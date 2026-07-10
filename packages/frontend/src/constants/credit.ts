@@ -1,4 +1,4 @@
-import { Sparkles, Route, Smartphone, Layers, PenLine, Wand2, Repeat, Play, Send, Mail, type LucideIcon } from 'lucide-react';
+import { Sparkles, Route, Smartphone, Layers, PenLine, Wand2, Repeat, Play, Send, Mail, Link2, type LucideIcon } from 'lucide-react';
 
 /**
  * 종량제 크레딧 공용 상수 (D229+ UI 폴리시).
@@ -24,6 +24,7 @@ export const CREDIT_TASK_COSTS: CreditTaskCost[] = [
   { key: 'journey', label: '여정 활성화', cost: 200, icon: Route },
   { key: 'dm', label: 'DM 발행', cost: 100, icon: Smartphone },
   { key: 'inapp', label: '인앱 게시', cost: 100, icon: Layers },
+  { key: 'shortlink', label: '단축 URL 발급', cost: 100, icon: Link2 }, // ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr)
   { key: 'email', label: '이메일 발행', cost: 50, icon: Mail },
   { key: 'operation', label: '여정·운영 발송', cost: 10, icon: Send },
   { key: 'copy', label: '문안·분석', cost: 5, icon: PenLine },
@@ -122,6 +123,7 @@ export const CONFIRM_CREDIT_COSTS: Record<string, number> = {
   'dm-ai-generate': 5,           // 모바일 DM 생성 (AI 자동 생성 — 생성 전 확인, 범위 넓어 5)
   'dm-builder': 100,             // DM 발행
   'dm-interaction-publish': 120, // 인터랙션 발행 (룰렛·추첨·설문)
+  'dm-custom-short-link': 100,   // ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 발급 확정 차감
   'email-campaign-complete': 50, // ★ 2026-07-02 Email 캠페인 완성 (AI/수동/템플릿 불문 1회 — 발송·이력 무료)
   'email-ai-publish': 50,        // (구) Email AI 캠페인 발송 확정 — 2026-07-02부터 미사용(완성 요금 대체)
   'inapp-publish': 100,          // 인앱 게시

@@ -20,6 +20,7 @@ import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import { takeEventDraft, EVENT_DM_DRAFT_KEY } from '../components/EventCampaignModal';
 import ImageToCopyButton from '../components/ImageToCopyButton';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
+import DmShortLinkModal from '../components/dm/DmShortLinkModal';
 import DmSendAndTrackModal from '../components/DmSendAndTrackModal';
 import DmTopBar from '../components/dm/DmTopBar';
 import DmLeftPanel from '../components/dm/DmLeftPanel';
@@ -160,6 +161,8 @@ export default function DmBuilderPage() {
 
   // ★ 2026-06-13: overview 로드 — 실패/지연해도 화면이 비지 않게 시도 완료 플래그로 구분
   const [overviewTried, setOverviewTried] = useState(false);
+  // ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) 모달 — 박성용 신기능
+  const [shortLinkOpen, setShortLinkOpen] = useState(false);
   useEffect(() => {
     if (mode !== 'list') return;
     setOverviewTried(false);
@@ -617,6 +620,14 @@ export default function DmBuilderPage() {
           </div>
           <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', margin: '2px 0 0 0' }}>카드형 모바일 DM 빌더 — 미디어 메세지 디자인 + 카드 단위 편집</p>
         </div>
+        {/* ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 박성용 신기능(Harold 위치 확정: 새 DM 만들기 왼쪽) */}
+        <button
+          onClick={() => setShortLinkOpen(true)}
+          style={{ height: 36, padding: '0 16px', background: 'rgba(255,255,255,0.06)', color: '#e9d5ff', border: '1px solid rgba(255,255,255,0.18)', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+        >
+          🔗 단축 URL
+          <span style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(52,211,153,0.18)', color: '#6ee7b7', borderRadius: 10, fontWeight: 700 }}>NEW</span>
+        </button>
         <button
           onClick={handleCreateNew}
           style={{ height: 36, padding: '0 16px', background: 'rgba(139,92,246,0.3)', color: '#ddd6fe', border: '1px solid rgba(139,92,246,0.5)', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
@@ -624,6 +635,8 @@ export default function DmBuilderPage() {
           + 새 DM 만들기
         </button>
       </header>
+
+      <DmShortLinkModal open={shortLinkOpen} onClose={() => setShortLinkOpen(false)} />
 
       {legacyDmError && (
         <div style={{ maxWidth: 1100, margin: '16px auto', padding: '12px 16px', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 8, color: '#fde68a', fontSize: 13 }}>

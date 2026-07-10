@@ -82,14 +82,16 @@ export function ProductCarouselSection({ props }: { props: ProductCarouselProps 
               : (price > 0 && discount > 0 && discount < price ? Math.round((1 - discount / price) * 100) : null);
             const finalPrice = discount > 0 ? discount : price;
             return (
-              <div key={p.id || i} style={{ width: 'calc(50% - 8px)', maxWidth: 220, boxSizing: 'border-box' }}>
+              // ★ 2026-07-10 임은지 건의: 가격 줄 = 카드 하단 고정(marginTop auto) — 제품명 길이 무관하게
+              //   같은 행 카드들의 가격 위치 일정(flex row 기본 stretch = 행 높이 동일). 발행 SSR 미러.
+              <div key={p.id || i} style={{ width: 'calc(50% - 8px)', maxWidth: 220, boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
                 {p.image_url ? (
-                  <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 8 }} />
+                  <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} />
                 ) : (
-                  <div style={{ width: '100%', height: 140, background: 'var(--dm-neutral-100)', borderRadius: 8 }} />
+                  <div style={{ width: '100%', height: 140, background: 'var(--dm-neutral-100)', borderRadius: 8, flexShrink: 0 }} />
                 )}
                 <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', marginTop: 6 }}>{p.name}</div>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginTop: 2, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginTop: 'auto', paddingTop: 2, flexWrap: 'wrap' }}>
                   {rate !== null && (
                     <span style={{ fontSize: 'var(--dm-fs-small)', color: 'var(--dm-error)', fontWeight: 800 }}>{rate}%</span>
                   )}

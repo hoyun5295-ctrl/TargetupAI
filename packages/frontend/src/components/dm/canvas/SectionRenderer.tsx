@@ -106,7 +106,14 @@ export default function SectionRenderer({
     textAlign: sAlign,
     ['--dm-section-justify']: sAlign === 'left' ? 'flex-start' : sAlign === 'right' ? 'flex-end' : 'center',
     // 액센트색 = 이 섹션 한정으로 --dm-primary 덮어쓰기 → 브랜드색 쓰던 모든 버튼이 자동 적용
-    ...(section.accent_color ? { ['--dm-primary']: section.accent_color } : {}),
+    // ★ 2026-07-10 임은지 신고: 강조 면 변수 3종 동반 — 버튼이 없는 구도(히어로 오버랩 카드 등)도
+    //   "버튼 색" 지정 시 카드 면으로 소비(미지정 = 변수 부재 → 각 구도 기존 기본색, 발행물 무변화). SSR 미러.
+    ...(section.accent_color ? {
+      ['--dm-primary']: section.accent_color,
+      ['--dm-accent-surface']: section.accent_color,
+      ['--dm-accent-surface-fg']: '#fff',
+      ['--dm-accent-surface-sub']: 'rgba(255,255,255,0.85)',
+    } : {}),
     ...(titleN ? {
       ['--dm-fs-hero']: `${titleN}px`, ['--dm-fs-h1']: `${titleN}px`,
       ['--dm-fs-h2']: `${titleN}px`, ['--dm-fs-h3']: `${titleN}px`,

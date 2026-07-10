@@ -39,6 +39,12 @@ import { runInCreditBundle } from '../utils/ai-credit-context';
 import type { Section } from '../utils/dm/dm-section-registry';
 import { selectSampleCustomers, selectSampleCustomerByKey, type SampleCustomerKey } from '../utils/dm/dm-sample-customer';
 import { lookupDmRecipientToken, issueDmRecipientTokensBulk, lookupDmShortLink } from '../utils/dm/dm-recipient-token';
+// ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 박성용 신기능(100크레딧·도메인 평판 보호)
+import {
+  createCustomShortLink, lookupCustomShortLink, recordCustomShortLinkClick,
+  listCustomShortLinks, setCustomShortLinkActive,
+} from '../utils/dm/dm-custom-short-link';
+import { validateCustomShortLinkUrl, normalizeCustomLinkTitle, CUSTOM_LINK_DAILY_LIMIT } from '../utils/dm/dm-custom-short-link-core';
 import {
   computeDmProgressPct, isDmCompleted, sumSectionClicks,
   sanitizeSectionInteractions, buildDmSectionLabel, dmSectionTypeLabel, summarizeDmResponse,
@@ -130,7 +136,21 @@ dmPublicRouter.get('/s/:code', async (req: Request, res: Response) => {
   const base = process.env.HANJUL_BASE_URL || 'https://hanjul.ai';
   try {
     const found = await lookupDmShortLink(req.params.code);
-    if (!found) return res.redirect(302, base);
+    if (!found) {
+      // ★ 2026-07-10 3순위: 고객사 자체 URL 단축(dm_custom_short_links) — 박성용 신기능(Harold 100크레딧 확정).
+      //   기존 2축(수신자 토큰 → 발행 페이지) miss 후에만 조회 = 기존 링크 동작 무변경.
+      //   클릭 집계는 fire-and-forget(실패해도 리다이렉트 무영향). 테이블 미생성/오류 = 홈 폴백(500 노출 0).
+      try {
+        const custom = await lookupCustomShortLink(req.params.code);
+        if (custom) {
+          void recordCustomShortLinkClick(custom.id).catch(() => {});
+          return res.redirect(302, custom.targetUrl);
+        }
+      } catch (e: any) {
+        console.warn('[DM 커스텀 단축링크] 조회 오류 — 홈으로 폴백:', e?.message);
+      }
+      return res.redirect(302, base);
+    }
     const target = found.expired
       ? `${base}/api/dm/v/dm-${found.dmCode}`
       : `${base}/api/dm/v/dm-${found.dmCode}?r=${found.token}`;
@@ -343,6 +363,95 @@ dmRouter.post('/', async (req: any, res: any) => {
     return res.json(dm);
   } catch (err: any) {
     console.error('[DM생성] 오류:', err.message);
+    return res.status(500).json({ error: '서버 오류' });
+  }
+});
+
+// ============================================================
+// ★ 2026-07-10 고객사 자체 URL 단축 (hlj.kr) — 박성용 신기능, Harold 100크레딧 확정
+//   외부 MDM 등 고객사 URL → hlj.kr/<code> 발급 + 클릭 집계. AI 호출 0 — 가치 과금(인프라 서빙+추적).
+//   도메인 평판 보호 = dm-custom-short-link-core 검증(오픈 리다이렉터 차단) + 일일 상한 + 비활성 토글.
+//   ('/:id'보다 먼저 등록 — 경로 캡처 방지)
+// ============================================================
+
+// GET /api/dm/short-links — 내 단축 링크 목록
+dmRouter.get('/short-links', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const links = await listCustomShortLinks(companyId);
+    const base = String(process.env.DM_SHORT_LINK_BASE || '').trim().replace(/\/+$/, '');
+    return res.json({
+      success: true,
+      links: links.map((l) => ({ ...l, shortUrl: base ? `${base}/${l.code}` : null })),
+      dailyLimit: CUSTOM_LINK_DAILY_LIMIT,
+    });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('does not exist') && (msg.includes('relation') || msg.includes('column'))) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 dm_custom_short_links 테이블 생성을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[커스텀 단축링크 목록] 오류:', msg);
+    return res.status(500).json({ error: '서버 오류' });
+  }
+});
+
+// POST /api/dm/short-links — 단축 링크 생성 (100크레딧 — 발급 성공 후 멱등 차감)
+dmRouter.post('/short-links', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId || !userId) return res.status(403).json({ error: '권한이 필요합니다.' });
+
+    const base = String(process.env.DM_SHORT_LINK_BASE || '').trim().replace(/\/+$/, '');
+    if (!base) return res.status(400).json({ error: '단축 도메인이 설정되지 않았습니다. 운영자에게 문의해주세요.' });
+
+    // 도메인 평판 보호 — 검증 실패 = 사용자 문구 그대로 400 (크레딧 차감 전)
+    const v = validateCustomShortLinkUrl(req.body?.url);
+    if (!v.ok || !v.url) return res.status(400).json({ error: v.reason || '올바른 URL이 아닙니다.' });
+    const title = normalizeCustomLinkTitle(req.body?.title);
+
+    // 크레딧 — 사전 확인 → 발급 성공 → 멱등 차감(키=링크 id). 발급 실패/상한 초과 시 미차감.
+    //   일일 상한 판정은 CT의 INSERT 단문에 결합(선-카운트 TOCTOU 정정 — Codex 지적).
+    //   deductCreditSafe 영구 실패는 전사 정책대로 [CREDIT][MISS] 로그+수동 재차감(효과물 회수 없음 — DM 발행과 동일).
+    const cost = getCreditCost('dm-custom-short-link');
+    await checkCredit(companyId, cost);
+    const link = await createCustomShortLink({ companyId, userId, targetUrl: v.url, title });
+    if (!link) {
+      return res.status(429).json({ error: `단축 링크는 하루 ${CUSTOM_LINK_DAILY_LIMIT}건까지 생성할 수 있습니다.` });
+    }
+    await deductCreditSafe({
+      companyId, cost, source: 'dm-custom-short-link', createdBy: userId,
+      idempotencyKey: `dm-custom-short-link:${link.id}`,
+    });
+
+    return res.json({ success: true, link: { ...link, shortUrl: `${base}/${link.code}` } });
+  } catch (err: any) {
+    if (err instanceof InsufficientCreditError) {
+      return res.status(402).json({ error: err.message, code: 'INSUFFICIENT_CREDIT' });
+    }
+    const msg = err?.message || '';
+    if (msg.includes('does not exist') && (msg.includes('relation') || msg.includes('column'))) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 dm_custom_short_links 테이블 생성을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[커스텀 단축링크 생성] 오류:', msg);
+    return res.status(500).json({ error: msg || '서버 오류' });
+  }
+});
+
+// PATCH /api/dm/short-links/:linkId — 활성/비활성 토글 (비활성 = 즉시 홈 폴백, 오염/오발급 대응)
+dmRouter.patch('/short-links/:linkId', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    if (!isUuid(req.params.linkId)) return res.status(400).json({ error: '올바르지 않은 링크 ID입니다.' });
+    const isActive = req.body?.isActive === true;
+    const link = await setCustomShortLinkActive(companyId, req.params.linkId, isActive);
+    if (!link) return res.status(404).json({ error: '링크를 찾을 수 없습니다.' });
+    const base = String(process.env.DM_SHORT_LINK_BASE || '').trim().replace(/\/+$/, '');
+    return res.json({ success: true, link: { ...link, shortUrl: base ? `${base}/${link.code}` : null } });
+  } catch (err: any) {
+    console.error('[커스텀 단축링크 토글] 오류:', err?.message);
     return res.status(500).json({ error: '서버 오류' });
   }
 });

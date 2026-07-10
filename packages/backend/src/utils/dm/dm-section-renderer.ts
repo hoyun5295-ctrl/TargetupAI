@@ -213,11 +213,12 @@ function renderHeroOverlap(props: HeroProps): string {
   const img = props.image_url ? publicImageUrl(props.image_url) : '';
   const head = escapeHtml(props.headline || '');
   const sub = escapeHtml(props.sub_copy || '');
+  // ★ 2026-07-10 임은지 신고: "버튼 색" 지정 시 오버랩 카드 면에 반영 — 강조 면 변수 폴백(미지정=기존 흰 카드, 캔버스 미러)
   return `<div class="dm-section dm-hero" data-section-type="hero" style="background:var(--dm-bg);padding-bottom:var(--dm-sp-5)">
     ${img ? `<img src="${escapeHtml(img)}" alt="${head}" style="width:100%;display:block;height:280px;object-fit:cover">` : `<div class="dm-mood-slot" style="height:240px"></div>`}
-    <div style="margin:-32px var(--dm-sp-5) 0;position:relative;background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:var(--dm-radius-xl);box-shadow:var(--dm-shadow-lg);padding:var(--dm-sp-6)">
-      ${head ? `<div style="font-size:var(--dm-fs-h1);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.2;font-family:var(--dm-font-display);color:var(--dm-neutral-900)${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${head}</div>` : ''}
-      ${sub ? `<div style="margin-top:var(--dm-sp-2);font-size:var(--dm-fs-body);color:var(--dm-neutral-600)${fsDecl(props.sub_copy_size)}${props.sub_copy_color ? `;color:${escapeHtml(props.sub_copy_color)}` : ''}">${sub}</div>` : ''}
+    <div style="margin:-32px var(--dm-sp-5) 0;position:relative;background:var(--dm-accent-surface, var(--dm-bg));border:1px solid var(--dm-accent-surface, var(--dm-neutral-200));border-radius:var(--dm-radius-xl);box-shadow:var(--dm-shadow-lg);padding:var(--dm-sp-6)">
+      ${head ? `<div style="font-size:var(--dm-fs-h1);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.2;font-family:var(--dm-font-display);color:var(--dm-accent-surface-fg, var(--dm-neutral-900))${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${head}</div>` : ''}
+      ${sub ? `<div style="margin-top:var(--dm-sp-2);font-size:var(--dm-fs-body);color:var(--dm-accent-surface-sub, var(--dm-neutral-600))${fsDecl(props.sub_copy_size)}${props.sub_copy_color ? `;color:${escapeHtml(props.sub_copy_color)}` : ''}">${sub}</div>` : ''}
     </div>
   </div>`;
 }
@@ -569,21 +570,23 @@ function renderProductCarousel(p: any): string {
     const discount = Number(it.discount_price || 0);
     const rate = computeDmDiscountRate(price, discount, it.discount_rate);
     const finalPrice = discount > 0 ? discount : price;
+    // ★ 2026-07-10 임은지 건의: 가격 줄 = 카드 하단 고정(margin-top:auto) — 제품명 길이가 달라도
+    //   같은 행 카드들의 가격 위치가 일정(flex row 기본 stretch = 행 높이 동일). 캔버스 미러.
     const priceHtml = rate !== null
-      ? `<div style="display:flex;gap:6px;align-items:baseline;margin-top:4px;flex-wrap:wrap;font-variant-numeric:tabular-nums">
+      ? `<div style="display:flex;gap:6px;align-items:baseline;margin-top:auto;padding-top:4px;flex-wrap:wrap;font-variant-numeric:tabular-nums">
           <span style="font-size:var(--dm-fs-h3);font-weight:800;color:var(--dm-error)">${rate}%</span>
           <span style="font-size:var(--dm-fs-body);font-weight:800;color:var(--dm-neutral-900)">${finalPrice.toLocaleString('ko-KR')}원</span>
           <span style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-400);text-decoration:line-through">${price.toLocaleString('ko-KR')}원</span>
         </div>`
-      : `<div style="font-size:var(--dm-fs-body);font-weight:800;margin-top:4px;color:var(--dm-neutral-900);font-variant-numeric:tabular-nums">${finalPrice.toLocaleString('ko-KR')}원</div>`;
+      : `<div style="font-size:var(--dm-fs-body);font-weight:800;margin-top:auto;padding-top:4px;color:var(--dm-neutral-900);font-variant-numeric:tabular-nums">${finalPrice.toLocaleString('ko-KR')}원</div>`;
     // ★ 2026-07-02 v2 — 라운드 카드 + 가격 타이포 위계(할인율 강조·최종가 굵게) 격상
     const card = `
-      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:150px;object-fit:cover;display:block"/>` : `<div style="width:100%;height:150px;background:var(--dm-neutral-100)"></div>`}
-      <div style="padding:10px 12px 12px">
+      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:150px;object-fit:cover;display:block;flex-shrink:0"/>` : `<div style="width:100%;height:150px;background:var(--dm-neutral-100);flex-shrink:0"></div>`}
+      <div style="padding:10px 12px 12px;flex:1;display:flex;flex-direction:column">
         <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4">${escapeHtml(it.name || '')}</div>
         ${priceHtml}
       </div>`;
-    const cardWrapStyle = 'width:calc(50% - 8px);max-width:220px;box-sizing:border-box;display:block;text-decoration:none;color:inherit;background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:16px;overflow:hidden;box-shadow:var(--dm-shadow-sm)';
+    const cardWrapStyle = 'width:calc(50% - 8px);max-width:220px;box-sizing:border-box;display:flex;flex-direction:column;text-decoration:none;color:inherit;background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:16px;overflow:hidden;box-shadow:var(--dm-shadow-sm)';
     const href = it.link_url ? safeUrl(it.link_url) : '#';
     return href !== '#'
       ? `<a href="${href}" target="_blank" rel="noopener" style="${cardWrapStyle}">${card}</a>`
@@ -864,7 +867,12 @@ export function renderSection(section: Section, ctx: SectionRenderContext): stri
   const sizeVars =
     `${titleN ? `;--dm-fs-hero:${titleN}px;--dm-fs-h1:${titleN}px;--dm-fs-h2:${titleN}px;--dm-fs-h3:${titleN}px` : ''}` +
     `${textN ? `;--dm-fs-body:${textN}px;--dm-fs-small:${textN}px` : ''}`;
-  const wrapStyle = `text-align:${al};--dm-section-justify:${just}${section.accent_color ? `;--dm-primary:${escapeHtml(section.accent_color)}` : ''}${sizeVars}`;
+  // ★ 2026-07-10 임은지 신고: 강조 면 변수 3종 동반 — 버튼 없는 구도(히어로 오버랩 카드 등)도 "버튼 색"을
+  //   카드 면으로 소비. 미지정 = 변수 부재 → 각 구도 기존 기본색(발행물 무변화). 캔버스 SectionRenderer 미러.
+  const accentVars = section.accent_color
+    ? `;--dm-primary:${escapeHtml(section.accent_color)};--dm-accent-surface:${escapeHtml(section.accent_color)};--dm-accent-surface-fg:#fff;--dm-accent-surface-sub:rgba(255,255,255,0.85)`
+    : '';
+  const wrapStyle = `text-align:${al};--dm-section-justify:${just}${accentVars}${sizeVars}`;
   return `<div class="dm-section-wrap" data-section-id="${escapeHtml(section.id)}" data-section-type="${escapeHtml(section.type)}" data-variant="${escapeHtml(variant)}"${treatmentAttr} style="${wrapStyle}">${inner}</div>`;
 }
 

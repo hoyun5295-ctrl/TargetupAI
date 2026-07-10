@@ -1441,7 +1441,9 @@ export default function JourneysPage() {
                   placeholder="예: 신규 가입자 환영 7일 시리즈 / VIP 고객 분기 감사 / 휴면 30일 회수 / 신상품 출시 3단계 안내"
                   rows={3}
                   className="flex-1 w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-xl text-sm resize-none leading-relaxed placeholder-white/30 focus:outline-none focus:border-fuchsia-400"
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !generating) { e.preventDefault(); handleAIGenerate(); } }}
+                  // ★ 2026-07-10 박성용 신고: 멀티라인 자연어 입력의 Enter=실행이라 줄바꿈 불가 →
+                  //   메인 오퍼레이터(AiOperatorPage)와 동일하게 Ctrl/Cmd+Enter만 실행, Enter는 기본 동작(줄바꿈).
+                  onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !generating) { e.preventDefault(); handleAIGenerate(); } }}
                   disabled={generating}
                 />
                 <div className="flex justify-end mt-3">

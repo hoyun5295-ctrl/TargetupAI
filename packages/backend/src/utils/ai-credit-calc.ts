@@ -163,6 +163,9 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'ai-column-mapper': 1,
   'brand-voice-extract': 1,
   'parse-briefing': 1,
+  // ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 박성용 신기능(Harold 100 확정). AI 호출 0 —
+  //   가치 과금(우리 도메인 상시 서빙 + 클릭 추적). 발급 성공 후 멱등 차감(키=링크 id).
+  'dm-custom-short-link': 100,
 };
 
 /** source → 크레딧 비용. 미등록·미전달 source는 0 (차감 안 함). */

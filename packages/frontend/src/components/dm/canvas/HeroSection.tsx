@@ -114,9 +114,10 @@ export default function HeroSection({ props, onEdit, treatment }: { props: HeroP
         ) : (
           <div className="dm-mood-slot" style={{ height: 240 }} />
         )}
-        <div style={{ margin: '-32px var(--dm-sp-5) 0', position: 'relative', background: 'var(--dm-bg)', border: '1px solid var(--dm-neutral-200)', borderRadius: 'var(--dm-radius-xl)', boxShadow: 'var(--dm-shadow-lg)', padding: 'var(--dm-sp-6)' }}>
-          {headNode({ fontSize: 'var(--dm-fs-h1)', fontWeight: FW_HERO, letterSpacing: 'var(--dm-ls-hero)', lineHeight: 1.2, fontFamily: 'var(--dm-font-display)', color: 'var(--dm-neutral-900)' })}
-          {subNode({ marginTop: 'var(--dm-sp-2)', fontSize: 'var(--dm-fs-body)', color: 'var(--dm-neutral-600)' })}
+        {/* ★ 2026-07-10 임은지 신고: "버튼 색" 지정 시 오버랩 카드 면에 반영 — 강조 면 변수 폴백(미지정=기존 흰 카드, SSR 미러) */}
+        <div style={{ margin: '-32px var(--dm-sp-5) 0', position: 'relative', background: 'var(--dm-accent-surface, var(--dm-bg))', border: '1px solid var(--dm-accent-surface, var(--dm-neutral-200))', borderRadius: 'var(--dm-radius-xl)', boxShadow: 'var(--dm-shadow-lg)', padding: 'var(--dm-sp-6)' }}>
+          {headNode({ fontSize: 'var(--dm-fs-h1)', fontWeight: FW_HERO, letterSpacing: 'var(--dm-ls-hero)', lineHeight: 1.2, fontFamily: 'var(--dm-font-display)', color: 'var(--dm-accent-surface-fg, var(--dm-neutral-900))' })}
+          {subNode({ marginTop: 'var(--dm-sp-2)', fontSize: 'var(--dm-fs-body)', color: 'var(--dm-accent-surface-sub, var(--dm-neutral-600))' })}
         </div>
       </div>
     );
