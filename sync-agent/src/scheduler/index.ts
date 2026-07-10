@@ -22,8 +22,11 @@ import type { QueueManager } from '../queue';
 import type { ApiClient } from '../api/client';
 import type { SyncStateManager } from '../sync/state';
 import { getLogger } from '../logger';
-import type { AgentCommand, UpdateConfigPayload } from '../types/api';
+import type { AgentCommand, AgentCommandResult, UpdateConfigPayload, ReportLogsPayload, MappingDryrunPayload } from '../types/api';
 import { restartAgent } from '../updater/restart';
+// ★ v1.6.1 (P2-7): report_logs 명령 — 최근 로그 tail
+import { readRecentLogLines } from '../logger/tail';
+import { AGENT_VERSION } from '../version';
 
 const logger = getLogger('scheduler');
 
@@ -246,10 +249,33 @@ export class Scheduler {
   }
 
   // ─── 원격 명령 처리 ───────────────────────────────────
+  //
+  // ★ v1.6.1 (P1-4·5): 서버 큐가 At-Least-Once로 재전달하므로
+  //   ① command_id 멱등 — 이미 실행한 명령은 재실행하지 않고 "재전달 무시" ACK만 재기록
+  //   ② 실행 결과를 state(파일)에 적재 → 다음 heartbeat가 ACK 동봉 → 서버가 큐에서 제거
+  //   id 없는 명령(구서버 하위호환)은 기존대로 실행만 하고 ACK 없음.
 
   private async processCommands(commands: AgentCommand[]): Promise<void> {
     for (const cmd of commands) {
       logger.info(`📡 원격 명령 수신: ${cmd.type}`, { commandId: cmd.id });
+      const cmdId = typeof cmd.id === 'string' && cmd.id.length > 0 ? cmd.id : null;
+
+      // 멱등 가드 — 재전달분은 재실행 없이 ACK만 다시 적재(서버 큐 정리 유도)
+      if (cmdId && this.stateManager?.hasExecutedCommand(cmdId)) {
+        logger.info(`원격 명령 재전달 감지 — 실행 생략(멱등): ${cmd.type}`, { commandId: cmdId });
+        this.stateManager.addCommandResult({
+          commandId: cmdId,
+          type: cmd.type,
+          ok: true,
+          message: '이미 실행된 명령 (재전달 무시)',
+          completedAt: new Date().toISOString(),
+        });
+        continue;
+      }
+
+      let ok = true;
+      let message = '';
+      let data: unknown;
 
       try {
         switch (cmd.type) {
@@ -258,6 +284,7 @@ export class Scheduler {
             await this.engine.runFull('customers');
             await this.engine.runFull('purchases');
             logger.info('✅ 원격 명령: 전체 동기화 완료');
+            message = '전체 동기화 완료';
             break;
 
           case 'restart':
@@ -265,18 +292,32 @@ export class Scheduler {
             // 예약작업(Windows)/systemd(Linux) 모델은 exit(0)로 자동 재시작되지 않는다
             //   (예약작업 exit 0=정상종료→RestartOnFailure 미발동 / systemd Restart=on-failure).
             //   restartAgent가 OS별로 실제 재기동을 트리거한다(별도 일회성 작업 / systemctl restart 위임).
+            // ★ v1.6.1: 재시작하면 ACK를 보낼 기회가 없다 — 결과·멱등 마킹을 먼저 파일에 저장(동기 I/O)
+            //   → 재기동 후 첫 heartbeat가 ACK 동봉.
+            if (cmdId && this.stateManager) {
+              this.stateManager.markCommandExecuted(cmdId);
+              this.stateManager.addCommandResult({
+                commandId: cmdId,
+                type: cmd.type,
+                ok: true,
+                message: '재시작 트리거 — 재기동 후 첫 heartbeat로 보고',
+                completedAt: new Date().toISOString(),
+              });
+            }
             restartAgent();
-            break;
+            continue; // 이후 공통 기록 생략 (프로세스 종료 예정)
 
           // ★ D131 후속(2026-04-21): 원격 pause/resume
           case 'pause':
             logger.info('⏸️  원격 명령: 동기화 일시정지');
             this.pause();
+            message = '동기화 일시정지 완료 (heartbeat 유지)';
             break;
 
           case 'resume':
             logger.info('▶️  원격 명령: 동기화 재개');
             this.resume();
+            message = '동기화 재개 완료';
             break;
 
           // ★ 2026-07-01: 원격 매핑 갱신 — 슈퍼관리자에서 매핑 변경 시 재설치 없이 즉시 반영
@@ -295,20 +336,90 @@ export class Scheduler {
               if (mapping.customers) await this.engine.runFull('customers');
               if (mapping.purchases) await this.engine.runFull('purchases');
               logger.info('✅ 원격 명령: 매핑 갱신 + 전체 동기화 완료');
+              message = `매핑 갱신 + 전체 재동기화 완료 (customers ${mapping.customers ? Object.keys(mapping.customers).length : '유지'} · purchases ${mapping.purchases ? Object.keys(mapping.purchases).length : '유지'})`;
             } else {
               logger.warn('update_config 명령에 mapping이 없어 무시');
+              ok = false;
+              message = 'mapping payload가 없어 적용하지 않았습니다.';
+            }
+            break;
+          }
+
+          // ★ v1.6.1 (P2-7): 최근 로그 업로드 — 원격 지원 없이 슈퍼관리자가 로그 열람
+          case 'report_logs': {
+            const payload = ((cmd.payload ?? cmd.params) ?? {}) as ReportLogsPayload;
+            const result = readRecentLogLines(Number(payload.lines) || 200);
+            data = result;
+            message = result.file
+              ? `${result.file} 최근 ${result.lines.length}줄`
+              : '로그 파일이 없습니다.';
+            ok = !!result.file;
+            break;
+          }
+
+          // ★ v1.6.1 (P2-8): 소스 DB 연결 테스트
+          case 'test_connection': {
+            const result = await this.engine.testSource();
+            data = result;
+            ok = result.connected;
+            message = result.connected
+              ? `소스 DB 연결 정상 (고객 ${result.customerColumns ?? 0}컬럼${result.purchaseColumns !== undefined ? ` · 구매 ${result.purchaseColumns}컬럼` : ''})`
+              : (result.error || '소스 DB 연결 실패');
+            break;
+          }
+
+          // ★ v1.6.1 (P2-9): 매핑 dry-run — 소스 1행 적용 미리보기(저장·적용 없음)
+          case 'mapping_dryrun': {
+            const payload = ((cmd.payload ?? cmd.params) ?? {}) as MappingDryrunPayload;
+            const mapping = payload.mapping || {};
+            const previews: Record<string, unknown> = {};
+            let anyOk = false;
+            if (mapping.customers) {
+              previews.customers = await this.engine.previewMapping('customers', mapping.customers);
+              anyOk = anyOk || (previews.customers as { ok: boolean }).ok;
+            }
+            if (mapping.purchases) {
+              previews.purchases = await this.engine.previewMapping('purchases', mapping.purchases);
+              anyOk = anyOk || (previews.purchases as { ok: boolean }).ok;
+            }
+            if (!mapping.customers && !mapping.purchases) {
+              ok = false;
+              message = 'dry-run할 mapping payload가 없습니다.';
+            } else {
+              data = previews;
+              ok = anyOk;
+              message = anyOk ? '매핑 미리보기 완료 (저장·적용 없음)' : '매핑 미리보기 실패';
             }
             break;
           }
 
           default:
             logger.warn(`알 수 없는 원격 명령: ${cmd.type}`);
+            ok = false;
+            message = `미지원 명령 (에이전트 v${AGENT_VERSION})`;
         }
       } catch (error) {
+        ok = false;
+        message = error instanceof Error ? error.message : String(error);
         logger.error(`원격 명령 실행 실패: ${cmd.type}`, {
           commandId: cmd.id,
-          error: error instanceof Error ? error.message : String(error),
+          error: message,
         });
+      }
+
+      // ★ v1.6.1: 멱등 마킹 + ACK 적재 (성공·실패 모두 1회 실행 확정 — 재시도는 새 명령으로)
+      if (cmdId && this.stateManager) {
+        this.stateManager.markCommandExecuted(cmdId);
+        this.stateManager.addCommandResult({
+          commandId: cmdId,
+          type: cmd.type,
+          ok,
+          message: message || undefined,
+          data,
+          completedAt: new Date().toISOString(),
+        });
+        // ACK를 다음 정각까지 묵히지 않도록 즉시 1회 전송 시도(실패해도 다음 heartbeat가 재동봉)
+        void this.heartbeat?.send();
       }
     }
   }
@@ -369,6 +480,33 @@ export class Scheduler {
     }
   }
 
+  // ─── heartbeat 부스트 (v1.6.1 — P1-6) ──────────────────
+  //
+  // 서버가 heartbeat 응답에 boost 지시를 동봉하면(대기 명령·미수신 ACK 존재 시)
+  // until까지 heartbeat를 짧은 주기로 추가 전송 — 명령·ACK 왕복 지연을 60분→분 단위로 단축.
+  // 인바운드 포트가 없는 폴링 구조에서의 현실적 즉시성 수단. until 경과 시 자동 종료.
+
+  private boostTask: cron.ScheduledTask | null = null;
+  private boostUntil = 0;
+
+  boostHeartbeat(intervalMinutes: number, until: string): void {
+    const ts = Date.parse(until);
+    if (!Number.isFinite(ts) || ts <= Date.now()) return;
+    this.boostUntil = Math.max(this.boostUntil, ts);
+    if (this.boostTask) return; // 이미 부스트 중 — until만 연장
+    const iv = Math.max(1, Math.min(10, Math.floor(Number(intervalMinutes)) || 1));
+    this.boostTask = cron.schedule(`*/${iv} * * * *`, async () => {
+      if (Date.now() > this.boostUntil) {
+        this.boostTask?.stop();
+        this.boostTask = null;
+        logger.info('heartbeat 부스트 종료 (기한 경과 — 정규 60분 주기 복귀)');
+        return;
+      }
+      await this.heartbeat?.send();
+    });
+    logger.info(`heartbeat 부스트 시작: 매 ${iv}분 (${until}까지)`);
+  }
+
   /**
    * 모든 스케줄 중지
    */
@@ -377,6 +515,11 @@ export class Scheduler {
       task.stop();
     }
     this.tasks = [];
+    // ★ v1.6.1: 부스트 task도 함께 정리 — 다음 heartbeat 응답이 필요 시 재지시
+    if (this.boostTask) {
+      this.boostTask.stop();
+      this.boostTask = null;
+    }
     this.running = false;
     logger.info('스케줄러 중지');
   }

@@ -29,6 +29,7 @@
 
 import dotenv from 'dotenv';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import { loadConfig, updateConfigEncrypted, type AgentConfig, type ConfigSource } from './config';
 import { initLogger, getLogger } from './logger';
 import { createDbConnector, createMockDbConnector, type IDbConnector } from './db';
@@ -365,6 +366,12 @@ async function main(): Promise<void> {
             customFieldLabels: mapping.customFieldLabels ?? current.mapping.customFieldLabels,
           },
         }));
+        // ★ v1.6.1: 메모리 config도 동기 갱신 — heartbeat 자기 보고(customFieldLabels)가 최신을 반영하도록.
+        config.mapping = {
+          customers: mapping.customers ?? config.mapping.customers,
+          purchases: mapping.purchases ?? config.mapping.purchases,
+          customFieldLabels: mapping.customFieldLabels ?? config.mapping.customFieldLabels,
+        };
         log.info('원격 매핑 갱신 — config.enc 영구 저장 완료');
       } catch (error) {
         log.error('원격 매핑 config.enc 저장 실패', {
@@ -394,6 +401,38 @@ async function main(): Promise<void> {
     if (heartbeat) {
       heartbeat.setCommandHandler((commands) => {
         scheduler.applyRemoteConfig({ commands });
+      });
+    }
+
+    // ★ v1.6.1 (P0-1): heartbeat 자기 보고 — 적용 매핑(런타임 진실)+매핑 해시+소스 컬럼(6시간 캐시).
+    //   서버가 config.reported에 사본을 저장해 슈퍼관리자 매핑 모달 프리필/드롭다운의 원천이 된다.
+    if (heartbeat) {
+      const SOURCE_COLUMNS_TTL_MS = 6 * 60 * 60 * 1000;
+      let srcColsCache: { at: number; value: { customers?: string[]; purchases?: string[] } } | null = null;
+      heartbeat.setReportProvider(async () => {
+        const applied = engine.getMapping();
+        const appliedMapping = {
+          customers: applied.customers || {},
+          purchases: applied.purchases || {},
+          customFieldLabels: config.mapping.customFieldLabels || {},
+        };
+        const configVersion = createHash('sha1')
+          .update(JSON.stringify(appliedMapping))
+          .digest('hex')
+          .slice(0, 12);
+        if (!srcColsCache || Date.now() - srcColsCache.at > SOURCE_COLUMNS_TTL_MS) {
+          srcColsCache = { at: Date.now(), value: await engine.getSourceColumns() };
+        }
+        return {
+          configVersion,
+          appliedMapping,
+          sourceColumns: srcColsCache.value,
+          sourceColumnsAt: new Date(srcColsCache.at).toISOString(),
+        };
+      });
+      // ★ v1.6.1 (P1-6): boost 지시 → 스케줄러 heartbeat 임시 단축
+      heartbeat.setBoostHandler((intervalMinutes, until) => {
+        scheduler.boostHeartbeat(intervalMinutes, until);
       });
     }
 

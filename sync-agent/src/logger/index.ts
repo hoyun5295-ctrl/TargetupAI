@@ -13,7 +13,8 @@ import { maskSensitiveData } from './masking';
 
 // ─── 포맷 ───────────────────────────────────────────────
 
-const LOG_DIR = path.resolve(process.cwd(), 'logs');
+// ★ v1.6.1: report_logs 명령(logger/tail.ts)이 같은 경로를 읽도록 export (경로 상수 단일 소스)
+export const LOG_DIR = path.resolve(process.cwd(), 'logs');
 
 /** 민감정보 마스킹 포맷 */
 const maskingFormat = winston.format((info) => {

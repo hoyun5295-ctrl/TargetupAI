@@ -24,6 +24,8 @@ import { validateCustomers } from '../types/customer';
 import { validatePurchases } from '../types/purchase';
 import { SyncStateManager } from './state';
 import { getLogger } from '../logger';
+// ★ v1.6.1: mapping_dryrun 미리보기 마스킹 (서버 저장 payload — 개인정보 최소화)
+import { maskPhone, maskEmail, maskSensitiveData } from '../logger/masking';
 
 const logger = getLogger('sync:engine');
 
@@ -91,6 +93,83 @@ export class SyncEngine {
       customers: this.config.customerMapping,
       purchases: this.config.purchaseMapping,
     };
+  }
+
+  // ─── 원격 관리 지원 (v1.6.1 — 2026-07-10 P0-1·P2-8·P2-9) ─────────
+  //
+  // heartbeat 자기 보고(sourceColumns)·test_connection·mapping_dryrun이 소스 DB를 만지는 유일한 통로.
+  // 전부 읽기 전용(getColumns/fetchAll 1행) — 동기화 상태·매핑에 영향 0.
+
+  /** 소스 테이블 컬럼 목록 (heartbeat 자기 보고용). 조회 실패 타겟은 생략(부분 보고). */
+  async getSourceColumns(): Promise<{ customers?: string[]; purchases?: string[] }> {
+    const out: { customers?: string[]; purchases?: string[] } = {};
+    try {
+      out.customers = (await this.db.getColumns(this.config.customerTable)).map((c) => c.name);
+    } catch (error) {
+      logger.debug('소스 컬럼 조회 실패(customers) — 보고 생략', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (this.config.purchaseTable) {
+      try {
+        out.purchases = (await this.db.getColumns(this.config.purchaseTable)).map((c) => c.name);
+      } catch (error) {
+        logger.debug('소스 컬럼 조회 실패(purchases) — 보고 생략', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return out;
+  }
+
+  /** 소스 DB 연결 테스트 (원격 test_connection 명령용) */
+  async testSource(): Promise<{ connected: boolean; customerColumns?: number; purchaseColumns?: number; error?: string }> {
+    try {
+      const connected = await this.db.testConnection();
+      if (!connected) return { connected: false, error: '소스 DB 연결 실패 (testConnection false)' };
+      const result: { connected: boolean; customerColumns?: number; purchaseColumns?: number } = { connected: true };
+      result.customerColumns = (await this.db.getColumns(this.config.customerTable)).length;
+      if (this.config.purchaseTable) {
+        result.purchaseColumns = (await this.db.getColumns(this.config.purchaseTable)).length;
+      }
+      return result;
+    } catch (error) {
+      return { connected: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  /**
+   * 매핑 dry-run (원격 mapping_dryrun 명령용) — 소스 1행에 후보 매핑을 적용한 결과 미리보기.
+   * 저장·적용·전송 없음. 이새 custom_5 매장코드 오적재류 사고를 저장 전에 잡는 용도.
+   * 미리보기는 heartbeat로 서버 config에 저장되므로 전화/이메일은 마스킹해 반환한다
+   * (소스 원본 컬럼명은 표준 키 기반 maskSensitiveData가 못 잡음 — 매핑 대상 기준으로 직접 마스킹).
+   */
+  async previewMapping(
+    target: SyncTarget,
+    mapping: ColumnMapping,
+  ): Promise<{ ok: boolean; sourceRow?: RawRow; mappedRow?: Record<string, unknown>; error?: string }> {
+    const table = target === 'customers' ? this.config.customerTable : this.config.purchaseTable;
+    if (!table) return { ok: false, error: `${target} 테이블이 설정되지 않았습니다.` };
+    try {
+      const rows = await this.db.fetchAll(table, 1, 0);
+      if (rows.length === 0) return { ok: false, error: `${table} 테이블에 데이터가 없습니다.` };
+      const mapped = mapBatch([rows[0]], mapping)[0] || {};
+      const maskFns = new Map<string, (v: string) => string>([
+        ['phone', maskPhone],
+        ['customer_phone', maskPhone],
+        ['email', maskEmail],
+      ]);
+      const sourceRow: RawRow = { ...rows[0] };
+      for (const [srcCol, targetField] of Object.entries(mapping)) {
+        const fn = maskFns.get(String(targetField));
+        if (fn && typeof sourceRow[srcCol] === 'string') {
+          sourceRow[srcCol] = fn(sourceRow[srcCol] as string);
+        }
+      }
+      return { ok: true, sourceRow, mappedRow: maskSensitiveData(mapped) };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   /**

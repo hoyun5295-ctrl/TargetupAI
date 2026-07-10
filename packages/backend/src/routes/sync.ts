@@ -20,6 +20,8 @@ import { callAiMapping, AiMappingQuotaExceeded, AiMappingUnavailable, SupportedD
 import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
 import { registerBulkCompanyUserUnsubscribes } from '../utils/unsubscribe-helper';
 import { resolveBuildTierFromOsInfo } from '../utils/agent-build-tiers';
+// ★ 2026-07-10 원격 관리 P1: 명령 큐 정책 CT — ACK 반영·At-Least-Once 전달·버전 분기(구버전=기존 동작 불변)
+import { isAgentVersionGte, ACK_MIN_AGENT_VERSION, applyCommandAcks, markCommandsDelivered } from '../utils/agent-protocol';
 // ★ 2026-07-03: 구매 배치 적재 직후 고객 구매요약 컬럼 재계산 (총구매액/최근구매 '-' 문제 근본)
 import { updateCustomerPurchaseAggregates } from '../utils/customer-purchase-aggregates';
 // ★ 2026-07-03: 필드정의 변경 시 활성 필드 캐시 무효화 (고객DB 현황 성능 캐시)
@@ -439,22 +441,77 @@ router.post('/heartbeat', async (req: SyncAuthRequest, res: Response) => {
        queuedItems, uptime, agentId]
     );
 
-    const currentConfig = configRows[0]?.config || {};
-    const pendingCommands: any[] = Array.isArray(currentConfig.commands) ? currentConfig.commands : [];
+    const nowIso = new Date().toISOString();
+    // ★ 2026-07-10 원격 관리 P1: v1.6.1+ = At-Least-Once(ACK 수신 시에만 큐 제거) / 구버전(이새 1.5.7) = 기존 At-Most-Once 불변
+    const supportsAck = isAgentVersionGte(agentVersion, ACK_MIN_AGENT_VERSION);
+    const acks = Array.isArray(req.body.commandResults) ? req.body.commandResults : [];
+    // ★ P0-1: 에이전트 자기 보고 사본 — 슈퍼관리자 매핑 모달 프리필/드롭다운의 원천(진실 이원화 D7 해소)
+    const reported = req.body.reported && typeof req.body.reported === 'object'
+      ? { ...req.body.reported, reportedAt: nowIso, agentVersion: agentVersion || null }
+      : undefined;
 
-    // commands 전달할 게 있으면 큐 비워서 중복 실행 방지 (At-Most-Once 의도)
-    if (pendingCommands.length > 0) {
-      const newConfig = { ...currentConfig, commands: [] };
-      await query(
-        `UPDATE sync_agents SET config = $1::jsonb WHERE id = $2`,
-        [JSON.stringify(newConfig), agentId]
+    // ★ P1-4·5 + Codex 지적 정정(2026-07-10): config 경쟁 차단 —
+    //   admin 명령 등록은 원자 append(admin-sync.ts)로 전환됐고, 여기(heartbeat)는 commands 키가
+    //   읽은 시점과 동일할 때만 쓰는 조건부 UPDATE. 그 사이 append가 끼면 최신 config로 재계산(최대 3회).
+    //   3회 연속 충돌(비정상)이면 이번 라운드 전달을 생략 — ACK는 에이전트가 보류함에 갖고 있다가
+    //   재동봉하고, 명령은 큐에 그대로 남아 다음 heartbeat가 처리한다(유실 0).
+    let currentConfig = configRows[0]?.config || {};
+    let deliverCommands: any[] = [];
+    let remainingQueue: any[] = Array.isArray(currentConfig.commands) ? currentConfig.commands : [];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      let queue: any[] = Array.isArray(currentConfig.commands) ? currentConfig.commands : [];
+      const origCommandsJson = JSON.stringify(queue);
+      let results: any[] = Array.isArray(currentConfig.command_results) ? currentConfig.command_results : [];
+      if (acks.length > 0) {
+        const applied = applyCommandAcks(queue, results, acks, nowIso);
+        queue = applied.queue;
+        results = applied.results;
+      }
+      const delivery = markCommandsDelivered(queue, results, supportsAck, nowIso);
+      deliverCommands = delivery.deliver;
+      remainingQueue = delivery.queue;
+      const configChanged =
+        acks.length > 0 || delivery.deliver.length > 0 || delivery.expiredCount > 0 || !!reported;
+      if (!configChanged) break;
+      const newConfig = {
+        ...currentConfig,
+        commands: delivery.queue,
+        command_results: delivery.results,
+        ...(reported ? { reported } : {}),
+      };
+      const upd = await query(
+        `UPDATE sync_agents SET config = $1::jsonb
+          WHERE id = $2 AND COALESCE(config->'commands', '[]'::jsonb) = $3::jsonb`,
+        [JSON.stringify(newConfig), agentId, origCommandsJson]
       );
+      if ((upd.rowCount || 0) === 1) break;
+      // 충돌 — 그 사이 admin이 명령을 append함. 최신 config 재조회 후 재계산.
+      const re = await query(`SELECT config FROM sync_agents WHERE id = $1`, [agentId]);
+      currentConfig = re.rows[0]?.config || {};
+      if (attempt === 2) {
+        deliverCommands = [];
+        remainingQueue = Array.isArray(currentConfig.commands) ? currentConfig.commands : [];
+        console.warn(`[Sync Heartbeat] config 갱신 3회 충돌 — 이번 라운드 전달 생략 (agent=${agentId})`);
+      }
     }
+
+    // ★ P1-6: 미ACK 명령이 남아 있으면 heartbeat 임시 단축 지시 — 명령·ACK 왕복을 60분→1분으로
+    const boost = supportsAck && remainingQueue.length > 0
+      ? { heartbeatIntervalMinutes: 1, until: new Date(Date.now() + 60 * 60 * 1000).toISOString() }
+      : undefined;
+
+    const remoteConfig =
+      deliverCommands.length > 0 || boost
+        ? {
+            ...(deliverCommands.length > 0 ? { commands: deliverCommands } : {}),
+            ...(boost ? { boost } : {}),
+          }
+        : undefined;
 
     return res.json({
       success: true,
       data: { acknowledged: true },
-      remoteConfig: pendingCommands.length > 0 ? { commands: pendingCommands } : undefined,
+      remoteConfig,
     });
   } catch (error) {
     console.error('[Sync Heartbeat Error]', error);

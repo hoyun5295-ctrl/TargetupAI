@@ -84,6 +84,68 @@ export class SyncStateManager {
     return this.state.fieldDefinitionsRegistered;
   }
 
+  // ─── 명령 멱등 + ACK 보류함 (v1.6.1 — P1-4·5) ─────────
+  //
+  // 서버 큐가 At-Least-Once로 재전달하므로, 실행한 command_id를 기억해 중복 실행을 차단하고
+  // 실행 결과는 서버 전송 성공 전까지 파일에 보존한다(restart 명령·프로세스 재시작에도 ACK 유실 0).
+
+  private static readonly EXECUTED_IDS_MAX = 50;
+  private static readonly PENDING_RESULTS_MAX = 20;
+  /** 결과 data 직렬화 상한 — heartbeat payload·state 파일 비대 차단 (서버 저장 가드와 별개의 송신 측 선제 가드) */
+  private static readonly RESULT_DATA_MAX_CHARS = 256_000;
+
+  /** 결과 data 용량 가드 — report_logs(lines 배열)는 앞(오래된) 줄부터 버리고, 그 외는 truncated 마커로 대체 */
+  private capResultData(data: unknown): unknown {
+    if (data === null || data === undefined) return data;
+    const size = (v: unknown) => {
+      try { return JSON.stringify(v)?.length ?? 0; } catch { return Number.MAX_SAFE_INTEGER; }
+    };
+    if (size(data) <= SyncStateManager.RESULT_DATA_MAX_CHARS) return data;
+    if (typeof data === 'object' && Array.isArray((data as any).lines)) {
+      const obj = { ...(data as Record<string, unknown>) };
+      let lines = [...((data as any).lines as unknown[])];
+      while (lines.length > 1 && size({ ...obj, lines }) > SyncStateManager.RESULT_DATA_MAX_CHARS) {
+        lines = lines.slice(Math.max(1, Math.floor(lines.length / 4)));
+      }
+      return { ...obj, lines, truncated: true };
+    }
+    return { truncated: true, note: '결과가 커서 전송을 생략했습니다. 요청 크기를 줄여 다시 시도해주세요.' };
+  }
+
+  hasExecutedCommand(commandId: string): boolean {
+    return (this.state.executedCommandIds || []).includes(commandId);
+  }
+
+  markCommandExecuted(commandId: string): void {
+    const ids = (this.state.executedCommandIds || []).filter((id) => id !== commandId);
+    ids.push(commandId);
+    this.state.executedCommandIds = ids.slice(-SyncStateManager.EXECUTED_IDS_MAX);
+    this.save();
+  }
+
+  /** 실행 결과 적재 — 같은 commandId 기존 항목은 교체. 초과분은 오래된 것부터 유실(상한 20). data는 선제 용량 가드. */
+  addCommandResult(result: import('../types/api').AgentCommandResult): void {
+    const rest = (this.state.pendingCommandResults || []).filter((r) => r.commandId !== result.commandId);
+    rest.push({ ...result, data: this.capResultData(result.data) });
+    this.state.pendingCommandResults = rest.slice(-SyncStateManager.PENDING_RESULTS_MAX);
+    this.save();
+  }
+
+  /** 미전송 실행 결과 조회 (heartbeat 동봉용) */
+  getPendingCommandResults(): import('../types/api').AgentCommandResult[] {
+    return [...(this.state.pendingCommandResults || [])];
+  }
+
+  /** 서버 전송 성공분 제거 */
+  removeCommandResults(commandIds: string[]): void {
+    if (commandIds.length === 0) return;
+    const idSet = new Set(commandIds);
+    this.state.pendingCommandResults = (this.state.pendingCommandResults || []).filter(
+      (r) => !idSet.has(r.commandId),
+    );
+    this.save();
+  }
+
   // ─── 파일 I/O ─────────────────────────────────────────
 
   private load(): SyncState {
@@ -107,7 +169,11 @@ export class SyncStateManager {
       if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
       }
-      fs.writeFileSync(STATE_FILE, JSON.stringify(this.state, null, 2), 'utf8');
+      // ★ v1.6.1 (Codex 지적 정정): 원자 저장 — temp 쓰기 후 rename(교체).
+      //   직접 덮어쓰기는 쓰는 도중 비정상 종료(정전·강제 종료) 시 파일 손상 = 마지막 동기화 시각·ACK 보류함 유실.
+      const tmpFile = `${STATE_FILE}.tmp`;
+      fs.writeFileSync(tmpFile, JSON.stringify(this.state, null, 2), 'utf8');
+      fs.renameSync(tmpFile, STATE_FILE);
     } catch (error) {
       logger.error('동기화 상태 파일 저장 실패', {
         error: error instanceof Error ? error.message : String(error),

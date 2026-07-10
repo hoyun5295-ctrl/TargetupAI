@@ -57,15 +57,23 @@
 9. **매핑 dry-run**: 소스 1행에 신규 매핑을 적용한 결과 미리보기(저장 전 검증 — 이새 custom_5 매장코드 오적재 같은 사고 사전 차단).
 10. custom 슬롯 확장(15→30) 검토 — customers.custom_fields는 jsonb라 DB 변경 0, FIELD_MAP·화면·에이전트 슬롯 상수 확장(D8). 소비처 전수 grep 필수.
 
-## 4. 전수 점검 체크리스트 (구현 전 실측 — 다음 세션 1단계)
+## 4. 전수 점검 체크리스트 (★2026-07-10 전 항목 실측 완료)
 
-- [ ] **A. 에이전트 소스 위치 확정** — targetup 레포에는 없음(packages = pos-agent뿐, 실측). sync-agent.exe 빌드 소스가 어느 폴더/레포인지 Harold님 확인 필요. ★이게 확정돼야 P0-1·P1 전부 가능
-- [ ] B. 에이전트의 update_config 적용 코드 실측 — 매핑 merge/replace 여부를 코드로 재확정(런북 기록은 "교체")
-- [ ] C. heartbeat 주기 실측(기본 60분? 에이전트 설정값?) + config GET 호출 시점
-- [ ] D. 명령별 에이전트 핸들러 유무(full_sync/restart/pause/resume/update_config 각각)
-- [ ] E. 서버 `PUT 설정`(admin-sync.ts:274 column_mapping 저장)과 명령 update_config의 관계 — 두 경로가 다르게 저장되는지(이원화 재확인)
-- [ ] F. 운영 에이전트 전수 현황: `SELECT id, company_id, agent_version, status, last_heartbeat_at FROM sync_agents ORDER BY last_heartbeat_at DESC;` — 버전 분포(구버전 잔존 = P0-3 안내 대상)
-- [ ] G. sync_releases 1.6.1 등록 상태(기존 TODO와 병합 — 자기교체 fix 안정판)
+- [x] **A. 에이전트 소스 위치 확정** — **`targetup 레포 루트의 sync-agent/`**(packages/ 밖이라 초기 실측에서 누락). 별도 `C:\Users\ceo\sync-agent-test` 테스트 베드 폴더 존재.
+- [x] B. update_config 적용 = **타겟 단위 통째 교체**(customers/purchases 각각 "넘긴 것만 교체·안 넘긴 타겟 유지") — engine.ts updateMapping + index.ts config.enc 영속화 동일. D1 위험 코드로 재확정.
+- [x] C. heartbeat = **매 60분 하드코딩**(cron '0 * * * *' 정각, scheduler:146) + 부팅 직후 1회. `GET /api/sync/config`는 에이전트 호출부 0건 = **미사용 죽은 endpoint**(v1.5.0 폴링 제거). 서버가 내려주는 heartbeatInterval·queueRetryInterval도 에이전트 미소비(하드코딩 60/30분).
+- [x] D. 명령 핸들러 5종 전부 존재(scheduler processCommands). 실행 결과 회신 없음(D4) — 1.6.1에서 ACK 신설.
+- [x] E. **이원화 코드 확정** — PUT 설정 column_mapping은 GET /config 응답에만 실리는데 에이전트가 안 부름 = 죽은 데이터. 주기만 싱크 응답 config(camelCase 일치·배선 유효)로 전달. 매핑 유일 유효 통로 = update_config 명령(heartbeat 응답).
+- [x] F. 운영 에이전트 = **이새 1대뿐**(1.5.7·active·heartbeat 정각+14s — Harold 실측 2026-07-10). 구버전 안내 대상이 곧 전부.
+- [x] G. sync_releases = 1.5.7 win-legacy active만 유효, **1.6.1 미등록**(기존 TODO 유지). 주의: 1.6.1을 win-legacy active로 등록하는 순간 이새 박스가 매시간 자동 수령 — 등록 시점은 §5 이새 비범위 원칙과 함께 판단.
+
+## 4-1. 구현 기록 (★2026-07-10 P0+P1+P2(7·8·9) 코드 완료 — Harold "완벽 대비·슈퍼관리자 통제 최대화" 지시)
+
+- 에이전트 **v1.6.1**(sync-agent/src): heartbeat 자기 보고(appliedMapping·sourceColumns 6h 캐시·configVersion sha1 12자) + 명령 ACK(state 파일 영속·멱등 id 50개·restart는 선기록 후 재시작) + boost(응답 지시 시 임시 1분 heartbeat) + 진단 3종(report_logs tail·test_connection·mapping_dryrun 1행 미리보기 — phone/email 마스킹) + state 원자 저장(temp+rename) + 결과 data 256KB 선제 cap.
+- 서버: `utils/agent-protocol.ts` 순수 CT(버전 비교·ACK 반영·At-Least-Once 전달·5회 만료·300KB 저장 가드, vitest 15) + heartbeat(ACK→전달→reported 저장→boost, **commands 동등 조건부 UPDATE·충돌 재계산 — admin 등록은 원자 append로 경쟁 차단**) + admin-sync(진단 3종 등록·구버전 400 게이트·상세 응답 reported/command_results/pending_commands/supports_ack). 구버전(<1.6.1)은 At-Most-Once 기존 동작 불변(이새 비범위 준수).
+- 슈퍼관리자(AdminDashboard): 매핑 모달 = reported 프리필 + 소스 컬럼 드롭다운(자유 타이핑 폐지) + custom 슬롯 카운터 + "전체 교체" 확인 모달 + 구버전 저장 차단 + dry-run 버튼 / 명령 모달 진단 2종(v1.6.1+만 활성) / 상세 모달 = 자기 보고·대기 명령(attempts)·명령 결과(로그 뷰어·dry-run 미리보기·연결 테스트).
+- 검증: agent tsc0·vitest60 / backend tsc0·vitest414 / frontend tsc0 / 금지 패턴 0 / Codex 적대 리뷰 지적 3건(config 경쟁·payload 선제 cap·state 원자 저장) 전부 정정 반영. DDL 0건(전부 sync_agents.config jsonb 내).
+- 잔여: ①1.6.1 exe 티어 빌드(`npm run build:tiers`)+서버 업로드+sync_releases 등록(등록 시점 Harold 판단 — 이새 수령 유의) ②등록 후 테스트 박스(sync-agent-test) 명령 왕복 실측(매핑 프리필→dry-run→저장→ACK 확인).
 
 ## 5. 비범위·주의
 

@@ -13,6 +13,8 @@ import { randomUUID } from 'crypto';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { query } from '../config/database';
 import { PLATFORMS, OS_TIERS, DB_OPTIONS, VERIFIED_COMBOS, resolveAgentBuild, buildReleaseDownloadUrl, PlatformId } from '../utils/agent-build-tiers';
+// ★ 2026-07-10 원격 관리: 진단 명령 버전 게이트 (v1.6.1+ ACK 전용)
+import { isAgentVersionGte, ACK_MIN_AGENT_VERSION } from '../utils/agent-protocol';
 import path from 'path';
 import fs from 'fs';
 
@@ -247,7 +249,13 @@ router.get('/agents/:agentId', authenticate, requireSuperAdmin, async (req: Requ
         total_customers_synced: agent.total_customers_synced || 0,
         total_purchases_synced: agent.total_purchases_synced || 0,
         config: agent.config || {},
-        created_at: agent.created_at
+        created_at: agent.created_at,
+        // ★ 2026-07-10 원격 관리: 에이전트 자기 보고 사본 + 명령 이력 — 매핑 모달 프리필/드롭다운·명령 결과 UI 원천.
+        //   reported 없음 = 구버전(v1.6.1 미만) 또는 신버전 첫 heartbeat 전 — 프론트는 "보고 대기" 정직 안내.
+        reported: (agent.config && agent.config.reported) || null,
+        command_results: (agent.config && agent.config.command_results) || [],
+        pending_commands: (agent.config && agent.config.commands) || [],
+        supports_ack: isAgentVersionGte(agent.agent_version, ACK_MIN_AGENT_VERSION),
       },
       recent_logs: recentLogs,
       stats: {
@@ -346,7 +354,9 @@ router.post('/agents/:agentId/command', authenticate, requireSuperAdmin, async (
     // ★ D131 후속(2026-04-21): pause/resume 추가 — 원격 동기화 중단/재개 지원
     //   pause: Agent 스케줄러 stop (heartbeat 유지), resume: 재개
     // ★ 2026-07-01: update_config 추가 — 슈퍼관리자에서 컬럼 매핑을 원격 갱신(재설치 없이)
-    const ALLOWED_COMMAND_TYPES = ['full_sync', 'restart', 'pause', 'resume', 'update_config'] as const;
+    // ★ 2026-07-10 원격 관리 P2: 진단 3종 추가 — report_logs(최근 로그 업로드)·test_connection(소스 DB 연결 테스트)·
+    //   mapping_dryrun(매핑을 소스 1행에 적용한 미리보기 — 저장/적용 없음). 결과는 ACK로 config.command_results에 수신.
+    const ALLOWED_COMMAND_TYPES = ['full_sync', 'restart', 'pause', 'resume', 'update_config', 'report_logs', 'test_connection', 'mapping_dryrun'] as const;
     if (!type || !ALLOWED_COMMAND_TYPES.includes(type)) {
       return res.status(400).json({
         success: false,
@@ -365,10 +375,20 @@ router.post('/agents/:agentId/command', authenticate, requireSuperAdmin, async (
         });
       }
     }
+    // ★ 2026-07-10: mapping_dryrun도 매핑 필수 (빈 dry-run 무의미)
+    if (type === 'mapping_dryrun') {
+      const hasMapping = mapping && typeof mapping === 'object' && (mapping.customers || mapping.purchases);
+      if (!hasMapping) {
+        return res.status(400).json({
+          success: false,
+          error: 'mapping_dryrun에는 customers/purchases 중 하나 이상의 mapping이 필요합니다.'
+        });
+      }
+    }
 
     // Agent 존재 확인 + 현재 config 조회
     const { rows } = await query(
-      'SELECT id, config FROM sync_agents WHERE id = $1',
+      'SELECT id, config, agent_version FROM sync_agents WHERE id = $1',
       [agentId]
     );
 
@@ -376,10 +396,19 @@ router.post('/agents/:agentId/command', authenticate, requireSuperAdmin, async (
       return res.status(404).json({ success: false, error: 'Agent를 찾을 수 없습니다.' });
     }
 
-    const currentConfig = rows[0].config || {};
-    const commands = currentConfig.commands || [];
+    // ★ 2026-07-10: 진단 3종은 v1.6.1+(ACK 지원) 전용 — 구버전은 "알 수 없는 명령"으로 버리고 결과 회신도 없다.
+    //   등록만 되고 조용히 사라지는 가짜 성공을 사전 차단(정직 안내).
+    const ACK_ONLY_TYPES = ['report_logs', 'test_connection', 'mapping_dryrun'];
+    if (ACK_ONLY_TYPES.includes(type) && !isAgentVersionGte(rows[0].agent_version, ACK_MIN_AGENT_VERSION)) {
+      return res.status(400).json({
+        success: false,
+        error: `이 명령은 에이전트 v${ACK_MIN_AGENT_VERSION} 이상에서만 지원됩니다. (현재 v${rows[0].agent_version || '알 수 없음'} — 버전 배포 후 사용)`,
+        code: 'AGENT_VERSION_TOO_OLD',
+      });
+    }
 
-    // 새 명령 추가
+    // 새 명령 추가 — ★ 2026-07-10 Codex 지적 정정: 옛 read-modify-write(JS push 후 전체 배열 덮어쓰기)는
+    //   heartbeat의 config 갱신과 겹치면 명령이 유실될 수 있다 → 단일 UPDATE 원자 append(||)로 전환.
     const commandId = randomUUID();
     const newCommand: Record<string, unknown> = {
       id: commandId,
@@ -388,13 +417,19 @@ router.post('/agents/:agentId/command', authenticate, requireSuperAdmin, async (
     };
     // ★ 2026-07-01: update_config는 매핑을 payload로 전달 (에이전트가 cmd.payload로 수신).
     //   그 외 명령은 기존대로 빈 params 유지(하위호환).
-    if (type === 'update_config') {
+    // ★ 2026-07-10: mapping_dryrun도 매핑 payload / report_logs는 lines 옵션.
+    if (type === 'update_config' || type === 'mapping_dryrun') {
       newCommand.payload = { mapping };
+    } else if (type === 'report_logs') {
+      const lines = Number(req.body?.lines);
+      newCommand.payload = { lines: Number.isFinite(lines) && lines > 0 ? Math.min(1000, Math.floor(lines)) : 200 };
     } else {
       newCommand.params = {};
     }
 
-    commands.push(newCommand);
+    // ★ 2026-07-10 Codex 지적 정정: 큐 추가 = 단일 UPDATE 원자 append(기존 배열 || 새 명령 1건).
+    //   heartbeat의 config 갱신(조건부 UPDATE)과 겹쳐도 이 append는 유실되지 않는다.
+    const appendJson = JSON.stringify([newCommand]);
 
     // ★ D131 후속(2026-04-21): pause/resume 명령 등록 시 sync_agents.status도 즉시 업데이트.
     //   이유: UI가 DB status 기반으로 재개/일시정지 버튼 활성화를 판단하는데
@@ -409,16 +444,16 @@ router.post('/agents/:agentId/command', authenticate, requireSuperAdmin, async (
     if (nextStatus) {
       await query(
         `UPDATE sync_agents
-         SET config = jsonb_set(COALESCE(config, '{}'), '{commands}', $1::jsonb),
+         SET config = jsonb_set(COALESCE(config, '{}'::jsonb), '{commands}', COALESCE(config->'commands', '[]'::jsonb) || $1::jsonb),
              status = $2,
              updated_at = NOW()
          WHERE id = $3`,
-        [JSON.stringify(commands), nextStatus, agentId]
+        [appendJson, nextStatus, agentId]
       );
     } else {
       await query(
-        `UPDATE sync_agents SET config = jsonb_set(COALESCE(config, '{}'), '{commands}', $1::jsonb), updated_at = NOW() WHERE id = $2`,
-        [JSON.stringify(commands), agentId]
+        `UPDATE sync_agents SET config = jsonb_set(COALESCE(config, '{}'::jsonb), '{commands}', COALESCE(config->'commands', '[]'::jsonb) || $1::jsonb), updated_at = NOW() WHERE id = $2`,
+        [appendJson, agentId]
       );
     }
 

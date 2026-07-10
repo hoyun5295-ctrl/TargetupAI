@@ -383,12 +383,19 @@ const [emailSending, setEmailSending] = useState(false);
   const [showSyncDeleteModal, setShowSyncDeleteModal] = useState(false);
   const [syncDeleting, setSyncDeleting] = useState(false);
   // ★ D131 후속(2026-04-21): 'pause' | 'resume' 추가 — 원격 동기화 제어
-  const [syncCommandType, setSyncCommandType] = useState<'full_sync' | 'restart' | 'pause' | 'resume'>('full_sync');
+  // ★ 2026-07-10 원격 관리 P2: 진단 2종 추가 — report_logs(최근 로그 업로드)·test_connection(소스 DB 연결 테스트)
+  const [syncCommandType, setSyncCommandType] = useState<'full_sync' | 'restart' | 'pause' | 'resume' | 'report_logs' | 'test_connection'>('full_sync');
   // ★ 2026-07-01: 원격 컬럼 매핑 편집(update_config) — 재설치 없이 슈퍼관리자에서 매핑 갱신
   const [showSyncMappingModal, setShowSyncMappingModal] = useState(false);
   const [syncMapCustomers, setSyncMapCustomers] = useState<Array<{ src: string; target: string; label: string }>>([]);
   const [syncMapPurchases, setSyncMapPurchases] = useState<Array<{ src: string; target: string; label: string }>>([]);
   const [syncMapSaving, setSyncMapSaving] = useState(false);
+  // ★ 2026-07-10 원격 관리 P0: 매핑 모달 프리필 — 에이전트 자기 보고(reported) 로드.
+  //   reported 없음(구버전 v1.6.1 미만·첫 heartbeat 전) = 저장 차단(빈 화면 저장 = 전체 매핑 소실 함정 봉쇄).
+  const [syncMapReported, setSyncMapReported] = useState<any>(null);
+  const [syncMapReportLoading, setSyncMapReportLoading] = useState(false);
+  const [syncMapAckSupported, setSyncMapAckSupported] = useState(false);
+  const [syncMapDryRunning, setSyncMapDryRunning] = useState(false);
   // ★ 2026-07-01: 자동 업데이트 릴리즈 등록 (박스 무선 교체 트리거)
   const [showSyncReleaseModal, setShowSyncReleaseModal] = useState(false);
   const [syncReleaseForm, setSyncReleaseForm] = useState<{ version: string; checksum: string; force_update: boolean; tier: string }>({ version: '', checksum: '', force_update: true, tier: 'win-legacy' });
@@ -836,13 +843,28 @@ const handleSyncCommand = async () => {
       pause: '일시정지',
       resume: '재개',
       restart: '재시작',
+      report_logs: '최근 로그 요청',
+      test_connection: '소스 DB 연결 테스트',
     };
     const label = commandLabels[syncCommandType] || syncCommandType;
-    showAlert('성공', `${label} 명령이 등록되었습니다. Agent가 다음 heartbeat(최대 60분)에 수행하고 상태가 반영됩니다.`, 'success');
+    const ackNote = syncAgentSupportsAck(syncSelectedAgent.agent_version)
+      ? ' 실행 결과는 상세 화면의 "명령 결과"에서 확인할 수 있습니다.'
+      : '';
+    showAlert('성공', `${label} 명령이 등록되었습니다. Agent가 다음 heartbeat(최대 60분)에 수행하고 상태가 반영됩니다.${ackNote}`, 'success');
     loadSyncAgents();
   } catch (e) {
     showAlert('오류', '명령 전송 실패', 'error');
   }
+};
+
+// ★ 2026-07-10 원격 관리: ACK(v1.6.1+) 지원 여부 — 진단 명령·dry-run 노출 판단 (백엔드 agent-protocol과 동일 기준)
+const syncAgentSupportsAck = (version: string | null | undefined): boolean => {
+  const m = String(version || '').trim().replace(/^v/i, '').match(/^(\d+)\.(\d+)(?:\.(\d+))?/);
+  if (!m) return false;
+  const [a, b, c] = [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3] || '0', 10)];
+  if (a !== 1) return a > 1;
+  if (b !== 6) return b > 6;
+  return c >= 1;
 };
 
 // ★ 2026-07-01: 원격 컬럼 매핑 편집(update_config) — 소스컬럼 → 표준/custom 슬롯
@@ -859,15 +881,50 @@ const SYNC_PURCHASE_TARGET_FIELDS = [
   'store_code', 'store_name', 'product_code', 'product_name', 'unit_price', ...SYNC_CUSTOM_SLOTS,
 ];
 
-const openSyncMappingModal = (agent: any) => {
+// ★ 2026-07-10 원격 관리 P0-2: 모달 오픈 = 에이전트 자기 보고(reported) 로드 → 기존 매핑 프리필.
+//   옛 구조(항상 빈 행)는 "한 줄 추가 저장 = 그 대상 매핑 전체 소실" 함정이었다(에이전트는 타겟 단위 통째 교체 — 실측).
+const openSyncMappingModal = async (agent: any) => {
   setSyncSelectedAgent(agent);
-  setSyncMapCustomers([{ src: '', target: '', label: '' }]);
-  setSyncMapPurchases([{ src: '', target: '', label: '' }]);
+  setSyncMapReported(null);
+  setSyncMapAckSupported(false);
+  setSyncMapCustomers([]);
+  setSyncMapPurchases([]);
   setShowSyncMappingModal(true);
+  setSyncMapReportLoading(true);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/admin/sync/agents/${agent.id}`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Agent 상세 조회 실패');
+    const reported = data.agent?.reported || null;
+    setSyncMapReported(reported);
+    setSyncMapAckSupported(!!data.agent?.supports_ack);
+    if (reported?.appliedMapping) {
+      const labels = reported.appliedMapping.customFieldLabels || {};
+      const custRows = Object.entries(reported.appliedMapping.customers || {}).map(([src, target]) => ({
+        src,
+        target: String(target),
+        label: /^custom_\d+$/.test(String(target)) ? String(labels[String(target)] || '') : '',
+      }));
+      const purchRows = Object.entries(reported.appliedMapping.purchases || {}).map(([src, target]) => ({
+        src,
+        target: String(target),
+        label: '',
+      }));
+      setSyncMapCustomers(custRows);
+      setSyncMapPurchases(purchRows);
+    }
+  } catch (e: any) {
+    showAlert('오류', e.message || 'Agent 상세 조회 실패', 'error');
+  } finally {
+    setSyncMapReportLoading(false);
+  }
 };
 
-const handleSyncMappingSave = async () => {
-  if (!syncSelectedAgent) return;
+// 편집 행 → 전송 payload (저장·dry-run 공용). 빈 행 제외.
+const buildSyncMappingPayload = () => {
   const customers: Record<string, string> = {};
   const customFieldLabels: Record<string, string> = {};
   for (const r of syncMapCustomers) {
@@ -884,15 +941,34 @@ const handleSyncMappingSave = async () => {
     if (!src || !target) continue;
     purchases[src] = target;
   }
-  if (Object.keys(customers).length === 0 && Object.keys(purchases).length === 0) {
-    showAlert('입력 오류', '매핑을 한 개 이상 입력해주세요.', 'error');
-    return;
-  }
   const mapping: any = {};
   if (Object.keys(customers).length) mapping.customers = customers;
   if (Object.keys(purchases).length) mapping.purchases = purchases;
   if (Object.keys(customFieldLabels).length) mapping.customFieldLabels = customFieldLabels;
+  return { mapping, custCount: Object.keys(customers).length, purchCount: Object.keys(purchases).length };
+};
 
+// ★ 2026-07-10 P0-2: 저장 = "전체 교체" 확인 모달을 거친 후에만 전송 (부분 추가 저장 사고 차단)
+const handleSyncMappingSave = () => {
+  if (!syncSelectedAgent) return;
+  if (!syncMapReported) {
+    showAlert('저장 불가', '에이전트가 아직 적용 매핑을 보고하지 않았습니다(구버전 또는 첫 heartbeat 전). 빈 화면 저장은 기존 매핑 전체를 지울 수 있어 차단됩니다.', 'error');
+    return;
+  }
+  const { mapping, custCount, purchCount } = buildSyncMappingPayload();
+  if (!mapping.customers && !mapping.purchases) {
+    showAlert('입력 오류', '매핑을 한 개 이상 입력해주세요.', 'error');
+    return;
+  }
+  showConfirm(
+    '매핑 전체 교체',
+    `이 저장은 전송한 대상의 매핑 전체를 교체합니다.\n\n전송: 고객 ${custCount}행 · 구매 ${purchCount}행\n(행을 모두 지운 대상은 전송되지 않아 기존 매핑이 유지됩니다)\n\n적용 후 바뀐 대상만 전체 재동기화가 실행됩니다. 진행할까요?`,
+    () => { void doSyncMappingSend(mapping); },
+  );
+};
+
+const doSyncMappingSend = async (mapping: any) => {
+  if (!syncSelectedAgent) return;
   setSyncMapSaving(true);
   try {
     const token = localStorage.getItem('token');
@@ -904,12 +980,40 @@ const handleSyncMappingSave = async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '매핑 전송 실패');
     setShowSyncMappingModal(false);
-    showAlert('성공', '매핑이 전송되었습니다. Agent가 다음 heartbeat(최대 60분)에 매핑을 갱신하고 바뀐 대상만 전체 재동기화합니다.', 'success');
+    showAlert('성공', `매핑이 전송되었습니다. Agent가 다음 heartbeat(최대 60분)에 매핑을 갱신하고 바뀐 대상만 전체 재동기화합니다.${syncMapAckSupported ? '\n적용 결과는 상세 화면의 "명령 결과"에서 확인할 수 있습니다.' : ''}`, 'success');
     loadSyncAgents();
   } catch (e: any) {
     showAlert('오류', e.message || '매핑 전송 실패', 'error');
   } finally {
     setSyncMapSaving(false);
+  }
+};
+
+// ★ 2026-07-10 P2-9: 매핑 dry-run — 편집 중 매핑을 소스 1행에 적용한 미리보기(저장·적용 없음).
+//   결과는 에이전트 ACK로 상세 "명령 결과"에 도착(부스트로 보통 1~2분).
+const handleSyncMappingDryRun = async () => {
+  if (!syncSelectedAgent) return;
+  const { mapping } = buildSyncMappingPayload();
+  delete mapping.customFieldLabels; // dry-run은 라벨 불요
+  if (!mapping.customers && !mapping.purchases) {
+    showAlert('입력 오류', 'dry-run할 매핑을 한 개 이상 입력해주세요.', 'error');
+    return;
+  }
+  setSyncMapDryRunning(true);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/admin/sync/agents/${syncSelectedAgent.id}/command`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'mapping_dryrun', mapping }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'dry-run 전송 실패');
+    showAlert('전송됨', '매핑 미리보기(dry-run) 명령을 보냈습니다. 결과는 상세 화면의 "명령 결과"에 도착합니다(에이전트 응답 주기에 따라 수 분 소요). 저장·적용은 일어나지 않습니다.', 'success');
+  } catch (e: any) {
+    showAlert('오류', e.message || 'dry-run 전송 실패', 'error');
+  } finally {
+    setSyncMapDryRunning(false);
   }
 };
 
@@ -8885,6 +8989,106 @@ const handleApproveRequest = async (id: string) => {
                     </div>
                   </div>
 
+                  {/* ★ 2026-07-10 원격 관리 P0: 에이전트 자기 보고 — 적용 매핑·소스 컬럼 (서버 사본, 진실 이원화 해소) */}
+                  <h4 className="text-sm font-semibold text-gray-700 mb-2">에이전트 자기 보고</h4>
+                  {syncAgentDetail.agent?.reported ? (
+                    <div className="border rounded-lg p-3 mb-5 text-xs space-y-2 bg-emerald-50/40 border-emerald-200">
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-gray-600">
+                        <span>보고 시각 <b className="text-gray-800">{syncAgentDetail.agent.reported.reportedAt ? formatDateTimeShort(syncAgentDetail.agent.reported.reportedAt) : '-'}</b></span>
+                        <span>매핑 해시 <b className="font-mono text-gray-800">{syncAgentDetail.agent.reported.configVersion || '-'}</b></span>
+                        <span>고객 매핑 <b className="text-gray-800">{Object.keys(syncAgentDetail.agent.reported.appliedMapping?.customers || {}).length}건</b></span>
+                        <span>구매 매핑 <b className="text-gray-800">{Object.keys(syncAgentDetail.agent.reported.appliedMapping?.purchases || {}).length}건</b></span>
+                        <span>소스 컬럼 고객 <b className="text-gray-800">{(syncAgentDetail.agent.reported.sourceColumns?.customers || []).length}개</b>{syncAgentDetail.agent.reported.sourceColumns?.purchases ? <> · 구매 <b className="text-gray-800">{syncAgentDetail.agent.reported.sourceColumns.purchases.length}개</b></> : null}</span>
+                      </div>
+                      <details>
+                        <summary className="cursor-pointer text-emerald-700 font-medium">적용 매핑 펼쳐보기</summary>
+                        <div className="mt-2 grid grid-cols-2 gap-3">
+                          <div>
+                            <div className="text-gray-500 mb-1">고객</div>
+                            <div className="bg-white border rounded p-2 max-h-40 overflow-y-auto font-mono text-[11px] space-y-0.5">
+                              {Object.entries(syncAgentDetail.agent.reported.appliedMapping?.customers || {}).map(([s, t]: any) => (
+                                <div key={s}>{s} → {String(t)}{/^custom_\d+$/.test(String(t)) && syncAgentDetail.agent.reported.appliedMapping?.customFieldLabels?.[String(t)] ? ` (${syncAgentDetail.agent.reported.appliedMapping.customFieldLabels[String(t)]})` : ''}</div>
+                              ))}
+                              {Object.keys(syncAgentDetail.agent.reported.appliedMapping?.customers || {}).length === 0 && <div className="text-gray-400">없음</div>}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-gray-500 mb-1">구매</div>
+                            <div className="bg-white border rounded p-2 max-h-40 overflow-y-auto font-mono text-[11px] space-y-0.5">
+                              {Object.entries(syncAgentDetail.agent.reported.appliedMapping?.purchases || {}).map(([s, t]: any) => (
+                                <div key={s}>{s} → {String(t)}</div>
+                              ))}
+                              {Object.keys(syncAgentDetail.agent.reported.appliedMapping?.purchases || {}).length === 0 && <div className="text-gray-400">없음</div>}
+                            </div>
+                          </div>
+                        </div>
+                      </details>
+                    </div>
+                  ) : (
+                    <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 mb-5 text-xs text-amber-800">
+                      아직 자기 보고가 없습니다 — 구버전(v1.6.1 미만) 또는 신버전 첫 heartbeat 전입니다.
+                    </div>
+                  )}
+
+                  {/* ★ 2026-07-10 P1: 대기 명령 + 명령 결과 (ACK) */}
+                  {(syncAgentDetail.agent?.pending_commands || []).length > 0 && (
+                    <>
+                      <h4 className="text-sm font-semibold text-gray-700 mb-2">대기 중 명령</h4>
+                      <div className="border rounded-lg p-3 mb-5 text-xs space-y-1">
+                        {(syncAgentDetail.agent.pending_commands || []).map((c: any, i: number) => (
+                          <div key={c.id || i} className="flex items-center justify-between gap-2">
+                            <span className="font-medium text-gray-700">{c.type}</span>
+                            <span className="text-gray-400">
+                              등록 {c.created_at ? formatDateTimeShort(c.created_at) : '-'}
+                              {c.attempts ? ` · 전달 ${c.attempts}회` : ' · 미전달'}
+                              {c.delivered_at ? ` (최근 ${formatDateTimeShort(c.delivered_at)})` : ''}
+                            </span>
+                          </div>
+                        ))}
+                        <div className="text-gray-400 pt-1">{syncAgentDetail.agent?.supports_ack ? '에이전트 실행 확인(ACK) 수신 시 목록에서 사라집니다. 5회 재전달 미응답 시 실패로 만료됩니다.' : '구버전 에이전트 — 다음 heartbeat에 전달 후 목록에서 사라집니다(결과 회신 없음).'}</div>
+                      </div>
+                    </>
+                  )}
+                  <h4 className="text-sm font-semibold text-gray-700 mb-2">명령 결과 (최근 {(syncAgentDetail.agent?.command_results || []).length}건)</h4>
+                  <div className="border rounded-lg overflow-hidden mb-5">
+                    {(syncAgentDetail.agent?.command_results || []).length === 0 ? (
+                      <div className="px-3 py-4 text-center text-xs text-gray-400">
+                        {syncAgentDetail.agent?.supports_ack ? '아직 회신된 명령 결과가 없습니다.' : '구버전 에이전트(v1.6.1 미만)는 명령 결과를 회신하지 않습니다.'}
+                      </div>
+                    ) : (
+                      <div className="divide-y">
+                        {[...(syncAgentDetail.agent.command_results || [])].reverse().map((r: any, i: number) => (
+                          <div key={`${r.commandId || i}`} className="px-3 py-2 text-xs">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`px-1.5 py-0.5 rounded font-medium ${r.ok ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{r.ok ? '성공' : '실패'}</span>
+                              <span className="font-medium text-gray-700">{r.type}</span>
+                              <span className="text-gray-400">{r.completedAt ? formatDateTimeShort(r.completedAt) : '-'}</span>
+                            </div>
+                            {r.message && <div className="mt-1 text-gray-600">{r.message}</div>}
+                            {/* report_logs — 로그 열람 */}
+                            {Array.isArray(r.data?.lines) && r.data.lines.length > 0 && (
+                              <details className="mt-1">
+                                <summary className="cursor-pointer text-indigo-600">로그 {r.data.lines.length}줄 보기{r.data.truncated ? ' (앞부분 생략됨)' : ''}</summary>
+                                <pre className="mt-1 bg-gray-900 text-gray-100 rounded p-2 max-h-64 overflow-auto text-[10px] leading-relaxed whitespace-pre-wrap">{r.data.lines.join('\n')}</pre>
+                              </details>
+                            )}
+                            {/* mapping_dryrun — 소스 1행 → 매핑 결과 미리보기 */}
+                            {(r.data?.customers || r.data?.purchases) && (
+                              <details className="mt-1">
+                                <summary className="cursor-pointer text-indigo-600">매핑 미리보기 결과</summary>
+                                <pre className="mt-1 bg-gray-50 border rounded p-2 max-h-64 overflow-auto text-[10px] leading-relaxed whitespace-pre-wrap">{JSON.stringify(r.data, null, 2)}</pre>
+                              </details>
+                            )}
+                            {/* test_connection — 상세 */}
+                            {typeof r.data?.connected === 'boolean' && (
+                              <div className="mt-1 text-gray-500">연결 {r.data.connected ? '정상' : '실패'}{typeof r.data.customerColumns === 'number' ? ` · 고객 ${r.data.customerColumns}컬럼` : ''}{typeof r.data.purchaseColumns === 'number' ? ` · 구매 ${r.data.purchaseColumns}컬럼` : ''}{r.data.error ? ` · ${r.data.error}` : ''}</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   {/* 동기화 이력 */}
                   <h4 className="text-sm font-semibold text-gray-700 mb-2">최근 동기화 이력</h4>
                   <div className="border rounded-lg overflow-hidden">
@@ -9069,6 +9273,38 @@ const handleApproveRequest = async (id: string) => {
             </div>
 
             <div className="p-5 space-y-5 overflow-y-auto">
+              {/* ★ 2026-07-10 P0: 에이전트 자기 보고 상태 배너 — 프리필 원천·구버전 정직 안내 */}
+              {syncMapReportLoading ? (
+                <div className="px-3 py-2 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-500">
+                  에이전트 보고(적용 매핑·소스 컬럼)를 불러오는 중...
+                </div>
+              ) : syncMapReported ? (
+                <div className="px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    에이전트 보고 기준 프리필 — 보고 {syncMapReported.reportedAt ? formatDateTimeShort(syncMapReported.reportedAt) : '-'}
+                    {' '}· 매핑 해시 <span className="font-mono">{syncMapReported.configVersion || '-'}</span>
+                    {' '}· 소스 컬럼 고객 {(syncMapReported.sourceColumns?.customers || []).length}개
+                    {syncMapReported.sourceColumns?.purchases ? ` / 구매 ${syncMapReported.sourceColumns.purchases.length}개` : ''}
+                  </div>
+                  {(() => {
+                    const used = new Set<string>();
+                    for (const r of [...syncMapCustomers, ...syncMapPurchases]) {
+                      if (/^custom_\d+$/.test(r.target)) used.add(r.target);
+                    }
+                    return (
+                      <span className={`px-2 py-0.5 rounded-full font-medium ${used.size >= 15 ? 'bg-red-100 text-red-700' : 'bg-violet-100 text-violet-700'}`}>
+                        custom 슬롯 {used.size}/15 사용 · 잔여 {Math.max(0, 15 - used.size)}
+                      </span>
+                    );
+                  })()}
+                </div>
+              ) : (
+                <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                  에이전트 보고 대기 — 현재 적용 매핑을 아직 보고하지 않았습니다(구버전 v{syncSelectedAgent.agent_version || '?'} 또는 첫 heartbeat 전).
+                  기존 매핑을 볼 수 없는 상태의 저장은 <b>매핑 전체 소실</b> 위험이 있어 차단됩니다. v1.6.1 이상 배포 후 사용해주세요.
+                </div>
+              )}
+
               {/* 고객 매핑 */}
               <div>
                 <div className="flex items-center justify-between mb-2">
@@ -9081,12 +9317,27 @@ const handleApproveRequest = async (id: string) => {
                 <div className="space-y-2">
                   {syncMapCustomers.map((row, i) => (
                     <div key={i} className="flex items-center gap-2">
-                      <input
-                        placeholder="소스 컬럼 (예: 신규등록일자)"
-                        value={row.src}
-                        onChange={(e) => { const n = [...syncMapCustomers]; n[i] = { ...n[i], src: e.target.value }; setSyncMapCustomers(n); }}
-                        className="flex-1 px-2 py-1.5 border rounded-lg text-xs focus:ring-2 focus:ring-violet-500 outline-none"
-                      />
+                      {/* ★ 2026-07-10 P0: 소스 컬럼 = 보고된 실컬럼 드롭다운(자유 타이핑 폐지 — 오타 매핑 차단). 보고 없으면 입력 유지 */}
+                      {(syncMapReported?.sourceColumns?.customers || []).length > 0 ? (
+                        <select
+                          value={row.src}
+                          onChange={(e) => { const n = [...syncMapCustomers]; n[i] = { ...n[i], src: e.target.value }; setSyncMapCustomers(n); }}
+                          className="flex-1 px-2 py-1.5 border rounded-lg text-xs bg-white focus:ring-2 focus:ring-violet-500 outline-none"
+                        >
+                          <option value="">소스 컬럼 선택</option>
+                          {row.src && !(syncMapReported.sourceColumns.customers as string[]).includes(row.src) && (
+                            <option value={row.src}>{row.src} (보고 목록 밖)</option>
+                          )}
+                          {(syncMapReported.sourceColumns.customers as string[]).map((c) => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      ) : (
+                        <input
+                          placeholder="소스 컬럼 (예: 신규등록일자)"
+                          value={row.src}
+                          onChange={(e) => { const n = [...syncMapCustomers]; n[i] = { ...n[i], src: e.target.value }; setSyncMapCustomers(n); }}
+                          className="flex-1 px-2 py-1.5 border rounded-lg text-xs focus:ring-2 focus:ring-violet-500 outline-none"
+                        />
+                      )}
                       <span className="text-gray-400 text-xs">→</span>
                       <select
                         value={row.target}
@@ -9111,7 +9362,9 @@ const handleApproveRequest = async (id: string) => {
                       >✕</button>
                     </div>
                   ))}
-                  {syncMapCustomers.length === 0 && <p className="text-xs text-gray-400">행 추가로 매핑을 입력하세요.</p>}
+                  {syncMapCustomers.length === 0 && !syncMapReportLoading && (
+                    <p className="text-xs text-gray-400">{syncMapReported ? '보고된 고객 매핑이 없습니다 — 행 추가로 입력하세요.' : '행 추가로 매핑을 입력하세요.'}</p>
+                  )}
                 </div>
               </div>
 
@@ -9127,12 +9380,26 @@ const handleApproveRequest = async (id: string) => {
                 <div className="space-y-2">
                   {syncMapPurchases.map((row, i) => (
                     <div key={i} className="flex items-center gap-2">
-                      <input
-                        placeholder="소스 컬럼 (예: 고객전화)"
-                        value={row.src}
-                        onChange={(e) => { const n = [...syncMapPurchases]; n[i] = { ...n[i], src: e.target.value }; setSyncMapPurchases(n); }}
-                        className="flex-1 px-2 py-1.5 border rounded-lg text-xs focus:ring-2 focus:ring-violet-500 outline-none"
-                      />
+                      {(syncMapReported?.sourceColumns?.purchases || []).length > 0 ? (
+                        <select
+                          value={row.src}
+                          onChange={(e) => { const n = [...syncMapPurchases]; n[i] = { ...n[i], src: e.target.value }; setSyncMapPurchases(n); }}
+                          className="flex-1 px-2 py-1.5 border rounded-lg text-xs bg-white focus:ring-2 focus:ring-violet-500 outline-none"
+                        >
+                          <option value="">소스 컬럼 선택</option>
+                          {row.src && !(syncMapReported.sourceColumns.purchases as string[]).includes(row.src) && (
+                            <option value={row.src}>{row.src} (보고 목록 밖)</option>
+                          )}
+                          {(syncMapReported.sourceColumns.purchases as string[]).map((c) => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      ) : (
+                        <input
+                          placeholder="소스 컬럼 (예: 고객전화)"
+                          value={row.src}
+                          onChange={(e) => { const n = [...syncMapPurchases]; n[i] = { ...n[i], src: e.target.value }; setSyncMapPurchases(n); }}
+                          className="flex-1 px-2 py-1.5 border rounded-lg text-xs focus:ring-2 focus:ring-violet-500 outline-none"
+                        />
+                      )}
                       <span className="text-gray-400 text-xs">→</span>
                       <select
                         value={row.target}
@@ -9154,21 +9421,30 @@ const handleApproveRequest = async (id: string) => {
               </div>
 
               <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
-                <div>• 소스 컬럼명은 실제 DB 컬럼명과 정확히 일치해야 합니다.</div>
+                <div>• <b>저장은 전송한 대상의 매핑 전체를 교체</b>합니다 — 남길 매핑도 화면에 남아 있어야 합니다.</div>
                 <div>• 저장 시 Agent가 다음 heartbeat(최대 60분)에 매핑을 갱신하고 <b>바뀐 대상만</b> 전체 재동기화합니다.</div>
                 <div>• custom 슬롯은 라벨이 화면 표시명이 됩니다(비우면 슬롯명 표시).</div>
+                <div>• <b>미리보기(dry-run)</b>는 소스 1행에 적용한 결과만 회신하고 저장·적용하지 않습니다 — 결과는 상세의 "명령 결과"에 도착합니다.</div>
               </div>
             </div>
 
             <div className="flex border-t">
               <button
                 onClick={() => setShowSyncMappingModal(false)}
-                disabled={syncMapSaving}
+                disabled={syncMapSaving || syncMapDryRunning}
                 className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r disabled:opacity-50"
               >취소</button>
+              {/* ★ 2026-07-10 P2-9: dry-run — v1.6.1+(ACK) 전용 */}
+              <button
+                onClick={handleSyncMappingDryRun}
+                disabled={syncMapSaving || syncMapDryRunning || !syncMapAckSupported}
+                title={!syncMapAckSupported ? '에이전트 v1.6.1 이상에서 지원' : undefined}
+                className="flex-1 px-4 py-3 text-indigo-600 font-medium hover:bg-indigo-50 transition-colors border-r disabled:opacity-50"
+              >{syncMapDryRunning ? '전송 중...' : '미리보기(dry-run)'}</button>
               <button
                 onClick={handleSyncMappingSave}
-                disabled={syncMapSaving}
+                disabled={syncMapSaving || syncMapDryRunning || syncMapReportLoading || !syncMapReported}
+                title={!syncMapReported ? '에이전트 보고 수신 후 저장 가능(빈 화면 저장 차단)' : undefined}
                 className="flex-1 px-4 py-3 text-violet-600 font-medium hover:bg-violet-50 transition-colors disabled:opacity-50"
               >{syncMapSaving ? '전송 중...' : '매핑 저장 및 전송'}</button>
             </div>
@@ -9317,6 +9593,28 @@ const handleApproveRequest = async (id: string) => {
                           <div className="text-xs text-gray-500">Agent 프로세스를 종료 (서비스로 설치된 경우 자동 재시작)</div>
                         </div>
                       </label>
+                      {/* ★ 2026-07-10 원격 관리 P2: 진단 2종 — v1.6.1+(결과 회신 지원) 전용 */}
+                      {(() => {
+                        const ackOk = syncAgentSupportsAck(syncSelectedAgent.agent_version);
+                        return (
+                          <>
+                            <label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${syncCommandType === 'report_logs' ? 'border-indigo-500 bg-indigo-50' : 'hover:bg-gray-50'} ${!ackOk ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
+                              <input type="radio" name="cmdType" value="report_logs" checked={syncCommandType === 'report_logs'} onChange={() => setSyncCommandType('report_logs')} className="text-indigo-600" disabled={!ackOk} />
+                              <div>
+                                <div className="text-sm font-medium text-gray-800">📄 최근 로그 요청</div>
+                                <div className="text-xs text-gray-500">{ackOk ? '에이전트 최근 로그 200줄을 회신받아 상세에서 열람' : 'v1.6.1 이상에서 지원'}</div>
+                              </div>
+                            </label>
+                            <label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${syncCommandType === 'test_connection' ? 'border-cyan-500 bg-cyan-50' : 'hover:bg-gray-50'} ${!ackOk ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
+                              <input type="radio" name="cmdType" value="test_connection" checked={syncCommandType === 'test_connection'} onChange={() => setSyncCommandType('test_connection')} className="text-cyan-600" disabled={!ackOk} />
+                              <div>
+                                <div className="text-sm font-medium text-gray-800">🔌 소스 DB 연결 테스트</div>
+                                <div className="text-xs text-gray-500">{ackOk ? '고객사 소스 DB 연결·컬럼 조회 상태를 회신받아 확인' : 'v1.6.1 이상에서 지원'}</div>
+                              </div>
+                            </label>
+                          </>
+                        );
+                      })()}
                     </div>
                   </>
                 );

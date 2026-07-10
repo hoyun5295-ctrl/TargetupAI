@@ -11,7 +11,7 @@ import type { SyncStateManager } from '../sync/state';
 import type { QueueManager } from '../queue';
 import type { AgentConfig } from '../config';
 import type { AlertManager } from '../alert';
-import type { AgentCommand } from '../types/api';
+import type { AgentCommand, AgentSelfReport } from '../types/api';
 import { UpdateManager } from '../updater';
 import { getLogger } from '../logger';
 import { AGENT_VERSION } from '../version';
@@ -33,6 +33,13 @@ export class HeartbeatManager {
   //   기존엔 싱크 응답(customers/purchases)에서만 commands 받았는데 0건이면 요청 자체 안 감 → 명령 누락.
   //   heartbeat 경로 추가로 안정적 전달 보장.
   private commandHandler: ((commands: AgentCommand[]) => void) | null = null;
+  // ★ v1.6.1 (P0-1): 자기 보고 provider — index.ts에서 engine 매핑+소스 컬럼 캐시 연결.
+  //   실패/미연결 시 undefined 동봉(heartbeat 자체는 계속).
+  private reportProvider: (() => Promise<AgentSelfReport | null>) | null = null;
+  // ★ v1.6.1 (P1-6): boost 지시 처리 — index.ts에서 scheduler.boostHeartbeat 연결.
+  private boostHandler: ((intervalMinutes: number, until: string) => void) | null = null;
+  // ★ v1.6.1: 동시 전송 가드 — 정각 cron·부스트 cron·명령 직후 즉시 전송이 겹칠 수 있다.
+  private sending = false;
 
   constructor(
     apiClient: ApiClient,
@@ -66,12 +73,49 @@ export class HeartbeatManager {
     this.commandHandler = handler;
   }
 
+  // ★ v1.6.1: 자기 보고 provider 등록 (index.ts에서 호출)
+  setReportProvider(provider: () => Promise<AgentSelfReport | null>): void {
+    this.reportProvider = provider;
+  }
+
+  // ★ v1.6.1: boost 지시 콜백 등록 (index.ts에서 scheduler.boostHeartbeat 연결)
+  setBoostHandler(handler: (intervalMinutes: number, until: string) => void): void {
+    this.boostHandler = handler;
+  }
+
   /**
    * Heartbeat 1회 전송
    */
   async send(): Promise<void> {
+    // ★ v1.6.1: 정각 cron·부스트 cron·명령 직후 즉시 전송 중복 가드
+    if (this.sending) {
+      logger.debug('Heartbeat 이미 전송 중 — 스킵');
+      return;
+    }
+    this.sending = true;
+    try {
+      await this.sendOnce();
+    } finally {
+      this.sending = false;
+    }
+  }
+
+  private async sendOnce(): Promise<void> {
     const state = this.stateManager.getState();
     const uptime = Math.floor((Date.now() - this.startTime) / 1000);
+
+    // ★ v1.6.1 (P0-1): 자기 보고 — 실패해도 heartbeat는 계속
+    let reported: AgentSelfReport | undefined;
+    try {
+      reported = (await this.reportProvider?.()) ?? undefined;
+    } catch (error) {
+      logger.debug('자기 보고 생성 실패 — 이번 heartbeat 생략', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    // ★ v1.6.1 (P1-4): 미전송 명령 실행 결과(ACK) 동봉
+    const commandResults = this.stateManager.getPendingCommandResults();
 
     try {
       const response = await this.apiClient.heartbeat({
@@ -85,6 +129,8 @@ export class HeartbeatManager {
         totalCustomersSynced: state.totalCustomersSynced,
         queuedItems: this.queueManager.getCount(),
         uptime,
+        reported,
+        commandResults: commandResults.length > 0 ? commandResults : undefined,
       });
 
       // Heartbeat 성공 → 알림 모듈에 보고
@@ -92,6 +138,11 @@ export class HeartbeatManager {
 
       if (response) {
         logger.debug('Heartbeat 전송 성공', { uptime: `${uptime}s` });
+
+        // ★ v1.6.1: 전송 성공한 ACK는 보류함에서 제거(서버가 기록·큐 정리 완료)
+        if (commandResults.length > 0) {
+          this.stateManager.removeCommandResults(commandResults.map((r) => r.commandId));
+        }
 
         // ★ D131 후속(2026-04-21): 서버 원격 명령을 scheduler로 전달하여 실제 실행.
         //   기존엔 로그만 찍고 TODO로 방치 → pause/resume이 실행되지 않던 버그.
@@ -105,6 +156,12 @@ export class HeartbeatManager {
           } else {
             logger.warn('commandHandler 미등록 — 명령 실행 불가 (index.ts 연결 확인)');
           }
+        }
+
+        // ★ v1.6.1 (P1-6): boost 지시 — 명령·ACK 왕복 동안 heartbeat 임시 단축
+        const boost = response.remoteConfig?.boost;
+        if (boost?.until && this.boostHandler) {
+          this.boostHandler(boost.heartbeatIntervalMinutes ?? 1, boost.until);
         }
 
         // Heartbeat 응답에 강제 업데이트 플래그가 있으면 즉시 처리

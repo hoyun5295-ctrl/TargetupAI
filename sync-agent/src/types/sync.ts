@@ -27,6 +27,11 @@ export interface SyncState {
   totalPurchasesSynced: number;
   /** 커스텀 필드 정의 서버 등록 완료 여부 (v1.4.0) */
   fieldDefinitionsRegistered: boolean;
+  // ★ v1.6.1 (P1-4·5): 명령 멱등 + ACK 보류함 — 파일 영속(재시작·restart 명령에도 유실 0).
+  //   executedCommandIds: 실행 완료한 command_id 최근 50개 (At-Least-Once 재전달 중복 실행 차단)
+  //   pendingCommandResults: 아직 서버에 전달 못 한 실행 결과 (다음 heartbeat 동봉 → 전송 성공 시 제거)
+  executedCommandIds?: string[];
+  pendingCommandResults?: import('./api').AgentCommandResult[];
 }
 
 export const DEFAULT_SYNC_STATE: SyncState = {
@@ -37,6 +42,8 @@ export const DEFAULT_SYNC_STATE: SyncState = {
   totalCustomersSynced: 0,
   totalPurchasesSynced: 0,
   fieldDefinitionsRegistered: false,
+  executedCommandIds: [],
+  pendingCommandResults: [],
 };
 
 // ─── 동기화 결과 ────────────────────────────────────────
