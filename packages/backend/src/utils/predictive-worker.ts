@@ -133,31 +133,9 @@ export async function runPredictiveBatchNow(): Promise<{
           createdBy: adminRes.rows[0]?.id || null,
           idempotencyKey: `predictive-daily:${row.id}:${todayKst}`,
         });
-        // ★ 2026-07-02 2차: 어제 자동마케팅 발송분 성과 회고 문자 — 브리핑보다 먼저(같은 사이클, 추가 차감 0).
-        try {
-          const { sendOperatorDailyRecaps } = await import('./operator-daily-recap');
-          const recap = await sendOperatorDailyRecaps(row.id);
-          if (recap.notified > 0) console.log(`[PredictiveWorker] 성과 회고 문자 company=${row.id} ${recap.notified}건`);
-        } catch (recapErr: any) {
-          console.warn('[PredictiveWorker] 성과 회고 skip:', row.id, recapErr?.message);
-        }
-        // ★ 2026-07-02 (Harold 확정): 월간 캠페인 D-2 사전 준비 문자 — 혜택·전략상품 입력/갱신 안내.
-        try {
-          const { sendMonthlyPrepReminders } = await import('./operator-prep-reminder');
-          const prep = await sendMonthlyPrepReminders(row.id);
-          if (prep.notified > 0) console.log(`[PredictiveWorker] 사전 준비 문자 company=${row.id} ${prep.notified}건`);
-        } catch (prepErr: any) {
-          console.warn('[PredictiveWorker] 사전 준비 문자 skip:', row.id, prepErr?.message);
-        }
-        // ★ 2026-07-07 (Harold 확정): 승인 대기 만료 임박(D-3) 리마인드 — 미승인 만료로 연 1회 캠페인이
-        //   소리 없이 무산되는 것 차단(마케팅 캘린더 완비). 실패는 예측·발송에 영향 0.
-        try {
-          const { sendPendingExpiryReminders } = await import('./operator-prep-reminder');
-          const expiry = await sendPendingExpiryReminders(row.id);
-          if (expiry.notified > 0) console.log(`[PredictiveWorker] 승인 만료 임박 문자 company=${row.id} ${expiry.notified}건`);
-        } catch (expiryErr: any) {
-          console.warn('[PredictiveWorker] 승인 만료 임박 문자 skip:', row.id, expiryErr?.message);
-        }
+        // ★ 2026-07-12 C-5: 자동마케팅 회고·D-2 준비·만료 임박 문자는 아래 독립 통지 패스로 이동 —
+        //   크레딧 부족·예측 실패로 이 회사가 skip돼도 통지는 나간다. AI 호출이 있는 일일 브리핑만
+        //   분석 차감 사이클(이 루프)에 유지(무과금 AI 호출 방지).
         // ★ 2026-07-02 3단계 (Harold 확정): 같은 일일 분석 차감 1회에 "오늘의 추천" 브리핑 동반 생성(추가 차감 0).
         //   실패는 예측·발송에 영향 0 — 격리 후 다음 날 사이클이 재시도.
         try {
@@ -172,6 +150,40 @@ export async function runPredictiveBatchNow(): Promise<{
       } catch (err: any) {
         console.warn('[PredictiveWorker] 회사 batch 오류, skip:', row.id, err?.message);
       }
+    }
+
+    // ★ 2026-07-12 C-5: 자동마케팅 통지·귀속 독립 패스 — 예측 차감과 분리(크레딧 부족 회사도 통지·귀속 진행).
+    //   대상 = 요금제 가입(만료·정지 제외) + 살아있는 오퍼레이터 보유 회사. 각 함수는 자체 멱등 마커 보유
+    //   (recap_notified_at·prep_reminder_sent_for·expiry_reminder_sent_at·conversion_attributed_at).
+    try {
+      const opCompanies = await query(
+        `SELECT DISTINCT c.id
+           FROM companies c
+           JOIN plans p ON c.plan_id = p.id
+          WHERE ${ACTIVE_PAID_PLAN_WHERE}
+            AND EXISTS (SELECT 1 FROM continuous_operators o WHERE o.company_id = c.id AND o.status <> 'archived')
+          ORDER BY c.id`,
+      );
+      const { sendOperatorDailyRecaps } = await import('./operator-daily-recap');
+      const { sendMonthlyPrepReminders, sendPendingExpiryReminders } = await import('./operator-prep-reminder');
+      const { runOperatorConversionAttribution } = await import('./operator-conversion-attribution');
+      for (const oc of opCompanies.rows) {
+        try {
+          const recap = await sendOperatorDailyRecaps(oc.id);
+          if (recap.notified > 0) console.log(`[PredictiveWorker] 성과 회고 문자 company=${oc.id} ${recap.notified}건`);
+          const prep = await sendMonthlyPrepReminders(oc.id);
+          if (prep.notified > 0) console.log(`[PredictiveWorker] 사전 준비 문자 company=${oc.id} ${prep.notified}건`);
+          const expiry = await sendPendingExpiryReminders(oc.id);
+          if (expiry.notified > 0) console.log(`[PredictiveWorker] 승인 만료 임박 문자 company=${oc.id} ${expiry.notified}건`);
+          // ★ 2026-07-12 C-3①: 발송 +7일 창이 닫힌 발송분의 구매 전환을 발송 변형에 확정 귀속(멱등 마커).
+          const conv = await runOperatorConversionAttribution(oc.id);
+          if (conv.attributed > 0) console.log(`[PredictiveWorker] 전환 귀속 company=${oc.id} ${conv.attributed}건`);
+        } catch (opErr: any) {
+          console.warn('[PredictiveWorker] 자동마케팅 통지 회사 skip:', oc.id, opErr?.message);
+        }
+      }
+    } catch (opLoopErr: any) {
+      console.warn('[PredictiveWorker] 자동마케팅 통지 패스 오류:', opLoopErr?.message);
     }
 
     const elapsedMs = Date.now() - startedAt;

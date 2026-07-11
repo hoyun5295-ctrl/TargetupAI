@@ -11,7 +11,7 @@ import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
 import {
   ContinuousOperator, OperatorProposal, ProposalVariant, BanditRecommendation,
-  LearningSummary, AutoMarketingView, ProposalApproveSelection,
+  LearningSummary, AutoMarketingView, ProposalApproveSelection, AutoMarketingRoi,
 } from '../components/automarketing/types';
 import AutoMarketingLauncher from '../components/automarketing/AutoMarketingLauncher';
 import ProposalDecisionCard from '../components/automarketing/ProposalDecisionCard';
@@ -31,7 +31,7 @@ const VIEW_TITLE: Record<AutoMarketingView, string> = {
 };
 
 const SMART_DEFAULTS: Partial<ContinuousOperator> = {
-  schedule: 'daily', scheduleTime: '09:00', status: 'active', channel: 'lms', deliveryPolicy: 'daily',
+  schedule: 'daily', scheduleTime: '09:00', status: 'active', channel: 'lms',
 };
 
 export default function ContinuousOperatorPage() {
@@ -44,6 +44,8 @@ export default function ContinuousOperatorPage() {
   const [proposalStatus, setProposalStatus] = useState<'pending' | 'all'>('pending');
   const [learningSummary, setLearningSummary] = useState<LearningSummary | null>(null);
   const [dailyBrief, setDailyBrief] = useState<DailyBrief | null>(null);
+  // ★ 2026-07-12 C-3③: 최근 30일 매출 귀속(ROI) — 런처 상설 카드(성과 화면과 동일 endpoint)
+  const [roi, setRoi] = useState<AutoMarketingRoi | null>(null);
   const [variantsMap, setVariantsMap] = useState<Record<string, { variants: ProposalVariant[]; recommendation: BanditRecommendation | null }>>({});
   const [expandedProposal, setExpandedProposal] = useState<string | null>(null);
 
@@ -79,21 +81,25 @@ export default function ContinuousOperatorPage() {
     setLoading(true);
     setError(null);
     try {
-      const [opRes, propRes, learnRes, briefRes] = await Promise.all([
+      const [opRes, propRes, learnRes, briefRes, roiRes] = await Promise.all([
         fetch('/api/ai/operator/continuous', { headers: auth() }),
         fetch(`/api/ai/operator/proposals?status=${proposalStatus}`, { headers: auth() }),
         fetch('/api/ai/operator/continuous/learning-summary', { headers: auth() }),
         fetch('/api/ai/operator/daily-brief', { headers: auth() }),
+        fetch('/api/ai/operator/performance/automarketing-roi?days=30', { headers: auth() }),
       ]);
       const opData = await opRes.json();
       const propData = await propRes.json();
       const learnData = await learnRes.json();
       const briefData = await briefRes.json().catch(() => ({ success: false }));
+      const roiData = await roiRes.json().catch(() => ({ success: false }));
       if (opData.success) setOperators(opData.operators || []);
       if (propData.success) setProposals(propData.proposals || []);
       if (learnData.success) setLearningSummary(learnData.summary || null);
       // 브리핑은 부가 정보 — 미생성(503)·오류 시 조용히 숨김
       if (briefData.success) setDailyBrief(briefData.brief || null);
+      // ROI는 부가 정보 — 오류 시 조용히 숨김
+      if (roiData.success) setRoi(roiData.roi || null);
       if (!opRes.ok && opData.code === 'BETA_GATE') setError('본 기능은 요금제 가입 후 이용 가능합니다.');
     } catch (e: any) {
       setError(e?.message || '조회 중 오류');
@@ -139,17 +145,14 @@ export default function ContinuousOperatorPage() {
     budget_monthly: e.budgetMonthly,
     budget_daily: e.budgetDaily,
     budget_alert_threshold: e.budgetAlertThreshold,
-    delivery_policy: e.deliveryPolicy || 'daily',
-    verification_required_days: e.verificationRequiredDays ?? 7,
     admin_phone_numbers: e.adminPhoneNumbers || [],
     backup_admin_phone: e.backupAdminPhone,
     admin_alert_channel: e.adminAlertChannel || 'sms',
-    opt_out_minutes: e.optOutMinutes ?? 5,
     auto_send_lead_minutes: e.autoSendLeadMinutes ?? 120,
     send_time_mode: e.sendTimeMode === 'ai_optimal' ? 'ai_optimal' : 'fixed',
     copy_style: e.copyStyle ?? null,
-    spam_score_threshold: e.spamScoreThreshold ?? 30,
-    max_spam_retries: e.maxSpamRetries ?? 3,
+    // ★ 2026-07-12 C-4: 발송 대상 축 — 미선택 = null(목표 문장 자유 해석)
+    target_hint: e.targetHint ?? null,
     channel: e.channel || 'lms',
     benefit_content: e.benefitContent ?? null,
     sequence_enabled: e.sequenceEnabled === true,
@@ -398,6 +401,7 @@ export default function ContinuousOperatorPage() {
               <AutoMarketingLauncher
                 pendingCount={pendingCount}
                 activeCount={activeCount}
+                roi={roi}
                 onOpenRecommendations={() => setView('recommendations')}
                 onOpenNatural={() => setView('natural')}
                 onOpenScenario={() => setView('scenario')}

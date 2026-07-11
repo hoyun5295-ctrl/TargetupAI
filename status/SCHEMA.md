@@ -2129,6 +2129,7 @@ cd /home/administrator/targetup-app/packages/backend && npm install web-push @ty
 | recap_notified_at | timestamptz | 성과 회고 문자(발송 다음날 9시) 멱등 마커 (2026-07-02 ALTER 실측 — information_schema 1row 확인) |
 | expiry_reminder_sent_at | timestamptz | 승인 대기 만료 임박(D-3) 리마인드 멱등 마커 (2026-07-07 ALTER 실행완료 — Harold 배포 선언) |
 | scheduled_send_at | timestamptz | 발송 예정 시각 — 2026-07-07부터 pending에도 저장(예정일 경과 승인 경고용). 자율 발송 트리거는 status='scheduled'만 |
+| conversion_attributed_at | timestamptz | ★ 2026-07-12 신규 — 전환(구매) 귀속 멱등 마커(발송+7일 창 닫힌 뒤 1회 확정 귀속). **적용 완료(2026-07-12 Harold 실행 — 사전 0행 확인 후 ALTER, 실측)** |
 - INDEX: company_id, status, created_at DESC
 - INDEX: operator_id, created_at DESC
 - INDEX: status, expires_at WHERE status='pending' (만료 처리용)

@@ -34,16 +34,14 @@ export interface ContinuousOperator {
   budgetAlertThreshold?: number;
   budgetSpentMonth?: number;
   budgetSpentToday?: number;
-  deliveryPolicy?: 'daily' | 'weekly' | 'monthly';
-  verificationRequiredDays?: number;
-  verificationPassedDays?: number;
+  // ★ 2026-07-12 C-2 죽은 설정 정리 — deliveryPolicy·verification*·optOutMinutes·spamScoreThreshold·
+  //   maxSpamRetries 제거(백엔드 소비 로직 0이던 거짓 설정).
   adminPhoneNumbers?: string[];
   backupAdminPhone?: string | null;
   adminAlertChannel?: 'sms' | 'kakao' | 'email';
-  optOutMinutes?: number;
-  spamScoreThreshold?: number;
-  maxSpamRetries?: number;
   autoSendLeadMinutes?: number | null;
+  // ★ 2026-07-12 C-4: 발송 대상 축 — null/미지정 = 목표 문장 자유 해석
+  targetHint?: string | null;
   // 발송 시각 모드 — 'fixed'(기본, 희망 시각 정각 발송) | 'ai_optimal'(반응 좋은 시간대로 AI가 조정)
   sendTimeMode?: 'fixed' | 'ai_optimal';
   // 문안 스타일 4종 — null/미지정 = 브랜드 톤 자동
@@ -243,6 +241,29 @@ export interface ProposalApproveSelection {
   variantIndex: number;
   body: string;
   subject?: string;
+}
+
+// ★ 2026-07-12 C-4: 발송 대상 축 선택지 — backend autosend-policy TARGET_HINTS의 키·라벨 미러.
+//   검증(화이트리스트)·타겟 지시문은 backend가 단일 진실 — 여기는 표시용 라벨만.
+export const TARGET_HINT_OPTIONS: Array<{ key: string; label: string }> = [
+  { key: 'all', label: '전체 고객' },
+  { key: 'dormant', label: '휴면 고객' },
+  { key: 'recent_buyers', label: '최근 구매 고객' },
+  { key: 'vip', label: 'VIP·상위 등급' },
+  { key: 'birthday', label: '이달 생일 고객' },
+  { key: 'new_customers', label: '신규 등록 고객' },
+];
+
+// ★ 2026-07-12 C-3③: 자동마케팅 매출 귀속(ROI) — GET /operator/performance/automarketing-roi 응답
+export interface AutoMarketingRoi {
+  analysisPeriodDays: number;
+  campaigns: number;
+  totalSent: number;
+  spendKrw: number;
+  purchases7d: number;
+  revenue7dKrw: number;
+  hasCdpData: boolean;
+  source: string;
 }
 
 // 통화/퍼센트 표시 헬퍼 — 모든 카드 공용

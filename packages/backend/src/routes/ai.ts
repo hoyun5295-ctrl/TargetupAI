@@ -54,7 +54,6 @@ import {
   updateOperator,
   archiveOperator,
   adminStopProposal,
-  adminConfirmProposal,
   listProposals,
   approveProposal,
   rejectProposal,
@@ -2352,13 +2351,14 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
       name, objective, schedule, schedule_time, status,
       schedule_day_of_week, schedule_day_of_month, schedule_month,
       budget_monthly, budget_daily, budget_alert_threshold,
-      // ★ D212+ 정책 (2026-05-23 Harold 명시)
-      delivery_policy, verification_required_days,
       admin_phone_numbers, backup_admin_phone, admin_alert_channel,
-      opt_out_minutes, auto_send_lead_minutes, spam_score_threshold, max_spam_retries,
+      auto_send_lead_minutes,
       channel, benefit_content,
       sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode, copy_style,
+      target_hint,
     } = req.body;
+    // ★ 2026-07-12 C-2: 죽은 설정 수신 제거(delivery_policy·verification_required_days·opt_out_minutes·
+    //   spam_score_threshold·max_spam_retries) — 소비 로직 0. 구클라이언트가 보내도 무시(에러 없음).
     const operator = await updateOperator(companyId, req.params.id, {
       name, objective, schedule, scheduleTime: schedule_time, status,
       scheduleDayOfWeek: schedule_day_of_week === undefined ? undefined : (schedule_day_of_week === null ? null : Number(schedule_day_of_week)),
@@ -2367,16 +2367,12 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
       budgetMonthly: budget_monthly === undefined ? undefined : (budget_monthly === null ? null : Number(budget_monthly)),
       budgetDaily: budget_daily === undefined ? undefined : (budget_daily === null ? null : Number(budget_daily)),
       budgetAlertThreshold: budget_alert_threshold !== undefined ? Number(budget_alert_threshold) : undefined,
-      // ★ D212+ 정책 (2026-05-23 Harold 명시): 발송 정책 + 검증 + 담당자 영역
-      deliveryPolicy: ['daily', 'weekly', 'monthly'].includes(delivery_policy) ? delivery_policy : undefined,
-      verificationRequiredDays: verification_required_days !== undefined ? Number(verification_required_days) : undefined,
       adminPhoneNumbers: Array.isArray(admin_phone_numbers) ? admin_phone_numbers.filter((p: any) => typeof p === 'string' && p.trim()) : undefined,
       backupAdminPhone: backup_admin_phone === undefined ? undefined : (backup_admin_phone === null ? null : String(backup_admin_phone)),
       adminAlertChannel: ['sms', 'kakao', 'email'].includes(admin_alert_channel) ? admin_alert_channel : undefined,
-      optOutMinutes: opt_out_minutes !== undefined ? Number(opt_out_minutes) : undefined,
       autoSendLeadMinutes: auto_send_lead_minutes !== undefined ? Number(auto_send_lead_minutes) : undefined,
-      spamScoreThreshold: spam_score_threshold !== undefined ? Number(spam_score_threshold) : undefined,
-      maxSpamRetries: max_spam_retries !== undefined ? Number(max_spam_retries) : undefined,
+      // ★ 2026-07-12 C-4: 타겟 축 — undefined = 유지, null/그 외 = 해제(CT가 화이트리스트 정규화)
+      targetHint: target_hint === undefined ? undefined : (typeof target_hint === 'string' ? target_hint : null),
       // ★ 2026-06-26: 발송 채널 + 관리자 입력 혜택
       channel: ['sms', 'lms', 'mms'].includes(channel) ? channel : undefined,
       benefitContent: typeof benefit_content === 'string' ? benefit_content : undefined,
@@ -2744,23 +2740,7 @@ router.post('/operator/proposals/:id/admin-stop', async (req: Request, res: Resp
   }
 });
 
-// ★ D212+ 정책 (2026-05-23 Harold 명시): 회사 admin 매일 컨펌 endpoint — 검증 영역 안 누적
-router.post('/operator/proposals/:id/admin-confirm', async (req: Request, res: Response) => {
-  try {
-    const companyId = req.user?.companyId;
-    const userType = req.user?.userType;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    if (userType !== 'company_admin') {
-      return res.status(403).json({ success: false, error: '회사 관리자만 컨펌 가능합니다.' });
-    }
-    const result = await adminConfirmProposal(companyId, req.params.id);
-    if (!result) return res.status(404).json({ success: false, error: '제안 영역 안 찾을 수 없습니다.' });
-    return res.json({ success: true, verificationDays: result.verificationDays });
-  } catch (err: any) {
-    console.error('[Proposals admin-confirm] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '컨펌 영역 오류' });
-  }
-});
+// (admin-confirm 라우트 제거 — 2026-07-12 C-2: 프론트 호출 0건 죽은 라우트, 검증 7일 게이팅 폐기분 잔재)
 
 // ============================================================
 // ★ D177 (2026-05-19) Self-Optimizing Bandit — variant 추천 + reward 박음

@@ -1,11 +1,14 @@
-// 자동마케팅 런처 — 시작 방법 4개(2×2) + 브리핑 + 실행 중 관리 진입 (2026-06-27)
+// 자동마케팅 런처 — 시작 방법 4개(2×2) + ROI 카드 + 브리핑 + 실행 중 관리 진입 (2026-06-27)
 // 타일은 라벨만 있는 액션이라 가운데 정렬, 브리핑은 읽는 글이라 좌측 정렬.
 import { ReactNode } from 'react';
-import { Sparkles, MessageSquare, LayoutGrid, SlidersHorizontal, ChevronRight, Bot } from 'lucide-react';
+import { Sparkles, MessageSquare, LayoutGrid, SlidersHorizontal, ChevronRight, Bot, TrendingUp } from 'lucide-react';
+import { AutoMarketingRoi, won } from './types';
 
 interface Props {
   pendingCount: number;
   activeCount: number;
+  // ★ 2026-07-12 C-3③: 최근 30일 매출 귀속 — 성과 화면에만 있던 ROI를 런처 상설로
+  roi?: AutoMarketingRoi | null;
   onOpenRecommendations: () => void;
   onOpenNatural: () => void;
   onOpenScenario: () => void;
@@ -14,7 +17,7 @@ interface Props {
 }
 
 export default function AutoMarketingLauncher({
-  pendingCount, activeCount,
+  pendingCount, activeCount, roi,
   onOpenRecommendations, onOpenNatural, onOpenScenario, onOpenAdvanced, onManage,
 }: Props) {
   return (
@@ -27,6 +30,31 @@ export default function AutoMarketingLauncher({
         <Tile icon={<LayoutGrid className="w-5 h-5" />} title="시나리오로 시작" onClick={onOpenScenario} />
         <Tile icon={<SlidersHorizontal className="w-5 h-5" />} title="세부설정으로 시작" onClick={onOpenAdvanced} />
       </div>
+
+      {/* ★ 2026-07-12 C-3③: 최근 30일 성과 — 발송 실적이 있을 때만 표시(cold start 숨김) */}
+      {roi && roi.campaigns > 0 && (
+        <div className="mt-6 bg-white/5 border border-white/10 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <TrendingUp className="w-4 h-4 text-emerald-300" />
+            <span className="text-sm font-semibold text-white">최근 30일 자동마케팅 성과</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <RoiStat label="발송 캠페인" value={`${roi.campaigns.toLocaleString()}건`} tone="text-indigo-200" />
+            <RoiStat label="발송" value={`${roi.totalSent.toLocaleString()}명`} tone="text-cyan-200" />
+            <RoiStat label="비용" value={won(roi.spendKrw)} tone="text-white/80" />
+            {roi.hasCdpData
+              ? <RoiStat label="귀속 매출 (7일)" value={won(roi.revenue7dKrw)} tone="text-emerald-200" />
+              : <RoiStat label="귀속 매출" value="연동 후 표시" tone="text-white/40" />}
+          </div>
+          {roi.hasCdpData && roi.purchases7d > 0 && (
+            <div className="mt-2 text-[11px] text-white/60">발송 후 7일 안 구매 {roi.purchases7d.toLocaleString()}건이 귀속된 실측 매출입니다.</div>
+          )}
+          {!roi.hasCdpData && (
+            <div className="mt-2 text-[11px] text-white/50">매출 귀속은 자사몰 연동(구매 데이터 수집) 후 표시됩니다.</div>
+          )}
+          <div className="text-[10px] text-white/30 italic mt-2">Data source — 발송 후 7일 구매 귀속 · 최근 30일 실측</div>
+        </div>
+      )}
 
       <div className="mt-6">
         <div className="text-xs text-white/40 mb-1">이렇게 시작합니다</div>
@@ -56,6 +84,15 @@ function Tile({ featured, icon, title, badge, onClick }: { featured?: boolean; i
       <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${featured ? 'bg-indigo-500 text-white' : 'bg-white/5 text-white/70'}`}>{icon}</div>
       <div className="mt-3 text-sm font-medium text-white">{title}</div>
     </button>
+  );
+}
+
+function RoiStat({ label, value, tone }: { label: string; value: string; tone: string }) {
+  return (
+    <div className="p-2.5 bg-white/5 rounded-lg">
+      <div className="text-[10px] text-white/40">{label}</div>
+      <div className={`text-base font-bold font-mono tabular-nums ${tone}`}>{value}</div>
+    </div>
   );
 }
 

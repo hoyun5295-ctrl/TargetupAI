@@ -5,12 +5,11 @@ import { ReactNode, useState } from 'react';
 import {
   Brain, X, Gift, Layers, Bell, Wallet, ChevronDown, ChevronUp, Loader2, AlertCircle,
 } from 'lucide-react';
-import { ContinuousOperator, Schedule, OperatorStatus, won } from './types';
+import { ContinuousOperator, Schedule, OperatorStatus, TARGET_HINT_OPTIONS, won } from './types';
 import CopyStylePicker from './CopyStylePicker';
 
 const INP = 'w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 transition-colors';
 const LAB = 'text-xs font-medium text-white/70 block mb-1.5';
-const POLICY_LABEL: Record<string, string> = { daily: '매일', weekly: '매주', monthly: '매달' };
 
 interface Props {
   editing: Partial<ContinuousOperator>;
@@ -74,6 +73,16 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
             <CopyStylePicker value={editing.copyStyle ?? null} onChange={(next) => setEditing({ ...editing, copyStyle: next })} disabled={saving} />
           </div>
 
+          <div>
+            {/* ★ 2026-07-12 C-4: 발송 대상 축 — 캘린더 등록 전용이던 target_hint 일반 개방 */}
+            <label className={LAB}>발송 대상 (선택)</label>
+            <select value={editing.targetHint ?? ''} onChange={(e) => setEditing({ ...editing, targetHint: e.target.value || null })} className={INP}>
+              <option value="">AI 자동 — 목표 문장으로 판단</option>
+              {TARGET_HINT_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}
+            </select>
+            <div className="text-[10px] text-white/40 mt-1">고르면 매 제안의 발송 대상이 이 축으로 고정됩니다. 비우면 목표 문장을 AI가 해석합니다.</div>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={LAB}>추천 주기</label>
@@ -86,7 +95,9 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
             </div>
             <div>
               <label className={LAB}>발송 희망 시각 (KST)</label>
-              <input type="time" value={editing.scheduleTime || '09:00'} onChange={(e) => setEditing({ ...editing, scheduleTime: e.target.value })} className={INP} />
+              {/* ★ 2026-07-12 C-1: 야간 광고 발송 제한 — 08:00~20:59만. 백엔드 저장 가드가 최종 차단 */}
+              <input type="time" min="08:00" max="20:59" value={editing.scheduleTime || '09:00'} onChange={(e) => setEditing({ ...editing, scheduleTime: e.target.value })} className={INP} />
+              <div className="text-[10px] text-white/40 mt-1">야간(21시~다음날 08시)에는 광고 발송이 제한되어 08:00~20:59만 선택할 수 있습니다.</div>
             </div>
           </div>
 
@@ -179,15 +190,8 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
             )}
           </Section>
 
-          <Section icon={<Bell className="w-4 h-4" />} title="발송 정책·담당자 알림" summary={`${POLICY_LABEL[editing.deliveryPolicy || 'daily']} · 담당자 ${phones.length}명`}>
-            <div>
-              <label className="text-[11px] text-white/60 block mb-1">발송 주기</label>
-              <select value={editing.deliveryPolicy || 'daily'} onChange={(e) => setEditing({ ...editing, deliveryPolicy: e.target.value as 'daily' | 'weekly' | 'monthly' })} className={INP}>
-                <option value="daily">매일 — 매일 새 제안</option>
-                <option value="weekly">매주 — 주 1회 새 제안</option>
-                <option value="monthly">매달 — 월 1회 새 제안</option>
-              </select>
-            </div>
+          {/* ★ 2026-07-12 C-2: "발송 주기" select 제거 — 소비 로직 0인 거짓 설정(실제 주기 = 위 '추천 주기') */}
+          <Section icon={<Bell className="w-4 h-4" />} title="담당자 알림" summary={`담당자 ${phones.length}명`}>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-[11px] text-white/60 block mb-1">담당자 연락처 (쉼표, 최대 3명)</label>

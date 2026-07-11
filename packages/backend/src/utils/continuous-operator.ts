@@ -27,14 +27,14 @@
 
 import { query } from '../config/database';
 import { orchestrate } from '../services/ai-orchestrator';
-import { getCompanyCosts } from '../config/defaults';
+import { getCompanyCosts, SEND_HOURS } from '../config/defaults';
 import { shouldSkipProposalGeneration } from './operator-proposal-dedup';
 // ★ D177 (2026-05-19): Self-Optimizing Bandit — message variants 생성 + Thompson Sampling
 import { insertProposalVariants, recommendVariantForProposal, recordVariantReward } from './bandit-optimizer';
 // ★ D212+ 정책 (2026-05-23 Harold 명시): CT-64 영역 통합 — 검증 영역 + 담당자 학습
 // ★ D227+ 스팸 안전망 격상 — decideSpamOutcome(실제 테스트 결과 → 상태) + buildSpamRegeneratePrompt(AI 재작성)
 import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt } from './continuous-operator-policy';
-import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery, decideBudgetGuard, buildAutoSendPrepInfoBody, buildPendingReviewNoticeBody, computeNextOccurrence, computeNextGenerationRun, normalizeSendTimeMode, SendTimeMode, normalizeCopyStyle, buildCopyStylePromptBlock, CopyStyle, wrapOperatorNoticeBody, normalizeTargetHint, TargetHint, applyBenefitToBody, hasUneditedBenefitPlaceholder } from './autosend-policy';
+import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery, decideBudgetGuard, decideBudgetAlert, isSendableHourKst, validateScheduleTimeSendable, buildAutoSendPrepInfoBody, buildPendingReviewNoticeBody, computeNextOccurrence, computeNextGenerationRun, normalizeSendTimeMode, SendTimeMode, normalizeCopyStyle, buildCopyStylePromptBlock, CopyStyle, wrapOperatorNoticeBody, normalizeTargetHint, TargetHint, applyBenefitToBody, hasUneditedBenefitPlaceholder } from './autosend-policy';
 import { getOpt080Number } from './messageUtils';
 // ★ D227+ 검증된 스팸 자산 재사용 (auto-campaign-worker와 동일 패턴) — 실제 테스트폰 발송 + AI 재생성 + 재테스트
 import { autoSpamTestWithRegenerate } from './spam-test-queue';
@@ -188,6 +188,9 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   }
   const schedule: OperatorSchedule = ['daily', 'weekly', 'monthly', 'yearly'].includes(input.schedule || '') ? input.schedule! : 'daily';
   const scheduleTime = input.scheduleTime || '09:00';
+  // ★ 2026-07-12 C-1: 야간 광고 발송 제한 — 자동마케팅은 광고 강제라 발송 희망 시각을 발송 가능 창 안으로만 저장.
+  const timeGate = validateScheduleTimeSendable(scheduleTime, SEND_HOURS.start, SEND_HOURS.end);
+  if (!timeGate.ok) throw new Error(timeGate.reason);
   const scheduleDayOfWeek = (schedule === 'weekly' && input.scheduleDayOfWeek != null) ? input.scheduleDayOfWeek : null;
   const scheduleDayOfMonth = ((schedule === 'monthly' || schedule === 'yearly') && input.scheduleDayOfMonth != null) ? input.scheduleDayOfMonth : null;
   // ★ 2026-07-05 yearly: 대상 월(1~12) 필수 — 시즌 캠페인 연 1회 (없으면 매월 반복으로 오등록되므로 차단)
@@ -321,16 +324,14 @@ export async function updateOperator(
     budgetMonthly?: number | null;
     budgetDaily?: number | null;
     budgetAlertThreshold?: number;
-    // ★ D212+ 정책 (2026-05-23 Harold 명시): 발송 정책 + 검증 + 담당자 영역 patch
-    deliveryPolicy?: 'daily' | 'weekly' | 'monthly';
-    verificationRequiredDays?: number;
+    // ★ 2026-07-12 C-2 죽은 설정 정리 — deliveryPolicy·verificationRequiredDays·optOutMinutes·
+    //   spamScoreThreshold·maxSpamRetries patch 제거(소비 로직 0 — DB 컬럼은 보존, 코드 참조만 정리).
     adminPhoneNumbers?: string[];
     backupAdminPhone?: string | null;
     adminAlertChannel?: 'sms' | 'kakao' | 'email';
-    optOutMinutes?: number;
     autoSendLeadMinutes?: number | null;
-    spamScoreThreshold?: number;
-    maxSpamRetries?: number;
+    // ★ 2026-07-12 C-4: 타겟 축 — undefined = 유지, null/화이트리스트 밖 = 해제(자유 해석).
+    targetHint?: string | null;
     // ★ 2026-06-26: 발송 채널 + 관리자 입력 혜택
     channel?: 'sms' | 'lms' | 'mms';
     benefitContent?: string | null;
@@ -344,6 +345,11 @@ export async function updateOperator(
     copyStyle?: string | null;
   }
 ): Promise<ContinuousOperator | null> {
+  // ★ 2026-07-12 C-1: 야간 광고 발송 제한 — 발송 희망 시각 변경도 발송 가능 창 안만 허용.
+  if (patch.scheduleTime) {
+    const timeGate = validateScheduleTimeSendable(patch.scheduleTime, SEND_HOURS.start, SEND_HOURS.end);
+    if (!timeGate.ok) throw new Error(timeGate.reason);
+  }
   // schedule/scheduleTime/요일/날짜/준비시간 변경 시 next_run_at 재계산 (생성 = 발송 희망 시각 − lead)
   let nextRunAt: Date | null = null;
   let nextDow: number | null = null;
@@ -367,6 +373,19 @@ export async function updateOperator(
     nextRunAt = computeNextGenerationRun(sched, time, nextDow, nextDom, nextMonth, lead).nextRunAt;
   }
 
+  // ★ 2026-07-12 Codex 정정: 부분 patch가 예산·백업 담당자를 NULL로 덮던 함정 봉합 —
+  //   직접 대입 3컬럼(budget_monthly·budget_daily·backup_admin_phone)은 undefined = 현재값 유지(선조회),
+  //   null = 명시 해제(무제한/제거) 의미 구분. 예산 가드·임계 알림의 보호선 유실 차단.
+  const curRes = await query(
+    `SELECT budget_monthly, budget_daily, backup_admin_phone FROM continuous_operators
+      WHERE id = $1::uuid AND company_id = $2::uuid`,
+    [operatorId, companyId],
+  );
+  if (curRes.rows.length === 0) return null;
+  const cur = curRes.rows[0];
+
+  // ★ 2026-07-12 C-2: 죽은 설정 SET 제거(delivery_policy·verification_required_days·opt_out_minutes·
+  //   spam_score_threshold·max_spam_retries) — 소비 로직 0. DB 컬럼은 보존, 이 UPDATE만 참조 정리.
   const result = await query(
     `UPDATE continuous_operators SET
       name = COALESCE($3, name),
@@ -378,25 +397,20 @@ export async function updateOperator(
       budget_monthly = $9,
       budget_daily = $10,
       budget_alert_threshold = COALESCE($11, budget_alert_threshold),
-      delivery_policy = COALESCE($12, delivery_policy),
-      verification_required_days = COALESCE($13, verification_required_days),
-      admin_phone_numbers = COALESCE($14, admin_phone_numbers),
-      backup_admin_phone = $15,
-      admin_alert_channel = COALESCE($16, admin_alert_channel),
-      opt_out_minutes = COALESCE($17, opt_out_minutes),
-      spam_score_threshold = COALESCE($18, spam_score_threshold),
-      max_spam_retries = COALESCE($19, max_spam_retries),
-      auto_send_lead_minutes = COALESCE($20, auto_send_lead_minutes),
-      schedule_day_of_week = COALESCE($21, schedule_day_of_week),
-      schedule_day_of_month = COALESCE($22, schedule_day_of_month),
-      channel = COALESCE($23, channel),
-      benefit_content = COALESCE($24, benefit_content),
-      sequence_enabled = COALESCE($25, sequence_enabled),
-      sequence_delay_days = COALESCE($26, sequence_delay_days),
-      sequence_reminder_content = COALESCE($27, sequence_reminder_content),
-      send_time_mode = COALESCE($28, send_time_mode),
-      copy_style = CASE WHEN $29::text = '__keep__' THEN copy_style ELSE NULLIF($29::text, '') END,
-      schedule_month = COALESCE($30, schedule_month),
+      admin_phone_numbers = COALESCE($12, admin_phone_numbers),
+      backup_admin_phone = $13,
+      admin_alert_channel = COALESCE($14, admin_alert_channel),
+      auto_send_lead_minutes = COALESCE($15, auto_send_lead_minutes),
+      schedule_day_of_week = COALESCE($16, schedule_day_of_week),
+      schedule_day_of_month = COALESCE($17, schedule_day_of_month),
+      channel = COALESCE($18, channel),
+      benefit_content = COALESCE($19, benefit_content),
+      sequence_enabled = COALESCE($20, sequence_enabled),
+      sequence_delay_days = COALESCE($21, sequence_delay_days),
+      sequence_reminder_content = COALESCE($22, sequence_reminder_content),
+      send_time_mode = COALESCE($23, send_time_mode),
+      copy_style = CASE WHEN $24::text = '__keep__' THEN copy_style ELSE NULLIF($24::text, '') END,
+      schedule_month = COALESCE($25, schedule_month),
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid
      RETURNING *`,
@@ -408,17 +422,12 @@ export async function updateOperator(
       patch.scheduleTime ?? null,
       patch.status ?? null,
       nextRunAt,
-      patch.budgetMonthly === undefined ? null : patch.budgetMonthly,
-      patch.budgetDaily === undefined ? null : patch.budgetDaily,
+      patch.budgetMonthly === undefined ? cur.budget_monthly : patch.budgetMonthly,
+      patch.budgetDaily === undefined ? cur.budget_daily : patch.budgetDaily,
       patch.budgetAlertThreshold ?? null,
-      patch.deliveryPolicy ?? null,
-      patch.verificationRequiredDays ?? null,
       patch.adminPhoneNumbers ?? null,
-      patch.backupAdminPhone === undefined ? null : patch.backupAdminPhone,
+      patch.backupAdminPhone === undefined ? cur.backup_admin_phone : patch.backupAdminPhone,
       patch.adminAlertChannel ?? null,
-      patch.optOutMinutes ?? null,
-      patch.spamScoreThreshold ?? null,
-      patch.maxSpamRetries ?? null,
       patch.autoSendLeadMinutes ?? null,
       nextDow,
       nextDom,
@@ -433,7 +442,40 @@ export async function updateOperator(
       nextMonth,
     ]
   );
-  return result.rows.length > 0 ? mapRowToOperator(result.rows[0]) : null;
+  if (result.rows.length === 0) return null;
+  let updated = mapRowToOperator(result.rows[0]);
+
+  // ★ 2026-07-12 C-4: 타겟 축(target_hint) — 공용 UPDATE 본문 밖 별도 UPDATE(0711 여정 신규 컬럼 패턴 미러).
+  //   컬럼 미생성(42703) = 조용히 skip — 수정 저장 본류 보호. undefined = 유지, null/화이트리스트 밖 = 해제.
+  if (patch.targetHint !== undefined) {
+    try {
+      const th = await query(
+        `UPDATE continuous_operators SET target_hint = $3, updated_at = NOW()
+          WHERE id = $1::uuid AND company_id = $2::uuid RETURNING *`,
+        [operatorId, companyId, normalizeTargetHint(patch.targetHint)],
+      );
+      if (th.rows.length > 0) updated = mapRowToOperator(th.rows[0]);
+    } catch (thErr: any) {
+      console.warn('[ContinuousOperator] target_hint 갱신 skip(컬럼 미생성 가능):', thErr?.message);
+    }
+  }
+
+  // ★ 2026-07-12 C-1: 일시 중지·보관 전환 시 예약된 자율 발송(scheduled) 동반 취소 — "중지했는데 발송" 차단.
+  if (patch.status === 'paused' || patch.status === 'archived') {
+    await cancelScheduledProposalsForOperator(operatorId, '자동마케팅 중지 — 예약 발송 취소')
+      .catch((e: any) => console.warn('[ContinuousOperator] 예약 발송 취소 경고:', e?.message));
+  }
+  return updated;
+}
+
+/** ★ 2026-07-12 C-1: 오퍼레이터 중지·보관 시 예약된 자율 발송(scheduled) 일괄 취소 — 리마인드 포함. */
+async function cancelScheduledProposalsForOperator(operatorId: string, reason: string): Promise<number> {
+  const r = await query(
+    `UPDATE operator_proposals SET status = 'admin_stopped', scheduled_send_at = NULL, auto_execute_reason = $2, reviewed_at = NOW()
+      WHERE operator_id = $1::uuid AND status = 'scheduled' RETURNING id`,
+    [operatorId, reason],
+  );
+  return r.rows.length;
 }
 
 export async function archiveOperator(companyId: string, operatorId: string): Promise<boolean> {
@@ -442,7 +484,11 @@ export async function archiveOperator(companyId: string, operatorId: string): Pr
      WHERE id = $1::uuid AND company_id = $2::uuid RETURNING id`,
     [operatorId, companyId]
   );
-  return result.rows.length > 0;
+  if (result.rows.length === 0) return false;
+  // ★ 2026-07-12 C-1: 보관(중지) 시 예약된 자율 발송 동반 취소 — "중지했는데 발송" 차단.
+  await cancelScheduledProposalsForOperator(operatorId, '자동마케팅 중지(보관) — 예약 발송 취소')
+    .catch((e: any) => console.warn('[ContinuousOperator] 보관 시 예약 발송 취소 경고:', e?.message));
+  return true;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -694,9 +740,11 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
   // ★ 2026-07-02 1단계 B (Harold 스펙): schedule_time = 발송 희망 시각.
   //   fixed(기본) = 희망 시각 정각 발송 — 생성 워커가 희망 − lead에 돌므로 다음 occurrence가 이번 주기 희망 시각.
   //   ai_optimal(명시 선택) = Phase3 B 클릭 피크 개인화(준비 창 보존·데이터 부족 시 now+lead 폴백) 유지.
+  // ★ 2026-07-12 C-1: fixed 모드도 발송 가능 창 클램프 — 신규 저장은 시각 가드로 차단되지만 기존 야간 설정 행 방어.
+  //   (ai_optimal은 computeOptimalSendAt이 자체 클램프, 리마인드는 shiftToSendableHour 기적용 — 3경로 전부 봉합)
   const scheduledSendAt = operator.sendTimeMode === 'ai_optimal'
     ? await resolveOptimalScheduledSendAt(operator.companyId, leadMinutes)
-    : computeNextOccurrence(operator.schedule, operator.scheduleTime, operator.scheduleDayOfWeek, operator.scheduleDayOfMonth, operator.scheduleMonth);
+    : shiftToSendableHour(computeNextOccurrence(operator.schedule, operator.scheduleTime, operator.scheduleDayOfWeek, operator.scheduleDayOfMonth, operator.scheduleMonth));
   const proposalRes = await query(
     `INSERT INTO operator_proposals (
       id, operator_id, company_id, proposal_json, recipient_count, cost_estimate,
@@ -904,48 +952,8 @@ export async function adminStopProposal(
   return true;
 }
 
-// ★ D212+ 정책 (2026-05-23 Harold 명시): 회사 admin 매일 컨펌
-export async function adminConfirmProposal(
-  companyId: string,
-  proposalId: string,
-): Promise<{ ok: boolean; verificationDays: number } | null> {
-  // 회사 격리 + proposal 조회
-  const r = await query(
-    `SELECT p.id, p.operator_id, o.verification_passed_days, o.verification_required_days
-     FROM operator_proposals p
-     INNER JOIN continuous_operators o ON o.id = p.operator_id
-     WHERE p.id = $1::uuid AND p.company_id = $2::uuid AND p.status = 'pending'`,
-    [proposalId, companyId],
-  );
-  if (r.rows.length === 0) return null;
-
-  const proposal = r.rows[0];
-
-  // 승인 영역 처리
-  await query(
-    `UPDATE operator_proposals SET
-       status = 'approved',
-       admin_response = 'confirmed',
-       reviewed_at = NOW()
-     WHERE id = $1::uuid`,
-    [proposalId],
-  );
-
-  // 검증 일수 누적
-  const incRes = await query(
-    `UPDATE continuous_operators SET
-       verification_passed_days = COALESCE(verification_passed_days, 0) + 1,
-       updated_at = NOW()
-     WHERE id = $1::uuid AND company_id = $2::uuid
-     RETURNING verification_passed_days`,
-    [proposal.operator_id, companyId],
-  );
-
-  return {
-    ok: true,
-    verificationDays: incRes.rows[0]?.verification_passed_days || 0,
-  };
-}
+// (adminConfirmProposal 제거 — 2026-07-12 C-2: 프론트 호출 0건의 죽은 라우트 전용 함수였고,
+//  검증 7일 게이팅 폐기로 verification_passed_days 누적도 죽은 카운터였다. 컬럼은 보존.)
 
 async function updateOperatorAfterRun(
   operatorId: string,
@@ -1065,6 +1073,22 @@ export async function approveProposal(
      WHERE id = $1::uuid`,
     [claim.rows[0].operator_id]
   );
+
+  // ★ 2026-07-12 C-1: 야간 승인 = 즉시 발송 대신 다음 발송 가능 시각(오전 9시) 자율 발송 예약(광고 야간 전송 제한).
+  //   userSelection은 이미 proposal_json에 병합돼 있어 예약 발송에도 그대로 반영된다.
+  const nowApprove = new Date();
+  if (!isSendableHourKst(nowApprove, SEND_HOURS.start, SEND_HOURS.end)) {
+    const sendAt = shiftToSendableHour(nowApprove);
+    await query(
+      `UPDATE operator_proposals SET status = 'scheduled', scheduled_send_at = $2
+       WHERE id = $1::uuid AND status = 'sending'`,
+      [proposalId, sendAt],
+    );
+    const label = sendAt.toLocaleString('ko-KR', {
+      timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+    return { ok: true, action: 'skipped', reason: `야간에는 광고 발송이 제한되어 지금은 발송하지 않습니다. ${label}에 자동 발송되도록 예약했습니다. 발송 전까지 [정지] 버튼으로 취소할 수 있습니다.` };
+  }
 
   // 발송 — dispatchProposalSend 공유. 크레딧은 발송 성공 시점 1회(멱등키 proposalId).
   const r = await dispatchProposalSend(claim.rows[0]);
@@ -1234,6 +1258,35 @@ async function reconcileStuckSending(staleMinutes: number = 30): Promise<void> {
 }
 
 async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skipped'> {
+  // ★ 2026-07-12 C-1: 발송 직전 오퍼레이터 상태 게이트 — 중지·보관 오퍼레이터의 잔여 예약 발송 최종 차단
+  //   (중지 시점 일괄 취소와 2중 안전망). paused_no_credit은 생성 크레딧 문제라 기예약 발송은 기존대로 진행.
+  const gateRes = await query(
+    `SELECT o.status AS operator_status
+       FROM operator_proposals p JOIN continuous_operators o ON o.id = p.operator_id
+      WHERE p.id = $1::uuid`,
+    [proposalId],
+  );
+  const opStatus = String(gateRes.rows[0]?.operator_status || '');
+  if (opStatus !== 'active' && opStatus !== 'paused_no_credit') {
+    await query(
+      `UPDATE operator_proposals SET status = 'admin_stopped', scheduled_send_at = NULL,
+         auto_execute_reason = '오퍼레이터 중지 상태 — 자동 발송 취소', reviewed_at = NOW()
+       WHERE id = $1::uuid AND status = 'scheduled'`,
+      [proposalId],
+    );
+    return 'skipped';
+  }
+  // ★ 2026-07-12 C-1: 야간 게이트 — 발송 가능 창 밖이면 다음 발송 가능 시각(오전 9시)으로 밀고 이번 패스는 skip.
+  //   신규 저장은 시각 가드로 차단되지만 기존 야간 예약 행·경계 드리프트 방어.
+  const nowGate = new Date();
+  if (!isSendableHourKst(nowGate, SEND_HOURS.start, SEND_HOURS.end)) {
+    await query(
+      `UPDATE operator_proposals SET scheduled_send_at = $2 WHERE id = $1::uuid AND status = 'scheduled'`,
+      [proposalId, shiftToSendableHour(nowGate)],
+    );
+    return 'skipped';
+  }
+
   // claim (scheduled → sending) — 동시 발송/중복 방지
   const claim = await query(
     `UPDATE operator_proposals SET status = 'sending', reviewed_at = NOW()
@@ -1386,7 +1439,8 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
     // operator(통지 대상 · created_by · Phase3 C 시퀀스 설정 · 2026-07-07 혜택 재치환용 benefit_content)
     const opRes = await query(
       `SELECT created_by, name, admin_phone_numbers, backup_admin_phone,
-              sequence_enabled, sequence_delay_days, sequence_reminder_content, benefit_content
+              sequence_enabled, sequence_delay_days, sequence_reminder_content, benefit_content,
+              budget_monthly, budget_daily, budget_alert_threshold
        FROM continuous_operators WHERE id = $1::uuid`,
       [p.operator_id],
     );
@@ -1521,6 +1575,32 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
     );
   }
   await notify('[AI 자동마케팅] 발송 완료', `'${op.name || ''}' ${recipientTotal}명에게 발송을 완료했습니다.`);
+
+  // ★ 2026-07-12 C-2: 예산 사용 임계 알림 — 이번 발송으로 임계 비율 선을 처음 넘는 순간 1회(교차 판정 = 멱등).
+  //   소진 집계는 예산 가드와 동일 기준(cost_estimate·동일 status 집합), 이번 제안은 id 제외로 "이전 소진"을 만든다.
+  try {
+    const spentRes = await query(
+      `SELECT
+         COALESCE(SUM(cost_estimate) FILTER (WHERE created_at >= date_trunc('month', NOW())), 0) AS spent_month,
+         COALESCE(SUM(cost_estimate) FILTER (WHERE created_at >= CURRENT_DATE), 0) AS spent_today
+       FROM operator_proposals
+       WHERE operator_id = $1::uuid AND status IN ('approved', 'auto_executed', 'sent') AND id <> $2::uuid`,
+      [p.operator_id, proposalId],
+    );
+    const budgetAlert = decideBudgetAlert({
+      budgetMonthly: op.budget_monthly != null ? Number(op.budget_monthly) : null,
+      budgetDaily: op.budget_daily != null ? Number(op.budget_daily) : null,
+      thresholdPct: Number(op.budget_alert_threshold),
+      spentMonthBefore: Number(spentRes.rows[0]?.spent_month) || 0,
+      spentTodayBefore: Number(spentRes.rows[0]?.spent_today) || 0,
+      addedCost: Number(p.cost_estimate) || 0,
+    });
+    if (budgetAlert.alert) {
+      await notify('[AI 자동마케팅] 예산 사용 알림', `'${op.name || ''}' ${budgetAlert.message}`);
+    }
+  } catch (alertErr: any) {
+    console.warn('[ContinuousOperator AutoSend] 예산 알림 경고:', alertErr?.message);
+  }
 
   // ★ Phase2 A — 발송된 변이에 실측 trial(sent_count) 누적 → 다음 제안 Bandit 추천 정교화(클릭/전환은 추적 경로에서 별도 누적).
   if (chosenVariantId) {

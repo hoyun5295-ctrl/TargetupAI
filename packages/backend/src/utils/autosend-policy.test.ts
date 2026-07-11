@@ -388,3 +388,74 @@ describe('buildExpiryReminderBody — 만료 임박 리마인드 문구', () => 
     expect(body).toContain('발송되지 않습니다');
   });
 });
+
+describe('isSendableHourKst / validateScheduleTimeSendable — 야간 광고 발송 제한 (2026-07-12 C-1)', () => {
+  it('KST 발송 가능 창 안(08~20시) = true, 밖(야간·새벽) = false', async () => {
+    const { isSendableHourKst } = await import('./autosend-policy');
+    // 2026-07-12 10:00 KST = 01:00 UTC
+    expect(isSendableHourKst(new Date('2026-07-12T01:00:00Z'), 8, 21)).toBe(true);
+    // 2026-07-12 08:00 KST = 전날 23:00 UTC (경계 시작 포함)
+    expect(isSendableHourKst(new Date('2026-07-11T23:00:00Z'), 8, 21)).toBe(true);
+    // 2026-07-12 21:00 KST = 12:00 UTC (경계 끝 제외)
+    expect(isSendableHourKst(new Date('2026-07-12T12:00:00Z'), 8, 21)).toBe(false);
+    // 2026-07-12 02:00 KST = 전날 17:00 UTC (새벽)
+    expect(isSendableHourKst(new Date('2026-07-11T17:00:00Z'), 8, 21)).toBe(false);
+  });
+
+  it('발송 희망 시각 저장 가드 — 창 안 ok, 밖 거부(사유 문구), 형식 이상은 기본 파서 위임(ok)', async () => {
+    const { validateScheduleTimeSendable } = await import('./autosend-policy');
+    expect(validateScheduleTimeSendable('09:00', 8, 21).ok).toBe(true);
+    expect(validateScheduleTimeSendable('20:59', 8, 21).ok).toBe(true);
+    const night = validateScheduleTimeSendable('22:00', 8, 21);
+    expect(night.ok).toBe(false);
+    expect(night.reason).toContain('야간');
+    expect(validateScheduleTimeSendable('07:30', 8, 21).ok).toBe(false);
+    expect(validateScheduleTimeSendable('', 8, 21).ok).toBe(true);
+    expect(validateScheduleTimeSendable('abc', 8, 21).ok).toBe(true);
+  });
+});
+
+describe('decideBudgetAlert — 예산 임계 교차 알림 (2026-07-12 C-2)', () => {
+  it('이번 발송으로 임계 선을 처음 넘는 순간만 alert (월 예산)', async () => {
+    const { decideBudgetAlert } = await import('./autosend-policy');
+    const base = { budgetMonthly: 100000, budgetDaily: null, thresholdPct: 80, spentTodayBefore: 0 };
+    // 이전 70,000 + 이번 15,000 = 85,000 >= 80,000 선 → 교차 alert
+    const crossed = decideBudgetAlert({ ...base, spentMonthBefore: 70000, addedCost: 15000 });
+    expect(crossed.alert).toBe(true);
+    expect(crossed.scope).toBe('month');
+    expect(crossed.message).toContain('월 예산');
+    // 이미 선 위(85,000)에서 추가 발송 → 재알림 없음(멱등)
+    expect(decideBudgetAlert({ ...base, spentMonthBefore: 85000, addedCost: 5000 }).alert).toBe(false);
+    // 선 아래 유지(50,000+10,000 < 80,000) → 알림 없음
+    expect(decideBudgetAlert({ ...base, spentMonthBefore: 50000, addedCost: 10000 }).alert).toBe(false);
+  });
+
+  it('일 한도 교차·예산 미설정·임계 이상값 처리', async () => {
+    const { decideBudgetAlert } = await import('./autosend-policy');
+    const day = decideBudgetAlert({ budgetMonthly: null, budgetDaily: 50000, thresholdPct: 80, spentMonthBefore: 0, spentTodayBefore: 35000, addedCost: 10000 });
+    expect(day.alert).toBe(true);
+    expect(day.scope).toBe('day');
+    // 예산 전부 null = 알림 없음
+    expect(decideBudgetAlert({ budgetMonthly: null, budgetDaily: null, thresholdPct: 80, spentMonthBefore: 999999, spentTodayBefore: 999999, addedCost: 1 }).alert).toBe(false);
+    // 임계 이상값(0/150/NaN) = 80으로 정규화 — 80% 교차 시 alert
+    expect(decideBudgetAlert({ budgetMonthly: 100000, budgetDaily: null, thresholdPct: 150, spentMonthBefore: 79000, spentTodayBefore: 0, addedCost: 2000 }).alert).toBe(true);
+  });
+});
+
+describe('buildDailyRecapBody — 발송 후 구매 라인 (2026-07-12 C-3②)', () => {
+  it('구매 > 0이면 구매·매출 라인 포함, 0이면 생략(미측정과 0 구분 불가 — 정직)', async () => {
+    const { buildDailyRecapBody } = await import('./autosend-policy');
+    const withRev = buildDailyRecapBody({
+      operatorName: 'VIP 재구매', dateLabel: '7월 11일',
+      sentCount: 1000, successCount: 980, clickedCount: 50, purchaseCount: 7, revenueKrw: 350000,
+    });
+    expect(withRev).toContain('구매 7건');
+    expect(withRev).toContain('350,000원');
+    expect(withRev).toContain('집계 중');
+    const noRev = buildDailyRecapBody({
+      operatorName: 'VIP 재구매', dateLabel: '7월 11일',
+      sentCount: 1000, successCount: 980, clickedCount: 50,
+    });
+    expect(noRev).not.toContain('발송 후 구매');
+  });
+});

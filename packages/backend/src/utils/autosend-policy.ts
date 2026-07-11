@@ -93,6 +93,68 @@ export function decideBudgetGuard(input: BudgetGuardInput): BudgetGuardResult {
   return { over: false, scope: null, reason: '' };
 }
 
+// ━━━ 야간 광고 발송 제한 (2026-07-12 자동마케팅 종합 강화 C-1) ━━━
+//   자동마케팅은 광고 강제(forcedIsAd)라 발송 가능 창 밖(야간) 자동 발송을 막는다.
+//   창 경계는 config/defaults SEND_HOURS가 단일 진실 — 호출부가 start/end를 주입한다(이 파일은 DB·config 미import 순수 유지).
+
+/** now가 KST 발송 가능 시간대([startHour, endHour))인지 — 광고 자동 발송 허용 판정. */
+export function isSendableHourKst(now: Date, startHour: number, endHour: number): boolean {
+  const kstHour = new Date(now.getTime() + 9 * 60 * 60 * 1000).getUTCHours();
+  return kstHour >= startHour && kstHour < endHour;
+}
+
+/**
+ * 발송 희망 시각(HH:mm) 저장 가드 — 발송 가능 창 밖이면 저장 거부(조용한 시프트 대신 명시 안내).
+ * 형식 이상(파싱 불가)은 기존 파서의 09시 기본값에 위임(ok) — computeNextOccurrence와 동일 관용.
+ */
+export function validateScheduleTimeSendable(
+  scheduleTime: string,
+  startHour: number,
+  endHour: number,
+): { ok: boolean; reason: string } {
+  const h = parseInt(String(scheduleTime || '').split(':')[0]);
+  if (!Number.isFinite(h)) return { ok: true, reason: '' };
+  if (h >= startHour && h < endHour) return { ok: true, reason: '' };
+  return {
+    ok: false,
+    reason: `발송 희망 시각은 ${String(startHour).padStart(2, '0')}:00~${String(endHour - 1).padStart(2, '0')}:59 사이만 가능합니다 (야간 광고 발송 제한).`,
+  };
+}
+
+// ━━━ 예산 사용 임계 알림 (2026-07-12 C-2 — budget_alert_threshold 실동작) ━━━
+//   발송 성공으로 소진액이 임계 비율 선을 "이번에 처음 넘는" 순간에만 알림(교차 판정 = 저장 마커 없이 멱등).
+//   한도 초과 차단은 decideBudgetGuard(생성·발송 직전)가 담당 — 이 알림은 도달 예고용.
+export interface BudgetAlertInput {
+  budgetMonthly: number | null;
+  budgetDaily: number | null;
+  thresholdPct: number;        // 50~100, 이상값 = 80
+  spentMonthBefore: number;    // 이번 발송 제외 당월 소진
+  spentTodayBefore: number;    // 이번 발송 제외 당일 소진
+  addedCost: number;           // 이번 발송 cost_estimate
+}
+export interface BudgetAlertResult { alert: boolean; scope: 'month' | 'day' | null; message: string }
+export function decideBudgetAlert(input: BudgetAlertInput): BudgetAlertResult {
+  const pctRaw = Math.floor(Number(input.thresholdPct));
+  const pct = Number.isFinite(pctRaw) && pctRaw >= 50 && pctRaw <= 100 ? pctRaw : 80;
+  const added = Math.max(0, Math.floor(Number(input.addedCost)) || 0);
+  const check = (budget: number | null, before: number, label: string, scope: 'month' | 'day'): BudgetAlertResult | null => {
+    if (budget == null || budget <= 0) return null;
+    const prev = Math.max(0, Math.floor(Number(before)) || 0);
+    const line = Math.ceil((budget * pct) / 100);
+    if (prev < line && prev + added >= line) {
+      return {
+        alert: true,
+        scope,
+        message: `${label} 사용 ${Math.round(((prev + added) / budget) * 100)}% 도달 — ${(prev + added).toLocaleString()}원 / 한도 ${budget.toLocaleString()}원 (알림 기준 ${pct}%)`,
+      };
+    }
+    return null;
+  };
+  return check(input.budgetMonthly, input.spentMonthBefore, '월 예산', 'month')
+    || check(input.budgetDaily, input.spentTodayBefore, '일 한도', 'day')
+    || { alert: false, scope: null, message: '' };
+}
+
 /**
  * 발송 시각 모드 — 2026-07-02 1단계 B (Harold 스펙: 설정 시각 = 발송 희망 시각).
  *  - 'fixed'(기본): 희망 시각 정각 발송. 생성·스팸테스트·담당자 통지 = 희망 시각 − 준비시간(lead).
@@ -365,18 +427,26 @@ export interface DailyRecapInput {
   sentCount: number;
   successCount: number;
   clickedCount: number;
+  // ★ 2026-07-12 C-3②: 발송 이후 자사몰 구매 실측(cdp) — 0 또는 CDP 미연동이면 줄 생략(미측정과 0 구분 불가 — 정직)
+  purchaseCount?: number;
+  revenueKrw?: number;
 }
 
 export function buildDailyRecapBody(input: DailyRecapInput): string {
   const sent = Math.max(0, Math.floor(Number(input.sentCount)) || 0);
   const success = Math.max(0, Math.floor(Number(input.successCount)) || 0);
   const clicked = Math.max(0, Math.floor(Number(input.clickedCount)) || 0);
+  const purchases = Math.max(0, Math.floor(Number(input.purchaseCount)) || 0);
+  const revenue = Math.max(0, Math.floor(Number(input.revenueKrw)) || 0);
   const lines = [
     `어제(${input.dateLabel}) '${input.operatorName}' 발송 결과입니다.`,
     `- 발송 ${sent.toLocaleString()}명 · 성공 ${success.toLocaleString()}명`,
   ];
   if (clicked > 0 && sent > 0) {
     lines.push(`- 클릭 ${clicked.toLocaleString()}명 (${((clicked / sent) * 100).toFixed(1)}%)`);
+  }
+  if (purchases > 0) {
+    lines.push(`- 발송 후 구매 ${purchases.toLocaleString()}건${revenue > 0 ? ` · ${revenue.toLocaleString()}원` : ''} (자사몰 구매 데이터 기준, 집계 중)`);
   }
   lines.push('이 결과를 학습해 다음 추천에 반영합니다.');
   return lines.join('\n');
