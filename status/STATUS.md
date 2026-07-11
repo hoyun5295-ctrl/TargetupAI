@@ -56,7 +56,7 @@
 ### 🔵 다음 세션 (예정)
 > ⓪ **비토 API 발송 경로 전환 검토(선택 후보 — 확정 과제 아님)** — LMS 왕복 테스트 통과로 개시 가능 상태. 한줄로 발송을 DB큐(SMSQ_SEND_13)→게이트웨이 API로 전환할지 설계 검토(발송 파이프라인 절대 보호 — 영향표부터). [[project_2026_0710_bito_api_direct_test]].
 > ⓪-2 싱크에이전트 1.6.1 = **업로드·릴리즈 등록 완료(2026-07-10 Harold) — 종결.** 이새 박스(1.5.7)는 updater 자기교체 결함으로 **원격 자동 업데이트 불가(현장 재설치 필요)** → 그대로 두고 **2달 뒤 타 업체 ERP 전환 때 새 에이전트(1.6.1+)로 신규 배포**(Harold 확정 2026-07-10). 그때까지 1.5.7 유지가 정상 상태(슈퍼관리자 매핑 모달=구버전 안내·저장 차단 동작).
-> ① **누적 0707 배포** — tp-push + build:safe(frontend·company-frontend·backend) + pm2 reload + Codex /codex:review(플러그인 미로드분). ② **PAY Track D** — 강문희 발주 → 전환 → 유입 검증 → Phase 2 설계(조회+정산+거래내역서 웹/Agent 구분 일괄). ③ **템플릿관리자 흡수(Track B+C)** = 레거시 폐기 최대 잔여 — 0705 이관 핸드오프 정독 + 발신프로필키 축(§5-③) 재검수 여부 카카오 검수팀 확인부터.
+> ① **누적 0707 배포** — tp-push + build:safe(frontend·company-frontend·backend) + pm2 reload + Codex /codex:review(플러그인 미로드분). ② **PAY Track D** — 강문희 발주 → 전환 → 유입 검증 → Phase 2 설계(조회+정산+거래내역서 웹/Agent 구분 일괄). ③ **템플릿관리자 흡수(Track B+C)** = 레거시 폐기 최대 잔여 — ★2026-07-10 방향 정리: 이관 = 레거시 DB 복사 X, **senderKey 연결 + IMC 원본 pull**(개발 실체 = 슈퍼관리자 import 2종 신설·같은 IMC 계정 개연성 4,849 실측 근거·재검수 쟁점은 같은 계정 확정 시 소멸). **서팀장 사전 체크 12문항 회신 대기(폐기플랜 §4-3)** → 회신 후 재토의 → 아난티 getSender 실측 → import 2종 설계. 강문희 질의는 그 후 잔여분만.
 > (보류) 팝폰 SDK 검증(자체 서비스 SDK 실측 베드) = C:\Users\ceo\projects\poppon-workspace 정독 후 별도. 상세 [[project_2026_0618_selfhosted_mall_app_collection]].
 
 ---

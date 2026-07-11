@@ -4,50 +4,400 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <title>한줄로 — AI Operator 소개</title>
-<meta name="description" content="한줄로 AI Operator — 마케터의 자연어 한 줄, AI가 마케팅 전체를 운영합니다. 단, 실행은 항상 사용자가 승인합니다." />
+<meta name="description" content="한줄로 AI Operator — 마케팅 실무를 바꾸는 7가지 기능. 자연어 한 줄이면 충분합니다. 실행은 항상 사용자가 승인합니다." />
 
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
 
 <style>
-  :root { --bg:#060a14; --panel:#0c1322; --line:rgba(255,255,255,0.10); --muted:rgba(255,255,255,0.55); --accent:#7c6cf0; }
+  :root {
+    --bg: #05080f;
+    --panel: rgba(255,255,255,0.035);
+    --panel2: rgba(255,255,255,0.06);
+    --line: rgba(255,255,255,0.10);
+    --line2: rgba(255,255,255,0.16);
+    --muted: rgba(255,255,255,0.55);
+    --dim: rgba(255,255,255,0.38);
+    --accent: #8b7cf7;
+    --accent2: #c084fc;
+    --cyan: #67e8f9;
+    --mint: #6ee7b7;
+    --amber: #fbbf24;
+    --grad: linear-gradient(92deg, #a5b4fc 0%, #c084fc 55%, #67e8f9 120%);
+  }
   * { box-sizing: border-box; }
   html, body { margin:0; padding:0; height:100%; background:var(--bg); color:#fff;
     font-family:'Pretendard Variable',Pretendard,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
     overflow:hidden; -webkit-font-smoothing:antialiased; }
   #app { display:flex; flex-direction:column; height:100dvh; }
 
-  /* 상단 바 */
-  header { flex:0 0 auto; display:flex; align-items:center; justify-content:space-between;
-    padding:12px 18px; border-bottom:1px solid var(--line); background:rgba(8,12,22,0.7); backdrop-filter:blur(8px); }
+  /* ── 상단 바 ─────────────────────────────────────────── */
+  header.top { flex:0 0 auto; display:flex; align-items:center; justify-content:space-between;
+    padding:12px 18px; border-bottom:1px solid var(--line); background:rgba(5,8,15,0.72); backdrop-filter:blur(8px); z-index:20; }
   .brand { display:flex; align-items:baseline; gap:10px; min-width:0; }
-  .brand b { font-size:16px; font-weight:700; letter-spacing:-0.02em; }
+  .brand b { font-size:16px; font-weight:800; letter-spacing:-0.02em; }
+  .brand b i { font-style:normal; color:var(--accent); }
   .brand span { font-size:12px; color:var(--muted); white-space:nowrap; }
   .top-right { display:flex; align-items:center; gap:10px; }
-  .counter { font-variant-numeric:tabular-nums; font-size:13px; color:var(--muted); letter-spacing:0.04em; }
+  .counter { font-variant-numeric:tabular-nums; font-size:13px; color:var(--muted); letter-spacing:0.06em; }
   .icon-btn { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px;
     border:1px solid var(--line); background:rgba(255,255,255,0.04); border-radius:10px; color:#fff; cursor:pointer; transition:background .15s; }
   .icon-btn:hover { background:rgba(255,255,255,0.10); }
 
-  /* 슬라이드 무대 */
+  /* ── 무대 ────────────────────────────────────────────── */
   .stage { flex:1 1 auto; position:relative; display:flex; align-items:center; justify-content:center;
-    padding:18px clamp(14px, 6vw, 88px); min-height:0; }
-  .slide-wrap { position:relative; width:100%; max-width:1280px; aspect-ratio:16/9; max-height:100%;
-    border-radius:14px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,0.55); background:#000; }
-  .slide-wrap img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#000;
-    opacity:0; transition:opacity .22s ease; }
-  .slide-wrap img.on { opacity:1; }
+    padding:16px clamp(12px, 5vw, 72px); min-height:0; }
+  .deck { position:relative; width:100%; max-width:1280px; height:100%; max-height:760px; }
 
+  .slide { position:absolute; inset:0; display:flex; flex-direction:column; justify-content:center;
+    padding:clamp(20px, 4vw, 56px) clamp(20px, 4.5vw, 64px);
+    border-radius:18px; border:1px solid var(--line); overflow:hidden;
+    background:
+      radial-gradient(1100px 500px at 12% -10%, rgba(139,124,247,0.14), transparent 60%),
+      radial-gradient(900px 480px at 95% 110%, rgba(103,232,249,0.08), transparent 55%),
+      linear-gradient(180deg, #0a101e 0%, #060a14 100%);
+    box-shadow:0 24px 70px rgba(0,0,0,0.55);
+    opacity:0; visibility:hidden; transform:translateY(10px) scale(0.992);
+    transition:opacity .3s ease, transform .3s ease, visibility 0s linear .3s; }
+  .slide.on { opacity:1; visibility:visible; transform:none; transition:opacity .32s ease, transform .32s ease; z-index:2; }
+
+  /* 배경 장식 — 점 그리드 */
+  .slide::before { content:""; position:absolute; inset:0; pointer-events:none; opacity:0.5;
+    background-image:radial-gradient(rgba(255,255,255,0.055) 1px, transparent 1.4px);
+    background-size:26px 26px;
+    mask-image:radial-gradient(75% 70% at 50% 40%, #000 0%, transparent 100%); }
+
+  /* 등장 애니메이션 */
+  @keyframes rise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+  .rv { opacity:0; }
+  .slide.on .rv { animation:rise .55s cubic-bezier(.22,.8,.3,1) both; animation-delay:var(--d, 0s); }
+
+  /* ── 공용 타이포 ─────────────────────────────────────── */
+  .kicker { display:flex; align-items:center; gap:10px; font-size:12px; font-weight:700;
+    letter-spacing:0.28em; text-transform:uppercase; color:var(--accent); margin-bottom:16px; }
+  .kicker::before { content:""; width:26px; height:1px; background:var(--accent); opacity:0.8; }
+  h1, h2 { margin:0; font-weight:800; letter-spacing:-0.035em; line-height:1.16; text-wrap:balance; }
+  h1 { font-size:clamp(30px, 4.6vw, 58px); }
+  h2 { font-size:clamp(24px, 3.4vw, 42px); }
+  .em { background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .sub { margin-top:14px; font-size:clamp(14px, 1.5vw, 17px); color:var(--muted); line-height:1.65; letter-spacing:-0.01em; text-wrap:pretty; }
+
+  /* 기능 바로가기 칩 (히어로·클로즈 공용) — 클릭 시 해당 슬라이드 이동 */
+  .chipnav { display:flex; flex-wrap:wrap; gap:8px; margin-top:28px; }
+  .chipnav .chip { cursor:pointer; font-size:12px; padding:7px 13px; transition:background .15s, border-color .15s, color .15s; }
+  .chipnav .chip i { font-style:normal; font-weight:800; color:var(--accent); margin-right:6px; font-size:10px; letter-spacing:0.1em; }
+  .chipnav .chip:hover { background:rgba(139,124,247,0.14); border-color:rgba(139,124,247,0.5); color:#fff; }
+  button.chip { font:inherit; cursor:pointer; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rv, .slide.on .rv { animation:none !important; opacity:1 !important; }
+    .hero .ring { animation:none; }
+    .slide { transition:opacity .01s; }
+  }
+
+  /* ── 기능 슬라이드 공통 (좌 텍스트 / 우 목업) ───────── */
+  .feature { display:grid; grid-template-columns:minmax(0, 5fr) minmax(0, 6fr); gap:clamp(24px, 4vw, 56px); align-items:center; }
+  .fbadge { display:inline-flex; align-items:center; gap:8px; padding:6px 12px; border-radius:999px;
+    border:1px solid rgba(139,124,247,0.35); background:rgba(139,124,247,0.12);
+    font-size:12px; font-weight:700; letter-spacing:0.14em; color:#c7bfff; margin-bottom:14px; }
+  .fbadge b { color:#fff; font-weight:800; }
+  ul.points { list-style:none; margin:22px 0 0; padding:0; display:flex; flex-direction:column; gap:13px; }
+  ul.points li { position:relative; padding-left:26px; font-size:clamp(13.5px, 1.35vw, 16px); color:rgba(255,255,255,0.82); line-height:1.6; letter-spacing:-0.01em; }
+  ul.points li::before { content:""; position:absolute; left:2px; top:0.62em; width:12px; height:2px; border-radius:2px;
+    background:linear-gradient(90deg, var(--accent), var(--accent2)); }
+  ul.points li b { color:#fff; font-weight:700; }
+  .note { margin-top:20px; display:inline-flex; align-items:center; gap:8px; padding:9px 13px; border-radius:10px;
+    background:rgba(110,231,183,0.08); border:1px solid rgba(110,231,183,0.25); color:#a9f0d1; font-size:12.5px; letter-spacing:-0.01em; }
+
+  /* ── 목업 공통 ───────────────────────────────────────── */
+  .shot { position:relative; }
+  .shot::after { content:""; position:absolute; inset:8% -6% -10% -6%; z-index:-1; pointer-events:none;
+    background:radial-gradient(60% 70% at 50% 50%, rgba(139,124,247,0.22), transparent 70%); filter:blur(10px); }
+  .console { border-radius:16px; border:1px solid var(--line2); background:linear-gradient(180deg, #0d1424, #090e1a);
+    box-shadow:0 18px 50px rgba(0,0,0,0.5); overflow:hidden; }
+  .console .bar { display:flex; align-items:center; gap:6px; padding:10px 14px; border-bottom:1px solid var(--line); }
+  .console .bar i { width:9px; height:9px; border-radius:50%; background:rgba(255,255,255,0.14); }
+  .console .bar i:first-child { background:rgba(255,107,107,0.55); }
+  .console .bar i:nth-child(2) { background:rgba(251,191,36,0.5); }
+  .console .bar i:nth-child(3) { background:rgba(110,231,183,0.5); }
+  .console .bar span { margin-left:6px; font-size:11px; color:var(--dim); letter-spacing:0.02em; }
+  .console .body { padding:16px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-size:11px; font-weight:600;
+    background:rgba(255,255,255,0.06); border:1px solid var(--line); color:rgba(255,255,255,0.7); }
+  .chip.violet { background:rgba(139,124,247,0.14); border-color:rgba(139,124,247,0.4); color:#cdc5ff; }
+  .chip.mint { background:rgba(110,231,183,0.1); border-color:rgba(110,231,183,0.35); color:#a9f0d1; }
+  .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:10px 18px; border-radius:11px;
+    font-size:13px; font-weight:700; letter-spacing:-0.01em; border:1px solid transparent; }
+  .btn.primary { background:linear-gradient(92deg, #6d5df0, #8b7cf7); color:#fff; box-shadow:0 6px 22px rgba(109,93,240,0.4); }
+  .btn.ghost { background:rgba(255,255,255,0.05); border-color:var(--line2); color:rgba(255,255,255,0.75); }
+
+  /* ── S1 히어로 ───────────────────────────────────────── */
+  .hero { text-align:left; }
+  .hero .seven { position:absolute; right:clamp(8px,4vw,70px); top:50%; transform:translateY(-52%);
+    font-size:clamp(200px, 34vw, 470px); font-weight:900; line-height:1; letter-spacing:-0.06em;
+    background:linear-gradient(160deg, rgba(139,124,247,0.32), rgba(103,232,249,0.06) 70%);
+    -webkit-background-clip:text; background-clip:text; color:transparent; pointer-events:none; user-select:none; }
+  .hero .ring { position:absolute; right:clamp(-40px,2vw,120px); top:50%; width:clamp(300px,36vw,520px); height:clamp(300px,36vw,520px);
+    transform:translateY(-50%); border-radius:50%; border:1px dashed rgba(139,124,247,0.28); pointer-events:none;
+    animation:spin 60s linear infinite; }
+  .hero .ring::before { content:""; position:absolute; top:6%; left:50%; width:10px; height:10px; border-radius:50%;
+    background:var(--accent); box-shadow:0 0 18px rgba(139,124,247,0.9); }
+  @keyframes spin { to { transform:translateY(-50%) rotate(360deg); } }
+  .hero .approve { margin-top:26px; display:inline-flex; align-items:center; gap:10px; padding:11px 16px; border-radius:12px;
+    background:rgba(255,255,255,0.045); border:1px solid var(--line2); font-size:13.5px; color:rgba(255,255,255,0.8); }
+  .hero .approve b { color:var(--mint); font-weight:800; }
+  .hero .corp { position:absolute; left:clamp(20px,4.5vw,64px); bottom:22px; font-size:12px; color:var(--dim); font-weight:700; letter-spacing:0.06em; }
+
+  /* ── S2 한눈에 그리드 ───────────────────────────────── */
+  .grid7 { margin-top:28px; display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; }
+  .gcard { position:relative; padding:18px 16px 16px; border-radius:14px; border:1px solid var(--line);
+    background:var(--panel); transition:border-color .2s, background .2s; overflow:hidden; }
+  .gcard:hover { border-color:rgba(139,124,247,0.5); background:rgba(139,124,247,0.07); }
+  .gcard .no { font-size:11px; font-weight:800; letter-spacing:0.18em; color:var(--accent); }
+  .gcard h3 { margin:8px 0 6px; font-size:clamp(15px,1.5vw,18px); font-weight:800; letter-spacing:-0.02em; }
+  .gcard p { margin:0; font-size:12.5px; color:var(--muted); line-height:1.55; letter-spacing:-0.01em; }
+  .gcard.all { border-style:dashed; border-color:rgba(255,255,255,0.14); background:rgba(255,255,255,0.02); }
+  .gcard.all .no { color:var(--dim); }
+  .gcard.all h3 { color:var(--muted); }
+
+  /* ── S3 여정 목업 ───────────────────────────────────── */
+  .jinput { display:flex; align-items:center; gap:10px; padding:11px 14px; border-radius:12px;
+    border:1px solid rgba(139,124,247,0.45); background:rgba(139,124,247,0.08); margin-bottom:14px; }
+  .jinput .q { color:#cdc5ff; font-size:13px; font-weight:600; }
+  .jinput .go { margin-left:auto; font-size:11.5px; font-weight:800; color:#fff; background:linear-gradient(92deg,#6d5df0,#8b7cf7);
+    padding:6px 12px; border-radius:9px; }
+  .jsteps { display:flex; flex-direction:column; gap:0; }
+  .jstep { position:relative; display:flex; align-items:center; gap:12px; padding:10px 0 10px 30px; }
+  .jstep::before { content:""; position:absolute; left:10px; top:0; bottom:0; width:2px; background:rgba(139,124,247,0.25); }
+  .jstep:first-child::before { top:50%; } .jstep:last-child::before { bottom:50%; }
+  .jstep .dot { position:absolute; left:4px; width:14px; height:14px; border-radius:50%; background:#0d1424;
+    border:2px solid var(--accent); z-index:1; }
+  .jstep.goal .dot { border-color:var(--mint); background:rgba(110,231,183,0.2); }
+  .jstep .box { flex:1; display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:10px 13px; border-radius:11px; border:1px solid var(--line); background:rgba(255,255,255,0.04); }
+  .jstep.goal .box { border-color:rgba(110,231,183,0.4); background:rgba(110,231,183,0.07); }
+  .jstep .box b { font-size:13px; font-weight:700; letter-spacing:-0.01em; }
+  .jstep .box span { font-size:11px; color:var(--dim); white-space:nowrap; }
+
+  /* ── S4 자동마케팅 목업 ─────────────────────────────── */
+  .prop .headrow { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
+  .prop .headrow b { font-size:14px; font-weight:800; letter-spacing:-0.01em; }
+  .stat3 { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; margin-bottom:12px; }
+  .stat3 .s { padding:11px 12px; border-radius:11px; border:1px solid var(--line); background:rgba(255,255,255,0.035); }
+  .stat3 .s em { display:block; font-style:normal; font-size:10.5px; color:var(--dim); margin-bottom:4px; letter-spacing:0.02em; }
+  .stat3 .s b { font-size:15px; font-weight:800; letter-spacing:-0.02em; }
+  .vtabs { display:flex; gap:7px; margin-bottom:10px; }
+  .vtabs i { font-style:normal; font-size:11.5px; font-weight:700; padding:6px 12px; border-radius:9px;
+    border:1px solid var(--line); color:var(--dim); }
+  .vtabs i.on { background:rgba(139,124,247,0.16); border-color:rgba(139,124,247,0.5); color:#dcd6ff; }
+  .prop .msg { padding:12px 14px; border-radius:11px; border:1px solid var(--line); background:rgba(255,255,255,0.03);
+    font-size:12.5px; color:rgba(255,255,255,0.75); line-height:1.65; margin-bottom:13px; }
+  .prop .row { display:flex; gap:9px; }
+
+  /* ── S5 브로셔 밴드 ─────────────────────────────────── */
+  .band { text-align:center; align-items:center; }
+  .band h2 { font-size:clamp(28px, 4.2vw, 54px); }
+  .band .sub { max-width:640px; margin-left:auto; margin-right:auto; }
+  .band .mini3 { margin-top:30px; display:grid; grid-template-columns:repeat(3, minmax(190px, 240px)); gap:13px; justify-content:center; }
+  .band .m { text-align:left; border:1px solid var(--line); background:var(--panel); border-radius:15px; padding:13px; cursor:pointer;
+    transition:border-color .2s, background .2s; }
+  .band .m:hover { border-color:rgba(139,124,247,0.5); background:rgba(139,124,247,0.06); }
+  .band .m .th { position:relative; height:64px; border-radius:10px; margin-bottom:11px; border:1px solid var(--line);
+    background:rgba(255,255,255,0.03); overflow:hidden; }
+  .th.dm::before { content:""; position:absolute; left:50%; top:10px; transform:translateX(-50%); width:34px; height:70px;
+    border-radius:8px; border:1px solid rgba(139,124,247,0.55); background:linear-gradient(180deg, rgba(139,124,247,0.30), rgba(139,124,247,0.05)); }
+  .th.mail::before { content:""; position:absolute; inset:14px 30px; border-radius:6px; border:1px solid rgba(103,232,249,0.5); background:rgba(103,232,249,0.06); }
+  .th.mail::after { content:""; position:absolute; left:30px; right:30px; top:14px; height:20px;
+    background:linear-gradient(180deg, rgba(103,232,249,0.28), transparent); clip-path:polygon(0 0, 50% 100%, 100% 0); }
+  .th.app::before { content:""; position:absolute; inset:10px;
+    background:repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0 26px, transparent 26px 34px); }
+  .th.app::after { content:""; position:absolute; right:12px; bottom:8px; width:66px; height:30px; border-radius:7px;
+    border:1px solid rgba(110,231,183,0.55); background:rgba(110,231,183,0.10); }
+  .band .m b { display:flex; align-items:center; gap:7px; font-size:14px; letter-spacing:-0.01em; }
+  .band .m b i { font-style:normal; font-size:10px; font-weight:800; color:var(--accent); letter-spacing:0.1em; }
+  .band .m p { margin:5px 0 0; font-size:11.5px; color:var(--muted); line-height:1.5; }
+  .band .bflow { margin-top:26px; display:flex; align-items:center; justify-content:center; gap:12px; flex-wrap:wrap;
+    font-size:12.5px; color:rgba(255,255,255,0.65); }
+  .band .bflow b { color:#fff; font-weight:700; }
+  .band .bflow .ar { color:var(--accent); font-weight:800; }
+  .band .slash { position:absolute; width:1px; height:140%; top:-20%; background:linear-gradient(180deg, transparent, rgba(139,124,247,0.25), transparent);
+    transform:rotate(18deg); pointer-events:none; }
+
+  /* ── 실물형 라이트 목업 공통 (S6·S7·S8) ─────────────── */
+  .devchips { margin-top:13px; display:flex; gap:7px; justify-content:center; flex-wrap:wrap; }
+
+  /* 아이폰 프레임 */
+  .iph { width:min(272px, 64vw); margin:0 auto; border-radius:40px; padding:9px;
+    background:linear-gradient(165deg, #454c5c, #14181f 70%); border:1px solid rgba(255,255,255,0.25);
+    box-shadow:0 34px 80px rgba(0,0,0,0.65), 0 4px 14px rgba(0,0,0,0.4); }
+  .iph .scr { position:relative; border-radius:31px; overflow:hidden; background:#f7f5f2; color:#1c1c1e;
+    box-shadow:inset 0 0 0 2px #06080c; }
+  .iph .isl { position:absolute; top:9px; left:50%; transform:translateX(-50%); width:72px; height:19px; border-radius:11px; background:#0a0c11; z-index:6; }
+  .iph .stat { display:flex; justify-content:space-between; align-items:center; padding:10px 20px 3px; font-size:10.5px; font-weight:700; color:#111; }
+  .iph .stat .sics { display:flex; gap:4px; align-items:center; }
+  .iph .stat .sics i { display:block; }
+  .iph .stat .sg { width:14px; height:8px; background:
+      linear-gradient(90deg, #111 0 2.5px, transparent 2.5px 3.5px, #111 3.5px 6px, transparent 6px 7px, #111 7px 10.5px, transparent 10.5px 11.5px, #111 11.5px 14px);
+      clip-path:polygon(0 60%, 100% 0, 100% 100%, 0 100%); }
+  .iph .stat .bt { width:19px; height:9px; border:1.4px solid rgba(0,0,0,0.5); border-radius:3px; position:relative; }
+  .iph .stat .bt::after { content:""; position:absolute; inset:1.5px 5px 1.5px 1.5px; background:#111; border-radius:1px; }
+  .iph .home { height:22px; position:relative; background:transparent; }
+  .iph .home::after { content:""; position:absolute; bottom:7px; left:50%; transform:translateX(-50%); width:88px; height:4px; border-radius:99px; background:rgba(0,0,0,0.32); }
+
+  /* DM 발행물 (라이트) */
+  .dm2 .bbar { display:flex; align-items:baseline; justify-content:space-between; padding:9px 13px 7px; }
+  .dm2 .bbar b { font-size:11px; font-weight:800; letter-spacing:0.2em; color:#20242c; }
+  .dm2 .bbar span { font-size:9px; color:#9a9aa2; letter-spacing:0.06em; }
+  .dm2 .hero2 { position:relative; height:118px; overflow:hidden; background:
+      radial-gradient(130% 150% at 78% -10%, #f4d9c8 0%, #e8b9a4 34%, #b97f6d 72%, #8e5a4e 100%); }
+  .dm2 .hero2::before { content:""; position:absolute; left:-24px; bottom:-40px; width:120px; height:120px; border-radius:50%;
+    background:radial-gradient(circle at 34% 30%, rgba(255,255,255,0.75), rgba(255,255,255,0) 60%); opacity:.7; }
+  .dm2 .bottle { position:absolute; right:18px; bottom:-6px; width:34px; height:76px; border-radius:8px 8px 10px 10px;
+    background:linear-gradient(100deg, #f8ede6 20%, #d9b8a8 55%, #c09280); box-shadow:-8px 10px 18px rgba(90,45,30,0.35); }
+  .dm2 .bottle::before { content:""; position:absolute; top:-11px; left:50%; transform:translateX(-50%); width:16px; height:13px; border-radius:3px;
+    background:linear-gradient(100deg, #6b4a3f, #3f2a24); }
+  .dm2 .hero2 em { position:absolute; left:12px; top:12px; font-style:normal; font-size:8.5px; font-weight:800; letter-spacing:0.22em;
+    color:#fff; background:rgba(50,28,20,0.45); padding:3px 8px; border-radius:5px; backdrop-filter:blur(2px); }
+  .dm2 .hero2 b { position:absolute; left:12px; bottom:11px; font-size:14.5px; font-weight:800; line-height:1.3; color:#fff;
+    letter-spacing:-0.01em; text-shadow:0 2px 10px rgba(60,25,15,0.45); }
+  .dm2 .prods2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:11px 12px 0; }
+  .dm2 .p2 { border:1px solid #eae6e1; border-radius:11px; overflow:hidden; background:#fff; box-shadow:0 2px 8px rgba(30,20,12,0.05); }
+  .dm2 .p2 .pimg { position:relative; height:52px; background:linear-gradient(150deg, #f6efe9, #ecdcd2); }
+  .dm2 .p2 .pimg::after { content:""; position:absolute; left:50%; bottom:6px; transform:translateX(-50%); width:15px; height:32px;
+    border-radius:4px; background:linear-gradient(100deg, #d9b8a8, #b28372); }
+  .dm2 .p2.jar .pimg::after { width:26px; height:20px; border-radius:5px 5px 8px 8px; background:linear-gradient(100deg, #e6cfc3, #bd9484); }
+  .dm2 .p2 .pt { padding:7px 9px 9px; }
+  .dm2 .p2 b { display:block; font-size:10.5px; font-weight:700; color:#26262b; letter-spacing:-0.01em; }
+  .dm2 .p2 span { font-size:10px; color:#8d8d95; }
+  .dm2 .tick { margin:10px 12px 0; position:relative; display:flex; justify-content:space-between; align-items:center;
+    padding:9px 13px; border-radius:9px; background:#faf3e6; border:1px dashed #d9bd8a; }
+  .dm2 .tick::before, .dm2 .tick::after { content:""; position:absolute; top:50%; width:12px; height:12px; border-radius:50%;
+    background:#f7f5f2; border:1px dashed #d9bd8a; }
+  .dm2 .tick::before { left:-7px; transform:translateY(-50%); }
+  .dm2 .tick::after { right:-7px; transform:translateY(-50%); }
+  .dm2 .tick b { font-size:10.5px; color:#8a6420; letter-spacing:0.05em; }
+  .dm2 .tick span { font-size:9px; color:#ad9668; }
+  .dm2 .cta2 { margin:11px 12px 0; padding:11px; text-align:center; border-radius:10px; font-size:12px; font-weight:800;
+    color:#fff; background:linear-gradient(100deg, #8e5a4e, #6f4237); box-shadow:0 6px 14px rgba(120,70,50,0.3); }
+  .dm2 .foot2 { padding:9px 12px 12px; text-align:center; font-size:8.5px; color:#a5a5ad; letter-spacing:0.02em; }
+
+  /* 이메일 클라이언트 (라이트) */
+  .mailc { border-radius:16px; overflow:hidden; border:1px solid rgba(255,255,255,0.2); background:#fbfaf8; color:#1c1c1e;
+    box-shadow:0 26px 64px rgba(0,0,0,0.55); }
+  .mailc .mtop { display:flex; align-items:center; gap:10px; padding:13px 15px 11px; border-bottom:1px solid #eceae6; }
+  .mailc .avatar { width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-size:14px; font-weight:800; color:#fff; background:linear-gradient(140deg, #8e5a4e, #5d382f); }
+  .mailc .mwho b { display:block; font-size:12.5px; font-weight:800; color:#222; }
+  .mailc .mwho span { font-size:10.5px; color:#96969e; }
+  .mailc .mtime { margin-left:auto; font-size:10.5px; color:#a2a2aa; }
+  .mailc .msubj { padding:12px 15px 0; font-size:14.5px; font-weight:800; letter-spacing:-0.015em; color:#191919; }
+  .mailc .mto { padding:3px 15px 11px; font-size:10.5px; color:#9b9ba3; }
+  .mailc .mban { position:relative; margin:0 15px; height:86px; border-radius:12px; overflow:hidden; background:
+      radial-gradient(120% 170% at 20% -20%, #efdccc 0%, #d9ae94 45%, #9c6a58 100%); }
+  .mailc .mban::after { content:""; position:absolute; right:-18px; top:-26px; width:110px; height:110px; border-radius:50%;
+    background:radial-gradient(circle at 35% 35%, rgba(255,255,255,0.65), transparent 65%); }
+  .mailc .mban em { position:absolute; left:13px; top:13px; font-style:normal; font-size:8.5px; font-weight:800; letter-spacing:0.26em; color:rgba(255,255,255,0.85); }
+  .mailc .mban b { position:absolute; left:13px; bottom:12px; font-size:15px; font-weight:800; color:#fff; letter-spacing:-0.01em;
+    text-shadow:0 2px 10px rgba(70,35,20,0.4); }
+  .mailc .mbody { padding:13px 15px 0; }
+  .mailc .mbody p { margin:0 0 11px; font-size:12px; color:#3d3d42; line-height:1.75; letter-spacing:-0.005em; }
+  .mailc .var { color:#6d4437; background:#f6e8e0; border:1px solid #e4c4b4; border-radius:6px; padding:1px 6px; font-weight:800; font-size:11px; }
+  .mailc .mrow { display:flex; gap:9px; margin-bottom:13px; }
+  .mailc .mrow .pr { flex:1; border:1px solid #ece8e3; border-radius:11px; overflow:hidden; background:#fff; }
+  .mailc .mrow .pimg { position:relative; height:46px; background:linear-gradient(150deg, #f5eee8, #e9d8cd); }
+  .mailc .mrow .pimg::after { content:""; position:absolute; left:50%; bottom:6px; transform:translateX(-50%); width:14px; height:28px;
+    border-radius:4px; background:linear-gradient(100deg, #d9b8a8, #b28372); }
+  .mailc .mrow .pr b { display:block; padding:7px 9px 8px; font-size:10.5px; font-weight:700; color:#2a2a2e; }
+  .mailc .mcta { display:block; margin:0 15px 13px; padding:11px; text-align:center; border-radius:10px; font-size:12px; font-weight:800;
+    color:#fff; background:#23232a; }
+  .mailc .mfoot { padding:10px 15px 13px; border-top:1px solid #efece7; font-size:9px; color:#ababb2; display:flex; justify-content:space-between; }
+
+  /* 자사몰 + 인앱 팝업 (라이트) */
+  .mall2 { position:relative; border-radius:16px; overflow:hidden; border:1px solid rgba(255,255,255,0.2);
+    background:#fbfaf8; color:#1c1c1e; box-shadow:0 26px 64px rgba(0,0,0,0.55); }
+  .mall2 .chrome { display:flex; align-items:center; gap:6px; padding:10px 13px; background:#efedea; border-bottom:1px solid #e3e0da; }
+  .mall2 .chrome i { width:9px; height:9px; border-radius:50%; background:#d7d4cd; }
+  .mall2 .chrome i:first-child { background:#eb8b83; } .mall2 .chrome i:nth-child(2) { background:#efc36b; } .mall2 .chrome i:nth-child(3) { background:#9fd08f; }
+  .mall2 .chrome span { flex:1; margin-left:6px; font-size:9.5px; color:#8f8f97; background:#fff; border-radius:6px; padding:4px 10px; }
+  .mall2 .mhead { display:flex; align-items:baseline; justify-content:space-between; padding:12px 15px 9px; }
+  .mall2 .mhead b { font-size:12px; font-weight:800; letter-spacing:0.2em; color:#22262e; }
+  .mall2 .mhead span { font-size:9px; color:#a0a0a8; letter-spacing:0.14em; }
+  .mall2 .mgrid2 { display:grid; grid-template-columns:repeat(3, 1fr); gap:9px; padding:0 15px 15px; }
+  .mall2 .mp2 { border:1px solid #edeae5; border-radius:10px; overflow:hidden; background:#fff; }
+  .mall2 .mp2 .pimg { position:relative; height:44px; background:linear-gradient(150deg, #f4efe9, #e7d9cf); }
+  .mall2 .mp2 .pimg::after { content:""; position:absolute; left:50%; bottom:5px; transform:translateX(-50%); width:12px; height:24px;
+    border-radius:3px; background:linear-gradient(100deg, #d8b7a7, #b18271); }
+  .mall2 .mp2 b { display:block; padding:5px 7px 3px; font-size:8.5px; font-weight:700; color:#33333a; }
+  .mall2 .mp2 span { display:block; padding:0 7px 7px; font-size:8px; color:#98989f; }
+  .mall2 .dimm { position:absolute; inset:0; background:rgba(24,18,14,0.34); backdrop-filter:blur(1.5px); }
+  .pop2 { position:absolute; left:50%; bottom:18px; transform:translateX(-50%); width:min(76%, 290px);
+    border-radius:16px; background:#fff; color:#1c1c1e; padding:0 0 13px; box-shadow:0 24px 54px rgba(20,10,5,0.45); }
+  .pop2 .pimg { height:74px; border-radius:16px 16px 0 0; position:relative; overflow:hidden; background:
+      radial-gradient(130% 160% at 75% -15%, #f2dcc9 0%, #dfb197 45%, #96604d 100%); }
+  .pop2 .pimg em { position:absolute; left:12px; top:11px; font-style:normal; font-size:8.5px; font-weight:800; letter-spacing:0.22em;
+    color:#fff; background:rgba(50,28,20,0.4); padding:3px 8px; border-radius:5px; }
+  .pop2 .x { position:absolute; right:10px; top:8px; font-style:normal; width:20px; height:20px; border-radius:50%; display:flex;
+    align-items:center; justify-content:center; background:rgba(255,255,255,0.85); color:#5b5b60; font-size:12px; font-weight:700; }
+  .pop2 b.tt { display:block; padding:11px 14px 3px; font-size:13.5px; font-weight:800; letter-spacing:-0.01em; }
+  .pop2 p { margin:0; padding:0 14px 10px; font-size:10.5px; color:#77777e; line-height:1.6; }
+  .pop2 .go { display:block; margin:0 14px; padding:10px; text-align:center; border-radius:10px; font-size:11.5px; font-weight:800;
+    color:#fff; background:#23232a; }
+  .pop2 .ab { position:absolute; top:-11px; right:14px; display:flex; gap:5px; }
+  .pop2 .ab i { font-style:normal; font-size:9.5px; font-weight:800; padding:3px 9px; border-radius:7px;
+    background:#0d1424; border:1px solid rgba(139,124,247,0.6); color:#cdc5ff; box-shadow:0 4px 10px rgba(0,0,0,0.4); }
+
+  /* ── S9 브랜드보이스 목업 ───────────────────────────── */
+  .voice { display:flex; flex-direction:column; gap:11px; }
+  .vmsg { border-radius:13px; border:1px solid var(--line); background:rgba(255,255,255,0.035); padding:13px 15px; }
+  .vmsg .vh { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .vmsg .vh b { font-size:11px; letter-spacing:0.06em; color:var(--dim); font-weight:700; }
+  .vmsg p { margin:0; font-size:12.5px; line-height:1.7; color:rgba(255,255,255,0.78); letter-spacing:-0.005em; }
+  .vmsg.after { border-color:rgba(139,124,247,0.45); background:rgba(139,124,247,0.07); }
+  .vmsg.after p { color:#e6e2ff; }
+  .varrow { text-align:center; color:var(--accent); font-size:15px; line-height:1; }
+  .vlearn { border-radius:13px; border:1px solid var(--line); background:rgba(255,255,255,0.03); padding:12px 15px; }
+  .vlearn .vt { display:flex; justify-content:space-between; font-size:11px; color:var(--dim); margin-bottom:8px; }
+  .vlearn .vt b { color:#cdc5ff; }
+  .vbar { height:7px; border-radius:99px; background:rgba(255,255,255,0.07); overflow:hidden; }
+  .vbar i { display:block; height:100%; width:82%; border-radius:99px;
+    background:linear-gradient(90deg, #6d5df0, #c084fc); box-shadow:0 0 14px rgba(139,124,247,0.6); }
+
+  /* ── S10 분석 목업 ──────────────────────────────────── */
+  .funnel { display:flex; flex-direction:column; gap:7px; margin:12px 0; }
+  .funnel .f { display:flex; align-items:center; gap:9px; }
+  .funnel .f em { font-style:normal; width:36px; font-size:10.5px; color:var(--dim); text-align:right; }
+  .funnel .f .fb { height:20px; border-radius:6px; background:linear-gradient(90deg, rgba(139,124,247,0.75), rgba(139,124,247,0.28)); }
+  .funnel .f:nth-child(2) .fb { background:linear-gradient(90deg, rgba(103,232,249,0.6), rgba(103,232,249,0.2)); }
+  .funnel .f:nth-child(3) .fb { background:linear-gradient(90deg, rgba(110,231,183,0.65), rgba(110,231,183,0.22)); }
+  .funnel .f b { font-size:11px; font-weight:700; color:rgba(255,255,255,0.75); white-space:nowrap; }
+  .hours { display:flex; align-items:flex-end; gap:5px; height:76px; padding-top:6px; }
+  .hours i { flex:1; border-radius:4px 4px 0 0; background:rgba(139,124,247,0.32); }
+  .hours i.pk { background:linear-gradient(180deg, #fbbf24, rgba(251,191,36,0.4)); position:relative; }
+  .hours i.pk::after { content:"피크 14시"; position:absolute; top:-18px; left:50%; transform:translateX(-50%);
+    font-size:9px; color:#fcd34d; white-space:nowrap; font-weight:700; }
+  .nextact { margin-top:12px; padding:11px 13px; border-radius:11px; border:1px solid rgba(103,232,249,0.35);
+    background:rgba(103,232,249,0.06); font-size:11.5px; color:#bff0fb; line-height:1.6; }
+  .nextact b { color:#fff; }
+
+  /* ── S11 클로즈 ─────────────────────────────────────── */
+  .close { text-align:center; align-items:center; }
+  .close .sub { max-width:620px; margin-left:auto; margin-right:auto; }
+  .close .safety { margin:26px auto 0; display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+  .close .safety .chip { font-size:12px; padding:8px 14px; }
+  .close .cta { margin-top:30px; }
+  .close .cta a { text-decoration:none; font-size:15px; padding:14px 30px; border-radius:13px; }
+  .close .small { margin-top:16px; font-size:12px; color:var(--dim); }
+
+  /* ── 내비게이션 ─────────────────────────────────────── */
   .nav { position:absolute; top:50%; transform:translateY(-50%); width:46px; height:46px; border-radius:50%;
     border:1px solid var(--line); background:rgba(10,14,24,0.7); color:#fff; cursor:pointer; display:flex;
-    align-items:center; justify-content:center; backdrop-filter:blur(6px); transition:background .15s, opacity .15s; z-index:5; }
+    align-items:center; justify-content:center; backdrop-filter:blur(6px); transition:background .15s, opacity .15s; z-index:10; }
   .nav:hover { background:rgba(124,108,240,0.55); }
-  .nav[disabled] { opacity:0.25; cursor:default; }
-  .nav.prev { left:clamp(6px,2.5vw,28px); }
-  .nav.next { right:clamp(6px,2.5vw,28px); }
+  .nav[disabled] { opacity:0.22; cursor:default; }
+  .nav.prev { left:clamp(4px,2vw,24px); }
+  .nav.next { right:clamp(4px,2vw,24px); }
 
-  /* 하단 인디케이터 */
-  footer { flex:0 0 auto; display:flex; flex-direction:column; align-items:center; gap:8px; padding:12px 16px 16px; }
+  footer.bottom { flex:0 0 auto; display:flex; flex-direction:column; align-items:center; gap:8px; padding:10px 16px 15px; }
   .dots { display:flex; flex-wrap:wrap; gap:7px; justify-content:center; max-width:680px; }
   .dot { width:9px; height:9px; border-radius:50%; border:none; padding:0; cursor:pointer;
     background:rgba(255,255,255,0.22); transition:background .15s, transform .15s; }
@@ -55,20 +405,35 @@
   .dot.on { background:var(--accent); transform:scale(1.25); }
   .hint { font-size:11px; color:rgba(255,255,255,0.32); letter-spacing:0.02em; }
 
-  @media (max-width:640px) {
-    .brand span { display:none; }
+  /* ── 반응형 ─────────────────────────────────────────── */
+  /* 낮은 화면(노트북 축소창 등): 중앙 정렬 대신 상단 정렬 + 내부 스크롤로 잘림 방지 */
+  @media (max-height: 640px) {
+    .slide { justify-content:flex-start; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+    .band .slash { display:none; }
+    .hero .seven, .hero .ring { display:none; }
+  }
+  @media (max-width: 860px) {
     .stage { padding:10px; }
-    .nav { width:38px; height:38px; }
+    .deck { max-height:none; }
+    .slide { padding:22px 18px; justify-content:flex-start; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+    .feature { grid-template-columns:1fr; gap:22px; }
+    .grid7 { grid-template-columns:repeat(2, 1fr); }
+    .band .mini3 { grid-template-columns:1fr; max-width:340px; margin-left:auto; margin-right:auto; }
+    .hero .seven, .hero .ring { display:none; }
+    .brand span { display:none; }
+    .nav { display:none; }
     .hint { display:none; }
+    ul.points { gap:10px; }
+    .close .safety { gap:7px; }
   }
 </style>
 </head>
 <body>
 <div id="app">
-  <header>
-    <div class="brand"><b>한줄로</b><span>AI Operator 소개</span></div>
+  <header class="top">
+    <div class="brand"><b>한줄로 <i>—</i></b><span>AI Operator 소개</span></div>
     <div class="top-right">
-      <span class="counter" id="counter">01 / 17</span>
+      <span class="counter" id="counter">01 / 11</span>
       <button class="icon-btn" id="fsBtn" title="전체화면" aria-label="전체화면">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
       </button>
@@ -79,16 +444,344 @@
     <button class="nav prev" id="prevBtn" aria-label="이전 슬라이드">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
     </button>
-    <div class="slide-wrap">
-      <img id="slideA" alt="" />
-      <img id="slideB" alt="" />
+
+    <div class="deck" id="deck">
+
+      <!-- S1 · 히어로 -->
+      <section class="slide hero">
+        <div class="seven">7</div>
+        <div class="ring"></div>
+        <div class="kicker rv" style="--d:.05s">AI Operator · Hanjullo</div>
+        <h1 class="rv" style="--d:.12s">마케팅 실무를 바꾸는<br /><span class="em">7가지 기능</span></h1>
+        <p class="sub rv" style="--d:.2s">캠페인 기획부터 콘텐츠 제작, 발송, 분석까지 —<br />자연어 한 줄이면 충분합니다.</p>
+        <div class="approve rv" style="--d:.28s">AI가 제안하고, <b>발송 승인은 항상 사람</b>이 합니다</div>
+        <div class="chipnav rv" style="--d:.36s; max-width:680px">
+          <button class="chip" data-goto="2"><i>01</i>여정설계</button>
+          <button class="chip" data-goto="3"><i>02</i>자동마케팅</button>
+          <button class="chip" data-goto="5"><i>03</i>모바일 DM</button>
+          <button class="chip" data-goto="6"><i>04</i>이메일 빌더</button>
+          <button class="chip" data-goto="7"><i>05</i>인앱 메시지</button>
+          <button class="chip" data-goto="8"><i>06</i>브랜드보이스</button>
+          <button class="chip" data-goto="9"><i>07</i>마케팅분석</button>
+        </div>
+        <p class="sub rv" style="--d:.42s; font-size:12px; color:var(--dim); margin-top:12px">누르면 해당 기능으로 바로 이동합니다</p>
+        <div class="corp">INVITO corp.</div>
+      </section>
+
+      <!-- S2 · 한눈에 -->
+      <section class="slide">
+        <div class="kicker rv" style="--d:.05s">At a Glance</div>
+        <h2 class="rv" style="--d:.1s">한 곳에서, <span class="em">일곱 가지</span>가 맞물립니다</h2>
+        <div class="grid7">
+          <div class="gcard rv" style="--d:.14s"><div class="no">01</div><h3>여정설계</h3><p>말하면 여정이 됩니다. 조건·발송·대기를 AI가 설계합니다.</p></div>
+          <div class="gcard rv" style="--d:.18s"><div class="no">02</div><h3>자동마케팅</h3><p>목표만 정하면 매일 AI 제안서가 도착합니다.</p></div>
+          <div class="gcard rv" style="--d:.22s"><div class="no">03</div><h3>모바일 DM</h3><p>문자 한 통이 브로셔 수준의 페이지가 됩니다.</p></div>
+          <div class="gcard rv" style="--d:.26s"><div class="no">04</div><h3>이메일 빌더</h3><p>같은 방식으로, 메일함에도 브로셔를 보냅니다.</p></div>
+          <div class="gcard rv" style="--d:.3s"><div class="no">05</div><h3>인앱 메시지</h3><p>자사몰 방문 고객에게 앱 수준의 메시지를 띄웁니다.</p></div>
+          <div class="gcard rv" style="--d:.34s"><div class="no">06</div><h3>브랜드보이스</h3><p>쓸수록 브랜드 이해도가 올라가고, 우리 목소리를 냅니다.</p></div>
+          <div class="gcard rv" style="--d:.38s"><div class="no">07</div><h3>마케팅분석</h3><p>퍼널·ROI·시간대 반응, 다음 액션 추천까지.</p></div>
+          <div class="gcard all rv" style="--d:.42s"><div class="no">+</div><h3>전 채널 통합</h3><p>SMS · LMS · MMS · 카카오 알림톡 · 인앱 · Email · DM</p></div>
+        </div>
+      </section>
+
+      <!-- S3 · 01 여정설계 -->
+      <section class="slide">
+        <div class="feature">
+          <div>
+            <div class="fbadge rv" style="--d:.05s"><b>01</b> JOURNEY · 여정설계</div>
+            <h2 class="rv" style="--d:.1s">말하면,<br /><span class="em">여정이 됩니다</span></h2>
+            <ul class="points">
+              <li class="rv" style="--d:.16s"><b>자연어 한 줄</b>로 다단계 여정을 자동 설계합니다.</li>
+              <li class="rv" style="--d:.21s">가입 환영 · 휴면 회복 · 생일 축하 같은 <b>표준 여정</b>에 자유 여정까지.</li>
+              <li class="rv" style="--d:.26s">단계별 SMS · LMS · 카카오 알림톡 구성과 <b>발송 전 스팸 사전 테스트</b>.</li>
+              <li class="rv" style="--d:.31s">목표를 달성한 고객은 <b>자동 종료</b> — 불필요한 발송을 만들지 않습니다.</li>
+            </ul>
+          </div>
+          <div class="shot rv" style="--d:.2s">
+            <div class="console">
+              <div class="bar"><i></i><i></i><i></i><span>여정 빌더</span></div>
+              <div class="body">
+                <div class="jinput"><span class="q">"휴면 고객을 다시 불러와줘"</span><span class="go">생성</span></div>
+                <div class="jsteps">
+                  <div class="jstep"><span class="dot"></span><div class="box"><b>진입 · 휴면 60일+</b><span>조건 충족 시 자동</span></div></div>
+                  <div class="jstep"><span class="dot"></span><div class="box"><b>카카오 알림톡 발송</b><span>반려 시 SMS 자동 폴백</span></div></div>
+                  <div class="jstep"><span class="dot"></span><div class="box"><b>대기 · 3일</b><span>미클릭 고객만 다음 단계</span></div></div>
+                  <div class="jstep"><span class="dot"></span><div class="box"><b>리마인드 · LMS</b><span>후속 1회</span></div></div>
+                  <div class="jstep goal"><span class="dot"></span><div class="box"><b>구매 시 자동 종료</b><span>목표 달성 · 여정 완료</span></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- S4 · 02 자동마케팅 -->
+      <section class="slide">
+        <div class="feature">
+          <div>
+            <div class="fbadge rv" style="--d:.05s"><b>02</b> AUTO MARKETING · 자동마케팅</div>
+            <h2 class="rv" style="--d:.1s">목표만 정하면,<br /><span class="em">매일 제안이 도착합니다</span></h2>
+            <ul class="points">
+              <li class="rv" style="--d:.16s">운영 목표를 한 번 정하면 <b>AI가 매일 제안서</b>를 만들어 둡니다.</li>
+              <li class="rv" style="--d:.21s">제안서 안에 <b>타겟 · 문안 3안 · 예상 비용 · 추천 시점</b>이 전부 들어 있습니다.</li>
+              <li class="rv" style="--d:.26s">발송 대상 명단은 <b>[타겟확인]</b>으로 발송 전에 직접 확인합니다.</li>
+              <li class="rv" style="--d:.31s">발송 성과를 학습해 <b>더 나은 문안을 자동 선택</b>합니다.</li>
+            </ul>
+            <div class="note rv" style="--d:.36s">승인하기 전에는 절대 발송되지 않습니다</div>
+          </div>
+          <div class="shot rv" style="--d:.2s">
+            <div class="console prop">
+              <div class="bar"><i></i><i></i><i></i><span>오늘의 추천 마케팅</span></div>
+              <div class="body">
+                <div class="headrow"><b>휴면 고객 시즌 안내</b><span class="chip mint">발송 안전 · 위험도 낮음</span></div>
+                <div class="stat3">
+                  <div class="s"><em>기대 매출</em><b>₩1,240,000</b></div>
+                  <div class="s"><em>대상</em><b>1,501명</b></div>
+                  <div class="s"><em>추천 시점</em><b>금 11:00</b></div>
+                </div>
+                <div class="vtabs"><i class="on">A안 · 감성</i><i>B안 · 실용</i><i>C안 · 혜택</i></div>
+                <div class="msg">고객님, 오랜만이에요. 계절이 바뀌는 김에 회원님께 먼저 소식을 전해드리고 싶었어요…</div>
+                <div class="row"><span class="btn primary">승인하고 발송</span><span class="btn ghost">거부</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- S5 · 브로셔 밴드 -->
+      <section class="slide band">
+        <div class="slash" style="left:22%"></div>
+        <div class="slash" style="left:78%"></div>
+        <div class="kicker rv" style="--d:.05s; justify-content:center">Content Studio</div>
+        <h2 class="rv" style="--d:.1s">디자이너 없이,<br /><span class="em">브로셔 수준의 콘텐츠</span></h2>
+        <p class="sub rv" style="--d:.18s">만들기 어려웠던 콘텐츠를 클릭 몇 번으로 완성합니다.<br />다음 세 가지가 그 도구입니다.</p>
+        <div class="mini3">
+          <div class="m rv" style="--d:.24s" data-goto="5"><div class="th dm"></div><b><i>03</i>모바일 DM</b><p>문자 링크 한 줄이 브로셔 페이지로 열립니다.</p></div>
+          <div class="m rv" style="--d:.29s" data-goto="6"><div class="th mail"></div><b><i>04</i>이메일 빌더</b><p>같은 블록 방식으로, 메일함까지 이어집니다.</p></div>
+          <div class="m rv" style="--d:.34s" data-goto="7"><div class="th app"></div><b><i>05</i>인앱 메시지</b><p>자사몰 방문 고객의 화면 위에 바로 띄웁니다.</p></div>
+        </div>
+        <div class="bflow rv" style="--d:.4s"><b>AI 초안</b><span class="ar">→</span><span>원하는 곳만 편집</span><span class="ar">→</span><b>발행 · 성과 추적</b></div>
+        <p class="sub rv" style="--d:.46s; font-size:12px; color:var(--dim); margin-top:16px">카드를 누르면 각 기능 소개로 이동합니다</p>
+      </section>
+
+      <!-- S6 · 03 모바일 DM -->
+      <section class="slide">
+        <div class="feature">
+          <div>
+            <div class="fbadge rv" style="--d:.05s"><b>03</b> MOBILE DM · 모바일 DM</div>
+            <h2 class="rv" style="--d:.1s">문자 한 통이,<br /><span class="em">브로셔가 됩니다</span></h2>
+            <ul class="points">
+              <li class="rv" style="--d:.16s">히어로 · 상품 · 쿠폰 · 설문을 <b>블록처럼 조립</b>하는 섹션 빌더.</li>
+              <li class="rv" style="--d:.21s">AI가 문안과 구성을 먼저 완성하고, <b>원하는 곳만 편집</b>하면 됩니다.</li>
+              <li class="rv" style="--d:.26s">문자에는 <b>링크 한 줄</b> — 열람 · 클릭이 수신자별로 잡힙니다.</li>
+              <li class="rv" style="--d:.31s">자체 <b>단축 URL</b>로 깔끔하게 발송합니다.</li>
+            </ul>
+          </div>
+          <div class="shot rv" style="--d:.2s">
+            <div class="iph">
+              <div class="scr">
+                <div class="isl"></div>
+                <div class="stat"><span>9:41</span><span class="sics"><i class="sg"></i><i class="bt"></i></span></div>
+                <div class="dm2">
+                  <div class="bbar"><b>MAISON BLANC</b><span>모바일 DM</span></div>
+                  <div class="hero2"><em>NEW SEASON</em><div class="bottle"></div><b>가을 컬렉션,<br />회원님께 먼저</b></div>
+                  <div class="prods2">
+                    <div class="p2"><div class="pimg"></div><div class="pt"><b>시그니처 세럼</b><span>32,000원</span></div></div>
+                    <div class="p2 jar"><div class="pimg"></div><div class="pt"><b>가을 한정 크림</b><span>28,000원</span></div></div>
+                  </div>
+                  <div class="tick"><b>WELCOME 쿠폰</b><span>회원 전용 · 매장 겸용</span></div>
+                  <div class="cta2">컬렉션 보러 가기</div>
+                  <div class="foot2">무료수신거부 080-123-4567</div>
+                </div>
+                <div class="home"></div>
+              </div>
+            </div>
+            <div class="devchips"><span class="chip violet">수신자별 열람 추적</span><span class="chip">클릭 집계</span><span class="chip">단축 URL</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- S7 · 04 이메일 빌더 -->
+      <section class="slide">
+        <div class="feature">
+          <div>
+            <div class="fbadge rv" style="--d:.05s"><b>04</b> EMAIL BUILDER · 이메일 빌더</div>
+            <h2 class="rv" style="--d:.1s">이메일도,<br /><span class="em">같은 방식으로</span></h2>
+            <ul class="points">
+              <li class="rv" style="--d:.16s">블록 편집기로 <b>브로셔형 이메일</b>을 그대로 만듭니다.</li>
+              <li class="rv" style="--d:.21s"><b>%고객명%</b> 같은 개인화 변수가 받는 사람마다 치환됩니다.</li>
+              <li class="rv" style="--d:.26s"><b>오픈 · 클릭</b>이 자동 추적되어 성과가 남습니다.</li>
+              <li class="rv" style="--d:.31s">쿠폰 · 버튼 · 상품 블록으로 <b>바로 행동</b>하게 만듭니다.</li>
+            </ul>
+          </div>
+          <div class="shot rv" style="--d:.2s">
+            <div class="mailc">
+              <div class="mtop">
+                <div class="avatar">M</div>
+                <div class="mwho"><b>메종 블랑</b><span>news@maisonblanc.kr</span></div>
+                <div class="mtime">오전 10:24</div>
+              </div>
+              <div class="msubj">가을 컬렉션, 회원님께 먼저 보여드려요</div>
+              <div class="mto">받는사람 · 나</div>
+              <div class="mban"><em>AUTUMN EDIT</em><b>깊어지는 계절의 첫 인사</b></div>
+              <div class="mbody">
+                <p><span class="var">%고객명%</span>님, 이번 시즌 컬렉션을 가장 먼저 만나보세요. 매장과 온라인에서 함께 준비했습니다.</p>
+                <div class="mrow">
+                  <div class="pr"><div class="pimg"></div><b>시그니처 세럼</b></div>
+                  <div class="pr"><div class="pimg"></div><b>바디 컬렉션</b></div>
+                </div>
+              </div>
+              <a class="mcta">컬렉션 보러 가기</a>
+              <div class="mfoot"><span>메종 블랑 · 서울특별시</span><span>수신거부</span></div>
+            </div>
+            <div class="devchips"><span class="chip violet">오픈 추적</span><span class="chip">클릭 추적</span><span class="chip">%고객명% 개인화</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- S8 · 05 인앱 메시지 -->
+      <section class="slide">
+        <div class="feature">
+          <div>
+            <div class="fbadge rv" style="--d:.05s"><b>05</b> IN-APP · 인앱 메시지</div>
+            <h2 class="rv" style="--d:.1s">방문한 고객에게,<br /><span class="em">앱 수준의 메시지</span></h2>
+            <ul class="points">
+              <li class="rv" style="--d:.16s">자사몰 화면 위에 <b>배너 · 팝업 · 티켓</b> 형태로 노출됩니다.</li>
+              <li class="rv" style="--d:.21s">블록 조립과 테마로 <b>브랜드 톤</b>을 그대로 유지합니다.</li>
+              <li class="rv" style="--d:.26s"><b>A/B 테스트</b>가 내장되어 반응 좋은 안이 남습니다.</li>
+              <li class="rv" style="--d:.31s">쇼핑몰 연동으로 <b>설치 한 번</b>이면 바로 시작됩니다.</li>
+            </ul>
+          </div>
+          <div class="shot rv" style="--d:.2s">
+            <div class="mall2">
+              <div class="chrome"><i></i><i></i><i></i><span>maisonblanc-mall.com</span></div>
+              <div class="mhead"><b>MAISON BLANC</b><span>SHOP ALL</span></div>
+              <div class="mgrid2">
+                <div class="mp2"><div class="pimg"></div><b>시그니처 세럼</b><span>32,000원</span></div>
+                <div class="mp2"><div class="pimg"></div><b>가을 한정 크림</b><span>28,000원</span></div>
+                <div class="mp2"><div class="pimg"></div><b>립 에디션</b><span>21,000원</span></div>
+                <div class="mp2"><div class="pimg"></div><b>바디 오일</b><span>26,000원</span></div>
+                <div class="mp2"><div class="pimg"></div><b>핸드 케어</b><span>18,000원</span></div>
+                <div class="mp2"><div class="pimg"></div><b>미니 키트</b><span>15,000원</span></div>
+              </div>
+              <div class="dimm"></div>
+              <div class="pop2">
+                <div class="ab"><i>A</i><i>B</i></div>
+                <div class="pimg"><em>NEW SEASON</em><i class="x">×</i></div>
+                <b class="tt">가을 단독 소식, 회원님께 먼저</b>
+                <p>이번 시즌 새 컬렉션을 가장 먼저 안내드려요.</p>
+                <span class="go">지금 보기</span>
+              </div>
+            </div>
+            <div class="devchips"><span class="chip violet">A/B 테스트 내장</span><span class="chip">쇼핑몰 연동</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- S9 · 06 브랜드보이스 -->
+      <section class="slide">
+        <div class="feature">
+          <div>
+            <div class="fbadge rv" style="--d:.05s"><b>06</b> BRAND VOICE · 브랜드보이스</div>
+            <h2 class="rv" style="--d:.1s">쓸수록,<br /><span class="em">우리 브랜드답게</span></h2>
+            <ul class="points">
+              <li class="rv" style="--d:.16s">대표 문안 몇 건만 등록하면 <b>회사의 톤</b>을 학습합니다.</li>
+              <li class="rv" style="--d:.21s">꾸준히 사용할수록 <b>브랜드 이해도가 올라가고</b>, 브랜드가 내고 싶은 목소리를 냅니다.</li>
+              <li class="rv" style="--d:.26s">이후 <b>모든 채널의 문안</b>에 자동으로 반영됩니다.</li>
+              <li class="rv" style="--d:.31s">금지 표현 · 필수 표기도 <b>함께 지켜</b>줍니다.</li>
+            </ul>
+          </div>
+          <div class="shot rv" style="--d:.2s">
+            <div class="voice">
+              <div class="vmsg">
+                <div class="vh"><span class="chip">학습 전</span><b>일반적인 톤</b></div>
+                <p>고객님 안녕하세요. 신상품 입고 소식을 안내드립니다. 많은 관심 부탁드립니다.</p>
+              </div>
+              <div class="varrow">▼</div>
+              <div class="vmsg after">
+                <div class="vh"><span class="chip violet">학습 후</span><b>우리 브랜드의 목소리</b></div>
+                <p>%고객명%님, 오랜만이에요. 계절이 바뀌는 김에 회원님께 먼저 새 소식을 챙겨드리고 싶었어요.</p>
+              </div>
+              <div class="vlearn">
+                <div class="vt"><span>브랜드 이해도</span><b>사용할수록 상승</b></div>
+                <div class="vbar"><i></i></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- S10 · 07 마케팅분석 -->
+      <section class="slide">
+        <div class="feature">
+          <div>
+            <div class="fbadge rv" style="--d:.05s"><b>07</b> ANALYTICS · 마케팅분석</div>
+            <h2 class="rv" style="--d:.1s">발송으로<br /><span class="em">끝나지 않습니다</span></h2>
+            <ul class="points">
+              <li class="rv" style="--d:.16s">노출 → 클릭 → 구매, <b>퍼널이 자동 집계</b>됩니다.</li>
+              <li class="rv" style="--d:.21s">채널별 · <b>시간대별 반응</b>으로 다음 발송 시점을 잡습니다.</li>
+              <li class="rv" style="--d:.26s">캠페인별 <b>비용과 성과</b>가 한 화면에 정리됩니다.</li>
+              <li class="rv" style="--d:.31s">숫자에서 멈추지 않고 <b>다음 액션 추천</b>까지 이어집니다.</li>
+            </ul>
+          </div>
+          <div class="shot rv" style="--d:.2s">
+            <div class="console">
+              <div class="bar"><i></i><i></i><i></i><span>성과 리포트 · 최근 30일</span></div>
+              <div class="body">
+                <div class="stat3">
+                  <div class="s"><em>노출</em><b>18,400</b></div>
+                  <div class="s"><em>클릭</em><b>772</b></div>
+                  <div class="s"><em>구매</em><b>96</b></div>
+                </div>
+                <div class="funnel">
+                  <div class="f"><em>노출</em><div class="fb" style="width:100%"></div></div>
+                  <div class="f"><em>클릭</em><div class="fb" style="width:46%"></div><b>4.2%</b></div>
+                  <div class="f"><em>구매</em><div class="fb" style="width:18%"></div><b>96건</b></div>
+                </div>
+                <div class="hours">
+                  <i style="height:22%"></i><i style="height:30%"></i><i style="height:38%"></i><i style="height:46%"></i>
+                  <i style="height:58%"></i><i style="height:70%"></i><i class="pk" style="height:96%"></i><i style="height:74%"></i>
+                  <i style="height:54%"></i><i style="height:40%"></i><i style="height:28%"></i>
+                </div>
+                <div class="nextact"><b>다음 액션 추천</b> — 클릭했지만 구매하지 않은 고객에게 후속 안내를 보내보세요.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- S11 · 클로즈 -->
+      <section class="slide close">
+        <div class="kicker rv" style="--d:.05s; justify-content:center">Safety First</div>
+        <h2 class="rv" style="--d:.1s">AI가 제안하고,<br /><span class="em">사람이 승인합니다</span></h2>
+        <p class="sub rv" style="--d:.18s">일곱 가지 기능이 아무리 빨라도, 발송 버튼은 항상 사용자의 것입니다.<br />법령 관련 사항은 시스템이 자동으로 챙깁니다.</p>
+        <div class="safety">
+          <span class="chip rv" style="--d:.24s">(광고) 표기 자동</span>
+          <span class="chip rv" style="--d:.28s">무료거부 080 자동</span>
+          <span class="chip rv" style="--d:.32s">발송 시간대 검증</span>
+          <span class="chip rv" style="--d:.36s">타겟 0건 발송 차단</span>
+        </div>
+        <div class="chipnav rv" style="--d:.42s; justify-content:center">
+          <button class="chip" data-goto="2"><i>01</i>여정설계</button>
+          <button class="chip" data-goto="3"><i>02</i>자동마케팅</button>
+          <button class="chip" data-goto="5"><i>03</i>모바일 DM</button>
+          <button class="chip" data-goto="6"><i>04</i>이메일 빌더</button>
+          <button class="chip" data-goto="7"><i>05</i>인앱 메시지</button>
+          <button class="chip" data-goto="8"><i>06</i>브랜드보이스</button>
+          <button class="chip" data-goto="9"><i>07</i>마케팅분석</button>
+        </div>
+        <div class="cta rv" style="--d:.48s"><a class="btn primary" href="/">로그인하고 시작하기</a></div>
+        <div class="small rv" style="--d:.54s">한줄로 — AI Operator · INVITO corp.</div>
+      </section>
+
     </div>
+
     <button class="nav next" id="nextBtn" aria-label="다음 슬라이드">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
     </button>
   </div>
 
-  <footer>
+  <footer class="bottom">
     <div class="dots" id="dots"></div>
     <div class="hint">← → 방향키 · 클릭 · 스와이프로 넘기세요</div>
   </footer>
@@ -96,64 +789,66 @@
 
 <script>
 (function () {
-  var TOTAL = 17;
-  var BASE = '/about-ai-operator/slide-';
-  var cur = 1;
-  var imgs = [document.getElementById('slideA'), document.getElementById('slideB')];
-  var front = 0;
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var TOTAL = slides.length;
+  var cur = 0; // 0-based
   var counter = document.getElementById('counter');
   var prevBtn = document.getElementById('prevBtn');
   var nextBtn = document.getElementById('nextBtn');
   var dotsEl = document.getElementById('dots');
   var fsBtn = document.getElementById('fsBtn');
 
-  // 점 생성
   var dots = [];
-  for (var i = 1; i <= TOTAL; i++) {
+  for (var i = 0; i < TOTAL; i++) {
     (function (n) {
       var b = document.createElement('button');
       b.className = 'dot';
-      b.setAttribute('aria-label', n + '번 슬라이드');
+      b.setAttribute('aria-label', (n + 1) + '번 슬라이드');
       b.addEventListener('click', function () { show(n); });
       dotsEl.appendChild(b);
       dots.push(b);
     })(i);
   }
 
-  function preload(n) {
-    if (n >= 1 && n <= TOTAL) { var im = new Image(); im.src = BASE + n + '.png'; }
-  }
+  function pad(n) { return n < 10 ? '0' + n : String(n); }
 
   function show(n) {
-    n = Math.max(1, Math.min(TOTAL, n));
-    if (n === cur && imgs[front].classList.contains('on')) return;
+    n = Math.max(0, Math.min(TOTAL - 1, n));
+    if (n === cur && slides[cur].classList.contains('on')) return;
+    slides[cur].classList.remove('on');
     cur = n;
-    var back = 1 - front;
-    var nextImg = imgs[back];
-    nextImg.onload = function () {
-      imgs[front].classList.remove('on');
-      nextImg.classList.add('on');
-      front = back;
-    };
-    nextImg.alt = 'AI Operator 소개 슬라이드 ' + n;
-    nextImg.src = BASE + n + '.png';
-    if (nextImg.complete) nextImg.onload();
-    counter.textContent = (n < 10 ? '0' + n : n) + ' / ' + TOTAL;
-    prevBtn.disabled = (n === 1);
-    nextBtn.disabled = (n === TOTAL);
-    for (var k = 0; k < dots.length; k++) dots[k].className = 'dot' + (k + 1 === n ? ' on' : '');
-    try { history.replaceState(null, '', '#' + n); } catch (e) {}
-    preload(n + 1); preload(n - 1);
+    var s = slides[cur];
+    s.classList.add('on');
+    // 등장 애니메이션 재시작
+    var rvs = s.querySelectorAll('.rv');
+    for (var k = 0; k < rvs.length; k++) {
+      rvs[k].style.animation = 'none';
+      void rvs[k].offsetWidth;
+      rvs[k].style.animation = '';
+    }
+    // 슬라이드 스크롤 최상단 (모바일)
+    s.scrollTop = 0;
+    counter.textContent = pad(cur + 1) + ' / ' + pad(TOTAL);
+    prevBtn.disabled = (cur === 0);
+    nextBtn.disabled = (cur === TOTAL - 1);
+    for (var d = 0; d < dots.length; d++) dots[d].className = 'dot' + (d === cur ? ' on' : '');
+    try { history.replaceState(null, '', '#' + (cur + 1)); } catch (e) {}
   }
 
   prevBtn.addEventListener('click', function () { show(cur - 1); });
   nextBtn.addEventListener('click', function () { show(cur + 1); });
 
+  // 기능 바로가기 (히어로 칩 · 브로셔 카드 · 클로즈 칩)
+  document.addEventListener('click', function (e) {
+    var g = e.target && e.target.closest ? e.target.closest('[data-goto]') : null;
+    if (g) { var n = parseInt(g.getAttribute('data-goto'), 10); if (!isNaN(n)) show(n); }
+  });
+
   document.addEventListener('keydown', function (e) {
     if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { show(cur + 1); e.preventDefault(); }
     else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { show(cur - 1); e.preventDefault(); }
-    else if (e.key === 'Home') { show(1); }
-    else if (e.key === 'End') { show(TOTAL); }
+    else if (e.key === 'Home') { show(0); }
+    else if (e.key === 'End') { show(TOTAL - 1); }
   });
 
   // 스와이프
@@ -172,7 +867,13 @@
   });
 
   var startN = parseInt((location.hash || '').replace('#', ''), 10);
-  show(startN >= 1 && startN <= TOTAL ? startN : 1);
+  slides[0].classList.remove('on');
+  cur = (startN >= 1 && startN <= TOTAL) ? startN - 1 : 0;
+  slides[cur].classList.add('on');
+  counter.textContent = pad(cur + 1) + ' / ' + pad(TOTAL);
+  prevBtn.disabled = (cur === 0);
+  nextBtn.disabled = (cur === TOTAL - 1);
+  for (var d0 = 0; d0 < dots.length; d0++) dots[d0].className = 'dot' + (d0 === cur ? ' on' : '');
 })();
 </script>
 </body>
