@@ -16,6 +16,7 @@ import TargetExtractModal, { type ExtractedTarget } from './TargetExtractModal';
 import AiRefineModal from './AiRefineModal';
 import SpamFilterTestModal from './SpamFilterTestModal';
 import ConfirmModal, { type ConfirmState } from './ConfirmModal';
+import CreditConfirmModal from './credit/CreditConfirmModal';
 import { DateTimeField, isoToLocalInput, localInputToIso } from './DateTimeField';
 
 /** 발신번호 select 특수값 — 고객별 등록매장 번호(개별 회신) */
@@ -184,8 +185,13 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
 
   const [tracking, setTracking] = useState<TrackData | null>(null);
   const [loadingTrack, setLoadingTrack] = useState(false);
-  // ★ 2026-07-06 미열람자 재발송 모드 — 추적 탭에서 미열람 고객만 추려 발송 탭으로(타겟 추출 대신 고객 id 지정)
+  // ★ 2026-07-06 미열람자 재발송 모드 — 추적 탭에서 고객만 추려 발송 탭으로(타겟 추출 대신 고객 id 지정)
+  //   ★ 2026-07-12 D-3 일반화 — 미열람 외 열람·무반응/클릭/응모 세그먼트 후속 발송(라벨 동반)
   const [resendIds, setResendIds] = useState<string[] | null>(null);
+  const [resendLabel, setResendLabel] = useState('미열람');
+  // ★ 2026-07-12 D-1: 발행비 미확정 DM(테스트 발행 등) 발송 시 — 발행 확인 모달 → confirmPublishFee 재요청(서버 인라인 확정)
+  const [publishFeeSource, setPublishFeeSource] = useState<string | null>(null);
+  const [publishFeeConfirmed, setPublishFeeConfirmed] = useState(false);
   // ★ 2026-07-02(3) 미리보기 샘플 전환 — 추출된 수신자별 개인화 결과를 눈으로 확인
   const [sampleIdx, setSampleIdx] = useState(0);
   // ★ 2026-07-02(3) 개별 회신(미등록/미보유 제외) 확인 모달
@@ -355,7 +361,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
     setScheduleMode('ai');
   };
 
-  const handleSend = async (confirmExclusion = false) => {
+  const handleSend = async (confirmExclusion = false, feeConfirmed = false) => {
     const isResend = !!resendIds && resendIds.length > 0;
     if (!isResend && (!target || target.channelEligibleCount === 0)) { toast.warning('먼저 타겟을 추출해주세요.'); return; }
     if (!messageText.trim()) { toast.warning('문자 본문을 작성해주세요.'); return; }
@@ -363,6 +369,12 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
     if (isAd && opt080Loaded && !opt080) { toast.warning('광고성 발송은 무료수신거부(080) 번호가 필요합니다. 수신거부번호 설정에서 등록해주세요.'); return; }
     const scheduledAtVal = scheduleMode === 'immediate' ? null : scheduledAt;
     if (scheduleMode !== 'immediate' && !scheduledAtVal) { toast.warning('예약 시각을 선택해주세요.'); return; }
+    // ★ 2026-07-12 D-2: 야간 광고 발송 제한 사전 안내 — 백엔드 공통 가드(NIGHT_AD_RESTRICTED)가 최종 차단
+    if (isAd) {
+      const eff = scheduledAtVal ? new Date(scheduledAtVal) : new Date();
+      const hr = eff.getHours();
+      if (hr < 8 || hr >= 21) { toast.warning('야간(21시~다음날 08시)에는 광고 발송이 제한됩니다. 발송 시각을 08:00~20:59 사이로 선택해주세요.'); return; }
+    }
     setSending(true);
     try {
       const res = await fetch(`/api/dm/${dmId}/send-to-target`, {
@@ -379,6 +391,8 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
           callback: isIndividualCb ? undefined : callback,
           useIndividualCallback: isIndividualCb,
           confirmCallbackExclusion: confirmExclusion,
+          // ★ 2026-07-12 D-1: 발행비 확인 모달 통과 후 재요청 — 서버가 이 자리에서 발행비 확정(멱등)
+          confirmPublishFee: feeConfirmed || publishFeeConfirmed,
           scheduledAt: scheduledAtVal ? new Date(scheduledAtVal).toISOString() : null,
         }),
       });
@@ -393,6 +407,11 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
           confirmLabel: '제외하고 발송',
           onConfirm: () => { void handleSend(true); },
         });
+        return;
+      }
+      // ★ 2026-07-12 D-1: 발행비 미확정 — 발행 크레딧 확인 모달을 띄우고, 확인 시 /publish 과금 후 발송 재시도
+      if (!res.ok && data?.code === 'PUBLISH_FEE_REQUIRED') {
+        setPublishFeeSource(String(data.costSource || 'dm-builder'));
         return;
       }
       if (!res.ok || !data.success) { toast.error(data?.error || '발송에 실패했습니다.'); return; }
@@ -433,10 +452,10 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
               <div className="space-y-4">
                 <div className="rounded-xl border border-white/10 bg-white/5 p-4">
                   {resendIds && resendIds.length > 0 ? (
-                    /* ★ 2026-07-06 미열람자 재발송 모드 — 타겟 추출 대신 미열람 고객 지정. 문구를 바꿔 보내면 열람률이 오릅니다. */
+                    /* ★ 2026-07-06/07-12 세그먼트 재발송 모드 — 타겟 추출 대신 추적 세그먼트 고객 지정. */
                     <div className="flex items-center justify-between gap-2">
                       <div>
-                        <p className="text-[10px] text-cyan-300/80 font-semibold">미열람자 재발송</p>
+                        <p className="text-[10px] text-cyan-300/80 font-semibold">{resendLabel} 고객 재발송·후속 발송</p>
                         <p className="text-2xl font-bold text-cyan-300">{resendIds.length.toLocaleString()}<span className="text-sm font-normal text-white/50 ml-1">명</span></p>
                         <p className="text-[10px] text-white/40 mt-0.5">그 사이 수신거부한 고객은 발송 시 자동 제외됩니다. 문구를 바꿔 보내는 것을 권장합니다.</p>
                       </div>
@@ -592,20 +611,31 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <p className="text-[11px] text-white/50">수신자별 열람 깊이 · 클릭 현황</p>
                   <div className="flex items-center gap-2">
-                    {/* ★ 2026-07-06 미열람자 재발송 — 미열람 고객만 추려 발송 탭으로(문구 수정 후 발송, 비용은 일반 발송과 동일) */}
-                    {tracking.recipients.some((r) => !r.viewed) && (
-                      <button
-                        onClick={() => {
-                          const ids = tracking.recipients.filter((r) => !r.viewed).map((r) => r.customerId);
-                          setResendIds(ids);
-                          setView('compose');
-                          toast.info(`미열람 ${ids.length.toLocaleString()}명이 발송 대상으로 지정되었습니다. 문구를 바꿔 발송해보세요.`);
-                        }}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-cyan-100 bg-cyan-500/20 hover:bg-cyan-500/35 border border-cyan-400/30"
-                      >
-                        <Send className="w-3.5 h-3.5" /> 미열람자 재발송 ({tracking.recipients.filter((r) => !r.viewed).length.toLocaleString()}명)
-                      </button>
-                    )}
+                    {/* ★ 2026-07-12 D-3 재타겟 1클릭 — 미열람/열람·무반응/클릭/응모 세그먼트 후속 발송.
+                        서버(send-to-target resendCustomerIds)가 자격·수신거부를 재적용하므로 프론트는 id 지정만. */}
+                    {(() => {
+                      const segs = [
+                        { label: '미열람', ids: tracking.recipients.filter((r) => !r.viewed).map((r) => r.customerId), hint: '문구를 바꿔 다시 보내면 열람률이 오릅니다' },
+                        { label: '열람·무반응', ids: tracking.recipients.filter((r) => r.viewed && r.clicks === 0 && !r.responded).map((r) => r.customerId), hint: '열람했지만 클릭·응모가 없던 고객 — 다른 문구·구성으로 후속' },
+                        { label: '클릭', ids: tracking.recipients.filter((r) => r.clicks > 0).map((r) => r.customerId), hint: '관심을 보인 고객 — 구매 유도 후속' },
+                        { label: '응모·액션', ids: tracking.recipients.filter((r) => r.responded).map((r) => r.customerId), hint: '참여한 고객 — 결과 안내·후속 혜택' },
+                      ].filter((s) => s.ids.length > 0);
+                      return segs.map((s) => (
+                        <button
+                          key={s.label}
+                          title={s.hint}
+                          onClick={() => {
+                            setResendIds(s.ids);
+                            setResendLabel(s.label);
+                            setView('compose');
+                            toast.info(`${s.label} ${s.ids.length.toLocaleString()}명이 발송 대상으로 지정되었습니다. 문구를 바꿔 발송해보세요.`);
+                          }}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-cyan-100 bg-cyan-500/20 hover:bg-cyan-500/35 border border-cyan-400/30"
+                        >
+                          <Send className="w-3.5 h-3.5" /> {s.label} ({s.ids.length.toLocaleString()})
+                        </button>
+                      ));
+                    })()}
                     {/* ★ 2026-07-06 추적 CSV 다운로드 — 로드된 전체 수신자(서버 LIMIT 1000) 내보내기 */}
                     <button
                       onClick={() => {
@@ -791,7 +821,8 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                     )}
                   </div>
                 )}
-                <p className="text-[10px] text-white/30 italic text-center">행을 클릭하면 섹션 여정·버튼 클릭·응답 상세가 열립니다 · Data source — dm_recipient_tokens × dm_views × dm_event_responses</p>
+                {/* ★ 2026-07-12 D-4: 구매 전환 소스 명시 — 자동마케팅 ROI(자사몰 cdp)와 소스가 달라 숫자가 다를 수 있음을 정직 표기 */}
+                <p className="text-[10px] text-white/30 italic text-center">행을 클릭하면 섹션 여정·버튼 클릭·응답 상세가 열립니다 · Data source — dm_recipient_tokens × dm_views × dm_event_responses · 구매 전환 = 매장·ERP 구매내역(발송 후 7일 실측, 자사몰 기준 화면과 소스가 다를 수 있음)</p>
               </>
             ) : (
               <p className="text-xs text-white/40 text-center py-8">추적 데이터를 불러오는 중입니다.</p>
@@ -834,7 +865,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
               <button onClick={() => handleSend()} disabled={(resendIds && resendIds.length > 0 ? false : (!target || target.channelEligibleCount === 0)) || !messageText.trim() || sending} className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5">
                 {sending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 {sending ? '처리 중...'
-                  : resendIds && resendIds.length > 0 ? `미열람 ${resendIds.length.toLocaleString()}명 재발송`
+                  : resendIds && resendIds.length > 0 ? `${resendLabel} ${resendIds.length.toLocaleString()}명 발송`
                   : scheduleMode === 'immediate' ? (target ? `${target.channelEligibleCount.toLocaleString()}명 발송` : '발송') : '예약 발송'}
               </button>
             </div>
@@ -847,6 +878,14 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
           <SpamFilterTestModal onClose={() => setSpamOpen(false)} messageContentLms={spamTestMessage} callbackNumber={isIndividualCb ? defaultRegisteredCb : callback} messageType="LMS" subject={dmTitle} isAd={isAd} />
         )}
         <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
+        {/* ★ 2026-07-12 D-1: 발행비 미확정 DM — 발행 크레딧 확인 시 confirmPublishFee 재요청(서버가 확정 후 발송 진행) */}
+        <CreditConfirmModal
+          open={!!publishFeeSource}
+          source={publishFeeSource || 'dm-builder'}
+          description="이 DM은 발행 크레딧이 아직 확정되지 않았습니다(테스트 발행 등). 확인하면 발행 크레딧이 차감되고 발송이 이어집니다."
+          onConfirm={() => { setPublishFeeSource(null); setPublishFeeConfirmed(true); void handleSend(false, true); }}
+          onCancel={() => setPublishFeeSource(null)}
+        />
       </div>
     </div>
   );

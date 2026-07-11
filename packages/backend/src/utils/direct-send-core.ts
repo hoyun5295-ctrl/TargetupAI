@@ -11,6 +11,9 @@ import { triggerDirectSendWorker } from './direct-send-worker';
 import { CAMPAIGN_INSERT_SQL, buildDirectSendCampaignParams, DirectSendError, type DirectSendSpec } from './direct-send-spec';
 import { logCampaignTraining } from './training-logger';
 import { hasUneditedLinkPlaceholder, LINK_PLACEHOLDER } from './brand-link-core';
+// ★ 2026-07-12 D-2: 야간 광고 발송 제한 — SEND_HOURS 창 밖 광고 접수 거부(순수 판정 CT 재사용)
+import { isSendableHourKst } from './autosend-policy';
+import { SEND_HOURS } from '../config/defaults';
 
 // ★ 대량 발송 (2026-06-04 톤28 504 정정): 모달 카운트 + commit 차감 공용 헬퍼 — 실제 삭제 없이 COUNT만.
 //   중복 = phone당 1건 유지(total - distinct), 수신거부 = distinct phone 중 user_id+phone 매칭.
@@ -65,6 +68,20 @@ export async function createDirectSendCampaign(
       `문안에 링크 자리(${LINK_PLACEHOLDER})가 비어 있습니다. 링크 삽입으로 URL을 넣거나 해당 줄을 지운 뒤 발송해주세요.`,
       400,
     );
+  }
+
+  // ★ 2026-07-12 D-2: 야간 광고 발송 제한(정보통신망법) — 광고(adEnabled)는 발송 시각(즉시=지금,
+  //   예약=예약 시각 KST)이 발송 가능 창 밖이면 접수 거부. 직접발송·DM 발송·자율발송 공통 길목(1곳 = 전 경로).
+  //   정보성(adEnabled=false)은 무영향. 자동마케팅은 상류 클램프로 주간에만 도달(이중 안전).
+  if (spec.adEnabled === true) {
+    const effectiveAt = spec.scheduled && spec.scheduledAt ? new Date(spec.scheduledAt) : new Date();
+    if (!Number.isNaN(effectiveAt.getTime()) && !isSendableHourKst(effectiveAt, SEND_HOURS.start, SEND_HOURS.end)) {
+      throw new DirectSendError(
+        'NIGHT_AD_RESTRICTED',
+        `야간(${SEND_HOURS.end}시~다음날 ${String(SEND_HOURS.start).padStart(2, '0')}시)에는 광고 발송이 제한됩니다. 발송 시각을 ${String(SEND_HOURS.start).padStart(2, '0')}:00~${SEND_HOURS.end - 1}:59 사이로 조정해주세요.`,
+        400,
+      );
+    }
   }
 
   const campaignResult = await query(CAMPAIGN_INSERT_SQL, buildDirectSendCampaignParams(spec, ctx));

@@ -33,7 +33,7 @@ import {
   oneShotGenerate,
   type CampaignSpec, type ToneKey,
 } from '../utils/dm/dm-ai';
-import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
+import { checkCredit, deductCreditSafe, InsufficientCreditError, getCreditState } from '../utils/ai-credit';
 import { getCreditCost } from '../utils/ai-credit-calc';
 import { runInCreditBundle } from '../utils/ai-credit-context';
 import type { Section } from '../utils/dm/dm-section-registry';
@@ -767,6 +767,54 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
 
     const dm = await getDmDetail(req.params.id, companyId);
     if (!dm) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
+
+    // ★ 2026-07-12 D-1 발행비 정합 — 발행비(멱등키 dm-publish:dmId) 미납 + 실고객 발송 이력 없음이면
+    //   402 PUBLISH_FEE_REQUIRED → 프론트 발행 확인 모달 → confirmPublishFee=true 재요청 시 이 자리에서
+    //   발행비 확정(멱등키 = /publish와 동일) 후 발송 진행. 테스트 발행(무과금)·API 직행 우회 차단.
+    //   (/publish 왕복 재시도는 차감 swallow 시 402 루프 가능 — Codex 지적으로 인라인 확정 설계.)
+    //   예외: ①과거 실발송 이력(dm_recipient_tokens) = 구 정책 통과분 소급 금지 ②크레딧제 미적용 회사.
+    //   판정 조회 실패 = 기존 동작(발송 우선 — 발송 무결 최우선). 차감 영구 실패 = [CREDIT][MISS] 수동 재차감(전사 정책).
+    let publishFeeGate: { source: string; cost: number } | null = null;
+    try {
+      const chargedR = await query(
+        `SELECT 1 FROM ai_credit_transactions WHERE company_id = $1::uuid AND idempotency_key = $2 LIMIT 1`,
+        [companyId, `dm-publish:${req.params.id}`],
+      );
+      if (chargedR.rows.length === 0) {
+        const [legacyR, creditState] = await Promise.all([
+          query(`SELECT 1 FROM dm_recipient_tokens WHERE dm_id = $1::uuid AND company_id = $2::uuid LIMIT 1`, [req.params.id, companyId]),
+          getCreditState(companyId),
+        ]);
+        if (legacyR.rows.length === 0 && creditState.creditEnabled) {
+          const isInteractionFee = await isInteractionCampaign(companyId, req.params.id);
+          const feeSource = isInteractionFee ? 'dm-interaction-publish' : 'dm-builder';
+          publishFeeGate = { source: feeSource, cost: getCreditCost(feeSource) };
+        }
+      }
+    } catch (feeErr: any) {
+      console.warn('[DM 타겟 발송] 발행비 판정 실패 — 기존 동작으로 진행:', feeErr?.message);
+    }
+    if (publishFeeGate) {
+      if (req.body?.confirmPublishFee !== true) {
+        return res.status(402).json({
+          error: '이 DM은 아직 발행 크레딧이 확정되지 않았습니다. 발행 확인 후 발송해주세요.',
+          code: 'PUBLISH_FEE_REQUIRED',
+          costSource: publishFeeGate.source,
+        });
+      }
+      try {
+        await checkCredit(companyId, publishFeeGate.cost);
+      } catch (e: any) {
+        if (e instanceof InsufficientCreditError) {
+          return res.status(402).json({ error: '발행 크레딧이 부족합니다. 충전 후 다시 시도해주세요.', code: 'INSUFFICIENT_CREDIT' });
+        }
+        throw e;
+      }
+      await deductCreditSafe({
+        companyId, cost: publishFeeGate.cost, source: publishFeeGate.source,
+        createdBy: req.user?.userId, idempotencyKey: `dm-publish:${req.params.id}`,
+      });
+    }
 
     // 발행(short_code) 보장
     let shortCode = dm.short_code;
