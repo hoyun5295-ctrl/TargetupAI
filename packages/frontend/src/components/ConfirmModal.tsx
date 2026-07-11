@@ -137,7 +137,7 @@ export default function ConfirmModal({ state, onClose }: Props) {
         {/* 본문 */}
         {state.description && (
           <div className="px-5 py-4">
-            <div className="text-sm text-white/75 leading-relaxed whitespace-pre-wrap">
+            <div className="text-sm text-white/75 leading-relaxed whitespace-pre-wrap break-words">
               {state.description}
             </div>
           </div>

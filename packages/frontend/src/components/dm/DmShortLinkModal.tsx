@@ -257,7 +257,7 @@ export default function DmShortLinkModal({ open, onClose }: Props) {
       <CreditConfirmModal
         open={confirmOpen}
         source="dm-custom-short-link"
-        description={`"${url.trim()}"을(를) hlj.kr 단축 주소로 발급합니다. 발급 후 클릭 수가 집계됩니다.`}
+        description={`"${url.trim().slice(0, 80)}${url.trim().length > 80 ? '…' : ''}"을(를) hlj.kr 단축 주소로 발급합니다. 발급 후 클릭 수가 집계됩니다.`}
         onConfirm={() => { void handleCreate(); }}
         onCancel={() => setConfirmOpen(false)}
       />

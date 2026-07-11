@@ -91,7 +91,7 @@ export default function CreditConfirmModal({ open, source, quantity, description
         </div>
 
         {description && (
-          <div className="text-[12px] text-white/70 leading-relaxed mb-3 rounded-lg bg-white/5 border border-white/10 px-3 py-2">
+          <div className="text-[12px] text-white/70 leading-relaxed mb-3 rounded-lg bg-white/5 border border-white/10 px-3 py-2 break-words">
             {description}
           </div>
         )}
