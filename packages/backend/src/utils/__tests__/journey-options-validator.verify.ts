@@ -46,5 +46,26 @@ ok('goalExitEnabled 미지정/이상값 → false', () => {
   assert.strictEqual(normalizeJourneyOptions({ goalExitEnabled: 1 }).options.goalExitEnabled, false);
 });
 
+// ★ 2026-07-11 목표 종류·홀드아웃·send-time 개인화 정규화
+ok('goalKind click → click', () =>
+  assert.strictEqual(normalizeJourneyOptions({ goalKind: 'click' }).options.goalKind, 'click'));
+ok('goalKind visit → visit', () =>
+  assert.strictEqual(normalizeJourneyOptions({ goalKind: 'visit' }).options.goalKind, 'visit'));
+ok('goalKind 이상값/미지정 → purchase', () => {
+  assert.strictEqual(normalizeJourneyOptions({ goalKind: 'weird' }).options.goalKind, 'purchase');
+  assert.strictEqual(normalizeJourneyOptions({}).options.goalKind, 'purchase');
+});
+ok('holdoutPct 50 → 30 클램프', () =>
+  assert.strictEqual(normalizeJourneyOptions({ holdoutPct: 50 }).options.holdoutPct, 30));
+ok('holdoutPct 음수/미지정 → 0', () => {
+  assert.strictEqual(normalizeJourneyOptions({ holdoutPct: -5 }).options.holdoutPct, 0);
+  assert.strictEqual(normalizeJourneyOptions({}).options.holdoutPct, 0);
+});
+ok('personalSendTime true/"true" → true, 그 외 false', () => {
+  assert.strictEqual(normalizeJourneyOptions({ personalSendTime: true }).options.personalSendTime, true);
+  assert.strictEqual(normalizeJourneyOptions({ personalSendTime: 'true' }).options.personalSendTime, true);
+  assert.strictEqual(normalizeJourneyOptions({ personalSendTime: 1 }).options.personalSendTime, false);
+});
+
 console.log(`\n${passed} assertions passed`);
 process.exit(0);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
@@ -28,6 +28,8 @@ import JourneyFlowDiagram from '../components/journey/JourneyFlowDiagram';
 // ★ D218+ (2026-05-26): 활성화 자동 검증 + 정지 이력 + 담당자 알림 토글 신규
 import JourneyActivationConfirmModal from '../components/journey/JourneyActivationConfirmModal';
 import JourneyPauseLogsModal from '../components/journey/JourneyPauseLogsModal';
+// ★ 2026-07-11 여정 [타겟확인] — 공용 타겟 리스트 모달 (0710 자동마케팅과 동일 계약)
+import TargetRecipientsModal, { arrayPager } from '../components/TargetRecipientsModal';
 // 저장 여정 문안(본문·제목) 수정 — 초안·일시정지만(구조·일정 변경은 새 여정)
 import JourneyMessageEditModal from '../components/journey/JourneyMessageEditModal';
 // 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
@@ -88,6 +90,8 @@ interface JourneyRow {
   // ★ 2026-07-10 목표 달성 시 자동 종료 — 옵션 + 목표 달성 종료 수(listJourneys 서브쿼리)
   goal_exit_enabled?: boolean;
   goal_met_count?: number;
+  /** ★ 2026-07-11 홀드아웃 대조군(미발송) 수 */
+  holdout_count?: number;
   paused_at: string | null;
   pause_reason: string | null;
   created_at: string;
@@ -273,6 +277,11 @@ interface AIGeneratedStep {
   stepIntent: string;
   // ★ D188 Phase 2-B-1 (2026-05-21): condition step 평가용 conditionJsonb.
   conditionJsonb?: ConditionJsonb;
+  // ★ 2026-07-11 진짜 분기: condition 미충족 시 이동할 step_order(전방만). null/미지정 = 여정 종료(현행).
+  notMetGoto?: number | null;
+  // ★ 2026-07-11 wait-until-event: 대기 step 이벤트 대기(발생 시 즉시 진행, 타임아웃 시 진행). 미지정 = 시간만 대기.
+  waitEventName?: string;
+  waitTimeoutHours?: number;
   // ★ D210+ Phase 3 (2026-05-23 Harold 명시): wait step 정확도 영역 — KST 시간대
   //   'relative' (default) = 옛 매트릭스 (delay_hours 영역)
   //   'specific_hour'      = target_hour_kst 영역 (오늘/내일 KST 정합)
@@ -437,6 +446,33 @@ export default function JourneysPage() {
   const [activationModal, setActivationModal] = useState<{ journeyId: string; journeyName: string; journeyStatus: string } | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [pauseLogsModal, setPauseLogsModal] = useState<{ journeyId: string; journeyName: string } | null>(null);
+  // ★ 2026-07-11 [타겟확인] — 여정별 1회 로드 캐시 + 클라 페이징 (0710 자동마케팅 패턴 미러)
+  const [targetModal, setTargetModal] = useState<{ journeyId: string; journeyName: string } | null>(null);
+  const [targetInfo, setTargetInfo] = useState<{
+    recipients: any[]; displayTotal: number; capped: boolean;
+    criteria: string | null; basisLabel: string | null;
+    conditionColumns: { key: string; label: string }[];
+  } | null>(null);
+  const targetCacheRef = useRef<Record<string, any>>({});
+  const fetchJourneyTargets = async (journeyId: string) => {
+    if (targetCacheRef.current[journeyId]) return targetCacheRef.current[journeyId];
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/ai/operator/journeys/${journeyId}/target-recipients`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: '{}',
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || '발송 대상 조회에 실패했습니다.');
+    targetCacheRef.current[journeyId] = data;
+    return data;
+  };
+  const journeyTargetPage = async (page: number, pageSize: number) => {
+    if (!targetModal) return { recipients: [], total: 0 };
+    const info = await fetchJourneyTargets(targetModal.journeyId);
+    setTargetInfo(info);
+    return arrayPager(info.recipients || [])(page, pageSize);
+  };
   // 문안 수정 모달 — 초안·일시정지 여정만 (활성은 일시정지 후)
   const [editMessageModal, setEditMessageModal] = useState<{ journeyId: string; journeyName: string; journeyStatus: string } | null>(null);
   // ★ D211+ Phase A (2026-05-23 Harold 명시): 시뮬레이션 + 실시간 위치 영역
@@ -1607,8 +1643,13 @@ export default function JourneysPage() {
                               <span className="flex items-center gap-1"><Users className="w-3 h-3" />{j.stats_total_entered}</span>
                               <span className="flex items-center gap-1"><Sparkles className="w-3 h-3" />{j.stats_total_completed}</span>
                               {Number(j.goal_met_count) > 0 && (
-                                <span className="flex items-center gap-1 text-emerald-300" title="목표 달성 종료 — 진입 후 구매가 확인되어 잔여 발송 없이 종료된 고객">
+                                <span className="flex items-center gap-1 text-emerald-300" title="목표 달성 종료 — 진입 후 목표 달성이 확인되어 잔여 발송 없이 종료된 고객">
                                   <Target className="w-3 h-3" />목표 달성 {Number(j.goal_met_count).toLocaleString()}
+                                </span>
+                              )}
+                              {Number(j.holdout_count) > 0 && (
+                                <span className="flex items-center gap-1 text-sky-300" title="홀드아웃 대조군 — 증분 성과 비교를 위해 의도적으로 발송하지 않는 진입 고객 (통계 분석에서 전환 비교)">
+                                  <Users className="w-3 h-3" />홀드아웃 {Number(j.holdout_count).toLocaleString()}
                                 </span>
                               )}
                               <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" />{Number(j.stats_total_cost).toLocaleString()}원</span>
@@ -1626,8 +1667,14 @@ export default function JourneysPage() {
                             <button onClick={(e) => { e.stopPropagation(); navigate(`/ai-journeys/${j.id}/stats`); }} className="p-2 rounded bg-violet-500/20 hover:bg-violet-500/30 text-violet-300" title="통계 분석">
                               <BarChart3 className="w-4 h-4" />
                             </button>
-                            {/* 문안 수정 — 초안·일시정지만(활성은 일시정지 후 / 일정·구조 변경은 새 여정) */}
-                            {!j.archived_at && (j.status === 'draft' || j.status === 'paused') && (
+                            {/* ★ 2026-07-11 [타겟확인] — 지금 조건 매칭 표본 (발송 추출과 동일 함수 실측) */}
+                            {!j.archived_at && j.status !== 'ended' && (
+                              <button onClick={(e) => { e.stopPropagation(); setTargetInfo(null); setTargetModal({ journeyId: j.id, journeyName: j.name }); }} className="p-2 rounded bg-teal-500/20 hover:bg-teal-500/30 text-teal-300" title="타겟확인 — 지금 조건 매칭 고객 표본">
+                              <Target className="w-4 h-4" />
+                              </button>
+                            )}
+                            {/* 문안 수정 — 초안·일시정지·활성(★2026-07-11 활성=문안만+자동 스팸 재검사 / 일정·구조 변경은 새 여정) */}
+                            {!j.archived_at && (j.status === 'draft' || j.status === 'paused' || j.status === 'active') && (
                               <button onClick={(e) => { e.stopPropagation(); setEditMessageModal({ journeyId: j.id, journeyName: j.name, journeyStatus: j.status }); }} className="p-2 rounded bg-purple-500/20 hover:bg-purple-500/30 text-purple-300" title="문안 수정">
                                 <Edit2 className="w-4 h-4" />
                               </button>
@@ -2297,8 +2344,8 @@ export default function JourneysPage() {
                         <div className="text-[11px] text-white/45 mt-0.5 truncate">
                           {idx === 0 ? '트리거 후' : '직전 후'} {formatStepDelay(s)}
                           {s.stepType === 'message' && s.messageTemplate.trim() ? ` · ${s.messageTemplate.replace(/\s+/g, ' ').trim().slice(0, 36)}` : ''}
-                          {s.stepType === 'condition' ? ' · 조건 만족 시 다음 단계' : ''}
-                          {s.stepType === 'wait' ? ' · 대기 후 다음 단계' : ''}
+                          {s.stepType === 'condition' ? (s.notMetGoto ? ` · 만족 시 다음 / 미충족 시 Step ${s.notMetGoto}` : ' · 조건 만족 시 다음 단계') : ''}
+                          {s.stepType === 'wait' ? (s.waitEventName ? ` · ${s.waitEventName} 이벤트 대기 (최대 ${s.waitTimeoutHours ?? 72}시간)` : ' · 대기 후 다음 단계') : ''}
                         </div>
                       </div>
                       <button onClick={() => setEditingStepIdx(idx)} className="shrink-0 px-3 py-1.5 rounded-lg bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 text-xs font-medium flex items-center gap-1">
@@ -2333,9 +2380,38 @@ export default function JourneysPage() {
                           3. next_business_day — 다음 평일 09시 KST (단순 매트릭스) */}
                     {s.stepType === 'wait' && (
                       <div className="p-3 bg-sky-500/10 border border-sky-500/30 rounded text-xs space-y-3">
-                        <div className="font-semibold text-sky-200">시간 대기 step</div>
+                        <div className="font-semibold text-sky-200">대기 step</div>
                         <div className="text-sky-200/70 leading-relaxed">
-                          메시지 발송 없이 대기 후 다음 step 진입. KST 시간대 정합 매트릭스.
+                          메시지 발송 없이 대기 후 다음 step에 진입합니다.
+                        </div>
+
+                        {/* ★ 2026-07-11 wait-until-event — 이벤트가 오면 즉시 진행, 없으면 타임아웃에 진행 */}
+                        <div>
+                          <label className="block text-[10px] text-sky-200/70 mb-1">이벤트 대기 (선택)</label>
+                          <select
+                            value={s.waitEventName || ''}
+                            onChange={(e) => updateStep(idx, { waitEventName: e.target.value || undefined, waitTimeoutHours: e.target.value ? (s.waitTimeoutHours ?? 72) : undefined })}
+                            className="w-full px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                          >
+                            <option value="">사용 안 함 — 시간만 대기 (기본)</option>
+                            <option value="purchase">구매(purchase)가 오면 즉시 진행</option>
+                            <option value="message_click">발송 링크 클릭이 오면 즉시 진행</option>
+                            <option value="page_view">몰 방문(page_view)이 오면 즉시 진행</option>
+                            <option value="cart_add">장바구니 담기가 오면 즉시 진행</option>
+                            <option value="reservation_created">예약 생성이 오면 즉시 진행</option>
+                          </select>
+                          {s.waitEventName && (
+                            <div className="mt-2 flex items-center gap-2">
+                              <label className="text-[10px] text-sky-200/70 shrink-0">최대 대기 (시간)</label>
+                              <input
+                                type="number" min={1} max={720}
+                                value={s.waitTimeoutHours ?? 72}
+                                onChange={(e) => updateStep(idx, { waitTimeoutHours: Math.max(1, Math.min(720, Number(e.target.value) || 72)) })}
+                                className="w-24 px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                              />
+                              <span className="text-[10px] text-sky-200/50">기한까지 안 오면 다음 step으로 진행합니다.</span>
+                            </div>
+                          )}
                         </div>
 
                         {/* delay_mode dropdown */}
@@ -2418,7 +2494,27 @@ export default function JourneysPage() {
                       <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded text-xs space-y-3">
                         <div className="font-semibold text-emerald-200">조건 평가 step</div>
                         <div className="text-emerald-200/60 leading-relaxed">
-                          고객 정보 또는 사건 영역 평가 후 조건 만족 시 다음 step 진입 / 미만족 시 여정 종료합니다.
+                          고객 정보 또는 사건을 평가해 만족 시 다음 step으로 진입합니다. 미충족 시 동작은 아래에서 선택합니다.
+                        </div>
+
+                        {/* ★ 2026-07-11 진짜 분기 — 미충족 시: 종료(기본) 또는 뒤쪽 step으로 이동 (yes/no 경로) */}
+                        <div>
+                          <label className="block text-[10px] text-emerald-200/70 mb-1">조건 미충족 시</label>
+                          <select
+                            value={s.notMetGoto ?? ''}
+                            onChange={(e) => updateStep(idx, { notMetGoto: e.target.value === '' ? null : Number(e.target.value) })}
+                            className="w-full px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                          >
+                            <option value="">여정 종료 (기본)</option>
+                            {aiPkg.steps.filter((t) => t.stepOrder > s.stepOrder).map((t) => (
+                              <option key={t.stepOrder} value={t.stepOrder}>
+                                Step {t.stepOrder}(으)로 이동{t.stepIntent ? ` — ${String(t.stepIntent).slice(0, 20)}` : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <div className="text-[10px] text-emerald-200/50 mt-1">
+                            예: "클릭했나?" 미충족 → 리마인드 단계로 이동. 만족한 고객은 리마인드를 건너뛰게 하려면 이동 대상을 뒤쪽 단계로 두세요.
+                          </div>
                         </div>
 
                         {/* type dropdown */}
@@ -3071,6 +3167,18 @@ export default function JourneysPage() {
           onSaved={() => { void loadAll(); }}
         />
       )}
+
+      {/* ★ 2026-07-11 [타겟확인] — 공용 모달(createPortal z-2000). totalCount=발송 추출과 동일 함수 실측 */}
+      <TargetRecipientsModal
+        show={!!targetModal}
+        onClose={() => { setTargetModal(null); setTargetInfo(null); }}
+        title={`발송 대상 확인 — ${targetModal?.journeyName || ''}`}
+        criteria={targetInfo?.criteria ?? null}
+        totalCount={targetInfo?.displayTotal ?? null}
+        fetchPage={targetModal ? journeyTargetPage : null}
+        extraColumns={targetInfo?.conditionColumns || null}
+        sourceLabel={`${targetInfo?.basisLabel || '발송 추출과 동일 기준 실측'} · 전체 ${(targetInfo?.displayTotal ?? 0).toLocaleString()}${targetInfo?.capped ? '+' : ''}명 중 최대 100명 표시`}
+      />
 
       {/* 정보 알림 — 버튼 클릭 모달화 (거래 통지 알림톡 빌더). 인라인 페이지 교체 폐기 → 닫으면 메인 그대로 */}
       {view === 'main' && purpose === 'info-alert' && createPortal(

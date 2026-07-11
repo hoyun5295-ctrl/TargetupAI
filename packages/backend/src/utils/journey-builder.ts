@@ -73,6 +73,13 @@ export interface JourneyStepDefinition {
   mmsImagePaths?: string[];
   // ★ 2026-06-30 여정 일반화: date_anchor 스텝 offset(앵커 N일 전, 0=당일). date_anchor 외에는 미사용.
   anchorOffsetDays?: number;
+  // ★ 2026-07-11 진짜 분기: condition step 미충족 시 이동할 step_order(전방만). null/미지정 = 현행(여정 종료).
+  //   신규 컬럼(not_met_goto)이라 INSERT 본문에 넣지 않고 저장 후 별도 UPDATE(42703 시 조용히 skip) — 여정 생성 본류 보호.
+  notMetGoto?: number | null;
+  // ★ 2026-07-11 wait-until-event: wait step 이벤트 대기(cdp 이벤트명 + 타임아웃 시간). 미지정 = 기존 시간 대기.
+  //   신규 컬럼 2종 — notMetGoto와 동일하게 INSERT 밖 별도 UPDATE.
+  waitEventName?: string | null;
+  waitTimeoutHours?: number | null;
 }
 
 export interface JourneyTemplate {
@@ -282,6 +289,12 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
         subject: channel === 'sms' ? '' : (s.subject || '').slice(0, 50),
         isAd: s.isAd !== undefined ? !!s.isAd : true,
         conditionJsonb: s.conditionJsonb,
+        // ★ 2026-07-11 분기·이벤트 대기: 필드 보존(0605 교훈 — map 경로 누락=조용한 소실)
+        notMetGoto: s.notMetGoto != null && Number.isFinite(Number(s.notMetGoto)) ? Math.floor(Number(s.notMetGoto)) : undefined,
+        waitEventName: typeof s.waitEventName === 'string' && s.waitEventName.trim() ? s.waitEventName.trim().slice(0, 50) : undefined,
+        waitTimeoutHours: s.waitTimeoutHours != null && Number.isFinite(Number(s.waitTimeoutHours)) && Number(s.waitTimeoutHours) > 0
+          ? Math.min(720, Math.floor(Number(s.waitTimeoutHours)))
+          : undefined,
         // ★ Phase 9 fix: 발송 시점(시각) + 알림톡/MMS 필드 보존 — 이전엔 map에서 누락돼 09시·알림톡 설정이 저장 안 됐음.
         delayMode: s.delayMode,
         targetHourKst: typeof s.targetHourKst === 'number' ? s.targetHourKst : undefined,
@@ -404,6 +417,32 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
         step.anchorOffsetDays != null ? step.anchorOffsetDays : null,
       ]
     );
+
+    // ★ 2026-07-11 분기(not_met_goto)·이벤트 대기(wait_event_name/wait_timeout_hours) — 신규 컬럼이라 INSERT 밖 별도 UPDATE.
+    //   DDL 미실행(42703)이면 해당 설정만 조용히 누락(로그) — 여정 생성 본류는 절대 안 죽는다.
+    //   분기는 전방 점프만 허용(자기 자신 이하 = 무한루프 위험 → 저장 안 함).
+    if (step.stepType === 'condition' && step.notMetGoto != null && step.notMetGoto > step.stepOrder) {
+      try {
+        await query(
+          `UPDATE journey_steps SET not_met_goto = $1
+            WHERE journey_id = $2::uuid AND step_order = $3`,
+          [step.notMetGoto, journeyId, step.stepOrder]
+        );
+      } catch (e: any) {
+        console.log(`[JourneyBuilder] not_met_goto 저장 skip(컬럼 미마이그레이션 추정): ${e?.message || e}`);
+      }
+    }
+    if (step.stepType === 'wait' && step.waitEventName) {
+      try {
+        await query(
+          `UPDATE journey_steps SET wait_event_name = $1, wait_timeout_hours = $2
+            WHERE journey_id = $3::uuid AND step_order = $4`,
+          [step.waitEventName, step.waitTimeoutHours ?? 72, journeyId, step.stepOrder]
+        );
+      } catch (e: any) {
+        console.log(`[JourneyBuilder] wait_event 저장 skip(컬럼 미마이그레이션 추정): ${e?.message || e}`);
+      }
+    }
   }
 
   return { journeyId };
@@ -887,16 +926,30 @@ export async function updateJourneyStep(
     targetHourKst?: number | null;
     // ★ D218+ (2026-05-26): step별 담당자 알림 ON/OFF/default 토글
     notifyManagerOnPretest?: boolean | null;
+    // ★ 2026-07-11 활성 중 문안 수정 — 라우트 명시 opt-in. 문안 키(messageTemplate/subject)만 허용,
+    //   구조 키(채널·일정·조건·알림톡·MMS)는 활성 중 계속 차단. 수정 후 새 snapshot + 스팸 재검사 강제.
+    allowActiveMessageEdit?: boolean;
   }
 ): Promise<boolean> {
-  // 회사 격리 + 활성 상태에서는 step 수정 차단
+  // 회사 격리 + 활성 상태 게이트
   const j = await query(
     `SELECT status FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
     [journeyId, companyId]
   );
   if (j.rows.length === 0) return false;
-  if (j.rows[0].status === 'active') {
-    throw new Error('활성 상태 여정의 step은 수정할 수 없습니다. 먼저 일시정지해주세요.');
+  const isActive = j.rows[0].status === 'active';
+  if (isActive) {
+    const structuralKeys: Array<keyof typeof patch> = [
+      'channel', 'delayHours', 'isAd', 'stepType', 'conditionJsonb',
+      'alimtalkProfileId', 'alimtalkTemplateCode', 'alimtalkVariableMap',
+      'alimtalkNextType', 'alimtalkNextContents', 'alimtalkNextSubject',
+      'mmsImagePaths', 'delayMode', 'targetHourKst',
+    ];
+    const touchesStructure = structuralKeys.some((k) => patch[k] !== undefined);
+    const touchesMessage = patch.messageTemplate !== undefined || patch.subject !== undefined;
+    if (!patch.allowActiveMessageEdit || touchesStructure || !touchesMessage) {
+      throw new Error('활성 상태 여정은 문안(본문·제목)만 수정할 수 있습니다. 구조·일정 변경은 먼저 일시정지해주세요.');
+    }
   }
 
   // ★ D188 Phase 2-B-1: step_type 변경 시 conditionJsonb 정합 검증 (condition은 conditionJsonb 필수).
@@ -954,6 +1007,39 @@ export async function updateJourneyStep(
   // ★ Fix #4 (2026-06-05): step 편집 시 발송 전 검증 마커 무효화 — 편집 후 재검증해야 활성화 가능.
   if (r.rows.length > 0) {
     await query(`UPDATE journeys SET last_pretest_passed_at = NULL WHERE id = $1::uuid`, [journeyId]);
+  }
+
+  // ★ 2026-07-11 활성 중 문안 수정 — 발송은 최신 snapshot을 소비(D218 ORDER BY created_at DESC)하므로
+  //   새 snapshot을 만들어야 수정 본문이 실제 발송에 반영된다. 함께 이 step의 pretest dedup을 지워
+  //   발송 2시간 전 자동 스팸 재검사(scanAndPretest)가 새 본문을 다시 검사하게 강제한다(기존 파이프라인 재사용).
+  //   snapshot 실패 = throw(문안만 바뀌고 발송은 옛 본문인 어긋남을 사용자에게 즉시 알림).
+  if (isActive && r.rows.length > 0) {
+    const s = await query(
+      `SELECT s.channel, s.is_ad, s.message_template, s.subject,
+              s.alimtalk_variable_map, s.alimtalk_template_code, j.callback_number
+         FROM journey_steps s JOIN journeys j ON j.id = s.journey_id
+        WHERE s.id = $1::uuid AND s.journey_id = $2::uuid`,
+      [stepId, journeyId]
+    );
+    if (s.rows.length > 0) {
+      const row = s.rows[0];
+      await query(
+        `INSERT INTO journey_step_snapshots
+           (company_id, journey_id, step_id, variant_id, message_body, message_subject,
+            variable_map, channel, is_ad, callback_number, alimtalk_template_code, confidence_score)
+         VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, $10, 100)`,
+        [
+          companyId, journeyId, stepId,
+          row.message_template, row.subject,
+          row.alimtalk_variable_map || {}, row.channel, row.is_ad,
+          row.callback_number, row.alimtalk_template_code,
+        ]
+      );
+    }
+    await query(
+      `DELETE FROM journey_pretest_schedules WHERE journey_id = $1::uuid AND step_id = $2::uuid`,
+      [journeyId, stepId]
+    ).catch((e: any) => console.log(`[JourneyBuilder] pretest dedup 리셋 skip: ${e?.message || e}`));
   }
   return r.rows.length > 0;
 }
@@ -1064,9 +1150,11 @@ export async function listJourneys(companyId: string, status?: JourneyStatus | '
   //   화이트리스트 CT로 검증해 SQL 주입을 차단한다. archived 분리 + 허용 상태만 보간.
   const where = journeyListWhere(status);
   // ★ 2026-07-10 goal_met_count — 목표 달성 종료(진입 이후 구매 확인) 카드 뱃지용. 회사당 여정 수가 작아 서브쿼리 COUNT 부담 미미.
+  // ★ 2026-07-11 holdout_count — 홀드아웃 대조군(미발송) 카드 뱃지용. status 값만 신규(컬럼 신규 아님 — DDL 무관 안전).
   const r = await query(
     `SELECT j.*,
-            (SELECT COUNT(*)::int FROM journey_executions e WHERE e.journey_id = j.id AND e.status = 'goal_met') AS goal_met_count
+            (SELECT COUNT(*)::int FROM journey_executions e WHERE e.journey_id = j.id AND e.status = 'goal_met') AS goal_met_count,
+            (SELECT COUNT(*)::int FROM journey_executions e WHERE e.journey_id = j.id AND e.status = 'holdout') AS holdout_count
      FROM journeys j
      WHERE j.company_id = $1::uuid ${where}
      ORDER BY j.status ASC, j.created_at DESC`,

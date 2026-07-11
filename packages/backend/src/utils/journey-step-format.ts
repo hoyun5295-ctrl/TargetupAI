@@ -77,3 +77,40 @@ export function formatConditionChip(c: ConditionJsonb | null | undefined): strin
   }
   return '';
 }
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-07-11 여정 [타겟확인]: 트리거를 사람이 읽는 추출 조건 문구로.
+//   extractor(selectJourneyTargetCustomerIds) switch의 9종과 1:1 — 신규 트리거 추가 시 여기도 추가.
+// ════════════════════════════════════════════════════════════════════
+
+const TRIGGER_KO: Record<string, string> = {
+  'customer.created': '신규 가입 고객',
+  'cdp.purchase': '구매 발생 고객',
+  'cdp.reservation_created': '예약 발생 고객',
+  'custom_order_shipped': '배송 시작 고객',
+  'customer.dormant': '휴면 고객',
+  'cdp.cart_abandon': '장바구니 이탈 고객',
+  'customer.birthday_approaching': '생일 임박 고객',
+  'customer.points_expiring': '포인트 소멸 임박 고객',
+  'custom': '지정 조건 매칭 고객',
+};
+
+/** "휴면 고객 (60일+) · 추가 조건 2건" — 여정 타겟확인 모달의 추출 조건 라벨. */
+export function describeJourneyTrigger(
+  triggerEvent: string | null | undefined,
+  triggerFilters: Record<string, any> | null | undefined,
+): string {
+  const ev = String(triggerEvent || '');
+  const f = triggerFilters || {};
+  let base = TRIGGER_KO[ev] || (ev ? `트리거: ${ev}` : '조건 매칭 고객');
+
+  const parts: string[] = [];
+  const days = Number(f.days ?? f.dormant_days ?? f.within_days);
+  if (Number.isFinite(days) && days > 0) parts.push(`${days}일 기준`);
+  const pmin = Number(f.points_min);
+  if (Number.isFinite(pmin) && pmin > 0) parts.push(`포인트 ${pmin.toLocaleString()}+`);
+  const conds = Array.isArray(f.customer_conditions) ? f.customer_conditions.length : 0;
+  if (conds > 0) parts.push(`추가 조건 ${conds}건`);
+
+  return parts.length > 0 ? `${base} (${parts.join(' · ')})` : base;
+}

@@ -6196,18 +6196,9 @@ const handleApproveRequest = async (id: string) => {
                       </select>
                     </div>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">일일 발송 한도 (0 = 무제한)</label>
-                    <input type="number" value={editCompany.dailyLimit}
-                      onChange={(e) => setEditCompany({ ...editCompany, dailyLimit: Number(e.target.value) })}
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" min="0" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">중복 발송 방지 기간 (일)</label>
-                    <input type="number" value={editCompany.duplicateDays}
-                      onChange={(e) => setEditCompany({ ...editCompany, duplicateDays: Number(e.target.value) })}
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" min="0" />
-                  </div>
+                  {/* ★ 2026-07-11 거짓 설정 정리: 일일 발송 한도·중복 방지 기간 입력 제거 —
+                      발송 경로 소비처 0곳(저장만 되던 죽은 설정). 실동작 제한 = 고객사 Settings 발송 피로도 보호.
+                      state/저장 통로는 하위호환 유지(editCompany.dailyLimit/duplicateDays — 기존 값 보존 전송). */}
                                     <div className="flex items-center gap-2">
                     <input type="checkbox" id="approvalRequired" checked={editCompany.approvalRequired}
                       onChange={(e) => setEditCompany({ ...editCompany, approvalRequired: e.target.checked })}

@@ -6,7 +6,7 @@
  */
 
 const JOURNEY_STATUSES = ['draft', 'active', 'paused', 'ended'];
-const EXECUTION_STATUSES = ['active', 'completed', 'paused', 'failed', 'ended', 'goal_met'];  // ★ 2026-07-10 목표 달성 종료
+const EXECUTION_STATUSES = ['active', 'completed', 'paused', 'failed', 'ended', 'goal_met', 'holdout'];  // ★ 2026-07-10 목표 달성 종료 · 2026-07-11 홀드아웃 대조군
 
 /** 여정 목록 WHERE 조각(company_id 절 뒤에 이어붙임). archived 분리 + status 화이트리스트. */
 export function journeyListWhere(status?: string): string {

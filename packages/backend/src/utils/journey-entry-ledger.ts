@@ -76,3 +76,19 @@ export async function hasBaseline(journeyId: string): Promise<boolean> {
   const r = await query(`SELECT entry_baseline_at FROM journeys WHERE id = $1::uuid`, [journeyId]);
   return !!r.rows[0]?.entry_baseline_at;
 }
+
+/**
+ * ★ 2026-07-11 홀드아웃 대조군 — journeys.holdout_pct(신규 컬럼, 0~30 클램프) 조회.
+ *   42703(미마이그레이션)·조회 실패 = 0(전원 발송군, 현행 동일). 배정은 "최초 진입"에서만 —
+ *   재진입(reentry)은 이미 발송군이었던 고객이라 굴리지 않는다(대조군 오염 방지).
+ */
+export async function getJourneyHoldoutPct(journeyId: string): Promise<number> {
+  try {
+    const r = await query(`SELECT holdout_pct FROM journeys WHERE id = $1::uuid`, [journeyId]);
+    const pct = Number(r.rows[0]?.holdout_pct);
+    if (!Number.isFinite(pct) || pct <= 0) return 0;
+    return Math.min(30, Math.floor(pct));
+  } catch {
+    return 0;
+  }
+}

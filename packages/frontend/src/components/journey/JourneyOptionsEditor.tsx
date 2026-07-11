@@ -34,8 +34,11 @@ export default function JourneyOptionsEditor({ journey, token, onSaved }: Props)
 
   const [goalExit, setGoalExit] = useState<boolean>(journey.goal_exit_enabled === true);
   const [goalSaving, setGoalSaving] = useState(false);
+  // ★ 2026-07-11 목표 종류 — purchase(구매)/click(발송 링크 클릭)/visit(자사몰 방문). 컬럼 미마이그레이션이면 undefined → purchase.
+  const [goalKind, setGoalKind] = useState<string>(journey.goal_kind || 'purchase');
   // 부모 상세 캐시 갱신 시 서버 값으로 재동기화 — 접었다 펼칠 때 stale 표시 차단(Codex P2 정정)
   useEffect(() => { setGoalExit(journey.goal_exit_enabled === true); }, [journey.id, journey.goal_exit_enabled]);
+  useEffect(() => { setGoalKind(journey.goal_kind || 'purchase'); }, [journey.id, journey.goal_kind]);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [form, setForm] = useState<Record<string, any>>({
     recent_hours: tf.recent_hours, dormant_days: tf.dormant_days, days_before: tf.days_before, abandon_hours: tf.abandon_hours,
@@ -43,6 +46,9 @@ export default function JourneyOptionsEditor({ journey, token, onSaved }: Props)
     thresholdRecipients: journey.threshold_recipients_per_step, thresholdCost: journey.threshold_cost_per_step,
     thresholdRiskLevel: journey.threshold_risk_level || 'low', budgetMonthly: journey.budget_monthly,
     reentryCooldownDays: journey.reentry_cooldown_days,
+    // ★ 2026-07-11 홀드아웃·send-time 개인화 (신규 컬럼 — 미마이그레이션이면 undefined → 0/false 표시)
+    holdoutPct: journey.holdout_pct ?? 0,
+    personalSendTime: journey.personal_send_time === true,
   });
   const [saving, setSaving] = useState(false);
   const set = (k: string, v: any) => setForm((p) => ({ ...p, [k]: v }));
@@ -69,8 +75,29 @@ export default function JourneyOptionsEditor({ journey, token, onSaved }: Props)
       if (ok) {
         setGoalExit(next);
         toast.success(next
-          ? '목표 달성 시 자동 종료를 켰습니다 — 진입 후 구매가 확인된 고객은 남은 메시지를 받지 않습니다.'
+          ? '목표 달성 시 자동 종료를 켰습니다 — 진입 후 목표 달성이 확인된 고객은 남은 메시지를 받지 않습니다.'
           : '목표 달성 시 자동 종료를 껐습니다.');
+        onSaved();
+      }
+    } catch (e: any) {
+      toast.error(e?.message || '옵션 저장 중 오류가 났습니다.');
+    } finally { setGoalSaving(false); }
+  };
+
+  // ★ 2026-07-11 목표 종류 선택 = 즉시 저장(토글과 동일 1클릭 패턴 — 운영 중에도 변경 가능)
+  const GOAL_KIND_META: Record<string, { label: string; desc: string }> = {
+    purchase: { label: '구매', desc: '진입 후 구매(연동몰 실시간 · ERP는 반영분)가 확인되면 종료' },
+    click: { label: '링크 클릭', desc: '이 여정이 보낸 메시지의 링크를 클릭하면 종료' },
+    visit: { label: '몰 방문', desc: '자사몰 재방문(사이트 스크립트 설치 몰)이 확인되면 종료' },
+  };
+  const selectGoalKind = async (kind: string) => {
+    if (!goalEditable || goalSaving || kind === goalKind) return;
+    setGoalSaving(true);
+    try {
+      const ok = await patchOptions({ goalKind: kind });
+      if (ok) {
+        setGoalKind(kind);
+        toast.success(`목표 종류를 "${GOAL_KIND_META[kind]?.label || kind}"(으)로 바꿨습니다.`);
         onSaved();
       }
     } catch (e: any) {
@@ -95,6 +122,8 @@ export default function JourneyOptionsEditor({ journey, token, onSaved }: Props)
       body.thresholdRiskLevel = form.thresholdRiskLevel;
       body.budgetMonthly = numOrNull(form.budgetMonthly);
       body.reentryCooldownDays = Number(form.reentryCooldownDays ?? 0);
+      body.holdoutPct = Number(form.holdoutPct ?? 0);
+      body.personalSendTime = form.personalSendTime === true;
 
       const ok = await patchOptions(body);
       if (ok) { toast.success('여정 옵션을 저장했습니다.'); onSaved(); }
@@ -123,8 +152,8 @@ export default function JourneyOptionsEditor({ journey, token, onSaved }: Props)
           <div className="min-w-0 flex-1">
             <div className="text-[12px] font-semibold text-white">목표 달성 시 자동 종료</div>
             <div className="text-[10px] text-white/45 leading-relaxed mt-0.5">
-              여정 진입 후 구매가 확인된 고객은 남은 메시지를 받지 않고 "목표 달성"으로 종료됩니다.
-              연동몰은 실시간, ERP 연동사는 데이터 반영분까지 인식합니다. 운영 중에도 바꿀 수 있습니다.
+              여정 진입 후 목표 달성이 확인된 고객은 남은 메시지를 받지 않고 "목표 달성"으로 종료됩니다.
+              운영 중에도 바꿀 수 있습니다.
             </div>
           </div>
           <button onClick={toggleGoalExit} disabled={!goalEditable || goalSaving} aria-label="목표 달성 시 자동 종료"
@@ -134,6 +163,24 @@ export default function JourneyOptionsEditor({ journey, token, onSaved }: Props)
               : <span className={`absolute top-0.5 w-[18px] h-[18px] bg-white rounded-full transition-all ${goalExit ? 'left-[20px]' : 'left-0.5'}`} />}
           </button>
         </div>
+        {/* ★ 2026-07-11 목표 종류 — 토글 on일 때만 노출, 선택 즉시 저장 */}
+        {goalExit && (
+          <div className="mt-2 pl-6">
+            <div className="flex gap-1.5">
+              {Object.entries(GOAL_KIND_META).map(([kind, meta]) => (
+                <button key={kind} onClick={() => selectGoalKind(kind)} disabled={!goalEditable || goalSaving}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-colors disabled:opacity-40 ${
+                    goalKind === kind
+                      ? 'bg-emerald-500/25 border-emerald-400/50 text-emerald-100'
+                      : 'bg-white/5 border-white/10 text-white/50 hover:text-white/80 hover:border-white/25'
+                  }`}>
+                  {meta.label}
+                </button>
+              ))}
+            </div>
+            <div className="text-[10px] text-white/40 mt-1.5">{GOAL_KIND_META[goalKind]?.desc || ''}</div>
+          </div>
+        )}
       </div>
 
       {/* 고급 설정 — 접기 */}
@@ -207,6 +254,21 @@ export default function JourneyOptionsEditor({ journey, token, onSaved }: Props)
                 <option value="medium">보통</option>
                 <option value="high">높음</option>
               </select>
+            </div>
+            {/* ★ 2026-07-11 홀드아웃 대조군 — 신규 진입의 N%를 미발송 대조군으로(증분 성과 비교). 0=사용 안 함 */}
+            <div>
+              <label className="block text-[10px] text-white/50 mb-1">홀드아웃 대조군 (%, 0~30 · 0=사용 안 함)</label>
+              <input type="number" min={0} max={30} disabled={!editable} className={inputCls} value={form.holdoutPct ?? 0}
+                onChange={(e) => set('holdoutPct', Math.max(0, Math.min(30, Number(e.target.value) || 0)))} />
+              <div className="text-[9px] text-white/35 mt-0.5">진입 고객 일부를 발송하지 않고 남겨 "보냈을 때 vs 안 보냈을 때" 전환을 비교합니다.</div>
+            </div>
+            {/* ★ 2026-07-11 send-time 개인화 — 시각 지정 단계의 발송 시각을 고객 반응 시간대로 */}
+            <div className="flex items-end pb-1">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" disabled={!editable} checked={form.personalSendTime === true}
+                  onChange={(e) => set('personalSendTime', e.target.checked)} className="w-3.5 h-3.5 rounded accent-violet-500" />
+                <span className="text-[10px] text-white/60 leading-snug">발송 시각 개인화 — 시각 지정 단계를 고객이 반응한 시간대(최근 90일)로 보정</span>
+              </label>
             </div>
           </div>
 

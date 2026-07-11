@@ -155,7 +155,8 @@ export default function JourneyMessageEditModal({
         const res = await fetch(`/api/ai/operator/journeys/${journeyId}/steps/${s.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ messageTemplate: s.messageTemplate, subject: s.subject }),
+          // ★ 2026-07-11 활성 중 문안 수정 — 명시 opt-in(문안 키만). 백엔드가 새 snapshot + 발송 전 스팸 재검사 강제.
+          body: JSON.stringify({ messageTemplate: s.messageTemplate, subject: s.subject, allowActiveMessageEdit: journeyStatus === 'active' }),
         });
         const data = await res.json();
         if (!res.ok || !data.success) {
@@ -236,6 +237,7 @@ export default function JourneyMessageEditModal({
             문안(본문·제목)만 고칠 수 있습니다. 발송 일정·단계 구조는 새 여정으로 바꿔주세요(진행 중 발송 보호).
             {journeyStatus === 'paused' && ' 일시정지 여정은 재개하면 새 문안으로 발송됩니다.'}
             {journeyStatus === 'draft' && ' 초안 여정은 활성화 시 이 문안으로 발송됩니다.'}
+            {journeyStatus === 'active' && ' 운영 중 여정입니다 — 저장 즉시 새 문안이 적용되고, 다음 발송 전 자동 스팸 검사를 다시 거칩니다. 단 2시간 이내로 예정된 발송에는 재검사 전에 적용될 수 있으니 저장 전 문안을 한 번 더 확인해주세요.'}
             {viewMode === 'preview' && ' 미리보기는 샘플 고객 한 명 기준으로 변수를 치환한 모습입니다.'}
           </div>
         </div>

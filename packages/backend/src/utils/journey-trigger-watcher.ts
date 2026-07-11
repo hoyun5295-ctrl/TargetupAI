@@ -29,6 +29,7 @@ import { query, pool } from '../config/database';
 import { selectJourneyTargetCustomerIds, selectCdpEventRowsForCursor, selectCartAbandonProperties, JOURNEY_COUNT_CAP } from './journey-target-extractor';
 import { planCdpCursorBatch, buildEntryPropsArray, resolveCdpCursorEventName } from './journey-cdp-cursor';
 import { calculateNextRunAt } from './send-time-util';
+import { getJourneyHoldoutPct } from './journey-entry-ledger';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -55,12 +56,20 @@ interface FirstStepRow {
 }
 
 // 진입 INSERT — enqueueCandidates / processCdpCursorJourney 공용(중복 정의 방지).
+// ★ 2026-07-11 홀드아웃: $5=holdout_pct(0~30) — 확률 당첨 시 status='holdout'(발송 tick의 active 조회에서 자동 제외 = 미발송 대조군).
 const INSERT_EXECUTION_SQL =
   `INSERT INTO journey_executions (
      id, journey_id, customer_id, current_step_order, status,
      entered_at, next_run_at, created_at, entry_event_properties
    ) VALUES (
-     gen_random_uuid(), $1::uuid, $2::uuid, 0, 'active',
+     gen_random_uuid(), $1::uuid, $2::uuid, 0,
+     CASE
+       WHEN EXISTS (SELECT 1 FROM journey_executions he
+                     WHERE he.journey_id = $1::uuid AND he.customer_id = $2::uuid AND he.status = 'holdout')
+         THEN 'holdout'
+       WHEN $5::int > 0 AND random() * 100 < $5::int THEN 'holdout'
+       ELSE 'active'
+     END,
      NOW(), $3, NOW(), $4::jsonb
    )`;
 
@@ -202,6 +211,7 @@ async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Pro
   const firstStep = firstStepRes.rows[0] as FirstStepRow;
 
   // ★ 정확히 1회: 진입 전부 + 커서 전진을 한 트랜잭션 (크래시 시 통째 롤백 → 다음 회차 동일 창 재처리, 중복 0).
+  const holdoutPct = await getJourneyHoldoutPct(j.id);  // ★ 2026-07-11 홀드아웃 — 여정당 1회 조회
   let enqueued = 0;
   let skipped = 0;
   const client = await pool.connect();
@@ -212,7 +222,7 @@ async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Pro
       if (!allowed) { skipped++; continue; }
       const nextRunAt = calculateNextRunAt(firstStep.delay_mode, Number(firstStep.delay_hours || 0), firstStep.target_hour_kst);
       const evProps = batch.propertiesByCustomer[customerId];
-      await client.query(INSERT_EXECUTION_SQL, [j.id, customerId, nextRunAt, evProps ? JSON.stringify(evProps) : null]);
+      await client.query(INSERT_EXECUTION_SQL, [j.id, customerId, nextRunAt, evProps ? JSON.stringify(evProps) : null, holdoutPct]);
       enqueued++;
     }
     await client.query(`UPDATE journeys SET last_event_cursor = $2 WHERE id = $1::uuid`, [j.id, newCursor]);
@@ -260,20 +270,29 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
   // ★ 2026-06-22: 진입 properties(장바구니 cart_add 등)를 id 순서에 정렬해 entry_event_properties로 동봉.
   //   props 미전달(타 트리거) 시 전부 null → entry_event_properties NULL(기존 동작 불변).
   const entryProps = buildEntryPropsArray(customerIds, propsByCustomer);
+  const holdoutPct = await getJourneyHoldoutPct(j.id);  // ★ 2026-07-11 홀드아웃 — 여정당 1회 조회
   let enqueued = 0;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const insRes = await client.query(
       `INSERT INTO journey_executions (id, journey_id, customer_id, current_step_order, status, entered_at, next_run_at, created_at, entry_event_properties)
-       SELECT gen_random_uuid(), $1::uuid, t.cid, 0, 'active', NOW(), $3, NOW(), t.props
+       SELECT gen_random_uuid(), $1::uuid, t.cid, 0,
+              CASE
+                WHEN EXISTS (SELECT 1 FROM journey_executions he
+                              WHERE he.journey_id = $1::uuid AND he.customer_id = t.cid AND he.status = 'holdout')
+                  THEN 'holdout'
+                WHEN $5::int > 0 AND random() * 100 < $5::int THEN 'holdout'
+                ELSE 'active'
+              END,
+              NOW(), $3, NOW(), t.props
          FROM unnest($2::uuid[], $4::jsonb[]) AS t(cid, props)
         WHERE NOT EXISTS (
           SELECT 1 FROM journey_executions je
            WHERE je.journey_id = $1::uuid AND je.customer_id = t.cid ${reentryGuard}
         )
        RETURNING customer_id`,
-      [j.id, customerIds, nextRunAt, entryProps]
+      [j.id, customerIds, nextRunAt, entryProps, holdoutPct]
     );
     enqueued = insRes.rows.length;
 

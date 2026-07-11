@@ -21,6 +21,7 @@
 
 import { query, pool } from '../config/database';
 import { selectAnchorAudienceIds, JOURNEY_COUNT_CAP } from './journey-target-extractor';
+import { getJourneyHoldoutPct } from './journey-entry-ledger';
 import {
   computeAnchorStepRunAt,
   computeNextAnchor,
@@ -185,11 +186,20 @@ async function dispatchAnchorStep(
     );
     const newIds = claimed.rows.map((r: any) => r.customer_id);
     if (newIds.length > 0) {
+      const holdoutPct = await getJourneyHoldoutPct(j.id);  // ★ 2026-07-11 홀드아웃 — 최초 진입에서만 배정
       const ins = await client.query(
         `INSERT INTO journey_executions (id, journey_id, customer_id, current_step_order, status, entered_at, next_run_at, created_at)
-         SELECT gen_random_uuid(), $1::uuid, cid, $2, 'active', NOW(), $3, NOW()
+         SELECT gen_random_uuid(), $1::uuid, cid, $2,
+                CASE
+                  WHEN EXISTS (SELECT 1 FROM journey_executions he
+                                WHERE he.journey_id = $1::uuid AND he.customer_id = cid AND he.status = 'holdout')
+                    THEN 'holdout'
+                  WHEN $5::int > 0 AND random() * 100 < $5::int THEN 'holdout'
+                  ELSE 'active'
+                END,
+                NOW(), $3, NOW()
            FROM unnest($4::uuid[]) AS t(cid)`,
-        [j.id, step.step_order - 1, nextRunAt, newIds],
+        [j.id, step.step_order - 1, nextRunAt, newIds, holdoutPct],
       );
       enqueued = ins.rowCount || 0;
       await client.query(
@@ -260,11 +270,20 @@ export async function dispatchOneShotJourney(companyId: string, journeyId: strin
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const holdoutPct = await getJourneyHoldoutPct(journeyId);  // ★ 2026-07-11 홀드아웃 — 최초 진입에서만 배정
     const ins = await client.query(
       `INSERT INTO journey_executions (id, journey_id, customer_id, current_step_order, status, entered_at, next_run_at, created_at)
-       SELECT gen_random_uuid(), $1::uuid, cid, $2, 'active', NOW(), $3, NOW()
+       SELECT gen_random_uuid(), $1::uuid, cid, $2,
+              CASE
+                WHEN EXISTS (SELECT 1 FROM journey_executions he
+                              WHERE he.journey_id = $1::uuid AND he.customer_id = cid AND he.status = 'holdout')
+                  THEN 'holdout'
+                WHEN $5::int > 0 AND random() * 100 < $5::int THEN 'holdout'
+                ELSE 'active'
+              END,
+              NOW(), $3, NOW()
          FROM unnest($4::uuid[]) AS t(cid)`,
-      [journeyId, Number(step.step_order) - 1, nextRunAt, ids],
+      [journeyId, Number(step.step_order) - 1, nextRunAt, ids, holdoutPct],
     );
     enqueued = ins.rowCount || 0;
     await client.query(

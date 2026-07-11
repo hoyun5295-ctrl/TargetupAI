@@ -27,6 +27,8 @@ export interface JourneyOverview {
   completed: number;
   /** ★ 2026-07-10 목표 달성 종료(진입 이후 구매 확인 이탈) — 실패가 아니라 성과 지표 */
   goalMet: number;
+  /** ★ 2026-07-11 홀드아웃 대조군 — 진입했지만 의도적으로 발송하지 않는 그룹(증분 성과 비교용) */
+  holdout: number;
   paused: number;
   failed: number;
   totalCost: number;
@@ -116,6 +118,8 @@ export interface JourneyFullStats {
   hourly: JourneyHourlyStat[];
   weekday: JourneyWeekdayStat[];
   variants: JourneyVariantStat[];
+  /** ★ 2026-07-11 홀드아웃 증분 비교 — 대조군 없으면 null */
+  holdoutCompare?: JourneyHoldoutCompare | null;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -143,6 +147,7 @@ async function getJourneyOverview(journeyId: string): Promise<JourneyOverview> {
        COUNT(*) FILTER (WHERE status = 'active') AS active,
        COUNT(*) FILTER (WHERE status = 'completed') AS completed,
        COUNT(*) FILTER (WHERE status = 'goal_met') AS goal_met,
+       COUNT(*) FILTER (WHERE status = 'holdout') AS holdout,
        COUNT(*) FILTER (WHERE status = 'paused') AS paused,
        COUNT(*) FILTER (WHERE status = 'failed') AS failed,
        COALESCE(SUM(total_cost), 0) AS total_cost,
@@ -167,6 +172,7 @@ async function getJourneyOverview(journeyId: string): Promise<JourneyOverview> {
   const log = logRes.rows[0] || {};
   const totalEntered = Number(exec.total_entered) || 0;
   const completed = Number(exec.completed) || 0;
+  const holdout = Number(exec.holdout) || 0;
 
   return {
     journeyId,
@@ -174,6 +180,7 @@ async function getJourneyOverview(journeyId: string): Promise<JourneyOverview> {
     active: Number(exec.active) || 0,
     completed,
     goalMet: Number(exec.goal_met) || 0,
+    holdout: Number(exec.holdout) || 0,
     paused: Number(exec.paused) || 0,
     failed: Number(exec.failed) || 0,
     totalCost: Number(exec.total_cost) || 0,
@@ -181,7 +188,8 @@ async function getJourneyOverview(journeyId: string): Promise<JourneyOverview> {
     totalFailed: Number(log.total_failed) || 0,
     totalSkipped: Number(log.total_skipped) || 0,
     avgCompletionHours: exec.avg_completion_hours != null ? Number(exec.avg_completion_hours) : null,
-    completionRate: totalEntered > 0 ? completed / totalEntered : 0,
+    // ★ 2026-07-11: 완주율 분모 = 발송군(홀드아웃 제외) — 대조군이 완주율을 희석하지 않게
+    completionRate: (totalEntered - holdout) > 0 ? completed / (totalEntered - holdout) : 0,
   };
 }
 
@@ -612,7 +620,62 @@ export async function buildJourneyStats(journeyId: string, companyId: string): P
     getJourneyVariantStats(journeyId),
   ]);
 
-  return { overview, steps, segments, hourly, weekday, variants };
+  // ★ 2026-07-11 홀드아웃 증분 비교 — 대조군이 있을 때만(전환 판정 = purchase 이벤트 또는 프로필 최근구매일 갱신,
+  //   goal purchase 판정과 동일 신호). 발송군 = holdout 제외 전체.
+  let holdoutCompare: JourneyHoldoutCompare | null = null;
+  if (overview.holdout > 0) {
+    try {
+      const hc = await query(
+        `SELECT
+           COUNT(*) FILTER (WHERE e.status = 'holdout') AS h_total,
+           COUNT(*) FILTER (WHERE e.status = 'holdout' AND e.conv) AS h_conv,
+           COUNT(*) FILTER (WHERE e.status <> 'holdout') AS s_total,
+           COUNT(*) FILTER (WHERE e.status <> 'holdout' AND e.conv) AS s_conv
+         FROM (
+           SELECT e.id, e.status,
+                  (EXISTS (
+                     SELECT 1 FROM cdp_events ce
+                      WHERE ce.company_id = j.company_id AND ce.customer_id = e.customer_id
+                        AND ce.event_name = 'purchase' AND ce.occurred_at > e.entered_at
+                   ) OR EXISTS (
+                     SELECT 1 FROM customers c
+                      WHERE c.id = e.customer_id AND c.company_id = j.company_id
+                        AND c.recent_purchase_date IS NOT NULL
+                        AND c.recent_purchase_date > (e.entered_at AT TIME ZONE 'Asia/Seoul')::date
+                   )) AS conv
+             FROM journey_executions e
+             JOIN journeys j ON j.id = e.journey_id
+            WHERE e.journey_id = $1::uuid
+         ) e`,
+        [journeyId]
+      );
+      const row = hc.rows[0] || {};
+      const hTotal = Number(row.h_total) || 0;
+      const sTotal = Number(row.s_total) || 0;
+      holdoutCompare = {
+        holdoutTotal: hTotal,
+        holdoutConverted: Number(row.h_conv) || 0,
+        sentTotal: sTotal,
+        sentConverted: Number(row.s_conv) || 0,
+        holdoutRate: hTotal > 0 ? (Number(row.h_conv) || 0) / hTotal : 0,
+        sentRate: sTotal > 0 ? (Number(row.s_conv) || 0) / sTotal : 0,
+      };
+    } catch (e: any) {
+      console.log('[JourneyStats] 홀드아웃 비교 실패(통계만 생략):', e?.message || e);
+    }
+  }
+
+  return { overview, steps, segments, hourly, weekday, variants, holdoutCompare };
+}
+
+/** ★ 2026-07-11 홀드아웃 증분 비교 — 발송군 vs 미발송 대조군 전환율 */
+export interface JourneyHoldoutCompare {
+  holdoutTotal: number;
+  holdoutConverted: number;
+  sentTotal: number;
+  sentConverted: number;
+  holdoutRate: number;
+  sentRate: number;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

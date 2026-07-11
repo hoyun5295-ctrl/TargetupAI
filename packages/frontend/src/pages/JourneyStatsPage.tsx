@@ -36,7 +36,18 @@ interface JourneyStatsData {
     totalSkipped: number;
     avgCompletionHours: number | null;
     completionRate: number;
+    /** ★ 2026-07-11 홀드아웃 대조군(미발송) */
+    holdout?: number;
   };
+  /** ★ 2026-07-11 홀드아웃 증분 비교 — 대조군 없으면 null */
+  holdoutCompare?: {
+    holdoutTotal: number;
+    holdoutConverted: number;
+    sentTotal: number;
+    sentConverted: number;
+    holdoutRate: number;
+    sentRate: number;
+  } | null;
   steps: Array<{
     stepId: string;
     stepOrder: number;
@@ -165,7 +176,38 @@ export default function JourneyStatsPage() {
           <Card icon={<DollarSign className="w-4 h-4" />} label="총 비용" value={formatCost(stats.overview.totalCost)} color="text-fuchsia-300" />
         </div>
         {Number(stats.overview.goalMet || 0) > 0 && (
-          <div className="text-[11px] text-emerald-300/70 -mt-4 mb-6">목표 달성 = 여정 진입 후 구매가 확인되어 남은 발송 없이 종료된 고객 — 이 여정이 만든 성과입니다.</div>
+          <div className="text-[11px] text-emerald-300/70 -mt-4 mb-6">목표 달성 = 여정 진입 후 목표 달성이 확인되어 남은 발송 없이 종료된 고객 — 이 여정이 만든 성과입니다.</div>
+        )}
+
+        {/* ★ 2026-07-11 홀드아웃 증분 비교 — 발송군 vs 미발송 대조군 전환율 */}
+        {stats.holdoutCompare && stats.holdoutCompare.holdoutTotal > 0 && (
+          <div className="mb-6 p-4 bg-sky-500/5 border border-sky-400/25 rounded-xl">
+            <div className="flex items-center gap-2 mb-3">
+              <Beaker className="w-4 h-4 text-sky-300" />
+              <span className="text-sm font-semibold text-sky-100">홀드아웃 증분 비교</span>
+              <span className="text-[10px] text-white/40">이 여정이 실제로 전환을 만드는지 — 발송군 vs 미발송 대조군</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="p-3 bg-white/[0.04] border border-white/10 rounded-lg">
+                <div className="text-[10px] text-white/45 mb-1">발송군 전환율</div>
+                <div className="text-xl font-bold text-emerald-300 tabular-nums">{(stats.holdoutCompare.sentRate * 100).toFixed(1)}%</div>
+                <div className="text-[10px] text-white/40 mt-0.5">{stats.holdoutCompare.sentConverted.toLocaleString()} / {stats.holdoutCompare.sentTotal.toLocaleString()}명</div>
+              </div>
+              <div className="p-3 bg-white/[0.04] border border-white/10 rounded-lg">
+                <div className="text-[10px] text-white/45 mb-1">대조군 전환율 (미발송)</div>
+                <div className="text-xl font-bold text-white/70 tabular-nums">{(stats.holdoutCompare.holdoutRate * 100).toFixed(1)}%</div>
+                <div className="text-[10px] text-white/40 mt-0.5">{stats.holdoutCompare.holdoutConverted.toLocaleString()} / {stats.holdoutCompare.holdoutTotal.toLocaleString()}명</div>
+              </div>
+              <div className="p-3 bg-white/[0.04] border border-white/10 rounded-lg">
+                <div className="text-[10px] text-white/45 mb-1">증분 효과 (발송군 − 대조군)</div>
+                <div className={`text-xl font-bold tabular-nums ${stats.holdoutCompare.sentRate >= stats.holdoutCompare.holdoutRate ? 'text-sky-300' : 'text-rose-300'}`}>
+                  {((stats.holdoutCompare.sentRate - stats.holdoutCompare.holdoutRate) * 100).toFixed(1)}%p
+                </div>
+                <div className="text-[10px] text-white/40 mt-0.5">전환 판정 = 진입 이후 구매(이벤트·프로필)</div>
+              </div>
+            </div>
+            <div className="text-[10px] text-white/30 italic mt-2">Data source — journey_executions(holdout) × cdp_events·customers 실측</div>
+          </div>
         )}
 
         {/* Step별 통계 */}

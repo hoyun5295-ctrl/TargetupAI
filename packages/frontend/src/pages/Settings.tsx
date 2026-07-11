@@ -40,9 +40,7 @@ export default function Settings() {
     cost_per_kakao: 7.5,
     send_start_hour: 9,
     send_end_hour: 20,
-    daily_limit_per_customer: 1,
     holiday_send_allowed: false,
-    duplicate_prevention_days: 7,
     target_strategy: 'balanced',
     cross_category_allowed: true,
     approval_required: false,
@@ -353,7 +351,7 @@ export default function Settings() {
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600"><Clock className="h-[18px] w-[18px]" /></div>
                 <div>
                   <h2 className="text-sm font-semibold text-gray-900">발송 정책</h2>
-                  <p className="text-[11px] text-gray-400">발송 시간대 · 한도 · 중복 방지</p>
+                  <p className="text-[11px] text-gray-400">발송 시간대 · 휴일 · 피로도 보호</p>
                 </div>
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -369,15 +367,10 @@ export default function Settings() {
                     {Array.from({ length: 24 }, (_, i) => (<option key={i} value={i}>{i}시</option>))}
                   </select>
                 </div>
-                <div>
-                  <label className={labelCls}>고객당 일일 한도</label>
-                  <input type="number" value={settings.daily_limit_per_customer} onChange={(e) => setSettings({ ...settings, daily_limit_per_customer: Number(e.target.value) })} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>중복 방지 기간 <span className="text-gray-300">(일)</span></label>
-                  <input type="number" value={settings.duplicate_prevention_days} onChange={(e) => setSettings({ ...settings, duplicate_prevention_days: Number(e.target.value) })} className={inputCls} />
-                </div>
+                {/* ★ 2026-07-11 거짓 설정 정리: "고객당 일일 한도"·"중복 방지 기간" 입력 제거 —
+                    발송 경로 소비처 0곳(저장만 되던 죽은 설정). 실제 발송 횟수 제한 = 아래 발송 피로도 보호. */}
               </div>
+              <p className="mt-2 text-[11px] text-gray-400">고객별 발송 횟수 제한은 아래 "발송 피로도 보호"가 담당합니다.</p>
               <label className="mt-3 flex w-fit cursor-pointer items-center gap-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
                 <input type="checkbox" checked={settings.holiday_send_allowed} onChange={(e) => setSettings({ ...settings, holiday_send_allowed: e.target.checked })} className="h-4 w-4 rounded accent-violet-600" />
                 <span className="text-sm text-gray-700">휴일 발송 허용</span>

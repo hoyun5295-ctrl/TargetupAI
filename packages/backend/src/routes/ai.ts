@@ -116,7 +116,9 @@ import { generateJourneyPackage, refineStepMessage, generateAnchorJourneyPlan } 
 import { editJourneyPackage } from '../utils/journey-ai-editor';
 // ★ 2026-06-29: AI 꾸미기 — 추천 메시지에 선택 컬럼(%변수%) 자연스럽게 녹임
 import { decorateOperatorMessages } from '../utils/operator-message-decorator';
-import { buildJourneyPreviewSamples, countJourneyTargetCustomers } from '../utils/journey-target-extractor';
+import { buildJourneyPreviewSamples, countJourneyTargetCustomers, selectAnchorAudienceIds } from '../utils/journey-target-extractor';
+import { describeJourneyTrigger } from '../utils/journey-step-format';
+import { normalizeStartKind } from '../utils/journey-start-kind';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 조회.
 //   /operator/data-profile endpoint = 마케팅 담당자 검토 UI 안내 카드 data source.
 import { getCompanyDataProfile } from '../utils/company-data-profile';
@@ -3418,8 +3420,10 @@ router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: R
       alimtalkNextType, alimtalkNextContents, alimtalkNextSubject,
       mmsImagePaths,
       notifyManagerOnPretest,
+      allowActiveMessageEdit,
     } = req.body || {};
     const ok = await updateJourneyStep(companyId, req.params.id, req.params.stepId, {
+      allowActiveMessageEdit: allowActiveMessageEdit === true,
       messageTemplate,
       subject,
       channel,
@@ -3626,6 +3630,88 @@ router.get('/operator/journeys/:id/preview-samples', async (req: Request, res: R
   }
 });
 
+// ★ 2026-07-11 여정 [타겟확인] — 발송 추출과 동일 함수로 "지금 조건 매칭 표본" LIMIT 100 명단.
+//   (0710 자동마케팅 [타겟확인]과 동일 계약: 1회 로드 → 클라 페이징, 시점 정직 라벨.)
+//   기존 검증 컬럼만 사용(journeys.trigger_event/trigger_filters/start_kind · customers 표시 필드) — 신규 컬럼 0.
+router.post('/operator/journeys/:id/target-recipients', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+
+    const jr = await query(
+      `SELECT name, trigger_event, trigger_filters, start_kind FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [req.params.id, companyId]
+    );
+    if (jr.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    const journeyRow = jr.rows[0];
+    const triggerEvent = String(journeyRow.trigger_event || '');
+    const triggerFilters = journeyRow.trigger_filters || {};
+    const startKind = normalizeStartKind(journeyRow.start_kind);
+
+    // 추출 — 발송과 동일 함수(자동완화 X). date_anchor는 앵커 대상 함수, 그 외는 트리거 추출.
+    let ids: string[] = [];
+    let displayTotal = 0;
+    let capped = false;
+    if (startKind === 'date_anchor') {
+      ids = await selectAnchorAudienceIds(companyId, triggerFilters, 100);
+      // 앵커 대상 전용 count 헬퍼 없음 — 10,000 상한 실측(정직 표기)
+      const totalProbe = await selectAnchorAudienceIds(companyId, triggerFilters, 10001);
+      capped = totalProbe.length > 10000;
+      displayTotal = capped ? 10000 : totalProbe.length;
+    } else {
+      ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, 100, req.params.id);
+      const cnt = await countJourneyTargetCustomers(companyId, triggerEvent, triggerFilters, req.params.id);
+      displayTotal = cnt.total;
+      capped = cnt.capped;
+    }
+
+    let recipients: any[] = [];
+    if (ids.length > 0) {
+      const rowsRes = await query(
+        `SELECT name, phone, grade, gender, region, age, points, recent_purchase_date
+           FROM customers
+          WHERE company_id = $1::uuid AND id = ANY($2::uuid[])
+          ORDER BY array_position($2::uuid[], id)`,
+        [companyId, ids]
+      );
+      recipients = rowsRes.rows.map((r: any) => ({
+        name: r.name || null,
+        phone: r.phone || null,
+        grade: r.grade || null,
+        gender: r.gender || null,
+        region: r.region || null,
+        age: r.age != null ? Number(r.age) : null,
+        points: r.points != null ? Number(r.points).toLocaleString() : null,
+        recent_purchase: r.recent_purchase_date
+          ? new Date(r.recent_purchase_date).toLocaleDateString('ko-KR')
+          : null,
+      }));
+    }
+
+    return res.json({
+      success: true,
+      recipients,
+      displayTotal,
+      capped,
+      criteria: describeJourneyTrigger(triggerEvent, triggerFilters),
+      journeyName: journeyRow.name || null,
+      basisLabel: '발송 추출과 동일 함수 실측 — 실제 진입·발송은 트리거 발생/스케줄 시점 기준',
+      conditionColumns: [
+        { key: 'points', label: '포인트' },
+        { key: 'recent_purchase', label: '최근구매일' },
+      ],
+    });
+  } catch (err: any) {
+    console.error('[Journeys target-recipients] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '발송 대상 조회 실패' });
+  }
+});
+
 // review 단계(저장 전) 미리보기 샘플 — triggerEvent/triggerFilters로 직접 추출 (preview-samples와 동일 빌더).
 router.post('/operator/preview-target-samples', async (req: Request, res: Response) => {
   try {
@@ -3709,7 +3795,8 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
       // ★ 2026-07-10 목표 달성 자동 종료 토글만 운영(active) 중에도 변경 허용 — 발송을 줄이는 안전 방향.
       //   그 외 옵션(타이밍·한도·예산·재진입·회신)은 기존 규칙 유지(일시정지 후 편집).
       const keys = Object.keys(body);
-      const onlyGoalToggle = cur.rows[0].status === 'active' && keys.length > 0 && keys.every((k) => k === 'goalExitEnabled');
+      // ★ 2026-07-11: 목표 종류(goalKind)도 운영 중 변경 허용 — 목표 축 키 2종만이면 통과(그 외 옵션은 기존 규칙).
+      const onlyGoalToggle = cur.rows[0].status === 'active' && keys.length > 0 && keys.every((k) => k === 'goalExitEnabled' || k === 'goalKind');
       if (!onlyGoalToggle) {
         return res.status(400).json({ success: false, error: '운영 중인 여정은 옵션을 바꿀 수 없습니다. 먼저 일시정지해 주세요. (목표 달성 자동 종료는 운영 중에도 변경 가능)' });
       }
@@ -3736,6 +3823,10 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
     if ('callbackNumber' in body && norm.options.callbackNumber) add('callback_number', norm.options.callbackNumber);
     if ('callbackMode' in body) add('callback_mode', norm.options.callbackMode);
     if ('goalExitEnabled' in body) add('goal_exit_enabled', norm.options.goalExitEnabled);  // 실측 컬럼(2026-07-10 DDL 실행 확인)
+    // ★ 2026-07-11 신규 컬럼(goal_kind·holdout_pct·personal_send_time) — DDL 실행 전이면 UPDATE가 42703 → catch의 DB_MIGRATION_PENDING 503 (기존 가드)
+    if ('goalKind' in body) add('goal_kind', norm.options.goalKind);
+    if ('holdoutPct' in body) add('holdout_pct', norm.options.holdoutPct);
+    if ('personalSendTime' in body) add('personal_send_time', norm.options.personalSendTime);
 
     sets.push('updated_at = NOW()');
 

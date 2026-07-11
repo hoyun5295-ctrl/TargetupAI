@@ -266,3 +266,9 @@ export function isAnchorCycleComplete(
   const todayKstMidnightUtc = Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate());
   return todayKstMidnightUtc > lastSendMidnightUtc;
 }
+
+/** ★ 2026-07-11 send-time 개인화 — 고객 선호 시각을 발송 안전 창(09~20시 KST)으로 클램프. 비정상 입력=10시. */
+export function clampPersonalSendHour(hour: number): number {
+  if (!Number.isFinite(hour)) return 10;
+  return Math.min(20, Math.max(9, Math.floor(hour)));
+}

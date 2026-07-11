@@ -59,7 +59,7 @@ import { getCompanyCosts } from '../config/defaults';
 import { sanitizeForSms } from './message-sanitizer';
 import { shortenUrlsInText } from './short-url';
 import { autoPauseExecution } from './journey-pause-handler';
-import { calculateNextRunAt } from './send-time-util';
+import { calculateNextRunAt, clampPersonalSendHour } from './send-time-util';
 import { getOrCreateStepCampaign, bumpStepCampaignCount } from './journey-step-campaign';
 import { evaluateCustomerFieldCondition, type ConditionOutcome } from './journey-condition';
 import { isCustomerSendable } from './journey-safety-filter';
@@ -139,7 +139,7 @@ interface CustomerRow {
 
 // ★ D188 Phase 2-B-1 (2026-05-21): wait/condition step 신규 outcome — 통계 분리 영역.
 // ★ D218+ (2026-05-26): paused_external 추가 — 담당자 단축 URL 정지 / 관리자 직접 정지 / race condition 안전망 사고 차단.
-type StepOutcome = 'sent' | 'skipped_hours' | 'skipped_opt_out' | 'skipped_no_customer' | 'skipped_already_sent' | 'waited' | 'condition_passed' | 'condition_failed' | 'paused_balance' | 'paused_budget' | 'paused_threshold' | 'paused_external' | 'failed' | 'completed' | 'exited_goal';
+type StepOutcome = 'sent' | 'skipped_hours' | 'skipped_opt_out' | 'skipped_no_customer' | 'skipped_already_sent' | 'waited' | 'condition_passed' | 'condition_failed' | 'condition_branched' | 'paused_balance' | 'paused_budget' | 'paused_threshold' | 'paused_external' | 'failed' | 'completed' | 'exited_goal';
 
 // ════════════════════════════════════════════════════════════════════
 // Worker — 5분 cron
@@ -188,6 +188,7 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
         else if (outcome === 'waited') summary.waited++;
         else if (outcome === 'condition_passed') summary.conditionPassed++;
         else if (outcome === 'condition_failed') summary.conditionFailed++;
+        else if (outcome === 'condition_branched') summary.conditionFailed++;  // ★ 2026-07-11 분기 — 미충족 계열로 집계
         else if (outcome === 'exited_goal') summary.goalExited++;
         else if (outcome.startsWith('paused')) summary.paused++;
         else if (outcome.startsWith('skipped')) summary.skipped++;
@@ -304,8 +305,71 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   //   condition step = 고객 조회 후 conditionJsonb 평가 — 만족 시 다음 step 진입 / 미만족 시 execution 종료.
   //   message step = 기존 흐름 (메시지 발송).
   if (step.step_type === 'wait') {
-    await logSkippedStep(exec.execution_id, step.id, 'wait_step_passed');
-    await advanceOrComplete(exec, step, 0);
+    // ★ 2026-07-11 wait-until-event: wait_event_name(신규 컬럼)이 설정된 wait step은 이벤트 대기 —
+    //   발생 시 즉시 다음 step, 타임아웃 시 다음 step(현행과 동일 방향 진행 — 분기는 뒤 condition step 몫).
+    //   본류 SELECT에 신규 컬럼을 넣지 않고 지연 조회(42703 = 기존 시간 대기 그대로) — 발송 tick 본류 보호.
+    let waitEventName: string | null = null;
+    let waitTimeoutHours = 72;
+    try {
+      const w = await query(
+        `SELECT wait_event_name, wait_timeout_hours FROM journey_steps WHERE id = $1::uuid`,
+        [step.id]
+      );
+      const wn = w.rows[0]?.wait_event_name;
+      if (wn != null && String(wn).trim()) waitEventName = String(wn).trim();
+      const wt = Number(w.rows[0]?.wait_timeout_hours);
+      if (Number.isFinite(wt) && wt > 0) waitTimeoutHours = Math.min(24 * 30, Math.floor(wt));
+    } catch {
+      /* wait 컬럼 미마이그레이션 → 기존 시간 대기 */
+    }
+
+    if (!waitEventName) {
+      await logSkippedStep(exec.execution_id, step.id, 'wait_step_passed');
+      await advanceOrComplete(exec, step, 0);
+      return 'waited';
+    }
+
+    // 대기 앵커 = 이 step에 최초 도달한 시각(waiting_event 로그) — 없으면 지금 마킹.
+    const anchorRes = await query(
+      `SELECT sent_at FROM journey_step_logs
+        WHERE execution_id = $1::uuid AND step_id = $2::uuid AND error_reason = 'waiting_event'
+        ORDER BY sent_at ASC LIMIT 1`,
+      [exec.execution_id, step.id]
+    );
+    let anchorAt: Date;
+    if (anchorRes.rows.length === 0) {
+      await logSkippedStep(exec.execution_id, step.id, 'waiting_event');
+      anchorAt = new Date();
+    } else {
+      anchorAt = new Date(anchorRes.rows[0].sent_at);
+    }
+
+    // 이벤트 발생 검사 (cdp_events — cdp_event_exists 조건과 동일 소스·회사 격리)
+    const ev = await query(
+      `SELECT 1 FROM cdp_events
+        WHERE company_id = $1::uuid AND customer_id = $2::uuid
+          AND event_name = $3 AND occurred_at >= $4::timestamptz
+        LIMIT 1`,
+      [exec.company_id, exec.customer_id, waitEventName, anchorAt.toISOString()]
+    );
+    if (ev.rows.length > 0) {
+      await logSkippedStep(exec.execution_id, step.id, 'wait_event_arrived');
+      await advanceOrComplete(exec, step, 0);
+      return 'waited';
+    }
+
+    const deadlineMs = anchorAt.getTime() + waitTimeoutHours * 3600 * 1000;
+    if (Date.now() >= deadlineMs) {
+      await logSkippedStep(exec.execution_id, step.id, 'wait_event_timeout');
+      await advanceOrComplete(exec, step, 0);
+      return 'waited';
+    }
+
+    // 기한 내 미발생 — 같은 step 유지 + 15분 후 재폴링
+    await query(
+      `UPDATE journey_executions SET next_run_at = NOW() + INTERVAL '15 minutes' WHERE id = $1::uuid`,
+      [exec.execution_id]
+    );
     return 'waited';
   }
 
@@ -333,7 +397,29 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       // 조건 DB 평가 실패 → 발송 보류 + 재시도 (발송 실패 흐름과 동일 — error_count<1 재시도, 넘으면 정지).
       return await handleConditionEvalError(exec, step);
     }
-    // not_met → execution 종료 (조건 확정 미충족 — 현 동작 보존)
+    // not_met → 분기(not_met_goto) 또는 execution 종료.
+    // ★ 2026-07-11 진짜 분기: not_met_goto(신규 컬럼)가 전방 step_order를 가리키면 종료 대신 그 step으로 점프.
+    //   본류 step SELECT에 신규 컬럼을 넣지 않고 여기서 지연 조회(42703 = null = 현행 종료) — 발송 tick 본류 보호.
+    let notMetGoto: number | null = null;
+    try {
+      const g = await query(`SELECT not_met_goto FROM journey_steps WHERE id = $1::uuid`, [step.id]);
+      const raw = g.rows[0]?.not_met_goto;
+      if (raw != null && Number.isFinite(Number(raw))) notMetGoto = Number(raw);
+    } catch {
+      /* not_met_goto 컬럼 미마이그레이션 → 현행(종료) */
+    }
+    if (notMetGoto != null && notMetGoto > step.step_order) {
+      const jumped = await jumpToStep(exec, notMetGoto);
+      await logSkippedStep(exec.execution_id, step.id, jumped ? 'condition_branched' : 'condition_branch_target_missing');
+      if (!jumped) {
+        // 분기 대상 step 없음(삭제 등) — 미충족 발송 없이 완주 처리
+        await markExecutionCompleted(exec.execution_id, exec.journey_id);
+      }
+      console.log(`[JourneyExecutor] execution=${exec.execution_id} step=${step.step_order} condition 미충족 → ${jumped ? `step ${notMetGoto} 분기` : '분기 대상 없음(완료)'}`);
+      return 'condition_branched';
+    }
+
+    // 분기 미설정 = execution 종료 (조건 확정 미충족 — 현 동작 보존)
     await query(
       `UPDATE journey_executions SET status = 'ended', completed_at = NOW(), current_step_order = $2
        WHERE id = $1::uuid`,
@@ -1040,7 +1126,33 @@ async function advanceOrComplete(exec: ExecutionRow, currentStep: StepRow, added
   const nextRow = nextRes.rows[0];
   const nextDelayHours = Number(nextRow.delay_hours || 0);
   const nextDelayMode = String(nextRow.delay_mode || 'relative');
-  const nextTargetHourKst = nextRow.target_hour_kst != null ? Number(nextRow.target_hour_kst) : null;
+  let nextTargetHourKst = nextRow.target_hour_kst != null ? Number(nextRow.target_hour_kst) : null;
+
+  // ★ 2026-07-11 send-time 개인화 — journeys.personal_send_time(신규 컬럼)이 켜져 있고 다음 step이 시각 지정 모드면
+  //   고객의 최근 90일 반응(클릭·방문·구매) 최빈 시간대(최소 3건)로 발송 시각을 대체. 데이터 부족/오류/미마이그레이션 = 기본 시각.
+  if (nextTargetHourKst != null && (nextDelayMode === 'specific_hour' || nextDelayMode === 'relative_at_hour')) {
+    try {
+      const ps = await query(`SELECT personal_send_time FROM journeys WHERE id = $1::uuid`, [exec.journey_id]);
+      if (ps.rows[0]?.personal_send_time === true) {
+        const h = await query(
+          `SELECT EXTRACT(HOUR FROM (occurred_at AT TIME ZONE 'Asia/Seoul'))::int AS h, COUNT(*)::int AS c
+             FROM cdp_events
+            WHERE company_id = $1::uuid AND customer_id = $2::uuid
+              AND event_name IN ('message_click', 'page_view', 'purchase')
+              AND occurred_at >= NOW() - INTERVAL '90 days'
+            GROUP BY 1 HAVING COUNT(*) >= 3
+            ORDER BY c DESC, h ASC
+            LIMIT 1`,
+          [exec.company_id, exec.customer_id]
+        );
+        const preferred = h.rows[0]?.h;
+        if (preferred != null) nextTargetHourKst = clampPersonalSendHour(Number(preferred));
+      }
+    } catch {
+      /* personal_send_time 컬럼 미마이그레이션/조회 실패 → step 기본 시각 */
+    }
+  }
+
   const nextRunAt = calculateNextRunAt(nextDelayMode, nextDelayHours, nextTargetHourKst);
 
   await query(
@@ -1062,13 +1174,75 @@ async function advanceOrComplete(exec: ExecutionRow, currentStep: StepRow, added
 
 // calculateNextRunAt — send-time-util.ts CT로 이동(Phase 6A). advanceOrComplete·trigger-watcher가 거기서 import해 공유.
 
-/** 목표 달성(진입 이후 구매) 판정 — 컬럼 실측 2026-07-10: recent_purchase_date=date · cdp_events.occurred_at=timestamptz.
- *  신호 1 = recent_purchase_date가 진입일(KST) **다음 날 이후**(엄격 초과 — Codex P1 정정: 진입 당일 구매를 포함하면
+/** ★ 2026-07-11 분기 — targetOrder 이상 첫 step 직전으로 이동 + 그 step의 delay로 next_run_at 계산.
+ *  대상 step 없으면 false(호출부가 완료 처리). 전방 점프만 호출부에서 보장(무한루프 차단). */
+async function jumpToStep(exec: ExecutionRow, targetOrder: number): Promise<boolean> {
+  const t = await query(
+    `SELECT step_order, delay_hours, delay_mode, target_hour_kst FROM journey_steps
+      WHERE journey_id = $1::uuid AND step_order >= $2
+      ORDER BY step_order ASC LIMIT 1`,
+    [exec.journey_id, targetOrder]
+  );
+  if (t.rows.length === 0) return false;
+  const row = t.rows[0];
+  const nextRunAt = calculateNextRunAt(
+    String(row.delay_mode || 'relative'),
+    Number(row.delay_hours || 0),
+    row.target_hour_kst != null ? Number(row.target_hour_kst) : null
+  );
+  await query(
+    `UPDATE journey_executions SET current_step_order = $2, next_run_at = $3 WHERE id = $1::uuid`,
+    [exec.execution_id, Number(row.step_order) - 1, nextRunAt]
+  );
+  return true;
+}
+
+/** 목표 달성 판정 — 목표 종류(journeys.goal_kind, 2026-07-11 신설 컬럼)별 분기.
+ *  purchase(기본·현행): 신호 1 = recent_purchase_date가 진입일(KST) **다음 날 이후**(엄격 초과 — Codex P1 정정: 진입 당일 구매를 포함하면
  *    구매가 진입 사유인 여정(cdp.purchase 트리거 등)이 첫 tick에 전원 즉시 이탈해 여정이 죽는다.
  *    당일 정밀 판정은 신호 2(cdp 이벤트 시각)가 담당 — 프로필만 있는 회사는 다음 날 tick부터 이탈)
- *  신호 2 = 연동몰 cdp 구매 이벤트(event_name='purchase', extractor와 동일 값)가 진입 시각 이후(시각 정밀) */
+ *    신호 2 = 연동몰 cdp 구매 이벤트(event_name='purchase', extractor와 동일 값)가 진입 시각 이후(시각 정밀).
+ *  click: 이 execution이 발송한 step(journey_step_logs status='sent') 이후 message_click(cdp) —
+ *    evaluateJourneyStepClickedCondition과 동일 조인(전 step 합집합). 발송 전에는 절대 참이 안 됨(진입 즉시 이탈 없음).
+ *  visit: 진입 시각 이후 page_view(브라우저 SDK 수집 회사 한정 — 미수집 회사는 판정 항상 거짓=여정 계속).
+ *  goal_kind 컬럼 미마이그레이션(42703) = 'purchase' 폴백(현행과 동일 — 발송 본류 무영향). */
 async function isGoalConvertedSinceEntry(exec: ExecutionRow): Promise<boolean> {
+  let goalKind = 'purchase';
   try {
+    const gk = await query(`SELECT goal_kind FROM journeys WHERE id = $1::uuid`, [exec.journey_id]);
+    const v = String(gk.rows[0]?.goal_kind || 'purchase');
+    if (v === 'click' || v === 'visit') goalKind = v;
+  } catch {
+    /* goal_kind 컬럼 미마이그레이션 → purchase(현행) */
+  }
+
+  try {
+    if (goalKind === 'click') {
+      const byClick = await query(
+        `SELECT 1 FROM journey_step_logs jsl
+          JOIN cdp_events ce ON ce.customer_id = $2::uuid
+           AND ce.company_id = $3::uuid
+           AND ce.event_name = 'message_click'
+           AND ce.occurred_at >= jsl.sent_at
+         WHERE jsl.execution_id = $1::uuid AND jsl.status = 'sent'
+         LIMIT 1`,
+        [exec.execution_id, exec.customer_id, exec.company_id]
+      );
+      return byClick.rows.length > 0;
+    }
+
+    if (goalKind === 'visit') {
+      const byVisit = await query(
+        `SELECT 1 FROM cdp_events
+          WHERE company_id = $1::uuid AND customer_id = $2::uuid
+            AND event_name = 'page_view' AND occurred_at > $3::timestamptz
+          LIMIT 1`,
+        [exec.company_id, exec.customer_id, exec.entered_at]
+      );
+      return byVisit.rows.length > 0;
+    }
+
+    // purchase (기본 · 현행 동작 보존)
     const byProfile = await query(
       `SELECT 1 FROM customers
         WHERE id = $1::uuid AND company_id = $2::uuid

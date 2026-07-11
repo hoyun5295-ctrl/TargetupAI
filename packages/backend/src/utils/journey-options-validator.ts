@@ -20,8 +20,16 @@ export interface NormalizedJourneyOptions {
     callbackMode: 'fixed' | 'store';
     /** ★ 2026-07-10 목표 달성 시 자동 종료 — 진입 이후 구매 확인 시 잔여 step 중단 */
     goalExitEnabled: boolean;
+    /** ★ 2026-07-11 목표 종류 — purchase(구매)/click(이 여정 발송 링크 클릭)/visit(자사몰 방문 page_view) */
+    goalKind: 'purchase' | 'click' | 'visit';
+    /** ★ 2026-07-11 홀드아웃 대조군 % (0~30 클램프, 0=비활성) — 신규 진입의 N%를 미발송 대조군으로 배정 */
+    holdoutPct: number;
+    /** ★ 2026-07-11 send-time 개인화 — 시각 지정 step 발송 시각을 고객 반응 최빈 시간대로 대체 */
+    personalSendTime: boolean;
   };
 }
+
+const GOAL_KINDS = ['purchase', 'click', 'visit'] as const;
 
 /** 0 이상 정수 또는 null(미설정/음수/비숫자). 한도·예산은 비우면 무제한(null). */
 function clampOrNull(val: any): number | null {
@@ -61,6 +69,9 @@ export function normalizeJourneyOptions(input: Record<string, any>): NormalizedJ
     callbackNumber: typeof src.callbackNumber === 'string' && src.callbackNumber.trim() ? src.callbackNumber.trim() : null,
     callbackMode: src.callbackMode === 'store' ? 'store' : 'fixed',
     goalExitEnabled: src.goalExitEnabled === true || src.goalExitEnabled === 'true',
+    goalKind: (GOAL_KINDS as readonly string[]).includes(src.goalKind) ? src.goalKind : 'purchase',
+    holdoutPct: clampInt(src.holdoutPct, 0, 0, 30),
+    personalSendTime: src.personalSendTime === true || src.personalSendTime === 'true',
   };
 
   return { triggerFilters, options };
