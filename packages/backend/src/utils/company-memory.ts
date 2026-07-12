@@ -45,6 +45,17 @@ export type MemoryType =
   | 'representative_message'   // 회사 admin 수동 등록 (5건 — 5 row)
   | 'brand_guideline';         // 자동 추출 가이드라인 9 항목 (1건 — 1 row, JSON)
 
+/**
+ * ★ 2026-07-12 학습 5종 단일 정의 — 주입(buildMemoryPromptContext)·화면 집계(overview/top-impact/분석)·
+ * 관련 학습 표시가 전부 이 화이트리스트를 공유한다.
+ * 같은 테이블의 비학습 타입(brand_guideline 10·representative_message 8·brand_link 7)이 높은 중요도로
+ * 슬롯을 잠식해 문안 생성(6슬롯)의 학습 주입이 0이 되던 결함의 단일 정답.
+ * (Brand Voice 2종 = buildSystemPromptWithBrandVoice 별도 주입 / brand_link = 링크 칩·{{LINK}} 치환 별도 소비)
+ */
+export const LEARNING_MEMORY_TYPES: MemoryType[] = [
+  'success_pattern', 'customer_insight', 'brand_tone_evolution', 'channel_performance', 'compliance_learning',
+];
+
 export interface MemoryEntry {
   id: string;
   companyId: string;
@@ -107,8 +118,10 @@ export async function addMemory(input: AddMemoryInput): Promise<MemoryEntry> {
 
 export async function listMemories(
   companyId: string,
-  options: { memoryType?: MemoryType; limit?: number; minImportance?: number } = {}
+  options: { memoryType?: MemoryType; memoryTypes?: MemoryType[]; limit?: number; minImportance?: number } = {}
 ): Promise<MemoryEntry[]> {
+  // ★ Codex 1R — 빈 화이트리스트 = "허용 타입 없음" = 0건 (무필터 전 타입 조회로 되돌아가는 폴백 차단)
+  if (Array.isArray(options.memoryTypes) && options.memoryTypes.length === 0) return [];
   const limit = Math.min(options.limit || 100, 500);
   const minImportance = options.minImportance || 1;
   const where: string[] = ['company_id = $1::uuid', 'importance >= $2'];
@@ -116,6 +129,10 @@ export async function listMemories(
   if (options.memoryType) {
     where.push(`memory_type = $${params.length + 1}`);
     params.push(options.memoryType);
+  } else if (Array.isArray(options.memoryTypes) && options.memoryTypes.length > 0) {
+    // ★ 2026-07-12 — 타입 화이트리스트 (학습 5종 한정 조회 등)
+    where.push(`memory_type = ANY($${params.length + 1}::text[])`);
+    params.push(options.memoryTypes);
   }
   params.push(limit);
   const result = await query(
@@ -147,7 +164,10 @@ export async function deleteMemory(companyId: string, memoryId: string): Promise
  * - Prompt Caching과 결합 (1h TTL ephemeral)
  */
 export async function buildMemoryPromptContext(companyId: string, maxEntries: number = 30): Promise<string> {
-  const memories = await listMemories(companyId, { limit: maxEntries, minImportance: 3 });
+  // ★ 2026-07-12 — 학습 5종만 조회. 타입 무필터 조회는 brand_guideline(10)·대표문안(8)·brand_link(7)가
+  //   중요도 상위 슬롯을 잠식해, 문안 생성(6슬롯)에서 실제 학습 주입이 0이 되던 결함(렌더는 원래 5종만).
+  //   usage_count 갱신도 이제 실제 렌더 대상 행에만 닿는다(top-impact "AI 참고 횟수" 거짓 집계 종식).
+  const memories = await listMemories(companyId, { limit: maxEntries, minImportance: 3, memoryTypes: LEARNING_MEMORY_TYPES });
   if (memories.length === 0) {
     return '';
   }
@@ -183,10 +203,8 @@ export async function buildMemoryPromptContext(companyId: string, maxEntries: nu
   };
 
   // AI Operator 호출 = 5 학습 타입 한정 (Brand Voice 2 타입은 buildSystemPromptWithBrandVoice로 별도 주입)
-  const OPERATOR_TYPES: MemoryType[] = ['success_pattern', 'customer_insight', 'brand_tone_evolution', 'channel_performance', 'compliance_learning'];
-
   const sections: string[] = [];
-  for (const type of OPERATOR_TYPES) {
+  for (const type of LEARNING_MEMORY_TYPES) {
     const arr = byType.get(type) || [];
     if (arr.length === 0) continue;
     const lines = arr.map((m, i) => `${i + 1}. [중요도 ${m.importance}] ${m.memoryKey} — ${m.memoryValue}`);

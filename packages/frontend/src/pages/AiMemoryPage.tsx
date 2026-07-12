@@ -82,7 +82,7 @@ const TYPE_META: Record<string, { label: string; color: string; gradient: string
   channel_performance:  { label: '채널 성과',         color: '#fbbf24', gradient: 'from-amber-400 to-orange-500', how: '캠페인 채널별 클릭 실측에서 자동' },
   customer_insight:     { label: '고객 인사이트',     color: '#38bdf8', gradient: 'from-sky-400 to-cyan-500', how: '등급별 구매·LTV 집계에서 자동' },
   brand_tone_evolution: { label: '브랜드 톤',         color: '#a78bfa', gradient: 'from-violet-400 to-purple-500', how: 'Brand Voice 가이드라인 변경 시 자동' },
-  compliance_learning:  { label: '컴플라이언스 학습', color: '#fb7185', gradient: 'from-rose-400 to-pink-500', how: '광고 차단·반려 학습에서 자동' },
+  compliance_learning:  { label: '컴플라이언스 학습', color: '#fb7185', gradient: 'from-rose-400 to-pink-500', how: '자동마케팅 정지 사유 자동 + 직접 입력' },
 };
 
 // ★ D227+ defense-in-depth — 미지의 memory_type이 와도 전체 화면 blank(크래시) 차단

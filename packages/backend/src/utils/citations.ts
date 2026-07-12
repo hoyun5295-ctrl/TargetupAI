@@ -25,7 +25,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
 import { AI_MODELS, isAdaptiveOnlyModel, resolveMaxTokens } from '../config/defaults';
-import { listMemories as listCompanyMemories } from './company-memory';
+import { listMemories as listCompanyMemories, LEARNING_MEMORY_TYPES } from './company-memory';
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
@@ -113,7 +113,8 @@ export async function buildCompanyDocuments(companyId: string): Promise<CompanyD
   }
 
   // 3. 박은 메모리
-  const memories = await listCompanyMemories(companyId, { limit: 30, minImportance: 5 });
+  // ★ 2026-07-12 — 학습 5종 한정 (무필터면 brand_guideline JSON 원문·대표문안·brand_link가 근거 문서 슬롯 잠식)
+  const memories = await listCompanyMemories(companyId, { limit: 30, minImportance: 5, memoryTypes: LEARNING_MEMORY_TYPES });
   if (memories.length > 0) {
     const lines = memories.map((m, i) =>
       `${i + 1}. [${m.memoryType}/중요도 ${m.importance}] ${m.memoryKey} — ${m.memoryValue}`

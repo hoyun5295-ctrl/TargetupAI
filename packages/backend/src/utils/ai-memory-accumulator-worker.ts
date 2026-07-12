@@ -62,10 +62,39 @@ export async function runAiMemoryAccumulatorTick(): Promise<void> {
 }
 
 // 1) 여정 완료 학습 — 7일 내 완료 execution 회사·여정별 집계 후 recordCampaignLearning.
+//    ★ 2026-07-12 — 실클릭 연결: clickCount 0 하드코딩은 게이트(shouldRecordCampaignLearning)가 항상 차단해
+//    여정 학습이 영구 보류였다. Codex 1R 정정 2건 반영:
+//    - 분모 = status 목록이 아니라 "실발송 step 존재(journey_step_logs status='sent')" — goal_met은 발송 전에도
+//      찍힐 수 있어(0710 조기 이탈) status 기준 분모는 미발송 인원을 포함한다.
+//    - 클릭 = 이 여정 귀속만: 단축링크 클릭 이벤트가 properties.journey_id를 기록(short-url 적재·journey-stats 소비
+//      — 배포 중 컬럼/키)하므로 매칭에 포함. 같은 고객의 타 캠페인·타 여정 클릭 오탐 차단.
+//    - 신원 = 컬럼 customer_id(익명 클릭은 NULL) OR properties.customer_id(short-url 토큰 resolve 값) 2축.
+//      단, source='short_url_click' + short_url_hash 존재로 서버 기록 이벤트에 한정(Codex 3R — CDP API/SDK가
+//      properties를 임의 전송할 수 있어 소스 무제한이면 위조 클릭이 학습에 유입. 'short_url_click'은 리다이렉트
+//      핸들러 전용 마커·SDK ingest는 'sdk' 하드코딩·CDP API는 키 provider라 클라이언트가 설정 불가).
+//    실측 0이면 지금처럼 보류(가짜 0% 차단 원칙 유지).
 async function accumulateJourneyLearning(): Promise<number> {
   const recentRes = await query(
     `SELECT e.company_id, e.journey_id, j.name AS journey_name,
-            COUNT(*) FILTER (WHERE e.status IN ('completed', 'sent')) AS sent_count
+            COUNT(*) FILTER (
+              WHERE EXISTS (
+                SELECT 1 FROM journey_step_logs jsl2
+                 WHERE jsl2.execution_id = e.id AND jsl2.status = 'sent'
+              )
+            ) AS sent_count,
+            COUNT(*) FILTER (
+              WHERE EXISTS (
+                SELECT 1 FROM journey_step_logs jsl
+                  JOIN cdp_events ce ON ce.company_id = e.company_id
+                   AND ce.source = 'short_url_click'
+                   AND ce.properties->>'short_url_hash' IS NOT NULL
+                   AND ce.event_name = 'message_click'
+                   AND ce.properties->>'journey_id' = e.journey_id::text
+                   AND (ce.customer_id = e.customer_id OR ce.properties->>'customer_id' = e.customer_id::text)
+                   AND ce.occurred_at >= jsl.sent_at
+                 WHERE jsl.execution_id = e.id AND jsl.status = 'sent'
+              )
+            ) AS click_count
        FROM journey_executions e
        JOIN journeys j ON j.id = e.journey_id
       WHERE e.completed_at >= NOW() - INTERVAL '7 days'
@@ -84,11 +113,11 @@ async function accumulateJourneyLearning(): Promise<number> {
         campaignName: row.journey_name || '여정 자동 발송',
         channel: 'mixed',
         targetCriteria: 'journey_executor',
-        messageBody: '', // 여정 실클릭(cdp_events) 연결은 데이터 적재 후 후속 단계
+        messageBody: '',
         sentCount,
-        clickCount: 0,
+        clickCount: Number(row.click_count) || 0, // 실측 클릭 수신자 수 — 0이면 CT 게이트가 보류
         conversionCount: 0,
-        hasConversionData: false, // cdp_events 0건 — 전환 데이터 없음(가짜 전환율 차단)
+        hasConversionData: false, // 전환 데이터 미연결 — 가짜 전환율 차단
         isAd: false,
       });
       learned += 1;
@@ -102,13 +131,23 @@ async function accumulateJourneyLearning(): Promise<number> {
 // 2) 등급별 고객 인사이트 — customers 실측 집계(cdp 불요). 회사+20h 멱등(UPSERT).
 //    qualifying 등급(표본 ≥ MIN_SAMPLE)이 있는 회사만 선정 → 0 인사이트 회사 재선정 방지.
 async function accumulateCustomerInsights(): Promise<number> {
+  // ★ Codex 1R — qualifying 등급이 0이 된 회사도 stale 자동 인사이트가 남아 있으면 선정(정리 전용 진입).
+  //   정리 후 다음 tick부터는 두 branch 모두 거짓이라 자연 이탈 — 무한 재선정 없음.
   const companies = await query(
     `SELECT co.id AS company_id
        FROM companies co
-      WHERE EXISTS (
-              SELECT 1 FROM customers c
-               WHERE c.company_id = co.id AND c.grade IS NOT NULL AND c.grade <> ''
-               GROUP BY c.grade HAVING COUNT(*) >= $1
+      WHERE (
+              EXISTS (
+                SELECT 1 FROM customers c
+                 WHERE c.company_id = co.id AND c.grade IS NOT NULL AND c.grade <> ''
+                 GROUP BY c.grade HAVING COUNT(*) >= $1
+              )
+              OR EXISTS (
+                SELECT 1 FROM ai_company_memory ms
+                 WHERE ms.company_id = co.id AND ms.memory_type = 'customer_insight'
+                   AND ms.source = 'ai_auto' AND ms.metadata->>'grade' IS NOT NULL
+                   AND ms.memory_key LIKE 'grade\\_%' ESCAPE '\\'
+              )
             )
         AND NOT EXISTS (
               SELECT 1 FROM ai_company_memory m
@@ -163,6 +202,21 @@ async function accumulateCustomerInsights(): Promise<number> {
           metadata: { grade: ins.grade, customer_count: ins.customerCount },
         });
       }
+      // ★ 2026-07-12 (Codex 1R 정정) — 사라진 등급의 stale 인사이트 정리: 자동 생성된 grade_* 행 중 이번 실측에
+      //   없는 등급 삭제(등급 폐지·표본 미달 전환분 — importance 7이라 90일 정리 대상 밖 = 영구 잔존이던 결함).
+      //   인사이트 0건이어도 실행(qualifying 등급 전멸 = 전부 stale). 경계 3중:
+      //   source='ai_auto'(admin CRUD는 서버가 admin_input 강제) + metadata.grade 구조 마커(워커 기록분만 보유)
+      //   + LIKE ESCAPE 명시(literal 언더스코어).
+      await query(
+        `DELETE FROM ai_company_memory
+          WHERE company_id = $1::uuid
+            AND memory_type = 'customer_insight'
+            AND source = 'ai_auto'
+            AND metadata->>'grade' IS NOT NULL
+            AND memory_key LIKE 'grade\\_%' ESCAPE '\\'
+            AND NOT (memory_key = ANY($2::text[]))`,
+        [companyId, insights.map((i) => i.memoryKey)],
+      ).catch((e: any) => console.log(`[ai-memory-accumulator] stale grade 정리 오류 — ${e?.message || 'unknown'}`));
       // 활성 회사 동반 — 오래된 저영향 메모리 정리(C3)
       await cleanupDeprecatedMemories(companyId).catch(() => {});
       if (insights.length > 0) done += 1;

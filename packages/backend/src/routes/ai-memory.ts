@@ -14,7 +14,7 @@ import { Request, Response, Router } from 'express';
 import { query, pool } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { callAIWithFallback } from '../services/ai';
-import { buildMemoryPromptContext, listMemories, MemoryType } from '../utils/company-memory';
+import { buildMemoryPromptContext, listMemories, MemoryType, LEARNING_MEMORY_TYPES } from '../utils/company-memory';
 import { fetchBrandGuideline, recordToneEvolution } from '../utils/brand-tone-evolution';
 import { scanLinkHabit, type LinkHabit } from '../utils/brand-link-core';
 import { extractJsonFromAiText } from '../utils/ai-json';
@@ -44,6 +44,8 @@ router.get('/overview', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     }
 
+    // ★ 2026-07-12 — 집계 전부 학습 5종 한정. 전 타입 COUNT는 브랜드 자산(가이드라인·대표문안·brand_link)
+    //   등록 회사에서 "누적 학습 N건"이 과대되고 도넛 % 합이 100 미만이 되던 혼입 결함.
     const overviewRes = await query(
       `SELECT
          COUNT(*)::int AS total,
@@ -56,20 +58,23 @@ router.get('/overview', async (req: Request, res: Response) => {
          COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days')::int AS recent_30d_added,
          AVG(importance)::float AS avg_importance
        FROM ai_company_memory
-       WHERE company_id = $1::uuid`,
-      [companyId],
+       WHERE company_id = $1::uuid
+         AND memory_type = ANY($2::text[])`,
+      [companyId, LEARNING_MEMORY_TYPES],
     );
     const row = overviewRes.rows[0] || {};
 
+    // ★ 2026-07-12 — 제외 목록(NOT IN) → 학습 5종 화이트리스트. 옛 코드가 brand_link를 빠뜨려
+    //   실제 주입된 적 없는 링크가 "AI가 가장 자주 참고한 학습"으로 노출될 수 있었다.
     const topImpactRes = await query(
       `SELECT id, memory_type, memory_key, memory_value, importance,
               COALESCE(usage_count, 0)::int AS usage_count
        FROM ai_company_memory
        WHERE company_id = $1::uuid
-         AND memory_type NOT IN ('representative_message', 'brand_guideline')
+         AND memory_type = ANY($2::text[])
        ORDER BY COALESCE(usage_count, 0) DESC, importance DESC, last_accessed_at DESC
        LIMIT 1`,
-      [companyId],
+      [companyId, LEARNING_MEMORY_TYPES],
     );
     const top = topImpactRes.rows[0] || null;
 
@@ -172,7 +177,8 @@ router.post('/search-natural', async (req: Request, res: Response) => {
       });
     }
 
-    const allMemories = await listMemories(companyId, { limit: 30, minImportance: 3 });
+    // ★ 2026-07-12 — 관련 학습 후보도 학습 5종 한정 (주입 컨텍스트와 동일 소스)
+    const allMemories = await listMemories(companyId, { limit: 30, minImportance: 3, memoryTypes: LEARNING_MEMORY_TYPES });
 
     const systemPrompt = `당신은 한줄로 마케팅 자동화 SaaS의 AI 학습 메모리 분석 도우미입니다.
 
@@ -202,8 +208,8 @@ ${memoryContext}
 
     const lowerQ = q.toLowerCase();
     const related = allMemories
-      // ★ D227+ Brand Voice 2 타입은 학습 메모리 5종이 아니라 별도 데이터 — 관련 메모리 표시에서 제외 (프론트 TYPE_META 미존재 크래시 차단)
-      .filter((m) => m.memoryType !== 'representative_message' && m.memoryType !== 'brand_guideline')
+      // 조회가 이미 학습 5종 화이트리스트(옛 제외 방식은 brand_link를 빠뜨렸음) — 방어적 이중 필터만 유지
+      .filter((m) => (LEARNING_MEMORY_TYPES as string[]).includes(m.memoryType))
       .map((m) => {
         const keyMatch = m.memoryKey.toLowerCase().includes(lowerQ.slice(0, 20)) ? 5 : 0;
         const valueMatch = m.memoryValue.toLowerCase().includes(lowerQ.slice(0, 20)) ? 3 : 0;
@@ -248,16 +254,17 @@ router.get('/top-impact', async (req: Request, res: Response) => {
     }
     const limit = Math.min(parseInt(String(req.query.limit || '10')) || 10, 50);
 
+    // ★ 2026-07-12 — 제외 목록 → 학습 5종 화이트리스트 (옛 NOT IN은 brand_link 누락)
     const r = await query(
       `SELECT id, memory_type, memory_key, memory_value, importance, source, metadata,
               COALESCE(usage_count, 0)::int AS usage_count,
               last_accessed_at, created_at, updated_at
        FROM ai_company_memory
        WHERE company_id = $1::uuid
-         AND memory_type NOT IN ('representative_message', 'brand_guideline')
+         AND memory_type = ANY($3::text[])
        ORDER BY COALESCE(usage_count, 0) DESC, importance DESC, last_accessed_at DESC
        LIMIT $2`,
-      [companyId, limit],
+      [companyId, limit, LEARNING_MEMORY_TYPES],
     );
 
     const memories = r.rows.map((row: any) => ({

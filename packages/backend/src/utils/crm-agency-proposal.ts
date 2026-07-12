@@ -11,7 +11,7 @@ import { query } from '../config/database';
 import { callAIWithFallback, recommendTarget, countFilteredCustomers } from '../services/ai';
 import { extractJsonFromAiText } from './ai-json';
 import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';
-import { listMemories } from './company-memory';
+import { listMemories, LEARNING_MEMORY_TYPES } from './company-memory';
 import { runInCreditBundle } from './ai-credit-context';
 import { getCompanyCosts } from '../config/defaults';
 import {
@@ -70,7 +70,8 @@ async function collectContext(companyId: string): Promise<AgencyContext> {
   // 축 2 — AI 학습 메모리 (중요도순 상위)
   let memoryLines: string[] = [];
   try {
-    const memories = await listMemories(companyId, { limit: 20 });
+    // ★ 2026-07-12 — 학습 5종 한정 (무필터면 브랜드 자산(중요도 7~10, 최대 31행)이 20슬롯 잠식)
+    const memories = await listMemories(companyId, { limit: 20, memoryTypes: LEARNING_MEMORY_TYPES });
     memoryLines = memories.map((m) => `- [${m.memoryType}] ${m.memoryKey}: ${m.memoryValue} (중요도 ${m.importance})`);
   } catch (e: any) {
     notes.push('AI 학습 메모리 조회 실패 — 해당 축 생략');

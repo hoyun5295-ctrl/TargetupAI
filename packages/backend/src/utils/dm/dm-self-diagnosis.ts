@@ -20,7 +20,7 @@
 
 import { query } from '../../config/database';
 import { callAIWithFallback } from '../../services/ai';
-import { listMemories } from '../company-memory';
+import { listMemories, LEARNING_MEMORY_TYPES } from '../company-memory';
 import { extractJson } from './dm-ai';
 
 // ────────────── 타입 ──────────────
@@ -258,7 +258,8 @@ async function deriveTopInsight(
   factors: DmDiagnosisFactorResult[],
 ): Promise<string> {
   try {
-    const memories = await listMemories(companyId, { limit: 8, minImportance: 4 });
+    // ★ 2026-07-12 — 학습 5종 한정 (무필터면 브랜드 자산이 8슬롯 잠식 + brand_guideline JSON 원문 주입)
+    const memories = await listMemories(companyId, { limit: 8, minImportance: 4, memoryTypes: LEARNING_MEMORY_TYPES });
     const memorySnippet = memories
       .map((m) => `[${m.memoryType}] ${m.memoryKey}: ${m.memoryValue}`)
       .join('\n')

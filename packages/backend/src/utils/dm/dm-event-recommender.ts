@@ -17,7 +17,7 @@
 
 import { query } from '../../config/database';
 import { callAIWithFallback } from '../../services/ai';
-import { listMemories } from '../company-memory';
+import { listMemories, type MemoryType } from '../company-memory';
 import { extractJson } from './dm-ai';
 
 // ────────────── 타입 ──────────────
@@ -128,9 +128,13 @@ export async function recommendEventType(
   const month = new Date().getMonth() + 1;
   const seasonKeywords = SEASON_BY_MONTH[month] || [];
 
-  const memories = await listMemories(companyId, { limit: 8, minImportance: 3 });
+  // ★ 2026-07-12 — 사후 필터(2종)를 조회 시점 화이트리스트로 승격. 무필터 8슬롯을 브랜드 자산(중요도 7~10)이
+  //   선점하면 필터 후 0건이 되던 잠식 결함.
+  const memories = await listMemories(companyId, {
+    limit: 8, minImportance: 3,
+    memoryTypes: ['success_pattern', 'channel_performance'] as MemoryType[],
+  });
   const memorySnippet = memories
-    .filter((m) => m.memoryType === 'success_pattern' || m.memoryType === 'channel_performance')
     .map((m) => `[${m.memoryType}] ${m.memoryKey}: ${m.memoryValue}`)
     .join('\n')
     .slice(0, 1500);

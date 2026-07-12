@@ -8,6 +8,7 @@
 
 | 날짜 | 제목 | 검색 키워드 | 파일 |
 |------|------|-------------|------|
+| 2026-07-12 | 🟢 (3) 이메일마케팅 법 준수·편집기 일괄 강화 14건 (회전 2026-07-12) | UNSUB_URL_MARKER List-Unsubscribe One-Click RFC 8058 webhook 410 excludeOptedOutEmails 야간 예외 시행령 61조의2 cancel-schedule placeholder 3중 재시도 멱등 sub_copy_size accent_color | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-12 | 🟢 자동마케팅 종합 강화 C-1~C-5 (회전 2026-07-12) | 야간 광고 차단 pause 캐스케이드 decideBudgetAlert 예산 임계 전환 귀속 conversion_attributed_at target_hint ROI 카드 예측 크레딧 독립 | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-11 | 🟢 (2) 여정 전수점검 일괄 강화 9건 (회전 2026-07-12) | goal_kind wait-until-event not_met_goto 홀드아웃 holdout_pct 멤버십 영속 send-time 개인화 타겟확인 TargetRecipientsModal 활성 중 문안 수정 pretest dedup | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-10 | 🟢 여정 목표 달성 자동 종료 goal_met + 옵션 UI 2단 (STATUS→archive 회전 2026-07-10) | goal_exit_enabled goal_met journey-executor tick 진입 이후 구매 recent_purchase_date 재진입 쿨다운 JourneyOptionsEditor Codex 날짜 경계 | [TASKS_2026-07.md](TASKS_2026-07.md) |

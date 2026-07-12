@@ -2,7 +2,7 @@
  * AddMemoryModal.tsx — 회사 admin 직접 학습 메모리 입력 모달 (D217+ 2026-05-25)
  *
  * 다크 톤 + violet 액센트 정합 (bg-slate-900 + border-white/10 + rounded-2xl + shadow-2xl).
- * 5 타입 + key + value + 중요도 1~10. ESC + backdrop click + autoFocus.
+ * 5 타입 + key + value + 중요도 1~10. ESC + autoFocus (백드롭 클릭 닫힘 없음 — 2026-07-04 전역 룰).
  *
  * native dialog 사용 절대 X — 부모 컴포넌트에서 useToast로 에러/성공 표시.
  */

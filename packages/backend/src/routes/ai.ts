@@ -81,6 +81,7 @@ import {
   deleteMemory as deleteCompanyMemory,
   cleanupDeprecatedMemories,
   MemoryType,
+  LEARNING_MEMORY_TYPES,
 } from '../utils/company-memory';
 // ★ D181 (2026-05-19): Anthropic Batch API (50% 비용 절감)
 import { listBatchJobs, pollBatch } from '../utils/batch-ai';
@@ -2421,7 +2422,8 @@ router.get('/operator/continuous/learning-summary', async (req: Request, res: Re
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
 
-    // 1. ai_company_memory 영역 누적 영역 + 5 타입 분포
+    // 1. ai_company_memory 누적 + 5 타입 분포 — ★ 2026-07-12 학습 5종 한정
+    //    (전 타입 집계는 브랜드 자산 등록 회사에서 total·avg가 과대되던 혼입 결함)
     const memoryRes = await query(
       `SELECT
          COUNT(*)::int AS total,
@@ -2433,19 +2435,22 @@ router.get('/operator/continuous/learning-summary', async (req: Request, res: Re
          MAX(updated_at) AS last_learned_at,
          AVG(importance) AS avg_importance
        FROM ai_company_memory
-       WHERE company_id = $1::uuid`,
-      [companyId],
+       WHERE company_id = $1::uuid
+         AND memory_type = ANY($2::text[])`,
+      [companyId, LEARNING_MEMORY_TYPES],
     );
     const mem = memoryRes.rows[0] || {};
 
-    // 2. 옛 30일 영역 안 최고 성과 패턴 5건 (importance 높은 순)
+    // 2. 최근 최고 성과 패턴 5건 — ★ 2026-07-12 학습 5종 한정
+    //    (무필터면 brand_guideline JSON 원문(중요도 10)이 "패턴 요약"으로 그대로 노출되던 결함)
     const topPatternsRes = await query(
       `SELECT memory_type, memory_value AS summary, importance, usage_count, updated_at
        FROM ai_company_memory
        WHERE company_id = $1::uuid AND importance >= 5
+         AND memory_type = ANY($2::text[])
        ORDER BY importance DESC, usage_count DESC NULLS LAST
        LIMIT 5`,
-      [companyId],
+      [companyId, LEARNING_MEMORY_TYPES],
     );
 
     // 3. 옛 30일 영역 안 자동 마케팅 영역 성과 영역
@@ -2841,7 +2846,12 @@ router.get('/operator/memory', async (req: Request, res: Response) => {
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const memoryType = req.query.type ? (String(req.query.type) as MemoryType) : undefined;
     const limit = Math.min(parseInt(String(req.query.limit || '100')) || 100, 500);
-    const memories = await listCompanyMemories(companyId, { memoryType, limit });
+    // ★ 2026-07-12 — type 미지정 시 학습 5종 한정 (비학습 타입 혼입으로 화면 "자세히 분석" 집계가 오염되던 결함).
+    //   소비처 = AiMemoryPage 1곳 실측(학습 화면 전용). 특정 타입 조회는 기존 type 파라미터 그대로.
+    const memories = await listCompanyMemories(
+      companyId,
+      memoryType ? { memoryType, limit } : { memoryTypes: LEARNING_MEMORY_TYPES, limit },
+    );
     return res.json({ success: true, memories });
   } catch (err: any) {
     console.error('[AI Operator memory GET] 오류:', err);
@@ -2861,20 +2871,27 @@ router.post('/operator/memory', async (req: Request, res: Response) => {
     if (!memory_type || !memory_key || !memory_value) {
       return res.status(400).json({ success: false, error: 'memory_type, memory_key, memory_value는 필수입니다.' });
     }
-    const validTypes: MemoryType[] = [
-      'success_pattern', 'customer_insight', 'brand_tone_evolution', 'channel_performance', 'compliance_learning',
-      'representative_message', 'brand_guideline',  // ★ D225+ Brand Voice Learning
-    ];
+    // ★ 2026-07-12 — 학습 5종만 허용. representative_message·brand_guideline은 구조 JSON이라 전용
+    //   endpoint(/api/ai-memory/brand-voice/*)로만 저장 — 본 자유 텍스트 경로로 upsert되면 구조가 파손돼
+    //   브랜드보이스 주입 전체가 조용히 소멸하는 우회 벡터였다(UI는 원래 5종만 노출).
+    const validTypes: MemoryType[] = LEARNING_MEMORY_TYPES;
     if (!validTypes.includes(memory_type)) {
       return res.status(400).json({ success: false, error: `memory_type은 ${validTypes.join('/')} 중 하나여야 합니다.` });
     }
+    // ★ 2026-07-12 — 서버 길이 가드(UI 2000자와 동일 기준). 무제한 저장 = 매 AI 호출 프롬프트 토큰 폭증.
+    if (String(memory_value).length > 2000) {
+      return res.status(400).json({ success: false, error: '상세 내용은 2000자 이내로 입력해주세요.' });
+    }
+    // ★ Codex 1R (2026-07-12) — source는 서버가 강제. 클라이언트가 'ai_auto'로 위장하면 워커의
+    //   자동 생성분 정리(stale grade DELETE 등) 대상이 되는 신뢰 경계 구멍이었다.
+    void source;
     const entry = await addCompanyMemory({
       companyId,
       memoryType: memory_type,
       memoryKey: String(memory_key),
       memoryValue: String(memory_value),
       importance: importance ? Number(importance) : undefined,
-      source: source ? String(source) : 'admin_input',
+      source: 'admin_input',
       metadata: metadata || {},
     });
     return res.json({ success: true, memory: entry });

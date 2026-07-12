@@ -68,8 +68,9 @@ const GUIDES: TypeGuide[] = [
     label: '브랜드 톤 진화',
     gradient: 'from-violet-400 to-purple-500',
     description: '시간에 따른 브랜드 톤 변화를 기록합니다 (이모지 사용 / 존댓말 / 친근도).',
-    addable: 'admin',
-    flow: '회사 admin 직접 입력 의무 (자동 학습 데이터 부족)',
+    addable: 'both',
+    // ★ 2026-07-12 실제 배선 기준 정정 — 가이드라인 변경 감지 + 거부 제안 공통 패턴 증류 2경로가 자동 기록
+    flow: 'Brand Voice 가이드라인 변경·거부 제안 패턴 증류 자동 + 직접 입력',
     examples: [
       '이모지 사용 자제 — 전문성 우선 (2026-Q1 정책)',
       '"고객님" 호칭 통일 (옛 "회원님" 사용 X)',
@@ -82,7 +83,8 @@ const GUIDES: TypeGuide[] = [
     gradient: 'from-rose-400 to-pink-500',
     description: '광고 차단 / 반려 사유 패턴 + 안전 대체 단어 매핑을 기록합니다.',
     addable: 'both',
-    flow: '회사 admin 직접 입력 권장 + 카카오 반려 자동 학습',
+    // ★ 2026-07-12 실제 배선 기준 정정 — 자동 기록 경로 = 자동마케팅 담당자 정지 사유 (카카오 반려 자동 학습은 미배선)
+    flow: '회사 admin 직접 입력 권장 + 자동마케팅 정지 사유 자동 학습',
     examples: [
       '"특가" 단어 광고 차단 6건 — "한정 혜택"으로 대체',
       '"긴급" 단어 카카오 반려 — "신규 안내"로 대체',
