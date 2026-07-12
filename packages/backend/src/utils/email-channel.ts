@@ -10,16 +10,18 @@
  *   - email_events: open/click/bounce/unsubscribe 이벤트 누적
  *
  * ⛔ 영구 원칙
- *   - 발송 시점 안전장치 — 회사 SMTP 미설정 시 차단 + 미래 1분+ / 08:00~21:00 KST / 즉시 confirm
+ *   - 발송 시점 안전장치 — 회사 SMTP 미설정 시 차단 + 예약은 미래 1분+ / 즉시 confirm
+ *     (야간 시간 제한 없음 — 전자우편은 정보통신망법 §50③ 단서 + 시행령 §61조의2 야간 광고 예외 매체)
  *   - Zero-Count #2 — recipients 0건 시 발송 차단
- *   - 정보통신망법 — (광고) prefix + 무료거부 링크 (광고성 이메일)
+ *   - 정보통신망법 §50④ — (광고) prefix + 전송자 명칭·연락처 + 수신거부 링크 자동 부착 (광고성 이메일)
+ *     수신거부 링크 존재 판정 = 실제 링크(마커/개인 토큰 URL)로만 — 본문 단어('수신거부') 존재로 생략 금지
  *   - 사용자 신뢰 #4 — 모델명 노출 X / 발송 결과 투명 표시
  *   - 발신 도메인 = 회사 admin 본인 도메인 (한줄로 도메인 사용 X — SaaS 핵심)
  */
 
 import { query } from '../config/database';
 import { sendEmail, isSmtpConfigured, getSmtpConfigPublic } from './company-smtp-client';
-import { applyTracking, UNSUB_URL_MARKER } from './email-tracking';
+import { applyTracking, buildUnsubscribeUrl, UNSUB_URL_MARKER } from './email-tracking';
 import { logCampaignTraining, updateTrainingMetrics, getSourceRef } from './training-logger';
 import { buildEmailTrainingMessage } from './email-training-message';
 import { renderEmailSections } from './email/email-section-renderer';
@@ -246,9 +248,38 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
     throw new Error('회사 SMTP 설정 미완료 — 회사 admin이 SMTP 정보 등록 후 발송 진입 의무');
   }
 
+  // ★ 2026-07-12 발송 엔진 단일 길목 placeholder 가드 (Codex HIGH 정정) —
+  //   라우트/스위퍼 개별 검사만으론 엔진 직접 호출 경로(재발송 자식·subjectOverride)가 빠진다.
+  //   미입력 자리 잔존 = 어떤 경로로도 발송 불가(AI 임의 혜택 영구 룰의 마지막 방어선).
+  if (hasUneditedPlaceholder(campaign.subject, campaign.htmlBody, campaign.textBody)) {
+    await query(
+      `UPDATE email_campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1::uuid`,
+      [campaign.id],
+    );
+    throw new Error('직접 입력이 필요한 자리가 남아 있어 발송할 수 없습니다. 편집에서 채운 뒤 다시 발송해주세요.');
+  }
+
   // Zero-Count 영구 원칙
   if (input.recipients.length === 0) {
     throw new Error('수신자 0건 — Zero-Count 영구 원칙 발송 차단.');
+  }
+
+  // ★ 2026-07-12 재시도 멱등 (Codex MEDIUM 정정) — 부분 실패 후 같은 캠페인을 다시 발송할 때
+  //   이미 delivered 기록된 수신자는 스킵(중복 발송 차단). 첫 발송은 delivered 0건이라 무영향.
+  //   totalAccepted를 과거 발송분에서 시작해 sent_count 누적이 재시도에도 정확하게 유지된다.
+  let alreadyDelivered = new Set<string>();
+  try {
+    const dRes = await query(
+      `SELECT DISTINCT lower(email) AS email FROM email_events WHERE campaign_id = $1::uuid AND event_type = 'delivered'`,
+      [campaign.id],
+    );
+    alreadyDelivered = new Set<string>(dRes.rows.map((r: any) => String(r.email)));
+  } catch { /* 조회 실패 = 스킵 없이 기존 동작(발송 우선) */ }
+  const sendTargets = alreadyDelivered.size > 0
+    ? input.recipients.filter((r) => !alreadyDelivered.has(r.email.toLowerCase()))
+    : input.recipients;
+  if (alreadyDelivered.size > 0) {
+    console.log(`[Email] 재시도 멱등 — 기발송(delivered) ${input.recipients.length - sendTargets.length}건 스킵 (campaign ${campaign.id})`);
   }
 
   // 발송 직전 status 갱신
@@ -261,27 +292,31 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
   const campaignSections = Array.isArray(campaign.sections) ? (campaign.sections as Section[]) : [];
   const hasSections = campaignSections.length > 0;
   const brandKit = hasSections ? await getCompanyBrandKit(campaign.companyId) : null;
-  const adFooter = `\n\n<hr><p style="font-size:11px;color:#999;text-align:center">본 메일은 ${campaign.fromName}의 광고 정보입니다. 수신을 원하지 않으시면 <a href="${UNSUB_URL_MARKER}">수신거부</a>를 눌러주세요.</p>`;
+  // 정보통신망법 §50④ — 전송자 명칭 + 연락처(발신 이메일) + 수신거부 방법 명시
+  const adFooter = `\n\n<hr><p style="font-size:11px;color:#999;text-align:center">본 메일은 ${campaign.fromName}(${campaign.fromEmail})의 광고 정보입니다. 수신을 원하지 않으시면 <a href="${UNSUB_URL_MARKER}">수신거부</a>를 눌러주세요.</p>`;
+  // 수신거부 링크 실존 판정 — 마커 또는 개인 토큰 URL이 실제로 있어야 생략.
+  // 본문에 '수신거부' 단어만 있는 경우(링크 없는 안내 문구)에 footer가 빠지면 수신거부 수단 0 = 법 위반.
+  const hasUnsubLink = (html: string): boolean => html.includes(UNSUB_URL_MARKER) || html.includes('/api/email/u/');
 
   // 광고성 prefix + 무료거부 자동 합성 — 수신거부는 마커로 두고 발송 시 수신자별 개인 토큰 URL로 치환(applyTracking)
   let finalSubject = campaign.subject;
   let finalHtml = campaign.htmlBody;
   if (campaign.isAd) {
     if (!/^\s*[(（]\s*광고\s*[)）]/.test(finalSubject)) finalSubject = `(광고) ${finalSubject}`; // 반각·전각 중복 방지
-    if (!finalHtml.includes('수신거부') && !finalHtml.includes('unsubscribe')) {
+    if (!hasUnsubLink(finalHtml)) {
       finalHtml += adFooter;
     }
   }
 
   let lastMessageId = '';
-  let totalAccepted = 0;
+  let totalAccepted = alreadyDelivered.size; // 재시도 시 과거 발송분 유지 — sent_count 정확
   let totalRejected = 0;
 
   try {
     // SMTP relay batch 100건 단위 — 회사 SMTP 한도 보호
     const BATCH_SIZE = 100;
-    for (let i = 0; i < input.recipients.length; i += BATCH_SIZE) {
-      const batch = input.recipients.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < sendTargets.length; i += BATCH_SIZE) {
+      const batch = sendTargets.slice(i, i + BATCH_SIZE);
       for (const recipient of batch) {
         try {
           // 섹션 캠페인 = 수신자별 개인화 렌더(변수+조건부). 섹션 없으면 기존 html_body 경로(무회귀).
@@ -291,7 +326,7 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
             const cust = recipient.customer || { name: recipient.name || '고객' };
             const resolved = resolveEmailSectionsForCustomer(campaignSections, cust);
             let body = renderEmailSections(resolved, { brandKit, publicBase: process.env.PUBLIC_BASE_URL });
-            if (campaign.isAd && !body.includes('수신거부') && !body.includes('unsubscribe')) body += adFooter;
+            if (campaign.isAd && !hasUnsubLink(body)) body += adFooter;
             personalizedHtml = body;
             personalizedSubject = renderEmailText(finalSubject, cust);
           } else {
@@ -306,14 +341,19 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
               personalizedSubject = personalizedSubject.replace(pattern, value);
             }
           }
-          if (recipient.name) {
-            // {{이름}} 기본 개인화 — substitutions에 이름이 따로 없을 때
-            personalizedHtml = personalizedHtml.replace(/\{\{\s*이름\s*\}\}/g, recipient.name);
-            personalizedSubject = personalizedSubject.replace(/\{\{\s*이름\s*\}\}/g, recipient.name);
-          }
+          // {{이름}} 기본 개인화 — 이름 없는 수신자도 토큰 원문이 남지 않게 '고객' fallback
+          const nameForToken = recipient.name || '고객';
+          personalizedHtml = personalizedHtml.replace(/\{\{\s*이름\s*\}\}/g, nameForToken);
+          personalizedSubject = personalizedSubject.replace(/\{\{\s*이름\s*\}\}/g, nameForToken);
 
           // 오픈 픽셀 + 클릭 래핑 + 개인 토큰 수신거부 URL 치환 (수신자별)
           personalizedHtml = applyTracking(personalizedHtml, campaign.id, recipient.email);
+
+          // ★ 2026-07-12 최종 방어선 (Codex MEDIUM 정정) — 미해결 {{...}} 토큰 잔존 제거.
+          //   수동 HTML의 substitutions 밖 변수({{ customer.grade }} 등)가 원문 그대로 수신자에게
+          //   노출되는 것을 차단. 수신거부 마커는 applyTracking이 이미 URL로 치환한 뒤라 안전.
+          personalizedHtml = personalizedHtml.replace(/\{\{[^{}]*\}\}/g, '');
+          personalizedSubject = personalizedSubject.replace(/\{\{[^{}]*\}\}/g, '');
 
           const result = await sendEmail({
             companyId: campaign.companyId,
@@ -321,6 +361,14 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
             subject: personalizedSubject,
             htmlBody: personalizedHtml,
             textBody: campaign.textBody || undefined,
+            // 광고 메일 = List-Unsubscribe + One-Click(RFC 8058) — Gmail/Yahoo 대량 발송 요건 + 원클릭 수신거부.
+            //   POST /api/email/u/:token이 본문 없이 수신거부를 처리하므로 One-Click 규격과 그대로 호환.
+            headers: campaign.isAd
+              ? {
+                  'List-Unsubscribe': `<${buildUnsubscribeUrl(campaign.id, recipient.email)}>`,
+                  'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+                }
+              : undefined,
           });
           lastMessageId = result.messageId || lastMessageId;
           const acceptedN = result.accepted.length;
@@ -350,7 +398,7 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
         [campaign.id, totalAccepted]
       );
       // batch 간 1초 sleep — 회사 SMTP rate-limit 차단
-      if (i + BATCH_SIZE < input.recipients.length) {
+      if (i + BATCH_SIZE < sendTargets.length) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
@@ -625,6 +673,30 @@ export async function previewCustomerRecipients(
     gradeBreakdown: breakdownRes.rows.map((r: any) => ({ grade: r.grade, count: Number(r.count) || 0 })),
     sample: sampleRes.rows.map((r: any) => String(r.email)),
   };
+}
+
+/**
+ * 직접 입력(list) 수신자에서 수신거부·반송·무효 이력 이메일 제외 — 즉시/예약(list targetSpec) 공용.
+ * 고객DB 경로(RECIPIENT_SAFETY_WHERE)와 달리 직접 입력은 필터가 없어, 과거 수신거부(자동 opt-out 포함)
+ * 이메일에 재발송되는 구멍을 막는다. 고객DB에 없는 이메일(비고객)은 거부 신호가 없으므로 그대로 발송.
+ * 같은 이메일이 여러 고객 행에 걸릴 땐 하나라도 거부 신호면 제외(보수 판정).
+ */
+export async function excludeOptedOutEmails(
+  companyId: string,
+  recipients: EmailRecipient[],
+): Promise<{ recipients: EmailRecipient[]; excludedCount: number }> {
+  if (recipients.length === 0) return { recipients, excludedCount: 0 };
+  const emails = [...new Set(recipients.map((r) => r.email.toLowerCase()))];
+  const res = await query(
+    `SELECT DISTINCT lower(email) AS email FROM customers
+     WHERE company_id = $1::uuid AND lower(email) = ANY($2)
+       AND (email_opt_in = false OR is_opt_out = true OR is_invalid = true)`,
+    [companyId, emails],
+  );
+  const blocked = new Set<string>(res.rows.map((r: any) => String(r.email)));
+  if (blocked.size === 0) return { recipients, excludedCount: 0 };
+  const kept = recipients.filter((r) => !blocked.has(r.email.toLowerCase()));
+  return { recipients: kept, excludedCount: recipients.length - kept.length };
 }
 
 /** 회사 전체 등급 목록 (고객DB 탭 등급 선택지) */

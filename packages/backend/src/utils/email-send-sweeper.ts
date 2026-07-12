@@ -15,9 +15,11 @@ import {
   sendEmailCampaign,
   resolveCustomerRecipients,
   resolveCustomerRecipientsByFilter,
+  excludeOptedOutEmails,
   type EmailTargetSpec,
   type EmailRecipient,
 } from './email-channel';
+import { hasUneditedPlaceholder } from './email-ai';
 
 const INTERVAL_MS = 60 * 1000;       // 1분 주기
 const STUCK_MINUTES = 30;            // sending 정체 판정
@@ -33,9 +35,15 @@ function isColumnMissing(err: any): boolean {
 async function resolveRecipients(companyId: string, spec: EmailTargetSpec | null): Promise<EmailRecipient[]> {
   if (!spec) return [];
   if (spec.type === 'list') {
-    return (spec.recipients || [])
+    const list = (spec.recipients || [])
       .map((r) => ({ email: String(r.email || '').trim(), name: r.name ? String(r.name) : undefined }))
       .filter((r) => r.email.includes('@'));
+    // ★ 2026-07-12 직접 입력 예약도 발송 시점 수신거부·반송·무효 재대조 — 예약~발송 사이 거부분까지 반영
+    const filtered = await excludeOptedOutEmails(companyId, list);
+    if (filtered.excludedCount > 0) {
+      console.log(`[email-send-sweeper] 직접 입력 대상 중 수신거부·반송 이력 ${filtered.excludedCount}건 제외`);
+    }
+    return filtered.recipients;
   }
   if (spec.type === 'customers') {
     return resolveCustomerRecipients(companyId, spec.grades);
@@ -54,7 +62,7 @@ export async function sweepScheduledEmailsOnce(): Promise<{ dispatched: number; 
   let dueRows: any[] = [];
   try {
     const res = await query(
-      `SELECT id, company_id, target_spec
+      `SELECT id, company_id, target_spec, subject, html_body, text_body
        FROM email_campaigns
        WHERE status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at <= NOW()
        ORDER BY scheduled_at ASC LIMIT 5`,
@@ -82,6 +90,17 @@ export async function sweepScheduledEmailsOnce(): Promise<{ dispatched: number; 
     );
     if (claim.rows.length === 0) continue; // 다른 사이클이 선점
 
+    // ★ 2026-07-12 발송 직전 placeholder 재검사 — 예약 후 편집으로 미입력 자리가 되살아난 캠페인 차단
+    //   (즉시 발송은 /send가 검사하지만 예약은 예약 시점 검사뿐이었음 — AI 임의 혜택 영구 룰의 예약 구멍 봉합)
+    if (hasUneditedPlaceholder(row.subject, row.html_body, row.text_body)) {
+      await query(
+        `UPDATE email_campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1::uuid`,
+        [campaignId],
+      );
+      console.warn(`[email-send-sweeper] 미입력 placeholder 잔존 — 발송하지 않고 failed 처리 (campaign ${campaignId})`);
+      continue;
+    }
+
     const recipients = await resolveRecipients(companyId, spec);
     if (recipients.length === 0) {
       // Zero-Count — 발송 대상 0건이면 발송하지 않고 failed (자동 완화 금지 원칙)
@@ -95,7 +114,16 @@ export async function sweepScheduledEmailsOnce(): Promise<{ dispatched: number; 
 
     // 비동기 발송 — sweeper 사이클을 막지 않음. 엔진이 status/sent_count 자체 갱신.
     sendEmailCampaign({ campaignId, recipients, immediate: true })
-      .catch((e: any) => console.error(`[email-send-sweeper] 예약 발송 실패 (campaign ${campaignId}):`, e?.message));
+      .catch(async (e: any) => {
+        console.error(`[email-send-sweeper] 예약 발송 실패 (campaign ${campaignId}):`, e?.message);
+        // 엔진 초입 throw(SMTP 미설정 등)는 status를 못 바꾸므로 즉시 failed — 30분 정체 대기 제거
+        try {
+          await query(
+            `UPDATE email_campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1::uuid AND status = 'sending'`,
+            [campaignId],
+          );
+        } catch { /* 정체 복구(②)가 후위 안전망 */ }
+      });
     dispatched += 1;
   }
 

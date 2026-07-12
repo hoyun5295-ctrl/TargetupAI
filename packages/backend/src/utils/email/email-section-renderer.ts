@@ -44,6 +44,14 @@ function emailImg(src: string | undefined, publicBase?: string): string {
   return base + '/' + String(src).replace(/^\//, '');
 }
 
+/** ★ 2026-07-12 편집기 폰트 크기(headline_size/body_size 등) 소비 — DM 렌더러 fsDecl 미러.
+ *  유효 숫자(10~64px clamp)면 인라인 px, 아니면 기본 토큰 크기(기존 산출 무변화 = 회귀 0). */
+function fsPx(n: number | undefined, fallback: string): string {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v <= 0) return fallback;
+  return `${Math.round(Math.min(Math.max(v, 10), 64))}px`;
+}
+
 // ────────────── 블록 렌더러 (대표 패턴 — 나머지는 동일 방식으로 확장) ──────────────
 
 // 이메일용 히어로 높이(전체화면 vh는 이메일 불가 → 큰 고정 px). td height 속성 + style로 클라이언트 호환.
@@ -60,18 +68,18 @@ function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx): string {
     const overlay = p.overlay_gradient !== false
       ? 'linear-gradient(180deg,rgba(0,0,0,0) 30%,rgba(0,0,0,0.62) 100%)'
       : 'rgba(0,0,0,0)';
-    // ★ 2026-07-02 줄바꿈(\n→<br>) + 색상 직접 지정(미지정 = 기존 기본색)
-    const headline = `<div style="font-size:${b.type.hero.size};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${esc(p.headline_color || '#ffffff')};text-shadow:0 2px 14px rgba(0,0,0,0.35);margin:0">${esc(p.headline).replace(/\n/g, '<br>')}</div>`;
+    // ★ 2026-07-02 줄바꿈(\n→<br>) + 색상 직접 지정(미지정 = 기존 기본색) + ★ 2026-07-12 크기 직접 지정(fsPx)
+    const headline = `<div style="font-size:${fsPx(p.headline_size, b.type.hero.size)};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${esc(p.headline_color || '#ffffff')};text-shadow:0 2px 14px rgba(0,0,0,0.35);margin:0">${esc(p.headline).replace(/\n/g, '<br>')}</div>`;
     const sub = p.sub_copy
-      ? `<div style="font-size:${b.type.body.size};line-height:${b.type.body.lineHeight};color:${esc(p.sub_copy_color || 'rgba(255,255,255,0.92)')};margin-top:${b.sp[3]}">${esc(p.sub_copy).replace(/\n/g, '<br>')}</div>`
+      ? `<div style="font-size:${fsPx(p.sub_copy_size, b.type.body.size)};line-height:${b.type.body.lineHeight};color:${esc(p.sub_copy_color || 'rgba(255,255,255,0.92)')};margin-top:${b.sp[3]}">${esc(p.sub_copy).replace(/\n/g, '<br>')}</div>`
       : '';
     return `<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${b.text};background-image:url('${esc(img)}');background-position:center center;background-size:cover;background-repeat:no-repeat"><tr><td height="${minH}" valign="bottom" style="height:${minH}px;background:${overlay};padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${headline}${sub}</td></tr></table></td></tr>`;
   }
 
-  // 이미지 없음 — 높이만 적용(텍스트 세로 가운데). 단색/투명 배경. ★ 2026-07-02 줄바꿈+색상 지정 동일 적용
-  const headlineD = `<div style="font-size:${b.type.hero.size};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${esc(p.headline_color || b.text)};margin:0">${esc(p.headline).replace(/\n/g, '<br>')}</div>`;
+  // 이미지 없음 — 높이만 적용(텍스트 세로 가운데). 단색/투명 배경. ★ 2026-07-02 줄바꿈+색상 지정 동일 적용 + 크기(fsPx)
+  const headlineD = `<div style="font-size:${fsPx(p.headline_size, b.type.hero.size)};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${esc(p.headline_color || b.text)};margin:0">${esc(p.headline).replace(/\n/g, '<br>')}</div>`;
   const subD = p.sub_copy
-    ? `<div style="font-size:${b.type.body.size};line-height:${b.type.body.lineHeight};color:${esc(p.sub_copy_color || b.textMuted)};margin-top:${b.sp[3]}">${esc(p.sub_copy).replace(/\n/g, '<br>')}</div>`
+    ? `<div style="font-size:${fsPx(p.sub_copy_size, b.type.body.size)};line-height:${b.type.body.lineHeight};color:${esc(p.sub_copy_color || b.textMuted)};margin-top:${b.sp[3]}">${esc(p.sub_copy).replace(/\n/g, '<br>')}</div>`
     : '';
   return `<tr><td height="${minH}" valign="middle" style="height:${minH}px;padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${headlineD}${subD}</td></tr>`;
 }
@@ -99,9 +107,9 @@ function renderTextCard(p: TextCardProps, b: EmailBrand, ctx: EmailRenderCtx): s
   const imgTag = img ? `<img src="${esc(img)}" alt="${esc(p.headline || '')}" style="width:100%;max-width:552px;display:block;border:0;border-radius:${b.radius.md}">` : '';
   // ★ 2026-07-07(5) 디자인 2.0 — 태그 = 자간 넓은 오버라인 (쿠폰 COUPON 인장과 동일 언어)
   const tag = p.tag ? `<div style="font-size:${b.type.tiny.size};font-weight:800;letter-spacing:0.18em;color:${b.primary};margin-bottom:${b.sp[2]}">${esc(p.tag)}</div>` : '';
-  // ★ 2026-07-02 헤드라인 줄바꿈 + 색상 직접 지정 (미지정 = 기존 기본색)
-  const head = p.headline ? `<div style="font-size:${b.type.h2.size};line-height:${b.type.h2.lineHeight};font-weight:${b.type.h2.weight};color:${esc(p.headline_color || b.text)};margin:0 0 ${b.sp[3]} 0">${esc(p.headline).replace(/\n/g, '<br>')}</div>` : '';
-  const bodyHtml = p.body ? `<div style="font-size:${b.type.body.size};line-height:${b.type.body.lineHeight};color:${esc(p.body_color || b.text)}">${esc(p.body).replace(/\n/g, '<br>')}</div>` : '';
+  // ★ 2026-07-02 헤드라인 줄바꿈 + 색상 직접 지정 (미지정 = 기존 기본색) + ★ 2026-07-12 크기 직접 지정(fsPx)
+  const head = p.headline ? `<div style="font-size:${fsPx(p.headline_size, b.type.h2.size)};line-height:${b.type.h2.lineHeight};font-weight:${b.type.h2.weight};color:${esc(p.headline_color || b.text)};margin:0 0 ${b.sp[3]} 0">${esc(p.headline).replace(/\n/g, '<br>')}</div>` : '';
+  const bodyHtml = p.body ? `<div style="font-size:${fsPx(p.body_size, b.type.body.size)};line-height:${b.type.body.lineHeight};color:${esc(p.body_color || b.text)}">${esc(p.body).replace(/\n/g, '<br>')}</div>` : '';
   const textHtml = `<div style="text-align:${align}">${tag}${head}${bodyHtml}</div>`;
   const pos = p.image_position || 'top';
   let inner: string;
@@ -324,10 +332,21 @@ function renderMapStatic(p: MapStoreLocatorProps, b: EmailBrand): string {
   return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}">${rows}</td></tr>`;
 }
 
-function renderBlock(s: Section, b: EmailBrand, ctx: EmailRenderCtx): string {
+// 섹션 공통 정렬(section.align)을 props.align으로 주입하는 대상 — 이메일 렌더러가 props.align을 소비하는 타입만
+//   (DM 렌더러 withAlign 패턴 미러. 미설정 시 각 타입 기본 유지 = 하위호환)
+const EMAIL_ALIGN_AWARE = new Set<string>(['hero', 'header', 'text_card']);
+
+function renderBlock(s: Section, baseBrand: EmailBrand, ctx: EmailRenderCtx): string {
   const renderable = (EMAIL_BLOCK_WHITELIST as readonly string[]).includes(s.type);
   // 화이트리스트 밖 + 정적 대체 대상도 아님 → 렌더 0(깨진 HTML 차단)
   if (!renderable && EMAIL_INCOMPATIBLE[s.type] !== 'static') return '';
+  // ★ 2026-07-12 섹션 공통 스타일 소비 — ①정렬(align 소비 타입만 주입) ②강조색(accent_color → 이 섹션만 primary 파생 재해석)
+  if (s.align && EMAIL_ALIGN_AWARE.has(s.type)) {
+    s = { ...s, props: { ...(s.props as any), align: s.align } } as Section;
+  }
+  const b = (s.accent_color && /^#[0-9a-fA-F]{6}$/.test(s.accent_color.trim()))
+    ? resolveEmailBrand({ ...(ctx.brandKit || {}), primary_color: s.accent_color.trim() } as NonNullable<EmailRenderCtx['brandKit']>)
+    : baseBrand;
   switch (s.type) {
     case 'header':
       return renderHeader(s.props as HeaderProps, b, ctx);

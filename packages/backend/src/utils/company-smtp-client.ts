@@ -61,6 +61,8 @@ export interface SendEmailInput {
   htmlBody: string;
   textBody?: string;
   replyTo?: string;
+  /** 추가 메일 헤더 (List-Unsubscribe 등 — 광고 캠페인 발송이 주입) */
+  headers?: Record<string, string>;
 }
 
 export interface SendEmailResult {
@@ -351,6 +353,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
     text: input.textBody,
     html: input.htmlBody,
     replyTo: input.replyTo,
+    headers: input.headers,
   });
 
   return {

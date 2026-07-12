@@ -43,10 +43,9 @@ const EMAIL_GEN_STEPS = ['요청 의도 분석', '브랜드 톤 반영', '제목
 
 // EmailCampaign / CampaignStatus = ../components/email/email-campaign-types (분석 모달과 공유)
 
-// 편집 모달 상태 — 캠페인 필드 + AI 생성 부가(제목 3안·프리헤더·AI 플래그)
+// 편집 모달 상태 — 캠페인 필드 + AI 생성 부가(제목 3안·AI 플래그)
 interface EditingCampaign extends Partial<EmailCampaign> {
   subjects?: string[];
-  preheader?: string;
   aiGenerated?: boolean;
 }
 
@@ -524,12 +523,13 @@ export default function EmailCampaignsPage() {
       if (data?.code === 'INSUFFICIENT_CREDIT') { showToast('크레딧이 부족합니다. 충전 후 이용해주세요.', 'warning'); setSendingId(null); return; }
       if (handle503(data)) { setSendingId(null); return; }
       if (data.success) {
+        const excluded = Number(data.excludedOptOut) > 0 ? ` · 수신거부 이력 ${Number(data.excludedOptOut)}건 제외` : '';
         if (data.scheduled) {
-          showToast(`예약 완료 — ${new Date(data.scheduledAt).toLocaleString('ko-KR')} 발송 (대상 ${data.total}명)`, 'success');
+          showToast(`예약 완료 — ${new Date(data.scheduledAt).toLocaleString('ko-KR')} 발송 (대상 ${data.total}명${excluded})`, 'success');
           setSendingId(null);
           await loadAll();
         } else {
-          showToast(`발송 시작 — 대상 ${data.total}명 (진행 상황 자동 갱신)`, 'success');
+          showToast(`발송 시작 — 대상 ${data.total}명${excluded} (진행 상황 자동 갱신)`, 'success');
           pollCampaign(campaign.id);
         }
       } else {
@@ -561,6 +561,32 @@ export default function EmailCampaignsPage() {
         onConfirm: () => doSend(campaign, payload),
       });
     }
+  };
+
+  // ★ 2026-07-12 예약 발송 취소 — scheduled → draft 복귀 (완성 크레딧은 유지, 재발송·재예약 자유)
+  const handleCancelSchedule = (c: EmailCampaign) => {
+    setConfirmState({
+      mode: 'warning',
+      title: '예약 발송 취소',
+      description: `${c.scheduledAt ? new Date(c.scheduledAt).toLocaleString('ko-KR') + ' 예약된 ' : ''}"${c.name}" 발송을 취소합니다. 캠페인은 초안으로 돌아가며 언제든 다시 발송·예약할 수 있습니다.`,
+      confirmLabel: '예약 취소',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/email/campaigns/${c.id}/cancel-schedule`, { method: 'POST', headers: authHeaders() });
+          const data = await res.json();
+          if (handle503(data)) return;
+          if (data.success) {
+            showToast('예약이 취소되었습니다 — 캠페인은 초안 상태로 보관됩니다.', 'success');
+            await loadAll();
+          } else {
+            showToast(data.error || '예약 취소 실패', 'error');
+            await loadAll(); // 이미 발송 시작 등 상태 변화 반영
+          }
+        } catch (e: any) {
+          showToast(e?.message || '예약 취소 중 오류', 'error');
+        }
+      },
+    });
   };
 
   // ★ 2026-07-02 완성(50크레딧) 처리 후 발송 — 멱등이라 중복 차감 0
@@ -833,6 +859,7 @@ export default function EmailCampaignsPage() {
                   <span>·</span>
                   <span>수신거부 <strong className="text-white/50">{c.unsubscribeCount.toLocaleString()}</strong></span>
                   {c.sentAt && <><span>·</span><span>발송 일자 {new Date(c.sentAt).toLocaleString('ko-KR')}</span></>}
+                  {c.status === 'scheduled' && c.scheduledAt && <><span>·</span><span className="text-amber-300">예약 {new Date(c.scheduledAt).toLocaleString('ko-KR')}</span></>}
                 </div>
                 <div className="mt-3 pt-2.5 border-t border-white/10 flex flex-wrap items-center gap-1.5">
                   {/* ★ 2026-07-02(3) Harold 지시 — 발송 버튼은 완성 저장(50크레딧) 후에만 생성. 임시저장(미완성) = 발송 버튼 자체 미노출 */}
@@ -853,6 +880,16 @@ export default function EmailCampaignsPage() {
                       title="편집기에서 완성 저장(50크레딧)하면 발송 버튼이 열립니다"
                     >
                       <Lock className="w-3 h-3" /> 완성 저장 후 발송
+                    </button>
+                  )}
+                  {/* ★ 2026-07-12 예약 취소 — 취소 수단 부재 봉합 (취소 = 초안 복귀, 완성 크레딧 유지) */}
+                  {c.status === 'scheduled' && (
+                    <button
+                      onClick={() => handleCancelSchedule(c)}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold bg-amber-500/20 hover:bg-amber-500/35 text-amber-200 border border-amber-400/30 px-2.5 py-1.5 rounded-lg"
+                      title="예약을 취소하고 초안으로 되돌립니다 (완성 상태 유지 — 다시 발송·예약 가능)"
+                    >
+                      <X className="w-3 h-3" /> 예약 취소
                     </button>
                   )}
                   {c.sentCount > 0 && (
@@ -1418,20 +1455,8 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
               </div>
             )}
           </div>
-          {/* 프리헤더 (AI 생성 시) */}
-          {(editing.aiGenerated || editing.preheader) && (
-            <div>
-              <label className="text-xs text-white/70 block mb-1">프리헤더 (수신함 미리보기 — 제목 옆 회색 글씨)</label>
-              <input
-                type="text"
-                value={editing.preheader || ''}
-                onChange={(e) => setEditing({ ...editing, preheader: e.target.value })}
-                placeholder="수신함에서 제목과 함께 보이는 한 줄"
-                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
-                maxLength={100}
-              />
-            </div>
-          )}
+          {/* ★ 2026-07-12 프리헤더 입력 제거 — 저장 통로가 없어 입력해도 사라지던 거짓 UI.
+              비주얼 캠페인은 렌더러가 본문 첫 텍스트로 프리헤더를 자동 생성한다. */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-white/70 block mb-1">발신자 이름 (선택)</label>

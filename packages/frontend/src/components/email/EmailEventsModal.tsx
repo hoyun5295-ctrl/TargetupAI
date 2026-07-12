@@ -76,7 +76,8 @@ const EVENT_TYPE_META: Record<string, { label: string; color: string; icon: type
   click: { label: '클릭', color: 'text-cyan-300', icon: MousePointerClick },
   bounce: { label: '반송', color: 'text-rose-300', icon: AlertCircle },
   dropped: { label: '드롭', color: 'text-rose-300', icon: AlertCircle },
-  spamreport: { label: '스팸 신고', color: 'text-rose-400', icon: AlertCircle },
+  spam_report: { label: '스팸 신고', color: 'text-rose-400', icon: AlertCircle }, // 실제 기록 값 (recordEmailEvent)
+  spamreport: { label: '스팸 신고', color: 'text-rose-400', icon: AlertCircle },  // 옛 웹훅 잔존 행 호환
   unsubscribe: { label: '수신거부', color: 'text-white/50', icon: UserMinus },
 };
 

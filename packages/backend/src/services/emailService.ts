@@ -30,6 +30,14 @@ export async function sendBillingEmail(params: SendBillingEmailParams): Promise<
   console.log(`PDF: ${params.pdfBuffer ? '있음' : '없음 (TODO)'}`);
   console.log('================================================');
 
+  // ★ 2026-07-12 거짓 성공 제거(6원칙 ② — 효과 검증 없는 성공 표시 금지):
+  //   SMTP 미연결 상태에서 success:true를 돌려주면 admin.ts가 billings.emailed_at을 기록해
+  //   "발송된 정산서"라는 거짓 상태가 남는다. 연결 전까지는 정직하게 실패로 응답.
+  return {
+    success: false,
+    message: '정산서 이메일 발송 기능이 아직 연결되지 않았습니다 — 발송되지 않았습니다. PDF 다운로드 후 직접 전달해주세요.',
+  };
+
   // TODO: 하이웍스 SMTP 연결 시 아래 코드로 교체
   // -----------------------------------------------
   // import nodemailer from 'nodemailer';
@@ -54,9 +62,4 @@ export async function sendBillingEmail(params: SendBillingEmailParams): Promise<
   //     : [],
   // });
   // -----------------------------------------------
-
-  return {
-    success: true,
-    message: `정산서가 ${to}로 발송되었습니다 (stub: 실제 메일 미발송)`,
-  };
 }

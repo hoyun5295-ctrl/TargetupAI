@@ -1334,6 +1334,11 @@ const handleSendBillingEmail = async () => {
       subject: emailSubject,
       body_html: bodyHtml,
     });
+    // ★ 2026-07-12 성공 분기 (Codex HIGH 정정) — 실패 응답을 성공 토스트로 표시하던 무분기 제거
+    if (!res.data?.success) {
+      setBillingToast({ msg: res.data?.error || res.data?.message || '이메일 발송 실패', type: 'error' });
+      return;
+    }
     setBillingToast({ msg: res.data.message || '정산서가 발송되었습니다', type: 'success' });
     setShowEmailModal(false);
     // 발송 이력 반영

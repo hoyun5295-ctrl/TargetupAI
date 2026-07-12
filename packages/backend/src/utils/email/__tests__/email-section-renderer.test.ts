@@ -96,4 +96,45 @@ describe('renderEmailSections — 디자인 2.0 골격', () => {
     expect(html).toContain('border-radius:14px');
     expect(html).toContain('border:1px solid');
   });
+
+  // ★ 2026-07-12 편집기 스타일 소비 고정 — 죽은 컨트롤(크기 selector 미반영) 재발 차단
+  it('폰트 크기 직접 지정(headline_size/body_size/sub_copy_size) = 인라인 px 반영 + 범위 clamp', () => {
+    const html = renderEmailSections([
+      sec('hero', { headline: '큰 제목', sub_copy: '부제', headline_size: 40, sub_copy_size: 18 }, 0),
+      sec('text_card', { headline: '소제목', body: '본문', headline_size: 28, body_size: 200 }, 1),
+    ], {});
+    expect(html).toContain('font-size:40px');
+    expect(html).toContain('font-size:18px');
+    expect(html).toContain('font-size:28px');
+    expect(html).toContain('font-size:64px'); // 200 → 64 clamp
+  });
+
+  it('폰트 크기 미지정 = 기본 토큰 유지 (기존 산출 회귀 0)', () => {
+    const html = renderEmailSections([sec('hero', { headline: '제목' }, 0)], {});
+    expect(html).not.toContain('font-size:NaN');
+    expect(html).toContain('제목');
+  });
+
+  it('섹션 공통 정렬(section.align) = hero/text_card props.align으로 주입', () => {
+    const secs: Section[] = [
+      { ...sec('hero', { headline: '좌측 제목' }, 0), align: 'left' } as Section,
+      { ...sec('text_card', { headline: '우측 카드', body: '본문', align: 'left' }, 1), align: 'right' } as Section,
+    ];
+    const html = renderEmailSections(secs, {});
+    expect(html).toContain('text-align:left');
+    expect(html).toContain('text-align:right'); // section.align이 props.align(left)을 덮음
+  });
+
+  it('섹션 강조색(accent_color) = 그 블록의 버튼·워시에만 반영 (다른 블록은 브랜드 색 유지)', () => {
+    const secs: Section[] = [
+      { ...sec('cta', { buttons: [{ label: '보기', url: 'https://a.example.com', style: 'primary' }] }, 0), accent_color: '#e11d48' } as Section,
+      sec('coupon', { discount_label: '혜택', coupon_code: 'C1' }, 1),
+    ];
+    const html = renderEmailSections(secs, {});
+    expect(html).toContain('#e11d48');                    // 지정 블록(CTA) 반영
+    expect(html).toContain('rgba(225,29,72,0.45)');       // primaryDashed 파생(CTA 그림자)
+    // 쿠폰(미지정 블록)은 accent 파생 워시(primarySoft)를 쓰지 않아야 — 블록 단위 격리 확인
+    expect(html).not.toContain('rgba(225,29,72,0.08)');
+    expect(html).toMatch(/COUPON/);                        // 쿠폰 블록은 기본 브랜드 색으로 렌더됨
+  });
 });

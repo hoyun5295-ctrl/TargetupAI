@@ -50,6 +50,7 @@ import {
   countResendChildren,
   createResendChildCampaign,
   listEmailPersonalizationVars,
+  excludeOptedOutEmails,
   type EmailRecipient,
   type EmailTargetSpec,
 } from '../utils/email-channel';
@@ -180,40 +181,16 @@ function renderUnsubPage(mode: 'confirm' | 'done' | 'invalid' | 'error', token: 
 }
 
 // ════════════════════════════════════════════════════════════════════
-// 외부 Webhook (인증 X — 향후 자체 픽셀/링크 트래킹 또는 외부 SMTP relay webhook 통합 영역)
-//   D215+ 정정: 옛 SendGrid 특화 흐름 영구 폐기 → 일반 webhook 흐름 (recordEmailEvent 보존)
+// 외부 Webhook — ★ 2026-07-12 영구 폐기(410)
+//   옛 SendGrid 잔재. 자체 픽셀/링크 추적(HMAC 토큰 검증) 전환 후 소비처 0인데,
+//   인증 없이 임의 email에 unsubscribe/bounce 이벤트를 넣을 수 있어(추적 토큰 payload가
+//   base64url 평문이라 수신자가 campaign uuid 추출 가능) 통계 오염·타인 수신거부 위조 표면이었다.
+//   이벤트 적재는 서명 검증을 거치는 /t/o·/t/c·/u 경로만 유지.
 // ════════════════════════════════════════════════════════════════════
 
-router.post(
-  '/webhook',
-  json({ limit: '2mb' }),
-  async (req: Request, res: Response) => {
-    try {
-      const events = Array.isArray(req.body) ? req.body : [req.body];
-      for (const ev of events) {
-        if (!ev?.email || !ev?.event) continue;
-        const campaignId = ev.campaign_id || ev.custom_args?.campaign_id;
-        if (!campaignId) continue;
-        try {
-          await recordEmailEvent({
-            campaignId: String(campaignId),
-            email: String(ev.email),
-            eventType: String(ev.event) as any,
-            url: ev.url ? String(ev.url) : undefined,
-            reason: ev.reason ? String(ev.reason) : undefined,
-            occurredAt: ev.timestamp ? new Date(ev.timestamp * 1000) : new Date(),
-          });
-        } catch (innerErr: any) {
-          console.warn('[Email Webhook] 이벤트 기록 실패:', innerErr?.message);
-        }
-      }
-      return res.status(200).json({ success: true, processed: events.length });
-    } catch (err: any) {
-      console.error('[Email /webhook] 오류:', err);
-      return res.status(500).json({ success: false, error: err?.message || 'webhook 처리 실패' });
-    }
-  }
-);
+router.post('/webhook', json({ limit: '16kb' }), (_req: Request, res: Response) => {
+  return res.status(410).json({ success: false, error: '지원이 종료된 endpoint입니다.' });
+});
 
 // ════════════════════════════════════════════════════════════════════
 // 자체 트래킹 공개 endpoint (인증 X — 수신자가 메일에서 직접 호출)
@@ -629,6 +606,7 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
     // 수신자 명세 해석 — 명시 recipients(직접 입력) 또는 target(고객DB)
     let resolved: EmailRecipient[] = [];
     let targetSpec: EmailTargetSpec | null = null;
+    let excludedOptOut = 0;
     if (Array.isArray(recipients) && recipients.length > 0) {
       resolved = recipients
         .map((r: any) => ({
@@ -637,6 +615,10 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
           substitutions: r.substitutions || undefined,
         }))
         .filter((r: EmailRecipient) => r.email.includes('@'));
+      // ★ 2026-07-12 직접 입력도 수신거부·반송·무효 이력 제외 — 고객DB 경로(RECIPIENT_SAFETY_WHERE)와 동일 보호
+      const filtered = await excludeOptedOutEmails(auth.companyId, resolved);
+      resolved = filtered.recipients;
+      excludedOptOut = filtered.excludedCount;
       targetSpec = { type: 'list', recipients: resolved.map((r) => ({ email: r.email, name: r.name })) };
     } else if (target && target.type === 'customers') {
       const grades = Array.isArray(target.grades) ? target.grades.map((g: any) => String(g)) : undefined;
@@ -653,7 +635,13 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
 
     // Zero-Count 영구 원칙
     if (resolved.length === 0) {
-      return res.status(400).json({ success: false, error: '발송 대상이 0건입니다. 조건을 조정해주세요.', code: 'ZERO_COUNT' });
+      return res.status(400).json({
+        success: false,
+        error: excludedOptOut > 0
+          ? `수신거부·반송 이력 ${excludedOptOut}건을 제외하면 발송 대상이 0건입니다.`
+          : '발송 대상이 0건입니다. 조건을 조정해주세요.',
+        code: 'ZERO_COUNT',
+      });
     }
 
     // ★ 2026-07-02 Harold 확정 — 발송 시 크레딧 차감 제거(발송 = 무료, 고객 SMTP).
@@ -673,7 +661,7 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
         return res.status(400).json({ success: false, error: '예약 시각은 현재보다 1분 이상 이후여야 합니다.' });
       }
       const updated = await scheduleCampaign(auth.companyId, campaign.id, targetSpec, when);
-      return res.json({ success: true, scheduled: true, total: resolved.length, scheduledAt: updated?.scheduledAt });
+      return res.json({ success: true, scheduled: true, total: resolved.length, excludedOptOut, scheduledAt: updated?.scheduledAt });
     }
 
     // 즉시 발송 — status='sending' 선점 후 응답, 실제 SMTP 루프는 백그라운드(타임아웃 차단)
@@ -683,9 +671,18 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
     );
     setImmediate(() => {
       sendEmailCampaign({ campaignId: campaign.id, recipients: resolved, immediate: true })
-        .catch((e: any) => console.error(`[Email /send] 백그라운드 발송 실패 (campaign ${campaign.id}):`, e?.message));
+        .catch(async (e: any) => {
+          console.error(`[Email /send] 백그라운드 발송 실패 (campaign ${campaign.id}):`, e?.message);
+          // 발송 엔진 초입 throw(SMTP 미설정 등)는 status를 못 바꾸므로 즉시 failed — 30분 정체 대기 제거
+          try {
+            await query(
+              `UPDATE email_campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1::uuid AND status = 'sending'`,
+              [campaign.id],
+            );
+          } catch { /* 상태 복구 실패는 sweeper 정체 복구가 후위 안전망 */ }
+        });
     });
-    return res.json({ success: true, queued: true, total: resolved.length });
+    return res.json({ success: true, queued: true, total: resolved.length, excludedOptOut });
   } catch (err: any) {
     console.error('[Email /campaigns/:id/send] 오류:', err);
     if (err instanceof InsufficientCreditError) {
@@ -695,6 +692,31 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
     if (handleEncryptionKeyError(err, res)) return;
     const status = err?.message?.includes('0건') || err?.message?.includes('필수') || err?.message?.includes('미완료') ? 400 : 500;
     return res.status(status).json({ success: false, error: err?.message || '발송 실패' });
+  }
+});
+
+// ★ 2026-07-12 예약 발송 취소 — scheduled → draft 복귀 (취소 수단 부재 봉합).
+//   WHERE status='scheduled' 원자 조건이라 sweeper의 sending 선점과 경합해도 한쪽만 성립(이중 처리 0).
+//   완성(50크레딧)은 캠페인에 남아 있으므로 취소 후 재발송·재예약 자유.
+router.post('/campaigns/:id/cancel-schedule', async (req: Request, res: Response) => {
+  const auth = await ensureEmailAdmin(req, res);
+  if (!auth) return;
+  try {
+    const r = await query(
+      `UPDATE email_campaigns
+         SET status = 'draft', scheduled_at = NULL, target_spec = NULL, updated_at = NOW()
+       WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'scheduled'
+       RETURNING id`,
+      [req.params.id, auth.companyId],
+    );
+    if (r.rows.length === 0) {
+      return res.status(400).json({ success: false, error: '예약 상태 캠페인이 아닙니다. 이미 발송이 시작되었거나 취소된 상태입니다.', code: 'NOT_SCHEDULED' });
+    }
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Email /campaigns/:id/cancel-schedule] 오류:', err);
+    if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+    return res.status(500).json({ success: false, error: err?.message || '예약 취소 실패' });
   }
 });
 
@@ -724,7 +746,7 @@ router.get('/campaigns/:id/events', async (req: Request, res: Response) => {
               MIN(CASE WHEN event_type IN ('delivered','processed','sent') THEN occurred_at END) AS delivered_at,
               MIN(CASE WHEN event_type = 'open' THEN occurred_at END) AS opened_at,
               MIN(CASE WHEN event_type = 'click' THEN occurred_at END) AS clicked_at,
-              MIN(CASE WHEN event_type IN ('bounce','dropped','spamreport') THEN occurred_at END) AS bounced_at,
+              MIN(CASE WHEN event_type IN ('bounce','dropped','spam_report') THEN occurred_at END) AS bounced_at,
               MIN(CASE WHEN event_type = 'unsubscribe' THEN occurred_at END) AS unsubscribed_at,
               COUNT(*) FILTER (WHERE event_type = 'click') AS click_count,
               COUNT(*) FILTER (WHERE event_type = 'open') AS open_count,
@@ -1335,6 +1357,10 @@ router.post('/campaigns/:id/resend-non-openers', async (req: Request, res: Respo
       return res.status(400).json({ success: false, error: '재발송할 미오픈 대상이 0건입니다.', code: 'ZERO_COUNT' });
     }
     const subjectOverride = typeof req.body?.subject === 'string' ? req.body.subject : undefined;
+    // ★ 2026-07-12 재발송 제목에 미입력 자리 유입 차단 — 엔진 가드(sendEmailCampaign)가 최종 방어선이나 즉시 안내가 낫다
+    if (subjectOverride && findUneditedPlaceholder(subjectOverride, null, null)) {
+      return res.status(400).json({ success: false, error: '재발송 제목에 직접 입력이 필요한 자리가 남아 있습니다. 채운 뒤 다시 시도해주세요.', code: 'UNEDITED_PLACEHOLDER' });
+    }
     // 자식 캠페인 생성(콘텐츠 재사용 = 무료, 완성 게이트 우회하도록 sendEmailCampaign 직접 호출)
     const child = await createResendChildCampaign(parent, auth.userId, subjectOverride);
     // 즉시 발송 — status='sending' 선점 후 응답, 실제 SMTP 루프는 백그라운드(타임아웃 차단)
@@ -1344,7 +1370,15 @@ router.post('/campaigns/:id/resend-non-openers', async (req: Request, res: Respo
     );
     setImmediate(() => {
       sendEmailCampaign({ campaignId: child.id, recipients, immediate: true })
-        .catch((e: any) => console.error(`[Email /resend-non-openers] 백그라운드 발송 실패 (child ${child.id}):`, e?.message));
+        .catch(async (e: any) => {
+          console.error(`[Email /resend-non-openers] 백그라운드 발송 실패 (child ${child.id}):`, e?.message);
+          try {
+            await query(
+              `UPDATE email_campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1::uuid AND status = 'sending'`,
+              [child.id],
+            );
+          } catch { /* sweeper 정체 복구가 후위 안전망 */ }
+        });
     });
     return res.json({ success: true, queued: true, childId: child.id, total: recipients.length });
   } catch (err: any) {

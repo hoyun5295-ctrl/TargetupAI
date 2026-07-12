@@ -27,6 +27,14 @@ const EMAIL_BLOCK_TYPES: SectionType[] = [
   'coupon', 'promo_code', 'cta', 'store_info', 'sns', 'reviews', 'footer',
 ];
 
+// ★ 2026-07-12 블록 스타일 공통 컨트롤 — 렌더러가 실제 소비하는 타입에만 노출(죽은 컨트롤 금지, LESSONS_FRONTEND 07-10).
+//   정렬 = 백엔드 EMAIL_ALIGN_AWARE 미러(section.align → props.align 주입 대상).
+//   강조색 = 이메일 렌더러가 primary 파생(버튼·쿠폰·태그·코드·SNS칩·카운트다운·상품 할인가·웹사이트 링크)을 쓰는 타입.
+const EMAIL_ALIGN_AWARE = new Set<SectionType>(['hero', 'header', 'text_card']);
+const EMAIL_ACCENT_AWARE = new Set<SectionType>([
+  'text_card', 'cta', 'coupon', 'promo_code', 'sns', 'store_info', 'product_carousel',
+]);
+
 // 개인화 변수(Liquid 토큰) — ★ 2026-07-02 Harold 지시: 하드코딩이 아니라 회사 실데이터 필드만 노출.
 //   실제 목록은 GET /api/email/personalization-vars (CT-58 실측 프로필 — 데이터 70%+ 채워진 필드)에서 로드.
 //   아래는 조회 실패 시에만 쓰는 fallback (편집 중단 0).
@@ -471,6 +479,57 @@ export default function EmailVisualEditor({
                   <span className="text-base">{SECTION_META[selected.type]?.icon}</span>
                   <span className="text-sm font-semibold text-white">{SECTION_META[selected.type]?.label} 편집</span>
                 </div>
+                {/* ★ 2026-07-12 블록 스타일 — 정렬(렌더러 소비 타입만) + 강조색(primary 파생 소비 타입만) */}
+                {(EMAIL_ALIGN_AWARE.has(selected.type) || EMAIL_ACCENT_AWARE.has(selected.type)) && (
+                  <div className="mb-4 pb-4 border-b border-white/10 space-y-2.5">
+                    <div className="text-[11px] font-semibold text-white/60">블록 스타일</div>
+                    {EMAIL_ALIGN_AWARE.has(selected.type) && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] text-white/60">정렬</span>
+                        <div className="flex gap-1">
+                          {([['left', '좌'], ['center', '중'], ['right', '우']] as const).map(([a, lbl]) => (
+                            <button
+                              key={a}
+                              type="button"
+                              onClick={() => updateSelectedSection({ align: a })}
+                              className={`w-9 h-7 text-[11px] rounded-lg border transition-colors ${
+                                (selected.align || 'center') === a
+                                  ? 'bg-violet-500/40 border-violet-400/60 text-white font-bold'
+                                  : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'
+                              }`}
+                            >
+                              {lbl}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {EMAIL_ACCENT_AWARE.has(selected.type) && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] text-white/60">버튼·강조색</span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="color"
+                            value={selected.accent_color || '#4f46e5'}
+                            onChange={(e) => updateSelectedSection({ accent_color: e.target.value })}
+                            className="w-9 h-7 p-0 rounded-lg border border-white/15 bg-transparent cursor-pointer"
+                            aria-label="강조색 선택"
+                          />
+                          {selected.accent_color && (
+                            <button
+                              type="button"
+                              onClick={() => updateSelectedSection({ accent_color: undefined })}
+                              className="text-[10px] text-white/50 hover:text-white underline"
+                              title="직접 지정을 지우고 브랜드 색으로 돌아갑니다"
+                            >
+                              브랜드색
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="text-white" onFocus={trackFieldFocus}>
                   <SectionPropsEditor section={selected} onUpdate={updateSelected} />
                 </div>

@@ -2208,16 +2208,16 @@ router.post('/billing/:id/send-email', authenticate, requireSuperAdmin, async (r
       pdfFilename: `정산서_${billing.company_name || 'billing'}_${billing.billing_year}_${billing.billing_month}.pdf`,
     });
 
-    // 4) 발송 이력 기록
-    if (emailResult.success) {
-      await query(
-        'UPDATE billings SET emailed_at = NOW(), emailed_to = $1, emailed_by = $2 WHERE id = $3',
-        [to, adminId, id]
-      );
+    // 4) 발송 이력 기록 — 실발송 성공 시에만. 실패인데 emailed_at을 응답에 넣으면 거짓 상태(Codex HIGH 정정).
+    if (!emailResult.success) {
+      return res.status(502).json({ success: false, error: emailResult.message });
     }
-
+    await query(
+      'UPDATE billings SET emailed_at = NOW(), emailed_to = $1, emailed_by = $2 WHERE id = $3',
+      [to, adminId, id]
+    );
     res.json({
-      success: emailResult.success,
+      success: true,
       message: emailResult.message,
       emailed_at: new Date().toISOString(),
       emailed_to: to,
