@@ -122,6 +122,10 @@ export interface InAppInitInput {
   containerSelector?: string;
   /** 장바구니 누적 금액 추정치 — cart_value 트리거 조건(cart_value_min) 비교용. 미전달 시 cart_value 조건 메시지는 매칭되지 않는다. */
   cartValue?: number;
+  /** ★ P0-1 (2026-07-12) scroll 자동 트리거 발화 시점의 실측 스크롤 도달 % — 발화별 값(lastInput에 누적 보존하지 않음) */
+  scrollPercent?: number;
+  /** ★ P0-1 (2026-07-12) time_on_page 자동 트리거 발화 시점의 실측 체류 초 — 발화별 값(lastInput에 누적 보존하지 않음) */
+  timeOnPageSeconds?: number;
   /** 자동 트리거 감지 활성 (default true) */
   enableAutoTriggers?: boolean;
   /** 디버그 로깅 활성 (default false) */
@@ -143,11 +147,63 @@ const CACHE_TTL_MS = 5 * 60 * 1000;  // 5분
 const MAX_RETRIES = 3;
 
 // ════════════════════════════════════════════════════════════════════
+// ★ 2026-07-12 인앱 강화 — 순수 판정 함수 (vitest 고정)
+// ════════════════════════════════════════════════════════════════════
+
+/**
+ * ★ P0-2 — 버튼 action_url 스킴 화이트리스트 판정 (순수).
+ * http:/https:(상대경로 포함 — base 기준 해석)만 허용, 그 외(javascript:/data:/vbscript: 등)는 null.
+ * 판정은 new URL 파싱 후 protocol 검사 — 인코딩·공백 변형은 파서 정규화를 신뢰한다(0710 hlj.kr 교훈).
+ * placeholder('['로 시작)는 기존 동작 그대로 이동 대상 아님.
+ */
+export function resolveSafeNavUrl(url: string | null | undefined, baseHref: string): string | null {
+  const raw = String(url || '').trim();
+  if (!raw || raw.startsWith('[')) return null;
+  try {
+    const parsed = new URL(raw, baseHref);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ★ P0-1 — 트리거 임계값 검증 (순수). 실측값(스크롤%·체류초·장바구니액)은 브라우저만 알므로 SDK가 판정.
+ * scroll/time_on_page 값 미전달(자사몰 직접 trigger 호출) = 통과 — 기존 동작 보존(오차단 0).
+ * cart_value는 기존 동작 유지(값 미전달 = 미매칭). 임계 미설정 시 기본값 scroll 50% / time_on_page 10초.
+ */
+export function passesTriggerThresholds(
+  conds: InAppTriggerConditions | undefined,
+  trigger: string,
+  input: Pick<InAppInitInput, 'scrollPercent' | 'timeOnPageSeconds' | 'cartValue'>,
+): boolean {
+  if (trigger === 'cart_value') {
+    const min = conds?.cart_value_min;
+    if (typeof min !== 'number' || min <= 0) return true;
+    return typeof input.cartValue === 'number' && input.cartValue >= min;
+  }
+  if (trigger === 'scroll') {
+    if (typeof input.scrollPercent !== 'number') return true;
+    const need = typeof conds?.scroll_percent === 'number' && conds.scroll_percent > 0 ? conds.scroll_percent : 50;
+    return input.scrollPercent >= need;
+  }
+  if (trigger === 'time_on_page') {
+    if (typeof input.timeOnPageSeconds !== 'number') return true;
+    const need = typeof conds?.time_on_page_seconds === 'number' && conds.time_on_page_seconds > 0 ? conds.time_on_page_seconds : 10;
+    return input.timeOnPageSeconds >= need;
+  }
+  return true;
+}
+
+// ════════════════════════════════════════════════════════════════════
 // 메인 클래스
 // ════════════════════════════════════════════════════════════════════
 
 export class HanjulloInAppModule {
   private autoTriggerSetup = false;
+  /** ★ P0-1 (Codex 1R) — 모듈 부팅(≈페이지 로드) 시각. time_on_page 직접 trigger 호출 시 실측 체류 초 보강용 */
+  private readonly pageStartMs = Date.now();
   /** 마지막 init/trigger input 누적 — identify가 늦게 갱신(SPA)돼도 이후 트리거가 최신 identity를 쓰도록 보존 */
   private lastInput: InAppInitInput = {};
   /** 메시지별 렌더 시각 (ms) — click/dismiss 시 dwell_seconds 계산 */
@@ -165,7 +221,9 @@ export class HanjulloInAppModule {
    */
   async init(input: InAppInitInput = {}): Promise<void> {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
-    this.lastInput = { ...this.lastInput, ...input };
+    // ★ P0-1 — scrollPercent/timeOnPageSeconds는 발화별 실측값이라 lastInput에 보존하지 않는다(잔류 시 이후 트리거 오판정)
+    const { scrollPercent: _sp, timeOnPageSeconds: _ts, ...persist } = input;
+    this.lastInput = { ...this.lastInput, ...persist };
     try {
       // Step 1: page_load 트리거 우선 처리
       await this.fetchAndRender('page_load', this.lastInput);
@@ -189,6 +247,15 @@ export class HanjulloInAppModule {
   async trigger(event: string, input: InAppInitInput = {}): Promise<void> {
     if (typeof window === 'undefined') return;
     const effective = { ...this.lastInput, ...input };
+    // ★ P0-1 (Codex 1R 정정) — scroll/time_on_page 직접 호출(실측값 미동봉) 시 SDK가 현재 실측값을 보강.
+    //   콘솔/자사몰 코드의 trigger('scroll') 임계 우회 차단 + 값이 실측이라 정당 표시는 그대로(오차단 0).
+    if (event === 'scroll' && typeof effective.scrollPercent !== 'number') {
+      const measured = this.measureScrollPercent();
+      if (measured !== null) effective.scrollPercent = measured;
+    }
+    if (event === 'time_on_page' && typeof effective.timeOnPageSeconds !== 'number') {
+      effective.timeOnPageSeconds = Math.max(0, Math.floor((Date.now() - this.pageStartMs) / 1000));
+    }
     try {
       await this.fetchAndRender(event, effective);
     } catch (err) {
@@ -267,13 +334,10 @@ export class HanjulloInAppModule {
     return { ...input, customer: serverCustomer };
   }
 
-  /** 트리거별 조건 클라이언트 검증 — cart_value_min은 클라이언트만 아는 값(누적 추정치)이라 여기서 비교 */
+  /** 트리거별 조건 클라이언트 검증 — 실측값(스크롤%·체류초·장바구니액)은 브라우저만 알아서 SDK가 판정 (★ P0-1 임계 확장) */
   private passesTriggerConditions(msg: InAppMessageSdk, trigger: string, input: InAppInitInput): boolean {
-    if (trigger !== 'cart_value') return true;
     const conds = msg.triggerConditions || msg.trigger_conditions;
-    const min = conds?.cart_value_min;
-    if (typeof min !== 'number' || min <= 0) return true;
-    return typeof input.cartValue === 'number' && input.cartValue >= min;
+    return passesTriggerThresholds(conds, trigger, input);
   }
 
   private async fetchWithRetry(url: string, options: RequestInit, attempt: number = 1): Promise<any> {
@@ -372,18 +436,18 @@ export class HanjulloInAppModule {
     const scrollListener = () => {
       const docHeight = document.documentElement.scrollHeight - window.innerHeight;
       const scrollPercent = docHeight > 0 ? Math.floor((window.scrollY / docHeight) * 100) : 0;
-      // 10% 증가할 때마다 1회 평가 (50% 등 임계값 매칭)
+      // 10% 증가할 때마다 1회 평가 — ★ P0-1 발화 시점 실측 %를 동봉해 임계값(scroll_percent) 비교 가능
       if (scrollPercent >= lastScrollPercent + 10) {
         lastScrollPercent = scrollPercent;
-        this.trigger('scroll').catch(() => {});
+        this.trigger('scroll', { scrollPercent }).catch(() => {});
       }
     };
     window.addEventListener('scroll', this.throttle(scrollListener, 500));
 
-    // Time on page 트리거 (10초 / 30초 / 60초 시점)
+    // Time on page 트리거 (10초 / 30초 / 60초 시점) — ★ P0-1 실측 체류 초 동봉(time_on_page_seconds 비교)
     [10, 30, 60].forEach((seconds) => {
       setTimeout(() => {
-        this.trigger('time_on_page').catch(() => {});
+        this.trigger('time_on_page', { timeOnPageSeconds: seconds }).catch(() => {});
       }, seconds * 1000);
     });
 
@@ -396,6 +460,16 @@ export class HanjulloInAppModule {
         this.trigger('exit_intent').catch(() => {});
       }
     });
+  }
+
+  /** ★ P0-1 (Codex 1R) — 현재 스크롤 도달 % 실측 (setupAutoTriggers 리스너와 동일 산식). 측정 불가 시 null(임계 판정은 기존 통과 동작) */
+  private measureScrollPercent(): number | null {
+    try {
+      const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+      return docHeight > 0 ? Math.floor((window.scrollY / docHeight) * 100) : 0;
+    } catch {
+      return null;
+    }
   }
 
   private throttle<T extends (...args: any[]) => void>(fn: T, delay: number): T {
@@ -466,6 +540,9 @@ export class HanjulloInAppModule {
   // ════════════════════════════════════════════════════════════════
 
   private renderMessage(msg: InAppMessageSdk, input: InAppInitInput): void {
+    // ★ P0-4 — 같은 메시지 DOM 잔존 시 중복 렌더 가드. always 메시지가 scroll(10%마다)·time_on_page(3회) 자동
+    //   트리거로 같은 페이지에 중복 스택되는 것 차단. 닫으면 DOM이 사라지므로 재표시 가능(always 의미 보존).
+    if (document.querySelector(`[data-hanjullo-msg="${msg.id}"]`)) return;
     this.renderTimes.set(msg.id, Date.now());
 
     // 이전 호환 — position 컬럼 fallback
@@ -587,7 +664,7 @@ export class HanjulloInAppModule {
     this.applyAnimation(root, animation, template);
 
     if (imageUrl) this.appendImage(root, imageUrl, 48);
-    this.appendTextBlock(root, title, body, 'banner');
+    this.appendTextBlock(root, title, body, 'banner', !!(msg.is_ad ?? msg.isAd));
     this.appendButtons(root, msg, buttons, input);
     this.appendCloseButton(root, msg, input, () => document.body.removeChild(root));
 
@@ -651,7 +728,7 @@ export class HanjulloInAppModule {
     const content = document.createElement('div');
     content.style.padding = imageUrl ? '22px 24px 24px' : '30px 24px 26px';
     if (badge) this.appendBadge(content, badge, msg.textColor);
-    this.appendTextBlock(content, title, body, 'modal');
+    this.appendTextBlock(content, title, body, 'modal', !!(msg.is_ad ?? msg.isAd));
     this.appendButtons(content, msg, buttons, input, 'stack');
     root.appendChild(content);
     // 닫기 = 우상단 (이미지 위에도 보이게)
@@ -691,7 +768,7 @@ export class HanjulloInAppModule {
 
     if (imageUrl) this.appendImage(root, imageUrl, 0, '100%', '240px');
     if (badge) this.appendBadge(root, badge, msg.textColor);
-    this.appendTextBlock(root, title, body, 'full');
+    this.appendTextBlock(root, title, body, 'full', !!(msg.is_ad ?? msg.isAd));
     this.appendButtons(root, msg, buttons, input);
     this.appendCloseButton(root, msg, input, () => document.body.removeChild(root), 'absolute-top-right');
 
@@ -729,7 +806,7 @@ export class HanjulloInAppModule {
 
     if (imageUrl) this.appendImage(root, imageUrl, 0, '100%', '120px');
     if (badge) this.appendBadge(root, badge, msg.textColor);
-    this.appendTextBlock(root, title, body, 'slide');
+    this.appendTextBlock(root, title, body, 'slide', !!(msg.is_ad ?? msg.isAd));
     this.appendButtons(root, msg, buttons, input);
     this.appendCloseButton(root, msg, input, () => document.body.removeChild(root), 'absolute-top-right');
 
@@ -768,7 +845,7 @@ export class HanjulloInAppModule {
 
     if (imageUrl) this.appendImage(root, imageUrl, 0, '100%', '160px');
     if (badge) this.appendBadge(root, badge, msg.textColor);
-    this.appendTextBlock(root, title, body, 'inline');
+    this.appendTextBlock(root, title, body, 'inline', !!(msg.is_ad ?? msg.isAd));
     this.appendButtons(root, msg, buttons, input);
 
     container.appendChild(root);
@@ -814,6 +891,14 @@ export class HanjulloInAppModule {
       root.appendChild(bodyEl);
     }
 
+    // ★ P1-5 — 토스트도 is_ad면 (광고) 잔글씨 (레거시 경로 표기 통일)
+    if ((msg.is_ad ?? msg.isAd) && !/\(광고\)/.test(`${title} ${body}`)) {
+      const ad = document.createElement('div');
+      ad.textContent = '(광고)';
+      Object.assign(ad.style, { fontSize: '10px', fontWeight: '500', opacity: '0.65', marginTop: '4px' });
+      root.appendChild(ad);
+    }
+
     document.body.appendChild(root);
     setTimeout(() => {
       try { document.body.removeChild(root); } catch {}
@@ -851,7 +936,7 @@ export class HanjulloInAppModule {
     root.textContent = title || action.label;
     root.addEventListener('click', () => {
       this.track(msg.id, 'click', input, action.id);
-      if (action.action_url) window.location.href = action.action_url;
+      this.safeNavigate(action.action_url);
     });
 
     document.body.appendChild(root);
@@ -898,7 +983,7 @@ export class HanjulloInAppModule {
       onButtonClick: (buttonId, actionUrl) => {
         this.track(msg.id, 'click', input, buttonId);
         c.remove();
-        if (actionUrl && !actionUrl.startsWith('[')) window.location.href = actionUrl;
+        this.safeNavigate(actionUrl);
       },
       reducedMotion: reduced,
       isAd,
@@ -1162,7 +1247,7 @@ export class HanjulloInAppModule {
     root.addEventListener('mousedown', () => { root.style.transform = 'scale(0.96)'; });
     root.addEventListener('click', () => {
       this.track(msg.id, 'click', input, btnId);
-      if (actionUrl && !actionUrl.startsWith('[')) window.location.href = actionUrl;
+      this.safeNavigate(actionUrl);
     });
     this.applyAnimation(root, msg.animation || 'pulse', 'toast');
     document.body.appendChild(root);
@@ -1217,6 +1302,12 @@ export class HanjulloInAppModule {
   // 공통 헬퍼 — 이미지 / 텍스트 / 버튼 / 닫기 / 애니메이션 / 자동 닫힘
   // ════════════════════════════════════════════════════════════════
 
+  /** ★ P0-2 — 버튼 이동 단일 길목: 스킴 화이트리스트 통과 시에만 이동 (javascript:/data: 등 실행 차단) */
+  private safeNavigate(url: string | null | undefined): void {
+    const target = resolveSafeNavUrl(url, window.location.href);
+    if (target) window.location.href = target;
+  }
+
   /** 상대경로 이미지(/uploads/...)를 SDK endpoint 도메인 기준 절대 URL로 — 자사몰 도메인 404 방지 */
   private toAbsoluteImageUrl(url: string): string {
     if (!url || /^(https?:)?\/\//i.test(url) || url.startsWith('data:')) return url;
@@ -1270,7 +1361,7 @@ export class HanjulloInAppModule {
     parent.appendChild(img);
   }
 
-  private appendTextBlock(parent: HTMLElement, title: string, body: string, variant: 'banner' | 'modal' | 'full' | 'slide' | 'inline'): void {
+  private appendTextBlock(parent: HTMLElement, title: string, body: string, variant: 'banner' | 'modal' | 'full' | 'slide' | 'inline', isAd = false): void {
     // variant별 본문 최대 줄 수 — 장문이 들어와도 레이아웃이 무너지지 않게 말줄임 (full만 무제한)
     const clampMap: Record<string, number> = { banner: 2, slide: 4, inline: 5, modal: 3, full: 0 };
     const clamp = clampMap[variant] ?? 3;
@@ -1303,6 +1394,14 @@ export class HanjulloInAppModule {
 
     text.appendChild(titleEl);
     text.appendChild(bodyEl);
+    // ★ P1-5 — 레거시 렌더도 is_ad면 본문 하단 잔글씨 (광고) 자동 표기 (블록 경로 renderFooter와 동일 문구.
+    //   문안에 이미 (광고)가 있으면 이중 표기 안 함. 수신거부 번호는 회사 admin 직접 작성 — 임의 생성 금지)
+    if (isAd && !/\(광고\)/.test(`${title} ${body}`)) {
+      const ad = document.createElement('div');
+      ad.textContent = '(광고)';
+      Object.assign(ad.style, { fontSize: '11px', fontWeight: '500', lineHeight: '1.5', opacity: '0.7', marginTop: '6px' });
+      text.appendChild(ad);
+    }
     parent.appendChild(text);
   }
 
@@ -1359,8 +1458,7 @@ export class HanjulloInAppModule {
         const wrap = el?.parentElement;
         if (wrap && wrap !== document.body) wrap.remove();
         else el?.remove();
-        const target = btn.action_url || '';
-        if (target && !target.startsWith('[')) window.location.href = target;
+        this.safeNavigate(btn.action_url);
       });
       wrapper.appendChild(btnEl);
     });

@@ -86,6 +86,11 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+/** ★ P2-2 (2026-07-12) 원화 표기 — 상품 블록 가격 행 (이메일 렌더러 formatWon과 동일 표기) */
+function formatWon(n: number): string {
+  return `${Math.round(n).toLocaleString('ko-KR')}원`;
+}
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** 라인 아이콘 (24x24 viewBox, currentColor stroke) */
@@ -508,8 +513,25 @@ function renderProduct(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
   }
   const col = el('div', { minWidth: '0', flex: '1' });
   col.appendChild(el('div', { fontSize: '14px', fontWeight: '700', letterSpacing: '-0.01em', color: theme.textPrimary, lineHeight: '1.3' }, name));
-  const meta = ctx.replaceVars(String(b.meta || '')).trim();
-  if (meta) col.appendChild(el('div', { fontSize: '12px', color: theme.textSecondary, marginTop: '2px' }, meta));
+  // ★ P2-2 (2026-07-12) 가격 구조화 — discount_price 있으면 accent 800 할인가 + 취소선 정가(이메일 렌더러와 동일 문법).
+  //   가격 미입력 시에만 기존 meta 문자열 표시(하위호환 — 기존 저장분 렌더 무변화).
+  const price = Number(b.price);
+  const discount = Number(b.discount_price);
+  const hasPrice = isFinite(price) && price > 0;
+  const hasDiscount = isFinite(discount) && discount > 0;
+  if (hasDiscount || hasPrice) {
+    const row = el('div', { display: 'flex', alignItems: 'baseline', gap: '6px', marginTop: '3px', flexWrap: 'wrap' });
+    if (hasDiscount) {
+      row.appendChild(el('span', { fontSize: '14px', fontWeight: '800', letterSpacing: '-0.01em', color: theme.accent }, formatWon(discount)));
+      if (hasPrice) row.appendChild(el('span', { fontSize: '12px', color: theme.textSecondary, textDecoration: 'line-through' }, formatWon(price)));
+    } else {
+      row.appendChild(el('span', { fontSize: '14px', fontWeight: '800', letterSpacing: '-0.01em', color: theme.textPrimary }, formatWon(price)));
+    }
+    col.appendChild(row);
+  } else {
+    const meta = ctx.replaceVars(String(b.meta || '')).trim();
+    if (meta) col.appendChild(el('div', { fontSize: '12px', color: theme.textSecondary, marginTop: '2px' }, meta));
+  }
   if (b.rating) {
     const r = renderRating({ type: 'rating', value: b.rating }, ctx);
     if (r) { r.style.marginTop = '4px'; col.appendChild(r); }

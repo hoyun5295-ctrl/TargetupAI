@@ -12,6 +12,9 @@ import { withAlpha, shadeHex, pickReadableText, planCardLayout, normalizeCardSty
 // 2026-07-07 디자인 2.0 — SDK inapp-blocks FONT_STACK 미러
 const FONT_STACK = '"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
 
+// ★ P2-2 (2026-07-12) — SDK inapp-blocks formatWon 미러 (상품 블록 가격 행)
+const formatWon = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
+
 export const ICON_PATHS: Record<string, string> = {
   check: 'M20 6 9 17l-5-5',
   gift: 'M20 12v9H4v-9M2 7h20v5H2zM12 22V7M12 7a3 3 0 0 1-3-3 2 2 0 0 1 2-2c2 0 3 2.5 3 5M12 7a3 3 0 0 0 3-3 2 2 0 0 0-2-2c-2 0-3 2.5-3 5',
@@ -172,7 +175,28 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
           {b.image && <img src={b.image} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} style={{ width: 56, height: 56, borderRadius: 12, objectFit: 'cover', flexShrink: 0, boxShadow: `inset 0 0 0 1px ${theme.border}` }} />}
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em', color: theme.textPrimary, lineHeight: 1.3 }}>{name}</div>
-            {b.meta && <div style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>{t(b.meta)}</div>}
+            {/* ★ P2-2 — 가격 구조화 (SDK renderProduct 1:1 미러). 가격 미입력 시에만 meta 표시 = 하위호환 */}
+            {(() => {
+              const price = Number(b.price);
+              const discount = Number(b.discount_price);
+              const hasPrice = isFinite(price) && price > 0;
+              const hasDiscount = isFinite(discount) && discount > 0;
+              if (hasDiscount || hasPrice) {
+                return (
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
+                    {hasDiscount ? (
+                      <>
+                        <span style={{ fontSize: 14, fontWeight: 800, letterSpacing: '-0.01em', color: theme.accent }}>{formatWon(discount)}</span>
+                        {hasPrice && <span style={{ fontSize: 12, color: theme.textSecondary, textDecoration: 'line-through' }}>{formatWon(price)}</span>}
+                      </>
+                    ) : (
+                      <span style={{ fontSize: 14, fontWeight: 800, letterSpacing: '-0.01em', color: theme.textPrimary }}>{formatWon(price)}</span>
+                    )}
+                  </div>
+                );
+              }
+              return b.meta ? <div style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>{t(b.meta)}</div> : null;
+            })()}
           </div>
         </div>
       );

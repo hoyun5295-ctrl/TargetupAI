@@ -21,6 +21,8 @@
 
 import { query } from '../config/database';
 import { sampleBeta, computeBetaCredibleInterval } from './bandit-optimizer';
+// ★ P1-4/P0-2 (2026-07-12) — 블록 정규화·스킴 무해화는 CT-27 단일 정의 재사용 (인라인 중복 금지)
+import { sanitizeContentBlocks, sanitizeButtonsActionUrls, normalizeTheme, normalizeCardStyle } from './inapp-message';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -66,6 +68,35 @@ export interface CreateVariantInput {
   text_color?: string;
   animation?: string;
   variant_weight?: number;
+  // ★ P1-4 (2026-07-12) — 명시 전달 시 그 값 우선, 미전달 시 부모 상속 (블록 부모의 variant가 레거시 단색 렌더로 오염되던 문제)
+  content_blocks?: any[] | null;
+  theme?: string | null;
+  accent_color?: string | null;
+  card_style?: string | null;
+  badge_text?: string | null;
+}
+
+/**
+ * ★ P1-4 (2026-07-12) — 부모 블록 사본에 variant 문안 반영 (순수 — vitest).
+ * 첫 headline 블록 text=title, 첫 body 블록 text=body, 나머지 구조(이미지·CTA·혜택 등) 유지.
+ * title/body가 빈 문자열이면 해당 블록 텍스트는 부모 그대로 유지(빈 문안으로 덮지 않음).
+ */
+export function replaceBlockTexts(parentBlocks: any, title: string, body: string): any[] {
+  if (!Array.isArray(parentBlocks)) return [];
+  const copy: any[] = JSON.parse(JSON.stringify(parentBlocks));
+  let headlineDone = false;
+  let bodyDone = false;
+  for (const b of copy) {
+    if (!b || typeof b !== 'object') continue;
+    if (!headlineDone && b.type === 'headline' && String(title || '').trim()) {
+      b.text = title;
+      headlineDone = true;
+    } else if (!bodyDone && b.type === 'body' && String(body || '').trim()) {
+      b.text = body;
+      bodyDone = true;
+    }
+  }
+  return copy;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -86,13 +117,21 @@ export async function createVariant(
   const parentR = await query(
     `SELECT id, title, body, template, segment_conditions, trigger_conditions, personalization_vars,
             display_frequency, auto_dismiss_seconds, max_displays_per_user,
-            send_start_hour, send_end_hour, allowed_weekdays, locale_variants, is_ad, status
+            send_start_hour, send_end_hour, allowed_weekdays, locale_variants, is_ad, status,
+            content_blocks, theme, accent_color, card_style, badge_text, channel
      FROM cdp_inapp_messages
      WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
     [input.parentMessageId, companyId]
   );
   if (parentR.rows.length === 0) throw new Error('부모 메시지를 찾을 수 없습니다.');
   const parent = parentR.rows[0];
+
+  // ★ P1-4 — 블록·테마·형태·뱃지·채널 상속. content_blocks는 부모 블록 사본에 variant 문안(title/body)만 교체
+  //   (미상속 시 블록 부모의 variant가 레거시 단색 렌더로 표시돼 A/B가 "디자인 세대 차이" 테스트로 오염).
+  //   input 명시 전달 시 그 값 우선. quickActionAIRefine(3안 자동 생성)도 같은 경로라 함께 해소.
+  const variantBlocks = input.content_blocks !== undefined
+    ? sanitizeContentBlocks(input.content_blocks)
+    : replaceBlockTexts(parent.content_blocks, input.title, input.body);
 
   const r = await query(
     `INSERT INTO cdp_inapp_messages (
@@ -103,6 +142,7 @@ export async function createVariant(
        send_start_hour, send_end_hour, allowed_weekdays, locale_variants,
        animation, is_ad, status,
        parent_message_id, variant_weight,
+       content_blocks, theme, accent_color, card_style, badge_text, channel,
        created_at, updated_at
      ) VALUES (
        gen_random_uuid(), $1::uuid, $2::uuid, $3, $4, $5, $6, $7::jsonb,
@@ -112,6 +152,7 @@ export async function createVariant(
        $16, $17, $18::integer[], $19::jsonb,
        $20, $21, 'active',
        $22::uuid, $23,
+       $24::jsonb, $25, $26, $27, $28, $29,
        NOW(), NOW()
      ) RETURNING id`,
     [
@@ -119,7 +160,7 @@ export async function createVariant(
       input.title, input.body,
       input.template || parent.template,
       input.image_url ?? null,
-      JSON.stringify(input.buttons || []),
+      JSON.stringify(sanitizeButtonsActionUrls(input.buttons || [])),
       input.background_color || '#4f46e5',
       input.text_color || '#ffffff',
       JSON.stringify(parent.segment_conditions || {}),
@@ -136,6 +177,12 @@ export async function createVariant(
       parent.is_ad || false,
       input.parentMessageId,
       input.variant_weight ?? 100,
+      JSON.stringify(variantBlocks),
+      input.theme !== undefined && input.theme !== null ? normalizeTheme(input.theme) : (parent.theme || 'auto'),
+      input.accent_color !== undefined ? input.accent_color : (parent.accent_color ?? null),
+      normalizeCardStyle(input.card_style !== undefined && input.card_style !== null ? input.card_style : parent.card_style),
+      input.badge_text !== undefined ? input.badge_text : (parent.badge_text ?? null),
+      parent.channel === 'app' ? 'app' : 'web',
     ]
   );
 

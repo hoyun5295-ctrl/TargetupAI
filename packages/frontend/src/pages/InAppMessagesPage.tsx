@@ -1,12 +1,20 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
 import {
   Activity, AlertCircle, AlertTriangle, AlignLeft, ArrowLeft, BarChart3, ChevronDown, ChevronUp,
-  Clock, Crown, Download, Edit2, Eye, Globe, ImageIcon, Layers, Lightbulb, ListChecks, Loader2, Minus, Moon, MousePointer,
+  Clock, Copy, Crown, Download, Edit2, Eye, Globe, GripVertical, ImageIcon, Layers, Lightbulb, ListChecks, Loader2, Minus, Moon, MousePointer,
   MousePointerClick, MoveVertical, Plus, RefreshCw, Repeat, ShoppingBag, ShoppingCart, Smartphone, Sparkles, Star,
   Tag, Target, Ticket, Timer, Trash2, TrendingDown, TrendingUp, Type, Upload, UserPlus, Users, Wand2, X,
 } from 'lucide-react';
+// ★ P2-1 (2026-07-12) 블록 드래그앤드롭 — EmailVisualEditor SortableBlockRow 패턴 이식 (의존성 기존재, 라이브러리 추가 0)
+import {
+  DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 // ★ 2026-07-06 식별 고객 목록 CSV 다운로드 — 공용 CT (BOM + 셀 이스케이프)
 import { downloadCsv, safeCsvFilename } from '../utils/csv-download';
 import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
@@ -2051,8 +2059,14 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   value={editing.trigger_event || 'page_load'}
                   onChange={(e) => {
                     const event = e.target.value as TriggerEvent;
-                    updateField('trigger_event', event);
-                    updateField('trigger_conditions', { ...(editing.trigger_conditions || {}), event });
+                    // ★ P0-1 — 한 번의 setEditing으로 event+conditions 동시 갱신(연속 updateField는 stale state로 앞 갱신 유실).
+                    //   임계값 키는 해당 트리거의 것만 유지(다른 트리거 임계 잔존 저장 방지).
+                    const prev: any = editing.trigger_conditions || {};
+                    const conds: any = { event };
+                    if (event === 'scroll' && typeof prev.scroll_percent === 'number') conds.scroll_percent = prev.scroll_percent;
+                    if (event === 'time_on_page' && typeof prev.time_on_page_seconds === 'number') conds.time_on_page_seconds = prev.time_on_page_seconds;
+                    if (event === 'cart_value' && typeof prev.cart_value_min === 'number') conds.cart_value_min = prev.cart_value_min;
+                    setEditing({ ...editing, trigger_event: event, trigger_conditions: conds });
                   }}
                   className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white"
                 >
@@ -2075,6 +2089,65 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   <option value="always">항상</option>
                 </select>
               </div>
+              {/* ★ P0-1 — 트리거 임계값 입력 (없으면 "스크롤 도달"을 골라도 % 지정 불가 = 트리거 정밀 표시 무동작이던 결함) */}
+              {(editing.trigger_event === 'scroll' || editing.trigger_event === 'time_on_page' || editing.trigger_event === 'cart_value') && (
+                <div className="mt-2 bg-slate-900/40 border border-white/10 rounded-lg p-2.5">
+                  {editing.trigger_event === 'scroll' && (
+                    <div>
+                      <label className="text-[10px] text-white/50 block mb-1">스크롤 도달 % (10~100 — 비우면 50%)</label>
+                      <input
+                        type="number" min={10} max={100}
+                        value={editing.trigger_conditions?.scroll_percent ?? ''}
+                        onChange={(e) => {
+                          const conds: any = { ...(editing.trigger_conditions || {}), event: 'scroll' };
+                          if (e.target.value === '') delete conds.scroll_percent;
+                          else conds.scroll_percent = Math.max(0, Math.floor(Number(e.target.value)));
+                          updateField('trigger_conditions', conds);
+                        }}
+                        placeholder="50"
+                        className="w-full px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                      />
+                      <div className="text-[10px] text-white/40 mt-1">방문자가 페이지를 이만큼 내렸을 때 표시됩니다.</div>
+                    </div>
+                  )}
+                  {editing.trigger_event === 'time_on_page' && (
+                    <div>
+                      <label className="text-[10px] text-white/50 block mb-1">체류 초 (5~600 — 비우면 10초)</label>
+                      <input
+                        type="number" min={5} max={600}
+                        value={editing.trigger_conditions?.time_on_page_seconds ?? ''}
+                        onChange={(e) => {
+                          const conds: any = { ...(editing.trigger_conditions || {}), event: 'time_on_page' };
+                          if (e.target.value === '') delete conds.time_on_page_seconds;
+                          else conds.time_on_page_seconds = Math.max(0, Math.floor(Number(e.target.value)));
+                          updateField('trigger_conditions', conds);
+                        }}
+                        placeholder="10"
+                        className="w-full px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                      />
+                      <div className="text-[10px] text-white/40 mt-1">체류 판정은 10·30·60초 시점에 확인됩니다 (예: 30 입력 시 30초 시점 표시).</div>
+                    </div>
+                  )}
+                  {editing.trigger_event === 'cart_value' && (
+                    <div>
+                      <label className="text-[10px] text-white/50 block mb-1">장바구니 금액 (원 이상)</label>
+                      <input
+                        type="number" min={0}
+                        value={editing.trigger_conditions?.cart_value_min ?? ''}
+                        onChange={(e) => {
+                          const conds: any = { ...(editing.trigger_conditions || {}), event: 'cart_value' };
+                          if (e.target.value === '') delete conds.cart_value_min;
+                          else conds.cart_value_min = Math.max(0, Math.floor(Number(e.target.value)));
+                          updateField('trigger_conditions', conds);
+                        }}
+                        placeholder="50000"
+                        className="w-full px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                      />
+                      <div className="text-[10px] text-white/40 mt-1">자사몰이 SDK에 장바구니 금액을 전달할 때 비교됩니다.</div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* 시간대 / 요일 / 한도 */}
@@ -2107,6 +2180,21 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     />
                   </div>
                 </div>
+                {/* ★ P1-2 (2026-07-12) — 새벽 시간대 경고 (차단 아님 — 인앱은 정보통신망법 §50 전송 규제 밖, 법 판정 SoT §0) */}
+                {(() => {
+                  const s = editing.send_start_hour;
+                  const e2 = editing.send_end_hour;
+                  const dawn = (typeof s === 'number' && s < 8) || (typeof e2 === 'number' && (e2 < 8 || e2 >= 23));
+                  if (!dawn) return null;
+                  return (
+                    <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-400/30 rounded-lg px-2.5 py-2">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-300 shrink-0 mt-0.5" />
+                      <div className="text-[11px] text-amber-200/90 leading-relaxed">
+                        새벽 시간대 노출 설정입니다. 인앱은 방문자에게만 표시돼 법적 제한은 없지만, 새벽 방문 고객 경험을 고려해주세요.
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div>
                   <label className="text-[10px] text-white/50 block mb-1">노출 요일</label>
                   <div className="flex gap-1">
@@ -2556,23 +2644,130 @@ export function convertToBlocks(m: Partial<MessageRow>): { content_blocks: any[]
 
 const COMPOSER_INPUT = 'w-full px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/40';
 
+// ★ P2-1 — 드래그용 임시 uid 시퀀스 (블록 jsonb에 id 필드를 저장하지 않기 위해 배열과 나란히만 유지)
+let inappBlockUidSeq = 0;
+
+/** ★ P2-1 — 블록 카드 1장 (드래그 핸들 + 위/아래 + 복제 + 삭제). useSortable 훅은 조기 return 없는 전용 컴포넌트에만 (LESSONS 0706 백지 사고) */
+function SortableInAppBlock({
+  uid, block, highlighted, isFirst, isLast, onUp, onDown, onDuplicate, onRemove, children,
+}: {
+  uid: string;
+  block: any;
+  highlighted: boolean;
+  isFirst: boolean;
+  isLast: boolean;
+  onUp: () => void;
+  onDown: () => void;
+  onDuplicate: () => void;
+  onRemove: () => void;
+  children: ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: uid });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+    zIndex: isDragging ? 10 : undefined,
+    position: 'relative',
+  };
+  const Ic = BLOCK_ICONS[block.type] || Layers;
+  return (
+    <div ref={setNodeRef} style={style} className={`bg-slate-800/50 border rounded-xl p-3 transition-all ${highlighted ? 'border-violet-400/70 ring-2 ring-violet-400/30' : 'border-white/10'}`}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="inline-flex items-center gap-1.5 min-w-0">
+          <span
+            {...attributes}
+            {...listeners}
+            title="드래그하여 순서 변경"
+            aria-label="드래그 핸들"
+            className="shrink-0 text-white/30 hover:text-white/70 cursor-grab active:cursor-grabbing touch-none px-0.5"
+          >
+            <GripVertical className="w-3.5 h-3.5" />
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-violet-200 bg-violet-500/15 px-2 py-0.5 rounded-full">
+            <Ic className="w-3 h-3" /> {BLOCK_LABELS[block.type] || block.type}
+          </span>
+        </span>
+        <div className="flex items-center gap-0.5">
+          <button onClick={onUp} disabled={isFirst} className="p-1 text-white/40 hover:text-white disabled:opacity-20" aria-label="위로"><ChevronUp className="w-3.5 h-3.5" /></button>
+          <button onClick={onDown} disabled={isLast} className="p-1 text-white/40 hover:text-white disabled:opacity-20" aria-label="아래로"><ChevronDown className="w-3.5 h-3.5" /></button>
+          <button onClick={onDuplicate} className="p-1 text-white/40 hover:text-violet-300" aria-label="복제"><Copy className="w-3.5 h-3.5" /></button>
+          <button onClick={onRemove} className="p-1 text-rose-300/70 hover:text-rose-300" aria-label="삭제"><Trash2 className="w-3.5 h-3.5" /></button>
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 function BlockComposer({ blocks, onChange, uploadImage }: { blocks: any[]; onChange: (b: any[]) => void; uploadImage: (file: File) => Promise<string | null> }) {
   const [showAdd, setShowAdd] = useState(false);
   const [highlight, setHighlight] = useState<number | null>(null);
   const listEndRef = useRef<HTMLDivElement | null>(null);
-  const update = (i: number, patch: any) => onChange(blocks.map((b, idx) => (idx === i ? { ...b, ...patch } : b)));
-  const remove = (i: number) => onChange(blocks.filter((_, idx) => idx !== i));
+  // ★ P2-1 — 저장 블록엔 id가 없어(불필요 필드 jsonb 저장 금지) 드래그용 uid를 블록 "객체 참조" 기준으로 유지.
+  //   내부 핸들러는 commit()으로 blocks·uids를 함께 확정하고, 외부 변경(AI 생성 통째 교체·디자인 탭 media 앞삽입)은
+  //   참조 매칭 reconcile로 기존 블록 uid 보존 + 새 객체만 새 uid (Codex 1R — 길이 동기화의 row identity 어긋남 정정).
+  const uidsRef = useRef<string[]>([]);
+  const prevBlocksRef = useRef<any[]>([]);
+  if (prevBlocksRef.current !== blocks) {
+    const uidByBlock = new Map<any, string>();
+    prevBlocksRef.current.forEach((b, i) => {
+      if (b && typeof b === 'object' && uidsRef.current[i]) uidByBlock.set(b, uidsRef.current[i]);
+    });
+    const used = new Set<string>();
+    uidsRef.current = blocks.map((b) => {
+      const known = b && typeof b === 'object' ? uidByBlock.get(b) : undefined;
+      if (known && !used.has(known)) { used.add(known); return known; }
+      const fresh = `blk-${++inappBlockUidSeq}`;
+      used.add(fresh);
+      return fresh;
+    });
+    prevBlocksRef.current = blocks;
+  }
+  const uids = uidsRef.current;
+
+  // 내부 편집 확정 — uid를 함께 등록해 다음 렌더의 reconcile이 참조 그대로 스킵(편집 중 새 uid 재발급 = 포커스 유실 방지)
+  const commit = (nextBlocks: any[], nextUids: string[]) => {
+    uidsRef.current = nextUids;
+    prevBlocksRef.current = nextBlocks;
+    onChange(nextBlocks);
+  };
+  const update = (i: number, patch: any) => commit(blocks.map((b, idx) => (idx === i ? { ...b, ...patch } : b)), uids);
+  const remove = (i: number) => commit(blocks.filter((_, idx) => idx !== i), uids.filter((_, idx) => idx !== i));
   const move = (i: number, dir: -1 | 1) => {
     const j = i + dir;
     if (j < 0 || j >= blocks.length) return;
     const next = [...blocks];
     [next[i], next[j]] = [next[j], next[i]];
-    onChange(next);
+    const nu = [...uids];
+    [nu[i], nu[j]] = [nu[j], nu[i]];
+    commit(next, nu);
+  };
+  const duplicate = (i: number) => {
+    const copy = JSON.parse(JSON.stringify(blocks[i]));
+    const next = [...blocks];
+    next.splice(i + 1, 0, copy);
+    const nu = [...uids];
+    nu.splice(i + 1, 0, `blk-${++inappBlockUidSeq}`);
+    commit(next, nu);
+    setHighlight(i + 1);
   };
   const add = (type: string) => {
-    onChange([...blocks, newBlock(type)]);
+    commit([...blocks, newBlock(type)], [...uids, `blk-${++inappBlockUidSeq}`]);
     setShowAdd(false);
     setHighlight(blocks.length);
+  };
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const handleDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const from = uids.indexOf(String(active.id));
+    const to = uids.indexOf(String(over.id));
+    if (from < 0 || to < 0) return;
+    commit(arrayMove(blocks, from, to), arrayMove(uids, from, to));
   };
   // 추가된 블록으로 자동 스크롤 + 잠시 하이라이트 — "추가했는데 어디 갔지" 방지
   useEffect(() => {
@@ -2584,24 +2779,28 @@ function BlockComposer({ blocks, onChange, uploadImage }: { blocks: any[]; onCha
 
   return (
     <div className="space-y-2">
-      {blocks.map((b, i) => {
-        const Ic = BLOCK_ICONS[b.type] || Layers;
-        return (
-          <div key={i} className={`bg-slate-800/50 border rounded-xl p-3 transition-all ${highlight === i ? 'border-violet-400/70 ring-2 ring-violet-400/30' : 'border-white/10'}`}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-violet-200 bg-violet-500/15 px-2 py-0.5 rounded-full">
-                <Ic className="w-3 h-3" /> {BLOCK_LABELS[b.type] || b.type}
-              </span>
-              <div className="flex items-center gap-0.5">
-                <button onClick={() => move(i, -1)} disabled={i === 0} className="p-1 text-white/40 hover:text-white disabled:opacity-20" aria-label="위로"><ChevronUp className="w-3.5 h-3.5" /></button>
-                <button onClick={() => move(i, 1)} disabled={i === blocks.length - 1} className="p-1 text-white/40 hover:text-white disabled:opacity-20" aria-label="아래로"><ChevronDown className="w-3.5 h-3.5" /></button>
-                <button onClick={() => remove(i)} className="p-1 text-rose-300/70 hover:text-rose-300" aria-label="삭제"><Trash2 className="w-3.5 h-3.5" /></button>
-              </div>
-            </div>
-            <BlockEditor block={b} onChange={(patch) => update(i, patch)} uploadImage={uploadImage} />
+      <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={uids} strategy={verticalListSortingStrategy}>
+          <div className="space-y-2">
+            {blocks.map((b, i) => (
+              <SortableInAppBlock
+                key={uids[i]}
+                uid={uids[i]}
+                block={b}
+                highlighted={highlight === i}
+                isFirst={i === 0}
+                isLast={i === blocks.length - 1}
+                onUp={() => move(i, -1)}
+                onDown={() => move(i, 1)}
+                onDuplicate={() => duplicate(i)}
+                onRemove={() => remove(i)}
+              >
+                <BlockEditor block={b} onChange={(patch) => update(i, patch)} uploadImage={uploadImage} />
+              </SortableInAppBlock>
+            ))}
           </div>
-        );
-      })}
+        </SortableContext>
+      </DndContext>
       <div ref={listEndRef} />
 
       <div className="relative">
@@ -2822,9 +3021,21 @@ function BlockEditor({ block, onChange, uploadImage }: { block: any; onChange: (
             )}
             <div className="flex-1 space-y-1.5 min-w-0">
               <input type="text" value={b.name || ''} onChange={(e) => onChange({ name: e.target.value })} placeholder="상품명" className={COMPOSER_INPUT} />
-              <input type="text" value={b.meta || ''} onChange={(e) => onChange({ meta: e.target.value })} placeholder="간단 설명 (가격 자리)" className={COMPOSER_INPUT} />
+              <input type="text" value={b.meta || ''} onChange={(e) => onChange({ meta: e.target.value })} placeholder="간단 설명" className={COMPOSER_INPUT} />
             </div>
           </div>
+          {/* ★ P2-2 (2026-07-12) — 가격 구조화 (이메일 product_carousel과 동일 구조). 비우면 기존 meta 문자열 그대로 = 하위호환 */}
+          <div className="grid grid-cols-2 gap-1.5">
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">정가 (원)</label>
+              <input type="number" min={0} value={b.price ?? ''} onChange={(e) => onChange({ price: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} placeholder="예: 39000" className={COMPOSER_INPUT} />
+            </div>
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">할인가 (원)</label>
+              <input type="number" min={0} value={b.discount_price ?? ''} onChange={(e) => onChange({ discount_price: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} placeholder="예: 29000" className={COMPOSER_INPUT} />
+            </div>
+          </div>
+          <div className="text-[10px] text-white/40">가격을 입력하면 카드에 가격이 표시되고(할인가는 강조 + 정가 취소선), 간단 설명은 가격이 없을 때만 표시됩니다.</div>
         </div>
       );
     case 'media':

@@ -50,6 +50,8 @@ export interface CreateInAppMessageInput {
   title: string;
   body: string;
   actionUrl?: string;
+  /** ★ P0-2 (Codex 2R) — 라우트가 req.body를 그대로 전달하므로 snake_case 키도 수용 (list 응답이 snake라 왕복 저장 대칭) */
+  action_url?: string | null;
   actionLabel?: string;
   position?: InAppPosition;
   backgroundColor?: string;
@@ -95,13 +97,40 @@ export const INAPP_THEME_KEYS = ['auto', 'light', 'dark', 'brand', 'vibrant', 'm
 
 export const BENEFIT_PLACEHOLDER = '[혜택 안내 — 직접 작성해주세요]';
 
-/** 알 수 없는 type 블록 제거 + 최대 30개. (jsonb 저장 전 정규화) */
+/**
+ * ★ P0-2 (2026-07-12) — action_url 스킴 화이트리스트 (SDK resolveSafeNavUrl과 동일 판정 기준).
+ * http:/https:(상대경로 포함)만 원문 보존, 위험 스킴(javascript:/data:/vbscript: 등)은 null 무해화
+ * (저장 차단이 아니라 무해화 — 발행 우선. SDK도 이동 시 2차 차단).
+ * placeholder('['로 시작 — AI 생성 "[URL — 회사 admin 수정]")는 저장 보존(SDK가 이동 차단).
+ * 판정은 new URL 파싱 후 protocol 검사 — 인코딩·공백 변형은 파서 정규화를 신뢰(0710 hlj.kr 교훈).
+ */
+export function sanitizeActionUrl(url: any): string | null {
+  if (url === undefined || url === null) return null;
+  const s = String(url).trim();
+  if (!s) return null;
+  if (s.startsWith('[')) return s;
+  try {
+    const parsed = new URL(s, 'https://mall.example/');
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? s : null;
+  } catch {
+    return null;
+  }
+}
+
+/** ★ P0-2 — buttons 배열의 각 action_url 무해화 (buttons 컬럼 + cta_group 블록 공용) */
+export function sanitizeButtonsActionUrls(buttons: any): any[] {
+  if (!Array.isArray(buttons)) return [];
+  return buttons.map((b) => (b && typeof b === 'object' ? { ...b, action_url: sanitizeActionUrl(b.action_url) } : b));
+}
+
+/** 알 수 없는 type 블록 제거 + 최대 30개 + cta_group action_url 무해화(★ P0-2). (jsonb 저장 전 정규화) */
 export function sanitizeContentBlocks(blocks: any): any[] {
   if (!Array.isArray(blocks)) return [];
   const allow = new Set<string>(INAPP_BLOCK_TYPES as readonly string[]);
   return blocks
     .filter((b) => b && typeof b === 'object' && typeof b.type === 'string' && allow.has(b.type))
-    .slice(0, 30);
+    .slice(0, 30)
+    .map((b) => (b.type === 'cta_group' ? { ...b, buttons: sanitizeButtonsActionUrls(b.buttons) } : b));
 }
 
 /** theme 키 화이트리스트 (아니면 auto) */
@@ -188,13 +217,13 @@ export async function createInAppMessage(
     ) RETURNING *`,
     [
       companyId, createdBy, input.title, input.body,
-      input.actionUrl || null, input.actionLabel || '자세히 보기',
+      resolveActionUrlPatch(input).value, input.actionLabel || '자세히 보기',
       position, input.backgroundColor || '#4f46e5', input.textColor || '#ffffff',
       input.triggerEvent || 'page_load', frequency,
       input.startAt || null, input.endAt || null,
       input.status || 'active', channel,
       input.template || position, input.image_url || null,
-      JSON.stringify(input.buttons || []), JSON.stringify(input.segment_conditions || {}), JSON.stringify(input.trigger_conditions || {}),
+      JSON.stringify(sanitizeButtonsActionUrls(input.buttons || [])), JSON.stringify(input.segment_conditions || {}), JSON.stringify(input.trigger_conditions || {}),
       JSON.stringify(input.personalization_vars || []), input.auto_dismiss_seconds ?? null, input.max_displays_per_user ?? null,
       input.send_start_hour ?? null, input.send_end_hour ?? null, input.allowed_weekdays || [0, 1, 2, 3, 4, 5, 6], input.animation || 'fade',
       input.badge_text ?? null,
@@ -219,6 +248,25 @@ export async function listInAppMessages(companyId: string, channel?: 'web' | 'ap
   return result.rows;
 }
 
+/**
+ * ★ P1-1 (2026-07-12, Codex 1R 정정) — 부분 PUT 병합 신호 (순수): undefined = 기존값 유지(set:false) /
+ * null = 비우기(set:true, null) / 값 = 교체(set:true, 값). SQL `CASE WHEN $flag THEN $value ELSE 기존컬럼 END`와
+ * 한 세트 — 선조회 병합(read-before-write)은 동시 PUT에서 상대 커밋을 stale 값으로 되살리는 경합이 있어 폐기.
+ */
+export function patchPresence<T>(inputValue: T | null | undefined): { set: boolean; value: T | null } {
+  return { set: inputValue !== undefined, value: inputValue === undefined ? null : inputValue };
+}
+
+/**
+ * ★ P0-2 (Codex 2R 정정) — actionUrl 입력 해석 (순수): camelCase(actionUrl) 우선, snake_case(action_url)도 수용.
+ * 라우트가 req.body 그대로 전달 + list 응답이 snake_case row라 snake 키 무시 시 위험 스킴 정리·명시 null 삭제가 누락된다.
+ * 제공된 값은 sanitizeActionUrl 무해화 후 확정 대입(set:true), 양쪽 다 미제공 = 기존값 유지(set:false).
+ */
+export function resolveActionUrlPatch(input: Record<string, any>): { set: boolean; value: string | null } {
+  const raw = input.actionUrl !== undefined ? input.actionUrl : input.action_url;
+  return patchPresence(raw !== undefined ? sanitizeActionUrl(raw) : undefined);
+}
+
 export async function updateInAppMessage(
   companyId: string,
   messageId: string,
@@ -233,11 +281,21 @@ export async function updateInAppMessage(
     }
     blocksParam = JSON.stringify(blocks);
   }
+  // ★ P1-1 — 무조건 대입이던 5필드(image_url·auto_dismiss_seconds·max_displays_per_user·send_start_hour·send_end_hour)는
+  //   부분 PUT에서 통째 NULL 리셋되던 함정 → presence flag(CASE WHEN)로 원자 병합(undefined=유지/null=비우기/값=교체).
+  // ★ P0-2 — action_url도 presence flag: 제공 시 무해화 값으로 확정 대입(위험 스킴 = null 클리어, 명시 null 비우기 지원).
+  //   camelCase·snake_case 양쪽 수용 (Codex 2R — snake 키 무시 시 무해화·삭제 누락).
+  const actionUrlPatch = resolveActionUrlPatch(input);
+  const imagePatch = patchPresence(input.image_url);
+  const dismissPatch = patchPresence(input.auto_dismiss_seconds);
+  const maxDispPatch = patchPresence(input.max_displays_per_user);
+  const startHourPatch = patchPresence(input.send_start_hour);
+  const endHourPatch = patchPresence(input.send_end_hour);
   const result = await query(
     `UPDATE cdp_inapp_messages SET
       title = COALESCE($3, title),
       body = COALESCE($4, body),
-      action_url = COALESCE($5, action_url),
+      action_url = CASE WHEN $32::boolean THEN $5 ELSE action_url END,
       action_label = COALESCE($6, action_label),
       position = COALESCE($7, position),
       background_color = COALESCE($8, background_color),
@@ -248,15 +306,15 @@ export async function updateInAppMessage(
       end_at = COALESCE($13, end_at),
       status = COALESCE($14, status),
       template = COALESCE($15, template),
-      image_url = $16,
+      image_url = CASE WHEN $33::boolean THEN $16 ELSE image_url END,
       buttons = COALESCE($17::jsonb, buttons),
       segment_conditions = COALESCE($18::jsonb, segment_conditions),
       trigger_conditions = COALESCE($19::jsonb, trigger_conditions),
       personalization_vars = COALESCE($20::jsonb, personalization_vars),
-      auto_dismiss_seconds = $21,
-      max_displays_per_user = $22,
-      send_start_hour = $23,
-      send_end_hour = $24,
+      auto_dismiss_seconds = CASE WHEN $34::boolean THEN $21 ELSE auto_dismiss_seconds END,
+      max_displays_per_user = CASE WHEN $35::boolean THEN $22 ELSE max_displays_per_user END,
+      send_start_hour = CASE WHEN $36::boolean THEN $23 ELSE send_start_hour END,
+      send_end_hour = CASE WHEN $37::boolean THEN $24 ELSE send_end_hour END,
       allowed_weekdays = COALESCE($25, allowed_weekdays),
       animation = COALESCE($26, animation),
       badge_text = COALESCE($27, badge_text),
@@ -270,20 +328,21 @@ export async function updateInAppMessage(
     [
       messageId, companyId,
       input.title ?? null, input.body ?? null,
-      input.actionUrl ?? null, input.actionLabel ?? null,
+      actionUrlPatch.value, input.actionLabel ?? null,
       input.position ?? null, input.backgroundColor ?? null, input.textColor ?? null,
       input.triggerEvent ?? null, input.displayFrequency ?? null,
       input.startAt ?? null, input.endAt ?? null,
       input.status ?? null,
-      input.template ?? null, input.image_url ?? null,
-      input.buttons ? JSON.stringify(input.buttons) : null, input.segment_conditions ? JSON.stringify(input.segment_conditions) : null,
+      input.template ?? null, imagePatch.value,
+      input.buttons ? JSON.stringify(sanitizeButtonsActionUrls(input.buttons)) : null, input.segment_conditions ? JSON.stringify(input.segment_conditions) : null,
       input.trigger_conditions ? JSON.stringify(input.trigger_conditions) : null, input.personalization_vars ? JSON.stringify(input.personalization_vars) : null,
-      input.auto_dismiss_seconds ?? null, input.max_displays_per_user ?? null,
-      input.send_start_hour ?? null, input.send_end_hour ?? null,
+      dismissPatch.value, maxDispPatch.value,
+      startHourPatch.value, endHourPatch.value,
       input.allowed_weekdays ?? null, input.animation ?? null,
       input.badge_text ?? null,
       blocksParam, input.theme ? normalizeTheme(input.theme) : null, input.accent_color ?? null,
       input.card_style !== undefined && input.card_style !== null ? normalizeCardStyle(input.card_style) : null,
+      actionUrlPatch.set, imagePatch.set, dismissPatch.set, maxDispPatch.set, startHourPatch.set, endHourPatch.set,
     ]
   );
   return result.rows.length > 0 ? mapRowToMessage(result.rows[0]) : null;
@@ -384,6 +443,18 @@ export async function trackImpression(input: TrackImpressionInput): Promise<void
   if (!['impression', 'click', 'dismiss'].includes(input.eventType)) {
     throw new Error(`허용되지 않는 event_type: ${input.eventType}`);
   }
+  // ★ P0-3 (2026-07-12) — message 소유 검증. 타사/임의 uuid로 자기 회사 impressions에 유령 행 적재 차단.
+  //   CT 단일 길목(소비처 = POST /inapp/track 1곳)이라 여기서 전부 커버. uuid 형식 오류도 동일 메시지로 400 매핑.
+  if (!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(input.messageId)) {
+    throw new Error('메시지를 찾을 수 없습니다.');
+  }
+  const own = await query(
+    `SELECT 1 FROM cdp_inapp_messages WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+    [input.messageId, input.companyId]
+  );
+  if (own.rows.length === 0) {
+    throw new Error('메시지를 찾을 수 없습니다.');
+  }
   await query(
     `INSERT INTO cdp_inapp_impressions (
       company_id, message_id, customer_id, identity_link_id, anonymous_id,
@@ -459,7 +530,8 @@ export async function getCompanyInAppStats(companyId: string, channel?: 'web' | 
        AND ($2::varchar IS NULL OR m.channel = $2)
      GROUP BY m.id, m.title, m.status, m.created_at
      ORDER BY m.created_at DESC`,
-    [companyId]
+    // ★ P1-3 (2026-07-12) — SQL에 $2::varchar(channel)가 있는데 params가 1개라 호출 시 항상 PG bind 오류 500이던 버그 수리
+    [companyId, channel || null]
   );
   return r.rows.map((row: any) => {
     const impressions = Number(row.impressions) || 0;

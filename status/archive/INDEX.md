@@ -8,6 +8,8 @@
 
 | 날짜 | 제목 | 검색 키워드 | 파일 |
 |------|------|-------------|------|
+| 2026-07-12 | 🟢 자동마케팅 종합 강화 C-1~C-5 (회전 2026-07-12) | 야간 광고 차단 pause 캐스케이드 decideBudgetAlert 예산 임계 전환 귀속 conversion_attributed_at target_hint ROI 카드 예측 크레딧 독립 | [TASKS_2026-07.md](TASKS_2026-07.md) |
+| 2026-07-11 | 🟢 (2) 여정 전수점검 일괄 강화 9건 (회전 2026-07-12) | goal_kind wait-until-event not_met_goto 홀드아웃 holdout_pct 멤버십 영속 send-time 개인화 타겟확인 TargetRecipientsModal 활성 중 문안 수정 pretest dedup | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-10 | 🟢 여정 목표 달성 자동 종료 goal_met + 옵션 UI 2단 (STATUS→archive 회전 2026-07-10) | goal_exit_enabled goal_met journey-executor tick 진입 이후 구매 recent_purchase_date 재진입 쿨다운 JourneyOptionsEditor Codex 날짜 경계 | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-09 | 🟢 (8) CRM 대행 접수 웹 폼 전환 + 이미지 자동 입력 (회전 2026-07-10) | CampaignAgencyPage AdminCampaignAgencyPage AgencyRequestForm image_paths sniffImageMediaType 이미지 전사 analyze-images exceljs 제거 PDF bufferPages | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-09 | 🟢 (7) 요금제 정책 정비 + AI 사용량 메뉴 이동 + Brand Voice 초기화/저장 (회전 2026-07-10) | 캘린더 FREE 개방 customerDbEnabled plans UPDATE ai_premium BETA_GATE 문구 24곳 brand-voice guideline DELETE | [TASKS_2026-07.md](TASKS_2026-07.md) |

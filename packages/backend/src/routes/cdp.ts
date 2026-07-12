@@ -678,6 +678,11 @@ router.post('/inapp/track', requireCdpKeyOrBrowserOrigin, async (req: Request, r
   } catch (err: any) {
     console.error('[CDP /inapp/track] 오류:', err);
     const msg = err?.message || '';
+    // ★ P0-3 (2026-07-12) — message 소유 불일치(타사/임의 uuid) = 400 (trackImpression CT 소유 검증 throw 매핑)
+    if (msg.includes('메시지를 찾을 수 없습니다')) {
+      await recordCdpApiCall(cdpAuth.companyId, 'event', 400);
+      return res.status(400).json({ success: false, error: msg });
+    }
     if (msg.includes('column') && msg.includes('does not exist')) {
       await recordCdpApiCall(cdpAuth.companyId, 'event', 503);
       return res.status(503).json({
