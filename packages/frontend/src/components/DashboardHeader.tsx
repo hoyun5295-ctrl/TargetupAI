@@ -109,7 +109,7 @@ export default function DashboardHeader({
     // ★ AI Operator 소개 — about-ai-operator.html 새 탭 진입. 모든 요금제 공통(게이팅 없음).
     {
       label: 'AI Operator 소개',
-      onClick: () => window.open('/about-ai-operator.html', '_blank', 'noopener'),
+      onClick: () => window.open('/about-ai-operator.html?v=3', '_blank', 'noopener'), // ?v= 캐시 버스터 — LoginPage 2곳과 동시 관리
       color: 'new',
     },
     // ★ D188 Phase 2-B-4 (2026-05-21) 자동발송 메뉴 영구 제거 — Harold 명시 "사용 고객사 0 + 여정 빌더가 진짜 업그레이드".
