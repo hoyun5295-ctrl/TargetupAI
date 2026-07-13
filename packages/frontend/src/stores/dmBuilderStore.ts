@@ -632,7 +632,20 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
     // ★ D216+ debounce pushHistory (500ms — 매 키스트로크 영역 부담 차단)
     scheduleHistoryPush(() => get().pushHistory());
     set((s) => markDirty(updateCurrentPageSections(s, (list) =>
-      list.map((sec) => sec.id === id ? { ...sec, props: { ...sec.props, ...patch } as SectionProps } : sec),
+      list.map((sec) => {
+        if (sec.id !== id) return sec;
+        const next = { ...sec, props: { ...sec.props, ...patch } as SectionProps };
+        // ★ 2026-07-13 (Harold 신고) — 이미지를 아예 그리지 않는 구도(히어로 타이포 / 텍스트카드 리드·인용)에
+        //   이미지가 새로 업로드되면 이미지 쓰는 기본 구도로 자동 전환. AI가 이미지 없는 시점에 타이포 구도를
+        //   확정 저장한 뒤 사용자가 업로드해도 화면에 안 나오던 함정 차단. 업로더·상품 자동채움 등 전 주입
+        //   경로의 단일 길목. 사용자가 구도를 직접 고르는 setSectionStyle 경로는 그대로(의도 선택 존중).
+        const img = (patch as Record<string, unknown>).image_url;
+        if (img) {
+          if (sec.type === 'hero' && sec.treatment === 'typographic') next.treatment = 'classic';
+          if (sec.type === 'text_card' && (sec.treatment === 'lead' || sec.treatment === 'quote')) next.treatment = 'classic';
+        }
+        return next;
+      }),
     )));
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },

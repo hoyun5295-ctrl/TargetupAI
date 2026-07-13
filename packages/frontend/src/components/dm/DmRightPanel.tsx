@@ -12,10 +12,10 @@ import SectionPropsEditor from './panels/SectionPropsEditor';
 const TREATMENT_OPTIONS: Record<string, { value: string; label: string }[]> = {
   hero: [
     { value: 'classic', label: '기본' }, { value: 'full_bleed', label: '풀블리드' },
-    { value: 'split', label: '분할' }, { value: 'typographic', label: '타이포' }, { value: 'editorial_overlap', label: '오버랩' },
+    { value: 'split', label: '분할' }, { value: 'typographic', label: '타이포 (이미지 미사용)' }, { value: 'editorial_overlap', label: '오버랩' },
   ],
   coupon: [{ value: 'classic', label: '기본' }, { value: 'ticket', label: '티켓' }, { value: 'spotlight', label: '스포트라이트' }],
-  text_card: [{ value: 'classic', label: '기본' }, { value: 'lead', label: '리드' }, { value: 'framed', label: '프레임' }, { value: 'quote', label: '인용' }],
+  text_card: [{ value: 'classic', label: '기본' }, { value: 'lead', label: '리드 (이미지 미사용)' }, { value: 'framed', label: '프레임' }, { value: 'quote', label: '인용 (이미지 미사용)' }],
   cta: [{ value: 'classic', label: '기본' }, { value: 'bar', label: '바' }, { value: 'ghost', label: '고스트' }, { value: 'sticky', label: '스티키 바 (하단 고정)' }],
   product_carousel: [{ value: 'classic', label: '기본 2열' }, { value: 'focus', label: '대표 상품 강조' }, { value: 'list', label: '리스트' }],
   gallery: [{ value: 'classic', label: '기본' }, { value: 'mosaic', label: '모자이크' }],
