@@ -60,6 +60,46 @@ export default function HeroEditor({ props, onUpdate }: EditorProps<HeroProps>) 
       <Field label="하단 그라디언트 오버레이">
         <Toggle value={props.overlay_gradient !== false} onChange={(v) => onUpdate({ overlay_gradient: v })} labelOn="사용" labelOff="미사용" />
       </Field>
+
+      {/* ★ 2026-07-13 디자인 3.0 이미지 스튜디오 — 오버레이 프리셋(선택 시 위 토글보다 우선)·초점·헤드라인 강조 */}
+      <Field label="오버레이 프리셋" hint="선택 시 하단 그라디언트 설정보다 우선">
+        <Select
+          value={props.overlay || ''}
+          onChange={(v) => onUpdate({ overlay: (v || undefined) as HeroProps['overlay'] })}
+          options={[
+            { value: '', label: '기본 (위 토글 따름)' },
+            { value: 'none', label: '없음' },
+            { value: 'soft', label: '소프트' },
+            { value: 'strong', label: '강하게' },
+            { value: 'brand', label: '브랜드 틴트' },
+            { value: 'top', label: '상단 방향' },
+          ]}
+        />
+      </Field>
+
+      <Field label="이미지 초점" hint="세로로 긴 사진에서 보여줄 부분">
+        <Select
+          value={props.focus || 'center'}
+          onChange={(v) => onUpdate({ focus: v as HeroProps['focus'] })}
+          options={[
+            { value: 'center', label: '중앙' },
+            { value: 'top', label: '위쪽' },
+            { value: 'bottom', label: '아래쪽' },
+          ]}
+        />
+      </Field>
+
+      <Field label="헤드라인 강조">
+        <Select
+          value={props.headline_emphasis || ''}
+          onChange={(v) => onUpdate({ headline_emphasis: (v || undefined) as HeroProps['headline_emphasis'] })}
+          options={[
+            { value: '', label: '없음' },
+            { value: 'marker', label: '형광 마커' },
+            { value: 'underline', label: '밑줄 스트로크' },
+          ]}
+        />
+      </Field>
     </>
   );
 }

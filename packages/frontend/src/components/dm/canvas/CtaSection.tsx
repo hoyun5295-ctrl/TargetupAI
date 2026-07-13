@@ -69,6 +69,28 @@ export default function CtaSection({ props, onEdit, treatment }: { props: CtaPro
     );
   }
 
+  // ── 스티키: 하단 고정 바 (★ 2026-07-13 — 래퍼 .dm-sticky-cta가 position:sticky 담당, SSR renderCtaSticky 미러) ──
+  if (t === 'sticky' && buttons.length > 0) {
+    const b = buttons[0];
+    const stickyStyle: CSSProperties = {
+      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--dm-sp-2)',
+      background: 'color-mix(in srgb, var(--dm-primary) 92%, transparent)', color: '#fff',
+      padding: 'var(--dm-sp-4) var(--dm-sp-6)', fontSize: 'var(--dm-fs-body)', fontWeight: 800,
+      letterSpacing: '-0.01em', borderRadius: 999,
+      boxShadow: '0 10px 30px -8px color-mix(in srgb, var(--dm-primary) 60%, transparent)',
+      backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+    };
+    return (
+      <div className="dm-section dm-cta-section" style={{ padding: 'var(--dm-sp-3) var(--dm-sp-4)' }}>
+        {editable ? (
+          <div style={stickyStyle}><span>{labelEl(0, b)}</span><span aria-hidden="true">→</span></div>
+        ) : (
+          <a href={b.url || '#'} target="_blank" rel="noreferrer" style={stickyStyle}><span>{b.label || '자세히 보기'}</span><span aria-hidden="true">→</span></a>
+        )}
+      </div>
+    );
+  }
+
   // ── classic (기존 — 골든 보존) ──
   return (
     <div className="dm-section dm-cta-section" style={{ padding: 'var(--dm-sp-5)' }}>

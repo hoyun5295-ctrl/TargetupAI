@@ -22,8 +22,11 @@ ok('editorial + 이미지 있는 hero → classic 기본(타이포 강제 X)', (
   assert.strictEqual(selectTreatment('hero', undefined, { typeScale: 'editorial', hasImage: true }), 'classic'));
 ok('treatment 없는 섹션(countdown) → classic', () =>
   assert.strictEqual(selectTreatment('countdown', 'x', {}), 'classic'));
-ok('TREATMENTS 우선 섹션 4종 존재', () =>
-  assert.deepStrictEqual(Object.keys(TREATMENTS).sort(), ['coupon', 'cta', 'hero', 'text_card']));
+ok('TREATMENTS 섹션 10종 존재 (★ 2026-07-13 디자인 3.0 확장)', () =>
+  assert.deepStrictEqual(
+    Object.keys(TREATMENTS).sort(),
+    ['countdown', 'coupon', 'cta', 'gallery', 'hero', 'product_carousel', 'promo_code', 'reviews', 'store_info', 'text_card'],
+  ));
 
 console.log('[dm-art-direction] normalizeArtDirection');
 ok('누락 → 안전 기본(bold/standard/none/sans)', () => {

@@ -519,3 +519,50 @@
 .dm-validation-fatal    { color: #dc2626; }
 .dm-validation-recommend { color: #d97706; }
 .dm-validation-improve  { color: #2563eb; }
+
+/* ══════════════════════════════════════════════════════
+   ★ 2026-07-13 디자인 3.0 — 캔버스 미러 절
+   뷰어(backend dm-tokens.ts renderDmDesign3Css)와 동일 클래스·동일 값.
+   값 변경 시 backend 동시 수정 필수 (SSOT). 모션은 뷰어 전용(캔버스 정적 유지).
+   ══════════════════════════════════════════════════════ */
+
+/* 섹션 배경면 — --dm-bg·중립 스케일을 섹션 범위로 재정의 */
+.dm-bgx-soft { --dm-bg: color-mix(in srgb, var(--dm-primary) 6%, #ffffff); background: var(--dm-bg); }
+.dm-bgx-tint { --dm-bg: color-mix(in srgb, var(--dm-primary) 14%, #ffffff); background: var(--dm-bg); }
+.dm-bgx-dark { --dm-bg: #12151f; background: #12151f;
+  --dm-neutral-0: #1b2130; --dm-neutral-50: #161b28; --dm-neutral-100: #1e2433; --dm-neutral-200: #2c3347;
+  --dm-neutral-300: #3a4257; --dm-neutral-400: #8b94a7; --dm-neutral-500: #9aa3b5; --dm-neutral-600: #b7bfce;
+  --dm-neutral-700: #cdd4e0; --dm-neutral-800: #e4e8f0; --dm-neutral-900: #f2f5fa; --dm-neutral-1000: #ffffff;
+  --dm-primary-light: color-mix(in srgb, var(--dm-primary) 22%, #141926); }
+.dm-bgx-gradient { --dm-bg: rgba(255,255,255,0);
+  background: linear-gradient(155deg, var(--dm-primary), color-mix(in srgb, var(--dm-primary) 35%, var(--dm-accent)));
+  --dm-neutral-900: #ffffff; --dm-neutral-800: #f4f6fb; --dm-neutral-700: rgba(255,255,255,0.88);
+  --dm-neutral-600: rgba(255,255,255,0.75); --dm-neutral-500: rgba(255,255,255,0.62); --dm-neutral-400: rgba(255,255,255,0.5);
+  --dm-neutral-300: rgba(255,255,255,0.35); --dm-neutral-200: rgba(255,255,255,0.25); --dm-neutral-100: rgba(255,255,255,0.14);
+  --dm-neutral-50: rgba(255,255,255,0.08); --dm-neutral-0: rgba(255,255,255,0.1); --dm-primary-light: rgba(255,255,255,0.14); }
+.dm-bgx-glass { --dm-bg: rgba(255,255,255,0.6); background: rgba(255,255,255,0.6);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.dm-pullup { position: relative; z-index: 2; margin-top: -26px; border-radius: 24px 24px 0 0; overflow: hidden;
+  box-shadow: 0 -12px 32px -14px rgba(15,23,42,0.25); }
+.dm-divider-svg { display: block; line-height: 0; margin-bottom: -1px; color: var(--dm-bg); }
+.dm-bgx-gradient + .dm-divider-svg, .dm-bgx-gradient .dm-divider-svg { color: var(--dm-primary); }
+.dm-divider-svg svg { display: block; width: 100%; height: 26px; }
+.dm-sticky-cta { position: sticky; bottom: 0; z-index: 40; }
+
+/* 헤드라인 강조 */
+.dm-em-marker { background: linear-gradient(180deg, transparent 55%, color-mix(in srgb, var(--dm-accent) 45%, transparent) 55%);
+  border-radius: 2px; padding: 0 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.dm-em-underline { text-decoration: underline; text-decoration-color: var(--dm-accent); text-decoration-thickness: 0.14em; text-underline-offset: 0.18em; }
+
+/* 아트디렉션 모티프 — 제목(.dm-text-h2) 장식 (뷰어 body[data-dm-*] → 캔버스 .dm-builder[data-dm-*]) */
+.dm-builder[data-dm-motif="rule"] .dm-section .dm-text-h2::before { content: ""; display: block; width: 30px; height: 3px;
+  background: var(--dm-accent); border-radius: 2px; margin-bottom: 10px; }
+.dm-builder[data-dm-motif="dot"] .dm-section .dm-text-h2::after { content: "."; color: var(--dm-primary); }
+.dm-builder[data-dm-motif="bracket"] .dm-section .dm-text-h2::before { content: "「"; color: var(--dm-accent); margin-right: 2px; }
+.dm-builder[data-dm-motif="bracket"] .dm-section .dm-text-h2::after { content: "」"; color: var(--dm-accent); margin-left: 2px; }
+
+/* 아트디렉션 섹션 디바이더 — 캔버스는 SectionFrame(.dm-section-wrap) 래핑 구조라 근사(연속 프레임 사이 여백/선) */
+.dm-builder[data-dm-divider="gap"] .dm-section-wrap + .dm-section-wrap { margin-top: 14px; }
+.dm-builder[data-dm-divider="hairline"] .dm-section-wrap + .dm-section-wrap { border-top: 1px solid var(--dm-neutral-200); }
+.dm-builder[data-dm-divider="rule"] .dm-section-wrap + .dm-section-wrap::before { content: ""; display: block; width: 44px; height: 2px;
+  background: var(--dm-primary); opacity: 0.6; margin: 18px auto; border-radius: 2px; }

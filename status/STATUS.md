@@ -38,6 +38,13 @@
 
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
+### 🟡 2026-07-13 (3) — 모바일 DM 디자인 3.0 대개편 (코드완료 · 배포 대기 · DDL 0)
+> Harold "훨씬 업그레이드" 지시 — 3웨이브 통합 프로그램 전체 구현. **영속화 = dm_pages.brand_kit JSONB 동승(font_display·art_direction — dm_versions 스냅샷 포함, DDL 0·SQL 무변경).**
+> **W1**: ①서체 시스템 — 카탈로그 6종+페어링 프리셋 6종(BrandKitModal 헤드라인/본문 분리), 뷰어+캔버스 Google Fonts 실로딩(기존 구멍: 명조 선택해도 수신자 화면 폴백) ②발행물 모션 2.0 — CTA 맥동·쿠폰 샤인·히어로 켄번즈·초침 팝·재고 게이지 성장·상품/갤러리 아이템 스태거(기존 리빌 1.0에 동승, reduced-motion 존중).
+> **W2**: ③섹션 배경면 5종(dm-bgx: soft/tint/dark/gradient/glass — 중립 스케일 섹션 범위 재정의)+웨이브/사선/커브 연결부 SVG+겹침(pull_up)+스티키 CTA, RightPanel 컨트롤 3종 신설 ④아트디렉션 실접속 — 뷰어가 brand_kit.art_direction 실주입(옛 Task 7 완결), 모티프 4종·디바이더 3종 렌더 신규, 다크 배경 자동 중립 반전(다크 테마 DM 최초 지원 — 기존 다크 패널은 리터럴 #171717 고정으로 골든 보존) ⑤구도 4→10섹션(text quote·cta sticky·상품 focus/list·갤러리 mosaic·리뷰 quote·카운트다운 banner·프로모 light·매장 card — SSR+캔버스 미러+픽커) ⑥골든 템플릿 12종(기존 7 id 유지 격상+5 신규 — 아트디렉션·구도·배경 완성형, 혜택 수치 0) ⑦테마 프리셋 8종(utils/dm-themes.ts + DesignThemeModal — 1클릭, 톤 기반 결정적 추천 배지).
+> **W3**: ⑧이미지 스튜디오 — 히어로 오버레이 프리셋 5종(soft/strong/brand/top/none)·초점(object-position)·헤드라인 강조(마커/밑줄, hero+text_card) ⑨AI 아트디렉터 — 비주얼 컨셉 프롬프트 구도 10종 확장+생성 시 art_direction/세리프 자동 영속화 ⑩캔버스 정합 — brandKitToCssVars CT 통일+아트디렉션 변수 미러(편집 화면=발행물), 캔버스 프로모 클래식을 SSR 다크 패널로 정렬(옛 3면 불일치 해소).
+> 검증: BE/FE tsc 0·vitest 457/457·금지패턴 0·Codex 2R(1R 8건 중 5건 정정/2건 의도 설계 판정/1건 오탐 재검증, 2R 전건 PASS+신규 2건 즉정정 — 폰트 raw 삽입 XSS 무해화 포함). 기존 발행물 변화 = 모션 팩+폰트 실로딩(의도)뿐, 조판 무변화. **잔여 = Harold 배포(tp-push + build:safe frontend·backend + pm2 reload) 후 빌더 실측.** 상세 [[project_2026_0713_dm_design_3]]
+
 ### 🟡 2026-07-13 (2) — AI Operator 소개 페이지 v3 시네마틱 대개편 + 미체감 근본 원인 종결 (코드완료 · 배포 대기)
 > **★근본 원인 확정 = 브라우저 휴리스틱 캐시**: `/about-ai-operator.html` 응답에 Cache-Control 부재(ETag/Last-Modified만) → 브라우저가 재검증 없이 디스크 캐시의 옛 버전을 계속 표시. 실측: v3 배포 후에도(서버 fx-version 마커·13:10 KST 확인) 로그인 "서비스 소개" 2곳 클릭 시 옛 화면 — 0713 1차 세션 "curl은 새 파일·화면은 정적" 모순 완전 설명. **fix = 진입점 3곳(LoginPage.tsx 536·630 + DashboardHeader.tsx 112) href에 `?v=3` 캐시 버스터**(소개 페이지 갱신 시 3곳 동시 버전 업 — 코드 주석 명기). tsc 0. 부차 조치: v2의 reduced-motion 전 연출 차단 가드도 제거(연출 항상 실행·성능 가드는 모바일만).
 > **v3 연출**: 인트로 v3(단어 블러 등장+확산 링 3겹+클릭 스킵+줌아웃 퇴장+축포)·장별 오로라 색조(hue-rotate 11장)·별밭 반짝임+유성+축포 캔버스·S3 여정 입력 실시간 타이핑+스텝 캐스케이드+닷 핑·제목 클립 와이프·목업 회전 헤일로+표면 광택 스윕+플로팅/발광 병행·시간대 바 웨이브·클릭 리플·호버 리프트·클로즈 CTA 맥동·필름 그레인. 검증: node --check 0·CSS 중괄호 균형·금지패턴 0·JS 참조 ID 13종 전존·Codex 2라운드(1R 5건→전건 정정, 2R 전건 PASS·회귀 0). 마커 fx-version=v3-cinematic-20260713. (선택 보강: nginx `location = /about-ai-operator.html { add_header Cache-Control "no-cache"; }` — Harold 판단)

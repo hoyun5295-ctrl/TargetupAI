@@ -116,10 +116,62 @@ export type DmBrandKit = {
   neutral_color?: string;
   background_color?: string;
   font_family?: string;
+  // ★ 2026-07-13 디자인 3.0 — 헤드라인 전용 서체(미설정 = font_family와 동일 = 기존 출력 그대로)
+  font_display?: string;
   tone?: 'premium' | 'friendly' | 'urgent' | 'elegant' | 'playful';
   contact?: { phone?: string; email?: string; website?: string };
   sns?: { instagram?: string; youtube?: string; kakao?: string; naver?: string };
+  // ★ 2026-07-13 디자인 3.0 — DM 단위 아트디렉션 영속화. brand_kit JSONB 동승(dm_versions 스냅샷 포함, DDL 0).
+  //   뷰어가 normalizeArtDirection으로 정규화해 주입. 미설정 = 중립 기본(현행과 동일).
+  art_direction?: {
+    theme?: string;
+    typeScale?: 'editorial' | 'bold' | 'minimal';
+    headlineFont?: 'sans' | 'serif';
+    spacingDensity?: 'compact' | 'standard' | 'airy';
+    accentMotif?: 'none' | 'rule' | 'index' | 'bracket' | 'dot';
+    sectionDivider?: 'none' | 'hairline' | 'gap' | 'rule';
+    grain?: boolean;
+  };
 };
+
+// ────────────── 서체 카탈로그 (디자인 3.0) ──────────────
+
+/**
+ * ★ 2026-07-13 — 큐레이션 서체 카탈로그. SSOT: frontend/src/utils/dm-tokens.ts 동기.
+ * css = brandKit.font_family/font_display에 저장되는 font-family 문자열(기존 저장값 하위호환).
+ * google = Google Fonts css2 파라미터(null = 별도 로드 불필요 — Pretendard는 뷰어가 항상 로드).
+ */
+export const DM_FONT_CATALOG: ReadonlyArray<{ id: string; label: string; css: string; google: string | null }> = [
+  { id: 'pretendard',     label: '프리텐다드 (기본)',        css: '"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif', google: null },
+  { id: 'noto-serif',     label: '노토 세리프 (명조)',       css: '"Noto Serif KR", serif',       google: 'Noto+Serif+KR:wght@400;600;700;900' },
+  { id: 'nanum-myeongjo', label: '나눔명조',                 css: '"Nanum Myeongjo", serif',      google: 'Nanum+Myeongjo:wght@400;700;800' },
+  { id: 'gowun-batang',   label: '고운바탕 (부드러운 명조)', css: '"Gowun Batang", serif',        google: 'Gowun+Batang:wght@400;700' },
+  { id: 'gowun-dodum',    label: '고운돋움',                 css: '"Gowun Dodum", sans-serif',    google: 'Gowun+Dodum' },
+  { id: 'black-han',      label: '검은고딕 (임팩트)',        css: '"Black Han Sans", sans-serif', google: 'Black+Han+Sans' },
+];
+
+/** ★ 2026-07-13 (Codex 지적) — 브랜드킷 서체 문자열 무해화: font-family에 필요한 문자만 허용.
+ *  <style> 블록 raw 삽입 경로의 저장형 XSS 차단 (font_family는 기존부터 raw 삽입이던 표면 — 부류 통합 차단). */
+export function safeFontFamily(v: string | undefined, fallback: string): string {
+  if (!v || typeof v !== 'string') return fallback;
+  const cleaned = v.replace(/[^\w\s,"'\-]/g, '').trim();
+  return cleaned || fallback;
+}
+
+/** font-family 문자열(들)에서 필요한 Google Fonts css2 URL 생성 — 매칭 0건이면 null (기존 DM = null → 링크 미추가) */
+export function dmGoogleFontsUrl(...families: Array<string | undefined>): string | null {
+  const params: string[] = [];
+  for (const f of families) {
+    if (!f) continue;
+    for (const c of DM_FONT_CATALOG) {
+      if (!c.google) continue;
+      const first = c.css.split(',')[0].replace(/"/g, '').trim();
+      if (f.includes(first) && !params.includes(c.google)) params.push(c.google);
+    }
+  }
+  if (params.length === 0) return null;
+  return `https://fonts.googleapis.com/css2?${params.map((p) => `family=${p}`).join('&')}&display=swap`;
+}
 
 // ────────────── CSS 변수 렌더러 (뷰어 HTML 삽입용) ──────────────
 
@@ -133,7 +185,29 @@ export function renderDmTokensCss(brandKit?: DmBrandKit): string {
   const accent    = brandKit?.accent_color     || DM_COLOR_TOKENS.brand.accent;
   const neutral   = brandKit?.neutral_color    || DM_COLOR_TOKENS.neutral[700];
   const bg        = brandKit?.background_color || DM_COLOR_TOKENS.neutral[0];
-  const fontPri   = brandKit?.font_family      || DM_TYPOGRAPHY.fontFamily.primary;
+  // ★ 2026-07-13 (Codex 지적) — 서체 문자열 무해화 후 삽입 (raw <style> 삽입 XSS 차단)
+  const fontPri   = safeFontFamily(brandKit?.font_family, DM_TYPOGRAPHY.fontFamily.primary);
+  // ★ 2026-07-13 디자인 3.0 — 헤드라인 전용 서체(미설정 = 본문과 동일 = 기존 출력과 동일)
+  const fontDisp  = safeFontFamily(brandKit?.font_display, fontPri);
+
+  // ★ 2026-07-13 디자인 3.0 — 배경색이 어두우면 중립 스케일 자동 반전(다크 테마 DM 전면 지원).
+  //   밝은 배경(기본) = 추가 출력 0줄 → 기존 발행물 CSS 무변화(골든 보존).
+  const darkBg = getContrastRatio('#ffffff', bg) >= 4.5;
+  const darkVars = darkBg ? `
+  --dm-neutral-0: #1b2130;
+  --dm-neutral-50: #161b28;
+  --dm-neutral-100: #1e2433;
+  --dm-neutral-200: #2c3347;
+  --dm-neutral-300: #3a4257;
+  --dm-neutral-400: #8b94a7;
+  --dm-neutral-500: #9aa3b5;
+  --dm-neutral-600: #b7bfce;
+  --dm-neutral-700: #cdd4e0;
+  --dm-neutral-800: #e4e8f0;
+  --dm-neutral-900: #f2f5fa;
+  --dm-neutral-1000: #ffffff;
+  --dm-primary-light: color-mix(in srgb, ${primary} 22%, #141926);
+` : '';
 
   return `
 :root {
@@ -166,7 +240,7 @@ export function renderDmTokensCss(brandKit?: DmBrandKit): string {
   --dm-font-primary: ${fontPri};
   --dm-font-serif: ${DM_TYPOGRAPHY.fontFamily.serif};
   --dm-font-mono: ${DM_TYPOGRAPHY.fontFamily.mono};
-  --dm-font-display: ${fontPri};
+  --dm-font-display: ${fontDisp};
 
   --dm-fs-hero: ${DM_TYPOGRAPHY.scale.hero.size};
   --dm-fw-hero: ${DM_TYPOGRAPHY.scale.hero.weight};
@@ -199,7 +273,7 @@ export function renderDmTokensCss(brandKit?: DmBrandKit): string {
   --dm-shadow-md: ${DM_SHADOW.md};
   --dm-shadow-lg: ${DM_SHADOW.lg};
   --dm-shadow-xl: ${DM_SHADOW.xl};
-}
+${darkVars}}
 `.trim();
 }
 
@@ -311,6 +385,105 @@ button { font-family: inherit; cursor: pointer; border: 0; background: transpare
   color: var(--dm-neutral-400);
 }
 `.trim();
+}
+
+// ────────────── 디자인 3.0 뷰어 CSS (2026-07-13) ──────────────
+
+/**
+ * ★ 2026-07-13 디자인 3.0 — 뷰어 전용 추가 CSS.
+ *   ① 모션 2.0(CTA 맥동·쿠폰 샤인·히어로 켄번즈·초침 팝·게이지 성장·아이템 스태거)
+ *   ② 아트디렉션 모티프/디바이더(body[data-dm-*])  ③ 섹션 배경면 클래스(dm-bgx-*)
+ *   ④ 헤드라인 강조  ⑤ 그레인  ⑥ 스티키 CTA
+ * reduced-motion = base css의 전역 0ms 규칙이 함께 적용되어 모션 전체 무력화.
+ * 캔버스 미러: frontend/src/styles/dm-builder.css "디자인 3.0" 절 동기 수정 필수.
+ */
+export function renderDmDesign3Css(): string {
+  return `
+/* ── 모션 2.0: 시그니처 ── */
+@keyframes dmCtaPulse { 0%,100% { box-shadow:0 1px 2px rgba(15,23,42,0.14), 0 8px 20px -6px rgba(15,23,42,0.28); } 50% { box-shadow:0 2px 4px rgba(15,23,42,0.16), 0 12px 30px -4px color-mix(in srgb, var(--dm-primary) 55%, transparent); } }
+.dm-cta-primary { animation: dmCtaPulse 3.2s ease-in-out 1.6s infinite; }
+@keyframes dmShine { 0% { transform: translateX(-160%) skewX(-18deg); } 60%,100% { transform: translateX(240%) skewX(-18deg); } }
+.dm-coupon-card { position: relative; overflow: hidden; }
+.dm-coupon-card::after { content:""; position:absolute; top:0; bottom:0; left:0; width:46%; pointer-events:none;
+  background:linear-gradient(105deg, transparent 20%, rgba(255,255,255,0.32) 50%, transparent 80%);
+  transform:translateX(-160%) skewX(-18deg); animation:dmShine 4.6s ease-in-out 1.2s infinite; }
+@keyframes dmKenburns { from { transform: scale(1.06); } to { transform: scale(1); } }
+.dm-hero-media { animation: dmKenburns 12s cubic-bezier(0.22,1,0.36,1) both; }
+@keyframes dmSecPop { 0% { transform: scale(1.16); opacity: 0.8; } 45%,100% { transform: scale(1); opacity: 1; } }
+.dm-countdown .cd-num[data-unit="s"] { display:inline-block; animation: dmSecPop 1s ease-out infinite; }
+.dm-reveal .dm-lq-bar { transform: scaleX(0); transform-origin: left center; }
+.dm-reveal.dm-in .dm-lq-bar { transform: scaleX(1); transition: transform 1.1s cubic-bezier(0.22,1,0.36,1) 0.25s; }
+/* 리빌 아이템 스태거 — 상품/갤러리 카드가 차례로 떠오름 */
+.dm-reveal :is(.dm-pc-items, .dm-gal-grid) > * { opacity:0; transform:translateY(12px); }
+.dm-reveal.dm-in :is(.dm-pc-items, .dm-gal-grid) > * { opacity:1; transform:none;
+  transition:opacity 500ms cubic-bezier(0.22,1,0.36,1), transform 500ms cubic-bezier(0.22,1,0.36,1); }
+.dm-reveal.dm-in :is(.dm-pc-items, .dm-gal-grid) > :nth-child(2) { transition-delay: 0.07s; }
+.dm-reveal.dm-in :is(.dm-pc-items, .dm-gal-grid) > :nth-child(3) { transition-delay: 0.14s; }
+.dm-reveal.dm-in :is(.dm-pc-items, .dm-gal-grid) > :nth-child(4) { transition-delay: 0.21s; }
+.dm-reveal.dm-in :is(.dm-pc-items, .dm-gal-grid) > :nth-child(5) { transition-delay: 0.28s; }
+.dm-reveal.dm-in :is(.dm-pc-items, .dm-gal-grid) > :nth-child(6) { transition-delay: 0.35s; }
+
+/* ── 섹션 배경면 (dm-bgx-*) — --dm-bg·중립 스케일을 섹션 범위로 재정의 ── */
+.dm-bgx-soft { --dm-bg: color-mix(in srgb, var(--dm-primary) 6%, #ffffff); background: var(--dm-bg); }
+.dm-bgx-tint { --dm-bg: color-mix(in srgb, var(--dm-primary) 14%, #ffffff); background: var(--dm-bg); }
+.dm-bgx-dark { --dm-bg:#12151f; background:#12151f;
+  --dm-neutral-0:#1b2130; --dm-neutral-50:#161b28; --dm-neutral-100:#1e2433; --dm-neutral-200:#2c3347;
+  --dm-neutral-300:#3a4257; --dm-neutral-400:#8b94a7; --dm-neutral-500:#9aa3b5; --dm-neutral-600:#b7bfce;
+  --dm-neutral-700:#cdd4e0; --dm-neutral-800:#e4e8f0; --dm-neutral-900:#f2f5fa; --dm-neutral-1000:#ffffff;
+  --dm-primary-light: color-mix(in srgb, var(--dm-primary) 22%, #141926); }
+.dm-bgx-gradient { --dm-bg: rgba(255,255,255,0);
+  background: linear-gradient(155deg, var(--dm-primary), color-mix(in srgb, var(--dm-primary) 35%, var(--dm-accent)));
+  --dm-neutral-900:#ffffff; --dm-neutral-800:#f4f6fb; --dm-neutral-700:rgba(255,255,255,0.88);
+  --dm-neutral-600:rgba(255,255,255,0.75); --dm-neutral-500:rgba(255,255,255,0.62); --dm-neutral-400:rgba(255,255,255,0.5);
+  --dm-neutral-300:rgba(255,255,255,0.35); --dm-neutral-200:rgba(255,255,255,0.25); --dm-neutral-100:rgba(255,255,255,0.14);
+  --dm-neutral-50:rgba(255,255,255,0.08); --dm-neutral-0:rgba(255,255,255,0.1); --dm-primary-light:rgba(255,255,255,0.14); }
+.dm-bgx-glass { --dm-bg: rgba(255,255,255,0.6); background: rgba(255,255,255,0.6);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.dm-pullup { position:relative; z-index:2; margin-top:-26px; border-radius:24px 24px 0 0; overflow:hidden;
+  box-shadow:0 -12px 32px -14px rgba(15,23,42,0.25); }
+.dm-divider-svg { display:block; line-height:0; margin-bottom:-1px; color: var(--dm-bg); }
+.dm-bgx-gradient + .dm-divider-svg, .dm-bgx-gradient .dm-divider-svg { color: var(--dm-primary); }
+.dm-divider-svg svg { display:block; width:100%; height:26px; }
+.dm-sticky-cta { position:sticky; bottom:0; z-index:40; }
+.dm-sticky-bar { backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+
+/* ── 아트디렉션 모티프 — 제목(.dm-text-h2) 장식 ── */
+body[data-dm-motif="rule"] .dm-section .dm-text-h2::before { content:""; display:block; width:30px; height:3px;
+  background:var(--dm-accent); border-radius:2px; margin-bottom:10px; }
+body[data-dm-motif="dot"] .dm-section .dm-text-h2::after { content:"."; color:var(--dm-primary); }
+body[data-dm-motif="bracket"] .dm-section .dm-text-h2::before { content:"「"; color:var(--dm-accent); margin-right:2px; }
+body[data-dm-motif="bracket"] .dm-section .dm-text-h2::after { content:"」"; color:var(--dm-accent); margin-left:2px; }
+body[data-dm-motif="index"] .dm-viewer { counter-reset: dmsec; }
+body[data-dm-motif="index"] .dm-section-wrap:not([data-section-type="header"]):not([data-section-type="footer"]) { counter-increment: dmsec; }
+body[data-dm-motif="index"] .dm-section-wrap:not([data-section-type="header"]):not([data-section-type="footer"]) .dm-text-h2::before {
+  content: counter(dmsec, decimal-leading-zero); display:block; font-size:11px; font-weight:800; letter-spacing:0.2em;
+  color:var(--dm-primary); margin-bottom:8px; font-family:var(--dm-font-mono); }
+
+/* ── 아트디렉션 섹션 디바이더 ── */
+body[data-dm-divider="hairline"] .dm-page > .dm-section-wrap + .dm-section-wrap { border-top:1px solid var(--dm-neutral-200); }
+body[data-dm-divider="gap"] .dm-page > .dm-section-wrap + .dm-section-wrap { margin-top:14px; }
+body[data-dm-divider="rule"] .dm-page > .dm-section-wrap + .dm-section-wrap::before { content:""; display:block; width:44px; height:2px;
+  background:var(--dm-primary); opacity:0.6; margin:18px auto; border-radius:2px; }
+
+/* ── 헤드라인 강조 ── */
+.dm-em-marker { background:linear-gradient(180deg, transparent 55%, color-mix(in srgb, var(--dm-accent) 45%, transparent) 55%);
+  border-radius:2px; padding:0 2px; box-decoration-break:clone; -webkit-box-decoration-break:clone; }
+.dm-em-underline { text-decoration:underline; text-decoration-color:var(--dm-accent); text-decoration-thickness:0.14em; text-underline-offset:0.18em; }
+
+/* ── 필름 그레인 (테마 옵션) ── */
+.dm-grain { position:fixed; inset:0; z-index:90; pointer-events:none; opacity:0.05; mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E"); }
+`.trim();
+}
+
+/** 디자인 3.0 — 섹션 연결부(웨이브/사선/커브) SVG. fill=currentColor → .dm-divider-svg의 color(--dm-bg)로 착색 */
+export function renderDmDividerSvg(shape: 'wave' | 'slant' | 'curve'): string {
+  const paths: Record<string, string> = {
+    wave:  'M0 0 H375 V8 C312 24 250 24 187 14 C125 4 62 4 0 16 Z',
+    slant: 'M0 0 H375 V4 L0 22 Z',
+    curve: 'M0 0 H375 V6 C250 24 125 24 0 6 Z',
+  };
+  return `<div class="dm-divider-svg" aria-hidden="true"><svg viewBox="0 0 375 26" preserveAspectRatio="none"><path d="${paths[shape] || paths.wave}" fill="currentColor"/></svg></div>`;
 }
 
 // ────────────── WCAG 대비 계산 (검수 엔진용) ──────────────

@@ -63,8 +63,70 @@ const PLACEHOLDER_STYLE: React.CSSProperties = {
 
 // ────────────── 카테고리 A. 시각 카드형 ──────────────
 
-export function ProductCarouselSection({ props }: { props: ProductCarouselProps }) {
+export function ProductCarouselSection({ props, treatment }: { props: ProductCarouselProps; treatment?: string }) {
   const products = props?.products || [];
+  // ★ 2026-07-13 디자인 3.0 — 구도 미러 (SSR renderProductFocus/renderProductList와 구조 동일)
+  const priceRow = (p: ProductCarouselProps['products'][number], big: boolean) => {
+    const price = Number(p.price || 0);
+    const discount = Number(p.discount_price || 0);
+    const manual = Math.round(Number(p.discount_rate));
+    const rate = Number.isFinite(manual) && manual > 0 && manual < 100
+      ? manual
+      : (price > 0 && discount > 0 && discount < price ? Math.round((1 - discount / price) * 100) : null);
+    const finalPrice = discount > 0 ? discount : price;
+    return (
+      <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', flexWrap: 'wrap' }}>
+        {rate !== null && <span style={{ fontSize: big ? 'var(--dm-fs-h3)' : 'var(--dm-fs-small)', color: 'var(--dm-error)', fontWeight: 800 }}>{rate}%</span>}
+        <span style={{ fontSize: big ? 'var(--dm-fs-h3)' : 'var(--dm-fs-small)', fontWeight: 800, color: 'var(--dm-neutral-900)' }}>{finalPrice.toLocaleString('ko-KR')}원</span>
+        {rate !== null && <span style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-400)', textDecoration: 'line-through' }}>{price.toLocaleString('ko-KR')}원</span>}
+      </div>
+    );
+  };
+  if (treatment === 'focus' && products.length > 0) {
+    const [first, ...rest] = products;
+    return (
+      <div className="dm-section dm-product-carousel" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)' }}>
+        {props.title && <div style={TITLE_STYLE}>{props.title}</div>}
+        <div className="dm-pc-items" style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ width: '100%', background: 'var(--dm-bg)', border: '1px solid var(--dm-neutral-200)', borderRadius: 18, overflow: 'hidden', boxShadow: 'var(--dm-shadow-md)' }}>
+            {first.image_url ? <img src={dmImageUrl(first.image_url)} alt={first.name} style={{ width: '100%', height: 210, objectFit: 'cover', display: 'block' }} /> : <div style={{ width: '100%', height: 210, background: 'var(--dm-neutral-100)' }} />}
+            <div style={{ padding: '14px 16px 16px' }}>
+              <div style={{ fontSize: 'var(--dm-fs-h3)', fontWeight: 700, color: 'var(--dm-neutral-900)', lineHeight: 1.4 }}>{first.name}</div>
+              <div style={{ marginTop: 6 }}>{priceRow(first, true)}</div>
+            </div>
+          </div>
+          {rest.map((p, i) => (
+            <div key={p.id || i} style={{ width: 'calc(50% - 6px)', background: 'var(--dm-bg)', border: '1px solid var(--dm-neutral-200)', borderRadius: 14, overflow: 'hidden', boxShadow: 'var(--dm-shadow-sm)', display: 'flex', flexDirection: 'column' }}>
+              {p.image_url ? <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: '100%', height: 120, objectFit: 'cover', display: 'block', flexShrink: 0 }} /> : <div style={{ width: '100%', height: 120, background: 'var(--dm-neutral-100)', flexShrink: 0 }} />}
+              <div style={{ padding: '8px 10px 10px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4 }}>{p.name}</div>
+                <div style={{ marginTop: 'auto', paddingTop: 4 }}>{priceRow(p, false)}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (treatment === 'list' && products.length > 0) {
+    return (
+      <div className="dm-section dm-product-carousel" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)' }}>
+        {props.title && <div style={TITLE_STYLE}>{props.title}</div>}
+        <div className="dm-pc-items" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {products.map((p, i) => (
+            <div key={p.id || i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', background: 'var(--dm-bg)', border: '1px solid var(--dm-neutral-200)', borderRadius: 14 }}>
+              {p.image_url ? <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: 76, height: 76, objectFit: 'cover', borderRadius: 12, flexShrink: 0 }} /> : <div style={{ width: 76, height: 76, background: 'var(--dm-neutral-100)', borderRadius: 12, flexShrink: 0 }} />}
+              <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4 }}>{p.name}</div>
+                <div style={{ marginTop: 4 }}>{priceRow(p, false)}</div>
+              </div>
+              {p.link_url ? <span aria-hidden="true" style={{ color: 'var(--dm-neutral-400)', flexShrink: 0 }}>→</span> : null}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="dm-section dm-product-carousel" style={CARD_STYLE}>
       {props.title && <div style={TITLE_STYLE}>{props.title}</div>}
@@ -116,10 +178,12 @@ export function ProductCarouselSection({ props }: { props: ProductCarouselProps 
   );
 }
 
-export function GallerySection({ props }: { props: GalleryProps }) {
+export function GallerySection({ props, treatment }: { props: GalleryProps; treatment?: string }) {
   const images = props?.images || [];
-  const isList = props?.layout === 'list_1xN';
-  const cols = props?.layout === 'grid_3x3' ? 3 : isList ? 1 : 2;
+  // ★ 2026-07-13 디자인 3.0 — mosaic 구도 미러 (SSR renderGallery mosaic 분기와 구조 동일)
+  const mosaic = treatment === 'mosaic';
+  const isList = !mosaic && props?.layout === 'list_1xN';
+  const cols = mosaic ? 2 : props?.layout === 'grid_3x3' ? 3 : isList ? 1 : 2;
   // list_1xN(세로 1열) = 완성 이미지/디자인 시안 대응: 원본 비율 풀폭(크롭 X). grid류는 1:1 cover 유지.
   const imgStyle: React.CSSProperties = isList
     ? { width: '100%', height: 'auto', display: 'block', borderRadius: 6 }
@@ -130,9 +194,16 @@ export function GallerySection({ props }: { props: GalleryProps }) {
       {images.length === 0 ? (
         <div style={PLACEHOLDER_STYLE}>[이미지를 추가해주세요]</div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: isList ? 10 : 6 }}>
+        <div className="dm-gal-grid" style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: isList ? 10 : 6 }}>
           {images.map((img, i) => (
-            <img key={i} src={dmImageUrl(img.url)} alt={img.caption || ''} style={imgStyle} />
+            <img
+              key={i}
+              src={dmImageUrl(img.url)}
+              alt={img.caption || ''}
+              style={mosaic && i === 0
+                ? { width: '100%', aspectRatio: '16/10', objectFit: 'cover', borderRadius: 10, gridColumn: '1 / -1' }
+                : imgStyle}
+            />
           ))}
         </div>
       )}
@@ -548,11 +619,37 @@ export function MapStoreLocatorSection({ props }: { props: MapStoreLocatorProps 
   );
 }
 
-export function ReviewsSection({ props }: { props: ReviewsProps }) {
+export function ReviewsSection({ props, treatment }: { props: ReviewsProps; treatment?: string }) {
   const reviews = props?.reviews || [];
   const avg = reviews.length > 0
     ? (reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / reviews.length).toFixed(1)
     : '0.0';
+  // ★ 2026-07-13 디자인 3.0 — quote 구도 미러 (SSR renderReviewsQuote와 구조 동일)
+  if (treatment === 'quote' && reviews.length > 0) {
+    const [first, ...rest] = reviews.slice(0, 3);
+    return (
+      <div className="dm-section dm-reviews" style={{ padding: 'calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-6)' }}>
+        {props.title && <div style={TITLE_STYLE}>{props.title}</div>}
+        <div aria-hidden="true" style={{ fontFamily: 'var(--dm-font-display)', fontSize: 52, lineHeight: 0.6, color: 'var(--dm-accent)', opacity: 0.85 }}>&ldquo;</div>
+        <div style={{ marginTop: 'var(--dm-sp-3)', fontSize: 'var(--dm-fs-h2)', fontWeight: 700, lineHeight: 1.55, fontFamily: 'var(--dm-font-display)', color: 'var(--dm-neutral-900)' }}>{first.body}</div>
+        <div style={{ marginTop: 'var(--dm-sp-3)', display: 'flex', gap: 8, alignItems: 'baseline' }}>
+          <span style={{ color: 'var(--dm-accent)', letterSpacing: 2, fontSize: 'var(--dm-fs-small)' }}>{'★'.repeat(first.rating || 0)}{'☆'.repeat(Math.max(0, 5 - (first.rating || 0)))}</span>
+          <span style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)' }}>{first.author}</span>
+        </div>
+        {rest.length > 0 && (
+          <div style={{ marginTop: 'var(--dm-sp-5)' }}>
+            {rest.map((r, i) => (
+              <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '10px 0', borderTop: '1px solid var(--dm-neutral-200)', textAlign: 'left' }}>
+                <span style={{ color: 'var(--dm-accent)', fontSize: 'var(--dm-fs-tiny)', letterSpacing: 1, flexShrink: 0 }}>{'★'.repeat(r.rating || 0)}</span>
+                <span style={{ flex: 1, fontSize: 'var(--dm-fs-small)', color: 'var(--dm-neutral-700)', lineHeight: 1.6 }}>{r.body}</span>
+                <span style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', flexShrink: 0 }}>{r.author}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="dm-section dm-reviews" style={CARD_STYLE}>
       {props.title && <div style={TITLE_STYLE}>{props.title}</div>}

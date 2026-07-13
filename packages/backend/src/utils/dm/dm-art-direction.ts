@@ -21,14 +21,23 @@ export type ArtDirection = {
   spacingDensity: SpacingDensity;
   accentMotif: AccentMotif;
   sectionDivider: SectionDivider;
+  // ★ 2026-07-13 디자인 3.0 — 필름 그레인 질감(테마 옵션)
+  grain?: boolean;
 };
 
-// 섹션별 허용 구도. 우선 4종(P1). 그 외 섹션은 classic만.
+// 섹션별 허용 구도. ★ 2026-07-13 디자인 3.0 — 4섹션 → 10섹션 확장 (미등재 섹션은 classic만).
+//   SSOT: frontend/src/utils/dm-treatment.ts DM_TREATMENTS + DmRightPanel TREATMENT_OPTIONS 동기 수정 필수.
 export const TREATMENTS: Record<string, readonly string[]> = {
   hero: ['classic', 'full_bleed', 'split', 'typographic', 'editorial_overlap'],
-  text_card: ['classic', 'lead', 'framed'],
-  cta: ['classic', 'bar', 'ghost'],
+  text_card: ['classic', 'lead', 'framed', 'quote'],
+  cta: ['classic', 'bar', 'ghost', 'sticky'],
   coupon: ['classic', 'ticket', 'spotlight'],
+  product_carousel: ['classic', 'focus', 'list'],
+  gallery: ['classic', 'mosaic'],
+  reviews: ['classic', 'quote'],
+  countdown: ['classic', 'banner'],
+  promo_code: ['classic', 'light'],
+  store_info: ['classic', 'card'],
 };
 
 const HEX6 = /^#([0-9a-fA-F]{6})$/;
@@ -99,6 +108,7 @@ export function normalizeArtDirection(
     spacingDensity: oneOf<SpacingDensity>(raw?.spacingDensity, ['compact', 'standard', 'airy'], td.spacingDensity),
     accentMotif: oneOf<AccentMotif>(raw?.accentMotif, ['none', 'rule', 'index', 'bracket', 'dot'], 'none'),
     sectionDivider: oneOf<SectionDivider>(raw?.sectionDivider, ['none', 'hairline', 'gap', 'rule'], 'none'),
+    grain: raw?.grain === true,
   };
 }
 
@@ -113,12 +123,16 @@ const DISPLAY_FONT: Record<HeadlineFont, string> = {
   serif: '"Noto Serif KR", var(--dm-font-primary)',
 };
 
-/** 아트디렉션 → 뷰어 :root override CSS(기존 토큰 다음에 주입돼 우선). */
-export function artDirectionToCssVars(ad: ArtDirection): string {
+/** 아트디렉션 → 뷰어 :root override CSS(기존 토큰 다음에 주입돼 우선).
+ *  ★ 2026-07-13 — brandDisplayFont(브랜드킷 font_display) 지정 시 그것이 최우선, 없으면 headlineFont(serif/sans). */
+export function artDirectionToCssVars(ad: ArtDirection, brandDisplayFont?: string): string {
   const t = TYPE_SCALE_VARS[ad.typeScale];
+  // ★ 2026-07-13 (Codex 지적) — raw <style> 삽입 XSS 차단: 서체 문자열 무해화
+  const safeDisplay = brandDisplayFont ? brandDisplayFont.replace(/[^\w\s,"'\-]/g, '').trim() : '';
+  const display = safeDisplay || DISPLAY_FONT[ad.headlineFont];
   return `:root{`
     + `--dm-fs-hero:${t.hero};--dm-fw-hero:${t.heroWeight};--dm-ls-hero:${t.heroLs};--dm-fs-h1:${t.h1};`
     + `--dm-section-pad-scale:${DENSITY_SCALE[ad.spacingDensity]};`
-    + `--dm-font-display:${DISPLAY_FONT[ad.headlineFont]};`
+    + `--dm-font-display:${display};`
     + `}`;
 }

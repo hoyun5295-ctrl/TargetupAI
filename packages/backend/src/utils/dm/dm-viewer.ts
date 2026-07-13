@@ -10,7 +10,7 @@
  */
 import { inlineImage, publicImageUrl, youtubeEmbedUrl } from './dm-viewer-utils';
 import { renderSections, COUNTDOWN_SCRIPT, escapeHtml } from './dm-section-renderer';
-import { renderDmTokensCss, renderDmBaseCss } from './dm-tokens';
+import { renderDmTokensCss, renderDmBaseCss, renderDmDesign3Css, dmGoogleFontsUrl } from './dm-tokens';
 // ★ 2026-06-25 (P1) 아트디렉션 — 뷰어 :root 변수 주입 + 섹션 ctx 동봉(신규 treatment에만 영향, classic 불변).
 import { normalizeArtDirection, artDirectionToCssVars } from './dm-art-direction';
 import { resolveSections } from './dm-variable-resolver';
@@ -354,9 +354,10 @@ function renderPagesHtml(
   const hasCountdown = allSections.some((s) => s.type === 'countdown');
   const totalPages = pages.length;
 
-  // ★ 2026-06-25 (P1) 중립 기본 아트디렉션(typeScale=bold). tone/AI 기반·영속화는 후속(Task 7).
-  //   classic 섹션은 이 변수를 소비하지 않으므로 레거시 출력 불변. 신규 treatment만 일관 토큰 사용.
-  const artDirection = normalizeArtDirection(null, '');
+  // ★ 2026-07-13 디자인 3.0 — brand_kit.art_direction 영속분 실주입(옛 Task 7 완결).
+  //   미설정 DM = tone 기반 정규화 기본값... 이 아니라 중립 기본과 동일 출력을 위해 raw 없으면 null 정규화(기존 발행물 무변화).
+  const adRaw = (brandKit as any)?.art_direction || null;
+  const artDirection = adRaw ? normalizeArtDirection(adRaw, '', brandKit?.tone) : normalizeArtDirection(null, '');
   const pagesHtml = pages.map((page, i) => {
     const secHtml = renderSections(page.sections, {
       brandKit,
@@ -413,20 +414,31 @@ html,body{height:100%;margin:0;overflow:hidden;touch-action:pan-y}
 <meta name="format-detection" content="telephone=no">
 <title>${escapeHtml(storeName ? `${storeName} - ${title}` : title)}</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" onerror="this.remove()">
+${(() => {
+    // ★ 2026-07-13 디자인 3.0 — 브랜드킷 선택 서체(명조 등) 실로딩. 매칭 0건(기존 DM) = 링크 미추가(무변화).
+    const fontsUrl = dmGoogleFontsUrl(
+      brandKit?.font_family,
+      brandKit?.font_display,
+      artDirection.headlineFont === 'serif' ? '"Noto Serif KR", serif' : undefined,
+    );
+    return fontsUrl ? `<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n<link rel="stylesheet" href="${fontsUrl}">` : '';
+  })()}
 <style>
 ${tokensCss}
-${artDirectionToCssVars(artDirection)}
+${artDirectionToCssVars(artDirection, brandKit?.font_display)}
 ${baseCss}
+${renderDmDesign3Css()}
 .cd-unit{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:14px;padding:var(--dm-sp-4) var(--dm-sp-3);min-width:76px}
 .cd-num{font-size:34px;font-weight:800;font-family:var(--dm-font-display);font-variant-numeric:tabular-nums;letter-spacing:1px;color:#fff;line-height:1.1}
 .cd-lbl{font-size:11px;opacity:0.55;margin-top:6px;letter-spacing:2px}
 ${modeCss}
 </style>
 </head>
-<body data-layout-mode="${mode}">
+<body data-layout-mode="${mode}"${artDirection.accentMotif !== 'none' ? ` data-dm-motif="${artDirection.accentMotif}"` : ''}${artDirection.sectionDivider !== 'none' ? ` data-dm-divider="${artDirection.sectionDivider}"` : ''}>
 <div class="dm-viewer">
 ${pagesHtml}
 </div>
+${artDirection.grain ? '<div class="dm-grain" aria-hidden="true"></div>' : ''}
 ${dotsHtml}
 ${counterHtml}
 

@@ -7,16 +7,39 @@ import { useDmBuilderStore } from '../../stores/dmBuilderStore';
 import { SECTION_META, DM_FONT_SIZE_OPTIONS } from '../../utils/dm-section-defaults';
 import SectionPropsEditor from './panels/SectionPropsEditor';
 
-// ★ 2026-06-25 (P1) 섹션 구도(treatment) 픽커 — 백엔드 dm-art-direction.TREATMENTS 미러(우선 4섹션).
+// ★ 2026-06-25 (P1) 섹션 구도(treatment) 픽커 — 백엔드 dm-art-direction.TREATMENTS 미러.
+// ★ 2026-07-13 디자인 3.0 — 4섹션 → 10섹션 확장.
 const TREATMENT_OPTIONS: Record<string, { value: string; label: string }[]> = {
   hero: [
     { value: 'classic', label: '기본' }, { value: 'full_bleed', label: '풀블리드' },
     { value: 'split', label: '분할' }, { value: 'typographic', label: '타이포' }, { value: 'editorial_overlap', label: '오버랩' },
   ],
   coupon: [{ value: 'classic', label: '기본' }, { value: 'ticket', label: '티켓' }, { value: 'spotlight', label: '스포트라이트' }],
-  text_card: [{ value: 'classic', label: '기본' }, { value: 'lead', label: '리드' }, { value: 'framed', label: '프레임' }],
-  cta: [{ value: 'classic', label: '기본' }, { value: 'bar', label: '바' }, { value: 'ghost', label: '고스트' }],
+  text_card: [{ value: 'classic', label: '기본' }, { value: 'lead', label: '리드' }, { value: 'framed', label: '프레임' }, { value: 'quote', label: '인용' }],
+  cta: [{ value: 'classic', label: '기본' }, { value: 'bar', label: '바' }, { value: 'ghost', label: '고스트' }, { value: 'sticky', label: '스티키 바 (하단 고정)' }],
+  product_carousel: [{ value: 'classic', label: '기본 2열' }, { value: 'focus', label: '대표 상품 강조' }, { value: 'list', label: '리스트' }],
+  gallery: [{ value: 'classic', label: '기본' }, { value: 'mosaic', label: '모자이크' }],
+  reviews: [{ value: 'classic', label: '기본' }, { value: 'quote', label: '대표 후기 인용' }],
+  countdown: [{ value: 'classic', label: '기본' }, { value: 'banner', label: '슬림 배너' }],
+  promo_code: [{ value: 'classic', label: '다크 패널' }, { value: 'light', label: '라이트 카드' }],
+  store_info: [{ value: 'classic', label: '기본' }, { value: 'card', label: '카드' }],
 };
+
+// ★ 2026-07-13 디자인 3.0 — 섹션 배경면/연결부 선택지 (SSR·캔버스 dm-bgx-*/dm-divider-svg 클래스와 1:1)
+const BACKGROUND_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: '기본' },
+  { value: 'soft', label: '브랜드 소프트' },
+  { value: 'tint', label: '브랜드 틴트' },
+  { value: 'dark', label: '다크' },
+  { value: 'gradient', label: '그라데이션' },
+  { value: 'glass', label: '글래스' },
+];
+const DIVIDER_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: '없음' },
+  { value: 'wave', label: '웨이브' },
+  { value: 'slant', label: '사선' },
+  { value: 'curve', label: '커브' },
+];
 
 export default function DmRightPanel() {
   const sections = useDmBuilderStore((s) => s.sections);
@@ -105,6 +128,37 @@ export default function DmRightPanel() {
                     </select>
                   </LabelRow>
                 )}
+                {/* ★ 2026-07-13 디자인 3.0 — 섹션 배경면/연결부/겹침 */}
+                <LabelRow label="배경면">
+                  <select
+                    value={selected.background || ''}
+                    onChange={(e) => setSectionStyle(selected.id, { background: (e.target.value || undefined) as any })}
+                    style={selectStyle}
+                  >
+                    {BACKGROUND_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </LabelRow>
+                <LabelRow label="하단 연결부">
+                  <select
+                    value={selected.divider_shape || ''}
+                    onChange={(e) => setSectionStyle(selected.id, { divider_shape: (e.target.value || undefined) as any })}
+                    style={selectStyle}
+                  >
+                    {DIVIDER_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </LabelRow>
+                <LabelRow label="위 섹션에 겹침">
+                  <ToggleButton
+                    active={!!selected.pull_up}
+                    onClick={() => setSectionStyle(selected.id, { pull_up: !selected.pull_up })}
+                    labelOn="겹침"
+                    labelOff="없음"
+                  />
+                </LabelRow>
                 <LabelRow label="정렬">
                   <div style={{ display: 'flex', gap: 4 }}>
                     {([['left', '좌'], ['center', '중'], ['right', '우']] as const).map(([a, lbl]) => (

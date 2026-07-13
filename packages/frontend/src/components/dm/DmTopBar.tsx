@@ -149,6 +149,7 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
           { emoji: '⚡', label: '프롬프트로 AI 초안', onClick: () => setOpenModal('ai-prompt') },
           { emoji: '✨', label: 'AI 문안 개선', onClick: () => setOpenModal('ai-improve') },
           { emoji: '🎨', label: '브랜드 킷', onClick: () => setOpenModal('brand-kit') },
+          { emoji: '🪄', label: '디자인 테마', onClick: () => setOpenModal('design-theme') },
           { emoji: '🔍', label: '자동 검수', onClick: () => setOpenModal('validation') },
           { emoji: '📜', label: '버전 히스토리', onClick: () => setOpenModal('version-history') },
           { emoji: '🔬', label: 'A/B 테스트', onClick: () => setOpenModal('ab-test') },

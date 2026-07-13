@@ -33,6 +33,7 @@ import AiImproveModal from '../components/dm/modals/AiImproveModal';
 import ValidationModal from '../components/dm/modals/ValidationModal';
 import VersionHistoryModal from '../components/dm/modals/VersionHistoryModal';
 import BrandKitModal from '../components/dm/modals/BrandKitModal';
+import DesignThemeModal from '../components/dm/modals/DesignThemeModal';
 import AbTestModal from '../components/dm/modals/AbTestModal';
 import ModalBase, { ModalButton } from '../components/dm/modals/ModalBase';
 import '../styles/dm-builder.css';
@@ -1330,6 +1331,7 @@ function EditorModals() {
       <ValidationModal open={openModal === 'validation'} onClose={close} />
       <VersionHistoryModal open={openModal === 'version-history'} onClose={close} />
       <BrandKitModal open={openModal === 'brand-kit'} onClose={close} />
+      <DesignThemeModal open={openModal === 'design-theme'} onClose={close} />
       <AbTestModal open={openModal === 'ab-test'} onClose={close} />
     </>
   );

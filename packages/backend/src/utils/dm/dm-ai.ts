@@ -716,10 +716,24 @@ export async function oneShotGenerate(opts: {
     }
   }
   const directed = applyVisualDirection(sections, concept, treatmentById);
+  // ★ 2026-07-13 디자인 3.0 — 비주얼 컨셉의 타입스케일을 brand_kit.art_direction으로 영속화(뷰어 실주입 — 디자인만, 사실/혜택 무관)
+  const adBase = (brandKit as any)?.art_direction || {};
+  const enrichedKit = {
+    ...brandKit,
+    art_direction: {
+      ...adBase,
+      typeScale: concept.type_scale,
+      headlineFont: adBase.headlineFont || (concept.type_scale === 'editorial' ? 'serif' : 'sans'),
+      spacingDensity: adBase.spacingDensity || (concept.type_scale === 'editorial' ? 'airy' : 'standard'),
+      accentMotif: adBase.accentMotif || (concept.type_scale === 'editorial' ? 'rule' : 'none'),
+      sectionDivider: adBase.sectionDivider || (concept.type_scale === 'editorial' ? 'hairline' : 'none'),
+    },
+    ...(concept.type_scale === 'editorial' && !(brandKit as any)?.font_display ? { font_display: '"Noto Serif KR", serif' } : {}),
+  } as typeof brandKit;
   // 섹션 구성으로 레이아웃 모드 자동 결정 + 모드별 페이지 분할 (slides면 여러 장, scroll이면 한 장)
   const layoutMode = decideLayoutMode(directed);
   const pages = splitSectionsIntoPages(directed, layoutMode);
-  return { spec, sections: directed, brandKit, scenario: opts.scenario, layoutMode, pages };
+  return { spec, sections: directed, brandKit: enrichedKit, scenario: opts.scenario, layoutMode, pages };
 }
 
 /**
@@ -834,14 +848,20 @@ const VISUAL_DIRECTOR_SYSTEM = `당신은 모바일 DM 아트 디렉터입니다
 - treatments는 섹션 "구도(레이아웃)"만 고른다. 각 섹션 타입은 아래 목록에서만 선택:
   hero: classic|full_bleed|split|typographic|editorial_overlap
   coupon: classic|ticket|spotlight
-  text_card: classic|lead|framed
-  cta: classic|bar|ghost
-  (캠페인 톤·맥락에 맞게 다양하게. 고급/에디토리얼이면 typographic·split·lead·ticket 등을 적극 활용.)
+  text_card: classic|lead|framed|quote
+  cta: classic|bar|ghost|sticky
+  product_carousel: classic|focus|list
+  gallery: classic|mosaic
+  reviews: classic|quote
+  countdown: classic|banner
+  promo_code: classic|light
+  store_info: classic|card
+  (캠페인 톤·맥락에 맞게 다양하게. 고급/에디토리얼이면 typographic·quote·focus·ticket, 세일/긴박이면 full_bleed·banner·sticky를 적극 활용.)
 - 디자인 디렉션만. 상품명·가격·할인율·쿠폰·무료·혜택 문구 등 사실/카피는 절대 만들지 않는다.
 - JSON만 출력:
 { "palette": { "primary":"#xxxxxx","accent":"#xxxxxx","surface":"#xxxxxx","on_surface":"#xxxxxx" },
   "mood":"한두 단어","hero_treatment":"gradient|color_block|image","emphasis_sections":["hero"],"type_scale":"bold|editorial|minimal",
-  "treatments":{ "hero":"...","coupon":"...","text_card":"...","cta":"..." } }`;
+  "treatments":{ "hero":"...","coupon":"...","text_card":"...","cta":"...","product_carousel":"...","gallery":"...","reviews":"...","countdown":"...","promo_code":"...","store_info":"..." } }`;
 
 /**
  * AI 비주얼 디렉터 — 캠페인별 색·무드·강조 컨셉을 설계. 색·무드만 만든다(혜택/사실 생성 X — 영구 룰).

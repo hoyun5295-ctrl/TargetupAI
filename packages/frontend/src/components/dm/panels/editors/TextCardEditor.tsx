@@ -28,6 +28,19 @@ export default function TextCardEditor({ props, onUpdate }: EditorProps<TextCard
         />
       </Field>
 
+      {/* ★ 2026-07-13 디자인 3.0 — 헤드라인 강조 (형광 마커/밑줄) */}
+      <Field label="헤드라인 강조">
+        <Select
+          value={props.headline_emphasis || ''}
+          onChange={(v) => onUpdate({ headline_emphasis: (v || undefined) as TextCardProps['headline_emphasis'] })}
+          options={[
+            { value: '', label: '없음' },
+            { value: 'marker', label: '형광 마커' },
+            { value: 'underline', label: '밑줄 스트로크' },
+          ]}
+        />
+      </Field>
+
       <Field label="본문">
         <TextArea value={props.body} onChange={(v) => onUpdate({ body: v })} rows={5} placeholder="고객님을 위한 한 마디..." />
       </Field>

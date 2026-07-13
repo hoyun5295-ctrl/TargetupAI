@@ -26,9 +26,21 @@ export type DmBrandKit = {
   neutral_color?: string;
   background_color?: string;
   font_family?: string;
+  // ★ 2026-07-13 디자인 3.0 — 헤드라인 전용 서체 (backend dm-tokens.ts DmBrandKit 미러)
+  font_display?: string;
   tone?: 'premium' | 'friendly' | 'urgent' | 'elegant' | 'playful';
   contact?: { phone?: string; email?: string; website?: string };
   sns?: { instagram?: string; youtube?: string; kakao?: string; naver?: string };
+  // ★ 2026-07-13 디자인 3.0 — DM 단위 아트디렉션 (brand_kit JSONB 동승 영속화 — backend 미러)
+  art_direction?: {
+    theme?: string;
+    typeScale?: 'editorial' | 'bold' | 'minimal';
+    headlineFont?: 'sans' | 'serif';
+    spacingDensity?: 'compact' | 'standard' | 'airy';
+    accentMotif?: 'none' | 'rule' | 'index' | 'bracket' | 'dot';
+    sectionDivider?: 'none' | 'hairline' | 'gap' | 'rule';
+    grain?: boolean;
+  };
 };
 
 export type LayoutMode = 'scroll' | 'slides';
@@ -62,6 +74,7 @@ export type ModalKey =
   | 'validation'
   | 'version-history'
   | 'brand-kit'
+  | 'design-theme'
   | 'ab-test'
   | null;
 
@@ -140,7 +153,7 @@ export type DmBuilderState = {
   updateSectionProps: (id: string, patch: Partial<SectionProps>) => void;
   setSectionVisible: (id: string, visible: boolean) => void;
   setSectionVariant: (id: string, variant: string) => void;
-  setSectionStyle: (id: string, patch: { align?: 'left' | 'center' | 'right'; accent_color?: string; treatment?: string; title_size?: number; text_size?: number }) => void;
+  setSectionStyle: (id: string, patch: { align?: 'left' | 'center' | 'right'; accent_color?: string; treatment?: string; title_size?: number; text_size?: number; background?: Section['background']; divider_shape?: Section['divider_shape']; pull_up?: boolean }) => void;
   setPublished: (v: boolean) => void;
   toggleSectionLock: (id: string) => void;
 

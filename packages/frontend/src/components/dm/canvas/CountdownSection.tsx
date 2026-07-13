@@ -19,7 +19,7 @@ function calcDiff(end: string): { d: number; h: number; m: number; s: number } {
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
-export default function CountdownSection({ props, onEdit }: { props: CountdownProps; onEdit?: EditHandler }) {
+export default function CountdownSection({ props, onEdit, treatment }: { props: CountdownProps; onEdit?: EditHandler; treatment?: string }) {
   const [t, setT] = useState(() => calcDiff(props.end_datetime));
   const editable = !!onEdit;
 
@@ -36,9 +36,34 @@ export default function CountdownSection({ props, onEdit }: { props: CountdownPr
     { show: props.show_seconds, val: t.s, label: '초' },
   ];
 
+  // ── 배너: 슬림 인라인 스트립 (★ 2026-07-13 — SSR renderCountdownBanner 미러) ──
+  if (treatment === 'banner') {
+    return (
+      <div className="dm-section dm-countdown" style={{ padding: 'var(--dm-sp-4) var(--dm-sp-5)', background: props.background_color || '#171717', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--dm-sp-3)', flexWrap: 'wrap' }}>
+        <InlineEditable
+          style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 700, letterSpacing: 2, color: props.urgency_color || 'var(--dm-accent)' }}
+          value={props.urgency_text || '마감까지'}
+          placeholder="마감 안내 문구"
+          onChange={(v) => onEdit?.({ urgency_text: v } as Partial<CountdownProps>)}
+          disabled={!editable}
+          maxLength={40}
+        />
+        <div style={{ display: 'flex', gap: 'var(--dm-sp-3)', alignItems: 'baseline' }}>
+          {units.filter(u => u.show).map((u, i) => (
+            <span key={i} style={{ display: 'inline-flex', alignItems: 'baseline', gap: 2 }}>
+              <span style={{ fontSize: 20, fontWeight: 800, fontFamily: 'var(--dm-font-display)', fontVariantNumeric: 'tabular-nums' }}>{pad(u.val)}</span>
+              <span style={{ fontSize: 10, opacity: 0.55 }}>{u.label}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   // ★ 2026-07-02(5) 발행물(SSR) 격상과 동일 스타일 — 에디터·발행물 시각 일치 (3면 대조)
+  //   ★ 2026-07-13 다크 패널 리터럴 고정(#171717 = 기존 var 값 동일 — 다크 테마 반전 안전, SSR 미러)
   return (
-    <div className="dm-section dm-countdown" style={{ padding: 'var(--dm-sp-8) var(--dm-sp-5)', background: props.background_color || 'var(--dm-neutral-900)', color: '#fff' }}>
+    <div className="dm-section dm-countdown" style={{ padding: 'var(--dm-sp-8) var(--dm-sp-5)', background: props.background_color || '#171717', color: '#fff' }}>
       <InlineEditable
         style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 700, letterSpacing: 3, color: props.urgency_color || 'var(--dm-accent)', marginBottom: 'var(--dm-sp-5)' }}
         value={props.urgency_text || '마감까지'}

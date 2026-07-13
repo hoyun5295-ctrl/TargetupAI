@@ -88,6 +88,10 @@ export type HeroProps = {
   // ★ 2026-07-02(2) 폰트 크기 직접 선택(px) — backend dm-section-registry와 동일
   headline_size?: number;
   sub_copy_size?: number;
+  // ★ 2026-07-13 디자인 3.0 이미지 스튜디오 — backend dm-section-registry와 동일 (미지정 = 하위호환)
+  overlay?: 'none' | 'soft' | 'strong' | 'brand' | 'top';
+  focus?: 'center' | 'top' | 'bottom';
+  headline_emphasis?: 'none' | 'marker' | 'underline';
 };
 
 export type CouponProps = {
@@ -125,6 +129,8 @@ export type TextCardProps = {
   // ★ 2026-07-02(2) 폰트 크기 직접 선택(px) — backend dm-section-registry와 동일
   headline_size?: number;
   body_size?: number;
+  // ★ 2026-07-13 디자인 3.0 — 헤드라인 강조. backend dm-section-registry와 동일
+  headline_emphasis?: 'none' | 'marker' | 'underline';
 };
 
 // ★ 2026-07-02(2) 폰트 크기 선택지 — 히어로/텍스트 카드 속성 패널 공용 (''=기본 토큰 크기)
@@ -292,6 +298,10 @@ export type Section = {
   /** ★ 2026-07-02(2) 섹션 공통 텍스트 크기(px) — 제목급/본문급 토큰 일괄 override. 미설정=기본 */
   title_size?: number;
   text_size?: number;
+  /** ★ 2026-07-13 디자인 3.0 — 섹션 배경면/연결부/겹침. backend dm-section-registry와 동일 (미설정=현행) */
+  background?: 'soft' | 'tint' | 'dark' | 'gradient' | 'glass';
+  divider_shape?: 'wave' | 'slant' | 'curve';
+  pull_up?: boolean;
   /** 개인화 조건부 표시 — 충족 안 하는 수신자에겐 이 섹션 제외(미설정=항상 표시). 이메일 발송 시 평가 */
   display_condition?: {
     field: string;

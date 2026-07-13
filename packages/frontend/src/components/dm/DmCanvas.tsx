@@ -7,7 +7,9 @@
  *  - 레이아웃 모드(scroll/slides)는 뷰어에서 페이지 간 전환 방식을 결정
  *  - 에디터 상단에 현재 페이지 배지 + 페이지 네비게이션 힌트
  */
+import { useEffect } from 'react';
 import { useDmBuilderStore } from '../../stores/dmBuilderStore';
+import { brandKitToCssVars, dmGoogleFontsUrl, dmArtDirectionCssVars } from '../../utils/dm-tokens';
 import MobileFrame from './MobileFrame';
 import { SectionRenderer } from './canvas';
 
@@ -30,12 +32,35 @@ export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
   const selectPage = useDmBuilderStore((s) => s.selectPage);
   const handlePromptClick = onPromptClick || (() => setOpenModal('ai-prompt'));
 
+  // ★ 2026-07-13 디자인 3.0 — CT(brandKitToCssVars)로 통일: 색 + 서체 + 다크 반전, 그 위에 아트디렉션 변수
+  //   (타입스케일·밀도·헤드라인 서체)를 뷰어와 동일 우선순위로 미러 — 편집 화면 = 발행물 (Codex 지적 정정)
   const brandKitStyle: React.CSSProperties = {
-    ...(brandKit.primary_color ? { ['--dm-primary' as any]: brandKit.primary_color } : {}),
-    ...(brandKit.secondary_color ? { ['--dm-secondary' as any]: brandKit.secondary_color } : {}),
-    ...(brandKit.accent_color ? { ['--dm-accent' as any]: brandKit.accent_color } : {}),
-    ...(brandKit.background_color ? { ['--dm-bg' as any]: brandKit.background_color } : {}),
+    ...brandKitToCssVars(brandKit),
+    ...dmArtDirectionCssVars(brandKit.art_direction, brandKit.font_display),
   };
+
+  // ★ 2026-07-13 디자인 3.0 — 브랜드킷 선택 서체(명조 등) 편집 캔버스 실로딩 (뷰어 dmGoogleFontsUrl 동일 규칙 —
+  //   headlineFont=serif + font_display 미설정이면 뷰어처럼 노토 세리프 로드, Codex 2R 지적 정정)
+  const fontsUrl = dmGoogleFontsUrl(
+    brandKit.font_family,
+    brandKit.font_display,
+    brandKit.art_direction?.headlineFont === 'serif' ? '"Noto Serif KR", serif' : undefined,
+  );
+  useEffect(() => {
+    const ID = 'dm-builder-fonts';
+    const prev = document.getElementById(ID) as HTMLLinkElement | null;
+    if (!fontsUrl) { if (prev) prev.remove(); return; }
+    if (prev && prev.href === fontsUrl) return;
+    if (prev) prev.remove();
+    const link = document.createElement('link');
+    link.id = ID;
+    link.rel = 'stylesheet';
+    link.href = fontsUrl;
+    document.head.appendChild(link);
+  }, [fontsUrl]);
+
+  // 아트디렉션 모티프/디바이더 = data 속성으로 캔버스에도 반영 (dm-builder.css 디자인 3.0 절 소비)
+  const ad = brandKit.art_direction;
 
   const currentPage = pages[currentPageIndex];
   const sections = currentPage?.sections || [];
@@ -115,7 +140,12 @@ export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
         </span>
       </div>
 
-      <div className="dm-builder" style={brandKitStyle}>
+      <div
+        className="dm-builder"
+        style={brandKitStyle}
+        {...(ad?.accentMotif && ad.accentMotif !== 'none' ? { 'data-dm-motif': ad.accentMotif } : {})}
+        {...(ad?.sectionDivider && ad.sectionDivider !== 'none' ? { 'data-dm-divider': ad.sectionDivider } : {})}
+      >
         <MobileFrame>
           {sortedSections.length === 0 ? (
             <EmptyCanvas onPromptClick={handlePromptClick} pageLabel={pageLabel} />

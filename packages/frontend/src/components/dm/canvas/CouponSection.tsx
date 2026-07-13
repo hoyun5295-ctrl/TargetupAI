@@ -91,7 +91,7 @@ export default function CouponSection({ props, onEdit, treatment }: { props: Cou
   // ── 스포트라이트: 코드 대형 강조 (다크 배경 + 모노) ──
   if (t === 'spotlight') {
     return (
-      <div className="dm-section dm-coupon" style={{ padding: 'calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-5)', background: 'var(--dm-neutral-900)', color: '#fff' }}>
+      <div className="dm-section dm-coupon" style={{ padding: 'calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-5)', background: '#171717' /* ★ 2026-07-13 다크 패널 리터럴 고정 — 다크 테마 반전 시에도 SSR과 일치 (Codex 지적) */, color: '#fff' }}>
         {(props.discount_label || editable) && discountNode({ fontSize: 'var(--dm-fs-h3)', fontWeight: 700, color: 'var(--dm-accent)', letterSpacing: 1 })}
         {(props.coupon_code || editable) && (
           <div style={{ marginTop: 'var(--dm-sp-3)' }}>
@@ -121,7 +121,7 @@ export default function CouponSection({ props, onEdit, treatment }: { props: Cou
         {(props.coupon_code || editable) && (
           <div style={{ marginTop: 'var(--dm-sp-4)', borderTop: '1px dashed var(--dm-neutral-300)', paddingTop: 'var(--dm-sp-4)' }}>
             <InlineEditable
-              style={{ background: 'var(--dm-neutral-900)', color: '#fff', display: 'inline-block', padding: 'var(--dm-sp-2) var(--dm-sp-6)', borderRadius: 999, fontFamily: 'var(--dm-font-mono)', fontSize: 'var(--dm-fs-h3)', fontWeight: 700, letterSpacing: 3 }}
+              style={{ background: '#171717', color: '#fff', display: 'inline-block', padding: 'var(--dm-sp-2) var(--dm-sp-6)', borderRadius: 999, fontFamily: 'var(--dm-font-mono)', fontSize: 'var(--dm-fs-h3)', fontWeight: 700, letterSpacing: 3 }}
               value={props.coupon_code || ''}
               placeholder="COUPON"
               onChange={(v) => onEdit?.({ coupon_code: v } as Partial<CouponProps>)}

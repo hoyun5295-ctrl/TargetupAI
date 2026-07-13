@@ -90,6 +90,10 @@ export type HeroProps = {
   // ★ 2026-07-02(2) 폰트 크기 직접 선택(px, 10~80) — 미지정 = 기존 토큰 크기 그대로
   headline_size?: number;
   sub_copy_size?: number;
+  // ★ 2026-07-13 디자인 3.0 이미지 스튜디오 — 미지정 = overlay_gradient 하위호환 렌더 그대로
+  overlay?: 'none' | 'soft' | 'strong' | 'brand' | 'top';   // 오버레이 프리셋(방향·강도·브랜드 틴트)
+  focus?: 'center' | 'top' | 'bottom';                      // 이미지 초점(object-position)
+  headline_emphasis?: 'none' | 'marker' | 'underline';      // 헤드라인 강조(형광 마커/밑줄 스트로크)
 };
 
 export type CouponProps = {
@@ -127,6 +131,8 @@ export type TextCardProps = {
   // ★ 2026-07-02(2) 폰트 크기 직접 선택(px, 10~80) — 미지정 = 기존 토큰 크기 그대로
   headline_size?: number;
   body_size?: number;
+  // ★ 2026-07-13 디자인 3.0 — 헤드라인 강조(형광 마커/밑줄 스트로크). 미지정 = 현행
+  headline_emphasis?: 'none' | 'marker' | 'underline';
 };
 
 export type CtaButton = {
@@ -449,6 +455,10 @@ export type Section = {
   // ★ 2026-07-02(2) 섹션 공통 텍스트 크기(px, 10~80) — 제목급(hero/h1~h3)·본문급(body/small) 토큰 일괄 override. 미설정=기본
   title_size?: number;
   text_size?: number;
+  // ★ 2026-07-13 디자인 3.0 — 섹션 배경면/연결부/겹침 (미설정 = 현행 렌더 그대로. 3면: SSR renderSection·캔버스 SectionRenderer·RightPanel)
+  background?: 'soft' | 'tint' | 'dark' | 'gradient' | 'glass';
+  divider_shape?: 'wave' | 'slant' | 'curve';
+  pull_up?: boolean;
   // 개인화 조건부 표시 — 충족 안 하는 수신자에겐 이 섹션 제외(미설정=항상 표시). 이메일 발송 시 평가
   display_condition?: {
     field: string;

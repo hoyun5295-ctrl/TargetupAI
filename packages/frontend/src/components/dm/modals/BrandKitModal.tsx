@@ -14,6 +14,7 @@ import { useEffect, useState } from 'react';
 import axios from 'axios';
 import type { DmBrandKit } from '../../../stores/dmBuilderStore';
 import { useDmBuilderStore } from '../../../stores/dmBuilderStore';
+import { DM_FONT_PAIRINGS } from '../../../utils/dm-tokens';
 import ModalBase, { ModalButton } from './ModalBase';
 
 const api = axios.create({ baseURL: '/api' });
@@ -50,8 +51,9 @@ const FONT_OPTIONS = [
   { value: '"Noto Serif KR", serif', label: 'Noto Serif KR (세리프)' },
   { value: '"Pretendard Variable", sans-serif', label: 'Pretendard (산세리프)' },
   { value: '"Nanum Myeongjo", serif', label: '나눔명조' },
-  { value: '"Gowun Dodum", sans-serif', label: '고운 도둠' },
-  { value: '"Black Han Sans", sans-serif', label: '검은 고딕' },
+  { value: '"Gowun Batang", serif', label: '고운바탕 (부드러운 명조)' },
+  { value: '"Gowun Dodum", sans-serif', label: '고운돋움' },
+  { value: '"Black Han Sans", sans-serif', label: '검은고딕 (임팩트)' },
 ];
 
 export default function BrandKitModal({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -229,13 +231,48 @@ export default function BrandKitModal({ open, onClose }: { open: boolean; onClos
 
           {/* 폰트 + 톤 */}
           <Panel title="🔤 타이포 & 톤">
-            <Field label="서체">
+            {/* ★ 2026-07-13 디자인 3.0 — 페어링 프리셋(헤드라인×본문 1클릭) + 헤드라인 전용 서체 */}
+            <Field label="서체 페어링">
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {DM_FONT_PAIRINGS.map((p) => {
+                  const active = (kit.font_display || '') === p.display && (kit.font_family || '') === p.body;
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => setKit((prev) => ({ ...prev, font_display: p.display || undefined, font_family: p.body || undefined }))}
+                      style={{
+                        height: 32, padding: '0 12px',
+                        border: active ? '2px solid #4f46e5' : '1px solid #d1d5db',
+                        background: active ? '#eef2ff' : '#fff',
+                        color: active ? '#4f46e5' : '#374151',
+                        borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      }}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
+            <Field label="본문 서체">
               <select
                 value={kit.font_family || ''}
                 onChange={(e) => updateField('font_family', e.target.value)}
                 style={inputStyle}
               >
                 {FONT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="헤드라인 서체" >
+              <select
+                value={kit.font_display || ''}
+                onChange={(e) => updateField('font_display', e.target.value || undefined)}
+                style={inputStyle}
+              >
+                <option value="">본문과 동일</option>
+                {FONT_OPTIONS.filter((o) => o.value).map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>

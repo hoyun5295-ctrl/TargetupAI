@@ -31,13 +31,27 @@ export default function TextCardSection({ props, onEdit, treatment }: { props: T
   ) : null;
 
   const tagChip: CSSProperties = { display: 'inline-block', background: 'var(--dm-primary-light)', color: 'var(--dm-primary)', padding: 'var(--dm-sp-1) var(--dm-sp-2)', borderRadius: 'var(--dm-radius-sm)', fontSize: 'var(--dm-fs-tiny)', fontWeight: 700, marginBottom: 'var(--dm-sp-2)' };
+  // ★ 2026-07-13 디자인 3.0 — 헤드라인 강조(마커/밑줄) 클래스 (SSR emphasizeHead 미러 — dm-builder.css 정의)
+  const emCls = props.headline_emphasis === 'marker' ? 'dm-em-marker' : props.headline_emphasis === 'underline' ? 'dm-em-underline' : undefined;
+
+  // ── 인용: 대형 따옴표 + 세리프 인용문 (★ 2026-07-13 — SSR renderTextCardQuote 미러) ──
+  if (t === 'quote') {
+    return (
+      <div className="dm-section dm-text-card" style={{ background: 'var(--dm-bg)', padding: 'calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-6)' }}>
+        <div aria-hidden="true" style={{ fontFamily: 'var(--dm-font-display)', fontSize: 52, lineHeight: 0.6, color: 'var(--dm-accent)', opacity: 0.85 }}>&ldquo;</div>
+        {headNode({ marginTop: 'var(--dm-sp-3)', fontSize: 'var(--dm-fs-h2)', fontWeight: 700, lineHeight: 1.5, fontFamily: 'var(--dm-font-display)', color: 'var(--dm-neutral-900)' }, emCls)}
+        {bodyNode({ marginTop: 'var(--dm-sp-3)', fontSize: 'var(--dm-fs-small)', color: 'var(--dm-neutral-500)' })}
+        {tagNode({ marginTop: 'var(--dm-sp-4)', fontSize: 'var(--dm-fs-tiny)', fontWeight: 700, letterSpacing: 2, color: 'var(--dm-primary)' })}
+      </div>
+    );
+  }
 
   // ── 리드: 대형 헤드라인 + 규칙선 (이미지 비중 낮춤) ──
   if (t === 'lead') {
     return (
       <div className="dm-section dm-text-card" style={{ background: 'var(--dm-bg)', padding: 'calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-5)', textAlign: align as 'left' | 'center' }}>
         {tagNode({ fontSize: 'var(--dm-fs-tiny)', fontWeight: 700, letterSpacing: 2, color: 'var(--dm-primary)', marginBottom: 'var(--dm-sp-3)' })}
-        {headNode({ fontSize: 'var(--dm-fs-h1)', fontWeight: FW_HERO, letterSpacing: 'var(--dm-ls-hero)', lineHeight: 1.25, fontFamily: 'var(--dm-font-display)', color: 'var(--dm-neutral-900)' })}
+        {headNode({ fontSize: 'var(--dm-fs-h1)', fontWeight: FW_HERO, letterSpacing: 'var(--dm-ls-hero)', lineHeight: 1.25, fontFamily: 'var(--dm-font-display)', color: 'var(--dm-neutral-900)' }, emCls)}
         <div style={{ height: 2, width: 40, background: 'var(--dm-primary)', margin: `var(--dm-sp-4) ${align === 'center' ? 'auto' : '0'}` }} />
         {bodyNode({ fontSize: 'var(--dm-fs-body)', lineHeight: 1.7, color: 'var(--dm-neutral-700)' })}
       </div>
@@ -52,7 +66,7 @@ export default function TextCardSection({ props, onEdit, treatment }: { props: T
           {imgSrc && <img src={imgSrc} alt={props.headline || ''} style={{ width: '100%', display: 'block' }} />}
           <div style={{ padding: 'var(--dm-sp-5)' }}>
             {tagNode(tagChip)}
-            {headNode({ fontSize: 'var(--dm-fs-h2)', fontWeight: 700, color: 'var(--dm-neutral-900)', marginBottom: 'var(--dm-sp-2)', fontFamily: 'var(--dm-font-display)' })}
+            {headNode({ fontSize: 'var(--dm-fs-h2)', fontWeight: 700, color: 'var(--dm-neutral-900)', marginBottom: 'var(--dm-sp-2)', fontFamily: 'var(--dm-font-display)' }, emCls)}
             {bodyNode({ fontSize: 'var(--dm-fs-body)', lineHeight: 1.65, color: 'var(--dm-neutral-700)' })}
           </div>
         </div>
@@ -86,7 +100,7 @@ export default function TextCardSection({ props, onEdit, treatment }: { props: T
           )}
           {(props.headline || editable) && (
             <InlineEditable
-              className="dm-text-h2"
+              className={emCls ? `dm-text-h2 ${emCls}` : 'dm-text-h2'}
               style={{
                 color: props.headline_color || 'var(--dm-neutral-900)',
                 marginBottom: 'var(--dm-sp-2)',

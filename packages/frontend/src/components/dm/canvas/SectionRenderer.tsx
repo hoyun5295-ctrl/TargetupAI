@@ -61,17 +61,17 @@ export default function SectionRenderer({
       case 'header':     return <HeaderSection props={withAlign(section.props)} storeName={storeName} onEdit={onEdit} />;
       case 'hero':       return <HeroSection props={withAlign(section.props)} onEdit={onEdit} treatment={treatment} />;
       case 'coupon':     return <CouponSection props={section.props as any} onEdit={onEdit} treatment={treatment} />;
-      case 'countdown':  return <CountdownSection props={section.props as any} onEdit={onEdit} />;
+      case 'countdown':  return <CountdownSection props={section.props as any} onEdit={onEdit} treatment={treatment} />;
       case 'text_card':  return <TextCardSection props={withAlign(section.props)} onEdit={onEdit} treatment={treatment} />;
       case 'cta':        return <CtaSection props={section.props as any} onEdit={onEdit} treatment={treatment} />;
       case 'video':      return <VideoSection props={section.props as any} onEdit={onEdit} />;
-      case 'store_info': return <StoreInfoSection props={section.props as any} onEdit={onEdit} />;
+      case 'store_info': return <StoreInfoSection props={section.props as any} onEdit={onEdit} treatment={treatment} />;
       case 'sns':        return <SnsSection props={section.props as any} />;
-      case 'promo_code': return <PromoCodeSection props={section.props as any} onEdit={onEdit} />;
+      case 'promo_code': return <PromoCodeSection props={section.props as any} onEdit={onEdit} treatment={treatment} />;
       case 'footer':     return <FooterSection props={section.props as any} onEdit={onEdit} />;
       // ★ D216+ 신규 16 섹션 — 카테고리 A. 시각 카드형
-      case 'product_carousel':  return <ProductCarouselSection props={section.props as any} />;
-      case 'gallery':           return <GallerySection props={section.props as any} />;
+      case 'product_carousel':  return <ProductCarouselSection props={section.props as any} treatment={treatment} />;
+      case 'gallery':           return <GallerySection props={section.props as any} treatment={treatment} />;
       case 'slideshow':         return <SlideshowSection props={section.props as any} />;
       case 'tab_cards':         return <TabCardsSection props={section.props as any} />;
       // 카테고리 B. 인터랙션 수집형
@@ -88,7 +88,7 @@ export default function SectionRenderer({
       case 'youtube_embed':     return <YoutubeEmbedSection props={section.props as any} />;
       case 'instagram_embed':   return <InstagramEmbedSection props={section.props as any} />;
       case 'map_store_locator': return <MapStoreLocatorSection props={section.props as any} />;
-      case 'reviews':           return <ReviewsSection props={section.props as any} />;
+      case 'reviews':           return <ReviewsSection props={section.props as any} treatment={treatment} />;
       default:                  return null;
     }
   })();
@@ -121,7 +121,31 @@ export default function SectionRenderer({
     ...(textN ? { ['--dm-fs-body']: `${textN}px`, ['--dm-fs-small']: `${textN}px` } : {}),
   } as CSSProperties;
 
-  if (readOnly) return <div style={styleVars}>{inner}</div>;
+  // ★ 2026-07-13 디자인 3.0 — 배경면(dm-bgx-*)/연결부 SVG/겹침(pull_up)/스티키 CTA 캔버스 미러 (SSR renderSection 동일 로직·동일 클래스)
+  const BGX_KEYS = ['soft', 'tint', 'dark', 'gradient', 'glass'];
+  const DIV_KEYS: Array<'wave' | 'slant' | 'curve'> = ['wave', 'slant', 'curve'];
+  const bgKey = section.background && BGX_KEYS.includes(section.background) ? section.background : undefined;
+  const divKey = section.divider_shape && DIV_KEYS.includes(section.divider_shape) ? section.divider_shape : undefined;
+  let wrapCls = '';
+  if (section.type === 'cta' && treatment === 'sticky') wrapCls += ' dm-sticky-cta';
+  if (section.pull_up) wrapCls += ' dm-pullup';
+  if (!divKey && bgKey) wrapCls += ` dm-bgx-${bgKey}`;
+  const DIV_PATHS: Record<string, string> = {
+    wave: 'M0 0 H375 V8 C312 24 250 24 187 14 C125 4 62 4 0 16 Z',
+    slant: 'M0 0 H375 V4 L0 22 Z',
+    curve: 'M0 0 H375 V6 C250 24 125 24 0 6 Z',
+  };
+  const content = divKey ? (
+    <>
+      <div className={bgKey ? `dm-bgx-${bgKey}` : undefined}>{inner}</div>
+      <div className="dm-divider-svg" aria-hidden="true">
+        <svg viewBox="0 0 375 26" preserveAspectRatio="none"><path d={DIV_PATHS[divKey]} fill="currentColor" /></svg>
+      </div>
+    </>
+  ) : inner;
+  const wrapClsAttr = wrapCls.trim() || undefined;
+
+  if (readOnly) return <div className={wrapClsAttr} style={styleVars}>{content}</div>;
 
   return (
     <SectionFrame
@@ -134,7 +158,7 @@ export default function SectionRenderer({
       onSelect={onSelect}
       onHover={onHover}
     >
-      <div style={styleVars}>{inner}</div>
+      <div className={wrapClsAttr} style={styleVars}>{content}</div>
     </SectionFrame>
   );
 }
