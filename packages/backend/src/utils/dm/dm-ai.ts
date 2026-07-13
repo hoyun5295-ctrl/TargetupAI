@@ -16,6 +16,8 @@ import { callAIWithFallback } from '../../services/ai';
 import { composeCopyBrain } from '../copy-prompt-composer';
 // ★ 2026-07-08 행사 원문 상품 구조 추출 — 원문 실존 검증(환각 가격 차단) 공용 CT
 import { validateProductsAgainstEventText, type ExtractedEventProduct } from '../event-brief';
+// ★ 2026-07-13 — 상품 URL 페이지의 og:image 자동 채움 (브랜드 추출기 CT 재사용)
+import { fetchProductOgImages } from './dm-brand-extractor';
 import {
   SECTION_META, SECTION_DEFAULTS, type Section, type SectionType,
   createSection,
@@ -574,11 +576,12 @@ const PRODUCT_EXTRACT_SYSTEM = `당신은 행사 원문에서 상품 정보를 �
 - name = 상품명 (원문 표기 그대로, 앞뒤 라벨 정리만 허용)
 - price = 정가 (원문 숫자 그대로, 콤마 제거한 정수)
 - discount_price = 할인가 (원문에 있을 때만), discount_rate = 할인율 % (원문에 있을 때만)
+- link_url = 그 상품 블록에 붙은 URL (원문에 있을 때만, 원문 글자 그대로). URL 창작·축약·변형 절대 금지. 없으면 생략
 - 가격이 하나만 적힌 상품은 price에 넣고 discount_price 생략
 - 가격이 전혀 없는 상품·상품이 없는 원문 = 빈 배열
 
 JSON만 출력:
-{ "products": [{ "name": "상품명", "price": 0, "discount_price": 0, "discount_rate": 0 }] }`;
+{ "products": [{ "name": "상품명", "price": 0, "discount_price": 0, "discount_rate": 0, "link_url": "https://..." }] }`;
 
 /**
  * 행사 원문 → 상품 목록 추출 + 원문 실존 기계 검증(validateProductsAgainstEventText).
@@ -590,8 +593,8 @@ export async function extractEventProducts(sourceText: string, companyId?: strin
   try {
     const raw = await callAIWithFallback({
       system: PRODUCT_EXTRACT_SYSTEM,
-      userMessage: `[행사 원문]\n${text.slice(0, 3000)}\n\n위 원문에서 상품 목록을 JSON으로 추출하세요.`,
-      maxTokens: 1500,
+      userMessage: `[행사 원문]\n${text.slice(0, 4000)}\n\n위 원문에서 상품 목록을 JSON으로 추출하세요.`,
+      maxTokens: 2000,
       temperature: 0,
       model: 'sonnet',
       companyId,
@@ -694,13 +697,17 @@ export async function oneShotGenerate(opts: {
   if (carouselIdx >= 0 && productSource) {
     const extracted = await extractEventProducts(productSource, opts.companyId);
     if (extracted.length > 0) {
-      (sections[carouselIdx].props as any).products = extracted.map((p) => ({
+      // ★ 2026-07-13 — 상품 URL 매핑(원문 실존 검증 통과분) + URL 페이지의 og:image로 상품 이미지 자동 채움.
+      //   이미지 fetch 실패/사설 호스트/og 부재 = 빈 값 유지(생성 차단 X — 사용자가 직접 업로드).
+      const ogImages = await fetchProductOgImages(extracted.map((p) => p.link_url));
+      (sections[carouselIdx].props as any).products = extracted.map((p, i) => ({
         id: randomUUID(),
-        image_url: '',
+        image_url: ogImages[i] || '',
         name: p.name,
         price: p.price,
         ...(p.discount_price ? { discount_price: p.discount_price } : {}),
         ...(p.discount_rate ? { discount_rate: p.discount_rate } : {}),
+        ...(p.link_url ? { link_url: p.link_url } : {}),
       }));
     }
   }

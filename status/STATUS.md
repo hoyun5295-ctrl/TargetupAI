@@ -38,6 +38,9 @@
 
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
+### 🟡 2026-07-13 (4) — DM 텍스트 넣기: 상품 URL·이미지 자동 매핑 + 타이포 구도 함정 정정 (코드완료 · 배포 대기 · DDL 0)
+> Harold 지시 "상품 주소까지 매핑 + 모바일DM 끝장". **①상품 URL 매핑**: 행사 원문 추출(extractEventProducts)에 link_url 축 추가 — AI 추출 + 3중 검증(http/https 스킴·원문 verbatim 실존·**자기 상품 구간 검증**(원문에 있어도 다른 상품 구간 URL이면 폐기 후 재배정 — Codex 지적)) + 결정적 배정(assignProductLinksFromText: 상품명 토큰 다수결 줄 앵커, 구간 내 URL 정확히 1개일 때만 — 증정 문단 URL 오배정 차단). **②상품 이미지 자동 채움**: link_url 페이지의 og:image fetch(fetchProductOgImages — redirect 홉마다 사설 호스트 가드 재검증(manual redirect ≤3), 5초 timeout, 실패=빈 값 유지). 텍스트만 붙여넣으면 상품 슬라이드에 이름·정가·할인·링크·이미지까지 자동. **③타이포 구도 함정**(Harold 실측 신고): AI가 이미지 없는 시점에 확정한 이미지 미사용 구도(히어로 타이포·텍스트카드 리드/인용)에 이미지 업로드 시 기본 구도로 자동 전환(스토어 단일 길목) + 픽커 라벨 "(이미지 미사용)" 명시. 검증: tsc 0·vitest 464/464(신규 7)·Codex 2R PASS(SSRF 리다이렉트 우회·URL 오배치 2건 정정). 상세 [[project_2026_0713_dm_design_3]]
+
 ### 🟡 2026-07-13 (3) — 모바일 DM 디자인 3.0 대개편 (코드완료 · 배포 대기 · DDL 0)
 > Harold "훨씬 업그레이드" 지시 — 3웨이브 통합 프로그램 전체 구현. **영속화 = dm_pages.brand_kit JSONB 동승(font_display·art_direction — dm_versions 스냅샷 포함, DDL 0·SQL 무변경).**
 > **W1**: ①서체 시스템 — 카탈로그 6종+페어링 프리셋 6종(BrandKitModal 헤드라인/본문 분리), 뷰어+캔버스 Google Fonts 실로딩(기존 구멍: 명조 선택해도 수신자 화면 폴백) ②발행물 모션 2.0 — CTA 맥동·쿠폰 샤인·히어로 켄번즈·초침 팝·재고 게이지 성장·상품/갤러리 아이템 스태거(기존 리빌 1.0에 동승, reduced-motion 존중).

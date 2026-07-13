@@ -276,6 +276,77 @@ export async function extractBrandFromUrl(targetUrl: string): Promise<BrandExtra
   };
 }
 
+// ────────────── 상품 URL → og:image 자동 채움 (★ 2026-07-13 디자인 3.0) ──────────────
+
+/** 외부 fetch 허용 판정 — 사설/내부 호스트 차단 (행사 원문의 사용자 입력 URL을 서버가 fetch하는 경로라 SSRF 가드 동반) */
+function isFetchableProductUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    if (!/^https?:$/.test(u.protocol)) return false;
+    const host = u.hostname.toLowerCase();
+    if (!host.includes('.')) return false; // localhost·단일 라벨 호스트 차단
+    if (/^(127\.|10\.|192\.168\.|169\.254\.|0\.)/.test(host)) return false;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return false;
+    if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 리다이렉트 홉(최대 3)마다 호스트 가드를 재검증하는 HTML fetch — 공개 URL이 내부 주소로 redirect하는 우회 차단 (Codex 지적).
+ *  DNS 레벨 rebind까지는 이 층에서 다루지 않는다(기존 브랜드 추출 경로와 동일 한계 — 문서화). */
+async function fetchHtmlGuarded(url: string): Promise<{ html: string; baseUrl: string } | null> {
+  let current = url;
+  for (let hop = 0; hop < 3; hop++) {
+    if (!isFetchableProductUrl(current)) return null;
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(current, {
+        headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,application/xhtml+xml' },
+        signal: controller.signal,
+        redirect: 'manual',
+      });
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get('location');
+        if (!loc) return null;
+        current = new URL(loc, current).toString();
+        continue; // 다음 홉에서 가드 재검증
+      }
+      if (!res.ok) return null;
+      const html = await res.text();
+      return { html: html.slice(0, 200_000), baseUrl: new URL(current).origin };
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(tid);
+    }
+  }
+  return null;
+}
+
+/**
+ * 상품 URL 배열 → 각 페이지의 og:image URL 배열 (순서 보존, 실패/미지원 = undefined).
+ * 행사 원문 추출 상품에 이미지를 자동으로 채우는 용도. 전 URL 병렬(최대 8개 — 추출기 상한과 동일).
+ */
+export async function fetchProductOgImages(urls: Array<string | undefined>): Promise<Array<string | undefined>> {
+  return Promise.all(urls.map(async (url) => {
+    if (!url) return undefined;
+    try {
+      const page = await fetchHtmlGuarded(url);
+      if (!page) return undefined;
+      const meta = parseMetaTags(page.html);
+      const og = meta.get('og:image') || meta.get('og:image:url') || meta.get('twitter:image');
+      if (!og) return undefined;
+      const abs = toAbsoluteUrl(og, page.baseUrl);
+      return abs && /^https?:\/\//i.test(abs) ? abs : undefined;
+    } catch {
+      return undefined;
+    }
+  }));
+}
+
 /**
  * BrandExtractResult → DmBrandKit 부분값으로 변환.
  * 사용자가 UI에서 확인 후 updateCompanyBrandKit으로 적용.
