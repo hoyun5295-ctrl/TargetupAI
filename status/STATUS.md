@@ -38,6 +38,9 @@
 
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
+### 🟡 2026-07-13 (2) — AI Operator 소개 페이지 v3 시네마틱 대개편 (코드완료 · 배포 대기)
+> **미체감 원인 규명+제거**: v2가 `prefers-reduced-motion` 감지 시 전 연출을 차단(CSS 2블록+JS reduce 변수) — Windows [설정>접근성>시각 효과>애니메이션 효과] off면 브라우저가 reduced-motion 판정 → 서버 파일이 정상 배포됐어도 화면은 완전 정적(0713 curl 모순 실측과 부합). **v3 = 가드 전면 제거(연출 항상 실행, 성능 가드는 모바일만)** + 연출 대상향: 인트로 v3(단어 블러 등장+확산 링 3겹+클릭 스킵+줌아웃 퇴장+축포)·장별 오로라 색조(hue-rotate 11장)·별밭 반짝임+유성+축포 캔버스·S3 여정 입력 실시간 타이핑+스텝 캐스케이드+닷 핑·제목 클립 와이프·목업 회전 헤일로+표면 광택 스윕+플로팅/발광 병행·시간대 바 웨이브·클릭 리플·호버 리프트·클로즈 CTA 맥동·필름 그레인. 검증: node --check 0·CSS 중괄호 균형·금지패턴 0·JS 참조 ID 13종 전존·Codex 2라운드(1R 5건 지적→전건 정정, 2R 전건 PASS·회귀 0). 마커 `<meta name="fx-version" content="v3-cinematic-20260713">`. **잔여 = Harold 배포(tp-push+frontend build) 후 시크릿창/Ctrl+F5 실측.** 상세 [[project_2026_0713_operator_intro_effects]]
+
 ### 🟢 2026-07-12 (2) — 모바일 DM 종합 연구 + 강화 D-1~D-4 (★배포완료 2026-07-12 — Harold 선언 / 실측 3건 = 직원 테스트)
 > 전수 연구(발행·발송·뷰어·추적·이벤트 라우트 70개+토큰·추적 CT 정독 — 코어 견고 확인, 실결함 2건뿐) 후 일괄 구현: **D-1 발행비 정합** — 발행비(멱등키 dm-publish:dmId) 미납+실발송 이력(dm_recipient_tokens) 없음+크레딧제 적용 회사면 send-to-target 402 PUBLISH_FEE_REQUIRED → 프론트 CreditConfirmModal 확인 → confirmPublishFee 재요청 시 서버 인라인 확정(/publish와 동일 멱등키 — Codex 402 루프 High 지적으로 /publish 왕복 재시도 폐기 재설계). 과거 실발송 DM 소급 면제·무과금 회사 면제·판정 실패=발송 우선. 테스트 발행(무과금)·API 직행 우회 차단. **D-2 야간 광고 가드 공통화** — createDirectSendCampaign(직접발송·DM·자율발송 단일 길목) adEnabled+발송 시각(즉시/예약) KST 창(SEND_HOURS 8~21) 밖=NIGHT_AD_RESTRICTED 400 + DM 발송 모달 사전 안내. ★직접발송 야간 광고도 이제 차단(정책 변화 — 운영 공지 검토 필요). **D-3 재타겟 1클릭** — 미열람 재발송을 세그먼트 4종(미열람/열람·무반응/클릭/응모)으로 일반화(백엔드 무변경 — resendCustomerIds 재사용·자격/수신거부 서버 재적용). **D-4** 발송 추적 구매 전환 소스 라벨(매장·ERP purchases ≠ 자사몰 cdp 정직 표기). Codex 적대 2라운드(402 루프 정정→PASS: 멱등·플래그 결합·순서 정합 확인). 검증 BE/FE tsc0·vitest 433·금지패턴0. DDL 없음. **잔여 = 실측 3건(직원 테스트 — 발행비 402→확인→발송 / 야간 광고 400 / 세그먼트 재발송).** 상세 [[project_2026_0712_dm_reinforcement]]
 
