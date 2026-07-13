@@ -57,9 +57,13 @@
       radial-gradient(900px 480px at 95% 110%, rgba(103,232,249,0.08), transparent 55%),
       linear-gradient(180deg, #0a101e 0%, #060a14 100%);
     box-shadow:0 24px 70px rgba(0,0,0,0.55);
-    opacity:0; visibility:hidden; transform:translateY(10px) scale(0.992);
-    transition:opacity .3s ease, transform .3s ease, visibility 0s linear .3s; }
-  .slide.on { opacity:1; visibility:visible; transform:none; transition:opacity .32s ease, transform .32s ease; z-index:2; }
+    opacity:0; visibility:hidden; transform:scale(0.9) translateY(38px); filter:blur(12px);
+    transition:opacity .5s ease, transform .5s ease, filter .5s ease, visibility 0s linear .5s; }
+  .slide.on { opacity:1; visibility:visible; transform:none; filter:none; z-index:2;
+    transition:opacity .6s cubic-bezier(.22,.8,.3,1) .06s, transform .65s cubic-bezier(.16,1,.3,1) .06s, filter .5s ease .06s; }
+  /* 나가는 장 — 카메라를 지나쳐 확대되며 흐려짐 (줌스루) */
+  .slide.leaving { opacity:0; visibility:visible; transform:scale(1.06) translateY(-16px); filter:blur(10px); z-index:1;
+    transition:opacity .45s ease, transform .45s ease, filter .45s ease; }
 
   /* 배경 장식 — 점 그리드 */
   .slide::before { content:""; position:absolute; inset:0; pointer-events:none; opacity:0.5;
@@ -67,10 +71,13 @@
     background-size:26px 26px;
     mask-image:radial-gradient(75% 70% at 50% 40%, #000 0%, transparent 100%); }
 
-  /* 등장 애니메이션 */
-  @keyframes rise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+  /* 등장 애니메이션 — 블러에서 초점이 잡히며 크게 떠오르는 스프링 등장 */
+  @keyframes rise {
+    0%   { opacity:0; transform:translateY(38px) scale(0.955); filter:blur(10px); }
+    55%  { filter:blur(0); }
+    100% { opacity:1; transform:none; filter:none; } }
   .rv { opacity:0; }
-  .slide.on .rv { animation:rise .55s cubic-bezier(.22,.8,.3,1) both; animation-delay:var(--d, 0s); }
+  .slide.on .rv { animation:rise .85s cubic-bezier(.16,1,.3,1) both; animation-delay:var(--d, 0s); }
 
   /* ── 공용 타이포 ─────────────────────────────────────── */
   .kicker { display:flex; align-items:center; gap:10px; font-size:12px; font-weight:700;
@@ -427,14 +434,154 @@
     ul.points { gap:10px; }
     .close .safety { gap:7px; }
   }
+
+  /* ══════════════════════════════════════════════════════
+     ★ 2026-07-13 프리미엄 연출 레이어 (풀옵션)
+     ══════════════════════════════════════════════════════ */
+
+  /* 오로라 — 천천히 흐르는 배경 광원 */
+  .aurora { position:fixed; inset:-25%; z-index:0; pointer-events:none; opacity:0.95;
+    background:
+      radial-gradient(38% 46% at 22% 30%, rgba(139,124,247,0.30), transparent 62%),
+      radial-gradient(34% 42% at 80% 72%, rgba(103,232,249,0.20), transparent 62%),
+      radial-gradient(42% 38% at 62% 16%, rgba(192,132,252,0.18), transparent 62%);
+    filter:blur(46px); animation:auroraMove 18s ease-in-out infinite alternate; }
+  @keyframes auroraMove {
+    0%   { transform:translate(0,0) rotate(0deg) scale(1); }
+    100% { transform:translate(-5%,4%) rotate(9deg) scale(1.08); } }
+
+  /* 파티클 캔버스 */
+  #fx { position:fixed; inset:0; z-index:0; pointer-events:none; }
+
+  /* 마우스 스포트라이트 */
+  .spot { position:fixed; inset:0; z-index:1; pointer-events:none; opacity:0; transition:opacity .5s ease;
+    background:radial-gradient(360px 360px at var(--mx,50%) var(--my,42%), rgba(139,124,247,0.12), transparent 70%); }
+  .spot.on { opacity:1; }
+
+  /* app 컨텐츠는 광원 위 */
+  #app { position:relative; z-index:2; }
+
+  /* 상단 자동재생 진행바 */
+  .progress { position:fixed; top:0; left:0; height:3px; width:0; z-index:60; border-radius:0 3px 3px 0;
+    background:linear-gradient(90deg,#a5b4fc,#c084fc 55%,#67e8f9);
+    box-shadow:0 0 14px rgba(139,124,247,0.75); opacity:0; transition:opacity .3s; }
+  .progress.on { opacity:1; }
+
+  /* 재생/일시정지 버튼 */
+  .play-state { display:inline-flex; }
+
+  /* 인트로 오버레이 */
+  #intro { position:fixed; inset:0; z-index:200; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px;
+    background:radial-gradient(circle at 50% 38%, #0b1222 0%, #05080f 72%);
+    transition:opacity .8s ease, visibility 0s linear .8s; }
+  #intro.hide { opacity:0; visibility:hidden; pointer-events:none; }
+  #intro .il { font-size:13px; font-weight:800; letter-spacing:0.34em; text-transform:uppercase; color:var(--accent);
+    opacity:0; animation:introUp .7s .1s both; }
+  #intro .it { font-size:clamp(34px, 7vw, 76px); font-weight:900; letter-spacing:-0.04em; line-height:1; text-align:center;
+    opacity:0; animation:introUp .85s .32s both; }
+  #intro .it .em { animation:none; }
+  #intro .ring0 { position:absolute; width:min(560px,86vw); height:min(560px,86vw); border-radius:50%;
+    border:1px dashed rgba(139,124,247,0.22); animation:spin 30s linear infinite, introFade 1s both; pointer-events:none; }
+  #intro .ib { position:relative; width:132px; height:2px; background:rgba(255,255,255,0.12); border-radius:2px; overflow:hidden;
+    opacity:0; animation:introUp .6s .6s both; }
+  #intro .ib i { position:absolute; inset:0; width:0; border-radius:2px; background:linear-gradient(90deg,#8b7cf7,#67e8f9); animation:introBar 1.5s .55s both; }
+  @keyframes introUp { from { opacity:0; transform:translateY(18px); } to { opacity:1; transform:none; } }
+  @keyframes introFade { from { opacity:0; } to { opacity:1; } }
+  @keyframes introBar { to { width:100%; } }
+
+  /* 제목 강조 shimmer — 그라데이션이 흐른다 */
+  .em { background-size:220% 100%; animation:emShimmer 7s linear infinite; }
+  @keyframes emShimmer { to { background-position:220% 0; } }
+
+  /* 전환 순간 화면을 가로지르는 빛 스윕 */
+  .sweep { position:fixed; inset:0; z-index:55; pointer-events:none; transform:translateX(-130%) skewX(-10deg);
+    background:linear-gradient(105deg, transparent 34%, rgba(139,124,247,0.14) 45%, rgba(255,255,255,0.10) 50%, rgba(103,232,249,0.13) 55%, transparent 66%); }
+  .sweep.go { animation:sweepGo .75s cubic-bezier(.3,.7,.3,1) both; }
+  @keyframes sweepGo { from { transform:translateX(-130%) skewX(-10deg); } to { transform:translateX(130%) skewX(-10deg); } }
+
+  /* 목업 — 둥둥 떠 있는 플로팅 + 글로우 맥동 */
+  @keyframes shotFloat { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-11px); } }
+  .slide.on .shot > :first-child { animation:shotFloat 5.5s ease-in-out 1.1s infinite; }
+  @keyframes glowPulse { 0%,100% { opacity:.65; } 50% { opacity:1; } }
+  .slide.on .shot::after { animation:glowPulse 4s ease-in-out infinite; }
+
+  /* 콘솔·실물 목업 테두리 글로우 호흡 */
+  @keyframes frameGlow {
+    0%,100% { box-shadow:0 18px 50px rgba(0,0,0,0.5), 0 0 0 1px rgba(139,124,247,0.10), 0 0 26px rgba(139,124,247,0.08); }
+    50%     { box-shadow:0 18px 50px rgba(0,0,0,0.5), 0 0 0 1px rgba(139,124,247,0.38), 0 0 60px rgba(139,124,247,0.26); } }
+  .slide.on .console, .slide.on .mailc, .slide.on .mall2, .slide.on .iph { animation:frameGlow 4.5s ease-in-out infinite; }
+
+  /* 히어로 "7" — 숨쉬는 글로우 / 링 강조 */
+  @keyframes sevenBreath { 0%,100% { transform:translateY(-52%) scale(1); } 50% { transform:translateY(-53%) scale(1.025); } }
+  .hero .seven { filter:drop-shadow(0 0 46px rgba(139,124,247,0.30)); animation:sevenBreath 6.5s ease-in-out infinite; }
+  .hero .ring { box-shadow:0 0 60px rgba(139,124,247,0.10) inset, 0 0 40px rgba(139,124,247,0.08); }
+
+  /* 킥커 라인 — 그어지며 등장 */
+  @keyframes lineDraw { from { width:0; } to { width:26px; } }
+  .slide.on .kicker::before { animation:lineDraw .7s cubic-bezier(.22,.8,.3,1) .15s both; }
+
+  /* 3D 틸트 */
+  .tilt-wrap { transform:perspective(1100px); transform-style:preserve-3d; will-change:transform; transition:transform .25s cubic-bezier(.22,.8,.3,1); }
+
+  /* 목업 마이크로 모션 — 슬라이드 진입 시 자라남 */
+  .funnel .fb { transform:scaleX(0); transform-origin:left center; transition:transform 1.05s cubic-bezier(.22,.8,.3,1); }
+  .slide.on .funnel .fb { transform:scaleX(1); }
+  .hours i { transform:scaleY(0); transform-origin:bottom; transition:transform .7s cubic-bezier(.22,.8,.3,1); }
+  .slide.on .hours i { transform:scaleY(1); }
+  .vbar i { width:0 !important; transition:width 1.2s cubic-bezier(.22,.8,.3,1); }
+  .slide.on .vbar i { width:82% !important; }
+  .jstep .dot { transform:scale(0); transition:transform .4s cubic-bezier(.34,1.5,.5,1); }
+  .slide.on .jstep .dot { transform:scale(1); }
+  .jstep .box { opacity:0; transform:translateX(10px); transition:opacity .5s ease, transform .5s cubic-bezier(.22,.8,.3,1); }
+  .slide.on .jstep .box { opacity:1; transform:none; }
+
+  /* 카운트업 대상은 tabular */
+  .countup { font-variant-numeric:tabular-nums; }
+
+  /* 저사양·접근성: 모션 최소화 */
+  @media (prefers-reduced-motion: reduce) {
+    .aurora, #fx, .spot, .sweep { display:none !important; }
+    .em { animation:none; }
+    #intro .il, #intro .it, #intro .ib, #intro .ib i, #intro .ring0 { animation:none !important; opacity:1; }
+    .funnel .fb, .hours i, .jstep .dot, .jstep .box, .vbar i { transition:none !important; }
+    .tilt-wrap { transition:none !important; }
+    .slide { transform:none; filter:none; }
+    .slide.leaving { display:none; }
+    .slide.on .shot > :first-child, .slide.on .shot::after,
+    .slide.on .console, .slide.on .mailc, .slide.on .mall2, .slide.on .iph,
+    .hero .seven, .slide.on .kicker::before { animation:none !important; }
+  }
+  /* 모바일: 파티클·틸트·블러 전환 비활성(성능) */
+  @media (max-width: 860px) {
+    #fx { display:none; }
+    .tilt-wrap { transform:none !important; }
+    .slide, .slide.leaving { filter:none; }
+    .slide.on .console, .slide.on .mailc, .slide.on .mall2, .slide.on .iph { animation:none; }
+  }
 </style>
 </head>
 <body>
+<div class="aurora"></div>
+<canvas id="fx"></canvas>
+<div class="spot" id="spot"></div>
+<div class="progress" id="progress"></div>
+<div class="sweep" id="sweep"></div>
+
+<div id="intro" aria-hidden="true">
+  <div class="ring0"></div>
+  <div class="il">AI Operator · Hanjullo</div>
+  <div class="it">마케팅 실무를 바꾸는<br /><span class="em">7가지 기능</span></div>
+  <div class="ib"><i></i></div>
+</div>
+
 <div id="app">
   <header class="top">
     <div class="brand"><b>한줄로 <i>—</i></b><span>AI Operator 소개</span></div>
     <div class="top-right">
       <span class="counter" id="counter">01 / 11</span>
+      <button class="icon-btn" id="playBtn" title="자동재생" aria-label="자동재생 시작/정지">
+        <svg id="playIcon" width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      </button>
       <button class="icon-btn" id="fsBtn" title="전체화면" aria-label="전체화면">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
       </button>
@@ -801,6 +948,13 @@
   var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
   var TOTAL = slides.length;
   var cur = 0; // 0-based
+  // ★ 2026-07-13 연출 — 모션 최소화·모바일 감지 (show()가 참조하므로 최상단)
+  var reduce = false, mobile = false;
+  try {
+    reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    mobile = (window.matchMedia && window.matchMedia('(max-width: 860px)').matches) || ('ontouchstart' in window);
+  } catch (e0) {}
+  var sweepEl = document.getElementById('sweep');
   var counter = document.getElementById('counter');
   var prevBtn = document.getElementById('prevBtn');
   var nextBtn = document.getElementById('nextBtn');
@@ -824,7 +978,14 @@
   function show(n) {
     n = Math.max(0, Math.min(TOTAL - 1, n));
     if (n === cur && slides[cur].classList.contains('on')) return;
-    slides[cur].classList.remove('on');
+    // ★ 줌스루 전환 — 나가는 장은 확대·블러로 카메라를 지나침 + 빛 스윕
+    var old = slides[cur];
+    old.classList.remove('on');
+    if (!reduce && old !== slides[n]) {
+      old.classList.add('leaving');
+      setTimeout(function () { old.classList.remove('leaving'); }, 500);
+      if (sweepEl && !mobile) { sweepEl.classList.remove('go'); void sweepEl.offsetWidth; sweepEl.classList.add('go'); }
+    }
     cur = n;
     var s = slides[cur];
     s.classList.add('on');
@@ -837,6 +998,7 @@
     }
     // 슬라이드 스크롤 최상단 (모바일)
     s.scrollTop = 0;
+    runCountUp(s);
     counter.textContent = pad(cur + 1) + ' / ' + pad(TOTAL);
     prevBtn.disabled = (cur === 0);
     nextBtn.disabled = (cur === TOTAL - 1);
@@ -875,14 +1037,149 @@
     else { (document.exitFullscreen || document.webkitExitFullscreen || function(){}).call(document); }
   });
 
+  // ══════════════════════════════════════════════════════
+  // ★ 2026-07-13 프리미엄 연출 (풀옵션) — 파티클·틸트·스포트라이트·자동재생·카운트업
+  //   (reduce·mobile 감지는 최상단 — show()의 줌스루·스윕이 참조)
+  // ══════════════════════════════════════════════════════
+
+  // ── 숫자 카운트업 (슬라이드 진입 시)
+  function fmtNum(v, dec) {
+    var str = v.toFixed(dec), p = str.split('.');
+    p[0] = p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return p.join('.');
+  }
+  function runCountUp(scope) {
+    if (reduce) return;
+    var els = scope.querySelectorAll('.stat3 .s b, .funnel .f b');
+    for (var i = 0; i < els.length; i++) {
+      (function (el) {
+        var raw = el.getAttribute('data-raw');
+        if (raw === null) { raw = el.textContent; el.setAttribute('data-raw', raw); }
+        var t = raw.trim();
+        if (!/^[₩\d]/.test(t)) return;
+        var m = t.match(/[\d,]+(?:\.\d+)?/); if (!m) return;
+        var numStr = m[0], num = parseFloat(numStr.replace(/,/g, '')); if (!isFinite(num)) return;
+        var dec = (numStr.split('.')[1] || '').length;
+        var pre = t.slice(0, m.index), suf = t.slice(m.index + numStr.length);
+        el.classList.add('countup');
+        var dur = 780, st = null;
+        function step(ts) {
+          if (!st) st = ts;
+          var pr = Math.min(1, (ts - st) / dur), e = 1 - Math.pow(1 - pr, 3);
+          el.textContent = pre + fmtNum(num * e, dec) + suf;
+          if (pr < 1) requestAnimationFrame(step); else el.textContent = raw;
+        }
+        requestAnimationFrame(step);
+      })(els[i]);
+    }
+  }
+
+  // ── 자동재생 + 진행바
+  var AUTO_MS = 7000, playing = false, rafA = null, segStart = 0;
+  var progressEl = document.getElementById('progress');
+  var playBtn = document.getElementById('playBtn');
+  function setPlayIcon(p) {
+    document.getElementById('playIcon').innerHTML = p
+      ? '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>'
+      : '<path d="M8 5v14l11-7z"/>';
+  }
+  function tickAuto(ts) {
+    if (!playing) return;
+    if (!segStart) segStart = ts;
+    var pr = Math.min(1, (ts - segStart) / AUTO_MS);
+    progressEl.style.width = (pr * 100) + '%';
+    if (pr >= 1) { segStart = 0; if (cur < TOTAL - 1) { show(cur + 1); } else { stopAuto(); return; } }
+    rafA = requestAnimationFrame(tickAuto);
+  }
+  function startAuto() {
+    if (cur >= TOTAL - 1) { show(0); }
+    playing = true; segStart = 0; progressEl.classList.add('on'); setPlayIcon(true);
+    rafA = requestAnimationFrame(tickAuto);
+  }
+  function stopAuto() {
+    if (!playing && !rafA) return;
+    playing = false; if (rafA) cancelAnimationFrame(rafA); rafA = null;
+    progressEl.classList.remove('on'); progressEl.style.width = '0'; setPlayIcon(false);
+  }
+  playBtn.addEventListener('click', function (e) { e.stopPropagation(); playing ? stopAuto() : startAuto(); });
+  // 사용자 개입 시 자동재생 정지 (재생 버튼 제외)
+  ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function (ev) {
+    document.addEventListener(ev, function (e) {
+      if (e.target && e.target.closest && e.target.closest('#playBtn')) return;
+      stopAuto();
+    }, { passive: true });
+  });
+
+  // ── 파티클 (constellation)
+  var canvas = document.getElementById('fx'), fxCtx = null, parts = [], fxOn = false;
+  function initFx() {
+    if (reduce || mobile) return;
+    fxCtx = canvas.getContext('2d'); fxOn = true;
+    var dpr = window.devicePixelRatio || 1;
+    function resize() { canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr; fxCtx.setTransform(dpr, 0, 0, dpr, 0, 0); }
+    resize(); window.addEventListener('resize', resize);
+    var N = Math.min(64, Math.round(innerWidth / 24));
+    for (var i = 0; i < N; i++) parts.push({ x: Math.random() * innerWidth, y: Math.random() * innerHeight, vx: (Math.random() - 0.5) * 0.22, vy: (Math.random() - 0.5) * 0.22, r: Math.random() * 1.6 + 0.6 });
+    requestAnimationFrame(drawFx);
+  }
+  function drawFx() {
+    if (!fxOn) return;
+    var w = innerWidth, h = innerHeight; fxCtx.clearRect(0, 0, w, h);
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i]; p.x += p.vx; p.y += p.vy;
+      if (p.x < 0) p.x += w; if (p.x > w) p.x -= w; if (p.y < 0) p.y += h; if (p.y > h) p.y -= h;
+      fxCtx.beginPath(); fxCtx.arc(p.x, p.y, p.r, 0, 6.283); fxCtx.fillStyle = 'rgba(184,174,255,0.65)'; fxCtx.fill();
+    }
+    for (var a = 0; a < parts.length; a++) for (var b = a + 1; b < parts.length; b++) {
+      var pa = parts[a], pb = parts[b], dx = pa.x - pb.x, dy = pa.y - pb.y, d2 = dx * dx + dy * dy;
+      if (d2 < 12100) { var o = (1 - d2 / 12100) * 0.3; fxCtx.strokeStyle = 'rgba(139,124,247,' + o + ')'; fxCtx.lineWidth = 0.7; fxCtx.beginPath(); fxCtx.moveTo(pa.x, pa.y); fxCtx.lineTo(pb.x, pb.y); fxCtx.stroke(); }
+    }
+    requestAnimationFrame(drawFx);
+  }
+
+  // ── 마우스 스포트라이트 + 목업 3D 틸트
+  var spotEl = document.getElementById('spot');
+  var stageEl = document.querySelector('.stage');
+  if (!reduce && !mobile) {
+    window.addEventListener('mousemove', function (e) {
+      document.documentElement.style.setProperty('--mx', e.clientX + 'px');
+      document.documentElement.style.setProperty('--my', e.clientY + 'px');
+      spotEl.classList.add('on');
+    }, { passive: true });
+    stageEl.addEventListener('mousemove', function (e) {
+      var shot = slides[cur].querySelector('.shot'); if (!shot) return;
+      shot.classList.add('tilt-wrap');
+      var r = shot.getBoundingClientRect();
+      var cx = Math.max(-1, Math.min(1, (e.clientX - (r.left + r.width / 2)) / (r.width / 2)));
+      var cy = Math.max(-1, Math.min(1, (e.clientY - (r.top + r.height / 2)) / (r.height / 2)));
+      shot.style.transform = 'perspective(1100px) rotateY(' + (cx * 5) + 'deg) rotateX(' + (-cy * 5) + 'deg)';
+    }, { passive: true });
+    stageEl.addEventListener('mouseleave', function () {
+      var shot = slides[cur].querySelector('.shot'); if (shot) shot.style.transform = '';
+    });
+  }
+
+  // ── 초기 슬라이드 설정
   var startN = parseInt((location.hash || '').replace('#', ''), 10);
+  var deepLink = (startN >= 1 && startN <= TOTAL) && !!location.hash;
   slides[0].classList.remove('on');
-  cur = (startN >= 1 && startN <= TOTAL) ? startN - 1 : 0;
+  cur = deepLink ? startN - 1 : 0;
   slides[cur].classList.add('on');
+  runCountUp(slides[cur]);
   counter.textContent = pad(cur + 1) + ' / ' + pad(TOTAL);
   prevBtn.disabled = (cur === 0);
   nextBtn.disabled = (cur === TOTAL - 1);
   for (var d0 = 0; d0 < dots.length; d0++) dots[d0].className = 'dot' + (d0 === cur ? ' on' : '');
+
+  initFx();
+
+  // ── 인트로 → 자동재생 (딥링크 진입 시 인트로·자동재생 생략)
+  var intro = document.getElementById('intro');
+  if (deepLink) {
+    intro.classList.add('hide');
+  } else {
+    setTimeout(function () { intro.classList.add('hide'); startAuto(); }, reduce ? 500 : 2100);
+  }
 })();
 </script>
 </body>

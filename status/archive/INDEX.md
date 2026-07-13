@@ -8,6 +8,8 @@
 
 | 날짜 | 제목 | 검색 키워드 | 파일 |
 |------|------|-------------|------|
+| 2026-07-12 | 🟢 (5) AI 학습메모리 전수점검·일괄 강화 (회전 2026-07-12) | LEARNING_MEMORY_TYPES 학습 5종 화이트리스트 buildMemoryPromptContext 슬롯 잠식 brand_guideline usage_count 여정 실클릭 short_url_click stale grade 정리 legacy POST validTypes Codex 4R | [TASKS_2026-07.md](TASKS_2026-07.md) |
+| 2026-07-12 | 🟢 (4) 인앱메시지 일괄 강화 P0-1~P2-2 (회전 2026-07-12) | passesTriggerThresholds safeNavigate sanitizeActionUrl resolveActionUrlPatch trackImpression 소유 중복 렌더 가드 patchPresence variant 상속 replaceBlockTexts dnd 상품 가격 discount_price SDK v0.3.8 v0.3.9 | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-12 | 🟢 (3) 이메일마케팅 법 준수·편집기 일괄 강화 14건 (회전 2026-07-12) | UNSUB_URL_MARKER List-Unsubscribe One-Click RFC 8058 webhook 410 excludeOptedOutEmails 야간 예외 시행령 61조의2 cancel-schedule placeholder 3중 재시도 멱등 sub_copy_size accent_color | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-12 | 🟢 자동마케팅 종합 강화 C-1~C-5 (회전 2026-07-12) | 야간 광고 차단 pause 캐스케이드 decideBudgetAlert 예산 임계 전환 귀속 conversion_attributed_at target_hint ROI 카드 예측 크레딧 독립 | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-11 | 🟢 (2) 여정 전수점검 일괄 강화 9건 (회전 2026-07-12) | goal_kind wait-until-event not_met_goto 홀드아웃 holdout_pct 멤버십 영속 send-time 개인화 타겟확인 TargetRecipientsModal 활성 중 문안 수정 pretest dedup | [TASKS_2026-07.md](TASKS_2026-07.md) |
