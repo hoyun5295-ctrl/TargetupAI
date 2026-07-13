@@ -111,11 +111,13 @@ export const UNSUB_URL_MARKER = '{{__hanjul_unsub_url__}}';
 /**
  * HTML 안 <a href="http(s)://..."> 링크를 클릭 트래킹 URL로 래핑.
  * 제외: mailto:/tel:/# 앵커, {{변수}} 포함 href, 이미 트래킹/수신거부 URL(이중 래핑 방지).
+ * ★ 2026-07-13 디자인 3.0 — 불릿프루프 버튼의 MSO VML(<v:roundrect href>)도 동일 래핑
+ *   (아웃룩 데스크탑은 VML href로 클릭 — <a>만 래핑하면 그 클라이언트 클릭이 통째 미집계, Codex 지적).
  */
 export function wrapLinksForTracking(html: string, campaignId: string, email: string): string {
   if (!html) return html;
   return html.replace(
-    /(<a\b[^>]*?\bhref\s*=\s*")([^"]+)(")/gi,
+    /(<(?:a|v:roundrect)\b[^>]*?\bhref\s*=\s*")([^"]+)(")/gi,
     (whole, before: string, href: string, after: string) => {
       // ★ 2026-07-02 스킴 없는 도메인형(www.x.y)은 https:// 부착 후 래핑 — 저장된 구 캠페인 HTML도 발송 시점 치유.
       //   mailto:/tel:/#/상대경로/개인화 변수는 normalizeWebUrl이 그대로 보존하므로 아래 https 검사에서 제외됨.

@@ -24,8 +24,9 @@ import { sendEmail, isSmtpConfigured, getSmtpConfigPublic } from './company-smtp
 import { applyTracking, buildUnsubscribeUrl, UNSUB_URL_MARKER } from './email-tracking';
 import { logCampaignTraining, updateTrainingMetrics, getSourceRef } from './training-logger';
 import { buildEmailTrainingMessage } from './email-training-message';
-import { renderEmailSections } from './email/email-section-renderer';
+import { renderEmailSections, EMAIL_FOOTER_SLOT } from './email/email-section-renderer';
 import { resolveEmailSectionsForCustomer, renderEmailText } from './email/email-personalization';
+import type { EmailDesign } from './email/email-tokens';
 import { getCompanyBrandKit } from './dm/dm-brand-kit';
 import { buildCustomerFilter } from './customer-filter';
 import { hasUneditedPlaceholder } from './email-ai';
@@ -67,6 +68,7 @@ export interface EmailCampaign {
   bounceCount: number;
   unsubscribeCount: number;
   sections: unknown[] | null; // 비주얼 빌더 Section[] (null = manual HTML)
+  design: EmailDesign | null; // ★ 2026-07-13 캠페인 단위 디자인(테마·아트디렉션·서체·프리헤더) — 신규 ALTER 컬럼
   parentCampaignId: string | null; // 재발송 자식이면 원본 campaign id (null = 원본)
   resendGeneration: number;        // 원본=0, 재발송본=1 — 재발송 1회 한도 판정
   createdBy: string | null;
@@ -85,6 +87,7 @@ export interface CreateCampaignInput {
   isAd?: boolean;
   aiGenerated?: boolean;
   sections?: unknown[] | null; // 비주얼 빌더 Section[] — 있으면 html_body는 렌더 산출물
+  design?: EmailDesign | null; // ★ 2026-07-13 캠페인 단위 디자인 — 신규 ALTER 컬럼(미실행 시 throw → route 503)
   scheduledAt?: Date;
 }
 
@@ -100,10 +103,39 @@ export interface SendCampaignInput {
 // Campaign CRUD
 // ════════════════════════════════════════════════════════════════════
 
+// ★ 2026-07-13 (Codex 지적 정정) — design 쓰기는 INSERT/UPDATE "이전"에 컬럼 실재를 확인한다.
+//   후행 UPDATE가 컬럼 부재로 죽으면 캠페인 행만 생기거나(재시도 중복) 렌더된 html_body만 남고
+//   테마가 유실되는 부분 상태가 된다 → 선확인으로 아무것도 안 쓰고 503(부분 상태 0).
+//   캐시는 dm-brand-kit ensureColumn 패턴 미러(ALTER→reload 배포 순서 전제, 조회 오류는 미캐시 재시도).
+let designColumnExists: boolean | null = null;
+async function ensureDesignColumnOrThrow(): Promise<void> {
+  // 양성만 캐시 — 음성 캐시는 ALTER 적용 후에도 재기동 전까지 503을 고정시킨다(자가 치유 불가, Codex 4R).
+  //   ALTER 전 창에서만 design 쓰기당 1회 조회가 추가될 뿐이라 부하 무시 가능.
+  if (designColumnExists !== true) {
+    const res = await query(
+      `SELECT 1 FROM information_schema.columns WHERE table_name = 'email_campaigns' AND column_name = 'design'`,
+    );
+    if (res.rows.length === 0) {
+      // 'column' + 'does not exist' 포함 — route handleDbMigrationError가 503 DB_MIGRATION_PENDING으로 변환
+      throw new Error('email_campaigns.design column does not exist — ALTER 실행 필요');
+    }
+    designColumnExists = true;
+  }
+}
+
 /**
  * 신규 캠페인 생성 — fromEmail/fromName 기본값 = 회사 SMTP 설정 안 from_email/from_name 활용.
  */
 export async function createEmailCampaign(input: CreateCampaignInput): Promise<EmailCampaign> {
+  // ★ 2026-07-13 — design 동봉 생성은 INSERT 전에 컬럼 확인(부분 생성 차단 — Codex 지적)
+  if (input.design && typeof input.design === 'object') await ensureDesignColumnOrThrow();
+  // ★ 2026-07-14 (Codex 5R) — 후행 쓰기(sections/design/ai_generated)가 있는 예약 생성은 INSERT를 draft로
+  //   시작하고 전 쓰기 성공 후에만 'scheduled'로 승격 — "scheduled 표시 = 콘텐츠 쓰기 완료" 불변식
+  //   (후행 쓰기 실패 시 scheduled 행 잔존 → 스위퍼 오발송 클래스 구조 차단, 6원칙 ② 정신).
+  const hasFollowUps = !!input.aiGenerated
+    || (Array.isArray(input.sections) && input.sections.length > 0)
+    || !!(input.design && typeof input.design === 'object');
+  const deferSchedule = !!input.scheduledAt && hasFollowUps;
   // 회사 SMTP 설정 안 from_email/from_name 기본값 사용
   const smtpConfig = await getSmtpConfigPublic(input.companyId);
   const defaultFromEmail = input.fromEmail || smtpConfig?.fromEmail || '';
@@ -136,7 +168,7 @@ export async function createEmailCampaign(input: CreateCampaignInput): Promise<E
       defaultFromEmail,
       !!input.isAd,
       input.scheduledAt || null,
-      input.scheduledAt ? 'scheduled' : 'draft',
+      input.scheduledAt && !deferSchedule ? 'scheduled' : 'draft',
     ]
   );
   const campaign = mapRow(result.rows[0]);
@@ -147,10 +179,31 @@ export async function createEmailCampaign(input: CreateCampaignInput): Promise<E
     await query(`UPDATE email_campaigns SET ai_generated = true WHERE id = $1::uuid`, [campaign.id]);
     campaign.aiGenerated = true;
   }
-  // 비주얼 빌더 sections — jsonb 저장(컬럼 확인됨). 없으면 미저장(기존 raw HTML 흐름 보존).
-  if (Array.isArray(input.sections) && input.sections.length > 0) {
+  // 비주얼 빌더 sections + design — 신규 ALTER 컬럼이라 메인 INSERT 밖 별도 저장(기존 raw HTML 흐름 보존).
+  //   ★ 2026-07-13 (Codex 2R) — 둘 다 있으면 단문 결합(부분 상태 창 최소화). design 컬럼 실재는
+  //   함수 초입 ensureDesignColumnOrThrow가 선확인 — 여기 도달 = 컬럼 존재.
+  //   잔여: INSERT↔이 UPDATE 사이 일시 DB 오류 시 테마 없는 draft 행 1개 가능 — 기존 sections/ai_generated와
+  //   동일 클래스(무과금 draft — 사용자가 목록에서 재편집), 트랜잭션 도입은 별도 과제.
+  const wantSections = Array.isArray(input.sections) && input.sections.length > 0;
+  const wantDesign = !!(input.design && typeof input.design === 'object');
+  if (wantSections && wantDesign) {
+    await query(
+      `UPDATE email_campaigns SET sections = $1::jsonb, design = $2::jsonb WHERE id = $3::uuid`,
+      [JSON.stringify(input.sections), JSON.stringify(input.design), campaign.id],
+    );
+    campaign.sections = input.sections!;
+    campaign.design = input.design!;
+  } else if (wantSections) {
     await query(`UPDATE email_campaigns SET sections = $1::jsonb WHERE id = $2::uuid`, [JSON.stringify(input.sections), campaign.id]);
-    campaign.sections = input.sections;
+    campaign.sections = input.sections!;
+  } else if (wantDesign) {
+    await query(`UPDATE email_campaigns SET design = $1::jsonb WHERE id = $2::uuid`, [JSON.stringify(input.design), campaign.id]);
+    campaign.design = input.design!;
+  }
+  // ★ 2026-07-14 (Codex 5R) — 전 후행 쓰기 성공 후에만 scheduled 승격(위 deferSchedule 주석 참조).
+  if (deferSchedule) {
+    await query(`UPDATE email_campaigns SET status = 'scheduled', updated_at = NOW() WHERE id = $1::uuid`, [campaign.id]);
+    campaign.status = 'scheduled';
   }
   return campaign;
 }
@@ -177,6 +230,11 @@ export async function updateEmailCampaign(
   campaignId: string,
   patch: Partial<CreateCampaignInput>,
 ): Promise<EmailCampaign | null> {
+  // ★ 2026-07-13 (Codex 2R) — design 동봉 수정은 컬럼 선확인 후 "메인 UPDATE 단문에 동승"
+  //   (html_body·sections만 저장되고 테마가 유실되는 부분 갱신 자체가 불가능한 구조).
+  //   design 미동봉 patch는 design 컬럼을 참조하지 않아 컬럼 부재(ALTER 전)여도 정상 동작.
+  const hasDesign = patch.design !== undefined;
+  if (hasDesign) await ensureDesignColumnOrThrow();
   const result = await query(
     `UPDATE email_campaigns SET
        name = COALESCE($3, name),
@@ -188,6 +246,7 @@ export async function updateEmailCampaign(
        is_ad = COALESCE($9, is_ad),
        scheduled_at = COALESCE($10, scheduled_at),
        sections = COALESCE($11::jsonb, sections),
+       ${hasDesign ? 'design = $12::jsonb,' : ''}
        updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid
      RETURNING *`,
@@ -203,6 +262,8 @@ export async function updateEmailCampaign(
       patch.isAd === undefined ? null : patch.isAd,
       patch.scheduledAt ?? null,
       Array.isArray(patch.sections) && patch.sections.length > 0 ? JSON.stringify(patch.sections) : null,
+      // design: null = 명시 초기화(기본 룩 복귀) — jsonb null 저장
+      ...(hasDesign ? [patch.design ? JSON.stringify(patch.design) : null] : []),
     ]
   );
   return result.rows.length > 0 ? mapRow(result.rows[0]) : null;
@@ -297,15 +358,19 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
   // 수신거부 링크 실존 판정 — 마커 또는 개인 토큰 URL이 실제로 있어야 생략.
   // 본문에 '수신거부' 단어만 있는 경우(링크 없는 안내 문구)에 footer가 빠지면 수신거부 수단 0 = 법 위반.
   const hasUnsubLink = (html: string): boolean => html.includes(UNSUB_URL_MARKER) || html.includes('/api/email/u/');
+  // ★ 2026-07-13 디자인 3.0 — 렌더러가 완전한 문서(</html>)를 내므로 footer는 EMAIL_FOOTER_SLOT(</body> 앞) 치환.
+  //   슬롯 없는 HTML(수동 작성·과거 저장분) = 기존 말미 append 폴백(무회귀). footer 불요 시 슬롯만 제거.
+  const injectFooter = (html: string, footer: string): string =>
+    html.includes(EMAIL_FOOTER_SLOT) ? html.split(EMAIL_FOOTER_SLOT).join(footer) : (footer ? html + footer : html);
 
   // 광고성 prefix + 무료거부 자동 합성 — 수신거부는 마커로 두고 발송 시 수신자별 개인 토큰 URL로 치환(applyTracking)
   let finalSubject = campaign.subject;
   let finalHtml = campaign.htmlBody;
   if (campaign.isAd) {
     if (!/^\s*[(（]\s*광고\s*[)）]/.test(finalSubject)) finalSubject = `(광고) ${finalSubject}`; // 반각·전각 중복 방지
-    if (!hasUnsubLink(finalHtml)) {
-      finalHtml += adFooter;
-    }
+    finalHtml = injectFooter(finalHtml, hasUnsubLink(finalHtml) ? '' : adFooter);
+  } else {
+    finalHtml = injectFooter(finalHtml, '');
   }
 
   let lastMessageId = '';
@@ -325,8 +390,8 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
           if (hasSections) {
             const cust = recipient.customer || { name: recipient.name || '고객' };
             const resolved = resolveEmailSectionsForCustomer(campaignSections, cust);
-            let body = renderEmailSections(resolved, { brandKit, publicBase: process.env.PUBLIC_BASE_URL });
-            if (campaign.isAd && !hasUnsubLink(body)) body += adFooter;
+            let body = renderEmailSections(resolved, { brandKit, design: campaign.design, publicBase: process.env.PUBLIC_BASE_URL });
+            body = injectFooter(body, campaign.isAd && !hasUnsubLink(body) ? adFooter : '');
             personalizedHtml = body;
             personalizedSubject = renderEmailText(finalSubject, cust);
           } else {
@@ -893,18 +958,24 @@ export async function createResendChildCampaign(
 ): Promise<EmailCampaign> {
   const childName = `${parent.name} (재발송)`.slice(0, 200);
   const childSubject = ((subjectOverride && subjectOverride.trim()) ? subjectOverride.trim() : parent.subject).slice(0, 200);
+  // ★ 2026-07-13 (Codex 3R) — design 복사는 INSERT 단문에 동승(원자성). 후행 UPDATE 분리는 실패 시
+  //   자식 행만 남아 "재발송 1회 한도"를 발송 없이 소진시킨다. parent.design이 있다는 것 =
+  //   design 컬럼이 이미 존재한다는 뜻(SELECT *로 읽힘)이라 컬럼 참조가 안전하고,
+  //   parent.design이 없으면(ALTER 전 포함) design을 참조하지 않는 기존 INSERT를 쓴다.
+  const designCol = parent.design ? ', design' : '';
+  const designVal = parent.design ? ', $14::jsonb' : '';
   const result = await query(
     `INSERT INTO email_campaigns (
        id, company_id, created_by, name, subject, html_body, text_body,
        from_name, from_email, is_ad, status,
        sent_count, open_count, click_count, bounce_count, unsubscribe_count,
-       ai_generated, sections, parent_campaign_id, resend_generation,
+       ai_generated, sections, parent_campaign_id, resend_generation${designCol},
        created_at, updated_at
      ) VALUES (
        gen_random_uuid(), $1::uuid, $2::uuid, $3, $4, $5, $6,
        $7, $8, $9, 'draft',
        0, 0, 0, 0, 0,
-       $10, $11::jsonb, $12::uuid, $13,
+       $10, $11::jsonb, $12::uuid, $13${designVal},
        NOW(), NOW()
      ) RETURNING *`,
     [
@@ -921,6 +992,7 @@ export async function createResendChildCampaign(
       parent.sections ? JSON.stringify(parent.sections) : null,
       parent.id,
       parent.resendGeneration + 1,
+      ...(parent.design ? [JSON.stringify(parent.design)] : []),
     ],
   );
   return mapRow(result.rows[0]);
@@ -929,6 +1001,15 @@ export async function createResendChildCampaign(
 // ════════════════════════════════════════════════════════════════════
 // 헬퍼
 // ════════════════════════════════════════════════════════════════════
+
+/** design JSONB 안전 파싱 — 문자열/객체 양쪽 수용, 불량 = null(렌더는 기존 기본 룩). */
+function parseDesign(raw: unknown): EmailDesign | null {
+  if (!raw) return null;
+  try {
+    const v = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as EmailDesign) : null;
+  } catch { return null; }
+}
 
 function mapRow(row: any): EmailCampaign {
   // ai_generated / target_spec = 신규 ALTER 컬럼. SELECT * 결과에 없으면(ALTER 전) undefined → 기본값.
@@ -960,6 +1041,8 @@ function mapRow(row: any): EmailCampaign {
     bounceCount: row.bounce_count || 0,
     unsubscribeCount: row.unsubscribe_count || 0,
     sections: Array.isArray(row.sections) ? row.sections : (row.sections ?? null),
+    // ★ 2026-07-13 design = 신규 ALTER 컬럼. SELECT * 결과에 없으면(ALTER 전) null — 렌더는 기존 기본 룩.
+    design: parseDesign(row.design),
     // parent_campaign_id / resend_generation = 신규 ALTER 컬럼. SELECT * 결과에 없으면(ALTER 전) 기본값.
     parentCampaignId: row.parent_campaign_id ?? null,
     resendGeneration: Number(row.resend_generation) || 0,

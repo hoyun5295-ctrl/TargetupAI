@@ -4,6 +4,13 @@
  * DM 웹 렌더러(dm-section-renderer.ts)와 별개. 웹 렌더러는 CSS 변수·flex라 이메일에서 깨진다.
  * 본 렌더러는 <table> 인라인 스타일 + 절대 이미지 URL + CSS 변수/JS 0으로 이메일 클라이언트(아웃룩 포함) 호환.
  *
+ * ★ 2026-07-13 이메일 디자인 3.0
+ *   - 완전한 HTML 문서 출력(doctype+head) — 다크모드 meta(color-scheme)·모바일 @media·웹폰트 @import 자리.
+ *     applyTracking 픽셀은 </body> 인지라 호환. 광고 footer는 EMAIL_FOOTER_SLOT 마커 치환(email-channel).
+ *   - 불릿프루프 버튼(MSO VML roundrect) / 구도(treatment — EMAIL_TREATMENTS 단일 진실) /
+ *     배경면 리듬(section.background) / 아트디렉션 모티프·디바이더 / 헤드라인 마커·밑줄 / 프리헤더 명시 우선.
+ *   - design(ctx.design) 미설정 = 기존 디자인 2.0 산출과 동일 골격(회귀 0 — 테스트 고정).
+ *
  * 원칙(LESSONS_BACKEND D152-4-4): template literal 안 raw 백틱 금지. 작성 후 tsc 검증.
  * verify 스크립트 DB-free 격리: escape를 로컬 정의(dm-section-renderer transitive import 회피).
  */
@@ -14,16 +21,21 @@ import type {
   CountdownProps, VideoProps, YoutubeEmbedProps, InstagramEmbedProps, MapStoreLocatorProps,
 } from '../dm/dm-section-registry';
 import type { DmBrandKit } from '../dm/dm-tokens';
-import { resolveEmailBrand, type EmailBrand } from './email-tokens';
-import { EMAIL_BLOCK_WHITELIST, EMAIL_INCOMPATIBLE } from './email-blocks';
+import { resolveEmailBrand, type EmailBrand, type EmailDesign } from './email-tokens';
+import { EMAIL_BLOCK_WHITELIST, EMAIL_INCOMPATIBLE, selectEmailTreatment } from './email-blocks';
 // ★ 2026-07-02 스킴 없는 URL(www.x.y) https:// 정규화 + 쿠폰 마감 한국어 표시 (normalize CT)
 import { normalizeWebUrl, formatKoreanDateTimeDisplay } from '../normalize';
 
 export interface EmailRenderCtx {
   brandKit?: DmBrandKit | null;
+  /** ★ 2026-07-13 캠페인 단위 디자인(테마·아트디렉션·서체·프리헤더) — 미설정 = 기존 렌더 */
+  design?: EmailDesign | null;
   storeName?: string;
   publicBase?: string; // 절대 이미지 URL 접두(미설정 시 https://hanjul.ai)
 }
+
+/** 광고 footer 삽입 자리 — email-channel이 발송 시 치환(</body> 앞·수신거부 링크 법 준수 위치 보장). */
+export const EMAIL_FOOTER_SLOT = '<!--EMAIL_FOOTER_SLOT-->';
 
 /** HTML 이스케이프(로컬 — DB-free 격리). */
 function esc(input: unknown): string {
@@ -52,15 +64,74 @@ function fsPx(n: number | undefined, fallback: string): string {
   return `${Math.round(Math.min(Math.max(v, 10), 64))}px`;
 }
 
-// ────────────── 블록 렌더러 (대표 패턴 — 나머지는 동일 방식으로 확장) ──────────────
+// ────────────── ★ 2026-07-13 디자인 3.0 헬퍼 ──────────────
+
+/** 헤드라인 강조 — 마커펜(그라데이션 워시)/밑줄. DM emphasizeHead의 인라인 스타일판(클래스 불가). */
+function emphasizeHead(headEscaped: string, emphasis: string | undefined, b: EmailBrand): string {
+  if (emphasis === 'marker') return `<span style="background:linear-gradient(transparent 58%,${b.markerWash} 58%)">${headEscaped}</span>`;
+  if (emphasis === 'underline') return `<span style="border-bottom:3px solid ${b.primary}">${headEscaped}</span>`;
+  return headEscaped;
+}
+
+/** 아트디렉션 모티프 — 헤드라인 위 포인트(rule/dot/index). bracket은 bracketWrap이 담당. */
+function motifHtml(b: EmailBrand, ordinal: number): string {
+  if (b.motif === 'rule') return `<div style="margin-bottom:${b.sp[3]};font-size:0;line-height:0"><span style="display:inline-block;width:28px;height:3px;background:${b.primary}"></span></div>`;
+  if (b.motif === 'dot') return `<div style="margin-bottom:${b.sp[3]};font-size:0;line-height:0"><span style="display:inline-block;width:7px;height:7px;border-radius:999px;background:${b.primary}"></span></div>`;
+  if (b.motif === 'index') return `<div style="font-size:12px;font-weight:800;letter-spacing:0.18em;color:${b.primary};margin-bottom:${b.sp[2]}">${String(Math.max(1, ordinal)).padStart(2, '0')}</div>`;
+  return '';
+}
+
+/** bracket 모티프 — 헤드라인 블록을 왼쪽 룰 프레임으로 감쌈. */
+function bracketWrap(inner: string, b: EmailBrand): string {
+  if (b.motif !== 'bracket') return inner;
+  return `<div style="border-left:3px solid ${b.primary};padding-left:${b.sp[4]}">${inner}</div>`;
+}
+
+/** 섹션 사이 디바이더 행 (hairline/gap/rule — DM sectionDivider의 테이블판). */
+function dividerRow(b: EmailBrand): string {
+  if (b.divider === 'hairline') return `<tr><td style="padding:0 ${b.sp[6]}"><hr style="border:none;border-top:1px solid ${b.border};margin:0"></td></tr>`;
+  if (b.divider === 'gap') return `<tr><td style="height:${b.sp[5]};font-size:0;line-height:0">&nbsp;</td></tr>`;
+  if (b.divider === 'rule') return `<tr><td align="center" style="padding:${b.sp[3]} 0"><hr style="border:none;border-top:3px solid ${b.primary};width:36px;margin:0 auto"></td></tr>`;
+  return '';
+}
+
+/** 배경면 리듬(section.background) — 블록 행들을 배경 밴드 td로 감쌈. dark는 renderBlock이 브랜드 재해석. */
+function wrapBand(rowsHtml: string, bgStyle: string): string {
+  return `<tr><td style="padding:0;${bgStyle}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rowsHtml}</table></td></tr>`;
+}
+
+// ────────────── 블록 렌더러 ──────────────
 
 // 이메일용 히어로 높이(전체화면 vh는 이메일 불가 → 큰 고정 px). td height 속성 + style로 클라이언트 호환.
 const HERO_HEIGHT_PX: Record<string, number> = { sm: 200, md: 320, lg: 480, full: 600 };
 
-function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx): string {
+function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx, treatment: string, ordinal: number): string {
   const img = emailImg(p.image_url, ctx.publicBase);
   const align = p.align || 'center';
   const minH = HERO_HEIGHT_PX[(p.height as string) || 'md'] || 320;
+  const headEsc = esc(p.headline).replace(/\n/g, '<br>');
+
+  // ★ 3.0 구도 typographic — 이미지 미사용 대형 타이포(에디토리얼). 모티프+디스플레이 서체.
+  if (treatment === 'typographic') {
+    const inner = bracketWrap(
+      motifHtml(b, ordinal)
+      + `<div style="font-family:${b.displayFont};font-size:${fsPx(p.headline_size, b.type.hero.size)};line-height:1.12;font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${esc(p.headline_color || b.text)};margin:0">${emphasizeHead(headEsc, p.headline_emphasis as string | undefined, b)}</div>`
+      + (p.sub_copy ? `<div style="font-size:${fsPx(p.sub_copy_size, b.type.body.size)};line-height:${b.type.body.lineHeight};color:${esc(p.sub_copy_color || b.textMuted)};margin-top:${b.sp[4]}">${esc(p.sub_copy).replace(/\n/g, '<br>')}</div>` : ''),
+      b,
+    );
+    return `<tr><td class="em-hero" style="padding:${b.sp[12]} ${b.sp[6]};text-align:${align}">${inner}</td></tr>`;
+  }
+
+  // ★ 3.0 구도 split — 이미지 절반 + 텍스트 절반(모바일 = em-stack 세로 스택). 이미지 없으면 classic 폴백.
+  if (treatment === 'split' && img) {
+    const imgCell = `<td width="50%" valign="middle" class="em-stack" style="padding:0"><img src="${esc(img)}" alt="${esc(p.headline || '')}" style="width:100%;display:block;border:0"></td>`;
+    const txtCell = `<td width="50%" valign="middle" class="em-stack" style="padding:${b.sp[6]};text-align:${align}">`
+      + motifHtml(b, ordinal)
+      + `<div style="font-family:${b.displayFont};font-size:${fsPx(p.headline_size, b.type.h1.size)};line-height:1.2;font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${esc(p.headline_color || b.text)};margin:0">${emphasizeHead(headEsc, p.headline_emphasis as string | undefined, b)}</div>`
+      + (p.sub_copy ? `<div style="font-size:${fsPx(p.sub_copy_size, b.type.body.size)};line-height:${b.type.body.lineHeight};color:${esc(p.sub_copy_color || b.textMuted)};margin-top:${b.sp[3]}">${esc(p.sub_copy).replace(/\n/g, '<br>')}</div>` : '')
+      + '</td>';
+    return `<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${imgCell}${txtCell}</tr></table></td></tr>`;
+  }
 
   if (img) {
     // 배경 이미지 + (옵션) 하단 그라데이션 오버레이 + 하단 정렬 텍스트. 아웃룩은 배경이미지 미지원 → bg색 폴백.
@@ -69,19 +140,19 @@ function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx): string {
       ? 'linear-gradient(180deg,rgba(0,0,0,0) 30%,rgba(0,0,0,0.62) 100%)'
       : 'rgba(0,0,0,0)';
     // ★ 2026-07-02 줄바꿈(\n→<br>) + 색상 직접 지정(미지정 = 기존 기본색) + ★ 2026-07-12 크기 직접 지정(fsPx)
-    const headline = `<div style="font-size:${fsPx(p.headline_size, b.type.hero.size)};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${esc(p.headline_color || '#ffffff')};text-shadow:0 2px 14px rgba(0,0,0,0.35);margin:0">${esc(p.headline).replace(/\n/g, '<br>')}</div>`;
+    const headline = `<div style="font-family:${b.displayFont};font-size:${fsPx(p.headline_size, b.type.hero.size)};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${esc(p.headline_color || '#ffffff')};text-shadow:0 2px 14px rgba(0,0,0,0.35);margin:0">${emphasizeHead(headEsc, p.headline_emphasis as string | undefined, b)}</div>`;
     const sub = p.sub_copy
       ? `<div style="font-size:${fsPx(p.sub_copy_size, b.type.body.size)};line-height:${b.type.body.lineHeight};color:${esc(p.sub_copy_color || 'rgba(255,255,255,0.92)')};margin-top:${b.sp[3]}">${esc(p.sub_copy).replace(/\n/g, '<br>')}</div>`
       : '';
-    return `<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${b.text};background-image:url('${esc(img)}');background-position:center center;background-size:cover;background-repeat:no-repeat"><tr><td height="${minH}" valign="bottom" style="height:${minH}px;background:${overlay};padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${headline}${sub}</td></tr></table></td></tr>`;
+    return `<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${b.text};background-image:url('${esc(img)}');background-position:center center;background-size:cover;background-repeat:no-repeat"><tr><td height="${minH}" valign="bottom" class="em-hero" style="height:${minH}px;background:${overlay};padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${headline}${sub}</td></tr></table></td></tr>`;
   }
 
   // 이미지 없음 — 높이만 적용(텍스트 세로 가운데). 단색/투명 배경. ★ 2026-07-02 줄바꿈+색상 지정 동일 적용 + 크기(fsPx)
-  const headlineD = `<div style="font-size:${fsPx(p.headline_size, b.type.hero.size)};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${esc(p.headline_color || b.text)};margin:0">${esc(p.headline).replace(/\n/g, '<br>')}</div>`;
+  const headlineD = `<div style="font-family:${b.displayFont};font-size:${fsPx(p.headline_size, b.type.hero.size)};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${esc(p.headline_color || b.text)};margin:0">${emphasizeHead(headEsc, p.headline_emphasis as string | undefined, b)}</div>`;
   const subD = p.sub_copy
     ? `<div style="font-size:${fsPx(p.sub_copy_size, b.type.body.size)};line-height:${b.type.body.lineHeight};color:${esc(p.sub_copy_color || b.textMuted)};margin-top:${b.sp[3]}">${esc(p.sub_copy).replace(/\n/g, '<br>')}</div>`
     : '';
-  return `<tr><td height="${minH}" valign="middle" style="height:${minH}px;padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${headlineD}${subD}</td></tr>`;
+  return `<tr><td height="${minH}" valign="middle" class="em-hero" style="height:${minH}px;padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${motifHtml(b, ordinal)}${headlineD}${subD}</td></tr>`;
 }
 
 function renderHeader(p: HeaderProps, b: EmailBrand, ctx: EmailRenderCtx): string {
@@ -97,25 +168,31 @@ function renderHeader(p: HeaderProps, b: EmailBrand, ctx: EmailRenderCtx): strin
   const logoH = p.logo_size === 'sm' ? '24' : p.logo_size === 'lg' ? '48' : '32';
   const brandFs = p.brand_size === 'sm' ? b.type.small.size : p.brand_size === 'lg' ? b.type.h1.size : b.type.h3.size;
   const logoTag = logo ? `<img src="${esc(logo)}" alt="${brand}" height="${logoH}" style="height:${logoH}px;display:inline-block;vertical-align:middle;border:0">` : '';
-  const brandTag = brand ? `<span style="font-size:${brandFs};font-weight:700;color:${b.text};vertical-align:middle;margin-left:${logo ? b.sp[2] : '0'}">${brand}</span>` : '';
+  const brandTag = brand ? `<span style="font-family:${b.displayFont};font-size:${brandFs};font-weight:700;color:${b.text};vertical-align:middle;margin-left:${logo ? b.sp[2] : '0'}">${brand}</span>` : '';
   return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]};text-align:${align};border-bottom:1px solid ${b.border}">${logoTag}${brandTag}</td></tr>`;
 }
 
-function renderTextCard(p: TextCardProps, b: EmailBrand, ctx: EmailRenderCtx): string {
+function renderTextCard(p: TextCardProps, b: EmailBrand, ctx: EmailRenderCtx, treatment: string, ordinal: number): string {
   const align = p.align || 'left';
   const img = p.image_url ? emailImg(p.image_url, ctx.publicBase) : '';
   const imgTag = img ? `<img src="${esc(img)}" alt="${esc(p.headline || '')}" style="width:100%;max-width:552px;display:block;border:0;border-radius:${b.radius.md}">` : '';
   // ★ 2026-07-07(5) 디자인 2.0 — 태그 = 자간 넓은 오버라인 (쿠폰 COUPON 인장과 동일 언어)
   const tag = p.tag ? `<div style="font-size:${b.type.tiny.size};font-weight:800;letter-spacing:0.18em;color:${b.primary};margin-bottom:${b.sp[2]}">${esc(p.tag)}</div>` : '';
+  const headEsc = p.headline ? esc(p.headline).replace(/\n/g, '<br>') : '';
+  // ★ 3.0 구도 — lead(큰 리드문)/framed(프레임)/quote(인용). classic = 기존 산출.
+  const headFs = treatment === 'lead' ? fsPx(p.headline_size, b.type.h1.size) : fsPx(p.headline_size, b.type.h2.size);
+  const bodyFs = (treatment === 'lead' || treatment === 'quote') ? fsPx(p.body_size, b.type.h3.size) : fsPx(p.body_size, b.type.body.size);
+  const bodyLh = (treatment === 'lead' || treatment === 'quote') ? '1.7' : b.type.body.lineHeight;
   // ★ 2026-07-02 헤드라인 줄바꿈 + 색상 직접 지정 (미지정 = 기존 기본색) + ★ 2026-07-12 크기 직접 지정(fsPx)
-  const head = p.headline ? `<div style="font-size:${fsPx(p.headline_size, b.type.h2.size)};line-height:${b.type.h2.lineHeight};font-weight:${b.type.h2.weight};color:${esc(p.headline_color || b.text)};margin:0 0 ${b.sp[3]} 0">${esc(p.headline).replace(/\n/g, '<br>')}</div>` : '';
-  const bodyHtml = p.body ? `<div style="font-size:${fsPx(p.body_size, b.type.body.size)};line-height:${b.type.body.lineHeight};color:${esc(p.body_color || b.text)}">${esc(p.body).replace(/\n/g, '<br>')}</div>` : '';
-  const textHtml = `<div style="text-align:${align}">${tag}${head}${bodyHtml}</div>`;
+  const head = headEsc ? `<div style="font-family:${b.displayFont};font-size:${headFs};line-height:${b.type.h2.lineHeight};font-weight:${b.type.h2.weight};color:${esc(p.headline_color || b.text)};margin:0 0 ${b.sp[3]} 0">${emphasizeHead(headEsc, p.headline_emphasis as string | undefined, b)}</div>` : '';
+  const quoteMark = treatment === 'quote' ? `<div style="font-family:Georgia,serif;font-size:44px;line-height:1;color:${b.primary};margin-bottom:${b.sp[2]}">&ldquo;</div>` : '';
+  const bodyHtml = p.body ? `<div style="font-size:${bodyFs};line-height:${bodyLh};color:${esc(p.body_color || b.text)}">${esc(p.body).replace(/\n/g, '<br>')}</div>` : '';
+  const textHtml = `<div style="text-align:${align}">${motifHtml(b, ordinal)}${tag}${quoteMark}${bracketWrap(head + bodyHtml, b)}</div>`;
   const pos = p.image_position || 'top';
   let inner: string;
   if (img && (pos === 'left' || pos === 'right')) {
-    const imgCell = `<td width="220" valign="top" style="padding-right:${b.sp[4]}">${imgTag}</td>`;
-    const txtCell = `<td valign="top">${textHtml}</td>`;
+    const imgCell = `<td width="220" valign="top" class="em-stack" style="padding-right:${b.sp[4]}">${imgTag}</td>`;
+    const txtCell = `<td valign="top" class="em-stack">${textHtml}</td>`;
     inner = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${pos === 'left' ? imgCell + txtCell : txtCell + imgCell}</tr></table>`;
   } else if (img && pos === 'bottom') {
     inner = `${textHtml}<div style="padding-top:${b.sp[4]}">${imgTag}</div>`;
@@ -124,23 +201,39 @@ function renderTextCard(p: TextCardProps, b: EmailBrand, ctx: EmailRenderCtx): s
   } else {
     inner = textHtml;
   }
-  return `<tr><td style="padding:${b.sp[6]}">${inner}</td></tr>`;
+  if (treatment === 'framed') {
+    inner = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="border:2px solid ${b.border};border-radius:${b.radius.md};padding:${b.sp[6]}">${inner}</td></tr></table>`;
+  }
+  const pad = treatment === 'lead' ? `${b.sp[8]} ${b.sp[6]}` : b.sp[6];
+  return `<tr><td style="padding:${pad}">${inner}</td></tr>`;
 }
 
 // 이메일 호환 버튼 — 이미지 버튼 금지, table 셀 배경 + padding (아웃룩 호환).
 // ★ 2026-07-07(5) 이메일 디자인 2.0 — primary=그라데이션(미지원 클라이언트 solid 폴백)+그림자, 대형 터치 타깃.
-function renderButton(btn: CtaButton, b: EmailBrand): string {
+// ★ 2026-07-13 디자인 3.0 — MSO VML roundrect 동봉(아웃룩 데스크탑 불릿프루프) + invert(bar 구도 흰 버튼).
+function renderButton(btn: CtaButton, b: EmailBrand, invert = false): string {
   const normalized = normalizeWebUrl(btn.url || '');
   const url = /^https?:\/\//i.test(normalized) ? normalized : '#';
   let bg = b.primary, bgImage = b.btnGrad, color = '#ffffff', border = b.primary, shadow = `0 2px 5px rgba(15,23,42,0.12),0 10px 24px ${b.primaryDashed}`;
-  if (btn.style === 'secondary') { bg = b.accent; bgImage = 'none'; border = b.accent; shadow = '0 2px 8px rgba(15,23,42,0.12)'; }
-  else if (btn.style === 'outline') { bg = b.cardBg; bgImage = 'none'; color = b.primary; shadow = 'none'; }
-  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto"><tr><td style="border-radius:14px;background:${bg};background-image:${bgImage};border:1px solid ${border};box-shadow:${shadow}"><a href="${esc(url)}" style="display:inline-block;padding:14px 34px;font-size:${b.type.body.size};font-weight:800;letter-spacing:-0.01em;color:${color};text-decoration:none">${esc(btn.label)}</a></td></tr></table>`;
+  let vmlFill = b.primary, vmlStroke = '';
+  if (btn.style === 'secondary') { bg = b.accent; bgImage = 'none'; border = b.accent; shadow = '0 2px 8px rgba(15,23,42,0.12)'; vmlFill = b.accent; }
+  else if (btn.style === 'outline') { bg = b.cardBg; bgImage = 'none'; color = b.primary; shadow = 'none'; vmlFill = b.cardBg; vmlStroke = b.primary; }
+  if (invert) { bg = '#ffffff'; bgImage = 'none'; color = b.primary; border = '#ffffff'; shadow = 'none'; vmlFill = '#ffffff'; vmlStroke = ''; }
+  const vml = `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${esc(url)}" style="height:46px;v-text-anchor:middle;width:230px" arcsize="30%" fillcolor="${vmlFill}" ${vmlStroke ? `strokecolor="${vmlStroke}"` : 'stroke="f"'}><w:anchorlock/><center style="color:${color};font-family:sans-serif;font-size:15px;font-weight:800">${esc(btn.label)}</center></v:roundrect><![endif]-->`;
+  const htmlBtn = `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto"><tr><td style="border-radius:14px;background:${bg};background-image:${bgImage};border:1px solid ${border};box-shadow:${shadow}"><a href="${esc(url)}" style="display:inline-block;padding:14px 34px;font-size:${b.type.body.size};font-weight:800;letter-spacing:-0.01em;color:${color};text-decoration:none">${esc(btn.label)}</a></td></tr></table>`;
+  return `${vml}<!--[if !mso]><!-->${htmlBtn}<!--<![endif]-->`;
 }
 
-function renderCta(p: CtaProps, b: EmailBrand): string {
-  const buttons = (p.buttons || []).filter((x) => x && x.label);
+function renderCta(p: CtaProps, b: EmailBrand, treatment: string): string {
+  let buttons = (p.buttons || []).filter((x) => x && x.label);
   if (buttons.length === 0) return '';
+  // ★ 3.0 구도 ghost — 전 버튼 아웃라인
+  if (treatment === 'ghost') buttons = buttons.map((x) => ({ ...x, style: 'outline' as CtaButton['style'] }));
+  // ★ 3.0 구도 bar — 전폭 강조 밴드 + 반전(흰) 버튼
+  if (treatment === 'bar') {
+    const btns = buttons.map((btn) => `<tr><td align="center" style="padding:${b.sp[2]} 0">${renderButton(btn, b, true)}</td></tr>`).join('');
+    return `<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="background:${b.primary};background-image:${b.btnGrad};padding:${b.sp[6]}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${btns}</table></td></tr></table></td></tr>`;
+  }
   const btns = buttons.map((btn) => `<tr><td align="center" style="padding:${b.sp[2]} 0">${renderButton(btn, b)}</td></tr>`).join('');
   return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${btns}</table></td></tr>`;
 }
@@ -167,7 +260,8 @@ function formatWon(n: number | undefined): string {
 
 // ★ 2026-07-07(5) 이메일 디자인 2.0 — 쿠폰 = 티켓 2톤 골격 (인앱 쿠폰 티켓 톤 미러).
 //   본권(강조색 워시 + 대형 혜택 타이포) / 절취 점선 / 스터브(흰 면 + 코드). 코드 없으면 본권 단독.
-function renderCoupon(p: CouponProps, b: EmailBrand): string {
+// ★ 2026-07-13 3.0 구도 spotlight — 다크 패널(리터럴 #171717 — DM 다크 패널 원칙) 위 대형 혜택.
+function renderCoupon(p: CouponProps, b: EmailBrand, treatment: string): string {
   const label = esc(p.discount_label || '');
   if (!label && !p.coupon_code) return '';
   const cond: string[] = [];
@@ -175,9 +269,20 @@ function renderCoupon(p: CouponProps, b: EmailBrand): string {
   // ★ 2026-07-02 ISO 원문("2026-07-30T03:00:00.000Z") 노출 → KST 한국어 표시
   if (p.expire_date) cond.push(esc(formatKoreanDateTimeDisplay(p.expire_date)) + '까지');
   if (p.usage_condition) cond.push(esc(p.usage_condition));
+
+  if (treatment === 'spotlight') {
+    const condLineS = cond.length ? `<div style="font-size:${b.type.tiny.size};color:rgba(255,255,255,0.66);margin-top:${b.sp[3]}">${cond.join(' · ')}</div>` : '';
+    const overlineS = `<div style="font-size:${b.type.tiny.size};font-weight:800;letter-spacing:0.18em;color:${b.accent};margin-bottom:${b.sp[2]}">COUPON</div>`;
+    const labelS = label ? `<div style="font-family:${b.displayFont};font-size:34px;line-height:1.2;font-weight:800;letter-spacing:-0.02em;color:#ffffff">${label}</div>` : '';
+    const codeS = p.coupon_code
+      ? `<div style="margin-top:${b.sp[4]}"><span style="display:inline-block;padding:${b.sp[3]} ${b.sp[6]};background:rgba(255,255,255,0.06);border:1px dashed ${b.accent};border-radius:${b.radius.sm};font-family:${b.mono};font-size:${b.type.h3.size};font-weight:800;letter-spacing:3px;color:${b.accent}">${esc(p.coupon_code)}</span></div>`
+      : '';
+    return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:${b.sp[8]} ${b.sp[6]};background:#171717;border-radius:${b.radius.lg};text-align:center">${overlineS}${labelS}${condLineS}${codeS}</td></tr></table></td></tr>`;
+  }
+
   const condLine = cond.length ? `<div style="font-size:${b.type.tiny.size};color:${b.textMuted};margin-top:${b.sp[3]}">${cond.join(' · ')}</div>` : '';
   const overline = `<div style="font-size:${b.type.tiny.size};font-weight:800;letter-spacing:0.18em;color:${b.primary};margin-bottom:${b.sp[2]}">COUPON</div>`;
-  const labelTag = label ? `<div style="font-size:30px;line-height:1.25;font-weight:800;letter-spacing:-0.02em;color:${b.primary}">${label}</div>` : '';
+  const labelTag = label ? `<div style="font-family:${b.displayFont};font-size:30px;line-height:1.25;font-weight:800;letter-spacing:-0.02em;color:${b.primary}">${label}</div>` : '';
   const topRadius = p.coupon_code ? `${b.radius.lg} ${b.radius.lg} 0 0` : b.radius.lg;
   const mainRow = `<tr><td style="padding:${b.sp[8]} ${b.sp[6]} ${b.sp[6]};background:${b.primarySoft};border:2px dashed ${b.primaryDashed};border-bottom:${p.coupon_code ? 'none' : `2px dashed ${b.primaryDashed}`};border-radius:${topRadius};text-align:center">${overline}${labelTag}${condLine}</td></tr>`;
   const stubRow = p.coupon_code
@@ -187,30 +292,66 @@ function renderCoupon(p: CouponProps, b: EmailBrand): string {
   return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}">${card}</td></tr>`;
 }
 
-function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: EmailRenderCtx): string {
+function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: EmailRenderCtx, treatment: string): string {
   const items = (p.products || []).filter((x) => x && x.name).slice(0, 6);
   if (items.length === 0) return '';
-  const title = p.title ? `<div style="font-size:${b.type.h3.size};font-weight:700;color:${b.text};padding:0 0 ${b.sp[4]};text-align:center">${esc(p.title)}</div>` : '';
+  const title = p.title ? `<div style="font-family:${b.displayFont};font-size:${b.type.h3.size};font-weight:700;color:${b.text};padding:0 0 ${b.sp[4]};text-align:center">${esc(p.title)}</div>` : '';
+
+  const priceOf = (it: ProductCarouselItem, big = false): string => {
+    const fs = big ? b.type.h3.size : b.type.body.size;
+    return it.discount_price != null
+      ? `<span style="font-size:${fs};color:${b.primary};font-weight:800">${formatWon(it.discount_price)}</span> <span style="color:${b.textMuted};text-decoration:line-through;font-size:${b.type.small.size}">${formatWon(it.price)}</span>`
+      : `<span style="font-size:${fs};color:${b.text};font-weight:800">${formatWon(it.price)}</span>`;
+  };
+  const linkOf = (it: ProductCarouselItem): string => {
+    const normalizedLink = normalizeWebUrl(it.link_url || '');
+    return /^https?:\/\//i.test(normalizedLink) ? normalizedLink : '';
+  };
+
   // ★ 2026-07-07(5) 디자인 2.0 — 상품 = 보더 카드(면+테두리+라운드), 가격 강조색 800
   const cellFor = (it: ProductCarouselItem): string => {
     const img = emailImg(it.image_url, ctx.publicBase);
-    const normalizedLink = normalizeWebUrl(it.link_url || '');
-    const url = /^https?:\/\//i.test(normalizedLink) ? normalizedLink : '';
-    const price = it.discount_price != null
-      ? `<span style="color:${b.primary};font-weight:800">${formatWon(it.discount_price)}</span> <span style="color:${b.textMuted};text-decoration:line-through;font-size:${b.type.small.size}">${formatWon(it.price)}</span>`
-      : `<span style="color:${b.text};font-weight:800">${formatWon(it.price)}</span>`;
+    const url = linkOf(it);
     const imgTag = img ? `<img src="${esc(img)}" alt="${esc(it.name)}" style="width:100%;display:block;border:0;border-radius:${b.radius.sm}">` : '';
-    const meta = `<div style="font-size:${b.type.small.size};color:${b.text};font-weight:600;margin-top:${b.sp[2]};line-height:1.4">${esc(it.name)}</div><div style="font-size:${b.type.body.size};margin-top:${b.sp[1]}">${price}</div>`;
+    const meta = `<div style="font-size:${b.type.small.size};color:${b.text};font-weight:600;margin-top:${b.sp[2]};line-height:1.4">${esc(it.name)}</div><div style="margin-top:${b.sp[1]}">${priceOf(it)}</div>`;
     const inner = url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${imgTag}${meta}</a>` : `${imgTag}${meta}`;
     const cardTable = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:${b.sp[3]};background:${b.cardBg};border:1px solid ${b.border};border-radius:14px">${inner}</td></tr></table>`;
-    return `<td width="50%" valign="top" style="padding:${b.sp[2]}">${cardTable}</td>`;
+    return `<td width="50%" valign="top" class="em-stack" style="padding:${b.sp[2]}">${cardTable}</td>`;
   };
-  const rows: string[] = [];
-  for (let i = 0; i < items.length; i += 2) {
-    const right = items[i + 1] ? cellFor(items[i + 1]) : '<td width="50%"></td>';
-    rows.push(`<tr>${cellFor(items[i])}${right}</tr>`);
+
+  // ★ 3.0 구도 list — 1열 가로 행(썸네일 96px + 메타)
+  if (treatment === 'list') {
+    const rowFor = (it: ProductCarouselItem): string => {
+      const img = emailImg(it.image_url, ctx.publicBase);
+      const url = linkOf(it);
+      const imgTag = img ? `<img src="${esc(img)}" alt="${esc(it.name)}" width="96" style="width:96px;height:96px;object-fit:cover;display:block;border:0;border-radius:${b.radius.sm}">` : '';
+      const meta = `<div style="font-size:${b.type.body.size};color:${b.text};font-weight:700;line-height:1.4">${esc(it.name)}</div><div style="margin-top:${b.sp[1]}">${priceOf(it)}</div>`;
+      const rowInner = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${imgTag ? `<td width="96" valign="top" style="padding-right:${b.sp[4]}">${imgTag}</td>` : ''}<td valign="middle">${url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${meta}</a>` : meta}</td></tr></table>`;
+      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[2]}"><tr><td style="padding:${b.sp[3]} ${b.sp[4]};background:${b.cardBg};border:1px solid ${b.border};border-radius:14px">${rowInner}</td></tr></table>`;
+    };
+    return `<tr><td style="padding:${b.sp[6]}">${title}${items.map(rowFor).join('')}</td></tr>`;
   }
-  return `<tr><td style="padding:${b.sp[6]} ${b.sp[4]}">${title}<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rows.join('')}</table></td></tr>`;
+
+  // ★ 3.0 구도 focus — 대표 1개 전폭 카드 + 나머지 2열
+  let focusHtml = '';
+  let gridItems = items;
+  if (treatment === 'focus') {
+    const it = items[0];
+    gridItems = items.slice(1);
+    const img = emailImg(it.image_url, ctx.publicBase);
+    const url = linkOf(it);
+    const imgTag = img ? `<img src="${esc(img)}" alt="${esc(it.name)}" style="width:100%;display:block;border:0;border-radius:${b.radius.sm}">` : '';
+    const meta = `<div style="font-family:${b.displayFont};font-size:${b.type.h3.size};color:${b.text};font-weight:700;margin-top:${b.sp[3]};line-height:1.4">${esc(it.name)}</div><div style="margin-top:${b.sp[1]}">${priceOf(it, true)}</div>`;
+    const inner = url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${imgTag}${meta}</a>` : `${imgTag}${meta}`;
+    focusHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[2]}"><tr><td style="padding:${b.sp[4]};background:${b.cardBg};border:1px solid ${b.border};border-radius:14px">${inner}</td></tr></table>`;
+  }
+
+  const rows: string[] = [];
+  for (let i = 0; i < gridItems.length; i += 2) {
+    const right = gridItems[i + 1] ? cellFor(gridItems[i + 1]) : '<td width="50%" class="em-stack"></td>';
+    rows.push(`<tr>${cellFor(gridItems[i])}${right}</tr>`);
+  }
+  return `<tr><td style="padding:${b.sp[6]} ${b.sp[4]}">${title}${focusHtml}<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rows.join('')}</table></td></tr>`;
 }
 
 function renderGallery(p: GalleryProps, b: EmailBrand, ctx: EmailRenderCtx): string {
@@ -218,7 +359,7 @@ function renderGallery(p: GalleryProps, b: EmailBrand, ctx: EmailRenderCtx): str
   if (imgs.length === 0) return '';
   const perRow = p.layout === 'grid_3x3' ? 3 : p.layout === 'list_1xN' ? 1 : 2;
   const w = Math.floor(100 / perRow);
-  const title = p.title ? `<div style="font-size:${b.type.h3.size};font-weight:700;color:${b.text};padding:0 0 ${b.sp[4]};text-align:center">${esc(p.title)}</div>` : '';
+  const title = p.title ? `<div style="font-family:${b.displayFont};font-size:${b.type.h3.size};font-weight:700;color:${b.text};padding:0 0 ${b.sp[4]};text-align:center">${esc(p.title)}</div>` : '';
   const cellFor = (im: GalleryImage): string => {
     const img = emailImg(im.url, ctx.publicBase);
     const tag = `<img src="${esc(img)}" alt="${esc(im.caption || '')}" style="width:100%;display:block;border:0;border-radius:${b.radius.sm}">`;
@@ -276,7 +417,7 @@ function renderSns(p: SnsProps, b: EmailBrand): string {
 function renderReviews(p: ReviewsProps, b: EmailBrand): string {
   const items = (p.reviews || []).filter((r) => r && r.body).slice(0, 5);
   if (items.length === 0) return '';
-  const title = p.title ? `<div style="font-size:${b.type.h3.size};font-weight:700;color:${b.text};padding:0 0 ${b.sp[4]};text-align:center">${esc(p.title)}</div>` : '';
+  const title = p.title ? `<div style="font-family:${b.displayFont};font-size:${b.type.h3.size};font-weight:700;color:${b.text};padding:0 0 ${b.sp[4]};text-align:center">${esc(p.title)}</div>` : '';
   const stars = (n: number) => { const r = Math.max(0, Math.min(5, Math.round(Number(n) || 0))); return '★★★★★'.slice(0, r) + '☆☆☆☆☆'.slice(0, 5 - r); };
   // ★ 2026-07-07(5) 디자인 2.0 — 리뷰 = 흰 카드 + 헤어라인 보더 (면 위 면 대비)
   const cards = items.map((r) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[3]}"><tr><td style="padding:${b.sp[4]} ${b.sp[5]};background:${b.cardBg};border:1px solid ${b.border};border-radius:14px"><div style="color:${b.accent};font-size:${b.type.body.size};letter-spacing:2px">${stars(r.rating)}</div><div style="font-size:${b.type.body.size};color:${b.text};margin:${b.sp[2]} 0;line-height:1.6">${esc(r.body)}</div><div style="font-size:${b.type.tiny.size};font-weight:600;color:${b.textMuted}">${esc(r.author)}${r.date ? ' · ' + esc(r.date) : ''}</div></td></tr></table>`).join('');
@@ -296,7 +437,7 @@ function renderCountdownStatic(p: CountdownProps, b: EmailBrand): string {
   }
   if (!dday && !p.urgency_text) return '';
   // ★ 2026-07-07(5) 디자인 2.0 — 그라데이션 밴드 카드 (미지원 클라이언트 solid primary 폴백)
-  const ddayTag = dday ? `<div style="font-size:${b.type.hero.size};font-weight:800;color:#ffffff;letter-spacing:1px">${dday}</div>` : '';
+  const ddayTag = dday ? `<div style="font-family:${b.displayFont};font-size:${b.type.hero.size};font-weight:800;color:#ffffff;letter-spacing:1px">${dday}</div>` : '';
   const urgency = p.urgency_text ? `<div style="font-size:${b.type.body.size};color:#ffffff;opacity:0.9;margin-top:${b.sp[2]}">${esc(p.urgency_text)}</div>` : '';
   return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:${b.sp[6]};background:${b.primary};background-image:${b.heroGrad};border-radius:${b.radius.lg};text-align:center">${ddayTag}${urgency}</td></tr></table></td></tr>`;
 }
@@ -336,7 +477,7 @@ function renderMapStatic(p: MapStoreLocatorProps, b: EmailBrand): string {
 //   (DM 렌더러 withAlign 패턴 미러. 미설정 시 각 타입 기본 유지 = 하위호환)
 const EMAIL_ALIGN_AWARE = new Set<string>(['hero', 'header', 'text_card']);
 
-function renderBlock(s: Section, baseBrand: EmailBrand, ctx: EmailRenderCtx): string {
+function renderBlock(s: Section, baseBrand: EmailBrand, ctx: EmailRenderCtx, ordinal: number): string {
   const renderable = (EMAIL_BLOCK_WHITELIST as readonly string[]).includes(s.type);
   // 화이트리스트 밖 + 정적 대체 대상도 아님 → 렌더 0(깨진 HTML 차단)
   if (!renderable && EMAIL_INCOMPATIBLE[s.type] !== 'static') return '';
@@ -344,67 +485,145 @@ function renderBlock(s: Section, baseBrand: EmailBrand, ctx: EmailRenderCtx): st
   if (s.align && EMAIL_ALIGN_AWARE.has(s.type)) {
     s = { ...s, props: { ...(s.props as any), align: s.align } } as Section;
   }
-  const b = (s.accent_color && /^#[0-9a-fA-F]{6}$/.test(s.accent_color.trim()))
-    ? resolveEmailBrand({ ...(ctx.brandKit || {}), primary_color: s.accent_color.trim() } as NonNullable<EmailRenderCtx['brandKit']>)
-    : baseBrand;
+  const accent = (s.accent_color && /^#[0-9a-fA-F]{6}$/.test(s.accent_color.trim())) ? s.accent_color.trim() : '';
+  // 강조색 재해석 시 design.palette.primary가 섹션 지정색을 덮지 않게 팔레트 primary만 제거(나머지 아트디렉션 유지).
+  const designSansPrimary = ctx.design
+    ? { ...ctx.design, palette: { ...(ctx.design.palette || {}), primary: undefined } }
+    : ctx.design;
+  // ★ 3.0 배경면 dark — 그 섹션만 다크 브랜드 재해석(리터럴 #171717 — DM 다크 패널 원칙).
+  //   design.palette.background(라이트 테마의 #ffffff 등)가 다크 재해석을 덮으면 다크 밴드 위
+  //   다크 텍스트가 되므로(Codex 3R) 팔레트 background는 제거하고 해석한다.
+  const bgKind = (s as { background?: string }).background;
+  let b = baseBrand;
+  if (bgKind === 'dark') {
+    const baseDesign = accent ? designSansPrimary : ctx.design;
+    const designForDark = baseDesign
+      ? { ...baseDesign, palette: { ...(baseDesign.palette || {}), background: undefined } }
+      : baseDesign;
+    b = resolveEmailBrand(
+      { ...(ctx.brandKit || {}), ...(accent ? { primary_color: accent } : {}), background_color: '#171717' } as NonNullable<EmailRenderCtx['brandKit']>,
+      designForDark,
+    );
+  } else if (accent) {
+    b = resolveEmailBrand(
+      { ...(ctx.brandKit || {}), primary_color: accent } as NonNullable<EmailRenderCtx['brandKit']>,
+      designSansPrimary,
+    );
+  }
+  const treatment = selectEmailTreatment(s.type, (s as { treatment?: string }).treatment);
+
+  let html = '';
   switch (s.type) {
     case 'header':
-      return renderHeader(s.props as HeaderProps, b, ctx);
+      html = renderHeader(s.props as HeaderProps, b, ctx); break;
     case 'hero':
-      return renderHero(s.props as HeroProps, b, ctx);
+      html = renderHero(s.props as HeroProps, b, ctx, treatment, ordinal); break;
     case 'text_card':
-      return renderTextCard(s.props as TextCardProps, b, ctx);
+      html = renderTextCard(s.props as TextCardProps, b, ctx, treatment, ordinal); break;
     case 'cta':
-      return renderCta(s.props as CtaProps, b);
+      html = renderCta(s.props as CtaProps, b, treatment); break;
     case 'footer':
-      return renderFooter(s.props as FooterProps, b);
+      html = renderFooter(s.props as FooterProps, b); break;
     case 'coupon':
-      return renderCoupon(s.props as CouponProps, b);
+      html = renderCoupon(s.props as CouponProps, b, treatment); break;
     case 'product_carousel':
-      return renderProductCarousel(s.props as ProductCarouselProps, b, ctx);
+      html = renderProductCarousel(s.props as ProductCarouselProps, b, ctx, treatment); break;
     case 'gallery':
-      return renderGallery(s.props as GalleryProps, b, ctx);
+      html = renderGallery(s.props as GalleryProps, b, ctx); break;
     case 'promo_code':
-      return renderPromoCode(s.props as PromoCodeProps, b);
+      html = renderPromoCode(s.props as PromoCodeProps, b); break;
     case 'store_info':
-      return renderStoreInfo(s.props as StoreInfoProps, b);
+      html = renderStoreInfo(s.props as StoreInfoProps, b); break;
     case 'sns':
-      return renderSns(s.props as SnsProps, b);
+      html = renderSns(s.props as SnsProps, b); break;
     case 'reviews':
-      return renderReviews(s.props as ReviewsProps, b);
+      html = renderReviews(s.props as ReviewsProps, b); break;
     // 정적 대체(이메일 비호환 → 요약)
     case 'countdown':
-      return renderCountdownStatic(s.props as CountdownProps, b);
+      html = renderCountdownStatic(s.props as CountdownProps, b); break;
     case 'video':
-      return renderVideoStatic(s.props as VideoProps, b, ctx);
+      html = renderVideoStatic(s.props as VideoProps, b, ctx); break;
     case 'youtube_embed':
-      return renderYoutubeStatic(s.props as YoutubeEmbedProps, b, ctx);
+      html = renderYoutubeStatic(s.props as YoutubeEmbedProps, b, ctx); break;
     case 'instagram_embed':
-      return renderInstagramStatic(s.props as InstagramEmbedProps, b);
+      html = renderInstagramStatic(s.props as InstagramEmbedProps, b); break;
     case 'map_store_locator':
-      return renderMapStatic(s.props as MapStoreLocatorProps, b);
+      html = renderMapStatic(s.props as MapStoreLocatorProps, b); break;
     default:
       return '';
   }
+  if (!html) return '';
+
+  // ★ 3.0 배경면 리듬 — dark(위에서 브랜드 재해석)/soft/tint/gradient. 미설정 = 기존 그대로.
+  if (bgKind === 'dark') return wrapBand(html, 'background:#171717');
+  if (bgKind === 'soft') return wrapBand(html, `background:${baseBrand.dark ? '#1f1f23' : baseBrand.bg}`);
+  if (bgKind === 'tint') return wrapBand(html, `background:${baseBrand.cardBg};background-image:linear-gradient(0deg,${b.primarySoft},${b.primarySoft})`);
+  if (bgKind === 'gradient') return wrapBand(html, `background:${baseBrand.cardBg};background-image:linear-gradient(180deg,${b.primarySoft} 0%,rgba(255,255,255,0) 100%)`);
+  return html;
 }
 
-/** Section[] → 이메일 안전 HTML(600px 중앙 카드). visible=false 제외 + order 정렬.
+/** Section[] → 이메일 HTML 문서(600px 중앙 카드). visible=false 제외 + order 정렬.
  *  ★ 2026-07-07(5) 디자인 2.0 — 상단 브랜드 밴드(그라데이션 6px) + 프리헤더(받은편지함 미리보기 텍스트)
- *    + 슬레이트 틴트 바깥 배경 + 카드 보더/그림자 (미지원 클라이언트는 각 요소 우아한 폴백). */
+ *    + 슬레이트 틴트 바깥 배경 + 카드 보더/그림자 (미지원 클라이언트는 각 요소 우아한 폴백).
+ *  ★ 2026-07-13 디자인 3.0 — 완전한 문서 출력(다크모드 meta·모바일 @media·웹폰트 @import) +
+ *    섹션 디바이더 + 명시 프리헤더 우선 + EMAIL_FOOTER_SLOT(광고 footer 자리). */
 export function renderEmailSections(sections: Section[], ctx: EmailRenderCtx): string {
-  const b = resolveEmailBrand(ctx.brandKit);
+  const b = resolveEmailBrand(ctx.brandKit, ctx.design);
   const ordered = (sections || [])
     .filter((s) => s.visible !== false)
     .sort((a, c) => (a.order || 0) - (c.order || 0));
-  const inner = ordered.map((s) => renderBlock(s, b, ctx)).join('\n');
-  // 프리헤더 — 받은편지함 제목 아래 미리보기 한 줄 (본문 첫 텍스트 90자). &zwnj; 패딩 = 뒤 본문 노출 차단.
-  const preText = extractEmailText(ordered).replace(/\s+/g, ' ').trim().slice(0, 90);
+  const rendered: Array<{ type: string; html: string }> = [];
+  for (const s of ordered) {
+    const html = renderBlock(s, b, ctx, rendered.length + 1);
+    if (html) rendered.push({ type: s.type, html });
+  }
+  // ★ 3.0 섹션 디바이더 — 헤더 뒤/푸터 앞은 자기 보더가 있어 제외
+  const div = dividerRow(b);
+  let inner = '';
+  for (let i = 0; i < rendered.length; i++) {
+    if (i > 0 && div && rendered[i - 1].type !== 'header' && rendered[i].type !== 'footer') inner += '\n' + div;
+    inner += '\n' + rendered[i].html;
+  }
+  // 프리헤더 — 명시(design.preheader) 우선, 없으면 본문 첫 텍스트 90자(기존 동작). &zwnj; 패딩 = 뒤 본문 노출 차단.
+  const explicitPre = String(ctx.design?.preheader || '').replace(/\s+/g, ' ').trim();
+  const preText = (explicitPre || extractEmailText(ordered).replace(/\s+/g, ' ').trim()).slice(0, 90);
   const preheader = preText
     ? `<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all">${esc(preText)}${'&nbsp;&zwnj;'.repeat(24)}</div>`
     : '';
   const bandRow = `<tr><td style="height:6px;font-size:0;line-height:0;background:${b.primary};background-image:${b.bandGrad};border-radius:${b.radius.xl} ${b.radius.xl} 0 0">&nbsp;</td></tr>`;
   const shellStyle = `max-width:600px;width:100%;background:${b.cardBg};border:1px solid ${b.border};border-radius:${b.radius.xl};overflow:hidden;box-shadow:0 12px 32px rgba(15,23,42,0.08),0 2px 6px rgba(15,23,42,0.05);font-family:${b.fontFamily}`;
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${b.shellBg};margin:0;padding:0">${preheader ? `<tr><td>${preheader}</td></tr>` : ''}<tr><td align="center" style="padding:${b.sp[6]} ${b.sp[3]} ${b.sp[8]}"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="${shellStyle}">${bandRow}${inner}</table></td></tr></table>`;
+  const outer = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${b.shellBg};margin:0;padding:0"><tr><td align="center" class="em-outer" style="padding:${b.sp[6]} ${b.sp[3]} ${b.sp[8]}"><table role="presentation" width="600" cellpadding="0" cellspacing="0" class="em-shell" style="${shellStyle}">${bandRow}${inner}</table></td></tr></table>`;
+  // 다크모드: 셸이 이미 다크면 그대로, 라이트면 다크 선호 클라이언트에서 바깥 배경만 짙게(카드는 설계 색 유지).
+  const darkPrefBg = b.dark ? b.shellBg : '#18181b';
+  return `<!DOCTYPE html>
+<html lang="ko" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<style>
+${b.fontImport}
+html,body{margin:0 !important;padding:0 !important}
+table{border-collapse:collapse}
+img{border:0;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic}
+@media (max-width:600px){
+  .em-outer{padding:0 !important}
+  .em-shell{width:100% !important;border-radius:0 !important}
+  .em-stack{display:block !important;width:100% !important;box-sizing:border-box !important}
+  .em-hero{height:auto !important;padding:36px 20px !important}
+}
+@media (prefers-color-scheme:dark){
+  body,.em-body{background:${darkPrefBg} !important}
+}
+</style>
+</head>
+<body class="em-body" style="margin:0;padding:0;background:${b.shellBg};-webkit-text-size-adjust:100%">
+${preheader}
+${outer}
+${EMAIL_FOOTER_SLOT}
+</body>
+</html>`;
 }
 
 /** Section[]에서 순수 텍스트 본문 추출(이미지 차단 환경 대비). */

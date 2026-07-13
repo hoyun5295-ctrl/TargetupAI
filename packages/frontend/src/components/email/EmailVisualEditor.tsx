@@ -4,7 +4,7 @@
 // 렌더는 백엔드 단일 진실원(POST /api/email/render-preview). 다크 + violet 톤.
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
-  ArrowDown, ArrowUp, Copy, Eye, GripVertical, Loader2, Monitor, Plus, Save, Sparkles, Trash2, Wand2, X,
+  ArrowDown, ArrowUp, Copy, Eye, GripVertical, Loader2, Monitor, Palette, Plus, Save, Sparkles, Trash2, Wand2, X,
 } from 'lucide-react';
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent,
@@ -16,6 +16,11 @@ import { CSS } from '@dnd-kit/utilities';
 import SectionPropsEditor from '../dm/panels/SectionPropsEditor';
 // ★ 2026-07-02 완성(50크레딧) 사전 고지 — 환불 없는 돈이라 확인 모달 의무
 import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
+// ★ 2026-07-13 디자인 3.0 — 테마 8종 1클릭 + 구도/배경면 픽커 + 프리헤더 (캠페인 단위 design)
+import EmailDesignThemeModal from './EmailDesignThemeModal';
+import {
+  EMAIL_TREATMENT_OPTIONS, EMAIL_BACKGROUND_OPTIONS, type EmailDesign,
+} from '../../utils/email-themes';
 import {
   createSection, normalizeOrder, SECTION_META, type Section,
 } from '../../utils/dm-section-defaults';
@@ -33,6 +38,10 @@ const EMAIL_BLOCK_TYPES: SectionType[] = [
 const EMAIL_ALIGN_AWARE = new Set<SectionType>(['hero', 'header', 'text_card']);
 const EMAIL_ACCENT_AWARE = new Set<SectionType>([
   'text_card', 'cta', 'coupon', 'promo_code', 'sns', 'store_info', 'product_carousel',
+]);
+// ★ 2026-07-13 배경면(리듬) 노출 대상 — 렌더러가 밴드 래핑을 소비하는 본문 타입만(죽은 컨트롤 금지)
+const EMAIL_BAND_AWARE = new Set<SectionType>([
+  'text_card', 'cta', 'coupon', 'promo_code', 'product_carousel', 'reviews',
 ]);
 
 // 개인화 변수(Liquid 토큰) — ★ 2026-07-02 Harold 지시: 하드코딩이 아니라 회사 실데이터 필드만 노출.
@@ -54,6 +63,8 @@ export interface EmailVisualEditorProps {
   initialName?: string;
   initialSubject?: string;
   initialIsAd?: boolean;
+  /** ★ 2026-07-13 캠페인 단위 디자인(테마·아트디렉션·프리헤더) — 저장·미리보기 동승 */
+  initialDesign?: EmailDesign | null;
   aiGenerated?: boolean;
   campaignId?: string;
   /** ★ 2026-07-02 완성(50크레딧 납부) 여부 — true면 발송 해금 + 저장 무료 (PC 미리보기는 항상 허용) */
@@ -65,7 +76,7 @@ export interface EmailVisualEditorProps {
 }
 
 export default function EmailVisualEditor({
-  initialSections, initialName, initialSubject, initialIsAd, aiGenerated,
+  initialSections, initialName, initialSubject, initialIsAd, initialDesign, aiGenerated,
   campaignId, completed, authHeaders, onClose, onSaved, onToast,
 }: EmailVisualEditorProps) {
   const [sections, setSections] = useState<Section[]>(() => normalizeOrder(initialSections || []));
@@ -74,6 +85,9 @@ export default function EmailVisualEditor({
   const [subject, setSubject] = useState(initialSubject || '');
   const [isAd, setIsAd] = useState(initialIsAd ?? true);
   const [addOpen, setAddOpen] = useState(false);
+  // ★ 2026-07-13 디자인 3.0 — 캠페인 단위 design (테마 1클릭·프리헤더·구도/배경은 섹션 필드)
+  const [design, setDesign] = useState<EmailDesign | null>(initialDesign ?? null);
+  const [themeOpen, setThemeOpen] = useState(false);
 
   const [previewHtml, setPreviewHtml] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -147,7 +161,7 @@ export default function EmailVisualEditor({
       try {
         const sample = previewSample !== 'none' ? sampleCustomers.find((c) => c.label === previewSample)?.customer : null;
         const res = await fetch('/api/email/render-preview', {
-          method: 'POST', headers: authHeaders(), body: JSON.stringify({ sections, sampleCustomer: sample || undefined }),
+          method: 'POST', headers: authHeaders(), body: JSON.stringify({ sections, design: design || undefined, sampleCustomer: sample || undefined }),
         });
         const data = await res.json();
         if (data.success) setPreviewHtml(data.html || '');
@@ -156,7 +170,7 @@ export default function EmailVisualEditor({
     }, 500);
     return () => { if (debounce.current) clearTimeout(debounce.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sections, previewSample]);
+  }, [sections, previewSample, design]);
 
   // 미리보기 샘플 고객 로드 (VIP/일반/신규) — 개인화 미리보기 토글용
   useEffect(() => {
@@ -175,7 +189,16 @@ export default function EmailVisualEditor({
   // ── 블록 조작 ──
   const updateSelected = (patch: Record<string, any>) => {
     if (!selectedId) return;
-    setSections((prev) => prev.map((s) => (s.id === selectedId ? { ...s, props: { ...(s.props as any), ...patch } } : s)));
+    setSections((prev) => prev.map((s) => {
+      if (s.id !== selectedId) return s;
+      let next = { ...s, props: { ...(s.props as any), ...patch } } as Section;
+      // ★ 2026-07-13 DM 교훈(타이포 구도 함정) — 이미지 미사용 구도에 이미지가 들어오면 기본 구도로 자동 전환
+      //   (안 그러면 업로드해도 화면에 안 나와 "안 된다" 신고가 된다)
+      if (typeof patch.image_url === 'string' && patch.image_url.trim() && s.type === 'hero' && (s as any).treatment === 'typographic') {
+        next = { ...next, treatment: 'classic' } as Section;
+      }
+      return next;
+    }));
   };
 
   // 섹션 최상위 필드(display_condition 등) 갱신 — props가 아닌 Section 레벨
@@ -264,6 +287,8 @@ export default function EmailVisualEditor({
         setSelectedId(g.sections?.[0]?.id || null);
         if (!name || name === 'AI 비주얼 이메일') setName(g.name || name);
         if (!subject) setSubject((g.subjects && g.subjects[0]) || '');
+        // ★ 2026-07-13 — AI 프리헤더 회생(옛 흐름은 버렸음). 테마 등 기존 design은 보존.
+        if (g.preheader) setDesign((d) => ({ ...(d || {}), preheader: String(g.preheader).slice(0, 90) }));
         setAiPrompt('');
         onToast('AI가 비주얼 이메일을 만들었어요. 이미지를 채우고 다듬어주세요. (3 크레딧)', 'success');
       } else {
@@ -309,7 +334,12 @@ export default function EmailVisualEditor({
     if (sections.length === 0) { onToast('블록을 1개 이상 추가해주세요.', 'warning'); return null; }
     const isUpdate = !!campaignId;
     const url = isUpdate ? `/api/email/campaigns/${campaignId}` : '/api/email/campaigns';
+    // ★ 2026-07-13 — design(테마·아트디렉션·프리헤더) 동승 규약 (Codex 4R):
+    //   값 있음 = 저장 / 원래 있었는데 사용자가 비움(기본 룩) = null로 명시 초기화 /
+    //   처음부터 없음 = key 자체 생략(무변경 저장이 design 컬럼·타 클라이언트 테마에 무영향).
     const body: any = { name: name.trim(), subject: subject.trim(), is_ad: isAd, sections };
+    if (design) body.design = design;
+    else if (initialDesign) body.design = null;
     if (!isUpdate && aiGenerated) body.ai_generated = true;
     const res = await fetch(url, { method: isUpdate ? 'PATCH' : 'POST', headers: authHeaders(), body: JSON.stringify(body) });
     const data = await res.json();
@@ -391,6 +421,13 @@ export default function EmailVisualEditor({
             <input type="checkbox" checked={isAd} onChange={(e) => setIsAd(e.target.checked)} className="rounded" />광고성
           </label>
           <button
+            onClick={() => setThemeOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 shrink-0"
+            title="디자인 테마 8종 — 색·서체·조판을 1클릭으로 바꿉니다 (문안은 그대로)"
+          >
+            <Palette className="w-4 h-4" /><span className="hidden md:inline">테마</span>
+          </button>
+          <button
             onClick={() => setPcPreviewOpen(true)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 shrink-0"
             title="PC(데스크탑) 폭으로 크게 미리보기"
@@ -421,6 +458,25 @@ export default function EmailVisualEditor({
         <div className="flex-1 flex min-h-0">
           {/* 좌: 블록 리스트 + 추가 + AI */}
           <div className="w-60 shrink-0 border-r border-white/10 flex flex-col bg-slate-900/60">
+            {/* ★ 2026-07-13 프리헤더 — 수신함에서 제목 옆에 보이는 미리보기 문구 (비우면 본문 첫 문장 자동) */}
+            <div className="p-3 border-b border-white/10 space-y-1.5">
+              <div className="text-[11px] font-semibold text-white/60">프리헤더 · 수신함 미리보기</div>
+              <input
+                value={design?.preheader || ''}
+                maxLength={90}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setDesign((d) => {
+                    const next: EmailDesign = { ...(d || {}) };
+                    if (v.trim()) next.preheader = v;
+                    else delete next.preheader;
+                    return Object.keys(next).length > 0 ? next : null;
+                  });
+                }}
+                placeholder="비우면 본문 첫 문장이 자동 표시"
+                className="w-full text-xs bg-slate-950/60 border border-white/10 rounded-lg px-2 py-1.5 text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
+              />
+            </div>
             <div className="p-3 border-b border-white/10 space-y-2">
               <div className="text-[11px] font-semibold text-white/60">AI로 만들기</div>
               <textarea
@@ -479,10 +535,62 @@ export default function EmailVisualEditor({
                   <span className="text-base">{SECTION_META[selected.type]?.icon}</span>
                   <span className="text-sm font-semibold text-white">{SECTION_META[selected.type]?.label} 편집</span>
                 </div>
-                {/* ★ 2026-07-12 블록 스타일 — 정렬(렌더러 소비 타입만) + 강조색(primary 파생 소비 타입만) */}
-                {(EMAIL_ALIGN_AWARE.has(selected.type) || EMAIL_ACCENT_AWARE.has(selected.type)) && (
+                {/* ★ 2026-07-12 블록 스타일 — 정렬(렌더러 소비 타입만) + 강조색(primary 파생 소비 타입만)
+                    ★ 2026-07-13 — 구도(EMAIL_TREATMENT_OPTIONS 타입만) + 배경면(EMAIL_BAND_AWARE 타입만) */}
+                {(EMAIL_ALIGN_AWARE.has(selected.type) || EMAIL_ACCENT_AWARE.has(selected.type)
+                  || !!EMAIL_TREATMENT_OPTIONS[selected.type] || EMAIL_BAND_AWARE.has(selected.type)) && (
                   <div className="mb-4 pb-4 border-b border-white/10 space-y-2.5">
                     <div className="text-[11px] font-semibold text-white/60">블록 스타일</div>
+                    {EMAIL_TREATMENT_OPTIONS[selected.type] && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] text-white/60 shrink-0">구도</span>
+                        <select
+                          value={(selected as any).treatment || 'classic'}
+                          onChange={(e) => updateSelectedSection({ treatment: e.target.value } as Partial<Section>)}
+                          className="text-[11px] bg-slate-950/60 border border-white/10 rounded px-1.5 py-1 text-white max-w-[170px]"
+                        >
+                          {EMAIL_TREATMENT_OPTIONS[selected.type].map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    {EMAIL_BAND_AWARE.has(selected.type) && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] text-white/60 shrink-0">배경면</span>
+                        <select
+                          value={(selected as any).background || 'none'}
+                          onChange={(e) => updateSelectedSection({ background: (e.target.value === 'none' ? undefined : e.target.value) } as Partial<Section>)}
+                          className="text-[11px] bg-slate-950/60 border border-white/10 rounded px-1.5 py-1 text-white max-w-[170px]"
+                        >
+                          {EMAIL_BACKGROUND_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    {/* ★ 2026-07-13 헤드라인 강조(마커펜/밑줄) — 렌더러 emphasizeHead 소비 타입만 */}
+                    {(selected.type === 'hero' || selected.type === 'text_card') && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] text-white/60">헤드라인 강조</span>
+                        <div className="flex gap-1">
+                          {([['', '없음'], ['marker', '마커'], ['underline', '밑줄']] as const).map(([v, lbl]) => (
+                            <button
+                              key={v || 'none'}
+                              type="button"
+                              onClick={() => updateSelected({ headline_emphasis: v || undefined })}
+                              className={`px-2 h-7 text-[11px] rounded-lg border transition-colors ${
+                                ((selected.props as any)?.headline_emphasis || '') === v
+                                  ? 'bg-violet-500/40 border-violet-400/60 text-white font-bold'
+                                  : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'
+                              }`}
+                            >
+                              {lbl}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {EMAIL_ALIGN_AWARE.has(selected.type) && (
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] text-white/60">정렬</span>
@@ -637,6 +745,16 @@ export default function EmailVisualEditor({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ★ 2026-07-13 디자인 테마 8종 — 1클릭 적용(문안 무변), 기본 룩 복귀 지원 */}
+      {themeOpen && (
+        <EmailDesignThemeModal
+          current={design}
+          onApply={(d) => setDesign(d)}
+          onReset={() => setDesign((cur) => (cur?.preheader ? { preheader: cur.preheader } : null))}
+          onClose={() => setThemeOpen(false)}
+        />
       )}
 
       {/* ★ 2026-07-02 완성(50크레딧) 사전 고지 확인 모달 */}

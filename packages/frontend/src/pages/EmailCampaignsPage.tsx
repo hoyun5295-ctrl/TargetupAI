@@ -20,6 +20,8 @@ import EmailEventsModal from '../components/email/EmailEventsModal';
 // 비주얼 빌더 에디터
 import EmailVisualEditor from '../components/email/EmailVisualEditor';
 import EmailTemplateGalleryModal from '../components/email/EmailTemplateGalleryModal';
+// ★ 2026-07-13 디자인 3.0 — 캠페인 단위 design(테마·프리헤더) 타입
+import type { EmailDesign } from '../utils/email-themes';
 import EmailAnalyticsModal from '../components/email/EmailAnalyticsModal';
 import TargetExtractModal, { type ExtractedTarget } from '../components/TargetExtractModal';
 import type { Section } from '../utils/dm-section-defaults';
@@ -165,7 +167,7 @@ export default function EmailCampaignsPage() {
   // AI 캠페인 발송 확정 30크레딧 확인
   const [creditConfirm, setCreditConfirm] = useState<{ campaign: EmailCampaign; payload: any; desc: string } | null>(null);
   // 비주얼 빌더 에디터 (sections 기반)
-  const [visualEditor, setVisualEditor] = useState<{ sections: Section[]; name?: string; subject?: string; isAd?: boolean; aiGenerated?: boolean; campaignId?: string; completed?: boolean } | null>(null);
+  const [visualEditor, setVisualEditor] = useState<{ sections: Section[]; name?: string; subject?: string; isAd?: boolean; aiGenerated?: boolean; campaignId?: string; completed?: boolean; design?: EmailDesign | null } | null>(null);
   // ★ 2026-07-02 캠페인 목록 페이징 — 2열 × 2줄 = 페이지당 4카드 (Harold 확정)
   const CAMPAIGN_PAGE_SIZE = 4;
   const [campaignPage, setCampaignPage] = useState(1);
@@ -410,7 +412,7 @@ export default function EmailCampaignsPage() {
   // 편집기 열기 — 비주얼 섹션 있으면 비주얼 에디터, 아니면 HTML 폼 (수정 버튼·placeholder 안내 공용)
   const openEditor = (c: EmailCampaign) => {
     if (c.sections && c.sections.length) {
-      setVisualEditor({ sections: c.sections as Section[], name: c.name, subject: c.subject, isAd: c.isAd, aiGenerated: c.aiGenerated, campaignId: c.id, completed: c.completed });
+      setVisualEditor({ sections: c.sections as Section[], name: c.name, subject: c.subject, isAd: c.isAd, aiGenerated: c.aiGenerated, campaignId: c.id, completed: c.completed, design: c.design ?? null });
     } else {
       setEditing(c);
     }
@@ -465,6 +467,8 @@ export default function EmailCampaignsPage() {
           subject: (g.subjects && g.subjects[0]) || '',
           isAd: aiAsAd,
           aiGenerated: true,
+          // ★ 2026-07-13 — AI 프리헤더 회생(design.preheader로 수용 — 옛 흐름은 버렸음)
+          design: g.preheader ? { preheader: String(g.preheader).slice(0, 90) } : null,
         });
         showToast('AI 생성 완료 — 비주얼 편집기에서 확인하고 다듬어주세요. (3 크레딧)', 'success');
       } else {
@@ -491,6 +495,7 @@ export default function EmailCampaignsPage() {
       subject: (g.subjects && g.subjects[0]) || '',
       isAd: d.isAd !== false,
       aiGenerated: true,
+      design: g.preheader ? { preheader: String(g.preheader).slice(0, 90) } : null,
     });
     showToast('행사 캠페인 이메일 초안을 불러왔습니다 — 이미지만 올리고 다듬어주세요.', 'success');
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1122,7 +1127,7 @@ export default function EmailCampaignsPage() {
       {/* 템플릿 갤러리 — 1클릭 무료 골격 → 비주얼 에디터 */}
       {showGallery && (
         <EmailTemplateGalleryModal
-          onPick={(sections, label) => setVisualEditor({ sections, name: label, subject: label, isAd: true, aiGenerated: false })}
+          onPick={(sections, label, design) => setVisualEditor({ sections, name: label, subject: label, isAd: true, aiGenerated: false, design: design ?? null })}
           onClose={() => setShowGallery(false)}
           authHeaders={authHeaders}
         />
@@ -1147,6 +1152,7 @@ export default function EmailCampaignsPage() {
           initialName={visualEditor.name}
           initialSubject={visualEditor.subject}
           initialIsAd={visualEditor.isAd}
+          initialDesign={visualEditor.design}
           aiGenerated={visualEditor.aiGenerated}
           campaignId={visualEditor.campaignId}
           completed={visualEditor.completed}

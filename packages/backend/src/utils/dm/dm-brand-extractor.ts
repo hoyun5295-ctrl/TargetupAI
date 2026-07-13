@@ -17,6 +17,9 @@
  *  - routes/dm.ts POST /brand-kit/extract
  */
 
+import { lookup } from 'node:dns/promises';
+import http from 'node:http';
+import https from 'node:https';
 import type { DmBrandKit } from './dm-tokens';
 
 export type BrandExtractResult = {
@@ -294,33 +297,161 @@ function isFetchableProductUrl(url: string): boolean {
   }
 }
 
+// ── ★ 2026-07-13 DNS 해석 레벨 SSRF 가드 (Codex 적대 리뷰 지적 정정) ──
+// 호스트명 문자열 검사만으로는 "공개 도메인이 사설 IP로 풀리는" 우회를 못 막는다 →
+// fetch 직전 홉마다 DNS 해석 결과(전 주소)가 공인망인지 확인. 하나라도 사설/예약 = 차단(보수).
+// 한계: 조회↔fetch 사이 재바인딩(TOCTOU)은 이 층에서 못 막는다 — 소켓 IP 고정은 별도 과제로 문서화.
+
+function isPrivateIpV4(ip: string): boolean {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
+  if (!m) return true; // 형식 불명 = 차단(보수)
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  if (a === 0 || a === 10 || a === 127) return true;               // 예약·사설·루프백
+  if (a === 100 && b >= 64 && b <= 127) return true;               // 100.64/10 CGN
+  if (a === 169 && b === 254) return true;                         // 링크로컬(메타데이터 서비스 포함)
+  if (a === 172 && b >= 16 && b <= 31) return true;                // 172.16/12
+  if (a === 192 && b === 168) return true;                         // 192.168/16
+  if (a === 198 && (b === 18 || b === 19)) return true;            // 벤치마크 예약
+  if (a >= 224) return true;                                       // 멀티캐스트·예약·브로드캐스트
+  return false;
+}
+
+/** 사설/예약 IP 판정 (순수 — SSRF 가드 회귀 테스트용 export) */
+export function isPrivateIp(addr: string): boolean {
+  const ip = addr.toLowerCase();
+  if (ip.includes(':')) {
+    const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(ip);  // v4-mapped v6
+    if (mapped) return isPrivateIpV4(mapped[1]);
+    if (ip === '::' || ip === '::1') return true;                  // 미지정·루프백
+    if (/^f[cd]/.test(ip)) return true;                            // fc00::/7 ULA
+    if (/^fe[89ab]/.test(ip)) return true;                         // fe80::/10 링크로컬
+    if (/^ff/.test(ip)) return true;                               // 멀티캐스트
+    return false;
+  }
+  return isPrivateIpV4(ip);
+}
+
+/** 호스트명 → 검증된 공인 주소 1개 (전 해석 주소가 공인이어야 통과 — 하나라도 사설이면 차단). */
+async function resolvePublicAddress(hostname: string): Promise<{ address: string; family: number } | null> {
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname)) return isPrivateIpV4(hostname) ? null : { address: hostname, family: 4 };
+  if (hostname.includes(':')) return isPrivateIp(hostname) ? null : { address: hostname, family: 6 }; // IPv6 리터럴(new URL이 대괄호 제거)
+  try {
+    const addrs = await lookup(hostname, { all: true });
+    if (!addrs.length || addrs.some((a) => isPrivateIp(a.address))) return null;
+    return { address: addrs[0].address, family: addrs[0].family };
+  } catch {
+    return null; // 해석 실패 = 차단
+  }
+}
+
+const MAX_HTML_BYTES = 200_000;
+
+/** 검증된 IP로 연결을 고정한 단발 GET (Codex 2R 정정) —
+ *  ① lookup 콜백이 검증 주소만 돌려줘 fetch류의 자체 DNS 재해석(리바인딩 창)을 제거.
+ *     TLS SNI·인증서 검증은 host(호스트명) 기준 그대로 유지.
+ *  ② 본문은 스트리밍으로 MAX_HTML_BYTES에서 절단(og 메타는 <head>라 충분) — 거대 응답 메모리 압박 차단.
+ *     Content-Length가 상한 초과로 선언된 응답은 즉시 거절. */
+function requestPinned(
+  urlStr: string,
+  pinned: { address: string; family: number },
+  timeoutMs: number,
+): Promise<{ status: number; location?: string; body?: string }> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(urlStr);
+    const mod = u.protocol === 'https:' ? https : http;
+    // ★ 2026-07-14 (Codex 5R) — options.timeout은 "무활동" 타임아웃이라 잘게 흘리는(trickle) 응답이
+    //   요청을 무기한 붙잡는다 → 벽시계 절대 마감을 별도로 걸고 모든 종료 경로에서 해제.
+    let settled = false;
+    let deadline: ReturnType<typeof setTimeout> | null = null;
+    const settleResolve = (v: { status: number; location?: string; body?: string }) => {
+      if (settled) return; settled = true;
+      if (deadline) clearTimeout(deadline);
+      resolve(v);
+    };
+    const settleReject = (e: Error) => {
+      if (settled) return; settled = true;
+      if (deadline) clearTimeout(deadline);
+      reject(e);
+    };
+    const req = mod.request(
+      {
+        protocol: u.protocol,
+        host: u.hostname,
+        port: u.port || (u.protocol === 'https:' ? '443' : '80'),
+        path: `${u.pathname}${u.search}` || '/',
+        method: 'GET',
+        headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,application/xhtml+xml' },
+        lookup: ((_h: string, _o: unknown, cb: (err: NodeJS.ErrnoException | null, address: string, family: number) => void) =>
+          cb(null, pinned.address, pinned.family)) as never,
+        timeout: timeoutMs,
+      },
+      (res) => {
+        const status = res.statusCode || 0;
+        if (status >= 300 && status < 400) {
+          const location = typeof res.headers.location === 'string' ? res.headers.location : undefined;
+          res.destroy(); // redirect 본문은 읽지 않음(무제한 drain 차단)
+          settleResolve({ status, location });
+          return;
+        }
+        const declared = Number(res.headers['content-length']);
+        if (Number.isFinite(declared) && declared > MAX_HTML_BYTES) {
+          res.destroy();
+          settleReject(new Error('response too large'));
+          return;
+        }
+        let size = 0;
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => {
+          if (settled) return;
+          const room = MAX_HTML_BYTES - size;
+          if (c.length >= room) {
+            chunks.push(c.subarray(0, room));
+            res.destroy(); // 상한 도달 — 여기까지만 사용(og 메타는 head에 있음)
+            settleResolve({ status, body: Buffer.concat(chunks).toString('utf8') });
+            return;
+          }
+          size += c.length;
+          chunks.push(c);
+        });
+        res.on('end', () => settleResolve({ status, body: Buffer.concat(chunks).toString('utf8') }));
+        res.on('error', (e) => settleReject(e));
+      },
+    );
+    deadline = setTimeout(() => {
+      req.destroy(new Error('deadline'));
+      settleReject(new Error('deadline'));
+    }, timeoutMs);
+    req.on('timeout', () => { req.destroy(new Error('timeout')); settleReject(new Error('timeout')); });
+    req.on('error', (e) => settleReject(e as Error));
+    req.end();
+  });
+}
+
 /** 리다이렉트 홉(최대 3)마다 호스트 가드를 재검증하는 HTML fetch — 공개 URL이 내부 주소로 redirect하는 우회 차단 (Codex 지적).
- *  DNS 레벨 rebind까지는 이 층에서 다루지 않는다(기존 브랜드 추출 경로와 동일 한계 — 문서화). */
+ *  ★ 2026-07-13 (Codex 2R) — 홉마다 DNS 해석 → 공인 검증 → 그 IP로 연결 고정(requestPinned) + 바이트 상한. */
 async function fetchHtmlGuarded(url: string): Promise<{ html: string; baseUrl: string } | null> {
   let current = url;
   for (let hop = 0; hop < 3; hop++) {
     if (!isFetchableProductUrl(current)) return null;
-    const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    let pinned: { address: string; family: number } | null = null;
     try {
-      const res = await fetch(current, {
-        headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,application/xhtml+xml' },
-        signal: controller.signal,
-        redirect: 'manual',
-      });
-      if (res.status >= 300 && res.status < 400) {
-        const loc = res.headers.get('location');
-        if (!loc) return null;
-        current = new URL(loc, current).toString();
-        continue; // 다음 홉에서 가드 재검증
-      }
-      if (!res.ok) return null;
-      const html = await res.text();
-      return { html: html.slice(0, 200_000), baseUrl: new URL(current).origin };
+      pinned = await resolvePublicAddress(new URL(current).hostname.toLowerCase());
     } catch {
       return null;
-    } finally {
-      clearTimeout(tid);
+    }
+    if (!pinned) return null;
+    try {
+      const res = await requestPinned(current, pinned, FETCH_TIMEOUT_MS);
+      if (res.status >= 300 && res.status < 400) {
+        if (!res.location) return null;
+        current = new URL(res.location, current).toString();
+        continue; // 다음 홉에서 가드·해석·고정 재검증
+      }
+      if (res.status < 200 || res.status >= 300 || !res.body) return null;
+      return { html: res.body, baseUrl: new URL(current).origin };
+    } catch {
+      return null;
     }
   }
   return null;

@@ -5,11 +5,13 @@ import { useEffect, useState } from 'react';
 import { Check, Sparkles, X } from 'lucide-react';
 import { EMAIL_TEMPLATES, recommendTemplateKeys, type EmailTemplate } from '../../utils/email-templates';
 import type { Section } from '../../utils/dm-section-defaults';
+import type { EmailDesign } from '../../utils/email-themes';
 
 export default function EmailTemplateGalleryModal({
   onPick, onClose, authHeaders,
 }: {
-  onPick: (sections: Section[], label: string) => void;
+  /** ★ 2026-07-13 — 골든 템플릿의 추천 테마(design)도 함께 전달(캠페인 design으로 동승) */
+  onPick: (sections: Section[], label: string, design?: EmailDesign) => void;
   onClose: () => void;
   authHeaders: () => Record<string, string>;
 }) {
@@ -38,18 +40,28 @@ export default function EmailTemplateGalleryModal({
     return (
       <button
         key={t.key}
-        onClick={() => { onPick(t.sections, t.label); onClose(); }}
+        onClick={() => { onPick(t.sections, t.label, t.design); onClose(); }}
         className={`group text-left bg-white/5 hover:bg-white/10 border rounded-2xl p-4 transition-all ${recommend ? 'border-violet-400/40 hover:border-violet-400/70' : 'border-white/10 hover:border-violet-400/40'}`}
       >
         <div className="flex items-center justify-between mb-3">
           <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${t.gradient} flex items-center justify-center shadow-md`}>
             <Icon className="w-5 h-5 text-white" />
           </div>
-          {recommend && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-violet-200 bg-violet-500/20 border border-violet-400/30 px-1.5 py-0.5 rounded-full">
-              <Sparkles className="w-2.5 h-2.5" /> 추천
-            </span>
-          )}
+          <div className="flex items-center gap-1.5">
+            {/* ★ 2026-07-13 — 템플릿 테마 스와치(색 큐레이션 미리보기) */}
+            {t.design?.palette && (
+              <span className="inline-flex items-center gap-0.5">
+                {[t.design.palette.primary, t.design.palette.accent, t.design.palette.background].filter(Boolean).map((c, i) => (
+                  <span key={i} className="w-2.5 h-2.5 rounded-full border border-white/20" style={{ background: c }} />
+                ))}
+              </span>
+            )}
+            {recommend && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-violet-200 bg-violet-500/20 border border-violet-400/30 px-1.5 py-0.5 rounded-full">
+                <Sparkles className="w-2.5 h-2.5" /> 추천
+              </span>
+            )}
+          </div>
         </div>
         <div className="text-sm font-bold text-white">{t.label}</div>
         <div className="text-[11px] text-white/50 mt-0.5">{t.hint}</div>

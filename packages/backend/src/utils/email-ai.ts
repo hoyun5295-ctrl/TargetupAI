@@ -21,7 +21,9 @@ import { callAIWithFallback } from '../services/ai';
 import { extractJsonFromAiText } from './ai-json';
 import { buildSystemPromptWithBrandVoice } from './brand-voice-prompt';
 // 비주얼 빌더: AI 블록 출력 → 검증된 email Section[]
-import { normalizeAiBlocksToSections } from './email/email-blocks';
+import { normalizeAiBlocksToSections, buildCarouselProductsFromExtracted } from './email/email-blocks';
+// ★ 2026-07-13 행사 상품 URL 페이지 og:image 자동 채움 — DM one-shot과 공용(SSRF 리다이렉트 가드 내장)
+import { fetchProductOgImages } from './dm/dm-brand-extractor';
 import type { Section } from './dm/dm-section-registry';
 // 비주얼 에디터 "AI로 개선" 순수 코어(텍스트 수집·안전 검증·반영)
 import { collectRefinableTexts, applyRefinedTexts } from './email/email-section-refine';
@@ -340,7 +342,7 @@ const EMAIL_BLOCKS_SYSTEM = `당신은 한국어 이메일 마케팅 디자이�
 - header: { "variant": "logo", "brand_name": "회사명" }
 - hero: { "headline": "큰 제목", "sub_copy": "한 줄 부제", "align": "center", "height": "md" }
 - text_card: { "tag": "라벨", "headline": "소제목", "body": "본문 2~3문장", "align": "left", "image_position": "top" }
-- product_carousel: { "title": "추천 상품", "products": [{ "name": "상품명", "price": 0, "discount_price": 0, "image_url": "" }] }
+- product_carousel: { "title": "추천 상품", "products": [{ "name": "상품명", "price": 0, "discount_price": 0, "image_url": "", "link_url": "" }] }
 - gallery: { "title": "갤러리", "images": [{ "url": "" }] }
 - coupon: { "discount_label": "혜택 제목", "discount_type": "percent", "coupon_code": "" }
 - cta: { "buttons": [{ "label": "버튼 글", "url": "", "style": "primary" }], "layout": "stack" }
@@ -352,6 +354,7 @@ const EMAIL_BLOCKS_SYSTEM = `당신은 한국어 이메일 마케팅 디자이�
 - 모든 이미지(image_url, url)는 빈 문자열로 둔다 (회사가 직접 업로드).
 - 구체 혜택 수치(할인율, 금액, 쿠폰코드, 무료, 사은품)는 임의로 만들지 않는다. 혜택 자리는 "[혜택을 직접 입력해주세요]" 텍스트로 두고, coupon_code는 빈 문자열로 둔다.
 - 단, [행사 내용] 원문에 상품명·가격이 적혀 있으면 그것은 창작이 아니다 — product_carousel 1개에 그 상품들을 원문 수치 그대로 담는다(정가 price, 할인가 discount_price — 원문에 없는 상품·가격 추가 금지).
+- [행사 내용] 원문에 상품 URL(http/https)이 적혀 있으면 해당 상품의 link_url에 원문 글자 그대로 넣는다(변형·축약·생성 금지). 원문에 URL이 없으면 link_url은 빈 문자열.
 - 모든 버튼 url은 빈 문자열로 둔다.
 - 권장 순서: header → hero → 본문(text_card / product_carousel / gallery) → cta → footer.
 
@@ -400,18 +403,18 @@ export async function generateEmailSections(input: {
     throw new Error('AI 블록 생성 결과가 비어 있습니다. 다시 시도해주세요.');
   }
   // ★ 2026-07-08 행사 원문 상품 기계 검증 — 가격이 원문에 실존하는 상품만 통과(환각 가격 차단, DM과 동일 규칙)
+  // ★ 2026-07-13 — link_url 보존(검증기 3중 검증 + 결정적 배정 통과분) + og:image 자동 채움 (DM one-shot 미러).
+  //   옛 map이 name/price만 재조립해 link_url을 유실하던 결함 정정. og 실패/사설 호스트/부재 = 빈 값 유지(생성 차단 X).
   if (input.eventText) {
     for (const s of sections) {
       if (s.type !== 'product_carousel') continue;
       const p: any = s.props || {};
-      p.products = validateProductsAgainstEventText(p.products, input.eventText).map((v, i) => ({
-        id: `p-${i + 1}`,
-        image_url: '',
-        name: v.name,
-        price: v.price,
-        ...(v.discount_price ? { discount_price: v.discount_price } : {}),
-        ...(v.discount_rate ? { discount_rate: v.discount_rate } : {}),
-      }));
+      const validated = validateProductsAgainstEventText(p.products, input.eventText);
+      let ogImages: Array<string | undefined> = [];
+      try {
+        ogImages = await fetchProductOgImages(validated.map((v) => v.link_url));
+      } catch { /* og 조회 실패 = 빈 값 유지 — 생성 흐름 무영향 */ }
+      p.products = buildCarouselProductsFromExtracted(validated, ogImages);
       s.props = p;
     }
   }

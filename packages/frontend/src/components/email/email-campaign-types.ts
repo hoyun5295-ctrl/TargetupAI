@@ -1,5 +1,6 @@
 // 이메일 캠페인 공유 타입 — 페이지와 분석 모달이 함께 쓴다(컴포넌트↔페이지 순환 import 회피).
 import type { Section } from '../../utils/dm-section-defaults';
+import type { EmailDesign } from '../../utils/email-themes';
 
 export type CampaignStatus = 'draft' | 'scheduled' | 'sending' | 'completed' | 'failed';
 
@@ -24,6 +25,7 @@ export interface EmailCampaign {
   unsubscribeCount: number;
   createdAt: string;
   sections?: Section[] | null; // 비주얼 빌더 Section[] (있으면 비주얼 에디터로 수정)
+  design?: EmailDesign | null; // ★ 2026-07-13 캠페인 단위 디자인(테마·아트디렉션·프리헤더)
   completed?: boolean; // ★ 2026-07-02 완성(50크레딧 납부) 여부 — 미완성 = 발송 잠금 (PC 미리보기는 항상 허용 — 07-02(3) Harold 지시)
   parentCampaignId?: string | null; // ★ 2026-07-06 재발송 자식이면 원본 id (재발송 배지·재발송 게이트)
   resendGeneration?: number;        // 원본=0, 재발송본=1

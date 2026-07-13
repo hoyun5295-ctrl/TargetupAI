@@ -83,6 +83,8 @@ import {
 } from '../utils/email-ai';
 // 비주얼 빌더: DM Section[] → 이메일 안전 HTML 렌더 + 회사 브랜드킷
 import { renderEmailSections, extractEmailText } from '../utils/email/email-section-renderer';
+// ★ 2026-07-13 디자인 3.0 — 캠페인 단위 design(테마·아트디렉션·프리헤더) 입력 정규화(단일 지점)
+import { normalizeEmailDesign } from '../utils/email/email-tokens';
 import { resolveEmailSectionsForCustomer } from '../utils/email/email-personalization';
 import { rate, relativeDelta, pointDelta } from '../utils/email/email-analytics-calc';
 import { buildPreviewCustomers } from '../utils/inapp-personalization';
@@ -497,12 +499,14 @@ router.post('/campaigns', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'name, subject는 필수입니다.' });
     }
     // 비주얼 빌더: sections 있으면 이메일 HTML 렌더 → html_body (없으면 클라이언트 html_body 직접 흐름 보존)
+    // ★ 2026-07-13 디자인 3.0 — design(테마·아트디렉션·프리헤더) 정규화 후 렌더·저장 동승
+    const design = normalizeEmailDesign(req.body.design);
     let finalHtml = html_body ? String(html_body) : '';
     let finalText = text_body ? String(text_body) : undefined;
     let finalSections: unknown[] | null = null;
     if (Array.isArray(sections) && sections.length > 0) {
       const brandKit = await getCompanyBrandKit(auth.companyId);
-      finalHtml = renderEmailSections(sections as Section[], { brandKit, publicBase: process.env.PUBLIC_BASE_URL });
+      finalHtml = renderEmailSections(sections as Section[], { brandKit, design, publicBase: process.env.PUBLIC_BASE_URL });
       finalText = extractEmailText(sections as Section[]);
       finalSections = sections;
     }
@@ -521,6 +525,7 @@ router.post('/campaigns', async (req: Request, res: Response) => {
       isAd: !!is_ad,
       aiGenerated: !!ai_generated,
       sections: finalSections,
+      design,
       scheduledAt: scheduled_at ? new Date(scheduled_at) : undefined,
     });
     return res.json({ success: true, campaign });
@@ -544,12 +549,20 @@ router.patch('/campaigns/:id', async (req: Request, res: Response) => {
     if (req.body.from_email !== undefined) patch.fromEmail = req.body.from_email ? String(req.body.from_email) : null;
     if (req.body.is_ad !== undefined) patch.isAd = !!req.body.is_ad;
     if (req.body.scheduled_at !== undefined) patch.scheduledAt = req.body.scheduled_at ? new Date(req.body.scheduled_at) : null;
+    // ★ 2026-07-13 디자인 3.0 — design 명시 전달 시 정규화 저장(null = 기본 룩 초기화)
+    if (req.body.design !== undefined) patch.design = normalizeEmailDesign(req.body.design);
     // 비주얼 빌더: sections 수정 시 html_body·text_body 재렌더
     if (Array.isArray(req.body.sections)) {
       patch.sections = req.body.sections;
       if (req.body.sections.length > 0) {
         const brandKit = await getCompanyBrandKit(auth.companyId);
-        patch.htmlBody = renderEmailSections(req.body.sections as Section[], { brandKit, publicBase: process.env.PUBLIC_BASE_URL });
+        // 재렌더 design = 이번 요청 우선, 미전달이면 저장된 캠페인 design 유지(테마 유실 방지)
+        let renderDesign = patch.design ?? null;
+        if (req.body.design === undefined) {
+          const existing = await getEmailCampaign(auth.companyId, req.params.id);
+          renderDesign = existing?.design ?? null;
+        }
+        patch.htmlBody = renderEmailSections(req.body.sections as Section[], { brandKit, design: renderDesign, publicBase: process.env.PUBLIC_BASE_URL });
         patch.textBody = extractEmailText(req.body.sections as Section[]);
       }
     }
@@ -934,12 +947,14 @@ router.post('/render-preview', async (req: Request, res: Response) => {
   try {
     const sections = Array.isArray(req.body?.sections) ? req.body.sections : [];
     const brandKit = await getCompanyBrandKit(auth.companyId);
+    // ★ 2026-07-13 디자인 3.0 — 편집기 design 동승 렌더(편집 화면 = 발송물)
+    const design = normalizeEmailDesign(req.body?.design);
     // 샘플 고객 동봉 시 수신자별 개인화(변수 치환 + 조건부 표시) 후 렌더 — 미리보기 전용(발송·저장 무관).
     const sampleCustomer = req.body?.sampleCustomer && typeof req.body.sampleCustomer === 'object' ? req.body.sampleCustomer : null;
     const renderSections = sampleCustomer
       ? resolveEmailSectionsForCustomer(sections as Section[], sampleCustomer)
       : (sections as Section[]);
-    const html = renderEmailSections(renderSections, { brandKit, publicBase: process.env.PUBLIC_BASE_URL });
+    const html = renderEmailSections(renderSections, { brandKit, design, publicBase: process.env.PUBLIC_BASE_URL });
     return res.json({ success: true, html });
   } catch (err: any) {
     console.error('[Email /render-preview] 오류:', err);
