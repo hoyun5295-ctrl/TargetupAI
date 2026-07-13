@@ -140,6 +140,20 @@ describe('디자인 3.0 — 구도(treatment)', () => {
     expect(list).toContain('width:96px');
   });
 
+  it('상품 카드 등고 — 이미지 200px 고정 박스 + 무이미지 placeholder + 상품명 2줄 확보 (Harold 신고 회귀)', () => {
+    const html = renderEmailSections([
+      sec('product_carousel', {
+        products: [
+          { name: '상품A 아주 긴 이름의 파운데이션 30ml', price: 85000, discount_price: 72250, image_url: 'https://cdn.example.com/a.jpg' },
+          { name: '상품B', price: 134000 },
+        ],
+      }, 0),
+    ], {});
+    expect(html).toContain('height:200px;object-fit:cover');   // 이미지 고정 박스
+    expect(html).toContain('height:200px;background:');        // 무이미지 placeholder(칸 유지)
+    expect(html).toContain('min-height:37px');                 // 상품명 1줄/2줄 차이 흡수
+  });
+
   it('selectEmailTreatment — 미허용/미등재 = classic (fail-closed)', () => {
     expect(selectEmailTreatment('hero', 'split')).toBe('split');
     expect(selectEmailTreatment('hero', 'sticky')).toBe('classic');

@@ -51,10 +51,12 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
     <>
       <Field label="제목 (선택)"><TextInput value={props.title} onChange={(v) => onUpdate({ title: v })} placeholder="이번 주 추천 상품" /></Field>
       <Field label="상품 목록">
+        {/* ★ 2026-07-14 — 명시 단색(emerald-600+white). 옛 text-emerald-100+워시 배경은 흰 패널(DM 우측/아이템 카드)
+            위에서 글자가 사라짐(Harold 신고 — 이메일·DM 공용 컴포넌트라 두 채널 동시 결함). 테마 경계 안전색 의무. */}
         <button
           type="button"
           onClick={() => setPickerOpen(true)}
-          className="w-full mb-2 inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-400/40 bg-emerald-500/10 text-emerald-100 text-[13px] font-medium py-2 hover:bg-emerald-500/20 transition-colors"
+          className="w-full mb-2 inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-500 bg-emerald-600 text-white text-[13px] font-semibold py-2 hover:bg-emerald-500 transition-colors"
         >
           연동 몰에서 상품 불러오기
         </button>
@@ -74,7 +76,7 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
                 type="button"
                 onClick={() => matchOne(i)}
                 disabled={matchingIdx !== null || !it.name?.trim()}
-                className="w-full text-[12px] text-emerald-100 border border-emerald-400/40 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-lg py-1.5 disabled:opacity-40 transition-colors"
+                className="w-full text-[12px] font-semibold text-white border border-emerald-500 bg-emerald-600 hover:bg-emerald-500 rounded-lg py-1.5 disabled:opacity-40 transition-colors"
               >
                 {matchingIdx === i ? '몰에서 찾는 중...' : '이 상품명으로 몰 이미지 자동 채우기'}
               </button>

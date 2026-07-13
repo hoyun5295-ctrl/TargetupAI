@@ -309,11 +309,16 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
   };
 
   // ★ 2026-07-07(5) 디자인 2.0 — 상품 = 보더 카드(면+테두리+라운드), 가격 강조색 800
+  // ★ 2026-07-14 카드 등고(Harold 신고) — 이미지 박스 고정 200px cover + 무이미지 placeholder +
+  //   상품명 2줄 확보(min-height 37px) → 옆 카드와 가격 줄·하단 정렬(DM SSR 고정 박스 방식 미러).
+  //   object-fit 미지원 구형 클라이언트는 이미지가 늘어질 뿐 칸 정렬은 유지된다.
   const cellFor = (it: ProductCarouselItem): string => {
     const img = emailImg(it.image_url, ctx.publicBase);
     const url = linkOf(it);
-    const imgTag = img ? `<img src="${esc(img)}" alt="${esc(it.name)}" style="width:100%;display:block;border:0;border-radius:${b.radius.sm}">` : '';
-    const meta = `<div style="font-size:${b.type.small.size};color:${b.text};font-weight:600;margin-top:${b.sp[2]};line-height:1.4">${esc(it.name)}</div><div style="margin-top:${b.sp[1]}">${priceOf(it)}</div>`;
+    const imgTag = img
+      ? `<img src="${esc(img)}" alt="${esc(it.name)}" width="100%" height="200" style="width:100%;height:200px;object-fit:cover;display:block;border:0;border-radius:${b.radius.sm}">`
+      : `<div style="width:100%;height:200px;background:${b.bg};border-radius:${b.radius.sm};font-size:0;line-height:0">&nbsp;</div>`;
+    const meta = `<div style="font-size:${b.type.small.size};color:${b.text};font-weight:600;margin-top:${b.sp[2]};line-height:1.4;min-height:37px">${esc(it.name)}</div><div style="margin-top:${b.sp[1]}">${priceOf(it)}</div>`;
     const inner = url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${imgTag}${meta}</a>` : `${imgTag}${meta}`;
     const cardTable = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:${b.sp[3]};background:${b.cardBg};border:1px solid ${b.border};border-radius:14px">${inner}</td></tr></table>`;
     return `<td width="50%" valign="top" class="em-stack" style="padding:${b.sp[2]}">${cardTable}</td>`;
