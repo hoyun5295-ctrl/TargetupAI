@@ -84,3 +84,49 @@ export function normalizeCustomLinkTitle(raw: unknown): string | null {
   if (!t) return null;
   return t.slice(0, CUSTOM_LINK_TITLE_MAX);
 }
+
+// ════════════════════════════════════════════════════════════
+// ★ 2026-07-15 한글 주소(사용자 지정 slug) — Harold 확정 (이새 vo.la/반짝이새_07 사례)
+//   발행 DM 별칭(hlj.kr/반짝이새_07) 용도. 검증 규칙의 단일 진실 — 순수 함수(vitest 대상).
+// ════════════════════════════════════════════════════════════
+
+/** slug 길이 (문자 수 기준 — DB code varchar(20)와 동기) */
+export const CUSTOM_SLUG_MIN = 2;
+export const CUSTOM_SLUG_MAX = 20;
+
+/** 허용 문자 = 한글(가-힣)·영문·숫자·하이픈·언더스코어 */
+const SLUG_PATTERN = /^[0-9A-Za-z가-힣_-]+$/;
+
+/** 내부 경로/프리픽스 예약어 — 뷰어·API 경로와 혼동 차단 */
+const SLUG_RESERVED = new Set(['s', 'api', 'dm', 'admin', 'app', 'www', 'images', 'track']);
+
+export interface SlugValidation {
+  ok: boolean;
+  /** 검증 통과 시 NFC 정규화된 slug */
+  slug?: string;
+  reason?: string;
+}
+
+/**
+ * 한글 주소 slug 검증 — 실패 사유는 사용자 노출 문구.
+ * NFC 정규화(iOS 자소 분리 대비)를 여기서 강제 — 쓰기/조회 양쪽이 이 함수 결과만 사용.
+ */
+export function validateCustomSlug(raw: unknown): SlugValidation {
+  if (typeof raw !== 'string' || raw.trim().length === 0) {
+    return { ok: false, reason: '주소로 쓸 문구를 입력해주세요. (예: 반짝세일_07)' };
+  }
+  const slug = raw.trim().normalize('NFC');
+  if (/\s/.test(slug)) {
+    return { ok: false, reason: '주소에 공백을 넣을 수 없습니다. 하이픈(-)이나 언더스코어(_)를 사용해주세요.' };
+  }
+  if (slug.length < CUSTOM_SLUG_MIN || slug.length > CUSTOM_SLUG_MAX) {
+    return { ok: false, reason: `주소는 ${CUSTOM_SLUG_MIN}~${CUSTOM_SLUG_MAX}자로 입력해주세요.` };
+  }
+  if (!SLUG_PATTERN.test(slug)) {
+    return { ok: false, reason: '한글·영문·숫자·하이픈(-)·언더스코어(_)만 사용할 수 있습니다.' };
+  }
+  if (SLUG_RESERVED.has(slug.toLowerCase()) || /^dm-/i.test(slug)) {
+    return { ok: false, reason: '사용할 수 없는 주소입니다. 다른 문구를 입력해주세요.' };
+  }
+  return { ok: true, slug };
+}

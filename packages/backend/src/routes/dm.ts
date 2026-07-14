@@ -43,8 +43,10 @@ import { lookupDmRecipientToken, issueDmRecipientTokensBulk, lookupDmShortLink }
 import {
   createCustomShortLink, lookupCustomShortLink, recordCustomShortLinkClick,
   listCustomShortLinks, setCustomShortLinkActive,
+  // ★ 2026-07-15 발행 DM 한글 주소 별칭
+  upsertDmAliasLink, getDmAliasLink, isSlugAvailable,
 } from '../utils/dm/dm-custom-short-link';
-import { validateCustomShortLinkUrl, normalizeCustomLinkTitle, CUSTOM_LINK_DAILY_LIMIT } from '../utils/dm/dm-custom-short-link-core';
+import { validateCustomShortLinkUrl, normalizeCustomLinkTitle, CUSTOM_LINK_DAILY_LIMIT, validateCustomSlug } from '../utils/dm/dm-custom-short-link-core';
 import {
   computeDmProgressPct, isDmCompleted, sumSectionClicks,
   sanitizeSectionInteractions, buildDmSectionLabel, dmSectionTypeLabel, summarizeDmResponse,
@@ -252,6 +254,8 @@ dmPublicRouter.post('/:code/track', async (req: Request, res: Response) => {
       maxScrollPct: b.max_scroll_pct,
       sectionDelta: b.section_interactions,
       isInit: b.init === 1 || b.init === true,
+      // ★ 2026-07-15 유입원(공용 링크 slug) — 뷰어 ?src= 비콘 동봉값. 정규화·격리는 trackDmView가 담당
+      entrySource: typeof b.src === 'string' && b.src ? b.src : null,
       ip,
       userAgent: ua,
     });
@@ -470,6 +474,161 @@ async function canAccessDm(dmId: string, companyId: string, userType?: string, u
   const r = await query(`SELECT 1 FROM dm_pages WHERE id = $1 AND company_id = $2 AND created_by = $3`, [dmId, companyId, userId || '']);
   return r.rows.length > 0;
 }
+
+// ============================================================
+// ★ 2026-07-15 발행 DM 한글 주소 별칭 (Harold 확정 — 이새 vo.la/반짝이새_07 사례)
+//   발행 공용 링크에 한글 slug 별칭(hlj.kr/반짝세일_07) — 무료·DM당 1개(기존 랜덤 코드는 그대로 유효).
+//   target에 ?src=<slug>를 저장해 리다이렉트 무변경으로 유입원이 뷰어 비콘까지 흐른다.
+// ============================================================
+
+const ALIAS_MIGRATION_MSG = 'DB 마이그레이션 필요 — 운영자에게 dm_custom_short_links(dm_page_id)/dm_views(entry_source) ALTER 실행을 요청해주세요.';
+
+function isMissingDbObject(err: any): boolean {
+  const msg = String(err?.message || '');
+  return msg.includes('does not exist') && (msg.includes('relation') || msg.includes('column'));
+}
+
+// GET /api/dm/:id/alias — 현재 한글 주소(없으면 alias:null)
+dmRouter.get('/:id/alias', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    if (!isUuid(req.params.id)) return res.status(400).json({ error: '올바르지 않은 DM ID입니다.' });
+    if (!(await canAccessDm(req.params.id, companyId, req.user?.userType, req.user?.userId))) {
+      return res.status(403).json({ error: '본인이 생성한 DM만 접근할 수 있습니다.' });
+    }
+    const base = String(process.env.DM_SHORT_LINK_BASE || '').trim().replace(/\/+$/, '');
+    const alias = await getDmAliasLink(req.params.id, companyId);
+    return res.json({
+      success: true,
+      alias: alias ? { ...alias, shortUrl: base ? `${base}/${alias.code}` : null } : null,
+    });
+  } catch (err: any) {
+    if (isMissingDbObject(err)) {
+      return res.status(503).json({ success: false, error: ALIAS_MIGRATION_MSG, code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[DM 한글주소 조회] 오류:', err?.message);
+    return res.status(500).json({ error: '서버 오류' });
+  }
+});
+
+// POST /api/dm/:id/alias — 한글 주소 생성/변경 { slug } (무료 — 발행된 DM만)
+dmRouter.post('/:id/alias', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId || !userId) return res.status(403).json({ error: '권한이 필요합니다.' });
+    if (!isUuid(req.params.id)) return res.status(400).json({ error: '올바르지 않은 DM ID입니다.' });
+    if (!(await canAccessDm(req.params.id, companyId, req.user?.userType, req.user?.userId))) {
+      return res.status(403).json({ error: '본인이 생성한 DM만 접근할 수 있습니다.' });
+    }
+    const base = String(process.env.DM_SHORT_LINK_BASE || '').trim().replace(/\/+$/, '');
+    if (!base) return res.status(400).json({ error: '단축 도메인이 설정되지 않았습니다. 운영자에게 문의해주세요.' });
+
+    const v = validateCustomSlug(req.body?.slug);
+    if (!v.ok || !v.slug) return res.status(400).json({ error: v.reason || '올바른 주소가 아닙니다.' });
+
+    const d = await query(`SELECT short_code, title FROM dm_pages WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`, [req.params.id, companyId]);
+    if (d.rows.length === 0) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
+    const dmShortCode = d.rows[0].short_code ? String(d.rows[0].short_code) : '';
+    if (!dmShortCode) return res.status(400).json({ error: '발행된 DM만 한글 주소를 만들 수 있습니다. 먼저 발행해주세요.' });
+
+    // 뷰어 직링크(리다이렉트 1홉) + 유입원 태그 — 비콘이 ?src를 실어 링크별 추적
+    const viewerBase = String(process.env.HANJUL_BASE_URL || 'https://hanjul.ai').replace(/\/+$/, '');
+    const targetUrl = `${viewerBase}/api/dm/v/dm-${dmShortCode}?src=${encodeURIComponent(v.slug)}`;
+
+    const alias = await upsertDmAliasLink({
+      companyId, userId, dmPageId: req.params.id, slug: v.slug, targetUrl,
+      title: normalizeCustomLinkTitle(d.rows[0].title),
+    });
+    if (!alias) {
+      return res.status(409).json({ error: '이미 사용 중인 주소입니다. 다른 문구를 입력해주세요.' });
+    }
+    return res.json({ success: true, alias: { ...alias, shortUrl: `${base}/${alias.code}` } });
+  } catch (err: any) {
+    if (isMissingDbObject(err)) {
+      return res.status(503).json({ success: false, error: ALIAS_MIGRATION_MSG, code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[DM 한글주소 생성] 오류:', err?.message);
+    return res.status(500).json({ error: '서버 오류' });
+  }
+});
+
+// GET /api/dm/:id/public-link-stats — 기본형(공용 링크) 추적: 클릭 → 열람 → 유니크 → 스크롤·체류 + 일별 추이
+//   개인화 발송 추적(recipients-tracking)과 분리된 두 번째 축 (Harold 확정 2026-07-15).
+dmRouter.get('/:id/public-link-stats', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    if (!isUuid(req.params.id)) return res.status(400).json({ error: '올바르지 않은 DM ID입니다.' });
+    if (!(await canAccessDm(req.params.id, companyId, req.user?.userType, req.user?.userId))) {
+      return res.status(403).json({ error: '본인이 생성한 DM만 접근할 수 있습니다.' });
+    }
+    const base = String(process.env.DM_SHORT_LINK_BASE || '').trim().replace(/\/+$/, '');
+
+    const d = await query(`SELECT short_code FROM dm_pages WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`, [req.params.id, companyId]);
+    if (d.rows.length === 0) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
+    const dmShortCode = d.rows[0].short_code ? String(d.rows[0].short_code) : '';
+
+    const alias = await getDmAliasLink(req.params.id, companyId);
+
+    // 공용(비개인화 = 익명) 열람 전체 — 수신자 토큰/phone 매칭이 없는 행
+    const totals = await query(
+      `SELECT COUNT(*)::int AS views,
+              COUNT(DISTINCT anonymous_id) FILTER (WHERE anonymous_id IS NOT NULL)::int AS unique_visitors,
+              COALESCE(SUM(open_count), 0)::int AS opens,
+              AVG(max_scroll_pct)::numeric(5,1) AS avg_scroll_pct,
+              AVG(duration_seconds)::numeric(10,0) AS avg_duration_seconds
+         FROM dm_views
+        WHERE dm_id = $1::uuid AND company_id = $2::uuid
+          AND recipient_token IS NULL AND phone IS NULL`,
+      [req.params.id, companyId],
+    );
+
+    // 유입 링크별 분해 (entry_source = 공용 링크 slug)
+    const bySource = await query(
+      `SELECT entry_source,
+              COUNT(*)::int AS views,
+              COUNT(DISTINCT anonymous_id) FILTER (WHERE anonymous_id IS NOT NULL)::int AS unique_visitors,
+              COALESCE(SUM(open_count), 0)::int AS opens,
+              AVG(max_scroll_pct)::numeric(5,1) AS avg_scroll_pct,
+              AVG(duration_seconds)::numeric(10,0) AS avg_duration_seconds
+         FROM dm_views
+        WHERE dm_id = $1::uuid AND company_id = $2::uuid AND entry_source IS NOT NULL
+        GROUP BY entry_source
+        ORDER BY views DESC`,
+      [req.params.id, companyId],
+    );
+
+    // 최근 14일 일별 추이 (공용 열람)
+    const daily = await query(
+      `SELECT to_char((viewed_at AT TIME ZONE 'Asia/Seoul')::date, 'MM-DD') AS day,
+              COUNT(*)::int AS views
+         FROM dm_views
+        WHERE dm_id = $1::uuid AND company_id = $2::uuid
+          AND recipient_token IS NULL AND phone IS NULL
+          AND viewed_at >= NOW() - INTERVAL '14 days'
+        GROUP BY (viewed_at AT TIME ZONE 'Asia/Seoul')::date
+        ORDER BY (viewed_at AT TIME ZONE 'Asia/Seoul')::date`,
+      [req.params.id, companyId],
+    );
+
+    return res.json({
+      success: true,
+      alias: alias ? { ...alias, shortUrl: base ? `${base}/${alias.code}` : null } : null,
+      publicUrl: dmShortCode && base ? `${base}/${dmShortCode}` : null,
+      totals: totals.rows[0] || null,
+      bySource: bySource.rows,
+      daily: daily.rows,
+    });
+  } catch (err: any) {
+    if (isMissingDbObject(err)) {
+      return res.status(503).json({ success: false, error: ALIAS_MIGRATION_MSG, code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[DM 공용링크 추적] 오류:', err?.message);
+    return res.status(500).json({ error: '서버 오류' });
+  }
+});
 
 // GET /api/dm/:id — 상세
 dmRouter.get('/:id', async (req: any, res: any, next: any) => {

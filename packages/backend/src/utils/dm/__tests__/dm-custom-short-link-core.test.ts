@@ -90,3 +90,55 @@ describe('normalizeCustomLinkTitle', () => {
     expect(normalizeCustomLinkTitle('x'.repeat(200))).toHaveLength(CUSTOM_LINK_TITLE_MAX);
   });
 });
+
+// ★ 2026-07-15 한글 주소(사용자 지정 slug) 검증 — Harold 확정 (이새 vo.la/반짝이새_07 사례)
+import { validateCustomSlug, CUSTOM_SLUG_MIN, CUSTOM_SLUG_MAX } from '../dm-custom-short-link-core';
+
+describe('validateCustomSlug — 허용', () => {
+  it('한글·영문·숫자·하이픈·언더스코어 조합', () => {
+    expect(validateCustomSlug('반짝이새_07').ok).toBe(true);
+    expect(validateCustomSlug('여름세일-2026').ok).toBe(true);
+    expect(validateCustomSlug('event01').ok).toBe(true);
+    expect(validateCustomSlug('세일').ok).toBe(true); // 최소 2자
+  });
+  it('앞뒤 공백 trim + NFC 정규화된 slug 반환', () => {
+    const r = validateCustomSlug('  반짝세일_07  ');
+    expect(r.ok).toBe(true);
+    expect(r.slug).toBe('반짝세일_07');
+  });
+  it('NFD(자소 분리) 입력도 NFC로 정규화 — iOS 대비', () => {
+    const nfd = '반짝세일'.normalize('NFD');
+    const r = validateCustomSlug(nfd);
+    expect(r.ok).toBe(true);
+    expect(r.slug).toBe('반짝세일'.normalize('NFC'));
+    expect(r.slug!.normalize('NFC')).toBe(r.slug); // 저장값 = NFC 고정
+  });
+  it('경계 길이 = MIN/MAX 통과', () => {
+    expect(validateCustomSlug('가'.repeat(CUSTOM_SLUG_MIN)).ok).toBe(true);
+    expect(validateCustomSlug('가'.repeat(CUSTOM_SLUG_MAX)).ok).toBe(true);
+  });
+});
+
+describe('validateCustomSlug — 차단', () => {
+  it('빈 값·비문자열·공백 포함', () => {
+    expect(validateCustomSlug('').ok).toBe(false);
+    expect(validateCustomSlug(undefined).ok).toBe(false);
+    expect(validateCustomSlug('반짝 세일').ok).toBe(false);
+  });
+  it('길이 초과/미달', () => {
+    expect(validateCustomSlug('가').ok).toBe(false);
+    expect(validateCustomSlug('가'.repeat(CUSTOM_SLUG_MAX + 1)).ok).toBe(false);
+  });
+  it('허용 외 문자 (점·슬래시·이모지·괄호·퍼센트)', () => {
+    expect(validateCustomSlug('세일.07').ok).toBe(false);
+    expect(validateCustomSlug('세일/07').ok).toBe(false);
+    expect(validateCustomSlug('세일(7월)').ok).toBe(false);
+    expect(validateCustomSlug('세일%07').ok).toBe(false);
+  });
+  it('내부 경로 예약어 + dm- 프리픽스(뷰어 코드 충돌)', () => {
+    expect(validateCustomSlug('api').ok).toBe(false);
+    expect(validateCustomSlug('admin').ok).toBe(false);
+    expect(validateCustomSlug('DM-abc').ok).toBe(false);
+    expect(validateCustomSlug('dm-세일').ok).toBe(false);
+  });
+});

@@ -203,6 +203,7 @@ body{font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFo
   var QS = new URLSearchParams(location.search);
   var PHONE = QS.get('p') || '';
   var RTOKEN = QS.get('r') || '';
+  var SRC = QS.get('src') || '';
   var ANON_KEY = 'dm_anon_' + CODE;
   var anonId = '';
   try {
@@ -228,7 +229,7 @@ body{font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFo
     if (!CODE) return;
     if (pageNum > pageReachedMax) pageReachedMax = pageNum;
     var body = JSON.stringify({
-      r: RTOKEN, phone: PHONE, anon: anonId, init: isInit ? 1 : 0,
+      r: RTOKEN, phone: PHONE, anon: anonId, src: SRC, init: isInit ? 1 : 0,
       page_reached: pageReachedMax, total_pages: total,
       duration: pendingDur,
       max_scroll_pct: total > 0 ? Math.min(100, Math.round((pageReachedMax / total) * 100)) : 0
@@ -451,6 +452,7 @@ ${counterHtml}
   var QS = new URLSearchParams(location.search);
   var PHONE = QS.get('p') || '';
   var RTOKEN = QS.get('r') || '';
+  var SRC = QS.get('src') || '';
   var MODE = document.body.getAttribute('data-layout-mode') || 'scroll';
   var TOTAL_PAGES = ${totalPages};
   // 익명 ID — 토큰·phone 없는 열람(발행 주소 복사/전달 링크)의 행 중복 방지 키
@@ -510,7 +512,7 @@ ${counterHtml}
     if (!CODE) return;
     updateScrollPct();
     var body = JSON.stringify({
-      r: RTOKEN, phone: PHONE, anon: anonId, init: isInit ? 1 : 0,
+      r: RTOKEN, phone: PHONE, anon: anonId, src: SRC, init: isInit ? 1 : 0,
       page_reached: pageReached, total_pages: TOTAL_PAGES || 1,
       duration: pendingDur, max_scroll_pct: maxScrollPct,
       section_interactions: pendingSections

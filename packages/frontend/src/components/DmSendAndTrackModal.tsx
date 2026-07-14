@@ -12,6 +12,7 @@ import { Sparkles, Send, RefreshCw, Check, X, Wand2, ShieldCheck, Clock, Smartph
 // ★ 2026-07-06 발송 추적 CSV 다운로드 (Harold 지시) — 공용 CT (BOM + 셀 이스케이프)
 import { downloadCsv, safeCsvFilename } from '../utils/csv-download';
 import { useToast } from './ToastProvider';
+import DmPublicLinkStatsPanel from './dm/DmPublicLinkStatsPanel';
 import TargetExtractModal, { type ExtractedTarget } from './TargetExtractModal';
 import AiRefineModal from './AiRefineModal';
 import SpamFilterTestModal from './SpamFilterTestModal';
@@ -185,6 +186,8 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
 
   const [tracking, setTracking] = useState<TrackData | null>(null);
   const [loadingTrack, setLoadingTrack] = useState(false);
+  // ★ 2026-07-15 추적 2원화 (Harold 확정) — 개인화 발송(수신자별) / 공용 링크(기본형·한글 주소)
+  const [trackAxis, setTrackAxis] = useState<'personal' | 'public'>('personal');
   // ★ 2026-07-06 미열람자 재발송 모드 — 추적 탭에서 고객만 추려 발송 탭으로(타겟 추출 대신 고객 id 지정)
   //   ★ 2026-07-12 D-3 일반화 — 미열람 외 열람·무반응/클릭/응모 세그먼트 후속 발송(라벨 동반)
   const [resendIds, setResendIds] = useState<string[] | null>(null);
@@ -243,6 +246,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
   // 카드 [발송 추적] 진입 = 추적 탭 직행 + 자동 로드
   useEffect(() => {
     if (!show) return;
+    setTrackAxis('personal');
     if (initialView === 'track') { void loadTracking(); }
     else { setView('compose'); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -603,7 +607,25 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto p-5 space-y-4">
-            {loadingTrack ? (
+            {/* ★ 2026-07-15 추적 2원화 서브탭 — 개인화 발송(누가) / 공용 링크(얼마나) */}
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setTrackAxis('personal')}
+                className={`px-3 py-1.5 rounded-lg text-[11.5px] font-semibold transition-colors border ${trackAxis === 'personal' ? 'bg-violet-500/20 text-violet-100 border-violet-400/40' : 'text-white/45 border-white/10 hover:text-white hover:bg-white/5'}`}
+              >
+                개인화 발송
+              </button>
+              <button
+                onClick={() => setTrackAxis('public')}
+                className={`px-3 py-1.5 rounded-lg text-[11.5px] font-semibold transition-colors border ${trackAxis === 'public' ? 'bg-sky-500/20 text-sky-100 border-sky-400/40' : 'text-white/45 border-white/10 hover:text-white hover:bg-white/5'}`}
+              >
+                공용 링크
+              </button>
+              <span className="text-[10px] text-white/30 ml-1 hidden md:inline">개인화 = 문자 개인화 링크(수신자별) · 공용 = 한글 주소·발행 주소(집계)</span>
+            </div>
+            {trackAxis === 'public' ? (
+              <DmPublicLinkStatsPanel dmId={dmId} />
+            ) : loadingTrack ? (
               <div className="py-12 flex justify-center text-white/50"><RefreshCw className="w-6 h-6 animate-spin" /></div>
             ) : tracking ? (
               <>

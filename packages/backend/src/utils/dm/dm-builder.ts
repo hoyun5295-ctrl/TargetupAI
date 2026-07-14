@@ -465,6 +465,8 @@ export interface DmViewTrackInput {
   sectionDelta?: DmSectionInteractions | null;
   /** 뷰어 진입 비콘 여부 — 신규 행 또는 재방문 시 view_count +1 */
   isInit?: boolean;
+  /** ★ 2026-07-15 유입원 — 공용 링크(한글 별칭 등) slug. 뷰어 ?src= → 비콘 전달. 첫 유입원만 기록 */
+  entrySource?: string | null;
   ip?: string | null;
   userAgent?: string | null;
 }
@@ -513,6 +515,8 @@ export async function trackDmView(input: DmViewTrackInput) {
   const token = input.recipientToken ? String(input.recipientToken).slice(0, 32) : null;
   const phone = input.phone ? String(input.phone).slice(0, 20) : null;
   const anonymousId = input.anonymousId ? String(input.anonymousId).slice(0, 100) : null;
+  // ★ 2026-07-15 유입원(공용 링크 slug) — 쓰기(validateCustomSlug)와 동일 NFC 정규화. 20자=code varchar(20) 동기
+  const entrySource = input.entrySource ? String(input.entrySource).trim().normalize('NFC').slice(0, 20) : null;
 
   // UPSERT 키 우선순위: 토큰 > phone > 익명ID (같은 사람 = 같은 행에 누적, 열람 1회 = 1행)
   let existing: { id: string; section_interactions: any } | null = null;
@@ -602,6 +606,23 @@ export async function trackDmView(input: DmViewTrackInput) {
       } catch (e: any) {
         if (!String(e?.message || '').includes('does not exist')) console.warn('[trackDmView] 첫 기기 기록 실패:', e?.message);
       }
+    }
+  }
+
+  // ★ 2026-07-15 유입원(공용 링크) 기록 — 첫 유입원만(COALESCE 시맨틱). 격리 UPDATE라
+  //   entry_source 컬럼 미마이그레이션(ALTER 전)이어도 본 추적 무결(0706 seen_anon_ids 선례).
+  if (entrySource) {
+    try {
+      await query(
+        `UPDATE dm_views SET entry_source = $1
+          WHERE dm_id = $2 AND company_id = $3 AND entry_source IS NULL
+            AND ((recipient_token IS NOT NULL AND recipient_token = $4)
+              OR ($5::text IS NOT NULL AND phone = $5)
+              OR (recipient_token IS NULL AND phone IS NULL AND anonymous_id = $6))`,
+        [entrySource, dmId, companyId, token, phone, anonymousId],
+      );
+    } catch (e: any) {
+      if (!String(e?.message || '').includes('does not exist')) console.warn('[trackDmView] 유입원 기록 실패:', e?.message);
     }
   }
 }

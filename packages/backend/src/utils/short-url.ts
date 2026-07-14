@@ -172,8 +172,13 @@ export async function shortenUrlsInText(
   // 중복 URL 제거 (동일 URL 다중 등장 시 한 번만 단축)
   const uniqueUrls = Array.from(new Set(urls));
 
+  // ★ 2026-07-15 hlj.kr(DM 단축 도메인) 재단축 금지 — 한글 주소(hlj.kr/반짝세일_07)를 본문에 넣으면
+  //   app.hanjul.ai/c/랜덤으로 도로 감싸져 한글 주소의 의미가 사라지던 경로 차단.
+  const dmShortBase = String(process.env.DM_SHORT_LINK_BASE || '').trim().replace(/\/+$/, '');
+
   for (const url of uniqueUrls) {
     if (url.startsWith(`${SHORT_URL_BASE}/`)) continue;
+    if (dmShortBase && url.startsWith(`${dmShortBase}/`)) continue;
     try {
       const { shortUrl } = await createShortUrl({
         companyId: ctx.companyId,

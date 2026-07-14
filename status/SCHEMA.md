@@ -823,8 +823,10 @@
 | open_count | integer NOT NULL DEFAULT 1 | ★ 2026-07-06 ALTER — 재열람 횟수(진입 비콘마다 +1) |
 | seen_anon_ids | jsonb | ★ 2026-07-06 ALTER — 열람 기기 익명ID 배열(최대 20 — 공유 신호) |
 | **max_scroll_pct** | **integer** | **★ 2026-07-02 ALTER — 스크롤 최대 도달 %(0~100), NULL=미측정** |
+| entry_source | varchar(20) | ★ 2026-07-15 ALTER **대기** — 공용 링크 유입원(한글 별칭 slug·NFC). 격리 UPDATE라 미실행이어도 추적 무결 |
 - INDEX: idx_dm_views_token (dm_id, recipient_token) WHERE recipient_token IS NOT NULL ★ 2026-07-02
 - INDEX: idx_dm_views_anon (dm_id, anonymous_id) WHERE anonymous_id IS NOT NULL ★ 2026-07-02
+- INDEX: idx_dm_views_entry_source (dm_id, entry_source) WHERE entry_source IS NOT NULL ★ 2026-07-15 대기
 
 ### dm_recipient_tokens (DM 수신자별 토큰 — 발송 고객 1급 연결) ★ 2026-07-03 information_schema 실측 기록
 > 0702 수신자 추적 작업 신설분. DM 발송 시 고객별 토큰 발급(dm.ts → dm-recipient-token.ts) — "DM 발송 고객 명단"의 원천. 성과리포트 고객 축이 발송 집합으로 사용.
@@ -847,8 +849,9 @@
 | id | uuid PK DEFAULT gen_random_uuid() |
 | company_id | uuid NOT NULL FK companies ON DELETE CASCADE |
 | created_by | uuid |
-| code | varchar(12) NOT NULL UNIQUE — base62 8자(generateDmShortCode) |
+| code | varchar(12) NOT NULL UNIQUE — base62 8자(generateDmShortCode). ★ 2026-07-15 varchar(20) ALTER **대기**(한글 별칭 slug 2~20자·NFC) |
 | target_url | text NOT NULL |
+| dm_page_id | uuid REF dm_pages CASCADE — ★ 2026-07-15 ALTER **대기**. 발행 DM 한글 별칭 연결(NULL=기존 외부 URL 단축). 부분 UNIQUE(dm_page_id)=DM당 별칭 1개 |
 | title | varchar(100) |
 | is_active | boolean NOT NULL DEFAULT true — 비활성=접속 시 서비스 홈 폴백 |
 | click_count | integer NOT NULL DEFAULT 0 |

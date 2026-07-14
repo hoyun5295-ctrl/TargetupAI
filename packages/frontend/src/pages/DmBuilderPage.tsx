@@ -21,6 +21,7 @@ import { takeEventDraft, EVENT_DM_DRAFT_KEY } from '../components/EventCampaignM
 import ImageToCopyButton from '../components/ImageToCopyButton';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import DmShortLinkModal from '../components/dm/DmShortLinkModal';
+import DmKoreanAliasModal from '../components/dm/DmKoreanAliasModal';
 import DmSendAndTrackModal from '../components/DmSendAndTrackModal';
 import DmTopBar from '../components/dm/DmTopBar';
 import DmLeftPanel from '../components/dm/DmLeftPanel';
@@ -430,6 +431,9 @@ export default function DmBuilderPage() {
 
   // ★ 2026-07-02(3) 발송 이력 카드 → 발송 추적 모달(track 직행) — 수신자별 열람·깊이·클릭·응모
   const [trackTarget, setTrackTarget] = useState<{ id: string; title?: string } | null>(null);
+
+  // ★ 2026-07-15 발행 DM 한글 주소 별칭 모달 (hlj.kr/반짝세일_07 — Harold 확정, 무료·DM당 1개)
+  const [aliasTarget, setAliasTarget] = useState<{ id: string; title?: string } | null>(null);
 
   // 발행 주소 복사 — 이미 발행된 DM은 발행 멱등(추가 과금 0)이라 그대로 short_url 재사용. 편집 재발행 불필요.
   const handleCopyUrl = async (id: string) => {
@@ -1067,6 +1071,7 @@ export default function DmBuilderPage() {
                     onClone={handleClone}
                     onCopyUrl={handleCopyUrl}
                     onTrack={(id, title) => setTrackTarget({ id, title })}
+                    onKoreanAlias={(id, title) => setAliasTarget({ id, title })}
                     cloning={cloningId === dm.id}
                   />
                 ))}
@@ -1187,6 +1192,9 @@ export default function DmBuilderPage() {
       {/* ★ 2026-07-02(3) 카드 [발송 추적] — 추적 탭 직행 */}
       {trackTarget && (
         <DmSendAndTrackModal dmId={trackTarget.id} dmTitle={trackTarget.title} show initialView="track" onClose={() => setTrackTarget(null)} />
+      )}
+      {aliasTarget && (
+        <DmKoreanAliasModal open dmId={aliasTarget.id} dmTitle={aliasTarget.title} onClose={() => setAliasTarget(null)} />
       )}
 
       {toast && <Toast toast={toast} />}
@@ -1352,12 +1360,13 @@ function EditorModals() {
 
 // EmptyList 영역 영구 폐기 (D216+ 정합 — 자연어 입력 + 빠른 시작 + 자유롭게 DM 생성 영역 흐름 정합)
 
-function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, onTrack, cloning }: {
+function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, onTrack, onKoreanAlias, cloning }: {
   dm: DmListItem;
   onEdit: (id: string, mode?: string) => void;
   onDelete: (id: string) => void;
   onClone: (id: string) => void;
   onCopyUrl: (id: string) => void;
+  onKoreanAlias?: (id: string, title?: string) => void;
   /** ★ 2026-07-02(3) 발송 이력 카드 → 발송 추적(열람·깊이·클릭·응모) 바로 진입 */
   onTrack?: (id: string, title?: string) => void;
   cloning?: boolean;
@@ -1434,15 +1443,28 @@ function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, onTrack, cloning }: 
       </div>
       <div style={{ flex: 1 }} />
       {dm.short_code && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onCopyUrl(dm.id); }}
-          title="발행 주소 복사 (추가 과금 없음)"
-          style={{ height: 32, width: '100%', background: 'rgba(16,185,129,0.12)', color: '#6ee7b7', border: '1px solid rgba(16,185,129,0.35)', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(16,185,129,0.2)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(16,185,129,0.12)'; }}
-        >
-          발행 주소 복사
-        </button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); onCopyUrl(dm.id); }}
+            title="발행 주소 복사 (추가 과금 없음)"
+            style={{ flex: 1, height: 32, background: 'rgba(16,185,129,0.12)', color: '#6ee7b7', border: '1px solid rgba(16,185,129,0.35)', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(16,185,129,0.2)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(16,185,129,0.12)'; }}
+          >
+            발행 주소 복사
+          </button>
+          {onKoreanAlias && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onKoreanAlias(dm.id, dm.title); }}
+              title="한글 주소 — hlj.kr/반짝세일_07처럼 기억하기 쉬운 공용 주소 (무료)"
+              style={{ height: 32, padding: '0 10px', background: 'rgba(56,189,248,0.12)', color: '#7dd3fc', border: '1px solid rgba(56,189,248,0.35)', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap' }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(56,189,248,0.2)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(56,189,248,0.12)'; }}
+            >
+              한글 주소
+            </button>
+          )}
+        </div>
       )}
       {dm.has_send_history && onTrack && (
         <button
