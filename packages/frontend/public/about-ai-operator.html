@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <title>한줄로 — AI Operator 소개</title>
 <meta name="description" content="한줄로 AI Operator — 마케팅 실무를 바꾸는 7가지 기능. 자연어 한 줄이면 충분합니다. 실행은 항상 사용자가 승인합니다." />
-<meta name="fx-version" content="v3-cinematic-20260713" />
+<meta name="fx-version" content="v4-spectacle-20260715" />
 
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
@@ -635,10 +635,148 @@
     .stat3 .s b { font-size:13px; }
     .vtabs i { padding:5px 9px; font-size:10.5px; }
   }
+
+  /* ═══ v4 스펙터클 (2026-07-15 Harold 지시) ═══════════════ */
+
+  /* 그라데이션 텍스트 — 흐르는 빛 (전 장 공통) */
+  .em { background-size:220% 100%; animation:emflow 6.5s ease-in-out infinite; }
+  @keyframes emflow { 0%,100% { background-position:0% 50%; } 50% { background-position:100% 50%; } }
+
+  /* 떠다니는 오브 — 무대 가장자리 글로우 */
+  .orb { position:fixed; border-radius:50%; pointer-events:none; z-index:0; filter:blur(70px); opacity:.55; }
+  .orb.o1 { width:440px; height:440px; left:-140px; top:10%;
+    background:radial-gradient(circle, rgba(139,124,247,0.30), transparent 70%); animation:orbf 17s ease-in-out infinite; }
+  .orb.o2 { width:380px; height:380px; right:-120px; bottom:6%;
+    background:radial-gradient(circle, rgba(103,232,249,0.22), transparent 70%); animation:orbf 21s ease-in-out infinite reverse; }
+  @keyframes orbf { 0%,100% { transform:translate(0,0) scale(1); } 50% { transform:translate(44px,-30px) scale(1.14); } }
+
+  /* S1 — 히어로 기능 칩 대형화 (쥐똥 → 기능 카드) */
+  .chipnav.big { gap:10px; margin-top:30px; max-width:760px; }
+  .chipnav.big .chip { font-size:15px; font-weight:700; padding:13px 20px; border-radius:14px; letter-spacing:-0.01em;
+    background:rgba(139,124,247,0.10); border:1px solid rgba(139,124,247,0.35); color:rgba(255,255,255,0.94);
+    box-shadow:0 4px 18px rgba(109,93,240,0.16); position:relative; overflow:hidden;
+    transition:transform .18s ease, border-color .18s ease, background .18s ease, box-shadow .18s ease; }
+  .chipnav.big .chip i { font-size:11px; font-weight:800; padding:3px 8px; border-radius:7px; margin-right:10px;
+    background:rgba(139,124,247,0.24); color:#ddd6ff; letter-spacing:0.1em; }
+  .chipnav.big .chip::after { content:""; position:absolute; top:0; left:-80%; width:55%; height:100%; pointer-events:none;
+    background:linear-gradient(100deg, transparent, rgba(255,255,255,0.14), transparent); transform:skewX(-18deg);
+    animation:chipshine 4.8s ease-in-out infinite; animation-delay:var(--sd, 0s); }
+  @keyframes chipshine { 0%, 62% { left:-80%; } 88%, 100% { left:130%; } }
+  .chipnav.big .chip:hover { transform:translateY(-3px); border-color:rgba(192,132,252,0.75);
+    background:rgba(139,124,247,0.22); box-shadow:0 12px 34px rgba(139,124,247,0.38); color:#fff; }
+
+  /* S1 — 숫자 7 글로우 맥동 + 역회전 링 */
+  .hero .seven { animation:sevenPulse 5.5s ease-in-out infinite; }
+  @keyframes sevenPulse {
+    0%,100% { filter:drop-shadow(0 0 26px rgba(139,124,247,0.16)); }
+    50%     { filter:drop-shadow(0 0 68px rgba(139,124,247,0.42)); } }
+  .hero .ring.r2 { width:clamp(210px,25vw,370px); height:clamp(210px,25vw,370px);
+    border-color:rgba(103,232,249,0.22); animation:spinrev 44s linear infinite; }
+  .hero .ring.r2::before { top:auto; bottom:7%; background:var(--cyan); box-shadow:0 0 16px rgba(103,232,249,0.9); }
+  @keyframes spinrev { to { transform:translateY(-50%) rotate(-360deg); } }
+
+  /* S2 — "마케터 단 한 명" 대형 강조 */
+  .solo { margin-top:26px; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  .solo .s1, .solo .s3 { font-size:clamp(14px,1.5vw,18px); color:var(--muted); letter-spacing:-0.01em; }
+  .solo .s2 { position:relative; font-size:clamp(30px,3.6vw,50px); font-weight:900; letter-spacing:-0.045em; line-height:1;
+    background:var(--grad); background-size:220% 100%; -webkit-background-clip:text; background-clip:text; color:transparent;
+    animation:emflow 6.5s ease-in-out infinite; filter:drop-shadow(0 4px 22px rgba(139,124,247,0.3)); }
+  .solo .s2::after { content:""; position:absolute; left:2px; right:6px; bottom:-9px; height:3px; border-radius:3px;
+    background:linear-gradient(90deg, var(--accent), var(--accent2) 60%, transparent); }
+
+  /* S3 — 여정 STEP 뱃지 + 종료 강조 */
+  .jstep .box b { display:flex; align-items:center; gap:8px; }
+  .stp { font-style:normal; font-size:9.5px; font-weight:800; letter-spacing:0.12em; white-space:nowrap;
+    color:#ddd6ff; background:rgba(139,124,247,0.18); border:1px solid rgba(139,124,247,0.42); padding:3px 8px; border-radius:6px; }
+  .stp.end { color:#a9f0d1; background:rgba(110,231,183,0.12); border-color:rgba(110,231,183,0.42); }
+  .jstep.goal .box { box-shadow:0 0 26px rgba(110,231,183,0.13); }
+  .jstep.goal .dot { animation:goalPulse 2.4s ease-in-out infinite; }
+  @keyframes goalPulse { 0%,100% { box-shadow:0 0 0 0 rgba(110,231,183,0.45); } 50% { box-shadow:0 0 0 7px rgba(110,231,183,0); } }
+
+  /* 싱크 에이전트 — 흐름 다이어그램 */
+  .syncflow { display:flex; flex-direction:column; }
+  .snode { border:1px solid var(--line2); border-radius:12px; padding:12px 14px; background:rgba(255,255,255,0.04); }
+  .snode em { display:block; font-style:normal; font-size:10px; font-weight:800; letter-spacing:0.18em; color:var(--dim); margin-bottom:3px; }
+  .snode b { font-size:14px; font-weight:800; letter-spacing:-0.01em; }
+  .snode span { display:block; margin-top:2px; font-size:11.5px; color:var(--muted); }
+  .snode.agent { border-color:rgba(139,124,247,0.5); background:rgba(139,124,247,0.10); box-shadow:0 0 26px rgba(139,124,247,0.14); }
+  .snode.dest { border-color:rgba(110,231,183,0.4); background:rgba(110,231,183,0.06); }
+  .slink { display:flex; flex-direction:column; align-items:center; gap:3px; padding:5px 0; }
+  .slink i { width:4px; height:4px; border-radius:50%; background:var(--accent); opacity:0.25; animation:syncdrop 1.6s ease-in-out infinite; }
+  .slink i:nth-child(2) { animation-delay:0.25s; } .slink i:nth-child(3) { animation-delay:0.5s; }
+  @keyframes syncdrop { 0% { opacity:0.15; transform:translateY(-3px); } 50% { opacity:1; } 100% { opacity:0.15; transform:translateY(3px); } }
+  .syncstat { display:flex; gap:7px; flex-wrap:wrap; margin-top:12px; }
+  /* 자사몰 연동 블록 — 커넥터 전부 지원 (v4.1) */
+  .mallrow { border:1px solid rgba(103,232,249,0.4); border-radius:12px; padding:11px 13px;
+    background:rgba(103,232,249,0.06); margin-bottom:10px; }
+  .mallrow em { display:block; font-style:normal; font-size:10px; font-weight:800; letter-spacing:0.18em; color:#9be8f7; margin-bottom:7px; }
+  .mallrow .mchips { display:flex; flex-wrap:wrap; gap:6px; }
+  .mallrow .mchips span { font-size:11px; font-weight:700; padding:4px 10px; border-radius:8px;
+    background:rgba(103,232,249,0.12); border:1px solid rgba(103,232,249,0.35); color:#c9f2fb; }
+  .mallrow .mcap { display:block; margin-top:7px; font-size:11px; color:var(--muted); }
+
+  /* ═══ v4.1 핵심 문장 찬란 강조 (Harold — "각 장의 꼭 해야 할 말이 빛나야") ═══ */
+
+  /* 헤드라인 핵심구 — 장 진입 순간 한 번 찬란하게 번쩍 */
+  .slide.on h1 .em, .slide.on h2 .em {
+    animation:emflow 6.5s ease-in-out infinite, emPop 1.25s ease-out .45s 1; }
+  @keyframes emPop {
+    0%   { filter:drop-shadow(0 0 0 rgba(192,132,252,0)); }
+    35%  { filter:drop-shadow(0 0 36px rgba(192,132,252,0.8)) drop-shadow(0 0 90px rgba(139,124,247,0.45)); }
+    100% { filter:drop-shadow(0 0 0 rgba(192,132,252,0)); } }
+
+  /* 스포트라이트 카드 — 각 장의 "꼭 해야 할 말"(.note) 전면 격상 */
+  .note { position:relative; overflow:hidden; margin-top:22px; padding:13px 18px; border-radius:12px;
+    font-size:14.5px; font-weight:700; color:#d8fbe9; letter-spacing:-0.01em;
+    background:linear-gradient(100deg, rgba(110,231,183,0.13), rgba(103,232,249,0.07));
+    border:1px solid rgba(110,231,183,0.5); }
+  .note::before { content:""; position:absolute; inset:-1px; border-radius:12px; pointer-events:none;
+    animation:noteGlow 2.6s ease-in-out infinite; }
+  @keyframes noteGlow {
+    0%,100% { box-shadow:0 0 14px rgba(110,231,183,0.18), inset 0 0 18px rgba(110,231,183,0.05); }
+    50%     { box-shadow:0 0 34px rgba(110,231,183,0.45), inset 0 0 26px rgba(110,231,183,0.12); } }
+  .note::after { content:""; position:absolute; top:0; left:-70%; width:45%; height:100%; pointer-events:none;
+    background:linear-gradient(100deg, transparent, rgba(255,255,255,0.16), transparent); transform:skewX(-16deg);
+    animation:chipshine 3.8s ease-in-out infinite; }
+
+  /* 핵심 수치 칩(10~15분 계열) — 뜨겁게 */
+  .chip.hot { font-size:12.5px; font-weight:800; padding:7px 14px; color:#eafff5;
+    background:linear-gradient(100deg, rgba(110,231,183,0.22), rgba(103,232,249,0.14));
+    border:1px solid rgba(110,231,183,0.65); animation:hotPulse 2.2s ease-in-out infinite; }
+  @keyframes hotPulse {
+    0%,100% { box-shadow:0 0 10px rgba(110,231,183,0.25); transform:translateY(0); }
+    50%     { box-shadow:0 0 26px rgba(110,231,183,0.6), 0 0 60px rgba(110,231,183,0.18); transform:translateY(-1px); } }
+
+  /* S1 신뢰 선언(.approve) — 발광 격상 */
+  .hero .approve { position:relative; overflow:hidden; font-size:15px; font-weight:600; padding:13px 19px;
+    border-color:rgba(110,231,183,0.5); background:linear-gradient(100deg, rgba(110,231,183,0.10), rgba(255,255,255,0.04)); }
+  .hero .approve::before { content:""; position:absolute; inset:-1px; border-radius:12px; pointer-events:none;
+    animation:noteGlow 2.8s ease-in-out infinite; }
+  .hero .approve::after { content:""; position:absolute; top:0; left:-70%; width:45%; height:100%; pointer-events:none;
+    background:linear-gradient(100deg, transparent, rgba(255,255,255,0.13), transparent); transform:skewX(-16deg);
+    animation:chipshine 4.2s ease-in-out infinite; animation-delay:.8s; }
+  .hero .approve b { font-size:16px; }
+
+  /* 본문 키워드 형광펜 — 전 장 points 굵은 글씨 */
+  ul.points li b { background:linear-gradient(180deg, transparent 58%, rgba(139,124,247,0.32) 58%);
+    border-radius:3px; padding:0 3px; margin:0 -1px; }
+
+  /* S10 다음 액션 추천 — 글로우 동참 */
+  .nextact { position:relative; animation:noteGlow 3s ease-in-out infinite; border-color:rgba(103,232,249,0.5); }
+
+  @media (max-width: 860px) {
+    .orb { display:none; }
+    .chipnav.big .chip { font-size:13px; padding:10px 14px; }
+    .chipnav.big .chip::after { display:none; }
+    .solo .s2 { font-size:clamp(26px,7vw,36px); }
+    .note::after, .hero .approve::after { display:none; }
+  }
 </style>
 </head>
 <body>
 <div class="aurora"></div>
+<div class="orb o1"></div>
+<div class="orb o2"></div>
 <canvas id="fx"></canvas>
 <div class="spot" id="spot"></div>
 <div class="progress" id="progress"></div>
@@ -682,18 +820,19 @@
       <section class="slide hero">
         <div class="seven">7</div>
         <div class="ring"></div>
+        <div class="ring r2"></div>
         <div class="kicker rv" style="--d:.05s">AI Operator · Hanjullo</div>
         <h1 class="rv" style="--d:.12s">마케팅 실무를 바꾸는<br /><span class="em">7가지 기능</span></h1>
         <p class="sub rv" style="--d:.2s">캠페인 기획부터 콘텐츠 제작, 발송, 분석까지 —<br />마케터 혼자, 자연어 한 줄이면 충분합니다.</p>
         <div class="approve rv" style="--d:.28s">AI가 제안하고, <b>발송 승인은 항상 사람</b>이 합니다</div>
-        <div class="chipnav rv" style="--d:.36s; max-width:680px">
-          <button class="chip" data-goto="2"><i>01</i>여정설계</button>
-          <button class="chip" data-goto="3"><i>02</i>자동마케팅</button>
-          <button class="chip" data-goto="5"><i>03</i>모바일 DM</button>
-          <button class="chip" data-goto="6"><i>04</i>이메일 빌더</button>
-          <button class="chip" data-goto="7"><i>05</i>인앱 메시지</button>
-          <button class="chip" data-goto="8"><i>06</i>브랜드보이스</button>
-          <button class="chip" data-goto="9"><i>07</i>마케팅분석</button>
+        <div class="chipnav big rv" style="--d:.36s">
+          <button class="chip" data-goto="2" style="--sd:0s"><i>01</i>여정설계</button>
+          <button class="chip" data-goto="3" style="--sd:.35s"><i>02</i>자동마케팅</button>
+          <button class="chip" data-goto="5" style="--sd:.7s"><i>03</i>모바일 DM</button>
+          <button class="chip" data-goto="6" style="--sd:1.05s"><i>04</i>이메일 빌더</button>
+          <button class="chip" data-goto="7" style="--sd:1.4s"><i>05</i>인앱 메시지</button>
+          <button class="chip" data-goto="8" style="--sd:1.75s"><i>06</i>브랜드보이스</button>
+          <button class="chip" data-goto="9" style="--sd:2.1s"><i>07</i>마케팅분석</button>
         </div>
         <p class="sub rv" style="--d:.42s; font-size:12px; color:var(--dim); margin-top:12px">누르면 해당 기능으로 바로 이동합니다</p>
         <div class="corp">INVITO corp.</div>
@@ -713,7 +852,11 @@
           <div class="gcard rv" style="--d:.38s"><div class="no">07</div><h3>마케팅분석</h3><p>퍼널·ROI·시간대 반응, 다음 액션 추천까지.</p></div>
           <div class="gcard all rv" style="--d:.42s"><div class="no">+</div><h3>전 채널 통합</h3><p>SMS · LMS · MMS · 카카오 알림톡 · 인앱 · Email · DM — 도구를 늘리지 않아도, 전부 한 곳에서.</p></div>
         </div>
-        <p class="sub rv" style="--d:.48s">— 그리고 이 일곱 가지를 다루는 데 필요한 사람은, 마케터 한 명이면 충분합니다.</p>
+        <div class="solo rv" style="--d:.48s">
+          <span class="s1">이 일곱 가지를 다루는 데 필요한 사람은</span>
+          <span class="s2">마케터, 단 한 명</span>
+          <span class="s3">이면 충분합니다</span>
+        </div>
       </section>
 
       <!-- S3 · 01 여정설계 -->
@@ -736,11 +879,11 @@
               <div class="body">
                 <div class="jinput"><span class="q">"휴면 고객을 다시 불러와줘"</span><span class="go">생성</span></div>
                 <div class="jsteps">
-                  <div class="jstep"><span class="dot"></span><div class="box"><b>진입 · 휴면 60일+</b><span>조건 충족 시 자동</span></div></div>
-                  <div class="jstep"><span class="dot"></span><div class="box"><b>카카오 알림톡 발송</b><span>반려 시 SMS 자동 폴백</span></div></div>
-                  <div class="jstep"><span class="dot"></span><div class="box"><b>대기 · 3일</b><span>미클릭 고객만 다음 단계</span></div></div>
-                  <div class="jstep"><span class="dot"></span><div class="box"><b>리마인드 · LMS</b><span>후속 1회</span></div></div>
-                  <div class="jstep goal"><span class="dot"></span><div class="box"><b>구매 시 자동 종료</b><span>목표 달성 · 여정 완료</span></div></div>
+                  <div class="jstep"><span class="dot"></span><div class="box"><b><i class="stp">진입</i>휴면 60일+ 고객</b><span>조건 충족 시 여정 자동 시작</span></div></div>
+                  <div class="jstep"><span class="dot"></span><div class="box"><b><i class="stp">STEP 1</i>안부 문자 · LMS</b><span>기본 채널 = 문자메시지</span></div></div>
+                  <div class="jstep"><span class="dot"></span><div class="box"><b><i class="stp">STEP 2</i>대기 · 3일</b><span>미반응 고객만 다음 단계</span></div></div>
+                  <div class="jstep"><span class="dot"></span><div class="box"><b><i class="stp">STEP 3</i>혜택 리마인드 · SMS</b><span>후속 1회 · 알림톡 확장 가능</span></div></div>
+                  <div class="jstep goal"><span class="dot"></span><div class="box"><b><i class="stp end">종료</i>구매 완료 — 여정 자동 종료</b><span>목표 달성 · 이후 발송 없음</span></div></div>
                 </div>
               </div>
             </div>
@@ -793,7 +936,7 @@
           <div class="m rv" style="--d:.29s" data-goto="6"><div class="th mail"></div><b><i>04</i>이메일 빌더</b><p>같은 블록 방식으로, 메일함까지 이어집니다.</p></div>
           <div class="m rv" style="--d:.34s" data-goto="7"><div class="th app"></div><b><i>05</i>인앱 메시지</b><p>자사몰 방문 고객의 화면 위에 바로 띄웁니다.</p></div>
         </div>
-        <div class="bflow rv" style="--d:.4s"><b>AI 초안</b><span class="ar">→</span><span>원하는 곳만 편집</span><span class="ar">→</span><b>발행 · 성과 추적</b><span class="chip mint">처음부터 발행까지 10~15분</span></div>
+        <div class="bflow rv" style="--d:.4s"><b>AI 초안</b><span class="ar">→</span><span>원하는 곳만 편집</span><span class="ar">→</span><b>발행 · 성과 추적</b><span class="chip hot">처음부터 발행까지 10~15분</span></div>
         <p class="sub rv" style="--d:.46s; font-size:12px; color:var(--dim); margin-top:16px">카드를 누르면 각 기능 소개로 이동합니다</p>
       </section>
 
@@ -830,7 +973,7 @@
                 <div class="home"></div>
               </div>
             </div>
-            <div class="devchips"><span class="chip mint">디자이너 없이 10~15분</span><span class="chip violet">수신자별 열람 추적</span><span class="chip">클릭 집계</span><span class="chip">단축 URL</span></div>
+            <div class="devchips"><span class="chip hot">디자이너 없이 10~15분</span><span class="chip violet">수신자별 열람 추적</span><span class="chip">클릭 집계</span><span class="chip">단축 URL</span></div>
           </div>
         </div>
       </section>
@@ -870,7 +1013,7 @@
               <a class="mcta">컬렉션 보러 가기</a>
               <div class="mfoot"><span>메종 블랑 · 서울특별시</span><span>수신거부</span></div>
             </div>
-            <div class="devchips"><span class="chip mint">혼자서 10~15분 완성</span><span class="chip violet">오픈 추적</span><span class="chip">클릭 추적</span><span class="chip">%고객명% 개인화</span></div>
+            <div class="devchips"><span class="chip hot">혼자서 10~15분 완성</span><span class="chip violet">오픈 추적</span><span class="chip">클릭 추적</span><span class="chip">%고객명% 개인화</span></div>
           </div>
         </div>
       </section>
@@ -909,7 +1052,7 @@
                 <span class="go">가을 에디션 먼저 보기</span>
               </div>
             </div>
-            <div class="devchips"><span class="chip mint">설치 한 번 · 제작은 10~15분</span><span class="chip violet">A/B 테스트 내장</span><span class="chip">쇼핑몰 연동</span></div>
+            <div class="devchips"><span class="chip hot">설치 한 번 · 제작은 10~15분</span><span class="chip violet">A/B 테스트 내장</span><span class="chip">쇼핑몰 연동</span></div>
           </div>
         </div>
       </section>
@@ -988,7 +1131,80 @@
         </div>
       </section>
 
-      <!-- S11 · 클로즈 -->
+      <!-- S11 · 자사몰 연동 -->
+      <section class="slide">
+        <div class="feature">
+          <div>
+            <div class="fbadge rv" style="--d:.05s"><b>+</b> MALL SYNC · 자사몰 연동</div>
+            <h2 class="rv" style="--d:.1s">자사몰의 모든 데이터,<br /><span class="em">연동 몇 분이면 연결됩니다</span></h2>
+            <ul class="points">
+              <li class="rv" style="--d:.16s"><b>카페24 · 아임웹 · 메이크샵 · 고도몰 · 네이버 커머스</b> — 주요 자사몰을 전부 지원합니다.</li>
+              <li class="rv" style="--d:.21s"><b>구매 · 장바구니 · 회원 데이터</b>가 자동으로 한줄로에 흘러들어옵니다.</li>
+              <li class="rv" style="--d:.26s">장바구니 이탈 · 재구매 시점 같은 <b>행동 신호</b>가 타겟 추출과 여정에 바로 쓰입니다.</li>
+              <li class="rv" style="--d:.31s">인앱 메시지도 같은 연동으로 — <b>방문 고객 화면 위</b>에 바로 띄웁니다.</li>
+            </ul>
+            <div class="note rv" style="--d:.36s">연동 몇 분이면, 고객의 행동이 곧 마케팅 재료가 됩니다</div>
+          </div>
+          <div class="shot rv" style="--d:.2s">
+            <div class="console">
+              <div class="bar"><i></i><i></i><i></i><span>자사몰 연동</span></div>
+              <div class="body">
+                <div class="mallrow">
+                  <em>주요 몰 전부 지원</em>
+                  <div class="mchips"><span>카페24</span><span>아임웹</span><span>메이크샵</span><span>고도몰</span><span>네이버 커머스</span></div>
+                </div>
+                <div class="syncflow">
+                  <div class="snode"><em>자사몰</em><b>구매 · 장바구니 · 회원</b><span>행동 데이터까지 자동 수집</span></div>
+                  <div class="slink"><i></i><i></i><i></i></div>
+                  <div class="snode dest"><em>한줄로</em><b>고객 DB 자동 반영</b><span>타겟 추출 · 여정 · 인앱에 즉시 활용</span></div>
+                </div>
+                <div class="syncstat">
+                  <span class="chip mint">연동 몇 분이면 연결</span>
+                  <span class="chip violet">장바구니 이탈 감지</span>
+                  <span class="chip">재구매 시점 포착</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- S12 · 싱크 에이전트 (자체 시스템) -->
+      <section class="slide">
+        <div class="feature">
+          <div>
+            <div class="fbadge rv" style="--d:.05s"><b>+</b> SYNC AGENT · 자체 시스템 연결</div>
+            <h2 class="rv" style="--d:.1s">자사몰이 아니어도,<br /><span class="em">설치 한 번이면 끝</span></h2>
+            <ul class="points">
+              <li class="rv" style="--d:.16s">개발자가 할 일은 <b>에이전트 설치와 동기화 주기 설정</b>, 그게 전부입니다.</li>
+              <li class="rv" style="--d:.21s">활용하고 싶은 데이터만 <b>읽기전용 테이블</b>에 담아주면 준비 끝.</li>
+              <li class="rv" style="--d:.26s">지정한 주기마다 <b>자동으로 읽어</b> 고객·구매 데이터가 항상 최신으로 유지됩니다.</li>
+              <li class="rv" style="--d:.31s">원본 DB에 <b>쓰기 접근이 없습니다</b> — 운영 시스템 영향 0.</li>
+            </ul>
+            <div class="note rv" style="--d:.36s">ERP · POS · 자체 DB 어디든 — 연결 이후 개발자 손이 다시 갈 일이 없습니다</div>
+          </div>
+          <div class="shot rv" style="--d:.2s">
+            <div class="console">
+              <div class="bar"><i></i><i></i><i></i><span>싱크 에이전트</span></div>
+              <div class="body">
+                <div class="syncflow">
+                  <div class="snode"><em>자체 시스템 (ERP · DB)</em><b>읽기전용 테이블</b><span>활용할 데이터만 담아두면 됩니다</span></div>
+                  <div class="slink"><i></i><i></i><i></i></div>
+                  <div class="snode agent"><em>SYNC AGENT</em><b>매일 06:00 자동 동기화</b><span>설치 + 주기 설정 — 이후 전자동</span></div>
+                  <div class="slink"><i></i><i></i><i></i></div>
+                  <div class="snode dest"><em>한줄로</em><b>고객 DB 자동 반영</b><span>타겟 추출 · 발송 · 분석에 즉시 활용</span></div>
+                </div>
+                <div class="syncstat">
+                  <span class="chip mint">마지막 동기화 오늘 06:00 · 성공</span>
+                  <span class="chip">읽기전용 · 원본 무접촉</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- S13 · 클로즈 -->
       <section class="slide close">
         <div class="kicker rv" style="--d:.05s; justify-content:center">Safety First</div>
         <h2 class="rv" style="--d:.1s">AI가 제안하고,<br /><span class="em">사람이 승인합니다</span></h2>
@@ -1037,8 +1253,8 @@
     mobile = (window.matchMedia && window.matchMedia('(max-width: 860px)').matches) || ('ontouchstart' in window);
   } catch (e0) {}
 
-  // 장별 배경 색조 (오로라 hue-rotate 각도) — S1~S11
-  var HUES = [0, -16, 0, 34, 16, -38, -68, -105, 26, -55, 0];
+  // 장별 배경 색조 (오로라 hue-rotate 각도) — S1~S13 (v4.1: 자사몰 연동·싱크 에이전트 분리)
+  var HUES = [0, -16, 0, 34, 16, -38, -68, -105, 26, -55, -80, 48, 0];
 
   var sweepEl = document.getElementById('sweep');
   var counter = document.getElementById('counter');
@@ -1123,7 +1339,7 @@
     runCountUp(s);
     stopTyping();
     runTyping(s);
-    if (cur === TOTAL - 1) fxBurst();
+    if (cur === TOTAL - 1) fxBurst(); else fxMiniBurst(); // v4: 장 전환마다 작은 스파크
     counter.textContent = pad(cur + 1) + ' / ' + pad(TOTAL);
     prevBtn.disabled = (cur === 0);
     nextBtn.disabled = (cur === TOTAL - 1);
@@ -1278,6 +1494,16 @@
         hue: [252, 190, 160, 290][Math.floor(Math.random() * 4)] });
     }
   }
+  // v4: 장 전환 미니 스파크 — 하단에서 위로 솟는 작은 불꽃 (주목도 리듬)
+  function fxMiniBurst() {
+    if (!fxOn) return;
+    var cx = innerWidth * (0.3 + Math.random() * 0.4), cy = innerHeight * 0.74;
+    for (var i = 0; i < 24; i++) {
+      var a = -Math.PI / 2 + (Math.random() - 0.5) * 1.7, sp = 1.6 + Math.random() * 4.6;
+      sparks.push({ x: cx, y: cy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.72,
+        hue: [252, 190, 160, 290][Math.floor(Math.random() * 4)] });
+    }
+  }
   function drawFx(now) {
     if (!fxOn) return;
     var w = innerWidth, h = innerHeight;
@@ -1294,7 +1520,7 @@
       if (d2 < 12100) { var o = (1 - d2 / 12100) * 0.3; fxCtx.strokeStyle = 'rgba(139,124,247,' + o.toFixed(3) + ')'; fxCtx.lineWidth = 0.7; fxCtx.beginPath(); fxCtx.moveTo(pa.x, pa.y); fxCtx.lineTo(pb.x, pb.y); fxCtx.stroke(); }
     }
     // 유성 — 이따금 화면을 가로지르는 빛줄기
-    if (now > nextMeteor) { spawnMeteor(); nextMeteor = now + 2600 + Math.random() * 4200; }
+    if (now > nextMeteor) { spawnMeteor(); nextMeteor = now + 1700 + Math.random() * 3000; } // v4: 유성 빈도 상향
     for (var m = meteors.length - 1; m >= 0; m--) {
       var mt = meteors[m]; mt.x += mt.vx; mt.y += mt.vy; mt.life -= 0.011;
       if (mt.life <= 0 || mt.x > w + 80 || mt.y > h + 80) { meteors.splice(m, 1); continue; }

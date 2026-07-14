@@ -533,7 +533,7 @@ export default function LoginPage() {
           {!isSuperAdminOnly && (
             <div className="mt-6 flex flex-col items-start gap-3">
               {/* ?v= 캐시 버스터 — 소개 페이지 내용/연출 갱신 시 3곳(LoginPage 2·DashboardHeader 1) 동시에 올릴 것 (Cache-Control 미설정 휴리스틱 캐시가 옛 버전을 재검증 없이 표시하는 문제 차단) */}
-              <a href="/about-ai-operator.html?v=3" target="_blank" rel="noopener"
+              <a href="/about-ai-operator.html?v=4" target="_blank" rel="noopener"
                 className="inline-flex items-center gap-1.5 text-sm font-medium text-white/90 hover:text-white border border-white/25 hover:border-white/50 rounded-full px-4 py-2 transition">
                 서비스 소개 보기
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
@@ -627,7 +627,7 @@ export default function LoginPage() {
 
             {!isSuperAdminOnly && (
               <div className="mt-6 text-center space-y-2.5">
-                <a href="/about-ai-operator.html?v=3" target="_blank" rel="noopener"
+                <a href="/about-ai-operator.html?v=4" target="_blank" rel="noopener"
                   className="inline-flex items-center gap-1 text-sm font-medium text-emerald-600 hover:text-emerald-700 transition">
                   한줄로가 처음이신가요? 서비스 소개 보기
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
