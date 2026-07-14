@@ -7,8 +7,8 @@
  * 문안 톤·대표 문안 학습은 아래 Brand Voice 카드가 담당(같은 페이지 — 여긴 정체성: 로고·색·서체·고객센터).
  * 1클릭 원칙: 홈페이지 링크 1개 → AI 자동 추출 → 확인 후 저장.
  */
-import { useEffect, useState } from 'react';
-import { Palette, Sparkles, Loader2, X, Globe, Phone, Mail, Check } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Palette, Sparkles, Loader2, X, Globe, Phone, Mail, Check, Upload } from 'lucide-react';
 
 interface BrandKitState {
   logo_url?: string;
@@ -41,8 +41,10 @@ export default function BrandStudioCard({ apiBase, token, onToast }: BrandStudio
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [extracting, setExtracting] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [siteUrl, setSiteUrl] = useState('');
   const [form, setForm] = useState<BrandKitState>({});
+  const logoFileRef = useRef<HTMLInputElement>(null);
 
   const authHeaders = { Authorization: `Bearer ${token}` };
 
@@ -94,11 +96,40 @@ export default function BrandStudioCard({ apiBase, token, onToast }: BrandStudio
         ...(patch.background_color ? { background_color: patch.background_color } : {}),
         contact: { ...f.contact, website: url },
       }));
-      onToast('홈페이지에서 브랜드 정보를 가져왔어요. 확인 후 저장해 주세요.', 'success');
+      // ★ 2026-07-14 Harold 신고 — 무엇을 가져왔는지 항목별로 정직하게 (사이트가 색 신호를 안 주면 그 사실을 알림)
+      const got: string[] = [];
+      if (patch.logo_url) got.push('로고');
+      if (patch.primary_color || patch.accent_color || patch.background_color) got.push('브랜드 색');
+      if (got.length === 0) {
+        onToast('이 홈페이지에서는 로고·색 신호를 찾지 못했어요. 아래에서 직접 등록해 주세요.', 'info');
+      } else if (got.includes('브랜드 색')) {
+        onToast(`${got.join('·')}을(를) 가져왔어요. 확인 후 저장해 주세요.`, 'success');
+      } else {
+        onToast('로고를 가져왔어요. 이 홈페이지는 색 정보를 제공하지 않아 색은 직접 지정해 주세요.', 'success');
+      }
     } catch (e: any) {
       onToast(e?.message || '추출에 실패했어요', 'error');
     } finally {
       setExtracting(false);
+    }
+  };
+
+  // ★ 2026-07-14 Harold 지시 — 로고 파일 직접 업로드 (기존 DM 이미지 업로드 endpoint 재사용: 5MB·jpg/png/webp)
+  const uploadLogo = async (file: File) => {
+    setUploadingLogo(true);
+    try {
+      const fd = new FormData();
+      fd.append('images', file);
+      const res = await fetch(`${apiBase}/api/dm/upload-image`, { method: 'POST', headers: authHeaders, body: fd });
+      const data = await res.json();
+      if (!res.ok || !data?.images?.[0]?.url) throw new Error(data?.error || '업로드에 실패했어요');
+      setForm((f) => ({ ...f, logo_url: data.images[0].url }));
+      onToast('로고를 업로드했어요. 저장하면 3채널 생성에 반영됩니다.', 'success');
+    } catch (e: any) {
+      onToast(e?.message || '로고 업로드에 실패했어요', 'error');
+    } finally {
+      setUploadingLogo(false);
+      if (logoFileRef.current) logoFileRef.current.value = '';
     }
   };
 
@@ -267,17 +298,46 @@ export default function BrandStudioCard({ apiBase, token, onToast }: BrandStudio
                 </div>
                 <div className="space-y-3">
                   <div className="text-xs font-semibold text-white/60">로고</div>
-                  <div className="h-20 bg-white/5 border border-dashed border-white/15 rounded-xl flex items-center justify-center overflow-hidden">
+                  {/* ★ 2026-07-14 — 어두운 로고도 보이도록 흰 배경 미리보기 */}
+                  <div className="h-20 bg-white border border-dashed border-white/30 rounded-xl flex items-center justify-center overflow-hidden">
                     {form.logo_url ? (
                       <img src={form.logo_url} alt="브랜드 로고 미리보기" className="max-h-16 max-w-[80%] object-contain" />
                     ) : (
-                      <span className="text-[11px] text-white/30">자동 추출 또는 주소 입력</span>
+                      <span className="text-[11px] text-gray-400">파일 업로드 · 자동 추출 · 주소 입력</span>
                     )}
                   </div>
+                  {/* ★ 2026-07-14 Harold 지시 — 파일 업로드 직접 등록 */}
+                  <input
+                    ref={logoFileRef}
+                    type="file"
+                    accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadLogo(f); }}
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => logoFileRef.current?.click()}
+                      disabled={uploadingLogo}
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/30 rounded-lg text-xs font-semibold text-sky-100 transition-colors disabled:opacity-40"
+                    >
+                      {uploadingLogo ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                      로고 파일 업로드
+                    </button>
+                    {form.logo_url && (
+                      <button
+                        onClick={() => setForm((f) => ({ ...f, logo_url: '' }))}
+                        disabled={uploadingLogo}
+                        className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs text-white/60 transition-colors disabled:opacity-40"
+                      >
+                        지우기
+                      </button>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-white/35">JPG · PNG · WebP, 5MB 이하</div>
                   <input
                     value={form.logo_url || ''}
                     onChange={(e) => setForm((f) => ({ ...f, logo_url: e.target.value }))}
-                    placeholder="로고 이미지 주소"
+                    placeholder="또는 로고 이미지 주소 직접 입력"
                     className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-sky-400/50"
                   />
                 </div>
