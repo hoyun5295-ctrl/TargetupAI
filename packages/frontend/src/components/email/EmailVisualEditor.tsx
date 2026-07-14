@@ -93,6 +93,9 @@ export default function EmailVisualEditor({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
+  // ★ 2026-07-14 Harold 지시 — 행사·상품 정보 붙여넣기 → 상품 카드 자동 구성 + 내용 재창조
+  //   (백엔드 기존 파이프: 상품 추출→가격·URL verbatim 검증→og:image 채움. 기재 혜택만 원문 그대로)
+  const [aiEventText, setAiEventText] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
   const [improving, setImproving] = useState(false);
   const [pcPreviewOpen, setPcPreviewOpen] = useState(false);
@@ -273,11 +276,16 @@ export default function EmailVisualEditor({
 
   // ── AI 생성 (전체 블록 교체) ──
   const handleAi = async () => {
-    if (aiBusy || !aiPrompt.trim()) { if (!aiPrompt.trim()) onToast('만들고 싶은 이메일을 한 줄로 적어주세요.', 'warning'); return; }
+    // ★ 2026-07-14 — 행사·상품 정보 단독 입력도 생성 가능(백엔드 기지원). 프롬프트/행사문 둘 다 비면 안내.
+    if (aiBusy) return;
+    if (!aiPrompt.trim() && !aiEventText.trim()) { onToast('만들고 싶은 이메일 한 줄 또는 행사·상품 정보를 넣어주세요.', 'warning'); return; }
     setAiBusy(true);
     try {
       const res = await fetch('/api/email/ai/generate-sections', {
-        method: 'POST', headers: authHeaders(), body: JSON.stringify({ prompt: aiPrompt.trim(), is_ad: isAd }),
+        method: 'POST', headers: authHeaders(), body: JSON.stringify({
+          prompt: aiPrompt.trim(), is_ad: isAd,
+          ...(aiEventText.trim() ? { event_text: aiEventText.trim() } : {}),
+        }),
       });
       const data = await res.json();
       if (data?.code === 'INSUFFICIENT_CREDIT') { onToast('크레딧이 부족합니다. 충전 후 이용해주세요.', 'warning'); return; }
@@ -290,7 +298,12 @@ export default function EmailVisualEditor({
         // ★ 2026-07-13 — AI 프리헤더 회생(옛 흐름은 버렸음). 테마 등 기존 design은 보존.
         if (g.preheader) setDesign((d) => ({ ...(d || {}), preheader: String(g.preheader).slice(0, 90) }));
         setAiPrompt('');
-        onToast('AI가 비주얼 이메일을 만들었어요. 이미지를 채우고 다듬어주세요. (3 크레딧)', 'success');
+        onToast(
+          aiEventText.trim()
+            ? 'AI가 행사·상품 정보로 이메일을 만들었어요. 상품 카드·가격·링크는 넣어주신 원문 기준입니다. (3 크레딧)'
+            : 'AI가 비주얼 이메일을 만들었어요. 이미지를 채우고 다듬어주세요. (3 크레딧)',
+          'success',
+        );
       } else {
         onToast(data.error || 'AI 생성 실패', 'error');
       }
@@ -484,9 +497,16 @@ export default function EmailVisualEditor({
                 placeholder="예: 여름 신상 안내, VIP에게 정중한 톤"
                 className="w-full text-xs bg-slate-950/60 border border-white/10 rounded-lg px-2 py-1.5 text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50 resize-none"
               />
-              <button onClick={handleAi} disabled={aiBusy || !aiPrompt.trim()} className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-fuchsia-500 to-purple-500 px-3 py-1.5 text-xs font-bold text-white hover:opacity-90 disabled:opacity-40">
+              {/* ★ 2026-07-14 Harold 지시 — 행사·상품 정보 붙여넣기 = 상품 카드(가격·링크·이미지) 자동 구성 + 내용 재창조 */}
+              <textarea
+                value={aiEventText} onChange={(e) => setAiEventText(e.target.value)} rows={5}
+                placeholder={'행사·상품 정보 붙여넣기 (선택)\n예)\n글로우 파운데이션 30ml\n85,000원 → 15% 72,250원\nhttps://store.example.com/products/123\n\n행사 문구·기간도 함께 넣으면 내용에 반영돼요'}
+                className="w-full text-xs bg-slate-950/60 border border-white/10 rounded-lg px-2 py-1.5 text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50 resize-none"
+              />
+              <button onClick={handleAi} disabled={aiBusy || (!aiPrompt.trim() && !aiEventText.trim())} className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-fuchsia-500 to-purple-500 px-3 py-1.5 text-xs font-bold text-white hover:opacity-90 disabled:opacity-40">
                 {aiBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}{aiBusy ? '생성 중...' : 'AI 생성 (3크레딧)'}
               </button>
+              <div className="text-[10px] text-white/35 leading-relaxed">상품 이름·가격·링크를 넣으면 상품 카드가 자동으로 만들어져요. 가격·혜택은 넣어주신 원문 그대로만 사용됩니다.</div>
             </div>
             <div className="flex-1 overflow-y-auto p-2">
               <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>

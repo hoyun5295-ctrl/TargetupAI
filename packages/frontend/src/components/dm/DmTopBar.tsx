@@ -226,21 +226,40 @@ function LayoutModeToggle({ value, onChange }: { value: LayoutMode; onChange: (m
 /** ★ 2026-07-02(5) 상단 바 정리 — 도구 진입점을 드롭다운 하나로 (바깥 클릭 시 닫힘) */
 function ToolsMenu({ items }: { items: Array<{ emoji: string; label: string; onClick: () => void }> }) {
   const [open, setOpen] = useState(false);
+  // ★ 2026-07-14 결함 수정 — 상단 바(overflow:hidden, 2026-04-17 V2부터)가 absolute 드롭다운을 56px에서
+  //   잘라내던 잠복 결함. 메뉴를 fixed(버튼 실좌표 앵커)로 렌더해 클리핑 조상 밖으로 분리.
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+
+  const toggle = () => {
+    if (!open && wrapRef.current) {
+      const r = wrapRef.current.getBoundingClientRect();
+      setMenuPos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
+    }
+    setOpen((v) => !v);
+  };
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
     };
+    // fixed 앵커는 스크롤·리사이즈에 안 따라가므로 열림 중 이동 신호 = 닫기 (짧은 수명 메뉴 — 재열기로 재계산)
+    const onMove = () => setOpen(false);
     document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
+    window.addEventListener('resize', onMove);
+    window.addEventListener('scroll', onMove, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('resize', onMove);
+      window.removeEventListener('scroll', onMove, true);
+    };
   }, [open]);
 
   return (
     <div ref={wrapRef} style={{ position: 'relative', flexShrink: 0 }}>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         title="AI·검수·버전·A/B·테스트 발송"
         style={{
           height: 32,
@@ -262,13 +281,15 @@ function ToolsMenu({ items }: { items: Array<{ emoji: string; label: string; onC
         <span>도구</span>
         <span style={{ fontSize: 9, opacity: 0.6 }}>{open ? '▲' : '▼'}</span>
       </button>
-      {open && (
+      {open && menuPos && (
         <div
           style={{
-            position: 'absolute',
-            top: 38,
-            right: 0,
+            position: 'fixed',
+            top: menuPos.top,
+            right: menuPos.right,
             minWidth: 180,
+            maxHeight: 'calc(100vh - 80px)',
+            overflowY: 'auto',
             background: 'var(--dm-bg)',
             border: '1px solid var(--dm-neutral-200)',
             borderRadius: 10,

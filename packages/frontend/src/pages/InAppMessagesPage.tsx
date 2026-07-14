@@ -29,7 +29,8 @@ import {
   INAPP_FONT_CATALOG, type CardStyle,
 } from '../components/inapp/blockTheme';
 // ★ 2026-07-14 디자인 3.0 — 골든 템플릿 12종 (형태×카드×테마×블록 완성형 — 혜택 placeholder 준수)
-import { GOLDEN_INAPP_TEMPLATES, type GoldenInAppTemplate } from '../components/inapp/goldenTemplates';
+// ★ 2026-07-14 Harold 지시 — 옛 골든 12종 노출 제거(정예 10종만). 타입만 유지(정예 적용 함수 공용).
+import { type GoldenInAppTemplate } from '../components/inapp/goldenTemplates';
 import { Icon as BlockIcon } from '../components/inapp/BlockPreview';
 import { DateTimeField } from '../components/DateTimeField';
 import { takeEventDraft, EVENT_INAPP_DRAFT_KEY } from '../components/EventCampaignModal';
@@ -1819,28 +1820,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             )}
 
-            {/* ★ 2026-07-14 디자인 3.0 — 골든 템플릿 12종 (1클릭 = 형태·카드·테마·블록 완성형. 문안은 편집으로 다듬기) */}
-            <div className={activeTab === 'design' ? 'mb-5' : 'hidden'}>
-              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                <Sparkles className="w-3 h-3 text-fuchsia-300" /> 골든 템플릿 (1클릭 완성형)
-              </h4>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                {GOLDEN_INAPP_TEMPLATES.map((g) => (
-                  <button
-                    key={g.id}
-                    onClick={() => pickGolden(g)}
-                    className="rounded-xl border border-white/10 bg-slate-900/60 hover:bg-white/5 hover:border-white/25 p-2 text-left transition-colors"
-                  >
-                    <span className="flex h-7 rounded-lg overflow-hidden border border-white/10">
-                      {g.swatches.map((s, i) => <span key={i} className="flex-1" style={{ background: s }} />)}
-                    </span>
-                    <span className="block text-[11px] font-bold mt-1.5 text-white/85">{g.label}</span>
-                    <span className="block text-[9px] text-white/45 mt-0.5">{g.hint}</span>
-                  </button>
-                ))}
-              </div>
-              <div className="text-[10px] text-white/40 mt-1.5">적용해도 트리거·표시 대상·시간대 설정은 그대로 유지됩니다. 혜택 문구는 직접 작성해야 저장됩니다.</div>
-            </div>
+            {/* ★ 2026-07-14 Harold 지시 — 옛 골든 12종 노출 제거(정예 10종만 유지, 위 그리드) */}
 
             {/* 탭 디자인: 표시 형태 */}
             <div className={activeTab === 'design' ? '' : 'hidden'}>
