@@ -12,7 +12,8 @@ import Redis from 'ioredis';
 // Redis 공통 인스턴스
 // ============================================================
 export const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
-export const redis = new Redis(REDIS_URL);
+// ★ 2026-07-14 테스트(vitest)에선 lazyConnect로 연결 시도 자체를 안 함 — 로컬 게이트 연결 에러 로그 차단. 운영(VITEST 미설정)은 즉시 연결(기존 동일).
+export const redis = new Redis(REDIS_URL, process.env.VITEST ? { lazyConnect: true } : {});
 redis.on('error', (err) => console.error('[Redis] 연결 에러:', err.message));
 
 // ============================================================

@@ -8,6 +8,10 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// ★ 2026-07-14 테스트(vitest) 실행 시엔 실제 DB/MySQL 연결을 시도하지 않는다 — 로컬 게이트에서 의미 없는 연결 실패 로그 차단.
+//   VITEST는 vitest만 설정하는 env(운영/개발 런타임=undefined) → 아래 연결·로그·fail-fast는 운영에서 기존과 100% 동일 동작.
+const IS_TEST = !!process.env.VITEST;
+
 // PostgreSQL 연결 풀
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -18,6 +22,7 @@ export const pool = new Pool({
 
 // PostgreSQL 연결 확인 — 부팅 순간 연결 경합으로 첫 시도가 타임아웃할 수 있어, 몇 회 재시도 후에만 실패로 기록(부팅 오탐 ❌ 방지). 앱은 그 사이 지연연결로 정상 동작.
 void (async () => {
+  if (IS_TEST) return;
   for (let attempt = 1; attempt <= 5; attempt++) {
     try {
       await pool.query('SELECT 1');
@@ -44,7 +49,7 @@ export const query = (text: string, params?: any[]) => {
 };
 
 // ★ 보안: MySQL 비밀번호 미설정 시 서버 기동 차단 (fail-fast)
-if (!process.env.MYSQL_PASSWORD) {
+if (!IS_TEST && !process.env.MYSQL_PASSWORD) {
   console.error('❌ [FATAL] MYSQL_PASSWORD 환경변수가 설정되지 않았습니다. 서버를 시작할 수 없습니다.');
   process.exit(1);
 }
@@ -62,7 +67,7 @@ export const mysqlPool = mysql.createPool({
 });
 
 // MySQL 연결 테스트 + TZ 확인 (서버 레벨 KST 영구 적용됨 — timezone.cnf)
-mysqlPool.getConnection()
+if (!IS_TEST) mysqlPool.getConnection()
   .then(async conn => {
     console.log('✅ MySQL(QTmsg) 연결됨');
     const [rows] = await conn.execute("SELECT NOW() as mysql_now, @@global.time_zone as tz");
