@@ -28,7 +28,6 @@ export default function EliteTemplateModal({ open, onClose }: { open: boolean; o
 
   const [items, setItems] = useState<EliteDmTemplate[]>([]);
   const [loading, setLoading] = useState(false);
-  const [confirmId, setConfirmId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || items.length > 0) return;
@@ -49,18 +48,34 @@ export default function EliteTemplateModal({ open, onClose }: { open: boolean; o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const apply = (t: EliteDmTemplate) => {
-    setSections(t.sections);
-    updateBrandKit(t.brand_kit_patch as any);
-    setToast({ type: 'success', message: `'${t.label}' 정예 템플릿을 적용했어요. 혜택 문구는 직접 작성해주세요.` });
-    setConfirmId(null);
-    onClose();
-  };
-
+  // ★ 2026-07-14 Harold 지시 — 비파괴 적용. 작성한 콘텐츠(상품·문안)가 있으면 절대 지우지 않는다:
+  //   빈 캔버스 = 골격+룩 채움 / 콘텐츠 있음 = 룩(브랜드킷)+같은 타입 섹션의 구도·배경만 입힘(콘텐츠 무손실).
   const pick = (t: EliteDmTemplate) => {
+    updateBrandKit(t.brand_kit_patch as any);
     const hasContent = (sections || []).some((s: any) => s.type !== 'header' && s.type !== 'footer');
-    if (hasContent) setConfirmId(t.id);
-    else apply(t);
+    if (!hasContent) {
+      setSections(t.sections);
+      setToast({ type: 'success', message: `'${t.label}' 골격과 룩을 적용했어요. 혜택 문구는 직접 작성해주세요.` });
+    } else {
+      const styleByType = new Map<string, any>();
+      for (const s of t.sections as any[]) {
+        if (!styleByType.has(s.type)) styleByType.set(s.type, s);
+      }
+      const STYLE_KEYS = ['treatment', 'background', 'divider_shape', 'pull_up', 'align'] as const;
+      setSections(
+        (sections as any[]).map((s) => {
+          const ref = styleByType.get(s.type);
+          if (!ref) return s;
+          const patch: Record<string, unknown> = {};
+          for (const k of STYLE_KEYS) {
+            if (ref[k] !== undefined) patch[k] = ref[k];
+          }
+          return { ...s, ...patch };
+        }) as any,
+      );
+      setToast({ type: 'success', message: `'${t.label}' 룩·구도만 적용했어요 — 작성하신 콘텐츠는 그대로예요.` });
+    }
+    onClose();
   };
 
   return (
@@ -68,7 +83,7 @@ export default function EliteTemplateModal({ open, onClose }: { open: boolean; o
       open={open}
       onClose={onClose}
       title="정예 템플릿"
-      subtitle="목적으로 고르는 완성형 골격 — 스토리 구조·구도·테마가 함께 적용됩니다. 혜택 문구는 직접 작성해주세요."
+      subtitle="빈 캔버스에는 골격까지, 작성 중인 DM에는 룩·구도만 입혀요 — 만들어둔 콘텐츠는 지워지지 않습니다."
       size="lg"
     >
       {loading && <div style={{ padding: 24, textAlign: 'center', fontSize: 13, color: '#6b7280' }}>정예 템플릿을 불러오는 중...</div>}
@@ -93,26 +108,11 @@ export default function EliteTemplateModal({ open, onClose }: { open: boolean; o
                 <div style={{ fontSize: 10.5, color: '#9ca3af', marginTop: 6, lineHeight: 1.55 }}>{t.difference}</div>
               </div>
             </button>
-            {confirmId === t.id && (
-              <div style={{ borderTop: '1px solid #fde68a', background: '#fffbeb', padding: '10px 14px' }}>
-                <div style={{ fontSize: 11.5, color: '#92400e', lineHeight: 1.5 }}>
-                  편집 중인 섹션 구성이 이 템플릿 골격으로 교체됩니다. 계속할까요?
-                </div>
-                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                  <button onClick={() => apply(t)} style={{ fontSize: 12, fontWeight: 700, color: '#fff', background: '#d97706', border: 0, borderRadius: 8, padding: '6px 12px', cursor: 'pointer' }}>
-                    교체하고 적용
-                  </button>
-                  <button onClick={() => setConfirmId(null)} style={{ fontSize: 12, color: '#6b7280', background: '#fff', border: '1px solid #d1d5db', borderRadius: 8, padding: '6px 12px', cursor: 'pointer' }}>
-                    취소
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         ))}
       </div>
       <div style={{ marginTop: 12, fontSize: 11, color: '#9ca3af', lineHeight: 1.6 }}>
-        브랜드 학습(AI 메모리)에 저장한 고객센터·브랜드 정보가 골격에 자동으로 채워집니다. 상품 카드는 편집기에서 연동 몰 자동 채우기로 이어가세요.
+        브랜드 학습(AI 메모리)에 저장한 고객센터·브랜드 정보가 골격에 자동으로 채워집니다. 상품은 상품 슬라이드 섹션의 [상품 정보 붙여넣기]나 [연동 몰에서 불러오기]로 언제든 추가할 수 있어요.
       </div>
     </ModalBase>
   );

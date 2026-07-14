@@ -4,11 +4,35 @@ import { RepeatableList } from '../RepeatableList';
 import type { EditorProps } from '../SectionPropsEditor';
 import { useState } from 'react';
 import MallProductPickerModal, { type PickedMallProduct } from '../../MallProductPickerModal';
+// ★ 2026-07-14 Harold 지시 — 상품 정보 붙여넣기(이름/가격→할인/URL 블록) = 결정적 파서·크레딧 0 (이메일·DM 공용)
+import { parsePastedProducts } from '../../../../utils/product-paste';
 
 export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<ProductCarouselProps>) {
   const products = props.products || [];
   const [pickerOpen, setPickerOpen] = useState(false);
   const [matchingIdx, setMatchingIdx] = useState<number | null>(null);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [pasteNote, setPasteNote] = useState<string | null>(null);
+
+  const applyPaste = () => {
+    const parsed = parsePastedProducts(pasteText, 8);
+    if (parsed.length === 0) {
+      setPasteNote('상품을 찾지 못했어요 — "상품명 / 가격 / 링크"를 줄로 나눠 붙여넣어 주세요.');
+      return;
+    }
+    const items: ProductCarouselItem[] = parsed.map((p) => ({
+      image_url: '',
+      name: p.name,
+      price: p.price || 0,
+      ...(p.discount_price ? { discount_price: p.discount_price } : {}),
+      link_url: p.link_url || '',
+    }));
+    onUpdate({ products: [...products, ...items] });
+    setPasteText('');
+    setPasteOpen(false);
+    setPasteNote(`상품 ${items.length}개를 추가했어요. 이미지는 각 상품의 [연동 몰 매칭]으로 채울 수 있어요.`);
+  };
   // 연동 몰 상품 → 슬라이드 항목 매핑 (정가=price, 할인가는 판매가<정가일 때만)
   const applyPicked = (picked: PickedMallProduct[]) => {
     const items: ProductCarouselItem[] = picked.map((p) => ({
@@ -60,6 +84,34 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
         >
           연동 몰에서 상품 불러오기
         </button>
+        {/* ★ 2026-07-14 Harold 지시 — 상품 정보 붙여넣기(크레딧 0, 붙여넣은 숫자·URL 그대로) */}
+        <button
+          type="button"
+          onClick={() => { setPasteOpen((v) => !v); setPasteNote(null); }}
+          className="w-full mb-2 inline-flex items-center justify-center gap-1.5 rounded-lg border border-sky-500 bg-sky-600 text-white text-[13px] font-semibold py-2 hover:bg-sky-500 transition-colors"
+        >
+          상품 정보 붙여넣기
+        </button>
+        {pasteOpen && (
+          <div className="mb-2 space-y-1.5">
+            <textarea
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              rows={6}
+              placeholder={'상품명·가격·링크를 줄로 나눠 붙여넣기\n예)\n글로우 파운데이션 30ml\n85,000원 → 15% 72,250원\nhttps://store.example.com/products/123\n\n(빈 줄로 상품 구분, 최대 8개)'}
+              className="w-full text-[12px] border border-gray-300 rounded-lg px-2.5 py-2 leading-relaxed focus:outline-none focus:border-sky-500"
+            />
+            <button
+              type="button"
+              onClick={applyPaste}
+              disabled={!pasteText.trim()}
+              className="w-full text-[12px] font-semibold text-white border border-sky-500 bg-sky-600 hover:bg-sky-500 rounded-lg py-1.5 disabled:opacity-40 transition-colors"
+            >
+              붙여넣은 상품 추가
+            </button>
+          </div>
+        )}
+        {pasteNote && <div className="mb-2 text-[11px] text-gray-500 leading-relaxed">{pasteNote}</div>}
         <RepeatableList
           items={products}
           addLabel="+ 상품 추가"
