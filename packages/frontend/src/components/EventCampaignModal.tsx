@@ -16,6 +16,7 @@ import { useNavigate } from 'react-router-dom';
 import { CalendarRange, ImagePlus, Layers, Loader2, Lock, Mail, Smartphone, Sparkles, X } from 'lucide-react';
 import { CONFIRM_CREDIT_COSTS } from '../constants/credit';
 import { downscaleToJpeg } from '../utils/image-downscale';
+import { useAuthStore } from '../stores/authStore';
 
 type ChannelKey = 'dm' | 'email' | 'inapp';
 type ChannelStatus = 'generated' | 'opened';
@@ -72,8 +73,11 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
   resumeDraftId?: string;
 }) {
   const navigate = useNavigate();
+  // ★ 2026-07-14 이메일은 관리자 전용(서수란 신고) — 비관리자는 원클릭에서 이메일 채널 잠금(선택+실패 방지). 백엔드 ensureEmailAdmin 게이트와 정합.
+  const isCompanyAdmin = useAuthStore((s) => s.user?.userType === 'company_admin');
+  const emailBlock = isCompanyAdmin ? null : '관리자만 생성 가능';
   const [text, setText] = useState('');
-  const [sel, setSel] = useState<Record<ChannelKey, boolean>>({ dm: true, email: true, inapp: true });
+  const [sel, setSel] = useState<Record<ChannelKey, boolean>>({ dm: true, email: isCompanyAdmin, inapp: true });
   const [inappBlock, setInappBlock] = useState<string | null>(null);
   const [running, setRunning] = useState<ChannelKey | null>(null);
   const [results, setResults] = useState<Partial<Record<ChannelKey, any>>>({});
@@ -90,6 +94,8 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
 
   const token = () => localStorage.getItem('token');
   const headers = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` });
+  // 채널 잠금 사유 (인앱=표시 불가 / 이메일=관리자 전용). null=선택 가능.
+  const blockOf = (key: ChannelKey): string | null => (key === 'inapp' ? inappBlock : key === 'email' ? emailBlock : null);
 
   useEffect(() => {
     if (!open) return;
@@ -106,7 +112,7 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
           setSel((s) => ({ ...s, inapp: false }));
         } else {
           setInappBlock(null);
-          setSel({ dm: true, email: true, inapp: true });
+          setSel({ dm: true, email: isCompanyAdmin, inapp: true });
         }
       })
       .catch(() => setInappBlock(null));
@@ -266,7 +272,7 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
 
   const generateSelected = async () => {
     for (const c of CHANNELS) {
-      if (sel[c.key] && !results[c.key] && !(c.key === 'inapp' && inappBlock)) {
+      if (sel[c.key] && !results[c.key] && !blockOf(c.key)) {
         // 순차 생성 — 실패한 채널은 오류 표시 후 다음 채널 계속 (이미 성공분 크레딧은 각 채널 몫)
         // eslint-disable-next-line no-await-in-loop
         await generateOne(c.key);
@@ -393,7 +399,7 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
             {CHANNELS.map((c) => {
               const Ic = c.icon;
-              const locked = c.key === 'inapp' && !!inappBlock;
+              const locked = !!blockOf(c.key);
               const done = !!results[c.key];
               const err = errs[c.key];
               const isRunning = running === c.key;
@@ -422,7 +428,7 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
                       {done
                         ? <span className="text-emerald-300">{opened ? '편집함' : '생성 완료'} — {summaryOf(c.key)}</span>
                         : locked
-                          ? <span className="text-amber-300/80">표시할 곳 없음 — 연동 후 이용 가능</span>
+                          ? <span className="text-amber-300/80">{c.key === 'email' ? '관리자만 생성 가능' : '표시할 곳 없음 — 연동 후 이용 가능'}</span>
                           : <span className="text-white/50">예상 {CH_COSTS[c.key]} 크레딧</span>}
                     </p>
                     {err && <p className="text-[10px] text-rose-300 mt-1">{err}</p>}
