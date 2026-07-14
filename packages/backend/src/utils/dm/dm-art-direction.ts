@@ -5,6 +5,8 @@
  *   - 색/hex 정규화는 dm-visual-direction의 normalizeVisualConcept와 정합(여기선 enum·구조만 담당).
  */
 import { DM_COLOR_TOKENS } from './dm-tokens';
+// ★ 2026-07-14 디자인 4.0 M2 — 타입스케일·밀도·톤 기본의 소유가 design-core로 이동(값 무변 이관).
+import { CORE_TYPE_SCALE, CORE_DENSITY_SCALE, CORE_TONE_DEFAULTS } from '../design-core/art-direction';
 
 export type TypeScale = 'editorial' | 'bold' | 'minimal';
 export type SpacingDensity = 'compact' | 'standard' | 'airy';
@@ -80,13 +82,8 @@ function industryColors(industry: string): { primary: string; accent: string } {
 }
 
 // tone → 아트디렉션 기본 경향(결정적). AI가 명시 안 했을 때만 적용.
-const TONE_DEFAULTS: Record<string, { typeScale: TypeScale; headlineFont: HeadlineFont; spacingDensity: SpacingDensity }> = {
-  premium:  { typeScale: 'editorial', headlineFont: 'serif', spacingDensity: 'airy' },
-  elegant:  { typeScale: 'editorial', headlineFont: 'serif', spacingDensity: 'airy' },
-  urgent:   { typeScale: 'bold', headlineFont: 'sans', spacingDensity: 'compact' },
-  playful:  { typeScale: 'bold', headlineFont: 'sans', spacingDensity: 'standard' },
-  friendly: { typeScale: 'minimal', headlineFont: 'sans', spacingDensity: 'standard' },
-};
+// ★ 2026-07-14 디자인 4.0 M2 — 소유 = design-core (값 무변 이관)
+const TONE_DEFAULTS = CORE_TONE_DEFAULTS;
 
 export function normalizeArtDirection(
   raw: Partial<ArtDirection> | null | undefined,
@@ -112,12 +109,18 @@ export function normalizeArtDirection(
   };
 }
 
+// ★ 2026-07-14 디자인 4.0 M2 — 소유 = design-core CORE_TYPE_SCALE·CORE_DENSITY_SCALE (값 무변 이관,
+//   M0 골든 스냅샷이 출력 불변을 고정). emailH2는 이메일 가지 전용이라 여기선 미소비.
 const TYPE_SCALE_VARS: Record<TypeScale, { hero: string; heroWeight: string; heroLs: string; h1: string }> = {
-  editorial: { hero: '40px', heroWeight: '800', heroLs: '-0.03em', h1: '28px' },
-  bold:      { hero: '34px', heroWeight: '900', heroLs: '-0.02em', h1: '24px' },
-  minimal:   { hero: '28px', heroWeight: '600', heroLs: '0',       h1: '22px' },
+  editorial: CORE_TYPE_SCALE.editorial,
+  bold:      CORE_TYPE_SCALE.bold,
+  minimal:   CORE_TYPE_SCALE.minimal,
 };
-const DENSITY_SCALE: Record<SpacingDensity, string> = { compact: '0.8', standard: '1', airy: '1.4' };
+const DENSITY_SCALE: Record<SpacingDensity, string> = {
+  compact: String(CORE_DENSITY_SCALE.compact),
+  standard: String(CORE_DENSITY_SCALE.standard),
+  airy: String(CORE_DENSITY_SCALE.airy),
+};
 const DISPLAY_FONT: Record<HeadlineFont, string> = {
   sans: 'var(--dm-font-primary)',
   serif: '"Noto Serif KR", var(--dm-font-primary)',

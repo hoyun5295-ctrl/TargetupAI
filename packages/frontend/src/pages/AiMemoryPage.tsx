@@ -36,6 +36,8 @@ import MemoryTypeGuideModal from '../components/AiMemory/MemoryTypeGuideModal';
 import AddMemoryModal, { NewMemoryInput } from '../components/AiMemory/AddMemoryModal';
 // ★ D225+ Brand Voice Learning (2026-05-28 Harold 명시)
 import BrandVoiceCard from '../components/AiMemory/BrandVoiceCard';
+// ★ 2026-07-14 디자인 4.0 — 브랜드 학습(정체성: 로고·색·톤·고객센터) 입구. 3채널 생성 공용 참조.
+import BrandStudioCard from '../components/AiMemory/BrandStudioCard';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -620,6 +622,17 @@ export default function AiMemoryPage() {
             </div>
           </div>
         )}
+
+        {/* ───────── ★ 디자인 4.0 브랜드 학습 — 로고·색·톤·고객센터 (3채널 생성 공용 참조) ───────── */}
+        <BrandStudioCard
+          apiBase=""
+          token={token() || ''}
+          onToast={(msg, type) => {
+            if (type === 'success') toast.success(msg);
+            else if (type === 'error') toast.error(msg);
+            else toast.info(msg);
+          }}
+        />
 
         {/* ───────── ★ D225+ Brand Voice Learning — 회사별 LMS 대표 문안 최대 10건 + AI 자동 가이드라인 ───────── */}
         <BrandVoiceCard

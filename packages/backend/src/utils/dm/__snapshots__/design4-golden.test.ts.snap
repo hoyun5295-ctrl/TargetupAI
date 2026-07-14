@@ -1,0 +1,534 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`M0 골든 — DM 발행물 렌더 > 디자인 3.0 대표(구도+아트디렉션) 렌더 동결 1`] = `
+"<div class="dm-section-wrap" data-section-id="g-header-0" data-section-type="header" data-variant="default" style="text-align:center;--dm-section-justify:center"><div class="dm-header dm-header-logo" data-variant="logo" style="background:var(--dm-bg);padding:var(--dm-sp-4) var(--dm-sp-5);border-bottom:1px solid var(--dm-neutral-200);display:flex;flex-direction:column;align-items:center;gap:var(--dm-sp-1)">
+        <div style="display:flex;align-items:center;gap:var(--dm-sp-2)">
+          
+          <div style="font-size:var(--dm-fs-h3);font-weight:800;letter-spacing:-0.01em;color:var(--dm-neutral-900)">한줄로상회</div>
+        </div>
+        
+      </div></div>
+<div class="dm-section-wrap" data-section-id="g-hero-1" data-section-type="hero" data-variant="default" data-treatment="typographic" style="text-align:center;--dm-section-justify:center"><div class="dm-section dm-hero" data-section-type="hero" style="background:var(--dm-bg);padding:calc(var(--dm-sp-12) * var(--dm-section-pad-scale)) var(--dm-sp-5);display:flex;flex-direction:column;gap:var(--dm-sp-4)">
+    <div style="font-size:var(--dm-fs-hero);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.12;font-family:var(--dm-font-display);color:var(--dm-neutral-900)">가을 신상품 안내</div>
+    <div style="height:2px;width:48px;background:var(--dm-primary)"></div>
+    <div style="font-size:var(--dm-fs-body);color:var(--dm-neutral-600)">먼저 만나보세요</div>
+  </div></div>
+<div class="dm-section-wrap" data-section-id="g-text_card-2" data-section-type="text_card" data-variant="default" data-treatment="lead" style="text-align:center;--dm-section-justify:center"><div class="dm-section dm-text-card" data-section-type="text_card" style="background:var(--dm-bg);padding:calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-5);text-align:left">
+    <div style="font-size:var(--dm-fs-tiny);font-weight:700;letter-spacing:2px;color:var(--dm-primary);margin-bottom:var(--dm-sp-3)">NEW</div>
+    <div style="font-size:var(--dm-fs-h1);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.25;font-family:var(--dm-font-display);color:var(--dm-neutral-900)">이번 시즌 포인트</div>
+    <div style="height:2px;width:40px;background:var(--dm-primary);margin:var(--dm-sp-4) 0"></div>
+    <div style="font-size:var(--dm-fs-body);line-height:1.7;color:var(--dm-neutral-700);white-space:pre-wrap">따뜻한 소재의 신상품이 들어왔어요.</div>
+  </div></div>
+<div class="dm-section-wrap" data-section-id="g-coupon-3" data-section-type="coupon" data-variant="default" data-treatment="spotlight" style="text-align:center;--dm-section-justify:center"><div class="dm-section dm-coupon dm-coupon-card" data-section-type="coupon" style="padding:calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-5);background:#171717;color:#fff">
+    <div style="font-size:var(--dm-fs-h3);font-weight:700;color:var(--dm-accent);letter-spacing:1px">[직접 작성해주세요]</div>
+    <div style="margin-top:var(--dm-sp-3);font-family:var(--dm-font-mono);font-size:var(--dm-fs-hero);font-weight:900;letter-spacing:4px">GOLDEN</div>
+    <div style="margin-top:var(--dm-sp-2);color:var(--dm-neutral-400)">
+      
+      </div>
+    
+  </div></div>
+<div class="dm-section-wrap" data-section-id="g-cta-4" data-section-type="cta" data-variant="default" data-treatment="bar" style="text-align:center;--dm-section-justify:center"><div class="dm-section dm-cta-section" data-section-type="cta" style="padding:var(--dm-sp-5)">
+    <a href="https://shop.example.com" target="_blank" style="display:flex;align-items:center;justify-content:space-between;gap:var(--dm-sp-3);background:var(--dm-primary);color:#fff;padding:var(--dm-sp-5) var(--dm-sp-6);font-size:var(--dm-fs-h3);font-weight:700;letter-spacing:-0.01em;border-radius:16px;box-shadow:var(--dm-shadow-md)">
+      <span>보러가기</span>
+      <span aria-hidden="true" style="width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.18);display:inline-flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0">→</span>
+    </a>
+    
+  </div></div>
+<div class="dm-section-wrap" data-section-id="g-footer-5" data-section-type="footer" data-variant="default" style="text-align:center;--dm-section-justify:center"><div class="dm-section dm-footer" data-section-type="footer" style="padding:var(--dm-sp-8) var(--dm-sp-6);background:var(--dm-neutral-100);border-top:1px solid var(--dm-neutral-200)">
+    <div class="dm-text-small" style="color:var(--dm-neutral-600);margin-bottom:var(--dm-sp-4);white-space:pre-wrap;line-height:1.8">본 메시지는 안내입니다</div>
+    <div class="dm-text-small" style="color:var(--dm-neutral-700);margin-bottom:var(--dm-sp-1)"><strong>고객센터</strong> <a href="tel:1544-0000" style="color:var(--dm-primary);font-weight:600">1544-0000</a></div>
+    
+    
+    <div class="dm-text-tiny" style="color:var(--dm-neutral-400);margin-top:var(--dm-sp-4)">
+      <a href="/api/unsubscribes/form" target="_blank" style="color:var(--dm-neutral-500);text-decoration:underline">수신거부</a>
+    </div>
+  </div></div>"
+`;
+
+exports[`M0 골든 — DM 발행물 렌더 > 레거시 대표(전부 미설정) 렌더 동결 1`] = `
+"<div class="dm-section-wrap" data-section-id="g-header-0" data-section-type="header" data-variant="default" style="text-align:center;--dm-section-justify:center"><div class="dm-header dm-header-logo" data-variant="logo" style="background:var(--dm-bg);padding:var(--dm-sp-4) var(--dm-sp-5);border-bottom:1px solid var(--dm-neutral-200);display:flex;flex-direction:column;align-items:center;gap:var(--dm-sp-1)">
+        <div style="display:flex;align-items:center;gap:var(--dm-sp-2)">
+          
+          <div style="font-size:var(--dm-fs-h3);font-weight:800;letter-spacing:-0.01em;color:var(--dm-neutral-900)">한줄로상회</div>
+        </div>
+        
+      </div></div>
+<div class="dm-section-wrap" data-section-id="g-hero-1" data-section-type="hero" data-variant="default" style="text-align:center;--dm-section-justify:center"><div class="dm-section dm-hero" data-section-type="hero" style="position:relative;min-height:320px;overflow:hidden;background:var(--dm-neutral-900)">
+    
+    
+    <div style="position:relative;min-height:320px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;padding:var(--dm-sp-8) var(--dm-sp-5);color:#fff;text-align:center">
+      <div class="dm-text-hero" style="font-weight:800">가을 신상품 안내</div>
+      <div class="dm-text-body" style="margin-top:var(--dm-sp-3);opacity:0.9">먼저 만나보세요</div>
+    </div>
+  </div></div>
+<div class="dm-section-wrap" data-section-id="g-text_card-2" data-section-type="text_card" data-variant="default" style="text-align:center;--dm-section-justify:center"><div class="dm-section dm-text-card" data-section-type="text_card" style="padding:0;background:var(--dm-bg)">
+    <div style="display:flex;flex-direction:column;gap:0;padding:0">
+      
+      <div style="flex:1;padding:var(--dm-sp-4) var(--dm-sp-5);text-align:left">
+    <div style="display:inline-block;background:var(--dm-primary-light);color:var(--dm-primary);padding:var(--dm-sp-1) var(--dm-sp-2);border-radius:var(--dm-radius-sm);font-size:var(--dm-fs-tiny);font-weight:700;margin-bottom:var(--dm-sp-2)">NEW</div>
+    <div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-2)">이번 시즌 포인트</div>
+    <div class="dm-text-body" style="color:var(--dm-neutral-700);white-space:pre-wrap">따뜻한 소재의 신상품이 들어왔어요.</div>
+  </div>
+    </div>
+  </div></div>
+<div class="dm-section-wrap" data-section-id="g-coupon-3" data-section-type="coupon" data-variant="default" style="text-align:center;--dm-section-justify:center"><div class="dm-section dm-coupon" data-section-type="coupon" style="padding:var(--dm-sp-8) var(--dm-sp-5);background:var(--dm-primary-light)">
+    <div class="dm-coupon-card" style="background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:20px;box-shadow:var(--dm-shadow-md);padding:var(--dm-sp-8) var(--dm-sp-6)">
+      <div style="font-size:var(--dm-fs-tiny);font-weight:700;letter-spacing:3px;color:var(--dm-neutral-500);margin-bottom:var(--dm-sp-3)">COUPON</div>
+      <div class="dm-text-hero" style="color:var(--dm-primary);font-weight:900;font-family:var(--dm-font-display)">[직접 작성해주세요]</div>
+      <div style="margin-top:var(--dm-sp-4);border-top:1px dashed var(--dm-neutral-300);padding-top:var(--dm-sp-4)"><span style="background:#171717;color:#fff;display:inline-block;padding:var(--dm-sp-2) var(--dm-sp-6);border-radius:999px;font-family:var(--dm-font-mono);font-size:var(--dm-fs-h3);font-weight:700;letter-spacing:3px">GOLDEN</span></div>
+      
+      
+      
+      
+    </div>
+  </div></div>
+<div class="dm-section-wrap" data-section-id="g-cta-4" data-section-type="cta" data-variant="default" style="text-align:center;--dm-section-justify:center"><div class="dm-section dm-cta-section" data-section-type="cta" style="padding:var(--dm-sp-5)">
+    <div style="display:flex;flex-direction:column;align-items:var(--dm-section-justify,center);gap:var(--dm-sp-3)"><a href="https://shop.example.com" class="dm-cta dm-cta-primary" target="_blank">보러가기</a></div>
+  </div></div>
+<div class="dm-section-wrap" data-section-id="g-store_info-5" data-section-type="store_info" data-variant="default" style="text-align:center;--dm-section-justify:center"><div class="dm-section dm-store-info" data-section-type="store_info" style="padding:var(--dm-sp-6) var(--dm-sp-5);background:var(--dm-neutral-50);border-top:1px solid var(--dm-neutral-200)">
+    <div style="display:flex;flex-direction:column;gap:var(--dm-sp-3);font-size:var(--dm-fs-small);line-height:1.6;color:var(--dm-neutral-700)">
+      <a href="tel:02-000-0000" style="color:var(--dm-primary)"><strong>전화</strong> 02-000-0000</a><span><strong>주소</strong> 서울시 어딘가 1</span>
+    </div>
+    
+  </div></div>
+<div class="dm-section-wrap" data-section-id="g-footer-6" data-section-type="footer" data-variant="default" style="text-align:center;--dm-section-justify:center"><div class="dm-section dm-footer" data-section-type="footer" style="padding:var(--dm-sp-8) var(--dm-sp-6);background:var(--dm-neutral-100);border-top:1px solid var(--dm-neutral-200)">
+    <div class="dm-text-small" style="color:var(--dm-neutral-600);margin-bottom:var(--dm-sp-4);white-space:pre-wrap;line-height:1.8">본 메시지는 안내입니다</div>
+    <div class="dm-text-small" style="color:var(--dm-neutral-700);margin-bottom:var(--dm-sp-1)"><strong>고객센터</strong> <a href="tel:1544-0000" style="color:var(--dm-primary);font-weight:600">1544-0000</a></div>
+    
+    
+    <div class="dm-text-tiny" style="color:var(--dm-neutral-400);margin-top:var(--dm-sp-4)">
+      <a href="/api/unsubscribes/form" target="_blank" style="color:var(--dm-neutral-500);text-decoration:underline">수신거부</a>
+    </div>
+  </div></div>"
+`;
+
+exports[`M0 골든 — DM 아트디렉션 정규화·CSS 변수 > 미설정 = 중립 기본(bold/standard) — 기존 발행물 동작 1`] = `
+{
+  "accentMotif": "none",
+  "emphasisSections": [],
+  "grain": false,
+  "headlineFont": "sans",
+  "mood": "",
+  "palette": {
+    "accent": "#f59e0b",
+    "on_surface": "#171717",
+    "primary": "#4f46e5",
+    "surface": "#ffffff",
+  },
+  "sectionDivider": "none",
+  "spacingDensity": "standard",
+  "typeScale": "bold",
+}
+`;
+
+exports[`M0 골든 — DM 아트디렉션 정규화·CSS 변수 > 미설정 = 중립 기본(bold/standard) — 기존 발행물 동작 2`] = `":root{--dm-fs-hero:34px;--dm-fw-hero:900;--dm-ls-hero:-0.02em;--dm-fs-h1:24px;--dm-section-pad-scale:1;--dm-font-display:var(--dm-font-primary);}"`;
+
+exports[`M0 골든 — DM 아트디렉션 정규화·CSS 변수 > 밀도 3종 CSS 변수 값 동결 > density-airy 1`] = `":root{--dm-fs-hero:34px;--dm-fw-hero:900;--dm-ls-hero:-0.02em;--dm-fs-h1:24px;--dm-section-pad-scale:1.4;--dm-font-display:var(--dm-font-primary);}"`;
+
+exports[`M0 골든 — DM 아트디렉션 정규화·CSS 변수 > 밀도 3종 CSS 변수 값 동결 > density-compact 1`] = `":root{--dm-fs-hero:34px;--dm-fw-hero:900;--dm-ls-hero:-0.02em;--dm-fs-h1:24px;--dm-section-pad-scale:0.8;--dm-font-display:var(--dm-font-primary);}"`;
+
+exports[`M0 골든 — DM 아트디렉션 정규화·CSS 변수 > 밀도 3종 CSS 변수 값 동결 > density-standard 1`] = `":root{--dm-fs-hero:34px;--dm-fw-hero:900;--dm-ls-hero:-0.02em;--dm-fs-h1:24px;--dm-section-pad-scale:1;--dm-font-display:var(--dm-font-primary);}"`;
+
+exports[`M0 골든 — DM 아트디렉션 정규화·CSS 변수 > 타입스케일 3종 CSS 변수 값 동결 > typeScale-bold 1`] = `":root{--dm-fs-hero:34px;--dm-fw-hero:900;--dm-ls-hero:-0.02em;--dm-fs-h1:24px;--dm-section-pad-scale:1;--dm-font-display:var(--dm-font-primary);}"`;
+
+exports[`M0 골든 — DM 아트디렉션 정규화·CSS 변수 > 타입스케일 3종 CSS 변수 값 동결 > typeScale-editorial 1`] = `":root{--dm-fs-hero:40px;--dm-fw-hero:800;--dm-ls-hero:-0.03em;--dm-fs-h1:28px;--dm-section-pad-scale:1;--dm-font-display:var(--dm-font-primary);}"`;
+
+exports[`M0 골든 — DM 아트디렉션 정규화·CSS 변수 > 타입스케일 3종 CSS 변수 값 동결 > typeScale-minimal 1`] = `":root{--dm-fs-hero:28px;--dm-fw-hero:600;--dm-ls-hero:0;--dm-fs-h1:22px;--dm-section-pad-scale:1;--dm-font-display:var(--dm-font-primary);}"`;
+
+exports[`M0 골든 — DM 토큰/베이스/디자인3 CSS > renderDmBaseCss / renderDmDesign3Css / divider svg 1`] = `
+"* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  font-family: var(--dm-font-primary);
+  font-size: var(--dm-fs-body);
+  line-height: var(--dm-lh-body);
+  color: var(--dm-neutral-900);
+  background: var(--dm-neutral-100);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+a { color: inherit; text-decoration: none; }
+img { max-width: 100%; display: block; }
+button { font-family: inherit; cursor: pointer; border: 0; background: transparent; }
+
+.dm-viewer {
+  max-width: var(--dm-mobile-max, 430px);
+  min-height: 100vh;
+  margin: 0 auto;
+  background: var(--dm-bg);
+}
+
+.dm-section {
+  position: relative;
+  /* ★ 2026-07-02(2) 한국어 단어 단위 줄바꿈 + 넘침 방지 — 긴 문구 잘림 근본 차단 */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+/* ★ 2026-07-02(2) 타이포 유틸 — 에디터(dm-builder.css)와 동일 정의. 그동안 발행물에 이 클래스 정의가
+   빠져 있어 .dm-text-hero(쿠폰 라벨·히어로 기본 구도 헤드라인 등)가 본문 크기로 렌더되던 결함 수정. */
+.dm-text-hero  { font-size: var(--dm-fs-hero);  line-height: var(--dm-lh-hero);  font-weight: 800; letter-spacing: -0.02em; }
+.dm-text-h1    { font-size: var(--dm-fs-h1);    line-height: var(--dm-lh-h1);    font-weight: 700; letter-spacing: -0.01em; }
+.dm-text-h2    { font-size: var(--dm-fs-h2);    line-height: var(--dm-lh-h2);    font-weight: 700; }
+.dm-text-h3    { font-size: var(--dm-fs-h3);    line-height: var(--dm-lh-h3);    font-weight: 600; }
+.dm-text-body  { font-size: var(--dm-fs-body);  line-height: var(--dm-lh-body);  font-weight: 400; }
+.dm-text-small { font-size: var(--dm-fs-small); line-height: var(--dm-lh-small); font-weight: 400; }
+.dm-text-tiny  { font-size: var(--dm-fs-tiny);  line-height: var(--dm-lh-tiny);  font-weight: 400; }
+/* ★ 2026-07-02 v2 — 오버라인 라벨(자간 넓은 소형 라벨 → 큰 헤드라인 3단 위계의 1단) */
+.dm-overline   { font-size: 11px; font-weight: 700; letter-spacing: 0.18em; }
+
+/* ★ 2026-07-02 v2 — 소형 화면 타입 축소 (디스플레이급 스케일의 375px 이하 보정) */
+@media (max-width: 375px) {
+  :root { --dm-fs-hero: 34px; --dm-fs-h1: 25px; }
+}
+
+/* ★ 2026-07-02(5) 발행물 디자인 격상 — 버튼 여백/자간/그림자 정돈 (이메일 톤)
+   ★ 2026-07-07(5) 디자인 2.0 — 그라데이션 면 + 강조색 그림자 + 프레스 마이크로 인터랙션 (인앱 2.0 톤).
+     값 변경 시 frontend/src/styles/dm-builder.css .dm-cta 동시 수정 필수 (에디터·발행물 시각 일치). */
+.dm-cta {
+  display: inline-block;
+  padding: 14px 28px;
+  min-height: 44px;
+  min-width: 44px;
+  border-radius: 14px;
+  font-size: var(--dm-fs-body);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  text-align: center;
+  background: linear-gradient(180deg, var(--dm-primary) 0%, var(--dm-primary-hover) 100%);
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.14), 0 8px 20px -6px rgba(15, 23, 42, 0.28);
+  transition: filter 150ms ease-out, transform 100ms ease-out, box-shadow 150ms ease-out;
+}
+.dm-cta:hover { filter: brightness(1.06); box-shadow: 0 2px 4px rgba(15, 23, 42, 0.14), 0 12px 26px -6px rgba(15, 23, 42, 0.32); }
+.dm-cta:active { transform: scale(0.97); }
+.dm-cta-secondary { background: var(--dm-neutral-100); color: var(--dm-neutral-900); box-shadow: inset 0 0 0 1px var(--dm-neutral-200); }
+.dm-cta-outline { background: transparent; border: 2px solid var(--dm-primary); color: var(--dm-primary); box-shadow: none; }
+
+/* ★ 2026-07-07(5) 섹션 스크롤 리빌 — 뷰어 JS가 화면 밖 섹션에만 .dm-reveal 부여(no-JS = 전부 즉시 표시).
+   reduced-motion은 JS에서 부여 자체를 건너뛴다. */
+.dm-reveal { opacity: 0; transform: translateY(16px); }
+.dm-reveal.dm-in {
+  opacity: 1;
+  transform: none;
+  transition: opacity 550ms cubic-bezier(0.22, 1, 0.36, 1), transform 550ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ★ 2026-07-07(5) 데스크탑 열람 — 슬레이트 틴트 배경 + 페이지 프레임 앰비언트 그림자 (모바일 무영향) */
+@media (min-width: 480px) {
+  body { background: linear-gradient(180deg, #eef0f5 0%, #e7eaf1 100%); }
+  .dm-viewer { box-shadow: 0 24px 80px -24px rgba(15, 23, 42, 0.22), 0 2px 8px rgba(15, 23, 42, 0.06); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0ms !important; transition-duration: 0ms !important; }
+}
+
+@media (max-width: 375px) {
+  :root { --dm-fs-hero: 28px; --dm-fs-h1: 22px; }
+}
+@media (max-width: 320px) {
+  :root { --dm-fs-hero: 24px; --dm-fs-h1: 20px; }
+}
+
+/* 빈 이미지/콘텐츠 자리 — 휑한 빈칸 대신 옅은 점선 박스로 정제 */
+.dm-mood-slot {
+  background: var(--dm-neutral-50);
+  border: 1px dashed var(--dm-neutral-300);
+  border-radius: var(--dm-radius-lg);
+  color: var(--dm-neutral-400);
+}"
+`;
+
+exports[`M0 골든 — DM 토큰/베이스/디자인3 CSS > renderDmBaseCss / renderDmDesign3Css / divider svg 2`] = `
+"/* ── 모션 2.0: 시그니처 ── */
+@keyframes dmCtaPulse { 0%,100% { box-shadow:0 1px 2px rgba(15,23,42,0.14), 0 8px 20px -6px rgba(15,23,42,0.28); } 50% { box-shadow:0 2px 4px rgba(15,23,42,0.16), 0 12px 30px -4px color-mix(in srgb, var(--dm-primary) 55%, transparent); } }
+.dm-cta-primary { animation: dmCtaPulse 3.2s ease-in-out 1.6s infinite; }
+@keyframes dmShine { 0% { transform: translateX(-160%) skewX(-18deg); } 60%,100% { transform: translateX(240%) skewX(-18deg); } }
+.dm-coupon-card { position: relative; overflow: hidden; }
+.dm-coupon-card::after { content:""; position:absolute; top:0; bottom:0; left:0; width:46%; pointer-events:none;
+  background:linear-gradient(105deg, transparent 20%, rgba(255,255,255,0.32) 50%, transparent 80%);
+  transform:translateX(-160%) skewX(-18deg); animation:dmShine 4.6s ease-in-out 1.2s infinite; }
+@keyframes dmKenburns { from { transform: scale(1.06); } to { transform: scale(1); } }
+.dm-hero-media { animation: dmKenburns 12s cubic-bezier(0.22,1,0.36,1) both; }
+@keyframes dmSecPop { 0% { transform: scale(1.16); opacity: 0.8; } 45%,100% { transform: scale(1); opacity: 1; } }
+.dm-countdown .cd-num[data-unit="s"] { display:inline-block; animation: dmSecPop 1s ease-out infinite; }
+.dm-reveal .dm-lq-bar { transform: scaleX(0); transform-origin: left center; }
+.dm-reveal.dm-in .dm-lq-bar { transform: scaleX(1); transition: transform 1.1s cubic-bezier(0.22,1,0.36,1) 0.25s; }
+/* 리빌 아이템 스태거 — 상품/갤러리 카드가 차례로 떠오름 */
+.dm-reveal :is(.dm-pc-items, .dm-gal-grid) > * { opacity:0; transform:translateY(12px); }
+.dm-reveal.dm-in :is(.dm-pc-items, .dm-gal-grid) > * { opacity:1; transform:none;
+  transition:opacity 500ms cubic-bezier(0.22,1,0.36,1), transform 500ms cubic-bezier(0.22,1,0.36,1); }
+.dm-reveal.dm-in :is(.dm-pc-items, .dm-gal-grid) > :nth-child(2) { transition-delay: 0.07s; }
+.dm-reveal.dm-in :is(.dm-pc-items, .dm-gal-grid) > :nth-child(3) { transition-delay: 0.14s; }
+.dm-reveal.dm-in :is(.dm-pc-items, .dm-gal-grid) > :nth-child(4) { transition-delay: 0.21s; }
+.dm-reveal.dm-in :is(.dm-pc-items, .dm-gal-grid) > :nth-child(5) { transition-delay: 0.28s; }
+.dm-reveal.dm-in :is(.dm-pc-items, .dm-gal-grid) > :nth-child(6) { transition-delay: 0.35s; }
+
+/* ── 섹션 배경면 (dm-bgx-*) — --dm-bg·중립 스케일을 섹션 범위로 재정의 ── */
+.dm-bgx-soft { --dm-bg: color-mix(in srgb, var(--dm-primary) 6%, #ffffff); background: var(--dm-bg); }
+.dm-bgx-tint { --dm-bg: color-mix(in srgb, var(--dm-primary) 14%, #ffffff); background: var(--dm-bg); }
+.dm-bgx-dark { --dm-bg:#12151f; background:#12151f;
+  --dm-neutral-0:#1b2130; --dm-neutral-50:#161b28; --dm-neutral-100:#1e2433; --dm-neutral-200:#2c3347;
+  --dm-neutral-300:#3a4257; --dm-neutral-400:#8b94a7; --dm-neutral-500:#9aa3b5; --dm-neutral-600:#b7bfce;
+  --dm-neutral-700:#cdd4e0; --dm-neutral-800:#e4e8f0; --dm-neutral-900:#f2f5fa; --dm-neutral-1000:#ffffff;
+  --dm-primary-light: color-mix(in srgb, var(--dm-primary) 22%, #141926); }
+.dm-bgx-gradient { --dm-bg: rgba(255,255,255,0);
+  background: linear-gradient(155deg, var(--dm-primary), color-mix(in srgb, var(--dm-primary) 35%, var(--dm-accent)));
+  --dm-neutral-900:#ffffff; --dm-neutral-800:#f4f6fb; --dm-neutral-700:rgba(255,255,255,0.88);
+  --dm-neutral-600:rgba(255,255,255,0.75); --dm-neutral-500:rgba(255,255,255,0.62); --dm-neutral-400:rgba(255,255,255,0.5);
+  --dm-neutral-300:rgba(255,255,255,0.35); --dm-neutral-200:rgba(255,255,255,0.25); --dm-neutral-100:rgba(255,255,255,0.14);
+  --dm-neutral-50:rgba(255,255,255,0.08); --dm-neutral-0:rgba(255,255,255,0.1); --dm-primary-light:rgba(255,255,255,0.14); }
+.dm-bgx-glass { --dm-bg: rgba(255,255,255,0.6); background: rgba(255,255,255,0.6);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.dm-pullup { position:relative; z-index:2; margin-top:-26px; border-radius:24px 24px 0 0; overflow:hidden;
+  box-shadow:0 -12px 32px -14px rgba(15,23,42,0.25); }
+.dm-divider-svg { display:block; line-height:0; margin-bottom:-1px; color: var(--dm-bg); }
+.dm-bgx-gradient + .dm-divider-svg, .dm-bgx-gradient .dm-divider-svg { color: var(--dm-primary); }
+.dm-divider-svg svg { display:block; width:100%; height:26px; }
+.dm-sticky-cta { position:sticky; bottom:0; z-index:40; }
+.dm-sticky-bar { backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+
+/* ── 아트디렉션 모티프 — 제목(.dm-text-h2) 장식 ── */
+body[data-dm-motif="rule"] .dm-section .dm-text-h2::before { content:""; display:block; width:30px; height:3px;
+  background:var(--dm-accent); border-radius:2px; margin-bottom:10px; }
+body[data-dm-motif="dot"] .dm-section .dm-text-h2::after { content:"."; color:var(--dm-primary); }
+body[data-dm-motif="bracket"] .dm-section .dm-text-h2::before { content:"「"; color:var(--dm-accent); margin-right:2px; }
+body[data-dm-motif="bracket"] .dm-section .dm-text-h2::after { content:"」"; color:var(--dm-accent); margin-left:2px; }
+body[data-dm-motif="index"] .dm-viewer { counter-reset: dmsec; }
+body[data-dm-motif="index"] .dm-section-wrap:not([data-section-type="header"]):not([data-section-type="footer"]) { counter-increment: dmsec; }
+body[data-dm-motif="index"] .dm-section-wrap:not([data-section-type="header"]):not([data-section-type="footer"]) .dm-text-h2::before {
+  content: counter(dmsec, decimal-leading-zero); display:block; font-size:11px; font-weight:800; letter-spacing:0.2em;
+  color:var(--dm-primary); margin-bottom:8px; font-family:var(--dm-font-mono); }
+
+/* ── 아트디렉션 섹션 디바이더 ── */
+body[data-dm-divider="hairline"] .dm-page > .dm-section-wrap + .dm-section-wrap { border-top:1px solid var(--dm-neutral-200); }
+body[data-dm-divider="gap"] .dm-page > .dm-section-wrap + .dm-section-wrap { margin-top:14px; }
+body[data-dm-divider="rule"] .dm-page > .dm-section-wrap + .dm-section-wrap::before { content:""; display:block; width:44px; height:2px;
+  background:var(--dm-primary); opacity:0.6; margin:18px auto; border-radius:2px; }
+
+/* ── 헤드라인 강조 ── */
+.dm-em-marker { background:linear-gradient(180deg, transparent 55%, color-mix(in srgb, var(--dm-accent) 45%, transparent) 55%);
+  border-radius:2px; padding:0 2px; box-decoration-break:clone; -webkit-box-decoration-break:clone; }
+.dm-em-underline { text-decoration:underline; text-decoration-color:var(--dm-accent); text-decoration-thickness:0.14em; text-underline-offset:0.18em; }
+
+/* ── 필름 그레인 (테마 옵션) ── */
+.dm-grain { position:fixed; inset:0; z-index:90; pointer-events:none; opacity:0.05; mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E"); }"
+`;
+
+exports[`M0 골든 — DM 토큰/베이스/디자인3 CSS > renderDmBaseCss / renderDmDesign3Css / divider svg 3`] = `"<div class="dm-divider-svg" aria-hidden="true"><svg viewBox="0 0 375 26" preserveAspectRatio="none"><path d="M0 0 H375 V8 C312 24 250 24 187 14 C125 4 62 4 0 16 Z" fill="currentColor"/></svg></div>"`;
+
+exports[`M0 골든 — DM 토큰/베이스/디자인3 CSS > renderDmTokensCss 기본(브랜드킷 미설정) 1`] = `
+":root {
+  --dm-neutral-0: #ffffff;
+  --dm-neutral-50: #fafafa;
+  --dm-neutral-100: #f5f5f5;
+  --dm-neutral-200: #e5e5e5;
+  --dm-neutral-300: #d4d4d4;
+  --dm-neutral-400: #a3a3a3;
+  --dm-neutral-500: #737373;
+  --dm-neutral-600: #525252;
+  --dm-neutral-700: #404040;
+  --dm-neutral-800: #262626;
+  --dm-neutral-900: #171717;
+  --dm-neutral-1000: #000000;
+
+  --dm-primary: #4f46e5;
+  --dm-primary-hover: #4338ca;
+  --dm-primary-light: #eef2ff;
+  --dm-secondary: #404040;
+  --dm-accent: #f59e0b;
+  --dm-neutral: #404040;
+  --dm-bg: #ffffff;
+
+  --dm-success: #10b981;
+  --dm-warning: #f59e0b;
+  --dm-error: #ef4444;
+  --dm-info: #3b82f6;
+
+  --dm-font-primary: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --dm-font-serif: "Noto Serif KR", serif;
+  --dm-font-mono: "JetBrains Mono", Menlo, Consolas, monospace;
+  --dm-font-display: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+
+  --dm-fs-hero: 40px;
+  --dm-fw-hero: 800;
+  --dm-ls-hero: -0.03em;
+  --dm-fs-h1: 28px;
+  --dm-fs-h2: 22px;
+  --dm-fs-h3: 18px;
+  --dm-fs-body: 16px;
+  --dm-fs-small: 13px;
+  --dm-fs-tiny: 11px;
+
+  --dm-lh-hero: 1.15;
+  --dm-lh-h1: 1.25;
+  --dm-lh-h2: 1.35;
+  --dm-lh-h3: 1.4;
+  --dm-lh-body: 1.65;
+  --dm-lh-small: 1.55;
+  --dm-lh-tiny: 1.4;
+
+  --dm-sp-0: 0; --dm-sp-1: 4px; --dm-sp-2: 8px; --dm-sp-3: 12px;
+  --dm-sp-4: 16px; --dm-sp-5: 20px; --dm-sp-6: 24px; --dm-sp-8: 32px;
+  --dm-sp-10: 40px; --dm-sp-12: 48px; --dm-sp-16: 64px; --dm-sp-20: 80px;
+  --dm-section-pad-scale: 1;
+
+  --dm-radius-none: 0; --dm-radius-sm: 4px; --dm-radius-md: 8px;
+  --dm-radius-lg: 12px; --dm-radius-xl: 16px; --dm-radius-2xl: 24px;
+  --dm-radius-full: 9999px;
+
+  --dm-shadow-sm: 0 1px 2px rgba(15,23,42,0.06);
+  --dm-shadow-md: 0 6px 16px -4px rgba(15,23,42,0.10), 0 2px 6px -2px rgba(15,23,42,0.06);
+  --dm-shadow-lg: 0 12px 28px -6px rgba(15,23,42,0.12), 0 4px 10px -4px rgba(15,23,42,0.06);
+  --dm-shadow-xl: 0 24px 48px -12px rgba(15,23,42,0.16), 0 10px 18px -8px rgba(15,23,42,0.06);
+}"
+`;
+
+exports[`M0 골든 — DM 토큰/베이스/디자인3 CSS > renderDmTokensCss 다크 배경 = 중립 반전 포함 1`] = `
+":root {
+  --dm-neutral-0: #ffffff;
+  --dm-neutral-50: #fafafa;
+  --dm-neutral-100: #f5f5f5;
+  --dm-neutral-200: #e5e5e5;
+  --dm-neutral-300: #d4d4d4;
+  --dm-neutral-400: #a3a3a3;
+  --dm-neutral-500: #737373;
+  --dm-neutral-600: #525252;
+  --dm-neutral-700: #404040;
+  --dm-neutral-800: #262626;
+  --dm-neutral-900: #171717;
+  --dm-neutral-1000: #000000;
+
+  --dm-primary: #b89150;
+  --dm-primary-hover: #4338ca;
+  --dm-primary-light: #eef2ff;
+  --dm-secondary: #404040;
+  --dm-accent: #d4af37;
+  --dm-neutral: #404040;
+  --dm-bg: #0e1018;
+
+  --dm-success: #10b981;
+  --dm-warning: #f59e0b;
+  --dm-error: #ef4444;
+  --dm-info: #3b82f6;
+
+  --dm-font-primary: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --dm-font-serif: "Noto Serif KR", serif;
+  --dm-font-mono: "JetBrains Mono", Menlo, Consolas, monospace;
+  --dm-font-display: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+
+  --dm-fs-hero: 40px;
+  --dm-fw-hero: 800;
+  --dm-ls-hero: -0.03em;
+  --dm-fs-h1: 28px;
+  --dm-fs-h2: 22px;
+  --dm-fs-h3: 18px;
+  --dm-fs-body: 16px;
+  --dm-fs-small: 13px;
+  --dm-fs-tiny: 11px;
+
+  --dm-lh-hero: 1.15;
+  --dm-lh-h1: 1.25;
+  --dm-lh-h2: 1.35;
+  --dm-lh-h3: 1.4;
+  --dm-lh-body: 1.65;
+  --dm-lh-small: 1.55;
+  --dm-lh-tiny: 1.4;
+
+  --dm-sp-0: 0; --dm-sp-1: 4px; --dm-sp-2: 8px; --dm-sp-3: 12px;
+  --dm-sp-4: 16px; --dm-sp-5: 20px; --dm-sp-6: 24px; --dm-sp-8: 32px;
+  --dm-sp-10: 40px; --dm-sp-12: 48px; --dm-sp-16: 64px; --dm-sp-20: 80px;
+  --dm-section-pad-scale: 1;
+
+  --dm-radius-none: 0; --dm-radius-sm: 4px; --dm-radius-md: 8px;
+  --dm-radius-lg: 12px; --dm-radius-xl: 16px; --dm-radius-2xl: 24px;
+  --dm-radius-full: 9999px;
+
+  --dm-shadow-sm: 0 1px 2px rgba(15,23,42,0.06);
+  --dm-shadow-md: 0 6px 16px -4px rgba(15,23,42,0.10), 0 2px 6px -2px rgba(15,23,42,0.06);
+  --dm-shadow-lg: 0 12px 28px -6px rgba(15,23,42,0.12), 0 4px 10px -4px rgba(15,23,42,0.06);
+  --dm-shadow-xl: 0 24px 48px -12px rgba(15,23,42,0.16), 0 10px 18px -8px rgba(15,23,42,0.06);
+
+  --dm-neutral-0: #1b2130;
+  --dm-neutral-50: #161b28;
+  --dm-neutral-100: #1e2433;
+  --dm-neutral-200: #2c3347;
+  --dm-neutral-300: #3a4257;
+  --dm-neutral-400: #8b94a7;
+  --dm-neutral-500: #9aa3b5;
+  --dm-neutral-600: #b7bfce;
+  --dm-neutral-700: #cdd4e0;
+  --dm-neutral-800: #e4e8f0;
+  --dm-neutral-900: #f2f5fa;
+  --dm-neutral-1000: #ffffff;
+  --dm-primary-light: color-mix(in srgb, #b89150 22%, #141926);
+}"
+`;
+
+exports[`M0 골든 — DM 토큰/베이스/디자인3 CSS > renderDmTokensCss 브랜드킷(라이트) 적용 1`] = `
+":root {
+  --dm-neutral-0: #ffffff;
+  --dm-neutral-50: #fafafa;
+  --dm-neutral-100: #f5f5f5;
+  --dm-neutral-200: #e5e5e5;
+  --dm-neutral-300: #d4d4d4;
+  --dm-neutral-400: #a3a3a3;
+  --dm-neutral-500: #737373;
+  --dm-neutral-600: #525252;
+  --dm-neutral-700: #404040;
+  --dm-neutral-800: #262626;
+  --dm-neutral-900: #171717;
+  --dm-neutral-1000: #000000;
+
+  --dm-primary: #111827;
+  --dm-primary-hover: #4338ca;
+  --dm-primary-light: #eef2ff;
+  --dm-secondary: #404040;
+  --dm-accent: #b45309;
+  --dm-neutral: #404040;
+  --dm-bg: #ffffff;
+
+  --dm-success: #10b981;
+  --dm-warning: #f59e0b;
+  --dm-error: #ef4444;
+  --dm-info: #3b82f6;
+
+  --dm-font-primary: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --dm-font-serif: "Noto Serif KR", serif;
+  --dm-font-mono: "JetBrains Mono", Menlo, Consolas, monospace;
+  --dm-font-display: "Noto Serif KR", serif;
+
+  --dm-fs-hero: 40px;
+  --dm-fw-hero: 800;
+  --dm-ls-hero: -0.03em;
+  --dm-fs-h1: 28px;
+  --dm-fs-h2: 22px;
+  --dm-fs-h3: 18px;
+  --dm-fs-body: 16px;
+  --dm-fs-small: 13px;
+  --dm-fs-tiny: 11px;
+
+  --dm-lh-hero: 1.15;
+  --dm-lh-h1: 1.25;
+  --dm-lh-h2: 1.35;
+  --dm-lh-h3: 1.4;
+  --dm-lh-body: 1.65;
+  --dm-lh-small: 1.55;
+  --dm-lh-tiny: 1.4;
+
+  --dm-sp-0: 0; --dm-sp-1: 4px; --dm-sp-2: 8px; --dm-sp-3: 12px;
+  --dm-sp-4: 16px; --dm-sp-5: 20px; --dm-sp-6: 24px; --dm-sp-8: 32px;
+  --dm-sp-10: 40px; --dm-sp-12: 48px; --dm-sp-16: 64px; --dm-sp-20: 80px;
+  --dm-section-pad-scale: 1;
+
+  --dm-radius-none: 0; --dm-radius-sm: 4px; --dm-radius-md: 8px;
+  --dm-radius-lg: 12px; --dm-radius-xl: 16px; --dm-radius-2xl: 24px;
+  --dm-radius-full: 9999px;
+
+  --dm-shadow-sm: 0 1px 2px rgba(15,23,42,0.06);
+  --dm-shadow-md: 0 6px 16px -4px rgba(15,23,42,0.10), 0 2px 6px -2px rgba(15,23,42,0.06);
+  --dm-shadow-lg: 0 12px 28px -6px rgba(15,23,42,0.12), 0 4px 10px -4px rgba(15,23,42,0.06);
+  --dm-shadow-xl: 0 24px 48px -12px rgba(15,23,42,0.16), 0 10px 18px -8px rgba(15,23,42,0.06);
+}"
+`;

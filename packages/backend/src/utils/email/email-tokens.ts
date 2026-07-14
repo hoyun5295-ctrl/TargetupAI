@@ -14,6 +14,9 @@
  */
 import { DM_COLOR_TOKENS, DM_TYPOGRAPHY, DM_SPACING } from '../dm/dm-tokens';
 import type { DmBrandKit } from '../dm/dm-tokens';
+// ★ 2026-07-14 디자인 4.0 M2 — 타입스케일·밀도·서체 카탈로그 소유가 design-core로 이동(값 무변 이관).
+import { CORE_TYPE_SCALE, CORE_DENSITY_SCALE } from '../design-core/art-direction';
+import { CORE_FONTS } from '../design-core/fonts';
 
 // ────────────── 디자인(캠페인 단위) 타입 ──────────────
 
@@ -87,14 +90,9 @@ export function normalizeEmailDesign(raw: unknown): EmailDesign | null {
  * css = 이메일 안전 폴백 스택(웹폰트 → 한국어 시스템 서체 → 총칭).
  * google = css2 family 파라미터(DM 카탈로그와 동일 값) — @import 지원 클라이언트(Apple Mail 등)만 로드.
  */
-export const EMAIL_FONT_CATALOG: ReadonlyArray<{ id: string; match: string; css: string; google: string | null }> = [
-  { id: 'pretendard', match: 'Pretendard', css: "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif", google: null },
-  { id: 'noto-serif', match: 'Noto Serif KR', css: "'Noto Serif KR', 'Nanum Myeongjo', 'AppleMyungjo', Batang, Georgia, serif", google: 'Noto+Serif+KR:wght@400;600;700;900' },
-  { id: 'nanum-myeongjo', match: 'Nanum Myeongjo', css: "'Nanum Myeongjo', 'Noto Serif KR', 'AppleMyungjo', Batang, Georgia, serif", google: 'Nanum+Myeongjo:wght@400;700;800' },
-  { id: 'gowun-batang', match: 'Gowun Batang', css: "'Gowun Batang', 'Nanum Myeongjo', 'AppleMyungjo', Batang, Georgia, serif", google: 'Gowun+Batang:wght@400;700' },
-  { id: 'gowun-dodum', match: 'Gowun Dodum', css: "'Gowun Dodum', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif", google: 'Gowun+Dodum' },
-  { id: 'black-han', match: 'Black Han Sans', css: "'Black Han Sans', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif", google: 'Black+Han+Sans' },
-];
+// ★ 2026-07-14 디자인 4.0 M2 — 소유 = design-core/fonts CORE_FONTS (emailCss = 이메일 폴백 스택, 값 무변 파생).
+export const EMAIL_FONT_CATALOG: ReadonlyArray<{ id: string; match: string; css: string; google: string | null }> =
+  CORE_FONTS.map((c) => ({ id: c.id, match: c.match, css: c.emailCss, google: c.google }));
 
 /** 저장된 font-family 문자열이 카탈로그 서체를 가리키면 이메일 폴백 스택으로 승격, 아니면 null(원본 유지). */
 export function emailFontStack(family?: string): string | null {
@@ -120,14 +118,15 @@ export function emailGoogleFontsImport(...families: Array<string | undefined>): 
 
 // ────────────── 타입스케일 / 여백 밀도 (DM SSOT 리터럴 미러) ──────────────
 
-// DM dm-art-direction TYPE_SCALE_VARS 미러 + h2 파생. 미설정 = DM_TYPOGRAPHY.scale 기본(현행 산출 그대로).
+// ★ 2026-07-14 디자인 4.0 M2 — 소유 = design-core CORE_TYPE_SCALE(emailH2 포함)·CORE_DENSITY_SCALE (값 무변 파생).
+//   미설정 = DM_TYPOGRAPHY.scale 기본(현행 산출 그대로 — M0 골든 스냅샷 고정).
 const EMAIL_TYPE_SCALE: Record<EmailTypeScale, { hero: { size: string; weight: number; ls: string }; h1: string; h2: string }> = {
-  editorial: { hero: { size: '40px', weight: 800, ls: '-0.03em' }, h1: '28px', h2: '22px' },
-  bold:      { hero: { size: '34px', weight: 900, ls: '-0.02em' }, h1: '24px', h2: '20px' },
-  minimal:   { hero: { size: '28px', weight: 600, ls: '0' },       h1: '22px', h2: '19px' },
+  editorial: { hero: { size: CORE_TYPE_SCALE.editorial.hero, weight: Number(CORE_TYPE_SCALE.editorial.heroWeight), ls: CORE_TYPE_SCALE.editorial.heroLs }, h1: CORE_TYPE_SCALE.editorial.h1, h2: CORE_TYPE_SCALE.editorial.emailH2 },
+  bold:      { hero: { size: CORE_TYPE_SCALE.bold.hero, weight: Number(CORE_TYPE_SCALE.bold.heroWeight), ls: CORE_TYPE_SCALE.bold.heroLs }, h1: CORE_TYPE_SCALE.bold.h1, h2: CORE_TYPE_SCALE.bold.emailH2 },
+  minimal:   { hero: { size: CORE_TYPE_SCALE.minimal.hero, weight: Number(CORE_TYPE_SCALE.minimal.heroWeight), ls: CORE_TYPE_SCALE.minimal.heroLs }, h1: CORE_TYPE_SCALE.minimal.h1, h2: CORE_TYPE_SCALE.minimal.emailH2 },
 };
 
-const DENSITY_MULT: Record<EmailSpacingDensity, number> = { compact: 0.8, standard: 1, airy: 1.4 };
+const DENSITY_MULT: Record<EmailSpacingDensity, number> = CORE_DENSITY_SCALE;
 
 function scaleSpacing(mult: number): typeof DM_SPACING {
   if (mult === 1) return DM_SPACING;

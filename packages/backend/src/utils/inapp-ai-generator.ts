@@ -32,6 +32,13 @@ import { buildEventPromptBlock, benefitMatchesEventText, normalizeEventText, val
 import { fetchProductOgImages } from './dm/dm-brand-extractor';
 // ★ D230+ 블록 — CT-27 공용 검증/정규화 (인라인 중복 금지)
 import { sanitizeContentBlocks, normalizeTheme, normalizeCardStyle, INAPP_CARD_STYLES, BENEFIT_PLACEHOLDER, sanitizeInAppDesign } from './inapp-message';
+// ★ 2026-07-14 디자인 4.0 M2 — 결정적 디자인 추천 소유 = design-core/recommend (값 무변 이관)
+import { INAPP_SCENARIO_CARD_STYLE, INAPP_SCENARIO_TREATMENT } from './design-core/recommend';
+// ★ 2026-07-14 디자인 4.0 M5 — 행사 → 정예 템플릿 스토리 힌트 (결정적 선택기, design-core)
+import { buildEventTemplateHintBlock } from './design-core/event-package';
+// ★ 2026-07-14 디자인 4.0 M2 — 브랜드 톤 파이프 연결: DM·이메일·여정과 동일하게 Brand Voice 주입
+//   (실측 2026-07-14: 3채널 중 인앱 생성기만 미주입이던 구멍 — 가이드라인 미학습 회사는 base 그대로 = 영향 0)
+import { buildSystemPromptWithBrandVoice } from './brand-voice-prompt';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -311,21 +318,9 @@ const SCENARIO_ACCENT: Record<QuickStartScenario, string> = {
   repeat_purchase: '#0ea5e9',
 };
 
-// ★ 2026-07-07(2) 시나리오별 추천 형태 — 대화 회복=말풍선 / 혜택 유도=티켓 / 신상품=포스터 / 포멀=클래식
-const SCENARIO_CARD_STYLE: Record<QuickStartScenario, string> = {
-  cart_recovery: 'ticket',
-  new_welcome: 'bubble',
-  dormant_recovery: 'bubble',
-  new_product: 'poster',
-  vip_appreciation: 'classic',
-  checkout_abandon: 'bubble',
-  repeat_purchase: 'ticket',
-};
-
-// ★ 2026-07-14 디자인 3.0 — 시나리오별 결정적 구도 추천 (허용표 밖 조합은 SDK fail-closed로 classic)
-const SCENARIO_TREATMENT: Partial<Record<QuickStartScenario, string>> = {
-  vip_appreciation: 'framed', // classic 카드 — 에디토리얼 액자
-};
+// ★ 2026-07-07(2) 시나리오별 추천 형태 / ★ 2026-07-14 디자인 4.0 M2 — 소유 = design-core/recommend (값 무변 이관)
+const SCENARIO_CARD_STYLE: Record<QuickStartScenario, string> = INAPP_SCENARIO_CARD_STYLE as Record<QuickStartScenario, string>;
+const SCENARIO_TREATMENT: Partial<Record<QuickStartScenario, string>> = INAPP_SCENARIO_TREATMENT;
 
 // ★ 2026-07-14 디자인 3.0 — 행사 원문 상품 자동 매핑: AI product 블록 → 원문 실존 검증(가격·URL verbatim)
 //   → og:image 자동 채움. 검증 탈락 상품은 가격/링크만 제거(카피는 유지) — AI 임의 혜택 영구 룰 양립.
@@ -465,7 +460,7 @@ export async function generateInAppMessagePackage(
 
 ${memoryContext}
 
-${eventText ? `${buildEventPromptBlock(eventText)}\n` : ''}
+${eventText ? `${buildEventPromptBlock(eventText)}\n${(() => { const h = buildEventTemplateHintBlock(eventText); return h ? `${h}\n` : ''; })()}` : ''}
 [★ ★ ★ 영구 룰 — 절대 위반 X ★ ★ ★]
 
 1. AI 임의 혜택 절대 금지:
@@ -680,9 +675,13 @@ ${brandAccent
 
 응답은 위 응답 JSON 형식 그대로.`;
 
+  // ★ 2026-07-14 디자인 4.0 M2 — 브랜드 학습(Brand Voice) 파이프 연결.
+  //   가이드라인 학습 회사 = 톤 가이드 prefix 주입 / 미학습 = system 그대로 반환(기존 흐름 영향 0).
+  const systemWithVoice = await buildSystemPromptWithBrandVoice(input.companyId, system);
+
   // AI Operator 영역 호출 (model: 'opus')
   const aiResult = await callAIWithFallback({
-    system,
+    system: systemWithVoice,
     userMessage,
     model: 'opus',
     maxTokens: 4096,

@@ -34,6 +34,8 @@ import ValidationModal from '../components/dm/modals/ValidationModal';
 import VersionHistoryModal from '../components/dm/modals/VersionHistoryModal';
 import BrandKitModal from '../components/dm/modals/BrandKitModal';
 import DesignThemeModal from '../components/dm/modals/DesignThemeModal';
+// ★ 2026-07-14 디자인 4.0 — 정예 템플릿(목적×스토리 구조, 서버 design-core 컴파일)
+import EliteTemplateModal from '../components/dm/modals/EliteTemplateModal';
 import AbTestModal from '../components/dm/modals/AbTestModal';
 import ModalBase, { ModalButton } from '../components/dm/modals/ModalBase';
 import '../styles/dm-builder.css';
@@ -1332,6 +1334,7 @@ function EditorModals() {
       <VersionHistoryModal open={openModal === 'version-history'} onClose={close} />
       <BrandKitModal open={openModal === 'brand-kit'} onClose={close} />
       <DesignThemeModal open={openModal === 'design-theme'} onClose={close} />
+      <EliteTemplateModal open={openModal === 'elite-template'} onClose={close} />
       <AbTestModal open={openModal === 'ab-test'} onClose={close} />
     </>
   );

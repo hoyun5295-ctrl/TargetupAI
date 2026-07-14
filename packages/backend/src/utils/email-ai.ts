@@ -30,6 +30,8 @@ import { collectRefinableTexts, applyRefinedTexts } from './email/email-section-
 // 문안 두뇌: 성과 RAG + 시의성 + 브랜드 키트 주입 + 타사 표현 복제 가드
 import { composeCopyBrain } from './copy-prompt-composer';
 import { buildEventPromptBlock, validateProductsAgainstEventText } from './event-brief';
+// ★ 2026-07-14 디자인 4.0 M5 — 행사 → 정예 템플릿 스토리 힌트 (결정적 선택기, design-core)
+import { buildEventTemplateHintBlock } from './design-core/event-package';
 import { checkCopyLeak } from './copy-similarity-guard';
 
 // ════════════════════════════════════════════════════════════════════
@@ -375,6 +377,9 @@ export async function generateEmailSections(input: {
   const parts: string[] = [];
   const eventBlock = input.eventText ? buildEventPromptBlock(input.eventText) : '';
   if (eventBlock) parts.push(eventBlock);
+  // ★ 2026-07-14 디자인 4.0 M5 — 행사 성격 → 정예 템플릿 스토리 힌트(결정적 매칭, 빈 행사문 = '' 우회)
+  const templateHint = input.eventText ? buildEventTemplateHintBlock(input.eventText) : '';
+  if (templateHint) parts.push(templateHint);
   if (scenarioPreset) parts.push(`[시나리오] ${scenarioPreset.label} — ${scenarioPreset.prompt}`);
   if (input.prompt) parts.push(`[요청 내용] ${input.prompt}`);
   parts.push(`[캠페인 성격] ${input.isAd ? '광고성 (표기는 발송 시 자동 부착 — 직접 넣지 말 것)' : '정보성'}`);

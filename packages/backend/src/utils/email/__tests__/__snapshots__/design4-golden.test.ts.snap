@@ -1,0 +1,394 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`M0 골든 — 이메일 발행물 렌더 > 럭셔리 다크(다크 셸) 렌더 동결 1`] = `
+"<!DOCTYPE html>
+<html lang="ko" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600;700;900&display=swap');
+html,body{margin:0 !important;padding:0 !important}
+table{border-collapse:collapse}
+img{border:0;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic}
+@media (max-width:600px){
+  .em-outer{padding:0 !important}
+  .em-shell{width:100% !important;border-radius:0 !important}
+  .em-stack{display:block !important;width:100% !important;box-sizing:border-box !important}
+  .em-hero{height:auto !important;padding:36px 20px !important}
+}
+@media (prefers-color-scheme:dark){
+  body,.em-body{background:#0e1018 !important}
+}
+</style>
+</head>
+<body class="em-body" style="margin:0;padding:0;background:#0e1018;-webkit-text-size-adjust:100%">
+<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all">한줄로상회 가을 신상품 안내 먼저 만나보세요 이번 시즌 포인트 따뜻한 소재의 신상품이 들어왔어요. [직접 작성해주세요]&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0e1018;margin:0;padding:0"><tr><td align="center" class="em-outer" style="padding:34px 17px 45px"><table role="presentation" width="600" cellpadding="0" cellspacing="0" class="em-shell" style="max-width:600px;width:100%;background:#171717;border:1px solid rgba(255,255,255,0.14);border-radius:20px;overflow:hidden;box-shadow:0 12px 32px rgba(15,23,42,0.08),0 2px 6px rgba(15,23,42,0.05);font-family:'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif"><tr><td style="height:6px;font-size:0;line-height:0;background:#b89150;background-image:linear-gradient(90deg,#b89150 0%,#f8d190 100%);border-radius:20px 20px 0 0">&nbsp;</td></tr>
+<tr><td style="padding:28px 34px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.14)"><span style="font-family:'Noto Serif KR', 'Nanum Myeongjo', 'AppleMyungjo', Batang, Georgia, serif;font-size:18px;font-weight:700;color:#f4f4f5;vertical-align:middle;margin-left:0">한줄로상회</span></td></tr>
+<tr><td class="em-hero" style="padding:67px 34px;text-align:center"><div style="margin-bottom:17px;font-size:0;line-height:0"><span style="display:inline-block;width:28px;height:3px;background:#b89150"></span></div><div style="font-family:'Noto Serif KR', 'Nanum Myeongjo', 'AppleMyungjo', Batang, Georgia, serif;font-size:40px;line-height:1.12;font-weight:800;letter-spacing:-0.03em;color:#f4f4f5;margin:0">가을 신상품 안내</div><div style="font-size:16px;line-height:1.65;color:#a1a1aa;margin-top:22px">먼저 만나보세요</div></td></tr>
+<tr><td align="center" style="padding:17px 0"><hr style="border:none;border-top:3px solid #b89150;width:36px;margin:0 auto"></td></tr>
+<tr><td style="padding:45px 34px"><div style="text-align:left"><div style="margin-bottom:17px;font-size:0;line-height:0"><span style="display:inline-block;width:28px;height:3px;background:#b89150"></span></div><div style="font-size:11px;font-weight:800;letter-spacing:0.18em;color:#b89150;margin-bottom:11px">NEW</div><div style="font-family:'Noto Serif KR', 'Nanum Myeongjo', 'AppleMyungjo', Batang, Georgia, serif;font-size:28px;line-height:1.35;font-weight:700;color:#f4f4f5;margin:0 0 17px 0">이번 시즌 포인트</div><div style="font-size:18px;line-height:1.7;color:#f4f4f5">따뜻한 소재의 신상품이 들어왔어요.</div></div></td></tr>
+<tr><td align="center" style="padding:17px 0"><hr style="border:none;border-top:3px solid #b89150;width:36px;margin:0 auto"></td></tr>
+<tr><td style="padding:28px 34px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:45px 34px;background:#171717;border-radius:16px;text-align:center"><div style="font-size:11px;font-weight:800;letter-spacing:0.18em;color:#d4af37;margin-bottom:11px">COUPON</div><div style="font-family:'Noto Serif KR', 'Nanum Myeongjo', 'AppleMyungjo', Batang, Georgia, serif;font-size:34px;line-height:1.2;font-weight:800;letter-spacing:-0.02em;color:#ffffff">[직접 작성해주세요]</div><div style="margin-top:22px"><span style="display:inline-block;padding:17px 34px;background:rgba(255,255,255,0.06);border:1px dashed #d4af37;border-radius:8px;font-family:'JetBrains Mono', Menlo, Consolas, monospace;font-size:18px;font-weight:800;letter-spacing:3px;color:#d4af37">GOLDEN</span></div></td></tr></table></td></tr>
+<tr><td align="center" style="padding:17px 0"><hr style="border:none;border-top:3px solid #b89150;width:36px;margin:0 auto"></td></tr>
+<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="background:#b89150;background-image:linear-gradient(180deg,#c69f5e 0%,#9c7534 100%);padding:34px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:11px 0"><!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="https://shop.example.com" style="height:46px;v-text-anchor:middle;width:230px" arcsize="30%" fillcolor="#ffffff" stroke="f"><w:anchorlock/><center style="color:#b89150;font-family:sans-serif;font-size:15px;font-weight:800">보러가기</center></v:roundrect><![endif]--><!--[if !mso]><!--><table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto"><tr><td style="border-radius:14px;background:#ffffff;background-image:none;border:1px solid #ffffff;box-shadow:none"><a href="https://shop.example.com" style="display:inline-block;padding:14px 34px;font-size:16px;font-weight:800;letter-spacing:-0.01em;color:#b89150;text-decoration:none">보러가기</a></td></tr></table><!--<![endif]--></td></tr></table></td></tr></table></td></tr>
+<tr><td style="padding:45px 34px;border-top:1px solid rgba(255,255,255,0.14);text-align:center;font-size:11px;line-height:1.7;color:#a1a1aa"><div style="margin:11px 0">본 메일은 안내입니다</div><div style="margin:11px 0">고객센터 1544-0000</div></td></tr></table></td></tr></table>
+<!--EMAIL_FOOTER_SLOT-->
+</body>
+</html>"
+`;
+
+exports[`M0 골든 — 이메일 발행물 렌더 > 레거시 대표(design 미설정) 렌더 동결 1`] = `
+"<!DOCTYPE html>
+<html lang="ko" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<style>
+
+html,body{margin:0 !important;padding:0 !important}
+table{border-collapse:collapse}
+img{border:0;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic}
+@media (max-width:600px){
+  .em-outer{padding:0 !important}
+  .em-shell{width:100% !important;border-radius:0 !important}
+  .em-stack{display:block !important;width:100% !important;box-sizing:border-box !important}
+  .em-hero{height:auto !important;padding:36px 20px !important}
+}
+@media (prefers-color-scheme:dark){
+  body,.em-body{background:#18181b !important}
+}
+</style>
+</head>
+<body class="em-body" style="margin:0;padding:0;background:#eef1f6;-webkit-text-size-adjust:100%">
+<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all">한줄로상회 가을 신상품 안내 먼저 만나보세요 이번 시즌 포인트 따뜻한 소재의 신상품이 들어왔어요. [직접 작성해주세요]&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f6;margin:0;padding:0"><tr><td align="center" class="em-outer" style="padding:24px 12px 32px"><table role="presentation" width="600" cellpadding="0" cellspacing="0" class="em-shell" style="max-width:600px;width:100%;background:#ffffff;border:1px solid #e5e5e5;border-radius:20px;overflow:hidden;box-shadow:0 12px 32px rgba(15,23,42,0.08),0 2px 6px rgba(15,23,42,0.05);font-family:'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif"><tr><td style="height:6px;font-size:0;line-height:0;background:#4f46e5;background-image:linear-gradient(90deg,#4f46e5 0%,#8f86ff 100%);border-radius:20px 20px 0 0">&nbsp;</td></tr>
+<tr><td style="padding:20px 24px;text-align:center;border-bottom:1px solid #e5e5e5"><span style="font-family:'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;font-size:18px;font-weight:700;color:#262626;vertical-align:middle;margin-left:0">한줄로상회</span></td></tr>
+<tr><td height="320" valign="middle" class="em-hero" style="height:320px;padding:32px 24px;text-align:center"><div style="font-family:'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;font-size:40px;line-height:1.15;font-weight:800;letter-spacing:-0.03em;color:#262626;margin:0">가을 신상품 안내</div><div style="font-size:16px;line-height:1.65;color:#737373;margin-top:12px">먼저 만나보세요</div></td></tr>
+<tr><td style="padding:24px"><div style="text-align:left"><div style="font-size:11px;font-weight:800;letter-spacing:0.18em;color:#4f46e5;margin-bottom:8px">NEW</div><div style="font-family:'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;font-size:22px;line-height:1.35;font-weight:700;color:#262626;margin:0 0 12px 0">이번 시즌 포인트</div><div style="font-size:16px;line-height:1.65;color:#262626">따뜻한 소재의 신상품이 들어왔어요.</div></div></td></tr>
+<tr><td style="padding:20px 24px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:32px 24px 24px;background:rgba(79,70,229,0.08);border:2px dashed rgba(79,70,229,0.45);border-bottom:none;border-radius:16px 16px 0 0;text-align:center"><div style="font-size:11px;font-weight:800;letter-spacing:0.18em;color:#4f46e5;margin-bottom:8px">COUPON</div><div style="font-family:'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;font-size:30px;line-height:1.25;font-weight:800;letter-spacing:-0.02em;color:#4f46e5">[직접 작성해주세요]</div></td></tr><tr><td style="padding:20px 24px;background:#ffffff;border:2px dashed rgba(79,70,229,0.45);border-top:2px dashed rgba(79,70,229,0.45);border-radius:0 0 16px 16px;text-align:center"><div style="display:inline-block;padding:12px 24px;background:rgba(79,70,229,0.08);border:1px dashed #4f46e5;border-radius:8px;font-family:'JetBrains Mono', Menlo, Consolas, monospace;font-size:18px;font-weight:800;letter-spacing:3px;color:#4f46e5">GOLDEN</div></td></tr></table></td></tr>
+<tr><td style="padding:20px 24px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:8px 0"><!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="https://shop.example.com" style="height:46px;v-text-anchor:middle;width:230px" arcsize="30%" fillcolor="#4f46e5" stroke="f"><w:anchorlock/><center style="color:#ffffff;font-family:sans-serif;font-size:15px;font-weight:800">보러가기</center></v:roundrect><![endif]--><!--[if !mso]><!--><table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto"><tr><td style="border-radius:14px;background:#4f46e5;background-image:linear-gradient(180deg,#5d54f3 0%,#332ac9 100%);border:1px solid #4f46e5;box-shadow:0 2px 5px rgba(15,23,42,0.12),0 10px 24px rgba(79,70,229,0.45)"><a href="https://shop.example.com" style="display:inline-block;padding:14px 34px;font-size:16px;font-weight:800;letter-spacing:-0.01em;color:#ffffff;text-decoration:none">보러가기</a></td></tr></table><!--<![endif]--></td></tr></table></td></tr>
+<tr><td style="padding:32px 24px;border-top:1px solid #e5e5e5;text-align:center;font-size:11px;line-height:1.7;color:#737373"><div style="margin:8px 0">본 메일은 안내입니다</div><div style="margin:8px 0">고객센터 1544-0000</div></td></tr></table></td></tr></table>
+<!--EMAIL_FOOTER_SLOT-->
+</body>
+</html>"
+`;
+
+exports[`M0 골든 — 이메일 발행물 렌더 > 에디토리얼 테마 렌더 동결 1`] = `
+"<!DOCTYPE html>
+<html lang="ko" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600;700;900&display=swap');
+html,body{margin:0 !important;padding:0 !important}
+table{border-collapse:collapse}
+img{border:0;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic}
+@media (max-width:600px){
+  .em-outer{padding:0 !important}
+  .em-shell{width:100% !important;border-radius:0 !important}
+  .em-stack{display:block !important;width:100% !important;box-sizing:border-box !important}
+  .em-hero{height:auto !important;padding:36px 20px !important}
+}
+@media (prefers-color-scheme:dark){
+  body,.em-body{background:#18181b !important}
+}
+</style>
+</head>
+<body class="em-body" style="margin:0;padding:0;background:#ffffff;-webkit-text-size-adjust:100%">
+<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all">한줄로상회 가을 신상품 안내 먼저 만나보세요 이번 시즌 포인트 따뜻한 소재의 신상품이 들어왔어요. [직접 작성해주세요]&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;margin:0;padding:0"><tr><td align="center" class="em-outer" style="padding:34px 17px 45px"><table role="presentation" width="600" cellpadding="0" cellspacing="0" class="em-shell" style="max-width:600px;width:100%;background:#ffffff;border:1px solid #e5e5e5;border-radius:20px;overflow:hidden;box-shadow:0 12px 32px rgba(15,23,42,0.08),0 2px 6px rgba(15,23,42,0.05);font-family:'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif"><tr><td style="height:6px;font-size:0;line-height:0;background:#111827;background-image:linear-gradient(90deg,#111827 0%,#515867 100%);border-radius:20px 20px 0 0">&nbsp;</td></tr>
+<tr><td style="padding:28px 34px;text-align:center;border-bottom:1px solid #e5e5e5"><span style="font-family:'Noto Serif KR', 'Nanum Myeongjo', 'AppleMyungjo', Batang, Georgia, serif;font-size:18px;font-weight:700;color:#262626;vertical-align:middle;margin-left:0">한줄로상회</span></td></tr>
+<tr><td class="em-hero" style="padding:67px 34px;text-align:center"><div style="margin-bottom:17px;font-size:0;line-height:0"><span style="display:inline-block;width:28px;height:3px;background:#111827"></span></div><div style="font-family:'Noto Serif KR', 'Nanum Myeongjo', 'AppleMyungjo', Batang, Georgia, serif;font-size:40px;line-height:1.12;font-weight:800;letter-spacing:-0.03em;color:#262626;margin:0">가을 신상품 안내</div><div style="font-size:16px;line-height:1.65;color:#737373;margin-top:22px">먼저 만나보세요</div></td></tr>
+<tr><td style="padding:0 34px"><hr style="border:none;border-top:1px solid #e5e5e5;margin:0"></td></tr>
+<tr><td style="padding:45px 34px"><div style="text-align:left"><div style="margin-bottom:17px;font-size:0;line-height:0"><span style="display:inline-block;width:28px;height:3px;background:#111827"></span></div><div style="font-size:11px;font-weight:800;letter-spacing:0.18em;color:#111827;margin-bottom:11px">NEW</div><div style="font-family:'Noto Serif KR', 'Nanum Myeongjo', 'AppleMyungjo', Batang, Georgia, serif;font-size:28px;line-height:1.35;font-weight:700;color:#262626;margin:0 0 17px 0">이번 시즌 포인트</div><div style="font-size:18px;line-height:1.7;color:#262626">따뜻한 소재의 신상품이 들어왔어요.</div></div></td></tr>
+<tr><td style="padding:0 34px"><hr style="border:none;border-top:1px solid #e5e5e5;margin:0"></td></tr>
+<tr><td style="padding:28px 34px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:45px 34px;background:#171717;border-radius:16px;text-align:center"><div style="font-size:11px;font-weight:800;letter-spacing:0.18em;color:#b45309;margin-bottom:11px">COUPON</div><div style="font-family:'Noto Serif KR', 'Nanum Myeongjo', 'AppleMyungjo', Batang, Georgia, serif;font-size:34px;line-height:1.2;font-weight:800;letter-spacing:-0.02em;color:#ffffff">[직접 작성해주세요]</div><div style="margin-top:22px"><span style="display:inline-block;padding:17px 34px;background:rgba(255,255,255,0.06);border:1px dashed #b45309;border-radius:8px;font-family:'JetBrains Mono', Menlo, Consolas, monospace;font-size:18px;font-weight:800;letter-spacing:3px;color:#b45309">GOLDEN</span></div></td></tr></table></td></tr>
+<tr><td style="padding:0 34px"><hr style="border:none;border-top:1px solid #e5e5e5;margin:0"></td></tr>
+<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="background:#111827;background-image:linear-gradient(180deg,#1f2635 0%,#00000b 100%);padding:34px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:11px 0"><!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="https://shop.example.com" style="height:46px;v-text-anchor:middle;width:230px" arcsize="30%" fillcolor="#ffffff" stroke="f"><w:anchorlock/><center style="color:#111827;font-family:sans-serif;font-size:15px;font-weight:800">보러가기</center></v:roundrect><![endif]--><!--[if !mso]><!--><table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto"><tr><td style="border-radius:14px;background:#ffffff;background-image:none;border:1px solid #ffffff;box-shadow:none"><a href="https://shop.example.com" style="display:inline-block;padding:14px 34px;font-size:16px;font-weight:800;letter-spacing:-0.01em;color:#111827;text-decoration:none">보러가기</a></td></tr></table><!--<![endif]--></td></tr></table></td></tr></table></td></tr>
+<tr><td style="padding:45px 34px;border-top:1px solid #e5e5e5;text-align:center;font-size:11px;line-height:1.7;color:#737373"><div style="margin:11px 0">본 메일은 안내입니다</div><div style="margin:11px 0">고객센터 1544-0000</div></td></tr></table></td></tr></table>
+<!--EMAIL_FOOTER_SLOT-->
+</body>
+</html>"
+`;
+
+exports[`M0 골든 — 이메일 브랜드 해석(resolveEmailBrand) > 다크 배경 = 중립 반전 값 동결 1`] = `
+{
+  "accent": "#d4af37",
+  "bandGrad": "linear-gradient(90deg,#b89150 0%,#f8d190 100%)",
+  "bg": "#1f1f23",
+  "border": "rgba(255,255,255,0.14)",
+  "btnGrad": "linear-gradient(180deg,#c69f5e 0%,#9c7534 100%)",
+  "cardBg": "#171717",
+  "dark": true,
+  "displayFont": "'Noto Serif KR', 'Nanum Myeongjo', 'AppleMyungjo', Batang, Georgia, serif",
+  "divider": "rule",
+  "fontFamily": "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif",
+  "fontImport": "@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600;700;900&display=swap');",
+  "heroGrad": "linear-gradient(135deg,#caa362 0%,#b89150 55%,#805918 100%)",
+  "markerWash": "rgba(184,145,80,0.26)",
+  "mono": "'JetBrains Mono', Menlo, Consolas, monospace",
+  "motif": "rule",
+  "primary": "#b89150",
+  "primaryDashed": "rgba(184,145,80,0.45)",
+  "primaryHover": "#a07938",
+  "primarySoft": "rgba(184,145,80,0.08)",
+  "radius": {
+    "lg": "16px",
+    "md": "12px",
+    "sm": "8px",
+    "xl": "20px",
+  },
+  "shellBg": "#0e1018",
+  "sp": {
+    "0": "0",
+    "1": "6px",
+    "10": "56px",
+    "12": "67px",
+    "16": "90px",
+    "2": "11px",
+    "20": "112px",
+    "3": "17px",
+    "4": "22px",
+    "5": "28px",
+    "6": "34px",
+    "8": "45px",
+  },
+  "text": "#f4f4f5",
+  "textMuted": "#a1a1aa",
+  "type": {
+    "body": {
+      "letterSpacing": "0",
+      "lineHeight": "1.65",
+      "size": "16px",
+      "weight": 400,
+    },
+    "h1": {
+      "letterSpacing": "-0.02em",
+      "lineHeight": "1.25",
+      "size": "28px",
+      "weight": 700,
+    },
+    "h2": {
+      "letterSpacing": "-0.01em",
+      "lineHeight": "1.35",
+      "size": "22px",
+      "weight": 700,
+    },
+    "h3": {
+      "letterSpacing": "0",
+      "lineHeight": "1.4",
+      "size": "18px",
+      "weight": 600,
+    },
+    "hero": {
+      "letterSpacing": "-0.03em",
+      "lineHeight": "1.15",
+      "size": "40px",
+      "weight": 800,
+    },
+    "small": {
+      "letterSpacing": "0",
+      "lineHeight": "1.55",
+      "size": "13px",
+      "weight": 400,
+    },
+    "tiny": {
+      "letterSpacing": "0",
+      "lineHeight": "1.4",
+      "size": "11px",
+      "weight": 400,
+    },
+  },
+}
+`;
+
+exports[`M0 골든 — 이메일 브랜드 해석(resolveEmailBrand) > 미설정 = 기본 브랜드 값 동결 1`] = `
+{
+  "accent": "#f59e0b",
+  "bandGrad": "linear-gradient(90deg,#4f46e5 0%,#8f86ff 100%)",
+  "bg": "#f5f5f5",
+  "border": "#e5e5e5",
+  "btnGrad": "linear-gradient(180deg,#5d54f3 0%,#332ac9 100%)",
+  "cardBg": "#ffffff",
+  "dark": false,
+  "displayFont": "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif",
+  "divider": "none",
+  "fontFamily": "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif",
+  "fontImport": "",
+  "heroGrad": "linear-gradient(135deg,#6158f7 0%,#4f46e5 55%,#170ead 100%)",
+  "markerWash": "rgba(79,70,229,0.26)",
+  "mono": "'JetBrains Mono', Menlo, Consolas, monospace",
+  "motif": "none",
+  "primary": "#4f46e5",
+  "primaryDashed": "rgba(79,70,229,0.45)",
+  "primaryHover": "#4338ca",
+  "primarySoft": "rgba(79,70,229,0.08)",
+  "radius": {
+    "lg": "16px",
+    "md": "12px",
+    "sm": "8px",
+    "xl": "20px",
+  },
+  "shellBg": "#eef1f6",
+  "sp": {
+    "0": "0",
+    "1": "4px",
+    "10": "40px",
+    "12": "48px",
+    "16": "64px",
+    "2": "8px",
+    "20": "80px",
+    "3": "12px",
+    "4": "16px",
+    "5": "20px",
+    "6": "24px",
+    "8": "32px",
+  },
+  "text": "#262626",
+  "textMuted": "#737373",
+  "type": {
+    "body": {
+      "letterSpacing": "0",
+      "lineHeight": "1.65",
+      "size": "16px",
+      "weight": 400,
+    },
+    "h1": {
+      "letterSpacing": "-0.02em",
+      "lineHeight": "1.25",
+      "size": "28px",
+      "weight": 700,
+    },
+    "h2": {
+      "letterSpacing": "-0.01em",
+      "lineHeight": "1.35",
+      "size": "22px",
+      "weight": 700,
+    },
+    "h3": {
+      "letterSpacing": "0",
+      "lineHeight": "1.4",
+      "size": "18px",
+      "weight": 600,
+    },
+    "hero": {
+      "letterSpacing": "-0.03em",
+      "lineHeight": "1.15",
+      "size": "40px",
+      "weight": 800,
+    },
+    "small": {
+      "letterSpacing": "0",
+      "lineHeight": "1.55",
+      "size": "13px",
+      "weight": 400,
+    },
+    "tiny": {
+      "letterSpacing": "0",
+      "lineHeight": "1.4",
+      "size": "11px",
+      "weight": 400,
+    },
+  },
+}
+`;
+
+exports[`M0 골든 — 이메일 브랜드 해석(resolveEmailBrand) > 에디토리얼 design 적용 값 동결 1`] = `
+{
+  "accent": "#b45309",
+  "bandGrad": "linear-gradient(90deg,#111827 0%,#515867 100%)",
+  "bg": "#ffffff",
+  "border": "#e5e5e5",
+  "btnGrad": "linear-gradient(180deg,#1f2635 0%,#00000b 100%)",
+  "cardBg": "#ffffff",
+  "dark": false,
+  "displayFont": "'Noto Serif KR', 'Nanum Myeongjo', 'AppleMyungjo', Batang, Georgia, serif",
+  "divider": "hairline",
+  "fontFamily": "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif",
+  "fontImport": "@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600;700;900&display=swap');",
+  "heroGrad": "linear-gradient(135deg,#232a39 0%,#111827 55%,#000000 100%)",
+  "markerWash": "rgba(17,24,39,0.26)",
+  "mono": "'JetBrains Mono', Menlo, Consolas, monospace",
+  "motif": "rule",
+  "primary": "#111827",
+  "primaryDashed": "rgba(17,24,39,0.45)",
+  "primaryHover": "#00000f",
+  "primarySoft": "rgba(17,24,39,0.08)",
+  "radius": {
+    "lg": "16px",
+    "md": "12px",
+    "sm": "8px",
+    "xl": "20px",
+  },
+  "shellBg": "#ffffff",
+  "sp": {
+    "0": "0",
+    "1": "6px",
+    "10": "56px",
+    "12": "67px",
+    "16": "90px",
+    "2": "11px",
+    "20": "112px",
+    "3": "17px",
+    "4": "22px",
+    "5": "28px",
+    "6": "34px",
+    "8": "45px",
+  },
+  "text": "#262626",
+  "textMuted": "#737373",
+  "type": {
+    "body": {
+      "letterSpacing": "0",
+      "lineHeight": "1.65",
+      "size": "16px",
+      "weight": 400,
+    },
+    "h1": {
+      "letterSpacing": "-0.02em",
+      "lineHeight": "1.25",
+      "size": "28px",
+      "weight": 700,
+    },
+    "h2": {
+      "letterSpacing": "-0.01em",
+      "lineHeight": "1.35",
+      "size": "22px",
+      "weight": 700,
+    },
+    "h3": {
+      "letterSpacing": "0",
+      "lineHeight": "1.4",
+      "size": "18px",
+      "weight": 600,
+    },
+    "hero": {
+      "letterSpacing": "-0.03em",
+      "lineHeight": "1.15",
+      "size": "40px",
+      "weight": 800,
+    },
+    "small": {
+      "letterSpacing": "0",
+      "lineHeight": "1.55",
+      "size": "13px",
+      "weight": 400,
+    },
+    "tiny": {
+      "letterSpacing": "0",
+      "lineHeight": "1.4",
+      "size": "11px",
+      "weight": 400,
+    },
+  },
+}
+`;

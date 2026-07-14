@@ -75,6 +75,8 @@ export type ModalKey =
   | 'version-history'
   | 'brand-kit'
   | 'design-theme'
+  // ★ 2026-07-14 디자인 4.0 — 정예 템플릿(목적×스토리 구조, 서버 design-core 컴파일)
+  | 'elite-template'
   | 'ab-test'
   | null;
 

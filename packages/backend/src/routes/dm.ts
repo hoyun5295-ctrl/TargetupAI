@@ -64,6 +64,8 @@ import { getAvailableVariables } from '../utils/dm/dm-variable-resolver';
 import { validateDm } from '../utils/dm/dm-validate';
 import { getCompanyBrandKit, updateCompanyBrandKit, DEFAULT_BRAND_KIT } from '../utils/dm/dm-brand-kit';
 import { buildEventPromptBlock, normalizeEventText } from '../utils/event-brief';
+// ★ 2026-07-14 디자인 4.0 M5 — 행사 → 정예 템플릿 스토리 힌트 (결정적 선택기, design-core)
+import { buildEventTemplateHintBlock } from '../utils/design-core/event-package';
 import { listTemplates, getTemplate, instantiateTemplate } from '../utils/dm/dm-template-registry';
 import { insertTestSmsQueue } from '../utils/sms-queue';
 import { getUserTestContacts } from '../utils/test-contact-helper';
@@ -598,8 +600,9 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
     if (prompt.length > 2000) {
       return res.status(400).json({ error: '프롬프트는 2000자 이내로 입력해주세요.' });
     }
+    // ★ 2026-07-14 디자인 4.0 M5 — 행사 성격 → 정예 템플릿 스토리 힌트(결정적 매칭, 빈 행사문 = '' 우회)
     const effectivePrompt = eventText
-      ? `${buildEventPromptBlock(eventText)}${prompt ? `\n\n[추가 요청]\n${prompt}` : ''}`
+      ? `${buildEventPromptBlock(eventText)}${(() => { const h = buildEventTemplateHintBlock(eventText); return h ? `\n\n${h}` : ''; })()}${prompt ? `\n\n[추가 요청]\n${prompt}` : ''}`
       : prompt;
 
     // ★ 종량제: DM 생성(돌려보기) = 3크레딧 묶음 (내부 parse/copy/tone은 집계만, 차감 0). 발행 시 30 별도.

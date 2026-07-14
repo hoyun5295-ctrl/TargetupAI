@@ -140,15 +140,11 @@ export type DmBrandKit = {
  * ★ 2026-07-13 — 큐레이션 서체 카탈로그. SSOT: frontend/src/utils/dm-tokens.ts 동기.
  * css = brandKit.font_family/font_display에 저장되는 font-family 문자열(기존 저장값 하위호환).
  * google = Google Fonts css2 파라미터(null = 별도 로드 불필요 — Pretendard는 뷰어가 항상 로드).
+ * ★ 2026-07-14 디자인 4.0 M2 — 소유 = design-core/fonts CORE_FONTS (값 무변 파생).
  */
-export const DM_FONT_CATALOG: ReadonlyArray<{ id: string; label: string; css: string; google: string | null }> = [
-  { id: 'pretendard',     label: '프리텐다드 (기본)',        css: '"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif', google: null },
-  { id: 'noto-serif',     label: '노토 세리프 (명조)',       css: '"Noto Serif KR", serif',       google: 'Noto+Serif+KR:wght@400;600;700;900' },
-  { id: 'nanum-myeongjo', label: '나눔명조',                 css: '"Nanum Myeongjo", serif',      google: 'Nanum+Myeongjo:wght@400;700;800' },
-  { id: 'gowun-batang',   label: '고운바탕 (부드러운 명조)', css: '"Gowun Batang", serif',        google: 'Gowun+Batang:wght@400;700' },
-  { id: 'gowun-dodum',    label: '고운돋움',                 css: '"Gowun Dodum", sans-serif',    google: 'Gowun+Dodum' },
-  { id: 'black-han',      label: '검은고딕 (임팩트)',        css: '"Black Han Sans", sans-serif', google: 'Black+Han+Sans' },
-];
+import { CORE_FONTS } from '../design-core/fonts';
+export const DM_FONT_CATALOG: ReadonlyArray<{ id: string; label: string; css: string; google: string | null }> =
+  CORE_FONTS.map((c) => ({ id: c.id, label: c.label, css: c.css, google: c.google }));
 
 /** ★ 2026-07-13 (Codex 지적) — 브랜드킷 서체 문자열 무해화: font-family에 필요한 문자만 허용.
  *  <style> 블록 raw 삽입 경로의 저장형 XSS 차단 (font_family는 기존부터 raw 삽입이던 표면 — 부류 통합 차단). */

@@ -7,6 +7,17 @@ import { EMAIL_TEMPLATES, recommendTemplateKeys, type EmailTemplate } from '../.
 import type { Section } from '../../utils/dm-section-defaults';
 import type { EmailDesign } from '../../utils/email-themes';
 
+/** ★ 2026-07-14 디자인 4.0 — 정예 템플릿(서버 design-core 컴파일 산출) */
+interface EliteTemplate {
+  id: string;
+  label: string;
+  hint: string;
+  difference: string;
+  swatches: [string, string, string];
+  sections: Section[];
+  design?: EmailDesign;
+}
+
 export default function EmailTemplateGalleryModal({
   onPick, onClose, authHeaders,
 }: {
@@ -16,6 +27,7 @@ export default function EmailTemplateGalleryModal({
   authHeaders: () => Record<string, string>;
 }) {
   const [recommendedKeys, setRecommendedKeys] = useState<string[]>([]);
+  const [elite, setElite] = useState<EliteTemplate[]>([]);
 
   // 회사 업종 신호 → 추천 템플릿 key(없으면 전체만 노출 — 추측 추천 0)
   useEffect(() => {
@@ -27,6 +39,18 @@ export default function EmailTemplateGalleryModal({
           setRecommendedKeys(recommendTemplateKeys(String(data.industry_code)));
         }
       } catch { /* 신호 조회 실패 = 전체 노출 폴백 */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ★ 2026-07-14 디자인 4.0 — 정예 10종(목적×스토리 구조, 서버 컴파일 — FE 복제 없음. 실패 = 그룹 미노출 폴백)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/design/golden-templates?channel=email', { headers: authHeaders() });
+        const data = await res.json();
+        if (data?.success && Array.isArray(data.templates)) setElite(data.templates);
+      } catch { /* 조회 실패 = 기존 12종만 노출 */ }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -91,6 +115,36 @@ export default function EmailTemplateGalleryModal({
           <button onClick={onClose} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* ★ 2026-07-14 디자인 4.0 — 정예 템플릿(목적으로 고르기). 각 카드 = 스토리 구조 완성형 */}
+          {elite.length > 0 && (
+            <div>
+              <div className="flex items-center gap-1.5 mb-2 text-[11px] font-semibold text-amber-200">
+                <Sparkles className="w-3.5 h-3.5" /> 정예 템플릿 — 목적으로 고르세요
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {elite.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => { onPick(t.sections, t.label, t.design); onClose(); }}
+                    className="group text-left bg-white/5 hover:bg-white/10 border border-amber-400/25 hover:border-amber-400/60 rounded-2xl p-4 transition-all"
+                  >
+                    <div className="flex items-center justify-between mb-2.5">
+                      <span className="inline-flex h-6 w-16 rounded-lg overflow-hidden border border-white/15">
+                        {t.swatches.map((c, i) => <span key={i} className="flex-1" style={{ background: c }} />)}
+                      </span>
+                      <span className="text-[10px] text-amber-200 bg-amber-500/15 border border-amber-400/25 px-1.5 py-0.5 rounded-full">정예</span>
+                    </div>
+                    <div className="text-sm font-bold text-white">{t.label}</div>
+                    <div className="text-[11px] text-white/50 mt-0.5">{t.hint}</div>
+                    <div className="text-[10px] text-white/35 mt-2 leading-relaxed line-clamp-2">{t.difference}</div>
+                    <div className="mt-2.5 inline-flex items-center gap-1 text-[11px] text-amber-300 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Check className="w-3 h-3" /> 이 템플릿으로 시작
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {recommended.length > 0 && (
             <div>
               <div className="flex items-center gap-1.5 mb-2 text-[11px] font-semibold text-violet-200">

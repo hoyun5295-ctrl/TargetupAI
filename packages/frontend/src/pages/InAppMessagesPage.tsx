@@ -1528,9 +1528,22 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
   const [previewIdx, setPreviewIdx] = useState(0);
   const [brandAccent, setBrandAccent] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'content' | 'design' | 'target'>('content');
+  // ★ 2026-07-14 디자인 4.0 — 정예 템플릿(서버 design-core 컴파일 — FE 복제 없음. 실패 = 그룹 미노출 폴백)
+  const [eliteTemplates, setEliteTemplates] = useState<Array<GoldenInAppTemplate & { difference?: string }>>([]);
 
   const token = () => localStorage.getItem('token');
   const authHeaders = () => ({ Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' });
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/design/golden-templates?channel=inapp', { headers: authHeaders() });
+        const data = await res.json();
+        if (data?.success && Array.isArray(data.templates)) setEliteTemplates(data.templates);
+      } catch { /* 조회 실패 = 기존 골든 12종만 노출 */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 세그먼트 매칭 customer 수 실시간 카운트
   useEffect(() => {
@@ -1779,6 +1792,32 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 </>
               )}
             </div>
+
+            {/* ★ 2026-07-14 디자인 4.0 — 정예 템플릿 10종 (목적×스토리 구조 — 서버 컴파일) */}
+            {eliteTemplates.length > 0 && (
+              <div className={activeTab === 'design' ? 'mb-5' : 'hidden'}>
+                <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+                  <Sparkles className="w-3 h-3 text-amber-300" /> 정예 템플릿 — 목적으로 고르세요
+                </h4>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {eliteTemplates.map((g) => (
+                    <button
+                      key={g.id}
+                      onClick={() => pickGolden(g)}
+                      className="rounded-xl border border-amber-400/25 bg-slate-900/60 hover:bg-white/5 hover:border-amber-400/60 p-2 text-left transition-colors"
+                      title={g.difference || ''}
+                    >
+                      <span className="flex h-7 rounded-lg overflow-hidden border border-white/10">
+                        {g.swatches.map((s, i) => <span key={i} className="flex-1" style={{ background: s }} />)}
+                      </span>
+                      <span className="block text-[11px] font-bold mt-1.5 text-white/85">{g.label}</span>
+                      <span className="block text-[9px] text-white/45 mt-0.5">{g.hint}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="text-[10px] text-white/40 mt-1.5">브랜드 학습(AI 메모리)의 색·고객센터가 자동 반영됩니다. 혜택 문구는 직접 작성해야 저장됩니다.</div>
+              </div>
+            )}
 
             {/* ★ 2026-07-14 디자인 3.0 — 골든 템플릿 12종 (1클릭 = 형태·카드·테마·블록 완성형. 문안은 편집으로 다듬기) */}
             <div className={activeTab === 'design' ? 'mb-5' : 'hidden'}>
