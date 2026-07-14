@@ -1,0 +1,25 @@
+#!/bin/sh
+# ★ 2026-07-14 재발 방지 게이트 (push 전 자동 실행) — DM 속성 계약(방지책1) + 동작 불변식(방지책2) 포함 backend 테스트.
+#   실패 시 push 차단 → "편집기≠발행" 이음새(연결부·줄바꿈·폰트·그라데이션)와 동작 결함(권한 스코프·발행 저장 시점)이
+#   서버에 못 올라간다. backend는 ts-node 실행이라 배포 때 build:safe를 안 돌리므로, 게이트는 push 시점이 유일한 자동 지점.
+#
+#   활성(클론당 1회):  git config core.hooksPath .githooks
+#   긴급 우회(지양):   git push --no-verify
+ROOT="$(git rev-parse --show-toplevel)"
+BE="$ROOT/packages/backend"
+
+# 테스트 환경(vitest devDep)이 없으면 게이트 건너뜀 — 환경 문제로 push를 막지는 않음(npm install 후 자동 활성).
+if [ ! -x "$BE/node_modules/.bin/vitest" ]; then
+  echo "[pre-push] backend 테스트 환경(vitest) 없음 — 게이트 건너뜀 (npm install 후 활성)."
+  exit 0
+fi
+
+echo "[pre-push] 재발 방지 테스트 실행 (backend vitest)..."
+if ! ( cd "$BE" && npm test ); then
+  echo ""
+  echo "❌ [pre-push] 테스트 실패 — push 차단. 위 실패 항목을 고친 뒤 다시 push하세요."
+  echo "   (정말 우회가 필요하면 git push --no-verify — 방지책 우회라 지양)"
+  exit 1
+fi
+echo "[pre-push] 테스트 통과 ✓ — push 진행"
+exit 0

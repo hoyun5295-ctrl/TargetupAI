@@ -372,7 +372,7 @@ function renderTextCard(props: TextCardProps, treatment?: string): string {
 
 // ★ 2026-07-13 디자인 3.0 — 인용 구도: 대형 따옴표 + 세리프 인용문 (브랜드 스토리·고객 후기 한 줄용)
 function renderTextCardQuote(props: TextCardProps): string {
-  const head = props.headline ? emphasizeHead(escapeHtml(props.headline), props.headline_emphasis) : '';
+  const head = props.headline ? emphasizeHead(escapeHtml(props.headline).replace(/\n/g, '<br>'), props.headline_emphasis) : '';
   const body = props.body ? escapeHtml(props.body) : '';
   const tag = props.tag ? escapeHtml(props.tag) : '';
   return `<div class="dm-section dm-text-card" data-section-type="text_card" style="background:var(--dm-bg);padding:calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-6)">
