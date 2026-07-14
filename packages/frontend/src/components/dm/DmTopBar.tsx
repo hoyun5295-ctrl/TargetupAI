@@ -48,7 +48,8 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
   const savedLabel = isSaving
     ? '저장 중...'
     : isDirty
-    ? '변경사항 있음'
+    // ★ 2026-07-14 발행 DM은 저장해야 URL 반영(임은지) — 미저장 상태를 명확히 안내
+    ? (isPublished ? '변경사항 있음 — 저장해야 URL 반영' : '변경사항 있음')
     : lastSavedAt
     ? `${new Date(lastSavedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 저장됨`
     : '';

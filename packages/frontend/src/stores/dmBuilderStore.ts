@@ -747,6 +747,10 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
     const silent = !!opts?.silent;
     const s = get();
     if (s.isSaving) return;
+    // ★ 2026-07-14 발행 DM 데이터 유실(임은지): 발행된 DM은 자동저장(silent)이 라이브 URL을 덮어쓰지 않게 차단.
+    //   명시적 '저장'/'발행'(비-silent)만 반영. 미저장 편집분은 isDirty 유지 → 상단 "변경사항 있음" + 이탈 경고가 보호.
+    //   초안(미발행) DM은 라이브 URL이 없어 자동저장 그대로.
+    if (silent && s.isPublished) return;
     set({ isSaving: true });
     try {
       // pages 구조로 저장 + 하위호환을 위해 전체 섹션 flat도 동봉

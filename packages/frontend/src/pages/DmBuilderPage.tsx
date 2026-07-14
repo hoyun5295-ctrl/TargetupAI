@@ -1211,6 +1211,16 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [sendModalOpen, setSendModalOpen] = useState(false);
 
+  // ★ 2026-07-14 발행 DM은 자동저장을 하지 않으므로(임은지 유실 방지), 미저장 편집분이 하드 새로고침/탭 닫기로
+  //   조용히 사라지지 않게 브라우저 이탈 가드(beforeunload). 앱 내 뒤로가기 이탈은 기존 확인 모달이 담당.
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (useDmBuilderStore.getState().isDirty) { e.preventDefault(); e.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, []);
+
   const handleTestSend = async () => {
     if (!dmId) {
       setToast({ type: 'error', message: '먼저 저장 후 테스트 발송이 가능해요.' });
