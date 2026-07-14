@@ -27,9 +27,11 @@ import { buildMemoryPromptContext } from './company-memory';
 import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';
 import { query } from '../config/database';
 import { getCompanyBrandKitRaw } from './dm/dm-brand-kit';
-import { buildEventPromptBlock, benefitMatchesEventText, normalizeEventText } from './event-brief';
+import { buildEventPromptBlock, benefitMatchesEventText, normalizeEventText, validateProductsAgainstEventText, type ExtractedEventProduct } from './event-brief';
+// ★ 2026-07-14 디자인 3.0 — og:image 자동 채움 (연결 고정 + 바이트 상한 공용 CT — DM/이메일과 동일 엔진)
+import { fetchProductOgImages } from './dm/dm-brand-extractor';
 // ★ D230+ 블록 — CT-27 공용 검증/정규화 (인라인 중복 금지)
-import { sanitizeContentBlocks, normalizeTheme, normalizeCardStyle, INAPP_CARD_STYLES, BENEFIT_PLACEHOLDER } from './inapp-message';
+import { sanitizeContentBlocks, normalizeTheme, normalizeCardStyle, INAPP_CARD_STYLES, BENEFIT_PLACEHOLDER, sanitizeInAppDesign } from './inapp-message';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -113,6 +115,8 @@ export interface GeneratedInAppMessage {
   accent_color: string | null;
   // ★ 2026-07-07(2) 형태 축 — classic/bubble/ticket/poster
   card_style: string;
+  // ★ 2026-07-14 디자인 3.0 — 결정적 디자인 추천 (임의 산식 X — 시나리오 큐레이션 매핑만)
+  design: Record<string, any> | null;
 }
 
 export interface SubAgentStep {
@@ -318,6 +322,48 @@ const SCENARIO_CARD_STYLE: Record<QuickStartScenario, string> = {
   repeat_purchase: 'ticket',
 };
 
+// ★ 2026-07-14 디자인 3.0 — 시나리오별 결정적 구도 추천 (허용표 밖 조합은 SDK fail-closed로 classic)
+const SCENARIO_TREATMENT: Partial<Record<QuickStartScenario, string>> = {
+  vip_appreciation: 'framed', // classic 카드 — 에디토리얼 액자
+};
+
+// ★ 2026-07-14 디자인 3.0 — 행사 원문 상품 자동 매핑: AI product 블록 → 원문 실존 검증(가격·URL verbatim)
+//   → og:image 자동 채움. 검증 탈락 상품은 가격/링크만 제거(카피는 유지) — AI 임의 혜택 영구 룰 양립.
+async function enrichProductBlocksFromEventText(blocks: any[], eventText: string): Promise<any[]> {
+  const aiProducts: any[] = [];
+  for (const b of blocks) {
+    if (b && b.type === 'product') {
+      aiProducts.push({ name: b.name, price: b.price, discount_price: b.discount_price, link_url: b.link_url });
+    }
+  }
+  if (aiProducts.length === 0) return blocks;
+  const validated = validateProductsAgainstEventText(aiProducts, eventText);
+  let ogImages: Array<string | undefined> = [];
+  if (validated.some((v) => v.link_url)) {
+    try { ogImages = await fetchProductOgImages(validated.map((v) => v.link_url)); } catch { ogImages = []; }
+  }
+  const byName = new Map<string, { p: ExtractedEventProduct; image?: string }>();
+  validated.forEach((p, i) => { if (!byName.has(p.name)) byName.set(p.name, { p, image: ogImages[i] }); });
+  return blocks.map((b) => {
+    if (!b || b.type !== 'product') return b;
+    const hit = byName.get(String(b.name || '').trim().slice(0, 80));
+    if (!hit) {
+      // 원문 검증 탈락 — 수치·링크 제거(환각 가격/URL 차단), 상품명 카피는 유지
+      const { price: _p, discount_price: _d, link_url: _l, ...rest } = b;
+      return rest;
+    }
+    return {
+      ...b,
+      name: hit.p.name,
+      price: hit.p.price,
+      ...(hit.p.discount_price ? { discount_price: hit.p.discount_price } : {}),
+      ...(hit.p.link_url ? { link_url: hit.p.link_url } : {}),
+      // 이미지는 AI 작성 금지(forceBlockSafety 삭제) — og:image 자동 채움만 (빈 값 보충)
+      ...(hit.image && !String(b.image || '').trim() ? { image: hit.image } : {}),
+    };
+  });
+}
+
 function isAccentHex(c: any): boolean {
   return typeof c === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(c.trim());
 }
@@ -336,7 +382,16 @@ function forceBlockSafety(b: any, eventText?: string): any {
     if (!keep) out.text = BENEFIT_PLACEHOLDER;
   }
   if (out.type === 'media' && (out.variant === 'image' || (!out.variant && out.url))) delete out.url;
-  if (out.type === 'product') delete out.image;
+  if (out.type === 'product') {
+    delete out.image;
+    // ★ 3.0 — 행사 원문이 없으면 가격·링크도 검증 불가 = 제거 (환각 수치/URL 차단.
+    //   행사 경로는 이후 enrichProductBlocksFromEventText가 원문 실존 검증으로 확정)
+    if (!eventText) {
+      delete out.price;
+      delete out.discount_price;
+      delete out.link_url;
+    }
+  }
   return out;
 }
 
@@ -528,7 +583,8 @@ buttons 배열 (최대 3개):
 - bullets   { "items": [ { "icon": "check", "text": "장점 한 줄" } ] }   (2~4개)
 - benefit   { "text": "[혜택 안내 — 직접 작성해주세요]" }   ← 반드시 이 placeholder 그대로. 구체 혜택 작성 절대 X
 - rating    { "value": 4.6, "count": 128, "label": "후기" }
-- product   { "name": "상품명", "meta": "간단 설명" }   ← image url 작성 X
+- product   { "name": "상품명", "meta": "간단 설명" }   ← image url 작성 X${eventText ? `
+            ← 행사 원문에 상품·가격·URL이 있으면 "price"(정가 숫자)·"discount_price"(할인가 숫자)·"link_url"(상품 URL)을 원문에 적힌 값 그대로(변형 금지) 추가 가능 — 원문에 없는 가격/URL 절대 작성 X` : ''}
 - media     { "variant": "icon", "icon": "gift" }  또는  { "variant": "illustration", "icon": "welcome" }
             ← image url은 AI가 작성 X (회사 admin 직접 업로드). 아이콘 키: gift·bell·heart·star·tag·sparkle·cart·user·check·clock / 일러스트 키: welcome·celebrate·empty_cart·gift·bell·heart
 - divider   { }   구분선
@@ -547,12 +603,13 @@ buttons 배열 (최대 3개):
 [테마 (theme + accent_color)]
 
 theme = 디자인 언어 큐레이션. 다음 중 하나:
-- auto(자사몰 라이트/다크 자동) · light(소프트 글래스) · dark(미드나잇 글로우) · brand(흰 캔버스 + 브랜드 밴드 쇼케이스) · vibrant(회사색 임팩트 포스터 — 환영·축하·감사 같은 강한 인상) · minimal(모노 에디토리얼 — 절제·프리미엄)
+- 기본: auto(자사몰 라이트/다크 자동) · light(소프트 글래스) · dark(미드나잇 글로우) · brand(흰 캔버스 + 브랜드 밴드 쇼케이스) · vibrant(회사색 임팩트 포스터 — 환영·축하·감사 같은 강한 인상) · minimal(모노 에디토리얼 — 절제·프리미엄)
+- 시그니처(아트디렉션 내장 — 서체·조판·모티프까지 큐레이션): editorial(세리프 화보 — 프리미엄 안내) · luxury-dark(딥 다크+골드 — VIP·프라이빗 오퍼) · bold-sale(검은고딕 임팩트 — 세일·마감 임박) · soft-pastel(부드러운 파스텔 — 환영·안부·복귀) · paper(웜 페이퍼 명조 — 따뜻한 감사·로컬) · city-night(다크 네온 — 신상·이벤트 밤 무드) · festive(축제 로즈×앰버 — 팝업·초대)
 
 ${brandAccent
     ? `accent_color = 반드시 "${brandAccent}" (회사가 설정한 브랜드 강조색 — 다른 색 임의 선택 절대 금지)`
     : `accent_color = 강조색 hex (예: "#4f46e5"). 회사 브랜드 색이 확인되지 않았으므로 시나리오 무드에 맞는 차분한 색 1개만 선택.`}
-- 환영 / 감사 / 축하 = vibrant 권장. 정보 / 안내 = light · brand 권장. 프리미엄 · VIP = minimal · dark 권장.
+- 환영 / 복귀 / 안부 = soft-pastel · vibrant 권장. 정보 / 안내 = light · brand 권장. 프리미엄 · VIP = luxury-dark · editorial · minimal 권장. 세일 · 마감 = bold-sale 권장. 신상품 · 이벤트 = city-night · festive 권장.
 
 [형태 (card_style)] — 색상과 독립인 카드 형태 축. 다음 중 하나:
 - classic(정돈된 기본 카드) · bubble(꼬리 달린 둥근 말풍선 — 환영·안부·대화 회복) · ticket(절취선 쿠폰 티켓 — 혜택·재구매 유도) · poster(매거진 포스터 — 신상품·이미지 중심 발표)
@@ -661,6 +718,10 @@ ${brandAccent
   if (content_blocks.length === 0) {
     content_blocks = synthesizeBlocks({ badge: badge_text, title, body, buttons });
   }
+  // ★ 2026-07-14 디자인 3.0 — 행사 원문 상품 자동 매핑 (가격·URL 원문 실존 검증 + og:image 채움. 실패 = 원본 유지)
+  if (eventText) {
+    try { content_blocks = await enrichProductBlocksFromEventText(content_blocks, eventText); } catch { /* 원본 유지 */ }
+  }
   const theme = normalizeTheme(parsed.theme);
   const scenarioAccent = input.templateHint ? SCENARIO_ACCENT[input.templateHint] : null;
   // 브랜드 킷 설정 회사 = 그 색으로 강제 (AI 출력 무시 — 임의 hex 차단). 미설정 = AI 제안 → 시나리오 팔레트 순.
@@ -670,6 +731,13 @@ ${brandAccent
   const card_style = (INAPP_CARD_STYLES as readonly string[]).includes(String(parsed.card_style))
     ? String(parsed.card_style)
     : normalizeCardStyle(scenarioCard);
+
+  // ★ 2026-07-14 디자인 3.0 — 결정적 디자인 추천: 모션 2.0 기본 + 시나리오 큐레이션 구도만 (임의 산식 X).
+  //   서체·조판은 테마(시그니처)가 내장 — 별도 추정 없음. 허용표 밖 구도는 SDK fail-closed로 classic.
+  const design = sanitizeInAppDesign({
+    motion: 'rich',
+    ...(input.templateHint && SCENARIO_TREATMENT[input.templateHint] ? { treatment: SCENARIO_TREATMENT[input.templateHint] } : {}),
+  });
 
   const message: GeneratedInAppMessage = {
     title,
@@ -697,6 +765,7 @@ ${brandAccent
     theme,
     accent_color,
     card_style,
+    design,
   };
 
   // 6 sub-agent 진행 — Frontend 시각 효과용 응답 (5~10초 시뮬레이션)

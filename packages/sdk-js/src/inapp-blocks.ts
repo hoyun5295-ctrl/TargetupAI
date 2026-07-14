@@ -8,7 +8,7 @@
  */
 
 import type { InAppTheme } from './inapp-theme';
-import { withAlpha, shadeHex, pickReadableText } from './inapp-theme';
+import { withAlpha, shadeHex, pickReadableText, safeFontFamily } from './inapp-theme';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -45,6 +45,33 @@ export interface BlockRenderContext {
   isAd?: boolean;
   /** ★ 2026-07-07(5) 형태 축 골격 — 블록 렌더가 타이포·CTA·라벨 구조를 형태별로 바꿀 때 참조. 미지정 = classic */
   cardStyle?: CardStyle;
+  // ── ★ 2026-07-14 디자인 3.0 (미지정 = 현행 렌더 — 기존 발행물 회귀 0) ──
+  /** 모션 2.0 활성 (design.motion='rich' && !reducedMotion). keyframes는 inapp.ts가 1회 주입(hjl- 접두) */
+  motion?: boolean;
+  /** 구도 — resolveInAppTreatment 통과값만 (fail-closed, 미허용 = classic) */
+  treatment?: InAppTreatment;
+  /** 헤드라인 서체 오버라이드 (design.font_display — 테마 displayFont보다 우선) */
+  displayFont?: string;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-07-14 디자인 3.0 — 구도(treatment) 허용표. template×card_style 조합별 fail-closed 단일 진실.
+//   미허용·미설정 = classic(현행 조판). poster/ticket/bubble은 자기 구도 보유라 classic만.
+// ════════════════════════════════════════════════════════════════════
+
+export type InAppTreatment = 'classic' | 'framed' | 'typographic' | 'spotlight';
+
+export const INAPP_TREATMENTS: Record<string, InAppTreatment[]> = {
+  'center_modal|classic': ['classic', 'framed', 'typographic', 'spotlight'],
+  'inline_card|classic': ['classic', 'framed', 'typographic', 'spotlight'],
+  'full_screen|classic': ['classic', 'framed', 'typographic'],
+  'slide_in|classic': ['classic', 'typographic', 'spotlight'],
+};
+
+export function resolveInAppTreatment(template: string, cardStyle: string, requested: any): InAppTreatment {
+  const allowed = INAPP_TREATMENTS[`${template}|${cardStyle}`];
+  const req = String(requested || '');
+  return allowed && (allowed as string[]).includes(req) ? (req as InAppTreatment) : 'classic';
 }
 
 export const ALL_BLOCK_TYPES: BlockType[] = [
@@ -285,21 +312,53 @@ function renderHeadline(b: ContentBlock, ctx: BlockRenderContext): HTMLElement |
   const ticket = ctx.cardStyle === 'ticket';
   const xl = b.size === 'xl';
   const weight = bubble ? 700 : (ticket || xl) ? Math.max(800, theme.headlineWeight) : theme.headlineWeight;
+  // ★ 3.0 — 크기 배율: 테마 headlineScale × typographic 구도 1.25 (미설정 = 1, 현행 크기 그대로)
+  const baseSize = (bubble ? BUBBLE_HEADLINE_SIZES : HEADLINE_SIZES)[String(b.size)] || (bubble ? '17px' : '19px');
+  const scale = (theme.headlineScale || 1) * (ctx.treatment === 'typographic' && !bubble ? 1.25 : 1);
   const head = el('div', {
     fontWeight: String(weight),
-    fontSize: (bubble ? BUBBLE_HEADLINE_SIZES : HEADLINE_SIZES)[String(b.size)] || (bubble ? '17px' : '19px'),
-    letterSpacing: xl || weight >= 800 ? '-0.02em' : '-0.01em',
+    fontSize: scale !== 1 ? `${Math.round(parseFloat(baseSize) * scale * 10) / 10}px` : baseSize,
+    letterSpacing: xl || weight >= 800 || scale > 1.15 ? '-0.02em' : '-0.01em',
     lineHeight: '1.28',
     color: theme.textPrimary,
-  }, text);
-  if (!theme.headlineAccentBar || bubble) return head;
-  // 브랜드 쇼케이스 — 헤드라인 아래 accent 짧은 바
+  });
+  // ★ 3.0 — 헤드라인 전용 서체 (design.font_display 우선 → 테마 displayFont. 미설정 = 카드 서체 상속)
+  const df = safeFontFamily(ctx.displayFont || theme.displayFont, '');
+  if (df) head.style.fontFamily = df;
+  // ★ 3.0 — 강조 표시 (블록 필드 emphasis — DM emphasizeHead 미러. 미설정 = 평문 그대로)
+  if (b.emphasis === 'marker' || b.emphasis === 'underline') {
+    const span = el('span', {}, text);
+    if (b.emphasis === 'marker') {
+      Object.assign(span.style, {
+        background: `linear-gradient(180deg, rgba(0,0,0,0) 58%, ${withAlpha(theme.accent, 0.3)} 58%)`,
+        borderRadius: '2px', padding: '0 2px',
+      });
+    } else {
+      Object.assign(span.style, { boxShadow: `inset 0 -2px 0 ${theme.accent}`, paddingBottom: '1px' });
+    }
+    head.appendChild(span);
+  } else {
+    head.textContent = text;
+  }
+  // ★ 3.0 — 모티프 마크(테마 아트디렉션) + 기존 브랜드 쇼케이스 accent 바 (버블은 채팅 골격이라 둘 다 제외)
+  const decorations: HTMLElement[] = [];
+  if (theme.motif && !bubble) {
+    if (theme.motif === 'rule') decorations.push(el('div', { width: '22px', height: '3px', borderRadius: '999px', background: theme.accent, marginBottom: '9px' }));
+    else if (theme.motif === 'dot') decorations.push(el('div', { width: '6px', height: '6px', borderRadius: '999px', background: theme.accent, marginBottom: '9px' }));
+    else if (theme.motif === 'bracket') decorations.push(el('div', { width: '12px', height: '12px', borderLeft: `2.5px solid ${theme.accent}`, borderTop: `2.5px solid ${theme.accent}`, marginBottom: '8px' }));
+  }
+  const withBar = theme.headlineAccentBar && !bubble;
+  if (decorations.length === 0 && !withBar) return head;
   const wrap = el('div');
+  for (const d of decorations) wrap.appendChild(d);
   wrap.appendChild(head);
-  wrap.appendChild(el('div', {
-    width: '26px', height: '4px', borderRadius: '999px', marginTop: '9px',
-    background: `linear-gradient(90deg, ${theme.accent} 0%, ${shadeHex(theme.accent, 30)} 100%)`,
-  }));
+  if (withBar) {
+    // 브랜드 쇼케이스 — 헤드라인 아래 accent 짧은 바
+    wrap.appendChild(el('div', {
+      width: '26px', height: '4px', borderRadius: '999px', marginTop: '9px',
+      background: `linear-gradient(90deg, ${theme.accent} 0%, ${shadeHex(theme.accent, 30)} 100%)`,
+    }));
+  }
   return wrap;
 }
 
@@ -343,12 +402,30 @@ function renderBullets(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
   return list;
 }
 
+/** ★ 3.0 모션 — 쿠폰 샤인 스윕. 호스트 위에 클립(inset 0, overflow hidden) + 광 띠. keyframes = inapp.ts hjl-shine */
+function attachShine(host: HTMLElement, radiusPx: number): void {
+  host.style.position = host.style.position || 'relative';
+  const clip = el('div', {
+    position: 'absolute', inset: '0', borderRadius: `${radiusPx}px`,
+    overflow: 'hidden', pointerEvents: 'none',
+  });
+  const band = el('div', {
+    position: 'absolute', top: '-40%', bottom: '-40%', left: '0', width: '38%',
+    background: 'linear-gradient(105deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.35) 50%, rgba(255,255,255,0) 100%)',
+    // 이동은 keyframes(hjl-shine)의 transform이 소유 — 레이아웃 속성(left) 애니메이션 금지(컴포지터 전용)
+    animation: 'hjl-shine 3.2s ease-in-out infinite',
+  });
+  clip.appendChild(band);
+  host.appendChild(clip);
+}
+
 function renderBenefit(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | null {
   const { theme } = ctx;
   const text = ctx.replaceVars(String(b.text || '[혜택 안내 — 직접 작성해주세요]'));
   // ★ 2026-07-07(5) 형태 골격 — 쿠폰 티켓 카드: 카드 자체가 티켓(절취선+스터브)이라
   //   점선 박스 중첩(티켓 안 티켓) 대신 대형 혜택 타이포로 승격
-  if (ctx.cardStyle === 'ticket') {
+  //   ★ 3.0 — spotlight 구도(classic 카드)도 같은 대형 승격을 사용
+  if (ctx.cardStyle === 'ticket' || ctx.treatment === 'spotlight') {
     const big = el('div', {
       display: 'flex', alignItems: 'center', gap: '12px',
       padding: '15px 16px', borderRadius: `${theme.innerRadius}px`,
@@ -365,6 +442,7 @@ function renderBenefit(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
       fontSize: '16.5px', fontWeight: '800', lineHeight: '1.35', letterSpacing: '-0.02em',
       color: theme.textPrimary, minWidth: '0',
     }, text));
+    if (ctx.motion) attachShine(big, theme.innerRadius);
     return big;
   }
   // 쿠폰 티켓 2.0 — 그라데이션 워시 + 양측 펀치홀 + 아이콘 배지
@@ -395,6 +473,7 @@ function renderBenefit(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
     fontSize: '13.5px', fontWeight: '700', lineHeight: '1.4', letterSpacing: '-0.01em',
     color: theme.textPrimary, minWidth: '0',
   }, text));
+  if (ctx.motion) attachShine(ticket, theme.innerRadius);
   return ticket;
 }
 
@@ -448,7 +527,10 @@ function renderCountdown(b: ContentBlock, ctx: BlockRenderContext): HTMLElement 
     time.appendChild(colon());
     time.appendChild(seg(String(m).padStart(2, '0'), urgent));
     time.appendChild(colon());
-    time.appendChild(seg(String(sec).padStart(2, '0'), urgent));
+    const secEl = seg(String(sec).padStart(2, '0'), urgent);
+    // ★ 3.0 모션 — 초 칸 팝 (매 틱 요소 재생성이라 자동 재생. keyframes = inapp.ts hjl-tick)
+    if (ctx.motion) secEl.style.animation = 'hjl-tick 0.3s ease-out';
+    time.appendChild(secEl);
   };
   const tick = () => {
     const remain = endMs - Date.now();
@@ -537,6 +619,24 @@ function renderProduct(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
     if (r) { r.style.marginTop = '4px'; col.appendChild(r); }
   }
   card.appendChild(col);
+  // ★ 3.0 — 상품 링크: link_url 있으면 카드 전체가 이동 표면 (클릭 추적 + 닫기 + safeNavigate = ctx 콜백 단일 길목).
+  //   미설정 = 현행 비클릭 카드 그대로 (기존 발행물 회귀 0).
+  const rawLink = String(b.link_url || '').trim();
+  if (/^https?:\/\//i.test(rawLink)) {
+    Object.assign(card.style, {
+      cursor: 'pointer',
+      transition: 'transform 0.16s cubic-bezier(0.22,1,0.36,1), box-shadow 0.2s ease',
+    });
+    card.setAttribute('role', 'link');
+    const arrow = iconSvg('arrow', theme.textSecondary, 15);
+    arrow.style.opacity = '0.55';
+    card.appendChild(arrow);
+    card.addEventListener('mouseenter', () => { card.style.transform = 'translateY(-1px)'; card.style.boxShadow = '0 6px 16px rgba(0,0,0,0.09)'; });
+    card.addEventListener('mouseleave', () => { card.style.transform = 'none'; card.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)'; });
+    card.addEventListener('click', () => {
+      ctx.onButtonClick(String(b.id || 'product'), rawLink);
+    });
+  }
   return card;
 }
 
@@ -579,6 +679,8 @@ function renderCtaGroup(b: ContentBlock, ctx: BlockRenderContext): HTMLElement |
           : `inset 0 0 0 1.5px ${withAlpha(theme.accent, 0.45)}`,
         transition: 'transform 0.16s cubic-bezier(0.22,1,0.36,1), filter 0.2s ease',
       }, ctx.replaceVars(btn.label));
+      // ★ 3.0 모션 — 대표 CTA 맥동 (밝기 파동 — transform 미사용이라 hover 리프트와 충돌 0)
+      if (ctx.motion && isPrimary) chip.style.animation = 'hjl-cta-pulse 2.8s ease-in-out infinite';
       chip.addEventListener('mouseenter', () => { chip.style.transform = 'translateY(-1px)'; chip.style.filter = 'brightness(1.05)'; });
       chip.addEventListener('mouseleave', () => { chip.style.transform = 'none'; chip.style.filter = 'none'; });
       chip.addEventListener('mousedown', () => { chip.style.transform = 'scale(0.96)'; });
@@ -614,6 +716,8 @@ function renderCtaGroup(b: ContentBlock, ctx: BlockRenderContext): HTMLElement |
       color: isPrimary ? theme.buttonPrimaryText : isGhost ? theme.buttonGhostColor : theme.textPrimary,
       boxShadow: isPrimary ? primaryShadow : isTertiary ? 'none' : `inset 0 0 0 1px ${theme.border}`,
     }, ctx.replaceVars(btn.label));
+    // ★ 3.0 모션 — 대표 CTA 맥동 (밝기 파동 — transform 미사용이라 hover 리프트와 충돌 0)
+    if (ctx.motion && isPrimary) node.style.animation = 'hjl-cta-pulse 2.8s ease-in-out infinite';
     // 마이크로 인터랙션 — hover 살짝 떠오름 + 밝기 상승, press 눌림
     node.addEventListener('mouseenter', () => {
       node.style.transform = 'translateY(-1px)';

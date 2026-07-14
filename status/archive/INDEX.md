@@ -8,6 +8,8 @@
 
 | 날짜 | 제목 | 검색 키워드 | 파일 |
 |------|------|-------------|------|
+| 2026-07-12 | 🟢 (2) 모바일 DM 종합 연구 + 강화 D-1~D-4 (회전 2026-07-14) | 발행비 PUBLISH_FEE_REQUIRED 402 dm-publish 멱등 confirmPublishFee 야간 광고 NIGHT_AD_RESTRICTED SEND_HOURS createDirectSendCampaign 재타겟 세그먼트 4종 resendCustomerIds 전환 소스 라벨 purchases cdp | [TASKS_2026-07.md](TASKS_2026-07.md) |
+| 2026-07-10 | 🟢 (4) 비토 게이트웨이 API 직접연동 테스트 통과 (회전 2026-07-14) | HANJULLO-API-TEST lms_mms route 1800-8125 LMS 왕복 DONE 결과 회수 SMSQ_SEND_13 API 전환 검토 | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-12 | 🟢 (5) AI 학습메모리 전수점검·일괄 강화 (회전 2026-07-12) | LEARNING_MEMORY_TYPES 학습 5종 화이트리스트 buildMemoryPromptContext 슬롯 잠식 brand_guideline usage_count 여정 실클릭 short_url_click stale grade 정리 legacy POST validTypes Codex 4R | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-12 | 🟢 (4) 인앱메시지 일괄 강화 P0-1~P2-2 (회전 2026-07-12) | passesTriggerThresholds safeNavigate sanitizeActionUrl resolveActionUrlPatch trackImpression 소유 중복 렌더 가드 patchPresence variant 상속 replaceBlockTexts dnd 상품 가격 discount_price SDK v0.3.8 v0.3.9 | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-12 | 🟢 (3) 이메일마케팅 법 준수·편집기 일괄 강화 14건 (회전 2026-07-12) | UNSUB_URL_MARKER List-Unsubscribe One-Click RFC 8058 webhook 410 excludeOptedOutEmails 야간 예외 시행령 61조의2 cancel-schedule placeholder 3중 재시도 멱등 sub_copy_size accent_color | [TASKS_2026-07.md](TASKS_2026-07.md) |

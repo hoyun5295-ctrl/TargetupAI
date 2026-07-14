@@ -5,9 +5,12 @@
  * SDK inapp.ts 렌더 톤(둥근/그림자/말줄임/CTA/이미지 절대화)과 1:1 정합.
  */
 
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { Monitor, Smartphone, Sun, Moon } from 'lucide-react';
-import { resolveTheme, normalizeCardStyle, planCardLayout, type InAppTheme } from './inapp/blockTheme';
+import {
+  resolveTheme, normalizeCardStyle, planCardLayout, resolveInAppTreatment, inappGoogleFontsUrl, safeFontFamily,
+  type InAppTheme, type InAppTreatment,
+} from './inapp/blockTheme';
 import { BlockPreview } from './inapp/BlockPreview';
 
 // ★ 2026-07-07(5) 형태 골격 — ticket(2톤)/poster(풀블리드) 존 분할 시 구간별 패딩.
@@ -42,6 +45,8 @@ export interface InAppMessagePreviewProps {
   replaceVars?: (t: string) => string;
   /** ★ 2026-07-07(2) 형태 축 — classic/bubble/ticket/poster (SDK 렌더 1:1) */
   cardStyle?: string | null;
+  /** ★ 2026-07-14 디자인 3.0 — design jsonb (font_display/treatment/motion/backdrop — SDK 소비 1:1 미러. 모션은 정적 미리보기라 미표현) */
+  design?: Record<string, any> | null;
 }
 
 /** 미리보기는 관리자 화면 = 백엔드와 같은 도메인. 상대경로(/api/..., /uploads/...)를 그대로 둬 현재 origin으로 로드한다.
@@ -125,12 +130,17 @@ function CardInner({ title, body, imageUrl, badge, buttons, textColor, variant }
 }
 
 /** template별 위치 + 카드 모양 오버레이 (블록 있으면 테마 토큰으로 BlockPreview) */
-function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTokens?: InAppTheme | null } & Omit<InAppMessagePreviewProps, 'template'>) {
+function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Variant; themeTokens?: InAppTheme | null; treatment?: InAppTreatment } & Omit<InAppMessagePreviewProps, 'template'>) {
   const { backgroundColor, textColor, blocks, replaceVars, isAd } = rest;
   const usingBlocks = !!(themeTokens && blocks && blocks.length > 0);
   // ★ 2026-07-07(2) 형태 축 — 카드형 variant에만 적용 (SDK와 동일 게이트)
   const cardish = variant === 'modal' || variant === 'slide' || variant === 'inline' || variant === 'full';
   const cardStyle = usingBlocks && cardish ? normalizeCardStyle(rest.cardStyle) : 'classic';
+  // ★ 2026-07-14 디자인 3.0 — 서체 오버라이드(design.font_display) + 백드롭 딤/블러 (SDK 소비 미러)
+  const displayFont = safeFontFamily(rest.design?.font_display, '') || undefined;
+  const BACKDROP_DIM: Record<string, string> = { soft: 'rgba(8,10,18,0.38)', standard: 'rgba(8,10,18,0.55)', deep: 'rgba(8,10,18,0.72)' };
+  const backdropDim = BACKDROP_DIM[String(rest.design?.backdrop?.dim || '')] || BACKDROP_DIM.standard;
+  const backdropBlurOn = rest.design?.backdrop?.blur !== false;
   const bubble = cardStyle === 'bubble' && (variant === 'modal' || variant === 'slide' || variant === 'inline');
   const bubbleRadius = (small: 'bl' | 'br') => {
     const rr = themeTokens ? themeTokens.radius + 4 : 24;
@@ -156,7 +166,7 @@ function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTok
     (cardStyle === 'ticket' && plan.stub.length > 0)
   );
   const inner = usingBlocks
-    ? <BlockPreview blocks={blocks!} theme={themeTokens!} replaceVars={replaceVars} isAd={isAd} cardStyle={cardish ? cardStyle : undefined} zonePads={zoned ? zonePads : undefined} />
+    ? <BlockPreview blocks={blocks!} theme={themeTokens!} replaceVars={replaceVars} isAd={isAd} cardStyle={cardish ? cardStyle : undefined} zonePads={zoned ? zonePads : undefined} treatment={cardish ? treatment : undefined} displayFont={displayFont} />
     : <CardInner {...rest} variant={variant} textColor={textColor} />;
 
   const cardBase: CSSProperties = {
@@ -175,7 +185,7 @@ function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTok
   if (variant === 'modal') {
     const heroImg = usingBlocks ? undefined : toAbsoluteImage(rest.imageUrl);
     return (
-      <div style={{ position: 'absolute', inset: 0, background: 'rgba(8,10,18,0.55)', backdropFilter: 'blur(10px) saturate(1.35)', WebkitBackdropFilter: 'blur(10px) saturate(1.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 } as CSSProperties}>
+      <div style={{ position: 'absolute', inset: 0, background: backdropDim, ...(backdropBlurOn ? { backdropFilter: 'blur(10px) saturate(1.35)', WebkitBackdropFilter: 'blur(10px) saturate(1.35)' } : {}), display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 } as CSSProperties}>
         <div style={{ ...cardBase, position: 'relative', maxWidth: 330, width: '100%', maxHeight: '92%', display: 'flex', flexDirection: 'column', borderRadius: bubble ? bubbleRadius('bl') : r(20), overflow: bubble ? 'visible' : 'hidden', boxShadow: sh('0 24px 60px rgba(0,0,0,0.45)') }}>
           {heroImg && <img src={heroImg} alt="" onError={hideOnError} style={{ width: '100%', maxHeight: 130, objectFit: 'cover', display: 'block', flexShrink: 0 }} />}
           <div style={{ padding: zoned ? 0 : 22, overflowY: 'auto' }}>
@@ -255,6 +265,19 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
   const useBlocks = Array.isArray(props.blocks) && props.blocks.length > 0;
   const siteDark = siteMode === 'dark';
   const themeTokens = useBlocks ? resolveTheme(props.theme, props.accentColor, siteDark) : null;
+  // ★ 2026-07-14 디자인 3.0 — 구도(fail-closed) + 미리보기 서체 실로딩 (SDK ensureFontLink 미러 — 카탈로그 매칭 화이트리스트)
+  const treatment = useBlocks ? resolveInAppTreatment(props.template, normalizeCardStyle(props.cardStyle), props.design?.treatment) : 'classic';
+  const fontsUrl = inappGoogleFontsUrl(props.design?.font_display, themeTokens?.displayFont);
+  useEffect(() => {
+    if (!fontsUrl) return;
+    if (document.querySelector(`link[data-hjl-fonts="${fontsUrl}"]`)) return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = fontsUrl;
+    link.setAttribute('data-hjl-fonts', fontsUrl);
+    document.head.appendChild(link);
+    // 편집 화면 폰트 링크는 세션 내 재사용 — 제거하지 않음(중복 가드가 단일 유지)
+  }, [fontsUrl]);
 
   return (
     <div>
@@ -308,7 +331,7 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
           {/* 콘텐츠 (더미 사이트 + 인앱 오버레이) */}
           <div style={{ position: 'relative', height: isMobile ? 580 : 540, overflow: 'hidden' }}>
             <DummySite dark={siteDark} />
-            <Overlay variant={variant} themeTokens={themeTokens} {...props} />
+            <Overlay variant={variant} themeTokens={themeTokens} treatment={treatment} {...props} />
           </div>
         </div>
       </div>

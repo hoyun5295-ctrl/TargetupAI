@@ -19,10 +19,11 @@
  * - 지수 backoff retry (3회) + offline fallback
  */
 
-import { resolveTheme, withAlpha, type InAppTheme } from './inapp-theme';
+import { resolveTheme, withAlpha, inappGoogleFontsUrl, safeFontFamily, type InAppTheme } from './inapp-theme';
 import {
   renderBlocks, planCardLayout, renderPosterHero, renderTicketPerforation, renderBubbleSender, normalizeCardStyle,
-  type ContentBlock, type BlockRenderContext, type CardStyle,
+  resolveInAppTreatment,
+  type ContentBlock, type BlockRenderContext, type CardStyle, type InAppTreatment,
 } from './inapp-blocks';
 
 // 2026-07-07 디자인 2.0 — Pretendard 우선(호스트 몰에 있으면 사용, 없으면 시스템 한글 폴백. 외부 로드 0)
@@ -41,6 +42,48 @@ function makeZone(pad: string): HTMLDivElement {
   Object.assign(z.style, { display: 'flex', flexDirection: 'column', gap: '13px', padding: pad, minWidth: '0', boxSizing: 'border-box' });
   return z;
 }
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-07-14 디자인 3.0 — 모션 keyframes 1회 주입 + 서체 실로딩 + 백드롭 딤 3단
+// ════════════════════════════════════════════════════════════════════
+
+// keyframes 이름은 hjl- 접두(몰 CSS 충돌 회피). reduced-motion = JS 게이트(ctx.motion) + 미디어쿼리 이중 차단.
+const MOTION_STYLE_ID = 'hjl-inapp-motion';
+function ensureMotionStyle(): void {
+  try {
+    if (document.getElementById(MOTION_STYLE_ID)) return;
+    const s = document.createElement('style');
+    s.id = MOTION_STYLE_ID;
+    s.textContent = [
+      '@keyframes hjl-cta-pulse{0%,100%{filter:brightness(1)}50%{filter:brightness(1.09)}}',
+      '@keyframes hjl-shine{0%{transform:translateX(-160%) skewX(-12deg)}55%{transform:translateX(420%) skewX(-12deg)}100%{transform:translateX(420%) skewX(-12deg)}}',
+      '@keyframes hjl-tick{0%{transform:translateY(-3px);opacity:.55}100%{transform:none;opacity:1}}',
+      '@media (prefers-reduced-motion: reduce){[data-hanjullo-msg] *{animation:none !important}}',
+    ].join('\n');
+    document.head.appendChild(s);
+  } catch { /* 조용히 실패 */ }
+}
+
+// 서체 실로딩 — Google Fonts <link> (카탈로그 매칭 시에만 URL 생성 = 화이트리스트, 중복 주입 가드 + display=swap)
+function ensureFontLink(fontFamily: string | null | undefined): void {
+  try {
+    const url = inappGoogleFontsUrl(fontFamily || undefined);
+    if (!url) return;
+    if (document.querySelector(`link[data-hjl-fonts="${url}"]`)) return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = url;
+    link.setAttribute('data-hjl-fonts', url);
+    document.head.appendChild(link);
+  } catch { /* 조용히 실패 */ }
+}
+
+// 백드롭 딤 3단 — 미설정 = standard(현행 0.55와 동일 값)
+const BACKDROP_DIM: Record<string, string> = {
+  soft: 'rgba(8,10,18,0.38)',
+  standard: 'rgba(8,10,18,0.55)',
+  deep: 'rgba(8,10,18,0.72)',
+};
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -109,6 +152,20 @@ export interface InAppMessageSdk {
   /** ★ 2026-07-07(2) 형태 축 — classic/bubble/ticket/poster. 미지정·미지원 값 = classic (구버전 안전) */
   cardStyle?: string | null;
   card_style?: string | null;
+  /** ★ 2026-07-14 디자인 3.0 — 메시지 단위 디자인(cdp_inapp_messages.design jsonb). 미설정 = 현행 렌더 그대로 */
+  design?: InAppDesignSdk | null;
+}
+
+/** ★ 2026-07-14 디자인 3.0 — design jsonb 스키마 (전 키 옵셔널. 서버 sanitize 통과값이지만 SDK도 fail-closed 소비) */
+export interface InAppDesignSdk {
+  /** 헤드라인 서체 font-family — 카탈로그 매칭 시에만 실로딩 */
+  font_display?: string | null;
+  /** 구도 — resolveInAppTreatment fail-closed (미허용 = classic) */
+  treatment?: string | null;
+  /** 모션 2.0 — 'rich'만 활성, 그 외 = 현행(진입 전환만) */
+  motion?: string | null;
+  /** 배경 딤/블러 — center_modal/full_screen 백드롭 */
+  backdrop?: { dim?: string | null; blur?: boolean | null } | null;
 }
 
 export interface InAppInitInput {
@@ -957,6 +1014,14 @@ export class HanjulloInAppModule {
     const cardish = template === 'center_modal' || template === 'slide_in' || template === 'inline_card' || template === 'full_screen';
     const cardStyle: CardStyle = cardish ? normalizeCardStyle(msg.cardStyle ?? msg.card_style) : 'classic';
 
+    // ★ 2026-07-14 디자인 3.0 — 메시지 단위 디자인 (design 미설정 = 아래 전부 비활성 = 현행 렌더 그대로)
+    const design = msg.design && typeof msg.design === 'object' ? msg.design : null;
+    const motion = !reduced && design?.motion === 'rich';
+    const treatment: InAppTreatment = cardish ? resolveInAppTreatment(template, cardStyle, design?.treatment) : 'classic';
+    const displayFont = safeFontFamily(design?.font_display || theme.displayFont || undefined, '');
+    if (motion) ensureMotionStyle();
+    if (displayFont) ensureFontLink(displayFont);
+
     // floating_button = 알약 1개 (블록 중 첫 CTA 라벨)
     if (template === 'floating_button') {
       this.renderBlockFloating(msg, blocks, theme, input);
@@ -971,8 +1036,11 @@ export class HanjulloInAppModule {
       (cardStyle === 'ticket' && plan.stub.length > 0)
     );
 
-    const c = this.makeContainer(msg, template, theme, input, cardStyle, zoned);
+    const c = this.makeContainer(msg, template, theme, input, cardStyle, zoned, design);
     if (!c.mounted) return;
+
+    // ★ 3.0 — 밀도(테마 아트디렉션): 비분할 컨테이너 블록 간격만 조정 (존 분할 구도는 자기 간격 소유 = 유지)
+    if (!zoned && theme.density) c.contentRoot.style.gap = theme.density === 'airy' ? '16px' : '10px';
 
     const ctx: BlockRenderContext = {
       theme,
@@ -987,6 +1055,9 @@ export class HanjulloInAppModule {
       },
       reducedMotion: reduced,
       isAd,
+      motion,
+      treatment,
+      displayFont: design?.font_display ? displayFont : undefined,
     };
 
     // 형태별 골격 — poster: 풀블리드 히어로+본문 존 / ticket: 2톤(본권/스터브) / bubble: 발신자 행+답장 칩 / classic: 순차 렌더
@@ -1023,6 +1094,16 @@ export class HanjulloInAppModule {
       const senderRow = renderBubbleSender(plan.sender, ctx);
       if (senderRow) c.contentRoot.appendChild(senderRow);
       renderBlocks(c.contentRoot, plan.main, ctx);
+    } else if (treatment === 'framed') {
+      // ★ 3.0 framed 구도 — 콘텐츠를 헤어라인 내부 프레임으로 감싼 에디토리얼 액자 (classic 카드 전용 허용표)
+      const frame = document.createElement('div');
+      Object.assign(frame.style, {
+        display: 'flex', flexDirection: 'column', gap: c.contentRoot.style.gap || '13px',
+        border: `1px solid ${theme.border}`, borderRadius: `${theme.innerRadius + 6}px`,
+        padding: '18px 16px', minWidth: '0', boxSizing: 'border-box',
+      });
+      renderBlocks(frame, blocks, ctx);
+      c.contentRoot.appendChild(frame);
     } else {
       renderBlocks(c.contentRoot, blocks, ctx);
     }
@@ -1041,7 +1122,7 @@ export class HanjulloInAppModule {
 
   /** 템플릿별 컨테이너(위치·면·모서리·그림자)를 테마 토큰으로 생성 + DOM 마운트. blocks는 contentRoot에.
    *  ★ 2026-07-07(5) zoned=true(ticket 2톤/poster 풀블리드) — 패딩을 존이 소유하도록 컨테이너 패딩 0 + 모서리 클립. */
-  private makeContainer(msg: InAppMessageSdk, template: InAppTemplate, theme: InAppTheme, input: InAppInitInput, cardStyle: CardStyle = 'classic', zoned = false) {
+  private makeContainer(msg: InAppMessageSdk, template: InAppTemplate, theme: InAppTheme, input: InAppInitInput, cardStyle: CardStyle = 'classic', zoned = false, design: InAppDesignSdk | null = null) {
     const card = document.createElement('div');
     card.setAttribute('data-hanjullo-msg', msg.id);
     const baseCard: Record<string, string> = {
@@ -1084,13 +1165,16 @@ export class HanjulloInAppModule {
     // ── center_modal
     if (template === 'center_modal') {
       const backdrop = document.createElement('div');
+      // ★ 3.0 — 딤 3단 + 블러 on/off (design.backdrop 미설정 = 현행 standard 0.55 + blur 그대로)
+      const dim = BACKDROP_DIM[String(design?.backdrop?.dim || '')] || BACKDROP_DIM.standard;
+      const blurOn = design?.backdrop?.blur !== false;
       Object.assign(backdrop.style, {
-        position: 'fixed', inset: '0', background: 'rgba(8,10,18,0.55)',
-        backdropFilter: 'blur(14px) saturate(1.35)',
+        position: 'fixed', inset: '0', background: dim,
+        ...(blurOn ? { backdropFilter: 'blur(14px) saturate(1.35)' } : {}),
         zIndex: '2147483646', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px',
         opacity: '0', transition: 'opacity 0.35s ease',
       });
-      (backdrop.style as any).webkitBackdropFilter = 'blur(14px) saturate(1.35)';
+      if (blurOn) (backdrop.style as any).webkitBackdropFilter = 'blur(14px) saturate(1.35)';
       Object.assign(card.style, baseCard, {
         maxWidth: '420px', width: '100%', borderRadius: `${theme.radius}px`, overflow: 'hidden',
         boxShadow: cardShadow, position: 'relative', border: `1px solid ${theme.border}`,

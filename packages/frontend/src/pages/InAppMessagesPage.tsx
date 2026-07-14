@@ -24,7 +24,12 @@ import { InAppMessagePreview } from '../components/InAppMessagePreview';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
 import TargetExtractModal from '../components/TargetExtractModal';
-import { THEME_OPTIONS, CARD_STYLE_OPTIONS, type CardStyle } from '../components/inapp/blockTheme';
+import {
+  THEME_OPTIONS, CARD_STYLE_OPTIONS, SIGNATURE_THEME_OPTIONS, INAPP_TREATMENTS, INAPP_TREATMENT_OPTIONS,
+  INAPP_FONT_CATALOG, type CardStyle,
+} from '../components/inapp/blockTheme';
+// ★ 2026-07-14 디자인 3.0 — 골든 템플릿 12종 (형태×카드×테마×블록 완성형 — 혜택 placeholder 준수)
+import { GOLDEN_INAPP_TEMPLATES, type GoldenInAppTemplate } from '../components/inapp/goldenTemplates';
 import { Icon as BlockIcon } from '../components/inapp/BlockPreview';
 import { DateTimeField } from '../components/DateTimeField';
 import { takeEventDraft, EVENT_INAPP_DRAFT_KEY } from '../components/EventCampaignModal';
@@ -89,6 +94,8 @@ interface MessageRow {
   accent_color?: string | null;
   // ★ 2026-07-07(2) 형태 축 — classic/bubble/ticket/poster
   card_style?: string | null;
+  // ★ 2026-07-14 디자인 3.0 — 메시지 단위 디자인 (font_display/treatment/motion/backdrop. 미설정 = 현행 렌더)
+  design?: Record<string, any> | null;
   status: Status;
   channel?: 'web' | 'app';
   startAt?: string | null;
@@ -299,6 +306,7 @@ export default function InAppMessagesPage() {
       theme: msg.theme || 'auto',
       accent_color: msg.accent_color || null,
       card_style: msg.card_style || 'classic',
+      design: msg.design ?? null,
       status: 'active',
       channel: 'web',
     });
@@ -504,6 +512,8 @@ export default function InAppMessagesPage() {
         theme: pkg.message.theme || 'auto',
         accent_color: pkg.message.accent_color || null,
         card_style: pkg.message.card_style || 'classic',
+        // ★ 2026-07-14 디자인 3.0 — 결정적 디자인 추천 (모션 2.0 + 시나리오 구도)
+        design: pkg.message.design ?? null,
         status: 'active',
         channel: channelOverride || channel || 'web',
       });
@@ -979,6 +989,7 @@ export default function InAppMessagesPage() {
                   theme={previewMsg.theme}
                   accentColor={previewMsg.accent_color}
                   cardStyle={previewMsg.card_style}
+                  design={previewMsg.design}
                 />
               </div>
               <div className="flex gap-2 mt-4">
@@ -1604,6 +1615,45 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
     setEditing({ ...editing, background_color: p.background, text_color: p.textColor });
   };
 
+  // ★ 2026-07-14 디자인 3.0 — design jsonb 부분 갱신 (null/undefined 값 키는 제거. 전 키 제거 = null = 현행 렌더)
+  const setDesign = (patch: Record<string, any>) => {
+    const next: Record<string, any> = { ...(editing.design || {}) };
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === null || v === undefined) delete next[k];
+      else next[k] = v;
+    }
+    setEditing({ ...editing, design: Object.keys(next).length > 0 ? next : null });
+  };
+
+  // ★ 2026-07-14 디자인 3.0 — 골든 템플릿 1클릭 적용 (형태·카드·테마·블록·디자인 교체. 트리거/타겟/시간대 무접촉)
+  const [goldenConfirm, setGoldenConfirm] = useState<ConfirmState | null>(null);
+  const applyGolden = (g: GoldenInAppTemplate) => {
+    const chTemplates = (editing.channel === 'app' ? CHANNEL_TEMPLATES.app : CHANNEL_TEMPLATES.web) as string[];
+    setEditing({
+      ...editing,
+      template: (chTemplates.includes(g.template) ? g.template : editing.template) as Template,
+      card_style: g.card_style,
+      theme: g.theme,
+      design: Object.keys(g.design).length > 0 ? { ...g.design } : null,
+      content_blocks: JSON.parse(JSON.stringify(g.content_blocks)),
+      ...(g.badge_text ? { badge_text: g.badge_text } : {}),
+    });
+  };
+  const pickGolden = (g: GoldenInAppTemplate) => {
+    const blocksNow = Array.isArray(editing.content_blocks) ? editing.content_blocks : [];
+    if (blocksNow.length > 0) {
+      setGoldenConfirm({
+        mode: 'warning',
+        title: `골든 템플릿 적용 — ${g.label}`,
+        description: '현재 편집 중인 블록 구성이 템플릿 블록으로 교체됩니다. 트리거·표시 대상·시간대 설정은 유지됩니다.',
+        confirmLabel: '적용',
+        onConfirm: () => applyGolden(g),
+      });
+    } else {
+      applyGolden(g);
+    }
+  };
+
   const replaceVars = (text: string, customer: Record<string, any>): string => {
     if (!text) return '';
     let out = text;
@@ -1730,6 +1780,29 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               )}
             </div>
 
+            {/* ★ 2026-07-14 디자인 3.0 — 골든 템플릿 12종 (1클릭 = 형태·카드·테마·블록 완성형. 문안은 편집으로 다듬기) */}
+            <div className={activeTab === 'design' ? 'mb-5' : 'hidden'}>
+              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+                <Sparkles className="w-3 h-3 text-fuchsia-300" /> 골든 템플릿 (1클릭 완성형)
+              </h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {GOLDEN_INAPP_TEMPLATES.map((g) => (
+                  <button
+                    key={g.id}
+                    onClick={() => pickGolden(g)}
+                    className="rounded-xl border border-white/10 bg-slate-900/60 hover:bg-white/5 hover:border-white/25 p-2 text-left transition-colors"
+                  >
+                    <span className="flex h-7 rounded-lg overflow-hidden border border-white/10">
+                      {g.swatches.map((s, i) => <span key={i} className="flex-1" style={{ background: s }} />)}
+                    </span>
+                    <span className="block text-[11px] font-bold mt-1.5 text-white/85">{g.label}</span>
+                    <span className="block text-[9px] text-white/45 mt-0.5">{g.hint}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="text-[10px] text-white/40 mt-1.5">적용해도 트리거·표시 대상·시간대 설정은 그대로 유지됩니다. 혜택 문구는 직접 작성해야 저장됩니다.</div>
+            </div>
+
             {/* 탭 디자인: 표시 형태 */}
             <div className={activeTab === 'design' ? '' : 'hidden'}>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
@@ -1791,6 +1864,28 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   </button>
                 ))}
               </div>
+              {/* ★ 2026-07-14 디자인 3.0 — 시그니처 테마 (서체·조판·모티프 내장 큐레이션. 1클릭 — 문안 무변) */}
+              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+                <Wand2 className="w-3 h-3 text-fuchsia-300" /> 시그니처 테마 (아트디렉션 내장)
+              </h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                {SIGNATURE_THEME_OPTIONS.map((t) => {
+                  const active = (editing.theme || 'auto') === t.key;
+                  return (
+                    <button
+                      key={t.key}
+                      onClick={() => updateField('theme', t.key)}
+                      className={`rounded-xl border p-2 text-left transition-colors ${active ? 'bg-violet-500/25 border-violet-400/60' : 'bg-slate-900/60 border-white/10 hover:bg-white/5'}`}
+                    >
+                      <span className="flex h-5 rounded-md overflow-hidden border border-white/10">
+                        {t.swatches.map((s, i) => <span key={i} className="flex-1" style={{ background: s }} />)}
+                      </span>
+                      <span className={`block text-[11px] font-bold mt-1.5 ${active ? 'text-white' : 'text-white/80'}`}>{t.label}</span>
+                      <span className="block text-[9px] text-white/45 mt-0.5">{t.hint}</span>
+                    </button>
+                  );
+                })}
+              </div>
               <div className="flex items-center gap-2 flex-wrap">
                 <label className="text-[11px] text-white/60">강조색</label>
                 <input
@@ -1811,6 +1906,141 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 )}
                 <span className="text-[10px] text-white/40">{brandAccent ? '브랜드 킷에 저장된 회사 색이 기본 적용됩니다' : '면·구조는 테마가, 강조색만 회사 색'}</span>
               </div>
+
+              {/* ★ 2026-07-14 디자인 3.0 — 구도·모션·서체·배경 (소비하는 형태 조합에서만 노출 — 죽은 컨트롤 금지) */}
+              {(() => {
+                const treatKey = `${editing.template}|${editing.card_style || 'classic'}`;
+                const treatAllowed = INAPP_TREATMENTS[treatKey];
+                const currentTreatment = treatAllowed && treatAllowed.includes((editing.design?.treatment || 'classic') as any)
+                  ? (editing.design?.treatment || 'classic') : 'classic';
+                const motionOn = editing.design?.motion === 'rich';
+                const currentFontId = (() => {
+                  const fd = String(editing.design?.font_display || '');
+                  if (!fd) return 'theme_default';
+                  const hit = INAPP_FONT_CATALOG.find((c) => fd === c.css);
+                  return hit ? hit.id : 'theme_default';
+                })();
+                const headlineBlockIdx = blocks.findIndex((b: any) => b?.type === 'headline');
+                const currentEmphasis = headlineBlockIdx >= 0 ? String(blocks[headlineBlockIdx]?.emphasis || '') : '';
+                const setHeadlineEmphasis = (v: 'marker' | 'underline' | '') => {
+                  if (headlineBlockIdx < 0) return;
+                  const nb = blocks.map((b: any, i: number) => {
+                    if (i !== headlineBlockIdx) return b;
+                    if (!v) { const { emphasis: _e, ...rest } = b; return rest; }
+                    return { ...b, emphasis: v };
+                  });
+                  setEditing({ ...editing, content_blocks: nb });
+                };
+                return (
+                  <div className="mt-4 space-y-3">
+                    {treatAllowed && treatAllowed.length > 1 && (
+                      <div>
+                        <label className="text-[10px] text-white/50 block mb-1">구도 (지금 형태 조합에서 쓸 수 있는 조판)</label>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                          {INAPP_TREATMENT_OPTIONS.filter((o) => treatAllowed.includes(o.key)).map((o) => (
+                            <button
+                              key={o.key}
+                              onClick={() => setDesign({ treatment: o.key === 'classic' ? null : o.key })}
+                              className={`px-2 py-2 rounded-lg border text-left transition-colors ${currentTreatment === o.key ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/70 hover:bg-white/5'}`}
+                            >
+                              <span className="block text-[11px] font-bold">{o.label}</span>
+                              <span className="block text-[9px] text-white/45 mt-0.5">{o.hint}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex flex-wrap items-end gap-4">
+                      <div>
+                        <label className="text-[10px] text-white/50 block mb-1">모션 2.0 (CTA 맥동·쿠폰 샤인·초침 팝)</label>
+                        <div className="flex gap-1.5">
+                          <button
+                            onClick={() => setDesign({ motion: 'rich' })}
+                            className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${motionOn ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/60 hover:bg-white/5'}`}
+                          >켬</button>
+                          <button
+                            onClick={() => setDesign({ motion: null })}
+                            className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${!motionOn ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/60 hover:bg-white/5'}`}
+                          >끔</button>
+                        </div>
+                        <div className="text-[9px] text-white/35 mt-1">수신자 기기의 모션 줄이기 설정이 켜져 있으면 자동으로 꺼집니다.</div>
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-white/50 block mb-1">헤드라인 서체</label>
+                        <select
+                          value={currentFontId}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            if (id === 'theme_default') { setDesign({ font_display: null }); return; }
+                            const c = INAPP_FONT_CATALOG.find((x) => x.id === id);
+                            setDesign({ font_display: c ? c.css : null });
+                          }}
+                          className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white"
+                        >
+                          <option value="theme_default">테마 기본</option>
+                          {INAPP_FONT_CATALOG.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                        </select>
+                      </div>
+                      {headlineBlockIdx >= 0 && (
+                        <div>
+                          <label className="text-[10px] text-white/50 block mb-1">헤드라인 강조</label>
+                          <div className="flex gap-1.5">
+                            {([['', '없음'], ['marker', '형광 마커'], ['underline', '밑줄']] as const).map(([v, label]) => (
+                              <button
+                                key={v || 'none'}
+                                onClick={() => setHeadlineEmphasis(v)}
+                                className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${currentEmphasis === v ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/60 hover:bg-white/5'}`}
+                              >{label}</button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    {editing.template === 'center_modal' && (
+                      <div className="flex flex-wrap items-end gap-4">
+                        <div>
+                          <label className="text-[10px] text-white/50 block mb-1">배경 어둡기 (모달 뒤 딤)</label>
+                          <div className="flex gap-1.5">
+                            {([['soft', '옅게'], ['standard', '기본'], ['deep', '깊게']] as const).map(([v, label]) => {
+                              const cur = String(editing.design?.backdrop?.dim || 'standard');
+                              return (
+                                <button
+                                  key={v}
+                                  onClick={() => {
+                                    const bd = { ...(editing.design?.backdrop || {}) };
+                                    if (v === 'standard') delete bd.dim; else bd.dim = v;
+                                    setDesign({ backdrop: Object.keys(bd).length > 0 ? bd : null });
+                                  }}
+                                  className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${cur === v ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/60 hover:bg-white/5'}`}
+                                >{label}</button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-white/50 block mb-1">배경 블러</label>
+                          <div className="flex gap-1.5">
+                            {([[true, '켬'], [false, '끔']] as const).map(([v, label]) => {
+                              const cur = editing.design?.backdrop?.blur !== false;
+                              return (
+                                <button
+                                  key={String(v)}
+                                  onClick={() => {
+                                    const bd = { ...(editing.design?.backdrop || {}) };
+                                    if (v) delete bd.blur; else bd.blur = false;
+                                    setDesign({ backdrop: Object.keys(bd).length > 0 ? bd : null });
+                                  }}
+                                  className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${cur === v ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/60 hover:bg-white/5'}`}
+                                >{label}</button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* 탭 디자인: 프리셋 갤러리 (레거시 단색 — 블록 없을 때만) */}
@@ -2359,6 +2589,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               theme={editing.theme}
               accentColor={editing.accent_color}
               cardStyle={editing.card_style}
+              design={editing.design}
               replaceVars={(t) => replaceVars(t, sampleCustomer)}
             />
           </div>
@@ -2372,6 +2603,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
           </button>
         </div>
       </div>
+      {/* ★ 2026-07-14 디자인 3.0 — 골든 템플릿 덮어쓰기 확인 (기존 블록 있을 때만) */}
+      <ConfirmModal state={goldenConfirm} onClose={() => setGoldenConfirm(null)} />
     </div>
   );
 }

@@ -82,6 +82,8 @@ export interface CreateInAppMessageInput {
   accent_color?: string | null;
   // ★ 2026-07-07(2) 형태 축 — classic/bubble/ticket/poster (색상 테마와 독립)
   card_style?: string | null;
+  // ★ 2026-07-14 디자인 3.0 — 메시지 단위 디자인(design jsonb). undefined=유지 / null=비우기 / 객체=sanitize 후 교체
+  design?: Record<string, any> | null;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -93,9 +95,58 @@ export const INAPP_BLOCK_TYPES = [
   'countdown', 'rating', 'product', 'divider', 'spacer', 'cta_group', 'footer',
 ] as const;
 
-export const INAPP_THEME_KEYS = ['auto', 'light', 'dark', 'brand', 'vibrant', 'minimal'] as const;
+// ★ 2026-07-14 디자인 3.0 — 시그니처 테마 7종 추가 (SDK inapp-theme VALID_KEYS·프론트 blockTheme와 1:1 동기 의무)
+export const INAPP_THEME_KEYS = [
+  'auto', 'light', 'dark', 'brand', 'vibrant', 'minimal',
+  'editorial', 'luxury-dark', 'bold-sale', 'soft-pastel', 'paper', 'city-night', 'festive',
+] as const;
 
 export const BENEFIT_PLACEHOLDER = '[혜택 안내 — 직접 작성해주세요]';
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-07-14 디자인 3.0 — cdp_inapp_messages.design jsonb (전 키 옵셔널 — 미설정 = 현행 렌더)
+// ════════════════════════════════════════════════════════════════════
+
+export const INAPP_DESIGN_TREATMENTS = ['classic', 'framed', 'typographic', 'spotlight'] as const;
+export const INAPP_DESIGN_MOTIONS = ['rich', 'none'] as const;
+export const INAPP_DESIGN_DIMS = ['soft', 'standard', 'deep'] as const;
+
+/**
+ * design jsonb 정규화 — 화이트리스트 밖 키·값은 버린다(fail-closed). 유효 키 0개 = null.
+ * font_display는 font-family 문자열만 허용(무해화 — SDK safeFontFamily와 동일 문자 집합).
+ */
+export function sanitizeInAppDesign(raw: any): Record<string, any> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out: Record<string, any> = {};
+  if (typeof raw.font_display === 'string') {
+    const cleaned = raw.font_display.replace(/[^\w\s,"'\-]/g, '').trim().slice(0, 120);
+    if (cleaned) out.font_display = cleaned;
+  }
+  if ((INAPP_DESIGN_TREATMENTS as readonly string[]).includes(String(raw.treatment))) out.treatment = String(raw.treatment);
+  if ((INAPP_DESIGN_MOTIONS as readonly string[]).includes(String(raw.motion))) out.motion = String(raw.motion);
+  if (raw.backdrop && typeof raw.backdrop === 'object' && !Array.isArray(raw.backdrop)) {
+    const bd: Record<string, any> = {};
+    if ((INAPP_DESIGN_DIMS as readonly string[]).includes(String(raw.backdrop.dim))) bd.dim = String(raw.backdrop.dim);
+    if (typeof raw.backdrop.blur === 'boolean') bd.blur = raw.backdrop.blur;
+    if (Object.keys(bd).length > 0) out.backdrop = bd;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+// ★ design 쓰기 전 컬럼 선확인 — email-channel ensureDesignColumnOrThrow 미러 (양성만 캐시 — ALTER 후 자가 치유).
+//   컬럼 부재 = throw('column ... does not exist') → 라우트 503 DB_MIGRATION_PENDING 변환 (부분 상태 0).
+let inappDesignColumnExists: boolean | null = null;
+async function ensureInAppDesignColumnOrThrow(): Promise<void> {
+  if (inappDesignColumnExists !== true) {
+    const res = await query(
+      `SELECT 1 FROM information_schema.columns WHERE table_name = 'cdp_inapp_messages' AND column_name = 'design'`,
+    );
+    if (res.rows.length === 0) {
+      throw new Error('cdp_inapp_messages.design column does not exist — ALTER 실행 필요');
+    }
+    inappDesignColumnExists = true;
+  }
+}
 
 /**
  * ★ P0-2 (2026-07-12) — action_url 스킴 화이트리스트 (SDK resolveSafeNavUrl과 동일 판정 기준).
@@ -195,6 +246,11 @@ export async function createInAppMessage(
     throw new Error(`${BENEFIT_PLACEHOLDER_ERROR}: 혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.`);
   }
 
+  // ★ 2026-07-14 디자인 3.0 — design 동봉 생성은 INSERT "전" 컬럼 선확인(부분 상태 0 — 이메일 3.0 규약 미러).
+  //   design 미제공 = 컬럼 자체를 INSERT에서 생략(ALTER 전 환경에서도 기존 생성 무영향).
+  const design = sanitizeInAppDesign(input.design);
+  if (design) await ensureInAppDesignColumnOrThrow();
+
   const result = await query(
     `INSERT INTO cdp_inapp_messages (
       id, company_id, created_by, title, body, action_url, action_label,
@@ -203,7 +259,7 @@ export async function createInAppMessage(
       template, image_url, buttons, segment_conditions, trigger_conditions,
       personalization_vars, auto_dismiss_seconds, max_displays_per_user,
       send_start_hour, send_end_hour, allowed_weekdays, animation, badge_text,
-      content_blocks, theme, accent_color, card_style,
+      content_blocks, theme, accent_color, card_style${design ? ', design' : ''},
       created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2::uuid, $3, $4, $5, $6,
@@ -212,7 +268,7 @@ export async function createInAppMessage(
       $16, $17, $18::jsonb, $19::jsonb, $20::jsonb,
       $21::jsonb, $22, $23,
       $24, $25, $26, $27, $28,
-      $29::jsonb, $30, $31, $32,
+      $29::jsonb, $30, $31, $32${design ? ', $33::jsonb' : ''},
       NOW(), NOW()
     ) RETURNING *`,
     [
@@ -229,6 +285,7 @@ export async function createInAppMessage(
       input.badge_text ?? null,
       JSON.stringify(contentBlocks), normalizeTheme(input.theme), input.accent_color ?? null,
       normalizeCardStyle(input.card_style),
+      ...(design ? [JSON.stringify(design)] : []),
     ]
   );
   return mapRowToMessage(result.rows[0]);
@@ -291,8 +348,14 @@ export async function updateInAppMessage(
   const maxDispPatch = patchPresence(input.max_displays_per_user);
   const startHourPatch = patchPresence(input.send_start_hour);
   const endHourPatch = patchPresence(input.send_end_hour);
+  // ★ 2026-07-14 디자인 3.0 — design: undefined=유지(SET 절 자체 생략 — ALTER 전 환경 무영향) /
+  //   null=비우기 / 객체=sanitize 후 교체(무효 키 전부 탈락 시 null). 쓰기 전 컬럼 선확인(부분 상태 0).
+  const designProvided = input.design !== undefined;
+  if (designProvided) await ensureInAppDesignColumnOrThrow();
+  const designValue = designProvided && input.design !== null ? sanitizeInAppDesign(input.design) : null;
   const result = await query(
     `UPDATE cdp_inapp_messages SET
+      ${designProvided ? 'design = $38::jsonb,' : ''}
       title = COALESCE($3, title),
       body = COALESCE($4, body),
       action_url = CASE WHEN $32::boolean THEN $5 ELSE action_url END,
@@ -343,6 +406,7 @@ export async function updateInAppMessage(
       blocksParam, input.theme ? normalizeTheme(input.theme) : null, input.accent_color ?? null,
       input.card_style !== undefined && input.card_style !== null ? normalizeCardStyle(input.card_style) : null,
       actionUrlPatch.set, imagePatch.set, dismissPatch.set, maxDispPatch.set, startHourPatch.set, endHourPatch.set,
+      ...(designProvided ? [designValue ? JSON.stringify(designValue) : null] : []),
     ]
   );
   return result.rows.length > 0 ? mapRowToMessage(result.rows[0]) : null;
@@ -602,6 +666,8 @@ export interface InAppMessageDetail extends InAppMessage {
   accentColor: string | null;
   /** ★ 2026-07-07(2) 형태 축 — classic/bubble/ticket/poster */
   cardStyle: string;
+  /** ★ 2026-07-14 디자인 3.0 — design jsonb (미설정 = null = 현행 렌더. 구 SDK는 미지 필드라 무시) */
+  design: Record<string, any> | null;
   audienceFilter?: Record<string, any> | null;
 }
 
@@ -628,6 +694,7 @@ function mapRowToMessageDetail(row: any): InAppMessageDetail {
     theme: row.theme || 'auto',
     accentColor: row.accent_color || null,
     cardStyle: normalizeCardStyle(row.card_style),
+    design: row.design && typeof row.design === 'object' ? row.design : null,
     audienceFilter: row.audience_filter || null,
   };
 }
@@ -656,7 +723,7 @@ const FULL_COLUMNS = `id, title, body, action_url, action_label, position, backg
                       personalization_vars, parent_message_id, variant_weight,
                       auto_dismiss_seconds, max_displays_per_user,
                       send_start_hour, send_end_hour, allowed_weekdays, locale_variants, animation, channel,
-                      content_blocks, theme, accent_color, card_style, audience_filter`;
+                      content_blocks, theme, accent_color, card_style, design, audience_filter`;
 
 /**
  * ★ D215+ V2 — SDK GET /inapp/active 호출 진입.

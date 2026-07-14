@@ -6,8 +6,8 @@
  */
 
 import { useEffect, useState, type CSSProperties } from 'react';
-import type { InAppTheme, CardLayoutPlan } from './blockTheme';
-import { withAlpha, shadeHex, pickReadableText, planCardLayout, normalizeCardStyle } from './blockTheme';
+import type { InAppTheme, CardLayoutPlan, InAppTreatment } from './blockTheme';
+import { withAlpha, shadeHex, pickReadableText, planCardLayout, normalizeCardStyle, safeFontFamily } from './blockTheme';
 
 // 2026-07-07 디자인 2.0 — SDK inapp-blocks FONT_STACK 미러
 const FONT_STACK = '"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
@@ -24,6 +24,7 @@ export const ICON_PATHS: Record<string, string> = {
   clock: 'M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
   tag: 'M20.6 13.4 12 22l-9-9V3h10l7.6 7.6a2 2 0 0 1 0 2.8zM7 7h.01',
   sparkle: 'M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2 2M16 16l2 2M18 6l-2 2M8 16l-2 2',
+  arrow: 'M5 12h14M13 6l6 6-6 6',
   cart: 'M6 6h15l-1.5 9h-12zM6 6 5 3H2M9 20a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM19 20a1 1 0 1 1-2 0 1 1 0 0 1 2 0z',
   user: 'M20 21a8 8 0 1 0-16 0M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
 };
@@ -42,6 +43,9 @@ interface Ctx {
   replaceVars: (t: string) => string;
   /** ★ 2026-07-07(5) 형태 골격 — SDK BlockRenderContext.cardStyle 미러 */
   cardStyle?: string;
+  // ★ 2026-07-14 디자인 3.0 — SDK ctx 미러 (미지정 = 현행 렌더)
+  treatment?: InAppTreatment;
+  displayFont?: string;
 }
 
 function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
@@ -81,15 +85,38 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
       const hs: Record<string, number> = bubble ? { sm: 15, md: 17, lg: 19, xl: 21 } : { sm: 16, md: 19, lg: 21, xl: 24 };
       const xl = b.size === 'xl';
       const weight = bubble ? 700 : (ticket || xl) ? Math.max(800, theme.headlineWeight) : theme.headlineWeight;
+      // ★ 3.0 — 크기 배율(테마 headlineScale × typographic 1.25)·전용 서체·강조 표시 (SDK renderHeadline 미러)
+      const scale = (theme.headlineScale || 1) * (ctx.treatment === 'typographic' && !bubble ? 1.25 : 1);
+      const df = safeFontFamily(ctx.displayFont || theme.displayFont, '');
+      const inner = b.emphasis === 'marker' ? (
+        <span style={{ background: `linear-gradient(180deg, rgba(0,0,0,0) 58%, ${withAlpha(theme.accent, 0.3)} 58%)`, borderRadius: 2, padding: '0 2px' }}>{text}</span>
+      ) : b.emphasis === 'underline' ? (
+        <span style={{ boxShadow: `inset 0 -2px 0 ${theme.accent}`, paddingBottom: 1 }}>{text}</span>
+      ) : text;
       const head = (
-        <div style={{ fontWeight: weight, fontSize: hs[String(b.size)] || (bubble ? 17 : 19), letterSpacing: xl || weight >= 800 ? '-0.02em' : '-0.01em', lineHeight: 1.28, color: theme.textPrimary }}>{text}</div>
+        <div style={{
+          fontWeight: weight,
+          fontSize: Math.round((hs[String(b.size)] || (bubble ? 17 : 19)) * scale * 10) / 10,
+          letterSpacing: xl || weight >= 800 || scale > 1.15 ? '-0.02em' : '-0.01em',
+          lineHeight: 1.28, color: theme.textPrimary,
+          ...(df ? { fontFamily: df } : {}),
+        }}>{inner}</div>
       );
-      if (!theme.headlineAccentBar || bubble) return <div key={i}>{head}</div>;
+      // ★ 3.0 — 모티프 마크 (테마 아트디렉션 — SDK 미러. 버블 제외)
+      const motif = theme.motif && !bubble ? (
+        theme.motif === 'rule' ? <div style={{ width: 22, height: 3, borderRadius: 999, background: theme.accent, marginBottom: 9 }} />
+        : theme.motif === 'dot' ? <div style={{ width: 6, height: 6, borderRadius: 999, background: theme.accent, marginBottom: 9 }} />
+        : <div style={{ width: 12, height: 12, borderLeft: `2.5px solid ${theme.accent}`, borderTop: `2.5px solid ${theme.accent}`, marginBottom: 8 }} />
+      ) : null;
+      if (!motif && (!theme.headlineAccentBar || bubble)) return <div key={i}>{head}</div>;
       // 브랜드 쇼케이스 — 헤드라인 아래 accent 짧은 바 (SDK 미러)
       return (
         <div key={i}>
+          {motif}
           {head}
-          <div style={{ width: 26, height: 4, borderRadius: 999, marginTop: 9, background: `linear-gradient(90deg, ${theme.accent} 0%, ${shadeHex(theme.accent, 30)} 100%)` }} />
+          {theme.headlineAccentBar && !bubble && (
+            <div style={{ width: 26, height: 4, borderRadius: 999, marginTop: 9, background: `linear-gradient(90deg, ${theme.accent} 0%, ${shadeHex(theme.accent, 30)} 100%)` }} />
+          )}
         </div>
       );
     }
@@ -125,7 +152,8 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
     case 'benefit': {
       const text = t(b.text || '[혜택 안내 — 직접 작성해주세요]');
       // ★ 2026-07-07(5) 형태 골격 — 쿠폰 티켓 카드: 점선 박스 중첩 대신 대형 혜택 타이포 (SDK 미러)
-      if (ctx.cardStyle === 'ticket') {
+      //   ★ 3.0 — spotlight 구도(classic 카드)도 같은 대형 승격 (SDK 미러)
+      if (ctx.cardStyle === 'ticket' || ctx.treatment === 'spotlight') {
         return (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '15px 16px', borderRadius: theme.innerRadius, background: theme.accentSoft, color: theme.textPrimary }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 38, height: 38, borderRadius: 12, background: theme.accent, flexShrink: 0 }}>
@@ -198,6 +226,12 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
               return b.meta ? <div style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>{t(b.meta)}</div> : null;
             })()}
           </div>
+          {/* ★ 3.0 — 상품 링크 어포던스 (SDK renderProduct 미러 — 미리보기는 정적이라 화살표 표시만) */}
+          {/^https?:\/\//i.test(String(b.link_url || '').trim()) && (
+            <span style={{ opacity: 0.55, flexShrink: 0, display: 'inline-flex' }}>
+              <Icon name="arrow" color={theme.textSecondary} size={15} />
+            </span>
+          )}
         </div>
       );
     }
@@ -405,7 +439,7 @@ function BubbleSender({ text, theme }: { text: string; theme: InAppTheme }) {
   );
 }
 
-export function BlockPreview({ blocks, theme, replaceVars, isAd, cardStyle, zonePads }: {
+export function BlockPreview({ blocks, theme, replaceVars, isAd, cardStyle, zonePads, treatment, displayFont }: {
   blocks: any[];
   theme: InAppTheme;
   replaceVars?: (t: string) => string;
@@ -414,9 +448,12 @@ export function BlockPreview({ blocks, theme, replaceVars, isAd, cardStyle, zone
   cardStyle?: string | null;
   /** ★ 2026-07-07(5) ticket/poster 존 분할 시 구간별 패딩 (미전달 = 기존 인셋 렌더) — SDK ZONE_PADS 미러 */
   zonePads?: { main: string; stub: string; body: string } | null;
+  /** ★ 2026-07-14 디자인 3.0 — 구도(resolveInAppTreatment 통과값) + 서체 오버라이드 (SDK ctx 미러) */
+  treatment?: InAppTreatment;
+  displayFont?: string;
 }) {
   const style = normalizeCardStyle(cardStyle);
-  const ctx: Ctx = { theme, replaceVars: replaceVars || ((s: string) => s), cardStyle: style };
+  const ctx: Ctx = { theme, replaceVars: replaceVars || ((s: string) => s), cardStyle: style, treatment, displayFont };
   const list = Array.isArray(blocks) ? blocks : [];
   const hasFooter = list.some((b) => b?.type === 'footer');
   const plan = planCardLayout(list, style);
@@ -466,12 +503,19 @@ export function BlockPreview({ blocks, theme, replaceVars, isAd, cardStyle, zone
       <BubbleSender text={t(String(plan.sender.text ?? '')).trim()} theme={theme} />
       {plan.main.map((b, i) => renderBlock(b, i, ctx)).filter(Boolean)}
     </>
+  ) : treatment === 'framed' ? (
+    // ★ 3.0 framed 구도 — 헤어라인 내부 프레임 (SDK renderBlockMessage 미러. classic 카드 전용 허용표)
+    <div style={{ display: 'flex', flexDirection: 'column', gap: theme.density === 'airy' ? 16 : theme.density === 'compact' ? 10 : 13, border: `1px solid ${theme.border}`, borderRadius: theme.innerRadius + 6, padding: '18px 16px', minWidth: 0, boxSizing: 'border-box' }}>
+      {list.map((b, i) => renderBlock(b, i, ctx)).filter(Boolean)}
+    </div>
   ) : (
     <>{list.map((b, i) => renderBlock(b, i, ctx)).filter(Boolean)}</>
   );
 
+  // ★ 3.0 — 밀도(테마 아트디렉션): 비분할 컨테이너 블록 간격 (SDK 미러 — airy 16 / compact 10 / 미설정 13)
+  const rootGap = zoned ? 0 : theme.density === 'airy' ? 16 : theme.density === 'compact' ? 10 : 13;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: zoned ? 0 : 13, color: theme.textPrimary, fontFamily: FONT_STACK, letterSpacing: '-0.005em' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: rootGap, color: theme.textPrimary, fontFamily: FONT_STACK, letterSpacing: '-0.005em' }}>
       {body}
       {!zoned && adLine}
     </div>
