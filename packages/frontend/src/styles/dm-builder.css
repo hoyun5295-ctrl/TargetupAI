@@ -535,7 +535,7 @@
   --dm-neutral-700: #cdd4e0; --dm-neutral-800: #e4e8f0; --dm-neutral-900: #f2f5fa; --dm-neutral-1000: #ffffff;
   --dm-primary-light: color-mix(in srgb, var(--dm-primary) 22%, #141926); }
 .dm-bgx-gradient { --dm-bg: rgba(255,255,255,0);
-  background: linear-gradient(155deg, var(--dm-primary), color-mix(in srgb, var(--dm-primary) 35%, var(--dm-accent)));
+  background: linear-gradient(155deg, var(--dm-primary), var(--dm-grad-to, color-mix(in srgb, var(--dm-primary) 35%, var(--dm-accent))));
   --dm-neutral-900: #ffffff; --dm-neutral-800: #f4f6fb; --dm-neutral-700: rgba(255,255,255,0.88);
   --dm-neutral-600: rgba(255,255,255,0.75); --dm-neutral-500: rgba(255,255,255,0.62); --dm-neutral-400: rgba(255,255,255,0.5);
   --dm-neutral-300: rgba(255,255,255,0.35); --dm-neutral-200: rgba(255,255,255,0.25); --dm-neutral-100: rgba(255,255,255,0.14);
@@ -546,6 +546,12 @@
   box-shadow: 0 -12px 32px -14px rgba(15,23,42,0.25); }
 .dm-divider-svg { display: block; line-height: 0; margin-bottom: -1px; color: var(--dm-bg); }
 .dm-bgx-gradient + .dm-divider-svg, .dm-bgx-gradient .dm-divider-svg { color: var(--dm-primary); }
+/* ★ 2026-07-14 하단 연결부 미반영(남지현 신고) — divider는 배경면 div 바깥 형제라 color:var(--dm-bg)가
+   페이지 기본 흰색으로 풀려 흰 위 흰색=안 보임. 배경면 변형별로 섹션 실제 색을 지정해 연결부 모양이 보이게 함. */
+.dm-bgx-soft + .dm-divider-svg, .dm-bgx-soft .dm-divider-svg { color: color-mix(in srgb, var(--dm-primary) 6%, #ffffff); }
+.dm-bgx-tint + .dm-divider-svg, .dm-bgx-tint .dm-divider-svg { color: color-mix(in srgb, var(--dm-primary) 14%, #ffffff); }
+.dm-bgx-dark + .dm-divider-svg, .dm-bgx-dark .dm-divider-svg { color: #12151f; }
+.dm-bgx-glass + .dm-divider-svg, .dm-bgx-glass .dm-divider-svg { color: rgba(255,255,255,0.6); }
 .dm-divider-svg svg { display: block; width: 100%; height: 26px; }
 .dm-sticky-cta { position: sticky; bottom: 0; z-index: 40; }
 

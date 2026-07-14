@@ -294,10 +294,14 @@ export function buildSectionSummary(row: { sections?: any; pages?: any; brand_ki
   return { types: [], headline: null, accent, count: pages ? pages.length : 0 };
 }
 
-export async function getDmList(companyId: string) {
+export async function getDmList(companyId: string, ownerUserId?: string | null) {
   // raw pages는 전송하지 않음 — 길이만 page_count로 SQL 집계(jsonb_array_length). sections/brand_kit만 요약 계산에 사용.
   // ★ 2026-07-02(3) has_send_history = 타겟 발송 이력 여부(dm_recipient_tokens EXISTS) — 카드 [발송 추적] 노출 판단.
   //   토큰 테이블 미마이그레이션(구 환경)이어도 목록이 죽지 않게 폴백.
+  // ★ 2026-07-14 사용자별 노출 스코프(서수란 신고): ownerUserId 지정 시 본인 생성분(created_by)만. 관리자=null→회사 전체.
+  //   0709 자동마케팅 선례 동일. created_by는 createDm에서 항상 기록되는 기존 컬럼(신규 아님).
+  const ownerSql = ownerUserId ? ' AND created_by = $2' : '';
+  const params: any[] = ownerUserId ? [companyId, ownerUserId] : [companyId];
   let result;
   try {
     result = await query(
@@ -306,9 +310,9 @@ export async function getDmList(companyId: string) {
               COALESCE(jsonb_array_length(pages), 0) as page_count,
               EXISTS (SELECT 1 FROM dm_recipient_tokens t WHERE t.dm_id = dm_pages.id) AS has_send_history,
               created_at, updated_at
-       FROM dm_pages WHERE company_id = $1
+       FROM dm_pages WHERE company_id = $1${ownerSql}
        ORDER BY updated_at DESC`,
-      [companyId]
+      params
     );
   } catch (e: any) {
     const msg = e?.message || '';
@@ -319,9 +323,9 @@ export async function getDmList(companyId: string) {
               COALESCE(jsonb_array_length(pages), 0) as page_count,
               false AS has_send_history,
               created_at, updated_at
-       FROM dm_pages WHERE company_id = $1
+       FROM dm_pages WHERE company_id = $1${ownerSql}
        ORDER BY updated_at DESC`,
-      [companyId]
+      params
     );
   }
   // sections/brand_kit 원본은 요약으로 압축해 응답에서 제거(목록 payload 경량)

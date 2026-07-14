@@ -155,7 +155,7 @@ export type DmBuilderState = {
   updateSectionProps: (id: string, patch: Partial<SectionProps>) => void;
   setSectionVisible: (id: string, visible: boolean) => void;
   setSectionVariant: (id: string, variant: string) => void;
-  setSectionStyle: (id: string, patch: { align?: 'left' | 'center' | 'right'; accent_color?: string; treatment?: string; title_size?: number; text_size?: number; background?: Section['background']; divider_shape?: Section['divider_shape']; pull_up?: boolean }) => void;
+  setSectionStyle: (id: string, patch: { align?: 'left' | 'center' | 'right'; accent_color?: string; accent_color_2?: string; treatment?: string; title_size?: number; text_size?: number; background?: Section['background']; divider_shape?: Section['divider_shape']; pull_up?: boolean }) => void;
   setPublished: (v: boolean) => void;
   toggleSectionLock: (id: string) => void;
 

@@ -114,6 +114,8 @@ export default function SectionRenderer({
       ['--dm-accent-surface-fg']: '#fff',
       ['--dm-accent-surface-sub']: 'rgba(255,255,255,0.85)',
     } : {}),
+    // ★ 2026-07-14 배경면=그라데이션 두 번째 색 사용자 지정(임은지). 미지정=변수 부재 → CSS가 자동 도출 폴백(회귀 0). SSR 미러.
+    ...((section as any).accent_color_2 ? { ['--dm-grad-to']: (section as any).accent_color_2 } : {}),
     ...(titleN ? {
       ['--dm-fs-hero']: `${titleN}px`, ['--dm-fs-h1']: `${titleN}px`,
       ['--dm-fs-h2']: `${titleN}px`, ['--dm-fs-h3']: `${titleN}px`,

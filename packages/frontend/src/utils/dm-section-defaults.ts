@@ -198,7 +198,8 @@ export type FooterProps = {
 // ────────────── D216+ 신규 16 Props ──────────────
 
 export type ProductCarouselItem = { id?: string; image_url: string; name: string; price: number; discount_price?: number; discount_rate?: number; link_url?: string; };
-export type ProductCarouselProps = { title?: string; products: ProductCarouselItem[]; show_indicator?: boolean; auto_slide?: boolean; slide_interval_ms?: number; };
+// image_fit: 채우기(cover=꽉 차게·기존 기본) / 맞추기(contain=전체 보임·잘림 X). image_focus: cover일 때 보일 초점(정렬). 미지정=cover/center(회귀 0).
+export type ProductCarouselProps = { title?: string; products: ProductCarouselItem[]; show_indicator?: boolean; auto_slide?: boolean; slide_interval_ms?: number; image_fit?: 'cover' | 'contain'; image_focus?: 'top' | 'center' | 'bottom'; };
 
 export type GalleryImage = { url: string; caption?: string; link_url?: string; };
 export type GalleryProps = { title?: string; images: GalleryImage[]; layout: 'grid_2x2' | 'grid_3x3' | 'list_1xN' | 'masonry'; enable_zoom?: boolean; enable_fullscreen?: boolean; };
@@ -295,6 +296,8 @@ export type Section = {
   align?: 'left' | 'center' | 'right';
   /** 섹션 버튼/액센트 색 override — 미설정 시 브랜드 색 */
   accent_color?: string;
+  /** ★ 2026-07-14 배경면=그라데이션 두 번째 색 직접 지정(임은지). 미설정=--dm-primary 기반 자동 도출(회귀 0) */
+  accent_color_2?: string;
   /** ★ 2026-07-02(2) 섹션 공통 텍스트 크기(px) — 제목급/본문급 토큰 일괄 override. 미설정=기본 */
   title_size?: number;
   text_size?: number;

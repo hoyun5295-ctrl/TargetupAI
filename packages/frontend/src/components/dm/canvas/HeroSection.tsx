@@ -55,7 +55,7 @@ export default function HeroSection({ props, onEdit, treatment }: { props: HeroP
         placeholder="큰 제목을 입력하세요"
         onChange={(v) => onEdit?.({ headline: v } as Partial<HeroProps>)}
         disabled={!editable}
-        multiline={false}
+        multiline
         maxLength={80}
       />
     ) : null;
@@ -173,7 +173,7 @@ export default function HeroSection({ props, onEdit, treatment }: { props: HeroP
             placeholder="큰 제목을 입력하세요"
             onChange={(v) => onEdit?.({ headline: v } as Partial<HeroProps>)}
             disabled={!editable}
-            multiline={false}
+            multiline
             maxLength={80}
           />
         )}

@@ -85,15 +85,11 @@ export default function InlineEditable({
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Enter') {
-      if (multiline && e.shiftKey) return; // Shift+Enter → 줄바꿈 허용
-      if (!multiline) {
-        e.preventDefault();
-        ref.current?.blur();
-      } else if (!e.shiftKey) {
-        // multiline인데 Shift 없이 Enter 누르면 저장
-        e.preventDefault();
-        ref.current?.blur();
-      }
+      // ★ 2026-07-14 줄바꿈(남지현·임은지 신고): 멀티라인 = Enter로 줄바꿈(네이티브 삽입), 저장은 blur(클릭 아웃)에서.
+      //   싱글라인 = Enter로 저장(blur). 기존 "멀티라인도 Enter=저장(Shift+Enter만 줄바꿈)"이 헤드라인 줄바꿈을 막던 원인.
+      if (multiline) return;
+      e.preventDefault();
+      ref.current?.blur();
     } else if (e.key === 'Escape') {
       e.preventDefault();
       revert();

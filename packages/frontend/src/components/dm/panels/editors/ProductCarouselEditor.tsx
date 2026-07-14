@@ -1,5 +1,5 @@
 import type { ProductCarouselProps, ProductCarouselItem } from '../../../../utils/dm-section-defaults';
-import { Field, TextInput, Toggle, ImageUploader } from '../FormControls';
+import { Field, TextInput, Toggle, ImageUploader, Select } from '../FormControls';
 import { RepeatableList } from '../RepeatableList';
 import type { EditorProps } from '../SectionPropsEditor';
 import { useState } from 'react';
@@ -74,6 +74,23 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
   return (
     <>
       <Field label="제목 (선택)"><TextInput value={props.title} onChange={(v) => onUpdate({ title: v })} placeholder="이번 주 추천 상품" /></Field>
+      {/* ★ 2026-07-14 상품 이미지 맞춤(남지현 신고) — 첨부 이미지가 잘려 보이는 문제. 맞추기=전체 보이기(잘림 X). */}
+      <Field label="이미지 맞춤" hint="맞추기 = 잘리지 않고 전체 보이기">
+        <Select
+          value={props.image_fit || 'cover'}
+          onChange={(v) => onUpdate({ image_fit: v })}
+          options={[{ value: 'cover', label: '채우기 (꽉 차게)' }, { value: 'contain', label: '맞추기 (전체 보이기)' }]}
+        />
+      </Field>
+      {(props.image_fit || 'cover') === 'cover' && (
+        <Field label="이미지 정렬" hint="채우기일 때 보일 위치">
+          <Select
+            value={props.image_focus || 'center'}
+            onChange={(v) => onUpdate({ image_focus: v })}
+            options={[{ value: 'top', label: '위' }, { value: 'center', label: '가운데' }, { value: 'bottom', label: '아래' }]}
+          />
+        </Field>
+      )}
       <Field label="상품 목록">
         {/* ★ 2026-07-14 — 명시 단색(emerald-600+white). 옛 text-emerald-100+워시 배경은 흰 패널(DM 우측/아이템 카드)
             위에서 글자가 사라짐(Harold 신고 — 이메일·DM 공용 컴포넌트라 두 채널 동시 결함). 테마 경계 안전색 의무. */}

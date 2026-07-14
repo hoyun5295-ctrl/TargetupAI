@@ -190,6 +190,27 @@ export default function DmRightPanel() {
                     )}
                   </div>
                 </LabelRow>
+                {/* ★ 2026-07-14 배경면=그라데이션 두 번째 색 직접 지정(임은지) — 첫 색은 위 "버튼 색", 끝 색을 여기서. 미지정=자동 도출 */}
+                {selected.background === 'gradient' && (
+                  <LabelRow label="그라데이션 끝 색">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input
+                        type="color"
+                        value={selected.accent_color_2 || '#a855f7'}
+                        onChange={(e) => setSectionStyle(selected.id, { accent_color_2: e.target.value })}
+                        style={{ width: 30, height: 24, padding: 0, border: '1px solid var(--dm-neutral-200)', borderRadius: 4, cursor: 'pointer', background: 'transparent' }}
+                      />
+                      {selected.accent_color_2 && (
+                        <button
+                          onClick={() => setSectionStyle(selected.id, { accent_color_2: undefined })}
+                          style={{ fontSize: 10, color: 'var(--dm-neutral-500)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                        >
+                          자동
+                        </button>
+                      )}
+                    </div>
+                  </LabelRow>
+                )}
                 {/* ★ 2026-07-02(2) 섹션 공통 텍스트 크기 — 전 섹션 제목급/본문급 일괄, 발행물 동일 적용 */}
                 <LabelRow label="제목 크기">
                   <select

@@ -65,6 +65,13 @@ const PLACEHOLDER_STYLE: React.CSSProperties = {
 
 export function ProductCarouselSection({ props, treatment }: { props: ProductCarouselProps; treatment?: string }) {
   const products = props?.products || [];
+  // ★ 2026-07-14 상품 이미지 맞춤(남지현 신고) — 채우기(cover 기본)=잘릴 수 있음 / 맞추기(contain)=전체 보임(잘림 X).
+  //   정렬(image_focus)은 cover일 때 어느 부분을 보일지(object-position). 미지정=cover/center = 기존 렌더 동일(회귀 0). 발행 SSR(productImgFit)과 미러.
+  const imgFit: React.CSSProperties = props?.image_fit === 'contain'
+    ? { objectFit: 'contain', background: 'var(--dm-neutral-50)' }
+    : (props?.image_focus === 'top' || props?.image_focus === 'bottom')
+      ? { objectFit: 'cover', objectPosition: `center ${props.image_focus}` }
+      : { objectFit: 'cover' };
   // ★ 2026-07-13 디자인 3.0 — 구도 미러 (SSR renderProductFocus/renderProductList와 구조 동일)
   const priceRow = (p: ProductCarouselProps['products'][number], big: boolean) => {
     const price = Number(p.price || 0);
@@ -89,7 +96,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
         {props.title && <div style={TITLE_STYLE}>{props.title}</div>}
         <div className="dm-pc-items" style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
           <div style={{ width: '100%', background: 'var(--dm-bg)', border: '1px solid var(--dm-neutral-200)', borderRadius: 18, overflow: 'hidden', boxShadow: 'var(--dm-shadow-md)' }}>
-            {first.image_url ? <img src={dmImageUrl(first.image_url)} alt={first.name} style={{ width: '100%', height: 210, objectFit: 'cover', display: 'block' }} /> : <div style={{ width: '100%', height: 210, background: 'var(--dm-neutral-100)' }} />}
+            {first.image_url ? <img src={dmImageUrl(first.image_url)} alt={first.name} style={{ width: '100%', height: 210, display: 'block', ...imgFit }} /> : <div style={{ width: '100%', height: 210, background: 'var(--dm-neutral-100)' }} />}
             <div style={{ padding: '14px 16px 16px' }}>
               <div style={{ fontSize: 'var(--dm-fs-h3)', fontWeight: 700, color: 'var(--dm-neutral-900)', lineHeight: 1.4 }}>{first.name}</div>
               <div style={{ marginTop: 6 }}>{priceRow(first, true)}</div>
@@ -97,7 +104,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
           </div>
           {rest.map((p, i) => (
             <div key={p.id || i} style={{ width: 'calc(50% - 6px)', background: 'var(--dm-bg)', border: '1px solid var(--dm-neutral-200)', borderRadius: 14, overflow: 'hidden', boxShadow: 'var(--dm-shadow-sm)', display: 'flex', flexDirection: 'column' }}>
-              {p.image_url ? <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: '100%', height: 120, objectFit: 'cover', display: 'block', flexShrink: 0 }} /> : <div style={{ width: '100%', height: 120, background: 'var(--dm-neutral-100)', flexShrink: 0 }} />}
+              {p.image_url ? <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: '100%', height: 120, display: 'block', flexShrink: 0, ...imgFit }} /> : <div style={{ width: '100%', height: 120, background: 'var(--dm-neutral-100)', flexShrink: 0 }} />}
               <div style={{ padding: '8px 10px 10px', flex: 1, display: 'flex', flexDirection: 'column' }}>
                 <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4 }}>{p.name}</div>
                 <div style={{ marginTop: 'auto', paddingTop: 4 }}>{priceRow(p, false)}</div>
@@ -115,7 +122,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
         <div className="dm-pc-items" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {products.map((p, i) => (
             <div key={p.id || i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', background: 'var(--dm-bg)', border: '1px solid var(--dm-neutral-200)', borderRadius: 14 }}>
-              {p.image_url ? <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: 76, height: 76, objectFit: 'cover', borderRadius: 12, flexShrink: 0 }} /> : <div style={{ width: 76, height: 76, background: 'var(--dm-neutral-100)', borderRadius: 12, flexShrink: 0 }} />}
+              {p.image_url ? <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: 76, height: 76, borderRadius: 12, flexShrink: 0, ...imgFit }} /> : <div style={{ width: 76, height: 76, background: 'var(--dm-neutral-100)', borderRadius: 12, flexShrink: 0 }} />}
               <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                 <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4 }}>{p.name}</div>
                 <div style={{ marginTop: 4 }}>{priceRow(p, false)}</div>
@@ -148,7 +155,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
               //   같은 행 카드들의 가격 위치 일정(flex row 기본 stretch = 행 높이 동일). 발행 SSR 미러.
               <div key={p.id || i} style={{ width: 'calc(50% - 8px)', maxWidth: 220, boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
                 {p.image_url ? (
-                  <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} />
+                  <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: '100%', height: 140, borderRadius: 8, flexShrink: 0, ...imgFit }} />
                 ) : (
                   <div style={{ width: '100%', height: 140, background: 'var(--dm-neutral-100)', borderRadius: 8, flexShrink: 0 }} />
                 )}

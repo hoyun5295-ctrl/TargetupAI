@@ -24,7 +24,7 @@ export default function TextCardSection({ props, onEdit, treatment }: { props: T
     <InlineEditable style={style} value={props.tag || ''} placeholder="태그" onChange={(v) => onEdit?.({ tag: v } as Partial<TextCardProps>)} disabled={!editable} maxLength={20} />
   ) : null;
   const headNode = (style: CSSProperties, className?: string) => (props.headline || editable) ? (
-    <InlineEditable className={className} style={{ ...style, ...(props.headline_size ? { fontSize: props.headline_size } : {}), ...(props.headline_color ? { color: props.headline_color } : {}) }} value={props.headline || ''} placeholder="제목" onChange={(v) => onEdit?.({ headline: v } as Partial<TextCardProps>)} disabled={!editable} maxLength={60} />
+    <InlineEditable className={className} style={{ ...style, ...(props.headline_size ? { fontSize: props.headline_size } : {}), ...(props.headline_color ? { color: props.headline_color } : {}) }} value={props.headline || ''} placeholder="제목" onChange={(v) => onEdit?.({ headline: v } as Partial<TextCardProps>)} disabled={!editable} multiline maxLength={60} />
   ) : null;
   const bodyNode = (style: CSSProperties, className?: string) => (props.body || editable) ? (
     <InlineEditable className={className} style={{ ...style, whiteSpace: 'pre-wrap', ...(props.body_size ? { fontSize: props.body_size } : {}), ...(props.body_color ? { color: props.body_color } : {}) }} value={props.body || ''} placeholder="본문 내용을 입력하세요" onChange={(v) => onEdit?.({ body: v } as Partial<TextCardProps>)} disabled={!editable} multiline maxLength={500} />
@@ -111,6 +111,7 @@ export default function TextCardSection({ props, onEdit, treatment }: { props: T
               placeholder="제목"
               onChange={(v) => onEdit?.({ headline: v } as Partial<TextCardProps>)}
               disabled={!editable}
+              multiline
               maxLength={60}
             />
           )}

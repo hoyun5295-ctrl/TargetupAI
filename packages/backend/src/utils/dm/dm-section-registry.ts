@@ -452,6 +452,7 @@ export type Section = {
   variable_fallbacks?: VariableBinding[];
   align?: 'left' | 'center' | 'right';  // 섹션 공통 정렬(전 섹션 일괄, 미설정=가운데)
   accent_color?: string;                // 섹션 버튼/액센트 색 override(미설정=브랜드 색)
+  accent_color_2?: string;              // ★ 2026-07-14 배경면=그라데이션 두 번째 색(임은지). 미설정=자동 도출
   // ★ 2026-07-02(2) 섹션 공통 텍스트 크기(px, 10~80) — 제목급(hero/h1~h3)·본문급(body/small) 토큰 일괄 override. 미설정=기본
   title_size?: number;
   text_size?: number;

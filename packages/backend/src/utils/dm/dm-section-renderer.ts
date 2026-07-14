@@ -198,8 +198,9 @@ function renderHeroClassic(props: HeroProps): string {
 
 // 타이포: 이미지 없이 대형 헤드라인 + 규칙선 + 여백(아트디렉션 타입스케일/밀도 변수 인라인 참조).
 function renderHeroTypographic(props: HeroProps): string {
-  const head = escapeHtml(props.headline || '');
-  const sub = escapeHtml(props.sub_copy || '');
+  // ★ 2026-07-14 줄바꿈(임은지·남지현 신고) — 헤드라인/서브카피 입력 개행을 발행물에 반영(hero classic과 동일 규칙). alt는 위에서 순수 이스케이프 사용.
+  const head = escapeHtml(props.headline || '').replace(/\n/g, '<br>');
+  const sub = escapeHtml(props.sub_copy || '').replace(/\n/g, '<br>');
   return `<div class="dm-section dm-hero" data-section-type="hero" style="background:var(--dm-bg);padding:calc(var(--dm-sp-12) * var(--dm-section-pad-scale)) var(--dm-sp-5);display:flex;flex-direction:column;gap:var(--dm-sp-4)">
     ${head ? `<div style="font-size:var(--dm-fs-hero);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.12;font-family:var(--dm-font-display);color:var(--dm-neutral-900)${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${head}</div>` : ''}
     <div style="height:2px;width:48px;background:var(--dm-primary)"></div>
@@ -213,10 +214,11 @@ function renderHeroFullBleed(props: HeroProps): string {
   const heightPx = { sm: '240px', md: '380px', lg: '520px', full: '100vh' }[props.height || 'md'];
   const moodBg = (props as any).mood_background as string | undefined;
   const baseBg = img ? 'var(--dm-neutral-900)' : (moodBg || 'var(--dm-neutral-900)');
-  const head = escapeHtml(props.headline || '');
-  const sub = escapeHtml(props.sub_copy || '');
+  // ★ 2026-07-14 줄바꿈(임은지·남지현 신고) — 헤드라인/서브카피 입력 개행을 발행물에 반영(hero classic과 동일 규칙). alt는 위에서 순수 이스케이프 사용.
+  const head = escapeHtml(props.headline || '').replace(/\n/g, '<br>');
+  const sub = escapeHtml(props.sub_copy || '').replace(/\n/g, '<br>');
   return `<div class="dm-section dm-hero" data-section-type="hero" style="position:relative;min-height:${heightPx};overflow:hidden;background:${baseBg}">
-    ${img ? `<img class="dm-hero-media" src="${escapeHtml(img)}" alt="${head}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;${heroFocusCss(props)}">` : ''}
+    ${img ? `<img class="dm-hero-media" src="${escapeHtml(img)}" alt="${escapeHtml(props.headline || '')}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;${heroFocusCss(props)}">` : ''}
     ${img ? `<div style="position:absolute;inset:0;background:${props.overlay ? heroOverlayCss(props) : 'rgba(0,0,0,0.32)'}"></div>` : ''}
     <div style="position:relative;min-height:${heightPx};display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:var(--dm-sp-6) var(--dm-sp-5);color:#fff">
       ${head ? `<div style="font-size:var(--dm-fs-hero);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.1;font-family:var(--dm-font-display)${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${emphasizeHead(head, props.headline_emphasis)}</div>` : ''}
@@ -228,25 +230,27 @@ function renderHeroFullBleed(props: HeroProps): string {
 // 분할: 상단 컬러 타입 블록 + 하단 이미지.
 function renderHeroSplit(props: HeroProps): string {
   const img = props.image_url ? publicImageUrl(props.image_url) : '';
-  const head = escapeHtml(props.headline || '');
-  const sub = escapeHtml(props.sub_copy || '');
+  // ★ 2026-07-14 줄바꿈(임은지·남지현 신고) — 헤드라인/서브카피 입력 개행을 발행물에 반영(hero classic과 동일 규칙). alt는 위에서 순수 이스케이프 사용.
+  const head = escapeHtml(props.headline || '').replace(/\n/g, '<br>');
+  const sub = escapeHtml(props.sub_copy || '').replace(/\n/g, '<br>');
   return `<div class="dm-section dm-hero" data-section-type="hero" style="background:var(--dm-bg)">
     <div style="background:var(--dm-primary);color:#fff;padding:calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-5)">
       ${head ? `<div style="font-size:var(--dm-fs-hero);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.12;font-family:var(--dm-font-display)${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${head}</div>` : ''}
       ${sub ? `<div style="margin-top:var(--dm-sp-2);font-size:var(--dm-fs-body);opacity:0.9${fsDecl(props.sub_copy_size)}${props.sub_copy_color ? `;color:${escapeHtml(props.sub_copy_color)}` : ''}">${sub}</div>` : ''}
     </div>
-    ${img ? `<img src="${escapeHtml(img)}" alt="${head}" style="width:100%;display:block;object-fit:cover">` : `<div class="dm-mood-slot" style="height:200px;display:flex;align-items:center;justify-content:center">이미지를 추가해주세요</div>`}
+    ${img ? `<img src="${escapeHtml(img)}" alt="${escapeHtml(props.headline || '')}" style="width:100%;display:block;object-fit:cover">` : `<div class="dm-mood-slot" style="height:200px;display:flex;align-items:center;justify-content:center">이미지를 추가해주세요</div>`}
   </div>`;
 }
 
 // 에디토리얼 오버랩: 이미지 위에 헤드라인 카드가 겹침.
 function renderHeroOverlap(props: HeroProps): string {
   const img = props.image_url ? publicImageUrl(props.image_url) : '';
-  const head = escapeHtml(props.headline || '');
-  const sub = escapeHtml(props.sub_copy || '');
+  // ★ 2026-07-14 줄바꿈(임은지·남지현 신고) — 헤드라인/서브카피 입력 개행을 발행물에 반영(hero classic과 동일 규칙). alt는 위에서 순수 이스케이프 사용.
+  const head = escapeHtml(props.headline || '').replace(/\n/g, '<br>');
+  const sub = escapeHtml(props.sub_copy || '').replace(/\n/g, '<br>');
   // ★ 2026-07-10 임은지 신고: "버튼 색" 지정 시 오버랩 카드 면에 반영 — 강조 면 변수 폴백(미지정=기존 흰 카드, 캔버스 미러)
   return `<div class="dm-section dm-hero" data-section-type="hero" style="background:var(--dm-bg);padding-bottom:var(--dm-sp-5)">
-    ${img ? `<img src="${escapeHtml(img)}" alt="${head}" style="width:100%;display:block;height:280px;object-fit:cover">` : `<div class="dm-mood-slot" style="height:240px"></div>`}
+    ${img ? `<img src="${escapeHtml(img)}" alt="${escapeHtml(props.headline || '')}" style="width:100%;display:block;height:280px;object-fit:cover">` : `<div class="dm-mood-slot" style="height:240px"></div>`}
     <div style="margin:-32px var(--dm-sp-5) 0;position:relative;background:var(--dm-accent-surface, var(--dm-bg));border:1px solid var(--dm-accent-surface, var(--dm-neutral-200));border-radius:var(--dm-radius-xl);box-shadow:var(--dm-shadow-lg);padding:var(--dm-sp-6)">
       ${head ? `<div style="font-size:var(--dm-fs-h1);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.2;font-family:var(--dm-font-display);color:var(--dm-accent-surface-fg, var(--dm-neutral-900))${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${head}</div>` : ''}
       ${sub ? `<div style="margin-top:var(--dm-sp-2);font-size:var(--dm-fs-body);color:var(--dm-accent-surface-sub, var(--dm-neutral-600))${fsDecl(props.sub_copy_size)}${props.sub_copy_color ? `;color:${escapeHtml(props.sub_copy_color)}` : ''}">${sub}</div>` : ''}
@@ -392,7 +396,7 @@ function renderTextCardClassic(props: TextCardProps): string {
 
   const textBlock = `<div style="flex:1;padding:var(--dm-sp-4) var(--dm-sp-5);text-align:${align}">
     ${props.tag ? `<div style="display:inline-block;background:var(--dm-primary-light);color:var(--dm-primary);padding:var(--dm-sp-1) var(--dm-sp-2);border-radius:var(--dm-radius-sm);font-size:var(--dm-fs-tiny);font-weight:700;margin-bottom:var(--dm-sp-2)">${escapeHtml(props.tag)}</div>` : ''}
-    ${props.headline ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-2)${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${emphasizeHead(escapeHtml(props.headline), props.headline_emphasis)}</div>` : ''}
+    ${props.headline ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-2)${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${emphasizeHead(escapeHtml(props.headline).replace(/\n/g, '<br>'), props.headline_emphasis)}</div>` : ''}
     ${props.body ? `<div class="dm-text-body" style="color:var(--dm-neutral-700);white-space:pre-wrap${fsDecl(props.body_size)}${props.body_color ? `;color:${escapeHtml(props.body_color)}` : ''}">${escapeHtml(props.body)}</div>` : ''}
   </div>`;
 
@@ -451,7 +455,7 @@ function renderCtaClassic(props: CtaProps): string {
 // 리드: 대형 헤드라인 + 규칙선 + 본문(에디토리얼, 이미지 비중 낮춤).
 function renderTextCardLead(props: TextCardProps): string {
   const tag = props.tag ? escapeHtml(props.tag) : '';
-  const head = props.headline ? escapeHtml(props.headline) : '';
+  const head = props.headline ? escapeHtml(props.headline).replace(/\n/g, '<br>') : '';
   const body = props.body ? escapeHtml(props.body) : '';
   const align = props.align || 'left';
   return `<div class="dm-section dm-text-card" data-section-type="text_card" style="background:var(--dm-bg);padding:calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-5);text-align:${align}">
@@ -465,13 +469,13 @@ function renderTextCardLead(props: TextCardProps): string {
 // 프레임: 좌측 악센트 + 테두리 카드.
 function renderTextCardFramed(props: TextCardProps): string {
   const tag = props.tag ? escapeHtml(props.tag) : '';
-  const head = props.headline ? escapeHtml(props.headline) : '';
+  const head = props.headline ? escapeHtml(props.headline).replace(/\n/g, '<br>') : '';
   const body = props.body ? escapeHtml(props.body) : '';
   const img = props.image_url ? publicImageUrl(props.image_url) : '';
   const align = props.align || 'left';
   return `<div class="dm-section dm-text-card" data-section-type="text_card" style="background:var(--dm-bg);padding:var(--dm-sp-5)">
     <div style="border:1px solid var(--dm-neutral-200);border-left:4px solid var(--dm-primary);border-radius:var(--dm-radius-lg);overflow:hidden;text-align:${align}">
-      ${img ? `<img src="${escapeHtml(img)}" alt="${head}" style="width:100%;display:block">` : ''}
+      ${img ? `<img src="${escapeHtml(img)}" alt="${escapeHtml(props.headline || '')}" style="width:100%;display:block">` : ''}
       <div style="padding:var(--dm-sp-5)">
         ${tag ? `<div style="display:inline-block;background:var(--dm-primary-light);color:var(--dm-primary);padding:var(--dm-sp-1) var(--dm-sp-2);border-radius:var(--dm-radius-sm);font-size:var(--dm-fs-tiny);font-weight:700;margin-bottom:var(--dm-sp-2)">${tag}</div>` : ''}
         ${head ? `<div style="font-size:var(--dm-fs-h2);font-weight:700;color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-2);font-family:var(--dm-font-display)${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${emphasizeHead(head, props.headline_emphasis)}</div>` : ''}
@@ -692,6 +696,7 @@ function renderProductCarousel(p: any, treatment?: string): string {
   if (treatment === 'list') return renderProductList(p, products);
   if (treatment === 'focus') return renderProductFocus(p, products);
   // ★ 2026-07-02(2) 할인 표시(할인율+할인가+정가 취소선) + 상품 링크(link_url) 카드 전체 연결
+  const fitCss = productImgFitCss(p);
   const items = products.map((it: any) => {
     const price = Number(it.price || 0);
     const discount = Number(it.discount_price || 0);
@@ -708,7 +713,7 @@ function renderProductCarousel(p: any, treatment?: string): string {
       : `<div style="font-size:var(--dm-fs-body);font-weight:800;margin-top:auto;padding-top:4px;color:var(--dm-neutral-900);font-variant-numeric:tabular-nums">${finalPrice.toLocaleString('ko-KR')}원</div>`;
     // ★ 2026-07-02 v2 — 라운드 카드 + 가격 타이포 위계(할인율 강조·최종가 굵게) 격상
     const card = `
-      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:150px;object-fit:cover;display:block;flex-shrink:0"/>` : `<div style="width:100%;height:150px;background:var(--dm-neutral-100);flex-shrink:0"></div>`}
+      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:150px;${fitCss};display:block;flex-shrink:0"/>` : `<div style="width:100%;height:150px;background:var(--dm-neutral-100);flex-shrink:0"></div>`}
       <div style="padding:10px 12px 12px;flex:1;display:flex;flex-direction:column">
         <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4">${escapeHtml(it.name || '')}</div>
         ${priceHtml}
@@ -742,21 +747,31 @@ function productPriceHtml(it: any, big: boolean): string {
     : `<div style="font-size:${priceFs};font-weight:800;color:var(--dm-neutral-900);font-variant-numeric:tabular-nums">${finalPrice.toLocaleString('ko-KR')}원</div>`;
 }
 
+// ★ 2026-07-14 상품 이미지 맞춤(남지현 신고) — 채우기(cover 기본·잘릴 수 있음) / 맞추기(contain·전체 보임).
+//   정렬(image_focus)은 cover일 때 초점(object-position). 미지정=cover/center = 기존 출력 동일(회귀 0). 캔버스(NewSections imgFit) 미러.
+function productImgFitCss(p: any): string {
+  if (p?.image_fit === 'contain') return 'object-fit:contain;background:var(--dm-neutral-50)';
+  // 기본(cover/center)은 기존과 동일 바이트(object-position 생략 — center center는 CSS 기본). 위/아래만 object-position 부착.
+  const focus = p?.image_focus === 'top' ? 'top' : p?.image_focus === 'bottom' ? 'bottom' : null;
+  return focus ? `object-fit:cover;object-position:center ${focus}` : 'object-fit:cover';
+}
+
 // 포커스: 첫 상품 풀폭 대형 카드 + 나머지 2열 (히어로급 대표 상품 강조)
 function renderProductFocus(p: any, products: any[]): string {
   const [first, ...rest] = products;
+  const fitCss = productImgFitCss(p);
   const wrapLink = (it: any, inner: string, style: string) => {
     const href = it.link_url ? safeUrl(it.link_url) : '#';
     return href !== '#' ? `<a href="${href}" target="_blank" rel="noopener" style="${style}">${inner}</a>` : `<div style="${style}">${inner}</div>`;
   };
   const bigCard = wrapLink(first, `
-    ${first.image_url ? `<img src="${escapeHtml(publicImageUrl(first.image_url))}" loading="lazy" alt="${escapeHtml(first.name || '')}" style="width:100%;height:210px;object-fit:cover;display:block"/>` : `<div style="width:100%;height:210px;background:var(--dm-neutral-100)"></div>`}
+    ${first.image_url ? `<img src="${escapeHtml(publicImageUrl(first.image_url))}" loading="lazy" alt="${escapeHtml(first.name || '')}" style="width:100%;height:210px;${fitCss};display:block"/>` : `<div style="width:100%;height:210px;background:var(--dm-neutral-100)"></div>`}
     <div style="padding:14px 16px 16px">
       <div style="font-size:var(--dm-fs-h3);font-weight:700;color:var(--dm-neutral-900);line-height:1.4">${escapeHtml(first.name || '')}</div>
       <div style="margin-top:6px">${productPriceHtml(first, true)}</div>
     </div>`, 'display:block;text-decoration:none;color:inherit;background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:18px;overflow:hidden;box-shadow:var(--dm-shadow-md);width:100%');
   const restItems = rest.map((it: any) => wrapLink(it, `
-      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:120px;object-fit:cover;display:block;flex-shrink:0"/>` : `<div style="width:100%;height:120px;background:var(--dm-neutral-100);flex-shrink:0"></div>`}
+      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:120px;${fitCss};display:block;flex-shrink:0"/>` : `<div style="width:100%;height:120px;background:var(--dm-neutral-100);flex-shrink:0"></div>`}
       <div style="padding:8px 10px 10px;flex:1;display:flex;flex-direction:column">
         <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4">${escapeHtml(it.name || '')}</div>
         <div style="margin-top:auto;padding-top:4px">${productPriceHtml(it, false)}</div>
@@ -769,9 +784,10 @@ function renderProductFocus(p: any, products: any[]): string {
 
 // 리스트: 좌 썸네일 + 우 정보의 컴팩트 행 (상품 수 많은 DM용)
 function renderProductList(p: any, products: any[]): string {
+  const fitCss = productImgFitCss(p);
   const rows = products.map((it: any) => {
     const inner = `
-      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:76px;height:76px;object-fit:cover;border-radius:12px;flex-shrink:0"/>` : `<div style="width:76px;height:76px;background:var(--dm-neutral-100);border-radius:12px;flex-shrink:0"></div>`}
+      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:76px;height:76px;${fitCss};border-radius:12px;flex-shrink:0"/>` : `<div style="width:76px;height:76px;background:var(--dm-neutral-100);border-radius:12px;flex-shrink:0"></div>`}
       <div style="flex:1;min-width:0;text-align:left">
         <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4">${escapeHtml(it.name || '')}</div>
         <div style="margin-top:4px">${productPriceHtml(it, false)}</div>
@@ -1093,7 +1109,9 @@ export function renderSection(section: Section, ctx: SectionRenderContext): stri
   const accentVars = section.accent_color
     ? `;--dm-primary:${escapeHtml(section.accent_color)};--dm-accent-surface:${escapeHtml(section.accent_color)};--dm-accent-surface-fg:#fff;--dm-accent-surface-sub:rgba(255,255,255,0.85)`
     : '';
-  const wrapStyle = `text-align:${al};--dm-section-justify:${just}${accentVars}${sizeVars}`;
+  // ★ 2026-07-14 배경면=그라데이션 두 번째 색(임은지). 미지정=변수 부재 → CSS 자동 도출 폴백(회귀 0). 캔버스 SectionRenderer 미러.
+  const gradVars = section.accent_color_2 ? `;--dm-grad-to:${escapeHtml(section.accent_color_2)}` : '';
+  const wrapStyle = `text-align:${al};--dm-section-justify:${just}${accentVars}${gradVars}${sizeVars}`;
   // ★ 2026-07-13 디자인 3.0 — 배경면(dm-bgx-*)/연결부 SVG/겹침(pull_up)/스티키 CTA. 미설정 = 기존 출력 그대로.
   //   화이트리스트 검증(클래스 주입 차단). 캔버스 SectionRenderer 동일 로직 미러.
   const BGX_KEYS = ['soft', 'tint', 'dark', 'gradient', 'glass'];

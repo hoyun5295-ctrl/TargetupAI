@@ -346,7 +346,9 @@ dmRouter.get('/', async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
-    const list = await getDmList(companyId);
+    // ★ 2026-07-14 사용자별 노출(서수란 신고): 관리자=회사 전체, 일반 사용자=본인 생성분만.
+    const isDmAdmin = req.user?.userType === 'company_admin' || req.user?.userType === 'super_admin';
+    const list = await getDmList(companyId, isDmAdmin ? null : req.user?.userId);
     return res.json(list);
   } catch (err: any) {
     console.error('[DM목록] 오류:', err.message);
@@ -458,6 +460,17 @@ dmRouter.patch('/short-links/:linkId', async (req: any, res: any) => {
   }
 });
 
+// ★ 2026-07-14 사용자별 소유 가드(서수란 신고) — 일반 사용자는 본인 생성 DM만 조회·수정·삭제·복제.
+//   관리자(company_admin/super_admin)=회사 전체. 0709 자동마케팅 선례 동일. created_by=createDm에서 항상 기록되는 기존 컬럼.
+async function canAccessDm(dmId: string, companyId: string, userType?: string, userId?: string): Promise<boolean> {
+  if (userType === 'company_admin' || userType === 'super_admin') {
+    const r = await query(`SELECT 1 FROM dm_pages WHERE id = $1 AND company_id = $2`, [dmId, companyId]);
+    return r.rows.length > 0;
+  }
+  const r = await query(`SELECT 1 FROM dm_pages WHERE id = $1 AND company_id = $2 AND created_by = $3`, [dmId, companyId, userId || '']);
+  return r.rows.length > 0;
+}
+
 // GET /api/dm/:id — 상세
 dmRouter.get('/:id', async (req: any, res: any, next: any) => {
   // ★ 2026-07-02: uuid 아닌 경로('/overview'·'/brand-kit' 등 뒤에 등록된 정적 GET)가
@@ -466,6 +479,9 @@ dmRouter.get('/:id', async (req: any, res: any, next: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    if (!(await canAccessDm(req.params.id, companyId, req.user?.userType, req.user?.userId))) {
+      return res.status(403).json({ error: '본인이 생성한 DM만 접근할 수 있습니다.' });
+    }
     const dm = await getDmDetail(req.params.id, companyId);
     if (!dm) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
     return res.json(dm);
@@ -481,6 +497,9 @@ dmRouter.put('/:id', async (req: any, res: any, next: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    if (!(await canAccessDm(req.params.id, companyId, req.user?.userType, req.user?.userId))) {
+      return res.status(403).json({ error: '본인이 생성한 DM만 수정할 수 있습니다.' });
+    }
     const updated = await updateDm(req.params.id, companyId, req.body);
     if (!updated) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
     return res.json(updated);
@@ -496,6 +515,9 @@ dmRouter.delete('/:id', async (req: any, res: any, next: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    if (!(await canAccessDm(req.params.id, companyId, req.user?.userType, req.user?.userId))) {
+      return res.status(403).json({ error: '본인이 생성한 DM만 삭제할 수 있습니다.' });
+    }
     const ok = await deleteDm(req.params.id, companyId);
     if (!ok) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
     return res.json({ success: true });
@@ -511,6 +533,9 @@ dmRouter.post('/:id/clone', async (req: any, res: any) => {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
     if (!companyId || !userId) return res.status(403).json({ error: '권한이 필요합니다.' });
+    if (!(await canAccessDm(req.params.id, companyId, req.user?.userType, userId))) {
+      return res.status(403).json({ error: '본인이 생성한 DM만 복제할 수 있습니다.' });
+    }
     const cloned = await cloneDm(req.params.id, companyId, userId);
     if (!cloned) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
     return res.json({ success: true, dm: cloned });
@@ -2061,14 +2086,23 @@ dmRouter.get('/overview', async (req: any, res: any) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
 
+    // ★ 2026-07-14 "내 DM 현황" 사용자 스코프(서수란 신고): 일반 사용자=본인 생성분만, 관리자=회사 전체.
+    const isDmAdmin = req.user?.userType === 'company_admin' || req.user?.userType === 'super_admin';
+    const ownerId = isDmAdmin ? null : req.user?.userId;
+    const ownerAnd = ownerId ? ' AND created_by = $2' : '';
+    const ownerParams: any[] = ownerId ? [companyId, ownerId] : [companyId];
+    // dm_views/dm_event_responses는 created_by가 없으므로 본인 DM id 하위질의로 스코프.
+    const ownDmSubqView = ownerId ? ` AND dm_id IN (SELECT id FROM dm_pages WHERE company_id = $1 AND created_by = $2)` : '';
+    const ownDmSubqResp = ownerId ? ` AND campaign_id IN (SELECT id FROM dm_pages WHERE company_id = $1 AND created_by = $2)` : '';
+
     // dm_pages 집계 = 핵심(목록과 같은 테이블 — 항상 존재). 실패 시에만 전체 오류.
     const totals = await query(
       `SELECT
         COUNT(*) AS total_dm,
         COUNT(*) FILTER (WHERE status = 'published') AS published_dm
       FROM dm_pages
-      WHERE company_id = $1`,
-      [companyId],
+      WHERE company_id = $1${ownerAnd}`,
+      ownerParams,
     );
 
     // dm_views / dm_event_responses = 부분 실패(테이블 미생성 등) 시 0으로 degrade.
@@ -2082,8 +2116,8 @@ dmRouter.get('/overview', async (req: any, res: any) => {
           COUNT(*) AS total_views,
           COUNT(DISTINCT phone) FILTER (WHERE phone IS NOT NULL) AS unique_viewers
         FROM dm_views
-        WHERE company_id = $1 AND viewed_at >= NOW() - INTERVAL '30 days'`,
-        [companyId],
+        WHERE company_id = $1 AND viewed_at >= NOW() - INTERVAL '30 days'${ownDmSubqView}`,
+        ownerParams,
       );
       totalViews = Number(views30d.rows[0]?.total_views || 0);
       uniqueViewers = Number(views30d.rows[0]?.unique_viewers || 0);
@@ -2094,8 +2128,8 @@ dmRouter.get('/overview', async (req: any, res: any) => {
       const responses30d = await query(
         `SELECT COUNT(*) AS total_responses
         FROM dm_event_responses
-        WHERE company_id = $1 AND occurred_at >= NOW() - INTERVAL '30 days'`,
-        [companyId],
+        WHERE company_id = $1 AND occurred_at >= NOW() - INTERVAL '30 days'${ownDmSubqResp}`,
+        ownerParams,
       );
       totalResponses = Number(responses30d.rows[0]?.total_responses || 0);
     } catch (e: any) {
@@ -2130,6 +2164,11 @@ dmRouter.get('/top-campaigns', async (req: any, res: any) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
     const limit = Math.min(Number(req.query.limit) || 10, 50);
+    // ★ 2026-07-14 사용자 스코프(서수란 신고): 관리자=회사 전체, 일반 사용자=본인 생성 DM만.
+    const isDmAdmin = req.user?.userType === 'company_admin' || req.user?.userType === 'super_admin';
+    const ownerId = isDmAdmin ? null : req.user?.userId;
+    const ownerAnd = ownerId ? ' AND dp.created_by = $3' : '';
+    const tcParams: any[] = ownerId ? [companyId, limit, ownerId] : [companyId, limit];
 
     const result = await query(
       `SELECT
@@ -2145,12 +2184,12 @@ dmRouter.get('/top-campaigns', async (req: any, res: any) => {
       FROM dm_pages dp
       LEFT JOIN dm_views dv ON dv.dm_id = dp.id AND dv.viewed_at >= NOW() - INTERVAL '30 days'
       LEFT JOIN dm_event_responses der ON der.campaign_id = dp.id AND der.occurred_at >= NOW() - INTERVAL '30 days'
-      WHERE dp.company_id = $1
+      WHERE dp.company_id = $1${ownerAnd}
       GROUP BY dp.id, dp.title, dp.approval_status
       HAVING COUNT(DISTINCT dv.id) > 0
       ORDER BY ctr DESC, view_count DESC
       LIMIT $2`,
-      [companyId, limit],
+      tcParams,
     );
 
     return res.json({ success: true, data: result.rows });

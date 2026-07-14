@@ -149,9 +149,11 @@ function renderLegacySlidesHtml(dm: any, trackApiBase: string): string {
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
 <title>${storeName} - ${title}</title>
 <style>
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Noto Sans KR',sans-serif;background:#fff;overflow-x:hidden;-webkit-text-size-adjust:100%}
+/* ★ 2026-07-14 제작 폰트≠출력 폰트(박성용 신고) — 편집기는 Pretendard로 그리는데 뷰어는 Pretendard 미로드+body에 Noto Sans KR 하드코딩이라 폴백으로 떨어져 서체가 달랐다. 위 CDN으로 Pretendard 실로딩 + 편집기(dm-builder.css --dm-font-primary)와 동일 스택으로 통일. */
+body{font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,system-ui,Roboto,"Helvetica Neue","Segoe UI","Apple SD Gothic Neo","Noto Sans KR",sans-serif;background:#fff;overflow-x:hidden;-webkit-text-size-adjust:100%}
 #dm-wrap{max-width:480px;margin:0 auto;min-height:100vh;background:#fff;position:relative}
 #dm-slider-wrap{overflow:hidden;position:relative;touch-action:pan-y}
 #dm-slider{display:flex;transition:transform 0.3s ease-out;will-change:transform}
