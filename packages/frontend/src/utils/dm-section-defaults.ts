@@ -572,17 +572,38 @@ export function isMaxCountExceeded(sections: Section[], type: SectionType): bool
   return count >= max;
 }
 
-/** 섹션 추가 메뉴 정렬 순서 (권장 배치 순) */
+/** 섹션 추가 메뉴 정렬 순서 (권장 배치 순).
+ *  ★ 2026-07-15 상품 슬라이드 등 신규 섹션 누락(임은지 신고) — D216+ 신규 16종이 SECTION_META·렌더엔 있는데
+ *  이 메뉴 배열만 갱신 누락돼 수동 추가에서 안 보였다(AI 자동생성은 사용). 신규 안정 섹션 전체를 카테고리 순 편입.
+ *  품질 미보증(SECTION_META.beta) 5종(poll·survey·click_rewards·lucky_draw·roulette)은 실험실 정책상 제외. */
 export const SECTION_ADD_MENU_ORDER: SectionType[] = [
+  // 헤더/히어로
   'header',
   'hero',
+  // 비주얼
+  'gallery',
+  'slideshow',
+  // 커머스
+  'product_carousel',
+  'tab_cards',
+  // 혜택/긴급
   'coupon',
+  'instant_coupon',
   'countdown',
+  'limited_quantity',
+  // 본문/행동
   'text_card',
   'cta',
-  'video',
-  'store_info',
   'promo_code',
+  'email_capture',
+  // 미디어
+  'video',
+  'youtube_embed',
+  'instagram_embed',
+  // 정보/마감
+  'reviews',
+  'map_store_locator',
+  'store_info',
   'sns',
   'footer',
 ];
