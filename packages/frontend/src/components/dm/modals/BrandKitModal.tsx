@@ -62,14 +62,16 @@ function FontPicker({ value, onChange, resetLabel }: { value: string; onChange: 
             key={o.id}
             type="button"
             onClick={() => onChange(o.value)}
+            aria-pressed={active}
+            className="dm-fontpick"
             style={{
-              textAlign: 'left', padding: '7px 10px', borderRadius: 8,
-              border: active ? '2px solid #4f46e5' : '1px solid #d1d5db',
-              background: active ? '#eef2ff' : '#fff', cursor: 'pointer',
+              textAlign: 'left', padding: '9px 11px', borderRadius: 10, cursor: 'pointer',
+              // 선택 타일만 인라인으로 강조(테두리색·틴트·인셋 링, 폭 변화 X=레이아웃 안 흔들림). 나머지/호버/프레스는 .dm-fontpick.
+              ...(active ? { borderColor: '#4f46e5', background: '#eef2ff', boxShadow: 'inset 0 0 0 1px #4f46e5' } : {}),
             }}
           >
-            <div style={{ fontFamily: o.css, fontSize: 15, color: '#111827', lineHeight: 1.25 }}>가나다 Aa 12</div>
-            <div style={{ fontSize: 10, color: '#6b7280', marginTop: 2 }}>{o.label}</div>
+            <div style={{ fontFamily: o.css, fontSize: 18, lineHeight: 1.3, color: '#111827' }}>가나다 Ag</div>
+            <div style={{ fontSize: 10.5, marginTop: 3, fontWeight: active ? 700 : 500, color: active ? '#4338ca' : '#6b7280' }}>{o.label}</div>
           </button>
         );
       })}

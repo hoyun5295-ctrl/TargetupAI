@@ -483,6 +483,23 @@
   pointer-events: none;
 }
 
+/* ─────────── 서체 피커 타일 (BrandKitModal FontPicker) — 2026-07-16 ───────────
+ * 촉각 피드백(호버/프레스)은 인라인 스타일로 불가 → 클래스로. 선택 타일은 인라인이 색/배경을 오버라이드.
+ * reduced-motion 존중.
+ */
+.dm-fontpick {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  transition: border-color 150ms var(--dm-motion-easing-out), background 150ms var(--dm-motion-easing-out),
+    transform 100ms var(--dm-motion-easing-out), box-shadow 150ms var(--dm-motion-easing-out);
+}
+.dm-fontpick:hover { border-color: #a5b4fc; background: #f7f8ff; }
+.dm-fontpick:active { transform: scale(0.985); }
+@media (prefers-reduced-motion: reduce) {
+  .dm-fontpick { transition: none; }
+  .dm-fontpick:active { transform: none; }
+}
+
 /* ─────────── 검수 / AI 제안 하이라이트 ─────────── */
 
 .dm-diff-insert {
