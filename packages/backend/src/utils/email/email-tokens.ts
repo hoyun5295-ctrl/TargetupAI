@@ -116,6 +116,23 @@ export function emailGoogleFontsImport(...families: Array<string | undefined>): 
   return `@import url('https://fonts.googleapis.com/css2?${params.map((p) => `family=${p}`).join('&')}&display=swap');`;
 }
 
+/**
+ * ★ 2026-07-16 자가 호스팅 — 사용 서체 중 자가 호스팅 대상이 있으면 우리 서버 fonts.css @import(절대 URL).
+ * 지원 클라이언트(애플 메일 등)만 로드하고 미지원(Gmail/아웃룩)은 이 @import를 지우고 emailCss 폴백 스택 사용.
+ * 구글 Fonts CDN 대비 우리 서버 직접 서빙 = 미로드 궁서 폴백 완화. 매칭 0건이면 ''(폴백 스택만).
+ * publicBase = 절대 도메인(끝 / 제거). 이메일은 수신함(타 출처)에서 열리므로 절대 URL 필수.
+ */
+export function emailSelfHostFontImport(publicBase: string, ...families: Array<string | undefined>): string {
+  const base = (publicBase || 'https://hanjul.ai').replace(/\/+$/, '');
+  for (const f of families) {
+    if (!f) continue;
+    for (const c of CORE_FONTS) {
+      if (c.selfHost && f.includes(c.match)) return `@import url('${base}/api/dm/v/fonts.css');`;
+    }
+  }
+  return '';
+}
+
 // ────────────── 타입스케일 / 여백 밀도 (DM SSOT 리터럴 미러) ──────────────
 
 // ★ 2026-07-14 디자인 4.0 M2 — 소유 = design-core CORE_TYPE_SCALE(emailH2 포함)·CORE_DENSITY_SCALE (값 무변 파생).
@@ -204,8 +221,6 @@ export interface EmailBrand {
   divider: EmailSectionDivider;
   /** 다크 셸 여부 (배경 어두움 → 중립 반전) */
   dark: boolean;
-  /** head <style>용 Google Fonts @import 라인 ('' = 카탈로그 서체 미사용) */
-  fontImport: string;
 }
 
 /** ★ 2026-07-07(5) 실측 발견 결함 수정 — 폰트 스택의 큰따옴표("Pretendard Variable")가
@@ -274,7 +289,6 @@ export function resolveEmailBrand(brandKit?: DmBrandKit | null, design?: EmailDe
     motif: design?.art_direction?.accentMotif || 'none',
     divider: design?.art_direction?.sectionDivider || 'none',
     dark,
-    fontImport: emailGoogleFontsImport(bodyFamilyRaw, displayFamilyRaw),
   };
 }
 

@@ -10,7 +10,9 @@
  */
 import { inlineImage, publicImageUrl, youtubeEmbedUrl } from './dm-viewer-utils';
 import { renderSections, COUNTDOWN_SCRIPT, escapeHtml } from './dm-section-renderer';
-import { renderDmTokensCss, renderDmBaseCss, renderDmDesign3Css, dmGoogleFontsUrl } from './dm-tokens';
+import { renderDmTokensCss, renderDmBaseCss, renderDmDesign3Css } from './dm-tokens';
+// ★ 2026-07-16 자가 호스팅 웹폰트 — 발행 서체를 우리 서버 @font-face로 로드(구글 CDN 미로드 궁서 폴백 정정)
+import { selfHostPreloadUrls } from '../design-core/fonts';
 // ★ 2026-06-25 (P1) 아트디렉션 — 뷰어 :root 변수 주입 + 섹션 ctx 동봉(신규 treatment에만 영향, classic 불변).
 import { normalizeArtDirection, artDirectionToCssVars } from './dm-art-direction';
 import { resolveSections } from './dm-variable-resolver';
@@ -418,13 +420,16 @@ html,body{height:100%;margin:0;overflow:hidden;touch-action:pan-y}
 <title>${escapeHtml(storeName ? `${storeName} - ${title}` : title)}</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" onerror="this.remove()">
 ${(() => {
-    // ★ 2026-07-13 디자인 3.0 — 브랜드킷 선택 서체(명조 등) 실로딩. 매칭 0건(기존 DM) = 링크 미추가(무변화).
-    const fontsUrl = dmGoogleFontsUrl(
-      brandKit?.font_family,
-      brandKit?.font_display,
-      artDirection.headlineFont === 'serif' ? '"Noto Serif KR", serif' : undefined,
-    );
-    return fontsUrl ? `<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n<link rel="stylesheet" href="${fontsUrl}">` : '';
+    // ★ 2026-07-16 자가 호스팅 — 브랜드킷 선택 서체(명조 등)를 우리 서버 @font-face(/api/dm/v/fonts.css)로 로드.
+    //   구글 Fonts CDN 미로드 시 serif 제네릭(궁서)로 폴백되던 신고(박성용) 정정. 사용 서체만 preload.
+    //   매칭 0건(기본 Pretendard DM) = 링크 미추가 = 기존 발행물과 동일(회귀 0).
+    const serifHint = artDirection.headlineFont === 'serif' ? '"Noto Serif KR", serif' : undefined;
+    const preloads = selfHostPreloadUrls(`${trackApiBase}/fonts`, brandKit?.font_family, brandKit?.font_display, serifHint);
+    if (preloads.length === 0) return '';
+    const preloadTags = preloads
+      .map((u) => `<link rel="preload" as="font" type="font/woff2" href="${escapeHtml(u)}" crossorigin>`)
+      .join('\n');
+    return `${preloadTags}\n<link rel="stylesheet" href="${escapeHtml(trackApiBase)}/fonts.css">`;
   })()}
 <style>
 ${tokensCss}

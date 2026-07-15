@@ -9,7 +9,7 @@ exports[`M0 골든 — 이메일 발행물 렌더 > 럭셔리 다크(다크 셸)
 <meta name="color-scheme" content="light dark">
 <meta name="supported-color-schemes" content="light dark">
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600;700;900&display=swap');
+@import url('https://hanjul.ai/api/dm/v/fonts.css');
 html,body{margin:0 !important;padding:0 !important}
 table{border-collapse:collapse}
 img{border:0;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic}
@@ -88,7 +88,7 @@ exports[`M0 골든 — 이메일 발행물 렌더 > 에디토리얼 테마 렌�
 <meta name="color-scheme" content="light dark">
 <meta name="supported-color-schemes" content="light dark">
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600;700;900&display=swap');
+@import url('https://hanjul.ai/api/dm/v/fonts.css');
 html,body{margin:0 !important;padding:0 !important}
 table{border-collapse:collapse}
 img{border:0;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic}
@@ -132,7 +132,6 @@ exports[`M0 골든 — 이메일 브랜드 해석(resolveEmailBrand) > 다크 �
   "displayFont": "'Noto Serif KR', 'Nanum Myeongjo', 'AppleMyungjo', Batang, Georgia, serif",
   "divider": "rule",
   "fontFamily": "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif",
-  "fontImport": "@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600;700;900&display=swap');",
   "heroGrad": "linear-gradient(135deg,#caa362 0%,#b89150 55%,#805918 100%)",
   "markerWash": "rgba(184,145,80,0.26)",
   "mono": "'JetBrains Mono', Menlo, Consolas, monospace",
@@ -223,7 +222,6 @@ exports[`M0 골든 — 이메일 브랜드 해석(resolveEmailBrand) > 미설정
   "displayFont": "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif",
   "divider": "none",
   "fontFamily": "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif",
-  "fontImport": "",
   "heroGrad": "linear-gradient(135deg,#6158f7 0%,#4f46e5 55%,#170ead 100%)",
   "markerWash": "rgba(79,70,229,0.26)",
   "mono": "'JetBrains Mono', Menlo, Consolas, monospace",
@@ -314,7 +312,6 @@ exports[`M0 골든 — 이메일 브랜드 해석(resolveEmailBrand) > 에디토
   "displayFont": "'Noto Serif KR', 'Nanum Myeongjo', 'AppleMyungjo', Batang, Georgia, serif",
   "divider": "hairline",
   "fontFamily": "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif",
-  "fontImport": "@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600;700;900&display=swap');",
   "heroGrad": "linear-gradient(135deg,#232a39 0%,#111827 55%,#000000 100%)",
   "markerWash": "rgba(17,24,39,0.26)",
   "mono": "'JetBrains Mono', Menlo, Consolas, monospace",

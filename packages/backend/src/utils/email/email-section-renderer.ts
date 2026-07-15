@@ -21,7 +21,7 @@ import type {
   CountdownProps, VideoProps, YoutubeEmbedProps, InstagramEmbedProps, MapStoreLocatorProps,
 } from '../dm/dm-section-registry';
 import type { DmBrandKit } from '../dm/dm-tokens';
-import { resolveEmailBrand, type EmailBrand, type EmailDesign } from './email-tokens';
+import { resolveEmailBrand, emailSelfHostFontImport, type EmailBrand, type EmailDesign } from './email-tokens';
 import { EMAIL_BLOCK_WHITELIST, EMAIL_INCOMPATIBLE, selectEmailTreatment } from './email-blocks';
 // ★ 2026-07-02 스킴 없는 URL(www.x.y) https:// 정규화 + 쿠폰 마감 한국어 표시 (normalize CT)
 import { normalizeWebUrl, formatKoreanDateTimeDisplay } from '../normalize';
@@ -608,7 +608,7 @@ export function renderEmailSections(sections: Section[], ctx: EmailRenderCtx): s
 <meta name="color-scheme" content="light dark">
 <meta name="supported-color-schemes" content="light dark">
 <style>
-${b.fontImport}
+${emailSelfHostFontImport(ctx.publicBase || 'https://hanjul.ai', ctx.design?.font_display, ctx.design?.font_family, ctx.brandKit?.font_display, ctx.brandKit?.font_family)}
 html,body{margin:0 !important;padding:0 !important}
 table{border-collapse:collapse}
 img{border:0;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic}

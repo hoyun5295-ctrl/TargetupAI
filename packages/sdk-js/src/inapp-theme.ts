@@ -227,6 +227,13 @@ export const INAPP_FONT_CATALOG: ReadonlyArray<{ id: string; label: string; css:
   { id: 'gowun-batang',   label: '고운바탕 (부드러운 명조)', css: '"Gowun Batang", serif',        google: 'Gowun+Batang:wght@400;700' },
   { id: 'gowun-dodum',    label: '고운돋움',                 css: '"Gowun Dodum", sans-serif',    google: 'Gowun+Dodum' },
   { id: 'black-han',      label: '검은고딕 (임팩트)',        css: '"Black Han Sans", sans-serif', google: 'Black+Han+Sans' },
+  // ── 2026-07-16 무료 글꼴 확장 (6→12) — design-core/fonts.ts CORE_FONTS 미러 ──
+  { id: 'noto-sans-kr',     label: '노토 산스 (고딕)',   css: '"Noto Sans KR", sans-serif',     google: 'Noto+Sans+KR:wght@400;500;700;900' },
+  { id: 'ibm-plex-sans-kr', label: 'IBM 플렉스 산스',    css: '"IBM Plex Sans KR", sans-serif', google: 'IBM+Plex+Sans+KR:wght@400;500;700' },
+  { id: 'gothic-a1',        label: '고딕 A1',            css: '"Gothic A1", sans-serif',        google: 'Gothic+A1:wght@400;700;900' },
+  { id: 'nanum-gothic',     label: '나눔고딕',           css: '"Nanum Gothic", sans-serif',     google: 'Nanum+Gothic:wght@400;700;800' },
+  { id: 'jua',              label: '주아 (둥근 제목)',   css: '"Jua", sans-serif',              google: 'Jua' },
+  { id: 'do-hyeon',         label: '도현 (각진 제목)',   css: '"Do Hyeon", sans-serif',         google: 'Do+Hyeon' },
 ];
 
 /** 서체 문자열 무해화 — font-family에 필요한 문자만 허용 (dm-tokens safeFontFamily 미러) */

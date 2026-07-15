@@ -68,6 +68,8 @@ import { getCompanyBrandKit, updateCompanyBrandKit, DEFAULT_BRAND_KIT } from '..
 import { buildEventPromptBlock, normalizeEventText } from '../utils/event-brief';
 // ★ 2026-07-14 디자인 4.0 M5 — 행사 → 정예 템플릿 스토리 힌트 (결정적 선택기, design-core)
 import { buildEventTemplateHintBlock } from '../utils/design-core/event-package';
+// ★ 2026-07-16 자가 호스팅 웹폰트 @font-face 생성 (궁서 폴백 정정)
+import { renderSelfHostFontFaceCss } from '../utils/design-core/fonts';
 import { listTemplates, getTemplate, instantiateTemplate } from '../utils/dm/dm-template-registry';
 import { insertTestSmsQueue } from '../utils/sms-queue';
 import { getUserTestContacts } from '../utils/test-contact-helper';
@@ -130,6 +132,32 @@ dmPublicRouter.get('/images/:companyId/:filename', (req: Request, res: Response)
   const { companyId, filename } = req.params;
   const filePath = path.join(DM_IMAGE_DIR, companyId, filename);
   if (!fs.existsSync(filePath)) return res.status(404).send('Not found');
+  res.sendFile(filePath);
+});
+
+// ★ 2026-07-16 자가 호스팅 웹폰트 — 발행 뷰어·편집 캔버스·이메일 공용 (구글 CDN 미로드 궁서 폴백 정정).
+//   helmet 전 마운트라 CORP/CSP 제약 없음. 편집기(app.hanjul.ai)·이메일 교차 출처 로드 위해 CORS 허용.
+const DM_FONT_DIR = path.join(__dirname, '../../assets/dm-fonts');
+
+// @font-face 선언(전 자가호스팅 서체) — url(fonts/…)은 이 CSS(/api/dm/v/fonts.css) 기준 상대 = /api/dm/v/fonts/…
+dmPublicRouter.get('/fonts.css', (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/css; charset=utf-8');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(renderSelfHostFontFaceCss('fonts'));
+});
+
+// woff2 서빙 — 파일명 화이트리스트(경로 조작 차단) + 장기 캐시(immutable).
+dmPublicRouter.get('/fonts/:file', (req: Request, res: Response) => {
+  const file = req.params.file;
+  if (!/^[a-z0-9-]+\.woff2$/i.test(file)) return res.status(400).send('bad request');
+  const filePath = path.join(DM_FONT_DIR, file);
+  if (!filePath.startsWith(DM_FONT_DIR) || !fs.existsSync(filePath)) return res.status(404).send('Not found');
+  res.setHeader('Content-Type', 'font/woff2');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   res.sendFile(filePath);
 });
 

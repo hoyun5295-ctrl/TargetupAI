@@ -40,16 +40,16 @@
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
 ### 🟢 2026-07-15 (3) — 템플릿관리자 흡수 Track B: import 2종 + 아난티 847 pull (★배포완료·DDL 0)
-> **관문 1 통과** — 아난티 `getSender` 실측 0000·@아난티·A = **같은 휴머스온 계정 확정**(B_ pull 성립·alimtalk:false는 정상 프로필 공통값). 슈퍼관리자 4 endpoint 신설(debug 1콜 `/senders/imc/:key`·연결 `/senders/import`·목록 probe·pull `/templates/import` dryRun 기본/멱등/재카운트 성공표시) + CT-16 역변환 4종(IMC snake→camel — 발송 toAttachmentLink 왕복 계약 테스트 13·snake 저장=대표링크 유실 7300 축 차단). **아난티 파일럿 = 연결 + 847건 pull 완료**(APPROVED 827·KREJ 20·failed 0·중복 0·재카운트 일치). 검증 tsc 0·vitest 628. **잔여 = M4 실발송 1건(이관 템플릿 발송→결과코드 0) + 497 집계 기준 서팀장 확인(실측 827) + M5 확대(B-3 계정·Bill_ID 선행) + Track C(강문희 회신).** 상세=[[project_2026_0705_legacy_template_migration]] · SoT=[docs/2026-07-14-template-migration-track-bc-design.md](../docs/2026-07-14-template-migration-track-bc-design.md)
+> **관문 1 통과** — 아난티 `getSender` 실측 0000·@아난티·A = **같은 휴머스온 계정 확정**(B_ pull 성립·alimtalk:false는 정상 프로필 공통값). 슈퍼관리자 4 endpoint 신설(debug 1콜 `/senders/imc/:key`·연결 `/senders/import`·목록 probe·pull `/templates/import` dryRun 기본/멱등/재카운트 성공표시) + CT-16 역변환 4종(IMC snake→camel — 발송 toAttachmentLink 왕복 계약 테스트 13·snake 저장=대표링크 유실 7300 축 차단). **아난티 파일럿 = 연결 + 847건 pull 완료**(APPROVED 827·KREJ 20·failed 0·중복 0·재카운트 일치). 검증 tsc 0·vitest 628. **★0716 Track C 관문 2 해소**(강문희 스펙 회신 전건 — upsert 키=(BILL_ID,외부템플릿코드)·54/58 이원 발송·API키·reload 자동·**삭제 없음**=고아행 대조 표시만·알림톡 senderkey 동봉 지원). **다우 2사(제이씨패밀리·유성소프트) = 다우 연동 폐기·휴머스온 흡수 확정**(발신프로필 딜러 이관 실측 선행). **잔여 = 답신 발신+착수 시기 → M2(매핑 CT+아웃박스+효과검증+대조 워커) + M4 실발송 1건 + 497 집계 기준 서팀장 + M5(B-3 계정·Bill_ID) + 다우 2사 senderKey 이관 실측.** 상세=[[project_2026_0705_legacy_template_migration]] · SoT=[docs/2026-07-14-template-migration-track-bc-design.md](../docs/2026-07-14-template-migration-track-bc-design.md)
 
 
-### 🟡 진행중 — 레거시 PAY 사이트 한줄로 흡수 (Track D, ★원격 접속 로직 검증완료(established 수정·139 실접속 OPEN) — 강문희 발송서버 실 공인 IP 회신 대기)
+### 🟡 진행중 — 레거시 PAY 사이트 한줄로 흡수 (Track D, ★0715 54 병행 적재 개시·개시일 실측 통과 — 익일 143 마감 대조 → 57·58 순차)
 > 서팀장 2차 회신 전부 반영. **수신 DB 구축완료(2026-07-07)**: invito `pay-ingest-db`(MariaDB 10.11, --sql-mode="") — 143 dump 3테이블 82MB 복원(934,232/730/7,026 일치)·SysId 백필(B/C/D=54/57/58)·계정(sales×3 IP host·root@% 제거)·방화벽 systemd `pay-ingest-fw`. **★2026-07-09 원격 접속 사고 근본해결**: 강문희 실측 54/57/58→62:23388 접속 불가(^C). 재점검 결과 근본 = **DOCKER-USER에 리턴(ESTABLISHED) 허용 룰 누락** → SYN은 ACCEPT 통과해도 DB 응답(SYN-ACK)이 `0.0.0.0/0 DROP`에 걸려 **어떤 IP도 접속 불가**(로컬 127.0.0.1은 FORWARD 미경유 OPEN 착시·tcpdump SYN-ACK 0 확인). 비토 게이트웨이(139.150.81.213) 화이트리스트+established 추가로 **동일 환경 실측→OPEN 확인**, systemd에 established+139 영속화. 부수 발견: "서버명 옥텟=공인 IP" 추정 폐기(우리 게이트웨이도 이름≠실 IP 139). **★0715(2) "적용 시작 OK" 발신 → 당일 54 병행 적재 개시 실측 통과(288행 실시간·SysId '54'·한글 무결·깨짐 0). 다음 = 익일 143 마감 대조(§7-4) → 강문희 공유+57(golang)→58 → 최종 전환일 직전 dump 재복원+재백필 → Phase 2.** SoT=[docs/레거시서버_폐기_플랜.md](docs/레거시서버_폐기_플랜.md) · 런북=[docs/2026-07-07-pay-absorption-track-d-design.md](docs/2026-07-07-pay-absorption-track-d-design.md) §7. 교훈=[[feedback_verify_in_same_env_before_external_request]].
 
 ### 🔵 다음 세션 (예정)
 > **배포 = 0713~0715 누적분 전부 완료(Harold 2026-07-15).** 위 CURRENT_TASK "배포 대기" 엔트리들은 배포완료 상태 — 다음 세션 초입에 archive 회전 대상(실측 잔여만 유지).
-> ★ **1순위 = 템플릿관리자 흡수(Track B+C)** — ★0715 진행: 관문 1 통과 + import 2종 배포 + 아난티 847 pull 완료(위 (3) 엔트리). **잔여 = M4 실발송 1건 · 497 집계 기준 서팀장 확인 · M5 확대(B-3 계정 생성·Bill_ID 확정본 선행) · 브랜드 스코프(B-2).** 병행 = 강문희 제안서 발신(Harold·Track C 관문)·서팀장 실무 4. SoT=폐기플랜 §4-3 · [[project_2026_0705_legacy_template_migration]].
-> ② **PAY Track D** — 강문희 발송서버 실 공인 IP 회신 대기 → 발주 → 전환 → 유입 검증 → Phase 2.
+> ★ **1순위 = 템플릿관리자 흡수(Track B+C)** — ★0715~16 진행: 관문 1·2 전부 통과(import 2종 배포·아난티 847 pull·강문희 스펙 회신 해소). **Track C 착수 대기 = 강문희 답신 발신(삭제 불요·upsert 키·착수 시기) → 착수 회신 오면 M2(매핑 CT+아웃박스+효과검증+대조 워커) 설계·구현.** 병행 = M4 실발송 1건 · 497 기준 서팀장 · M5(B-3 계정·Bill_ID) · 브랜드 스코프(B-2) · 다우 2사 senderKey 이관 실측. SoT=설계문서 §1 · [[project_2026_0705_legacy_template_migration]].
+> ② **PAY Track D** — ★0715 54 병행 적재 개시. 다음 = 익일 143 마감 대조(§7-4) → 57(golang)→58 → 최종 전환일 dump 재복원 → Phase 2.
 > ③ **Local AI Ops Hub(비토 24시간화)** — 미래 대비. 설계 3부작 완료(docs/2026-07-15-local-ai-ops-hub-{design·agents-design·jarvis-spec}.md). Harold 결정(H-2 M0 착수) 대기. **현재 실무(①②)보다 후순위.** [[project_2026_0715_local_ai_ops_hub]].
 > (지속) ⓪ 비토 API 발송 경로 전환 검토(선택) [[project_2026_0710_bito_api_direct_test]] · ⓪-2 싱크에이전트 1.5.7 유지(종결) · (보류) 팝폰 SDK 검증.
 
@@ -57,6 +57,7 @@
 
 ### 최근 완료 인덱스 (원문 = 링크의 월별 아카이브)
 
+- 🟢 2026-07-15 (4) — 모바일 DM 직원 신고 3파트: 완성이미지 풀화면(full_bleed)·색표시 5건9항목(연결부 그라데이션·버튼색·헤더 제목색/브랜드토글·상품 배경/글씨공간/이미지높이)·섹션추가 메뉴 신규 11종 편입 (DDL 0·3면 미러+계약테스트 / full_bleed·5건9항목 ★배포완료 / **섹션메뉴(c3cd455e) frontend build:safe 잔여** / 직원 실측, 회전 2026-07-16) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0715_mobile_dm_bugfix_5]]
 - 🟢 2026-07-15 (2) — AI Operator 소개 v4 스펙터클 (★배포완료, 회전 2026-07-15 / 잔여=Harold 시각 확인) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0713_operator_intro_effects]]
 - 🟢 2026-07-15 — 모바일 DM 한글 주소(hlj.kr/반짝세일_07)+추적 2원화 (★배포완료, 회전 2026-07-15 / 잔여=DDL 3건 확인+실측(단말 문자 링크 인식=성패 축·직원)+Codex 합류) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0715_dm_korean_alias]]
 - 🟢 2026-07-14 (2) — 디자인 4.0: 코어 통합+정예 10종+브랜드 학습+행사 자동 완성 (★배포완료, 회전 2026-07-15 / 잔여=Harold 시각 승인(게이트 7)+실측 3건(직원)) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · SoT=[specs/2026-07-14-design-4-core.md](../specs/2026-07-14-design-4-core.md)

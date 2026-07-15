@@ -14,7 +14,7 @@ import { useEffect, useState } from 'react';
 import axios from 'axios';
 import type { DmBrandKit } from '../../../stores/dmBuilderStore';
 import { useDmBuilderStore } from '../../../stores/dmBuilderStore';
-import { DM_FONT_PAIRINGS } from '../../../utils/dm-tokens';
+import { DM_FONT_PAIRINGS, DM_FONT_CATALOG } from '../../../utils/dm-tokens';
 import ModalBase, { ModalButton } from './ModalBase';
 
 const api = axios.create({ baseURL: '/api' });
@@ -46,15 +46,36 @@ const TONE_OPTIONS: Array<{ value: DmBrandKit['tone']; label: string }> = [
   { value: 'playful', label: '재미' },
 ];
 
-const FONT_OPTIONS = [
-  { value: '', label: '기본 (Pretendard)' },
-  { value: '"Noto Serif KR", serif', label: 'Noto Serif KR (세리프)' },
-  { value: '"Pretendard Variable", sans-serif', label: 'Pretendard (산세리프)' },
-  { value: '"Nanum Myeongjo", serif', label: '나눔명조' },
-  { value: '"Gowun Batang", serif', label: '고운바탕 (부드러운 명조)' },
-  { value: '"Gowun Dodum", sans-serif', label: '고운돋움' },
-  { value: '"Black Han Sans", sans-serif', label: '검은고딕 (임팩트)' },
-];
+// ★ 2026-07-16 서체 선택 = DM_FONT_CATALOG 단일 소스(하드코딩 금지) + 각 서체를 실제 글꼴로 미리보기.
+//   Pretendard = 기본('')으로 분리(본문/헤드라인 리셋). 미리보기 글꼴은 fonts.css(자가호스팅)로 로드됨.
+function FontPicker({ value, onChange, resetLabel }: { value: string; onChange: (v: string) => void; resetLabel: string }) {
+  const opts = [
+    { id: '__reset', label: resetLabel, css: '"Pretendard Variable", Pretendard, sans-serif', value: '' },
+    ...DM_FONT_CATALOG.filter((c) => c.id !== 'pretendard').map((c) => ({ id: c.id, label: c.label, css: c.css, value: c.css })),
+  ];
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+      {opts.map((o) => {
+        const active = (value || '') === o.value;
+        return (
+          <button
+            key={o.id}
+            type="button"
+            onClick={() => onChange(o.value)}
+            style={{
+              textAlign: 'left', padding: '7px 10px', borderRadius: 8,
+              border: active ? '2px solid #4f46e5' : '1px solid #d1d5db',
+              background: active ? '#eef2ff' : '#fff', cursor: 'pointer',
+            }}
+          >
+            <div style={{ fontFamily: o.css, fontSize: 15, color: '#111827', lineHeight: 1.25 }}>가나다 Aa 12</div>
+            <div style={{ fontSize: 10, color: '#6b7280', marginTop: 2 }}>{o.label}</div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function BrandKitModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const appliedKit = useDmBuilderStore((s) => s.brandKit);
@@ -77,6 +98,17 @@ export default function BrandKitModal({ open, onClose }: { open: boolean; onClos
     void loadCompanyKit();
     setKit(appliedKit);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ★ 2026-07-16 미리보기용 자가호스팅 서체 로드 — 편집 캔버스와 동일 파일(idempotent). 각 서체가 실제 글꼴로 보임.
+  useEffect(() => {
+    const ID = 'dm-selfhost-fonts';
+    if (document.getElementById(ID)) return;
+    const link = document.createElement('link');
+    link.id = ID;
+    link.rel = 'stylesheet';
+    link.href = '/api/dm/v/fonts.css';
+    document.head.appendChild(link);
+  }, []);
 
   const loadCompanyKit = async () => {
     setLoading(true);
@@ -255,27 +287,10 @@ export default function BrandKitModal({ open, onClose }: { open: boolean; onClos
               </div>
             </Field>
             <Field label="본문 서체">
-              <select
-                value={kit.font_family || ''}
-                onChange={(e) => updateField('font_family', e.target.value)}
-                style={inputStyle}
-              >
-                {FONT_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
+              <FontPicker value={kit.font_family || ''} onChange={(v) => updateField('font_family', v || undefined)} resetLabel="기본 (Pretendard)" />
             </Field>
-            <Field label="헤드라인 서체" >
-              <select
-                value={kit.font_display || ''}
-                onChange={(e) => updateField('font_display', e.target.value || undefined)}
-                style={inputStyle}
-              >
-                <option value="">본문과 동일</option>
-                {FONT_OPTIONS.filter((o) => o.value).map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
+            <Field label="헤드라인 서체">
+              <FontPicker value={kit.font_display || ''} onChange={(v) => updateField('font_display', v || undefined)} resetLabel="본문과 동일" />
             </Field>
             <Field label="톤">
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
