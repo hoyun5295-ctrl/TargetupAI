@@ -379,6 +379,46 @@ router.get('/senders', async (req: Request, res: Response) => {
   }
 });
 
+// ── 슈퍼관리자 디버그: 임의 senderKey IMC 발신프로필 raw 1콜 조회
+//    Track B 관문 1 실측용 (docs/2026-07-14-template-migration-track-bc-design.md §5-1).
+//    kakao_sender_profiles 미등록 키도 IMC에 직접 조회 — 우리 IMC 계정에서 보이는지(같은 계정 소속)를 확인한다.
+//    DB 무접촉(read-only). 응답은 계정 판별에 필요하므로 sanitize 없이 IMC 원문 그대로(super_admin 전용).
+//    `/senders/:id`보다 앞에 배치 — 명시 path가 param 라우트에 가로채이지 않도록 (D162-4 교훈).
+router.get(
+  '/senders/imc/:senderKey',
+  requireSuperAdmin as any,
+  async (req: Request, res: Response) => {
+    const senderKey = String(req.params.senderKey || '').trim();
+    // URL path 세그먼트로 들어가므로 영숫자·-·_만 허용 (슬래시/점 주입 차단, 레거시 짧은 키 허용)
+    if (!/^[0-9A-Za-z_-]{8,64}$/.test(senderKey)) {
+      return res
+        .status(400)
+        .json({ success: false, error: 'senderKey 형식 오류 — 영숫자 8~64자' });
+    }
+    try {
+      const r = await imc.getSender(senderKey);
+      console.log(
+        `[alimtalk][debug-getSender] key=${senderKey} code=${r.code} status=${r.data?.status} name=${r.data?.name} uuid=${r.data?.uuid}`,
+      );
+      return res.json({ success: true, imc: r });
+    } catch (err: any) {
+      if (err instanceof ImcApiError) {
+        console.log(
+          `[alimtalk][debug-getSender] key=${senderKey} 실패 code=${err.code} http=${err.httpStatus}`,
+        );
+        return res.json({
+          success: false,
+          imcCode: err.code,
+          httpStatus: err.httpStatus,
+          responseBody: err.responseBody ?? null,
+          message: err.message,
+        });
+      }
+      return handleImcError(res, err);
+    }
+  },
+);
+
 router.get('/senders/:id', async (req: Request, res: Response) => {
   try {
     const r = await query(

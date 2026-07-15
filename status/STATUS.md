@@ -58,12 +58,11 @@
 > 서팀장 2차 회신 전부 반영. **수신 DB 구축완료(2026-07-07)**: invito `pay-ingest-db`(MariaDB 10.11, --sql-mode="") — 143 dump 3테이블 82MB 복원(934,232/730/7,026 일치)·SysId 백필(B/C/D=54/57/58)·계정(sales×3 IP host·root@% 제거)·방화벽 systemd `pay-ingest-fw`. **★2026-07-09 원격 접속 사고 근본해결**: 강문희 실측 54/57/58→62:23388 접속 불가(^C). 재점검 결과 근본 = **DOCKER-USER에 리턴(ESTABLISHED) 허용 룰 누락** → SYN은 ACCEPT 통과해도 DB 응답(SYN-ACK)이 `0.0.0.0/0 DROP`에 걸려 **어떤 IP도 접속 불가**(로컬 127.0.0.1은 FORWARD 미경유 OPEN 착시·tcpdump SYN-ACK 0 확인). 비토 게이트웨이(139.150.81.213) 화이트리스트+established 추가로 **동일 환경 실측→OPEN 확인**, systemd에 established+139 영속화. 부수 발견: "서버명 옥텟=공인 IP" 추정 폐기(우리 게이트웨이도 이름≠실 IP 139). **다음 = 강문희 발송서버 실 아웃바운드 공인 IP 회신 → 계정 host+iptables 반영 → 발주 → 전환일 → 유입 검증(§7-4) → Phase 2.** 강문희 정정 메일(established 수정·실접속 확인·실 IP 요청) 발송 대기. SoT=[docs/레거시서버_폐기_플랜.md](docs/레거시서버_폐기_플랜.md) · 런북=[docs/2026-07-07-pay-absorption-track-d-design.md](docs/2026-07-07-pay-absorption-track-d-design.md) §7. 교훈=[[feedback_verify_in_same_env_before_external_request]].
 
 ### 🔵 다음 세션 (예정)
-> ★ **다음 세션 = 디버깅 몇 건 + 추가 업그레이드 (Harold 2026-07-14 예고)** — 배포 후 실동작에서 나온 결함 우선. 디자인 4.0/후속 관련 리그레션은 [[project_2026_0714_design_4_core]] 잔여(Harold 시각 승인·직원 실측)와 교차 확인.
-> ⓪-A 이메일 3.0 · ⓪-B 인앱 3.0 · ⓪-C 디자인 4.0(+후속 3차) = 전부 실행 완료 — 위 CURRENT_TASK 엔트리 참조 (⓪-C Codex 재실행 = Harold 면제).
-> ⓪ **비토 API 발송 경로 전환 검토(선택 후보 — 확정 과제 아님)** — LMS 왕복 테스트 통과로 개시 가능 상태. 한줄로 발송을 DB큐(SMSQ_SEND_13)→게이트웨이 API로 전환할지 설계 검토(발송 파이프라인 절대 보호 — 영향표부터). [[project_2026_0710_bito_api_direct_test]].
-> ⓪-2 싱크에이전트 1.6.1 = **업로드·릴리즈 등록 완료(2026-07-10 Harold) — 종결.** 이새 박스(1.5.7)는 updater 자기교체 결함으로 **원격 자동 업데이트 불가(현장 재설치 필요)** → 그대로 두고 **2달 뒤 타 업체 ERP 전환 때 새 에이전트(1.6.1+)로 신규 배포**(Harold 확정 2026-07-10). 그때까지 1.5.7 유지가 정상 상태(슈퍼관리자 매핑 모달=구버전 안내·저장 차단 동작).
-> ① **누적 0707 배포** — tp-push + build:safe(frontend·company-frontend·backend) + pm2 reload + Codex /codex:review(플러그인 미로드분). ② **PAY Track D** — 강문희 발주 → 전환 → 유입 검증 → Phase 2 설계(조회+정산+거래내역서 웹/Agent 구분 일괄). ③ **템플릿관리자 흡수(Track B+C)** = 레거시 폐기 최대 잔여 — ★2026-07-10 방향 정리: 이관 = 레거시 DB 복사 X, **senderKey 연결 + IMC 원본 pull**(개발 실체 = 슈퍼관리자 import 2종 신설·같은 IMC 계정 개연성 4,849 실측 근거·재검수 쟁점은 같은 계정 확정 시 소멸). **서팀장 사전 체크 12문항 회신 대기(폐기플랜 §4-3)** → 회신 후 재토의 → 아난티 getSender 실측 → import 2종 설계. 강문희 질의는 그 후 잔여분만.
-> (보류) 팝폰 SDK 검증(자체 서비스 SDK 실측 베드) = C:\Users\ceo\projects\poppon-workspace 정독 후 별도. 상세 [[project_2026_0618_selfhosted_mall_app_collection]].
+> **배포 = 0713~0715 누적분 전부 완료(Harold 2026-07-15).** 위 CURRENT_TASK "배포 대기" 엔트리들은 배포완료 상태 — 다음 세션 초입에 archive 회전 대상(실측 잔여만 유지).
+> ★ **1순위 = 템플릿관리자 흡수(Track B+C)** — 현재 진행 실무. ★0715 강문희 **1안 확정**, 산출 3문서(자비스 지시서·강문희 제안서 Word·Track B+C 설계). **관문 = 아난티 `getSender('6be1390acc...')` 실측** → 통과 시 import 2종 설계 착수. **주의: 임의 senderKey로 getSender 호출하는 실행 경로가 현재 있는지 미확인 — 없으면 슈퍼관리자 디버그 1콜 경로 마련이 첫 작업.** 병행 = 강문희 제안서 발신(Harold·Track C 관문)·서팀장 실무 4(Bill_ID 확정본). SoT=폐기플랜 §4-3 · [[project_2026_0705_legacy_template_migration]].
+> ② **PAY Track D** — 강문희 발송서버 실 공인 IP 회신 대기 → 발주 → 전환 → 유입 검증 → Phase 2.
+> ③ **Local AI Ops Hub(비토 24시간화)** — 미래 대비. 설계 3부작 완료(docs/2026-07-15-local-ai-ops-hub-{design·agents-design·jarvis-spec}.md). Harold 결정(H-2 M0 착수) 대기. **현재 실무(①②)보다 후순위.** [[project_2026_0715_local_ai_ops_hub]].
+> (지속) ⓪ 비토 API 발송 경로 전환 검토(선택) [[project_2026_0710_bito_api_direct_test]] · ⓪-2 싱크에이전트 1.5.7 유지(종결) · (보류) 팝폰 SDK 검증.
 
 ---
 
