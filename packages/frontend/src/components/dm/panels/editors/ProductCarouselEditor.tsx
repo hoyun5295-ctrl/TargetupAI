@@ -1,5 +1,5 @@
 import type { ProductCarouselProps, ProductCarouselItem } from '../../../../utils/dm-section-defaults';
-import { Field, TextInput, Toggle, ImageUploader, Select } from '../FormControls';
+import { Field, TextInput, Toggle, ImageUploader, Select, ColorOverride } from '../FormControls';
 import { RepeatableList } from '../RepeatableList';
 import type { EditorProps } from '../SectionPropsEditor';
 import { useState } from 'react';
@@ -91,6 +91,20 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
           />
         </Field>
       )}
+      {/* ★ 2026-07-15 이미지 높이·배경색·글씨공간 색(서수란 신고) — 미지정 = 현행(md 높이·회색 여백·흰 카드) */}
+      <Field label="이미지 높이" hint="상품 이미지 크기가 제각각일 때 조정">
+        <Select
+          value={props.image_height || 'md'}
+          onChange={(v) => onUpdate({ image_height: v as 'sm' | 'md' | 'lg' })}
+          options={[{ value: 'sm', label: '작게' }, { value: 'md', label: '보통' }, { value: 'lg', label: '크게' }]}
+        />
+      </Field>
+      <Field label="배경색" hint="맞추기 여백·섹션 배경 — 미지정 = 기본(회색 여백)">
+        <ColorOverride value={props.background_color} onChange={(v) => onUpdate({ background_color: v })} />
+      </Field>
+      <Field label="글씨공간 색" hint="상품명·가격 카드 배경 — 미지정 = 흰색">
+        <ColorOverride value={props.caption_bg_color} onChange={(v) => onUpdate({ caption_bg_color: v })} />
+      </Field>
       <Field label="상품 목록">
         {/* ★ 2026-07-14 — 명시 단색(emerald-600+white). 옛 text-emerald-100+워시 배경은 흰 패널(DM 우측/아이템 카드)
             위에서 글자가 사라짐(Harold 신고 — 이메일·DM 공용 컴포넌트라 두 채널 동시 결함). 테마 경계 안전색 의무. */}

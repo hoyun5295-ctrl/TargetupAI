@@ -73,6 +73,10 @@ export type HeaderProps = {
   discount_label?: string;
   coupon_code?: string;
   banner_image_url?: string;
+  // ★ 2026-07-15 헤더 제목(브랜드명) 색(임은지 신고) — 미지정 = 기본 neutral-900. backend 미러.
+  title_color?: string;
+  // ★ 2026-07-15 브랜드명 표시 여부(서수란 신고) — 미지정/true = 표시(현행), false = 로고만. backend 미러.
+  show_brand_name?: boolean;
 };
 
 export type HeroProps = {
@@ -102,6 +106,8 @@ export type CouponProps = {
   min_purchase?: number;
   usage_condition?: string;
   cta_url?: string;
+  // ★ 2026-07-15 쿠폰 "쿠폰 사용하기" 버튼 색(임은지 신고) — 미지정 = 기본 primary. backend 미러.
+  button_color?: string;
 };
 
 export type CountdownProps = {
@@ -144,6 +150,8 @@ export type CtaButton = {
   url: string;
   style: 'primary' | 'secondary' | 'outline';
   icon?: string;
+  // ★ 2026-07-15 버튼 색 직접 지정(남지현·임은지 신고) — 미지정 = 스타일 프리셋 색 유지(회귀 0). backend registry 미러.
+  color?: string;
 };
 
 export type CtaProps = {
@@ -199,7 +207,7 @@ export type FooterProps = {
 
 export type ProductCarouselItem = { id?: string; image_url: string; name: string; price: number; discount_price?: number; discount_rate?: number; link_url?: string; };
 // image_fit: 채우기(cover=꽉 차게·기존 기본) / 맞추기(contain=전체 보임·잘림 X). image_focus: cover일 때 보일 초점(정렬). 미지정=cover/center(회귀 0).
-export type ProductCarouselProps = { title?: string; products: ProductCarouselItem[]; show_indicator?: boolean; auto_slide?: boolean; slide_interval_ms?: number; image_fit?: 'cover' | 'contain'; image_focus?: 'top' | 'center' | 'bottom'; };
+export type ProductCarouselProps = { title?: string; products: ProductCarouselItem[]; show_indicator?: boolean; auto_slide?: boolean; slide_interval_ms?: number; image_fit?: 'cover' | 'contain'; image_focus?: 'top' | 'center' | 'bottom'; background_color?: string; caption_bg_color?: string; image_height?: 'sm' | 'md' | 'lg'; };
 
 export type GalleryImage = { url: string; caption?: string; link_url?: string; };
 export type GalleryProps = { title?: string; images: GalleryImage[]; layout: 'grid_2x2' | 'grid_3x3' | 'list_1xN' | 'masonry'; enable_zoom?: boolean; enable_fullscreen?: boolean; full_bleed?: boolean; };

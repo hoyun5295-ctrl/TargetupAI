@@ -46,3 +46,20 @@ export const DM_IMAGE_FITS = ['cover', 'contain'] as const;
 /** 갤러리 풀화면(full_bleed) — true면 발행물에서 섹션 패딩·이미지 라운드가 0이 돼 화면 꽉 참(완성 이미지 시안).
  *  미설정=현행 카드 프레임 유지. 편집기 GalleryEditor 토글과 값이 일치해야 한다(2026-07-15 서수란 신고). */
 export const DM_GALLERY_FULL_BLEED = [false, true] as const;
+
+/** ★ 2026-07-15 색·표시 옵션(남지현·임은지·서수란 신고 묶음) — 편집기 지정값이 발행 SSR에 실제 소비돼야 한다.
+ *  미소비 = "편집기에서 고를 수 있는데 발행물엔 반영 안 됨"(A2·A3·B1·B2 신고 원인). dm-editor-parity가 각 소비를 밟는다.
+ *  헤더 제목색/브랜드표시(HeaderEditor), CTA 버튼색(CtaEditor), 쿠폰 버튼색(CouponEditor),
+ *  상품 배경/글씨공간색·이미지높이(ProductCarouselEditor)와 값이 일치해야 한다. */
+export const DM_COLOR_TABLE_2026_07_15: Array<{ section: string; prop: string; desc: string }> = [
+  { section: 'header', prop: 'title_color', desc: '헤더 제목(브랜드명) 색' },
+  { section: 'header', prop: 'show_brand_name', desc: '브랜드명 표시/로고만' },
+  { section: 'cta', prop: 'button.color', desc: 'CTA 버튼 색' },
+  { section: 'coupon', prop: 'button_color', desc: '쿠폰 버튼 색' },
+  { section: 'product_carousel', prop: 'background_color', desc: '상품슬라이드 배경색' },
+  { section: 'product_carousel', prop: 'caption_bg_color', desc: '상품슬라이드 글씨공간 색' },
+  { section: 'product_carousel', prop: 'image_height', desc: '상품 이미지 높이' },
+];
+
+/** 그라데이션 하단 연결부 = 그라데이션 끝색(--dm-grad-to)으로 착색돼야 이어짐(2026-07-15 임은지 — 시작색만 반영 결함). */
+export const DM_GRADIENT_DIVIDER_ENDCOLOR = true;

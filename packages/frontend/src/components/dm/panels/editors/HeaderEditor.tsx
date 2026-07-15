@@ -1,5 +1,5 @@
 import type { HeaderProps } from '../../../../utils/dm-section-defaults';
-import { Field, TextInput, Select, ImageUploader, DateTimePicker } from '../FormControls';
+import { Field, TextInput, Select, ImageUploader, DateTimePicker, Toggle, ColorOverride } from '../FormControls';
 import type { EditorProps } from '../SectionPropsEditor';
 
 export default function HeaderEditor({ props, onUpdate }: EditorProps<HeaderProps>) {
@@ -18,9 +18,23 @@ export default function HeaderEditor({ props, onUpdate }: EditorProps<HeaderProp
         />
       </Field>
 
-      <Field label="브랜드명">
-        <TextInput value={props.brand_name} onChange={(v) => onUpdate({ brand_name: v })} placeholder="브랜드명" />
-      </Field>
+      {(props.variant === 'logo' || !props.variant) && (
+        <Field label="브랜드명 표시" hint="끄면 로고만 (로고 중앙 정렬)">
+          <Toggle value={props.show_brand_name ?? true} onChange={(v) => onUpdate({ show_brand_name: v })} />
+        </Field>
+      )}
+
+      {(props.show_brand_name ?? true) && (
+        <Field label="브랜드명">
+          <TextInput value={props.brand_name} onChange={(v) => onUpdate({ brand_name: v })} placeholder="브랜드명" />
+        </Field>
+      )}
+
+      {(props.variant === 'logo' || !props.variant) && (props.show_brand_name ?? true) && (
+        <Field label="브랜드명 색" hint="미지정 = 기본색">
+          <ColorOverride value={props.title_color} onChange={(v) => onUpdate({ title_color: v })} />
+        </Field>
+      )}
 
       {(props.variant === 'logo' || !props.variant) && (
         <>

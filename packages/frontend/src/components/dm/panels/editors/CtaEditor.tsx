@@ -1,5 +1,5 @@
 import type { CtaProps, CtaButton } from '../../../../utils/dm-section-defaults';
-import { Field, TextInput, Select } from '../FormControls';
+import { Field, TextInput, Select, ColorOverride } from '../FormControls';
 import type { EditorProps } from '../SectionPropsEditor';
 
 export default function CtaEditor({ props, onUpdate }: EditorProps<CtaProps>) {
@@ -57,6 +57,9 @@ export default function CtaEditor({ props, onUpdate }: EditorProps<CtaProps>) {
                 { value: 'outline', label: '외곽선' },
               ]}
             />
+          </Field>
+          <Field label="버튼 색" hint="미지정 = 스타일 기본색">
+            <ColorOverride value={b.color} onChange={(v) => updateBtn(i, { color: v })} />
           </Field>
         </div>
       ))}

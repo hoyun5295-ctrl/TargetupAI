@@ -283,7 +283,8 @@ exports[`M0 골든 — DM 토큰/베이스/디자인3 CSS > renderDmBaseCss / re
 .dm-pullup { position:relative; z-index:2; margin-top:-26px; border-radius:24px 24px 0 0; overflow:hidden;
   box-shadow:0 -12px 32px -14px rgba(15,23,42,0.25); }
 .dm-divider-svg { display:block; line-height:0; margin-bottom:-1px; color: var(--dm-bg); }
-.dm-bgx-gradient + .dm-divider-svg, .dm-bgx-gradient .dm-divider-svg { color: var(--dm-primary); }
+/* ★ 2026-07-15 그라데이션 연결부(임은지 신고) — 연결부는 섹션 하단이라 그라데이션 끝색(--dm-grad-to)으로 착색해야 이어짐(기존 시작색 var(--dm-primary)=배경 윗부분 색만 반영). 배경면 gradient 정의와 동일 폴백. */
+.dm-bgx-gradient + .dm-divider-svg, .dm-bgx-gradient .dm-divider-svg { color: var(--dm-grad-to, color-mix(in srgb, var(--dm-primary) 35%, var(--dm-accent))); }
 /* ★ 2026-07-14 하단 연결부 미반영(남지현 신고) — divider가 배경면 div 바깥이라 color:var(--dm-bg)가 페이지 기본 흰색으로 풀림. 배경면 변형별 실제 색 지정. */
 .dm-bgx-soft + .dm-divider-svg, .dm-bgx-soft .dm-divider-svg { color: color-mix(in srgb, var(--dm-primary) 6%, #ffffff); }
 .dm-bgx-tint + .dm-divider-svg, .dm-bgx-tint .dm-divider-svg { color: color-mix(in srgb, var(--dm-primary) 14%, #ffffff); }

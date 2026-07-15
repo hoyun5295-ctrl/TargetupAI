@@ -63,9 +63,11 @@ export default function CouponSection({ props, onEdit, treatment }: { props: Cou
       )}
     </>
   );
+  // ★ 2026-07-15 쿠폰 버튼 색(임은지) — SSR couponBtnStyle 미러. 미지정 = 기본 primary.
+  const btnColorStyle = props.button_color ? { background: props.button_color, backgroundImage: 'none', color: '#fff' } : {};
   const ctaNode = props.cta_url ? (
     <div style={{ marginTop: 'var(--dm-sp-5)' }}>
-      <a href={props.cta_url} className="dm-cta dm-cta-primary" target="_blank" rel="noreferrer" style={{ width: '100%', maxWidth: 280 }}>쿠폰 사용하기</a>
+      <a href={props.cta_url} className="dm-cta dm-cta-primary" target="_blank" rel="noreferrer" style={{ width: '100%', maxWidth: 280, ...btnColorStyle }}>쿠폰 사용하기</a>
     </div>
   ) : null;
 
@@ -82,7 +84,7 @@ export default function CouponSection({ props, onEdit, treatment }: { props: Cou
             </div>
           )}
           {metaNode}
-          {props.cta_url && <div style={{ marginTop: 'var(--dm-sp-4)' }}><a href={props.cta_url} className="dm-cta dm-cta-primary" target="_blank" rel="noreferrer">쿠폰 사용하기</a></div>}
+          {props.cta_url && <div style={{ marginTop: 'var(--dm-sp-4)' }}><a href={props.cta_url} className="dm-cta dm-cta-primary" target="_blank" rel="noreferrer" style={btnColorStyle}>쿠폰 사용하기</a></div>}
         </div>
       </div>
     );
@@ -146,7 +148,7 @@ export default function CouponSection({ props, onEdit, treatment }: { props: Cou
         )}
         {props.cta_url && (
           <div style={{ marginTop: 'var(--dm-sp-5)' }}>
-            <a href={props.cta_url} className="dm-cta dm-cta-primary" target="_blank" rel="noreferrer" style={{ width: '100%', maxWidth: 280 }}>쿠폰 사용하기</a>
+            <a href={props.cta_url} className="dm-cta dm-cta-primary" target="_blank" rel="noreferrer" style={{ width: '100%', maxWidth: 280, ...btnColorStyle }}>쿠폰 사용하기</a>
           </div>
         )}
       </div>

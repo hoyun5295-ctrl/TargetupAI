@@ -67,11 +67,14 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
   const products = props?.products || [];
   // ★ 2026-07-14 상품 이미지 맞춤(남지현 신고) — 채우기(cover 기본)=잘릴 수 있음 / 맞추기(contain)=전체 보임(잘림 X).
   //   정렬(image_focus)은 cover일 때 어느 부분을 보일지(object-position). 미지정=cover/center = 기존 렌더 동일(회귀 0). 발행 SSR(productImgFit)과 미러.
+  // ★ 2026-07-15 맞추기 여백 배경·이미지 높이·글씨공간/섹션 배경(서수란) — SSR productImgFitCss/Height 미러. 미지정=현행.
   const imgFit: React.CSSProperties = props?.image_fit === 'contain'
-    ? { objectFit: 'contain', background: 'var(--dm-neutral-50)' }
+    ? { objectFit: 'contain', background: props?.background_color || 'var(--dm-neutral-50)' }
     : (props?.image_focus === 'top' || props?.image_focus === 'bottom')
       ? { objectFit: 'cover', objectPosition: `center ${props.image_focus}` }
       : { objectFit: 'cover' };
+  const imgH = props?.image_height === 'sm' ? 120 : props?.image_height === 'lg' ? 220 : 150;
+  const cardBg = props?.caption_bg_color || 'var(--dm-bg)';
   // ★ 2026-07-13 디자인 3.0 — 구도 미러 (SSR renderProductFocus/renderProductList와 구조 동일)
   const priceRow = (p: ProductCarouselProps['products'][number], big: boolean) => {
     const price = Number(p.price || 0);
@@ -135,7 +138,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
     );
   }
   return (
-    <div className="dm-section dm-product-carousel" style={CARD_STYLE}>
+    <div className="dm-section dm-product-carousel" style={props.background_color ? { ...CARD_STYLE, background: props.background_color } : CARD_STYLE}>
       {props.title && <div style={TITLE_STYLE}>{props.title}</div>}
       {products.length === 0 ? (
         <div style={PLACEHOLDER_STYLE}>[상품을 추가해주세요]</div>
@@ -153,13 +156,13 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
             return (
               // ★ 2026-07-10 임은지 건의: 가격 줄 = 카드 하단 고정(marginTop auto) — 제품명 길이 무관하게
               //   같은 행 카드들의 가격 위치 일정(flex row 기본 stretch = 행 높이 동일). 발행 SSR 미러.
-              <div key={p.id || i} style={{ width: 'calc(50% - 8px)', maxWidth: 220, boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
+              <div key={p.id || i} style={{ width: 'calc(50% - 8px)', maxWidth: 220, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', background: cardBg, borderRadius: 8 }}>
                 {p.image_url ? (
-                  <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: '100%', height: 140, borderRadius: 8, flexShrink: 0, ...imgFit }} />
+                  <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: '100%', height: imgH, borderRadius: 8, flexShrink: 0, ...imgFit }} />
                 ) : (
-                  <div style={{ width: '100%', height: 140, background: 'var(--dm-neutral-100)', borderRadius: 8, flexShrink: 0 }} />
+                  <div style={{ width: '100%', height: imgH, background: 'var(--dm-neutral-100)', borderRadius: 8, flexShrink: 0 }} />
                 )}
-                <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', marginTop: 6 }}>{p.name}</div>
+                <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', marginTop: 6, padding: props.caption_bg_color ? '0 8px' : undefined }}>{p.name}</div>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginTop: 'auto', paddingTop: 2, flexWrap: 'wrap' }}>
                   {rate !== null && (
                     <span style={{ fontSize: 'var(--dm-fs-small)', color: 'var(--dm-error)', fontWeight: 800 }}>{rate}%</span>

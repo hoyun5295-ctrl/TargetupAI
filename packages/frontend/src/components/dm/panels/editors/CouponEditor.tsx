@@ -1,5 +1,5 @@
 import type { CouponProps } from '../../../../utils/dm-section-defaults';
-import { Field, TextInput, TextArea, Select, DateTimePicker } from '../FormControls';
+import { Field, TextInput, TextArea, Select, DateTimePicker, ColorOverride } from '../FormControls';
 import type { EditorProps } from '../SectionPropsEditor';
 
 export default function CouponEditor({ props, onUpdate }: EditorProps<CouponProps>) {
@@ -39,6 +39,10 @@ export default function CouponEditor({ props, onUpdate }: EditorProps<CouponProp
 
       <Field label="연결 URL">
         <TextInput type="url" value={props.cta_url} onChange={(v) => onUpdate({ cta_url: v })} placeholder="https://..." />
+      </Field>
+
+      <Field label="버튼 색" hint="'쿠폰 사용하기' 버튼 색 — 미지정 = 기본색">
+        <ColorOverride value={props.button_color} onChange={(v) => onUpdate({ button_color: v })} />
       </Field>
     </>
   );

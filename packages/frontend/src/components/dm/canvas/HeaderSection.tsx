@@ -96,12 +96,14 @@ export default function HeaderSection({ props, storeName = '', onEdit }: { props
   const alignItems = align === 'left' ? 'flex-start' : align === 'right' ? 'flex-end' : 'center';
   const brandFs = props.brand_size === 'sm' ? 'var(--dm-fs-small)' : props.brand_size === 'lg' ? 'var(--dm-fs-h1)' : 'var(--dm-fs-h3)';
   const logoH = props.logo_size === 'sm' ? 24 : props.logo_size === 'lg' ? 48 : 32;
+  // ★ 2026-07-15 브랜드명 표시(서수란)·제목색(임은지) — SSR renderHeader logo default 미러. 로고만=false, 미설정=표시.
+  const showBrand = props.show_brand_name !== false;
   const logoBrand = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--dm-sp-2)' }}>
       {props.logo_url && <img src={dmImageUrl(props.logo_url)} alt={brand} style={{ height: logoH, borderRadius: 'var(--dm-radius-sm)' }} />}
-      {(brand || editable) && (
+      {showBrand && (brand || editable) && (
         <InlineEditable
-          style={{ fontSize: brandFs, fontWeight: 700, color: 'var(--dm-neutral-900)' }}
+          style={{ fontSize: brandFs, fontWeight: 700, color: props.title_color || 'var(--dm-neutral-900)' }}
           value={brand}
           placeholder="브랜드명"
           onChange={(v) => onEdit?.({ brand_name: v } as Partial<HeaderProps>)}

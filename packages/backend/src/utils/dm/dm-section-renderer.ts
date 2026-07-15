@@ -119,6 +119,9 @@ export function computeDmDiscountRate(price: unknown, discountPrice: unknown, ma
 function renderHeader(props: HeaderProps, ctx: SectionRenderContext): string {
   const variant = props.variant || 'logo';
   const brand = escapeHtml(props.brand_name || ctx.storeName || '');
+  // ★ 2026-07-15 헤더 제목(브랜드명) 색(임은지) — 미지정=기본 neutral-900. 브랜드명 표시 여부(서수란) — logo형에서 false면 로고만.
+  const brandColor = props.title_color ? escapeHtml(props.title_color) : 'var(--dm-neutral-900)';
+  const showBrand = props.show_brand_name !== false;
 
   switch (variant) {
     case 'banner': {
@@ -151,7 +154,7 @@ function renderHeader(props: HeaderProps, ctx: SectionRenderContext): string {
       const logoH = props.logo_size === 'sm' ? '24px' : props.logo_size === 'lg' ? '48px' : '32px';
       const logoBrand = `<div style="display:flex;align-items:center;gap:var(--dm-sp-2)">
           ${logo ? `<img src="${escapeHtml(logo)}" alt="${brand}" style="height:${logoH};border-radius:var(--dm-radius-sm)">` : ''}
-          ${brand ? `<div style="font-size:${brandFs};font-weight:800;letter-spacing:-0.01em;color:var(--dm-neutral-900)">${brand}</div>` : ''}
+          ${(showBrand && brand) ? `<div style="font-size:${brandFs};font-weight:800;letter-spacing:-0.01em;color:${brandColor}">${brand}</div>` : ''}
         </div>`;
       // ★ 2026-07-09: 좌/중/우 = column + align-items 통일 (편집 캔버스 HeaderSection과 미러).
       //   이전 좌/우 row + justify-content는 편집기 contentEditable(브랜드) 블록이 폭을 꽉 채워 flex-end가 안 먹던 근본 정정.
@@ -286,7 +289,7 @@ function renderCouponClassic(props: CouponProps): string {
       <div class="dm-text-hero" style="color:var(--dm-primary);font-weight:900;font-family:var(--dm-font-display)">${discountLabel}</div>
       ${code ? `<div style="margin-top:var(--dm-sp-4);border-top:1px dashed var(--dm-neutral-300);padding-top:var(--dm-sp-4)"><span style="background:#171717;color:#fff;display:inline-block;padding:var(--dm-sp-2) var(--dm-sp-6);border-radius:999px;font-family:var(--dm-font-mono);font-size:var(--dm-fs-h3);font-weight:700;letter-spacing:3px">${code}</span></div>` : ''}
       ${couponMeta(props)}
-      ${props.cta_url ? `<div style="margin-top:var(--dm-sp-5)"><a href="${safeUrl(props.cta_url)}" class="dm-cta dm-cta-primary" target="_blank" style="width:100%;max-width:280px">쿠폰 사용하기</a></div>` : ''}
+      ${props.cta_url ? `<div style="margin-top:var(--dm-sp-5)"><a href="${safeUrl(props.cta_url)}" class="dm-cta dm-cta-primary" target="_blank" style="width:100%;max-width:280px${couponBtnStyle(props.button_color)}">쿠폰 사용하기</a></div>` : ''}
     </div>
   </div>`;
 }
@@ -301,7 +304,7 @@ function renderCouponTicket(props: CouponProps): string {
       <div style="font-size:var(--dm-fs-hero);font-weight:900;color:var(--dm-primary);font-family:var(--dm-font-display)">${discountLabel}</div>
       ${code ? `<div style="margin-top:var(--dm-sp-4);border-top:1px dashed var(--dm-neutral-300);padding-top:var(--dm-sp-4);font-family:var(--dm-font-mono);font-size:var(--dm-fs-h2);font-weight:700;letter-spacing:3px;color:var(--dm-neutral-900)">${code}</div>` : ''}
       ${couponMeta(props)}
-      ${props.cta_url ? `<div style="margin-top:var(--dm-sp-4)"><a href="${safeUrl(props.cta_url)}" class="dm-cta dm-cta-primary" target="_blank">쿠폰 사용하기</a></div>` : ''}
+      ${props.cta_url ? `<div style="margin-top:var(--dm-sp-4)"><a href="${safeUrl(props.cta_url)}" class="dm-cta dm-cta-primary" target="_blank" style="${couponBtnStyle(props.button_color).replace(/^;/, '')}">쿠폰 사용하기</a></div>` : ''}
     </div>
   </div>`;
 }
@@ -315,7 +318,7 @@ function renderCouponSpotlight(props: CouponProps): string {
     ${discountLabel ? `<div style="font-size:var(--dm-fs-h3);font-weight:700;color:var(--dm-accent);letter-spacing:1px">${discountLabel}</div>` : ''}
     ${code ? `<div style="margin-top:var(--dm-sp-3);font-family:var(--dm-font-mono);font-size:var(--dm-fs-hero);font-weight:900;letter-spacing:4px">${code}</div>` : ''}
     <div style="margin-top:var(--dm-sp-2);color:var(--dm-neutral-400)">${couponMeta(props)}</div>
-    ${props.cta_url ? `<div style="margin-top:var(--dm-sp-5)"><a href="${safeUrl(props.cta_url)}" class="dm-cta dm-cta-primary" target="_blank">쿠폰 사용하기</a></div>` : ''}
+    ${props.cta_url ? `<div style="margin-top:var(--dm-sp-5)"><a href="${safeUrl(props.cta_url)}" class="dm-cta dm-cta-primary" target="_blank" style="${couponBtnStyle(props.button_color).replace(/^;/, '')}">쿠폰 사용하기</a></div>` : ''}
   </div>`;
 }
 
@@ -408,6 +411,20 @@ function renderTextCardClassic(props: TextCardProps): string {
   </div>`;
 }
 
+// ★ 2026-07-15 버튼 색 직접 지정(남지현·임은지 신고) — 미지정 = 스타일 프리셋(dm-cta-*) 유지(회귀 0).
+//   채움(primary/secondary) = 배경색으로(그라데이션 덮기 background-image:none), 외곽선(outline) = 테두리·글자색으로.
+function ctaBtnColorStyle(color?: string, style?: string): string {
+  if (!color) return '';
+  const c = escapeHtml(color);
+  return style === 'outline'
+    ? `border-color:${c};color:${c}`
+    : `background:${c};background-image:none;color:#fff`;
+}
+// 쿠폰 "쿠폰 사용하기" 버튼(항상 채움형) 색 오버라이드.
+function couponBtnStyle(color?: string): string {
+  return color ? `;background:${escapeHtml(color)};background-image:none;color:#fff` : '';
+}
+
 // ★ 2026-06-25 (P1) cta treatment 디스패처. 미설정/미허용=classic(현행). ★ 2026-07-13 sticky 추가.
 function renderCta(props: CtaProps, treatment?: string): string {
   switch (treatment) {
@@ -423,8 +440,9 @@ function renderCtaSticky(props: CtaProps): string {
   const buttons = Array.isArray(props.buttons) ? props.buttons : [];
   if (buttons.length === 0) return '';
   const b = buttons[0];
+  const stickyBg = b.color ? escapeHtml(b.color) : 'color-mix(in srgb, var(--dm-primary) 92%, transparent)';
   return `<div class="dm-section dm-cta-section" data-section-type="cta" style="padding:var(--dm-sp-3) var(--dm-sp-4)">
-    <a href="${safeUrl(b.url)}" target="_blank" class="dm-sticky-bar" style="display:flex;align-items:center;justify-content:center;gap:var(--dm-sp-2);background:color-mix(in srgb, var(--dm-primary) 92%, transparent);color:#fff;padding:var(--dm-sp-4) var(--dm-sp-6);font-size:var(--dm-fs-body);font-weight:800;letter-spacing:-0.01em;border-radius:999px;box-shadow:0 10px 30px -8px color-mix(in srgb, var(--dm-primary) 60%, transparent)">
+    <a href="${safeUrl(b.url)}" target="_blank" class="dm-sticky-bar" style="display:flex;align-items:center;justify-content:center;gap:var(--dm-sp-2);background:${stickyBg};color:#fff;padding:var(--dm-sp-4) var(--dm-sp-6);font-size:var(--dm-fs-body);font-weight:800;letter-spacing:-0.01em;border-radius:999px;box-shadow:0 10px 30px -8px color-mix(in srgb, var(--dm-primary) 60%, transparent)">
       <span>${escapeHtml(b.label || '자세히 보기')}</span>
       <span aria-hidden="true">→</span>
     </a>
@@ -439,7 +457,8 @@ function renderCtaClassic(props: CtaProps): string {
   const btnHtml = buttons.map((b) => {
     const styleClass = b.style === 'secondary' ? 'dm-cta-secondary' : b.style === 'outline' ? 'dm-cta-outline' : 'dm-cta-primary';
     const icon = b.icon ? `<span style="margin-right:var(--dm-sp-1)">${escapeHtml(b.icon)}</span>` : '';
-    return `<a href="${safeUrl(b.url)}" class="dm-cta ${styleClass}" target="_blank">${icon}${escapeHtml(b.label || '자세히 보기')}</a>`;
+    const colorStyle = ctaBtnColorStyle(b.color, b.style);
+    return `<a href="${safeUrl(b.url)}" class="dm-cta ${styleClass}" target="_blank"${colorStyle ? ` style="${colorStyle}"` : ''}>${icon}${escapeHtml(b.label || '자세히 보기')}</a>`;
   }).join('');
 
   // 가로 정렬: row=주축(justify-content) / column(stack)=교차축(align-items).
@@ -493,8 +512,9 @@ function renderCtaBar(props: CtaProps): string {
   const b = buttons[0];
   const more = buttons.slice(1);
   const moreHtml = more.map((x) => `<a href="${safeUrl(x.url)}" class="dm-cta dm-cta-secondary" target="_blank">${escapeHtml(x.label || '자세히 보기')}</a>`).join('');
+  const barBg = b.color ? escapeHtml(b.color) : 'var(--dm-primary)';
   return `<div class="dm-section dm-cta-section" data-section-type="cta" style="padding:var(--dm-sp-5)">
-    <a href="${safeUrl(b.url)}" target="_blank" style="display:flex;align-items:center;justify-content:space-between;gap:var(--dm-sp-3);background:var(--dm-primary);color:#fff;padding:var(--dm-sp-5) var(--dm-sp-6);font-size:var(--dm-fs-h3);font-weight:700;letter-spacing:-0.01em;border-radius:16px;box-shadow:var(--dm-shadow-md)">
+    <a href="${safeUrl(b.url)}" target="_blank" style="display:flex;align-items:center;justify-content:space-between;gap:var(--dm-sp-3);background:${barBg};color:#fff;padding:var(--dm-sp-5) var(--dm-sp-6);font-size:var(--dm-fs-h3);font-weight:700;letter-spacing:-0.01em;border-radius:16px;box-shadow:var(--dm-shadow-md)">
       <span>${escapeHtml(b.label || '자세히 보기')}</span>
       <span aria-hidden="true" style="width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.18);display:inline-flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0">→</span>
     </a>
@@ -506,7 +526,10 @@ function renderCtaBar(props: CtaProps): string {
 function renderCtaGhost(props: CtaProps): string {
   const buttons = Array.isArray(props.buttons) ? props.buttons : [];
   if (buttons.length === 0) return '';
-  const btnHtml = buttons.map((b) => `<a href="${safeUrl(b.url)}" target="_blank" style="display:block;text-align:center;border:2px solid var(--dm-primary);color:var(--dm-primary);border-radius:var(--dm-radius-lg);padding:var(--dm-sp-4);font-size:var(--dm-fs-body);font-weight:700;letter-spacing:0.5px">${escapeHtml(b.label || '자세히 보기')}</a>`).join('');
+  const btnHtml = buttons.map((b) => {
+    const gc = b.color ? escapeHtml(b.color) : 'var(--dm-primary)';
+    return `<a href="${safeUrl(b.url)}" target="_blank" style="display:block;text-align:center;border:2px solid ${gc};color:${gc};border-radius:var(--dm-radius-lg);padding:var(--dm-sp-4);font-size:var(--dm-fs-body);font-weight:700;letter-spacing:0.5px">${escapeHtml(b.label || '자세히 보기')}</a>`;
+  }).join('');
   return `<div class="dm-section dm-cta-section" data-section-type="cta" style="padding:calc(var(--dm-sp-6) * var(--dm-section-pad-scale)) var(--dm-sp-5)">
     <div style="display:flex;flex-direction:column;gap:var(--dm-sp-3)">${btnHtml}</div>
   </div>`;
@@ -697,6 +720,9 @@ function renderProductCarousel(p: any, treatment?: string): string {
   if (treatment === 'focus') return renderProductFocus(p, products);
   // ★ 2026-07-02(2) 할인 표시(할인율+할인가+정가 취소선) + 상품 링크(link_url) 카드 전체 연결
   const fitCss = productImgFitCss(p);
+  const imgH = productImgHeight(p);
+  // ★ 2026-07-15 글씨공간(카드) 배경(서수란) — 미지정=기본 var(--dm-bg).
+  const cardBg = p?.caption_bg_color ? escapeHtml(p.caption_bg_color) : 'var(--dm-bg)';
   const items = products.map((it: any) => {
     const price = Number(it.price || 0);
     const discount = Number(it.discount_price || 0);
@@ -713,18 +739,19 @@ function renderProductCarousel(p: any, treatment?: string): string {
       : `<div style="font-size:var(--dm-fs-body);font-weight:800;margin-top:auto;padding-top:4px;color:var(--dm-neutral-900);font-variant-numeric:tabular-nums">${finalPrice.toLocaleString('ko-KR')}원</div>`;
     // ★ 2026-07-02 v2 — 라운드 카드 + 가격 타이포 위계(할인율 강조·최종가 굵게) 격상
     const card = `
-      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:150px;${fitCss};display:block;flex-shrink:0"/>` : `<div style="width:100%;height:150px;background:var(--dm-neutral-100);flex-shrink:0"></div>`}
-      <div style="padding:10px 12px 12px;flex:1;display:flex;flex-direction:column">
+      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:${imgH}px;${fitCss};display:block;flex-shrink:0"/>` : `<div style="width:100%;height:${imgH}px;background:var(--dm-neutral-100);flex-shrink:0"></div>`}
+      <div style="padding:10px 12px 12px;flex:1;display:flex;flex-direction:column;background:${cardBg}">
         <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4">${escapeHtml(it.name || '')}</div>
         ${priceHtml}
       </div>`;
-    const cardWrapStyle = 'width:calc(50% - 8px);max-width:220px;box-sizing:border-box;display:flex;flex-direction:column;text-decoration:none;color:inherit;background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:16px;overflow:hidden;box-shadow:var(--dm-shadow-sm)';
+    const cardWrapStyle = `width:calc(50% - 8px);max-width:220px;box-sizing:border-box;display:flex;flex-direction:column;text-decoration:none;color:inherit;background:${cardBg};border:1px solid var(--dm-neutral-200);border-radius:16px;overflow:hidden;box-shadow:var(--dm-shadow-sm)`;
     const href = it.link_url ? safeUrl(it.link_url) : '#';
     return href !== '#'
       ? `<a href="${href}" target="_blank" rel="noopener" style="${cardWrapStyle}">${card}</a>`
       : `<div style="${cardWrapStyle}">${card}</div>`;
   }).join('');
-  return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-6) var(--dm-sp-5)">
+  const sectionBg = p?.background_color ? `;background:${escapeHtml(p.background_color)}` : '';
+  return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-6) var(--dm-sp-5)${sectionBg}">
     ${p.title ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4)">${escapeHtml(p.title)}</div>` : ''}
     <div class="dm-pc-items" style="display:flex;flex-wrap:wrap;justify-content:var(--dm-section-justify,center);gap:12px">${items}</div>
   </div>`;
@@ -750,10 +777,19 @@ function productPriceHtml(it: any, big: boolean): string {
 // ★ 2026-07-14 상품 이미지 맞춤(남지현 신고) — 채우기(cover 기본·잘릴 수 있음) / 맞추기(contain·전체 보임).
 //   정렬(image_focus)은 cover일 때 초점(object-position). 미지정=cover/center = 기존 출력 동일(회귀 0). 캔버스(NewSections imgFit) 미러.
 function productImgFitCss(p: any): string {
-  if (p?.image_fit === 'contain') return 'object-fit:contain;background:var(--dm-neutral-50)';
+  // ★ 2026-07-15 맞추기(contain) 여백 배경 = background_color(서수란 신고 — 흰 배경 이미지에 회색 여백). 미지정=기존 neutral-50.
+  if (p?.image_fit === 'contain') {
+    const bg = p?.background_color ? escapeHtml(p.background_color) : 'var(--dm-neutral-50)';
+    return `object-fit:contain;background:${bg}`;
+  }
   // 기본(cover/center)은 기존과 동일 바이트(object-position 생략 — center center는 CSS 기본). 위/아래만 object-position 부착.
   const focus = p?.image_focus === 'top' ? 'top' : p?.image_focus === 'bottom' ? 'bottom' : null;
   return focus ? `object-fit:cover;object-position:center ${focus}` : 'object-fit:cover';
+}
+
+// ★ 2026-07-15 상품 이미지 높이(서수란 신고 — 제각각 크기). 미지정=md(150 = 기존 고정 높이·회귀 0).
+function productImgHeight(p: any): number {
+  return p?.image_height === 'sm' ? 120 : p?.image_height === 'lg' ? 220 : 150;
 }
 
 // 포커스: 첫 상품 풀폭 대형 카드 + 나머지 2열 (히어로급 대표 상품 강조)

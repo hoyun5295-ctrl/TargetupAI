@@ -106,6 +106,48 @@ describe('DM 편집기↔발행 속성 계약 (재발 방지책 1)', () => {
     }
   });
 
+  // ── 2026-07-15 색·표시 옵션(남지현·임은지·서수란) — 편집기 값이 발행 SSR에 실제 소비 ──
+  describe('색·표시 옵션 소비 (2026-07-15 신고 묶음)', () => {
+    it('B1 헤더 제목색 — title_color가 출력에 반영', () => {
+      const html = renderSection(mk('header', { variant: 'logo', brand_name: 'ACME', title_color: '#ff3366' }), { storeName: 'S' } as any);
+      expect(html).toContain('#ff3366');
+    });
+    it('D1 헤더 브랜드명 표시 — show_brand_name=false면 브랜드 미출력', () => {
+      const shown = renderSection(mk('header', { variant: 'logo', brand_name: 'ACME브랜드' }), { storeName: 'S' } as any);
+      const hidden = renderSection(mk('header', { variant: 'logo', brand_name: 'ACME브랜드', show_brand_name: false }), { storeName: 'S' } as any);
+      expect(shown).toContain('ACME브랜드');
+      expect(hidden).not.toContain('ACME브랜드');
+    });
+    it('A3 CTA 버튼색 — buttons[].color가 출력에 반영(채움/외곽선)', () => {
+      const fill = renderSection(mk('cta', { layout: 'stack', buttons: [{ label: '구매', url: 'https://x.com', style: 'primary', color: '#00aa88' }] }), {} as any);
+      expect(fill).toContain('#00aa88');
+      const outline = renderSection(mk('cta', { layout: 'stack', buttons: [{ label: '구매', url: 'https://x.com', style: 'outline', color: '#00aa88' }] }), {} as any);
+      expect(outline).toContain('border-color:#00aa88');
+    });
+    it('A3 쿠폰 버튼색 — button_color가 출력에 반영', () => {
+      const html = renderSection(mk('coupon', { discount_label: '20%', discount_type: 'percent', cta_url: 'https://x.com', button_color: '#123abc' }), {} as any);
+      expect(html).toContain('#123abc');
+    });
+    it('B2 상품 배경색·글씨공간색 — 출력에 반영', () => {
+      const html = renderSection(mk('product_carousel', { products: [{ image_url: 'https://x.com/a.jpg', name: 'P', price: 1000 }], background_color: '#eef', caption_bg_color: '#fed' }), {} as any);
+      expect(html).toContain('#eef');
+      expect(html).toContain('#fed');
+    });
+    it('C1 상품 이미지 높이 — image_height가 출력 높이를 바꿈(sm 120 / lg 220)', () => {
+      const sm = renderSection(mk('product_carousel', { products: [{ image_url: 'https://x.com/a.jpg', name: 'P', price: 1000 }], image_height: 'sm' }), {} as any);
+      const lg = renderSection(mk('product_carousel', { products: [{ image_url: 'https://x.com/a.jpg', name: 'P', price: 1000 }], image_height: 'lg' }), {} as any);
+      expect(sm).toContain('height:120px');
+      expect(lg).toContain('height:220px');
+    });
+  });
+
+  // ── A1 그라데이션 연결부 = 끝색(--dm-grad-to) 착색 (임은지) ──
+  it('A1 그라데이션 하단 연결부 — --dm-grad-to 로 착색(시작색 아님)', () => {
+    const css = renderDmDesign3Css();
+    const rule = css.split('\n').find((l) => l.includes('.dm-bgx-gradient') && l.includes('.dm-divider-svg')) || '';
+    expect(rule, '그라데이션 연결부가 --dm-grad-to 로 착색돼야 배경 끝색과 이어짐').toContain('--dm-grad-to');
+  });
+
   // ── #5 제작 폰트 = 출력 폰트 ──
   describe('제작 폰트 = 출력 폰트 (#5)', () => {
     it('토큰 --dm-font-primary = Pretendard 우선 스택', () => {

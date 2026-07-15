@@ -75,6 +75,10 @@ export type HeaderProps = {
   discount_label?: string;
   coupon_code?: string;
   banner_image_url?: string;
+  // ★ 2026-07-15 헤더 제목(브랜드명) 색(임은지 신고) — 미지정 = 기본 neutral-900. 프론트 미러.
+  title_color?: string;
+  // ★ 2026-07-15 브랜드명 표시 여부(서수란 신고) — 미지정/true = 표시(현행), false = 로고만. 프론트 미러.
+  show_brand_name?: boolean;
 };
 
 export type HeroProps = {
@@ -103,6 +107,8 @@ export type CouponProps = {
   expire_date?: string;
   min_purchase?: number;
   usage_condition?: string;
+  // ★ 2026-07-15 쿠폰 "쿠폰 사용하기" 버튼 색(임은지 신고) — 미지정 = 기본 primary. 프론트 미러.
+  button_color?: string;
   cta_url?: string;
 };
 
@@ -140,6 +146,8 @@ export type CtaButton = {
   url: string;
   style: 'primary' | 'secondary' | 'outline';
   icon?: string;
+  // ★ 2026-07-15 버튼 색 직접 지정(남지현·임은지 신고) — 미지정 = 스타일 프리셋 색(dm-cta-*) 유지(회귀 0). 프론트 defaults 미러.
+  color?: string;
 };
 
 export type CtaProps = {
@@ -211,6 +219,13 @@ export type ProductCarouselProps = {
   show_indicator?: boolean;
   auto_slide?: boolean;
   slide_interval_ms?: number;
+  // ★ 2026-07-14 이미지 맞춤(남지현) — 프론트 미러(옛 프론트에만 있던 필드 정합)
+  image_fit?: 'cover' | 'contain';
+  image_focus?: 'top' | 'center' | 'bottom';
+  // ★ 2026-07-15 상품슬라이드 색·이미지 높이(서수란 신고) — 미지정 = 현행(배경 회색·캡션 무배경·md 높이). 프론트 미러.
+  background_color?: string;   // 슬라이드 섹션 배경(기본 회색 var(--dm-neutral-50) 대체)
+  caption_bg_color?: string;   // 상품명·가격 글씨공간(카드) 배경
+  image_height?: 'sm' | 'md' | 'lg';  // 이미지 높이 조정(기본 md — 기존 고정 높이)
 };
 
 export type GalleryImage = {

@@ -545,7 +545,8 @@
 .dm-pullup { position: relative; z-index: 2; margin-top: -26px; border-radius: 24px 24px 0 0; overflow: hidden;
   box-shadow: 0 -12px 32px -14px rgba(15,23,42,0.25); }
 .dm-divider-svg { display: block; line-height: 0; margin-bottom: -1px; color: var(--dm-bg); }
-.dm-bgx-gradient + .dm-divider-svg, .dm-bgx-gradient .dm-divider-svg { color: var(--dm-primary); }
+/* ★ 2026-07-15 그라데이션 연결부(임은지) — 끝색(--dm-grad-to)으로 착색해야 이어짐. dm-tokens.ts 미러. */
+.dm-bgx-gradient + .dm-divider-svg, .dm-bgx-gradient .dm-divider-svg { color: var(--dm-grad-to, color-mix(in srgb, var(--dm-primary) 35%, var(--dm-accent))); }
 /* ★ 2026-07-14 하단 연결부 미반영(남지현 신고) — divider는 배경면 div 바깥 형제라 color:var(--dm-bg)가
    페이지 기본 흰색으로 풀려 흰 위 흰색=안 보임. 배경면 변형별로 섹션 실제 색을 지정해 연결부 모양이 보이게 함. */
 .dm-bgx-soft + .dm-divider-svg, .dm-bgx-soft .dm-divider-svg { color: color-mix(in srgb, var(--dm-primary) 6%, #ffffff); }

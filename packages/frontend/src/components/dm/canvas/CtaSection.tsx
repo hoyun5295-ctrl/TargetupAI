@@ -27,11 +27,17 @@ export default function CtaSection({ props, onEdit, treatment }: { props: CtaPro
     <InlineEditable value={b.label || ''} placeholder="버튼 문구" onChange={(v) => updateButtonLabel(idx, v)} maxLength={30} style={{ minWidth: 60 }} />
   ) : (b.label || '자세히 보기');
 
+  // ★ 2026-07-15 버튼 색 직접 지정(남지현·임은지) — SSR ctaBtnColorStyle 미러. 미지정 = 프리셋 유지.
+  const btnColorStyle = (b: { color?: string; style?: string }): CSSProperties =>
+    !b.color ? {}
+      : b.style === 'outline' ? { borderColor: b.color, color: b.color }
+      : { background: b.color, backgroundImage: 'none', color: '#fff' };
+
   // ── 바: 첫 버튼 강조 바 + 화살표 ──
   if (t === 'bar' && buttons.length > 0) {
     const b = buttons[0];
     const more = buttons.slice(1);
-    const barStyle: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--dm-sp-3)', background: 'var(--dm-primary)', color: '#fff', padding: 'var(--dm-sp-5) var(--dm-sp-6)', fontSize: 'var(--dm-fs-h3)', fontWeight: 700, letterSpacing: '-0.01em', borderRadius: 16, boxShadow: 'var(--dm-shadow-md)' };
+    const barStyle: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--dm-sp-3)', background: b.color || 'var(--dm-primary)', color: '#fff', padding: 'var(--dm-sp-5) var(--dm-sp-6)', fontSize: 'var(--dm-fs-h3)', fontWeight: 700, letterSpacing: '-0.01em', borderRadius: 16, boxShadow: 'var(--dm-shadow-md)' };
     const arrow = <span aria-hidden="true" style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(255,255,255,0.18)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>→</span>;
     return (
       <div className="dm-section dm-cta-section" style={{ padding: 'var(--dm-sp-5)' }}>
@@ -55,15 +61,18 @@ export default function CtaSection({ props, onEdit, treatment }: { props: CtaPro
 
   // ── 고스트: 아웃라인 대형 라벨 ──
   if (t === 'ghost' && buttons.length > 0) {
-    const ghostStyle: CSSProperties = { display: 'block', textAlign: 'center', border: '2px solid var(--dm-primary)', color: 'var(--dm-primary)', borderRadius: 'var(--dm-radius-lg)', padding: 'var(--dm-sp-4)', fontSize: 'var(--dm-fs-body)', fontWeight: 700, letterSpacing: 0.5 };
+    const ghostStyleBase: CSSProperties = { display: 'block', textAlign: 'center', border: '2px solid var(--dm-primary)', color: 'var(--dm-primary)', borderRadius: 'var(--dm-radius-lg)', padding: 'var(--dm-sp-4)', fontSize: 'var(--dm-fs-body)', fontWeight: 700, letterSpacing: 0.5 };
     return (
       <div className="dm-section dm-cta-section" style={{ padding: 'calc(var(--dm-sp-6) * var(--dm-section-pad-scale)) var(--dm-sp-5)' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--dm-sp-3)' }}>
-          {buttons.map((b, i) => editable ? (
-            <div key={i} style={ghostStyle}>{labelEl(i, b)}</div>
-          ) : (
-            <a key={i} href={b.url || '#'} target="_blank" rel="noreferrer" style={ghostStyle}>{b.label || '자세히 보기'}</a>
-          ))}
+          {buttons.map((b, i) => {
+            const ghostStyle: CSSProperties = b.color ? { ...ghostStyleBase, borderColor: b.color, color: b.color } : ghostStyleBase;
+            return editable ? (
+              <div key={i} style={ghostStyle}>{labelEl(i, b)}</div>
+            ) : (
+              <a key={i} href={b.url || '#'} target="_blank" rel="noreferrer" style={ghostStyle}>{b.label || '자세히 보기'}</a>
+            );
+          })}
         </div>
       </div>
     );
@@ -74,7 +83,7 @@ export default function CtaSection({ props, onEdit, treatment }: { props: CtaPro
     const b = buttons[0];
     const stickyStyle: CSSProperties = {
       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--dm-sp-2)',
-      background: 'color-mix(in srgb, var(--dm-primary) 92%, transparent)', color: '#fff',
+      background: b.color || 'color-mix(in srgb, var(--dm-primary) 92%, transparent)', color: '#fff',
       padding: 'var(--dm-sp-4) var(--dm-sp-6)', fontSize: 'var(--dm-fs-body)', fontWeight: 800,
       letterSpacing: '-0.01em', borderRadius: 999,
       boxShadow: '0 10px 30px -8px color-mix(in srgb, var(--dm-primary) 60%, transparent)',
@@ -108,8 +117,9 @@ export default function CtaSection({ props, onEdit, treatment }: { props: CtaPro
           const cls = b.style === 'secondary' ? 'dm-cta dm-cta-secondary'
                     : b.style === 'outline'   ? 'dm-cta dm-cta-outline'
                     : 'dm-cta dm-cta-primary';
+          const colorStyle = btnColorStyle(b);
           return editable ? (
-            <span key={i} className={cls} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span key={i} className={cls} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, ...colorStyle }}>
               {b.icon && <span>{b.icon}</span>}
               <InlineEditable
                 value={b.label || ''}
@@ -120,7 +130,7 @@ export default function CtaSection({ props, onEdit, treatment }: { props: CtaPro
               />
             </span>
           ) : (
-            <a key={i} href={b.url || '#'} className={cls} target="_blank" rel="noreferrer">
+            <a key={i} href={b.url || '#'} className={cls} target="_blank" rel="noreferrer" style={colorStyle}>
               {b.icon && <span style={{ marginRight: 'var(--dm-sp-1)' }}>{b.icon}</span>}
               {b.label || '자세히 보기'}
             </a>
