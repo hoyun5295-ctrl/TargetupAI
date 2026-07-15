@@ -42,6 +42,7 @@ export default function GalleryEditor({ props, onUpdate }: EditorProps<GalleryPr
           )}
         />
       </Field>
+      <Field label="풀화면 (여백 없이 꽉 채우기)"><Toggle value={props.full_bleed ?? false} onChange={(v) => onUpdate({ full_bleed: v })} /></Field>
       <Field label="확대 보기"><Toggle value={props.enable_zoom ?? true} onChange={(v) => onUpdate({ enable_zoom: v })} /></Field>
     </>
   );

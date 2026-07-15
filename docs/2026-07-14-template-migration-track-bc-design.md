@@ -22,6 +22,8 @@
 | ★0715 소스 확인: 발신프로필 카톡인증 등록(token+등록+승인 워크플로+슈퍼관리자 타사 귀속)·검수 알림(kakao_alarm_users CRUD+승인/반려 SMS 발화)·승인 감지(웹훅 IP/HMAC+5분 폴링+1h sender sync)·getSender = 전부 운영 중 코드 | alimtalk.ts:156/178/293/2232 · alimtalk-jobs.ts:706 · alimtalk-api.ts:218 |
 | ★0715 소스 확인: 템플릿 조회 = 회사 전체 노출 정책(2026-07-04 Harold) — 브랜드(sender_key) 열람 스코프 **미구현** = 이 프로젝트의 유일한 진짜 신규 개발 | alimtalk.ts:605 |
 | 친구톡 = 카카오 공식 폐지(브랜드메시지 전환) — 레거시 친구톡 템플릿 이관·실사용 확인 불요 | Harold 2026-07-15 |
+| ★0715(2) 실측: 아난티 getSender 0000·@아난티·A = **같은 휴머스온 계정 확정**(관문 1 통과). alimtalk:false는 정상 운영 인비토도 false = 무의미 값. IMC 목록 = [hasNext,total,templateList]·item에 senderKey+profile.senderKey 존재·total 4,904 | 본 세션 curl 실측 2026-07-15 |
+| ★0715(2) 실행: import 2종 구현·배포 + 아난티 파일럿 pull 847건(APPROVED 827·KREJ 20·failed 0·중복 0·재카운트 일치). **엑셀 497 vs IMC 실측 827 — 서팀장 집계 기준 확인 대기** | POST /senders/import·/templates/import 실행 결과 |
 
 ## 2. 전체 그림
 
@@ -70,7 +72,7 @@
 
 ## 5. 선행 관문 (코드 착수 전)
 
-1. **아난티 getSender 실측** — `getSender('6be1390acc6dceecd2441f93fd14324d6d82ed1d')` 1콜(함수 기존 존재 — alimtalk-api.ts:218). 성공 = 같은 휴머스온 계정 확정 → B_ 76% pull 성립. 실패 = 프로필을 한줄로 연동 계정으로 이관/재발급 절차 추가(서팀장 휴머스온 라인 문의 — B-1 지연·폐기 자체는 가능). 서팀장 계정 구조 교차 확인 병행.
+1. **아난티 getSender 실측** — ★0715 통과(0000·@아난티·status A — 같은 계정 확정, §1 참조). 실측 경로 = 신설 `GET /api/alimtalk/senders/imc/:senderKey`(super_admin debug 1콜). B_ 76% pull 성립 확정.
 2. **강문희 스펙 회신** — 제안서 §3 합의 5건 + §4 확인 2건(명칭 정본 / 알림톡 senderkey 동봉 통과). 전달 경로 = Word 문서(Downloads/템플릿연동_1안_진행제안_인비토_20260715.docx) → 서팀장 검토 → 발신.
 3. **브랜드 스코프 DDL 설계** — 미구현 확정(0715 소스 확인·§B-2). 잔여 = users↔프로필 연결 축 DDL 설계 + information_schema 검증 (db_column_verify_before_code).
 4. **자비스 개발 완료 회신** — 자체게이트웨이 upsert/조회 API + 실측 4시나리오 통과.
@@ -80,11 +82,11 @@
 
 | 단계 | 내용 | 게이트 |
 |---|---|---|
-| M0 | 관문 실측(아난티 getSender) + 강문희·자비스 회신 | 관문 1·2·4 |
+| M0 | 관문 실측(아난티 getSender) + 강문희·자비스 회신 | 관문 1 ★0715 통과 / 2·4 대기 |
 | M1 | 스펙 확정 + 브랜드 스코프 스키마 검증 | 관문 3 |
 | M2 | Track C: 매핑 CT + 아웃박스 + 효과검증 + 대조 워커 | tsc 0 + 테스트 |
-| M3 | Track B: import 2종 + 브랜드 계층 + 계정 생성 | tsc 0 + 테스트 |
-| M4 | 아난티 파일럿 (497건 pull + 실발송 1건 + 결과코드 0 확인) | 6원칙 ⑤ 실측 |
+| M3 | Track B: import 2종(★0715 구현·배포 — `/senders/import`·`/templates/import`+CT-16 역변환 4종+계약 테스트 13) + 브랜드 계층·계정 생성(잔여) | tsc 0 + vitest 628 통과 |
+| M4 | 아난티 파일럿 — pull ★0715 완료(847건·APPROVED 827·KREJ 20·중복 0). 잔여 = 실발송 1건 + 결과코드 0 확인 + 497 집계 기준 대조(서팀장) | 6원칙 ⑤ 실측 |
 | M5 | 확대(회사별 순차 — 더화이트·시세이도 등) + 신규 승인분 자동 등록 개시 | 대조 워커 diff 0 |
 | M6 | 레거시 템플릿관리자 접속 차단 → 2주 무클레임 → 폐기 게이트(플랜 §6) | Track F |
 

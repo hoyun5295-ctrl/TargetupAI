@@ -14,17 +14,19 @@ export type SlidePage = { id: string; name?: string; sections: SlideSection[] };
 
 const IMAGE_SECTION_TYPES = new Set(['gallery', 'slideshow']);
 
-function extractImages(s: SlideSection): Array<{ url: string; caption?: string }> {
+// ★ 2026-07-15 full_bleed(풀화면)는 원본 갤러리 섹션 속성 → 펼친 각 페이지에 보존해야 완성 이미지 슬라이드가 꽉 찬다.
+function extractImages(s: SlideSection): Array<{ url: string; caption?: string; full_bleed?: boolean }> {
+  const fullBleed = s?.props?.full_bleed === true;
   if (s?.type === 'gallery') {
     const imgs = Array.isArray(s.props?.images) ? s.props.images : [];
     return imgs
-      .map((img: any) => ({ url: String(img?.url || ''), caption: img?.caption }))
+      .map((img: any) => ({ url: String(img?.url || ''), caption: img?.caption, full_bleed: fullBleed }))
       .filter((i: { url: string }) => i.url !== '');
   }
   if (s?.type === 'slideshow') {
     const slides = Array.isArray(s.props?.slides) ? s.props.slides : [];
     return slides
-      .map((x: any) => ({ url: String(x?.image_url || x?.url || ''), caption: x?.caption }))
+      .map((x: any) => ({ url: String(x?.image_url || x?.url || ''), caption: x?.caption, full_bleed: fullBleed }))
       .filter((i: { url: string }) => i.url !== '');
   }
   return [];
@@ -56,7 +58,7 @@ export function expandSlidePagesForSwipe(pages: SlidePage[]): SlidePage[] {
             id: `${page.id}-s${i}-img`,
             type: 'gallery',
             order: 0,
-            props: { images: [{ url: img.url, caption: img.caption }], layout: 'list_1xN' },
+            props: { images: [{ url: img.url, caption: img.caption }], layout: 'list_1xN', ...(img.full_bleed ? { full_bleed: true } : {}) },
           },
         ],
       });

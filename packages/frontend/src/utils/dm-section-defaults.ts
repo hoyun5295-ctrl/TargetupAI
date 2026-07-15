@@ -202,7 +202,7 @@ export type ProductCarouselItem = { id?: string; image_url: string; name: string
 export type ProductCarouselProps = { title?: string; products: ProductCarouselItem[]; show_indicator?: boolean; auto_slide?: boolean; slide_interval_ms?: number; image_fit?: 'cover' | 'contain'; image_focus?: 'top' | 'center' | 'bottom'; };
 
 export type GalleryImage = { url: string; caption?: string; link_url?: string; };
-export type GalleryProps = { title?: string; images: GalleryImage[]; layout: 'grid_2x2' | 'grid_3x3' | 'list_1xN' | 'masonry'; enable_zoom?: boolean; enable_fullscreen?: boolean; };
+export type GalleryProps = { title?: string; images: GalleryImage[]; layout: 'grid_2x2' | 'grid_3x3' | 'list_1xN' | 'masonry'; enable_zoom?: boolean; enable_fullscreen?: boolean; full_bleed?: boolean; };
 
 export type SlideshowSlide = { image_url: string; caption?: string; link_url?: string; };
 export type SlideshowProps = { slides: SlideshowSlide[]; interval_ms: number; show_pause?: boolean; show_indicator?: boolean; };

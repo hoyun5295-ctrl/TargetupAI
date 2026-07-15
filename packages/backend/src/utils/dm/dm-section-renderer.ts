@@ -812,15 +812,20 @@ function renderGallery(p: any, treatment?: string): string {
   const mosaic = treatment === 'mosaic';
   const isList = !mosaic && p?.layout === 'list_1xN';
   const cols = mosaic ? 2 : p?.layout === 'grid_3x3' ? 3 : isList ? 1 : 2;
+  // ★ 2026-07-15 풀화면(full_bleed) = 완성 이미지/디자인 시안을 화면 꽉 채움(패딩·테두리·라운드·간격 0).
+  //   미설정=현행 카드 프레임 유지(회귀 0). 완성 이미지 업로드·슬라이드 펼침이 자동 지정.
+  const fullBleed = p?.full_bleed === true;
+  const radius = fullBleed ? '0' : 'var(--dm-radius-md)';
+  const mosaicRadius = fullBleed ? '0' : 'var(--dm-radius-lg)';
   // list_1xN(세로 1열) = 완성 이미지/디자인 시안: 원본 비율 풀폭(크롭 X). grid류는 1:1 cover 유지.
   const imgStyle = isList
-    ? 'width:100%;height:auto;display:block;border-radius:var(--dm-radius-md)'
-    : 'width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--dm-radius-md)';
+    ? `width:100%;height:auto;display:block;border-radius:${radius}`
+    : `width:100%;aspect-ratio:1;object-fit:cover;border-radius:${radius}`;
   // ★ 2026-07-02(3) link_url 있으면 이미지 링크 연결 (입력받고도 발행물에서 안 쓰이던 결함)
   const items = images.map((img: any, i: number) => {
     // 모자이크: 첫 장 = 전체 폭 + 16/10 대형 (에디토리얼 리듬)
     const style = mosaic && i === 0
-      ? 'width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:var(--dm-radius-lg)'
+      ? `width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:${mosaicRadius}`
       : imgStyle;
     const spanWrap = mosaic && i === 0 ? 'grid-column:1/-1' : '';
     const tag = `<img src="${escapeHtml(publicImageUrl(img.url))}" loading="lazy" alt="${escapeHtml(img.caption || '')}" style="${style}"/>`;
@@ -828,9 +833,12 @@ function renderGallery(p: any, treatment?: string): string {
     const inner = href !== '#' ? `<a href="${href}" target="_blank" rel="noopener" style="display:block">${tag}</a>` : tag;
     return spanWrap ? `<div style="${spanWrap}">${inner}</div>` : inner;
   }).join('');
-  return `<div class="dm-section dm-gallery" style="padding:var(--dm-sp-6) var(--dm-sp-5)">
-    ${p.title ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4)">${escapeHtml(p.title)}</div>` : ''}
-    <div class="dm-gal-grid" style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:${isList ? 12 : 8}px">${items}</div>
+  const sectionPad = fullBleed ? '0' : 'var(--dm-sp-6) var(--dm-sp-5)';
+  const gap = fullBleed ? 0 : (isList ? 12 : 8);
+  const titlePad = fullBleed ? 'padding:var(--dm-sp-4) var(--dm-sp-5) 0' : '';
+  return `<div class="dm-section dm-gallery" style="padding:${sectionPad}">
+    ${p.title ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4);${titlePad}">${escapeHtml(p.title)}</div>` : ''}
+    <div class="dm-gal-grid" style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:${gap}px">${items}</div>
   </div>`;
 }
 

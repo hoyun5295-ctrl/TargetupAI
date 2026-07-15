@@ -42,3 +42,7 @@ export const DM_NEWLINE_FIELDS: Array<{ type: string; treatment?: string; field:
 
 /** 상품 이미지 맞춤 — cover/contain이 발행물 출력에서 실제로 달라져야 한다(#1 회귀 차단). */
 export const DM_IMAGE_FITS = ['cover', 'contain'] as const;
+
+/** 갤러리 풀화면(full_bleed) — true면 발행물에서 섹션 패딩·이미지 라운드가 0이 돼 화면 꽉 참(완성 이미지 시안).
+ *  미설정=현행 카드 프레임 유지. 편집기 GalleryEditor 토글과 값이 일치해야 한다(2026-07-15 서수란 신고). */
+export const DM_GALLERY_FULL_BLEED = [false, true] as const;

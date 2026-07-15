@@ -11,7 +11,7 @@ import { resolve } from 'node:path';
 import { renderSection } from './dm-section-renderer';
 import { renderDmDesign3Css, renderDmBaseCss, renderDmTokensCss, renderDmDividerSvg } from './dm-tokens';
 import type { Section } from './dm-section-registry';
-import { DM_BACKGROUNDS, DM_DIVIDERS, DM_NEWLINE_FIELDS, DM_IMAGE_FITS } from './dm-property-contract';
+import { DM_BACKGROUNDS, DM_DIVIDERS, DM_NEWLINE_FIELDS, DM_IMAGE_FITS, DM_GALLERY_FULL_BLEED } from './dm-property-contract';
 
 const NL = '줄1\n줄2';
 const NL_BR = '줄1<br>줄2';
@@ -85,6 +85,23 @@ describe('DM 편집기↔발행 속성 계약 (재발 방지책 1)', () => {
       it(`image_fit=${fit} — object-fit:${fit} 출력`, () => {
         const html = renderSection(mk('product_carousel', { products, image_fit: fit } as any), {} as any);
         expect(html).toContain(`object-fit:${fit}`);
+      });
+    }
+  });
+
+  // ── 갤러리 풀화면(full_bleed): 완성 이미지가 화면 꽉 참 (2026-07-15 서수란 신고) ──
+  describe('갤러리 풀화면 (full_bleed — 완성 이미지 꽉 채우기)', () => {
+    const img = [{ url: 'https://ex.com/a.jpg' }];
+    for (const fb of DM_GALLERY_FULL_BLEED) {
+      it(`full_bleed=${fb} — ${fb ? '섹션 패딩·이미지 라운드 0(꽉 참)' : '카드 프레임 유지(회귀 0)'}`, () => {
+        const html = renderSection(mk('gallery', { images: img, layout: 'list_1xN', full_bleed: fb }), {} as any);
+        if (fb) {
+          expect(html, 'full_bleed면 섹션 패딩이 0이어야 화면 꽉 참').toContain('padding:0');
+          expect(html, 'full_bleed면 이미지 라운드 제거').not.toContain('border-radius:var(--dm-radius-md)');
+        } else {
+          expect(html).toContain('var(--dm-sp-6) var(--dm-sp-5)');
+          expect(html).toContain('border-radius:var(--dm-radius-md)');
+        }
       });
     }
   });

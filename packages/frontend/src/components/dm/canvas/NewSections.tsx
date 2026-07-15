@@ -191,24 +191,30 @@ export function GallerySection({ props, treatment }: { props: GalleryProps; trea
   const mosaic = treatment === 'mosaic';
   const isList = !mosaic && props?.layout === 'list_1xN';
   const cols = mosaic ? 2 : props?.layout === 'grid_3x3' ? 3 : isList ? 1 : 2;
+  // ★ 2026-07-15 풀화면(full_bleed) = 완성 이미지 화면 꽉 채움. SSR renderGallery와 미러(패딩·테두리·라운드·간격 0).
+  const fullBleed = props?.full_bleed === true;
+  const radius = fullBleed ? 0 : 6;
   // list_1xN(세로 1열) = 완성 이미지/디자인 시안 대응: 원본 비율 풀폭(크롭 X). grid류는 1:1 cover 유지.
   const imgStyle: React.CSSProperties = isList
-    ? { width: '100%', height: 'auto', display: 'block', borderRadius: 6 }
-    : { width: '100%', aspectRatio: '1', objectFit: 'cover', borderRadius: 6 };
+    ? { width: '100%', height: 'auto', display: 'block', borderRadius: radius }
+    : { width: '100%', aspectRatio: '1', objectFit: 'cover', borderRadius: radius };
+  const sectionStyle: React.CSSProperties = fullBleed
+    ? { padding: 0, margin: 0 }
+    : CARD_STYLE;
   return (
-    <div className="dm-section dm-gallery" style={CARD_STYLE}>
-      {props.title && <div style={TITLE_STYLE}>{props.title}</div>}
+    <div className="dm-section dm-gallery" style={sectionStyle}>
+      {props.title && <div style={fullBleed ? { ...TITLE_STYLE, padding: 'var(--dm-sp-4) var(--dm-sp-5) 0' } : TITLE_STYLE}>{props.title}</div>}
       {images.length === 0 ? (
         <div style={PLACEHOLDER_STYLE}>[이미지를 추가해주세요]</div>
       ) : (
-        <div className="dm-gal-grid" style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: isList ? 10 : 6 }}>
+        <div className="dm-gal-grid" style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: fullBleed ? 0 : (isList ? 10 : 6) }}>
           {images.map((img, i) => (
             <img
               key={i}
               src={dmImageUrl(img.url)}
               alt={img.caption || ''}
               style={mosaic && i === 0
-                ? { width: '100%', aspectRatio: '16/10', objectFit: 'cover', borderRadius: 10, gridColumn: '1 / -1' }
+                ? { width: '100%', aspectRatio: '16/10', objectFit: 'cover', borderRadius: fullBleed ? 0 : 10, gridColumn: '1 / -1' }
                 : imgStyle}
             />
           ))}

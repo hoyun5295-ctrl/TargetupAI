@@ -296,11 +296,12 @@ export default function DmBuilderPage() {
       // 완성 이미지 N장 → 좌우 슬라이드(이미지당 1페이지 스와이프) 또는 세로 스크롤(1열 갤러리). 사용자 선택(mode).
       // ★ 슬라이드쇼 섹션은 16:9 크롭 + 발송 시 첫 장만 렌더 버그 → 페이지 스와이프(layoutMode 'slides')로 원본 비율·전 장 렌더.
       createNew({ title: '완성 이미지 DM' });
+      // ★ 2026-07-15 완성 이미지 = 외주가 디자인 다 한 전체 이미지 → 풀화면(full_bleed) 자동 지정(카드 여백 X, 화면 꽉)
       if (mode === 'slides') {
-        const pages = urls.map((u) => [createSection('gallery', 0, { images: [{ url: u }], layout: 'list_1xN' })]);
+        const pages = urls.map((u) => [createSection('gallery', 0, { images: [{ url: u }], layout: 'list_1xN', full_bleed: true })]);
         applyAiGenerated(pages[0], undefined, '완성 이미지 업로드', { pages, layoutMode: 'slides' });
       } else {
-        const gallery = createSection('gallery', 0, { images: urls.map((u) => ({ url: u })), layout: 'list_1xN' });
+        const gallery = createSection('gallery', 0, { images: urls.map((u) => ({ url: u })), layout: 'list_1xN', full_bleed: true });
         applyAiGenerated([gallery], undefined, '완성 이미지 업로드', { layoutMode: 'scroll' });
       }
       await save({ silent: true });

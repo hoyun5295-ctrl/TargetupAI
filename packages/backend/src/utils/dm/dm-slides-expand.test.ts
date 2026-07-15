@@ -50,4 +50,23 @@ describe('expandSlidePagesForSwipe — 슬라이드 모드: 이미지 N장을 �
     const empty = [{ id: 'p1', sections: [{ id: 'g1', type: 'gallery', order: 0, props: { images: [], layout: 'list_1xN' } }] }];
     expect(expandSlidePagesForSwipe(empty)).toBe(empty);
   });
+
+  // ★ 2026-07-15 완성 이미지 풀화면(full_bleed) 슬라이드 = 펼친 각 페이지에 보존돼야 꽉 참
+  test('full_bleed 갤러리 → 펼친 각 페이지에 full_bleed 보존', () => {
+    const pages = [
+      { id: 'p1', sections: [{ id: 'g1', type: 'gallery', order: 0, props: { images: [{ url: 'a.jpg' }, { url: 'b.jpg' }], layout: 'list_1xN', full_bleed: true } }] },
+    ];
+    const out = expandSlidePagesForSwipe(pages);
+    expect(out.length).toBe(2);
+    expect(out[0].sections[0].props.full_bleed).toBe(true);
+    expect(out[1].sections[0].props.full_bleed).toBe(true);
+  });
+
+  test('full_bleed 미설정 → 펼친 페이지에도 없음(회귀 0)', () => {
+    const pages = [
+      { id: 'p1', sections: [{ id: 'g1', type: 'gallery', order: 0, props: { images: [{ url: 'a.jpg' }, { url: 'b.jpg' }], layout: 'list_1xN' } }] },
+    ];
+    const out = expandSlidePagesForSwipe(pages);
+    expect(out[0].sections[0].props.full_bleed).toBeUndefined();
+  });
 });
