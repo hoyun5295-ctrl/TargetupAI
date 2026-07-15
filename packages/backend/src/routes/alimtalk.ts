@@ -419,6 +419,175 @@ router.get(
   },
 );
 
+// ── 슈퍼관리자 import ①: 기존 IMC 발신프로필을 한줄로 회사에 연결 (Track B-1)
+//    카톡인증 신규 등록(POST /senders)과 달리, IMC에 이미 존재·승인된 프로필의 "연결"만 수행.
+//    IMC 실조회(0000) 확인 후에만 INSERT — 컬럼은 기존 등록 경로·1h 워커에서 운영 검증된 집합만 사용(DDL 0).
+router.post(
+  '/senders/import',
+  requireSuperAdmin as any,
+  async (req: Request, res: Response) => {
+    try {
+      const companyId = String(req.body?.companyId || '').trim();
+      const senderKey = String(req.body?.senderKey || '').trim();
+      const profileNameInput = String(req.body?.profileName || '').trim();
+
+      if (!/^[0-9a-f-]{36}$/i.test(companyId)) {
+        return res.status(400).json({ success: false, error: 'companyId(uuid) 필요' });
+      }
+      if (!/^[0-9A-Za-z_-]{8,64}$/.test(senderKey)) {
+        return res
+          .status(400)
+          .json({ success: false, error: 'senderKey 형식 오류 — 영숫자 8~64자' });
+      }
+
+      const comp = await query(
+        `SELECT id, company_name FROM companies WHERE id = $1::uuid LIMIT 1`,
+        [companyId],
+      );
+      if (comp.rows.length === 0) {
+        return res.status(404).json({ success: false, error: '회사 없음' });
+      }
+
+      // 중복 연결 가드 — profile_key는 전역 1회만 연결 (unique 제약이 없어 코드 가드)
+      const dupKey = await query(
+        `SELECT p.id, p.company_id, c.company_name
+           FROM kakao_sender_profiles p
+           LEFT JOIN companies c ON c.id = p.company_id
+          WHERE p.profile_key = $1
+          LIMIT 1`,
+        [senderKey],
+      );
+      if (dupKey.rows.length > 0) {
+        return res.status(409).json({
+          success: false,
+          error: `이미 연결된 senderKey입니다 (회사: ${dupKey.rows[0].company_name || dupKey.rows[0].company_id})`,
+          existingProfileId: dupKey.rows[0].id,
+        });
+      }
+
+      // IMC 실조회 — 존재·우리 계정 소속 확인 후에만 연결
+      const r = await imc.getSender(senderKey);
+      if (r.code !== '0000' || !r.data?.senderKey) {
+        return res.status(400).json({
+          success: false,
+          code: r.code,
+          error: 'IMC 조회 실패 — 우리 계정에서 보이지 않는 senderKey',
+          imc: r,
+        });
+      }
+      const d = r.data;
+
+      // 동일 회사+채널 중복 가드 (idx_ksp_yellow_id unique 선방어 — 신규 등록 경로와 동일 정책)
+      if (d.uuid) {
+        const dupChannel = await query(
+          `SELECT id FROM kakao_sender_profiles
+            WHERE company_id = $1 AND yellow_id = $2
+            LIMIT 1`,
+          [companyId, d.uuid],
+        );
+        if (dupChannel.rows.length > 0) {
+          return res.status(409).json({
+            success: false,
+            error: `같은 회사에 이미 등록된 채널입니다 (${d.uuid})`,
+            existingProfileId: dupChannel.rows[0].id,
+          });
+        }
+      }
+
+      // 카테고리 이름 캐시 (신규 등록 경로와 동일 — 실패 무시)
+      let categoryNameCache: string | null = null;
+      if (d.categoryCode) {
+        try {
+          const cat = await imc.getSenderCategory(String(d.categoryCode));
+          if (cat.code === '0000' && cat.data) categoryNameCache = cat.data.name;
+        } catch {
+          /* 카테고리 조회 실패 무시 */
+        }
+      }
+
+      const ins = await query(
+        `INSERT INTO kakao_sender_profiles
+           (company_id, profile_key, profile_name, is_active,
+            yellow_id, category_code, category_name_cache,
+            top_sender_yn, custom_sender_key, status,
+            block_yn, dormant_yn, brand_message_yn, channel_created_at,
+            approval_status, approval_requested_at, approved_at, approved_by,
+            registered_at, updated_at)
+         VALUES ($1,$2,$3,true,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
+                 'APPROVED', now(), now(), $14,
+                 now(), now())
+         RETURNING *`,
+        [
+          companyId,
+          d.senderKey,
+          profileNameInput || d.name || d.uuid || senderKey,
+          d.uuid || null,
+          d.categoryCode ? String(d.categoryCode) : null,
+          categoryNameCache,
+          d.topSenderKeyYn || 'N',
+          d.customSenderKey || null,
+          d.status || 'NORMAL',
+          d.block === true ? 'Y' : 'N',
+          d.dormant === true ? 'Y' : 'N',
+          d.brandMessage === true ? 'Y' : 'N',
+          d.createdAt || null,
+          req.user?.userId || null,
+        ],
+      );
+
+      console.log(
+        `[alimtalk][senders-import] company=${comp.rows[0].company_name} key=${d.senderKey} uuid=${d.uuid} status=${d.status} → id=${ins.rows[0].id}`,
+      );
+      return res.status(201).json({ success: true, profile: ins.rows[0], imc: r });
+    } catch (err) {
+      return handleImcError(res, err);
+    }
+  },
+);
+
+// ── 슈퍼관리자 디버그: IMC 계정 전체 템플릿 목록 probe (Track B-1 ② 템플릿 pull 사전 실측)
+//    목록 item에 senderKey 필드가 있는지 raw 확인용 — 외부 API 응답 구조 추측 금지 (D217+ 교훈).
+//    DB 무접촉(read-only).
+router.get(
+  '/templates/imc/probe',
+  requireSuperAdmin as any,
+  async (req: Request, res: Response) => {
+    try {
+      const page = Math.max(0, parseInt(String(req.query.page ?? '0'), 10) || 0);
+      const count = Math.min(100, Math.max(1, parseInt(String(req.query.count ?? '5'), 10) || 5));
+      const r = await imc.listAlimtalkTemplates({ page, count });
+      const data: any = r.data || {};
+      const items: any[] = data.templateList || data.list || [];
+      const senderKeyPresent = items.filter((it) => it?.senderKey || it?.sender_key).length;
+      console.log(
+        `[alimtalk][imc-list-probe] page=${page} count=${count} code=${r.code} keys=[${Object.keys(data).join(',')}] items=${items.length} senderKeyPresent=${senderKeyPresent}`,
+      );
+      return res.json({
+        success: true,
+        code: r.code,
+        topLevelKeys: Object.keys(data),
+        total: data.total ?? null,
+        hasNext: data.hasNext ?? null,
+        itemCount: items.length,
+        senderKeyPresentCount: senderKeyPresent,
+        firstItemKeys: items[0] ? Object.keys(items[0]) : [],
+        sample: items.slice(0, 2),
+      });
+    } catch (err: any) {
+      if (err instanceof ImcApiError) {
+        return res.json({
+          success: false,
+          imcCode: err.code,
+          httpStatus: err.httpStatus,
+          responseBody: err.responseBody ?? null,
+          message: err.message,
+        });
+      }
+      return handleImcError(res, err);
+    }
+  },
+);
+
 router.get('/senders/:id', async (req: Request, res: Response) => {
   try {
     const r = await query(
