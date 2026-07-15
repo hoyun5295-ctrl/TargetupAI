@@ -588,6 +588,217 @@ router.get(
   },
 );
 
+// ── 슈퍼관리자 import ②: 특정 senderKey의 IMC 템플릿 → kakao_templates 행 생성 (Track B-1)
+//    CT-91 sync(기존 행 백필 전용·행 생성 X)와 별개의 신설 경로. 검수상태·템플릿코드 = IMC 원본 그대로(재검수 없음).
+//    멱등 = 회사 내 template_key/template_code 기존 행 skip. dryRun 기본 true(명시 false일 때만 INSERT).
+//    buttons/대표링크 = CT-16 fromImc* 역변환으로 DB 규약(camelCase) 저장 — 발송 CT(toAttachmentLink)가 camel만 읽음.
+//    imc_template_status는 운영 ALTER 미실행 가능성(SCHEMA.md 2026-06-11 실측)으로 INSERT 제외 — 30분 워커가 백필.
+//    created_by = NULL(='자동' 관례) — super_admins id는 users FK와 다른 테이블이라 미기록.
+router.post(
+  '/templates/import',
+  requireSuperAdmin as any,
+  async (req: Request, res: Response) => {
+    try {
+      const companyId = String(req.body?.companyId || '').trim();
+      const senderKey = String(req.body?.senderKey || '').trim();
+      const dryRun = req.body?.dryRun !== false;
+
+      if (!/^[0-9a-f-]{36}$/i.test(companyId)) {
+        return res.status(400).json({ success: false, error: 'companyId(uuid) 필요' });
+      }
+      if (!/^[0-9A-Za-z_-]{8,64}$/.test(senderKey)) {
+        return res
+          .status(400)
+          .json({ success: false, error: 'senderKey 형식 오류 — 영숫자 8~64자' });
+      }
+
+      const prof = await query(
+        `SELECT id FROM kakao_sender_profiles
+          WHERE company_id = $1::uuid AND profile_key = $2
+          LIMIT 1`,
+        [companyId, senderKey],
+      );
+      if (prof.rows.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: '해당 회사에 연결된 senderKey가 없습니다 — 먼저 POST /senders/import(연결)를 실행하세요',
+        });
+      }
+      const profileId: string = prof.rows[0].id;
+
+      // 1) IMC 계정 전체 목록 페이지네이션 → senderKey 필터
+      //    (2026-07-15 probe 실측: 최상위 [hasNext,total,templateList], item에 senderKey+profile.senderKey 존재)
+      const PAGE_SIZE = 100;
+      const MAX_PAGES = 100;
+      const matched: any[] = [];
+      let imcScanned = 0;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const r = await imc.listAlimtalkTemplates({ page, count: PAGE_SIZE });
+        if (r.code !== '0000') {
+          // 부분 스캔으로 진행하면 누락 import가 "완료"로 보임 — 전체 스캔 실패 시 중단이 정답
+          return res.status(502).json({
+            success: false,
+            error: `IMC 목록 조회 실패 (page=${page}, code=${r.code}) — 전체 스캔 불가로 중단`,
+            imcMessage: r.message,
+          });
+        }
+        const data: any = r.data || {};
+        const items: any[] = data.templateList || [];
+        imcScanned += items.length;
+        for (const it of items) {
+          const itemKey = it?.senderKey || it?.profile?.senderKey;
+          if (itemKey === senderKey) matched.push(it);
+        }
+        if (data.hasNext !== true || items.length === 0) break;
+      }
+
+      if (matched.length === 0) {
+        return res.json({
+          success: true,
+          dryRun,
+          imcScanned,
+          matchedForSender: 0,
+          message: 'IMC 목록에 해당 senderKey 템플릿이 없습니다',
+        });
+      }
+
+      // 2) 기존 행 dedup (멱등 — 재실행 안전)
+      const existing = await query(
+        `SELECT template_key, template_code FROM kakao_templates WHERE company_id = $1::uuid`,
+        [companyId],
+      );
+      const existingKeys = new Set<string>();
+      for (const row of existing.rows) {
+        if (row.template_key) existingKeys.add(String(row.template_key));
+        if (row.template_code) existingKeys.add(String(row.template_code));
+      }
+      const toCreate = matched.filter((it) => {
+        const k = it?.templateKey ? String(it.templateKey) : '';
+        const c = it?.templateCode ? String(it.templateCode) : '';
+        return !(k && existingKeys.has(k)) && !(c && existingKeys.has(c));
+      });
+      const skippedExisting = matched.length - toCreate.length;
+      const summary = (arr: any[]) =>
+        arr.slice(0, 5).map((it) => ({
+          templateCode: it.templateCode,
+          templateKey: it.templateKey,
+          templateName: it.templateName,
+          inspectionStatus: it.inspectionStatus,
+          imcStatus: it.status,
+        }));
+
+      if (dryRun) {
+        console.log(
+          `[alimtalk][templates-import][dryRun] key=${senderKey} imcScanned=${imcScanned} matched=${matched.length} wouldCreate=${toCreate.length} skippedExisting=${skippedExisting}`,
+        );
+        return res.json({
+          success: true,
+          dryRun: true,
+          imcScanned,
+          matchedForSender: matched.length,
+          wouldCreate: toCreate.length,
+          skippedExisting,
+          sample: summary(toCreate),
+        });
+      }
+
+      // 3) INSERT — 컬럼 집합 = 운영 등록 INSERT + 운영 UPDATE 검증분(approved_at·reject_reason)만
+      let created = 0;
+      const failures: Array<{ templateCode: string; error: string }> = [];
+      for (const it of toCreate) {
+        const status = normalizeImcTemplateStatus(it.inspectionStatus || '');
+        const approvedAt =
+          status === 'APPROVED' && it.inspectionStatusUpdate ? it.inspectionStatusUpdate : null;
+        const representLink = imc.fromImcRepresentLink(it.templateRepresentLink);
+        try {
+          await query(
+            `INSERT INTO kakao_templates
+               (company_id, profile_id, template_code, template_key, template_name,
+                content, buttons, variables, status,
+                category, message_type, emphasize_type, emphasize_title, emphasize_subtitle, emphasize_sub_title,
+                image_name, extra_content, ad_content, security_flag, quick_replies,
+                template_header, item_highlight, item_list, item_summary, represent_link,
+                preview_message, alarm_phone_numbers, service_mode, custom_template_code,
+                reject_reason, approved_at,
+                created_by, created_at, updated_at, last_synced_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::text[],$9,
+                     $10,$11,$12,$13,$14,$14,
+                     $15,$16,$17,$18,$19::jsonb,
+                     $20,$21::jsonb,$22::jsonb,$23::jsonb,$24::jsonb,
+                     $25,$26,$27,$28,
+                     $29,$30::timestamp,
+                     NULL, COALESCE($31::timestamp, now()), now(), now())`,
+            [
+              companyId,
+              profileId,
+              String(it.templateCode || it.templateKey),
+              it.templateKey ? String(it.templateKey) : null,
+              String(it.templateName || it.manageName || '').slice(0, 100),
+              it.templateContent || '',
+              JSON.stringify(imc.fromImcButtons(it.buttonList)),
+              imc.extractAlimtalkVariables(it.templateContent),
+              status,
+              it.categoryCode ? String(it.categoryCode) : null,
+              it.templateMessageType || 'BA',
+              it.templateEmphasizeType || 'NONE',
+              it.templateTitle ? String(it.templateTitle).slice(0, 50) : null,
+              it.templateSubtitle || null,
+              it.templateImageName || null,
+              it.templateExtra || null,
+              it.templateAd ? String(it.templateAd).slice(0, 100) : null,
+              it.securityFlag === true,
+              JSON.stringify(imc.fromImcButtons(it.quickReplyList)),
+              it.templateHeader || null,
+              it.templateItemHighlight ? JSON.stringify(it.templateItemHighlight) : null,
+              it.templateItem?.list ? JSON.stringify(it.templateItem.list) : null,
+              it.templateItem?.summary ? JSON.stringify(it.templateItem.summary) : null,
+              representLink ? JSON.stringify(representLink) : null,
+              it.templatePreviewMessage || null,
+              it.alarmPhoneNumber || null,
+              it.serviceMode || 'PRD',
+              it.customTemplateCode || null,
+              it.rejectReason || null,
+              approvedAt,
+              it.createdAt || null,
+            ],
+          );
+          created++;
+        } catch (insErr: any) {
+          failures.push({
+            templateCode: String(it.templateCode || it.templateKey),
+            error: insErr?.message || String(insErr),
+          });
+        }
+      }
+
+      // 4) 효과 검증 — 실제 잔존 재카운트 후에만 성공 표시 (6원칙 ②)
+      const recount = await query(
+        `SELECT COUNT(*)::int AS cnt FROM kakao_templates
+          WHERE company_id = $1::uuid AND profile_id = $2::uuid`,
+        [companyId, profileId],
+      );
+      const finalCount = recount.rows[0]?.cnt ?? null;
+
+      console.log(
+        `[alimtalk][templates-import] key=${senderKey} matched=${matched.length} created=${created} skipped=${skippedExisting} failed=${failures.length} finalCount=${finalCount}`,
+      );
+      return res.status(failures.length === 0 ? 201 : 207).json({
+        success: failures.length === 0,
+        dryRun: false,
+        imcScanned,
+        matchedForSender: matched.length,
+        created,
+        skippedExisting,
+        failed: failures.length,
+        failures: failures.slice(0, 5),
+        finalCountForProfile: finalCount,
+      });
+    } catch (err) {
+      return handleImcError(res, err);
+    }
+  },
+);
+
 router.get('/senders/:id', async (req: Request, res: Response) => {
   try {
     const r = await query(

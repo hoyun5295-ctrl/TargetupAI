@@ -412,6 +412,87 @@ export interface AlimtalkTemplateData extends AlimtalkTemplateCreateRequest {
   [key: string]: any;
 }
 
+// ════════════════════════════════════════════════════════════
+// Track B 이관(import) 역변환 — IMC 응답(snake_case) → 한줄로 DB 저장 규약(camelCase)
+// ════════════════════════════════════════════════════════════
+// DB의 buttons/represent_link는 등록 경로(frontend) 기준 camelCase로 저장된다.
+// 발송 CT(alimtalk-emphasize toAttachmentLink)는 camelCase만 읽으므로, IMC 목록 raw(snake_case,
+// 2026-07-15 probe 실측: buttonList url_mobile 등)를 그대로 저장하면 대표링크가 발송에서
+// 유실된다(대표링크 미동봉 7300 축 — D234+). import 경로는 반드시 아래 역변환을 거친다.
+// snake/camel 둘 다 있으면 camel 우선(idempotent — toImcButton pick 관례의 역방향 대칭).
+
+export function fromImcButton(b: any): any {
+  if (!b || typeof b !== 'object') return b;
+  const pick = (snake: string, camel: string) =>
+    b[camel] !== undefined ? b[camel] : b[snake];
+  const out: Record<string, any> = {};
+  if (b.name !== undefined) out.name = b.name;
+  if (b.type !== undefined) out.type = b.type;
+  const map: Array<[string, string]> = [
+    ['url_mobile', 'urlMobile'],
+    ['url_pc', 'urlPc'],
+    ['scheme_android', 'schemeAndroid'],
+    ['scheme_ios', 'schemeIos'],
+    ['chat_extra', 'chatExtra'],
+    ['chat_event', 'chatEvent'],
+    ['biz_form_id', 'bizFormId'],
+    ['plugin_id', 'pluginId'],
+    ['relay_id', 'relayId'],
+    ['oneclick_id', 'oneclickId'],
+    ['product_id', 'productId'],
+    ['tel_number', 'telNumber'],
+    ['map_address', 'mapAddress'],
+    ['map_coordinates', 'mapCoordinates'],
+  ];
+  for (const [snake, camel] of map) {
+    const v = pick(snake, camel);
+    if (v !== undefined && v !== null && v !== '') out[camel] = v;
+  }
+  if (b.target !== undefined && b.target !== null && b.target !== '') out.target = b.target;
+  return out;
+}
+
+export function fromImcButtons(list: any): any[] {
+  if (!Array.isArray(list)) return [];
+  return list.map(fromImcButton);
+}
+
+export interface CamelRepresentLink {
+  urlMobile?: string;
+  urlPc?: string;
+  schemeIos?: string;
+  schemeAndroid?: string;
+}
+
+export function fromImcRepresentLink(link: any): CamelRepresentLink | null {
+  if (!link || typeof link !== 'object') return null;
+  const out: Record<string, string> = {};
+  const pairs: Array<[string, string]> = [
+    ['url_mobile', 'urlMobile'],
+    ['url_pc', 'urlPc'],
+    ['scheme_ios', 'schemeIos'],
+    ['scheme_android', 'schemeAndroid'],
+  ];
+  for (const [snake, camel] of pairs) {
+    const raw = link[camel] !== undefined && link[camel] !== null && link[camel] !== ''
+      ? link[camel]
+      : link[snake];
+    if (raw !== undefined && raw !== null && raw !== '') out[camel] = String(raw);
+  }
+  return Object.keys(out).length > 0 ? (out as CamelRepresentLink) : null;
+}
+
+/**
+ * 알림톡 본문에서 #{...} 변수 전체 토큰 추출 (unique, 등장 순서 유지).
+ * frontend AlimtalkVariableMappingPanel/AlimtalkChannelPanel extractVariables와 동일 규칙 —
+ * variables 컬럼 저장 형식 = '#{고객명}' 전체 토큰.
+ */
+export function extractAlimtalkVariables(content: string | null | undefined): string[] {
+  if (!content) return [];
+  const matches = String(content).match(/#\{[^}]+\}/g) || [];
+  return Array.from(new Set(matches));
+}
+
 /**
  * 버튼/퀵리플라이 필드명 camelCase → snake_case 변환 (IMC 문서 규약).
  * Frontend ButtonEditor/QuickReplyEditor는 camelCase 타입을 쓰므로 IMC 전송 직전에 변환.
