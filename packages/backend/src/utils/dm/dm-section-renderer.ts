@@ -334,9 +334,13 @@ function renderCountdownClassic(props: CountdownProps): string {
   // 2026-07-09: 배경색·상단문구 글씨색 (미지정 = 기본 다크/accent). ★ 2026-07-13 다크 패널 리터럴 고정(#171717 = 기존 var 값 동일)
   const cdBg = props.background_color ? escapeHtml(props.background_color) : '#171717';
   const cdUrgencyColor = props.urgency_color ? escapeHtml(props.urgency_color) : 'var(--dm-accent)';
+  // ★ 2026-07-16 (#4 직원신고): 카운트다운 숫자·라벨 글씨색 = 상단 문구 글씨색(urgency_color) 따라감.
+  //   미지정 = 흰색(기존 유지, 비파괴). 배경 흰색 지정 시 숫자가 안 보이던 근본(숫자 #fff 하드코딩) 해소.
+  //   숫자(.cd-num)는 CSS `color:var(--dm-cd-num,#fff)`를 참조하므로 섹션에 --dm-cd-num을 주입, 라벨은 섹션 color 상속.
+  const cdFg = props.urgency_color ? escapeHtml(props.urgency_color) : '#fff';
 
   // ★ 2026-07-02(5) 발행물 디자인 격상 — 이메일 톤: 중앙 정렬 + 자간 라벨 + 여백 리듬 + 절제된 타일
-  return `<div class="dm-section dm-countdown" data-section-type="countdown" data-end="${escapeHtml(end)}" style="padding:var(--dm-sp-8) var(--dm-sp-5);background:${cdBg};color:#fff">
+  return `<div class="dm-section dm-countdown" data-section-type="countdown" data-end="${escapeHtml(end)}" style="padding:var(--dm-sp-8) var(--dm-sp-5);background:${cdBg};color:${cdFg};--dm-cd-num:${cdFg}">
     <div style="font-size:var(--dm-fs-small);font-weight:700;letter-spacing:3px;color:${cdUrgencyColor};margin-bottom:var(--dm-sp-5)">${urgency}</div>
     <div class="dm-countdown-display" style="display:flex;gap:var(--dm-sp-2);justify-content:var(--dm-section-justify,center);flex-wrap:wrap;align-items:stretch">
       ${props.show_days    ? `<div class="cd-unit"><div class="cd-num" data-unit="d">00</div><div class="cd-lbl">일</div></div>` : ''}
@@ -353,9 +357,11 @@ function renderCountdownBanner(props: CountdownProps): string {
   const urgency = escapeHtml(props.urgency_text || '마감까지');
   const cdBg = props.background_color ? escapeHtml(props.background_color) : '#171717';
   const cdUrgencyColor = props.urgency_color ? escapeHtml(props.urgency_color) : 'var(--dm-accent)';
+  // ★ 2026-07-16 (#4): 배너 구도도 숫자·라벨이 urgency_color 따라감(미지정=흰색). classic과 동일 정합.
+  const cdFg = props.urgency_color ? escapeHtml(props.urgency_color) : '#fff';
   const unit = (u: string, lbl: string) =>
     `<span style="display:inline-flex;align-items:baseline;gap:2px"><span class="cd-num" data-unit="${u}" style="font-size:20px;letter-spacing:0">00</span><span style="font-size:10px;opacity:0.55">${lbl}</span></span>`;
-  return `<div class="dm-section dm-countdown" data-section-type="countdown" data-end="${escapeHtml(end)}" style="padding:var(--dm-sp-4) var(--dm-sp-5);background:${cdBg};color:#fff;display:flex;align-items:center;justify-content:space-between;gap:var(--dm-sp-3);flex-wrap:wrap">
+  return `<div class="dm-section dm-countdown" data-section-type="countdown" data-end="${escapeHtml(end)}" style="padding:var(--dm-sp-4) var(--dm-sp-5);background:${cdBg};color:${cdFg};--dm-cd-num:${cdFg};display:flex;align-items:center;justify-content:space-between;gap:var(--dm-sp-3);flex-wrap:wrap">
     <div style="font-size:var(--dm-fs-small);font-weight:700;letter-spacing:2px;color:${cdUrgencyColor}">${urgency}</div>
     <div class="dm-countdown-display" style="display:flex;gap:var(--dm-sp-3);align-items:baseline">
       ${props.show_days ? unit('d', '일') : ''}${props.show_hours ? unit('h', '시간') : ''}${props.show_minutes ? unit('m', '분') : ''}${props.show_seconds ? unit('s', '초') : ''}
@@ -666,7 +672,7 @@ function renderFooter(props: FooterProps, ctx: SectionRenderContext): string {
   return `<div class="dm-section dm-footer" data-section-type="footer" style="padding:var(--dm-sp-8) var(--dm-sp-6);background:var(--dm-neutral-100);border-top:1px solid var(--dm-neutral-200)">
     ${props.notes ? `<div class="dm-text-small" style="color:var(--dm-neutral-600);margin-bottom:var(--dm-sp-4);white-space:pre-wrap;line-height:1.8">${escapeHtml(props.notes)}</div>` : ''}
     ${props.cs_phone ? `<div class="dm-text-small" style="color:var(--dm-neutral-700);margin-bottom:var(--dm-sp-1)"><strong>고객센터</strong> <a href="tel:${escapeHtml(props.cs_phone)}" style="color:var(--dm-primary);font-weight:600">${escapeHtml(props.cs_phone)}</a></div>` : ''}
-    ${props.cs_hours ? `<div class="dm-text-tiny" style="color:var(--dm-neutral-500);margin-bottom:var(--dm-sp-2)">${escapeHtml(props.cs_hours)}</div>` : ''}
+    ${props.cs_hours ? `<div class="dm-text-tiny" style="color:var(--dm-neutral-500);margin-bottom:var(--dm-sp-2);white-space:pre-wrap;line-height:1.7">${escapeHtml(props.cs_hours)}</div>` : ''}
     ${props.legal_text ? `<div class="dm-text-tiny" style="color:var(--dm-neutral-500);margin-top:var(--dm-sp-3);white-space:pre-wrap;line-height:1.7">${escapeHtml(props.legal_text)}</div>` : ''}
     <div class="dm-text-tiny" style="color:var(--dm-neutral-400);margin-top:var(--dm-sp-4)">
       ${unsubLink}

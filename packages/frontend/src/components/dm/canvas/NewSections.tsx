@@ -158,31 +158,34 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
               : (price > 0 && discount > 0 && discount < price ? Math.round((1 - discount / price) * 100) : null);
             const finalPrice = discount > 0 ? discount : price;
             return (
-              // ★ 2026-07-10 임은지 건의: 가격 줄 = 카드 하단 고정(marginTop auto) — 제품명 길이 무관하게
-              //   같은 행 카드들의 가격 위치 일정(flex row 기본 stretch = 행 높이 동일). 발행 SSR 미러.
-              <div key={p.id || i} style={{ width: 'calc(50% - 8px)', maxWidth: 220, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', background: cardBg, borderRadius: 8 }}>
+              // ★ 2026-07-16 (#2 재오픈): classic 카드 구조·스타일을 발행 SSR renderProductCarousel과 정확히 미러.
+              //   드리프트였던 카드 테두리·그림자·radius(8→16)·overflow·내부 패딩(10 12 12)·가격 글씨(크기 fs-small→h3/body·굵기 700→800)를
+              //   발행물 기준으로 통일. 가격 줄 = 카드 하단 고정(marginTop auto)로 같은 행 카드 가격 위치 일정(임은지 건의 유지).
+              <div key={p.id || i} style={{ width: 'calc(50% - 8px)', maxWidth: 220, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', background: cardBg, border: '1px solid var(--dm-neutral-200)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--dm-shadow-sm)' }}>
                 {p.image_url ? (
-                  <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: '100%', height: imgH, borderRadius: 8, flexShrink: 0, ...imgFit }} />
+                  <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: '100%', height: imgH, display: 'block', flexShrink: 0, ...imgFit }} />
                 ) : (
-                  <div style={{ width: '100%', height: imgH, background: 'var(--dm-neutral-100)', borderRadius: 8, flexShrink: 0 }} />
+                  <div style={{ width: '100%', height: imgH, background: 'var(--dm-neutral-100)', flexShrink: 0 }} />
                 )}
-                <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', marginTop: 6, padding: props.caption_bg_color ? '0 8px' : undefined }}>{p.name}</div>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginTop: 'auto', paddingTop: 2, flexWrap: 'wrap' }}>
-                  {rate !== null && (
-                    <span style={{ fontSize: 'var(--dm-fs-small)', color: 'var(--dm-error)', fontWeight: 800 }}>{rate}%</span>
-                  )}
-                  <span style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 700, color: 'var(--dm-neutral-900)' }}>
-                    {finalPrice.toLocaleString('ko-KR')}원
-                  </span>
-                  {rate !== null && (
-                    <span style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-400)', textDecoration: 'line-through' }}>
-                      {price.toLocaleString('ko-KR')}원
+                <div style={{ padding: '10px 12px 12px', flex: 1, display: 'flex', flexDirection: 'column', background: cardBg }}>
+                  <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4 }}>{p.name}</div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginTop: 'auto', paddingTop: 4, flexWrap: 'wrap', fontVariantNumeric: 'tabular-nums' }}>
+                    {rate !== null && (
+                      <span style={{ fontSize: 'var(--dm-fs-h3)', color: 'var(--dm-error)', fontWeight: 800 }}>{rate}%</span>
+                    )}
+                    <span style={{ fontSize: 'var(--dm-fs-body)', fontWeight: 800, color: 'var(--dm-neutral-900)' }}>
+                      {finalPrice.toLocaleString('ko-KR')}원
                     </span>
-                  )}
+                    {rate !== null && (
+                      <span style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-400)', textDecoration: 'line-through' }}>
+                        {price.toLocaleString('ko-KR')}원
+                      </span>
+                    )}
+                  </div>
+                  {p.link_url ? (
+                    <div style={{ fontSize: 10, color: 'var(--dm-primary)', marginTop: 4 }}>링크 연결됨</div>
+                  ) : null}
                 </div>
-                {p.link_url ? (
-                  <div style={{ fontSize: 10, color: 'var(--dm-primary)', marginTop: 2 }}>링크 연결됨</div>
-                ) : null}
               </div>
             );
           })}

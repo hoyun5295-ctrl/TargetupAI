@@ -39,7 +39,7 @@ export default function CountdownSection({ props, onEdit, treatment }: { props: 
   // ── 배너: 슬림 인라인 스트립 (★ 2026-07-13 — SSR renderCountdownBanner 미러) ──
   if (treatment === 'banner') {
     return (
-      <div className="dm-section dm-countdown" style={{ padding: 'var(--dm-sp-4) var(--dm-sp-5)', background: props.background_color || '#171717', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--dm-sp-3)', flexWrap: 'wrap' }}>
+      <div className="dm-section dm-countdown" style={{ padding: 'var(--dm-sp-4) var(--dm-sp-5)', background: props.background_color || '#171717', color: props.urgency_color || '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--dm-sp-3)', flexWrap: 'wrap' }}>
         <InlineEditable
           style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 700, letterSpacing: 2, color: props.urgency_color || 'var(--dm-accent)' }}
           value={props.urgency_text || '마감까지'}
@@ -63,7 +63,7 @@ export default function CountdownSection({ props, onEdit, treatment }: { props: 
   // ★ 2026-07-02(5) 발행물(SSR) 격상과 동일 스타일 — 에디터·발행물 시각 일치 (3면 대조)
   //   ★ 2026-07-13 다크 패널 리터럴 고정(#171717 = 기존 var 값 동일 — 다크 테마 반전 안전, SSR 미러)
   return (
-    <div className="dm-section dm-countdown" style={{ padding: 'var(--dm-sp-8) var(--dm-sp-5)', background: props.background_color || '#171717', color: '#fff' }}>
+    <div className="dm-section dm-countdown" style={{ padding: 'var(--dm-sp-8) var(--dm-sp-5)', background: props.background_color || '#171717', color: props.urgency_color || '#fff' }}>
       <InlineEditable
         style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 700, letterSpacing: 3, color: props.urgency_color || 'var(--dm-accent)', marginBottom: 'var(--dm-sp-5)' }}
         value={props.urgency_text || '마감까지'}

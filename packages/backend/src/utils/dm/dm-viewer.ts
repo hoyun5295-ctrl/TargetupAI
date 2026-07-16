@@ -438,7 +438,7 @@ ${baseCss}
 ${renderDmDesign3Css()}
 ${renderDmVariantCss()}
 .cd-unit{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:14px;padding:var(--dm-sp-4) var(--dm-sp-3);min-width:76px}
-.cd-num{font-size:34px;font-weight:800;font-family:var(--dm-font-display);font-variant-numeric:tabular-nums;letter-spacing:1px;color:#fff;line-height:1.1}
+.cd-num{font-size:34px;font-weight:800;font-family:var(--dm-font-display);font-variant-numeric:tabular-nums;letter-spacing:1px;color:var(--dm-cd-num,#fff);line-height:1.1}
 .cd-lbl{font-size:11px;opacity:0.55;margin-top:6px;letter-spacing:2px}
 ${modeCss}
 </style>

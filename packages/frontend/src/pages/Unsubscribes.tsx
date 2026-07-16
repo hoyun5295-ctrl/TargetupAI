@@ -19,6 +19,9 @@ export default function Unsubscribes() {
   const [deleteModal, setDeleteModal] = useState<{ show: boolean; id: string; phone: string }>({ show: false, id: '', phone: '' });
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // ★ 엑셀/CSV 업로드 열 선택 (여러 열이면 전화번호 열을 고르게 함)
+  const [columnPicker, setColumnPicker] = useState<{ show: boolean; fileId: string; columns: Array<{ index: number; header: string; samples: string[]; phoneCount: number }>; selected: number; totalRows: number }>({ show: false, fileId: '', columns: [], selected: 0, totalRows: 0 });
+  const [pickerSubmitting, setPickerSubmitting] = useState(false);
   // D43-4: 080 연동 상태
   const [opt080Number, setOpt080Number] = useState('');
   const [optOutAutoSync, setOptOutAutoSync] = useState(false);
@@ -144,8 +147,11 @@ export default function Unsubscribes() {
       const data = await res.json();
       if (data.success) {
         setToast({ show: true, type: 'success', message: '삭제되었습니다. 수신동의로 복원됩니다.' });
-        loadUnsubscribes();
+      } else {
+        // 6원칙 ②: 실제 삭제 0건이면 성공 토스트 금지 — 정직 안내 + 목록 재조회로 진실 반영
+        setToast({ show: true, type: 'error', message: data.error || '삭제된 항목이 없습니다. 새로고침 후 다시 시도해주세요.' });
       }
+      loadUnsubscribes();
     } catch (error) {
       setToast({ show: true, type: 'error', message: '삭제 실패' });
     } finally {
@@ -161,24 +167,50 @@ export default function Unsubscribes() {
 
     setUploading(true);
     try {
-      const text = await file.text();
-      const lines = text.split(/\r?\n/).filter(line => line.trim());
-      const phones = lines.map(line => line.split(/[,\t]/)[0].trim()).filter(p => p.replace(/\D/g, '').length >= 10);
-
-      if (phones.length === 0) {
-        setToast({ show: true, type: 'error', message: '유효한 전화번호가 없습니다' });
+      // 1단계: 서버(multer+XLSX)로 파싱해 열 메타를 받는다. 실제 엑셀(.xlsx) 바이너리도 서버가 읽음.
+      const formData = new FormData();
+      formData.append('file', file);
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/unsubscribes/upload/parse', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` }, // Content-Type 미지정 — multipart boundary 자동
+        body: formData,
+      });
+      const data = await res.json();
+      if (!data.success) {
+        setToast({ show: true, type: 'error', message: data.error || '파일 파싱 실패' });
         setTimeout(() => setToast({ show: false, type: '', message: '' }), 3000);
         return;
       }
+      const cols: Array<{ index: number; header: string; samples: string[]; phoneCount: number }> = data.columns || [];
+      const phoneCols = cols.filter((c) => c.phoneCount > 0);
+      // 단일 열, 또는 전화번호 열이 하나로 명확하면 모달 없이 자동 등록 (불필요한 클릭 방지)
+      if (cols.length <= 1) {
+        await commitUpload(data.fileId, cols[0]?.index ?? 0);
+      } else if (phoneCols.length === 1) {
+        await commitUpload(data.fileId, phoneCols[0].index);
+      } else {
+        // 애매(다열) = 전화번호 열 선택 모달 (추천 열 미리 선택)
+        setColumnPicker({ show: true, fileId: data.fileId, columns: cols, selected: data.suggestedColumn ?? 0, totalRows: data.totalRows || 0 });
+      }
+    } catch (error) {
+      setToast({ show: true, type: 'error', message: '파일 처리 실패' });
+      setTimeout(() => setToast({ show: false, type: '', message: '' }), 3000);
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  };
 
+  // 2단계: 선택한 열로 커밋 등록
+  const commitUpload = async (fileId: string, columnIndex: number) => {
+    setPickerSubmitting(true);
+    try {
       const token = localStorage.getItem('token');
       const res = await fetch('/api/unsubscribes/upload', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ phones }),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ fileId, columnIndex }),
       });
       const data = await res.json();
       if (data.success) {
@@ -188,12 +220,12 @@ export default function Unsubscribes() {
         setToast({ show: true, type: 'error', message: data.error || '업로드 실패' });
       }
     } catch (error) {
-      setToast({ show: true, type: 'error', message: '파일 처리 실패' });
+      setToast({ show: true, type: 'error', message: '업로드 실패' });
     } finally {
-      setUploading(false);
-      e.target.value = '';
+      setPickerSubmitting(false);
+      setColumnPicker({ show: false, fileId: '', columns: [], selected: 0, totalRows: 0 });
+      setTimeout(() => setToast({ show: false, type: '', message: '' }), 3000);
     }
-    setTimeout(() => setToast({ show: false, type: '', message: '' }), 3000);
   };
 
   // D43-4: 080 연동 테스트 — 목록 새로고침 후 최근 080_ars 건 확인
@@ -278,6 +310,69 @@ export default function Unsubscribes() {
                   className="flex-1 px-4 py-2.5 bg-rose-500 text-white rounded-xl hover:bg-rose-600 font-medium transition-colors disabled:opacity-50"
                 >
                   {deleting ? '처리중...' : '삭제'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 전화번호 열 선택 모달 — 여러 열 파일 업로드 시 (엑셀/CSV) */}
+      {columnPicker.show && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            onClick={() => { if (!pickerSubmitting) setColumnPicker({ show: false, fileId: '', columns: [], selected: 0, totalRows: 0 }); }}
+          />
+          <div className="relative bg-white rounded-2xl shadow-xl ring-1 ring-slate-200 max-w-md w-full animate-in fade-in zoom-in duration-200">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-11 h-11 rounded-xl bg-violet-50 flex items-center justify-center shrink-0">
+                  <Upload className="w-5 h-5 text-violet-500" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-bold text-slate-900">전화번호 열 선택</h3>
+                  <p className="text-xs text-slate-400">수신거부할 전화번호가 있는 열을 선택하세요 · 총 {columnPicker.totalRows.toLocaleString()}행</p>
+                </div>
+              </div>
+
+              <div className="space-y-2 max-h-72 overflow-y-auto -mx-1 px-1">
+                {columnPicker.columns.map((col) => {
+                  const active = columnPicker.selected === col.index;
+                  return (
+                    <button
+                      key={col.index}
+                      onClick={() => setColumnPicker((prev) => ({ ...prev, selected: col.index }))}
+                      className={`w-full text-left px-3.5 py-3 rounded-xl border transition-colors ${active ? 'border-violet-400 bg-violet-50 ring-1 ring-violet-200' : 'border-slate-200 hover:bg-slate-50'}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold text-slate-800 truncate">{col.header}</span>
+                        {col.phoneCount > 0 && (
+                          <span className="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100">전화번호 {col.phoneCount.toLocaleString()}건</span>
+                        )}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-400 font-mono truncate">
+                        {col.samples.length > 0 ? col.samples.join('  ·  ') : '(빈 값)'}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex gap-3 mt-5">
+                <button
+                  onClick={() => setColumnPicker({ show: false, fileId: '', columns: [], selected: 0, totalRows: 0 })}
+                  disabled={pickerSubmitting}
+                  className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 font-medium transition-colors disabled:opacity-50"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={() => commitUpload(columnPicker.fileId, columnPicker.selected)}
+                  disabled={pickerSubmitting}
+                  className="flex-1 px-4 py-2.5 bg-slate-900 text-white rounded-xl hover:bg-slate-800 font-medium transition-colors disabled:opacity-50"
+                >
+                  {pickerSubmitting ? '등록 중...' : '이 열로 등록'}
                 </button>
               </div>
             </div>
@@ -405,10 +500,10 @@ export default function Unsubscribes() {
               <label className="block text-xs font-semibold text-slate-500 mb-1.5">파일 업로드</label>
               <label className={`inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl border transition-colors ${canManageUnsubscribes ? 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer' : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'} ${uploading ? 'opacity-60' : ''}`}>
                 <Upload className="w-4 h-4" />
-                <span>{uploading ? '처리중...' : 'CSV/TXT'}</span>
+                <span>{uploading ? '처리중...' : '엑셀·CSV'}</span>
                 <input
                   type="file"
-                  accept=".csv,.txt"
+                  accept=".xlsx,.xls,.csv,.txt"
                   onChange={handleFileUpload}
                   disabled={uploading || !canManageUnsubscribes}
                   className="hidden"
@@ -435,7 +530,7 @@ export default function Unsubscribes() {
           <p className="text-xs text-slate-400 mt-3">
             {optOutAutoSync
               ? `※ 080 수신거부(${format080Number(opt080Number)}) 시 자동 등록됩니다. 유료 요금제 업체는 고객 DB의 수신동의 상태도 자동 연동됩니다.`
-              : '※ 파일 업로드는 한 줄에 하나의 전화번호 형식입니다.'
+              : '※ 엑셀(xlsx·xls)·CSV·TXT 업로드를 지원합니다. 열이 여러 개면 전화번호 열을 선택하는 창이 뜹니다.'
             }
           </p>
 

@@ -35,6 +35,36 @@
 | Nginx | 0.0.0.0 | 80/443 | 리버스 프록시 + SSL, client_max_body_size 50M |
 | 백엔드 API | localhost | 3000 | PM2 관리 |
 
+### 1-3. PAY 이관 수신 DB (pay-ingest-db — Track D · 레거시 PAY 통계 흡수)
+
+레거시 PAY `sales` DB를 흡수한 도커 컨테이너. 게이트웨이(54·57·58)가 발송 통계를 1분 간격 replace로 직접 적재, 한줄로는 **READ only**. 설계 = `docs/2026-07-07-pay-absorption-track-d-design.md`.
+
+| 항목 | 값 |
+|------|------|
+| 컨테이너 | `pay-ingest-db` (MariaDB 10.11, invito `58.227.193.62`, `-p 23388:3306`) |
+| DB | `sales` |
+| **localhost 접속 = root만** | `docker exec -it pay-ingest-db mariadb -uroot -p sales` (비번 프롬프트) |
+| `sales` 계정 | **게이트웨이 IP(54·57·58)+비토(139.150.81.213) 전용** → localhost 접속 시 `ERROR 1045` = 정상(보안). 검증은 반드시 `-uroot` |
+
+**반복 실수 방지 (2026-07-16 실측 시행착오):**
+- 호스트(`administrator@invito`)에 mysql/mariadb 클라이언트 **없음** → 반드시 `docker exec`로 컨테이너 안 `mariadb` 사용 (`sudo apt install` 금지).
+- `-usales`는 localhost에서 **거부**(IP 전용) → `-uroot`.
+- MariaDB **예약어**(`rows`·`groups` 등)를 컬럼 별칭으로 쓰면 문법 에러 → 백틱 또는 개명(`rowcnt`).
+
+**일통계 적재 검증 (서버별 유입·신선도·정합):**
+```bash
+docker exec -it pay-ingest-db mariadb -uroot -p sales -e "
+SELECT SysId, COUNT(*) rowcnt, SUM(TotCnt) tot, SUM(OkCnt) ok, SUM(FailCnt) fail, MAX(InsTm) last_ins, TIMESTAMPDIFF(MINUTE, MAX(InsTm), NOW()) mins_ago FROM RSRM_SalesStts WHERE DestDt=DATE_FORMAT(NOW(),'%Y%m%d') GROUP BY SysId ORDER BY SysId;
+SELECT SysId, LEFT(CustId,1) prefix, COUNT(*) c FROM RSRM_SalesStts WHERE DestDt=DATE_FORMAT(NOW(),'%Y%m%d') GROUP BY SysId, LEFT(CustId,1);
+SELECT DestDt,SysId,CustId,StoreId,MsgType,COUNT(*) c FROM RSRM_SalesStts GROUP BY DestDt,SysId,CustId,StoreId,MsgType HAVING c>1 LIMIT 20;
+"
+```
+- ① 서버별 유입 + `mins_ago` 작으면 1분 push 정상 / ② prefix 정합(B=54·C=57·D=58) / ③ replace 확정키 중복 0.
+- 확정 키 = `(DestDt, SysId, CustId, StoreId, MsgType)`. StoreId 공란 = 후불 업체 정상(CustId 매칭). 스키마 = 설계문서 §2-2.
+- ★ 완전성 검증 = 레거시 143 `sales` 원본과 같은 일자 집계 대조(설계 §7-4).
+
+**실측 통과 이력**: 2026-07-16 — 54(65,033)·57(16,219)·58(898,442) 실시간 유입 + prefix 정합 + 중복 0 확인.
+
 ---
 
 ## 2. 개발 워크플로우

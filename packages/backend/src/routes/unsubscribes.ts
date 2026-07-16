@@ -1,9 +1,14 @@
 import { Request, Response, Router } from 'express';
+import fs from 'fs';
+import path from 'path';
+import multer from 'multer';
+import * as XLSX from 'xlsx';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { process080Callback, getUserUnsubscribes, registerUnsubscribe, IsolationBlockedError } from '../utils/unsubscribe-helper';
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { normalizePhone, formatPhoneDisplay } from '../utils/normalize';
+import { isFirstRowHeaderRow } from '../utils/excel-columns';
 
 // ★ D162-3 (2026-05-15) 격리 ON 회사 + company_admin = 등록/삭제 차단 가드
 //   안내 메시지: "수신거부 사용자격리기능이 적용되어있습니다. 한줄로 운영실에 문의하세요"
@@ -19,6 +24,77 @@ async function checkIsolationBlock(companyId: string, userType: string | undefin
 }
 
 const router = Router();
+
+// ================================================================
+// ★ #4 (2026-07-16) 수신거부 파일 업로드 = 고객DB 업로드(upload.ts)와 동일한 multer+XLSX CT 미러.
+//   옛 프론트 file.text() 첫 열 텍스트 파싱은 실제 엑셀(.xlsx 바이너리)을 못 읽어 "상위 1개만" 등록되던 근본을
+//   서버 파싱으로 교체. xlsx/xls/csv/txt 전 형식 + 가로·세로 배치 무관 전 셀 추출.
+// ================================================================
+const unsubUploadStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    const uploadDir = path.join(__dirname, '../../uploads');
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+    cb(null, uploadDir);
+  },
+  filename: (_req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `unsub-${uniqueSuffix}${ext}`);
+  },
+});
+const unsubUpload = multer({
+  storage: unsubUploadStorage,
+  limits: { fileSize: 20 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['.xlsx', '.xls', '.csv', '.txt'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowed.includes(ext)) cb(null, true);
+    else cb(new Error('지원하지 않는 파일 형식입니다. (xlsx/xls/csv/txt만 가능)'));
+  },
+});
+// multer 에러(형식/용량)를 사용자 친화 400으로 변환 (raw 500 노출 차단)
+function unsubUploadMw(req: Request, res: Response, next: () => void) {
+  unsubUpload.single('file')(req, res, (err: any) => {
+    if (err) {
+      const msg = err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE'
+        ? '파일이 너무 큽니다. (최대 20MB)'
+        : (err?.message || '파일 업로드 오류');
+      return res.status(400).json({ error: msg });
+    }
+    next();
+  });
+}
+
+// 업로드 파일 → 셀 그리드 (xlsx/xls = XLSX SheetJS, csv/txt = 텍스트). 열 선택을 위해 2차원 그대로 유지.
+function parseUnsubFileToGrid(filePath: string, originalName: string): string[][] {
+  const ext = path.extname(originalName).toLowerCase();
+  if (ext === '.xlsx' || ext === '.xls') {
+    const workbook = XLSX.readFile(filePath, {
+      type: 'file', cellDates: false, cellFormula: false, cellHTML: false, cellStyles: false, raw: false, sheetStubs: false,
+    });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    if (!sheet) return [];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as any[][];
+    // ★ LESSONS(엑셀 0값 `|| ''` falsy 사고): 셀 falsy 변환 금지 — null/undefined만 걸러 String화.
+    return rows.map((r) => (r || []).map((c) => (c === null || c === undefined ? '' : String(c))));
+  }
+  const text = fs.readFileSync(filePath, 'utf-8');
+  return text.split(/\r?\n/).filter((l) => l.length > 0).map((line) => line.split(/[,\t;]/).map((c) => c.trim()));
+}
+
+// 파싱만 하고 커밋 안 된(모달 취소 등) 임시 파일 정리 — 30분 초과분 sweep.
+function sweepStaleUnsubFiles(uploadDir: string): void {
+  try {
+    const now = Date.now();
+    for (const f of fs.readdirSync(uploadDir)) {
+      if (!f.startsWith('unsub-')) continue;
+      const fp = path.join(uploadDir, f);
+      try {
+        if (now - fs.statSync(fp).mtimeMs > 30 * 60 * 1000) fs.unlinkSync(fp);
+      } catch { /* skip */ }
+    }
+  } catch { /* skip */ }
+}
 
 // ================================================================
 // 공통 헬퍼: 유료 플랜 업체의 customers.sms_opt_in 동기화
@@ -282,59 +358,131 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // ================================================================
-// POST /api/unsubscribes/upload - 엑셀 업로드 (user_id 기준)
-// D43-4: 유료 플랜 업체는 customers.sms_opt_in = false 벌크 업데이트
+// POST /api/unsubscribes/upload/parse - 1단계: 파일 파싱 + 열 메타 반환 (xlsx/xls/csv/txt)
+//   여러 열이면 프론트에서 전화번호 열을 선택하게 함(추천인 번호 등 오추출 차단). 파일은 커밋까지 서버 보관.
 // ================================================================
-router.post('/upload', async (req: Request, res: Response) => {
+router.post('/upload/parse', unsubUploadMw, async (req: Request, res: Response) => {
+  const filePath = req.file?.path;
   try {
     const userId = req.user?.userId;
     const companyId = req.user?.companyId;
     if (!userId || !companyId) {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
-    
-    const { phones } = req.body;
-
-    if (!phones || !Array.isArray(phones) || phones.length === 0) {
-      return res.status(400).json({ error: '전화번호 목록이 필요합니다.' });
+    if (!req.file || !filePath) {
+      return res.status(400).json({ error: '업로드할 파일이 필요합니다.' });
     }
-
     const userType = req.user?.userType;
 
+    // ★ D162-3 격리 ON + company_admin 가드
+    if (await checkIsolationBlock(companyId, userType)) {
+      if (filePath) { try { fs.unlinkSync(filePath); } catch { /* skip */ } }
+      return res.status(403).json({ error: ISOLATION_BLOCK_MESSAGE });
+    }
+
+    const grid = parseUnsubFileToGrid(filePath, req.file.originalname);
+    if (grid.length === 0) {
+      try { fs.unlinkSync(filePath); } catch { /* skip */ }
+      return res.status(400).json({ error: '파일이 비어있거나 읽을 수 없습니다.' });
+    }
+
+    const hasHeader = isFirstRowHeaderRow(grid[0]);
+    const dataRows = hasHeader ? grid.slice(1) : grid;
+    const colCount = grid.reduce((m, r) => Math.max(m, r.length), 0);
+
+    const columns: Array<{ index: number; header: string; samples: string[]; phoneCount: number }> = [];
+    for (let c = 0; c < colCount; c++) {
+      const cells = dataRows.map((r) => r[c] ?? '').filter((v) => String(v).trim() !== '');
+      const phoneCount = cells.reduce((n, v) => n + (normalizePhone(v) ? 1 : 0), 0);
+      const headerRaw = hasHeader ? (grid[0][c] || '') : '';
+      columns.push({
+        index: c,
+        header: (String(headerRaw).trim() || `${c + 1}번째 열`).slice(0, 40),
+        samples: cells.slice(0, 3).map((s) => String(s).slice(0, 30)),
+        phoneCount,
+      });
+    }
+    // 전화번호가 가장 많은 열 추천
+    const suggestedColumn = columns.reduce((best, col) => (col.phoneCount > (columns[best]?.phoneCount ?? -1) ? col.index : best), 0);
+
+    sweepStaleUnsubFiles(path.dirname(filePath));
+
+    return res.json({
+      success: true,
+      fileId: path.basename(filePath), // 커밋 때 이 파일을 재파싱
+      hasHeader,
+      totalRows: dataRows.length,
+      columns,
+      suggestedColumn,
+    });
+  } catch (error) {
+    if (filePath) { try { fs.unlinkSync(filePath); } catch { /* skip */ } }
+    console.error('수신거부 파싱 에러:', error);
+    return res.status(500).json({ error: '파일 파싱 오류' });
+  }
+});
+
+// ================================================================
+// POST /api/unsubscribes/upload - 2단계: 선택 열 커밋 등록 (user_id 기준)
+//   body: { fileId, columnIndex }. D43-4: 유료 플랜 업체는 customers.sms_opt_in = false 벌크 업데이트
+// ================================================================
+router.post('/upload', async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
+  const companyId = req.user?.companyId;
+  if (!userId || !companyId) {
+    return res.status(403).json({ error: '권한이 필요합니다.' });
+  }
+  const userType = req.user?.userType;
+  const { fileId, columnIndex } = req.body || {};
+  if (!fileId || typeof fileId !== 'string' || typeof columnIndex !== 'number' || columnIndex < 0) {
+    return res.status(400).json({ error: '파일 정보가 올바르지 않습니다. 다시 업로드해주세요.' });
+  }
+
+  // 경로 조작 차단: basename만 허용 + unsub- 접두사 + uploads 내 실존
+  const safeName = path.basename(fileId);
+  const uploadDir = path.join(__dirname, '../../uploads');
+  const filePath = path.join(uploadDir, safeName);
+  if (!safeName.startsWith('unsub-') || !fs.existsSync(filePath)) {
+    return res.status(400).json({ error: '업로드 파일을 찾을 수 없습니다. 파일을 다시 선택해주세요.' });
+  }
+
+  try {
     // ★ D162-3 격리 ON + company_admin 가드 (업로드 차단)
     if (await checkIsolationBlock(companyId, userType)) {
       return res.status(403).json({ error: ISOLATION_BLOCK_MESSAGE });
     }
 
-    let insertCount = 0;
+    // 선택 열의 셀만 추출. 헤더 행 별도 제외 불필요 — 헤더 텍스트는 normalizePhone에서 자연 탈락.
+    const grid = parseUnsubFileToGrid(filePath, safeName);
+    const seen = new Set<string>();
+    const phones: string[] = [];
+    for (const row of grid) {
+      const cleanPhone = normalizePhone(row[columnIndex]); // ★ D162 0 자동 보정 + 유효성
+      if (cleanPhone && !seen.has(cleanPhone)) {
+        seen.add(cleanPhone);
+        phones.push(cleanPhone);
+      }
+    }
+
+    if (phones.length === 0) {
+      return res.status(400).json({ error: '선택한 열에 유효한 전화번호가 없습니다. 다른 열을 선택해주세요.' });
+    }
+
     let skipCount = 0;
     const insertedPhones: string[] = [];
-
-    for (const phone of phones) {
-      // ★ D162 (2026-05-15) 0 자동 보정: 카카오 받은 CSV 등 앞 0 누락 10자리 휴대폰(예: 1066133762)
-      //   → normalizePhone(0 자동 보정 + 한국 휴대폰 유효성 검사)로 11자리 정합 + 매칭 보장.
-      //   유효 휴대폰 아니면 skip (잘못된 번호로 unsubscribes INSERT 차단).
-      const cleanPhone = normalizePhone(phone);
-      if (cleanPhone) {
-        // CT-03 (D162-3): 격리 OFF=회사 전체 broadcast / 격리 ON=사용자 본인+admin sync
-        let cnt: number;
-        try {
-          cnt = await registerUnsubscribe(companyId, userId, userType || 'company_user', cleanPhone, 'upload');
-        } catch (e) {
-          if (e instanceof IsolationBlockedError) {
-            return res.status(403).json({ error: ISOLATION_BLOCK_MESSAGE });
-          }
-          throw e;
+    for (const cleanPhone of phones) {
+      // CT-03 (D162-3): 격리 OFF=회사 전체 broadcast / 격리 ON=사용자 본인+admin sync
+      let cnt: number;
+      try {
+        cnt = await registerUnsubscribe(companyId, userId, userType || 'company_user', cleanPhone, 'upload');
+      } catch (e) {
+        if (e instanceof IsolationBlockedError) {
+          return res.status(403).json({ error: ISOLATION_BLOCK_MESSAGE });
         }
-        if (cnt > 0) {
-          insertCount += cnt;
-          insertedPhones.push(cleanPhone);
-        } else {
-          skipCount++;
-        }
-      } else {
-        skipCount++;
+        throw e;
       }
+      if (cnt > 0) insertedPhones.push(cleanPhone);
+      else skipCount++; // 회사 전체에 이미 등록됨 = 중복
     }
 
     // D43-4: 유료 플랜 업체면 새로 등록된 번호들 벌크 sms_opt_in = false
@@ -344,17 +492,20 @@ router.post('/upload', async (req: Request, res: Response) => {
 
     // ★ Audit 로그 (시간 + IP + 등록 주체 + 업로드 결과)
     const ip = req.headers['x-forwarded-for'] || req.ip || 'unknown';
-    console.log(`[unsubscribe-audit][upload] ${new Date().toISOString()} ip=${ip} actor=${req.user?.loginId || userId} company=${companyId} total=${phones.length} inserted=${insertCount} skipped=${skipCount}`);
+    console.log(`[unsubscribe-audit][upload] ${new Date().toISOString()} ip=${ip} actor=${req.user?.loginId || userId} company=${companyId} col=${columnIndex} parsed=${phones.length} inserted=${insertedPhones.length} skipped=${skipCount}`);
 
     return res.json({
       success: true,
-      message: `${insertCount}건 등록, ${skipCount}건 중복 제외`,
-      insertCount,
+      message: `${insertedPhones.length}건 등록, ${skipCount}건 중복 제외`,
+      insertCount: insertedPhones.length,
       skipCount,
     });
   } catch (error) {
     console.error('수신거부 업로드 에러:', error);
     return res.status(500).json({ error: '서버 오류' });
+  } finally {
+    // 커밋 후 임시 파일 정리 (디스크 누적 차단)
+    try { fs.unlinkSync(filePath); } catch { /* 이미 없으면 무시 */ }
   }
 });
 
@@ -379,31 +530,47 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
     const { id } = req.params;
 
-    // ★ D162-3 (2026-05-15) Harold 명시 의도 — 격리 OFF(기본) 회사 = 회사 전체 row DELETE
-    //   등록 broadcast 패턴과 정합 (한 user 삭제 시 다른 user에 row 잔존 → 발송 매칭 X 사고 차단)
+    // ★ 삭제 대상 phone 조회 — id는 목록에 표시된 row uuid.
+    //   ⚠️ B17-01(수신거부 필터=user_id 기준)과는 별개 축이다. 소유검증은 company_id 기준이어야 한다:
+    //   등록(registerUnsubscribe 격리 OFF)은 회사 전 사용자에게 broadcast → 한 phone에 user_id 여러 행 존재.
+    //   company_admin 목록(getUserUnsubscribes)은 DISTINCT ON(phone)으로 '아무 사용자 행의 id'를 표시하므로,
+    //   그 id의 user_id가 로그인 본인과 다르면 옛 `AND user_id = 본인` 조건이 0건 → 삭제 스킵인데 성공 표시.
+    //   (이것이 "삭제가 안 되는데 성공 토스트" 재오픈 근본 — 2026-07-16 실측 확정)
+    //   삭제 실행 자체가 D162-3로 이미 회사 전체(company_id + phone)라, 소유검증도 company_id로 맞추는 게 정합.
     const target = await query(
-      `SELECT phone FROM unsubscribes WHERE id = $1 AND user_id = $2`,
-      [id, userId]
+      `SELECT phone FROM unsubscribes WHERE id = $1 AND company_id = $2::uuid`,
+      [id, companyId]
     );
 
-    if (target.rows.length > 0) {
-      const targetPhone = target.rows[0].phone;
+    if (target.rows.length === 0) {
+      // 대상 없음 = 남의 회사 id이거나 이미 삭제된 항목. 거짓 성공 금지(6원칙 ②).
+      return res.status(404).json({ success: false, error: '삭제할 수신거부 대상을 찾을 수 없습니다.' });
+    }
 
-      // 회사 전체 active user의 해당 phone row 모두 삭제 + 삭제 row 수 반환
-      const delResult = await query(
-        `DELETE FROM unsubscribes WHERE company_id = $1::uuid AND phone = $2::varchar RETURNING user_id`,
-        [companyId, targetPhone]
-      );
+    const targetPhone = target.rows[0].phone;
 
-      // ★ Audit 로그 (시간 + IP + 삭제 주체 + 영향 row 수) — PM2 로그 검색 가능
-      const ip = req.headers['x-forwarded-for'] || req.ip || 'unknown';
-      console.log(`[unsubscribe-audit][delete] ${new Date().toISOString()} ip=${ip} actor=${loginId || userId} company=${companyId} phone=${targetPhone} affected_rows=${delResult.rowCount || 0}`);
+    // 회사 전체 active user의 해당 phone row 모두 삭제 + 삭제 row 수 반환 (D162-3)
+    const delResult = await query(
+      `DELETE FROM unsubscribes WHERE company_id = $1::uuid AND phone = $2::varchar RETURNING user_id`,
+      [companyId, targetPhone]
+    );
+    const deletedCount = delResult.rowCount || 0;
 
-      // D43-4: customers.sms_opt_in = true 복원
+    // ★ Audit 로그 (시간 + IP + 삭제 주체 + 영향 row 수) — PM2 로그 검색 가능
+    const ip = req.headers['x-forwarded-for'] || req.ip || 'unknown';
+    console.log(`[unsubscribe-audit][delete] ${new Date().toISOString()} ip=${ip} actor=${loginId || userId} company=${companyId} phone=${targetPhone} affected_rows=${deletedCount}`);
+
+    // D43-4: customers.sms_opt_in = true 복원 (실제 삭제된 경우만)
+    if (deletedCount > 0) {
       await syncCustomerOptIn(companyId, targetPhone, true);
     }
 
-    return res.json({ success: true, message: '삭제되었습니다.' });
+    // 6원칙 ②: 실제 효과(삭제 건수) 검증 후에만 성공 표시 — 0건이면 성공 아님
+    return res.json({
+      success: deletedCount > 0,
+      message: deletedCount > 0 ? '삭제되었습니다.' : '삭제된 항목이 없습니다.',
+      deletedCount,
+    });
   } catch (error) {
     console.error('수신거부 삭제 에러:', error);
     return res.status(500).json({ error: '서버 오류' });

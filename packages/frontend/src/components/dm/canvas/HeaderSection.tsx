@@ -103,7 +103,7 @@ export default function HeaderSection({ props, storeName = '', onEdit }: { props
       {props.logo_url && <img src={dmImageUrl(props.logo_url)} alt={brand} style={{ height: logoH, borderRadius: 'var(--dm-radius-sm)' }} />}
       {showBrand && (brand || editable) && (
         <InlineEditable
-          style={{ fontSize: brandFs, fontWeight: 700, color: props.title_color || 'var(--dm-neutral-900)' }}
+          style={{ fontSize: brandFs, fontWeight: 800, letterSpacing: '-0.01em', color: props.title_color || 'var(--dm-neutral-900)' }}
           value={brand}
           placeholder="브랜드명"
           onChange={(v) => onEdit?.({ brand_name: v } as Partial<HeaderProps>)}

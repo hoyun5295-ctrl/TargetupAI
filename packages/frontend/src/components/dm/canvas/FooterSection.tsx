@@ -29,7 +29,7 @@ export default function FooterSection({ props, onEdit }: { props: FooterProps; o
           <strong>고객센터</strong> <a href={`tel:${props.cs_phone}`} style={{ color: 'var(--dm-primary)', textDecoration: 'none' }}>{props.cs_phone}</a>
         </div>
       )}
-      {props.cs_hours && <div className="dm-text-tiny" style={{ color: 'var(--dm-neutral-500)', marginBottom: 'var(--dm-sp-2)' }}>{props.cs_hours}</div>}
+      {props.cs_hours && <div className="dm-text-tiny" style={{ color: 'var(--dm-neutral-500)', marginBottom: 'var(--dm-sp-2)', whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>{props.cs_hours}</div>}
       {(props.legal_text || editable) && (
         <InlineEditable
           className="dm-text-tiny"

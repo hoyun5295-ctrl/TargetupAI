@@ -13,8 +13,8 @@ export default function FooterEditor({ props, onUpdate }: EditorProps<FooterProp
         <TextInput type="tel" value={props.cs_phone} onChange={(v) => onUpdate({ cs_phone: v })} placeholder="1588-0000" />
       </Field>
 
-      <Field label="상담 시간">
-        <TextInput value={props.cs_hours} onChange={(v) => onUpdate({ cs_hours: v })} placeholder="평일 10:00 ~ 18:00 (주말·공휴일 제외)" />
+      <Field label="상담 시간" hint="엔터로 줄바꿈 가능">
+        <TextArea value={props.cs_hours} onChange={(v) => onUpdate({ cs_hours: v })} rows={2} placeholder="평일 10:00 ~ 18:00\n(주말·공휴일 제외)" />
       </Field>
 
       <Field label="법정 안내" hint="사업자등록번호, 대표자명 등">
