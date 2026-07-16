@@ -69,14 +69,16 @@ function hideOnError(e: React.SyntheticEvent<HTMLImageElement>) {
 }
 
 /** 인앱 카드 내부 (이미지+제목+본문+CTA) — SDK 렌더 톤 일치 */
-function CardInner({ title, body, imageUrl, badge, buttons, textColor, variant }: {
-  title: string; body: string; imageUrl?: string | null; badge?: string | null; buttons?: PreviewButton[]; textColor: string; variant: Variant;
+function CardInner({ title, body, imageUrl, badge, buttons, textColor, variant, design }: {
+  title: string; body: string; imageUrl?: string | null; badge?: string | null; buttons?: PreviewButton[]; textColor: string; variant: Variant; design?: Record<string, any> | null;
 }) {
   const img = toAbsoluteImage(imageUrl);
   const clampMap: Record<Variant, number> = { banner: 2, slide: 4, inline: 5, modal: 3, full: 10, toast: 2, floating: 1 };
   const clamp = clampMap[variant];
   const isBanner = variant === 'banner';
   const bigTitle = variant === 'full' ? 19 : (isBanner || variant === 'toast') ? 13.5 : 15.5;
+  // ★ 2026-07-17 텍스트 정렬 (design.text_align) — SDK 렌더 미러. 미지정=왼쪽
+  const textAlign: 'left' | 'center' | 'right' = design?.text_align === 'center' ? 'center' : design?.text_align === 'right' ? 'right' : 'left';
 
   return (
     <div style={{ display: 'flex', flexDirection: isBanner ? 'row' : 'column', alignItems: isBanner ? 'center' : 'stretch', gap: isBanner ? 12 : 0, color: textColor, width: '100%' }}>
@@ -86,7 +88,7 @@ function CardInner({ title, body, imageUrl, badge, buttons, textColor, variant }
       {img && !isBanner && variant !== 'toast' && variant !== 'floating' && (
         <img src={img} alt="" onError={hideOnError} style={{ width: '100%', height: variant === 'modal' || variant === 'full' ? 128 : 100, objectFit: 'cover', borderRadius: 13, marginBottom: 13, boxShadow: '0 4px 16px rgba(0,0,0,0.14)' }} />
       )}
-      <div style={{ flex: isBanner ? 1 : undefined, minWidth: 0 }}>
+      <div style={{ flex: isBanner ? 1 : undefined, minWidth: 0, textAlign }}>
         {badge && !isBanner && variant !== 'toast' && variant !== 'floating' && (
           <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.2)', color: textColor, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.03em', padding: '3px 9px', borderRadius: 999, marginBottom: 8 }}>
             {badge}
@@ -365,6 +367,7 @@ export interface AppInAppPreviewProps {
   buttons?: Array<{ label: string; background_color?: string; text_color?: string }>;
   backgroundColor: string;
   textColor: string;
+  design?: Record<string, any> | null;
 }
 
 /** 더미 앱 화면 — 인앱이 뜨는 맥락 (라이트 앱 리스트) */
@@ -391,9 +394,12 @@ function DummyAppScreen() {
   );
 }
 
-export function AppInAppPreview({ template, title, body, imageUrl, badge, buttons, backgroundColor, textColor }: AppInAppPreviewProps) {
+export function AppInAppPreview({ template, title, body, imageUrl, badge, buttons, backgroundColor, textColor, design }: AppInAppPreviewProps) {
   const isModal = template === 'center_modal';
   const img = imageUrl || undefined;
+  // ★ 2026-07-17 텍스트 정렬 (design.text_align) — SDK 렌더 미러. 미지정=왼쪽
+  const ta: 'left' | 'center' | 'right' = design?.text_align === 'center' ? 'center' : design?.text_align === 'right' ? 'right' : 'left';
+  const badgeSelf = ta === 'center' ? 'center' : ta === 'right' ? 'flex-end' : 'flex-start';
   const card = (
     <div style={{
       background: backgroundColor || '#1f1f29',
@@ -407,9 +413,9 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
       {img && (
         <img src={img} alt="" onError={hideOnError} style={{ width: '100%', height: 150, objectFit: 'cover', display: 'block' }} />
       )}
-      <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8, textAlign: ta }}>
         {badge ? (
-          <div style={{ alignSelf: 'flex-start', background: 'rgba(255,255,255,0.18)', borderRadius: 999, padding: '3px 10px' }}>
+          <div style={{ alignSelf: badgeSelf, background: 'rgba(255,255,255,0.18)', borderRadius: 999, padding: '3px 10px' }}>
             <span style={{ color: textColor, fontSize: 10.5, fontWeight: 700 }}>{badge}</span>
           </div>
         ) : null}

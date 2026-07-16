@@ -125,6 +125,8 @@ export function sanitizeInAppDesign(raw: any): Record<string, any> | null {
   }
   if ((INAPP_DESIGN_TREATMENTS as readonly string[]).includes(String(raw.treatment))) out.treatment = String(raw.treatment);
   if ((INAPP_DESIGN_MOTIONS as readonly string[]).includes(String(raw.motion))) out.motion = String(raw.motion);
+  // ★ 2026-07-17 텍스트 정렬 (좌/중/우). 미지정=기존 렌더(좌) — 회귀 0.
+  if (['left', 'center', 'right'].includes(String(raw.text_align))) out.text_align = String(raw.text_align);
   if (raw.backdrop && typeof raw.backdrop === 'object' && !Array.isArray(raw.backdrop)) {
     const bd: Record<string, any> = {};
     if ((INAPP_DESIGN_DIMS as readonly string[]).includes(String(raw.backdrop.dim))) bd.dim = String(raw.backdrop.dim);

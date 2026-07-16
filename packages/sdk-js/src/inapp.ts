@@ -197,6 +197,9 @@ export interface InAppInitInput {
 
 const STORAGE_KEY_SEEN = 'hanjullo_inapp_seen';
 const SESSION_KEY_SEEN = 'hanjullo_inapp_session';
+// ★ 2026-07-17 닫기(X)·버튼 누르면 이번 세션엔 재표시 안 함 — always여도 닫기가 유효하도록.
+//   (opt_out=영구와 구분: dismiss는 세션 한정 — 새 세션/새 방문엔 빈도 규칙대로 다시 뜸)
+const SESSION_KEY_DISMISSED = 'hanjullo_inapp_dismissed';
 const STORAGE_KEY_DISPLAY_COUNT = 'hanjullo_inapp_display_count';
 const STORAGE_KEY_CACHE = 'hanjullo_inapp_cache';
 const SESSION_KEY_STICKY = 'hanjullo_inapp_sticky';
@@ -466,6 +469,10 @@ export class HanjulloInAppModule {
     if (this.isOptedOut(msg.id) || (msg.parentMessageId && this.isOptedOut(msg.parentMessageId)) || ((msg as any).parent_message_id && this.isOptedOut(String((msg as any).parent_message_id)))) {
       return false;
     }
+    // ★ 2026-07-17 닫기·버튼 누른 메시지는 이번 세션 억제 — always여도 닫으면 자동 트리거(스크롤·체류) 재표시 차단
+    if (this.isDismissed(msg.id) || (msg.parentMessageId && this.isDismissed(msg.parentMessageId)) || ((msg as any).parent_message_id && this.isDismissed(String((msg as any).parent_message_id)))) {
+      return false;
+    }
     const maxDisplays = msg.maxDisplaysPerUser ?? msg.max_displays_per_user;
     if (!maxDisplays || maxDisplays <= 0) return true;
     try {
@@ -498,6 +505,48 @@ export class HanjulloInAppModule {
     } catch {
       // 조용히 실패 — 서버 opt_out 기록이 최종 방어
     }
+  }
+
+  /** ★ 2026-07-17 닫기·버튼 클릭 = 이번 세션 재표시 억제 (sessionStorage). always여도 닫으면 세션 내 안 뜸.
+   *  variant는 부모 축으로 억제. opt_out(영구)과 구분 — 새 세션엔 빈도 규칙대로 다시 뜬다. */
+  private markDismissed(messageId: string): void {
+    try {
+      const raw = sessionStorage.getItem(SESSION_KEY_DISMISSED);
+      const map = raw ? JSON.parse(raw) : {};
+      map[messageId] = 1;
+      sessionStorage.setItem(SESSION_KEY_DISMISSED, JSON.stringify(map));
+    } catch {
+      // 조용히 실패
+    }
+  }
+
+  private isDismissed(messageId: string): boolean {
+    try {
+      const raw = sessionStorage.getItem(SESSION_KEY_DISMISSED);
+      const map = raw ? JSON.parse(raw) : {};
+      return map[messageId] === 1;
+    } catch {
+      return false;
+    }
+  }
+
+  /** 닫기·버튼 누른 메시지를 세션 억제 (부모 축 포함). 재표시 방지 공통 진입점. */
+  private dismissForSession(msg: InAppMessageSdk): void {
+    this.markDismissed(msg.id);
+    const parentId = msg.parentMessageId ?? msg.parent_message_id;
+    if (parentId) this.markDismissed(String(parentId));
+  }
+
+  /**
+   * ★ 2026-07-17 세션 초기화 (공개 API). 앱(웹뷰)이 앱 실행 시 호출해 once_per_session·닫기 억제를
+   * 새 세션으로 리셋한다. 브라우저는 탭 닫으면 sessionStorage가 자동 초기화되지만, 앱 웹뷰는
+   * 프로세스 종료 후에도 sessionStorage가 남을 수 있어 앱이 실행 시 명시적으로 호출해야 한다.
+   * (opt_out은 영구 규칙이라 리셋 대상 아님)
+   */
+  public resetSession(): void {
+    try { sessionStorage.removeItem(SESSION_KEY_SEEN); } catch { /* noop */ }
+    try { sessionStorage.removeItem(SESSION_KEY_DISMISSED); } catch { /* noop */ }
+    try { sessionStorage.removeItem(SESSION_KEY_STICKY); } catch { /* noop */ }
   }
 
   private incrementDisplayCount(messageId: string): void {
@@ -646,6 +695,13 @@ export class HanjulloInAppModule {
       }
     } else {
       this.renderLegacy(msg, template, input);
+    }
+
+    // ★ 2026-07-17 텍스트 정렬 (design.text_align) — 루트에 적용해 제목·본문 텍스트를 좌/중/우 정렬 (미지정=왼쪽·현행 유지)
+    const textAlign = (msg.design as any)?.text_align;
+    if (textAlign === 'center' || textAlign === 'right') {
+      const rootEl = document.querySelector(`[data-hanjullo-msg="${msg.id}"]`) as HTMLElement | null;
+      if (rootEl) rootEl.style.textAlign = textAlign;
     }
 
     // impression 트래킹 + 표시 이력 + 카운트 증가
@@ -1084,6 +1140,7 @@ export class HanjulloInAppModule {
       absoluteImageUrl: (u) => this.toAbsoluteImageUrl(u),
       onButtonClick: (buttonId, actionUrl) => {
         this.track(msg.id, 'click', input, buttonId);
+        this.dismissForSession(msg); // ★ 2026-07-17 버튼 누르면 이번 세션 재표시 억제
         c.remove();
         this.safeNavigate(actionUrl);
       },
@@ -1574,6 +1631,7 @@ export class HanjulloInAppModule {
       });
       btnEl.addEventListener('click', () => {
         this.track(msg.id, 'click', input, btn.id);
+        this.dismissForSession(msg); // ★ 2026-07-17 버튼 누르면(다음에 볼게요 등) 이번 세션 재표시 억제
         // 이동 전 모달 닫기 — SPA 라우팅·placeholder URL에서도 모달이 남지 않게
         const el = document.querySelector(`[data-hanjullo-msg="${msg.id}"]`) as HTMLElement | null;
         const wrap = el?.parentElement;
@@ -1652,6 +1710,7 @@ export class HanjulloInAppModule {
     });
     close.addEventListener('click', () => {
       this.track(msg.id, 'dismiss', input);
+      this.dismissForSession(msg); // ★ 2026-07-17 닫으면 이번 세션 재표시 억제 (always여도 유효)
       this.gracefulClose(close, onClose);
     });
     parent.appendChild(close);
