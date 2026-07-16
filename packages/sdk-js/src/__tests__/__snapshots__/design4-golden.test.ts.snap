@@ -186,7 +186,7 @@ exports[`M0 골든 — 인앱 테마 토큰 13종 동결 > 기본 6종 (accent �
 }
 `;
 
-exports[`M0 골든 — 인앱 테마 토큰 13종 동결 > 서체 카탈로그 6종 동결 1`] = `
+exports[`M0 골든 — 인앱 테마 토큰 13종 동결 > 서체 카탈로그 12종 동결 (2026-07-16 무료 글꼴 6→12 확장 반영) 1`] = `
 [
   {
     "css": ""Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
@@ -223,6 +223,42 @@ exports[`M0 골든 — 인앱 테마 토큰 13종 동결 > 서체 카탈로그 6
     "google": "Black+Han+Sans",
     "id": "black-han",
     "label": "검은고딕 (임팩트)",
+  },
+  {
+    "css": ""Noto Sans KR", sans-serif",
+    "google": "Noto+Sans+KR:wght@400;500;700;900",
+    "id": "noto-sans-kr",
+    "label": "노토 산스 (고딕)",
+  },
+  {
+    "css": ""IBM Plex Sans KR", sans-serif",
+    "google": "IBM+Plex+Sans+KR:wght@400;500;700",
+    "id": "ibm-plex-sans-kr",
+    "label": "IBM 플렉스 산스",
+  },
+  {
+    "css": ""Gothic A1", sans-serif",
+    "google": "Gothic+A1:wght@400;700;900",
+    "id": "gothic-a1",
+    "label": "고딕 A1",
+  },
+  {
+    "css": ""Nanum Gothic", sans-serif",
+    "google": "Nanum+Gothic:wght@400;700;800",
+    "id": "nanum-gothic",
+    "label": "나눔고딕",
+  },
+  {
+    "css": ""Jua", sans-serif",
+    "google": "Jua",
+    "id": "jua",
+    "label": "주아 (둥근 제목)",
+  },
+  {
+    "css": ""Do Hyeon", sans-serif",
+    "google": "Do+Hyeon",
+    "id": "do-hyeon",
+    "label": "도현 (각진 제목)",
   },
 ]
 `;

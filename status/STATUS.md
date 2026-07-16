@@ -29,6 +29,7 @@
 | CRM 캠페인 대행(설계 대행) 기능 | docs/2026-07-09-crm-campaign-agency-implementation.md | 전체 |
 | 레거시 서버(27.102.203.143) 폐기 | docs/레거시서버_폐기_플랜.md | 전체 (SoT — 진행 시 갱신) |
 | 인앱메시지 설계 | docs/인앱메세지전용.md | 해당 절 |
+| DM 편집기 AI 퍼스트 재개편 | docs/2026-07-16-dm-editor-ai-first-redesign.md | 전체 (SoT — Harold 검토 대기) |
 | 장기 로드맵·비전 | docs/한줄로_BEYOND_BRAZE_비전.md | 해당 절 |
 | 옛 설계서·핸드오프·디버그노트 | archive/DESIGNS/ (archive/INDEX.md 경유) | grep 적중 문서만 |
 | Codex 등 외부 에이전트 온보딩·리뷰 판정 기준 | AGENTS.md (레포 루트) | 전체 (경량 유지 — 룰 원천은 CLAUDE.md, 여긴 축약판) |
@@ -46,7 +47,13 @@
 ### 🟡 진행중 — 레거시 PAY 사이트 한줄로 흡수 (Track D, ★0715 54 병행 적재 개시·개시일 실측 통과 — 익일 143 마감 대조 → 57·58 순차)
 > 서팀장 2차 회신 전부 반영. **수신 DB 구축완료(2026-07-07)**: invito `pay-ingest-db`(MariaDB 10.11, --sql-mode="") — 143 dump 3테이블 82MB 복원(934,232/730/7,026 일치)·SysId 백필(B/C/D=54/57/58)·계정(sales×3 IP host·root@% 제거)·방화벽 systemd `pay-ingest-fw`. **★2026-07-09 원격 접속 사고 근본해결**: 강문희 실측 54/57/58→62:23388 접속 불가(^C). 재점검 결과 근본 = **DOCKER-USER에 리턴(ESTABLISHED) 허용 룰 누락** → SYN은 ACCEPT 통과해도 DB 응답(SYN-ACK)이 `0.0.0.0/0 DROP`에 걸려 **어떤 IP도 접속 불가**(로컬 127.0.0.1은 FORWARD 미경유 OPEN 착시·tcpdump SYN-ACK 0 확인). 비토 게이트웨이(139.150.81.213) 화이트리스트+established 추가로 **동일 환경 실측→OPEN 확인**, systemd에 established+139 영속화. 부수 발견: "서버명 옥텟=공인 IP" 추정 폐기(우리 게이트웨이도 이름≠실 IP 139). **★0715(2) "적용 시작 OK" 발신 → 당일 54 병행 적재 개시 실측 통과(288행 실시간·SysId '54'·한글 무결·깨짐 0). 다음 = 익일 143 마감 대조(§7-4) → 강문희 공유+57(golang)→58 → 최종 전환일 직전 dump 재복원+재백필 → Phase 2.** SoT=[docs/레거시서버_폐기_플랜.md](docs/레거시서버_폐기_플랜.md) · 런북=[docs/2026-07-07-pay-absorption-track-d-design.md](docs/2026-07-07-pay-absorption-track-d-design.md) §7. 교훈=[[feedback_verify_in_same_env_before_external_request]].
 
+### 🟢 2026-07-16 (2) — 인앱 "범용 안전 편집기" 재설계 (코드완료·배포 대기·DDL 0)
+> **근본(3면 실측 확정)**: 블록이 진실인데 flat(image_url·buttons) 동기화 책임자 부재(BlockComposer 업로드/버튼·골든/정예 템플릿 전부 블록만 씀) → flat만 소비하는 팝폰 앱에서 이미지·링크 소실. **재접속 시 안 뜨는 증상** = 팝폰 inapp-client가 session: 키까지 AsyncStorage 영속(주석과 상반) → once_per_session(기본값)=앱 삭제 전까지 영구 1회.
+> **구현(범용 보장 계약)**: ① 서버 CT `composeFlatFromBlocks` — create/update 저장 시 블록→flat(제목·본문·이미지·버튼≤3·배지) 합성 확정 + V2 응답 안전망(과거 저장분 fill-if-empty·앱 채널만 actionUrl→buttons 승격) ② **"다시 보지 않기"(opt_out)** — 닫기(X)=이번만·빈도 규칙대로 재표시, 명시 거부만 영구 억제(V2 Step 4.5 가족 축 + 클라 저장 이중, CHECK 제약 없음 실측=DDL 0) ③ 웹SDK **v0.3.11**(옵트아웃 링크·게이트, 서빙 4경로 반영) ④ 팝폰(별도 repo·별도 커밋): 세션 영속 결함 수리+옛 영속분 정리+다시 보지 않기 ⑤ 편집기: 앱 채널=flat 보장 요소 전용(블록→flat 비파괴 승계 후 비움·형태 2형·트리거 page_load 고정·미소비 컨트롤 숨김) + **AppInAppPreview**(앱 실렌더 1:1 미러). 부수=SDK 서체 카탈로그 테스트 6→12 정정(e1e3c61b 미갱신분).
+> **검증**: BE vitest 655(+계약 13)·SDK 168·tsc 0(BE/FE/SDK/팝폰)·Codex 리뷰. **잔여 = 배포(tp-push+build:safe BE·FE+pm2 + `packages/company-frontend/public/sdk/v0.3.11/` git add) + 팝폰 repo 커밋·앱 빌드 + 실기기 실측(디버깅테스트·kr.poppon.app: 이미지·링크·재접속 재표시·다시보지않기).** 상세 = [[project_2026_0716_inapp_universal_safe_editor]]
+
 ### 🔵 다음 세션 (예정)
+> (0716 배포 대기·미커밋) DM·이메일 서체 **자가 호스팅** + 무료글꼴 6→12 + DM 서체 피커 = 코드·검증 완료(BE 642·tsc0 BE/FE/SDK) → **tp-push + build:safe(BE·FE) + pm2 + 신규 `packages/backend/assets/dm-fonts/` git add 필수.** [[project_2026_0716_dm_email_font_selfhosting]]. (`public/about-ai-operator-v5.html` = 소개페이지 디자인 실험·Harold 반려·미커밋 = 무시/폐기 대상.)
 > **배포 = 0713~0715 누적분 전부 완료(Harold 2026-07-15).** 위 CURRENT_TASK "배포 대기" 엔트리들은 배포완료 상태 — 다음 세션 초입에 archive 회전 대상(실측 잔여만 유지).
 > ★ **1순위 = 템플릿관리자 흡수(Track B+C)** — ★0715~16 진행: 관문 1·2 전부 통과(import 2종 배포·아난티 847 pull·강문희 스펙 회신 해소). **Track C 착수 대기 = 강문희 답신 발신(삭제 불요·upsert 키·착수 시기) → 착수 회신 오면 M2(매핑 CT+아웃박스+효과검증+대조 워커) 설계·구현.** 병행 = M4 실발송 1건 · 497 기준 서팀장 · M5(B-3 계정·Bill_ID) · 브랜드 스코프(B-2) · 다우 2사 senderKey 이관 실측. SoT=설계문서 §1 · [[project_2026_0705_legacy_template_migration]].
 > ② **PAY Track D** — ★0715 54 병행 적재 개시. 다음 = 익일 143 마감 대조(§7-4) → 57(golang)→58 → 최종 전환일 dump 재복원 → Phase 2.

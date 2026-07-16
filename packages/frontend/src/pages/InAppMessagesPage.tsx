@@ -20,7 +20,7 @@ import { downloadCsv, safeCsvFilename } from '../utils/csv-download';
 import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
 // 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
 import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
-import { InAppMessagePreview } from '../components/InAppMessagePreview';
+import { InAppMessagePreview, AppInAppPreview } from '../components/InAppMessagePreview';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
 import TargetExtractModal from '../components/TargetExtractModal';
@@ -213,11 +213,62 @@ const TEMPLATE_LABELS: Record<Template, string> = {
 
 // ★ 2026-06-17 채널별 표시 형태 — 확실한 것만 (애매/충돌 형태 배제)
 //   웹: 오버레이로 안전한 4종 (상단/하단 배너=헤더 충돌, 전체화면=과함, 인라인=협조 필요 → 배제)
-//   앱: SDK가 직접 그려 통제 → 전면 인터스티셜·인앱 배너 포함
+//   ★ 2026-07-16 범용 보장 계약 — 앱: 실제 앱 렌더는 중앙 모달/바텀 시트 2형뿐 (그 외 값도 앱이 시트로 그림).
+//   편집기가 6형을 약속하고 앱이 2형만 그리던 거짓 선택지 제거 — 확실히 렌더되는 것만 노출.
 const CHANNEL_TEMPLATES: Record<'web' | 'app', Template[]> = {
   web: ['center_modal', 'slide_in', 'toast', 'floating_button'],
-  app: ['center_modal', 'full_screen', 'top_banner', 'bottom_banner', 'toast', 'slide_in'],
+  app: ['center_modal', 'bottom_banner'],
 };
+
+// 앱 채널 표시 형태 라벨 — 실렌더 기준 (bottom_banner 값 = 앱에서 바텀 시트로 렌더)
+const APP_TEMPLATE_LABELS: Partial<Record<Template, string>> = {
+  center_modal: '중앙 모달',
+  bottom_banner: '바텀 시트',
+};
+
+// 빈도 한글 라벨 (목록 카드·편집기 공용)
+const FREQ_LABELS: Record<string, string> = {
+  once_per_session: '세션당 1회',
+  once_per_day: '하루 1회',
+  always: '매번 표시',
+};
+
+/** ★ 2026-07-16 범용 보장 계약 — blocks → flat 승계 (백엔드 composeFlatFromBlocks 미러, 앱 채널 편집 진입용).
+ *  옛 블록 메시지의 이미지·버튼·배지를 flat 폼으로 비파괴 승계한다 (빈 곳만 채움). */
+function composeFlatFromBlocksFE(blocks: any[]): { title: string | null; body: string | null; imageUrl: string | null; buttons: InAppButton[]; badgeText: string | null } {
+  const list = Array.isArray(blocks) ? blocks.filter((b: any) => b && typeof b === 'object') : [];
+  const text = (t: any) => String(t ?? '').trim();
+  const media = list.find((b: any) => b.type === 'media' && text(b.url) && (b.variant === 'image' || !b.variant));
+  const headline = list.find((b: any) => b.type === 'headline');
+  const bodyBlock = list.find((b: any) => b.type === 'body');
+  const eyebrow = list.find((b: any) => b.type === 'eyebrow');
+  const buttons: InAppButton[] = [];
+  for (const b of list) {
+    if (b.type !== 'cta_group' || !Array.isArray(b.buttons)) continue;
+    for (const btn of b.buttons) {
+      if (buttons.length >= 3) break;
+      if (!btn || typeof btn !== 'object' || !text(btn.label)) continue;
+      buttons.push({
+        id: String(btn.id || `btn_${buttons.length}`),
+        label: String(btn.label),
+        action_url: btn.action_url ?? btn.actionUrl ?? null,
+        style: ['primary', 'secondary', 'tertiary'].includes(String(btn.style)) ? btn.style : (buttons.length === 0 ? 'primary' : 'secondary'),
+        background_color: String(btn.background_color || '#4f46e5'),
+        text_color: String(btn.text_color || '#ffffff'),
+      });
+    }
+    if (buttons.length >= 3) break;
+  }
+  const headlineText = headline ? text(headline.text) : '';
+  const bodyText = bodyBlock ? text(bodyBlock.text) : '';
+  return {
+    title: headlineText || null,
+    body: bodyText || headlineText || null,
+    imageUrl: media ? String(media.url) : null,
+    buttons,
+    badgeText: eyebrow ? text(eyebrow.text) || null : null,
+  };
+}
 
 const EMPTY_FORM: Partial<MessageRow> = {
   title: '',
@@ -632,6 +683,9 @@ export default function InAppMessagesPage() {
           textColor: editing!.text_color,
           triggerEvent: editing!.trigger_event,
           displayFrequency: editing!.display_frequency,
+          // ★ 2026-07-16 범용 보장 계약 — 앱 채널 = flat이 진실(블록 저장 안 함).
+          //   블록이 남아 저장되면 서버 블록→flat 합성이 폼 수정을 덮는다 (편집 진입 효과가 이미 비움 — 이중 안전망)
+          ...(editing!.channel === 'app' ? { content_blocks: [] } : {}),
         }),
       });
       const data = await res.json();
@@ -958,7 +1012,7 @@ export default function InAppMessagesPage() {
                 >
                   <Smartphone className="w-6 h-6 text-sky-200" />
                   <span className="text-sm font-bold text-white">모바일 앱</span>
-                  <span className="text-[10px] text-white/50">전면·배너·토스트</span>
+                  <span className="text-[10px] text-white/50">중앙 모달·바텀 시트</span>
                 </button>
               </div>
             </div>
@@ -977,6 +1031,22 @@ export default function InAppMessagesPage() {
                 <button onClick={() => setPreviewMsg(null)} className="text-white/50 hover:text-white p-1 rounded hover:bg-white/10 shrink-0" aria-label="닫기"><X className="w-4 h-4" /></button>
               </div>
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                {previewMsg.channel === 'app' ? (() => {
+                  // ★ 2026-07-16 앱 메시지 = 앱 실렌더 미러 미리보기 (옛 블록 저장분은 flat 승계해 표시)
+                  const flat = composeFlatFromBlocksFE(previewMsg.content_blocks || []);
+                  return (
+                    <AppInAppPreview
+                      template={previewMsg.template === 'center_modal' ? 'center_modal' : 'bottom_banner'}
+                      title={previewMsg.title || flat.title || ''}
+                      body={previewMsg.body || flat.body || ''}
+                      imageUrl={previewMsg.image_url || flat.imageUrl}
+                      badge={previewMsg.badge_text || flat.badgeText}
+                      buttons={(previewMsg.buttons && previewMsg.buttons.length > 0 ? previewMsg.buttons : flat.buttons) || []}
+                      backgroundColor={previewMsg.background_color || '#4f46e5'}
+                      textColor={previewMsg.text_color || '#ffffff'}
+                    />
+                  );
+                })() : (
                 <InAppMessagePreview
                   template={(previewMsg.template || previewMsg.position || 'center_modal') as string}
                   title={previewMsg.title}
@@ -992,6 +1062,7 @@ export default function InAppMessagesPage() {
                   cardStyle={previewMsg.card_style}
                   design={previewMsg.design}
                 />
+                )}
               </div>
               <div className="flex gap-2 mt-4">
                 <button
@@ -1326,7 +1397,7 @@ export default function InAppMessagesPage() {
                         <div className="flex flex-wrap gap-2 text-[10px] text-white/50">
                           <span>트리거: {m.trigger_event}</span>
                           <span>·</span>
-                          <span>빈도: {m.display_frequency}</span>
+                          <span>빈도: {FREQ_LABELS[m.display_frequency || ''] || m.display_frequency}</span>
                           {(m.send_start_hour !== null && m.send_start_hour !== undefined) && (
                             <>
                               <span>·</span>
@@ -1610,6 +1681,34 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing.id]);
 
+  // ★ 2026-07-16 범용 보장 계약 — 앱 채널 편집 = flat(보장 요소: 제목·본문·이미지·버튼·배지)만.
+  //   ① 블록에만 있던 이미지·버튼·제목을 flat으로 비파괴 승계(빈 곳만 채움) 후 블록을 비운다
+  //      (앱은 블록을 렌더하지 않음 — 블록 유지 시 flat 폼 수정이 서버 블록 합성에 덮여 "편집기 ≠ 앱" 재발).
+  //   ② 형태 = 실렌더 2형(중앙 모달/바텀 시트)으로 정규화 (그 외 값은 앱이 시트로 그림).
+  //   ③ 트리거 = page_load 고정 (앱은 실행 시에만 조회 — 다른 트리거로 저장되면 영원히 미표시).
+  useEffect(() => {
+    if (editing.channel !== 'app') return;
+    const APP_OK = CHANNEL_TEMPLATES.app as string[];
+    const appBlocks = Array.isArray(editing.content_blocks) ? editing.content_blocks : [];
+    const badTemplate = !!editing.template && !APP_OK.includes(editing.template);
+    const badTrigger = !!editing.trigger_event && editing.trigger_event !== 'page_load';
+    if (appBlocks.length === 0 && !badTemplate && !badTrigger) return;
+    const flat = composeFlatFromBlocksFE(appBlocks);
+    setEditing({
+      ...editing,
+      template: badTemplate ? 'bottom_banner' : editing.template,
+      trigger_event: 'page_load',
+      trigger_conditions: { event: 'page_load' },
+      title: (editing.title || '').trim() ? editing.title : (flat.title || editing.title || ''),
+      body: (editing.body || '').trim() ? editing.body : (flat.body || editing.body || ''),
+      image_url: editing.image_url || flat.imageUrl,
+      badge_text: editing.badge_text || flat.badgeText,
+      buttons: editing.buttons && editing.buttons.length > 0 ? editing.buttons : flat.buttons,
+      content_blocks: [],
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing.id, editing.channel]);
+
   const updateField = (key: keyof MessageRow, value: any) => {
     setEditing({ ...editing, [key]: value });
   };
@@ -1699,6 +1798,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
   // ★ D230+ 블록
   const blocks = Array.isArray(editing.content_blocks) ? editing.content_blocks : [];
   const hasBlocks = blocks.length > 0;
+  // ★ 2026-07-16 범용 보장 계약 — 앱 채널 = flat 보장 요소만 (블록·테마·정예 템플릿 = 웹 전용)
+  const isApp = editing.channel === 'app';
   const blockHasPlaceholder = blocks.some((b: any) => b?.type === 'benefit' && (!String(b.text || '').trim() || String(b.text || '').includes('[혜택') || String(b.text || '').includes('[직접')));
   const hasPlaceholder = (editing.body || '').includes('[혜택') || (editing.body || '').includes('[직접') || blockHasPlaceholder;
 
@@ -1784,18 +1885,25 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     className="w-full px-3 py-2 mb-2 bg-slate-900/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
                     maxLength={20}
                   />
-                  <button
-                    onClick={() => { const c = convertToBlocks(editing); setEditing({ ...editing, ...c }); }}
-                    className="w-full text-xs text-violet-100 bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 hover:from-violet-500/50 hover:to-fuchsia-500/50 border border-violet-400/30 rounded-lg py-2 flex items-center justify-center gap-1.5 transition-colors"
-                  >
-                    <Wand2 className="w-3.5 h-3.5" /> 블록 에디터로 전환 (모던 메시지 — 권장)
-                  </button>
+                  {!isApp && (
+                    <button
+                      onClick={() => { const c = convertToBlocks(editing); setEditing({ ...editing, ...c }); }}
+                      className="w-full text-xs text-violet-100 bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 hover:from-violet-500/50 hover:to-fuchsia-500/50 border border-violet-400/30 rounded-lg py-2 flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <Wand2 className="w-3.5 h-3.5" /> 블록 에디터로 전환 (모던 메시지 — 권장)
+                    </button>
+                  )}
+                  {isApp && (
+                    <div className="text-[10px] text-white/40 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
+                      앱 인앱은 위 보장 요소(제목·본문·이미지·버튼·배지)가 그대로 앱에 표시됩니다 — 미리보기와 실물이 1:1로 일치합니다.
+                    </div>
+                  )}
                 </>
               )}
             </div>
 
-            {/* ★ 2026-07-14 디자인 4.0 — 정예 템플릿 10종 (목적×스토리 구조 — 서버 컴파일) */}
-            {eliteTemplates.length > 0 && (
+            {/* ★ 2026-07-14 디자인 4.0 — 정예 템플릿 10종 (목적×스토리 구조 — 서버 컴파일. 블록 기반 = 웹 전용) */}
+            {eliteTemplates.length > 0 && !isApp && (
               <div className={activeTab === 'design' ? 'mb-5' : 'hidden'}>
                 <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                   <Sparkles className="w-3 h-3 text-amber-300" /> 정예 템플릿 — 목적으로 고르세요
@@ -1838,10 +1946,13 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                         : 'bg-slate-900/60 border-white/10 text-white/70 hover:bg-white/5'
                     }`}
                   >
-                    {TEMPLATE_LABELS[tpl]}
+                    {isApp ? (APP_TEMPLATE_LABELS[tpl] || TEMPLATE_LABELS[tpl]) : TEMPLATE_LABELS[tpl]}
                   </button>
                 ))}
               </div>
+              {isApp && (
+                <div className="text-[10px] text-white/40 mt-1.5">앱 실렌더 기준 2형 — 중앙 모달 / 바텀 시트(하단에서 올라오는 카드).</div>
+              )}
             </div>
 
             {/* 탭 디자인: 형태(디자인) + 색상 + 강조색 (블록 모드) */}
@@ -2304,6 +2415,12 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 <Activity className="w-3 h-3" /> 트리거 조건
               </h4>
               <div className="grid grid-cols-2 gap-2">
+                {isApp ? (
+                  // ★ 2026-07-16 앱 = 실행(접속) 시에만 조회 — 다른 트리거로 저장되면 영원히 미표시라 고정
+                  <div className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white/70 flex items-center">
+                    앱 실행(접속) 시 표시
+                  </div>
+                ) : (
                 <select
                   value={editing.trigger_event || 'page_load'}
                   onChange={(e) => {
@@ -2328,15 +2445,20 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   <option value="exit_intent">이탈 의도</option>
                   <option value="cart_value">장바구니 금액</option>
                 </select>
+                )}
                 <select
                   value={editing.display_frequency || 'once_per_session'}
                   onChange={(e) => updateField('display_frequency', e.target.value as Frequency)}
                   className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white"
                 >
-                  <option value="once_per_session">세션당 1회</option>
+                  <option value="once_per_session">{isApp ? '접속당 1회' : '세션당 1회'}</option>
                   <option value="once_per_day">하루 1회</option>
-                  <option value="always">항상</option>
+                  <option value="always">매번 표시</option>
                 </select>
+              </div>
+              {/* ★ 2026-07-16 재노출 계약 안내 — 닫기 ≠ 영구 거부 */}
+              <div className="text-[10px] text-white/40 mt-1.5">
+                닫기(X)는 이번만 닫히고 위 빈도 규칙에 따라 다시 표시됩니다. "다시 보지 않기"를 누른 고객에게는 더 이상 표시되지 않습니다.
               </div>
               {/* ★ P0-1 — 트리거 임계값 입력 (없으면 "스크롤 도달"을 골라도 % 지정 불가 = 트리거 정밀 표시 무동작이던 결함) */}
               {(editing.trigger_event === 'scroll' || editing.trigger_event === 'time_on_page' || editing.trigger_event === 'cart_value') && (
@@ -2468,17 +2590,20 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[10px] text-white/50 block mb-1">자동 닫힘 (초, 비우면 사용자 직접)</label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={editing.auto_dismiss_seconds ?? ''}
-                      onChange={(e) => updateField('auto_dismiss_seconds', e.target.value ? Number(e.target.value) : null)}
-                      placeholder="비우면 수동"
-                      className="w-full px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30"
-                    />
-                  </div>
+                  {/* ★ 2026-07-16 — 자동 닫힘은 앱이 소비하지 않는 옵션이라 앱 채널에서 숨김 (죽은 컨트롤 금지) */}
+                  {!isApp && (
+                    <div>
+                      <label className="text-[10px] text-white/50 block mb-1">자동 닫힘 (초, 비우면 사용자 직접)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={editing.auto_dismiss_seconds ?? ''}
+                        onChange={(e) => updateField('auto_dismiss_seconds', e.target.value ? Number(e.target.value) : null)}
+                        placeholder="비우면 수동"
+                        className="w-full px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                      />
+                    </div>
+                  )}
                   <div>
                     <label className="text-[10px] text-white/50 block mb-1">사용자별 최대 노출 횟수</label>
                     <input
@@ -2491,6 +2616,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     />
                   </div>
                 </div>
+                {/* ★ 2026-07-16 — 애니메이션도 앱 미소비(네이티브 슬라이드업 고정)라 앱 채널에서 숨김 */}
+                {!isApp && (
                 <div>
                   <label className="text-[10px] text-white/50 block mb-1">애니메이션</label>
                   <select
@@ -2506,6 +2633,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     <option value="celebrate">축하 효과</option>
                   </select>
                 </div>
+                )}
               </div>
             </div>
 
@@ -2560,9 +2688,9 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               <Eye className="w-3 h-3" /> 실시간 미리보기
             </h4>
             {editing.channel === 'app' && (
-              <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg px-3 py-2 text-[11px] text-amber-200 flex items-start gap-1.5">
+              <div className="bg-sky-500/10 border border-sky-400/30 rounded-lg px-3 py-2 text-[11px] text-sky-200 flex items-start gap-1.5">
                 <Smartphone className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                <span>앱 인앱은 <strong>앱 SDK 연동 후</strong> 실제 표시됩니다. 아래는 내용·형태 미리보기입니다.</span>
+                <span>아래 미리보기 = <strong>앱 실렌더와 동일 요소</strong>(이미지·배지·제목·본문·버튼)만 표시 — 만든 그대로 앱에 뜹니다. (앱 SDK 연동 필요)</span>
               </div>
             )}
             <div className="flex gap-1 flex-wrap">
@@ -2595,6 +2723,19 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               )}
             </div>
 
+            {isApp ? (
+              // ★ 2026-07-16 범용 보장 계약 — 앱 채널 미리보기 = 앱 실렌더(바텀시트/중앙 모달) 1:1 미러
+              <AppInAppPreview
+                template={(editing.template || 'bottom_banner') as string}
+                title={renderedTitle}
+                body={renderedBody}
+                imageUrl={editing.image_url}
+                badge={editing.badge_text}
+                buttons={(editing.buttons || []).map((b) => ({ ...b, label: replaceVars(b.label, sampleCustomer) }))}
+                backgroundColor={editing.background_color || '#4f46e5'}
+                textColor={editing.text_color || '#ffffff'}
+              />
+            ) : (
             <InAppMessagePreview
               template={(editing.template || 'top_banner') as string}
               title={renderedTitle}
@@ -2611,6 +2752,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               design={editing.design}
               replaceVars={(t) => replaceVars(t, sampleCustomer)}
             />
+            )}
           </div>
         </div>
 

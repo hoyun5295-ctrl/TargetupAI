@@ -178,9 +178,13 @@ function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Varian
   };
   const r = (def: number) => (usingBlocks ? themeTokens!.radius : def);
   const sh = (def: string) => cardShadow || def;
+  // ★ 2026-07-16 SDK appendOptOutLink 미러 — 토스트·플로팅 제외 전 표면에 "다시 보지 않기"(명시 거부) 노출
+  const optOutHint = (
+    <div style={{ textAlign: 'center', fontSize: 10, opacity: 0.45, textDecoration: 'underline dotted', textUnderlineOffset: 3, padding: '6px 0 2px' }}>다시 보지 않기</div>
+  );
 
   if (variant === 'banner') {
-    return <div style={{ ...cardBase, top: 0, left: 0, right: 0, padding: '13px 16px', boxShadow: '0 8px 28px rgba(0,0,0,0.18)' }}>{inner}</div>;
+    return <div style={{ ...cardBase, top: 0, left: 0, right: 0, padding: '13px 16px', boxShadow: '0 8px 28px rgba(0,0,0,0.18)' }}>{inner}{optOutHint}</div>;
   }
   if (variant === 'modal') {
     const heroImg = usingBlocks ? undefined : toAbsoluteImage(rest.imageUrl);
@@ -190,6 +194,7 @@ function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Varian
           {heroImg && <img src={heroImg} alt="" onError={hideOnError} style={{ width: '100%', maxHeight: 130, objectFit: 'cover', display: 'block', flexShrink: 0 }} />}
           <div style={{ padding: zoned ? 0 : 22, overflowY: 'auto' }}>
             {usingBlocks ? inner : <CardInner {...rest} imageUrl={null} variant="modal" textColor={textColor} />}
+            {optOutHint}
           </div>
           {bubble && bubbleTail('left')}
         </div>
@@ -197,12 +202,13 @@ function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Varian
     );
   }
   if (variant === 'full') {
-    return <div style={{ ...cardBase, inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: 24, overflowY: 'auto' }}>{inner}</div>;
+    return <div style={{ ...cardBase, inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: 24, overflowY: 'auto' }}>{inner}{optOutHint}</div>;
   }
   if (variant === 'slide') {
     return (
       <div style={{ ...cardBase, right: 16, bottom: 16, maxWidth: 236, maxHeight: '88%', overflowY: bubble ? 'visible' : 'auto', borderRadius: bubble ? bubbleRadius('br') : r(16), padding: zoned ? 0 : 17, overflow: zoned ? 'hidden' : undefined, boxShadow: sh('0 16px 40px rgba(0,0,0,0.3)') }}>
         {inner}
+        {optOutHint}
         {bubble && bubbleTail('right')}
       </div>
     );
@@ -225,6 +231,7 @@ function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Varian
     <div style={{ position: 'absolute', top: 64, left: 14, right: 14 }}>
       <div style={{ ...cardBase, position: 'relative', borderRadius: bubble ? bubbleRadius('bl') : r(15), padding: zoned ? 0 : 18, overflow: zoned ? 'hidden' : undefined, boxShadow: sh('0 6px 20px rgba(0,0,0,0.12)') }}>
         {inner}
+        {optOutHint}
         {bubble && bubbleTail('left')}
       </div>
     </div>
@@ -338,6 +345,115 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
 
       <div className="text-[10px] text-white/30 italic mt-2.5 text-center">
         Data source — 선택한 형태·내용 그대로 자사몰에 표시됩니다
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-07-16 앱 채널 미리보기 — 앱 실렌더(네이티브 바텀시트/중앙 모달) 1:1 미러
+//   범용 보장 계약: 앱은 flat(이미지·배지·제목·본문·버튼)만 렌더 — 미리보기도 같은 요소만 그린다.
+//   (미리보기가 실물과 다른 요소를 그리던 것이 "편집기 ≠ 앱" 사고의 표면 — 실렌더 미러 의무)
+// ════════════════════════════════════════════════════════════════════
+
+export interface AppInAppPreviewProps {
+  template: string;
+  title: string;
+  body: string;
+  imageUrl?: string | null;
+  badge?: string | null;
+  buttons?: Array<{ label: string; background_color?: string; text_color?: string }>;
+  backgroundColor: string;
+  textColor: string;
+}
+
+/** 더미 앱 화면 — 인앱이 뜨는 맥락 (라이트 앱 리스트) */
+function DummyAppScreen() {
+  return (
+    <div style={{ position: 'absolute', inset: 0, background: '#f5f5f7', overflow: 'hidden' }}>
+      <div style={{ height: 44, background: '#ffffff', borderBottom: '1px solid #ececf0', display: 'flex', alignItems: 'center', padding: '0 14px', gap: 8 }}>
+        <div style={{ width: 58, height: 10, borderRadius: 3, background: '#d9d9de' }} />
+        <div style={{ flex: 1 }} />
+        <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#e4e4e8' }} />
+      </div>
+      <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 9 }}>
+        {[0, 1, 2, 3, 4].map((i) => (
+          <div key={i} style={{ height: 62, borderRadius: 12, background: '#ffffff', border: '1px solid #ececf0', display: 'flex', alignItems: 'center', gap: 10, padding: '0 10px' }}>
+            <div style={{ width: 44, height: 44, borderRadius: 9, background: '#ebebef', flexShrink: 0 }} />
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5 }}>
+              <div style={{ width: '62%', height: 8, borderRadius: 3, background: '#e2e2e7' }} />
+              <div style={{ width: '38%', height: 7, borderRadius: 3, background: '#ececf0' }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function AppInAppPreview({ template, title, body, imageUrl, badge, buttons, backgroundColor, textColor }: AppInAppPreviewProps) {
+  const isModal = template === 'center_modal';
+  const img = imageUrl || undefined;
+  const card = (
+    <div style={{
+      background: backgroundColor || '#1f1f29',
+      color: textColor || '#ffffff',
+      overflow: 'hidden',
+      fontFamily: '"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif',
+      ...(isModal
+        ? { borderRadius: 22, margin: '0 18px', maxWidth: 420, width: 'calc(100% - 36px)' }
+        : { borderTopLeftRadius: 24, borderTopRightRadius: 24, width: '100%', paddingBottom: 10 }),
+    }}>
+      {img && (
+        <img src={img} alt="" onError={hideOnError} style={{ width: '100%', height: 150, objectFit: 'cover', display: 'block' }} />
+      )}
+      <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {badge ? (
+          <div style={{ alignSelf: 'flex-start', background: 'rgba(255,255,255,0.18)', borderRadius: 999, padding: '3px 10px' }}>
+            <span style={{ color: textColor, fontSize: 10.5, fontWeight: 700 }}>{badge}</span>
+          </div>
+        ) : null}
+        <div style={{ fontSize: 17, fontWeight: 800, lineHeight: 1.35 }}>{title || '제목 미리보기'}</div>
+        {body ? (
+          <div style={{ fontSize: 13, lineHeight: 1.5, opacity: 0.82, whiteSpace: 'pre-wrap' }}>{body}</div>
+        ) : null}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 6 }}>
+          {(buttons || []).slice(0, 3).map((b, i) => (
+            <div key={i} style={{ background: b.background_color || 'rgba(255,255,255,0.16)', borderRadius: 12, padding: '10px 0', textAlign: 'center' }}>
+              <span style={{ color: b.text_color || '#ffffff', fontSize: 13.5, fontWeight: 700 }}>{b.label || '버튼'}</span>
+            </div>
+          ))}
+          {/* 앱 실렌더 미러 — 다시 보지 않기(영구 거부) · 닫기(이번만) */}
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 22 }}>
+            <span style={{ color: textColor, opacity: 0.45, fontSize: 12, textDecoration: 'underline', padding: '8px 0' }}>다시 보지 않기</span>
+            <span style={{ color: textColor, opacity: 0.55, fontSize: 12, padding: '8px 0' }}>닫기</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div className="mx-auto" style={{ width: 300 }}>
+        <div style={{ borderRadius: 26, overflow: 'hidden', boxShadow: '0 14px 44px rgba(0,0,0,0.42)', border: '1px solid rgba(255,255,255,0.12)' }}>
+          {/* 상단 바 (모바일 노치) */}
+          <div style={{ height: 30, background: '#26262e', display: 'flex', alignItems: 'center', padding: '0 12px' }}>
+            <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+              <div style={{ width: 54, height: 5, borderRadius: 3, background: '#45454f' }} />
+            </div>
+          </div>
+          {/* 앱 화면 + 백드롭 + 시트/모달 */}
+          <div style={{ position: 'relative', height: 580, overflow: 'hidden' }}>
+            <DummyAppScreen />
+            <div style={{ position: 'absolute', inset: 0, background: 'rgba(10,10,15,0.6)', display: 'flex', flexDirection: 'column', justifyContent: isModal ? 'center' : 'flex-end', alignItems: 'center' }}>
+              {card}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="text-[10px] text-white/30 italic mt-2.5 text-center">
+        Data source — 앱 실렌더와 동일 요소(이미지·배지·제목·본문·버튼)만 표시 · 만든 그대로 앱에 뜹니다
       </div>
     </div>
   );

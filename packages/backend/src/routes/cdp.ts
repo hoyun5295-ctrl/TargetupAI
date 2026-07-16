@@ -578,6 +578,8 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
       triggerEvent: trigger,
       externalId,
       anonymousId,
+      // ★ 2026-07-16 (Codex 1R) — opt_out 억제의 identity_link 조회를 source로 한정 (/inapp/track과 동일 축)
+      source: cdpAuth.source,
       seenMessageIds,
       channel: reqChannel,
     });
@@ -640,8 +642,9 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
   }
 });
 
-// POST /api/cdp/inapp/track — SDK가 impression/click/dismiss 기록
+// POST /api/cdp/inapp/track — SDK가 impression/click/dismiss/opt_out 기록
 // ★ D215+ (2026-05-25) — button_id / dwell_seconds 신규 컬럼 처리 + 503 안전망
+// ★ 2026-07-16 — opt_out("다시 보지 않기") 추가: getActiveMessagesForCustomerV2가 영구 억제 근거로 사용
 router.post('/inapp/track', requireCdpKeyOrBrowserOrigin, async (req: Request, res: Response) => {
   const cdpAuth = req.cdpAuth!;
   try {

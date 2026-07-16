@@ -27,7 +27,8 @@ import { isTimeWindowValid } from './inapp-trigger-engine';
 export type InAppPosition = 'top_banner' | 'bottom_banner' | 'center_modal';
 export type InAppFrequency = 'once_per_session' | 'once_per_day' | 'always';
 export type InAppStatus = 'active' | 'paused' | 'archived';
-export type InAppEventType = 'impression' | 'click' | 'dismiss';
+// ★ 2026-07-16 opt_out = "다시 보지 않기" 명시 거부 (닫기 dismiss와 구분 — 영구 억제 근거)
+export type InAppEventType = 'impression' | 'click' | 'dismiss' | 'opt_out';
 
 export interface InAppMessage {
   id: string;
@@ -189,6 +190,66 @@ export function normalizeTheme(theme: any): string {
   return (INAPP_THEME_KEYS as readonly string[]).includes(String(theme)) ? String(theme) : 'auto';
 }
 
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-07-16 범용 보장 계약 — blocks → flat 합성 (단일 소스)
+//   편집기·서버·웹SDK는 블록 기반인데 flat(title·body·image_url·buttons·badge)만 읽는
+//   소비자(고객사 앱 등)가 존재한다. 블록이 있으면 blocks가 진실 — flat을 블록에서 합성해
+//   "만든 그대로 어디서나" 렌더+동작을 보장한다. 소비 길목 = 저장(create/update) + 응답(V2).
+// ════════════════════════════════════════════════════════════════════
+
+export interface ComposedFlat {
+  title: string | null;
+  body: string | null;
+  imageUrl: string | null;
+  buttons: any[];
+  badgeText: string | null;
+}
+
+const FLAT_BUTTON_STYLES = ['primary', 'secondary', 'tertiary', 'ghost'];
+
+/** blocks에서 범용 보장 요소(제목·본문·이미지·버튼 최대 3·배지) 합성 — 순수 함수 (계약 테스트 고정) */
+export function composeFlatFromBlocks(blocks: any[]): ComposedFlat {
+  const list = Array.isArray(blocks) ? blocks.filter((b) => b && typeof b === 'object') : [];
+  const text = (t: any) => String(t ?? '').trim();
+  const media = list.find((b) => b.type === 'media' && text(b.url) && (b.variant === 'image' || !b.variant));
+  const headline = list.find((b) => b.type === 'headline');
+  const bodyBlock = list.find((b) => b.type === 'body');
+  const eyebrow = list.find((b) => b.type === 'eyebrow');
+  const buttons: any[] = [];
+  for (const b of list) {
+    if (b.type !== 'cta_group' || !Array.isArray(b.buttons)) continue;
+    for (const btn of b.buttons) {
+      if (buttons.length >= 3) break;
+      if (!btn || typeof btn !== 'object' || !text(btn.label)) continue;
+      buttons.push({
+        id: String(btn.id || `btn_${buttons.length}`),
+        label: String(btn.label),
+        action_url: btn.action_url ?? btn.actionUrl ?? null,
+        style: FLAT_BUTTON_STYLES.includes(String(btn.style)) ? String(btn.style) : (buttons.length === 0 ? 'primary' : 'secondary'),
+        ...(btn.background_color ? { background_color: btn.background_color } : {}),
+        ...(btn.text_color ? { text_color: btn.text_color } : {}),
+      });
+    }
+    if (buttons.length >= 3) break;
+  }
+  const headlineText = headline ? text(headline.text) : '';
+  const bodyText = bodyBlock ? text(bodyBlock.text) : '';
+  return {
+    title: headlineText || null,
+    body: bodyText || headlineText || null,
+    imageUrl: media ? String(media.url) : null,
+    buttons,
+    badgeText: eyebrow ? text(eyebrow.text) || null : null,
+  };
+}
+
+/** 옛 단일 CTA(action_url·action_label) → buttons 승격 — buttons만 읽는 소비자(앱)용. 순수 함수 */
+export function synthesizeButtonsFromActionUrl(actionUrl: any, actionLabel?: any): any[] {
+  const u = String(actionUrl || '').trim();
+  if (!u) return [];
+  return [{ id: 'btn_primary', label: String(actionLabel || '자세히 보기'), action_url: u, style: 'primary' }];
+}
+
 // ★ 2026-07-07(2) 형태 축 화이트리스트 — SDK inapp-blocks CARD_STYLES와 1:1
 export const INAPP_CARD_STYLES = ['classic', 'bubble', 'ticket', 'poster'] as const;
 
@@ -245,6 +306,9 @@ export async function createInAppMessage(
   if (blocksHaveUneditedPlaceholder(contentBlocks)) {
     throw new Error(`${BENEFIT_PLACEHOLDER_ERROR}: 혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.`);
   }
+  // ★ 2026-07-16 범용 보장 계약 — 블록이 있으면 blocks가 진실: flat(제목·본문·이미지·버튼·배지)을 블록에서 합성 저장.
+  //   입구(편집기·AI·템플릿·향후 API)가 몇 개든 flat만 읽는 소비자(앱)가 같은 내용을 받는다.
+  const composed = contentBlocks.length > 0 ? composeFlatFromBlocks(contentBlocks) : null;
 
   // ★ 2026-07-14 디자인 3.0 — design 동봉 생성은 INSERT "전" 컬럼 선확인(부분 상태 0 — 이메일 3.0 규약 미러).
   //   design 미제공 = 컬럼 자체를 INSERT에서 생략(ALTER 전 환경에서도 기존 생성 무영향).
@@ -272,17 +336,17 @@ export async function createInAppMessage(
       NOW(), NOW()
     ) RETURNING *`,
     [
-      companyId, createdBy, input.title, input.body,
+      companyId, createdBy, composed?.title || input.title, composed?.body || input.body,
       resolveActionUrlPatch(input).value, input.actionLabel || '자세히 보기',
       position, input.backgroundColor || '#4f46e5', input.textColor || '#ffffff',
       input.triggerEvent || 'page_load', frequency,
       input.startAt || null, input.endAt || null,
       input.status || 'active', channel,
-      input.template || position, input.image_url || null,
-      JSON.stringify(sanitizeButtonsActionUrls(input.buttons || [])), JSON.stringify(input.segment_conditions || {}), JSON.stringify(input.trigger_conditions || {}),
+      input.template || position, composed ? composed.imageUrl : (input.image_url || null),
+      JSON.stringify(sanitizeButtonsActionUrls(composed ? composed.buttons : (input.buttons || []))), JSON.stringify(input.segment_conditions || {}), JSON.stringify(input.trigger_conditions || {}),
       JSON.stringify(input.personalization_vars || []), input.auto_dismiss_seconds ?? null, input.max_displays_per_user ?? null,
       input.send_start_hour ?? null, input.send_end_hour ?? null, input.allowed_weekdays || [0, 1, 2, 3, 4, 5, 6], input.animation || 'fade',
-      input.badge_text ?? null,
+      input.badge_text ?? composed?.badgeText ?? null,
       JSON.stringify(contentBlocks), normalizeTheme(input.theme), input.accent_color ?? null,
       normalizeCardStyle(input.card_style),
       ...(design ? [JSON.stringify(design)] : []),
@@ -331,19 +395,24 @@ export async function updateInAppMessage(
 ): Promise<InAppMessage | null> {
   // ★ D230+ 블록 — 제공된 경우만 정규화 + 혜택 placeholder 차단
   let blocksParam: string | null = null;
+  // ★ 2026-07-16 범용 보장 계약 — 블록이 제공되고 비어있지 않으면 blocks가 진실:
+  //   flat(제목·본문·이미지·버튼·배지)을 블록에서 재합성해 확정 대입(입력 flat이 stale이어도 블록 편집이 반영).
+  let composed: ComposedFlat | null = null;
   if (input.content_blocks !== undefined) {
     const blocks = sanitizeContentBlocks(input.content_blocks);
     if (blocksHaveUneditedPlaceholder(blocks)) {
       throw new Error(`${BENEFIT_PLACEHOLDER_ERROR}: 혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.`);
     }
     blocksParam = JSON.stringify(blocks);
+    if (blocks.length > 0) composed = composeFlatFromBlocks(blocks);
   }
   // ★ P1-1 — 무조건 대입이던 5필드(image_url·auto_dismiss_seconds·max_displays_per_user·send_start_hour·send_end_hour)는
   //   부분 PUT에서 통째 NULL 리셋되던 함정 → presence flag(CASE WHEN)로 원자 병합(undefined=유지/null=비우기/값=교체).
   // ★ P0-2 — action_url도 presence flag: 제공 시 무해화 값으로 확정 대입(위험 스킴 = null 클리어, 명시 null 비우기 지원).
   //   camelCase·snake_case 양쪽 수용 (Codex 2R — snake 키 무시 시 무해화·삭제 누락).
   const actionUrlPatch = resolveActionUrlPatch(input);
-  const imagePatch = patchPresence(input.image_url);
+  // ★ 2026-07-16 범용 보장 계약 — 블록 제공 시 이미지·버튼은 블록 합성값으로 확정 대입(블록에 없으면 비움 = 편집기 표시와 일치)
+  const imagePatch = composed ? { set: true, value: composed.imageUrl } : patchPresence(input.image_url);
   const dismissPatch = patchPresence(input.auto_dismiss_seconds);
   const maxDispPatch = patchPresence(input.max_displays_per_user);
   const startHourPatch = patchPresence(input.send_start_hour);
@@ -390,19 +459,19 @@ export async function updateInAppMessage(
      RETURNING *`,
     [
       messageId, companyId,
-      input.title ?? null, input.body ?? null,
+      composed?.title ?? input.title ?? null, composed?.body ?? input.body ?? null,
       actionUrlPatch.value, input.actionLabel ?? null,
       input.position ?? null, input.backgroundColor ?? null, input.textColor ?? null,
       input.triggerEvent ?? null, input.displayFrequency ?? null,
       input.startAt ?? null, input.endAt ?? null,
       input.status ?? null,
       input.template ?? null, imagePatch.value,
-      input.buttons ? JSON.stringify(sanitizeButtonsActionUrls(input.buttons)) : null, input.segment_conditions ? JSON.stringify(input.segment_conditions) : null,
+      composed ? JSON.stringify(sanitizeButtonsActionUrls(composed.buttons)) : (input.buttons ? JSON.stringify(sanitizeButtonsActionUrls(input.buttons)) : null), input.segment_conditions ? JSON.stringify(input.segment_conditions) : null,
       input.trigger_conditions ? JSON.stringify(input.trigger_conditions) : null, input.personalization_vars ? JSON.stringify(input.personalization_vars) : null,
       dismissPatch.value, maxDispPatch.value,
       startHourPatch.value, endHourPatch.value,
       input.allowed_weekdays ?? null, input.animation ?? null,
-      input.badge_text ?? null,
+      input.badge_text ?? composed?.badgeText ?? null,
       blocksParam, input.theme ? normalizeTheme(input.theme) : null, input.accent_color ?? null,
       input.card_style !== undefined && input.card_style !== null ? normalizeCardStyle(input.card_style) : null,
       actionUrlPatch.set, imagePatch.set, dismissPatch.set, maxDispPatch.set, startHourPatch.set, endHourPatch.set,
@@ -430,6 +499,9 @@ export interface ActiveMessagesInput {
   triggerEvent?: string;            // 기본 'page_load'
   externalId?: string;              // 회원 식별
   anonymousId?: string;             // 비회원 식별
+  /** ★ 2026-07-16 (Codex 지적) — identity_link는 (company,source,external_id) 축이라 opt_out 조회를
+   *  source로 한정해 같은 external_id의 타 source 고객 오억제를 차단. 미전달 = 기존(전 source) 동작 */
+  source?: string;
   /** 클라이언트가 전달한 표시 이력 (localStorage) — 서버 검증 보조 */
   seenMessageIds?: string[];
   /** ★ 2026-06-17 2단계 — 'web'(자사몰 팝업, 기본) / 'app'(웹뷰 앱 인앱). 미지정 시 web 하위호환 */
@@ -504,7 +576,7 @@ export async function trackImpression(input: TrackImpressionInput): Promise<void
   if (!input.companyId || !input.messageId || !input.eventType) {
     throw new Error('companyId, messageId, eventType은 필수입니다.');
   }
-  if (!['impression', 'click', 'dismiss'].includes(input.eventType)) {
+  if (!['impression', 'click', 'dismiss', 'opt_out'].includes(input.eventType)) {
     throw new Error(`허용되지 않는 event_type: ${input.eventType}`);
   }
   // ★ P0-3 (2026-07-12) — message 소유 검증. 타사/임의 uuid로 자기 회사 impressions에 유령 행 적재 차단.
@@ -546,6 +618,7 @@ export async function getMessageStats(companyId: string, messageId: string): Pro
   impressions: number;
   clicks: number;
   dismisses: number;
+  optOuts: number;
   ctr: number;
 }> {
   const result = await query(
@@ -555,13 +628,14 @@ export async function getMessageStats(companyId: string, messageId: string): Pro
      GROUP BY event_type`,
     [companyId, messageId]
   );
-  const map: Record<string, number> = { impression: 0, click: 0, dismiss: 0 };
+  const map: Record<string, number> = { impression: 0, click: 0, dismiss: 0, opt_out: 0 };
   result.rows.forEach((r: any) => { map[r.event_type] = r.cnt; });
   const impressions = map.impression || 0;
   return {
     impressions,
     clicks: map.click || 0,
     dismisses: map.dismiss || 0,
+    optOuts: map.opt_out || 0,
     ctr: impressions > 0 ? (map.click || 0) / impressions : 0,
   };
 }
@@ -827,6 +901,41 @@ export async function getActiveMessagesForCustomerV2(input: ActiveMessagesInput)
 
   let messages = selected.map(mapRowToMessageDetail);
 
+  // ★ 2026-07-16 Step 4.5 — "다시 보지 않기"(opt_out) 영구 억제. 명시 거부가 빈도 규칙보다 최우선(시간 무제한).
+  //   variant에서 눌러도 부모 축(family)으로 억제해 형제 variant 재노출까지 차단.
+  //   ★ Codex 1R 정정 2건: ① externalId·anonymousId 둘 다 오면 OR 매칭 — 익명으로 거부한 뒤 로그인해도 억제 유지
+  //   ② identity_link 조회를 source로 한정(제공 시) — 같은 external_id의 타 source 고객 오억제 차단.
+  //   (사용 컬럼 전부 기존 코드가 사용 중 — cdp_identity_links.source는 /inapp/track 라우트와 동일 축. 신규 컬럼 0)
+  if (messages.length > 0 && (input.externalId || input.anonymousId)) {
+    const optConds: string[] = [];
+    const optParams: any[] = [input.companyId];
+    if (input.externalId) {
+      optParams.push(input.externalId);
+      const extIdx = optParams.length;
+      if (input.source) {
+        optParams.push(input.source);
+        optConds.push(`i.identity_link_id IN (SELECT id FROM cdp_identity_links WHERE company_id = $1::uuid AND external_id = $${extIdx} AND source = $${optParams.length})`);
+      } else {
+        optConds.push(`i.identity_link_id IN (SELECT id FROM cdp_identity_links WHERE company_id = $1::uuid AND external_id = $${extIdx})`);
+      }
+    }
+    if (input.anonymousId) {
+      optParams.push(input.anonymousId);
+      optConds.push(`i.anonymous_id = $${optParams.length}`);
+    }
+    const optR = await query(
+      `SELECT DISTINCT COALESCE(m2.parent_message_id, m2.id) AS root_id
+       FROM cdp_inapp_impressions i
+       JOIN cdp_inapp_messages m2 ON m2.id = i.message_id AND m2.company_id = i.company_id
+       WHERE i.company_id = $1::uuid AND i.event_type = 'opt_out' AND (${optConds.join(' OR ')})`,
+      optParams
+    );
+    if (optR.rows.length > 0) {
+      const optedRoots = new Set<string>(optR.rows.map((r: any) => String(r.root_id)));
+      messages = messages.filter((m) => !optedRoots.has(String(m.parentMessageId || m.id)));
+    }
+  }
+
   // Step 5 — once_per_day 누적 impression 검증 (24h 윈도우)
   const onceMessages = messages.filter((m) => m.displayFrequency === 'once_per_day');
   if (onceMessages.length > 0 && (input.externalId || input.anonymousId)) {
@@ -875,6 +984,24 @@ export async function getActiveMessagesForCustomerV2(input: ActiveMessagesInput)
   if (input.seenMessageIds && input.seenMessageIds.length > 0) {
     const seenSet = new Set(input.seenMessageIds);
     messages = messages.filter((m) => m.displayFrequency !== 'once_per_session' || !seenSet.has(m.id));
+  }
+
+  // ★ 2026-07-16 Step 8 — 범용 보장 계약 응답 안전망: 과거 저장분(블록만 있고 flat이 빈 메시지)도
+  //   flat을 채워 전달한다(빈 곳만 채움 — DB 무변경). flat만 읽는 소비자(앱)의 이미지·버튼 소실 차단.
+  for (const m of messages) {
+    if (Array.isArray(m.contentBlocks) && m.contentBlocks.length > 0) {
+      const flat = composeFlatFromBlocks(m.contentBlocks);
+      if (!m.imageUrl && flat.imageUrl) m.imageUrl = flat.imageUrl;
+      if ((!Array.isArray(m.buttons) || m.buttons.length === 0) && flat.buttons.length > 0) m.buttons = flat.buttons;
+      if (!m.badgeText && flat.badgeText) m.badgeText = flat.badgeText;
+      if (!String(m.title || '').trim() && flat.title) m.title = flat.title;
+      if (!String(m.body || '').trim() && flat.body) m.body = flat.body;
+    }
+    // 옛 단일 CTA(actionUrl)만 있는 메시지 — 앱은 buttons만 읽으므로 앱 채널 응답에서만 buttons로 승격.
+    // 웹은 SDK 자체 폴백(반투명 버튼 스타일)이 있어 불변 — 서버 합성 시 기존 웹 렌더 색이 바뀌는 회귀 차단.
+    if (input.channel === 'app' && (!Array.isArray(m.buttons) || m.buttons.length === 0) && m.actionUrl) {
+      m.buttons = synthesizeButtonsFromActionUrl(m.actionUrl, m.actionLabel);
+    }
   }
 
   return messages;

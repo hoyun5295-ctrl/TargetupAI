@@ -110,9 +110,9 @@ describe('서체 실로딩 화이트리스트', () => {
     expect(safeFontFamily(undefined, 'fallback')).toBe('fallback');
   });
 
-  it('카탈로그 6종 — DM_FONT_CATALOG 계열 미러', () => {
-    expect(INAPP_FONT_CATALOG).toHaveLength(6);
-    expect(INAPP_FONT_CATALOG.filter((c) => c.google).length).toBe(5); // pretendard만 null
+  it('카탈로그 12종 — design-core CORE_FONTS 계열 미러 (2026-07-16 무료 글꼴 6→12 확장)', () => {
+    expect(INAPP_FONT_CATALOG).toHaveLength(12);
+    expect(INAPP_FONT_CATALOG.filter((c) => c.google).length).toBe(11); // pretendard만 null
   });
 });
 

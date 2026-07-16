@@ -200,6 +200,9 @@ const SESSION_KEY_SEEN = 'hanjullo_inapp_session';
 const STORAGE_KEY_DISPLAY_COUNT = 'hanjullo_inapp_display_count';
 const STORAGE_KEY_CACHE = 'hanjullo_inapp_cache';
 const SESSION_KEY_STICKY = 'hanjullo_inapp_sticky';
+// ★ 2026-07-16 "다시 보지 않기" — 명시 거부 메시지 영구 억제 (닫기 X는 이번만 — 빈도 규칙대로 재표시).
+//   서버(cdp_inapp_impressions event_type='opt_out')가 진실, localStorage는 즉시 차단 보조.
+const STORAGE_KEY_OPTOUT = 'hanjullo_inapp_optout';
 const CACHE_TTL_MS = 5 * 60 * 1000;  // 5분
 const MAX_RETRIES = 3;
 
@@ -459,6 +462,10 @@ export class HanjulloInAppModule {
   // ════════════════════════════════════════════════════════════════
 
   private canDisplayMessage(msg: InAppMessageSdk): boolean {
+    // ★ 2026-07-16 "다시 보지 않기" 최우선 — 명시 거부 메시지는 캐시/신규 응답 무관 영구 차단
+    if (this.isOptedOut(msg.id) || (msg.parentMessageId && this.isOptedOut(msg.parentMessageId)) || ((msg as any).parent_message_id && this.isOptedOut(String((msg as any).parent_message_id)))) {
+      return false;
+    }
     const maxDisplays = msg.maxDisplaysPerUser ?? msg.max_displays_per_user;
     if (!maxDisplays || maxDisplays <= 0) return true;
     try {
@@ -468,6 +475,28 @@ export class HanjulloInAppModule {
       return current < maxDisplays;
     } catch {
       return true;
+    }
+  }
+
+  /** ★ 2026-07-16 opt-out 판정 — localStorage 즉시 차단 (서버 억제의 보조. 저장 실패 시 서버가 최종 방어) */
+  private isOptedOut(messageId: string): boolean {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_OPTOUT);
+      const map = raw ? JSON.parse(raw) : {};
+      return typeof map[messageId] === 'number';
+    } catch {
+      return false;
+    }
+  }
+
+  private markOptOut(messageId: string): void {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_OPTOUT);
+      const map = raw ? JSON.parse(raw) : {};
+      map[messageId] = Date.now();
+      localStorage.setItem(STORAGE_KEY_OPTOUT, JSON.stringify(map));
+    } catch {
+      // 조용히 실패 — 서버 opt_out 기록이 최종 방어
     }
   }
 
@@ -723,6 +752,7 @@ export class HanjulloInAppModule {
     if (imageUrl) this.appendImage(root, imageUrl, 48);
     this.appendTextBlock(root, title, body, 'banner', !!(msg.is_ad ?? msg.isAd));
     this.appendButtons(root, msg, buttons, input);
+    this.appendOptOutLink(root, msg, input, () => { try { document.body.removeChild(root); } catch {} }, 'inline');
     this.appendCloseButton(root, msg, input, () => document.body.removeChild(root));
 
     document.body.appendChild(root);
@@ -787,6 +817,7 @@ export class HanjulloInAppModule {
     if (badge) this.appendBadge(content, badge, msg.textColor);
     this.appendTextBlock(content, title, body, 'modal', !!(msg.is_ad ?? msg.isAd));
     this.appendButtons(content, msg, buttons, input, 'stack');
+    this.appendOptOutLink(content, msg, input, () => { try { document.body.removeChild(backdrop); } catch {} });
     root.appendChild(content);
     // 닫기 = 우상단 (이미지 위에도 보이게)
     this.appendCloseButton(root, msg, input, () => document.body.removeChild(backdrop), 'absolute-top-right');
@@ -827,6 +858,7 @@ export class HanjulloInAppModule {
     if (badge) this.appendBadge(root, badge, msg.textColor);
     this.appendTextBlock(root, title, body, 'full', !!(msg.is_ad ?? msg.isAd));
     this.appendButtons(root, msg, buttons, input);
+    this.appendOptOutLink(root, msg, input, () => { try { document.body.removeChild(root); } catch {} });
     this.appendCloseButton(root, msg, input, () => document.body.removeChild(root), 'absolute-top-right');
 
     document.body.appendChild(root);
@@ -865,6 +897,7 @@ export class HanjulloInAppModule {
     if (badge) this.appendBadge(root, badge, msg.textColor);
     this.appendTextBlock(root, title, body, 'slide', !!(msg.is_ad ?? msg.isAd));
     this.appendButtons(root, msg, buttons, input);
+    this.appendOptOutLink(root, msg, input, () => { try { document.body.removeChild(root); } catch {} });
     this.appendCloseButton(root, msg, input, () => document.body.removeChild(root), 'absolute-top-right');
 
     document.body.appendChild(root);
@@ -904,6 +937,7 @@ export class HanjulloInAppModule {
     if (badge) this.appendBadge(root, badge, msg.textColor);
     this.appendTextBlock(root, title, body, 'inline', !!(msg.is_ad ?? msg.isAd));
     this.appendButtons(root, msg, buttons, input);
+    this.appendOptOutLink(root, msg, input, () => { try { root.parentNode?.removeChild(root); } catch {} });
 
     container.appendChild(root);
   }
@@ -1111,6 +1145,9 @@ export class HanjulloInAppModule {
     if (c.showClose) {
       this.appendCloseButton(c.closeTarget, msg, input, c.remove, c.closeLayout);
     }
+
+    // ★ 2026-07-16 "다시 보지 않기" — 토스트(자동 닫힘) 제외 전 표면 (플로팅 버튼은 위에서 조기 반환)
+    if (template !== 'toast') this.appendOptOutLink(c.contentRoot, msg, input, c.remove);
 
     this.applyAnimation(c.animationTarget, animation, c.motionContext);
     if (animation === 'celebrate' && !reduced) this.celebrate(c.animationTarget);
@@ -1620,6 +1657,48 @@ export class HanjulloInAppModule {
     parent.appendChild(close);
   }
 
+  /** ★ 2026-07-16 "다시 보지 않기" 링크 — 명시 거부 = opt_out 기록 + 영구 억제.
+   *  닫기(X)와 구분: X는 이번만 닫히고 빈도 규칙(세션/24h)대로 다시 표시된다.
+   *  토스트(자동 닫힘)·플로팅 버튼(단일 액션)은 제외. */
+  private appendOptOutLink(
+    parent: HTMLElement,
+    msg: InAppMessageSdk,
+    input: InAppInitInput,
+    removeFn: () => void,
+    layout: 'block' | 'inline' = 'block',
+  ): void {
+    const btn = document.createElement('button');
+    btn.textContent = '다시 보지 않기';
+    Object.assign(btn.style, {
+      background: 'none',
+      border: 'none',
+      color: 'inherit',
+      opacity: '0.5',
+      fontSize: '11px',
+      fontWeight: '500',
+      lineHeight: '1',
+      cursor: 'pointer',
+      padding: '4px 6px',
+      textDecoration: 'underline dotted',
+      textUnderlineOffset: '3px',
+      fontFamily: 'inherit',
+      flexShrink: '0',
+      whiteSpace: 'nowrap',
+      transition: 'opacity 0.2s ease',
+      ...(layout === 'block' ? { display: 'block', margin: '2px auto 8px' } : {}),
+    });
+    btn.addEventListener('mouseenter', () => { btn.style.opacity = '0.85'; });
+    btn.addEventListener('mouseleave', () => { btn.style.opacity = '0.5'; });
+    btn.addEventListener('click', () => {
+      this.markOptOut(msg.id);
+      const parentId = msg.parentMessageId ?? msg.parent_message_id;
+      if (parentId) this.markOptOut(String(parentId)); // variant에서 눌러도 부모 축 억제 (서버와 동일 기준)
+      this.track(msg.id, 'opt_out', input);
+      this.gracefulClose(btn, removeFn);
+    });
+    parent.appendChild(btn);
+  }
+
   /** 닫기 — 카드가 살짝 줄며 사라진 뒤 제거 (reduced motion이면 즉시). onClose 실패해도 조용히. */
   private gracefulClose(fromEl: HTMLElement, onClose: () => void): void {
     try {
@@ -1716,7 +1795,7 @@ export class HanjulloInAppModule {
 
   private async track(
     messageId: string,
-    eventType: 'impression' | 'click' | 'dismiss',
+    eventType: 'impression' | 'click' | 'dismiss' | 'opt_out',
     input: InAppInitInput,
     buttonId?: string,
   ): Promise<void> {
