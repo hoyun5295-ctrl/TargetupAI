@@ -36,7 +36,8 @@ import VersionHistoryModal from '../components/dm/modals/VersionHistoryModal';
 import BrandKitModal from '../components/dm/modals/BrandKitModal';
 import DesignThemeModal from '../components/dm/modals/DesignThemeModal';
 // ★ 2026-07-14 디자인 4.0 — 정예 템플릿(목적×스토리 구조, 서버 design-core 컴파일)
-import EliteTemplateModal from '../components/dm/modals/EliteTemplateModal';
+// ★ 2026-07-16 M4 — 정예 템플릿 진입 폐기 (Harold 명시 — 설계서 §1-2. EliteTemplateModal 미사용)
+import DmQuickBar from '../components/dm/DmQuickBar';
 import AbTestModal from '../components/dm/modals/AbTestModal';
 import ModalBase, { ModalButton } from '../components/dm/modals/ModalBase';
 import '../styles/dm-builder.css';
@@ -107,6 +108,15 @@ export default function DmBuilderPage() {
   const toast = useDmBuilderStore((s) => s.toast);
   const setToast = useDmBuilderStore((s) => s.setToast);
   const isDirty = useDmBuilderStore((s) => s.isDirty);
+  const isSavingGlobal = useDmBuilderStore((s) => s.isSaving);
+  const isPublishedGlobal = useDmBuilderStore((s) => s.isPublished);
+  // ★ 2026-07-16 M4 — 전역 자동저장(초안 전용): 어떤 편집 경로든 dirty 2.5초 뒤 저장(수동 저장 버튼 제거의 안전망).
+  //   신규 DM(dmId 없음)도 save()가 생성 처리. 발행 DM은 명시 저장만(라이브 URL 보호 — store가 silent 저장 차단).
+  useEffect(() => {
+    if (mode !== 'edit' || !isDirty || isSavingGlobal || isPublishedGlobal) return;
+    const t = setTimeout(() => { void useDmBuilderStore.getState().save({ silent: true }); }, 2500);
+    return () => clearTimeout(t);
+  }, [mode, isDirty, isSavingGlobal, isPublishedGlobal]);
   const [confirmBackOpen, setConfirmBackOpen] = useState(false);
   // ★ D216+ ConfirmModal generic (native confirm 영구 폐기)
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
@@ -468,6 +478,8 @@ export default function DmBuilderPage() {
     return (
       <div className="dm-builder" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
         <TopBarWithBack onBack={handleBackRequest} onPublishDone={handleBackToList} />
+        {/* ★ 2026-07-16 M4 — 전역 퀵바(서체 일괄·브랜드 킷·테마) */}
+        <DmQuickBar />
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
           <DmLeftPanel />
           <DmCanvas />
@@ -1269,8 +1281,29 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
       <DmTopBar
         onBack={onBack}
         onTestSendClick={handleTestSend}
-        // 발행 완료 = 크레딧 모달 없이 바로 타겟 발송 모달 / 미발행 = 크레딧 확인 후 발행
-        onPublishClick={() => { if (isPublished) { setSendModalOpen(true); } else { setConfirmPublish(true); } }}
+        // 발행 완료 = 크레딧 모달 없이 바로 타겟 발송 모달 / 미발행 = ★ M4 자동 검수 내장 → 통과 시 크레딧 확인 → 발행
+        onPublishClick={async () => {
+          if (isPublished) { setSendModalOpen(true); return; }
+          // ★ Codex 1R — 저장 배리어: 진행 중 자동저장 완료를 기다린 뒤(save는 isSaving이면 즉시 반환)
+          //   dirty/미생성분을 직접 저장 — 최신 상태로 검수·발행 보장. dmId 확보 실패 = 발행 중단(정직 안내).
+          const st = () => useDmBuilderStore.getState();
+          for (let i = 0; i < 40 && st().isSaving; i++) {
+            // eslint-disable-next-line no-await-in-loop
+            await new Promise((r) => setTimeout(r, 150));
+          }
+          if (st().isDirty || !st().dmId) await st().save({ silent: true });
+          if (!st().dmId) {
+            st().setToast({ type: 'error', message: '저장에 실패해 발행을 진행할 수 없어요. 잠시 후 다시 시도해주세요.' });
+            return;
+          }
+          const result = await st().runValidation();
+          if (!result) return; // 검수 호출 실패 — 토스트는 store가 띄움
+          if (result.can_publish === false) {
+            st().setOpenModal('validation'); // 문제 항목 + 바로 고치기
+            return;
+          }
+          setConfirmPublish(true);
+        }}
       />
       <CreditConfirmModal
         open={confirmPublish}
@@ -1353,7 +1386,6 @@ function EditorModals() {
       <VersionHistoryModal open={openModal === 'version-history'} onClose={close} />
       <BrandKitModal open={openModal === 'brand-kit'} onClose={close} />
       <DesignThemeModal open={openModal === 'design-theme'} onClose={close} />
-      <EliteTemplateModal open={openModal === 'elite-template'} onClose={close} />
       <AbTestModal open={openModal === 'ab-test'} onClose={close} />
     </>
   );

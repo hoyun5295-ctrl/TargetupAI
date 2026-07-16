@@ -406,6 +406,31 @@ export type SectionMeta = {
   beta?: boolean;
 };
 
+/**
+ * ★ 2026-07-16 M4 — 스타일 변형 한국어 라벨 (단일 소스).
+ * 편집기에 beauty-elegant 같은 개발자 코드값 노출 절대 금지(설계서 §1-5-3) —
+ * select 등 UI는 반드시 styleVariantLabel()을 거친다. 신규 변형 추가 시 여기 등재 의무
+ * (m4 게이트 테스트가 SECTION_META 전 변형의 등재를 기계 검증).
+ */
+export const STYLE_VARIANT_LABELS: Record<string, string> = {
+  'default': '기본',
+  'beauty-elegant': '뷰티 — 우아한',
+  'beauty-bold': '뷰티 — 강렬한',
+  'fashion-editorial': '패션 — 에디토리얼',
+  'food-warm': '푸드 — 따뜻한',
+  'luxury': '럭셔리',
+  'editorial': '에디토리얼',
+  'elegant': '우아한',
+  'minimal': '미니멀',
+  'bold': '강렬한',
+  'urgent': '긴박한',
+};
+
+/** 스타일 변형 표시 라벨 — 미등재 값도 코드값 원문 노출 대신 순화 (하이픈 제거) */
+export function styleVariantLabel(v: string): string {
+  return STYLE_VARIANT_LABELS[v] || String(v || '').replace(/[-_]/g, ' ');
+}
+
 export const SECTION_META: Record<SectionType, SectionMeta> = {
   header: {
     label: '헤더',

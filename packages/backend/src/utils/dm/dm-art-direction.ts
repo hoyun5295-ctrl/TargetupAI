@@ -7,6 +7,7 @@
 import { DM_COLOR_TOKENS } from './dm-tokens';
 // ★ 2026-07-14 디자인 4.0 M2 — 타입스케일·밀도·톤 기본의 소유가 design-core로 이동(값 무변 이관).
 import { CORE_TYPE_SCALE, CORE_DENSITY_SCALE, CORE_TONE_DEFAULTS } from '../design-core/art-direction';
+import { sansSafeDisplayStack } from '../design-core/fonts';
 
 export type TypeScale = 'editorial' | 'bold' | 'minimal';
 export type SpacingDensity = 'compact' | 'standard' | 'airy';
@@ -132,7 +133,10 @@ export function artDirectionToCssVars(ad: ArtDirection, brandDisplayFont?: strin
   const t = TYPE_SCALE_VARS[ad.typeScale];
   // ★ 2026-07-13 (Codex 지적) — raw <style> 삽입 XSS 차단: 서체 문자열 무해화
   const safeDisplay = brandDisplayFont ? brandDisplayFont.replace(/[^\w\s,"'\-]/g, '').trim() : '';
-  const display = safeDisplay || DISPLAY_FONT[ad.headlineFont];
+  // ★ 2026-07-16 M5 궁서체 영구 종결 2겹째 — 브랜드 display 스택 꼬리 generic serif를 본문(sans) 변수로 교체
+  const display = safeDisplay
+    ? sansSafeDisplayStack(safeDisplay, 'var(--dm-font-primary)')
+    : DISPLAY_FONT[ad.headlineFont];
   return `:root{`
     + `--dm-fs-hero:${t.hero};--dm-fw-hero:${t.heroWeight};--dm-ls-hero:${t.heroLs};--dm-fs-h1:${t.h1};`
     + `--dm-section-pad-scale:${DENSITY_SCALE[ad.spacingDensity]};`

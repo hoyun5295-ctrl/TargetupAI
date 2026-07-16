@@ -143,30 +143,39 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
       {/* 레이아웃 모드 세그먼트 토글 */}
       <LayoutModeToggle value={layoutMode} onChange={setLayoutMode} />
 
-      {/* ★ 2026-07-02(5) Harold 지시 — 버튼 7개(프롬프트·AI개선·브랜드·검수·버전·A/B·테스트)를
-          [도구] 드롭다운 하나로 정리 (진입점 보존 + 상단 바 단순화) */}
-      <ToolsMenu
+      {/* ★ 2026-07-16 M4 (설계서 §1-1·§1-2) — [도구] 드롭다운 9종·정예 템플릿 폐기.
+          AI 초안 = [⚡ AI로 만들기]로 승격 / 검수 = 발행에 내장 / AI개선 = 우패널 인라인 /
+          브랜드킷·테마·서체 = 퀵바 / 버전·A/B = 후퇴(⋯ 더보기 2개만) / 저장 = 자동(수동 버튼 제거) */}
+      <button
+        onClick={() => setOpenModal('ai-prompt')}
+        style={{ ...btnStyle('primary'), background: 'linear-gradient(135deg, #7c3aed, #db2777)' }}
+        title="행사 내용을 붙여넣으면 완성된 DM을 만들어요"
+      >
+        ⚡ AI로 만들기
+      </button>
+
+      <MoreMenu
         items={[
-          { emoji: '⚡', label: '프롬프트로 AI 초안', onClick: () => setOpenModal('ai-prompt') },
-          { emoji: '✨', label: 'AI 문안 개선', onClick: () => setOpenModal('ai-improve') },
-          { emoji: '🎨', label: '브랜드 킷', onClick: () => setOpenModal('brand-kit') },
-          { emoji: '🪄', label: '디자인 테마', onClick: () => setOpenModal('design-theme') },
-          { emoji: '🏆', label: '정예 템플릿', onClick: () => setOpenModal('elite-template') },
-          { emoji: '🔍', label: '자동 검수', onClick: () => setOpenModal('validation') },
           { emoji: '📜', label: '버전 히스토리', onClick: () => setOpenModal('version-history') },
           { emoji: '🔬', label: 'A/B 테스트', onClick: () => setOpenModal('ab-test') },
-          { emoji: '📤', label: '테스트 발송', onClick: () => onTestSendClick?.() },
         ]}
       />
 
-      <button onClick={() => save()} disabled={isSaving} style={btnStyle('secondary')} title="저장 (Ctrl+S)">
-        💾 저장
+      {/* ★ 초안은 전역 자동저장 — 발행 DM만 명시 저장 유지(자동저장이 라이브 URL을 덮지 않게 차단돼 있어 저장 경로 필수) */}
+      {isPublished && (
+        <button onClick={() => save()} disabled={isSaving} style={btnStyle('secondary')} title="저장 — 라이브 URL에 반영">
+          💾 저장
+        </button>
+      )}
+      <button onClick={() => onTestSendClick?.()} style={btnStyle('secondary')} title="내 폰으로 테스트 발송">
+        📤 테스트
       </button>
+      {/* ★ Codex 1R — 검수가 발행 클릭에 내장되면서 버튼 잠금 해제 (옛 canPublish 잠금은 "문제 고친 뒤 재검수 불가" 교착 유발).
+          클릭 흐름 자체가 게이트: 저장 배리어 → 자동 검수 → 실패 시 검수 모달. */}
       <button
         onClick={onPublishClick}
-        disabled={!canPublish}
-        style={btnStyle(canPublish ? 'primary' : 'disabled')}
-        title={isPublished ? '타겟 고객에게 발송 (발행 완료 — 추가 과금 없음)' : canPublish ? '발행 (100크레딧, DM당 1회)' : '검수 통과 후 발행 가능'}
+        style={btnStyle('primary')}
+        title={isPublished ? '타겟 고객에게 발송 (발행 완료 — 추가 과금 없음)' : canPublish ? '발행 — 자동 검수 후 진행 (100크레딧, DM당 1회)' : '발행 — 자동 검수를 다시 실행합니다'}
       >
         {isPublished ? '📨 발송' : '🚀 발행'}
       </button>
@@ -224,8 +233,8 @@ function LayoutModeToggle({ value, onChange }: { value: LayoutMode; onChange: (m
   );
 }
 
-/** ★ 2026-07-02(5) 상단 바 정리 — 도구 진입점을 드롭다운 하나로 (바깥 클릭 시 닫힘) */
-function ToolsMenu({ items }: { items: Array<{ emoji: string; label: string; onClick: () => void }> }) {
+/** ★ 2026-07-16 M4 — 후퇴 항목(버전·A/B) 전용 ⋯ 더보기 (옛 도구 드롭다운의 축소 대체 — 바깥 클릭 시 닫힘) */
+function MoreMenu({ items }: { items: Array<{ emoji: string; label: string; onClick: () => void }> }) {
   const [open, setOpen] = useState(false);
   // ★ 2026-07-14 결함 수정 — 상단 바(overflow:hidden, 2026-04-17 V2부터)가 absolute 드롭다운을 56px에서
   //   잘라내던 잠복 결함. 메뉴를 fixed(버튼 실좌표 앵커)로 렌더해 클리핑 조상 밖으로 분리.
@@ -261,26 +270,25 @@ function ToolsMenu({ items }: { items: Array<{ emoji: string; label: string; onC
     <div ref={wrapRef} style={{ position: 'relative', flexShrink: 0 }}>
       <button
         onClick={toggle}
-        title="AI·검수·버전·A/B·테스트 발송"
+        title="더보기 — 버전 히스토리 · A/B 테스트"
+        aria-label="더보기"
         style={{
           height: 32,
-          padding: '0 12px',
+          width: 32,
           border: '1px solid var(--dm-neutral-200)',
           background: open ? 'var(--dm-neutral-100)' : 'var(--dm-neutral-50)',
           color: 'var(--dm-neutral-700)',
-          fontSize: 12,
-          fontWeight: 600,
+          fontSize: 16,
+          fontWeight: 700,
           borderRadius: 8,
           cursor: 'pointer',
           display: 'inline-flex',
           alignItems: 'center',
-          gap: 4,
-          whiteSpace: 'nowrap',
+          justifyContent: 'center',
+          lineHeight: 1,
         }}
       >
-        <span>🧰</span>
-        <span>도구</span>
-        <span style={{ fontSize: 9, opacity: 0.6 }}>{open ? '▲' : '▼'}</span>
+        ⋯
       </button>
       {open && menuPos && (
         <div

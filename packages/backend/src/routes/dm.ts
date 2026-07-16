@@ -66,6 +66,9 @@ import { getAvailableVariables } from '../utils/dm/dm-variable-resolver';
 import { validateDm } from '../utils/dm/dm-validate';
 import { getCompanyBrandKit, updateCompanyBrandKit, DEFAULT_BRAND_KIT } from '../utils/dm/dm-brand-kit';
 import { buildEventPromptBlock, normalizeEventText } from '../utils/event-brief';
+// ★ 2026-07-16 M3 — 상품 이미지 후보(네이버 쇼핑 검색 — 원탭 확정 전용) + 행사 URL 본문 수집
+import { searchNaverShopCandidates, isNaverShopSearchConfigured } from '../utils/naver-shop-search';
+import { fetchEventTextFromUrl } from '../utils/dm/dm-brand-extractor';
 // ★ 2026-07-14 디자인 4.0 M5 — 행사 → 정예 템플릿 스토리 힌트 (결정적 선택기, design-core)
 import { buildEventTemplateHintBlock } from '../utils/design-core/event-package';
 // ★ 2026-07-16 자가 호스팅 웹폰트 @font-face 생성 (궁서 폴백 정정)
@@ -836,11 +839,56 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
         brand_kit: result.brandKit,
         spec: result.spec,
         scenario: result.scenario,
+        // ★ 2026-07-16 M1 — 행사 브리프 + 반영 커버리지(미반영 항목 정직 표시 — 숨기지 않는다)
+        brief: result.brief ?? null,
+        coverage: result.coverage ?? null,
       },
     });
   } catch (err: any) {
     console.error('[DM AI one-shot-generate] 오류:', err.message);
     return res.status(500).json({ success: false, error: err.message || 'AI 통합 생성 실패' });
+  }
+});
+
+// ★ 2026-07-16 M3 — POST /api/dm/products/image-candidates — 상품명 → 네이버 쇼핑 후보 이미지 (최대 5)
+//   자동 삽입 아님: 편집기가 후보를 띄우고 사용자가 탭 1번으로 확정한다 (오매칭 구조적 0 — 설계서 §2-5).
+dmRouter.post('/products/image-candidates', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const name = String(req.body?.name || '').trim();
+    if (!name) return res.status(400).json({ success: false, error: '상품명이 필요합니다.' });
+    if (!isNaverShopSearchConfigured()) {
+      // 미설정 = 정직 안내 (후보 기능만 비활성 — 직접 업로드 경로는 항상 있음)
+      return res.json({ success: true, configured: false, candidates: [] });
+    }
+    const candidates = await searchNaverShopCandidates(name, 5);
+    return res.json({ success: true, configured: true, candidates });
+  } catch (err: any) {
+    console.error('[DM products/image-candidates] 오류:', err.message);
+    return res.status(500).json({ success: false, error: err.message || '후보 검색 실패' });
+  }
+});
+
+// ★ 2026-07-16 M3 — POST /api/dm/ai/event-text-from-url — 행사 URL → 페이지 본문 텍스트
+//   반환 텍스트는 브리프 입력칸에 합쳐져 사용자가 눈으로 확인·보정 후 생성에 쓰인다(이미지 판독과 동일 이중 검증).
+dmRouter.post('/ai/event-text-from-url', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const url = String(req.body?.url || '').trim();
+    if (!/^https?:\/\//i.test(url)) return res.status(400).json({ success: false, error: '올바른 URL을 입력해주세요.' });
+    const text = await fetchEventTextFromUrl(url);
+    if (!text) {
+      return res.json({
+        success: false,
+        error: '이 페이지는 내용을 자동으로 가져올 수 없습니다(사이트가 외부 수집을 차단). 행사 내용을 직접 붙여넣어주세요.',
+      });
+    }
+    return res.json({ success: true, text });
+  } catch (err: any) {
+    console.error('[DM ai/event-text-from-url] 오류:', err.message);
+    return res.status(500).json({ success: false, error: err.message || 'URL 수집 실패' });
   }
 });
 

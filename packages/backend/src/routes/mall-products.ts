@@ -104,7 +104,8 @@ mallProductsRouter.get('/search', async (req: any, res: Response) => {
   }
 });
 
-// GET /match?name=&provider= — 상품명 정확 일치 1건(없으면 product:null). 슬라이드 상품명 → 이미지 자동 채우기용.
+// GET /match?name=&provider=&link= — 상품 매칭 1건(없으면 product:null). 슬라이드 상품명 → 이미지 자동 채우기용.
+// ★ 2026-07-16 M3 — link(상품 링크) 제공 시 상품번호 ID 확정 매칭 최우선 (이름 표기 달라도 그 상품 — 오매칭 구조적 0)
 mallProductsRouter.get('/match', async (req: any, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -112,7 +113,8 @@ mallProductsRouter.get('/match', async (req: any, res: Response) => {
     const name = String(req.query.name || '').trim();
     if (!name) return res.status(400).json({ success: false, error: '상품명이 필요합니다.' });
     const provider = req.query.provider ? String(req.query.provider).trim() : undefined;
-    const product = await matchMallProductByName(companyId, name, provider);
+    const linkUrl = req.query.link ? String(req.query.link).trim() : undefined;
+    const product = await matchMallProductByName(companyId, name, provider, linkUrl);
     return res.json({ success: true, product: product || null });
   } catch (err: any) {
     console.error('[mall-products match] 오류:', err?.message);

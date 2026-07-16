@@ -503,7 +503,7 @@ exports[`M0 골든 — DM 토큰/베이스/디자인3 CSS > renderDmTokensCss �
   --dm-font-primary: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   --dm-font-serif: "Noto Serif KR", serif;
   --dm-font-mono: "JetBrains Mono", Menlo, Consolas, monospace;
-  --dm-font-display: "Noto Serif KR", serif;
+  --dm-font-display: "Noto Serif KR", "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
 
   --dm-fs-hero: 40px;
   --dm-fw-hero: 800;

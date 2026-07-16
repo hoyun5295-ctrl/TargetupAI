@@ -15,7 +15,12 @@ import { callAIWithFallback } from '../../services/ai';
 // ★ 2026-07-03 DM 문안두뇌 주입 (전 채널 학습 통합 Phase 1c) — 회사 성과 DM 문안 RAG + 브랜드 키트
 import { composeCopyBrain } from '../copy-prompt-composer';
 // ★ 2026-07-08 행사 원문 상품 구조 추출 — 원문 실존 검증(환각 가격 차단) 공용 CT
-import { validateProductsAgainstEventText, type ExtractedEventProduct } from '../event-brief';
+// ★ 2026-07-16 M1 — EventBrief 구조화(요약 병목 제거) + 커버리지 게이트 + 카피 출구 가드
+import {
+  validateProductsAgainstEventText, type ExtractedEventProduct,
+  extractEventBrief, computeBriefCoverage, copyFactsExistInText, textContainsNormalized,
+  normalizeEventText, type EventBrief, type BriefCoverageItem,
+} from '../event-brief';
 // ★ 2026-07-13 — 상품 URL 페이지의 og:image 자동 채움 (브랜드 추출기 CT 재사용)
 import { fetchProductOgImages } from './dm-brand-extractor';
 import {
@@ -260,7 +265,13 @@ const COPY_GEN_SYSTEM = `당신은 리테일 브랜드 모바일 DM 카피라이
 - 모르는 사실(상품명·가격·일정·수량)을 지어내지 않는다 — 구조와 분위기만 카피로 표현
 - JSON 외 다른 텍스트 출력 금지`;
 
-export async function generateCopy(spec: CampaignSpec, section: Section, companyId?: string): Promise<CopyDraft> {
+/** ★ 2026-07-16 M1 — 카피 생성에 행사 원문·브리프를 직투입하는 컨텍스트 (요약 병목 제거) */
+export interface EventCopyContext {
+  raw: string;
+  brief?: EventBrief | null;
+}
+
+export async function generateCopy(spec: CampaignSpec, section: Section, companyId?: string, eventContext?: EventCopyContext): Promise<CopyDraft> {
   const specSummary = JSON.stringify({
     brand: spec.brand.name,
     objective: spec.objective,
@@ -358,7 +369,26 @@ export async function generateCopy(spec: CampaignSpec, section: Section, company
       return {}; // video/store_info/sns/slideshow 등은 AI 생성 대상 아님
   }
 
-  const userMessage = `캠페인 스펙: ${specSummary}
+  // ★ 2026-07-16 M1 — 행사 원문+구조 브리프 직투입: 카피가 원문 사실(기간·품목별 혜택·유의사항)을
+  //   그대로 인용할 수 있게 한다. 요약(spec)만 주던 병목이 "상품 카탈로그만 반영"의 근본이었다.
+  const rawEvent = eventContext?.raw ? String(eventContext.raw).slice(0, 6000) : '';
+  const briefSummary = eventContext?.brief
+    ? JSON.stringify({
+        event_name: eventContext.brief.event_name,
+        period: eventContext.brief.period_raw,
+        benefits: eventContext.brief.benefits.map((b) => (b.target ? `${b.target}: ${b.content}` : b.content)),
+        notices: eventContext.brief.notices,
+        place: eventContext.brief.place,
+      })
+    : '';
+  const eventBlock = rawEvent
+    ? `\n\n[행사 원문 — 사용자가 직접 적은 사실. 카피는 이 원문에 근거해 작성]\n${rawEvent}\n${briefSummary ? `\n[구조 요약]\n${briefSummary}\n` : ''}
+[원문 사용 규칙]
+- 원문에 적힌 행사명·기간·혜택·조건·수치는 원문 그대로 인용해 이 섹션의 역할에 맞게 적극 반영
+- 원문에 없는 수치·혜택·사실 생성은 여전히 절대 금지`
+    : '';
+
+  const userMessage = `캠페인 스펙: ${specSummary}${eventBlock}
 
 ${sectionHint}
 
@@ -367,11 +397,14 @@ ${schema}`;
 
   // ★ 2026-07-03 문안두뇌 주입 — 회사 성과 DM 문안 RAG + 브랜드 키트(시그니처·슬로건·금지어)를 시스템에 덧붙임.
   //   companyId 있을 때만, 실패해도 기본 프롬프트로 그대로 생성(생성 무영향). isAd=true(DM=판촉 기본).
-  let genSystem = COPY_GEN_SYSTEM;
+  // ★ 2026-07-16 M1 — 행사 원문이 있으면 "원문 기재 수치 인용 허용" 예외를 명시 (임의 생성 금지는 유지)
+  let genSystem = rawEvent
+    ? COPY_GEN_SYSTEM + '\n- 예외: [행사 원문]에 사용자가 직접 적은 혜택·수치·상품명·기간은 원문 그대로 인용해 반영한다 (원문에 없는 수치는 여전히 금지)'
+    : COPY_GEN_SYSTEM;
   if (companyId) {
     try {
       const brain = await composeCopyBrain({ companyId, channels: ['DM'], isAd: true });
-      if (brain.promptSuffix) genSystem = COPY_GEN_SYSTEM + brain.promptSuffix;
+      if (brain.promptSuffix) genSystem = genSystem + brain.promptSuffix;
     } catch (err) {
       console.warn('[copy-brain] DM generateCopy 주입 실패 — 기본 프롬프트로 진행:', (err as Error)?.message);
     }
@@ -386,7 +419,18 @@ ${schema}`;
     companyId,
     source: 'dm-copy', // ★ D227+ 종량제: 집계용(맵 미등록=0). dm-builder 묶음 안에선 자동 0
   });
-  return extractJson<CopyDraft>(text);
+  const draft = extractJson<CopyDraft>(text);
+  // ★ 2026-07-16 M1 출구 가드 — 원문 투입 시 카피의 혜택·수치 토큰은 전부 원문에 실존해야 한다.
+  //   지시(프롬프트)는 확률적으로 뚫린다 — 보장은 출구에서 코드가 한다 (0706 Liquid 사고 원칙).
+  //   위반 필드만 버리고 나머지는 유지(전체 실패 X — 빈 필드는 기존 placeholder 규칙).
+  if (rawEvent) {
+    const d: any = draft;
+    if (Array.isArray(d.headlines)) d.headlines = d.headlines.filter((h: any) => copyFactsExistInText(h?.text, rawEvent));
+    if (Array.isArray(d.subCopies)) d.subCopies = d.subCopies.filter((s: any) => copyFactsExistInText(s, rawEvent));
+    if (Array.isArray(d.ctaLabels)) d.ctaLabels = d.ctaLabels.filter((l: any) => copyFactsExistInText(l, rawEvent));
+    if (d.body && !copyFactsExistInText(d.body, rawEvent)) d.body = '';
+  }
+  return draft;
 }
 
 // ────────────── 4. Tone Transformer ──────────────
@@ -565,6 +609,106 @@ export interface OneShotResult {
   scenario?: string;
   layoutMode: DmLayoutMode;
   pages: Section[][];
+  /** ★ 2026-07-16 M1 — 행사 원문 구조 브리프 (행사문 입력 시에만) */
+  brief?: EventBrief;
+  /** ★ 2026-07-16 M1 — 반영 커버리지 (missing = 보강 후에도 미반영 — 숨기지 않고 사용자에게 표시) */
+  coverage?: { missing: BriefCoverageItem[] };
+}
+
+// ────────────── ★ 2026-07-16 M1 — 브리프 → 섹션 결정적 주입/보강 (순수 — 계약 테스트 고정) ──────────────
+
+/** 섹션 사실 직렬화 — 커버리지 판정 대상 텍스트 */
+export function sectionsFactText(sections: Section[]): string {
+  return JSON.stringify(sections.map((s) => s.props));
+}
+
+/**
+ * 브리프의 확정 사실을 섹션 props에 결정적으로 주입 (빈 곳만 — AI 카피가 채운 값은 보존).
+ * 카운트다운·쿠폰 기간, 헤더 브랜드/행사명, 푸터 유의사항, CTA 잔여 링크(상품에 배정 안 된 URL).
+ */
+export function applyBriefToSections(sections: Section[], brief: EventBrief): Section[] {
+  const productLinks = new Set(brief.products.map((p) => p.link_url).filter(Boolean));
+  const leftoverLink = brief.links.find((l) => !productLinks.has(l));
+  return sections.map((s) => {
+    const p: any = { ...(s.props as any) };
+    if (s.type === 'header') {
+      if (brief.brand && !p.brand_name) p.brand_name = brief.brand;
+      if (brief.event_name && !p.event_title) p.event_title = brief.event_name;
+    }
+    if (s.type === 'hero' && brief.event_name && !String(p.headline || '').trim()) {
+      p.headline = brief.event_name;
+    }
+    if (s.type === 'countdown' && brief.period_end && !p.end_datetime) {
+      p.end_datetime = `${brief.period_end}T23:59:59+09:00`;
+    }
+    if (s.type === 'coupon' && brief.period_end && !p.expire_date) {
+      p.expire_date = brief.period_end;
+    }
+    if (s.type === 'footer' && brief.notices.length > 0) {
+      const cur = String(p.notes || '');
+      const add = brief.notices.filter((n) => !textContainsNormalized(cur, n));
+      if (add.length > 0) p.notes = [cur, ...add].filter(Boolean).join('\n');
+    }
+    if (s.type === 'cta' && leftoverLink && Array.isArray(p.buttons) && p.buttons.length > 0 && !p.buttons[0]?.url) {
+      p.buttons = [{ ...p.buttons[0], url: leftoverLink }, ...p.buttons.slice(1)];
+    }
+    return { ...s, props: p };
+  });
+}
+
+/**
+ * 커버리지 미반영분 결정적 보강 — 원문 실존 검증 통과분을 "원문 그대로" 텍스트 카드/푸터에 인용.
+ * (AI 재생성이 아니라 결정적 인용 = 보강 자체가 또 빗나갈 수 없다. 남는 항목은 정직하게 missing으로.)
+ */
+export function repairBriefCoverage(sections: Section[], brief: EventBrief, missing: BriefCoverageItem[]): Section[] {
+  const benefitLines = missing.filter((m) => m.kind === 'benefit')
+    // ★ Codex 1R — 커버리지 라벨이 "target — content" 합성형이 될 수 있어 양쪽 형식으로 매칭
+    .map((m) => brief.benefits.find((b) => {
+      const composed = b.target ? `${b.target} — ${b.content}` : b.content;
+      const key = m.label.slice(0, 30);
+      return composed.startsWith(key) || b.content.startsWith(key);
+    }) || null)
+    .filter(Boolean)
+    .map((b) => (b!.target ? `${b!.target} — ${b!.content}` : `${b!.content}`));
+  const periodMissing = missing.some((m) => m.kind === 'period') && (brief.period_raw || brief.period_end);
+  const noticeLines = missing.filter((m) => m.kind === 'notice')
+    .map((m) => brief.notices.find((n) => n.startsWith(m.label.slice(0, 30))))
+    .filter(Boolean) as string[];
+
+  if (benefitLines.length === 0 && !periodMissing && noticeLines.length === 0) return sections;
+
+  let out = sections.map((s) => ({ ...s, props: { ...(s.props as any) } }));
+
+  // 유의사항 → 푸터 (없으면 아래 텍스트 카드로 합류)
+  let noticesLeft = [...noticeLines];
+  const footer = out.find((s) => s.type === 'footer');
+  if (footer && noticesLeft.length > 0) {
+    const p: any = footer.props;
+    p.notes = [String(p.notes || ''), ...noticesLeft].filter(Boolean).join('\n');
+    noticesLeft = [];
+  }
+
+  // 혜택·기간(+잔여 유의사항) → 기존 text_card에 합류, 없으면 신설(히어로 뒤/없으면 맨 앞)
+  const bodyLines = [
+    ...benefitLines.map((l) => `• ${l}`),
+    ...(periodMissing ? [`기간: ${brief.period_raw || brief.period_end}`] : []),
+    ...noticesLeft.map((l) => `※ ${l}`),
+  ];
+  if (bodyLines.length > 0) {
+    const card = out.find((s) => s.type === 'text_card');
+    if (card) {
+      const p: any = card.props;
+      p.body = [String(p.body || ''), ...bodyLines].filter(Boolean).join('\n');
+    } else {
+      const heroIdx = out.findIndex((s) => s.type === 'hero');
+      const insertAt = heroIdx >= 0 ? heroIdx + 1 : 0;
+      const fresh = createSection('text_card', cryptoId(), insertAt);
+      (fresh.props as any).headline = brief.event_name || '행사 안내';
+      (fresh.props as any).body = bodyLines.join('\n');
+      out = [...out.slice(0, insertAt), fresh, ...out.slice(insertAt)].map((s, i) => ({ ...s, order: i }));
+    }
+  }
+  return out;
 }
 
 // ────────────── 행사 원문 상품 구조 추출 (2026-07-08) ──────────────
@@ -630,6 +774,12 @@ export async function oneShotGenerate(opts: {
     throw new Error('prompt 또는 scenario 영역 필요');
   }
 
+  // ★ 2026-07-16 M1 — 행사 원문 구조화(EventBrief): 요약(spec) 병목 제거의 축.
+  //   원문+브리프가 섹션별 카피 생성에 직투입되고, 생성 후 반영 커버리지를 기계 검증한다.
+  const rawEvent = normalizeEventText(opts.eventText || '');
+  const brief: EventBrief | null = rawEvent ? await extractEventBrief(rawEvent, opts.companyId) : null;
+  const eventContext: EventCopyContext | undefined = rawEvent ? { raw: rawEvent, brief } : undefined;
+
   // 1. spec 영역 생성 (scenario 영역 지정 시 = 기본 spec 영역 + scenario 매핑 활용)
   let spec: CampaignSpec;
   let scenarioMeta = opts.scenario ? SCENARIO_MAP[opts.scenario] : undefined;
@@ -677,9 +827,10 @@ export async function oneShotGenerate(opts: {
     const section = createSection(type, randomUUID(), i);
 
     // 4. 섹션별 카피 자동 생성 (AI 영역 = 옛 영역 정합) + 신규 16 영역 = default props 정합
+    // ★ 2026-07-16 M1 — 행사 원문·브리프 직투입 (eventContext) — 원문 기재 사실이 카피에 그대로 반영
     if (SECTION_META[type].aiAware) {
       try {
-        const copy = await generateCopy(spec, section, opts.companyId);
+        const copy = await generateCopy(spec, section, opts.companyId, eventContext);
         section.props = mergeCopyIntoProps(section.props as any, type, copy) as any;
       } catch (err) {
         console.warn(`[oneShotGenerate] generateCopy 실패 type=${type}:`, (err as any)?.message);
@@ -692,10 +843,15 @@ export async function oneShotGenerate(opts: {
 
   // ★ 2026-07-08 행사 원문 상품 구조 반영 — 첫 product_carousel.products에 원문 실존 검증 통과분 주입.
   //   추출 실패/검증 탈락 = placeholder 유지(기존 흐름 무영향). 이미지는 직접 업로드(image_url '').
-  const productSource = (opts.eventText || '').trim() || prompt;
+  // ★ 2026-07-16 M1 — 브리프가 있으면 브리프 상품(이미 원문 검증 통과)을 사용 — 추출 AI 이중 호출 제거
+  const productSource = rawEvent || prompt;
   const carouselIdx = sections.findIndex((s) => s.type === 'product_carousel');
   if (carouselIdx >= 0 && productSource) {
-    const extracted = await extractEventProducts(productSource, opts.companyId);
+    // ★ Codex 1R — 브리프 추출이 실패(폴백 브리프)하거나 상품 0이면 옛 전용 상품 추출기로 재시도
+    //   (일시 JSON 실패가 상품 placeholder 캐러셀로 끝나던 회귀 차단)
+    const extracted = (brief && brief.products.length > 0)
+      ? brief.products
+      : await extractEventProducts(productSource, opts.companyId);
     if (extracted.length > 0) {
       // ★ 2026-07-13 — 상품 URL 매핑(원문 실존 검증 통과분) + URL 페이지의 og:image로 상품 이미지 자동 채움.
       //   이미지 fetch 실패/사설 호스트/og 부재 = 빈 값 유지(생성 차단 X — 사용자가 직접 업로드).
@@ -712,17 +868,28 @@ export async function oneShotGenerate(opts: {
     }
   }
 
+  // ★ 2026-07-16 M1 — 브리프 확정 사실 주입 → 커버리지 1차 → 결정적 보강(원문 그대로 인용) → 최종 커버리지.
+  //   남은 missing은 숨기지 않고 응답에 실어 사용자에게 표시한다 (겉만 화려한 빈껍데기 차단 게이트).
+  let assembled: Section[] = sections;
+  let coverage: { missing: BriefCoverageItem[] } | undefined;
+  if (brief) {
+    assembled = applyBriefToSections(assembled, brief);
+    const first = computeBriefCoverage(brief, sectionsFactText(assembled));
+    if (first.missing.length > 0) assembled = repairBriefCoverage(assembled, brief, first.missing);
+    coverage = computeBriefCoverage(brief, sectionsFactText(assembled));
+  }
+
   // ★ AI 비주얼 디렉터 — 캠페인별 색·무드·강조 + 섹션 구도(treatment)를 설계해 섹션에 입힘(사진 없어도 완성형).
   const concept = await designVisualConcept(spec, undefined, opts.companyId);
   // 디렉터의 섹션 타입별 treatment 추천 → 섹션 id 맵(없으면 applyVisualDirection이 typeScale 기반 기본 적용).
   const treatmentById: Record<string, string> = {};
   if (concept.treatments) {
-    for (const s of sections) {
+    for (const s of assembled) {
       const t = concept.treatments[s.type];
       if (t) treatmentById[s.id] = t;
     }
   }
-  const directed = applyVisualDirection(sections, concept, treatmentById);
+  const directed = applyVisualDirection(assembled, concept, treatmentById);
   // ★ 2026-07-13 디자인 3.0 — 비주얼 컨셉의 타입스케일을 brand_kit.art_direction으로 영속화(뷰어 실주입 — 디자인만, 사실/혜택 무관)
   const adBase = (brandKit as any)?.art_direction || {};
   const enrichedKit = {
@@ -740,7 +907,10 @@ export async function oneShotGenerate(opts: {
   // 섹션 구성으로 레이아웃 모드 자동 결정 + 모드별 페이지 분할 (slides면 여러 장, scroll이면 한 장)
   const layoutMode = decideLayoutMode(directed);
   const pages = splitSectionsIntoPages(directed, layoutMode);
-  return { spec, sections: directed, brandKit: enrichedKit, scenario: opts.scenario, layoutMode, pages };
+  return {
+    spec, sections: directed, brandKit: enrichedKit, scenario: opts.scenario, layoutMode, pages,
+    ...(brief ? { brief, coverage } : {}),
+  };
 }
 
 /**

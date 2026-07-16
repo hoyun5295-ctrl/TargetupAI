@@ -7,14 +7,20 @@
  */
 import { getCafe24Integration, getCafe24ByoCredentials, fetchCafe24Products } from './cafe24-client';
 import { getNaverCommerceIntegration, getNaverCommerceCredentials, fetchNaverProducts } from './naver-commerce-client';
-import { type MallProduct, normalizeNameForMatch } from './mall-product-normalize';
+import { type MallProduct, normalizeNameForMatch, extractMallProductNo } from './mall-product-normalize';
 
 const SUPPORTED_PROVIDERS = ['cafe24', 'naver'];
 
-/** 상품명 → 연동 몰에서 정확 일치 1건(없으면 null). provider 미지정 시 연동 몰 순회. */
-export async function matchMallProductByName(companyId: string, name: string, provider?: string): Promise<MallProduct | null> {
+/**
+ * 상품명 → 연동 몰에서 매칭 1건(없으면 null). provider 미지정 시 연동 몰 순회.
+ * ★ 2026-07-16 M3 — linkUrl(사용자가 붙여넣은 상품 링크) 제공 시 **상품번호 일치를 최우선 확정**:
+ *   이름 검색 결과 중 링크 번호와 같은 상품이 있으면 이름 표기가 달라도 그 상품(ID 확정 — 오매칭 구조적 0).
+ *   번호 일치가 없을 때만 기존 이름 정확 일치 폴백 (기존 소비처 동작 보존).
+ */
+export async function matchMallProductByName(companyId: string, name: string, provider?: string, linkUrl?: string): Promise<MallProduct | null> {
   const target = normalizeNameForMatch(name);
   if (!companyId || target.length < 2) return null;
+  const linkNo = extractMallProductNo(linkUrl);
   const providers = provider ? [provider] : SUPPORTED_PROVIDERS;
   for (const prov of providers) {
     try {
@@ -29,6 +35,10 @@ export async function matchMallProductByName(companyId: string, name: string, pr
         if (!integ) continue;
         const creds = (await getNaverCommerceCredentials(companyId).catch(() => null)) || undefined;
         products = await fetchNaverProducts(integ, { q: name, size: 20 }, creds);
+      }
+      if (linkNo) {
+        const byId = products.find((p) => String(p.code) === linkNo || extractMallProductNo(p.productUrl) === linkNo);
+        if (byId) return byId;
       }
       const exact = products.find((p) => normalizeNameForMatch(p.name) === target);
       if (exact) return exact;
@@ -55,8 +65,10 @@ export async function attachMallImagesToProductCarousels(companyId: string, sect
       const nm = String(it?.name || '').trim();
       const hasImg = !!(it?.image_url && String(it.image_url).trim());
       if (!nm || hasImg) continue;
+      // ★ 2026-07-16 M3 — 행사문에 붙여넣은 상품 링크가 있으면 번호 축 ID 확정 매칭 (오매칭 구조적 0)
+      const linkUrl = String(it?.link_url || '').trim() || undefined;
       // eslint-disable-next-line no-await-in-loop
-      const m = await matchMallProductByName(companyId, nm);
+      const m = await matchMallProductByName(companyId, nm, undefined, linkUrl);
       if (!m) continue;
       matched++;
       if (m.imageUrl) it.image_url = m.imageUrl;

@@ -1,10 +1,13 @@
 /**
  * DmRightPanel — 우측 패널 (320px)
- * 선택된 섹션의 공통 속성 + 타입별 필드 에디터 (8단계 SectionPropsEditor 연결).
+ * ★ 2026-07-16 M4 재구성 (설계서 §1-5 — 초등학생 조작성):
+ *   내용(타입별 에디터)이 최상단 → 빠른 디자인(정렬·버튼 색 2개만) → 나머지 공통 속성 전부 [고급 설정 ▾] 접힘.
+ *   개발자 코드값(beauty-elegant 등) 노출 금지 — styleVariantLabel 단일 소스 경유.
+ *   (직원 실사용 "설명 없이는 모른다" + Harold "세부편집 겁나 불편" 직접 대응 — 폼 나열 12개 → 기본 노출 2개)
  */
 import { useMemo } from 'react';
 import { useDmBuilderStore } from '../../stores/dmBuilderStore';
-import { SECTION_META, DM_FONT_SIZE_OPTIONS } from '../../utils/dm-section-defaults';
+import { SECTION_META, DM_FONT_SIZE_OPTIONS, styleVariantLabel } from '../../utils/dm-section-defaults';
 import SectionPropsEditor from './panels/SectionPropsEditor';
 
 // ★ 2026-06-25 (P1) 섹션 구도(treatment) 픽커 — 백엔드 dm-art-direction.TREATMENTS 미러.
@@ -49,6 +52,7 @@ export default function DmRightPanel() {
   const setSectionVisible = useDmBuilderStore((s) => s.setSectionVisible);
   const toggleSectionLock = useDmBuilderStore((s) => s.toggleSectionLock);
   const setSectionStyle = useDmBuilderStore((s) => s.setSectionStyle);
+  const setOpenModal = useDmBuilderStore((s) => s.setOpenModal);
 
   const selected = useMemo(
     () => sections.find((s) => s.id === selectedSectionId) || null,
@@ -80,38 +84,88 @@ export default function DmRightPanel() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                 <span style={{ fontSize: 18 }}>{meta.icon}</span>
                 <span style={{ fontSize: 13, fontWeight: 700 }}>{meta.label}</span>
+                {/* ★ 2026-07-16 M4 — AI 문안 개선을 전역 메뉴에서 섹션 문맥 인라인으로 이동 (설계서 §1-2) */}
+                <button
+                  onClick={() => setOpenModal('ai-improve')}
+                  title="이 DM의 문안을 AI가 다듬어줘요"
+                  style={{
+                    marginLeft: 'auto', height: 24, padding: '0 8px', borderRadius: 6,
+                    border: '1px solid var(--dm-neutral-200)', background: 'var(--dm-neutral-50)',
+                    color: 'var(--dm-neutral-700)', fontSize: 11, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+                  }}
+                >
+                  ✨ AI 다듬기
+                </button>
               </div>
               <div style={{ fontSize: 11, color: 'var(--dm-neutral-500)' }}>{meta.description}</div>
             </div>
 
             <div style={{ flex: 1, overflow: 'auto', padding: '14px' }}>
-              {/* 공통 속성 */}
+              {/* ★ M4 — 내용이 1순위: 타입별 필드 에디터가 최상단 (설계서 §1-5) */}
               <section style={{ marginBottom: 16 }}>
-                <SectionTitle>공통 속성</SectionTitle>
-                <LabelRow label="표시">
-                  <ToggleButton
-                    active={selected.visible}
-                    onClick={() => setSectionVisible(selected.id, !selected.visible)}
-                    labelOn="표시"
-                    labelOff="숨김"
-                  />
+                <SectionTitle>내용</SectionTitle>
+                <SectionPropsEditor
+                  key={selected.id}
+                  section={selected}
+                  onUpdate={(patch) => updateSectionProps(selected.id, patch)}
+                />
+              </section>
+
+              {/* ★ M4 — 빠른 디자인: 자주 쓰는 2개만 기본 노출 */}
+              <section style={{ marginBottom: 12 }}>
+                <SectionTitle>빠른 디자인</SectionTitle>
+                <LabelRow label="정렬">
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {([['left', '좌'], ['center', '중'], ['right', '우']] as const).map(([a, lbl]) => (
+                      <button
+                        key={a}
+                        onClick={() => setSectionStyle(selected.id, { align: a })}
+                        style={{ ...alignBtnStyle, ...((selected.align || 'center') === a ? alignBtnActiveStyle : {}) }}
+                      >
+                        {lbl}
+                      </button>
+                    ))}
+                  </div>
                 </LabelRow>
-                <LabelRow label="AI 재생성 제외">
-                  <ToggleButton
-                    active={!!selected.ai_locked}
-                    onClick={() => toggleSectionLock(selected.id)}
-                    labelOn="잠금"
-                    labelOff="허용"
-                  />
+                <LabelRow label="버튼 색">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input
+                      type="color"
+                      value={selected.accent_color || '#4f46e5'}
+                      onChange={(e) => setSectionStyle(selected.id, { accent_color: e.target.value })}
+                      style={{ width: 30, height: 24, padding: 0, border: '1px solid var(--dm-neutral-200)', borderRadius: 4, cursor: 'pointer', background: 'transparent' }}
+                    />
+                    {selected.accent_color && (
+                      <button
+                        onClick={() => setSectionStyle(selected.id, { accent_color: undefined })}
+                        style={{ fontSize: 10, color: 'var(--dm-neutral-500)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                      >
+                        브랜드색
+                      </button>
+                    )}
+                  </div>
                 </LabelRow>
-                <LabelRow label="스타일 변형">
+              </section>
+
+              {/* ★ M4 — 나머지 공통 속성 전부 [고급 설정 ▾] 접힘 (기본 닫힘 — 폼 12개 나열 제거) */}
+              <details>
+                <summary
+                  style={{
+                    fontSize: 11, fontWeight: 700, color: 'var(--dm-neutral-500)', letterSpacing: 0.5,
+                    textTransform: 'uppercase', cursor: 'pointer', userSelect: 'none', marginBottom: 10,
+                  }}
+                >
+                  고급 설정 (디자인 세부)
+                </summary>
+                <div style={{ paddingTop: 6 }}>
+                <LabelRow label="분위기(스타일)">
                   <select
                     value={selected.style_variant || 'default'}
                     onChange={(e) => setSectionVariant(selected.id, e.target.value)}
                     style={selectStyle}
                   >
                     {meta.supportsStyleVariants.map((v) => (
-                      <option key={v} value={v}>{v}</option>
+                      <option key={v} value={v}>{styleVariantLabel(v)}</option>
                     ))}
                   </select>
                 </LabelRow>
@@ -159,38 +213,7 @@ export default function DmRightPanel() {
                     labelOff="없음"
                   />
                 </LabelRow>
-                <LabelRow label="정렬">
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    {([['left', '좌'], ['center', '중'], ['right', '우']] as const).map(([a, lbl]) => (
-                      <button
-                        key={a}
-                        onClick={() => setSectionStyle(selected.id, { align: a })}
-                        style={{ ...alignBtnStyle, ...((selected.align || 'center') === a ? alignBtnActiveStyle : {}) }}
-                      >
-                        {lbl}
-                      </button>
-                    ))}
-                  </div>
-                </LabelRow>
-                <LabelRow label="버튼 색">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <input
-                      type="color"
-                      value={selected.accent_color || '#4f46e5'}
-                      onChange={(e) => setSectionStyle(selected.id, { accent_color: e.target.value })}
-                      style={{ width: 30, height: 24, padding: 0, border: '1px solid var(--dm-neutral-200)', borderRadius: 4, cursor: 'pointer', background: 'transparent' }}
-                    />
-                    {selected.accent_color && (
-                      <button
-                        onClick={() => setSectionStyle(selected.id, { accent_color: undefined })}
-                        style={{ fontSize: 10, color: 'var(--dm-neutral-500)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
-                      >
-                        브랜드색
-                      </button>
-                    )}
-                  </div>
-                </LabelRow>
-                {/* ★ 2026-07-14 배경면=그라데이션 두 번째 색 직접 지정(임은지) — 첫 색은 위 "버튼 색", 끝 색을 여기서. 미지정=자동 도출 */}
+                {/* ★ 2026-07-14 배경면=그라데이션 두 번째 색 직접 지정(임은지) — 첫 색은 "빠른 디자인"의 버튼 색, 끝 색을 여기서. 미지정=자동 도출 */}
                 {selected.background === 'gradient' && (
                   <LabelRow label="그라데이션 끝 색">
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -234,17 +257,25 @@ export default function DmRightPanel() {
                     ))}
                   </select>
                 </LabelRow>
-              </section>
-
-              {/* 타입별 필드 에디터 */}
-              <section>
-                <SectionTitle>{meta.label} 속성</SectionTitle>
-                <SectionPropsEditor
-                  key={selected.id}
-                  section={selected}
-                  onUpdate={(patch) => updateSectionProps(selected.id, patch)}
-                />
-              </section>
+                {/* 운영성 토글 — 항상 보일 이유 없어 고급 끝으로 (설계서 §1-5-5) */}
+                <LabelRow label="표시">
+                  <ToggleButton
+                    active={selected.visible}
+                    onClick={() => setSectionVisible(selected.id, !selected.visible)}
+                    labelOn="표시"
+                    labelOff="숨김"
+                  />
+                </LabelRow>
+                <LabelRow label="AI 재생성 제외">
+                  <ToggleButton
+                    active={!!selected.ai_locked}
+                    onClick={() => toggleSectionLock(selected.id)}
+                    labelOn="잠금"
+                    labelOff="허용"
+                  />
+                </LabelRow>
+                </div>
+              </details>
             </div>
           </>
         );

@@ -14,6 +14,41 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [pasteNote, setPasteNote] = useState<string | null>(null);
+  // ★ 2026-07-16 M3 — 이미지 후보(네이버 쇼핑 검색, 원탭 확정 전용 — 자동 삽입 금지·오매칭 구조적 0)
+  const [candIdx, setCandIdx] = useState<number | null>(null);
+  const [candLoading, setCandLoading] = useState(false);
+  const [candidates, setCandidates] = useState<Array<{ title: string; image: string; mallName: string }>>([]);
+  const [candNote, setCandNote] = useState<string | null>(null);
+
+  const loadCandidates = async (i: number) => {
+    const nm = (products[i]?.name || '').trim();
+    if (!nm || candLoading) return;
+    if (candIdx === i) { setCandIdx(null); return; } // 다시 누르면 닫기
+    setCandIdx(i);
+    setCandidates([]);
+    setCandNote(null);
+    setCandLoading(true);
+    try {
+      const res = await fetch('/api/dm/products/image-candidates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+        body: JSON.stringify({ name: nm }),
+      });
+      const data = await res.json();
+      if (data?.configured === false) {
+        setCandNote('이미지 후보 검색이 아직 설정되지 않았어요 — 직접 업로드하거나 연동 몰 매칭을 이용해주세요.');
+      } else if (Array.isArray(data?.candidates) && data.candidates.length > 0) {
+        setCandidates(data.candidates);
+        setCandNote('후보를 탭하면 그 이미지로 확정돼요 — 내 상품이 맞는지 확인해주세요.');
+      } else {
+        setCandNote('후보를 찾지 못했어요 — 직접 업로드해주세요.');
+      }
+    } catch {
+      setCandNote('후보 검색에 실패했어요 — 직접 업로드해주세요.');
+    } finally {
+      setCandLoading(false);
+    }
+  };
 
   const applyPaste = () => {
     const parsed = parsePastedProducts(pasteText, 8);
@@ -53,7 +88,9 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
     if (!nm || matchingIdx !== null) return;
     setMatchingIdx(i);
     try {
-      const res = await fetch(`/api/mall-products/match?name=${encodeURIComponent(nm)}`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+      // ★ 2026-07-16 M3 — 상품 링크가 있으면 함께 전달 → 몰 상품번호 ID 확정 매칭 (이름 표기 달라도 그 상품)
+      const linkParam = (products[i]?.link_url || '').trim();
+      const res = await fetch(`/api/mall-products/match?name=${encodeURIComponent(nm)}${linkParam ? `&link=${encodeURIComponent(linkParam)}` : ''}`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
       const data = await res.json();
       const p = data?.product;
       if (p) {
@@ -161,8 +198,38 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
                 disabled={matchingIdx !== null || !it.name?.trim()}
                 className="w-full text-[12px] font-semibold text-white border border-emerald-500 bg-emerald-600 hover:bg-emerald-500 rounded-lg py-1.5 disabled:opacity-40 transition-colors"
               >
-                {matchingIdx === i ? '몰에서 찾는 중...' : '이 상품명으로 몰 이미지 자동 채우기'}
+                {matchingIdx === i ? '몰에서 찾는 중...' : '연동 몰에서 이미지 자동 채우기'}
               </button>
+              <div style={{ height: 6 }} />
+              {/* ★ 2026-07-16 M3 — 미연동 폴백: 이미지 후보 5장 + 원탭 확정 (사용자 선택 = 확정 근거) */}
+              <button
+                type="button"
+                onClick={() => loadCandidates(i)}
+                disabled={candLoading || !it.name?.trim()}
+                className="w-full text-[12px] font-semibold text-sky-700 border border-sky-300 bg-sky-50 hover:bg-sky-100 rounded-lg py-1.5 disabled:opacity-40 transition-colors"
+              >
+                {candLoading && candIdx === i ? '후보 찾는 중...' : candIdx === i ? '이미지 후보 닫기' : '이미지 후보 보기'}
+              </button>
+              {candIdx === i && (
+                <div className="mt-1.5">
+                  {candidates.length > 0 && (
+                    <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
+                      {candidates.map((c, ci) => (
+                        <button
+                          key={ci}
+                          type="button"
+                          title={`${c.title}${c.mallName ? ` — ${c.mallName}` : ''}`}
+                          onClick={() => { setItem(i, { image_url: c.image }); setCandIdx(null); setCandNote(null); }}
+                          style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 0, cursor: 'pointer', flexShrink: 0, overflow: 'hidden', background: '#fff' }}
+                        >
+                          <img src={c.image} alt={c.title} style={{ width: 64, height: 64, objectFit: 'cover', display: 'block' }} />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {candNote && <div className="text-[11px] text-gray-500 leading-relaxed mt-1">{candNote}</div>}
+                </div>
+              )}
               <div style={{ height: 6 }} />
               <div style={{ display: 'flex', gap: 6 }}>
                 <TextInput type="number" value={it.price} onChange={(v) => setItem(i, { price: v ? Number(v) : 0 })} placeholder="정가" />

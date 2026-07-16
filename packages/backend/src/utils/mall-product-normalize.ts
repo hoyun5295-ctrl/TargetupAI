@@ -10,6 +10,25 @@ export function normalizeNameForMatch(s: any): string {
   return String(s ?? '').toLowerCase().replace(/[\s[\]()·・,.\-_/~]/g, '');
 }
 
+/**
+ * ★ 2026-07-16 M3 — 상품 상세 URL에서 몰 상품번호 추출 (순수).
+ * 고객이 행사문에 붙여넣은 링크의 번호가 곧 연동 몰의 상품 축:
+ *   네이버 = brand.naver.com·smartstore.naver.com/{스토어}/products/{channelProductNo}
+ *   카페24 = detail.html?product_no={no} 또는 SEO형 /product/{이름}/{no}/
+ * 번호 일치 = "그 상품" 기계 확정 — 이름 유사도가 아니라 ID라 오매칭이 구조적으로 불가능 (설계서 §2-5).
+ */
+export function extractMallProductNo(url: any): string | null {
+  const s = String(url ?? '').trim();
+  if (!s) return null;
+  let m = s.match(/\/products\/(\d+)/);
+  if (m) return m[1];
+  m = s.match(/[?&]product_no=(\d+)/);
+  if (m) return m[1];
+  m = s.match(/\/product\/[^/]+\/(\d+)(?:[/?#]|$)/);
+  if (m) return m[1];
+  return null;
+}
+
 export interface MallProduct {
   provider: string;
   code: string;          // 몰 상품 코드/번호 (식별)

@@ -479,6 +479,30 @@ export async function fetchProductOgImages(urls: Array<string | undefined>): Pro
 }
 
 /**
+ * ★ 2026-07-16 M3 — 행사 URL → 페이지 본문 텍스트 (브리프 입력기 "URL 붙여넣기" 축).
+ * fetchHtmlGuarded(SSRF 가드·핀 고정) 재사용. 반환 텍스트는 사용자 입력칸에 넣어
+ * 눈으로 확인·보정 후 생성에 쓰인다(이미지 판독과 동일한 사람 검증 이중).
+ * 봇 차단 사이트(네이버 스마트스토어 429 실측 등) = null — 호출측이 정직하게 안내.
+ */
+export async function fetchEventTextFromUrl(url: string): Promise<string | null> {
+  const page = await fetchHtmlGuarded(url);
+  if (!page) return null;
+  const meta = parseMetaTags(page.html);
+  const head = [meta.get('og:title'), meta.get('og:description')].filter(Boolean).join('\n');
+  let t = page.html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|h[1-6]|tr|section|article)>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  t = t.split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n');
+  const merged = [head, t].filter(Boolean).join('\n');
+  return merged ? merged.slice(0, 6000) : null;
+}
+
+/**
  * BrandExtractResult → DmBrandKit 부분값으로 변환.
  * 사용자가 UI에서 확인 후 updateCompanyBrandKit으로 적용.
  */

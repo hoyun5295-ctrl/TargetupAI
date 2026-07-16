@@ -120,6 +120,27 @@ export const CORE_FONTS: readonly CoreFont[] = [
  * DM(dmGoogleFontsUrl)·인앱(inappGoogleFontsUrl)과 동일 규약 — 화이트리스트 밖 문자열로
  * 외부 URL을 만들지 않는다.
  */
+/**
+ * ★ 2026-07-16 M5 궁서체 영구 종결 — display 서체 스택의 꼬리 generic `serif`를 sans 안전 폴백으로 교체.
+ *
+ * 근본: 카탈로그 css가 `"Noto Serif KR", serif`처럼 generic serif로 끝나 서체 로딩 실패 시
+ * 브라우저 기본 세리프(바탕 — 사용자 체감 "궁서체")로 떨어진다. 자가 호스팅(1순위 수정)이
+ * 로딩 자체를 보장하고, 이 함수가 2겹째: 어떤 실패에도 폴백이 산세리프 계열로 끝나게 한다.
+ * 선택 서체(비-generic 패밀리)는 전부 보존 — 룩 무변, 실패 시 도착지만 교체.
+ */
+export function sansSafeDisplayStack(stack: string, sansFallback: string): string {
+  const s = String(stack || '').trim();
+  if (!s) return sansFallback;
+  const parts = s.split(',').map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return sansFallback;
+  const last = parts[parts.length - 1].replace(/["']/g, '').toLowerCase();
+  if (last === 'serif' || last === 'cursive' || last === 'fantasy') {
+    parts[parts.length - 1] = sansFallback;
+    return parts.join(', ');
+  }
+  return s;
+}
+
 export function coreGoogleFontsUrl(...families: Array<string | undefined | null>): string | null {
   const params: string[] = [];
   for (const f of families) {

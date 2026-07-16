@@ -142,7 +142,7 @@ export type DmBrandKit = {
  * google = Google Fonts css2 파라미터(null = 별도 로드 불필요 — Pretendard는 뷰어가 항상 로드).
  * ★ 2026-07-14 디자인 4.0 M2 — 소유 = design-core/fonts CORE_FONTS (값 무변 파생).
  */
-import { CORE_FONTS } from '../design-core/fonts';
+import { CORE_FONTS, sansSafeDisplayStack } from '../design-core/fonts';
 export const DM_FONT_CATALOG: ReadonlyArray<{ id: string; label: string; css: string; google: string | null }> =
   CORE_FONTS.map((c) => ({ id: c.id, label: c.label, css: c.css, google: c.google }));
 
@@ -184,7 +184,9 @@ export function renderDmTokensCss(brandKit?: DmBrandKit): string {
   // ★ 2026-07-13 (Codex 지적) — 서체 문자열 무해화 후 삽입 (raw <style> 삽입 XSS 차단)
   const fontPri   = safeFontFamily(brandKit?.font_family, DM_TYPOGRAPHY.fontFamily.primary);
   // ★ 2026-07-13 디자인 3.0 — 헤드라인 전용 서체(미설정 = 본문과 동일 = 기존 출력과 동일)
-  const fontDisp  = safeFontFamily(brandKit?.font_display, fontPri);
+  // ★ 2026-07-16 M5 궁서체 영구 종결 2겹째 — 꼬리 generic serif를 본문(sans) 스택으로 교체.
+  //   선택 서체 로딩 실패 시에도 바탕(궁서 체감) 폴백이 구조적으로 불가능. 룩 무변(선택 패밀리 전부 보존).
+  const fontDisp  = sansSafeDisplayStack(safeFontFamily(brandKit?.font_display, fontPri), fontPri);
 
   // ★ 2026-07-13 디자인 3.0 — 배경색이 어두우면 중립 스케일 자동 반전(다크 테마 DM 전면 지원).
   //   밝은 배경(기본) = 추가 출력 0줄 → 기존 발행물 CSS 무변화(골든 보존).

@@ -269,8 +269,15 @@ function scheduleHistoryPush(push: () => void) {
   historyDebounceTimer = setTimeout(push, 500);
 }
 
+// ★ 2026-07-16 (Codex 1R) — 편집 시퀀스 카운터: save()가 요청 중 들어온 편집을 "저장된 것"으로
+//   오인해 isDirty를 지우던 경합 차단. markDirty마다 증가, save 성공 시 시작 시점과 비교.
+let editCounter = 0;
 function markDirty<T extends Partial<DmBuilderState>>(patch: T): T & { isDirty: true } {
+  editCounter++;
   return { ...patch, isDirty: true };
+}
+export function currentEditSeq(): number {
+  return editCounter;
 }
 
 /**
@@ -328,27 +335,77 @@ function normalizePagesFromDm(dm: any): DmPage[] {
 /**
  * 섹션 배열을 레이아웃 모드별 페이지 그룹으로 분할 (편집 토글 재분할용).
  * backend utils/dm/dm-page-split.ts와 동일 규칙 — 프런트/백 런타임 분리로 불가피한 경계 중복(한쪽 변경 시 양쪽 동기 의무).
+ * ★ 2026-07-16 M2 스토리보드 밀도 규칙 동기 (Codex 1R — 토글이 옛 "섹션당 1장" 규칙으로 남아 AI 생성과 다른 분할이던 결함):
+ *   표지=hero 포함 시만(+직후 countdown 편입) / 리치 섹션만 단독 장 / 얇은 섹션 2~3 묶음 / 홀로 남은 얇은 장 병합 / footer 병합.
  */
 const SLIDE_INTRO_TYPES: SectionType[] = ['header', 'hero'];
+const RICH_SOLO_TYPES: SectionType[] = [
+  'product_carousel', 'gallery', 'slideshow', 'video', 'youtube_embed', 'instagram_embed',
+  'survey', 'roulette', 'lucky_draw', 'reviews', 'map_store_locator', 'tab_cards',
+];
+const THIN_PAGE_MAX = 3;
+function isRichSoloSection(s: Section): boolean {
+  if (!RICH_SOLO_TYPES.includes(s.type)) return false;
+  const p: any = s.props || {};
+  if (s.type === 'product_carousel') return Array.isArray(p.products) && p.products.length >= 2;
+  if (s.type === 'gallery') return Array.isArray(p.images) && p.images.length >= 1;
+  if (s.type === 'slideshow') return Array.isArray(p.slides) && p.slides.length >= 1;
+  return true;
+}
 function splitSectionsForMode(sections: Section[], mode: LayoutMode): Section[][] {
   if (mode !== 'slides' || sections.length === 0) return [sections];
   const groups: Section[][] = [];
   let i = 0;
-  const intro: Section[] = [];
+  const leading: Section[] = [];
   while (i < sections.length && SLIDE_INTRO_TYPES.includes(sections[i].type)) {
+    leading.push(sections[i]);
+    i++;
+  }
+  const hasHero = leading.some((s) => s.type === 'hero');
+  const intro: Section[] = hasHero ? [...leading] : [];
+  if (hasHero && i < sections.length && sections[i].type === 'countdown') {
     intro.push(sections[i]);
     i++;
   }
   if (intro.length) groups.push(intro);
-  const rest = sections.slice(i);
+  const rest = hasHero ? sections.slice(i) : [...leading, ...sections.slice(i)];
   let footer: Section | null = null;
   if (rest.length > 0 && rest[rest.length - 1].type === 'footer') {
     footer = rest[rest.length - 1];
     rest.pop();
   }
-  for (const sec of rest) groups.push([sec]);
+  let thinBuffer: Section[] = [];
+  const flushThin = () => {
+    if (thinBuffer.length > 0) {
+      groups.push(thinBuffer);
+      thinBuffer = [];
+    }
+  };
+  for (const sec of rest) {
+    if (isRichSoloSection(sec)) {
+      if (thinBuffer.length === 1) {
+        groups.push([thinBuffer[0], sec]);
+        thinBuffer = [];
+      } else {
+        flushThin();
+        groups.push([sec]);
+      }
+    } else {
+      thinBuffer.push(sec);
+      if (thinBuffer.length >= THIN_PAGE_MAX) flushThin();
+    }
+  }
+  if (thinBuffer.length === 1 && groups.length > 0) {
+    const prev = groups[groups.length - 1];
+    const prevIsRich = prev.length === 1 && isRichSoloSection(prev[0]);
+    if (prevIsRich || prev.length < THIN_PAGE_MAX) {
+      groups[groups.length - 1] = [...prev, thinBuffer[0]];
+      thinBuffer = [];
+    }
+  }
+  flushThin();
   if (footer) {
-    if (groups.length > 0) groups[groups.length - 1].push(footer);
+    if (groups.length > 0) groups[groups.length - 1] = [...groups[groups.length - 1], footer];
     else groups.push([footer]);
   }
   if (groups.length === 0) groups.push(sections);
@@ -751,6 +808,7 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
     //   명시적 '저장'/'발행'(비-silent)만 반영. 미저장 편집분은 isDirty 유지 → 상단 "변경사항 있음" + 이탈 경고가 보호.
     //   초안(미발행) DM은 라이브 URL이 없어 자동저장 그대로.
     if (silent && s.isPublished) return;
+    const seqAtStart = editCounter; // ★ Codex 1R — 요청 스냅샷 시점의 편집 시퀀스
     set({ isSaving: true });
     try {
       // pages 구조로 저장 + 하위호환을 위해 전체 섹션 flat도 동봉
@@ -772,7 +830,8 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
         const created = res.data as any;
         set({ dmId: created.id || created.dmId });
       }
-      set({ isDirty: false, lastSavedAt: Date.now(), isSaving: false });
+      // ★ Codex 1R — 요청 중 새 편집이 들어왔으면 isDirty 유지 (스냅샷 밖 편집분이 "저장됨"으로 오인되던 경합 차단)
+      set({ isDirty: editCounter !== seqAtStart, lastSavedAt: Date.now(), isSaving: false });
       if (!silent) set({ toast: { type: 'success', message: '저장했어요.' } });
     } catch (err: any) {
       set({ isSaving: false, toast: { type: 'error', message: err?.response?.data?.error || '저장 실패' } });
