@@ -70,6 +70,7 @@ import {
   getMessageStats,
   getCompanyInAppStats,
   setInAppAudienceFilter,
+  sanitizeAppMessageColors,
 } from '../utils/inapp-message';
 // ★ D215+ (2026-05-25) 인앱 메시지 압도적 강화 CT-77~84
 import { generateInAppMessagePackage, listQuickStartCards } from '../utils/inapp-ai-generator';
@@ -591,6 +592,12 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
         const t = m.template || m.position;
         if (t && !WEB_OK.has(t)) m.template = 'center_modal';
       }
+    }
+
+    // ★ 2026-07-17 app 채널은 색상 필드를 단색 hex로 보정 — 네이티브 앱(Android/iOS) Color 파서가
+    //   CSS 그라데이션(linear-gradient)에서 예외로 앱이 강제종료되던 근본 차단. 웹은 그라데이션 유지(DB 무변경).
+    if (reqChannel === 'app') {
+      for (const m of messages as any[]) sanitizeAppMessageColors(m);
     }
 
     // T3 (2026-06-11) — 자동 기동 개인화: 메시지들이 실제 쓰는 변수만 customer로 동봉 (식별 회원 한정)

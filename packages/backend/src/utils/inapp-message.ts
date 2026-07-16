@@ -287,6 +287,37 @@ export const BENEFIT_PLACEHOLDER_ERROR = 'BENEFIT_PLACEHOLDER_UNEDITED';
 // 회사 admin — CRUD
 // ════════════════════════════════════════════════════════════════════
 
+/**
+ * ★ 2026-07-17 네이티브 앱 크래시 방어 — Android/iOS 앱은 색상 필드를 Color 파서로 읽어
+ *   CSS 그라데이션(linear-gradient(...))이면 Color.parseColor 등에서 예외 → 앱 강제종료(웹은 CSS라 정상).
+ *   그라데이션이면 첫 hex를 단색으로 추출, 못 찾으면 fallback. app 채널 응답에서만 적용(웹 그라데이션 보존).
+ */
+export function solidColorForApp(color: any, fallback: string): string {
+  const c = String(color ?? '').trim();
+  if (!c) return fallback;
+  if (/^#[0-9a-fA-F]{3,8}$/.test(c)) return c; // 이미 단색 hex = 그대로
+  const hex = c.match(/#[0-9a-fA-F]{3,8}/);    // 그라데이션 등에서 첫 hex 추출
+  return hex ? hex[0] : fallback;
+}
+
+/**
+ * app 채널 메시지의 색상 필드 전체를 네이티브 안전 단색으로 보정 (그라데이션 크래시 차단).
+ */
+export function sanitizeAppMessageColors(m: any): void {
+  if (!m || typeof m !== 'object') return;
+  if (m.backgroundColor != null) m.backgroundColor = solidColorForApp(m.backgroundColor, '#1c1917');
+  if (m.textColor != null) m.textColor = solidColorForApp(m.textColor, '#ffffff');
+  if (m.accentColor != null) m.accentColor = solidColorForApp(m.accentColor, '#f59e0b');
+  if (Array.isArray(m.buttons)) {
+    for (const b of m.buttons) {
+      if (b && typeof b === 'object') {
+        if (b.text_color != null) b.text_color = solidColorForApp(b.text_color, '#ffffff');
+        if (b.background_color != null) b.background_color = solidColorForApp(b.background_color, '#f59e0b');
+      }
+    }
+  }
+}
+
 export async function createInAppMessage(
   companyId: string,
   createdBy: string,
