@@ -480,6 +480,66 @@ body[data-dm-divider="rule"] .dm-page > .dm-section-wrap + .dm-section-wrap::bef
 `.trim();
 }
 
+/**
+ * ★ 2026-07-16 남지현 재오픈 근본 — 스타일 변형(style_variant) 발행 CSS.
+ *   [근본] 편집 캔버스(frontend/src/styles/dm-builder.css "Style Variants" 절)에만 변형 규칙이 있고
+ *   발행 뷰어엔 없어, 변형 걸린 DM이 편집≠발행이었다(fashion-editorial 쿠폰 버튼=편집 검정/발행 인디고 등).
+ *   뷰어는 이미 dm-section-wrap[data-variant]을 HTML로 심고 있었으나(dm-section-renderer) CSS만 누락 —
+ *   이 블록으로 발행이 편집과 동일하게 업종 변형을 입는다(WYSIWYG).
+ *   [회귀 0] 변형 미지정/default DM은 매칭 규칙이 없어 발행물 무변.
+ *   [재발 차단] dm-variant-parity.test.ts — 편집 CSS의 변형 셀렉터 전량이 이 출력에 존재하는지 기계 검증.
+ *   [주의] 편집 dm-builder.css "Style Variants" 절 수정 시 이 함수도 동시 수정 필수.
+ */
+export function renderDmVariantCss(): string {
+  return `
+/* beauty-elegant */
+.dm-section-wrap[data-variant="beauty-elegant"] { font-family: var(--dm-font-serif); letter-spacing: 0.01em; }
+.dm-section-wrap[data-variant="beauty-elegant"] .dm-text-hero,
+.dm-section-wrap[data-variant="beauty-elegant"] .dm-text-h1 { font-weight: 500; letter-spacing: 0.02em; }
+.dm-section-wrap[data-variant="beauty-elegant"] .dm-cta { border-radius: 0; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; }
+/* beauty-natural */
+.dm-section-wrap[data-variant="beauty-natural"] { --dm-accent: #84cc16; background: linear-gradient(180deg, #f7fbf3 0%, var(--dm-bg) 100%); }
+.dm-section-wrap[data-variant="beauty-natural"] .dm-cta-primary { background: linear-gradient(135deg, #84cc16, #22c55e); }
+/* fashion-editorial */
+.dm-section-wrap[data-variant="fashion-editorial"] { --dm-primary: #000; --dm-primary-hover: #262626; --dm-bg: #fafaf7; }
+.dm-section-wrap[data-variant="fashion-editorial"] .dm-text-hero,
+.dm-section-wrap[data-variant="fashion-editorial"] .dm-text-h1 { font-weight: 900; letter-spacing: -0.03em; line-height: 1; }
+.dm-section-wrap[data-variant="fashion-editorial"] .dm-cta { border-radius: 0; border: 2px solid #000; background: #fff; color: #000; }
+.dm-section-wrap[data-variant="fashion-editorial"] .dm-cta-primary { background: #000; color: #fff; }
+/* fashion-street */
+.dm-section-wrap[data-variant="fashion-street"] { --dm-primary: #ef4444; --dm-accent: #fbbf24; }
+.dm-section-wrap[data-variant="fashion-street"] .dm-text-hero,
+.dm-section-wrap[data-variant="fashion-street"] .dm-text-h1 { font-weight: 900; text-transform: uppercase; }
+.dm-section-wrap[data-variant="fashion-street"] .dm-cta { border-radius: 4px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
+/* food-warm */
+.dm-section-wrap[data-variant="food-warm"] { --dm-primary: #ea580c; --dm-primary-hover: #c2410c; --dm-accent: #f59e0b; background: #fff7ed; }
+.dm-section-wrap[data-variant="food-warm"] .dm-cta-primary { background: linear-gradient(135deg, #ea580c, #d97706); box-shadow: 0 6px 20px rgba(234, 88, 12, 0.25); }
+/* food-fresh */
+.dm-section-wrap[data-variant="food-fresh"] { --dm-primary: #059669; --dm-primary-hover: #047857; background: #f0fdf4; }
+.dm-section-wrap[data-variant="food-fresh"] .dm-cta { border-radius: var(--dm-radius-full); }
+/* lifestyle-cozy */
+.dm-section-wrap[data-variant="lifestyle-cozy"] { --dm-primary: #d97706; --dm-accent: #a78bfa; background: #fffbeb; }
+.dm-section-wrap[data-variant="lifestyle-cozy"] .dm-cta,
+.dm-section-wrap[data-variant="lifestyle-cozy"] img { border-radius: var(--dm-radius-xl); }
+/* luxury-dark */
+.dm-section-wrap[data-variant="luxury-dark"] { --dm-primary: #d4af37; --dm-primary-hover: #b8952f; --dm-bg: #0b0b0b; background: #0b0b0b; color: #f5f5f5; }
+.dm-section-wrap[data-variant="luxury-dark"] .dm-text-hero,
+.dm-section-wrap[data-variant="luxury-dark"] .dm-text-h1,
+.dm-section-wrap[data-variant="luxury-dark"] .dm-text-h2 { font-family: var(--dm-font-serif); font-weight: 400; letter-spacing: 0.05em; }
+.dm-section-wrap[data-variant="luxury-dark"] .dm-cta-primary { background: #d4af37; color: #0b0b0b; font-weight: 600; letter-spacing: 0.1em; }
+.dm-section-wrap[data-variant="luxury-dark"] .dm-cta-outline { border-color: #d4af37; color: #d4af37; }
+/* minimal-clean */
+.dm-section-wrap[data-variant="minimal-clean"] { --dm-primary: #171717; --dm-primary-hover: #000; background: #fff; }
+.dm-section-wrap[data-variant="minimal-clean"] .dm-text-hero,
+.dm-section-wrap[data-variant="minimal-clean"] .dm-text-h1 { font-weight: 300; letter-spacing: -0.02em; }
+.dm-section-wrap[data-variant="minimal-clean"] .dm-cta { border-radius: 2px; font-weight: 500; }
+/* vibrant-playful */
+.dm-section-wrap[data-variant="vibrant-playful"] { --dm-primary: #ec4899; --dm-primary-hover: #db2777; --dm-accent: #8b5cf6; }
+.dm-section-wrap[data-variant="vibrant-playful"] .dm-cta-primary { background: linear-gradient(135deg, #ec4899, #8b5cf6); border-radius: var(--dm-radius-full); font-weight: 700; box-shadow: 0 8px 24px rgba(236, 72, 153, 0.3); }
+.dm-section-wrap[data-variant="vibrant-playful"] img { border-radius: var(--dm-radius-xl); }
+`.trim();
+}
+
 /** 디자인 3.0 — 섹션 연결부(웨이브/사선/커브) SVG. fill=currentColor → .dm-divider-svg의 color(--dm-bg)로 착색 */
 export function renderDmDividerSvg(shape: 'wave' | 'slant' | 'curve'): string {
   const paths: Record<string, string> = {

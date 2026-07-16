@@ -10,7 +10,7 @@
  */
 import { inlineImage, publicImageUrl, youtubeEmbedUrl } from './dm-viewer-utils';
 import { renderSections, COUNTDOWN_SCRIPT, escapeHtml } from './dm-section-renderer';
-import { renderDmTokensCss, renderDmBaseCss, renderDmDesign3Css } from './dm-tokens';
+import { renderDmTokensCss, renderDmBaseCss, renderDmDesign3Css, renderDmVariantCss } from './dm-tokens';
 // ★ 2026-07-16 자가 호스팅 웹폰트 — 발행 서체를 우리 서버 @font-face로 로드(구글 CDN 미로드 궁서 폴백 정정)
 import { selfHostPreloadUrls } from '../design-core/fonts';
 // ★ 2026-06-25 (P1) 아트디렉션 — 뷰어 :root 변수 주입 + 섹션 ctx 동봉(신규 treatment에만 영향, classic 불변).
@@ -436,6 +436,7 @@ ${tokensCss}
 ${artDirectionToCssVars(artDirection, brandKit?.font_display)}
 ${baseCss}
 ${renderDmDesign3Css()}
+${renderDmVariantCss()}
 .cd-unit{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:14px;padding:var(--dm-sp-4) var(--dm-sp-3);min-width:76px}
 .cd-num{font-size:34px;font-weight:800;font-family:var(--dm-font-display);font-variant-numeric:tabular-nums;letter-spacing:1px;color:#fff;line-height:1.1}
 .cd-lbl{font-size:11px;opacity:0.55;margin-top:6px;letter-spacing:2px}
