@@ -2751,6 +2751,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 buttons={(editing.buttons || []).map((b) => ({ ...b, label: replaceVars(b.label, sampleCustomer) }))}
                 backgroundColor={editing.background_color || '#4f46e5'}
                 textColor={editing.text_color || '#ffffff'}
+                design={editing.design}
               />
             ) : (
             <InAppMessagePreview
