@@ -35,6 +35,7 @@ import ValidationModal from '../components/dm/modals/ValidationModal';
 import VersionHistoryModal from '../components/dm/modals/VersionHistoryModal';
 import BrandKitModal from '../components/dm/modals/BrandKitModal';
 import DesignThemeModal from '../components/dm/modals/DesignThemeModal';
+import FontApplyModal from '../components/dm/modals/FontApplyModal';
 // ★ 2026-07-14 디자인 4.0 — 정예 템플릿(목적×스토리 구조, 서버 design-core 컴파일)
 // ★ 2026-07-16 M4 — 정예 템플릿 진입 폐기 (Harold 명시 — 설계서 §1-2. EliteTemplateModal 미사용)
 import DmQuickBar from '../components/dm/DmQuickBar';
@@ -1386,6 +1387,7 @@ function EditorModals() {
       <VersionHistoryModal open={openModal === 'version-history'} onClose={close} />
       <BrandKitModal open={openModal === 'brand-kit'} onClose={close} />
       <DesignThemeModal open={openModal === 'design-theme'} onClose={close} />
+      <FontApplyModal open={openModal === 'font'} onClose={close} />
       <AbTestModal open={openModal === 'ab-test'} onClose={close} />
     </>
   );

@@ -793,47 +793,57 @@ function productImgHeight(p: any): number {
 }
 
 // 포커스: 첫 상품 풀폭 대형 카드 + 나머지 2열 (히어로급 대표 상품 강조)
+// ★ 2026-07-16 서수란 신고 — 배경색·글씨공간 색·이미지 높이가 classic(기본 2열)에만 먹던 것 정정.
+//   focus 구도도 background_color(섹션·맞추기 여백)·caption_bg_color(카드)·image_height 소비. 캔버스 NewSections 미러.
 function renderProductFocus(p: any, products: any[]): string {
   const [first, ...rest] = products;
   const fitCss = productImgFitCss(p);
+  const cardBg = p?.caption_bg_color ? escapeHtml(p.caption_bg_color) : 'var(--dm-bg)';
+  const sectionBg = p?.background_color ? `;background:${escapeHtml(p.background_color)}` : '';
+  const bigH = p?.image_height === 'sm' ? 170 : p?.image_height === 'lg' ? 260 : 210;
+  const restH = p?.image_height === 'sm' ? 96 : p?.image_height === 'lg' ? 150 : 120;
   const wrapLink = (it: any, inner: string, style: string) => {
     const href = it.link_url ? safeUrl(it.link_url) : '#';
     return href !== '#' ? `<a href="${href}" target="_blank" rel="noopener" style="${style}">${inner}</a>` : `<div style="${style}">${inner}</div>`;
   };
   const bigCard = wrapLink(first, `
-    ${first.image_url ? `<img src="${escapeHtml(publicImageUrl(first.image_url))}" loading="lazy" alt="${escapeHtml(first.name || '')}" style="width:100%;height:210px;${fitCss};display:block"/>` : `<div style="width:100%;height:210px;background:var(--dm-neutral-100)"></div>`}
-    <div style="padding:14px 16px 16px">
-      <div style="font-size:var(--dm-fs-h3);font-weight:700;color:var(--dm-neutral-900);line-height:1.4">${escapeHtml(first.name || '')}</div>
+    ${first.image_url ? `<img src="${escapeHtml(publicImageUrl(first.image_url))}" loading="lazy" alt="${escapeHtml(first.name || '')}" style="width:100%;height:${bigH}px;${fitCss};display:block"/>` : `<div style="width:100%;height:${bigH}px;background:var(--dm-neutral-100)"></div>`}
+    <div style="padding:14px 16px 16px;background:${cardBg}">
+      <div style="font-size:var(--dm-fs-h3);font-weight:700;color:var(--dm-neutral-900);line-height:1.4;overflow-wrap:break-word">${escapeHtml(first.name || '')}</div>
       <div style="margin-top:6px">${productPriceHtml(first, true)}</div>
-    </div>`, 'display:block;text-decoration:none;color:inherit;background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:18px;overflow:hidden;box-shadow:var(--dm-shadow-md);width:100%');
+    </div>`, `display:block;text-decoration:none;color:inherit;background:${cardBg};border:1px solid var(--dm-neutral-200);border-radius:18px;overflow:hidden;box-shadow:var(--dm-shadow-md);width:100%`);
   const restItems = rest.map((it: any) => wrapLink(it, `
-      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:120px;${fitCss};display:block;flex-shrink:0"/>` : `<div style="width:100%;height:120px;background:var(--dm-neutral-100);flex-shrink:0"></div>`}
-      <div style="padding:8px 10px 10px;flex:1;display:flex;flex-direction:column">
-        <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4">${escapeHtml(it.name || '')}</div>
+      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:${restH}px;${fitCss};display:block;flex-shrink:0"/>` : `<div style="width:100%;height:${restH}px;background:var(--dm-neutral-100);flex-shrink:0"></div>`}
+      <div style="padding:8px 10px 10px;flex:1;display:flex;flex-direction:column;background:${cardBg}">
+        <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4;overflow-wrap:break-word">${escapeHtml(it.name || '')}</div>
         <div style="margin-top:auto;padding-top:4px">${productPriceHtml(it, false)}</div>
-      </div>`, 'width:calc(50% - 6px);box-sizing:border-box;display:flex;flex-direction:column;text-decoration:none;color:inherit;background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:14px;overflow:hidden;box-shadow:var(--dm-shadow-sm)')).join('');
-  return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-6) var(--dm-sp-5)">
+      </div>`, `width:calc(50% - 6px);box-sizing:border-box;display:flex;flex-direction:column;text-decoration:none;color:inherit;background:${cardBg};border:1px solid var(--dm-neutral-200);border-radius:14px;overflow:hidden;box-shadow:var(--dm-shadow-sm)`)).join('');
+  return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-6) var(--dm-sp-5)${sectionBg}">
     ${p.title ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4)">${escapeHtml(p.title)}</div>` : ''}
     <div class="dm-pc-items" style="display:flex;flex-wrap:wrap;gap:12px">${bigCard}${restItems}</div>
   </div>`;
 }
 
 // 리스트: 좌 썸네일 + 우 정보의 컴팩트 행 (상품 수 많은 DM용)
+// ★ 2026-07-16 서수란 신고 — list 구도도 background_color(섹션)·caption_bg_color(행 카드)·image_height(썸네일) 소비. 캔버스 NewSections 미러.
 function renderProductList(p: any, products: any[]): string {
   const fitCss = productImgFitCss(p);
+  const cardBg = p?.caption_bg_color ? escapeHtml(p.caption_bg_color) : 'var(--dm-bg)';
+  const sectionBg = p?.background_color ? `;background:${escapeHtml(p.background_color)}` : '';
+  const thumbH = p?.image_height === 'sm' ? 60 : p?.image_height === 'lg' ? 96 : 76;
   const rows = products.map((it: any) => {
     const inner = `
-      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:76px;height:76px;${fitCss};border-radius:12px;flex-shrink:0"/>` : `<div style="width:76px;height:76px;background:var(--dm-neutral-100);border-radius:12px;flex-shrink:0"></div>`}
+      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:${thumbH}px;height:${thumbH}px;${fitCss};border-radius:12px;flex-shrink:0"/>` : `<div style="width:${thumbH}px;height:${thumbH}px;background:var(--dm-neutral-100);border-radius:12px;flex-shrink:0"></div>`}
       <div style="flex:1;min-width:0;text-align:left">
-        <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4">${escapeHtml(it.name || '')}</div>
+        <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4;overflow-wrap:break-word">${escapeHtml(it.name || '')}</div>
         <div style="margin-top:4px">${productPriceHtml(it, false)}</div>
       </div>
       ${it.link_url ? `<span aria-hidden="true" style="color:var(--dm-neutral-400);flex-shrink:0">→</span>` : ''}`;
-    const style = 'display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:14px;text-decoration:none;color:inherit';
+    const style = `display:flex;align-items:center;gap:12px;padding:10px 12px;background:${cardBg};border:1px solid var(--dm-neutral-200);border-radius:14px;text-decoration:none;color:inherit`;
     const href = it.link_url ? safeUrl(it.link_url) : '#';
     return href !== '#' ? `<a href="${href}" target="_blank" rel="noopener" style="${style}">${inner}</a>` : `<div style="${style}">${inner}</div>`;
   }).join('');
-  return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-6) var(--dm-sp-5)">
+  return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-6) var(--dm-sp-5)${sectionBg}">
     ${p.title ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4)">${escapeHtml(p.title)}</div>` : ''}
     <div class="dm-pc-items" style="display:flex;flex-direction:column;gap:10px">${rows}</div>
   </div>`;

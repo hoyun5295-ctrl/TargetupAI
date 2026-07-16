@@ -74,6 +74,10 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
       ? { objectFit: 'cover', objectPosition: `center ${props.image_focus}` }
       : { objectFit: 'cover' };
   const imgH = props?.image_height === 'sm' ? 120 : props?.image_height === 'lg' ? 220 : 150;
+  // ★ 2026-07-16 focus/list 구도 이미지 높이(서수란) — SSR renderProductFocus/renderProductList 미러
+  const focusBigH = props?.image_height === 'sm' ? 170 : props?.image_height === 'lg' ? 260 : 210;
+  const focusRestH = props?.image_height === 'sm' ? 96 : props?.image_height === 'lg' ? 150 : 120;
+  const listThumbH = props?.image_height === 'sm' ? 60 : props?.image_height === 'lg' ? 96 : 76;
   const cardBg = props?.caption_bg_color || 'var(--dm-bg)';
   // ★ 2026-07-13 디자인 3.0 — 구도 미러 (SSR renderProductFocus/renderProductList와 구조 동일)
   const priceRow = (p: ProductCarouselProps['products'][number], big: boolean) => {
@@ -95,21 +99,21 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
   if (treatment === 'focus' && products.length > 0) {
     const [first, ...rest] = products;
     return (
-      <div className="dm-section dm-product-carousel" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)' }}>
+      <div className="dm-section dm-product-carousel" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', ...(props.background_color ? { background: props.background_color } : {}) }}>
         {props.title && <div style={TITLE_STYLE}>{props.title}</div>}
         <div className="dm-pc-items" style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-          <div style={{ width: '100%', background: 'var(--dm-bg)', border: '1px solid var(--dm-neutral-200)', borderRadius: 18, overflow: 'hidden', boxShadow: 'var(--dm-shadow-md)' }}>
-            {first.image_url ? <img src={dmImageUrl(first.image_url)} alt={first.name} style={{ width: '100%', height: 210, display: 'block', ...imgFit }} /> : <div style={{ width: '100%', height: 210, background: 'var(--dm-neutral-100)' }} />}
-            <div style={{ padding: '14px 16px 16px' }}>
-              <div style={{ fontSize: 'var(--dm-fs-h3)', fontWeight: 700, color: 'var(--dm-neutral-900)', lineHeight: 1.4 }}>{first.name}</div>
+          <div style={{ width: '100%', background: cardBg, border: '1px solid var(--dm-neutral-200)', borderRadius: 18, overflow: 'hidden', boxShadow: 'var(--dm-shadow-md)' }}>
+            {first.image_url ? <img src={dmImageUrl(first.image_url)} alt={first.name} style={{ width: '100%', height: focusBigH, display: 'block', ...imgFit }} /> : <div style={{ width: '100%', height: focusBigH, background: 'var(--dm-neutral-100)' }} />}
+            <div style={{ padding: '14px 16px 16px', background: cardBg }}>
+              <div style={{ fontSize: 'var(--dm-fs-h3)', fontWeight: 700, color: 'var(--dm-neutral-900)', lineHeight: 1.4, overflowWrap: 'break-word' }}>{first.name}</div>
               <div style={{ marginTop: 6 }}>{priceRow(first, true)}</div>
             </div>
           </div>
           {rest.map((p, i) => (
-            <div key={p.id || i} style={{ width: 'calc(50% - 6px)', background: 'var(--dm-bg)', border: '1px solid var(--dm-neutral-200)', borderRadius: 14, overflow: 'hidden', boxShadow: 'var(--dm-shadow-sm)', display: 'flex', flexDirection: 'column' }}>
-              {p.image_url ? <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: '100%', height: 120, display: 'block', flexShrink: 0, ...imgFit }} /> : <div style={{ width: '100%', height: 120, background: 'var(--dm-neutral-100)', flexShrink: 0 }} />}
-              <div style={{ padding: '8px 10px 10px', flex: 1, display: 'flex', flexDirection: 'column' }}>
-                <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4 }}>{p.name}</div>
+            <div key={p.id || i} style={{ width: 'calc(50% - 6px)', background: cardBg, border: '1px solid var(--dm-neutral-200)', borderRadius: 14, overflow: 'hidden', boxShadow: 'var(--dm-shadow-sm)', display: 'flex', flexDirection: 'column' }}>
+              {p.image_url ? <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: '100%', height: focusRestH, display: 'block', flexShrink: 0, ...imgFit }} /> : <div style={{ width: '100%', height: focusRestH, background: 'var(--dm-neutral-100)', flexShrink: 0 }} />}
+              <div style={{ padding: '8px 10px 10px', flex: 1, display: 'flex', flexDirection: 'column', background: cardBg }}>
+                <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4, overflowWrap: 'break-word' }}>{p.name}</div>
                 <div style={{ marginTop: 'auto', paddingTop: 4 }}>{priceRow(p, false)}</div>
               </div>
             </div>
@@ -120,14 +124,14 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
   }
   if (treatment === 'list' && products.length > 0) {
     return (
-      <div className="dm-section dm-product-carousel" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)' }}>
+      <div className="dm-section dm-product-carousel" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', ...(props.background_color ? { background: props.background_color } : {}) }}>
         {props.title && <div style={TITLE_STYLE}>{props.title}</div>}
         <div className="dm-pc-items" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {products.map((p, i) => (
-            <div key={p.id || i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', background: 'var(--dm-bg)', border: '1px solid var(--dm-neutral-200)', borderRadius: 14 }}>
-              {p.image_url ? <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: 76, height: 76, borderRadius: 12, flexShrink: 0, ...imgFit }} /> : <div style={{ width: 76, height: 76, background: 'var(--dm-neutral-100)', borderRadius: 12, flexShrink: 0 }} />}
+            <div key={p.id || i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', background: cardBg, border: '1px solid var(--dm-neutral-200)', borderRadius: 14 }}>
+              {p.image_url ? <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: listThumbH, height: listThumbH, borderRadius: 12, flexShrink: 0, ...imgFit }} /> : <div style={{ width: listThumbH, height: listThumbH, background: 'var(--dm-neutral-100)', borderRadius: 12, flexShrink: 0 }} />}
               <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4 }}>{p.name}</div>
+                <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4, overflowWrap: 'break-word' }}>{p.name}</div>
                 <div style={{ marginTop: 4 }}>{priceRow(p, false)}</div>
               </div>
               {p.link_url ? <span aria-hidden="true" style={{ color: 'var(--dm-neutral-400)', flexShrink: 0 }}>→</span> : null}

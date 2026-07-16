@@ -12,7 +12,7 @@ export default function SectionAddMenu() {
   const addSection = useDmBuilderStore((s) => s.addSection);
 
   return (
-    <div style={{ borderTop: '1px solid var(--dm-neutral-200)', padding: '12px 8px' }}>
+    <div style={{ borderTop: '1px solid var(--dm-neutral-200)', padding: '12px 8px', flexShrink: 0 }}>
       <button
         onClick={() => setExpanded(!expanded)}
         style={{
@@ -35,7 +35,9 @@ export default function SectionAddMenu() {
       </button>
 
       {expanded && (
-        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        // ★ 2026-07-16 서수란 신고 — 목록이 좌측 패널(overflow:hidden)에 잘려 아래 섹션(영상 등)을 볼 수 없던 것 정정.
+        //   maxHeight + overflowY:auto 로 22종 전체를 스크롤로 접근 가능하게.
+        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4, maxHeight: '50vh', overflowY: 'auto', overflowX: 'hidden', paddingRight: 2 }}>
           {SECTION_ADD_MENU_ORDER.map((type: SectionType) => {
             const meta = SECTION_META[type];
             const disabled = isMaxCountExceeded(sections, type);

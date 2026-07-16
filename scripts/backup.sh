@@ -65,9 +65,10 @@ MY_SZ=$(stat -c%s "${MY_OUT}")
 (( MY_SZ >= MIN_MYSQL_BYTES )) || { alert "MySQL 산출물 과소 ${MY_SZ}B (<${MIN_MYSQL_BYTES})"; exit 1; }
 log "MySQL 완료: $(numfmt --to=iec "${MY_SZ}" 2>/dev/null || echo "${MY_SZ}B")"
 
-# 3) 무결성: gpg 패킷 파싱 확인 (개인키 없이도 구조 검증 가능)
-gpg --list-packets "${PG_OUT}" >/dev/null 2>&1 || { alert "PG gpg 산출물 손상"; exit 1; }
-gpg --list-packets "${MY_OUT}" >/dev/null 2>&1 || { alert "MySQL gpg 산출물 손상"; exit 1; }
+# 3) 형식 검증 — 서버엔 개인키가 없어 복호화 불가. PGP 암호문 구조만 확인
+#    (완전 무결성 = 복원 테스트에서 개인키로 복호+gunzip -t 검증)
+file -b "${PG_OUT}" | grep -qi "PGP.*encrypted" || { alert "PG 산출물이 PGP 암호문 아님(암호화 실패 의심)"; exit 1; }
+file -b "${MY_OUT}" | grep -qi "PGP.*encrypted" || { alert "MySQL 산출물이 PGP 암호문 아님(암호화 실패 의심)"; exit 1; }
 
 # 4) 오프사이트 전송 (암호문 → 59 안전)
 log "59 오프사이트 전송..."

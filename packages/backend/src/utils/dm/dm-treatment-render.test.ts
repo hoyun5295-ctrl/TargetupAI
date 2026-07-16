@@ -82,3 +82,41 @@ describe('dm treatment render — coupon/text_card/cta', () => {
     expect(c).not.toContain('<i>');
   });
 });
+
+// ★ 2026-07-16 서수란 재오픈 재발 방지 게이트 —
+//   "색 지정이 기본 2열 구도에서만 먹는다"의 근본(구도별 소비 누락) 차단.
+//   상품슬라이드 배경색·글씨공간 색·이미지 높이는 3개 구도(classic/focus/list) 전부에서 소비돼야 한다.
+//   한 구도라도 하드코딩(var(--dm-bg))으로 무시하면 이 테스트가 pre-push 훅에서 push를 막는다.
+describe('dm treatment render — product_carousel 구도별 색/높이 소비 게이트', () => {
+  const products = [
+    { image_url: 'https://cdn.example.com/a.jpg', name: '상품 A', price: 10000 },
+    { image_url: 'https://cdn.example.com/b.jpg', name: '상품 B', price: 20000, discount_price: 15000 },
+    { image_url: 'https://cdn.example.com/c.jpg', name: '상품 C', price: 30000 },
+  ];
+  const TREATMENTS: Array<[string, string | undefined]> = [
+    ['classic(기본 2열)', undefined],
+    ['focus(첫 상품 대형)', 'focus'],
+    ['list(리스트)', 'list'],
+  ];
+
+  for (const [label, treatment] of TREATMENTS) {
+    it(`${label} 구도 = background_color + caption_bg_color 소비`, () => {
+      const html = renderSection(
+        sec('product_carousel', { products, caption_bg_color: '#abcdef', background_color: '#123456' }, treatment),
+        {},
+      );
+      expect(html.includes('#abcdef'), `${label}: 글씨공간 색(caption_bg_color) 미소비 — 카드 배경 하드코딩 의심`).toBe(true);
+      expect(html.includes('#123456'), `${label}: 배경색(background_color) 미소비 — 섹션 배경 하드코딩 의심`).toBe(true);
+    });
+  }
+
+  for (const [label, treatment] of TREATMENTS) {
+    it(`${label} 구도 = image_height(lg) 반영`, () => {
+      const smHtml = renderSection(sec('product_carousel', { products, image_height: 'sm' }, treatment), {});
+      const lgHtml = renderSection(sec('product_carousel', { products, image_height: 'lg' }, treatment), {});
+      // sm↔lg 높이 토큰이 실제로 달라야 한다(구도가 image_height를 소비한다는 증거).
+      const heights = (h: string) => (h.match(/height:\d+px/g) || []).join('|');
+      expect(heights(smHtml) !== heights(lgHtml), `${label}: image_height 미반영 — 이미지 높이 하드코딩 의심`).toBe(true);
+    });
+  }
+});

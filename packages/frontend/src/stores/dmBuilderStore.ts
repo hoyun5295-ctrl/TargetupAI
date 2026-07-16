@@ -75,6 +75,8 @@ export type ModalKey =
   | 'version-history'
   | 'brand-kit'
   | 'design-theme'
+  // ★ 2026-07-16 서체 일괄 적용 모달 (퀵바 팝오버 클리핑 → 모달 교체)
+  | 'font'
   // ★ 2026-07-14 디자인 4.0 — 정예 템플릿(목적×스토리 구조, 서버 design-core 컴파일)
   | 'elite-template'
   | 'ab-test'
