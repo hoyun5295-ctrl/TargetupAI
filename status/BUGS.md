@@ -55,5 +55,8 @@
 
 ## 2) 활성 버그
 
-> 현재 열린 버그 없음. **2026-07-07 알림톡 강조표기형 3관문(7300 대표링크 · 9999 senderkey · 3027 버튼) 종결** → [archive/BUGS_RESOLVED.md](archive/BUGS_RESOLVED.md) 최상단(커밋 716074dc 배포·Harold "전체 발송 잘된다" 확인). 잔여 별건 = 진단로그 `[ALIMTALK-DEBUG2]`(direct-send-processor) 정리 시 제거.
+### 🔵 B-0717-1 인앱 웹 블록 메시지 중앙정렬 안 됨 (🟠 Major) — 2026-07-17 (당일 원인 확정·코드완료·배포 대기)
+> **3면 실측으로 원인 확정(추측 0)**: ① 데이터 정상 — 실서버 웹 채널 `/inapp/active` 응답에 해당 메시지 `design.text_align="center"` 동봉 확인(저장·sanitize·서빙 무결) ② **실렌더 근본 = 팝폰 웹이 `sdk/v0.3.9/hanjul.min.js` 고정 로드인데 0717 SDK 빌드가 v0.3.11 폴더에만 복사됨** — 0716엔 새 빌드를 v0.3.8/9/10에 전부 동기화(3파일 바이트 동일 실측)했는데 0717은 v0.3.11만 갱신. 그래서 v0.3.11 기능 "다시 보지 않기"는 보이고 정렬만 없었음. 옛 기재 "SSR renderBlockMessage" 추정은 **오류** — 인앱은 SSR 없음(renderBlockMessage=SDK 내부 함수, 웹 실렌더=SDK 클라이언트) ③ 미리보기 = Overlay(BlockPreview 경로)만 text_align 미적용. **수정(0717)**: `InAppMessagePreview.tsx` Overlay cardBase에 SDK 루트 적용 미러(전 7 variant 공통, 미지정=현행 유지 회귀 0) + v0.3.8~11 4폴더에 0717 빌드 min.js+map 동기화(md5 동일 검증). tsc 0·Codex 리뷰 통과. **잔여 = 배포(frontend build:safe + pm2 reload — sdk-serve 메모리 캐시 무TTL이라 reload 필수) + Harold 시크릿모드 실측.** 재발 방지(SDK 릴리즈=전 서빙 폴더 동기화 자동화)=인앱 아키텍처 재설계에 포함 예정. 다른 0717 항목(수신거부·DM·이메일·인앱 다수 코드완료·미검증) 상세=[[project_2026_0717_inapp_debug_session_incomplete]].
+
+> **2026-07-07 알림톡 강조표기형 3관문(7300 대표링크 · 9999 senderkey · 3027 버튼) 종결** → [archive/BUGS_RESOLVED.md](archive/BUGS_RESOLVED.md) 최상단(커밋 716074dc 배포·Harold "전체 발송 잘된다" 확인). 잔여 별건 = 진단로그 `[ALIMTALK-DEBUG2]`(direct-send-processor) 정리 시 제거.
 

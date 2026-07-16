@@ -143,6 +143,9 @@ function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Varian
   const BACKDROP_DIM: Record<string, string> = { soft: 'rgba(8,10,18,0.38)', standard: 'rgba(8,10,18,0.55)', deep: 'rgba(8,10,18,0.72)' };
   const backdropDim = BACKDROP_DIM[String(rest.design?.backdrop?.dim || '')] || BACKDROP_DIM.standard;
   const backdropBlurOn = rest.design?.backdrop?.blur !== false;
+  // ★ 2026-07-17 텍스트 정렬 (design.text_align) — SDK renderMessage가 루트 [data-hanjullo-msg]에 적용하는 것을 미러.
+  //   블록(BlockPreview)·flat 공통으로 카드 루트에서 상속. 미지정/left = 스타일 자체를 안 얹어 현행 렌더 유지(회귀 0).
+  const rootTextAlign = rest.design?.text_align === 'center' ? ('center' as const) : rest.design?.text_align === 'right' ? ('right' as const) : undefined;
   const bubble = cardStyle === 'bubble' && (variant === 'modal' || variant === 'slide' || variant === 'inline');
   const bubbleRadius = (small: 'bl' | 'br') => {
     const rr = themeTokens ? themeTokens.radius + 4 : 24;
@@ -176,6 +179,7 @@ function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Varian
     position: 'absolute',
     fontFamily: '"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif',
     boxSizing: 'border-box',
+    ...(rootTextAlign ? { textAlign: rootTextAlign } : {}),
     ...(usingBlocks ? { color: themeTokens!.textPrimary, border: `1px solid ${themeTokens!.border}` } : {}),
   };
   const r = (def: number) => (usingBlocks ? themeTokens!.radius : def);
