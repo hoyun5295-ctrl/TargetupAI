@@ -1901,6 +1901,22 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   )}
                 </>
               )}
+              {/* ★ 2026-07-17 텍스트 정렬 (좌/중/우) — 제목·본문. 웹·앱·블록·flat 전부 공통 노출 */}
+              <div className="mt-3">
+                <label className="text-[10px] text-white/50 block mb-1.5">텍스트 정렬</label>
+                <div className="flex gap-1.5">
+                  {([['left', '왼쪽'], ['center', '가운데'], ['right', '오른쪽']] as const).map(([v, label]) => {
+                    const cur = String(editing.design?.text_align || 'left');
+                    return (
+                      <button
+                        key={v}
+                        onClick={() => setDesign({ text_align: v === 'left' ? null : v })}
+                        className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${cur === v ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/60 hover:bg-white/5'}`}
+                      >{label}</button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
 
             {/* ★ 2026-07-14 디자인 4.0 — 정예 템플릿 10종 (목적×스토리 구조 — 서버 컴파일. 블록 기반 = 웹 전용) */}
@@ -2126,24 +2142,6 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                           </div>
                         </div>
                       )}
-                    </div>
-                    {/* ★ 2026-07-17 텍스트 정렬 (좌/중/우) — 제목·본문 정렬. 전 템플릿 공통. 미지정=왼쪽(기존) */}
-                    <div className="flex flex-wrap items-end gap-4">
-                      <div>
-                        <label className="text-[10px] text-white/50 block mb-1">텍스트 정렬</label>
-                        <div className="flex gap-1.5">
-                          {([['left', '왼쪽'], ['center', '가운데'], ['right', '오른쪽']] as const).map(([v, label]) => {
-                            const cur = String(editing.design?.text_align || 'left');
-                            return (
-                              <button
-                                key={v}
-                                onClick={() => setDesign({ text_align: v === 'left' ? null : v })}
-                                className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${cur === v ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/60 hover:bg-white/5'}`}
-                              >{label}</button>
-                            );
-                          })}
-                        </div>
-                      </div>
                     </div>
                     {editing.template === 'center_modal' && (
                       <div className="flex flex-wrap items-end gap-4">
