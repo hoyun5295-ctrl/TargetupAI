@@ -243,7 +243,8 @@ function renderFooter(p: FooterProps, b: EmailBrand): string {
   if (p.notes) parts.push(esc(p.notes).replace(/\n/g, '<br>'));
   const cs: string[] = [];
   if (p.cs_phone) cs.push('고객센터 ' + esc(p.cs_phone));
-  if (p.cs_hours) cs.push(esc(p.cs_hours));
+  // ★ 2026-07-16 상담시간 줄바꿈(엔터) 반영 — notes·legal_text와 동일하게 \n→<br>. DM 수정 이메일 미러.
+  if (p.cs_hours) cs.push(esc(p.cs_hours).replace(/\n/g, '<br>'));
   if (cs.length) parts.push(cs.join(' · '));
   if (p.legal_text) parts.push(esc(p.legal_text).replace(/\n/g, '<br>'));
   // 수신거부 링크는 발송 시 시스템 자동 부착 — 여기서 렌더 X.

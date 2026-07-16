@@ -250,6 +250,31 @@ export async function customerMatchesFilter(
 }
 
 /**
+ * ★ 2026-07-17 "전 등급 선택 = 제한 없음" 정규화.
+ *   근본: AI 인앱 생성기가 일반 메시지에도 customer.grade=[VIP,일반,신규](전 표준 등급)을 자동으로 넣어,
+ *   서빙(getActiveMessagesForCustomerV2 Step 3)이 grade 있음 = "등급 잡히는 로그인 고객만"으로 해석 →
+ *   익명(비로그인) 방문자를 전원 제외 → 인앱이 웹/앱 어디에도 안 뜨던 근본(2026-07-16 직원 신고).
+ *   전 표준 등급을 모두 포함 = 사실상 등급 제한 없음이므로 grade 키를 제거해 전체(익명 포함) 노출로 되돌린다.
+ *   실제로 좁힌 등급(예: ['VIP'])은 그대로 유지 = 진짜 타겟은 보존.
+ *   ★ 서빙·저장 양쪽에 적용(CT 단일 정의) — 기존 메시지는 서빙 정규화로 즉시 복구(재저장·수동 UPDATE 불필요).
+ */
+const STANDARD_GRADES = ['VIP', '일반', '신규'];
+export function normalizeSegmentConditions<T extends SegmentConditions>(seg: T): T {
+  if (!seg || typeof seg !== 'object') return seg;
+  const cust = (seg as any).customer;
+  if (cust && Array.isArray(cust.grade) && cust.grade.length > 0) {
+    const set = new Set(cust.grade.map((g: any) => String(g).trim()));
+    const coversAllStandard = STANDARD_GRADES.every((g) => set.has(g));
+    if (coversAllStandard) {
+      const restCust = { ...cust };
+      delete restCust.grade;
+      return { ...(seg as any), customer: restCust };
+    }
+  }
+  return seg;
+}
+
+/**
  * 빈 세그먼트 (조건 0건) 여부 — true이면 회사 전체 active customer가 대상.
  */
 export function isEmptySegment(segmentConditions: SegmentConditions): boolean {

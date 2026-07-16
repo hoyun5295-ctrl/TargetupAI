@@ -16,7 +16,7 @@
 
 import { query } from '../config/database';
 // ★ D215+ (2026-05-25) 통합 영역 — CT-78 (segment) + CT-80 (variant) + CT-82 (trigger window)
-import { customerMatchesSegment, customerMatchesFilter, isEmptySegment } from './inapp-segment-matcher';
+import { customerMatchesSegment, customerMatchesFilter, isEmptySegment, normalizeSegmentConditions } from './inapp-segment-matcher';
 import { selectVariantForCustomer } from './inapp-variant-optimizer';
 import { isTimeWindowValid } from './inapp-trigger-engine';
 
@@ -343,7 +343,7 @@ export async function createInAppMessage(
       input.startAt || null, input.endAt || null,
       input.status || 'active', channel,
       input.template || position, composed ? composed.imageUrl : (input.image_url || null),
-      JSON.stringify(sanitizeButtonsActionUrls(composed ? composed.buttons : (input.buttons || []))), JSON.stringify(input.segment_conditions || {}), JSON.stringify(input.trigger_conditions || {}),
+      JSON.stringify(sanitizeButtonsActionUrls(composed ? composed.buttons : (input.buttons || []))), JSON.stringify(normalizeSegmentConditions(input.segment_conditions || {})), JSON.stringify(input.trigger_conditions || {}),
       JSON.stringify(input.personalization_vars || []), input.auto_dismiss_seconds ?? null, input.max_displays_per_user ?? null,
       input.send_start_hour ?? null, input.send_end_hour ?? null, input.allowed_weekdays || [0, 1, 2, 3, 4, 5, 6], input.animation || 'fade',
       input.badge_text ?? composed?.badgeText ?? null,
@@ -466,7 +466,7 @@ export async function updateInAppMessage(
       input.startAt ?? null, input.endAt ?? null,
       input.status ?? null,
       input.template ?? null, imagePatch.value,
-      composed ? JSON.stringify(sanitizeButtonsActionUrls(composed.buttons)) : (input.buttons ? JSON.stringify(sanitizeButtonsActionUrls(input.buttons)) : null), input.segment_conditions ? JSON.stringify(input.segment_conditions) : null,
+      composed ? JSON.stringify(sanitizeButtonsActionUrls(composed.buttons)) : (input.buttons ? JSON.stringify(sanitizeButtonsActionUrls(input.buttons)) : null), input.segment_conditions ? JSON.stringify(normalizeSegmentConditions(input.segment_conditions)) : null,
       input.trigger_conditions ? JSON.stringify(input.trigger_conditions) : null, input.personalization_vars ? JSON.stringify(input.personalization_vars) : null,
       dismissPatch.value, maxDispPatch.value,
       startHourPatch.value, endHourPatch.value,
@@ -856,7 +856,9 @@ export async function getActiveMessagesForCustomerV2(input: ActiveMessagesInput)
     });
     if (!timeWindow.valid) continue;
 
-    const segmentConds = cand.segment_conditions || {};
+    // ★ 2026-07-17 "전 등급 선택 = 제한 없음" 정규화 — AI가 자동 심은 grade=[전 등급]이 익명 방문자를
+    //   전원 제외하던 근본 복구. 기존 메시지도 서빙 시점 정규화로 즉시 익명 노출됨(재저장 불필요).
+    const segmentConds = normalizeSegmentConditions(cand.segment_conditions || {});
     if (!isEmptySegment(segmentConds)) {
       if (!customerId) continue;  // 세그먼트 조건 있는데 customer 미식별 = 매칭 불가
       const segMatch = await customerMatchesSegment(input.companyId, customerId, segmentConds).catch(() => false);
