@@ -52,6 +52,10 @@ export interface BlockRenderContext {
   treatment?: InAppTreatment;
   /** 헤드라인 서체 오버라이드 (design.font_display — 테마 displayFont보다 우선) */
   displayFont?: string;
+  /** ★ 2026-07-17 텍스트 정렬 (design.text_align) — 루트 text-align 상속이 닿지 않는 flex 행 블록(쿠폰·CTA 행)의
+   *  justify-content 미러 전용. 카운트다운(좌 라벨+우 시계)·목록(마커)·상품 카드(좌 이미지+우 정보)는 구조 유지.
+   *  미지정 = 기존 렌더 그대로(회귀 0). */
+  textAlign?: 'center' | 'right';
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -430,6 +434,8 @@ function renderBenefit(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
       display: 'flex', alignItems: 'center', gap: '12px',
       padding: '15px 16px', borderRadius: `${theme.innerRadius}px`,
       background: theme.accentSoft, color: theme.textPrimary,
+      // ★ 2026-07-17 text_align 미러 — flex 행이라 상속이 안 닿아 justify-content로 (미지정 = 기존 좌측)
+      ...(ctx.textAlign ? { justifyContent: ctx.textAlign === 'center' ? 'center' : 'flex-end' } : {}),
     });
     const bigIc = el('span', {
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -453,6 +459,8 @@ function renderBenefit(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
     border: `1.5px dashed ${withAlpha(theme.accent, 0.45)}`,
     borderRadius: `${theme.innerRadius}px`,
     color: theme.textPrimary,
+    // ★ 2026-07-17 text_align 미러 — flex 행이라 상속이 안 닿아 justify-content로 (미지정 = 기존 좌측)
+    ...(ctx.textAlign ? { justifyContent: ctx.textAlign === 'center' ? 'center' : 'flex-end' } : {}),
   });
   // 양측 노치 (티켓 펀치홀 — 면 색으로 구멍처럼)
   const notchStyle = {
@@ -662,7 +670,11 @@ function renderCtaGroup(b: ContentBlock, ctx: BlockRenderContext): HTMLElement |
 
   // ★ 2026-07-07(5) 형태 골격 — 둥근 말풍선: 전폭 버튼 대신 채팅 답장 칩 (자동 폭 알약, 가로 나열)
   if (ctx.cardStyle === 'bubble') {
-    const chipWrap = el('div', { display: 'flex', flexDirection: 'row', gap: '8px', flexWrap: 'wrap' });
+    const chipWrap = el('div', {
+      display: 'flex', flexDirection: 'row', gap: '8px', flexWrap: 'wrap',
+      // ★ 2026-07-17 text_align 미러 — 칩 행 justify-content (미지정 = 기존 좌측)
+      ...(ctx.textAlign ? { justifyContent: ctx.textAlign === 'center' ? 'center' : 'flex-end' } : {}),
+    });
     buttons.slice(0, 3).forEach((btn, idx) => {
       const style = btn.style || (idx === 0 ? 'primary' : 'secondary');
       const isPrimary = style === 'primary';
@@ -695,6 +707,8 @@ function renderCtaGroup(b: ContentBlock, ctx: BlockRenderContext): HTMLElement |
   const stack = b.layout !== 'inline';
   const wrap = el('div', {
     display: 'flex', flexDirection: stack ? 'column' : 'row', gap: '8px', flexWrap: 'wrap',
+    // ★ 2026-07-17 text_align 미러 — 비스택 버튼 행 justify-content (스택 = 전폭이라 무영향, 미지정 = 기존 좌측)
+    ...(ctx.textAlign && !stack ? { justifyContent: ctx.textAlign === 'center' ? 'center' : 'flex-end' } : {}),
   });
   buttons.slice(0, 3).forEach((btn, idx) => {
     const style = btn.style || (idx === 0 ? 'primary' : 'secondary');

@@ -166,6 +166,8 @@ export interface InAppDesignSdk {
   motion?: string | null;
   /** 배경 딤/블러 — center_modal/full_screen 백드롭 */
   backdrop?: { dim?: string | null; blur?: boolean | null } | null;
+  /** ★ 2026-07-17 텍스트 정렬 — 'center'/'right'만 소비(루트 상속 + flex 행 블록 justify 미러), 그 외 = 기존 좌측 */
+  text_align?: string | null;
 }
 
 export interface InAppInitInput {
@@ -1149,6 +1151,8 @@ export class HanjulloInAppModule {
       motion,
       treatment,
       displayFont: design?.font_display ? displayFont : undefined,
+      // ★ 2026-07-17 text_align — flex 행 블록(쿠폰·CTA 행) justify-content 미러용 (루트 text-align은 renderMessage가 적용)
+      textAlign: design?.text_align === 'center' ? 'center' : design?.text_align === 'right' ? 'right' : undefined,
     };
 
     // 형태별 골격 — poster: 풀블리드 히어로+본문 존 / ticket: 2톤(본권/스터브) / bubble: 발신자 행+답장 칩 / classic: 순차 렌더

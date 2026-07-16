@@ -35,8 +35,9 @@ import {
   ArrowLeft, Database, Brain, Loader2, RefreshCw, Sparkles, Users, AlertTriangle,
   Activity, Info, Link2, Store, Server, ShoppingBag, Boxes, Cloud, Palette, LayoutTemplate, Package, Blocks,
   KeyRound, Copy, Check, Unlink, MousePointerClick, AlertCircle, ShoppingCart, Code2, X,
-  Eye, EyeOff, ExternalLink, ChevronDown, ChevronUp,
+  Eye, EyeOff, ExternalLink, ChevronDown, ChevronUp, Smartphone,
 } from 'lucide-react';
+import { APP_INAPP_CONTRACT_SECTIONS } from '../components/inapp/AppIntegrationContract';
 import { useAuthStore } from '../stores/authStore';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import { useToast } from '../components/ToastProvider';
@@ -1726,6 +1727,40 @@ client.newCall(req).execute()`}</pre>
               </div>
             </div>
             <div className="text-[10px] text-white/30 italic mt-3">Data source — /api/cdp/ingest · /api/cdp/inapp/active (공개키)</div>
+          </div>
+        )}
+
+        {/* ★ 2026-07-17 인앱 메시지 앱(네이티브) 통합 계약 (앱 탭) — 앱이 구현해야 편집기 설정이 그대로 동작.
+            단일 소스 = components/inapp/AppIntegrationContract.tsx (편집기 앱 채널 모달과 동일 내용) */}
+        {webhookProviderOpen && customInfo?.hasSecret && customTab === 'app' && (
+          <div className="bg-white/5 border border-white/10 rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-3">
+              <Smartphone className="w-5 h-5 text-cyan-300" />
+              <h2 className="text-base font-bold text-white">인앱 메시지 — 앱이 구현해야 하는 계약</h2>
+            </div>
+            <div className="text-xs text-white/60 leading-relaxed mb-4">
+              네이티브 앱은 인앱 메시지를 앱이 직접 그립니다. 아래 계약(조회·렌더 필드·닫기/빈도 동작·트래킹)을 앱 개발에 그대로 전달하세요 —
+              이 계약을 구현하면 이후 편집기에서 만드는 모든 인앱 메시지가 앱 수정 없이 동작합니다.
+            </div>
+            <div className="space-y-4">
+              {APP_INAPP_CONTRACT_SECTIONS.map((sec) => (
+                <div key={sec.key}>
+                  <div className="text-xs font-bold text-white/90 mb-1.5">{sec.heading}</div>
+                  <div className="space-y-2 text-xs text-white/70">
+                    {sec.items.map((it, i) => (
+                      <div key={i} className="bg-slate-900/40 border border-white/10 rounded-lg p-2.5">
+                        <div className="font-semibold text-white/85">{it.title}</div>
+                        <div className="text-white/55 leading-relaxed mt-0.5">{it.desc}</div>
+                        {it.code && (
+                          <pre className="mt-2 bg-slate-950 border border-white/10 rounded-lg p-2.5 text-[11px] text-cyan-200 overflow-x-auto whitespace-pre">{it.code}</pre>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="text-[10px] text-white/30 italic mt-3">Data source — /api/cdp/inapp/active · /api/cdp/inapp/track (앱 채널 보장 계약)</div>
           </div>
         )}
 

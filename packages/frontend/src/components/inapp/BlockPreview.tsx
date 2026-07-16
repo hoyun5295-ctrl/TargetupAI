@@ -46,6 +46,8 @@ interface Ctx {
   // ★ 2026-07-14 디자인 3.0 — SDK ctx 미러 (미지정 = 현행 렌더)
   treatment?: InAppTreatment;
   displayFont?: string;
+  /** ★ 2026-07-17 텍스트 정렬 — flex 행 블록(쿠폰·CTA 행) justify-content 미러 (SDK ctx.textAlign 1:1). 미지정 = 기존 좌측 */
+  textAlign?: 'center' | 'right';
 }
 
 function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
@@ -155,7 +157,7 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
       //   ★ 3.0 — spotlight 구도(classic 카드)도 같은 대형 승격 (SDK 미러)
       if (ctx.cardStyle === 'ticket' || ctx.treatment === 'spotlight') {
         return (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '15px 16px', borderRadius: theme.innerRadius, background: theme.accentSoft, color: theme.textPrimary }}>
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '15px 16px', borderRadius: theme.innerRadius, background: theme.accentSoft, color: theme.textPrimary, ...(ctx.textAlign ? { justifyContent: ctx.textAlign === 'center' ? 'center' : 'flex-end' } : {}) }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 38, height: 38, borderRadius: 12, background: theme.accent, flexShrink: 0 }}>
               <Icon name="gift" color={theme.accentText} size={20} />
             </span>
@@ -165,7 +167,7 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
       }
       const notch: CSSProperties = { position: 'absolute', top: '50%', transform: 'translateY(-50%)', width: 13, height: 13, borderRadius: 999, background: theme.surface, boxShadow: `inset 0 0 0 1.5px ${withAlpha(theme.accent, 0.28)}` };
       return (
-        <div key={i} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 11, padding: '13px 18px 13px 14px', background: `linear-gradient(135deg, ${withAlpha(theme.accent, 0.09)} 0%, ${withAlpha(theme.accent, 0.16)} 100%)`, border: `1.5px dashed ${withAlpha(theme.accent, 0.45)}`, borderRadius: theme.innerRadius }}>
+        <div key={i} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 11, padding: '13px 18px 13px 14px', background: `linear-gradient(135deg, ${withAlpha(theme.accent, 0.09)} 0%, ${withAlpha(theme.accent, 0.16)} 100%)`, border: `1.5px dashed ${withAlpha(theme.accent, 0.45)}`, borderRadius: theme.innerRadius, ...(ctx.textAlign ? { justifyContent: ctx.textAlign === 'center' ? 'center' : 'flex-end' } : {}) }}>
           <span style={{ ...notch, left: -8 }} />
           <span style={{ ...notch, right: -8 }} />
           <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 10, background: theme.accentSoft, flexShrink: 0 }}>
@@ -274,7 +276,7 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
       // ★ 2026-07-07(5) 형태 골격 — 둥근 말풍선: 전폭 버튼 대신 채팅 답장 칩 (SDK 미러)
       if (ctx.cardStyle === 'bubble') {
         return (
-          <div key={i} style={{ display: 'flex', flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+          <div key={i} style={{ display: 'flex', flexDirection: 'row', gap: 8, flexWrap: 'wrap', ...(ctx.textAlign ? { justifyContent: ctx.textAlign === 'center' ? 'center' : 'flex-end' } : {}) }}>
             {buttons.slice(0, 3).map((btn: any, j: number) => {
               const style = btn.style || (j === 0 ? 'primary' : 'secondary');
               const isPrimary = style === 'primary';
@@ -295,7 +297,7 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
       }
       const stack = b.layout !== 'inline';
       return (
-        <div key={i} style={{ display: 'flex', flexDirection: stack ? 'column' : 'row', gap: 8, flexWrap: 'wrap' }}>
+        <div key={i} style={{ display: 'flex', flexDirection: stack ? 'column' : 'row', gap: 8, flexWrap: 'wrap', ...(ctx.textAlign && !stack ? { justifyContent: ctx.textAlign === 'center' ? 'center' : 'flex-end' } : {}) }}>
           {buttons.slice(0, 3).map((btn: any, j: number) => {
             const style = btn.style || (j === 0 ? 'primary' : 'secondary');
             const isPrimary = style === 'primary';
@@ -439,7 +441,7 @@ function BubbleSender({ text, theme }: { text: string; theme: InAppTheme }) {
   );
 }
 
-export function BlockPreview({ blocks, theme, replaceVars, isAd, cardStyle, zonePads, treatment, displayFont }: {
+export function BlockPreview({ blocks, theme, replaceVars, isAd, cardStyle, zonePads, treatment, displayFont, textAlign }: {
   blocks: any[];
   theme: InAppTheme;
   replaceVars?: (t: string) => string;
@@ -451,9 +453,11 @@ export function BlockPreview({ blocks, theme, replaceVars, isAd, cardStyle, zone
   /** ★ 2026-07-14 디자인 3.0 — 구도(resolveInAppTreatment 통과값) + 서체 오버라이드 (SDK ctx 미러) */
   treatment?: InAppTreatment;
   displayFont?: string;
+  /** ★ 2026-07-17 텍스트 정렬 — flex 행 블록(쿠폰·CTA 행) justify 미러 (SDK ctx.textAlign 1:1) */
+  textAlign?: 'center' | 'right';
 }) {
   const style = normalizeCardStyle(cardStyle);
-  const ctx: Ctx = { theme, replaceVars: replaceVars || ((s: string) => s), cardStyle: style, treatment, displayFont };
+  const ctx: Ctx = { theme, replaceVars: replaceVars || ((s: string) => s), cardStyle: style, treatment, displayFont, textAlign };
   const list = Array.isArray(blocks) ? blocks : [];
   const hasFooter = list.some((b) => b?.type === 'footer');
   const plan = planCardLayout(list, style);

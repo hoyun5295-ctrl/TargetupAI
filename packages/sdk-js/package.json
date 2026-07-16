@@ -21,8 +21,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json && tsc -p tsconfig.types.json",
     "build:iife": "rollup -c rollup.config.js",
-    "build:all": "npm run build && npm run build:iife",
+    "build:all": "npm run build && npm run build:iife && npm run sync:serving",
     "build:clean": "rm -rf dist && npm run build:all",
+    "sync:serving": "node scripts/sync-serving-folders.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },

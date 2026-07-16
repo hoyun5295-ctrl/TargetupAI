@@ -171,7 +171,7 @@ function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Varian
     (cardStyle === 'ticket' && plan.stub.length > 0)
   );
   const inner = usingBlocks
-    ? <BlockPreview blocks={blocks!} theme={themeTokens!} replaceVars={replaceVars} isAd={isAd} cardStyle={cardish ? cardStyle : undefined} zonePads={zoned ? zonePads : undefined} treatment={cardish ? treatment : undefined} displayFont={displayFont} />
+    ? <BlockPreview blocks={blocks!} theme={themeTokens!} replaceVars={replaceVars} isAd={isAd} cardStyle={cardish ? cardStyle : undefined} zonePads={zoned ? zonePads : undefined} treatment={cardish ? treatment : undefined} displayFont={displayFont} textAlign={rootTextAlign} />
     : <CardInner {...rest} variant={variant} textColor={textColor} />;
 
   const cardBase: CSSProperties = {

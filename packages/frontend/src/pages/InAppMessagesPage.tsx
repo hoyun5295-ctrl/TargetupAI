@@ -32,6 +32,7 @@ import {
 // ★ 2026-07-14 Harold 지시 — 옛 골든 12종 노출 제거(정예 10종만). 타입만 유지(정예 적용 함수 공용).
 import { type GoldenInAppTemplate } from '../components/inapp/goldenTemplates';
 import { Icon as BlockIcon } from '../components/inapp/BlockPreview';
+import { AppInAppContractModal } from '../components/inapp/AppIntegrationContract';
 import { DateTimeField } from '../components/DateTimeField';
 import { takeEventDraft, EVENT_INAPP_DRAFT_KEY } from '../components/EventCampaignModal';
 import ImageToCopyButton from '../components/ImageToCopyButton';
@@ -1741,6 +1742,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
 
   // ★ 2026-07-14 디자인 3.0 — 골든 템플릿 1클릭 적용 (형태·카드·테마·블록·디자인 교체. 트리거/타겟/시간대 무접촉)
   const [goldenConfirm, setGoldenConfirm] = useState<ConfirmState | null>(null);
+  // ★ 2026-07-17 앱(네이티브) 통합 계약 모달 — 단일 소스 = components/inapp/AppIntegrationContract
+  const [showAppContract, setShowAppContract] = useState(false);
   const applyGolden = (g: GoldenInAppTemplate) => {
     const chTemplates = (editing.channel === 'app' ? CHANNEL_TEMPLATES.app : CHANNEL_TEMPLATES.web) as string[];
     setEditing({
@@ -1837,6 +1840,16 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 </button>
               ))}
             </div>
+            {/* ★ 2026-07-17 앱 채널 = 앱이 직접 그림 — 통합 계약 안내 (설정했는데 앱이 못 그리는 상황 차단) */}
+            {isApp && (
+              <div className="bg-cyan-500/10 border border-cyan-400/30 rounded-lg p-3 flex items-start gap-2">
+                <Smartphone className="w-4 h-4 text-cyan-300 mt-0.5 shrink-0" />
+                <div className="text-xs text-cyan-100 min-w-0">
+                  <strong>앱(네이티브)이 직접 그리는 채널입니다</strong> — 앱이 통합 계약을 구현해야 여기서 설정한 내용·색·정렬·닫기 동작이 그대로 나옵니다.{' '}
+                  <button onClick={() => setShowAppContract(true)} className="underline underline-offset-2 font-semibold text-cyan-200 hover:text-white">앱 통합 계약 보기</button>
+                </div>
+              </div>
+            )}
             {hasPlaceholder && activeTab === 'content' && (
               <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg p-3 flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 text-amber-300 mt-0.5 shrink-0" />
@@ -2468,14 +2481,15 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   onChange={(e) => updateField('display_frequency', e.target.value as Frequency)}
                   className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white"
                 >
-                  <option value="once_per_session">{isApp ? '접속당 1회' : '세션당 1회'}</option>
+                  {/* ★ 2026-07-17 라벨 통일 — 웹/앱 전부 "세션당 1회" (세션 정의만 채널별 각주. 옛 "접속당 1회" 라벨 폐기) */}
+                  <option value="once_per_session">세션당 1회</option>
                   <option value="once_per_day">하루 1회</option>
                   <option value="always">매번 표시</option>
                 </select>
               </div>
               {/* ★ 2026-07-16 재노출 계약 안내 — 닫기 ≠ 영구 거부 */}
               <div className="text-[10px] text-white/40 mt-1.5">
-                닫기(X)는 이번만 닫히고 위 빈도 규칙에 따라 다시 표시됩니다. "다시 보지 않기"를 누른 고객에게는 더 이상 표시되지 않습니다.
+                세션 = {isApp ? '앱 실행 1회' : '브라우저 방문 1회'} 기준. 닫기(X)는 이번만 닫히고 위 빈도 규칙에 따라 다시 표시됩니다. "다시 보지 않기"를 누른 고객에게는 더 이상 표시되지 않습니다.
               </div>
               {/* ★ P0-1 — 트리거 임계값 입력 (없으면 "스크롤 도달"을 골라도 % 지정 불가 = 트리거 정밀 표시 무동작이던 결함) */}
               {(editing.trigger_event === 'scroll' || editing.trigger_event === 'time_on_page' || editing.trigger_event === 'cart_value') && (
@@ -2784,6 +2798,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
       </div>
       {/* ★ 2026-07-14 디자인 3.0 — 골든 템플릿 덮어쓰기 확인 (기존 블록 있을 때만) */}
       <ConfirmModal state={goldenConfirm} onClose={() => setGoldenConfirm(null)} />
+      {/* ★ 2026-07-17 앱(네이티브) 통합 계약 — CDP 설정 앱 탭과 동일 단일 소스 */}
+      <AppInAppContractModal open={showAppContract} onClose={() => setShowAppContract(false)} />
     </div>
   );
 }
