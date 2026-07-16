@@ -158,9 +158,20 @@ async function ensureInAppDesignColumnOrThrow(): Promise<void> {
  */
 export function sanitizeActionUrl(url: any): string | null {
   if (url === undefined || url === null) return null;
-  const s = String(url).trim();
+  let s = String(url).trim();
   if (!s) return null;
   if (s.startsWith('[')) return s;
+  // ★ 2026-07-17 프로토콜 없는 도메인(www.xxx / xxx.tld) → https:// 자동 보정.
+  //   빠지면 SDK가 상대경로로 해석해 "몰도메인/www.poppon.co.kr"(404)로 이동 → CTA가 "안 가던" 근본.
+  //   몰 내부 상대경로(/event 등)·스킴 있는 URL은 그대로 둔다.
+  if (!/^[a-z][a-z0-9+.\-]*:/i.test(s) && !/^[/#?]/.test(s)) {
+    const host = s.split(/[/?#]/)[0];
+    const looksDomain =
+      /^www\./i.test(host) ||
+      /\.(com|net|org|io|co|kr|shop|store|app|me|biz|info|xyz|dev|ai|tv|gg|link|page|site)$/i.test(host) ||
+      /\.(co|com|ne|or|go)\.kr$/i.test(host);
+    if (looksDomain) s = 'https://' + s;
+  }
   try {
     const parsed = new URL(s, 'https://mall.example/');
     return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? s : null;

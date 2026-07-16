@@ -71,6 +71,8 @@ import {
   getCompanyInAppStats,
   setInAppAudienceFilter,
   sanitizeAppMessageColors,
+  sanitizeActionUrl,
+  sanitizeButtonsActionUrls,
 } from '../utils/inapp-message';
 // ★ D215+ (2026-05-25) 인앱 메시지 압도적 강화 CT-77~84
 import { generateInAppMessagePackage, listQuickStartCards } from '../utils/inapp-ai-generator';
@@ -584,6 +586,14 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
       seenMessageIds,
       channel: reqChannel,
     });
+
+    // ★ 2026-07-17 CTA URL 서빙 정규화(전 채널) — 프로토콜 없는 도메인(www.xxx)을 https://로 보정.
+    //   빠지면 SDK가 상대경로로 해석해 "몰도메인/www.poppon.co.kr"(404)로 이동 → CTA가 "안 가던" 근본.
+    //   기존 메시지도 재저장 없이 즉시 복구(저장 sanitizeActionUrl과 동일 로직 재사용, DB 무변경).
+    for (const m of messages as any[]) {
+      if (m.actionUrl) m.actionUrl = sanitizeActionUrl(m.actionUrl);
+      if (Array.isArray(m.buttons)) m.buttons = sanitizeButtonsActionUrls(m.buttons);
+    }
 
     // web 채널은 모달/슬라이드/토스트/플로팅 4종만 — 그 밖 형태(옛 배너 등)는 모달로 보정. 기존 메시지 포함, DB 무변경.
     if (reqChannel === 'web') {
