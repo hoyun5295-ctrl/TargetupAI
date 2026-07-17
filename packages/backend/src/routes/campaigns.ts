@@ -132,6 +132,7 @@ router.get('/', async (req: Request, res: Response) => {
     // count 쿼리용 파라미터 복사
     const countParams = [...params];
 
+    const tPg0 = Date.now(); // ★ 2026-07-17 구간 계측 (PG 카운트+목록)
     const countResult = await query(
       `SELECT COUNT(*) FROM campaigns ${whereClause}`,
       countParams
@@ -167,15 +168,26 @@ router.get('/', async (req: Request, res: Response) => {
        LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
       params
     );
+    if (Date.now() - tPg0 >= 300) {
+      console.log(`[SLOW-STAGE] /campaigns PG 카운트+목록 — ${Date.now() - tPg0}ms company=${companyId}`);
+    }
 
     // ★ 2026-07-17 성능(SLOW 2,960ms 실측) — 독립 집계 3개 중 2개(SMS 카운트·카카오)를 병렬, 발송시각은 후속.
     //   각 함수·쿼리·산식 무접촉, 실행 시점만 조정. ★ Codex 정정: 셋 다 MySQL 공용 풀(limit 10 — 발송 INSERT와
     //   공유)이라 3개 완전 병렬은 대시보드 1진입(목록 3콜+stats)만으로 풀 포화(3×3+2=11>10) → 요청당 동시 2 상한.
+    // ★ 2026-07-17 구간 계측 — 병렬화 후에도 3,052ms 실측(개선 0) = 지배 구간이 따로 있다는 뜻.
+    //   SQL·인덱스(app_etc1)는 실측 정상이라, 어느 구간이 먹는지 로그로 확정 후 수정(추측 수정 금지). 응답 무변경.
+    const tAgg0 = Date.now();
     const [listSmsMap, listKakaoMap] = await Promise.all([
       aggregateSmsCountsByCampaign(result.rows),
       kakaoBatchAggByGroup(result.rows.map((c: any) => c.id)),
     ]);
+    const tAgg1 = Date.now();
     const listSentTimeMap = await aggregateSmsSendTimesByCampaign(result.rows);
+    const tAgg2 = Date.now();
+    if (tAgg2 - tAgg0 >= 300) {
+      console.log(`[SLOW-STAGE] /campaigns 목록 집계 — sms+kakao=${tAgg1 - tAgg0}ms sendTimes=${tAgg2 - tAgg1}ms n=${result.rows.length} status=${status || 'all'} company=${companyId}`);
+    }
 
     // ★ D144 P4/P7 후속 (2026-05-07): 사용자 캠페인 목록에서도 status='sending' 자동 정리
     //   Dashboard 진입 시 fire-and-forget sync-results가 호출되지만, 사용자가 캠페인 목록만 보고

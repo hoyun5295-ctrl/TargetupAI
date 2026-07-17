@@ -253,12 +253,15 @@ export async function aggregateSmsCountsByCampaign(
   }
 
   // 2) 각 (company, user) 쌍의 라인그룹 테이블셋 조회 (캐시 hit이면 빠름) — 병렬 await
+  // ★ 2026-07-17 구간 계측 — 3초 지연의 지배 구간 확정용(추측 수정 금지). 테이블셋 해석(PG) vs MySQL UNION 분리.
+  const tRes0 = Date.now();
   const userGroupTables: Array<{ ug: UserGroup; tables: string[] }> = await Promise.all(
     Array.from(byUser.values()).map(async (ug) => ({
       ug,
       tables: await getCompanySmsTablesWithLogs(ug.companyId, ug.userId || undefined),
     }))
   );
+  const tRes1 = Date.now();
 
   // 3) 라인그룹 테이블셋이 동일한 그룹끼리 묶음 (대부분 default BULK_ONLY 공유 → K << N)
   const byTableSet = new Map<string, { tables: string[]; ids: string[] }>();
@@ -270,11 +273,19 @@ export async function aggregateSmsCountsByCampaign(
   }
 
   // 4) 라인그룹 테이블셋별 집계 — ★ 2026-06-11 정합성 100% 산식(이력=결과/라이브=대기)으로 교체
+  let unionMs = 0;
+  let tableCount = 0;
   for (const [, group] of byTableSet) {
+    const tU0 = Date.now();
     const partial = await smsCampaignCountsSafe(group.tables, group.ids);
+    unionMs += Date.now() - tU0;
+    tableCount += group.tables.length;
     for (const [cid, v] of partial) {
       result.set(cid, { total_count: v.total, success_count: v.success, fail_count: v.fail, pending_count: v.pending });
     }
+  }
+  if (Date.now() - tRes0 >= 300) {
+    console.log(`[SLOW-STAGE] aggregateSmsCounts — 테이블셋해석=${tRes1 - tRes0}ms mysqlUnion=${unionMs}ms 테이블=${tableCount}개 캠페인=${campaigns.length}건`);
   }
   return result;
 }
