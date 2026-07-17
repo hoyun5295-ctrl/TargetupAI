@@ -11,9 +11,10 @@ import { query, mysqlQuery } from '../config/database';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from './unsubscribe-helper';
 // ★ D144: PG sent_count 캐시 의존 제거 — MySQL 직접 카운트로 전환
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
-import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, kakaoBatchAggByGroup } from './sms-queue';
+import { getAllSmsTablesWithLogs, getCompanySmsTablesWithLogs, smsCampaignCountsSafe, kakaoBatchAggByGroup } from './sms-queue';
 import { classifyResultTables, computeDisplayCounts, DisplayCounts } from './sms-table-split';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, tallySmsChannelCounts, SmsChannel, ChannelCount } from './sms-result-map';
+import { CampaignTableMeta, recordedLiveTables, logTablesForLive } from './stats-table-scope';
 
 // ============================================================
 // KST 날짜 범위 필터 빌더
@@ -222,6 +223,80 @@ export interface SendStatsResult {
 }
 
 /**
+ * ★ 2026-07-17 성능 — 캠페인 배열을 "조회해야 할 MySQL 테이블셋"별로 그룹핑
+ *   (counts·channelSplit·sendTimes 3집계 공용 — 0717 stats mysqlUnion 823ms 실측 처방).
+ *
+ * 축소는 "라인 축"으로만 한다 — 기록된 LIVE 테이블(send_config.sentTables, 0611+ 적재 워커 실기록)
+ * + 그 라인의 전 존재 LOG(이새 실측: 전 라인 합집합 27개 → 라인당 LIVE 1+LOG 수 개).
+ * ★ Codex 2R 정정: 시간 창(발송월 ±1개월) 방식은 선예약 직접발송(sent_at=적재 시각)·장기 분할
+ * 발송(수개월 sendreq_time)이 창 밖 LOG로 빠지므로 폐기 — 캠페인 행은 적재된 테이블 또는 그 라인의
+ * 월별 아카이브에만 존재할 수 있어 라인 축 축소는 시간 가정 없이 정확성이 보장된다.
+ * 기록이 없거나 실존 교차 검증에 실패한 캠페인은 현행 그대로 (company,user) 라인 합집합
+ * (getCompanySmsTablesWithLogs) fallback — 정확성 동일. 산식 소비처는 무접촉.
+ */
+async function resolveCampaignTableGroups(
+  campaigns: CampaignTableMeta[]
+): Promise<Map<string, { tables: string[]; ids: string[] }>> {
+  const byTableSet = new Map<string, { tables: string[]; ids: string[] }>();
+  if (campaigns.length === 0) return byTableSet;
+
+  // 1) 기록 경로 vs fallback 분리 (판정 = stats-table-scope 순수 코어)
+  type UserGroup = { companyId: string; userId: string | null; ids: string[] };
+  const recorded: Array<{ c: CampaignTableMeta; lives: string[] }> = [];
+  const byUser = new Map<string, UserGroup>();
+  const pushFallback = (c: CampaignTableMeta) => {
+    const key = `${c.company_id}::${c.created_by || ''}`;
+    if (!byUser.has(key)) byUser.set(key, { companyId: c.company_id, userId: c.created_by, ids: [] });
+    byUser.get(key)!.ids.push(c.id);
+  };
+  for (const c of campaigns) {
+    const lives = recordedLiveTables(c);
+    if (lives.length > 0) recorded.push({ c, lives });
+    else pushFallback(c);
+  }
+
+  const addToSet = (tables: string[], ids: string[]) => {
+    if (tables.length === 0 || ids.length === 0) return;
+    const tableKey = [...tables].sort().join(',');
+    if (!byTableSet.has(tableKey)) byTableSet.set(tableKey, { tables, ids: [] });
+    byTableSet.get(tableKey)!.ids.push(...ids);
+  };
+
+  // 2) 기록 경로 — 전체 테이블 목록 1회 조회(5분 캐시)로 실존 교차 검증 후 LIVE+그 라인 전 LOG 구성.
+  //    미실존 테이블이 UNION에 끼는 SQL 에러 차단. ★ Codex 3R: LIVE가 폐선돼 현 목록에 없어도
+  //    그 라인의 LOG 아카이브가 남아 있으면 LOG만으로 집계(폐선 라인 결과 보존 — 현행 합집합은
+  //    현재 배정 라인만 봐서 폐선분을 놓치므로 이쪽이 더 정확). LIVE·LOG 전무일 때만 fallback.
+  if (recorded.length > 0) {
+    const allTables = await getAllSmsTablesWithLogs();
+    const existing = new Set(allTables);
+    const logCache = new Map<string, string[]>();
+    for (const { c, lives } of recorded) {
+      const tables: string[] = [];
+      for (const live of lives) {
+        if (!logCache.has(live)) logCache.set(live, logTablesForLive(live, allTables));
+        if (existing.has(live)) tables.push(live);
+        tables.push(...logCache.get(live)!);
+      }
+      if (tables.length === 0) {
+        pushFallback(c);
+        continue;
+      }
+      addToSet(tables, [c.id]);
+    }
+  }
+
+  // 3) fallback — 현행 (company,user) 라인 합집합 (기록 없는 과거 캠페인·미실존 기록 포함)
+  const fallbackResolved = await Promise.all(
+    Array.from(byUser.values()).map(async (ug) => ({
+      ug,
+      tables: await getCompanySmsTablesWithLogs(ug.companyId, ug.userId || undefined),
+    }))
+  );
+  for (const { ug, tables } of fallbackResolved) addToSet(tables, ug.ids);
+  return byTableSet;
+}
+
+/**
  * ★ D144 헬퍼: 캠페인 배열을 라인그룹 테이블셋별로 그룹핑하여
  * MySQL 큐(SMSQ_SEND_*) 테이블에서 status_code 기반 success/fail/pending을
  * 배치 집계한다. CT-04 `getCompanySmsTablesWithLogs` + `smsBatchAggByGroup` 사용.
@@ -233,44 +308,22 @@ export interface SendStatsResult {
  *   그룹핑은 N회 sequential MySQL 쿼리 발생. 대부분 회사가 동일 default BULK_ONLY 라인그룹
  *   공유하므로 "라인그룹 테이블셋"별로 묶으면 K(<<N)회로 축소 (CLAUDE.md D110 UNION ALL 교훈).
  *
+ * ★ 2026-07-17 성능: 테이블셋 해석을 resolveCampaignTableGroups(sentTables 기록 축소)로 교체 —
+ *   send_config·발송시각을 함께 넘기는 소비처(campaigns 목록·customers stats)는 실적재 테이블만 훑고,
+ *   안 넘기는 소비처(results/admin/querySendStats)는 현행 합집합 그대로 (하위호환).
+ *
  * @returns Map<campaignId, { total_count, success_count, fail_count, pending_count }>
  */
 export async function aggregateSmsCountsByCampaign(
-  campaigns: Array<{ id: string; company_id: string; created_by: string | null }>
+  campaigns: CampaignTableMeta[]
 ): Promise<Map<string, Record<string, number>>> {
   const result = new Map<string, Record<string, number>>();
   if (campaigns.length === 0) return result;
 
-  // 1) (company_id, created_by) 쌍별 캠페인 ID 그룹핑
-  type UserGroup = { companyId: string; userId: string | null; ids: string[] };
-  const byUser = new Map<string, UserGroup>();
-  for (const c of campaigns) {
-    const key = `${c.company_id}::${c.created_by || ''}`;
-    if (!byUser.has(key)) {
-      byUser.set(key, { companyId: c.company_id, userId: c.created_by, ids: [] });
-    }
-    byUser.get(key)!.ids.push(c.id);
-  }
-
-  // 2) 각 (company, user) 쌍의 라인그룹 테이블셋 조회 (캐시 hit이면 빠름) — 병렬 await
-  // ★ 2026-07-17 구간 계측 — 3초 지연의 지배 구간 확정용(추측 수정 금지). 테이블셋 해석(PG) vs MySQL UNION 분리.
+  // 1~3) 조회 테이블셋 그룹핑 — ★ 2026-07-17 구간 계측 유지(테이블셋 해석 vs MySQL UNION 분리)
   const tRes0 = Date.now();
-  const userGroupTables: Array<{ ug: UserGroup; tables: string[] }> = await Promise.all(
-    Array.from(byUser.values()).map(async (ug) => ({
-      ug,
-      tables: await getCompanySmsTablesWithLogs(ug.companyId, ug.userId || undefined),
-    }))
-  );
+  const byTableSet = await resolveCampaignTableGroups(campaigns);
   const tRes1 = Date.now();
-
-  // 3) 라인그룹 테이블셋이 동일한 그룹끼리 묶음 (대부분 default BULK_ONLY 공유 → K << N)
-  const byTableSet = new Map<string, { tables: string[]; ids: string[] }>();
-  for (const { ug, tables } of userGroupTables) {
-    if (tables.length === 0) continue;
-    const tableKey = [...tables].sort().join(',');
-    if (!byTableSet.has(tableKey)) byTableSet.set(tableKey, { tables, ids: [] });
-    byTableSet.get(tableKey)!.ids.push(...ug.ids);
-  }
 
   // 4) 라인그룹 테이블셋별 집계 — ★ 2026-06-11 정합성 100% 산식(이력=결과/라이브=대기)으로 교체
   let unionMs = 0;
@@ -298,31 +351,13 @@ export async function aggregateSmsCountsByCampaign(
  * @returns Map<campaignId, Record<SmsChannel, {total,success,fail,pending}>>
  */
 export async function aggregateSmsChannelSplitByCampaign(
-  campaigns: Array<{ id: string; company_id: string; created_by: string | null }>
+  campaigns: CampaignTableMeta[]
 ): Promise<Map<string, Record<SmsChannel, ChannelCount>>> {
   const result = new Map<string, Record<SmsChannel, ChannelCount>>();
   if (campaigns.length === 0) return result;
 
-  // (company_id, created_by)별 → 라인그룹 테이블셋별 묶기 (aggregateSmsCountsByCampaign과 동일)
-  type UserGroup = { companyId: string; userId: string | null; ids: string[] };
-  const byUser = new Map<string, UserGroup>();
-  for (const c of campaigns) {
-    const key = `${c.company_id}::${c.created_by || ''}`;
-    if (!byUser.has(key)) byUser.set(key, { companyId: c.company_id, userId: c.created_by, ids: [] });
-    byUser.get(key)!.ids.push(c.id);
-  }
-  const userGroupTables: Array<{ ug: UserGroup; tables: string[] }> = await Promise.all(
-    Array.from(byUser.values()).map(async (ug) => ({
-      ug, tables: await getCompanySmsTablesWithLogs(ug.companyId, ug.userId || undefined),
-    }))
-  );
-  const byTableSet = new Map<string, { tables: string[]; ids: string[] }>();
-  for (const { ug, tables } of userGroupTables) {
-    if (tables.length === 0) continue;
-    const tableKey = [...tables].sort().join(',');
-    if (!byTableSet.has(tableKey)) byTableSet.set(tableKey, { tables, ids: [] });
-    byTableSet.get(tableKey)!.ids.push(...ug.ids);
-  }
+  // 테이블셋 그룹핑 — ★ 2026-07-17 resolveCampaignTableGroups 공용 (sentTables 기록 축소 + 현행 fallback)
+  const byTableSet = await resolveCampaignTableGroups(campaigns);
 
   // 라인그룹 테이블셋별 raw 집계: app_etc1 + msg_type + (대체 여부) + status_code
   // ★ 2026-06-11: 라이브 큐는 대기 코드만 — 큐→이력 이동 중 같은 행이 양쪽에서 잡히는 이중 카운트 차단
@@ -373,38 +408,13 @@ export async function aggregateSmsChannelSplitByCampaign(
  * @returns Map<campaignId, Date>  — KST 시각의 Date 객체. 응답으로 ISO 변환 시 +0900 포함.
  */
 export async function aggregateSmsSendTimesByCampaign(
-  campaigns: Array<{ id: string; company_id: string; created_by: string | null }>
+  campaigns: CampaignTableMeta[]
 ): Promise<Map<string, Date>> {
   const result = new Map<string, Date>();
   if (campaigns.length === 0) return result;
 
-  // (company_id, created_by) 쌍별 ID 묶기 — aggregateSmsCountsByCampaign과 동일 패턴
-  type UserGroup = { companyId: string; userId: string | null; ids: string[] };
-  const byUser = new Map<string, UserGroup>();
-  for (const c of campaigns) {
-    const key = `${c.company_id}::${c.created_by || ''}`;
-    if (!byUser.has(key)) {
-      byUser.set(key, { companyId: c.company_id, userId: c.created_by, ids: [] });
-    }
-    byUser.get(key)!.ids.push(c.id);
-  }
-
-  // 라인그룹 테이블 조회 병렬
-  const userGroupTables: Array<{ ug: UserGroup; tables: string[] }> = await Promise.all(
-    Array.from(byUser.values()).map(async (ug) => ({
-      ug,
-      tables: await getCompanySmsTablesWithLogs(ug.companyId, ug.userId || undefined),
-    }))
-  );
-
-  // 라인그룹 테이블셋별 묶음 (대부분 default BULK_ONLY 공유)
-  const byTableSet = new Map<string, { tables: string[]; ids: string[] }>();
-  for (const { ug, tables } of userGroupTables) {
-    if (tables.length === 0) continue;
-    const tableKey = [...tables].sort().join(',');
-    if (!byTableSet.has(tableKey)) byTableSet.set(tableKey, { tables, ids: [] });
-    byTableSet.get(tableKey)!.ids.push(...ug.ids);
-  }
+  // 테이블셋 그룹핑 — ★ 2026-07-17 resolveCampaignTableGroups 공용 (sentTables 기록 축소 + 현행 fallback)
+  const byTableSet = await resolveCampaignTableGroups(campaigns);
 
   // 라인그룹 테이블셋별 UNION ALL — outer MIN으로 첫 sendreq_time 추출
   // ★ sendreq_time은 KST 그대로 저장(D98) → DATE_FORMAT으로 +09:00 ISO 명시하면

@@ -134,10 +134,19 @@ async function detectCustomFieldTypeFromSamples(
 const ENABLED_FIELDS_CACHE_TTL_MS = 5 * 60 * 1000;
 const enabledFieldsCache = new Map<string, { at: number; data: EnabledFieldsResult }>();
 
+/**
+ * ★ Codex 3R — SWR 세대 키. 무효화마다 INCR — swrCache가 "compute 도중 무효화 발생"을 감지해
+ * 변형 전 결과의 저장(부활)을 생략하는 가드. 이름에 콜론 구획을 쓰지 않아(enabled-fields-gen)
+ * 아래 삭제 패턴(enabled-fields:*)에 걸리지 않는다 — 패턴 삭제로 세대가 리셋되면 INCR 재시작 값이
+ * 과거 값과 우연히 일치해 가드가 뚫릴 수 있기 때문.
+ */
+export const ENABLED_FIELDS_CACHE_GEN_KEY = 'enabled-fields-gen';
+
 export function clearEnabledFieldsCache(companyId?: string): void {
   // ★ 2026-07-17 — 라우트 응답 Redis 캐시(enabled-fields:{companyId}:{userId}:{scope})도 같은 길목에서 무효화.
-  //   "업로드·삭제·싱크 = 즉시 반영" 기존 계약 유지(Codex 정정 — Redis 잔존 시 새 필드·삭제 고객 sample이 60초 노출).
-  //   fire-and-forget — 무효화 실패해도 TTL 60초가 상한.
+  //   "업로드·삭제·싱크 = 즉시 반영" 기존 계약 유지(Codex 정정 — Redis 잔존 시 새 필드·삭제 고객 sample 노출).
+  //   fire-and-forget — 무효화 실패해도 SWR hard TTL 10분이 상한(soft 60초 지나면 백그라운드 갱신이 먼저 정정).
+  redis.incr(ENABLED_FIELDS_CACHE_GEN_KEY).catch(() => { /* 세대 가드 실패 = 키 삭제·TTL이 상한 */ });
   const redisPattern = companyId ? `enabled-fields:${companyId}:*` : 'enabled-fields:*';
   redis.keys(redisPattern)
     .then((keys) => (keys.length > 0 ? redis.del(...keys) : 0))

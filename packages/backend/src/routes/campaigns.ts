@@ -160,6 +160,7 @@ router.get('/', async (req: Request, res: Response) => {
         TO_CHAR(c.event_end_date, 'YYYY-MM-DD') as event_end_date,
         c.message_content, c.message_template, c.subject, c.message_subject, c.is_ad, c.callback_number,
         c.mms_image_paths,
+        c.send_config,
         ${CAMPAIGN_OPT080_SELECT_EXPR}
        FROM campaigns c
        ${CAMPAIGN_OPT080_LEFT_JOIN}
@@ -205,8 +206,10 @@ router.get('/', async (req: Request, res: Response) => {
         effectiveStatus = 'completed';
         userAutoCompleteIds.push(c.id);
       }
+      // ★ 2026-07-17: send_config는 집계 테이블 축소용 내부 데이터(sentTables) — 응답에 미노출(현행 응답 형태 유지)
+      const { send_config: _sendConfig, ...rest } = c;
       return {
-        ...c,
+        ...rest,
         status: effectiveStatus,
         sent_count: Number(sms.total_count || 0) + kakao.total,
         success_count: totalSuccess,

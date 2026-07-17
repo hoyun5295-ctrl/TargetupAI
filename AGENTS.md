@@ -27,6 +27,9 @@
 13. **공통 로직 = `utils/` 컨트롤타워 1곳** — 라우트 파일 안 인라인 헬퍼 중복 정의 = 결함.
 14. **외부 URL fetch(og/브랜드 추출 등)** — 검증된 IP로 연결 고정 + 크기/시간 상한(SSRF 방어 공용 CT 경유). 신규 fetch 경로가 이를 우회하면 결함.
 
+## 리뷰 범위 (★ 2026-07-17)
+- **`.claude/worktrees/` 이하는 리뷰 대상이 아니다** — 과거 세션의 잔존 작업 사본(배포 경로 아님·메인 트리가 항상 최신). 이 경로의 diff/파일에서 발견한 문제는 보고하지 않는다. 판정은 반드시 `packages/` 메인 트리 기준.
+
 ## 검증 명령
 - backend: `cd packages/backend && npx tsc --noEmit && npx vitest run`
 - frontend: `cd packages/frontend && npx tsc --noEmit`

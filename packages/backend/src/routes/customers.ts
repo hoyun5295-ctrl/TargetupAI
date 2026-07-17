@@ -6,7 +6,7 @@ import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVarian
 // ★ 2026-06-25: 고객 전체 삭제 시 데이터 프로필 캐시 무효화(게이트 즉시 반영)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { FIELD_MAP, getFieldByKey, getColumnFields, CATEGORY_LABELS, FIELD_DISPLAY_MAP, reverseDisplayValue, renderFieldValue } from '../utils/standard-field-map';
-import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
+import { DEFAULT_COSTS, CACHE_TTL } from '../config/defaults';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildDynamicFilterCompat } from '../utils/customer-filter';
@@ -15,7 +15,12 @@ import { detectPhoneFields } from '../utils/callback-filter';
 import { aggregateSmsCountsByCampaign } from '../utils/stats-aggregation';
 import { blockIfSyncActive } from '../middlewares/sync-active-check';
 import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
-import { detectEnabledFields, buildDynamicSelectExpr, clearEnabledFieldsCache } from '../utils/enabled-fields';
+import { detectEnabledFields, buildDynamicSelectExpr, clearEnabledFieldsCache, ENABLED_FIELDS_CACHE_GEN_KEY } from '../utils/enabled-fields';
+import { swrCache } from '../utils/swr-cache';
+
+// ★ 2026-07-17 — 대시보드 캐시 SWR hard TTL(초). soft(CACHE_TTL.customerStats=60초) 안은 현행 히트,
+//   soft~hard 사이 재진입은 직전 값 즉시 반환+백그라운드 갱신(콜드 1초 재계산 차단), hard 지나면 동기 계산.
+const DASHBOARD_SWR_HARD_TTL_SEC = 600;
 // ★ D219+ Part 2 후속 (2026-05-27): CT-97 활용 — DirectTargetFilterModal 자연어 모드 (BASIC+ 게이팅)
 import { requirePlanFeature } from '../utils/plan-guard';
 import { generateSegmentFromNaturalLanguage, SegmentGenerationError } from '../utils/ai-segment-generator';
@@ -687,32 +692,38 @@ router.get('/stats', async (req: Request, res: Response) => {
     const userId = req.user?.userId;
     const userType = req.user?.userType;
 
-    // ★ Redis 캐싱 (60초) — 사용자별 캐시 키 (브랜드별 store_code 격리 반영)
-    const cacheKey = `stats:${companyId}:${userId || 'anonymous'}`;
-    try {
-      const cached = await redis.get(cacheKey);
-      if (cached) return res.json(JSON.parse(cached));
-    } catch (e) { /* Redis 실패 시 DB 직접 조회 */ }
-
     if (!companyId) {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
 
     // 일반 사용자는 본인 store_codes에 해당하는 고객만
     // ★ B16-01: store_codes 없는 company_user → 빈 통계 반환
+    // ★ 2026-07-17: 스코프 해석을 캐시 "앞"으로 이동 + 키에 스코프 서명(enabled-fields Codex 정정과 동일 계약)
+    //   — 매장 권한 변경 = 즉시 새 키 콜드 재계산, 옛 키는 TTL 소멸. blocked는 캐시 없이 즉시 반환.
     let storeFilter = '';
-    const params: any[] = [companyId];
+    const scopeBaseParams: any[] = [companyId];
 
     // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워
     if (userType === 'company_user' && userId) {
       const scope = await getStoreScope(companyId, userId);
       if (scope.type === 'filtered') {
         storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
-        params.push(scope.storeCodes);
+        scopeBaseParams.push(scope.storeCodes);
       } else if (scope.type === 'blocked') {
         return res.json({ total: 0, sms_opt_in_count: 0, gender_male: 0, gender_female: 0, gender_unknown: 0, age_20s: 0, age_30s: 0, age_40s: 0, age_50s: 0, age_60plus: 0, age_unknown: 0, grades: [], store_codes: [], custom_field_keys: [] });
       }
     }
+
+    // ★ 2026-07-17 SWR — 60초 안=현행 히트 / 60초~10분=직전 값 즉시 반환+백그라운드 갱신 / 그 밖=동기 계산.
+    //   TTL 만료마다 재진입이 콜드 1.2초(이새 실측)를 다시 물던 것 차단. computeStats는 백그라운드에서
+    //   재실행되므로 재진입 안전 — params 배열을 클로저 안에서 매번 새로 구성한다(공유 배열 push 금지).
+    // ★ Codex 2R 정정: userType도 키에 포함 — computeStats가 userType으로 캠페인·테스트비용 필터를
+    //   가르므로(company_user=본인 발송만), 승급/강등 직후 같은 키로 옛 역할 통계가 나오는 것 차단.
+    // (서명 직렬화 = JSON — 매장코드에 콤마가 있어도 서로 다른 스코프가 같은 키로 뭉치지 않게. Codex 4R)
+    const statsScopeSig = scopeBaseParams.length > 1 ? `f:${JSON.stringify([...scopeBaseParams[1]].sort())}` : 'all';
+    const cacheKey = `stats:${companyId}:${userId || 'anonymous'}:${userType || 'unknown'}:${statsScopeSig}`;
+    const computeStats = async () => {
+    const params: any[] = [...scopeBaseParams];
 
     // ★ B17-01: 수신거부 user_id 기준 통일
     const unsubStatIdx = params.length + 1;
@@ -752,8 +763,10 @@ router.get('/stats', async (req: Request, res: Response) => {
       // ★ 사용자(company_user)는 본인 발송만, 관리자(company_admin)는 전체
       // ★ D144: PG cr.sent_count/success_count + c.sent_count/success_count 캐시 의존 제거.
       //   PG는 캠페인 메타만 SELECT → MySQL 큐 + 카카오 직접 카운트 → JS에서 message_type별 합산.
+      // ★ 2026-07-17: send_config(sentTables)·발송시각 동봉 — 집계가 실적재 테이블만 훑도록(응답 미노출, 집계 전용)
       query(
-        `SELECT c.id, c.company_id, c.created_by, c.message_type
+        `SELECT c.id, c.company_id, c.created_by, c.message_type,
+                c.send_config, c.sent_at, c.scheduled_at, c.created_at
          FROM campaigns c
          WHERE c.company_id = $1
            AND c.status NOT IN ('cancelled', 'draft', 'scheduled')
@@ -881,9 +894,16 @@ router.get('/stats', async (req: Request, res: Response) => {
         use_file_upload: company.use_file_upload ?? true
       }
     };
-    // ★ Redis 캐시 저장 (60초)
-    try { await redis.setex(cacheKey, CACHE_TTL.customerStats, JSON.stringify(responseData)); } catch (e) { /* 캐시 실패 무시 */ }
-    return res.json(responseData);
+    return responseData;
+    }; // ── computeStats 끝 (SWR compute 클로저)
+
+    const statsPayload = await swrCache({
+      key: cacheKey,
+      softTtlSec: CACHE_TTL.customerStats,
+      hardTtlSec: DASHBOARD_SWR_HARD_TTL_SEC,
+      compute: computeStats,
+    });
+    return res.json(statsPayload);
   } catch (error) {
     console.error('고객 통계 조회 오류:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
@@ -1259,17 +1279,17 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
       }
     }
 
-    // ★ 2026-07-17 성능(SLOW 1,109ms 실측) — 필드당 DISTINCT 다발이 매 진입마다 돌던 것을 60초 캐시로 차단.
+    // ★ 2026-07-17 성능(SLOW 1,109ms 실측) — 필드당 DISTINCT 다발이 매 진입마다 돌던 것을 SWR 캐시로 차단
+    //   (soft 60초/hard 10분 — 60초~10분 재진입은 직전 값 즉시 반환+백그라운드 갱신, 콜드 942ms 실측 차단).
     //   ★ Codex 정정: 캐시는 권한 스코프 해석 "뒤"에서, 키에 스코프 서명 포함 — 스코프 앞 캐시는 매장 권한
-    //   축소 후에도 옛 범위 sample(고객 실데이터)이 최대 60초 노출되는 격리 위반. blocked는 위에서 이미 반환.
-    //   무효화 = clearEnabledFieldsCache 길목(업로드·삭제·싱크)이 Redis도 함께 제거 + TTL 60초 상한.
-    const efScopeSig = scopeParams.length > 1 ? `f:${[...scopeParams[1]].sort().join(',')}` : 'all';
+    //   축소 후에도 옛 범위 sample(고객 실데이터)이 노출되는 격리 위반. blocked는 위에서 이미 반환.
+    //   무효화 = clearEnabledFieldsCache 길목(업로드·삭제·싱크)이 Redis 키째 제거 → 데이터 변경 후
+    //   첫 진입 = 콜드 fresh(즉시 반영 계약 불변). compute는 백그라운드 재실행되므로 재진입 안전 —
+    //   scopeWhere/scopeParams는 읽기 전용으로만 쓴다.
+    // (서명 직렬화 = JSON — 매장코드에 콤마가 있어도 서로 다른 스코프가 같은 키로 뭉치지 않게. Codex 4R)
+    const efScopeSig = scopeParams.length > 1 ? `f:${JSON.stringify([...scopeParams[1]].sort())}` : 'all';
     const efCacheKey = `enabled-fields:${companyId}:${userId || 'anonymous'}:${efScopeSig}`;
-    try {
-      const cached = await redis.get(efCacheKey);
-      if (cached) return res.json(JSON.parse(cached));
-    } catch (e) { /* Redis 실패 시 DB 직접 조회 */ }
-
+    const computeEnabledFields = async () => {
     // ★ CT-18: 활성 필드 탐지 단일 진입점
     const { fields } = await detectEnabledFields({ companyId, scopeWhere, scopeParams });
 
@@ -1380,9 +1400,19 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
       phoneFields = [...new Set([...enabledKnown, ...customPhoneFields.map(f => f.field_key)])];
     } catch (e) { /* phone_fields 감지 실패 시 빈 배열 */ }
 
-    // ★ 2026-07-17 — 응답 전체를 사용자별 60초 캐시(stats CACHE_TTL.customerStats와 동일 클래스)
-    const efPayload = { fields, options, sample, categories: CATEGORY_LABELS, phoneFields };
-    try { await redis.setex(efCacheKey, CACHE_TTL.customerStats, JSON.stringify(efPayload)); } catch (e) { /* 캐시 실패 무시 */ }
+    return { fields, options, sample, categories: CATEGORY_LABELS, phoneFields };
+    }; // ── computeEnabledFields 끝 (SWR compute 클로저)
+
+    // ★ 2026-07-17 — 응답 전체 SWR 캐시 (soft=CACHE_TTL.customerStats 60초, hard=10분)
+    const efPayload = await swrCache({
+      key: efCacheKey,
+      softTtlSec: CACHE_TTL.customerStats,
+      hardTtlSec: DASHBOARD_SWR_HARD_TTL_SEC,
+      compute: computeEnabledFields,
+      // ★ Codex 3R — 무효화 게이트웨이(clearEnabledFieldsCache) 세대 가드: 계산 도중 업로드/삭제/싱크가
+      //   끼면 변형 전 결과를 저장하지 않는다. (stats는 무효화 게이트웨이 없는 순수 TTL 캐시라 미지정)
+      generationKey: ENABLED_FIELDS_CACHE_GEN_KEY,
+    });
     res.json(efPayload);
   } catch (error) {
     console.error('활성 필드 조회 실패:', error);
@@ -1427,6 +1457,10 @@ router.delete('/:id', blockIfSyncActive, async (req: Request, res: Response) => 
 
     // 고객 삭제 (하드 삭제)
     await query('DELETE FROM customers WHERE id = $1 AND company_id = $2', [id, companyId]);
+
+    // ★ Codex 4R — 개별 삭제도 활성 필드/샘플 캐시 무효화 (bulk-delete·전체삭제·업로드와 동일 길목.
+    //   삭제된 고객이 sample이거나 필드 마지막 값 보유자면 캐시 잔존 = 삭제 고객 노출)
+    clearEnabledFieldsCache(companyId);
 
     // 감사 로그
     await query(
