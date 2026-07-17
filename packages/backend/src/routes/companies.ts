@@ -839,15 +839,113 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[], use
     return { delta, deltaPercent, hasTrend: true };
   };
 
+  // ★ 2026-07-17 대시보드 성능 — 카드별 개별 쿼리 병렬 선실행.
+  //   기존: 아래 for 루프 안에서 순차 await → 카드 수만큼 DB 왕복이 직렬 누적(이새 13.7만 고객 체감 지연 축).
+  //   쿼리 문자열·파라미터는 기존과 동일하고 실행 시점만 병렬로 이동 — 소비 지점 await에서 기존과 동일하게 throw.
+  const prefetch = new Map<string, Promise<any>>();
+  const setPrefetch = (id: string, p: Promise<any>) => {
+    p.catch(() => { /* 소비 지점 await가 처리 — 병렬 실행 중 unhandledRejection 경고만 차단 */ });
+    prefetch.set(id, p);
+  };
+  for (const cardId of cardIds) {
+    if (isDynamicCardId(cardId)) {
+      const parsedDyn = parseDynamicCardId(cardId);
+      if (parsedDyn) setPrefetch(cardId, aggregateDynamicCard(companyId, cardId, parsedDyn, customerStoreFilter));
+      continue;
+    }
+    switch (cardId) {
+      case 'age_distribution':
+        if (parseInt(base.has_age_data) > 0) {
+          setPrefetch(cardId, query(`
+          SELECT
+            CASE
+              WHEN age < 20 THEN '10대 이하'
+              WHEN age < 30 THEN '20대'
+              WHEN age < 40 THEN '30대'
+              WHEN age < 50 THEN '40대'
+              WHEN age < 60 THEN '50대'
+              ELSE '60대 이상'
+            END as label,
+            COUNT(*)::int as count
+          FROM customers
+          WHERE company_id = $1 AND age IS NOT NULL${customerStoreFilter}
+          GROUP BY 1
+          ORDER BY MIN(age)
+        `, [companyId]));
+        }
+        break;
+      case 'grade_distribution':
+        if (parseInt(base.has_grade_data) > 0) {
+          setPrefetch(cardId, query(`
+          SELECT grade as label, COUNT(*)::int as count
+          FROM customers
+          WHERE company_id = $1 AND grade IS NOT NULL${customerStoreFilter}
+          GROUP BY grade
+          ORDER BY count DESC
+        `, [companyId]));
+        }
+        break;
+      case 'region_top':
+        if (parseInt(base.has_region_data) > 0) {
+          setPrefetch(cardId, query(`
+          SELECT region as label, COUNT(*)::int as count
+          FROM customers
+          WHERE company_id = $1 AND region IS NOT NULL${customerStoreFilter}
+          GROUP BY region
+          ORDER BY count DESC
+          LIMIT 5
+        `, [companyId]));
+        }
+        break;
+      case 'store_distribution':
+        if (parseInt(base.has_store_data) > 0) {
+          setPrefetch(cardId, query(`
+          SELECT COALESCE(registered_store, recent_purchase_store) as label, COUNT(*)::int as count
+          FROM customers
+          WHERE company_id = $1 AND (registered_store IS NOT NULL OR recent_purchase_store IS NOT NULL)${customerStoreFilter}
+          GROUP BY COALESCE(registered_store, recent_purchase_store)
+          ORDER BY count DESC
+          LIMIT 10
+        `, [companyId]));
+        }
+        break;
+      case 'opt_out_count':
+        setPrefetch(cardId, query(
+          `SELECT COUNT(DISTINCT phone)::int as count FROM unsubscribes WHERE company_id = $1`,
+          [companyId]
+        ));
+        break;
+      case 'active_campaigns': {
+        const campCreatedByFilter = isCompanyUser ? ` AND created_by = '${userId}'` : '';
+        setPrefetch(cardId, query(
+          `SELECT COUNT(*)::int as count FROM campaigns WHERE company_id = $1 AND status IN ('sending', 'scheduled')${campCreatedByFilter}`,
+          [companyId]
+        ));
+        break;
+      }
+      case 'monthly_spend': {
+        const spendCreatedByFilter = isCompanyUser ? ` AND created_by = $2` : '';
+        const spendParams: any[] = isCompanyUser ? [companyId, userId] : [companyId];
+        setPrefetch(cardId, query(
+          `SELECT COALESCE(SUM(amount), 0)::numeric as total
+           FROM balance_transactions
+           WHERE company_id = $1 AND type = 'deduct' AND created_at >= date_trunc('month', NOW())${spendCreatedByFilter}`,
+          spendParams
+        ));
+        break;
+      }
+    }
+  }
+
   // ── 2단계: 각 카드별 결과 조립 ──
   for (const cardId of cardIds) {
     // ★ D136 (2026-04-22 PDF #8): 동적 카드(dyn_{fieldKey}_{aggType}) 분기 집계
     //   고객사가 업로드한 커스텀 필드(custom_1~15 또는 임의 JSONB 키) 기반 카드.
     //   fieldKey는 파라미터 바인딩($2)으로 주입 → SQL 인젝션 방어.
     if (isDynamicCardId(cardId)) {
-      const parsed = parseDynamicCardId(cardId);
-      if (!parsed) continue;
-      const dynResult = await aggregateDynamicCard(companyId, cardId, parsed, customerStoreFilter);
+      const dynPromise = prefetch.get(cardId);
+      if (!dynPromise) continue;
+      const dynResult = await dynPromise;
       if (dynResult) results.push(dynResult);
       continue;
     }
@@ -919,22 +1017,7 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[], use
           hasData = false;
           break;
         }
-        const ageResult = await query(`
-          SELECT
-            CASE
-              WHEN age < 20 THEN '10대 이하'
-              WHEN age < 30 THEN '20대'
-              WHEN age < 40 THEN '30대'
-              WHEN age < 50 THEN '40대'
-              WHEN age < 60 THEN '50대'
-              ELSE '60대 이상'
-            END as label,
-            COUNT(*)::int as count
-          FROM customers
-          WHERE company_id = $1 AND age IS NOT NULL${customerStoreFilter}
-          GROUP BY 1
-          ORDER BY MIN(age)
-        `, [companyId]);
+        const ageResult = await prefetch.get(cardId)!;
         value = ageResult.rows as { label: string; count: number }[];
         hasData = true;
         break;
@@ -946,13 +1029,7 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[], use
           hasData = false;
           break;
         }
-        const gradeResult = await query(`
-          SELECT grade as label, COUNT(*)::int as count
-          FROM customers
-          WHERE company_id = $1 AND grade IS NOT NULL${customerStoreFilter}
-          GROUP BY grade
-          ORDER BY count DESC
-        `, [companyId]);
+        const gradeResult = await prefetch.get(cardId)!;
         value = gradeResult.rows as { label: string; count: number }[];
         hasData = true;
         break;
@@ -964,14 +1041,7 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[], use
           hasData = false;
           break;
         }
-        const regionResult = await query(`
-          SELECT region as label, COUNT(*)::int as count
-          FROM customers
-          WHERE company_id = $1 AND region IS NOT NULL${customerStoreFilter}
-          GROUP BY region
-          ORDER BY count DESC
-          LIMIT 5
-        `, [companyId]);
+        const regionResult = await prefetch.get(cardId)!;
         value = regionResult.rows as { label: string; count: number }[];
         hasData = true;
         break;
@@ -984,14 +1054,7 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[], use
           break;
         }
         // ★ B17-16: store_name → COALESCE(registered_store, recent_purchase_store) 실제 컬럼 참조
-        const storeResult = await query(`
-          SELECT COALESCE(registered_store, recent_purchase_store) as label, COUNT(*)::int as count
-          FROM customers
-          WHERE company_id = $1 AND (registered_store IS NOT NULL OR recent_purchase_store IS NOT NULL)${customerStoreFilter}
-          GROUP BY COALESCE(registered_store, recent_purchase_store)
-          ORDER BY count DESC
-          LIMIT 10
-        `, [companyId]);
+        const storeResult = await prefetch.get(cardId)!;
         value = storeResult.rows as { label: string; count: number }[];
         hasData = true;
         break;
@@ -999,21 +1062,14 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[], use
 
       // ── 외부 테이블 카드 ──
       case 'opt_out_count': {
-        const optOutResult = await query(
-          `SELECT COUNT(DISTINCT phone)::int as count FROM unsubscribes WHERE company_id = $1`,
-          [companyId]
-        );
+        const optOutResult = await prefetch.get(cardId)!;
         value = parseInt(optOutResult.rows[0]?.count ?? 0);
         hasData = totalCustomers > 0;
         break;
       }
 
       case 'active_campaigns': {
-        const campCreatedByFilter = isCompanyUser ? ` AND created_by = '${userId}'` : '';
-        const campResult = await query(
-          `SELECT COUNT(*)::int as count FROM campaigns WHERE company_id = $1 AND status IN ('sending', 'scheduled')${campCreatedByFilter}`,
-          [companyId]
-        );
+        const campResult = await prefetch.get(cardId)!;
         value = parseInt(campResult.rows[0]?.count ?? 0);
         hasData = true;
         break;
@@ -1021,14 +1077,7 @@ async function aggregateDashboardCards(companyId: string, cardIds: string[], use
 
       case 'monthly_spend': {
         // ★ D98: created_by 직접 필터링 (서브쿼리 대신 — 테스트발송 더미 UUID 문제 해결)
-        const spendCreatedByFilter = isCompanyUser ? ` AND created_by = $2` : '';
-        const spendParams: any[] = isCompanyUser ? [companyId, userId] : [companyId];
-        const spendResult = await query(
-          `SELECT COALESCE(SUM(amount), 0)::numeric as total
-           FROM balance_transactions
-           WHERE company_id = $1 AND type = 'deduct' AND created_at >= date_trunc('month', NOW())${spendCreatedByFilter}`,
-          spendParams
-        );
+        const spendResult = await prefetch.get(cardId)!;
         value = parseFloat(spendResult.rows[0]?.total ?? 0);
         hasData = true;
         break;
@@ -1113,11 +1162,12 @@ router.get('/dashboard-cards', async (req: Request, res: Response) => {
     }
 
     // DB에 고객 데이터 존재 여부 확인 (전체 블러 처리용)
+    // ★ 2026-07-17 성능 — 옛 COUNT(*)는 회사 고객 전수를 셌음(이새 13.7만). 존재 여부만 필요하므로 1건 조회로 교체.
     const customerCheck = await query(
-      'SELECT COUNT(*)::int as count FROM customers WHERE company_id = $1 LIMIT 1',
+      'SELECT 1 FROM customers WHERE company_id = $1 LIMIT 1',
       [companyId]
     );
-    const hasCustomers = parseInt(customerCheck.rows[0].count) > 0;
+    const hasCustomers = customerCheck.rows.length > 0;
 
     if (!hasCustomers) {
       // DB 미업로드 → 프론트에서 전체 블러 + CTA 표시

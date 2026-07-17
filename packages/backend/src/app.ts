@@ -214,6 +214,22 @@ app.use(
 );
 app.use(express.json({ limit: LIMITS.requestBodySize }));
 
+// ★ 2026-07-17 느린 요청 상시 계측 — 500ms 초과 API 요청을 로깅(경로·소요·회사·상태).
+//   이새(13.7만 고객) 대시보드 지연 진단 + 대형 연동사 증가 대비: "무엇이 느린지"를 추측이 아니라
+//   PM2 로그로 본다. 쿼리스트링은 남기지 않음(개인정보 URL 파라미터 금지 원칙). 응답 무변경.
+app.use((req, res, next) => {
+  const t0 = Date.now();
+  res.on('finish', () => {
+    const ms = Date.now() - t0;
+    if (ms >= 500 && req.originalUrl.startsWith('/api/')) {
+      const path = req.originalUrl.split('?')[0];
+      const companyId = (req as any).user?.companyId || '-';
+      console.log(`[SLOW ${ms}ms] ${req.method} ${path} company=${companyId} status=${res.statusCode}`);
+    }
+  });
+  next();
+});
+
 // 사후 토스트용 — 크레딧 차감이 일어난 요청의 JSON 응답에 _credit 자동 첨부(호출처 무수정).
 app.use((_req, res, next) => {
   const orig = res.json.bind(res);

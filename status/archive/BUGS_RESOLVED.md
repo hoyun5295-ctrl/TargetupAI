@@ -2,6 +2,14 @@
 > 원본: status/BUGS.md — 2026-07-03 관제탑 재설계 v2로 원문 그대로 이동 (요약·재서술 없음).
 > 본문 내 상대 링크는 재설계 전 경로 기준 — 설계·핸드오프 문서는 archive/DESIGNS/ 에 있다.
 
+## 2026-07-17 ✅ 종결 — B-0717-1 인앱 웹 블록 메시지 중앙정렬 안 됨 (배포·Harold 실측 통과)
+
+> BUGS.md §2에서 이동(2026-07-17). 교차검증 = 배포(커밋 a742b51a 외 4건) + Harold 시크릿모드 실측 "잘 되는데"(제목·본문 중앙정렬). 상세 원본 = `memory/project_2026_0717_inapp_debug_session_incomplete.md`.
+> **3면 실측 원인 확정(추측 0)**: ① 데이터 정상 — 실서버 웹 `/inapp/active` 응답에 `design.text_align="center"` 동봉 확인(저장·sanitize·서빙 무결) ② **실렌더 근본 = 팝폰 웹이 `sdk/v0.3.9/hanjul.min.js` 고정 로드인데 0717 SDK 빌드가 v0.3.11 폴더에만 복사됨**(0716엔 v0.3.8/9/10 전부 동기화 — 그래서 v0.3.11 기능 "다시 보지 않기"는 보이고 정렬만 없던 착시) ③ 미리보기 = Overlay(BlockPreview 경로) text_align 미적용. **옛 기재 "SSR renderBlockMessage" 추정 = 오류**(인앱은 SSR 없음 — renderBlockMessage는 SDK 내부 함수, 웹 실렌더=SDK 클라이언트).
+> **수정 5차 누적**: ①Overlay cardBase에 SDK 루트 적용 미러(7 variant 공통·미지정=현행 유지 회귀 0) + v0.3.8~11 4폴더 빌드 동기화(md5 동일) ②쿠폰(benefit)·CTA 행 = flex 행이라 text-align 상속 미도달 → `ctx.textAlign` justify 미러(SDK inapp-blocks + BlockPreview 1:1, 카운트다운·목록·상품카드=구조물이라 유지) ③**재발 방지 = `packages/sdk-js/scripts/sync-serving-folders.mjs` + `npm run sync:serving`(build:all 연결 — v0.3.8+ 전 서빙 폴더 자동 동기화)** ④앱 채널 죽은 컨트롤 정리(버튼 스타일 셀렉트=웹 전용 소비라 앱 숨김 — 0716 auto_dismiss·애니메이션과 동일 원칙) ⑤전수점검 발견 = **웹 블록 허용표 3면 불일치**(SDK renderBlocks가 템플릿 미허용 블록을 조용히 drop하는데 편집기 추가 메뉴·BlockPreview 무필터 → "미리보기엔 보이고 실물에서 사라짐") → 허용표 3면 미러(SDK 원본 → BlockPreview·backend) + 편집기 메뉴 필터 + 미허용 블록 경고 배지 + **AI 생성 산출물 `filterBlocksForTemplate` 기계 필터(계약 테스트 4건)**.
+> **교훈**: **버전 고정 URL로 서빙되는 산출물(SDK)은 "새 빌드를 어느 폴더에 넣었나"가 배포 그 자체다.** 소스에 코드가 있어도 옛 버전 폴더를 부르는 몰은 영원히 못 받는다 — 수동 복사 관행을 스크립트로 대체(sync:serving)해 클래스 차단. 또 **"편집기 컨트롤 = 실소비" 대조는 값(정렬·색)뿐 아니라 허용표(무엇이 그려지는가)까지** 봐야 한다(조용한 drop = 사용자에겐 버그).
+> **잔여(별건)**: 쿠폰·CTA 정렬 실측 + 슬라이드/토스트 허용표 실측(Harold·직원) · 팝폰 앱 = 1.0.2 심사 중(세션당 1회·매번 표시·다시 보지 않기는 그 빌드부터 동작 — 아래 앱 항목 참조).
+
 ## 2026-07-07 ✅ 종결 — 알림톡 강조표기형 3관문(7300 대표링크 · 9999 senderkey · 3027 버튼) 전부 해결
 
 > BUGS.md §2에서 이동(2026-07-07). 비토 자체 게이트웨이(139.150.81.213 / hanjul01 Agent line13 SMSQ_SEND_13→IMC invito11) 알림톡 발송 종결. 교차검증 = 커밋 716074dc 배포 + Gateway DB 실측(79738=0000) + Harold "전체 발송 잘된다". 상세 원본 = `memory/project_2026_0707_bito_agent_7300_senderkey.md`.

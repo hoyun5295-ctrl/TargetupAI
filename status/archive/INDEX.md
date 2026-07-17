@@ -8,6 +8,7 @@
 
 | 날짜 | 제목 | 검색 키워드 | 파일 |
 |------|------|-------------|------|
+| 2026-07-17 | 🟢 인앱 중앙정렬 근본수정 + 전층 전수점검 + 앱 통합 계약 (회전 2026-07-17) | text_align 중앙정렬 sdk v0.3.9 버전 폴더 동기화 sync-serving-folders sync:serving BlockPreview Overlay cardBase 쿠폰 benefit flex justifyContent isBlockAllowed ALLOWED_BLOCKS 허용표 filterBlocksForTemplate AppIntegrationContract 세션당 1회 once_per_session 죽은 컨트롤 버튼 스타일 팝폰 1.0.2 EAS Update | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-16 | 🟢 (3) DM 편집기 AI 퍼스트 전면 재개편 M1~M5 (회전 2026-07-17) | event-brief EventBrief 커버리지 게이트 copyFactsExistInText dm-page-split 스토리보드 extractMallProductNo naver-shop-search AiPromptModal 자동저장 퀵바 STYLE_VARIANT_LABELS sansSafeDisplayStack 궁서체 | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-16 | 🟢 (2) 인앱 범용 안전 편집기 재설계 (회전 2026-07-17) | composeFlatFromBlocks flat 합성 다시 보지 않기 opt_out once_per_session AsyncStorage 영속 SDK v0.3.11 옵트아웃 링크 AppInAppPreview 팝폰 세션 결함 | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-12 | 🟢 (2) 모바일 DM 종합 연구 + 강화 D-1~D-4 (회전 2026-07-14) | 발행비 PUBLISH_FEE_REQUIRED 402 dm-publish 멱등 confirmPublishFee 야간 광고 NIGHT_AD_RESTRICTED SEND_HOURS createDirectSendCampaign 재타겟 세그먼트 4종 resendCustomerIds 전환 소스 라벨 purchases cdp | [TASKS_2026-07.md](TASKS_2026-07.md) |

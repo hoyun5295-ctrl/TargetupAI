@@ -44,9 +44,10 @@
 > 서팀장 2차 회신 전부 반영. **수신 DB 구축완료(2026-07-07)**: invito `pay-ingest-db`(MariaDB 10.11, --sql-mode="") — 143 dump 3테이블 82MB 복원(934,232/730/7,026 일치)·SysId 백필(B/C/D=54/57/58)·계정(sales×3 IP host·root@% 제거)·방화벽 systemd `pay-ingest-fw`. **★2026-07-09 원격 접속 사고 근본해결**: 강문희 실측 54/57/58→62:23388 접속 불가(^C). 재점검 결과 근본 = **DOCKER-USER에 리턴(ESTABLISHED) 허용 룰 누락** → SYN은 ACCEPT 통과해도 DB 응답(SYN-ACK)이 `0.0.0.0/0 DROP`에 걸려 **어떤 IP도 접속 불가**(로컬 127.0.0.1은 FORWARD 미경유 OPEN 착시·tcpdump SYN-ACK 0 확인). 비토 게이트웨이(139.150.81.213) 화이트리스트+established 추가로 **동일 환경 실측→OPEN 확인**, systemd에 established+139 영속화. 부수 발견: "서버명 옥텟=공인 IP" 추정 폐기(우리 게이트웨이도 이름≠실 IP 139). **★0715(2) "적용 시작 OK" 발신 → 당일 54 병행 적재 개시 실측 통과(288행 실시간·SysId '54'·한글 무결·깨짐 0). 다음 = 익일 143 마감 대조(§7-4) → 강문희 공유+57(golang)→58 → 최종 전환일 직전 dump 재복원+재백필 → Phase 2.** SoT=[docs/레거시서버_폐기_플랜.md](docs/레거시서버_폐기_플랜.md) · 런북=[docs/2026-07-07-pay-absorption-track-d-design.md](docs/2026-07-07-pay-absorption-track-d-design.md) §7. 교훈=[[feedback_verify_in_same_env_before_external_request]].
 
 ### 🔵 다음 세션 (예정)
-> **0716 배포완료 3건 archive 회전 완료(2026-07-17)** — DM 편집기 AI퍼스트(M1~M5)·인앱 범용보장계약·서체 자가호스팅(궁서체 해소, 커밋 3d40dfb1·e1e3c61b·24b4e9e8). 잔여 실측 = 최근 완료 인덱스 참조. (`public/about-ai-operator-v5.html`·`v6.html`=소개 실험·반려·미커밋=폐기.)
-> **별건 잔여**: 팝폰 앱 별도 repo 커밋(인앱 세션 결함·다시 보지 않기·정렬 — Harold 직접 0718) · 인앱/DM M3 네이버 후보 env 키(NAVER_CLIENT_ID/SECRET) 등록 시 활성 · DM M6 이메일·인앱 이식(별도 설계).
-> **★2026-07-17 인앱 재작업** — ① 웹 중앙정렬 근본수정 **1차 배포·실측 통과**(원인=팝폰 웹 v0.3.9 고정 로드+0717 빌드가 v0.3.11에만 복사 / 미리보기 Overlay 미적용 / 데이터는 정상 실측) ② **2차 코드완료(배포·실측 잔여)**: 쿠폰·CTA 행 flex 미러 + sync:serving 자동 동기화 + **앱(네이티브) 통합 계약 안내 2면**(CDP 설정 앱 탭·편집기 앱 채널 — 네이티브=1급, 소스=docs/인앱메세지전용.md §10-B) + "세션당 1회" 라벨 통일. 상세=BUGS §B-0717-1. 팝폰앱 수정분=Harold 직접 재빌드·커밋 예정(0718)·비토 배제. 상세=[[project_2026_0717_inapp_debug_session_incomplete]].
+> **0716~17 배포완료 4건 archive 회전 완료(2026-07-17)** — DM 편집기 AI퍼스트(M1~M5)·인앱 범용보장계약·서체 자가호스팅·**0717 인앱 중앙정렬 근본수정+전층 전수점검+앱 통합 계약(5커밋)**. 잔여 실측 = 최근 완료 인덱스 참조. (`public/about-ai-operator-v5.html`·`v6.html`=소개 실험·반려·미커밋=폐기.)
+> **★인앱 잔여(0718~)**: **팝폰 1.0.2 심사 중** — 출시 후 실측 3종(재실행 재표시=세션당 1회 / 닫기 억제 / 다시 보지 않기) = **B-0717-2 해소 확인**(BUGS.md). 1.0.2부터 EAS Update 런타임 성립(이후 JS 수정=검수 없이 OTA). 웹 실측 = 쿠폰·CTA 정렬·허용표·AI 생성 1건. 0717 직원 디버깅분(수신거부·DM #1~3·이메일)=코드완료·미검증.
+> **별건 잔여**: 인앱/DM M3 네이버 후보 env 키(NAVER_CLIENT_ID/SECRET) 등록 시 활성 · DM M6 이메일·인앱 이식(별도 설계).
+> **★0717 대시보드 성능 1차(코드완료·배포 대기)** — 이새(13.7만) 지연: purchases(185만·전부 이새) company_id 인덱스 신설(Harold 실행)+balance_tx 인덱스+customers 중복 유니크 2쌍 DROP(실행 대기)+카드 쿼리 병렬화+EXISTS+**SLOW 계측(500ms+)**. 다음=배포 후 `pm2 logs | grep SLOW`로 병목 분해→2차(카드 캐시·일별 롤업·pg_stat_statements=DB 재시작 결정). 상세=[[project_2026_0717_dashboard_performance]].
 > ★ **1순위 = 템플릿관리자 흡수(Track B+C)** — ★0715~16 진행: 관문 1·2 전부 통과(import 2종 배포·아난티 847 pull·강문희 스펙 회신 해소). **Track C 착수 대기 = 강문희 답신 발신(삭제 불요·upsert 키·착수 시기) → 착수 회신 오면 M2(매핑 CT+아웃박스+효과검증+대조 워커) 설계·구현.** 병행 = M4 실발송 1건 · 497 기준 서팀장 · M5(B-3 계정·Bill_ID) · 브랜드 스코프(B-2) · 다우 2사 senderKey 이관 실측. SoT=설계문서 §1 · [[project_2026_0705_legacy_template_migration]].
 > ② **PAY Track D** — ★0715 54 병행 적재 개시. 다음 = 익일 143 마감 대조(§7-4) → 57(golang)→58 → 최종 전환일 dump 재복원 → Phase 2.
 > ③ **Local AI Ops Hub(비토 24시간화)** — 미래 대비. 설계 3부작 완료(docs/2026-07-15-local-ai-ops-hub-{design·agents-design·jarvis-spec}.md). Harold 결정(H-2 M0 착수) 대기. **현재 실무(①②)보다 후순위.** [[project_2026_0715_local_ai_ops_hub]].
@@ -56,6 +57,7 @@
 
 ### 최근 완료 인덱스 (원문 = 링크의 월별 아카이브)
 
+- 🟢 2026-07-17 — 인앱 중앙정렬 근본수정(SDK 버전 폴더 동기화 누락)+전층 전수점검(허용표 3면 통일)+앱 네이티브 통합 계약 2면 (★배포완료 5커밋·DDL 0 / B-0717-1 종결(Harold 실측) · B-0717-2=팝폰 1.0.2 심사 중 / 잔여=웹 실측(쿠폰정렬·허용표)+앱 출시 후 실측 3종, 회전 2026-07-17) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0717_inapp_debug_session_incomplete]]
 - 🟢 2026-07-16 (3) — DM 편집기 AI 퍼스트 재개편 M1~M5 (★배포완료 3d40dfb1 / 잔여=직원 모바일 DM 실측+M3 네이버 env 키+M6 이메일·인앱 이식, 회전 2026-07-17) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0716_dm_editor_ai_first_redesign]]
 - 🟢 2026-07-16 (2) — 인앱 범용 안전 편집기(블록→flat 합성·다시 보지 않기·SDK v0.3.11) (★배포완료·DDL 0 / 잔여=팝폰 앱 커밋·빌드(Harold 직접)+실기기 실측, 회전 2026-07-17) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0716_inapp_universal_safe_editor]]
 - 🟢 2026-07-16 — DM·이메일 서체 자가호스팅+무료글꼴 12종(궁서체 해소) (★배포완료 e1e3c61b·24b4e9e8 / 잔여=직원 실측, 회전 2026-07-17) → 상세 [[project_2026_0716_dm_email_font_selfhosting]]

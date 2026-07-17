@@ -55,8 +55,13 @@
 
 ## 2) 활성 버그
 
-### 🔵 B-0717-1 인앱 웹 블록 메시지 중앙정렬 안 됨 (🟠 Major) — 2026-07-17 (당일 원인 확정·코드완료·배포 대기)
-> **3면 실측으로 원인 확정(추측 0)**: ① 데이터 정상 — 실서버 웹 채널 `/inapp/active` 응답에 해당 메시지 `design.text_align="center"` 동봉 확인(저장·sanitize·서빙 무결) ② **실렌더 근본 = 팝폰 웹이 `sdk/v0.3.9/hanjul.min.js` 고정 로드인데 0717 SDK 빌드가 v0.3.11 폴더에만 복사됨** — 0716엔 새 빌드를 v0.3.8/9/10에 전부 동기화(3파일 바이트 동일 실측)했는데 0717은 v0.3.11만 갱신. 그래서 v0.3.11 기능 "다시 보지 않기"는 보이고 정렬만 없었음. 옛 기재 "SSR renderBlockMessage" 추정은 **오류** — 인앱은 SSR 없음(renderBlockMessage=SDK 내부 함수, 웹 실렌더=SDK 클라이언트) ③ 미리보기 = Overlay(BlockPreview 경로)만 text_align 미적용. **수정(0717)**: `InAppMessagePreview.tsx` Overlay cardBase에 SDK 루트 적용 미러(전 7 variant 공통, 미지정=현행 유지 회귀 0) + v0.3.8~11 4폴더에 0717 빌드 min.js+map 동기화(md5 동일 검증). tsc 0·Codex 리뷰 통과. **잔여 = 배포(frontend build:safe + pm2 reload — sdk-serve 메모리 캐시 무TTL이라 reload 필수) + Harold 시크릿모드 실측.** **후속(0717 2차·배포 실측 통과 후)**: 제목·본문 정렬 통과 확인(Harold 스샷), 쿠폰만 미정렬 = benefit 블록이 flex 행(아이콘+텍스트)이라 상속 미도달 → ctx.textAlign 배선으로 쿠폰 2형태+CTA 행(비스택·bubble 칩) justify 미러(SDK+BlockPreview 1:1, 카운트다운·목록·상품카드=구조 유지), **재발 방지 = sdk-js `sync:serving` 스크립트(build:all에 연결 — 전 서빙 폴더 자동 동기화)**, 앱(네이티브) 통합 계약 단일 소스+2면 노출(CDP 설정 앱 탭·편집기 앱 채널 — docs/인앱메세지전용.md §10-B), once_per_session 라벨 "세션당 1회" 통일. 다른 0717 항목(수신거부·DM·이메일·인앱 다수 코드완료·미검증) 상세=[[project_2026_0717_inapp_debug_session_incomplete]].
+### 🟠 B-0717-2 팝폰 앱 인앱 표시 빈도 결함 (🟠 Major) — 2026-07-17 (원인 확정·수리 코드 완료 / 앱 1.0.2 심사 중 = 배포로만 해소)
+> **증상(Harold 실측)**: 앱에서 "세션당 1회" 메시지가 한 번 뜬 뒤 **앱을 껐다 켜도 다시 안 뜸**. 매번 표시=닫아도 재표시(닫기 억제 없음), "다시 보지 않기" 미노출.
+> **근본(코드 확정)**: 설치된 프로덕션 빌드(≤1.0.1)의 `inapp-client`가 세션 키(`session:`)까지 AsyncStorage에 영속 → `once_per_session`이 **설치당 1회(영구)**로 동작. 0716에 수리(세션=메모리 전용 + 옛 영속분 자동 정리)했으나 **앱 미빌드·미배포**가 전부였음.
+> **데이터 교차검증(0717 SQL)**: app 채널 `cdp_inapp_impressions` = impression 85·click 13·dismiss 24·opt_out 0, 마지막 impression 0717 01:50 KST에서 정지 → **현 빌드도 트래킹은 정상 전송(하루 1회 서버 24h 억제·통계 유효)**, 그 이후 표시 0 = 세션 영구화 진단과 일치.
+> **빈도 계약 확정(편집기 각주 반영)**: 세션당 1회=앱 실행 1회(완전 종료 후 재실행=재표시) / 하루 1회=서버 24h 억제(impression 기준)+클라 이중 / 매번=닫으면 그 실행만 억제 / 다시 보지 않기=서버 opt_out 영구.
+> **해소 경로**: 팝폰 1.0.2 빌드(iOS 빌드 22·Android) — 0717 Harold 심사 제출 완료(iOS 재업로드 2회 실패 원인=스토어 출시 버전과 동일 문자열 1.0.1 → app.json 1.0.2 상향으로 해소, 7/4 1.0.0→1.0.1 패턴 재현). **잔여 = 출시 후 실측 3종**(①완전 종료→재실행 시 재표시 ②닫기 후 같은 실행 미재표시 ③다시 보지 않기 후 영구 미표시). 1.0.2부터 EAS Update 런타임 성립 = 이후 JS 수정은 `eas update`로 검수 없이 배포. 상세=[[project_2026_0717_inapp_debug_session_incomplete]].
 
-> **2026-07-07 알림톡 강조표기형 3관문(7300 대표링크 · 9999 senderkey · 3027 버튼) 종결** → [archive/BUGS_RESOLVED.md](archive/BUGS_RESOLVED.md) 최상단(커밋 716074dc 배포·Harold "전체 발송 잘된다" 확인). 잔여 별건 = 진단로그 `[ALIMTALK-DEBUG2]`(direct-send-processor) 정리 시 제거.
+> **2026-07-17 B-0717-1 인앱 웹 블록 중앙정렬 종결** → [archive/BUGS_RESOLVED.md](archive/BUGS_RESOLVED.md) 최상단(배포 5커밋·Harold 실측 "잘 되는데" — 근본=SDK 버전 폴더 동기화 누락, 재발 방지=sync:serving). 잔여 별건 = 쿠폰·CTA 정렬+허용표 실측.
+> **2026-07-07 알림톡 강조표기형 3관문(7300 대표링크 · 9999 senderkey · 3027 버튼) 종결** → [archive/BUGS_RESOLVED.md](archive/BUGS_RESOLVED.md)(커밋 716074dc 배포·Harold "전체 발송 잘된다" 확인). 잔여 별건 = 진단로그 `[ALIMTALK-DEBUG2]`(direct-send-processor) 정리 시 제거.
 
