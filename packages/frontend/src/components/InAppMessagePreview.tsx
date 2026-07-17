@@ -132,7 +132,7 @@ function CardInner({ title, body, imageUrl, badge, buttons, textColor, variant, 
 }
 
 /** template별 위치 + 카드 모양 오버레이 (블록 있으면 테마 토큰으로 BlockPreview) */
-function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Variant; themeTokens?: InAppTheme | null; treatment?: InAppTreatment } & Omit<InAppMessagePreviewProps, 'template'>) {
+function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Variant; themeTokens?: InAppTheme | null; treatment?: InAppTreatment } & InAppMessagePreviewProps) {
   const { backgroundColor, textColor, blocks, replaceVars, isAd } = rest;
   const usingBlocks = !!(themeTokens && blocks && blocks.length > 0);
   // ★ 2026-07-07(2) 형태 축 — 카드형 variant에만 적용 (SDK와 동일 게이트)
@@ -171,7 +171,7 @@ function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Varian
     (cardStyle === 'ticket' && plan.stub.length > 0)
   );
   const inner = usingBlocks
-    ? <BlockPreview blocks={blocks!} theme={themeTokens!} replaceVars={replaceVars} isAd={isAd} cardStyle={cardish ? cardStyle : undefined} zonePads={zoned ? zonePads : undefined} treatment={cardish ? treatment : undefined} displayFont={displayFont} textAlign={rootTextAlign} />
+    ? <BlockPreview blocks={blocks!} theme={themeTokens!} replaceVars={replaceVars} isAd={isAd} cardStyle={cardish ? cardStyle : undefined} zonePads={zoned ? zonePads : undefined} treatment={cardish ? treatment : undefined} displayFont={displayFont} textAlign={rootTextAlign} template={rest.template} />
     : <CardInner {...rest} variant={variant} textColor={textColor} />;
 
   const cardBase: CSSProperties = {
@@ -463,7 +463,7 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
         </div>
       </div>
       <div className="text-[10px] text-white/30 italic mt-2.5 text-center">
-        Data source — 앱 실렌더와 동일 요소(이미지·배지·제목·본문·버튼)만 표시 · 만든 그대로 앱에 뜹니다
+        Data source — 앱 실렌더와 동일 요소(이미지·배지·제목·본문·버튼·정렬) 표시 · 닫기/다시 보지 않기는 앱이 통합 계약을 구현한 빌드에서 동작
       </div>
     </div>
   );

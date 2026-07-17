@@ -31,7 +31,7 @@ import {
 // ★ 2026-07-14 디자인 3.0 — 골든 템플릿 12종 (형태×카드×테마×블록 완성형 — 혜택 placeholder 준수)
 // ★ 2026-07-14 Harold 지시 — 옛 골든 12종 노출 제거(정예 10종만). 타입만 유지(정예 적용 함수 공용).
 import { type GoldenInAppTemplate } from '../components/inapp/goldenTemplates';
-import { Icon as BlockIcon } from '../components/inapp/BlockPreview';
+import { Icon as BlockIcon, isInAppBlockAllowed } from '../components/inapp/BlockPreview';
 import { AppInAppContractModal } from '../components/inapp/AppIntegrationContract';
 import { DateTimeField } from '../components/DateTimeField';
 import { takeEventDraft, EVENT_INAPP_DRAFT_KEY } from '../components/EventCampaignModal';
@@ -1880,7 +1880,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     <span className="text-[11px] font-bold text-white/70 flex items-center gap-1.5"><Layers className="w-3 h-3" /> 블록 구성</span>
                     <button onClick={() => updateField('content_blocks', [])} className="text-[10px] text-white/40 hover:text-white/70">단순 폼으로</button>
                   </div>
-                  <BlockComposer blocks={blocks} onChange={(b) => updateField('content_blocks', b)} uploadImage={uploadImage} />
+                  <BlockComposer blocks={blocks} onChange={(b) => updateField('content_blocks', b)} uploadImage={uploadImage} template={(editing.template || '') as string} />
                 </div>
               ) : (
                 <>
@@ -2279,7 +2279,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </h4>
               <div className="space-y-2">
                 {(editing.buttons || []).map((btn, idx) => (
-                  <div key={idx} className="grid grid-cols-1 md:grid-cols-[1fr,1fr,80px,40px] gap-2 items-center">
+                  <div key={idx} className={`grid grid-cols-1 ${isApp ? 'md:grid-cols-[1fr,1fr,40px]' : 'md:grid-cols-[1fr,1fr,80px,40px]'} gap-2 items-center`}>
                     <input
                       type="text"
                       value={btn.label}
@@ -2302,6 +2302,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                       placeholder="이동 URL"
                       className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30"
                     />
+                    {/* ★ 2026-07-17 버튼 스타일은 웹 렌더(SDK renderLegacy)만 소비 — 앱(팝폰 시트·계약)은 색 데이터 축이라 앱 채널에서 숨김 (죽은 컨트롤 금지, auto_dismiss·애니메이션과 동일 원칙) */}
+                    {!isApp && (
                     <select
                       value={btn.style}
                       onChange={(e) => {
@@ -2315,6 +2317,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                       <option value="secondary">보통</option>
                       <option value="tertiary">약함</option>
                     </select>
+                    )}
                     <button
                       onClick={() => updateField('buttons', (editing.buttons || []).filter((_, i) => i !== idx))}
                       className="text-rose-300 hover:bg-rose-500/10 rounded p-1.5"
@@ -3128,7 +3131,8 @@ function SortableInAppBlock({
   );
 }
 
-function BlockComposer({ blocks, onChange, uploadImage }: { blocks: any[]; onChange: (b: any[]) => void; uploadImage: (file: File) => Promise<string | null> }) {
+// ★ 2026-07-17 template — SDK 실렌더가 템플릿 미허용 블록을 건너뛰므로(isBlockAllowed) 추가 메뉴 필터 + 기존 블록 경고에 사용
+function BlockComposer({ blocks, onChange, uploadImage, template }: { blocks: any[]; onChange: (b: any[]) => void; uploadImage: (file: File) => Promise<string | null>; template?: string }) {
   const [showAdd, setShowAdd] = useState(false);
   const [highlight, setHighlight] = useState<number | null>(null);
   const listEndRef = useRef<HTMLDivElement | null>(null);
@@ -3223,6 +3227,12 @@ function BlockComposer({ blocks, onChange, uploadImage }: { blocks: any[]; onCha
                 onDuplicate={() => duplicate(i)}
                 onRemove={() => remove(i)}
               >
+                {/* ★ 2026-07-17 템플릿 미허용 블록 = 실물에서 조용히 사라짐(SDK 필터) → 정직 경고 (조용한 소실 차단) */}
+                {b?.type && !isInAppBlockAllowed(template, String(b.type)) && (
+                  <div className="mb-1.5 bg-amber-500/10 border border-amber-400/30 rounded px-2 py-1.5 text-[10px] text-amber-100">
+                    현재 표시 형태에서는 이 블록이 표시되지 않습니다 — 형태를 바꾸거나 블록을 제거해주세요.
+                  </div>
+                )}
                 <BlockEditor block={b} onChange={(patch) => update(i, patch)} uploadImage={uploadImage} />
               </SortableInAppBlock>
             ))}
@@ -3237,11 +3247,15 @@ function BlockComposer({ blocks, onChange, uploadImage }: { blocks: any[]; onCha
         </button>
         {showAdd && (
           <div className="mt-2 bg-slate-900/80 border border-white/10 rounded-xl p-3 space-y-3">
-            {BLOCK_CATS.map((cat) => (
+            {BLOCK_CATS.map((cat) => {
+              // ★ 2026-07-17 템플릿 허용 블록만 노출 (SDK isBlockAllowed 미러) — 추가해도 실물에 안 나오는 항목 제거
+              const items = BLOCK_ADD_MENU.filter((m) => m.cat === cat && isInAppBlockAllowed(template, m.type));
+              if (items.length === 0) return null;
+              return (
               <div key={cat}>
                 <div className="text-[10px] font-bold text-white/40 mb-1.5 tracking-wide">{cat}</div>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5">
-                  {BLOCK_ADD_MENU.filter((m) => m.cat === cat).map((m) => {
+                  {items.map((m) => {
                     const Ic = m.icon;
                     return (
                       <button
@@ -3261,7 +3275,8 @@ function BlockComposer({ blocks, onChange, uploadImage }: { blocks: any[]; onCha
                   })}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

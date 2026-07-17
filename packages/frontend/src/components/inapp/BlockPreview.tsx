@@ -48,11 +48,39 @@ interface Ctx {
   displayFont?: string;
   /** ★ 2026-07-17 텍스트 정렬 — flex 행 블록(쿠폰·CTA 행) justify-content 미러 (SDK ctx.textAlign 1:1). 미지정 = 기존 좌측 */
   textAlign?: 'center' | 'right';
+  /** ★ 2026-07-17 템플릿 — 허용 블록 필터(SDK renderBlocks isBlockAllowed 미러)용. 미지정 = 전부 렌더(기존) */
+  template?: string;
+}
+
+// ★ 2026-07-17 템플릿별 허용 블록 — SDK inapp-blocks.ts ALLOWED_BLOCKS 1:1 미러 (단일 진실 = SDK, 여기는 미리보기·편집기 소비용 미러).
+//   SDK 실렌더는 미허용 블록을 조용히 건너뛰므로(renderBlocks isBlockAllowed), 편집기 추가 메뉴·미리보기가
+//   이 표를 안 보면 "미리보기엔 보이는데 실물에서 사라지는" 불일치가 난다 (B-0717-1 후속 전수점검 발견).
+const INAPP_ALL_BLOCK_TYPES = ['media', 'eyebrow', 'headline', 'body', 'bullets', 'benefit', 'countdown', 'rating', 'product', 'divider', 'spacer', 'cta_group', 'footer'];
+const INAPP_ALL_SET = new Set(INAPP_ALL_BLOCK_TYPES);
+const INAPP_ALLOWED_BLOCKS: Record<string, Set<string>> = {
+  center_modal: INAPP_ALL_SET,
+  full_screen: INAPP_ALL_SET,
+  inline_card: INAPP_ALL_SET,
+  slide_in: new Set(['media', 'eyebrow', 'headline', 'body', 'rating', 'product', 'benefit', 'cta_group', 'divider', 'spacer', 'footer']),
+  top_banner: new Set(['media', 'eyebrow', 'headline', 'body', 'cta_group', 'footer']),
+  bottom_banner: new Set(['media', 'eyebrow', 'headline', 'body', 'cta_group', 'footer']),
+  toast: new Set(['eyebrow', 'headline', 'body', 'footer']),
+  floating_button: new Set(['cta_group']),
+};
+
+/** 템플릿별 블록 허용 판정 — SDK isBlockAllowed 1:1 (정의 없는 템플릿·미지정 = 허용) */
+export function isInAppBlockAllowed(template: string | null | undefined, type: string): boolean {
+  if (!template) return true;
+  const set = INAPP_ALLOWED_BLOCKS[template];
+  if (!set) return true;
+  return set.has(type);
 }
 
 function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
   const { theme, replaceVars } = ctx;
   const t = (s: any) => replaceVars(String(s ?? ''));
+  // ★ 2026-07-17 SDK renderBlocks 미러 — 템플릿 미허용 블록은 실렌더처럼 건너뜀 (미리보기=실물)
+  if (b?.type && !isInAppBlockAllowed(ctx.template, String(b.type))) return null;
   switch (b?.type) {
     case 'eyebrow': {
       const text = t(b.text).trim();
@@ -441,7 +469,7 @@ function BubbleSender({ text, theme }: { text: string; theme: InAppTheme }) {
   );
 }
 
-export function BlockPreview({ blocks, theme, replaceVars, isAd, cardStyle, zonePads, treatment, displayFont, textAlign }: {
+export function BlockPreview({ blocks, theme, replaceVars, isAd, cardStyle, zonePads, treatment, displayFont, textAlign, template }: {
   blocks: any[];
   theme: InAppTheme;
   replaceVars?: (t: string) => string;
@@ -455,9 +483,11 @@ export function BlockPreview({ blocks, theme, replaceVars, isAd, cardStyle, zone
   displayFont?: string;
   /** ★ 2026-07-17 텍스트 정렬 — flex 행 블록(쿠폰·CTA 행) justify 미러 (SDK ctx.textAlign 1:1) */
   textAlign?: 'center' | 'right';
+  /** ★ 2026-07-17 템플릿 — 허용 블록 필터 (SDK isBlockAllowed 미러). 미지정 = 전부 렌더(기존) */
+  template?: string;
 }) {
   const style = normalizeCardStyle(cardStyle);
-  const ctx: Ctx = { theme, replaceVars: replaceVars || ((s: string) => s), cardStyle: style, treatment, displayFont, textAlign };
+  const ctx: Ctx = { theme, replaceVars: replaceVars || ((s: string) => s), cardStyle: style, treatment, displayFont, textAlign, template };
   const list = Array.isArray(blocks) ? blocks : [];
   const hasFooter = list.some((b) => b?.type === 'footer');
   const plan = planCardLayout(list, style);
