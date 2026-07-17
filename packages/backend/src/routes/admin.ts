@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
-import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsSelectPagedAll, smsAggAll, getTestSmsTables, kakaoCountWhere, kakaoSelectWhere, kakaoBatchAggByGroup } from '../utils/sms-queue';
+import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsSelectPagedAll, smsAggAll, getTestSmsTables, findMissingSmsTables, kakaoCountWhere, kakaoSelectWhere, kakaoBatchAggByGroup } from '../utils/sms-queue';
 import { streamCampaignSmsCsv } from '../utils/campaign-sms-export';
 import { insertCuratedSeeds, listCuratedSeeds, listCuratedSeedCounts, deleteCuratedSeed, saveCuratedSeedOne, updateCuratedSeed, SeedGateFail } from '../utils/copy-seed-curator';
 import { startMiningJob, getMiningJob } from '../utils/best-copy-miner';
@@ -26,7 +26,7 @@ import { normalizePhone } from '../utils/normalize-phone';
 import { normalizeCdpAutoExecuteGate } from '../utils/autosend-policy';
 import { grantBasicTrial } from '../utils/basic-trial';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
-import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, diffFields } from '../utils/audit-log';
+import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isLineGroupAdmin, diffFields } from '../utils/audit-log';
 // ★ 2026-07-01: 예측 일괄 분석·차감 수동 트리거 (9시 대기 없이 검증·복구·시연)
 import { runPredictiveBatchNow } from '../utils/predictive-worker';
 
@@ -3231,6 +3231,8 @@ router.get('/audit-logs', authenticate, requireSuperAdmin, async (req: Request, 
 // ===== 발송 라인그룹 관리 API =====
 
 // GET /api/admin/line-groups - 라인그룹 목록
+// ★ 2026-07-17: 조회는 슈퍼관리자 공용 유지 — 고객사/사용자 편집 모달의 발송 라인 드롭다운이 이 API를 쓴다.
+//   쓰기 권한(canManage)만 실어 보내 프론트가 관리 탭 노출을 판정한다(허용 목록 단일 소스 = 백엔드 ENV).
 router.get('/line-groups', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const result = await query(`
@@ -3239,7 +3241,7 @@ router.get('/line-groups', authenticate, requireSuperAdmin, async (req: Request,
       FROM sms_line_groups lg
       ORDER BY lg.sort_order, lg.created_at
     `);
-    res.json({ lineGroups: result.rows });
+    res.json({ lineGroups: result.rows, canManage: await isLineGroupAdmin(req.user?.userId) });
   } catch (error) {
     console.error('라인그룹 목록 조회 실패:', error);
     res.status(500).json({ error: '조회 실패' });
@@ -3249,6 +3251,10 @@ router.get('/line-groups', authenticate, requireSuperAdmin, async (req: Request,
 // POST /api/admin/line-groups - 라인그룹 생성
 router.post('/line-groups', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
+    // ★ 2026-07-17: 라인 설정 쓰기 = LINE_GROUP_ADMIN_USERS(기본 ceo,admin)만 (Harold 명시)
+    if (!(await isLineGroupAdmin(req.user?.userId))) {
+      return res.status(403).json({ error: '발송 라인 설정 권한이 없습니다.' });
+    }
     const { groupName, groupType, smsTables, sortOrder } = req.body;
     if (!groupName || !groupType || !smsTables || smsTables.length === 0) {
       return res.status(400).json({ error: '필수 필드를 입력해주세요.' });
@@ -3258,6 +3264,11 @@ router.post('/line-groups', authenticate, requireSuperAdmin, async (req: Request
       validateSmsTables(smsTables);
     } catch (err) {
       return res.status(400).json({ error: `잘못된 테이블명: ${err instanceof Error ? err.message : String(err)}` });
+    }
+    // ★ 2026-07-17: 실존 검증 — 패턴만 맞는 오타 테이블이 라인에 들어가면 그 라인의 적재·집계·정산이 전부 SQL 에러
+    const missingTables = await findMissingSmsTables(smsTables);
+    if (missingTables.length > 0) {
+      return res.status(400).json({ error: `MySQL smsdb에 없는 테이블입니다: ${missingTables.join(', ')}` });
     }
     const result = await query(`
       INSERT INTO sms_line_groups (group_name, group_type, sms_tables, sort_order)
@@ -3285,6 +3296,10 @@ router.post('/line-groups', authenticate, requireSuperAdmin, async (req: Request
 // PUT /api/admin/line-groups/:id - 라인그룹 수정
 router.put('/line-groups/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
+    // ★ 2026-07-17: 라인 설정 쓰기 = LINE_GROUP_ADMIN_USERS(기본 ceo,admin)만 (Harold 명시)
+    if (!(await isLineGroupAdmin(req.user?.userId))) {
+      return res.status(403).json({ error: '발송 라인 설정 권한이 없습니다.' });
+    }
     const { id } = req.params;
     const { groupName, groupType, smsTables, sortOrder, isActive } = req.body;
     // ★ P0-Q1: SQL Injection 방지 — 테이블명 화이트리스트 검증
@@ -3293,6 +3308,11 @@ router.put('/line-groups/:id', authenticate, requireSuperAdmin, async (req: Requ
         validateSmsTables(smsTables);
       } catch (err) {
         return res.status(400).json({ error: `잘못된 테이블명: ${err instanceof Error ? err.message : String(err)}` });
+      }
+      // ★ 2026-07-17: 실존 검증 — 패턴만 맞는 오타 테이블이 라인에 들어가면 그 라인의 적재·집계·정산이 전부 SQL 에러
+      const missingTables = await findMissingSmsTables(smsTables);
+      if (missingTables.length > 0) {
+        return res.status(400).json({ error: `MySQL smsdb에 없는 테이블입니다: ${missingTables.join(', ')}` });
       }
     }
     // ★ 2026-06-11: 변경 전 값 조회 — 감사 로그 before 기록
@@ -3339,6 +3359,10 @@ router.put('/line-groups/:id', authenticate, requireSuperAdmin, async (req: Requ
 // DELETE /api/admin/line-groups/:id - 라인그룹 삭제
 router.delete('/line-groups/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
+    // ★ 2026-07-17: 라인 설정 쓰기 = LINE_GROUP_ADMIN_USERS(기본 ceo,admin)만 (Harold 명시)
+    if (!(await isLineGroupAdmin(req.user?.userId))) {
+      return res.status(403).json({ error: '발송 라인 설정 권한이 없습니다.' });
+    }
     const { id } = req.params;
     // 할당된 회사 있는지 확인
     const assigned = await query('SELECT COUNT(*) FROM companies WHERE line_group_id = $1', [id]);

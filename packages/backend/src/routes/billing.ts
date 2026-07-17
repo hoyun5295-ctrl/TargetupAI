@@ -4,7 +4,7 @@ import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL } from '../utils/sms-result-map';
 import { INVITO_INFO } from '../config/defaults';
-import { getAllBulkSmsTables, getTestSmsTables } from '../utils/sms-queue';
+import { getAllBulkSmsTables, getBitoSmsTables, getTestSmsTables, mergeLineTables } from '../utils/sms-queue';
 import { CREDIT_UNIT_PRICE } from '../utils/ai-credit-calc';
 
 // SMTP transporter (재사용)
@@ -23,7 +23,14 @@ const getTransporter = () => nodemailer.createTransport({
 // ★ 2026-06-11: 회사 라인만 → 전 bulk 라인 합집합. 사용자 개별 라인 발송분(에이치피오 87,014 = 대량발송(1))이
 //   회사 라인({7,8,9})만 보던 정산에서 통째로 빠지던 누락 fix. 라인 해제/재배정에도 내성.
 //   회사 격리는 whereClause(app_etc1 IN (그 회사 run/campaign id) · app_etc2=company_id)가 보장 — 타사 혼입 0.
-const getBillingCompanyTables = (_companyId: string) => getAllBulkSmsTables();
+// ★ 2026-07-17: bulk → bulk + bito 합집합 (Harold 승인). getAllBulkSmsTables는 group_type='bulk'만 봐서
+//   비토 게이트웨이 라인(13·14·15) 발송분이 정산에서 통째로 빠져 있었다. 라인13이 담당자 테스트
+//   전용이라 실피해가 없었을 뿐, 실업체로 확대하면 그대로 청구 누락이 된다.
+//   적용 전 실측(2026-07-17): 라인13 소급 대상 = 테스트계정 22건·테스트계정2 18건뿐 — 실고객사 0.
+const getBillingCompanyTables = async (_companyId: string) => {
+  const [bulk, bito] = await Promise.all([getAllBulkSmsTables(), getBitoSmsTables()]);
+  return mergeLineTables(bulk, bito);
+};
 const getBillingTestTables = () => getTestSmsTables();
 
 async function getBillingLogTables(): Promise<Set<string>> {

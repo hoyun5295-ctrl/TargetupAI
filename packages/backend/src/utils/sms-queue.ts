@@ -25,10 +25,13 @@ for (const t of ALL_SMS_TABLES) {
     console.error(`[QTmsg] ⚠️ 잘못된 SMS 테이블명 감지: "${t}" — SQL Injection 위험. SMS_TABLES 환경변수를 확인하세요.`);
   }
 }
-// 대량발송 풀 = 테스트(10)·인증(11)·비토 게이트웨이 테스트(13) 제외.
-// SMSQ_SEND_13은 비토 게이트웨이 전용(담당자 테스트) 라인 — 라인그룹 미지정 회사의 일반 발송이
+// 대량발송 풀 = 테스트(10)·인증(11)·비토 게이트웨이(13·14·15) 제외.
+// SMSQ_SEND_13/14/15는 비토 게이트웨이 전용 라인 — 라인그룹 미지정 회사의 일반 발송이
 // 비토로 새지 않도록 bulk fallback에서 격리한다(검증 후 실업체 확대 시 정책 재검토).
-const BULK_ONLY_TABLES = ALL_SMS_TABLES.filter(t => !['SMSQ_SEND_10', 'SMSQ_SEND_11', 'SMSQ_SEND_13'].includes(t));
+// ★ 2026-07-17 라인 14·15 추가(자비스 요청, Agent hanjul02/hanjul03): 현재 서버 .env SMS_TABLES는
+//   1~11만 담고 있어 이 필터는 무효과지만, 나중에 누가 env에 비토 라인을 넣는 순간
+//   미할당 고객사의 일반 발송이 비토 게이트웨이로 새는 것을 여기서 막는다.
+const BULK_ONLY_TABLES = ALL_SMS_TABLES.filter(t => !['SMSQ_SEND_10', 'SMSQ_SEND_11', 'SMSQ_SEND_13', 'SMSQ_SEND_14', 'SMSQ_SEND_15'].includes(t));
 let rrIndex = 0;
 console.log(`[QTmsg] ALL_SMS_TABLES: ${ALL_SMS_TABLES.join(', ')} (${ALL_SMS_TABLES.length}개 Agent)`);
 console.log(`[QTmsg] BULK_ONLY_TABLES: ${BULK_ONLY_TABLES.join(', ')} (테스트/인증/비토 제외 ${BULK_ONLY_TABLES.length}개)`);
@@ -208,6 +211,27 @@ export async function getAuthSmsTable(): Promise<string> {
  */
 export function getPlatformNoticeCallback(): string {
   return (process.env.SYSTEM_SMS_CALLBACK || '18008125').replace(/\D/g, '');
+}
+
+/**
+ * ★ 2026-07-17: 라인그룹에 넣을 테이블이 MySQL에 실재하는지 검증 — 슈퍼관리자 쓰기 경로 전용.
+ *   isValidSmsTable은 이름 패턴만 본다. 패턴은 맞는데 실재하지 않는 테이블(오타 SMSQ_SEND_99 등)이
+ *   라인그룹에 들어가면, 그 라인을 쓰는 적재·취소·집계·정산의 UNION ALL이 통째로 SQL 에러가 난다
+ *   (tsc는 SQL 문자열 안 테이블명을 검증하지 못한다 — D227+ 발송결과 전체 다운과 같은 계열).
+ *   패턴 검증(validateSmsTables) 통과분만 조회하므로 식별자 주입 위험 없음.
+ * @returns 실재하지 않는 테이블명 목록 (빈 배열 = 전부 실재)
+ */
+export async function findMissingSmsTables(tables: string[]): Promise<string[]> {
+  const targets = tables.map((t) => String(t).trim()).filter((t) => isValidSmsTable(t));
+  if (targets.length === 0) return [];
+  const placeholders = targets.map(() => '?').join(',');
+  const rows = await mysqlQuery(
+    `SELECT TABLE_NAME FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (${placeholders})`,
+    targets,
+  ) as any[];
+  const found = new Set(rows.map((r: any) => String(r.TABLE_NAME)));
+  return targets.filter((t) => !found.has(t));
 }
 
 /** 캐시 무효화 (라인그룹 설정 변경 시 호출) */

@@ -72,6 +72,9 @@ export default function AdminDashboard() {
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
   // ★ 2026-06-13: AI 학습 데이터 열람 권한 (AI_TRAINING_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 진입 버튼 노출
   const [aiTrainingAllowed, setAiTrainingAllowed] = useState(false);
+  // ★ 2026-07-17: 발송 라인 설정 권한 (LINE_GROUP_ADMIN_USERS — 기본 ceo,admin) — 허용 계정에만 메뉴/탭 노출.
+  //   판정은 백엔드 GET /line-groups 응답의 canManage가 유일한 소스 — 프론트 자체 판정 금지.
+  const [lineGroupCanManage, setLineGroupCanManage] = useState(false);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   // 드롭다운: 단일 클릭 열림 고정 + 바깥 클릭·ESC 닫힘 (두 번 클릭 경합 제거)
@@ -426,6 +429,9 @@ const [emailSending, setEmailSending] = useState(false);
   // ===== 발송 라인그룹 =====
   const [lineGroups, setLineGroups] = useState<any[]>([]);
   const [lineGroupsLoading, setLineGroupsLoading] = useState(false);
+  // ★ 2026-07-17 발송 라인 설정 탭 — 생성/수정 모달 (null이면 닫힘). sms_tables는 화면에서 콤마 문자열로 다룬다.
+  const [editingLineGroup, setEditingLineGroup] = useState<any | null>(null);
+  const [lineGroupSaving, setLineGroupSaving] = useState(false);
 
   // ===== 템플릿 관리 =====
   const [adminTemplates, setAdminTemplates] = useState<any[]>([]);
@@ -695,6 +701,7 @@ const loadLineGroups = async () => {
     const res = await fetch('/api/admin/line-groups', { headers: { Authorization: `Bearer ${token}` } });
     const data = await res.json();
     setLineGroups(data.lineGroups || []);
+    setLineGroupCanManage(!!data.canManage);
   } catch (e) { console.error('라인그룹 조회 실패:', e); }
   finally { setLineGroupsLoading(false); }
 };
@@ -719,6 +726,50 @@ const deleteLineGroup = async (id: string) => {
   });
   if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
   await loadLineGroups();
+};
+
+// ★ 2026-07-17 발송 라인 설정 탭 — 저장/삭제 핸들러.
+//   sms_tables는 화면에서 콤마 구분 문자열로 다루고, 저장 직전 배열로 되돌린다.
+//   테이블명 유효성(SMSQ_SEND[_n][_yyyymm])은 백엔드 validateSmsTables가 최종 판정 — 프론트는 형식만 다듬는다.
+const handleSaveLineGroup = async () => {
+  if (!editingLineGroup) return;
+  const groupName = String(editingLineGroup.group_name || '').trim();
+  const tables = String(editingLineGroup.sms_tables || '')
+    .split(',').map((t: string) => t.trim()).filter(Boolean);
+  if (!groupName) return showAlert('입력 확인', '그룹명을 입력해주세요.', 'warning');
+  if (tables.length === 0) return showAlert('입력 확인', '발송 테이블을 1개 이상 입력해주세요.', 'warning');
+
+  setLineGroupSaving(true);
+  try {
+    await saveLineGroup(editingLineGroup.id || null, {
+      groupName,
+      groupType: editingLineGroup.group_type,
+      smsTables: tables,
+      sortOrder: Number(editingLineGroup.sort_order) || 0,
+      ...(editingLineGroup.id ? { isActive: !!editingLineGroup.is_active } : {}),
+    });
+    setEditingLineGroup(null);
+    showAlert('저장 완료', `${groupName} 라인그룹이 저장되었습니다.`, 'success');
+  } catch (e: any) {
+    showAlert('저장 실패', e?.message || '라인그룹 저장에 실패했습니다.', 'error');
+  } finally {
+    setLineGroupSaving(false);
+  }
+};
+
+const handleDeleteLineGroup = (lg: any) => {
+  showConfirm(
+    '라인그룹 삭제',
+    `"${lg.group_name}" 라인그룹을 삭제하시겠습니까?\n이 라인으로 발송한 과거 캠페인의 집계·정산 조회 범위가 바뀔 수 있습니다.`,
+    async () => {
+      try {
+        await deleteLineGroup(lg.id);
+        showAlert('삭제 완료', `${lg.group_name} 라인그룹이 삭제되었습니다.`, 'success');
+      } catch (e: any) {
+        showAlert('삭제 실패', e?.message || '라인그룹 삭제에 실패했습니다.', 'error');
+      }
+    }
+  );
 };
 useEffect(() => { if (billingToast) { const t = setTimeout(() => setBillingToast(null), 3000); return () => clearTimeout(t); } }, [billingToast]);
 useEffect(() => {
@@ -2802,10 +2853,12 @@ const handleApproveRequest = async (id: string) => {
               },
               {
                 label: '시스템', color: 'gray',
-                tabs: ['syncAgents', 'agentDeploy', 'auditLogs', 'loginBlocks'] as const,
+                tabs: ['syncAgents', 'agentDeploy', 'lineGroups', 'auditLogs', 'loginBlocks'] as const,
                 items: [
                   { key: 'syncAgents', label: 'Sync 모니터링' },
                   { key: 'agentDeploy', label: '싱크에이전트 배포' },
+                  // ★ 2026-07-17: 발송 라인 설정 = 허용 계정(기본 ceo,admin)에만 노출
+                  ...(lineGroupCanManage ? [{ key: 'lineGroups', label: '발송 라인 설정' }] : []),
                   // ★ 2026-06-11: 감사 로그 = 허용 계정(기본 ceo)에만 노출
                   ...(auditAccessAllowed ? [{ key: 'auditLogs', label: '감사 로그' }] : []),
                   // ★ 2026-07-04: 베스트 문안(업종 큐레이션) = 슈퍼관리자 공용(직원 큐레이션, ceo 게이트 없음)
@@ -8769,6 +8822,184 @@ const handleApproveRequest = async (id: string) => {
       {/* ★ D145 P0: 로그인 차단 관리 탭 */}
       {activeTab === 'loginBlocks' && (
         <LoginBlocksManagement />
+      )}
+
+      {/* ★ 2026-07-17 발송 라인 설정 탭 — LINE_GROUP_ADMIN_USERS(기본 ceo,admin) 전용 */}
+      {activeTab === 'lineGroups' && lineGroupCanManage && (
+        <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
+          <div className="px-6 py-4 border-b flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-semibold">발송 라인 설정</h2>
+              <p className="text-xs text-gray-500 mt-1">
+                라인그룹은 발송 라우팅 축입니다. 바꾸면 적재·취소·집계·정산이 함께 움직입니다.
+              </p>
+            </div>
+            <button
+              onClick={() => setEditingLineGroup({ group_name: '', group_type: 'bulk', sms_tables: '', sort_order: lineGroups.length + 1, is_active: true })}
+              className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors whitespace-nowrap"
+            >
+              새 라인그룹
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">순서</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">그룹명</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">타입</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">발송 테이블</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">배정 고객사</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상태</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">관리</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {lineGroupsLoading ? (
+                  <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-500">불러오는 중...</td></tr>
+                ) : lineGroups.length === 0 ? (
+                  <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-500">등록된 라인그룹이 없습니다.</td></tr>
+                ) : (
+                  lineGroups.map((lg: any) => {
+                    const typeLabels: Record<string, { label: string; cls: string }> = {
+                      bulk: { label: '대량발송', cls: 'bg-blue-100 text-blue-700' },
+                      test: { label: '테스트', cls: 'bg-amber-100 text-amber-700' },
+                      auth: { label: '인증', cls: 'bg-purple-100 text-purple-700' },
+                      bito: { label: '자체 게이트웨이', cls: 'bg-emerald-100 text-emerald-700' },
+                    };
+                    const t = typeLabels[lg.group_type] || { label: lg.group_type, cls: 'bg-gray-100 text-gray-700' };
+                    return (
+                      <tr key={lg.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-2.5 text-center text-gray-500">{lg.sort_order}</td>
+                        <td className="px-4 py-2.5 font-medium text-gray-900">{lg.group_name}</td>
+                        <td className="px-4 py-2.5 text-center">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${t.cls}`}>{t.label}</span>
+                        </td>
+                        <td className="px-4 py-2.5 font-mono text-xs text-gray-600">{(lg.sms_tables || []).join(', ')}</td>
+                        <td className="px-4 py-2.5 text-center text-gray-700">{Number(lg.company_count || 0).toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-center">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${lg.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                            {lg.is_active ? '활성' : '비활성'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-center whitespace-nowrap">
+                          <button
+                            onClick={() => setEditingLineGroup({ ...lg, sms_tables: (lg.sms_tables || []).join(', ') })}
+                            className="px-2.5 py-1 text-xs border rounded-lg text-gray-700 hover:bg-gray-100"
+                          >
+                            수정
+                          </button>
+                          <button
+                            onClick={() => handleDeleteLineGroup(lg)}
+                            className="ml-1.5 px-2.5 py-1 text-xs border border-red-200 rounded-lg text-red-600 hover:bg-red-50"
+                          >
+                            삭제
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="px-6 py-3 border-t text-xs text-gray-400">
+            고객사·사용자 배정은 [고객 관리 → 고객사 관리 → 수정 → 발송 라인] 및 [사용자 관리 → 수정 → 발송 라인그룹]에서 합니다.
+          </div>
+        </div>
+      )}
+
+      {/* ★ 2026-07-17 라인그룹 생성/수정 모달 */}
+      {editingLineGroup && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
+              <h3 className="text-lg font-semibold text-gray-800">
+                {editingLineGroup.id ? '라인그룹 수정' : '새 라인그룹'}
+              </h3>
+            </div>
+            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">그룹명 *</label>
+                <input
+                  type="text"
+                  value={editingLineGroup.group_name}
+                  onChange={(e) => setEditingLineGroup({ ...editingLineGroup, group_name: e.target.value })}
+                  placeholder="비토게이트웨이 2"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">타입 *</label>
+                <select
+                  value={editingLineGroup.group_type}
+                  onChange={(e) => setEditingLineGroup({ ...editingLineGroup, group_type: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="bulk">대량발송 (bulk)</option>
+                  <option value="bito">자체 게이트웨이 (bito)</option>
+                  <option value="test">테스트 (test)</option>
+                  <option value="auth">인증 (auth)</option>
+                </select>
+                <p className="text-xs text-gray-400 mt-1">
+                  대량발송·자체 게이트웨이만 고객사/사용자 배정 드롭다운에 노출됩니다. 테스트·인증은 시스템 전용입니다.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">발송 테이블 *</label>
+                <input
+                  type="text"
+                  value={editingLineGroup.sms_tables}
+                  onChange={(e) => setEditingLineGroup({ ...editingLineGroup, sms_tables: e.target.value })}
+                  placeholder="SMSQ_SEND_14"
+                  className="w-full px-3 py-2 border rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  콤마로 구분. 2개 이상이면 라운드로빈으로 나눠 적재합니다. MySQL에 실재하는 테이블만 넣어야 합니다.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">정렬 순서</label>
+                <input
+                  type="number"
+                  value={editingLineGroup.sort_order}
+                  onChange={(e) => setEditingLineGroup({ ...editingLineGroup, sort_order: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              {editingLineGroup.id && (
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={!!editingLineGroup.is_active}
+                    onChange={(e) => setEditingLineGroup({ ...editingLineGroup, is_active: e.target.checked })}
+                    className="w-4 h-4"
+                  />
+                  활성 (비활성하면 이 라인으로 새 발송이 나가지 않습니다)
+                </label>
+              )}
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingLineGroup(null)}
+                  className="flex-1 px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50"
+                >
+                  취소
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveLineGroup}
+                  disabled={lineGroupSaving}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {lineGroupSaving ? '저장 중...' : '저장'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* 감사 로그 탭 */}
