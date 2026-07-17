@@ -263,6 +263,32 @@ export function synthesizeButtonsFromActionUrl(actionUrl: any, actionLabel?: any
   return [{ id: 'btn_primary', label: String(actionLabel || '자세히 보기'), action_url: u, style: 'primary' }];
 }
 
+// ★ 2026-07-17 템플릿별 허용 블록 — SDK inapp-blocks.ts ALLOWED_BLOCKS 1:1 미러 (frontend BlockPreview 미러와 3면 동일).
+//   단일 진실 = SDK. 변경 시 SDK·frontend·여기 3면 동시 갱신 의무.
+//   SDK 실렌더가 미허용 블록을 조용히 건너뛰므로(renderBlocks isBlockAllowed), AI 생성 산출물은
+//   저장 전에 걸러 "미리보기·실물에서 사라지는 블록이 든 생성물"을 애초에 만들지 않는다.
+const INAPP_ALL_BLOCK_TYPES = ['media', 'eyebrow', 'headline', 'body', 'bullets', 'benefit', 'countdown', 'rating', 'product', 'divider', 'spacer', 'cta_group', 'footer'];
+const INAPP_ALL_BLOCK_SET: ReadonlySet<string> = new Set(INAPP_ALL_BLOCK_TYPES);
+export const INAPP_TEMPLATE_ALLOWED_BLOCKS: Record<string, ReadonlySet<string>> = {
+  center_modal: INAPP_ALL_BLOCK_SET,
+  full_screen: INAPP_ALL_BLOCK_SET,
+  inline_card: INAPP_ALL_BLOCK_SET,
+  slide_in: new Set(['media', 'eyebrow', 'headline', 'body', 'rating', 'product', 'benefit', 'cta_group', 'divider', 'spacer', 'footer']),
+  top_banner: new Set(['media', 'eyebrow', 'headline', 'body', 'cta_group', 'footer']),
+  bottom_banner: new Set(['media', 'eyebrow', 'headline', 'body', 'cta_group', 'footer']),
+  toast: new Set(['eyebrow', 'headline', 'body', 'footer']),
+  floating_button: new Set(['cta_group']),
+};
+
+/** 템플릿 미허용 블록 제거 — SDK isBlockAllowed와 동일 기준(정의 없는 템플릿·미지정 = 전부 유지). 순수 함수 */
+export function filterBlocksForTemplate(template: string | null | undefined, blocks: any[]): any[] {
+  const list = Array.isArray(blocks) ? blocks : [];
+  if (!template) return list;
+  const set = INAPP_TEMPLATE_ALLOWED_BLOCKS[template];
+  if (!set) return list;
+  return list.filter((b) => !b || typeof b !== 'object' || !b.type || set.has(String(b.type)));
+}
+
 // ★ 2026-07-07(2) 형태 축 화이트리스트 — SDK inapp-blocks CARD_STYLES와 1:1
 export const INAPP_CARD_STYLES = ['classic', 'bubble', 'ticket', 'poster'] as const;
 

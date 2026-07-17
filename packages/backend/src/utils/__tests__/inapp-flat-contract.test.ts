@@ -11,6 +11,7 @@ import {
   composeFlatFromBlocks,
   synthesizeButtonsFromActionUrl,
   sanitizeContentBlocks,
+  filterBlocksForTemplate,
 } from '../inapp-message';
 
 describe('composeFlatFromBlocks — 범용 보장 계약 합성', () => {
@@ -117,5 +118,37 @@ describe('synthesizeButtonsFromActionUrl — 옛 단일 CTA 승격(앱 채널 �
   it('빈/공백 actionUrl = 빈 배열', () => {
     expect(synthesizeButtonsFromActionUrl(null)).toEqual([]);
     expect(synthesizeButtonsFromActionUrl('  ')).toEqual([]);
+  });
+});
+
+// ★ 2026-07-17 템플릿별 허용 블록 필터 — SDK inapp-blocks ALLOWED_BLOCKS 3면 미러 계약.
+//   AI 생성 산출물이 slide_in에 bullets 등 미허용 블록을 실으면 실렌더에서 조용히 사라지므로 저장 전에 거른다.
+describe('filterBlocksForTemplate — 템플릿 허용표 3면 미러', () => {
+  const blocks = [
+    { type: 'headline', text: '제목' },
+    { type: 'bullets', items: [{ icon: 'check', text: '장점' }] },
+    { type: 'countdown', ends_at: '2026-08-01T00:00:00Z' },
+    { type: 'cta_group', buttons: [{ id: 'b1', label: '보기' }] },
+  ];
+
+  it('slide_in — bullets·countdown 제거, headline·cta 유지 (SDK 허용표 1:1)', () => {
+    const out = filterBlocksForTemplate('slide_in', blocks);
+    expect(out.map((b: any) => b.type)).toEqual(['headline', 'cta_group']);
+  });
+
+  it('toast — 텍스트 4종만 (headline 유지, 나머지 제거)', () => {
+    const out = filterBlocksForTemplate('toast', blocks);
+    expect(out.map((b: any) => b.type)).toEqual(['headline']);
+  });
+
+  it('floating_button — cta_group만', () => {
+    const out = filterBlocksForTemplate('floating_button', blocks);
+    expect(out.map((b: any) => b.type)).toEqual(['cta_group']);
+  });
+
+  it('center_modal·미지정·미정의 템플릿 = 전부 유지 (SDK default 허용과 동일)', () => {
+    expect(filterBlocksForTemplate('center_modal', blocks)).toHaveLength(4);
+    expect(filterBlocksForTemplate(null, blocks)).toHaveLength(4);
+    expect(filterBlocksForTemplate('unknown_tpl', blocks)).toHaveLength(4);
   });
 });

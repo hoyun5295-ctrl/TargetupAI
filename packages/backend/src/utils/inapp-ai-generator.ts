@@ -31,7 +31,7 @@ import { buildEventPromptBlock, benefitMatchesEventText, normalizeEventText, val
 // ★ 2026-07-14 디자인 3.0 — og:image 자동 채움 (연결 고정 + 바이트 상한 공용 CT — DM/이메일과 동일 엔진)
 import { fetchProductOgImages } from './dm/dm-brand-extractor';
 // ★ D230+ 블록 — CT-27 공용 검증/정규화 (인라인 중복 금지)
-import { sanitizeContentBlocks, normalizeTheme, normalizeCardStyle, INAPP_CARD_STYLES, BENEFIT_PLACEHOLDER, sanitizeInAppDesign } from './inapp-message';
+import { sanitizeContentBlocks, normalizeTheme, normalizeCardStyle, INAPP_CARD_STYLES, BENEFIT_PLACEHOLDER, sanitizeInAppDesign, filterBlocksForTemplate } from './inapp-message';
 // ★ 2026-07-14 디자인 4.0 M2 — 결정적 디자인 추천 소유 = design-core/recommend (값 무변 이관)
 import { INAPP_SCENARIO_CARD_STYLE, INAPP_SCENARIO_TREATMENT } from './design-core/recommend';
 // ★ 2026-07-14 디자인 4.0 M5 — 행사 → 정예 템플릿 스토리 힌트 (결정적 선택기, design-core)
@@ -766,6 +766,10 @@ ${brandAccent
     card_style,
     design,
   };
+  // ★ 2026-07-17 템플릿 미허용 블록 제거 — SDK 실렌더 isBlockAllowed와 동일 기준(3면 미러).
+  //   AI가 slide_in에 bullets 등 미허용 블록을 제안해도 저장 전에 걸러, 편집기 경고 배지가 달린 생성물을 차단.
+  //   (사용자 직접 편집 경로는 무접촉 — 편집기는 경고로 안내, 생성물만 기계로 거른다.)
+  message.content_blocks = filterBlocksForTemplate(message.template, message.content_blocks);
 
   // 6 sub-agent 진행 — Frontend 시각 효과용 응답 (5~10초 시뮬레이션)
   const progressSteps: SubAgentStep[] = [
