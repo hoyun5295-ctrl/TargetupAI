@@ -6,13 +6,18 @@
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 
-beforeAll(() => {
+// ★ 2026-07-17 flaky 정정 — 모듈 최초 동적 import(전이 의존 변환 비용 수 초, 부하 시 5,418ms 실측)가
+//   개별 테스트 5초 타임아웃 안에서 결제돼 pre-push가 간헐 차단되던 근본. import를 훅으로 이동(30초).
+//   EMAIL_TRACKING_SECRET을 import 전에 설정하는 순서는 보존. 검증 로직 무변경.
+let wrapLinksForTracking: (html: string, sendId: string, email: string) => string;
+
+beforeAll(async () => {
   process.env.EMAIL_TRACKING_SECRET = 'test-secret-for-wrap';
-});
+  ({ wrapLinksForTracking } = await import('../email-tracking'));
+}, 30_000);
 
 describe('wrapLinksForTracking — a + v:roundrect 동시 래핑', () => {
-  it('<a href>와 <v:roundrect href> 둘 다 /api/email/t/c/ 추적 URL로 래핑', async () => {
-    const { wrapLinksForTracking } = await import('../email-tracking');
+  it('<a href>와 <v:roundrect href> 둘 다 /api/email/t/c/ 추적 URL로 래핑', () => {
     const html = '<!--[if mso]><v:roundrect href="https://shop.example.com/a" arcsize="30%"><center>보기</center></v:roundrect><![endif]--><!--[if !mso]><!--><a href="https://shop.example.com/a">보기</a><!--<![endif]-->';
     const out = wrapLinksForTracking(html, '11111111-1111-1111-1111-111111111111', 'user@example.com');
     expect(out).not.toContain('href="https://shop.example.com/a"'); // 원본 직행 0
@@ -20,8 +25,7 @@ describe('wrapLinksForTracking — a + v:roundrect 동시 래핑', () => {
     expect(tracked.length).toBe(2); // a + roundrect 둘 다
   });
 
-  it('제외 규칙 유지 — mailto/변수/이미 추적 URL은 그대로 (roundrect 포함)', async () => {
-    const { wrapLinksForTracking } = await import('../email-tracking');
+  it('제외 규칙 유지 — mailto/변수/이미 추적 URL은 그대로 (roundrect 포함)', () => {
     const html = '<a href="mailto:cs@example.com">문의</a>'
       + '<a href="{{ customer.link }}">개인화</a>'
       + '<v:roundrect href="https://app.hanjul.ai/api/email/t/c/abc.def"><center>기추적</center></v:roundrect>';
