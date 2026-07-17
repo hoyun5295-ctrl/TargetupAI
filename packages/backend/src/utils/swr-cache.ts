@@ -116,6 +116,29 @@ export async function swrCache<T>(opts: SwrCacheOptions<T>): Promise<T> {
   return value;
 }
 
+/**
+ * ★ 2026-07-17(3) — 사전 워밍용: compute 후 세대 가드로 저장(키 부재여도 저장).
+ * 무효화 길목이 캐시를 지운 뒤 백그라운드로 새 값을 미리 데워 두는 용도 —
+ * 사용자가 콜드 계산을 무는 구조 자체를 제거한다. 워밍 도중 또 무효화가 끼면
+ * 세대 가드가 저장을 생략하고, 그 무효화가 예약한 다음 워밍이 이어받는다.
+ */
+export async function swrPrimeCache<T>(opts: {
+  key: string;
+  hardTtlSec: number;
+  compute: () => Promise<T>;
+  generationKey?: string;
+}): Promise<void> {
+  const { key, hardTtlSec, compute, generationKey } = opts;
+  const genBefore = await readGeneration(generationKey);
+  const value = await compute();
+  const envelope = buildSwrEnvelope(value, Date.now());
+  if (generationKey) {
+    await genGuardedSet(key, generationKey, genBefore, hardTtlSec, envelope, false);
+  } else {
+    await redis.setex(key, hardTtlSec, envelope);
+  }
+}
+
 function scheduleRefresh<T>(
   key: string,
   hardTtlSec: number,

@@ -40,7 +40,9 @@
 
 import { query } from '../config/database';
 import { redis } from '../config/defaults';
-import { FIELD_MAP, getColumnFields, getFieldByKey } from './standard-field-map';
+import { FIELD_MAP, getColumnFields, getFieldByKey, CATEGORY_LABELS, FIELD_DISPLAY_MAP, reverseDisplayValue } from './standard-field-map';
+import { detectPhoneFields } from './callback-filter';
+import { swrPrimeCache } from './swr-cache';
 
 // ─── 타입 정의 ───
 
@@ -135,22 +137,30 @@ const ENABLED_FIELDS_CACHE_TTL_MS = 5 * 60 * 1000;
 const enabledFieldsCache = new Map<string, { at: number; data: EnabledFieldsResult }>();
 
 /**
- * ★ Codex 3R — SWR 세대 키. 무효화마다 INCR — swrCache가 "compute 도중 무효화 발생"을 감지해
- * 변형 전 결과의 저장(부활)을 생략하는 가드. 이름에 콜론 구획을 쓰지 않아(enabled-fields-gen)
- * 아래 삭제 패턴(enabled-fields:*)에 걸리지 않는다 — 패턴 삭제로 세대가 리셋되면 INCR 재시작 값이
- * 과거 값과 우연히 일치해 가드가 뚫릴 수 있기 때문.
+ * ★ Codex 3R·4차 — SWR 세대 키(회사별). 무효화마다 INCR — swrCache/swrPrimeCache가 "compute 도중
+ * 무효화 발생"을 감지해 변형 전 결과의 저장(부활)을 생략하는 가드.
+ * 회사별 분리(4차 지적 수용): 전역 키였을 때는 B사 무효화가 A사 워밍 저장까지 무효로 만들어 A가
+ * 콜드로 남았다 — 회사별 키면 자기 회사 재무효화만 저장을 막고, 그 재무효화가 예약한 다음 워밍이
+ * 항상 이어받는다. 이름에 'enabled-fields:' 콜론 구획을 쓰지 않아(enabled-fields-gen:) 데이터 키
+ * 삭제 패턴에 걸리지 않는다 — 패턴 삭제로 세대가 리셋되면 INCR 재시작 값이 과거 값과 우연히
+ * 일치해 가드가 뚫릴 수 있기 때문. (무인자 clear 호출 = 전 소스 grep 0건 실측)
  */
-export const ENABLED_FIELDS_CACHE_GEN_KEY = 'enabled-fields-gen';
+export const enabledFieldsGenKey = (companyId: string) => `enabled-fields-gen:${companyId}`;
 
 export function clearEnabledFieldsCache(companyId?: string): void {
   // ★ 2026-07-17 — 라우트 응답 Redis 캐시(enabled-fields:{companyId}:{userId}:{scope})도 같은 길목에서 무효화.
   //   "업로드·삭제·싱크 = 즉시 반영" 기존 계약 유지(Codex 정정 — Redis 잔존 시 새 필드·삭제 고객 sample 노출).
-  //   fire-and-forget — 무효화 실패해도 SWR hard TTL 10분이 상한(soft 60초 지나면 백그라운드 갱신이 먼저 정정).
-  redis.incr(ENABLED_FIELDS_CACHE_GEN_KEY).catch(() => { /* 세대 가드 실패 = 키 삭제·TTL이 상한 */ });
+  //   fire-and-forget — 무효화 실패해도 soft 60초 백그라운드 갱신이 먼저 정정(hard TTL은 최후 상한).
+  if (companyId) {
+    redis.incr(enabledFieldsGenKey(companyId)).catch(() => { /* 세대 가드 실패 = 키 삭제·TTL이 상한 */ });
+  }
   const redisPattern = companyId ? `enabled-fields:${companyId}:*` : 'enabled-fields:*';
   redis.keys(redisPattern)
     .then((keys) => (keys.length > 0 ? redis.del(...keys) : 0))
     .catch(() => { /* TTL 60초 상한 */ });
+  // ★ 2026-07-17(3) — 무효화 = 사전 워밍 예약(5초 디바운스). 데이터가 바뀐 직후 백그라운드로
+  //   'all' 스코프 payload를 다시 계산해 공용 키를 데워 두므로, 사용자가 콜드 1초를 물지 않는다.
+  if (companyId) scheduleEnabledFieldsWarm(companyId);
   if (!companyId) {
     enabledFieldsCache.clear();
     return;
@@ -169,12 +179,15 @@ export function clearEnabledFieldsCache(companyId?: string): void {
  */
 export async function detectEnabledFields(
   params: DetectEnabledFieldsParams,
+  opts: { bypassCache?: boolean } = {},
 ): Promise<EnabledFieldsResult> {
   const { companyId, scopeWhere, scopeParams } = params;
 
   // ★ 2026-07-03: 캐시 조회 (5분 TTL) — 소비처가 배열을 변형해도 안전하게 얕은 복사로 반환
+  // ★ Codex 4차: bypassCache = 무효화 후 워밍 전용 — 무효화 직전 in-flight 계산이 5분 캐시에 남긴
+  //   변형 전 결과를 재사용하지 않도록 읽기만 우회(계산 결과는 아래에서 캐시에 덮어써 신선하게 갱신).
   const cacheKey = `${companyId}|${scopeWhere}|${JSON.stringify(scopeParams)}`;
-  const cached = enabledFieldsCache.get(cacheKey);
+  const cached = opts.bypassCache ? undefined : enabledFieldsCache.get(cacheKey);
   if (cached && Date.now() - cached.at < ENABLED_FIELDS_CACHE_TTL_MS) {
     return {
       fields: [...cached.data.fields],
@@ -403,4 +416,196 @@ export function buildDynamicSelectExpr(
   }
 
   return { selectExpr: parts.join(', '), hasCustomFields };
+}
+
+// ─── 활성 필드 응답 payload 조립 + 사전 워밍 (★ 2026-07-17(3) 라우트 인라인 → CT 이동) ───
+
+/**
+ * enabled-fields 캐시 hard TTL(초) = 1시간. ★ Codex 확인 라운드 정정(24h→1h): CDP identify 계열
+ * (identifyCustomer — custom_fields 쓰기)은 clearEnabledFieldsCache 길목을 타지 않는 고빈도 경로라
+ * "모든 쓰기가 무효화를 탄다"는 전제가 성립하지 않는다. 그 핫패스에 KEYS 무효화를 붙이는 대신
+ * TTL 상한을 1시간으로 묶는다 — 장기 무접근 후 첫 응답의 낡음이 최대 1시간(soft 60초 백그라운드
+ * 갱신이 그 1회 뒤 즉시 정정), 콜드 재발은 1시간+ 무접근일 때만(워밍이 통상 유입을 커버).
+ */
+export const ENABLED_FIELDS_HARD_TTL_SEC = 60 * 60;
+
+export interface EnabledFieldsPayload {
+  fields: EnabledField[];
+  options: Record<string, string[]>;
+  sample: Record<string, any>;
+  categories: typeof CATEGORY_LABELS;
+  phoneFields: string[];
+}
+
+/**
+ * GET /enabled-fields 응답 전체(fields+options+sample+phoneFields)를 조립한다.
+ * 기존 routes/customers.ts 인라인 로직의 무변형 이동 — 쿼리·필터·실패 무시(try/catch) 전부 동일.
+ * 소비처: ①라우트(swrCache compute) ②scheduleEnabledFieldsWarm(무효화 길목 사전 워밍).
+ * 재진입 안전 — scopeParams는 읽기 전용으로만 쓴다.
+ */
+export async function buildEnabledFieldsPayload(
+  params: DetectEnabledFieldsParams,
+  opts: { bypassDetectorCache?: boolean } = {},
+): Promise<EnabledFieldsPayload> {
+  const { companyId, scopeWhere, scopeParams } = params;
+
+  // ★ CT-18: 활성 필드 탐지 단일 진입점 (bypassDetectorCache = 워밍 전용 — Codex 4차)
+  const { fields } = await detectEnabledFields(
+    { companyId, scopeWhere, scopeParams },
+    { bypassCache: opts.bypassDetectorCache },
+  );
+
+  // 3. 드롭다운 옵션 (실제 DB 값 기반 — 동적 감지)
+  // 고카디널리티 필드 제외 (이름, 전화번호, 이메일, 주소는 DISTINCT 의미 없음)
+  const HIGH_CARDINALITY = ['name', 'phone', 'email', 'address'];
+  const options: Record<string, string[]> = {};
+
+  // ★ 2026-07-17 성능 — 필드당 DISTINCT 조회(3-1 직접 컬럼 + 3-2 커스텀)를 순차 루프에서 병렬로.
+  //   쿼리·필터·결과 의미 무변경, 필드별 실패 무시(try/catch)도 그대로 — 실행 시점만 병렬.
+  //   ★ Codex 정정: 무제한 병렬은 커스텀 필드 다수 회사가 PG 풀(20)을 독점 → 동시 5개 청크 상한.
+  const optionThunks: Array<() => Promise<void>> = [];
+
+  // 3-1. 직접 컬럼 string 필드 → DISTINCT 조회
+  for (const f of fields) {
+    if (f.is_custom || f.data_type !== 'string' || HIGH_CARDINALITY.includes(f.field_key)) continue;
+    const mapped = getFieldByKey(f.field_key);
+    const col = mapped?.columnName || f.field_key;
+    optionThunks.push(async () => {
+      try {
+        const optResult = await query(
+          `SELECT DISTINCT ${col} FROM customers WHERE ${scopeWhere} AND ${col} IS NOT NULL AND ${col} != '' ORDER BY ${col} LIMIT 100`,
+          scopeParams
+        );
+        if (optResult.rows.length > 0 && optResult.rows.length <= 100) {
+          options[f.field_key] = optResult.rows.map((r: any) => r[col]);
+        }
+      } catch (e) { /* 컬럼 없으면 무시 */ }
+    });
+  }
+
+  // 3-2. 커스텀 필드 (JSONB) string 타입 → DISTINCT 조회
+  for (const f of fields) {
+    if (!f.is_custom || f.data_type !== 'string') continue;
+    optionThunks.push(async () => {
+      try {
+        const optResult = await query(
+          `SELECT DISTINCT custom_fields->>'${f.field_key}' as val FROM customers WHERE ${scopeWhere} AND custom_fields->>'${f.field_key}' IS NOT NULL AND custom_fields->>'${f.field_key}' != '' ORDER BY val LIMIT 100`,
+          scopeParams
+        );
+        if (optResult.rows.length > 0 && optResult.rows.length <= 100) {
+          options[f.field_key] = optResult.rows.map((r: any) => r.val);
+        }
+      } catch (e) { /* 커스텀 필드 옵션 조회 실패 무시 */ }
+    });
+  }
+  for (let i = 0; i < optionThunks.length; i += 5) {
+    await Promise.all(optionThunks.slice(i, i + 5).map((fn) => fn()));
+  }
+
+  // 4. 실제 고객 1건 샘플 데이터 (AI 맞춤한줄 미리보기용)
+  // ★ B+0407-1: enum 필드(gender F→여성) 미리 변환 — 모든 frontend 표시 경로 자동 정상화
+  const sample: Record<string, any> = {};
+  try {
+    const sampleResult = await query(
+      `SELECT * FROM customers
+       WHERE ${scopeWhere} AND name IS NOT NULL AND name != ''
+       ORDER BY updated_at DESC LIMIT 1`,
+      scopeParams
+    );
+    if (sampleResult.rows.length > 0) {
+      const row = sampleResult.rows[0];
+      for (const f of fields) {
+        const key = f.field_key;
+        const mapped = getFieldByKey(key);
+        let val: any;
+        if (mapped?.storageType === 'custom_fields' && row.custom_fields && row.custom_fields[key] != null) {
+          val = row.custom_fields[key];
+        } else if (!mapped && row.custom_fields && row.custom_fields[key] != null) {
+          // FIELD_MAP에 없는 커스텀 필드 (레거시 등)
+          val = row.custom_fields[key];
+        } else if (row[key] != null) {
+          val = row[key];
+        } else {
+          continue;
+        }
+        // ★ B+0407-1: enum 필드 한글 역변환 (gender 'F' → '여성')
+        if (FIELD_DISPLAY_MAP[key]) {
+          sample[key] = reverseDisplayValue(key, val);
+        } else {
+          sample[key] = val;
+        }
+      }
+    }
+  } catch (e) { /* 샘플 조회 실패 시 빈 객체 */ }
+
+  // ★ D103: 전화번호 형태 필드 동적 감지 — 개별회신번호 드롭다운용
+  let phoneFields: string[] = [];
+  try {
+    // FIELD_MAP에서 normalizeFunction이 전화번호 관련인 필드는 무조건 포함 (데이터 없어도)
+    const knownPhoneKeys = FIELD_MAP.filter(f =>
+      f.normalizeFunction === 'normalizePhone' || f.normalizeFunction === 'normalizeStorePhone'
+    ).map(f => f.fieldKey).filter(k => k !== 'phone'); // phone(수신자번호) 제외
+
+    // 이미 enabled된 필드 중 기본 전화번호 필드
+    const enabledKnown = knownPhoneKeys.filter(k => fields.some((f) => f.field_key === k));
+
+    // 커스텀 필드는 실제 데이터 샘플링으로 판별 (최대 10건)
+    const phoneSampleResult = await query(
+      `SELECT custom_fields, store_phone FROM customers WHERE ${scopeWhere} AND custom_fields IS NOT NULL AND custom_fields != '{}' LIMIT 10`,
+      scopeParams
+    );
+    const customPhoneFields = detectPhoneFields(
+      phoneSampleResult.rows,
+      fields.filter((f) => f.is_custom),
+    );
+
+    phoneFields = [...new Set([...enabledKnown, ...customPhoneFields.map(f => f.field_key)])];
+  } catch (e) { /* phone_fields 감지 실패 시 빈 배열 */ }
+
+  return { fields, options, sample, categories: CATEGORY_LABELS, phoneFields };
+}
+
+/**
+ * ★ 2026-07-17(3) — 무효화 길목 사전 워밍. clearEnabledFieldsCache(9곳 전 길목 공용)가 호출한다.
+ * 5초 디바운스(업로드/싱크 배치의 연속 무효화 흡수) 후 'all' 스코프 payload를 백그라운드 재계산해
+ * 회사 공용 키(enabled-fields:{companyId}:all)를 데운다 — 콜드 1초(0717 실측 1,074ms)를
+ * 사용자가 아니라 워커가 문다. 워밍 도중 또 무효화가 끼면 swrPrimeCache 세대 가드가 저장을
+ * 생략하고, 그 무효화가 예약한 다음 워밍이 이어받는다. 실패 = 다음 접근이 콜드 계산(현행과 동일).
+ */
+// ★ Codex 확인 라운드 — 60초: 싱크는 4,000행 배치마다 무효화를 호출하므로 짧은 디바운스면 배치
+//   사이(>5초 간격)마다 전수 스캔 워밍이 끼어 수십 회 낭비된다. 60초면 대형 싱크 전체가 하나로
+//   합쳐져 마지막 배치 후 1회만 워밍. 트레이드오프 = 데이터 변경 후 60초 안에 진입하는 사용자만
+//   콜드 1회(현행과 동일 비용) — 반복 콜드 제거라는 목적은 그대로.
+const ENABLED_FIELDS_WARM_DEBOUNCE_MS = 60 * 1000;
+const enabledFieldsWarmTimers = new Map<string, NodeJS.Timeout>();
+// ★ Codex 4차 — 워밍 전역 직렬 큐: 여러 회사가 동시에 싱크/업로드를 끝내도 워밍은 한 번에 하나만
+//   실행(회사당 대기 1건 dedup). 워밍의 DISTINCT 청크(동시 5)가 회사 수만큼 겹치면 PG 풀(20)을
+//   잠식해 사용자 요청이 줄을 서게 되므로 — 워밍은 배경 작업이라 순서대로 밀려도 된다.
+let enabledFieldsWarmChain: Promise<void> = Promise.resolve();
+const enabledFieldsWarmQueued = new Set<string>();
+
+function scheduleEnabledFieldsWarm(companyId: string): void {
+  const prev = enabledFieldsWarmTimers.get(companyId);
+  if (prev) clearTimeout(prev);
+  enabledFieldsWarmTimers.set(companyId, setTimeout(() => {
+    enabledFieldsWarmTimers.delete(companyId);
+    if (enabledFieldsWarmQueued.has(companyId)) return; // 이미 대기 중 — 그 실행이 최신 데이터를 읽는다
+    enabledFieldsWarmQueued.add(companyId);
+    enabledFieldsWarmChain = enabledFieldsWarmChain
+      .then(async () => {
+        enabledFieldsWarmQueued.delete(companyId);
+        await swrPrimeCache({
+          key: `enabled-fields:${companyId}:all`,
+          hardTtlSec: ENABLED_FIELDS_HARD_TTL_SEC,
+          generationKey: enabledFieldsGenKey(companyId),
+          // ★ Codex 4차 — detector 인메모리 캐시 우회: 무효화 직전 in-flight 계산이 남긴 변형 전
+          //   결과를 재사용하지 않도록 항상 실계산(결과가 캐시를 덮어써 양쪽 층이 함께 신선해짐).
+          compute: () => buildEnabledFieldsPayload(
+            { companyId, scopeWhere: 'company_id = $1 AND is_active = true', scopeParams: [companyId] },
+            { bypassDetectorCache: true },
+          ),
+        });
+      })
+      .catch(() => { /* 워밍 실패 = 다음 접근이 콜드 계산 (현행과 동일) */ });
+  }, ENABLED_FIELDS_WARM_DEBOUNCE_MS));
 }

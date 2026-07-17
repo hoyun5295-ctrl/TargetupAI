@@ -5,6 +5,17 @@
 
 ---
 
+## 0-1. 운영 DB 설정 기준선 (★ 2026-07-17 인프라 감사 — 신규 컨테이너 생성 시 기본값 방치 금지)
+
+| 항목 | 기준값 | 확인 명령 | 비고 |
+|------|--------|-----------|------|
+| PG shared_buffers | 4GB | `SHOW shared_buffers;` | 초기 구축 때 튜닝돼 있던 값 (양호) |
+| PG effective_cache_size | 48GB | `SHOW effective_cache_size;` | 〃 |
+| PG work_mem | 64MB | `SHOW work_mem;` | 〃 |
+| MySQL innodb_buffer_pool_size | **2GB** | `SHOW VARIABLES LIKE 'innodb_buffer_pool_size';` | **2026-07-17 128MB(설치 기본값 방치)→2GB 온라인 확장(SET PERSIST — 재기동 유지).** 컨테이너 수명 누적 디스크 읽기 36.9TB가 방치의 증거(데이터 1~2GB DB의 상시 재읽기). 신규/재생성 시 반드시 재적용 확인 |
+| nginx gzip | on + application/javascript 포함 | `grep gzip_types /etc/nginx/nginx.conf` | 양호 (JS 압축 확인 2026-07-17) |
+| 관측 | pg_stat_statements + MySQL slow_query_log(0.5s) | `SELECT count(*) FROM pg_stat_statements;` | 2026-07-17 가동 — 성능 사이클의 측정 원천 |
+
 ## 1. 접속 정보
 
 ### 1-1. 로컬 개발 환경

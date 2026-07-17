@@ -5,17 +5,16 @@ import { authenticate } from '../middlewares/auth';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants } from '../utils/normalize';
 // ★ 2026-06-25: 고객 전체 삭제 시 데이터 프로필 캐시 무효화(게이트 즉시 반영)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
-import { FIELD_MAP, getFieldByKey, getColumnFields, CATEGORY_LABELS, FIELD_DISPLAY_MAP, reverseDisplayValue, renderFieldValue } from '../utils/standard-field-map';
+import { getColumnFields, FIELD_DISPLAY_MAP, reverseDisplayValue, renderFieldValue } from '../utils/standard-field-map';
 import { DEFAULT_COSTS, CACHE_TTL } from '../config/defaults';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildDynamicFilterCompat } from '../utils/customer-filter';
 import { getTestSmsTables } from '../utils/sms-queue';
-import { detectPhoneFields } from '../utils/callback-filter';
 import { getCampaignResultCounts } from '../utils/stats-aggregation';
 import { blockIfSyncActive } from '../middlewares/sync-active-check';
 import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
-import { detectEnabledFields, buildDynamicSelectExpr, clearEnabledFieldsCache, ENABLED_FIELDS_CACHE_GEN_KEY } from '../utils/enabled-fields';
+import { detectEnabledFields, buildDynamicSelectExpr, buildEnabledFieldsPayload, clearEnabledFieldsCache, enabledFieldsGenKey, ENABLED_FIELDS_HARD_TTL_SEC } from '../utils/enabled-fields';
 import { swrCache } from '../utils/swr-cache';
 
 // ★ 2026-07-17 — 대시보드 캐시 SWR hard TTL(초). soft(CACHE_TTL.customerStats=60초) 안은 현행 히트,
@@ -1287,130 +1286,26 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
     //   scopeWhere/scopeParams는 읽기 전용으로만 쓴다.
     // (서명 직렬화 = JSON — 매장코드에 콤마가 있어도 서로 다른 스코프가 같은 키로 뭉치지 않게. Codex 4R)
     const efScopeSig = scopeParams.length > 1 ? `f:${JSON.stringify([...scopeParams[1]].sort())}` : 'all';
-    const efCacheKey = `enabled-fields:${companyId}:${userId || 'anonymous'}:${efScopeSig}`;
-    const computeEnabledFields = async () => {
-    // ★ CT-18: 활성 필드 탐지 단일 진입점
-    const { fields } = await detectEnabledFields({ companyId, scopeWhere, scopeParams });
+    // ★ 2026-07-17(3) — 'all' 스코프(관리자·전체 열람)는 payload가 사용자 무관 동일 → 회사 공용 키.
+    //   무효화 길목의 사전 워밍(scheduleEnabledFieldsWarm — clearEnabledFieldsCache 내부)이 이 키를
+    //   데워 두므로 콜드 1초(0717 실측 1,074ms)를 사용자가 물지 않는다. 매장 필터 스코프는
+    //   하위 집합 스캔(저비용)이라 현행 사용자별 키 유지. 조립 로직 = CT buildEnabledFieldsPayload로 이동.
+    const efCacheKey = efScopeSig === 'all'
+      ? `enabled-fields:${companyId}:all`
+      : `enabled-fields:${companyId}:${userId || 'anonymous'}:${efScopeSig}`;
+    const computeEnabledFields = () => buildEnabledFieldsPayload({ companyId, scopeWhere, scopeParams });
 
-    // 3. 드롭다운 옵션 (실제 DB 값 기반 — 동적 감지)
-    // 고카디널리티 필드 제외 (이름, 전화번호, 이메일, 주소는 DISTINCT 의미 없음)
-    const HIGH_CARDINALITY = ['name', 'phone', 'email', 'address'];
-    const options: Record<string, string[]> = {};
-
-    // ★ 2026-07-17 성능 — 필드당 DISTINCT 조회(3-1 직접 컬럼 + 3-2 커스텀)를 순차 루프에서 병렬로.
-    //   쿼리·필터·결과 의미 무변경, 필드별 실패 무시(try/catch)도 그대로 — 실행 시점만 병렬.
-    //   ★ Codex 정정: 무제한 병렬은 커스텀 필드 다수 회사가 PG 풀(20)을 독점 → 동시 5개 청크 상한.
-    const optionThunks: Array<() => Promise<void>> = [];
-
-    // 3-1. 직접 컬럼 string 필드 → DISTINCT 조회
-    for (const f of fields) {
-      if (f.is_custom || f.data_type !== 'string' || HIGH_CARDINALITY.includes(f.field_key)) continue;
-      const mapped = getFieldByKey(f.field_key);
-      const col = mapped?.columnName || f.field_key;
-      optionThunks.push(async () => {
-        try {
-          const optResult = await query(
-            `SELECT DISTINCT ${col} FROM customers WHERE ${scopeWhere} AND ${col} IS NOT NULL AND ${col} != '' ORDER BY ${col} LIMIT 100`,
-            scopeParams
-          );
-          if (optResult.rows.length > 0 && optResult.rows.length <= 100) {
-            options[f.field_key] = optResult.rows.map((r: any) => r[col]);
-          }
-        } catch (e) { /* 컬럼 없으면 무시 */ }
-      });
-    }
-
-    // 3-2. 커스텀 필드 (JSONB) string 타입 → DISTINCT 조회
-    for (const f of fields) {
-      if (!f.is_custom || f.data_type !== 'string') continue;
-      optionThunks.push(async () => {
-        try {
-          const optResult = await query(
-            `SELECT DISTINCT custom_fields->>'${f.field_key}' as val FROM customers WHERE ${scopeWhere} AND custom_fields->>'${f.field_key}' IS NOT NULL AND custom_fields->>'${f.field_key}' != '' ORDER BY val LIMIT 100`,
-            scopeParams
-          );
-          if (optResult.rows.length > 0 && optResult.rows.length <= 100) {
-            options[f.field_key] = optResult.rows.map((r: any) => r.val);
-          }
-        } catch (e) { /* 커스텀 필드 옵션 조회 실패 무시 */ }
-      });
-    }
-    for (let i = 0; i < optionThunks.length; i += 5) {
-      await Promise.all(optionThunks.slice(i, i + 5).map((fn) => fn()));
-    }
-
-    // 4. 실제 고객 1건 샘플 데이터 (AI 맞춤한줄 미리보기용)
-    // ★ B+0407-1: enum 필드(gender F→여성) 미리 변환 — 모든 frontend 표시 경로 자동 정상화
-    let sample: Record<string, any> = {};
-    try {
-      const sampleResult = await query(
-        `SELECT * FROM customers
-         WHERE ${scopeWhere} AND name IS NOT NULL AND name != ''
-         ORDER BY updated_at DESC LIMIT 1`,
-        scopeParams
-      );
-      if (sampleResult.rows.length > 0) {
-        const row = sampleResult.rows[0];
-        for (const f of fields) {
-          const key = f.field_key;
-          const mapped = getFieldByKey(key);
-          let val: any;
-          if (mapped?.storageType === 'custom_fields' && row.custom_fields && row.custom_fields[key] != null) {
-            val = row.custom_fields[key];
-          } else if (!mapped && row.custom_fields && row.custom_fields[key] != null) {
-            // FIELD_MAP에 없는 커스텀 필드 (레거시 등)
-            val = row.custom_fields[key];
-          } else if (row[key] != null) {
-            val = row[key];
-          } else {
-            continue;
-          }
-          // ★ B+0407-1: enum 필드 한글 역변환 (gender 'F' → '여성')
-          if (FIELD_DISPLAY_MAP[key]) {
-            sample[key] = reverseDisplayValue(key, val);
-          } else {
-            sample[key] = val;
-          }
-        }
-      }
-    } catch (e) { /* 샘플 조회 실패 시 빈 객체 */ }
-
-    // ★ D103: 전화번호 형태 필드 동적 감지 — 개별회신번호 드롭다운용
-    let phoneFields: string[] = [];
-    try {
-      // FIELD_MAP에서 normalizeFunction이 전화번호 관련인 필드는 무조건 포함 (데이터 없어도)
-      const knownPhoneKeys = FIELD_MAP.filter(f =>
-        f.normalizeFunction === 'normalizePhone' || f.normalizeFunction === 'normalizeStorePhone'
-      ).map(f => f.fieldKey).filter(k => k !== 'phone'); // phone(수신자번호) 제외
-
-      // 이미 enabled된 필드 중 기본 전화번호 필드
-      const enabledKnown = knownPhoneKeys.filter(k => fields.some((f: any) => f.field_key === k));
-
-      // 커스텀 필드는 실제 데이터 샘플링으로 판별 (최대 10건)
-      const phoneSampleResult = await query(
-        `SELECT custom_fields, store_phone FROM customers WHERE ${scopeWhere} AND custom_fields IS NOT NULL AND custom_fields != '{}' LIMIT 10`,
-        scopeParams
-      );
-      const customPhoneFields = detectPhoneFields(
-        phoneSampleResult.rows,
-        fields.filter((f: any) => f.is_custom),
-      );
-
-      phoneFields = [...new Set([...enabledKnown, ...customPhoneFields.map(f => f.field_key)])];
-    } catch (e) { /* phone_fields 감지 실패 시 빈 배열 */ }
-
-    return { fields, options, sample, categories: CATEGORY_LABELS, phoneFields };
-    }; // ── computeEnabledFields 끝 (SWR compute 클로저)
-
-    // ★ 2026-07-17 — 응답 전체 SWR 캐시 (soft=CACHE_TTL.customerStats 60초, hard=10분)
+    // ★ 2026-07-17 — 응답 전체 SWR 캐시 (soft=CACHE_TTL.customerStats 60초, hard=24시간 —
+    //   신선도 소유자는 무효화 이벤트(9개 길목 전부 clearEnabledFieldsCache 경유)이고,
+    //   soft 60초 백그라운드 갱신이 자가 치유 안전망이라 TTL을 길게 가져가 콜드 재발을 차단)
     const efPayload = await swrCache({
       key: efCacheKey,
       softTtlSec: CACHE_TTL.customerStats,
-      hardTtlSec: DASHBOARD_SWR_HARD_TTL_SEC,
+      hardTtlSec: ENABLED_FIELDS_HARD_TTL_SEC,
       compute: computeEnabledFields,
-      // ★ Codex 3R — 무효화 게이트웨이(clearEnabledFieldsCache) 세대 가드: 계산 도중 업로드/삭제/싱크가
-      //   끼면 변형 전 결과를 저장하지 않는다. (stats는 무효화 게이트웨이 없는 순수 TTL 캐시라 미지정)
-      generationKey: ENABLED_FIELDS_CACHE_GEN_KEY,
+      // ★ Codex 3R·4차 — 무효화 게이트웨이(clearEnabledFieldsCache) 세대 가드(회사별 키): 계산 도중
+      //   업로드/삭제/싱크가 끼면 변형 전 결과를 저장하지 않는다. (stats는 게이트웨이 없는 순수 TTL 캐시라 미지정)
+      generationKey: enabledFieldsGenKey(companyId),
     });
     res.json(efPayload);
   } catch (error) {
