@@ -1364,10 +1364,21 @@
 
 ## MySQL 테이블 (QTmsg - smsdb)
 
-### SMSQ_SEND_1~11 (SMS 발송 큐 - 11개 Agent 라인그룹 분배)
-> 로컬: SMSQ_SEND (1개), 서버: SMSQ_SEND_1~11 (11개, 환경변수 SMS_TABLES + 라인그룹으로 분기)
+### SMSQ_SEND_1~11 / 13~15 (SMS 발송 큐 - Agent 라인그룹 분배)
+> 로컬: SMSQ_SEND (1개), 서버: SMSQ_SEND_1~11 (QTmsg Agent 11개, 환경변수 SMS_TABLES + 라인그룹으로 분기)
+> + **SMSQ_SEND_13·14·15 = 비토 자체 게이트웨이 라인** (★2026-07-17 14·15 신설 — Agent hanjul02/hanjul03).
+>   **env `SMS_TABLES`에 없음** — 라우팅은 PG `sms_line_groups`(group_type='bito')가 전담.
+>   LOG 테이블(`_YYYYMM`) 없음 — 비토 Agent는 status를 제자리 갱신만 하고 이력으로 옮기지 않는다.
+>   그래서 결과 집계는 `classifyResultTables`가 "LOG 짝 없는 LIVE = 결과까지 집계" 분기로 처리한다(이중카운트 구조적 불가).
+> + **SMSQ_SEND_12 = 유휴 잔재** — 라인그룹 미등록 · env 미포함 · 코드 참조 0.
+>   2026-03-20 더미 8행(010-0000-0000, status 100 미발송)만 고여 있음. 13을 만들 때 `LIKE 12`로 복제한 원본. 폐기 후보(2026-07-17 실측).
 >
 > **★ D144 검증(2026-05-06):** 서버 `SMSQ_SEND`는 BASE TABLE이 아니라 **VIEW** = `SMSQ_SEND_1 UNION ALL ... SMSQ_SEND_11` 단순 가상 뷰. 한줄로AI는 SMSQ_SEND_X에 INSERT, VIEW는 모니터링 가상 표시. 한줄로AI 코드는 fallback 단일 'SMSQ_SEND'에 직접 INSERT 가능하나 서버 .env에 SMS_TABLES 명시되어 fallback 미발동. 레거시 invitoMsg watch 대상이던 base table은 D-Day 5/5에 DROP됨.
+>
+> **★ 2026-07-17 실측(`SHOW CREATE TABLE SMSQ_SEND_13`)** — 아래 표에 없던 컬럼 4개가 실재한다: `k_oriseq` varchar(20) · `k_resyes` varchar(1) · `app_etc1` varchar(50) · `app_etc2` varchar(50). 총 29컬럼.
+> 인덱스 = PK(`seqno`) + `idx_app_etc1_status`(app_etc1,status_code) + `idx_app_etc1_sendreq`(app_etc1,sendreq_time). InnoDB / utf8mb4_0900_ai_ci.
+> `app_etc1` = 캠페인/추적 식별자(결과·정산 매칭 축), `app_etc2` = company_id.
+> 신규 라인 테이블은 `CREATE TABLE SMSQ_SEND_N LIKE SMSQ_SEND_13` (root 실행 — smsuser는 CREATE 권한 없음. 권한은 `smsdb.*` 스키마 단위라 자동 상속).
 
 | 컬럼 | 타입 | 설명 |
 |------|------|------|

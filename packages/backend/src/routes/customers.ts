@@ -10,9 +10,9 @@ import { DEFAULT_COSTS, CACHE_TTL } from '../config/defaults';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildDynamicFilterCompat } from '../utils/customer-filter';
-import { getTestSmsTables, kakaoBatchAggByGroup } from '../utils/sms-queue';
+import { getTestSmsTables } from '../utils/sms-queue';
 import { detectPhoneFields } from '../utils/callback-filter';
-import { aggregateSmsCountsByCampaign } from '../utils/stats-aggregation';
+import { getCampaignResultCounts } from '../utils/stats-aggregation';
 import { blockIfSyncActive } from '../middlewares/sync-active-check';
 import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
 import { detectEnabledFields, buildDynamicSelectExpr, clearEnabledFieldsCache, ENABLED_FIELDS_CACHE_GEN_KEY } from '../utils/enabled-fields';
@@ -766,6 +766,7 @@ router.get('/stats', async (req: Request, res: Response) => {
       // ★ 2026-07-17: send_config(sentTables)·발송시각 동봉 — 집계가 실적재 테이블만 훑도록(응답 미노출, 집계 전용)
       query(
         `SELECT c.id, c.company_id, c.created_by, c.message_type,
+                c.result_final, c.sent_count, c.success_count, c.fail_count,
                 c.send_config, c.sent_at, c.scheduled_at, c.created_at
          FROM campaigns c
          WHERE c.company_id = $1
@@ -776,24 +777,22 @@ router.get('/stats', async (req: Request, res: Response) => {
     ]);
     const company = companyResult.rows[0] || {};
 
-    // ★ 2026-07-17 — MySQL 집계 2개(카운트·카카오)도 독립이라 병렬 (stats-aggregation CT 무접촉)
-    const [monthlySmsMap, monthlyKakaoMap] = await Promise.all([
-      aggregateSmsCountsByCampaign(monthlyMetaResult.rows),
-      kakaoBatchAggByGroup(monthlyMetaResult.rows.map((c: any) => c.id)),
-    ]);
+    // ★ 2026-07-17(2) — 카운트 단일 진입점 합류: 확정(result_final) 캠페인 = PG 캐시, 진행 중만 MySQL 실시간.
+    //   getCampaignResultCounts = 발송결과·발송통계·관리자 화면과 동일 소스(SMS+카카오 합산 완료값이라
+    //   카카오를 따로 더하지 않는다 — 이중 합산 금지 계약). 진행 중 잔여분은 CT 내부 집계가
+    //   send_config(sentTables) 라인 축 축소를 그대로 탄다.
+    const monthlyCountMap = await getCampaignResultCounts(monthlyMetaResult.rows);
 
     // 채널별 집계 (성공 건수 기준으로 비용 계산)
     let smsSent = 0, lmsSent = 0, mmsSent = 0, kakaoSent = 0;
     let totalSent = 0, totalSuccess = 0, totalFail = 0;
 
     for (const c of monthlyMetaResult.rows) {
-      const sms = monthlySmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
-      const kakao = monthlyKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
-      const sent = Number(sms.total_count || 0) + kakao.total;
-      const success = Number(sms.success_count || 0) + kakao.success;
-      totalSent += sent;
+      const counts = monthlyCountMap.get(c.id) || { sent: 0, success: 0, fail: 0, pending: 0 };
+      const success = counts.success;
+      totalSent += counts.sent;
       totalSuccess += success;
-      totalFail += Number(sms.fail_count || 0) + kakao.fail;
+      totalFail += counts.fail;
 
       switch (c.message_type) {
         case 'SMS': smsSent += success; break;

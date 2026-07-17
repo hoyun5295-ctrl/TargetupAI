@@ -25,13 +25,13 @@ import {
   invalidateLineGroupCache, getNextSmsTable,
   smsCountAll, smsAggAll, smsSelectAll, smsMinAll, smsExecAll,
   getCompanySmsTablesWithLogs, getCampaignQueueTables,
-  insertKakaoQueue, kakaoAgg, kakaoCountPending, kakaoCancelPending, kakaoBatchAggByGroup,
+  insertKakaoQueue, kakaoAgg, kakaoCountPending, kakaoCancelPending,
   bulkInsertSmsQueue, insertAlimtalkQueue, toQtmsgType, insertTestSmsQueue
 } from '../utils/sms-queue';
 import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
 import { normalizeMmsImagePaths, type MmsImageItem } from '../utils/mms-image-util';
 import { validateMmsPayload } from '../utils/mms-validator';
-import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
+import { buildDateRangeFilter, getCampaignResultCounts, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
 import { cancelCampaign, syncCampaignResults, cleanupScheduledCampaigns } from '../utils/campaign-lifecycle';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { findUnfilledAlimtalkVars, fillAlimtalkVarMap } from '../utils/alimtalk-vars';
@@ -160,7 +160,7 @@ router.get('/', async (req: Request, res: Response) => {
         TO_CHAR(c.event_end_date, 'YYYY-MM-DD') as event_end_date,
         c.message_content, c.message_template, c.subject, c.message_subject, c.is_ad, c.callback_number,
         c.mms_image_paths,
-        c.send_config,
+        c.send_config, c.result_final, c.sent_count, c.success_count, c.fail_count,
         ${CAMPAIGN_OPT080_SELECT_EXPR}
        FROM campaigns c
        ${CAMPAIGN_OPT080_LEFT_JOIN}
@@ -179,15 +179,15 @@ router.get('/', async (req: Request, res: Response) => {
     // ★ 2026-07-17 구간 계측 — 병렬화 후에도 3,052ms 실측(개선 0) = 지배 구간이 따로 있다는 뜻.
     //   SQL·인덱스(app_etc1)는 실측 정상이라, 어느 구간이 먹는지 로그로 확정 후 수정(추측 수정 금지). 응답 무변경.
     const tAgg0 = Date.now();
-    const [listSmsMap, listKakaoMap] = await Promise.all([
-      aggregateSmsCountsByCampaign(result.rows),
-      kakaoBatchAggByGroup(result.rows.map((c: any) => c.id)),
-    ]);
+    // ★ 2026-07-17(2) — 카운트 단일 진입점 합류: 확정(result_final)=PG 캐시, 진행 중만 MySQL 실시간.
+    //   getCampaignResultCounts = 발송결과·발송통계·관리자 화면과 동일 소스(SMS+카카오 합산 완료값).
+    //   진행 중 잔여분은 CT 내부 집계가 send_config(sentTables) 라인 축 축소를 그대로 탄다.
+    const listCountMap = await getCampaignResultCounts(result.rows);
     const tAgg1 = Date.now();
     const listSentTimeMap = await aggregateSmsSendTimesByCampaign(result.rows);
     const tAgg2 = Date.now();
     if (tAgg2 - tAgg0 >= 300) {
-      console.log(`[SLOW-STAGE] /campaigns 목록 집계 — sms+kakao=${tAgg1 - tAgg0}ms sendTimes=${tAgg2 - tAgg1}ms n=${result.rows.length} status=${status || 'all'} company=${companyId}`);
+      console.log(`[SLOW-STAGE] /campaigns 목록 집계 — counts=${tAgg1 - tAgg0}ms sendTimes=${tAgg2 - tAgg1}ms n=${result.rows.length} status=${status || 'all'} company=${companyId}`);
     }
 
     // ★ D144 P4/P7 후속 (2026-05-07): 사용자 캠페인 목록에서도 status='sending' 자동 정리
@@ -196,22 +196,22 @@ router.get('/', async (req: Request, res: Response) => {
     //   PG status를 'completed'로 자동 정리.
     const userAutoCompleteIds: string[] = [];
     const campaigns = result.rows.map((c: any) => {
-      const sms = listSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0, pending_count: 0 };
-      const kakao = listKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
-      const totalSuccess = Number(sms.success_count || 0) + kakao.success;
-      const totalFail = Number(sms.fail_count || 0) + kakao.fail;
-      const totalPending = Number(sms.pending_count || 0) + kakao.pending;
+      const counts = listCountMap.get(c.id) || { sent: 0, success: 0, fail: 0, pending: 0 };
+      const totalSuccess = counts.success;
+      const totalFail = counts.fail;
+      const totalPending = counts.pending;
       let effectiveStatus = c.status;
       if (c.status === 'sending' && totalPending === 0 && (totalSuccess > 0 || totalFail > 0)) {
         effectiveStatus = 'completed';
         userAutoCompleteIds.push(c.id);
       }
-      // ★ 2026-07-17: send_config는 집계 테이블 축소용 내부 데이터(sentTables) — 응답에 미노출(현행 응답 형태 유지)
-      const { send_config: _sendConfig, ...rest } = c;
+      // ★ 2026-07-17: send_config·result_final은 집계 전용 내부 데이터 — 응답에 미노출(현행 응답 형태 유지.
+      //   sent/success/fail_count는 지금도 계산값으로 덮어쓰는 자리라 raw 컬럼 추가의 응답 영향 0)
+      const { send_config: _sendConfig, result_final: _resultFinal, ...rest } = c;
       return {
         ...rest,
         status: effectiveStatus,
-        sent_count: Number(sms.total_count || 0) + kakao.total,
+        sent_count: counts.sent,
         success_count: totalSuccess,
         fail_count: totalFail,
         sent_at: listSentTimeMap.get(c.id) ?? c.sent_at,

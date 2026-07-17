@@ -474,8 +474,13 @@ export async function getCampaignResultCounts(
   // 진행 중 캠페인만 MySQL 실시간 집계 (SMS + 카카오). 대기 = 실측(total - 성공 - 실패).
   const nonFinal = campaigns.filter((c) => !c.result_final);
   if (nonFinal.length > 0) {
-    const smsMap = await aggregateSmsCountsByCampaign(nonFinal);
-    const kakaoMap = await kakaoBatchAggByGroup(nonFinal.map((c) => c.id));
+    // ★ 2026-07-17: 서로 독립인 SMS·카카오 집계 병렬(동시 2 — MySQL 공용 풀 상한 정책과 일치).
+    //   대시보드 2라우트가 이 CT로 합류하면서 기존 라우트별 병렬성을 CT 안에서 보존(Codex 지적 수용 —
+    //   결과·시그니처 불변, 실행 시점만 병렬. 전 소비처(관리자·발송통계 포함) 공통 이득).
+    const [smsMap, kakaoMap] = await Promise.all([
+      aggregateSmsCountsByCampaign(nonFinal),
+      kakaoBatchAggByGroup(nonFinal.map((c) => c.id)),
+    ]);
     for (const c of nonFinal) {
       const sms = smsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
       const kakao = (kakaoMap.get(c.id) as any) || { total: 0, success: 0, fail: 0, pending: 0 };
