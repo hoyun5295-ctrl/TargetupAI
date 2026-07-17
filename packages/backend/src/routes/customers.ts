@@ -717,16 +717,20 @@ router.get('/stats', async (req: Request, res: Response) => {
     // ★ B17-01: 수신거부 user_id 기준 통일
     const unsubStatIdx = params.length + 1;
     params.push(userId);
-    const result = await query(
+    // ★ 2026-07-17 성능(SLOW 1,441ms 실측) — ①행별 상관 EXISTS 프로브(고객 13.7만 행 × 수신거부 조회 2회,
+    //   unsubscribes idx_scan 1.5억의 정체)를 해시 안티조인(LEFT JOIN + IS [NOT] NULL — 동치)으로 교체
+    //   ②서로 독립인 3쿼리(고객 집계·회사 요금·이번달 캠페인 메타)를 병렬로. 산식·응답 의미 무변경.
+    const monthlySendFilterClause = userType === 'company_user' && userId ? ' AND c.created_by = $2' : '';
+    const monthlySendFilterParams: any[] = userType === 'company_user' && userId ? [companyId, userId] : [companyId];
+    const [result, companyResult, monthlyMetaResult] = await Promise.all([
+      query(
       `SELECT
         COUNT(*) as total,
-        COUNT(*) FILTER (WHERE c.sms_opt_in = true
-          AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubStatIdx} AND u.phone = c.phone)
-        ) as sms_opt_in_count,
+        COUNT(*) FILTER (WHERE c.sms_opt_in = true AND uo.phone IS NULL) as sms_opt_in_count,
         COUNT(*) FILTER (WHERE c.gender = ANY($${params.length + 1}::text[])) as male_count,
         COUNT(*) FILTER (WHERE c.gender = ANY($${params.length + 2}::text[])) as female_count,
         COUNT(*) FILTER (WHERE c.grade = 'VIP') as vip_count,
-        COUNT(*) FILTER (WHERE c.sms_opt_in = false OR EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubStatIdx} AND u.phone = c.phone)) as unsubscribe_count,
+        COUNT(*) FILTER (WHERE c.sms_opt_in = false OR uo.phone IS NOT NULL) as unsubscribe_count,
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) < 20) as age_under20,
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) BETWEEN 20 AND 29) as age_20s,
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) BETWEEN 30 AND 39) as age_30s,
@@ -734,36 +738,36 @@ router.get('/stats', async (req: Request, res: Response) => {
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) BETWEEN 50 AND 59) as age_50s,
         COUNT(*) FILTER (WHERE c.birth_year IS NOT NULL AND (2026 - c.birth_year) >= 60) as age_60plus
        FROM customers_unified c
+       LEFT JOIN (SELECT DISTINCT phone FROM unsubscribes WHERE user_id = $${unsubStatIdx}) uo ON uo.phone = c.phone
        WHERE c.company_id = $1 AND c.is_active = true${storeFilter}`,
       [...params, getGenderVariants('M'), getGenderVariants('F')]
-    );
-
-    // 회사 요금 정보 조회
-    const companyResult = await query(
-      `SELECT monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, use_db_sync, use_file_upload
-       FROM companies WHERE id = $1`,
-      [companyId]
-    );
+      ),
+      // 회사 요금 정보 조회
+      query(
+        `SELECT monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, use_db_sync, use_file_upload
+         FROM companies WHERE id = $1`,
+        [companyId]
+      ),
+      // 이번 달 채널별 발송 통계 메타 (취소/초안/예약 제외, 성공 건수 기준)
+      // ★ 사용자(company_user)는 본인 발송만, 관리자(company_admin)는 전체
+      // ★ D144: PG cr.sent_count/success_count + c.sent_count/success_count 캐시 의존 제거.
+      //   PG는 캠페인 메타만 SELECT → MySQL 큐 + 카카오 직접 카운트 → JS에서 message_type별 합산.
+      query(
+        `SELECT c.id, c.company_id, c.created_by, c.message_type
+         FROM campaigns c
+         WHERE c.company_id = $1
+           AND c.status NOT IN ('cancelled', 'draft', 'scheduled')
+           AND c.created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'${monthlySendFilterClause}`,
+        monthlySendFilterParams
+      ),
+    ]);
     const company = companyResult.rows[0] || {};
 
-    // 이번 달 채널별 발송 통계 (취소/초안/예약 제외, 성공 건수 기준)
-    // ★ 사용자(company_user)는 본인 발송만, 관리자(company_admin)는 전체
-    // ★ D144: PG cr.sent_count/success_count + c.sent_count/success_count 캐시 의존 제거.
-    //   PG는 캠페인 메타만 SELECT → MySQL 큐 + 카카오 직접 카운트 → JS에서 message_type별 합산.
-    const monthlySendFilterClause = userType === 'company_user' && userId ? ' AND c.created_by = $2' : '';
-    const monthlySendFilterParams: any[] = userType === 'company_user' && userId ? [companyId, userId] : [companyId];
-
-    const monthlyMetaResult = await query(
-      `SELECT c.id, c.company_id, c.created_by, c.message_type
-       FROM campaigns c
-       WHERE c.company_id = $1
-         AND c.status NOT IN ('cancelled', 'draft', 'scheduled')
-         AND c.created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'${monthlySendFilterClause}`,
-      monthlySendFilterParams
-    );
-
-    const monthlySmsMap = await aggregateSmsCountsByCampaign(monthlyMetaResult.rows);
-    const monthlyKakaoMap = await kakaoBatchAggByGroup(monthlyMetaResult.rows.map((c: any) => c.id));
+    // ★ 2026-07-17 — MySQL 집계 2개(카운트·카카오)도 독립이라 병렬 (stats-aggregation CT 무접촉)
+    const [monthlySmsMap, monthlyKakaoMap] = await Promise.all([
+      aggregateSmsCountsByCampaign(monthlyMetaResult.rows),
+      kakaoBatchAggByGroup(monthlyMetaResult.rows.map((c: any) => c.id)),
+    ]);
 
     // 채널별 집계 (성공 건수 기준으로 비용 계산)
     let smsSent = 0, lmsSent = 0, mmsSent = 0, kakaoSent = 0;
@@ -1255,6 +1259,17 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
       }
     }
 
+    // ★ 2026-07-17 성능(SLOW 1,109ms 실측) — 필드당 DISTINCT 다발이 매 진입마다 돌던 것을 60초 캐시로 차단.
+    //   ★ Codex 정정: 캐시는 권한 스코프 해석 "뒤"에서, 키에 스코프 서명 포함 — 스코프 앞 캐시는 매장 권한
+    //   축소 후에도 옛 범위 sample(고객 실데이터)이 최대 60초 노출되는 격리 위반. blocked는 위에서 이미 반환.
+    //   무효화 = clearEnabledFieldsCache 길목(업로드·삭제·싱크)이 Redis도 함께 제거 + TTL 60초 상한.
+    const efScopeSig = scopeParams.length > 1 ? `f:${[...scopeParams[1]].sort().join(',')}` : 'all';
+    const efCacheKey = `enabled-fields:${companyId}:${userId || 'anonymous'}:${efScopeSig}`;
+    try {
+      const cached = await redis.get(efCacheKey);
+      if (cached) return res.json(JSON.parse(cached));
+    } catch (e) { /* Redis 실패 시 DB 직접 조회 */ }
+
     // ★ CT-18: 활성 필드 탐지 단일 진입점
     const { fields } = await detectEnabledFields({ companyId, scopeWhere, scopeParams });
 
@@ -1263,34 +1278,46 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
     const HIGH_CARDINALITY = ['name', 'phone', 'email', 'address'];
     const options: Record<string, string[]> = {};
 
+    // ★ 2026-07-17 성능 — 필드당 DISTINCT 조회(3-1 직접 컬럼 + 3-2 커스텀)를 순차 루프에서 병렬로.
+    //   쿼리·필터·결과 의미 무변경, 필드별 실패 무시(try/catch)도 그대로 — 실행 시점만 병렬.
+    //   ★ Codex 정정: 무제한 병렬은 커스텀 필드 다수 회사가 PG 풀(20)을 독점 → 동시 5개 청크 상한.
+    const optionThunks: Array<() => Promise<void>> = [];
+
     // 3-1. 직접 컬럼 string 필드 → DISTINCT 조회
     for (const f of fields) {
       if (f.is_custom || f.data_type !== 'string' || HIGH_CARDINALITY.includes(f.field_key)) continue;
       const mapped = getFieldByKey(f.field_key);
       const col = mapped?.columnName || f.field_key;
-      try {
-        const optResult = await query(
-          `SELECT DISTINCT ${col} FROM customers WHERE ${scopeWhere} AND ${col} IS NOT NULL AND ${col} != '' ORDER BY ${col} LIMIT 100`,
-          scopeParams
-        );
-        if (optResult.rows.length > 0 && optResult.rows.length <= 100) {
-          options[f.field_key] = optResult.rows.map((r: any) => r[col]);
-        }
-      } catch (e) { /* 컬럼 없으면 무시 */ }
+      optionThunks.push(async () => {
+        try {
+          const optResult = await query(
+            `SELECT DISTINCT ${col} FROM customers WHERE ${scopeWhere} AND ${col} IS NOT NULL AND ${col} != '' ORDER BY ${col} LIMIT 100`,
+            scopeParams
+          );
+          if (optResult.rows.length > 0 && optResult.rows.length <= 100) {
+            options[f.field_key] = optResult.rows.map((r: any) => r[col]);
+          }
+        } catch (e) { /* 컬럼 없으면 무시 */ }
+      });
     }
 
     // 3-2. 커스텀 필드 (JSONB) string 타입 → DISTINCT 조회
     for (const f of fields) {
       if (!f.is_custom || f.data_type !== 'string') continue;
-      try {
-        const optResult = await query(
-          `SELECT DISTINCT custom_fields->>'${f.field_key}' as val FROM customers WHERE ${scopeWhere} AND custom_fields->>'${f.field_key}' IS NOT NULL AND custom_fields->>'${f.field_key}' != '' ORDER BY val LIMIT 100`,
-          scopeParams
-        );
-        if (optResult.rows.length > 0 && optResult.rows.length <= 100) {
-          options[f.field_key] = optResult.rows.map((r: any) => r.val);
-        }
-      } catch (e) { /* 커스텀 필드 옵션 조회 실패 무시 */ }
+      optionThunks.push(async () => {
+        try {
+          const optResult = await query(
+            `SELECT DISTINCT custom_fields->>'${f.field_key}' as val FROM customers WHERE ${scopeWhere} AND custom_fields->>'${f.field_key}' IS NOT NULL AND custom_fields->>'${f.field_key}' != '' ORDER BY val LIMIT 100`,
+            scopeParams
+          );
+          if (optResult.rows.length > 0 && optResult.rows.length <= 100) {
+            options[f.field_key] = optResult.rows.map((r: any) => r.val);
+          }
+        } catch (e) { /* 커스텀 필드 옵션 조회 실패 무시 */ }
+      });
+    }
+    for (let i = 0; i < optionThunks.length; i += 5) {
+      await Promise.all(optionThunks.slice(i, i + 5).map((fn) => fn()));
     }
 
     // 4. 실제 고객 1건 샘플 데이터 (AI 맞춤한줄 미리보기용)
@@ -1353,7 +1380,10 @@ router.get('/enabled-fields', async (req: Request, res: Response) => {
       phoneFields = [...new Set([...enabledKnown, ...customPhoneFields.map(f => f.field_key)])];
     } catch (e) { /* phone_fields 감지 실패 시 빈 배열 */ }
 
-    res.json({ fields, options, sample, categories: CATEGORY_LABELS, phoneFields });
+    // ★ 2026-07-17 — 응답 전체를 사용자별 60초 캐시(stats CACHE_TTL.customerStats와 동일 클래스)
+    const efPayload = { fields, options, sample, categories: CATEGORY_LABELS, phoneFields };
+    try { await redis.setex(efCacheKey, CACHE_TTL.customerStats, JSON.stringify(efPayload)); } catch (e) { /* 캐시 실패 무시 */ }
+    res.json(efPayload);
   } catch (error) {
     console.error('활성 필드 조회 실패:', error);
     res.status(500).json({ error: '조회 실패' });

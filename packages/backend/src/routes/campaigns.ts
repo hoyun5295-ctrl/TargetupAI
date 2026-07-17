@@ -168,8 +168,13 @@ router.get('/', async (req: Request, res: Response) => {
       params
     );
 
-    const listSmsMap = await aggregateSmsCountsByCampaign(result.rows);
-    const listKakaoMap = await kakaoBatchAggByGroup(result.rows.map((c: any) => c.id));
+    // ★ 2026-07-17 성능(SLOW 2,960ms 실측) — 독립 집계 3개 중 2개(SMS 카운트·카카오)를 병렬, 발송시각은 후속.
+    //   각 함수·쿼리·산식 무접촉, 실행 시점만 조정. ★ Codex 정정: 셋 다 MySQL 공용 풀(limit 10 — 발송 INSERT와
+    //   공유)이라 3개 완전 병렬은 대시보드 1진입(목록 3콜+stats)만으로 풀 포화(3×3+2=11>10) → 요청당 동시 2 상한.
+    const [listSmsMap, listKakaoMap] = await Promise.all([
+      aggregateSmsCountsByCampaign(result.rows),
+      kakaoBatchAggByGroup(result.rows.map((c: any) => c.id)),
+    ]);
     const listSentTimeMap = await aggregateSmsSendTimesByCampaign(result.rows);
 
     // ★ D144 P4/P7 후속 (2026-05-07): 사용자 캠페인 목록에서도 status='sending' 자동 정리

@@ -39,6 +39,7 @@
  */
 
 import { query } from '../config/database';
+import { redis } from '../config/defaults';
 import { FIELD_MAP, getColumnFields, getFieldByKey } from './standard-field-map';
 
 // ─── 타입 정의 ───
@@ -134,6 +135,13 @@ const ENABLED_FIELDS_CACHE_TTL_MS = 5 * 60 * 1000;
 const enabledFieldsCache = new Map<string, { at: number; data: EnabledFieldsResult }>();
 
 export function clearEnabledFieldsCache(companyId?: string): void {
+  // ★ 2026-07-17 — 라우트 응답 Redis 캐시(enabled-fields:{companyId}:{userId}:{scope})도 같은 길목에서 무효화.
+  //   "업로드·삭제·싱크 = 즉시 반영" 기존 계약 유지(Codex 정정 — Redis 잔존 시 새 필드·삭제 고객 sample이 60초 노출).
+  //   fire-and-forget — 무효화 실패해도 TTL 60초가 상한.
+  const redisPattern = companyId ? `enabled-fields:${companyId}:*` : 'enabled-fields:*';
+  redis.keys(redisPattern)
+    .then((keys) => (keys.length > 0 ? redis.del(...keys) : 0))
+    .catch(() => { /* TTL 60초 상한 */ });
   if (!companyId) {
     enabledFieldsCache.clear();
     return;
