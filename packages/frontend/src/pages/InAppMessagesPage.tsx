@@ -2490,9 +2490,9 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   <option value="always">매번 표시</option>
                 </select>
               </div>
-              {/* ★ 2026-07-16 재노출 계약 안내 — 닫기 ≠ 영구 거부 */}
+              {/* ★ 2026-07-16 재노출 계약 안내 — 닫기 ≠ 영구 거부. ★ 2026-07-17 앱 채널 = 계약 구현 빌드 기준 단서(구 빌드 앱에선 빈도가 다르게 동작할 수 있음 — 팝폰 구 빌드 세션 영구화 실사례) */}
               <div className="text-[10px] text-white/40 mt-1.5">
-                세션 = {isApp ? '앱 실행 1회' : '브라우저 방문 1회'} 기준. 닫기(X)는 이번만 닫히고 위 빈도 규칙에 따라 다시 표시됩니다. "다시 보지 않기"를 누른 고객에게는 더 이상 표시되지 않습니다.
+                세션 = {isApp ? '앱 실행 1회(완전 종료 후 재실행하면 다시 표시)' : '브라우저 방문 1회'} 기준. 닫기(X)는 이번만 닫히고 위 빈도 규칙에 따라 다시 표시됩니다. "다시 보지 않기"를 누른 고객에게는 더 이상 표시되지 않습니다.{isApp ? ' 빈도·닫기 동작은 앱이 통합 계약을 구현한 빌드에서 이 정의대로 동작합니다.' : ''}
               </div>
               {/* ★ P0-1 — 트리거 임계값 입력 (없으면 "스크롤 도달"을 골라도 % 지정 불가 = 트리거 정밀 표시 무동작이던 결함) */}
               {(editing.trigger_event === 'scroll' || editing.trigger_event === 'time_on_page' || editing.trigger_event === 'cart_value') && (
