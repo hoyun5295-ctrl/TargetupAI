@@ -217,10 +217,8 @@ const TEMPLATE_LABELS: Record<Template, string> = {
   full_image: '포스터형',
 };
 
-// ★ 2026-07-18 인앱 단순화 P1 (Harold 확정) — 신규 웹 픽커는 2종만: 기본형/포스터형.
-//   기존 발행물의 다른 형태는 편집 진입 시 현재 값을 옵션에 함께 표시(비파괴 — 값 강제 변환 없음).
+// ★ 2026-07-18 정정 — 웹 기존 라벨(중앙 모달 등) 유지, 신설 포스터형만 라벨+힌트 부여
 const WEB_PICKER_LABELS: Partial<Record<Template, { label: string; hint: string }>> = {
-  center_modal: { label: '기본형', hint: '이미지 · 문구 · 버튼' },
   full_image: { label: '포스터형', hint: '전면 이미지 1장' },
 };
 
@@ -229,9 +227,9 @@ const WEB_PICKER_LABELS: Partial<Record<Template, { label: string; hint: string 
 //   ★ 2026-07-16 범용 보장 계약 — 앱: 실제 앱 렌더는 중앙 모달/바텀 시트 2형뿐 (그 외 값도 앱이 시트로 그림).
 //   편집기가 6형을 약속하고 앱이 2형만 그리던 거짓 선택지 제거 — 확실히 렌더되는 것만 노출.
 const CHANNEL_TEMPLATES: Record<'web' | 'app', Template[]> = {
-  // ★ 2026-07-18 P1 — 웹 신규 = 기본형(center_modal)·포스터형(full_image) 2종만 (쿠팡이츠·스벅 벤치마크: 이미지가 전부, 나머지 심플).
-  //   옛 slide_in/toast/floating_button 발행물은 렌더·서빙 그대로 유지(비파괴), 편집 진입 시 현재 값이 옵션에 추가된다.
-  web: ['center_modal', 'full_image'],
+  // ★ 2026-07-18 정정 (Harold 지시) — 단순화 2형 구도는 앱 채널(중앙 모달/바텀 시트) 이야기.
+  //   웹은 기존 다양성(모달·슬라이드·토스트·플로팅+테마) 전부 유지하고, 포스터형(full_image)만 추가 옵션으로 얹는다.
+  web: ['center_modal', 'slide_in', 'toast', 'floating_button', 'full_image'],
   app: ['center_modal', 'bottom_banner'],
 };
 
@@ -241,8 +239,8 @@ const APP_TEMPLATE_LABELS: Partial<Record<Template, string>> = {
   bottom_banner: '바텀 시트',
 };
 
-// ★ 2026-07-18 P1 (Harold 확정) — 정예 템플릿(테마×블록 완성형) 신규 UI 비노출. 코드·데이터 무접촉 게이트만.
-const SHOW_ELITE_TEMPLATES = false;
+// ★ 2026-07-18 정정 (Harold 지시) — 웹의 정예 템플릿·테마 다양성은 유지가 맞다 (단순화 2형 구도는 앱 채널 축). 원복.
+const SHOW_ELITE_TEMPLATES = true;
 
 // 빈도 한글 라벨 (목록 카드·편집기 공용)
 const FREQ_LABELS: Record<string, string> = {
@@ -292,10 +290,9 @@ const EMPTY_FORM: Partial<MessageRow> = {
   title: '',
   body: '',
   template: 'center_modal',
-  // ★ 2026-07-18 P1 (Harold 확정) — 신규 메시지 = 흰 배경 + 진한 글씨 고정, 색은 버튼(브랜드 컬러)만.
-  //   기존 발행물의 저장된 색은 무변경(비파괴).
-  background_color: '#ffffff',
-  text_color: '#1b1d23',
+  // ★ 2026-07-18 정정 — 웹 기존 기본색 원복 (흰 바닥 고정은 포스터형 렌더에만 내장된 규칙)
+  background_color: '#4f46e5',
+  text_color: '#ffffff',
   trigger_event: 'page_load',
   trigger_conditions: { event: 'page_load' },
   segment_conditions: {},
@@ -1931,14 +1928,13 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     className="w-full px-3 py-2 mb-2 bg-slate-900/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
                     maxLength={20}
                   />
-                  {/* ★ 2026-07-18 P1 — 포스터형은 flat 전용(블록 미지원, 서버 허용표 빈 Set) → 전환 버튼 숨김.
-                      2템플릿 단순화로 신규 생성은 flat 프리셋 — 블록 전환은 기존 메시지 편집에서만 유지(비파괴) */}
-                  {!isApp && editing.template !== 'full_image' && !!editing.id && (
+                  {/* ★ 2026-07-18 정정 — 웹 기존 UX 원복(신규에서도 블록 전환 가능). 포스터형만 flat 전용이라 숨김 유지 */}
+                  {!isApp && editing.template !== 'full_image' && (
                     <button
                       onClick={() => { const c = convertToBlocks(editing); setEditing({ ...editing, ...c }); }}
                       className="w-full text-xs text-violet-100 bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 hover:from-violet-500/50 hover:to-fuchsia-500/50 border border-violet-400/30 rounded-lg py-2 flex items-center justify-center gap-1.5 transition-colors"
                     >
-                      <Wand2 className="w-3.5 h-3.5" /> 블록 에디터로 전환
+                      <Wand2 className="w-3.5 h-3.5" /> 블록 에디터로 전환 (모던 메시지 — 권장)
                     </button>
                   )}
                   {isApp && (
@@ -1995,7 +1991,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
 
             {/* ★ 2026-07-14 Harold 지시 — 옛 골든 12종 노출 제거(정예 10종만 유지, 위 그리드) */}
 
-            {/* 탭 디자인: 표시 형태 — ★ 2026-07-18 P1: 웹 신규 = 기본형/포스터형 2종. 옛 형태 발행물은 현재 값을 옵션에 추가(비파괴) */}
+            {/* 탭 디자인: 표시 형태 — ★ 2026-07-18 정정: 웹 = 기존 4종 + 포스터형 추가. 목록 밖 값(옛 배너 등)은 현재 값을 옵션에 추가(비파괴) */}
             <div className={activeTab === 'design' ? '' : 'hidden'}>
               {(() => {
                 const base = editing.channel === 'app' ? CHANNEL_TEMPLATES.app : CHANNEL_TEMPLATES.web;
@@ -2768,11 +2764,11 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             </div>
 
-            {/* 색상 + 상태 — ★ 2026-07-18 P1: 신규 = 흰 배경 고정이라 색 입력 숨김(버튼색만 브랜드 컬러).
-                기존 발행물(editing.id 존재·포스터형 아님)만 저장된 색 편집 유지(비파괴). 블록 모드는 테마가 색 결정 → 상태만 */}
+            {/* 색상 + 상태 — ★ 2026-07-18 정정: 웹 기존 노출 원복. 포스터형만 배경 흰 고정이라 색 입력 숨김.
+                블록 모드는 테마가 색 결정 → 상태만 */}
             <div>
               {(() => {
-                const showColors = !hasBlocks && !!editing.id && editing.template !== 'full_image' && (editing.background_color || '#ffffff') !== '#ffffff';
+                const showColors = !hasBlocks && editing.template !== 'full_image';
                 return (
                   <>
                     <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
@@ -2814,7 +2810,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                       </div>
                     </div>
                     {hasBlocks && <div className="text-[10px] text-white/40 mt-1.5">색상은 디자인 탭의 테마·강조색으로 정해집니다.</div>}
-                    {!hasBlocks && !showColors && <div className="text-[10px] text-white/40 mt-1.5">배경은 흰색 고정 — 색은 버튼(브랜드 컬러)으로만 줍니다.</div>}
+                    {!hasBlocks && !showColors && <div className="text-[10px] text-white/40 mt-1.5">포스터형은 바닥이 흰색 고정 — 색은 버튼(브랜드 컬러)으로만 줍니다.</div>}
                   </>
                 );
               })()}

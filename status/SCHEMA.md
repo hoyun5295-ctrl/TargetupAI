@@ -1971,6 +1971,28 @@ CAFE24_REDIRECT_URI=https://app.hanjul.ai/api/cafe24/oauth/callback
 - INDEX: company_id, message_id, occurred_at DESC
 - INDEX: message_id, event_type
 
+### cdp_assets (에셋 라이브러리) — 2026-07-18 P3 신규 (★ 운영 psql 실행·information_schema 실측 13컬럼)
+
+회사별 이미지 소재 저장소 — 업로드/AI 생성물(P4) 등재 → 전 채널 에디터 "라이브러리에서 선택" 재사용. CT=`utils/assets.ts`, API=`/api/assets`. 설계 SoT=docs/2026-07-18-inapp-simplify-image-studio-design.md §5.
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK DEFAULT gen_random_uuid() | |
+| company_id | uuid NOT NULL | |
+| created_by | uuid | |
+| kind | varchar(20) NOT NULL DEFAULT 'uploaded' | uploaded/generated/nukki/variant |
+| source_asset_id | uuid | 누끼·변형본의 원본 계보 |
+| url | text NOT NULL | 서빙 URL (인앱=/api/cdp/inapp/image/{companyId}/{filename}) |
+| filename | varchar(255) | 원본 파일명 (검색축) |
+| bytes | bigint NOT NULL DEFAULT 0 | 용량 합산 = 플랜 한도 판정(PLAN_STORAGE_LIMITS: ~BASIC 0.5GB/PRO 2.5GB/BUSINESS+ 5GB) |
+| format | varchar(20) | |
+| origin | varchar(30) NOT NULL DEFAULT 'inapp' | 등재 출처 (inapp/dm/email/studio) |
+| prompt | text | AI 생성물 프롬프트 (P4) |
+| created_at | timestamptz NOT NULL DEFAULT NOW() | |
+| updated_at | timestamptz NOT NULL DEFAULT NOW() | |
+- INDEX: idx_cdp_assets_company(company_id, created_at DESC)
+- 삭제 규약: 발행 인앱 메시지 참조 중 = 409 거부 / 미참조 = 행+실물 파일 동시 삭제 (디스크 증식 차단)
+
 ### D175-A 운영 환경 추가 실행 SQL (Harold 직접)
 
 ```sql
