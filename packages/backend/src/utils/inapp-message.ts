@@ -127,9 +127,26 @@ export function sanitizeInAppDesign(raw: any): Record<string, any> | null {
   if ((INAPP_DESIGN_MOTIONS as readonly string[]).includes(String(raw.motion))) out.motion = String(raw.motion);
   // ★ 2026-07-17 텍스트 정렬 (좌/중/우). 미지정=기존 렌더(좌) — 회귀 0.
   if (['left', 'center', 'right'].includes(String(raw.text_align))) out.text_align = String(raw.text_align);
+  // ★ 2026-07-19 hex = 3/4/6/8자리만 (5·7자리는 RN 색 파서가 거부 — Codex 지적. CSS·RN 공통 유효 길이만 통과)
+  const POSTER_HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
   // ★ 2026-07-18 포스터형 v2 — 오버레이 글자색 (hex만. 미지정=흰색 — SDK·미리보기 3면 동일 기본)
-  if (typeof raw.poster_text_color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(raw.poster_text_color.trim())) {
+  if (typeof raw.poster_text_color === 'string' && POSTER_HEX.test(raw.poster_text_color.trim())) {
     out.poster_text_color = raw.poster_text_color.trim();
+  }
+  // ★ 2026-07-19 포스터형 편집 UX 재구성 (Harold) — 제목/본문 분리 색·크기. poster_text_color는 하위 호환 폴백으로 유지.
+  if (typeof raw.poster_title_color === 'string' && POSTER_HEX.test(raw.poster_title_color.trim())) {
+    out.poster_title_color = raw.poster_title_color.trim();
+  }
+  if (typeof raw.poster_body_color === 'string' && POSTER_HEX.test(raw.poster_body_color.trim())) {
+    out.poster_body_color = raw.poster_body_color.trim();
+  }
+  const posterTitleSize = Number(raw.poster_title_size);
+  if (Number.isFinite(posterTitleSize) && posterTitleSize >= 14 && posterTitleSize <= 32) {
+    out.poster_title_size = Math.round(posterTitleSize);
+  }
+  const posterBodySize = Number(raw.poster_body_size);
+  if (Number.isFinite(posterBodySize) && posterBodySize >= 10 && posterBodySize <= 22) {
+    out.poster_body_size = Math.round(posterBodySize);
   }
   if (raw.backdrop && typeof raw.backdrop === 'object' && !Array.isArray(raw.backdrop)) {
     const bd: Record<string, any> = {};

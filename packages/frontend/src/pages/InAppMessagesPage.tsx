@@ -1909,6 +1909,50 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   maxLength={100}
                 />
               )}
+              {/* ★ 2026-07-19 (Harold) — 포스터형 제목 스타일은 입력 바로 아래: 서체 · 크기 · 색 */}
+              {!hasBlocks && editing.template === 'full_image' && (
+                <div className="flex flex-wrap items-center gap-2 mb-2 -mt-0.5">
+                  <select
+                    value={(() => {
+                      const fd = String(editing.design?.font_display || '');
+                      const hit = INAPP_FONT_CATALOG.find((c) => fd === c.css);
+                      return hit ? hit.id : 'default';
+                    })()}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      if (id === 'default') { setDesign({ font_display: null }); return; }
+                      const c = INAPP_FONT_CATALOG.find((x) => x.id === id);
+                      setDesign({ font_display: c ? c.css : null });
+                    }}
+                    className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-[11px] text-white"
+                    title="제목 서체"
+                  >
+                    <option value="default">서체 기본</option>
+                    {INAPP_FONT_CATALOG.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  </select>
+                  <div className="flex gap-1" title="제목 크기">
+                    {([['작게', 17], ['보통', 20], ['크게', 24]] as const).map(([label, px]) => {
+                      const cur = Number(editing.design?.poster_title_size || 20);
+                      return (
+                        <button
+                          key={px}
+                          onClick={() => setDesign({ poster_title_size: px === 20 ? null : px })}
+                          className={`px-2.5 py-1.5 rounded border text-[11px] font-bold transition-colors ${cur === px ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/50 hover:bg-white/5'}`}
+                        >{label}</button>
+                      );
+                    })}
+                  </div>
+                  <label className="flex items-center gap-1.5 text-[10px] text-white/50" title="제목 색 (이미지 위)">
+                    제목 색
+                    <input
+                      type="color"
+                      value={String(editing.design?.poster_title_color || editing.design?.poster_text_color || '#ffffff')}
+                      onChange={(e) => setDesign({ poster_title_color: e.target.value })}
+                      className="h-7 w-10 bg-slate-900/60 border border-white/10 rounded cursor-pointer"
+                    />
+                  </label>
+                </div>
+              )}
               {hasBlocks ? (
                 <div className="mt-3">
                   <div className="flex items-center justify-between mb-2">
@@ -1919,13 +1963,40 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 </div>
               ) : (
                 <>
+                  {/* ★ 2026-07-19 (Harold) — 포스터형 본문은 이미지 위 짧은 문구: 입력창 축소 + 스타일 인라인 */}
                   <textarea
                     value={editing.body || ''}
                     onChange={(e) => updateField('body', e.target.value)}
-                    placeholder="짧고 강렬하게 한두 문장. 혜택 부분은 [혜택 안내 — 직접 작성해주세요] placeholder 사용"
-                    className="w-full px-3 py-2 mb-2 bg-slate-900/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-y h-24 focus:outline-none focus:border-violet-400/50"
+                    placeholder={editing.template === 'full_image' ? '이미지 위에 얹는 짧은 문구 1~3줄 — 길면 이미지 밖으로 잘려 보일 수 있어요' : '짧고 강렬하게 한두 문장. 혜택 부분은 [혜택 안내 — 직접 작성해주세요] placeholder 사용'}
+                    className={`w-full px-3 py-2 mb-2 bg-slate-900/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-y ${editing.template === 'full_image' ? 'h-16' : 'h-24'} focus:outline-none focus:border-violet-400/50`}
                     maxLength={300}
                   />
+                  {editing.template === 'full_image' && (
+                    <div className="flex flex-wrap items-center gap-2 mb-2 -mt-0.5">
+                      <div className="flex gap-1" title="본문 크기">
+                        {([['작게', 12], ['보통', 14], ['크게', 16]] as const).map(([label, px]) => {
+                          const cur = Number(editing.design?.poster_body_size || 14);
+                          return (
+                            <button
+                              key={px}
+                              onClick={() => setDesign({ poster_body_size: px === 14 ? null : px })}
+                              className={`px-2.5 py-1.5 rounded border text-[11px] font-bold transition-colors ${cur === px ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/50 hover:bg-white/5'}`}
+                            >{label}</button>
+                          );
+                        })}
+                      </div>
+                      <label className="flex items-center gap-1.5 text-[10px] text-white/50" title="본문 색 (이미지 위)">
+                        본문 색
+                        <input
+                          type="color"
+                          value={String(editing.design?.poster_body_color || editing.design?.poster_text_color || '#ffffff')}
+                          onChange={(e) => setDesign({ poster_body_color: e.target.value })}
+                          className="h-7 w-10 bg-slate-900/60 border border-white/10 rounded cursor-pointer"
+                        />
+                      </label>
+                      <span className="text-[10px] text-white/35">제목·본문은 이미지 위에 표시 — 우측 미리보기로 확인</span>
+                    </div>
+                  )}
                   <input
                     type="text"
                     value={editing.badge_text || ''}
@@ -2268,73 +2339,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
             </div>
 
             {/* 탭 디자인: 프리셋 갤러리 (레거시 단색 — 블록 없을 때만) */}
-            {/* ★ 2026-07-18 포스터형 v2 (Harold 정정) — 전용 디자인 컨트롤: 제목 서체·이미지 위 글자색·버튼 색 */}
-            <div className={activeTab === 'design' && editing.template === 'full_image' ? '' : 'hidden'}>
-              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                <Wand2 className="w-3 h-3 text-fuchsia-300" /> 포스터 디자인
-              </h4>
-              <div className="flex flex-wrap items-end gap-4 mb-2">
-                <div>
-                  <label className="text-[10px] text-white/50 block mb-1">제목 서체</label>
-                  <select
-                    value={(() => {
-                      const fd = String(editing.design?.font_display || '');
-                      const hit = INAPP_FONT_CATALOG.find((c) => fd === c.css);
-                      return hit ? hit.id : 'default';
-                    })()}
-                    onChange={(e) => {
-                      const id = e.target.value;
-                      if (id === 'default') { setDesign({ font_display: null }); return; }
-                      const c = INAPP_FONT_CATALOG.find((x) => x.id === id);
-                      setDesign({ font_display: c ? c.css : null });
-                    }}
-                    className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white"
-                  >
-                    <option value="default">기본</option>
-                    {INAPP_FONT_CATALOG.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[10px] text-white/50 block mb-1">이미지 위 글자색</label>
-                  <input
-                    type="color"
-                    value={String(editing.design?.poster_text_color || '#ffffff')}
-                    onChange={(e) => setDesign({ poster_text_color: e.target.value.toLowerCase() === '#ffffff' ? null : e.target.value })}
-                    className="h-9 w-16 bg-slate-900/60 border border-white/10 rounded cursor-pointer"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-white/50 block mb-1">버튼 색</label>
-                  <input
-                    type="color"
-                    value={String((editing.buttons || [])[0]?.background_color || brandAccent || '#4f46e5')}
-                    onChange={(e) => {
-                      const nb = [...(editing.buttons || [])];
-                      if (nb[0]) { nb[0] = { ...nb[0], background_color: e.target.value }; updateField('buttons', nb); }
-                    }}
-                    disabled={(editing.buttons || []).length === 0}
-                    className="h-9 w-16 bg-slate-900/60 border border-white/10 rounded cursor-pointer disabled:opacity-40"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-white/50 block mb-1">버튼 글자색</label>
-                  <input
-                    type="color"
-                    value={String((editing.buttons || [])[0]?.text_color || '#ffffff')}
-                    onChange={(e) => {
-                      const nb = [...(editing.buttons || [])];
-                      if (nb[0]) { nb[0] = { ...nb[0], text_color: e.target.value }; updateField('buttons', nb); }
-                    }}
-                    disabled={(editing.buttons || []).length === 0}
-                    className="h-9 w-16 bg-slate-900/60 border border-white/10 rounded cursor-pointer disabled:opacity-40"
-                  />
-                </div>
-              </div>
-              <div className="text-[10px] text-white/40">
-                바닥은 흰색 고정 · 본문은 작성한 전 줄이 이미지 위에 표시됩니다{(editing.buttons || []).length === 0 && ' · 버튼 색은 내용 탭에서 버튼 추가 후 지정'} — 우측 미리보기로 확인하세요.
-              </div>
-            </div>
-
+            {/* ★ 2026-07-19 재구성 (Harold) — 포스터 서체·색·크기 컨트롤은 내용 탭의 입력 바로 옆으로 이동 (여기서 제거) */}
             {/* ★ 2026-07-18 정정2 — 포스터형은 카드 배경이 이미지+흰 바닥 고정이라 색 프리셋이 죽은 컨트롤 → 숨김 */}
             <div className={activeTab === 'design' && !hasBlocks && editing.template !== 'full_image' ? '' : 'hidden'}>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
@@ -2433,9 +2438,15 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   const urlBadMsg = hasOtherScheme
                     ? 'http/https 주소만 지원됩니다 — 저장 시 이 값은 제거되어 버튼이 무반응이 됩니다.'
                     : '앱에서 열 수 없는 주소 형식입니다 — https:// 포함 전체 주소 또는 "연동 몰" 선택을 사용해주세요.';
+                  // ★ 2026-07-19 (Harold) — 포스터형은 버튼 색을 버튼 행 바로 옆에 (배경/글자)
+                  const posterBtn = editing.template === 'full_image';
                   return (
                   <div key={idx}>
-                  <div className={`grid grid-cols-1 ${isApp ? 'md:grid-cols-[1fr,1fr,72px,40px]' : 'md:grid-cols-[1fr,1fr,72px,80px,40px]'} gap-2 items-center`}>
+                  <div className={`grid grid-cols-1 ${
+                    isApp
+                      ? (posterBtn ? 'md:grid-cols-[1fr,1fr,72px,34px,34px,40px]' : 'md:grid-cols-[1fr,1fr,72px,40px]')
+                      : (posterBtn ? 'md:grid-cols-[1fr,1fr,72px,34px,34px,80px,40px]' : 'md:grid-cols-[1fr,1fr,72px,80px,40px]')
+                  } gap-2 items-center`}>
                     <input
                       type="text"
                       value={btn.label}
@@ -2466,6 +2477,33 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     >
                       연동 몰
                     </button>
+                    {/* ★ 2026-07-19 — 포스터형: 버튼 배경/글자 색을 행 안에 (Harold "버튼 옆에 색") */}
+                    {posterBtn && (
+                      <input
+                        type="color"
+                        value={String(btn.background_color || brandAccent || '#4f46e5')}
+                        onChange={(e) => {
+                          const newButtons = [...(editing.buttons || [])];
+                          newButtons[idx] = { ...newButtons[idx], background_color: e.target.value };
+                          updateField('buttons', newButtons);
+                        }}
+                        className="h-8 w-full bg-slate-900/60 border border-white/10 rounded cursor-pointer"
+                        title="버튼 배경색"
+                      />
+                    )}
+                    {posterBtn && (
+                      <input
+                        type="color"
+                        value={String(btn.text_color || '#ffffff')}
+                        onChange={(e) => {
+                          const newButtons = [...(editing.buttons || [])];
+                          newButtons[idx] = { ...newButtons[idx], text_color: e.target.value };
+                          updateField('buttons', newButtons);
+                        }}
+                        className="h-8 w-full bg-slate-900/60 border border-white/10 rounded cursor-pointer"
+                        title="버튼 글자색"
+                      />
+                    )}
                     {/* ★ 2026-07-17 버튼 스타일은 웹 렌더(SDK renderLegacy)만 소비 — 앱(팝폰 시트·계약)은 색 데이터 축이라 앱 채널에서 숨김 (죽은 컨트롤 금지, auto_dismiss·애니메이션과 동일 원칙) */}
                     {!isApp && (
                     <select

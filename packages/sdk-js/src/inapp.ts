@@ -913,8 +913,18 @@ export class HanjulloInAppModule {
       return;
     }
     const design: any = (msg as any).design || {};
-    const overlayColor = typeof design.poster_text_color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(design.poster_text_color)
-      ? design.poster_text_color : '#ffffff';
+    // hex 3/4/6/8자리만 (5·7자리 = CSS·RN 무효 — 백엔드 sanitize와 동일 기준)
+    const hexOr = (v: any, fb: string) => (typeof v === 'string' && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(v) ? v : fb);
+    const sizeOr = (v: any, min: number, max: number, fb: number) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n >= min && n <= max ? n : fb;
+    };
+    // ★ 2026-07-19 제목/본문 분리 색·크기 (poster_text_color = 하위 호환 폴백)
+    const overlayColor = hexOr(design.poster_text_color, '#ffffff');
+    const titleColor = hexOr(design.poster_title_color, overlayColor);
+    const bodyColor = hexOr(design.poster_body_color, overlayColor);
+    const titleSize = sizeOr(design.poster_title_size, 14, 32, 20);
+    const bodySize = sizeOr(design.poster_body_size, 10, 22, 14); // 기본 14 = 편집기 '보통'과 1:1
     const displayFont = safeFontFamily(design.font_display, '');
     if (displayFont) ensureFontLink(displayFont);
 
@@ -981,10 +991,10 @@ export class HanjulloInAppModule {
         maxHeight: '100%',
         overflowY: 'auto',
       });
-      if (badge) this.appendBadge(scrim, badge, overlayColor);
+      if (badge) this.appendBadge(scrim, badge, titleColor);
       if (title) {
         const t = document.createElement('div');
-        Object.assign(t.style, { fontWeight: '800', fontSize: '20px', letterSpacing: '-0.01em', lineHeight: '1.3', marginBottom: body ? '5px' : '0' });
+        Object.assign(t.style, { fontWeight: '800', fontSize: `${titleSize}px`, letterSpacing: '-0.01em', lineHeight: '1.3', marginBottom: body ? '5px' : '0', color: titleColor });
         if (displayFont) t.style.fontFamily = `${displayFont}, ${INAPP_FONT_STACK}`;
         t.textContent = title;
         scrim.appendChild(t);
@@ -992,7 +1002,7 @@ export class HanjulloInAppModule {
       if (body) {
         // ★ 2026-07-18 v2 — 본문 잘림 없음 (작성한 전 줄 표시. 길이는 미리보기로 확인)
         const b = document.createElement('div');
-        Object.assign(b.style, { fontSize: '13.5px', opacity: '0.94', lineHeight: '1.55', whiteSpace: 'pre-wrap' });
+        Object.assign(b.style, { fontSize: `${bodySize}px`, opacity: '0.94', lineHeight: '1.55', whiteSpace: 'pre-wrap', color: bodyColor });
         b.textContent = body;
         scrim.appendChild(b);
       }

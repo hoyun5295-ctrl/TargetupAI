@@ -199,8 +199,13 @@ function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Varian
   if (variant === 'poster') {
     const posterImg = toAbsoluteImage(rest.imageUrl);
     const pBtn = (rest.buttons || [])[0];
-    const overlayColor = typeof rest.design?.poster_text_color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(rest.design.poster_text_color)
-      ? rest.design.poster_text_color : '#ffffff';
+    const pHex = (v: any, fb: string) => (typeof v === 'string' && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(v) ? v : fb);
+    const overlayColor = pHex(rest.design?.poster_text_color, '#ffffff');
+    // ★ 2026-07-19 제목/본문 분리 색·크기 (SDK 미러 — 미리보기 프레임 축소 배율 0.82)
+    const pTitleColor = pHex(rest.design?.poster_title_color, overlayColor);
+    const pBodyColor = pHex(rest.design?.poster_body_color, overlayColor);
+    const pTitleSize = Math.round((Number(rest.design?.poster_title_size) >= 14 && Number(rest.design?.poster_title_size) <= 32 ? Number(rest.design?.poster_title_size) : 20) * 0.82);
+    const pBodySize = Math.round((Number(rest.design?.poster_body_size) >= 10 && Number(rest.design?.poster_body_size) <= 22 ? Number(rest.design?.poster_body_size) : 14) * 0.82);
     return (
       <div style={{ position: 'absolute', inset: 0, background: backdropDim, ...(backdropBlurOn ? { backdropFilter: 'blur(10px) saturate(1.35)', WebkitBackdropFilter: 'blur(10px) saturate(1.35)' } : {}), display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 0 } as CSSProperties}>
         <div style={{ position: 'relative', width: '100%', maxHeight: '96%', display: 'flex', flexDirection: 'column', background: '#ffffff', color: '#1b1d23', borderRadius: '18px 18px 0 0', overflow: 'hidden', boxShadow: '0 -18px 50px rgba(0,0,0,0.4)', fontFamily: cardBase.fontFamily, ...(rootTextAlign ? { textAlign: rootTextAlign } : {}) }}>
@@ -213,10 +218,10 @@ function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Varian
             {(rest.title || rest.body || rest.badge) && posterImg && (
               <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '42px 18px 14px', background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.66) 100%)', color: overlayColor, maxHeight: '100%', overflowY: 'auto' }}>
                 {rest.badge && (
-                  <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.2)', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.03em', padding: '3px 9px', borderRadius: 999, marginBottom: 7 }}>{rest.badge}</div>
+                  <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.2)', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.03em', padding: '3px 9px', borderRadius: 999, marginBottom: 7, color: pTitleColor }}>{rest.badge}</div>
                 )}
-                {rest.title && <div style={{ fontWeight: 800, fontSize: 16.5, letterSpacing: '-0.01em', lineHeight: 1.3, marginBottom: rest.body ? 4 : 0, ...(displayFont ? { fontFamily: displayFont } : {}) }}>{rest.title}</div>}
-                {rest.body && <div style={{ fontSize: 12, opacity: 0.94, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>{rest.body}</div>}
+                {rest.title && <div style={{ fontWeight: 800, fontSize: pTitleSize, letterSpacing: '-0.01em', lineHeight: 1.3, marginBottom: rest.body ? 4 : 0, color: pTitleColor, ...(displayFont ? { fontFamily: displayFont } : {}) }}>{rest.title}</div>}
+                {rest.body && <div style={{ fontSize: pBodySize, opacity: 0.94, lineHeight: 1.55, whiteSpace: 'pre-wrap', color: pBodyColor }}>{rest.body}</div>}
               </div>
             )}
           </div>
@@ -458,8 +463,13 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
   const ta: 'left' | 'center' | 'right' = design?.text_align === 'center' ? 'center' : design?.text_align === 'right' ? 'right' : 'left';
   const badgeSelf = ta === 'center' ? 'center' : ta === 'right' ? 'flex-end' : 'flex-start';
   // ★ 2026-07-18 포스터형 v2 — 가로 꽉 찬 하단 시트(상단 모서리만 라운드) + 본문 무클램프 + 서체·오버레이 글자색 소비
-  const posterOverlayColor = typeof design?.poster_text_color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(design.poster_text_color)
-    ? design.poster_text_color : '#ffffff';
+  const aHex = (v: any, fb: string) => (typeof v === 'string' && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(v) ? v : fb);
+  const posterOverlayColor = aHex(design?.poster_text_color, '#ffffff');
+  // ★ 2026-07-19 제목/본문 분리 색·크기 (SDK 미러 — 앱 프레임 축소 배율 0.82)
+  const aTitleColor = aHex(design?.poster_title_color, posterOverlayColor);
+  const aBodyColor = aHex(design?.poster_body_color, posterOverlayColor);
+  const aTitleSize = Math.round((Number(design?.poster_title_size) >= 14 && Number(design?.poster_title_size) <= 32 ? Number(design?.poster_title_size) : 20) * 0.82);
+  const aBodySize = Math.round((Number(design?.poster_body_size) >= 10 && Number(design?.poster_body_size) <= 22 ? Number(design?.poster_body_size) : 14) * 0.82);
   const posterFont = safeFontFamily(design?.font_display, '') || undefined;
   const posterCard = (
     <div style={{
@@ -477,9 +487,9 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
         )}
         {(title || body || badge) && img && (
           <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '42px 18px 14px', background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.66) 100%)', color: posterOverlayColor, textAlign: ta, maxHeight: '100%', overflowY: 'auto' }}>
-            {badge && <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.2)', fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 999, marginBottom: 7 }}>{badge}</div>}
-            {title && <div style={{ fontWeight: 800, fontSize: 17, lineHeight: 1.3, marginBottom: body ? 4 : 0, ...(posterFont ? { fontFamily: posterFont } : {}) }}>{title}</div>}
-            {body && <div style={{ fontSize: 12, opacity: 0.94, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>{body}</div>}
+            {badge && <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.2)', fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 999, marginBottom: 7, color: aTitleColor }}>{badge}</div>}
+            {title && <div style={{ fontWeight: 800, fontSize: aTitleSize, lineHeight: 1.3, marginBottom: body ? 4 : 0, color: aTitleColor, ...(posterFont ? { fontFamily: posterFont } : {}) }}>{title}</div>}
+            {body && <div style={{ fontSize: aBodySize, opacity: 0.94, lineHeight: 1.55, whiteSpace: 'pre-wrap', color: aBodyColor }}>{body}</div>}
           </div>
         )}
       </div>

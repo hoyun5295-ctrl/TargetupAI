@@ -47,7 +47,7 @@ Header: X-Hanjullo-Key: hjl_...
       {
         // ★ 2026-07-18 포스터형 v2 — 앱 채널 계약 (웹 renderPoster와 동일 규격)
         title: '포스터형 (template = "full_image")',
-        desc: '가로 꽉 찬 하단 시트입니다 — 좌우 마진 0, 상단 모서리만 라운드, 카드 바닥 흰색 고정. imageUrl 필수(원본 비율 유지), 제목/본문/배지는 이미지 하단 어두운 그라데이션 위 오버레이(본문은 잘림 없이 전 줄), 오버레이 글자색 = design.poster_text_color(미지정 흰색), 제목 서체 = design.font_display. 흰 바닥에 buttons[0] 1개만 + "다시 보지 않기·닫기". 이 값을 모르는 구버전 앱은 기본형(바텀 시트)으로 안전 표시하면 됩니다.',
+        desc: '가로 꽉 찬 하단 시트입니다 — 좌우 마진 0, 상단 모서리만 라운드, 카드 바닥 흰색 고정. imageUrl 필수(원본 비율 유지), 제목/본문/배지는 이미지 하단 어두운 그라데이션 위 오버레이(본문은 잘림 없이 전 줄). 스타일 필드: design.poster_title_color/poster_body_color(제목·본문 색, 폴백 poster_text_color→흰색) · design.poster_title_size(14~32, 기본 20)/poster_body_size(10~22, 기본 14) · 제목 서체 = design.font_display(로드 불가 환경은 기본 서체). 흰 바닥에 buttons[0] 1개만(배경/글자색 소비) + "다시 보지 않기·닫기". 이 값을 모르는 구버전 앱은 기본형(바텀 시트)으로 안전 표시하면 됩니다.',
       },
       {
         title: '색상 — 단색 hex만 옵니다',
