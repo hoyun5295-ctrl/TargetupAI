@@ -8,6 +8,8 @@
 
 | 날짜 | 제목 | 검색 키워드 | 파일 |
 |------|------|-------------|------|
+| 2026-07-17 | 🟢 (3) 대시보드 성능 1~7차 + 0718 M1 스플리팅 사고·재발 방지 게이트 ①② (회전 2026-07-18) | sendTimes 커버링 인덱스 mysqlUnion SWR swr-cache enabled-fields 워밍 getCampaignResultCounts pg_stat_statements slow_query_log 버퍼풀 2GB M1 스플리팅 lazy 난독화 stringArray 동적 import 비결정 빌드 B-0718-1 dist-old safe-build 게이트 verify-live-chunks 비literal import(W f8ac12f6 d6958238 | [TASKS_2026-07.md](TASKS_2026-07.md) |
+| 2026-07-17 | 🟢 (2) 비토 라인 14·15 + 발송 라인 설정 탭 (회전 2026-07-18) | SMSQ_SEND_14 SMSQ_SEND_15 hanjul02 hanjul03 발송 라인 설정 탭 라인그룹 배정 정산 bito E2E 왕복 리포트 SMSQ_SEND_12 폐기 expired-pending-sweeper system-monitor-worker getAllBulkSmsTables | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-17 | 🟢 인앱 중앙정렬 근본수정 + 전층 전수점검 + 앱 통합 계약 (회전 2026-07-17) | text_align 중앙정렬 sdk v0.3.9 버전 폴더 동기화 sync-serving-folders sync:serving BlockPreview Overlay cardBase 쿠폰 benefit flex justifyContent isBlockAllowed ALLOWED_BLOCKS 허용표 filterBlocksForTemplate AppIntegrationContract 세션당 1회 once_per_session 죽은 컨트롤 버튼 스타일 팝폰 1.0.2 EAS Update | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-16 | 🟢 (3) DM 편집기 AI 퍼스트 전면 재개편 M1~M5 (회전 2026-07-17) | event-brief EventBrief 커버리지 게이트 copyFactsExistInText dm-page-split 스토리보드 extractMallProductNo naver-shop-search AiPromptModal 자동저장 퀵바 STYLE_VARIANT_LABELS sansSafeDisplayStack 궁서체 | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-16 | 🟢 (2) 인앱 범용 안전 편집기 재설계 (회전 2026-07-17) | composeFlatFromBlocks flat 합성 다시 보지 않기 opt_out once_per_session AsyncStorage 영속 SDK v0.3.11 옵트아웃 링크 AppInAppPreview 팝폰 세션 결함 | [TASKS_2026-07.md](TASKS_2026-07.md) |

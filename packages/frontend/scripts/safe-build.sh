@@ -79,6 +79,75 @@ if [ ! -d "$DIST_NEW/assets" ]; then
   exit 1
 fi
 
+# 3-1. ★ B-0718-1 (2026-07-18): lazy 청크 실존 기계 검증 게이트
+#   사고: 난독화 stringArray(threshold 0.5 = 빌드마다 무작위 암호화)가 라우트 동적 import
+#   경로 문자열(import('./pages/X'))을 암호화하면 rollup이 그 페이지 청크를 생성하지 못하고
+#   런타임이 원시 경로를 요청 → SPA fallback HTML → 전 고객 오류 화면.
+#   index.html/assets 존재 검증(위 2·3단계)만으론 이 불량 빌드가 전부 통과했다.
+#   대책: src의 동적 import 대상 전수를 dist-new/assets/<이름>-*.js 실존과 1:1 대조,
+#   하나라도 없으면 스왑 자체를 거부(옛 dist 유지). 현재 단일 번들(동적 import 0건)은 자동 통과.
+#   주의: 스플리팅을 pages 외 경로로 확장하면 아래 grep 패턴도 함께 확장할 것.
+LAZY_TARGETS=$(grep -rhoE "import\(['\"]\./pages/[A-Za-z0-9_]+['\"]\)" src/ 2>/dev/null | sed -E 's/.*\/pages\/([A-Za-z0-9_]+).*/\1/' | sort -u || true)
+LAZY_COUNT=$(echo $LAZY_TARGETS | wc -w)
+MISSING_CHUNKS=""
+for name in $LAZY_TARGETS; do
+  if ! ls "$DIST_NEW/assets/$name"-*.js >/dev/null 2>&1; then
+    MISSING_CHUNKS="$MISSING_CHUNKS $name"
+  fi
+done
+if [ -n "$MISSING_CHUNKS" ]; then
+  echo "❌ [atomic-build] lazy 청크 미생성 감지 —$MISSING_CHUNKS"
+  echo "   B-0718-1 유형(난독화 x 동적 import 비결정 빌드) — 스왑 거부 + 옛 dist 유지"
+  rm -rf "$DIST_NEW"
+  exit 1
+fi
+echo "[atomic-build] lazy 청크 게이트 통과 — 대상 ${LAZY_COUNT}건 전부 실존"
+
+# 3-2. ★ B-0718-1 보강 (Codex 2R P1): 산출물 안 "비literal 동적 import" 검출
+#   같은 페이지에 import 지점이 2곳+(라우트 lazy + prefetch)이면 한 지점만 난독화로 깨져도
+#   다른 지점 덕에 청크는 생성됨 → 3-1(실존)만으론 통과하는데 라우트는 런타임에 원시 경로를
+#   요청해 깨진다. 실측 증거: 사고날 밤 "통과" 판정했던 로컬 76청크 빌드조차 동적 import
+#   38지점 중 19지점이 import(W(491)) 형태(stringArray 조회 = 경로 암호화)였다.
+#   대책: 번들 전체에서 import( 뒤가 따옴표가 아닌 지점(=계산식 인자)을 세어 1건이라도
+#   있으면 스왑 거부. 현 src 동적 import 0건 + vendor 계산식 import 0건 실측이라 오탐 없음.
+#   (Codex 3R P2 보강: 인자 "전체"가 단일 완결 문자열 literal인지 검사 — 따옴표로 시작해도
+#    "./pages/"+name 연결식·`${}` 보간·미종결 문자열은 전부 계산식으로 판정)
+BAD_IMPORT_COUNT=$(node - "$DIST_NEW/assets" <<'NODE_EOF'
+const fs=require('fs'),path=require('path');
+const dir=process.argv[2];
+let bad=0;
+for(const f of fs.readdirSync(dir).filter(f=>f.endsWith('.js'))){
+  const s=fs.readFileSync(path.join(dir,f),'utf8');
+  const re=/(^|[^\w.$])import\(/g;let m;
+  while((m=re.exec(s))!==null){
+    const i=m.index+m[0].length;
+    const q=s[i];
+    if(q!=='"'&&q!=="'"&&q!=='`'){bad++;continue;}
+    let j=i+1,closed=false,computed=false;
+    while(j<s.length){
+      const c=s[j];
+      if(c==='\\'){j+=2;continue;}
+      if(q==='`'&&c==='$'&&s[j+1]==='{'){computed=true;break;}
+      if(c===q){closed=true;break;}
+      j++;
+    }
+    if(!closed||computed){bad++;continue;}
+    let k=j+1;
+    while(k<s.length&&/\s/.test(s[k]))k++;
+    if(s[k]!==')'&&s[k]!==','){bad++;}
+  }
+}
+console.log(bad);
+NODE_EOF
+)
+if [ "$BAD_IMPORT_COUNT" -gt 0 ]; then
+  echo "❌ [atomic-build] 비literal 동적 import ${BAD_IMPORT_COUNT}건 검출 — 난독화가 import 경로를 암호화함"
+  echo "   B-0718-1 유형(라우트 런타임 원시 경로 요청) — 스왑 거부 + 옛 dist 유지"
+  rm -rf "$DIST_NEW"
+  exit 1
+fi
+echo "[atomic-build] 비literal 동적 import 게이트 통과 — 0건"
+
 # 4. atomic swap — 옛 dist 백업 + dist-new를 dist로 rename
 if [ -d "$DIST_OLD" ]; then
   rm -rf "$DIST_OLD"

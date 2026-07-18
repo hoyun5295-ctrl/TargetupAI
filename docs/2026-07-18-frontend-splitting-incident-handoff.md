@@ -30,6 +30,7 @@
 
 ### 왜 사전 검증이 못 잡았나
 - tsc 0·vitest·로컬 빌드 성공·로컬 청크 실행 검증까지 전부 통과 — 그러나 **빌드가 비결정이라 로컬 산출물이 서버 산출물을 대표하지 못함**. "빌드 성공 ≠ 배포 가능".
+- **★0718 후속 실측(게이트 구현 중 발견 — 판정 정정)**: "온전"으로 봤던 로컬 76청크 빌드도 동적 import 38지점 중 **19지점이 `import(W(491))` 형태**(stringArray 조회 = 경로 암호화)로 남아 있었다. 즉 로컬 빌드 역시 라우트 상당수가 런타임에 원시 경로를 요청하는 불량이었고, 청크 수·Node 실행 검증으로는 못 잡는다(같은 페이지의 다른 literal import 지점 덕에 청크는 생성되므로). 산출물 게이트는 청크 실존(3-1)에 더해 **"비literal 동적 import 0건"(3-2)까지 검사**해야 한다 — 2026-07-18 safe-build.sh에 두 게이트 모두 구현.
 - 연관 영향 검토 누락: 동적 import 도입 시 "기존 난독화 설정과의 상호작용"을 영향 지점 목록에 올리지 않음(impact_analysis_before_modification 위반).
 
 ## 3. 현재 서버 상태 (다음 세션이 이어받는 지점)
@@ -50,7 +51,8 @@ tp-push "M1 스플리팅 롤백 정합 — 프론트를 f8ac12f6로 원복(사�
 ```
 서버에서: `cd /home/administrator/targetup-app && git status` 확인 → 로컬 커밋과 동일 내용이므로 `git stash && git pull`(또는 `git checkout -- packages/frontend && git pull`) — **실행 전 git status 출력을 보고 판단**(dirty 내용이 revert 커밋과 동일해야 함). pull 후 frontend 재빌드 불필요(dist는 이미 롤백 상태).
 
-### 4-2. 재발 방지 게이트 (스플리팅과 무관하게 먼저 구현·배포)
+### 4-2. 재발 방지 게이트 (스플리팅과 무관하게 먼저 구현·배포) — ★2026-07-18 구현 완료(Codex 5라운드 통과)
+> 구현물: `safe-build.sh` 3-1(lazy 청크 실존 1:1 대조) + 3-2(번들 전체 "비literal 동적 import" 검출 — 청크가 있어도 다른 import 지점이 암호화된 경우까지 차단) + `scripts/verify-live-chunks.sh`(배포 직후 라이브 전수: 산출물 스캔 + src lazy 대상 + index.html 참조 + 전 JS content-type·HTTP 200, 전부 fail-closed). 하네스 실측 = 사고 재현·이름 겹침 미끼·계산식 오인·curl 중단·node 부재·CSS-only 배포물 전부 차단 확인.
 `safe-build.sh`에 **산출물 기계 검증** 추가 — 나쁜 주사위 빌드는 스왑 자체가 거부되게:
 - 검증식: `src`의 lazy 대상 목록(`grep -oE "import\('\./pages/[A-Za-z]+'\)" src/App.tsx`)과 `dist-new/assets/<이름>-*.js` 실존을 1:1 대조. 하나라도 없으면 exit 1(옛 dist 유지).
 - 단일 번들 상태(현재)에서는 lazy 0건이라 게이트가 자동 통과 — 지금 넣어도 무해.
