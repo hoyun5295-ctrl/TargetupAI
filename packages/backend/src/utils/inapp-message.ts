@@ -127,6 +127,10 @@ export function sanitizeInAppDesign(raw: any): Record<string, any> | null {
   if ((INAPP_DESIGN_MOTIONS as readonly string[]).includes(String(raw.motion))) out.motion = String(raw.motion);
   // ★ 2026-07-17 텍스트 정렬 (좌/중/우). 미지정=기존 렌더(좌) — 회귀 0.
   if (['left', 'center', 'right'].includes(String(raw.text_align))) out.text_align = String(raw.text_align);
+  // ★ 2026-07-18 포스터형 v2 — 오버레이 글자색 (hex만. 미지정=흰색 — SDK·미리보기 3면 동일 기본)
+  if (typeof raw.poster_text_color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(raw.poster_text_color.trim())) {
+    out.poster_text_color = raw.poster_text_color.trim();
+  }
   if (raw.backdrop && typeof raw.backdrop === 'object' && !Array.isArray(raw.backdrop)) {
     const bd: Record<string, any> = {};
     if ((INAPP_DESIGN_DIMS as readonly string[]).includes(String(raw.backdrop.dim))) bd.dim = String(raw.backdrop.dim);

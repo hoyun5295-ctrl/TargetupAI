@@ -54,14 +54,15 @@ export type InAppTemplate =
   | 'toast'
   | 'floating_button';
 
+// ★ 2026-07-18 재편 (Harold 확정) — 인앱은 "접속 중인 사람"에게만 보이는 채널: 리텐션형(휴면 회수·재구매 유도)은
+//   세그 축으로 정직하게 표현 불가(미접속자는 못 보고, 미결제·복귀 모멘트 축은 매처에 없음) → 카드에서 제거.
+//   남은 5종은 세그·트리거·빈도를 SCENARIO_CONDITIONS로 결정 주입 — 카드 문구 = 실조건 1:1 보장.
 export type QuickStartScenario =
   | 'cart_recovery'
   | 'new_welcome'
-  | 'dormant_recovery'
   | 'new_product'
   | 'vip_appreciation'
-  | 'checkout_abandon'
-  | 'repeat_purchase';
+  | 'checkout_abandon';
 
 export interface InAppButton {
   id: string;
@@ -160,51 +161,54 @@ interface QuickStartSeed {
 
 const QUICK_START_SEEDS: Record<QuickStartScenario, QuickStartSeed> = {
   cart_recovery: {
-    objective: '장바구니에 상품을 24시간 이상 두고 결제하지 않은 회원에게 부드러운 회복 안내',
+    objective: '최근 3일 안에 장바구니에 상품을 담은 회원이 장바구니 화면을 볼 때 부드러운 회복 안내',
     defaultTemplate: 'slide_in',
     defaultTrigger: 'cart_view',
   },
   new_welcome: {
-    objective: '신규 가입 24시간 안 첫 방문 시 환영 인사 + 자사몰 둘러보기 안내',
-    defaultTemplate: 'center_modal',
-    defaultTrigger: 'page_load',
-  },
-  dormant_recovery: {
-    objective: '60일 이상 미접속 휴면 회원에게 오랜 안부 인사 + 새 소식 안내',
+    objective: "등급 '신규' 회원이 접속하면 환영 인사 + 자사몰 둘러보기 안내",
     defaultTemplate: 'center_modal',
     defaultTrigger: 'page_load',
   },
   new_product: {
-    objective: '신상품 출시 첫 주 동안 전체 회원에게 부드러운 알림',
+    objective: '신상품 출시를 전체 방문 고객에게 하루 1회 부드럽게 알림',
     defaultTemplate: 'center_modal',
     defaultTrigger: 'page_load',
   },
   vip_appreciation: {
-    objective: 'VIP 등급 회원에게 진심 어린 감사 인사 + 우대 안내',
+    objective: "등급 'VIP' 회원에게 진심 어린 감사 인사 + 우대 안내",
     defaultTemplate: 'slide_in',
     defaultTrigger: 'page_load',
   },
   checkout_abandon: {
-    objective: '결제 페이지에서 30초 이상 머무르며 결제 X 회원에게 부드러운 진행 안내',
+    objective: '결제를 시작한 회원에게 안심 문구로 결제 완료를 돕는 안내',
     defaultTemplate: 'center_modal',
-    defaultTrigger: 'time_on_page',
+    defaultTrigger: 'checkout_start',
   },
-  repeat_purchase: {
-    objective: '직전 구매 14일 후 재구매 유도 — 구매 회복 시점 부드러운 안내',
-    defaultTemplate: 'center_modal',
-    defaultTrigger: 'page_load',
-  },
+};
+
+// ★ 2026-07-18 (Harold 확정) — 시나리오별 세그·트리거·빈도 결정 주입.
+//   AI 산출을 신뢰하지 않고 여기 값으로 덮는다 — 카드에 적힌 조건이 그대로 저장되는 것을 기계로 보장.
+//   축은 전부 CT-78 매처 실지원 필드만 사용(표현 불가 조건 = 카드 자체를 두지 않는다).
+const SCENARIO_CONDITIONS: Record<QuickStartScenario, {
+  segment: SegmentConditions;
+  trigger: TriggerConditions;
+  frequency: 'once_per_session' | 'once_per_day' | 'always';
+}> = {
+  cart_recovery:    { segment: { events: { cart_add_within_days: 3 } }, trigger: { event: 'cart_view' },      frequency: 'once_per_session' },
+  new_welcome:      { segment: { customer: { grade: ['신규'] } },       trigger: { event: 'page_load' },      frequency: 'once_per_session' },
+  new_product:      { segment: {},                                      trigger: { event: 'page_load' },      frequency: 'once_per_day' },
+  vip_appreciation: { segment: { customer: { grade: ['VIP'] } },        trigger: { event: 'page_load' },      frequency: 'once_per_session' },
+  checkout_abandon: { segment: {},                                      trigger: { event: 'checkout_start' }, frequency: 'once_per_session' },
 };
 
 // 시나리오별 뱃지 + 추천 프리셋 색 (편집에서 8종 자유 변경 가능). 자연어 추론 시 AI가 직접 생성.
 const SCENARIO_STYLE: Record<QuickStartScenario, { badge: string; background: string; textColor: string }> = {
   cart_recovery:    { badge: '장바구니',     background: 'linear-gradient(135deg, #fb7185 0%, #f97316 100%)', textColor: '#ffffff' },
   new_welcome:      { badge: 'WELCOME',      background: 'linear-gradient(135deg, #059669 0%, #0d9488 100%)', textColor: '#ffffff' },
-  dormant_recovery: { badge: '오랜만이에요', background: 'linear-gradient(135deg, #0f172a 0%, #312e81 100%)', textColor: '#ffffff' },
   new_product:      { badge: 'NEW',          background: 'linear-gradient(135deg, #a855f7 0%, #ec4899 50%, #fb923c 100%)', textColor: '#ffffff' },
   vip_appreciation: { badge: 'VIP',          background: 'linear-gradient(135deg, #1c1917 0%, #44403c 100%)', textColor: '#fcd34d' },
   checkout_abandon: { badge: '거의 다 왔어요', background: 'linear-gradient(135deg, #fb7185 0%, #f97316 100%)', textColor: '#ffffff' },
-  repeat_purchase:  { badge: '다시 만나요',   background: 'linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%)', textColor: '#ffffff' },
 };
 
 export interface QuickStartCardInfo {
@@ -214,15 +218,14 @@ export interface QuickStartCardInfo {
   defaultTemplate: InAppTemplate;
 }
 
+// ★ 2026-07-18 재편 — hint = SCENARIO_CONDITIONS 실주입 조건과 1:1 (카드 문구가 곧 저장되는 조건)
 export function listQuickStartCards(): QuickStartCardInfo[] {
   return [
-    { scenario: 'cart_recovery',     label: '장바구니 회복',     hint: '24h 이상 결제 X 회원 부드러운 안내', defaultTemplate: 'slide_in' },
-    { scenario: 'new_welcome',       label: '신규 가입 환영',    hint: '첫 방문 환영 + 자사몰 안내',         defaultTemplate: 'center_modal' },
-    { scenario: 'dormant_recovery',  label: '휴면 회수',         hint: '60일+ 미접속 안부 인사',              defaultTemplate: 'center_modal' },
-    { scenario: 'new_product',       label: '신상품 출시',       hint: '첫 주 전체 회원 알림',                defaultTemplate: 'center_modal' },
-    { scenario: 'vip_appreciation',  label: 'VIP 감사',          hint: 'VIP 등급 진심 감사 인사',             defaultTemplate: 'slide_in' },
-    { scenario: 'checkout_abandon',  label: '결제 이탈 방지',    hint: '결제 페이지 30초+ 머무름 안내',       defaultTemplate: 'center_modal' },
-    { scenario: 'repeat_purchase',   label: '재구매 유도',       hint: '직전 구매 14일 후 회복',              defaultTemplate: 'center_modal' },
+    { scenario: 'cart_recovery',     label: '장바구니 살리기',   hint: '최근 3일 장바구니 담은 고객 · 장바구니 화면에서', defaultTemplate: 'slide_in' },
+    { scenario: 'new_welcome',       label: '신규 고객 환영',    hint: "등급 '신규' 고객 · 접속 시 · 세션당 1회",          defaultTemplate: 'center_modal' },
+    { scenario: 'new_product',       label: '신상품 알림',       hint: '전체 방문 고객 · 접속 시 · 하루 1회',              defaultTemplate: 'center_modal' },
+    { scenario: 'vip_appreciation',  label: 'VIP 감사',          hint: "등급 'VIP' 고객 · 접속 시 · 세션당 1회",           defaultTemplate: 'slide_in' },
+    { scenario: 'checkout_abandon',  label: '결제 완료 돕기',    hint: '결제 시작 고객 · 결제 화면 진입 시',               defaultTemplate: 'center_modal' },
   ];
 }
 
@@ -311,11 +314,9 @@ function validateTemplate(t: any): InAppTemplate | null {
 const SCENARIO_ACCENT: Record<QuickStartScenario, string> = {
   cart_recovery: '#f97316',
   new_welcome: '#10b981',
-  dormant_recovery: '#6366f1',
   new_product: '#a855f7',
   vip_appreciation: '#d4a017',
   checkout_abandon: '#f43f5e',
-  repeat_purchase: '#0ea5e9',
 };
 
 // ★ 2026-07-07(2) 시나리오별 추천 형태 / ★ 2026-07-14 디자인 4.0 M2 — 소유 = design-core/recommend (값 무변 이관)
@@ -419,8 +420,13 @@ export async function generateInAppMessagePackage(
   input: InAppAIGenerateInput
 ): Promise<InAppAIPackage> {
   const eventText = normalizeEventText(input.eventText || '');
+  // ★ 2026-07-18 재편 — 폐지 시나리오(repeat_purchase 등)·임의 문자열이 오면 SCENARIO_CONDITIONS 직접 접근에서
+  //   500이 나므로 입구에서 무해화: 모르는 값 = templateHint 없음(자연어 경로)으로 취급.
+  if (input.templateHint && !QUICK_START_SEEDS[input.templateHint]) {
+    input.templateHint = undefined;
+  }
   if (!input.objective && !input.templateHint && !eventText) {
-    throw new Error('objective (자연어) 또는 templateHint (빠른 시작 7 시나리오) 또는 event_text (행사 내용) 중 하나는 필수입니다.');
+    throw new Error('objective (자연어) 또는 templateHint (빠른 시작 시나리오) 또는 event_text (행사 내용) 중 하나는 필수입니다.');
   }
 
   // templateHint 우선 — 빠른 시작 SEED 사용
@@ -747,12 +753,16 @@ ${brandAccent
     buttons,
     background_color: String(parsed.background_color || scenarioStyle?.background || '#4f46e5'),
     text_color: String(parsed.text_color || scenarioStyle?.textColor || '#ffffff'),
-    segment_conditions: parsed.segment_conditions || {},
-    trigger_conditions: parsed.trigger_conditions || { event: 'page_load' },
+    // ★ 2026-07-18 (Harold 확정) — 빠른 시작 = 세그·트리거·빈도 결정 주입 (AI 산출 덮음 — 카드 문구와 실조건 1:1 기계 보장).
+    //   자연어 자유 입력 경로(templateHint 없음)만 AI 산출 사용.
+    segment_conditions: input.templateHint ? SCENARIO_CONDITIONS[input.templateHint].segment : (parsed.segment_conditions || {}),
+    trigger_conditions: input.templateHint ? SCENARIO_CONDITIONS[input.templateHint].trigger : (parsed.trigger_conditions || { event: 'page_load' }),
     personalization_vars: Array.isArray(parsed.personalization_vars) ? parsed.personalization_vars : [],
-    display_frequency: ['once_per_session', 'once_per_day', 'always'].includes(parsed.display_frequency)
-      ? parsed.display_frequency
-      : 'once_per_session',
+    display_frequency: input.templateHint
+      ? SCENARIO_CONDITIONS[input.templateHint].frequency
+      : (['once_per_session', 'once_per_day', 'always'].includes(parsed.display_frequency)
+        ? parsed.display_frequency
+        : 'once_per_session'),
     auto_dismiss_seconds: parsed.auto_dismiss_seconds ?? null,
     max_displays_per_user: parsed.max_displays_per_user ?? null,
     send_start_hour: parsed.send_start_hour ?? null,

@@ -897,9 +897,11 @@ export class HanjulloInAppModule {
   // Template 9: full_image (포스터형 — 2026-07-18 인앱 단순화 P1)
   // ────────────────────────────────────────────────────────────────
 
-  /** 포스터형 — 이미지가 카드 전체(쿠팡이츠·스타벅스형). 카드 배경 흰색 고정(저장된 background_color 무시 — B형 정책),
-   *  제목/본문(선택)은 이미지 하단 그라데이션 스크림 위 텍스트 레이어(픽셀에 굽지 않음 — 수정·개인화 치환 가능),
-   *  흰 바닥 = CTA 1개(브랜드 버튼색) + 다시 보지 않기. 이미지가 없으면 중앙 모달로 안전 폴백. */
+  /** 포스터형 — 이미지가 카드 전체(쿠팡이츠·스타벅스형). ★ 2026-07-18 v2 (Harold 정정):
+   *  가로 꽉 찬 하단 시트(좌우 마진 0·상단 모서리만 라운드 — 데스크톱은 최대 520px 중앙), 본문 잘림 없음,
+   *  오버레이 서체(design.font_display)·글자색(design.poster_text_color) 소비. 카드 바닥 흰색 고정,
+   *  텍스트는 이미지 하단 스크림 위 레이어(픽셀에 굽지 않음), 흰 바닥 = CTA 1개 + 다시 보지 않기.
+   *  이미지가 없으면 중앙 모달로 안전 폴백. */
   private renderPoster(
     msg: InAppMessageSdk, title: string, body: string, imageUrl: string | null | undefined,
     badge: string,
@@ -910,6 +912,11 @@ export class HanjulloInAppModule {
       this.renderCenterModal(msg, title, body, imageUrl, badge, buttons, animation, autoDismissSec, input);
       return;
     }
+    const design: any = (msg as any).design || {};
+    const overlayColor = typeof design.poster_text_color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(design.poster_text_color)
+      ? design.poster_text_color : '#ffffff';
+    const displayFont = safeFontFamily(design.font_display, '');
+    if (displayFont) ensureFontLink(displayFont);
 
     const backdrop = document.createElement('div');
     Object.assign(backdrop.style, {
@@ -919,28 +926,28 @@ export class HanjulloInAppModule {
       backdropFilter: 'blur(14px) saturate(1.35)',
       zIndex: '2147483646',
       display: 'flex',
-      alignItems: 'center',
+      alignItems: 'flex-end',
       justifyContent: 'center',
-      padding: '16px',
+      padding: '0',
     });
     (backdrop.style as any).webkitBackdropFilter = 'blur(14px) saturate(1.35)';
 
     const root = document.createElement('div');
     root.setAttribute('data-hanjullo-msg', msg.id);
     Object.assign(root.style, {
-      maxWidth: '400px',
       width: '100%',
+      maxWidth: '520px',
       background: '#ffffff',
       color: '#1b1d23',
-      borderRadius: '24px',
+      borderRadius: '22px 22px 0 0',
       overflow: 'hidden',
-      boxShadow: '0 2px 8px rgba(0,0,0,0.25), 0 18px 46px rgba(0,0,0,0.35), 0 44px 110px rgba(0,0,0,0.45)',
+      boxShadow: '0 -6px 24px rgba(0,0,0,0.22), 0 -24px 70px rgba(0,0,0,0.35)',
       position: 'relative',
       zIndex: '2147483647',
       fontFamily: INAPP_FONT_STACK,
       boxSizing: 'border-box',
     });
-    this.applyAnimation(root, animation, 'modal');
+    this.applyAnimation(root, animation, 'modal'); // fade=rise(살짝 떠오름) — 하단 시트에 자연스러운 기존 컨텍스트 재사용
 
     // 이미지 = 카드 전체. 원본 비율 유지(이미지 안 문구가 잘리지 않게 크롭 없음), 과도한 세로만 62vh에서 컷
     const imgWrap = document.createElement('div');
@@ -966,26 +973,26 @@ export class HanjulloInAppModule {
         left: '0',
         right: '0',
         bottom: '0',
-        padding: '46px 22px 18px',
-        background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.62) 100%)',
-        color: '#ffffff',
+        padding: '52px 22px 18px',
+        background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.66) 100%)',
+        color: overlayColor,
         boxSizing: 'border-box',
+        // 본문이 이미지 높이를 넘는 극단 케이스 — 잘라내지 않고 이미지 안에서 스크롤 (Codex 지적)
+        maxHeight: '100%',
+        overflowY: 'auto',
       });
-      if (badge) this.appendBadge(scrim, badge, '#ffffff');
+      if (badge) this.appendBadge(scrim, badge, overlayColor);
       if (title) {
         const t = document.createElement('div');
         Object.assign(t.style, { fontWeight: '800', fontSize: '20px', letterSpacing: '-0.01em', lineHeight: '1.3', marginBottom: body ? '5px' : '0' });
+        if (displayFont) t.style.fontFamily = `${displayFont}, ${INAPP_FONT_STACK}`;
         t.textContent = title;
         scrim.appendChild(t);
       }
       if (body) {
+        // ★ 2026-07-18 v2 — 본문 잘림 없음 (작성한 전 줄 표시. 길이는 미리보기로 확인)
         const b = document.createElement('div');
-        Object.assign(b.style, {
-          fontSize: '13.5px', opacity: '0.92', lineHeight: '1.5', whiteSpace: 'pre-wrap',
-          display: '-webkit-box', overflow: 'hidden',
-        });
-        (b.style as any).webkitLineClamp = '2';
-        (b.style as any).webkitBoxOrient = 'vertical';
+        Object.assign(b.style, { fontSize: '13.5px', opacity: '0.94', lineHeight: '1.55', whiteSpace: 'pre-wrap' });
         b.textContent = body;
         scrim.appendChild(b);
       }

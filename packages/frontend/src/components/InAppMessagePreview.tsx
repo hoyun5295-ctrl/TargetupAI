@@ -194,26 +194,29 @@ function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Varian
   if (variant === 'banner') {
     return <div style={{ ...cardBase, top: 0, left: 0, right: 0, padding: '13px 16px', boxShadow: '0 8px 28px rgba(0,0,0,0.18)' }}>{inner}{optOutHint}</div>;
   }
-  // ★ 2026-07-18 P1 — 포스터형 (SDK renderPoster 1:1 미러): 흰 카드 고정 + 전면 이미지 + 하단 스크림 오버레이 텍스트 + 흰 바닥 CTA 1개
+  // ★ 2026-07-18 포스터형 v2 (SDK renderPoster 1:1 미러): 가로 꽉 찬 하단 시트(상단 모서리만 라운드) +
+  //   본문 무클램프 + 서체(design.font_display)·오버레이 글자색(design.poster_text_color) 소비
   if (variant === 'poster') {
     const posterImg = toAbsoluteImage(rest.imageUrl);
     const pBtn = (rest.buttons || [])[0];
+    const overlayColor = typeof rest.design?.poster_text_color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(rest.design.poster_text_color)
+      ? rest.design.poster_text_color : '#ffffff';
     return (
-      <div style={{ position: 'absolute', inset: 0, background: backdropDim, ...(backdropBlurOn ? { backdropFilter: 'blur(10px) saturate(1.35)', WebkitBackdropFilter: 'blur(10px) saturate(1.35)' } : {}), display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 } as CSSProperties}>
-        <div style={{ position: 'relative', maxWidth: 300, width: '100%', maxHeight: '94%', display: 'flex', flexDirection: 'column', background: '#ffffff', color: '#1b1d23', borderRadius: 20, overflow: 'hidden', boxShadow: '0 24px 60px rgba(0,0,0,0.45)', fontFamily: cardBase.fontFamily, ...(rootTextAlign ? { textAlign: rootTextAlign } : {}) }}>
+      <div style={{ position: 'absolute', inset: 0, background: backdropDim, ...(backdropBlurOn ? { backdropFilter: 'blur(10px) saturate(1.35)', WebkitBackdropFilter: 'blur(10px) saturate(1.35)' } : {}), display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 0 } as CSSProperties}>
+        <div style={{ position: 'relative', width: '100%', maxHeight: '96%', display: 'flex', flexDirection: 'column', background: '#ffffff', color: '#1b1d23', borderRadius: '18px 18px 0 0', overflow: 'hidden', boxShadow: '0 -18px 50px rgba(0,0,0,0.4)', fontFamily: cardBase.fontFamily, ...(rootTextAlign ? { textAlign: rootTextAlign } : {}) }}>
           <div style={{ position: 'relative', overflow: 'hidden', flexShrink: 1, minHeight: 0 }}>
             {posterImg ? (
-              <img src={posterImg} alt="" onError={hideOnError} style={{ width: '100%', height: 'auto', maxHeight: 340, objectFit: 'cover', display: 'block' }} />
+              <img src={posterImg} alt="" onError={hideOnError} style={{ width: '100%', height: 'auto', maxHeight: 360, objectFit: 'cover', display: 'block' }} />
             ) : (
               <div style={{ width: '100%', height: 240, background: 'linear-gradient(135deg,#e8e8ee,#d4d4dd)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#8a8a94' }}>이미지 1장 필수 — 콘텐츠 탭에서 업로드</div>
             )}
             {(rest.title || rest.body || rest.badge) && posterImg && (
-              <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '38px 18px 14px', background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.62) 100%)', color: '#ffffff' }}>
+              <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '42px 18px 14px', background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.66) 100%)', color: overlayColor, maxHeight: '100%', overflowY: 'auto' }}>
                 {rest.badge && (
                   <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.2)', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.03em', padding: '3px 9px', borderRadius: 999, marginBottom: 7 }}>{rest.badge}</div>
                 )}
-                {rest.title && <div style={{ fontWeight: 800, fontSize: 16.5, letterSpacing: '-0.01em', lineHeight: 1.3, marginBottom: rest.body ? 4 : 0 }}>{rest.title}</div>}
-                {rest.body && <div style={{ fontSize: 12, opacity: 0.92, lineHeight: 1.5, whiteSpace: 'pre-wrap', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{rest.body}</div>}
+                {rest.title && <div style={{ fontWeight: 800, fontSize: 16.5, letterSpacing: '-0.01em', lineHeight: 1.3, marginBottom: rest.body ? 4 : 0, ...(displayFont ? { fontFamily: displayFont } : {}) }}>{rest.title}</div>}
+                {rest.body && <div style={{ fontSize: 12, opacity: 0.94, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>{rest.body}</div>}
               </div>
             )}
           </div>
@@ -436,6 +439,17 @@ function DummyAppScreen() {
 }
 
 export function AppInAppPreview({ template, title, body, imageUrl, badge, buttons, backgroundColor, textColor, design }: AppInAppPreviewProps) {
+  // ★ 2026-07-18 포스터형 v2 — 선택 서체 실로딩 (웹 미리보기 useEffect와 동일 가드)
+  const appFontsUrl = inappGoogleFontsUrl(design?.font_display, undefined);
+  useEffect(() => {
+    if (!appFontsUrl) return;
+    if (document.querySelector(`link[data-hjl-fonts="${appFontsUrl}"]`)) return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = appFontsUrl;
+    link.setAttribute('data-hjl-fonts', appFontsUrl);
+    document.head.appendChild(link);
+  }, [appFontsUrl]);
   const isModal = template === 'center_modal';
   // ★ 2026-07-18 정정2 — 앱 포스터형(전면 이미지): 웹 renderPoster와 동일 규격(흰 바닥·CTA 1개·오버레이 텍스트)
   const isPoster = template === 'full_image';
@@ -443,25 +457,29 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
   // ★ 2026-07-17 텍스트 정렬 (design.text_align) — SDK 렌더 미러. 미지정=왼쪽
   const ta: 'left' | 'center' | 'right' = design?.text_align === 'center' ? 'center' : design?.text_align === 'right' ? 'right' : 'left';
   const badgeSelf = ta === 'center' ? 'center' : ta === 'right' ? 'flex-end' : 'flex-start';
+  // ★ 2026-07-18 포스터형 v2 — 가로 꽉 찬 하단 시트(상단 모서리만 라운드) + 본문 무클램프 + 서체·오버레이 글자색 소비
+  const posterOverlayColor = typeof design?.poster_text_color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(design.poster_text_color)
+    ? design.poster_text_color : '#ffffff';
+  const posterFont = safeFontFamily(design?.font_display, '') || undefined;
   const posterCard = (
     <div style={{
       background: '#ffffff',
       color: '#1b1d23',
       overflow: 'hidden',
       fontFamily: '"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif',
-      borderRadius: 22, margin: '0 18px', maxWidth: 420, width: 'calc(100% - 36px)',
+      borderTopLeftRadius: 24, borderTopRightRadius: 24, width: '100%',
     }}>
       <div style={{ position: 'relative' }}>
         {img ? (
-          <img src={img} alt="" onError={hideOnError} style={{ width: '100%', height: 'auto', maxHeight: 320, objectFit: 'cover', display: 'block' }} />
+          <img src={img} alt="" onError={hideOnError} style={{ width: '100%', height: 'auto', maxHeight: 340, objectFit: 'cover', display: 'block' }} />
         ) : (
           <div style={{ width: '100%', height: 220, background: 'linear-gradient(135deg,#e8e8ee,#d4d4dd)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#8a8a94' }}>이미지 1장 필수 — 콘텐츠 탭에서 업로드</div>
         )}
         {(title || body || badge) && img && (
-          <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '40px 18px 14px', background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.62) 100%)', color: '#ffffff', textAlign: ta }}>
+          <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '42px 18px 14px', background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.66) 100%)', color: posterOverlayColor, textAlign: ta, maxHeight: '100%', overflowY: 'auto' }}>
             {badge && <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.2)', fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 999, marginBottom: 7 }}>{badge}</div>}
-            {title && <div style={{ fontWeight: 800, fontSize: 17, lineHeight: 1.3, marginBottom: body ? 4 : 0 }}>{title}</div>}
-            {body && <div style={{ fontSize: 12, opacity: 0.92, lineHeight: 1.5, whiteSpace: 'pre-wrap', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{body}</div>}
+            {title && <div style={{ fontWeight: 800, fontSize: 17, lineHeight: 1.3, marginBottom: body ? 4 : 0, ...(posterFont ? { fontFamily: posterFont } : {}) }}>{title}</div>}
+            {body && <div style={{ fontSize: 12, opacity: 0.94, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>{body}</div>}
           </div>
         )}
       </div>
@@ -530,7 +548,7 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
           {/* 앱 화면 + 백드롭 + 시트/모달/포스터 */}
           <div style={{ position: 'relative', height: 580, overflow: 'hidden' }}>
             <DummyAppScreen />
-            <div style={{ position: 'absolute', inset: 0, background: 'rgba(10,10,15,0.6)', display: 'flex', flexDirection: 'column', justifyContent: isModal || isPoster ? 'center' : 'flex-end', alignItems: 'center' }}>
+            <div style={{ position: 'absolute', inset: 0, background: 'rgba(10,10,15,0.6)', display: 'flex', flexDirection: 'column', justifyContent: isModal ? 'center' : 'flex-end', alignItems: 'center' }}>
               {isPoster ? posterCard : card}
             </div>
           </div>

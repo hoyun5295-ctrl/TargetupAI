@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
 import {
   Activity, AlertCircle, AlertTriangle, AlignLeft, ArrowLeft, BarChart3, ChevronDown, ChevronUp,
-  Clock, Copy, Crown, Download, Edit2, Eye, Globe, GripVertical, ImageIcon, Layers, Lightbulb, ListChecks, Loader2, Minus, Moon, MousePointer,
-  MousePointerClick, MoveVertical, Plus, RefreshCw, Repeat, ShoppingBag, ShoppingCart, Smartphone, Sparkles, Star,
+  Clock, Copy, CreditCard, Crown, Download, Edit2, Eye, Globe, GripVertical, ImageIcon, Layers, Lightbulb, ListChecks, Loader2, Minus, MousePointer,
+  MousePointerClick, MoveVertical, Plus, RefreshCw, ShoppingBag, ShoppingCart, Smartphone, Sparkles, Star,
   Tag, Target, Ticket, Timer, Trash2, TrendingDown, TrendingUp, Type, Upload, UserPlus, Users, Wand2, X,
 } from 'lucide-react';
 // ★ P2-1 (2026-07-12) 블록 드래그앤드롭 — EmailVisualEditor SortableBlockRow 패턴 이식 (의존성 기존재, 라이브러리 추가 0)
@@ -57,7 +57,9 @@ type Frequency = 'once_per_session' | 'once_per_day' | 'always';
 type Status = 'active' | 'paused' | 'archived';
 type TriggerEvent = 'page_load' | 'cart_add' | 'cart_view' | 'checkout_start' | 'scroll' | 'time_on_page' | 'exit_intent' | 'cart_value';
 type Animation = 'fade' | 'slide' | 'bounce' | 'pulse' | 'spring' | 'celebrate';
-type QuickStartScenario = 'cart_recovery' | 'new_welcome' | 'dormant_recovery' | 'new_product' | 'vip_appreciation' | 'checkout_abandon' | 'repeat_purchase';
+// ★ 2026-07-18 재편 (Harold 확정) — 리텐션형(휴면·재구매) 제거: 인앱은 접속 중인 사람에게만 보이는 채널.
+//   남은 5종은 백엔드 SCENARIO_CONDITIONS가 세그·트리거·빈도를 결정 주입 — 카드 문구 = 실조건 1:1.
+type QuickStartScenario = 'cart_recovery' | 'new_welcome' | 'new_product' | 'vip_appreciation' | 'checkout_abandon';
 type SortMode = 'ctr_desc' | 'impressions_desc' | 'created_desc';
 
 interface InAppButton {
@@ -186,14 +188,13 @@ interface FunnelStats {
 // 빠른 시작 7 시나리오 아이콘 + 그라데이션 매핑
 // ════════════════════════════════════════════════════════════════════
 
+// ★ 2026-07-18 재편 — 라벨·힌트 = 백엔드 listQuickStartCards·SCENARIO_CONDITIONS와 1:1 (카드 문구가 곧 저장 조건)
 const SCENARIO_VISUAL: Record<QuickStartScenario, { icon: typeof ShoppingCart; gradient: string; label: string; hint: string }> = {
-  cart_recovery:     { icon: ShoppingCart,   gradient: 'from-amber-400 to-orange-500',   label: '장바구니 회복',     hint: '24h 이상 결제 X 회원 안내' },
-  new_welcome:       { icon: UserPlus,       gradient: 'from-emerald-400 to-teal-500',   label: '신규 가입 환영',    hint: '첫 방문 환영 + 자사몰 안내' },
-  dormant_recovery:  { icon: Moon,           gradient: 'from-violet-400 to-indigo-500',  label: '휴면 회수',         hint: '60일+ 미접속 안부 인사' },
-  new_product:       { icon: Sparkles,       gradient: 'from-fuchsia-400 to-purple-500', label: '신상품 출시',       hint: '첫 주 전체 회원 알림' },
-  vip_appreciation:  { icon: Crown,          gradient: 'from-amber-400 to-yellow-500',   label: 'VIP 감사',          hint: 'VIP 등급 진심 감사 인사' },
-  checkout_abandon:  { icon: AlertTriangle,  gradient: 'from-rose-400 to-pink-500',      label: '결제 이탈 방지',    hint: '결제 페이지 30초+ 머무름' },
-  repeat_purchase:   { icon: Repeat,         gradient: 'from-cyan-400 to-blue-500',      label: '재구매 유도',       hint: '직전 구매 14일 후 회복' },
+  cart_recovery:     { icon: ShoppingCart, gradient: 'from-amber-400 to-orange-500',   label: '장바구니 살리기', hint: '최근 3일 장바구니 담은 고객 · 장바구니 화면에서' },
+  new_welcome:       { icon: UserPlus,     gradient: 'from-emerald-400 to-teal-500',   label: '신규 고객 환영',  hint: "등급 '신규' 고객 · 접속 시 · 세션당 1회" },
+  new_product:       { icon: Sparkles,     gradient: 'from-fuchsia-400 to-purple-500', label: '신상품 알림',     hint: '전체 방문 고객 · 접속 시 · 하루 1회' },
+  vip_appreciation:  { icon: Crown,        gradient: 'from-amber-400 to-yellow-500',   label: 'VIP 감사',        hint: "등급 'VIP' 고객 · 접속 시 · 세션당 1회" },
+  checkout_abandon:  { icon: CreditCard,   gradient: 'from-sky-400 to-indigo-500',     label: '결제 완료 돕기',  hint: '결제 시작 고객 · 결제 화면 진입 시' },
 };
 
 const SUB_AGENT_VISUAL: Record<string, { icon: typeof Target; gradient: string; label: string }> = {
@@ -1226,8 +1227,10 @@ export default function InAppMessagesPage() {
             </button>
           </div>
 
-          <div className="text-xs text-white/60 mb-3">또는 빠른 시작 시나리오 선택:</div>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
+          {/* ★ 2026-07-18 재편 (Harold 확정) — 원색 나열 폐기 → 모던 다크 카드 + 그라데이션 아이콘 칩.
+              카드의 대상·시점 문구 = 백엔드가 결정 주입하는 실조건 그대로 (선택 즉시 세그·트리거까지 설정 완료) */}
+          <div className="text-xs text-white/60 mb-3">또는 빠른 시작 — 카드에 적힌 대상·시점이 그대로 설정됩니다:</div>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5">
             {quickStartCards.map((card) => {
               const visual = SCENARIO_VISUAL[card.scenario] || SCENARIO_VISUAL.cart_recovery;
               const Icon = visual.icon;
@@ -1236,11 +1239,13 @@ export default function InAppMessagesPage() {
                   key={card.scenario}
                   onClick={() => handleAIGenerate('', card.scenario)}
                   disabled={aiGenerating}
-                  className={`bg-gradient-to-br ${visual.gradient} hover:scale-[1.03] transition-transform p-3 rounded-lg text-left disabled:opacity-40 disabled:cursor-not-allowed`}
+                  className="group text-left bg-slate-900/60 hover:bg-white/[0.07] border border-white/10 hover:border-violet-400/40 rounded-2xl p-3.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  <Icon className="w-5 h-5 text-white mb-2" />
+                  <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${visual.gradient} flex items-center justify-center mb-2.5 shadow-md group-hover:scale-105 transition-transform`}>
+                    <Icon className="w-4.5 h-4.5 text-white" />
+                  </div>
                   <div className="text-xs font-bold text-white">{card.label}</div>
-                  <div className="text-[10px] text-white/80 mt-0.5 line-clamp-2">{card.hint}</div>
+                  <div className="text-[10px] text-white/45 mt-1 leading-snug">{card.hint}</div>
                 </button>
               );
             })}
@@ -2263,6 +2268,73 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
             </div>
 
             {/* 탭 디자인: 프리셋 갤러리 (레거시 단색 — 블록 없을 때만) */}
+            {/* ★ 2026-07-18 포스터형 v2 (Harold 정정) — 전용 디자인 컨트롤: 제목 서체·이미지 위 글자색·버튼 색 */}
+            <div className={activeTab === 'design' && editing.template === 'full_image' ? '' : 'hidden'}>
+              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+                <Wand2 className="w-3 h-3 text-fuchsia-300" /> 포스터 디자인
+              </h4>
+              <div className="flex flex-wrap items-end gap-4 mb-2">
+                <div>
+                  <label className="text-[10px] text-white/50 block mb-1">제목 서체</label>
+                  <select
+                    value={(() => {
+                      const fd = String(editing.design?.font_display || '');
+                      const hit = INAPP_FONT_CATALOG.find((c) => fd === c.css);
+                      return hit ? hit.id : 'default';
+                    })()}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      if (id === 'default') { setDesign({ font_display: null }); return; }
+                      const c = INAPP_FONT_CATALOG.find((x) => x.id === id);
+                      setDesign({ font_display: c ? c.css : null });
+                    }}
+                    className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white"
+                  >
+                    <option value="default">기본</option>
+                    {INAPP_FONT_CATALOG.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-white/50 block mb-1">이미지 위 글자색</label>
+                  <input
+                    type="color"
+                    value={String(editing.design?.poster_text_color || '#ffffff')}
+                    onChange={(e) => setDesign({ poster_text_color: e.target.value.toLowerCase() === '#ffffff' ? null : e.target.value })}
+                    className="h-9 w-16 bg-slate-900/60 border border-white/10 rounded cursor-pointer"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-white/50 block mb-1">버튼 색</label>
+                  <input
+                    type="color"
+                    value={String((editing.buttons || [])[0]?.background_color || brandAccent || '#4f46e5')}
+                    onChange={(e) => {
+                      const nb = [...(editing.buttons || [])];
+                      if (nb[0]) { nb[0] = { ...nb[0], background_color: e.target.value }; updateField('buttons', nb); }
+                    }}
+                    disabled={(editing.buttons || []).length === 0}
+                    className="h-9 w-16 bg-slate-900/60 border border-white/10 rounded cursor-pointer disabled:opacity-40"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-white/50 block mb-1">버튼 글자색</label>
+                  <input
+                    type="color"
+                    value={String((editing.buttons || [])[0]?.text_color || '#ffffff')}
+                    onChange={(e) => {
+                      const nb = [...(editing.buttons || [])];
+                      if (nb[0]) { nb[0] = { ...nb[0], text_color: e.target.value }; updateField('buttons', nb); }
+                    }}
+                    disabled={(editing.buttons || []).length === 0}
+                    className="h-9 w-16 bg-slate-900/60 border border-white/10 rounded cursor-pointer disabled:opacity-40"
+                  />
+                </div>
+              </div>
+              <div className="text-[10px] text-white/40">
+                바닥은 흰색 고정 · 본문은 작성한 전 줄이 이미지 위에 표시됩니다{(editing.buttons || []).length === 0 && ' · 버튼 색은 내용 탭에서 버튼 추가 후 지정'} — 우측 미리보기로 확인하세요.
+              </div>
+            </div>
+
             {/* ★ 2026-07-18 정정2 — 포스터형은 카드 배경이 이미지+흰 바닥 고정이라 색 프리셋이 죽은 컨트롤 → 숨김 */}
             <div className={activeTab === 'design' && !hasBlocks && editing.template !== 'full_image' ? '' : 'hidden'}>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">

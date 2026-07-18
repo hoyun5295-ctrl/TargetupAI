@@ -42,12 +42,12 @@ Header: X-Hanjullo-Key: hjl_...
     items: [
       {
         title: '텍스트·이미지·버튼',
-        desc: 'title(제목) · body(본문) · imageUrl(이미지, 없으면 생략) · badgeText(배지) · buttons({id, label, action_url} 배열 — 3개까지만 그리세요. 웹 SDK도 3개까지만 렌더합니다) — 앱 채널은 서버가 블록 콘텐츠를 이 평면 필드로 합성해 보장합니다.',
+        desc: 'title(제목) · body(본문) · imageUrl(이미지, 없으면 생략) · badgeText(배지) · buttons({id, label, action_url, background_color, text_color} 배열 — 3개까지만 그리고 색 필드를 반드시 소비하세요. 웹 SDK도 3개까지만 렌더합니다) — 앱 채널은 서버가 블록 콘텐츠를 이 평면 필드로 합성해 보장합니다.',
       },
       {
-        // ★ 2026-07-18 정정2 — 앱 채널 포스터형 계약 (웹 renderPoster와 동일 규격)
+        // ★ 2026-07-18 포스터형 v2 — 앱 채널 계약 (웹 renderPoster와 동일 규격)
         title: '포스터형 (template = "full_image")',
-        desc: '이미지가 카드 전체인 전면 이미지형입니다. 카드 배경 흰색 고정, imageUrl 필수(원본 비율 유지), 제목/본문/배지는 이미지 하단 어두운 그라데이션 위 흰 글씨 오버레이(선택), 흰 바닥에 buttons[0] 1개만 + "다시 보지 않기·닫기". 이 값을 모르는 구버전 앱은 기본형(바텀 시트)으로 안전 표시하면 됩니다.',
+        desc: '가로 꽉 찬 하단 시트입니다 — 좌우 마진 0, 상단 모서리만 라운드, 카드 바닥 흰색 고정. imageUrl 필수(원본 비율 유지), 제목/본문/배지는 이미지 하단 어두운 그라데이션 위 오버레이(본문은 잘림 없이 전 줄), 오버레이 글자색 = design.poster_text_color(미지정 흰색), 제목 서체 = design.font_display. 흰 바닥에 buttons[0] 1개만 + "다시 보지 않기·닫기". 이 값을 모르는 구버전 앱은 기본형(바텀 시트)으로 안전 표시하면 됩니다.',
       },
       {
         title: '색상 — 단색 hex만 옵니다',
