@@ -116,7 +116,6 @@ git pull
 
 # 2. 의존성 설치 (새 패키지 추가 시)
 cd packages/frontend && npm install
-cd ../company-frontend && npm install
 
 # ⚠️ 3. 백엔드 빌드 (TypeScript → JavaScript, 변경 시 필수!)
 # git pull만으로는 dist/ 미갱신 → 코드 수정이 서버에 반영 안 됨 (D67 교훈)
@@ -124,8 +123,7 @@ cd /home/administrator/targetup-app/packages/backend && npm run build
 
 # 4. 프론트엔드 빌드 (변경 시) — D61 난독화 플러그인 포함
 cd /home/administrator/targetup-app/packages/frontend && npm run build
-# 또는 company-frontend 변경 시
-cd /home/administrator/targetup-app/packages/company-frontend && npm run build
+# (company-frontend = 2026-07-18 폐기 — 고객사 관리자는 hanjul.ai "관리" 메뉴)
 # ⚠️ 최초 빌드 시 vite-plugin-javascript-obfuscator 미설치 에러 발생하면:
 # npm install vite-plugin-javascript-obfuscator --save-dev
 
@@ -217,11 +215,8 @@ C:\Users\ceo\projects\targetup\  (로컬)
 │   │       ├── components/         ← UI 컴포넌트
 │   │       ├── pages/              ← 페이지 (LoginPage.tsx, PrivacyPage.tsx, TermsPage.tsx)
 │   │       └── services/           ← API 호출
-│   └── company-frontend/           ← 고객사 관리자 UI (app.hanjul.ai)
-│       └── src/
-│           ├── components/
-│           ├── pages/
-│           └── services/
+│   └── (company-frontend = 2026-07-18 폐기 — 관리자 화면 nginx 404 차단·패키지 제거.
+│        SDK 서빙 실물 = backend/sdk-serving/{version}/hanjul.min.js)
 ├── docker-compose.yml
 └── STATUS.md
 ```
@@ -235,7 +230,7 @@ C:\Users\ceo\projects\targetup\  (로컬)
 |------|--------|----------------|
 | `/etc/nginx/sites-available/targetup` | hanjul.ai | frontend/dist |
 | `/etc/nginx/sites-available/targetup-company` | sys.hanjullo.com | frontend/dist |
-| `/etc/nginx/sites-available/targetup-app` | app.hanjul.ai | company-frontend/dist |
+| `/etc/nginx/sites-available/targetup-app` | app.hanjul.ai | (2026-07-18 관리자 화면 폐기 — `location /` = 404, /sdk·/api 프록시만 유지) |
 
 > **★ 2026-07-08 인앱 SDK 서빙 — `targetup-app`에 `location ^~ /sdk/ { proxy_pass http://127.0.0.1:3000; }` 추가됨** (`location /` SPA 폴백보다 앞·`^~`). 정적 `/sdk/`가 SPA index.html로 새어 팝폰(레거시 `/sdk/v0.3.6/` 스니펫) 인앱이 깨진 것 복구용. **이 블록 지우면 팝폰 인앱 재차단.** backend가 버전폴백으로 서빙(utils/sdk-serve.ts). 신규 몰은 `/api/cdp/sdk/`(이미 `/api/`가 backend).
 > **⚠️ sites-enabled/targetup-app 은 심볼릭이 아니라 사본(copy)** — sites-available만 고치면 반영 안 됨. 실제 로드 파일 = **sites-enabled/targetup-app** 직접 수정(또는 available→enabled cp) 후 `nginx -t && systemctl reload`. **백업 파일은 sites-enabled 밖에 둘 것**(`sites-enabled/*` 전부 로드 → `.bak`가 server_name 중복 경고 유발).

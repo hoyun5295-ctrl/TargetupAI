@@ -2,7 +2,8 @@
  * ★ CT: 한줄로 SDK(hanjul.min.js) 서빙 (CORS) — 2026-07-08 신설
  *
  * 인앱 SDK를 몰 스토어프론트가 교차 출처로 로드할 수 있게 CORS + CORP 헤더와 함께 서빙한다.
- * 실물 = company-frontend/public/sdk/{version}/hanjul.min.js (커밋 소스 — git pull이면 항상 존재).
+ * 실물 = backend/sdk-serving/{version}/hanjul.min.js (커밋 소스 — git pull이면 항상 존재).
+ *   (2026-07-18 company-frontend 패키지 폐기로 옛 company-frontend/public/sdk에서 이전 — URL·응답 불변.)
  * 카페24 scripttag src는 Access-Control-Allow-Origin: * 를 요구(미동봉 = 422).
  *
  * ★ 버전 폴백: 요청 버전 파일이 없으면 커밋된 최신 버전으로 서빙한다.
@@ -15,7 +16,8 @@ import { readFileSync, existsSync, readdirSync } from 'fs';
 import { resolve } from 'path';
 import type { Request, Response } from 'express';
 
-const SDK_DIR = resolve(__dirname, '../../../company-frontend/public/sdk');
+// src/utils·dist/utils 어디서든 2단계 위 = backend 루트 → sdk-serving (dist 스왑과 무관한 위치)
+const SDK_DIR = resolve(__dirname, '../../sdk-serving');
 const VERSION_RE = /^v[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9]+)?$/;
 const sdkFileCache = new Map<string, Buffer>();
 

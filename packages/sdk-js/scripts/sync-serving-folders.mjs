@@ -10,7 +10,8 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DIST = resolve(__dirname, '../dist/iife');
-const SDK_DIR = resolve(__dirname, '../../company-frontend/public/sdk');
+// 2026-07-18 company-frontend 폐기 — 서빙 실물 = backend/sdk-serving (URL·서빙 CT 불변)
+const SDK_DIR = resolve(__dirname, '../../backend/sdk-serving');
 const MIN_SYNC = [0, 3, 8]; // v0.3.8 이상만 동기화
 const FILES = ['hanjul.min.js', 'hanjul.min.js.map'];
 

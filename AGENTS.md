@@ -5,7 +5,7 @@
 
 ## 프로젝트 정체
 - SMS/LMS/MMS·카카오·이메일·인앱 마케팅 자동화 SaaS "한줄로". **운영 중인 기간계(고객사 6,000+)** — 결함 = 실발송·과금 사고로 직결된다.
-- 모노레포: `packages/backend`(Express+TS, PostgreSQL 메인 + MySQL 발송큐) / `packages/frontend`·`packages/company-frontend`(React+TS+Tailwind) / `packages/sdk-js`(자사몰 삽입 인앱 SDK — 순수 브라우저 번들, backend import 물리 불가).
+- 모노레포: `packages/backend`(Express+TS, PostgreSQL 메인 + MySQL 발송큐) / `packages/frontend`(React+TS+Tailwind) / `packages/sdk-js`(자사몰 삽입 인앱 SDK — 순수 브라우저 번들, backend import 물리 불가). (company-frontend = 2026-07-18 폐기 — 고객사 관리자는 hanjul.ai "관리" 메뉴, SDK 실물은 backend/sdk-serving.)
 
 ## 절대 보호 (발송·돈 파이프라인 — 이 파일들의 diff는 최우선 정밀 리뷰)
 `campaigns.ts`(직접발송 포함) · `spam-filter.ts` · `messageUtils.ts` · `results.ts` · `billing.ts`

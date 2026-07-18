@@ -296,7 +296,7 @@
 ## 프로젝트 기본 정보
 
 - **서비스명:** 한줄로 (TargetUp) — SMS/LMS/MMS 마케팅 자동화 SaaS
-- **도메인:** hanjul.ai (서비스), app.hanjul.ai (고객사 관리자), sys.hanjullo.com (슈퍼관리자)
+- **도메인:** hanjul.ai (서비스 — 고객사 관리자는 이 안의 "관리" 메뉴), app.hanjul.ai (SDK·API 전용 — 관리자 화면 2026-07-18 폐기·별도 로그인 금지), sys.hanjullo.com (슈퍼관리자)
 - **스택:** Node.js/Express + React + TypeScript, PostgreSQL(메인DB) + MySQL(QTmsg SMS 발송)
 - **상태:** 정식 오픈 후 운영 중 (D-Day 2026-05-05)
 

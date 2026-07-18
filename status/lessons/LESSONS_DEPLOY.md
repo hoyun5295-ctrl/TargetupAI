@@ -15,7 +15,7 @@
 - **표준 출력 형식 의무** — tp-push + 절대 경로 build:safe (`/home/administrator/targetup-app/...`)
 - **PM2 process 변경 안내 룰** — pm2 delete + pm2 start 패턴 절대 금지 (D183 사이트 다운 사고). atomic pm2 reload / startOrReload 우선
 - **신규 파일 작성 후 git pull 단독 안내 절대 금지** — tp-push 표준 종료 멘트만
-- **버전 고정 URL로 서빙되는 산출물(인앱 SDK) = "어느 버전 폴더에 넣었나"가 곧 배포다** (2026-07-17 B-0717-1) — 자사몰 스니펫은 `/sdk/v0.3.9/hanjul.min.js`처럼 **버전을 URL에 박아** 로드한다. 새 빌드를 최신 폴더(v0.3.11)에만 복사하면 옛 버전을 부르는 몰(팝폰 웹)은 새 코드를 **영원히** 못 받는다 — 소스·서버·데이터가 전부 정상인데 화면만 안 바뀌어 "고쳤는데 안 된다"의 전형이 된다(0716엔 v0.3.8/9/10 전부 동기화한 관행이 0717에 누락되며 발생). 진단 = `curl -s https://app.hanjul.ai/sdk/<몰이_부르는_버전>/hanjul.min.js | grep -c <신규마커>` (몰이 부르는 버전은 몰 HTML에서 실측: `curl -sL <몰> | grep -o '[^"]*hanjul[^"]*'`). 근본 대책 = **`packages/sdk-js/scripts/sync-serving-folders.mjs` + `npm run sync:serving`(build:all에 연결)** — dist/iife를 v0.3.8+ 전 서빙 폴더에 자동 복사(수동 복사 관행 폐기). 서빙 CT(`utils/sdk-serve.ts`)는 파일을 **무기한 메모리 캐시**하므로 SDK 갱신 배포 = **pm2 restart 필수**(frontend build:safe만으론 옛 바이트가 계속 나감).
+- **버전 고정 URL로 서빙되는 산출물(인앱 SDK) = "어느 버전 폴더에 넣었나"가 곧 배포다** (2026-07-17 B-0717-1) — 자사몰 스니펫은 `/sdk/v0.3.9/hanjul.min.js`처럼 **버전을 URL에 박아** 로드한다. 새 빌드를 최신 폴더(v0.3.11)에만 복사하면 옛 버전을 부르는 몰(팝폰 웹)은 새 코드를 **영원히** 못 받는다 — 소스·서버·데이터가 전부 정상인데 화면만 안 바뀌어 "고쳤는데 안 된다"의 전형이 된다(0716엔 v0.3.8/9/10 전부 동기화한 관행이 0717에 누락되며 발생). 진단 = `curl -s https://app.hanjul.ai/sdk/<몰이_부르는_버전>/hanjul.min.js | grep -c <신규마커>` (몰이 부르는 버전은 몰 HTML에서 실측: `curl -sL <몰> | grep -o '[^"]*hanjul[^"]*'`). 근본 대책 = **`packages/sdk-js/scripts/sync-serving-folders.mjs` + `npm run sync:serving`(build:all에 연결)** — dist/iife를 v0.3.8+ 전 서빙 폴더에 자동 복사(수동 복사 관행 폐기). ★서빙 실물 위치 = `packages/backend/sdk-serving/`(2026-07-18 company-frontend 폐기로 이전 — URL·서빙 CT 불변). 서빙 CT(`utils/sdk-serve.ts`)는 파일을 **무기한 메모리 캐시**하므로 SDK 갱신 배포 = **pm2 restart 필수**(frontend build:safe만으론 옛 바이트가 계속 나감).
 
 ---
 
@@ -78,8 +78,7 @@ pm2 restart all
 ### frontend 변경 시 (hanjul.ai + sys.hanjullo.com)
 cd /home/administrator/targetup-app/packages/frontend && npm run build:safe
 
-### company-frontend 변경 시 (app.hanjul.ai)
-cd /home/administrator/targetup-app/packages/company-frontend && npm run build:safe
+### (company-frontend = 2026-07-18 폐기 — 관리자 화면 nginx 차단 + 패키지 제거. 고객사 관리자 = hanjul.ai "관리" 메뉴)
 ```
 
 ### 한줄전단 (hanjulDM)
