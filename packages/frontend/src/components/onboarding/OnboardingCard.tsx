@@ -15,7 +15,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sparkles, ArrowRight, X, Clock } from 'lucide-react';
-import { isWizardDismissedNow, dismissWizardForToday } from '../../pages/OnboardingWizardPage';
+// ★ 2026-07-18 (Codex M1 재시도 라운드): 위저드 "페이지"가 아니라 분리 모듈에서 import —
+//   페이지 import는 Dashboard 청크가 위저드 lazy 청크를 물고 들어가는 결합이었다.
+import { isWizardDismissedNow, dismissWizardForToday } from '../../lib/onboarding-dismiss';
 
 interface TrialInfo {
   active: boolean;

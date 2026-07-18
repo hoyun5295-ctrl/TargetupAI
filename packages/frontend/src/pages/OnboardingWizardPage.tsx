@@ -20,38 +20,9 @@ import Step4Segment from '../components/onboarding/Step4Segment';
 import Step5Draft from '../components/onboarding/Step5Draft';
 import Step6Sample from '../components/onboarding/Step6Sample';
 import Step7Roi from '../components/onboarding/Step7Roi';
-
-// ════════════════════════════════════════════════════════════════════
-// localStorage 키 — "오늘 하루 보지 않기" 24h cooldown
-// ════════════════════════════════════════════════════════════════════
-
-const DISMISS_KEY = 'onboarding_wizard_dismissed_until';
-const COOLDOWN_MS = 24 * 60 * 60 * 1000;
-
-export function isWizardDismissedNow(): boolean {
-  try {
-    const raw = localStorage.getItem(DISMISS_KEY);
-    if (!raw) return false;
-    const until = Number(raw);
-    return Number.isFinite(until) && until > Date.now();
-  } catch {
-    return false;
-  }
-}
-
-export function dismissWizardForToday(): void {
-  try {
-    localStorage.setItem(DISMISS_KEY, String(Date.now() + COOLDOWN_MS));
-  } catch {
-    // localStorage 차단 영역 = 무시 (보안 모드 안 영향 0)
-  }
-}
-
-export function clearWizardDismiss(): void {
-  try {
-    localStorage.removeItem(DISMISS_KEY);
-  } catch { /* skip */ }
-}
+// ★ 2026-07-18 (Codex M1 재시도 라운드): "오늘 하루 보지 않기" 헬퍼를 lib/onboarding-dismiss로 분리 —
+//   OnboardingCard(대시보드 정적 그래프)가 이 페이지를 import하지 않게 해 Dashboard↔위저드 청크 격리.
+import { dismissWizardForToday, clearWizardDismiss } from '../lib/onboarding-dismiss';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
