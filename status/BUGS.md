@@ -55,13 +55,6 @@
 
 ## 2) 활성 버그
 
-### 🔴 B-0718-1 프론트 스플리팅 배포 → 전 고객 화면 진입 불능 (🔴 Critical) — 2026-07-18 (롤백으로 서비스 정상 / 원인 확정 / 종결 조건 ①② 완료·Codex 5R 통과 / 잔여 ③ = 열림 유지)
-> **증상**: 23:25 M1(페이지 lazy 분할) 배포 후 로그인 첫 화면에서 "화면을 불러오지 못했습니다" 오류 카드 — 약 1.5시간, 고객 클레임 다수. 발송·백엔드·데이터는 전 시간 정상.
-> **근본(증거 확정)**: 기존 난독화 stringArray(threshold 0.5 — 문자열 절반을 빌드마다 무작위 암호화)가 신규 동적 import 경로 문자열을 암호화 → rollup이 Dashboard 등 ~13페이지 청크 미생성(서버 63 vs 로컬 76) + 런타임 원시 경로 요청. 결정 증거 = nginx `GET /assets/pages/Dashboard` 4회 + dist-old에 Dashboard 청크 부재.
-> **복구**: 프론트만 f8ac12f6 원복+build:safe — 외부 실측 정상 확인. 서버 git 작업트리 dirty·dist-old=증거물 보존.
-> **종결 조건**: ①서버 git 정합(revert 커밋) = **완료(0718 d6958238 pull·frontend 항목 소멸 확인)** ②safe-build 산출물 기계 검증 게이트 = **완료(0718 — 3-1 lazy 청크 실존 + 3-2 비literal 동적 import 검출 + verify-live-chunks.sh 라이브 전수 검사. Codex 5라운드 통과·하네스 실측)** ③난독화-동적 import 상호작용 제거 = **로컬 실측 완료(0718 — 8 lazy+exclude 3회 반복 빌드: 청크 8/8·비literal 0·청크 수 동일. 원복 완료)**, 설정 반영은 ④ M1 재시도 패키지에 포함 — ③ 배포(또는 재시도 폐기 결정) 후 Closed. SoT=[docs/2026-07-18-frontend-splitting-incident-handoff.md](../docs/2026-07-18-frontend-splitting-incident-handoff.md)
-> **추가 실측(0718 게이트 구현 중 — 판정 정정)**: "온전"으로 봤던 로컬 76청크 빌드도 동적 import 38지점 중 19지점이 `import(W(491))` 형태 암호화 불량 — 로컬도 라우트 상당수 런타임 깨짐이었음. 상세 = SoT §2.
-
 ### 🟠 B-0717-2 팝폰 앱 인앱 표시 빈도 결함 (🟠 Major) — 2026-07-17 (원인 확정·수리 코드 완료 / 앱 1.0.2 심사 중 = 배포로만 해소)
 > **증상(Harold 실측)**: 앱에서 "세션당 1회" 메시지가 한 번 뜬 뒤 **앱을 껐다 켜도 다시 안 뜸**. 매번 표시=닫아도 재표시(닫기 억제 없음), "다시 보지 않기" 미노출.
 > **근본(코드 확정)**: 설치된 프로덕션 빌드(≤1.0.1)의 `inapp-client`가 세션 키(`session:`)까지 AsyncStorage에 영속 → `once_per_session`이 **설치당 1회(영구)**로 동작. 0716에 수리(세션=메모리 전용 + 옛 영속분 자동 정리)했으나 **앱 미빌드·미배포**가 전부였음.
@@ -69,6 +62,7 @@
 > **빈도 계약 확정(편집기 각주 반영)**: 세션당 1회=앱 실행 1회(완전 종료 후 재실행=재표시) / 하루 1회=서버 24h 억제(impression 기준)+클라 이중 / 매번=닫으면 그 실행만 억제 / 다시 보지 않기=서버 opt_out 영구.
 > **해소 경로**: 팝폰 1.0.2 빌드(iOS 빌드 22·Android) — 0717 Harold 심사 제출 완료(iOS 재업로드 2회 실패 원인=스토어 출시 버전과 동일 문자열 1.0.1 → app.json 1.0.2 상향으로 해소, 7/4 1.0.0→1.0.1 패턴 재현). **잔여 = 출시 후 실측 3종**(①완전 종료→재실행 시 재표시 ②닫기 후 같은 실행 미재표시 ③다시 보지 않기 후 영구 미표시). 1.0.2부터 EAS Update 런타임 성립 = 이후 JS 수정은 `eas update`로 검수 없이 배포. 상세=[[project_2026_0717_inapp_debug_session_incomplete]].
 
+> **2026-07-18 B-0718-1 프론트 스플리팅 전 고객 진입 불능 종결** → [archive/BUGS_RESOLVED.md](archive/BUGS_RESOLVED.md) 최상단(재발 방지 3겹 게이트 + M1 재도입 배포 eab1f413 + 라이브 전수 177건 + Harold 화면 실측 통과. 첫 로드 5MB→0.37MB).
 > **2026-07-17 B-0717-1 인앱 웹 블록 중앙정렬 종결** → [archive/BUGS_RESOLVED.md](archive/BUGS_RESOLVED.md) 최상단(배포 5커밋·Harold 실측 "잘 되는데" — 근본=SDK 버전 폴더 동기화 누락, 재발 방지=sync:serving). 잔여 별건 = 쿠폰·CTA 정렬+허용표 실측.
 > **2026-07-07 알림톡 강조표기형 3관문(7300 대표링크 · 9999 senderkey · 3027 버튼) 종결** → [archive/BUGS_RESOLVED.md](archive/BUGS_RESOLVED.md)(커밋 716074dc 배포·Harold "전체 발송 잘된다" 확인). 잔여 별건 = 진단로그 `[ALIMTALK-DEBUG2]`(direct-send-processor) 정리 시 제거.
 
