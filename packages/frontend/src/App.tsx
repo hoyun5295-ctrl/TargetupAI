@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, createContext, useContext, Suspense } from 'react';
+import { useEffect, useState, useCallback, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { ScrollManager } from './lib/scroll-restoration';
 import { useAuthStore, isAgentOnlyCompany } from './stores/authStore';
@@ -7,67 +7,63 @@ import { useSessionTimeout } from './hooks/useSessionTimeout';
 import SessionTimeoutModal from './components/SessionTimeoutModal';
 // ★ D212+ (2026-05-23 Harold 명시): Toast 알림 영역 — native alert() 영구 폐기 정합
 import { ToastProvider } from './components/ToastProvider';
-// ★ 2026-07-17 축 A(M1) 번들 스플리팅 — 정적 유지 6개는 "깨지면 사고인 동선"(공개·결제·심사·로그인)이라
-//   로딩 방식 변경에서 제외. 나머지 35개 페이지는 lazyPage(페이지별 청크 + 배포 직후 청크 소실 1회 새로고침 가드).
-import { lazyPage, prefetchPage, PageErrorBoundary } from './lib/lazy-page';
 import LoginPage from './pages/LoginPage';
+import AdminDashboard from './pages/AdminDashboard';
+import AiTrainingDataPage from './pages/AiTrainingDataPage';
+import BestCopyPage from './pages/BestCopyPage';
+import Dashboard from './pages/Dashboard';
+import ManagePage from './pages/ManagePage';
+import CalendarPage from './pages/CalendarPage';
+import Settings from './pages/Settings';
+import Unsubscribes from './pages/Unsubscribes';
+import PricingPage from './pages/PricingPage';
 import PrivacyPage from './pages/PrivacyPage';
 import TermsPage from './pages/TermsPage';
+import AutoSendPage from './pages/AutoSendPage';
+import KakaoRcsPage from './pages/KakaoRcsPage';
+import DmBuilderPage from './pages/DmBuilderPage'; // ★ 모바일 DM 빌더
+// ★ D130: 슈퍼관리자 알림톡 발신프로필 모니터링 페이지
+import AlimtalkSendersPage from './pages/AlimtalkSendersPage';
+// ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator placeholder (ENT/BUSINESS 대상 베타)
+import AiOperatorPage from './pages/AiOperatorPage';
+// ★ D172 (2026-05-19): 한줄로 CDP — 자사몰 → 한줄로 sync 설정 페이지
+import CdpSettingsPage from './pages/CdpSettingsPage';
 // ★ 2026-07-03: 카페24 앱 실행 랜딩 (심사위원 동선 — 공개 라우트)
 import Cafe24LaunchPage from './pages/Cafe24LaunchPage';
-// ★ D184 (2026-05-20): 이니시스 결제 결과 fallback 페이지 (새 창 자동 close 차단 시 fallback 표시)
+// ★ D174 (2026-05-19): Step 1 — 성과 리포트 + AI 다음 캠페인 추천
+import PerformancePage from './pages/PerformancePage';
+// ★ D175-A (2026-05-19): Web Push + In-app Message 채널
+import PushCampaignsPage from './pages/PushCampaignsPage';
+import InAppMessagesPage from './pages/InAppMessagesPage';
+// ★ D176 (2026-05-19): Continuous Agentic Operator (사용자 동의 흐름)
+import ContinuousOperatorPage from './pages/ContinuousOperatorPage';
+// ★ 2026-07-02 4차: 마케팅 캘린더 — 1년 시즌 캠페인 AI 설계
+import MarketingCalendarPage from './pages/MarketingCalendarPage';
+// ★ D178 (2026-05-19): 인바운드 AI 음성 응답 (Naver Clova STT/TTS)
+import VoiceInboundPage from './pages/VoiceInboundPage';
+// ★ D180 (2026-05-19): Email 채널 (SendGrid)
+import EmailCampaignsPage from './pages/EmailCampaignsPage';
+// ★ D181 (2026-05-19): Phase 1 영구 개선 — Memory + Batch + Citations
+import AiMemoryPage from './pages/AiMemoryPage';
+import AiBatchesPage from './pages/AiBatchesPage';
+import AiExplainPage from './pages/AiExplainPage';
+// ★ D184 (2026-05-20): 이니시스 결제 결과 fallback 페이지 (새 창 자동 close 영역에 fallback 본질)
 import PaymentResultPage from './pages/PaymentResultPage';
 import JourneyPausePage from './pages/JourneyPausePage'; // ★ D218+ Public 정지 페이지 (인증 X)
-
-const AdminDashboard = lazyPage(() => import('./pages/AdminDashboard'));
-const AiTrainingDataPage = lazyPage(() => import('./pages/AiTrainingDataPage'));
-const BestCopyPage = lazyPage(() => import('./pages/BestCopyPage'));
-const Dashboard = lazyPage(() => import('./pages/Dashboard'));
-const ManagePage = lazyPage(() => import('./pages/ManagePage'));
-const CalendarPage = lazyPage(() => import('./pages/CalendarPage'));
-const Settings = lazyPage(() => import('./pages/Settings'));
-const Unsubscribes = lazyPage(() => import('./pages/Unsubscribes'));
-const PricingPage = lazyPage(() => import('./pages/PricingPage'));
-const AutoSendPage = lazyPage(() => import('./pages/AutoSendPage'));
-const KakaoRcsPage = lazyPage(() => import('./pages/KakaoRcsPage'));
-const DmBuilderPage = lazyPage(() => import('./pages/DmBuilderPage')); // ★ 모바일 DM 빌더
-// ★ D130: 슈퍼관리자 알림톡 발신프로필 모니터링 페이지
-const AlimtalkSendersPage = lazyPage(() => import('./pages/AlimtalkSendersPage'));
-// ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator placeholder (ENT/BUSINESS 대상 베타)
-const AiOperatorPage = lazyPage(() => import('./pages/AiOperatorPage'));
-// ★ D172 (2026-05-19): 한줄로 CDP — 자사몰 → 한줄로 sync 설정 페이지
-const CdpSettingsPage = lazyPage(() => import('./pages/CdpSettingsPage'));
-// ★ D174 (2026-05-19): Step 1 — 성과 리포트 + AI 다음 캠페인 추천
-const PerformancePage = lazyPage(() => import('./pages/PerformancePage'));
-// ★ D175-A (2026-05-19): Web Push + In-app Message 채널
-const PushCampaignsPage = lazyPage(() => import('./pages/PushCampaignsPage'));
-const InAppMessagesPage = lazyPage(() => import('./pages/InAppMessagesPage'));
-// ★ D176 (2026-05-19): Continuous Agentic Operator (사용자 동의 흐름)
-const ContinuousOperatorPage = lazyPage(() => import('./pages/ContinuousOperatorPage'));
-// ★ 2026-07-02 4차: 마케팅 캘린더 — 1년 시즌 캠페인 AI 설계
-const MarketingCalendarPage = lazyPage(() => import('./pages/MarketingCalendarPage'));
-// ★ D178 (2026-05-19): 인바운드 AI 음성 응답 (Naver Clova STT/TTS)
-const VoiceInboundPage = lazyPage(() => import('./pages/VoiceInboundPage'));
-// ★ D180 (2026-05-19): Email 채널 (SendGrid)
-const EmailCampaignsPage = lazyPage(() => import('./pages/EmailCampaignsPage'));
-// ★ D181 (2026-05-19): Phase 1 영구 개선 — Memory + Batch + Citations
-const AiMemoryPage = lazyPage(() => import('./pages/AiMemoryPage'));
-const AiBatchesPage = lazyPage(() => import('./pages/AiBatchesPage'));
-const AiExplainPage = lazyPage(() => import('./pages/AiExplainPage'));
-const OnboardingWizardPage = lazyPage(() => import('./pages/OnboardingWizardPage')); // ★ D219+ Part 2 온보딩 Wizard 7 step
-const SegmentsPage = lazyPage(() => import('./pages/SegmentsPage')); // ★ D220+ Task 6 세그먼트 관리
+import OnboardingWizardPage from './pages/OnboardingWizardPage'; // ★ D219+ Part 2 (2026-05-27) AI 오퍼레이션 무료체험 사용자 온보딩 7 step
+import SegmentsPage from './pages/SegmentsPage'; // ★ D220+ Task 6 (2026-05-27) 일반 segment 관리 메뉴 — Braze 동급 자산
 // ★ D187 (2026-05-20): Journey Builder Lite — 7 표준 여정 + 자연어 진입
-const JourneysPage = lazyPage(() => import('./pages/JourneysPage'));
+import JourneysPage from './pages/JourneysPage';
 // ★ D192 (2026-05-22): Journey monitoring + 통계 페이지 신규
-const JourneyDetailPage = lazyPage(() => import('./pages/JourneyDetailPage'));
-const JourneyStatsPage = lazyPage(() => import('./pages/JourneyStatsPage'));
+import JourneyDetailPage from './pages/JourneyDetailPage';
+import JourneyStatsPage from './pages/JourneyStatsPage';
 // ★ D197 (2026-05-22) Phase B-2: Predictive Suite 대시보드 — AI 자율 예측 분석
-const PredictiveDashboardPage = lazyPage(() => import('./pages/PredictiveDashboardPage'));
-// ★ D209+ (2026-05-22) Phase D 비용 안전 — AI 호출 월 한도 + cache 통계 대시보드
-const AiUsagePage = lazyPage(() => import('./pages/AiUsagePage'));
-const QuickCampaignPage = lazyPage(() => import('./pages/QuickCampaignPage'));
-const CampaignAgencyPage = lazyPage(() => import('./pages/CampaignAgencyPage')); // ★ 2026-07-09 CRM 캠페인 대행 접수
-const AdminCampaignAgencyPage = lazyPage(() => import('./pages/AdminCampaignAgencyPage')); // ★ 2026-07-09 캠페인 대행 설계
+import PredictiveDashboardPage from './pages/PredictiveDashboardPage';
+// ★ D209+ (2026-05-22) Phase D 비용 안전 매트릭스 — AI 호출 월 한도 + cache 통계 대시보드
+import AiUsagePage from './pages/AiUsagePage';
+import QuickCampaignPage from './pages/QuickCampaignPage';
+import CampaignAgencyPage from './pages/CampaignAgencyPage'; // ★ 2026-07-09 CRM 캠페인 대행 접수 (비즈니스+ 전용)
+import AdminCampaignAgencyPage from './pages/AdminCampaignAgencyPage'; // ★ 2026-07-09 캠페인 대행 설계 (슈퍼관리자)
 
 // ★ 세션 타이머 Context — 헤더 등에서 남은 시간 표시용
 interface SessionTimerContextType {
@@ -194,33 +190,6 @@ function SessionTimeoutGuard({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ★ 2026-07-17 축 A — lazy 페이지 청크 로딩 중 폴백 (다크 톤 + violet 액센트, 페이지 배경과 동일 룩)
-function PageLoadingFallback() {
-  return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-      <div className="w-8 h-8 border-2 border-violet-500/30 border-t-violet-500 rounded-full animate-spin" />
-    </div>
-  );
-}
-
-// ★ Codex 확인 라운드 — 청크 로드가 자동 새로고침 후에도 실패한 경우의 복구 화면 (백지 방지)
-function PageLoadError() {
-  return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center">
-        <h3 className="text-white font-bold text-lg">화면을 불러오지 못했습니다</h3>
-        <p className="text-white/50 text-sm mt-2 leading-relaxed">네트워크 상태를 확인한 뒤 다시 시도해 주세요.</p>
-        <button
-          onClick={() => window.location.reload()}
-          className="mt-6 w-full bg-violet-600 hover:bg-violet-500 text-white font-medium py-2.5 rounded-xl text-sm transition-colors"
-        >
-          다시 시도
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function App() {
   const { loadFromStorage, isAuthenticated, user } = useAuthStore();
   const [isLoading, setIsLoading] = useState(true);
@@ -229,20 +198,6 @@ function App() {
     loadFromStorage();
     setIsLoading(false);
   }, [loadFromStorage]);
-
-  // ★ 2026-07-17 축 A — 로그인 상태면 "실제 착지 라우트"의 청크를 백그라운드 선로딩 (첫 전환 대기 0).
-  //   Codex 확인 라운드 정정: super_admin은 /admin·에이전트 전용은 /kakao-rcs로 가므로
-  //   무조건 Dashboard(0.86MB)를 받으면 느린 회선에서 실제 필요한 청크와 경합한다.
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    // ★ Codex 확인 라운드: 선로딩은 로그인/루트 착지 흐름에서만 — 딥링크·새로고침(/settings 등)은
-    //   실제 목적 라우트 청크가 우선이라 경합시키지 않는다.
-    const path = window.location.pathname;
-    if (path !== '/' && path !== '/login') return;
-    if (user?.userType === 'super_admin') prefetchPage(() => import('./pages/AdminDashboard'));
-    else if (isAgentOnlyCompany(user)) prefetchPage(() => import('./pages/KakaoRcsPage'));
-    else prefetchPage(() => import('./pages/Dashboard'));
-  }, [isAuthenticated, user]);
 
   if (isLoading) {
     return <div>로딩 중...</div>;
@@ -258,9 +213,6 @@ function App() {
       <SessionGuard />
       <SessionTimeoutGuard>
 
-      {/* ★ 2026-07-17 축 A — lazy 페이지 청크 로딩 경계 (fallback = 다크 스피너) + 지속 실패 복구 화면 */}
-      <PageErrorBoundary fallback={<PageLoadError />}>
-      <Suspense fallback={<PageLoadingFallback />}>
       <Routes>
         {/* 로그인 */}
         <Route path="/login" element={<LoginPage />} />
@@ -614,8 +566,6 @@ function App() {
         {/* 404 */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-      </Suspense>
-      </PageErrorBoundary>
       </SessionTimeoutGuard>
       </ToastProvider>
     </BrowserRouter>
