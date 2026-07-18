@@ -58,7 +58,9 @@ tp-push "M1 스플리팅 롤백 정합 — 프론트를 f8ac12f6로 원복(사�
 - 단일 번들 상태(현재)에서는 lazy 0건이라 게이트가 자동 통과 — 지금 넣어도 무해.
 - 추가 게이트: 배포 직후 라이브 전수 curl(`index.html`의 엔트리에서 청크 지도 추출 → 각 URL content-type이 javascript인지) 스크립트 — 수동 1커맨드로 제공.
 
-### 4-3. 난독화 상호작용 제거 (스플리팅 재시도의 전제)
+### 4-3. 난독화 상호작용 제거 (스플리팅 재시도의 전제) — ★2026-07-18 로컬 실측 완료(설정 반영은 ④ 재시도 패키지에 포함)
+> **실측 결과**: 라우트 8개 lazy 전환 + `exclude: [/node_modules/, /\.nuxt/, /App\.tsx$/]` 상태로 같은 코드 3회 반복 빌드 → 3회 전부 JS 청크 10개 동일·페이지 청크 8/8 실존·동적 import 8지점 전부 literal(비literal 0). exclude 실동작 입증(비결정성 소거). 실험 후 App.tsx·vite.config.ts 원복(바이트 대조 일치) — 운영 코드 무변경.
+> **★플러그인 함정(실코드 확인 — vite-plugin-javascript-obfuscator 3.1.0)**: `exclude` 지정 시 기본값(`[/node_modules/, /\.nuxt/]`)이 **대체**된다(병합 아님). App.tsx만 넣으면 node_modules 전체가 난독화 대상이 되어 빌드 폭증·파손 — exclude엔 반드시 기본 2종을 함께 나열할 것.
 - 방안: vite.config 난독화 플러그인에서 **동적 import를 보유한 파일(src/App.tsx·src/lib/lazy-page.tsx)을 exclude** — 라우트 경로명은 비밀이 아님(번들 파일명으로 어차피 노출). 플러그인의 include/exclude 실동작은 **문서가 아니라 로컬 빌드 반복 실측**으로 확인(비결정성 검증 = 같은 코드 3회 빌드 → 게이트 3회 통과 + 청크 수 동일).
 - 대안(방안이 실측 실패 시): stringArray를 유지하되 임계 하향이 아니라 — 임계는 확률이라 해법이 아님 — 동적 import 구간만 별도 비난독 모듈로 분리.
 
