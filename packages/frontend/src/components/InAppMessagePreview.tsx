@@ -437,10 +437,47 @@ function DummyAppScreen() {
 
 export function AppInAppPreview({ template, title, body, imageUrl, badge, buttons, backgroundColor, textColor, design }: AppInAppPreviewProps) {
   const isModal = template === 'center_modal';
+  // ★ 2026-07-18 정정2 — 앱 포스터형(전면 이미지): 웹 renderPoster와 동일 규격(흰 바닥·CTA 1개·오버레이 텍스트)
+  const isPoster = template === 'full_image';
   const img = imageUrl || undefined;
   // ★ 2026-07-17 텍스트 정렬 (design.text_align) — SDK 렌더 미러. 미지정=왼쪽
   const ta: 'left' | 'center' | 'right' = design?.text_align === 'center' ? 'center' : design?.text_align === 'right' ? 'right' : 'left';
   const badgeSelf = ta === 'center' ? 'center' : ta === 'right' ? 'flex-end' : 'flex-start';
+  const posterCard = (
+    <div style={{
+      background: '#ffffff',
+      color: '#1b1d23',
+      overflow: 'hidden',
+      fontFamily: '"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif',
+      borderRadius: 22, margin: '0 18px', maxWidth: 420, width: 'calc(100% - 36px)',
+    }}>
+      <div style={{ position: 'relative' }}>
+        {img ? (
+          <img src={img} alt="" onError={hideOnError} style={{ width: '100%', height: 'auto', maxHeight: 320, objectFit: 'cover', display: 'block' }} />
+        ) : (
+          <div style={{ width: '100%', height: 220, background: 'linear-gradient(135deg,#e8e8ee,#d4d4dd)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#8a8a94' }}>이미지 1장 필수 — 콘텐츠 탭에서 업로드</div>
+        )}
+        {(title || body || badge) && img && (
+          <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '40px 18px 14px', background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.62) 100%)', color: '#ffffff', textAlign: ta }}>
+            {badge && <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.2)', fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 999, marginBottom: 7 }}>{badge}</div>}
+            {title && <div style={{ fontWeight: 800, fontSize: 17, lineHeight: 1.3, marginBottom: body ? 4 : 0 }}>{title}</div>}
+            {body && <div style={{ fontSize: 12, opacity: 0.92, lineHeight: 1.5, whiteSpace: 'pre-wrap', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{body}</div>}
+          </div>
+        )}
+      </div>
+      <div style={{ padding: '13px 16px 8px' }}>
+        {(buttons || []).slice(0, 1).map((b, i) => (
+          <div key={i} style={{ background: b.background_color || '#4f46e5', color: b.text_color || '#ffffff', padding: '11px 0', borderRadius: 11, fontSize: 13, fontWeight: 700, textAlign: 'center' }}>
+            {b.label || '버튼'}
+          </div>
+        ))}
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 22, marginTop: 4 }}>
+          <span style={{ color: '#1b1d23', opacity: 0.45, fontSize: 12, textDecoration: 'underline', padding: '8px 0' }}>다시 보지 않기</span>
+          <span style={{ color: '#1b1d23', opacity: 0.55, fontSize: 12, padding: '8px 0' }}>닫기</span>
+        </div>
+      </div>
+    </div>
+  );
   const card = (
     <div style={{
       background: backgroundColor || '#1f1f29',
@@ -490,11 +527,11 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
               <div style={{ width: 54, height: 5, borderRadius: 3, background: '#45454f' }} />
             </div>
           </div>
-          {/* 앱 화면 + 백드롭 + 시트/모달 */}
+          {/* 앱 화면 + 백드롭 + 시트/모달/포스터 */}
           <div style={{ position: 'relative', height: 580, overflow: 'hidden' }}>
             <DummyAppScreen />
-            <div style={{ position: 'absolute', inset: 0, background: 'rgba(10,10,15,0.6)', display: 'flex', flexDirection: 'column', justifyContent: isModal ? 'center' : 'flex-end', alignItems: 'center' }}>
-              {card}
+            <div style={{ position: 'absolute', inset: 0, background: 'rgba(10,10,15,0.6)', display: 'flex', flexDirection: 'column', justifyContent: isModal || isPoster ? 'center' : 'flex-end', alignItems: 'center' }}>
+              {isPoster ? posterCard : card}
             </div>
           </div>
         </div>

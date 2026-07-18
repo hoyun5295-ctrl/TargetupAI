@@ -45,6 +45,11 @@ Header: X-Hanjullo-Key: hjl_...
         desc: 'title(제목) · body(본문) · imageUrl(이미지, 없으면 생략) · badgeText(배지) · buttons({id, label, action_url} 배열 — 3개까지만 그리세요. 웹 SDK도 3개까지만 렌더합니다) — 앱 채널은 서버가 블록 콘텐츠를 이 평면 필드로 합성해 보장합니다.',
       },
       {
+        // ★ 2026-07-18 정정2 — 앱 채널 포스터형 계약 (웹 renderPoster와 동일 규격)
+        title: '포스터형 (template = "full_image")',
+        desc: '이미지가 카드 전체인 전면 이미지형입니다. 카드 배경 흰색 고정, imageUrl 필수(원본 비율 유지), 제목/본문/배지는 이미지 하단 어두운 그라데이션 위 흰 글씨 오버레이(선택), 흰 바닥에 buttons[0] 1개만 + "다시 보지 않기·닫기". 이 값을 모르는 구버전 앱은 기본형(바텀 시트)으로 안전 표시하면 됩니다.',
+      },
+      {
         title: '색상 — 단색 hex만 옵니다',
         desc: 'backgroundColor · textColor는 앱 채널 응답에서 단색 hex(#RGB~#RRGGBBAA, 3~8자리)로 보정돼 옵니다(그라데이션 문자열 없음). 그래도 색 파싱 실패 시 앱이 죽지 않게 기본색 폴백을 두세요.',
       },
@@ -53,8 +58,9 @@ Header: X-Hanjullo-Key: hjl_...
         desc: "design.text_align('left' | 'center' | 'right')을 제목·본문 정렬에 적용하세요. 미지정 = 왼쪽. 이 필드를 소비하지 않으면 편집기의 정렬 설정이 앱에서 무시됩니다.",
       },
       {
+        // ★ 2026-07-18 정정2 — 앱 = 기본형 2위치 + 포스터형
         title: '표시 형태',
-        desc: "template: 편집기는 앱 채널에 'center_modal'(중앙 모달)과 'bottom_banner'(하단 시트) 2형만 제공합니다. 그 밖의 값이 와도 두 형태 중 하나로 폴백하세요.",
+        desc: "template: 앱 채널은 'center_modal'(기본형·중앙 모달) · 'bottom_banner'(기본형·바텀 시트) · 'full_image'(포스터형·전면 이미지) 3값을 받습니다. 모르는 값이 와도 기본형(바텀 시트)으로 폴백하세요.",
       },
     ],
   },

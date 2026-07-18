@@ -227,16 +227,17 @@ const WEB_PICKER_LABELS: Partial<Record<Template, { label: string; hint: string 
 //   ★ 2026-07-16 범용 보장 계약 — 앱: 실제 앱 렌더는 중앙 모달/바텀 시트 2형뿐 (그 외 값도 앱이 시트로 그림).
 //   편집기가 6형을 약속하고 앱이 2형만 그리던 거짓 선택지 제거 — 확실히 렌더되는 것만 노출.
 const CHANNEL_TEMPLATES: Record<'web' | 'app', Template[]> = {
-  // ★ 2026-07-18 정정 (Harold 지시) — 단순화 2형 구도는 앱 채널(중앙 모달/바텀 시트) 이야기.
-  //   웹은 기존 다양성(모달·슬라이드·토스트·플로팅+테마) 전부 유지하고, 포스터형(full_image)만 추가 옵션으로 얹는다.
+  // ★ 2026-07-18 정정2 (Harold 지시) — 웹 = 기존 다양성 유지 + 포스터형 추가.
+  //   앱 = 2종 구도: 기본형(중앙 모달/바텀 시트로 위치 분기) + 포스터형(전면 이미지 — 신규).
   web: ['center_modal', 'slide_in', 'toast', 'floating_button', 'full_image'],
-  app: ['center_modal', 'bottom_banner'],
+  app: ['center_modal', 'bottom_banner', 'full_image'],
 };
 
 // 앱 채널 표시 형태 라벨 — 실렌더 기준 (bottom_banner 값 = 앱에서 바텀 시트로 렌더)
 const APP_TEMPLATE_LABELS: Partial<Record<Template, string>> = {
-  center_modal: '중앙 모달',
-  bottom_banner: '바텀 시트',
+  center_modal: '기본형 · 중앙 모달',
+  bottom_banner: '기본형 · 바텀 시트',
+  full_image: '포스터형',
 };
 
 // ★ 2026-07-18 정정 (Harold 지시) — 웹의 정예 템플릿·테마 다양성은 유지가 맞다 (단순화 2형 구도는 앱 채널 축). 원복.
@@ -1059,7 +1060,7 @@ export default function InAppMessagesPage() {
                   const flat = composeFlatFromBlocksFE(previewMsg.content_blocks || []);
                   return (
                     <AppInAppPreview
-                      template={previewMsg.template === 'center_modal' ? 'center_modal' : 'bottom_banner'}
+                      template={previewMsg.template === 'center_modal' || previewMsg.template === 'full_image' ? previewMsg.template : 'bottom_banner'}
                       title={previewMsg.title || flat.title || ''}
                       body={previewMsg.body || flat.body || ''}
                       imageUrl={previewMsg.image_url || flat.imageUrl}
@@ -1137,8 +1138,8 @@ export default function InAppMessagesPage() {
             </div>
             <p className="text-xs md:text-sm text-white/50 mt-0.5">
               {channel === 'app'
-                ? '모바일 앱 인앱 — 모달 · 전면 · 배너 · 토스트 (앱 SDK 연동 후 표시)'
-                : '웹 자사몰 팝업 — 모달 · 슬라이드 · 토스트 · 플로팅 버튼'}
+                ? '모바일 앱 인앱 — 기본형(중앙 모달·바텀 시트) · 포스터형 (앱 SDK 연동 후 표시)'
+                : '웹 자사몰 팝업 — 모달 · 슬라이드 · 토스트 · 플로팅 버튼 · 포스터형'}
             </p>
           </div>
           <div className="ml-auto flex items-center gap-2">
@@ -2029,11 +2030,14 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                         );
                       })}
                     </div>
-                    {isApp && (
-                      <div className="text-[10px] text-white/40 mt-1.5">앱 실렌더 기준 2형 — 중앙 모달 / 바텀 시트(하단에서 올라오는 카드).</div>
+                    {isApp && editing.template !== 'full_image' && (
+                      <div className="text-[10px] text-white/40 mt-1.5">기본형 = 이미지·문구·버튼 카드 — 위치를 중앙 모달/바텀 시트로 나눕니다. 포스터형 = 전면 이미지 1장.</div>
                     )}
-                    {!isApp && editing.template === 'full_image' && (
-                      <div className="text-[10px] text-white/40 mt-1.5">포스터형 = 이미지가 카드 전체입니다. 이미지 1장 필수, 버튼은 1개만 표시되고 바닥은 흰색 고정, 제목·본문은 이미지 위에 얹힙니다(선택).</div>
+                    {editing.template === 'full_image' && (
+                      <div className="text-[10px] text-white/40 mt-1.5">
+                        포스터형 = 이미지가 카드 전체입니다. 이미지 1장 필수, 버튼은 1개만 표시되고 바닥은 흰색 고정, 제목·본문은 이미지 위에 얹힙니다(선택).
+                        {isApp && ' 앱은 통합 계약(포스터 렌더)을 구현한 빌드에서 전면 이미지로 표시되며, 이전 빌드는 바텀 시트로 안전 표시됩니다.'}
+                      </div>
                     )}
                   </>
                 );
@@ -2259,7 +2263,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
             </div>
 
             {/* 탭 디자인: 프리셋 갤러리 (레거시 단색 — 블록 없을 때만) */}
-            <div className={activeTab === 'design' && !hasBlocks ? '' : 'hidden'}>
+            {/* ★ 2026-07-18 정정2 — 포스터형은 카드 배경이 이미지+흰 바닥 고정이라 색 프리셋이 죽은 컨트롤 → 숨김 */}
+            <div className={activeTab === 'design' && !hasBlocks && editing.template !== 'full_image' ? '' : 'hidden'}>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                 <Wand2 className="w-3 h-3 text-fuchsia-300" /> 디자인 (클릭해서 골라보세요)
               </h4>
