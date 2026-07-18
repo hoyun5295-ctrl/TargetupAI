@@ -97,7 +97,9 @@ export type InAppTemplate =
   | 'slide_in'
   | 'inline_card'
   | 'toast'
-  | 'floating_button';
+  | 'floating_button'
+  // ★ 2026-07-18 인앱 단순화 P1 — 포스터형(전면 이미지 + 흰 바닥 + CTA 1개). flat 전용(블록 미지원)
+  | 'full_image';
 
 export interface InAppButton {
   id: string;
@@ -685,8 +687,10 @@ export class HanjulloInAppModule {
     // 이전 호환 — position 컬럼 fallback
     const template: InAppTemplate = (msg.template || (msg.position as InAppTemplate) || 'top_banner');
 
+    // ★ 2026-07-18 P1 — 포스터형은 flat 전용: 블록이 남아 있는 데이터(API 경유 전환 등)여도 블록 경로를 타지 않는다.
+    //   빠지면 renderBlockMessage가 전 블록을 허용표(빈 Set)에서 걸러 거의 빈 배너 폴백으로 그려진다 (Codex 지적).
     // ★ D230+ — content_blocks 있으면 블록 렌더(테마+모션), 없으면 레거시 단색 렌더(외형 변화 0)
-    const blocks = this.parseBlocks(msg);
+    const blocks = template === 'full_image' ? [] : this.parseBlocks(msg);
     if (blocks.length > 0) {
       try {
         this.renderBlockMessage(msg, template, blocks, input);
@@ -755,6 +759,10 @@ export class HanjulloInAppModule {
         break;
       case 'center_modal':
         this.renderCenterModal(msg, renderedTitle, renderedBody, imageUrl, badge, buttons, animation, autoDismissSec, input);
+        break;
+      case 'full_image':
+        // ★ 2026-07-18 포스터형 — 전면 이미지. 이미지가 없으면 포스터 성립 X → 중앙 모달 안전 폴백
+        this.renderPoster(msg, renderedTitle, renderedBody, imageUrl, badge, buttons, animation, autoDismissSec, input);
         break;
       case 'full_screen':
         this.renderFullScreen(msg, renderedTitle, renderedBody, imageUrl, badge, buttons, animation, autoDismissSec, input);
@@ -879,6 +887,122 @@ export class HanjulloInAppModule {
     root.appendChild(content);
     // 닫기 = 우상단 (이미지 위에도 보이게)
     this.appendCloseButton(root, msg, input, () => document.body.removeChild(backdrop), 'absolute-top-right');
+
+    backdrop.appendChild(root);
+    document.body.appendChild(backdrop);
+    if (autoDismissSec && autoDismissSec > 0) this.setupAutoDismiss(backdrop, autoDismissSec);
+  }
+
+  // ────────────────────────────────────────────────────────────────
+  // Template 9: full_image (포스터형 — 2026-07-18 인앱 단순화 P1)
+  // ────────────────────────────────────────────────────────────────
+
+  /** 포스터형 — 이미지가 카드 전체(쿠팡이츠·스타벅스형). 카드 배경 흰색 고정(저장된 background_color 무시 — B형 정책),
+   *  제목/본문(선택)은 이미지 하단 그라데이션 스크림 위 텍스트 레이어(픽셀에 굽지 않음 — 수정·개인화 치환 가능),
+   *  흰 바닥 = CTA 1개(브랜드 버튼색) + 다시 보지 않기. 이미지가 없으면 중앙 모달로 안전 폴백. */
+  private renderPoster(
+    msg: InAppMessageSdk, title: string, body: string, imageUrl: string | null | undefined,
+    badge: string,
+    buttons: InAppButton[], animation: string, autoDismissSec: number | null | undefined,
+    input: InAppInitInput,
+  ): void {
+    if (!imageUrl) {
+      this.renderCenterModal(msg, title, body, imageUrl, badge, buttons, animation, autoDismissSec, input);
+      return;
+    }
+
+    const backdrop = document.createElement('div');
+    Object.assign(backdrop.style, {
+      position: 'fixed',
+      inset: '0',
+      background: 'rgba(8,10,18,0.55)',
+      backdropFilter: 'blur(14px) saturate(1.35)',
+      zIndex: '2147483646',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '16px',
+    });
+    (backdrop.style as any).webkitBackdropFilter = 'blur(14px) saturate(1.35)';
+
+    const root = document.createElement('div');
+    root.setAttribute('data-hanjullo-msg', msg.id);
+    Object.assign(root.style, {
+      maxWidth: '400px',
+      width: '100%',
+      background: '#ffffff',
+      color: '#1b1d23',
+      borderRadius: '24px',
+      overflow: 'hidden',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.25), 0 18px 46px rgba(0,0,0,0.35), 0 44px 110px rgba(0,0,0,0.45)',
+      position: 'relative',
+      zIndex: '2147483647',
+      fontFamily: INAPP_FONT_STACK,
+      boxSizing: 'border-box',
+    });
+    this.applyAnimation(root, animation, 'modal');
+
+    // 이미지 = 카드 전체. 원본 비율 유지(이미지 안 문구가 잘리지 않게 크롭 없음), 과도한 세로만 62vh에서 컷
+    const imgWrap = document.createElement('div');
+    Object.assign(imgWrap.style, { position: 'relative', width: '100%' });
+    const hero = document.createElement('img');
+    hero.src = this.toAbsoluteImageUrl(imageUrl);
+    hero.alt = '';
+    hero.loading = 'lazy';
+    hero.referrerPolicy = 'no-referrer';
+    Object.assign(hero.style, { width: '100%', height: 'auto', maxHeight: '62vh', objectFit: 'cover', display: 'block' });
+    // 이미지 로드 실패 시 — 숨기기만 하면 imgWrap이 0높이로 접혀 스크림 텍스트까지 사라진다(Codex 지적).
+    // 회색 판을 유지해 제목/본문 오버레이는 계속 보이게 한다.
+    hero.onerror = () => {
+      hero.style.display = 'none';
+      Object.assign(imgWrap.style, { minHeight: '220px', background: 'linear-gradient(135deg,#3a3d46,#23252c)' });
+    };
+    imgWrap.appendChild(hero);
+
+    if (title || body || badge) {
+      const scrim = document.createElement('div');
+      Object.assign(scrim.style, {
+        position: 'absolute',
+        left: '0',
+        right: '0',
+        bottom: '0',
+        padding: '46px 22px 18px',
+        background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.62) 100%)',
+        color: '#ffffff',
+        boxSizing: 'border-box',
+      });
+      if (badge) this.appendBadge(scrim, badge, '#ffffff');
+      if (title) {
+        const t = document.createElement('div');
+        Object.assign(t.style, { fontWeight: '800', fontSize: '20px', letterSpacing: '-0.01em', lineHeight: '1.3', marginBottom: body ? '5px' : '0' });
+        t.textContent = title;
+        scrim.appendChild(t);
+      }
+      if (body) {
+        const b = document.createElement('div');
+        Object.assign(b.style, {
+          fontSize: '13.5px', opacity: '0.92', lineHeight: '1.5', whiteSpace: 'pre-wrap',
+          display: '-webkit-box', overflow: 'hidden',
+        });
+        (b.style as any).webkitLineClamp = '2';
+        (b.style as any).webkitBoxOrient = 'vertical';
+        b.textContent = body;
+        scrim.appendChild(b);
+      }
+      imgWrap.appendChild(scrim);
+    }
+    root.appendChild(imgWrap);
+
+    // 흰 바닥 — CTA 1개 + 다시 보지 않기 (버튼이 없으면 다시 보지 않기만)
+    const bottom = document.createElement('div');
+    Object.assign(bottom.style, { padding: '16px 20px 12px', boxSizing: 'border-box' });
+    this.appendButtons(bottom, msg, buttons.slice(0, 1), input, 'stack');
+    this.appendOptOutLink(bottom, msg, input, () => { try { document.body.removeChild(backdrop); } catch {} });
+    root.appendChild(bottom);
+
+    // 닫기 = 이미지 우상단 — imgWrap에 흰색 상속을 줘 어두운 포스터에서도 X가 보인다 (root의 진한 글씨색 상속 방지, Codex 지적)
+    imgWrap.style.color = '#ffffff';
+    this.appendCloseButton(imgWrap, msg, input, () => document.body.removeChild(backdrop), 'absolute-top-right');
 
     backdrop.appendChild(root);
     document.body.appendChild(backdrop);

@@ -134,6 +134,9 @@ import { designTemplatesRouter } from './routes/design-templates';
 // ★ 2026-07-08 연동 몰 상품 조회 (DM 상품 슬라이드 자동 채우기 — 카페24·네이버 raw preview 실측부터)
 import { mallProductsRouter } from './routes/mall-products';
 
+// ★ 2026-07-18 P3 에셋 라이브러리 — 회사별 이미지 소재 저장소 (cdp_assets)
+import { assetsRouter } from './routes/assets';
+
 // ★ D145 P0 (2026-05-07): 슈퍼관리자 로그인 차단 관리
 import loginBlocksRoutes from './routes/admin/login-blocks';
 
@@ -339,6 +342,7 @@ app.use('/api/event-campaigns', eventCampaignRouter);
 app.use('/api/design', designTemplatesRouter);
 // ★ 2026-07-08 연동 몰 상품 조회 (DM 상품 자동 채우기 — preview 실측)
 app.use('/api/mall-products', mallProductsRouter);
+app.use('/api/assets', assetsRouter); // ★ 2026-07-18 P3 에셋 라이브러리
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 app.use('/api/manage/users', manageUsersRoutes);

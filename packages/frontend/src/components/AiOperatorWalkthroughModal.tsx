@@ -154,7 +154,8 @@ export default function AiOperatorWalkthroughModal({ forceShow, onClose }: AiOpe
                 {/* ★ D210+ (Harold 명시 2026-05-23): STEP 6 = 메뉴 매트릭스 + 하단 안내 박스 통합 — 사용자 한 눈에 메뉴 확인.
                     ★ Harold 명시 2026-05-23 추가: 노트북 화면 잘림 차단 = 본문 여백 + 카드 padding + 안내 박스 padding 축소. */}
                 <p className="text-sm text-white/60 leading-relaxed mb-3 whitespace-pre-line">{step.description}</p>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-3 text-left">
+                {/* ★ 2026-07-18 P1 — 3열 고정(lg 4열 폐기): 카드 순서가 행 정체성(자동화/채널/제작/분석) 기준이라 4열이면 행이 섞인다 */}
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3 text-left">
                   {SUB_MODULE_CARDS.map((card) => {
                     const CardIcon = card.icon;
                     return (

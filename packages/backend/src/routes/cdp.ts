@@ -74,6 +74,8 @@ import {
   sanitizeActionUrl,
   sanitizeButtonsActionUrls,
 } from '../utils/inapp-message';
+// ★ 2026-07-18 P3 에셋 라이브러리 — 업로드 자동 등재 + 플랜별 용량 한도
+import { registerAsset, getStorageUsage, isAssetsTableMissing } from '../utils/assets';
 // ★ D215+ (2026-05-25) 인앱 메시지 압도적 강화 CT-77~84
 import { generateInAppMessagePackage, listQuickStartCards } from '../utils/inapp-ai-generator';
 // ★ 2026-07-06 인앱 표시 가능성 게이트 — 표시할 곳 없는 고객의 크레딧 낭비 차단 (네이버 단독 등)
@@ -595,9 +597,10 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
       if (Array.isArray(m.buttons)) m.buttons = sanitizeButtonsActionUrls(m.buttons);
     }
 
-    // web 채널은 모달/슬라이드/토스트/플로팅 4종만 — 그 밖 형태(옛 배너 등)는 모달로 보정. 기존 메시지 포함, DB 무변경.
+    // web 채널 허용 형태 — 그 밖 형태(옛 배너 등)는 모달로 보정. 기존 메시지 포함, DB 무변경.
+    // ★ 2026-07-18 P1: full_image(포스터형) 등재 — 빠지면 B형이 center_modal로 강제 변환돼 렌더가 어긋난다.
     if (reqChannel === 'web') {
-      const WEB_OK = new Set(['center_modal', 'slide_in', 'toast', 'floating_button']);
+      const WEB_OK = new Set(['center_modal', 'slide_in', 'toast', 'floating_button', 'full_image']);
       for (const m of messages as any[]) {
         const t = m.template || m.position;
         if (t && !WEB_OK.has(t)) m.template = 'center_modal';
@@ -1635,6 +1638,20 @@ router.post('/inapp/upload-image', (req: any, res: any) => {
     const file = req.file as Express.Multer.File | undefined;
     if (!file) return res.status(400).json({ success: false, error: '이미지 파일 필수' });
     try {
+      // ★ 2026-07-18 P3 — 플랜별 라이브러리 용량 한도 (테이블 미생성 환경 = 사용량 조회 실패 → 한도 검사 건너뜀, 업로드 무중단)
+      try {
+        const usage = await getStorageUsage(auth.companyId);
+        if (usage.usedBytes + file.size > usage.limitBytes) {
+          return res.status(400).json({
+            success: false,
+            error: `저장 공간이 가득 찼습니다 (${(usage.usedBytes / 1024 / 1024).toFixed(0)}MB / ${(usage.limitBytes / 1024 / 1024).toFixed(0)}MB). 라이브러리에서 안 쓰는 소재를 정리하거나 플랜을 올려주세요.`,
+            code: 'ASSET_STORAGE_FULL',
+          });
+        }
+      } catch (usageErr: any) {
+        // cdp_assets 미생성 = 조용히 생략. 그 외 실패는 흔적을 남기되 업로드는 계속(무중단 원칙 — Codex A1)
+        if (!isAssetsTableMissing(usageErr)) console.warn('[CDP /inapp/upload-image] 용량 확인 실패 — 한도 검사 생략:', usageErr?.message);
+      }
       const companyDir = path.join(INAPP_IMAGE_BASE, auth.companyId);
       if (!fs.existsSync(companyDir)) fs.mkdirSync(companyDir, { recursive: true });
       const ext = path.extname(file.originalname).toLowerCase();
@@ -1642,6 +1659,17 @@ router.post('/inapp/upload-image', (req: any, res: any) => {
       const filepath = path.join(companyDir, filename);
       fs.writeFileSync(filepath, file.buffer);
       const publicUrl = `/api/cdp/inapp/image/${auth.companyId}/${filename}`;
+      // ★ 2026-07-18 P3 — 에셋 라이브러리 자동 등재 (부가 흐름 — 실패해도 업로드 성공 유지)
+      registerAsset({
+        companyId: auth.companyId,
+        createdBy: auth.userId,
+        kind: 'uploaded',
+        origin: 'inapp',
+        url: publicUrl,
+        filename: file.originalname,
+        bytes: file.size,
+        format: ext.replace('.', '') || null,
+      }).catch(() => {});
       return res.json({ success: true, url: publicUrl, filename, size: file.size });
     } catch (e: any) {
       console.error('[CDP /inapp/upload-image] 오류:', e);

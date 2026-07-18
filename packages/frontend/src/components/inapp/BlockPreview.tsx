@@ -66,6 +66,8 @@ const INAPP_ALLOWED_BLOCKS: Record<string, Set<string>> = {
   bottom_banner: new Set(['media', 'eyebrow', 'headline', 'body', 'cta_group', 'footer']),
   toast: new Set(['eyebrow', 'headline', 'body', 'footer']),
   floating_button: new Set(['cta_group']),
+  // ★ 2026-07-18 포스터형(P1) — flat 전용, 블록 미지원 (backend·SDK와 3면 동일)
+  full_image: new Set<string>(),
 };
 
 /** 템플릿별 블록 허용 판정 — SDK isBlockAllowed 1:1 (정의 없는 템플릿·미지정 = 허용) */

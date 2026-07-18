@@ -36,6 +36,10 @@ import { AppInAppContractModal } from '../components/inapp/AppIntegrationContrac
 import { DateTimeField } from '../components/DateTimeField';
 import { takeEventDraft, EVENT_INAPP_DRAFT_KEY } from '../components/EventCampaignModal';
 import ImageToCopyButton from '../components/ImageToCopyButton';
+// ★ 2026-07-18 P2 — CTA 자동 연결: DM의 연동 몰 상품 픽커 재사용 (URL 수기 입력 사고 차단 — 0718 팝폰 m/xxx 무반응 근본)
+import MallProductPickerModal, { type PickedMallProduct } from '../components/dm/MallProductPickerModal';
+// ★ 2026-07-18 P3 — 에셋 라이브러리 픽커 (업로드 소재 재사용 — 전 채널 공용 컴포넌트)
+import AssetLibraryPickerModal, { type PickedAsset } from '../components/assets/AssetLibraryPickerModal';
 
 // ════════════════════════════════════════════════════════════════════
 // ★ D215+ (2026-05-25) 인앱 메시지 압도적 강화 — Journey Builder급 12 화면 영역
@@ -48,7 +52,7 @@ import ImageToCopyButton from '../components/ImageToCopyButton';
 //   - 모바일 반응형 default
 // ════════════════════════════════════════════════════════════════════
 
-type Template = 'top_banner' | 'bottom_banner' | 'center_modal' | 'full_screen' | 'slide_in' | 'inline_card' | 'toast' | 'floating_button';
+type Template = 'top_banner' | 'bottom_banner' | 'center_modal' | 'full_screen' | 'slide_in' | 'inline_card' | 'toast' | 'floating_button' | 'full_image';
 type Frequency = 'once_per_session' | 'once_per_day' | 'always';
 type Status = 'active' | 'paused' | 'archived';
 type TriggerEvent = 'page_load' | 'cart_add' | 'cart_view' | 'checkout_start' | 'scroll' | 'time_on_page' | 'exit_intent' | 'cart_value';
@@ -210,6 +214,14 @@ const TEMPLATE_LABELS: Record<Template, string> = {
   inline_card: '인라인 카드',
   toast: '토스트',
   floating_button: '플로팅 버튼',
+  full_image: '포스터형',
+};
+
+// ★ 2026-07-18 인앱 단순화 P1 (Harold 확정) — 신규 웹 픽커는 2종만: 기본형/포스터형.
+//   기존 발행물의 다른 형태는 편집 진입 시 현재 값을 옵션에 함께 표시(비파괴 — 값 강제 변환 없음).
+const WEB_PICKER_LABELS: Partial<Record<Template, { label: string; hint: string }>> = {
+  center_modal: { label: '기본형', hint: '이미지 · 문구 · 버튼' },
+  full_image: { label: '포스터형', hint: '전면 이미지 1장' },
 };
 
 // ★ 2026-06-17 채널별 표시 형태 — 확실한 것만 (애매/충돌 형태 배제)
@@ -217,7 +229,9 @@ const TEMPLATE_LABELS: Record<Template, string> = {
 //   ★ 2026-07-16 범용 보장 계약 — 앱: 실제 앱 렌더는 중앙 모달/바텀 시트 2형뿐 (그 외 값도 앱이 시트로 그림).
 //   편집기가 6형을 약속하고 앱이 2형만 그리던 거짓 선택지 제거 — 확실히 렌더되는 것만 노출.
 const CHANNEL_TEMPLATES: Record<'web' | 'app', Template[]> = {
-  web: ['center_modal', 'slide_in', 'toast', 'floating_button'],
+  // ★ 2026-07-18 P1 — 웹 신규 = 기본형(center_modal)·포스터형(full_image) 2종만 (쿠팡이츠·스벅 벤치마크: 이미지가 전부, 나머지 심플).
+  //   옛 slide_in/toast/floating_button 발행물은 렌더·서빙 그대로 유지(비파괴), 편집 진입 시 현재 값이 옵션에 추가된다.
+  web: ['center_modal', 'full_image'],
   app: ['center_modal', 'bottom_banner'],
 };
 
@@ -226,6 +240,9 @@ const APP_TEMPLATE_LABELS: Partial<Record<Template, string>> = {
   center_modal: '중앙 모달',
   bottom_banner: '바텀 시트',
 };
+
+// ★ 2026-07-18 P1 (Harold 확정) — 정예 템플릿(테마×블록 완성형) 신규 UI 비노출. 코드·데이터 무접촉 게이트만.
+const SHOW_ELITE_TEMPLATES = false;
 
 // 빈도 한글 라벨 (목록 카드·편집기 공용)
 const FREQ_LABELS: Record<string, string> = {
@@ -275,8 +292,10 @@ const EMPTY_FORM: Partial<MessageRow> = {
   title: '',
   body: '',
   template: 'center_modal',
-  background_color: '#4f46e5',
-  text_color: '#ffffff',
+  // ★ 2026-07-18 P1 (Harold 확정) — 신규 메시지 = 흰 배경 + 진한 글씨 고정, 색은 버튼(브랜드 컬러)만.
+  //   기존 발행물의 저장된 색은 무변경(비파괴).
+  background_color: '#ffffff',
+  text_color: '#1b1d23',
   trigger_event: 'page_load',
   trigger_conditions: { event: 'page_load' },
   segment_conditions: {},
@@ -660,6 +679,12 @@ export default function InAppMessagesPage() {
     const textBad = ['headline', 'body', 'eyebrow', 'footer'].some((tp) => hasPh(blockText(tp)));
     if (hasPh(editing?.body || '') || benefitBad || textBad) {
       showToast('혜택 안내 placeholder를 회사 정책에 맞게 직접 작성 후 저장해주세요.', { type: 'warning' });
+      return;
+    }
+    // ★ 2026-07-18 P1 — 포스터형은 이미지 1장이 정체성: 이미지 없이 저장하면 실물이 중앙 모달 폴백으로 그려져
+    //   미리보기와 달라진다(조용한 불일치). 저장 시점에 정직하게 차단.
+    if (editing?.template === 'full_image' && !editing?.image_url) {
+      showToast('포스터형은 이미지 1장이 필수입니다. 이미지를 업로드해주세요.', { type: 'warning' });
       return;
     }
     // ★ 2026-07-06 표시 가능성 가드 — 웹 메시지를 active로 저장(게시)할 때 표시할 곳 없으면 차단 (paused 저장은 허용)
@@ -1601,6 +1626,12 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
   const [previewPeople, setPreviewPeople] = useState<Array<{ label: string; customer: Record<string, any>; is_sample?: boolean }>>([]);
   const [previewIdx, setPreviewIdx] = useState(0);
   const [brandAccent, setBrandAccent] = useState<string | null>(null);
+  // ★ 2026-07-18 P2 — CTA 몰 상품 픽커: 대상 버튼 id (null = 닫힘). 인덱스 저장은 픽커 열린 사이
+  //   버튼 삭제 시 다른 버튼을 덮어쓰는 이동 결함이 있어 id로 고정 (Codex C1)
+  const [mallPickTarget, setMallPickTarget] = useState<string | null>(null);
+  // ★ 2026-07-18 P3 — 에셋 라이브러리 픽커 (이미지 재사용)
+  const [assetPickOpen, setAssetPickOpen] = useState(false);
+  const pickToast = useToast();
   const [activeTab, setActiveTab] = useState<'content' | 'design' | 'target'>('content');
   // ★ 2026-07-14 디자인 4.0 — 정예 템플릿(서버 design-core 컴파일 — FE 복제 없음. 실패 = 그룹 미노출 폴백)
   const [eliteTemplates, setEliteTemplates] = useState<Array<GoldenInAppTemplate & { difference?: string }>>([]);
@@ -1674,9 +1705,10 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brandAccent]);
 
-  // web 채널은 4종(모달/슬라이드/토스트/플로팅)만 — 이전 배너 등 4종 밖 형태로 저장된 메시지를 열면 모달로 자동 정규화
+  // web 채널 허용 형태 밖(옛 배너 등)으로 저장된 메시지를 열면 모달로 자동 정규화 (서빙 WEB_OK 보정과 동일 기준)
+  // ★ 2026-07-18 P1 — full_image 등재 필수: 빠지면 포스터형 메시지가 편집 진입만으로 center_modal로 바뀌어 저장된다 (Codex 지적)
   useEffect(() => {
-    const WEB_OK = ['center_modal', 'slide_in', 'toast', 'floating_button'];
+    const WEB_OK = ['center_modal', 'slide_in', 'toast', 'floating_button', 'full_image'];
     if (editing.channel !== 'app' && editing.template && !WEB_OK.includes(editing.template)) {
       setEditing({ ...editing, template: 'center_modal' });
     }
@@ -1899,12 +1931,14 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     className="w-full px-3 py-2 mb-2 bg-slate-900/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
                     maxLength={20}
                   />
-                  {!isApp && (
+                  {/* ★ 2026-07-18 P1 — 포스터형은 flat 전용(블록 미지원, 서버 허용표 빈 Set) → 전환 버튼 숨김.
+                      2템플릿 단순화로 신규 생성은 flat 프리셋 — 블록 전환은 기존 메시지 편집에서만 유지(비파괴) */}
+                  {!isApp && editing.template !== 'full_image' && !!editing.id && (
                     <button
                       onClick={() => { const c = convertToBlocks(editing); setEditing({ ...editing, ...c }); }}
                       className="w-full text-xs text-violet-100 bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 hover:from-violet-500/50 hover:to-fuchsia-500/50 border border-violet-400/30 rounded-lg py-2 flex items-center justify-center gap-1.5 transition-colors"
                     >
-                      <Wand2 className="w-3.5 h-3.5" /> 블록 에디터로 전환 (모던 메시지 — 권장)
+                      <Wand2 className="w-3.5 h-3.5" /> 블록 에디터로 전환
                     </button>
                   )}
                   {isApp && (
@@ -1932,8 +1966,9 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             </div>
 
-            {/* ★ 2026-07-14 디자인 4.0 — 정예 템플릿 10종 (목적×스토리 구조 — 서버 컴파일. 블록 기반 = 웹 전용) */}
-            {eliteTemplates.length > 0 && !isApp && (
+            {/* ★ 2026-07-14 디자인 4.0 — 정예 템플릿 10종 (목적×스토리 구조 — 서버 컴파일. 블록 기반 = 웹 전용)
+                ★ 2026-07-18 P1 (Harold 확정) — 테마 축 정리로 신규 UI 비노출. 데이터·렌더는 무접촉(기존 발행물 회귀 0) */}
+            {SHOW_ELITE_TEMPLATES && eliteTemplates.length > 0 && !isApp && (
               <div className={activeTab === 'design' ? 'mb-5' : 'hidden'}>
                 <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                   <Sparkles className="w-3 h-3 text-amber-300" /> 정예 템플릿 — 목적으로 고르세요
@@ -1960,29 +1995,53 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
 
             {/* ★ 2026-07-14 Harold 지시 — 옛 골든 12종 노출 제거(정예 10종만 유지, 위 그리드) */}
 
-            {/* 탭 디자인: 표시 형태 */}
+            {/* 탭 디자인: 표시 형태 — ★ 2026-07-18 P1: 웹 신규 = 기본형/포스터형 2종. 옛 형태 발행물은 현재 값을 옵션에 추가(비파괴) */}
             <div className={activeTab === 'design' ? '' : 'hidden'}>
-              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                <Layers className="w-3 h-3" /> 표시 형태 ({(editing.channel === 'app' ? CHANNEL_TEMPLATES.app : CHANNEL_TEMPLATES.web).length}종)
-              </h4>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                {(editing.channel === 'app' ? CHANNEL_TEMPLATES.app : CHANNEL_TEMPLATES.web).map((tpl) => (
-                  <button
-                    key={tpl}
-                    onClick={() => updateField('template', tpl)}
-                    className={`text-xs px-2 py-2 rounded-lg border transition-colors ${
-                      editing.template === tpl
-                        ? 'bg-violet-500/30 border-violet-400/60 text-white'
-                        : 'bg-slate-900/60 border-white/10 text-white/70 hover:bg-white/5'
-                    }`}
-                  >
-                    {isApp ? (APP_TEMPLATE_LABELS[tpl] || TEMPLATE_LABELS[tpl]) : TEMPLATE_LABELS[tpl]}
-                  </button>
-                ))}
-              </div>
-              {isApp && (
-                <div className="text-[10px] text-white/40 mt-1.5">앱 실렌더 기준 2형 — 중앙 모달 / 바텀 시트(하단에서 올라오는 카드).</div>
-              )}
+              {(() => {
+                const base = editing.channel === 'app' ? CHANNEL_TEMPLATES.app : CHANNEL_TEMPLATES.web;
+                // position 폴백 포함 — 옛 행(template NULL·position만 존재)도 현재 형태가 옵션·선택 표시되게 (서빙과 동일 기준)
+                const cur = (editing.template || (editing as any).position) as Template | undefined;
+                const options: Template[] = cur && !base.includes(cur) ? [...base, cur] : base;
+                return (
+                  <>
+                    <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+                      <Layers className="w-3 h-3" /> 표시 형태
+                    </h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      {options.map((tpl) => {
+                        const pick = !isApp ? WEB_PICKER_LABELS[tpl] : undefined;
+                        // ★ 2026-07-18 P1 — 블록 메시지에서 포스터형 선택 금지: 저장 시 서버 허용표(빈 Set)가 블록을 전부
+                        //   제거해 콘텐츠가 조용히 사라진다 (미리보기≠실물 사고 부류). 정직하게 비활성 + 사유 표기.
+                        const blockedPoster = tpl === 'full_image' && hasBlocks;
+                        return (
+                          <button
+                            key={tpl}
+                            disabled={blockedPoster}
+                            onClick={() => { if (!blockedPoster) updateField('template', tpl); }}
+                            className={`text-xs px-2 py-2 rounded-lg border text-left transition-colors ${
+                              editing.template === tpl
+                                ? 'bg-violet-500/30 border-violet-400/60 text-white'
+                                : blockedPoster
+                                  ? 'bg-slate-900/40 border-white/5 text-white/25 cursor-not-allowed'
+                                  : 'bg-slate-900/60 border-white/10 text-white/70 hover:bg-white/5'
+                            }`}
+                            title={blockedPoster ? '포스터형은 블록 메시지에서 쓸 수 없습니다 (이미지·문구·버튼만 쓰는 메시지 전용)' : undefined}
+                          >
+                            <span className="block font-bold">{isApp ? (APP_TEMPLATE_LABELS[tpl] || TEMPLATE_LABELS[tpl]) : (pick?.label || TEMPLATE_LABELS[tpl])}</span>
+                            {pick && <span className="block text-[9px] text-white/45 mt-0.5">{blockedPoster ? '블록 메시지 사용 불가' : pick.hint}</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {isApp && (
+                      <div className="text-[10px] text-white/40 mt-1.5">앱 실렌더 기준 2형 — 중앙 모달 / 바텀 시트(하단에서 올라오는 카드).</div>
+                    )}
+                    {!isApp && editing.template === 'full_image' && (
+                      <div className="text-[10px] text-white/40 mt-1.5">포스터형 = 이미지가 카드 전체입니다. 이미지 1장 필수, 버튼은 1개만 표시되고 바닥은 흰색 고정, 제목·본문은 이미지 위에 얹힙니다(선택).</div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
 
             {/* 탭 디자인: 형태(디자인) + 색상 + 강조색 (블록 모드) */}
@@ -2232,7 +2291,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                 <ImageIcon className="w-3 h-3" /> 이미지 (선택)
               </h4>
-              {!['center_modal', 'slide_in', 'top_banner', 'bottom_banner', 'full_screen', 'inline_card'].includes(editing.template || '') ? (
+              {!['center_modal', 'slide_in', 'top_banner', 'bottom_banner', 'full_screen', 'inline_card', 'full_image'].includes(editing.template || '') ? (
                 <div className="text-[11px] text-white/50 bg-white/5 border border-white/10 rounded-lg px-3 py-2.5">
                   토스트·플로팅 버튼 형태는 이미지를 지원하지 않습니다. 이미지를 쓰려면 중앙 모달이나 슬라이드 인을 선택해주세요.
                 </div>
@@ -2253,13 +2312,22 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     </button>
                   </div>
                 ) : (
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="px-3 py-2 bg-slate-900/60 border border-dashed border-white/20 rounded-lg text-xs text-white/70 hover:bg-white/5 flex items-center gap-2"
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                    이미지 업로드 (2MB 이하)
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-3 py-2 bg-slate-900/60 border border-dashed border-white/20 rounded-lg text-xs text-white/70 hover:bg-white/5 flex items-center gap-2"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      이미지 업로드 (2MB 이하)
+                    </button>
+                    {/* ★ 2026-07-18 P3 — 업로드한 소재 재사용 (에셋 라이브러리) */}
+                    <button
+                      onClick={() => setAssetPickOpen(true)}
+                      className="px-3 py-2 bg-violet-500/10 border border-violet-400/30 rounded-lg text-xs text-violet-300 hover:bg-violet-500/20 flex items-center gap-2"
+                    >
+                      라이브러리에서 선택
+                    </button>
+                  </div>
                 )}
                 <input
                   ref={fileInputRef}
@@ -2278,8 +2346,23 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 <MousePointer className="w-3 h-3" /> CTA 버튼 (최대 3개)
               </h4>
               <div className="space-y-2">
-                {(editing.buttons || []).map((btn, idx) => (
-                  <div key={idx} className={`grid grid-cols-1 ${isApp ? 'md:grid-cols-[1fr,1fr,40px]' : 'md:grid-cols-[1fr,1fr,80px,40px]'} gap-2 items-center`}>
+                {(editing.buttons || []).map((btn, idx) => {
+                  // ★ 2026-07-18 P2 — 열 수 없는 주소 정직 경고 (Codex D1·D2 정정: 서버 sanitize 실동작 기준):
+                  //   · http/https 외 스킴(myapp:// 등) = 서버가 저장 시 제거 → 전 채널 무반응
+                  //   · 앱 채널의 상대경로(m/xxx 등) = 앱이 열 수 없음 (0718 팝폰 실사고). 웹은 몰 기준 상대경로가 유효라 경고 안 함
+                  const rawUrl = (btn.action_url || '').trim();
+                  const isHttpish = /^https?:\/\//i.test(rawUrl) || rawUrl.startsWith('//');
+                  const hasOtherScheme = !isHttpish && /^[a-z][a-z0-9+.-]*:/i.test(rawUrl);
+                  const domainLike = /^(www\.|[\w-]+(\.[\w-]+)+)/i.test(rawUrl);
+                  const urlBad = !!rawUrl && !rawUrl.startsWith('[') && (
+                    hasOtherScheme || (isApp && !isHttpish && !domainLike)
+                  );
+                  const urlBadMsg = hasOtherScheme
+                    ? 'http/https 주소만 지원됩니다 — 저장 시 이 값은 제거되어 버튼이 무반응이 됩니다.'
+                    : '앱에서 열 수 없는 주소 형식입니다 — https:// 포함 전체 주소 또는 "연동 몰" 선택을 사용해주세요.';
+                  return (
+                  <div key={idx}>
+                  <div className={`grid grid-cols-1 ${isApp ? 'md:grid-cols-[1fr,1fr,72px,40px]' : 'md:grid-cols-[1fr,1fr,72px,80px,40px]'} gap-2 items-center`}>
                     <input
                       type="text"
                       value={btn.label}
@@ -2300,8 +2383,16 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                         updateField('buttons', newButtons);
                       }}
                       placeholder="이동 URL"
-                      className="px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                      className={`px-2 py-1.5 bg-slate-900/60 border rounded text-xs text-white placeholder-white/30 ${urlBad ? 'border-rose-400/60' : 'border-white/10'}`}
                     />
+                    {/* ★ 2026-07-18 P2 — 연동 몰 상품 선택 → URL 자동 주입 (수기 입력 사고 차단) */}
+                    <button
+                      onClick={() => setMallPickTarget(btn.id || `btn_${idx}`)}
+                      className="px-2 py-1.5 rounded border border-emerald-400/30 bg-emerald-500/10 text-[11px] text-emerald-300 hover:bg-emerald-500/20 whitespace-nowrap"
+                      title="연동 몰에서 상품을 골라 이동 URL을 자동으로 채웁니다"
+                    >
+                      연동 몰
+                    </button>
                     {/* ★ 2026-07-17 버튼 스타일은 웹 렌더(SDK renderLegacy)만 소비 — 앱(팝폰 시트·계약)은 색 데이터 축이라 앱 채널에서 숨김 (죽은 컨트롤 금지, auto_dismiss·애니메이션과 동일 원칙) */}
                     {!isApp && (
                     <select
@@ -2326,7 +2417,12 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                ))}
+                  {urlBad && (
+                    <div className="text-[10px] text-rose-300/90 mt-1">{urlBadMsg}</div>
+                  )}
+                  </div>
+                  );
+                })}
                 {(editing.buttons || []).length < 3 && (
                   <button
                     onClick={() => updateField('buttons', [...(editing.buttons || []), {
@@ -2334,7 +2430,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                       label: '자세히 보기',
                       action_url: '[URL — 회사 admin 수정]',
                       style: 'primary',
-                      background_color: '#4f46e5',
+                      // ★ 2026-07-18 P1 — 버튼색 기본 = 브랜드 킷 색 (버튼만 브랜드 컬러 정책)
+                      background_color: brandAccent || '#4f46e5',
                       text_color: '#ffffff',
                     }])}
                     className="text-xs text-violet-300 hover:bg-violet-500/10 px-2 py-1 rounded flex items-center gap-1"
@@ -2671,47 +2768,56 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             </div>
 
-            {/* 색상 + 상태 (블록 모드는 테마가 색 결정 → 상태만) */}
+            {/* 색상 + 상태 — ★ 2026-07-18 P1: 신규 = 흰 배경 고정이라 색 입력 숨김(버튼색만 브랜드 컬러).
+                기존 발행물(editing.id 존재·포스터형 아님)만 저장된 색 편집 유지(비파괴). 블록 모드는 테마가 색 결정 → 상태만 */}
             <div>
-              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                <Layers className="w-3 h-3" /> {hasBlocks ? '상태' : '색상 + 상태'}
-              </h4>
-              <div className={`grid ${hasBlocks ? 'grid-cols-1' : 'grid-cols-3'} gap-2`}>
-                {!hasBlocks && (
-                  <div>
-                    <label className="text-[10px] text-white/50 block mb-1">배경색</label>
-                    <input
-                      type="color"
-                      value={editing.background_color || '#4f46e5'}
-                      onChange={(e) => updateField('background_color', e.target.value)}
-                      className="w-full h-9 bg-slate-900/60 border border-white/10 rounded cursor-pointer"
-                    />
-                  </div>
-                )}
-                {!hasBlocks && (
-                  <div>
-                    <label className="text-[10px] text-white/50 block mb-1">글자색</label>
-                    <input
-                      type="color"
-                      value={editing.text_color || '#ffffff'}
-                      onChange={(e) => updateField('text_color', e.target.value)}
-                      className="w-full h-9 bg-slate-900/60 border border-white/10 rounded cursor-pointer"
-                    />
-                  </div>
-                )}
-                <div>
-                  <label className="text-[10px] text-white/50 block mb-1">상태</label>
-                  <select
-                    value={editing.status || 'active'}
-                    onChange={(e) => updateField('status', e.target.value as Status)}
-                    className="w-full h-9 px-2 bg-slate-900/60 border border-white/10 rounded text-xs text-white"
-                  >
-                    <option value="active">활성</option>
-                    <option value="paused">일시 중지</option>
-                  </select>
-                </div>
-              </div>
-              {hasBlocks && <div className="text-[10px] text-white/40 mt-1.5">색상은 디자인 탭의 테마·강조색으로 정해집니다.</div>}
+              {(() => {
+                const showColors = !hasBlocks && !!editing.id && editing.template !== 'full_image' && (editing.background_color || '#ffffff') !== '#ffffff';
+                return (
+                  <>
+                    <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+                      <Layers className="w-3 h-3" /> {showColors ? '색상 + 상태' : '상태'}
+                    </h4>
+                    <div className={`grid ${showColors ? 'grid-cols-3' : 'grid-cols-1'} gap-2`}>
+                      {showColors && (
+                        <div>
+                          <label className="text-[10px] text-white/50 block mb-1">배경색</label>
+                          <input
+                            type="color"
+                            value={editing.background_color || '#4f46e5'}
+                            onChange={(e) => updateField('background_color', e.target.value)}
+                            className="w-full h-9 bg-slate-900/60 border border-white/10 rounded cursor-pointer"
+                          />
+                        </div>
+                      )}
+                      {showColors && (
+                        <div>
+                          <label className="text-[10px] text-white/50 block mb-1">글자색</label>
+                          <input
+                            type="color"
+                            value={editing.text_color || '#ffffff'}
+                            onChange={(e) => updateField('text_color', e.target.value)}
+                            className="w-full h-9 bg-slate-900/60 border border-white/10 rounded cursor-pointer"
+                          />
+                        </div>
+                      )}
+                      <div>
+                        <label className="text-[10px] text-white/50 block mb-1">상태</label>
+                        <select
+                          value={editing.status || 'active'}
+                          onChange={(e) => updateField('status', e.target.value as Status)}
+                          className="w-full h-9 px-2 bg-slate-900/60 border border-white/10 rounded text-xs text-white"
+                        >
+                          <option value="active">활성</option>
+                          <option value="paused">일시 중지</option>
+                        </select>
+                      </div>
+                    </div>
+                    {hasBlocks && <div className="text-[10px] text-white/40 mt-1.5">색상은 디자인 탭의 테마·강조색으로 정해집니다.</div>}
+                    {!hasBlocks && !showColors && <div className="text-[10px] text-white/40 mt-1.5">배경은 흰색 고정 — 색은 버튼(브랜드 컬러)으로만 줍니다.</div>}
+                  </>
+                );
+              })()}
             </div>
             </div>
           </div>
@@ -2799,6 +2905,55 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
           </button>
         </div>
       </div>
+      {/* ★ 2026-07-18 P2 — CTA 몰 상품 픽커: 선택 상품 URL을 대상 버튼에 자동 주입 (+이미지 비어 있으면 상품 이미지 채움) */}
+      <MallProductPickerModal
+        open={mallPickTarget !== null}
+        onClose={() => setMallPickTarget(null)}
+        onPick={(products: PickedMallProduct[]) => {
+          const targetId = mallPickTarget;
+          setMallPickTarget(null);
+          if (!targetId || products.length === 0) return;
+          const p = products[0];
+          if (!p.productUrl) {
+            // ★ Codex C2 — 네이버 스마트스토어는 상품 API가 URL을 제공하지 않아 자동 연결 불가 (정직 안내)
+            pickToast.warning(
+              p.provider === 'naver'
+                ? '네이버 스마트스토어는 상품 URL을 제공하지 않아 자동 연결할 수 없습니다 — 이동 URL을 직접 입력해주세요.'
+                : '선택한 상품에 상품 페이지 URL이 없습니다. 다른 상품을 선택해주세요.',
+            );
+            return;
+          }
+          // ★ Codex C1 — 픽커 열린 사이 버튼이 삭제/변경돼도 id로 정확 대상 판정
+          const idx = (editing.buttons || []).findIndex((b) => b.id === targetId);
+          if (idx < 0) {
+            pickToast.warning('대상 버튼이 삭제되어 연결을 취소했습니다.');
+            return;
+          }
+          const newButtons = [...(editing.buttons || [])];
+          newButtons[idx] = { ...newButtons[idx], action_url: p.productUrl };
+          const patch: Partial<MessageRow> = { buttons: newButtons };
+          let filledImage = false;
+          if (!editing.image_url && p.imageUrl) {
+            (patch as any).image_url = p.imageUrl;
+            filledImage = true;
+          }
+          setEditing({ ...editing, ...patch });
+          pickToast.success(
+            filledImage
+              ? `"${p.name}" 연결 완료 — 이동 URL과 이미지가 채워졌습니다.`
+              : `"${p.name}" 연결 완료 — 이동 URL이 채워졌습니다.${products.length > 1 ? ' (첫 상품만 적용)' : ''}`,
+          );
+        }}
+      />
+      {/* ★ 2026-07-18 P3 — 에셋 라이브러리 픽커: 선택 이미지를 메시지 이미지로 주입 */}
+      <AssetLibraryPickerModal
+        open={assetPickOpen}
+        onClose={() => setAssetPickOpen(false)}
+        onPick={(a: PickedAsset) => {
+          setEditing({ ...editing, image_url: a.url });
+          pickToast.success('라이브러리 소재를 이미지로 넣었습니다.');
+        }}
+      />
       {/* ★ 2026-07-14 디자인 3.0 — 골든 템플릿 덮어쓰기 확인 (기존 블록 있을 때만) */}
       <ConfirmModal state={goldenConfirm} onClose={() => setGoldenConfirm(null)} />
       {/* ★ 2026-07-17 앱(네이티브) 통합 계약 — CDP 설정 앱 탭과 동일 단일 소스 */}

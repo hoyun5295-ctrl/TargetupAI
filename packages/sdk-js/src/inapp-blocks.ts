@@ -94,6 +94,8 @@ const ALLOWED_BLOCKS: Record<string, Set<string>> = {
   bottom_banner: new Set(['media', 'eyebrow', 'headline', 'body', 'cta_group', 'footer']),
   toast: new Set(['eyebrow', 'headline', 'body', 'footer']),
   floating_button: new Set(['cta_group']),
+  // ★ 2026-07-18 포스터형(P1) — flat 전용, 블록 미지원 (backend·frontend 미러와 3면 동일)
+  full_image: new Set<string>(),
 };
 
 export function isBlockAllowed(template: string, type: string): boolean {

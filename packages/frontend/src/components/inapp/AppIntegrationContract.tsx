@@ -76,7 +76,13 @@ Header: X-Hanjullo-Key: hjl_...
       },
       {
         title: '버튼 이동',
-        desc: 'buttons[].action_url(또는 actionUrl)을 엽니다. 서버가 https:// 프로토콜을 보정해 내려주며, 앱 딥링크 스킴도 그대로 전달됩니다.',
+        // ★ 2026-07-18 정정(Codex D2) — 서버 sanitize 실동작 기준: http/https만 통과, 그 외 스킴은 저장 시 제거
+        desc: 'buttons[].action_url(또는 actionUrl)을 엽니다. 서버가 https:// 프로토콜을 보정해 내려주며, http/https URL만 전달됩니다(그 외 스킴은 저장 시 제거).',
+      },
+      {
+        // ★ 2026-07-18 P2 — CTA 자동 연결 규칙: 몰마다 제각각인 앱 내 경로 문제 종결 (0718 팝폰 m/xxx 무반응 실사고 근거)
+        title: 'CTA URL 처리 규칙 (웹 URL 기준)',
+        desc: 'CTA에는 연동 몰의 웹 URL(https://…)이 옵니다. 앱은 자체 라우팅 규칙으로 앱 내 화면에 매핑하고, 매핑할 수 없으면 반드시 인앱 브라우저(또는 외부 브라우저)로 여세요. 스킴 없는 상대경로를 openURL에 그대로 넘기면 조용히 무반응이 됩니다 — 무반응 CTA는 계약 위반입니다.',
       },
     ],
   },

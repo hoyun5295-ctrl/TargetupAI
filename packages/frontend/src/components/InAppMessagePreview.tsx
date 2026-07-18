@@ -55,13 +55,15 @@ function toAbsoluteImage(url?: string | null): string | undefined {
   return url || undefined;
 }
 
-type Variant = 'banner' | 'modal' | 'slide' | 'toast' | 'inline' | 'full' | 'floating';
+type Variant = 'banner' | 'modal' | 'slide' | 'toast' | 'inline' | 'full' | 'floating' | 'poster';
 
 const VARIANT_MAP: Record<string, Variant> = {
   top_banner: 'banner', bottom_banner: 'banner',
   center_modal: 'modal', full_screen: 'full',
   slide_in: 'slide', inline_card: 'inline',
   toast: 'toast', floating_button: 'floating',
+  // ★ 2026-07-18 P1 — 포스터형 (SDK renderPoster 1:1 미러)
+  full_image: 'poster',
 };
 
 function hideOnError(e: React.SyntheticEvent<HTMLImageElement>) {
@@ -73,7 +75,7 @@ function CardInner({ title, body, imageUrl, badge, buttons, textColor, variant, 
   title: string; body: string; imageUrl?: string | null; badge?: string | null; buttons?: PreviewButton[]; textColor: string; variant: Variant; design?: Record<string, any> | null;
 }) {
   const img = toAbsoluteImage(imageUrl);
-  const clampMap: Record<Variant, number> = { banner: 2, slide: 4, inline: 5, modal: 3, full: 10, toast: 2, floating: 1 };
+  const clampMap: Record<Variant, number> = { banner: 2, slide: 4, inline: 5, modal: 3, full: 10, toast: 2, floating: 1, poster: 2 };
   const clamp = clampMap[variant];
   const isBanner = variant === 'banner';
   const bigTitle = variant === 'full' ? 19 : (isBanner || variant === 'toast') ? 13.5 : 15.5;
@@ -191,6 +193,41 @@ function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Varian
 
   if (variant === 'banner') {
     return <div style={{ ...cardBase, top: 0, left: 0, right: 0, padding: '13px 16px', boxShadow: '0 8px 28px rgba(0,0,0,0.18)' }}>{inner}{optOutHint}</div>;
+  }
+  // ★ 2026-07-18 P1 — 포스터형 (SDK renderPoster 1:1 미러): 흰 카드 고정 + 전면 이미지 + 하단 스크림 오버레이 텍스트 + 흰 바닥 CTA 1개
+  if (variant === 'poster') {
+    const posterImg = toAbsoluteImage(rest.imageUrl);
+    const pBtn = (rest.buttons || [])[0];
+    return (
+      <div style={{ position: 'absolute', inset: 0, background: backdropDim, ...(backdropBlurOn ? { backdropFilter: 'blur(10px) saturate(1.35)', WebkitBackdropFilter: 'blur(10px) saturate(1.35)' } : {}), display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 } as CSSProperties}>
+        <div style={{ position: 'relative', maxWidth: 300, width: '100%', maxHeight: '94%', display: 'flex', flexDirection: 'column', background: '#ffffff', color: '#1b1d23', borderRadius: 20, overflow: 'hidden', boxShadow: '0 24px 60px rgba(0,0,0,0.45)', fontFamily: cardBase.fontFamily, ...(rootTextAlign ? { textAlign: rootTextAlign } : {}) }}>
+          <div style={{ position: 'relative', overflow: 'hidden', flexShrink: 1, minHeight: 0 }}>
+            {posterImg ? (
+              <img src={posterImg} alt="" onError={hideOnError} style={{ width: '100%', height: 'auto', maxHeight: 340, objectFit: 'cover', display: 'block' }} />
+            ) : (
+              <div style={{ width: '100%', height: 240, background: 'linear-gradient(135deg,#e8e8ee,#d4d4dd)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#8a8a94' }}>이미지 1장 필수 — 콘텐츠 탭에서 업로드</div>
+            )}
+            {(rest.title || rest.body || rest.badge) && posterImg && (
+              <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '38px 18px 14px', background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.62) 100%)', color: '#ffffff' }}>
+                {rest.badge && (
+                  <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.2)', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.03em', padding: '3px 9px', borderRadius: 999, marginBottom: 7 }}>{rest.badge}</div>
+                )}
+                {rest.title && <div style={{ fontWeight: 800, fontSize: 16.5, letterSpacing: '-0.01em', lineHeight: 1.3, marginBottom: rest.body ? 4 : 0 }}>{rest.title}</div>}
+                {rest.body && <div style={{ fontSize: 12, opacity: 0.92, lineHeight: 1.5, whiteSpace: 'pre-wrap', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{rest.body}</div>}
+              </div>
+            )}
+          </div>
+          <div style={{ padding: '13px 16px 8px', flexShrink: 0 }}>
+            {pBtn && (
+              <div style={{ background: pBtn.background_color || '#4f46e5', color: pBtn.text_color || '#ffffff', padding: '10px 15px', borderRadius: 10, fontSize: 12.5, fontWeight: 700, textAlign: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}>
+                {pBtn.label || '버튼'}
+              </div>
+            )}
+            {optOutHint}
+          </div>
+        </div>
+      </div>
+    );
   }
   if (variant === 'modal') {
     const heroImg = usingBlocks ? undefined : toAbsoluteImage(rest.imageUrl);

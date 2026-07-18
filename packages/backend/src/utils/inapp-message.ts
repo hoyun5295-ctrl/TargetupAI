@@ -278,6 +278,8 @@ export const INAPP_TEMPLATE_ALLOWED_BLOCKS: Record<string, ReadonlySet<string>> 
   bottom_banner: new Set(['media', 'eyebrow', 'headline', 'body', 'cta_group', 'footer']),
   toast: new Set(['eyebrow', 'headline', 'body', 'footer']),
   floating_button: new Set(['cta_group']),
+  // ★ 2026-07-18 포스터형(P1) — flat 전용(전면 이미지+오버레이 텍스트). 블록 미지원 명시(빈 허용표 = 전 블록 제거)
+  full_image: new Set<string>(),
 };
 
 /** 템플릿 미허용 블록 제거 — SDK isBlockAllowed와 동일 기준(정의 없는 템플릿·미지정 = 전부 유지). 순수 함수 */
@@ -371,8 +373,15 @@ export async function createInAppMessage(
   // ★ 2026-06-17 채널 분리 — web(자사몰 팝업) / app(모바일 인앱). 미지정 시 web.
   const channel: 'web' | 'app' = input.channel === 'app' ? 'app' : 'web';
 
+  // ★ 2026-07-18 P1 — 포스터형(full_image) 저장 계약 (Codex 지적 반영):
+  //   웹 전용 — 앱 채널이면 중앙 모달로 보정(앱 실렌더 2형 계약 보호). flat 전용 — 블록 미저장
+  //   (허용표 3면과 동일. 블록이 남으면 SDK 블록 경로가 전부 걸러져 빈 배너로 무너진다).
+  const template = (input.template || position) === 'full_image' && channel === 'app'
+    ? 'center_modal'
+    : (input.template || position);
+
   // ★ D230+ 블록 — 정규화 + 혜택 placeholder 미편집 차단 (AI 임의 혜택 영구 룰)
-  const contentBlocks = sanitizeContentBlocks(input.content_blocks);
+  const contentBlocks = template === 'full_image' ? [] : sanitizeContentBlocks(input.content_blocks);
   if (blocksHaveUneditedPlaceholder(contentBlocks)) {
     throw new Error(`${BENEFIT_PLACEHOLDER_ERROR}: 혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.`);
   }
@@ -412,7 +421,7 @@ export async function createInAppMessage(
       input.triggerEvent || 'page_load', frequency,
       input.startAt || null, input.endAt || null,
       input.status || 'active', channel,
-      input.template || position, composed ? composed.imageUrl : (input.image_url || null),
+      template, composed ? composed.imageUrl : (input.image_url || null),
       JSON.stringify(sanitizeButtonsActionUrls(composed ? composed.buttons : (input.buttons || []))), JSON.stringify(normalizeSegmentConditions(input.segment_conditions || {})), JSON.stringify(input.trigger_conditions || {}),
       JSON.stringify(input.personalization_vars || []), input.auto_dismiss_seconds ?? null, input.max_displays_per_user ?? null,
       input.send_start_hour ?? null, input.send_end_hour ?? null, input.allowed_weekdays || [0, 1, 2, 3, 4, 5, 6], input.animation || 'fade',
@@ -507,7 +516,8 @@ export async function updateInAppMessage(
       start_at = COALESCE($12, start_at),
       end_at = COALESCE($13, end_at),
       status = COALESCE($14, status),
-      template = COALESCE($15, template),
+      -- ★ 2026-07-18 P1 — 포스터형은 웹 전용: 앱 채널 행에 full_image가 들어오면 중앙 모달로 보정 (행별 channel 기준 원자 처리)
+      template = CASE WHEN $15::varchar = 'full_image' AND channel = 'app' THEN 'center_modal' ELSE COALESCE($15, template) END,
       image_url = CASE WHEN $33::boolean THEN $16 ELSE image_url END,
       buttons = COALESCE($17::jsonb, buttons),
       segment_conditions = COALESCE($18::jsonb, segment_conditions),
@@ -520,7 +530,13 @@ export async function updateInAppMessage(
       allowed_weekdays = COALESCE($25, allowed_weekdays),
       animation = COALESCE($26, animation),
       badge_text = COALESCE($27, badge_text),
-      content_blocks = COALESCE($28::jsonb, content_blocks),
+      -- ★ 2026-07-18 P1 — 최종 형태가 포스터형이면 블록 비움(flat 전용 계약 — 블록 잔존 시 실렌더가 빈 배너로 무너짐).
+      --   SET 표현식은 전부 OLD 값 기준이라 template와 동일한 판정식을 반복한다.
+      content_blocks = CASE
+        WHEN (CASE WHEN $15::varchar = 'full_image' AND channel = 'app' THEN 'center_modal' ELSE COALESCE($15, template) END) = 'full_image'
+        THEN '[]'::jsonb
+        ELSE COALESCE($28::jsonb, content_blocks)
+      END,
       theme = COALESCE($29, theme),
       accent_color = COALESCE($30, accent_color),
       card_style = COALESCE($31, card_style),
