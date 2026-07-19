@@ -13,9 +13,11 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CalendarRange, ImagePlus, Layers, Loader2, Lock, Mail, Smartphone, Sparkles, X } from 'lucide-react';
+import { CalendarRange, FolderOpen, ImagePlus, Layers, Loader2, Lock, Mail, Smartphone, Sparkles, X } from 'lucide-react';
 import { CONFIRM_CREDIT_COSTS } from '../constants/credit';
 import { downscaleToJpeg } from '../utils/image-downscale';
+import AssetLibraryPickerModal from './assets/AssetLibraryPickerModal';
+import { assetsToFiles } from '../lib/asset-to-file';
 import { useAuthStore } from '../stores/authStore';
 
 type ChannelKey = 'dm' | 'email' | 'inapp';
@@ -84,6 +86,7 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
   const [errs, setErrs] = useState<Partial<Record<ChannelKey, string>>>({});
   // ★ 2026-07-08 이미지 판독
   const [images, setImages] = useState<File[]>([]);
+  const [libOpen, setLibOpen] = useState(false); // ★ P4: 라이브러리에서 선택 분기
   const [extracting, setExtracting] = useState(false);
   const [imgErr, setImgErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -366,8 +369,29 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
                   disabled={busy || images.length >= MAX_IMAGES}
                   className="text-[11px] font-medium text-violet-100 border border-violet-400/40 hover:bg-violet-500/15 rounded-lg px-3 py-1.5 disabled:opacity-40"
                 >
-                  이미지 선택
+                  직접 업로드
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setLibOpen(true)}
+                  disabled={busy || images.length >= MAX_IMAGES}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-100 border border-emerald-400/40 hover:bg-emerald-500/15 rounded-lg px-3 py-1.5 disabled:opacity-40"
+                >
+                  <FolderOpen className="w-3 h-3" /> 라이브러리에서
+                </button>
+                <AssetLibraryPickerModal
+                  open={libOpen}
+                  onClose={() => setLibOpen(false)}
+                  multiSelect
+                  onPick={async (a) => {
+                    const fs = await assetsToFiles([a]);
+                    setImages((prev) => [...prev, ...fs].slice(0, MAX_IMAGES));
+                  }}
+                  onPickMany={async (assets) => {
+                    const fs = await assetsToFiles(assets);
+                    setImages((prev) => [...prev, ...fs].slice(0, MAX_IMAGES));
+                  }}
+                />
                 <button
                   type="button"
                   onClick={() => extractFromImages()}

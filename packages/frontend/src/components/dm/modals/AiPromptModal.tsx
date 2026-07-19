@@ -16,6 +16,9 @@ import ModalBase, { ModalButton } from './ModalBase';
 import { downscaleToJpeg } from '../../../utils/image-downscale';
 // 고객 데이터 없으면 AI 문안 생성 전 차단 안내 (공용 게이트 — 모달만, 다크 오버레이)
 import { useCustomerDataGate, CustomerDataRequiredModal } from '../../CustomerDataGate';
+// ★ 2026-07-19 P4: 라이브러리 소재로 이미지 판독 (직접 업로드와 동일 흐름 — File 변환 후 판독)
+import AssetLibraryPickerModal from '../../assets/AssetLibraryPickerModal';
+import { assetsToFiles } from '../../../lib/asset-to-file';
 
 const api = axios.create({ baseURL: '/api' });
 api.interceptors.request.use((cfg) => {
@@ -40,6 +43,7 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
   const [urlInput, setUrlInput] = useState('');
   const [urlFetching, setUrlFetching] = useState(false);
   const [imgExtracting, setImgExtracting] = useState(false);
+  const [libOpen, setLibOpen] = useState(false); // ★ P4: 라이브러리에서 선택 분기
   const [step, setStep] = useState<Step>('input');
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{
@@ -225,6 +229,33 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
             >
               {imgExtracting ? '이미지 읽는 중...' : '🖼 이미지로 채우기 (3크레딧)'}
             </button>
+            <button
+              type="button"
+              onClick={() => setLibOpen(true)}
+              disabled={imgExtracting || step === 'generating'}
+              style={helperBtnStyle}
+            >
+              🗂 라이브러리에서 (3크레딧)
+            </button>
+            <AssetLibraryPickerModal
+              open={libOpen}
+              onClose={() => setLibOpen(false)}
+              multiSelect
+              onPick={async (a) => {
+                const fs = await assetsToFiles([a]);
+                if (!fs.length) return;
+                const dt = new DataTransfer();
+                fs.forEach((f) => dt.items.add(f));
+                handleImages(dt.files);
+              }}
+              onPickMany={async (assets) => {
+                const fs = await assetsToFiles(assets);
+                if (!fs.length) return;
+                const dt = new DataTransfer();
+                fs.forEach((f) => dt.items.add(f));
+                handleImages(dt.files);
+              }}
+            />
             <div style={{ display: 'flex', gap: 6, flex: 1, minWidth: 240 }}>
               <input
                 type="url"

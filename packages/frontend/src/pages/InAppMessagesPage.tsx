@@ -4,7 +4,7 @@ import { goBackOr } from '../lib/scroll-restoration';
 import {
   Activity, AlertCircle, AlertTriangle, AlignLeft, ArrowLeft, BarChart3, ChevronDown, ChevronUp,
   Clock, Copy, CreditCard, Crown, Download, Edit2, Eye, Globe, GripVertical, ImageIcon, Layers, Lightbulb, ListChecks, Loader2, Minus, MousePointer,
-  MousePointerClick, MoveVertical, Plus, RefreshCw, ShoppingBag, ShoppingCart, Smartphone, Sparkles, Star,
+  FolderOpen, MousePointerClick, MoveVertical, Plus, RefreshCw, ShoppingBag, ShoppingCart, Smartphone, Sparkles, Star,
   Tag, Target, Ticket, Timer, Trash2, TrendingDown, TrendingUp, Type, Upload, UserPlus, Users, Wand2, X,
 } from 'lucide-react';
 // ★ P2-1 (2026-07-12) 블록 드래그앤드롭 — EmailVisualEditor SortableBlockRow 패턴 이식 (의존성 기존재, 라이브러리 추가 0)
@@ -35,6 +35,7 @@ import { Icon as BlockIcon, isInAppBlockAllowed } from '../components/inapp/Bloc
 import { AppInAppContractModal } from '../components/inapp/AppIntegrationContract';
 import { DateTimeField } from '../components/DateTimeField';
 import { takeEventDraft, EVENT_INAPP_DRAFT_KEY } from '../components/EventCampaignModal';
+import { STUDIO_INAPP_DRAFT_KEY } from '../lib/studio-draft';
 import ImageToCopyButton from '../components/ImageToCopyButton';
 // ★ 2026-07-18 P2 — CTA 자동 연결: DM의 연동 몰 상품 픽커 재사용 (URL 수기 입력 사고 차단 — 0718 팝폰 m/xxx 무반응 근본)
 import MallProductPickerModal, { type PickedMallProduct } from '../components/dm/MallProductPickerModal';
@@ -338,6 +339,8 @@ export default function InAppMessagesPage() {
   const [recentMessages, setRecentMessages] = useState<MessageRow[]>([]);
   const [scenarioPick, setScenarioPick] = useState<QuickStartScenario | null>(null);
   const [previewMsg, setPreviewMsg] = useState<MessageRow | null>(null);
+  // ★ 2026-07-19 P4: 라이브러리 소재로 시작(목록 헤더) — 소재 선택 → 포스터형 새 초안
+  const [startLibOpen, setStartLibOpen] = useState(false);
   // ★ 2026-07-06 인앱 표시 가능성 — 연동 플랫폼별 지원 + SDK 신호. 표시할 곳 없으면 생성 차단(크레딧 낭비 방지).
   const [eligibility, setEligibility] = useState<DisplayEligibility | null>(null);
   const [showDisplayBlock, setShowDisplayBlock] = useState(false);
@@ -382,6 +385,16 @@ export default function InAppMessagesPage() {
       channel: 'web',
     });
     toast.success('행사 캠페인 인앱 초안을 불러왔습니다 — 이미지만 올리고 다듬어주세요.');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ★ 2026-07-19 P4: 이미지 스튜디오 소재 → 포스터형(full_image) 새 초안 (라이브러리 클릭 → 인앱 만들기)
+  useEffect(() => {
+    const d = takeEventDraft<{ imageUrl?: string }>(STUDIO_INAPP_DRAFT_KEY);
+    if (!d?.imageUrl) return;
+    setChannel('web');
+    setEditing({ ...EMPTY_FORM, template: 'full_image', image_url: d.imageUrl, channel: 'web' });
+    toast.success('스튜디오 소재로 포스터형 인앱을 시작했어요 — 문구·타겟만 다듬어주세요.');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1148,6 +1161,15 @@ export default function InAppMessagesPage() {
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">새로고침</span>
             </button>
+            {/* ★ 2026-07-19 P4: 라이브러리 소재로 시작 — 소재 선택 → 포스터형(full_image) 새 초안 */}
+            <button
+              onClick={() => setStartLibOpen(true)}
+              className="text-xs text-white/70 hover:bg-white/10 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors border border-white/10"
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">라이브러리로 시작</span>
+              <span className="sm:hidden">라이브러리</span>
+            </button>
             <button
               onClick={() => setEditing({ ...EMPTY_FORM, channel: channel || 'web' })}
               className="text-xs bg-gradient-to-r from-rose-500/40 to-pink-500/40 hover:from-rose-500/60 hover:to-pink-500/60 text-rose-50 px-3 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors border border-rose-400/30"
@@ -1155,6 +1177,15 @@ export default function InAppMessagesPage() {
               <Plus className="w-3.5 h-3.5" />
               신규 메시지
             </button>
+            <AssetLibraryPickerModal
+              open={startLibOpen}
+              onClose={() => setStartLibOpen(false)}
+              onPick={(a) => {
+                setChannel('web');
+                setEditing({ ...EMPTY_FORM, template: 'full_image', image_url: a.url, channel: 'web' });
+                toast.success('라이브러리 소재로 포스터형 인앱을 시작했어요 — 문구·타겟만 다듬어주세요.');
+              }}
+            />
           </div>
         </div>
       </div>

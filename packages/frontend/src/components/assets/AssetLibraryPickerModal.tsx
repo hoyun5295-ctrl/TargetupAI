@@ -7,7 +7,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { FolderOpen, Loader2, Search, Trash2, X } from 'lucide-react';
+import { Check, FolderOpen, Loader2, Search, Trash2, X } from 'lucide-react';
 
 export interface PickedAsset {
   id: string;
@@ -21,12 +21,16 @@ interface AssetUsage { usedBytes: number; limitBytes: number; planCode: string }
 
 const mb = (n: number) => `${(Number(n) / 1024 / 1024).toFixed(1)}MB`;
 
-export default function AssetLibraryPickerModal({ open, onClose, onPick }: {
+export default function AssetLibraryPickerModal({ open, onClose, onPick, multiSelect = false, onPickMany }: {
   open: boolean;
   onClose: () => void;
   onPick: (asset: PickedAsset) => void;
+  /** ★ 2026-07-19 P4: 다중 선택 모드 — 클릭=토글, 하단 [N개 선택 완료]가 onPickMany로 반환. 미전달=단일(하위호환). */
+  multiSelect?: boolean;
+  onPickMany?: (assets: PickedAsset[]) => void;
 }) {
   const [assets, setAssets] = useState<PickedAsset[]>([]);
+  const [sel, setSel] = useState<Record<string, PickedAsset>>({});
   const [usage, setUsage] = useState<AssetUsage | null>(null);
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(false);
@@ -67,6 +71,7 @@ export default function AssetLibraryPickerModal({ open, onClose, onPick }: {
   useEffect(() => {
     if (!open) return;
     setQ('');
+    setSel({});
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -139,12 +144,29 @@ export default function AssetLibraryPickerModal({ open, onClose, onPick }: {
               {assets.map((a) => (
                 <div key={a.id} className="group relative">
                   <button
-                    onClick={() => { onPick(a); onClose(); }}
-                    className="block w-full aspect-square rounded-xl overflow-hidden border border-white/10 bg-slate-950/60 hover:border-violet-400/60 transition-colors"
+                    onClick={() => {
+                      if (multiSelect) {
+                        setSel((s) => {
+                          const next = { ...s };
+                          if (next[a.id]) delete next[a.id];
+                          else next[a.id] = a;
+                          return next;
+                        });
+                      } else {
+                        onPick(a);
+                        onClose();
+                      }
+                    }}
+                    className={`block w-full aspect-square rounded-xl overflow-hidden border bg-slate-950/60 transition-colors ${multiSelect && sel[a.id] ? 'border-violet-400 ring-2 ring-violet-400/40' : 'border-white/10 hover:border-violet-400/60'}`}
                     title={a.filename || ''}
                   >
                     <img src={a.url} alt={a.filename || ''} loading="lazy" className="w-full h-full object-cover" />
                   </button>
+                  {multiSelect && sel[a.id] && (
+                    <span className="absolute top-1.5 left-1.5 w-5 h-5 rounded-full bg-violet-500 flex items-center justify-center pointer-events-none">
+                      <Check className="w-3 h-3 text-white" />
+                    </span>
+                  )}
                   <button
                     onClick={() => remove(a.id)}
                     className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white/70 hover:text-rose-300 hover:bg-black/80 hidden group-hover:flex items-center justify-center"
@@ -159,6 +181,24 @@ export default function AssetLibraryPickerModal({ open, onClose, onPick }: {
             </div>
           )}
         </div>
+
+        {/* 다중 선택 확정 바 */}
+        {multiSelect && (
+          <div className="px-6 py-3.5 border-t border-white/10 shrink-0">
+            <button
+              onClick={() => {
+                const picked = Object.values(sel);
+                if (picked.length === 0) return;
+                onPickMany?.(picked);
+                onClose();
+              }}
+              disabled={Object.keys(sel).length === 0}
+              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-30"
+            >
+              {Object.keys(sel).length > 0 ? `${Object.keys(sel).length}개 선택 완료` : '이미지를 선택해주세요'}
+            </button>
+          </div>
+        )}
       </div>
     </div>,
     document.body,

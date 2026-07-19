@@ -2105,6 +2105,7 @@ const campaignData = {
           /* ★ B1: MMS 이미지 첨부 (한줄로 AI와 동일 패턴 — Dashboard 부모 state 공유) */
           mmsUploadedImages={mmsUploadedImages}
           onMmsImageUpload={(files) => handleMmsMultiUpload(files!)}
+          onMmsFromAsset={handleMmsFromAsset}
           onMmsImageRemove={handleMmsImageRemove}
           mmsUploading={mmsUploading}
         />

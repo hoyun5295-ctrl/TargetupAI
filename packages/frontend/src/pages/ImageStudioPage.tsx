@@ -13,10 +13,13 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, ImagePlus, Loader2, ShoppingBag, Upload, Wand2,
   Check, Save, Maximize2, PenLine, ChevronLeft, Sparkles, FolderOpen,
+  Layers, Smartphone, Mail, MessageSquareText, X,
 } from 'lucide-react';
 import { goBackOr } from '../lib/scroll-restoration';
+import { putStudioDraft, STUDIO_INAPP_DRAFT_KEY, STUDIO_DM_DRAFT_KEY, STUDIO_EMAIL_DRAFT_KEY } from '../lib/studio-draft';
 import { useToast } from '../components/ToastProvider';
 import MallProductPickerModal, { type PickedMallProduct } from '../components/dm/MallProductPickerModal';
+import AssetLibraryPickerModal from '../components/assets/AssetLibraryPickerModal';
 
 const token = () => localStorage.getItem('token');
 const authFetch = (url: string, opts: RequestInit = {}) =>
@@ -59,7 +62,9 @@ export default function ImageStudioPage() {
   const [category, setCategory] = useState<string | null>(null);
   const [template, setTemplate] = useState<StudioTemplatePublic | null>(null);
 
-  // 내 라이브러리(저장 소재) — 갤러리 상단 폴더 스트립. 실패 시 조용히 숨김(표시 전용).
+  // 내 라이브러리(저장 소재) — 갤러리 상단 폴더. 소재 클릭 = 채널 발사대(인앱/DM/이메일/MMS 변환).
+  const [assetAction, setAssetAction] = useState<{ id: string; url: string; filename: string | null; bytes: number } | null>(null);
+  const [libManageOpen, setLibManageOpen] = useState(false); // 전체 보기·관리(검색·삭제) — 픽커 재사용
   const [libAssets, setLibAssets] = useState<{ id: string; url: string; filename: string | null; bytes: number }[]>([]);
   const [libUsage, setLibUsage] = useState<{ usedBytes: number; limitBytes: number } | null>(null);
   const loadLibrary = useCallback(async () => {
@@ -247,6 +252,26 @@ export default function ImageStudioPage() {
     }
   };
 
+  // ── 라이브러리 소재 발사대 — 채널 편집기 주입 / MMS 변환 ─────────
+  const launchChannel = (draftKey: string, path: string) => {
+    if (!assetAction) return;
+    putStudioDraft(draftKey, { imageUrl: assetAction.url, name: assetAction.filename });
+    navigate(path);
+  };
+  const convertAssetToMms = async (assetId: string) => {
+    setBusyMsg('MMS 규격으로 변환 중... (≤300KB 보장)');
+    try {
+      const { r, d } = await postJson('/api/image-studio/mms-from-asset', { assetId });
+      if (!r.ok || !d?.success) throw new Error(d?.error || '변환에 실패했어요');
+      toast.success(`MMS 변환 완료 — ${(Number(d.image?.size || 0) / 1024).toFixed(0)}KB. 발송 시 MMS 첨부 창의 '라이브러리에서 가져오기'로 첨부하세요`);
+      setAssetAction(null);
+    } catch (e: any) {
+      toast.error(e?.message || '변환에 실패했어요');
+    } finally {
+      setBusyMsg('');
+    }
+  };
+
   const busy = !!busyMsg;
 
   return (
@@ -285,18 +310,25 @@ export default function ImageStudioPage() {
         {/* 0단계 — 내 라이브러리 폴더 (저장 소재 스트립) */}
         {stage === 'gallery' && !category && libAssets.length > 0 && (
           <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <h2 className="text-sm font-bold flex items-center gap-2 mb-3">
-              <FolderOpen className="w-4 h-4 text-violet-300" /> 내 라이브러리
-              <span className="text-[11px] text-white/35 font-normal">
-                {libAssets.length}개{libUsage ? ` · ${(libUsage.usedBytes / 1048576).toFixed(1)}MB / ${(libUsage.limitBytes / 1073741824).toFixed(1)}GB` : ''}
-              </span>
-            </h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-bold flex items-center gap-2">
+                <FolderOpen className="w-4 h-4 text-violet-300" /> 내 라이브러리
+                <span className="text-[11px] text-white/35 font-normal">
+                  {libAssets.length}개{libUsage ? ` · ${(libUsage.usedBytes / 1048576).toFixed(1)}MB / ${(libUsage.limitBytes / 1073741824).toFixed(1)}GB` : ''}
+                </span>
+              </h2>
+              <button onClick={() => setLibManageOpen(true)} className="text-xs px-3 py-1.5 rounded-lg border border-white/10 text-white/60 hover:text-white hover:bg-white/10">
+                전체 보기·관리
+              </button>
+            </div>
             <div className="flex gap-2.5 overflow-x-auto pb-1">
               {libAssets.slice(0, 14).map((a) => (
-                <img key={a.id} src={a.url} alt={a.filename || ''} title={a.filename || ''} loading="lazy" className="w-20 h-20 rounded-lg object-cover border border-white/10 shrink-0" />
+                <button key={a.id} onClick={() => setAssetAction(a)} className="shrink-0 rounded-lg overflow-hidden border border-white/10 hover:border-violet-400/60 transition" title={a.filename || ''}>
+                  <img src={a.url} alt={a.filename || ''} loading="lazy" className="w-20 h-20 object-cover" />
+                </button>
               ))}
             </div>
-            <p className="text-[10px] text-white/30 italic mt-2">Data source — 스튜디오에서 저장한 소재. 인앱 편집기·MMS 첨부 창에서 바로 사용됩니다.</p>
+            <p className="text-[10px] text-white/30 italic mt-2">Data source — 소재를 클릭하면 인앱·DM·이메일로 바로 만들거나 MMS로 변환할 수 있어요.</p>
           </section>
         )}
 
@@ -481,6 +513,44 @@ export default function ImageStudioPage() {
         )}
       </main>
 
+      {/* 라이브러리 소재 발사대 모달 — 클릭 한 번으로 채널 초안 삽입 / MMS 변환 */}
+      {assetAction && (
+        <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+          <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/10">
+              <h3 className="text-sm font-bold">이 소재로 바로 만들기</h3>
+              <button onClick={() => setAssetAction(null)} className="text-white/40 hover:text-white p-1 rounded-lg hover:bg-white/10" aria-label="닫기">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5">
+              <div className="flex gap-4 mb-4">
+                <img src={assetAction.url} alt="" className="w-24 h-24 rounded-xl object-cover border border-white/10 shrink-0" />
+                <div className="text-[11px] text-white/45 min-w-0">
+                  <div className="truncate text-white/70">{assetAction.filename || '소재'}</div>
+                  <div className="mt-0.5">{(assetAction.bytes / 1024).toFixed(0)}KB</div>
+                  <div className="mt-2 text-white/35 leading-relaxed">채널을 고르면 이 이미지가 삽입된 새 초안으로 바로 이동합니다.</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => launchChannel(STUDIO_INAPP_DRAFT_KEY, '/inapp-messages')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/85 hover:border-rose-400/50 hover:bg-rose-500/10 transition">
+                  <Layers className="w-4 h-4 text-rose-300" /> 인앱메시지 만들기
+                </button>
+                <button onClick={() => launchChannel(STUDIO_DM_DRAFT_KEY, '/dm-builder')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/85 hover:border-amber-400/50 hover:bg-amber-500/10 transition">
+                  <Smartphone className="w-4 h-4 text-amber-300" /> 모바일 DM 만들기
+                </button>
+                <button onClick={() => launchChannel(STUDIO_EMAIL_DRAFT_KEY, '/email-campaigns')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/85 hover:border-cyan-400/50 hover:bg-cyan-500/10 transition">
+                  <Mail className="w-4 h-4 text-cyan-300" /> 이메일 만들기
+                </button>
+                <button onClick={() => convertAssetToMms(assetAction.id)} disabled={busy} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/85 hover:border-emerald-400/50 hover:bg-emerald-500/10 transition disabled:opacity-40">
+                  <MessageSquareText className="w-4 h-4 text-emerald-300" /> MMS 변환 <span className="text-white/35 font-normal">≤300KB</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 처리 오버레이 */}
       {busy && (
         <div className="fixed inset-0 z-[2500] flex items-center justify-center bg-black/70 backdrop-blur-sm">
@@ -493,6 +563,13 @@ export default function ImageStudioPage() {
       )}
 
       <MallProductPickerModal open={pickerOpen} onClose={() => setPickerOpen(false)} onPick={onPickMall} />
+
+      {/* 라이브러리 전체 보기·관리 — 검색·삭제(픽커 재사용), 소재 클릭 = 발사대 모달 */}
+      <AssetLibraryPickerModal
+        open={libManageOpen}
+        onClose={() => { setLibManageOpen(false); loadLibrary(); }}
+        onPick={(a) => setAssetAction({ id: a.id, url: a.url, filename: a.filename, bytes: a.bytes })}
+      />
     </div>
   );
 }

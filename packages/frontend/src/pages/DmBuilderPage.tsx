@@ -18,6 +18,8 @@ import { uploadOne } from '../components/dm/panels/FormControls';
 import { useDmKeyboardShortcuts } from '../hooks/useDmKeyboardShortcuts';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import { takeEventDraft, EVENT_DM_DRAFT_KEY } from '../components/EventCampaignModal';
+import { STUDIO_DM_DRAFT_KEY } from '../lib/studio-draft';
+import AssetLibraryPickerModal, { type PickedAsset } from '../components/assets/AssetLibraryPickerModal';
 import ImageToCopyButton from '../components/ImageToCopyButton';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import DmShortLinkModal from '../components/dm/DmShortLinkModal';
@@ -287,6 +289,23 @@ export default function DmBuilderPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ★ 2026-07-19 P4: 이미지 스튜디오 소재 → 풀화면 이미지 DM 새 초안 (완성 이미지 업로드 흐름과 동일 섹션 — 검증된 선례 재사용)
+  useEffect(() => {
+    const d = takeEventDraft<{ imageUrl?: string; name?: string | null }>(STUDIO_DM_DRAFT_KEY);
+    if (!d?.imageUrl) return;
+    try {
+      createNew({ title: '스튜디오 소재 DM' });
+      const gallery = createSection('gallery', 0, { images: [{ url: d.imageUrl }], layout: 'list_1xN', full_bleed: true });
+      applyAiGenerated([gallery], undefined, '이미지 스튜디오 소재', { layoutMode: 'scroll' });
+      save({ silent: true }).catch(() => {});
+      setMode('edit');
+      setToast({ type: 'success', message: '스튜디오 소재로 이미지 DM을 시작했어요 — 문구·버튼만 더해주세요.' });
+    } catch {
+      // 초안 손상 = 조용히 무시
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ★ 2026-06-19: 완성 이미지 업로드 → 슬라이드 DM 자동 생성 (외주 완성 시안 대응 — 신규 섹션 타입 불요, slideshow 재사용)
   const handleCompletedImagesSelected = useCallback(async (files: FileList | null, mode: 'slides' | 'scroll' = 'scroll') => {
     if (!files || files.length === 0) return;
@@ -328,6 +347,23 @@ export default function DmBuilderPage() {
       if (completedImagesInputRef.current) completedImagesInputRef.current.value = '';
     }
   }, [uploadingImages, generating, createNew, applyAiGenerated, save, setToast]);
+
+  // ★ 2026-07-19 P4: 라이브러리 다중 선택 → 이미지 DM (완성 이미지 업로드와 동일 gallery 흐름 — 업로드 없이 URL 직결)
+  const [libPickerOpen, setLibPickerOpen] = useState(false);
+  const handleLibraryImagesSelected = useCallback((assets: PickedAsset[]) => {
+    const urls = assets.map((a) => a.url).filter(Boolean);
+    if (urls.length === 0) return;
+    try {
+      createNew({ title: '라이브러리 이미지 DM' });
+      const gallery = createSection('gallery', 0, { images: urls.map((u) => ({ url: u })), layout: 'list_1xN', full_bleed: true });
+      applyAiGenerated([gallery], undefined, '라이브러리 소재', { layoutMode: 'scroll' });
+      save({ silent: true }).catch(() => {});
+      setMode('edit');
+      setToast({ type: 'success', message: `라이브러리 소재 ${urls.length}장으로 이미지 DM을 시작했어요.` });
+    } catch {
+      setToast({ type: 'error', message: '이미지 DM 생성에 실패했습니다. 다시 시도해주세요.' });
+    }
+  }, [createNew, applyAiGenerated, save, setToast]);
 
   // ★ D216+ 편집 모드 안 1-click floating action 영역 (자동 생성 직후 만족 강화)
   const handleFloatingAction = useCallback(async (action: 'ai_refine' | 'design_align' | 'variable_consistency') => {
@@ -687,7 +723,7 @@ export default function DmBuilderPage() {
           {/* ★ 2026-07-02(5) Harold 지시 재배치 — 좌: 프롬프트 단독(크게) / 우: 빠른 시작(위) + 자유 시작·완성 슬라이드(아래) */}
           <style>{`
             .dm-hub-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 12px; align-items: stretch; }
-            .dm-hub-bottom { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+            .dm-hub-bottom { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
             @media (max-width: 767px) { .dm-hub-grid { grid-template-columns: 1fr; } }
           `}</style>
           <div className="dm-hub-grid">
@@ -785,6 +821,22 @@ export default function DmBuilderPage() {
                   </div>
                   <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>완성 이미지 업로드 → 슬라이드 DM</div>
                 </button>
+                {/* ★ 2026-07-19 P4: 라이브러리 불러오기 — 저장 소재 다중 선택 → 이미지 DM */}
+                <button
+                  onClick={() => { if (!generating && !uploadingImages) setLibPickerOpen(true); }}
+                  disabled={generating || uploadingImages}
+                  style={{
+                    minHeight: 84, padding: '12px 14px', textAlign: 'center',
+                    background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.22)', borderRadius: 12,
+                    cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer', opacity: (generating || uploadingImages) ? 0.5 : 1,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 4 }}>
+                    <span style={{ fontSize: 15 }}>🗂️</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>라이브러리 불러오기</span>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>저장 소재 다중 선택 → 이미지 DM</div>
+                </button>
               </div>
             </div>
           </div>
@@ -837,6 +889,15 @@ export default function DmBuilderPage() {
             multiple
             style={{ display: 'none' }}
             onChange={(e) => handleCompletedImagesSelected(e.target.files, uploadModeRef.current)}
+          />
+
+          {/* ★ 2026-07-19 P4: 라이브러리 다중 선택 픽커 (시작 허브 타일) */}
+          <AssetLibraryPickerModal
+            open={libPickerOpen}
+            onClose={() => setLibPickerOpen(false)}
+            multiSelect
+            onPick={(a) => handleLibraryImagesSelected([a])}
+            onPickMany={handleLibraryImagesSelected}
           />
         </div>
 

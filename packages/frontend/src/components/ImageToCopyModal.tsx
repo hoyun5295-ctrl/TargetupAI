@@ -9,8 +9,10 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ImagePlus, Loader2, Sparkles, X } from 'lucide-react';
+import { FolderOpen, ImagePlus, Loader2, Sparkles, X } from 'lucide-react';
 import { downscaleToJpeg } from '../utils/image-downscale';
+import AssetLibraryPickerModal from './assets/AssetLibraryPickerModal';
+import { assetsToFiles } from '../lib/asset-to-file';
 
 const MAX_IMAGES = 5;
 const IMAGE_EXTRACT_COST = 3;
@@ -25,6 +27,7 @@ export default function ImageToCopyModal({ open, onClose, onExtracted }: {
   const [images, setImages] = useState<File[]>([]);
   const [extracting, setExtracting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [libOpen, setLibOpen] = useState(false); // ★ P4: 라이브러리에서 선택 분기
   const fileRef = useRef<HTMLInputElement>(null);
 
   const token = () => localStorage.getItem('token');
@@ -119,14 +122,37 @@ export default function ImageToCopyModal({ open, onClose, onExtracted }: {
           )}
 
           <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={onPick} />
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            disabled={extracting || images.length >= MAX_IMAGES}
-            className="w-full rounded-xl border border-dashed border-violet-400/40 bg-violet-500/[0.06] hover:bg-violet-500/10 text-violet-100 text-sm font-medium py-4 disabled:opacity-40"
-          >
-            <span className="inline-flex items-center gap-2"><ImagePlus className="w-4 h-4" /> 이미지 선택 (여러 장 가능)</span>
-          </button>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={extracting || images.length >= MAX_IMAGES}
+              className="rounded-xl border border-dashed border-violet-400/40 bg-violet-500/[0.06] hover:bg-violet-500/10 text-violet-100 text-sm font-medium py-4 disabled:opacity-40"
+            >
+              <span className="inline-flex items-center gap-2"><ImagePlus className="w-4 h-4" /> 직접 업로드</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setLibOpen(true)}
+              disabled={extracting || images.length >= MAX_IMAGES}
+              className="rounded-xl border border-dashed border-emerald-400/40 bg-emerald-500/[0.06] hover:bg-emerald-500/10 text-emerald-100 text-sm font-medium py-4 disabled:opacity-40"
+            >
+              <span className="inline-flex items-center gap-2"><FolderOpen className="w-4 h-4" /> 라이브러리에서 선택</span>
+            </button>
+          </div>
+          <AssetLibraryPickerModal
+            open={libOpen}
+            onClose={() => setLibOpen(false)}
+            multiSelect
+            onPick={async (a) => {
+              const fs = await assetsToFiles([a]);
+              setImages((prev) => [...prev, ...fs].slice(0, MAX_IMAGES));
+            }}
+            onPickMany={async (assets) => {
+              const fs = await assetsToFiles(assets);
+              setImages((prev) => [...prev, ...fs].slice(0, MAX_IMAGES));
+            }}
+          />
 
           {err && <p className="text-[11px] text-rose-300">{err}</p>}
 

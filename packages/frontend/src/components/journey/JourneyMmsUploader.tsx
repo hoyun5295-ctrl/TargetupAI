@@ -20,7 +20,9 @@
  */
 
 import { useState, useRef } from 'react';
-import { Image as ImageIcon, X, Loader2, Upload } from 'lucide-react';
+import { Image as ImageIcon, X, Loader2, Upload, FolderOpen } from 'lucide-react';
+// ★ 2026-07-19 P4: 라이브러리 소재 → MMS 자동 변환(≤300KB) 첨부
+import AssetLibraryPickerModal from '../assets/AssetLibraryPickerModal';
 
 interface MmsImageItem {
   serverPath: string;
@@ -52,7 +54,33 @@ function serverPathToUrl(serverPath: string): string {
 export default function JourneyMmsUploader({ value, onChange, disabled, maxCount = 3 }: Props) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [libOpen, setLibOpen] = useState(false); // ★ P4: 라이브러리 변환 첨부
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ★ P4: 라이브러리 소재 → 서버 MMS 변환(≤300KB JPG) → serverPath 누적
+  const handleFromAsset = async (assetId: string) => {
+    if (disabled || value.length >= maxCount) {
+      setError(`최대 ${maxCount}개까지 업로드 가능합니다.`);
+      return;
+    }
+    setUploading(true);
+    setError(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/image-studio/mms-from-asset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ assetId }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.success || !data.image?.serverPath) throw new Error(data?.error || 'MMS 변환 실패');
+      onChange([...value, data.image.serverPath]);
+    } catch (e: any) {
+      setError(e?.message || 'MMS 변환 실패');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const items: MmsImageItem[] = value.map((serverPath) => ({
     serverPath,
@@ -129,17 +157,31 @@ export default function JourneyMmsUploader({ value, onChange, disabled, maxCount
           MMS 이미지 ({value.length}/{maxCount})
         </div>
         {canAdd && (
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="px-2 py-1 bg-cyan-500/20 hover:bg-cyan-500/30 disabled:opacity-50 text-cyan-200 rounded text-[11px] flex items-center gap-1"
-          >
-            {uploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
-            이미지 추가
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="px-2 py-1 bg-cyan-500/20 hover:bg-cyan-500/30 disabled:opacity-50 text-cyan-200 rounded text-[11px] flex items-center gap-1"
+            >
+              {uploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+              이미지 추가
+            </button>
+            <button
+              type="button"
+              onClick={() => setLibOpen(true)}
+              disabled={uploading}
+              className="px-2 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 disabled:opacity-50 text-emerald-200 rounded text-[11px] flex items-center gap-1"
+              title="라이브러리 소재를 MMS 규격(≤300KB)으로 자동 변환해 첨부"
+            >
+              <FolderOpen className="w-3 h-3" />
+              라이브러리
+            </button>
+          </div>
         )}
       </div>
+
+      <AssetLibraryPickerModal open={libOpen} onClose={() => setLibOpen(false)} onPick={(a) => handleFromAsset(a.id)} />
 
       <input
         ref={fileInputRef}

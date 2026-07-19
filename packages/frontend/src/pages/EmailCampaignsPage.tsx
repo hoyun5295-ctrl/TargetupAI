@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
 import {
   AlertCircle, AlertTriangle, ArrowLeft, BarChart3, Check, ChevronDown, ChevronUp, Clock,
-  Edit2, Eye, EyeOff, LayoutTemplate, Loader2, Lock, Mail, PenLine,
+  Edit2, Eye, EyeOff, FolderOpen, LayoutTemplate, Loader2, Lock, Mail, PenLine,
   RefreshCw, Send, Server, Settings, ShieldCheck, Smartphone, Sparkles,
   Trash2, TrendingUp, Users, Wand2, X,
 } from 'lucide-react';
@@ -24,7 +24,9 @@ import EmailTemplateGalleryModal from '../components/email/EmailTemplateGalleryM
 import type { EmailDesign } from '../utils/email-themes';
 import EmailAnalyticsModal from '../components/email/EmailAnalyticsModal';
 import TargetExtractModal, { type ExtractedTarget } from '../components/TargetExtractModal';
-import type { Section } from '../utils/dm-section-defaults';
+import { createSection, type Section } from '../utils/dm-section-defaults';
+import { STUDIO_EMAIL_DRAFT_KEY } from '../lib/studio-draft';
+import AssetLibraryPickerModal, { type PickedAsset } from '../components/assets/AssetLibraryPickerModal';
 import type { EmailCampaign, CampaignStatus } from '../components/email/email-campaign-types';
 
 // ★ 2026-07-02(3) 빠른 시작 7카드 제거 — 시작 방식은 [템플릿에서 시작]/[비주얼로 만들기] 2개 + 프롬프트 AI 생성으로 통일 (Harold 확정)
@@ -501,6 +503,44 @@ export default function EmailCampaignsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ★ 2026-07-19 P4: 이미지 스튜디오 소재 → 히어로 이미지 이메일 새 초안 (라이브러리 클릭 → 이메일 만들기)
+  useEffect(() => {
+    const d = takeEventDraft<{ imageUrl?: string; name?: string | null }>(STUDIO_EMAIL_DRAFT_KEY);
+    if (!d?.imageUrl) return;
+    try {
+      const gallery = createSection('gallery', 0, { images: [{ url: d.imageUrl }], layout: 'list_1xN', full_bleed: true });
+      setVisualEditor({
+        sections: [gallery] as Section[],
+        name: '스튜디오 소재 이메일',
+        subject: '',
+        isAd: true,
+        aiGenerated: false,
+        design: null,
+      });
+      showToast('스튜디오 소재로 이메일을 시작했어요 — 제목·문구만 더해주세요.', 'success');
+    } catch {
+      // 초안 손상 = 조용히 무시
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ★ 2026-07-19 P4: 라이브러리에서 시작 — 저장 소재 다중 선택 → 이미지 섹션 이메일
+  const [startLibOpen, setStartLibOpen] = useState(false);
+  const startFromLibrary = (assets: PickedAsset[]) => {
+    const urls = assets.map((a) => a.url).filter(Boolean);
+    if (urls.length === 0) return;
+    const gallery = createSection('gallery', 0, { images: urls.map((u) => ({ url: u })), layout: 'list_1xN', full_bleed: true });
+    setVisualEditor({
+      sections: [gallery] as Section[],
+      name: '라이브러리 소재 이메일',
+      subject: '',
+      isAd: true,
+      aiGenerated: false,
+      design: null,
+    });
+    showToast(`라이브러리 소재 ${urls.length}장으로 이메일을 시작했어요 — 제목·문구만 더해주세요.`, 'success');
+  };
+
   // ──────────────── 발송 진행 (수신자 모달 → 확인 → POST → 폴링) ────────────────
   const pollCampaign = (campaignId: string) => {
     const t = setInterval(async () => {
@@ -764,8 +804,8 @@ export default function EmailCampaignsPage() {
               <input type="checkbox" checked={aiAsAd} onChange={(e) => setAiAsAd(e.target.checked)} disabled={genStep !== null} className="rounded" />
               광고성 이메일로 만들기 (발송 시 "(광고)" + 수신거부 링크 자동 부착)
             </label>
-            {/* ★ 2026-07-02(3) 시작 허브 — 헤더에 몰려 있던 [템플릿에서 시작]/[비주얼로 만들기]를 카드로 이동 (빠른 시작 자리) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+            {/* ★ 2026-07-02(3) 시작 허브 — [템플릿에서 시작]/[비주얼로 만들기] + ★2026-07-19 P4 [라이브러리에서 시작] */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
               <button
                 onClick={() => setShowGallery(true)}
                 disabled={genStep !== null}
@@ -792,7 +832,28 @@ export default function EmailCampaignsPage() {
                   <div className="text-[10px] text-white/45 mt-0.5">빈 캔버스에서 블록 직접 조립</div>
                 </div>
               </button>
+              <button
+                onClick={() => setStartLibOpen(true)}
+                disabled={genStep !== null}
+                className="group flex items-center gap-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-400/25 hover:border-amber-400/50 rounded-xl p-3.5 text-left transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-md shrink-0">
+                  <FolderOpen className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-white">라이브러리에서 시작</div>
+                  <div className="text-[10px] text-white/45 mt-0.5">저장 소재 다중 선택 → 이미지 이메일</div>
+                </div>
+              </button>
             </div>
+            {/* ★ 2026-07-19 P4: 라이브러리 다중 선택 → 이미지 섹션 이메일 */}
+            <AssetLibraryPickerModal
+              open={startLibOpen}
+              onClose={() => setStartLibOpen(false)}
+              multiSelect
+              onPick={(a) => startFromLibrary([a])}
+              onPickMany={startFromLibrary}
+            />
             <div className="text-[10px] text-white/30 italic mt-3">
               Data source — 회사 Brand Voice 학습 결과 자동 반영 · 구체 혜택은 직접 입력
             </div>

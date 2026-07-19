@@ -22,6 +22,8 @@ import { formatPreviewValue, calculateSmsBytes, replaceMessageVars, buildAdMessa
 import { highlightVars, mergeAndHighlightVars } from '../utils/highlightVars';
 import { toMmsImagePaths } from '../utils/mmsImage';
 import MmsImagePreview from './shared/MmsImagePreview';
+// ★ 2026-07-19 P4: 라이브러리 소재 → MMS 자동 변환 첨부
+import AssetLibraryPickerModal from './assets/AssetLibraryPickerModal';
 import TargetRecipientsModal, { type TargetPageLoader } from './TargetRecipientsModal';
 
 interface AiCustomSendFlowProps {
@@ -65,6 +67,8 @@ interface AiCustomSendFlowProps {
   // ★ B1: MMS 이미지 첨부 (Dashboard에서 props 전달 — 한줄로 AI와 동일 패턴)
   mmsUploadedImages?: { serverPath: string; url: string; filename: string; originalName?: string; size: number }[];
   onMmsImageUpload?: (files: FileList | null) => void;
+  /** ★ P4: 라이브러리 소재 → MMS 자동 변환 첨부 (useMmsUpload.handleMmsFromAsset). 미전달 = 버튼 미노출. */
+  onMmsFromAsset?: (assetId: string) => void;
   onMmsImageRemove?: (index: number) => void;
   mmsUploading?: boolean;
 }
@@ -118,9 +122,10 @@ export default function AiCustomSendFlow({
   onClose, onConfirmSend, brandName, callbackNumbers, selectedCallback, isAd, optOutNumber,
   setShowSpamFilter, setSpamFilterData, handleTestSend, testSending, testCooldown, testSentResult,
   sampleCustomer, isSpamFilterLocked, preloadData,
-  mmsUploadedImages = [], onMmsImageUpload, onMmsImageRemove, mmsUploading,
+  mmsUploadedImages = [], onMmsImageUpload, onMmsFromAsset, onMmsImageRemove, mmsUploading,
 }: AiCustomSendFlowProps) {
   const [currentStep, setCurrentStep] = useState(1);
+  const [mmsLibOpen, setMmsLibOpen] = useState(false); // ★ P4: 라이브러리 변환 첨부
   const TOTAL_STEPS = 4;
 
   // Step 1
@@ -700,14 +705,42 @@ export default function AiCustomSendFlow({
                               <input type="file" accept="image/jpeg,image/jpg" multiple className="hidden" onChange={(e) => onMmsImageUpload(e.target.files)} />
                             </label>
                           )}
+                          {mmsUploadedImages.length < 3 && onMmsFromAsset && (
+                            <button
+                              type="button"
+                              onClick={() => setMmsLibOpen(true)}
+                              className="w-16 h-16 border-2 border-dashed border-emerald-300 rounded flex items-center justify-center cursor-pointer hover:bg-emerald-50 text-emerald-600 text-[10px] leading-tight text-center"
+                              title="라이브러리 소재를 MMS 규격(≤300KB)으로 자동 변환해 첨부"
+                            >
+                              라이브러리
+                            </button>
+                          )}
                         </div>
                       ) : onMmsImageUpload ? (
-                        <label className="block w-full py-3 border-2 border-dashed border-violet-300 rounded text-center text-xs text-violet-600 cursor-pointer hover:bg-violet-100">
-                          {mmsUploading ? '업로드 중...' : '클릭하여 이미지 선택 (JPG, 300KB 이하)'}
-                          <input type="file" accept="image/jpeg,image/jpg" multiple className="hidden" onChange={(e) => onMmsImageUpload(e.target.files)} />
-                        </label>
+                        <div className="space-y-1.5">
+                          <label className="block w-full py-3 border-2 border-dashed border-violet-300 rounded text-center text-xs text-violet-600 cursor-pointer hover:bg-violet-100">
+                            {mmsUploading ? '업로드 중...' : '클릭하여 이미지 선택 (JPG, 300KB 이하)'}
+                            <input type="file" accept="image/jpeg,image/jpg" multiple className="hidden" onChange={(e) => onMmsImageUpload(e.target.files)} />
+                          </label>
+                          {onMmsFromAsset && (
+                            <button
+                              type="button"
+                              onClick={() => setMmsLibOpen(true)}
+                              className="block w-full py-2 border-2 border-dashed border-emerald-300 rounded text-center text-xs text-emerald-600 hover:bg-emerald-50"
+                            >
+                              라이브러리에서 가져오기 (MMS 규격 자동 변환)
+                            </button>
+                          )}
+                        </div>
                       ) : (
                         <p className="text-xs text-violet-500">이미지 첨부 핸들러가 연결되지 않았습니다.</p>
+                      )}
+                      {onMmsFromAsset && (
+                        <AssetLibraryPickerModal
+                          open={mmsLibOpen}
+                          onClose={() => setMmsLibOpen(false)}
+                          onPick={(a) => onMmsFromAsset(a.id)}
+                        />
                       )}
                     </div>
                   )}

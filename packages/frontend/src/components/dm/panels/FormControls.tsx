@@ -7,6 +7,8 @@ import { useRef, useState } from 'react';
 import axios from 'axios';
 import { dmImageUrl } from '../../../utils/dm-image-url';
 import { DateTimeField } from '../../DateTimeField';
+// ★ 2026-07-19 P4: 에셋 라이브러리 불러오기 — DM 에디터 전 이미지 필드 + 이메일 비주얼 에디터 일괄 적용
+import AssetLibraryPickerModal from '../../assets/AssetLibraryPickerModal';
 
 const api = axios.create({ baseURL: '/api' });
 api.interceptors.request.use((cfg) => {
@@ -290,6 +292,7 @@ export function ImageUploader({
   const ref = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [libOpen, setLibOpen] = useState(false);
 
   const handleFile = async (file: File) => {
     setUploading(true);
@@ -333,6 +336,25 @@ export function ImageUploader({
         >
           {uploading ? '업로드 중...' : value ? '이미지 변경' : `+ ${label} 업로드`}
         </button>
+        <button
+          type="button"
+          onClick={() => setLibOpen(true)}
+          disabled={uploading}
+          title="에셋 라이브러리에서 선택"
+          style={{
+            minHeight: 30,
+            padding: '6px 10px',
+            border: '1px solid var(--dm-neutral-300)',
+            borderRadius: 6,
+            background: 'var(--dm-bg)',
+            color: 'var(--dm-neutral-700)',
+            fontSize: 11,
+            cursor: uploading ? 'wait' : 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          라이브러리
+        </button>
       </div>
       <input
         ref={ref}
@@ -346,6 +368,7 @@ export function ImageUploader({
         }}
       />
       {err && <div style={{ fontSize: 10, color: 'var(--dm-error)', marginTop: 3 }}>{err}</div>}
+      <AssetLibraryPickerModal open={libOpen} onClose={() => setLibOpen(false)} onPick={(a) => onChange(a.url)} />
     </div>
   );
 }
@@ -363,6 +386,7 @@ export function MultiImageUploader({
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState('');
   const [err, setErr] = useState<string | null>(null);
+  const [libOpen, setLibOpen] = useState(false);
 
   const handleFiles = async (files: FileList) => {
     const arr = Array.from(files).slice(0, max);
@@ -395,6 +419,17 @@ export function MultiImageUploader({
       >
         {uploading ? (progress || '업로드 중...') : `+ ${label} 여러 장 한번에`}
       </button>
+      <button
+        type="button"
+        onClick={() => setLibOpen(true)}
+        disabled={uploading}
+        style={{
+          width: '100%', marginTop: 6, padding: 8, border: '1px dashed var(--dm-neutral-300)', borderRadius: 6,
+          background: 'var(--dm-bg)', color: 'var(--dm-neutral-700)', fontSize: 12, fontWeight: 600, cursor: uploading ? 'wait' : 'pointer',
+        }}
+      >
+        라이브러리에서 불러오기 (다중 선택)
+      </button>
       <input
         ref={ref}
         type="file"
@@ -408,6 +443,13 @@ export function MultiImageUploader({
         }}
       />
       {err && <div style={{ fontSize: 10, color: 'var(--dm-error)', marginTop: 3 }}>{err}</div>}
+      <AssetLibraryPickerModal
+        open={libOpen}
+        onClose={() => setLibOpen(false)}
+        multiSelect
+        onPick={(a) => onAdd([a.url])}
+        onPickMany={(assets) => onAdd(assets.slice(0, max).map((a) => a.url))}
+      />
     </div>
   );
 }
