@@ -1,5 +1,5 @@
 /**
- * utils/image-studio-templates.ts — P4 이미지 스튜디오 템플릿 = 은닉 프롬프트 스캐폴드 카탈로그 (2026-07-19 v4 · 36종)
+ * utils/image-studio-templates.ts — P4 이미지 스튜디오 템플릿 = 은닉 프롬프트 스캐폴드 카탈로그 (2026-07-19 v5 · 58종 — 계절 22종 확장)
  *
  * ★ 재정의(Harold 2026-07-19): 템플릿 = "미리 정교하게 짜둔 이미지 생성 프롬프트".
  *   고객사는 템플릿(예시 스타일) 선택 + 원본 이미지 + 간단 문구만 입력하면,
@@ -38,7 +38,7 @@ export interface StudioTemplate {
 }
 
 export const STUDIO_TEMPLATES: StudioTemplate[] = [
-  // ══ 뷰티 (6) ══════════════════════════════════════════
+  // ══ 뷰티 (10) ══════════════════════════════════════════
   {
     id: 'beauty-lux-dark', name: '프리미엄 다크 럭셔리', category: '뷰티',
     desc: '어두운 우드·대리석 위 고급 브랜드 무드', accent: '#3d2b22',
@@ -88,7 +88,40 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
     sample: { title: '봄빛 새 컬러 출시', subtitle: '파우더 블러셔 라인' },
   },
 
-  // ══ 카페·음료 (6) ═════════════════════════════════════
+  {
+    id: 'beauty-spring-garden', name: '스프링 가든', category: '뷰티',
+    desc: '새싹·튤립 정원의 봄 생기 무드', accent: '#9fc98c',
+    scaffold: 'A fresh spring garden skincare scene: young green sprouts and tulip stems around the edges, morning dew on leaves, soft pale-green and butter-yellow light, a clean stone or glass platform among the greenery. Vitamin-fresh new-season vitality, airy and hopeful.',
+    textStyle: 'Fresh spring typography in deep leaf green, light clean headline, small uppercase label with wide tracking. Lively but calm placement in the upper area.',
+    defaultTexts: { label: 'SPRING CARE', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '봄이 먼저 닿는 피부', subtitle: '스프링 케어 라인' },
+  },
+  {
+    id: 'beauty-summer-cooling', name: '아이스 쿨링', category: '뷰티',
+    desc: '얼음 결정·쿨민트의 여름 쿨링 무드', accent: '#6fc6d9',
+    scaffold: 'A summer cooling skincare scene: crushed ice and frosted ice cubes scattered on a chilled surface, cool mint and icy blue tones, bright hard summer sunlight with crisp highlights, a frozen acrylic pedestal for the product, tiny frost vapor in the air. Instant-cooling suncare energy, crisp and invigorating.',
+    textStyle: 'Crisp cool typography in icy white with a subtle frost edge, bold clean headline, small chilled-blue label. High-summer freshness in the upper area.',
+    defaultTexts: { label: 'SUMMER COOLING', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '한여름의 쿨링 처방', subtitle: '서머 쿨링 라인' },
+  },
+  {
+    id: 'beauty-autumn-amber', name: '어텀 앰버', category: '뷰티',
+    desc: '앰버·팜파스의 포근한 가을 보습 무드', accent: '#a9683b',
+    scaffold: 'A warm autumn skincare scene: amber and terracotta tones, dried pampas grass and cinnamon-toned leaves at the edges, soft knit fabric draped on the surface, low golden dusk light with long gentle shadows. Deep-moisture comfort of the season, cozy and mature.',
+    textStyle: 'Warm autumn typography in deep amber brown, serif-feeling medium headline, small letter-spaced label. Calm seasonal warmth in the upper area.',
+    defaultTexts: { label: 'AUTUMN CARE', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '깊어지는 계절의 보습', subtitle: '어텀 케어 라인' },
+  },
+  {
+    id: 'beauty-winter-frost', name: '윈터 프로스트', category: '뷰티',
+    desc: '성에·설원 실버블루의 겨울 리페어 무드', accent: '#9db4c9',
+    scaffold: 'A winter repair skincare scene: frosted glass panel with delicate ice crystal patterns, fine snow dust on a pale surface, cool silver-blue and soft white tones, quiet overcast winter light, a single frozen branch at the edge. Protective calm against the cold, serene and pristine.',
+    textStyle: 'Serene winter typography in cool deep slate blue, thin elegant headline, tiny frost-white label. Quiet pristine placement in the upper area.',
+    defaultTexts: { label: 'WINTER REPAIR', title: '{productName}', subtitle: '' },
+    sample: { title: '혹한에도 무너지지 않게', subtitle: '윈터 리페어 라인' },
+  },
+
+  // ══ 카페·음료 (8) ═════════════════════════════════════
   {
     id: 'cafe-wood-natural', name: '우드 내추럴 카페', category: '카페·음료',
     desc: '원목·자연광의 따뜻한 카페 무드', accent: '#8a6d52',
@@ -138,7 +171,24 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
     sample: { title: '따뜻함을 담은 겨울 메뉴', subtitle: '시즌 음료 출시' },
   },
 
-  // ══ 신메뉴·팝 (5) ═════════════════════════════════════
+  {
+    id: 'cafe-spring-blossom-terrace', name: '벚꽃 테라스', category: '카페·음료',
+    desc: '벚꽃 가지 아래 봄 테라스 무드', accent: '#dfa8b6',
+    scaffold: 'A spring cafe terrace scene: an outdoor pastel table under blooming cherry-blossom branches, a few petals resting on the table, soft spring breeze feeling, warm afternoon light through the blossoms, blurred park greenery behind. First-warm-day terrace atmosphere, romantic and light.',
+    textStyle: 'Light spring typography in soft rose-brown, gentle rounded headline, petal-delicate small label. Airy placement in the upper area.',
+    defaultTexts: { label: '봄 시즌', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '벚꽃 아래 첫 모금', subtitle: '스프링 시즌 메뉴' },
+  },
+  {
+    id: 'cafe-autumn-maple', name: '단풍 어텀 카페', category: '카페·음료',
+    desc: '단풍·담요·라떼 스팀의 가을 카페 무드', accent: '#c07840',
+    scaffold: 'An autumn cafe scene: maple and ginkgo leaves in deep red and gold scattered at the edges, a plaid wool blanket folded on a wooden bench-table, warm latte steam rising, golden late-afternoon sunlight, crisp autumn-air clarity. Sweater-weather cafe comfort, rich and nostalgic.',
+    textStyle: 'Cozy autumn typography in warm chestnut brown on cream, medium friendly headline, small leaf-toned label. Comforting seasonal-menu placement in the upper area.',
+    defaultTexts: { label: '가을 한정', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '가을을 마시는 시간', subtitle: '어텀 시즌 메뉴' },
+  },
+
+  // ══ 신메뉴·팝 (9) ═════════════════════════════════════
   {
     id: 'pop-retro-block', name: '레트로 팝 색블록', category: '신메뉴·팝',
     desc: '체커보드·원색 대비의 임팩트 팝', accent: '#2b2f77',
@@ -180,7 +230,40 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
     sample: { title: '옛날 그 맛 그대로', subtitle: '전통의 인기 메뉴' },
   },
 
-  // ══ 세일·이벤트 (6) ═══════════════════════════════════
+  {
+    id: 'pop-strawberry-season', name: '딸기 시즌 팝', category: '신메뉴·팝',
+    desc: '딸기 레드·크림의 상큼한 시즌 팝', accent: '#e25864',
+    scaffold: 'A strawberry-season promotional scene: fresh strawberry red and soft cream color blocks, playful strawberry and cream-swirl graphic shapes bouncing around the edges, tiny seed-dot pattern accents, juicy and adorable dessert-season energy. Bright, sweet, irresistible.',
+    textStyle: 'Juicy playful typography — bold rounded headline in cream white with a strawberry-red outline, cute fruit-badge label. Sweet and punchy composition.',
+    defaultTexts: { label: '딸기 시즌', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '새콤달콤 시즌 오픈', subtitle: '딸기 신메뉴 모음' },
+  },
+  {
+    id: 'pop-tropical-sunset', name: '트로피컬 썸머 팝', category: '신메뉴·팝',
+    desc: '야자수·선셋 그라디언트의 여름 팝', accent: '#f08a3c',
+    scaffold: 'A retro tropical summer promotional scene: bold sunset gradient background (coral orange to pink to violet), black palm-leaf silhouettes framing the corners, retro sun rays and tiny pineapple or citrus graphic accents, 80s beach-resort poster energy. Vibrant vacation excitement.',
+    textStyle: 'Retro summer typography — thick display headline in warm white with a sunset-pink shadow, wave-shaped small label. Holiday-poster boldness.',
+    defaultTexts: { label: '여름 한정', title: '{productName}', subtitle: '' },
+    sample: { title: '한 입의 바캉스', subtitle: '트로피컬 신메뉴' },
+  },
+  {
+    id: 'pop-halloween-night', name: '핼러윈 팝', category: '신메뉴·팝',
+    desc: '펌킨 오렌지·바이올렛의 유쾌한 핼러윈 팝', accent: '#8a4fc9',
+    scaffold: 'A playful halloween promotional scene: deep violet night background with pumpkin-orange accents, cute sticker-style bats, pumpkins and candy shapes floating around the edges, a mischievous crescent moon glow, spooky-cute trick-or-treat energy — fun, never scary.',
+    textStyle: 'Spooky-fun typography — chunky headline in pumpkin orange with a wobbly hand-drawn feel, small bat-badge label in violet. Mischievous party energy.',
+    defaultTexts: { label: 'HALLOWEEN', title: '{productName}', subtitle: '' },
+    sample: { title: '오싹하게 맛있는 밤', subtitle: '핼러윈 한정 메뉴' },
+  },
+  {
+    id: 'pop-christmas-toy', name: '크리스마스 토이 팝', category: '신메뉴·팝',
+    desc: '캔디케인·진저브레드의 신나는 성탄 팝', accent: '#cf4436',
+    scaffold: 'A cheerful christmas toy-shop promotional scene: bright flat red and pine green color blocks, playful candy canes, gingerbread and gift-box sticker graphics tumbling around the edges, white snow-dot confetti, jolly cartoon holiday-market energy. Loud, warm and merry.',
+    textStyle: 'Merry bouncy typography — bold headline in snow white with a christmas-red outline, ribbon-tag small label in green. Festive toy-package fun.',
+    defaultTexts: { label: '크리스마스', title: '{productName}', subtitle: '' },
+    sample: { title: '메리 딜리셔스', subtitle: '홀리데이 신메뉴' },
+  },
+
+  // ══ 세일·이벤트 (10) ═══════════════════════════════════
   {
     id: 'sale-bold-impact', name: '볼드 세일 임팩트', category: '세일·이벤트',
     desc: '큰 숫자·강한 대비의 세일 포스터', accent: '#e2483d',
@@ -230,7 +313,40 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
     sample: { title: '고마운 마음을 담아', subtitle: '단골님께 드리는 혜택' },
   },
 
-  // ══ 패션 (5) ═════════════════════════════════════════
+  {
+    id: 'sale-spring-renewal', name: '봄맞이 세일', category: '세일·이벤트',
+    desc: '꽃잎 콘페티·파스텔의 새단장 세일', accent: '#8fbf6f',
+    scaffold: 'A spring renewal sale scene: fresh pastel green and blossom-pink palette, flower-petal confetti drifting down, light ribbon streamers at the top corners, bright clean daylight, new-beginning shopping energy. Cheerful seasonal refresh atmosphere.',
+    textStyle: 'Bright spring sale typography — bold friendly headline in deep green with white highlights, petal-badge small label. Energetic but fresh, dominating the upper area.',
+    defaultTexts: { label: '봄맞이 특가', title: '[혜택은 직접 입력해주세요]', subtitle: '' },
+    sample: { title: '새 계절, 새 단장 세일', subtitle: '봄맞이 특별 혜택' },
+  },
+  {
+    id: 'sale-summer-splash', name: '썸머 스플래시 세일', category: '세일·이벤트',
+    desc: '물보라·파라솔 그래픽의 시원한 특가', accent: '#1f86c9',
+    scaffold: 'A splashy summer sale scene: dynamic clear-water splash frozen mid-air, bold cool blue with coral accents, playful parasol and watermelon-slice graphic elements at the edges, strong beach-festival sale energy, bright high-noon light. Refreshing and loud.',
+    textStyle: 'Splash-bold typography — very large tilted headline in white with a deep blue outline and water-drop accents, sunburst small label. Maximum summer impact.',
+    defaultTexts: { label: '여름 특가', title: '[혜택은 직접 입력해주세요]', subtitle: '' },
+    sample: { title: '뜨거운 여름, 시원한 가격', subtitle: '서머 빅세일' },
+  },
+  {
+    id: 'sale-season-off', name: '시즌 오프', category: '세일·이벤트',
+    desc: '행잉랙·택 모티프의 시즌오프 클리어런스', accent: '#8c7a5f',
+    scaffold: 'A season-off clearance scene: warm neutral studio backdrop with a minimalist clothing rack silhouette and kraft-paper hang tags as graphic motifs, soft editorial light, calm sophisticated end-of-season mood with a clear promotional focus. Understated but urgent.',
+    textStyle: 'Editorial sale typography — large refined headline in deep charcoal, a kraft-tag shaped small label, generous spacing. Fashion-outlet elegance with clear sale intent.',
+    defaultTexts: { label: 'SEASON OFF', title: '[혜택은 직접 입력해주세요]', subtitle: '' },
+    sample: { title: '이번 시즌 마지막 기회', subtitle: '시즌 오프 클리어런스' },
+  },
+  {
+    id: 'sale-winter-ice', name: '윈터 아이스 세일', category: '세일·이벤트',
+    desc: '얼음 결정·아이스블루의 겨울 파이널 세일', accent: '#5b8fc9',
+    scaffold: 'A winter clearance sale scene: crisp ice-blue palette with frost crystal patterns creeping from the corners, a frozen-glass price-tag motif, cool white spotlight on the product area, sharp wintry sparkle in the air. Cold colors, hot deal tension.',
+    textStyle: 'Frozen-bold typography — massive headline in icy white with a frosted blue edge, snowflake-accent small label. Strong winter-sale contrast in the upper area.',
+    defaultTexts: { label: '겨울 특가', title: '[혜택은 직접 입력해주세요]', subtitle: '' },
+    sample: { title: '꽁꽁 얼린 겨울 가격', subtitle: '윈터 파이널 세일' },
+  },
+
+  // ══ 패션 (9) ═════════════════════════════════════════
   {
     id: 'fashion-studio-clean', name: '스튜디오 클린', category: '패션',
     desc: '뉴트럴 배경의 미니멀 스튜디오컷', accent: '#9a9a9a',
@@ -272,7 +388,40 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
     sample: { title: '단 하나의 순간을 위해', subtitle: '프리미엄 라인' },
   },
 
-  // ══ 미니멀 (4) ═══════════════════════════════════════
+  {
+    id: 'fashion-spring-outing', name: '스프링 아우팅', category: '패션',
+    desc: '꽃핀 정원길·봄 햇살의 야외 화보 무드', accent: '#c5d3a0',
+    scaffold: 'A spring outdoor fashion editorial scene: a garden path with blooming shrubs and soft green haze, gentle warm sunlight with a light lens glow, fresh air feeling, natural depth of field like an outdoor lookbook shoot. Light, breezy new-season romance.',
+    textStyle: 'Breezy editorial typography — light serif-feeling headline in deep moss green, small airy label with wide tracking. Natural catalog placement in the upper area.',
+    defaultTexts: { label: 'S/S', title: '{productName}', subtitle: '' },
+    sample: { title: '봄바람을 걸치다', subtitle: 'S/S 컬렉션' },
+  },
+  {
+    id: 'fashion-summer-resort', name: '썸머 리조트', category: '패션',
+    desc: '백사장·터쿼이즈 바다의 바캉스 화보 무드', accent: '#4fb8c4',
+    scaffold: 'A summer resort fashion scene: white sand beach with a turquoise sea horizon, sharp midday sun and clean shadows, a hint of palm shade at one edge, minimal resort-hotel elegance like a vacation campaign shoot. Sun-soaked freedom, premium vacance mood.',
+    textStyle: 'Resort typography — clean white headline with strong legibility against the bright scene, tiny nautical-spaced label. Effortless luxury in the upper area.',
+    defaultTexts: { label: 'VACANCE', title: '{productName}', subtitle: '' },
+    sample: { title: '여름의 목적지', subtitle: '리조트 컬렉션' },
+  },
+  {
+    id: 'fashion-autumn-city', name: '어텀 시티', category: '패션',
+    desc: '은행나무 가로수길·트렌치 무드의 가을 화보', accent: '#b8863f',
+    scaffold: 'An autumn city fashion scene: a tree-lined avenue with golden ginkgo leaves, fallen leaves on the pavement, warm low afternoon sun flaring softly between buildings, trench-coat-weather atmosphere like a street-style editorial. Cinematic urban autumn.',
+    textStyle: 'City editorial typography — confident medium serif headline in dark espresso, small classic label. Timeless autumn-campaign placement in the upper area.',
+    defaultTexts: { label: 'F/W', title: '{productName}', subtitle: '' },
+    sample: { title: '가을의 온도를 입다', subtitle: 'F/W 컬렉션' },
+  },
+  {
+    id: 'fashion-winter-snow', name: '윈터 스노우 시티', category: '패션',
+    desc: '눈 내리는 저녁 거리·가로등 불빛의 겨울 화보', accent: '#7d8ba0',
+    scaffold: 'A winter city fashion scene: softly falling snow on a quiet evening street, warm streetlamp glow against cool blue dusk, faint breath-fog in the cold air, wool-coat season atmosphere like a winter campaign film still. Elegant, cinematic warmth in the cold.',
+    textStyle: 'Winter campaign typography — slim elegant headline in warm ivory glowing gently against the dusk, small refined label. Quiet cinematic placement in the upper area.',
+    defaultTexts: { label: 'WINTER', title: '{productName}', subtitle: '' },
+    sample: { title: '겨울을 입는 방법', subtitle: '윈터 컬렉션' },
+  },
+
+  // ══ 미니멀 (8) ═══════════════════════════════════════
   {
     id: 'minimal-stone', name: '스톤 미니멀', category: '미니멀',
     desc: '돌 단상·여백의 정제된 미니멀', accent: '#d8d2c8',
@@ -304,6 +453,39 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
     textStyle: 'Graphic minimal typography — clean geometric sans headline, small label aligned to a shape edge, muted ink tone. Design-studio poise.',
     defaultTexts: { label: 'OBJECT', title: '{productName}', subtitle: '{salePrice}' },
     sample: { title: '형태가 말하는 것', subtitle: '디자인 컬렉션' },
+  },
+
+  {
+    id: 'minimal-spring-branch', name: '블로썸 브랜치', category: '미니멀',
+    desc: '여백 속 벚꽃 가지 하나의 봄 미니멀', accent: '#e3c3cb',
+    scaffold: 'A minimal spring scene: one single cherry-blossom branch entering the frame from a corner, vast warm-white negative space, a few petals resting near the product, soft even daylight. Serene spring stillness — the emptiness holds the season.',
+    textStyle: 'Delicate minimal typography — small precise headline in muted rose-gray, generous emptiness around the text. Whisper-quiet spring elegance.',
+    defaultTexts: { label: '', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '봄의 한 조각' },
+  },
+  {
+    id: 'minimal-summer-pool', name: '풀사이드 미니멀', category: '미니멀',
+    desc: '풀 타일·물그림자의 정적인 여름 미니멀', accent: '#8fc4cf',
+    scaffold: 'A minimal summer poolside scene: pale aqua pool tiles with rippling water-light caustics dancing across the surface, one clean shadow edge, nothing else but sun and stillness. Silent summer noon, architectural calm.',
+    textStyle: 'Still minimal typography — small clean headline in deep teal, positioned in a calm corner of light. Quiet as a summer noon.',
+    defaultTexts: { label: '', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '고요한 여름' },
+  },
+  {
+    id: 'minimal-autumn-leaf', name: '어텀 리프', category: '미니멀',
+    desc: '낙엽 한 장·긴 그림자의 가을 미니멀', accent: '#c9a06b',
+    scaffold: 'A minimal autumn scene: a single perfect dry leaf resting on a warm beige paper-textured surface, one long low-sun shadow, faint kraft warmth in the light, everything else empty. The whole season in one leaf.',
+    textStyle: 'Warm minimal typography — small serif-feeling headline in deep umber, asymmetric quiet placement. Contemplative autumn restraint.',
+    defaultTexts: { label: '', title: '{productName}', subtitle: '' },
+    sample: { title: '가을의 결' },
+  },
+  {
+    id: 'minimal-winter-still', name: '스노우 스틸니스', category: '미니멀',
+    desc: '눈 입자·프로스트의 고요한 겨울 미니멀', accent: '#c3ccd6',
+    scaffold: 'A minimal winter scene: a field of fine untouched snow grain in pale gray-blue, one delicate frost crystal detail near the product, hushed overcast light, absolute stillness. Winter reduced to its quietest essence.',
+    textStyle: 'Hushed minimal typography — tiny precise headline in cool graphite, floating in the pale emptiness. Snow-silence elegance.',
+    defaultTexts: { label: '', title: '{productName}', subtitle: '' },
+    sample: { title: '겨울의 고요' },
   },
 
   // ══ 시즌 (4) ═════════════════════════════════════════
