@@ -85,6 +85,10 @@ function SortableRow({ section, onRequestRemove }: { section: Section; onRequest
   const selectSection = useDmBuilderStore((s) => s.selectSection);
   const duplicateSection = useDmBuilderStore((s) => s.duplicateSection);
   const setSectionVisible = useDmBuilderStore((s) => s.setSectionVisible);
+  // ★ 2026-07-19: 섹션 페이지 간 이동 (2페이지 이상일 때만 노출)
+  const pages = useDmBuilderStore((s) => s.pages);
+  const currentPageIndex = useDmBuilderStore((s) => s.currentPageIndex);
+  const moveSectionToPage = useDmBuilderStore((s) => s.moveSectionToPage);
 
   const meta = SECTION_META[section.type];
   const isSelected = selectedSectionId === section.id;
@@ -153,6 +157,32 @@ function SortableRow({ section, onRequestRemove }: { section: Section; onRequest
       </div>
 
       <div style={{ display: 'flex', gap: 2 }} onClick={(e) => e.stopPropagation()}>
+        {pages.length > 1 && (
+          <select
+            value=""
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (!Number.isNaN(v)) moveSectionToPage(section.id, v);
+              e.currentTarget.value = '';
+            }}
+            title="다른 페이지로 이동"
+            aria-label="다른 페이지로 이동"
+            style={{
+              width: 22, height: 22, padding: 0,
+              border: 'none', background: 'transparent',
+              borderRadius: 4, cursor: 'pointer', fontSize: 11,
+              color: 'var(--dm-neutral-600)', textAlign: 'center',
+              appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none',
+            }}
+          >
+            <option value="" disabled hidden>⇢</option>
+            {pages.map((p, i) => (
+              i === currentPageIndex ? null : (
+                <option key={p.id} value={i}>{p.name || `페이지 ${i + 1}`}(으)로 이동</option>
+              )
+            ))}
+          </select>
+        )}
         <IconBtn onClick={() => setSectionVisible(section.id, !section.visible)} title={section.visible ? '숨기기' : '표시'}>
           {section.visible ? '👁' : '⊘'}
         </IconBtn>

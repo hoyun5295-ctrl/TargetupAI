@@ -154,6 +154,8 @@ export type DmBuilderState = {
   duplicateSection: (id: string) => void;
   reorderSections: (fromIdx: number, toIdx: number) => void;
   moveSection: (id: string, direction: 'up' | 'down') => void;
+  /** ★ 2026-07-19: 섹션을 다른 페이지로 이동 (슬라이드 모드 — 현재 페이지에서 제거 + 대상 페이지 끝에 추가) */
+  moveSectionToPage: (id: string, targetPageIdx: number) => void;
   updateSectionProps: (id: string, patch: Partial<SectionProps>) => void;
   setSectionVisible: (id: string, visible: boolean) => void;
   setSectionVariant: (id: string, variant: string) => void;
@@ -677,6 +679,35 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
       // 옛 order 기준으로 재정렬해 이동을 그대로 되돌린다.
       return next.map((sec, i) => ({ ...sec, order: i }));
     })));
+    scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
+  },
+
+  // ★ 2026-07-19 (Harold): 섹션 페이지 간 이동 — 대상 페이지 maxCount 검사 후 끝에 추가, 실행취소(history) 지원
+  moveSectionToPage: (id, targetPageIdx) => {
+    const state = get();
+    const fromIdx = state.currentPageIndex;
+    if (targetPageIdx === fromIdx || targetPageIdx < 0 || targetPageIdx >= state.pages.length) return;
+    const src = (state.pages[fromIdx]?.sections || []).find((sec) => sec.id === id);
+    if (!src) return;
+    const targetSecs = state.pages[targetPageIdx]?.sections || [];
+    if (isMaxCountExceeded(targetSecs, src.type)) {
+      set({ toast: { type: 'error', message: `${SECTION_META[src.type].label}은(는) 대상 페이지에 최대 ${SECTION_META[src.type].maxCount}개까지 둘 수 있어요.` } });
+      return;
+    }
+    state.pushHistory();
+    set((s) => {
+      const nextPages = s.pages.map((p, i) => {
+        if (i === fromIdx) return { ...p, sections: normalizeOrder(p.sections.filter((sec) => sec.id !== id)) };
+        if (i === targetPageIdx) return { ...p, sections: normalizeOrder([...p.sections, src]) };
+        return p;
+      });
+      return markDirty({
+        pages: nextPages,
+        sections: nextPages[s.currentPageIndex]?.sections || [],
+        selectedSectionId: s.selectedSectionId === id ? null : s.selectedSectionId,
+        toast: { type: 'success', message: `${state.pages[targetPageIdx]?.name || `페이지 ${targetPageIdx + 1}`}(으)로 이동했어요.` },
+      });
+    });
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },
 
