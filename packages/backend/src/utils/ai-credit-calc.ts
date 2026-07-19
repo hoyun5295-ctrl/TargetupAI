@@ -166,6 +166,13 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   // ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 박성용 신기능(Harold 100 확정). AI 호출 0 —
   //   가치 과금(우리 도메인 상시 서빙 + 클릭 추적). 발급 성공 후 멱등 차감(키=링크 id).
   'dm-custom-short-link': 100,
+  // ★ 2026-07-19 P4 이미지 스튜디오 (AI 오퍼레이터 스튜디오 — 1크레딧=500원, 전부 20 미만 = CreditConfirmModal 비대상).
+  //   생성 1회 = Pro 2K 후보 2장 = 2 (부분 성공 1장 = 호출측이 cost 1 override). 같은 구도 4K 격상 = +2. 배경·무드 AI 편집 = 1.
+  //   누끼·서버 합성(/compose)·타이포 오버레이·MMS 변환은 무료(CREDIT_COST_MAP 미등록 = 0).
+  //   frontend constants/credit.ts CREDIT_SOURCE_LABELS와 1:1 유지 (한쪽만 바꾸지 말 것).
+  'image-studio-generate': 2,
+  'image-studio-4k': 2,
+  'image-studio-edit': 1,
 };
 
 /** source → 크레딧 비용. 미등록·미전달 source는 0 (차감 안 함). */

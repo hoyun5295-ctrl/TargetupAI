@@ -1,4 +1,4 @@
-import { Sparkles, Route, Smartphone, Layers, PenLine, Wand2, Repeat, Play, Send, Mail, Link2, type LucideIcon } from 'lucide-react';
+import { Sparkles, Route, Smartphone, Layers, PenLine, Wand2, Repeat, Play, Send, Mail, Link2, ImagePlus, type LucideIcon } from 'lucide-react';
 
 /**
  * 종량제 크레딧 공용 상수 (D229+ UI 폴리시).
@@ -30,6 +30,7 @@ export const CREDIT_TASK_COSTS: CreditTaskCost[] = [
   { key: 'copy', label: '문안·분석', cost: 5, icon: PenLine },
   { key: 'decorate', label: '꾸미기', cost: 3, icon: Wand2 },
   { key: 'generate', label: '생성·돌려보기', cost: 3, icon: Play },
+  { key: 'image', label: '이미지 생성', cost: 2, icon: ImagePlus }, // ★ 2026-07-19 P4 이미지 스튜디오 (생성 2·4K +2·편집 1)
   { key: 'refine', label: '다듬기·질문', cost: 1, icon: Wand2 },
 ];
 
@@ -97,6 +98,7 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'inapp-ai-generator': '인앱 생성', 'inapp-publish': '인앱 게시', 'inapp-quick-action': '인앱 다듬기',
   'email-ai-generate': 'Email 생성', 'email-campaign-complete': 'Email 캠페인 완성', 'email-ai-publish': 'Email 발송 확정(구)', 'email-refine': 'Email 다듬기',
   'event-image-extract': '이미지 판독',
+  'image-studio-generate': '이미지 생성', 'image-studio-4k': '이미지 4K 격상', 'image-studio-edit': '이미지 배경 편집',
   'email-precheck': 'Email 발송 전 진단', 'email-performance-insight': 'Email 성과 진단',
   'email-send-time-recommend': 'Email 발송 시간 추천',
   'generate-messages': '문구 생성', 'generate-custom-messages': '문구 생성',

@@ -114,6 +114,8 @@ import { startCdpProfileRecomputeWorker } from './utils/cdp-profile-recompute-wo
 import { startSystemMonitorWorker } from './utils/system-monitor-worker';
 // ★ 2026-07-05: 발송 피로도 보호 — send_fatigue_daily 45일 초과 버킷 프루닝 (6시간 주기)
 import { startFatiguePruneWorker } from './utils/fatigue-guard';
+// ★ 2026-07-19: P4 이미지 스튜디오 temp 산출물 7일 스윕 (1일 주기)
+import { startStudioTempSweeper } from './utils/studio-temp-sweeper';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -136,6 +138,9 @@ import { mallProductsRouter } from './routes/mall-products';
 
 // ★ 2026-07-18 P3 에셋 라이브러리 — 회사별 이미지 소재 저장소 (cdp_assets)
 import { assetsRouter } from './routes/assets';
+
+// ★ 2026-07-19 P4 AI 이미지 스튜디오 — 상품 누끼 → AI 배경 → 서버 합성 → 라이브러리
+import imageStudioRouter from './routes/image-studio';
 
 // ★ D145 P0 (2026-05-07): 슈퍼관리자 로그인 차단 관리
 import loginBlocksRoutes from './routes/admin/login-blocks';
@@ -343,6 +348,7 @@ app.use('/api/design', designTemplatesRouter);
 // ★ 2026-07-08 연동 몰 상품 조회 (DM 상품 자동 채우기 — preview 실측)
 app.use('/api/mall-products', mallProductsRouter);
 app.use('/api/assets', assetsRouter); // ★ 2026-07-18 P3 에셋 라이브러리
+app.use('/api/image-studio', imageStudioRouter); // ★ 2026-07-19 P4 AI 이미지 스튜디오
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 app.use('/api/manage/users', manageUsersRoutes);
@@ -486,6 +492,9 @@ app.listen(PORT, () => {
 
   // ★ 2026-06-14: DM 마감 추첨 (1분 주기) — lucky_draw draw_at 도래 시 응모자 풀 등급별 랜덤 추첨
   startDmDrawWorker();
+
+  // ★ 2026-07-19: P4 이미지 스튜디오 temp 산출물 7일 스윕 (1일 주기)
+  startStudioTempSweeper();
 });
 
 export default app;

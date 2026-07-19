@@ -10,7 +10,7 @@
 
 import {
   Brain,
-  CalendarDays,
+  ImagePlus,
   LineChart,
   Mail,
   MessageSquare,
@@ -27,6 +27,8 @@ export interface SubModuleCard {
   description: string;
   path: string;
   adminOnly?: boolean;
+  /** ★ P4: 신규 기능 NEW 뱃지(4~6주 유효 — 지나면 제거). */
+  badge?: string;
 }
 
 // ★ D209+ (Harold 명시 2026-05-22): 모든 description 1줄 일관 매트릭스 — AI 자동 마케팅 ("매일 AI 캠페인 자동 제안" 12자) 기준.
@@ -46,7 +48,8 @@ export const SUB_MODULE_CARDS: SubModuleCard[] = [
   { icon: MessageSquare,gradient: 'from-rose-400 to-pink-500',      label: '인앱메시지',     description: '자사몰 배너·모달 자동 표시',     path: '/inapp-messages',   adminOnly: true },
   // 3행 — 제작 도구·AI 두뇌 (중앙 슬롯 = P4에서 이미지 스튜디오로 카드 교체)
   { icon: Wand2,        gradient: 'from-amber-400 to-fuchsia-500', label: '원클릭 캠페인',  description: '행사·이미지 → 채널 초안',        path: '/quick-campaign' },
-  { icon: CalendarDays, gradient: 'from-orange-400 to-rose-500',    label: '마케팅 캘린더',  description: '1년 시즌 캠페인 AI 설계',        path: '/marketing-calendar' },
+  // ★ 2026-07-19 P4: 3행 중앙 슬롯 = 마케팅 캘린더 → 이미지 스튜디오 교체 (라우트 /marketing-calendar는 유지, 카드 진입만 제거 — 비파괴).
+  { icon: ImagePlus,    gradient: 'from-violet-400 to-fuchsia-500', label: '이미지 스튜디오', description: '상품→AI 배경 소재 완성',         path: '/image-studio', badge: 'NEW' },
   { icon: Brain,        gradient: 'from-emerald-400 to-teal-500',   label: 'AI 메모리',      description: '회사별 누적 학습 정확도↑',       path: '/ai-memory' },
   // 4행 — 고객 이해·분석
   { icon: Target,       gradient: 'from-teal-400 to-cyan-500',      label: '세그먼트',       description: '자연어로 고객 그룹 추출',        path: '/segments' },

@@ -43,6 +43,9 @@ export interface AssetRow {
   format: string | null;
   origin: string;
   prompt: string | null;
+  channel_spec: string | null;
+  width: number | null;
+  height: number | null;
   created_at: string;
 }
 
@@ -64,16 +67,24 @@ export async function registerAsset(input: {
   origin: string; // inapp / dm / email / studio ...
   prompt?: string | null;
   sourceAssetId?: string | null;
+  /** ★ P4(2026-07-19): 채널 규격 태그(mms / inapp-poster / dm / email / free ...) — 라이브러리 2트랙 게이팅용. */
+  channelSpec?: string | null;
+  /** ★ P4: 산출물 실측 픽셀 — 픽커 표시·저해상 경고용. */
+  width?: number | null;
+  height?: number | null;
 }): Promise<string | null> {
   try {
     const result = await query(
-      `INSERT INTO cdp_assets (company_id, created_by, kind, source_asset_id, url, filename, bytes, format, origin, prompt)
-       VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO cdp_assets (company_id, created_by, kind, source_asset_id, url, filename, bytes, format, origin, prompt, channel_spec, width, height)
+       VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING id`,
       [
         input.companyId, input.createdBy || null, input.kind, input.sourceAssetId || null,
         input.url, input.filename || null, Math.max(0, Math.round(input.bytes || 0)),
         input.format || null, input.origin, input.prompt || null,
+        input.channelSpec || null,
+        input.width != null ? Math.max(0, Math.round(input.width)) : null,
+        input.height != null ? Math.max(0, Math.round(input.height)) : null,
       ],
     );
     return result.rows[0]?.id || null;
@@ -103,7 +114,7 @@ export async function getStorageUsage(companyId: string): Promise<{ usedBytes: n
 /** 목록 — 최신순, 검색(q = 파일명·프롬프트 부분 일치), 최대 200건 */
 export async function listAssets(companyId: string, q?: string): Promise<AssetRow[]> {
   const result = await query(
-    `SELECT id, company_id, kind, url, filename, bytes, format, origin, prompt, created_at
+    `SELECT id, company_id, kind, url, filename, bytes, format, origin, prompt, channel_spec, width, height, created_at
        FROM cdp_assets
       WHERE company_id = $1::uuid
         AND ($2::text IS NULL OR filename ILIKE '%' || $2 || '%' OR prompt ILIKE '%' || $2 || '%')
