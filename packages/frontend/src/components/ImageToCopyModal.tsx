@@ -18,11 +18,13 @@ const MAX_IMAGES = 5;
 const IMAGE_EXTRACT_COST = 3;
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
-export default function ImageToCopyModal({ open, onClose, onExtracted }: {
+export default function ImageToCopyModal({ open, onClose, onExtracted, onStructured }: {
   open: boolean;
   onClose: () => void;
   /** 판독 성공 시 추출된 행사/상품 내용 텍스트를 전달 */
   onExtracted: (text: string) => void;
+  /** ★ 2026-07-19: 구조화 판독(events[]) 수신 — 전달 시 구조가 있으면 이쪽 우선(디터미니스틱 조립용). 미전달 = 기존 산문 흐름. */
+  onStructured?: (payload: { events: Array<Record<string, any>>; text: string }) => void;
 }) {
   const [images, setImages] = useState<File[]>([]);
   const [extracting, setExtracting] = useState(false);
@@ -71,6 +73,13 @@ export default function ImageToCopyModal({ open, onClose, onExtracted }: {
       const data = await res.json();
       if (data?.code === 'INSUFFICIENT_CREDIT') throw new Error('크레딧이 부족합니다. 충전 후 이용해주세요.');
       if (!res.ok || data?.success === false) throw new Error(String(data?.error || '이미지 판독 실패'));
+      // ★ 구조화 판독 우선 — events가 오면 호출부가 DM 섹션을 디터미니스틱 조립(70% 완성 흐름)
+      const events = Array.isArray(data.events) ? data.events.filter((e: any) => e && (e.title || e.benefit || (e.products || []).length)) : [];
+      if (events.length > 0 && onStructured) {
+        onStructured({ events, text: String(data.event_text || '') });
+        onClose();
+        return;
+      }
       onExtracted(String(data.event_text || ''));
       onClose();
     } catch (e: any) {

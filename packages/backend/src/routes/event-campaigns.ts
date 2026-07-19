@@ -17,7 +17,7 @@ import multer from 'multer';
 import { authenticate } from '../middlewares/auth';
 import { query } from '../config/database';
 import { normalizeEventText } from '../utils/event-brief';
-import { extractEventTextFromImages, MAX_EVENT_IMAGES } from '../utils/event-image-extract';
+import { extractEventsFromImages, MAX_EVENT_IMAGES } from '../utils/event-image-extract';
 import { handleDbMigrationError } from '../utils/db-migration-error';
 import { InsufficientCreditError } from '../utils/ai-credit';
 
@@ -53,8 +53,9 @@ eventCampaignRouter.post('/extract-image', (req: any, res: Response) => {
       const files = (req.files as Express.Multer.File[]) || [];
       if (!files.length) return res.status(400).json({ success: false, error: '이미지를 1장 이상 올려주세요.' });
       const images = files.map((f) => ({ media_type: f.mimetype, data: f.buffer.toString('base64') }));
-      const eventText = await extractEventTextFromImages({ images, companyId, userId: req.user?.userId });
-      return res.json({ success: true, event_text: eventText });
+      // ★ 2026-07-19 구조화 판독 — event_text(산문·기존 소비처 호환) + events(구조 — DM 디터미니스틱 조립용)
+      const { events, eventText } = await extractEventsFromImages({ images, companyId, userId: req.user?.userId });
+      return res.json({ success: true, event_text: eventText, events });
     } catch (err: any) {
       if (err instanceof InsufficientCreditError) {
         return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });

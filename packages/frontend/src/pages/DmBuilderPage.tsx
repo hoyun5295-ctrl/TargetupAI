@@ -21,6 +21,8 @@ import { takeEventDraft, EVENT_DM_DRAFT_KEY } from '../components/EventCampaignM
 import { STUDIO_DM_DRAFT_KEY } from '../lib/studio-draft';
 import AssetLibraryPickerModal, { type PickedAsset } from '../components/assets/AssetLibraryPickerModal';
 import ImageToCopyButton from '../components/ImageToCopyButton';
+// ★ 2026-07-19: 기획전 스샷 구조화 판독 → DM 섹션 디터미니스틱 조립 (행사 N블록 = 70% 완성)
+import { buildDmSectionsFromEvents, deriveDmTitleFromEvents, summarizeEvents } from '../utils/dm-event-assembly';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import DmShortLinkModal from '../components/dm/DmShortLinkModal';
 import DmKoreanAliasModal from '../components/dm/DmKoreanAliasModal';
@@ -752,6 +754,25 @@ export default function DmBuilderPage() {
               <ImageToCopyButton
                 label="이미지로 불러오기"
                 onExtracted={(t) => setNaturalLanguage((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
+                onStructured={({ events, text }) => {
+                  // ★ 기획전 스샷 → 행사별 [히어로+상품 카드] 즉시 조립 (AI 생성 없이 코드 매핑 — 크레딧 추가 0)
+                  try {
+                    const sections = buildDmSectionsFromEvents(events);
+                    if (sections.length === 0) {
+                      setNaturalLanguage((prev) => (prev.trim() ? `${prev.trim()}\n${text}` : text));
+                      return;
+                    }
+                    createNew({ title: deriveDmTitleFromEvents(events) });
+                    applyAiGenerated(sections, undefined, text || '이미지 행사 추출', { layoutMode: 'scroll' });
+                    save({ silent: true }).catch(() => {});
+                    setMode('edit');
+                    const sum = summarizeEvents(events);
+                    setToast({ type: 'success', message: `행사 ${sum.events}건·상품 ${sum.products}개로 DM 초안을 만들었어요 — 상품 이미지와 문구만 다듬어주세요.` });
+                  } catch {
+                    // 조립 실패 = 산문 폴백(기존 흐름 무손상)
+                    setNaturalLanguage((prev) => (prev.trim() ? `${prev.trim()}\n${text}` : text));
+                  }
+                }}
                 disabled={generating}
                 className="w-full inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-violet-400/40 bg-violet-500/10 text-violet-100 text-sm font-medium py-2.5 hover:bg-violet-500/20 disabled:opacity-40 transition-colors"
               />

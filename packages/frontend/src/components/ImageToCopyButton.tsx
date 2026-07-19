@@ -8,8 +8,10 @@ import { useState } from 'react';
 import { ImagePlus } from 'lucide-react';
 import ImageToCopyModal from './ImageToCopyModal';
 
-export default function ImageToCopyButton({ onExtracted, className, label, disabled }: {
+export default function ImageToCopyButton({ onExtracted, onStructured, className, label, disabled }: {
   onExtracted: (text: string) => void;
+  /** ★ 2026-07-19: 구조화 판독 수신(선택) — ImageToCopyModal로 그대로 전달 */
+  onStructured?: (payload: { events: Array<Record<string, any>>; text: string }) => void;
   className?: string;
   /** 지정 시 아이콘 + 라벨, 미지정 시 아이콘 전용 */
   label?: string;
@@ -32,7 +34,7 @@ export default function ImageToCopyButton({ onExtracted, className, label, disab
         <ImagePlus className="w-[18px] h-[18px]" />
         {label ? <span>{label}</span> : null}
       </button>
-      <ImageToCopyModal open={open} onClose={() => setOpen(false)} onExtracted={onExtracted} />
+      <ImageToCopyModal open={open} onClose={() => setOpen(false)} onExtracted={onExtracted} onStructured={onStructured} />
     </>
   );
 }
