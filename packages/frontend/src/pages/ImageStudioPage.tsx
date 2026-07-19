@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } f
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, ImagePlus, Loader2, ShoppingBag, Upload, Wand2,
-  Check, Save, Maximize2, PenLine, ChevronLeft, Sparkles,
+  Check, Save, Maximize2, PenLine, ChevronLeft, Sparkles, FolderOpen,
 } from 'lucide-react';
 import { goBackOr } from '../lib/scroll-restoration';
 import { useToast } from '../components/ToastProvider';
@@ -59,6 +59,20 @@ export default function ImageStudioPage() {
   const [category, setCategory] = useState<string | null>(null);
   const [template, setTemplate] = useState<StudioTemplatePublic | null>(null);
 
+  // 내 라이브러리(저장 소재) — 갤러리 상단 폴더 스트립. 실패 시 조용히 숨김(표시 전용).
+  const [libAssets, setLibAssets] = useState<{ id: string; url: string; filename: string | null; bytes: number }[]>([]);
+  const [libUsage, setLibUsage] = useState<{ usedBytes: number; limitBytes: number } | null>(null);
+  const loadLibrary = useCallback(async () => {
+    try {
+      const r = await authFetch('/api/assets');
+      const d = await r.json();
+      if (r.ok && d?.success) {
+        setLibAssets(Array.isArray(d.assets) ? d.assets : []);
+        setLibUsage(d.usage || null);
+      }
+    } catch { /* 표시 전용 — 실패 무시 */ }
+  }, []);
+
   // 상품·누끼
   const [product, setProduct] = useState<PickedMallProduct | null>(null);
   const [cutoutTempId, setCutoutTempId] = useState<string | null>(null);
@@ -88,7 +102,9 @@ export default function ImageStudioPage() {
   useEffect(() => {
     authFetch('/api/image-studio/status').then((r) => r.json()).then((d) => setReady(!!d?.ready)).catch(() => setReady(true));
     authFetch('/api/image-studio/templates').then((r) => r.json()).then((d) => setTemplates(Array.isArray(d?.templates) ? d.templates : [])).catch(() => setTemplates([]));
+    loadLibrary();
     return () => { objectUrls.current.forEach((u) => URL.revokeObjectURL(u)); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const categories = useMemo(() => {
@@ -223,6 +239,7 @@ export default function ImageStudioPage() {
       if (!r.ok || !d?.success) throw new Error(d?.error || '저장에 실패했어요');
       toast.success('라이브러리에 저장했어요 — MMS 발송 시엔 첨부 창에서 자동 변환돼요');
       setCandidates((prev) => prev.filter((x) => x.tempId !== c.tempId));
+      loadLibrary(); // 상단 라이브러리 폴더 즉시 갱신
     } catch (e: any) {
       toast.error(e?.message || '저장에 실패했어요');
     } finally {
@@ -263,6 +280,24 @@ export default function ImageStudioPage() {
           <div className="rounded-2xl border border-amber-400/20 bg-amber-500/5 p-5 text-sm text-amber-200/80">
             이미지 스튜디오가 준비 중입니다. 잠시 후 다시 시도해주세요.
           </div>
+        )}
+
+        {/* 0단계 — 내 라이브러리 폴더 (저장 소재 스트립) */}
+        {stage === 'gallery' && !category && libAssets.length > 0 && (
+          <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <h2 className="text-sm font-bold flex items-center gap-2 mb-3">
+              <FolderOpen className="w-4 h-4 text-violet-300" /> 내 라이브러리
+              <span className="text-[11px] text-white/35 font-normal">
+                {libAssets.length}개{libUsage ? ` · ${(libUsage.usedBytes / 1048576).toFixed(1)}MB / ${(libUsage.limitBytes / 1073741824).toFixed(1)}GB` : ''}
+              </span>
+            </h2>
+            <div className="flex gap-2.5 overflow-x-auto pb-1">
+              {libAssets.slice(0, 14).map((a) => (
+                <img key={a.id} src={a.url} alt={a.filename || ''} title={a.filename || ''} loading="lazy" className="w-20 h-20 rounded-lg object-cover border border-white/10 shrink-0" />
+              ))}
+            </div>
+            <p className="text-[10px] text-white/30 italic mt-2">Data source — 스튜디오에서 저장한 소재. 인앱 편집기·MMS 첨부 창에서 바로 사용됩니다.</p>
+          </section>
         )}
 
         {/* 1단계-a — 카테고리 선택 */}
@@ -368,8 +403,8 @@ export default function ImageStudioPage() {
               <div className="rounded-2xl border border-fuchsia-400/20 bg-gradient-to-br from-fuchsia-500/10 to-indigo-500/5 p-4 space-y-2.5">
                 <h3 className="text-sm font-bold flex items-center gap-2"><PenLine className="w-4 h-4 text-fuchsia-300" /> 포스터에 들어갈 문구</h3>
                 <input value={texts.label} onChange={(e) => setTexts({ ...texts, label: e.target.value })} placeholder="작은 라벨 (예: ONLINE EXCLUSIVE)" className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
-                <input value={texts.title} onChange={(e) => setTexts({ ...texts, title: e.target.value })} placeholder="헤드라인 (예: 얼티뮨 세트 30% 할인)" className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-sm font-semibold text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
-                <input value={texts.subtitle} onChange={(e) => setTexts({ ...texts, subtitle: e.target.value })} placeholder="부제 (예: 한정 300명 특별 혜택)" className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
+                <input value={texts.title} onChange={(e) => setTexts({ ...texts, title: e.target.value })} placeholder="헤드라인 (예: 제품명 30% 할인 · 2+1 이벤트)" className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-sm font-semibold text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
+                <input value={texts.subtitle} onChange={(e) => setTexts({ ...texts, subtitle: e.target.value })} placeholder="부제 (예: 한정 수량 특별 혜택)" className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
                 <p className="text-[10px] text-white/35 italic">입력한 문구 그대로 이미지 안에 고급 타이포로 새겨집니다. 혜택·수치는 직접 입력해주세요.</p>
               </div>
 

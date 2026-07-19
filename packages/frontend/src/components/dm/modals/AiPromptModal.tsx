@@ -200,7 +200,7 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
           <textarea
             value={eventText}
             onChange={(e) => setEventText(e.target.value.slice(0, EVENT_TEXT_MAX))}
-            placeholder={'예)\n시세이도 리바이탈 파운데이션 30ml\n85,000원 → 15% 72,250원\nhttps://brand.naver.com/...\n\n얼티뮨 구매 시 한정판 키링 증정\n한정 수량 — 조기 소진 가능'}
+            placeholder={'예)\n프리미엄 수분 세럼 30ml\n85,000원 → 15% 72,250원\nhttps://brand.naver.com/...\n\n세럼 구매 시 한정판 파우치 증정\n한정 수량 — 조기 소진 가능'}
             rows={9}
             style={{
               width: '100%', border: '1px solid #d1d5db', borderRadius: 8, padding: 12,
