@@ -102,104 +102,72 @@ export function resolvePreset(presetKey: string | undefined): ChannelPreset {
   return (presetKey && CHANNEL_PRESETS[presetKey]) || CHANNEL_PRESETS['inapp-poster'];
 }
 
-// ── 용도 카드 (§5-2 — 카드 문구 = 실제 주입 프롬프트 1:1) ─────────
-export interface PurposeCard {
-  key: string;
-  label: string;
-  desc: string;
-  /** 배경 씬 스타일 지시(제품 없음 전제 — 제품은 누끼로 합성). */
-  scene: string;
-}
-
-export const PURPOSE_CARDS: Record<string, PurposeCard> = {
-  'new-product': {
-    key: 'new-product', label: '신상품 포스터', desc: '깔끔한 스테이징에 신상품을 돋보이게',
-    scene: 'A clean premium product-staging scene, minimal and modern, subtle elegant props at the edges, calm neutral studio backdrop that makes a single product stand out.',
-  },
-  'season-promo': {
-    key: 'season-promo', label: '시즌 프로모션', desc: '지금 계절 감성의 판매 무드',
-    scene: 'A warm inviting seasonal product-staging scene with tasteful seasonal props and atmosphere at the edges, keeping the product placement area clean.',
-  },
-  'event-notice': {
-    key: 'event-notice', label: '이벤트 공지', desc: '행사·이벤트 알림용 배경',
-    scene: 'A festive yet tasteful product-staging scene suitable for an event announcement, celebratory but clean and not cluttered, product placement area kept empty.',
-  },
-  'brand-mood': {
-    key: 'brand-mood', label: '브랜드 무드컷', desc: '브랜드 감성의 editorial 컷',
-    scene: 'An editorial high-end brand mood scene, refined lighting and texture, magazine-quality product staging, restrained palette, product placement area kept clean.',
-  },
-  'free-scene': {
-    key: 'free-scene', label: '자유 생성', desc: '원하는 분위기를 자유롭게',
-    scene: 'A tasteful product-staging scene.',
-  },
-};
-
-export function resolvePurpose(purposeKey: string | undefined): PurposeCard {
-  return (purposeKey && PURPOSE_CARDS[purposeKey]) || PURPOSE_CARDS['new-product'];
-}
-
-// ── 혜택 픽셀 금지 감지 (§5-3 — 유저 힌트에 혜택 수치 감지) ─────────
+// ── 혜택 패턴 감지 — 장면 힌트 칸 오입력 안내용(문구 칸으로 유도). 문구 칸은 사용자 지정 verbatim 렌더 허용. ──
 const BENEFIT_PATTERN = /(\d+\s*%)|(\d[\d,]*\s*원)|할인|쿠폰|무료|증정|사은품|적립|세일|special\s*offer|discount|sale|% ?off/i;
 export function hasBenefitPattern(text: string | undefined | null): boolean {
   return !!text && BENEFIT_PATTERN.test(text);
 }
 
-// ── buildMarketingPrompt (§5-1-0 마케팅 증강 계층) ─────────────
-export interface BuildPromptInput {
-  purposeKey?: string;
-  presetKey?: string;
-  /** 유저 자연어 한 줄(선택) — "장면 묘사 힌트"로만 중간 삽입, 금지 지시는 마지막. */
-  userHint?: string | null;
-  /** 브랜드 키트(선택) — accentColor/tone. v1은 라우트가 있으면 주입, 없으면 생략. */
-  brand?: { accentColor?: string | null; tone?: string | null } | null;
-  /** 제품 합성용 배경인지(제품 놓일 하단 중앙 여백 강조). 스튜디오 기본 true. */
-  forProductComposite?: boolean;
-  now?: Date;
+// ── buildPosterPrompt (★v2 재정의 — 템플릿 스캐폴드 + 지정 문구까지 AI가 완성 포스터로 렌더) ──
+import type { StudioTemplate } from './image-studio-templates';
+
+export interface PosterTexts {
+  label?: string | null;    // 작은 상단 라벨 (예: ONLINE EXCLUSIVE)
+  title?: string | null;    // 메인 헤드라인 (예: 얼티뮨 세트 30% 할인)
+  subtitle?: string | null; // 부제 (예: 한정 300명 특별 혜택)
 }
 
 /**
- * 유저 입력을 그대로 모델에 넘기지 않는다. 증강 계층:
- *   용도 카드 씬 + 채널 구도 규칙 + 오버레이 여백(텍스트 존) + 광원·구도 제약(H-1 붙인 티 방지)
- *   + 브랜드 톤(선택) + 시즌 컨텍스트 + (중간)유저 힌트 + (마지막)금지 지시(픽셀 텍스트·숫자·혜택).
- * 지시 순서(H-6 인젝션 방어): 유저 한 줄은 중간 "장면 힌트", 금지 지시가 항상 마지막.
+ * 은닉 스캐폴드(템플릿) + 사용자 지정 문구(verbatim) + 제품 보존 지시를 한 프롬프트로 합성.
+ * 문구는 고객사가 직접 입력한 텍스트만 그대로 렌더 — "그 외 텍스트·숫자·로고 금지"가 항상 마지막(인젝션 방어).
+ * 실증 결과물 = 시세이도 얼티뮨 포스터(Harold 실측 2026-07-19).
  */
-export function buildMarketingPrompt(input: BuildPromptInput): string {
-  const purpose = resolvePurpose(input.purposeKey);
-  const preset = resolvePreset(input.presetKey);
-  const now = input.now || new Date();
-  const season = getSeasonContext(now);
-  const forComposite = input.forProductComposite !== false;
-
+export function buildPosterPrompt(input: {
+  template: StudioTemplate;
+  preset: ChannelPreset;
+  texts: PosterTexts;
+  userHint?: string | null;
+  hasProduct: boolean;
+  now?: Date;
+}): string {
+  const { template, preset, texts } = input;
   const lines: string[] = [];
-  // 1. 씬 스타일(용도 카드)
-  lines.push(purpose.scene);
-  // 2. 채널 구도
-  lines.push(`Composition for a ${preset.label} marketing poster, aspect ratio ${preset.aspectRatio}.`);
-  // 3. 제품 자리 + 오버레이 여백(텍스트 존)
-  if (forComposite) {
-    lines.push('Leave a clean empty flat horizontal surface in the lower-center where a product will be composited later.');
+
+  // 1. 장면 스캐폴드(은닉 — 템플릿이 품은 정교한 지시)
+  lines.push(template.scaffold);
+  // 2. 포스터 형식·비율
+  lines.push(`This is a complete marketing poster design, aspect ratio ${preset.aspectRatio}.`);
+  // 3. 제품 보존(누끼 첨부 시) — 픽셀 충실 지시
+  if (input.hasProduct) {
+    lines.push('A product photo with transparent background is attached. Place it as the hero of the composition on a natural surface. Preserve the attached product EXACTLY as provided — do not redraw, restyle, recolor, or alter its shape, proportions, packaging, or label text in any way. Integrate it with scene-consistent lighting and a realistic soft ground shadow.');
   }
-  lines.push(
-    preset.textZone === 'top'
-      ? 'Keep the upper third clean and simple, reserved for a text headline overlay.'
-      : 'Keep the lower area clean and simple, reserved for a text headline overlay.'
-  );
-  // 4. 광원·구도 제약 (H-1 — "붙인 티" 방지)
-  lines.push('Soft diffuse frontal lighting, eye-level camera angle, flat horizontal surface, no strong directional shadows.');
-  // 5. 브랜드 톤(선택)
-  if (input.brand?.accentColor) lines.push(`Subtle brand accent color harmony around ${input.brand.accentColor}.`);
-  if (input.brand?.tone) lines.push(`Overall tone: ${input.brand.tone}.`);
-  // 6. 시즌 컨텍스트(톤·소재로만)
-  if (season.keywords.length) {
-    lines.push(`Seasonal atmosphere hint (${season.season}): ${season.keywords.slice(0, 3).join(', ')} — as ambience only, do not add literal text.`);
+  // 4. 시즌(시즌 템플릿만)
+  if (template.useSeason) {
+    const season = getSeasonContext(input.now || new Date());
+    lines.push(`Current Korean season: ${season.season} (month ${season.month}). Seasonal ambience keywords: ${season.keywords.slice(0, 3).join(', ')} — as scenery and mood only.`);
   }
-  // 7. (중간) 유저 힌트 — 장면 묘사로만. 혜택 패턴은 사전 제거(픽셀 텍스트 방지).
+  // 5. (중간) 장면 힌트 — 장면 묘사로만. 혜택 문구는 문구 칸으로(라우트가 안내).
   const hint = (input.userHint || '').trim();
   if (hint && !hasBenefitPattern(hint)) {
-    lines.push(`Scene hint from the user (describe the scene only, do not render it as text): ${hint.slice(0, 300)}`);
+    lines.push(`Additional scene direction from the user (scenery only, never render this as text): ${hint.slice(0, 300)}`);
   }
-  // 8. (마지막) 금지 지시 — 항상 끝에.
-  lines.push('Do not render any product, any text, any numbers, any letters, any logos, any price, any discount or promotional marks in the image. Background scene only.');
+  // 6. 문구 렌더 블록 — 사용자가 지정한 텍스트를 verbatim으로, 템플릿 타이포 지시에 맞춰.
+  const label = (texts.label || '').trim().slice(0, 60);
+  const title = (texts.title || '').trim().slice(0, 80);
+  const subtitle = (texts.subtitle || '').trim().slice(0, 100);
+  const given: string[] = [];
+  if (label) given.push(`- Small top label: "${label}"`);
+  if (title) given.push(`- Main headline: "${title}"`);
+  if (subtitle) given.push(`- Sub-headline: "${subtitle}"`);
+  if (given.length) {
+    lines.push('Render the following marketing copy INTO the image as part of the design, in polished native-quality Korean typography (correct spelling, exact characters):');
+    lines.push(given.join('\n'));
+    lines.push(`Typography direction: ${template.textStyle}`);
+  } else {
+    lines.push('This poster has no text — pure visual composition with space that could hold a headline.');
+  }
+  // 7. (마지막) 제한 — 지정 문구 외 일체 금지.
+  lines.push('Use ONLY the text given above, exactly as written — do not add, translate, paraphrase, or modify any wording or numbers. Do not render any other text, prices, logos, QR codes, or watermarks.');
 
   return lines.join('\n');
 }
@@ -284,13 +252,23 @@ async function callGemini(
   return { base64: imgPart.inlineData.data, mime: imgPart.inlineData.mimeType || 'image/jpeg', parts, imageTokens, ms };
 }
 
-/** 배경 1장 생성(단일턴). */
-export async function generateBackground(prompt: string, preset: ChannelPreset): Promise<GeneratedImage> {
+/**
+ * 완성 포스터 1장 생성(단일턴) — 누끼 제품 이미지를 입력으로 첨부하면
+ * 생성 모델이 [제품 배치 + 배경 + 지정 문구 타이포]까지 한 장으로 렌더한다(실증 §0-2·Harold 실측).
+ * cutout 미첨부 = 문구 포함 배경 포스터.
+ */
+export async function generatePoster(
+  prompt: string,
+  preset: ChannelPreset,
+  cutout?: { base64: string; mime: string } | null,
+): Promise<GeneratedImage> {
+  const parts: GeminiPart[] = [{ text: prompt }];
+  if (cutout) parts.push({ inlineData: { mimeType: cutout.mime, data: cutout.base64 } });
   return callGemini(
-    [{ role: 'user', parts: [{ text: prompt }] }],
+    [{ role: 'user', parts }],
     preset.imageSize,
     preset.aspectRatio,
-    90_000,
+    120_000,
   );
 }
 
@@ -400,7 +378,7 @@ export async function composeImage(input: ComposeInput): Promise<{ bytes: number
 // ── temp 저장소 (per-company, sidecar 메타) ────────────────────
 export interface TempMeta {
   companyId: string;
-  kind: 'source' | 'background' | 'cutout' | 'composite';
+  kind: 'source' | 'background' | 'poster' | 'cutout' | 'composite';
   ext: string;
   mime: string;
   prompt?: string | null;

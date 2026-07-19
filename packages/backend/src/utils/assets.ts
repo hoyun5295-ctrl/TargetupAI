@@ -111,6 +111,17 @@ export async function getStorageUsage(companyId: string): Promise<{ usedBytes: n
   return { usedBytes, limitBytes, planCode };
 }
 
+/** 단건 조회 — 회사 소유 검증 포함. 없으면 null. (P4 MMS 변환 등 파생 작업용) */
+export async function getAsset(companyId: string, assetId: string): Promise<AssetRow | null> {
+  const result = await query(
+    `SELECT id, company_id, kind, url, filename, bytes, format, origin, prompt, channel_spec, width, height, created_at
+       FROM cdp_assets
+      WHERE id = $1::uuid AND company_id = $2::uuid`,
+    [assetId, companyId],
+  );
+  return (result.rows[0] as AssetRow) || null;
+}
+
 /** 목록 — 최신순, 검색(q = 파일명·프롬프트 부분 일치), 최대 200건 */
 export async function listAssets(companyId: string, q?: string): Promise<AssetRow[]> {
   const result = await query(

@@ -45,12 +45,15 @@ KO_FONT_FALLBACKS = [
 ]
 
 
-def load_font(font_path, size):
-    """지정 폰트 → 한국어 폴백 → PIL 기본. 한글 렌더 위해 CJK 폰트 우선."""
+def load_font(font_path, size, bold=True):
+    """지정 폰트 → 한국어 폴백 → PIL 기본. bold면 malgunbd(굵게) 우선, 아니면 malgun(일반) 우선."""
     candidates = []
     if font_path:
         candidates.append(font_path)
-    candidates += KO_FONT_FALLBACKS
+    base = list(KO_FONT_FALLBACKS)
+    if not bold and len(base) >= 2:
+        base[0], base[1] = base[1], base[0]  # 일반체(malgun) 우선으로 스왑
+    candidates += base
     for p in candidates:
         try:
             if p and os.path.exists(p):
@@ -129,7 +132,7 @@ def _place_product(canvas, cutout, layout):
 
 
 def _draw_typography(canvas, typo):
-    """정제 타이포(라벨/제목/부제) — 가독성 위해 미세 그림자 + 정렬."""
+    """정제 타이포 — 라벨/제목/부제/뱃지(알약) + 정렬 + 효과(외곽선/그림자) + 굵기."""
     if not typo:
         return canvas
     bg_w, bg_h = canvas.size
@@ -139,23 +142,91 @@ def _draw_typography(canvas, typo):
         if not text:
             continue
         size = max(8, int(float(t.get('size', 0.06)) * bg_h))
-        font = load_font(t.get('fontPath'), size)
+        bold = t.get('weight', 'bold') == 'bold'
+        font = load_font(t.get('fontPath'), size, bold)
         color = hex_to_rgb(t.get('color', '#ffffff'))
+        align = t.get('align', 'center')
         tx = int(float(t.get('x', 0.5)) * bg_w)
         ty = int(float(t.get('y', 0.1)) * bg_h)
-        align = t.get('align', 'center')
         try:
             bbox = draw.textbbox((0, 0), text, font=font)
             tw = bbox[2] - bbox[0]
+            th = bbox[3] - bbox[1]
         except Exception:
             tw = size * len(text) // 2
+            th = size
         if align == 'center':
-            tx -= tw // 2
+            ax = tx - tw // 2
         elif align == 'right':
-            tx -= tw
-        # 가독성 그림자 후 본문
-        draw.text((tx + 2, ty + 2), text, font=font, fill=(0, 0, 0))
-        draw.text((tx, ty), text, font=font, fill=color)
+            ax = tx - tw
+        else:
+            ax = tx
+
+        if t.get('role') == 'badge':
+            pad_x = int(size * 0.5)
+            pad_y = int(size * 0.3)
+            box = [ax - pad_x, ty - pad_y, ax + tw + pad_x, ty + th + pad_y]
+            bcolor = hex_to_rgb(t.get('badgeColor', '#ffd24a'))
+            try:
+                draw.rounded_rectangle(box, radius=int((box[3] - box[1]) / 2), fill=bcolor)
+            except Exception:
+                draw.rectangle(box, fill=bcolor)
+            draw.text((ax, ty), text, font=font, fill=color)
+            continue
+
+        effect = t.get('effect', 'plain')
+        if effect == 'outline':
+            try:
+                draw.text((ax, ty), text, font=font, fill=color, stroke_width=max(2, size // 18), stroke_fill=(0, 0, 0))
+            except Exception:
+                draw.text((ax, ty), text, font=font, fill=color)
+        elif effect == 'shadow':
+            off = max(2, size // 20)
+            draw.text((ax + off, ty + off), text, font=font, fill=(0, 0, 0))
+            draw.text((ax, ty), text, font=font, fill=color)
+        else:
+            draw.text((ax, ty), text, font=font, fill=color)
+    return canvas
+
+
+def render_graphic_bg(spec, w, h):
+    """그래픽 배경 렌더(AI 미사용) — solid/gradient/split/diagonal/frame."""
+    kind = spec.get('kind', 'solid')
+    cols = [hex_to_rgb(c) for c in (spec.get('colors') or ['#ffffff'])] or [(255, 255, 255)]
+    canvas = Image.new('RGBA', (w, h), cols[0] + (255,))
+    if kind == 'solid':
+        return canvas
+    if kind == 'gradient':
+        c0 = cols[0]
+        c1 = cols[1] if len(cols) > 1 else cols[0]
+        strip = Image.new('RGBA', (1, h))
+        sp = strip.load()
+        for y in range(h):
+            r = y / max(1, h - 1)
+            sp[0, y] = tuple(int(c0[i] + (c1[i] - c0[i]) * r) for i in range(3)) + (255,)
+        return strip.resize((w, h))
+    if kind == 'split':
+        ratio = spec.get('param', 0.5)
+        ratio = float(ratio) if isinstance(ratio, (int, float)) else 0.5
+        c1 = cols[1] if len(cols) > 1 else cols[0]
+        ImageDraw.Draw(canvas).rectangle([0, int(h * ratio), w, h], fill=c1 + (255,))
+        return canvas
+    if kind == 'diagonal':
+        d = ImageDraw.Draw(canvas)
+        c1 = cols[1] if len(cols) > 1 else cols[0]
+        c2 = cols[2] if len(cols) > 2 else c1
+        if spec.get('param') == 'bl-tr':
+            d.polygon([(0, h), (w, 0), (w, int(h * 0.4)), (int(w * 0.3), h)], fill=c1 + (255,))
+            d.polygon([(0, h), (0, int(h * 0.6)), (int(w * 0.45), h)], fill=c2 + (255,))
+        else:
+            d.polygon([(0, 0), (w, h), (w, int(h * 0.6)), (int(w * 0.3), 0)], fill=c1 + (255,))
+            d.polygon([(0, 0), (0, int(h * 0.4)), (int(w * 0.45), 0)], fill=c2 + (255,))
+        return canvas
+    if kind == 'frame':
+        border = cols[1] if len(cols) > 1 else (200, 180, 140)
+        m = int(min(w, h) * 0.05)
+        ImageDraw.Draw(canvas).rectangle([m, m, w - m, h - m], outline=border + (255,), width=max(2, int(min(w, h) * 0.008)))
+        return canvas
     return canvas
 
 
@@ -191,11 +262,17 @@ def _save_jpeg_under(img, out, max_bytes):
 def compose():
     try:
         data = request.get_json(force=True)
-        bg_path = data['bg']
         out = data['out']
-        if not os.path.exists(bg_path):
-            return jsonify({'ok': False, 'error': 'bg not found'}), 400
-        canvas = Image.open(bg_path).convert('RGBA')
+        graphic = data.get('graphic_bg')
+        if graphic:
+            cw = int(data.get('canvas_w') or 1200)
+            ch = int(data.get('canvas_h') or 1600)
+            canvas = render_graphic_bg(graphic, cw, ch)
+        else:
+            bg_path = data['bg']
+            if not os.path.exists(bg_path):
+                return jsonify({'ok': False, 'error': 'bg not found'}), 400
+            canvas = Image.open(bg_path).convert('RGBA')
 
         cutout_path = data.get('cutout')
         if cutout_path and os.path.exists(cutout_path):

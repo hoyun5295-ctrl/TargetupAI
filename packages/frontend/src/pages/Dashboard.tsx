@@ -833,6 +833,7 @@ export default function Dashboard() {
     handleMmsSlotUpload,
     handleMmsMultiUpload,
     handleMmsImageRemove,
+    handleMmsFromAsset,
   } = useMmsUpload((msg) => {
     setToast({ show: true, type: 'error', message: msg });
     setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
@@ -3189,6 +3190,7 @@ const campaignData = {
           handleMmsSlotUpload={handleMmsSlotUpload}
           handleMmsMultiUpload={handleMmsMultiUpload}
           handleMmsImageRemove={handleMmsImageRemove}
+          handleMmsFromAsset={handleMmsFromAsset}
           onConfirm={(count) => {
             // 이미지 있으면 3채널 상태 MMS로 동기화 (기존 동작 유지)
             if (count > 0) {

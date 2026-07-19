@@ -120,6 +120,33 @@ export function useMmsUpload(onError: (msg: string) => void) {
     }
   };
 
+  // ★ 2026-07-19 P4: 라이브러리 소재 → MMS 변환 첨부 (서버가 ≤300KB JPG 자동 변환 — 기존 업로드 계약과 동일 응답)
+  const handleMmsFromAsset = async (assetId: string) => {
+    if (mmsUploadedImages.length >= MAX_SLOTS) {
+      onError('최대 3장까지 첨부 가능합니다');
+      return;
+    }
+    setMmsUploading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/image-studio/mms-from-asset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ assetId }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.image) {
+        setMmsUploadedImages(prev => (prev.length >= MAX_SLOTS ? prev : [...prev, data.image]));
+      } else {
+        onError(data.error || 'MMS 변환에 실패했습니다');
+      }
+    } catch {
+      onError('MMS 변환 중 오류 발생');
+    } finally {
+      setMmsUploading(false);
+    }
+  };
+
   // 슬롯 삭제 (서버 unlink 시도 후 UI 제거)
   const handleMmsImageRemove = async (index: number) => {
     const img = mmsUploadedImages[index];
@@ -139,5 +166,6 @@ export function useMmsUpload(onError: (msg: string) => void) {
     handleMmsSlotUpload,
     handleMmsMultiUpload,
     handleMmsImageRemove,
+    handleMmsFromAsset,
   };
 }

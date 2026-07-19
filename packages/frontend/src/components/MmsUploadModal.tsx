@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Image as ImageIcon, X, Paperclip, Lock, Plus, Loader2, AlertTriangle } from 'lucide-react';
+import { Image as ImageIcon, X, Paperclip, Lock, Plus, Loader2, AlertTriangle, FolderOpen } from 'lucide-react';
 import { getMmsImageDisplayName } from '../utils/mmsImage';
+import AssetLibraryPickerModal from './assets/AssetLibraryPickerModal';
 
 interface MmsUploadModalProps {
   show: boolean;
@@ -15,6 +16,8 @@ interface MmsUploadModalProps {
   onConfirm?: (imageCount: number) => void;
   /** 업로드 검증 실패 등 모달 내부에 표시할 안내 (선택) */
   errorMessage?: string | null;
+  /** ★ 2026-07-19 P4: 라이브러리 소재 → MMS 자동 변환 첨부 (useMmsUpload.handleMmsFromAsset). 미전달 = 버튼 미노출(하위호환). */
+  handleMmsFromAsset?: (assetId: string) => void;
 }
 
 /**
@@ -31,7 +34,11 @@ export default function MmsUploadModal({
   handleMmsImageRemove,
   onConfirm,
   errorMessage,
+  handleMmsFromAsset,
 }: MmsUploadModalProps) {
+  // ★ 훅은 조기 return 위에 (조건부 렌더 컴포넌트 훅 개수 불일치 크래시 차단 — 2026-07-06 교훈)
+  const [libOpen, setLibOpen] = useState(false);
+
   if (!show) return null;
 
   const remaining = 3 - mmsUploadedImages.length;
@@ -72,6 +79,18 @@ export default function MmsUploadModal({
               <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
               <span>{errorMessage}</span>
             </div>
+          )}
+
+          {/* ★ P4: 라이브러리 소재 자동 변환 첨부 — 고품질 소재를 서버가 ≤300KB JPG로 변환 */}
+          {handleMmsFromAsset && mmsUploadedImages.length < 3 && (
+            <button
+              onClick={() => setLibOpen(true)}
+              disabled={mmsUploading}
+              className={`w-full flex items-center justify-center gap-2 mb-3 py-3 rounded-xl border border-emerald-400/30 bg-emerald-500/[0.06] hover:bg-emerald-500/[0.12] hover:border-emerald-400/50 transition-colors ${mmsUploading ? 'opacity-50 pointer-events-none' : ''}`}
+            >
+              <FolderOpen className="w-4 h-4 text-emerald-300" />
+              <span className="text-sm font-medium text-emerald-200">라이브러리에서 가져오기 <span className="text-emerald-300/60 text-xs">(MMS 규격 자동 변환)</span></span>
+            </button>
           )}
 
           {/* 다중 첨부 */}
@@ -177,6 +196,15 @@ export default function MmsUploadModal({
           </button>
         </div>
       </div>
+
+      {/* 라이브러리 픽커 — 선택 시 서버가 MMS 규격(≤300KB JPG)으로 자동 변환해 슬롯에 추가 */}
+      {handleMmsFromAsset && (
+        <AssetLibraryPickerModal
+          open={libOpen}
+          onClose={() => setLibOpen(false)}
+          onPick={(asset) => handleMmsFromAsset(asset.id)}
+        />
+      )}
     </div>,
     document.body,
   );
