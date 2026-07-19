@@ -54,9 +54,9 @@ export default function ImageStudioPage() {
   const [stage, setStage] = useState<Stage>('gallery');
   const [busyMsg, setBusyMsg] = useState('');
 
-  // 템플릿
+  // 템플릿 — 카테고리 우선 탐색(카테고리 목록 → 템플릿 목록 2단)
   const [templates, setTemplates] = useState<StudioTemplatePublic[]>([]);
-  const [category, setCategory] = useState<string>('전체');
+  const [category, setCategory] = useState<string | null>(null);
   const [template, setTemplate] = useState<StudioTemplatePublic | null>(null);
 
   // 상품·누끼
@@ -91,9 +91,18 @@ export default function ImageStudioPage() {
     return () => { objectUrls.current.forEach((u) => URL.revokeObjectURL(u)); };
   }, []);
 
-  const categories = useMemo(() => ['전체', ...Array.from(new Set(templates.map((t) => t.category)))], [templates]);
+  const categories = useMemo(() => {
+    const map = new Map<string, { count: number; accents: string[] }>();
+    for (const t of templates) {
+      const e = map.get(t.category) || { count: 0, accents: [] };
+      e.count++;
+      if (e.accents.length < 3) e.accents.push(t.accent);
+      map.set(t.category, e);
+    }
+    return Array.from(map.entries()).map(([name, v]) => ({ name, ...v }));
+  }, [templates]);
   const visibleTemplates = useMemo(
-    () => (category === '전체' ? templates : templates.filter((t) => t.category === category)),
+    () => (category ? templates.filter((t) => t.category === category) : []),
     [templates, category],
   );
 
@@ -256,44 +265,63 @@ export default function ImageStudioPage() {
           </div>
         )}
 
-        {/* 1단계 — 템플릿 갤러리 */}
-        {stage === 'gallery' && (
+        {/* 1단계-a — 카테고리 선택 */}
+        {stage === 'gallery' && !category && (
           <section>
-            <div className="flex flex-wrap gap-2 mb-4">
+            <h2 className="text-sm font-bold text-white/90 mb-3">어떤 종류의 포스터인가요?</h2>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
               {categories.map((c) => (
-                <button key={c} onClick={() => setCategory(c)} className={`px-3 py-1.5 rounded-full text-xs font-medium border ${category === c ? 'bg-violet-500/20 border-violet-400/40 text-violet-200' : 'border-white/10 text-white/50 hover:bg-white/5'}`}>
-                  {c}
+                <button key={c.name} onClick={() => setCategory(c.name)} className="rounded-2xl border border-white/10 bg-white/5 p-4 text-left hover:border-violet-400/40 hover:bg-white/10 transition">
+                  <div className="flex gap-1.5 mb-3">
+                    {c.accents.map((a, i) => (
+                      <span key={i} className="w-6 h-6 rounded-lg border border-white/10" style={{ background: a }} />
+                    ))}
+                  </div>
+                  <div className="text-sm font-semibold">{c.name}</div>
+                  <div className="text-[10px] text-white/40 mt-0.5">템플릿 {c.count}종</div>
                 </button>
               ))}
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            <p className="text-[10px] text-white/30 italic mt-3">Data source — 카테고리를 고르면 템플릿 목록으로 이동합니다. 생성 1회 2크레딧(후보 2장).</p>
+          </section>
+        )}
+
+        {/* 1단계-b — 템플릿 선택 (컴팩트 카드) */}
+        {stage === 'gallery' && category && (
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <button onClick={() => setCategory(null)} className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-white/10 text-white/60 hover:text-white hover:bg-white/10">
+                <ChevronLeft className="w-3.5 h-3.5" /> 카테고리
+              </button>
+              <h2 className="text-sm font-bold text-white/90">{category}</h2>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
               {visibleTemplates.map((t) => (
                 <button
                   key={t.id}
                   onClick={() => { setTemplate(t); setStage('setup'); }}
-                  className="group rounded-2xl border border-white/10 overflow-hidden text-left hover:border-violet-400/50 transition bg-slate-950/50"
+                  className="group rounded-xl border border-white/10 overflow-hidden text-left hover:border-violet-400/50 transition bg-slate-950/50"
                 >
                   {t.exampleUrl ? (
                     <img src={t.exampleUrl} alt={t.name} loading="lazy" className="w-full aspect-[3/4] object-cover" />
                   ) : (
-                    <div className="w-full aspect-[3/4] relative flex flex-col items-center justify-end p-4" style={{ background: `linear-gradient(160deg, ${t.accent}cc, ${t.accent}55 60%, #0f172a)` }}>
-                      <div className="absolute top-4 left-0 right-0 text-center space-y-1 px-3">
-                        <div className="text-[9px] tracking-[0.2em] text-white/70">{(t.defaultTexts.label || 'LABEL').slice(0, 16)}</div>
-                        <div className="text-sm font-bold text-white leading-tight">헤드라인 문구</div>
-                        <div className="text-[10px] text-white/60">부제 문구</div>
+                    <div className="w-full aspect-[3/4] relative flex flex-col items-center justify-end p-2" style={{ background: `linear-gradient(160deg, ${t.accent}cc, ${t.accent}55 60%, #0f172a)` }}>
+                      <div className="absolute top-2.5 left-0 right-0 text-center space-y-0.5 px-2">
+                        <div className="text-[7px] tracking-[0.18em] text-white/70 truncate">{(t.defaultTexts.label || 'LABEL').slice(0, 16)}</div>
+                        <div className="text-[11px] font-bold text-white leading-tight">헤드라인 문구</div>
+                        <div className="text-[8px] text-white/60">부제 문구</div>
                       </div>
-                      <div className="w-12 h-16 rounded-md bg-white/15 border border-white/25 backdrop-blur-[1px] mb-5" title="상품 자리" />
+                      <div className="w-7 h-10 rounded bg-white/15 border border-white/25 mb-3" title="상품 자리" />
                     </div>
                   )}
-                  <div className="p-3">
-                    <div className="text-sm font-semibold">{t.name}</div>
-                    <div className="text-[10px] text-white/40 mt-0.5">{t.desc}</div>
-                    <div className="text-[9px] text-violet-300/70 mt-1">{t.category}</div>
+                  <div className="p-2">
+                    <div className="text-[11px] font-semibold truncate">{t.name}</div>
+                    <div className="text-[9px] text-white/40 truncate">{t.desc}</div>
                   </div>
                 </button>
               ))}
             </div>
-            <p className="text-[10px] text-white/30 italic mt-3">Data source — 템플릿을 고르면 상품과 문구를 넣는 단계로 이동합니다. 생성 1회 2크레딧(후보 2장).</p>
+            <p className="text-[10px] text-white/30 italic mt-3">Data source — 템플릿을 고르면 상품과 문구를 넣는 단계로 이동합니다.</p>
           </section>
         )}
 
