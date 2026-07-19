@@ -13,7 +13,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, ImagePlus, Loader2, ShoppingBag, Upload, Wand2,
   Check, Save, Maximize2, PenLine, ChevronLeft, Sparkles, FolderOpen,
-  Layers, Smartphone, Mail, MessageSquareText, X,
+  Layers, Smartphone, Mail, MessageSquareText, X, Download,
 } from 'lucide-react';
 import { goBackOr } from '../lib/scroll-restoration';
 import { putStudioDraft, STUDIO_INAPP_DRAFT_KEY, STUDIO_DM_DRAFT_KEY, STUDIO_EMAIL_DRAFT_KEY } from '../lib/studio-draft';
@@ -35,6 +35,8 @@ interface StudioTemplatePublic {
   id: string; name: string; category: string; desc: string; accent: string;
   exampleUrl: string | null;
   defaultTexts: { label?: string; title?: string; subtitle?: string };
+  /** 카드 목업 예시 카피(템플릿 무드별 실카피). */
+  sample?: { title: string; subtitle?: string };
 }
 interface Candidate { tempId: string; url: string; blob?: string; presetKey: string }
 
@@ -258,6 +260,30 @@ export default function ImageStudioPage() {
     putStudioDraft(draftKey, { imageUrl: assetAction.url, name: assetAction.filename });
     navigate(path);
   };
+  // 다운로드 — 크레딧 들여 만든 산출물은 파일로도 가져갈 수 있어야 한다(Harold 확정)
+  const downloadFromUrl = async (url: string, filename: string) => {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error();
+      const b = await r.blob();
+      const u = URL.createObjectURL(b);
+      const a = document.createElement('a');
+      a.href = u;
+      a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(u), 5000);
+    } catch {
+      toast.error('다운로드에 실패했어요');
+    }
+  };
+  const downloadCandidate = (c: Candidate) => {
+    if (!c.blob) return;
+    const a = document.createElement('a');
+    a.href = c.blob;
+    a.download = `poster_${presetLabel(c.presetKey)}_${c.tempId.slice(0, 8)}.jpg`;
+    a.click();
+  };
+
   const convertAssetToMms = async (assetId: string) => {
     setBusyMsg('MMS 규격으로 변환 중... (≤300KB 보장)');
     try {
@@ -374,9 +400,9 @@ export default function ImageStudioPage() {
                   ) : (
                     <div className="w-full aspect-[3/4] relative flex flex-col items-center justify-end p-2" style={{ background: `linear-gradient(160deg, ${t.accent}cc, ${t.accent}55 60%, #0f172a)` }}>
                       <div className="absolute top-2.5 left-0 right-0 text-center space-y-0.5 px-2">
-                        <div className="text-[7px] tracking-[0.18em] text-white/70 truncate">{(t.defaultTexts.label || 'LABEL').slice(0, 16)}</div>
-                        <div className="text-[11px] font-bold text-white leading-tight">헤드라인 문구</div>
-                        <div className="text-[8px] text-white/60">부제 문구</div>
+                        {t.defaultTexts.label ? <div className="text-[7px] tracking-[0.18em] text-white/70 truncate">{t.defaultTexts.label.slice(0, 16)}</div> : null}
+                        <div className="text-[11px] font-bold text-white leading-tight">{t.sample?.title || t.name}</div>
+                        {t.sample?.subtitle ? <div className="text-[8px] text-white/60 truncate">{t.sample.subtitle}</div> : null}
                       </div>
                       <div className="w-7 h-10 rounded bg-white/15 border border-white/25 mb-3" title="상품 자리" />
                     </div>
@@ -496,6 +522,9 @@ export default function ImageStudioPage() {
                       <button onClick={() => { setEditFor(editFor === c.tempId ? null : c.tempId); setEditText(''); }} disabled={busy} className="flex items-center gap-1 px-3 py-2 rounded-lg border border-white/10 text-xs text-white/70 hover:bg-white/10 disabled:opacity-40">
                         <Wand2 className="w-3.5 h-3.5" /> AI 수정 <span className="text-white/40">1</span>
                       </button>
+                      <button onClick={() => downloadCandidate(c)} disabled={!c.blob} className="flex items-center gap-1 px-3 py-2 rounded-lg border border-white/10 text-xs text-white/70 hover:bg-white/10 disabled:opacity-40" title="파일로 다운로드">
+                        <Download className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                     {editFor === c.tempId && (
                       <div className="flex gap-2">
@@ -544,6 +573,12 @@ export default function ImageStudioPage() {
                 </button>
                 <button onClick={() => convertAssetToMms(assetAction.id)} disabled={busy} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/85 hover:border-emerald-400/50 hover:bg-emerald-500/10 transition disabled:opacity-40">
                   <MessageSquareText className="w-4 h-4 text-emerald-300" /> MMS 변환 <span className="text-white/35 font-normal">≤300KB</span>
+                </button>
+                <button
+                  onClick={() => downloadFromUrl(assetAction.url, assetAction.filename || 'asset.jpg')}
+                  className="col-span-2 flex items-center justify-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/85 hover:border-violet-400/50 hover:bg-violet-500/10 transition"
+                >
+                  <Download className="w-4 h-4 text-violet-300" /> 파일로 다운로드
                 </button>
               </div>
             </div>
