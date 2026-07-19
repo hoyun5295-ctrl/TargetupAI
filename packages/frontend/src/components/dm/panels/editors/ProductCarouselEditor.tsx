@@ -19,6 +19,8 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
   const [candLoading, setCandLoading] = useState(false);
   const [candidates, setCandidates] = useState<Array<{ title: string; image: string; mallName: string }>>([]);
   const [candNote, setCandNote] = useState<string | null>(null);
+  // ★ 2026-07-19: 스샷 판독 상품명이 말줄임으로 잘린 경우 — 후보의 전체 이름을 "제안"(자동 교체 금지, 원탭 확정)
+  const [nameSuggest, setNameSuggest] = useState<{ idx: number; title: string } | null>(null);
 
   const loadCandidates = async (i: number) => {
     const nm = (products[i]?.name || '').trim();
@@ -32,7 +34,8 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
       const res = await fetch('/api/dm/products/image-candidates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
-        body: JSON.stringify({ name: nm }),
+        // ★ 브랜드+제품명 검색 — 스샷 조립 시 캐러셀 제목=브랜드(적중률 향상)
+        body: JSON.stringify({ name: nm, brand: (props.title || '').trim() }),
       });
       const data = await res.json();
       if (data?.configured === false) {
@@ -219,7 +222,19 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
                           key={ci}
                           type="button"
                           title={`${c.title}${c.mallName ? ` — ${c.mallName}` : ''}`}
-                          onClick={() => { setItem(i, { image_url: c.image }); setCandIdx(null); setCandNote(null); }}
+                          onClick={() => {
+                            setItem(i, { image_url: c.image });
+                            setCandIdx(null);
+                            setCandNote(null);
+                            // 현재 이름이 후보 전체 이름의 일부(스샷 말줄임 잘림 패턴)면 전체 이름 교체를 "제안"만 (자동 교체 금지)
+                            const curName = (products[i]?.name || '').replace(/\s+/g, '');
+                            const candTitle = (c.title || '').trim();
+                            if (curName && candTitle && candTitle.replace(/\s+/g, '').includes(curName) && candTitle.replace(/\s+/g, '').length > curName.length) {
+                              setNameSuggest({ idx: i, title: candTitle });
+                            } else {
+                              setNameSuggest(null);
+                            }
+                          }}
                           style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 0, cursor: 'pointer', flexShrink: 0, overflow: 'hidden', background: '#fff' }}
                         >
                           <img src={c.image} alt={c.title} style={{ width: 64, height: 64, objectFit: 'cover', display: 'block' }} />
@@ -228,6 +243,26 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
                     </div>
                   )}
                   {candNote && <div className="text-[11px] text-gray-500 leading-relaxed mt-1">{candNote}</div>}
+                </div>
+              )}
+              {/* ★ 잘린 상품명 보정 제안 — 후보 전체 이름으로 교체(사용자 확정 시에만) */}
+              {nameSuggest?.idx === i && (
+                <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => { setItem(i, { name: nameSuggest.title }); setNameSuggest(null); }}
+                    style={{ border: '1px solid var(--dm-primary)', borderRadius: 6, background: 'var(--dm-bg)', color: 'var(--dm-primary)', fontSize: 11, padding: '4px 8px', cursor: 'pointer' }}
+                    title="스크린샷에서 잘린 상품명을 검색 결과의 전체 이름으로 바꿉니다"
+                  >
+                    상품명 전체 이름으로: “{nameSuggest.title.slice(0, 40)}{nameSuggest.title.length > 40 ? '…' : ''}”
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNameSuggest(null)}
+                    style={{ border: '1px solid var(--dm-neutral-300)', borderRadius: 6, background: 'var(--dm-bg)', color: 'var(--dm-neutral-700)', fontSize: 11, padding: '4px 8px', cursor: 'pointer' }}
+                  >
+                    유지
+                  </button>
                 </div>
               )}
               <div style={{ height: 6 }} />

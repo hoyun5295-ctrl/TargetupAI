@@ -858,11 +858,13 @@ dmRouter.post('/products/image-candidates', async (req: any, res: any) => {
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
     const name = String(req.body?.name || '').trim();
     if (!name) return res.status(400).json({ success: false, error: '상품명이 필요합니다.' });
+    // ★ 2026-07-19 (Harold): 브랜드+제품명 조합 검색 — 기획전 스샷 조립(캐러셀 title=브랜드)의 적중률 향상
+    const brand = String(req.body?.brand || '').trim().slice(0, 60);
     if (!isNaverShopSearchConfigured()) {
       // 미설정 = 정직 안내 (후보 기능만 비활성 — 직접 업로드 경로는 항상 있음)
       return res.json({ success: true, configured: false, candidates: [] });
     }
-    const candidates = await searchNaverShopCandidates(name, 5);
+    const candidates = await searchNaverShopCandidates([brand, name].filter(Boolean).join(' '), 5);
     return res.json({ success: true, configured: true, candidates });
   } catch (err: any) {
     console.error('[DM products/image-candidates] 오류:', err.message);
