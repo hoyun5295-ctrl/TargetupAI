@@ -102,6 +102,28 @@ export function resolvePreset(presetKey: string | undefined): ChannelPreset {
   return (presetKey && CHANNEL_PRESETS[presetKey]) || CHANNEL_PRESETS['inapp-poster'];
 }
 
+// ★ 2026-07-21 채널 한글 라벨(파일명·표시용) — cdp_assets.channel_spec → 짧은 한글. 파일명만 봐도 용도 체킹.
+const CHANNEL_LABEL_KO: Record<string, string> = {
+  'inapp-poster': '인앱', inapp: '인앱', dm: 'DM', email: '이메일', mms: 'MMS', free: '자유',
+};
+export function channelLabelKo(channelSpec: string | null | undefined): string {
+  return (channelSpec && CHANNEL_LABEL_KO[channelSpec]) || '이미지';
+}
+
+// ★ 2026-07-21 라이브러리 표시 파일명 = "헤드라인_채널.ext" (랜덤 UUID 대체 + 용도 체킹 동시).
+//   실제 저장 파일(URL)은 tempId 유지 — 이 값은 cdp_assets.filename(표시명)에만 들어간다. 파일시스템 안전화.
+export function buildAssetDisplayName(title: string | null | undefined, channelSpec: string | null | undefined, ext: string): string {
+  const safe = String(title || '')
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, '') // 파일명 금지·경로·제어 문자
+    .replace(/\s+/g, '_')
+    .replace(/^[._]+|[._]+$/g, '')
+    .slice(0, 30);
+  const base = safe || '이미지';
+  const cleanExt = String(ext || 'jpg').replace(/^\./, '').replace('jpeg', 'jpg');
+  return `${base}_${channelLabelKo(channelSpec)}.${cleanExt}`;
+}
+
 // ── 혜택 패턴 감지 — 장면 힌트 칸 오입력 안내용(문구 칸으로 유도). 문구 칸은 사용자 지정 verbatim 렌더 허용. ──
 const BENEFIT_PATTERN = /(\d+\s*%)|(\d[\d,]*\s*원)|할인|쿠폰|무료|증정|사은품|적립|세일|special\s*offer|discount|sale|% ?off/i;
 export function hasBenefitPattern(text: string | undefined | null): boolean {
@@ -512,4 +534,25 @@ export const CREDIT_SOURCE = {
   generate: 'image-studio-generate',
   upscale4k: 'image-studio-4k',
   edit: 'image-studio-edit',
+  channelConvert: 'image-studio-convert', // ★ 2026-07-21 채널 변환(다른 비율 재생성) 1크레딧
 } as const;
+
+// ★ 2026-07-21 채널 변환용 — 완성 소재를 다른 채널 비율로 재구성(디자인 유지). editOrUpscale 재사용.
+export function buildChannelConvertInstruction(aspectRatio: string): string {
+  return `Re-render this exact finished design adapted to a ${aspectRatio} aspect ratio. Keep the product, all text wording, colors, typography, and overall style identical — only recompose the framing, margins, and background extension to fit the new ratio naturally. Do not add, remove, translate, or alter any text or numbers.`;
+}
+
+// ★ 2026-07-21 완성 소재(cdp_assets) 원본 파일 디스크 경로 — asset.url의 basename(실파일 tempId.ext) 기준. 경로 이탈 차단.
+export function resolvePermanentAssetPath(companyId: string, url: string | null | undefined): string | null {
+  const name = path.basename(String(url || ''));
+  if (!name || name.includes('..') || name.includes('/') || name.includes('\\')) return null;
+  const p = path.join(INAPP_IMAGE_BASE, companyId, name);
+  return fs.existsSync(p) ? p : null;
+}
+
+// ★ 2026-07-21 표시명("헤드라인_채널.ext")에서 헤드라인 부분만 복원 — 변환본 파일명 재생성용(채널만 교체).
+export function deriveHeadlineFromDisplayName(displayName: string | null | undefined): string {
+  return String(displayName || '')
+    .replace(/\.[^.]+$/, '') // 확장자 제거
+    .replace(/_[^_]+$/, ''); // 마지막 _채널 제거
+}

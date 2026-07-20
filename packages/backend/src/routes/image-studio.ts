@@ -29,7 +29,8 @@ import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils
 import { registerAsset, getStorageUsage, isAssetsTableMissing, getAsset } from '../utils/assets';
 import {
   isStudioReady, StudioError, CREDIT_SOURCE,
-  resolvePreset, buildPosterPrompt, hasBenefitPattern,
+  resolvePreset, buildPosterPrompt, hasBenefitPattern, buildAssetDisplayName,
+  buildChannelConvertInstruction, resolvePermanentAssetPath, deriveHeadlineFromDisplayName,
   generatePoster, editOrUpscale, UPSCALE_4K_INSTRUCTION, buildEditInstruction,
   removeBackground, composeImage,
   writeTempBuffer, allocTempPath, writeTempMeta, readTempMeta, findTempFile, moveTempToPermanent,
@@ -386,7 +387,7 @@ imageStudioRouter.post('/save', async (req: any, res: Response) => {
   const userId = req.user?.userId;
   if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
 
-  const { tempId, channelSpec } = req.body || {};
+  const { tempId, channelSpec, title } = req.body || {};
   if (!isValidTempId(tempId)) return res.status(400).json({ success: false, error: '저장할 이미지를 찾을 수 없습니다.' });
   let meta = readTempMeta(companyId, tempId);
   let found = findTempFile(companyId, tempId);
@@ -432,9 +433,11 @@ imageStudioRouter.post('/save', async (req: any, res: Response) => {
     if (!moved) return res.status(409).json({ success: false, error: '이미 저장됐거나 만료된 이미지입니다.', code: 'ALREADY_SAVED' });
 
     const format = moved.ext === 'png' ? 'png' : 'jpg';
+    // ★ 2026-07-21 표시명 = "헤드라인_채널.ext" (랜덤 UUID 대신 — 용도 체킹 동시). 실제 파일(moved.url)은 tempId 유지.
+    const displayName = buildAssetDisplayName(title, effectiveSpec, moved.ext);
     const assetId = await registerAsset({
       companyId, createdBy: userId, kind: 'generated', origin: 'studio',
-      url: moved.url, filename: moved.filename, bytes: moved.bytes, format,
+      url: moved.url, filename: displayName, bytes: moved.bytes, format,
       prompt: meta.prompt || null,
       channelSpec: effectiveSpec,
       width: meta.width ?? null, height: meta.height ?? null,
@@ -488,6 +491,86 @@ imageStudioRouter.post('/mms-from-asset', async (req: any, res: Response) => {
         size: r.bytes,
       },
     });
+  } catch (err: any) {
+    if (isAssetsTableMissing(err)) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 cdp_assets 테이블 확인 요청 의무', code: 'DB_MIGRATION_PENDING' });
+    }
+    return respondStudioError(res, err);
+  }
+});
+
+// ── POST /convert-channel — 완성 소재를 다른 채널 비율로 재생성(1크레딧) → 라이브러리 추가 ────────────
+//   [근본] DM용 1:1 소재는 인앱(3:4)·이메일(16:9)에 그대로 못 쓴다 → 대상 채널 비율로 재구성(디자인 유지).
+//   editOrUpscale 재사용(멀티턴 sig strip 내장). 크레딧은 저장 성공 후 차감(용량 초과·저장 실패 시 미차감).
+imageStudioRouter.post('/convert-channel', async (req: any, res: Response) => {
+  const companyId = req.user?.companyId;
+  const userId = req.user?.userId;
+  if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+  if (!isStudioReady()) return respondStudioError(res, new StudioError('STUDIO_NOT_READY', 503));
+
+  const assetId = String(req.body?.assetId || '');
+  const preset = resolvePreset(String(req.body?.targetPreset || ''));
+  if (!/^[0-9a-f-]{36}$/i.test(assetId)) return res.status(400).json({ success: false, error: '소재를 찾을 수 없습니다.' });
+
+  try {
+    const asset = await getAsset(companyId, assetId);
+    if (!asset) return res.status(404).json({ success: false, error: '소재를 찾을 수 없습니다.' });
+    if ((asset.channel_spec || '') === preset.channelSpec) {
+      return res.status(400).json({ success: false, error: '이미 이 채널용 이미지예요.' });
+    }
+    const srcPath = resolvePermanentAssetPath(companyId, asset.url);
+    if (!srcPath) return res.status(400).json({ success: false, error: '이 소재는 변환할 수 없습니다. 스튜디오·업로드 소재를 사용해주세요.' });
+
+    // 크레딧 사전 확인(부족 시 402) — 실제 차감은 저장 성공 후
+    try { await checkCredit(companyId, 1); } catch (err) { return respondStudioError(res, err); }
+    if (!tryAcquireGenerateLock(companyId)) return respondStudioError(res, new StudioError('BUSY', 409));
+
+    try {
+      const base = fs.readFileSync(srcPath).toString('base64');
+      const baseMime = asset.format === 'png' ? 'image/png' : 'image/jpeg';
+      const result = await editOrUpscale({
+        baseImageBase64: base, baseMime,
+        basePrompt: asset.prompt || 'A finished marketing poster.',
+        instruction: buildChannelConvertInstruction(preset.aspectRatio),
+        imageSize: '2K',
+        aspectRatio: preset.aspectRatio,
+      });
+      const buf = Buffer.from(result.base64, 'base64');
+      const ext = (result.mime.split('/')[1] || 'jpeg').replace('jpg', 'jpeg');
+      const newTemp = writeTempBuffer(companyId, buf, {
+        kind: 'poster', ext, mime: result.mime, prompt: asset.prompt || null,
+        presetKey: preset.key, channelSpec: preset.channelSpec, aspectRatio: preset.aspectRatio,
+        width: null, height: null,
+      });
+
+      // 용량 한도 검사(영구 이동 전, temp 실크기로) — 초과 시 크레딧 미차감(재생성만 됨·temp는 TTL 정리)
+      const usage = await getStorageUsage(companyId);
+      const tf = findTempFile(companyId, newTemp);
+      const tempBytes = tf && fs.existsSync(tf.absPath) ? fs.statSync(tf.absPath).size : 0;
+      if (usage.usedBytes + tempBytes > usage.limitBytes) {
+        return res.status(409).json({ success: false, error: '저장 용량 한도를 초과했습니다. 라이브러리에서 정리 후 다시 시도해주세요.', code: 'STORAGE_FULL' });
+      }
+
+      const moved = moveTempToPermanent(companyId, newTemp);
+      if (!moved) return respondStudioError(res, new StudioError('GEN_FAILED', 502));
+
+      // 표시명 = 원본 헤드라인 + 대상 채널(채널만 교체) — 용도 체킹 유지
+      const displayName = buildAssetDisplayName(deriveHeadlineFromDisplayName(asset.filename), preset.channelSpec, moved.ext);
+      const newAssetId = await registerAsset({
+        companyId, createdBy: userId, kind: 'generated', origin: 'studio',
+        url: moved.url, filename: displayName, bytes: moved.bytes, format: ext === 'png' ? 'png' : 'jpg',
+        prompt: asset.prompt || null, channelSpec: preset.channelSpec,
+        width: null, height: null,
+      });
+
+      // 저장 성공 후 차감(멱등키) — 6원칙 ②효과 검증 후, ⑤돈=성공 확인 후
+      const convReqId = newTempId();
+      await deductCreditSafe({ companyId, cost: 1, source: CREDIT_SOURCE.channelConvert, createdBy: userId, idempotencyKey: `image-studio:${convReqId}` });
+
+      return res.json({ success: true, asset: { id: newAssetId, url: moved.url, filename: displayName, bytes: moved.bytes, channelSpec: preset.channelSpec } });
+    } finally {
+      releaseGenerateLock(companyId);
+    }
   } catch (err: any) {
     if (isAssetsTableMissing(err)) {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 cdp_assets 테이블 확인 요청 의무', code: 'DB_MIGRATION_PENDING' });

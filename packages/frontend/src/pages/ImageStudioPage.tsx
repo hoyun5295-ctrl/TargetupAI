@@ -13,11 +13,12 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, ImagePlus, Loader2, ShoppingBag, Upload, Wand2,
   Check, Save, Maximize2, PenLine, ChevronLeft, Sparkles, FolderOpen,
-  Layers, Smartphone, Mail, MessageSquareText, X, Download,
+  Layers, Smartphone, Mail, MessageSquareText, X, RefreshCw,
 } from 'lucide-react';
 import { goBackOr } from '../lib/scroll-restoration';
 import { putStudioDraft, STUDIO_INAPP_DRAFT_KEY, STUDIO_DM_DRAFT_KEY, STUDIO_EMAIL_DRAFT_KEY } from '../lib/studio-draft';
 import { useToast } from '../components/ToastProvider';
+import { useAuthStore } from '../stores/authStore';
 import MallProductPickerModal, { type PickedMallProduct } from '../components/dm/MallProductPickerModal';
 import AssetLibraryPickerModal from '../components/assets/AssetLibraryPickerModal';
 
@@ -38,7 +39,7 @@ interface StudioTemplatePublic {
   /** 카드 목업 예시 카피(템플릿 무드별 실카피). */
   sample?: { title: string; subtitle?: string };
 }
-interface Candidate { tempId: string; url: string; blob?: string; presetKey: string }
+interface Candidate { tempId: string; url: string; blob?: string; presetKey: string; title?: string }
 
 // 채널 사이즈 (백엔드 CHANNEL_PRESETS와 key 1:1)
 // ★ MMS 전용 생성 없음(Harold 확정 2026-07-19) — 항상 고품질 생성·저장, MMS는 발송 시 라이브러리 소재 자동 변환.
@@ -49,11 +50,33 @@ const PRESETS = [
 ];
 const presetLabel = (key: string) => PRESETS.find((p) => p.key === key)?.label || key;
 
+// ★ 2026-07-21 스크린샷 유출 억제 워터마크(CSS 오버레이) — 화면 표시본에만. 발송물 원본 무손(오버레이는 DOM).
+//   대각선 반복 텍스트 = 회사명·사용자. 유출돼도 출처 추적. pointer-events:none·select-none로 조작·선택 차단.
+function StudioWatermark({ text }: { text: string }) {
+  if (!text) return null;
+  return (
+    <div aria-hidden className="pointer-events-none select-none absolute inset-0 overflow-hidden z-10">
+      <div className="absolute inset-[-60%] flex flex-wrap content-center justify-center gap-x-6 gap-y-5 -rotate-[28deg]">
+        {Array.from({ length: 80 }).map((_, i) => (
+          <span key={i} className="whitespace-nowrap text-white text-[11px] font-semibold" style={{ opacity: 0.16, textShadow: '0 1px 2px rgba(0,0,0,0.35)' }}>{text}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 type Stage = 'gallery' | 'setup' | 'result';
 
 export default function ImageStudioPage() {
   const navigate = useNavigate();
   const toast = useToast();
+  const authUser = useAuthStore((s) => s.user);
+  // 워터마크 추적 텍스트 = 회사명 · 사용자(로그인ID). 유출 시 출처 식별.
+  const wmText = useMemo(() => {
+    const co = authUser?.company?.name || '';
+    const who = authUser?.name || authUser?.loginId || '';
+    return [co, who].filter(Boolean).join(' · ') || '한줄로';
+  }, [authUser]);
 
   const [ready, setReady] = useState(true);
   const [stage, setStage] = useState<Stage>('gallery');
@@ -65,16 +88,17 @@ export default function ImageStudioPage() {
   const [template, setTemplate] = useState<StudioTemplatePublic | null>(null);
 
   // 내 라이브러리(저장 소재) — 갤러리 상단 폴더. 소재 클릭 = 채널 발사대(인앱/DM/이메일/MMS 변환).
-  const [assetAction, setAssetAction] = useState<{ id: string; url: string; filename: string | null; bytes: number } | null>(null);
+  const [assetAction, setAssetAction] = useState<{ id: string; url: string; filename: string | null; bytes: number; channelSpec?: string | null } | null>(null);
+  const [converting, setConverting] = useState(false);
   const [libManageOpen, setLibManageOpen] = useState(false); // 전체 보기·관리(검색·삭제) — 픽커 재사용
-  const [libAssets, setLibAssets] = useState<{ id: string; url: string; filename: string | null; bytes: number }[]>([]);
+  const [libAssets, setLibAssets] = useState<{ id: string; url: string; filename: string | null; bytes: number; channelSpec?: string | null }[]>([]);
   const [libUsage, setLibUsage] = useState<{ usedBytes: number; limitBytes: number } | null>(null);
   const loadLibrary = useCallback(async () => {
     try {
       const r = await authFetch('/api/assets');
       const d = await r.json();
       if (r.ok && d?.success) {
-        setLibAssets(Array.isArray(d.assets) ? d.assets : []);
+        setLibAssets(Array.isArray(d.assets) ? d.assets.map((a: any) => ({ id: a.id, url: a.url, filename: a.filename, bytes: a.bytes, channelSpec: a.channel_spec ?? null })) : []);
         setLibUsage(d.usage || null);
       }
     } catch { /* 표시 전용 — 실패 무시 */ }
@@ -206,7 +230,8 @@ export default function ImageStudioPage() {
       if (r.status === 409) { toast.error(d?.error || '다른 생성이 진행 중입니다'); return; }
       if (!r.ok || !d?.success) throw new Error(d?.error || '생성에 실패했어요');
       if (d.benefitNotice) toast.success(d.benefitNotice);
-      const imgs: Candidate[] = (d.images || []).map((im: any) => ({ ...im, presetKey: im.presetKey || useKey }));
+      // ★ 2026-07-21 헤드라인을 candidate 스냅샷으로 — 저장 시 파일명(헤드라인_채널) 생성용(생성 시점 문구 고정)
+      const imgs: Candidate[] = (d.images || []).map((im: any) => ({ ...im, presetKey: im.presetKey || useKey, title: texts.title }));
       for (const im of imgs) im.blob = await loadBlob(im.url);
       setCandidates((prev) => [...imgs, ...prev]);
       setStage('result');
@@ -226,7 +251,7 @@ export default function ImageStudioPage() {
       if (r.status === 402) { toast.error('크레딧이 부족합니다'); return; }
       if (!r.ok || !d?.success) throw new Error(d?.error || '수정에 실패했어요');
       const blob = await loadBlob(d.image.url);
-      setCandidates((prev) => [{ tempId: d.image.tempId, url: d.image.url, blob, presetKey: c.presetKey }, ...prev]);
+      setCandidates((prev) => [{ tempId: d.image.tempId, url: d.image.url, blob, presetKey: c.presetKey, title: c.title }, ...prev]);
       toast.success(targetSize === '4K' ? '4K 격상 완료' : '수정 완료');
       setEditFor(null); setEditText('');
     } catch (e: any) {
@@ -240,7 +265,7 @@ export default function ImageStudioPage() {
   const save = async (c: Candidate) => {
     setBusyMsg('라이브러리에 저장 중...');
     try {
-      const { r, d } = await postJson('/api/image-studio/save', { tempId: c.tempId });
+      const { r, d } = await postJson('/api/image-studio/save', { tempId: c.tempId, title: c.title });
       if (r.status === 503 && d?.code === 'DB_MIGRATION_PENDING') { toast.error('라이브러리 준비 중 — 운영자에게 문의해주세요'); return; }
       if (r.status === 409) { toast.error(d?.error || '이미 저장됐어요'); return; }
       if (!r.ok || !d?.success) throw new Error(d?.error || '저장에 실패했어요');
@@ -260,29 +285,8 @@ export default function ImageStudioPage() {
     putStudioDraft(draftKey, { imageUrl: assetAction.url, name: assetAction.filename });
     navigate(path);
   };
-  // 다운로드 — 크레딧 들여 만든 산출물은 파일로도 가져갈 수 있어야 한다(Harold 확정)
-  const downloadFromUrl = async (url: string, filename: string) => {
-    try {
-      const r = await fetch(url);
-      if (!r.ok) throw new Error();
-      const b = await r.blob();
-      const u = URL.createObjectURL(b);
-      const a = document.createElement('a');
-      a.href = u;
-      a.download = filename;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(u), 5000);
-    } catch {
-      toast.error('다운로드에 실패했어요');
-    }
-  };
-  const downloadCandidate = (c: Candidate) => {
-    if (!c.blob) return;
-    const a = document.createElement('a');
-    a.href = c.blob;
-    a.download = `poster_${presetLabel(c.presetKey)}_${c.tempId.slice(0, 8)}.jpg`;
-    a.click();
-  };
+  // ★ 2026-07-21 다운로드 제거(전 직원 요청 — 악용 소지). 소재는 한줄로 채널/발송으로만 활용, 파일 반출 차단.
+  //   화면 표시본엔 워터마크 오버레이(스크린샷 유출 억제), 발송물은 원본 유지.
 
   const convertAssetToMms = async (assetId: string) => {
     setBusyMsg('MMS 규격으로 변환 중... (≤300KB 보장)');
@@ -294,6 +298,29 @@ export default function ImageStudioPage() {
     } catch (e: any) {
       toast.error(e?.message || '변환에 실패했어요');
     } finally {
+      setBusyMsg('');
+    }
+  };
+
+  // ★ 2026-07-21 채널 변환 — 완성 소재를 다른 채널 비율로 재생성(1크레딧) → 라이브러리 추가 → 발사대 모달을 새 소재로 갱신.
+  //   DM용 소재를 인앱/이메일에 그대로 못 쓰는 문제(비율 상이) 해소. 생성 채널은 바로 사용, 그 외는 변환.
+  const convertChannel = async (targetPreset: string) => {
+    if (!assetAction || converting) return;
+    setConverting(true);
+    setBusyMsg('다른 채널 비율로 변환 중... (약 20초)');
+    try {
+      const { r, d } = await postJson('/api/image-studio/convert-channel', { assetId: assetAction.id, targetPreset });
+      if (r.status === 402) { toast.error('크레딧이 부족합니다 — 충전 후 다시 시도해주세요'); return; }
+      if (r.status === 409) { toast.error(d?.error || '잠시 후 다시 시도해주세요'); return; }
+      if (r.status === 503 && d?.code === 'DB_MIGRATION_PENDING') { toast.error('라이브러리 준비 중 — 운영자에게 문의해주세요'); return; }
+      if (!r.ok || !d?.success) throw new Error(d?.error || '변환에 실패했어요');
+      toast.success('변환해서 라이브러리에 저장했어요 (1크레딧) — 이제 이 채널로 만들 수 있어요');
+      loadLibrary();
+      setAssetAction({ id: d.asset.id, url: d.asset.url, filename: d.asset.filename, bytes: d.asset.bytes, channelSpec: d.asset.channelSpec });
+    } catch (e: any) {
+      toast.error(e?.message || '변환에 실패했어요');
+    } finally {
+      setConverting(false);
       setBusyMsg('');
     }
   };
@@ -350,7 +377,7 @@ export default function ImageStudioPage() {
             <div className="flex gap-2.5 overflow-x-auto pb-1">
               {libAssets.slice(0, 14).map((a) => (
                 <button key={a.id} onClick={() => setAssetAction(a)} className="shrink-0 rounded-lg overflow-hidden border border-white/10 hover:border-violet-400/60 transition" title={a.filename || ''}>
-                  <img src={a.url} alt={a.filename || ''} loading="lazy" className="w-20 h-20 object-cover" />
+                  <img src={a.url} alt={a.filename || ''} loading="lazy" draggable={false} onContextMenu={(e) => e.preventDefault()} className="w-20 h-20 object-cover" />
                 </button>
               ))}
             </div>
@@ -509,8 +536,9 @@ export default function ImageStudioPage() {
               {candidates.map((c) => (
                 <div key={c.tempId} className="rounded-2xl border border-white/10 overflow-hidden bg-slate-950/60">
                   <div className="relative">
-                    {c.blob ? <img src={c.blob} alt="완성 포스터" className="w-full object-contain max-h-[480px] bg-slate-950" /> : <div className="h-64 flex items-center justify-center"><Loader2 className="w-5 h-5 animate-spin text-white/40" /></div>}
-                    <span className="absolute top-2 left-2 text-[10px] px-2 py-0.5 rounded-full bg-black/60 text-white/70 border border-white/15">{presetLabel(c.presetKey)}</span>
+                    {c.blob ? <img src={c.blob} alt="완성 포스터" draggable={false} onContextMenu={(e) => e.preventDefault()} className="w-full object-contain max-h-[480px] bg-slate-950" /> : <div className="h-64 flex items-center justify-center"><Loader2 className="w-5 h-5 animate-spin text-white/40" /></div>}
+                    {c.blob && <StudioWatermark text={wmText} />}
+                    <span className="absolute top-2 left-2 z-20 text-[10px] px-2 py-0.5 rounded-full bg-black/60 text-white/70 border border-white/15">{presetLabel(c.presetKey)}</span>
                   </div>
                   <div className="p-3 space-y-2">
                     <div className="flex flex-wrap gap-2">
@@ -522,9 +550,6 @@ export default function ImageStudioPage() {
                       </button>
                       <button onClick={() => { setEditFor(editFor === c.tempId ? null : c.tempId); setEditText(''); }} disabled={busy} className="flex items-center gap-1 px-3 py-2 rounded-lg border border-white/10 text-xs text-white/70 hover:bg-white/10 disabled:opacity-40">
                         <Wand2 className="w-3.5 h-3.5" /> AI 수정 <span className="text-white/40">1</span>
-                      </button>
-                      <button onClick={() => downloadCandidate(c)} disabled={!c.blob} className="flex items-center gap-1 px-3 py-2 rounded-lg border border-white/10 text-xs text-white/70 hover:bg-white/10 disabled:opacity-40" title="파일로 다운로드">
-                        <Download className="w-3.5 h-3.5" />
                       </button>
                     </div>
                     {editFor === c.tempId && (
@@ -543,49 +568,77 @@ export default function ImageStudioPage() {
         )}
       </main>
 
-      {/* 라이브러리 소재 발사대 모달 — 클릭 한 번으로 채널 초안 삽입 / MMS 변환 */}
-      {assetAction && (
+      {/* 라이브러리 소재 발사대 모달 — 이미지 크게(좌) + 채널 메뉴(우). 생성 채널은 바로, 그 외는 변환(1). */}
+      {assetAction && (() => {
+        const spec = assetAction.channelSpec || '';
+        // 이 소재가 각 채널에서 "바로 사용" 가능한가(생성 채널 일치). 그 외는 변환.
+        const nativeInapp = spec === 'inapp-poster';
+        const nativeDm = spec === 'dm';
+        const nativeEmail = spec === 'email';
+        const specLabel = spec === 'inapp-poster' ? '인앱' : spec === 'dm' ? 'DM' : spec === 'email' ? '이메일' : spec === 'mms' ? 'MMS' : spec === 'free' ? '자유' : '소재';
+        return (
         <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
-          <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+          <div className="w-full max-w-3xl bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/10">
               <h3 className="text-sm font-bold">이 소재로 바로 만들기</h3>
               <button onClick={() => setAssetAction(null)} className="text-white/40 hover:text-white p-1 rounded-lg hover:bg-white/10" aria-label="닫기">
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="p-5">
-              <div className="flex gap-4 mb-4">
-                <img src={assetAction.url} alt="" className="w-24 h-24 rounded-xl object-cover border border-white/10 shrink-0" />
-                <div className="text-[11px] text-white/45 min-w-0">
-                  <div className="truncate text-white/70">{assetAction.filename || '소재'}</div>
-                  <div className="mt-0.5">{(assetAction.bytes / 1024).toFixed(0)}KB</div>
-                  <div className="mt-2 text-white/35 leading-relaxed">채널을 고르면 이 이미지가 삽입된 새 초안으로 바로 이동합니다.</div>
+            <div className="flex flex-col md:flex-row">
+              {/* 좌 — 이미지 크게·선명 + 워터마크 */}
+              <div className="md:w-[58%] bg-slate-950 p-4 flex items-center justify-center">
+                <div className="relative w-full max-h-[64vh] flex items-center justify-center">
+                  <img src={assetAction.url} alt="" draggable={false} onContextMenu={(e) => e.preventDefault()} className="max-w-full max-h-[64vh] object-contain rounded-lg" />
+                  <StudioWatermark text={wmText} />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => launchChannel(STUDIO_INAPP_DRAFT_KEY, '/inapp-messages')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/85 hover:border-rose-400/50 hover:bg-rose-500/10 transition">
-                  <Layers className="w-4 h-4 text-rose-300" /> 인앱메시지 만들기
-                </button>
-                <button onClick={() => launchChannel(STUDIO_DM_DRAFT_KEY, '/dm-builder')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/85 hover:border-amber-400/50 hover:bg-amber-500/10 transition">
-                  <Smartphone className="w-4 h-4 text-amber-300" /> 모바일 DM 만들기
-                </button>
-                <button onClick={() => launchChannel(STUDIO_EMAIL_DRAFT_KEY, '/email-campaigns')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/85 hover:border-cyan-400/50 hover:bg-cyan-500/10 transition">
-                  <Mail className="w-4 h-4 text-cyan-300" /> 이메일 만들기
-                </button>
-                <button onClick={() => convertAssetToMms(assetAction.id)} disabled={busy} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/85 hover:border-emerald-400/50 hover:bg-emerald-500/10 transition disabled:opacity-40">
+              {/* 우 — 채널 메뉴 */}
+              <div className="md:w-[42%] p-5 flex flex-col gap-2.5 border-t md:border-t-0 md:border-l border-white/10">
+                <div className="text-[11px] text-white/45 mb-1">
+                  <span className="inline-block px-2 py-0.5 rounded-full bg-white/10 text-white/70 font-semibold">{specLabel}용</span>
+                  <div className="mt-2 text-white/35 leading-relaxed">생성한 채널은 바로 사용할 수 있고, 다른 채널은 그 비율로 변환(1크레딧)한 뒤 사용해요.</div>
+                </div>
+                {/* 인앱 */}
+                {nativeInapp ? (
+                  <button onClick={() => launchChannel(STUDIO_INAPP_DRAFT_KEY, '/inapp-messages')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-rose-400/40 bg-rose-500/10 text-xs font-semibold text-white/90 hover:bg-rose-500/20 transition">
+                    <Layers className="w-4 h-4 text-rose-300" /> 인앱메시지 만들기
+                  </button>
+                ) : (
+                  <button onClick={() => convertChannel('inapp-poster')} disabled={busy || converting} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/70 hover:border-rose-400/40 hover:bg-rose-500/10 transition disabled:opacity-40">
+                    <RefreshCw className="w-4 h-4 text-rose-300" /> 인앱용으로 변환 <span className="text-white/35 font-normal">1크레딧</span>
+                  </button>
+                )}
+                {/* DM */}
+                {nativeDm ? (
+                  <button onClick={() => launchChannel(STUDIO_DM_DRAFT_KEY, '/dm-builder')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-amber-400/40 bg-amber-500/10 text-xs font-semibold text-white/90 hover:bg-amber-500/20 transition">
+                    <Smartphone className="w-4 h-4 text-amber-300" /> 모바일 DM 만들기
+                  </button>
+                ) : (
+                  <button onClick={() => convertChannel('dm-card')} disabled={busy || converting} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/70 hover:border-amber-400/40 hover:bg-amber-500/10 transition disabled:opacity-40">
+                    <RefreshCw className="w-4 h-4 text-amber-300" /> 모바일 DM용으로 변환 <span className="text-white/35 font-normal">1크레딧</span>
+                  </button>
+                )}
+                {/* 이메일 */}
+                {nativeEmail ? (
+                  <button onClick={() => launchChannel(STUDIO_EMAIL_DRAFT_KEY, '/email-campaigns')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-cyan-400/40 bg-cyan-500/10 text-xs font-semibold text-white/90 hover:bg-cyan-500/20 transition">
+                    <Mail className="w-4 h-4 text-cyan-300" /> 이메일 만들기
+                  </button>
+                ) : (
+                  <button onClick={() => convertChannel('email-hero')} disabled={busy || converting} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/70 hover:border-cyan-400/40 hover:bg-cyan-500/10 transition disabled:opacity-40">
+                    <RefreshCw className="w-4 h-4 text-cyan-300" /> 이메일용으로 변환 <span className="text-white/35 font-normal">1크레딧</span>
+                  </button>
+                )}
+                <div className="h-px bg-white/10 my-1" />
+                <button onClick={() => convertAssetToMms(assetAction.id)} disabled={busy || converting} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/70 hover:border-emerald-400/40 hover:bg-emerald-500/10 transition disabled:opacity-40">
                   <MessageSquareText className="w-4 h-4 text-emerald-300" /> MMS 변환 <span className="text-white/35 font-normal">≤300KB</span>
-                </button>
-                <button
-                  onClick={() => downloadFromUrl(assetAction.url, assetAction.filename || 'asset.jpg')}
-                  className="col-span-2 flex items-center justify-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/85 hover:border-violet-400/50 hover:bg-violet-500/10 transition"
-                >
-                  <Download className="w-4 h-4 text-violet-300" /> 파일로 다운로드
                 </button>
               </div>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* 처리 오버레이 */}
       {busy && (
@@ -604,7 +657,7 @@ export default function ImageStudioPage() {
       <AssetLibraryPickerModal
         open={libManageOpen}
         onClose={() => { setLibManageOpen(false); loadLibrary(); }}
-        onPick={(a) => setAssetAction({ id: a.id, url: a.url, filename: a.filename, bytes: a.bytes })}
+        onPick={(a) => setAssetAction({ id: a.id, url: a.url, filename: a.filename, bytes: a.bytes, channelSpec: (a as any).channel_spec ?? (a as any).channelSpec ?? null })}
       />
     </div>
   );
