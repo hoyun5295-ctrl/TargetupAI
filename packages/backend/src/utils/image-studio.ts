@@ -397,6 +397,18 @@ export async function composeImage(input: ComposeInput): Promise<{ bytes: number
   return { bytes: Number(r.bytes) || 0, width: Number(r.width) || 0, height: Number(r.height) || 0, mime: String(r.mime || 'image/jpeg') };
 }
 
+// ★ 2026-07-21 채널 변환 = 비율 조정(원본 픽셀 100% 보존·배경 연장). AI 재생성 아님 — 상품 색·디테일 무손.
+//   studio-py /refit: 원본을 대상 비율 캔버스에 contain(잘림 0) + 여백은 원본 cover+블러 배경(레터박스 X).
+export async function refitImage(input: { srcPath: string; outPath: string; aspectRatio: string; format?: 'jpeg' | 'png' }): Promise<{ bytes: number; width: number; height: number; mime: string }> {
+  const r = await callPy('/refit', {
+    src: input.srcPath,
+    out: input.outPath,
+    aspect_ratio: input.aspectRatio,
+    format: input.format || 'jpeg',
+  }, 30_000);
+  return { bytes: Number(r.bytes) || 0, width: Number(r.width) || 0, height: Number(r.height) || 0, mime: String(r.mime || 'image/jpeg') };
+}
+
 // ── temp 저장소 (per-company, sidecar 메타) ────────────────────
 export interface TempMeta {
   companyId: string;
@@ -536,11 +548,6 @@ export const CREDIT_SOURCE = {
   edit: 'image-studio-edit',
   channelConvert: 'image-studio-convert', // ★ 2026-07-21 채널 변환(다른 비율 재생성) 1크레딧
 } as const;
-
-// ★ 2026-07-21 채널 변환용 — 완성 소재를 다른 채널 비율로 재구성(디자인 유지). editOrUpscale 재사용.
-export function buildChannelConvertInstruction(aspectRatio: string): string {
-  return `Re-render this exact finished design adapted to a ${aspectRatio} aspect ratio. Keep the product, all text wording, colors, typography, and overall style identical — only recompose the framing, margins, and background extension to fit the new ratio naturally. Do not add, remove, translate, or alter any text or numbers.`;
-}
 
 // ★ 2026-07-21 완성 소재(cdp_assets) 원본 파일 디스크 경로 — asset.url의 basename(실파일 tempId.ext) 기준. 경로 이탈 차단.
 export function resolvePermanentAssetPath(companyId: string, url: string | null | undefined): string | null {

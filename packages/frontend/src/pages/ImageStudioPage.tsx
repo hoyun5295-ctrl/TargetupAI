@@ -49,6 +49,8 @@ const PRESETS = [
   { key: 'email-hero', label: '이메일 히어로', sub: '16:9' },
 ];
 const presetLabel = (key: string) => PRESETS.find((p) => p.key === key)?.label || key;
+// 소재 channel_spec → 짧은 한글 라벨(용도 배지·캡션). 백엔드 channelLabelKo 미러.
+const specKo = (s?: string | null) => (s === 'inapp-poster' ? '인앱' : s === 'dm' ? 'DM' : s === 'email' ? '이메일' : s === 'mms' ? 'MMS' : s === 'free' ? '자유' : '소재');
 
 // ★ 2026-07-21 스크린샷 유출 억제 워터마크(CSS 오버레이) — 화면 표시본에만. 발송물 원본 무손(오버레이는 DOM).
 //   대각선 반복 텍스트 = 회사명·사용자. 유출돼도 출처 추적. pointer-events:none·select-none로 조작·선택 차단.
@@ -307,7 +309,7 @@ export default function ImageStudioPage() {
   const convertChannel = async (targetPreset: string) => {
     if (!assetAction || converting) return;
     setConverting(true);
-    setBusyMsg('다른 채널 비율로 변환 중... (약 20초)');
+    setBusyMsg('채널 비율에 맞추는 중...');
     try {
       const { r, d } = await postJson('/api/image-studio/convert-channel', { assetId: assetAction.id, targetPreset });
       if (r.status === 402) { toast.error('크레딧이 부족합니다 — 충전 후 다시 시도해주세요'); return; }
@@ -376,8 +378,12 @@ export default function ImageStudioPage() {
             </div>
             <div className="flex gap-2.5 overflow-x-auto pb-1">
               {libAssets.slice(0, 14).map((a) => (
-                <button key={a.id} onClick={() => setAssetAction(a)} className="shrink-0 rounded-lg overflow-hidden border border-white/10 hover:border-violet-400/60 transition" title={a.filename || ''}>
-                  <img src={a.url} alt={a.filename || ''} loading="lazy" draggable={false} onContextMenu={(e) => e.preventDefault()} className="w-20 h-20 object-cover" />
+                <button key={a.id} onClick={() => setAssetAction(a)} className="shrink-0 w-20 text-left group" title={a.filename || ''}>
+                  <div className="relative rounded-lg overflow-hidden border border-white/10 group-hover:border-violet-400/60 transition">
+                    <img src={a.url} alt={a.filename || ''} loading="lazy" draggable={false} onContextMenu={(e) => e.preventDefault()} className="w-20 h-20 object-cover" />
+                    {a.channelSpec && <span className="absolute top-1 left-1 text-[8px] px-1 py-px rounded bg-black/65 text-white/85 font-semibold">{specKo(a.channelSpec)}</span>}
+                  </div>
+                  {a.filename && <div className="mt-0.5 text-[9px] text-white/45 truncate">{a.filename.replace(/\.[^.]+$/, '')}</div>}
                 </button>
               ))}
             </div>
@@ -575,7 +581,7 @@ export default function ImageStudioPage() {
         const nativeInapp = spec === 'inapp-poster';
         const nativeDm = spec === 'dm';
         const nativeEmail = spec === 'email';
-        const specLabel = spec === 'inapp-poster' ? '인앱' : spec === 'dm' ? 'DM' : spec === 'email' ? '이메일' : spec === 'mms' ? 'MMS' : spec === 'free' ? '자유' : '소재';
+        const specLabel = specKo(spec);
         return (
         <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
           <div className="w-full max-w-3xl bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
@@ -597,6 +603,7 @@ export default function ImageStudioPage() {
               <div className="md:w-[42%] p-5 flex flex-col gap-2.5 border-t md:border-t-0 md:border-l border-white/10">
                 <div className="text-[11px] text-white/45 mb-1">
                   <span className="inline-block px-2 py-0.5 rounded-full bg-white/10 text-white/70 font-semibold">{specLabel}용</span>
+                  {assetAction.filename && <div className="mt-1.5 text-white/75 font-medium break-all leading-snug">{assetAction.filename.replace(/\.[^.]+$/, '')}</div>}
                   <div className="mt-2 text-white/35 leading-relaxed">생성한 채널은 바로 사용할 수 있고, 다른 채널은 그 비율로 변환(1크레딧)한 뒤 사용해요.</div>
                 </div>
                 {/* 인앱 */}

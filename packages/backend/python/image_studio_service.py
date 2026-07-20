@@ -258,6 +258,59 @@ def _save_jpeg_under(img, out, max_bytes):
     return len(best), rgb.width, rgb.height
 
 
+def _parse_ratio(ratio):
+    """'3:4' → (3.0, 4.0). 무효 시 3:4 기본."""
+    try:
+        a, b = str(ratio or '').split(':')
+        rw, rh = float(a), float(b)
+        if rw > 0 and rh > 0:
+            return rw, rh
+    except Exception:
+        pass
+    return 3.0, 4.0
+
+
+@app.post('/refit')
+def refit():
+    """★ 2026-07-21 채널 변환 = 비율 조정(원본 픽셀 100% 보존). AI 재생성 아님 — 상품 색·디테일 무손.
+    원본을 대상 비율 캔버스에 contain(잘림 0)하고, 남는 여백은 원본을 cover로 확대+블러한 배경으로 채운다(레터박스 X)."""
+    try:
+        data = request.get_json(force=True)
+        src = data['src']
+        out = data['out']
+        if not os.path.exists(src):
+            return jsonify({'ok': False, 'error': 'src not found'}), 400
+        rw, rh = _parse_ratio(data.get('aspect_ratio'))
+        img = Image.open(src).convert('RGB')
+        w, h = img.size
+        # 캔버스 = 원본을 완전히 포함하는 최소 대상비율 크기(원본 잘림 0)
+        if (w / h) > (rw / rh):
+            cw, ch = w, max(1, int(round(w * rh / rw)))
+        else:
+            cw, ch = max(1, int(round(h * rw / rh))), h
+        # 배경 = 원본 cover(캔버스 꽉 채우고 넘침) + 강한 블러
+        scale_bg = max(cw / w, ch / h)
+        bw, bh = max(1, int(round(w * scale_bg))), max(1, int(round(h * scale_bg)))
+        bg = img.resize((bw, bh), Image.LANCZOS)
+        left, top = (bw - cw) // 2, (bh - ch) // 2
+        bg = bg.crop((left, top, left + cw, top + ch)).filter(ImageFilter.GaussianBlur(max(8, cw // 40)))
+        # 전경 = 원본 그대로 중앙 배치(잘림 0)
+        canvas = bg.copy()
+        canvas.paste(img, ((cw - w) // 2, (ch - h) // 2))
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        fmt = data.get('format', 'jpeg')
+        if fmt == 'png':
+            canvas.save(out, 'PNG')
+            mime = 'image/png'
+        else:
+            canvas.save(out, 'JPEG', quality=90)
+            mime = 'image/jpeg'
+        return jsonify({'ok': True, 'bytes': os.path.getsize(out), 'width': cw, 'height': ch, 'mime': mime})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 500
+
+
 @app.post('/compose')
 def compose():
     try:

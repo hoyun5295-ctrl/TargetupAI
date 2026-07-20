@@ -30,7 +30,7 @@ import { registerAsset, getStorageUsage, isAssetsTableMissing, getAsset } from '
 import {
   isStudioReady, StudioError, CREDIT_SOURCE,
   resolvePreset, buildPosterPrompt, hasBenefitPattern, buildAssetDisplayName,
-  buildChannelConvertInstruction, resolvePermanentAssetPath, deriveHeadlineFromDisplayName,
+  refitImage, resolvePermanentAssetPath, deriveHeadlineFromDisplayName,
   generatePoster, editOrUpscale, UPSCALE_4K_INSTRUCTION, buildEditInstruction,
   removeBackground, composeImage,
   writeTempBuffer, allocTempPath, writeTempMeta, readTempMeta, findTempFile, moveTempToPermanent,
@@ -499,9 +499,10 @@ imageStudioRouter.post('/mms-from-asset', async (req: any, res: Response) => {
   }
 });
 
-// ── POST /convert-channel — 완성 소재를 다른 채널 비율로 재생성(1크레딧) → 라이브러리 추가 ────────────
-//   [근본] DM용 1:1 소재는 인앱(3:4)·이메일(16:9)에 그대로 못 쓴다 → 대상 채널 비율로 재구성(디자인 유지).
-//   editOrUpscale 재사용(멀티턴 sig strip 내장). 크레딧은 저장 성공 후 차감(용량 초과·저장 실패 시 미차감).
+// ── POST /convert-channel — 완성 소재를 다른 채널 비율로 재맞춤(1크레딧) → 라이브러리 추가 ────────────
+//   [근본] DM용 1:1 소재는 인앱(3:4)·이메일(16:9)에 그대로 못 쓴다 → 대상 비율로 재맞춤.
+//   ★ 2026-07-21 AI 재생성(editOrUpscale) 폐기 — 상품 색·디테일을 바꿔버려(검정 스커트→흰색 사고) 원본 파괴.
+//     studio-py /refit = 원본 픽셀 100% 보존(배경 연장)만. 크레딧 1은 유지(Harold 확정) · 저장 성공 후 차감.
 imageStudioRouter.post('/convert-channel', async (req: any, res: Response) => {
   const companyId = req.user?.companyId;
   const userId = req.user?.userId;
@@ -526,44 +527,36 @@ imageStudioRouter.post('/convert-channel', async (req: any, res: Response) => {
     if (!tryAcquireGenerateLock(companyId)) return respondStudioError(res, new StudioError('BUSY', 409));
 
     try {
-      const base = fs.readFileSync(srcPath).toString('base64');
-      const baseMime = asset.format === 'png' ? 'image/png' : 'image/jpeg';
-      const result = await editOrUpscale({
-        baseImageBase64: base, baseMime,
-        basePrompt: asset.prompt || 'A finished marketing poster.',
-        instruction: buildChannelConvertInstruction(preset.aspectRatio),
-        imageSize: '2K',
-        aspectRatio: preset.aspectRatio,
-      });
-      const buf = Buffer.from(result.base64, 'base64');
-      const ext = (result.mime.split('/')[1] || 'jpeg').replace('jpg', 'jpeg');
-      const newTemp = writeTempBuffer(companyId, buf, {
-        kind: 'poster', ext, mime: result.mime, prompt: asset.prompt || null,
+      // 비율 재맞춤(원본 보존·배경 연장) — studio-py가 out 경로에 직접 씀(파일 경로 기반, AI 0)
+      const alloc = allocTempPath(companyId, 'jpeg');
+      const r = await refitImage({ srcPath, outPath: alloc.absPath, aspectRatio: preset.aspectRatio, format: 'jpeg' });
+      writeTempMeta(companyId, alloc.tempId, {
+        kind: 'poster', ext: 'jpeg', mime: 'image/jpeg', prompt: asset.prompt || null,
         presetKey: preset.key, channelSpec: preset.channelSpec, aspectRatio: preset.aspectRatio,
-        width: null, height: null,
+        width: r.width, height: r.height,
       });
 
-      // 용량 한도 검사(영구 이동 전, temp 실크기로) — 초과 시 크레딧 미차감(재생성만 됨·temp는 TTL 정리)
+      // 용량 한도 검사(영구 이동 전, temp 실크기로) — 초과 시 크레딧 미차감(temp는 TTL 정리)
       const usage = await getStorageUsage(companyId);
-      const tf = findTempFile(companyId, newTemp);
+      const tf = findTempFile(companyId, alloc.tempId);
       const tempBytes = tf && fs.existsSync(tf.absPath) ? fs.statSync(tf.absPath).size : 0;
       if (usage.usedBytes + tempBytes > usage.limitBytes) {
         return res.status(409).json({ success: false, error: '저장 용량 한도를 초과했습니다. 라이브러리에서 정리 후 다시 시도해주세요.', code: 'STORAGE_FULL' });
       }
 
-      const moved = moveTempToPermanent(companyId, newTemp);
+      const moved = moveTempToPermanent(companyId, alloc.tempId);
       if (!moved) return respondStudioError(res, new StudioError('GEN_FAILED', 502));
 
       // 표시명 = 원본 헤드라인 + 대상 채널(채널만 교체) — 용도 체킹 유지
       const displayName = buildAssetDisplayName(deriveHeadlineFromDisplayName(asset.filename), preset.channelSpec, moved.ext);
       const newAssetId = await registerAsset({
         companyId, createdBy: userId, kind: 'generated', origin: 'studio',
-        url: moved.url, filename: displayName, bytes: moved.bytes, format: ext === 'png' ? 'png' : 'jpg',
+        url: moved.url, filename: displayName, bytes: moved.bytes, format: 'jpg',
         prompt: asset.prompt || null, channelSpec: preset.channelSpec,
-        width: null, height: null,
+        width: r.width || null, height: r.height || null,
       });
 
-      // 저장 성공 후 차감(멱등키) — 6원칙 ②효과 검증 후, ⑤돈=성공 확인 후
+      // 저장 성공 후 차감(멱등키) — 6원칙 ②효과 검증 후, ⑤돈=성공 확인 후. AI 미사용이나 크레딧 1 유지(Harold 확정)
       const convReqId = newTempId();
       await deductCreditSafe({ companyId, cost: 1, source: CREDIT_SOURCE.channelConvert, createdBy: userId, idempotencyKey: `image-studio:${convReqId}` });
 
