@@ -288,7 +288,7 @@ CREATE INDEX idx_gtm_company ON gateway_template_mappings (company_id);
 | `utils/kakao-bulk-migration.ts` (CT 신설) | 순수 함수 — B_ 판정 · IMC item senderKey/코드 추출(D217+ 실측 키만) · 전량 스캔 index · **회사 단위 senderKey 합집합 대상 구성**(코드수 오름차순 정렬=실행 순서) · 누락 4분류 · 이관분 alarm 상태 |
 | `utils/__tests__/kakao-bulk-migration.test.ts` | 계약 24건 — 규칙 6개 고정(B_ 한정·합집합·distinct 기준·포함 관계·사유 분류·알림 억제) |
 | `routes/gateway-templates.ts` `POST /bulk-migrate-templates` | dryRun 기본 true. IMC **전량 1회 스캔**(senderKey마다 재스캔하면 215키×50페이지=1만 콜) → 회사별 프로필 연결(IMC 실조회 통과분만·타사 선점은 표시만) → B_ pull → 대조 → 효과 검증 재카운트 |
-| `routes/gateway-templates.ts` `POST /imported-alarm-suppress` | 기존 이관분 알림 억제 백필. 대상 한정 = 게이트웨이 연결 회사 + 종결 상태 + `requested_at IS NULL AND created_by IS NULL`(import 경로 표식 — 정상 등록 경로는 requested_at을 항상 채움) |
+| `routes/gateway-templates.ts` `POST /imported-alarm-suppress` | 기존 이관분 알림 억제 백필. 대상 한정 = **`billIds` 명시 필수**(전역 일괄 금지) + 종결 상태 + `alarm_notified_status` 미기록. ★첫 구현의 `requested_at IS NULL AND created_by IS NULL`(import 경로 표식) 판별식은 **0720 실측으로 폐기** — 대상 847건 전부 `requested_at`이 채워져 있고(컬럼 기본값) 정상 등록 경로도 `created_by`가 NULL이라 판별력이 0이었다(백필 0건). 표식 추정 대신 사람이 범위를 지정한다 |
 
 **안전 설계** — 게이트웨이 호출 0 · `gateway_template_mappings` 쓰기 0(마스터 게이트 false 유지와 무관) · 발송 경로 파일 수정 0 · 부분 IMC 스캔 시 중단(누락 pull이 "완료"로 보이는 것 차단) · D231+ 방어로 회사·프로필·템플릿 상한 + `offset` 이어달리기(전 단계 멱등).
 
@@ -300,7 +300,22 @@ CREATE INDEX idx_gtm_company ON gateway_template_mappings (company_id);
 5. **더화이트 단독 회차** — 1,687코드·senderKey 141개. `maxProfiles`/`maxTemplates` 상한으로 여러 회차.
 6. `POST /imported-alarm-suppress` dryRun → 실행(잔존 0 확인).
 
-**미확정(실행이 답을 준다)** — `7dc0de…`를 포함한 미연결 senderKey들이 우리 IMC 계정에서 보이는지. 안 보이면 카카오 채널 딜러 이관이 필요한 건(0715(4) 관문)이며 코드로 해결 불가. dryRun 1단계가 전 키에 대해 이 판정을 한 번에 낸다.
+**★0720 실행 결과 — 이관 본체 완료(Harold 실행)**
+
+| 차수 | 구간 | 템플릿 | 프로필 | 실패 | 누락 |
+|---|---|---|---|---|---|
+| 1 | offset 0 (10곳) | 97 | 14 | 0 | 인비토 10만 |
+| 2 | offset 10 (10곳) | 499 | 19 | 0 | 0 |
+| 3 | offset 20 (9곳) | 984 | 27 | 0 | 0 |
+| 4 | 더화이트 단독 | 1,999 | 138 | 0 | 0 |
+| **계** | **29곳** | **3,579** | **198** | **0** | — |
+
+- **dryRun 예측과 실행 결과가 전 차수 정확히 일치.** 회사별 게이트웨이 B_ 코드 대비 누락 0.
+- **0715 아난티 누락 62건 복구 확인** — 미연결이던 `7dc0de…`가 IMC에서 보여 연결·pull 성공(847+66=913, 누락 0).
+- **미연결 senderKey의 IMC 가시성 = 해소** — `imc_not_visible` 9건(메트로시티 2·아이올리 4·더화이트 3)은 전부 게이트웨이 B_ 코드가 없는 키라 이관 영향 0. **딜러 이관이 필요한 회사는 없다**(0715(4) 관문 소멸).
+- **인비토(R0046) 제외** — senderKey 2개(`@invitocorp`·`@poppon`)가 `테스트계정2`(IVITO123)에 귀속돼 있고 B_ 10코드도 이미 그 회사에 존재. 데이터 공백 아님. 자동 재연결을 막아둔 덕에 팝폰 실사용 프로필이 딸려 옮겨가는 것을 피함. 프로필 귀속 정리는 별건.
+- **알림 상태 기록 정상** — 3,579건 전부 `alarm_notified_status`가 종결 상태로 들어가, 5분 폴링 대상이 이관 전(747)에서 1건도 늘지 않음.
+- 게이트웨이보다 IMC가 많은 초과분(예 더화이트 1,687→1,999, 베네통 39→102)은 **게이트웨이 매핑이 없어 현재 라우팅 불가** — push 축이 열릴 때 적재 스캔이 승인 템플릿 전량으로 desired 행을 만들며 자동 해소. 컷오버 전 선행 조건.
 
 ### G. (0720 소진) 옛 재개 런북 — M2 구현 완료로 종료
 

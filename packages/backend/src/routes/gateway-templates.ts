@@ -824,21 +824,32 @@ router.post('/bulk-migrate-templates', async (req: Request, res: Response) => {
 //    영구 잔존한다(0720 실측: 폴링 대상 747 전량이 아난티 이관분). 신규 이관분은 INSERT에서 채우고,
 //    이미 들어간 분은 여기서 맞춘다.
 //
-//    대상 한정(정상 등록 건 오염 차단):
-//      ① 게이트웨이 bill이 연결된 회사   ② 검수 종결 상태   ③ alarm_notified_status 미기록
-//      ④ requested_at IS NULL + created_by IS NULL = import 경로 산물 표식
-//         (관리자·고객사 등록 경로는 requested_at을 항상 채운다 — admin.ts·companies.ts INSERT)
+//    대상 한정 — ★billIds 명시 필수(전역 일괄 금지):
+//      ① 지정한 bill에 연결된 회사   ② 검수 종결 상태   ③ alarm_notified_status 미기록
+//
+//    ★0720 실측으로 폐기한 방식: 처음엔 `requested_at IS NULL AND created_by IS NULL`을 import 경로
+//      표식으로 썼는데, 대상 847건 전부 requested_at이 채워져 있어(컬럼 기본값) 0건만 잡혔다.
+//      정상 등록 경로도 created_by가 NULL이라 이 역시 판별력이 없다. 표식 추정 대신 **사람이 대상을
+//      지정**하는 방식으로 바꾼다 — 알림 억제는 되돌리기 번거로운 상태 변경이라 범위는 명시가 안전하다.
 router.post('/imported-alarm-suppress', async (req: Request, res: Response) => {
   try {
     const dryRun = req.body?.dryRun !== false; // 기본 true
+    const billIds: string[] = Array.isArray(req.body?.billIds)
+      ? req.body.billIds.map((v: any) => String(v).trim()).filter(Boolean)
+      : [];
+    if (billIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'billIds 배열 필요 — 억제 대상을 명시해야 합니다 (예: ["R0007"])',
+      });
+    }
+
     const WHERE = `
         t.status IN ('APPROVED','REJECTED','KREJ')
     AND t.alarm_notified_status IS NULL
-    AND t.requested_at IS NULL
-    AND t.created_by IS NULL
-    AND EXISTS (
-          SELECT 1 FROM gateway_bill_mappings b
-           WHERE b.company_id = t.company_id AND b.is_active = true
+    AND t.company_id IN (
+          SELECT b.company_id FROM gateway_bill_mappings b
+           WHERE b.bill_id = ANY($1::text[]) AND b.is_active = true AND b.company_id IS NOT NULL
         )`;
 
     if (dryRun) {
@@ -849,9 +860,10 @@ router.post('/imported-alarm-suppress', async (req: Request, res: Response) => {
           WHERE ${WHERE}
           GROUP BY c.company_name, t.status
           ORDER BY cnt DESC`,
+        [billIds],
       );
       const total = preview.rows.reduce((sum: number, r: any) => sum + r.cnt, 0);
-      return res.json({ success: true, dryRun: true, wouldUpdate: total, breakdown: preview.rows });
+      return res.json({ success: true, dryRun: true, billIds, wouldUpdate: total, breakdown: preview.rows });
     }
 
     const upd = await query(
@@ -859,18 +871,21 @@ router.post('/imported-alarm-suppress', async (req: Request, res: Response) => {
           SET alarm_notified_status = CASE WHEN t.status = 'APPROVED' THEN 'APPROVED' ELSE 'REJECTED' END,
               updated_at = now()
         WHERE ${WHERE}`,
+      [billIds],
     );
 
     // 효과 검증(6원칙 ②) — 잔존 재카운트 후에만 성공 표시
     const remain = await query(
       `SELECT COUNT(*)::int AS cnt FROM kakao_templates t WHERE ${WHERE}`,
+      [billIds],
     );
     console.log(
-      `[gateway-templates][imported-alarm-suppress] updated=${upd.rowCount || 0} 잔존=${remain.rows[0].cnt}`,
+      `[gateway-templates][imported-alarm-suppress] bills=${billIds.join(',')} updated=${upd.rowCount || 0} 잔존=${remain.rows[0].cnt}`,
     );
     return res.json({
       success: remain.rows[0].cnt === 0,
       dryRun: false,
+      billIds,
       updated: upd.rowCount || 0,
       remaining: remain.rows[0].cnt,
     });

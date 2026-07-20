@@ -443,6 +443,44 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 
 ---
 
+## 8-B. 슈퍼관리자 API를 서버 curl로 호출하는 절차 (★2026-07-20 기록 — 그동안 미기록)
+
+> 대상 = `requireSuperAdmin`이 걸린 endpoint 전부 (`/api/gateway-templates/*`, `/api/alimtalk/senders/import`·`/templates/import`, `/api/admin/*` 등).
+> 백엔드 = `http://127.0.0.1:3000` (nginx가 `/api/`를 여기로 프록시). 비밀번호·OTP는 Harold님이 직접 입력 — 문서·대화에 남기지 않는다.
+
+**1) 토큰 발급** — 슈퍼관리자 로그인은 2FA(TOTP) 통과해야 JWT가 나온다 (routes/auth.ts).
+
+```bash
+TOKEN=$(curl -s -X POST http://127.0.0.1:3000/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"userType":"super_admin","loginId":"<아이디>","password":"<비밀번호>","totpCode":"<OTP 6자리>"}' \
+  | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
+echo "len=${#TOKEN}"    # 0이면 로그인 실패(비번·OTP·차단 확인)
+```
+
+**2) 호출** — 헤더는 `Authorization: Bearer <token>` (middlewares/auth.ts:40).
+
+```bash
+curl -s -X POST http://127.0.0.1:3000/api/gateway-templates/bulk-migrate-templates \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"dryRun":true,"offset":0,"maxCompanies":10}' -o /tmp/out.json
+head -c 3000 /tmp/out.json
+```
+
+> 응답이 크면 파일로 받고 잘라 본다(서버에 jq·python 의존 안 함).
+
+**주의 2건 (모르면 작업 중간에 끊긴다)**
+- **슈퍼관리자는 `super` 단일 세션**(auth.ts D111 P0) — curl로 로그인하는 순간 브라우저에 열려 있던 슈퍼관리자 화면 세션이 무효화된다(다음 클릭에서 401). 반대로 작업 중 브라우저에서 재로그인하면 curl 토큰이 죽는다. **한 번에 한쪽만 쓴다.**
+- **토큰 수명 30분**(`TIMEOUTS.superAdminSessionMinutes`, D55) — 긴 작업은 중간에 1)을 다시 실행해 갱신.
+
+**라우트 배포 반영 확인(토큰 불필요)** — 인증 걸린 경로라 살아있으면 401, 미탑재면 404다.
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000/api/gateway-templates/status
+```
+
+---
+
 ## 9. AI Operator 환경변수 매트릭스 (D170~D181 누적, 2026-05-19)
 
 > 박은 영역 = `/home/administrator/targetup-app/packages/backend/.env`. 박지 X 시 영역별 안전 default 박음.
