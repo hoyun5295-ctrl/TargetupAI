@@ -260,8 +260,10 @@ export interface ReconcileBillReport {
   desiredCount: number;
   matched: number;
   orphans: string[];      // 게이트웨이에만 있는 tmplcd — 표시만(자동 삭제 절대 X)
-  drifts: string[];       // 필드 불일치 → pending 재전환
-  missingOnGateway: string[]; // synced인데 게이트웨이 부재 → pending 재전환
+  /** ★시드(기존 운영) 행의 필드 차이 = 게이트웨이 실값을 우리 DB에 채택(기존 값 유지 원칙 §4-9-C 3) — 재push 아님 */
+  adopted: string[];
+  drifts: string[];       // auto/manual 행 필드 불일치 → pending 재전환(재push)
+  missingOnGateway: string[]; // synced인데 게이트웨이 부재 — auto/manual=pending 재전환 / seed=failed(재등록 안 함)
   queryError?: string;
 }
 
@@ -300,9 +302,10 @@ export async function runReconcilePass(onlyBillId?: string): Promise<ReconcilePa
   }
 
   const totOrphan = result.bills.reduce((s, b) => s + b.orphans.length, 0);
+  const totAdopted = result.bills.reduce((s, b) => s + b.adopted.length, 0);
   const totDrift = result.bills.reduce((s, b) => s + b.drifts.length + b.missingOnGateway.length, 0);
   if (result.bills.length > 0) {
-    log(`대조 — bills=${result.bills.length} orphan=${totOrphan} drift=${totDrift} held54=${result.held54}`);
+    log(`대조 — bills=${result.bills.length} orphan=${totOrphan} adopted=${totAdopted} drift=${totDrift} held54=${result.held54}`);
   }
   if (totDrift > 0) {
     await sendSystemAlert({
@@ -316,7 +319,7 @@ export async function runReconcilePass(onlyBillId?: string): Promise<ReconcilePa
 async function reconcileOneBill(billId: string, server: GatewayServer): Promise<ReconcileBillReport> {
   const report: ReconcileBillReport = {
     billId, server, remoteCount: 0, desiredCount: 0, matched: 0,
-    orphans: [], drifts: [], missingOnGateway: [],
+    orphans: [], adopted: [], drifts: [], missingOnGateway: [],
   };
 
   let remoteRows: any[];
@@ -334,7 +337,7 @@ async function reconcileOneBill(billId: string, server: GatewayServer): Promise<
   report.remoteCount = remoteRows.length;
 
   const desiredRes = await query(
-    `SELECT id, tmplcd, tran_tmplcd, usemod, billnm, sync_status
+    `SELECT id, tmplcd, tran_tmplcd, usemod, billnm, sync_status, source
        FROM gateway_template_mappings
       WHERE bill_id = $1`,
     [billId],
@@ -348,6 +351,7 @@ async function reconcileOneBill(billId: string, server: GatewayServer): Promise<
   for (const remote of remoteRows) {
     const tmplcd = String(remote?.tmplcd ?? '').trim();
     if (!tmplcd) continue; // 0720 결함 당시 산물(빈 tmplcd 행) — 매칭 불가·무해, 리포트만
+    if (remoteTmplcds.has(tmplcd)) continue; // 병기 billid('P0042;R0003')는 엔진이 분해 조회해 같은 행을 이중 반환 — dedup
     remoteTmplcds.add(tmplcd);
     const desired = desiredByTmplcd.get(tmplcd);
 
@@ -371,43 +375,82 @@ async function reconcileOneBill(billId: string, server: GatewayServer): Promise<
       continue;
     }
 
-    if (desired.sync_status === 'synced') {
-      const mismatches = diffMappingFields(
-        { tmplcd: desired.tmplcd, tran_tmplcd: desired.tran_tmplcd, usemod: desired.usemod, billnm: desired.billnm },
-        remote,
+    const mismatches = diffMappingFields(
+      { tmplcd: desired.tmplcd, tran_tmplcd: desired.tran_tmplcd, usemod: desired.usemod, billnm: desired.billnm },
+      remote,
+    );
+
+    if (mismatches.length === 0) {
+      report.matched += 1;
+      await query(
+        `UPDATE gateway_template_mappings SET last_seen_at = now() WHERE id = $1`,
+        [desired.id],
       );
-      if (mismatches.length > 0) {
-        report.drifts.push(tmplcd);
-        await query(
-          `UPDATE gateway_template_mappings
-              SET sync_status = 'pending', next_retry_at = now(), attempts = 0,
-                  last_error = $2, last_seen_at = now(), updated_at = now()
-            WHERE id = $1`,
-          [desired.id, `대조 드리프트: [${mismatches.join(', ')}] 게이트웨이 실값과 불일치`],
-        );
-        continue;
-      }
+      continue;
     }
 
+    if (desired.source === 'seed') {
+      // ★시드(기존 운영) 행 = 게이트웨이 실값이 진실 — 우리 DB를 채택으로 수렴(기존 값 유지 원칙 §4-9-C 3).
+      //   엑셀 스냅샷 값으로 운영 매핑을 재push하면 이후 변경분을 덮어쓰므로 절대 금지.
+      //   (직전 대조가 pending으로 잘못 돌린 행도 이 분기가 synced로 자가 치유한다)
+      report.adopted.push(tmplcd);
+      await query(
+        `UPDATE gateway_template_mappings
+            SET tran_tmplcd = $2, usemod = $3, billnm = $4,
+                sync_status = 'synced', attempts = 0, next_retry_at = NULL,
+                last_error = NULL, last_seen_at = now(), updated_at = now()
+          WHERE id = $1`,
+        [
+          desired.id,
+          String(remote?.tran_tmplcd ?? '').trim() || desired.tmplcd,
+          String(remote?.usemod ?? '').trim() || desired.usemod,
+          String(remote?.billnm ?? '').trim(),
+        ],
+      );
+      continue;
+    }
+
+    if (desired.sync_status === 'synced') {
+      // auto/manual 행 = 우리가 등록 주체 — desired가 진실이라 재push로 수렴
+      report.drifts.push(tmplcd);
+      await query(
+        `UPDATE gateway_template_mappings
+            SET sync_status = 'pending', next_retry_at = now(), attempts = 0,
+                last_error = $2, last_seen_at = now(), updated_at = now()
+          WHERE id = $1`,
+        [desired.id, `대조 드리프트: [${mismatches.join(', ')}] 게이트웨이 실값과 불일치`],
+      );
+      continue;
+    }
+
+    // auto/manual인데 pending/failed 상태 = push 대기·판단 대기 중 — 실존 확인만 기록
     report.matched += 1;
-    await query(
-      `UPDATE gateway_template_mappings SET last_seen_at = now() WHERE id = $1`,
-      [desired.id],
-    );
+    await query(`UPDATE gateway_template_mappings SET last_seen_at = now() WHERE id = $1`, [desired.id]);
   }
 
-  // desired는 synced인데 게이트웨이에 없는 행 = 드리프트 → pending 재전환 (재push로 수렴)
+  // desired에 있는데 게이트웨이에 없는 행
   for (const [tmplcd, desired] of desiredByTmplcd) {
     if (remoteTmplcds.has(tmplcd)) continue;
     if (desired.sync_status === 'synced') {
       report.missingOnGateway.push(tmplcd);
-      await query(
-        `UPDATE gateway_template_mappings
-            SET sync_status = 'pending', next_retry_at = now(), attempts = 0,
-                last_error = '대조: 게이트웨이에 행 부재 — 재push', updated_at = now()
-          WHERE id = $1`,
-        [desired.id],
-      );
+      if (desired.source === 'seed') {
+        // 시드 행 부재 = 스냅샷 이후 운영자가 웹관리자에서 삭제한 것 — 자동 재등록은 사람 결정 뒤집기라 금지(0611 원칙)
+        await query(
+          `UPDATE gateway_template_mappings
+              SET sync_status = 'failed', next_retry_at = NULL,
+                  last_error = '대조: 게이트웨이 부재(시드 이후 삭제 추정) — 자동 재등록 안 함·운영자 판단', updated_at = now()
+            WHERE id = $1`,
+          [desired.id],
+        );
+      } else {
+        await query(
+          `UPDATE gateway_template_mappings
+              SET sync_status = 'pending', next_retry_at = now(), attempts = 0,
+                  last_error = '대조: 게이트웨이에 행 부재 — 재push', updated_at = now()
+            WHERE id = $1`,
+          [desired.id],
+        );
+      }
     } else if (desired.sync_status === 'orphan') {
       // 고아 표시 행이 게이트웨이에서 사라짐(운영자가 웹관리자에서 삭제) → 우리 표시 행만 정리
       await query(`DELETE FROM gateway_template_mappings WHERE id = $1 AND sync_status = 'orphan'`, [desired.id]);
