@@ -444,9 +444,10 @@ const [emailSending, setEmailSending] = useState(false);
   const [templateSearch, setTemplateSearch] = useState('');
   const [templateDetail, setTemplateDetail] = useState<any | null>(null);
   const [manualForm, setManualForm] = useState({ companyId: '', templateCode: '', templateName: '', category: '', messageType: 'BA', content: '' });
-  // ★ 2026-07-20: 이관으로 템플릿이 4,400건대가 되면서 전량 렌더가 사실상 못 쓰는 상태 → 20개씩 페이징
+  // ★ 2026-07-20: 이관으로 템플릿이 4,400건대가 되면서 전량 렌더가 사실상 못 쓰는 상태 → 페이징
+  //   행 높이가 2줄(템플릿명+코드)이라 20건도 스크롤이 길어 10건으로 확정(고객사 목록과 동일 기준)
   const [templatePage, setTemplatePage] = useState(1);
-  const templatePerPage = 20;
+  const templatePerPage = 10;
   // 검색·상태 필터는 알림톡/RCS 공통 규칙 — 한 곳에만 정의해 두 목록이 같은 기준을 쓰게 한다
   const filterTemplateRows = (list: any[]) =>
     list.filter((t: any) => {

@@ -261,9 +261,10 @@ export default function AlimtalkSendersSection() {
     );
   }, [senders, tab]);
 
-  // ★ 2026-07-20: 이관으로 프로필이 199개가 되어 전량 렌더는 세로 스크롤이 과함 → 20개씩 페이징
+  // ★ 2026-07-20: 이관으로 프로필이 199개가 되어 전량 렌더는 세로 스크롤이 과함 → 10개씩 페이징
+  //   (템플릿 목록·고객사 목록과 동일 기준 — 행이 여러 줄이라 20건은 여전히 길다)
   const [page, setPage] = useState(1);
-  const perPage = 20;
+  const perPage = 10;
   useEffect(() => {
     setPage(1);
   }, [tab, senders.length]);
