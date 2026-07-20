@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef, Fragment } from 'react';
+import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { companiesApi, plansApi, billingApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import { formatDateTime, formatDate, formatDateTimeShort, formatCampaignMessageForDisplay, getAlimtalkTemplateStatus, kstTodayStr } from '../utils/formatDate';
 import SessionTimer from '../components/SessionTimer';
 import AlimtalkSendersSection from '../components/alimtalk/AlimtalkSendersSection'; // ★ D130
+import TablePagination from '../components/common/TablePagination'; // ★ 2026-07-20 목록 공용 페이저
 import MessageDetailModal from '../components/MessageDetailModal'; // ★ D144 후속: 발송 상세 내역 모달의 메시지 셀 클릭 시 표시 + 복사
 import SearchableSelect from '../components/SearchableSelect'; // ★ D144 P11+P13: 검색 가능 select (사용자 추가 소속회사 + 발송통계 회사 필터)
 import LoginBlocksManagement from '../components/admin/LoginBlocksManagement'; // ★ D145 P0 (2026-05-07): 로그인 차단 관리 (B안: IP+loginId 쌍)
@@ -443,6 +444,30 @@ const [emailSending, setEmailSending] = useState(false);
   const [templateSearch, setTemplateSearch] = useState('');
   const [templateDetail, setTemplateDetail] = useState<any | null>(null);
   const [manualForm, setManualForm] = useState({ companyId: '', templateCode: '', templateName: '', category: '', messageType: 'BA', content: '' });
+  // ★ 2026-07-20: 이관으로 템플릿이 4,400건대가 되면서 전량 렌더가 사실상 못 쓰는 상태 → 20개씩 페이징
+  const [templatePage, setTemplatePage] = useState(1);
+  const templatePerPage = 20;
+  // 검색·상태 필터는 알림톡/RCS 공통 규칙 — 한 곳에만 정의해 두 목록이 같은 기준을 쓰게 한다
+  const filterTemplateRows = (list: any[]) =>
+    list.filter((t: any) => {
+      const q = templateSearch.trim().toLowerCase();
+      if (q && !`${t.company_name || ''} ${t.template_name || ''} ${t.template_code || ''}`.toLowerCase().includes(q)) return false;
+      if (templateFilter === 'all') return true;
+      const lb = getAlimtalkTemplateStatus(t.status).label;
+      return templateFilter === 'pending' ? lb === '검수중' : templateFilter === 'approved' ? lb === '승인' : lb === '반려';
+    });
+  const filteredAlimtalkTemplates = useMemo(
+    () => filterTemplateRows(adminTemplates),
+    [adminTemplates, templateSearch, templateFilter],
+  );
+  const filteredRcsTemplates = useMemo(
+    () => filterTemplateRows(adminRcsTemplates),
+    [adminRcsTemplates, templateSearch, templateFilter],
+  );
+  // 검색·필터·서브탭이 바뀌면 1페이지로 — 3페이지에서 검색해 결과가 1페이지뿐이면 빈 화면이 되는 것 차단
+  useEffect(() => {
+    setTemplatePage(1);
+  }, [templateSearch, templateFilter, templateSubTab]);
   // ★ D130: 레거시 adminProfiles/showProfileForm/profileForm/profileSaving 제거 — AlimtalkSendersSection이 자체 관리
 
   // 커스텀 모달 상태
@@ -3039,24 +3064,12 @@ const handleApproveRequest = async (id: string) => {
                 </tbody>
                 </table>
             </div>
-            {filteredCompanies.length > companyPerPage && (
-              <div className="px-6 py-4 border-t flex items-center justify-between">
-                <span className="text-sm text-gray-500">
-                  총 {filteredCompanies.length}개 중 {(companyPage - 1) * companyPerPage + 1}-{Math.min(companyPage * companyPerPage, filteredCompanies.length)}
-                </span>
-                <div className="flex gap-1">
-                  <button onClick={() => setCompanyPage(p => Math.max(1, p - 1))} disabled={companyPage === 1}
-                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">◀ 이전</button>
-                  {Array.from({ length: Math.ceil(filteredCompanies.length / companyPerPage) }, (_, i) => i + 1).map(p => (
-                    <button key={p} onClick={() => setCompanyPage(p)}
-                      className={`px-3 py-1 rounded border text-sm ${companyPage === p ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-gray-50'}`}>{p}</button>
-                  ))}
-                  <button onClick={() => setCompanyPage(p => Math.min(Math.ceil(filteredCompanies.length / companyPerPage), p + 1))}
-                    disabled={companyPage >= Math.ceil(filteredCompanies.length / companyPerPage)}
-                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-gray-50">다음 ▶</button>
-                </div>
-              </div>
-            )}
+            <TablePagination
+              total={filteredCompanies.length}
+              page={companyPage}
+              perPage={companyPerPage}
+              onChange={setCompanyPage}
+            />
           </div>
         )}
 
@@ -4840,11 +4853,14 @@ const handleApproveRequest = async (id: string) => {
 
           {/* 알림톡 목록 */}
           {templateSubTab === 'alimtalk' && (
+            <>
             <div className="overflow-x-auto">
               {templatesLoading ? (
                 <div className="text-center py-12 text-gray-400">로딩 중...</div>
-              ) : adminTemplates.length === 0 ? (
-                <div className="text-center py-12 text-gray-400">템플릿이 없습니다</div>
+              ) : filteredAlimtalkTemplates.length === 0 ? (
+                <div className="text-center py-12 text-gray-400">
+                  {adminTemplates.length === 0 ? '템플릿이 없습니다' : '검색 결과가 없습니다'}
+                </div>
               ) : (
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b">
@@ -4858,13 +4874,9 @@ const handleApproveRequest = async (id: string) => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {adminTemplates.filter((t: any) => {
-                      const q = templateSearch.trim().toLowerCase();
-                      if (q && !`${t.company_name || ''} ${t.template_name || ''} ${t.template_code || ''}`.toLowerCase().includes(q)) return false;
-                      if (templateFilter === 'all') return true;
-                      const lb = getAlimtalkTemplateStatus(t.status).label;
-                      return templateFilter === 'pending' ? lb === '검수중' : templateFilter === 'approved' ? lb === '승인' : lb === '반려';
-                    }).map((t: any) => (
+                    {filteredAlimtalkTemplates
+                      .slice((templatePage - 1) * templatePerPage, templatePage * templatePerPage)
+                      .map((t: any) => (
                       <tr key={t.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-gray-900 font-medium">{t.company_name || '-'}</td>
                         <td className="px-4 py-3">
@@ -4914,13 +4926,24 @@ const handleApproveRequest = async (id: string) => {
                 </table>
               )}
             </div>
+            <TablePagination
+              total={filteredAlimtalkTemplates.length}
+              page={templatePage}
+              perPage={templatePerPage}
+              onChange={setTemplatePage}
+              unit="건"
+            />
+            </>
           )}
 
           {/* RCS 목록 */}
           {templateSubTab === 'rcs' && (
+            <>
             <div className="overflow-x-auto">
-              {adminRcsTemplates.length === 0 ? (
-                <div className="text-center py-12 text-gray-400">RCS 템플릿이 없습니다</div>
+              {filteredRcsTemplates.length === 0 ? (
+                <div className="text-center py-12 text-gray-400">
+                  {adminRcsTemplates.length === 0 ? 'RCS 템플릿이 없습니다' : '검색 결과가 없습니다'}
+                </div>
               ) : (
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b">
@@ -4933,13 +4956,9 @@ const handleApproveRequest = async (id: string) => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {adminRcsTemplates.filter((t: any) => {
-                      const q = templateSearch.trim().toLowerCase();
-                      if (q && !`${t.company_name || ''} ${t.template_name || ''} ${t.template_code || ''}`.toLowerCase().includes(q)) return false;
-                      if (templateFilter === 'all') return true;
-                      const lb = getAlimtalkTemplateStatus(t.status).label;
-                      return templateFilter === 'pending' ? lb === '검수중' : templateFilter === 'approved' ? lb === '승인' : lb === '반려';
-                    }).map((t: any) => (
+                    {filteredRcsTemplates
+                      .slice((templatePage - 1) * templatePerPage, templatePage * templatePerPage)
+                      .map((t: any) => (
                       <tr key={t.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-gray-900 font-medium">{t.company_name || '-'}</td>
                         <td className="px-4 py-3 text-gray-900">{t.template_name}</td>
@@ -4969,6 +4988,14 @@ const handleApproveRequest = async (id: string) => {
                 </table>
               )}
             </div>
+            <TablePagination
+              total={filteredRcsTemplates.length}
+              page={templatePage}
+              perPage={templatePerPage}
+              onChange={setTemplatePage}
+              unit="건"
+            />
+            </>
           )}
         </div>
         </div>

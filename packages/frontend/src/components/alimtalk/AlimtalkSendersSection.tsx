@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState } from 'react';
 import SenderRegistrationWizard from './SenderRegistrationWizard';
 import UnsubscribeSettingModal from './UnsubscribeSettingModal';
 import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
+import TablePagination from '../common/TablePagination'; // ★ 2026-07-20 목록 공용 페이저
 
 type ApprovalStatus = 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED';
 
@@ -260,6 +261,17 @@ export default function AlimtalkSendersSection() {
     );
   }, [senders, tab]);
 
+  // ★ 2026-07-20: 이관으로 프로필이 199개가 되어 전량 렌더는 세로 스크롤이 과함 → 20개씩 페이징
+  const [page, setPage] = useState(1);
+  const perPage = 20;
+  useEffect(() => {
+    setPage(1);
+  }, [tab, senders.length]);
+  const paged = useMemo(
+    () => filtered.slice((page - 1) * perPage, page * perPage),
+    [filtered, page],
+  );
+
   return (
     <div className="bg-white rounded-lg shadow">
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
@@ -364,7 +376,7 @@ export default function AlimtalkSendersSection() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((s) => {
+                {paged.map((s) => {
                   const approval = (s.approval_status ||
                     'PENDING_APPROVAL') as ApprovalStatus;
                   const approvalBadge = APPROVAL_BADGE[approval];
@@ -477,6 +489,12 @@ export default function AlimtalkSendersSection() {
                 })}
               </tbody>
             </table>
+            <TablePagination
+              total={filtered.length}
+              page={page}
+              perPage={perPage}
+              onChange={setPage}
+            />
           </div>
         )}
       </div>
