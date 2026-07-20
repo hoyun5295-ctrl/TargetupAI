@@ -415,21 +415,21 @@ function CountdownLive({ b, theme, t }: { b: any; theme: InAppTheme; t: (s: any)
 function PosterHero({ plan, theme, t, fullBleed }: { plan: CardLayoutPlan; theme: InAppTheme; t: (s: any) => string; fullBleed?: boolean }) {
   const onHero = plan.hero ? '#ffffff' : pickReadableText(theme.accent);
   return (
-    <div style={{ position: 'relative', width: '100%', minHeight: fullBleed ? 170 : 136, borderRadius: fullBleed ? 0 : Math.max(12, theme.radius - 8), overflow: 'hidden', display: 'flex', alignItems: 'flex-end', background: plan.hero ? theme.surfaceElevated : `linear-gradient(135deg, ${shadeHex(theme.accent, 10)} 0%, ${theme.accent} 55%, ${shadeHex(theme.accent, -25)} 100%)` }}>
+    <div style={{ position: 'relative', width: '100%', minHeight: fullBleed ? 190 : 136, borderRadius: fullBleed ? 0 : Math.max(12, theme.radius - 8), overflow: 'hidden', display: 'flex', alignItems: 'flex-end', background: plan.hero ? theme.surfaceElevated : `linear-gradient(135deg, ${shadeHex(theme.accent, 10)} 0%, ${theme.accent} 55%, ${shadeHex(theme.accent, -25)} 100%)` }}>
       {plan.hero && (
         <>
           <img src={String(plan.hero.url || '')} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
           <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.02) 30%, rgba(0,0,0,0.58) 100%)' }} />
         </>
       )}
-      <div style={{ position: 'relative', padding: fullBleed ? '20px 22px 16px' : '18px 18px 16px', display: 'flex', flexDirection: 'column', gap: 7, width: '100%', boxSizing: 'border-box' }}>
+      <div style={{ position: 'relative', padding: fullBleed ? '22px 24px 18px' : '18px 18px 16px', display: 'flex', flexDirection: 'column', gap: 7, width: '100%', boxSizing: 'border-box' }}>
         {plan.overlay.map((ob: any, j: number) => {
           const txt = t(ob.text).trim();
           if (!txt) return null;
           return ob.type === 'eyebrow' ? (
             <div key={j} style={{ alignSelf: 'flex-start', fontSize: fullBleed ? 11 : 10.5, fontWeight: 800, letterSpacing: fullBleed ? '0.2em' : '0.14em', color: onHero, opacity: 0.88, lineHeight: 1.2 }}>{txt}</div>
           ) : (
-            <div key={j} style={{ fontSize: fullBleed ? 24 : 22, fontWeight: 800, letterSpacing: fullBleed ? '-0.03em' : '-0.02em', lineHeight: fullBleed ? 1.18 : 1.22, color: onHero, textShadow: plan.hero ? '0 2px 12px rgba(0,0,0,0.35)' : 'none' }}>{txt}</div>
+            <div key={j} style={{ fontSize: fullBleed ? 26 : 22, fontWeight: 800, letterSpacing: fullBleed ? '-0.03em' : '-0.02em', lineHeight: fullBleed ? 1.18 : 1.22, color: onHero, textShadow: plan.hero ? '0 2px 12px rgba(0,0,0,0.35)' : 'none' }}>{txt}</div>
           );
         })}
       </div>

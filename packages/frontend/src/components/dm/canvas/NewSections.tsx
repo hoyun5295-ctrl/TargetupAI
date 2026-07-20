@@ -36,19 +36,33 @@ import { DmIcon, DmEventCard, DM_CTA_STYLE } from './dm-primitives';
 
 // ────────────── 공통 영역 ──────────────
 
-const CARD_STYLE: React.CSSProperties = {
-  background: 'var(--dm-bg)',
-  border: '1px solid var(--dm-neutral-200)',
-  borderRadius: 'var(--dm-radius-lg)',
-  padding: 'var(--dm-sp-4)',
-  margin: 'var(--dm-sp-3) 0',
-};
+// ★ 2026-07-21 발행 SSR 섹션 셸 정합(Codex 지적) — 발행 dm-section은 카드 테두리·radius·margin 없이 padding만.
+//   편집 캔버스도 동일하게(편집=발행). LG=상품/갤러리/탭카드/매장/후기(sp-6 sp-5), SM=슬라이드쇼/유튜브/인스타(sp-4).
+//   이벤트형(투표/설문/이메일수집/클릭리워드/추첨/룰렛/선착순)은 DmEventCard 셸(발행 dmEventCard 미러).
+const SECTION_SHELL_LG: React.CSSProperties = { padding: 'var(--dm-sp-6) var(--dm-sp-5)' };
+const SECTION_SHELL_SM: React.CSSProperties = { padding: 'var(--dm-sp-4)' };
 
+// 발행 SSR도 인라인 fs-h3로 제목을 그리는 섹션 전용(설문·추첨·선착순 — dm-section-renderer 964/1007/1046).
 const TITLE_STYLE: React.CSSProperties = {
   fontSize: 'var(--dm-fs-h3)',
   fontWeight: 700,
   color: 'var(--dm-neutral-900)',
   marginBottom: 'var(--dm-sp-2)',
+};
+
+// ★ 2026-07-20 남지현 재오픈("편집 화면 ≠ 출력 화면") 근본 — 발행 SSR은 섹션 제목에 dm-text-h2 클래스를 붙이는데
+//   편집 캔버스는 클래스 없는 div였다. 아트디렉션 모티프(rule = 제목 위 30x3 강조색 막대 / bracket / index)가
+//   `.dm-text-h2::before`·`::after`로 걸리는 구조라, 클래스가 없으면 편집 화면에서만 장식이 통째로 사라진다.
+//   크기(h2)·굵기는 클래스가 주므로 인라인에 두지 않는다(인라인이 클래스를 덮어 h3로 되돌아감).
+//   여백은 SSR과 동일하게 sp-4, 후기 classic만 sp-3(dm-section-renderer 1117).
+const H2_TITLE_STYLE: React.CSSProperties = {
+  color: 'var(--dm-neutral-900)',
+  marginBottom: 'var(--dm-sp-4)',
+};
+
+const H2_TITLE_STYLE_TIGHT: React.CSSProperties = {
+  color: 'var(--dm-neutral-900)',
+  marginBottom: 'var(--dm-sp-3)',
 };
 
 const PLACEHOLDER_STYLE: React.CSSProperties = {
@@ -100,7 +114,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
     const [first, ...rest] = products;
     return (
       <div className="dm-section dm-product-carousel" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', ...(props.background_color ? { background: props.background_color } : {}) }}>
-        {props.title && <div style={TITLE_STYLE}>{props.title}</div>}
+        {props.title && <div className="dm-text-h2" style={H2_TITLE_STYLE}>{props.title}</div>}
         <div className="dm-pc-items" style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
           <div style={{ width: '100%', background: cardBg, border: '1px solid var(--dm-neutral-200)', borderRadius: 18, overflow: 'hidden', boxShadow: 'var(--dm-shadow-md)' }}>
             {first.image_url ? <img src={dmImageUrl(first.image_url)} alt={first.name} style={{ width: '100%', height: focusBigH, display: 'block', ...imgFit }} /> : <div style={{ width: '100%', height: focusBigH, background: 'var(--dm-neutral-100)' }} />}
@@ -125,7 +139,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
   if (treatment === 'list' && products.length > 0) {
     return (
       <div className="dm-section dm-product-carousel" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', ...(props.background_color ? { background: props.background_color } : {}) }}>
-        {props.title && <div style={TITLE_STYLE}>{props.title}</div>}
+        {props.title && <div className="dm-text-h2" style={H2_TITLE_STYLE}>{props.title}</div>}
         <div className="dm-pc-items" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {products.map((p, i) => (
             <div key={p.id || i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', background: cardBg, border: '1px solid var(--dm-neutral-200)', borderRadius: 14 }}>
@@ -142,8 +156,8 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
     );
   }
   return (
-    <div className="dm-section dm-product-carousel" style={props.background_color ? { ...CARD_STYLE, background: props.background_color } : CARD_STYLE}>
-      {props.title && <div style={TITLE_STYLE}>{props.title}</div>}
+    <div className="dm-section dm-product-carousel" style={props.background_color ? { ...SECTION_SHELL_LG, background: props.background_color } : SECTION_SHELL_LG}>
+      {props.title && <div className="dm-text-h2" style={H2_TITLE_STYLE}>{props.title}</div>}
       {products.length === 0 ? (
         <div style={PLACEHOLDER_STYLE}>[상품을 추가해주세요]</div>
       ) : (
@@ -210,10 +224,10 @@ export function GallerySection({ props, treatment }: { props: GalleryProps; trea
     : { width: '100%', aspectRatio: '1', objectFit: 'cover', borderRadius: radius };
   const sectionStyle: React.CSSProperties = fullBleed
     ? { padding: 0, margin: 0 }
-    : CARD_STYLE;
+    : SECTION_SHELL_LG;
   return (
     <div className="dm-section dm-gallery" style={sectionStyle}>
-      {props.title && <div style={fullBleed ? { ...TITLE_STYLE, padding: 'var(--dm-sp-4) var(--dm-sp-5) 0' } : TITLE_STYLE}>{props.title}</div>}
+      {props.title && <div className="dm-text-h2" style={fullBleed ? { ...H2_TITLE_STYLE, padding: 'var(--dm-sp-4) var(--dm-sp-5) 0' } : H2_TITLE_STYLE}>{props.title}</div>}
       {images.length === 0 ? (
         <div style={PLACEHOLDER_STYLE}>[이미지를 추가해주세요]</div>
       ) : (
@@ -239,7 +253,7 @@ export function SlideshowSection({ props }: { props: SlideshowProps }) {
   const [idx, setIdx] = useState(0);
   const cur = slides[idx];
   return (
-    <div className="dm-section dm-slideshow" style={{ ...CARD_STYLE, position: 'relative' }}>
+    <div className="dm-section dm-slideshow" style={{ ...SECTION_SHELL_SM, position: 'relative' }}>
       {slides.length === 0 ? (
         <div style={PLACEHOLDER_STYLE}>[슬라이드를 추가해주세요]</div>
       ) : (
@@ -275,7 +289,7 @@ export function TabCardsSection({ props }: { props: TabCardsProps }) {
   const [idx, setIdx] = useState(props?.default_tab_index || 0);
   const cur = tabs[idx];
   return (
-    <div className="dm-section dm-tab-cards" style={CARD_STYLE}>
+    <div className="dm-section dm-tab-cards" style={SECTION_SHELL_LG}>
       <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--dm-neutral-200)', marginBottom: 12 }}>
         {tabs.map((t, i) => (
           <button
@@ -305,123 +319,137 @@ export function TabCardsSection({ props }: { props: TabCardsProps }) {
 
 export function PollSection({ props }: { props: PollProps }) {
   const options = props?.options || [];
+  // ★ 2026-07-21 발행 renderPoll이 dmEventCard(icon:poll·overline:POLL)로 감싸므로 셸을 DmEventCard로 정합(옛 단순 카드 → 편집=발행).
   return (
-    <div className="dm-section dm-poll" style={CARD_STYLE}>
-      <div style={TITLE_STYLE}>{props.question || '[질문을 작성해주세요]'}</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {options.map((o) => (
-          <button
-            key={o.id}
-            style={{
-              padding: '10px 14px',
-              background: 'var(--dm-neutral-50)',
-              border: '1px solid var(--dm-neutral-200)',
-              borderRadius: 8, fontSize: 13, fontWeight: 500, color: 'var(--dm-neutral-900)',
-              cursor: 'pointer', textAlign: 'left',
-            }}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
-      {props.one_vote_per_user && (
-        <div style={{ fontSize: 11, color: 'var(--dm-neutral-500)', marginTop: 8 }}>1인 1회 투표</div>
-      )}
+    <div className="dm-section dm-poll">
+      <DmEventCard accentVar="--dm-primary" icon="poll" overline="POLL">
+        <div className="dm-text-h2" style={H2_TITLE_STYLE}>{props.question || '[질문을 작성해주세요]'}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {options.map((o) => (
+            <button
+              key={o.id}
+              style={{
+                padding: '10px 14px',
+                background: 'var(--dm-neutral-50)',
+                border: '1px solid var(--dm-neutral-200)',
+                borderRadius: 8, fontSize: 13, fontWeight: 500, color: 'var(--dm-neutral-900)',
+                cursor: 'pointer', textAlign: 'left',
+              }}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+        {props.one_vote_per_user && (
+          <div style={{ fontSize: 11, color: 'var(--dm-neutral-500)', marginTop: 8 }}>1인 1회 투표</div>
+        )}
+      </DmEventCard>
     </div>
   );
 }
 
 export function SurveySection({ props }: { props: SurveyProps }) {
   const questions = props?.questions || [];
+  // ★ 2026-07-21 발행 renderSurvey가 dmEventCard(icon:survey·overline:SURVEY)로 감싸므로 셸을 DmEventCard로 정합.
+  //   [의도적 차이] 발행은 질문 0개면 셸 없이 '[설문 질문을 추가해주세요]'만(early-return) — 편집기는 작성 도구라
+  //   빈 상태에서도 제목·플레이스홀더를 유지(제목부터 쓰고 질문 채우는 흐름). Harold 결정(2026-07-21).
   return (
-    <div className="dm-section dm-survey" style={CARD_STYLE}>
-      {props.title && <div style={TITLE_STYLE}>{props.title}</div>}
-      {questions.length === 0 ? (
-        <div style={PLACEHOLDER_STYLE}>[설문 질문을 추가해주세요]</div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {questions.map((q) => (
-            <div key={q.id}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--dm-neutral-900)', marginBottom: 6 }}>
-                {q.question}
-                {q.required && <span style={{ color: 'var(--dm-error)' }}> *</span>}
-              </div>
-              {q.type === 'text' ? (
-                <input style={{ width: '100%', padding: 8, border: '1px solid var(--dm-neutral-200)', borderRadius: 6, fontSize: 13 }} placeholder="답변" />
-              ) : q.type === 'rating' ? (
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {[1, 2, 3, 4, 5].map((n) => <span key={n} style={{ fontSize: 20, color: 'var(--dm-neutral-300)' }}>★</span>)}
+    <div className="dm-section dm-survey">
+      <DmEventCard accentVar="--dm-primary" icon="survey" overline="SURVEY">
+        {props.title && <div style={{ ...TITLE_STYLE, marginBottom: 'var(--dm-sp-3)' }}>{props.title}</div>}
+        {questions.length === 0 ? (
+          <div style={PLACEHOLDER_STYLE}>[설문 질문을 추가해주세요]</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {questions.map((q) => (
+              <div key={q.id}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--dm-neutral-900)', marginBottom: 6 }}>
+                  {q.question}
+                  {q.required && <span style={{ color: 'var(--dm-error)' }}> *</span>}
                 </div>
-              ) : (
-                (q.options || []).map((opt, i) => (
-                  <label key={i} style={{ display: 'block', padding: '6px 0', fontSize: 13 }}>
-                    <input type={q.type === 'multiple' ? 'checkbox' : 'radio'} name={q.id} style={{ marginRight: 8 }} />
-                    {opt}
-                  </label>
-                ))
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-      {props.completion_reward_text && (
-        <div style={{ fontSize: 12, color: 'var(--dm-primary)', marginTop: 12, fontWeight: 600 }}>{props.completion_reward_text}</div>
-      )}
+                {q.type === 'text' ? (
+                  <input style={{ width: '100%', padding: 8, border: '1px solid var(--dm-neutral-200)', borderRadius: 6, fontSize: 13 }} placeholder="답변" />
+                ) : q.type === 'rating' ? (
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {[1, 2, 3, 4, 5].map((n) => <span key={n} style={{ fontSize: 20, color: 'var(--dm-neutral-300)' }}>★</span>)}
+                  </div>
+                ) : (
+                  (q.options || []).map((opt, i) => (
+                    <label key={i} style={{ display: 'block', padding: '6px 0', fontSize: 13 }}>
+                      <input type={q.type === 'multiple' ? 'checkbox' : 'radio'} name={q.id} style={{ marginRight: 8 }} />
+                      {opt}
+                    </label>
+                  ))
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {props.completion_reward_text && (
+          <div style={{ fontSize: 12, color: 'var(--dm-primary)', marginTop: 12, fontWeight: 600 }}>{props.completion_reward_text}</div>
+        )}
+      </DmEventCard>
     </div>
   );
 }
 
 export function EmailCaptureSection({ props }: { props: EmailCaptureProps }) {
+  // ★ 2026-07-21 발행 renderEmailCapture가 dmEventCard(icon:mail·overline:JOIN US)로 감싸므로 셸을 DmEventCard로 정합.
   return (
-    <div className="dm-section dm-email-capture" style={CARD_STYLE}>
-      <div style={TITLE_STYLE}>{props.headline || '[헤드라인을 작성해주세요]'}</div>
-      {props.description && (
-        <div style={{ fontSize: 13, color: 'var(--dm-neutral-700)', marginBottom: 12, lineHeight: 1.6 }}>{props.description}</div>
-      )}
-      <input
-        type="email"
-        placeholder="이메일 주소"
-        style={{ width: '100%', padding: 10, border: '1px solid var(--dm-neutral-200)', borderRadius: 6, fontSize: 13, marginBottom: 10 }}
-      />
-      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 12, color: 'var(--dm-neutral-700)', marginBottom: 10 }}>
-        <input type="checkbox" style={{ marginTop: 2 }} />
-        <span>{props.consent_text}</span>
-      </label>
-      <button
-        style={{
-          width: '100%', height: 40, background: 'var(--dm-primary)', color: '#fff',
-          border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 700, cursor: 'pointer',
-        }}
-      >
-        {props.reward_description ? `참여하고 ${props.reward_description}` : '참여하기'}
-      </button>
-      {props.legal_notice && (
-        <div style={{ fontSize: 10, color: 'var(--dm-neutral-500)', marginTop: 8, lineHeight: 1.5 }}>{props.legal_notice}</div>
-      )}
+    <div className="dm-section dm-email-capture">
+      <DmEventCard accentVar="--dm-primary" icon="mail" overline="JOIN US">
+        <div style={TITLE_STYLE}>{props.headline || '[헤드라인을 작성해주세요]'}</div>
+        {props.description && (
+          <div style={{ fontSize: 13, color: 'var(--dm-neutral-700)', marginBottom: 12, lineHeight: 1.6 }}>{props.description}</div>
+        )}
+        <input
+          type="email"
+          placeholder="이메일 주소"
+          style={{ width: '100%', padding: 10, border: '1px solid var(--dm-neutral-200)', borderRadius: 6, fontSize: 13, marginBottom: 10 }}
+        />
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 12, color: 'var(--dm-neutral-700)', marginBottom: 10 }}>
+          <input type="checkbox" style={{ marginTop: 2 }} />
+          <span>{props.consent_text}</span>
+        </label>
+        <button
+          style={{
+            width: '100%', height: 40, background: 'var(--dm-primary)', color: '#fff',
+            border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+          }}
+        >
+          {props.reward_description ? `참여하고 ${props.reward_description}` : '참여하기'}
+        </button>
+        {props.legal_notice && (
+          <div style={{ fontSize: 10, color: 'var(--dm-neutral-500)', marginTop: 8, lineHeight: 1.5 }}>{props.legal_notice}</div>
+        )}
+      </DmEventCard>
     </div>
   );
 }
 
 export function ClickRewardsSection({ props }: { props: ClickRewardsProps }) {
   const iconMap: Record<string, 'heart' | 'star'> = { like: 'heart', share: 'star', scroll: 'star' };
+  // ★ 2026-07-21 발행 renderClickRewards가 dmEventCard(accentVar:--dm-accent, icon/overline 없음)로 감싸므로 셸 정합.
   return (
-    <div className="dm-section dm-click-rewards" style={CARD_STYLE}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--dm-sp-3)', marginBottom: 'var(--dm-sp-2)' }}>
-        <div style={{ color: 'var(--dm-accent)' }}><DmIcon name={iconMap[props.reward_type] || 'star'} size={28} /></div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)' }}>{props.reward_description}</div>
-          {props.show_progress && (
-            <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', marginTop: 2 }}>
-              목표 {props.target_count}회
-            </div>
-          )}
+    <div className="dm-section dm-click-rewards">
+      <DmEventCard accentVar="--dm-accent">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--dm-sp-3)', marginBottom: 'var(--dm-sp-2)' }}>
+          <div style={{ color: 'var(--dm-accent)' }}><DmIcon name={iconMap[props.reward_type] || 'star'} size={28} /></div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)' }}>{props.reward_description}</div>
+            {props.show_progress && (
+              <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', marginTop: 2 }}>
+                목표 {props.target_count}회
+              </div>
+            )}
+          </div>
         </div>
-      </div>
-      {props.show_progress && (
-        <div style={{ width: '100%', height: 6, background: 'var(--dm-neutral-200)', borderRadius: 'var(--dm-radius-full)', overflow: 'hidden' }}>
-          <div style={{ width: '0%', height: '100%', background: 'var(--dm-accent)' }} />
-        </div>
-      )}
+        {props.show_progress && (
+          <div style={{ width: '100%', height: 6, background: 'var(--dm-neutral-200)', borderRadius: 'var(--dm-radius-full)', overflow: 'hidden' }}>
+            <div style={{ width: '0%', height: '100%', background: 'var(--dm-accent)' }} />
+          </div>
+        )}
+      </DmEventCard>
     </div>
   );
 }
@@ -466,7 +494,9 @@ export function RouletteSection({ props }: { props: RouletteProps }) {
   return (
     <div className="dm-section dm-roulette">
       <DmEventCard accentVar="--dm-primary" icon="wheel" overline="EVENT">
-        <div style={TITLE_STYLE}>룰렛 이벤트</div>
+        {/* ★ 2026-07-21 SSR(renderRoulette) 여백 sp-3 정합. RouletteProps엔 title 타입·편집 UI가 없어(beta)
+            SSR의 p.title fallback은 항상 '룰렛 이벤트' — 하드코딩과 결과 동일(커스텀 제목 입력 경로 0). */}
+        <div style={{ ...TITLE_STYLE, marginBottom: 'var(--dm-sp-3)' }}>룰렛 이벤트</div>
         <div
           style={{
             width: 200, height: 200, borderRadius: '50%',
@@ -495,8 +525,11 @@ export function RouletteSection({ props }: { props: RouletteProps }) {
 export function InstantCouponSection({ props }: { props: InstantCouponProps }) {
   return (
     <div className="dm-section dm-instant-coupon">
-      <div style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', background: 'var(--dm-primary-light)', border: '2px dashed var(--dm-primary)', borderRadius: 'var(--dm-radius-xl)', margin: 'var(--dm-sp-3) 0' }}>
-        <div style={{ color: 'var(--dm-primary)', marginBottom: 'var(--dm-sp-3)' }}><DmIcon name="ticket" size={26} /></div>
+      {/* ★ 2026-07-21 발행 renderInstantCoupon v2 셸 정합 — 옛 점선 상자(2px dashed·아이콘26·오버라인 없음) →
+          라운드 카드(sp-8 sp-6·1px solid·radius20·shadow)+아이콘 칩 44+COUPON 오버라인. bg는 primary-light라 DmEventCard 대신 인라인 미러. */}
+      <div style={{ padding: 'var(--dm-sp-8) var(--dm-sp-6)', background: 'var(--dm-primary-light)', border: '1px solid var(--dm-neutral-200)', borderRadius: 20, boxShadow: 'var(--dm-shadow-md)', margin: 'var(--dm-sp-2) 0' }}>
+        <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--dm-bg)', color: 'var(--dm-primary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 'var(--dm-sp-4)' }}><DmIcon name="ticket" size={22} /></div>
+        <div className="dm-overline" style={{ color: 'var(--dm-primary)', marginBottom: 'var(--dm-sp-2)' }}>COUPON</div>
         <div style={{ ...TITLE_STYLE, color: 'var(--dm-primary)' }}>{props.coupon_label}</div>
         <div style={{ fontSize: 'var(--dm-fs-small)', color: 'var(--dm-neutral-700)', marginBottom: 'var(--dm-sp-3)' }}>{props.discount_description}</div>
         {props.expires_at && (
@@ -551,7 +584,7 @@ function getYoutubeId(url: string): string | null {
 export function YoutubeEmbedSection({ props }: { props: YoutubeEmbedProps }) {
   const videoId = props.video_url ? getYoutubeId(props.video_url) : null;
   return (
-    <div className="dm-section dm-youtube-embed" style={CARD_STYLE}>
+    <div className="dm-section dm-youtube-embed" style={SECTION_SHELL_SM}>
       {videoId ? (
         <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0 }}>
           <iframe
@@ -573,7 +606,7 @@ export function YoutubeEmbedSection({ props }: { props: YoutubeEmbedProps }) {
 
 export function InstagramEmbedSection({ props }: { props: InstagramEmbedProps }) {
   return (
-    <div className="dm-section dm-instagram-embed" style={CARD_STYLE}>
+    <div className="dm-section dm-instagram-embed" style={SECTION_SHELL_SM}>
       {props.post_url ? (
         <a
           href={props.post_url}
@@ -603,8 +636,8 @@ export function InstagramEmbedSection({ props }: { props: InstagramEmbedProps })
 export function MapStoreLocatorSection({ props }: { props: MapStoreLocatorProps }) {
   const stores = props?.stores || [];
   return (
-    <div className="dm-section dm-map-store-locator" style={CARD_STYLE}>
-      <div style={{ ...TITLE_STYLE, display: 'flex', alignItems: 'center', gap: 6 }}>
+    <div className="dm-section dm-map-store-locator" style={SECTION_SHELL_LG}>
+      <div style={{ ...TITLE_STYLE, marginBottom: 'var(--dm-sp-3)', display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ color: 'var(--dm-primary)' }}><DmIcon name="map" size={18} /></span>매장 찾기
       </div>
       <div style={{
@@ -652,7 +685,7 @@ export function ReviewsSection({ props, treatment }: { props: ReviewsProps; trea
     const [first, ...rest] = reviews.slice(0, 3);
     return (
       <div className="dm-section dm-reviews" style={{ padding: 'calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-6)' }}>
-        {props.title && <div style={TITLE_STYLE}>{props.title}</div>}
+        {props.title && <div className="dm-text-h2" style={H2_TITLE_STYLE}>{props.title}</div>}
         <div aria-hidden="true" style={{ fontFamily: 'var(--dm-font-display)', fontSize: 52, lineHeight: 0.6, color: 'var(--dm-accent)', opacity: 0.85 }}>&ldquo;</div>
         <div style={{ marginTop: 'var(--dm-sp-3)', fontSize: 'var(--dm-fs-h2)', fontWeight: 700, lineHeight: 1.55, fontFamily: 'var(--dm-font-display)', color: 'var(--dm-neutral-900)' }}>{first.body}</div>
         <div style={{ marginTop: 'var(--dm-sp-3)', display: 'flex', gap: 8, alignItems: 'baseline' }}>
@@ -674,8 +707,13 @@ export function ReviewsSection({ props, treatment }: { props: ReviewsProps; trea
     );
   }
   return (
-    <div className="dm-section dm-reviews" style={CARD_STYLE}>
-      {props.title && <div style={TITLE_STYLE}>{props.title}</div>}
+    <div className="dm-section dm-reviews" style={SECTION_SHELL_LG}>
+      {/* ★ 2026-07-21 SSR(renderReviews classic)은 제목 앞에 accent 별 아이콘 flex — 편집기에도 미러 */}
+      {props.title && (
+        <div className="dm-text-h2" style={{ ...H2_TITLE_STYLE_TIGHT, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ color: 'var(--dm-accent)' }}><DmIcon name="star" size={20} /></span>{props.title}
+        </div>
+      )}
       {props.show_average_rating !== false && reviews.length > 0 && (
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 'var(--dm-sp-3)' }}>
           <span style={{ fontSize: 'var(--dm-fs-h1)', fontWeight: 700, color: 'var(--dm-neutral-900)' }}>{avg}</span>

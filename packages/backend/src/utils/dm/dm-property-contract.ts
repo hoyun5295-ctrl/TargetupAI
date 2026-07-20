@@ -63,3 +63,23 @@ export const DM_COLOR_TABLE_2026_07_15: Array<{ section: string; prop: string; d
 
 /** 그라데이션 하단 연결부 = 그라데이션 끝색(--dm-grad-to)으로 착색돼야 이어짐(2026-07-15 임은지 — 시작색만 반영 결함). */
 export const DM_GRADIENT_DIVIDER_ENDCOLOR = true;
+
+/** ★ 2026-07-20 아트디렉션 모티프(브랜드킷 art_direction.accentMotif) — 값 축이 아니라 "장식이 걸리는 마크업 클래스" 축.
+ *  rule=제목 위 30x3 강조색 막대 / bracket=제목 양옆 괄호 / index=제목 위 일련번호 / dot=제목 끝 점.
+ *  전부 `.dm-text-h2`의 ::before·::after로 걸리므로, 발행 SSR과 편집 캔버스가 같은 섹션 제목에
+ *  같은 클래스를 붙여야 편집=발행이다(2026-07-20 남지현 재오픈 — 캔버스만 클래스 없는 div였다).
+ *  소비 검증 = dm-title-parity.test.ts(섹션별 제목 수까지 대조). 섹션 제목 마크업을 손대면 이 표를 함께 본다. */
+export const DM_MOTIF_TITLE_HOOK = {
+  cssClass: 'dm-text-h2',
+  motifs: ['rule', 'bracket', 'index', 'dot'] as const,
+  /** 발행·편집 양쪽이 제목에 위 클래스를 붙여야 하는 섹션 루트 클래스 */
+  sections: ['dm-product-carousel', 'dm-gallery', 'dm-poll', 'dm-reviews', 'dm-text-card'] as const,
+} as const;
+
+/** ★ 2026-07-21 섹션 셸 정합 — 발행 SSR이 dmEventCard(아이콘+오버라인 헤더의 큰 이벤트 카드)로 감싸는 섹션은
+ *  편집 캔버스도 DmEventCard로 감싸야 편집=발행(옛 단순 CARD_STYLE이면 셸 구조가 달라 편집≠발행). 소비 검증 = dm-title-parity.test.ts.
+ *  [제외] instant_coupon = 배경이 primary-light라 dmEventCard 함수 대신 양쪽 인라인 미러(별도 유지). */
+export const DM_EVENT_CARD_SECTIONS = [
+  'dm-poll', 'dm-survey', 'dm-email-capture', 'dm-click-rewards',
+  'dm-lucky-draw', 'dm-roulette', 'dm-limited-quantity',
+] as const;

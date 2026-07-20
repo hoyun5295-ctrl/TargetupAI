@@ -236,9 +236,11 @@
 
 /* ─────────── 타이포 유틸 ─────────── */
 
-.dm-text-hero  { font-size: var(--dm-fs-hero);  line-height: var(--dm-lh-hero);  font-weight: 800; letter-spacing: -0.03em; }
-.dm-text-h1    { font-size: var(--dm-fs-h1);    line-height: var(--dm-lh-h1);    font-weight: 700; letter-spacing: -0.02em; }
-.dm-text-h2    { font-size: var(--dm-fs-h2);    line-height: var(--dm-lh-h2);    font-weight: 700; letter-spacing: -0.01em; }
+/* ★ 2026-07-20 자간이 발행 뷰어(dm-tokens.ts 타이포 유틸)보다 한 단계씩 좁던 드리프트 정정 —
+   편집 화면을 발행물 값에 맞춘다(발행물 출력 무변 = 골든 스냅샷 무변). h2는 발행에 자간 지정이 없다. */
+.dm-text-hero  { font-size: var(--dm-fs-hero);  line-height: var(--dm-lh-hero);  font-weight: 800; letter-spacing: -0.02em; }
+.dm-text-h1    { font-size: var(--dm-fs-h1);    line-height: var(--dm-lh-h1);    font-weight: 700; letter-spacing: -0.01em; }
+.dm-text-h2    { font-size: var(--dm-fs-h2);    line-height: var(--dm-lh-h2);    font-weight: 700; }
 .dm-text-h3    { font-size: var(--dm-fs-h3);    line-height: var(--dm-lh-h3);    font-weight: 600; }
 .dm-text-body  { font-size: var(--dm-fs-body);  line-height: var(--dm-lh-body);  font-weight: 400; }
 .dm-text-small { font-size: var(--dm-fs-small); line-height: var(--dm-lh-small); font-weight: 400; }
@@ -584,6 +586,13 @@
 .dm-builder[data-dm-motif="dot"] .dm-section .dm-text-h2::after { content: "."; color: var(--dm-primary); }
 .dm-builder[data-dm-motif="bracket"] .dm-section .dm-text-h2::before { content: "「"; color: var(--dm-accent); margin-right: 2px; }
 .dm-builder[data-dm-motif="bracket"] .dm-section .dm-text-h2::after { content: "」"; color: var(--dm-accent); margin-left: 2px; }
+/* ★ 2026-07-20 index 모티프(제목 위 01·02 일련번호)가 발행 뷰어에만 있던 누락 정정 — rule 막대와 같은 부류.
+   캔버스도 SectionFrame이 .dm-section-wrap + data-section-type을 심으므로 셀렉터가 그대로 성립한다. */
+.dm-builder[data-dm-motif="index"] { counter-reset: dmsec; }
+.dm-builder[data-dm-motif="index"] .dm-section-wrap:not([data-section-type="header"]):not([data-section-type="footer"]) { counter-increment: dmsec; }
+.dm-builder[data-dm-motif="index"] .dm-section-wrap:not([data-section-type="header"]):not([data-section-type="footer"]) .dm-text-h2::before {
+  content: counter(dmsec, decimal-leading-zero); display: block; font-size: 11px; font-weight: 800; letter-spacing: 0.2em;
+  color: var(--dm-primary); margin-bottom: 8px; font-family: var(--dm-font-mono); }
 
 /* 아트디렉션 섹션 디바이더 — 캔버스는 SectionFrame(.dm-section-wrap) 래핑 구조라 근사(연속 프레임 사이 여백/선) */
 .dm-builder[data-dm-divider="gap"] .dm-section-wrap + .dm-section-wrap { margin-top: 14px; }

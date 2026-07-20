@@ -7,10 +7,12 @@ import type { ReactNode } from 'react';
 export type MobileFrameProps = {
   width?: number;             // 기본 375
   children: ReactNode;
-  showNotch?: boolean;        // 상단 노치
 };
 
-export default function MobileFrame({ width = 375, children, showNotch = true }: MobileFrameProps) {
+// ★ 2026-07-20 남지현 재오픈("맨 처음 로고 시작 부분") — 로고 위 가짜 노치(검정 24px 바 + 흰 알약)를 제거.
+//   단말기에는 없는 편집기 장식이라 "편집 화면 = 출력 화면" 대조 때마다 상단이 어긋나 보였다.
+//   폰 형태 인지는 프레임 라운드·그림자가 이미 담당한다.
+export default function MobileFrame({ width = 375, children }: MobileFrameProps) {
   return (
     <div
       className="dm-mobile-frame"
@@ -26,21 +28,6 @@ export default function MobileFrame({ width = 375, children, showNotch = true }:
         position: 'relative',
       }}
     >
-      {showNotch && (
-        <div
-          aria-hidden
-          style={{
-            height: 24,
-            background: 'var(--dm-neutral-900)',
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'flex-end',
-            paddingBottom: 4,
-          }}
-        >
-          <div style={{ width: 88, height: 16, background: 'var(--dm-neutral-1000)', borderRadius: 'var(--dm-radius-full)' }} />
-        </div>
-      )}
       <div style={{ background: 'var(--dm-bg)', minHeight: 600 }}>
         {children}
       </div>

@@ -113,6 +113,7 @@ export default function AdminDashboard() {
     ceoName: '',
     businessType: '',
     businessItem: '',
+    industryCode: '',
     address: '',
     sendHourStart: 9,
     sendHourEnd: 21,
@@ -156,6 +157,8 @@ export default function AdminDashboard() {
     aiOperatorTrialUntil: '' as string | null | '',
   });
   const [editCompanyTab, setEditCompanyTab] = useState<'basic' | 'send' | 'cost' | 'ai' | 'store' | 'fields' | 'cards' | 'customers' | 'sync'>('basic');
+  // ★ 2026-07-21 문안 생성 참조 업종 목록 — SSOT=백엔드 industry-codes.ts (프론트 하드코딩 금지, GET /api/admin/industry-codes)
+  const [industryOptions, setIndustryOptions] = useState<Array<{ code: string; label: string }>>([]);
   const [standardFields, setStandardFields] = useState<any[]>([]);
   const [enabledFields, setEnabledFields] = useState<string[]>([]);
   const [fieldDataCheck, setFieldDataCheck] = useState<Record<string, { hasData: boolean; count: number }>>({});
@@ -2291,6 +2294,13 @@ const handleApproveRequest = async (id: string) => {
   const handleEditCompany = async (company: Company) => {
     try {
       const token = localStorage.getItem('token');
+      // ★ 2026-07-21 문안 참조 업종 목록 — 정적 SSOT라 최초 1회만 로드(회사와 무관)
+      if (industryOptions.length === 0) {
+        fetch('/api/admin/industry-codes', { headers: { 'Authorization': `Bearer ${token}` } })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((j) => { if (j?.industries) setIndustryOptions(j.industries); })
+          .catch(() => {});
+      }
       const [res, fieldsRes, enabledRes, dataCheckRes, cardsRes] = await Promise.all([
         fetch(`/api/admin/companies/${company.id}`, {
           headers: { 'Authorization': `Bearer ${token}` }
@@ -2351,6 +2361,7 @@ const handleApproveRequest = async (id: string) => {
           ceoName: c.ceo_name || '',
           businessType: c.business_type || '',
           businessItem: c.business_item || '',
+          industryCode: c.industry_code || '',
           address: c.address || '',
           sendHourStart: c.send_start_hour ?? 9,
           sendHourEnd: c.send_end_hour ?? 21,
@@ -5874,6 +5885,19 @@ const handleApproveRequest = async (id: string) => {
                         onChange={(e) => setEditCompany({ ...editCompany, businessItem: e.target.value })}
                         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="화장품" />
                     </div>
+                  </div>
+                  {/* ★ 2026-07-21 문안 생성 참조 업종 — 사업자등록증 업태/종목(위)과 별개. 브랜드보이스 미등록 업체 문안 생성 시 참조 카테고리. */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">문안 생성 참조 업종</label>
+                    <select value={editCompany.industryCode}
+                      onChange={(e) => setEditCompany({ ...editCompany, industryCode: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                      <option value="">미지정</option>
+                      {industryOptions.map((o) => (
+                        <option key={o.code} value={o.code}>{o.label}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-400 mt-1">브랜드보이스 미등록 업체의 문안 생성 시 참조하는 업종입니다. 사업자등록증 업태·종목과 무관하게 실제 판매 카테고리로 지정하세요.</p>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">주소</label>

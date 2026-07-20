@@ -410,6 +410,12 @@ router.post('/users/:id/reset-password', authenticate, requireSuperAdmin, async 
 
 // ===== 회사 상세 수정 API =====
 
+// ★ 2026-07-21 문안 생성 참조 업종 목록 — 고객사 수정 셀렉트용 경량 SSOT(프론트 하드코딩 금지).
+//   업종 SSOT = industry-codes.ts. best-copy/list는 시드까지 끌어오는 무거운 쿼리라 이 용도로 재사용 부적합.
+router.get('/industry-codes', authenticate, requireSuperAdmin, (_req: Request, res: Response) => {
+  res.json({ industries: INDUSTRY_CODES.map((code) => ({ code, label: INDUSTRY_LABELS[code] })) });
+});
+
 // 회사 상세 조회
 router.get('/companies/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
@@ -450,10 +456,24 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
     subscriptionStatus,
     userIsolationEnabled,  // ★ D162-3 (2026-05-15) 수신거부 사용자격리 ON/OFF
     usageType,  // ★ 2026-07-03 사용구분: web / agent / both
+    industryCode,  // ★ 2026-07-21 문안 생성 참조 업종(companies.industry_code) — 사업자등록증 업태/종목과 별개
   } = req.body;
 
   if (usageType !== undefined && !['web', 'agent', 'both'].includes(usageType)) {
     return res.status(400).json({ error: 'usageType은 web/agent/both 중 하나여야 합니다.' });
+  }
+
+  // ★ 2026-07-21 업종 코드 정규화 — undefined=무변(미전송) / ''=미지정으로 클리어(NULL) / 유효코드=저장 / 그 외=거부.
+  let industryCodeParam: string | null = null;
+  if (industryCode !== undefined) {
+    const ic = String(industryCode).trim();
+    if (ic === '') {
+      industryCodeParam = '';  // 클리어 신호 — SQL CASE에서 NULLIF로 NULL 저장
+    } else if (isIndustryCode(ic)) {
+      industryCodeParam = ic;
+    } else {
+      return res.status(400).json({ error: '유효하지 않은 업종 코드입니다.' });
+    }
   }
 
   try {
@@ -509,11 +529,13 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           kakao_enabled = COALESCE($30, kakao_enabled),
           user_isolation_enabled = COALESCE($33, user_isolation_enabled),
           usage_type = COALESCE($34, usage_type),
+          -- ★ 2026-07-21 문안 참조 업종: null=무변 / ''=NULLIF로 미지정 클리어 / 코드=저장
+          industry_code = CASE WHEN $35::text IS NULL THEN industry_code ELSE NULLIF($35, '') END,
           -- subscription_status는 위 plan_id CASE문에서 처리
           updated_at = NOW()
       WHERE id = $32
       RETURNING *
-    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, finalSubscriptionStatus, id, userIsolationEnabled !== undefined ? userIsolationEnabled : null, usageType || null]);
+    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, finalSubscriptionStatus, id, userIsolationEnabled !== undefined ? userIsolationEnabled : null, usageType || null, industryCodeParam]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
