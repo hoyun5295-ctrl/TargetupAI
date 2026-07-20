@@ -322,6 +322,7 @@ router.post('/bills/bulk-create-companies', async (req: Request, res: Response) 
     for (const g of plan) {
       try {
         let companyId = g.existingCompanyId;
+        let needAdminUser = false;
         if (!companyId) {
           const company = await createCompanyCore({
             companyCode: g.companyCode,
@@ -331,15 +332,29 @@ router.post('/bills/bulk-create-companies', async (req: Request, res: Response) 
             usageType: 'agent',
             createdBy: req.user?.userId ?? null,
           });
-          companyId = company.id;
+          companyId = String(company.id);
           created += 1;
+          needAdminUser = true;
+        } else {
+          // 코드 일치 기존 회사 — 에이전트 전용이고 실계정이 0명일 때만 계정 보정
+          // (앞선 실행에서 회사만 생기고 계정 생성이 실패한 경우의 재실행 자가 치유.
+          //  실사용 회사(R0023 등)는 계정이 이미 있어 이 분기에 절대 안 들어옴)
+          const chk = await query(
+            `SELECT c.usage_type,
+                    (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id AND COALESCE(u.is_system, false) = false)::int AS user_cnt
+               FROM companies c WHERE c.id = $1::uuid`,
+            [companyId],
+          );
+          needAdminUser = chk.rows[0]?.usage_type === 'agent' && chk.rows[0]?.user_cnt === 0;
+        }
 
-          // company_admin 계정 동시 생성 — 최초 비번 일괄(BULK_INITIAL_PASSWORD)·최초 로그인 변경 강제.
+        if (needAdminUser) {
+          // 관리자 계정 생성 — 최초 비번 일괄(BULK_INITIAL_PASSWORD)·최초 로그인 변경 강제.
           // login_id는 전역 축이라 선점 확인 후 생성(충돌 시 skip 보고 — 기존 계정 무접촉).
           const loginId = g.loginId || g.companyCode.toLowerCase();
           const dupUser = await query(`SELECT id FROM users WHERE login_id = $1 LIMIT 1`, [loginId]);
           if (dupUser.rows.length === 0) {
-            await createCompanyAdminUser(String(company.id), loginId, BULK_INITIAL_PASSWORD, g.companyName);
+            await createCompanyAdminUser(companyId, loginId, BULK_INITIAL_PASSWORD, g.companyName);
             createdUsers.push(loginId);
           } else {
             skippedUsers.push(loginId);

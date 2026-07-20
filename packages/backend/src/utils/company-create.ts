@@ -85,9 +85,11 @@ export async function createCompanyAdminUser(
   name: string,
 ): Promise<any> {
   const passwordHash = await bcrypt.hash(password, 10);
+  // users.user_type DB 실값 = 'admin' (CHECK 제약) — 로그인 시 JWT에서 'company_admin'으로 매핑됨(auth.ts:295).
+  // 'company_admin'을 넣으면 users_user_type_check 위반(0720 bulk 실측 결함 정정).
   const r = await query(
     `INSERT INTO users (company_id, login_id, password_hash, name, user_type, status, must_change_password)
-     VALUES ($1, $2, $3, $4, 'company_admin', 'active', true)
+     VALUES ($1, $2, $3, $4, 'admin', 'active', true)
      RETURNING id, login_id, name, user_type`,
     [companyId, loginId, passwordHash, name],
   );
