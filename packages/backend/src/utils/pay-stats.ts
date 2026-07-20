@@ -148,3 +148,74 @@ export async function queryPayAgentStats(options: PayStatsOptions): Promise<PayS
     return null;
   }
 }
+
+export interface PayStatsDetailResult {
+  userStats: { user_name: string; department: string; sent: number; success: number; fail: number; cost: number }[];
+  campaigns: any[];
+  unitCost: { sms: number; lms: number };
+}
+
+const MSG_TYPE_LABEL: Record<string, string> = { S: 'SMS', L: 'LMS', M: 'MMS' };
+
+/**
+ * 에이전트 회사 발송 상세 — 그 날짜(또는 월)의 계정(CustId)×유형(MsgType)별 분해.
+ * 상세 모달의 userStats 표(이름/부서/발송/성공/실패)에 그대로 실리도록 동일 키로 반환
+ * (이름=CustId, 부서=유형 라벨 — 화면 무수정). campaigns 섹션은 빈 배열 = 미표시.
+ */
+export async function queryPayAgentStatsDetail(options: {
+  companyId: string;
+  view: 'daily' | 'monthly';
+  date: string; // daily 'YYYY-MM-DD' / monthly 'YYYY-MM'
+}): Promise<PayStatsDetailResult | null> {
+  const pool = getPool();
+  if (!pool) return null;
+
+  try {
+    const custRes = await query(
+      `SELECT agent_send_id FROM company_agent_ids WHERE company_id = $1 ORDER BY agent_send_id`,
+      [options.companyId],
+    );
+    const custIds: string[] = custRes.rows.map((r: any) => String(r.agent_send_id).trim()).filter(Boolean);
+    if (custIds.length === 0) return null;
+
+    const compact = String(options.date || '').replace(/-/g, '');
+    let dateCond: string;
+    let dateParam: string;
+    if (options.view === 'monthly') {
+      if (!/^\d{6}$/.test(compact)) return null;
+      dateCond = 'DestDt LIKE ?';
+      dateParam = `${compact}%`;
+    } else {
+      if (!/^\d{8}$/.test(compact)) return null;
+      dateCond = 'DestDt = ?';
+      dateParam = compact;
+    }
+
+    const [rows] = await pool.query(
+      `SELECT CustId, MsgType,
+              SUM(TotCnt) AS tot, SUM(OkCnt) AS ok, SUM(FailCnt) AS fl
+         FROM RSRM_SalesStts
+        WHERE CustId IN (${custIds.map(() => '?').join(',')}) AND ${dateCond}
+        GROUP BY CustId, MsgType
+        ORDER BY CustId, MsgType`,
+      [...custIds, dateParam],
+    );
+
+    const userStats = (rows as any[])
+      .filter((r) => Number(r.tot) > 0)
+      .map((r) => ({
+        user_name: String(r.CustId),
+        department: MSG_TYPE_LABEL[String(r.MsgType)] || String(r.MsgType || '-'),
+        sent: Number(r.tot) || 0,
+        success: Number(r.ok) || 0,
+        fail: Number(r.fl) || 0,
+        cost: 0,
+      }));
+    if (userStats.length === 0) return null;
+
+    return { userStats, campaigns: [], unitCost: { sms: 0, lms: 0 } };
+  } catch (err: any) {
+    console.log('[pay-stats] 상세 조회 실패(campaigns 축 폴백):', err?.message || err);
+    return null;
+  }
+}

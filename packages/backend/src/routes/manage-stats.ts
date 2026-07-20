@@ -6,7 +6,7 @@ import { getCompanyScope } from '../utils/permission-helper';
 import { getTestSmsTables } from '../utils/sms-queue';
 import { buildDateRangeFilter, querySendStats, querySendStatsDetail } from '../utils/stats-aggregation';
 // ★ 2026-07-20: 에이전트 전용 회사 = 엔진(PAY) 통계 축 — campaigns엔 행이 없어 0으로 보이던 결함의 근본 배선
-import { queryPayAgentStats, isPayStatsConfigured } from '../utils/pay-stats';
+import { queryPayAgentStats, queryPayAgentStatsDetail, isPayStatsConfigured } from '../utils/pay-stats';
 
 const router = Router();
 
@@ -179,10 +179,24 @@ router.get('/send/detail', async (req: Request, res: Response) => {
     const filterUserId = req.query.filterUserId as string;
 
     // ★ 컨트롤타워 호출 — 인라인 쿼리 제거
-    const detailResult = await querySendStatsDetail(
+    let detailResult = await querySendStatsDetail(
       { view: view as 'daily' | 'monthly', date: dateVal, companyId: targetCompanyId, filterUserId: filterUserId || undefined },
       { sms: DEFAULT_COSTS.sms, lms: DEFAULT_COSTS.lms }
     );
+
+    // ★ 2026-07-20: 에이전트 전용 회사 — 상세도 엔진(PAY) 축: 계정(CustId)×유형별 분해를 userStats 표에 매핑.
+    //   목록 분기(/send)와 동일 원칙 — env 미설정·미연결·실패 = 기존 결과 유지(조용한 폴백).
+    if (isPayStatsConfigured()) {
+      const compType = await pool.query('SELECT usage_type FROM companies WHERE id = $1', [targetCompanyId]);
+      if (compType.rows[0]?.usage_type === 'agent') {
+        const payDetail = await queryPayAgentStatsDetail({
+          companyId: targetCompanyId,
+          view: view as 'daily' | 'monthly',
+          date: dateVal,
+        });
+        if (payDetail) detailResult = payDetail;
+      }
+    }
 
     // 테스트 발송 상세 (MySQL — 관리자 전용)
     let testDetail: any[] = [];
