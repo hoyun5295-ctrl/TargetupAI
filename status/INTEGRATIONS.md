@@ -15,7 +15,7 @@
 | 네이버 스마트스토어 | client_credentials + **bcrypt 서명** | polling | 3h / refresh 없음 | **필수(화이트리스트)** | 주문 조회(polling) | ★ active (한줄로AI, 토큰 실측) |
 | 메이크샵 | client_credentials + **Basic 헤더** | polling | **5분** / refresh 없음 | 불요(실측) | 회원·주문 조회(polling) | ★ active (gyunoo83, 토큰+회원 실측) |
 | 고도몰 | 폴링 키 (partner_key + 몰별 key) | polling | 없음(키) | 불요 | 주문 조회(polling) | ★ active (godo, 키 검증) |
-| 아임웹 | OAuth authorization_code | oauth | 2h / refresh 90d | 불요 | webhook + admin API | 코드완료 (실측 잔여) |
+| 아임웹 | OAuth authorization_code | oauth | 2h / refresh 90d | 불요 | webhook + admin API | 코드완료 · **앱 승인(0719)** · 스토어 등록·실측 잔여 |
 | 자체 호스팅(custom) | webhook (HMAC-SHA256) | webhook | 없음 | 불요 | webhook 수신 | ★ active (self, 2개 회사) |
 | ~~가비아(퍼스트몰)~~ | — | — | — | — | — | **2026-07-06 제거 — 자체호스팅 흡수(§5)** |
 
@@ -87,6 +87,8 @@ polling/webhook 전용 provider는 OAuth 메서드를 throw, webhook 없는 prov
 - **CDP 매핑**(backfillGodoOrders): 각 주문 → identify(수신동의 시)+syncOrder. 멱등 = order_id.
 
 ### 아임웹 (OAuth)
+- **★2026-07-19 앱 심사 승인 완료** (파트너센터 "한줄로AI" = 승인 됨). **승인 ≠ 앱스토어 출시** — 출시는 콘텐츠를 integration_squad@imweb.me로 제출하는 별도 단계(0719 제출 완료·회신 대기). 몰의 앱 추가 진입점 = **결제·앱스토어 페이지**(동의 시 서비스 URL로 `?siteCode=S...` 리다이렉트). 사이트 관리자 "외부 서비스 연동(API) = Rest API V2"는 사방넷·플레이오토용 **구형 별개 계열** — 우리 앱이 거기 없는 것이 정상.
+- **사전 점검 통과(0719)**: env 4키 설정 확인 · redirect 등록값 일치 · authorize 401·callback 400(백엔드 도달 = app.hanjul.ai `/api/*` 라우팅 정상). **실측 미검증 3건(리허설로 확정)**: token 본문 JSON vs form-urlencoded · webhook 인증 토큰 헤더명 · integration-complete의 site-info scope 요구 여부. 제출물·문구 SoT = docs/imweb-appstore/.
 - **코드**: `utils/imweb-client.ts`, `routes/imweb.ts`(+ callbackRouter)
 - **인증**: authorization_code. authorize `https://openapi.imweb.me/oauth2/authorize`(camelCase 파라미터 + siteCode 필수) · token `.../oauth2/token`(JSON 본문) · API base `https://openapi.imweb.me`. 토큰 2h / refresh 90d. **integration-complete PATCH가 OAuth 직후 필수**(안 하면 다른 API 차단).
 - **엔드포인트**: GET `/api/imweb/oauth/authorize?site_code=` → callback(+integration-complete) → status → disconnect(+integration-cancellation) / POST `/api/imweb/webhook`. webhook 인증 = 공유 토큰 헤더(env `IMWEB_WEBHOOK_SECRET`).

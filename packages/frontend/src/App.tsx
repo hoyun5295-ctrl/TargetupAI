@@ -84,7 +84,8 @@ export const SessionTimerContext = createContext<SessionTimerContextType>({
 
 // ★ 2026-07-03 에이전트(QTmsg) 전용 회사 허용 라우트 — 이 외 전 라우트는 /kakao-rcs로 회수.
 //   메뉴 숨김이 아니라 라우트 자체 차단 (URL 직접 입력 누수 방지). 동종 메시징 업체 대시보드 노출 차단이 목적.
-const AGENT_ALLOWED_PATHS = ['/kakao-rcs'];
+// ★ 2026-07-20 Harold 확정: 에이전트 전용 = 3메뉴만 — 발송결과·발신번호(/manage 축소 탭)·카카오 템플릿 등록(/kakao-rcs)
+const AGENT_ALLOWED_PATHS = ['/kakao-rcs', '/manage'];
 
 // 인증 필요 라우트
 function PrivateRoute({ children, allowedTypes }: { children: React.ReactNode; allowedTypes?: string[] }) {

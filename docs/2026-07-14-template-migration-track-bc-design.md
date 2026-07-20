@@ -67,29 +67,220 @@
 
 ## 4. Track C — 게이트웨이 매핑 연동 (개발 실체)
 
+### 4-0. ★2026-07-20 레거시 API 계약 확정 (강문희 「카카오 템플릿관리 API정의서」 수령·구현 완료·62서버 조회 실측 통과)
+
+> 원본 = 큐테크놀로지 2026-07-20 pptx(5p). 구현 완료·실동작 상태로 수령. 아래는 우리 구현이 의존하는 계약 전문.
+
+| 항목 | 확정 내용 |
+|---|---|
+| 엔드포인트 | `http://<서버IP>:25230/tmpl-mgr` — **54=P코드 계정 / 58=R코드 계정**(서팀장 0720 확정). 현재 58만 가동, 54는 우리 점검 통지 후 포팅 |
+| 프로토콜 | HTTP + JSON. **PUT=등록·수정(upsert) / GET=조회**. GET에 body 동봉(자바 제약 시 PATCH 대체 허용) |
+| 인증 | 헤더 `Authorization: <token>` + **발신 IP 화이트리스트(62서버 등록 완료)**. 화이트리스트 밖 = 사유 없이 reject. 토큰 변경 가능성 명시 → **env 관리 + 변경 통지 경로 협의 대상** |
+| upsert 키 | **billid + tmplcd**. 기존 키를 치면 덮어씀(덮어쓰기 위험 = 클라이언트 책임) |
+| 필수 필드 | `billid`, `senderkey`, `usemod`, `tmplcd` (전부 string) |
+| 선택 필드 | `billnm`, `tran_tmplcd`(공백이면 서버가 tmplcd로 채움) |
+| billid 단위 | **계정(billID)이 아니라 고객사 = 납입자ID 1건**. 서팀장이 "납입자ID 1건 등록 시 그 아래 모든 계정이 해당 템플릿 사용" 하도록 엔진 등록 절차를 변경(0720 채팅) → 매핑 테이블 = `companies : 납입자ID = 1:1` |
+| usemod | ⚠ **서버 상수가 아니다 — 템플릿 행 단위 값**(0720 실등록 데이터로 정정, §4-0-2). 서팀장 구두값(54=HM1~3 / 58=HM1~6)은 **신규 고객사 기본값**으로만 쓴다. 실제 54에는 HM1~3과 **HM1~4가 혼재**(더화이트 P0032 등 7개 Bill_ID), 다우 업체는 `DPK_DW1~3`, 예외 `DPK_GT1` 1행. 58은 전부 HM1~6 일관. **⛔ 기존 고객사는 GET으로 현재 usemod를 읽어 그대로 유지**(상수로 덮으면 HM4가 날아간다) |
+| 응답 코드 | `00` 조회 성공 / `01` update / `02` insert / `21` 인증 / `22` DB insert 에러 / `23` 시스템 / `24` body 없음 / `27` 필수필드 공백(필드명 적시) |
+| 레이트리밋 | **1초 500회 이상 = 공격 간주 reject**(무응답) → 아웃박스 워커 발사 속도 제한 필수 |
+| 삭제 | **API에는 없음**(자동화 불가 = 유지). 단 **★0720 강문희: 중계서버 웹관리자에 삭제 기능 존재** — 조회 후 수동 삭제 가능. ⇒ 옛 "삭제 자체가 없음(0716)" 기재는 정정. **자동 삭제는 여전히 설계에서 배제**하고, 대조 워커가 고아 행을 표시 → 운영자가 웹관리자에서 수동 삭제하는 구조로 간다(0611 사고 이후 "삭제는 사람 승인으로만" 원칙과 정합) |
+| 토큰 운영(★0720 강문희) | 서버측 임의 변경 없음. 해킹 확실 시에만 변경 후 메일 통지(드묾). 클라이언트 요청 시 협의 변경. **토큰 파일 = `/home/mmsr3/svrs/tmplmgr/conf/conf.json`**(`api_key`·`white_ip`=`127.0.0.1;58.227.193.62`) — 운영실 직접 변경 가능. 변경 후 재기동 = `cd /home/mmsr3/svrs/tmplmgr/ && run.sh restart`(프로세스 `tmpl_api`). **화이트리스트는 ufw에도 있어 함께 변경 필요** |
+| 통신 구간 | 62·58·54 = 동일 IDC·동일 랙 내부 구간 → 평문 HTTP 수용(Harold 0720) |
+| **54 인코딩 주의** | ★0720 강문희: **54는 표준 한글이 EUC-KR, DB charset이 latin1**이라 포팅에 추가 확인 필요(58은 UTF-8 정상 실증). ⇒ **P0001 점검 시 한글 `billnm` 왕복이 첫 확인 항목.** 깨지면 클라이언트 인코딩 분기 필요 |
+
+### 4-0-1. ★0720 실측 — PUT 왕복 검증 완료 + **서버 결함 1건 발견(구현 필수 회피책)**
+
+테스트 계정(서팀장 지정) = **P0001(54 자체테스트) / R0001(58 자체테스트)**. 58 가동 중이라 R0001로 6회 호출 실측.
+
+| # | 호출 | 결과 | 판정 |
+|---|---|---|---|
+| 0 | `GET {"billid":"HANJULLO_PROBE_0000"}` | `{"data":[],"req_result":"00"}` | 화이트리스트·토큰·엔드포인트 정상. **미등록 billid = 에러 아닌 빈 배열** |
+| 1 | PUT (tmplcd=`..._0001`, tran_tmplcd=`""`) | `02 insert ok` | insert 분기 정상 |
+| 2 | GET | `{"billnm":"한줄로연동테스트","tmplcd":"","tran_tmplcd":"",...}` | ⚠ **tmplcd 유실** |
+| 3 | PUT 동일 키·billnm 변경 | `01 update ok` | update 분기 정상 |
+| 4 | GET | billnm 변경 반영 | upsert 갱신 정상 |
+| 5 | PUT (tmplcd=`..._0002`, tran_tmplcd=`..._TRAN_0002`) | `02 insert ok` | **tmplcd가 키로 작동 — 새 행 생성**(설계 전제 유효) |
+| 6 | GET | data 2건. 2행은 tmplcd·tran_tmplcd 모두 정상 저장 | 결함 조건 확정 |
+
+> **★결함(2026-07-20 발견) — `tran_tmplcd`를 빈 문자열로 보내면 `tmplcd`까지 빈 값으로 저장 → ✅당일 수정·재검증 통과.**
+> 발견 당시: 정의서 계약은 "tran_tmplcd 공백 시 서버가 tmplcd로 채움"인데 실제는 **반대로 빈 tran_tmplcd가 tmplcd를 덮어씀**(대입 방향 역전). tmplcd는 필수 필드인데 `27 Validation err`도 미반환.
+> **강문희 조치(당일)**: "소스 코딩 오류 확인, 수정 후 API 데몬 반영, 계약대로 동작". **재검증 [7]·[8]**: 동일 조건(tran_tmplcd `""`)으로 PUT → `02 insert` + 조회 시 `tmplcd`=`HANJULLO_TEST_0003` 유지, `tran_tmplcd`도 같은 값으로 **자동 채움 정상**. 한글 `billnm` 왕복도 정상(58=UTF-8 확인).
+> **⛔ 그래도 구현 회피책은 유지**: 매핑 CT는 `tran_tmplcd`를 빈 값으로 보내지 않고 항상 `tran_tmplcd = tmplcd` 복사값을 넣는다(우리 정책과 동일하므로 비용 0, 회귀 시 자동 방어). 계약테스트에 이 케이스를 남긴다.
+> R0001 잔존: 테스트 행 3건(1건은 tmplcd 빈 값 = 발견 당시 산물). **삭제는 중계서버 웹관리자에서 가능**(아래 참조).
+
+**해소된 미확정**: ①테스트 billid = P0001·R0001(서팀장 0720) ②**`"P00xx;R00xx"` 병기 = 실제 사용됨**(§4-0-2 — 실등록 데이터에 `P0042;R0003` 1행 존재. 한 고객사가 54·58 양쪽 계정을 가지면 세미콜론 병기, 등록서버는 58). **③`tran_tmplcd` 정책 확정 = tmplcd 복사**(결함 회피 + 실데이터 불일치 0건 검증).
+
+**58번 계약 검증 완료(0720)**: 조회 / insert(02) / update(01) / billid+tmplcd 키 / tran_tmplcd 자동 채움 / 한글 UTF-8 왕복 — 전 항목 통과. **잔여 = 강문희 54 포팅(EUC-KR·latin1 확인 중, 익일 내 예정) → P0001로 동일 점검(한글 왕복 우선) → 최종 통지.**
+
+### 4-0-2. ★0720 매핑 시드 데이터 확보 — 「템플릿관리자 등록 목록」(서팀장 0716 제공·실등록 전량)
+
+> 원본 = `OneDrive/문서/카카오톡 받은 파일/템플릿관리자 등록 목록 (1).xlsx` 시트 `카톡템플릿매핑관리`.
+> **컬럼이 API payload와 1:1**: `등록서버 | Bill_ID | 회사명 | SenderKey | 외부모듈 | 인비토코드 | 외부템플릿코드` → 각각 엔드포인트 / billid / billnm / senderkey / usemod / tran_tmplcd / tmplcd.
+> ⇒ **서팀장에게 추가로 요청할 산출물 없음**(관문 5-① Bill_ID↔실업체↔발신프로필 확정본 = 이 파일로 충족).
+
+**규모**: 매핑 **4,681행** · **Bill_ID 41개** · 계정명 218 · SenderKey 211. Bill_ID 1개에 다수 계정·프로필이 붙는 **고객사 단위** 구조가 데이터로 확인(서팀장 0720 설명과 일치).
+
+**서버 축**: `P`=54 (3,155행) / `R`=58 (1,503행). **Bill_ID가 두 서버에 걸친 사례 0건**(같은 회사라도 서버별 별도 발급 — 한국고용노동교육원 = P0074·R0027, 마리오몰 = P0013·R0041). 예외 1건 = **`P0042;R0003`(아이비케이저축, 등록서버 58)** → 정의서의 병기 표기가 실사용됨을 입증.
+
+**usemod 실분포**(⚠ 서버 상수 아님):
+
+| 모듈 | 행수 | 비고 |
+|---|---|---|
+| DPK_HM1·2·3 | 각 4,394 | 공통 기반 |
+| DPK_HM4 | 1,937 | **54에도 존재** — P0032(더화이트)·P0071·P0064(베네통)·P0074·P0020·P0070·P0076. **★0720 서팀장 사유**: 아이디어스가 대량 발송한다고 해서 받은 모듈이며, **58번으로 옮기면서 3개로만 관리**함 ⇒ 54의 HM4 등록분은 **과거 잔재**(현 관리 기준은 3개). 그래도 기존분은 조회값 유지 원칙 적용 — 우리가 바꿀 이유가 없다 |
+| DPK_HM5·6 | 각 1,494 | 58 전용(58은 전부 HM1~6 일관) |
+| DPK_DW1 / DW2·3 | 286 / 각 242 | 다우 업체(유성소프트·제이씨패밀리 등) |
+| DPK_GT1 | 1 | 예외 1행(P0019) |
+
+같은 Bill_ID 안에서도 템플릿마다 모듈이 다른 사례 4건(P0019는 DW1 / DW1;2;3 / GT1 3종). **⇒ usemod는 행 단위 값 — 기존분은 조회로 읽어 유지, 서팀장 구두값은 신규 고객사 기본값.**
+
+**tran_tmplcd 실증**: 인비토코드 ≠ 외부템플릿코드 **불일치 0건 / 4,681행 전부 동일**. 치환 사례가 운영에 존재하지 않음 → 우리 정책(tran_tmplcd = tmplcd 복사)이 기존 운영과 100% 일치.
+
+**템플릿 코드 prefix**: `B*` 3,353 / `bizp_` 798 / 업체지정(ACS·ANH·APS·APH 등) — 0714 파악한 휴머스온 76%·다우 18%·업체지정 5%와 정합.
+
+**B prefix 23행 = 옛 형식 잔재**: 전부 **유성소프트**(B0067·B0070~B0076, 계정 8개, DPK_DW1, bizp_ 템플릿). 같은 회사의 신형식 P0022도 별도 존재. 유성소프트는 0715 "다우→휴머스온 흡수" 대상이라 정리 시 함께 해소.
+
+**집중도**: P0032(더화이트, 계정 141개) 1,914행 = 전체의 41%. R0007(아난티) 886행. 상위 2개가 60%. → M5 확대 순서는 소규모부터, 더화이트는 마지막(§7 리스크 정합).
+
+**설계 반영 포인트**: billid 접두(P/R) 하나가 **엔드포인트와 usemod 값을 동시에 결정**한다. usemod는 서버 모듈 증설 시 바뀌므로 코드 상수가 아닌 **설정값**으로 분리하고, 대조 워커 점검 항목에 usemod를 포함해 서버 실값과 상시 대조한다(조회 응답에 usemod가 그대로 실려 옴).
+
+### 4-1. 구성요소
+
 | 구성요소 | 내용 | 위치(계획) |
 |---|---|---|
-| 매핑 클라이언트 CT | upsert/조회/삭제 호출 + 레거시·자체 게이트웨이 공용 어댑터. payload 5요소(bill_id·senderkey·인비토코드·외부코드·외부모듈) | `utils/gateway-template-mapping.ts` (CT 신설) |
+| 매핑 클라이언트 CT | upsert/조회 호출 + 레거시·자체 게이트웨이 공용 어댑터. payload 6필드(billid·billnm·senderkey·usemod·tmplcd·tran_tmplcd). **billid 접두(P/R)로 엔드포인트·usemod 동시 분기** · **tran_tmplcd 빈 값 전송 금지(§4-0-1 결함)** · 레이트리밋 1초 500회 미만 | `utils/gateway-template-mapping.ts` (CT 신설) |
 | 아웃박스 워커 | 승인 확정 → 큐 적재 → 멱등 upsert + 백오프 재시도 + N회 실패 알림 | 기존 워커 패턴 준용 |
 | 효과 검증 게이트 | upsert 응답만 믿지 않음 — 조회로 실존 재확인 후에만 "발송 가능" 표시. 그 전 = "승인완료·발송준비중" | 6원칙 ② |
 | 대조 안전망 워커 | 주기 전량 diff(5요소 전체) → 어긋남 자동 보정+알림. 초기 1회 = 서팀장 엑셀 4,159건 baseline 대조 = 이관 검증 | 6원칙 ③ |
-| 삭제 승인 UI | ~~DELETE는 자동화에서 제거 — 슈퍼관리자 확인 모달로만~~ **★0715 강문희: 레거시 API에 삭제 자체가 없음(Harold 확정)** — 키 오등록 행 = 발송 매칭 불가·무해 → 대조 워커가 '고아 행' 표시만(삭제 시도 X) / 값 실수 = 동일 키 upsert 교정. 자체게이트웨이(자비스)는 별도 스펙 | 0611 재발 차단 + 0715 회신 |
+| 삭제 승인 UI | ~~DELETE는 자동화에서 제거 — 슈퍼관리자 확인 모달로만~~ / ~~0715 "삭제 자체가 없음"~~ → **★0720 정정: API에는 없지만 중계서버 웹관리자에 삭제 기능이 있다(강문희)**. 결론은 동일 — **자동 삭제는 설계에서 배제**, 대조 워커가 '고아 행'을 표시하고 **운영자가 웹관리자에서 수동 삭제**. 값 실수는 동일 키 upsert 교정. 자체게이트웨이(자비스)는 별도 스펙 | 0611 재발 차단(삭제=사람 승인) |
+
+## 4-9. M2 구현 설계 (★2026-07-20 확정 — Harold "한 치의 빈틈도 없이")
+
+> 원칙: **desired state + 수렴**. 이벤트 훅(승인 순간 push)에 의존하지 않는다 — 훅은 경로 3개(웹훅·5분 폴링·1h sync)라 하나만 놓쳐도 구멍. 대신 워커가 "있어야 할 매핑"을 상태에서 계산해 게이트웨이와 수렴시킨다(놓친 전이 자동 복구·멱등).
+
+### A. 데이터 모델 (PG 신규 2 테이블)
+
+> **★DDL 사전 검증 0720 통과(Harold 실행)**: `gateway_bill_mappings`·`gateway_template_mappings` = information_schema **0 rows(부재 확인)** / 참조 컬럼 7개 전부 실존(companies.id · kakao_templates id·status·template_code·company_id·profile_id · kakao_sender_profiles.profile_key). 아래 DDL은 **그대로 실행 가능한 확정본**(db_column_verify_before_code 이행 완료). 실행 후 SCHEMA.md에 두 테이블 절 즉시 기록.
+
+```sql
+-- ① 고객사 ↔ 게이트웨이 납입자ID 연결 (billid는 리터럴 — 병기 'P0042;R0003' 분해 금지)
+CREATE TABLE gateway_bill_mappings (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  bill_id       varchar(30)  NOT NULL UNIQUE,
+  server        varchar(2)   NOT NULL CHECK (server IN ('54','58')),
+  company_id    uuid         REFERENCES companies(id),   -- NULL 허용: 시드 직후 미연결 상태
+  bill_name     varchar(128) NOT NULL DEFAULT '',        -- 레거시 표기(참고용)
+  default_usemod varchar(100) NOT NULL,                  -- 신규 템플릿 기본값(시드 최빈값)
+  auto_push_enabled boolean   NOT NULL DEFAULT false,    -- 회사별 점진 개시(파일럿 게이트)
+  is_active     boolean      NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- ② 매핑 desired state + 동기화 상태 (게이트웨이 1행 = 여기 1행)
+CREATE TABLE gateway_template_mappings (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  bill_id       varchar(30)  NOT NULL,
+  server        varchar(2)   NOT NULL CHECK (server IN ('54','58')),
+  tmplcd        varchar(100) NOT NULL,
+  tran_tmplcd   varchar(100) NOT NULL,                   -- ⛔ 빈 값 금지 — 항상 채움(기본=tmplcd)
+  senderkey     varchar(100) NOT NULL,
+  billnm        varchar(128) NOT NULL DEFAULT '',
+  usemod        varchar(100) NOT NULL,                   -- 행 단위 값(§4-0-2)
+  company_id    uuid,
+  kakao_template_id uuid REFERENCES kakao_templates(id), -- auto 생성분만, seed는 NULL
+  source        varchar(10)  NOT NULL DEFAULT 'auto' CHECK (source IN ('seed','auto','manual')),
+  sync_status   varchar(12)  NOT NULL DEFAULT 'pending' CHECK (sync_status IN ('pending','synced','failed','orphan')),
+  attempts      int          NOT NULL DEFAULT 0,
+  next_retry_at timestamptz,
+  last_error    text,
+  last_synced_at timestamptz,
+  last_seen_at  timestamptz,                             -- 대조에서 게이트웨이 실존 확인 시각
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (bill_id, tmplcd)                               -- = 게이트웨이 upsert 키와 동일
+);
+CREATE INDEX idx_gtm_status_retry ON gateway_template_mappings (sync_status, next_retry_at);
+CREATE INDEX idx_gtm_company ON gateway_template_mappings (company_id);
+```
+
+### B. 파일 구성 (CT 원칙 — 로직은 utils, 라우트는 thin)
+
+| 파일 | 역할 |
+|---|---|
+| `utils/gateway-template-mapping.ts` (CT 신설) | HTTP 클라이언트(PUT/GET)·엔드포인트 resolve(server→host)·payload 빌더(트림·필수 검증·tran_tmplcd=빈값이면 tmplcd 복사)·응답코드 매핑(00/01/02=성공, 21/22/23/24/27=타입別 에러)·**직렬 레이트리밋(호출 간 최소 200ms = 5/s ≪ 500/s)**·효과 검증(upsert 후 GET 재조회로 해당 tmplcd 실존+필드 일치 확인 = 6원칙 ②) |
+| `utils/gateway-template-mapping-worker.ts` | ①**적재 스캔**(5분): `kakao_templates status='APPROVED'` × `gateway_bill_mappings(auto_push_enabled=true, company_id 연결)` → 없는 desired 행 INSERT(pending). usemod=bill의 default_usemod, senderkey=해당 템플릿 profile의 profile_key ②**푸시**(1분): pending/재시도 도래분 배치(상한 50) → upsert→검증→synced. 실패=백오프(1m→5m→30m→2h→6h, 8회 초과=failed+`sendSystemAlert` 쿨다운) ③**대조**(6h): bill_id별 GET 전량 → desired와 diff(tmplcd·tran_tmplcd·usemod·billnm) — 게이트웨이에만 있는 행=orphan 표시(자동 삭제 절대 X·웹관리자 수동 삭제 안내), desired만 있는데 synced인 행=드리프트→pending 재전환+알림, `last_seen_at` 갱신 |
+| `routes/gateway-templates.ts` (super_admin 전용) | bill 연결·auto_push 토글 / 매핑·상태 조회 / seed-import(dryRun 기본 true·멱등) / 대조 리포트 / 수동 push 트리거. 테이블 부재 시 503 `DB_MIGRATION_PENDING`(워커는 조용히 skip) |
+| `app.ts` | `startGatewayTemplateMappingWorker()` 등록(기존 start* 패턴) + 라우트 mount |
+
+### C. 불변 규칙 (계약 테스트로 고정)
+
+1. **tran_tmplcd 빈 값 전송 절대 금지** — 빌더가 빈 값이면 tmplcd 복사(0720 결함 회피 유지·회귀 방어)
+2. **billid 리터럴 보존** — 병기(`P0042;R0003`) 분해·재조합 금지. 시드 그대로
+3. **기존 행 usemod 불변** — 시드·GET에서 온 값을 그대로 유지(HM4 잔재 포함). default_usemod는 **신규 행에만**
+4. **server='54' 푸시 보류 게이트** — env `GATEWAY_TMPL_54_ENABLED=false`가 기본. 강문희 54 포팅 + P0001 **한글 왕복 실측** 통과 후에만 true(EUC-KR·latin1 리스크)
+5. **전체 동기화 마스터 게이트** — env `GATEWAY_TMPL_SYNC_ENABLED=false` 기본. 배포≠가동
+6. **삭제 없음** — orphan은 표시만. 삭제는 중계서버 웹관리자에서 사람이(0611 원칙)
+7. **발송 경로 무접촉** — campaigns.ts·direct-send 등 절대 보호 영역 파일 수정 0. 이 트랙은 매핑 등록만
+8. 레이트리밋 위반 시 무응답 reject이므로 **타임아웃(20s)+재시도 백오프**가 유일한 복구 경로 — 재시도는 항상 멱등(upsert)
+
+### D. 시드·매칭·가동 순서 (배포 런북)
+
+1. **DDL 2건** — information_schema 사전 검증(테이블 부재 확인) → Harold 서버 psql 실행 → SCHEMA.md 갱신
+2. **코드 배포** — 워커는 env 게이트 false라 무동작(안전)
+3. **시드 임포트** — 서팀장 엑셀 4,681행→JSON 변환(내가 생성)→`POST seed-import dryRun` 검토→실행. `gateway_bill_mappings` 41건(+B잔재)·`gateway_template_mappings` 4,681건 `source='seed', sync_status='synced'`(이미 게이트웨이에 실존하는 상태값이므로)
+4. **대조 1회 수동 실행** — 시드(엑셀) vs 게이트웨이 실서버 GET 전량 diff = **이관 검증 그 자체**. diff 결과 보고
+5. **실측 1건(6원칙 ⑤)** — 테스트 bill(R0001)로 워커 경유 전 사이클(적재→푸시→검증→synced) 통과 확인
+6. **아난티 파일럿** — 아난티 company↔R0007 연결 + auto_push_enabled=true → 신규 승인 템플릿 1건이 자동 등록되는지 + M4 실발송 1건
+7. **확대(M5)** — 소규모부터, 더화이트(41% 집중) 마지막
+
+### E. 알려진 한계 (정직 고지)
+
+- **GET 응답에 senderkey가 없다** — 대조는 tmplcd·tran_tmplcd·usemod·billnm 4필드만 가능. senderkey 정합은 upsert 응답코드 + M4 실발송으로 검증. (강문희에게 GET 응답 필드 추가 요청 여부 = Harold 결정, 차단 아님)
+- 54 인코딩은 P0001 실측 전 미지수 — 게이트 4번이 방어
+- 시드의 company 매칭(레거시 회사명→companies)은 점진 — 미연결 bill은 대조만 되고 auto push는 안 됨(안전한 기본값)
+
+### D-2. 시드 변환 스펙 (다음 세션 — 엑셀→JSON)
+
+- **원본**: `C:\Users\ceo\OneDrive\문서\카카오톡 받은 파일\템플릿관리자 등록 목록 (1).xlsx` 시트 `카톡템플릿매핑관리` (4,681행 — "(1)" 붙은 최신본. 한글 경로라 glob+`-LiteralPath`로 접근, python은 스크립트 파일로)
+- **컬럼→필드**: 등록서버→server / Bill_ID→bill_id(**리터럴 — trim만, 분해·대문자화 금지**) / 회사명→billnm / SenderKey→senderkey / 외부모듈→usemod / 인비토코드→tran_tmplcd / 외부템플릿코드→tmplcd
+- **적재 규칙**: `gateway_template_mappings` = 4,681행 `source='seed', sync_status='synced'`(게이트웨이 실존 상태이므로), UNIQUE(bill_id,tmplcd) 충돌=skip 카운트 보고. `gateway_bill_mappings` = bill_id별 1행(서버·최빈 usemod=default_usemod·대표 billnm), company_id=NULL·auto_push_enabled=false로 시작
+- **주의**: 엑셀 내 (bill_id,tmplcd) 중복 존재 가능(같은 템플릿코드가 계정명만 다른 행) → dryRun에서 중복 수 확인 후 최신행 우선 규칙 적용. B-prefix 23행(유성소프트 잔재)도 그대로 시드(대조 대상)
+
+### G. 다음 세션 재개 런북 (0720 컨텍스트 종료 — 여기서 시작)
+
+1. **정독 의무**: CLAUDE.md → STATUS §2 → 본 문서 §4-0~§4-9 전체 → LESSONS_DB·LESSONS_BACKEND(핵심 원칙+워커·외부API 절)
+2. **DDL 실행**(Harold psql — §A 확정본 그대로) → SCHEMA.md 두 테이블 절 기록
+3. **구현**(§B 파일 4개): CT → 워커 → 라우트 → app.ts 등록. 불변 규칙 §C 8개 = 계약 테스트 먼저(RED)
+4. **검증**: vitest(§F 목록) → tsc 0 → 자가 grep → **Codex adversarial**(발송 인접 의무)
+5. **배포**: env 3키(`GATEWAY_TMPL_API_TOKEN`=현행 토큰·`GATEWAY_TMPL_SYNC_ENABLED=false`·`GATEWAY_TMPL_54_ENABLED=false`) → tp-push → build:safe → pm2
+6. **시드**(§D-2) → 대조 1회(diff 보고) → R0001 실측 1건 → 이후는 §D 6~7(아난티 파일럿)
+7. **병행 확인**: 강문희 54 포팅 완료 메일 오면 P0001 **한글 왕복** 점검 → 통과 시에만 `GATEWAY_TMPL_54_ENABLED=true`
+8. **★미생성 납입자ID 일괄 생성(Harold 0720 지시 — 이 세션 의제)**: 한줄로 카카오 사용 예정 고객사 중 엔진 납입자ID(P/R) 미보유인 곳의 ID를 일괄 생성·연결하는 작업. **생성 주체·방법은 미확정(추측 금지)** — 납입자ID는 엔진측 발급 체계라 서팀장에게 "신규 납입자ID를 누가 어떤 화면/절차로 만드는지, 일괄 생성이 가능한지" 확인 후 진행. 생성되면 `gateway_bill_mappings`에 연결(company_id·server·default_usemod=서버 기본값). 대상 산정 = 한줄로 kakao_sender_profiles 보유 회사 − 기존 bill 연결 회사.
+- 이 시점 확정 사실 전부 = §4-0(계약)·§4-0-1(결함·재검증)·§4-0-2(시드 데이터)·§4-9(설계). **여기 없는 건 사실이 아니라 추측이다 — 재확인 후 진행.**
+
+### F. 검증·리뷰 게이트
+
+- vitest 계약 테스트: 빌더(트림·필수·tran 복사·빈값 거부)·server resolve·병기 리터럴·백오프 스케줄·diff 로직(usemod 포함)·레이트리밋 간격 — 기존 테스트 패턴 미러
+- tsc 0 + 자가 grep(모델명·박단어·dialog 0)
+- **Codex adversarial 리뷰 의무**(발송 인접 신규 인프라) — 종결 전
+- 배포 후: 워커 기동 로그·테이블 부재 skip 동작·503 응답 확인
 
 ## 5. 선행 관문 (코드 착수 전)
 
 1. **아난티 getSender 실측** — ★0715 통과(0000·@아난티·status A — 같은 계정 확정, §1 참조). 실측 경로 = 신설 `GET /api/alimtalk/senders/imc/:senderKey`(super_admin debug 1콜). B_ 76% pull 성립 확정.
-2. **강문희 스펙 회신** — ★0715 회신 도착·전건 해소(§1 0715(5) 참조). 잔여 = 답신 발신(삭제 불요 확정·upsert 키·착수 시기 문의) → 착수 시기 회신 → 필드 스펙 메일 협의.
+2. **강문희 스펙 회신** — ★**0720 통과**: API 정의서 수령 + 구현 완료 통지 + **62서버 조회 실측 정상**(§4-0). 계약 전문 확정. 잔여 = 미확정 2건 회신(테스트 billid·billid 병기 표기) → PUT 점검 → 결과 통지 → 강문희 54 포팅. **M2 착수 관문은 사실상 해소**(잔여 2건은 PUT 검증용이며 CT 설계를 막지 않음).
 3. **브랜드 스코프 DDL 설계** — 미구현 확정(0715 소스 확인·§B-2). 잔여 = users↔프로필 연결 축 DDL 설계 + information_schema 검증 (db_column_verify_before_code).
 4. **자비스 개발 완료 회신** — 자체게이트웨이 upsert/조회 API + 실측 4시나리오 통과.
-5. **서팀장 실무 4건** — ①Bill_ID↔실업체↔발신프로필 확정본(최우선 — company_agent_ids 시드·M3 전제. **신규 산출물**: bill_ID별 회사명+발신프로필(senderKey)까지, 템플릿코드 불요. 내부 계정 제외(★0715 실측: B0001=CustNm '자체관리' 2행 — 실업체 아님)·복수 표기 통일. ★0715 서수란 정의 합치 확인) ②휴머스온 계정 교차 확인(관문 1 통과로 사실상 해소) ③수동 등록 컷오버 날짜 합의(이중 등록 방지 — 한줄로 가동일부터 서팀장 수동 중단) ④업체 담당자 연락처+안내 패키지(계정 발급·검수 알림 수신자 초기 등록·차단 전 최종 검수).
+5. **서팀장 실무 4건** — ①Bill_ID↔실업체↔발신프로필 확정본 → **★0720 충족 완료**: 0716 제공 「템플릿관리자 등록 목록 (1).xlsx」가 Bill_ID·회사명·SenderKey·모듈·코드까지 전량 포함(§4-0-2 분석). **추가 요청 불요.** (별건으로 0720 수령한 `PAY_회사단위_실고객.xlsx`는 **PAY 정산 축(CustId B/C/D)**으로 Track D용 — 템플릿 축(P/R)과 혼동 금지) ②휴머스온 계정 교차 확인(관문 1 통과로 사실상 해소) ③수동 등록 컷오버 날짜 합의(이중 등록 방지 — 한줄로 가동일부터 서팀장 수동 중단) ④업체 담당자 연락처+안내 패키지(계정 발급·검수 알림 수신자 초기 등록·차단 전 최종 검수).
 
 ## 6. 마일스톤
 
 | 단계 | 내용 | 게이트 |
 |---|---|---|
-| M0 | 관문 실측(아난티 getSender) + 강문희·자비스 회신 | 관문 1 ★0715 통과 / 2·4 대기 |
-| M1 | 스펙 확정 + 브랜드 스코프 스키마 검증 | 관문 3 |
-| M2 | Track C: 매핑 CT + 아웃박스 + 효과검증 + 대조 워커 | tsc 0 + 테스트 |
+| M0 | 관문 실측(아난티 getSender) + 강문희·자비스 회신 | 관문 1 ★0715 통과 / **2 ★0720 통과** / 4 대기 |
+| M1 | 스펙 확정 + 브랜드 스코프 스키마 검증 | **API 계약 ★0720 확정(§4-0)** / 브랜드 스코프 DDL은 관문 3 |
+| M2 | Track C: 매핑 CT + 아웃박스 + 효과검증 + 대조 워커 | tsc 0 + 테스트. **착수 가능(0720) — 데이터 3종(납입자ID 목록·usemod 상수·companies 매칭) 확보 시 실호출** |
 | M3 | Track B: import 2종(★0715 구현·배포 — `/senders/import`·`/templates/import`+CT-16 역변환 4종+계약 테스트 13) + 브랜드 계층·계정 생성(잔여) | tsc 0 + vitest 628 통과 |
 | M4 | 아난티 파일럿 — pull ★0715 완료(847건·APPROVED 827·KREJ 20·중복 0). 잔여 = 실발송 1건 + 결과코드 0 확인 + 497 집계 기준 대조(서팀장) | 6원칙 ⑤ 실측 |
 | M5 | 확대(회사별 순차 — 더화이트·시세이도 등) + 신규 승인분 자동 등록 개시 | 대조 워커 diff 0 |
@@ -99,7 +290,7 @@
 
 ## 7. 리스크
 
-- 강문희 API 품질(1.5일 개발) = 이 설계의 바닥 → 스펙 합의문(멱등·조회 전량)으로 방어, 효과 검증 게이트가 최종 방어선.
+- 강문희 API 품질(1.5일 개발) = 이 설계의 바닥 → 스펙 합의문(멱등·조회 전량)으로 방어, 효과 검증 게이트가 최종 방어선. **★0720 실증: 첫 점검에서 계약↔동작 불일치 1건 발견(tran_tmplcd 빈 값 → tmplcd 유실, §4-0-1). 정의서 문구만 믿고 구현했으면 전 템플릿의 코드가 빈 값으로 등록될 뻔했다 — 효과 검증 게이트(upsert 후 조회 재확인)가 이 유형을 잡는 유일한 장치임이 확인됨. 잔여 필드·분기도 동일하게 실측 후에만 확정한다.**
 - 낡은 매핑 우선 문제(senderkey 교체 시) → upsert가 UPDATE를 포함하므로 해소. 대조 워커가 2차 방어.
 - bizp_·업체지정 24%는 IMC에 없음 → pull 금지(대조 워커 diff 대상에서도 원천 구분). 잔존 발송은 기존 매핑이 담당.
 - 더화이트 리셀러 = 전체 44% 집중 → M5에서 회사 단위 마지막 순번 배치(파일럿·소규모 검증 후).

@@ -34,6 +34,8 @@
 | 옛 설계서·핸드오프·디버그노트 | archive/DESIGNS/ (archive/INDEX.md 경유) | grep 적중 문서만 |
 | Codex 등 외부 에이전트 온보딩·리뷰 판정 기준 | AGENTS.md (레포 루트) | 전체 (경량 유지 — 룰 원천은 CLAUDE.md, 여긴 축약판) |
 | 0718 프론트 스플리팅 사고 후속(B-0718-1)·성능 최적화 재개 | docs/2026-07-18-frontend-splitting-incident-handoff.md | 전체 (SoT — §4 작업 순서) |
+| 아임웹 앱스토어 등록·제출물(한줄로AI) | docs/imweb-appstore/app-intro-copy.md + deliverables/ | 전체 (SoT — 문구 원고·산출물. 연동 스펙은 INTEGRATIONS.md 아임웹 카드) |
+| AI 규제 대응(고영향 판단·생성물 표시) | docs/compliance/ | 해당 문서 (고영향AI 사전검토서 = 법 제31조 이행 기록) |
 
 ---
 
@@ -41,16 +43,18 @@
 
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
-### 🟡 진행중 — 레거시 PAY 사이트 한줄로 흡수 (Track D, ★0715 54 병행 적재 개시·개시일 실측 통과 — 익일 143 마감 대조 → 57·58 순차)
-> 서팀장 2차 회신 전부 반영. **수신 DB 구축완료(2026-07-07)**: invito `pay-ingest-db`(MariaDB 10.11, --sql-mode="") — 143 dump 3테이블 82MB 복원(934,232/730/7,026 일치)·SysId 백필(B/C/D=54/57/58)·계정(sales×3 IP host·root@% 제거)·방화벽 systemd `pay-ingest-fw`. **★2026-07-09 원격 접속 사고 근본해결**: 강문희 실측 54/57/58→62:23388 접속 불가(^C). 재점검 결과 근본 = **DOCKER-USER에 리턴(ESTABLISHED) 허용 룰 누락** → SYN은 ACCEPT 통과해도 DB 응답(SYN-ACK)이 `0.0.0.0/0 DROP`에 걸려 **어떤 IP도 접속 불가**(로컬 127.0.0.1은 FORWARD 미경유 OPEN 착시·tcpdump SYN-ACK 0 확인). 비토 게이트웨이(139.150.81.213) 화이트리스트+established 추가로 **동일 환경 실측→OPEN 확인**, systemd에 established+139 영속화. 부수 발견: "서버명 옥텟=공인 IP" 추정 폐기(우리 게이트웨이도 이름≠실 IP 139). **★0715(2) "적용 시작 OK" 발신 → 당일 54 병행 적재 개시 실측 통과(288행 실시간·SysId '54'·한글 무결·깨짐 0). 다음 = 익일 143 마감 대조(§7-4) → 강문희 공유+57(golang)→58 → 최종 전환일 직전 dump 재복원+재백필 → Phase 2.** SoT=[docs/레거시서버_폐기_플랜.md](docs/레거시서버_폐기_플랜.md) · 런북=[docs/2026-07-07-pay-absorption-track-d-design.md](docs/2026-07-07-pay-absorption-track-d-design.md) §7. 교훈=[[feedback_verify_in_same_env_before_external_request]].
+### 🟡 진행중 — 레거시 PAY 흡수 (Track D — ★0720 통계 3서버 완료 / 충전 축 미완)
+> 서팀장 2차 회신 전부 반영. **수신 DB 구축완료(2026-07-07)**: invito `pay-ingest-db`(MariaDB 10.11, --sql-mode="") — 143 dump 3테이블 82MB 복원(934,232/730/7,026 일치)·SysId 백필(B/C/D=54/57/58)·계정(sales×3 IP host·root@% 제거)·방화벽 systemd `pay-ingest-fw`. **0709 원격 접속 사고 해결(종결)**: 근본 = DOCKER-USER에 리턴(ESTABLISHED) 허용 룰 누락 → SYN은 통과해도 SYN-ACK가 `0.0.0.0/0 DROP`에 걸려 전 IP 접속 불가(로컬은 FORWARD 미경유 OPEN 착시). 화이트리스트+established를 systemd 영속화로 해소. 상세=설계문서 §7-2 · 교훈=[[feedback_verify_in_same_env_before_external_request]]. **★0717 강문희 54·57·58 3서버 전부 구현·적용 완료. ★0720 실측: 통계 3서버 20240101~당일 실시간 유입 정상(커버 930/909/926일·마지막 적재 0분 전) = 정방향 통계 완료.** **단 충전·원장 축 미완**: FillAmtHist 최신 0706(0707 복원분 그대로·유입 0)·SalesMst 최신 2/26·58 빈 행 1건(0717 05:00 배치). **★0720 서팀장 확인 = 충전 입력 창구는 PAY 화면 하나뿐**(게이트웨이 직접 경로 없음 — 0707 "게이트웨이 직접" 기재는 오기)·**입력 주체=인비토 내부** → **143 폐기 시 충전 단절 → 슈퍼관리자 충전 입력 화면 필수 승격**(설계 §4 전면 개정). 마이너스 상계는 실증(1,202건·전부 Y). 다음 = ①강문희 수집엔진 소스 62 전환(선행) ②143 대조(§7-4·통계 수치+원장) ③PAY↔companies 매핑 ④충전 화면 구현+실측 1건 → Phase 2. SoT=[docs/레거시서버_폐기_플랜.md](docs/레거시서버_폐기_플랜.md) · 런북=[docs/2026-07-07-pay-absorption-track-d-design.md](docs/2026-07-07-pay-absorption-track-d-design.md) §7. 교훈=[[feedback_verify_in_same_env_before_external_request]].
 
 ### 🔵 다음 세션 (예정)
 > **0716~17 배포완료 4건 archive 회전 완료(2026-07-17)** — DM 편집기 AI퍼스트(M1~M5)·인앱 범용보장계약·서체 자가호스팅·**0717 인앱 중앙정렬 근본수정+전층 전수점검+앱 통합 계약(5커밋)**. 잔여 실측 = 최근 완료 인덱스 참조. (`public/about-ai-operator-v5.html`·`v6.html`=소개 실험·반려·미커밋=폐기.)
-> **★인앱 잔여(0718~)**: **팝폰 1.0.2 심사 중** — 출시 후 실측 3종(재실행 재표시=세션당 1회 / 닫기 억제 / 다시 보지 않기) = **B-0717-2 해소 확인**(BUGS.md). 1.0.2부터 EAS Update 런타임 성립(이후 JS 수정=검수 없이 OTA). 웹 실측 = 쿠폰·CTA 정렬·허용표·AI 생성 1건. 0717 직원 디버깅분(수신거부·DM #1~3·이메일)=코드완료·미검증.
+> **★인앱 잔여(0718~)**: **팝폰 1.0.2 출시·OTA 성립 확인(0720 양 OS 실측)** — 실측 3종(재실행 재표시=세션당 1회 / 닫기 억제 / 다시 보지 않기) = **B-0717-2 해소 확인**(BUGS.md). 1.0.2부터 EAS Update 런타임 성립(이후 JS 수정=검수 없이 OTA). 웹 실측 = 쿠폰·CTA 정렬·허용표·AI 생성 1건. 0717 직원 디버깅분(수신거부·DM #1~3·이메일)=코드완료·미검증.
 > **별건 잔여**: 인앱/DM M3 네이버 후보 env 키(NAVER_CLIENT_ID/SECRET) 등록 시 활성 · DM M6 이메일·인앱 이식(별도 설계).
+> **★아임웹·아이디룩 시연(활성 0719~)**: 앱 승인 완료·앱스토어 콘텐츠 제출 완료(회신 대기). 순서 = 스토어 등록 확인(또는 파트너센터 "연동 사이트 관리"가 등록 전 테스트 연동 경로인지 확인) → 테스트 몰 OAuth 리허설(pm2 로그 + 회원가입 1건 webhook = 실측 미검증 3건 확정) → 아이디룩 시연. 스펙=INTEGRATIONS.md 아임웹 카드 · 제출물=docs/imweb-appstore/ · 상세=[[project_2026_0719_imweb_appstore_idlook]].
+> **★이미지 스튜디오 잔여(0719~)**: 인앱 웹 디자인 탭 단순화 · 원샷 이식(인앱·이메일) · 판독 3축 확장(내용+디자인신호+이미지 역할) · 템플릿 exampleUrl 실샘플 · **미해결 = DM 상품 링크 입력 시 멈춤(원인 미확정 — 재현 정보 대기)**. 상세=[[project_2026_0719_p4_image_studio]].
 > **★0718 성능·사고 후속(활성)**: B-0718-1 종결 조건 ①서버 git 일치(d6958238) ②재발 방지 게이트(safe-build 3-1 lazy 청크 실존/3-2 비literal 동적 import 검출 + verify-live-chunks.sh 라이브 전수) 완료 — Codex 5라운드 통과·하네스 실측. 로컬 "온전" 빌드도 19/38지점 암호화 불량 실측 정정. **0718 오후: ③exclude 3회 반복 빌드 실측 완료(청크 8/8·비literal 0·원복) · ⑦ 백엔드 실측 종결(이새 진입 2회 후 SLOW 0) · 양쪽 프론트 게이트 배포·라이브 검사 통과. **④M1 재도입 배포·종결(0718 저녁 eab1f413 — Codex 3R 성능 정정 3건 동반·서버 게이트 실전 통과·라이브 전수 177건 실패 0·Harold 화면 실측 통과 → B-0718-1 Closed·archive/BUGS_RESOLVED 회전. 첫 로드 5MB→0.37MB).** 잔여 = 화(0722~) 관측 사이클 1회전 — **0718 저녁 조기 판독 완료: 1순위=campaigns 발송 단계 폴러 인덱스(14,478콜·총 115초=PG 전체 30%·EXPLAIN 후 처방) · 2순위=balance_transactions 잔액 SUM N+1(78만 콜·호출처 추적) · MySQL 슬로우=버퍼풀 2GB 이후 0건** · 그 후 M3/롤업. M2=무효 — 고객사 관리자=hanjul.ai "관리" 메뉴 정책(별도 로그인 사이트 금지·Harold 0718). **app.hanjul.ai 관리자 화면 nginx 차단 + SDK 실물 backend/sdk-serving 이전 + company-frontend 패키지 제거 = 전부 배포·외부 실측 종결(0718 — 전 버전 200 js·v0.3.6/7은 설계 의도 폴백 서빙·api 정상·migrations/callback-self-register.sql 이관).** 단축 URL 실태 확정 = 발급은 모바일 DM(hlj.kr)뿐·message_short_urls 0건 실측(hlj.kr 통일 불필요 판정).** SoT=docs/2026-07-18-frontend-splitting-incident-handoff.md · 상세=[[project_2026_0717_dashboard_performance]] · 0717 성능 1~7차 원문=archive/TASKS_2026-07.md.
 > **비토 라인 14·15 미결 4건(활성)**: ①배정 화면 게이팅 범위(Harold 미확인) ②라인그룹 DELETE가 users.line_group_id 미체크(무경고 배정 해제) ③sweeper 2종 bulk-only 사각 ④Codex 결과 미수령(Harold 직접 /codex:result). 상세=[[project_2026_0717_bito_line14_15_lineadmin]] · 원문=archive/TASKS_2026-07.md.
-> ★ **1순위 = 템플릿관리자 흡수(Track B+C)** — ★0715~16 진행: 관문 1·2 전부 통과(import 2종 배포·아난티 847 pull·강문희 스펙 회신 해소). **Track C 착수 대기 = 강문희 답신 발신(삭제 불요·upsert 키·착수 시기) → 착수 회신 오면 M2(매핑 CT+아웃박스+효과검증+대조 워커) 설계·구현.** 병행 = M4 실발송 1건 · 497 기준 서팀장 · M5(B-3 계정·Bill_ID) · 브랜드 스코프(B-2) · 다우 2사 senderKey 이관 실측. SoT=설계문서 §1 · [[project_2026_0705_legacy_template_migration]].
+> ★ **1순위 = 템플릿관리자 흡수(Track B+C)** — ★0715~16 관문 1·2 통과(import 2종 배포·아난티 847 pull). **★0720 Track C API 개통**: 강문희 구현 완료·API 정의서 수령·62서버 조회 실측 통과(화이트리스트·토큰·응답 정상). 계약 확정 = **54=P코드/58=R코드 · billid=고객사(납입자ID) 단위 · usemod 서버별 상수(54:HM1~3/58:HM1~6) · 삭제 없음 · 1초 500회 제한**. **★0720 PUT 왕복 점검(R0001) 완료 — 서버 결함 1건: `tran_tmplcd` 빈 값 전송 시 tmplcd까지 유실**(계약 역전). 회피책=tran_tmplcd 항상 채움(기본=tmplcd 복사)=tran_tmplcd 정책 확정. **★0720 매핑 시드 확보**(서팀장 0716 엑셀 = API payload 1:1 · Bill_ID 41/4,681행) → 추가 요청 불요. P=54·R=58·병기 실사례. **usemod=서버상수 아닌 행 단위**(54 HM1~4 혼재)→기존분 조회 유지. tran_tmplcd=tmplcd 불일치 0. **58 계약 전 항목 검증 통과**(발견 결함=빈 tran_tmplcd→tmplcd 유실, 강문희 당일 수정·재검증). 삭제=웹관리자에 존재(API 무 → 자동삭제 배제 유지). **★0720(2) M2 전체 코드 완료 + bill 일괄 회사·계정 생성 + 에이전트 3메뉴**(상세·잔여 런북=[[project_2026_0705_legacy_template_migration]] 0720(2)절). 잔여 = DDL→env→배포→시드→link/bulk→대조→R0001→Codex. 54 포팅 메일 미도착(P0001 한글 대기). 전문=설계문서 §4-0~4-9. 병행 = M4 실발송 1건 · 497 기준 서팀장 · M5(B-3 계정·Bill_ID) · 브랜드 스코프(B-2) · 다우 2사 senderKey 이관 실측. SoT=설계문서 §1 · [[project_2026_0705_legacy_template_migration]].
 > ② **PAY Track D** — ★0715 54 병행 적재 개시. 다음 = 익일 143 마감 대조(§7-4) → 57(golang)→58 → 최종 전환일 dump 재복원 → Phase 2.
 > ③ **Local AI Ops Hub(비토 24시간화)** — 미래 대비. 설계 3부작 완료(docs/2026-07-15-local-ai-ops-hub-{design·agents-design·jarvis-spec}.md). Harold 결정(H-2 M0 착수) 대기. **현재 실무(①②)보다 후순위.** [[project_2026_0715_local_ai_ops_hub]].
 > (지속) ⓪ 비토 API 발송 경로 전환 검토(선택) [[project_2026_0710_bito_api_direct_test]] · ⓪-2 싱크에이전트 1.5.7 유지(종결) · (보류) 팝폰 SDK 검증.
@@ -59,6 +63,7 @@
 
 ### 최근 완료 인덱스 (원문 = 링크의 월별 아카이브)
 
+- 🟢 2026-07-19~20 — 계절 템플릿 22종(★7e613613) + 의류 단독컷 원칙 + 팝폰 가로줄 종결(양 OS 실측) + 아임웹 앱스토어 제출 (잔여=의류 안내 1줄 커밋·배포 / 아임웹 잔여는 위 활성 트랙, 회전 0720) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · [[project_2026_0719_p4_image_studio]] · [[project_2026_0719_imweb_appstore_idlook]]
 - 🟢 2026-07-17 (3) — 대시보드 성능 1~7차(측정→소거→처방·관측 인프라 가동) + 0718 M1 스플리팅 사고 롤백·재발 방지 게이트 ①② (★배포완료·Codex 5R / 잔여=③④·⑦실측·관측 사이클, 회전 2026-07-18) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0717_dashboard_performance]]
 - 🟢 2026-07-17 (2) — 비토 라인 14·15 신설(자비스 요청) + 슈퍼관리자 `발송 라인 설정` 탭 신설(ceo·admin 전용) + 정산 bito 라인 포함 (★배포완료 · **E2E 왕복 Harold 실측 통과 = 트랙 종결** / 잔여 = 미결 4건, 회전 2026-07-18) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0717_bito_line14_15_lineadmin]]
 - 🟢 2026-07-17 — 인앱 중앙정렬 근본수정(SDK 버전 폴더 동기화 누락)+전층 전수점검(허용표 3면 통일)+앱 네이티브 통합 계약 2면 (★배포완료 5커밋·DDL 0 / B-0717-1 종결(Harold 실측) · B-0717-2=팝폰 1.0.2 심사 중 / 잔여=웹 실측(쿠폰정렬·허용표)+앱 출시 후 실측 3종, 회전 2026-07-17) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0717_inapp_debug_session_incomplete]]
@@ -104,23 +109,8 @@
 - 🟢 2026-07-06 — 운영 버그 5건 근본수정 (★배포완료 / **잔여: Harold 운영검증** — 복구 UPDATE 897 재실행·5건 실측·.env CLAUDE_MAPPING_MODEL 확인) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0706_pending_fail_freeze_rootfix]]
 - 🟢 2026-07-05 — 자동마케팅 4수정(★배포완료) + 비토 Agent v1.0.8 MMS(**잔여: Gateway v135 E2E 실측 대기**) + 레거시 템플릿 이관 조사(**잔여: 서팀장 회의**) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0705_bito_agent_v108_mms]] · [[project_2026_0705_legacy_template_migration]]
 - 🟢 2026-07-05 (4) — 카페24 심사 반려 3건 대응 + 마케팅 캘린더 헛점 12건 근본 수정 (★배포완료·DDL 2건 포함) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0705_marketing_calendar_overhaul]] · [[project_2026_0703_cafe24_review_godo_integration]]
-- 🟢 2026-07-05 (2) — 여정 재점검: 3버그 + 발송 피로도 보호 + 계절감 제거 (★전부 배포완료) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0705_journey_reinforcement]]
 - 🟢 2026-07-04 (2) — 모달/토스트 UX(★배포완료) + 베스트 문안 재설계·진화 + 발송결과 집계 근본수정 + 스크롤 복원 + 직접발송 정리 (**잔여: ③④⑤⑥⑦ tp-push+build:safe+pm2 재배포 + 서버 psql 2세트(best_copy_seed_usage·best_copy_assets CREATE / ai_training_logs.click_count·conversion_count ADD)**) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
-- 🟢 2026-07-04 — 문안 퀄리티 엔진(cold-start, GPT 차별화·fix분 재배포 대기) + 비토 자체게이트웨이 라인13 E2E 완주 + 메모리 관제탑 정리 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
-- 🟢 2026-07-03 — 관제탑 v2 + 사용구분 게이팅 + 전채널 학습루프 + 레거시 SSL + 카페24/고도몰/isae 완결 (**잔여: 학습루프 ②③⑤ 재배포+실측 / 레거시 폐기 서팀장 5문항 회신 대기**) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0703_control_tower_redesign]] · [[project_2026_0703_all_channel_learning_loop]]
-- 🟢 2026-07-03 — 싱크에이전트 updater 자기교체 근본수정 v1.6.0 (**잔여: tp-push·sync_releases 서버 릴리즈 등록 — win-legacy active 등록은 1.6.1부터**) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0703_sync_agent_updater_selfreplace]]
-- 🟢 2026-07-02 (6) — 자동마케팅 완성: 발송 전 흐름 스펙 + 일일 분석 엔진(오늘의 추천) + 회고·ROI·캘린더·D-2 준비 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
-- 🟢 2026-07-02 (5) — DM 추적 근본 수리(본문 파서) + 상세 추적/버튼 단위 + AI 학습 메모리 자동 전송 + 디자인 v2 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
-- 🟢 2026-07-02 (4) — DM·이메일 전면 정비 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
-- 🟢 2026-07-02 (3) — 모바일DM 수신자별 추적 근본 수정: 토큰 1급 키 + 열람 깊이/섹션/클릭 + 추적 화면 격상 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
-- 🟢 2026-07-02 (2) — 이메일 마케팅 종결: 크레딧 모델 개편 + 개인화 동적화 + 링크/쿠폰/서식/페이징 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
-- 🟢 2026-07-02 (1) — 브랜드보이스 형태 추출 강화 + 브랜드 링크 + 문안 편집기 모달 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
-- 🟢 2026-07-01 (이어서 3) — 서버 상태 점검 후 코드 수정: 42P08 + PG 부팅 연결 재시도 + CORS 안내 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
-- 🟢 2026-07-01 (이어서 2) — 예측 일일차감 eligibility 재정의 + 슈퍼관리자 화이트 모던화 + 이메일 placeholder 발송 UX → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
-- 🟢 2026-07-01 (이어서) — 비-문자 개인화+타겟추출 전체(이메일·인앱·DM) + DM 수신자별 토큰 발송/추적/편집기 + 발행 주소복사 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
-- 🟢 2026-07-01 — AI 모델 전환: 문안=Sonnet 5 / 오퍼레이터 정밀=Opus 4.8 + 검수 thinking·오탐차단 + 브랜드보이스 톤 강화 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
-
-> 2026-06-30 이하 완료분 = [archive/INDEX.md](archive/INDEX.md) 카탈로그 경유 (날짜·증상어 grep).
+> 2026-07-02 이하 완료분 = [archive/INDEX.md](archive/INDEX.md) 카탈로그 경유 (날짜·증상어 grep). ★2026-07-20 회전: 07-01(4건)·07-02(6건) 인덱스 줄을 INDEX 등재 확인 후 제거 — 원문은 TASKS_2026-07.md에 무손실 보존.
 
 ---
 

@@ -1,8 +1,8 @@
-import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
 import nodemailer from 'nodemailer';
 import { query } from '../config/database';
-import { ensureSystemSyncUser } from '../utils/system-sync-user';
+// ★ 2026-07-20: 회사 생성 코어 CT(시스템 user·시퀀스 부속 포함) — POST /와 게이트웨이 bill 일괄 생성 공유
+import { createCompanyCore } from '../utils/company-create';
 import { authenticate, requireSuperAdmin, requireUuidId } from '../middlewares/auth';
 import { getCardDef, isDynamicCardId, parseDynamicCardId, type ParsedDynamicCardId } from '../utils/dashboard-card-pool';
 import { getStoreScope } from '../utils/store-scope';
@@ -1563,49 +1563,26 @@ router.post('/', requireSuperAdmin, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'usageType은 web/agent/both 중 하나여야 합니다.' });
     }
 
-    const apiKey = `tk_${crypto.randomBytes(24).toString('hex')}`;
-    const apiSecret = crypto.randomBytes(32).toString('hex');
-    const dbName = `targetup_${companyCode.toLowerCase()}`;
-
-    const result = await query(
-      `INSERT INTO companies (
-        name, company_code, company_name, business_number, ceo_name,
-        contact_name, contact_email, contact_phone, address,
-        plan_id, data_input_method, api_key, api_secret, db_name,
-        created_by, usage_type
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-      RETURNING *`,
-      [
-        companyName, companyCode, companyName, businessNumber, ceoName,
-        contactName, contactEmail, contactPhone, address,
-        planId, dataInputMethod, apiKey, apiSecret, dbName,
-        req.user?.userId, usageType
-      ]
-    );
-
-    const newCompanyId = result.rows[0].id;
-
-    // ===== SyncAgent v1.5.0: 시스템 가상 user + customer_code 시퀀스 자동 생성 =====
-    // 설계서 §9-3 — 트리거 대신 애플리케이션 로직 선택(추천 B안).
-    try {
-      await ensureSystemSyncUser(newCompanyId);
-    } catch (sysErr) {
-      console.error('[Company Create] 시스템 user 생성 실패:', sysErr);
-    }
-    try {
-      await query(
-        `INSERT INTO customer_code_sequences (company_id, last_number)
-         VALUES ($1, 0)
-         ON CONFLICT (company_id) DO NOTHING`,
-        [newCompanyId]
-      );
-    } catch (seqErr) {
-      console.error('[Company Create] customer_code_sequences 초기화 실패:', seqErr);
-    }
+    // ★ 2026-07-20: 생성 코어를 utils/company-create.ts CT로 추출 — 게이트웨이 bill 일괄 생성과 공유.
+    //   INSERT 컬럼·자동 생성값·부속 처리(시스템 user·customer_code_sequences) 동작 불변.
+    const company = await createCompanyCore({
+      companyCode,
+      companyName,
+      businessNumber,
+      ceoName,
+      contactName,
+      contactEmail,
+      contactPhone,
+      address,
+      planId,
+      dataInputMethod,
+      usageType,
+      createdBy: req.user?.userId,
+    });
 
     return res.status(201).json({
       message: '고객사가 생성되었습니다.',
-      company: result.rows[0],
+      company,
     });
   } catch (error: any) {
     console.error('고객사 생성 에러:', error);

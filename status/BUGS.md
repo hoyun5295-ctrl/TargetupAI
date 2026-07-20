@@ -60,6 +60,7 @@
 > **근본(코드 확정)**: 설치된 프로덕션 빌드(≤1.0.1)의 `inapp-client`가 세션 키(`session:`)까지 AsyncStorage에 영속 → `once_per_session`이 **설치당 1회(영구)**로 동작. 0716에 수리(세션=메모리 전용 + 옛 영속분 자동 정리)했으나 **앱 미빌드·미배포**가 전부였음.
 > **데이터 교차검증(0717 SQL)**: app 채널 `cdp_inapp_impressions` = impression 85·click 13·dismiss 24·opt_out 0, 마지막 impression 0717 01:50 KST에서 정지 → **현 빌드도 트래킹은 정상 전송(하루 1회 서버 24h 억제·통계 유효)**, 그 이후 표시 0 = 세션 영구화 진단과 일치.
 > **빈도 계약 확정(편집기 각주 반영)**: 세션당 1회=앱 실행 1회(완전 종료 후 재실행=재표시) / 하루 1회=서버 24h 억제(impression 기준)+클라 이중 / 매번=닫으면 그 실행만 억제 / 다시 보지 않기=서버 opt_out 영구.
+> **★2026-07-20 진전 — 1.0.2 런타임 성립 확인**: 포스터형 스크림 수정분을 `eas update --branch production`으로 발행했고 **iOS·Android 단말 모두 OTA 반영 실측**(Harold "안드로이드까지 정상 확인완료"). runtimeVersion 정책이 appVersion(1.0.2)이므로 **양 OS 1.0.2 출시·설치 확정** = 해소 경로의 배포 조건은 충족됐다. **남은 것은 실측 3종뿐**(아래). 이후 JS 수정은 검수 없이 `eas update`로 배포(단 `--platform android`/`ios` 분리 실행 — `all`은 web export가 Supabase→AsyncStorage `window is not defined`로 실패).
 > **해소 경로**: 팝폰 1.0.2 빌드(iOS 빌드 22·Android) — 0717 Harold 심사 제출 완료(iOS 재업로드 2회 실패 원인=스토어 출시 버전과 동일 문자열 1.0.1 → app.json 1.0.2 상향으로 해소, 7/4 1.0.0→1.0.1 패턴 재현). **잔여 = 출시 후 실측 3종**(①완전 종료→재실행 시 재표시 ②닫기 후 같은 실행 미재표시 ③다시 보지 않기 후 영구 미표시). 1.0.2부터 EAS Update 런타임 성립 = 이후 JS 수정은 `eas update`로 검수 없이 배포. 상세=[[project_2026_0717_inapp_debug_session_incomplete]].
 
 > **2026-07-18 B-0718-1 프론트 스플리팅 전 고객 진입 불능 종결** → [archive/BUGS_RESOLVED.md](archive/BUGS_RESOLVED.md) 최상단(재발 방지 3겹 게이트 + M1 재도입 배포 eab1f413 + 라이브 전수 177건 + Harold 화면 실측 통과. 첫 로드 5MB→0.37MB).

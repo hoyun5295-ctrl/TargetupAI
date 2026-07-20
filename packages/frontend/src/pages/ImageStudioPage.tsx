@@ -453,6 +453,7 @@ export default function ImageStudioPage() {
                 )}
                 {product && <div className="mt-2 text-[11px] text-white/50 truncate">{product.name}{product.salePrice ? ` · ${won(product.salePrice)}` : ''}</div>}
                 <p className="text-[10px] text-white/30 italic mt-2">상품 없이도 생성할 수 있어요(문구 포스터). 단일 제품 사진에서 가장 잘 작동합니다.</p>
+                <p className="text-[10px] text-amber-300/60 italic mt-1">의류는 모델 착용컷 대신 옷 단독컷을 권장해요 — 착용컷은 배경과 합성한 티가 나기 쉬워요.</p>
               </div>
             </div>
 

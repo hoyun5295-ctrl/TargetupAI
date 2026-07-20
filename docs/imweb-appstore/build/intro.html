@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: 'Pretendard'; font-weight: 800; src: url('file:///C:/Users/ceo/AppData/Local/Microsoft/Windows/Fonts/Pretendard-ExtraBold.otf') format('opentype'); }
+  @font-face { font-family: 'Pretendard'; font-weight: 700; src: url('file:///C:/Users/ceo/AppData/Local/Microsoft/Windows/Fonts/Pretendard-Bold.otf') format('opentype'); }
+  @font-face { font-family: 'Pretendard'; font-weight: 600; src: url('file:///C:/Users/ceo/AppData/Local/Microsoft/Windows/Fonts/Pretendard-SemiBold.otf') format('opentype'); }
+  @font-face { font-family: 'Pretendard'; font-weight: 400; src: url('file:///C:/Users/ceo/AppData/Local/Microsoft/Windows/Fonts/Pretendard-Regular.otf') format('opentype'); }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1024px; }
+  body { font-family: 'Pretendard', sans-serif; background: #090c15; color: #fff; }
+  .hero { position: relative; padding: 88px 80px 72px; overflow: hidden; }
+  .hero .glow { position: absolute; width: 900px; height: 900px; right: -300px; top: -450px; background: radial-gradient(circle, rgba(168,85,247,0.18) 0%, rgba(168,85,247,0) 62%); }
+  .hero img.mark { height: 40px; margin-bottom: 48px; position: relative; }
+  .hero h1 { font-size: 46px; font-weight: 800; line-height: 1.32; letter-spacing: -0.8px; position: relative; }
+  .hero p { margin-top: 22px; font-size: 19px; line-height: 1.65; color: rgba(255,255,255,0.62); position: relative; }
+  .hero .bar { width: 110px; height: 9px; border-radius: 5px; background: #fff; margin-top: 40px; position: relative; }
+  .steps { display: flex; gap: 16px; padding: 0 80px; margin-top: 8px; }
+  .step { flex: 1; border: 1px solid rgba(255,255,255,0.11); background: rgba(255,255,255,0.035); border-radius: 18px; padding: 26px 24px; }
+  .step .n { font-size: 13px; font-weight: 700; color: #e879f9; margin-bottom: 10px; letter-spacing: 1px; }
+  .step .t { font-size: 18px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.3px; }
+  .step .d { font-size: 14px; line-height: 1.6; color: rgba(255,255,255,0.55); }
+  .feature { padding: 78px 80px 0; }
+  .feature .label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: #e879f9; letter-spacing: 1.5px; margin-bottom: 14px; }
+  .feature .label::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #e879f9; }
+  .feature h2 { font-size: 32px; font-weight: 800; letter-spacing: -0.6px; line-height: 1.35; }
+  .feature p { margin-top: 12px; font-size: 16.5px; line-height: 1.65; color: rgba(255,255,255,0.58); }
+  .shot { margin-top: 30px; border-radius: 16px; overflow: hidden; border: 1px solid rgba(255,255,255,0.13); box-shadow: 0 26px 70px rgba(0,0,0,0.5); }
+  .shot img { width: 100%; display: block; }
+  .channels { margin: 84px 80px 0; border-top: 1px solid rgba(255,255,255,0.1); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 30px 0; display: flex; justify-content: space-between; align-items: center; }
+  .channels .k { font-size: 15px; font-weight: 700; color: rgba(255,255,255,0.45); }
+  .channels .v { font-size: 17px; font-weight: 600; letter-spacing: -0.2px; }
+  .cta { position: relative; margin-top: 84px; padding: 76px 80px 88px; background: #f4f4f6; color: #0b0d17; overflow: hidden; }
+  .cta img.mark { height: 36px; margin-bottom: 34px; }
+  .cta h2 { font-size: 36px; font-weight: 800; letter-spacing: -0.7px; line-height: 1.35; }
+  .cta p { margin-top: 14px; font-size: 17px; color: rgba(11,13,23,0.6); line-height: 1.6; }
+  .cta .domain { display: inline-block; margin-top: 34px; background: #0b0d17; color: #fff; font-weight: 700; font-size: 18px; padding: 16px 34px; border-radius: 999px; }
+</style>
+</head>
+<body>
+  <div class="hero">
+    <div class="glow"></div>
+    <img class="mark" src="../assets/logo_white_mark.png">
+    <h1>아임웹에 연결하는 순간,<br>AI 마케팅 팀이 생깁니다</h1>
+    <p>회원·주문 데이터 자동 연동부터 콘텐츠 제작, 타겟 발송, 성과 분석까지.<br>마케팅 담당자가 없어도, 한줄로가 알아서 합니다.</p>
+    <div class="bar"></div>
+  </div>
+
+  <div class="steps">
+    <div class="step"><div class="n">STEP 1</div><div class="t">앱 추가</div><div class="d">아임웹 앱스토어에서 한줄로를 사이트에 추가합니다.</div></div>
+    <div class="step"><div class="n">STEP 2</div><div class="t">권한 동의</div><div class="d">클릭 한 번으로 연동 동의 — 개발 작업이 필요 없습니다.</div></div>
+    <div class="step"><div class="n">STEP 3</div><div class="t">자동 연동 시작</div><div class="d">회원·주문·장바구니 데이터가 실시간으로 들어옵니다.</div></div>
+  </div>
+
+  <div class="feature">
+    <div class="label">IMAGE STUDIO</div>
+    <h2>상품 사진 한 장이면,<br>완성 포스터가 나옵니다</h2>
+    <p>템플릿을 고르고 상품과 문구만 넣으세요. 배경·연출·타이포까지 AI가 한 장의 완성 포스터로 만들어 드립니다. 7개 카테고리 58종 템플릿.</p>
+    <div class="shot"><img src="../assets/스크린샷 2026-07-19 232214.png"></div>
+  </div>
+
+  <div class="feature">
+    <div class="label">CONTENT BUILDER</div>
+    <h2>연동된 상품·가격이<br>그대로 콘텐츠가 됩니다</h2>
+    <p>모바일 DM·이메일·인앱 메시지를 편집기에서 바로 제작. 연동 몰에서 상품을 불러오면 사진·가격·할인율이 자동으로 채워집니다.</p>
+    <div class="shot"><img src="../assets/스크린샷 2026-07-19 232236.png"></div>
+  </div>
+
+  <div class="feature">
+    <div class="label">AI JOURNEY</div>
+    <h2>가입·구매·이탈 시점에<br>알아서 보냅니다</h2>
+    <p>AI가 시점과 타겟, 문구까지 설계하는 여정 자동화. 만들어 두면 고객 행동에 맞춰 자동으로 움직입니다.</p>
+    <div class="shot"><img src="../assets/스크린샷 2026-07-19 232327.png"></div>
+  </div>
+
+  <div class="channels">
+    <span class="k">발송 채널</span>
+    <span class="v">문자(SMS·LMS·MMS) · 카카오 알림톡 · 이메일 · 모바일 DM · 인앱 메시지</span>
+  </div>
+
+  <div class="cta">
+    <img class="mark" src="../assets/logo_black_mark.png">
+    <h2>지금 사이트에 추가하고<br>첫 캠페인을 만들어 보세요</h2>
+    <p>연동은 1분이면 끝납니다. 자세한 안내는 홈페이지에서 확인하세요.</p>
+    <div class="domain">hanjul.ai</div>
+  </div>
+</body>
+</html>

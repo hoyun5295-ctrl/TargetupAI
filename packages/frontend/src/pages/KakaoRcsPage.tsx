@@ -206,11 +206,22 @@ export default function KakaoRcsPage() {
             <p className="text-sm text-gray-500 mt-0.5">{isAgentOnly ? '알림톡 템플릿 등록 · 검수 관리' : '알림톡 템플릿, 브랜드메시지, RCS 관리'}</p>
           </div>
           {isAgentOnly ? (
-            // ★ 2026-07-03 에이전트 전용 회사 — 대시보드 진입점 제거, 로그아웃만
-            <button onClick={() => { logout(); navigate('/login'); }}
-              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm transition">
-              로그아웃
-            </button>
+            // ★ 2026-07-03 에이전트 전용 회사 — 대시보드 진입점 제거
+            // ★ 2026-07-20 Harold 확정 3메뉴: 카카오 템플릿(현재)·발송결과·발신번호 등록 — /manage 축소 탭으로 연결
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              <button onClick={() => navigate('/manage?tab=stats')}
+                className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg text-sm font-medium transition">
+                발송결과
+              </button>
+              <button onClick={() => navigate('/manage?tab=callbacks')}
+                className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg text-sm font-medium transition">
+                발신번호 등록
+              </button>
+              <button onClick={() => { logout(); navigate('/login'); }}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm transition">
+                로그아웃
+              </button>
+            </div>
           ) : (
             <button onClick={() => navigate('/')}
               className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm transition">

@@ -45,6 +45,8 @@ import targetsRoutes from './routes/targets';
 import campaignAgencyRoutes from './routes/campaign-agency'; // ★ 2026-07-09 CRM 캠페인 대행 (비즈니스+ 전용)
 // ★ D130: IMC 알림톡/브랜드메시지 관리
 import alimtalkRoutes from './routes/alimtalk';
+// ★ 2026-07-20 Track C M2: 게이트웨이 알림톡 매핑 관리 (super_admin 전용)
+import gatewayTemplatesRoutes from './routes/gateway-templates';
 // ★ D172 (2026-05-19): 한줄로 CDP — 자사몰 sync API (identify/event/order/bulk-import)
 import cdpRoutes from './routes/cdp';
 import { serveSdkFile } from './utils/sdk-serve';
@@ -95,6 +97,9 @@ import { startJourneyReentryWorker } from './utils/journey-reentry-worker';
 // ★ D217+ (2026-05-26 Harold 명시 진단 정정): 카카오 templateCode 동기화 worker — 30분 주기
 //   옛 D147 영역 = 검수 통과 후 진정 카카오 templateCode 영역 = 한줄로 안 동기화 누락 사고 (8건 100%) 영구 정정
 import { startKakaoTemplateSyncWorker } from './utils/kakao-template-sync-worker';
+// ★ 2026-07-20 Track C M2: 게이트웨이 매핑 동기화 워커 — 적재 5분·푸시 1분·대조 6h.
+//   이중 env 게이트(GATEWAY_TMPL_SYNC_ENABLED·GATEWAY_TMPL_54_ENABLED 기본 false) — 배포≠가동
+import { startGatewayTemplateMappingWorker } from './utils/gateway-template-mapping-worker';
 // ★ D227+ (2026-05-28 영업팀장 박성용 신고 fix): 예약 캠페인 자동 정리 worker — 1분 cron
 //   옛 흐름 = 응답 영역 직전 동기 호출 → 6만건 안 30~40초 사고 → 백그라운드 영역 분리
 import { startScheduledCleanupWorker } from './utils/scheduled-cleanup-worker';
@@ -340,6 +345,8 @@ app.use('/api/voice', voiceRoutes);
 app.use('/api/email', emailRoutes);
 // ★ D130: 알림톡/브랜드메시지 IMC 연동 (발신프로필/템플릿/검수/웹훅/이미지/알림수신자)
 app.use('/api/alimtalk', alimtalkRoutes);
+// ★ 2026-07-20 Track C M2: 게이트웨이 알림톡 매핑 관리 (super_admin 전용)
+app.use('/api/gateway-templates', gatewayTemplatesRoutes);
 app.use('/api/dm', dmRouter);
 // ★ 2026-07-08 행사 캠페인 (이미지 판독 + 생성 초안 임시 보관)
 app.use('/api/event-campaigns', eventCampaignRouter);
@@ -446,6 +453,10 @@ app.listen(PORT, () => {
   //   운영 환경 8건 100% 사고 (template_code = Tmp_xxx 자체 코드 영구 유지) 영구 안전망
   //   Phase 1 백필 endpoint (POST /api/alimtalk/jobs/sync-template-codes) + Phase 2 getAlimtalkTemplate 영역 분기 정합
   startKakaoTemplateSyncWorker();
+
+  // ★ 2026-07-20 Track C M2: 게이트웨이 매핑 동기화 워커 (desired state 수렴 — 적재 5분·푸시 1분·대조 6h)
+  //   GATEWAY_TMPL_SYNC_ENABLED=false(기본)면 자동 주기 전부 무동작(배포≠가동). 테이블 부재 시 조용히 skip.
+  startGatewayTemplateMappingWorker();
 
   // ★ D197 (2026-05-22) Phase B-2: Predictive Suite worker — 1시간 주기 customer 예측 점수 자동 갱신
   //   클릭률 + 이탈 위험 + 구매 가능성 (Logistic Regression + cold start fallback)

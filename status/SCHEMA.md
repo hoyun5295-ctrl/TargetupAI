@@ -2617,3 +2617,55 @@ CREATE INDEX IF NOT EXISTS idx_journey_step_logs_execution ON journey_step_logs(
 - **journeys.last_event_cursor** `timestamptz` — cdp 구매·예약 이벤트 처리 커서(이 시각 이후~지금 전수 처리 → 워처 멈춰도 누락 0).
 - **journey_entry_ledger**(`journey_id` uuid FK→journeys CASCADE, `company_id` uuid, `store_code` varchar null, `phone` varchar, `kind` varchar 'baseline'|'entered', `created_at`) · **UNIQUE(journey_id, company_id, COALESCE(store_code,'__NONE__'), phone)** + idx(journey_id) — 신규가입 "전에 본 적 없는 식별자"만 진입. 키 = 시스템 upsert 식별자(회사+매장코드+전화번호).
 - **journey_step_campaigns**(`journey_id` uuid FK→journeys CASCADE, `step_id` uuid, `send_date` date, `campaign_id` uuid, `created_at`) · **PK(journey_id, step_id, send_date)** — 묶음 발송: (journey,step,KST날짜)당 campaign 1건 공유(발송결과 1줄 + app_etc1=campaignId 상세 검색).
+
+### ★ 2026-07-20 Track C M2 — 게이트웨이 알림톡 매핑 2테이블 (템플릿관리자 흡수)
+
+> **미적용 — Harold 서버 psql 실행 후 이 줄을 "적용 완료"로 갱신.**
+> DDL 사전검증 0720 통과(Harold 실행): 두 테이블 information_schema 0 rows(부재) + 참조 컬럼 7개 실존(companies.id · kakao_templates id/status/template_code/company_id/profile_id · kakao_sender_profiles.profile_key).
+> 설계 SoT = docs/2026-07-14-template-migration-track-bc-design.md §4-9-A. 소비처 = utils/gateway-template-mapping-worker.ts · routes/gateway-templates.ts (super_admin 전용).
+
+```sql
+-- ① 고객사 ↔ 게이트웨이 납입자ID 연결 (billid는 리터럴 — 병기 'P0042;R0003' 분해 금지)
+CREATE TABLE gateway_bill_mappings (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  bill_id       varchar(30)  NOT NULL UNIQUE,
+  server        varchar(2)   NOT NULL CHECK (server IN ('54','58')),
+  company_id    uuid         REFERENCES companies(id),   -- NULL 허용: 시드 직후 미연결 상태
+  bill_name     varchar(128) NOT NULL DEFAULT '',        -- 레거시 표기(참고용)
+  default_usemod varchar(100) NOT NULL,                  -- 신규 템플릿 기본값(시드 최빈값)
+  auto_push_enabled boolean   NOT NULL DEFAULT false,    -- 회사별 점진 개시(파일럿 게이트)
+  is_active     boolean      NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- ② 매핑 desired state + 동기화 상태 (게이트웨이 1행 = 여기 1행)
+CREATE TABLE gateway_template_mappings (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  bill_id       varchar(30)  NOT NULL,
+  server        varchar(2)   NOT NULL CHECK (server IN ('54','58')),
+  tmplcd        varchar(100) NOT NULL,
+  tran_tmplcd   varchar(100) NOT NULL,                   -- 빈 값 금지 — 항상 채움(기본=tmplcd)
+  senderkey     varchar(100) NOT NULL,
+  billnm        varchar(128) NOT NULL DEFAULT '',
+  usemod        varchar(100) NOT NULL,                   -- 행 단위 값(§4-0-2 — 서버 상수 아님)
+  company_id    uuid,
+  kakao_template_id uuid REFERENCES kakao_templates(id), -- auto 생성분만, seed는 NULL
+  source        varchar(10)  NOT NULL DEFAULT 'auto' CHECK (source IN ('seed','auto','manual')),
+  sync_status   varchar(12)  NOT NULL DEFAULT 'pending' CHECK (sync_status IN ('pending','synced','failed','orphan')),
+  attempts      int          NOT NULL DEFAULT 0,
+  next_retry_at timestamptz,
+  last_error    text,
+  last_synced_at timestamptz,
+  last_seen_at  timestamptz,                             -- 대조에서 게이트웨이 실존 확인 시각
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (bill_id, tmplcd)                               -- = 게이트웨이 upsert 키와 동일
+);
+CREATE INDEX idx_gtm_status_retry ON gateway_template_mappings (sync_status, next_retry_at);
+CREATE INDEX idx_gtm_company ON gateway_template_mappings (company_id);
+```
+
+- sync_status: pending(push 대기/재시도) → synced(효과 검증 통과) / failed(8회 초과·영구 오류 — 알림 후 수동 재개) / orphan(게이트웨이에만 있는 행 — 표시 전용, 자동 삭제 절대 X)
+- source: seed(서팀장 엑셀 4,681행 — sync_status 'synced'로 적재) / auto(적재 스캔 생성) / manual(수동 등록 + 대조가 발견한 고아 행)
+- env 게이트: `GATEWAY_TMPL_SYNC_ENABLED`(마스터, 기본 false) · `GATEWAY_TMPL_54_ENABLED`(54 푸시, 기본 false — P0001 한글 왕복 실측 후) · `GATEWAY_TMPL_API_TOKEN`

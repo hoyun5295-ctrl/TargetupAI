@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuthStore } from '../stores/authStore';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useAuthStore, isAgentOnlyCompany } from '../stores/authStore';
 import UsersTab from '../components/manage/UsersTab';
 import CallbacksTab from '../components/manage/CallbacksTab';
 import ScheduledTab from '../components/manage/ScheduledTab';
@@ -34,7 +34,24 @@ function TabIcon({ k }: { k: Tab }) {
 export default function ManagePage() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
-  const [activeTab, setActiveTab] = useState<Tab>('users');
+  const [searchParams] = useSearchParams();
+
+  // ★ 2026-07-20 에이전트 전용 회사 = 발송결과(stats)·발신번호(callbacks) 탭만 (Harold 확정 3메뉴 중 2)
+  const isAgentOnly = isAgentOnlyCompany(user);
+  const visibleTabs = isAgentOnly
+    ? [
+        { key: 'stats' as Tab, label: '발송결과' },
+        { key: 'callbacks' as Tab, label: '발신번호' },
+      ]
+    : TABS;
+
+  // ?tab= 초기 탭 (카카오 템플릿 페이지의 3메뉴 네비에서 진입) — 허용 탭만 수용
+  const tabParam = searchParams.get('tab') as Tab | null;
+  const initialTab: Tab =
+    tabParam && visibleTabs.some((t) => t.key === tabParam)
+      ? tabParam
+      : isAgentOnly ? 'stats' : 'users';
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
 
   const handleLogout = () => {
     logout();
@@ -50,13 +67,13 @@ export default function ManagePage() {
             {/* 로고 + 돌아가기 */}
             <div className="flex items-center gap-3">
               <button
-                onClick={() => navigate('/dashboard')}
+                onClick={() => navigate(isAgentOnly ? '/kakao-rcs' : '/dashboard')}
                 className="flex items-center gap-1.5 text-slate-400 hover:text-slate-700 transition"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
-                <span className="text-sm font-medium">대시보드</span>
+                <span className="text-sm font-medium">{isAgentOnly ? '카카오 템플릿' : '대시보드'}</span>
               </button>
               <div className="w-px h-5 bg-slate-200" />
               <img src="/logo.png" alt="한줄로" className="h-7" />
@@ -85,7 +102,7 @@ export default function ManagePage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
         {/* 탭 네비게이션 */}
         <div className="flex gap-1 mb-6 bg-white rounded-2xl border border-slate-200 shadow-sm p-1.5 overflow-x-auto">
-          {TABS.map(tab => (
+          {visibleTabs.map(tab => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
