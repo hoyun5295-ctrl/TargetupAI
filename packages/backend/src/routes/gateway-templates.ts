@@ -29,6 +29,17 @@ import {
   inferServerFromBillId,
 } from '../utils/gateway-template-mapping';
 import { createCompanyCore, createCompanyAdminUser } from '../utils/company-create';
+import * as imc from '../utils/alimtalk-api';
+import { normalizeImcTemplateStatus } from '../utils/alimtalk-jobs';
+import {
+  buildCompanyTargets,
+  indexImcTemplates,
+  extractImcTemplateCode,
+  isBSeriesCode,
+  classifyMissingSeedCodes,
+  summarizeMissing,
+  importedAlarmNotifiedStatus,
+} from '../utils/kakao-bulk-migration';
 
 // 일괄 생성 계정 최초 비밀번호 (Harold 지정 2026-07-20) — must_change_password=true라 최초 로그인 시 변경 강제
 const BULK_INITIAL_PASSWORD = 'qwer1234';
@@ -392,6 +403,476 @@ router.post('/bills/bulk-create-companies', async (req: Request, res: Response) 
       linked,
       errors,
       remainingUnlinked: remain.rows[0].cnt,
+    });
+  } catch (err) {
+    return handleDbError(res, err);
+  }
+});
+
+// ── 카카오 템플릿 일괄 이관 (Track B M5 — §4-9-H 런북, Harold 지시 2026-07-20)
+//    게이트웨이 매핑이 아는 "회사 ↔ senderKey ↔ B_ 코드"를 IMC 실목록과 맞춰 프로필 연결 + 템플릿 pull.
+//    게이트웨이 호출 0 · gateway_template_mappings 쓰기 0 → 마스터 게이트(false)와 무관하게 안전.
+//    발송 경로 파일 무접촉.
+//
+//    ★기존 POST /api/alimtalk/templates/import를 senderKey마다 부르지 않는 이유:
+//      그 경로는 senderKey 1개마다 IMC 계정 전체를 처음부터 재스캔한다(최대 100페이지).
+//      senderKey 215개면 IMC 호출이 1만 회를 넘는다. 여기서는 전량 1회 스캔 후 senderKey별로 나눈다.
+//
+//    ★회사 단위로 도는 이유(0720 실측): bill 단위면 마리오아울렛(P0013·R0041)처럼 두 bill 회사에
+//      pull이 두 번 걸리고, 반대로 아난티처럼 한 bill 안 senderKey가 2개면 하나만 연결돼 62코드가
+//      조용히 누락된다(0715 실사고). 회사 단위 senderKey 합집합이 두 결함을 동시에 막는다.
+//
+//    ★D231+ 교훈(응답 전 대량 동기 처리 = nginx 504) 방어: 회사·프로필·템플릿 건수를 모두 상한으로 끊고
+//      offset으로 이어서 실행한다. 전 단계 멱등이라 재실행이 항상 안전.
+router.post('/bulk-migrate-templates', async (req: Request, res: Response) => {
+  const clampInt = (raw: any, def: number, min: number, max: number): number => {
+    const n = parseInt(String(raw ?? ''), 10);
+    if (!Number.isFinite(n)) return def;
+    return Math.min(max, Math.max(min, n));
+  };
+
+  try {
+    const dryRun = req.body?.dryRun !== false; // 기본 true
+    const offset = clampInt(req.body?.offset, 0, 0, 10000);
+    const maxCompanies = clampInt(req.body?.maxCompanies, dryRun ? 10 : 1, 1, 100);
+    const maxProfiles = clampInt(req.body?.maxProfiles, 30, 1, 200);
+    const maxTemplates = clampInt(req.body?.maxTemplates, 800, 1, 3000);
+    const billIdFilter: string[] | null =
+      Array.isArray(req.body?.billIds) && req.body.billIds.length > 0
+        ? req.body.billIds.map((v: any) => String(v).trim())
+        : null;
+    const companyIdFilter: string[] | null =
+      Array.isArray(req.body?.companyIds) && req.body.companyIds.length > 0
+        ? req.body.companyIds.map((v: any) => String(v).trim())
+        : null;
+
+    // 1) 이관 대상 = 회사 연결된 활성 bill의 매핑 전량 (source 무관 — orphan도 게이트웨이에 실존하는 라우팅)
+    const rowsRes = await query(
+      `SELECT b.company_id, c.company_name, b.bill_id, m.senderkey, m.tmplcd, m.source
+         FROM gateway_bill_mappings b
+         JOIN companies c ON c.id = b.company_id
+         JOIN gateway_template_mappings m ON m.bill_id = b.bill_id
+        WHERE b.is_active = true AND b.company_id IS NOT NULL`,
+    );
+
+    let allTargets = buildCompanyTargets(rowsRes.rows);
+    if (billIdFilter) {
+      allTargets = allTargets.filter((t) => t.billIds.some((b) => billIdFilter.includes(b)));
+    }
+    if (companyIdFilter) {
+      allTargets = allTargets.filter((t) => companyIdFilter.includes(t.companyId));
+    }
+    const totalCompanies = allTargets.length;
+    const targets = allTargets.slice(offset, offset + maxCompanies);
+    if (targets.length === 0) {
+      return res.json({
+        success: true, dryRun, totalCompanies, offset, processedCompanies: 0,
+        message: '처리 대상 회사 없음 (offset이 전체 수를 넘었거나 필터 결과 0)',
+      });
+    }
+
+    // 2) IMC 계정 전량 1회 스캔 — 부분 스캔으로 진행하면 누락 pull이 "완료"로 보인다(0715 사고 유형)
+    const IMC_PAGE_SIZE = 100;
+    const IMC_MAX_PAGES = 100;
+    const imcItems: any[] = [];
+    let scanExhausted = false;
+    let imcPages = 0;
+    for (let page = 0; page < IMC_MAX_PAGES; page++) {
+      const r = await imc.listAlimtalkTemplates({ page, count: IMC_PAGE_SIZE });
+      if (r.code !== '0000') {
+        return res.status(502).json({
+          success: false,
+          error: `IMC 목록 조회 실패 (page=${page}, code=${r.code}) — 전체 스캔 불가로 중단`,
+          imcMessage: r.message,
+        });
+      }
+      const data: any = r.data || {};
+      const list: any[] = data.templateList || [];
+      imcItems.push(...list);
+      imcPages = page + 1;
+      if (data.hasNext !== true || list.length === 0) {
+        scanExhausted = true;
+        break;
+      }
+    }
+    if (!scanExhausted) {
+      return res.status(502).json({
+        success: false,
+        error: `IMC 목록이 ${IMC_MAX_PAGES}페이지에서도 끝나지 않음 — 부분 스캔 금지로 중단(페이지 상한 상향 필요)`,
+        scanned: imcItems.length,
+      });
+    }
+    const imcIndex = indexImcTemplates(imcItems);
+
+    // 3) 대상 senderKey의 기존 프로필 / 대상 회사의 기존 템플릿코드
+    const targetCompanyIds = targets.map((t) => t.companyId);
+    const targetSenderKeys = [...new Set(targets.flatMap((t) => t.senderKeys))];
+    const profRes = await query(
+      `SELECT id, company_id, profile_key FROM kakao_sender_profiles WHERE profile_key = ANY($1::text[])`,
+      [targetSenderKeys],
+    );
+    const profileByKey = new Map<string, { id: string; company_id: string }>();
+    for (const p of profRes.rows) profileByKey.set(String(p.profile_key), { id: p.id, company_id: String(p.company_id) });
+
+    const tmplRes = await query(
+      `SELECT company_id, template_code, template_key FROM kakao_templates WHERE company_id = ANY($1::uuid[])`,
+      [targetCompanyIds],
+    );
+    const codesByCompany = new Map<string, Set<string>>();
+    for (const cid of targetCompanyIds) codesByCompany.set(cid, new Set<string>());
+    for (const row of tmplRes.rows) {
+      const set = codesByCompany.get(String(row.company_id));
+      if (!set) continue;
+      if (row.template_code) set.add(String(row.template_code));
+      if (row.template_key) set.add(String(row.template_key));
+    }
+
+    // 4) 회사별 처리
+    let profileBudget = maxProfiles;
+    let templateBudget = maxTemplates;
+    const report: any[] = [];
+
+    for (const target of targets) {
+      const presentCodes = codesByCompany.get(target.companyId) || new Set<string>();
+      const connectedSenderKeys = new Set<string>();
+      const senderReport: any[] = [];
+      const pullSenderKeys: string[] = [];
+
+      for (const key of target.senderKeys) {
+        const existing = profileByKey.get(key);
+        if (existing && existing.company_id === target.companyId) {
+          connectedSenderKeys.add(key);
+          pullSenderKeys.push(key);
+          senderReport.push({ senderKey: key, state: 'already_linked', profileId: existing.id });
+          continue;
+        }
+        if (existing) {
+          // 다른 회사 선점 — 자동 재연결 금지(오귀속 위험). 표시만 하고 사람이 판단.
+          senderReport.push({ senderKey: key, state: 'linked_to_other_company', otherCompanyId: existing.company_id });
+          continue;
+        }
+        if (profileBudget <= 0) {
+          senderReport.push({ senderKey: key, state: 'budget_exhausted' });
+          continue;
+        }
+
+        // IMC 실조회 — 우리 계정에서 보이는 키만 연결 대상 (관문 1과 동일 판정)
+        profileBudget -= 1;
+        let sender: any = null;
+        try {
+          const r = await imc.getSender(key);
+          if (r.code === '0000' && r.data?.senderKey) sender = r.data;
+          else senderReport.push({ senderKey: key, state: 'imc_not_visible', imcCode: r.code });
+        } catch (probeErr: any) {
+          senderReport.push({
+            senderKey: key,
+            state: 'imc_probe_error',
+            error: String(probeErr?.message || probeErr).slice(0, 200),
+          });
+        }
+        if (!sender) continue;
+
+        if (dryRun) {
+          connectedSenderKeys.add(key);
+          pullSenderKeys.push(key);
+          senderReport.push({ senderKey: key, state: 'would_link', yellowId: sender.uuid || null, imcStatus: sender.status || null });
+          continue;
+        }
+
+        // 같은 회사+채널 중복 가드 (idx_ksp_yellow_id unique 선방어 — 기존 등록 경로와 동일 정책)
+        if (sender.uuid) {
+          const dupChannel = await query(
+            `SELECT id FROM kakao_sender_profiles WHERE company_id = $1::uuid AND yellow_id = $2 LIMIT 1`,
+            [target.companyId, sender.uuid],
+          );
+          if (dupChannel.rows.length > 0) {
+            senderReport.push({ senderKey: key, state: 'channel_already_registered', existingProfileId: dupChannel.rows[0].id });
+            continue;
+          }
+        }
+
+        let categoryNameCache: string | null = null;
+        if (sender.categoryCode) {
+          try {
+            const cat = await imc.getSenderCategory(String(sender.categoryCode));
+            if (cat.code === '0000' && cat.data) categoryNameCache = cat.data.name;
+          } catch {
+            /* 카테고리 조회 실패 무시 — 표시용 캐시 */
+          }
+        }
+
+        const ins = await query(
+          `INSERT INTO kakao_sender_profiles
+             (company_id, profile_key, profile_name, is_active,
+              yellow_id, category_code, category_name_cache,
+              top_sender_yn, custom_sender_key, status,
+              block_yn, dormant_yn, brand_message_yn, channel_created_at,
+              approval_status, approval_requested_at, approved_at, approved_by,
+              registered_at, updated_at)
+           VALUES ($1,$2,$3,true,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
+                   'APPROVED', now(), now(), $14,
+                   now(), now())
+           RETURNING id`,
+          [
+            target.companyId,
+            sender.senderKey,
+            sender.name || sender.uuid || key,
+            sender.uuid || null,
+            sender.categoryCode ? String(sender.categoryCode) : null,
+            categoryNameCache,
+            sender.topSenderKeyYn || 'N',
+            sender.customSenderKey || null,
+            sender.status || 'NORMAL',
+            sender.block === true ? 'Y' : 'N',
+            sender.dormant === true ? 'Y' : 'N',
+            sender.brandMessage === true ? 'Y' : 'N',
+            sender.createdAt || null,
+            req.user?.userId || null,
+          ],
+        );
+        profileByKey.set(key, { id: ins.rows[0].id, company_id: target.companyId });
+        connectedSenderKeys.add(key);
+        pullSenderKeys.push(key);
+        senderReport.push({ senderKey: key, state: 'linked', profileId: ins.rows[0].id });
+      }
+
+      // 템플릿 pull — 연결된 senderKey의 IMC 항목 중 B_ 계열이면서 기존에 없는 것만
+      const toCreate: Array<{ item: any; code: string; senderKey: string }> = [];
+      const seenInThisRun = new Set<string>();
+      for (const key of pullSenderKeys) {
+        for (const item of imcIndex.bySender.get(key) || []) {
+          const code = extractImcTemplateCode(item);
+          if (!code || !isBSeriesCode(code)) continue;
+          if (presentCodes.has(code) || seenInThisRun.has(code)) continue;
+          const tkey = item?.templateKey ? String(item.templateKey) : '';
+          if (tkey && presentCodes.has(tkey)) continue;
+          seenInThisRun.add(code);
+          toCreate.push({ item, code, senderKey: key });
+        }
+      }
+
+      let created = 0;
+      let deferred = 0;
+      const failures: Array<{ templateCode: string; error: string }> = [];
+      if (!dryRun) {
+        for (const entry of toCreate) {
+          if (templateBudget <= 0) {
+            deferred += 1;
+            continue;
+          }
+          templateBudget -= 1;
+          const profileId = profileByKey.get(entry.senderKey)?.id;
+          if (!profileId) {
+            failures.push({ templateCode: entry.code, error: '프로필 id 없음' });
+            continue;
+          }
+          const it = entry.item;
+          const status = normalizeImcTemplateStatus(it.inspectionStatus || '');
+          const approvedAt = status === 'APPROVED' && it.inspectionStatusUpdate ? it.inspectionStatusUpdate : null;
+          const representLink = imc.fromImcRepresentLink(it.templateRepresentLink);
+          try {
+            await query(
+              `INSERT INTO kakao_templates
+                 (company_id, profile_id, template_code, template_key, template_name,
+                  content, buttons, variables, status,
+                  category, message_type, emphasize_type, emphasize_title, emphasize_subtitle, emphasize_sub_title,
+                  image_name, extra_content, ad_content, security_flag, quick_replies,
+                  template_header, item_highlight, item_list, item_summary, represent_link,
+                  preview_message, alarm_phone_numbers, service_mode, custom_template_code,
+                  reject_reason, approved_at, alarm_notified_status,
+                  created_by, created_at, updated_at, last_synced_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::text[],$9,
+                       $10,$11,$12,$13,$14,$14,
+                       $15,$16,$17,$18,$19::jsonb,
+                       $20,$21::jsonb,$22::jsonb,$23::jsonb,$24::jsonb,
+                       $25,$26,$27,$28,
+                       $29,$30::timestamp,$31,
+                       NULL, COALESCE($32::timestamp, now()), now(), now())`,
+              [
+                target.companyId,
+                profileId,
+                entry.code,
+                it.templateKey ? String(it.templateKey) : null,
+                String(it.templateName || it.manageName || '').slice(0, 100),
+                it.templateContent || '',
+                JSON.stringify(imc.fromImcButtons(it.buttonList)),
+                imc.extractAlimtalkVariables(it.templateContent),
+                status,
+                it.categoryCode ? String(it.categoryCode) : null,
+                it.templateMessageType || 'BA',
+                it.templateEmphasizeType || 'NONE',
+                it.templateTitle ? String(it.templateTitle).slice(0, 50) : null,
+                it.templateSubtitle || null,
+                it.templateImageName || null,
+                it.templateExtra || null,
+                it.templateAd ? String(it.templateAd).slice(0, 100) : null,
+                it.securityFlag === true,
+                JSON.stringify(imc.fromImcButtons(it.quickReplyList)),
+                it.templateHeader || null,
+                it.templateItemHighlight ? JSON.stringify(it.templateItemHighlight) : null,
+                it.templateItem?.list ? JSON.stringify(it.templateItem.list) : null,
+                it.templateItem?.summary ? JSON.stringify(it.templateItem.summary) : null,
+                representLink ? JSON.stringify(representLink) : null,
+                it.templatePreviewMessage || null,
+                it.alarmPhoneNumber || null,
+                it.serviceMode || 'PRD',
+                it.customTemplateCode || null,
+                it.rejectReason || null,
+                approvedAt,
+                // ★과거 확정분이라 검수 알림 대상이 아니다 — 종결 상태를 미리 기록해 5분 폴링·알림 루프 진입 차단
+                importedAlarmNotifiedStatus(status),
+                it.createdAt || null,
+              ],
+            );
+            presentCodes.add(entry.code);
+            created += 1;
+          } catch (insErr: any) {
+            failures.push({ templateCode: entry.code, error: String(insErr?.message || insErr).slice(0, 200) });
+          }
+        }
+      } else {
+        for (const entry of toCreate) presentCodes.add(entry.code);
+      }
+
+      // 대조 — 게이트웨이 B_ 코드 집합 − 한줄로 보유 집합. 빈 배열일 때만 통과(6원칙 ②)
+      const missing = classifyMissingSeedCodes({
+        seedBCodes: target.seedBCodes,
+        codeSenderKey: target.codeSenderKey,
+        presentCodes,
+        connectedSenderKeys,
+        imc: imcIndex,
+      });
+
+      // 효과 검증 — 실행분은 DB 재카운트 후에만 수치 보고
+      let finalCount: number | null = null;
+      if (!dryRun) {
+        const recount = await query(
+          `SELECT COUNT(*)::int AS cnt FROM kakao_templates WHERE company_id = $1::uuid`,
+          [target.companyId],
+        );
+        finalCount = recount.rows[0]?.cnt ?? null;
+      }
+
+      // ★상한에 걸려 덜 처리된 것과 진짜 결함을 구분한다 — 둘 다 sender_not_connected로 보이면
+      //   재실행하면 끝날 일을 결함으로 오판한다(반대도 마찬가지라 더 위험).
+      const budgetStopped =
+        deferred > 0 || senderReport.some((s: any) => s.state === 'budget_exhausted');
+      const byReason = summarizeMissing(missing);
+      // not_in_imc = IMC에 없는 게이트웨이 고아 코드 → 코드로 해결 불가·사람 판단(자동 삭제 금지 원칙).
+      // 이걸 빼고도 0이 아니면 그건 우리가 손볼 수 있는 누락이다.
+      const actionableMissing = missing.length - byReason.not_in_imc;
+
+      report.push({
+        companyId: target.companyId,
+        companyName: target.companyName,
+        billIds: target.billIds,
+        senderKeys: target.senderKeys.length,
+        gatewayBCodes: target.seedBCodes.length,
+        nonBRowsExcluded: target.nonBRows,
+        senders: senderReport,
+        [dryRun ? 'wouldCreate' : 'created']: dryRun ? toCreate.length : created,
+        deferredByBudget: deferred,
+        incompleteByBudget: budgetStopped,
+        failed: failures.length,
+        failures: failures.slice(0, 5),
+        reconcile: {
+          passed: missing.length === 0,
+          actionableMissing,
+          missingCount: missing.length,
+          byReason,
+          samples: missing.slice(0, 20),
+        },
+        templatesForCompanyAfterRun: finalCount,
+      });
+
+      console.log(
+        `[gateway-templates][bulk-migrate]${dryRun ? '[dryRun]' : ''} ${target.companyName} ` +
+          `keys=${target.senderKeys.length} gatewayB=${target.seedBCodes.length} ` +
+          `${dryRun ? 'would' : ''}create=${dryRun ? toCreate.length : created} ` +
+          `missing=${missing.length} ${JSON.stringify(summarizeMissing(missing))}`,
+      );
+    }
+
+    const noFailures = report.every((r) => r.failed === 0);
+    const passedAll = noFailures && report.every((r) => r.reconcile.passed);
+    // 사람 판단 대상(게이트웨이 고아 코드)만 남은 상태 = 코드로 할 일은 끝난 것 — 엄격 통과와 구분해 보고
+    const actionableResolved = noFailures && report.every((r) => r.reconcile.actionableMissing === 0);
+    const budgetIncomplete = report.some((r) => r.incompleteByBudget);
+
+    return res.json({
+      success: passedAll,
+      dryRun,
+      imc: { scannedTemplates: imcIndex.total, pages: imcPages, senderKeyMissingItems: imcIndex.senderKeyMissing },
+      totalCompanies,
+      offset,
+      processedCompanies: targets.length,
+      remainingCompanies: Math.max(0, totalCompanies - (offset + targets.length)),
+      budgetLeft: { profiles: profileBudget, templates: templateBudget },
+      // 상한에 걸려 덜 처리됐다는 뜻 — 같은 offset으로 재실행하면 이어서 처리된다(멱등)
+      incompleteByBudget: budgetIncomplete,
+      allReconcilePassed: passedAll,
+      allActionableResolved: actionableResolved,
+      report,
+    });
+  } catch (err) {
+    return handleDbError(res, err);
+  }
+});
+
+// ── 기존 이관분 검수 알림 억제 백필 (0715 아난티 847건 — §4-9-H)
+//    0715 import 경로가 alarm_notified_status를 안 채워, 과거 확정 템플릿이 5분 폴링·검수 알림 대상으로
+//    영구 잔존한다(0720 실측: 폴링 대상 747 전량이 아난티 이관분). 신규 이관분은 INSERT에서 채우고,
+//    이미 들어간 분은 여기서 맞춘다.
+//
+//    대상 한정(정상 등록 건 오염 차단):
+//      ① 게이트웨이 bill이 연결된 회사   ② 검수 종결 상태   ③ alarm_notified_status 미기록
+//      ④ requested_at IS NULL + created_by IS NULL = import 경로 산물 표식
+//         (관리자·고객사 등록 경로는 requested_at을 항상 채운다 — admin.ts·companies.ts INSERT)
+router.post('/imported-alarm-suppress', async (req: Request, res: Response) => {
+  try {
+    const dryRun = req.body?.dryRun !== false; // 기본 true
+    const WHERE = `
+        t.status IN ('APPROVED','REJECTED','KREJ')
+    AND t.alarm_notified_status IS NULL
+    AND t.requested_at IS NULL
+    AND t.created_by IS NULL
+    AND EXISTS (
+          SELECT 1 FROM gateway_bill_mappings b
+           WHERE b.company_id = t.company_id AND b.is_active = true
+        )`;
+
+    if (dryRun) {
+      const preview = await query(
+        `SELECT c.company_name, t.status, COUNT(*)::int AS cnt
+           FROM kakao_templates t
+           LEFT JOIN companies c ON c.id = t.company_id
+          WHERE ${WHERE}
+          GROUP BY c.company_name, t.status
+          ORDER BY cnt DESC`,
+      );
+      const total = preview.rows.reduce((sum: number, r: any) => sum + r.cnt, 0);
+      return res.json({ success: true, dryRun: true, wouldUpdate: total, breakdown: preview.rows });
+    }
+
+    const upd = await query(
+      `UPDATE kakao_templates t
+          SET alarm_notified_status = CASE WHEN t.status = 'APPROVED' THEN 'APPROVED' ELSE 'REJECTED' END,
+              updated_at = now()
+        WHERE ${WHERE}`,
+    );
+
+    // 효과 검증(6원칙 ②) — 잔존 재카운트 후에만 성공 표시
+    const remain = await query(
+      `SELECT COUNT(*)::int AS cnt FROM kakao_templates t WHERE ${WHERE}`,
+    );
+    console.log(
+      `[gateway-templates][imported-alarm-suppress] updated=${upd.rowCount || 0} 잔존=${remain.rows[0].cnt}`,
+    );
+    return res.json({
+      success: remain.rows[0].cnt === 0,
+      dryRun: false,
+      updated: upd.rowCount || 0,
+      remaining: remain.rows[0].cnt,
     });
   } catch (err) {
     return handleDbError(res, err);

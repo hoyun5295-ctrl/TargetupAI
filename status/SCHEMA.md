@@ -2620,7 +2620,7 @@ CREATE INDEX IF NOT EXISTS idx_journey_step_logs_execution ON journey_step_logs(
 
 ### ★ 2026-07-20 Track C M2 — 게이트웨이 알림톡 매핑 2테이블 (템플릿관리자 흡수)
 
-> **미적용 — Harold 서버 psql 실행 후 이 줄을 "적용 완료"로 갱신.**
+> **적용 완료(2026-07-20 Harold psql 실행 — 시드 4,680행 적재·대조·R0001 실측으로 실증).**
 > DDL 사전검증 0720 통과(Harold 실행): 두 테이블 information_schema 0 rows(부재) + 참조 컬럼 7개 실존(companies.id · kakao_templates id/status/template_code/company_id/profile_id · kakao_sender_profiles.profile_key).
 > 설계 SoT = docs/2026-07-14-template-migration-track-bc-design.md §4-9-A. 소비처 = utils/gateway-template-mapping-worker.ts · routes/gateway-templates.ts (super_admin 전용).
 

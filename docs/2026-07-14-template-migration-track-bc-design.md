@@ -247,7 +247,62 @@ CREATE INDEX idx_gtm_company ON gateway_template_mappings (company_id);
 - **적재 규칙**: `gateway_template_mappings` = 4,681행 `source='seed', sync_status='synced'`(게이트웨이 실존 상태이므로), UNIQUE(bill_id,tmplcd) 충돌=skip 카운트 보고. `gateway_bill_mappings` = bill_id별 1행(서버·최빈 usemod=default_usemod·대표 billnm), company_id=NULL·auto_push_enabled=false로 시작
 - **주의**: 엑셀 내 (bill_id,tmplcd) 중복 존재 가능(같은 템플릿코드가 계정명만 다른 행) → dryRun에서 중복 수 확인 후 최신행 우선 규칙 적용. B-prefix 23행(유성소프트 잔재)도 그대로 시드(대조 대상)
 
-### G. 다음 세션 재개 런북 (0720 컨텍스트 종료 — 여기서 시작)
+### H. ★0720 실행 결과 + 다음 세션 런북 — 템플릿 일괄 이관 (여기서 시작)
+
+> **0720 종결(전부 Harold 실측)**: M2 배포·DDL·env 3키 / 시드 4,680행·41bill / 대조 = 키 기준 전량 실존·최종 드리프트 0
+> (시드 행 필드 차이 1,482건 = billnm `_HU` 표기 — **대조 정정: 시드 행은 게이트웨이 실값 채택(재push 금지)**) /
+> R0001 워커 전 사이클(pending→push→효과검증→synced) 통과 / **카카오축 회사 33 연결 + 15 생성** + **PAY축 80 실체(회사 50 생성·계정 38·CustId 283 연결·겸용 전환 17)** /
+> 에이전트 3메뉴 게이팅 + **에이전트 발송결과 화면(RSRM_SalesStts 배선·목록+상세) 신성통상 실측 통과**.
+> 계정 정책 확정: 아이디 = 걔네가 쓰던 것(레거시 카카오 핸들 > PAY MemId), 비번 일괄 qwer1234+최초 변경 강제. users.user_type DB값='admin'(CHECK 실측).
+
+**다음 세션 = 카카오 템플릿 일괄 이관(매핑) 완료가 목표.**
+
+1. **전제 확정(Harold 0720)**: 강문희 게이트웨이 push 축은 계속 홀딩(마스터 게이트 `GATEWAY_TMPL_SYNC_ENABLED=false` 유지) — **템플릿 이관(IMC pull)은 한줄로↔IMC만 오가므로 게이트웨이와 무관, 즉시 진행 가능.**
+2. **재료(전부 확보 상태)**: 회사↔bill 연결(카카오 33+PAY 80) / bill별 senderKey = `gateway_template_mappings.senderkey`(211키) / 검증된 도구 = `POST /api/alimtalk/senders/import`(프로필 연결)+`POST /api/alimtalk/templates/import`(IMC pull — 아난티 847건 실증·멱등·재카운트).
+3. **절차**: 일괄 이관 endpoint 신설(dryRun 기본) — 연결된 회사별로 ①bill의 distinct senderKey → senders/import(연결) ②templates/import(pull) ③검증 = 회사별 pull 건수 ↔ 게이트웨이 시드 행수(B_ 계열) 대조. **B_(휴머스온 76%)만 pull** — bizp_·업체지정 24%는 IMC 부재라 pull 금지(발송은 기존 게이트웨이 매핑 유지·새 템플릿부터 한줄로). 순서 = 소규모부터, 더화이트(1,914행 41%) 마지막.
+4. **자료가 더 필요하면 Harold님께 요청**: 서수란 팀장 수령 자료 일체(「템플릿관리자 등록 목록 (1).xlsx」=OneDrive 카카오톡 받은 파일·발신프로필 엑셀·PAY 3종)와 레거시 원본(event_admin DB — Harold만 143 접속) 등 — 필요 시점에 구체 항목으로 요청할 것.
+5. 잔여 병행: 아난티 파일럿(auto_push+마스터 게이트 ON+M4 실발송 1건) / 강문희 54 포팅 메일→P0001 한글 왕복→54_ENABLED / 아이디 보류 4(p0019·p0070·r0019·r0029) / company_only 12곳 계정=요청 시.
+
+### I. ★0720(8) 일괄 이관 구현 — 대조 계약 정정 + 0715 누락 62건 발견
+
+> 상태: **코드 완료·tsc 0·vitest 798 통과 / 배포·실행 대기.** DDL 0건(신규 컬럼·테이블 없음).
+
+**0715 아난티 pull은 완료가 아니었다(운영 DB 실측).** `failed 0 / 중복 0 / 재카운트 일치`로 종결 보고됐지만, 게이트웨이가 실제로 라우팅하는 B_ 코드 **62개가 한줄로에 없다**. 원인 = 아난티 시드 senderKey 2개 중 `6be13…`만 `/senders/import`로 연결되고 `7dc0de…`(62코드)는 미연결 → 그 키의 템플릿이 pull 대상에 아예 들어오지 않음. 누락분은 한줄로 어디에도 없음(전역 조회 0 rows). **pull 경로가 자기가 만든 수만 세고 게이트웨이 기준과 대조하지 않으면 이 유형은 영원히 안 보인다.** senderKey 2개 이상 회사가 30곳 중 17곳이라 같은 자리가 그만큼 있었다.
+
+**대조 계약 정정(0720 실측 확정)**
+
+| 항목 | 옛 기재 | 정정 |
+|---|---|---|
+| 기준 단위 | 시드 **행수** | **distinct 템플릿코드** — bill 2개 회사(마리오아울렛 P0013·R0041, 엔그램, 한국고용노동교육원)는 같은 코드가 54·58 양쪽 등록이라 행이 2배(4행/2코드·32/16·146/73). 전체 3,353행 = **3,262코드** |
+| 판정 | pull 건수 **=** 시드 행수 | **포함 관계** — 아난티 시드 559코드 vs IMC pull 847건. IMC가 더 많은 게 정상(게이트웨이 미등록 승인분). 통과 조건 = `게이트웨이 B_ 코드 − 한줄로 보유 = 공집합` |
+| 누락 처리 | (없음) | **사유 4분류 의무** — `sender_not_connected`(0715 유형) / `not_in_imc`(게이트웨이 고아·사람 판단) / `imc_sender_mismatch`(귀속 불일치=코드 결함) / `insert_failed` |
+
+**B_ 필터 확정** — `split_part(tmplcd,'_',1)='B'` 3,353행 전량이 `B_` 형식. pull 대상 판정 = `startsWith('B_')`. 제외분 실분포: bizp 797 · SJT 105 · ACS 95 · ANH 85 · APS 68 · APH 58 · SJB 22 · ANT 14 · tryon/sdmall 각 9 · sdnetworks 7 · whole 6 · sdcap/r 각 4 · 숫자형 다수. **B_ 0건 회사 4곳(아이올리 211행·메트로시티 52·미구하라 10·쎌렉박스 9)은 pull 0건이 정답** — 실패로 오판 금지.
+
+**검수 알림·폴링 루프(동반 정정)** — `/templates/import`가 `alarm_notified_status`를 안 채워, 이관된 과거 확정 템플릿이 `syncPendingTemplatesJob`(5분) 조회 조건(`status IN (APPROVED,REJECTED,KREJ) AND alarm_notified_status IS NULL`)에 영구 잔존. 알림 수신자 0명이면 `count=0`이라 상태 표시 없이 다음 주기 재시도(alimtalk-jobs.ts:356) → **0720 실측 폴링 대상 747건 전량이 0715 아난티 이관분**. 3,262건을 같은 상태로 넣으면 4배가 되어 실제 검수 중 템플릿의 상태 반영이 밀린다. 알림 수신자가 등록된 회사면 과거 승인 건이 승인 알림 LMS로 실발송된다. → 이관 INSERT는 종결 상태를 미리 기록해 억제, 기존 잔존분은 백필 endpoint로 정리.
+
+**구현물**
+
+| 파일 | 역할 |
+|---|---|
+| `utils/kakao-bulk-migration.ts` (CT 신설) | 순수 함수 — B_ 판정 · IMC item senderKey/코드 추출(D217+ 실측 키만) · 전량 스캔 index · **회사 단위 senderKey 합집합 대상 구성**(코드수 오름차순 정렬=실행 순서) · 누락 4분류 · 이관분 alarm 상태 |
+| `utils/__tests__/kakao-bulk-migration.test.ts` | 계약 24건 — 규칙 6개 고정(B_ 한정·합집합·distinct 기준·포함 관계·사유 분류·알림 억제) |
+| `routes/gateway-templates.ts` `POST /bulk-migrate-templates` | dryRun 기본 true. IMC **전량 1회 스캔**(senderKey마다 재스캔하면 215키×50페이지=1만 콜) → 회사별 프로필 연결(IMC 실조회 통과분만·타사 선점은 표시만) → B_ pull → 대조 → 효과 검증 재카운트 |
+| `routes/gateway-templates.ts` `POST /imported-alarm-suppress` | 기존 이관분 알림 억제 백필. 대상 한정 = 게이트웨이 연결 회사 + 종결 상태 + `requested_at IS NULL AND created_by IS NULL`(import 경로 표식 — 정상 등록 경로는 requested_at을 항상 채움) |
+
+**안전 설계** — 게이트웨이 호출 0 · `gateway_template_mappings` 쓰기 0(마스터 게이트 false 유지와 무관) · 발송 경로 파일 수정 0 · 부분 IMC 스캔 시 중단(누락 pull이 "완료"로 보이는 것 차단) · D231+ 방어로 회사·프로필·템플릿 상한 + `offset` 이어달리기(전 단계 멱등).
+
+**실행 순서(코드수 오름차순 = endpoint 정렬 그대로)**
+1. 전체 dryRun 훑기 — `{dryRun:true, offset:0, maxCompanies:10}`을 offset 0·10·20·30으로 4회. 여기서 senderKey별 IMC 가시성(`would_link` / `imc_not_visible` / `linked_to_other_company`)이 전부 드러난다.
+2. 소규모 실행 — 여미지(1코드)부터 `{dryRun:false, offset:N, maxCompanies:1}`. 응답 `reconcile.passed=true` 확인 후 다음.
+3. 중간 규모(sdmall 117·신성통상 115·고운세상 103) 개별 실행.
+4. **아난티 재실행** — 백필이 아니라 재실행 대상(미연결 `7dc0de…` 연결 → 62코드 pull).
+5. **더화이트 단독 회차** — 1,687코드·senderKey 141개. `maxProfiles`/`maxTemplates` 상한으로 여러 회차.
+6. `POST /imported-alarm-suppress` dryRun → 실행(잔존 0 확인).
+
+**미확정(실행이 답을 준다)** — `7dc0de…`를 포함한 미연결 senderKey들이 우리 IMC 계정에서 보이는지. 안 보이면 카카오 채널 딜러 이관이 필요한 건(0715(4) 관문)이며 코드로 해결 불가. dryRun 1단계가 전 키에 대해 이 판정을 한 번에 낸다.
+
+### G. (0720 소진) 옛 재개 런북 — M2 구현 완료로 종료
 
 1. **정독 의무**: CLAUDE.md → STATUS §2 → 본 문서 §4-0~§4-9 전체 → LESSONS_DB·LESSONS_BACKEND(핵심 원칙+워커·외부API 절)
 2. **DDL 실행**(Harold psql — §A 확정본 그대로) → SCHEMA.md 두 테이블 절 기록
