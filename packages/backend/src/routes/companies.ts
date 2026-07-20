@@ -1555,7 +1555,7 @@ router.post('/', requireSuperAdmin, async (req: Request, res: Response) => {
       address,
       planId,
       dataInputMethod = 'file',
-      usageType = 'web', // ★ 2026-07-03 사용구분: web(웹발송) / agent(QTmsg 에이전트 전용) / both(둘다)
+      usageType = 'web', // ★ 2026-07-03 사용구분: web(웹발송) / agent(QTmsg 에이전트 전용) / both(웹+에이전트)
     } = req.body;
 
     // usage_type CHECK 제약과 동일 검증 (DB 에러 전에 사용자 친화 차단)

@@ -140,7 +140,7 @@ export default function AdminDashboard() {
     lineGroupId: '',
     kakaoEnabled: false,
     userIsolationEnabled: false,  // ★ D162-3 (2026-05-15) 수신거부 사용자격리 ON/OFF
-    usageType: 'web',  // ★ 2026-07-03 사용구분: web(웹발송) / agent(QTmsg 에이전트 전용) / both(둘다)
+    usageType: 'web',  // ★ 2026-07-03 사용구분: web(웹발송) / agent(QTmsg 에이전트 전용) / both(웹+에이전트)
     useAiOrchestrator: false,  // ★ D190 #2 (2026-05-22) AI Orchestrator Tool Use 회사별 토글
     cdpAutoExecuteEnabled: false,  // ★ 2026-06-06 자동마케팅 자율발송 게이트
     cdpAutoExecuteMaxRecipients: 1000,
@@ -3004,7 +3004,7 @@ const handleApproveRequest = async (id: string) => {
                           {company.usage_type === 'agent' ? (
                             <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">에이전트</span>
                           ) : company.usage_type === 'both' ? (
-                            <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-purple-100 text-purple-700">둘다</span>
+                            <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-purple-100 text-purple-700">웹+에이전트</span>
                           ) : (
                             <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-600">웹</span>
                           )}
@@ -5224,7 +5224,7 @@ const handleApproveRequest = async (id: string) => {
                   ))}
                 </select>
               </div>
-              {/* ★ 2026-07-03 사용구분 — web(웹발송) / agent(QTmsg 에이전트 전용) / both(둘다) */}
+              {/* ★ 2026-07-03 사용구분 — web(웹발송) / agent(QTmsg 에이전트 전용) / both(웹+에이전트) */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   사용구분 *
@@ -5233,7 +5233,7 @@ const handleApproveRequest = async (id: string) => {
                   {([
                     { value: 'web', label: '웹발송', desc: '한줄로 전체 기능' },
                     { value: 'agent', label: '에이전트', desc: '카카오템플릿+결과만' },
-                    { value: 'both', label: '둘다', desc: '웹+에이전트 통합' },
+                    { value: 'both', label: '웹+에이전트', desc: '웹 발송과 에이전트 발송을 함께 사용' },
                   ] as const).map((opt) => (
                     <button
                       key={opt.value}
@@ -5900,7 +5900,7 @@ const handleApproveRequest = async (id: string) => {
                       {([
                         { value: 'web', label: '웹발송', desc: '한줄로 전체 기능' },
                         { value: 'agent', label: '에이전트', desc: '카카오템플릿+결과만' },
-                        { value: 'both', label: '둘다', desc: '웹+에이전트 통합' },
+                        { value: 'both', label: '웹+에이전트', desc: '웹 발송과 에이전트 발송을 함께 사용' },
                       ] as const).map((opt) => (
                         <button
                           key={opt.value}
