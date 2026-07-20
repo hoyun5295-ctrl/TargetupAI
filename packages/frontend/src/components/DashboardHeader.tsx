@@ -89,18 +89,10 @@ export default function DashboardHeader({
     handler();
   };
 
-  // ★ ENTERPRISE 전용 게이팅 — 자동발송 / 카카오&RCS
-  //   planCode가 아직 로드되지 않았으면(undefined/'') 잠금 표시 보류
-  const isEnterprise = planCode === 'ENTERPRISE';
-  const isEnterpriseLocked = !!planCode && !isEnterprise;
-  const [enterpriseModal, setEnterpriseModal] = useState<{ show: boolean; featureName: string; description: string }>({ show: false, featureName: '', description: '' });
-  const enterpriseGuard = (featureName: string, description: string, handler: () => void) => {
-    if (isEnterpriseLocked) {
-      setEnterpriseModal({ show: true, featureName, description });
-      return;
-    }
-    handler();
-  };
+  // ★ 2026-07-20 (Harold 확정): 카카오&RCS ENTERPRISE 게이팅 제거 — 전 요금제 개방.
+  //   ENTERPRISE 한정은 내부 검증용 임시 조치였고, 알림톡은 직접발송 모달에도 이미 진입점이 있어 막을 이유가 없다.
+  //   같이 묶였던 자동발송은 D188에서 메뉴 자체가 제거돼(위 주석) 이 게이트를 쓰는 곳은 0이 됐다 → 기계 전체 제거.
+  //   구독 만료·정지 차단(subscriptionGuard)은 별개로 유지된다.
 
   const menuItems: MenuItem[] = [
     // ★ D222+ Phase 1 (2026-05-27): AI Operator (BETA) 메뉴 영구 제거 — Dashboard 우측 카드 "AI Operator" 라벨 통합 진입.
@@ -117,10 +109,8 @@ export default function DashboardHeader({
     // ★ D182 (2026-05-19): 모바일DM 헤더 메뉴 영구 제거 — AI Operator 페이지 안 SUB_MODULE_CARDS로 이동 (Harold 명시 — 헤더 간소화)
     {
       label: '카카오&RCS',
-      onClick: () => enterpriseGuard('카카오 & RCS', '알림톡 템플릿 · 브랜드메시지 · RCS 통합 관리 기능입니다.',
-        () => navigate('/kakao-rcs')),
+      onClick: () => navigate('/kakao-rcs'),
       color: 'green',
-      locked: isEnterpriseLocked,
       path: '/kakao-rcs',
     },
     { label: '직접발송', onClick: onDirectSend, color: 'green', path: '/' },
@@ -217,30 +207,6 @@ export default function DashboardHeader({
         </nav>
       </div>
 
-      {/* ★ 베타테스트 잠금 안내 모달 */}
-      {enterpriseModal.show && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full mx-4 p-6">
-            <div className="text-center">
-              <div className="text-4xl mb-3">🧪</div>
-              <h3 className="text-lg font-bold text-gray-900 mb-2">{enterpriseModal.featureName}</h3>
-              <p className="text-xs text-gray-500 mb-4">{enterpriseModal.description}</p>
-              <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5">
-                <p className="text-sm text-gray-700">
-                  현재 <span className="font-bold text-amber-700">베타테스트 진행 중</span>입니다.<br />
-                  테스트 완료 후 사용 가능합니다.
-                </p>
-              </div>
-              <button
-                onClick={() => setEnterpriseModal({ show: false, featureName: '', description: '' })}
-                className="w-full px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium transition"
-              >
-                확인
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </header>
   );
 }
