@@ -47,6 +47,8 @@ import campaignAgencyRoutes from './routes/campaign-agency'; // ★ 2026-07-09 C
 import alimtalkRoutes from './routes/alimtalk';
 // ★ 2026-07-20 Track C M2: 게이트웨이 알림톡 매핑 관리 (super_admin 전용)
 import gatewayTemplatesRoutes from './routes/gateway-templates';
+// ★ 2026-07-20 Track D 접점: PAY(엔진) 고객 ↔ 회사 매핑 시드 (super_admin 전용)
+import payMappingsRoutes from './routes/pay-mappings';
 // ★ D172 (2026-05-19): 한줄로 CDP — 자사몰 sync API (identify/event/order/bulk-import)
 import cdpRoutes from './routes/cdp';
 import { serveSdkFile } from './utils/sdk-serve';
@@ -347,6 +349,8 @@ app.use('/api/email', emailRoutes);
 app.use('/api/alimtalk', alimtalkRoutes);
 // ★ 2026-07-20 Track C M2: 게이트웨이 알림톡 매핑 관리 (super_admin 전용)
 app.use('/api/gateway-templates', gatewayTemplatesRoutes);
+// ★ 2026-07-20 Track D 접점: PAY 매핑 시드 (super_admin 전용)
+app.use('/api/pay-mappings', payMappingsRoutes);
 app.use('/api/dm', dmRouter);
 // ★ 2026-07-08 행사 캠페인 (이미지 판독 + 생성 초안 임시 보관)
 app.use('/api/event-campaigns', eventCampaignRouter);

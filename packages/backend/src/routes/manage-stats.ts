@@ -5,6 +5,8 @@ import { DEFAULT_COSTS } from '../config/defaults';
 import { getCompanyScope } from '../utils/permission-helper';
 import { getTestSmsTables } from '../utils/sms-queue';
 import { buildDateRangeFilter, querySendStats, querySendStatsDetail } from '../utils/stats-aggregation';
+// ★ 2026-07-20: 에이전트 전용 회사 = 엔진(PAY) 통계 축 — campaigns엔 행이 없어 0으로 보이던 결함의 근본 배선
+import { queryPayAgentStats, isPayStatsConfigured } from '../utils/pay-stats';
 
 const router = Router();
 
@@ -29,7 +31,7 @@ router.get('/send', async (req: Request, res: Response) => {
     const filterUserId = req.query.filterUserId as string;
 
     // ★ 컨트롤타워 호출 — 인라인 쿼리 제거
-    const statsResult = await querySendStats({
+    let statsResult = await querySendStats({
       view: view as 'daily' | 'monthly',
       startDate,
       endDate,
@@ -38,6 +40,24 @@ router.get('/send', async (req: Request, res: Response) => {
       page,
       limit,
     });
+
+    // ★ 2026-07-20: 에이전트 전용 회사 — 발송 실체가 게이트웨이 엔진이라 campaigns 집계는 구조적으로 0.
+    //   회사에 연결된 CustId(company_agent_ids) 전량을 pay-ingest-db RSRM_SalesStts에서 합산해 같은 형태로 대체.
+    //   env 미설정·미연결·조회 실패 = null → 기존 결과 유지(조용한 폴백). web/both 회사 경로는 불변.
+    if (companyScope && isPayStatsConfigured()) {
+      const compType = await pool.query('SELECT usage_type FROM companies WHERE id = $1', [companyScope]);
+      if (compType.rows[0]?.usage_type === 'agent') {
+        const payResult = await queryPayAgentStats({
+          companyId: companyScope,
+          view: view as 'daily' | 'monthly',
+          startDate,
+          endDate,
+          page,
+          limit,
+        });
+        if (payResult) statsResult = payResult;
+      }
+    }
 
     // 테스트 발송 통계 (MySQL — 컨트롤타워 대상 아님, 관리자 전용)
     let testSummary = { total: 0, success: 0, fail: 0, pending: 0, sms: 0, lms: 0, cost: 0 };

@@ -1,0 +1,801 @@
+{
+ "entities": [
+  {
+   "action": "company_only",
+   "companyName": "MG손해보험",
+   "companyCode": "B0135",
+   "custIds": [
+    "B0135"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "교촌",
+   "companyCode": "P0027",
+   "custIds": [
+    "B0115",
+    "B0116",
+    "B0117",
+    "B0118",
+    "B0139",
+    "B0160..."
+   ]
+  },
+  {
+   "action": "company_only",
+   "companyName": "넷퍼씨",
+   "companyCode": "D0083",
+   "custIds": [
+    "D0083",
+    "D0105"
+   ]
+  },
+  {
+   "action": "company_only",
+   "companyName": "다날핀테크",
+   "companyCode": "D0040",
+   "custIds": [
+    "D0040"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "더화이트커뮤니케이션",
+   "companyCode": "P0032",
+   "custIds": [
+    "B0090",
+    "B0093",
+    "B0123",
+    "B0179"
+   ]
+  },
+  {
+   "action": "company_only",
+   "companyName": "두리콜렉션",
+   "companyCode": "B0044",
+   "custIds": [
+    "B0044",
+    "B0235"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "런소프트",
+   "companyCode": "realm01",
+   "loginId": "realm01",
+   "custIds": [
+    "C0130",
+    "D0078",
+    "D0079"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "마리오아울렛",
+   "companyCode": "mariooutlet",
+   "custIds": [
+    "B0039",
+    "B0040",
+    "B0041",
+    "B0164",
+    "B0174",
+    "B0175..."
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "마리오아울렛몰",
+   "companyCode": "mariooutlet",
+   "custIds": [
+    "B0176",
+    "B0177"
+   ]
+  },
+  {
+   "action": "company_only",
+   "companyName": "마인드에듀",
+   "companyCode": "B0078",
+   "custIds": [
+    "B0078"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "무주덕유산리조트",
+   "companyCode": "mdysresort",
+   "custIds": [
+    "D0106"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "베네통",
+   "companyCode": "benetton",
+   "custIds": [
+    "B0183"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "베터라이프",
+   "companyCode": "betterlife",
+   "loginId": "betterlife",
+   "custIds": [
+    "D0035",
+    "D0039"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "브이패스",
+   "companyCode": "P0044",
+   "custIds": [
+    "B0124"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "숭실원격평생교육원",
+   "companyCode": "soongsil",
+   "custIds": [
+    "B0108"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "신성통상",
+   "companyCode": "R0002",
+   "custIds": [
+    "D0002",
+    "D0003",
+    "D0004",
+    "D0005",
+    "D0006",
+    "D0007",
+    "D0008",
+    "D0009..."
+   ],
+   "renameTo": "신성통상"
+  },
+  {
+   "action": "link",
+   "companyName": "아난티",
+   "companyCode": "ananti",
+   "custIds": [
+    "D0018",
+    "D0049"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "아이티앤",
+   "companyCode": "iten",
+   "loginId": "iten",
+   "custIds": [
+    "D0065",
+    "D0066"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "언니가간다",
+   "companyCode": "ellen",
+   "loginId": "ellen",
+   "custIds": [
+    "B0023"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "에스디몰",
+   "companyCode": "P0071",
+   "custIds": [
+    "B0207",
+    "B0208",
+    "B0209"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "에이스하드웨어",
+   "companyCode": "acehardware",
+   "custIds": [
+    "D0050",
+    "D0051"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "엔그램",
+   "companyCode": "P0055",
+   "custIds": [
+    "B0161",
+    "B0166",
+    "B0167",
+    "B0186",
+    "B0187",
+    "D0024..."
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "엔씨아이티에스",
+   "companyCode": "ncitssms",
+   "loginId": "ncitssms",
+   "custIds": [
+    "B0088"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "엔터식스",
+   "companyCode": "enter6",
+   "loginId": "enter6",
+   "custIds": [
+    "B0169",
+    "B0171"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "엠투넷",
+   "companyCode": "mtonet",
+   "loginId": "mtonet",
+   "custIds": [
+    "B0120",
+    "B0121",
+    "B0192",
+    "B0193",
+    "B0223",
+    "B0224..."
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "엠포플러스",
+   "companyCode": "emfo",
+   "loginId": "emfo",
+   "custIds": [
+    "B0138",
+    "B0140",
+    "B0141",
+    "B0142",
+    "B0143",
+    "B0144..."
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "여미지",
+   "companyCode": "P0076",
+   "custIds": [
+    "B0219",
+    "B0227",
+    "B0231"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "오직",
+   "companyCode": "ohjic",
+   "loginId": "ohjic",
+   "custIds": [
+    "B0015",
+    "B0063",
+    "B0230"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "우림FMG",
+   "companyCode": "woorimfmg",
+   "custIds": [
+    "D0023"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "유성소프트",
+   "companyCode": "usung",
+   "loginId": "usung",
+   "custIds": [
+    "B0067",
+    "B0070",
+    "B0071",
+    "B0072",
+    "B0073",
+    "B0074..."
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "이비전글로벌",
+   "companyCode": "R0029",
+   "custIds": [
+    "D0056"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "이새F&C",
+   "companyCode": "isae",
+   "custIds": [
+    "B0068",
+    "B0069",
+    "B0233"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "제이씨패밀리",
+   "companyCode": "theamall",
+   "loginId": "theamall",
+   "custIds": [
+    "B0228",
+    "B0229"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "제주한라병원",
+   "companyCode": "P0048",
+   "custIds": [
+    "B0131"
+   ]
+  },
+  {
+   "action": "company_only",
+   "companyName": "지구촌교회",
+   "companyCode": "B0016",
+   "custIds": [
+    "B0016"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "최선어학원",
+   "companyCode": "choisun",
+   "custIds": [
+    "B0125",
+    "B0126",
+    "D0107",
+    "D0108",
+    "D0109"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "콜비서",
+   "companyCode": "call001",
+   "loginId": "call001",
+   "custIds": [
+    "C0112",
+    "C0113",
+    "C0115"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "트렉스타",
+   "companyCode": "treksta",
+   "custIds": [
+    "B0077",
+    "B0119"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "티앤비소프트",
+   "companyCode": "P0059",
+   "custIds": [
+    "B0168",
+    "B0182"
+   ]
+  },
+  {
+   "action": "company_only",
+   "companyName": "프로웨어",
+   "companyCode": "B0080",
+   "custIds": [
+    "B0080"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "프뢰벨",
+   "companyCode": "froebel",
+   "loginId": "froebel",
+   "custIds": [
+    "B0017",
+    "B0018"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "피케이포유",
+   "companyCode": "pk4u",
+   "loginId": "pk4u",
+   "custIds": [
+    "B0081",
+    "B0082"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "한국고용노동교육원",
+   "companyCode": "P0074",
+   "custIds": [
+    "B0217",
+    "D0054",
+    "D0061"
+   ]
+  },
+  {
+   "action": "company_only",
+   "companyName": "한국고용노동연구원",
+   "companyCode": "D0067",
+   "custIds": [
+    "D0067"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "휴머스온",
+   "companyCode": "humuson",
+   "loginId": "humuson",
+   "custIds": [
+    "B0155",
+    "B0156",
+    "B0157",
+    "B0158",
+    "B0159",
+    "B0200..."
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "고운세상코스메틱",
+   "companyCode": "IV004",
+   "custIds": [
+    "B0154",
+    "B0225"
+   ]
+  },
+  {
+   "action": "company_only",
+   "companyName": "국민사이버평생교육원",
+   "companyCode": "D0118",
+   "custIds": [
+    "D0118"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "다나가",
+   "companyCode": "naself",
+   "loginId": "naself",
+   "custIds": [
+    "C0087",
+    "C0088",
+    "C0089",
+    "C0105",
+    "C0106",
+    "C0107..."
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "마사회",
+   "companyCode": "letsrun",
+   "custIds": [
+    "D0119"
+   ]
+  },
+  {
+   "action": "company_only",
+   "companyName": "메일링크",
+   "companyCode": "B0047",
+   "custIds": [
+    "B0047",
+    "B0216"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "무성",
+   "companyCode": "kapmp",
+   "loginId": "kapmp",
+   "custIds": [
+    "D0120"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "문자데이",
+   "companyCode": "inday",
+   "loginId": "inday",
+   "custIds": [
+    "C0132"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "범문자",
+   "companyCode": "bummunja",
+   "loginId": "bummunja",
+   "custIds": [
+    "C0135"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "시세이도",
+   "companyCode": "R0023",
+   "custIds": [
+    "D0041",
+    "D0042"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "에프앤드에이",
+   "companyCode": "fnda",
+   "custIds": [
+    "D0022"
+   ]
+  },
+  {
+   "action": "company_only",
+   "companyName": "에픽소프트",
+   "companyCode": "B0042",
+   "custIds": [
+    "B0042",
+    "B0043"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "SENDIO",
+   "companyCode": "sendio",
+   "loginId": "sendio",
+   "custIds": [
+    "C0042",
+    "C0047",
+    "C0063",
+    "C0066",
+    "C0070"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "SJ원격평생교육원",
+   "companyCode": "kwcyber",
+   "loginId": "kwcyber",
+   "custIds": [
+    "B0181"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "그린나래",
+   "companyCode": "munjayo",
+   "loginId": "munjayo",
+   "custIds": [
+    "C0126",
+    "C0127"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "더스카이모바일",
+   "companyCode": "thesky",
+   "loginId": "thesky",
+   "custIds": [
+    "C0100",
+    "C0101",
+    "C0102"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "비즈아이솔루션",
+   "companyCode": "bizsms",
+   "loginId": "bizsms",
+   "custIds": [
+    "B0163",
+    "D0059",
+    "D0081",
+    "D0082"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "시큐엠",
+   "companyCode": "secum12",
+   "loginId": "secum12",
+   "custIds": [
+    "C0103",
+    "C0104"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "원탑문자",
+   "companyCode": "onetop",
+   "loginId": "onetop",
+   "custIds": [
+    "C0125",
+    "C0128"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "전서구통신",
+   "companyCode": "jsgcomm",
+   "loginId": "jsgcomm",
+   "custIds": [
+    "C0085",
+    "C0096"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "진소프트",
+   "companyCode": "jinsoft",
+   "loginId": "jinsoft",
+   "custIds": [
+    "B0114",
+    "B0234"
+   ]
+  },
+  {
+   "action": "company_only",
+   "companyName": "태산네트워크",
+   "companyCode": "C0114",
+   "custIds": [
+    "C0114",
+    "C0129"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "플랫에이",
+   "companyCode": "munjanow",
+   "loginId": "munjanow",
+   "custIds": [
+    "C0133",
+    "C0134"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "황금마차",
+   "companyCode": "og001",
+   "loginId": "og001",
+   "custIds": [
+    "C0131"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "교촌에프앤비",
+   "companyCode": "P0027",
+   "custIds": [
+    "B0083"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "금강제화",
+   "companyCode": "kumkang",
+   "custIds": [
+    "D0110"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "더콜론컴퍼니",
+   "companyCode": "ldjsso",
+   "loginId": "ldjsso",
+   "custIds": [
+    "C0120"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "마트앤",
+   "companyCode": "martn",
+   "loginId": "martn",
+   "custIds": [
+    "B0199"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "미션비",
+   "companyCode": "missionb2",
+   "loginId": "missionb2",
+   "custIds": [
+    "C0078",
+    "C0079",
+    "C0086"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "아이디룩",
+   "companyCode": "idlook",
+   "custIds": [
+    "D0080"
+   ]
+  },
+  {
+   "action": "link",
+   "companyName": "아이올리",
+   "companyCode": "P0019",
+   "custIds": [
+    "B0060"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "에스씨서비스",
+   "companyCode": "scsms",
+   "loginId": "scsms",
+   "custIds": [
+    "C0049",
+    "C0050",
+    "C0051",
+    "C0052",
+    "C0053"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "엠디네트웍",
+   "companyCode": "away7975",
+   "loginId": "away7975",
+   "custIds": [
+    "C0110",
+    "C0111"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "유다솔루션",
+   "companyCode": "judas",
+   "loginId": "judas",
+   "custIds": [
+    "C0011",
+    "C0012",
+    "C0013",
+    "C0016",
+    "C0018",
+    "C0019..."
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "일레븐스퀘어",
+   "companyCode": "11square",
+   "loginId": "11square",
+   "custIds": [
+    "B0218"
+   ]
+  },
+  {
+   "action": "create",
+   "companyName": "케이피모바일",
+   "companyCode": "kpmobile",
+   "loginId": "kpmobile",
+   "custIds": [
+    "C0006",
+    "C0007",
+    "C0010",
+    "C0068",
+    "C0069",
+    "C0121..."
+   ]
+  }
+ ]
+}
