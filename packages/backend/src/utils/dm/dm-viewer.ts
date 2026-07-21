@@ -424,7 +424,8 @@ ${(() => {
     //   구글 Fonts CDN 미로드 시 serif 제네릭(궁서)로 폴백되던 신고(박성용) 정정. 사용 서체만 preload.
     //   매칭 0건(기본 Pretendard DM) = 링크 미추가 = 기존 발행물과 동일(회귀 0).
     const serifHint = artDirection.headlineFont === 'serif' ? '"Noto Serif KR", serif' : undefined;
-    const preloads = selfHostPreloadUrls(`${trackApiBase}/fonts`, brandKit?.font_family, brandKit?.font_display, serifHint);
+    // ★ 2026-07-21 브랜드 학습 통합 — 한글/영문 서체(font_ko·font_en) 프리로드 추가. 미설정 시 font_family 폴백(회귀 0).
+    const preloads = selfHostPreloadUrls(`${trackApiBase}/fonts`, brandKit?.font_ko || brandKit?.font_family, brandKit?.font_en, brandKit?.font_display, serifHint);
     if (preloads.length === 0) return '';
     const preloadTags = preloads
       .map((u) => `<link rel="preload" as="font" type="font/woff2" href="${escapeHtml(u)}" crossorigin>`)

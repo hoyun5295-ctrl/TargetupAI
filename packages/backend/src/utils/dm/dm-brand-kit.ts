@@ -41,6 +41,23 @@ async function ensureColumn(): Promise<boolean> {
   return columnExists;
 }
 
+// ────────────── 정규화 (서체 한/영 폴백) ──────────────
+
+/**
+ * ★ 2026-07-21 브랜드 학습 통합 — 서체 한/영 신키 폴백.
+ * font_ko(한글 서체) = 기존 본문 서체(font_family) 폴백(무손실·회귀 0).
+ * font_en(영문 서체)은 신규 축(기존 대응 없음) — font_display(헤드라인)는 축이 달라 폴백하지 않는다. 미설정 기본.
+ * 헤드라인 서체(font_display)는 렌더에서 그대로 유지(하위호환) — 이 함수는 손대지 않는다.
+ * 순수 함수(DB 접근 X) — 로드 경로와 테스트가 공유.
+ */
+export function normalizeBrandKit<T extends Partial<DmBrandKit>>(kit: T): T {
+  if (!kit) return kit;
+  return {
+    ...kit,
+    font_ko: kit.font_ko ?? kit.font_family,
+  };
+}
+
 // ────────────── 조회/수정 ──────────────
 
 export async function getCompanyBrandKit(companyId: string): Promise<DmBrandKit> {
@@ -51,7 +68,7 @@ export async function getCompanyBrandKit(companyId: string): Promise<DmBrandKit>
     const raw = res.rows[0]?.brand_kit;
     if (!raw) return { ...DEFAULT_BRAND_KIT };
     const kit = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    return { ...DEFAULT_BRAND_KIT, ...(kit || {}) };
+    return normalizeBrandKit({ ...DEFAULT_BRAND_KIT, ...(kit || {}) });
   } catch {
     return { ...DEFAULT_BRAND_KIT };
   }
@@ -84,7 +101,10 @@ export async function updateCompanyBrandKit(companyId: string, patch: Partial<Dm
     return { ...DEFAULT_BRAND_KIT, ...patch };
   }
   const current = await getCompanyBrandKit(companyId);
-  const merged = { ...current, ...patch };
+  // ★ 2026-07-21 (Codex R2 #7) undefined 키는 병합 전 제거 — 내부 호출이 {k: undefined}를 넘겨도 기존값이 지워지지 않게.
+  //   의도적 클리어는 명시 null로만(프론트는 클리어 시 null 전송). undefined는 "미변경"으로 취급.
+  const cleanPatch = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+  const merged = { ...current, ...cleanPatch };
   await query(
     `UPDATE companies SET brand_kit = $1 WHERE id = $2`,
     [JSON.stringify(merged), companyId],

@@ -35,9 +35,8 @@ import TopImpactCard, { TopImpactMemory, MemoryType } from '../components/AiMemo
 import MemoryTypeGuideModal from '../components/AiMemory/MemoryTypeGuideModal';
 import AddMemoryModal, { NewMemoryInput } from '../components/AiMemory/AddMemoryModal';
 // ★ D225+ Brand Voice Learning (2026-05-28 Harold 명시)
-import BrandVoiceCard from '../components/AiMemory/BrandVoiceCard';
-// ★ 2026-07-14 디자인 4.0 — 브랜드 학습(정체성: 로고·색·톤·고객센터) 입구. 3채널 생성 공용 참조.
-import BrandStudioCard from '../components/AiMemory/BrandStudioCard';
+// ★ 2026-07-21 브랜드 학습 통합 — 단일 진입 카드(→ 3탭 모달). 기존 BrandStudioCard·BrandVoiceCard 카드 2개 대체(BrandVoiceCard는 모달 탭 내부에서 재사용).
+import BrandLearningCard from '../components/AiMemory/BrandLearningCard';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -623,19 +622,8 @@ export default function AiMemoryPage() {
           </div>
         )}
 
-        {/* ───────── ★ 디자인 4.0 브랜드 학습 — 로고·색·톤·고객센터 (3채널 생성 공용 참조) ───────── */}
-        <BrandStudioCard
-          apiBase=""
-          token={token() || ''}
-          onToast={(msg, type) => {
-            if (type === 'success') toast.success(msg);
-            else if (type === 'error') toast.error(msg);
-            else toast.info(msg);
-          }}
-        />
-
-        {/* ───────── ★ D225+ Brand Voice Learning — 회사별 LMS 대표 문안 최대 10건 + AI 자동 가이드라인 ───────── */}
-        <BrandVoiceCard
+        {/* ───────── ★ 2026-07-21 브랜드 학습 통합 — 단일 진입 카드 → 모달(기본정보/브랜드킷/브랜드보이스 3탭). 기존 BrandStudioCard·BrandVoiceCard 2개 통합 ───────── */}
+        <BrandLearningCard
           apiBase=""
           token={token() || ''}
           onToast={(msg, type) => {

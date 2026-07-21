@@ -28,6 +28,8 @@ import {
   createSection,
 } from './dm-section-registry';
 import type { DmBrandKit } from './dm-tokens';
+// ★ 2026-07-21 브랜드 학습 통합 — one-shot 생성 시 회사 brand_kit.contact를 footer·store_info에 시드(페이지 분할 전)
+import { getCompanyBrandKit } from './dm-brand-kit';
 import { decideLayoutMode, splitSectionsIntoPages, type DmLayoutMode } from './dm-page-split';
 import { normalizeVisualConcept, applyVisualDirection, type VisualConcept } from './dm-visual-direction';
 import { normalizeSectionChain } from './dm-section-layout';
@@ -246,6 +248,36 @@ export function recommendLayout(spec: CampaignSpec): Section[] {
   });
 
   return sections;
+}
+
+/**
+ * ★ 2026-07-21 브랜드 학습 통합 — DM 생성 시 회사 브랜드킷 연락처를 footer·store_info 빈 필드에 시드.
+ * "향후 DM은 브랜드학습을 참조해 자동으로 채움"(Harold). 생성 시점 시드라 편집기·발송물이 같은 값을 봄(편집=발송·#3 파리티 유지).
+ * 이미 값이 있는 필드는 덮어쓰지 않는다(사용자 입력 보존). 순수 함수(DB 접근 X) — 엔드포인트에서 brandKit 주입.
+ */
+export function seedBrandContact(
+  sections: Section[],
+  brandKit: { contact?: { phone?: string; cs_phone?: string; email?: string; website?: string; address?: string } } | null | undefined,
+): Section[] {
+  const c = brandKit?.contact;
+  if (!c) return sections;
+  return sections.map((s) => {
+    if (s.type === 'footer') {
+      const p = s.props as any;
+      if (!p.cs_phone && c.cs_phone) return { ...s, props: { ...p, cs_phone: c.cs_phone } };
+      return s;
+    }
+    if (s.type === 'store_info') {
+      const p = s.props as any;
+      const patch: Record<string, string> = {};
+      if (!p.phone && c.phone) patch.phone = c.phone;
+      if (!p.email && c.email) patch.email = c.email;
+      if (!p.website && c.website) patch.website = c.website;
+      if (!p.address && c.address) patch.address = c.address;
+      return Object.keys(patch).length ? { ...s, props: { ...p, ...patch } } : s;
+    }
+    return s;
+  });
 }
 
 // ────────────── 3. Copy Generator ──────────────
@@ -904,11 +936,17 @@ export async function oneShotGenerate(opts: {
     },
     ...(concept.type_scale === 'editorial' && !(brandKit as any)?.font_display ? { font_display: '"Noto Serif KR", serif' } : {}),
   } as typeof brandKit;
+  // ★ 2026-07-21 회사 브랜드킷 연락처를 footer·store_info 빈 필드에 시드 — enrichedKit엔 회사 contact가 없어 실제 회사 brand_kit 조회.
+  //   페이지 분할 "전"에 적용해 sections·pages가 동일하게 시드됨(에디터=발송·#3 파리티. Codex R2 High 2건 정정).
+  let seeded = directed;
+  if (opts.companyId) {
+    try { seeded = seedBrandContact(directed, await getCompanyBrandKit(opts.companyId)); } catch { /* 조회 실패 = 미시드(회귀 0) */ }
+  }
   // 섹션 구성으로 레이아웃 모드 자동 결정 + 모드별 페이지 분할 (slides면 여러 장, scroll이면 한 장)
-  const layoutMode = decideLayoutMode(directed);
-  const pages = splitSectionsIntoPages(directed, layoutMode);
+  const layoutMode = decideLayoutMode(seeded);
+  const pages = splitSectionsIntoPages(seeded, layoutMode);
   return {
-    spec, sections: directed, brandKit: enrichedKit, scenario: opts.scenario, layoutMode, pages,
+    spec, sections: seeded, brandKit: enrichedKit, scenario: opts.scenario, layoutMode, pages,
     ...(brief ? { brief, coverage } : {}),
   };
 }

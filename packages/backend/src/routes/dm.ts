@@ -29,7 +29,7 @@ import { renderDmViewerHtml, renderDmViewerHtmlWithCustomer, renderDmErrorHtml }
 // ★ 2026-07-08 연동 몰 상품 자동 첨부 (생성된 상품 슬라이드 항목명 → 몰 이름매칭 이미지·링크)
 import { attachMallImagesToProductCarousels } from '../utils/mall-product-match';
 import {
-  parsePrompt, recommendLayout, generateCopy, transformTone, improveMessage,
+  parsePrompt, recommendLayout, seedBrandContact, generateCopy, transformTone, improveMessage,
   oneShotGenerate,
   type CampaignSpec, type ToneKey,
 } from '../utils/dm/dm-ai';
@@ -65,6 +65,9 @@ import { buildSystemPromptWithBrandVoice } from '../utils/brand-voice-prompt';
 import { getAvailableVariables } from '../utils/dm/dm-variable-resolver';
 import { validateDm } from '../utils/dm/dm-validate';
 import { getCompanyBrandKit, updateCompanyBrandKit, DEFAULT_BRAND_KIT } from '../utils/dm/dm-brand-kit';
+// ★ 2026-07-21 브랜드 학습 통합 — 회사 기본정보(브랜드명·사업자·업종) CRUD (companies 컬럼, Phase 0 실측)
+import { getBrandBasicInfo, updateBrandBasicInfo } from '../utils/brand-basic-info';
+import { INDUSTRY_CODES, INDUSTRY_LABELS } from '../utils/industry-codes';
 import { buildEventPromptBlock, normalizeEventText } from '../utils/event-brief';
 // ★ 2026-07-16 M3 — 상품 이미지 후보(네이버 쇼핑 검색 — 원탭 확정 전용) + 행사 URL 본문 수집
 import { searchNaverShopCandidates, isNaverShopSearchConfigured } from '../utils/naver-shop-search';
@@ -828,6 +831,7 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
       await deductCreditSafe({ companyId, cost: genCost, source: 'dm-ai-generate', createdBy: req.user?.userId });
       return r;
     });
+    // ★ 2026-07-21 연락처 시드는 oneShotGenerate 내부(페이지 분할 전)에서 실제 회사 brand_kit로 수행 — sections·pages 모두 반영(편집=발송). 여기 재시드 불필요.
     // ★ 2026-07-08 연동 몰 상품 자동 첨부 — 상품 슬라이드 항목명 이름매칭 → 이미지·링크·정가·할인가 채움(빈 값만, 몰 실패 skip). 발송 코어 무관(생성 결과 후처리).
     try { await attachMallImagesToProductCarousels(companyId, result.sections); } catch { /* best-effort */ }
     return res.json({
@@ -915,7 +919,12 @@ dmRouter.post('/ai/recommend-layout', async (req: any, res: any) => {
   try {
     const spec = req.body?.spec as CampaignSpec | undefined;
     if (!spec || typeof spec !== 'object') return res.status(400).json({ error: 'spec이 필요해요.' });
-    const sections = recommendLayout(spec);
+    let sections = recommendLayout(spec);
+    // ★ 2026-07-21 향후 DM은 브랜드학습 참조 — 회사 brand_kit 연락처를 footer·store_info 빈 필드에 시드(편집=발송). 조회 실패해도 안전 degrade.
+    const companyId = req.user?.companyId;
+    if (companyId) {
+      try { sections = seedBrandContact(sections, await getCompanyBrandKit(companyId)); } catch { /* 시드 실패 = 빈 섹션 그대로(회귀 0) */ }
+    }
     return res.json({ sections });
   } catch (err: any) {
     console.error('[DM AI recommend-layout] 오류:', err.message);
@@ -1884,6 +1893,42 @@ dmRouter.put('/brand-kit', async (req: any, res: any) => {
     return res.json({ brand_kit: kit });
   } catch (err: any) {
     console.error('[DM BrandKit PUT] 오류:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/dm/industry-codes — 문안 참조 업종 목록 (회사 접근 가능·기본정보 탭 셀렉트용, SSOT=industry-codes.ts)
+dmRouter.get('/industry-codes', async (req: any, res: any) => {
+  try {
+    if (!req.user?.companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    return res.json({ industries: INDUSTRY_CODES.map((code) => ({ code, label: INDUSTRY_LABELS[code] })) });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/dm/brand-basic-info — 회사 기본정보 조회 (브랜드 학습 ①기본정보 탭)
+dmRouter.get('/brand-basic-info', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const info = await getBrandBasicInfo(companyId);
+    return res.json({ basic_info: info });
+  } catch (err: any) {
+    console.error('[DM BrandBasicInfo GET] 오류:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/dm/brand-basic-info — 회사 기본정보 수정 (화이트리스트 컬럼만 부분 업데이트)
+dmRouter.put('/brand-basic-info', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const info = await updateBrandBasicInfo(companyId, req.body || {});
+    return res.json({ basic_info: info });
+  } catch (err: any) {
+    console.error('[DM BrandBasicInfo PUT] 오류:', err.message);
     return res.status(500).json({ error: err.message });
   }
 });

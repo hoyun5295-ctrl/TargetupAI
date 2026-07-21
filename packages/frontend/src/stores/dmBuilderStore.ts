@@ -28,9 +28,13 @@ export type DmBrandKit = {
   font_family?: string;
   // ★ 2026-07-13 디자인 3.0 — 헤드라인 전용 서체 (backend dm-tokens.ts DmBrandKit 미러)
   font_display?: string;
+  // ★ 2026-07-21 브랜드 학습 통합 — 서체 한/영 분리 (backend 미러). 미설정 시 font_family/display 폴백.
+  font_ko?: string;
+  font_en?: string;
   tone?: 'premium' | 'friendly' | 'urgent' | 'elegant' | 'playful';
-  contact?: { phone?: string; email?: string; website?: string };
-  sns?: { instagram?: string; youtube?: string; kakao?: string; naver?: string };
+  // ★ 2026-07-21 브랜드 학습 통합 — cs_phone(고객센터 번호)·address 추가 (backend 미러).
+  contact?: { phone?: string; cs_phone?: string; email?: string; website?: string; address?: string };
+  sns?: { instagram?: string; youtube?: string; kakao?: string; naver?: string; facebook?: string; x?: string };
   // ★ 2026-07-13 디자인 3.0 — DM 단위 아트디렉션 (brand_kit JSONB 동승 영속화 — backend 미러)
   art_direction?: {
     theme?: string;
@@ -73,7 +77,7 @@ export type ModalKey =
   | 'ai-improve'
   | 'validation'
   | 'version-history'
-  | 'brand-kit'
+  // ★ 2026-07-21 'brand-kit' 제거 — 브랜드 편집은 AI메모리 "브랜드 학습" 단일 창구로 일원화
   | 'design-theme'
   // ★ 2026-07-16 서체 일괄 적용 모달 (퀵바 팝오버 클리핑 → 모달 교체)
   | 'font'

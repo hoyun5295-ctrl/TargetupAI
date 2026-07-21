@@ -37,7 +37,6 @@ import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredMo
 import AiImproveModal from '../components/dm/modals/AiImproveModal';
 import ValidationModal from '../components/dm/modals/ValidationModal';
 import VersionHistoryModal from '../components/dm/modals/VersionHistoryModal';
-import BrandKitModal from '../components/dm/modals/BrandKitModal';
 import DesignThemeModal from '../components/dm/modals/DesignThemeModal';
 import FontApplyModal from '../components/dm/modals/FontApplyModal';
 // ★ 2026-07-14 디자인 4.0 — 정예 템플릿(목적×스토리 구조, 서버 design-core 컴파일)
@@ -1467,7 +1466,7 @@ function EditorModals() {
       <AiImproveModal open={openModal === 'ai-improve'} onClose={close} />
       <ValidationModal open={openModal === 'validation'} onClose={close} />
       <VersionHistoryModal open={openModal === 'version-history'} onClose={close} />
-      <BrandKitModal open={openModal === 'brand-kit'} onClose={close} />
+      {/* ★ 2026-07-21 BrandKitModal 제거 — 브랜드 편집은 AI메모리 "브랜드 학습" 단일 창구로 일원화 */}
       <DesignThemeModal open={openModal === 'design-theme'} onClose={close} />
       <FontApplyModal open={openModal === 'font'} onClose={close} />
       <AbTestModal open={openModal === 'ab-test'} onClose={close} />

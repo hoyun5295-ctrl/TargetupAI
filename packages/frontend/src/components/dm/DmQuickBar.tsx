@@ -39,9 +39,7 @@ export default function DmQuickBar() {
         🔤 서체{currentFont ? ` — ${currentFont.label.replace(/\s*\(.*\)$/, '')}` : ''}
       </button>
 
-      <button onClick={() => setOpenModal('brand-kit')} style={chipStyle} title="브랜드 색·로고·연락처 관리">
-        🎨 브랜드 킷
-      </button>
+      {/* ★ 2026-07-21 브랜드 킷 편집 제거 — 브랜드 편집은 AI메모리 "브랜드 학습" 단일 창구로 일원화. DM은 회사 브랜드 상속(기존 DM별 override 렌더는 유지). */}
       <button onClick={() => setOpenModal('design-theme')} style={chipStyle} title="디자인 테마 — 색·서체만 바꿔 입혀요 (내용은 그대로)">
         🪄 테마
       </button>

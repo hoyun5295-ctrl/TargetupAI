@@ -118,9 +118,13 @@ export type DmBrandKit = {
   font_family?: string;
   // ★ 2026-07-13 디자인 3.0 — 헤드라인 전용 서체(미설정 = font_family와 동일 = 기존 출력 그대로)
   font_display?: string;
+  // ★ 2026-07-21 브랜드 학습 통합 — 서체 한/영 분리. 미설정 시 font_family/font_display 폴백(normalizeBrandKit) = 회귀 0.
+  font_ko?: string;
+  font_en?: string;
   tone?: 'premium' | 'friendly' | 'urgent' | 'elegant' | 'playful';
-  contact?: { phone?: string; email?: string; website?: string };
-  sns?: { instagram?: string; youtube?: string; kakao?: string; naver?: string };
+  // ★ 2026-07-21 브랜드 학습 통합 — cs_phone(고객센터 번호, DM 푸터 cs_phone 대응)·address 추가.
+  contact?: { phone?: string; cs_phone?: string; email?: string; website?: string; address?: string };
+  sns?: { instagram?: string; youtube?: string; kakao?: string; naver?: string; facebook?: string; x?: string };
   // ★ 2026-07-13 디자인 3.0 — DM 단위 아트디렉션 영속화. brand_kit JSONB 동승(dm_versions 스냅샷 포함, DDL 0).
   //   뷰어가 normalizeArtDirection으로 정규화해 주입. 미설정 = 중립 기본(현행과 동일).
   art_direction?: {
@@ -182,8 +186,12 @@ export function renderDmTokensCss(brandKit?: DmBrandKit): string {
   const neutral   = brandKit?.neutral_color    || DM_COLOR_TOKENS.neutral[700];
   const bg        = brandKit?.background_color || DM_COLOR_TOKENS.neutral[0];
   // ★ 2026-07-13 (Codex 지적) — 서체 문자열 무해화 후 삽입 (raw <style> 삽입 XSS 차단)
-  const fontPri   = safeFontFamily(brandKit?.font_family, DM_TYPOGRAPHY.fontFamily.primary);
-  // ★ 2026-07-13 디자인 3.0 — 헤드라인 전용 서체(미설정 = 본문과 동일 = 기존 출력과 동일)
+  // ★ 2026-07-21 브랜드 학습 통합 — 한글 서체(font_ko, 미설정=font_family 폴백) + 영문 서체(font_en, 미설정 시 미추가).
+  //   영문 서체를 앞에 스택 → 라틴은 영문 서체, 한글은 한글 서체가 렌더. font_en 미설정 = 기존 출력과 동일(회귀 0).
+  const koFont    = safeFontFamily(brandKit?.font_ko || brandKit?.font_family, DM_TYPOGRAPHY.fontFamily.primary);
+  const enFont    = safeFontFamily(brandKit?.font_en, '');
+  const fontPri   = enFont ? `${enFont}, ${koFont}` : koFont;
+  // ★ 2026-07-13 디자인 3.0 — 헤드라인 전용 서체(미설정 = 본문과 동일 = 기존 출력과 동일). 하위호환 유지.
   // ★ 2026-07-16 M5 궁서체 영구 종결 2겹째 — 꼬리 generic serif를 본문(sans) 스택으로 교체.
   //   선택 서체 로딩 실패 시에도 바탕(궁서 체감) 폴백이 구조적으로 불가능. 룩 무변(선택 패밀리 전부 보존).
   const fontDisp  = sansSafeDisplayStack(safeFontFamily(brandKit?.font_display, fontPri), fontPri);
