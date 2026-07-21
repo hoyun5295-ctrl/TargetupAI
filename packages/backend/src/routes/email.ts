@@ -27,6 +27,7 @@
 
 import { Router, Request, Response, json } from 'express';
 import { authenticate } from '../middlewares/auth';
+import { resolveOwnerScope } from '../utils/owner-scope';
 import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 // ★ D225+ (2026-05-28): Email 캠페인 events 이력 조회 endpoint 신설 — email_events 직접 SELECT
 import { query } from '../config/database';
@@ -286,7 +287,7 @@ async function ensureEmailAdmin(req: Request, res: Response): Promise<{ companyI
     res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     return null;
   }
-  if (userType !== 'company_admin') {
+  if (userType !== 'company_admin' && userType !== 'super_admin') {
     res.status(403).json({ success: false, error: '회사 관리자 권한이 필요합니다.' });
     return null;
   }
@@ -296,6 +297,24 @@ async function ensureEmailAdmin(req: Request, res: Response): Promise<{ companyI
     return null;
   }
   return { companyId, userId };
+}
+
+// 캠페인 기능 접근 — 회사 구성원(담당자 포함) + 유료 플랜. ownerId = 담당자면 본인 id(격리), 관리자·슈퍼면 null(전체).
+async function ensureEmailAccess(req: Request, res: Response): Promise<{ companyId: string; userId: string; ownerId: string | null } | null> {
+  const companyId = req.user?.companyId;
+  const userId = req.user?.userId;
+  const userType = req.user?.userType;
+  if (!companyId || !userId) {
+    res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    return null;
+  }
+  const cdpEnabled = await isCdpEnabledForPlan(companyId);
+  if (!cdpEnabled) {
+    res.status(403).json({ success: false, error: 'Email 캠페인은 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
+    return null;
+  }
+  const isAdmin = userType === 'company_admin' || userType === 'super_admin';
+  return { companyId, userId, ownerId: isAdmin ? null : userId };
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -419,7 +438,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const limit = Math.min(parseInt(String(req.query.limit || '50')) || 50, 200);
-    const campaigns = await listEmailCampaigns(companyId, limit);
+    const campaigns = await listEmailCampaigns(companyId, limit, resolveOwnerScope(req));
     // ★ 2026-07-02 완성 여부 플래그 — 프론트 발송/PC 미리보기 잠금 판단용 (신·구 멱등키 인정)
     try {
       const keysRes = await query(
@@ -449,7 +468,7 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const campaign = await getEmailCampaign(companyId, req.params.id);
+    const campaign = await getEmailCampaign(companyId, req.params.id, resolveOwnerScope(req));
     if (!campaign) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
     return res.json({ success: true, campaign });
   } catch (err: any) {
@@ -463,10 +482,10 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
 //   완성 = 50크레딧 캠페인당 1회(멱등) — AI/수동/템플릿 불문. 완성 후 수정·재저장·발송·이력 전부 추가 차감 0.
 //   임시저장(draft)은 무료·무제한이되 발송/PC 미리보기가 잠기고, 이 endpoint가 해금한다. 환불 없음.
 router.post('/campaigns/:id/complete', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAdmin(req, res);
+  const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
-    const campaign = await getEmailCampaign(auth.companyId, req.params.id);
+    const campaign = await getEmailCampaign(auth.companyId, req.params.id, auth.ownerId);
     if (!campaign) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
 
     if (await isEmailCampaignCompleted(auth.companyId, campaign.id)) {
@@ -491,7 +510,7 @@ router.post('/campaigns/:id/complete', async (req: Request, res: Response) => {
 });
 
 router.post('/campaigns', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAdmin(req, res);
+  const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
     const { name, subject, html_body, text_body, from_name, from_email, is_ad, scheduled_at, ai_generated, sections } = req.body;
@@ -537,7 +556,7 @@ router.post('/campaigns', async (req: Request, res: Response) => {
 });
 
 router.patch('/campaigns/:id', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAdmin(req, res);
+  const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
     const patch: any = {};
@@ -559,7 +578,7 @@ router.patch('/campaigns/:id', async (req: Request, res: Response) => {
         // 재렌더 design = 이번 요청 우선, 미전달이면 저장된 캠페인 design 유지(테마 유실 방지)
         let renderDesign = patch.design ?? null;
         if (req.body.design === undefined) {
-          const existing = await getEmailCampaign(auth.companyId, req.params.id);
+          const existing = await getEmailCampaign(auth.companyId, req.params.id, auth.ownerId);
           renderDesign = existing?.design ?? null;
         }
         patch.htmlBody = renderEmailSections(req.body.sections as Section[], { brandKit, design: renderDesign, publicBase: process.env.PUBLIC_BASE_URL });
@@ -567,7 +586,7 @@ router.patch('/campaigns/:id', async (req: Request, res: Response) => {
       }
     }
 
-    const updated = await updateEmailCampaign(auth.companyId, req.params.id, patch);
+    const updated = await updateEmailCampaign(auth.companyId, req.params.id, patch, auth.ownerId);
     if (!updated) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
     return res.json({ success: true, campaign: updated });
   } catch (err: any) {
@@ -578,10 +597,10 @@ router.patch('/campaigns/:id', async (req: Request, res: Response) => {
 });
 
 router.delete('/campaigns/:id', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAdmin(req, res);
+  const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
-    const ok = await deleteEmailCampaign(auth.companyId, req.params.id);
+    const ok = await deleteEmailCampaign(auth.companyId, req.params.id, auth.ownerId);
     if (!ok) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
     return res.json({ success: true });
   } catch (err: any) {
@@ -592,10 +611,10 @@ router.delete('/campaigns/:id', async (req: Request, res: Response) => {
 });
 
 router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAdmin(req, res);
+  const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
-    const campaign = await getEmailCampaign(auth.companyId, req.params.id);
+    const campaign = await getEmailCampaign(auth.companyId, req.params.id, auth.ownerId);
     if (!campaign) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
 
     // 이중 발송 가드 — 이미 발송 중이면 차단
@@ -712,15 +731,18 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
 //   WHERE status='scheduled' 원자 조건이라 sweeper의 sending 선점과 경합해도 한쪽만 성립(이중 처리 0).
 //   완성(50크레딧)은 캠페인에 남아 있으므로 취소 후 재발송·재예약 자유.
 router.post('/campaigns/:id/cancel-schedule', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAdmin(req, res);
+  const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
+    const ownerClause = auth.ownerId ? ' AND created_by = $3::uuid' : '';
+    const params: any[] = [req.params.id, auth.companyId];
+    if (auth.ownerId) params.push(auth.ownerId);
     const r = await query(
       `UPDATE email_campaigns
          SET status = 'draft', scheduled_at = NULL, target_spec = NULL, updated_at = NOW()
-       WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'scheduled'
+       WHERE id = $1::uuid AND company_id = $2::uuid${ownerClause} AND status = 'scheduled'
        RETURNING id`,
-      [req.params.id, auth.companyId],
+      params,
     );
     if (r.rows.length === 0) {
       return res.status(400).json({ success: false, error: '예약 상태 캠페인이 아닙니다. 이미 발송이 시작되었거나 취소된 상태입니다.', code: 'NOT_SCHEDULED' });
@@ -749,8 +771,8 @@ router.get('/campaigns/:id/events', async (req: Request, res: Response) => {
     const offset = Math.max(parseInt(String(req.query.offset || '0')) || 0, 0);
     const eventType = req.query.event_type ? String(req.query.event_type) : null;
 
-    // 캠페인 권한 검증 (회사 격리)
-    const campaign = await getEmailCampaign(companyId, campaignId);
+    // 캠페인 권한 검증 (회사 격리 + 담당자 소유 격리)
+    const campaign = await getEmailCampaign(companyId, campaignId, resolveOwnerScope(req));
     if (!campaign) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
 
     // 1. 수신자별 매트릭스 — email 안 events 영역 GROUP
@@ -875,7 +897,7 @@ router.get('/ai/scenarios', async (_req: Request, res: Response) => {
 });
 
 router.post('/ai/generate', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAdmin(req, res);
+  const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
     const prompt = req.body?.prompt ? String(req.body.prompt).trim() : '';
@@ -907,7 +929,7 @@ router.post('/ai/generate', async (req: Request, res: Response) => {
 
 // 비주얼 빌더 — AI가 이메일 블록 Section[]을 생성(이미지·혜택은 빈 자리). 크레딧 3.
 router.post('/ai/generate-sections', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAdmin(req, res);
+  const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
     const prompt = req.body?.prompt ? String(req.body.prompt).trim() : '';
@@ -942,7 +964,7 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
 
 // 비주얼 에디터 실시간 미리보기 — sections → 이메일 HTML (크레딧·저장 없음).
 router.post('/render-preview', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAdmin(req, res);
+  const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
     const sections = Array.isArray(req.body?.sections) ? req.body.sections : [];
@@ -964,7 +986,7 @@ router.post('/render-preview', async (req: Request, res: Response) => {
 
 // 미리보기용 샘플 고객 3건(VIP/일반/신규) — 개인화 미리보기 토글. 회사 격리(inapp CT 재사용).
 router.get('/preview-customers', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAdmin(req, res);
+  const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
     const customers = await buildPreviewCustomers(auth.companyId);
@@ -977,7 +999,7 @@ router.get('/preview-customers', async (req: Request, res: Response) => {
 
 // 템플릿 추천용 회사 업종 신호(companies.industry_code — 기존 컬럼). 미설정/실패 시 null → 갤러리는 전체만 노출(추측 추천 0).
 router.get('/brand-signal', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAdmin(req, res);
+  const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
     const r = await query('SELECT industry_code FROM companies WHERE id = $1', [auth.companyId]);
@@ -991,6 +1013,7 @@ router.get('/brand-signal', async (req: Request, res: Response) => {
 
 // 분석 대시보드 — 계정 성과 집계(읽기 전용·무과금·회사 격리). 신규 컬럼 0(전부 기존 컬럼).
 router.get('/analytics', async (req: Request, res: Response) => {
+  // 회사 전체 이메일 집계 = 관리자 조회 영역 (담당자는 본인 캠페인 이력=events/non-openers로 확인)
   const auth = await ensureEmailAdmin(req, res);
   if (!auth) return;
   try {
@@ -1085,6 +1108,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
 
 // 분석 대시보드 — AI 종합 진단(on-demand 5크레딧). 집계 실측만 근거·임의 혜택 0. 발송 데이터 0이면 무과금.
 router.post('/ai/account-insight', async (req: Request, res: Response) => {
+  // 회사 전체 계정 인사이트 = 관리자 조회 영역
   const auth = await ensureEmailAdmin(req, res);
   if (!auth) return;
   try {
@@ -1155,7 +1179,7 @@ router.post('/ai/account-insight', async (req: Request, res: Response) => {
 });
 
 router.post('/ai/refine', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAdmin(req, res);
+  const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
     const subject = String(req.body?.subject || '').trim();
@@ -1180,7 +1204,7 @@ router.post('/ai/refine', async (req: Request, res: Response) => {
 
 // 비주얼 에디터 "AI로 개선" — 블록 카피만 다듬어 Section[] 반환(사실·혜택·변수 보존). 다듬을 텍스트 0이면 무차감.
 router.post('/ai/refine-sections', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAdmin(req, res);
+  const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
     const sections = Array.isArray(req.body?.sections) ? (req.body.sections as Section[]) : null;
@@ -1205,10 +1229,10 @@ router.post('/ai/refine-sections', async (req: Request, res: Response) => {
 });
 
 router.post('/ai/precheck', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAdmin(req, res);
+  const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
-    const campaign = await getEmailCampaign(auth.companyId, String(req.body?.campaign_id || ''));
+    const campaign = await getEmailCampaign(auth.companyId, String(req.body?.campaign_id || ''), auth.ownerId);
     if (!campaign) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
 
     // 기계 체크 = 코드(무료, 즉시)
@@ -1239,10 +1263,10 @@ router.post('/ai/precheck', async (req: Request, res: Response) => {
 });
 
 router.post('/ai/insight', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAdmin(req, res);
+  const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
-    const campaign = await getEmailCampaign(auth.companyId, String(req.body?.campaign_id || ''));
+    const campaign = await getEmailCampaign(auth.companyId, String(req.body?.campaign_id || ''), auth.ownerId);
     if (!campaign) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
 
     const stats = await getCampaignPerformanceStats(campaign.id);
@@ -1279,6 +1303,7 @@ router.post('/ai/insight', async (req: Request, res: Response) => {
 });
 
 router.post('/ai/send-time', async (req: Request, res: Response) => {
+  // 회사 전체 발송 시각 집계 = 관리자 조회 영역
   const auth = await ensureEmailAdmin(req, res);
   if (!auth) return;
   try {
@@ -1316,7 +1341,7 @@ router.get('/campaigns/:id/non-openers', async (req: Request, res: Response) => 
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const campaign = await getEmailCampaign(companyId, req.params.id);
+    const campaign = await getEmailCampaign(companyId, req.params.id, resolveOwnerScope(req));
     if (!campaign) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
     const smsResult = await getCampaignNonOpeners(companyId, req.params.id);              // SMS 크로스채널(전화 매칭) — 유료 상위 옵션
     const resendRecipients = await getCampaignResendRecipients(companyId, req.params.id); // 이메일 재발송 대상(무료·주)
@@ -1348,10 +1373,10 @@ router.get('/campaigns/:id/non-openers', async (req: Request, res: Response) => 
 // ★ 2026-07-06 미수신자 재발송 — 미오픈자에게 같은 콘텐츠를 이메일로 다시 발송(무료).
 //   자식 캠페인 1건 생성(원본 통계 무손상) + 재발송 1회 한도 + 발신 도메인 평판 보호. 완성 크레딧 재부과 없음(콘텐츠 재사용).
 router.post('/campaigns/:id/resend-non-openers', async (req: Request, res: Response) => {
-  const auth = await ensureEmailAdmin(req, res);
+  const auth = await ensureEmailAccess(req, res);
   if (!auth) return;
   try {
-    const parent = await getEmailCampaign(auth.companyId, req.params.id);
+    const parent = await getEmailCampaign(auth.companyId, req.params.id, auth.ownerId);
     if (!parent) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
     if (parent.status !== 'completed' || parent.sentCount <= 0) {
       return res.status(400).json({ success: false, error: '발송 완료된 캠페인만 재발송할 수 있습니다.' });

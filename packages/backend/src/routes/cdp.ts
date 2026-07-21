@@ -23,6 +23,7 @@ import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { authenticate } from '../middlewares/auth';
+import { resolveOwnerScope } from '../utils/owner-scope';
 import { requireCdpApiKey, requireCdpBrowserOrigin, requireCdpKeyOrBrowserOrigin, recordCdpApiCall, issueCdpKeyPair, isCdpEnabledForPlan } from '../utils/cdp-auth';
 import { isValidBundleId } from '../utils/cdp-app-id';
 import { identifyCustomer, parseConsentValue } from '../utils/cdp-identity';
@@ -64,6 +65,7 @@ import {
   listInAppMessages,
   updateInAppMessage,
   deleteInAppMessage,
+  isInAppMessageOwned,
   getActiveMessagesForCustomer,
   getActiveMessagesForCustomerV2,
   trackImpression,
@@ -1119,7 +1121,7 @@ router.get('/inapp', async (req: Request, res: Response) => {
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const channelRaw = req.query.channel ? String(req.query.channel) : undefined;
     const channel = channelRaw === 'web' || channelRaw === 'app' ? channelRaw : undefined;
-    const messages = await listInAppMessages(companyId, channel);
+    const messages = await listInAppMessages(companyId, channel, resolveOwnerScope(req));
     // 메시지별 통계 추가
     const withStats = await Promise.all(
       messages.map(async (m) => ({
@@ -1140,6 +1142,8 @@ router.get('/inapp/stats', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    // 회사 전체 집계 = 관리자 조회 영역 (담당자는 본인 메시지 목록/개별 통계로 확인)
+    if (resolveOwnerScope(req)) return res.status(403).json({ success: false, error: '회사 전체 통계는 관리자만 조회할 수 있습니다.' });
     const ch = req.query.channel === 'web' || req.query.channel === 'app' ? req.query.channel : undefined;
     const stats = await getCompanyInAppStats(companyId, ch);
     return res.json({ success: true, stats });
@@ -1166,11 +1170,7 @@ router.post('/inapp', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
-    const userType = req.user?.userType;
     if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    if (userType !== 'company_admin') {
-      return res.status(403).json({ success: false, error: 'In-app 메시지 신설은 회사 관리자만 가능합니다.' });
-    }
     const cdpEnabled = await isCdpEnabledForPlan(companyId);
     if (!cdpEnabled) {
       return res.status(403).json({ success: false, error: 'In-app 메시지는 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
@@ -1214,10 +1214,10 @@ router.post('/inapp', async (req: Request, res: Response) => {
 router.put('/inapp/:id', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
-    const userType = req.user?.userType;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    if (userType !== 'company_admin') {
-      return res.status(403).json({ success: false, error: '수정은 회사 관리자만 가능합니다.' });
+    const ownerId = resolveOwnerScope(req);
+    if (!(await isInAppMessageOwned(companyId, req.params.id, ownerId))) {
+      return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
     }
     // ★ 2026-07-06 표시 가능성 게이트 — 웹 메시지를 active로 저장(게시/재개)할 때만.
     //   paused/archived 저장은 통과(중단은 언제나 허용). 판정 오류는 격리(수정 자체를 막지 않음).
@@ -1234,7 +1234,7 @@ router.put('/inapp/:id', async (req: Request, res: Response) => {
         }
       }
     }
-    const message = await updateInAppMessage(companyId, req.params.id, req.body);
+    const message = await updateInAppMessage(companyId, req.params.id, req.body, ownerId);
     if (!message) return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
     // ★ 종량제: paused→active 게시 시 15(멱등 inapp-publish:messageId — POST에서 이미 과금됐으면 0).
     if (message.status === 'active') {
@@ -1261,14 +1261,11 @@ router.put('/inapp/:id', async (req: Request, res: Response) => {
 router.put('/inapp/:id/audience-filter', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
-    const userType = req.user?.userType;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    if (userType !== 'company_admin') {
-      return res.status(403).json({ success: false, error: '수정은 회사 관리자만 가능합니다.' });
-    }
+    const ownerId = resolveOwnerScope(req);
     const raw = req.body?.filter;
     const filter = raw && typeof raw === 'object' && Object.keys(raw).length > 0 ? raw : null;
-    const ok = await setInAppAudienceFilter(companyId, req.params.id, filter);
+    const ok = await setInAppAudienceFilter(companyId, req.params.id, filter, ownerId);
     if (!ok) return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
     return res.json({ success: true });
   } catch (err: any) {
@@ -1284,12 +1281,9 @@ router.put('/inapp/:id/audience-filter', async (req: Request, res: Response) => 
 router.delete('/inapp/:id', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
-    const userType = req.user?.userType;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    if (userType !== 'company_admin') {
-      return res.status(403).json({ success: false, error: '삭제는 회사 관리자만 가능합니다.' });
-    }
-    const ok = await deleteInAppMessage(companyId, req.params.id);
+    const ownerId = resolveOwnerScope(req);
+    const ok = await deleteInAppMessage(companyId, req.params.id, ownerId);
     if (!ok) return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
     return res.json({ success: true });
   } catch (err: any) {
@@ -1324,8 +1318,8 @@ const inappImageUpload = multer({
   },
 });
 
-// 회사 admin 권한 + BUSINESS+ 게이팅 공통 헬퍼
-async function ensureInAppAdmin(req: Request, res: Response): Promise<{ companyId: string; userId: string } | null> {
+// 회사 구성원(담당자 포함) 접근 + 유료 플랜 게이팅 공통 헬퍼 — 데이터는 ownerId(created_by)로 격리
+async function ensureInAppAccess(req: Request, res: Response): Promise<{ companyId: string; userId: string; ownerId: string | null } | null> {
   const companyId = req.user?.companyId;
   const userId = req.user?.userId;
   const userType = req.user?.userType;
@@ -1333,16 +1327,13 @@ async function ensureInAppAdmin(req: Request, res: Response): Promise<{ companyI
     res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     return null;
   }
-  if (userType !== 'company_admin') {
-    res.status(403).json({ success: false, error: '회사 관리자 권한이 필요합니다.' });
-    return null;
-  }
   const cdpEnabled = await isCdpEnabledForPlan(companyId);
   if (!cdpEnabled) {
     res.status(403).json({ success: false, error: '인앱 메시지는 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
     return null;
   }
-  return { companyId, userId };
+  const isAdmin = userType === 'company_admin' || userType === 'super_admin';
+  return { companyId, userId, ownerId: isAdmin ? null : userId };
 }
 
 // DB ALTER 503 분기 공통 헬퍼 (db_alter_safety_net 룰)
@@ -1363,7 +1354,7 @@ function handleDbMigrationError(err: any, res: Response, tableName: string): boo
 // 1. POST /api/cdp/inapp/ai-generate — 자연어 → 완전 메시지 자동 생성 (CT-77)
 // ─────────────────────────────────────────────────────────────────────
 router.post('/inapp/ai-generate', async (req: Request, res: Response) => {
-  const auth = await ensureInAppAdmin(req, res);
+  const auth = await ensureInAppAccess(req, res);
   if (!auth) return;
   try {
     // ★ 2026-07-06 표시 가능성 게이트 — AI 생성도 크레딧 소모라, 표시할 곳이 전혀 없으면(SDK 신호 0 + 표시 지원 연동 0) 차단.
@@ -1393,11 +1384,14 @@ router.post('/inapp/ai-generate', async (req: Request, res: Response) => {
 // 2. POST /api/cdp/inapp/explain — CTR 영향 요인 + 개선 추천 (CT-81)
 // ─────────────────────────────────────────────────────────────────────
 router.post('/inapp/explain', async (req: Request, res: Response) => {
-  const auth = await ensureInAppAdmin(req, res);
+  const auth = await ensureInAppAccess(req, res);
   if (!auth) return;
   try {
     const { message_id } = req.body;
     if (!message_id) return res.status(400).json({ success: false, error: 'message_id 필수' });
+    if (!(await isInAppMessageOwned(auth.companyId, String(message_id), auth.ownerId))) {
+      return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
+    }
     const result = await explainInAppMessage(auth.companyId, String(message_id));
     return res.json({ success: true, result });
   } catch (err: any) {
@@ -1411,12 +1405,15 @@ router.post('/inapp/explain', async (req: Request, res: Response) => {
 // 3. POST /api/cdp/inapp/quick-action — 1-click 액션 (CT-84)
 // ─────────────────────────────────────────────────────────────────────
 router.post('/inapp/quick-action', async (req: Request, res: Response) => {
-  const auth = await ensureInAppAdmin(req, res);
+  const auth = await ensureInAppAccess(req, res);
   if (!auth) return;
   try {
     const { message_id, action_type } = req.body;
     if (!message_id || !action_type) {
       return res.status(400).json({ success: false, error: 'message_id + action_type 필수' });
+    }
+    if (!(await isInAppMessageOwned(auth.companyId, String(message_id), auth.ownerId))) {
+      return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
     }
     let result;
     if (action_type === 'ai_refine') {
@@ -1440,10 +1437,13 @@ router.post('/inapp/quick-action', async (req: Request, res: Response) => {
 // 4. GET /api/cdp/inapp/preview/:id — 실시간 미리보기 (CT-79 + Liquid 치환)
 // ─────────────────────────────────────────────────────────────────────
 router.get('/inapp/preview/:id', async (req: Request, res: Response) => {
-  const auth = await ensureInAppAdmin(req, res);
+  const auth = await ensureInAppAccess(req, res);
   if (!auth) return;
   try {
     const messageId = req.params.id;
+    if (!(await isInAppMessageOwned(auth.companyId, messageId, auth.ownerId))) {
+      return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
+    }
     const msgR = await query(
       `SELECT id, title, body, action_url, action_label, position, background_color, text_color,
               trigger_event, display_frequency, start_at, end_at, status,
@@ -1508,10 +1508,13 @@ router.get('/inapp/preview/:id', async (req: Request, res: Response) => {
 // 5. GET /api/cdp/inapp/funnel-stats/:id — funnel + 시간대 + 히트맵 + 디바이스 (CT-83)
 // ─────────────────────────────────────────────────────────────────────
 router.get('/inapp/funnel-stats/:id', async (req: Request, res: Response) => {
-  const auth = await ensureInAppAdmin(req, res);
+  const auth = await ensureInAppAccess(req, res);
   if (!auth) return;
   try {
     const messageId = req.params.id;
+    if (!(await isInAppMessageOwned(auth.companyId, messageId, auth.ownerId))) {
+      return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
+    }
     const [funnel, hourly, heatmap, device] = await Promise.all([
       buildInAppFunnel(auth.companyId, messageId),
       buildHourlyDistribution(auth.companyId, messageId),
@@ -1537,9 +1540,12 @@ router.get('/inapp/funnel-stats/:id', async (req: Request, res: Response) => {
 //   인앱은 익명 다수라 DM식 전 명단 불가 — 식별분만 목록, 나머지는 익명 N명 정직 합산.
 // ─────────────────────────────────────────────────────────────────────
 router.get('/inapp/viewers/:id', async (req: Request, res: Response) => {
-  const auth = await ensureInAppAdmin(req, res);
+  const auth = await ensureInAppAccess(req, res);
   if (!auth) return;
   try {
+    if (!(await isInAppMessageOwned(auth.companyId, req.params.id, auth.ownerId))) {
+      return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
+    }
     const result = await buildIdentifiedViewers(auth.companyId, req.params.id);
     return res.json({ success: true, ...result });
   } catch (err: any) {
@@ -1553,7 +1559,7 @@ router.get('/inapp/viewers/:id', async (req: Request, res: Response) => {
 // 6. POST /api/cdp/inapp/segment-preview — 세그먼트 매칭 customer 수 (CT-78)
 // ─────────────────────────────────────────────────────────────────────
 router.post('/inapp/segment-preview', async (req: Request, res: Response) => {
-  const auth = await ensureInAppAdmin(req, res);
+  const auth = await ensureInAppAccess(req, res);
   if (!auth) return;
   try {
     const { segment_conditions } = req.body;
@@ -1576,7 +1582,7 @@ router.post('/inapp/segment-preview', async (req: Request, res: Response) => {
 //   brand_accent = 회사 brand_kit 실설정 강조색 (미설정 = null) — 신규 메시지 기본 강조색용.
 // ─────────────────────────────────────────────────────────────────────
 router.post('/inapp/preview-customers', async (req: Request, res: Response) => {
-  const auth = await ensureInAppAdmin(req, res);
+  const auth = await ensureInAppAccess(req, res);
   if (!auth) return;
   try {
     const raw = req.body?.segment_conditions;
@@ -1598,10 +1604,13 @@ router.post('/inapp/preview-customers', async (req: Request, res: Response) => {
 // 7. POST /api/cdp/inapp/variant — A/B variant 생성 / 목록 / Winner 자동 판정 (CT-80)
 // ─────────────────────────────────────────────────────────────────────
 router.post('/inapp/variant', async (req: Request, res: Response) => {
-  const auth = await ensureInAppAdmin(req, res);
+  const auth = await ensureInAppAccess(req, res);
   if (!auth) return;
   try {
     const { action, parent_message_id, ...variantData } = req.body;
+    if (parent_message_id && !(await isInAppMessageOwned(auth.companyId, String(parent_message_id), auth.ownerId))) {
+      return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
+    }
     if (action === 'create') {
       if (!parent_message_id || !variantData.title || !variantData.body) {
         return res.status(400).json({ success: false, error: 'parent_message_id + title + body 필수' });
@@ -1649,7 +1658,7 @@ router.post('/inapp/upload-image', (req: any, res: any) => {
       }
       return res.status(400).json({ success: false, error: err.message || '이미지 업로드 실패' });
     }
-    const auth = await ensureInAppAdmin(req, res);
+    const auth = await ensureInAppAccess(req, res);
     if (!auth) return;
     const file = req.file as Express.Multer.File | undefined;
     if (!file) return res.status(400).json({ success: false, error: '이미지 파일 필수' });
@@ -1698,7 +1707,7 @@ router.post('/inapp/upload-image', (req: any, res: any) => {
 // 9. GET /api/cdp/inapp/quick-start-cards — 빠른 시작 7 시나리오 (CT-77)
 // ─────────────────────────────────────────────────────────────────────
 router.get('/inapp/quick-start-cards', async (req: Request, res: Response) => {
-  const auth = await ensureInAppAdmin(req, res);
+  const auth = await ensureInAppAccess(req, res);
   if (!auth) return;
   try {
     const cards = listQuickStartCards();
@@ -1713,7 +1722,7 @@ router.get('/inapp/quick-start-cards', async (req: Request, res: Response) => {
 // 10. GET /api/cdp/inapp/available-variables — Liquid 변수 드롭다운 (CT-79)
 // ─────────────────────────────────────────────────────────────────────
 router.get('/inapp/available-variables', async (req: Request, res: Response) => {
-  const auth = await ensureInAppAdmin(req, res);
+  const auth = await ensureInAppAccess(req, res);
   if (!auth) return;
   try {
     // ★ 2026-07-02 회사 실데이터 필드만 노출 (CT-58 필터)
@@ -1729,8 +1738,10 @@ router.get('/inapp/available-variables', async (req: Request, res: Response) => 
 // 11. GET /api/cdp/inapp/overview — 회사 전체 요약 5 metric + 격차 (CT-83)
 // ─────────────────────────────────────────────────────────────────────
 router.get('/inapp/overview', async (req: Request, res: Response) => {
-  const auth = await ensureInAppAdmin(req, res);
+  const auth = await ensureInAppAccess(req, res);
   if (!auth) return;
+  // 회사 전체 개요 집계 = 관리자 조회 영역
+  if (auth.ownerId) return res.status(403).json({ success: false, error: '회사 전체 개요는 관리자만 조회할 수 있습니다.' });
   try {
     const ch = req.query.channel === 'web' || req.query.channel === 'app' ? req.query.channel : undefined;
     const overview = await buildInAppOverview(auth.companyId, ch);
@@ -1746,8 +1757,10 @@ router.get('/inapp/overview', async (req: Request, res: Response) => {
 // 12. GET /api/cdp/inapp/top-messages — Top CTR 메시지 (CT-83)
 // ─────────────────────────────────────────────────────────────────────
 router.get('/inapp/top-messages', async (req: Request, res: Response) => {
-  const auth = await ensureInAppAdmin(req, res);
+  const auth = await ensureInAppAccess(req, res);
   if (!auth) return;
+  // 회사 전체 상위 메시지 집계 = 관리자 조회 영역
+  if (auth.ownerId) return res.status(403).json({ success: false, error: '회사 전체 순위는 관리자만 조회할 수 있습니다.' });
   try {
     const limit = Math.min(Math.max(parseInt(String(req.query.limit || '10'), 10) || 10, 1), 50);
     const ch = req.query.channel === 'web' || req.query.channel === 'app' ? req.query.channel : undefined;

@@ -111,27 +111,35 @@ export async function getStorageUsage(companyId: string): Promise<{ usedBytes: n
   return { usedBytes, limitBytes, planCode };
 }
 
-/** 단건 조회 — 회사 소유 검증 포함. 없으면 null. (P4 MMS 변환 등 파생 작업용) */
-export async function getAsset(companyId: string, assetId: string): Promise<AssetRow | null> {
+/** 단건 조회 — 회사 소유 검증 포함. 없으면 null. (P4 MMS 변환 등 파생 작업용)
+ *  ownerId 지정 시(담당자) 본인 생성분만 조회 가능(방어 격리). */
+export async function getAsset(companyId: string, assetId: string, ownerId?: string | null): Promise<AssetRow | null> {
+  const ownerClause = ownerId ? ' AND created_by = $3::uuid' : '';
+  const params: any[] = [assetId, companyId];
+  if (ownerId) params.push(ownerId);
   const result = await query(
     `SELECT id, company_id, kind, url, filename, bytes, format, origin, prompt, channel_spec, width, height, created_at
        FROM cdp_assets
-      WHERE id = $1::uuid AND company_id = $2::uuid`,
-    [assetId, companyId],
+      WHERE id = $1::uuid AND company_id = $2::uuid${ownerClause}`,
+    params,
   );
   return (result.rows[0] as AssetRow) || null;
 }
 
-/** 목록 — 최신순, 검색(q = 파일명·프롬프트 부분 일치), 최대 200건 */
-export async function listAssets(companyId: string, q?: string): Promise<AssetRow[]> {
+/** 목록 — 최신순, 검색(q = 파일명·프롬프트 부분 일치), 최대 200건.
+ *  ownerId 지정 시(담당자) 본인 생성분만, null/미지정(관리자)이면 회사 전체. */
+export async function listAssets(companyId: string, q?: string, ownerId?: string | null): Promise<AssetRow[]> {
+  const ownerClause = ownerId ? ' AND created_by = $3::uuid' : '';
+  const params: any[] = [companyId, q?.trim() || null];
+  if (ownerId) params.push(ownerId);
   const result = await query(
     `SELECT id, company_id, kind, url, filename, bytes, format, origin, prompt, channel_spec, width, height, created_at
        FROM cdp_assets
       WHERE company_id = $1::uuid
-        AND ($2::text IS NULL OR filename ILIKE '%' || $2 || '%' OR prompt ILIKE '%' || $2 || '%')
+        AND ($2::text IS NULL OR filename ILIKE '%' || $2 || '%' OR prompt ILIKE '%' || $2 || '%')${ownerClause}
       ORDER BY created_at DESC
       LIMIT 200`,
-    [companyId, q?.trim() || null],
+    params,
   );
   return result.rows as AssetRow[];
 }

@@ -425,7 +425,7 @@ function App() {
         <Route
           path="/inapp-messages"
           element={
-            <PrivateRoute allowedTypes={['company_admin']}>
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <InAppMessagesPage />
             </PrivateRoute>
           }
@@ -473,7 +473,7 @@ function App() {
         <Route
           path="/email-campaigns"
           element={
-            <PrivateRoute allowedTypes={['company_admin']}>
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <EmailCampaignsPage />
             </PrivateRoute>
           }

@@ -24,6 +24,7 @@ import path from 'path';
 import dns from 'dns';
 import net from 'net';
 import { authenticate } from '../middlewares/auth';
+import { resolveOwnerScope } from '../utils/owner-scope';
 import { LIMITS } from '../config/defaults';
 import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
 import { registerAsset, getStorageUsage, isAssetsTableMissing, getAsset } from '../utils/assets';
@@ -462,7 +463,7 @@ imageStudioRouter.post('/mms-from-asset', async (req: any, res: Response) => {
   if (!/^[0-9a-f-]{36}$/i.test(assetId)) return res.status(400).json({ success: false, error: '소재를 찾을 수 없습니다.' });
 
   try {
-    const asset = await getAsset(companyId, assetId);
+    const asset = await getAsset(companyId, assetId, resolveOwnerScope(req));
     if (!asset) return res.status(404).json({ success: false, error: '소재를 찾을 수 없습니다.' });
     // 우리 서빙 URL(인앱 이미지 저장소)만 로컬 변환 대상 — deleteAsset과 동일 패턴
     const m = String(asset.url || '').match(/^\/api\/cdp\/inapp\/image\/([^/]+)\/([^/?#]+)$/);

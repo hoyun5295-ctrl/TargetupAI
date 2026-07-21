@@ -208,19 +208,25 @@ export async function createEmailCampaign(input: CreateCampaignInput): Promise<E
   return campaign;
 }
 
-export async function listEmailCampaigns(companyId: string, limit: number = 50): Promise<EmailCampaign[]> {
+export async function listEmailCampaigns(companyId: string, limit: number = 50, ownerId?: string | null): Promise<EmailCampaign[]> {
+  const ownerClause = ownerId ? ' AND created_by = $3::uuid' : '';
+  const params: any[] = [companyId, Math.min(limit, 200)];
+  if (ownerId) params.push(ownerId);
   const result = await query(
-    `SELECT * FROM email_campaigns WHERE company_id = $1::uuid
+    `SELECT * FROM email_campaigns WHERE company_id = $1::uuid${ownerClause}
      ORDER BY created_at DESC LIMIT $2`,
-    [companyId, Math.min(limit, 200)]
+    params
   );
   return result.rows.map(mapRow);
 }
 
-export async function getEmailCampaign(companyId: string, campaignId: string): Promise<EmailCampaign | null> {
+export async function getEmailCampaign(companyId: string, campaignId: string, ownerId?: string | null): Promise<EmailCampaign | null> {
+  const ownerClause = ownerId ? ' AND created_by = $3::uuid' : '';
+  const params: any[] = [campaignId, companyId];
+  if (ownerId) params.push(ownerId);
   const result = await query(
-    `SELECT * FROM email_campaigns WHERE id = $1::uuid AND company_id = $2::uuid`,
-    [campaignId, companyId]
+    `SELECT * FROM email_campaigns WHERE id = $1::uuid AND company_id = $2::uuid${ownerClause}`,
+    params
   );
   return result.rows.length > 0 ? mapRow(result.rows[0]) : null;
 }
@@ -229,7 +235,16 @@ export async function updateEmailCampaign(
   companyId: string,
   campaignId: string,
   patch: Partial<CreateCampaignInput>,
+  ownerId?: string | null,
 ): Promise<EmailCampaign | null> {
+  // 데이터 격리 — 담당자(ownerId 지정)는 본인 생성분만 수정. 아니면 null(라우트 404).
+  if (ownerId) {
+    const own = await query(
+      `SELECT 1 FROM email_campaigns WHERE id = $1::uuid AND company_id = $2::uuid AND created_by = $3::uuid`,
+      [campaignId, companyId, ownerId],
+    );
+    if (own.rows.length === 0) return null;
+  }
   // ★ 2026-07-13 (Codex 2R) — design 동봉 수정은 컬럼 선확인 후 "메인 UPDATE 단문에 동승"
   //   (html_body·sections만 저장되고 테마가 유실되는 부분 갱신 자체가 불가능한 구조).
   //   design 미동봉 patch는 design 컬럼을 참조하지 않아 컬럼 부재(ALTER 전)여도 정상 동작.
@@ -269,10 +284,13 @@ export async function updateEmailCampaign(
   return result.rows.length > 0 ? mapRow(result.rows[0]) : null;
 }
 
-export async function deleteEmailCampaign(companyId: string, campaignId: string): Promise<boolean> {
+export async function deleteEmailCampaign(companyId: string, campaignId: string, ownerId?: string | null): Promise<boolean> {
+  const ownerClause = ownerId ? ' AND created_by = $3::uuid' : '';
+  const params: any[] = [campaignId, companyId];
+  if (ownerId) params.push(ownerId);
   const result = await query(
-    `DELETE FROM email_campaigns WHERE id = $1::uuid AND company_id = $2::uuid RETURNING id`,
-    [campaignId, companyId]
+    `DELETE FROM email_campaigns WHERE id = $1::uuid AND company_id = $2::uuid${ownerClause} RETURNING id`,
+    params
   );
   return result.rows.length > 0;
 }

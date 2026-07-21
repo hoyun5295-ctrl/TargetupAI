@@ -8,6 +8,7 @@
  */
 import { Router, Response } from 'express';
 import { authenticate } from '../middlewares/auth';
+import { resolveOwnerScope } from '../utils/owner-scope';
 import { listAssets, deleteAsset, getStorageUsage, isAssetsTableMissing } from '../utils/assets';
 
 export const assetsRouter = Router();
@@ -27,7 +28,7 @@ assetsRouter.get('/', async (req: any, res: Response) => {
   if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
   try {
     const q = typeof req.query.q === 'string' ? req.query.q : undefined;
-    const [assets, usage] = await Promise.all([listAssets(companyId, q), getStorageUsage(companyId)]);
+    const [assets, usage] = await Promise.all([listAssets(companyId, q, resolveOwnerScope(req)), getStorageUsage(companyId)]);
     return res.json({ success: true, assets, usage });
   } catch (err: any) {
     if (isAssetsTableMissing(err)) return respondMigrationPending(res);

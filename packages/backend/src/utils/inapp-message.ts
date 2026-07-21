@@ -625,13 +625,16 @@ export async function createInAppMessage(
   return mapRowToMessage(result.rows[0]);
 }
 
-export async function listInAppMessages(companyId: string, channel?: 'web' | 'app'): Promise<Record<string, any>[]> {
+export async function listInAppMessages(companyId: string, channel?: 'web' | 'app', ownerId?: string | null): Promise<Record<string, any>[]> {
+  const ownerClause = ownerId ? ' AND created_by = $3::uuid' : '';
+  const params: any[] = [companyId, channel || null];
+  if (ownerId) params.push(ownerId);
   const result = await query(
     `SELECT * FROM cdp_inapp_messages
      WHERE company_id = $1::uuid AND status != 'archived'
-       AND ($2::varchar IS NULL OR channel = $2)
+       AND ($2::varchar IS NULL OR channel = $2)${ownerClause}
      ORDER BY created_at DESC`,
-    [companyId, channel || null]
+    params
   );
   // 편집 화면이 전체 필드(buttons·badge_text·image_url·segment_conditions·시간설정)를 그대로 받도록
   // raw row(snake_case = 프론트 MessageRow 일치) 반환. mapRowToMessage는 기본 필드만 줘서
@@ -661,8 +664,17 @@ export function resolveActionUrlPatch(input: Record<string, any>): { set: boolea
 export async function updateInAppMessage(
   companyId: string,
   messageId: string,
-  input: Partial<CreateInAppMessageInput>
+  input: Partial<CreateInAppMessageInput>,
+  ownerId?: string | null
 ): Promise<InAppMessage | null> {
+  // 데이터 격리 — 담당자(ownerId 지정)는 본인 생성분만 수정. 아니면 null(라우트 404).
+  if (ownerId) {
+    const own = await query(
+      `SELECT 1 FROM cdp_inapp_messages WHERE id = $1::uuid AND company_id = $2::uuid AND created_by = $3::uuid`,
+      [messageId, companyId, ownerId],
+    );
+    if (own.rows.length === 0) return null;
+  }
   // ★ D230+ 블록 — 제공된 경우만 정규화 + 혜택 placeholder 차단
   let blocksParam: string | null = null;
   // ★ 2026-07-16 범용 보장 계약 — 블록이 제공되고 비어있지 않으면 blocks가 진실:
@@ -787,13 +799,29 @@ export async function updateInAppMessage(
   return result.rows.length > 0 ? mapRowToMessage(result.rows[0]) : null;
 }
 
-export async function deleteInAppMessage(companyId: string, messageId: string): Promise<boolean> {
+export async function deleteInAppMessage(companyId: string, messageId: string, ownerId?: string | null): Promise<boolean> {
+  const ownerClause = ownerId ? ' AND created_by = $3::uuid' : '';
+  const params: any[] = [messageId, companyId];
+  if (ownerId) params.push(ownerId);
   const result = await query(
     `UPDATE cdp_inapp_messages SET status = 'archived', updated_at = NOW()
-     WHERE id = $1::uuid AND company_id = $2::uuid RETURNING id`,
-    [messageId, companyId]
+     WHERE id = $1::uuid AND company_id = $2::uuid${ownerClause} RETURNING id`,
+    params
   );
   return result.rows.length > 0;
+}
+
+/** 소유 확인 — ownerId null(관리자)=회사 범위만, 지정 시(담당자)=본인 생성분만. 회사 밖·타인 것 = false.
+ *  보조 엔드포인트(조회 통계·AI 분석·variant)가 message_id로 타 담당자 데이터에 접근하는 IDOR 차단용. */
+export async function isInAppMessageOwned(companyId: string, messageId: string, ownerId?: string | null): Promise<boolean> {
+  const ownerClause = ownerId ? ' AND created_by = $3::uuid' : '';
+  const params: any[] = [messageId, companyId];
+  if (ownerId) params.push(ownerId);
+  const r = await query(
+    `SELECT 1 FROM cdp_inapp_messages WHERE id = $1::uuid AND company_id = $2::uuid${ownerClause} LIMIT 1`,
+    params,
+  );
+  return r.rows.length > 0;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1090,12 +1118,16 @@ export async function setInAppAudienceFilter(
   companyId: string,
   messageId: string,
   filter: Record<string, { operator: string; value: any }> | null,
+  ownerId?: string | null,
 ): Promise<boolean> {
+  const ownerClause = ownerId ? ' AND created_by = $4::uuid' : '';
+  const params: any[] = [messageId, companyId, filter ? JSON.stringify(filter) : null];
+  if (ownerId) params.push(ownerId);
   const r = await query(
     `UPDATE cdp_inapp_messages
         SET audience_filter = $3::jsonb, updated_at = NOW()
-      WHERE id = $1::uuid AND company_id = $2::uuid`,
-    [messageId, companyId, filter ? JSON.stringify(filter) : null],
+      WHERE id = $1::uuid AND company_id = $2::uuid${ownerClause}`,
+    params,
   );
   return (r.rowCount || 0) > 0;
 }
