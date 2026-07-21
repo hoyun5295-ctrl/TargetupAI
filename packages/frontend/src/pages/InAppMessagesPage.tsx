@@ -855,9 +855,10 @@ export default function InAppMessagesPage() {
             let nb: any[];
             if (idx >= 0) {
               nb = [...blocks];
-              nb[idx] = { ...nb[idx], variant: 'image', url: data.url };
+              // 기존 미디어 블록의 명시 aspect는 보존, 없으면(아이콘/일러스트였던 블록) 전체보기 기본 — 크롭 방지
+              nb[idx] = { ...nb[idx], variant: 'image', url: data.url, aspect: nb[idx].aspect || defaultMediaAspect(prev.template || prev.position) };
             } else {
-              nb = [{ type: 'media', variant: 'image', url: data.url, aspect: '16:9' }, ...blocks];
+              nb = [{ type: 'media', variant: 'image', url: data.url, aspect: defaultMediaAspect(prev.template || prev.position) }, ...blocks];
             }
             return { ...prev, image_url: data.url, content_blocks: nb };
           }
@@ -3382,11 +3383,17 @@ function newBlock(type: string): any {
   }
 }
 
+/** 사용자가 올린 이미지 블록 기본 표시 — 카드형은 전체보기(크롭 0), 배너(top/bottom)만 얇은 띠(16:9) 유지 */
+const BANNER_INAPP_TEMPLATES = new Set(['top_banner', 'bottom_banner']);
+function defaultMediaAspect(template?: string | null): 'natural' | '16:9' {
+  return BANNER_INAPP_TEMPLATES.has(String(template || '')) ? '16:9' : 'natural';
+}
+
 /** 레거시(제목/본문/이미지/버튼/배경) → 블록 + 테마 1:1 변환 */
 export function convertToBlocks(m: Partial<MessageRow>): { content_blocks: any[]; theme: string; accent_color: string } {
   const blocks: any[] = [];
   if (m.badge_text && String(m.badge_text).trim()) blocks.push({ type: 'eyebrow', text: String(m.badge_text).trim(), tone: 'accent' });
-  if (m.image_url) blocks.push({ type: 'media', variant: 'image', url: m.image_url, aspect: '16:9' });
+  if (m.image_url) blocks.push({ type: 'media', variant: 'image', url: m.image_url, aspect: defaultMediaAspect(m.template || m.position) });
   if (m.title && m.title.trim()) blocks.push({ type: 'headline', text: m.title.trim(), size: 'lg' });
   if (m.body && m.body.trim()) blocks.push({ type: 'body', text: m.body.trim() });
   if ((m.buttons || []).length > 0) {
@@ -3915,11 +3922,17 @@ function BlockEditor({ block, onChange, uploadImage }: { block: any; onChange: (
           <Seg
             options={[{ v: 'icon', label: '아이콘' }, { v: 'illustration', label: '일러스트' }, { v: 'image', label: '이미지' }]}
             value={b.variant || 'icon'}
-            onChange={(v) => onChange({ variant: v, ...(v !== 'image' ? { icon: v === 'illustration' ? 'welcome' : 'gift' } : {}) })}
+            onChange={(v) => onChange({ variant: v, ...(v !== 'image' ? { icon: v === 'illustration' ? 'welcome' : 'gift' } : { aspect: b.aspect || 'natural' }) })}
           />
           {b.variant === 'image' ? (
             <div className="space-y-1.5">
-              {b.url && <img src={b.url} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} className="w-full max-h-28 object-cover rounded-lg border border-white/10" />}
+              {/* ★ 2026-07-21 전체보기(크롭 0)/채우기 토글 — 기본 전체보기. SDK·미리보기 aspect 미러 */}
+              <Seg
+                options={[{ v: 'full', label: '전체보기' }, { v: 'fill', label: '채우기' }]}
+                value={String(b.aspect) === 'natural' ? 'full' : 'fill'}
+                onChange={(v) => onChange({ aspect: v === 'full' ? 'natural' : '16:9' })}
+              />
+              {b.url && <img src={b.url} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} className={`w-full rounded-lg border border-white/10 ${String(b.aspect) === 'natural' ? 'max-h-56 object-contain' : 'max-h-28 object-cover'}`} />}
               <div className="flex gap-1.5 items-center">
                 <label className="flex-1 text-center text-[11px] text-white/70 bg-white/5 hover:bg-white/10 border border-dashed border-white/20 rounded px-2 py-1.5 cursor-pointer transition-colors">
                   이미지 업로드 (2MB 이하)

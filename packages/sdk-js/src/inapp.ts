@@ -1623,7 +1623,8 @@ export class HanjulloInAppModule {
         Object.assign(card.style, { borderRadius: bubbleRadius('bl'), overflow: 'visible' });
         attachBubbleTail(card, 'left');
       }
-      Object.assign(content.style, zoned ? { padding: '0', gap: '0' } : { padding: '28px 26px 26px' });
+      // ★ 2026-07-21 오버플로 가드 — natural 이미지 등 콘텐츠가 뷰포트 넘치면 CTA·닫기가 밖으로 나가므로 내부 스크롤.
+      Object.assign(content.style, zoned ? { padding: '0', gap: '0' } : { padding: '28px 26px 26px' }, { maxHeight: 'calc(100vh - 32px)', overflowY: 'auto' });
       card.appendChild(content);
       backdrop.appendChild(card);
       document.body.appendChild(backdrop);
@@ -1643,7 +1644,8 @@ export class HanjulloInAppModule {
         alignItems: 'center', justifyContent: 'center',
         padding: 'calc(24px + env(safe-area-inset-top, 0px)) 24px calc(24px + env(safe-area-inset-bottom, 0px))',
       });
-      Object.assign(content.style, { maxWidth: '460px', width: '100%' });
+      // ★ 2026-07-21 오버플로 가드 — 콘텐츠가 넘치면 내부 스크롤(CTA·닫기 접근 보장)
+      Object.assign(content.style, { maxWidth: '460px', width: '100%', maxHeight: '100%', overflowY: 'auto' });
       card.appendChild(content);
       document.body.appendChild(card);
       let off = () => {};
@@ -1662,6 +1664,8 @@ export class HanjulloInAppModule {
         ...(zoned ? { overflow: 'hidden' } : {}),
       });
       if (zoned) content.style.gap = '0';
+      // ★ 2026-07-21 오버플로 가드 — natural 이미지 등으로 패널이 뷰포트 넘치면 내부 스크롤
+      Object.assign(content.style, { maxHeight: 'calc(100vh - 80px)', overflowY: 'auto' });
       if (bubble) {
         Object.assign(card.style, { borderRadius: bubbleRadius('br') });
         attachBubbleTail(card, 'right');

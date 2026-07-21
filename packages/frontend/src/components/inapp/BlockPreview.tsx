@@ -293,10 +293,12 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
       }
       const url = String(b.url || '').trim();
       if (!url) return null;
+      // ★ 2026-07-21 전체보기(natural) — 크롭 없이 원본 비율 통짜. SDK inapp-blocks.ts renderMedia와 값 미러.
+      const isNatural = String(b.aspect) === 'natural';
       const pad: Record<string, string> = { '16:9': '56.25%', '4:3': '75%', '1:1': '100%', banner: '34%' };
       return (
-        <div key={i} style={{ position: 'relative', width: '100%', paddingTop: pad[String(b.aspect)] || pad['16:9'], borderRadius: Math.max(10, theme.radius - 8), overflow: 'hidden', background: theme.surfaceElevated, boxShadow: `inset 0 0 0 1px ${theme.border}` }}>
-          <img src={url} alt="" onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none'; }} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: b.fit === 'contain' ? 'contain' : 'cover' }} />
+        <div key={i} style={{ position: 'relative', width: '100%', ...(isNatural ? {} : { paddingTop: pad[String(b.aspect)] || pad['16:9'] }), borderRadius: Math.max(10, theme.radius - 8), overflow: 'hidden', background: theme.surfaceElevated, boxShadow: `inset 0 0 0 1px ${theme.border}` }}>
+          <img src={url} alt="" onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none'; }} style={isNatural ? { width: '100%', height: 'auto', maxHeight: '62vh', objectFit: 'contain', display: 'block' } : { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: b.fit === 'contain' ? 'contain' : 'cover' }} />
         </div>
       );
     }

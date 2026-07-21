@@ -219,12 +219,17 @@ function renderMedia(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | nu
   // image
   const url = String(b.url || '').trim();
   if (!url) return null;
+  // ★ 2026-07-21 전체보기(natural) — 사용자가 올린 이미지를 크롭 없이 원본 비율 통짜로 표시.
+  //   aspect='natural'이면 고정 박스 없이 height:auto(초대형만 62vh 상한).
+  //   미지정/16:9 등은 기존 크롭 박스 유지(배너·기존 발행물 회귀 0). BlockPreview.tsx media 케이스와 값 미러.
+  const isNatural = String(b.aspect) === 'natural';
   const aspect: Record<string, string> = { '16:9': '56.25%', '4:3': '75%', '1:1': '100%', banner: '34%' };
   const pad = aspect[String(b.aspect)] || aspect['16:9'];
   const radius = typeof b.radius === 'number' ? `${b.radius}px` : `${Math.max(10, theme.radius - 8)}px`;
 
   const frame = el('div', {
-    position: 'relative', width: '100%', paddingTop: pad,
+    position: 'relative', width: '100%',
+    ...(isNatural ? {} : { paddingTop: pad }),
     borderRadius: radius, overflow: 'hidden', background: theme.surfaceElevated,
     boxShadow: `inset 0 0 0 1px ${theme.border}`,
   });
@@ -233,10 +238,9 @@ function renderMedia(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | nu
   img.alt = '';
   img.loading = 'lazy';
   img.referrerPolicy = 'no-referrer';
-  Object.assign(img.style, {
-    position: 'absolute', inset: '0', width: '100%', height: '100%',
-    objectFit: b.fit === 'contain' ? 'contain' : 'cover', display: 'block',
-  });
+  Object.assign(img.style, isNatural
+    ? { width: '100%', height: 'auto', maxHeight: '62vh', objectFit: 'contain', display: 'block' }
+    : { position: 'absolute', inset: '0', width: '100%', height: '100%', objectFit: b.fit === 'contain' ? 'contain' : 'cover', display: 'block' });
   img.onerror = () => { frame.style.display = 'none'; };
   frame.appendChild(img);
   if (b.overlay) {
