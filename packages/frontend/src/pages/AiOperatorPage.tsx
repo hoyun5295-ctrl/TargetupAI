@@ -1246,6 +1246,15 @@ export default function AiOperatorPage() {
                             {!resolveSubject(safeIdx).trim() && (
                               <p className="text-[10px] text-rose-300 mt-1">제목을 입력해주세요. LMS/MMS는 제목이 필요합니다.</p>
                             )}
+                            {/* ★ 2026-07-21 (임은지 리포트): 광고 발송 시 제목 맨 앞에 (광고) 자동 부착 — 실제 발송 제목 표시(백엔드 buildAdSubject 미러). 발송 값은 순수 제목 유지 → 이중 부착 없음 */}
+                            {isAd && resolveSubject(safeIdx).trim() && (
+                              <p className="text-[10px] text-white/45 mt-1">
+                                실제 발송 제목:{' '}
+                                <span className="text-amber-200/90 font-medium">
+                                  {/^\s*[(（]\s*광고\s*[)）]/.test(resolveSubject(safeIdx)) ? resolveSubject(safeIdx) : `(광고) ${resolveSubject(safeIdx)}`}
+                                </span>
+                              </p>
+                            )}
                           </div>
                         )}
 
