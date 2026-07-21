@@ -95,6 +95,8 @@ export type HeroProps = {
   // ★ 2026-07-13 디자인 3.0 이미지 스튜디오 — backend dm-section-registry와 동일 (미지정 = 하위호환)
   overlay?: 'none' | 'soft' | 'strong' | 'brand' | 'top';
   focus?: 'center' | 'top' | 'bottom';
+  // ★ 2026-07-22 이미지 맞춤 — cover(꽉 차게·잘림) / contain(전체 보임·잘림 X). 완성 포스터를 히어로에 통짜로. 미지정=cover(회귀 0). backend 미러.
+  image_fit?: 'cover' | 'contain';
   headline_emphasis?: 'none' | 'marker' | 'underline';
 };
 

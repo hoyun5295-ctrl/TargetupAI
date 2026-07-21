@@ -89,6 +89,16 @@ describe('DM 편집기↔발행 속성 계약 (재발 방지책 1)', () => {
     }
   });
 
+  // ── 히어로 이미지 맞춤: 완성 포스터를 히어로에 통짜(잘림 X)로 (2026-07-22) ──
+  describe('히어로 이미지 맞춤 (완성 포스터 안 잘림)', () => {
+    for (const fit of DM_IMAGE_FITS) {
+      it(`hero image_fit=${fit} — object-fit:${fit} 출력`, () => {
+        const html = renderSection(mk('hero', { headline: '제목', image_url: 'https://ex.com/a.jpg', image_fit: fit } as any), {} as any);
+        expect(html).toContain(`object-fit:${fit}`);
+      });
+    }
+  });
+
   // ── 갤러리 풀화면(full_bleed): 완성 이미지가 화면 꽉 참 (2026-07-15 서수란 신고) ──
   describe('갤러리 풀화면 (full_bleed — 완성 이미지 꽉 채우기)', () => {
     const img = [{ url: 'https://ex.com/a.jpg' }];

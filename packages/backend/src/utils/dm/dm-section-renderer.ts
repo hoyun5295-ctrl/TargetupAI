@@ -190,7 +190,7 @@ function renderHeroClassic(props: HeroProps): string {
   const textColor = (!img && moodBg) ? ((props as any).mood_text || '#fff') : '#fff';
 
   return `<div class="dm-section dm-hero" data-section-type="hero" style="position:relative;min-height:${heightPx};overflow:hidden;background:${baseBg}">
-    ${img ? `<img class="dm-hero-media" src="${escapeHtml(img)}" alt="${escapeHtml(props.headline || '')}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;${heroFocusCss(props)}">` : ''}
+    ${img ? `<img class="dm-hero-media" src="${escapeHtml(img)}" alt="${escapeHtml(props.headline || '')}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:${props.image_fit === 'contain' ? 'contain' : 'cover'};${heroFocusCss(props)}">` : ''}
     ${img ? `<div style="position:absolute;inset:0;background:${gradient}"></div>` : ''}
     <div style="position:relative;min-height:${heightPx};display:flex;flex-direction:column;justify-content:flex-end;align-items:${textAlign};padding:var(--dm-sp-8) var(--dm-sp-5);color:${textColor};text-align:${align}">
       ${props.headline ? `<div class="dm-text-hero" style="font-weight:800${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${emphasizeHead(escapeHtml(props.headline).replace(/\n/g, '<br>'), props.headline_emphasis)}</div>` : ''}
@@ -221,7 +221,7 @@ function renderHeroFullBleed(props: HeroProps): string {
   const head = escapeHtml(props.headline || '').replace(/\n/g, '<br>');
   const sub = escapeHtml(props.sub_copy || '').replace(/\n/g, '<br>');
   return `<div class="dm-section dm-hero" data-section-type="hero" style="position:relative;min-height:${heightPx};overflow:hidden;background:${baseBg}">
-    ${img ? `<img class="dm-hero-media" src="${escapeHtml(img)}" alt="${escapeHtml(props.headline || '')}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;${heroFocusCss(props)}">` : ''}
+    ${img ? `<img class="dm-hero-media" src="${escapeHtml(img)}" alt="${escapeHtml(props.headline || '')}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:${props.image_fit === 'contain' ? 'contain' : 'cover'};${heroFocusCss(props)}">` : ''}
     ${img ? `<div style="position:absolute;inset:0;background:${props.overlay ? heroOverlayCss(props) : 'rgba(0,0,0,0.32)'}"></div>` : ''}
     <div style="position:relative;min-height:${heightPx};display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:var(--dm-sp-6) var(--dm-sp-5);color:#fff">
       ${head ? `<div style="font-size:var(--dm-fs-hero);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.1;font-family:var(--dm-font-display)${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${emphasizeHead(head, props.headline_emphasis)}</div>` : ''}

@@ -144,7 +144,7 @@ function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx, treatment:
     const sub = p.sub_copy
       ? `<div style="font-size:${fsPx(p.sub_copy_size, b.type.body.size)};line-height:${b.type.body.lineHeight};color:${esc(p.sub_copy_color || 'rgba(255,255,255,0.92)')};margin-top:${b.sp[3]}">${esc(p.sub_copy).replace(/\n/g, '<br>')}</div>`
       : '';
-    return `<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${b.text};background-image:url('${esc(img)}');background-position:center center;background-size:cover;background-repeat:no-repeat"><tr><td height="${minH}" valign="bottom" class="em-hero" style="height:${minH}px;background:${overlay};padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${headline}${sub}</td></tr></table></td></tr>`;
+    return `<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${b.text};background-image:url('${esc(img)}');background-position:center center;background-size:${p.image_fit === 'contain' ? 'contain' : 'cover'};background-repeat:no-repeat"><tr><td height="${minH}" valign="bottom" class="em-hero" style="height:${minH}px;background:${overlay};padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${headline}${sub}</td></tr></table></td></tr>`;
   }
 
   // 이미지 없음 — 높이만 적용(텍스트 세로 가운데). 단색/투명 배경. ★ 2026-07-02 줄바꿈+색상 지정 동일 적용 + 크기(fsPx)

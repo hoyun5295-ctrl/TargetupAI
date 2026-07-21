@@ -77,7 +77,18 @@ export default function HeroEditor({ props, onUpdate }: EditorProps<HeroProps>) 
         />
       </Field>
 
-      <Field label="이미지 초점" hint="세로로 긴 사진에서 보여줄 부분">
+      <Field label="이미지 맞춤" hint="문구가 들어간 완성 포스터는 '전체 보기'로 두면 잘리지 않아요">
+        <Select
+          value={props.image_fit || 'cover'}
+          onChange={(v) => onUpdate({ image_fit: v as HeroProps['image_fit'] })}
+          options={[
+            { value: 'cover', label: '채우기 (꽉 차게 · 잘릴 수 있음)' },
+            { value: 'contain', label: '전체 보기 (잘림 없음)' },
+          ]}
+        />
+      </Field>
+
+      <Field label="이미지 초점" hint="채우기일 때 세로로 긴 사진에서 보여줄 부분">
         <Select
           value={props.focus || 'center'}
           onChange={(v) => onUpdate({ focus: v as HeroProps['focus'] })}

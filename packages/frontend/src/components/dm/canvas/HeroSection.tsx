@@ -33,6 +33,8 @@ export default function HeroSection({ props, onEdit, treatment }: { props: HeroP
     }
   })();
   const objectPosition = `center ${props.focus === 'top' ? 'top' : props.focus === 'bottom' ? 'bottom' : 'center'}`;
+  // ★ 2026-07-22 이미지 맞춤 — contain=완성 포스터 전체(잘림 X), 미지정=cover(회귀 0). SSR renderHero 미러.
+  const imgFit: 'cover' | 'contain' = props.image_fit === 'contain' ? 'contain' : 'cover';
   const emCls = props.headline_emphasis === 'marker' ? 'dm-em-marker' : props.headline_emphasis === 'underline' ? 'dm-em-underline' : undefined;
   const editable = !!onEdit;
   // ★ Phase 1: 이미지 없으면 AI 무드 배경(그라데이션)으로 — 휑한 검정 대신 완성형. mood_text로 가독 색.
@@ -91,7 +93,7 @@ export default function HeroSection({ props, onEdit, treatment }: { props: HeroP
     const h = HEIGHT_PX_FULLBLEED[props.height || 'md'];
     return (
       <div className="dm-section dm-hero" style={{ position: 'relative', minHeight: h, overflow: 'hidden', background: baseBg }}>
-        {imgSrc && <img src={imgSrc} alt={props.headline || ''} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition }} />}
+        {imgSrc && <img src={imgSrc} alt={props.headline || ''} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: imgFit, objectPosition }} />}
         {imgSrc && <div style={{ position: 'absolute', inset: 0, background: props.overlay ? gradient : 'rgba(0,0,0,0.32)' }} />}
         <div style={{ position: 'relative', minHeight: h, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: 'var(--dm-sp-6) var(--dm-sp-5)', color: '#fff' }}>
           {headNode({ fontSize: 'var(--dm-fs-hero)', fontWeight: FW_HERO, letterSpacing: 'var(--dm-ls-hero)', lineHeight: 1.1, fontFamily: 'var(--dm-font-display)' }, emCls)}
@@ -143,7 +145,7 @@ export default function HeroSection({ props, onEdit, treatment }: { props: HeroP
         <img
           src={dmImageUrl(props.image_url)}
           alt={props.headline || ''}
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition }}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: imgFit, objectPosition }}
         />
       )}
       {props.image_url && <div style={{ position: 'absolute', inset: 0, background: gradient }} />}

@@ -97,6 +97,7 @@ export type HeroProps = {
   // ★ 2026-07-13 디자인 3.0 이미지 스튜디오 — 미지정 = overlay_gradient 하위호환 렌더 그대로
   overlay?: 'none' | 'soft' | 'strong' | 'brand' | 'top';   // 오버레이 프리셋(방향·강도·브랜드 틴트)
   focus?: 'center' | 'top' | 'bottom';                      // 이미지 초점(object-position)
+  image_fit?: 'cover' | 'contain';                          // ★ 2026-07-22 cover(꽉 차게·잘림)/contain(전체·잘림X). 완성 포스터 통짜. 미지정=cover(회귀 0)
   headline_emphasis?: 'none' | 'marker' | 'underline';      // 헤드라인 강조(형광 마커/밑줄 스트로크)
 };
 

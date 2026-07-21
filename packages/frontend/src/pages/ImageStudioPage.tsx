@@ -13,7 +13,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, ImagePlus, Loader2, ShoppingBag, Upload, Wand2,
   Check, Save, Maximize2, PenLine, ChevronLeft, Sparkles, FolderOpen,
-  Layers, Smartphone, Mail, MessageSquareText, X, RefreshCw,
+  Layers, Smartphone, Mail, X,
 } from 'lucide-react';
 import { goBackOr } from '../lib/scroll-restoration';
 import { putStudioDraft, STUDIO_INAPP_DRAFT_KEY, STUDIO_DM_DRAFT_KEY, STUDIO_EMAIL_DRAFT_KEY } from '../lib/studio-draft';
@@ -91,7 +91,6 @@ export default function ImageStudioPage() {
 
   // 내 라이브러리(저장 소재) — 갤러리 상단 폴더. 소재 클릭 = 채널 발사대(인앱/DM/이메일/MMS 변환).
   const [assetAction, setAssetAction] = useState<{ id: string; url: string; filename: string | null; bytes: number; channelSpec?: string | null } | null>(null);
-  const [converting, setConverting] = useState(false);
   const [libManageOpen, setLibManageOpen] = useState(false); // 전체 보기·관리(검색·삭제) — 픽커 재사용
   const [libAssets, setLibAssets] = useState<{ id: string; url: string; filename: string | null; bytes: number; channelSpec?: string | null }[]>([]);
   const [libUsage, setLibUsage] = useState<{ usedBytes: number; limitBytes: number } | null>(null);
@@ -289,43 +288,6 @@ export default function ImageStudioPage() {
   };
   // ★ 2026-07-21 다운로드 제거(전 직원 요청 — 악용 소지). 소재는 한줄로 채널/발송으로만 활용, 파일 반출 차단.
   //   화면 표시본엔 워터마크 오버레이(스크린샷 유출 억제), 발송물은 원본 유지.
-
-  const convertAssetToMms = async (assetId: string) => {
-    setBusyMsg('MMS 규격으로 변환 중... (≤300KB 보장)');
-    try {
-      const { r, d } = await postJson('/api/image-studio/mms-from-asset', { assetId });
-      if (!r.ok || !d?.success) throw new Error(d?.error || '변환에 실패했어요');
-      toast.success(`MMS 변환 완료 — ${(Number(d.image?.size || 0) / 1024).toFixed(0)}KB. 발송 시 MMS 첨부 창의 '라이브러리에서 가져오기'로 첨부하세요`);
-      setAssetAction(null);
-    } catch (e: any) {
-      toast.error(e?.message || '변환에 실패했어요');
-    } finally {
-      setBusyMsg('');
-    }
-  };
-
-  // ★ 2026-07-21 채널 변환 — 완성 소재를 다른 채널 비율로 재생성(1크레딧) → 라이브러리 추가 → 발사대 모달을 새 소재로 갱신.
-  //   DM용 소재를 인앱/이메일에 그대로 못 쓰는 문제(비율 상이) 해소. 생성 채널은 바로 사용, 그 외는 변환.
-  const convertChannel = async (targetPreset: string) => {
-    if (!assetAction || converting) return;
-    setConverting(true);
-    setBusyMsg('채널 비율에 맞추는 중...');
-    try {
-      const { r, d } = await postJson('/api/image-studio/convert-channel', { assetId: assetAction.id, targetPreset });
-      if (r.status === 402) { toast.error('크레딧이 부족합니다 — 충전 후 다시 시도해주세요'); return; }
-      if (r.status === 409) { toast.error(d?.error || '잠시 후 다시 시도해주세요'); return; }
-      if (r.status === 503 && d?.code === 'DB_MIGRATION_PENDING') { toast.error('라이브러리 준비 중 — 운영자에게 문의해주세요'); return; }
-      if (!r.ok || !d?.success) throw new Error(d?.error || '변환에 실패했어요');
-      toast.success('변환해서 라이브러리에 저장했어요 (1크레딧) — 이제 이 채널로 만들 수 있어요');
-      loadLibrary();
-      setAssetAction({ id: d.asset.id, url: d.asset.url, filename: d.asset.filename, bytes: d.asset.bytes, channelSpec: d.asset.channelSpec });
-    } catch (e: any) {
-      toast.error(e?.message || '변환에 실패했어요');
-    } finally {
-      setConverting(false);
-      setBusyMsg('');
-    }
-  };
 
   const busy = !!busyMsg;
 
@@ -529,7 +491,8 @@ export default function ImageStudioPage() {
         {stage === 'result' && (
           <section className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-sm font-bold text-white/90 mr-2">완성 포스터 — 다른 사이즈도 바로</h2>
+              <h2 className="text-sm font-bold text-white/90 mr-2">완성 포스터</h2>
+              <span className="text-[11px] text-white/40 mr-1">이 포스터는 인앱·DM·이메일 어디서든 그대로 쓸 수 있어요. 특정 채널 전용 비율이 필요할 때만:</span>
               {PRESETS.map((p) => (
                 <button key={p.key} onClick={() => generate(p.key)} disabled={busy} className="px-3 py-1.5 rounded-lg text-[11px] border border-white/10 text-white/60 hover:bg-white/10 disabled:opacity-40">
                   + {p.label} <span className="text-white/35">2크레딧</span>
@@ -574,15 +537,8 @@ export default function ImageStudioPage() {
         )}
       </main>
 
-      {/* 라이브러리 소재 발사대 모달 — 이미지 크게(좌) + 채널 메뉴(우). 생성 채널은 바로, 그 외는 변환(1). */}
-      {assetAction && (() => {
-        const spec = assetAction.channelSpec || '';
-        // 이 소재가 각 채널에서 "바로 사용" 가능한가(생성 채널 일치). 그 외는 변환.
-        const nativeInapp = spec === 'inapp-poster';
-        const nativeDm = spec === 'dm';
-        const nativeEmail = spec === 'email';
-        const specLabel = specKo(spec);
-        return (
+      {/* 라이브러리 소재 발사대 모달 — 완성 포스터는 어느 채널이든 그대로(전체) 사용. 변환·크롭·추가과금 없음. */}
+      {assetAction && (
         <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
           <div className="w-full max-w-3xl bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/10">
@@ -599,53 +555,27 @@ export default function ImageStudioPage() {
                   <StudioWatermark text={wmText} />
                 </div>
               </div>
-              {/* 우 — 채널 메뉴 */}
+              {/* 우 — 채널 메뉴 (전 채널 그대로 사용 · 변환 없음) */}
               <div className="md:w-[42%] p-5 flex flex-col gap-2.5 border-t md:border-t-0 md:border-l border-white/10">
                 <div className="text-[11px] text-white/45 mb-1">
-                  <span className="inline-block px-2 py-0.5 rounded-full bg-white/10 text-white/70 font-semibold">{specLabel}용</span>
-                  {assetAction.filename && <div className="mt-1.5 text-white/75 font-medium break-all leading-snug">{assetAction.filename.replace(/\.[^.]+$/, '')}</div>}
-                  <div className="mt-2 text-white/35 leading-relaxed">생성한 채널은 바로 사용할 수 있고, 다른 채널은 그 비율로 변환(1크레딧)한 뒤 사용해요.</div>
+                  {assetAction.filename && <div className="text-white/75 font-medium break-all leading-snug">{assetAction.filename.replace(/\.[^.]+$/, '')}</div>}
+                  <div className="mt-2 text-white/35 leading-relaxed">이 포스터는 문구·상품이 이미 들어가 있어, 어느 채널이든 <b className="text-white/60 font-semibold">전체가 그대로</b> 쓰여요 — 잘림·추가 비용 없음.</div>
                 </div>
-                {/* 인앱 */}
-                {nativeInapp ? (
-                  <button onClick={() => launchChannel(STUDIO_INAPP_DRAFT_KEY, '/inapp-messages')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-rose-400/40 bg-rose-500/10 text-xs font-semibold text-white/90 hover:bg-rose-500/20 transition">
-                    <Layers className="w-4 h-4 text-rose-300" /> 인앱메시지 만들기
-                  </button>
-                ) : (
-                  <button onClick={() => convertChannel('inapp-poster')} disabled={busy || converting} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/70 hover:border-rose-400/40 hover:bg-rose-500/10 transition disabled:opacity-40">
-                    <RefreshCw className="w-4 h-4 text-rose-300" /> 인앱용으로 변환 <span className="text-white/35 font-normal">1크레딧</span>
-                  </button>
-                )}
-                {/* DM */}
-                {nativeDm ? (
-                  <button onClick={() => launchChannel(STUDIO_DM_DRAFT_KEY, '/dm-builder')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-amber-400/40 bg-amber-500/10 text-xs font-semibold text-white/90 hover:bg-amber-500/20 transition">
-                    <Smartphone className="w-4 h-4 text-amber-300" /> 모바일 DM 만들기
-                  </button>
-                ) : (
-                  <button onClick={() => convertChannel('dm-card')} disabled={busy || converting} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/70 hover:border-amber-400/40 hover:bg-amber-500/10 transition disabled:opacity-40">
-                    <RefreshCw className="w-4 h-4 text-amber-300" /> 모바일 DM용으로 변환 <span className="text-white/35 font-normal">1크레딧</span>
-                  </button>
-                )}
-                {/* 이메일 */}
-                {nativeEmail ? (
-                  <button onClick={() => launchChannel(STUDIO_EMAIL_DRAFT_KEY, '/email-campaigns')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-cyan-400/40 bg-cyan-500/10 text-xs font-semibold text-white/90 hover:bg-cyan-500/20 transition">
-                    <Mail className="w-4 h-4 text-cyan-300" /> 이메일 만들기
-                  </button>
-                ) : (
-                  <button onClick={() => convertChannel('email-hero')} disabled={busy || converting} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/70 hover:border-cyan-400/40 hover:bg-cyan-500/10 transition disabled:opacity-40">
-                    <RefreshCw className="w-4 h-4 text-cyan-300" /> 이메일용으로 변환 <span className="text-white/35 font-normal">1크레딧</span>
-                  </button>
-                )}
-                <div className="h-px bg-white/10 my-1" />
-                <button onClick={() => convertAssetToMms(assetAction.id)} disabled={busy || converting} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/70 hover:border-emerald-400/40 hover:bg-emerald-500/10 transition disabled:opacity-40">
-                  <MessageSquareText className="w-4 h-4 text-emerald-300" /> MMS 변환 <span className="text-white/35 font-normal">≤300KB</span>
+                <button onClick={() => launchChannel(STUDIO_INAPP_DRAFT_KEY, '/inapp-messages')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-rose-400/40 bg-rose-500/10 text-xs font-semibold text-white/90 hover:bg-rose-500/20 transition">
+                  <Layers className="w-4 h-4 text-rose-300" /> 인앱메시지 만들기
                 </button>
+                <button onClick={() => launchChannel(STUDIO_DM_DRAFT_KEY, '/dm-builder')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-amber-400/40 bg-amber-500/10 text-xs font-semibold text-white/90 hover:bg-amber-500/20 transition">
+                  <Smartphone className="w-4 h-4 text-amber-300" /> 모바일 DM 만들기
+                </button>
+                <button onClick={() => launchChannel(STUDIO_EMAIL_DRAFT_KEY, '/email-campaigns')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-cyan-400/40 bg-cyan-500/10 text-xs font-semibold text-white/90 hover:bg-cyan-500/20 transition">
+                  <Mail className="w-4 h-4 text-cyan-300" /> 이메일 만들기
+                </button>
+                <div className="mt-1 text-[10px] text-white/30 leading-relaxed">MMS로 보낼 때는 발송 화면의 ‘라이브러리에서 가져오기’로 첨부하면 자동으로 규격(≤300KB)에 맞춰져요. 특정 채널 전용 비율이 필요하면 스튜디오에서 그 비율로 새로 만들면 돼요.</div>
               </div>
             </div>
           </div>
         </div>
-        );
-      })()}
+      )}
 
       {/* 처리 오버레이 */}
       {busy && (
