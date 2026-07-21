@@ -63,7 +63,8 @@
 
 ### 최근 완료 인덱스 (원문 = 링크의 월별 아카이브)
 
-- 🟢 2026-07-21 (3) — 이미지 스튜디오 4대 개선: 파일명 헤드라인_채널(용도 체킹 동시·신규만)·다운로드 제거(악용 차단)·워터마크 CSS 오버레이(발송 원본 무손)·채널 변환(다른 비율 재생성 1크레딧·editOrUpscale 재사용) (★배포완료·DDL 0·vitest816 / 크레딧≠balance=ai_credits 2버킷 / 실측=변환 시 credits_total -1+cdp_assets 새 행) → [[project_2026_0721_image_studio_improvements]]
+- 🟢 2026-07-22 — 이미지 스튜디오 채널 변환 폐기 → 완성 포스터 **어디서든 통짜 재사용**(refit·/convert-channel·channelConvert 전부 제거·런처 "만들기" 3버튼·히어로 `image_fit` 토글 신설) + GPT 폴백 **전부 gpt-5.5**(analysis.ts temperature 제거 세트·아니면 400) + "OPENAI 경고"=vitest 노이즈 fix(모듈로드 env 오탐·서버무관) + 상품 **제품명 줄바꿈**(DM+이메일 공용·네이버 후보만 \n 평탄화·몰매칭 normalize라 무영향) (★배포완료·FE/BE tsc0·vitest822·골든 무변·자사몰 자동채움=카페24·네이버만) → [[project_2026_0722_studio_reuse_gpt55_linebreak]]
+- 🟢 2026-07-21 (3) — 이미지 스튜디오 4대 개선: 파일명 헤드라인_채널(용도 체킹 동시·신규만)·다운로드 제거(악용 차단)·워터마크 CSS 오버레이(발송 원본 무손)·채널 변환(1크레딧·**★0722 폐기→통짜 재사용으로 대체**) (★배포완료·DDL 0·vitest816 / 크레딧≠balance=ai_credits 2버킷 / 실측=변환 시 credits_total -1+cdp_assets 새 행) → [[project_2026_0721_image_studio_improvements]]
 - 🟢 2026-07-20~21 — 모바일 DM 편집≠발행 4번째 재오픈 근본(모티프 rule 제목 클래스 dm-text-h2 캔버스 미부여·앞 3회 divider 오진) + 셸 정합(4섹션 DmEventCard·패딩형 8섹션) + 인앱 포스터 SDK 정합 (★배포완료·게이트 3종 신설=title/shell/inapp-poster·골든 무변·DDL 0 / 실측=주황막대·노치·이벤트카드·인앱포스터) → [[project_2026_0720_mobile_dm_title_parity]]
 - 🟢 2026-07-21 — 문안 생성 참조 업종 셀렉트 신설(companies.industry_code 입력 UI 0곳→슈퍼관리자 고객사 수정·사업자등록증 업태/종목과 별개·경량 GET /industry-codes SSOT) (★배포완료·DDL 0) → [[project_2026_0721_copy_industry_category]]
 - 🟢 2026-07-19~20 — 계절 템플릿 22종(★7e613613) + 의류 단독컷 원칙 + 팝폰 가로줄 종결(양 OS 실측) + 아임웹 앱스토어 제출 (잔여=의류 안내 1줄 커밋·배포 / 아임웹 잔여는 위 활성 트랙, 회전 0720) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · [[project_2026_0719_p4_image_studio]] · [[project_2026_0719_imweb_appstore_idlook]]
@@ -100,12 +101,7 @@
 - 🟢 2026-07-08(3) — AI Operator 0건 크레딧 미차감 + 직원 디버깅 4건(개인화 라벨·하위계정 DB현황·DM헤더우측·타겟건수 오판철회) (★배포완료) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0708_operator_credit_and_staff_debug]]
 - 🟢 2026-07-08(2) — 원클릭 캠페인(이미지 판독·초안DB) + 이미지로 문안 + 연동몰 상품 자동채움(카페24·네이버) + 예약 UI (★배포완료) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0708_mall_product_autofill_dm]] · [[project_2026_0708_event_campaign_image_and_draft_persistence]]
 - 🟢 2026-07-08 — 행사 상품 구조 추출 + 인앱 SDK 서빙 공용화·팝폰 복구 + 인앱 익명 fallback + 로그인 문의·DM 2열 (★배포완료) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0708_event_campaign_product_extraction]] · [[reference_inapp_sdk_serving]]
-- 🟢 2026-07-07 — 인앱/이메일/DM 대개편 6종 + hlj.kr 단축링크 + 인앱 디자인 2.0~2.1 + 형태 4종 + 이메일·DM 2.0 + 행사 캠페인 (★DDL 6컬럼·hlj.kr 라이브 / frontend·SDK·backend build+deploy 잔여) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0707_inapp_email_dm_overhaul]]
-- 🟢 2026-07-07(6) — 마케팅 캘린더 완비: 통지·출구·타겟 축 구멍 4건 근본수정 (★배포완료) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0705_marketing_calendar_overhaul]]
-- 🟢 2026-07-06 — 운영 버그 5건 근본수정 (★배포완료 / **잔여: Harold 운영검증** — 복구 UPDATE 897 재실행·5건 실측·.env CLAUDE_MAPPING_MODEL 확인) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0706_pending_fail_freeze_rootfix]]
-- 🟢 2026-07-05 (·4) — 자동마케팅 4수정 + 비토 Agent v1.0.8 MMS(**잔여: Gateway v135 E2E 실측**) + 레거시 템플릿 이관 조사(**잔여: 서팀장 회의**) + 카페24 반려 3건 + 마케팅 캘린더 12건 (★배포완료·DDL 2건) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · [[project_2026_0705_bito_agent_v108_mms]] · [[project_2026_0705_marketing_calendar_overhaul]]
-- 🟢 2026-07-04 (2) — 모달/토스트 UX + 베스트 문안 재설계·진화 + 발송결과 집계 근본수정 + 스크롤 복원 (**잔여: ③④⑤⑥⑦ 재배포 + psql 2세트(best_copy_seed_usage·best_copy_assets CREATE / ai_training_logs.click_count·conversion_count ADD)**) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
-> 2026-07-02 이하 완료분 = [archive/INDEX.md](archive/INDEX.md) 카탈로그 경유 (날짜·증상어 grep). ★2026-07-21 회전: 07-01(4)·07-02(6)·07-07~09 통합. 원문은 TASKS_2026-07.md에 무손실 보존.
+> 2026-07-02 이하 완료분 = [archive/INDEX.md](archive/INDEX.md) 카탈로그 경유 (날짜·증상어 grep). ★2026-07-21 회전: 07-01(4)·07-02(6)·07-07~09 통합. ★2026-07-22 회전: 07-04~07-07 통합(07-04 psql 2세트·07-06 복구 UPDATE 897·07-05 Gateway v135 실측 잔여는 각 project 파일 보존). 원문은 TASKS_2026-07.md에 무손실 보존.
 
 ---
 

@@ -156,6 +156,21 @@ export interface InAppMessageSdk {
   card_style?: string | null;
   /** ★ 2026-07-14 디자인 3.0 — 메시지 단위 디자인(cdp_inapp_messages.design jsonb). 미설정 = 현행 렌더 그대로 */
   design?: InAppDesignSdk | null;
+  /** ★ 2026-07-21 포스터형 캐러셀 — 슬라이드 배열(2장 이상 = 좌우 스와이프). 미설정·1장 = 단일 포스터(회귀 0) */
+  posterSlides?: PosterSlideSdk[] | null;
+  poster_slides?: PosterSlideSdk[] | string | null;
+}
+
+/** ★ 2026-07-21 포스터 캐러셀 슬라이드 (백엔드 PosterSlide 미러) — image_url 필수, 나머지 옵셔널 */
+export interface PosterSlideSdk {
+  image_url: string;
+  title?: string | null;
+  body?: string | null;
+  cta?: { label?: string; action_url?: string | null; background_color?: string; text_color?: string } | null;
+  title_color?: string | null;
+  body_color?: string | null;
+  title_size?: number | null;
+  body_size?: number | null;
 }
 
 /** ★ 2026-07-14 디자인 3.0 — design jsonb 스키마 (전 키 옵셔널. 서버 sanitize 통과값이지만 SDK도 fail-closed 소비) */
@@ -908,6 +923,12 @@ export class HanjulloInAppModule {
     buttons: InAppButton[], animation: string, autoDismissSec: number | null | undefined,
     input: InAppInitInput,
   ): void {
+    // ★ 2026-07-21 캐러셀 — 슬라이드 2장 이상이면 좌우 스와이프 렌더. 1장·미보유 = 아래 단일 포스터(회귀 0).
+    const slides = this.parsePosterSlides(msg);
+    if (slides.length >= 2) {
+      this.renderPosterCarousel(msg, slides, badge, animation, autoDismissSec, input);
+      return;
+    }
     if (!imageUrl) {
       this.renderCenterModal(msg, title, body, imageUrl, badge, buttons, animation, autoDismissSec, input);
       return;
@@ -976,38 +997,9 @@ export class HanjulloInAppModule {
     };
     imgWrap.appendChild(hero);
 
-    if (title || body || badge) {
-      const scrim = document.createElement('div');
-      Object.assign(scrim.style, {
-        position: 'absolute',
-        left: '0',
-        right: '0',
-        bottom: '0',
-        padding: '52px 22px 18px',
-        background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.66) 100%)',
-        color: overlayColor,
-        boxSizing: 'border-box',
-        // 본문이 이미지 높이를 넘는 극단 케이스 — 잘라내지 않고 이미지 안에서 스크롤 (Codex 지적)
-        maxHeight: '100%',
-        overflowY: 'auto',
-      });
-      if (badge) this.appendBadge(scrim, badge, titleColor);
-      if (title) {
-        const t = document.createElement('div');
-        Object.assign(t.style, { fontWeight: '800', fontSize: `${titleSize}px`, letterSpacing: '-0.01em', lineHeight: '1.3', marginBottom: body ? '5px' : '0', color: titleColor });
-        if (displayFont) t.style.fontFamily = `${displayFont}, ${INAPP_FONT_STACK}`;
-        t.textContent = title;
-        scrim.appendChild(t);
-      }
-      if (body) {
-        // ★ 2026-07-18 v2 — 본문 잘림 없음 (작성한 전 줄 표시. 길이는 미리보기로 확인)
-        const b = document.createElement('div');
-        Object.assign(b.style, { fontSize: `${bodySize}px`, opacity: '0.94', lineHeight: '1.55', whiteSpace: 'pre-wrap', color: bodyColor });
-        b.textContent = body;
-        scrim.appendChild(b);
-      }
-      imgWrap.appendChild(scrim);
-    }
+    // ★ 2026-07-21 스크림(제목/본문/배지 오버레이) — 단일 포스터·캐러셀 슬라이드 공용 buildPosterScrim(동일 규격).
+    const scrim = this.buildPosterScrim({ title, body, badge, overlayColor, titleColor, bodyColor, titleSize, bodySize, displayFont });
+    if (scrim) imgWrap.appendChild(scrim);
     root.appendChild(imgWrap);
 
     // 흰 바닥 — CTA 1개 + 다시 보지 않기 (버튼이 없으면 다시 보지 않기만)
@@ -1020,6 +1012,214 @@ export class HanjulloInAppModule {
     // 닫기 = 이미지 우상단 — imgWrap에 흰색 상속을 줘 어두운 포스터에서도 X가 보인다 (root의 진한 글씨색 상속 방지, Codex 지적)
     imgWrap.style.color = '#ffffff';
     this.appendCloseButton(imgWrap, msg, input, () => document.body.removeChild(backdrop), 'absolute-top-right');
+
+    backdrop.appendChild(root);
+    document.body.appendChild(backdrop);
+    if (autoDismissSec && autoDismissSec > 0) this.setupAutoDismiss(backdrop, autoDismissSec);
+  }
+
+  // ────────────────────────────────────────────────────────────────
+  // 포스터형 캐러셀 (2026-07-21) — 좌우 스와이프 N장 + 점(1/N) + 슬라이드별 CTA
+  // ────────────────────────────────────────────────────────────────
+
+  /** posterSlides 파싱 — 배열·JSON 문자열 수용, image_url 있는 슬라이드만. 실패 시 [] (단일 포스터 폴백) */
+  private parsePosterSlides(msg: InAppMessageSdk): PosterSlideSdk[] {
+    let raw: any = (msg as any).posterSlides ?? (msg as any).poster_slides;
+    if (typeof raw === 'string') {
+      try { raw = JSON.parse(raw); } catch { return []; }
+    }
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((s: any) => s && typeof s === 'object' && typeof s.image_url === 'string' && s.image_url.trim().length > 0);
+  }
+
+  /** 캐러셀 트랙 스크롤바 숨김 스타일 1회 주입 (몰 CSS 충돌 회피 — hjl- 접두 id) */
+  private ensureCarouselStyle(): void {
+    try {
+      if (document.getElementById('hjl-inapp-carousel')) return;
+      const s = document.createElement('style');
+      s.id = 'hjl-inapp-carousel';
+      s.textContent = '[data-hjl-carousel]{scrollbar-width:none;-ms-overflow-style:none}[data-hjl-carousel]::-webkit-scrollbar{display:none;width:0;height:0}';
+      document.head.appendChild(s);
+    } catch { /* 조용히 실패 */ }
+  }
+
+  /** 포스터 스크림(이미지 하단 그라데이션 위 제목/본문/배지 오버레이) — 단일 포스터·캐러셀 슬라이드 공용.
+   *  텍스트는 픽셀에 굽지 않는 레이어. 제목·본문·배지 모두 없으면 null. */
+  private buildPosterScrim(o: {
+    title: string; body: string; badge: string;
+    overlayColor: string; titleColor: string; bodyColor: string;
+    titleSize: number; bodySize: number; displayFont: string;
+  }): HTMLDivElement | null {
+    if (!o.title && !o.body && !o.badge) return null;
+    const scrim = document.createElement('div');
+    Object.assign(scrim.style, {
+      position: 'absolute', left: '0', right: '0', bottom: '0',
+      padding: '52px 22px 18px',
+      background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.66) 100%)',
+      color: o.overlayColor, boxSizing: 'border-box',
+      // 본문이 이미지 높이를 넘는 극단 케이스 — 잘라내지 않고 이미지 안에서 스크롤 (Codex 지적)
+      maxHeight: '100%', overflowY: 'auto',
+    });
+    if (o.badge) this.appendBadge(scrim, o.badge, o.titleColor);
+    if (o.title) {
+      const t = document.createElement('div');
+      Object.assign(t.style, { fontWeight: '800', fontSize: `${o.titleSize}px`, letterSpacing: '-0.01em', lineHeight: '1.3', marginBottom: o.body ? '5px' : '0', color: o.titleColor });
+      if (o.displayFont) t.style.fontFamily = `${o.displayFont}, ${INAPP_FONT_STACK}`;
+      t.textContent = o.title;
+      scrim.appendChild(t);
+    }
+    if (o.body) {
+      // ★ 2026-07-18 v2 — 본문 잘림 없음 (작성한 전 줄 표시. 길이는 미리보기로 확인)
+      const b = document.createElement('div');
+      Object.assign(b.style, { fontSize: `${o.bodySize}px`, opacity: '0.94', lineHeight: '1.55', whiteSpace: 'pre-wrap', color: o.bodyColor });
+      b.textContent = o.body;
+      scrim.appendChild(b);
+    }
+    return scrim;
+  }
+
+  /** 포스터형 캐러셀 — 가로 꽉 찬 하단 시트 안 좌우 스와이프(CSS scroll-snap, 외부 의존성 0).
+   *  각 슬라이드 = 이미지(cover·통일 높이) + 슬라이드별 오버레이 문구. 하단 = 점(1/N) + 활성 슬라이드 CTA(스와이프 시 교체) + 다시 보지 않기.
+   *  색·크기 폴백: 슬라이드 값 → 메시지 design(poster_*) → 기본. click 트래킹 button_id = slide_{index}(슬라이드별 성과). */
+  private renderPosterCarousel(
+    msg: InAppMessageSdk,
+    slides: PosterSlideSdk[],
+    badge: string,
+    animation: string,
+    autoDismissSec: number | null | undefined,
+    input: InAppInitInput,
+  ): void {
+    this.ensureCarouselStyle();
+    const customer = input.customer || {};
+    const design: any = (msg as any).design || {};
+    const hexOr = (v: any, fb: string) => (typeof v === 'string' && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(v) ? v : fb);
+    const sizeOr = (v: any, min: number, max: number, fb: number) => { const n = Number(v); return Number.isFinite(n) && n >= min && n <= max ? n : fb; };
+    const msgOverlay = hexOr(design.poster_text_color, '#ffffff');
+    const displayFont = safeFontFamily(design.font_display, '');
+    if (displayFont) ensureFontLink(displayFont);
+
+    const backdrop = document.createElement('div');
+    Object.assign(backdrop.style, {
+      position: 'fixed', inset: '0', background: 'rgba(8,10,18,0.55)',
+      backdropFilter: 'blur(14px) saturate(1.35)', zIndex: '2147483646',
+      display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: '0',
+    });
+    (backdrop.style as any).webkitBackdropFilter = 'blur(14px) saturate(1.35)';
+
+    const root = document.createElement('div');
+    root.setAttribute('data-hanjullo-msg', msg.id);
+    Object.assign(root.style, {
+      width: '100%', maxWidth: '520px', background: '#ffffff', color: '#1b1d23',
+      borderRadius: '22px 22px 0 0', overflow: 'hidden',
+      boxShadow: '0 -6px 24px rgba(0,0,0,0.22), 0 -24px 70px rgba(0,0,0,0.35)',
+      position: 'relative', zIndex: '2147483647', fontFamily: INAPP_FONT_STACK, boxSizing: 'border-box',
+    });
+    this.applyAnimation(root, animation, 'modal');
+
+    // 가로 트랙 — 슬라이드마다 100% 폭, scroll-snap
+    const track = document.createElement('div');
+    track.setAttribute('data-hjl-carousel', '1');
+    Object.assign(track.style, {
+      display: 'flex', overflowX: 'auto', overflowY: 'hidden',
+      scrollSnapType: 'x mandatory', scrollBehavior: 'smooth', width: '100%',
+    });
+    (track.style as any).webkitOverflowScrolling = 'touch';
+
+    slides.forEach((slide) => {
+      const cell = document.createElement('div');
+      Object.assign(cell.style, { position: 'relative', flex: '0 0 100%', width: '100%', scrollSnapAlign: 'start', scrollSnapStop: 'always', boxSizing: 'border-box' });
+      // 미디어 박스 — 캐러셀은 슬라이드 높이 통일 필수 → 4:5 박스 cover(62vh 상한). 단일 포스터(원본 비율)와 의도적 차이.
+      const media = document.createElement('div');
+      Object.assign(media.style, { position: 'relative', width: '100%', aspectRatio: '4 / 5', maxHeight: '62vh', overflow: 'hidden', background: '#23252c', color: '#ffffff' });
+      const img = document.createElement('img');
+      img.src = this.toAbsoluteImageUrl(slide.image_url);
+      img.alt = ''; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer';
+      Object.assign(img.style, { width: '100%', height: '100%', objectFit: 'cover', display: 'block' });
+      img.onerror = () => { img.style.display = 'none'; media.style.background = 'linear-gradient(135deg,#3a3d46,#23252c)'; };
+      media.appendChild(img);
+
+      const scrim = this.buildPosterScrim({
+        title: this.replaceVariables(String(slide.title || ''), customer),
+        body: this.replaceVariables(String(slide.body || ''), customer),
+        badge,
+        overlayColor: msgOverlay,
+        titleColor: hexOr(slide.title_color, hexOr(design.poster_title_color, msgOverlay)),
+        bodyColor: hexOr(slide.body_color, hexOr(design.poster_body_color, msgOverlay)),
+        titleSize: sizeOr(slide.title_size, 14, 32, sizeOr(design.poster_title_size, 14, 32, 20)),
+        bodySize: sizeOr(slide.body_size, 10, 22, sizeOr(design.poster_body_size, 10, 22, 14)),
+        displayFont,
+      });
+      if (scrim) media.appendChild(scrim);
+      cell.appendChild(media);
+      track.appendChild(cell);
+    });
+    root.appendChild(track);
+
+    // 닫기 — 미디어 위 우상단 (흰 X + 블러 배경. closeHost 색 흰색 상속)
+    const closeHost = document.createElement('div');
+    Object.assign(closeHost.style, { position: 'absolute', top: '12px', right: '12px', zIndex: '3', color: '#ffffff' });
+    this.appendCloseButton(closeHost, msg, input, () => { try { document.body.removeChild(backdrop); } catch {} }, 'inline');
+    root.appendChild(closeHost);
+
+    // 흰 바닥 — 점(1/N) + 활성 슬라이드 CTA + 다시 보지 않기
+    const bottom = document.createElement('div');
+    Object.assign(bottom.style, { padding: '12px 20px', boxSizing: 'border-box' });
+
+    const dotsRow = document.createElement('div');
+    Object.assign(dotsRow.style, { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px', marginBottom: '12px' });
+    const dotAccent = hexOr(design.poster_title_color, '#1b1d23');
+    const dots = slides.map((_, i) => {
+      const d = document.createElement('div');
+      d.setAttribute('data-hjl-dot', String(i));
+      Object.assign(d.style, { width: '7px', height: '7px', borderRadius: '999px', background: 'rgba(27,29,35,0.22)', transition: 'width 0.25s ease, background 0.25s ease' });
+      dotsRow.appendChild(d);
+      return d;
+    });
+    bottom.appendChild(dotsRow);
+
+    const ctaHost = document.createElement('div');
+    bottom.appendChild(ctaHost);
+
+    const renderActiveCta = (idx: number) => {
+      ctaHost.textContent = '';
+      const cta = slides[idx] && slides[idx].cta;
+      if (cta && (cta.label || cta.action_url)) {
+        const btn: InAppButton = {
+          id: `slide_${idx}`,
+          label: cta.label || '자세히 보기',
+          action_url: cta.action_url ?? null,
+          style: 'primary',
+          background_color: cta.background_color || '',
+          text_color: cta.text_color || '',
+        };
+        this.appendButtons(ctaHost, msg, [btn], input, 'stack');
+      }
+    };
+    const setActive = (idx: number) => {
+      dots.forEach((d, i) => {
+        const on = i === idx;
+        d.style.width = on ? '18px' : '7px';
+        d.style.background = on ? dotAccent : 'rgba(27,29,35,0.22)';
+      });
+      renderActiveCta(idx);
+    };
+    setActive(0);
+
+    // 스와이프 시 활성 슬라이드 갱신 (rAF throttle — 점 + 하단 CTA 교체)
+    let activeIdx = 0, ticking = false;
+    track.addEventListener('scroll', () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        ticking = false;
+        const w = track.clientWidth || 1;
+        const idx = Math.max(0, Math.min(slides.length - 1, Math.round(track.scrollLeft / w)));
+        if (idx !== activeIdx) { activeIdx = idx; setActive(idx); }
+      });
+    });
+
+    this.appendOptOutLink(bottom, msg, input, () => { try { document.body.removeChild(backdrop); } catch {} });
+    root.appendChild(bottom);
 
     backdrop.appendChild(root);
     document.body.appendChild(backdrop);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Dispatch, type SetStateAction } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
 import {
@@ -105,6 +105,10 @@ interface MessageRow {
   card_style?: string | null;
   // ★ 2026-07-14 디자인 3.0 — 메시지 단위 디자인 (font_display/treatment/motion/backdrop. 미설정 = 현행 렌더)
   design?: Record<string, any> | null;
+  // ★ 2026-07-21 포스터 캐러셀 — 서버 저장 슬라이드 전체(첫 장 포함). list 응답 snake_case. 빈/미설정 = 단일 포스터
+  poster_slides?: any[] | null;
+  // ★ 2026-07-21 편집 중 "추가 슬라이드"(2번째~) 작업본 — 클라 전용. 저장 시 slide0(위 콘텐츠)와 합쳐 poster_slides로 전송
+  extra_slides?: any[];
   status: Status;
   channel?: 'web' | 'app';
   startAt?: string | null;
@@ -699,6 +703,18 @@ export default function InAppMessagesPage() {
       showToast('포스터형은 이미지 1장이 필수입니다. 이미지를 업로드해주세요.', { type: 'warning' });
       return;
     }
+    // ★ 2026-07-21 포스터 캐러셀 — 이미지 없는데 내용만 있는 추가 슬라이드 = 정직 차단(이미지가 슬라이드 필수 요소)
+    if (editing?.template === 'full_image') {
+      const rawExtra = editing.extra_slides ?? (Array.isArray(editing.poster_slides) ? editing.poster_slides.slice(1) : []);
+      const incomplete = (Array.isArray(rawExtra) ? rawExtra : []).find((s: any) => s && !String(s.image_url || '').trim()
+        && (String(s.title || '').trim() || String(s.body || '').trim() || (s.cta && (String(s.cta.label || '').trim() || String(s.cta.action_url || '').trim()))));
+      if (incomplete) {
+        showToast('추가 슬라이드에 이미지를 넣어주세요 — 이미지가 슬라이드의 필수 요소입니다.', { type: 'warning' });
+        return;
+      }
+    }
+    // slide0(위 콘텐츠) + 추가 슬라이드 조립 — 미리보기와 동일 헬퍼. undefined(비 full_image) / [](단일) / 배열(캐러셀)
+    const posterSlidesPayload = assemblePosterSlides({ ...editing, title: effectiveTitle, body: effectiveBody } as Partial<MessageRow>);
     // ★ 2026-07-06 표시 가능성 가드 — 웹 메시지를 active로 저장(게시)할 때 표시할 곳 없으면 차단 (paused 저장은 허용)
     if ((editing?.channel === 'app' ? 'app' : 'web') === 'web' && (editing?.status ?? 'active') === 'active' && webBlocked) {
       setShowDisplayBlock(true);
@@ -724,6 +740,9 @@ export default function InAppMessagesPage() {
           // ★ 2026-07-16 범용 보장 계약 — 앱 채널 = flat이 진실(블록 저장 안 함).
           //   블록이 남아 저장되면 서버 블록→flat 합성이 폼 수정을 덮는다 (편집 진입 효과가 이미 비움 — 이중 안전망)
           ...(editing!.channel === 'app' ? { content_blocks: [] } : {}),
+          // ★ 2026-07-21 포스터 캐러셀 — 헬퍼가 full_image만 값 반환(그 외 undefined=미전송). extra_slides(클라 작업본)는 항상 제외.
+          poster_slides: posterSlidesPayload,
+          extra_slides: undefined,
         }),
       });
       const data = await res.json();
@@ -1083,6 +1102,7 @@ export default function InAppMessagesPage() {
                       backgroundColor={previewMsg.background_color || '#4f46e5'}
                       textColor={previewMsg.text_color || '#ffffff'}
                       design={previewMsg.design}
+                      posterSlides={previewMsg.poster_slides || undefined}
                     />
                   );
                 })() : (
@@ -1100,6 +1120,7 @@ export default function InAppMessagesPage() {
                   accentColor={previewMsg.accent_color}
                   cardStyle={previewMsg.card_style}
                   design={previewMsg.design}
+                  posterSlides={previewMsg.poster_slides || undefined}
                 />
                 )}
               </div>
@@ -1644,7 +1665,8 @@ function CardStyleThumb({ k, active }: { k: CardStyle; active: boolean }) {
 
 interface EditModalProps {
   editing: Partial<MessageRow>;
-  setEditing: (m: Partial<MessageRow> | null) => void;
+  // ★ 2026-07-21 함수형 업데이터 허용(useState dispatch 원형) — 업로드 완료 콜백의 널-세이프 병합에 필요
+  setEditing: Dispatch<SetStateAction<Partial<MessageRow> | null>>;
   availableVariables: AvailableVariable[];
   onSave: () => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
@@ -2036,6 +2058,15 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     className="w-full px-3 py-2 mb-2 bg-slate-900/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
                     maxLength={20}
                   />
+                  {/* ★ 2026-07-21 포스터 캐러셀 — 좌우 스와이프(N장). 위 이미지·문구=첫 장, 여기서 장 추가 */}
+                  {editing.template === 'full_image' && (
+                    <PosterSlidesEditor
+                      slides={editing.extra_slides ?? (Array.isArray(editing.poster_slides) ? editing.poster_slides.slice(1) : [])}
+                      // ★ 2026-07-21 널-세이프 + 메시지 식별 가드 — 업로드 지연 콜백이 (a)모달 닫힘 후 재오픈, (b)다른 메시지로 전환 후 그 메시지의 슬라이드를 덮는 것 차단(Codex 2R·3R ③)
+                      onChange={(s) => { const eid = editing?.id ?? null; setEditing((prev) => (prev && (prev.id ?? null) === eid ? { ...prev, extra_slides: s } : prev)); }}
+                      uploadImage={uploadImage}
+                    />
+                  )}
                   {/* ★ 2026-07-18 정정 — 웹 기존 UX 원복(신규에서도 블록 전환 가능). 포스터형만 flat 전용이라 숨김 유지 */}
                   {!isApp && editing.template !== 'full_image' && (
                     <button
@@ -3017,6 +3048,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 backgroundColor={editing.background_color || '#4f46e5'}
                 textColor={editing.text_color || '#ffffff'}
                 design={editing.design}
+                posterSlides={assemblePosterSlides(editing)}
+                replaceVars={(t) => replaceVars(t, sampleCustomer)}
               />
             ) : (
             <InAppMessagePreview
@@ -3033,6 +3066,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               accentColor={editing.accent_color}
               cardStyle={editing.card_style}
               design={editing.design}
+              posterSlides={assemblePosterSlides(editing)}
               replaceVars={(t) => replaceVars(t, sampleCustomer)}
             />
             )}
@@ -3424,6 +3458,103 @@ function SortableInAppBlock({
         </div>
       </div>
       {children}
+    </div>
+  );
+}
+
+/** ★ 2026-07-21 편집 상태 → poster_slides 조립 (저장·라이브 미리보기 공용 — 인라인 중복 금지).
+ *  full_image만: 첫 장=상단 콘텐츠(이미지·제목·본문·buttons[0]·design 포스터색), 추가=extra_slides.
+ *  반환: undefined(full_image 아님) / [](단일 포스터) / [slide0, ...extra](2장+ 캐러셀). 이미지 없는 추가 슬라이드 제외. */
+function assemblePosterSlides(editing: Partial<MessageRow>): any[] | undefined {
+  if (editing.template !== 'full_image') return undefined;
+  const rawExtra = editing.extra_slides ?? (Array.isArray(editing.poster_slides) ? editing.poster_slides.slice(1) : []);
+  const extra = (Array.isArray(rawExtra) ? rawExtra : []).filter((s: any) => s && String(s.image_url || '').trim());
+  if (extra.length === 0) return [];
+  const b0: any = editing.buttons && editing.buttons[0];
+  const d: any = editing.design || {};
+  return [
+    {
+      image_url: editing.image_url,
+      title: editing.title,
+      body: editing.body,
+      ...(b0 ? { cta: { label: b0.label, action_url: b0.action_url, ...(b0.background_color ? { background_color: b0.background_color } : {}), ...(b0.text_color ? { text_color: b0.text_color } : {}) } } : {}),
+      ...(d.poster_title_color ? { title_color: d.poster_title_color } : {}),
+      ...(d.poster_body_color ? { body_color: d.poster_body_color } : {}),
+      ...(d.poster_title_size ? { title_size: d.poster_title_size } : {}),
+      ...(d.poster_body_size ? { body_size: d.poster_body_size } : {}),
+    },
+    ...extra,
+  ];
+}
+
+// ★ 2026-07-21 포스터 캐러셀 — "추가 슬라이드"(2번째~) 편집기. 위 이미지·문구=첫 장(비파괴), 여기서 장을 늘려 좌우 스와이프.
+//   각 장 = 자기 이미지(필수) + 오버레이 제목/본문(선택) + CTA 1개(선택). 총 5장(첫 장 + 추가 4).
+function PosterSlidesEditor({ slides, onChange, uploadImage }: { slides: any[]; onChange: (s: any[]) => void; uploadImage: (file: File) => Promise<string | null> }) {
+  const [busy, setBusy] = useState<number | null>(null);
+  const MAX_EXTRA = 4;
+  const list = Array.isArray(slides) ? slides : [];
+  const update = (i: number, patch: any) => onChange(list.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
+  const updateCta = (i: number, patch: any) => onChange(list.map((s, idx) => (idx === i ? { ...s, cta: { ...(s.cta || {}), ...patch } } : s)));
+  const remove = (i: number) => onChange(list.filter((_, idx) => idx !== i));
+  const move = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= list.length) return;
+    const next = list.slice();
+    [next[i], next[j]] = [next[j], next[i]];
+    onChange(next);
+  };
+  const add = () => { if (list.length >= MAX_EXTRA) return; onChange([...list, { image_url: '', title: '', body: '', cta: { label: '', action_url: '' } }]); };
+  const onFile = async (i: number, file: File) => {
+    setBusy(i);
+    try { const url = await uploadImage(file); if (url) update(i, { image_url: url }); }
+    finally { setBusy(null); }
+  };
+  return (
+    <div className="mt-3 border-t border-white/10 pt-3">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[11px] font-bold text-white/70 flex items-center gap-1.5"><Layers className="w-3 h-3" /> 추가 슬라이드 (좌우 스와이프)</span>
+        <span className="text-[10px] text-white/35">{list.length > 0 ? `총 ${list.length + 1}장` : '단일 포스터'}</span>
+      </div>
+      <p className="text-[10px] text-white/40 mb-2">위 이미지·문구가 <strong className="text-white/60">첫 장</strong>입니다. 장을 추가하면 좌우로 넘겨보는 카드가 됩니다 — 각 장은 자기 이미지·문구·버튼을 가집니다.</p>
+      {list.map((s, i) => (
+        <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-3 mb-2">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold text-white/70">{i + 2}번째 장</span>
+            <div className="flex items-center gap-1">
+              {/* ★ 2026-07-21 업로드 중(busy)엔 순서·삭제 잠금 — in-flight 업로드가 stale 인덱스로 덮어쓰는 race 차단(Codex ③) */}
+              <button onClick={() => move(i, -1)} disabled={i === 0 || busy !== null} className="p-1 rounded text-white/40 hover:text-white hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed" title="위로"><ChevronUp className="w-3.5 h-3.5" /></button>
+              <button onClick={() => move(i, 1)} disabled={i === list.length - 1 || busy !== null} className="p-1 rounded text-white/40 hover:text-white hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed" title="아래로"><ChevronDown className="w-3.5 h-3.5" /></button>
+              <button onClick={() => remove(i)} disabled={busy !== null} className="p-1 rounded text-rose-300/70 hover:text-rose-200 hover:bg-rose-500/10 disabled:opacity-25 disabled:cursor-not-allowed" title="삭제"><Trash2 className="w-3.5 h-3.5" /></button>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <label className="shrink-0 w-20 h-24 rounded-lg border border-dashed border-white/15 bg-slate-900/60 flex items-center justify-center overflow-hidden cursor-pointer hover:border-violet-400/50 transition-colors">
+              {s.image_url ? (
+                <img src={s.image_url} alt="" className="w-full h-full object-cover" />
+              ) : busy === i ? (
+                <Loader2 className="w-4 h-4 text-white/40 animate-spin" />
+              ) : (
+                <span className="text-[10px] text-white/40 text-center leading-tight px-1">이미지<br />업로드</span>
+              )}
+              <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f && busy === null) onFile(i, f); }} />
+            </label>
+            <div className="flex-1 min-w-0 space-y-1.5">
+              {/* ★ 2026-07-21 업로드 중(busy)엔 문안 입력도 잠금 — 업로드 완료 콜백이 stale 배열로 덮는 race 완전 차단(Codex 2R ③) */}
+              <input type="text" value={s.title || ''} disabled={busy !== null} onChange={(e) => update(i, { title: e.target.value })} placeholder="제목 (이미지 위, 선택)" className="w-full px-2.5 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50 disabled:opacity-50" maxLength={100} />
+              <input type="text" value={s.body || ''} disabled={busy !== null} onChange={(e) => update(i, { body: e.target.value })} placeholder="짧은 문구 (선택)" className="w-full px-2.5 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50 disabled:opacity-50" maxLength={300} />
+              <div className="flex gap-1.5">
+                <input type="text" value={s.cta?.label || ''} disabled={busy !== null} onChange={(e) => updateCta(i, { label: e.target.value })} placeholder="버튼 문구" className="w-1/3 min-w-0 px-2.5 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50 disabled:opacity-50" maxLength={30} />
+                <input type="text" value={s.cta?.action_url || ''} disabled={busy !== null} onChange={(e) => updateCta(i, { action_url: e.target.value })} placeholder="이동 링크 (https://…)" className="flex-1 min-w-0 px-2.5 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50 disabled:opacity-50" />
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+      {list.length < MAX_EXTRA && (
+        <button onClick={add} disabled={busy !== null} className="w-full text-xs text-violet-100 bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20 hover:from-violet-500/40 hover:to-fuchsia-500/40 border border-violet-400/30 rounded-lg py-2 flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+          <Plus className="w-3.5 h-3.5" /> 슬라이드 추가 (최대 {MAX_EXTRA + 1}장)
+        </button>
+      )}
     </div>
   );
 }

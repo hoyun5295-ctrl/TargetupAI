@@ -50,6 +50,15 @@ Header: X-Hanjullo-Key: hjl_...
         desc: '가로 꽉 찬 하단 시트입니다 — 좌우 마진 0, 상단 모서리만 라운드, 카드 바닥 흰색 고정. imageUrl 필수(원본 비율 유지), 제목/본문/배지는 이미지 하단 어두운 그라데이션 위 오버레이(본문은 잘림 없이 전 줄). 스타일 필드: design.poster_title_color/poster_body_color(제목·본문 색, 폴백 poster_text_color→흰색) · design.poster_title_size(14~32, 기본 20)/poster_body_size(10~22, 기본 14) · 제목 서체 = design.font_display(로드 불가 환경은 기본 서체). 흰 바닥에 buttons[0] 1개만(배경/글자색 소비) + "다시 보지 않기·닫기". 이 값을 모르는 구버전 앱은 기본형(바텀 시트)으로 안전 표시하면 됩니다.',
       },
       {
+        // ★ 2026-07-21 포스터형 캐러셀 — 좌우 스와이프(스타벅스형). posterSlides가 있으면 여러 장을 넘겨봅니다.
+        title: '포스터형 캐러셀 (posterSlides 배열, 2장 이상)',
+        desc: 'posterSlides 배열이 오면(2장 이상) 포스터를 한 장이 아니라 좌우로 스와이프하는 카드로 그립니다. 각 슬라이드 = { image_url(필수), title, body, cta:{label, action_url, background_color, text_color}, title_color/body_color(hex), title_size(14~32)/body_size(10~22) }. 각 장은 자기 이미지(cover, 슬라이드 높이 통일)·오버레이 문구·CTA 1개를 가지며, 하단 CTA는 현재 보이는 슬라이드의 cta로 바뀝니다. 하단 점(1/N) 인디케이터 + "다시 보지 않기"는 공용. 슬라이드별 색·크기 미지정 시 design.poster_* 폴백. posterSlides[0]은 flat 필드(imageUrl/title/body/buttons[0])와 동일하므로, 캐러셀을 모르는 구버전 앱은 자동으로 "첫 장"만 단일 포스터로 안전 표시합니다.',
+      },
+      {
+        title: '캐러셀 클릭 트래킹 + 그라데이션(네이티브 주의)',
+        desc: '슬라이드 CTA 클릭은 button_id = "slide_{index}"(0부터)로 트래킹을 보내면 슬라이드별 성과가 집계됩니다. 스크림(이미지 하단 어두운 그라데이션)은 반투명 View를 여러 장 쌓지 말고 단일 요소(LinearGradient 또는 코드 내장 base64 PNG 알파 램프 1장을 늘려서)로 그리세요 — 반투명 뷰 쌓기는 Android에서 이음새마다 가로줄이 생깁니다(실사고). 좌우 스와이프는 RN 기본 가로 페이징(FlatList/ScrollView pagingEnabled)으로 충분해 네이티브 모듈 추가가 필요 없습니다(OTA 가능).',
+      },
+      {
         title: '색상 — 단색 hex만 옵니다',
         desc: 'backgroundColor · textColor는 앱 채널 응답에서 단색 hex(#RGB~#RRGGBBAA, 3~8자리)로 보정돼 옵니다(그라데이션 문자열 없음). 그래도 색 파싱 실패 시 앱이 죽지 않게 기본색 폴백을 두세요.',
       },

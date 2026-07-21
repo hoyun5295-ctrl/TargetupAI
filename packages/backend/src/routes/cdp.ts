@@ -73,6 +73,7 @@ import {
   sanitizeAppMessageColors,
   sanitizeActionUrl,
   sanitizeButtonsActionUrls,
+  sanitizePosterSlidesActionUrls,
 } from '../utils/inapp-message';
 // ★ 2026-07-18 P3 에셋 라이브러리 — 업로드 자동 등재 + 플랜별 용량 한도
 import { registerAsset, getStorageUsage, isAssetsTableMissing } from '../utils/assets';
@@ -595,6 +596,8 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
     for (const m of messages as any[]) {
       if (m.actionUrl) m.actionUrl = sanitizeActionUrl(m.actionUrl);
       if (Array.isArray(m.buttons)) m.buttons = sanitizeButtonsActionUrls(m.buttons);
+      // ★ 2026-07-21 포스터 캐러셀 슬라이드 CTA URL도 서빙 정규화(프로토콜 없는 도메인→https)
+      if (Array.isArray(m.posterSlides)) m.posterSlides = sanitizePosterSlidesActionUrls(m.posterSlides);
     }
 
     // web 채널 허용 형태 — 그 밖 형태(옛 배너 등)는 모달로 보정. 기존 메시지 포함, DB 무변경.
@@ -640,6 +643,19 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
           const rendered = renderBlocksForCustomer(blocksRaw, renderCustomer);
           if ('contentBlocks' in m) m.contentBlocks = rendered;
           if ('content_blocks' in m) m.content_blocks = rendered;
+        }
+        // ★ 2026-07-21 포스터 캐러셀 슬라이드 개인화 (제목/본문/CTA 라벨) — 익명 폴백·식별 치환 동일 기준
+        if (Array.isArray(m.posterSlides)) {
+          m.posterSlides = m.posterSlides.map((s: any) => {
+            if (!s || typeof s !== 'object') return s;
+            const out: any = { ...s };
+            if (typeof s.title === 'string') out.title = renderTextForCustomer(s.title, renderCustomer).rendered;
+            if (typeof s.body === 'string') out.body = renderTextForCustomer(s.body, renderCustomer).rendered;
+            if (s.cta && typeof s.cta === 'object' && typeof s.cta.label === 'string') {
+              out.cta = { ...s.cta, label: renderTextForCustomer(s.cta.label, renderCustomer).rendered };
+            }
+            return out;
+          });
         }
       }
     }

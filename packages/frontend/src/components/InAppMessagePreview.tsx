@@ -5,7 +5,7 @@
  * SDK inapp.ts 렌더 톤(둥근/그림자/말줄임/CTA/이미지 절대화)과 1:1 정합.
  */
 
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { Monitor, Smartphone, Sun, Moon } from 'lucide-react';
 import {
   resolveTheme, normalizeCardStyle, planCardLayout, resolveInAppTreatment, inappGoogleFontsUrl, safeFontFamily,
@@ -47,12 +47,73 @@ export interface InAppMessagePreviewProps {
   cardStyle?: string | null;
   /** ★ 2026-07-14 디자인 3.0 — design jsonb (font_display/treatment/motion/backdrop — SDK 소비 1:1 미러. 모션은 정적 미리보기라 미표현) */
   design?: Record<string, any> | null;
+  /** ★ 2026-07-21 포스터 캐러셀 — 슬라이드 2장 이상이면 좌우 스와이프 미리보기(SDK 미러) */
+  posterSlides?: any[] | null;
 }
 
 /** 미리보기는 관리자 화면 = 백엔드와 같은 도메인. 상대경로(/api/..., /uploads/...)를 그대로 둬 현재 origin으로 로드한다.
  *  절대 도메인 하드코딩은 운영 도메인이 다를 때 미리보기만 404를 유발하므로 쓰지 않는다(썸네일은 상대경로라 정상). */
 function toAbsoluteImage(url?: string | null): string | undefined {
   return url || undefined;
+}
+
+/** ★ 2026-07-21 포스터 캐러셀 미리보기 — SDK renderPosterCarousel 미러(좌우 스와이프 + 점 + 활성 슬라이드 CTA).
+ *  흰 시트 안 트랙(scroll-snap) + 각 슬라이드 이미지(cover·통일 높이 4:5)·오버레이 문구. 목록 미리보기 웹·앱 공용.
+ *  색·크기 폴백: 슬라이드 값 → 메시지 design(poster_*) → 기본 (SDK와 동일). */
+function PosterCarouselPreview({
+  slides, design, replaceVars, optOut, badge, scale = 0.82, imgMax = 360, radius = '18px 18px 0 0', shadow = '0 -18px 50px rgba(0,0,0,0.4)', fontFamily,
+}: {
+  slides: any[]; design?: Record<string, any> | null; replaceVars?: (t: string) => string; optOut?: ReactNode; badge?: string | null;
+  scale?: number; imgMax?: number; radius?: string; shadow?: string; fontFamily?: string;
+}) {
+  const [active, setActive] = useState(0);
+  const pHex = (v: any, fb: string) => (typeof v === 'string' && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(v) ? v : fb);
+  const clampN = (v: any, mn: number, mx: number, fb: number) => { const n = Number(v); return Number.isFinite(n) && n >= mn && n <= mx ? n : fb; };
+  const rv = (t: any) => (replaceVars ? replaceVars(String(t || '')) : String(t || ''));
+  const list = Array.isArray(slides) ? slides : [];
+  const msgOverlay = pHex(design?.poster_text_color, '#ffffff');
+  const font = safeFontFamily(design?.font_display, '') || undefined;
+  const dotAccent = pHex(design?.poster_title_color, '#1b1d23');
+  const cta = list[active]?.cta;
+  return (
+    <div style={{ position: 'relative', width: '100%', maxHeight: '96%', display: 'flex', flexDirection: 'column', background: '#ffffff', color: '#1b1d23', borderRadius: radius, overflow: 'hidden', boxShadow: shadow, fontFamily } as CSSProperties}>
+      <div
+        onScroll={(e) => { const el = e.currentTarget; const w = el.clientWidth || 1; const idx = Math.max(0, Math.min(list.length - 1, Math.round(el.scrollLeft / w))); if (idx !== active) setActive(idx); }}
+        style={{ display: 'flex', overflowX: 'auto', overflowY: 'hidden', scrollSnapType: 'x mandatory', flexShrink: 1, minHeight: 0 } as CSSProperties}
+      >
+        {list.map((s, i) => {
+          const tColor = pHex(s.title_color, pHex(design?.poster_title_color, msgOverlay));
+          const bColor = pHex(s.body_color, pHex(design?.poster_body_color, msgOverlay));
+          const tSize = Math.round(clampN(s.title_size, 14, 32, clampN(design?.poster_title_size, 14, 32, 20)) * scale);
+          const bSize = Math.round(clampN(s.body_size, 10, 22, clampN(design?.poster_body_size, 10, 22, 14)) * scale);
+          const title = rv(s.title); const body = rv(s.body);
+          return (
+            <div key={i} style={{ position: 'relative', flex: '0 0 100%', width: '100%', scrollSnapAlign: 'start', aspectRatio: '4 / 5', maxHeight: imgMax, overflow: 'hidden', background: '#23252c' } as CSSProperties}>
+              {s.image_url
+                ? <img src={s.image_url} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#8a8a94', background: 'linear-gradient(135deg,#e8e8ee,#d4d4dd)' }}>이미지 필요</div>}
+              {(badge || title || body) && (
+                <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '42px 18px 14px', background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.66) 100%)', color: msgOverlay, maxHeight: '100%', overflowY: 'auto' }}>
+                  {badge && <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.2)', fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 999, marginBottom: 7, color: tColor }}>{badge}</div>}
+                  {title && <div style={{ fontWeight: 800, fontSize: tSize, lineHeight: 1.3, marginBottom: body ? 4 : 0, color: tColor, ...(font ? { fontFamily: font } : {}) }}>{title}</div>}
+                  {body && <div style={{ fontSize: bSize, opacity: 0.94, lineHeight: 1.55, whiteSpace: 'pre-wrap', color: bColor }}>{body}</div>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 5, padding: '9px 0 3px', flexShrink: 0 }}>
+        {list.map((_, i) => <div key={i} style={{ width: i === active ? 15 : 6, height: 6, borderRadius: 999, background: i === active ? dotAccent : 'rgba(27,29,35,0.22)', transition: 'width 0.2s ease' }} />)}
+      </div>
+      <div style={{ padding: '4px 16px 8px', flexShrink: 0 }}>
+        {cta && (cta.label || cta.action_url) && (
+          <div style={{ background: cta.background_color || '#4f46e5', color: cta.text_color || '#ffffff', padding: '10px 15px', borderRadius: 10, fontSize: 12.5, fontWeight: 700, textAlign: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}>{rv(cta.label) || '자세히 보기'}</div>
+        )}
+        {optOut}
+      </div>
+    </div>
+  );
 }
 
 type Variant = 'banner' | 'modal' | 'slide' | 'toast' | 'inline' | 'full' | 'floating' | 'poster';
@@ -197,6 +258,14 @@ function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Varian
   // ★ 2026-07-18 포스터형 v2 (SDK renderPoster 1:1 미러): 가로 꽉 찬 하단 시트(상단 모서리만 라운드) +
   //   본문 무클램프 + 서체(design.font_display)·오버레이 글자색(design.poster_text_color) 소비
   if (variant === 'poster') {
+    // ★ 2026-07-21 캐러셀 — 슬라이드 2장 이상이면 좌우 스와이프 미리보기 (SDK renderPosterCarousel 미러)
+    if (Array.isArray(rest.posterSlides) && rest.posterSlides.length >= 2) {
+      return (
+        <div style={{ position: 'absolute', inset: 0, background: backdropDim, ...(backdropBlurOn ? { backdropFilter: 'blur(10px) saturate(1.35)', WebkitBackdropFilter: 'blur(10px) saturate(1.35)' } : {}), display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 0 } as CSSProperties}>
+          <PosterCarouselPreview slides={rest.posterSlides} design={rest.design} replaceVars={rest.replaceVars} badge={rest.badge} optOut={optOutHint} scale={0.82} imgMax={360} radius="18px 18px 0 0" shadow="0 -18px 50px rgba(0,0,0,0.4)" fontFamily={cardBase.fontFamily as string} />
+        </div>
+      );
+    }
     const posterImg = toAbsoluteImage(rest.imageUrl);
     const pBtn = (rest.buttons || [])[0];
     const pHex = (v: any, fb: string) => (typeof v === 'string' && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(v) ? v : fb);
@@ -417,6 +486,10 @@ export interface AppInAppPreviewProps {
   backgroundColor: string;
   textColor: string;
   design?: Record<string, any> | null;
+  /** ★ 2026-07-21 포스터 캐러셀 — 슬라이드 2장 이상이면 좌우 스와이프 미리보기(SDK 미러) */
+  posterSlides?: any[] | null;
+  /** ★ 2026-07-21 캐러셀 슬라이드 문안 변수 치환(단일 포스터는 호출부가 이미 치환된 title/body 전달) */
+  replaceVars?: (t: string) => string;
 }
 
 /** 더미 앱 화면 — 인앱이 뜨는 맥락 (라이트 앱 리스트) */
@@ -443,7 +516,7 @@ function DummyAppScreen() {
   );
 }
 
-export function AppInAppPreview({ template, title, body, imageUrl, badge, buttons, backgroundColor, textColor, design }: AppInAppPreviewProps) {
+export function AppInAppPreview({ template, title, body, imageUrl, badge, buttons, backgroundColor, textColor, design, posterSlides, replaceVars }: AppInAppPreviewProps) {
   // ★ 2026-07-18 포스터형 v2 — 선택 서체 실로딩 (웹 미리보기 useEffect와 동일 가드)
   const appFontsUrl = inappGoogleFontsUrl(design?.font_display, undefined);
   useEffect(() => {
@@ -559,7 +632,27 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
           <div style={{ position: 'relative', height: 580, overflow: 'hidden' }}>
             <DummyAppScreen />
             <div style={{ position: 'absolute', inset: 0, background: 'rgba(10,10,15,0.6)', display: 'flex', flexDirection: 'column', justifyContent: isModal ? 'center' : 'flex-end', alignItems: 'center' }}>
-              {isPoster ? posterCard : card}
+              {isPoster
+                ? (Array.isArray(posterSlides) && posterSlides.length >= 2
+                    ? <PosterCarouselPreview
+                        slides={posterSlides}
+                        design={design}
+                        badge={badge}
+                        replaceVars={replaceVars}
+                        scale={0.82}
+                        imgMax={340}
+                        radius="24px 24px 0 0"
+                        shadow="none"
+                        fontFamily={'"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif'}
+                        optOut={(
+                          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 22, marginTop: 4 }}>
+                            <span style={{ color: '#1b1d23', opacity: 0.45, fontSize: 12, textDecoration: 'underline', padding: '8px 0' }}>다시 보지 않기</span>
+                            <span style={{ color: '#1b1d23', opacity: 0.55, fontSize: 12, padding: '8px 0' }}>닫기</span>
+                          </div>
+                        )}
+                      />
+                    : posterCard)
+                : card}
             </div>
           </div>
         </div>

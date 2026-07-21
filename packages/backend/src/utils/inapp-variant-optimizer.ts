@@ -22,7 +22,7 @@
 import { query } from '../config/database';
 import { sampleBeta, computeBetaCredibleInterval } from './bandit-optimizer';
 // ★ P1-4/P0-2 (2026-07-12) — 블록 정규화·스킴 무해화는 CT-27 단일 정의 재사용 (인라인 중복 금지)
-import { sanitizeContentBlocks, sanitizeButtonsActionUrls, normalizeTheme, normalizeCardStyle } from './inapp-message';
+import { sanitizeContentBlocks, sanitizeButtonsActionUrls, normalizeTheme, normalizeCardStyle, composeFlatFromPosterSlides } from './inapp-message';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -118,7 +118,7 @@ export async function createVariant(
     `SELECT id, title, body, template, segment_conditions, trigger_conditions, personalization_vars,
             display_frequency, auto_dismiss_seconds, max_displays_per_user,
             send_start_hour, send_end_hour, allowed_weekdays, locale_variants, is_ad, status,
-            content_blocks, theme, accent_color, card_style, badge_text, channel
+            content_blocks, theme, accent_color, card_style, badge_text, channel, design, poster_slides
      FROM cdp_inapp_messages
      WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
     [input.parentMessageId, companyId]
@@ -132,6 +132,18 @@ export async function createVariant(
   const variantBlocks = input.content_blocks !== undefined
     ? sanitizeContentBlocks(input.content_blocks)
     : replaceBlockTexts(parent.content_blocks, input.title, input.body);
+  // ★ 2026-07-21 포스터 캐러셀 상속 — 부모 슬라이드 복사 + slide[0] 문안만 variant 문안으로 교체(블록 replaceBlockTexts 미러).
+  //   빠지면 A/B variant가 캐러셀을 잃고 단일 포스터로 노출(Codex HIGH). design(포스터 색·서체)도 함께 상속.
+  const variantSlides = Array.isArray(parent.poster_slides) && parent.poster_slides.length > 0
+    ? [{ ...parent.poster_slides[0], title: input.title, body: input.body }, ...parent.poster_slides.slice(1)]
+    : null;
+  // ★ 2026-07-21 캐러셀 variant의 flat(image_url·buttons)은 slide0에서 합성 — 구 SDK가 첫 장을 단일 포스터로 표시(Codex 2R ⑥ 잔여).
+  //   직접 /inapp/variant API가 image_url/buttons 생략해도 flat이 slide0과 일치(create/update와 동일 CT 재사용).
+  // ★ 2026-07-21 (Codex 3R ⑥) — 캐러셀 variant의 flat은 slide0만 미러: fallback buttons=[]로 둬 slide0 무CTA면 flat도 무CTA.
+  //   (명시 input.buttons를 fallback으로 두면 slide0엔 없는 CTA가 flat에만 생겨 구/신 SDK가 어긋남.)
+  const variantFlat = variantSlides
+    ? composeFlatFromPosterSlides(variantSlides, { title: input.title, body: input.body, imageUrl: input.image_url, buttons: [] })
+    : null;
 
   const r = await query(
     `INSERT INTO cdp_inapp_messages (
@@ -142,7 +154,7 @@ export async function createVariant(
        send_start_hour, send_end_hour, allowed_weekdays, locale_variants,
        animation, is_ad, status,
        parent_message_id, variant_weight,
-       content_blocks, theme, accent_color, card_style, badge_text, channel,
+       content_blocks, theme, accent_color, card_style, badge_text, channel, design, poster_slides,
        created_at, updated_at
      ) VALUES (
        gen_random_uuid(), $1::uuid, $2::uuid, $3, $4, $5, $6, $7::jsonb,
@@ -152,15 +164,15 @@ export async function createVariant(
        $16, $17, $18::integer[], $19::jsonb,
        $20, $21, 'active',
        $22::uuid, $23,
-       $24::jsonb, $25, $26, $27, $28, $29,
+       $24::jsonb, $25, $26, $27, $28, $29, $30::jsonb, $31::jsonb,
        NOW(), NOW()
      ) RETURNING id`,
     [
       companyId, createdBy,
       input.title, input.body,
       input.template || parent.template,
-      input.image_url ?? null,
-      JSON.stringify(sanitizeButtonsActionUrls(input.buttons || [])),
+      variantFlat ? variantFlat.imageUrl : (input.image_url ?? null),
+      JSON.stringify(sanitizeButtonsActionUrls(variantFlat ? variantFlat.buttons : (input.buttons || []))),
       input.background_color || '#4f46e5',
       input.text_color || '#ffffff',
       JSON.stringify(parent.segment_conditions || {}),
@@ -183,6 +195,8 @@ export async function createVariant(
       normalizeCardStyle(input.card_style !== undefined && input.card_style !== null ? input.card_style : parent.card_style),
       input.badge_text !== undefined ? input.badge_text : (parent.badge_text ?? null),
       parent.channel === 'app' ? 'app' : 'web',
+      parent.design ? JSON.stringify(parent.design) : null,
+      variantSlides ? JSON.stringify(variantSlides) : null,
     ]
   );
 

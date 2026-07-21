@@ -85,6 +85,8 @@ export interface CreateInAppMessageInput {
   card_style?: string | null;
   // ★ 2026-07-14 디자인 3.0 — 메시지 단위 디자인(design jsonb). undefined=유지 / null=비우기 / 객체=sanitize 후 교체
   design?: Record<string, any> | null;
+  // ★ 2026-07-21 포스터형 캐러셀 — 슬라이드 배열(full_image 전용). undefined=유지 / 배열=교체(빈 배열=단일 포스터로 복귀)
+  poster_slides?: any[] | null;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -112,6 +114,10 @@ export const INAPP_DESIGN_TREATMENTS = ['classic', 'framed', 'typographic', 'spo
 export const INAPP_DESIGN_MOTIONS = ['rich', 'none'] as const;
 export const INAPP_DESIGN_DIMS = ['soft', 'standard', 'deep'] as const;
 
+// ★ 2026-07-19 포스터 색 hex = 3/4/6/8자리만 (5·7자리는 RN 색 파서가 거부 — Codex 지적. CSS·RN 공통 유효 길이).
+//   design(제목/본문 색) + poster_slides(슬라이드별 색·CTA 색) 공용 단일 기준.
+export const POSTER_HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+
 /**
  * design jsonb 정규화 — 화이트리스트 밖 키·값은 버린다(fail-closed). 유효 키 0개 = null.
  * font_display는 font-family 문자열만 허용(무해화 — SDK safeFontFamily와 동일 문자 집합).
@@ -127,8 +133,7 @@ export function sanitizeInAppDesign(raw: any): Record<string, any> | null {
   if ((INAPP_DESIGN_MOTIONS as readonly string[]).includes(String(raw.motion))) out.motion = String(raw.motion);
   // ★ 2026-07-17 텍스트 정렬 (좌/중/우). 미지정=기존 렌더(좌) — 회귀 0.
   if (['left', 'center', 'right'].includes(String(raw.text_align))) out.text_align = String(raw.text_align);
-  // ★ 2026-07-19 hex = 3/4/6/8자리만 (5·7자리는 RN 색 파서가 거부 — Codex 지적. CSS·RN 공통 유효 길이만 통과)
-  const POSTER_HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+  // ★ 2026-07-19 hex = 3/4/6/8자리만: 모듈 상수 POSTER_HEX 재사용 (design + poster_slides 공용 단일 기준)
   // ★ 2026-07-18 포스터형 v2 — 오버레이 글자색 (hex만. 미지정=흰색 — SDK·미리보기 3면 동일 기본)
   if (typeof raw.poster_text_color === 'string' && POSTER_HEX.test(raw.poster_text_color.trim())) {
     out.poster_text_color = raw.poster_text_color.trim();
@@ -169,6 +174,21 @@ async function ensureInAppDesignColumnOrThrow(): Promise<void> {
       throw new Error('cdp_inapp_messages.design column does not exist — ALTER 실행 필요');
     }
     inappDesignColumnExists = true;
+  }
+}
+
+// ★ 2026-07-21 poster_slides 컬럼 선확인 — ensureInAppDesignColumnOrThrow 미러(양성만 캐시).
+//   부재 = throw('column ... does not exist') → 라우트 503 DB_MIGRATION_PENDING 변환(부분 상태 0).
+let inappPosterSlidesColumnExists: boolean | null = null;
+async function ensurePosterSlidesColumnOrThrow(): Promise<void> {
+  if (inappPosterSlidesColumnExists !== true) {
+    const res = await query(
+      `SELECT 1 FROM information_schema.columns WHERE table_name = 'cdp_inapp_messages' AND column_name = 'poster_slides'`,
+    );
+    if (res.rows.length === 0) {
+      throw new Error('cdp_inapp_messages.poster_slides column does not exist — ALTER 실행 필요');
+    }
+    inappPosterSlidesColumnExists = true;
   }
 }
 
@@ -284,6 +304,134 @@ export function synthesizeButtonsFromActionUrl(actionUrl: any, actionLabel?: any
   return [{ id: 'btn_primary', label: String(actionLabel || '자세히 보기'), action_url: u, style: 'primary' }];
 }
 
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-07-21 포스터형 캐러셀(좌우 슬라이드) — 슬라이드 정규화 + 혜택 차단 + slide[0]→flat 합성
+//   full_image 1건 = N 슬라이드(각 슬라이드 = 이미지 + 오버레이 제목/본문 + CTA 1개). slide[0]은
+//   flat(image_url·title·body·buttons)으로 합성 저장 → 구버전 앱·flat 소비자가 "첫 장"을 단일 포스터로
+//   안전 표시(비파괴 폴백). 색·크기 기준은 design 오버레이와 동일(POSTER_HEX·14~32/10~22). 순수 함수(계약 테스트 고정).
+// ════════════════════════════════════════════════════════════════════
+
+export const POSTER_SLIDE_MAX = 5;
+
+export interface PosterSlide {
+  image_url: string;
+  title?: string;
+  body?: string;
+  cta?: { label?: string; action_url?: string | null; background_color?: string; text_color?: string };
+  title_color?: string;
+  body_color?: string;
+  title_size?: number;
+  body_size?: number;
+}
+
+function posterHexOrUndef(v: any): string | undefined {
+  return typeof v === 'string' && POSTER_HEX.test(v.trim()) ? v.trim() : undefined;
+}
+function posterSizeOrUndef(v: any, min: number, max: number): number | undefined {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= min && n <= max ? Math.round(n) : undefined;
+}
+
+/**
+ * 포스터 캐러셀 슬라이드 정규화 (순수). image_url 필수(없으면 슬라이드 제거)·최대 5장.
+ * CTA action_url은 sanitizeActionUrl 무해화(위험 스킴 null·placeholder 보존), 색은 POSTER_HEX(3/4/6/8자리)만,
+ * 크기는 제목 14~32·본문 10~22 clamp. SDK renderPoster·편집 미리보기와 동일 폴백 기준.
+ */
+export function sanitizePosterSlides(raw: any): PosterSlide[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PosterSlide[] = [];
+  for (const s of raw) {
+    if (!s || typeof s !== 'object') continue;
+    const imageUrl = String(s.image_url ?? s.imageUrl ?? '').trim();
+    if (!imageUrl) continue;  // 이미지 없는 슬라이드는 포스터 성립 X
+    const slide: PosterSlide = { image_url: imageUrl };
+    const title = String(s.title ?? '').trim();
+    if (title) slide.title = title;
+    const body = String(s.body ?? '').trim();
+    if (body) slide.body = body;
+    // 슬라이드별 CTA 1개 — 라벨 또는 링크가 있을 때만
+    const rawCta = s.cta && typeof s.cta === 'object' && !Array.isArray(s.cta) ? s.cta : null;
+    if (rawCta) {
+      const label = String(rawCta.label ?? '').trim();
+      const hasUrlKey = rawCta.action_url !== undefined || rawCta.actionUrl !== undefined;
+      const actionUrl = hasUrlKey ? sanitizeActionUrl(rawCta.action_url ?? rawCta.actionUrl) : null;
+      if (label || actionUrl) {
+        const cta: NonNullable<PosterSlide['cta']> = { action_url: actionUrl };
+        if (label) cta.label = label;
+        const bg = posterHexOrUndef(rawCta.background_color);
+        if (bg) cta.background_color = bg;
+        const fg = posterHexOrUndef(rawCta.text_color);
+        if (fg) cta.text_color = fg;
+        slide.cta = cta;
+      }
+    }
+    const tc = posterHexOrUndef(s.title_color); if (tc) slide.title_color = tc;
+    const bc = posterHexOrUndef(s.body_color); if (bc) slide.body_color = bc;
+    const ts = posterSizeOrUndef(s.title_size, 14, 32); if (ts) slide.title_size = ts;
+    const bs = posterSizeOrUndef(s.body_size, 10, 22); if (bs) slide.body_size = bs;
+    out.push(slide);
+    if (out.length >= POSTER_SLIDE_MAX) break;
+  }
+  return out;
+}
+
+/** 슬라이드 제목·본문·CTA 라벨의 미편집 혜택 placeholder 잔존 여부 — 저장 차단(AI 임의 혜택 영구 룰). 순수. */
+export function posterSlidesHaveUneditedPlaceholder(slides: any[]): boolean {
+  if (!Array.isArray(slides)) return false;
+  for (const s of slides) {
+    if (!s || typeof s !== 'object') continue;
+    if (textHasPlaceholder(s.title) || textHasPlaceholder(s.body)) return true;
+    if (s.cta && typeof s.cta === 'object' && textHasPlaceholder(s.cta.label)) return true;
+  }
+  return false;
+}
+
+/**
+ * slide[0] → flat(제목·본문·이미지·버튼) 합성 (순수). 구버전 앱·flat 소비자가 첫 장을 단일 포스터로 표시.
+ * slide에 제목/본문/CTA가 없으면 fallback(메시지 레벨 값) 유지. badge는 슬라이드 미보유 → 메시지 badge_text 별도 유지.
+ */
+export function composeFlatFromPosterSlides(
+  slides: PosterSlide[],
+  fallback: { title?: string | null; body?: string | null; imageUrl?: string | null; buttons?: any[] },
+): ComposedFlat {
+  const fbButtons = Array.isArray(fallback.buttons) ? fallback.buttons : [];
+  const first = Array.isArray(slides) && slides.length > 0 ? slides[0] : null;
+  if (!first) {
+    return {
+      title: fallback.title ?? null,
+      body: fallback.body ?? null,
+      imageUrl: fallback.imageUrl ?? null,
+      buttons: fbButtons,
+      badgeText: null,
+    };
+  }
+  const buttons = first.cta
+    ? [{
+        id: 'btn_primary',
+        label: first.cta.label || '자세히 보기',
+        action_url: first.cta.action_url ?? null,
+        style: 'primary',
+        ...(first.cta.background_color ? { background_color: first.cta.background_color } : {}),
+        ...(first.cta.text_color ? { text_color: first.cta.text_color } : {}),
+      }]
+    : fbButtons;
+  return {
+    title: first.title || (fallback.title ?? null),
+    body: first.body || (fallback.body ?? null),
+    imageUrl: first.image_url,
+    buttons,
+    badgeText: null,
+  };
+}
+
+/** 서빙 시 슬라이드 CTA action_url 재정규화 (프로토콜 없는 도메인 → https 보정 — sanitizeButtonsActionUrls 미러, DB 무변경). */
+export function sanitizePosterSlidesActionUrls(slides: any): any[] {
+  if (!Array.isArray(slides)) return [];
+  return slides.map((s) => (s && typeof s === 'object' && s.cta && typeof s.cta === 'object'
+    ? { ...s, cta: { ...s.cta, action_url: sanitizeActionUrl(s.cta.action_url) } }
+    : s));
+}
+
 // ★ 2026-07-17 템플릿별 허용 블록 — SDK inapp-blocks.ts ALLOWED_BLOCKS 1:1 미러 (frontend BlockPreview 미러와 3면 동일).
 //   단일 진실 = SDK. 변경 시 SDK·frontend·여기 3면 동시 갱신 의무.
 //   SDK 실렌더가 미허용 블록을 조용히 건너뛰므로(renderBlocks isBlockAllowed), AI 생성 산출물은
@@ -378,6 +526,18 @@ export function sanitizeAppMessageColors(m: any): void {
       }
     }
   }
+  // ★ 2026-07-21 포스터 캐러셀 슬라이드 색도 단색 보정 (그라데이션 크래시 차단 — 앱 채널만)
+  if (Array.isArray(m.posterSlides)) {
+    for (const s of m.posterSlides) {
+      if (!s || typeof s !== 'object') continue;
+      if (s.title_color != null) s.title_color = solidColorForApp(s.title_color, '#ffffff');
+      if (s.body_color != null) s.body_color = solidColorForApp(s.body_color, '#ffffff');
+      if (s.cta && typeof s.cta === 'object') {
+        if (s.cta.text_color != null) s.cta.text_color = solidColorForApp(s.cta.text_color, '#ffffff');
+        if (s.cta.background_color != null) s.cta.background_color = solidColorForApp(s.cta.background_color, '#f59e0b');
+      }
+    }
+  }
 }
 
 export async function createInAppMessage(
@@ -403,14 +563,26 @@ export async function createInAppMessage(
   if (blocksHaveUneditedPlaceholder(contentBlocks)) {
     throw new Error(`${BENEFIT_PLACEHOLDER_ERROR}: 혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.`);
   }
-  // ★ 2026-07-16 범용 보장 계약 — 블록이 있으면 blocks가 진실: flat(제목·본문·이미지·버튼·배지)을 블록에서 합성 저장.
+  // ★ 2026-07-21 포스터 캐러셀 — full_image 전용. 슬라이드 정규화 + 혜택 placeholder 차단.
+  const posterSlides = template === 'full_image' ? sanitizePosterSlides(input.poster_slides) : [];
+  if (posterSlidesHaveUneditedPlaceholder(posterSlides)) {
+    throw new Error(`${BENEFIT_PLACEHOLDER_ERROR}: 혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.`);
+  }
+  const hasSlides = posterSlides.length > 0;
+
+  // ★ 2026-07-16 범용 보장 계약 — 블록·슬라이드가 있으면 그게 진실: flat(제목·본문·이미지·버튼·배지)을 합성 저장.
+  //   슬라이드(포스터 캐러셀) 우선 → slide[0]을 flat으로(구버전 앱·flat 소비자가 첫 장 표시). 그다음 블록.
   //   입구(편집기·AI·템플릿·향후 API)가 몇 개든 flat만 읽는 소비자(앱)가 같은 내용을 받는다.
-  const composed = contentBlocks.length > 0 ? composeFlatFromBlocks(contentBlocks) : null;
+  const composed = hasSlides
+    ? composeFlatFromPosterSlides(posterSlides, { title: input.title, body: input.body, imageUrl: input.image_url, buttons: input.buttons })
+    : (contentBlocks.length > 0 ? composeFlatFromBlocks(contentBlocks) : null);
 
   // ★ 2026-07-14 디자인 3.0 — design 동봉 생성은 INSERT "전" 컬럼 선확인(부분 상태 0 — 이메일 3.0 규약 미러).
   //   design 미제공 = 컬럼 자체를 INSERT에서 생략(ALTER 전 환경에서도 기존 생성 무영향).
   const design = sanitizeInAppDesign(input.design);
   if (design) await ensureInAppDesignColumnOrThrow();
+  // ★ 2026-07-21 poster_slides는 INSERT에 항상 포함(컬럼 상시 참조) → 쓰기 전 컬럼 선확인(부재 시 503).
+  await ensurePosterSlidesColumnOrThrow();
 
   const result = await query(
     `INSERT INTO cdp_inapp_messages (
@@ -420,7 +592,7 @@ export async function createInAppMessage(
       template, image_url, buttons, segment_conditions, trigger_conditions,
       personalization_vars, auto_dismiss_seconds, max_displays_per_user,
       send_start_hour, send_end_hour, allowed_weekdays, animation, badge_text,
-      content_blocks, theme, accent_color, card_style${design ? ', design' : ''},
+      content_blocks, theme, accent_color, card_style, poster_slides${design ? ', design' : ''},
       created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2::uuid, $3, $4, $5, $6,
@@ -429,7 +601,7 @@ export async function createInAppMessage(
       $16, $17, $18::jsonb, $19::jsonb, $20::jsonb,
       $21::jsonb, $22, $23,
       $24, $25, $26, $27, $28,
-      $29::jsonb, $30, $31, $32${design ? ', $33::jsonb' : ''},
+      $29::jsonb, $30, $31, $32, $33::jsonb${design ? ', $34::jsonb' : ''},
       NOW(), NOW()
     ) RETURNING *`,
     [
@@ -446,6 +618,7 @@ export async function createInAppMessage(
       input.badge_text ?? composed?.badgeText ?? null,
       JSON.stringify(contentBlocks), normalizeTheme(input.theme), input.accent_color ?? null,
       normalizeCardStyle(input.card_style),
+      hasSlides ? JSON.stringify(posterSlides) : null,
       ...(design ? [JSON.stringify(design)] : []),
     ]
   );
@@ -495,6 +668,8 @@ export async function updateInAppMessage(
   // ★ 2026-07-16 범용 보장 계약 — 블록이 제공되고 비어있지 않으면 blocks가 진실:
   //   flat(제목·본문·이미지·버튼·배지)을 블록에서 재합성해 확정 대입(입력 flat이 stale이어도 블록 편집이 반영).
   let composed: ComposedFlat | null = null;
+  // ★ 2026-07-21 composed가 포스터 슬라이드에서 왔는지 표시 — slide0 무CTA 시 buttons 처리 분기(블록은 빈 buttons=비움 유지)
+  let composedFromSlides = false;
   if (input.content_blocks !== undefined) {
     const blocks = sanitizeContentBlocks(input.content_blocks);
     if (blocksHaveUneditedPlaceholder(blocks)) {
@@ -502,6 +677,21 @@ export async function updateInAppMessage(
     }
     blocksParam = JSON.stringify(blocks);
     if (blocks.length > 0) composed = composeFlatFromBlocks(blocks);
+  }
+  // ★ 2026-07-21 포스터 캐러셀 — 슬라이드 제공 시(presence) slide[0]을 flat으로 재합성(블록보다 우선 — full_image는 블록 미저장).
+  //   빈 배열 = 단일 포스터로 복귀(poster_slides=null). 혜택 placeholder 차단.
+  let posterSlidesParam: string | null = null;
+  const posterSlidesProvided = input.poster_slides !== undefined;
+  if (posterSlidesProvided) {
+    const slides = sanitizePosterSlides(input.poster_slides);
+    if (posterSlidesHaveUneditedPlaceholder(slides)) {
+      throw new Error(`${BENEFIT_PLACEHOLDER_ERROR}: 혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.`);
+    }
+    posterSlidesParam = slides.length > 0 ? JSON.stringify(slides) : null;
+    if (slides.length > 0) {
+      composed = composeFlatFromPosterSlides(slides, { title: input.title, body: input.body, imageUrl: input.image_url, buttons: input.buttons });
+      composedFromSlides = true;
+    }
   }
   // ★ P1-1 — 무조건 대입이던 5필드(image_url·auto_dismiss_seconds·max_displays_per_user·send_start_hour·send_end_hour)는
   //   부분 PUT에서 통째 NULL 리셋되던 함정 → presence flag(CASE WHEN)로 원자 병합(undefined=유지/null=비우기/값=교체).
@@ -519,9 +709,11 @@ export async function updateInAppMessage(
   const designProvided = input.design !== undefined;
   if (designProvided) await ensureInAppDesignColumnOrThrow();
   const designValue = designProvided && input.design !== null ? sanitizeInAppDesign(input.design) : null;
+  // ★ 2026-07-21 poster_slides는 UPDATE에서 항상 참조(CASE $38/$39) → 쓰기 전 컬럼 선확인(부재 시 503). design은 $40으로 이동.
+  await ensurePosterSlidesColumnOrThrow();
   const result = await query(
     `UPDATE cdp_inapp_messages SET
-      ${designProvided ? 'design = $38::jsonb,' : ''}
+      ${designProvided ? 'design = $40::jsonb,' : ''}
       title = COALESCE($3, title),
       body = COALESCE($4, body),
       action_url = CASE WHEN $32::boolean THEN $5 ELSE action_url END,
@@ -557,6 +749,8 @@ export async function updateInAppMessage(
       theme = COALESCE($29, theme),
       accent_color = COALESCE($30, accent_color),
       card_style = COALESCE($31, card_style),
+      -- ★ 2026-07-21 포스터 캐러셀 슬라이드 — presence flag(제공 시 교체/비우기, 미제공 시 유지). full_image 아닌 메시지엔 무해(미판독).
+      poster_slides = CASE WHEN $38::boolean THEN $39::jsonb ELSE poster_slides END,
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid
      RETURNING *`,
@@ -569,7 +763,15 @@ export async function updateInAppMessage(
       input.startAt ?? null, input.endAt ?? null,
       input.status ?? null,
       input.template ?? null, imagePatch.value,
-      composed ? JSON.stringify(sanitizeButtonsActionUrls(composed.buttons)) : (input.buttons ? JSON.stringify(sanitizeButtonsActionUrls(input.buttons)) : null), input.segment_conditions ? JSON.stringify(normalizeSegmentConditions(input.segment_conditions)) : null,
+      (composed
+        ? (composed.buttons.length > 0
+            ? JSON.stringify(sanitizeButtonsActionUrls(composed.buttons))
+            : (composedFromSlides
+                // 슬라이드 slide0 무CTA: buttons 제공되면 그 값, 미제공이면 null(기존 CTA 유지 — Codex ①)
+                ? (input.buttons !== undefined ? JSON.stringify(sanitizeButtonsActionUrls(input.buttons || [])) : null)
+                // 블록 경로: 빈 buttons = 비움(편집기 표시와 일치 계약 유지)
+                : JSON.stringify(sanitizeButtonsActionUrls(composed.buttons))))
+        : (input.buttons ? JSON.stringify(sanitizeButtonsActionUrls(input.buttons)) : null)), input.segment_conditions ? JSON.stringify(normalizeSegmentConditions(input.segment_conditions)) : null,
       input.trigger_conditions ? JSON.stringify(input.trigger_conditions) : null, input.personalization_vars ? JSON.stringify(input.personalization_vars) : null,
       dismissPatch.value, maxDispPatch.value,
       startHourPatch.value, endHourPatch.value,
@@ -578,6 +780,7 @@ export async function updateInAppMessage(
       blocksParam, input.theme ? normalizeTheme(input.theme) : null, input.accent_color ?? null,
       input.card_style !== undefined && input.card_style !== null ? normalizeCardStyle(input.card_style) : null,
       actionUrlPatch.set, imagePatch.set, dismissPatch.set, maxDispPatch.set, startHourPatch.set, endHourPatch.set,
+      posterSlidesProvided, posterSlidesParam,
       ...(designProvided ? [designValue ? JSON.stringify(designValue) : null] : []),
     ]
   );
@@ -845,6 +1048,8 @@ export interface InAppMessageDetail extends InAppMessage {
   cardStyle: string;
   /** ★ 2026-07-14 디자인 3.0 — design jsonb (미설정 = null = 현행 렌더. 구 SDK는 미지 필드라 무시) */
   design: Record<string, any> | null;
+  /** ★ 2026-07-21 포스터 캐러셀 — 슬라이드 배열(빈 배열 = 단일 포스터). SDK가 2장 이상이면 좌우 스와이프 렌더 */
+  posterSlides: PosterSlide[];
   audienceFilter?: Record<string, any> | null;
 }
 
@@ -872,6 +1077,7 @@ function mapRowToMessageDetail(row: any): InAppMessageDetail {
     accentColor: row.accent_color || null,
     cardStyle: normalizeCardStyle(row.card_style),
     design: row.design && typeof row.design === 'object' ? row.design : null,
+    posterSlides: Array.isArray(row.poster_slides) ? row.poster_slides : [],
     audienceFilter: row.audience_filter || null,
   };
 }
@@ -900,7 +1106,7 @@ const FULL_COLUMNS = `id, title, body, action_url, action_label, position, backg
                       personalization_vars, parent_message_id, variant_weight,
                       auto_dismiss_seconds, max_displays_per_user,
                       send_start_hour, send_end_hour, allowed_weekdays, locale_variants, animation, channel,
-                      content_blocks, theme, accent_color, card_style, design, audience_filter`;
+                      content_blocks, theme, accent_color, card_style, design, audience_filter, poster_slides`;
 
 /**
  * ★ D215+ V2 — SDK GET /inapp/active 호출 진입.

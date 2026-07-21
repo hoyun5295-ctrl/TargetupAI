@@ -428,6 +428,8 @@ interface UsedVarsMessageLike {
   personalizationVars?: string[] | null;
   // ★ D230+ — 블록 메시지: 블록 텍스트도 변수 스캔 대상 (서버 동봉 customer가 블록 변수도 채우도록)
   contentBlocks?: any[] | null;
+  // ★ 2026-07-21 포스터 캐러셀: 슬라이드 제목/본문/CTA 라벨 변수도 스캔 (식별 고객 치환 누락 차단)
+  posterSlides?: any[] | null;
 }
 
 /**
@@ -473,6 +475,15 @@ export function extractUsedInAppVariables(messages: UsedVarsMessageLike[]): stri
     scanText(msg.body);
     (msg.buttons || []).forEach((b) => scanText(b?.label));
     scanBlocks(msg.contentBlocks);
+    // ★ 2026-07-21 포스터 캐러셀 슬라이드 문구 (제목/본문/CTA 라벨)
+    if (Array.isArray(msg.posterSlides)) {
+      for (const s of msg.posterSlides) {
+        if (!s || typeof s !== 'object') continue;
+        scanText(s.title);
+        scanText(s.body);
+        if (s.cta && typeof s.cta === 'object') scanText(s.cta.label);
+      }
+    }
   }
 
   return Array.from(used);
