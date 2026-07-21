@@ -137,10 +137,13 @@ export default function SectionRenderer({
     slant: 'M0 0 H375 V4 L0 22 Z',
     curve: 'M0 0 H375 V6 C250 24 125 24 0 6 Z',
   };
+  // ★ 2026-07-21 (#4b 임은지) 커스텀 배경색 섹션은 연결부도 그 색으로 착색(SSR renderSection 미러). bgKey 변형은 CSS 담당→제외.
+  const sectionBgColor = (section.props as { background_color?: string } | undefined)?.background_color;
+  const dividerColorStyle: CSSProperties | undefined = (!bgKey && sectionBgColor) ? { color: sectionBgColor } : undefined;
   const content = divKey ? (
     <>
       <div className={bgKey ? `dm-bgx-${bgKey}` : undefined}>{inner}</div>
-      <div className="dm-divider-svg" aria-hidden="true">
+      <div className="dm-divider-svg" aria-hidden="true" style={dividerColorStyle}>
         <svg viewBox="0 0 375 26" preserveAspectRatio="none"><path d={DIV_PATHS[divKey]} fill="currentColor" /></svg>
       </div>
     </>

@@ -24,8 +24,8 @@ export default function PollEditor({ props, onUpdate }: EditorProps<PollProps>) 
           renderItem={(o, i) => <TextInput value={o.label} onChange={(v) => setItem(i, v)} placeholder={`선택지 ${i + 1}`} />}
         />
       </Field>
-      <Field label="복수 선택"><Toggle value={props.allow_multiple ?? false} onChange={(v) => onUpdate({ allow_multiple: v })} /></Field>
-      <Field label="투표 후 결과 표시"><Toggle value={props.show_result_after_vote ?? true} onChange={(v) => onUpdate({ show_result_after_vote: v })} /></Field>
+      <Field label="복수 선택" hint="켜면 여러 항목 선택 후 [투표하기]로 제출"><Toggle value={props.allow_multiple ?? false} onChange={(v) => onUpdate({ allow_multiple: v })} /></Field>
+      {/* ★ 2026-07-21 "투표 후 결과 표시"(show_result_after_vote) 토글 제거 — 실시간 득표 집계(백엔드 응답)가 미구축이라 켜도 발송물 무변화였던 죽은 컨트롤(no_dead_controls). 결과 공개는 집계 API 신설 후 별도 기능으로 재도입. */}
       <Field label="1인 1회 투표"><Toggle value={props.one_vote_per_user ?? true} onChange={(v) => onUpdate({ one_vote_per_user: v })} /></Field>
     </>
   );

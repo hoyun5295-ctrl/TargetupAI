@@ -43,6 +43,44 @@ export const DM_NEWLINE_FIELDS: Array<{ type: string; treatment?: string; field:
 /** 상품 이미지 맞춤 — cover/contain이 발행물 출력에서 실제로 달라져야 한다(#1 회귀 차단). */
 export const DM_IMAGE_FITS = ['cover', 'contain'] as const;
 
+/** ★ 2026-07-21 갤러리 이미지별 캡션 — 편집기(GalleryEditor) 입력 caption이 발행물에 "보이는 텍스트"(dm-gal-caption)로 표시돼야 한다.
+ *  (임은지 신고 — 종전엔 alt 속성으로만 쓰여 화면 미표시. 슬라이드쇼는 이미 보이는 캡션이라 갤러리만 누락이었다.)
+ *  미입력 시 캡션 div 미출력(회귀 0). 캔버스 GallerySection ↔ SSR renderGallery 미러. */
+export const DM_GALLERY_CAPTION_VISIBLE = true;
+
+/** ★ 2026-07-21 자동 슬라이드 일시정지 버튼 — 편집기(SlideshowEditor) show_pause가 발행물에 재생/정지 컨트롤(data-dm-slide-pause)로
+ *  렌더되고 뷰어(dm-viewer.ts)가 그 클릭으로 자동 전환을 멈춰야 한다(임은지 신고 — 종전엔 렌더/뷰어 어디서도 소비 안 되는 고아 속성).
+ *  기본 노출(default true). 슬라이드 2장 이상에서만(1장은 전환 없음). 캔버스 SlideshowSection 미러(미리보기라 비상호작용). */
+export const DM_SLIDESHOW_PAUSE = true;
+
+/** ★ 2026-07-21 (#4a 임은지) 상품 슬라이드 = 상품 3개 초과 시 가로 스와이프 캐러셀(data-dm-pcarousel, scroll-snap) + 인디케이터 점(data-dm-pc-dots).
+ *  2개 이하는 기존 그리드(회귀 0). 자동 전환은 미도입(auto_slide 토글 제거·수신자 수동 스와이프). 뷰어(dm-viewer.ts)가 스크롤↔점 동기화. 캔버스 NewSections 미러.
+ *  (종전엔 show_indicator·auto_slide가 렌더/뷰어 어디서도 소비 안 되는 고아 속성이라 토글해도 단말 무변화였다.) */
+export const DM_PRODUCT_CAROUSEL_SWIPE_MIN = 3;
+
+/** ★ 2026-07-21 (#3 남지현) 매장/고객센터 개행 보존 — business_hours·address 입력 개행이 발행물에 white-space:pre-line 으로 보존.
+ *  (종전엔 escapeHtml만이라 \n이 공백으로 붕괴 → 편집창 3줄, 단말 1줄). card·classic 양 구도 SSR + 캔버스 StoreInfoSection 미러. */
+export const DM_STORE_INFO_NEWLINE_FIELDS = ['business_hours', 'address'] as const;
+
+/** ★ 2026-07-21 고아 토글 전수 배선 — 편집기 토글이 발행물/뷰어에 실제 소비돼야 한다(종전 전부 미소비 = 토글해도 단말 무변화).
+ *  각 값 = 발행물에 나와야 하는 마커(뷰어 dm-viewer.ts가 같은 마커로 배선). enable_zoom=갤러리 링크 없는 이미지 라이트박스,
+ *  allow_multiple=투표 복수 선택+제출, show_progress=설문 진행률 실시간.
+ *  [제거된 죽은 컨트롤] show_result_after_vote(실시간 득표 집계 API 미구축)·enable_user_location(매장 좌표 스키마+Geolocation 미구축)
+ *  = 켜도 발송물 무변화라 편집기 토글 제거(no_dead_controls). 집계 API / 좌표 스키마 신설 후 별도 기능으로 재도입 예정. */
+export const DM_WIRED_ORPHAN_MARKERS = {
+  gallery_enable_zoom: 'data-dm-zoom',
+  poll_allow_multiple: 'data-dm-poll-multi',
+  survey_show_progress: 'data-dm-survey-progress',
+} as const;
+
+/** ★ 2026-07-21 (#3 남지현) 매장/고객센터 라벨 = 구도별 발송 SSR 라벨을 캔버스가 미러해야 편집=발송.
+ *  card 구도 = 웹/메일/영업(renderStoreInfoCard), classic = 홈페이지/이메일/영업시간(renderStoreInfoClassic).
+ *  종전엔 캔버스(StoreInfoSection)가 구도 무관 classic 라벨 하드코딩 → card 구도서 편집창(홈페이지)≠단말(웹). 라벨 최종 통일은 브랜드보이스 합산 예정. */
+export const DM_STORE_INFO_LABELS = {
+  card:    { website: '웹', email: '메일', business_hours: '영업' },
+  classic: { website: '홈페이지', email: '이메일', business_hours: '영업시간' },
+} as const;
+
 /** 갤러리 풀화면(full_bleed) — true면 발행물에서 섹션 패딩·이미지 라운드가 0이 돼 화면 꽉 참(완성 이미지 시안).
  *  미설정=현행 카드 프레임 유지. 편집기 GalleryEditor 토글과 값이 일치해야 한다(2026-07-15 서수란 신고). */
 export const DM_GALLERY_FULL_BLEED = [false, true] as const;

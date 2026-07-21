@@ -277,8 +277,8 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
           )}
         />
       </Field>
-      <Field label="인디케이터"><Toggle value={props.show_indicator ?? true} onChange={(v) => onUpdate({ show_indicator: v })} /></Field>
-      <Field label="자동 슬라이드"><Toggle value={props.auto_slide ?? false} onChange={(v) => onUpdate({ auto_slide: v })} /></Field>
+      {/* ★ 2026-07-21 (#4a 임은지) 상품 3개 이상이면 좌우 스와이프 슬라이드로 자동 표시(수동 넘김). 인디케이터=하단 위치 점. 자동 전환(auto_slide)은 미도입. */}
+      <Field label="인디케이터" hint="상품 3개 이상이면 좌우로 넘기는 슬라이드 · 켜면 하단에 위치 점 표시"><Toggle value={props.show_indicator ?? true} onChange={(v) => onUpdate({ show_indicator: v })} /></Field>
       <MallProductPickerModal open={pickerOpen} onClose={() => setPickerOpen(false)} onPick={applyPicked} />
     </>
   );

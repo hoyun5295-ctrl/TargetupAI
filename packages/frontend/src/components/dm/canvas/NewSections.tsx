@@ -155,13 +155,19 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
       </div>
     );
   }
+  // ★ 2026-07-21 (#4a 임은지) classic = 상품 3개 초과 시 가로 스와이프 캐러셀 + 인디케이터 (SSR renderProductCarousel 미러). 2개 이하 = 기존 그리드.
+  const isScroll = products.length > 2;
+  const showDots = isScroll && props.show_indicator !== false;
   return (
     <div className="dm-section dm-product-carousel" style={props.background_color ? { ...SECTION_SHELL_LG, background: props.background_color } : SECTION_SHELL_LG}>
       {props.title && <div className="dm-text-h2" style={H2_TITLE_STYLE}>{props.title}</div>}
       {products.length === 0 ? (
         <div style={PLACEHOLDER_STYLE}>[상품을 추가해주세요]</div>
       ) : (
-        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'var(--dm-section-justify, center)', gap: 12 }}>
+        <>
+        <div style={isScroll
+          ? { display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', scrollSnapType: 'x mandatory', gap: 12 }
+          : { display: 'flex', flexWrap: 'wrap', justifyContent: 'var(--dm-section-justify, center)', gap: 12 }}>
           {products.map((p, i) => {
             // ★ 2026-07-02(2) 할인 자동 계산 표시 + 링크 연결 표시 — 뷰어 SSR(renderProductCarousel)과 동일 규칙
             const price = Number(p.price || 0);
@@ -175,7 +181,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
               // ★ 2026-07-16 (#2 재오픈): classic 카드 구조·스타일을 발행 SSR renderProductCarousel과 정확히 미러.
               //   드리프트였던 카드 테두리·그림자·radius(8→16)·overflow·내부 패딩(10 12 12)·가격 글씨(크기 fs-small→h3/body·굵기 700→800)를
               //   발행물 기준으로 통일. 가격 줄 = 카드 하단 고정(marginTop auto)로 같은 행 카드 가격 위치 일정(임은지 건의 유지).
-              <div key={p.id || i} style={{ width: 'calc(50% - 8px)', maxWidth: 220, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', background: cardBg, border: '1px solid var(--dm-neutral-200)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--dm-shadow-sm)' }}>
+              <div key={p.id || i} style={{ ...(isScroll ? { flex: '0 0 calc(50% - 6px)', scrollSnapAlign: 'start' } : { width: 'calc(50% - 8px)' }), maxWidth: 220, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', background: cardBg, border: '1px solid var(--dm-neutral-200)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--dm-shadow-sm)' }}>
                 {p.image_url ? (
                   <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: '100%', height: imgH, display: 'block', flexShrink: 0, ...imgFit }} />
                 ) : (
@@ -204,6 +210,15 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
             );
           })}
         </div>
+        {/* ★ 2026-07-21 (#4a 임은지) 인디케이터 점 — 발행물(renderProductCarousel) 미러. 캔버스는 미리보기라 첫 점 활성 정적. */}
+        {showDots && (
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 'var(--dm-sp-3)' }}>
+            {products.map((_, i) => (
+              <span key={i} style={{ width: 8, height: 8, borderRadius: '50%', background: i === 0 ? 'var(--dm-primary)' : 'var(--dm-neutral-300)' }} />
+            ))}
+          </div>
+        )}
+        </>
       )}
     </div>
   );
@@ -232,16 +247,26 @@ export function GallerySection({ props, treatment }: { props: GalleryProps; trea
         <div style={PLACEHOLDER_STYLE}>[이미지를 추가해주세요]</div>
       ) : (
         <div className="dm-gal-grid" style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: fullBleed ? 0 : (isList ? 10 : 6) }}>
-          {images.map((img, i) => (
-            <img
-              key={i}
-              src={dmImageUrl(img.url)}
-              alt={img.caption || ''}
-              style={mosaic && i === 0
-                ? { width: '100%', aspectRatio: '16/10', objectFit: 'cover', borderRadius: fullBleed ? 0 : 10, gridColumn: '1 / -1' }
-                : imgStyle}
-            />
-          ))}
+          {images.map((img, i) => {
+            const isMosaicFirst = mosaic && i === 0;
+            return (
+              <div key={i} style={isMosaicFirst ? { gridColumn: '1 / -1' } : undefined}>
+                <img
+                  src={dmImageUrl(img.url)}
+                  alt={img.caption || ''}
+                  style={isMosaicFirst
+                    ? { width: '100%', aspectRatio: '16/10', objectFit: 'cover', borderRadius: fullBleed ? 0 : 10 }
+                    : imgStyle}
+                />
+                {/* ★ 2026-07-21 갤러리 이미지별 캡션 표시(임은지 신고) — SSR renderGallery 미러. 미입력=미표시. */}
+                {img.caption && (
+                  <div style={{ fontSize: 'var(--dm-fs-small)', color: 'var(--dm-neutral-700)', marginTop: 'var(--dm-sp-2)', ...(fullBleed ? { padding: '0 var(--dm-sp-5)' } : {}) }}>
+                    {img.caption}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -258,6 +283,10 @@ export function SlideshowSection({ props }: { props: SlideshowProps }) {
         <div style={PLACEHOLDER_STYLE}>[슬라이드를 추가해주세요]</div>
       ) : (
         <>
+          {/* ★ 2026-07-21 (#2 임은지) 일시정지 버튼 — 발행물(renderSlideshow) 미러. 캔버스는 미리보기라 비상호작용(pointer-events:none). */}
+          {props.show_pause !== false && slides.length > 1 && (
+            <div aria-hidden style={{ position: 'absolute', top: 'var(--dm-sp-3)', right: 'var(--dm-sp-3)', width: 32, height: 32, borderRadius: 999, background: 'rgba(0,0,0,0.45)', color: '#fff', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2, pointerEvents: 'none' }}>⏸</div>
+          )}
           {cur?.image_url ? (
             <img src={dmImageUrl(cur.image_url)} alt={cur.caption || ''} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', borderRadius: 8 }} />
           ) : (
@@ -340,8 +369,12 @@ export function PollSection({ props }: { props: PollProps }) {
             </button>
           ))}
         </div>
+        {/* ★ 2026-07-21 (#6 복수 선택) 발행 renderPoll 미러 — allow_multiple이면 [투표하기] 제출 버튼 */}
+        {props.allow_multiple && (
+          <button className="dm-cta dm-cta-primary" style={{ width: '100%', marginTop: 'var(--dm-sp-3)' }}>투표하기</button>
+        )}
         {props.one_vote_per_user && (
-          <div style={{ fontSize: 11, color: 'var(--dm-neutral-500)', marginTop: 8 }}>1인 1회 투표</div>
+          <div style={{ fontSize: 11, color: 'var(--dm-neutral-500)', marginTop: 8 }}>1인 1회 투표{props.allow_multiple ? ' · 복수 선택 가능' : ''}</div>
         )}
       </DmEventCard>
     </div>
@@ -357,6 +390,15 @@ export function SurveySection({ props }: { props: SurveyProps }) {
     <div className="dm-section dm-survey">
       <DmEventCard accentVar="--dm-primary" icon="survey" overline="SURVEY">
         {props.title && <div style={{ ...TITLE_STYLE, marginBottom: 'var(--dm-sp-3)' }}>{props.title}</div>}
+        {/* ★ 2026-07-21 (#6 진행률) 발행 renderSurvey 미러 — show_progress면 진행률(캔버스는 정적 0/N 미리보기) */}
+        {props.show_progress && questions.length > 0 && (
+          <div style={{ fontSize: 11, color: 'var(--dm-neutral-500)', marginBottom: 'var(--dm-sp-3)', textAlign: 'left' }}>
+            0 / {questions.length} 답변
+            <div style={{ height: 4, background: 'var(--dm-neutral-200)', borderRadius: 2, marginTop: 4, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: '0%', background: 'var(--dm-primary)' }} />
+            </div>
+          </div>
+        )}
         {questions.length === 0 ? (
           <div style={PLACEHOLDER_STYLE}>[설문 질문을 추가해주세요]</div>
         ) : (

@@ -38,7 +38,7 @@ export default function MapStoreLocatorEditor({ props, onUpdate }: EditorProps<M
           )}
         />
       </Field>
-      <Field label="사용자 위치 사용"><Toggle value={props.enable_user_location ?? false} onChange={(v) => onUpdate({ enable_user_location: v })} /></Field>
+      {/* ★ 2026-07-21 "사용자 위치 사용"(enable_user_location) 토글 제거 — 매장 좌표(lat/lng) 데이터 모델과 위치 기반 거리정렬(Geolocation)이 미구축이라 켜도 발송물 무변화였던 죽은 컨트롤(no_dead_controls). 좌표 스키마 + 거리정렬 신설 후 별도 기능으로 재도입. */}
     </>
   );
 }

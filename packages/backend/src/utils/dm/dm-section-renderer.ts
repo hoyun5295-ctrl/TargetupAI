@@ -567,14 +567,16 @@ function renderStoreInfo(props: StoreInfoProps, treatment?: string): string {
 
 // 카드: 라운드 카드 안에 정보 행 — 풋터 직전 마감 카드용
 function renderStoreInfoCard(props: StoreInfoProps): string {
-  const row = (label: string, value: string) =>
-    `<div style="display:flex;gap:var(--dm-sp-3);align-items:baseline"><span style="flex:0 0 56px;font-size:var(--dm-fs-tiny);font-weight:700;letter-spacing:1px;color:var(--dm-primary)">${label}</span><span style="font-size:var(--dm-fs-small);color:var(--dm-neutral-700)">${value}</span></div>`;
+  // ★ 2026-07-21 (#3 남지현) white-space:pre-line — 편집창(InlineEditable multiline)은 개행을 보존하는데 발행물은 escapeHtml만이라 \n이 공백으로 붕괴(영업시간 3줄→1줄).
+  //   개행이 실제 있는 값에만 pre-line 부착(단일행 값은 바이트 무변화 = 레거시 골든 보존). 단일행 필드(전화·웹·메일)엔 미부착.
+  const row = (label: string, value: string, preLine?: boolean) =>
+    `<div style="display:flex;gap:var(--dm-sp-3);align-items:baseline"><span style="flex:0 0 56px;font-size:var(--dm-fs-tiny);font-weight:700;letter-spacing:1px;color:var(--dm-primary)">${label}</span><span style="font-size:var(--dm-fs-small);color:var(--dm-neutral-700)${preLine ? ';white-space:pre-line' : ''}">${value}</span></div>`;
   const rows: string[] = [];
   if (props.phone) rows.push(row('전화', `<a href="tel:${escapeHtml(props.phone)}" style="color:var(--dm-neutral-800);font-weight:600">${escapeHtml(props.phone)}</a>`));
   if (props.website) rows.push(row('웹', `<a href="${safeUrl(props.website)}" target="_blank" style="color:var(--dm-neutral-800)">${escapeHtml(props.website.replace(/^https?:\/\//, ''))}</a>`));
   if (props.email) rows.push(row('메일', `<a href="mailto:${escapeHtml(props.email)}" style="color:var(--dm-neutral-800)">${escapeHtml(props.email)}</a>`));
-  if (props.address) rows.push(row('주소', escapeHtml(props.address)));
-  if (props.business_hours) rows.push(row('영업', escapeHtml(props.business_hours)));
+  if (props.address) rows.push(row('주소', escapeHtml(props.address), /\n/.test(props.address)));
+  if (props.business_hours) rows.push(row('영업', escapeHtml(props.business_hours), /\n/.test(props.business_hours)));
   if (rows.length === 0) return '';
   return `<div class="dm-section dm-store-info" data-section-type="store_info" style="padding:var(--dm-sp-5)">
     <div style="background:var(--dm-neutral-50);border:1px solid var(--dm-neutral-200);border-radius:18px;padding:var(--dm-sp-5);display:flex;flex-direction:column;gap:var(--dm-sp-3);text-align:left;box-shadow:var(--dm-shadow-sm)">
@@ -589,8 +591,9 @@ function renderStoreInfoClassic(props: StoreInfoProps): string {
   if (props.phone) items.push(`<a href="tel:${escapeHtml(props.phone)}" style="color:var(--dm-primary)"><strong>전화</strong> ${escapeHtml(props.phone)}</a>`);
   if (props.website) items.push(`<a href="${safeUrl(props.website)}" target="_blank" style="color:var(--dm-primary)"><strong>홈페이지</strong> ${escapeHtml(props.website.replace(/^https?:\/\//, ''))}</a>`);
   if (props.email) items.push(`<a href="mailto:${escapeHtml(props.email)}" style="color:var(--dm-primary)"><strong>이메일</strong> ${escapeHtml(props.email)}</a>`);
-  if (props.address) items.push(`<span><strong>주소</strong> ${escapeHtml(props.address)}</span>`);
-  if (props.business_hours) items.push(`<span><strong>영업시간</strong> ${escapeHtml(props.business_hours)}</span>`);
+  // ★ 2026-07-21 (#3 남지현) 주소·영업시간 개행 보존 — 개행이 실제 있는 값에만 white-space:pre-line(단일행은 바이트 무변화·레거시 골든 보존).
+  if (props.address) items.push(`<span${/\n/.test(props.address) ? ' style="white-space:pre-line"' : ''}><strong>주소</strong> ${escapeHtml(props.address)}</span>`);
+  if (props.business_hours) items.push(`<span${/\n/.test(props.business_hours) ? ' style="white-space:pre-line"' : ''}><strong>영업시간</strong> ${escapeHtml(props.business_hours)}</span>`);
 
   if (items.length === 0) return '';
 
@@ -729,6 +732,9 @@ function renderProductCarousel(p: any, treatment?: string): string {
   const imgH = productImgHeight(p);
   // ★ 2026-07-15 글씨공간(카드) 배경(서수란) — 미지정=기본 var(--dm-bg).
   const cardBg = p?.caption_bg_color ? escapeHtml(p.caption_bg_color) : 'var(--dm-bg)';
+  // ★ 2026-07-21 (#4a 임은지) 상품 슬라이드 = 상품 3개 초과 시 가로 스와이프 캐러셀(scroll-snap)+인디케이터, 2개 이하는 기존 그리드(회귀 0).
+  //   자동전환은 미도입(수신자 수동 스와이프). show_indicator=점 노출. 뷰어 dm-viewer.ts가 data-dm-pcarousel 스크롤을 점에 반영.
+  const isScroll = products.length > 2;
   const items = products.map((it: any) => {
     const price = Number(it.price || 0);
     const discount = Number(it.discount_price || 0);
@@ -750,16 +756,24 @@ function renderProductCarousel(p: any, treatment?: string): string {
         <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4">${escapeHtml(it.name || '').replace(/\n/g, '<br>')}</div>
         ${priceHtml}
       </div>`;
-    const cardWrapStyle = `width:calc(50% - 8px);max-width:220px;box-sizing:border-box;display:flex;flex-direction:column;text-decoration:none;color:inherit;background:${cardBg};border:1px solid var(--dm-neutral-200);border-radius:16px;overflow:hidden;box-shadow:var(--dm-shadow-sm)`;
+    const cardWrapStyle = `${isScroll ? 'flex:0 0 calc(50% - 6px);scroll-snap-align:start' : 'width:calc(50% - 8px)'};max-width:220px;box-sizing:border-box;display:flex;flex-direction:column;text-decoration:none;color:inherit;background:${cardBg};border:1px solid var(--dm-neutral-200);border-radius:16px;overflow:hidden;box-shadow:var(--dm-shadow-sm)`;
     const href = it.link_url ? safeUrl(it.link_url) : '#';
     return href !== '#'
       ? `<a href="${href}" target="_blank" rel="noopener" style="${cardWrapStyle}">${card}</a>`
       : `<div style="${cardWrapStyle}">${card}</div>`;
   }).join('');
   const sectionBg = p?.background_color ? `;background:${escapeHtml(p.background_color)}` : '';
+  const itemsStyle = isScroll
+    ? 'display:flex;flex-wrap:nowrap;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;gap:12px;scrollbar-width:none'
+    : 'display:flex;flex-wrap:wrap;justify-content:var(--dm-section-justify,center);gap:12px';
+  const showDots = isScroll && p.show_indicator !== false;
+  const dots = showDots
+    ? `<div data-dm-pc-dots style="display:flex;justify-content:center;gap:6px;margin-top:var(--dm-sp-3)">${products.map((_: any, i: number) => `<span data-dm-pc-dot="${i}" style="width:8px;height:8px;border-radius:50%;background:${i === 0 ? 'var(--dm-primary)' : 'var(--dm-neutral-300)'};cursor:pointer"></span>`).join('')}</div>`
+    : '';
   return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-6) var(--dm-sp-5)${sectionBg}">
     ${p.title ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4)">${escapeHtml(p.title)}</div>` : ''}
-    <div class="dm-pc-items" style="display:flex;flex-wrap:wrap;justify-content:var(--dm-section-justify,center);gap:12px">${items}</div>
+    <div class="dm-pc-items"${isScroll ? ' data-dm-pcarousel' : ''} style="${itemsStyle}">${items}</div>
+    ${dots}
   </div>`;
 }
 
@@ -880,10 +894,20 @@ function renderGallery(p: any, treatment?: string): string {
       ? `width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:${mosaicRadius}`
       : imgStyle;
     const spanWrap = mosaic && i === 0 ? 'grid-column:1/-1' : '';
-    const tag = `<img src="${escapeHtml(publicImageUrl(img.url))}" loading="lazy" alt="${escapeHtml(img.caption || '')}" style="${style}"/>`;
     const href = img.link_url ? safeUrl(img.link_url) : '#';
+    // ★ 2026-07-21 확대 보기(enable_zoom, 기본 on) — 링크 없는 이미지는 탭 시 전체화면 확대(data-dm-zoom, 뷰어가 라이트박스 배선). 링크 있으면 링크 우선.
+    const zoomable = href === '#' && p?.enable_zoom !== false;
+    const src = escapeHtml(publicImageUrl(img.url));
+    const tag = `<img src="${src}"${zoomable ? ` data-dm-zoom="${src}"` : ''} loading="lazy" alt="${escapeHtml(img.caption || '')}" style="${style}${zoomable ? ';cursor:zoom-in' : ''}"/>`;
     const inner = href !== '#' ? `<a href="${href}" target="_blank" rel="noopener" style="display:block">${tag}</a>` : tag;
-    return spanWrap ? `<div style="${spanWrap}">${inner}</div>` : inner;
+    // ★ 2026-07-21 갤러리 이미지별 캡션 표시(임은지 신고) — 편집기 입력 caption이 alt로만 쓰이고 발행물 미표시였음.
+    //   슬라이드쇼(renderSlideshow)와 동일하게 이미지 밑에 보이는 캡션. 미입력=미표시(회귀 0). full_bleed는 좌우 패딩으로 가독.
+    const cap = img.caption
+      ? `<div class="dm-gal-caption" style="font-size:var(--dm-fs-small);color:var(--dm-neutral-700);margin-top:var(--dm-sp-2)${fullBleed ? ';padding:0 var(--dm-sp-5)' : ''}">${escapeHtml(img.caption)}</div>`
+      : '';
+    // 캡션/모자이크 스팬이 있을 때만 셀 div로 감싼다(그 외엔 레거시 출력 그대로 = 바이트 보존). 캔버스 GallerySection 미러.
+    if (cap || spanWrap) return `<div${spanWrap ? ` style="${spanWrap}"` : ''}>${inner}${cap}</div>`;
+    return inner;
   }).join('');
   const sectionPad = fullBleed ? '0' : 'var(--dm-sp-6) var(--dm-sp-5)';
   const gap = fullBleed ? 0 : (isList ? 12 : 8);
@@ -910,7 +934,15 @@ function renderSlideshow(p: any): string {
   const dots = p.show_indicator !== false && slides.length > 1
     ? `<div style="display:flex;justify-content:center;gap:6px;margin-top:var(--dm-sp-2)">${slides.map((_: any, i: number) => `<span data-dm-slide-dot="${i}" style="width:8px;height:8px;border-radius:50%;background:${i === 0 ? 'var(--dm-primary)' : 'var(--dm-neutral-300)'};cursor:pointer"></span>`).join('')}</div>`
     : '';
-  return `<div class="dm-section dm-slideshow" data-dm-slideshow data-interval="${interval}" style="padding:var(--dm-sp-4)">${slidesHtml}${dots}</div>`;
+  // ★ 2026-07-21 (#2 임은지) 일시정지 버튼 — show_pause 설정이 종전엔 렌더/뷰어 어디서도 소비 안 됨(고아 속성).
+  //   재생/정지 토글(수신자가 탭하면 자동 전환 멈춤·다시 탭하면 재개). 뷰어 dm-viewer.ts가 data-dm-slide-pause를 배선. 미설정=기본 노출(default true).
+  //   슬라이드 1장이면 전환 자체가 없어 미노출. ⏸=일시정지 아이콘(재생 중), 탭 시 ▶(재생)로 토글.
+  const pauseBtn = p.show_pause !== false && slides.length > 1
+    ? `<button type="button" data-dm-slide-pause aria-label="일시정지" style="position:absolute;top:var(--dm-sp-3);right:var(--dm-sp-3);width:32px;height:32px;border-radius:999px;border:none;background:rgba(0,0,0,0.45);color:#fff;font-size:13px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:2">⏸</button>`
+    : '';
+  // position:relative는 정지 버튼(절대배치)이 있을 때만 — 단일 슬라이드 등 버튼 없는 경우 레거시 출력 그대로(바이트 보존).
+  const relStyle = pauseBtn ? ';position:relative' : '';
+  return `<div class="dm-section dm-slideshow" data-dm-slideshow data-interval="${interval}" style="padding:var(--dm-sp-4)${relStyle}">${slidesHtml}${pauseBtn}${dots}</div>`;
 }
 
 function renderTabCards(p: any): string {
@@ -931,12 +963,15 @@ function renderTabCards(p: any): string {
 function renderPoll(p: any): string {
   const options = Array.isArray(p?.options) ? p.options : [];
   const items = options.map((o: any, i: number) => `<div data-dm-poll-option data-option-id="${escapeHtml(o.id || String(i))}" style="padding:14px 16px;background:var(--dm-neutral-50);border:1px solid var(--dm-neutral-200);border-radius:12px;font-size:var(--dm-fs-body);font-weight:500;margin-bottom:var(--dm-sp-2);cursor:pointer;transition:all 150ms">${escapeHtml(o.label || '')}</div>`).join('');
+  // ★ 2026-07-21 (복수 선택 allow_multiple) — 여러 항목 선택 후 [투표하기]로 제출(뷰어 배선). 미설정=단일 선택 즉시 제출(기존). 종전엔 렌더/뷰어 어디서도 소비 안 됨(고아).
+  const multi = p.allow_multiple === true;
   const body = `
     <div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4)">${escapeHtml(p.question || '[질문을 작성해주세요]')}</div>
     ${items}
-    ${p.one_vote_per_user ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2)">1인 1회 투표</div>` : ''}
+    ${multi ? `<button data-dm-poll-submit class="dm-cta dm-cta-primary" style="width:100%;margin-top:var(--dm-sp-3)">투표하기</button>` : ''}
+    ${p.one_vote_per_user ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2)">1인 1회 투표${multi ? ' · 복수 선택 가능' : ''}</div>` : ''}
     <div data-dm-result style="display:none"></div>`;
-  return `<div class="dm-section dm-poll" data-dm-poll>${dmEventCard({ accentVar: '--dm-primary', icon: 'poll', overline: 'POLL', body })}</div>`;
+  return `<div class="dm-section dm-poll" data-dm-poll${multi ? ' data-dm-poll-multi' : ''}>${dmEventCard({ accentVar: '--dm-primary', icon: 'poll', overline: 'POLL', body })}</div>`;
 }
 
 function renderSurvey(p: any): string {
@@ -960,8 +995,13 @@ function renderSurvey(p: any): string {
     }
     return `<div data-dm-question data-required="${q.required ? '1' : '0'}" style="margin-bottom:var(--dm-sp-4);text-align:left"><div style="font-size:var(--dm-fs-small);font-weight:600;margin-bottom:6px">${escapeHtml(q.question || '')}${q.required ? ' <span style="color:var(--dm-error)">*</span>' : ''}</div>${control}</div>`;
   }).join('');
+  // ★ 2026-07-21 (설문 진행률 show_progress) — 답변 문항 수를 실시간 표시(뷰어가 입력마다 갱신). 종전엔 렌더 어디서도 소비 안 됨(고아).
+  const progress = p.show_progress
+    ? `<div data-dm-survey-progress data-total="${questions.length}" style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-bottom:var(--dm-sp-3);text-align:left"><span data-dm-progress-count>0</span> / ${questions.length} 답변<div style="height:4px;background:var(--dm-neutral-200);border-radius:2px;margin-top:4px;overflow:hidden"><div data-dm-progress-bar style="height:100%;width:0%;background:var(--dm-primary);transition:width 200ms"></div></div></div>`
+    : '';
   const body = `
     ${p.title ? `<div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-3)">${escapeHtml(p.title)}</div>` : ''}
+    ${progress}
     ${items}
     <button data-dm-submit class="dm-cta dm-cta-primary" style="width:100%">제출하기</button>
     ${p.completion_reward_text ? `<div style="font-size:var(--dm-fs-small);color:var(--dm-primary);margin-top:var(--dm-sp-3);font-weight:600">${escapeHtml(p.completion_reward_text)}</div>` : ''}
@@ -1184,7 +1224,11 @@ export function renderSection(section: Section, ctx: SectionRenderContext): stri
   let bodyHtml = inner;
   if (divKey) {
     // 연결부가 있으면 배경면은 내부 div가 담당(SVG 투명부에 래퍼 배경이 비치지 않도록)
-    bodyHtml = `<div${bgKey ? ` class="dm-bgx-${bgKey}"` : ''}>${inner}</div>${renderDmDividerSvg(divKey as 'wave' | 'slant' | 'curve')}`;
+    // ★ 2026-07-21 (#4b 임은지) 커스텀 배경색(product_carousel·countdown 등 background_color) 섹션은 연결부도 그 색으로 착색.
+    //   안 그러면 var(--dm-bg)=페이지 흰색이라 색 있는 섹션 하단에서 연결부가 안 보인다. bgKey 변형은 CSS가 착색하므로 제외(중복 방지). 캔버스 SectionRenderer 미러.
+    const sectionBgColor = (section.props as any)?.background_color;
+    const dividerColor = (!bgKey && sectionBgColor) ? escapeHtml(String(sectionBgColor)) : undefined;
+    bodyHtml = `<div${bgKey ? ` class="dm-bgx-${bgKey}"` : ''}>${inner}</div>${renderDmDividerSvg(divKey as 'wave' | 'slant' | 'curve', dividerColor)}`;
   } else if (bgKey) {
     wrapClasses += ` dm-bgx-${bgKey}`;
   }

@@ -717,20 +717,71 @@ ${counterHtml}
     });
   });
 
-  // 투표 — 옵션 클릭 → 제출
+  // 투표 — 옵션 클릭 → 제출. ★ 2026-07-21 allow_multiple(data-dm-poll-multi)이면 복수 선택 토글 후 [투표하기]로 일괄 제출.
   Array.prototype.forEach.call(document.querySelectorAll('[data-dm-poll]'), function (box) {
     var info = wrapInfo(box);
     if (!info) return;
-    Array.prototype.forEach.call(box.querySelectorAll('[data-dm-poll-option]'), function (opt) {
-      opt.addEventListener('click', function () {
+    var opts = box.querySelectorAll('[data-dm-poll-option]');
+    if (box.hasAttribute('data-dm-poll-multi')) {
+      var selected = {};
+      Array.prototype.forEach.call(opts, function (opt) {
+        opt.addEventListener('click', function () {
+          if (box.getAttribute('data-voted') === '1') return;
+          var id = opt.getAttribute('data-option-id');
+          if (selected[id]) { delete selected[id]; opt.style.background = ''; opt.style.borderColor = ''; }
+          else { selected[id] = true; opt.style.background = '#ede9fe'; opt.style.borderColor = '#7c3aed'; }
+        });
+      });
+      var submitBtn = box.querySelector('[data-dm-poll-submit]');
+      if (submitBtn) submitBtn.addEventListener('click', function () {
         if (box.getAttribute('data-voted') === '1') { showMsg(box, '이미 투표하셨습니다.', true); return; }
+        var ids = Object.keys(selected);
+        if (!ids.length) { showMsg(box, '항목을 선택해주세요.', false); return; }
         box.setAttribute('data-voted', '1');
-        submitInteraction(info.id, info.type, { option_ids: [opt.getAttribute('data-option-id')] }).then(function (res) {
-          showMsg(box, res && res.already ? '이미 투표하셨습니다.' : '투표해주셔서 감사합니다!', true);
-          opt.style.background = '#ede9fe'; opt.style.borderColor = '#7c3aed';
+        submitInteraction(info.id, info.type, { option_ids: ids }).then(function (res) {
+          // ★ 2026-07-21 실패 응답(success:false)도 성공 처리하던 결함 정정 — 거부 시 재시도 가능하게 data-voted 해제.
+          if (!res || res.success === false) { box.removeAttribute('data-voted'); showMsg(box, '잠시 후 다시 시도해주세요.', false); return; }
+          showMsg(box, res.already ? '이미 투표하셨습니다.' : '투표해주셔서 감사합니다!', true);
         }).catch(function () { box.removeAttribute('data-voted'); showMsg(box, '잠시 후 다시 시도해주세요.', false); });
       });
-    });
+    } else {
+      Array.prototype.forEach.call(opts, function (opt) {
+        opt.addEventListener('click', function () {
+          if (box.getAttribute('data-voted') === '1') { showMsg(box, '이미 투표하셨습니다.', true); return; }
+          box.setAttribute('data-voted', '1');
+          submitInteraction(info.id, info.type, { option_ids: [opt.getAttribute('data-option-id')] }).then(function (res) {
+            // ★ 2026-07-21 실패 응답(success:false)도 성공 처리하던 결함 정정 — 거부 시 재시도 가능하게 data-voted 해제.
+            if (!res || res.success === false) { box.removeAttribute('data-voted'); showMsg(box, '잠시 후 다시 시도해주세요.', false); return; }
+            showMsg(box, res.already ? '이미 투표하셨습니다.' : '투표해주셔서 감사합니다!', true);
+            opt.style.background = '#ede9fe'; opt.style.borderColor = '#7c3aed';
+          }).catch(function () { box.removeAttribute('data-voted'); showMsg(box, '잠시 후 다시 시도해주세요.', false); });
+        });
+      });
+    }
+  });
+
+  // ★ 2026-07-21 (설문 진행률 show_progress) — 답변한 문항 수를 실시간 반영(입력·클릭마다 갱신).
+  Array.prototype.forEach.call(document.querySelectorAll('[data-dm-survey-progress]'), function (prog) {
+    var sbox = prog.closest ? prog.closest('[data-dm-survey]') : null;
+    if (!sbox) return;
+    var total = parseInt(prog.getAttribute('data-total') || '0', 10) || 0;
+    var countEl = prog.querySelector('[data-dm-progress-count]');
+    var barEl = prog.querySelector('[data-dm-progress-bar]');
+    function updateProgress() {
+      var answered = 0;
+      Array.prototype.forEach.call(sbox.querySelectorAll('[data-dm-question]'), function (q) {
+        var rating = q.querySelector('[data-dm-rating]');
+        if (rating) { if (rating.getAttribute('data-value')) answered++; return; }
+        if (q.querySelectorAll('input[type=radio]:checked, input[type=checkbox]:checked').length) { answered++; return; }
+        var text = q.querySelector('input[type=text]');
+        if (text && text.value.trim()) answered++;
+      });
+      if (countEl) countEl.textContent = String(answered);
+      if (barEl) barEl.style.width = (total ? Math.round(answered / total * 100) : 0) + '%';
+    }
+    sbox.addEventListener('input', updateProgress);
+    sbox.addEventListener('click', updateProgress); // 별점은 click으로 data-value 세팅
+    updateProgress();
   });
 
   // ── ★ 2026-07-02(3) 발행물에서 죽어있던 섹션 동작 일괄 배선 ──
@@ -768,8 +819,79 @@ ${counterHtml}
     Array.prototype.forEach.call(dotEls, function (d, di) { d.addEventListener('click', function () { show(di); }); });
     var iv = parseInt(box.getAttribute('data-interval') || '4000', 10);
     if (!(iv >= 1500 && iv <= 60000)) iv = 4000;
-    setInterval(function () { if (document.visibilityState === 'visible') show(cur + 1); }, iv);
+    // ★ 2026-07-21 (#2 임은지) 일시정지 버튼 — 수신자가 탭하면 자동 전환 멈춤/재개. show_pause 설정이 종전엔 어디서도 소비 안 됨(고아).
+    var paused = false;
+    setInterval(function () { if (!paused && document.visibilityState === 'visible') show(cur + 1); }, iv);
+    var pauseBtn = box.querySelector('[data-dm-slide-pause]');
+    if (pauseBtn) {
+      pauseBtn.addEventListener('click', function () {
+        paused = !paused;
+        pauseBtn.textContent = paused ? '▶' : '⏸'; // ▶ 재생 / ⏸ 일시정지
+        pauseBtn.setAttribute('aria-label', paused ? '재생' : '일시정지');
+      });
+    }
   });
+
+  // ★ 2026-07-21 (#4a 임은지) 상품 슬라이드 가로 스와이프 인디케이터 — 스크롤 위치를 점에 반영 + 점 클릭 스크롤(자동 전환 없음).
+  Array.prototype.forEach.call(document.querySelectorAll('[data-dm-pcarousel]'), function (row) {
+    var wrap = row.parentElement;
+    var dotBox = wrap ? wrap.querySelector('[data-dm-pc-dots]') : null;
+    if (!dotBox) return;
+    var dots = dotBox.querySelectorAll('[data-dm-pc-dot]');
+    var cards = row.children;
+    if (!dots.length || !cards.length) return;
+    function activeIdx() {
+      var rowLeft = row.getBoundingClientRect().left;
+      var best = 0, bestD = Infinity;
+      for (var i = 0; i < cards.length; i++) {
+        var d = Math.abs(cards[i].getBoundingClientRect().left - rowLeft);
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      return best;
+    }
+    function paint() {
+      var a = activeIdx();
+      Array.prototype.forEach.call(dots, function (dot, di) {
+        dot.style.background = di === a ? 'var(--dm-primary)' : 'var(--dm-neutral-300)';
+      });
+    }
+    var raf = null;
+    // ★ 2026-07-21 구형 임베디드 WebView 대비 — requestAnimationFrame 미지원 시 setTimeout 폴백.
+    var rafFn = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function (cb) { return setTimeout(cb, 16); };
+    row.addEventListener('scroll', function () {
+      if (raf) return;
+      raf = rafFn(function () { raf = null; paint(); });
+    });
+    Array.prototype.forEach.call(dots, function (dot, di) {
+      dot.addEventListener('click', function () {
+        if (!cards[di]) return;
+        var delta = cards[di].getBoundingClientRect().left - row.getBoundingClientRect().left;
+        var target = row.scrollLeft + delta;
+        // scrollTo({options}) 미지원 WebView 대비 — scrollLeft 직접 대입 폴백.
+        if (row.scrollTo) { try { row.scrollTo({ left: target, behavior: 'smooth' }); } catch (e) { row.scrollLeft = target; } }
+        else { row.scrollLeft = target; }
+      });
+    });
+    paint();
+  });
+
+  // ★ 2026-07-21 (갤러리 확대 보기 enable_zoom) — [data-dm-zoom] 이미지 탭 시 전체화면 오버레이(탭하면 닫힘). 링크 있는 이미지엔 미부여(링크 우선).
+  var zoomImgs = document.querySelectorAll('[data-dm-zoom]');
+  if (zoomImgs.length) {
+    var zoomOverlay = document.createElement('div');
+    zoomOverlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:99998;display:none;align-items:center;justify-content:center;cursor:zoom-out;padding:20px';
+    var zoomImg = document.createElement('img');
+    zoomImg.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;border-radius:8px';
+    zoomOverlay.appendChild(zoomImg);
+    zoomOverlay.addEventListener('click', function () { zoomOverlay.style.display = 'none'; });
+    document.body.appendChild(zoomOverlay);
+    Array.prototype.forEach.call(zoomImgs, function (img) {
+      img.addEventListener('click', function () {
+        zoomImg.src = img.getAttribute('data-dm-zoom');
+        zoomOverlay.style.display = 'flex';
+      });
+    });
+  }
 
   // 설문 별점 — 클릭 선택
   Array.prototype.forEach.call(document.querySelectorAll('[data-dm-rating]'), function (r) {

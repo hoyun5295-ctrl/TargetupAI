@@ -541,13 +541,17 @@ export function renderDmVariantCss(): string {
 }
 
 /** 디자인 3.0 — 섹션 연결부(웨이브/사선/커브) SVG. fill=currentColor → .dm-divider-svg의 color(--dm-bg)로 착색 */
-export function renderDmDividerSvg(shape: 'wave' | 'slant' | 'curve'): string {
+export function renderDmDividerSvg(shape: 'wave' | 'slant' | 'curve', color?: string): string {
   const paths: Record<string, string> = {
     wave:  'M0 0 H375 V8 C312 24 250 24 187 14 C125 4 62 4 0 16 Z',
     slant: 'M0 0 H375 V4 L0 22 Z',
     curve: 'M0 0 H375 V6 C250 24 125 24 0 6 Z',
   };
-  return `<div class="dm-divider-svg" aria-hidden="true"><svg viewBox="0 0 375 26" preserveAspectRatio="none"><path d="${paths[shape] || paths.wave}" fill="currentColor"/></svg></div>`;
+  // ★ 2026-07-21 (#4b 임은지) 커스텀 배경색 섹션(product_carousel·countdown 등 background_color)의 연결부 착색.
+  //   미전달=CSS(.dm-divider-svg{color:var(--dm-bg)} + 배경면 변형별 규칙)가 색 담당(회귀 0). 전달 시 인라인 우선(색 있는 섹션서 연결부가 보이게).
+  //   color는 호출부에서 escape된 값을 받는다(accent_color 처리와 동일 규약).
+  const colorStyle = color ? ` style="color:${color}"` : '';
+  return `<div class="dm-divider-svg" aria-hidden="true"${colorStyle}><svg viewBox="0 0 375 26" preserveAspectRatio="none"><path d="${paths[shape] || paths.wave}" fill="currentColor"/></svg></div>`;
 }
 
 // ────────────── WCAG 대비 계산 (검수 엔진용) ──────────────

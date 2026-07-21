@@ -7,6 +7,7 @@
 
 ## 핵심 원칙
 
+- **역할 라우트 가드 불일치 = 로그아웃 오인 + 기능 개방/차단은 UI 진입점 전수 게이트** (2026-07-21) — PrivateRoute가 userType 불일치 시 `<Navigate to="/login">` → 인증된 사용자가 로그인 화면으로 = 로그아웃 오인(스튜디오에서 담당자가 인앱/이메일 버튼 누르면 튕김의 근본). 담당자 = DB `user_type='user'` → 로그인 시 JWT `company_user`(auth.ts:295). 기능을 역할에 개방/차단할 땐 **라우트만이 아니라 모든 UI 진입점 전수**(스튜디오 발사대 버튼·오퍼레이터 카드 `adminOnly`·채널선택 모달 EventCampaignModal·resume bar) userType 일관 게이트 — 하나 빠지면 그 경로로 튕김/노출(Codex가 EventCampaignModal 잔존 적발). **인앱메시지 = 공유 화면**(SDK `sdk-js/inapp.ts:400`이 active 메시지를 for 루프로 전부 렌더 → 다중 담당자 발행 시 겹침, per-recipient 채널과 근본 다름)이라 관리자 전용.
 - **모델명 UI 노출 절대 금지** — Opus / Sonnet / GPT / Claude 단어 Frontend grep = 0건 (D190-fix1 + D214+ 반복 사고)
 - **native dialog 절대 금지** — alert / confirm / prompt 0건. ConfirmModal + useToast 의무 (D211+ + D212+)
 - **모바일 반응형 default** — `@media (max-width: 767px)` 매트릭스 항상 박을 것 (D186)
