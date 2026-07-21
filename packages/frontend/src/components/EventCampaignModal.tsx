@@ -75,12 +75,12 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
   resumeDraftId?: string;
 }) {
   const navigate = useNavigate();
-  // ★ 2026-07-14 이메일은 관리자 전용(서수란 신고) — 비관리자는 원클릭에서 이메일 채널 잠금(선택+실패 방지). 백엔드 ensureEmailAdmin 게이트와 정합.
-  const isCompanyAdmin = useAuthStore((s) => s.user?.userType === 'company_admin');
-  const emailBlock = isCompanyAdmin ? null : '관리자만 생성 가능';
+  // ★ 2026-07-21 채널 접근 정책(Harold 확정): 이메일=담당자 개방 / 인앱=회사 관리자 전용(공유 화면). 백엔드 게이트와 정합.
+  const isCompanyAdmin = useAuthStore((s) => s.user?.userType === 'company_admin' || s.user?.userType === 'super_admin');
+  const emailBlock = null; // 이메일은 담당자도 생성 가능
   const [text, setText] = useState('');
-  const [sel, setSel] = useState<Record<ChannelKey, boolean>>({ dm: true, email: isCompanyAdmin, inapp: true });
-  const [inappBlock, setInappBlock] = useState<string | null>(null);
+  const [sel, setSel] = useState<Record<ChannelKey, boolean>>({ dm: true, email: true, inapp: isCompanyAdmin });
+  const [inappBlock, setInappBlock] = useState<string | null>(isCompanyAdmin ? null : '관리자만 이용 가능');
   const [running, setRunning] = useState<ChannelKey | null>(null);
   const [results, setResults] = useState<Partial<Record<ChannelKey, any>>>({});
   const [errs, setErrs] = useState<Partial<Record<ChannelKey, string>>>({});
@@ -105,20 +105,22 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
     setImages([]);
     setImgErr(null);
     setExtracting(false);
-    // 인앱 표시 가능성 — 표시할 곳 없으면 슬롯 잠금 (크레딧 낭비 차단)
-    fetch('/api/cdp/inapp/display-eligibility', { headers: headers() })
-      .then((r) => r.json())
-      .then((data) => {
-        const e = data?.eligibility || data;
-        if (e && e.canCreateWeb === false) {
-          setInappBlock(String(e.blockReasonWeb || '인앱 메시지를 표시할 수 있는 쇼핑몰 연동이 없습니다.'));
-          setSel((s) => ({ ...s, inapp: false }));
-        } else {
-          setInappBlock(null);
-          setSel({ dm: true, email: isCompanyAdmin, inapp: true });
-        }
-      })
-      .catch(() => setInappBlock(null));
+    // 인앱 표시 가능성 — 표시할 곳 없으면 슬롯 잠금 (크레딧 낭비 차단). ★ 인앱=회사 관리자 전용이라 관리자만 조회·개방(비관리자는 잠금 유지).
+    if (isCompanyAdmin) {
+      fetch('/api/cdp/inapp/display-eligibility', { headers: headers() })
+        .then((r) => r.json())
+        .then((data) => {
+          const e = data?.eligibility || data;
+          if (e && e.canCreateWeb === false) {
+            setInappBlock(String(e.blockReasonWeb || '인앱 메시지를 표시할 수 있는 쇼핑몰 연동이 없습니다.'));
+            setSel((s) => ({ ...s, inapp: false }));
+          } else {
+            setInappBlock(null);
+            setSel({ dm: true, email: true, inapp: true });
+          }
+        })
+        .catch(() => setInappBlock(null));
+    }
 
     if (resumeDraftId) {
       // 임시 보관한 세트 재개 — 초안 복원
@@ -139,6 +141,8 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
           const nextResults: Partial<Record<ChannelKey, any>> = {};
           const nextStatus: Partial<Record<ChannelKey, ChannelStatus>> = {};
           for (const k of CHANNELS.map((c) => c.key)) {
+            // ★ 인앱=회사 관리자 전용. 비관리자 복원 시 인앱 payload·편집 진입 차단.
+            if (k === 'inapp' && !isCompanyAdmin) continue;
             if (ch[k] && ch[k].payload) {
               nextResults[k] = ch[k].payload;
               nextStatus[k] = ch[k].status === 'opened' ? 'opened' : 'generated';

@@ -44,7 +44,7 @@ export const SUB_MODULE_CARDS: SubModuleCard[] = [
   { icon: Workflow,     gradient: 'from-emerald-400 to-teal-500',   label: '자사몰 연동',    description: '카페24·네이버 자동 연동',        path: '/cdp-settings' },
   // 2행 — 발송 채널
   { icon: Smartphone,   gradient: 'from-amber-400 to-yellow-500',   label: '모바일 DM',      description: '카드형 미디어 메시지 빌더',      path: '/dm-builder' },
-  { icon: Mail,         gradient: 'from-blue-400 to-cyan-500',      label: 'Email 캠페인',   description: '이메일 자동 발송 + 트래킹',      path: '/email-campaigns',  adminOnly: true },
+  { icon: Mail,         gradient: 'from-blue-400 to-cyan-500',      label: 'Email 캠페인',   description: '이메일 자동 발송 + 트래킹',      path: '/email-campaigns' },
   { icon: MessageSquare,gradient: 'from-rose-400 to-pink-500',      label: '인앱메시지',     description: '자사몰 배너·모달 자동 표시',     path: '/inapp-messages',   adminOnly: true },
   // 3행 — 제작 도구·AI 두뇌 (중앙 슬롯 = P4에서 이미지 스튜디오로 카드 교체)
   { icon: Wand2,        gradient: 'from-amber-400 to-fuchsia-500', label: '원클릭 캠페인',  description: '행사·이미지 → 채널 초안',        path: '/quick-campaign' },

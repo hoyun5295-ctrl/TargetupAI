@@ -15,6 +15,7 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { authenticate } from '../middlewares/auth';
+import { resolveOwnerScope } from '../utils/owner-scope';
 import { query } from '../config/database';
 import { normalizeEventText } from '../utils/event-brief';
 import { extractEventsFromImages, MAX_EVENT_IMAGES } from '../utils/event-image-extract';
@@ -127,11 +128,14 @@ eventCampaignRouter.patch('/drafts/:id', async (req: any, res: Response) => {
     if (typeof req.body?.event_text === 'string') { sets.push(`event_text = $${n}`); vals.push(normalizeEventText(req.body.event_text)); n += 1; }
     if (DRAFT_STATUS.has(req.body?.status)) { sets.push(`status = $${n}`); vals.push(req.body.status); n += 1; }
 
+    const ownerId = resolveOwnerScope(req);
     const idParam = n; const compParam = n + 1;
     vals.push(id, companyId);
+    const ownerClause = ownerId ? ` AND created_by = $${n + 2}::uuid` : '';
+    if (ownerId) vals.push(ownerId);
     const r = await query(
       `UPDATE event_campaign_drafts SET ${sets.join(', ')}
-       WHERE id = $${idParam}::uuid AND company_id = $${compParam}::uuid
+       WHERE id = $${idParam}::uuid AND company_id = $${compParam}::uuid${ownerClause}
        RETURNING id`,
       vals,
     );
@@ -149,13 +153,18 @@ eventCampaignRouter.get('/drafts', async (req: any, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    // ★ 생성물 격리 — 담당자=본인 초안만, 관리자=회사 전체.
+    const ownerId = resolveOwnerScope(req);
+    const ownerClause = ownerId ? ' AND created_by = $2::uuid' : '';
+    const params: any[] = [companyId];
+    if (ownerId) params.push(ownerId);
     const r = await query(
       `SELECT id, title, event_text, source_kind, channels, status, created_at, updated_at
        FROM event_campaign_drafts
-       WHERE company_id = $1::uuid AND status = 'active' AND updated_at > NOW() - INTERVAL '30 days'
+       WHERE company_id = $1::uuid AND status = 'active' AND updated_at > NOW() - INTERVAL '30 days'${ownerClause}
        ORDER BY updated_at DESC
        LIMIT 50`,
-      [companyId],
+      params,
     );
     return res.json({ success: true, drafts: r.rows });
   } catch (err: any) {
@@ -170,11 +179,15 @@ eventCampaignRouter.get('/drafts/:id', async (req: any, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const ownerId = resolveOwnerScope(req);
+    const ownerClause = ownerId ? ' AND created_by = $3::uuid' : '';
+    const params: any[] = [String(req.params.id || ''), companyId];
+    if (ownerId) params.push(ownerId);
     const r = await query(
       `SELECT id, title, event_text, source_kind, channels, status, created_at, updated_at
        FROM event_campaign_drafts
-       WHERE id = $1::uuid AND company_id = $2::uuid`,
-      [String(req.params.id || ''), companyId],
+       WHERE id = $1::uuid AND company_id = $2::uuid${ownerClause}`,
+      params,
     );
     if (!r.rows.length) return res.status(404).json({ success: false, error: '초안을 찾을 수 없습니다.' });
     return res.json({ success: true, draft: r.rows[0] });
@@ -190,11 +203,15 @@ eventCampaignRouter.post('/drafts/:id/archive', async (req: any, res: Response) 
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const ownerId = resolveOwnerScope(req);
+    const ownerClause = ownerId ? ' AND created_by = $3::uuid' : '';
+    const params: any[] = [String(req.params.id || ''), companyId];
+    if (ownerId) params.push(ownerId);
     const r = await query(
       `UPDATE event_campaign_drafts SET status = 'archived', updated_at = NOW()
-       WHERE id = $1::uuid AND company_id = $2::uuid
+       WHERE id = $1::uuid AND company_id = $2::uuid${ownerClause}
        RETURNING id`,
-      [String(req.params.id || ''), companyId],
+      params,
     );
     if (!r.rows.length) return res.status(404).json({ success: false, error: '초안을 찾을 수 없습니다.' });
     return res.json({ success: true });

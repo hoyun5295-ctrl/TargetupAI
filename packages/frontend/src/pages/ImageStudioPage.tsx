@@ -79,6 +79,8 @@ export default function ImageStudioPage() {
     const who = authUser?.name || authUser?.loginId || '';
     return [co, who].filter(Boolean).join(' · ') || '한줄로';
   }, [authUser]);
+  // ★ 인앱메시지 = 회사 관리자 전용(공유 화면). 사용자에겐 발사대에서 인앱 버튼 숨김.
+  const isCompanyAdmin = authUser?.userType === 'company_admin' || authUser?.userType === 'super_admin';
 
   const [ready, setReady] = useState(true);
   const [stage, setStage] = useState<Stage>('gallery');
@@ -561,9 +563,11 @@ export default function ImageStudioPage() {
                   {assetAction.filename && <div className="text-white/75 font-medium break-all leading-snug">{assetAction.filename.replace(/\.[^.]+$/, '')}</div>}
                   <div className="mt-2 text-white/35 leading-relaxed">이 포스터는 문구·상품이 이미 들어가 있어, 어느 채널이든 <b className="text-white/60 font-semibold">전체가 그대로</b> 쓰여요 — 잘림·추가 비용 없음.</div>
                 </div>
-                <button onClick={() => launchChannel(STUDIO_INAPP_DRAFT_KEY, '/inapp-messages')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-rose-400/40 bg-rose-500/10 text-xs font-semibold text-white/90 hover:bg-rose-500/20 transition">
-                  <Layers className="w-4 h-4 text-rose-300" /> 인앱메시지 만들기
-                </button>
+                {isCompanyAdmin && (
+                  <button onClick={() => launchChannel(STUDIO_INAPP_DRAFT_KEY, '/inapp-messages')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-rose-400/40 bg-rose-500/10 text-xs font-semibold text-white/90 hover:bg-rose-500/20 transition">
+                    <Layers className="w-4 h-4 text-rose-300" /> 인앱메시지 만들기
+                  </button>
+                )}
                 <button onClick={() => launchChannel(STUDIO_DM_DRAFT_KEY, '/dm-builder')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-amber-400/40 bg-amber-500/10 text-xs font-semibold text-white/90 hover:bg-amber-500/20 transition">
                   <Smartphone className="w-4 h-4 text-amber-300" /> 모바일 DM 만들기
                 </button>

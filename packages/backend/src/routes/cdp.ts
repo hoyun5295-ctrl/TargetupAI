@@ -1119,6 +1119,7 @@ router.get('/inapp', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (resolveOwnerScope(req)) return res.status(403).json({ success: false, error: '인앱 메시지는 회사 관리자만 이용할 수 있습니다.' });
     const channelRaw = req.query.channel ? String(req.query.channel) : undefined;
     const channel = channelRaw === 'web' || channelRaw === 'app' ? channelRaw : undefined;
     const messages = await listInAppMessages(companyId, channel, resolveOwnerScope(req));
@@ -1158,6 +1159,7 @@ router.get('/inapp/display-eligibility', async (req: Request, res: Response) => 
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (resolveOwnerScope(req)) return res.status(403).json({ success: false, error: '인앱 메시지는 회사 관리자만 이용할 수 있습니다.' });
     const eligibility = await getInAppDisplayEligibility(companyId);
     return res.json({ success: true, eligibility });
   } catch (err: any) {
@@ -1171,6 +1173,7 @@ router.post('/inapp', async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
     if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (resolveOwnerScope(req)) return res.status(403).json({ success: false, error: '인앱 메시지는 회사 관리자만 이용할 수 있습니다.' });
     const cdpEnabled = await isCdpEnabledForPlan(companyId);
     if (!cdpEnabled) {
       return res.status(403).json({ success: false, error: 'In-app 메시지는 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
@@ -1216,6 +1219,7 @@ router.put('/inapp/:id', async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const ownerId = resolveOwnerScope(req);
+    if (ownerId) return res.status(403).json({ success: false, error: '인앱 메시지는 회사 관리자만 이용할 수 있습니다.' });
     if (!(await isInAppMessageOwned(companyId, req.params.id, ownerId))) {
       return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
     }
@@ -1263,6 +1267,7 @@ router.put('/inapp/:id/audience-filter', async (req: Request, res: Response) => 
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const ownerId = resolveOwnerScope(req);
+    if (ownerId) return res.status(403).json({ success: false, error: '인앱 메시지는 회사 관리자만 이용할 수 있습니다.' });
     const raw = req.body?.filter;
     const filter = raw && typeof raw === 'object' && Object.keys(raw).length > 0 ? raw : null;
     const ok = await setInAppAudienceFilter(companyId, req.params.id, filter, ownerId);
@@ -1283,6 +1288,7 @@ router.delete('/inapp/:id', async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const ownerId = resolveOwnerScope(req);
+    if (ownerId) return res.status(403).json({ success: false, error: '인앱 메시지는 회사 관리자만 이용할 수 있습니다.' });
     const ok = await deleteInAppMessage(companyId, req.params.id, ownerId);
     if (!ok) return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
     return res.json({ success: true });
@@ -1318,13 +1324,18 @@ const inappImageUpload = multer({
   },
 });
 
-// 회사 구성원(담당자 포함) 접근 + 유료 플랜 게이팅 공통 헬퍼 — 데이터는 ownerId(created_by)로 격리
+// 인앱메시지 접근 = 회사 관리자 전용(공유 화면 특성) + 유료 플랜 게이팅 공통 헬퍼
 async function ensureInAppAccess(req: Request, res: Response): Promise<{ companyId: string; userId: string; ownerId: string | null } | null> {
   const companyId = req.user?.companyId;
   const userId = req.user?.userId;
   const userType = req.user?.userType;
   if (!companyId || !userId) {
     res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    return null;
+  }
+  // ★ 인앱메시지 = 회사 관리자 전용 (담당자 다중 발행 시 공유 화면 겹침 — Harold 확정). 사용자 접근 차단.
+  if (userType !== 'company_admin' && userType !== 'super_admin') {
+    res.status(403).json({ success: false, error: '인앱 메시지는 회사 관리자만 이용할 수 있습니다.' });
     return null;
   }
   const cdpEnabled = await isCdpEnabledForPlan(companyId);
