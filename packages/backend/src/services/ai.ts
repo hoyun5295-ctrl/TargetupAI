@@ -28,8 +28,12 @@ import { getCreditCost } from '../utils/ai-credit-calc';
 // ★ D227+ 종량제: orchestrate 묶음 차감 컨텍스트 (묶음 안 sub 호출은 차감 skip)
 import { isInCreditBundle } from '../utils/ai-credit-context';
 
-if (!process.env.ANTHROPIC_API_KEY) console.warn('[AI] ANTHROPIC_API_KEY not configured — Claude AI 기능 비활성 상태');
-if (!process.env.OPENAI_API_KEY) console.warn('[AI] OPENAI_API_KEY not configured — OpenAI 기능 비활성 상태');
+// ★ 2026-07-22 기동 시 1회 진단 경고(운영 PM2용). vitest는 dotenv.config()를 안 거쳐(app.ts 부트스트랩 미실행)
+//   process.env가 비어 실제 키가 있어도 매 테스트 파일마다 오탐 경고가 찍힌다 → 테스트 컨텍스트에선 skip.
+//   서버는 app.ts가 dotenv.config()를 ai.ts import보다 먼저 실행하므로 키가 잡혀 경고 안 뜸(폴백 정상).
+const IS_TEST_ENV = process.env.VITEST === 'true' || process.env.NODE_ENV === 'test';
+if (!IS_TEST_ENV && !process.env.ANTHROPIC_API_KEY) console.warn('[AI] ANTHROPIC_API_KEY not configured — Claude AI 기능 비활성 상태');
+if (!IS_TEST_ENV && !process.env.OPENAI_API_KEY) console.warn('[AI] OPENAI_API_KEY not configured — OpenAI 기능 비활성 상태');
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',

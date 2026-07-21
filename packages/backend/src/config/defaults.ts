@@ -34,7 +34,7 @@ export const AI_MODELS = {
   //   ※ 서버 .env에 CLAUDE_MODEL / CLAUDE_OPUS_MODEL 설정 시 그 값 우선 → 함께 변경 필요.
   claude: process.env.CLAUDE_MODEL || 'claude-sonnet-5',                  // 문안 생성 — Sonnet 5
   opus: process.env.CLAUDE_OPUS_MODEL || 'claude-opus-4-8',               // AI Operator 정밀(검수·타겟) — Opus 4.8
-  gpt: process.env.GPT_MODEL || 'gpt-5.4-mini',                          // 기존 한줄로AI fallback — Harold 명시 절대 유지
+  gpt: process.env.GPT_MODEL || 'gpt-5.5',                               // ★ 2026-07-22 Harold 명시 — 전부 gpt-5.5 통일(구 gpt-5.4-mini). gpt-5.5는 temperature 미전송(400 방지)
   gptOperator: process.env.GPT_OPERATOR_MODEL || 'gpt-5.5',              // AI Operator fallback
 };
 

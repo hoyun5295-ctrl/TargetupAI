@@ -328,7 +328,7 @@ async function callClaude(userMessage: string, maxRetries = 2): Promise<Analysis
     const gptResponse = await openai.chat.completions.create({
       model: AI_MODELS.gpt,
       max_completion_tokens: AI_MAX_TOKENS.analysis,
-      temperature: 0.3,
+      // ★ 2026-07-22 gpt-5.5는 temperature 0.3 보내면 400("only default 1 supported") → 미전송(기본값). 다른 GPT 폴백 3곳과 동일.
       messages: [
         { role: 'system', content: ANALYSIS_SYSTEM_PROMPT },
         { role: 'user', content: userMessage },
