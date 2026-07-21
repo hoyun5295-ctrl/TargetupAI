@@ -4,13 +4,13 @@ import * as path from 'path';
 import { buildAdSubject } from '../messageUtils';
 
 /**
- * ★ 2026-07-21 (임은지 리포트) — AI operator 생성 화면 "실제 발송 제목" 표시 ↔ 발송 buildAdSubject 미러 게이트.
+ * ★ 2026-07-22 (임은지 리포트 + Harold) — AI operator 광고표기 토글 + 제목 (광고) 표시 ↔ 발송 buildAdSubject 미러 게이트.
  *
- * [근본] 발송(prepareSendMessage→buildAdSubject)은 isAd+LMS/MMS 제목 맨 앞에 "(광고) "를 붙이는데,
- *   생성 화면 제목엔 안 보여줘 "발송엔 (광고) 붙는데 화면엔 없다"는 혼동이 났다.
- * [수정] 생성 화면 제목 입력창 아래에 실제 발송 제목((광고) 포함)을 표시(값은 순수 제목 유지 = 이중부착 없음).
- * [게이트] 화면 표시가 백엔드 buildAdSubject와 어긋나면 또 불일치 → 형식(“(광고) ” 접두 + 반각/전각 중복 방지)을
- *   양쪽에서 확인. buildAdSubject를 바꾸면 화면 미러도 같이 바꾸도록 강제.
+ * [경위] 발송(prepareSendMessage→buildAdSubject)은 isAd+LMS/MMS 제목 맨 앞에 "(광고) "를 붙이는데 생성 화면 제목엔
+ *   안 보여줘 혼동. 1차=캡션 표시 → Harold "제목 자체에 붙어야". 2차(확정)=직접발송처럼 광고표기 on/off 토글(기본 ON)
+ *   + 제목 입력칸 앞 (광고) 고정 접두 오버레이. 값은 순수 제목 유지(백엔드가 부착·이중부착 없음), /direct-send는
+ *   D143으로 사용자 광고체크(adEnabled)를 강제 없이 존중.
+ * [게이트] 백엔드 buildAdSubject 형식 + 프론트 토글/표시/발송 배선을 함께 확인 — 한쪽만 바뀌면 화면≠발송.
  */
 
 function read(cands: string[]): string {
@@ -23,7 +23,7 @@ const operator = read([
   path.resolve(process.cwd(), 'packages/frontend/src/pages/AiOperatorPage.tsx'),
 ]);
 
-describe('AI operator 제목 (광고) 표시 ↔ buildAdSubject 미러', () => {
+describe('AI operator 광고표기 토글 + 제목 (광고) ↔ buildAdSubject 미러', () => {
   it('buildAdSubject: isAd+LMS/MMS 제목 맨 앞 "(광고) " 부착(중복·비광고·SMS 제외)', () => {
     expect(buildAdSubject('여름세일', 'LMS', true)).toBe('(광고) 여름세일');
     expect(buildAdSubject('여름세일', 'MMS', true)).toBe('(광고) 여름세일');
@@ -32,12 +32,17 @@ describe('AI operator 제목 (광고) 표시 ↔ buildAdSubject 미러', () => {
     expect(buildAdSubject('여름세일', 'LMS', false)).toBe('여름세일');  // 정보성 미부착
   });
 
-  it('AiOperatorPage에 실제 발송 제목((광고) 미러) 표시가 있다', () => {
+  it('AI operator: 광고표기 토글(기본ON)+제목 (광고) 접두 표시+발송 배선', () => {
     expect(operator, 'AiOperatorPage.tsx 못 찾음 — cwd=' + process.cwd()).toBeTruthy();
-    expect(operator).toContain('실제 발송 제목');
-    // buildAdSubject와 동일: "(광고) " 접두
-    expect(operator).toContain('(광고) ${resolveSubject(safeIdx)}');
-    // buildAdSubject와 동일: 반각·전각 (광고) 중복 방지 정규식
-    expect(operator).toContain('[(（]\\s*광고\\s*[)）]');
+    // 상태(기본 ON) + on/off 토글 배선 (직접발송 미러)
+    expect(operator).toContain('const [adEnabled, setAdEnabled] = useState(true)');
+    expect(operator).toContain('광고표기');
+    expect(operator).toContain('setAdEnabled(e.target.checked)');
+    // 본문·제목 표시 = 토글 상태 단일 소스
+    expect(operator).toContain('const isAd = adEnabled');
+    // 제목 입력칸 앞 (광고) 접두 오버레이 (값은 순수 유지 — 접두는 표시용 span)
+    expect(operator).toMatch(/pointer-events-none[^>]*>\(광고\)</);
+    // 발송 payload가 토글 상태를 그대로 전송 (백엔드 D143 존중)
+    expect(operator).toContain('adEnabled, //');
   });
 });

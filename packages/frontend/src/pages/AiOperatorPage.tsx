@@ -296,6 +296,8 @@ export default function AiOperatorPage() {
   const [loading, setLoading] = useState(false);
   const [progressStep, setProgressStep] = useState(0);
   const [proposal, setProposal] = useState<ProposalResponse | null>(null);
+  // ★ 2026-07-22 (Harold 명시) 광고표기 on/off 토글 (직접발송 미러·기본 ON) — 제안 로드 시 AI 판정(마케팅=ON)으로 초기화
+  const [adEnabled, setAdEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // ★ D165: 메시지 3안 토글 + 다듬기 모달 + 다듬기 결과 오버라이드
   const [selectedVariantIdx, setSelectedVariantIdx] = useState(0);
@@ -524,6 +526,7 @@ export default function AiOperatorPage() {
       }, 1500);
       setTimeout(() => {
         setProposal(data as ProposalResponse);
+        setAdEnabled(!!(data as ProposalResponse).channel?.isAd); // 새 제안마다 광고표기 = AI 판정으로 초기화(마케팅=ON)
         setLoading(false);
 
         // ★ D210+ Phase 2-fix5 (Harold 명시 2026-05-23): 추출 타겟 안 상위 1건 고객 fetch (filters body 영역).
@@ -599,7 +602,7 @@ export default function AiOperatorPage() {
       const res = await fetch('/api/ai/operator/decorate-message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ messages: bodies, selectedVars: Array.from(selectedVars), channel, isAd: !!proposal.channel?.isAd }),
+        body: JSON.stringify({ messages: bodies, selectedVars: Array.from(selectedVars), channel, isAd: adEnabled }),
       });
       const data = await res.json();
       if (data.success && Array.isArray(data.messages)) {
@@ -756,7 +759,7 @@ export default function AiOperatorPage() {
         message: body,
         callback: previewData.defaultCallback,
         recipients,
-        adEnabled: !!proposal.channel.isAd,
+        adEnabled, // ★ 2026-07-22 사용자 광고표기 토글(직접발송 미러·기본 ON) — /direct-send가 D143로 사용자 선택 존중
         scheduled,
         scheduledAt,
         sendChannel: 'sms',
@@ -1121,7 +1124,7 @@ export default function AiOperatorPage() {
               const rawActiveBody = overrideText || baseBody;
               // ★ Harold 명시 (2026-05-19): 광고 메시지면 (광고) prefix + 무료거부 suffix 자동 합성 — 실제 발송 형태 미리보기
               //   원본(rawActiveBody)은 다듬기/발송 시 그대로 사용. 표시(activeBody)만 합성 — 실 발송은 /direct-send가 adEnabled=true로 자동 처리.
-              const isAd = !!proposal.channel.isAd;
+              const isAd = adEnabled; // ★ 2026-07-22 광고표기 토글 상태 — 본문·제목 (광고) 표시 + 발송 유형 단일 소스
               const rawReject = proposal.channel.rejectNumber || '';
               const formattedReject = rawReject
                 ? rawReject.replace(/[^0-9]/g, '').replace(/^(\d{3,4})(\d{3,4})(\d{4})$/, '$1-$2-$3')
@@ -1229,31 +1232,35 @@ export default function AiOperatorPage() {
                           </div>
                         )}
 
+                        {/* ★ 2026-07-22 (Harold 명시): 광고표기 on/off 토글 — 직접발송 미러·기본 ON. 끄면 (광고)/무료거부 미부착 정보성 발송(백엔드 D143이 사용자 선택 존중). SMS도 본문 (광고)에 영향 → 채널 무관 노출 */}
+                        <label className={`flex items-center justify-between gap-3 mb-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-all ${isAd ? 'bg-amber-400/15 border-amber-300/40' : 'bg-white/5 border-white/10 hover:bg-white/[0.07]'}`}>
+                          <div className="min-w-0">
+                            <div className={`text-xs font-semibold ${isAd ? 'text-amber-100' : 'text-white/70'}`}>광고표기 <span className="font-bold">(광고)</span></div>
+                            <div className="text-[10px] text-white/45 mt-0.5">{isAd ? '제목·본문 맨 앞에 (광고)+무료거부 자동 부착' : '정보성 발송 — (광고) 미부착 (광고성 문안은 법상 (광고) 표기 의무)'}</div>
+                          </div>
+                          <input type="checkbox" checked={isAd} onChange={(e) => setAdEnabled(e.target.checked)} className="w-4 h-4 accent-amber-400 flex-shrink-0" />
+                        </label>
+
                         {/* ★ 2026-07-10 (임은지 리포트): LMS/MMS 제목 확인·수정 — 발송 전 확인 불가 문제 해소. 표시 값 = 발송 값(resolveSubject) */}
                         {(activeChannel === 'LMS' || activeChannel === 'MMS') && (
                           <div className="mb-3">
-                            <label className="block text-[11px] text-white/50 mb-1">
-                              제목 — 문자 상단에 표시{isAd ? ' · 광고 발송 시 "(광고)" 자동 부착' : ''}
-                            </label>
-                            <input
-                              type="text"
-                              value={resolveSubject(safeIdx)}
-                              onChange={(e) => setSubjectOverrides((prev) => ({ ...prev, [safeIdx]: e.target.value }))}
-                              maxLength={17}
-                              placeholder="제목 입력 (최대 17자)"
-                              className="w-full px-3 py-2 rounded-xl bg-indigo-950/60 border border-white/10 text-sm text-white placeholder-white/30 focus:border-amber-300/50 focus:outline-none transition-colors"
-                            />
+                            <label className="block text-[11px] text-white/50 mb-1">제목 — 문자 상단에 표시</label>
+                            {/* ★ 2026-07-22 (Harold 명시): 광고표기 ON이면 제목 입력칸 앞에 (광고) 고정 접두 오버레이(직접발송 미러). 입력값은 순수 제목 유지 → 백엔드 buildAdSubject가 부착·이중부착 없음 */}
+                            <div className="relative">
+                              {isAd && (
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-amber-300 pointer-events-none select-none">(광고)</span>
+                              )}
+                              <input
+                                type="text"
+                                value={resolveSubject(safeIdx)}
+                                onChange={(e) => setSubjectOverrides((prev) => ({ ...prev, [safeIdx]: e.target.value }))}
+                                maxLength={17}
+                                placeholder="제목 입력 (최대 17자)"
+                                className={`w-full ${isAd ? 'pl-[54px]' : 'pl-3'} pr-3 py-2 rounded-xl bg-indigo-950/60 border border-white/10 text-sm text-white placeholder-white/30 focus:border-amber-300/50 focus:outline-none transition-colors`}
+                              />
+                            </div>
                             {!resolveSubject(safeIdx).trim() && (
                               <p className="text-[10px] text-rose-300 mt-1">제목을 입력해주세요. LMS/MMS는 제목이 필요합니다.</p>
-                            )}
-                            {/* ★ 2026-07-21 (임은지 리포트): 광고 발송 시 제목 맨 앞에 (광고) 자동 부착 — 실제 발송 제목 표시(백엔드 buildAdSubject 미러). 발송 값은 순수 제목 유지 → 이중 부착 없음 */}
-                            {isAd && resolveSubject(safeIdx).trim() && (
-                              <p className="text-[10px] text-white/45 mt-1">
-                                실제 발송 제목:{' '}
-                                <span className="text-amber-200/90 font-medium">
-                                  {/^\s*[(（]\s*광고\s*[)）]/.test(resolveSubject(safeIdx)) ? resolveSubject(safeIdx) : `(광고) ${resolveSubject(safeIdx)}`}
-                                </span>
-                              </p>
                             )}
                           </div>
                         )}
