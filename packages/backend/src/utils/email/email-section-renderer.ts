@@ -319,7 +319,7 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
     const imgTag = img
       ? `<img src="${esc(img)}" alt="${esc(it.name)}" width="100%" height="200" style="width:100%;height:200px;object-fit:cover;display:block;border:0;border-radius:${b.radius.sm}">`
       : `<div style="width:100%;height:200px;background:${b.bg};border-radius:${b.radius.sm};font-size:0;line-height:0">&nbsp;</div>`;
-    const meta = `<div style="font-size:${b.type.small.size};color:${b.text};font-weight:600;margin-top:${b.sp[2]};line-height:1.4;min-height:37px">${esc(it.name)}</div><div style="margin-top:${b.sp[1]}">${priceOf(it)}</div>`;
+    const meta = `<div style="font-size:${b.type.small.size};color:${b.text};font-weight:600;margin-top:${b.sp[2]};line-height:1.4;min-height:37px">${esc(it.name).replace(/\n/g, '<br>')}</div><div style="margin-top:${b.sp[1]}">${priceOf(it)}</div>`;
     const inner = url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${imgTag}${meta}</a>` : `${imgTag}${meta}`;
     const cardTable = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:${b.sp[3]};background:${b.cardBg};border:1px solid ${b.border};border-radius:14px">${inner}</td></tr></table>`;
     return `<td width="50%" valign="top" class="em-stack" style="padding:${b.sp[2]}">${cardTable}</td>`;
@@ -331,7 +331,7 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
       const img = emailImg(it.image_url, ctx.publicBase);
       const url = linkOf(it);
       const imgTag = img ? `<img src="${esc(img)}" alt="${esc(it.name)}" width="96" style="width:96px;height:96px;object-fit:cover;display:block;border:0;border-radius:${b.radius.sm}">` : '';
-      const meta = `<div style="font-size:${b.type.body.size};color:${b.text};font-weight:700;line-height:1.4">${esc(it.name)}</div><div style="margin-top:${b.sp[1]}">${priceOf(it)}</div>`;
+      const meta = `<div style="font-size:${b.type.body.size};color:${b.text};font-weight:700;line-height:1.4">${esc(it.name).replace(/\n/g, '<br>')}</div><div style="margin-top:${b.sp[1]}">${priceOf(it)}</div>`;
       const rowInner = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${imgTag ? `<td width="96" valign="top" style="padding-right:${b.sp[4]}">${imgTag}</td>` : ''}<td valign="middle">${url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${meta}</a>` : meta}</td></tr></table>`;
       return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[2]}"><tr><td style="padding:${b.sp[3]} ${b.sp[4]};background:${b.cardBg};border:1px solid ${b.border};border-radius:14px">${rowInner}</td></tr></table>`;
     };
@@ -347,7 +347,7 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
     const img = emailImg(it.image_url, ctx.publicBase);
     const url = linkOf(it);
     const imgTag = img ? `<img src="${esc(img)}" alt="${esc(it.name)}" style="width:100%;display:block;border:0;border-radius:${b.radius.sm}">` : '';
-    const meta = `<div style="font-family:${b.displayFont};font-size:${b.type.h3.size};color:${b.text};font-weight:700;margin-top:${b.sp[3]};line-height:1.4">${esc(it.name)}</div><div style="margin-top:${b.sp[1]}">${priceOf(it, true)}</div>`;
+    const meta = `<div style="font-family:${b.displayFont};font-size:${b.type.h3.size};color:${b.text};font-weight:700;margin-top:${b.sp[3]};line-height:1.4">${esc(it.name).replace(/\n/g, '<br>')}</div><div style="margin-top:${b.sp[1]}">${priceOf(it, true)}</div>`;
     const inner = url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${imgTag}${meta}</a>` : `${imgTag}${meta}`;
     focusHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[2]}"><tr><td style="padding:${b.sp[4]};background:${b.cardBg};border:1px solid ${b.border};border-radius:14px">${inner}</td></tr></table>`;
   }

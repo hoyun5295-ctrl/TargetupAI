@@ -89,6 +89,20 @@ describe('DM 편집기↔발행 속성 계약 (재발 방지책 1)', () => {
     }
   });
 
+  // ── 상품명 줄바꿈: 제품명 개행이 발행물에 <br>로 반영 (2026-07-22 직원 요청 — DM+이메일 공용) ──
+  describe('상품명 줄바꿈 (제품명 \\n → <br>)', () => {
+    const nlProducts = [
+      { id: 'p1', image_url: 'https://ex.com/a.jpg', name: '줄1\n줄2', price: 1000 },
+      { id: 'p2', image_url: 'https://ex.com/b.jpg', name: '다른\n상품', price: 2000 },
+    ];
+    for (const t of ['classic', 'focus', 'list']) {
+      it(`product_carousel/${t} — 상품명 개행이 <br>로 반영`, () => {
+        const html = renderSection(mk('product_carousel', { products: nlProducts }, t === 'classic' ? {} : ({ treatment: t } as any)), {} as any);
+        expect(html, `${t} 구도가 상품명 개행을 <br>로 반영 안 함`).toContain('줄1<br>줄2');
+      });
+    }
+  });
+
   // ── 히어로 이미지 맞춤: 완성 포스터를 히어로에 통짜(잘림 X)로 (2026-07-22) ──
   describe('히어로 이미지 맞춤 (완성 포스터 안 잘림)', () => {
     for (const fit of DM_IMAGE_FITS) {

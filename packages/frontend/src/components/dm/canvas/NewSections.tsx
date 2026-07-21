@@ -119,7 +119,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
           <div style={{ width: '100%', background: cardBg, border: '1px solid var(--dm-neutral-200)', borderRadius: 18, overflow: 'hidden', boxShadow: 'var(--dm-shadow-md)' }}>
             {first.image_url ? <img src={dmImageUrl(first.image_url)} alt={first.name} style={{ width: '100%', height: focusBigH, display: 'block', ...imgFit }} /> : <div style={{ width: '100%', height: focusBigH, background: 'var(--dm-neutral-100)' }} />}
             <div style={{ padding: '14px 16px 16px', background: cardBg }}>
-              <div style={{ fontSize: 'var(--dm-fs-h3)', fontWeight: 700, color: 'var(--dm-neutral-900)', lineHeight: 1.4, overflowWrap: 'break-word' }}>{first.name}</div>
+              <div style={{ fontSize: 'var(--dm-fs-h3)', fontWeight: 700, color: 'var(--dm-neutral-900)', lineHeight: 1.4, overflowWrap: 'break-word', whiteSpace: 'pre-line' }}>{first.name}</div>
               <div style={{ marginTop: 6 }}>{priceRow(first, true)}</div>
             </div>
           </div>
@@ -127,7 +127,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
             <div key={p.id || i} style={{ width: 'calc(50% - 6px)', background: cardBg, border: '1px solid var(--dm-neutral-200)', borderRadius: 14, overflow: 'hidden', boxShadow: 'var(--dm-shadow-sm)', display: 'flex', flexDirection: 'column' }}>
               {p.image_url ? <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: '100%', height: focusRestH, display: 'block', flexShrink: 0, ...imgFit }} /> : <div style={{ width: '100%', height: focusRestH, background: 'var(--dm-neutral-100)', flexShrink: 0 }} />}
               <div style={{ padding: '8px 10px 10px', flex: 1, display: 'flex', flexDirection: 'column', background: cardBg }}>
-                <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4, overflowWrap: 'break-word' }}>{p.name}</div>
+                <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4, overflowWrap: 'break-word', whiteSpace: 'pre-line' }}>{p.name}</div>
                 <div style={{ marginTop: 'auto', paddingTop: 4 }}>{priceRow(p, false)}</div>
               </div>
             </div>
@@ -145,7 +145,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
             <div key={p.id || i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', background: cardBg, border: '1px solid var(--dm-neutral-200)', borderRadius: 14 }}>
               {p.image_url ? <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: listThumbH, height: listThumbH, borderRadius: 12, flexShrink: 0, ...imgFit }} /> : <div style={{ width: listThumbH, height: listThumbH, background: 'var(--dm-neutral-100)', borderRadius: 12, flexShrink: 0 }} />}
               <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4, overflowWrap: 'break-word' }}>{p.name}</div>
+                <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4, overflowWrap: 'break-word', whiteSpace: 'pre-line' }}>{p.name}</div>
                 <div style={{ marginTop: 4 }}>{priceRow(p, false)}</div>
               </div>
               {p.link_url ? <span aria-hidden="true" style={{ color: 'var(--dm-neutral-400)', flexShrink: 0 }}>→</span> : null}
@@ -182,7 +182,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
                   <div style={{ width: '100%', height: imgH, background: 'var(--dm-neutral-100)', flexShrink: 0 }} />
                 )}
                 <div style={{ padding: '10px 12px 12px', flex: 1, display: 'flex', flexDirection: 'column', background: cardBg }}>
-                  <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4 }}>{p.name}</div>
+                  <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4, whiteSpace: 'pre-line' }}>{p.name}</div>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginTop: 'auto', paddingTop: 4, flexWrap: 'wrap', fontVariantNumeric: 'tabular-nums' }}>
                     {rate !== null && (
                       <span style={{ fontSize: 'var(--dm-fs-h3)', color: 'var(--dm-error)', fontWeight: 800 }}>{rate}%</span>

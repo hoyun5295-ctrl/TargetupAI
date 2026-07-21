@@ -1,5 +1,5 @@
 import type { ProductCarouselProps, ProductCarouselItem } from '../../../../utils/dm-section-defaults';
-import { Field, TextInput, Toggle, ImageUploader, Select, ColorOverride } from '../FormControls';
+import { Field, TextInput, TextArea, Toggle, ImageUploader, Select, ColorOverride } from '../FormControls';
 import { RepeatableList } from '../RepeatableList';
 import type { EditorProps } from '../SectionPropsEditor';
 import { useState } from 'react';
@@ -35,7 +35,8 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
         // ★ 브랜드+제품명 검색 — 스샷 조립 시 캐러셀 제목=브랜드(적중률 향상)
-        body: JSON.stringify({ name: nm, brand: (props.title || '').trim() }),
+        // ★ 2026-07-22 상품명 줄바꿈 허용 → 검색 쿼리는 줄바꿈을 공백으로 평탄화(네이버 후보 검색 깨짐 방지). 표시용 이름엔 \n 유지.
+        body: JSON.stringify({ name: nm.replace(/\s+/g, ' ').trim(), brand: (props.title || '').trim() }),
       });
       const data = await res.json();
       if (data?.configured === false) {
@@ -93,7 +94,7 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
     try {
       // ★ 2026-07-16 M3 — 상품 링크가 있으면 함께 전달 → 몰 상품번호 ID 확정 매칭 (이름 표기 달라도 그 상품)
       const linkParam = (products[i]?.link_url || '').trim();
-      const res = await fetch(`/api/mall-products/match?name=${encodeURIComponent(nm)}${linkParam ? `&link=${encodeURIComponent(linkParam)}` : ''}`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+      const res = await fetch(`/api/mall-products/match?name=${encodeURIComponent(nm.replace(/\s+/g, ' ').trim())}${linkParam ? `&link=${encodeURIComponent(linkParam)}` : ''}`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
       const data = await res.json();
       const p = data?.product;
       if (p) {
@@ -193,7 +194,7 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
             <>
               <ImageUploader label="상품 이미지" value={it.image_url} onChange={(url) => setItem(i, { image_url: url })} />
               <div style={{ height: 6 }} />
-              <TextInput value={it.name} onChange={(v) => setItem(i, { name: v })} placeholder="상품명" />
+              <TextArea value={it.name} onChange={(v) => setItem(i, { name: v })} placeholder="상품명 (원하는 위치에서 엔터로 줄바꿈)" rows={2} />
               <div style={{ height: 6 }} />
               <button
                 type="button"

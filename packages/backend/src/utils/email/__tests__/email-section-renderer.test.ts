@@ -44,6 +44,11 @@ describe('renderEmailSections — 디자인 2.0 골격', () => {
     expect(html).toMatch(/background:#[0-9a-f]{6};background-image:linear-gradient/);
   });
 
+  it('상품명 줄바꿈 — product_carousel 제품명 개행이 <br>로 반영 (2026-07-22 직원 요청, DM 미러)', () => {
+    const html = renderEmailSections([sec('product_carousel', { products: [{ image_url: 'https://ex.com/a.jpg', name: '줄1\n줄2', price: 1000 }] }, 0)], {});
+    expect(html).toContain('줄1<br>줄2');
+  });
+
   it('쿠폰 = 티켓 2톤 (COUPON 인장 + 워시 본권 + 절취 대시 + 코드 스터브)', () => {
     const html = renderEmailSections(SAMPLE, {});
     expect(html).toContain('COUPON');

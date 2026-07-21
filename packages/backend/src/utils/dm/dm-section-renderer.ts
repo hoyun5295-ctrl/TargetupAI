@@ -747,7 +747,7 @@ function renderProductCarousel(p: any, treatment?: string): string {
     const card = `
       ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:${imgH}px;${fitCss};display:block;flex-shrink:0"/>` : `<div style="width:100%;height:${imgH}px;background:var(--dm-neutral-100);flex-shrink:0"></div>`}
       <div style="padding:10px 12px 12px;flex:1;display:flex;flex-direction:column;background:${cardBg}">
-        <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4">${escapeHtml(it.name || '')}</div>
+        <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4">${escapeHtml(it.name || '').replace(/\n/g, '<br>')}</div>
         ${priceHtml}
       </div>`;
     const cardWrapStyle = `width:calc(50% - 8px);max-width:220px;box-sizing:border-box;display:flex;flex-direction:column;text-decoration:none;color:inherit;background:${cardBg};border:1px solid var(--dm-neutral-200);border-radius:16px;overflow:hidden;box-shadow:var(--dm-shadow-sm)`;
@@ -815,13 +815,13 @@ function renderProductFocus(p: any, products: any[]): string {
   const bigCard = wrapLink(first, `
     ${first.image_url ? `<img src="${escapeHtml(publicImageUrl(first.image_url))}" loading="lazy" alt="${escapeHtml(first.name || '')}" style="width:100%;height:${bigH}px;${fitCss};display:block"/>` : `<div style="width:100%;height:${bigH}px;background:var(--dm-neutral-100)"></div>`}
     <div style="padding:14px 16px 16px;background:${cardBg}">
-      <div style="font-size:var(--dm-fs-h3);font-weight:700;color:var(--dm-neutral-900);line-height:1.4;overflow-wrap:break-word">${escapeHtml(first.name || '')}</div>
+      <div style="font-size:var(--dm-fs-h3);font-weight:700;color:var(--dm-neutral-900);line-height:1.4;overflow-wrap:break-word">${escapeHtml(first.name || '').replace(/\n/g, '<br>')}</div>
       <div style="margin-top:6px">${productPriceHtml(first, true)}</div>
     </div>`, `display:block;text-decoration:none;color:inherit;background:${cardBg};border:1px solid var(--dm-neutral-200);border-radius:18px;overflow:hidden;box-shadow:var(--dm-shadow-md);width:100%`);
   const restItems = rest.map((it: any) => wrapLink(it, `
       ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:${restH}px;${fitCss};display:block;flex-shrink:0"/>` : `<div style="width:100%;height:${restH}px;background:var(--dm-neutral-100);flex-shrink:0"></div>`}
       <div style="padding:8px 10px 10px;flex:1;display:flex;flex-direction:column;background:${cardBg}">
-        <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4;overflow-wrap:break-word">${escapeHtml(it.name || '')}</div>
+        <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4;overflow-wrap:break-word">${escapeHtml(it.name || '').replace(/\n/g, '<br>')}</div>
         <div style="margin-top:auto;padding-top:4px">${productPriceHtml(it, false)}</div>
       </div>`, `width:calc(50% - 6px);box-sizing:border-box;display:flex;flex-direction:column;text-decoration:none;color:inherit;background:${cardBg};border:1px solid var(--dm-neutral-200);border-radius:14px;overflow:hidden;box-shadow:var(--dm-shadow-sm)`)).join('');
   return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-6) var(--dm-sp-5)${sectionBg}">
@@ -841,7 +841,7 @@ function renderProductList(p: any, products: any[]): string {
     const inner = `
       ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:${thumbH}px;height:${thumbH}px;${fitCss};border-radius:12px;flex-shrink:0"/>` : `<div style="width:${thumbH}px;height:${thumbH}px;background:var(--dm-neutral-100);border-radius:12px;flex-shrink:0"></div>`}
       <div style="flex:1;min-width:0;text-align:left">
-        <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4;overflow-wrap:break-word">${escapeHtml(it.name || '')}</div>
+        <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4;overflow-wrap:break-word">${escapeHtml(it.name || '').replace(/\n/g, '<br>')}</div>
         <div style="margin-top:4px">${productPriceHtml(it, false)}</div>
       </div>
       ${it.link_url ? `<span aria-hidden="true" style="color:var(--dm-neutral-400);flex-shrink:0">→</span>` : ''}`;
