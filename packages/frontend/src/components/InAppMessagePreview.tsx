@@ -49,6 +49,9 @@ export interface InAppMessagePreviewProps {
   design?: Record<string, any> | null;
   /** ★ 2026-07-21 포스터 캐러셀 — 슬라이드 2장 이상이면 좌우 스와이프 미리보기(SDK 미러) */
   posterSlides?: any[] | null;
+  /** ★ 2026-07-22 테스트저장(영업용 이미지 캡처) — true면 토글/캡션 등 UI 크롬을 숨기고 배경 웹을 블러 처리.
+   *  팝업 렌더 자체는 미변경(실렌더 미러 유지). 미지정=undefined면 기존 편집기 미리보기와 완전 동일. */
+  captureMode?: boolean;
 }
 
 /** 미리보기는 관리자 화면 = 백엔드와 같은 도메인. 상대경로(/api/..., /uploads/...)를 그대로 둬 현재 origin으로 로드한다.
@@ -359,7 +362,7 @@ function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Varian
 }
 
 /** 더미 자사몰 배경 — 인앱이 뜨는 맥락 (라이트/다크 몰 양쪽) */
-function DummySite({ dark }: { dark?: boolean }) {
+function DummySite({ dark, blur }: { dark?: boolean; blur?: boolean }) {
   const bg = dark ? '#101218' : '#f4f4f6';
   const bar = dark ? '#171a22' : '#fff';
   const barBorder = dark ? '#232734' : '#ebebee';
@@ -368,7 +371,7 @@ function DummySite({ dark }: { dark?: boolean }) {
   const card = dark ? '#171a22' : '#fff';
   const cardBorder = dark ? '#232734' : '#ededf1';
   return (
-    <div style={{ position: 'absolute', inset: 0, background: bg, overflow: 'hidden' }}>
+    <div style={{ position: 'absolute', inset: 0, background: bg, overflow: 'hidden', ...(blur ? { filter: 'blur(3px)', transform: 'scale(1.06)' } : {}) }}>
       <div style={{ height: 34, background: bar, borderBottom: `1px solid ${barBorder}`, display: 'flex', alignItems: 'center', padding: '0 14px', gap: 8 }}>
         <div style={{ width: 46, height: 9, borderRadius: 3, background: chip }} />
         <div style={{ flex: 1 }} />
@@ -408,7 +411,8 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
 
   return (
     <div>
-      {/* 디바이스 + 자사몰 모드 토글 */}
+      {/* 디바이스 + 자사몰 모드 토글 (captureMode = 영업용 이미지 저장이라 UI 크롬 숨김) */}
+      {!props.captureMode && (
       <div style={{ display: 'flex', gap: 6, marginBottom: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
         {(['desktop', 'mobile'] as const).map((d) => {
           const Icon = d === 'desktop' ? Monitor : Smartphone;
@@ -431,7 +435,8 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
           {siteDark ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />} 몰 {siteDark ? '다크' : '라이트'}
         </button>
       </div>
-      {props.theme === 'auto' && useBlocks && (
+      )}
+      {props.theme === 'auto' && useBlocks && !props.captureMode && (
         <div className="text-[10px] text-white/40 text-center -mt-1 mb-2">자동 테마 = 고객 자사몰의 라이트/다크 모드를 따라갑니다 — 위 토글로 양쪽 확인</div>
       )}
 
@@ -457,15 +462,17 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
           </div>
           {/* 콘텐츠 (더미 사이트 + 인앱 오버레이) */}
           <div style={{ position: 'relative', height: isMobile ? 580 : 540, overflow: 'hidden' }}>
-            <DummySite dark={siteDark} />
+            <DummySite dark={siteDark} blur={props.captureMode} />
             <Overlay variant={variant} themeTokens={themeTokens} treatment={treatment} {...props} />
           </div>
         </div>
       </div>
 
+      {!props.captureMode && (
       <div className="text-[10px] text-white/30 italic mt-2.5 text-center">
         Data source — 선택한 형태·내용 그대로 자사몰에 표시됩니다
       </div>
+      )}
     </div>
   );
 }
@@ -490,6 +497,8 @@ export interface AppInAppPreviewProps {
   posterSlides?: any[] | null;
   /** ★ 2026-07-21 캐러셀 슬라이드 문안 변수 치환(단일 포스터는 호출부가 이미 치환된 title/body 전달) */
   replaceVars?: (t: string) => string;
+  /** ★ 2026-07-22 테스트저장 — true면 하단 캡션 숨김(영업용 이미지 캡처). 폰 프레임 렌더는 미변경. */
+  captureMode?: boolean;
 }
 
 /** 더미 앱 화면 — 인앱이 뜨는 맥락 (라이트 앱 리스트) */
@@ -516,7 +525,7 @@ function DummyAppScreen() {
   );
 }
 
-export function AppInAppPreview({ template, title, body, imageUrl, badge, buttons, backgroundColor, textColor, design, posterSlides, replaceVars }: AppInAppPreviewProps) {
+export function AppInAppPreview({ template, title, body, imageUrl, badge, buttons, backgroundColor, textColor, design, posterSlides, replaceVars, captureMode }: AppInAppPreviewProps) {
   // ★ 2026-07-18 포스터형 v2 — 선택 서체 실로딩 (웹 미리보기 useEffect와 동일 가드)
   const appFontsUrl = inappGoogleFontsUrl(design?.font_display, undefined);
   useEffect(() => {
@@ -657,9 +666,11 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
           </div>
         </div>
       </div>
+      {!captureMode && (
       <div className="text-[10px] text-white/30 italic mt-2.5 text-center">
         Data source — 앱 실렌더와 동일 요소(이미지·배지·제목·본문·버튼·정렬) 표시 · 닫기/다시 보지 않기는 앱이 통합 계약을 구현한 빌드에서 동작
       </div>
+      )}
     </div>
   );
 }

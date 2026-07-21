@@ -166,6 +166,10 @@ export default function EmailCampaignsPage() {
   // ★ 2026-06-13: AI 성과 진단 / 미오픈자 SMS 모달
   const [insightModal, setInsightModal] = useState<{ campaign: EmailCampaign } | null>(null);
   const [nonOpenerModal, setNonOpenerModal] = useState<{ campaign: EmailCampaign } | null>(null);
+  // ★ 2026-07-22 테스트발송 — 완성된 이 캠페인을 직접 입력 최대 3개 주소로 발송(영업/자체 점검). SMTP 연동 + 완성 캠페인만. (광고) 없음·통계 미반영·발송 무과금.
+  const [campaignTest, setCampaignTest] = useState<EmailCampaign | null>(null);
+  const [campaignTestEmails, setCampaignTestEmails] = useState<string[]>(['', '', '']);
+  const [campaignTestSending, setCampaignTestSending] = useState(false);
   // AI 캠페인 발송 확정 30크레딧 확인
   const [creditConfirm, setCreditConfirm] = useState<{ campaign: EmailCampaign; payload: any; desc: string } | null>(null);
   // 비주얼 빌더 에디터 (sections 기반)
@@ -343,6 +347,45 @@ export default function EmailCampaignsPage() {
       showToast(e?.message || '테스트 발송 중 오류', 'error');
     } finally {
       setTestSending(false);
+    }
+  };
+
+  // ★ 2026-07-22 테스트발송 — 완성된 캠페인 자체를 직접 입력 주소로 발송. (SMTP 점검용 handleTestSend와 별개)
+  const openCampaignTest = (c: EmailCampaign) => {
+    setCampaignTestEmails(['', '', '']);
+    setCampaignTest(c);
+  };
+  const handleCampaignTestSend = async () => {
+    if (!campaignTest) return;
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emails = campaignTestEmails.map((e) => e.trim()).filter(Boolean);
+    if (emails.length === 0) {
+      showToast('보낼 이메일 주소를 1개 이상 입력해주세요', 'warning');
+      return;
+    }
+    if (emails.some((e) => !emailPattern.test(e))) {
+      showToast('이메일 형식이 올바르지 않은 주소가 있습니다', 'warning');
+      return;
+    }
+    setCampaignTestSending(true);
+    try {
+      const res = await fetch(`/api/email/campaigns/${campaignTest.id}/test-send`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ emails }),
+      });
+      const data = await res.json();
+      if (handle503(data)) return;
+      if (data.success) {
+        showToast(`테스트발송 완료 — ${data.sent}건 발송 (수신함·스팸 폴더 확인)`, 'success');
+        setCampaignTest(null);
+      } else {
+        showToast(data.error || '테스트발송 실패', 'error');
+      }
+    } catch (e: any) {
+      showToast(e?.message || '테스트발송 중 오류', 'error');
+    } finally {
+      setCampaignTestSending(false);
     }
   };
 
@@ -988,6 +1031,15 @@ export default function EmailCampaignsPage() {
                   >
                     <Edit2 className="w-3 h-3" /> 수정
                   </button>
+                  {smtpConfigured && c.completed && (
+                    <button
+                      onClick={() => openCampaignTest(c)}
+                      className="inline-flex items-center gap-1 text-[11px] text-teal-300 border border-teal-400/20 hover:bg-teal-500/10 px-2.5 py-1.5 rounded-lg"
+                      title="이 이메일을 직접 입력한 주소(최대 3개)로 테스트 발송합니다 — 광고 표기 없음"
+                    >
+                      <Send className="w-3 h-3" /> 테스트발송
+                    </button>
+                  )}
                   <button
                     onClick={() => handleDeleteCampaign(c)}
                     className="inline-flex items-center gap-1 text-[11px] text-rose-300 border border-rose-400/20 hover:bg-rose-500/10 px-2.5 py-1.5 rounded-lg"
@@ -1095,6 +1147,43 @@ export default function EmailCampaignsPage() {
               >
                 {testSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 {testSending ? '발송 중...' : '테스트 발송'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ★ 2026-07-22 테스트발송 — 완성된 이 캠페인을 직접 입력 최대 3개 주소로 발송(영업/자체 점검). (광고) 없음·통계 미반영. */}
+      {campaignTest && (
+        <div className="fixed inset-0 z-[2000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between px-5 py-3 border-b border-white/10">
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2"><Send className="w-4 h-4 text-teal-300" /> 테스트발송</h3>
+                <p className="text-[11px] text-white/50 mt-1 truncate">{campaignTest.name}</p>
+              </div>
+              <button onClick={() => setCampaignTest(null)} disabled={campaignTestSending} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10 disabled:opacity-40 shrink-0" aria-label="닫기"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-5 space-y-3">
+              <p className="text-xs text-white/50">이 이메일을 입력한 주소로 그대로 보냅니다 (최대 3개). 광고 표기 없이 발송되며 통계에 반영되지 않습니다.</p>
+              {[0, 1, 2].map((i) => (
+                <input
+                  key={i}
+                  type="email"
+                  value={campaignTestEmails[i]}
+                  onChange={(e) => setCampaignTestEmails((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !campaignTestSending) handleCampaignTestSend(); }}
+                  placeholder={`받는 사람 ${i + 1}${i === 0 ? ' (필수)' : ' (선택)'}`}
+                  className="w-full px-3 py-2 bg-violet-950/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-teal-400/50"
+                />
+              ))}
+              <button
+                onClick={handleCampaignTestSend}
+                disabled={campaignTestSending || campaignTestEmails.every((e) => !e.trim())}
+                className="w-full px-4 py-2 bg-teal-500/30 hover:bg-teal-500/50 disabled:opacity-40 disabled:cursor-not-allowed text-teal-100 text-sm font-medium rounded-lg flex items-center justify-center gap-1.5"
+              >
+                {campaignTestSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                {campaignTestSending ? '발송 중...' : '테스트발송'}
               </button>
             </div>
           </div>

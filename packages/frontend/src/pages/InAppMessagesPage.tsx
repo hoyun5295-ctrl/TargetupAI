@@ -21,6 +21,9 @@ import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
 // 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
 import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
 import { InAppMessagePreview, AppInAppPreview } from '../components/InAppMessagePreview';
+// ★ 2026-07-22 테스트저장 — 웹·앱 실물을 PNG로 저장(영업용). 정적 import 필수(난독화×동적 import 사고 회피 — LESSONS_FRONTEND 2026-07-18).
+import { toPng } from 'html-to-image';
+import { useAuthStore } from '../stores/authStore';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
 import TargetExtractModal from '../components/TargetExtractModal';
@@ -1690,6 +1693,32 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
   const [assetPickOpen, setAssetPickOpen] = useState(false);
   const pickToast = useToast();
   const [activeTab, setActiveTab] = useState<'content' | 'design' | 'target'>('content');
+  // ★ 2026-07-22 테스트저장(영업용) — 담당 아이디에게만 노출. 웹·앱 실물을 실제 크기로 렌더해 PNG 저장(발송 아님·크레딧 무관).
+  const testSaveUser = useAuthStore((s) => s.user);
+  const canTestSave = ['hoyun', 'psy5868', 'mobile'].includes(testSaveUser?.loginId || '');
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const webShotRef = useRef<HTMLDivElement>(null);
+  const appShotRef = useRef<HTMLDivElement>(null);
+  const [savingShot, setSavingShot] = useState<'web' | 'app' | null>(null);
+  const saveShot = async (kind: 'web' | 'app') => {
+    const node = kind === 'web' ? webShotRef.current : appShotRef.current;
+    if (!node || savingShot) return;
+    setSavingShot(kind);
+    try {
+      // cacheBust 미사용 — 이미 화면에 로드된 이미지를 재사용(외부 서명 URL에 쿼리 추가 시 403 회피). Codex M1.
+      const dataUrl = await toPng(node, { pixelRatio: 2, backgroundColor: '#0f172a' });
+      const base = (editing.title || 'inapp').replace(/[^\w가-힣-]+/g, '_').slice(0, 40) || 'inapp';
+      const a = document.createElement('a');
+      a.download = `${base}_${kind === 'web' ? '웹' : '앱'}.png`;
+      a.href = dataUrl;
+      a.click();
+      pickToast.success(`${kind === 'web' ? '웹' : '앱'} 이미지 저장 완료`);
+    } catch {
+      pickToast.error('이미지 저장 실패 — 잠시 후 다시 시도해주세요');
+    } finally {
+      setSavingShot(null);
+    }
+  };
   // ★ 2026-07-14 디자인 4.0 — 정예 템플릿(서버 design-core 컴파일 — FE 복제 없음. 실패 = 그룹 미노출 폴백)
   const [eliteTemplates, setEliteTemplates] = useState<Array<GoldenInAppTemplate & { difference?: string }>>([]);
 
@@ -3076,12 +3105,89 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
 
         {/* 푸터 */}
         <div className="sticky bottom-0 bg-slate-900/60 border-t border-white/10 px-6 py-3 flex justify-end gap-2">
+          {canTestSave && (
+            <button
+              onClick={() => setCaptureOpen(true)}
+              className="mr-auto inline-flex items-center gap-1.5 px-4 py-2 text-sm text-violet-200 hover:bg-violet-500/10 border border-violet-400/25 rounded-lg"
+              title="영업 담당자에게 보낼 웹·앱 실물 이미지를 저장합니다 (발송 아님)"
+            >
+              <Download className="w-4 h-4" /> 테스트저장
+            </button>
+          )}
           <button onClick={() => setEditing(null)} className="px-4 py-2 text-sm text-white/70 hover:bg-white/5 rounded-lg">취소</button>
           <button onClick={onSave} className="px-5 py-2 bg-gradient-to-r from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600 text-white text-sm font-bold rounded-lg">
             저장
           </button>
         </div>
       </div>
+      {/* ★ 2026-07-22 테스트저장 — 웹·앱 실물을 실제 크기로 렌더해 PNG 저장(영업용, 발송 아님). 백드롭 클릭 닫힘 없음(작업 손실 방지). */}
+      {captureOpen && (
+        <div className="fixed inset-0 z-[2000] flex items-start justify-center bg-black/75 backdrop-blur-sm px-4 py-8 overflow-y-auto">
+          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-5xl w-full my-auto">
+            <div className="sticky top-0 bg-slate-900/95 border-b border-white/10 px-6 py-4 flex items-start justify-between rounded-t-2xl">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2"><Download className="w-4.5 h-4.5 text-violet-300" /> 테스트 이미지 저장 — 웹·앱 실물</h3>
+                <p className="text-[11px] text-white/50 mt-1">담당자에게 보낼 이미지입니다. 각 [이미지 저장]으로 PNG를 내려받아 이메일에 첨부하세요. (실제 발송이 아닙니다)</p>
+              </div>
+              <button onClick={() => setCaptureOpen(false)} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10 shrink-0" aria-label="닫기"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-white/70 flex items-center gap-1.5"><Globe className="w-3.5 h-3.5" /> 웹 (자사몰 브라우저)</span>
+                  <button onClick={() => saveShot('web')} disabled={savingShot !== null} className="inline-flex items-center gap-1.5 text-xs font-semibold bg-violet-500/25 hover:bg-violet-500/40 text-violet-100 border border-violet-400/30 px-3 py-1.5 rounded-lg disabled:opacity-50">
+                    {savingShot === 'web' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} 이미지 저장
+                  </button>
+                </div>
+                <div ref={webShotRef} style={{ background: '#0f172a', padding: 16, borderRadius: 12 }}>
+                  <InAppMessagePreview
+                    template={(editing.template || 'top_banner') as string}
+                    title={renderedTitle}
+                    body={renderedBody}
+                    imageUrl={editing.image_url}
+                    badge={editing.badge_text}
+                    buttons={(editing.buttons || []).map((b) => ({ ...b, label: replaceVars(b.label, sampleCustomer) }))}
+                    backgroundColor={editing.background_color || '#4f46e5'}
+                    textColor={editing.text_color || '#ffffff'}
+                    blocks={hasBlocks ? blocks : undefined}
+                    theme={editing.theme}
+                    accentColor={editing.accent_color}
+                    cardStyle={editing.card_style}
+                    design={editing.design}
+                    posterSlides={assemblePosterSlides(editing)}
+                    replaceVars={(t) => replaceVars(t, sampleCustomer)}
+                    captureMode
+                  />
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-white/70 flex items-center gap-1.5"><Smartphone className="w-3.5 h-3.5" /> 앱 (네이티브)</span>
+                  <button onClick={() => saveShot('app')} disabled={savingShot !== null} className="inline-flex items-center gap-1.5 text-xs font-semibold bg-violet-500/25 hover:bg-violet-500/40 text-violet-100 border border-violet-400/30 px-3 py-1.5 rounded-lg disabled:opacity-50">
+                    {savingShot === 'app' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} 이미지 저장
+                  </button>
+                </div>
+                <div ref={appShotRef} style={{ background: '#0f172a', padding: 16, borderRadius: 12 }}>
+                  <AppInAppPreview
+                    template={(editing.template || 'bottom_banner') as string}
+                    title={renderedTitle}
+                    body={renderedBody}
+                    imageUrl={editing.image_url}
+                    badge={editing.badge_text}
+                    buttons={(editing.buttons || []).map((b) => ({ ...b, label: replaceVars(b.label, sampleCustomer) }))}
+                    backgroundColor={editing.background_color || '#4f46e5'}
+                    textColor={editing.text_color || '#ffffff'}
+                    design={editing.design}
+                    posterSlides={assemblePosterSlides(editing)}
+                    replaceVars={(t) => replaceVars(t, sampleCustomer)}
+                    captureMode
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {/* ★ 2026-07-18 P2 — CTA 몰 상품 픽커: 선택 상품 URL을 대상 버튼에 자동 주입 (+이미지 비어 있으면 상품 이미지 채움) */}
       <MallProductPickerModal
         open={mallPickTarget !== null}

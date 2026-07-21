@@ -60,6 +60,7 @@ import {
   getSmtpConfigPublic,
   clearSmtpConfig,
   sendTestEmail,
+  sendEmail,
   isSmtpConfigured,
 } from '../utils/company-smtp-client';
 import {
@@ -83,7 +84,7 @@ import {
   type EmailScenarioKey,
 } from '../utils/email-ai';
 // 비주얼 빌더: DM Section[] → 이메일 안전 HTML 렌더 + 회사 브랜드킷
-import { renderEmailSections, extractEmailText } from '../utils/email/email-section-renderer';
+import { renderEmailSections, extractEmailText, EMAIL_FOOTER_SLOT } from '../utils/email/email-section-renderer';
 // ★ 2026-07-13 디자인 3.0 — 캠페인 단위 design(테마·아트디렉션·프리헤더) 입력 정규화(단일 지점)
 import { normalizeEmailDesign } from '../utils/email/email-tokens';
 import { resolveEmailSectionsForCustomer } from '../utils/email/email-personalization';
@@ -724,6 +725,79 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
     if (handleEncryptionKeyError(err, res)) return;
     const status = err?.message?.includes('0건') || err?.message?.includes('필수') || err?.message?.includes('미완료') ? 400 : 500;
     return res.status(status).json({ success: false, error: err?.message || '발송 실패' });
+  }
+});
+
+// ★ 2026-07-22 테스트발송 — 완성된 캠페인을 직접 입력 최대 3개 주소로 발송(영업/자체 점검용).
+//   실발송 엔진(sendEmailCampaign)을 안 거쳐 (광고)·수신거부 footer·추적·통계 미반영. 저수준 sendEmail 재사용.
+//   완성(50크레딧) 게이트는 실발송과 동일 — 발송 자체는 무과금(크레딧은 완성 시점에 이미 차감).
+//   신규 DB 컬럼/JOIN 없음(기존 getEmailCampaign·isEmailCampaignCompleted·isSmtpConfigured 재사용).
+router.post('/campaigns/:id/test-send', async (req: Request, res: Response) => {
+  const auth = await ensureEmailAccess(req, res);
+  if (!auth) return;
+  try {
+    // SMTP 연동 필수 — 회사 SMTP로 발송
+    if (!(await isSmtpConfigured(auth.companyId))) {
+      return res.status(400).json({ success: false, error: '회사 SMTP를 먼저 설정해주세요.', code: 'SMTP_NOT_CONFIGURED' });
+    }
+
+    const campaign = await getEmailCampaign(auth.companyId, req.params.id, auth.ownerId);
+    if (!campaign) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
+
+    // 완성 저장(50크레딧) 후에만 — 실발송과 동일 게이트(방어). 미완성이면 안내.
+    if (!(await isEmailCampaignCompleted(auth.companyId, campaign.id))) {
+      return res.status(400).json({
+        success: false,
+        error: '완성 저장(50크레딧) 후 테스트발송할 수 있습니다. 편집기에서 [완성 저장]을 눌러주세요.',
+        code: 'CAMPAIGN_NOT_COMPLETED',
+      });
+    }
+
+    // 직접 입력 수신 주소 최대 3개 (중복·형식 정리)
+    const rawList = Array.isArray(req.body?.emails) ? req.body.emails : [];
+    if (rawList.length > 3) {
+      return res.status(400).json({ success: false, error: '테스트발송은 최대 3개 주소까지 가능합니다.' });
+    }
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emails = Array.from(new Set(
+      rawList.map((e: any) => String(e || '').trim().toLowerCase()).filter((e: string) => emailPattern.test(e)),
+    )).slice(0, 3) as string[];
+    if (emails.length === 0) {
+      return res.status(400).json({ success: false, error: '유효한 이메일 주소를 1개 이상 입력해주세요 (최대 3개).' });
+    }
+
+    // (광고)·수신거부 footer는 실발송 엔진에서만 부착 — 테스트발송은 저장값 그대로.
+    //   htmlBody의 광고 footer 슬롯 마커만 제거(HTML 주석이라 비노출이나 정리 차원). 추적 픽셀·통계 미반영.
+    const html = String(campaign.htmlBody || '').split(EMAIL_FOOTER_SLOT).join('');
+    const subject = String(campaign.subject || '');
+
+    let lastErr: any = null;
+    const results: Array<{ email: string; ok: boolean }> = [];
+    for (const email of emails) {
+      try {
+        await sendEmail({ companyId: auth.companyId, to: email, subject, htmlBody: html, textBody: campaign.textBody || undefined });
+        results.push({ email, ok: true });
+      } catch (e: any) {
+        lastErr = e;
+        console.error(`[Email /test-send] 발송 실패 (${email}):`, e?.message);
+        results.push({ email, ok: false });
+      }
+    }
+    const sent = results.filter((r) => r.ok).length;
+    // 감사 로그 — 영업용 테스트발송 추적(누가/어떤 캠페인/몇 건). 반복 발송 모니터링용.
+    console.log(`[Email /test-send] company=${auth.companyId} user=${auth.userId} campaign=${campaign.id} sent=${sent}/${emails.length}`);
+    if (sent === 0) {
+      // 전량 실패가 SMTP 암호화 키/마이그레이션 문제면 실발송과 동일하게 분류(503) — 일반 502로 뭉개지 않게(Codex M2).
+      if (lastErr && handleEncryptionKeyError(lastErr, res)) return;
+      if (lastErr && handleDbMigrationError(lastErr, res, 'companies')) return;
+      return res.status(502).json({ success: false, error: '테스트발송에 실패했습니다. SMTP 설정을 확인해주세요.', results });
+    }
+    return res.json({ success: true, sent, total: emails.length, results });
+  } catch (err: any) {
+    console.error('[Email /campaigns/:id/test-send] 오류:', err);
+    if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+    if (handleEncryptionKeyError(err, res)) return;
+    return res.status(500).json({ success: false, error: err?.message || '테스트발송 실패' });
   }
 });
 
