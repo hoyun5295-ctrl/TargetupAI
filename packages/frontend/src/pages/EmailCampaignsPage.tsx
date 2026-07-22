@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
 import {
   AlertCircle, AlertTriangle, ArrowLeft, BarChart3, Check, ChevronDown, ChevronUp, Clock,
-  Edit2, Eye, EyeOff, FolderOpen, LayoutTemplate, Loader2, Lock, Mail, PenLine,
+  Download, Edit2, Eye, EyeOff, FolderOpen, LayoutTemplate, Loader2, Lock, Mail, PenLine,
   RefreshCw, Send, Server, Settings, ShieldCheck, Smartphone, Sparkles,
   Trash2, TrendingUp, Users, Wand2, X,
 } from 'lucide-react';
@@ -170,6 +170,8 @@ export default function EmailCampaignsPage() {
   const [campaignTest, setCampaignTest] = useState<EmailCampaign | null>(null);
   const [campaignTestEmails, setCampaignTestEmails] = useState<string[]>(['', '', '']);
   const [campaignTestSending, setCampaignTestSending] = useState(false);
+  // ★ 2026-07-22 완성 이메일 HTML 내보내기 — 완성분만(서버가 완성 여부 재검증). 크레딧 없이 산출물 추출 방어.
+  const [htmlExporting, setHtmlExporting] = useState<string | null>(null);
   // AI 캠페인 발송 확정 30크레딧 확인
   const [creditConfirm, setCreditConfirm] = useState<{ campaign: EmailCampaign; payload: any; desc: string } | null>(null);
   // 비주얼 빌더 에디터 (sections 기반)
@@ -386,6 +388,36 @@ export default function EmailCampaignsPage() {
       showToast(e?.message || '테스트발송 중 오류', 'error');
     } finally {
       setCampaignTestSending(false);
+    }
+  };
+
+  // ★ 2026-07-22 완성 이메일을 HTML 파일로 저장 — 서버가 완성 여부 재검증(크레딧 없이 추출 차단). 인증 헤더 필요라 fetch→Blob 다운로드.
+  const handleExportHtml = async (c: EmailCampaign) => {
+    if (htmlExporting) return;
+    setHtmlExporting(c.id);
+    try {
+      const res = await fetch(`/api/email/campaigns/${c.id}/export-html`, { headers: authHeaders() });
+      const ct = res.headers.get('content-type') || '';
+      if (!res.ok || ct.includes('application/json')) {
+        const data = await res.json().catch(() => ({}));
+        if (handle503(data)) return;
+        showToast(data.error || 'HTML 내보내기 실패', 'error');
+        return;
+      }
+      const html = await res.text();
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const safe = (c.name || 'email').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 60) || 'email';
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${safe}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('HTML 저장 완료', 'success');
+    } catch (e: any) {
+      showToast(e?.message || 'HTML 내보내기 중 오류', 'error');
+    } finally {
+      setHtmlExporting(null);
     }
   };
 
@@ -1038,6 +1070,16 @@ export default function EmailCampaignsPage() {
                       title="이 이메일을 직접 입력한 주소(최대 3개)로 테스트 발송합니다 — 광고 표기 없음"
                     >
                       <Send className="w-3 h-3" /> 테스트발송
+                    </button>
+                  )}
+                  {c.completed && (
+                    <button
+                      onClick={() => handleExportHtml(c)}
+                      disabled={htmlExporting === c.id}
+                      className="inline-flex items-center gap-1 text-[11px] text-sky-300 border border-sky-400/20 hover:bg-sky-500/10 px-2.5 py-1.5 rounded-lg disabled:opacity-50"
+                      title="완성된 이메일을 HTML 파일로 저장합니다"
+                    >
+                      {htmlExporting === c.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />} HTML 저장
                     </button>
                   )}
                   <button

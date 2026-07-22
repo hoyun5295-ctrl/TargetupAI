@@ -801,6 +801,45 @@ router.post('/campaigns/:id/test-send', async (req: Request, res: Response) => {
   }
 });
 
+// ★ 2026-07-22 완성 이메일 HTML 내보내기 — 저장 산출물을 .html 파일로 다운로드(재사용·보관용).
+//   완성(50크레딧 차감) 후에만 — 크레딧 없이 완성 HTML을 빼가는 우회 방어(서버 게이트, 버튼 숨김만으론 부족).
+//   추적 픽셀·(광고)·수신거부 미포함(순수 산출물). 신규 DB 컬럼/JOIN 0(기존 getEmailCampaign·isEmailCampaignCompleted 재사용).
+router.get('/campaigns/:id/export-html', async (req: Request, res: Response) => {
+  const auth = await ensureEmailAccess(req, res);
+  if (!auth) return;
+  try {
+    const campaign = await getEmailCampaign(auth.companyId, req.params.id, auth.ownerId);
+    if (!campaign) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
+
+    // 완성(50크레딧) 후에만 — 크레딧 없이 산출물 추출 방어(서버 게이트, UI 숨김만으론 우회 가능).
+    if (!(await isEmailCampaignCompleted(auth.companyId, campaign.id))) {
+      return res.status(400).json({
+        success: false,
+        error: '완성 저장(50크레딧) 후 HTML로 저장할 수 있습니다. 편집기에서 [완성 저장]을 눌러주세요.',
+        code: 'CAMPAIGN_NOT_COMPLETED',
+      });
+    }
+
+    // 저장 HTML → 광고 footer 슬롯 마커 제거 + 남은 루트상대 src/href를 절대경로화(파일을 어디서 열어도 이미지·링크 로드).
+    //   렌더러(emailImg)가 대부분 이미 절대화하나, 수동 html_body 등 잔여분 방어. //·http·#·data:·mailto: 는 미접촉.
+    const base = (process.env.PUBLIC_BASE_URL || 'https://hanjul.ai').replace(/\/$/, '');
+    let html = String(campaign.htmlBody || '').split(EMAIL_FOOTER_SLOT).join('');
+    // 루트상대 src/href 절대화 — 대소문자·따옴표·공백 변형 포함(Codex L). //·http·#·data:·mailto: 는 미접촉.
+    html = html.replace(/(\b(?:src|href)\s*=\s*["'])\/(?!\/)/gi, `$1${base}/`);
+
+    const safeName = (campaign.name || 'email').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 60) || 'email';
+    // ASCII fallback(비ASCII·제어문자 제거) + RFC 5987 UTF-8 파일명 병기 — 구형 클라 파일명 깨짐 방어(Codex L).
+    const asciiName = (safeName.replace(/[^\x20-\x7E]/g, '').replace(/["\\]/g, '').trim()) || 'email';
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${asciiName}.html"; filename*=UTF-8''${encodeURIComponent(safeName)}.html`);
+    return res.send(html);
+  } catch (err: any) {
+    console.error('[Email /campaigns/:id/export-html] 오류:', err);
+    if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+    return res.status(500).json({ success: false, error: err?.message || 'HTML 내보내기 실패' });
+  }
+});
+
 // ★ 2026-07-12 예약 발송 취소 — scheduled → draft 복귀 (취소 수단 부재 봉합).
 //   WHERE status='scheduled' 원자 조건이라 sweeper의 sending 선점과 경합해도 한쪽만 성립(이중 처리 0).
 //   완성(50크레딧)은 캠페인에 남아 있으므로 취소 후 재발송·재예약 자유.
