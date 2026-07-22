@@ -885,17 +885,15 @@ export default function AlimtalkManagementSection() {
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       <div className="font-medium text-gray-900 text-xs">{t.template_name}</div>
-                      {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시 정합 — 반려사유 펼침 영역 제거.
-                          row에 길게 펼쳐지던 사유 글씨가 화면 어지러움 유발. 관리 컬럼의 '반려사유' 버튼 클릭 시 모달로 상세 노출. */}
-                      {t.custom_template_code && (
-                        <div className="text-[10px] text-gray-400 font-mono mt-0.5">
-                          고객사: {t.custom_template_code}
-                        </div>
-                      )}
+                      {/* ★ 2026-07-22(접수2): 고객사 관리코드는 코드이므로 템플릿코드 열로 이동 — 템플릿명 아래에는 표시 안 함 */}
                     </td>
-                    {/* ★ D188 (2026-05-21) 영업팀장 신고 #3: 템플릿코드 컬럼 row. font-mono + 작은 텍스트 + select-text. */}
+                    {/* ★ D188 (2026-05-21) 영업팀장 신고 #3: 템플릿코드 컬럼 row. font-mono + 작은 텍스트 + select-text.
+                        ★ 2026-07-22(접수2): 고객사 지정 관리코드도 코드이므로 여기(템플릿코드 열)에 함께 표시 */}
                     <td className="px-3 py-2 font-mono text-[10px] text-gray-500 select-text cursor-text whitespace-nowrap">
                       {t.template_code || '-'}
+                      {t.custom_template_code && (
+                        <div className="text-gray-400 mt-0.5">고객사: {t.custom_template_code}</div>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-[11px] text-gray-600 whitespace-nowrap">
                       {t.profile_name || '-'}

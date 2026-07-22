@@ -455,7 +455,7 @@ const [emailSending, setEmailSending] = useState(false);
   const filterTemplateRows = (list: any[]) =>
     list.filter((t: any) => {
       const q = templateSearch.trim().toLowerCase();
-      if (q && !`${t.company_name || ''} ${t.template_name || ''} ${t.template_code || ''}`.toLowerCase().includes(q)) return false;
+      if (q && !`${t.company_name || ''} ${t.template_name || ''} ${t.template_code || ''} ${t.custom_template_code || ''}`.toLowerCase().includes(q)) return false;
       if (templateFilter === 'all') return true;
       const lb = getAlimtalkTemplateStatus(t.status).label;
       return templateFilter === 'pending' ? lb === '검수중' : templateFilter === 'approved' ? lb === '승인' : lb === '반려';
@@ -4850,7 +4850,7 @@ const handleApproveRequest = async (id: string) => {
               type="text"
               value={templateSearch}
               onChange={(e) => setTemplateSearch(e.target.value)}
-              placeholder="고객사·템플릿명·템플릿코드 검색"
+              placeholder="고객사·템플릿명·템플릿코드·관리코드 검색"
               className="flex-1 min-w-0 max-w-sm px-3 py-1.5 border rounded-lg text-sm"
             />
             <div className="flex gap-1 flex-shrink-0">
@@ -4900,6 +4900,10 @@ const handleApproveRequest = async (id: string) => {
                               title="클릭하면 복사"
                               onClick={() => { navigator.clipboard.writeText(t.template_code); showAlert('복사 완료', '템플릿코드를 복사했습니다.', 'success'); }}
                             >{t.template_code}</div>
+                          )}
+                          {/* ★ 2026-07-22(접수2): 고객사 지정 관리코드 표시 + 검색 대상 */}
+                          {t.custom_template_code && (
+                            <div className="text-[11px] text-gray-400" style={{ userSelect: 'text' }}>관리코드: {t.custom_template_code}</div>
                           )}
                         </td>
                         <td className="px-4 py-3 text-gray-600">{t.category || '-'}</td>
