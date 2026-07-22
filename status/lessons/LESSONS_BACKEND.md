@@ -8,6 +8,7 @@
 ## 핵심 원칙
 
 - **기능/라우트를 새 역할에 개방 = 그 기능의 전 엔드포인트 전수 격리·게이트** (2026-07-21) — 핵심 CRUD만 격리하면 보조 경로가 IDOR. 0721 인앱/이메일 담당자 개방 때 Codex 적대검증이 aux 엔드포인트 IDOR을 라운드마다 적발: 조회통계(viewers=고객 이름·전화)·발송이력(events/non-openers=수신자 이메일)·AI 분석(precheck/insight=body의 campaign_id)·표시가능성(display-eligibility)·초안 API(event_campaign_drafts). **개방 기능은 라우터 전 엔드포인트 grep해 per-record=owner(created_by) 격리 / 회사 전체 집계(analytics·stats·overview·top-messages)=관리자 전용.** 격리 CT=`utils/owner-scope.ts`(`resolveOwnerScope`: admin/super→null=회사전체, 담당자→userId, 비관리자 userId 누락 시 fail-closed nil-uuid) + `created_by` optional 파라미터(미지정=무필터 하위호환). 개방/차단류 = Codex `/codex:review` 필수(사람은 aux 경로 누락).
+- **이관(외부 pull)은 외부에 없는 로컬 관리명을 유실 — 로컬 라벨은 로컬 복원 (2026-07-22)** — 0720 카카오 템플릿 IMC pull 이관이 `template_name`을 IMC 체계형 자동명(`아난티_81880`)으로 채워, 고객사 원본 관리명(레거시 event_admin `kakao_alim_talk_template.title`)이 유실. 복원 = 레거시 title을 `template_code` 매칭 로컬 UPDATE(3,242건·remainDiff 0). **핵심: `template_name`은 로컬 라벨(IMC 등록 payload 아님·리스트 검색 파라미터일 뿐·kakao-template-sync가 code/status만 갱신·template_name 미접촉)이라 IMC/재승인/발송 무접촉 안전 복원.** 단 custom_template_code 수정은 IMC 호출(순수 로컬 아님) — **필드마다 로컬/원격 여부 확인 후 경로 선택.** 복원 엔드포인트 = super_admin·dryRun·멱등(IS DISTINCT FROM)·remainDiff 효과검증(6원칙 ②).
 - **발송 5경로 전수 점검** — `messageUtils.ts replaceVariables()` 공통 (D32~D33)
 - **컨트롤타워 단일 진입점** — `utils/` CT에만 로직 / 라우트 인라인 정의 금지
 - **모델 분리 룰** — Opus 4.7 (AI Operator) / Sonnet 4.6 (기존 한줄로AI) 흐름 영향 0건

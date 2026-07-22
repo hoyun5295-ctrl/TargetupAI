@@ -63,6 +63,8 @@
 
 ### 최근 완료 인덱스 (원문 = 링크의 월별 아카이브)
 
+- 🟢 2026-07-22 (3) — 카카오 템플릿 관리 서수란 5티켓: 목록 페이징(공용 TablePagination)+발신프로필 검색+템플릿 검색 프로필옵션 / 등록폼 발신프로필 검색형 콤보+"관리 이름"→"템플릿명" / 슈퍼 발신프로필·관리코드 검색 / 고객사관리코드 템플릿코드 열 이동 / **이관 템플릿명 복원**(레거시 event_admin title→template_name·순수 로컬 라벨·IMC/발송 무접촉·changed 3242·remainingDiff 0). FE·BE tsc0·vitest879·★배포완료(접수2 프론트 배포대기) → [[project_2026_0722_kakao_template_mgmt_tickets]]
+- 🟢 2026-07-22 (2) — 영업용 테스트발송/저장 3채널(인앱 테스트저장=웹·앱 이미지·loginId 게이팅·html-to-image / 이메일 테스트발송=완성분 3개 직접입력·(광고)없음·통계무오염) + 완성 이메일 HTML 내보내기(완성 게이트 서버강제=크레딧 없이 산출물 추출 차단). Codex1R·★배포완료 → [[project_2026_0722_sales_test_send]]
 - 🟢 2026-07-21 — 브랜드 학습 통합(AI메모리 단일 모달 3탭 집약·DM 브랜드킷 편집 제거[override 보존]·업태=business_type·서체 한/영·연락처 생성시드·자동추출 폐기). Codex 3R·tsc0·vitest212·★배포완료. SoT=[[project_2026_0721_brand_learning_consolidation]]
 - 🟢 2026-07-21 — 모바일 DM 디버깅 10건(갤러리캡션·상품슬라이드 스와이프·연결부색·정지버튼·매장정보 편집=발송·고아기능5). Codex 2R·★배포완료. SoT=[[project_2026_0721_mobile_dm_feature_wiring]]
 - 🟢 2026-07-21 — 담당자 생성물 격리 + 인앱 관리자 전용(스튜디오 로그아웃 근본=역할 라우트 가드 불일치). owner-scope.ts CT+created_by 격리·인앱=관리자 전용·이메일=담당자 개방. Codex 7R·★배포가능. SoT=[[project_2026_0721_role_isolation_inapp_admin]]
@@ -97,15 +99,7 @@
 - 🟢 2026-07-10(5) — 직원 리포트 3건: 여정 엔터·MDM 단축 URL(hlj.kr)·DM 히어로/가격 (★배포완료, 회전 2026-07-12) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0710_staff_reports_shortlink_dm]]
 - 🟢 2026-07-10(3) — 싱크에이전트 원격 관리 개편 P0~P2·v1.6.1 (★배포완료·릴리즈 등록 완료·트랙 종결, 회전 2026-07-12) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0710_sync_agent_remote_admin_audit]]
 - 🟢 2026-07-10 — 여정 "목표 달성 시 자동 종료"(goal_met)+옵션 UI 2단 (★배포완료, STATUS→archive 회전 2026-07-10) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0710_journey_goal_exit]]
-- 🟢 2026-07-09(8) — CRM 대행 접수 웹 폼 전환+이미지 자동 입력 (★배포완료, 회전 2026-07-10) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0709_crm_agency_webform_redesign]]
-- 🟢 2026-07-09(7) — 요금제 정책 정비+AI 사용량 메뉴 이동+Brand Voice 초기화/저장 (★배포완료, 회전 2026-07-10) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0709_plan_gating_audit]]
-- 🟢 2026-07-09(6) — CRM 캠페인 대행 신설(비즈니스+ 컨설팅) (★배포완료, 회전 2026-07-10) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0709_crm_campaign_agency]]
-- 🟢 2026-07-09(5·2~4·1) — 자동마케팅 3건·AI Operator MMS+DM 4건+여정+뒤로가기·직접시점 모달화+타겟 공용화+DM 정렬+개인화 라벨 (★배포완료, 회전 2026-07-10) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · [[project_2026_0709_datetime_target_dm_var_unify]]
-- 🟢 2026-07-07(9·알림톡) — 뱃지 라벨 3단 정책 + 알림톡 강조표기형 3관문 종결 (★배포완료 716074dc, 회전 2026-07-10) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · [[project_2026_0707_bito_agent_7300_senderkey]]
-- 🟢 2026-07-08(3) — AI Operator 0건 크레딧 미차감 + 직원 디버깅 4건(개인화 라벨·하위계정 DB현황·DM헤더우측·타겟건수 오판철회) (★배포완료) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0708_operator_credit_and_staff_debug]]
-- 🟢 2026-07-08(2) — 원클릭 캠페인(이미지 판독·초안DB) + 이미지로 문안 + 연동몰 상품 자동채움(카페24·네이버) + 예약 UI (★배포완료) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0708_mall_product_autofill_dm]] · [[project_2026_0708_event_campaign_image_and_draft_persistence]]
-- 🟢 2026-07-08 — 행사 상품 구조 추출 + 인앱 SDK 서빙 공용화·팝폰 복구 + 인앱 익명 fallback + 로그인 문의·DM 2열 (★배포완료) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0708_event_campaign_product_extraction]] · [[reference_inapp_sdk_serving]]
-> 2026-07-02 이하 완료분 = [archive/INDEX.md](archive/INDEX.md) 카탈로그 경유 (날짜·증상어 grep). ★2026-07-21 회전: 07-01(4)·07-02(6)·07-07~09 통합. ★2026-07-22 회전: 07-04~07-07 통합(07-04 psql 2세트·07-06 복구 UPDATE 897·07-05 Gateway v135 실측 잔여는 각 project 파일 보존). 원문은 TASKS_2026-07.md에 무손실 보존.
+> 2026-07-09 이하 완료분 = [archive/INDEX.md](archive/INDEX.md) 카탈로그 경유 (날짜·증상어 grep). ★2026-07-21 회전: 07-01(4)·07-02(6)·07-07~09 통합. ★2026-07-22 회전: 07-04~07-09 인덱스 1줄 회전(원문은 각 project 파일 + TASKS_2026-07.md 무손실 보존).
 
 ---
 

@@ -843,15 +843,25 @@ router.post(
         return res.status(400).json({ success: false, error: 'titles(code→title) 맵이 비어 있습니다.' });
       }
 
-      // 매칭 건수 + 현재 이름과 다른(=복원 대상) 건수 — unnest 배치 비교(멱등: 다른 것만).
+      // ★ 2026-07-22 재오픈 정정(서수란): 옛 다우(bizp) 이관분은 레거시코드(bizp_)가 우리 custom_template_code에 있고
+      //   template_code는 새 IMC 코드(B_...)라, template_code 매칭만으로는 안 잡혔다. → template_code 우선 + custom_template_code
+      //   보조 매칭. seed 코드는 유니크(JSON dedup)라 각 LEFT JOIN 최대 1행 → 중복 행 0, COALESCE로 template_code 제목 우선.
+      const RESOLVED = `WITH seed AS (SELECT unnest($1::text[]) AS code, unnest($2::text[]) AS title),
+        resolved AS (
+          SELECT t.id, t.template_code, t.custom_template_code, t.template_name AS old_name,
+                 COALESCE(sc.title, cc.title) AS title
+            FROM kakao_templates t
+            LEFT JOIN seed sc ON t.template_code = sc.code
+            LEFT JOIN seed cc ON COALESCE(t.custom_template_code, '') <> '' AND t.custom_template_code = cc.code
+           WHERE COALESCE(sc.title, cc.title) IS NOT NULL
+        )`;
+
+      // 매칭 건수 + 현재 이름과 다른(=복원 대상) 건수 (멱등: 다른 것만).
       const cnt = await query(
-        `SELECT
-            (SELECT count(*) FROM kakao_templates t
-               JOIN (SELECT unnest($1::text[]) AS code) v ON t.template_code = v.code) AS matched,
-            (SELECT count(*) FROM kakao_templates t
-               JOIN (SELECT unnest($1::text[]) AS code, unnest($2::text[]) AS title) v
-                 ON t.template_code = v.code
-              WHERE t.template_name IS DISTINCT FROM v.title) AS to_change`,
+        `${RESOLVED}
+         SELECT count(*) AS matched,
+                count(*) FILTER (WHERE old_name IS DISTINCT FROM title) AS to_change
+           FROM resolved`,
         [codes, titles],
       );
       const matched = Number(cnt.rows[0]?.matched || 0);
@@ -859,33 +869,28 @@ router.post(
 
       if (dryRun) {
         const preview = await query(
-          `SELECT t.template_code, t.template_name AS old_name, v.title AS new_name
-             FROM kakao_templates t
-             JOIN (SELECT unnest($1::text[]) AS code, unnest($2::text[]) AS title) v
-               ON t.template_code = v.code
-            WHERE t.template_name IS DISTINCT FROM v.title
-            ORDER BY t.template_code
-            LIMIT 20`,
+          `${RESOLVED}
+           SELECT template_code, custom_template_code, old_name, title AS new_name
+             FROM resolved WHERE old_name IS DISTINCT FROM title
+            ORDER BY template_code LIMIT 20`,
           [codes, titles],
         );
         return res.json({ success: true, dryRun: true, seedCodes: codes.length, matched, toChange, samples: preview.rows });
       }
 
       const upd = await query(
-        `UPDATE kakao_templates t
-            SET template_name = v.title, updated_at = now()
-           FROM (SELECT unnest($1::text[]) AS code, unnest($2::text[]) AS title) v
-          WHERE t.template_code = v.code
-            AND t.template_name IS DISTINCT FROM v.title`,
+        `${RESOLVED}
+         UPDATE kakao_templates t
+            SET template_name = r.title, updated_at = now()
+           FROM resolved r
+          WHERE t.id = r.id AND t.template_name IS DISTINCT FROM r.title`,
         [codes, titles],
       );
       const changed = upd.rowCount || 0;
       // 효과 검증(6원칙 ②) — 복원 후 남은 diff 재카운트(멱등 확인)
       const remain = await query(
-        `SELECT count(*) AS cnt FROM kakao_templates t
-           JOIN (SELECT unnest($1::text[]) AS code, unnest($2::text[]) AS title) v
-             ON t.template_code = v.code
-          WHERE t.template_name IS DISTINCT FROM v.title`,
+        `${RESOLVED}
+         SELECT count(*) AS cnt FROM resolved WHERE old_name IS DISTINCT FROM title`,
         [codes, titles],
       );
       console.log(`[alimtalk restore-legacy-names] seedCodes=${codes.length} matched=${matched} changed=${changed} remainDiff=${remain.rows[0]?.cnt}`);
