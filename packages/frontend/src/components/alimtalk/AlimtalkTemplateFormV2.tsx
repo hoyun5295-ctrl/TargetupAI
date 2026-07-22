@@ -146,6 +146,9 @@ export default function AlimtalkTemplateFormV2({
 
   // ★ D135+ (B5): 미리보기 메시지 체크박스 — 기존값이 있으면 ON으로 초기화
   const [previewEnabled, setPreviewEnabled] = useState(() => !!template?.previewMessage);
+  // ★ 2026-07-22 발신프로필 검색형 선택(C1) — 프로필 많을 때 타이핑으로 즉시 찾기
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileQuery, setProfileQuery] = useState('');
 
   useEffect(() => {
     if (!toast) return;
@@ -198,8 +201,8 @@ export default function AlimtalkTemplateFormV2({
 
   const validate = (): string | null => {
     if (!form.profile_id) return '발신 프로필을 선택하세요';
-    if (!form.manageName.trim()) return '관리 이름을 입력하세요';
-    if (form.manageName.length > 30) return '관리 이름은 최대 30자';
+    if (!form.manageName.trim()) return '템플릿명을 입력하세요';
+    if (form.manageName.length > 30) return '템플릿명은 최대 30자';
     if (!form.categoryCode) return '카테고리를 선택하세요';
     if (!form.content.trim()) return '본문을 입력하세요';
     if (contentOver) return '본문은 최대 1,000자';
@@ -505,19 +508,64 @@ export default function AlimtalkTemplateFormV2({
                 const hasApproved = approvedProfiles.length > 0;
                 return (
                   <>
-                    <select
-                      value={form.profile_id}
-                      onChange={(e) => setForm({ ...form, profile_id: e.target.value })}
-                      disabled={!hasApproved}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm disabled:bg-gray-100 disabled:text-gray-400"
-                    >
-                      <option value="">선택</option>
-                      {approvedProfiles.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.profile_name} ({p.profile_key.slice(0, 10)}…)
-                        </option>
-                      ))}
-                    </select>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        disabled={!hasApproved}
+                        onClick={() => setProfileOpen((o) => !o)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-left flex items-center justify-between disabled:bg-gray-100 disabled:text-gray-400"
+                      >
+                        <span className={form.profile_id ? 'text-gray-800 truncate' : 'text-gray-400'}>
+                          {(() => {
+                            const sp = approvedProfiles.find((p) => p.id === form.profile_id);
+                            return sp ? `${sp.profile_name} (${sp.profile_key.slice(0, 10)}…)` : '선택';
+                          })()}
+                        </span>
+                        <span className="text-gray-400 ml-2 shrink-0">▾</span>
+                      </button>
+                      {profileOpen && hasApproved && (
+                        <>
+                          {/* 드롭다운 바깥 클릭 닫기(정상 UX — 모달 백드롭 닫힘 규칙과 별개) */}
+                          <div className="fixed inset-0 z-10" onClick={() => setProfileOpen(false)} />
+                          <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                            <div className="p-2 border-b border-gray-100 sticky top-0 bg-white">
+                              <input
+                                autoFocus
+                                type="text"
+                                value={profileQuery}
+                                onChange={(e) => setProfileQuery(e.target.value)}
+                                placeholder="프로필명·채널ID 검색"
+                                className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:border-amber-400"
+                              />
+                            </div>
+                            {(() => {
+                              const q = profileQuery.trim().toLowerCase();
+                              const list = q
+                                ? approvedProfiles.filter((p) => `${p.profile_name} ${p.profile_key}`.toLowerCase().includes(q))
+                                : approvedProfiles;
+                              if (list.length === 0) {
+                                return <div className="px-3 py-2 text-xs text-gray-400">검색 결과가 없습니다.</div>;
+                              }
+                              return list.map((p) => (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setForm({ ...form, profile_id: p.id });
+                                    setProfileOpen(false);
+                                    setProfileQuery('');
+                                  }}
+                                  className={`w-full text-left px-3 py-2 text-sm hover:bg-amber-50 ${form.profile_id === p.id ? 'bg-amber-50 font-medium' : ''}`}
+                                >
+                                  {p.profile_name}{' '}
+                                  <span className="text-[11px] text-gray-400">({p.profile_key.slice(0, 10)}…)</span>
+                                </button>
+                              ));
+                            })()}
+                          </div>
+                        </>
+                      )}
+                    </div>
                     {!hasAny && (
                       <p className="mt-1 text-[11px] text-red-600">
                         등록된 발신프로필이 없습니다. 슈퍼관리자에게 등록을 요청해주세요.
@@ -533,17 +581,17 @@ export default function AlimtalkTemplateFormV2({
               })()}
             </div>
 
-            {/* 관리 이름 + 고객사 코드 */}
+            {/* 템플릿명 + 고객사 코드 */}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                  관리 이름 <span className="text-red-500">*</span>
+                  템플릿명 <span className="text-red-500">*</span>
                 </label>
                 <input
                   value={form.manageName}
                   onChange={(e) => setForm({ ...form, manageName: e.target.value })}
                   maxLength={30}
-                  placeholder="내부 관리용 (최대 30자)"
+                  placeholder="템플릿을 구분할 이름 (최대 30자)"
                   className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
                 />
               </div>

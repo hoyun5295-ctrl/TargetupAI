@@ -814,6 +814,89 @@ router.get('/senders/:id', async (req: Request, res: Response) => {
   }
 });
 
+// ★ 2026-07-22 이관 템플릿명 복원 — 이관(IMC pull) 시 체계형 자동명(예: 아난티_81880)만 왔고, 고객사 원본 관리명은
+//   레거시 event_admin `kakao_alim_talk_template.title`에 있었다(IMC 경로라 미포함). 이를 template_code 매칭으로 로컬 복원.
+//   ★ 순수 로컬 라벨(template_name)만 UPDATE — IMC/게이트웨이/발송/재승인 무접촉. kakao-template-sync는 template_name을
+//   절대 덮지 않음(template_code·status만 갱신) → 복원이 되돌려지지 않음. IMC에도 template_name은 전송 안 됨(리스트 검색 파라미터일 뿐).
+//   dryRun 기본 true·멱등(현재값과 다른 것만). seed = migrate-legacy/data/legacy-template-titles.json (code→title 맵).
+//   신규 DB 컬럼/JOIN 없음(기존 kakao_templates.template_name/template_code만).
+router.post(
+  '/templates/restore-legacy-names',
+  requireSuperAdmin as any,
+  async (req: Request, res: Response) => {
+    try {
+      const body = req.body || {};
+      const src = (body.titles && typeof body.titles === 'object' && !Array.isArray(body.titles)) ? body.titles : body;
+      const dryRun = body.dryRun !== false && req.query.dryRun !== 'false';
+
+      const codes: string[] = [];
+      const titles: string[] = [];
+      for (const [code, t] of Object.entries(src)) {
+        if (code === 'dryRun' || code === 'titles') continue;
+        const c = String(code).trim();
+        const title = String(t ?? '').replace(/\s+/g, ' ').trim().slice(0, 100);
+        if (!c || !title) continue;
+        codes.push(c);
+        titles.push(title);
+      }
+      if (codes.length === 0) {
+        return res.status(400).json({ success: false, error: 'titles(code→title) 맵이 비어 있습니다.' });
+      }
+
+      // 매칭 건수 + 현재 이름과 다른(=복원 대상) 건수 — unnest 배치 비교(멱등: 다른 것만).
+      const cnt = await query(
+        `SELECT
+            (SELECT count(*) FROM kakao_templates t
+               JOIN (SELECT unnest($1::text[]) AS code) v ON t.template_code = v.code) AS matched,
+            (SELECT count(*) FROM kakao_templates t
+               JOIN (SELECT unnest($1::text[]) AS code, unnest($2::text[]) AS title) v
+                 ON t.template_code = v.code
+              WHERE t.template_name IS DISTINCT FROM v.title) AS to_change`,
+        [codes, titles],
+      );
+      const matched = Number(cnt.rows[0]?.matched || 0);
+      const toChange = Number(cnt.rows[0]?.to_change || 0);
+
+      if (dryRun) {
+        const preview = await query(
+          `SELECT t.template_code, t.template_name AS old_name, v.title AS new_name
+             FROM kakao_templates t
+             JOIN (SELECT unnest($1::text[]) AS code, unnest($2::text[]) AS title) v
+               ON t.template_code = v.code
+            WHERE t.template_name IS DISTINCT FROM v.title
+            ORDER BY t.template_code
+            LIMIT 20`,
+          [codes, titles],
+        );
+        return res.json({ success: true, dryRun: true, seedCodes: codes.length, matched, toChange, samples: preview.rows });
+      }
+
+      const upd = await query(
+        `UPDATE kakao_templates t
+            SET template_name = v.title, updated_at = now()
+           FROM (SELECT unnest($1::text[]) AS code, unnest($2::text[]) AS title) v
+          WHERE t.template_code = v.code
+            AND t.template_name IS DISTINCT FROM v.title`,
+        [codes, titles],
+      );
+      const changed = upd.rowCount || 0;
+      // 효과 검증(6원칙 ②) — 복원 후 남은 diff 재카운트(멱등 확인)
+      const remain = await query(
+        `SELECT count(*) AS cnt FROM kakao_templates t
+           JOIN (SELECT unnest($1::text[]) AS code, unnest($2::text[]) AS title) v
+             ON t.template_code = v.code
+          WHERE t.template_name IS DISTINCT FROM v.title`,
+        [codes, titles],
+      );
+      console.log(`[alimtalk restore-legacy-names] seedCodes=${codes.length} matched=${matched} changed=${changed} remainDiff=${remain.rows[0]?.cnt}`);
+      return res.json({ success: true, dryRun: false, seedCodes: codes.length, matched, changed, remainingDiff: Number(remain.rows[0]?.cnt || 0) });
+    } catch (err: any) {
+      console.error('[alimtalk restore-legacy-names] 오류:', err);
+      return res.status(500).json({ success: false, error: err?.message || '복원 실패' });
+    }
+  },
+);
+
 router.put(
   '/senders/:id/unsubscribe',
   requireSuperAdmin as any,

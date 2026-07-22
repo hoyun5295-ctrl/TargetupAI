@@ -18,6 +18,7 @@ import TemplateHistoryModal from './TemplateHistoryModal';
 import { formatTemplateType } from './alimtalk-types';
 import { useAuthStore } from '../../stores/authStore';
 import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
+import TablePagination from '../common/TablePagination';
 
 interface Template {
   id: string;
@@ -207,9 +208,15 @@ export default function AlimtalkManagementSection() {
 
   // ★ D188 (2026-05-21) 영업팀장 신고 #4: 템플릿 검색 UI — 4 영역 선택(templateName/content/templateCode/customTemplateCode) + 검색어 input.
   //   클라이언트 측 filter (templates useMemo 합성) — 서버 API 추가 호출 X. 운영 환경 템플릿 수 수십~수백 건 = 클라이언트 filter 정합.
-  type SearchType = 'templateName' | 'content' | 'templateCode' | 'customTemplateCode';
+  type SearchType = 'templateName' | 'content' | 'templateCode' | 'customTemplateCode' | 'profile';
   const [searchType, setSearchType] = useState<SearchType>('templateName');
   const [searchKeyword, setSearchKeyword] = useState('');
+  // ★ 2026-07-22 발신프로필 검색 + 목록 페이징(재판매사 다량 프로필 대응) + 템플릿 페이징
+  const [profileSearch, setProfileSearch] = useState('');
+  const [profilePage, setProfilePage] = useState(1);
+  const [templatePage, setTemplatePage] = useState(1);
+  const PROFILE_PER_PAGE = 10;
+  const TEMPLATE_PER_PAGE = 15;
 
   // 내 회사 정보 (Wizard에 전달) — authStore에서 직접 참조 (별도 API 호출 불필요)
   const authUser = useAuthStore((s) => s.user);
@@ -260,7 +267,11 @@ export default function AlimtalkManagementSection() {
   // ★ 2026-07-02 일괄 검수요청: 필터/검색 변경 시 선택 초기화 — 숨겨진 행이 선택에 남지 않도록.
   useEffect(() => {
     setSelectedIds(new Set());
+    setTemplatePage(1);
   }, [filter, searchType, searchKeyword]);
+  // ★ 2026-07-22 검색/데이터 변경 시 페이지 리셋
+  useEffect(() => { setProfilePage(1); }, [profileSearch, profiles.length]);
+  useEffect(() => { setTemplatePage(1); }, [templates.length]);
 
   // ★ D152-4 Harold님 지시 (2026-05-12): IMC 6단계 정합 — filter 탭 ↔ DB status 매핑.
   //   IMC raw(REG/REQ/KREQ/KREJ/HREJ/APR) + 한줄로 풀네임(DRAFT/REQUESTED/REVIEWING/APPROVED/REJECTED) 양쪽 호환.
@@ -288,10 +299,28 @@ export default function AlimtalkManagementSection() {
         searchType === 'content'            ? (t.content || '') :
         searchType === 'templateCode'       ? (t.template_code || '') :
         searchType === 'customTemplateCode' ? (t.custom_template_code || '') :
+        searchType === 'profile'            ? (t.profile_name || '') :
         '';
       return String(fieldValue).toLowerCase().includes(kw);
     });
   }, [templates, filter, searchType, searchKeyword]);
+
+  // ★ 2026-07-22 발신프로필 검색(프로필명·채널ID) + 페이징
+  const filteredProfiles = useMemo(() => {
+    const kw = profileSearch.trim().toLowerCase();
+    if (!kw) return profiles;
+    return profiles.filter((p) =>
+      String(p.profile_name || '').toLowerCase().includes(kw) ||
+      String(p.yellow_id || '').toLowerCase().includes(kw));
+  }, [profiles, profileSearch]);
+  const pagedProfiles = useMemo(
+    () => filteredProfiles.slice((profilePage - 1) * PROFILE_PER_PAGE, profilePage * PROFILE_PER_PAGE),
+    [filteredProfiles, profilePage],
+  );
+  const pagedTemplates = useMemo(
+    () => filtered.slice((templatePage - 1) * TEMPLATE_PER_PAGE, templatePage * TEMPLATE_PER_PAGE),
+    [filtered, templatePage],
+  );
 
   // ★ 2026-07-02 일괄 검수요청 — 현재 목록 중 검수요청 가능(등록 DRAFT/REG) 행만 대상.
   //   개별 '검수요청' 버튼 노출 기준(isDraft)과 동일. 반려 건은 본문 수정이 필요해 '재검수' 개별 흐름 유지.
@@ -521,16 +550,28 @@ export default function AlimtalkManagementSection() {
               카카오톡 채널을 연결하면 즉시 사용 가능합니다
             </span>
           </div>
-          {/* ★ 권한: 고객사관리자(company_admin/super_admin)만 발신프로필 등록 가능 */}
-          {canManage && (
-            <button
-              type="button"
-              onClick={() => setShowWizard(true)}
-              className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-lg text-xs font-medium transition"
-            >
-              + 발신프로필 등록
-            </button>
-          )}
+          {/* ★ 2026-07-22 발신프로필 검색(좌) + 등록(우) — 재판매사 다량 프로필 대응 */}
+          <div className="flex items-center gap-2">
+            {profiles.length > 0 && (
+              <input
+                type="text"
+                value={profileSearch}
+                onChange={(e) => setProfileSearch(e.target.value)}
+                placeholder="프로필·채널ID 검색"
+                className="px-2.5 py-1.5 text-xs bg-white border border-gray-300 rounded-lg w-40 focus:outline-none focus:border-amber-400 placeholder:text-gray-400"
+              />
+            )}
+            {/* ★ 권한: 고객사관리자(company_admin/super_admin)만 발신프로필 등록 가능 */}
+            {canManage && (
+              <button
+                type="button"
+                onClick={() => setShowWizard(true)}
+                className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-lg text-xs font-medium transition whitespace-nowrap"
+              >
+                + 발신프로필 등록
+              </button>
+            )}
+          </div>
         </div>
 
         {profiles.length === 0 ? (
@@ -544,6 +585,8 @@ export default function AlimtalkManagementSection() {
               <>등록된 발신프로필이 없습니다. 고객사관리자에게 발신프로필 등록을 요청해주세요.</>
             )}
           </div>
+        ) : filteredProfiles.length === 0 ? (
+          <div className="text-center py-4 text-gray-400 text-sm">검색 결과가 없습니다.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
@@ -559,7 +602,7 @@ export default function AlimtalkManagementSection() {
                 </tr>
               </thead>
               <tbody>
-                {profiles.map((p) => {
+                {pagedProfiles.map((p) => {
                   // ★ 2026-06-17: 080 무료수신거부 컬럼 제거(고객사 화면). 대신 IMC 상태/브랜드메시지/등록일 노출.
                   //   상태 = syncSenderStatusJob이 IMC status+block+dormant를 DB 동기화 → senderStatusBadge로 한글 매핑.
                   const ap = APPROVAL_LABELS[p.approval_status || 'PENDING_APPROVAL'] || {
@@ -633,6 +676,7 @@ export default function AlimtalkManagementSection() {
                 })}
               </tbody>
             </table>
+            <TablePagination total={filteredProfiles.length} page={profilePage} perPage={PROFILE_PER_PAGE} onChange={setProfilePage} unit="개" />
 
             {/* 승인 안내 */}
             {profiles.some((p) => p.approval_status === 'PENDING_APPROVAL') && (
@@ -679,6 +723,7 @@ export default function AlimtalkManagementSection() {
               <option value="content">템플릿 문구</option>
               <option value="templateCode">템플릿코드</option>
               <option value="customTemplateCode">고객사관리코드</option>
+              <option value="profile">프로필</option>
             </select>
             <div className="w-px h-4 bg-gray-200" />
             <input
@@ -803,7 +848,7 @@ export default function AlimtalkManagementSection() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((t) => {
+              {pagedTemplates.map((t) => {
                 const st = STATUS_LABELS[t.status] || {
                   label: t.status,
                   cls: 'bg-gray-100 text-gray-500',
@@ -1009,6 +1054,7 @@ export default function AlimtalkManagementSection() {
               })}
             </tbody>
           </table>
+          <TablePagination total={filtered.length} page={templatePage} perPage={TEMPLATE_PER_PAGE} onChange={setTemplatePage} unit="건" />
         </div>
       )}
 

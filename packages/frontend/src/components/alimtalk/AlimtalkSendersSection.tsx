@@ -254,12 +254,20 @@ export default function AlimtalkSendersSection() {
     return c;
   }, [senders]);
 
+  // ★ 2026-07-22 발신프로필 검색(#2 슈퍼관리자) — 프로필명·회사명·키
+  const [senderSearch, setSenderSearch] = useState('');
+
   const filtered = useMemo(() => {
-    if (tab === 'all') return senders;
-    return senders.filter(
+    const byTab = tab === 'all' ? senders : senders.filter(
       (s) => (s.approval_status || 'PENDING_APPROVAL') === tab,
     );
-  }, [senders, tab]);
+    const kw = senderSearch.trim().toLowerCase();
+    if (!kw) return byTab;
+    return byTab.filter((s) =>
+      String(s.profile_name || '').toLowerCase().includes(kw) ||
+      String(s.company_name || '').toLowerCase().includes(kw) ||
+      String(s.profile_key || '').toLowerCase().includes(kw));
+  }, [senders, tab, senderSearch]);
 
   // ★ 2026-07-20: 이관으로 프로필이 199개가 되어 전량 렌더는 세로 스크롤이 과함 → 10개씩 페이징
   //   (템플릿 목록·고객사 목록과 동일 기준 — 행이 여러 줄이라 20건은 여전히 길다)
@@ -267,7 +275,7 @@ export default function AlimtalkSendersSection() {
   const perPage = 10;
   useEffect(() => {
     setPage(1);
-  }, [tab, senders.length]);
+  }, [tab, senders.length, senderSearch]);
   const paged = useMemo(
     () => filtered.slice((page - 1) * perPage, page * perPage),
     [filtered, page],
@@ -284,7 +292,14 @@ export default function AlimtalkSendersSection() {
             알림톡 발신프로필 · 등록 요청 → 슈퍼관리자 승인 → 회사 전체 공유
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <input
+            type="text"
+            value={senderSearch}
+            onChange={(e) => setSenderSearch(e.target.value)}
+            placeholder="프로필·회사·키 검색"
+            className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg w-44 focus:outline-none focus:border-green-400 placeholder:text-gray-400"
+          />
           <button
             type="button"
             onClick={syncCategories}
