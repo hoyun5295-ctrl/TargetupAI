@@ -26,6 +26,10 @@ import { renderDmDividerSvg } from './dm-tokens';
 import { selectTreatment, type ArtDirection } from './dm-art-direction';
 // ★ 2026-07-02 스킴 없는 URL(www.x.y) https:// 정규화 — 이메일 "링크 이동 안 됨" 신고와 동일 구멍 통합 수정
 import { normalizeWebUrl } from '../normalize';
+// ★ 2026-07-22 상품 슬라이드 인디케이터 페이지 단위 상수(SoT) — 점=ceil(상품수/페이지당).
+import { DM_PRODUCT_CAROUSEL_PER_PAGE } from './dm-property-contract';
+// ★ 2026-07-22 탭 카드 content_type='product_list' 파서(백엔드 미러) — 발행 SSR이 상품 행으로 렌더.
+import { parseTabProductList } from './dm-tab-content';
 
 // ────────────── 렌더 컨텍스트 ──────────────
 
@@ -735,7 +739,7 @@ function renderProductCarousel(p: any, treatment?: string): string {
   // ★ 2026-07-21 (#4a 임은지) 상품 슬라이드 = 상품 3개 초과 시 가로 스와이프 캐러셀(scroll-snap)+인디케이터, 2개 이하는 기존 그리드(회귀 0).
   //   자동전환은 미도입(수신자 수동 스와이프). show_indicator=점 노출. 뷰어 dm-viewer.ts가 data-dm-pcarousel 스크롤을 점에 반영.
   const isScroll = products.length > 2;
-  const items = products.map((it: any) => {
+  const cards = products.map((it: any) => {
     const price = Number(it.price || 0);
     const discount = Number(it.discount_price || 0);
     const rate = computeDmDiscountRate(price, discount, it.discount_rate);
@@ -756,23 +760,38 @@ function renderProductCarousel(p: any, treatment?: string): string {
         <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4">${escapeHtml(it.name || '').replace(/\n/g, '<br>')}</div>
         ${priceHtml}
       </div>`;
-    const cardWrapStyle = `${isScroll ? 'flex:0 0 calc(50% - 6px);scroll-snap-align:start' : 'width:calc(50% - 8px)'};max-width:220px;box-sizing:border-box;display:flex;flex-direction:column;text-decoration:none;color:inherit;background:${cardBg};border:1px solid var(--dm-neutral-200);border-radius:16px;overflow:hidden;box-shadow:var(--dm-shadow-sm)`;
+    const cardWrapStyle = `${isScroll ? 'flex:0 0 calc(50% - 6px)' : 'width:calc(50% - 8px)'};max-width:220px;box-sizing:border-box;display:flex;flex-direction:column;text-decoration:none;color:inherit;background:${cardBg};border:1px solid var(--dm-neutral-200);border-radius:16px;overflow:hidden;box-shadow:var(--dm-shadow-sm)`;
     const href = it.link_url ? safeUrl(it.link_url) : '#';
     return href !== '#'
       ? `<a href="${href}" target="_blank" rel="noopener" style="${cardWrapStyle}">${card}</a>`
       : `<div style="${cardWrapStyle}">${card}</div>`;
-  }).join('');
+  });
   const sectionBg = p?.background_color ? `;background:${escapeHtml(p.background_color)}` : '';
+  // ★ 2026-07-22 (임은지 재신고) 카드를 페이지당 DM_PRODUCT_CAROUSEL_PER_PAGE개씩 페이지 래퍼(.dm-pc-page)로 묶어
+  //   각 페이지가 scroll-snap-align:start(페이지 단위 스와이프) → 스크롤 컨테이너 자식=페이지. 점은 페이지 수만큼(ceil(N/2)).
+  //   뷰어(dm-viewer.ts)가 자식(페이지)↔점을 1:1로 동기화하므로 상품수만큼 점이 뜨던 유령 페이지 해소.
+  let itemsInner: string;
+  let pageCount = 0;
+  if (isScroll) {
+    const pages: string[] = [];
+    for (let i = 0; i < cards.length; i += DM_PRODUCT_CAROUSEL_PER_PAGE) {
+      pages.push(`<div class="dm-pc-page" style="flex:0 0 100%;box-sizing:border-box;scroll-snap-align:start;display:flex;gap:12px">${cards.slice(i, i + DM_PRODUCT_CAROUSEL_PER_PAGE).join('')}</div>`);
+    }
+    pageCount = pages.length;
+    itemsInner = pages.join('');
+  } else {
+    itemsInner = cards.join('');
+  }
   const itemsStyle = isScroll
-    ? 'display:flex;flex-wrap:nowrap;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;gap:12px;scrollbar-width:none'
+    ? 'display:flex;flex-wrap:nowrap;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;gap:0;scrollbar-width:none'
     : 'display:flex;flex-wrap:wrap;justify-content:var(--dm-section-justify,center);gap:12px';
   const showDots = isScroll && p.show_indicator !== false;
   const dots = showDots
-    ? `<div data-dm-pc-dots style="display:flex;justify-content:center;gap:6px;margin-top:var(--dm-sp-3)">${products.map((_: any, i: number) => `<span data-dm-pc-dot="${i}" style="width:8px;height:8px;border-radius:50%;background:${i === 0 ? 'var(--dm-primary)' : 'var(--dm-neutral-300)'};cursor:pointer"></span>`).join('')}</div>`
+    ? `<div data-dm-pc-dots style="display:flex;justify-content:center;gap:6px;margin-top:var(--dm-sp-3)">${Array.from({ length: pageCount }, (_: unknown, i: number) => `<span data-dm-pc-dot="${i}" style="width:8px;height:8px;border-radius:50%;background:${i === 0 ? 'var(--dm-primary)' : 'var(--dm-neutral-300)'};cursor:pointer"></span>`).join('')}</div>`
     : '';
   return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-6) var(--dm-sp-5)${sectionBg}">
     ${p.title ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4)">${escapeHtml(p.title)}</div>` : ''}
-    <div class="dm-pc-items"${isScroll ? ' data-dm-pcarousel' : ''} style="${itemsStyle}">${items}</div>
+    <div class="dm-pc-items"${isScroll ? ' data-dm-pcarousel' : ''} style="${itemsStyle}">${itemsInner}</div>
     ${dots}
   </div>`;
 }
@@ -945,6 +964,40 @@ function renderSlideshow(p: any): string {
   return `<div class="dm-section dm-slideshow" data-dm-slideshow data-interval="${interval}" style="padding:var(--dm-sp-4)${relStyle}">${slidesHtml}${pauseBtn}${dots}</div>`;
 }
 
+// ★ 2026-07-22 (임은지) 탭 content_type 실제 렌더 — 편집기의 텍스트/이미지 URL/상품 목록 옵션이 발행·편집 모두
+//   텍스트로만 나오던 죽은 옵션(F8) → 타입별 실제 렌더. image=이미지, product_list=상품 행(붙여넣기 파서 재사용), text=텍스트.
+function renderTabPanelContent(t: any): string {
+  const ct = t?.content_type;
+  const content = String(t?.content || '');
+  if (ct === 'image' && content.trim()) {
+    return `<img src="${escapeHtml(publicImageUrl(content.trim()))}" loading="lazy" alt="" style="width:100%;height:auto;display:block;border-radius:var(--dm-radius-md)"/>`;
+  }
+  if (ct === 'product_list') {
+    const items = parseTabProductList(content);
+    if (items.length > 0) {
+      const rows = items.map((it) => {
+        const price = Number(it.price || 0);
+        const discount = Number(it.discount_price || 0);
+        const rate = computeDmDiscountRate(price, discount, it.discount_rate);
+        const finalPrice = discount > 0 ? discount : price;
+        const priceHtml = price > 0
+          ? (rate !== null
+            ? `<span style="font-size:var(--dm-fs-tiny);color:var(--dm-error);font-weight:800">${rate}%</span> <span style="font-weight:800">${finalPrice.toLocaleString('ko-KR')}원</span> <span style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-400);text-decoration:line-through">${price.toLocaleString('ko-KR')}원</span>`
+            : `<span style="font-weight:800">${finalPrice.toLocaleString('ko-KR')}원</span>`)
+          : '';
+        const inner = `<div style="flex:1;min-width:0;text-align:left"><div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900)">${escapeHtml(it.name)}</div>${priceHtml ? `<div style="margin-top:2px;font-variant-numeric:tabular-nums">${priceHtml}</div>` : ''}</div>${it.link_url ? `<span aria-hidden="true" style="color:var(--dm-neutral-400);flex-shrink:0">→</span>` : ''}`;
+        const style = `display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--dm-neutral-50);border:1px solid var(--dm-neutral-200);border-radius:12px;text-decoration:none;color:inherit`;
+        return it.link_url
+          ? `<a href="${safeUrl(it.link_url)}" target="_blank" rel="noopener" style="${style}">${inner}</a>`
+          : `<div style="${style}">${inner}</div>`;
+      }).join('');
+      return `<div style="display:flex;flex-direction:column;gap:8px">${rows}</div>`;
+    }
+    // 파싱 실패(형식 불충족) = 텍스트 폴백(회귀 0)
+  }
+  return `<div style="font-size:var(--dm-fs-small);line-height:1.7;white-space:pre-wrap;color:var(--dm-neutral-700)">${escapeHtml(content)}</div>`;
+}
+
 function renderTabCards(p: any): string {
   const tabs = Array.isArray(p?.tabs) ? p.tabs : [];
   if (tabs.length === 0) return '';
@@ -953,7 +1006,7 @@ function renderTabCards(p: any): string {
   // ★ 2026-07-02 v2 — 밑줄 탭 → 알약(pill) 세그먼트 탭
   // ★ 2026-07-13 활성 알약 = 리터럴 고정(#171717 = 기존 var 값 동일 — 다크 테마 반전 시에도 어두운 알약 + 흰 글자 유지)
   const btns = tabs.map((t: any, i: number) => `<span data-dm-tab="${i}" style="padding:9px 16px;cursor:pointer;border-radius:999px;background:${i === di ? '#171717' : 'var(--dm-neutral-100)'};color:${i === di ? '#fff' : 'var(--dm-neutral-600)'};font-size:var(--dm-fs-small);font-weight:600;transition:all 150ms">${escapeHtml(t.label || '')}</span>`).join('');
-  const panels = tabs.map((t: any, i: number) => `<div data-dm-tab-panel="${i}" style="font-size:var(--dm-fs-small);line-height:1.7;white-space:pre-wrap;display:${i === di ? 'block' : 'none'};color:var(--dm-neutral-700)">${escapeHtml(t.content || '')}</div>`).join('');
+  const panels = tabs.map((t: any, i: number) => `<div data-dm-tab-panel="${i}" style="display:${i === di ? 'block' : 'none'}">${renderTabPanelContent(t)}</div>`).join('');
   return `<div class="dm-section dm-tab-cards" data-dm-tabs style="padding:var(--dm-sp-6) var(--dm-sp-5)">
     <div style="display:flex;gap:8px;margin-bottom:var(--dm-sp-4);flex-wrap:wrap">${btns}</div>
     ${panels}
@@ -1018,7 +1071,9 @@ function renderEmailCapture(p: any): string {
     <button data-dm-submit class="dm-cta dm-cta-primary" style="width:100%">${escapeHtml(p.reward_description ? `참여하고 ${p.reward_description}` : '참여하기')}</button>
     ${p.legal_notice ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2);line-height:1.5">${escapeHtml(p.legal_notice)}</div>` : ''}
     <div data-dm-result style="display:none"></div>`;
-  return `<div class="dm-section dm-email-capture" data-dm-form>${dmEventCard({ accentVar: '--dm-primary', icon: 'mail', overline: 'JOIN US', body })}</div>`;
+  // ★ 2026-07-22 (임은지) 완료 문구(success_text) — 지정 시 폼에 data-success-text로 실어 뷰어 성공 메시지가 이 값을 쓴다(미지정=기본 문구·회귀 0).
+  const successAttr = p.success_text ? ` data-success-text="${escapeHtml(p.success_text)}"` : '';
+  return `<div class="dm-section dm-email-capture" data-dm-form${successAttr}>${dmEventCard({ accentVar: '--dm-primary', icon: 'mail', overline: 'JOIN US', body })}</div>`;
 }
 
 function renderClickRewards(p: any): string {
@@ -1043,9 +1098,15 @@ function renderLuckyDraw(p: any): string {
     const ph = f.name === 'name' ? '이름' : f.name === 'phone' ? '전화번호' : '이메일';
     return `<input type="${t}" data-field="${escapeHtml(f.name)}" placeholder="${ph}" style="padding:12px;border:1px solid var(--dm-neutral-300);border-radius:var(--dm-radius-md);font-size:var(--dm-fs-small);background:var(--dm-bg);margin-bottom:var(--dm-sp-2);display:block;width:100%"/>`;
   }).join('');
+  // ★ 2026-07-22 (임은지) 경품 등급(prizes)을 발행에 노출 — 편집기서 경품을 입력해도 DM 어디에도 안 보여 응모 유도가 안 되던 갭. 편집 캔버스도 미러.
+  const prizes = Array.isArray(p?.prizes) ? p.prizes : [];
+  const prizeHtml = prizes.length > 0
+    ? `<div style="margin-bottom:var(--dm-sp-3)"><div style="font-size:var(--dm-fs-tiny);font-weight:700;color:var(--dm-primary);letter-spacing:1px;margin-bottom:4px">경품</div>${prizes.map((pr: any) => `<div style="font-size:var(--dm-fs-small);color:var(--dm-neutral-700)">${escapeHtml(String(pr.rank || ''))}등 ${escapeHtml(String(pr.name || ''))}${pr.count ? ` <span style="color:var(--dm-neutral-500)">(${Number(pr.count)}명)</span>` : ''}</div>`).join('')}</div>`
+    : '';
   const body = `
     <div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-2)">${escapeHtml(p.title || '[추첨 이벤트 제목]')}</div>
     ${p.description ? `<div style="font-size:var(--dm-fs-small);color:var(--dm-neutral-700);margin-bottom:var(--dm-sp-3);line-height:1.6">${escapeHtml(p.description)}</div>` : ''}
+    ${prizeHtml}
     ${inputs}
     <label style="display:flex;align-items:flex-start;gap:6px;font-size:var(--dm-fs-tiny);color:var(--dm-neutral-600);margin-bottom:var(--dm-sp-3)"><input type="checkbox" data-consent style="margin-top:2px"/><span>${escapeHtml(p.consent_text || '')}</span></label>
     <button data-dm-submit class="dm-cta dm-cta-primary" style="width:100%">응모하기</button>
@@ -1056,8 +1117,14 @@ function renderLuckyDraw(p: any): string {
 
 function renderRoulette(p: any): string {
   const segs = Array.isArray(p?.segments) ? p.segments.map((s: any) => ({ id: String(s.id), label: String(s.label || '') })) : [];
+  // ★ 2026-07-22 (임은지) 당첨 경품(prize_count>0) 라벨을 발행에 노출 — 휠(conic)엔 라벨이 없어 수신자가 당첨 가능 경품을 알 수 없던 갭. 편집 캔버스도 동일 필터 미러.
+  const prizeSegs = Array.isArray(p?.segments) ? p.segments.filter((s: any) => Number(s.prize_count) > 0) : [];
+  const prizeChips = prizeSegs.length > 0
+    ? `<div data-dm-prize-chips style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:var(--dm-sp-2)">${prizeSegs.map((s: any) => `<span style="font-size:var(--dm-fs-tiny);padding:4px 10px;background:var(--dm-primary-light);color:var(--dm-primary);border-radius:999px;font-weight:600">${escapeHtml(String(s.reward_description || s.label || ''))}</span>`).join('')}</div>`
+    : '';
   const body = `
     <div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-3)">${escapeHtml(p.title || '룰렛 이벤트')}</div>
+    ${prizeChips}
     <div data-dm-wheel style="width:200px;height:200px;border-radius:var(--dm-radius-full);background:conic-gradient(var(--dm-primary) 0deg 45deg,var(--dm-primary-light) 45deg 90deg,var(--dm-accent) 90deg 135deg,var(--dm-neutral-100) 135deg 180deg,var(--dm-primary) 180deg 225deg,var(--dm-primary-light) 225deg 270deg,var(--dm-accent) 270deg 315deg,var(--dm-neutral-100) 315deg 360deg);margin:var(--dm-sp-3) auto;border:4px solid var(--dm-bg);box-shadow:var(--dm-shadow-md)"></div>
     <button data-dm-spin class="dm-cta dm-cta-primary">룰렛 돌리기</button>
     ${p.one_spin_per_user ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2)">1인 1회 한정</div>` : ''}

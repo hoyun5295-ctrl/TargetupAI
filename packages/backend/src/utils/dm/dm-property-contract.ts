@@ -58,6 +58,13 @@ export const DM_SLIDESHOW_PAUSE = true;
  *  (종전엔 show_indicator·auto_slide가 렌더/뷰어 어디서도 소비 안 되는 고아 속성이라 토글해도 단말 무변화였다.) */
 export const DM_PRODUCT_CAROUSEL_SWIPE_MIN = 3;
 
+/** ★ 2026-07-22 (임은지 재신고) 상품 슬라이드 인디케이터 = 페이지 단위. 카드가 페이지당 2개(50% 폭) 보이므로
+ *  점 개수는 상품 수가 아니라 페이지 수(=ceil(상품수/2))여야 한다. 종전엔 상품 1개당 1점(아이템 단위)이라
+ *  상품 4개면 점 4개·끝까지 스와이프해도 3번째 점에서 멈춤 → "한 페이지 더 있는 것처럼" 보였다.
+ *  SSR renderProductCarousel·캔버스 ProductCarouselSection이 상품을 이 크기로 묶어 페이지 래퍼로 렌더하고
+ *  점을 페이지 수만큼 방출한다. 뷰어(dm-viewer.ts)는 스크롤 컨테이너의 자식(=페이지)↔점을 1:1로 동기화한다. */
+export const DM_PRODUCT_CAROUSEL_PER_PAGE = 2;
+
 /** ★ 2026-07-21 (#3 남지현) 매장/고객센터 개행 보존 — business_hours·address 입력 개행이 발행물에 white-space:pre-line 으로 보존.
  *  (종전엔 escapeHtml만이라 \n이 공백으로 붕괴 → 편집창 3줄, 단말 1줄). card·classic 양 구도 SSR + 캔버스 StoreInfoSection 미러. */
 export const DM_STORE_INFO_NEWLINE_FIELDS = ['business_hours', 'address'] as const;
@@ -71,6 +78,9 @@ export const DM_WIRED_ORPHAN_MARKERS = {
   gallery_enable_zoom: 'data-dm-zoom',
   poll_allow_multiple: 'data-dm-poll-multi',
   survey_show_progress: 'data-dm-survey-progress',
+  // ★ 2026-07-22 (임은지) 이메일 수집 "완료 문구"(success_text) — 편집기 입력이 발행 폼에 data-success-text로 실리고
+  //   뷰어(dm-viewer.ts) 폼 제출 성공 메시지가 이 값을 쓴다(미지정=기존 기본 문구). 종전엔 렌더/뷰어 어디서도 소비 안 됨(고아).
+  email_success_text: 'data-success-text',
 } as const;
 
 /** ★ 2026-07-21 (#3 남지현) 매장/고객센터 라벨 = 구도별 발송 SSR 라벨을 캔버스가 미러해야 편집=발송.

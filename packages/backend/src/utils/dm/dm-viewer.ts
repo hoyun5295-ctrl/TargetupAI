@@ -711,8 +711,10 @@ ${counterHtml}
       if (info.type === 'lucky_draw' && (!data.phone || !String(data.phone).trim())) { showMsg(box, '전화번호를 입력해주세요.', false); return; }
       if (info.type === 'email_capture' && (!data.email || !String(data.email).trim())) { showMsg(box, '이메일을 입력해주세요.', false); return; }
       btn.disabled = true; btn.style.opacity = '0.6';
+      // ★ 2026-07-22 (임은지) 편집기 "완료 문구"(success_text) — 폼에 실린 값을 성공 메시지로. 미지정=기본 문구.
+      var successText = box.getAttribute('data-success-text');
       submitInteraction(info.id, info.type, data).then(function (res) {
-        if (res && res.success) showMsg(box, res.already ? '이미 참여하셨습니다.' : '참여가 완료되었습니다. 감사합니다!', true);
+        if (res && res.success) showMsg(box, res.already ? '이미 참여하셨습니다.' : (successText || '참여가 완료되었습니다. 감사합니다!'), true);
         else { btn.disabled = false; btn.style.opacity = '1'; showMsg(box, (res && res.error) || '잠시 후 다시 시도해주세요.', false); }
       }).catch(function () { btn.disabled = false; btn.style.opacity = '1'; showMsg(box, '잠시 후 다시 시도해주세요.', false); });
     });

@@ -32,6 +32,8 @@ import type {
   ReviewsProps,
 } from '../../../utils/dm-section-defaults';
 import { dmImageUrl } from '../../../utils/dm-image-url';
+// ★ 2026-07-22 탭 카드 content_type='product_list' — 발행 SSR과 같은 붙여넣기 파서 재사용(편집=단말).
+import { parsePastedProducts } from '../../../utils/product-paste';
 import { DmIcon, DmEventCard, DM_CTA_STYLE } from './dm-primitives';
 
 // ────────────── 공통 영역 ──────────────
@@ -156,8 +158,64 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
     );
   }
   // ★ 2026-07-21 (#4a 임은지) classic = 상품 3개 초과 시 가로 스와이프 캐러셀 + 인디케이터 (SSR renderProductCarousel 미러). 2개 이하 = 기존 그리드.
+  // ★ 2026-07-22 (임은지 재신고) 점=페이지 단위(ceil(N/PC_PER_PAGE)). 카드를 페이지당 PC_PER_PAGE개씩 페이지 래퍼(.dm-pc-page)로 묶어
+  //   각 페이지가 scroll-snap-align:start → 스크롤 자식=페이지, 점=페이지 수. 발행 SSR renderProductCarousel과 동일 구조.
+  const PC_PER_PAGE = 2; // = DM_PRODUCT_CAROUSEL_PER_PAGE (SoT: 백엔드 dm-property-contract.ts). 카드 2개 = 1페이지.
   const isScroll = products.length > 2;
   const showDots = isScroll && props.show_indicator !== false;
+  const cardEls = products.map((p, i) => {
+    // ★ 2026-07-02(2) 할인 자동 계산 표시 + 링크 연결 표시 — 뷰어 SSR(renderProductCarousel)과 동일 규칙
+    const price = Number(p.price || 0);
+    const discount = Number(p.discount_price || 0);
+    const manual = Math.round(Number(p.discount_rate));
+    const rate = Number.isFinite(manual) && manual > 0 && manual < 100
+      ? manual
+      : (price > 0 && discount > 0 && discount < price ? Math.round((1 - discount / price) * 100) : null);
+    const finalPrice = discount > 0 ? discount : price;
+    return (
+      // ★ 2026-07-16 (#2 재오픈): classic 카드 구조·스타일을 발행 SSR renderProductCarousel과 정확히 미러.
+      //   가격 줄 = 카드 하단 고정(marginTop auto)로 같은 행 카드 가격 위치 일정(임은지 건의 유지).
+      //   ★ 2026-07-22 스와이프 스냅은 카드가 아니라 페이지(.dm-pc-page)가 담당 → 카드에서 scrollSnapAlign 제거.
+      <div key={p.id || i} style={{ ...(isScroll ? { flex: '0 0 calc(50% - 6px)' } : { width: 'calc(50% - 8px)' }), maxWidth: 220, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', background: cardBg, border: '1px solid var(--dm-neutral-200)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--dm-shadow-sm)' }}>
+        {p.image_url ? (
+          <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: '100%', height: imgH, display: 'block', flexShrink: 0, ...imgFit }} />
+        ) : (
+          <div style={{ width: '100%', height: imgH, background: 'var(--dm-neutral-100)', flexShrink: 0 }} />
+        )}
+        <div style={{ padding: '10px 12px 12px', flex: 1, display: 'flex', flexDirection: 'column', background: cardBg }}>
+          <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4, whiteSpace: 'pre-line' }}>{p.name}</div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginTop: 'auto', paddingTop: 4, flexWrap: 'wrap', fontVariantNumeric: 'tabular-nums' }}>
+            {rate !== null && (
+              <span style={{ fontSize: 'var(--dm-fs-h3)', color: 'var(--dm-error)', fontWeight: 800 }}>{rate}%</span>
+            )}
+            <span style={{ fontSize: 'var(--dm-fs-body)', fontWeight: 800, color: 'var(--dm-neutral-900)' }}>
+              {finalPrice.toLocaleString('ko-KR')}원
+            </span>
+            {rate !== null && (
+              <span style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-400)', textDecoration: 'line-through' }}>
+                {price.toLocaleString('ko-KR')}원
+              </span>
+            )}
+          </div>
+          {p.link_url ? (
+            <div style={{ fontSize: 10, color: 'var(--dm-primary)', marginTop: 4 }}>링크 연결됨</div>
+          ) : null}
+        </div>
+      </div>
+    );
+  });
+  // 스크롤이면 카드를 페이지 단위로 묶는다(발행 SSR 페이지 래퍼 미러). 그리드면 카드 나열.
+  const pcPages: React.ReactElement[] = [];
+  if (isScroll) {
+    for (let i = 0; i < cardEls.length; i += PC_PER_PAGE) {
+      pcPages.push(
+        <div key={i} className="dm-pc-page" style={{ flex: '0 0 100%', boxSizing: 'border-box', scrollSnapAlign: 'start', display: 'flex', gap: 12 }}>
+          {cardEls.slice(i, i + PC_PER_PAGE)}
+        </div>,
+      );
+    }
+  }
+  const pageCount = pcPages.length;
   return (
     <div className="dm-section dm-product-carousel" style={props.background_color ? { ...SECTION_SHELL_LG, background: props.background_color } : SECTION_SHELL_LG}>
       {props.title && <div className="dm-text-h2" style={H2_TITLE_STYLE}>{props.title}</div>}
@@ -165,55 +223,15 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
         <div style={PLACEHOLDER_STYLE}>[상품을 추가해주세요]</div>
       ) : (
         <>
-        <div style={isScroll
-          ? { display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', scrollSnapType: 'x mandatory', gap: 12 }
+        <div className="dm-pc-items" style={isScroll
+          ? { display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', scrollSnapType: 'x mandatory', gap: 0 }
           : { display: 'flex', flexWrap: 'wrap', justifyContent: 'var(--dm-section-justify, center)', gap: 12 }}>
-          {products.map((p, i) => {
-            // ★ 2026-07-02(2) 할인 자동 계산 표시 + 링크 연결 표시 — 뷰어 SSR(renderProductCarousel)과 동일 규칙
-            const price = Number(p.price || 0);
-            const discount = Number(p.discount_price || 0);
-            const manual = Math.round(Number(p.discount_rate));
-            const rate = Number.isFinite(manual) && manual > 0 && manual < 100
-              ? manual
-              : (price > 0 && discount > 0 && discount < price ? Math.round((1 - discount / price) * 100) : null);
-            const finalPrice = discount > 0 ? discount : price;
-            return (
-              // ★ 2026-07-16 (#2 재오픈): classic 카드 구조·스타일을 발행 SSR renderProductCarousel과 정확히 미러.
-              //   드리프트였던 카드 테두리·그림자·radius(8→16)·overflow·내부 패딩(10 12 12)·가격 글씨(크기 fs-small→h3/body·굵기 700→800)를
-              //   발행물 기준으로 통일. 가격 줄 = 카드 하단 고정(marginTop auto)로 같은 행 카드 가격 위치 일정(임은지 건의 유지).
-              <div key={p.id || i} style={{ ...(isScroll ? { flex: '0 0 calc(50% - 6px)', scrollSnapAlign: 'start' } : { width: 'calc(50% - 8px)' }), maxWidth: 220, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', background: cardBg, border: '1px solid var(--dm-neutral-200)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--dm-shadow-sm)' }}>
-                {p.image_url ? (
-                  <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: '100%', height: imgH, display: 'block', flexShrink: 0, ...imgFit }} />
-                ) : (
-                  <div style={{ width: '100%', height: imgH, background: 'var(--dm-neutral-100)', flexShrink: 0 }} />
-                )}
-                <div style={{ padding: '10px 12px 12px', flex: 1, display: 'flex', flexDirection: 'column', background: cardBg }}>
-                  <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4, whiteSpace: 'pre-line' }}>{p.name}</div>
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginTop: 'auto', paddingTop: 4, flexWrap: 'wrap', fontVariantNumeric: 'tabular-nums' }}>
-                    {rate !== null && (
-                      <span style={{ fontSize: 'var(--dm-fs-h3)', color: 'var(--dm-error)', fontWeight: 800 }}>{rate}%</span>
-                    )}
-                    <span style={{ fontSize: 'var(--dm-fs-body)', fontWeight: 800, color: 'var(--dm-neutral-900)' }}>
-                      {finalPrice.toLocaleString('ko-KR')}원
-                    </span>
-                    {rate !== null && (
-                      <span style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-400)', textDecoration: 'line-through' }}>
-                        {price.toLocaleString('ko-KR')}원
-                      </span>
-                    )}
-                  </div>
-                  {p.link_url ? (
-                    <div style={{ fontSize: 10, color: 'var(--dm-primary)', marginTop: 4 }}>링크 연결됨</div>
-                  ) : null}
-                </div>
-              </div>
-            );
-          })}
+          {isScroll ? pcPages : cardEls}
         </div>
-        {/* ★ 2026-07-21 (#4a 임은지) 인디케이터 점 — 발행물(renderProductCarousel) 미러. 캔버스는 미리보기라 첫 점 활성 정적. */}
+        {/* ★ 2026-07-22 (임은지 재신고) 인디케이터 점 = 페이지 수(ceil(N/2)). 발행 SSR renderProductCarousel 미러. 캔버스는 미리보기라 첫 점 활성 정적. */}
         {showDots && (
           <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 'var(--dm-sp-3)' }}>
-            {products.map((_, i) => (
+            {Array.from({ length: pageCount }, (_, i) => (
               <span key={i} style={{ width: 8, height: 8, borderRadius: '50%', background: i === 0 ? 'var(--dm-primary)' : 'var(--dm-neutral-300)' }} />
             ))}
           </div>
@@ -317,29 +335,64 @@ export function TabCardsSection({ props }: { props: TabCardsProps }) {
   const tabs = props?.tabs || [];
   const [idx, setIdx] = useState(props?.default_tab_index || 0);
   const cur = tabs[idx];
+  // ★ 2026-07-22 (임은지) content_type 실제 렌더 미러(발행 renderTabPanelContent) — image=이미지 / product_list=상품 행 / text=텍스트.
+  const content = (cur?.content || '').trim();
+  const plItems = cur?.content_type === 'product_list' ? parsePastedProducts(cur?.content || '') : [];
+  let panel: React.ReactNode;
+  if (!content) {
+    panel = <span style={PLACEHOLDER_STYLE}>[내용을 추가해주세요]</span>;
+  } else if (cur?.content_type === 'image') {
+    panel = <img src={dmImageUrl(content)} alt="" style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 'var(--dm-radius-md)' }} />;
+  } else if (cur?.content_type === 'product_list' && plItems.length > 0) {
+    panel = (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {plItems.map((it, i) => {
+          const rate = it.discount_rate ?? (it.price && it.discount_price && it.discount_price < it.price ? Math.round((1 - it.discount_price / it.price) * 100) : null);
+          const finalPrice = it.discount_price ?? it.price ?? 0;
+          return (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--dm-neutral-50)', border: '1px solid var(--dm-neutral-200)', borderRadius: 12 }}>
+              <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)' }}>{it.name}</div>
+                {it.price ? (
+                  <div style={{ marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+                    {rate !== null && <span style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-error)', fontWeight: 800 }}>{rate}% </span>}
+                    <span style={{ fontWeight: 800 }}>{finalPrice.toLocaleString('ko-KR')}원</span>
+                  </div>
+                ) : null}
+              </div>
+              {it.link_url ? <span aria-hidden="true" style={{ color: 'var(--dm-neutral-400)', flexShrink: 0 }}>→</span> : null}
+            </div>
+          );
+        })}
+      </div>
+    );
+  } else {
+    panel = <div style={{ fontSize: 'var(--dm-fs-small)', lineHeight: 1.7, whiteSpace: 'pre-wrap', color: 'var(--dm-neutral-700)' }}>{cur?.content}</div>;
+  }
   return (
     <div className="dm-section dm-tab-cards" style={SECTION_SHELL_LG}>
-      <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--dm-neutral-200)', marginBottom: 12 }}>
+      {/* ★ 2026-07-22 (임은지) 발행 SSR renderTabCards = 알약(pill) 세그먼트 탭(활성 #171717 배경+흰 글자). 편집 캔버스도 미러(옛 밑줄 탭 → 알약) = 편집=단말. */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 'var(--dm-sp-4)', flexWrap: 'wrap' }}>
         {tabs.map((t, i) => (
           <button
             key={i}
             onClick={() => setIdx(i)}
             style={{
-              padding: '8px 12px',
-              background: 'transparent',
+              padding: '9px 16px',
+              cursor: 'pointer',
               border: 'none',
-              borderBottom: i === idx ? '2px solid var(--dm-primary)' : '2px solid transparent',
-              color: i === idx ? 'var(--dm-primary)' : 'var(--dm-neutral-600)',
-              fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              borderRadius: 999,
+              background: i === idx ? '#171717' : 'var(--dm-neutral-100)',
+              color: i === idx ? '#fff' : 'var(--dm-neutral-600)',
+              fontSize: 'var(--dm-fs-small)', fontWeight: 600,
+              transition: 'all 150ms',
             }}
           >
             {t.label}
           </button>
         ))}
       </div>
-      <div style={{ fontSize: 13, color: 'var(--dm-neutral-800)', lineHeight: 1.6 }}>
-        {cur?.content || <span style={PLACEHOLDER_STYLE}>[내용을 추가해주세요]</span>}
-      </div>
+      {panel}
     </div>
   );
 }
@@ -472,10 +525,12 @@ export function EmailCaptureSection({ props }: { props: EmailCaptureProps }) {
 export function ClickRewardsSection({ props }: { props: ClickRewardsProps }) {
   const iconMap: Record<string, 'heart' | 'star'> = { like: 'heart', share: 'star', scroll: 'star' };
   // ★ 2026-07-21 발행 renderClickRewards가 dmEventCard(accentVar:--dm-accent, icon/overline 없음)로 감싸므로 셸 정합.
+  // ★ 2026-07-22 (임은지) 발행엔 [참여하기] 버튼(data-dm-claim)이 있는데 편집엔 없었고, 반대로 편집엔 정적 진행바가 있었으나
+  //   발행엔 없다(실시간 참여수 집계 미구축이라 바는 항상 0% = 거짓 표시). 발행 SSR과 정확히 미러(버튼 O·바 X) = 편집=단말.
   return (
     <div className="dm-section dm-click-rewards">
       <DmEventCard accentVar="--dm-accent">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--dm-sp-3)', marginBottom: 'var(--dm-sp-2)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--dm-sp-3)' }}>
           <div style={{ color: 'var(--dm-accent)' }}><DmIcon name={iconMap[props.reward_type] || 'star'} size={28} /></div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)' }}>{props.reward_description}</div>
@@ -486,11 +541,7 @@ export function ClickRewardsSection({ props }: { props: ClickRewardsProps }) {
             )}
           </div>
         </div>
-        {props.show_progress && (
-          <div style={{ width: '100%', height: 6, background: 'var(--dm-neutral-200)', borderRadius: 'var(--dm-radius-full)', overflow: 'hidden' }}>
-            <div style={{ width: '0%', height: '100%', background: 'var(--dm-accent)' }} />
-          </div>
-        )}
+        <button style={{ ...DM_CTA_STYLE, width: '100%', marginTop: 'var(--dm-sp-3)' }}>참여하기</button>
       </DmEventCard>
     </div>
   );
@@ -505,6 +556,17 @@ export function LuckyDrawSection({ props }: { props: LuckyDrawProps }) {
         <div style={TITLE_STYLE}>{props.title || '[추첨 이벤트 제목을 작성해주세요]'}</div>
         {props.description && (
           <div style={{ fontSize: 'var(--dm-fs-small)', color: 'var(--dm-neutral-700)', marginBottom: 'var(--dm-sp-3)', lineHeight: 1.6 }}>{props.description}</div>
+        )}
+        {/* ★ 2026-07-22 (임은지) 경품 등급(prizes)을 발행 SSR과 동일하게 노출(응모 유도) — 편집기서 입력해도 DM에 안 보이던 갭. */}
+        {(props.prizes || []).length > 0 && (
+          <div style={{ marginBottom: 'var(--dm-sp-3)' }}>
+            <div style={{ fontSize: 'var(--dm-fs-tiny)', fontWeight: 700, color: 'var(--dm-primary)', letterSpacing: 1, marginBottom: 4 }}>경품</div>
+            {(props.prizes || []).map((pr, i) => (
+              <div key={i} style={{ fontSize: 'var(--dm-fs-small)', color: 'var(--dm-neutral-700)' }}>
+                {pr.rank}등 {pr.name}{pr.count ? <span style={{ color: 'var(--dm-neutral-500)' }}> ({pr.count}명)</span> : null}
+              </div>
+            ))}
+          </div>
         )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--dm-sp-2)', marginBottom: 'var(--dm-sp-3)' }}>
           {(props.form_fields || []).map((f) => (
@@ -552,13 +614,16 @@ export function RouletteSection({ props }: { props: RouletteProps }) {
         {props.one_spin_per_user && (
           <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', marginTop: 'var(--dm-sp-2)' }}>1인 1회 한정</div>
         )}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginTop: 'var(--dm-sp-3)' }}>
-          {segments.map((s) => (
-            <span key={s.id} style={{ fontSize: 'var(--dm-fs-tiny)', padding: '4px 8px', background: 'var(--dm-bg)', border: '1px solid var(--dm-neutral-200)', borderRadius: 'var(--dm-radius-full)', color: 'var(--dm-neutral-700)' }}>
-              {s.label}
-            </span>
-          ))}
-        </div>
+        {/* ★ 2026-07-22 (임은지) 당첨 경품(prize_count>0)만 발행 SSR과 동일 필터로 노출(전 세그먼트 나열 아님). 휠엔 라벨이 없어 경품 안내 역할. */}
+        {segments.filter((s) => Number(s.prize_count) > 0).length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginTop: 'var(--dm-sp-3)' }}>
+            {segments.filter((s) => Number(s.prize_count) > 0).map((s) => (
+              <span key={s.id} style={{ fontSize: 'var(--dm-fs-tiny)', padding: '4px 10px', background: 'var(--dm-primary-light)', color: 'var(--dm-primary)', borderRadius: 999, fontWeight: 600 }}>
+                {s.reward_description || s.label}
+              </span>
+            ))}
+          </div>
+        )}
       </DmEventCard>
     </div>
   );
@@ -610,7 +675,13 @@ export function LimitedQuantitySection({ props }: { props: LimitedQuantityProps 
             <div style={{ width: `${percent}%`, height: '100%', background: 'var(--dm-accent)', transition: 'width 0.3s' }} />
           </div>
         </div>
-        <button style={{ ...DM_CTA_STYLE, width: '100%' }}>선착순 참여하기</button>
+        {/* ★ 2026-07-22 (임은지) signup_url이 있으면 발행 SSR은 링크(a href)로, 없으면 참여 버튼으로 렌더한다.
+            편집 캔버스는 항상 버튼이라 "참여 링크"를 입력해도 단말은 링크·편집은 버튼으로 달랐다 → 발행과 동일 분기 미러. */}
+        {props.signup_url ? (
+          <a href={props.signup_url} target="_blank" rel="noopener noreferrer" style={{ ...DM_CTA_STYLE, width: '100%', display: 'block', textAlign: 'center', textDecoration: 'none' }}>선착순 참여하기</a>
+        ) : (
+          <button style={{ ...DM_CTA_STYLE, width: '100%' }}>선착순 참여하기</button>
+        )}
       </DmEventCard>
     </div>
   );
@@ -679,21 +750,10 @@ export function MapStoreLocatorSection({ props }: { props: MapStoreLocatorProps 
   const stores = props?.stores || [];
   return (
     <div className="dm-section dm-map-store-locator" style={SECTION_SHELL_LG}>
+      {/* ★ 2026-07-22 (임은지) 발행 SSR renderMapStoreLocator는 2026-07-07에 기능 없는 200px 회색 지도 자리(죽은 장식)를 제거했다.
+          편집 캔버스에만 남아 편집엔 회색 상자가 보이고 단말엔 없던 불일치 → 캔버스에서도 제거(제목+매장 카드만). */}
       <div style={{ ...TITLE_STYLE, marginBottom: 'var(--dm-sp-3)', display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ color: 'var(--dm-primary)' }}><DmIcon name="map" size={18} /></span>매장 찾기
-      </div>
-      <div style={{
-        width: '100%',
-        height: 200,
-        background: 'var(--dm-neutral-100)',
-        borderRadius: 'var(--dm-radius-md)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: 'var(--dm-neutral-400)',
-        marginBottom: 'var(--dm-sp-3)',
-      }}>
-        <DmIcon name="map" size={32} />
       </div>
       {stores.length === 0 ? (
         <div style={PLACEHOLDER_STYLE}>[매장 정보를 추가해주세요]</div>

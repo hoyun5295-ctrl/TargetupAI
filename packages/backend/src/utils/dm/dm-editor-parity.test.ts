@@ -11,7 +11,10 @@ import { resolve } from 'node:path';
 import { renderSection } from './dm-section-renderer';
 import { renderDmDesign3Css, renderDmBaseCss, renderDmTokensCss, renderDmDividerSvg } from './dm-tokens';
 import type { Section } from './dm-section-registry';
-import { DM_BACKGROUNDS, DM_DIVIDERS, DM_NEWLINE_FIELDS, DM_IMAGE_FITS, DM_GALLERY_FULL_BLEED, DM_GALLERY_CAPTION_VISIBLE, DM_SLIDESHOW_PAUSE, DM_STORE_INFO_NEWLINE_FIELDS, DM_STORE_INFO_LABELS, DM_PRODUCT_CAROUSEL_SWIPE_MIN, DM_WIRED_ORPHAN_MARKERS } from './dm-property-contract';
+import { DM_BACKGROUNDS, DM_DIVIDERS, DM_NEWLINE_FIELDS, DM_IMAGE_FITS, DM_GALLERY_FULL_BLEED, DM_GALLERY_CAPTION_VISIBLE, DM_SLIDESHOW_PAUSE, DM_STORE_INFO_NEWLINE_FIELDS, DM_STORE_INFO_LABELS, DM_PRODUCT_CAROUSEL_SWIPE_MIN, DM_PRODUCT_CAROUSEL_PER_PAGE, DM_WIRED_ORPHAN_MARKERS } from './dm-property-contract';
+import { parseTabProductList } from './dm-tab-content';
+// FE 상품 붙여넣기 파서 원본(SoT) — 백엔드 미러(parseTabProductList)와 결과 일치 교차 고정
+import { parsePastedProducts } from '../../../../frontend/src/utils/product-paste';
 
 const NL = '줄1\n줄2';
 const NL_BR = '줄1<br>줄2';
@@ -215,6 +218,16 @@ describe('DM 편집기↔발행 속성 계약 (재발 방지책 1)', () => {
       const html = renderSection(mk('survey', { title: 'S', questions: [{ id: 'q1', type: 'text', question: 'Q1' }] }), {} as any);
       expect(html).not.toContain('data-dm-survey-progress');
     });
+    it('이메일 수집 완료 문구(success_text) — 발행 폼 data-success-text + 뷰어 소비(종전 고아)', () => {
+      const html = renderSection(mk('email_capture', { headline: 'H', consent_text: 'C', success_text: '구독 감사합니다 특별문구' }), {} as any);
+      expect(html, '발행 폼에 완료 문구가 data-success-text로 실려야').toContain(DM_WIRED_ORPHAN_MARKERS.email_success_text);
+      expect(html).toContain('구독 감사합니다 특별문구');
+      expect(viewer, '뷰어 폼 핸들러가 data-success-text 소비 안 하면 완료 문구가 죽은 옵션').toContain(DM_WIRED_ORPHAN_MARKERS.email_success_text);
+    });
+    it('이메일 수집 완료 문구 미지정 — data-success-text 미출력(회귀 0)', () => {
+      const html = renderSection(mk('email_capture', { headline: 'H', consent_text: 'C' }), {} as any);
+      expect(html).not.toContain('data-success-text');
+    });
   });
 
   // ── 상품 슬라이드 가로 스와이프 + 인디케이터 (2026-07-21 임은지 — show_indicator/auto_slide 고아였음) ──
@@ -237,6 +250,108 @@ describe('DM 편집기↔발행 속성 계약 (재발 방지책 1)', () => {
       const html = renderSection(mk('product_carousel', { products: mkProducts(4), show_indicator: false }), {} as any);
       expect(html).toContain('data-dm-pcarousel');
       expect(html).not.toContain('data-dm-pc-dots');
+    });
+    // ★ 2026-07-22 (임은지 재신고) 점 = 페이지 단위(ceil(N/2)). 상품 1개당 1점(아이템 단위) 아님.
+    const dotCount = (h: string) => (h.match(/data-dm-pc-dot=/g) || []).length;
+    for (const [n, expected] of [[3, 2], [4, 2], [5, 3], [6, 3], [7, 4]] as const) {
+      it(`상품 ${n}개 — 점 ${expected}개(ceil(${n}/${DM_PRODUCT_CAROUSEL_PER_PAGE}) 페이지 수)`, () => {
+        const html = renderSection(mk('product_carousel', { products: mkProducts(n) }), {} as any);
+        expect(dotCount(html), `상품 ${n}개인데 점이 페이지 수(${expected})가 아님 → 유령 페이지`).toBe(expected);
+      });
+    }
+    it('스크롤 컨테이너 자식 = 페이지 래퍼(dm-pc-page)로 묶여 점↔페이지 1:1', () => {
+      const html = renderSection(mk('product_carousel', { products: mkProducts(4) }), {} as any);
+      const pageCount = (html.match(/dm-pc-page/g) || []).length;
+      expect(pageCount, '상품 4개 → 페이지 래퍼 2개').toBe(2);
+    });
+    it('편집 캔버스(NewSections) 미러 — 페이지 래퍼 + 점=페이지수(편집=단말)', () => {
+      const canvas = readFileSync(resolve(process.cwd(), '../frontend/src/components/dm/canvas/NewSections.tsx'), 'utf8');
+      expect(canvas, '캔버스가 페이지 래퍼(dm-pc-page)로 안 묶으면 편집≠단말').toContain('dm-pc-page');
+      expect(canvas, '캔버스 점이 상품수가 아니라 페이지수(pageCount) 기반이어야').toMatch(/length:\s*pageCount/);
+    });
+  });
+
+  // ── 편집 캔버스 = 발행 SSR 미러 (2026-07-22 편집≠단말 전수 정정, 임은지) ──
+  describe('편집 캔버스 = 발행 SSR 미러 (편집≠단말 전수)', () => {
+    const canvasSrc = () => readFileSync(resolve(process.cwd(), '../frontend/src/components/dm/canvas/NewSections.tsx'), 'utf8');
+    // 캔버스 컴포넌트 함수 본문만 잘라 대조(다른 섹션 마커 오염 방지)
+    const block = (fn: string, next: string) => {
+      const src = canvasSrc();
+      const a = src.indexOf(`export function ${fn}`);
+      const b = src.indexOf(`export function ${next}`);
+      return src.slice(a, b === -1 ? undefined : b);
+    };
+
+    it('탭 카드 — 발행은 알약(pill) 탭, 캔버스도 알약 미러(밑줄 아님)', () => {
+      const ssr = renderSection(mk('tab_cards', { tabs: [{ label: 'A', content: 'x' }, { label: 'B', content: 'y' }] }), {} as any);
+      expect(ssr, '발행 탭이 알약(border-radius:999px)이어야').toContain('border-radius:999px');
+      const tab = block('TabCardsSection', 'PollSection');
+      expect(tab, '캔버스 탭이 알약(borderRadius 999) 미러 안 함 → 편집 밑줄 vs 단말 알약').toMatch(/borderRadius:\s*999/);
+      expect(tab, '캔버스 탭에 밑줄(borderBottom) 잔존 = 발행 알약과 불일치').not.toContain('borderBottom');
+    });
+
+    it('참여 보상 — 발행은 [참여하기] 버튼, 캔버스도 버튼 미러(편집에 버튼 없던 갭)', () => {
+      const ssr = renderSection(mk('click_rewards', { reward_type: 'like', target_count: 10, reward_description: 'R', show_progress: true }), {} as any);
+      expect(ssr, '발행에 참여 버튼(data-dm-claim)').toContain('data-dm-claim');
+      const cr = block('ClickRewardsSection', 'LuckyDrawSection');
+      expect(cr, '캔버스에 [참여하기] 버튼 없음 = 편집엔 버튼 안 보임(단말엔 있음)').toContain('참여하기');
+    });
+
+    it('매장 찾기 지도 — 캔버스에 죽은 200px 회색 지도 상자 없음(발행 2026-07-07 제거분 미러)', () => {
+      const map = block('MapStoreLocatorSection', 'ReviewsSection');
+      expect(map, '캔버스에 죽은 지도 상자(height 200 회색) 잔존 = 편집엔 보이는데 단말엔 없음').not.toMatch(/height:\s*200/);
+    });
+
+    it('선착순 한정 — signup_url 있으면 발행은 링크, 캔버스도 링크 미러(항상 버튼 아님)', () => {
+      const ssr = renderSection(mk('limited_quantity', { title: 'T', total_quantity: 100, signup_url: 'https://x.com' }), {} as any);
+      expect(ssr, 'signup_url 있으면 발행은 링크(a href)').toContain('href=');
+      const lq = block('LimitedQuantitySection', 'YoutubeEmbedSection');
+      expect(lq, '캔버스가 signup_url을 링크로 미러 안 함(항상 버튼)').toContain('signup_url');
+    });
+
+    // ── F8 (임은지) 탭 카드 content_type = 이미지/상품목록 = 죽은 옵션 → 실제 렌더 구현 ──
+    it('탭 content_type=image — 발행이 이미지(<img>)로 렌더(텍스트 아님)', () => {
+      const html = renderSection(mk('tab_cards', { tabs: [{ label: '이미지', content_type: 'image', content: 'https://ex.com/a.jpg' }] }), {} as any);
+      expect(html, 'image 탭이 <img>로 렌더돼야').toContain('<img');
+      expect(html).toContain('a.jpg');
+    });
+    it('탭 content_type=product_list — 발행이 구조화 상품 행(링크 href+가격)으로 렌더(평문 아님)', () => {
+      const content = '글로우 파운데이션\n85,000원 → 15% 72,250원\nhttps://ex.com/p/1';
+      const html = renderSection(mk('tab_cards', { tabs: [{ label: '상품', content_type: 'product_list', content }] }), {} as any);
+      expect(html, 'product_list가 상품명 렌더').toContain('글로우 파운데이션');
+      // 평문 패널은 URL을 이스케이프 텍스트로만 두지만, 구조화 렌더는 링크(href)로 만든다 = 평문과 구별
+      expect(html, 'product_list URL이 링크(href)로 렌더돼야 = 구조화(평문 아님)').toContain('href="https://ex.com/p/1"');
+      expect(html, 'product_list 최종가 렌더').toContain('72,250원');
+    });
+    it('탭 상품목록 파서 = 상품 붙여넣기 파서(교차 패키지 결과 일치·창작 0)', () => {
+      const fmt = '상품A\n10,000원\nhttps://ex.com/a\n\n상품B\n20,000원 → 10% 18,000원\nhttps://ex.com/b';
+      expect(parseTabProductList(fmt)).toEqual(parsePastedProducts(fmt));
+    });
+    it('탭 카드 — 캔버스가 content_type(image/product_list) 분기 미러', () => {
+      const tab = block('TabCardsSection', 'PollSection');
+      expect(tab, "캔버스가 content_type='image'(이미지) 렌더 미러").toContain("=== 'image'");
+      expect(tab, "캔버스가 content_type='product_list'(상품 목록) 렌더 미러").toContain('product_list');
+    });
+
+    // ── 설정한 경품이 단말 어디에도 안 보이던 것 노출 (룰렛 휠엔 라벨 없음 / 추첨 경품 미표시) ──
+    it('룰렛 — 당첨 경품(prize_count>0) 라벨이 발행에 노출(휠엔 라벨 없어 경품 안내)', () => {
+      const html = renderSection(mk('roulette', { segments: [{ id: '1', label: '1등', probability: 0.1, prize_count: 5, reward_description: '스타벅스 기프티콘' }, { id: '2', label: '꽝', probability: 0.9, prize_count: 0 }], one_spin_per_user: true }), {} as any);
+      // reward_description은 data-segments(id·label만)에 없으므로, 이 문자열 노출 = 경품 칩이 실제 렌더됨(평문 data 아님)
+      expect(html, '경품(prize_count>0) reward_description이 발행에 노출').toContain('스타벅스 기프티콘');
+    });
+    it('룰렛 — 경품 0개(전부 꽝) 시 경품 칩 미노출(회귀 0)', () => {
+      const html = renderSection(mk('roulette', { segments: [{ id: '1', label: '꽝', probability: 1, prize_count: 0 }], one_spin_per_user: true }), {} as any);
+      expect(html).not.toContain('data-dm-prize-chips');
+    });
+    it('추첨 — 경품 등급(prizes)이 발행에 노출(응모 유도)', () => {
+      const html = renderSection(mk('lucky_draw', { title: 'T', form_fields: [{ name: 'phone', required: true }], consent_text: 'C', draw_at: '', prizes: [{ rank: 1, name: '에어팟', count: 2 }] }), {} as any);
+      expect(html, '경품명이 발행에 노출').toContain('에어팟');
+    });
+    it('룰렛/추첨 경품 — 캔버스도 발행과 동일 노출 미러', () => {
+      const rl = block('RouletteSection', 'InstantCouponSection');
+      expect(rl, '캔버스 룰렛이 prize_count>0 경품 필터 미러').toContain('prize_count');
+      const ld = block('LuckyDrawSection', 'RouletteSection');
+      expect(ld, '캔버스 추첨이 경품(prizes) 노출 미러').toContain('props.prizes');
     });
   });
 
