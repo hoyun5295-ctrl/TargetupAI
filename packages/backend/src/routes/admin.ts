@@ -22,6 +22,8 @@ import { validateSmsTables } from '../utils/sms-table-validator';
 import { cleanupScheduledCampaigns, cancelCampaign } from '../utils/campaign-lifecycle';
 import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsChannelSplitByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, STAT_DATE_EXPR, STAT_STARTED_GUARD } from '../utils/stats-aggregation';
+// ★ 2026-07-23: 슈퍼관리자 발송통계 웹/에이전트 구분 — 에이전트(엔진) 통계 CT 병행 반환
+import { queryPayAgentStatsAllCompanies, isPayStatsConfigured } from '../utils/pay-stats';
 import { normalizePhone } from '../utils/normalize-phone';
 import { normalizeCdpAutoExecuteGate } from '../utils/autosend-policy';
 import { grantBasicTrial } from '../utils/basic-trial';
@@ -1389,6 +1391,9 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
     const view = (req.query.view as string) || 'daily';
     let startDate = (req.query.startDate as string) || '';
     let endDate = (req.query.endDate as string) || '';
+    // ★ 2026-07-23 에이전트 CT는 자체 월 확장 → 원본(raw) 날짜 전달(아래 확장분과 이중 적용 방지)
+    const rawStartDate = startDate;
+    const rawEndDate = endDate;
 
     // 월별 조회 시 날짜를 월 단위로 자동 확장
     if (view === 'monthly') {
@@ -1560,13 +1565,31 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
       }
     }
 
+    // ★ 2026-07-23: 슈퍼관리자 웹/에이전트 구분 — 에이전트(agent·both) 회사 엔진 통계를 (기간,회사)별 병행 반환.
+    //   웹(campaigns) 축은 불변. env 미설정·실패 = agentRows 빈 배열(조용한 폴백). 별도 DB(pay-ingest) 조회라 발송 기간계 무관.
+    let agentSummary: any = null;
+    let agentRows: any[] = [];
+    if (isPayStatsConfigured()) {
+      const agentRes = await queryPayAgentStatsAllCompanies({
+        view: view as 'daily' | 'monthly',
+        startDate: rawStartDate,
+        endDate: rawEndDate,
+        companyId: companyId || undefined,
+      });
+      if (agentRes) { agentSummary = agentRes.summary; agentRows = agentRes.rows; }
+    }
+
     res.json({
       summary: summaryResult.rows[0],
       testSummary,
       rows: rowsResult.rows,
       total,
       page,
-      totalPages: Math.ceil(total / limit)
+      totalPages: Math.ceil(total / limit),
+      // ★ 2026-07-23 웹/에이전트 구분 (별도 탭)
+      agentSummary,
+      agentRows,
+      agentTotal: agentRows.length,
     });
   } catch (error) {
     console.error('발송 통계 조회 실패:', error);

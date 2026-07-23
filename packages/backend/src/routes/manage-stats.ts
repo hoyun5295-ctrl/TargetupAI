@@ -6,7 +6,8 @@ import { getCompanyScope } from '../utils/permission-helper';
 import { getTestSmsTables } from '../utils/sms-queue';
 import { buildDateRangeFilter, querySendStats, querySendStatsDetail } from '../utils/stats-aggregation';
 // ★ 2026-07-20: 에이전트 전용 회사 = 엔진(PAY) 통계 축 — campaigns엔 행이 없어 0으로 보이던 결함의 근본 배선
-import { queryPayAgentStats, queryPayAgentStatsDetail, isPayStatsConfigured } from '../utils/pay-stats';
+//   2026-07-23: 웹/에이전트/테스트 탭 분리 — 교체가 아니라 별도 축(agentRows) 병행 반환으로 전환.
+import { queryPayAgentStats, isPayStatsConfigured, type PayStatsResult } from '../utils/pay-stats';
 
 const router = Router();
 
@@ -41,21 +42,26 @@ router.get('/send', async (req: Request, res: Response) => {
       limit,
     });
 
-    // ★ 2026-07-20: 에이전트 전용 회사 — 발송 실체가 게이트웨이 엔진이라 campaigns 집계는 구조적으로 0.
-    //   회사에 연결된 CustId(company_agent_ids) 전량을 pay-ingest-db RSRM_SalesStts에서 합산해 같은 형태로 대체.
-    //   env 미설정·미연결·조회 실패 = null → 기존 결과 유지(조용한 폴백). web/both 회사 경로는 불변.
-    if (companyScope && isPayStatsConfigured()) {
+    // ★ 2026-07-23: 웹/에이전트/테스트 탭 분리 — 에이전트(엔진) 통계는 웹을 "교체"하지 않고 별도 축으로 병행 반환.
+    //   usage_type in (agent, both)면 company_agent_ids CustId 전량을 pay-ingest-db RSRM_SalesStts에서 합산(pay-stats CT).
+    //   웹(campaigns) 축은 불변(회귀 0). env 미설정·미연결·실패 = agentRows 빈 배열(조용한 폴백).
+    //   에이전트는 일자 단위 소량이라 전량 반환(limit 크게) 후 프론트에서 별도 탭 페이징.
+    let usageType = 'web';
+    let agentSummary: PayStatsResult['summary'] | null = null;
+    let agentRows: PayStatsResult['rows'] = [];
+    if (companyScope) {
       const compType = await pool.query('SELECT usage_type FROM companies WHERE id = $1', [companyScope]);
-      if (compType.rows[0]?.usage_type === 'agent') {
+      usageType = compType.rows[0]?.usage_type || 'web';
+      if ((usageType === 'agent' || usageType === 'both') && isPayStatsConfigured()) {
         const payResult = await queryPayAgentStats({
           companyId: companyScope,
           view: view as 'daily' | 'monthly',
           startDate,
           endDate,
-          page,
-          limit,
+          page: 1,
+          limit: 100000,
         });
-        if (payResult) statsResult = payResult;
+        if (payResult) { agentSummary = payResult.summary; agentRows = payResult.rows; }
       }
     }
 
@@ -152,6 +158,10 @@ router.get('/send', async (req: Request, res: Response) => {
       total: statsResult.total,
       page: statsResult.page,
       totalPages: statsResult.totalPages,
+      // ★ 2026-07-23 탭 분리: 회사 유형 + 에이전트(엔진) 통계 병행 축
+      usageType,
+      agentSummary,
+      agentRows,
     });
   } catch (error) {
     console.error('발송 통계 조회 실패:', error);
@@ -184,19 +194,7 @@ router.get('/send/detail', async (req: Request, res: Response) => {
       { sms: DEFAULT_COSTS.sms, lms: DEFAULT_COSTS.lms }
     );
 
-    // ★ 2026-07-20: 에이전트 전용 회사 — 상세도 엔진(PAY) 축: 계정(CustId)×유형별 분해를 userStats 표에 매핑.
-    //   목록 분기(/send)와 동일 원칙 — env 미설정·미연결·실패 = 기존 결과 유지(조용한 폴백).
-    if (isPayStatsConfigured()) {
-      const compType = await pool.query('SELECT usage_type FROM companies WHERE id = $1', [targetCompanyId]);
-      if (compType.rows[0]?.usage_type === 'agent') {
-        const payDetail = await queryPayAgentStatsDetail({
-          companyId: targetCompanyId,
-          view: view as 'daily' | 'monthly',
-          date: dateVal,
-        });
-        if (payDetail) detailResult = payDetail;
-      }
-    }
+    // ★ 2026-07-23: 에이전트는 수신자별 상세 데이터가 없어(집계만 유입) 상세 축 없음 — 웹/테스트 상세만 유지.
 
     // 테스트 발송 상세 (MySQL — 관리자 전용)
     let testDetail: any[] = [];

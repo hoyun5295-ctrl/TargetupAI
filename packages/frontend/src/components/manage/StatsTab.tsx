@@ -8,6 +8,7 @@ export default function StatsTab() {
   const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [page, setPage] = useState(1);
+  const [channel, setChannel] = useState<'web' | 'agent' | 'test'>('web'); // ★ 2026-07-23 웹/에이전트/테스트 탭
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const setToast = useLegacyToast();
@@ -92,6 +93,21 @@ export default function StatsTab() {
 
   const testSummary = stats?.testSummary;
 
+  // ★ 2026-07-23 채널 탭 — 회사 usage_type로 노출 탭 결정 (web=웹+테스트 / agent=에이전트+테스트 / both=3탭)
+  const usageType: string = stats?.usageType || 'web';
+  const availableTabs: ('web' | 'agent' | 'test')[] =
+    usageType === 'agent' ? ['agent', 'test']
+      : usageType === 'both' ? ['web', 'agent', 'test']
+        : ['web', 'test'];
+  useEffect(() => {
+    if (!availableTabs.includes(channel)) setChannel(availableTabs[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usageType]);
+  const TAB_LABEL: Record<string, string> = { web: '웹 발송', agent: '에이전트 발송', test: '테스트 발송' };
+  const agentSummary = stats?.agentSummary;
+  const agentRows: any[] = stats?.agentRows || [];
+  const activeSummary = channel === 'agent' ? agentSummary : stats?.summary;
+
   return (
     <>
 
@@ -106,6 +122,18 @@ export default function StatsTab() {
             <p className="text-xs text-slate-400 mt-0.5">기간·사용자별 발송 실적과 상세 내역</p>
           </div>
         </div>
+
+        {/* ★ 2026-07-23 채널 탭 — 웹/에이전트/테스트 */}
+        {availableTabs.length > 1 && (
+          <div className="px-6 pt-3 flex items-center gap-1 border-b border-slate-100">
+            {availableTabs.map((t) => (
+              <button key={t} onClick={() => setChannel(t)}
+                className={`px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 -mb-px transition ${channel === t ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
+                {TAB_LABEL[t]}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* 필터 */}
         <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap items-center gap-3">
@@ -124,7 +152,7 @@ export default function StatsTab() {
             <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
               className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition" />
           </div>
-          {users.length > 1 && (
+          {channel === 'web' && users.length > 1 && (
             <select value={filterUserId} onChange={(e) => setFilterUserId(e.target.value)}
               className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition">
               <option value="">전체 사용자</option>
@@ -140,9 +168,29 @@ export default function StatsTab() {
           </button>
         </div>
 
-        {/* 요약 카드 — 실발송 3개 + 테스트 1개 (비용 포함) */}
-        {stats?.summary && (
+        {/* ★ 2026-07-23 요약 — 채널별 (웹/에이전트 = 총발송·성공·실패 / 테스트 = 테스트 요약) */}
+        {channel === 'test' ? (
           <div className="px-6 py-5 grid grid-cols-2 md:grid-cols-4 gap-3 border-b border-slate-100">
+            <div className="rounded-2xl border border-amber-200/70 bg-amber-50/40 p-4">
+              <span className="text-xs font-medium text-slate-500">총 테스트</span>
+              <p className="mt-2.5 text-3xl font-bold tracking-tight text-amber-600 tabular-nums">{formatNum(testSummary?.total || 0)}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <span className="text-xs font-medium text-slate-500">성공</span>
+              <p className="mt-2.5 text-3xl font-bold tracking-tight text-emerald-600 tabular-nums">{formatNum(testSummary?.success || 0)}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <span className="text-xs font-medium text-slate-500">실패</span>
+              <p className={`mt-2.5 text-3xl font-bold tracking-tight tabular-nums ${Number(testSummary?.fail) > 0 ? 'text-rose-500' : 'text-slate-300'}`}>{formatNum(testSummary?.fail || 0)}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <span className="text-xs font-medium text-slate-500">SMS / LMS · 비용</span>
+              <p className="mt-2.5 text-base font-bold tracking-tight text-slate-700 tabular-nums">SMS {testSummary?.sms || 0} · LMS {testSummary?.lms || 0}</p>
+              <p className="mt-1 text-sm font-semibold text-amber-600">{(testSummary?.cost || 0).toLocaleString()}원</p>
+            </div>
+          </div>
+        ) : activeSummary ? (
+          <div className="px-6 py-5 grid grid-cols-1 md:grid-cols-3 gap-3 border-b border-slate-100">
             {/* 총 발송 */}
             <div className="group rounded-2xl border border-slate-200 bg-white p-4 transition hover:shadow-md hover:border-slate-300">
               <div className="flex items-center justify-between">
@@ -151,7 +199,7 @@ export default function StatsTab() {
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg>
                 </span>
               </div>
-              <p className="mt-2.5 text-3xl font-bold tracking-tight text-slate-900 tabular-nums">{formatNum(stats.summary.total_sent)}</p>
+              <p className="mt-2.5 text-3xl font-bold tracking-tight text-slate-900 tabular-nums">{formatNum(activeSummary.total_sent)}</p>
             </div>
             {/* 성공 */}
             <div className="group rounded-2xl border border-slate-200 bg-white p-4 transition hover:shadow-md hover:border-slate-300">
@@ -161,7 +209,7 @@ export default function StatsTab() {
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><path d="m9 11 3 3L22 4" /></svg>
                 </span>
               </div>
-              <p className="mt-2.5 text-3xl font-bold tracking-tight text-emerald-600 tabular-nums">{formatNum(stats.summary.total_success)}</p>
+              <p className="mt-2.5 text-3xl font-bold tracking-tight text-emerald-600 tabular-nums">{formatNum(activeSummary.total_success)}</p>
             </div>
             {/* 실패 */}
             <div className="group rounded-2xl border border-slate-200 bg-white p-4 transition hover:shadow-md hover:border-slate-300">
@@ -171,34 +219,49 @@ export default function StatsTab() {
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><circle cx="12" cy="12" r="10" /><path d="m15 9-6 6" /><path d="m9 9 6 6" /></svg>
                 </span>
               </div>
-              <p className={`mt-2.5 text-3xl font-bold tracking-tight tabular-nums ${Number(stats.summary.total_fail) > 0 ? 'text-rose-500' : 'text-slate-300'}`}>{formatNum(stats.summary.total_fail)}</p>
-            </div>
-            {/* 테스트 */}
-            <div className="group rounded-2xl border border-amber-200/70 bg-amber-50/40 p-4 transition hover:shadow-md hover:border-amber-300">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-slate-500">테스트 발송</span>
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 text-amber-600 transition group-hover:scale-110">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M14.5 2v17.5c0 1.4-1.1 2.5-2.5 2.5s-2.5-1.1-2.5-2.5V2" /><path d="M8.5 2h7" /><path d="M9.5 16h5" /></svg>
-                </span>
-              </div>
-              <p className="mt-2.5 text-3xl font-bold tracking-tight text-amber-600 tabular-nums">{formatNum(testSummary?.total || 0)}</p>
-              {testSummary && testSummary.total > 0 && (
-                <div className="mt-1 flex items-center gap-2 text-[11px]">
-                  <span className="text-slate-400">SMS {testSummary.sms} · LMS {testSummary.lms}</span>
-                  <span className="font-semibold text-amber-600">{(testSummary.cost || 0).toLocaleString()}원</span>
-                </div>
-              )}
+              <p className={`mt-2.5 text-3xl font-bold tracking-tight tabular-nums ${Number(activeSummary.total_fail) > 0 ? 'text-rose-500' : 'text-slate-300'}`}>{formatNum(activeSummary.total_fail)}</p>
             </div>
           </div>
+        ) : null}
+        {channel === 'agent' && (
+          <p className="px-6 pt-3 text-[11px] text-slate-400 italic">에이전트 발송은 게이트웨이 엔진 집계(일 단위)로, 수신자별 상세는 제공되지 않습니다.</p>
         )}
 
-        {/* 테이블 */}
+        {/* 테이블 — 웹/에이전트 (테스트는 요약 카드만) */}
+        {channel !== 'test' && (
         <div className="overflow-x-auto">
           {loading ? (
             <div className="flex flex-col items-center justify-center gap-3 py-16 text-slate-400">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
               <span className="text-sm">불러오는 중…</span>
             </div>
+          ) : channel === 'agent' ? (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100">
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">{view === 'monthly' ? '월' : '날짜'}</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">발송ID</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">발송</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">성공</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">실패</th>
+                  <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">대기</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {agentRows.length === 0 ? (
+                  <tr><td colSpan={6} className="px-4 py-16 text-center text-sm text-slate-400">표시할 에이전트 발송 내역이 없습니다.</td></tr>
+                ) : agentRows.map((r: any, i: number) => (
+                  <tr key={i} className="transition hover:bg-slate-50/70">
+                    <td className="px-6 py-3.5 font-semibold text-slate-700">{r.period}</td>
+                    <td className="px-4 py-3.5 text-right text-slate-500 tabular-nums">{formatNum(r.runs)}</td>
+                    <td className="px-4 py-3.5 text-right text-slate-700 font-medium tabular-nums">{formatNum(r.sent)}</td>
+                    <td className="px-4 py-3.5 text-right text-emerald-600 font-semibold tabular-nums">{formatNum(r.success)}</td>
+                    <td className={`px-4 py-3.5 text-right font-medium tabular-nums ${Number(r.fail) > 0 ? 'text-rose-500' : 'text-slate-300'}`}>{formatNum(r.fail)}</td>
+                    <td className="px-6 py-3.5 text-right text-slate-400 tabular-nums">{formatNum(r.pending)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           ) : (
             <table className="w-full text-sm">
               <thead>
@@ -237,9 +300,10 @@ export default function StatsTab() {
             </table>
           )}
         </div>
+        )}
 
-        {/* 페이징 */}
-        {totalPages > 1 && (
+        {/* 페이징 — 웹만 서버 페이징 */}
+        {channel === 'web' && totalPages > 1 && (
           <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
             <span className="text-xs text-slate-400 tabular-nums">
               {startIdx}–{endIdx} / 전체 {totalCount}건

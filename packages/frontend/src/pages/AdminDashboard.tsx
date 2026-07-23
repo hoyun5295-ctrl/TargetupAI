@@ -184,6 +184,7 @@ const [allCampaignsStatus, setAllCampaignsStatus] = useState('');
 const [allCampaignsCompany, setAllCampaignsCompany] = useState('');
 // 발송 통계
 const [sendStats, setSendStats] = useState<any>(null);
+const [statsChannel, setStatsChannel] = useState<'web' | 'agent'>('web'); // ★ 2026-07-23 웹/에이전트 구분 탭
 const [statsView, setStatsView] = useState<'daily' | 'monthly'>('daily');
 const [statsStartDate, setStatsStartDate] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' }));
 const [statsEndDate, setStatsEndDate] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' }));
@@ -4647,12 +4648,22 @@ const handleApproveRequest = async (id: string) => {
         {/* 발송 통계 탭 */}
         {activeTab === 'stats' && (
           <div className="space-y-4">
-            {/* 요약 바 (얇게) */}
-            {sendStats?.summary && (() => {
-              const sent = Number(sendStats.summary.total_sent);
-              const success = Number(sendStats.summary.total_success);
-              const fail = Number(sendStats.summary.total_fail);
-              const pending = sendStats.summary.total_pending != null ? Number(sendStats.summary.total_pending) : Math.max(0, sent - success - fail);
+            {/* ★ 2026-07-23 채널 탭 — 웹/에이전트 구분 */}
+            <div className="flex items-center gap-1 border-b border-gray-200">
+              {([['web', '웹 발송'], ['agent', '에이전트 발송']] as const).map(([key, label]) => (
+                <button key={key} onClick={() => { setStatsChannel(key); loadSendStats(1); }}
+                  className={`px-4 py-2 text-sm font-semibold border-b-2 -mb-px transition ${statsChannel === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {/* 요약 바 (얇게) — 채널별 */}
+            {(statsChannel === 'agent' ? sendStats?.agentSummary : sendStats?.summary) && (() => {
+              const s = statsChannel === 'agent' ? sendStats.agentSummary : sendStats.summary;
+              const sent = Number(s.total_sent);
+              const success = Number(s.total_success);
+              const fail = Number(s.total_fail);
+              const pending = s.total_pending != null ? Number(s.total_pending) : Math.max(0, sent - success - fail);
               // D183 fix: 성공률 = 전송 대비 성공 비율 (대기 영역 포함 분모) — 사용자 관점 정합
               const rate = sent > 0 ? (success / sent * 100).toFixed(1) : '-';
               return (
@@ -4712,7 +4723,8 @@ const handleApproveRequest = async (id: string) => {
               >
                 조회
               </button>
-              {/* ★ D114 P10: 발송통계 엑셀(CSV) 다운로드 — fetch+blob (Authorization 헤더 필수) */}
+              {/* ★ D114 P10: 발송통계 엑셀(CSV) 다운로드 — fetch+blob (Authorization 헤더 필수). ★2026-07-23 에이전트 탭은 웹 CSV라 숨김(에이전트 export 미구현) */}
+              {statsChannel === 'web' && (
               <button
                 onClick={async () => {
                   const token = localStorage.getItem('token');
@@ -4739,7 +4751,8 @@ const handleApproveRequest = async (id: string) => {
               >
                 엑셀 다운로드
               </button>
-              <span className="text-sm text-gray-400 ml-auto">총 {statsTotal}건</span>
+              )}
+              <span className="text-sm text-gray-400 ml-auto">총 {statsChannel === 'agent' ? (sendStats?.agentTotal || 0) : statsTotal}건</span>
             </div>
 
             {/* 테이블 */}
@@ -4759,9 +4772,9 @@ const handleApproveRequest = async (id: string) => {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {!sendStats?.rows?.length ? (
+                    {!(statsChannel === 'agent' ? sendStats?.agentRows : sendStats?.rows)?.length ? (
                       <tr><td colSpan={8} className="px-4 py-12 text-center text-gray-400">데이터가 없습니다.</td></tr>
-                    ) : sendStats.rows.map((row: any, idx: number) => {
+                    ) : (statsChannel === 'agent' ? sendStats.agentRows : sendStats.rows).map((row: any, idx: number) => {
                       const sent = Number(row.sent);
                       const success = Number(row.success);
                       const fail = Number(row.fail);
@@ -4770,7 +4783,7 @@ const handleApproveRequest = async (id: string) => {
                       const rate = sent > 0 ? (success / sent * 100).toFixed(1) : '-';
                       return (
                         <tr key={idx} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 font-medium text-gray-900 font-mono">{row.date || row.month}</td>
+                          <td className="px-4 py-3 font-medium text-gray-900 font-mono">{row.date || row.month || row.period}</td>
                           <td className="px-4 py-3 text-gray-700">{row.company_name}</td>
                           <td className="px-4 py-3 text-center text-blue-600 font-medium">{sent.toLocaleString()}</td>
                           <td className="px-4 py-3 text-center text-green-600">{success.toLocaleString()}</td>
@@ -4778,7 +4791,9 @@ const handleApproveRequest = async (id: string) => {
                           <td className="px-4 py-3 text-center text-amber-600">{pending.toLocaleString()}</td>
                           <td className="px-4 py-3 text-center font-medium">{sent > 0 ? `${rate}%` : '-'}</td>
                           <td className="px-4 py-3 text-center">
-                            {row.line_group_name ? (
+                            {statsChannel === 'agent' ? (
+                              <span className="px-2 py-1 bg-violet-50 text-violet-700 text-xs rounded-full font-medium">에이전트</span>
+                            ) : row.line_group_name ? (
                               <span className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded-full font-medium">{row.line_group_name}</span>
                             ) : (
                               <span className="text-xs text-gray-400">미배정</span>
@@ -4791,8 +4806,8 @@ const handleApproveRequest = async (id: string) => {
                 </table>
               </div>
 
-              {/* 페이징 */}
-              {statsTotal > 10 && (
+              {/* 페이징 — 웹만 서버 페이징 (에이전트는 전량 표시) */}
+              {statsChannel === 'web' && statsTotal > 10 && (
                 <div className="px-6 py-4 border-t flex justify-center gap-2">
                   {Array.from({ length: Math.ceil(statsTotal / 10) }, (_, i) => i + 1).slice(
                     Math.max(0, statsPage - 3), Math.min(Math.ceil(statsTotal / 10), statsPage + 2)

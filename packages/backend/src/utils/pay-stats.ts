@@ -111,7 +111,7 @@ export async function queryPayAgentStats(options: PayStatsOptions): Promise<PayS
 
     for (const r of rows as any[]) {
       const dt = String(r.DestDt || '');
-      if (dt.length !== 8) continue;
+      if (!/^\d{8}$/.test(dt)) continue;
       const period = options.view === 'monthly'
         ? `${dt.slice(0, 4)}-${dt.slice(4, 6)}`
         : `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}`;
@@ -216,6 +216,137 @@ export async function queryPayAgentStatsDetail(options: {
     return { userStats, campaigns: [], unitCost: { sms: 0, lms: 0 } };
   } catch (err: any) {
     console.log('[pay-stats] 상세 조회 실패(campaigns 축 폴백):', err?.message || err);
+    return null;
+  }
+}
+
+export interface PayAgentCompanyRow {
+  period: string;
+  company_id: string;
+  company_name: string;
+  runs: number;    // 해당 기간 해당 회사에서 집계된 CustId(발송ID) 수
+  sent: number;
+  success: number;
+  fail: number;
+  pending: number;
+}
+
+export interface PayAgentAllResult {
+  summary: { total_sent: string; total_success: string; total_fail: string; total_pending: string };
+  rows: PayAgentCompanyRow[];
+  total: number;
+}
+
+/**
+ * 슈퍼관리자용 — 전 에이전트(agent·both) 회사의 엔진 발송 통계를 (기간, 회사)별로 합산.
+ * 슈퍼 발송통계 화면(admin /stats/send)의 웹 행(rows)과 같은 형태로 병행 반환 → 프론트 탭 분리.
+ * companyId 지정 시 그 회사만. 미설정/미연결/실패 = null(호출부는 에이전트 축 생략).
+ *
+ * ★ 날짜 확장: 이 함수가 view=monthly일 때 자체 확장하므로 호출부는 **원본(raw) 날짜**를 넘겨야 한다
+ *   (admin 라우트가 이미 월 확장한 값을 넘기면 이중 확장 — rawStartDate/rawEndDate 전달 필수).
+ */
+export async function queryPayAgentStatsAllCompanies(options: {
+  view: 'daily' | 'monthly';
+  startDate?: string; // raw YYYY-MM-DD (미확장)
+  endDate?: string;   // raw YYYY-MM-DD (미확장)
+  companyId?: string;
+}): Promise<PayAgentAllResult | null> {
+  const pool = getPool();
+  if (!pool) return null;
+
+  try {
+    // PG: agent/both 회사의 CustId(agent_send_id) ↔ 회사 매핑 (실측 확정: agent_send_id = CustId)
+    const mapParams: any[] = [];
+    let compFilter = '';
+    if (options.companyId) { compFilter = 'AND c.id = $1'; mapParams.push(options.companyId); }
+    const mapRes = await query(
+      `SELECT cai.agent_send_id, c.id AS company_id, c.company_name
+         FROM company_agent_ids cai
+         JOIN companies c ON c.id = cai.company_id
+        WHERE c.usage_type IN ('agent','both') ${compFilter}`,
+      mapParams,
+    );
+    const custToCompany = new Map<string, { id: string; name: string }>();
+    const custIds: string[] = [];
+    for (const r of mapRes.rows as any[]) {
+      const cid = String(r.agent_send_id).trim();
+      if (!cid) continue;
+      custToCompany.set(cid, { id: String(r.company_id), name: String(r.company_name || '') });
+      custIds.push(cid);
+    }
+    const empty: PayAgentAllResult = { summary: { total_sent: '0', total_success: '0', total_fail: '0', total_pending: '0' }, rows: [], total: 0 };
+    if (custIds.length === 0) return empty;
+
+    // 월별 조회 시 날짜를 월 단위로 확장 (querySendStats/admin과 동일 규칙)
+    let { startDate, endDate } = options;
+    if (options.view === 'monthly') {
+      if (startDate) startDate = startDate.substring(0, 7) + '-01';
+      if (endDate) {
+        const d = new Date(endDate);
+        d.setMonth(d.getMonth() + 1, 0);
+        endDate = d.toISOString().split('T')[0];
+      }
+    }
+    const fromDt = toDestDt(startDate);
+    const toDt = toDestDt(endDate);
+
+    const conds: string[] = [`CustId IN (${custIds.map(() => '?').join(',')})`];
+    const params: any[] = [...custIds];
+    if (fromDt) { conds.push('DestDt >= ?'); params.push(fromDt); }
+    if (toDt) { conds.push('DestDt <= ?'); params.push(toDt); }
+
+    const [rows] = await pool.query(
+      `SELECT DestDt, CustId,
+              SUM(TotCnt) AS tot, SUM(OkCnt) AS ok, SUM(FailCnt) AS fl, SUM(ReadyCnt) AS rd
+         FROM RSRM_SalesStts
+        WHERE ${conds.join(' AND ')}
+        GROUP BY DestDt, CustId`,
+      params,
+    );
+
+    const byKey = new Map<string, { period: string; company_id: string; company_name: string; custs: Set<string>; sent: number; success: number; fail: number; pending: number }>();
+    let totalSent = 0, totalSuccess = 0, totalFail = 0, totalPending = 0;
+
+    for (const r of rows as any[]) {
+      const dt = String(r.DestDt || '');
+      if (!/^\d{8}$/.test(dt)) continue;
+      const comp = custToCompany.get(String(r.CustId));
+      if (!comp) continue;
+      const period = options.view === 'monthly'
+        ? `${dt.slice(0, 4)}-${dt.slice(4, 6)}`
+        : `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}`;
+      const sent = Number(r.tot) || 0;
+      const success = Number(r.ok) || 0;
+      const fail = Number(r.fl) || 0;
+      const pending = Number(r.rd) || 0;
+      totalSent += sent; totalSuccess += success; totalFail += fail; totalPending += pending;
+      const key = `${period}|${comp.id}`;
+      if (!byKey.has(key)) byKey.set(key, { period, company_id: comp.id, company_name: comp.name, custs: new Set(), sent: 0, success: 0, fail: 0, pending: 0 });
+      const b = byKey.get(key)!;
+      b.custs.add(String(r.CustId));
+      b.sent += sent; b.success += success; b.fail += fail; b.pending += pending;
+    }
+
+    const allRows: PayAgentCompanyRow[] = Array.from(byKey.values())
+      .map((v) => ({ period: v.period, company_id: v.company_id, company_name: v.company_name, runs: v.custs.size, sent: v.sent, success: v.success, fail: v.fail, pending: v.pending }))
+      .sort((a, b) => {
+        if (a.period < b.period) return 1;
+        if (a.period > b.period) return -1;
+        return a.company_name.localeCompare(b.company_name);
+      });
+
+    return {
+      summary: {
+        total_sent: String(totalSent),
+        total_success: String(totalSuccess),
+        total_fail: String(totalFail),
+        total_pending: String(totalPending),
+      },
+      rows: allRows,
+      total: allRows.length,
+    };
+  } catch (err: any) {
+    console.log('[pay-stats] 슈퍼 전체 조회 실패:', err?.message || err);
     return null;
   }
 }

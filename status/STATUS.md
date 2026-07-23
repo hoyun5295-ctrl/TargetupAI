@@ -63,7 +63,7 @@
 
 ### 최근 완료 인덱스 (원문 = 링크의 월별 아카이브)
 
-- 🟢 2026-07-22 (4) — 모바일 DM 편집≠단말 전수 정정(임은지 접수 2건 발단): 탭 밑줄→알약 / 상품슬라이드 인디케이터=페이지 단위(ceil(N/2) 페이지래퍼·뷰어 자식↔점 1:1 무변경) / click_rewards 참여버튼 / map 죽은 200px 상자 제거 / limited signup 링크 / **탭 content_type 이미지·상품목록 실제 렌더**(백엔드 미러 파서 dm-tab-content) / 이메일 완료문구 data-success-text 배선 / 룰렛·추첨 경품 노출. 신규16 3면 감사·옛11 클린·골든 무변. BE·FE tsc0·backend vitest900(신규21). ★배포대기 → [[project_2026_0722_mobile_dm_editor_publish_parity]]
+- 🟢 2026-07-22 (4) — 모바일 DM 편집≠단말 전수 정정(임은지 접수 2건 발단): 탭 밑줄→알약 / 상품슬라이드 인디케이터=페이지 단위(ceil(N/2) 페이지래퍼·뷰어 자식↔점 1:1 무변경) / click_rewards 참여버튼 / map 죽은 200px 상자 제거 / limited signup 링크 / **탭 content_type 이미지·상품목록 실제 렌더**(백엔드 미러 파서 dm-tab-content) / 이메일 완료문구 data-success-text 배선 / 룰렛·추첨 경품 노출. 신규16 3면 감사·옛11 클린·골든 무변. BE·FE tsc0·backend vitest900(신규21). ★배포완료(잔여=Harold 실측) → [[project_2026_0722_mobile_dm_editor_publish_parity]]
 - 🟢 2026-07-22 (3) — 카카오 템플릿 관리 서수란 5티켓: 목록 페이징(공용 TablePagination)+발신프로필 검색+템플릿 검색 프로필옵션 / 등록폼 발신프로필 검색형 콤보+"관리 이름"→"템플릿명" / 슈퍼 발신프로필·관리코드 검색 / 고객사관리코드 템플릿코드 열 이동 / **이관 템플릿명 복원**(레거시 event_admin title→template_name·순수 로컬 라벨·IMC/발송 무접촉·changed 3242·remainingDiff 0). FE·BE tsc0·vitest879·★배포완료(접수2 프론트 배포대기) → [[project_2026_0722_kakao_template_mgmt_tickets]]
 - 🟢 2026-07-22 (2) — 영업용 테스트발송/저장 3채널(인앱 테스트저장=웹·앱 이미지·loginId 게이팅·html-to-image / 이메일 테스트발송=완성분 3개 직접입력·(광고)없음·통계무오염) + 완성 이메일 HTML 내보내기(완성 게이트 서버강제=크레딧 없이 산출물 추출 차단). Codex1R·★배포완료 → [[project_2026_0722_sales_test_send]]
 - 🟢 2026-07-21 — 브랜드 학습 통합(AI메모리 단일 모달 3탭 집약·DM 브랜드킷 편집 제거[override 보존]·업태=business_type·서체 한/영·연락처 생성시드·자동추출 폐기). Codex 3R·tsc0·vitest212·★배포완료. SoT=[[project_2026_0721_brand_learning_consolidation]]
