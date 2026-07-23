@@ -261,3 +261,34 @@ iptables -L DOCKER-USER -n --line-numbers   # 최종 순서: ESTABLISHED → ACC
 - **수신 DB 커넥션 격리**: 기존 QTmsg MySQL pool 재사용 시 발송 경로 영향 0 확인. 신규 pool 권장.
 - **게이팅 함정**: `AGENT_ALLOWED_PATHS` 확장 누락 = 에이전트 발송결과 화면 접근 불가(§3-1).
 - **잔액 이중 위치**: RSRM_SalesMst.RemAmt(현재잔액) + RSRM_SalesStts.RemAmt(일자 스냅샷) — 조회 시 어느 것을 진실로 볼지 정의.
+
+---
+
+## 9. Phase 2 부분 구현 — 에이전트 발송통계 유형별 조회 (2026-07-23 코드완료·배포대기)
+
+§3 조회 화면의 첫 덩어리 구현. Harold 지시 = **성공수량을 뭉뚱그리지 말고 SMS/LMS/MMS/카카오알림톡 유형별로 나눠서** 3화면 전부 표시.
+
+### 9-1. 확정 사실 (0723 실측)
+- **매핑 축 = `company_agent_ids.agent_send_id` = CustId**(B=54/C=57/D=58 접두). 설계 §2-3의 "StoreId" 표기는 오류 — 실제는 CustId.
+- **MsgType 코드 = S(SMS)·L(LMS)·M(MMS)·K(카카오알림톡)** (그 외 X=팩스). 라벨 단일소스 = `utils/pay-stats.ts agentTypeLabel`.
+- RSRM_SalesStts PK=(DestDt,CustId,StoreId,MsgType) → 날짜범위+CustId 조회에 충분(추가 인덱스 불필요).
+- **게이트웨이 "58 성공"의 정체 = 유형별 성공 합산**(SMS+LMS+MMS+카카오). 화면에서 한 유형만 보면 숫자가 다르게 보임 → 유형별 분리 필수.
+- **타겟업AI(D0121~) = 한줄로 자체 웹발송**이 게이트웨이 58을 타고 나가 원장에 찍힌 것 → 웹 탭(SMSQ_SEND)에 있으므로 에이전트 탭에서 제외되는 게 정상(매핑 안 함).
+
+### 9-2. 구현 (CT `utils/pay-stats.ts` — `GROUP BY … MsgType`)
+- `queryPayAgentStats`(회사): (기간×유형) rows + 유형별 합계 byType + 전체 summary.
+- `queryPayAgentStatsAllCompanies`(슈퍼): (기간×회사×유형) rows. admin 라우트가 월 확장한 값을 넘기지 않도록 **rawStartDate/rawEndDate 전달**(이중 확장 방지).
+- `queryPayAgentByType`(경량): 전송결과 모달용 유형별 합계만.
+- 화면 3종: 고객사 `StatsTab`(웹/에이전트/테스트 탭·에이전트=유형별 카드+`날짜|유형|전송|성공|실패|대기`), 슈퍼 `AdminDashboard`(웹/에이전트 탭·`월|고객사|유형|…`), 사용자 `ResultsModal`(요약 아래 에이전트 유형별 표).
+- **격리(Codex 지적)**: 에이전트 통계는 회사 전체 집계(사용자별 귀속 없음)라 **관리자 전용** — results.ts `/summary`에서 `company_user`(담당자)·`filter_user_id` 시 제외(웹은 created_by 격리인데 에이전트가 회사 전체 노출되던 결함 정정).
+- 웹/테스트 축 무접촉(회귀 0). env 미설정 = 조용한 폴백(빈 배열). 검증 = tsc0(BE·FE)·vitest900·Codex1R.
+
+### 9-3. ★ 전환갭 백필 (초기 dump ~ 라이브 적재 사이 날짜 누락 — §7-1 예고분 실현)
+- **증상**: 게이트웨이 58 성공 1,957만 vs 우리 원장 1,474만 = **484만 미적재**(계정마다 ~25% 부족).
+- **근본**: 적재 목적지 전환 시 **초기 dump(07-07) ~ 라이브 적재 시작(58=07-14·54=07-10) 사이 날짜가 62에 통째 누락** — 58=07-08~13(6일), 54=07-08~09(2일). 강문희 replace는 "당일만 삭제·재삽입"이라 과거 갭을 자동 복구하지 않는다(§7-1이 정확히 경고한 것).
+- **처방(강문희 불필요·자체 복원)**: 그 기간엔 강문희가 아직 **143(옛 수신 DB `sales`@3388)**에 적재 중이었으므로 143에 원본이 남아 있다. 143에서 결손일을 `CustId LIKE 'B%'`(54)/`'D%'`(58)로 mysqldump(`--insert-ignore --complete-insert --no-create-info --where`) → 62로 scp → `source` 로드 → **SysId 백필**(143 테이블엔 SysId 컬럼 없음 → 62에서 `UPDATE … SET SysId='54/58' WHERE … AND SysId IS NULL`) → 일자별 재확인. 62에 결손일이 없어 PK 충돌 0.
+- **결과**: 백필 후 유형합 게이트웨이 일치.
+- **★교훈(영구)**: ①적재 목적지 전환 = dump~라이브 사이 갭 필연 → **전환 후 반드시 일자별(`GROUP BY DestDt`) 연속성 점검** ②갭은 옛 수신 DB에서 백필(옛 타깃이 그 기간 원본 보유) ③외부 "성공 N만"은 유형별 합산 여부부터 확인.
+
+### 9-4. 잔여
+배포(BE·FE build:safe+pm2) → 57도 동일 전환갭 확인(있으면 같은 방식) → 강문희 전환갭 재발 방지 FYI → §3-3 슈퍼 정산합산 + 거래내역서 웹/Agent 이용구분(billing.ts 보호구역·별도 Phase).

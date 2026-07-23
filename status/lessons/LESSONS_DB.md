@@ -12,6 +12,7 @@
 - **돈 관련 = 단순 fix X** — root cause + 영구 안전망 (reverse + cron + idempotent + 트랜잭션) 동시 (D182)
 - **DB ALTER 새 컬럼 → endpoint catch 분기 처리** (D214+ 신규)
 - **GREATEST vs COALESCE** — 양방향 sync 영역 (POS + 자사몰) = GREATEST 강제 (D214+ 신규)
+- **적재 목적지 전환 = dump~라이브 갭 필연 + 옛 수신 DB에서 백필** (2026-07-23) — 외부(강문희)가 push하는 통계 DB의 수신 목적지를 143→62로 바꾸니 초기 dump(07-07)~라이브 적재 시작(58=07-14) 사이 날짜(07-08~13)가 62에 통째 누락 = 게이트웨이 대비 484만(25%) 부족. replace는 당일만 갱신이라 과거 갭 자동 복구 X. **처방 = ①전환 후 `GROUP BY DestDt` 연속성 점검 의무(빠진 날짜 즉시 드러남) ②갭은 옛 수신 DB(전환 전 타깃이 그 기간 원본 보유)에서 mysqldump `--where` 결손일만 떠서 새 DB로 백필(신 스키마에 SysId 등 추가 컬럼 있으면 로드 후 UPDATE 백필) ③외부 "성공 N만"은 유형별(SMS/LMS/MMS/카카오) 합산 여부부터 확인 — 한 컬럼만 보면 착시**. 상세=docs/2026-07-07-pay-absorption-track-d-design.md §9-3.
 
 ---
 
