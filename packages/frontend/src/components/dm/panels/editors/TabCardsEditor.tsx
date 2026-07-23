@@ -1,5 +1,5 @@
 import type { TabCardsProps, TabCardItem } from '../../../../utils/dm-section-defaults';
-import { Field, TextInput, TextArea, Select } from '../FormControls';
+import { Field, TextInput, TextArea, Select, ColorOverride } from '../FormControls';
 import { RepeatableList } from '../RepeatableList';
 import type { EditorProps } from '../SectionPropsEditor';
 
@@ -35,6 +35,14 @@ export default function TabCardsEditor({ props, onUpdate }: EditorProps<TabCards
             </>
           )}
         />
+      </Field>
+
+      <Field label="탭 버튼 배경색" hint="선택된 탭 버튼 색 — 미지정 = 기본 검정">
+        <ColorOverride value={props.tab_active_bg} onChange={(v) => onUpdate({ tab_active_bg: v })} />
+      </Field>
+
+      <Field label="탭 버튼 글씨색" hint="선택된 탭 버튼 글씨 — 미지정 = 기본 흰색. 탭 글씨 크기 = 아래 ‘제목 크기’, 탭 내용 크기 = ‘본문 크기’">
+        <ColorOverride value={props.tab_active_text_color} onChange={(v) => onUpdate({ tab_active_text_color: v })} />
       </Field>
     </>
   );

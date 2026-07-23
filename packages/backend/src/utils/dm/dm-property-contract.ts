@@ -103,7 +103,7 @@ export const DM_COLOR_TABLE_2026_07_15: Array<{ section: string; prop: string; d
   { section: 'header', prop: 'title_color', desc: '헤더 제목(브랜드명) 색' },
   { section: 'header', prop: 'show_brand_name', desc: '브랜드명 표시/로고만' },
   { section: 'cta', prop: 'button.color', desc: 'CTA 버튼 색' },
-  { section: 'coupon', prop: 'button_color', desc: '쿠폰 버튼 색' },
+  { section: 'coupon', prop: 'button_color', desc: '쿠폰코드 알약 배경색 (2026-07-23 재정의 — 옛 CTA 색 · 상세=DM_COLOR_TABLE_2026_07_23)' },
   { section: 'product_carousel', prop: 'background_color', desc: '상품슬라이드 배경색' },
   { section: 'product_carousel', prop: 'caption_bg_color', desc: '상품슬라이드 글씨공간 색' },
   { section: 'product_carousel', prop: 'image_height', desc: '상품 이미지 높이' },
@@ -131,3 +131,18 @@ export const DM_EVENT_CARD_SECTIONS = [
   'dm-poll', 'dm-survey', 'dm-email-capture', 'dm-click-rewards',
   'dm-lucky-draw', 'dm-roulette', 'dm-limited-quantity',
 ] as const;
+
+/** ★ 2026-07-23 (임은지) 쿠폰/탭/즉시쿠폰 색·크기 분리 — 편집기 신규 색 컨트롤이 발행 SSR에 실제 소비돼야 한다.
+ *  쿠폰: button_color=쿠폰코드 알약 배경(옛 '쿠폰 사용하기' CTA 색에서 재정의·CTA는 공통 버튼색)·code_text_color=쿠폰코드 글씨·label_color=할인 라벨 글씨·card_bg_color=쿠폰 카드 배경.
+ *  탭카드: tab_active_bg/tab_active_text_color=활성 탭 버튼 배경/글씨 + 탭 버튼 글씨 크기=섹션 title_size(--dm-fs-tab)·탭 내용=text_size(옛: 둘 다 fs-small이라 본문 크기가 버튼까지 바꿈).
+ *  즉시쿠폰: button_bg_color/button_text_color='쿠폰 받기' 버튼 배경/글씨. 미지정=기존 기본값(회귀 0). dm-editor-parity가 각 소비를 밟는다. */
+export const DM_COLOR_TABLE_2026_07_23: Array<{ section: string; prop: string; desc: string }> = [
+  { section: 'coupon', prop: 'button_color', desc: '쿠폰코드 알약 배경색' },
+  { section: 'coupon', prop: 'code_text_color', desc: '쿠폰코드 글씨색' },
+  { section: 'coupon', prop: 'label_color', desc: '할인 라벨 글씨색' },
+  { section: 'coupon', prop: 'card_bg_color', desc: '쿠폰 카드 배경색' },
+  { section: 'tab_cards', prop: 'tab_active_bg', desc: '활성 탭 버튼 배경색' },
+  { section: 'tab_cards', prop: 'tab_active_text_color', desc: '활성 탭 버튼 글씨색' },
+  { section: 'instant_coupon', prop: 'button_bg_color', desc: '쿠폰 받기 버튼 배경색' },
+  { section: 'instant_coupon', prop: 'button_text_color', desc: '쿠폰 받기 버튼 글씨색' },
+];

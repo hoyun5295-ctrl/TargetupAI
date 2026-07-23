@@ -119,6 +119,8 @@ export default function SectionRenderer({
     ...(titleN ? {
       ['--dm-fs-hero']: `${titleN}px`, ['--dm-fs-h1']: `${titleN}px`,
       ['--dm-fs-h2']: `${titleN}px`, ['--dm-fs-h3']: `${titleN}px`,
+      // ★ 2026-07-23 (임은지) 탭 카드 버튼 글씨 = 제목 크기(발행 SSR wrapStyle 미러). 탭 버튼만 소비(--dm-fs-tab).
+      ['--dm-fs-tab']: `${titleN}px`,
     } : {}),
     ...(textN ? { ['--dm-fs-body']: `${textN}px`, ['--dm-fs-small']: `${textN}px` } : {}),
   } as CSSProperties;

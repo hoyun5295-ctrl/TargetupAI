@@ -1,5 +1,5 @@
 import type { InstantCouponProps } from '../../../../utils/dm-section-defaults';
-import { Field, TextInput, TextArea, DateTimePicker } from '../FormControls';
+import { Field, TextInput, TextArea, DateTimePicker, ColorOverride } from '../FormControls';
 import type { EditorProps } from '../SectionPropsEditor';
 
 export default function InstantCouponEditor({ props, onUpdate }: EditorProps<InstantCouponProps>) {
@@ -10,6 +10,8 @@ export default function InstantCouponEditor({ props, onUpdate }: EditorProps<Ins
       <Field label="만료일시 (선택)"><DateTimePicker value={props.expires_at} onChange={(v) => onUpdate({ expires_at: v })} /></Field>
       <Field label="사용 조건 (선택)"><TextArea value={props.conditions} onChange={(v) => onUpdate({ conditions: v })} placeholder="1회 사용 / 온라인 한정" rows={2} /></Field>
       <Field label="사용 안내 (선택)"><TextArea value={props.usage_instructions} onChange={(v) => onUpdate({ usage_instructions: v })} placeholder="결제 시 쿠폰 코드 입력" rows={2} /></Field>
+      <Field label="버튼 배경색" hint="'쿠폰 받기' 버튼 — 미지정 = 기본 브랜드색"><ColorOverride value={props.button_bg_color} onChange={(v) => onUpdate({ button_bg_color: v })} /></Field>
+      <Field label="버튼 글씨색" hint="미지정 = 기본 흰색"><ColorOverride value={props.button_text_color} onChange={(v) => onUpdate({ button_text_color: v })} /></Field>
     </>
   );
 }

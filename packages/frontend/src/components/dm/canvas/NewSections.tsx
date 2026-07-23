@@ -382,9 +382,10 @@ export function TabCardsSection({ props }: { props: TabCardsProps }) {
               cursor: 'pointer',
               border: 'none',
               borderRadius: 999,
-              background: i === idx ? '#171717' : 'var(--dm-neutral-100)',
-              color: i === idx ? '#fff' : 'var(--dm-neutral-600)',
-              fontSize: 'var(--dm-fs-small)', fontWeight: 600,
+              // ★ 2026-07-23 (임은지) 활성 탭 배경/글씨색 지정(미지정=현행) + 글씨 크기=섹션 '제목 크기'(--dm-fs-tab). 발행 renderTabCards 미러.
+              background: i === idx ? (props.tab_active_bg || '#171717') : 'var(--dm-neutral-100)',
+              color: i === idx ? (props.tab_active_text_color || '#fff') : 'var(--dm-neutral-600)',
+              fontSize: 'var(--dm-fs-tab, 13px)', fontWeight: 600,
               transition: 'all 150ms',
             }}
           >
@@ -644,7 +645,8 @@ export function InstantCouponSection({ props }: { props: InstantCouponProps }) {
             만료: {new Date(props.expires_at).toLocaleString('ko-KR')}
           </div>
         )}
-        <button style={DM_CTA_STYLE}>쿠폰 받기</button>
+        {/* ★ 2026-07-23 (임은지) '쿠폰 받기' 버튼 배경/글씨색(미지정=DM_CTA_STYLE 기본·회귀 0). 발행 renderInstantCoupon 미러. */}
+        <button style={{ ...DM_CTA_STYLE, ...(props.button_bg_color ? { background: props.button_bg_color } : {}), ...(props.button_text_color ? { color: props.button_text_color } : {}) }}>쿠폰 받기</button>
         {props.conditions && (
           <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', marginTop: 'var(--dm-sp-2)', whiteSpace: 'pre-wrap' }}>{props.conditions}</div>
         )}

@@ -108,8 +108,13 @@ export type CouponProps = {
   min_purchase?: number;
   usage_condition?: string;
   cta_url?: string;
-  // ★ 2026-07-15 쿠폰 "쿠폰 사용하기" 버튼 색(임은지 신고) — 미지정 = 기본 primary. backend 미러.
+  // ★ 2026-07-15 → 2026-07-23 재정의(임은지 신고): 쿠폰코드 버튼(알약) 배경색. 미지정 = 기본 #171717. backend 미러.
+  //   (옛 "쿠폰 사용하기" CTA 색 배선 폐지 — CTA는 공통 '버튼 색'(accent_color)이 담당.)
   button_color?: string;
+  // ★ 2026-07-23 (임은지) 쿠폰 색 분리 — 미지정 = 기존 기본값(회귀 0). backend 미러.
+  code_text_color?: string; // 쿠폰코드 글씨색 (기본 #fff)
+  label_color?: string;     // 할인 라벨 글씨색 (기본 var(--dm-primary))
+  card_bg_color?: string;   // 쿠폰 카드 배경색 (기본 var(--dm-bg))
 };
 
 export type CountdownProps = {
@@ -218,7 +223,9 @@ export type SlideshowSlide = { image_url: string; caption?: string; link_url?: s
 export type SlideshowProps = { slides: SlideshowSlide[]; interval_ms: number; show_pause?: boolean; show_indicator?: boolean; };
 
 export type TabCardItem = { label: string; content_type: 'text' | 'image' | 'product_list'; content: string; };
-export type TabCardsProps = { tabs: TabCardItem[]; default_tab_index?: number; };
+// ★ 2026-07-23 (임은지) tab_active_bg/text_color = 활성 탭 버튼 배경/글씨색(미지정=#171717/#fff·회귀 0). backend 미러.
+//   탭 버튼 글씨 크기 = 섹션 '제목 크기'(--dm-fs-tab), 탭 내용 크기 = 섹션 '본문 크기'.
+export type TabCardsProps = { tabs: TabCardItem[]; default_tab_index?: number; tab_active_bg?: string; tab_active_text_color?: string; };
 
 export type PollOption = { id: string; label: string; };
 export type PollProps = { question: string; options: PollOption[]; allow_multiple?: boolean; show_result_after_vote?: boolean; one_vote_per_user: boolean; };
@@ -237,7 +244,8 @@ export type LuckyDrawProps = { title: string; description?: string; form_fields:
 export type RouletteSegment = { id: string; label: string; probability: number; reward_description?: string; prize_count?: number; };
 export type RouletteProps = { segments: RouletteSegment[]; one_spin_per_user: boolean; spin_animation_ms?: number; };
 
-export type InstantCouponProps = { coupon_label: string; discount_description: string; expires_at?: string; conditions?: string; usage_instructions?: string; };
+// ★ 2026-07-23 (임은지) button_bg_color/button_text_color = '쿠폰 받기' 버튼 배경/글씨색(미지정=primary/#fff·회귀 0). backend 미러.
+export type InstantCouponProps = { coupon_label: string; discount_description: string; expires_at?: string; conditions?: string; usage_instructions?: string; button_bg_color?: string; button_text_color?: string; };
 
 export type LimitedQuantityProps = { title: string; description?: string; total_quantity: number; current_remaining?: number; signup_url?: string; };
 

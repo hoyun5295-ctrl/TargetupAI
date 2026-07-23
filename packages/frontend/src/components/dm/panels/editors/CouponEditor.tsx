@@ -41,8 +41,20 @@ export default function CouponEditor({ props, onUpdate }: EditorProps<CouponProp
         <TextInput type="url" value={props.cta_url} onChange={(v) => onUpdate({ cta_url: v })} placeholder="https://..." />
       </Field>
 
-      <Field label="버튼 색" hint="'쿠폰 사용하기' 버튼 색 — 미지정 = 기본색">
+      <Field label="할인 라벨 글씨색" hint="미지정 = 기본 브랜드색">
+        <ColorOverride value={props.label_color} onChange={(v) => onUpdate({ label_color: v })} />
+      </Field>
+
+      <Field label="쿠폰 카드 배경색" hint="미지정 = 기본 흰색">
+        <ColorOverride value={props.card_bg_color} onChange={(v) => onUpdate({ card_bg_color: v })} />
+      </Field>
+
+      <Field label="쿠폰코드 버튼 색" hint="'쿠폰코드' 알약 배경 — 미지정 = 기본 검정">
         <ColorOverride value={props.button_color} onChange={(v) => onUpdate({ button_color: v })} />
+      </Field>
+
+      <Field label="쿠폰코드 글씨색" hint="미지정 = 기본 흰색. (‘쿠폰 사용하기’ 연결 버튼 색은 ‘빠른 디자인 → 버튼 색’)">
+        <ColorOverride value={props.code_text_color} onChange={(v) => onUpdate({ code_text_color: v })} />
       </Field>
     </>
   );

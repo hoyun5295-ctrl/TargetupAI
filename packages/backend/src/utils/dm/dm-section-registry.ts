@@ -108,8 +108,13 @@ export type CouponProps = {
   expire_date?: string;
   min_purchase?: number;
   usage_condition?: string;
-  // ★ 2026-07-15 쿠폰 "쿠폰 사용하기" 버튼 색(임은지 신고) — 미지정 = 기본 primary. 프론트 미러.
+  // ★ 2026-07-15 → 2026-07-23 재정의(임은지 신고): 쿠폰코드 버튼(알약) 배경색. 미지정 = 기본 #171717. 프론트 미러.
+  //   (옛 "쿠폰 사용하기" CTA 색 배선 폐지 — CTA는 공통 '버튼 색'(accent_color)이 담당.)
   button_color?: string;
+  // ★ 2026-07-23 (임은지) 쿠폰 색 분리 — 각 요소 개별 지정. 미지정 = 기존 기본값(회귀 0). 프론트 미러.
+  code_text_color?: string; // 쿠폰코드 글씨색 (기본 #fff)
+  label_color?: string;     // 할인 라벨 글씨색 (기본 var(--dm-primary))
+  card_bg_color?: string;   // 쿠폰 카드 배경색 (기본 var(--dm-bg))
   cta_url?: string;
 };
 

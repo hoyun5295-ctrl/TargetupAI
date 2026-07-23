@@ -400,8 +400,8 @@ describe('DM 편집기↔발행 속성 계약 (재발 방지책 1)', () => {
       const outline = renderSection(mk('cta', { layout: 'stack', buttons: [{ label: '구매', url: 'https://x.com', style: 'outline', color: '#00aa88' }] }), {} as any);
       expect(outline).toContain('border-color:#00aa88');
     });
-    it('A3 쿠폰 버튼색 — button_color가 출력에 반영', () => {
-      const html = renderSection(mk('coupon', { discount_label: '20%', discount_type: 'percent', cta_url: 'https://x.com', button_color: '#123abc' }), {} as any);
+    it('A3 쿠폰 버튼색(2026-07-23 재정의) — button_color가 쿠폰코드 알약 배경에 반영', () => {
+      const html = renderSection(mk('coupon', { discount_label: '20%', discount_type: 'percent', coupon_code: 'SAVE20', button_color: '#123abc' }), {} as any);
       expect(html).toContain('#123abc');
     });
     it('B2 상품 배경색·글씨공간색 — 출력에 반영', () => {
@@ -414,6 +414,64 @@ describe('DM 편집기↔발행 속성 계약 (재발 방지책 1)', () => {
       const lg = renderSection(mk('product_carousel', { products: [{ image_url: 'https://x.com/a.jpg', name: 'P', price: 1000 }], image_height: 'lg' }), {} as any);
       expect(sm).toContain('height:120px');
       expect(lg).toContain('height:220px');
+    });
+  });
+
+  // ── 쿠폰/탭/즉시쿠폰 색·크기 분리 (2026-07-23 임은지) ──
+  describe('쿠폰/탭/즉시쿠폰 색·크기 분리 (2026-07-23 임은지)', () => {
+    it('쿠폰코드 알약 배경(button_color) — 반영', () => {
+      const html = renderSection(mk('coupon', { discount_label: '20%', discount_type: 'percent', coupon_code: 'SAVE20', button_color: '#0a0b0c' }), {} as any);
+      expect(html).toContain('background:#0a0b0c');
+    });
+    it('쿠폰코드 글씨색(code_text_color) — 반영', () => {
+      const html = renderSection(mk('coupon', { discount_label: '20%', discount_type: 'percent', coupon_code: 'SAVE20', code_text_color: '#ff00aa' }), {} as any);
+      expect(html).toContain('color:#ff00aa');
+    });
+    it('할인 라벨 글씨색(label_color) — 반영', () => {
+      const html = renderSection(mk('coupon', { discount_label: '20%', discount_type: 'percent', label_color: '#abccba' }), {} as any);
+      expect(html).toContain('color:#abccba');
+    });
+    it('쿠폰 카드 배경색(card_bg_color) — 반영', () => {
+      const html = renderSection(mk('coupon', { discount_label: '20%', discount_type: 'percent', card_bg_color: '#123456' }), {} as any);
+      expect(html).toContain('background:#123456');
+    });
+    it('쿠폰 색 미지정 — 기본값 유지(회귀 0: 코드 알약 #171717·카드 var(--dm-bg))', () => {
+      const html = renderSection(mk('coupon', { discount_label: '20%', discount_type: 'percent', coupon_code: 'X' }), {} as any);
+      expect(html).toContain('background:#171717');
+      expect(html).toContain('background:var(--dm-bg)');
+    });
+    it('활성 탭 버튼 배경/글씨(tab_active_bg·tab_active_text_color) — 반영(미지정=#171717/#fff)', () => {
+      const withColor = renderSection(mk('tab_cards', { tabs: [{ label: 'A', content: 'x' }], tab_active_bg: '#101112', tab_active_text_color: '#eeddcc' }), {} as any);
+      expect(withColor).toContain('background:#101112');
+      expect(withColor).toContain('color:#eeddcc');
+      const plain = renderSection(mk('tab_cards', { tabs: [{ label: 'A', content: 'x' }] }), {} as any);
+      expect(plain).toContain('#171717');
+    });
+    it('탭 버튼 글씨 크기 = 섹션 제목 크기(title_size→--dm-fs-tab), 본문 크기엔 영향 없음(--dm-fs-small 미참조)', () => {
+      const titled = renderSection(mk('tab_cards', { tabs: [{ label: 'A', content: 'x' }] }, { title_size: 24 } as any), {} as any);
+      expect(titled).toContain('--dm-fs-tab:24px');
+      const btnPart = titled.slice(titled.indexOf('data-dm-tab='), titled.indexOf('data-dm-tab-panel='));
+      expect(btnPart, '탭 버튼이 --dm-fs-tab(13px 폴백)만 참조해야 본문 크기와 분리').toContain('var(--dm-fs-tab, 13px)');
+      expect(btnPart, '탭 버튼이 --dm-fs-small 참조 시 본문 크기가 버튼까지 바꿈(옛 버그)').not.toContain('--dm-fs-small');
+    });
+    it('즉시쿠폰 버튼 배경/글씨(button_bg_color·button_text_color) — 반영', () => {
+      const html = renderSection(mk('instant_coupon', { coupon_label: 'L', discount_description: 'D', button_bg_color: '#334455', button_text_color: '#ccbbaa' }), {} as any);
+      expect(html).toContain('background:#334455');
+      expect(html).toContain('color:#ccbbaa');
+    });
+    it('즉시쿠폰 색 미지정 — 버튼 인라인 style 없음(회귀 0)', () => {
+      const html = renderSection(mk('instant_coupon', { coupon_label: 'L', discount_description: 'D' }), {} as any);
+      expect(html).toContain('class="dm-cta dm-cta-primary">쿠폰 받기');
+    });
+    it('캔버스 미러 — 쿠폰/탭/즉시쿠폰이 신규 색·크기 prop 소비(편집=발송)', () => {
+      const coupon = readFileSync(resolve(process.cwd(), '../frontend/src/components/dm/canvas/CouponSection.tsx'), 'utf8');
+      expect(coupon).toContain('card_bg_color');
+      expect(coupon).toContain('code_text_color');
+      expect(coupon).toContain('label_color');
+      const ns = readFileSync(resolve(process.cwd(), '../frontend/src/components/dm/canvas/NewSections.tsx'), 'utf8');
+      expect(ns).toContain('tab_active_bg');
+      expect(ns).toContain('var(--dm-fs-tab, 13px)');
+      expect(ns).toContain('button_bg_color');
     });
   });
 

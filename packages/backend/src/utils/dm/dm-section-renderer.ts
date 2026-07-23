@@ -287,13 +287,18 @@ function renderCouponClassic(props: CouponProps): string {
 
   // ★ 2026-07-02(5) 발행물 디자인 격상 — 이메일 톤: 점선 테두리 카드 → 정돈된 카드 + 코드 점선 분리
   // ★ 2026-07-13 디자인 3.0 — dm-coupon-card = 샤인 스윕 모션 훅
+  // ★ 2026-07-23 (임은지) 색 분리 — 미지정=현행(회귀 0). 쿠폰코드 배경=button_color·글씨=code_text_color·라벨=label_color·카드=card_bg_color.
+  const cardBg = colorOr(props.card_bg_color, 'var(--dm-bg)');
+  const labelColor = colorOr(props.label_color, 'var(--dm-primary)');
+  const codeBg = colorOr(props.button_color, '#171717');
+  const codeText = colorOr(props.code_text_color, '#fff');
   return `<div class="dm-section dm-coupon" data-section-type="coupon" style="padding:var(--dm-sp-8) var(--dm-sp-5);background:var(--dm-primary-light)">
-    <div class="dm-coupon-card" style="background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:20px;box-shadow:var(--dm-shadow-md);padding:var(--dm-sp-8) var(--dm-sp-6)">
+    <div class="dm-coupon-card" style="background:${cardBg};border:1px solid var(--dm-neutral-200);border-radius:20px;box-shadow:var(--dm-shadow-md);padding:var(--dm-sp-8) var(--dm-sp-6)">
       <div style="font-size:var(--dm-fs-tiny);font-weight:700;letter-spacing:3px;color:var(--dm-neutral-500);margin-bottom:var(--dm-sp-3)">COUPON</div>
-      <div class="dm-text-hero" style="color:var(--dm-primary);font-weight:900;font-family:var(--dm-font-display)">${discountLabel}</div>
-      ${code ? `<div style="margin-top:var(--dm-sp-4);border-top:1px dashed var(--dm-neutral-300);padding-top:var(--dm-sp-4)"><span style="background:#171717;color:#fff;display:inline-block;padding:var(--dm-sp-2) var(--dm-sp-6);border-radius:999px;font-family:var(--dm-font-mono);font-size:var(--dm-fs-h3);font-weight:700;letter-spacing:3px">${code}</span></div>` : ''}
+      <div class="dm-text-hero" style="color:${labelColor};font-weight:900;font-family:var(--dm-font-display)">${discountLabel}</div>
+      ${code ? `<div style="margin-top:var(--dm-sp-4);border-top:1px dashed var(--dm-neutral-300);padding-top:var(--dm-sp-4)"><span style="background:${codeBg};color:${codeText};display:inline-block;padding:var(--dm-sp-2) var(--dm-sp-6);border-radius:999px;font-family:var(--dm-font-mono);font-size:var(--dm-fs-h3);font-weight:700;letter-spacing:3px">${code}</span></div>` : ''}
       ${couponMeta(props)}
-      ${props.cta_url ? `<div style="margin-top:var(--dm-sp-5)"><a href="${safeUrl(props.cta_url)}" class="dm-cta dm-cta-primary" target="_blank" style="width:100%;max-width:280px${couponBtnStyle(props.button_color)}">쿠폰 사용하기</a></div>` : ''}
+      ${props.cta_url ? `<div style="margin-top:var(--dm-sp-5)"><a href="${safeUrl(props.cta_url)}" class="dm-cta dm-cta-primary" target="_blank" style="width:100%;max-width:280px">쿠폰 사용하기</a></div>` : ''}
     </div>
   </div>`;
 }
@@ -302,13 +307,17 @@ function renderCouponClassic(props: CouponProps): string {
 function renderCouponTicket(props: CouponProps): string {
   const discountLabel = escapeHtml(props.discount_label || '');
   const code = props.coupon_code ? escapeHtml(props.coupon_code) : '';
-  const notch = 'radial-gradient(circle at 0 50%, transparent 10px, var(--dm-bg) 11px) left/51% 100% no-repeat, radial-gradient(circle at 100% 50%, transparent 10px, var(--dm-bg) 11px) right/51% 100% no-repeat';
+  // ★ 2026-07-23 (임은지) 색 분리 — 미지정=현행(회귀 0). 티켓 코드는 알약 없는 평문이라 button_color(알약 배경)은 미적용.
+  const cardBg = colorOr(props.card_bg_color, 'var(--dm-bg)');
+  const labelColor = colorOr(props.label_color, 'var(--dm-primary)');
+  const codeText = colorOr(props.code_text_color, 'var(--dm-neutral-900)');
+  const notch = `radial-gradient(circle at 0 50%, transparent 10px, ${cardBg} 11px) left/51% 100% no-repeat, radial-gradient(circle at 100% 50%, transparent 10px, ${cardBg} 11px) right/51% 100% no-repeat`;
   return `<div class="dm-section dm-coupon" data-section-type="coupon" style="padding:calc(var(--dm-sp-6) * var(--dm-section-pad-scale)) var(--dm-sp-5);background:var(--dm-primary-light)">
     <div class="dm-coupon-card" style="background:${notch};box-shadow:var(--dm-shadow-md);border-radius:var(--dm-radius-lg);padding:var(--dm-sp-6) var(--dm-sp-8)">
-      <div style="font-size:var(--dm-fs-hero);font-weight:900;color:var(--dm-primary);font-family:var(--dm-font-display)">${discountLabel}</div>
-      ${code ? `<div style="margin-top:var(--dm-sp-4);border-top:1px dashed var(--dm-neutral-300);padding-top:var(--dm-sp-4);font-family:var(--dm-font-mono);font-size:var(--dm-fs-h2);font-weight:700;letter-spacing:3px;color:var(--dm-neutral-900)">${code}</div>` : ''}
+      <div style="font-size:var(--dm-fs-hero);font-weight:900;color:${labelColor};font-family:var(--dm-font-display)">${discountLabel}</div>
+      ${code ? `<div style="margin-top:var(--dm-sp-4);border-top:1px dashed var(--dm-neutral-300);padding-top:var(--dm-sp-4);font-family:var(--dm-font-mono);font-size:var(--dm-fs-h2);font-weight:700;letter-spacing:3px;color:${codeText}">${code}</div>` : ''}
       ${couponMeta(props)}
-      ${props.cta_url ? `<div style="margin-top:var(--dm-sp-4)"><a href="${safeUrl(props.cta_url)}" class="dm-cta dm-cta-primary" target="_blank" style="${couponBtnStyle(props.button_color).replace(/^;/, '')}">쿠폰 사용하기</a></div>` : ''}
+      ${props.cta_url ? `<div style="margin-top:var(--dm-sp-4)"><a href="${safeUrl(props.cta_url)}" class="dm-cta dm-cta-primary" target="_blank">쿠폰 사용하기</a></div>` : ''}
     </div>
   </div>`;
 }
@@ -318,11 +327,14 @@ function renderCouponSpotlight(props: CouponProps): string {
   const discountLabel = escapeHtml(props.discount_label || '');
   const code = props.coupon_code ? escapeHtml(props.coupon_code) : '';
   // ★ 2026-07-13 다크 패널 = 리터럴 고정(#171717 — 기존 var(--dm-neutral-900)와 동일값). 다크 테마 반전 시에도 어두운 패널 유지.
-  return `<div class="dm-section dm-coupon dm-coupon-card" data-section-type="coupon" style="padding:calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-5);background:#171717;color:#fff">
-    ${discountLabel ? `<div style="font-size:var(--dm-fs-h3);font-weight:700;color:var(--dm-accent);letter-spacing:1px">${discountLabel}</div>` : ''}
-    ${code ? `<div style="margin-top:var(--dm-sp-3);font-family:var(--dm-font-mono);font-size:var(--dm-fs-hero);font-weight:900;letter-spacing:4px">${code}</div>` : ''}
+  // ★ 2026-07-23 (임은지) 색 분리 — 미지정=현행(회귀 0). 스포트라이트 코드는 알약 없는 평문이라 button_color 미적용.
+  const cardBg = colorOr(props.card_bg_color, '#171717');
+  const labelColor = colorOr(props.label_color, 'var(--dm-accent)');
+  return `<div class="dm-section dm-coupon dm-coupon-card" data-section-type="coupon" style="padding:calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-5);background:${cardBg};color:#fff">
+    ${discountLabel ? `<div style="font-size:var(--dm-fs-h3);font-weight:700;color:${labelColor};letter-spacing:1px">${discountLabel}</div>` : ''}
+    ${code ? `<div style="margin-top:var(--dm-sp-3);font-family:var(--dm-font-mono);font-size:var(--dm-fs-hero);font-weight:900;letter-spacing:4px${props.code_text_color ? `;color:${escapeHtml(props.code_text_color)}` : ''}">${code}</div>` : ''}
     <div style="margin-top:var(--dm-sp-2);color:var(--dm-neutral-400)">${couponMeta(props)}</div>
-    ${props.cta_url ? `<div style="margin-top:var(--dm-sp-5)"><a href="${safeUrl(props.cta_url)}" class="dm-cta dm-cta-primary" target="_blank" style="${couponBtnStyle(props.button_color).replace(/^;/, '')}">쿠폰 사용하기</a></div>` : ''}
+    ${props.cta_url ? `<div style="margin-top:var(--dm-sp-5)"><a href="${safeUrl(props.cta_url)}" class="dm-cta dm-cta-primary" target="_blank">쿠폰 사용하기</a></div>` : ''}
   </div>`;
 }
 
@@ -431,8 +443,9 @@ function ctaBtnColorStyle(color?: string, style?: string): string {
     : `background:${c};background-image:none;color:#fff`;
 }
 // 쿠폰 "쿠폰 사용하기" 버튼(항상 채움형) 색 오버라이드.
-function couponBtnStyle(color?: string): string {
-  return color ? `;background:${escapeHtml(color)};background-image:none;color:#fff` : '';
+/** ★ 2026-07-23 (임은지) 색 오버라이드 → escape된 값 또는 기본값(토큰/리터럴). 미지정=기본(회귀 0). 편집기 ColorOverride와 짝. */
+function colorOr(v: unknown, fallback: string): string {
+  return typeof v === 'string' && v.trim() ? escapeHtml(v) : fallback;
 }
 
 // ★ 2026-06-25 (P1) cta treatment 디스패처. 미설정/미허용=classic(현행). ★ 2026-07-13 sticky 추가.
@@ -1005,7 +1018,11 @@ function renderTabCards(p: any): string {
   const di = Math.min(Math.max(0, Math.floor(Number(p.default_tab_index) || 0)), tabs.length - 1);
   // ★ 2026-07-02 v2 — 밑줄 탭 → 알약(pill) 세그먼트 탭
   // ★ 2026-07-13 활성 알약 = 리터럴 고정(#171717 = 기존 var 값 동일 — 다크 테마 반전 시에도 어두운 알약 + 흰 글자 유지)
-  const btns = tabs.map((t: any, i: number) => `<span data-dm-tab="${i}" style="padding:9px 16px;cursor:pointer;border-radius:999px;background:${i === di ? '#171717' : 'var(--dm-neutral-100)'};color:${i === di ? '#fff' : 'var(--dm-neutral-600)'};font-size:var(--dm-fs-small);font-weight:600;transition:all 150ms">${escapeHtml(t.label || '')}</span>`).join('');
+  // ★ 2026-07-23 (임은지) 활성 탭 배경/글씨색 지정(미지정=현행) + 탭 버튼 글씨 크기 = 섹션 '제목 크기'(--dm-fs-tab, 기본 13px = 옛 fs-small).
+  //   탭 내용(renderTabPanelContent)은 '본문 크기'(fs-small) → 크기 컨트롤 분리(옛: 둘 다 fs-small이라 본문 크기가 버튼까지 바꿈).
+  const activeBg = colorOr(p.tab_active_bg, '#171717');
+  const activeText = colorOr(p.tab_active_text_color, '#fff');
+  const btns = tabs.map((t: any, i: number) => `<span data-dm-tab="${i}" style="padding:9px 16px;cursor:pointer;border-radius:999px;background:${i === di ? activeBg : 'var(--dm-neutral-100)'};color:${i === di ? activeText : 'var(--dm-neutral-600)'};font-size:var(--dm-fs-tab, 13px);font-weight:600;transition:all 150ms">${escapeHtml(t.label || '')}</span>`).join('');
   const panels = tabs.map((t: any, i: number) => `<div data-dm-tab-panel="${i}" style="display:${i === di ? 'block' : 'none'}">${renderTabPanelContent(t)}</div>`).join('');
   return `<div class="dm-section dm-tab-cards" data-dm-tabs style="padding:var(--dm-sp-6) var(--dm-sp-5)">
     <div style="display:flex;gap:8px;margin-bottom:var(--dm-sp-4);flex-wrap:wrap">${btns}</div>
@@ -1133,11 +1150,16 @@ function renderRoulette(p: any): string {
 }
 
 function renderInstantCoupon(p: any): string {
+  // ★ 2026-07-23 (임은지) '쿠폰 받기' 버튼 배경/글씨색(미지정=dm-cta-primary 기본 → 인라인 미출력·회귀 0)
+  const icParts: string[] = [];
+  if (p.button_bg_color) icParts.push(`background:${escapeHtml(p.button_bg_color)}`, 'background-image:none');
+  if (p.button_text_color) icParts.push(`color:${escapeHtml(p.button_text_color)}`);
+  const icStyle = icParts.length ? ` style="${icParts.join(';')}"` : '';
   const body = `
     <div style="font-size:var(--dm-fs-h3);font-weight:700;color:var(--dm-primary);margin-bottom:var(--dm-sp-2)">${escapeHtml(p.coupon_label || '')}</div>
     <div style="font-size:var(--dm-fs-small);color:var(--dm-neutral-700);margin-bottom:var(--dm-sp-3)">${escapeHtml(p.discount_description || '')}</div>
     ${p.expires_at ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-primary);margin-bottom:var(--dm-sp-3);font-weight:600">만료: ${escapeHtml(new Date(p.expires_at).toLocaleString('ko-KR'))}</div>` : ''}
-    <button data-dm-claim data-claim-success="${escapeHtml(p.usage_instructions ? `쿠폰이 발급되었습니다. ${p.usage_instructions}` : '쿠폰이 발급되었습니다. 결제 시 적용해주세요.')}" class="dm-cta dm-cta-primary">쿠폰 받기</button>
+    <button data-dm-claim data-claim-success="${escapeHtml(p.usage_instructions ? `쿠폰이 발급되었습니다. ${p.usage_instructions}` : '쿠폰이 발급되었습니다. 결제 시 적용해주세요.')}" class="dm-cta dm-cta-primary"${icStyle}>쿠폰 받기</button>
     ${p.conditions ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2);white-space:pre-wrap">${escapeHtml(p.conditions)}</div>` : ''}
     ${p.usage_instructions ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:4px;white-space:pre-wrap">${escapeHtml(p.usage_instructions)}</div>` : ''}
     <div data-dm-result style="display:none"></div>`;
@@ -1269,7 +1291,7 @@ export function renderSection(section: Section, ctx: SectionRenderContext): stri
   const titleN = fsVarPx(section.title_size);
   const textN = fsVarPx(section.text_size);
   const sizeVars =
-    `${titleN ? `;--dm-fs-hero:${titleN}px;--dm-fs-h1:${titleN}px;--dm-fs-h2:${titleN}px;--dm-fs-h3:${titleN}px` : ''}` +
+    `${titleN ? `;--dm-fs-hero:${titleN}px;--dm-fs-h1:${titleN}px;--dm-fs-h2:${titleN}px;--dm-fs-h3:${titleN}px;--dm-fs-tab:${titleN}px` : ''}` +
     `${textN ? `;--dm-fs-body:${textN}px;--dm-fs-small:${textN}px` : ''}`;
   // ★ 2026-07-10 임은지 신고: 강조 면 변수 3종 동반 — 버튼 없는 구도(히어로 오버랩 카드 등)도 "버튼 색"을
   //   카드 면으로 소비. 미지정 = 변수 부재 → 각 구도 기존 기본색(발행물 무변화). 캔버스 SectionRenderer 미러.

@@ -63,28 +63,31 @@ export default function CouponSection({ props, onEdit, treatment }: { props: Cou
       )}
     </>
   );
-  // ★ 2026-07-15 쿠폰 버튼 색(임은지) — SSR couponBtnStyle 미러. 미지정 = 기본 primary.
-  const btnColorStyle = props.button_color ? { background: props.button_color, backgroundImage: 'none', color: '#fff' } : {};
+  // ★ 2026-07-23 (임은지) 쿠폰 색 분리 — SSR renderCoupon* 미러. 미지정=각 구도 기본(회귀 0).
+  //   button_color=쿠폰코드 배경(옛 '쿠폰 사용하기' CTA 색 배선 폐지 — CTA는 공통 '버튼 색'), code_text_color=쿠폰코드 글씨.
+  const codeBg = props.button_color || '#171717';
+  const codeText = props.code_text_color || '#fff';
   const ctaNode = props.cta_url ? (
     <div style={{ marginTop: 'var(--dm-sp-5)' }}>
-      <a href={props.cta_url} className="dm-cta dm-cta-primary" target="_blank" rel="noreferrer" style={{ width: '100%', maxWidth: 280, ...btnColorStyle }}>쿠폰 사용하기</a>
+      <a href={props.cta_url} className="dm-cta dm-cta-primary" target="_blank" rel="noreferrer" style={{ width: '100%', maxWidth: 280 }}>쿠폰 사용하기</a>
     </div>
   ) : null;
 
   // ── 티켓: 좌우 노치 + 점선 분리 ──
   if (t === 'ticket') {
-    const notch = 'radial-gradient(circle at 0 50%, transparent 10px, var(--dm-bg) 11px) left/51% 100% no-repeat, radial-gradient(circle at 100% 50%, transparent 10px, var(--dm-bg) 11px) right/51% 100% no-repeat';
+    const cardBg = props.card_bg_color || 'var(--dm-bg)';
+    const notch = `radial-gradient(circle at 0 50%, transparent 10px, ${cardBg} 11px) left/51% 100% no-repeat, radial-gradient(circle at 100% 50%, transparent 10px, ${cardBg} 11px) right/51% 100% no-repeat`;
     return (
       <div className="dm-section dm-coupon" style={{ padding: 'calc(var(--dm-sp-6) * var(--dm-section-pad-scale)) var(--dm-sp-5)', background: 'var(--dm-primary-light)' }}>
         <div style={{ background: notch, boxShadow: 'var(--dm-shadow-md)', borderRadius: 'var(--dm-radius-lg)', padding: 'var(--dm-sp-6) var(--dm-sp-8)' }}>
-          {discountNode({ fontSize: 'var(--dm-fs-hero)', fontWeight: 900, color: 'var(--dm-primary)', fontFamily: 'var(--dm-font-display)' })}
+          {discountNode({ fontSize: 'var(--dm-fs-hero)', fontWeight: 900, color: props.label_color || 'var(--dm-primary)', fontFamily: 'var(--dm-font-display)' })}
           {(props.coupon_code || editable) && (
             <div style={{ marginTop: 'var(--dm-sp-4)', borderTop: '1px dashed var(--dm-neutral-300)', paddingTop: 'var(--dm-sp-4)' }}>
-              {codeNode({ fontFamily: 'var(--dm-font-mono)', fontSize: 'var(--dm-fs-h2)', fontWeight: 700, letterSpacing: 3, color: 'var(--dm-neutral-900)' })}
+              {codeNode({ fontFamily: 'var(--dm-font-mono)', fontSize: 'var(--dm-fs-h2)', fontWeight: 700, letterSpacing: 3, color: props.code_text_color || 'var(--dm-neutral-900)' })}
             </div>
           )}
           {metaNode}
-          {props.cta_url && <div style={{ marginTop: 'var(--dm-sp-4)' }}><a href={props.cta_url} className="dm-cta dm-cta-primary" target="_blank" rel="noreferrer" style={btnColorStyle}>쿠폰 사용하기</a></div>}
+          {props.cta_url && <div style={{ marginTop: 'var(--dm-sp-4)' }}><a href={props.cta_url} className="dm-cta dm-cta-primary" target="_blank" rel="noreferrer">쿠폰 사용하기</a></div>}
         </div>
       </div>
     );
@@ -93,11 +96,11 @@ export default function CouponSection({ props, onEdit, treatment }: { props: Cou
   // ── 스포트라이트: 코드 대형 강조 (다크 배경 + 모노) ──
   if (t === 'spotlight') {
     return (
-      <div className="dm-section dm-coupon" style={{ padding: 'calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-5)', background: '#171717' /* ★ 2026-07-13 다크 패널 리터럴 고정 — 다크 테마 반전 시에도 SSR과 일치 (Codex 지적) */, color: '#fff' }}>
-        {(props.discount_label || editable) && discountNode({ fontSize: 'var(--dm-fs-h3)', fontWeight: 700, color: 'var(--dm-accent)', letterSpacing: 1 })}
+      <div className="dm-section dm-coupon" style={{ padding: 'calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-5)', background: props.card_bg_color || '#171717' /* ★ 2026-07-13 다크 패널 리터럴 고정 (미지정 시) */, color: '#fff' }}>
+        {(props.discount_label || editable) && discountNode({ fontSize: 'var(--dm-fs-h3)', fontWeight: 700, color: props.label_color || 'var(--dm-accent)', letterSpacing: 1 })}
         {(props.coupon_code || editable) && (
           <div style={{ marginTop: 'var(--dm-sp-3)' }}>
-            {codeNode({ fontFamily: 'var(--dm-font-mono)', fontSize: 'var(--dm-fs-hero)', fontWeight: 900, letterSpacing: 4, color: '#fff' })}
+            {codeNode({ fontFamily: 'var(--dm-font-mono)', fontSize: 'var(--dm-fs-hero)', fontWeight: 900, letterSpacing: 4, color: props.code_text_color || '#fff' })}
           </div>
         )}
         <div style={{ marginTop: 'var(--dm-sp-2)', color: 'var(--dm-neutral-400)' }}>{metaNode}</div>
@@ -109,11 +112,11 @@ export default function CouponSection({ props, onEdit, treatment }: { props: Cou
   // ── classic (기존 — 골든 보존) ──
   return (
     <div className="dm-section dm-coupon" style={{ padding: 'var(--dm-sp-8) var(--dm-sp-5)', background: 'var(--dm-primary-light)' }}>
-      <div style={{ background: 'var(--dm-bg)', border: '1px solid var(--dm-neutral-200)', borderRadius: 20, boxShadow: 'var(--dm-shadow-md)', padding: 'var(--dm-sp-8) var(--dm-sp-6)' }}>
+      <div style={{ background: props.card_bg_color || 'var(--dm-bg)', border: '1px solid var(--dm-neutral-200)', borderRadius: 20, boxShadow: 'var(--dm-shadow-md)', padding: 'var(--dm-sp-8) var(--dm-sp-6)' }}>
         <div style={{ fontSize: 'var(--dm-fs-tiny)', fontWeight: 700, letterSpacing: 3, color: 'var(--dm-neutral-500)', marginBottom: 'var(--dm-sp-3)' }}>COUPON</div>
         <InlineEditable
           className="dm-text-hero"
-          style={{ color: 'var(--dm-primary)', fontWeight: 900, fontFamily: 'var(--dm-font-display)' }}
+          style={{ color: props.label_color || 'var(--dm-primary)', fontWeight: 900, fontFamily: 'var(--dm-font-display)' }}
           value={props.discount_label || ''}
           placeholder="할인 (예: 30% OFF)"
           onChange={(v) => onEdit?.({ discount_label: v } as Partial<CouponProps>)}
@@ -123,7 +126,7 @@ export default function CouponSection({ props, onEdit, treatment }: { props: Cou
         {(props.coupon_code || editable) && (
           <div style={{ marginTop: 'var(--dm-sp-4)', borderTop: '1px dashed var(--dm-neutral-300)', paddingTop: 'var(--dm-sp-4)' }}>
             <InlineEditable
-              style={{ background: '#171717', color: '#fff', display: 'inline-block', padding: 'var(--dm-sp-2) var(--dm-sp-6)', borderRadius: 999, fontFamily: 'var(--dm-font-mono)', fontSize: 'var(--dm-fs-h3)', fontWeight: 700, letterSpacing: 3 }}
+              style={{ background: codeBg, color: codeText, display: 'inline-block', padding: 'var(--dm-sp-2) var(--dm-sp-6)', borderRadius: 999, fontFamily: 'var(--dm-font-mono)', fontSize: 'var(--dm-fs-h3)', fontWeight: 700, letterSpacing: 3 }}
               value={props.coupon_code || ''}
               placeholder="COUPON"
               onChange={(v) => onEdit?.({ coupon_code: v } as Partial<CouponProps>)}
@@ -148,7 +151,7 @@ export default function CouponSection({ props, onEdit, treatment }: { props: Cou
         )}
         {props.cta_url && (
           <div style={{ marginTop: 'var(--dm-sp-5)' }}>
-            <a href={props.cta_url} className="dm-cta dm-cta-primary" target="_blank" rel="noreferrer" style={{ width: '100%', maxWidth: 280, ...btnColorStyle }}>쿠폰 사용하기</a>
+            <a href={props.cta_url} className="dm-cta dm-cta-primary" target="_blank" rel="noreferrer" style={{ width: '100%', maxWidth: 280 }}>쿠폰 사용하기</a>
           </div>
         )}
       </div>
