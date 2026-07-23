@@ -106,6 +106,7 @@ export default function StatsTab() {
   const TAB_LABEL: Record<string, string> = { web: '웹 발송', agent: '에이전트 발송', test: '테스트 발송' };
   const agentSummary = stats?.agentSummary;
   const agentRows: any[] = stats?.agentRows || [];
+  const agentByType: any[] = stats?.agentByType || [];
   const activeSummary = channel === 'agent' ? agentSummary : stats?.summary;
 
   return (
@@ -224,7 +225,23 @@ export default function StatsTab() {
           </div>
         ) : null}
         {channel === 'agent' && (
-          <p className="px-6 pt-3 text-[11px] text-slate-400 italic">에이전트 발송은 게이트웨이 엔진 집계(일 단위)로, 수신자별 상세는 제공되지 않습니다.</p>
+          <>
+            {agentByType.length > 0 && (
+              <div className="px-6 pt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+                {agentByType.map((t: any) => (
+                  <div key={t.msg_type} className="rounded-xl border border-slate-200 bg-white p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 text-xs font-semibold">{t.type_label || t.msg_type}</span>
+                      <span className="text-[11px] text-slate-400">성공률 {Number(t.sent) > 0 ? `${((Number(t.success) / Number(t.sent)) * 100).toFixed(1)}%` : '-'}</span>
+                    </div>
+                    <p className="mt-2 text-2xl font-bold tracking-tight text-slate-900 tabular-nums">{formatNum(t.success)}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-400">전송 {formatNum(t.sent)} · 실패 {formatNum(t.fail)}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="px-6 pt-3 text-[11px] text-slate-400 italic">에이전트 발송은 게이트웨이 엔진 집계(일 단위)로, 유형(SMS/LMS/MMS/카카오알림톡)별로 나뉘며 수신자별 상세는 제공되지 않습니다.</p>
+          </>
         )}
 
         {/* 테이블 — 웹/에이전트 (테스트는 요약 카드만) */}
@@ -240,8 +257,8 @@ export default function StatsTab() {
               <thead>
                 <tr className="border-b border-slate-100">
                   <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">{view === 'monthly' ? '월' : '날짜'}</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">발송ID</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">발송</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">유형</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">전송</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">성공</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">실패</th>
                   <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">대기</th>
@@ -253,7 +270,7 @@ export default function StatsTab() {
                 ) : agentRows.map((r: any, i: number) => (
                   <tr key={i} className="transition hover:bg-slate-50/70">
                     <td className="px-6 py-3.5 font-semibold text-slate-700">{r.period}</td>
-                    <td className="px-4 py-3.5 text-right text-slate-500 tabular-nums">{formatNum(r.runs)}</td>
+                    <td className="px-4 py-3.5 text-left"><span className="px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 text-xs font-medium">{r.type_label || r.msg_type}</span></td>
                     <td className="px-4 py-3.5 text-right text-slate-700 font-medium tabular-nums">{formatNum(r.sent)}</td>
                     <td className="px-4 py-3.5 text-right text-emerald-600 font-semibold tabular-nums">{formatNum(r.success)}</td>
                     <td className={`px-4 py-3.5 text-right font-medium tabular-nums ${Number(r.fail) > 0 ? 'text-rose-500' : 'text-slate-300'}`}>{formatNum(r.fail)}</td>

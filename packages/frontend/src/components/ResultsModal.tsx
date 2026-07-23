@@ -426,6 +426,43 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                 );
               })()}
 
+              {/* ★ 2026-07-23 에이전트(엔진) 발송 유형별 — agent·both 회사만 채워짐 */}
+              {summary?.agent?.byType?.length > 0 && (
+                <div className="rounded-2xl border border-violet-200 bg-violet-50/30 overflow-hidden">
+                  <div className="px-4 py-2.5 border-b border-violet-100 flex items-center gap-2 flex-wrap">
+                    <span className="px-2 py-0.5 rounded-md bg-violet-100 text-violet-700 text-xs font-semibold">에이전트 발송</span>
+                    <span className="text-xs text-slate-400">게이트웨이 엔진 집계 · 유형별 (수신자별 상세 없음)</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-white/60">
+                      <tr className="border-b border-violet-100">
+                        <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500">유형</th>
+                        <th className="px-4 py-2.5 text-right text-xs font-semibold text-slate-500">전송</th>
+                        <th className="px-4 py-2.5 text-right text-xs font-semibold text-slate-500">성공</th>
+                        <th className="px-4 py-2.5 text-right text-xs font-semibold text-slate-500">실패</th>
+                        <th className="px-4 py-2.5 text-right text-xs font-semibold text-slate-500">성공률</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {summary.agent.byType.map((t: any) => {
+                        const rate = Number(t.sent) > 0 ? ((Number(t.success) / Number(t.sent)) * 100).toFixed(1) : '-';
+                        return (
+                          <tr key={t.msg_type} className="border-b border-violet-50 last:border-0">
+                            <td className="px-4 py-2.5"><span className="px-2 py-0.5 rounded-md bg-violet-100 text-violet-700 text-xs font-medium">{t.type_label || t.msg_type}</span></td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-slate-700">{Number(t.sent).toLocaleString()}</td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-emerald-600 font-medium">{Number(t.success).toLocaleString()}</td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-rose-500">{Number(t.fail).toLocaleString()}</td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">{Number(t.sent) > 0 ? `${rate}%` : '-'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  </div>
+                </div>
+              )}
+
               {/* 채널통합조회 테이블 */}
               {(() => {
                 const pageRows = filteredCampaigns.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);

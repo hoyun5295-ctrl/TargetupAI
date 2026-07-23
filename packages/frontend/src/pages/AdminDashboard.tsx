@@ -4763,6 +4763,7 @@ const handleApproveRequest = async (id: string) => {
                   <tr>
                       <th className="px-4 py-3 text-left text-gray-600 font-medium">{statsView === 'daily' ? '날짜' : '월'}</th>
                       <th className="px-4 py-3 text-left text-gray-600 font-medium">고객사</th>
+                      {statsChannel === 'agent' && <th className="px-4 py-3 text-left text-gray-600 font-medium">유형</th>}
                       <th className="px-4 py-3 text-center text-gray-600 font-medium">전송</th>
                       <th className="px-4 py-3 text-center text-gray-600 font-medium">성공</th>
                       <th className="px-4 py-3 text-center text-gray-600 font-medium">실패</th>
@@ -4773,7 +4774,7 @@ const handleApproveRequest = async (id: string) => {
                   </thead>
                   <tbody className="divide-y">
                     {!(statsChannel === 'agent' ? sendStats?.agentRows : sendStats?.rows)?.length ? (
-                      <tr><td colSpan={8} className="px-4 py-12 text-center text-gray-400">데이터가 없습니다.</td></tr>
+                      <tr><td colSpan={statsChannel === 'agent' ? 9 : 8} className="px-4 py-12 text-center text-gray-400">데이터가 없습니다.</td></tr>
                     ) : (statsChannel === 'agent' ? sendStats.agentRows : sendStats.rows).map((row: any, idx: number) => {
                       const sent = Number(row.sent);
                       const success = Number(row.success);
@@ -4785,6 +4786,7 @@ const handleApproveRequest = async (id: string) => {
                         <tr key={idx} className="hover:bg-gray-50">
                           <td className="px-4 py-3 font-medium text-gray-900 font-mono">{row.date || row.month || row.period}</td>
                           <td className="px-4 py-3 text-gray-700">{row.company_name}</td>
+                          {statsChannel === 'agent' && <td className="px-4 py-3"><span className="px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 text-xs font-medium">{row.type_label || row.msg_type}</span></td>}
                           <td className="px-4 py-3 text-center text-blue-600 font-medium">{sent.toLocaleString()}</td>
                           <td className="px-4 py-3 text-center text-green-600">{success.toLocaleString()}</td>
                           <td className="px-4 py-3 text-center text-red-600">{fail.toLocaleString()}</td>

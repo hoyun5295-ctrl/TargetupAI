@@ -48,7 +48,8 @@ router.get('/send', async (req: Request, res: Response) => {
     //   에이전트는 일자 단위 소량이라 전량 반환(limit 크게) 후 프론트에서 별도 탭 페이징.
     let usageType = 'web';
     let agentSummary: PayStatsResult['summary'] | null = null;
-    let agentRows: PayStatsResult['rows'] = [];
+    let agentRows: PayStatsResult['rows'] = [];         // (기간 × 유형) 행
+    let agentByType: PayStatsResult['byType'] = [];     // 유형별 합계 (SMS/LMS/MMS/카카오)
     if (companyScope) {
       const compType = await pool.query('SELECT usage_type FROM companies WHERE id = $1', [companyScope]);
       usageType = compType.rows[0]?.usage_type || 'web';
@@ -61,7 +62,7 @@ router.get('/send', async (req: Request, res: Response) => {
           page: 1,
           limit: 100000,
         });
-        if (payResult) { agentSummary = payResult.summary; agentRows = payResult.rows; }
+        if (payResult) { agentSummary = payResult.summary; agentRows = payResult.rows; agentByType = payResult.byType; }
       }
     }
 
@@ -158,10 +159,11 @@ router.get('/send', async (req: Request, res: Response) => {
       total: statsResult.total,
       page: statsResult.page,
       totalPages: statsResult.totalPages,
-      // ★ 2026-07-23 탭 분리: 회사 유형 + 에이전트(엔진) 통계 병행 축
+      // ★ 2026-07-23 탭 분리 + 유형별: 회사 유형 + 에이전트(엔진) 통계 병행 축
       usageType,
       agentSummary,
-      agentRows,
+      agentRows,     // (기간 × 유형)
+      agentByType,   // 유형별 합계
     });
   } catch (error) {
     console.error('발송 통계 조회 실패:', error);

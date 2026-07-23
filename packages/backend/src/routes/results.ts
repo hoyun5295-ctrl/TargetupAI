@@ -17,6 +17,8 @@ import { buildDateRangeFilter, buildPeriodFilter, STAT_DATE_EXPR, STAT_STARTED_G
 import { computeDisplayCounts } from '../utils/sms-table-split';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 import { buildCampaignListCsv, channelPlainLabel, CampaignCsvRow } from '../utils/campaign-list-csv';
+// ★ 2026-07-23: 에이전트(agent·both) 회사 발송결과에 엔진 통계 유형별 병행 표시
+import { queryPayAgentByType, isPayStatsConfigured } from '../utils/pay-stats';
 
 const router = Router();
 
@@ -173,6 +175,29 @@ router.get('/summary', async (req: Request, res: Response) => {
       ? ((totalSuccess / totalSent) * 100).toFixed(1)
       : '0';
 
+    // ★ 2026-07-23: 에이전트(agent·both) 회사 — 엔진 발송을 유형(SMS/LMS/MMS/카카오)별로 병행 반환.
+    //   웹 캠페인 요약은 불변. env 미설정·미연결·실패 = agentByType 빈 배열(조용한 폴백).
+    //   ★ 격리: 에이전트 통계는 회사 전체 집계(사용자별 귀속 없음)라 관리자 전용 — company_user(담당자)는
+    //     웹이 created_by로 격리되므로 에이전트 축도 제외. admin이 특정 사용자 필터 중이면 그 사용자 관점이라 미표시.
+    let agentSummary: any = null;
+    let agentByType: any[] = [];
+    if (isPayStatsConfigured() && userType !== 'company_user' && !req.query.filter_user_id) {
+      const ut = await query(`SELECT usage_type FROM companies WHERE id = $1`, [companyId]);
+      const usageType = ut.rows[0]?.usage_type || 'web';
+      if (usageType === 'agent' || usageType === 'both') {
+        let aStart = fromDate ? String(fromDate) : undefined;
+        let aEnd = toDate ? String(toDate) : undefined;
+        if (!aStart || !aEnd) {
+          const y = yearMonth.slice(0, 4), m = yearMonth.slice(4, 6);
+          const last = new Date(Number(y), Number(m), 0).getDate();
+          aStart = `${y}-${m}-01`;
+          aEnd = `${y}-${m}-${String(last).padStart(2, '0')}`;
+        }
+        const at = await queryPayAgentByType({ companyId, startDate: aStart, endDate: aEnd });
+        if (at) { agentSummary = at.summary; agentByType = at.byType; }
+      }
+    }
+
     return res.json({
       period: yearMonth,
       summary: {
@@ -189,6 +214,8 @@ router.get('/summary', async (req: Request, res: Response) => {
         perMms: parseFloat(costs.cost_per_mms) || DEFAULT_COSTS.mms,
         perKakao: parseFloat(costs.cost_per_kakao) || DEFAULT_COSTS.kakao,
       },
+      // ★ 2026-07-23 에이전트(엔진) 발송 유형별 (agent·both만 채워짐)
+      agent: { summary: agentSummary, byType: agentByType },
     });
   } catch (error: any) {
     // ★ D228+ db_alter_safety_net: result_final 등 신규 컬럼 미마이그레이션 시 500 대신 503 안내.
