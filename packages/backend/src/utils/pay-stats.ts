@@ -220,6 +220,7 @@ export interface PayAgentCompanyRow {
   period: string;
   company_id: string;
   company_name: string;
+  agent_send_id: string; // ★ 2026-07-24 발송ID(=CustId) 축 — 슈퍼 정산 대조용(고객사 화면과 동일 축)
   msg_type: string;
   type_label: string;
   sent: number;
@@ -306,8 +307,10 @@ export async function queryPayAgentStatsAllCompanies(options: {
       const pending = Number(r.rd) || 0;
       totalSent += sent; totalSuccess += success; totalFail += fail; totalPending += pending;
 
-      const key = `${period}|${comp.id}|${mt}`;
-      if (!byKey.has(key)) byKey.set(key, { period, company_id: comp.id, company_name: comp.name, msg_type: mt, type_label: agentTypeLabel(mt), sent: 0, success: 0, fail: 0, pending: 0 });
+      // ★ 2026-07-24 발송ID 축 추가 — 매핑 lookup(위 custToCompany.get)은 불변이라 집계 총량 보존, 표시용만 trim.
+      const custId = String(r.CustId || '').trim();
+      const key = `${period}|${comp.id}|${custId}|${mt}`;
+      if (!byKey.has(key)) byKey.set(key, { period, company_id: comp.id, company_name: comp.name, agent_send_id: custId, msg_type: mt, type_label: agentTypeLabel(mt), sent: 0, success: 0, fail: 0, pending: 0 });
       const b = byKey.get(key)!;
       b.sent += sent; b.success += success; b.fail += fail; b.pending += pending;
     }
@@ -316,6 +319,7 @@ export async function queryPayAgentStatsAllCompanies(options: {
       if (a.period !== b.period) return b.period.localeCompare(a.period);
       const nc = a.company_name.localeCompare(b.company_name);
       if (nc !== 0) return nc;
+      if (a.agent_send_id !== b.agent_send_id) return a.agent_send_id.localeCompare(b.agent_send_id);
       return typeOrder(a.msg_type) - typeOrder(b.msg_type);
     });
 

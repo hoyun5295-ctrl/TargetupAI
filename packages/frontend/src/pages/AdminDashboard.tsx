@@ -4723,18 +4723,20 @@ const handleApproveRequest = async (id: string) => {
               >
                 조회
               </button>
-              {/* ★ D114 P10: 발송통계 엑셀(CSV) 다운로드 — fetch+blob (Authorization 헤더 필수). ★2026-07-23 에이전트 탭은 웹 CSV라 숨김(에이전트 export 미구현) */}
-              {statsChannel === 'web' && (
+              {/* ★ D114 P10: 발송통계 엑셀(CSV) 다운로드 — fetch+blob (Authorization 헤더 필수).
+                  ★2026-07-24 에이전트 탭도 지원 — /stats/export/agent (기간×고객사×발송ID×유형, 정산 대조용) */}
               <button
                 onClick={async () => {
                   const token = localStorage.getItem('token');
                   if (!statsStartDate || !statsEndDate) { showAlert('안내', '시작일과 종료일을 선택해주세요.', 'warning'); return; }
+                  const isAgent = statsChannel === 'agent';
                   const params = new URLSearchParams();
                   params.set('startDate', statsStartDate);
                   params.set('endDate', statsEndDate);
                   if (statsCompanyFilter) params.set('companyId', statsCompanyFilter);
+                  if (isAgent) params.set('view', statsView);
                   try {
-                    const res = await fetch(`/api/admin/stats/export?${params.toString()}`, {
+                    const res = await fetch(`/api/admin/stats/export${isAgent ? '/agent' : ''}?${params.toString()}`, {
                       headers: { Authorization: `Bearer ${token}` },
                     });
                     if (!res.ok) { const err = await res.json().catch(() => ({})); showAlert('오류', (err as any).error || '다운로드 실패', 'error'); return; }
@@ -4742,7 +4744,7 @@ const handleApproveRequest = async (id: string) => {
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `발송통계_${statsStartDate}_${statsEndDate}.csv`;
+                    a.download = `${isAgent ? '에이전트발송통계' : '발송통계'}_${statsStartDate}_${statsEndDate}.csv`;
                     a.click();
                     URL.revokeObjectURL(url);
                   } catch { showAlert('오류', '다운로드 중 오류가 발생했습니다.', 'error'); }
@@ -4751,7 +4753,6 @@ const handleApproveRequest = async (id: string) => {
               >
                 엑셀 다운로드
               </button>
-              )}
               <span className="text-sm text-gray-400 ml-auto">총 {statsChannel === 'agent' ? (sendStats?.agentTotal || 0) : statsTotal}건</span>
             </div>
 
@@ -4763,6 +4764,8 @@ const handleApproveRequest = async (id: string) => {
                   <tr>
                       <th className="px-4 py-3 text-left text-gray-600 font-medium">{statsView === 'daily' ? '날짜' : '월'}</th>
                       <th className="px-4 py-3 text-left text-gray-600 font-medium">고객사</th>
+                      {/* ★ 2026-07-24 발송ID(CustId) — 고객사 화면과 동일 축(정산 대조) */}
+                      {statsChannel === 'agent' && <th className="px-4 py-3 text-left text-gray-600 font-medium">발송ID</th>}
                       {statsChannel === 'agent' && <th className="px-4 py-3 text-left text-gray-600 font-medium">유형</th>}
                       <th className="px-4 py-3 text-center text-gray-600 font-medium">전송</th>
                       <th className="px-4 py-3 text-center text-gray-600 font-medium">성공</th>
@@ -4774,7 +4777,7 @@ const handleApproveRequest = async (id: string) => {
                   </thead>
                   <tbody className="divide-y">
                     {!(statsChannel === 'agent' ? sendStats?.agentRows : sendStats?.rows)?.length ? (
-                      <tr><td colSpan={statsChannel === 'agent' ? 9 : 8} className="px-4 py-12 text-center text-gray-400">데이터가 없습니다.</td></tr>
+                      <tr><td colSpan={statsChannel === 'agent' ? 10 : 8} className="px-4 py-12 text-center text-gray-400">데이터가 없습니다.</td></tr>
                     ) : (statsChannel === 'agent' ? sendStats.agentRows : sendStats.rows).map((row: any, idx: number) => {
                       const sent = Number(row.sent);
                       const success = Number(row.success);
@@ -4786,6 +4789,7 @@ const handleApproveRequest = async (id: string) => {
                         <tr key={idx} className="hover:bg-gray-50">
                           <td className="px-4 py-3 font-medium text-gray-900 font-mono">{row.date || row.month || row.period}</td>
                           <td className="px-4 py-3 text-gray-700">{row.company_name}</td>
+                          {statsChannel === 'agent' && <td className="px-4 py-3 font-mono text-xs text-gray-600">{row.agent_send_id || '-'}</td>}
                           {statsChannel === 'agent' && <td className="px-4 py-3"><span className="px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 text-xs font-medium">{row.type_label || row.msg_type}</span></td>}
                           <td className="px-4 py-3 text-center text-blue-600 font-medium">{sent.toLocaleString()}</td>
                           <td className="px-4 py-3 text-center text-green-600">{success.toLocaleString()}</td>

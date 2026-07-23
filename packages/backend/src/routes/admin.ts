@@ -24,6 +24,8 @@ import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CA
 import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsChannelSplitByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, STAT_DATE_EXPR, STAT_STARTED_GUARD } from '../utils/stats-aggregation';
 // ★ 2026-07-23: 슈퍼관리자 발송통계 웹/에이전트 구분 — 에이전트(엔진) 통계 CT 병행 반환
 import { queryPayAgentStatsAllCompanies, isPayStatsConfigured } from '../utils/pay-stats';
+// ★ 2026-07-24 슈퍼 에이전트 통계 엑셀(CSV) — 기간×고객사×발송ID×유형 (정산 대조)
+import { buildAdminAgentStatsCsv } from '../utils/manage-stats-export';
 import { normalizePhone } from '../utils/normalize-phone';
 import { normalizeCdpAutoExecuteGate } from '../utils/autosend-policy';
 import { grantBasicTrial } from '../utils/basic-trial';
@@ -3798,6 +3800,35 @@ router.put('/rcs-templates/:id/reject', authenticate, requireSuperAdmin, async (
 // 필요 데이터: 발송날짜 / 발송계정(사용자) / 문자타입별 총건수·성공·실패·대기
 // 계정별 사용 내역 필수 (거래내역서 발행용)
 // ============================================================
+// ★ 2026-07-24 (서수란) 슈퍼 에이전트(엔진) 발송통계 엑셀(CSV) — 기간×고객사×발송ID×유형.
+//   기존 웹 /stats/export(캠페인 축)는 무접촉. 날짜는 raw 전달(queryPayAgentStatsAllCompanies가 월 확장 자체 수행).
+router.get('/stats/export/agent', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { startDate, endDate, companyId } = req.query;
+    const view = (req.query.view as string) === 'monthly' ? 'monthly' : 'daily';
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: '시작일과 종료일을 입력해주세요.' });
+    }
+    if (!isPayStatsConfigured()) {
+      return res.status(503).json({ error: '에이전트 통계 DB가 설정되지 않아 다운로드할 수 없습니다.' });
+    }
+    const agentRes = await queryPayAgentStatsAllCompanies({
+      view,
+      startDate: String(startDate),
+      endDate: String(endDate),
+      companyId: companyId ? String(companyId) : undefined,
+    });
+    const csv = buildAdminAgentStatsCsv(agentRes?.rows || []);
+    const filename = `에이전트발송통계_${startDate}_${endDate}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+    return res.send(csv);
+  } catch (error) {
+    console.error('에이전트 발송통계 엑셀 export 실패:', error);
+    return res.status(500).json({ error: '다운로드에 실패했습니다.' });
+  }
+});
+
 router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { startDate, endDate, companyId } = req.query;

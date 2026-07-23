@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildManageStatsCsv } from './manage-stats-export';
+import { buildManageStatsCsv, buildAdminAgentStatsCsv } from './manage-stats-export';
 
 describe('manage-stats-export — 발송 통계 CSV(엑셀) 빌더 (서수란 2026-07-23)', () => {
   const BOM = '﻿';
@@ -52,5 +52,35 @@ describe('manage-stats-export — 발송 통계 CSV(엑셀) 빌더 (서수란 20
   it('숫자 아닌 값·undefined는 0으로', () => {
     const csv = buildManageStatsCsv({ webRows: [{ period: '2026-07-23', sent: 'x' as any, success: undefined as any, fail: 3 }] });
     expect(csv.replace(BOM, '').split('\n')[1]).toBe('웹,2026-07-23,,,0,0,3,');
+  });
+});
+
+describe('buildAdminAgentStatsCsv — 슈퍼 에이전트 통계 CSV (정산 대조, 2026-07-24)', () => {
+  const BOM = '﻿';
+
+  it('빈 배열 — BOM + 헤더만(고객사 컬럼 포함)', () => {
+    const csv = buildAdminAgentStatsCsv([]);
+    expect(csv).toBe(BOM + '기간,고객사,발송ID,유형,전송,성공,실패,대기');
+  });
+
+  it('행 — 기간×고객사×발송ID×유형 전개', () => {
+    const csv = buildAdminAgentStatsCsv([
+      { period: '2026-07-23', company_name: '신성통상', agent_send_id: 'D0002', type_label: 'SMS', sent: 1632, success: 1612, fail: 20, pending: 0 },
+      { period: '2026-07-23', company_name: '신성통상', agent_send_id: 'D0003', type_label: 'LMS', sent: 10, success: 9, fail: 1, pending: 0 },
+    ]);
+    const lines = csv.replace(BOM, '').split('\n');
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toBe('2026-07-23,신성통상,D0002,SMS,1632,1612,20,0');
+    expect(lines[2]).toBe('2026-07-23,신성통상,D0003,LMS,10,9,1,0');
+  });
+
+  it('고객사명·발송ID 누락은 공란, type_label 없으면 msg_type 폴백', () => {
+    const csv = buildAdminAgentStatsCsv([{ period: '2026-07', msg_type: 'K', sent: 5, success: 5, fail: 0, pending: 0 }]);
+    expect(csv.replace(BOM, '').split('\n')[1]).toBe('2026-07,,,K,5,5,0,0');
+  });
+
+  it('고객사명에 쉼표 있으면 이스케이프', () => {
+    const csv = buildAdminAgentStatsCsv([{ period: '2026-07', company_name: '가,나', agent_send_id: 'B0046', type_label: 'MMS', sent: 1, success: 1, fail: 0, pending: 0 }]);
+    expect(csv).toContain('"가,나"');
   });
 });

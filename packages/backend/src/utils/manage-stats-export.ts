@@ -55,3 +55,32 @@ export function buildManageStatsCsv(input: {
   }
   return BOM + CSV_HEADERS.join(',') + (lines.length ? '\n' + lines.join('\n') : '');
 }
+
+/** ★ 2026-07-24 슈퍼관리자 에이전트(엔진) 통계 CSV 행 — 고객사 축이 추가된 형태(기간×고객사×발송ID×유형). */
+export interface AdminAgentStatsCsvRow {
+  period: string;
+  company_name?: string;
+  agent_send_id?: string;
+  type_label?: string;
+  msg_type?: string;
+  sent: number | string;
+  success: number | string;
+  fail: number | string;
+  pending: number | string;
+}
+
+const ADMIN_AGENT_CSV_HEADERS = ['기간', '고객사', '발송ID', '유형', '전송', '성공', '실패', '대기'];
+
+/**
+ * 슈퍼관리자 에이전트 통계 rows(기간×고객사×발송ID×유형) → CSV 문자열(BOM 포함).
+ * 고객사 화면 CSV와 달리 '고객사' 컬럼이 있어 전 업체 정산 대조에 쓴다. 빈 배열이면 헤더만.
+ */
+export function buildAdminAgentStatsCsv(rows: AdminAgentStatsCsvRow[]): string {
+  const BOM = '﻿';
+  const lines = (rows || []).map((r) =>
+    [r.period, r.company_name || '', r.agent_send_id || '', r.type_label || r.msg_type || '', n(r.sent), n(r.success), n(r.fail), n(r.pending)]
+      .map(csvEscape)
+      .join(','),
+  );
+  return BOM + ADMIN_AGENT_CSV_HEADERS.join(',') + (lines.length ? '\n' + lines.join('\n') : '');
+}
