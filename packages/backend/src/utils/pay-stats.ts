@@ -77,6 +77,7 @@ export interface PayTypeAgg {
 }
 export interface PayPeriodTypeRow extends PayTypeAgg {
   period: string;
+  agent_send_id: string; // ★ 2026-07-23 발송ID(=CustId) 축 — 회사 표에서 ID별 구분(서수란 신고). 정산 오차 확인용.
 }
 export interface PayStatsResult {
   summary: { total_sent: string; total_success: string; total_fail: string; total_pending: string };
@@ -137,12 +138,14 @@ export async function queryPayAgentStats(options: PayStatsOptions): Promise<PayS
     if (fromDt) { conds.push('DestDt >= ?'); params.push(fromDt); }
     if (toDt) { conds.push('DestDt <= ?'); params.push(toDt); }
 
+    // ★ 2026-07-23 (서수란) 발송ID(CustId)별 × 유형 분해 — GROUP BY에 CustId 추가.
+    //   byType/summary는 여전히 전 CustId 합산(회귀 0). CustId=RSRM_SalesStts 기존 컬럼(WHERE에서 이미 사용).
     const [rows] = await pool.query(
-      `SELECT DestDt, MsgType,
+      `SELECT DestDt, CustId, MsgType,
               SUM(TotCnt) AS tot, SUM(OkCnt) AS ok, SUM(FailCnt) AS fl, SUM(ReadyCnt) AS rd
          FROM RSRM_SalesStts
         WHERE ${conds.join(' AND ')}
-        GROUP BY DestDt, MsgType`,
+        GROUP BY DestDt, CustId, MsgType`,
       params,
     );
 
@@ -154,6 +157,7 @@ export async function queryPayAgentStats(options: PayStatsOptions): Promise<PayS
       const dt = String(r.DestDt || '');
       if (!/^\d{8}$/.test(dt)) continue;
       const mt = String(r.MsgType || '').trim().toUpperCase();
+      const custId = String(r.CustId || '').trim();
       const period = periodOf(dt, options.view);
       const sent = Number(r.tot) || 0;
       const success = Number(r.ok) || 0;
@@ -161,8 +165,8 @@ export async function queryPayAgentStats(options: PayStatsOptions): Promise<PayS
       const pending = Number(r.rd) || 0;
       totalSent += sent; totalSuccess += success; totalFail += fail; totalPending += pending;
 
-      const pk = `${period}|${mt}`;
-      if (!byPeriodType.has(pk)) byPeriodType.set(pk, { period, msg_type: mt, type_label: agentTypeLabel(mt), sent: 0, success: 0, fail: 0, pending: 0 });
+      const pk = `${period}|${custId}|${mt}`;
+      if (!byPeriodType.has(pk)) byPeriodType.set(pk, { period, agent_send_id: custId, msg_type: mt, type_label: agentTypeLabel(mt), sent: 0, success: 0, fail: 0, pending: 0 });
       const p = byPeriodType.get(pk)!;
       p.sent += sent; p.success += success; p.fail += fail; p.pending += pending;
 
@@ -171,9 +175,11 @@ export async function queryPayAgentStats(options: PayStatsOptions): Promise<PayS
       t.sent += sent; t.success += success; t.fail += fail; t.pending += pending;
     }
 
-    const allRows = Array.from(byPeriodType.values()).sort((a, b) =>
-      a.period !== b.period ? b.period.localeCompare(a.period) : typeOrder(a.msg_type) - typeOrder(b.msg_type),
-    );
+    const allRows = Array.from(byPeriodType.values()).sort((a, b) => {
+      if (a.period !== b.period) return b.period.localeCompare(a.period);
+      if (a.agent_send_id !== b.agent_send_id) return a.agent_send_id.localeCompare(b.agent_send_id);
+      return typeOrder(a.msg_type) - typeOrder(b.msg_type);
+    });
     const byType = Array.from(byTypeMap.values()).sort((a, b) => typeOrder(a.msg_type) - typeOrder(b.msg_type));
 
     const offset = (options.page - 1) * options.limit;

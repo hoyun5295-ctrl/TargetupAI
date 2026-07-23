@@ -153,6 +153,8 @@ export const manageScheduledApi = {
 export const manageStatsApi = {
   send: (params: any) => api.get('/manage/stats/send', { params }),
   sendDetail: (params: any) => api.get('/manage/stats/send/detail', { params }),
+  // ★ 2026-07-23 (서수란) 발송 통계 엑셀(CSV) 다운로드 — 웹+에이전트 합산
+  exportCsv: (params: any) => api.get('/manage/stats/send/export', { params, responseType: 'blob' }),
 };
 
 export default api;

@@ -24,6 +24,8 @@ export default function StatsTab() {
   const [testDetailPage, setTestDetailPage] = useState(1);
   // ★ 2026-06-26 라프레리 신고: 캠페인별 발송 문안 전체 보기
   const [msgDetail, setMsgDetail] = useState<{ name: string; content: string } | null>(null);
+  // ★ 2026-07-23 (서수란) 발송 통계 엑셀(CSV) 다운로드
+  const [exporting, setExporting] = useState(false);
 
   const perPage = 10;
 
@@ -66,6 +68,25 @@ export default function StatsTab() {
     } catch {
       setToast({ msg: '상세 조회 실패', type: 'error' });
     } finally { setDetailLoading(false); }
+  };
+
+  // ★ 2026-07-23 (서수란) 엑셀(CSV) 다운로드 — 웹+에이전트 합산 한 파일
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await manageStatsApi.exportCsv({ view, startDate, endDate, filterUserId: filterUserId || undefined });
+      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `발송통계_${startDate}_${endDate}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      setToast({ msg: '엑셀 다운로드 실패', type: 'error' });
+    } finally { setExporting(false); }
   };
 
   const formatNum = (n: any) => Number(n || 0).toLocaleString();
@@ -167,6 +188,12 @@ export default function StatsTab() {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
             조회
           </button>
+          {/* ★ 2026-07-23 (서수란) 웹+에이전트 발송 수량을 한 파일로 — 정산 오차 확인용 */}
+          <button onClick={handleExport} disabled={exporting} title="웹+에이전트 발송 수량(발송ID·유형별)을 한 파일로 내려받습니다"
+            className="inline-flex items-center gap-1.5 px-4 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-semibold transition disabled:opacity-50">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
+            {exporting ? '내보내는 중…' : '엑셀 다운로드'}
+          </button>
         </div>
 
         {/* ★ 2026-07-23 요약 — 채널별 (웹/에이전트 = 총발송·성공·실패 / 테스트 = 테스트 요약) */}
@@ -240,7 +267,7 @@ export default function StatsTab() {
                 ))}
               </div>
             )}
-            <p className="px-6 pt-3 text-[11px] text-slate-400 italic">에이전트 발송은 게이트웨이 엔진 집계(일 단위)로, 유형(SMS/LMS/MMS/카카오알림톡)별로 나뉘며 수신자별 상세는 제공되지 않습니다.</p>
+            <p className="px-6 pt-3 text-[11px] text-slate-400 italic">에이전트 발송은 게이트웨이 엔진 집계(일 단위)로, 발송ID·유형(SMS/LMS/MMS/카카오알림톡)별로 나뉘며 수신자별 상세는 제공되지 않습니다. 웹+에이전트 합산 수량은 상단 ‘엑셀 다운로드’로 확인하세요.</p>
           </>
         )}
 
@@ -257,6 +284,7 @@ export default function StatsTab() {
               <thead>
                 <tr className="border-b border-slate-100">
                   <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">{view === 'monthly' ? '월' : '날짜'}</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">발송ID</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">유형</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">전송</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">성공</th>
@@ -266,10 +294,11 @@ export default function StatsTab() {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {agentRows.length === 0 ? (
-                  <tr><td colSpan={6} className="px-4 py-16 text-center text-sm text-slate-400">표시할 에이전트 발송 내역이 없습니다.</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-16 text-center text-sm text-slate-400">표시할 에이전트 발송 내역이 없습니다.</td></tr>
                 ) : agentRows.map((r: any, i: number) => (
                   <tr key={i} className="transition hover:bg-slate-50/70">
                     <td className="px-6 py-3.5 font-semibold text-slate-700">{r.period}</td>
+                    <td className="px-4 py-3.5 text-left font-mono text-xs text-slate-600">{r.agent_send_id || '-'}</td>
                     <td className="px-4 py-3.5 text-left"><span className="px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 text-xs font-medium">{r.type_label || r.msg_type}</span></td>
                     <td className="px-4 py-3.5 text-right text-slate-700 font-medium tabular-nums">{formatNum(r.sent)}</td>
                     <td className="px-4 py-3.5 text-right text-emerald-600 font-semibold tabular-nums">{formatNum(r.success)}</td>

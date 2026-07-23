@@ -8,6 +8,8 @@ import { buildDateRangeFilter, querySendStats, querySendStatsDetail } from '../u
 // ★ 2026-07-20: 에이전트 전용 회사 = 엔진(PAY) 통계 축 — campaigns엔 행이 없어 0으로 보이던 결함의 근본 배선
 //   2026-07-23: 웹/에이전트/테스트 탭 분리 — 교체가 아니라 별도 축(agentRows) 병행 반환으로 전환.
 import { queryPayAgentStats, isPayStatsConfigured, type PayStatsResult } from '../utils/pay-stats';
+// ★ 2026-07-23 (서수란) 발송 통계 엑셀(CSV) 다운로드 — 웹+에이전트 합산 CT
+import { buildManageStatsCsv } from '../utils/manage-stats-export';
 
 const router = Router();
 
@@ -260,6 +262,61 @@ router.get('/send/detail', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('발송 통계 상세 조회 실패:', error);
     res.status(500).json({ error: '발송 통계 상세 조회 실패' });
+  }
+});
+
+// GET /send/export — 발송 통계 엑셀(CSV) 다운로드 (웹+에이전트 한 파일 합산·서수란 2026-07-23)
+//   화면과 동일 축(웹=querySendStats·에이전트=queryPayAgentStats 발송ID×유형)을 페이징 없이 전량 CSV로.
+//   웹 축 무접촉(회귀 0). 에이전트 = usage_type agent/both + env 설정 시만.
+router.get('/send/export', async (req: Request, res: Response) => {
+  try {
+    const view = (req.query.view as string) === 'monthly' ? 'monthly' : 'daily';
+    const startDate = (req.query.startDate as string) || '';
+    const endDate = (req.query.endDate as string) || '';
+    const filterUserId = req.query.filterUserId as string;
+    const companyScope = getCompanyScope(req);
+
+    const statsResult = await querySendStats({
+      view: view as 'daily' | 'monthly',
+      startDate,
+      endDate,
+      companyId: companyScope || undefined,
+      filterUserId: filterUserId || undefined,
+      page: 1,
+      limit: 100000,
+    });
+    const webRows = (statsResult.rows || []).map((r: any) => ({
+      period: r.period || r.date || r.month || '',
+      sent: r.sent,
+      success: r.success,
+      fail: r.fail,
+    }));
+
+    let agentRows: PayStatsResult['rows'] = [];
+    if (companyScope) {
+      const compType = await pool.query('SELECT usage_type FROM companies WHERE id = $1', [companyScope]);
+      const usageType = compType.rows[0]?.usage_type || 'web';
+      if ((usageType === 'agent' || usageType === 'both') && isPayStatsConfigured()) {
+        const payResult = await queryPayAgentStats({
+          companyId: companyScope,
+          view: view as 'daily' | 'monthly',
+          startDate,
+          endDate,
+          page: 1,
+          limit: 100000,
+        });
+        if (payResult) agentRows = payResult.rows;
+      }
+    }
+
+    const csv = buildManageStatsCsv({ webRows, agentRows });
+    const filename = `발송통계_${startDate || ''}_${endDate || ''}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+    return res.send(csv);
+  } catch (error) {
+    console.error('발송 통계 엑셀 export 실패:', error);
+    return res.status(500).json({ error: '엑셀 다운로드에 실패했습니다.' });
   }
 });
 
