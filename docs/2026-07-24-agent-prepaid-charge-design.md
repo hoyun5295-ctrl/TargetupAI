@@ -1,7 +1,7 @@
 # 에이전트 선불 충전·잔액 축 한줄로 흡수 — 설계 및 인수인계
 
 > 작성 2026-07-24 (오전) · **다음 세션이 이 문서만 읽고 단독 재개 가능하도록 작성**
-> 상태(0724 저녁): **§5-1 완결(DDL+선불 지정·단가 UI — Codex 6R ship·배포 대기) / §5-2 배포 완료 / 왕복 실측 통과(62 충전 연동 실가동·음수 상계 실증) / §8 잔여 = 8-2(143 SHOW TABLES)·8-8(서수란)·인덱스 질문 / 다음 구현 = §5-3 충전 실행(슈퍼) → §5-4 충전 요청 → §5-5 대조 워커 → 컷오버(최종 백필+143 종료 통지)**
+> 상태(0724 저녁): **§5-1 완결(원장 DDL+선불 지정·단가 UI) / §5-2 배포 완료 / §5-3 충전 실행 코드 완결(Codex 16R ship·배포 대기 — 신규 테이블 DDL + GRANT 선행) / 왕복 실측 통과(62 충전 연동 실가동) / §8 잔여 = 8-2·8-8 / 다음 = §5-3 배포 → §5-4 충전 요청 → §5-5 대조 워커 → 컷오버(최종 백필+143 종료 통지)**
 > 이 문서가 이 트랙의 SoT다. 진행하면 여기에 갱신한다.
 
 ---
@@ -324,10 +324,37 @@ ORDER BY (c.company_name IS NULL), v.sid;
   - 6R 비차단 제안 2건(다중 점 입력을 병합 대신 거부 / 라우트 통합 테스트)은 후속 선택 과제.
 
 ### 5-3. 충전 실행 (슈퍼관리자)
-- 흐름: 회사 → 발송ID 선택 → 금액 입력 → `FillAmtHist` INSERT(`RsApplyFlag='N'`) → **1분 주기로 `Y` + `RsApplyDtTm` 확인 후에만 성공 표시**(6원칙 ②, F3이 근거).
+- 흐름: 회사 → 발송ID 선택 → 금액 입력 → `FillAmtHist` INSERT(`RsApplyFlag='N'`) → **폴링으로 `Y` + `RsApplyDtTm` 확인 후에만 성공 표시**(6원칙 ②, F3이 근거).
 - **음수 입력 지원 필수**(F6). 한줄로 `balance_transactions`는 `type`으로 방향을 정하는 반대 방식이니 **혼동 금지**.
 - **다건 일괄 입력 지원**(F7).
-- INSERT 대상 DB = **62 pay-ingest-db**(143 아님). 단 §6이 선행되어야 실제 반영됨.
+- INSERT 대상 DB = **62 pay-ingest-db**(143 아님). ★왕복 실측(§6-1)으로 62 연동 실가동 확인됨 — §6 선행 조건 해소.
+- **★2026-07-24 구현 완료 (Codex gpt-5.6-sol 16R ready to ship·배포 대기)**:
+  - CT `pay-stats.ts` — `parseAgentCharges`(1~50건·요청 내 중복 금지·금액 십진만·배치 절대합 ≤1억)·`insertAgentCharges`(전체 60초 데드라인 fencing·단일 트랜잭션)·`getAgentChargeStatus`·`listAgentCharges`·`findGatewayCharges`(대조)·`matchHealWindow`(자가복구 순수 판정).
+  - `routes/admin.ts` — `GET /agent-charges/targets` / `POST /agent-charges`(멱등키 UNIQUE·서버 전역 uncertain 게이트·일 한도 원자적 gross 2억·발송ID 실존+선불 강제·고액/불확실 알림) / `POST /agent-charges/:id/resolve`(3분 숙성+게이트웨이 대조 후에만 not_applied·사유 필수·resolved_by/at 영속) / `GET /agent-charges/status`(requestId 기준·자가복구) / `GET /agent-charges`(이력).
+  - `AgentChargePanel.tsx`(신규) — 충전 관리 탭 상단. 다건 입력·음수 상계·반영 폴링(applied=Y만 성공)·불확실 해소 UI·이력.
+  - **신규 테이블 `agent_charge_requests`**(요청 원장/감사 — 게이트웨이 잔액·반영은 여전히 FillAmtHist 단일 진실). DDL 필요.
+  - **선행: 62 backend MySQL 계정(paystats)에 `RSRM_FillAmtHist` INSERT 권한 GRANT 필요**(현재 SELECT 전용). 권한 전엔 등록 시 503 DB_GRANT_PENDING 안내, 화면·조회는 정상.
+  - Codex 16라운드(돈 기능 적대 검증) — 멱등성·이중충전·음수 악용·한도 우회·불확실 처리·트랜잭션 fencing까지 근본 정정. 마지막은 "3분 유예 + 게이트웨이 대조" 설계로 종결(destroy 즉시성 비의존). 잔여 이론적 엣지(DB 다분 fsync 멈춤 등 재해 수준)는 비차단.
+
+### 5-3 DDL (Harold 실행 — 서버 PG)
+```sql
+CREATE TABLE IF NOT EXISTS agent_charge_requests (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  idempotency_key varchar(80) NOT NULL UNIQUE,
+  requested_by varchar(80),
+  reason varchar(200) NOT NULL,
+  charges jsonb NOT NULL DEFAULT '[]'::jsonb,
+  total_amount numeric NOT NULL,
+  abs_total numeric NOT NULL,
+  status varchar(20) NOT NULL DEFAULT 'reserved',
+  resolved_by varchar(80),
+  resolved_at timestamptz,
+  resolve_note varchar(200),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_agent_charge_requests_created ON agent_charge_requests (created_at DESC);
+```
+status 값: reserved(예약) → registered(반영 대기) / uncertain(커밋 응답 유실) → resolve로 registered|not_applied.
 
 ### 5-4. 충전 요청 (고객사)
 - 에이전트 업체가 요청 등록 → 직원이 확인 후 5-3으로 실행. 기존 무통장입금 요청(`deposit_requests`) 흐름 재사용 검토.

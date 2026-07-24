@@ -9,6 +9,7 @@ import TablePagination from '../components/common/TablePagination'; // ★ 2026-
 import MessageDetailModal from '../components/MessageDetailModal'; // ★ D144 후속: 발송 상세 내역 모달의 메시지 셀 클릭 시 표시 + 복사
 import SearchableSelect from '../components/SearchableSelect'; // ★ D144 P11+P13: 검색 가능 select (사용자 추가 소속회사 + 발송통계 회사 필터)
 import LoginBlocksManagement from '../components/admin/LoginBlocksManagement'; // ★ D145 P0 (2026-05-07): 로그인 차단 관리 (B안: IP+loginId 쌍)
+import AgentChargePanel from '../components/AgentChargePanel'; // ★ 2026-07-24 §5-3 에이전트 충전 실행 (게이트웨이 지갑)
 import AgentDeployWizard from '../components/admin/AgentDeployWizard'; // 싱크에이전트 OS별 배포 위저드
 import { COMPANY_NAME_EN, COMPANY_EMAIL } from '../constants/company';
 import { creditTxLabel } from '../constants/credit'; // 크레딧 사용 이력 작업명 라벨
@@ -4402,6 +4403,9 @@ const handleApproveRequest = async (id: string) => {
                 </div>
               </div>
             )}
+
+            {/* ★ 2026-07-24 §5-3 에이전트 충전 실행 — 웹 잔액과 별개 지갑(게이트웨이 원장 직결) */}
+            <AgentChargePanel />
 
             {/* 전체 잔액 변동 이력 */}
             <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">

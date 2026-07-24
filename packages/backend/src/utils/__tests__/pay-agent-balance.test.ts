@@ -9,7 +9,7 @@
  *  - custIds 순서 보존 + 전 ID 반환 (조용한 누락 방지)
  */
 import { describe, it, expect } from 'vitest';
-import { pickLatestBalances, PayBalanceSourceRow, parseAgentLedgerFields, parseAgentLedgerPatch } from '../pay-stats';
+import { pickLatestBalances, PayBalanceSourceRow, parseAgentLedgerFields, parseAgentLedgerPatch, parseAgentCharges, toChargeRow, matchHealWindow } from '../pay-stats';
 
 const row = (o: Partial<PayBalanceSourceRow>): PayBalanceSourceRow => o;
 
@@ -178,5 +178,113 @@ describe('parseAgentLedgerPatch (§5-1 PATCH 부분 갱신 — Codex 5R-1 회귀
     expect('error' in parseAgentLedgerPatch({ costPerSms: -0.1 })).toBe(true);
     expect('error' in parseAgentLedgerPatch({ costPerMms: '1.2.3' })).toBe(true);
     expect('error' in parseAgentLedgerPatch({ costPerKakao: 1000001 })).toBe(true);
+  });
+});
+
+describe('parseAgentCharges (§5-3 충전 등록 입력 검증)', () => {
+  it('정상 다건 + 음수 상계 허용(F6 실무 패턴), 발송ID trim', () => {
+    expect(parseAgentCharges({ charges: [
+      { agentSendId: ' B0023 ', amount: 1000 },
+      { agentSendId: 'D0079', amount: -1000 },
+    ] })).toEqual({ charges: [
+      { agentSendId: 'B0023', amount: 1000 },
+      { agentSendId: 'D0079', amount: -1000 },
+    ] });
+  });
+
+  it('빈 배열·배열 아님·51건 초과 = error', () => {
+    expect('error' in parseAgentCharges({})).toBe(true);
+    expect('error' in parseAgentCharges({ charges: [] })).toBe(true);
+    expect('error' in parseAgentCharges({ charges: 'x' })).toBe(true);
+    const many = Array.from({ length: 51 }, () => ({ agentSendId: 'B0023', amount: 1 }));
+    expect('error' in parseAgentCharges({ charges: many })).toBe(true);
+  });
+
+  it('금액 0·비수치·±1억 초과·발송ID 누락 = error', () => {
+    expect('error' in parseAgentCharges({ charges: [{ agentSendId: 'B0023', amount: 0 }] })).toBe(true);
+    expect('error' in parseAgentCharges({ charges: [{ agentSendId: 'B0023', amount: 'abc' }] })).toBe(true);
+    expect('error' in parseAgentCharges({ charges: [{ agentSendId: 'B0023', amount: 100000001 }] })).toBe(true);
+    expect('error' in parseAgentCharges({ charges: [{ agentSendId: 'B0023', amount: -100000001 }] })).toBe(true);
+    expect('error' in parseAgentCharges({ charges: [{ agentSendId: '', amount: 1000 }] })).toBe(true);
+  });
+
+  it('금액 강제 변환 우회 차단 — boolean/배열/16진 문자열 거부, 십진 문자열만 수용 (Codex 8R)', () => {
+    expect('error' in parseAgentCharges({ charges: [{ agentSendId: 'B0023', amount: true }] })).toBe(true);
+    expect('error' in parseAgentCharges({ charges: [{ agentSendId: 'B0023', amount: [5] }] })).toBe(true);
+    expect('error' in parseAgentCharges({ charges: [{ agentSendId: 'B0023', amount: '0x10' }] })).toBe(true);
+    expect('error' in parseAgentCharges({ charges: [{ agentSendId: 'B0023', amount: '1e5' }] })).toBe(true);
+    expect(parseAgentCharges({ charges: [{ agentSendId: 'B0023', amount: ' -1000.5 ' }] })).toEqual({
+      charges: [{ agentSendId: 'B0023', amount: -1000.5 }],
+    });
+  });
+
+  it('요청 내 중복 발송ID = 대소문자 무시 거부, 배치 절대합 1억 초과 = error (Codex 7R·8R)', () => {
+    expect('error' in parseAgentCharges({ charges: [
+      { agentSendId: 'B0023', amount: 1000 },
+      { agentSendId: 'b0023', amount: 2000 },
+    ] })).toBe(true);
+    expect('error' in parseAgentCharges({ charges: [
+      { agentSendId: 'B0023', amount: 60_000_000 },
+      { agentSendId: 'D0079', amount: -60_000_000 },
+    ] })).toBe(true); // 절대합 1.2억 — 부호 상쇄로 우회 불가
+  });
+});
+
+describe('toChargeRow (§5-3 게이트웨이 행 정규화 — mysql2 Date 파싱 실버그 회귀 방지, Codex 12R)', () => {
+  it('FillDtTm이 Date 객체여도 filledAtMs가 정확한 epoch, filledAt은 YYYY-MM-DD HH:mm:ss', () => {
+    const d = new Date(2026, 6, 24, 14, 16, 51); // 2026-07-24 14:16:51 로컬
+    const row = toChargeRow({ SeqNo: 7044, StoreId: 'B0023', FillAmt: 1000, FillDtTm: d, RsApplyFlag: 'Y', RsApplyDtTm: d });
+    expect(row.filledAtMs).toBe(d.getTime());
+    expect(row.filledAt).toBe('2026-07-24 14:16:51');
+    expect(row.applied).toBe(true);
+    expect(row.appliedAt).toBe('2026-07-24 14:16:51');
+  });
+
+  it('FillDtTm이 문자열이어도 filledAtMs 산출, 미반영(N)은 applied=false·appliedAt=null', () => {
+    const row = toChargeRow({ SeqNo: 7045, StoreId: 'B0023', FillAmt: -1000, FillDtTm: '2026-07-24 14:22:50', RsApplyFlag: 'N', RsApplyDtTm: null });
+    expect(row.filledAtMs).toBe(new Date('2026-07-24T14:22:50').getTime());
+    expect(row.amount).toBe(-1000);
+    expect(row.applied).toBe(false);
+    expect(row.appliedAt).toBeNull();
+  });
+});
+
+describe('matchHealWindow (§5-3 자가복구 수용 판정 — 원장 오염 차단, Codex 10R·11R·12R)', () => {
+  const center = new Date(2026, 6, 24, 14, 16, 51).getTime();
+  const mk = (seqNo: number, sid: string, amt: number, offsetMin: number) =>
+    toChargeRow({ SeqNo: seqNo, StoreId: sid, FillAmt: amt, FillDtTm: new Date(center + offsetMin * 60_000), RsApplyFlag: 'Y', RsApplyDtTm: new Date(center) });
+
+  it('시간창 내 + (발송ID, 금액) 다중집합 정확 일치 = 수용', () => {
+    const out = matchHealWindow(
+      [{ agentSendId: 'B0023', amount: 1000 }, { agentSendId: 'D0079', amount: -500 }],
+      [mk(1, 'B0023', 1000, 1), mk(2, 'D0079', -500, 2)],
+      center, 2, 10,
+    );
+    expect(out).not.toBeNull();
+    expect(out!.map((r) => r.seqNo).sort()).toEqual([1, 2]);
+  });
+
+  it('시간창 밖 후보(과거 동일 발송ID·금액 SeqNo)는 배제 → 개수 불일치로 거부(null)', () => {
+    const out = matchHealWindow(
+      [{ agentSendId: 'B0023', amount: 1000 }],
+      [mk(9, 'B0023', 1000, -30)], // 30분 전 = 창 밖
+      center, 2, 10,
+    );
+    expect(out).toBeNull();
+  });
+
+  it('개수 같아도 금액이 다르면 거부 (A:+40/B:+60 vs 요청 A:+50/B:+50)', () => {
+    const out = matchHealWindow(
+      [{ agentSendId: 'A', amount: 50 }, { agentSendId: 'B', amount: 50 }],
+      [mk(1, 'A', 40, 1), mk(2, 'B', 60, 1)],
+      center, 2, 10,
+    );
+    expect(out).toBeNull();
+  });
+
+  it('filledAtMs가 null인 행(파싱 불가)은 창 밖 취급 → 거부', () => {
+    const bad = toChargeRow({ SeqNo: 3, StoreId: 'B0023', FillAmt: 1000, FillDtTm: 'not-a-date', RsApplyFlag: 'Y', RsApplyDtTm: null });
+    expect(bad.filledAtMs).toBeNull();
+    expect(matchHealWindow([{ agentSendId: 'B0023', amount: 1000 }], [bad], center, 2, 10)).toBeNull();
   });
 });

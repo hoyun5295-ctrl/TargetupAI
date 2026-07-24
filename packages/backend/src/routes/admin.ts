@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
-import { mysqlQuery, query } from '../config/database';
+import { mysqlQuery, query, pool } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsSelectPagedAll, smsAggAll, getTestSmsTables, findMissingSmsTables, kakaoCountWhere, kakaoSelectWhere, kakaoBatchAggByGroup } from '../utils/sms-queue';
 import { streamCampaignSmsCsv } from '../utils/campaign-sms-export';
@@ -23,7 +23,12 @@ import { cleanupScheduledCampaigns, cancelCampaign } from '../utils/campaign-lif
 import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsChannelSplitByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, STAT_DATE_EXPR, STAT_STARTED_GUARD } from '../utils/stats-aggregation';
 // ★ 2026-07-23: 슈퍼관리자 발송통계 웹/에이전트 구분 — 에이전트(엔진) 통계 CT 병행 반환
-import { queryPayAgentStatsAllCompanies, isPayStatsConfigured } from '../utils/pay-stats';
+import {
+  queryPayAgentStatsAllCompanies, isPayStatsConfigured,
+  parseAgentCharges, insertAgentCharges, getAgentChargeStatus, listAgentCharges, findGatewayCharges, matchHealWindow,
+} from '../utils/pay-stats';
+import { handleDbMigrationError } from '../utils/db-migration-error';
+import { sendSystemAlert } from '../utils/system-alert';
 // ★ 2026-07-24 슈퍼 에이전트 통계 엑셀(CSV) — 기간×고객사×발송ID×유형 (정산 대조)
 import { buildAdminAgentStatsCsv } from '../utils/manage-stats-export';
 import { normalizePhone } from '../utils/normalize-phone';
@@ -2824,6 +2829,418 @@ router.get('/balance-overview', authenticate, requireSuperAdmin, async (req: Req
   } catch (error) {
     console.error('잔액 현황 조회 실패:', error);
     res.status(500).json({ error: '잔액 현황 조회 실패' });
+  }
+});
+
+// ===== ★ 2026-07-24 §5-3 에이전트 충전 실행 (62 pay-ingest-db RSRM_FillAmtHist — 웹 balance와 별개 지갑) =====
+
+// 충전 대상 목록 — usage_type agent/both 회사의 발송ID 전량 (하드코딩 없음, 등록 즉시 자동 편입)
+router.get('/agent-charges/targets', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `SELECT c.id AS company_id, c.company_name, cai.agent_send_id, cai.billing_type
+         FROM company_agent_ids cai
+         JOIN companies c ON c.id = cai.company_id
+        WHERE c.usage_type IN ('agent','both')
+        ORDER BY c.company_name ASC, cai.agent_send_id ASC`
+    );
+    res.json({ targets: result.rows });
+  } catch (error: any) {
+    console.error('에이전트 충전 대상 조회 실패:', error);
+    if (handleDbMigrationError(error, res, 'company_agent_ids')) return;
+    res.status(500).json({ error: '충전 대상 조회 실패' });
+  }
+});
+
+// 충전 등록 (다건 일괄·음수 상계 지원) — ★Codex 7R 정정 반영판
+//   멱등: idempotencyKey 필수 + PG agent_charge_requests UNIQUE 예약(재전송/더블클릭/응답 유실 재시도 = 재충전 0)
+//   감사: 요청 원장에 requested_by·reason·총액 기록 (게이트웨이 잔액·반영 상태는 여전히 FillAmtHist 단일 진실 — 복제 아님)
+//   선불 강제: billing_type='prepaid' + usage_type agent/both 발송ID만 충전 허용
+//   성공 응답은 "등록(반영 대기)"일 뿐, 반영 완료 표시는 status의 applied=true만 근거
+router.post('/agent-charges', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const idempotencyKey = String((req.body as any)?.idempotencyKey || '').trim();
+  try {
+    if (!isPayStatsConfigured()) {
+      return res.status(503).json({ error: '게이트웨이 통계 DB(env paystats) 미설정 — 충전 실행 불가' });
+    }
+    if (idempotencyKey.length < 8 || idempotencyKey.length > 80) {
+      return res.status(400).json({ error: 'idempotencyKey(8~80자)가 필요합니다.' });
+    }
+    const reason = String((req.body as any)?.reason || '').trim();
+    if (!reason || reason.length > 200) {
+      return res.status(400).json({ error: '충전 사유(1~200자)가 필요합니다.' });
+    }
+    const parsed = parseAgentCharges(req.body);
+    if ('error' in parsed) {
+      return res.status(400).json({ error: parsed.error });
+    }
+
+    // 발송ID 실존 + 선불(prepaid) + usage_type 검증 — 매핑에 없거나 후불인 ID 차단 (Codex 7R-3)
+    const ids = parsed.charges.map((c) => c.agentSendId);
+    const known = await query(
+      `SELECT cai.agent_send_id, cai.billing_type, c.usage_type
+         FROM company_agent_ids cai JOIN companies c ON c.id = cai.company_id
+        WHERE cai.agent_send_id = ANY($1)`,
+      [ids]
+    );
+    const infoMap = new Map<string, any>(known.rows.map((r: any) => [String(r.agent_send_id), r]));
+    const unknown = ids.filter((v) => !infoMap.has(v));
+    if (unknown.length > 0) {
+      return res.status(400).json({ error: `매핑에 없는 발송ID: ${unknown.join(', ')} — 고객사 수정 화면에서 먼저 등록하세요.` });
+    }
+    const notEligible = ids.filter((v) => {
+      const r = infoMap.get(v);
+      return r.billing_type !== 'prepaid' || !['agent', 'both'].includes(String(r.usage_type));
+    });
+    if (notEligible.length > 0) {
+      return res.status(400).json({ error: `선불 지정되지 않은 발송ID: ${notEligible.join(', ')} — 고객사 수정 화면에서 선불 지정 먼저 하세요.` });
+    }
+
+    const totalAmount = parsed.charges.reduce((s, c) => s + c.amount, 0);
+    const absBatch = parsed.charges.reduce((s, c) => s + Math.abs(c.amount), 0);
+    const requestedBy = String((req as any).user?.userId || '');
+
+    // 멱등 선조회 → 불확실 게이트 → 일 한도 → 예약 INSERT를 단일 트랜잭션(어드바이저리 락)으로(Codex 9R·10R).
+    // - 멱등키 선조회가 한도보다 먼저: 이미 접수된 키의 안전 재전송이 일 한도 성장으로 오거부되지 않게(10R).
+    // - 불확실 게이트 = 서버 전역: 미해소 uncertain 존재 시 어떤 경로(새 탭/새로고침/직접 API)로도 신규 충전 차단(10R-1a).
+    // - 한도 = gross(abs_total 합산 — 배치 내 ± 상쇄로 우회 불가), 기준일 = Asia/Seoul. 근거: PAY 실측(§2-6).
+    const client = await pool.connect();
+    let requestId: string | null = null;
+    let duplicatedKey = false;
+    let uncertainPending: any[] | null = null;
+    let capExceeded: { used: number } | null = null;
+    try {
+      await client.query('BEGIN');
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext('agent_charge_requests_daily'))`);
+      const dupChk = await client.query(`SELECT id FROM agent_charge_requests WHERE idempotency_key = $1`, [idempotencyKey]);
+      if (dupChk.rows.length > 0) {
+        duplicatedKey = true;
+        await client.query('COMMIT');
+      } else {
+        // 게이트 대상 = 미해소 uncertain + "seqNo 없는 reserved 전부"(우회 창 0 — Codex 12R-1).
+        //   정상 reserved는 같은 요청 처리 안에서 수백 ms 내 registered로 전이되므로, 여기 걸리는 것은
+        //   ①마킹 실패 잔존 ②거의 동시에 온 다른 충전뿐. 단독 운영에서 동시 충전 과잉차단은 안전 방향.
+        const unc = await client.query(
+          `SELECT id, reason, abs_total, created_at, charges FROM agent_charge_requests
+            WHERE status = 'uncertain'
+               OR (status = 'reserved' AND (charges->0->>'seqNo') IS NULL)
+            ORDER BY created_at ASC LIMIT 10`
+        );
+        if (unc.rows.length > 0) {
+          uncertainPending = unc.rows;
+          await client.query('ROLLBACK');
+        } else {
+          const daily = await client.query(
+            `SELECT COALESCE(SUM(abs_total), 0) AS s
+               FROM agent_charge_requests
+              WHERE created_at >= (date_trunc('day', now() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul')
+                AND status IN ('reserved', 'registered', 'uncertain')`
+          );
+          const dailyUsed = Number(daily.rows[0]?.s || 0);
+          if (dailyUsed + absBatch > 200_000_000) {
+            capExceeded = { used: dailyUsed };
+            await client.query('ROLLBACK');
+          } else {
+            const reserve = await client.query(
+              `INSERT INTO agent_charge_requests (idempotency_key, requested_by, reason, charges, total_amount, abs_total, status)
+               VALUES ($1, $2, $3, $4::jsonb, $5, $6, 'reserved')
+               ON CONFLICT (idempotency_key) DO NOTHING
+               RETURNING id`,
+              [idempotencyKey, requestedBy, reason, JSON.stringify(parsed.charges), totalAmount, absBatch]
+            );
+            if (reserve.rows.length === 0) duplicatedKey = true;
+            else requestId = String(reserve.rows[0].id);
+            await client.query('COMMIT');
+          }
+        }
+      }
+      client.release();
+    } catch (txErr) {
+      // 롤백까지 실패한 클라이언트는 풀 복귀 금지 — release(true) = destroy (Codex 10R)
+      try {
+        await client.query('ROLLBACK');
+        client.release();
+      } catch {
+        client.release(true as unknown as Error);
+      }
+      throw txErr;
+    }
+
+    if (uncertainPending) {
+      return res.status(409).json({
+        code: 'UNCERTAIN_PENDING',
+        error: '반영 불확실 충전이 미해소 상태입니다 — 이력 확인 후 해소해야 신규 충전이 가능합니다.',
+        uncertainRequests: uncertainPending,
+      });
+    }
+    if (capExceeded) {
+      return res.status(400).json({ error: `일 누적 충전 한도(절대합 200,000,000)를 초과합니다. (오늘 누적 ${capExceeded.used.toLocaleString()} + 이번 ${absBatch.toLocaleString()})` });
+    }
+    if (duplicatedKey || !requestId) {
+      // 같은 키 재전송 — 기존 요청 그대로 반환(재충전 0)
+      const existing = await query(
+        `SELECT id, charges, status FROM agent_charge_requests WHERE idempotency_key = $1`,
+        [idempotencyKey]
+      );
+      const ex = existing.rows[0];
+      return res.status(200).json({
+        duplicated: true,
+        requestId: ex?.id || null,
+        registered: Array.isArray(ex?.charges) ? ex.charges : [],
+        message: '이미 접수된 요청입니다(중복 충전 차단).',
+      });
+    }
+
+    let registered;
+    try {
+      registered = await insertAgentCharges(parsed.charges);
+    } catch (mysqlErr: any) {
+      if (mysqlErr?.chargeCommitUncertain) {
+        // 커밋 응답 유실 — 실제 반영됐을 수 있다. 예약을 지우지 않고 uncertain 마킹(같은 키 재시도 = 중복 차단 유지, Codex 8R-1a).
+        // 이후 신규 충전은 서버 전역 게이트가 차단하며, 해소는 /agent-charges/:id/resolve 로만 가능.
+        // 마킹은 2회 시도 — 그래도 실패하면 reserved 잔존분을 게이트의 stale-reserved 조건이 잡는다(Codex 11R-1)
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            await query(`UPDATE agent_charge_requests SET status = 'uncertain' WHERE id = $1`, [requestId]);
+            break;
+          } catch (markErr) {
+            console.error(`[agent-charges] uncertain 마킹 실패(${attempt}/2 — 예약은 유지·게이트가 stale-reserved로 차단):`, markErr);
+          }
+        }
+        // 최고 위험 경로(고액 실반영 가능 + ACK 유실)일수록 즉시 알림 — 금액 무관 발송(Codex 10R)
+        sendSystemAlert({
+          dedupKey: `agent-charge-uncertain:${requestId}`,
+          message: `에이전트 충전 반영 불확실(커밋 응답 유실) — 절대합 ${absBatch.toLocaleString()}원 ${parsed.charges.length}건 (by ${requestedBy || 'unknown'}) 사유: ${reason}. 이력 확인 후 해소 필요`,
+          cooldownMs: 1000,
+        }).catch(() => { /* 미설정/실패 시 조용히 생략 */ });
+        return res.status(502).json({
+          uncertain: true,
+          requestId,
+          error: '커밋 응답 유실 — 반영 여부 불확실. 같은 요청을 새로 넣지 말고, 아래 이력에서 해당 발송ID의 최신 행을 먼저 확인하세요.',
+        });
+      }
+      // 커밋 전 실패 = MySQL 롤백 확정(충전 0건) — 예약 해제해 같은 키 재시도 허용
+      await query(`DELETE FROM agent_charge_requests WHERE id = $1 AND status = 'reserved'`, [requestId]);
+      throw mysqlErr;
+    }
+
+    // 충전은 이미 확정 — 확정 기록(PG) 실패로 500을 내면 프론트가 새 키로 재시도해 이중 충전된다(Codex 8R-1b). 로그만 남기고 201 유지.
+    // ★status='reserved' 가드(Codex 12R-2): 이 요청이 그 사이 uncertain/not_applied로 전이됐다면 registered로 되돌리지 않는다
+    //   (해소된 건을 늦은 확정이 뒤집어 이중 충전 회계를 만드는 경로 차단).
+    try {
+      const book = await query(
+        `UPDATE agent_charge_requests SET charges = $2::jsonb, status = 'registered' WHERE id = $1 AND status = 'reserved'`,
+        [requestId, JSON.stringify(registered.map((r) => ({ seqNo: r.seqNo, agentSendId: r.agentSendId, amount: r.amount, applied: false })))]
+      );
+      if ((book.rowCount ?? 0) === 0) {
+        console.warn(`[agent-charges] 확정 기록 skip — 요청 ${requestId}이 이미 reserved가 아님(uncertain/not_applied 전이됨). 충전은 성공했으므로 이력에서 확인 필요`);
+      }
+    } catch (bookErr) {
+      console.error('[agent-charges] 확정 기록 실패(충전은 성공·멱등 예약 유지 — 이력에서 확인 가능):', bookErr);
+    }
+
+    // 고액 배치(절대합 5천만+) 즉시 알림 — 단독 운영 통제 보강(Codex 9R). 알림 실패는 충전 결과 무영향
+    if (absBatch >= 50_000_000) {
+      sendSystemAlert({
+        dedupKey: `agent-charge-high:${requestId}`,
+        message: `에이전트 고액 충전 등록 — 절대합 ${absBatch.toLocaleString()}원 ${registered.length}건 (by ${requestedBy || 'unknown'}) 사유: ${reason}`,
+        cooldownMs: 1000,
+      }).catch(() => { /* 미설정/실패 시 조용히 생략 */ });
+    }
+
+    console.log(`[agent-charges] 등록 ${registered.length}건 (req ${requestId} · SeqNo ${registered.map((r) => r.seqNo).join(',')}) by ${requestedBy || 'unknown'} — ${reason}`);
+    return res.status(201).json({
+      requestId,
+      registered: registered.map((r) => ({ seqNo: r.seqNo, agentSendId: r.agentSendId, amount: r.amount, applied: false })),
+    });
+  } catch (error: any) {
+    console.error('에이전트 충전 등록 실패:', error);
+    const msg = String(error?.message || '');
+    if (msg === 'PAY_STATS_DB_NOT_CONFIGURED') {
+      return res.status(503).json({ error: '게이트웨이 통계 DB(env paystats) 미설정 — 충전 실행 불가' });
+    }
+    if (msg.toLowerCase().includes('command denied')) {
+      return res.status(503).json({
+        error: '충전용 쓰기 권한 없음 — 운영자에게 pay-ingest-db 계정 GRANT INSERT(sales.RSRM_FillAmtHist) 실행 요청',
+        code: 'DB_GRANT_PENDING',
+      });
+    }
+    if (handleDbMigrationError(error, res, 'agent_charge_requests')) return;
+    return res.status(500).json({ error: '충전 등록 실패' });
+  }
+});
+
+// 반영 불확실 해소 — 슈퍼관리자가 이력 확인 후 확정 (★서버 전역 게이트의 유일한 해제 경로, Codex 10R-1a)
+//   confirmed = 실반영 확인됨 → registered(일 한도 계속 집계) / not_applied = 미반영 확인됨 → not_applied(집계 제외)
+router.post('/agent-charges/:requestId/resolve', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { requestId } = req.params;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) {
+      return res.status(400).json({ error: 'requestId(uuid)가 필요합니다.' });
+    }
+    const outcome = String((req.body as any)?.outcome || '');
+    if (!['confirmed', 'not_applied'].includes(outcome)) {
+      return res.status(400).json({ error: "outcome은 'confirmed' 또는 'not_applied'만 허용됩니다." });
+    }
+    // 해소 사유(메모) 필수 — 감사 기록(Codex 11R·12R). 프론트도 항상 전송.
+    const note = String((req.body as any)?.note || '').trim().slice(0, 200);
+    if (!note) {
+      return res.status(400).json({ error: '해소 사유(메모)를 입력하세요.' });
+    }
+
+    // 대상 행 로드 — 미확정(uncertain 또는 seqNo 없는 reserved) 중 "요청 후 3분 경과"만(Codex 15R).
+    //   ★uncertain에도 reserved와 동일하게 3분 숙성 적용: 데드라인(60s)에 destroy해도 서버측 커밋이 graceful
+    //   half-close로 나중에 완료될 수 있으므로, 3분 지나 트랜잭션이 확실히 확정된 뒤에만 게이트웨이 대조·해소한다.
+    //   즉 정확성은 destroy의 즉시성이 아니라 "3분 유예 + findGatewayCharges 대조"가 보장한다.
+    const rowRes = await query(
+      `SELECT id, charges, created_at, status FROM agent_charge_requests
+        WHERE id = $1
+          AND created_at < now() - interval '3 minutes'
+          AND (status = 'uncertain'
+               OR (status = 'reserved' AND (charges->0->>'seqNo') IS NULL))`,
+      [requestId]
+    );
+    if (rowRes.rows.length === 0) {
+      return res.status(404).json({ error: '해소 대상(3분 경과 미확정) 상태의 요청이 아닙니다. 잠시 후 다시 시도하세요.' });
+    }
+    const rowCharges: any[] = Array.isArray(rowRes.rows[0].charges) ? rowRes.rows[0].charges : [];
+
+    // ★ not_applied는 게이트웨이 실행 대조 후에만(Codex 11R-2): 요청 시각 ±10분 창에 (발송ID, 금액) 대응 행이
+    //   실존하면 거부 — 실반영 충전을 미반영으로 지워 일 한도 회계를 왜곡하는 경로 차단. 대조 불가 = fail-closed 보류.
+    if (outcome === 'not_applied') {
+      let matches;
+      try {
+        matches = await findGatewayCharges(
+          rowCharges.map((c) => ({ agentSendId: String(c?.agentSendId || '').trim(), amount: Number(c?.amount) })),
+          new Date(rowRes.rows[0].created_at),
+          10
+        );
+      } catch (probeErr) {
+        console.error('[agent-charges] 게이트웨이 대조 불가(해소 보류):', probeErr);
+        return res.status(503).json({ error: '게이트웨이 대조 불가 — 미반영 확정을 보류합니다. 잠시 후 다시 시도하세요.' });
+      }
+      if (matches.length > 0) {
+        return res.status(400).json({
+          error: `게이트웨이에 대응 충전 행이 실존합니다(SeqNo ${matches.map((m) => m.seqNo).join(',')}) — 미반영 처리 불가. "실반영 확인됨"으로 해소하세요.`,
+        });
+      }
+    }
+
+    const next = outcome === 'confirmed' ? 'registered' : 'not_applied';
+    // 효과 검증: 해소 대상 상태였던 행만 전이 — RETURNING으로 실제 갱신 확정. 해소 주체·시각·메모 영속(Codex 11R)
+    const r = await query(
+      `UPDATE agent_charge_requests
+          SET status = $2, resolved_by = $3, resolved_at = now(), resolve_note = $4
+        WHERE id = $1
+          AND created_at < now() - interval '3 minutes'
+          AND (status = 'uncertain'
+               OR (status = 'reserved' AND (charges->0->>'seqNo') IS NULL))
+        RETURNING id`,
+      [requestId, next, String((req as any).user?.userId || ''), note]
+    );
+    if (r.rows.length === 0) {
+      return res.status(409).json({ error: '이미 다른 세션에서 해소된 요청입니다.' });
+    }
+    console.log(`[agent-charges] 불확실 해소 ${requestId} → ${next} by ${(req as any).user?.userId || 'unknown'}${note ? ` — ${note}` : ''}`);
+    return res.json({ resolved: true, status: next });
+  } catch (error: any) {
+    console.error('에이전트 충전 불확실 해소 실패:', error);
+    if (handleDbMigrationError(error, res, 'agent_charge_requests')) return;
+    return res.status(500).json({ error: '해소 처리 실패' });
+  }
+});
+
+// 반영 상태 폴링 — requestId 기준(우리가 발행한 요청의 SeqNo만 조회 — 임의 SeqNo 탐색 차단, Codex 7R).
+// applied=true(RsApplyFlag='Y')만 성공 신호 (6원칙 ②)
+router.get('/agent-charges/status', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const requestId = String(req.query.requestId || '').trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) {
+      return res.status(400).json({ error: 'requestId(uuid)가 필요합니다.' });
+    }
+    const reqRow = await query(`SELECT charges, status, created_at FROM agent_charge_requests WHERE id = $1`, [requestId]);
+    if (reqRow.rows.length === 0) {
+      return res.status(404).json({ error: '요청을 찾을 수 없습니다.' });
+    }
+    const charges: any[] = Array.isArray(reqRow.rows[0].charges) ? reqRow.rows[0].charges : [];
+    let seqNos = charges.map((c) => Number(c?.seqNo)).filter((n) => Number.isInteger(n) && n > 0);
+
+    // 확정 기록 유실 복구(Codex 9R-1b): 충전은 성공했는데 PG 확정 UPDATE만 실패한 요청(status='reserved'에 seqNo 없음)은
+    // 클라이언트가 201 응답으로 보유한 seqNos를 수용해 조회하고, MySQL 실값으로 PG를 자가 복구한다.
+    // ★수용 조건(Codex 10R-1b): MySQL 실행의 (발송ID, 금액) 다중집합이 예약 시 저장한 charges와 정확히 일치할 때만 —
+    //   다른 충전의 SeqNo를 주입해 요청↔충전 원장 연결을 오염시키는 경로 차단. 복구 UPDATE는 rowCount 확인(레이스 패배 시 이긴 값 재조회).
+    if (seqNos.length === 0 && String(reqRow.rows[0].status) === 'reserved') {
+      const fallback = String(req.query.seqNos || '')
+        .split(',')
+        .map((s) => Number(s.trim()))
+        .filter((n) => Number.isInteger(n) && n > 0)
+        .slice(0, 50);
+      if (fallback.length > 0) {
+        const mysqlRows = await getAgentChargeStatus(fallback);
+        // 시간창 상관 + 다중집합 일치(Codex 11R-1b·12R): 요청 created_at −2분 ~ +10분 안 입력분만 후보.
+        // filledAtMs = mysql2 Date 객체 epoch 정규화(String() 파싱 실버그 제거 — Codex 12R-3).
+        const centerMs = new Date(reqRow.rows[0].created_at).getTime();
+        const inWindow = matchHealWindow(
+          charges.map((c) => ({ agentSendId: String(c?.agentSendId || '').trim(), amount: Number(c?.amount) })),
+          mysqlRows, centerMs, 2, 10,
+        );
+        if (inWindow) {
+          try {
+            const heal = await query(
+              `UPDATE agent_charge_requests SET charges = $2::jsonb, status = 'registered' WHERE id = $1 AND status = 'reserved'`,
+              [requestId, JSON.stringify(inWindow.map((r) => ({ seqNo: r.seqNo, agentSendId: r.agentSendId, amount: r.amount, applied: r.applied })))]
+            );
+            if ((heal.rowCount ?? 0) > 0) {
+              console.log(`[agent-charges] 확정 기록 자가 복구 (req ${requestId} · SeqNo ${inWindow.map((r) => r.seqNo).join(',')})`);
+              return res.json({ rows: inWindow });
+            }
+          } catch (healErr) {
+            // 복구 쓰기 실패 — 검증 통과한 행 조회 결과는 그대로 응답(다음 폴링이 재시도)
+            console.error('[agent-charges] 자가 복구 실패(조회는 계속):', healErr);
+            return res.json({ rows: inWindow });
+          }
+          // 레이스 패배 — 이긴 쪽이 저장한 seqNos 재조회. 재조회 실패 = fail-closed 빈 rows(Codex 11R-1b)
+          try {
+            const re = await query(`SELECT charges FROM agent_charge_requests WHERE id = $1`, [requestId]);
+            const reCharges: any[] = Array.isArray(re.rows[0]?.charges) ? re.rows[0].charges : [];
+            seqNos = reCharges.map((c: any) => Number(c?.seqNo)).filter((n: number) => Number.isInteger(n) && n > 0);
+          } catch {
+            return res.json({ rows: [] });
+          }
+        }
+        // 불일치 = 수용 거부(빈 rows 경로) — 임의 SeqNo 주입 차단
+      }
+    }
+
+    if (seqNos.length === 0) {
+      return res.json({ rows: [] });
+    }
+    const rows = await getAgentChargeStatus(seqNos);
+    return res.json({ rows });
+  } catch (error: any) {
+    console.error('에이전트 충전 상태 조회 실패:', error);
+    if (handleDbMigrationError(error, res, 'agent_charge_requests')) return;
+    return res.status(500).json({ error: '상태 조회 실패' });
+  }
+});
+
+// 최근 충전 이력 (회사명은 PG 매핑으로 라벨링 — 매핑 없는 ID는 고아 표시)
+router.get('/agent-charges', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const rows = await listAgentCharges(Number(req.query.limit) || 30);
+    const ids = Array.from(new Set(rows.map((r) => r.agentSendId).filter(Boolean)));
+    const nameMap = new Map<string, string>();
+    if (ids.length > 0) {
+      const named = await query(
+        `SELECT cai.agent_send_id, c.company_name FROM company_agent_ids cai JOIN companies c ON c.id = cai.company_id WHERE cai.agent_send_id = ANY($1)`,
+        [ids]
+      );
+      for (const r of named.rows as any[]) nameMap.set(String(r.agent_send_id), String(r.company_name || ''));
+    }
+    return res.json({ rows: rows.map((r) => ({ ...r, companyName: nameMap.get(r.agentSendId) || null })) });
+  } catch (error) {
+    console.error('에이전트 충전 이력 조회 실패:', error);
+    return res.status(500).json({ error: '이력 조회 실패' });
   }
 });
 

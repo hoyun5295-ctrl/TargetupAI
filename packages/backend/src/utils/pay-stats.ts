@@ -500,6 +500,240 @@ export function parseAgentLedgerPatch(body: any): AgentLedgerPatch | { error: st
  * MySQL 연결/조회 실패 = 빈 배열(호출부 미노출 폴백).
  * 단 PG 에러(billing_type 컬럼 미마이그레이션 등)는 그대로 던진다 — 라우트 catch의 503 분기용.
  */
+// ============================================================
+// ★ 2026-07-24 §5-3 — 에이전트 충전 실행 (62 pay-ingest-db RSRM_FillAmtHist)
+//   계약(0724 강문희 회신 + 왕복 실측 B0023 ±1,000 통과):
+//   - INSERT = (StoreId=발송ID, FillAmt, FillDtTm=NOW(), PayMethod='2', RsApplyFlag='N')
+//   - 엔진이 N 행을 읽어 잔액 증액 후 Y + RsApplyDtTm update → **Y 확인 후에만 성공 표시**(6원칙 ②)
+//   - SeqNo는 auto_increment 재채번(워터마크 아님). 음수 = 상계(실무 패턴). PayFkey = 미사용(비움)
+//   - PG에 상태를 복제 저장하지 않는다 — FillAmtHist가 단일 원장(이중 진실 금지)
+// ============================================================
+
+export interface AgentChargeInput { agentSendId: string; amount: number }
+
+/**
+ * 충전 요청 body 검증 — 1~50건, 발송ID 필수·**요청 내 중복 금지**, 금액 = 0 제외 ±1억 이내 유한수(소수 허용),
+ * **배치 절대합 ≤ 1억**(Codex 7R-2 — 동일 한도 행 50개로 총액 폭주하는 경로 차단).
+ */
+export function parseAgentCharges(body: any): { charges: AgentChargeInput[] } | { error: string } {
+  const raw = Array.isArray(body?.charges) ? body.charges : null;
+  if (!raw || raw.length === 0) return { error: 'charges 배열이 비어 있습니다.' };
+  if (raw.length > 50) return { error: '일괄 충전은 50건 이하여야 합니다.' };
+  const charges: AgentChargeInput[] = [];
+  const seen = new Set<string>();
+  let absTotal = 0;
+  for (const r of raw) {
+    const agentSendId = String(r?.agentSendId || '').trim();
+    if (!agentSendId || agentSendId.length > 100) return { error: '발송ID가 비었거나 100자를 초과했습니다.' };
+    if (seen.has(agentSendId.toUpperCase())) return { error: `같은 발송ID가 요청에 2번 이상 있습니다: ${agentSendId} — 금액을 합쳐 1행으로 입력하세요.` };
+    seen.add(agentSendId.toUpperCase());
+    // 금액 = number 또는 십진 문자열만 (Codex 8R — boolean/배열/16진 문자열의 Number() 강제 변환 차단)
+    const rawAmount = r?.amount;
+    let amount: number;
+    if (typeof rawAmount === 'number') {
+      amount = rawAmount;
+    } else if (typeof rawAmount === 'string' && /^-?\d+(\.\d+)?$/.test(rawAmount.trim())) {
+      amount = Number(rawAmount.trim());
+    } else {
+      return { error: `금액 형식이 올바르지 않습니다. (${agentSendId})` };
+    }
+    if (!Number.isFinite(amount) || amount === 0 || Math.abs(amount) > 100_000_000) {
+      return { error: `금액은 0을 제외한 ±100,000,000 이내 숫자여야 합니다. (${agentSendId})` };
+    }
+    absTotal += Math.abs(amount);
+    charges.push({ agentSendId, amount });
+  }
+  if (absTotal > 100_000_000) {
+    return { error: `배치 총액(절대값 합)은 100,000,000 이하여야 합니다. (현재 ${absTotal.toLocaleString()})` };
+  }
+  return { charges };
+}
+
+const CHARGE_STMT_TIMEOUT_MS = 30_000;  // 개별 문 timeout(빠른 실패용)
+// ★ 전체 충전 트랜잭션 단일 데드라인(Codex 14R): 커넥션 획득·세션 설정·모든 INSERT·COMMIT을 통틀어 이 시한.
+//   resolve 자격(요청 후 3분=180초)보다 넉넉히 짧게 둬, insert가 최대 ~60초 내 확정(성공/롤백/응답유실)되게 한다.
+//   (per-statement timeout만으론 50행×29초 누적으로 3분 초과 가능 — 전체 데드라인 필요.)
+const CHARGE_TX_DEADLINE_MS = 60_000;
+
+/**
+ * 충전 행 일괄 INSERT (단일 트랜잭션 — 부분 성공 차단). 반환 = 행별 SeqNo. 실패는 그대로 throw(라우트 분기).
+ * 데드라인 초과 시 커넥션을 destroy(best-effort 정리) + chargeCommitUncertain 처리.
+ * ★안전성의 근거는 destroy의 즉시성이 아니다: destroy(소켓 half-close)는 서버측 COMMIT을 즉시 취소한다고 보장하지
+ *   않으므로, uncertain 건은 요청 후 3분 경과 뒤에만 resolve하도록 라우트가 강제한다(그 시점엔 60초 데드라인이
+ *   지나 트랜잭션이 서버에서 확정). 정확한 성공/실패 판정은 그 3분 유예 + resolve의 게이트웨이 대조(findGatewayCharges)가
+ *   담당한다 — 커밋됐으면 게이트웨이에 행이 보여 not_applied 거부, 롤백됐으면 안 보여 허용.
+ */
+export async function insertAgentCharges(charges: AgentChargeInput[]): Promise<Array<AgentChargeInput & { seqNo: number }>> {
+  const pool = getPool();
+  if (!pool) throw new Error('PAY_STATS_DB_NOT_CONFIGURED');
+
+  const holder: { conn: mysql.PoolConnection | null } = { conn: null };
+  let deadlineHit = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      deadlineHit = true;
+      if (holder.conn) { try { holder.conn.destroy(); } catch { /* 이미 끊김 */ } } // best-effort 정리(즉시 롤백 보장 아님 — 안전성은 resolve의 3분 유예+대조가 담당)
+      const e: any = new Error('CHARGE_TX_DEADLINE');
+      e.chargeCommitUncertain = true; // 극히 드물게 데드라인 직전 커밋됐을 수 있음 → uncertain 보수 처리
+      reject(e);
+    }, CHARGE_TX_DEADLINE_MS);
+  });
+
+  const work = (async (): Promise<Array<AgentChargeInput & { seqNo: number }>> => {
+    const c = await pool.getConnection();
+    holder.conn = c;
+    // 데드라인이 이미 지난 뒤 늦게 획득한 커넥션은 즉시 반납(누수 차단 — Codex 15R-2). 트랜잭션 미개시라 release 안전.
+    if (deadlineHit) { try { c.release(); } catch { /* 이미 반납 */ } throw Object.assign(new Error('CHARGE_TX_DEADLINE'), { chargeCommitUncertain: true }); }
+    await c.query({ sql: `SET SESSION max_statement_time=${CHARGE_STMT_TIMEOUT_MS / 1000}` });
+    await c.query({ sql: 'START TRANSACTION', timeout: CHARGE_STMT_TIMEOUT_MS });
+    const out: Array<AgentChargeInput & { seqNo: number }> = [];
+    for (const ch of charges) {
+      const [r] = await c.query(
+        { sql: `INSERT INTO RSRM_FillAmtHist (StoreId, FillAmt, FillDtTm, PayMethod, RsApplyFlag) VALUES (?, ?, NOW(), '2', 'N')`, timeout: CHARGE_STMT_TIMEOUT_MS },
+        [ch.agentSendId, ch.amount],
+      );
+      out.push({ ...ch, seqNo: Number((r as any).insertId) });
+    }
+    try {
+      await c.query({ sql: 'COMMIT', timeout: CHARGE_STMT_TIMEOUT_MS });
+    } catch (commitErr: any) {
+      commitErr.chargeCommitUncertain = true; // 커밋 응답 유실 가능 — 예약 유지(Codex 8R-1a)
+      throw commitErr;
+    }
+    return out;
+  })();
+
+  try {
+    const out = await Promise.race([work, deadline]);
+    if (timer) clearTimeout(timer);
+    if (holder.conn) holder.conn.release();
+    return out;
+  } catch (err: any) {
+    if (timer) clearTimeout(timer);
+    const conn = holder.conn;
+    if (err?.message === 'CHARGE_TX_DEADLINE') {
+      // 커넥션은 타이머에서 destroy됨(또는 아직 미획득). work가 늦게 커넥션을 얻어도 다음 획득분은 풀이 회수.
+      throw err;
+    }
+    // work 자체 에러 — 커밋 불확실이면 롤백 무의미(destroy), 아니면 롤백 후 반환
+    if (conn) {
+      if (err?.chargeCommitUncertain) {
+        try { conn.destroy(); } catch { /* 이미 끊김 */ }
+      } else {
+        try {
+          await conn.query({ sql: 'ROLLBACK', timeout: CHARGE_STMT_TIMEOUT_MS });
+          conn.release();
+        } catch {
+          try { conn.destroy(); } catch { /* 이미 끊김 */ }
+        }
+      }
+    }
+    throw err;
+  }
+}
+
+export interface AgentChargeStatusRow {
+  seqNo: number;
+  agentSendId: string;
+  amount: number;
+  filledAt: string;        // 'YYYY-MM-DD HH:mm:ss' (서버 로컬 = KST — MySQL NOW()와 동일 기준)
+  filledAtMs: number | null; // 시간창 비교용 epoch ms — mysql2가 DATETIME을 Date 객체로 주므로 String() 파싱 금지(Codex 12R 실버그)
+  applied: boolean; // RsApplyFlag === 'Y' — 이것만이 성공 신호
+  appliedAt: string | null;
+}
+
+function dtToMs(v: any): number | null {
+  if (v instanceof Date) return v.getTime();
+  const t = Date.parse(String(v || '').replace(' ', 'T'));
+  return Number.isFinite(t) ? t : null;
+}
+
+function fmtDt(v: any): string {
+  const ms = dtToMs(v);
+  if (ms === null) return String(v || '');
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/**
+ * ★ 2026-07-24 Codex 12R — 자가복구 수용 판정(순수). 반환 = 수용할 행들(시간창 내 · 다중집합 일치) 또는 null.
+ * MySQL 실행 행이 요청 created_at 기준 [-before, +after]분 창 안에 있고, (발송ID, 금액) 다중집합이 예약 charges와
+ * 정확히 일치할 때만 수용 — 과거의 동일 (발송ID, 금액) SeqNo나 무관 행 주입으로 원장 연결을 오염시키는 경로 차단.
+ */
+export function matchHealWindow(
+  charges: Array<{ agentSendId: string; amount: number }>,
+  mysqlRows: AgentChargeStatusRow[],
+  centerMs: number,
+  beforeMin: number,
+  afterMin: number,
+): AgentChargeStatusRow[] | null {
+  const inWindow = mysqlRows.filter((r) => {
+    const t = r.filledAtMs;
+    return t !== null && t >= centerMs - beforeMin * 60_000 && t <= centerMs + afterMin * 60_000;
+  });
+  const expect = charges.map((c) => `${String(c.agentSendId).trim()}|${Number(c.amount)}`).sort();
+  const got = inWindow.map((r) => `${r.agentSendId}|${r.amount}`).sort();
+  const matches = inWindow.length > 0 && inWindow.length === charges.length && expect.every((v, i) => v === got[i]);
+  return matches ? inWindow : null;
+}
+
+export function toChargeRow(r: any): AgentChargeStatusRow {
+  return {
+    seqNo: Number(r.SeqNo),
+    agentSendId: String(r.StoreId || ''),
+    amount: Number(r.FillAmt) || 0,
+    filledAt: fmtDt(r.FillDtTm),
+    filledAtMs: dtToMs(r.FillDtTm),
+    applied: String(r.RsApplyFlag || '').toUpperCase() === 'Y',
+    appliedAt: r.RsApplyDtTm ? fmtDt(r.RsApplyDtTm) : null,
+  };
+}
+
+/** SeqNo 목록의 반영 상태 조회 (프론트 폴링용) */
+export async function getAgentChargeStatus(seqNos: number[]): Promise<AgentChargeStatusRow[]> {
+  const pool = getPool();
+  if (!pool || seqNos.length === 0) return [];
+  const [rows] = await pool.query(
+    `SELECT SeqNo, StoreId, FillAmt, FillDtTm, RsApplyFlag, RsApplyDtTm FROM RSRM_FillAmtHist WHERE SeqNo IN (${seqNos.map(() => '?').join(',')})`,
+    seqNos,
+  );
+  return (rows as any[]).map(toChargeRow);
+}
+
+/**
+ * ★ 2026-07-24 Codex 11R — 게이트웨이 실행 대조: (발송ID, 금액) 조합이 기준 시각 ±window분 안에 실존하는지.
+ * resolve(not_applied) 검증용 — 실반영된 충전을 미반영으로 지워 한도 회계를 왜곡하는 경로 차단.
+ * MySQL 미설정 = throw(호출부 fail-closed — 대조 불가면 해소 보류).
+ */
+export async function findGatewayCharges(inputs: AgentChargeInput[], center: Date, windowMinutes: number): Promise<AgentChargeStatusRow[]> {
+  const pool = getPool();
+  if (!pool) throw new Error('PAY_STATS_DB_NOT_CONFIGURED');
+  if (inputs.length === 0) return [];
+  const conds = inputs.map(() => '(StoreId = ? AND FillAmt = ?)').join(' OR ');
+  const params: any[] = [];
+  inputs.forEach((i) => { params.push(i.agentSendId, i.amount); });
+  params.push(new Date(center.getTime() - windowMinutes * 60_000), new Date(center.getTime() + windowMinutes * 60_000));
+  const [rows] = await pool.query(
+    `SELECT SeqNo, StoreId, FillAmt, FillDtTm, RsApplyFlag, RsApplyDtTm FROM RSRM_FillAmtHist WHERE (${conds}) AND FillDtTm BETWEEN ? AND ?`,
+    params,
+  );
+  return (rows as any[]).map(toChargeRow);
+}
+
+/** 최근 충전 이력 (표시용 — 최신순) */
+export async function listAgentCharges(limit: number): Promise<AgentChargeStatusRow[]> {
+  const pool = getPool();
+  if (!pool) return [];
+  const lim = Math.min(Math.max(Math.floor(limit) || 30, 1), 200);
+  const [rows] = await pool.query(
+    `SELECT SeqNo, StoreId, FillAmt, FillDtTm, RsApplyFlag, RsApplyDtTm FROM RSRM_FillAmtHist ORDER BY SeqNo DESC LIMIT ${lim}`,
+  );
+  return (rows as any[]).map(toChargeRow);
+}
+
 export async function queryPayAgentBalances(companyId: string): Promise<PayAgentBalance[]> {
   const pool = getPool();
   if (!pool) return [];
