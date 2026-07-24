@@ -1329,6 +1329,11 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
       setToast({ type: 'error', message: '먼저 저장 후 테스트 발송이 가능해요.' });
       return;
     }
+    // ★ 2026-07-24 발행 후에만 테스트 발송 — 미발행 자동발행(무과금 URL 발급) 결함 차단(서수란). 발행 전 확인은 캔버스 미리보기.
+    if (!isPublished) {
+      setToast({ type: 'error', message: '발행 후 테스트 발송이 가능해요. 발행 전에는 편집기 미리보기로 확인해주세요.' });
+      return;
+    }
     try {
       await api.post(`/dm/${dmId}/test-send`, { sample_key: 'vip' });
       setToast({ type: 'success', message: '테스트 발송 요청을 보냈어요.' });

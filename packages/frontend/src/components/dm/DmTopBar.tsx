@@ -167,7 +167,12 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
           💾 저장
         </button>
       )}
-      <button onClick={() => onTestSendClick?.()} style={btnStyle('secondary')} title="내 폰으로 테스트 발송">
+      {/* ★ 2026-07-24 발행 후에만 테스트 발송 — 미발행 시 흐리게+안내(클릭 시 사유 토스트). 발행 전 확인은 캔버스 미리보기. */}
+      <button
+        onClick={() => onTestSendClick?.()}
+        style={{ ...btnStyle('secondary'), ...(isPublished ? {} : { opacity: 0.5 }) }}
+        title={isPublished ? '내 폰으로 테스트 발송' : '발행 후 테스트 발송이 가능해요'}
+      >
         📤 테스트
       </button>
       {/* ★ Codex 1R — 검수가 발행 클릭에 내장되면서 버튼 잠금 해제 (옛 canPublish 잠금은 "문제 고친 뒤 재검수 불가" 교착 유발).

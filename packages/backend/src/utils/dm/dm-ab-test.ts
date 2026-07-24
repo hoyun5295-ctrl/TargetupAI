@@ -257,6 +257,19 @@ export async function startAbTest(id: string, companyId: string): Promise<AbTest
   if (!current) return null;
   if (current.status === 'running') return current;
 
+  // ★ 2026-07-24: 발행(과금)된 DM만 A/B 시작 — 미발행 variant를 A/B 공개 URL(/v/ab/:code)로 무과금 노출해
+  //   발행 과금을 우회하던 경로 차단(test-send 무과금 발행 결함과 동일 계열, Codex 적대검토 발견).
+  const pageIds = [current.variant_a_page_id, current.variant_b_page_id, current.variant_c_page_id].filter(Boolean) as string[];
+  if (pageIds.length > 0) {
+    const published = await query(
+      `SELECT id FROM dm_pages WHERE company_id = $1 AND id = ANY($2::uuid[]) AND short_code IS NOT NULL`,
+      [companyId, pageIds],
+    );
+    if (published.rows.length !== pageIds.length) {
+      throw new Error('발행된 DM만 A/B 테스트를 시작할 수 있어요. 포함된 DM을 먼저 발행해주세요.');
+    }
+  }
+
   if (!current.short_code) {
     await ensureShortCode(id);
   }

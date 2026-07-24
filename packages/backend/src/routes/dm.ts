@@ -1693,13 +1693,14 @@ dmRouter.post('/:id/test-send', async (req: any, res: any) => {
 
     const sampleKey: SampleCustomerKey = (req.body?.sample_key || 'vip') as SampleCustomerKey;
 
-    let dm = await getDmDetail(req.params.id, companyId);
+    const dm = await getDmDetail(req.params.id, companyId);
     if (!dm) return res.status(404).json({ error: 'DM을 찾을 수 없어요.' });
 
-    // short_code 없으면 자동 발행 (테스트용 링크 생성)
+    // ★ 2026-07-24(Harold 확정): 미발행 DM 테스트 발송 시 자동발행(publishDm) 금지 — 크레딧 없이 short_code(발행 URL)가
+    //   영구 발급돼 목록 복사·실사용으로 발행 과금을 우회하던 결함(서수란 접수). 발행(과금) 후에만 테스트 발송 허용.
+    //   발행 전 확인은 편집기 캔버스 미리보기로. (발송 경로 1096은 발행비 게이트로 차감 후 발행 — 무게이트는 여기뿐이었음)
     if (!dm.short_code) {
-      await publishDm(req.params.id, companyId);
-      dm = await getDmDetail(req.params.id, companyId);
+      return res.status(400).json({ error: '발행 후 테스트 발송이 가능해요. 발행 전에는 편집기 미리보기로 확인해주세요.', code: 'DM_NOT_PUBLISHED' });
     }
 
     const baseUrl = process.env.HANJUL_BASE_URL || 'https://hanjul.ai';
