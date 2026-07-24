@@ -494,12 +494,25 @@ const [emailSending, setEmailSending] = useState(false);
   });
 
   // ★ 2026-07-03 에이전트(QTmsg) 발송ID 매핑 관리 (수정 모달 내)
-  const [agentIds, setAgentIds] = useState<{ id: string; agent_send_id: string; memo: string | null }[]>([]);
+  //   ★ 2026-07-24 §5-1 원장 격상 — ID별 선/후불(billing_type)·단가 4종 표시/편집 (웹 축 companies.*와 별개 지갑)
+  const [agentIds, setAgentIds] = useState<{
+    id: string; agent_send_id: string; memo: string | null;
+    billing_type?: string | null;
+    cost_per_sms?: string | number | null; cost_per_lms?: string | number | null;
+    cost_per_mms?: string | number | null; cost_per_kakao?: string | number | null;
+  }[]>([]);
   const [newAgentSendId, setNewAgentSendId] = useState('');
   const [newAgentMemo, setNewAgentMemo] = useState('');
   const [agentIdSaving, setAgentIdSaving] = useState(false);
+  // 원장(선/후불·단가) 인라인 편집 상태
+  const [editingAgentRowId, setEditingAgentRowId] = useState<string | null>(null);
+  const [editAgentLedger, setEditAgentLedger] = useState({
+    billingType: 'postpaid', costPerSms: '', costPerLms: '', costPerMms: '', costPerKakao: '', memo: '',
+  });
+  const [agentLedgerSaving, setAgentLedgerSaving] = useState(false);
 
   const loadAgentIds = async (companyId: string) => {
+    setEditingAgentRowId(null);
     try {
       const token = localStorage.getItem('token');
       const res = await fetch(`/api/companies/${companyId}/agent-ids`, {
@@ -558,6 +571,61 @@ const [emailSending, setEmailSending] = useState(false);
       }
     } catch {
       showAlert('오류', '서버 오류', 'error');
+    }
+  };
+
+  // ★ 2026-07-24 §5-1 — 발송ID 원장(선/후불·단가·메모) 인라인 편집
+  // 단가 입력 정제: 숫자+점 하나만 허용 ('1.2.3' 차단 — Codex 5R-2), 저장 시 점만 남은 값은 빈 값 처리
+  const sanitizeCostInput = (v: string) => {
+    const c = v.replace(/[^0-9.]/g, '');
+    const i = c.indexOf('.');
+    return i === -1 ? c : c.slice(0, i + 1) + c.slice(i + 1).replace(/\./g, '');
+  };
+  const normalizeCostForSave = (v: string) => {
+    const t = v.trim();
+    return t === '.' ? '' : t;
+  };
+
+  const openAgentLedgerEdit = (a: (typeof agentIds)[number]) => {
+    setEditingAgentRowId(a.id);
+    setEditAgentLedger({
+      billingType: a.billing_type === 'prepaid' ? 'prepaid' : 'postpaid',
+      costPerSms: a.cost_per_sms != null && String(a.cost_per_sms) !== '' ? String(Number(a.cost_per_sms)) : '',
+      costPerLms: a.cost_per_lms != null && String(a.cost_per_lms) !== '' ? String(Number(a.cost_per_lms)) : '',
+      costPerMms: a.cost_per_mms != null && String(a.cost_per_mms) !== '' ? String(Number(a.cost_per_mms)) : '',
+      costPerKakao: a.cost_per_kakao != null && String(a.cost_per_kakao) !== '' ? String(Number(a.cost_per_kakao)) : '',
+      memo: a.memo || '',
+    });
+  };
+
+  const handleSaveAgentLedger = async () => {
+    if (!editCompany.id || !editingAgentRowId) return;
+    setAgentLedgerSaving(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/companies/${editCompany.id}/agent-ids/${editingAgentRowId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          billingType: editAgentLedger.billingType,
+          costPerSms: normalizeCostForSave(editAgentLedger.costPerSms),
+          costPerLms: normalizeCostForSave(editAgentLedger.costPerLms),
+          costPerMms: normalizeCostForSave(editAgentLedger.costPerMms),
+          costPerKakao: normalizeCostForSave(editAgentLedger.costPerKakao),
+          memo: editAgentLedger.memo.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showAlert('오류', data.error || '발송ID 설정 저장 실패', 'error');
+      } else {
+        setEditingAgentRowId(null);
+        await loadAgentIds(editCompany.id);
+      }
+    } catch {
+      showAlert('오류', '서버 오류', 'error');
+    } finally {
+      setAgentLedgerSaving(false);
     }
   };
 
@@ -6006,21 +6074,105 @@ const handleApproveRequest = async (id: string) => {
                       <p className="text-xs text-gray-500 mt-0.5 mb-2">이 회사에 속한 QTmsg 발송ID 목록. 발송량 조회·정산 합산의 기준이 됩니다.</p>
                       {agentIds.length > 0 ? (
                         <div className="space-y-1.5 mb-2">
-                          {agentIds.map((a) => (
-                            <div key={a.id} className="flex items-center justify-between bg-white rounded-lg border border-gray-200 px-3 py-1.5">
-                              <div className="min-w-0">
-                                <span className="text-sm font-mono text-gray-800">{a.agent_send_id}</span>
-                                {a.memo && <span className="ml-2 text-xs text-gray-400">{a.memo}</span>}
+                          {agentIds.map((a) => {
+                            const costSummary = [
+                              { l: 'S', v: a.cost_per_sms },
+                              { l: 'L', v: a.cost_per_lms },
+                              { l: 'M', v: a.cost_per_mms },
+                              { l: '카카오', v: a.cost_per_kakao },
+                            ].filter((c) => c.v != null && String(c.v) !== '').map((c) => `${c.l} ${Number(c.v)}`).join(' · ');
+                            return (
+                              <div key={a.id} className="bg-white rounded-lg border border-gray-200 px-3 py-1.5">
+                                <div className="flex items-center justify-between">
+                                  <div className="min-w-0 flex items-center gap-2 flex-wrap">
+                                    <span className="text-sm font-mono text-gray-800">{a.agent_send_id}</span>
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${a.billing_type === 'prepaid' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-500'}`}>
+                                      {a.billing_type === 'prepaid' ? '선불' : '후불'}
+                                    </span>
+                                    {costSummary && <span className="text-[10px] text-gray-400 tabular-nums">{costSummary}</span>}
+                                    {a.memo && <span className="text-xs text-gray-400">{a.memo}</span>}
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0 ml-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => (editingAgentRowId === a.id ? setEditingAgentRowId(null) : openAgentLedgerEdit(a))}
+                                      className="text-xs text-blue-600 hover:text-blue-800"
+                                    >
+                                      설정
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveAgentId(a.id)}
+                                      className="text-xs text-red-500 hover:text-red-700"
+                                    >
+                                      해제
+                                    </button>
+                                  </div>
+                                </div>
+                                {editingAgentRowId === a.id && (
+                                  <div className="mt-1.5 rounded-lg border border-blue-200 bg-blue-50/40 p-2.5 space-y-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      {(['prepaid', 'postpaid'] as const).map((bt) => (
+                                        <button
+                                          key={bt}
+                                          type="button"
+                                          onClick={() => setEditAgentLedger({ ...editAgentLedger, billingType: bt })}
+                                          className={`px-2.5 py-1 rounded-lg border text-xs transition ${
+                                            editAgentLedger.billingType === bt
+                                              ? bt === 'prepaid'
+                                                ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                                                : 'border-blue-500 bg-blue-50 text-blue-700'
+                                              : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                                          }`}
+                                        >
+                                          {bt === 'prepaid' ? '선불' : '후불'}
+                                        </button>
+                                      ))}
+                                      <span className="text-[10px] text-gray-400">선불 지정 시 고객 대시보드 잔액 표시·충전 대상</span>
+                                    </div>
+                                    <div className="grid grid-cols-4 gap-1.5">
+                                      {([['costPerSms', 'SMS'], ['costPerLms', 'LMS'], ['costPerMms', 'MMS'], ['costPerKakao', '카카오']] as const).map(([k, label]) => (
+                                        <div key={k}>
+                                          <label className="block text-[10px] text-gray-500 mb-0.5">{label} 단가</label>
+                                          <input
+                                            type="text"
+                                            value={editAgentLedger[k]}
+                                            onChange={(e) => setEditAgentLedger({ ...editAgentLedger, [k]: sanitizeCostInput(e.target.value) })}
+                                            className="w-full px-2 py-1 border rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                                            placeholder="미설정"
+                                          />
+                                        </div>
+                                      ))}
+                                    </div>
+                                    <div className="flex gap-1.5">
+                                      <input
+                                        type="text"
+                                        value={editAgentLedger.memo}
+                                        onChange={(e) => setEditAgentLedger({ ...editAgentLedger, memo: e.target.value })}
+                                        className="flex-1 px-2 py-1 border rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                                        placeholder="메모(선택)"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={handleSaveAgentLedger}
+                                        disabled={agentLedgerSaving}
+                                        className="px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-lg text-xs shrink-0"
+                                      >
+                                        {agentLedgerSaving ? '저장 중...' : '저장'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingAgentRowId(null)}
+                                        className="px-2.5 py-1 text-gray-500 hover:text-gray-700 text-xs shrink-0"
+                                      >
+                                        취소
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveAgentId(a.id)}
-                                className="text-xs text-red-500 hover:text-red-700 shrink-0 ml-2"
-                              >
-                                해제
-                              </button>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       ) : (
                         <p className="text-xs text-gray-400 mb-2">등록된 발송ID가 없습니다.</p>

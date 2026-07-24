@@ -412,6 +412,85 @@ export function pickLatestBalances(custIds: string[], rows: PayBalanceSourceRow[
   });
 }
 
+export interface AgentLedgerFields {
+  billingType: 'prepaid' | 'postpaid';
+  costPerSms: number | null;
+  costPerLms: number | null;
+  costPerMms: number | null;
+  costPerKakao: number | null;
+}
+
+// 단가 1개 값 검증 (등록·수정 공용) — null/빈 값 = 미설정(null), 그 외 0~1,000,000 유한수(소수 허용)
+function parseCostValue(v: any, label: string): { value: number | null } | { error: string } {
+  if (v === undefined || v === null || String(v).trim() === '') return { value: null };
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || n > 1_000_000) {
+    return { error: `${label} 단가는 0 이상 1,000,000 이하 숫자여야 합니다.` };
+  }
+  return { value: n };
+}
+
+/**
+ * ★ 2026-07-24 §5-1 — 발송ID 원장 필드(선/후불·단가) 등록용 파싱·검증 (POST 전용 — 미지정 = 기본값).
+ * billingType 미지정/빈 값 = postpaid(기존 동작 보존). 위반 시 { error } 반환 — 라우트는 400으로 응답.
+ */
+export function parseAgentLedgerFields(body: any): AgentLedgerFields | { error: string } {
+  const rawBilling = body?.billingType === undefined || body?.billingType === null || String(body?.billingType).trim() === ''
+    ? 'postpaid'
+    : String(body.billingType).trim();
+  if (rawBilling !== 'prepaid' && rawBilling !== 'postpaid') {
+    return { error: 'billingType은 prepaid 또는 postpaid만 허용됩니다.' };
+  }
+  const sms = parseCostValue(body?.costPerSms, 'SMS');
+  if ('error' in sms) return sms;
+  const lms = parseCostValue(body?.costPerLms, 'LMS');
+  if ('error' in lms) return lms;
+  const mms = parseCostValue(body?.costPerMms, 'MMS');
+  if ('error' in mms) return mms;
+  const kakao = parseCostValue(body?.costPerKakao, '카카오');
+  if ('error' in kakao) return kakao;
+  return { billingType: rawBilling, costPerSms: sms.value, costPerLms: lms.value, costPerMms: mms.value, costPerKakao: kakao.value };
+}
+
+export interface AgentLedgerPatch {
+  updates: {
+    billing_type?: 'prepaid' | 'postpaid';
+    cost_per_sms?: number | null;
+    cost_per_lms?: number | null;
+    cost_per_mms?: number | null;
+    cost_per_kakao?: number | null;
+  };
+}
+
+/**
+ * ★ 2026-07-24 §5-1 — 발송ID 원장 수정용 부분(PATCH) 파싱·검증 (Codex 5R-1 정정).
+ * undefined/빈 billingType = 미변경(기존 값 보존 — 전체 덮어쓰기로 원장이 초기화되는 사고 차단).
+ * 단가는 키가 온 것만 반영: '' 또는 null = 명시적 해제(null), 값 = 검증 후 세트.
+ */
+export function parseAgentLedgerPatch(body: any): AgentLedgerPatch | { error: string } {
+  const updates: AgentLedgerPatch['updates'] = {};
+  if (body?.billingType !== undefined && body?.billingType !== null && String(body.billingType).trim() !== '') {
+    const bt = String(body.billingType).trim();
+    if (bt !== 'prepaid' && bt !== 'postpaid') {
+      return { error: 'billingType은 prepaid 또는 postpaid만 허용됩니다.' };
+    }
+    updates.billing_type = bt;
+  }
+  const entries: Array<['cost_per_sms' | 'cost_per_lms' | 'cost_per_mms' | 'cost_per_kakao', any, string]> = [
+    ['cost_per_sms', body?.costPerSms, 'SMS'],
+    ['cost_per_lms', body?.costPerLms, 'LMS'],
+    ['cost_per_mms', body?.costPerMms, 'MMS'],
+    ['cost_per_kakao', body?.costPerKakao, '카카오'],
+  ];
+  for (const [col, v, label] of entries) {
+    if (v === undefined) continue;
+    const r = parseCostValue(v, label);
+    if ('error' in r) return r;
+    updates[col] = r.value;
+  }
+  return { updates };
+}
+
 /**
  * ★ 2026-07-24 §5-2 — 발송ID별 게이트웨이 잔액 조회 (선불 prepaid ID만).
  * 잔액 = RSRM_SalesStts에서 CustId별 MAX(DestDt) 행의 RemAmt(같은 날 복수 행이면 UpdTm 최신 행).

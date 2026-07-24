@@ -9,7 +9,7 @@
  *  - custIds 순서 보존 + 전 ID 반환 (조용한 누락 방지)
  */
 import { describe, it, expect } from 'vitest';
-import { pickLatestBalances, PayBalanceSourceRow } from '../pay-stats';
+import { pickLatestBalances, PayBalanceSourceRow, parseAgentLedgerFields, parseAgentLedgerPatch } from '../pay-stats';
 
 const row = (o: Partial<PayBalanceSourceRow>): PayBalanceSourceRow => o;
 
@@ -128,5 +128,55 @@ describe('pickLatestBalances', () => {
     ]);
     expect(out).toHaveLength(1);
     expect(out[0].rem_amt).toBe(6822770);
+  });
+});
+
+describe('parseAgentLedgerFields (§5-1 원장 입력 검증)', () => {
+  it('미지정/빈 값 = postpaid + 단가 전부 null — 기존 등록 동작 보존', () => {
+    expect(parseAgentLedgerFields({})).toEqual({
+      billingType: 'postpaid', costPerSms: null, costPerLms: null, costPerMms: null, costPerKakao: null,
+    });
+    expect(parseAgentLedgerFields({ billingType: '', costPerSms: '' })).toEqual({
+      billingType: 'postpaid', costPerSms: null, costPerLms: null, costPerMms: null, costPerKakao: null,
+    });
+  });
+
+  it('prepaid + 소수 단가 허용·문자열 숫자 수용·빈 문자열 = null', () => {
+    expect(parseAgentLedgerFields({ billingType: 'prepaid', costPerSms: '8.4', costPerLms: '', costPerKakao: 6.5 })).toEqual({
+      billingType: 'prepaid', costPerSms: 8.4, costPerLms: null, costPerMms: null, costPerKakao: 6.5,
+    });
+    expect(parseAgentLedgerFields({ billingType: 'prepaid', costPerMms: 0 })).toEqual({
+      billingType: 'prepaid', costPerSms: null, costPerLms: null, costPerMms: 0, costPerKakao: null,
+    });
+  });
+
+  it('화이트리스트 밖 billingType·음수·비수치·상한 초과 단가 = error', () => {
+    expect('error' in parseAgentLedgerFields({ billingType: 'free' })).toBe(true);
+    expect('error' in parseAgentLedgerFields({ costPerSms: -1 })).toBe(true);
+    expect('error' in parseAgentLedgerFields({ costPerLms: 'abc' })).toBe(true);
+    expect('error' in parseAgentLedgerFields({ costPerMms: 1000001 })).toBe(true);
+    expect('error' in parseAgentLedgerFields({ costPerKakao: Infinity })).toBe(true);
+  });
+});
+
+describe('parseAgentLedgerPatch (§5-1 PATCH 부분 갱신 — Codex 5R-1 회귀 방지)', () => {
+  it('빈 body/memo만 = updates 빈 객체 — 선/후불·단가를 건드리지 않는다(전체 덮어쓰기 초기화 사고 차단)', () => {
+    expect(parseAgentLedgerPatch({})).toEqual({ updates: {} });
+    expect(parseAgentLedgerPatch({ memo: '메모만 수정' })).toEqual({ updates: {} });
+  });
+
+  it('온 키만 반영: 빈 문자열 단가 = 명시적 해제(null), 값 = 검증 후 세트, 빈 billingType = 미변경', () => {
+    expect(parseAgentLedgerPatch({ costPerSms: '' })).toEqual({ updates: { cost_per_sms: null } });
+    expect(parseAgentLedgerPatch({ billingType: 'prepaid', costPerKakao: '6.5' })).toEqual({
+      updates: { billing_type: 'prepaid', cost_per_kakao: 6.5 },
+    });
+    expect(parseAgentLedgerPatch({ billingType: '' , costPerLms: 25 })).toEqual({ updates: { cost_per_lms: 25 } });
+  });
+
+  it('위반 값 = error (화이트리스트 밖·음수·비수치·다중 점 문자열)', () => {
+    expect('error' in parseAgentLedgerPatch({ billingType: 'free' })).toBe(true);
+    expect('error' in parseAgentLedgerPatch({ costPerSms: -0.1 })).toBe(true);
+    expect('error' in parseAgentLedgerPatch({ costPerMms: '1.2.3' })).toBe(true);
+    expect('error' in parseAgentLedgerPatch({ costPerKakao: 1000001 })).toBe(true);
   });
 });

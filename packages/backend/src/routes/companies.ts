@@ -9,6 +9,7 @@ import { getStoreScope } from '../utils/store-scope';
 import { getOpt080Number } from '../utils/messageUtils';
 import { normalizeOpt080Input } from '../utils/normalize';
 import { grantBasicTrial, isTrialApplyOpen } from '../utils/basic-trial';
+import { parseAgentLedgerFields, parseAgentLedgerPatch } from '../utils/pay-stats';
 
 const router = Router();
 
@@ -1979,8 +1980,10 @@ router.put('/:id', requireUuidId, requireSuperAdmin, async (req: Request, res: R
 router.get('/:id/agent-ids', requireUuidId, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    // ★ 2026-07-24 §5-1 원장 격상 — ID별 선/후불·단가 동반 반환 (에이전트 축, 웹 companies.* 와 별개 지갑)
     const result = await query(
-      `SELECT id, agent_send_id, memo, created_at
+      `SELECT id, agent_send_id, memo, created_at,
+              billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao
        FROM company_agent_ids WHERE company_id = $1 ORDER BY created_at ASC`,
       [id]
     );
@@ -1991,7 +1994,7 @@ router.get('/:id/agent-ids', requireUuidId, requireSuperAdmin, async (req: Reque
     if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 company_agent_ids CREATE 실행 요청',
+        error: 'DB 마이그레이션 필요 — 운영자에게 company_agent_ids CREATE/ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -2012,12 +2015,21 @@ router.post('/:id/agent-ids', requireUuidId, requireSuperAdmin, async (req: Requ
     if (agentSendId.length > 100) {
       return res.status(400).json({ error: 'agentSendId는 100자 이하여야 합니다.' });
     }
+    if (memo && memo.length > 200) {
+      return res.status(400).json({ error: '메모는 200자 이하여야 합니다.' }); // DB varchar(200) — 500 유출 차단 (Codex 5R-3)
+    }
+
+    // ★ 2026-07-24 §5-1 — 등록 시점 선/후불·단가 지정(선택). 미지정 = postpaid + 단가 NULL(기존 동작 동일)
+    const ledger = parseAgentLedgerFields(req.body);
+    if ('error' in ledger) {
+      return res.status(400).json({ error: ledger.error });
+    }
 
     const result = await query(
-      `INSERT INTO company_agent_ids (company_id, agent_send_id, memo)
-       VALUES ($1, $2, $3)
-       RETURNING id, agent_send_id, memo, created_at`,
-      [id, agentSendId, memo]
+      `INSERT INTO company_agent_ids (company_id, agent_send_id, memo, billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, agent_send_id, memo, created_at, billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao`,
+      [id, agentSendId, memo, ledger.billingType, ledger.costPerSms, ledger.costPerLms, ledger.costPerMms, ledger.costPerKakao]
     );
     return res.status(201).json({ agentId: result.rows[0] });
   } catch (error: any) {
@@ -2048,7 +2060,7 @@ router.post('/:id/agent-ids', requireUuidId, requireSuperAdmin, async (req: Requ
     if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 company_agent_ids CREATE 실행 요청',
+        error: 'DB 마이그레이션 필요 — 운영자에게 company_agent_ids CREATE/ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -2078,7 +2090,67 @@ router.delete('/:id/agent-ids/:agentIdRowId', requireUuidId, requireSuperAdmin, 
     if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 company_agent_ids CREATE 실행 요청',
+        error: 'DB 마이그레이션 필요 — 운영자에게 company_agent_ids CREATE/ALTER 실행 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// PATCH /api/companies/:id/agent-ids/:agentIdRowId - 발송ID 원장 수정 (★ 2026-07-24 §5-1 — 선/후불·단가·메모)
+// 선불(prepaid) 지정된 ID부터 대시보드 잔액 표시(§5-2)·충전(§5-3) 대상이 된다.
+router.patch('/:id/agent-ids/:agentIdRowId', requireUuidId, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id, agentIdRowId } = req.params;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(agentIdRowId)) {
+      return res.status(400).json({ error: '잘못된 ID 형식입니다.' });
+    }
+
+    // ★ Codex 5R-1 정정: 부분(PATCH) 시맨틱 — 온 필드만 갱신. memo만 보내도 선/후불·단가가 초기화되지 않는다.
+    const patch = parseAgentLedgerPatch(req.body);
+    if ('error' in patch) {
+      return res.status(400).json({ error: patch.error });
+    }
+    const sets: string[] = [];
+    const params: any[] = [];
+    const pushSet = (col: string, val: any) => { params.push(val); sets.push(`${col} = $${params.length}`); };
+    if (patch.updates.billing_type !== undefined) pushSet('billing_type', patch.updates.billing_type);
+    if (patch.updates.cost_per_sms !== undefined) pushSet('cost_per_sms', patch.updates.cost_per_sms);
+    if (patch.updates.cost_per_lms !== undefined) pushSet('cost_per_lms', patch.updates.cost_per_lms);
+    if (patch.updates.cost_per_mms !== undefined) pushSet('cost_per_mms', patch.updates.cost_per_mms);
+    if (patch.updates.cost_per_kakao !== undefined) pushSet('cost_per_kakao', patch.updates.cost_per_kakao);
+    if ((req.body as any)?.memo !== undefined) {
+      const memo = String((req.body as any).memo || '').trim() || null;
+      if (memo && memo.length > 200) {
+        return res.status(400).json({ error: '메모는 200자 이하여야 합니다.' });
+      }
+      pushSet('memo', memo);
+    }
+    if (sets.length === 0) {
+      return res.status(400).json({ error: '수정할 필드가 없습니다.' });
+    }
+
+    // 효과 검증: RETURNING으로 실제 갱신 행 확정 후에만 성공 응답
+    params.push(agentIdRowId, id);
+    const result = await query(
+      `UPDATE company_agent_ids
+          SET ${sets.join(', ')}
+        WHERE id = $${params.length - 1} AND company_id = $${params.length}
+        RETURNING id, agent_send_id, memo, created_at, billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao`,
+      params
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '매핑을 찾을 수 없습니다.' });
+    }
+    return res.json({ agentId: result.rows[0] });
+  } catch (error: any) {
+    console.error('에이전트 발송ID 원장 수정 에러:', error);
+    const msg = error?.message || '';
+    if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        error: 'DB 마이그레이션 필요 — 운영자에게 company_agent_ids ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
