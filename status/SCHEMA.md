@@ -362,15 +362,21 @@
 | duplicate_days | integer | ★ 실측 레거시(duplicate_prevention_days 우선) |
 | usage_type | varchar(10) | ★ 2026-07-03 실측 (사용구분: web/agent/both, NOT NULL DEFAULT 'web' + CHECK. agent=QTmsg 에이전트 전용 게이팅) |
 
-### company_agent_ids (에이전트 발송ID 매핑 — 2026-07-03 신설 실측)
+### company_agent_ids (에이전트 발송ID 매핑 → 에이전트 계정 원장 — 2026-07-03 신설 실측 · 2026-07-24 원장 격상 ALTER 실측)
 | 컬럼 | 타입 |
 |------|------|
 | id | uuid PK DEFAULT gen_random_uuid() |
 | company_id | uuid FK → companies ON DELETE CASCADE |
-| agent_send_id | varchar(100) NOT NULL UNIQUE (QTmsg 발송ID — 전역 유일, 역매핑용) |
+| agent_send_id | varchar(100) NOT NULL UNIQUE (QTmsg 발송ID — 전역 유일, 역매핑용. =게이트웨이 CustId·FillAmtHist.StoreId 축) |
 | memo | varchar(200) |
 | created_at | timestamptz NOT NULL DEFAULT NOW() |
+| billing_type | varchar NOT NULL DEFAULT 'postpaid' CHECK (prepaid/postpaid) — ★2026-07-24 발송ID별 선/후불 (웹 companies.billing_type과 완전 독립) |
+| cost_per_sms | numeric NULL — ★2026-07-24 발송ID별 단가 (NULL=미설정) |
+| cost_per_lms | numeric NULL — ★2026-07-24 |
+| cost_per_mms | numeric NULL — ★2026-07-24 |
+| cost_per_kakao | numeric NULL — ★2026-07-24 |
 - INDEX idx_company_agent_ids_company (company_id)
+- 2026-07-24 ALTER 적용 실측: 10컬럼·기존 283행 전부 postpaid. 잔액은 컬럼 없음(이중 진실 금지 — 게이트웨이 RSRM_SalesStts.RemAmt 최신 DestDt 행을 조회만). SoT=docs/2026-07-24-agent-prepaid-charge-design.md
 
 ### company_settings (고객사 설정 KV)
 | 컬럼 | 타입 |

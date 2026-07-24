@@ -210,6 +210,9 @@ export default function Dashboard() {
   const isCustomerDbLocked = !planInfo?.customer_db_enabled || isSubscriptionLocked;
   const isAiMessagingLocked = !planInfo?.ai_messaging_enabled || isSubscriptionLocked;
   const [balanceInfo, setBalanceInfo] = useState<{billingType: string, balance: number, costPerSms: number, costPerLms: number, costPerMms: number, costPerKakao: number} | null>(null);
+  // ★ 2026-07-24 §5-2 에이전트(게이트웨이) 선불 발송ID별 잔액 — 웹 잔액과 다른 지갑. 빈 배열 = 미노출.
+  //   remAmt null = 집계 전(금액 미확정 — 0원과 구분해 표시)
+  const [agentBalances, setAgentBalances] = useState<{agentSendId: string; remAmt: number | null; asOfDate: string}[]>([]);
   const [showBalanceModal, setShowBalanceModal] = useState(false);
   const [showChargeModal, setShowChargeModal] = useState(false);
   const [chargeStep, setChargeStep] = useState<'select' | 'deposit'>('select');
@@ -1125,6 +1128,25 @@ export default function Dashboard() {
         const balanceData = await balanceRes.json();
         setBalanceInfo(balanceData);
       }
+
+      // ★ 2026-07-24 §5-2 에이전트 선불 잔액 조회 — 대상 아니면 빈 배열(미노출).
+      //   대시보드 로딩을 게이트웨이 응답 지연에 묶지 않도록 await 없이 비동기 로드(Codex R1-4).
+      //   원소 구조 가드 — 부분 응답/계약 변형 시 NaN·렌더 예외 차단(Codex R1-7).
+      fetch('/api/balance/agent', { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (!d || !Array.isArray(d.balances)) return;
+          setAgentBalances(
+            d.balances
+              .filter((b: any) => b && typeof b.agentSendId === 'string' && b.agentSendId.trim())
+              .map((b: any) => ({
+                agentSendId: String(b.agentSendId),
+                remAmt: typeof b.remAmt === 'number' && Number.isFinite(b.remAmt) ? b.remAmt : null,
+                asOfDate: typeof b.asOfDate === 'string' ? b.asOfDate : '',
+              }))
+          );
+        })
+        .catch(() => {});
 
       // D41 대시보드 동적 카드 조회
       try {
@@ -2413,6 +2435,32 @@ const campaignData = {
                   <span className="text-xs font-medium text-gray-500">총 사용금액</span>
                   <span className="text-lg font-bold text-gray-800 tabular-nums">{(stats?.monthly_cost || 0).toLocaleString()}<span className="text-xs font-normal text-gray-400">원</span></span>
                 </div>
+                {/* ★ 2026-07-24 §5-2 에이전트 발송 잔액 — 선불 발송ID별 게이트웨이 실값 표시 (웹 잔액과 다른 지갑) */}
+                {agentBalances.length > 0 && (
+                  <div className="mt-2 rounded-lg border border-emerald-100/80 bg-gradient-to-r from-emerald-50/60 to-teal-50/30 px-3.5 py-2.5">
+                    <div className="mb-1.5 flex items-center justify-between">
+                      <span className="text-xs font-medium text-gray-500">에이전트 발송 잔액</span>
+                      <span className="text-[10px] italic text-gray-300">Data source — 발송 게이트웨이 일별 잔액</span>
+                    </div>
+                    <div className="space-y-1">
+                      {agentBalances.map((b) => (
+                        <div key={b.agentSendId} className="flex items-center justify-between">
+                          <span className="text-xs tabular-nums text-gray-500">{b.agentSendId}</span>
+                          {b.remAmt === null ? (
+                            <span className="text-[10px] text-gray-400">집계 전 — 잔액 미확인</span>
+                          ) : (
+                            <span className="flex items-baseline gap-1.5">
+                              {b.asOfDate && <span className="text-[10px] text-gray-400">{b.asOfDate} 기준</span>}
+                              <span className={`text-sm font-bold tabular-nums ${b.remAmt < 10000 ? 'text-rose-500' : 'text-gray-800'}`}>
+                                {Math.floor(b.remAmt).toLocaleString()}<span className="text-[10px] font-normal text-gray-400">원</span>
+                              </span>
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 

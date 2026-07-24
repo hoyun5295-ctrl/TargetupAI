@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
+import { queryPayAgentBalances } from '../utils/pay-stats';
 
 const router = Router();
 
@@ -35,6 +36,37 @@ router.get('/', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('잔액 조회 실패:', error);
+    res.status(500).json({ error: '잔액 조회 실패' });
+  }
+});
+
+// GET /api/balance/agent - 에이전트(게이트웨이) 선불 발송ID별 잔액 (★ 2026-07-24 §5-2)
+// 잔액은 저장하지 않고 게이트웨이 일별 통계의 최신 RemAmt를 조회만 한다. 빈 배열 = 화면 미노출.
+router.get('/agent', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(403).json({ error: '고객사 권한이 필요합니다.' });
+    }
+
+    const balances = await queryPayAgentBalances(companyId);
+    res.json({
+      balances: balances.map((b) => ({
+        agentSendId: b.agent_send_id,
+        remAmt: b.rem_amt,
+        asOfDate: b.as_of_date,
+      })),
+    });
+  } catch (error: any) {
+    const msg = error?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        error: 'DB 마이그레이션 필요 — 운영자에게 company_agent_ids ALTER 실행 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    console.error('에이전트 잔액 조회 실패:', error);
     res.status(500).json({ error: '잔액 조회 실패' });
   }
 });

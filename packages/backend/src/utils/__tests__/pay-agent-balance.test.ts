@@ -1,0 +1,132 @@
+/**
+ * pay-agent-balance.test.ts — queryPayAgentBalances 순수 선택 로직(pickLatestBalances) 검증
+ * (★ 2026-07-24 §5-2 에이전트 선불 잔액 · Codex R1 정정 회귀 방지)
+ *
+ * 핵심 계약:
+ *  - 통계 행 없는 ID = rem_amt null(집계 전) — 0원으로 합성 금지 (Codex R1-2)
+ *  - CustId별 선택 = DestDt 최대 → UpdTm 최신 → MsgType·StoreId 사전순 결정적 (Codex R1-1)
+ *  - 입력 행 순서와 무관하게 같은 결과 (SQL ORDER BY 의존 제거)
+ *  - custIds 순서 보존 + 전 ID 반환 (조용한 누락 방지)
+ */
+import { describe, it, expect } from 'vitest';
+import { pickLatestBalances, PayBalanceSourceRow } from '../pay-stats';
+
+const row = (o: Partial<PayBalanceSourceRow>): PayBalanceSourceRow => o;
+
+describe('pickLatestBalances', () => {
+  it('통계 행이 없는 ID는 rem_amt null(집계 전)로 반환 — 0원 합성 금지', () => {
+    const out = pickLatestBalances(['C0119'], []);
+    expect(out).toHaveLength(1);
+    expect(out[0].agent_send_id).toBe('C0119');
+    expect(out[0].rem_amt).toBeNull();
+    expect(out[0].as_of_date).toBe('');
+  });
+
+  it('CustId별 MAX(DestDt) 행의 RemAmt를 선택하고 as_of_date를 YYYY-MM-DD로 변환', () => {
+    const out = pickLatestBalances(['D0079'], [
+      row({ CustId: 'D0079', DestDt: '20260722', RemAmt: 10396100, UpdTm: '2026-07-24 05:00:17' }),
+      row({ CustId: 'D0079', DestDt: '20260723', RemAmt: 10383500, UpdTm: '2026-07-24 05:00:17' }),
+      row({ CustId: 'D0079', DestDt: '20260721', RemAmt: 10511100, UpdTm: '2026-07-24 05:00:17' }),
+    ]);
+    expect(out[0].rem_amt).toBe(10383500);
+    expect(out[0].as_of_date).toBe('2026-07-23');
+  });
+
+  it('같은 DestDt·같은 RemAmt면 UpdTm 최신 행을 선택 (Date 객체 UpdTm 포함)', () => {
+    const out = pickLatestBalances(['C0130'], [
+      row({ CustId: 'C0130', DestDt: '20260703', RemAmt: 200, UpdTm: new Date('2026-07-07T05:00:00') }),
+      row({ CustId: 'C0130', DestDt: '20260703', RemAmt: 200, UpdTm: new Date('2026-07-07T07:00:00') }),
+    ]);
+    expect(out[0].rem_amt).toBe(200);
+    expect(out[0].updated_at).toContain('07:00:00');
+  });
+
+  it('권위 행 = StoreId 빈 계정 합계 행만 — 상세 행(RemAmt 0)이 잔액을 가리지 않는다 (§8-9 행 단위 실측: D0130)', () => {
+    const account = row({ CustId: 'D0130', DestDt: '20260723', StoreId: '', MsgType: 'L', RemAmt: 18445, UpdTm: '2026-07-24 05:00:17' });
+    const account2 = row({ CustId: 'D0130', DestDt: '20260723', StoreId: '', MsgType: 'S', RemAmt: 18445, UpdTm: '2026-07-24 05:00:17' });
+    const detail = row({ CustId: 'D0130', DestDt: '20260723', StoreId: 'c2dca7c8-50be-44fd-b8e1-0a24cc2f642d', MsgType: 'L', RemAmt: 0, UpdTm: '2026-07-24 05:00:17' });
+    const o1 = pickLatestBalances(['D0130'], [detail, account, account2]);
+    const o2 = pickLatestBalances(['D0130'], [account2, detail, account]);
+    expect(o1[0].rem_amt).toBe(18445);
+    expect(o2[0].rem_amt).toBe(18445);
+  });
+
+  it('상세 행만 있으면(계정 행 부재) 잔액 미확정 null — 상세 행 0을 잔액으로 오인하지 않는다', () => {
+    const out = pickLatestBalances(['B0001'], [
+      row({ CustId: 'B0001', DestDt: '20260721', StoreId: 'alarm', MsgType: 'S', RemAmt: 0, UpdTm: '2026-07-24 08:00:07' }),
+    ]);
+    expect(out[0].rem_amt).toBeNull();
+  });
+
+  it('최신 날짜에 계정 행이 없으면 계정 행이 있는 이전 날짜로 — 상세 행 날짜에 끌려가지 않는다', () => {
+    const out = pickLatestBalances(['D0130'], [
+      row({ CustId: 'D0130', DestDt: '20260723', StoreId: 'ca3fef1f-b614-485e-9cc5-ebd0a27f093f', MsgType: 'L', RemAmt: 0, UpdTm: '2026-07-24 05:00:17' }),
+      row({ CustId: 'D0130', DestDt: '20260722', StoreId: '', MsgType: 'L', RemAmt: 18445, UpdTm: '2026-07-24 05:00:17' }),
+    ]);
+    expect(out[0].rem_amt).toBe(18445);
+    expect(out[0].as_of_date).toBe('2026-07-22');
+  });
+
+  it('같은 UpdTm에 값이 어긋나면 MsgType 사전순 — 큰 값 우선 아님(과대 표시 편향 차단, Codex R3), 입력 순서 무관', () => {
+    const a = row({ CustId: 'B0225', DestDt: '20260723', UpdTm: '2026-07-24 05:00:17', MsgType: 'L', StoreId: '', RemAmt: 111 });
+    const b = row({ CustId: 'B0225', DestDt: '20260723', UpdTm: '2026-07-24 05:00:17', MsgType: 'S', StoreId: '', RemAmt: 222 });
+    const o1 = pickLatestBalances(['B0225'], [a, b]);
+    const o2 = pickLatestBalances(['B0225'], [b, a]);
+    expect(o1[0].rem_amt).toBe(111); // MsgType 'L' < 'S' — 222(큰 값)가 아니라 사전순 승자
+    expect(o2[0].rem_amt).toBe(111);
+  });
+
+  it('RemAmt null·빈 문자열은 0으로 강제 변환하지 않고 null(미확정) (Codex R2 실버그)', () => {
+    const onlyNull = pickLatestBalances(['A0'], [
+      row({ CustId: 'A0', DestDt: '20260701', RemAmt: null, UpdTm: '2026-07-02 05:00:00' }),
+      row({ CustId: 'A0', DestDt: '20260701', RemAmt: '', UpdTm: '2026-07-02 06:00:00' }),
+    ]);
+    expect(onlyNull[0].rem_amt).toBeNull();
+
+    // 같은 UpdTm이면 값 보유 행 우선
+    const sameTime = pickLatestBalances(['A1'], [
+      row({ CustId: 'A1', DestDt: '20260701', RemAmt: null, UpdTm: '2026-07-02 05:00:00' }),
+      row({ CustId: 'A1', DestDt: '20260701', RemAmt: 7390.1, UpdTm: '2026-07-02 05:00:00' }),
+    ]);
+    expect(sameTime[0].rem_amt).toBe(7390.1);
+
+    // 최신 스냅샷(UpdTm)이 값 없음이면 fail-closed로 null — 옛 값으로 과대/과소 표시하지 않는다 (Codex R3 방향)
+    const newerNull = pickLatestBalances(['A2'], [
+      row({ CustId: 'A2', DestDt: '20260701', RemAmt: null, UpdTm: '2026-07-02 07:00:00' }),
+      row({ CustId: 'A2', DestDt: '20260701', RemAmt: 7390.1, UpdTm: '2026-07-02 05:00:00' }),
+    ]);
+    expect(newerNull[0].rem_amt).toBeNull();
+  });
+
+  it('custIds 순서를 보존하고 전 ID를 반환한다 (일부만 통계 보유)', () => {
+    const out = pickLatestBalances(['B0225', 'C0119', 'D0079'], [
+      row({ CustId: 'D0079', DestDt: '20260723', RemAmt: 10383500, UpdTm: '2026-07-24 05:00:17' }),
+      row({ CustId: 'B0225', DestDt: '20260601', RemAmt: 91277, UpdTm: '2026-06-02 05:00:01' }),
+    ]);
+    expect(out.map((o) => o.agent_send_id)).toEqual(['B0225', 'C0119', 'D0079']);
+    expect(out[0].rem_amt).toBe(91277);
+    expect(out[1].rem_amt).toBeNull();
+    expect(out[2].rem_amt).toBe(10383500);
+  });
+
+  it('RemAmt가 수치가 아니면 null(미확정) — NaN 노출 금지 / 음수·0은 실값 그대로', () => {
+    const out = pickLatestBalances(['A1', 'A2', 'A3'], [
+      row({ CustId: 'A1', DestDt: '20260701', RemAmt: 'abc', UpdTm: '2026-07-02 05:00:00' }),
+      row({ CustId: 'A2', DestDt: '20260701', RemAmt: -645884, UpdTm: '2026-07-02 05:00:00' }),
+      row({ CustId: 'A3', DestDt: '20260701', RemAmt: 0, UpdTm: '2026-07-02 05:00:00' }),
+    ]);
+    expect(out[0].rem_amt).toBeNull();
+    expect(out[1].rem_amt).toBe(-645884);
+    expect(out[2].rem_amt).toBe(0);
+  });
+
+  it('CustId 빈 행은 무시하고, 대상 외 CustId 행은 결과에 섞이지 않는다', () => {
+    const out = pickLatestBalances(['D0079'], [
+      row({ CustId: '', DestDt: '20260723', RemAmt: 999, UpdTm: '2026-07-24 05:00:17' }),
+      row({ CustId: 'Z9999', DestDt: '20260723', RemAmt: 888, UpdTm: '2026-07-24 05:00:17' }),
+      row({ CustId: 'D0079', DestDt: '20260716', RemAmt: 6822770, UpdTm: '2026-07-19 05:00:40' }),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].rem_amt).toBe(6822770);
+  });
+});

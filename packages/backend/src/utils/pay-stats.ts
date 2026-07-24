@@ -338,3 +338,114 @@ export async function queryPayAgentStatsAllCompanies(options: {
     return null;
   }
 }
+
+export interface PayAgentBalance {
+  agent_send_id: string;
+  rem_amt: number | null; // null = 통계 행 없음/값 미확정(집계 전) — 실제 0원과 구분(Codex R1-2)
+  as_of_date: string; // 'YYYY-MM-DD' — 게이트웨이 일별 통계의 최신 기준일(DestDt). ''=집계 전
+  updated_at: string; // 그 행의 게이트웨이 갱신 시각(UpdTm)
+}
+
+export interface PayBalanceSourceRow {
+  CustId?: any; DestDt?: any; RemAmt?: any; UpdTm?: any; MsgType?: any; StoreId?: any;
+}
+
+function updTmMs(v: any): number {
+  if (v instanceof Date) return v.getTime();
+  const t = Date.parse(String(v || '').replace(' ', 'T'));
+  return Number.isFinite(t) ? t : 0;
+}
+
+// RemAmt 원값 정규화 — null/undefined/빈 문자열은 "값 없음"(NaN)으로. Number(null)=0 강제 변환 차단(Codex R2 실버그).
+function remAmtNum(v: any): number {
+  if (v === null || v === undefined || String(v).trim() === '') return NaN;
+  return Number(v);
+}
+
+// ★ 권위 행 확정(§8-9 행 단위 실측 0724): RemAmt는 **StoreId=''(계정 합계 행)에만** 실린다.
+//   D0130 실증 — 빈 StoreId 행(L·S)은 둘 다 18,445(같은 값 복제), UUID StoreId 상세 행은 전부 0. B0001 동일('alarm' 행 0).
+//   → pickLatestBalances는 StoreId 빈 행만 잔액 소스로 쓴다. PK가 (DestDt,CustId,StoreId,MsgType)라 StoreId는 NOT NULL('' 비교로 충분).
+// 잔액 행 우선순위(계정 행 안에서) — DestDt 최대 → UpdTm 최신 → 값 보유(비NaN) 우선 → MsgType·StoreId 사전순.
+// ⚠ "큰 값 우선" 축은 두지 않는다(Codex R3 — 계정 행 간 값이 어긋나는 미관측 상황에서 잔액 과대 표시 편향 차단).
+//   실측상 같은 날 계정 행 RemAmt는 동일 복제(D0130 L·S 둘 다 18,445)라 값 축 자체가 불필요하고,
+//   어긋나면 최신 스냅샷(UpdTm)이 이기며, 그마저 같으면 MsgType 사전순으로 결정적이다.
+function balanceRowRank(a: PayBalanceSourceRow, b: PayBalanceSourceRow): number {
+  const da = String(a.DestDt || ''), db = String(b.DestDt || '');
+  if (da !== db) return da > db ? -1 : 1;
+  const ua = updTmMs(a.UpdTm), ub = updTmMs(b.UpdTm);
+  if (ua !== ub) return ua > ub ? -1 : 1;
+  const ha = Number.isFinite(remAmtNum(a.RemAmt)) ? 0 : 1;
+  const hb = Number.isFinite(remAmtNum(b.RemAmt)) ? 0 : 1;
+  if (ha !== hb) return ha - hb; // 값 보유 행 > 값 없는(null) 행 — 동시각 한정
+  const ma = String(a.MsgType || ''), mb = String(b.MsgType || '');
+  if (ma !== mb) return ma < mb ? -1 : 1;
+  const sa = String(a.StoreId || ''), sb = String(b.StoreId || '');
+  if (sa !== sb) return sa < sb ? -1 : 1;
+  return 0;
+}
+
+/**
+ * 순수 선택 로직(테스트 대상) — CustId별 최우선 행 1건을 골라 custIds 순서대로 반환.
+ * 통계 행이 없는 ID는 rem_amt=null(집계 전)로 합성해 조용한 누락을 막되, 0원으로 오인시키지 않는다.
+ * RemAmt가 수치가 아니면 null(미확정) 처리.
+ */
+export function pickLatestBalances(custIds: string[], rows: PayBalanceSourceRow[]): PayAgentBalance[] {
+  const best = new Map<string, PayBalanceSourceRow>();
+  for (const r of rows) {
+    const cid = String(r.CustId || '').trim();
+    if (!cid) continue;
+    if (String(r.StoreId || '').trim() !== '') continue; // 권위 행 = StoreId 빈 계정 합계 행만(§8-9 확정) — 상세 행 RemAmt=0 오염 차단
+    const cur = best.get(cid);
+    if (!cur || balanceRowRank(r, cur) < 0) best.set(cid, r);
+  }
+  return custIds.map((cid) => {
+    const r = best.get(cid);
+    if (!r) return { agent_send_id: cid, rem_amt: null, as_of_date: '', updated_at: '' };
+    const dt = String(r.DestDt || '');
+    const amt = remAmtNum(r.RemAmt); // null/''=값 없음 → null (0원 강제 변환 금지 — Codex R2)
+    return {
+      agent_send_id: cid,
+      rem_amt: Number.isFinite(amt) ? amt : null,
+      as_of_date: /^\d{8}$/.test(dt) ? `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}` : '',
+      updated_at: String(r.UpdTm || ''),
+    };
+  });
+}
+
+/**
+ * ★ 2026-07-24 §5-2 — 발송ID별 게이트웨이 잔액 조회 (선불 prepaid ID만).
+ * 잔액 = RSRM_SalesStts에서 CustId별 MAX(DestDt) 행의 RemAmt(같은 날 복수 행이면 UpdTm 최신 행).
+ * 저장하지 않는다(이중 진실 금지) — 조회만. 과거 적재분(dump 복원·0715 이전)은 RemAmt=0이라
+ * as_of_date를 반드시 함께 노출해 stale 여부를 사용자가 식별하게 한다(0724 실측 근거).
+ * PAY env 미설정 = 기능 자체 비활성 — PG 검증 없이 빈 배열(의도. 이 경로에선 503 분기 미작동이 정상).
+ * MySQL 연결/조회 실패 = 빈 배열(호출부 미노출 폴백).
+ * 단 PG 에러(billing_type 컬럼 미마이그레이션 등)는 그대로 던진다 — 라우트 catch의 503 분기용.
+ */
+export async function queryPayAgentBalances(companyId: string): Promise<PayAgentBalance[]> {
+  const pool = getPool();
+  if (!pool) return [];
+
+  const custRes = await query(
+    `SELECT agent_send_id FROM company_agent_ids WHERE company_id = $1 AND billing_type = 'prepaid' ORDER BY agent_send_id`,
+    [companyId],
+  );
+  const custIds: string[] = custRes.rows.map((r: any) => String(r.agent_send_id).trim()).filter(Boolean);
+  if (custIds.length === 0) return [];
+
+  try {
+    // 계정 합계 행(StoreId='')만 — MAX(DestDt) 산정도 계정 행 기준(상세 행만 있는 날짜로 끌려가는 것 방지). 규칙 자체는 pickLatestBalances에도 이중 적용.
+    const ph = custIds.map(() => '?').join(',');
+    const [rows] = await pool.query(
+      `SELECT s.CustId, s.DestDt, s.RemAmt, s.UpdTm, s.MsgType, s.StoreId
+         FROM RSRM_SalesStts s
+         JOIN (SELECT CustId, MAX(DestDt) AS mx FROM RSRM_SalesStts WHERE CustId IN (${ph}) AND StoreId = '' GROUP BY CustId) m
+           ON m.CustId = s.CustId AND m.mx = s.DestDt
+        WHERE s.StoreId = ''`,
+      custIds,
+    );
+    return pickLatestBalances(custIds, rows as PayBalanceSourceRow[]);
+  } catch (err: any) {
+    console.log('[pay-stats] 잔액 조회 실패(미노출 폴백):', err?.message || err);
+    return [];
+  }
+}
