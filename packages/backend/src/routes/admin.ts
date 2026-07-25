@@ -36,6 +36,8 @@ import { buildXlsxBuffer, XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../u
 import { normalizePhone } from '../utils/normalize-phone';
 import { normalizeCdpAutoExecuteGate } from '../utils/autosend-policy';
 import { grantBasicTrial } from '../utils/basic-trial';
+// ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
+import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
 import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isLineGroupAdmin, diffFields } from '../utils/audit-log';
 // ★ 2026-07-01: 예측 일괄 분석·차감 수동 트리거 (9시 대기 없이 검증·복구·시연)
@@ -508,7 +510,19 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
       prevCompanyLineGroupId = prevLg.rows[0]?.line_group_id ?? null;
     }
 
-    const result = await query(`
+    // ★ 2026-07-25 요금제가 바뀌는 경로라 변경과 이력을 한 트랜잭션으로(Codex 지적 A·C).
+    //   이 엔드포인트는 이력 배선이 빠져 있었다 — `SET plan_id` 리터럴 grep이 다중 컬럼 UPDATE의
+    //   중간 줄(`plan_id = COALESCE($6, plan_id)`)을 못 잡았다. 전 출현 분류로 재검증해 찾았다.
+    const planClient = await pool.connect();
+    let result: any;
+    try {
+      await planClient.query('BEGIN');
+      const beforePlan = await planClient.query('SELECT plan_id FROM companies WHERE id = $1::uuid FOR UPDATE', [id]);
+      if (beforePlan.rows.length === 0) {
+        await planClient.query('ROLLBACK');
+        return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+      }
+      result = await planClient.query(`
       UPDATE companies
       SET company_name = COALESCE($1, company_name),
           contact_name = COALESCE($2, contact_name),
@@ -554,7 +568,28 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
       WHERE id = $32
       RETURNING *
     `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, finalSubscriptionStatus, id, userIsolationEnabled !== undefined ? userIsolationEnabled : null, usageType || null, industryCodeParam, costPerTestSms === undefined ? null : String(costPerTestSms ?? ''), costPerTestLms === undefined ? null : String(costPerTestLms ?? '')]);
-    
+
+      // 요금제가 실제로 바뀐 때만 기록한다(COALESCE라 planId가 null이면 미변경).
+      const newPlanId = result.rows[0]?.plan_id;
+      if (planId && newPlanId && String(newPlanId) !== String(beforePlan.rows[0].plan_id)) {
+        await recordPlanChange({
+          client: planClient,
+          companyId: id,
+          toPlanId: String(newPlanId),
+          changeType: 'auto',
+          changedBy: (req as any).user?.userId || null,
+          reason: '회사 수정(요금제 변경·슈퍼관리자)',
+        });
+      }
+      await planClient.query('COMMIT');
+    } catch (err) {
+      try { await planClient.query('ROLLBACK'); } catch { /* 아래 알림에 포함 */ }
+      await alertPlanChangeFailure(id, err);
+      throw err;
+    } finally {
+      planClient.release();
+    }
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
     }
@@ -1332,10 +1367,35 @@ router.put('/plan-requests/:id/approve', authenticate, requireSuperAdmin, async 
       const approvedPlanRes = await query(`SELECT plan_code FROM plans WHERE id = $1`, [request.requested_plan_id]);
       const approvedIsTrial = approvedPlanRes.rows[0]?.plan_code === 'TRIAL';
       const approvedStatus = approvedIsTrial ? 'trial' : 'paid';
-      await query(
-        `UPDATE companies SET plan_id = $1, subscription_status = $2, updated_at = NOW() WHERE id = $3`,
-        [request.requested_plan_id, approvedStatus, request.company_id]
-      );
+      // ★ 2026-07-25 플랜 변경과 이력을 한 트랜잭션으로(Codex 지적 C).
+      //   승급/강등 판정은 recordPlanChange 안에서 INSERT에 쓰는 바로 그 직전 값으로 한다(지적 F) —
+      //   호출부가 미리 계산하면 그 사이 다른 변경이 끼어들 때 방향이 뒤집힌다.
+      const planClient = await pool.connect();
+      try {
+        await planClient.query('BEGIN');
+        const planUpd = await planClient.query(
+          `UPDATE companies SET plan_id = $1, subscription_status = $2, updated_at = NOW() WHERE id = $3
+           RETURNING id`,
+          [request.requested_plan_id, approvedStatus, request.company_id]
+        );
+        if (planUpd.rows.length > 0) {
+          await recordPlanChange({
+            client: planClient,
+            companyId: request.company_id,
+            toPlanId: request.requested_plan_id,
+            changeType: 'auto',
+            changedBy: (req as any).user?.userId || null,
+            reason: '요금제 신청 승인(슈퍼관리자)',
+          });
+        }
+        await planClient.query('COMMIT');
+      } catch (err) {
+        try { await planClient.query('ROLLBACK'); } catch { /* 아래 알림에 포함 */ }
+        await alertPlanChangeFailure(request.company_id, err);
+        return res.status(500).json({ error: '요금제 승인에 실패했습니다. 다시 시도해주세요.' });
+      } finally {
+        planClient.release();
+      }
     }
     
     // 신청 상태 변경

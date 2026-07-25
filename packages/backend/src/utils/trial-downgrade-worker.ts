@@ -20,7 +20,8 @@
  *   ※ 정식 구독은 plan_code가 STARTER/BASIC/PRO/BUSINESS/ENTERPRISE로 바뀌므로 자동 제외됨.
  */
 
-import { query } from '../config/database';
+import pool, { query } from '../config/database';
+import { recordPlanChange, alertPlanChangeFailure } from './plan-change-log';
 
 function log(tag: string, ...args: any[]) {
   console.log(`[trial-downgrade][${tag}]`, ...args);
@@ -51,21 +52,58 @@ export async function runTrialDowngradeJob(): Promise<{ downgraded: number }> {
   // ※ 2026-06-08: plan_code='TRIAL' 한정 → status='trial' 기준 확장 (BASIC 체험은 plan_code='BASIC'이라 옛 조건에 안 잡힘).
   //   정식 구독(status='paid')은 제외. 일반 플랜변경 승인은 'paid'로 세팅하므로 안전.
   // ⛔ 크레딧 불변식: base만 FREE(0)로 리셋, purchased(구매분) 컬럼 미포함 = 보존.
-  const res = await query(
-    `UPDATE companies c
-        SET plan_id                   = $1,
-            subscription_status       = 'trial_expired',
-            ai_credits_base_remaining = $2,
-            ai_credits_reset_at       = NOW(),
-            updated_at                = NOW()
+  // ★ 2026-07-25 일괄 UPDATE → 회사별 트랜잭션(Codex 지적 C).
+  //   강등과 이력 기록이 원자적이어야 한다 — 이력을 놓치면 그 뒤 모든 구간의 직전 플랜이 어긋나
+  //   청구 금액이 연쇄로 틀어진다. 한 건 실패가 나머지 회사를 막지는 않는다.
+  const targets = await query(
+    `SELECT c.id, c.company_name
+       FROM companies c
       WHERE c.subscription_status = 'trial'
         AND c.trial_expires_at IS NOT NULL
-        AND c.trial_expires_at < NOW()
-    RETURNING c.id, c.company_name`,
-    [freePlanId, freeBaseCredits],
+        AND c.trial_expires_at < NOW()`,
   );
 
-  const rows = res.rows as Array<{ id: string; company_name: string }>;
+  const rows: Array<{ id: string; company_name: string }> = [];
+  for (const t of targets.rows as Array<{ id: string; company_name: string }>) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const upd = await client.query(
+        `UPDATE companies
+            SET plan_id                   = $1,
+                subscription_status       = 'trial_expired',
+                ai_credits_base_remaining = $2,
+                ai_credits_reset_at       = NOW(),
+                updated_at                = NOW()
+          WHERE id = $3
+            AND subscription_status = 'trial'
+            AND trial_expires_at IS NOT NULL
+            AND trial_expires_at < NOW()
+        RETURNING id`,
+        [freePlanId, freeBaseCredits, t.id],
+      );
+      if (upd.rows.length > 0) {
+        await recordPlanChange({
+          client,
+          companyId: t.id,
+          toPlanId: freePlanId,
+          changeType: 'trial_expire',
+          reason: '무료체험 만료 자동 강등(trial-downgrade-worker)',
+        });
+        await client.query('COMMIT');
+        rows.push(t);
+      } else {
+        // 조회~갱신 사이에 상태가 바뀐 경우(다른 경로가 먼저 처리) — 정상 스킵
+        await client.query('ROLLBACK');
+      }
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* 아래 알림에 포함 */ }
+      await alertPlanChangeFailure(t.id, err);
+    } finally {
+      client.release();
+    }
+  }
+
   if (rows.length > 0) {
     log('job', `${rows.length}개 회사 FREE(미가입) 강등 완료:`,
       rows.map(r => `${r.company_name}(${r.id.slice(0, 8)})`).join(', '));

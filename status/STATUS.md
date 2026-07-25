@@ -13,6 +13,7 @@
 | DB 쿼리 작성 / 스키마 확인 | SCHEMA.md | 대상 테이블 절만 |
 | 도메인 작업 착수 전 사고 이력 (룰 원천=CLAUDE.md `read_lessons_first`) | lessons/LESSONS_{DB,FRONTEND,BACKEND,DEPLOY,ARCHITECTURE,META}.md | 해당 도메인 전체. DB·돈·환불=DB / UI·모달=FRONTEND / API·발송·AI=BACKEND / 배포·빌드·SSH=DEPLOY+OPS.md 해당 절 / 컨트롤타워=ARCHITECTURE / **매 답변 직전=META** |
 | **Harold님이 "브레인스토밍"이라고 말했을 때** · superpowers 스킬 선택 · Codex 라운드 운영 | **COLLAB.md** | 브레인스토밍 = §1 전체 정독 후 그대로 진행(의무) / 그 외 = 해당 절만 |
+| **정산 재구성(청구서 5항목·에이전트 축·일할계산) 재개** | **docs/2026-07-25-billing-restructure-handoff.md** | 전체 (SoT — 단독 재개용. §0 배포상태 → §4 남은 작업 순서) |
 | 시스템 구조 파악 | ARCHITECTURE.md | 해당 절만 |
 | 자사몰 연동·CDP·커넥터 작업 | INTEGRATIONS.md | 해당 provider 카드 / CDP 공통 절 |
 | 버그 수정 | BUGS.md | 해당 버그 항목 (해결분은 archive/BUGS_RESOLVED.md) |
@@ -47,6 +48,14 @@
 > (이하 0725 1차분) MMS 308,043건 0원 청구(msg_type M·K 미변환) 수정에 이어, 같은 날 2세션에서 ①preview≠발행(자체 SQL 폐기·발행 드라이런으로 재작성) ②정산 생성 비트랜잭션(+`billed` 되돌림 — `billed_invoice_id`는 FK 아님이라 "삭제 후 재생성"에서 크레딧이 영구 미청구되던 경로) ③테스트단가 0원 폴백 ④사용자별 정산 크레딧 축 불일치 ⑤선불 회사 이중 청구 가드 ⑥집계 유형키 누락 자동 감지 ⑦IMC 부재 500 방어 ⑧**월 경계 누락(6월 LOG에 앉은 7/1 발송 385건이 6·7월 어디에도 안 잡히던 구조 — LOG 스캔 ±1개월)** 완료. **7월 청구 금액을 바꾸는 미해결 항목 없음.** Codex 적대검증 4건 중 3건은 실측으로 기각(브랜드메시지는 `IMC%` 테이블 전 스키마 0개 + `campaigns.name` 컬럼 부재로 발송 자체가 비가동 — 별건 분리). tsc 0·1,033 테스트 통과. **발행은 대기 소진 후 8/4 이후, 검증 1건 = 거래내역서에 MMS 308,043건.** 62 원장 07-05~07 + C서버 6일 복구 완료. 상세=[[project_2026_0725_settlement_mms_gap_and_seo_tickets]].
 > (구) 서수란 접수 6건 착수 기록 — 순서 = ①발급명 병기 ②대상ID 출력 ③웹 발송유형 NULL ④알림톡 부달 B0061 귀속 ⑤7/6~7 불일치 진단 ⑥슈퍼 발신번호 페이징. ③ 착수 시 근본 = 웹 통계 소스(querySendStats)에 유형 축이 없어 CSV만 고쳐선 안 됨. 상세·함정 = [[project_2026_0725_pay_stats_custnm_storeid]].
 > **별건(미해결)**: 피케이포유 대상ID 인코딩 손상 — 같은 매장이 정상 UTF-8과 EUC-KR 이중인코딩 두 벌(hex 실측 확정). 게이트웨이 ingest 손상이라 복원은 별도 과제. 상세 = Track D SoT §2-4.
+
+### 🔴 진행중 — 정산 재구성 (0725 착수, 다음 세션 1순위)
+> **SoT = [docs/2026-07-25-billing-restructure-handoff.md](docs/2026-07-25-billing-restructure-handoff.md)** — 단독 재개용. 대화 맥락 없이 그 문서만 읽으면 된다.
+> **재개 첫 할 일 = 요금제 이력 배선 7파일 커밋·배포**(미커밋 상태. tsc 0·1,077 테스트·Codex 6건 정정 완료).
+> Harold 정의 청구서 = ①요금제(일할) ②한줄로 웹(일자×계정×유형) ③에이전트(일자×발송ID×대상ID×유형) ④테스트(일자×계정) ⑤AI크레딧.
+> **근본 문제 = 청구 집계가 에이전트(`sales.RSRM_SalesStts`)를 전혀 안 읽는다** → `usage_type='both'` 회사의 게이트웨이 발송분이 청구서에서 통째 누락(금강제화 정산서 지적의 원인).
+> 준비 완료: `company_plan_changes` 테이블+141행 기준선 · `plan-change-log` CT(쓰기 9곳 전수 배선) · `billing_items` 축 ALTER(channel·store_id·agent_id FK).
+> 남은 순서 = ①청구용 통합 집계 ②`/generate` 재작성 ③PDF 재구성 ④일할계산 순수함수 ⑤성능(1분+, 48테이블) ⑥금강제화 대상ID 실측.
 
 ### 🔵 다음 세션 (예정)
 > ① **템플릿관리자 흡수(Track B+C) — 1순위**: 다음 = 서팀장 점검표 회신(계정·코드 정정) → 컷오버. 병행 = M4 실발송 1건 · 497 기준 서팀장 · M5(B-3 계정·Bill_ID) · 브랜드 스코프(B-2) · 다우 2사 senderKey 이관 실측. 계약·이관 이력 전문 = 설계문서 §1·§4 · [[project_2026_0705_legacy_template_migration]].

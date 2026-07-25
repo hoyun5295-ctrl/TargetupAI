@@ -11,8 +11,9 @@
 
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import { query } from '../config/database';
+import pool, { query } from '../config/database';
 import { ensureSystemSyncUser } from './system-sync-user';
+import { recordPlanChange } from './plan-change-log';
 
 export interface CreateCompanyParams {
   companyCode: string;
@@ -34,21 +35,47 @@ export async function createCompanyCore(p: CreateCompanyParams): Promise<any> {
   const apiSecret = crypto.randomBytes(32).toString('hex');
   const dbName = `targetup_${p.companyCode.toLowerCase()}`;
 
-  const result = await query(
-    `INSERT INTO companies (
-      name, company_code, company_name, business_number, ceo_name,
-      contact_name, contact_email, contact_phone, address,
-      plan_id, data_input_method, api_key, api_secret, db_name,
-      created_by, usage_type
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-    RETURNING *`,
-    [
-      p.companyName, p.companyCode, p.companyName, p.businessNumber ?? null, p.ceoName ?? null,
-      p.contactName ?? null, p.contactEmail ?? null, p.contactPhone ?? null, p.address ?? null,
-      p.planId ?? null, p.dataInputMethod ?? 'file', apiKey, apiSecret, dbName,
-      p.createdBy ?? null, p.usageType ?? 'web',
-    ],
-  );
+  // ★ 2026-07-25 회사 생성과 최초 요금제 이력을 한 트랜잭션으로(Codex 지적 C).
+  //   회사 생성이 곧 최초 플랜 확정이다. 여기서 안 남기면 신규 회사의 첫 구간이 통째로 비어
+  //   청구서 일할계산이 성립하지 않는다. 에러는 raw 전파(23505 중복 등) — 기존 계약 유지.
+  const client = await pool.connect();
+  let result: any;
+  try {
+    await client.query('BEGIN');
+    result = await client.query(
+      `INSERT INTO companies (
+        name, company_code, company_name, business_number, ceo_name,
+        contact_name, contact_email, contact_phone, address,
+        plan_id, data_input_method, api_key, api_secret, db_name,
+        created_by, usage_type
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      RETURNING *`,
+      [
+        p.companyName, p.companyCode, p.companyName, p.businessNumber ?? null, p.ceoName ?? null,
+        p.contactName ?? null, p.contactEmail ?? null, p.contactPhone ?? null, p.address ?? null,
+        p.planId ?? null, p.dataInputMethod ?? 'file', apiKey, apiSecret, dbName,
+        p.createdBy ?? null, p.usageType ?? 'web',
+      ],
+    );
+
+    // 플랜 미지정(NULL) 회사는 남길 값이 없으므로 건너뛴다.
+    if (p.planId) {
+      await recordPlanChange({
+        client,
+        companyId: result.rows[0].id,
+        toPlanId: p.planId,
+        changeType: 'initial',
+        changedBy: p.createdBy ?? null,
+        reason: '회사 생성 시 최초 요금제',
+      });
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* 아래 전파에 포함 */ }
+    throw err;
+  } finally {
+    client.release();
+  }
 
   const newCompanyId = result.rows[0].id;
 

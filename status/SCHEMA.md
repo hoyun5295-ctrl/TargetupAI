@@ -378,6 +378,31 @@
 - INDEX idx_company_agent_ids_company (company_id)
 - 2026-07-24 ALTER 적용 실측: 10컬럼·기존 283행 전부 postpaid. 잔액은 컬럼 없음(이중 진실 금지 — 게이트웨이 RSRM_SalesStts.RemAmt 최신 DestDt 행을 조회만). SoT=docs/2026-07-24-agent-prepaid-charge-design.md
 
+### [외부 MySQL] sales.RSRM_SalesStts — 에이전트(PAY 엔진) 발송 통계 ★2026-07-25 등재
+
+> **PG가 아니다. 별도 MySQL 컨테이너 `pay-ingest-db`에 있다.** 강문희 쪽 게이트웨이가 여기로 push하고 우리는 읽기만 한다.
+> 여기 없어서 매번 컬럼을 추측하다 `SuccCnt`(존재하지 않음) 오류가 났다. **성공 컬럼은 `OkCnt`다.**
+
+**접속** — 앱: `PAY_STATS_DB_*` env (host 기본 `127.0.0.1`, port **23388**, db **`sales`**, user `paystats`).
+`paystats`·`hanjul_ro`는 `172.%`(도커 브리지)에서만 붙는다. **컨테이너 안에서 `docker exec`로 접속하면 출처가 `localhost`라 권한이 없다** — 그때는 `root@localhost`를 쓴다.
+`sales@139.150.81.213 / 58.227.193.54 / .57 / .58` = 게이트웨이 push 계정(그 4개 IP만 허용).
+
+| 컬럼 | 용도 |
+|------|------|
+| CustId | **발송ID**. `company_agent_ids.agent_send_id`와 매칭되는 회사 축 |
+| StoreId | **대상ID**. 발송 시 입력하는 청구 구분 축(지점·브랜드). 빈 값 가능 |
+| DestDt | 일자 **`YYYYMMDD` 문자열**(date 아님). 기간 필터는 문자열 비교 |
+| MsgType | 유형 코드 S/L/M/K/X(+KS·KL 대체발송) — `pay-stats.ts AGENT_MSG_TYPE_LABEL` |
+| TotCnt | 전송 |
+| **OkCnt** | **성공** (★`SuccCnt` 아님 — 청구 수량의 기준) |
+| FailCnt | 실패 |
+| ReadyCnt | 대기. **음수가 관측된다**(게이트웨이 원천값이 완료분을 차감) — 우리 파생 아님 |
+| RemAmt | 잔액. `StoreId=''` 계정 행에만 유효(SoT=docs/2026-07-24-agent-prepaid-charge-design.md) |
+| SysId | 수집 서버 구분 |
+
+- 소비 CT = `utils/pay-stats.ts`(집계 SQL 전량). 월 확장은 `utils/stats-period.ts` 공용.
+- 2026-07-25 실측: 청구서(`billing.ts`)는 이 테이블을 **전혀 읽지 않는다** → `usage_type='both'` 회사(금강제화 등)의 에이전트 발송분이 청구서에서 통째로 누락. 재구성 대상.
+
 ### company_settings (고객사 설정 KV)
 | 컬럼 | 타입 |
 |------|------|
@@ -1002,6 +1027,32 @@
 - `subscription_status` varchar(20) — `null | 'trial' | 'trial_expired' | 'paid' | 'active' | 'expired' | 'suspended'`
 - `trial_expires_at` timestamp — 30일 PRO 무료체험 만료 시각. `utils/trial-downgrade-worker.ts` Cron(매일 04:00 KST)이 만료 시 자동 강등.
 
+### company_plan_changes (요금제 변경 이력 — 청구 일할계산의 입력) ★2026-07-25 신설 · 2026-07-26 실측 등재 (13컬럼)
+
+> 신설 사유: `companies.plan_id`를 덮어쓰기만 해서 **언제 바꿨는지가 어디에도 안 남았다.** 월 중간에 플랜을 올리거나 내린 회사의 일할계산 전제가 없었고, 소급으로 알아낼 방법도 없다.
+> 쓰기 진입점 = `utils/plan-change-log.ts` `recordPlanChange()` **하나뿐**(plan_id 쓰기 9곳 전수 배선). `client`(PoolClient)가 필수라 plan_id UPDATE와 **같은 트랜잭션 안에서만** 기록된다 — 이력 한 건 유실은 그 뒤 전 구간을 틀어뜨리는 연쇄 손상이라 분리를 타입에서 막았다.
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK NOT NULL `gen_random_uuid()` | |
+| company_id | uuid NOT NULL | FK companies |
+| from_plan_id | uuid NULL | 직전 플랜. 기준선 행은 NULL |
+| to_plan_id | uuid NOT NULL | |
+| from_plan_code | varchar NULL | 그 시점 **스냅샷** |
+| to_plan_code | varchar NOT NULL | |
+| from_monthly_price | numeric NULL | 그 시점 **스냅샷** — `plans.monthly_price`를 나중에 올려도 과거 청구서 재발행 금액이 안 바뀌게 |
+| to_monthly_price | numeric NOT NULL | |
+| effective_date | date NOT NULL | **요금 적용 기준일**(KST). `changed_at`과 분리 |
+| change_type | varchar NOT NULL | `initial`/`upgrade`/`downgrade`/`trial_start`/`trial_expire`/`admin` |
+| changed_by | uuid NULL | FK users ON DELETE SET NULL |
+| reason | text NULL | |
+| changed_at | timestamptz NOT NULL DEFAULT now() | **기록 시각**(≠ 적용 기준일) |
+
+- **직전 플랜은 `companies`가 아니라 이 테이블 최신 행**(`ORDER BY effective_date DESC, changed_at DESC LIMIT 1`)에서 도출한다 — 호출 시점엔 `plan_id`가 이미 새 값으로 덮여 있고, 이력끼리 체인이 이어져야 일할계산이 구간을 끊을 수 있다.
+- 회사별 `pg_advisory_xact_lock(hashtext(company_id), hashtext('plan_change'))`로 직렬화. 승강등 판정(`classifyPlanChange`)은 INSERT에 쓰는 바로 그 prev 값으로만 한다.
+- **기준선 141행**(2026-07-25 21:18 UTC 일괄 INSERT): `change_type='initial'` · `effective_date = companies.created_at::date` · `from_*` 전부 NULL. reason에 "이력 도입 전 기준선 — 실제 변경 이력 없음" 명시. 분포 = FREE 129 / BASIC 6 / ENTERPRISE 3 / TRIAL 2 / BUSINESS 1.
+- 인덱스·FK·varchar 길이는 아직 `pg_indexes`/`pg_constraint` 미실측 — 생성 명세는 `docs/2026-07-25-billing-restructure-handoff.md` §3-1(`INDEX (company_id, effective_date)` · `(effective_date)`).
+
 ### saved_segments (저장 세그먼트 — D107)
 | 컬럼 | 타입 | 비고 |
 |------|------|------|
@@ -1413,6 +1464,58 @@
 | k_resyes | varchar(1) | |
 | app_etc1 | varchar(50) | campaign_run_id 저장 |
 | app_etc2 | varchar(50) | |
+
+### billings (정산 헤더 — 청구서 1페이지 요약) ★2026-07-25 등재 (38컬럼 실측)
+
+> 실제 발행 경로의 헤더. **`billing_items`가 상세.** 0725 기준 실행 이력 = 금강제화 시험 발행 1건뿐.
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK `gen_random_uuid()` | |
+| company_id | uuid NOT NULL | |
+| user_id | uuid NULL | 사용자 지정 정산(그 사용자 발송분만) |
+| agent_id | uuid NULL | 미사용(항상 NULL) |
+| billing_year · billing_month | integer NOT NULL | |
+| billing_start · billing_end | date NOT NULL | 기간 겹침 중복검사 축 |
+| sms_success · lms_success · mms_success · kakao_success | integer NOT NULL DEFAULT 0 | **성공 수량 = 청구 수량** |
+| sms_unit_price · lms_unit_price · mms_unit_price · kakao_unit_price | numeric NOT NULL DEFAULT 0 | 단가 스냅샷 |
+| test_sms_count · test_lms_count | integer NOT NULL DEFAULT 0 | |
+| test_sms_unit_price · test_lms_unit_price | numeric NOT NULL DEFAULT 0 | 미설정 시 일반 단가 상속(0원은 0원 — `resolveBillingUnitPrices`) |
+| spam_filter_sms_count · spam_filter_lms_count | integer NULL DEFAULT 0 | |
+| spam_filter_sms_unit_price · spam_filter_lms_unit_price | numeric NULL DEFAULT 0 | 스팸 단가 = 일반 SMS/LMS 단가(D16) |
+| ai_credit_count | integer NOT NULL DEFAULT 0 | 후불 충전 + overage 크레딧 수량 |
+| ai_credit_supply | numeric NOT NULL DEFAULT 0 | 공급가(VAT 별도) |
+| subtotal · vat · total_amount | numeric NOT NULL DEFAULT 0 | vat = round(subtotal × 0.1) |
+| status | varchar NOT NULL DEFAULT 'draft' | draft/confirmed/paid |
+| notes | text NULL | |
+| created_by | uuid NULL | |
+| created_at · updated_at | timestamptz NOT NULL now() | |
+| emailed_at · emailed_to · emailed_by · email_sent_at | — | 발송 이력 |
+
+- **에이전트 축 컬럼이 없다** — 그래서 `usage_type='both'` 회사의 게이트웨이 발송분이 청구서에 안 들어간다(0725 발견, 재구성 대상).
+- `ai_credit_requests.billed_invoice_id`가 이 테이블을 가리키지만 **FK가 아니다** — 삭제해도 `billed=true`가 남아 재발행 시 크레딧이 영구 미청구. 0725에 `DELETE /:id`가 되돌리도록 수정함.
+
+### billing_items (정산 상세 — 청구서 2페이지 일자별) ★2026-07-25 등재 + 축 확장 ALTER
+
+> 실제 발행 경로 = `POST /api/admin/billing/generate` → `billings`(헤더) + `billing_items`(상세) → `GET /:id/pdf`.
+> (`billing_invoices`는 화면에 생성 UI가 없다 — 0725 실측 0행·`billingApi.createInvoice` 호출부 0건.)
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| billing_id | uuid FK → billings **ON DELETE CASCADE** | |
+| company_id | uuid FK → companies | |
+| user_id | uuid FK → users NULL | ★2026-07-25 **행별 사용자 축**(웹·테스트·스팸). 그 전엔 헤더값 복사라 무의미 |
+| agent_id | uuid FK → **company_agent_ids** NULL | ★2026-07-25 FK 신설. 에이전트 발송ID. 그 전엔 항상 NULL |
+| store_id | varchar(100) NULL | ★2026-07-25 ALTER 신설. 에이전트 대상ID(`RSRM_SalesStts.StoreId`) |
+| channel | varchar(20) NOT NULL DEFAULT 'web' | ★2026-07-25 ALTER 신설. `web`/`agent`/`test`/`spam` — 암묵 판별(message_type 접두) 폐기 |
+| item_date | date NOT NULL | |
+| message_type | varchar NOT NULL | 유형키(SMS/LMS/MMS/KAKAO/TEST_*/SPAM_*) |
+| total_count · success_count · fail_count · pending_count | integer NOT NULL | **청구 수량 = success_count** |
+| unit_price · amount | numeric NOT NULL | 단가 스냅샷 × 성공 |
+| created_at | timestamptz NOT NULL | |
+- INDEX idx_billing_items_billing_channel (billing_id, channel)
+- 2026-07-25 ALTER 적용 실측: `channel`·`store_id` 추가 + `agent_id` FK 신설 + 인덱스. 기존 15행(금강제화 시험 발행분)은 전부 web.
 
 ### billing_invoices (거래내역서/정산)
 | 컬럼 | 타입 | 설명 |

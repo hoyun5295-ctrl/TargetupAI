@@ -7,7 +7,13 @@
 
 ## 핵심 원칙
 
+- **★ 컬럼을 쓰기 전 3단계 — 순서 절대 준수 (2026-07-25 Harold 질책)**
+  1. **SCHEMA.md grep** — 이미 등재돼 있으면 그걸 쓴다. 안 보고 물으면 Harold 시간을 뺏는다(0725: `company_agent_ids`가 365행에 있었는데 다시 여쭘).
+  2. **없으면 코드에서 실사용 컬럼 확인** — 운영에서 도는 SQL이 가장 확실한 증거다. 외부 DB라 information_schema를 못 볼 때 특히(0725: `RSRM_SalesStts` 성공 컬럼은 `pay-stats.ts` SELECT에 `OkCnt`로 있었다).
+  3. **그래도 없으면 information_schema 순수 덤프를 Harold께 요청** — 그리고 **받은 즉시 SCHEMA.md에 등재한다.** 등재를 안 하면 다음에 또 묻게 되고, 그게 추측의 씨앗이 된다.
+  - 위반 사례(같은 날 2회): `campaigns.name`(실제 `campaign_name`) / `RSRM_SalesStts.SuccCnt`(실제 `OkCnt`). 둘 다 확인 없이 명령어를 드려 에러가 났다.
 - **SCHEMA.md 의존 X** — 실 DB `pg_constraint` + `information_schema.columns` 검증 후 SQL 작성 (D134)
+  - ※ 위 3단계와 충돌 아님: SCHEMA.md는 **출발점**이고, 스키마를 **바꾸거나 제약에 의존**할 땐 실 DB 검증이 최종 근거다.
 - **추측 컬럼명 X** — `\d 테이블명` 검증 SQL 먼저 (D162 42P08)
 - **돈 관련 = 단순 fix X** — root cause + 영구 안전망 (reverse + cron + idempotent + 트랜잭션) 동시 (D182)
 - **DB ALTER 새 컬럼 → endpoint catch 분기 처리** (D214+ 신규)

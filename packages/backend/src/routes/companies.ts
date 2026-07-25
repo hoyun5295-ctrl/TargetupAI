@@ -1,6 +1,6 @@
 import { Request, Response, Router } from 'express';
 import nodemailer from 'nodemailer';
-import { query } from '../config/database';
+import pool, { query } from '../config/database';
 // ★ 2026-07-20: 회사 생성 코어 CT(시스템 user·시퀀스 부속 포함) — POST /와 게이트웨이 bill 일괄 생성 공유
 import { createCompanyCore } from '../utils/company-create';
 import { authenticate, requireSuperAdmin, requireUuidId } from '../middlewares/auth';
@@ -9,6 +9,8 @@ import { getStoreScope } from '../utils/store-scope';
 import { getOpt080Number } from '../utils/messageUtils';
 import { normalizeOpt080Input } from '../utils/normalize';
 import { grantBasicTrial, isTrialApplyOpen } from '../utils/basic-trial';
+// ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
+import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
 import { parseAgentLedgerFields, parseAgentLedgerPatch } from '../utils/pay-stats';
 
 const router = Router();
@@ -1642,17 +1644,40 @@ router.post('/:id/grant-trial', requireUuidId, requireSuperAdmin, async (req: Re
     const trialPlanId = trialRes.rows[0].id;
 
     // ★ RETURNING에 plan_code 포함 — AdminDashboard 가 응답값으로 planCode 표시
-    const updated = await query(
-      `UPDATE companies c
-          SET plan_id             = $1,
-              subscription_status = 'trial',
-              trial_expires_at    = NOW() + ($2::int || ' days')::interval,
-              updated_at          = NOW()
-        WHERE c.id = $3
-      RETURNING c.id, c.plan_id, c.subscription_status, c.trial_expires_at,
-                (SELECT plan_code FROM plans WHERE id = $1) AS plan_code`,
-      [trialPlanId, days, id],
-    );
+    // ★ 2026-07-25 플랜 변경과 이력을 한 트랜잭션으로(Codex 지적 C) — 이력 유실 시 이후 구간이 연쇄로 틀어진다.
+    const client = await pool.connect();
+    let updated: any;
+    try {
+      await client.query('BEGIN');
+      updated = await client.query(
+        `UPDATE companies c
+            SET plan_id             = $1,
+                subscription_status = 'trial',
+                trial_expires_at    = NOW() + ($2::int || ' days')::interval,
+                updated_at          = NOW()
+          WHERE c.id = $3
+        RETURNING c.id, c.plan_id, c.subscription_status, c.trial_expires_at,
+                  (SELECT plan_code FROM plans WHERE id = $1) AS plan_code`,
+        [trialPlanId, days, id],
+      );
+      if (updated.rows.length > 0) {
+        await recordPlanChange({
+          client,
+          companyId: id,
+          toPlanId: trialPlanId,
+          changeType: 'trial_start',
+          changedBy: (req as any).user?.userId || null,
+          reason: `${days}일 무료체험 부여`,
+        });
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* 아래 알림에 포함 */ }
+      await alertPlanChangeFailure(id, err);
+      return res.status(500).json({ error: '무료체험 부여에 실패했습니다. 다시 시도해주세요.' });
+    } finally {
+      client.release();
+    }
 
     return res.json({
       success: true,
@@ -1685,22 +1710,43 @@ router.post('/:id/revoke-trial', requireUuidId, requireSuperAdmin, async (req: R
     }
     const freePlanId = freeRes.rows[0].id;
 
-    const updated = await query(
-      `UPDATE companies c
-          SET plan_id             = $1,
-              subscription_status = 'trial_expired',
-              updated_at          = NOW()
-         FROM plans p
-        WHERE c.id = $2
-          AND c.plan_id = p.id
-          AND p.plan_code = 'TRIAL'
-      RETURNING c.id, c.plan_id, c.subscription_status, c.trial_expires_at,
-                (SELECT plan_code FROM plans WHERE id = $1) AS plan_code`,
-      [freePlanId, id],
-    );
-
-    if (updated.rows.length === 0) {
-      return res.status(400).json({ error: '취소할 활성 체험이 없습니다.' });
+    // ★ 2026-07-25 플랜 변경과 이력을 한 트랜잭션으로(Codex 지적 C).
+    const client = await pool.connect();
+    let updated: any;
+    try {
+      await client.query('BEGIN');
+      updated = await client.query(
+        `UPDATE companies c
+            SET plan_id             = $1,
+                subscription_status = 'trial_expired',
+                updated_at          = NOW()
+           FROM plans p
+          WHERE c.id = $2
+            AND c.plan_id = p.id
+            AND p.plan_code = 'TRIAL'
+        RETURNING c.id, c.plan_id, c.subscription_status, c.trial_expires_at,
+                  (SELECT plan_code FROM plans WHERE id = $1) AS plan_code`,
+        [freePlanId, id],
+      );
+      if (updated.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: '취소할 활성 체험이 없습니다.' });
+      }
+      await recordPlanChange({
+        client,
+        companyId: id,
+        toPlanId: freePlanId,
+        changeType: 'trial_expire',
+        changedBy: (req as any).user?.userId || null,
+        reason: '무료체험 취소(관리자)',
+      });
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* 아래 알림에 포함 */ }
+      await alertPlanChangeFailure(id, err);
+      return res.status(500).json({ error: '무료체험 취소에 실패했습니다. 다시 시도해주세요.' });
+    } finally {
+      client.release();
     }
 
     return res.json({
@@ -1852,18 +1898,43 @@ router.post('/:id/revoke-basic-trial', requireUuidId, requireSuperAdmin, async (
     );
     if (freeRes.rows.length === 0) return res.status(500).json({ error: 'FREE 요금제가 존재하지 않습니다.' });
     // ⛔ 크레딧 불변식: base만 FREE(0)로, purchased 컬럼 미포함 = 보존.
-    const updated = await query(
-      `UPDATE companies
-          SET plan_id                   = $1,
-              subscription_status       = 'trial_expired',
-              ai_credits_base_remaining = $2,
-              ai_credits_reset_at       = NOW(),
-              updated_at                = NOW()
-        WHERE id = $3 AND subscription_status = 'trial'
-      RETURNING id, plan_id, subscription_status`,
-      [freeRes.rows[0].id, Number(freeRes.rows[0].credits) || 0, id],
-    );
-    if (updated.rows.length === 0) return res.status(400).json({ error: '취소할 활성 무료체험이 없습니다.' });
+    // ★ 2026-07-25 플랜 변경과 이력을 한 트랜잭션으로(Codex 지적 C).
+    const client = await pool.connect();
+    let updated: any;
+    try {
+      await client.query('BEGIN');
+      updated = await client.query(
+        `UPDATE companies
+            SET plan_id                   = $1,
+                subscription_status       = 'trial_expired',
+                ai_credits_base_remaining = $2,
+                ai_credits_reset_at       = NOW(),
+                updated_at                = NOW()
+          WHERE id = $3 AND subscription_status = 'trial'
+        RETURNING id, plan_id, subscription_status`,
+        [freeRes.rows[0].id, Number(freeRes.rows[0].credits) || 0, id],
+      );
+      if (updated.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: '취소할 활성 무료체험이 없습니다.' });
+      }
+      await recordPlanChange({
+        client,
+        companyId: id,
+        toPlanId: freeRes.rows[0].id,
+        changeType: 'trial_expire',
+        changedBy: (req as any).user?.userId || null,
+        reason: 'BASIC 무료체험 취소(관리자)',
+      });
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* 아래 알림에 포함 */ }
+      await alertPlanChangeFailure(id, err);
+      return res.status(500).json({ error: 'BASIC 무료체험 취소에 실패했습니다. 다시 시도해주세요.' });
+    } finally {
+      client.release();
+    }
+
     return res.json({ success: true, message: '무료체험이 취소되고 미가입(FREE)으로 전환되었습니다.', company: updated.rows[0] });
   } catch (err: any) {
     console.error('revoke-basic-trial 실패:', err);
@@ -1899,7 +1970,19 @@ router.put('/:id', requireUuidId, requireSuperAdmin, async (req: Request, res: R
       return res.status(400).json({ error: 'usageType은 web/agent/both 중 하나여야 합니다.' });
     }
 
-    const result = await query(
+    // ★ 2026-07-25 요금제가 바뀌는 경로라 변경과 이력을 한 트랜잭션으로(Codex 지적 A·C).
+    //   이 엔드포인트는 전에 이력 배선이 빠져 있었다 — `SET plan_id` 리터럴 grep이 다중 컴럼 UPDATE의
+    //   중간 줄(`plan_id = COALESCE($8, plan_id)`)을 못 잡았다. 전 출현 분류로 재검증해 찾았다.
+    const client = await pool.connect();
+    let result: any;
+    try {
+      await client.query('BEGIN');
+      const before = await client.query('SELECT plan_id FROM companies WHERE id = $1::uuid FOR UPDATE', [id]);
+      if (before.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
+      }
+      result = await client.query(
       `UPDATE companies SET
         company_name = COALESCE($1, company_name),
         name = COALESCE($1, name),
@@ -1945,10 +2028,27 @@ router.put('/:id', requireUuidId, requireSuperAdmin, async (req: Request, res: R
         usageType,
         id
       ]
-    );
+      );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
+      // 요금제가 실제로 바뀜 때만 기록한다(COALESCE라 planId가 null이면 미변경).
+      const newPlanId = result.rows[0]?.plan_id;
+      if (planId && newPlanId && String(newPlanId) !== String(before.rows[0].plan_id)) {
+        await recordPlanChange({
+          client,
+          companyId: id,
+          toPlanId: String(newPlanId),
+          changeType: 'auto',
+          changedBy: (req as any).user?.userId || null,
+          reason: '고객사 수정(요금제 변경)',
+        });
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* 아래 알림에 포함 */ }
+      await alertPlanChangeFailure(id, err);
+      throw err;
+    } finally {
+      client.release();
     }
 
     return res.json({

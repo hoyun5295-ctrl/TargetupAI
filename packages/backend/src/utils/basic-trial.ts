@@ -10,7 +10,8 @@
  *   - purchased(구매분) 컬럼은 SQL에 포함하지 않음 = 보존(월 넘어가도 이월).
  */
 
-import { query } from '../config/database';
+import pool, { query } from '../config/database';
+import { recordPlanChange, alertPlanChangeFailure } from './plan-change-log';
 
 /**
  * ★ 무료체험 신청 마감 (Harold 확정 2026-06-11): 2026-06-30 23:59:59 KST까지만 신청 접수.
@@ -35,18 +36,42 @@ export async function grantBasicTrial(companyId: string, days = 30): Promise<any
   const basicPlanId = basic.rows[0].id;
   const basicCredits = Number(basic.rows[0].credits) || 0;
 
-  const updated = await query(
-    `UPDATE companies
-        SET plan_id                   = $1,
-            subscription_status       = 'trial',
-            trial_expires_at          = NOW() + ($2::int || ' days')::interval,
-            ai_credits_base_remaining = $3,
-            ai_credits_reset_at       = NOW(),
-            updated_at                = NOW()
-      WHERE id = $4
-    RETURNING id, plan_id, subscription_status, trial_expires_at,
-              (SELECT plan_code FROM plans WHERE id = $1) AS plan_code`,
-    [basicPlanId, days, basicCredits, companyId],
-  );
-  return updated.rows[0];
+  // ★ 2026-07-25 플랜 변경과 이력 기록을 한 트랜잭션으로 묶는다(Codex 지적 C).
+  //   이력을 놓치면 그 뒤 모든 구간의 직전 플랜이 어긋나 청구 금액이 연쇄로 틀어진다.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const updated = await client.query(
+      `UPDATE companies
+          SET plan_id                   = $1,
+              subscription_status       = 'trial',
+              trial_expires_at          = NOW() + ($2::int || ' days')::interval,
+              ai_credits_base_remaining = $3,
+              ai_credits_reset_at       = NOW(),
+              updated_at                = NOW()
+        WHERE id = $4
+      RETURNING id, plan_id, subscription_status, trial_expires_at,
+                (SELECT plan_code FROM plans WHERE id = $1) AS plan_code`,
+      [basicPlanId, days, basicCredits, companyId],
+    );
+
+    if (updated.rows.length > 0) {
+      await recordPlanChange({
+        client,
+        companyId,
+        toPlanId: basicPlanId,
+        changeType: 'trial_start',
+        reason: `BASIC 무료체험 ${days}일 부여`,
+      });
+    }
+
+    await client.query('COMMIT');
+    return updated.rows[0];
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* 롤백 실패는 아래 알림에 포함 */ }
+    await alertPlanChangeFailure(companyId, err);
+    throw err;
+  } finally {
+    client.release();
+  }
 }
