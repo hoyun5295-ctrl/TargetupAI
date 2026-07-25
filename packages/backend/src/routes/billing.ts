@@ -2,12 +2,15 @@ import { Router, Request, Response } from 'express';
 import nodemailer from 'nodemailer';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
-import { SUCCESS_CODES_SQL, PENDING_CODES_SQL } from '../utils/sms-result-map';
+import { SUCCESS_CODES_SQL } from '../utils/sms-result-map';
 import { INVITO_INFO } from '../config/defaults';
-import { getAllBulkSmsTables, getBitoSmsTables, getTestSmsTables, mergeLineTables } from '../utils/sms-queue';
 import { CREDIT_UNIT_PRICE } from '../utils/ai-credit-calc';
 // ★ 2026-07-25 사용량 집계 CT — 청구서(이 파일)와 발송통계 엑셀이 같은 집계를 쓴다(정산 정합).
-import { buildCompanyUsageByDay, getTablesForBillingPeriod, getBillingCompanyTables, getBillingTestTables } from '../utils/send-usage-aggregation';
+//   미리보기(/preview)도 여기를 거친다 — 미리보기와 발행 금액이 갈라지지 않게 하는 유일한 장치다.
+import {
+  buildCompanyUsageByDay, buildBillingTotals, selectBillingRunIds, resolveBillingUnitPrices,
+  getTablesForBillingPeriod, getBillingCompanyTables, MSG_TYPE_TO_USAGE_KEY, logUnbillableUsageKeys,
+} from '../utils/send-usage-aggregation';
 
 // SMTP transporter (재사용)
 const getTransporter = () => nodemailer.createTransport({
@@ -26,22 +29,6 @@ async function smsAggByRunAndType(tables: string[], whereClause: string, params:
               SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count
        FROM ${t} WHERE ${whereClause}
        GROUP BY app_etc1, msg_type`,
-      params
-    ) as any[];
-    allRows.push(...rows);
-  }
-  return allRows;
-}
-
-async function smsAggTestByType(tables: string[], whereClause: string, params: any[]): Promise<any[]> {
-  const allRows: any[] = [];
-  for (const t of tables) {
-    const rows = await mysqlQuery(
-      `SELECT msg_type,
-              COUNT(*) as total_count,
-              SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count
-       FROM ${t} WHERE ${whereClause}
-       GROUP BY msg_type`,
       params
     ) as any[];
     allRows.push(...rows);
@@ -100,7 +87,8 @@ router.post('/generate', async (req: Request, res: Response) => {
 
     // 2) 고객사 단가 조회 (스냅샷)
     const companyResult = await pool.query(
-      `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
+      `SELECT company_name, billing_type,
+              cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
               cost_per_test_sms, cost_per_test_lms
        FROM companies WHERE id = $1`,
       [company_id]
@@ -109,14 +97,21 @@ router.post('/generate', async (req: Request, res: Response) => {
       return res.status(404).json({ error: '고객사를 찾을 수 없습니다' });
     }
     const co = companyResult.rows[0];
-    const prices: Record<string, number> = {
-      SMS: Number(co.cost_per_sms) || 0,
-      LMS: Number(co.cost_per_lms) || 0,
-      MMS: Number(co.cost_per_mms) || 0,
-      KAKAO: Number(co.cost_per_kakao) || 0,
-      TEST_SMS: Number(co.cost_per_test_sms) || Number(co.cost_per_sms) || 0,
-      TEST_LMS: Number(co.cost_per_test_lms) || Number(co.cost_per_lms) || 0,
-    };
+
+    // ★ 2026-07-25 선불 회사 이중 청구 차단.
+    //   선불은 발송하는 순간 잔액에서 빠진다(prepaid.ts prepaidDeduct — 후불이면 그냥 통과한다).
+    //   이미 받은 돈을 월 정산서로 또 청구하면 그대로 이중 청구다.
+    //   화면은 선불·후불을 한 목록에 섞어 보여주고 회사를 하나씩 골라 뽑는 방식이라 오선택이 실제로 가능하다.
+    if (co.billing_type === 'prepaid') {
+      return res.status(400).json({
+        error: `${co.company_name || '해당 고객사'}는 선불 고객사입니다. 발송 시점에 잔액에서 이미 차감되었으므로 월 정산서를 발행하면 이중 청구가 됩니다.`,
+        code: 'PREPAID_COMPANY_NOT_BILLABLE',
+        billing_type: co.billing_type,
+      });
+    }
+
+    // ★ 2026-07-25 단가 해석을 CT로 — 0원 설정이 `|| 일반단가` 폴백에 먹히던 결함 정정.
+    const prices = resolveBillingUnitPrices(co);
 
     // 3~6) 사용량 집계 — ★ 2026-07-25 컨트롤타워로 이동(utils/send-usage-aggregation.ts).
     //   발송통계 엑셀이 청구서와 **같은 함수**를 호출하게 하려고 뺐다. 로직을 복사하면 언젠가 갈라져
@@ -128,121 +123,178 @@ router.post('/generate', async (req: Request, res: Response) => {
       userId: user_id || undefined,
     });
 
-    // 7) 합산
-    let totalSms = 0, totalLms = 0, totalMms = 0, totalKakao = 0;
-    let totalTestSms = 0, totalTestLms = 0;
-    let totalSpamSms = 0, totalSpamLms = 0;
-    Object.values(dayData).forEach(types => {
-      if (types.SMS) totalSms += types.SMS.success;
-      if (types.LMS) totalLms += types.LMS.success;
-      if (types.MMS) totalMms += types.MMS.success;
-      if (types.KAKAO) totalKakao += types.KAKAO.success;
-      if (types.TEST_SMS) totalTestSms += types.TEST_SMS.success;
-      if (types.TEST_LMS) totalTestLms += types.TEST_LMS.success;
-      if (types.SPAM_SMS) totalSpamSms += types.SPAM_SMS.success;
-      if (types.SPAM_LMS) totalSpamLms += types.SPAM_LMS.success;
-    });
+    // 7) 합산 — ★ 2026-07-25 미리보기와 같은 함수로(금액 불일치 차단)
+    const totals = buildBillingTotals(dayData);
+    // 청구가 못 읽는 유형키가 섞여 있으면 그 유형은 조용히 0원이 된다 — 발행 시점에 로그로 드러낸다.
+    logUnbillableUsageKeys(dayData, `정산생성 company=${company_id} ${billing_start}~${billing_end}`);
+    const totalSms = totals.SMS, totalLms = totals.LMS, totalMms = totals.MMS, totalKakao = totals.KAKAO;
+    const totalTestSms = totals.TEST_SMS, totalTestLms = totals.TEST_LMS;
+    const totalSpamSms = totals.SPAM_SMS, totalSpamLms = totals.SPAM_LMS;
 
     // 스팸필터 단가 = 일반 단가와 동일 (D16 결정)
     const spamSmsCost = prices.SMS;
     const spamLmsCost = prices.LMS;
 
-    // ★ D229+ 후불 AI 크레딧 충전 합산 — 이 기간 승인·미청구분(supply=공급가 VAT 별도)을 정산서에 합산.
-    //   선불 충전은 status='completed'(즉시 결제)라 미포함 — 후불(status='approved')만 월말 청구 대상.
-    const creditChargeRes = await pool.query(
-      `SELECT id, credits, supply_amount FROM ai_credit_requests
-        WHERE company_id = $1::uuid AND status = 'approved' AND billed = false
-          AND processed_at::date >= $2 AND processed_at::date <= $3`,
-      [company_id, billing_start, billing_end]
-    );
-    const chargeSupply = creditChargeRes.rows.reduce((s: number, r: any) => s + Number(r.supply_amount || 0), 0);
-    const chargeCount = creditChargeRes.rows.reduce((s: number, r: any) => s + Number(r.credits || 0), 0);
-    // ★ #3 후불 overage(기본 크레딧 초과해 한도 음수로 쓴 분)도 같은 기간 합산 — 솔루션 이용요금 통합(단가 동일 2,000원)
-    //   이중 방지: 위 기간 겹침 중복 차단(409)으로 월 1회만 생성 → created_at 기간 집계가 다음 달과 안 겹침.
-    const overageRes = await pool.query(
-      `SELECT COALESCE(SUM(overage_credits), 0) AS oc FROM ai_credit_transactions
-        WHERE company_id = $1::uuid AND type = 'deduct' AND overage_credits > 0
-          AND created_at >= $2::date AND created_at < ($3::date + interval '1 day')`,
-      [company_id, billing_start, billing_end]
-    );
-    const overageCount = Number(overageRes.rows[0]?.oc) || 0;
-    const aiCreditCount = chargeCount + overageCount;                       // 충전 + 초과사용 크레딧 수량
-    const aiCreditSupply = chargeSupply + overageCount * CREDIT_UNIT_PRICE; // 공급가(크레딧×단가=공급가 일관)
+    // ★ 2026-07-25 7~9) 정산 쓰기를 단일 트랜잭션으로 묶는다.
+    //   기존에는 billings INSERT → ai_credit_requests.billed=true → billing_items INSERT가 각각 따로 커밋됐다.
+    //   중간에 실패하면 헤더만 남고 위 기간 중복검사(1번)가 재발행을 막는다.
+    //   더 나쁜 쪽은 회복 경로다 — 화면 안내대로 "삭제 후 재생성"을 하면 billed=true는 되돌아오지 않아
+    //   그 후불 크레딧 충전분이 영구 미청구가 된다(billed_invoice_id는 FK가 아니라 삭제에 반응하지 않는다).
+    //   무거운 사용량 집계(MySQL 멀티테이블)는 트랜잭션 밖에 두고, 쓰기와 그 근거가 되는 PG 조회만 안에 넣는다.
+    //   ※ config/database.ts의 `query`는 pool.query라 BEGIN/COMMIT이 서로 다른 커넥션에 나뉜다 — 반드시 client 고정.
+    const client = await pool.connect();
+    let billing: any;
+    let itemsCount = 0;
+    let aiCreditCount = 0, aiCreditSupply = 0;
+    let subtotal = 0, vat = 0, totalAmount = 0;
+    try {
+      await client.query('BEGIN');
 
-    const subtotal =
-      (totalSms * prices.SMS) + (totalLms * prices.LMS) +
-      (totalMms * prices.MMS) + (totalKakao * prices.KAKAO) +
-      (totalTestSms * prices.TEST_SMS) + (totalTestLms * prices.TEST_LMS) +
-      (totalSpamSms * spamSmsCost) + (totalSpamLms * spamLmsCost) +
-      aiCreditSupply;
-    const vat = Math.round(subtotal * 0.1);
-    const totalAmount = subtotal + vat;
-
-    // 8) billings INSERT
-    const billingResult = await pool.query(
-      `INSERT INTO billings (
-        company_id, user_id, billing_year, billing_month, billing_start, billing_end,
-        sms_success, lms_success, mms_success, kakao_success,
-        sms_unit_price, lms_unit_price, mms_unit_price, kakao_unit_price,
-        test_sms_count, test_lms_count, test_sms_unit_price, test_lms_unit_price,
-        spam_filter_sms_count, spam_filter_lms_count, spam_filter_sms_unit_price, spam_filter_lms_unit_price,
-        subtotal, vat, total_amount, ai_credit_count, ai_credit_supply, created_by
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
-      RETURNING *`,
-      [
-        company_id, user_id || null, billing_year, billing_month, billing_start, billing_end,
-        totalSms, totalLms, totalMms, totalKakao,
-        prices.SMS, prices.LMS, prices.MMS, prices.KAKAO,
-        totalTestSms, totalTestLms, prices.TEST_SMS, prices.TEST_LMS,
-        totalSpamSms, totalSpamLms, spamSmsCost, spamLmsCost,
-        subtotal, vat, totalAmount, aiCreditCount, aiCreditSupply, adminId
-      ]
-    );
-    const billing = billingResult.rows[0];
-
-    // ★ D229+ 합산한 후불 크레딧 충전 행을 billed 처리 (id 배열로 정확히 — 중복 청구 차단)
-    if (creditChargeRes.rows.length > 0) {
-      await pool.query(
-        `UPDATE ai_credit_requests SET billed = true, billed_invoice_id = $1::uuid WHERE id = ANY($2::uuid[])`,
-        [billing.id, creditChargeRes.rows.map((r: any) => r.id)]
+      // 같은 (회사, 사용자) 정산을 동시에 생성하면 위 1번 중복검사를 양쪽 다 통과할 수 있다 — 직렬화한다.
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))`,
+        [String(company_id), String(user_id || '')]
       );
-    }
 
-    // 9) billing_items INSERT (일자별 상세)
-    const itemValues: any[][] = [];
-    const allPrices: Record<string, number> = { ...prices, SPAM_SMS: spamSmsCost, SPAM_LMS: spamLmsCost };
-    Object.entries(dayData).forEach(([dateStr, types]) => {
-      Object.entries(types).forEach(([msgType, counts]) => {
-        const up = allPrices[msgType] || 0;
-        itemValues.push([
-          billing.id, company_id, user_id || null, null,
-          dateStr, msgType,
-          counts.total, counts.success, counts.fail, counts.pending,
-          up, counts.success * up
-        ]);
+      // 잠금을 기다리는 동안 다른 요청이 먼저 만들었을 수 있다 — 잠금 획득 후 재검사.
+      const dupInTx = await client.query(
+        `SELECT id, status, billing_start, billing_end FROM billings
+         WHERE company_id = $1
+           AND COALESCE(user_id, '00000000-0000-0000-0000-000000000000') = COALESCE($2::uuid, '00000000-0000-0000-0000-000000000000')
+           AND billing_start <= $4::date AND billing_end >= $3::date`,
+        [company_id, user_id || null, billing_start, billing_end]
+      );
+      if (dupInTx.rows.length > 0) {
+        await client.query('ROLLBACK');
+        const ex = dupInTx.rows[0];
+        return res.status(409).json({
+          error: `해당 기간과 겹치는 정산이 이미 존재합니다 (${String(ex.billing_start).slice(0,10)} ~ ${String(ex.billing_end).slice(0,10)})`,
+          existing_id: ex.id,
+          existing_status: ex.status
+        });
+      }
+
+      // ★ D229+ 후불 AI 크레딧 충전 합산 — 이 기간 승인·미청구분(supply=공급가 VAT 별도)을 정산서에 합산.
+      //   선불 충전은 status='completed'(즉시 결제)라 미포함 — 후불(status='approved')만 월말 청구 대상.
+      //   FOR UPDATE = 합산에 넣은 행과 아래 billed 처리 대상 행이 같음을 보장(그 사이 상태 변경 차단).
+      //
+      // ★ 2026-07-25 사용자 지정 정산에서는 크레딧을 청구하지 않는다.
+      //   발송 사용량은 `created_by`로 그 사용자 것만 거르는데 크레딧 조회는 `company_id`만 봤다.
+      //   축이 어긋나 한 사용자의 청구서에 회사 전체 크레딧이 붙었고, 더 나쁜 건 그 행에 billed=true가 찍혀
+      //   정작 회사 정산에서는 그만큼 빠져 버린 점이다(한 번 찍히면 되돌아오지 않는다).
+      //   크레딧 충전은 회사 단위 행위라 사용자별로 나눌 근거 자체가 없다 — 회사 정산에서만 청구한다.
+      let creditChargeRes: { rows: any[] } = { rows: [] };
+      if (!user_id) {
+        creditChargeRes = await client.query(
+          `SELECT id, credits, supply_amount FROM ai_credit_requests
+            WHERE company_id = $1::uuid AND status = 'approved' AND billed = false
+              AND processed_at::date >= $2 AND processed_at::date <= $3
+            FOR UPDATE`,
+          [company_id, billing_start, billing_end]
+        );
+      }
+      const chargeSupply = creditChargeRes.rows.reduce((s: number, r: any) => s + Number(r.supply_amount || 0), 0);
+      const chargeCount = creditChargeRes.rows.reduce((s: number, r: any) => s + Number(r.credits || 0), 0);
+      // ★ #3 후불 overage(기본 크레딧 초과해 한도 음수로 쓴 분)도 같은 기간 합산 — 솔루션 이용요금 통합(단가 동일 2,000원)
+      //   이중 방지: 위 기간 겹침 중복 차단(409)으로 월 1회만 생성 → created_at 기간 집계가 다음 달과 안 겹침.
+      let overageCount = 0;
+      if (!user_id) {
+        const overageRes = await client.query(
+          `SELECT COALESCE(SUM(overage_credits), 0) AS oc FROM ai_credit_transactions
+            WHERE company_id = $1::uuid AND type = 'deduct' AND overage_credits > 0
+              AND created_at >= $2::date AND created_at < ($3::date + interval '1 day')`,
+          [company_id, billing_start, billing_end]
+        );
+        overageCount = Number(overageRes.rows[0]?.oc) || 0;
+      }
+      aiCreditCount = chargeCount + overageCount;                       // 충전 + 초과사용 크레딧 수량
+      aiCreditSupply = chargeSupply + overageCount * CREDIT_UNIT_PRICE; // 공급가(크레딧×단가=공급가 일관)
+
+      subtotal =
+        (totalSms * prices.SMS) + (totalLms * prices.LMS) +
+        (totalMms * prices.MMS) + (totalKakao * prices.KAKAO) +
+        (totalTestSms * prices.TEST_SMS) + (totalTestLms * prices.TEST_LMS) +
+        (totalSpamSms * spamSmsCost) + (totalSpamLms * spamLmsCost) +
+        aiCreditSupply;
+      vat = Math.round(subtotal * 0.1);
+      totalAmount = subtotal + vat;
+
+      // 8) billings INSERT
+      const billingResult = await client.query(
+        `INSERT INTO billings (
+          company_id, user_id, billing_year, billing_month, billing_start, billing_end,
+          sms_success, lms_success, mms_success, kakao_success,
+          sms_unit_price, lms_unit_price, mms_unit_price, kakao_unit_price,
+          test_sms_count, test_lms_count, test_sms_unit_price, test_lms_unit_price,
+          spam_filter_sms_count, spam_filter_lms_count, spam_filter_sms_unit_price, spam_filter_lms_unit_price,
+          subtotal, vat, total_amount, ai_credit_count, ai_credit_supply, created_by
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
+        RETURNING *`,
+        [
+          company_id, user_id || null, billing_year, billing_month, billing_start, billing_end,
+          totalSms, totalLms, totalMms, totalKakao,
+          prices.SMS, prices.LMS, prices.MMS, prices.KAKAO,
+          totalTestSms, totalTestLms, prices.TEST_SMS, prices.TEST_LMS,
+          totalSpamSms, totalSpamLms, spamSmsCost, spamLmsCost,
+          subtotal, vat, totalAmount, aiCreditCount, aiCreditSupply, adminId
+        ]
+      );
+      billing = billingResult.rows[0];
+
+      // ★ D229+ 합산한 후불 크레딧 충전 행을 billed 처리 (id 배열로 정확히 — 중복 청구 차단)
+      if (creditChargeRes.rows.length > 0) {
+        await client.query(
+          `UPDATE ai_credit_requests SET billed = true, billed_invoice_id = $1::uuid WHERE id = ANY($2::uuid[])`,
+          [billing.id, creditChargeRes.rows.map((r: any) => r.id)]
+        );
+      }
+
+      // 9) billing_items INSERT (일자별 상세)
+      const itemValues: any[][] = [];
+      const allPrices: Record<string, number> = { ...prices, SPAM_SMS: spamSmsCost, SPAM_LMS: spamLmsCost };
+      Object.entries(dayData).forEach(([dateStr, types]) => {
+        Object.entries(types).forEach(([msgType, counts]) => {
+          const up = allPrices[msgType] || 0;
+          itemValues.push([
+            billing.id, company_id, user_id || null, null,
+            dateStr, msgType,
+            counts.total, counts.success, counts.fail, counts.pending,
+            up, counts.success * up
+          ]);
+        });
       });
-    });
 
-    if (itemValues.length > 0) {
-      const ph = itemValues.map((_, i) => {
-        const b = i * 12;
-        return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11},$${b+12})`;
-      }).join(',');
+      if (itemValues.length > 0) {
+        const ph = itemValues.map((_, i) => {
+          const b = i * 12;
+          return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11},$${b+12})`;
+        }).join(',');
 
-      await pool.query(
-        `INSERT INTO billing_items (
-          billing_id, company_id, user_id, agent_id,
-          item_date, message_type,
-          total_count, success_count, fail_count, pending_count,
-          unit_price, amount
-        ) VALUES ${ph}`,
-        itemValues.flat()
-      );
+        await client.query(
+          `INSERT INTO billing_items (
+            billing_id, company_id, user_id, agent_id,
+            item_date, message_type,
+            total_count, success_count, fail_count, pending_count,
+            unit_price, amount
+          ) VALUES ${ph}`,
+          itemValues.flat()
+        );
+      }
+      itemsCount = itemValues.length;
+
+      await client.query('COMMIT');
+    } catch (txError: any) {
+      try { await client.query('ROLLBACK'); } catch (rbError: any) {
+        console.error('정산 생성 롤백 실패:', rbError?.message || rbError);
+      }
+      throw txError;
+    } finally {
+      client.release();
     }
 
     return res.json({
       billing,
-      items_count: itemValues.length,
+      items_count: itemsCount,
       summary: { totalSms, totalLms, totalMms, totalKakao, totalTestSms, totalTestLms, totalSpamSms, totalSpamLms, subtotal, vat, totalAmount }
     });
   } catch (error: any) {
@@ -348,18 +400,46 @@ router.put('/:id/status', async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /:id - 정산 삭제 (draft만)
+// DELETE /:id - 정산 삭제
 router.delete('/:id', async (req: Request, res: Response) => {
+  const client = await pool.connect();
   try {
-    const check = await pool.query('SELECT status FROM billings WHERE id = $1', [req.params.id]);
-    if (check.rows.length === 0) return res.status(404).json({ error: '정산을 찾을 수 없습니다' });
-    
-    // billing_items는 ON DELETE CASCADE로 자동 삭제
-    await pool.query('DELETE FROM billings WHERE id = $1', [req.params.id]);
-    return res.json({ success: true });
+    // ★ 2026-07-25 삭제와 후불 크레딧 billed 되돌림을 한 트랜잭션으로.
+    //   billed_invoice_id는 FK가 아니라 정산이 지워져도 billed=true가 그대로 남는다.
+    //   화면은 기간 겹침 409에서 "삭제 후 재생성"을 안내하는데, 그대로 두면 재생성 시
+    //   `billed = false` 필터에 걸려 그 충전분이 영구히 청구되지 않는다(정상 운영 동작에서 돈이 샌다).
+    await client.query('BEGIN');
+
+    const check = await client.query('SELECT id FROM billings WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (check.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: '정산을 찾을 수 없습니다' });
+    }
+
+    const restored = await client.query(
+      `UPDATE ai_credit_requests
+          SET billed = false, billed_invoice_id = NULL
+        WHERE billed_invoice_id = $1::uuid
+        RETURNING id`,
+      [req.params.id]
+    );
+
+    // billing_items는 ON DELETE CASCADE로 자동 삭제 (billing_items_billing_id_fkey confdeltype='c' 실측)
+    await client.query('DELETE FROM billings WHERE id = $1', [req.params.id]);
+
+    await client.query('COMMIT');
+    if (restored.rowCount) {
+      console.log(`[정산삭제] billing=${req.params.id} 후불 크레딧 충전 ${restored.rowCount}건 미청구 상태로 복구`);
+    }
+    return res.json({ success: true, restored_credit_requests: restored.rowCount || 0 });
   } catch (error: any) {
+    try { await client.query('ROLLBACK'); } catch (rbError: any) {
+      console.error('정산 삭제 롤백 실패:', rbError?.message || rbError);
+    }
     console.error('정산 삭제 오류:', error);
     return res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -667,226 +747,193 @@ router.get('/:id/pdf', async (req: Request, res: Response) => {
 //  거래내역서(Invoice) API
 // ============================================================
 
-// GET /preview - 정산 미리보기
+// GET /preview - 정산 미리보기 = 발행 드라이런
+//   ★ 2026-07-25 전면 재작성. 자체 SQL을 전부 버리고 발행(`POST /generate`)과 **같은 함수**를 호출한다.
+//   기존 미리보기는 발행과 네 축이 달라 같은 기간인데 금액이 어긋났다:
+//     ① campaign_runs 상태조건 없음(발행은 status='completed'만) → 미완료 발송까지 셈
+//     ② 일반발송에 sendreq_time 기간조건을 덧붙임(발행은 run 집합으로만 기간을 정함)
+//     ③ 브랜드메시지 REQUEST_DATE 기간조건 없음(발행은 있음)
+//     ④ 후불 AI 크레딧 미포함(발행은 청구에 합산)
+//   미리보기가 실제 청구액과 다르면 그걸 보고 발행하는 사람이 틀린 금액을 승인하게 된다.
+//   여기서는 계산만 하고 아무것도 쓰지 않는다 — billed 플래그는 발행에서만 바뀐다.
 router.get('/preview', async (req: Request, res: Response) => {
   try {
-    const { company_id, start, end, type = 'combined' } = req.query;
+    const { company_id, start, end, type = 'combined', user_id } = req.query;
 
     if (!company_id || !start || !end) {
       return res.status(400).json({ error: '필수 파라미터: company_id, start, end' });
     }
+    const companyId = String(company_id);
+    const startDate = String(start);
+    const endDate = String(end);
+    const userId = user_id ? String(user_id) : undefined;
 
-    // 1) 회사 단가 조회
+    // 1) 회사 단가 — 발행과 같은 해석(명시된 0원 보존)
     const companyResult = await pool.query(
-      `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
+      `SELECT company_name, billing_type,
+              cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
               cost_per_test_sms, cost_per_test_lms, service_type
        FROM companies WHERE id = $1`,
-      [company_id]
+      [companyId]
     );
     if (companyResult.rows.length === 0) {
       return res.status(404).json({ error: '고객사를 찾을 수 없습니다' });
     }
     const company = companyResult.rows[0];
+    const prices = resolveBillingUnitPrices(company);
+    // 미리보기는 계산만 하므로 선불 회사도 막지 않는다. 대신 발행이 차단된다는 사실을 함께 돌려준다.
+    const billable = company.billing_type !== 'prepaid';
 
-    // 2) 해당 기간 campaign_run_id 목록 조회 (PostgreSQL)
-    // ★ 2026-06-11: 신규 직접발송(staging worker)은 campaign_runs 미생성 + app_etc1=campaigns.id — UNION으로 포함
-    //   (campaign_runs만 보던 미리보기 누락 fix. 이중 계상 0 — MySQL 행은 자기 app_etc1 하나에만 매칭).
-    const runsResult = await pool.query(
-      `SELECT cr.id as run_id, c.callback_number, cb.store_code, cb.store_name
-       FROM campaign_runs cr
-       JOIN campaigns c ON c.id = cr.campaign_id
-       LEFT JOIN callback_numbers cb ON cb.phone = c.callback_number AND cb.company_id = c.company_id
-       WHERE c.company_id = $1
-         AND cr.sent_at >= $2::date
-         AND cr.sent_at < ($3::date + interval '1 day')
-       UNION
-       SELECT c2.id as run_id, c2.callback_number, cb2.store_code, cb2.store_name
-       FROM campaigns c2
-       LEFT JOIN callback_numbers cb2 ON cb2.phone = c2.callback_number AND cb2.company_id = c2.company_id
-       WHERE c2.company_id = $1
-         AND c2.send_type = 'direct'
-         AND c2.send_phase = 'sent'
-         AND c2.status = 'completed'
-         AND COALESCE(c2.scheduled_at, c2.sent_at) >= $2::date
-         AND COALESCE(c2.scheduled_at, c2.sent_at) < ($3::date + interval '1 day')`,
-      [company_id, start, end]
-    );
+    // 2) 사용량 — 발행과 완전히 같은 집계(일반·테스트·스팸·브랜드메시지 전부 포함)
+    const dayData = await buildCompanyUsageByDay({ companyId, startDate, endDate, userId });
+    const totals = buildBillingTotals(dayData);
+    const unbillable = logUnbillableUsageKeys(dayData, `미리보기 company=${companyId} ${startDate}~${endDate}`);
 
-    const runIds = runsResult.rows.map((r: any) => r.run_id);
-    const runStoreMap: Record<string, { store_code: string; store_name: string }> = {};
-    runsResult.rows.forEach((r: any) => {
-      runStoreMap[r.run_id] = {
-        store_code: r.store_code || 'default',
-        store_name: r.store_name || '본사'
-      };
-    });
-
-    // 3) MySQL에서 일반발송 성공 집계 — 멀티테이블
-    let normalCounts: any[] = [];
-    if (runIds.length > 0) {
-      const companyTables = await getBillingCompanyTables(company_id as string);
-      const billingTables = await getTablesForBillingPeriod(companyTables, start as string, end as string);
-      const placeholders = runIds.map(() => '?').join(',');
-      normalCounts = await smsAggByRunAndType(
-        billingTables,
-        `app_etc1 IN (${placeholders}) AND sendreq_time >= ? AND sendreq_time < DATE_ADD(?, INTERVAL 1 DAY)`,
-        [...runIds, start, end]
+    // 3) 후불 AI 크레딧 — 발행과 같은 기준. 읽기만 하고 billed는 건드리지 않는다.
+    //    사용자 지정이면 발행이 크레딧을 청구하지 않으므로 미리보기도 0으로 둔다(금액 일치).
+    let chargeSupply = 0, chargeCount = 0, overageCount = 0;
+    if (!userId) {
+      const creditChargeRes = await pool.query(
+        `SELECT credits, supply_amount FROM ai_credit_requests
+          WHERE company_id = $1::uuid AND status = 'approved' AND billed = false
+            AND processed_at::date >= $2 AND processed_at::date <= $3`,
+        [companyId, startDate, endDate]
       );
-    }
-
-    // 4) MySQL에서 테스트발송 집계 — 멀티테이블
-    const testBaseTables = await getBillingTestTables();
-    const testTables = await getTablesForBillingPeriod(testBaseTables, start as string, end as string);
-    const testRows = await smsAggTestByType(
-      testTables,
-      `app_etc1 = 'test' AND app_etc2 = ? AND sendreq_time >= ? AND sendreq_time < DATE_ADD(?, INTERVAL 1 DAY)`,
-      [company_id, start, end]
-    );
-
-    // 4-A) 스팸필터 테스트 집계 (PostgreSQL)
-    const spamResult = await pool.query(`
-      SELECT
-        r.message_type,
-        COUNT(*) as total_count,
-        SUM(CASE WHEN r.result IS NOT NULL THEN 1 ELSE 0 END) as success_count
-      FROM spam_filter_test_results r
-      JOIN spam_filter_tests t ON r.test_id = t.id
-      WHERE t.company_id = $1
-        AND t.created_at >= ($2 || ' 00:00:00+09')::timestamptz
-        AND t.created_at < (($3::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz
-      GROUP BY r.message_type
-    `, [company_id, start, end]);
-
-    let spam_sms = 0, spam_lms = 0;
-    spamResult.rows.forEach((row: any) => {
-      const cnt = Number(row.success_count) || 0;
-      if (row.message_type === 'LMS') spam_lms += cnt;
-      else spam_sms += cnt;
-    });
-
-    // 4-B) 카카오 브랜드메시지 집계
-    let kakaoSuccessTotal = 0;
-    if (runIds.length > 0) {
-      // runIds → campaign_id 매핑 (kakao/both 채널만)
-      const kakaoCampResult = await pool.query(
-        `SELECT DISTINCT c.id
-         FROM campaign_runs cr JOIN campaigns c ON c.id = cr.campaign_id
-         WHERE cr.id = ANY($1::uuid[]) AND (c.send_channel = 'kakao' OR c.send_channel = 'both')`,
-        [runIds]
+      chargeSupply = creditChargeRes.rows.reduce((s: number, r: any) => s + Number(r.supply_amount || 0), 0);
+      chargeCount = creditChargeRes.rows.reduce((s: number, r: any) => s + Number(r.credits || 0), 0);
+      const overageRes = await pool.query(
+        `SELECT COALESCE(SUM(overage_credits), 0) AS oc FROM ai_credit_transactions
+          WHERE company_id = $1::uuid AND type = 'deduct' AND overage_credits > 0
+            AND created_at >= $2::date AND created_at < ($3::date + interval '1 day')`,
+        [companyId, startDate, endDate]
       );
-      const kakaoCampIds = kakaoCampResult.rows.map((r: any) => r.id);
-
-      if (kakaoCampIds.length > 0) {
-        const kph = kakaoCampIds.map(() => '?').join(',');
-        const kakaoCountRows = await mysqlQuery(
-          `SELECT COUNT(*) as success_count
-           FROM IMC_BM_FREE_BIZ_MSG
-           WHERE REQUEST_UID IN (${kph}) AND REPORT_CODE = '0000'`,
-          kakaoCampIds
-        );
-        kakaoSuccessTotal = Number((kakaoCountRows as any[])[0]?.success_count || 0);
-      }
+      overageCount = Number(overageRes.rows[0]?.oc) || 0;
     }
-    // 직접발송 카카오도 합산
-    {
-      const directKakaoResult = await pool.query(
-        `SELECT id FROM campaigns
-         WHERE company_id = $1 AND send_type = 'manual'
-           AND (send_channel = 'kakao' OR send_channel = 'both')
-           AND sent_at >= $2::date AND sent_at < ($3::date + interval '1 day')`,
-        [company_id, start, end]
-      );
-      const dkIds = directKakaoResult.rows.map((r: any) => r.id);
-      if (dkIds.length > 0) {
-        const dkph = dkIds.map(() => '?').join(',');
-        const dkCountRows = await mysqlQuery(
-          `SELECT COUNT(*) as success_count FROM IMC_BM_FREE_BIZ_MSG WHERE REQUEST_UID IN (${dkph}) AND REPORT_CODE = '0000'`,
-          dkIds
-        );
-        kakaoSuccessTotal += Number((dkCountRows as any[])[0]?.success_count || 0);
-      }
-    }
+    const aiCreditCount = chargeCount + overageCount;
+    const aiCreditSupply = chargeSupply + overageCount * CREDIT_UNIT_PRICE;
 
-    // 5) 집계 계산
-    const spamSummary = buildSpamSummary(spam_sms, spam_lms, company);
+    // 4) 금액 — 발행과 같은 식
+    const subtotal =
+      (totals.SMS * prices.SMS) + (totals.LMS * prices.LMS) +
+      (totals.MMS * prices.MMS) + (totals.KAKAO * prices.KAKAO) +
+      (totals.TEST_SMS * prices.TEST_SMS) + (totals.TEST_LMS * prices.TEST_LMS) +
+      (totals.SPAM_SMS * prices.SPAM_SMS) + (totals.SPAM_LMS * prices.SPAM_LMS) +
+      aiCreditSupply;
+    const vat = Math.round(subtotal * 0.1);
+    const totalAmount = subtotal + vat;
+
+    const test = {
+      test_sms: totals.TEST_SMS,
+      test_lms: totals.TEST_LMS,
+      test_sms_amount: totals.TEST_SMS * prices.TEST_SMS,
+      test_lms_amount: totals.TEST_LMS * prices.TEST_LMS,
+    };
+    const spam = {
+      spam_sms: totals.SPAM_SMS,
+      spam_lms: totals.SPAM_LMS,
+      spam_sms_amount: totals.SPAM_SMS * prices.SPAM_SMS,
+      spam_lms_amount: totals.SPAM_LMS * prices.SPAM_LMS,
+    };
+    const ai_credit = { count: aiCreditCount, supply_amount: aiCreditSupply };
+    const amounts = { subtotal, vat, total_amount: totalAmount };
+    // 발행 가능 여부를 미리보기에서 먼저 알린다 — 선불 회사는 발행이 400으로 막힌다.
+    const billing_guard = {
+      billable,
+      billing_type: company.billing_type || null,
+      reason: billable ? null : '선불 고객사 — 발송 시점에 잔액에서 이미 차감되어 월 정산서 발행 시 이중 청구',
+      unbillable_types: unbillable,
+    };
 
     if (type === 'brand') {
+      // 매장(발신번호) 축은 청구 집계에 없다. 그래서 **같은 run 집합·같은 테이블·같은 where**를 매장별로
+      // 나누기만 한다 — 그러면 매장 합계가 아래 combined 합계와 항상 일치한다.
+      // (기간조건을 덧붙이면 그 순간 두 숫자가 갈라진다. 그게 이번에 고친 결함이다.)
+      const runIds = await selectBillingRunIds({ companyId, startDate, endDate, userId });
       const brandMap: Record<string, any> = {};
-      normalCounts.forEach((row: any) => {
-        const store = runStoreMap[row.run_id] || { store_code: 'default', store_name: '본사' };
-        const key = store.store_code;
-        if (!brandMap[key]) {
-          brandMap[key] = { store_code: store.store_code, store_name: store.store_name, sms_success: 0, lms_success: 0, mms_success: 0, kakao_success: 0 };
+      const ensureStore = (code: string, name: string) => {
+        if (!brandMap[code]) {
+          brandMap[code] = { store_code: code, store_name: name, sms_success: 0, lms_success: 0, mms_success: 0, kakao_success: 0 };
         }
-        if (row.msg_type === 'S') brandMap[key].sms_success += Number(row.success_count);
-        if (row.msg_type === 'L') brandMap[key].lms_success += Number(row.success_count);
-        // ★ 2026-07-25 M·K가 빠져 MMS·알림톡이 미리보기에서 0원으로 나왔다(SMSQ msg_type = S/L/M/K)
-        if (row.msg_type === 'M') brandMap[key].mms_success += Number(row.success_count);
-        if (row.msg_type === 'K') brandMap[key].kakao_success += Number(row.success_count);
-      });
-      // 카카오는 브랜드 구분 없이 전체 합산 (default에 넣기)
-      if (kakaoSuccessTotal > 0) {
-        if (!brandMap['default']) brandMap['default'] = { store_code: 'default', store_name: '본사', sms_success: 0, lms_success: 0, mms_success: 0, kakao_success: 0 };
-        brandMap['default'].kakao_success += kakaoSuccessTotal;
+        return brandMap[code];
+      };
+
+      let queueKakao = 0;
+      if (runIds.length > 0) {
+        const storeRes = await pool.query(
+          `SELECT cr.id AS run_id, cb.store_code, cb.store_name
+             FROM campaign_runs cr
+             JOIN campaigns c ON c.id = cr.campaign_id
+             LEFT JOIN callback_numbers cb ON cb.phone = c.callback_number AND cb.company_id = c.company_id
+            WHERE cr.id = ANY($1::uuid[])
+            UNION
+           SELECT c2.id AS run_id, cb2.store_code, cb2.store_name
+             FROM campaigns c2
+             LEFT JOIN callback_numbers cb2 ON cb2.phone = c2.callback_number AND cb2.company_id = c2.company_id
+            WHERE c2.id = ANY($1::uuid[])`,
+          [runIds]
+        );
+        const storeMap: Record<string, { store_code: string; store_name: string }> = {};
+        storeRes.rows.forEach((r: any) => {
+          storeMap[r.run_id] = { store_code: r.store_code || 'default', store_name: r.store_name || '본사' };
+        });
+
+        const companyTables = await getBillingCompanyTables(companyId);
+        const billingTables = await getTablesForBillingPeriod(companyTables, startDate, endDate);
+        const ph = runIds.map(() => '?').join(',');
+        const rows = await smsAggByRunAndType(billingTables, `app_etc1 IN (${ph})`, runIds);
+        rows.forEach((row: any) => {
+          const store = storeMap[row.run_id] || { store_code: 'default', store_name: '본사' };
+          const b = ensureStore(store.store_code, store.store_name);
+          const n = Number(row.success_count) || 0;
+          switch (MSG_TYPE_TO_USAGE_KEY[row.msg_type]) {
+            case 'SMS': b.sms_success += n; break;
+            case 'LMS': b.lms_success += n; break;
+            case 'MMS': b.mms_success += n; break;
+            case 'KAKAO': b.kakao_success += n; queueKakao += n; break;
+          }
+        });
       }
+
+      // 브랜드메시지(IMC)는 매장 축이 없다 — 큐에서 센 알림톡을 뺀 차액을 본사로 몰아 합계를 맞춘다.
+      const imcKakao = Math.max(0, totals.KAKAO - queueKakao);
+      if (imcKakao > 0) ensureStore('default', '본사').kakao_success += imcKakao;
 
       const brands = Object.values(brandMap).map((b: any) => ({
         ...b,
-        sms_amount: b.sms_success * (Number(company.cost_per_sms) || 0),
-        lms_amount: b.lms_success * (Number(company.cost_per_lms) || 0),
-        mms_amount: b.mms_success * (Number(company.cost_per_mms) || 0),
-        kakao_amount: b.kakao_success * (Number(company.cost_per_kakao) || 0),
+        sms_amount: b.sms_success * prices.SMS,
+        lms_amount: b.lms_success * prices.LMS,
+        mms_amount: b.mms_success * prices.MMS,
+        kakao_amount: b.kakao_success * prices.KAKAO,
       }));
 
-      return res.json({ type: 'brand', brands, test: buildTestSummary(testRows, company), spam: spamSummary });
-    } else {
-      let sms_success = 0, lms_success = 0, mms_success = 0, kakao_success = kakaoSuccessTotal;
-      normalCounts.forEach((row: any) => {
-        if (row.msg_type === 'S') sms_success += Number(row.success_count);
-        if (row.msg_type === 'L') lms_success += Number(row.success_count);
-        // ★ 2026-07-25 M·K 누락 정정 — 청구 생성부(send-usage-aggregation)와 같은 축으로 맞춘다
-        if (row.msg_type === 'M') mms_success += Number(row.success_count);
-        if (row.msg_type === 'K') kakao_success += Number(row.success_count);
-      });
-
-      const summary = {
-        sms_success, lms_success, mms_success, kakao_success,
-        sms_amount: sms_success * (Number(company.cost_per_sms) || 0),
-        lms_amount: lms_success * (Number(company.cost_per_lms) || 0),
-        mms_amount: mms_success * (Number(company.cost_per_mms) || 0),
-        kakao_amount: kakao_success * (Number(company.cost_per_kakao) || 0),
-      };
-
-      return res.json({ type: 'combined', summary, test: buildTestSummary(testRows, company), spam: spamSummary });
+      return res.json({ type: 'brand', brands, test, spam, ai_credit, amounts, billing_guard });
     }
+
+    const summary = {
+      sms_success: totals.SMS,
+      lms_success: totals.LMS,
+      mms_success: totals.MMS,
+      kakao_success: totals.KAKAO,
+      sms_amount: totals.SMS * prices.SMS,
+      lms_amount: totals.LMS * prices.LMS,
+      mms_amount: totals.MMS * prices.MMS,
+      kakao_amount: totals.KAKAO * prices.KAKAO,
+    };
+
+    return res.json({ type: 'combined', summary, test, spam, ai_credit, amounts, billing_guard });
   } catch (error: any) {
+    const emsg = error?.message || '';
+    if (emsg.includes('column') && emsg.includes('does not exist')) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — ai_credit_transactions.overage_credits 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
     console.error('정산 미리보기 오류:', error);
     return res.status(500).json({ error: error.message });
   }
 });
 
-function buildTestSummary(testRows: any, company: any) {
-  let test_sms = 0, test_lms = 0;
-  (testRows as any[]).forEach((row: any) => {
-    if (row.msg_type === 'S') test_sms += Number(row.success_count);
-    if (row.msg_type === 'L') test_lms += Number(row.success_count);
-  });
-  return {
-    test_sms, test_lms,
-    test_sms_amount: test_sms * (Number(company.cost_per_test_sms) || Number(company.cost_per_sms) || 0),
-    test_lms_amount: test_lms * (Number(company.cost_per_test_lms) || Number(company.cost_per_lms) || 0),
-  };
-}
-
-function buildSpamSummary(spam_sms: number, spam_lms: number, company: any) {
-  const smsPrice = Number(company.cost_per_sms) || 0;
-  const lmsPrice = Number(company.cost_per_lms) || 0;
-  return {
-    spam_sms, spam_lms,
-    spam_sms_amount: spam_sms * smsPrice,
-    spam_lms_amount: spam_lms * lmsPrice,
-  };
-}
+// ※ 옛 buildTestSummary·buildSpamSummary는 삭제했다(2026-07-25).
+//   테스트·스팸 수량도 발행과 같은 집계(buildCompanyUsageByDay의 TEST_*/SPAM_* 유형키)에서 나온다.
+//   같은 숫자를 두 군데서 따로 세면 언젠가 갈라진다.
 
 // POST /invoices - 거래내역서 생성
 router.post('/invoices', async (req: Request, res: Response) => {
