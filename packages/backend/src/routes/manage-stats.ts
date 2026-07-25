@@ -4,7 +4,9 @@ import pool, { mysqlQuery } from '../config/database';
 import { DEFAULT_COSTS } from '../config/defaults';
 import { getCompanyScope } from '../utils/permission-helper';
 import { getTestSmsTables } from '../utils/sms-queue';
-import { buildDateRangeFilter, querySendStats, querySendStatsDetail } from '../utils/stats-aggregation';
+// ★ 2026-07-25 `querySendStats`(campaigns 축) 미사용 — 화면·엑셀 모두 청구 축(send-usage-aggregation)으로 통일.
+//   슈퍼관리자 통계(admin.ts)는 계정·캠페인 단위 운영 뷰라 그 축을 계속 쓴다.
+import { buildDateRangeFilter, querySendStatsDetail } from '../utils/stats-aggregation';
 // ★ 2026-07-25 청구서와 동일한 사용량 집계 CT — 엑셀 유형이 청구 유형과 갈리면 정산 대조가 불가능하다.
 import { buildCompanyUsageByDay, rollupUsageByPeriod, logUnbillableUsageKeys } from '../utils/send-usage-aggregation';
 // ★ 2026-07-25 월 확장 규칙 CT — 화면·에이전트·엑셀 웹 행이 같은 함수를 써야 기간 축이 갈리지 않는다.
@@ -38,16 +40,52 @@ router.get('/send', async (req: Request, res: Response) => {
     const limit = parseInt(req.query.limit as string) || 10;
     const filterUserId = req.query.filterUserId as string;
 
-    // ★ 컨트롤타워 호출 — 인라인 쿼리 제거
-    let statsResult = await querySendStats({
-      view: view as 'daily' | 'monthly',
-      startDate,
-      endDate,
-      companyId: companyScope || undefined,
-      filterUserId: filterUserId || undefined,
-      page,
-      limit,
-    });
+    // ★ 2026-07-25 웹 탭을 **청구 축으로 통일**한다(Harold 지시: 정산은 정합성 최우선).
+    //   전에는 화면만 campaigns 축(querySendStats)이고 엑셀·청구서는 청구 축이라 같은 기간인데 숫자가 달랐다.
+    //   화면을 띄워놓고 엑셀을 받는 담당자에게 그건 "고치면서 숫자를 깨뜨렸다"로 읽힌다.
+    //   행 축도 에이전트 탭과 같은 (기간 × 유형)으로 맞춘다 — 티켓 "웹만 유형이 없다"의 화면 쪽 해소.
+    //   `발송 횟수`(캠페인 수)는 청구 축에 없는 개념이라 열에서 뺀다. 캠페인 목록은 기간별 `상세`가 이미 보여준다.
+    //   ★ Codex 적대검증 지적 수용(2026-07-25): 조건이 하나라도 빠지면 옛 축으로 **조용히** 복귀해
+    //   청구 축과 다른 숫자를 보여주던 폴백이 있었다. 엑셀에서 없앤 결함을 화면에 남겨두면 같은 사고다.
+    //   날짜는 화면이 항상 오늘로 채워 보내지만 `<input type="date">`는 비울 수 있다 — 그때 걸린다.
+    if (!companyScope) {
+      return res.status(400).json({ error: '고객사를 확인할 수 없습니다.', code: 'COMPANY_SCOPE_REQUIRED' });
+    }
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: '시작일과 종료일을 선택해주세요.', code: 'DATE_RANGE_REQUIRED' });
+    }
+
+    let statsResult;
+    {
+      const range = expandMonthlyRange(view as 'daily' | 'monthly', startDate, endDate);
+      const dayData = await buildCompanyUsageByDay({
+        companyId: companyScope,
+        startDate: range.startDate!,
+        endDate: range.endDate!,
+        userId: filterUserId || undefined,
+      });
+      logUnbillableUsageKeys(dayData, `발송통계화면 company=${companyScope} ${range.startDate}~${range.endDate}`);
+      // 테스트·스팸은 화면 '테스트' 탭이 따로 담당한다(엑셀의 '테스트' 채널 행과 같은 구분).
+      const webTypeRows = rollupUsageByPeriod(dayData, view as 'daily' | 'monthly')
+        .filter((r) => !r.type_key.startsWith('TEST_') && !r.type_key.startsWith('SPAM_'));
+
+      const totalRows = webTypeRows.length;
+      const totalPages = Math.max(1, Math.ceil(totalRows / limit));
+      const safePage = Math.min(Math.max(1, page), totalPages);
+      const sum = (k: 'sent' | 'success' | 'fail' | 'pending') => webTypeRows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+      statsResult = {
+        summary: {
+          total_sent: String(sum('sent')),
+          total_success: String(sum('success')),
+          total_fail: String(sum('fail')),
+          total_pending: String(sum('pending')),
+        },
+        rows: webTypeRows.slice((safePage - 1) * limit, safePage * limit),
+        total: totalRows,
+        page: safePage,
+        totalPages,
+      };
+    }
 
     // ★ 2026-07-23: 웹/에이전트/테스트 탭 분리 — 에이전트(엔진) 통계는 웹을 "교체"하지 않고 별도 축으로 병행 반환.
     //   usage_type in (agent, both)면 company_agent_ids CustId 전량을 pay-ingest-db RSRM_SalesStts에서 합산(pay-stats CT).
@@ -271,7 +309,7 @@ router.get('/send/detail', async (req: Request, res: Response) => {
 });
 
 // GET /send/export — 발송 통계 엑셀(CSV) 다운로드 (웹+에이전트 한 파일 합산·서수란 2026-07-23)
-//   웹=querySendStats(기간)·에이전트=queryPayAgentStoreBreakdown(기간×발송ID×대상ID×유형)을 페이징 없이 전량 CSV로.
+//   웹=buildCompanyUsageByDay(기간×유형·청구 축)·에이전트=queryPayAgentStoreBreakdown(기간×발송ID×대상ID×유형)을 페이징 없이 전량.
 //   ★ 2026-07-25 (#2) CSV는 대상ID(StoreId)별 정산 분해 — 화면 GET(집계)과 별도 함수라 회귀 0. 웹 축 무접촉.
 router.get('/send/export', async (req: Request, res: Response) => {
   try {

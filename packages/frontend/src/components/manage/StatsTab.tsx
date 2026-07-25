@@ -41,6 +41,12 @@ export default function StatsTab() {
   }, []);
 
   const loadStats = useCallback(async (p = 1) => {
+    // ★ 2026-07-25 날짜를 비우면 서버가 400을 낸다(청구 축 집계 불가).
+    //   요청을 보내 에러를 삼키는 대신 여기서 막고 사유를 알린다 — 옛 숫자가 남아 "안 바뀐다"로 읽히지 않게.
+    if (!startDate || !endDate) {
+      setToast({ msg: '시작일과 종료일을 선택해주세요.', type: 'error' });
+      return;
+    }
     const currentRequestId = ++requestIdRef.current;
     setLoading(true);
     try {
@@ -51,7 +57,10 @@ export default function StatsTab() {
       // ★ stale 응답이면 무시 (탭 전환 race condition 방지)
       if (currentRequestId !== requestIdRef.current) return;
       setStats(res.data);
-      setPage(p);
+      // ★ 2026-07-25 Codex 지적 수용 — 서버가 보정한 page를 쓴다.
+      //   요청 page를 그대로 쓰면, 조회 중 행이 줄어 서버가 마지막 페이지로 clamp했을 때
+      //   화면 강조와 "N–M / 전체" 표시가 실제 rows와 어긋난다.
+      setPage(Number(res.data?.page) || p);
     } catch { /* */ } finally {
       if (currentRequestId === requestIdRef.current) setLoading(false);
     }
@@ -321,26 +330,34 @@ export default function StatsTab() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100">
+                  {/* ★ 2026-07-25 웹 탭도 (기간 × 유형) 축 — 화면·엑셀·청구서가 같은 숫자를 본다.
+                      `발송 횟수`(캠페인 수)는 청구 축에 없는 개념이라 뺐다. 캠페인 목록은 `상세`가 보여준다. */}
                   <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">{view === 'monthly' ? '월' : '날짜'}</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">발송 횟수</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">발송</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">유형</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">전송</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">성공</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">실패</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">대기</th>
                   <th className="px-6 py-3 text-center text-xs font-semibold uppercase tracking-wider text-slate-400">상세</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {rows.length === 0 ? (
-                  <tr><td colSpan={6} className="px-4 py-16 text-center text-sm text-slate-400">표시할 발송 내역이 없습니다.</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-16 text-center text-sm text-slate-400">표시할 발송 내역이 없습니다.</td></tr>
                 ) : rows.map((r: any, i: number) => {
                   const dateKey = r.period || r.date || r.month;
                   return (
                     <tr key={i} className="group transition hover:bg-slate-50/70">
                       <td className="px-6 py-3.5 font-semibold text-slate-700">{dateKey}</td>
-                      <td className="px-4 py-3.5 text-right text-slate-500 tabular-nums">{formatNum(r.runs)}</td>
+                      <td className="px-4 py-3.5 text-left">
+                        {r.type_label
+                          ? <span className="px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 text-xs font-medium">{r.type_label}</span>
+                          : <span className="text-slate-300">-</span>}
+                      </td>
                       <td className="px-4 py-3.5 text-right text-slate-700 font-medium tabular-nums">{formatNum(r.sent)}</td>
                       <td className="px-4 py-3.5 text-right text-emerald-600 font-semibold tabular-nums">{formatNum(r.success)}</td>
                       <td className={`px-4 py-3.5 text-right font-medium tabular-nums ${Number(r.fail) > 0 ? 'text-rose-500' : 'text-slate-300'}`}>{formatNum(r.fail)}</td>
+                      <td className="px-4 py-3.5 text-right text-slate-400 tabular-nums">{formatNum(r.pending)}</td>
                       <td className="px-6 py-3.5 text-center">
                         <button onClick={() => loadDetail(dateKey)}
                           className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 transition">

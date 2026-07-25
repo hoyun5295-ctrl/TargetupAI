@@ -3,7 +3,7 @@
 // 포인트 차감/환불은 이 모듈을 통해서만 수행한다.
 // 하드코딩 금지. DB 기반 단가 조회.
 
-import { query } from '../config/database';
+import pool, { query } from '../config/database';
 import { buildDeductDescription } from './deduct-reference';
 
 /**
@@ -207,25 +207,35 @@ export async function prepaidReverseOverRefund(
   const excess = Math.round((netRefunded - maxLegit) * 100) / 100;
   if (excess <= 0) return { reversed: 0, netRefundedAmt: netRefunded, skipped: false }; // 정당 한도 이내 (idempotency)
 
-  await query('BEGIN');
+  // ★ 2026-07-25 트랜잭션을 실제로 성립시킨다.
+  //   전에는 `query('BEGIN')`을 썼는데 `config/database.ts`의 `query`는 `pool.query`다 —
+  //   BEGIN·UPDATE·INSERT·COMMIT이 **각각 다른 커넥션**에 나뉘어 나갈 수 있어 트랜잭션이 성립하지 않았다.
+  //   그 상태에서 INSERT가 실패하면 잔액만 깎이고 이력이 안 남는다(돈이 조용히 사라진다).
+  //   커넥션을 고정해야 BEGIN~COMMIT이 한 트랜잭션이 된다.
+  const client = await pool.connect();
   try {
-    const bal = await query(
+    await client.query('BEGIN');
+    const bal = await client.query(
       'UPDATE companies SET balance = balance - $1, updated_at = NOW() WHERE id = $2 RETURNING balance',
       [excess, companyId]
     );
     if (bal.rows.length === 0) throw new Error(`company_id=${companyId} 잔액 갱신 실패`);
     const newBalance = Number(bal.rows[0].balance);
-    await query(
+    await client.query(
       `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method, message_type)
        VALUES ($1, 'admin_deduct', $2, $3, $4, 'campaign', $5, 'system', $6)`,
       [companyId, -excess, newBalance, `초과 환불 reverse (정당 한도 ${Math.max(0, Math.floor(maxLegitRefundCount))}건 초과분 자동 회수, ${messageType})`, campaignId, messageType]
     );
-    await query('COMMIT');
+    await client.query('COMMIT');
     console.log(`[초과환불reverse] company=${companyId} ${messageType} campaign=${campaignId} ${excess}원 회수 → 잔액 ${newBalance}원`);
     return { reversed: excess, netRefundedAmt: Math.round((netRefunded - excess) * 100) / 100, skipped: false };
   } catch (e: any) {
-    await query('ROLLBACK');
+    try { await client.query('ROLLBACK'); } catch (rb: any) {
+      console.error('[초과환불reverse] 롤백 실패:', rb?.message || rb);
+    }
     console.error('[초과환불reverse] 롤백:', e?.message || e);
     return { reversed: 0, netRefundedAmt: netRefunded, skipped: false };
+  } finally {
+    client.release();
   }
 }

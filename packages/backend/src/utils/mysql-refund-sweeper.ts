@@ -22,7 +22,7 @@
 // 패턴 기준: utils/campaign-sync-worker.ts (D151-2 setInterval) + utils/auto-campaign-worker.ts 미러
 // ===========================================================================
 
-import { query } from '../config/database';
+import pool, { query } from '../config/database';
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
 import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, kakaoBatchAggByGroup, type CampaignAggCounts } from './sms-queue';
 import { prepaidRefund, prepaidReverseOverRefund } from './prepaid';
@@ -383,10 +383,15 @@ async function reverseTimeoutRefundIfRecovered(): Promise<{ reversed: number; to
       if (reverseAmount <= 0) continue;
 
       // 5. companies 잔액 차감 + balance_transactions INSERT (트랜잭션)
-      await query('BEGIN');
+      // ★ 2026-07-25 트랜잭션을 실제로 성립시킨다. 전에는 `query('BEGIN')`을 썼는데
+      //   `config/database.ts`의 `query`는 `pool.query`라 BEGIN·UPDATE·INSERT·COMMIT이
+      //   각각 다른 커넥션에 나뉠 수 있어 트랜잭션이 성립하지 않았다.
+      //   INSERT가 실패하면 잔액만 깎이고 이력이 안 남는다(돈이 조용히 사라진다).
+      const client = await pool.connect();
       try {
+        await client.query('BEGIN');
         // 잔액 차감
-        const balanceRes = await query(
+        const balanceRes = await client.query(
           `UPDATE companies SET balance = balance - $1 WHERE id = $2::uuid RETURNING balance`,
           [reverseAmount, row.company_id]
         );
@@ -396,7 +401,7 @@ async function reverseTimeoutRefundIfRecovered(): Promise<{ reversed: number; to
         const newBalance = Number(balanceRes.rows[0].balance);
 
         // balance_transactions INSERT (type='admin_deduct', 추적 가능 description)
-        await query(
+        await client.query(
           `INSERT INTO balance_transactions (
             id, company_id, type, amount, balance_after, description,
             reference_type, reference_id, message_type, created_at
@@ -414,13 +419,17 @@ async function reverseTimeoutRefundIfRecovered(): Promise<{ reversed: number; to
           ]
         );
 
-        await query('COMMIT');
+        await client.query('COMMIT');
         reversed++;
         totalAmount += reverseAmount;
         log(`✓ reverse campaign=${row.campaign_id} company=${row.company_id} ${row.message_type} success=${recoveredCount}건 → ${reverseAmount}원 차감`);
       } catch (innerErr: any) {
-        await query('ROLLBACK');
+        try { await client.query('ROLLBACK'); } catch (rb: any) {
+          log(`✗ reverse campaign=${row.campaign_id} 롤백 실패:`, rb?.message || rb);
+        }
         log(`✗ reverse campaign=${row.campaign_id} 트랜잭션 롤백:`, innerErr?.message || innerErr);
+      } finally {
+        client.release();
       }
     } catch (rowErr: any) {
       log(`✗ reverse campaign=${row.campaign_id} 처리 에러:`, rowErr?.message || rowErr);
