@@ -4851,7 +4851,8 @@ const handleApproveRequest = async (id: string) => {
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `${isAgent ? '에이전트발송통계' : '발송통계'}_${statsStartDate}_${statsEndDate}.csv`;
+                    // ★ 2026-07-25 CSV → .xlsx (서버가 exceljs로 서식·숫자형까지 넣어 내려준다)
+                    a.download = `${isAgent ? '에이전트발송통계' : '발송통계'}_${statsStartDate}_${statsEndDate}.xlsx`;
                     a.click();
                     URL.revokeObjectURL(url);
                   } catch { showAlert('오류', '다운로드 중 오류가 발생했습니다.', 'error'); }

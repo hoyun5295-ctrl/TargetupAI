@@ -20,6 +20,7 @@
 
 import mysql from 'mysql2/promise';
 import { query } from '../config/database';
+import { expandMonthlyRange } from './stats-period';
 
 let _pool: mysql.Pool | null = null;
 
@@ -130,18 +131,12 @@ export function validateStatsDateRange(
   return { ok: true, startDate: s, endDate: e };
 }
 
-/** 월별 조회 시 시작/끝 날짜를 월 단위로 확장 (querySendStats와 동일 규칙) */
-function expandMonthly(view: 'daily' | 'monthly', startDate?: string, endDate?: string): { startDate?: string; endDate?: string } {
-  if (view !== 'monthly') return { startDate, endDate };
-  let s = startDate, e = endDate;
-  if (s) s = s.substring(0, 7) + '-01';
-  if (e) {
-    const d = new Date(e);
-    d.setMonth(d.getMonth() + 1, 0);
-    e = d.toISOString().split('T')[0];
-  }
-  return { startDate: s, endDate: e };
-}
+/**
+ * 월별 조회 시 시작/끝 날짜를 월 단위로 확장.
+ * ★ 2026-07-25 규칙을 `utils/stats-period.ts` CT로 이동 — 화면(querySendStats)·에이전트(여기)·
+ *   발송통계 엑셀 웹 행이 같은 함수를 봐야 한 파일 안에서 기간 축이 갈리지 않는다.
+ */
+const expandMonthly = expandMonthlyRange;
 
 function periodOf(dt: string, view: 'daily' | 'monthly'): string {
   return view === 'monthly'

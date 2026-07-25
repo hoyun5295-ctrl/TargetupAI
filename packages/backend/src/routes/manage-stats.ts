@@ -6,12 +6,15 @@ import { getCompanyScope } from '../utils/permission-helper';
 import { getTestSmsTables } from '../utils/sms-queue';
 import { buildDateRangeFilter, querySendStats, querySendStatsDetail } from '../utils/stats-aggregation';
 // ★ 2026-07-25 청구서와 동일한 사용량 집계 CT — 엑셀 유형이 청구 유형과 갈리면 정산 대조가 불가능하다.
-import { buildCompanyUsageByDay, rollupUsageByPeriod } from '../utils/send-usage-aggregation';
+import { buildCompanyUsageByDay, rollupUsageByPeriod, logUnbillableUsageKeys } from '../utils/send-usage-aggregation';
+// ★ 2026-07-25 월 확장 규칙 CT — 화면·에이전트·엑셀 웹 행이 같은 함수를 써야 기간 축이 갈리지 않는다.
+import { expandMonthlyRange } from '../utils/stats-period';
 // ★ 2026-07-20: 에이전트 전용 회사 = 엔진(PAY) 통계 축 — campaigns엔 행이 없어 0으로 보이던 결함의 근본 배선
 //   2026-07-23: 웹/에이전트/테스트 탭 분리 — 교체가 아니라 별도 축(agentRows) 병행 반환으로 전환.
 import { queryPayAgentStats, queryPayAgentStoreBreakdown, validateStatsDateRange, isPayStatsConfigured, type PayStatsResult, type PayAgentStoreRow } from '../utils/pay-stats';
 // ★ 2026-07-23 (서수란) 발송 통계 엑셀(CSV) 다운로드 — 웹+에이전트 합산 CT
-import { buildManageStatsCsv, type StatsExportWebRow } from '../utils/manage-stats-export';
+import { buildManageStatsXlsx, type StatsExportWebRow } from '../utils/manage-stats-export';
+import { XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
 
 const router = Router();
 
@@ -279,24 +282,37 @@ router.get('/send/export', async (req: Request, res: Response) => {
     const filterUserId = req.query.filterUserId as string;
     const companyScope = getCompanyScope(req);
 
-    // ★ 2026-07-25 에이전트 축 사전 검증 — 웹 조회(querySendStats) 전에 수행(헛일 방지).
-    //   미설정(PAY env)·잘못된 기간을 조용히 빈 에이전트 축으로 흘리면 정산에서 "발송 0"으로 오독된다(Codex R2 HIGH 1).
+    // ★ 2026-07-25 이 CSV는 정산 대조용이다. 회사 스코프가 없으면 청구 축 집계를 만들 수 없고,
+    //   그 상태로 다른 축(캠페인 선언 유형) 숫자를 조용히 내보내면 대조가 성립하지 않는다 — 명시 차단.
+    //   (고객사 관리자는 토큰에서 스코프가 항상 잡히고, super_admin이 companyId 없이 부를 때만 여기 걸린다.)
+    if (!companyScope) {
+      return res.status(400).json({
+        error: '발송통계 엑셀은 고객사를 지정해야 받을 수 있습니다. (정산 대조용 파일이라 회사 단위 집계가 필요합니다)',
+        code: 'COMPANY_SCOPE_REQUIRED',
+      });
+    }
+
+    // ★ 2026-07-25 날짜 검증을 usage_type 무관 전건으로 올렸다.
+    //   전에는 agent/both일 때만 검증해서, 웹 전용 회사가 날짜를 비우면 기간 필터 없이 전 이력을 스캔한 뒤
+    //   청구 축이 아닌 폴백 숫자를 내보냈다. 정산 파일에서 조용히 다른 축이 나가는 것이 빈 유형보다 나쁘다.
+    //   검증은 정규화(trim)된 날짜를 돌려주며, 이후 전 경로(웹·에이전트 조회·파일명)가 그 값을 쓴다.
+    const dateCheck = validateStatsDateRange(startDate, endDate);
+    if (!dateCheck.ok) {
+      return res.status(400).json({ error: `발송통계 엑셀 — ${dateCheck.error}` });
+    }
+    startDate = dateCheck.startDate;
+    endDate = dateCheck.endDate;
+
+    // ★ 2026-07-25 에이전트 축 사전 검증 — 웹 조회 전에 수행(헛일 방지).
+    //   미설정(PAY env)을 조용히 빈 에이전트 축으로 흘리면 정산에서 "발송 0"으로 오독된다(Codex R2 HIGH 1).
     let includeAgent = false;
-    if (companyScope) {
+    {
       const compType = await pool.query('SELECT usage_type FROM companies WHERE id = $1', [companyScope]);
       const usageType = compType.rows[0]?.usage_type || 'web';
       if (usageType === 'agent' || usageType === 'both') {
-        // 대상ID 그레인은 카디널리티가 높아 기간 없이/잘못된 기간/과대 기간 조회 시 과중 → 형식·순서·상한까지 검증
-        const dateCheck = validateStatsDateRange(startDate, endDate);
-        if (!dateCheck.ok) {
-          return res.status(400).json({ error: `에이전트 발송통계 엑셀 — ${dateCheck.error}` });
-        }
         if (!isPayStatsConfigured()) {
           return res.status(503).json({ error: '에이전트 통계 DB가 설정되지 않아 다운로드할 수 없습니다.', code: 'PAY_STATS_NOT_CONFIGURED' });
         }
-        // 정규화된 날짜를 이후 전 경로(웹·에이전트 조회·파일명)에 사용
-        startDate = dateCheck.startDate;
-        endDate = dateCheck.endDate;
         includeAgent = true;
       }
     }
@@ -305,15 +321,21 @@ router.get('/send/export', async (req: Request, res: Response) => {
     //   Harold 지시: 정산 대조용 엑셀의 유형이 청구서와 다르면 정산이 성립하지 않는다.
     //   캠페인에 선언된 유형은 큐 적재 시 SMS→LMS 자동 승격을 반영하지 못해 청구서와 갈렸다.
     //   테스트·스팸필터분은 화면 탭 구분과 맞춰 '테스트' 채널 행으로 분리한다.
+    //   ★ 2026-07-25 월별 보기는 기간을 그 달 전체로 넓혀 조회한다(stats-period CT).
+    //   화면(querySendStats)과 에이전트(queryPayAgentStoreBreakdown)는 원래 넓혔는데 웹 행만 안 넓혀서,
+    //   월별로 받으면 같은 파일 안에서 에이전트는 그 달 전체·웹은 하루치인데 기간 라벨은 둘 다 `YYYY-MM`이었다.
+    const webRange = expandMonthlyRange(view, startDate, endDate);
     let webRows: StatsExportWebRow[] = [];
     let testRows: StatsExportWebRow[] = [];
-    if (companyScope && startDate && endDate) {
+    {
       const dayData = await buildCompanyUsageByDay({
         companyId: companyScope,
-        startDate,
-        endDate,
+        startDate: webRange.startDate!,
+        endDate: webRange.endDate!,
         userId: filterUserId || undefined,
       });
+      // 청구가 못 읽는 유형키가 섞이면 그 유형은 원시 키로 실려 대조가 깨진다 — 그 자리에서 로그로 드러낸다.
+      logUnbillableUsageKeys(dayData, `발송통계엑셀 company=${companyScope} ${webRange.startDate}~${webRange.endDate}`);
       for (const r of rollupUsageByPeriod(dayData, view as 'daily' | 'monthly')) {
         const row: StatsExportWebRow = {
           period: r.period,
@@ -326,23 +348,6 @@ router.get('/send/export', async (req: Request, res: Response) => {
         if (r.type_key.startsWith('TEST_') || r.type_key.startsWith('SPAM_')) testRows.push(row);
         else webRows.push(row);
       }
-    } else {
-      // 회사 스코프나 기간이 없으면 청구 축 집계를 만들 수 없다 → 기존 축(기간 합계)으로 폴백
-      const statsResult = await querySendStats({
-        view: view as 'daily' | 'monthly',
-        startDate,
-        endDate,
-        companyId: companyScope || undefined,
-        filterUserId: filterUserId || undefined,
-        page: 1,
-        limit: 100000,
-      });
-      webRows = (statsResult.rows || []).map((r: any) => ({
-        period: r.period || r.date || r.month || '',
-        sent: r.sent,
-        success: r.success,
-        fail: r.fail,
-      }));
     }
 
     // ★ 2026-07-25 (#2) CSV 에이전트 축 = 대상ID(StoreId)별 분해(정산 구분). 화면 GET은 queryPayAgentStats(집계) 유지.
@@ -362,11 +367,20 @@ router.get('/send/export', async (req: Request, res: Response) => {
       agentRows = storeRows;
     }
 
-    const csv = buildManageStatsCsv({ webRows, testRows, agentRows });
-    const filename = `발송통계_${startDate || ''}_${endDate || ''}.csv`;
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
-    return res.send(csv);
+    // ★ 2026-07-25 CSV → 엑셀(.xlsx). Harold 지시 + LESSONS_BACKEND "고객 대상 xlsx = exceljs".
+    //   수량 열이 실제 숫자로 들어가 담당자가 바로 합계·필터를 걸 수 있다(CSV는 문자로 읽혀 안 됐다).
+    //   웹 행은 청구 축(성공 기준 과금)이라 캡션에 기준을 명시한다 — 대조 시 '전송'으로 맞추다 어긋나는 걸 막는다.
+    const buf = await buildManageStatsXlsx(
+      { webRows, testRows, agentRows },
+      {
+        title: `발송통계 ${startDate} ~ ${endDate}`,
+        caption: `${view === 'monthly' ? '월별' : '일별'} · 청구 기준 집계(성공 건수가 과금 대상) · 웹/테스트는 발송ID·대상ID 축이 없습니다`,
+      },
+    );
+    const filename = `발송통계_${startDate}_${endDate}.xlsx`;
+    res.setHeader('Content-Type', XLSX_CONTENT_TYPE);
+    res.setHeader('Content-Disposition', xlsxContentDisposition(filename));
+    return res.send(buf);
   } catch (error) {
     console.error('발송 통계 엑셀 export 실패:', error);
     return res.status(500).json({ error: '엑셀 다운로드에 실패했습니다.' });

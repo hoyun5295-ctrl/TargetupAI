@@ -15,6 +15,7 @@ import { getAllSmsTablesWithLogs, getCompanySmsTablesWithLogs, smsCampaignCounts
 import { classifyResultTables, computeDisplayCounts, DisplayCounts } from './sms-table-split';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, tallySmsChannelCounts, SmsChannel, ChannelCount } from './sms-result-map';
 import { CampaignTableMeta, recordedLiveTables, logTablesForLive } from './stats-table-scope';
+import { expandMonthlyRange } from './stats-period';
 
 // ============================================================
 // KST 날짜 범위 필터 빌더
@@ -500,14 +501,9 @@ export async function querySendStats(options: SendStatsOptions): Promise<SendSta
   const offset = (page - 1) * limit;
 
   // 월별 조회 시 날짜를 월 단위로 자동 확장
-  if (view === 'monthly') {
-    if (startDate) startDate = startDate.substring(0, 7) + '-01';
-    if (endDate) {
-      const d = new Date(endDate);
-      d.setMonth(d.getMonth() + 1, 0);
-      endDate = d.toISOString().split('T')[0];
-    }
-  }
+  // ★ 2026-07-25 규칙을 `utils/stats-period.ts` CT로 이동 — 화면(여기)·에이전트(pay-stats)·
+  //   발송통계 엑셀 웹 행이 같은 함수를 봐야 한 파일 안에서 기간 축이 갈리지 않는다. 동작 동일.
+  ({ startDate, endDate } = expandMonthlyRange(view, startDate, endDate));
 
   // WHERE 절 동적 구성 — 발송통계는 발송예정일(예약)/발송일(즉시) 기준 (STAT_DATE_EXPR)
   const dr = buildDateRangeFilter(STAT_DATE_EXPR, startDate, endDate, 1);

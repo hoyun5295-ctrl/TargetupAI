@@ -445,7 +445,10 @@ export const USAGE_TYPE_LABEL: Record<string, string> = {
   SMS: 'SMS',
   LMS: 'LMS',
   MMS: 'MMS',
-  KAKAO: '카카오',
+  // ★ 2026-07-25 '카카오' → '카카오알림톡'. 같은 엑셀의 에이전트 행이 '카카오알림톡'(pay-stats.ts AGENT_MSG_TYPE_LABEL.K)이라
+  //   한 '유형' 컬럼에 알림톡이 두 이름으로 갈렸다 — 피벗하면 두 줄이 되어 정산 대조가 깨진다.
+  //   웹 KAKAO의 실체도 SMSQ msg_type='K' 알림톡이라 에이전트 쪽 이름이 의미상 정확하다.
+  KAKAO: '카카오알림톡',
   TEST_SMS: '테스트 SMS',
   TEST_LMS: '테스트 LMS',
   SPAM_SMS: '스팸테스트 SMS',

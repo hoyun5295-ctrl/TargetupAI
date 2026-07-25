@@ -30,7 +30,9 @@ import {
 import { handleDbMigrationError } from '../utils/db-migration-error';
 import { sendSystemAlert } from '../utils/system-alert';
 // ★ 2026-07-24 슈퍼 에이전트 통계 엑셀(CSV) — 기간×고객사×발송ID×유형 (정산 대조)
-import { buildAdminAgentStatsCsv } from '../utils/manage-stats-export';
+import { buildAdminAgentStatsXlsx } from '../utils/manage-stats-export';
+// ★ 2026-07-25 고객 대상 표는 엑셀(.xlsx)로 나간다 — LESSONS_BACKEND "고객 대상 xlsx = exceljs".
+import { buildXlsxBuffer, XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
 import { normalizePhone } from '../utils/normalize-phone';
 import { normalizeCdpAutoExecuteGate } from '../utils/autosend-policy';
 import { grantBasicTrial } from '../utils/basic-trial';
@@ -4253,11 +4255,15 @@ router.get('/stats/export/agent', authenticate, requireSuperAdmin, async (req: R
     if (storeRows === null) {
       return res.status(503).json({ error: '에이전트 통계 조회에 실패했습니다. 잠시 후 다시 시도해주세요.', code: 'PAY_STATS_QUERY_FAILED' });
     }
-    const csv = buildAdminAgentStatsCsv(storeRows);
-    const filename = `에이전트발송통계_${from}_${to}.csv`;
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
-    return res.send(csv);
+    // ★ 2026-07-25 CSV → 엑셀(.xlsx). 고객사 발송통계와 같은 행 빌더·같은 서식을 쓴다.
+    const buf = await buildAdminAgentStatsXlsx(storeRows, {
+      title: `에이전트 발송통계 ${from} ~ ${to}`,
+      caption: '기간 × 고객사 × 발송ID × 대상ID × 유형 · 청구 기준 집계(성공 건수가 과금 대상)',
+    });
+    const filename = `에이전트발송통계_${from}_${to}.xlsx`;
+    res.setHeader('Content-Type', XLSX_CONTENT_TYPE);
+    res.setHeader('Content-Disposition', xlsxContentDisposition(filename));
+    return res.send(buf);
   } catch (error) {
     console.error('에이전트 발송통계 엑셀 export 실패:', error);
     return res.status(500).json({ error: '다운로드에 실패했습니다.' });
@@ -4373,35 +4379,53 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
     });
     const result = { rows: exportRows };
 
-    // CSV 생성 — 쉼표/큰따옴표 포함 값은 이스케이핑
-    const BOM = '\uFEFF';
-    const csvEscape = (v: any) => {
-      const s = String(v ?? '');
-      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const headers = ['발송일', '회사코드', '회사명', '계정ID', '사용자명', '문자타입', '발송유형', '캠페인수', '대상건수', '전송건수', '성공', '실패', '대기'];
-    const rows = result.rows.map((r: any) => [
+    // ★ 2026-07-25 CSV → 엑셀(.xlsx). Harold 지시 + LESSONS_BACKEND "고객 대상 xlsx = exceljs".
+    //   수량 열이 실제 숫자로 들어가 합계·필터가 바로 먹는다(CSV는 문자로 읽혀 안 됐다).
+    const xlsxRows: Array<Array<string | number>> = result.rows.map((r: any) => [
       r.send_date,
-      csvEscape(r.company_code || ''),
-      csvEscape(r.company_name),
-      csvEscape(r.login_id || '-'),
-      csvEscape(r.user_name || '-'),
+      r.company_code || '',
+      r.company_name || '',
+      r.login_id || '-',
+      r.user_name || '-',
       r.channel_label,
       r.send_type === 'auto' ? '자동' : r.send_type === 'direct' ? '직접' : 'AI',
-      r.campaign_count,
-      r.total_target,
-      r.total_sent,
-      r.total_success,
-      r.total_fail,
+      Number(r.campaign_count) || 0,
+      Number(r.total_target) || 0,
+      Number(r.total_sent) || 0,
+      Number(r.total_success) || 0,
+      Number(r.total_fail) || 0,
       Math.max(0, Number(r.total_pending) || 0),
-    ].join(','));
+    ]);
 
-    const csv = BOM + headers.join(',') + '\n' + rows.join('\n');
+    const buf = await buildXlsxBuffer({
+      sheetName: '발송통계',
+      title: `발송통계(슈퍼관리자) ${startDate} ~ ${endDate}`,
+      // ★ 축을 파일에 명시한다. 이건 계정·캠페인 단위 운영 뷰라 '문자타입'이 캠페인에 선언된 유형이고,
+      //   큐 적재 시 SMS→LMS 자동 승격이 반영되지 않는다. 고객사 발송통계(청구 축)와 유형 분해가 다를 수 있어
+      //   어느 파일로 대조해야 하는지를 파일 자체가 말하게 한다.
+      caption: '캠페인·계정 단위 운영 집계 · 문자타입은 캠페인 선언 유형(큐 자동승격 미반영) · 청구 대조는 고객사 발송통계 또는 청구서를 사용하세요',
+      columns: [
+        { header: '발송일', width: 14 },
+        { header: '회사코드', width: 14 },
+        { header: '회사명', width: 24 },
+        { header: '계정ID', width: 16 },
+        { header: '사용자명', width: 14 },
+        { header: '문자타입', width: 18 },
+        { header: '발송유형', width: 12 },
+        { header: '캠페인수', width: 12, numeric: true },
+        { header: '대상건수', width: 12, numeric: true },
+        { header: '전송건수', width: 12, numeric: true },
+        { header: '성공', width: 12, numeric: true },
+        { header: '실패', width: 12, numeric: true },
+        { header: '대기', width: 12, numeric: true },
+      ],
+      rows: xlsxRows,
+    });
 
-    const filename = `발송통계_${startDate}_${endDate}.csv`;
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
-    res.send(csv);
+    const filename = `발송통계_${startDate}_${endDate}.xlsx`;
+    res.setHeader('Content-Type', XLSX_CONTENT_TYPE);
+    res.setHeader('Content-Disposition', xlsxContentDisposition(filename));
+    res.send(buf);
   } catch (error) {
     console.error('[Admin] 발송통계 엑셀 다운로드 실패:', error);
     res.status(500).json({ error: '다운로드에 실패했습니다.' });

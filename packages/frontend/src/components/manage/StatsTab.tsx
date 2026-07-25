@@ -71,16 +71,19 @@ export default function StatsTab() {
     } finally { setDetailLoading(false); }
   };
 
-  // ★ 2026-07-23 (서수란) 엑셀(CSV) 다운로드 — 웹+에이전트 합산 한 파일
+  // ★ 2026-07-23 (서수란) 엑셀 다운로드 — 웹+에이전트 합산 한 파일
+  // ★ 2026-07-25 CSV → .xlsx. 수량이 실제 숫자로 들어가 담당자가 바로 합계·필터를 걸 수 있다.
   const handleExport = async () => {
     setExporting(true);
     try {
       const res = await manageStatsApi.exportCsv({ view, startDate, endDate, filterUserId: filterUserId || undefined });
-      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
+      const blob = new Blob([res.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `발송통계_${startDate}_${endDate}.csv`;
+      a.download = `발송통계_${startDate}_${endDate}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();

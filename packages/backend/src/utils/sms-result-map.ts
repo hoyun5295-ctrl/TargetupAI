@@ -222,7 +222,10 @@ export function getSendTypeLabel(msgType: string, kOriseq?: number | string | nu
  */
 export function getCampaignChannelLabel(sendChannel: string | null | undefined, messageType: string): string {
   if (sendChannel === 'alimtalk') return '알림톡';
-  return messageType;
+  // ★ 2026-07-25 message_type이 비어 있으면 엑셀 '문자타입' 셀이 통째로 빈칸이 됐다.
+  //   빈 셀은 담당자에게 "데이터 누락"으로 읽힌다(고객사 발송통계에서 접수된 그 증상과 같다).
+  //   값이 없는 것과 유형을 모르는 것을 구분해 표기한다.
+  return String(messageType || '').trim() || '(유형 미상)';
 }
 
 /**
