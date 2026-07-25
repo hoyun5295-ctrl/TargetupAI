@@ -76,6 +76,7 @@ import { startAlimtalkScheduler } from './utils/alimtalk-jobs';
 import { startJourneyPretestNotifierWorker } from './utils/journey-pretest-notifier-worker';
 import { startAiMemoryAccumulatorWorker } from './utils/ai-memory-accumulator-worker';
 import { startCopyLabelSweeperWorker } from './utils/copy-label-sweeper';
+import { startPayIngestMonitor } from './utils/pay-ingest-monitor';
 // ★ CT-17: 30일 PRO 무료체험 자동 강등 Cron (2026-04-22)
 import { startTrialDowngradeWorker } from './utils/trial-downgrade-worker';
 // ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 30일 무료체험 자동 만료 Cron (매일 04:00 KST 로그)
@@ -469,6 +470,11 @@ app.listen(PORT, () => {
 
   // ★ 2026-07-04: 여정·브랜드 KAKAO 학습 라벨 스윕 — 30분 주기(환불·상태·큐 무접촉, 라벨 전용). 발견1(라벨 누수) fix.
   startCopyLabelSweeperWorker();
+
+  // ★ 2026-07-25: 통계DB(pay-ingest-db) 트립와이어 — 10분 주기. 인증실패 급증(스캔) + 적재 정체(게이트웨이 push 중단) 감지.
+  //   포트 23388이 0.0.0.0으로 게시돼 외부 TCP 접속이 되는 상태(실측)라 감시를 둔다.
+  //   읽기 전용·기존 pay-stats 풀 공유·실패 무해 — 강문희 적재에 영향 0.
+  startPayIngestMonitor();
 
   // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 자동 재진입 worker — 6시간 주기 + 회사 admin 명시 활성 정합
   //   journeys.auto_reentry_enabled = true 영역만 진입 (default OFF — feedback_no_target_auto_relax 정합)

@@ -43,6 +43,55 @@ function getPool(): mysql.Pool | null {
   return _pool;
 }
 
+/**
+ * ★ 2026-07-25 통계 DB 상태 스냅샷 — 침입 감시·적재 정체 감지 전용.
+ *
+ * 배경: `pay-ingest-db`가 `0.0.0.0:23388`로 게시돼 인터넷에서 접근 가능한 상태다(실측 확인).
+ *   계정은 전부 호스트 제한(`%` 없음)이라 인증은 못 뚫지만, 인증 이전 단계는 열려 있다.
+ *   방화벽으로 출처를 좁히더라도 "누가 두드리는지"와 "적재가 살아 있는지"는 계속 보고 있어야 한다.
+ *
+ * ※ **읽기 전용이다.** 상태 변수 조회와 COUNT 하나뿐이라 강문희 쪽 적재를 방해하지 않는다.
+ *   커넥션도 새로 만들지 않고 기존 풀(connectionLimit 3)을 공유한다.
+ */
+export interface PayDbSnapshot {
+  abortedConnects: number;
+  connections: number;
+  /** MariaDB 가동 시간(초). 줄어들면 DB가 재시작된 것 → 누적 카운터 기준선을 다시 잡아야 한다. */
+  uptimeSec: number;
+  /** 오늘(KST 기준 YYYYMMDD) 적재된 행 수. 정체하면 push가 끊긴 것이다. */
+  todayRows: number;
+  /** 적재된 가장 최근 일자(YYYYMMDD). */
+  latestDestDt: string | null;
+}
+
+export async function fetchPayDbSnapshot(): Promise<PayDbSnapshot | null> {
+  const pool = getPool();
+  if (!pool) return null;
+
+  const [statusRows] = await pool.query(
+    `SHOW GLOBAL STATUS WHERE Variable_name IN ('Aborted_connects','Connections','Uptime')`,
+  );
+  const status: Record<string, number> = {};
+  for (const r of statusRows as any[]) status[String(r.Variable_name)] = Number(r.Value) || 0;
+
+  // DestDt는 YYYYMMDD 문자열이다. 오늘 행 수와 최신 일자를 함께 본다 —
+  // 최신 일자만 보면 하루 단위라 둔감해서, 오늘 안에 멈춘 것을 못 잡는다.
+  const [ingestRows] = await pool.query(
+    `SELECT COUNT(*) AS todayRows, MAX(DestDt) AS latestDestDt
+       FROM RSRM_SalesStts
+      WHERE DestDt = DATE_FORMAT(NOW(), '%Y%m%d')`,
+  );
+  const ing = (ingestRows as any[])[0] || {};
+
+  return {
+    abortedConnects: status.Aborted_connects || 0,
+    connections: status.Connections || 0,
+    uptimeSec: status.Uptime || 0,
+    todayRows: Number(ing.todayRows) || 0,
+    latestDestDt: ing.latestDestDt ? String(ing.latestDestDt) : null,
+  };
+}
+
 // ★ 유형 라벨 단일 소스 (MsgType 코드 → 사용자 표시명). 카카오는 알림톡.
 export const AGENT_MSG_TYPE_LABEL: Record<string, string> = {
   S: 'SMS', L: 'LMS', M: 'MMS', K: '카카오알림톡', X: '팩스',
