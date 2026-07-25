@@ -24,7 +24,7 @@ import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CA
 import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsChannelSplitByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, STAT_DATE_EXPR, STAT_STARTED_GUARD } from '../utils/stats-aggregation';
 // ★ 2026-07-23: 슈퍼관리자 발송통계 웹/에이전트 구분 — 에이전트(엔진) 통계 CT 병행 반환
 import {
-  queryPayAgentStatsAllCompanies, isPayStatsConfigured,
+  queryPayAgentStatsAllCompanies, queryPayAgentStoreBreakdown, validateStatsDateRange, isPayStatsConfigured,
   parseAgentCharges, insertAgentCharges, getAgentChargeStatus, listAgentCharges, findGatewayCharges, matchHealWindow,
 } from '../utils/pay-stats';
 import { handleDbMigrationError } from '../utils/db-migration-error';
@@ -458,6 +458,9 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
     status, planId, rejectNumber, brandName,
     sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays,
     costPerSms, costPerLms, costPerMms, costPerKakao,
+    // ★ 2026-07-25 청구서가 쓰는 단가인데 입력 경로가 없어 설정 불가였다(billing.ts 테스트발송 항목).
+    //   스팸필터는 일반 SMS/LMS 단가를 그대로 쓰므로(billing.ts D16 결정) 별도 단가를 두지 않는다.
+    costPerTestSms, costPerTestLms,
     storeCodeList,
     businessNumber, ceoName, businessType, businessItem, address,
     allowCallbackSelfRegister, maxUsers, sessionTimeoutMinutes,
@@ -523,6 +526,10 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           cost_per_lms = COALESCE($15, cost_per_lms),
           cost_per_mms = COALESCE($16, cost_per_mms),
           cost_per_kakao = COALESCE($17, cost_per_kakao),
+          -- ★ 2026-07-25 미전송(null)=무변 / ''=미설정으로 되돌림 / 값=저장.
+          --   COALESCE만 쓰면 한 번 넣은 단가를 다시 비워 일반 단가 상속으로 되돌릴 수 없다.
+          cost_per_test_sms = CASE WHEN $36::text IS NULL THEN cost_per_test_sms ELSE NULLIF($36::text, '')::numeric END,
+          cost_per_test_lms = CASE WHEN $37::text IS NULL THEN cost_per_test_lms ELSE NULLIF($37::text, '')::numeric END,
           store_code_list = COALESCE($18, store_code_list),
           business_number = COALESCE($19, business_number),
           ceo_name = COALESCE($20, ceo_name),
@@ -544,7 +551,7 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           updated_at = NOW()
       WHERE id = $32
       RETURNING *
-    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, finalSubscriptionStatus, id, userIsolationEnabled !== undefined ? userIsolationEnabled : null, usageType || null, industryCodeParam]);
+    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, finalSubscriptionStatus, id, userIsolationEnabled !== undefined ? userIsolationEnabled : null, usageType || null, industryCodeParam, costPerTestSms === undefined ? null : String(costPerTestSms ?? ''), costPerTestLms === undefined ? null : String(costPerTestLms ?? '')]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
@@ -4217,26 +4224,37 @@ router.put('/rcs-templates/:id/reject', authenticate, requireSuperAdmin, async (
 // 필요 데이터: 발송날짜 / 발송계정(사용자) / 문자타입별 총건수·성공·실패·대기
 // 계정별 사용 내역 필수 (거래내역서 발행용)
 // ============================================================
-// ★ 2026-07-24 (서수란) 슈퍼 에이전트(엔진) 발송통계 엑셀(CSV) — 기간×고객사×발송ID×유형.
-//   기존 웹 /stats/export(캠페인 축)는 무접촉. 날짜는 raw 전달(queryPayAgentStatsAllCompanies가 월 확장 자체 수행).
+// ★ 2026-07-24 (서수란) 슈퍼 에이전트(엔진) 발송통계 엑셀(CSV) — 기간×고객사×발송ID×대상ID×유형 (2026-07-25 #2 대상ID 분해).
+//   기존 웹 /stats/export(캠페인 축)는 무접촉. 날짜는 검증기가 정규화한 값을 전달(queryPayAgentStoreBreakdown이 월 확장 자체 수행).
 router.get('/stats/export/agent', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { startDate, endDate, companyId } = req.query;
     const view = (req.query.view as string) === 'monthly' ? 'monthly' : 'daily';
-    if (!startDate || !endDate) {
-      return res.status(400).json({ error: '시작일과 종료일을 입력해주세요.' });
+    // 형식·순서·상한까지 검증 — 잘못된 값이 조용히 무제한 조회로 새는 것 차단(대상ID 그레인은 카디널리티가 높다)
+    const dateCheck = validateStatsDateRange(startDate as string, endDate as string);
+    if (!dateCheck.ok) {
+      return res.status(400).json({ error: dateCheck.error });
     }
     if (!isPayStatsConfigured()) {
-      return res.status(503).json({ error: '에이전트 통계 DB가 설정되지 않아 다운로드할 수 없습니다.' });
+      return res.status(503).json({ error: '에이전트 통계 DB가 설정되지 않아 다운로드할 수 없습니다.', code: 'PAY_STATS_NOT_CONFIGURED' });
     }
-    const agentRes = await queryPayAgentStatsAllCompanies({
+    // 정규화된 날짜를 조회·파일명 전 경로에 사용(공백 낀 원본이 월 확장에서 깨지는 것 차단)
+    const from = dateCheck.startDate;
+    const to = dateCheck.endDate;
+    // ★ 2026-07-25 (#2) 슈퍼 CSV = 대상ID(StoreId)별 분해(기간×고객사×발송ID×대상ID×유형). 화면 GET은 queryPayAgentStatsAllCompanies(집계) 유지.
+    const storeRows = await queryPayAgentStoreBreakdown({
+      scope: 'admin',
       view,
-      startDate: String(startDate),
-      endDate: String(endDate),
+      startDate: from,
+      endDate: to,
       companyId: companyId ? String(companyId) : undefined,
     });
-    const csv = buildAdminAgentStatsCsv(agentRes?.rows || []);
-    const filename = `에이전트발송통계_${startDate}_${endDate}.csv`;
+    // null(조회 실패) ≠ [](정상 0건) — 실패를 빈 CSV로 내면 정산 과소집계로 오인
+    if (storeRows === null) {
+      return res.status(503).json({ error: '에이전트 통계 조회에 실패했습니다. 잠시 후 다시 시도해주세요.', code: 'PAY_STATS_QUERY_FAILED' });
+    }
+    const csv = buildAdminAgentStatsCsv(storeRows);
+    const filename = `에이전트발송통계_${from}_${to}.csv`;
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
     return res.send(csv);

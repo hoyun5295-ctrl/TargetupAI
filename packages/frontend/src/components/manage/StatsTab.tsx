@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { manageStatsApi, manageUsersApi } from '../../api/client';
 import { useLegacyToast } from '../ToastProvider';
 import { formatDateTime, formatCampaignMessageForDisplay } from '../../utils/formatDate';
+import { extractBlobErrorMessage } from '../../utils/csv-download';
 
 export default function StatsTab() {
   const [view, setView] = useState<'daily' | 'monthly'>('daily');
@@ -84,8 +85,9 @@ export default function StatsTab() {
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
-    } catch {
-      setToast({ msg: '엑셀 다운로드 실패', type: 'error' });
+    } catch (err: any) {
+      // 서버 안내(기간 오류·에이전트 통계 미설정 등)를 그대로 노출 — blob 응답이라 별도 추출 필요
+      setToast({ msg: await extractBlobErrorMessage(err, '엑셀 다운로드 실패'), type: 'error' });
     } finally { setExporting(false); }
   };
 
@@ -189,7 +191,7 @@ export default function StatsTab() {
             조회
           </button>
           {/* ★ 2026-07-23 (서수란) 웹+에이전트 발송 수량을 한 파일로 — 정산 오차 확인용 */}
-          <button onClick={handleExport} disabled={exporting} title="웹+에이전트 발송 수량(발송ID·유형별)을 한 파일로 내려받습니다"
+          <button onClick={handleExport} disabled={exporting} title="웹+에이전트 발송 수량(발송ID·발급명·대상ID·유형별)을 한 파일로 내려받습니다"
             className="inline-flex items-center gap-1.5 px-4 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-semibold transition disabled:opacity-50">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
             {exporting ? '내보내는 중…' : '엑셀 다운로드'}
@@ -298,7 +300,11 @@ export default function StatsTab() {
                 ) : agentRows.map((r: any, i: number) => (
                   <tr key={i} className="transition hover:bg-slate-50/70">
                     <td className="px-6 py-3.5 font-semibold text-slate-700">{r.period}</td>
-                    <td className="px-4 py-3.5 text-left font-mono text-xs text-slate-600">{r.agent_send_id || '-'}</td>
+                    <td className="px-4 py-3.5 text-left font-mono text-xs text-slate-600">
+                      {r.agent_send_id || '-'}{r.cust_name ? <span className="text-slate-400"> / {r.cust_name}</span> : null}
+                      {/* ★ 2026-07-25 부달 재전송 귀속분 — 직접 발송분과 섞이면 "내가 안 보낸 발송"으로 오인된다 */}
+                      {r.is_relay ? <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-sans">부달 재전송</span> : null}
+                    </td>
                     <td className="px-4 py-3.5 text-left"><span className="px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 text-xs font-medium">{r.type_label || r.msg_type}</span></td>
                     <td className="px-4 py-3.5 text-right text-slate-700 font-medium tabular-nums">{formatNum(r.sent)}</td>
                     <td className="px-4 py-3.5 text-right text-emerald-600 font-semibold tabular-nums">{formatNum(r.success)}</td>

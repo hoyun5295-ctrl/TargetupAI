@@ -5,11 +5,13 @@ import { DEFAULT_COSTS } from '../config/defaults';
 import { getCompanyScope } from '../utils/permission-helper';
 import { getTestSmsTables } from '../utils/sms-queue';
 import { buildDateRangeFilter, querySendStats, querySendStatsDetail } from '../utils/stats-aggregation';
+// ★ 2026-07-25 청구서와 동일한 사용량 집계 CT — 엑셀 유형이 청구 유형과 갈리면 정산 대조가 불가능하다.
+import { buildCompanyUsageByDay, rollupUsageByPeriod } from '../utils/send-usage-aggregation';
 // ★ 2026-07-20: 에이전트 전용 회사 = 엔진(PAY) 통계 축 — campaigns엔 행이 없어 0으로 보이던 결함의 근본 배선
 //   2026-07-23: 웹/에이전트/테스트 탭 분리 — 교체가 아니라 별도 축(agentRows) 병행 반환으로 전환.
-import { queryPayAgentStats, isPayStatsConfigured, type PayStatsResult } from '../utils/pay-stats';
+import { queryPayAgentStats, queryPayAgentStoreBreakdown, validateStatsDateRange, isPayStatsConfigured, type PayStatsResult, type PayAgentStoreRow } from '../utils/pay-stats';
 // ★ 2026-07-23 (서수란) 발송 통계 엑셀(CSV) 다운로드 — 웹+에이전트 합산 CT
-import { buildManageStatsCsv } from '../utils/manage-stats-export';
+import { buildManageStatsCsv, type StatsExportWebRow } from '../utils/manage-stats-export';
 
 const router = Router();
 
@@ -266,50 +268,101 @@ router.get('/send/detail', async (req: Request, res: Response) => {
 });
 
 // GET /send/export — 발송 통계 엑셀(CSV) 다운로드 (웹+에이전트 한 파일 합산·서수란 2026-07-23)
-//   화면과 동일 축(웹=querySendStats·에이전트=queryPayAgentStats 발송ID×유형)을 페이징 없이 전량 CSV로.
-//   웹 축 무접촉(회귀 0). 에이전트 = usage_type agent/both + env 설정 시만.
+//   웹=querySendStats(기간)·에이전트=queryPayAgentStoreBreakdown(기간×발송ID×대상ID×유형)을 페이징 없이 전량 CSV로.
+//   ★ 2026-07-25 (#2) CSV는 대상ID(StoreId)별 정산 분해 — 화면 GET(집계)과 별도 함수라 회귀 0. 웹 축 무접촉.
 router.get('/send/export', async (req: Request, res: Response) => {
   try {
     const view = (req.query.view as string) === 'monthly' ? 'monthly' : 'daily';
-    const startDate = (req.query.startDate as string) || '';
-    const endDate = (req.query.endDate as string) || '';
+    // 공백 낀 값이 하위(expandMonthly substring)에서 깨지지 않도록 입구에서 정규화
+    let startDate = String(req.query.startDate || '').trim();
+    let endDate = String(req.query.endDate || '').trim();
     const filterUserId = req.query.filterUserId as string;
     const companyScope = getCompanyScope(req);
 
-    const statsResult = await querySendStats({
-      view: view as 'daily' | 'monthly',
-      startDate,
-      endDate,
-      companyId: companyScope || undefined,
-      filterUserId: filterUserId || undefined,
-      page: 1,
-      limit: 100000,
-    });
-    const webRows = (statsResult.rows || []).map((r: any) => ({
-      period: r.period || r.date || r.month || '',
-      sent: r.sent,
-      success: r.success,
-      fail: r.fail,
-    }));
-
-    let agentRows: PayStatsResult['rows'] = [];
+    // ★ 2026-07-25 에이전트 축 사전 검증 — 웹 조회(querySendStats) 전에 수행(헛일 방지).
+    //   미설정(PAY env)·잘못된 기간을 조용히 빈 에이전트 축으로 흘리면 정산에서 "발송 0"으로 오독된다(Codex R2 HIGH 1).
+    let includeAgent = false;
     if (companyScope) {
       const compType = await pool.query('SELECT usage_type FROM companies WHERE id = $1', [companyScope]);
       const usageType = compType.rows[0]?.usage_type || 'web';
-      if ((usageType === 'agent' || usageType === 'both') && isPayStatsConfigured()) {
-        const payResult = await queryPayAgentStats({
-          companyId: companyScope,
-          view: view as 'daily' | 'monthly',
-          startDate,
-          endDate,
-          page: 1,
-          limit: 100000,
-        });
-        if (payResult) agentRows = payResult.rows;
+      if (usageType === 'agent' || usageType === 'both') {
+        // 대상ID 그레인은 카디널리티가 높아 기간 없이/잘못된 기간/과대 기간 조회 시 과중 → 형식·순서·상한까지 검증
+        const dateCheck = validateStatsDateRange(startDate, endDate);
+        if (!dateCheck.ok) {
+          return res.status(400).json({ error: `에이전트 발송통계 엑셀 — ${dateCheck.error}` });
+        }
+        if (!isPayStatsConfigured()) {
+          return res.status(503).json({ error: '에이전트 통계 DB가 설정되지 않아 다운로드할 수 없습니다.', code: 'PAY_STATS_NOT_CONFIGURED' });
+        }
+        // 정규화된 날짜를 이후 전 경로(웹·에이전트 조회·파일명)에 사용
+        startDate = dateCheck.startDate;
+        endDate = dateCheck.endDate;
+        includeAgent = true;
       }
     }
 
-    const csv = buildManageStatsCsv({ webRows, agentRows });
+    // ★ 2026-07-25 (#3) 웹 행 유형 — **청구서와 같은 집계 CT**(send-usage-aggregation)를 쓴다.
+    //   Harold 지시: 정산 대조용 엑셀의 유형이 청구서와 다르면 정산이 성립하지 않는다.
+    //   캠페인에 선언된 유형은 큐 적재 시 SMS→LMS 자동 승격을 반영하지 못해 청구서와 갈렸다.
+    //   테스트·스팸필터분은 화면 탭 구분과 맞춰 '테스트' 채널 행으로 분리한다.
+    let webRows: StatsExportWebRow[] = [];
+    let testRows: StatsExportWebRow[] = [];
+    if (companyScope && startDate && endDate) {
+      const dayData = await buildCompanyUsageByDay({
+        companyId: companyScope,
+        startDate,
+        endDate,
+        userId: filterUserId || undefined,
+      });
+      for (const r of rollupUsageByPeriod(dayData, view as 'daily' | 'monthly')) {
+        const row: StatsExportWebRow = {
+          period: r.period,
+          type_label: r.type_label,
+          sent: r.sent,
+          success: r.success,
+          fail: r.fail,
+          pending: r.pending,
+        };
+        if (r.type_key.startsWith('TEST_') || r.type_key.startsWith('SPAM_')) testRows.push(row);
+        else webRows.push(row);
+      }
+    } else {
+      // 회사 스코프나 기간이 없으면 청구 축 집계를 만들 수 없다 → 기존 축(기간 합계)으로 폴백
+      const statsResult = await querySendStats({
+        view: view as 'daily' | 'monthly',
+        startDate,
+        endDate,
+        companyId: companyScope || undefined,
+        filterUserId: filterUserId || undefined,
+        page: 1,
+        limit: 100000,
+      });
+      webRows = (statsResult.rows || []).map((r: any) => ({
+        period: r.period || r.date || r.month || '',
+        sent: r.sent,
+        success: r.success,
+        fail: r.fail,
+      }));
+    }
+
+    // ★ 2026-07-25 (#2) CSV 에이전트 축 = 대상ID(StoreId)별 분해(정산 구분). 화면 GET은 queryPayAgentStats(집계) 유지.
+    let agentRows: PayAgentStoreRow[] = [];
+    if (includeAgent && companyScope) {
+      const storeRows = await queryPayAgentStoreBreakdown({
+        scope: 'company',
+        companyId: companyScope,
+        view: view as 'daily' | 'monthly',
+        startDate,
+        endDate,
+      });
+      // null(조회 실패) ≠ [](정상 0건) — 실패를 빈 CSV로 내면 정산 과소집계로 오인
+      if (storeRows === null) {
+        return res.status(503).json({ error: '에이전트 통계 조회에 실패했습니다. 잠시 후 다시 시도해주세요.', code: 'PAY_STATS_QUERY_FAILED' });
+      }
+      agentRows = storeRows;
+    }
+
+    const csv = buildManageStatsCsv({ webRows, testRows, agentRows });
     const filename = `발송통계_${startDate || ''}_${endDate || ''}.csv`;
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);

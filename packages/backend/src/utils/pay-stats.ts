@@ -65,6 +65,7 @@ export interface PayStatsOptions {
   endDate?: string;   // YYYY-MM-DD
   page: number;
   limit: number;
+  enrichNames?: boolean; // ★ 2026-07-25 발급명(CustNm) 부착 여부. 기본 true. rows 미사용 경로(queryPayAgentByType)는 false로 불필요 조회 차단.
 }
 
 export interface PayTypeAgg {
@@ -78,6 +79,8 @@ export interface PayTypeAgg {
 export interface PayPeriodTypeRow extends PayTypeAgg {
   period: string;
   agent_send_id: string; // ★ 2026-07-23 발송ID(=CustId) 축 — 회사 표에서 ID별 구분(서수란 신고). 정산 오차 확인용.
+  cust_name?: string; // ★ 2026-07-25 발급명(RSRM_SalesMst.CustNm) — 표시용 "custId / custNm". 이름 없으면 미포함(CustId만).
+  is_relay?: boolean; // ★ 2026-07-25 부달(미달) 재전송 귀속분 — 공용 엔진 계정 발송을 원 발송ID로 귀속한 행
 }
 export interface PayStatsResult {
   summary: { total_sent: string; total_success: string; total_fail: string; total_pending: string };
@@ -92,6 +95,39 @@ export interface PayStatsResult {
 function toDestDt(d?: string): string | null {
   const s = String(d || '').replace(/-/g, '').trim();
   return /^\d{8}$/.test(s) ? s : null;
+}
+
+/** 조회 기간 상한(일) — 대상ID 그레인은 카디널리티가 높아(피케이포유 325 등) 무제한 조회 시 메모리·CSV 폭증. 연 단위 정산은 허용. */
+export const STATS_RANGE_MAX_DAYS = 366;
+
+/**
+ * (순수) 통계 조회 기간 검증 — 존재·형식(YYYY-MM-DD)·실재 날짜·순서(시작≤종료)·상한.
+ * ★ 2026-07-25 라우트 입력 검증 단일 소스(고객사·슈퍼 엑셀 공용). toDestDt는 형식 밖 값을 조용히 무시하므로
+ *   검증 없이 두면 잘못된 날짜가 **무제한 전체 기간 조회**로 새어 대상ID 그레인에서 과중해진다.
+ * ★ 성공 시 **정규화(trim)된 날짜를 함께 반환** — 호출부는 반드시 이 값을 하위 조회·파일명에 쓴다.
+ *   원본을 그대로 넘기면 공백 낀 값이 expandMonthly의 substring(0,7)에서 깨져(' 2026-0-01') 시작일 필터가 조용히 빠진다.
+ */
+export function validateStatsDateRange(
+  startDate?: string,
+  endDate?: string,
+  maxDays: number = STATS_RANGE_MAX_DAYS,
+): { ok: true; startDate: string; endDate: string } | { ok: false; error: string } {
+  const s = String(startDate || '').trim();
+  const e = String(endDate || '').trim();
+  if (!s || !e) return { ok: false, error: '시작일과 종료일을 입력해주세요.' };
+  const fmt = /^\d{4}-\d{2}-\d{2}$/;
+  if (!fmt.test(s) || !fmt.test(e)) return { ok: false, error: '날짜 형식이 올바르지 않습니다 (YYYY-MM-DD).' };
+  // 실재 날짜 확인 — 2026-13-45 같은 값이 형식만 통과해 들어오는 것 차단
+  const real = (v: string): boolean => {
+    const [y, m, d] = v.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  };
+  if (!real(s) || !real(e)) return { ok: false, error: '존재하지 않는 날짜입니다.' };
+  if (s > e) return { ok: false, error: '시작일이 종료일보다 늦을 수 없습니다.' };
+  const days = Math.round((Date.parse(e) - Date.parse(s)) / 86400000) + 1;
+  if (days > maxDays) return { ok: false, error: `조회 기간은 최대 ${maxDays}일입니다. 기간을 나눠 받아주세요.` };
+  return { ok: true, startDate: s, endDate: e };
 }
 
 /** 월별 조회 시 시작/끝 날짜를 월 단위로 확장 (querySendStats와 동일 규칙) */
@@ -114,6 +150,141 @@ function periodOf(dt: string, view: 'daily' | 'monthly'): string {
 }
 
 /**
+ * ★ 2026-07-25 (서수란 #4) 부달(미달) 재전송 중계 계정.
+ * 알림톡 부달은 각 고객사 계정이 아니라 인비토 공용 엔진 계정으로 재전송되고, 원 계정은 `StoreId`에 기록된다.
+ * 이 계정들의 발송은 우리 매핑에 없어 **어느 고객사 통계에도 안 잡히고**, 지금까지 사람이 수기로 원 업체에 붙여 왔다.
+ * 계정이 늘어날 수 있으므로 env(`PAY_RELAY_CUST_IDS`, 콤마 구분)로 덮어쓸 수 있다.
+ */
+export const PAY_RELAY_CUST_IDS: string[] = Array.from(
+  new Set(
+    String(process.env.PAY_RELAY_CUST_IDS || 'B0061')
+      .split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter((s) => {
+        if (!s) return false;
+        // 형식 강제 — 오타로 엉뚱한 값이 들어가면 그 계정 발송이 통째로 부달로 오분류된다
+        if (!/^[A-Z]\d{4}$/.test(s)) {
+          console.log(`[pay-stats] PAY_RELAY_CUST_IDS 형식 위반으로 무시: ${s}`);
+          return false;
+        }
+        return true;
+      }),
+  ),
+);
+
+export function isRelayCustId(custId: string): boolean {
+  return PAY_RELAY_CUST_IDS.includes(String(custId || '').trim().toUpperCase());
+}
+
+/**
+ * 매핑 목록에서 중계 계정을 걷어낸다.
+ * 중계 계정이 실수로 `company_agent_ids`에 등록되면 기본 조회와 부달 조회 양쪽에 잡혀 **이중 계상**된다.
+ * 부달분은 원 발송ID로 귀속하는 것이 계약이므로, 중계 계정 자체는 어느 회사의 직접 발송분도 아니다.
+ */
+export function excludeRelayCustIds(custIds: string[]): string[] {
+  return custIds.filter((c) => !isRelayCustId(c));
+}
+
+/**
+ * (순수) 중계 계정 행의 `StoreId`에서 **원 발송ID**를 뽑는다. 못 뽑으면 null(=미귀속).
+ * 실측 형태(2026-07-25): `b0093_16006217` · `b0179_1600-1279` · `b0067_metrocity` · `B0179_1522-5954` · `B0131`(단독).
+ *   → 접두 4자리 + 선택적 `_접미`. 접미는 발신번호·영문명 등 제각각이라 검증 대상이 아니다.
+ * 대문자로 정규화한다(게이트웨이 컬럼 collation이 utf8mb3_general_ci라 대소문자를 이미 같게 본다).
+ *
+ * ★ 안전 설계: 여기서 뽑은 값은 **후보**일 뿐이다. 반드시 `company_agent_ids` 실존 확인을 통과해야 귀속한다.
+ *   "가장 비슷한 회사" 같은 추측 폴백은 절대 넣지 않는다 — 틀리면 남의 발송이 남의 청구서에 들어간다.
+ * ★ 주의: 같은 이름의 `RSRM_FillAmtHist.StoreId`는 대상ID가 아니라 **발송ID(=CustId)**다(충전 경로).
+ *   이 함수를 그쪽에 재사용하면 남의 계정에 충전이 들어간다. 통계 경로 전용이다.
+ */
+export function resolveRelayOwnerCustId(storeId: string | null | undefined): string | null {
+  const s = String(storeId ?? '').trim();
+  const m = /^([A-Za-z]\d{4})(?:_.*)?$/.exec(s);
+  return m ? m[1].toUpperCase() : null;
+}
+
+/** 중계 계정 원본 행 + 해석된 원 발송ID (ownerCustId=null 이면 미귀속) */
+export interface RelayResolvedRow {
+  period_dt: string; // DestDt(YYYYMMDD)
+  relay_cust_id: string;
+  store_id: string;
+  owner_cust_id: string | null;
+  msg_type: string;
+  sent: number;
+  success: number;
+  fail: number;
+  pending: number;
+}
+
+/**
+ * 중계 계정(부달 재전송) 행을 기간으로 조회하고 원 발송ID를 해석한다.
+ * 실패 시 **throw** — 호출부의 try/catch가 null을 반환하고, CSV 라우트는 그 null을 503으로 표면화한다.
+ * 조용히 빈 배열을 돌려주면 "부달 0건"으로 오독돼 정산이 과소집계된다.
+ */
+async function fetchRelayRows(pool: any, fromDt: string | null, toDt: string | null): Promise<RelayResolvedRow[]> {
+  if (PAY_RELAY_CUST_IDS.length === 0) return [];
+  const conds: string[] = [`CustId IN (${PAY_RELAY_CUST_IDS.map(() => '?').join(',')})`];
+  const params: any[] = [...PAY_RELAY_CUST_IDS];
+  if (fromDt) { conds.push('DestDt >= ?'); params.push(fromDt); }
+  if (toDt) { conds.push('DestDt <= ?'); params.push(toDt); }
+
+  const [rows] = await pool.query(
+    `SELECT DestDt, CustId, StoreId, MsgType,
+            SUM(TotCnt) AS tot, SUM(OkCnt) AS ok, SUM(FailCnt) AS fl, SUM(ReadyCnt) AS rd
+       FROM RSRM_SalesStts
+      WHERE ${conds.join(' AND ')}
+      GROUP BY DestDt, CustId, StoreId, MsgType`,
+    params,
+  );
+
+  const out: RelayResolvedRow[] = [];
+  for (const r of rows as any[]) {
+    const dt = String(r.DestDt || '');
+    if (!/^\d{8}$/.test(dt)) continue;
+    out.push({
+      period_dt: dt,
+      relay_cust_id: String(r.CustId || '').trim(),
+      store_id: String(r.StoreId ?? ''),
+      owner_cust_id: resolveRelayOwnerCustId(r.StoreId),
+      msg_type: String(r.MsgType || '').trim().toUpperCase(),
+      sent: Number(r.tot) || 0,
+      success: Number(r.ok) || 0,
+      fail: Number(r.fl) || 0,
+      pending: Number(r.rd) || 0,
+    });
+  }
+  return out;
+}
+
+/**
+ * 발송ID(CustId) → 발급명(CustNm) 맵. 원장 RSRM_SalesMst(62 pay-ingest-db — 143 폐기와 무관하게 유지)에서 조회.
+ * ★ 2026-07-25 (서수란) 발송ID에 업체가 아는 발급명을 함께 표시하기 위한 이름 소스(내부 코드 B0039만으론 업체가 모름).
+ * 이름 없는 CustId는 맵에 없음(호출부는 CustId만 표시 폴백). 조회 실패 = 빈 맵(회귀 0 — 발송·정산 무영향).
+ * 한 CustId에 원장 행이 여럿(계정×지점 730행/499 CustId)일 수 있어, ORDER BY로 최신행(UpdTm→SeqNo)을 결정적으로 채택한다.
+ */
+export async function fetchCustNames(pool: any, custIds: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const ids = Array.from(new Set(custIds.map((c) => String(c).trim()).filter(Boolean)));
+  if (ids.length === 0) return map;
+  try {
+    const [rows] = await pool.query(
+      `SELECT CustId, CustNm FROM RSRM_SalesMst
+        WHERE CustId IN (${ids.map(() => '?').join(',')}) AND CustNm <> ''
+        ORDER BY CustId, UpdTm DESC, SeqNo DESC`,
+      ids,
+    );
+    // ORDER BY로 CustId별 최신행이 먼저 오므로, 첫 항목(!map.has)이 최신 이름 = 결정적.
+    for (const r of rows as any[]) {
+      const id = String(r.CustId || '').trim();
+      const nm = String(r.CustNm || '').trim();
+      if (id && nm && !map.has(id)) map.set(id, nm);
+    }
+  } catch (err: any) {
+    console.log('[pay-stats] 발급명(CustNm) 조회 실패 — CustId만 표시:', err?.message || err);
+  }
+  return map;
+}
+
+/**
  * 에이전트 회사의 엔진 발송 통계 — 회사에 연결된 CustId 전량 합산, **유형(MsgType)별 분해**.
  * 미설정/미연결/조회 실패 = null 반환(호출부는 조용히 폴백).
  */
@@ -126,7 +297,8 @@ export async function queryPayAgentStats(options: PayStatsOptions): Promise<PayS
       `SELECT agent_send_id FROM company_agent_ids WHERE company_id = $1 ORDER BY agent_send_id`,
       [options.companyId],
     );
-    const custIds: string[] = custRes.rows.map((r: any) => String(r.agent_send_id).trim()).filter(Boolean);
+    // 중계 계정이 매핑에 섞여 있으면 기본 조회와 부달 조회 양쪽에 잡혀 이중 계상된다
+    const custIds: string[] = excludeRelayCustIds(custRes.rows.map((r: any) => String(r.agent_send_id).trim()).filter(Boolean));
     if (custIds.length === 0) return null;
 
     const { startDate, endDate } = expandMonthly(options.view, options.startDate, options.endDate);
@@ -175,11 +347,43 @@ export async function queryPayAgentStats(options: PayStatsOptions): Promise<PayS
       t.sent += sent; t.success += success; t.fail += fail; t.pending += pending;
     }
 
+    // ★ 2026-07-25 (서수란 #4) 부달 재전송 귀속 — 공용 엔진 계정 발송을 StoreId에 적힌 원 발송ID로 되돌린다.
+    //   이 물량은 우리 매핑에 없어 지금까지 어느 고객사에도 안 잡혔고 사람이 수기로 붙여 왔다(= 순수 추가, 감소하는 회사 없음).
+    //   해석 실패분(미귀속)은 이 회사 것이라는 근거가 없으므로 회사 화면에서는 제외한다 — 총량 대조는 슈퍼 축이 담당.
+    const custIdSet = new Set(custIds.map((c) => c.toUpperCase()));
+    for (const rr of await fetchRelayRows(pool, fromDt, toDt)) {
+      if (!rr.owner_cust_id || !custIdSet.has(rr.owner_cust_id)) continue;
+      const period = periodOf(rr.period_dt, options.view);
+      totalSent += rr.sent; totalSuccess += rr.success; totalFail += rr.fail; totalPending += rr.pending;
+
+      const pk = `${period}|${rr.owner_cust_id}|${rr.msg_type}|relay`;
+      if (!byPeriodType.has(pk)) {
+        byPeriodType.set(pk, { period, agent_send_id: rr.owner_cust_id, msg_type: rr.msg_type, type_label: agentTypeLabel(rr.msg_type), is_relay: true, sent: 0, success: 0, fail: 0, pending: 0 });
+      }
+      const rp = byPeriodType.get(pk)!;
+      rp.sent += rr.sent; rp.success += rr.success; rp.fail += rr.fail; rp.pending += rr.pending;
+
+      if (!byTypeMap.has(rr.msg_type)) byTypeMap.set(rr.msg_type, { msg_type: rr.msg_type, type_label: agentTypeLabel(rr.msg_type), sent: 0, success: 0, fail: 0, pending: 0 });
+      const rt = byTypeMap.get(rr.msg_type)!;
+      rt.sent += rr.sent; rt.success += rr.success; rt.fail += rr.fail; rt.pending += rr.pending;
+    }
+
     const allRows = Array.from(byPeriodType.values()).sort((a, b) => {
       if (a.period !== b.period) return b.period.localeCompare(a.period);
       if (a.agent_send_id !== b.agent_send_id) return a.agent_send_id.localeCompare(b.agent_send_id);
-      return typeOrder(a.msg_type) - typeOrder(b.msg_type);
+      const to = typeOrder(a.msg_type) - typeOrder(b.msg_type);
+      if (to !== 0) return to;
+      return Number(a.is_relay || false) - Number(b.is_relay || false); // 직접분 먼저, 부달 귀속분 뒤
     });
+    // ★ 2026-07-25 (서수란) 발급명(CustNm) 부착 — 발송ID를 "custId / custNm"로 표시. 이름 없으면 CustId만.
+    //   rows 미사용 경로(queryPayAgentByType→ResultsModal 요약)는 enrichNames:false로 이 조회를 건너뛴다.
+    if (options.enrichNames !== false) {
+      const nameMap = await fetchCustNames(pool, custIds);
+      for (const row of allRows) {
+        const nm = nameMap.get(row.agent_send_id);
+        if (nm) row.cust_name = nm;
+      }
+    }
     const byType = Array.from(byTypeMap.values()).sort((a, b) => typeOrder(a.msg_type) - typeOrder(b.msg_type));
 
     const offset = (options.page - 1) * options.limit;
@@ -211,7 +415,7 @@ export async function queryPayAgentByType(options: {
   startDate?: string; // raw YYYY-MM-DD
   endDate?: string;
 }): Promise<{ summary: { total_sent: string; total_success: string; total_fail: string; total_pending: string }; byType: PayTypeAgg[] } | null> {
-  const res = await queryPayAgentStats({ companyId: options.companyId, view: 'daily', startDate: options.startDate, endDate: options.endDate, page: 1, limit: 1 });
+  const res = await queryPayAgentStats({ companyId: options.companyId, view: 'daily', startDate: options.startDate, endDate: options.endDate, page: 1, limit: 1, enrichNames: false });
   if (!res) return null;
   return { summary: res.summary, byType: res.byType };
 }
@@ -221,6 +425,8 @@ export interface PayAgentCompanyRow {
   company_id: string;
   company_name: string;
   agent_send_id: string; // ★ 2026-07-24 발송ID(=CustId) 축 — 슈퍼 정산 대조용(고객사 화면과 동일 축)
+  cust_name?: string; // ★ 2026-07-25 발급명(RSRM_SalesMst.CustNm) — 표시용 "custId / custNm". 이름 없으면 미포함(CustId만).
+  is_relay?: boolean; // ★ 2026-07-25 부달 재전송 귀속분
   msg_type: string;
   type_label: string;
   sent: number;
@@ -252,22 +458,28 @@ export async function queryPayAgentStatsAllCompanies(options: {
   if (!pool) return null;
 
   try {
-    const mapParams: any[] = [];
-    let compFilter = '';
-    if (options.companyId) { compFilter = 'AND c.id = $1'; mapParams.push(options.companyId); }
+    // ★ 2026-07-25 매핑은 **항상 전사 조회**한다. 회사 필터는 그 뒤에 적용.
+    //   부달 귀속을 필터된 매핑으로 해석하면, 다른 회사 소유 부달이 원 계정을 못 찾아
+    //   `(미귀속)`으로 둔갑해 선택한 회사 화면·CSV에 섞여 들어간다(Codex 적대검증 발견).
     const mapRes = await query(
       `SELECT cai.agent_send_id, c.id AS company_id, c.company_name
          FROM company_agent_ids cai
          JOIN companies c ON c.id = cai.company_id
-        WHERE c.usage_type IN ('agent','both') ${compFilter}`,
-      mapParams,
+        WHERE c.usage_type IN ('agent','both')`,
     );
-    const custToCompany = new Map<string, { id: string; name: string }>();
-    const custIds: string[] = [];
+    const allCustToCompany = new Map<string, { id: string; name: string }>();
     for (const r of mapRes.rows as any[]) {
       const cid = String(r.agent_send_id).trim();
       if (!cid) continue;
-      custToCompany.set(cid, { id: String(r.company_id), name: String(r.company_name || '') });
+      allCustToCompany.set(cid, { id: String(r.company_id), name: String(r.company_name || '') });
+    }
+    // 조회 대상(회사 필터 적용분)
+    const custToCompany = new Map<string, { id: string; name: string }>();
+    const custIds: string[] = [];
+    for (const [cid, comp] of allCustToCompany) {
+      if (isRelayCustId(cid)) continue; // 중계 계정은 직접 발송분이 아니다(부달 조회가 따로 담당)
+      if (options.companyId && comp.id !== options.companyId) continue;
+      custToCompany.set(cid, comp);
       custIds.push(cid);
     }
     const empty: PayAgentAllResult = { summary: { total_sent: '0', total_success: '0', total_fail: '0', total_pending: '0' }, rows: [], total: 0 };
@@ -315,13 +527,46 @@ export async function queryPayAgentStatsAllCompanies(options: {
       b.sent += sent; b.success += success; b.fail += fail; b.pending += pending;
     }
 
+    // ★ 2026-07-25 (서수란 #4) 부달 재전송 귀속 — 슈퍼 축은 **미귀속분도 버리지 않고** 표면화한다.
+    //   조용히 버리면 "B0061 총량 = 귀속분 + 미귀속분" 대조가 깨져 파싱 결함을 아무도 못 본다.
+    //   해석은 전사 매핑으로 한다(위 주석 참조). 회사 필터가 걸린 조회에서는 그 회사 소유분만 남기고,
+    //   해석 실패분(미귀속)은 전사 조회에서만 보여준다 — 특정 회사 화면에 남의 미귀속이 섞이면 안 된다.
+    const upperToCompany = new Map<string, { id: string; name: string }>();
+    for (const [cid, comp] of allCustToCompany) upperToCompany.set(cid.toUpperCase(), comp);
+
+    for (const rr of await fetchRelayRows(pool, fromDt, toDt)) {
+      const owner = rr.owner_cust_id ? upperToCompany.get(rr.owner_cust_id) : undefined;
+      if (options.companyId && (!owner || owner.id !== options.companyId)) continue;
+      const period = periodOf(rr.period_dt, options.view);
+      totalSent += rr.sent; totalSuccess += rr.success; totalFail += rr.fail; totalPending += rr.pending;
+
+      const compId = owner ? owner.id : '';
+      const compName = owner ? owner.name : '(미귀속)';
+      const sendId = owner ? rr.owner_cust_id! : rr.relay_cust_id;
+      const key = `${period}|${compId}|${sendId}|${rr.msg_type}|relay`;
+      if (!byKey.has(key)) {
+        byKey.set(key, { period, company_id: compId, company_name: compName, agent_send_id: sendId, is_relay: true, msg_type: rr.msg_type, type_label: agentTypeLabel(rr.msg_type), sent: 0, success: 0, fail: 0, pending: 0 });
+      }
+      const rb = byKey.get(key)!;
+      rb.sent += rr.sent; rb.success += rr.success; rb.fail += rr.fail; rb.pending += rr.pending;
+    }
+
     const allRows: PayAgentCompanyRow[] = Array.from(byKey.values()).sort((a, b) => {
       if (a.period !== b.period) return b.period.localeCompare(a.period);
       const nc = a.company_name.localeCompare(b.company_name);
       if (nc !== 0) return nc;
       if (a.agent_send_id !== b.agent_send_id) return a.agent_send_id.localeCompare(b.agent_send_id);
-      return typeOrder(a.msg_type) - typeOrder(b.msg_type);
+      const to = typeOrder(a.msg_type) - typeOrder(b.msg_type);
+      if (to !== 0) return to;
+      return Number(a.is_relay || false) - Number(b.is_relay || false);
     });
+
+    // ★ 2026-07-25 (서수란) 발급명(CustNm) 부착 — 슈퍼 화면·CSV 발송ID에 발급명 병기(고객사와 동일 소스).
+    const nameMap = await fetchCustNames(pool, custIds);
+    for (const row of allRows) {
+      const nm = nameMap.get(row.agent_send_id);
+      if (nm) row.cust_name = nm;
+    }
 
     return {
       summary: {
@@ -335,6 +580,228 @@ export async function queryPayAgentStatsAllCompanies(options: {
     };
   } catch (err: any) {
     console.log('[pay-stats] 슈퍼 전체 조회 실패:', err?.message || err);
+    return null;
+  }
+}
+
+// ★ 2026-07-25 (서수란 #2) 대상ID(StoreId)별 분해 — CSV 엑셀 정산 전용.
+export interface PayAgentStoreRow {
+  period: string;
+  company_name?: string; // 슈퍼(admin) scope에서만 채움
+  agent_send_id: string; // = CustId
+  cust_name?: string;    // 발급명(RSRM_SalesMst.CustNm)
+  store_id: string;      // 대상ID(StoreId 원본). ''=대상ID 없음
+  is_relay?: boolean;    // ★ 2026-07-25 부달 재전송 귀속분(공용 엔진 계정 → 원 발송ID)
+  msg_type: string;
+  type_label: string;
+  sent: number;
+  success: number;
+  fail: number;
+  pending: number;
+}
+
+/**
+ * (순수) SQL 원본 행 → 대상ID(StoreId)별 PayAgentStoreRow[] 그룹핑·정렬. DB I/O와 분리해 단위 테스트 가능.
+ * - 공백만 있는 StoreId는 ''(대상ID 없음 버킷)로 정규화 → 유령 중복 행 방지. 그 외는 원본 보존(정산 키).
+ * - admin scope: custToCompany에 없는 CustId 제외(집계 총량 보존) + company_name 채움.
+ * - 정렬: 기간 desc → (admin)회사명 → 발송ID → 대상ID → 유형순(동일 typeOrder 미지 유형은 msg_type 사전순 tiebreak).
+ * - nameMap 있으면 발급명(cust_name) 부착.
+ */
+export function groupStoreRows(
+  rawRows: any[],
+  opts: {
+    scope: 'company' | 'admin';
+    view: 'daily' | 'monthly';
+    custToCompany?: Map<string, string>;
+    nameMap?: Map<string, string>;
+  },
+): PayAgentStoreRow[] {
+  const byKey = new Map<string, PayAgentStoreRow>();
+  for (const r of rawRows || []) {
+    const dt = String(r.DestDt || '');
+    if (!/^\d{8}$/.test(dt)) continue;
+    const custId = String(r.CustId || '').trim();
+    if (opts.scope === 'admin' && !opts.custToCompany?.has(custId)) continue; // 매핑 없는 CustId 제외(집계 총량 보존)
+    const mt = String(r.MsgType || '').trim().toUpperCase();
+    const rawStore = String(r.StoreId ?? '');
+    const storeId = rawStore.trim() === '' ? '' : rawStore; // 공백만 = 대상ID 없음(정규화), 그 외 원본 보존
+    const period = periodOf(dt, opts.view);
+    const sent = Number(r.tot) || 0;
+    const success = Number(r.ok) || 0;
+    const fail = Number(r.fl) || 0;
+    const pending = Number(r.rd) || 0;
+
+    const key = `${period}|${custId}|${storeId}|${mt}`;
+    if (!byKey.has(key)) {
+      const row: PayAgentStoreRow = { period, agent_send_id: custId, store_id: storeId, msg_type: mt, type_label: agentTypeLabel(mt), sent: 0, success: 0, fail: 0, pending: 0 };
+      if (opts.scope === 'admin') row.company_name = opts.custToCompany?.get(custId) || '';
+      byKey.set(key, row);
+    }
+    const b = byKey.get(key)!;
+    b.sent += sent; b.success += success; b.fail += fail; b.pending += pending;
+  }
+
+  const allRows = Array.from(byKey.values()).sort((a, b) => {
+    if (a.period !== b.period) return b.period.localeCompare(a.period);
+    if (opts.scope === 'admin') {
+      const nc = (a.company_name || '').localeCompare(b.company_name || '');
+      if (nc !== 0) return nc;
+    }
+    if (a.agent_send_id !== b.agent_send_id) return a.agent_send_id.localeCompare(b.agent_send_id);
+    const sa = a.store_id || '', sb = b.store_id || '';
+    if (sa !== sb) return sa.localeCompare(sb);
+    const to = typeOrder(a.msg_type) - typeOrder(b.msg_type);
+    if (to !== 0) return to;
+    return a.msg_type.localeCompare(b.msg_type); // 미지 유형(동일 typeOrder 99) 결정적 tiebreak
+  });
+
+  if (opts.nameMap) {
+    for (const row of allRows) {
+      const nm = opts.nameMap.get(row.agent_send_id);
+      if (nm) row.cust_name = nm;
+    }
+  }
+  return allRows;
+}
+
+/**
+ * 대상ID(StoreId)별 발송 통계 — **CSV 엑셀 정산 전용**(화면 집계 함수와 분리 = 라이브 통계 회귀 0).
+ * ★ 2026-07-25 서수란 #2: 아난티 지점·마리오 200/400·피케이포유 업체구분처럼 발송 시 입력한 대상ID로 청구를 나눈다.
+ *   그레인 = (기간 × 발송ID × 대상ID × 유형). 화면에 통으로 넣으면 폭증(피케이포유 325 등)이라 CSV에만 둔다.
+ * scope='company' = 그 회사만(고객사 CSV, company_name 불필요). scope='admin' = 전 agent/both(슈퍼 CSV, company_name 채움·companyId로 필터 가능).
+ * 대상ID(StoreId)는 원본 그대로 — 게이트웨이 ingest 인코딩 손상(피케이포유 EUC-KR 이중인코딩) 복원은 별도 과제.
+ * **반환 계약**: `null` = 미설정(pool 없음)·조회 실패 → 호출부는 **503으로 표면화**(빈 CSV로 내면 정산 과소집계로 오인).
+ *   `[]` = 정상 0건(매핑된 발송ID 없음 포함). 이 둘을 절대 같게 다루지 말 것.
+ */
+export async function queryPayAgentStoreBreakdown(options: {
+  scope: 'company' | 'admin';
+  view: 'daily' | 'monthly';
+  startDate?: string; // raw YYYY-MM-DD
+  endDate?: string;
+  companyId?: string; // company scope=필수, admin scope=선택 필터
+}): Promise<PayAgentStoreRow[] | null> {
+  const pool = getPool();
+  if (!pool) return null;
+
+  try {
+    // 1) CustId 목록(+ admin scope는 회사명 매핑)
+    const custIds: string[] = [];
+    const custToCompany = new Map<string, string>(); // CustId → company_name (admin scope)
+    const allOwnerCompany = new Map<string, { id: string; name: string }>(); // 대문자 CustId → 회사(전사) — 부달 귀속 해석용
+    if (options.scope === 'company') {
+      if (!options.companyId) return [];
+      // ★ 부달 귀속 해석에 쓸 전사 매핑도 함께 채운다. 이게 비어 있으면 회사 CSV에서 부달 행이
+      //   전부 미해석으로 떨어져 통째로 사라진다(화면엔 있고 엑셀엔 없는 상태 = 정산 대조 붕괴).
+      const allRes = await query(
+        `SELECT cai.agent_send_id, c.id AS company_id, c.company_name
+           FROM company_agent_ids cai
+           JOIN companies c ON c.id = cai.company_id`,
+      );
+      for (const x of allRes.rows as any[]) {
+        const cid = String(x.agent_send_id || '').trim();
+        if (!cid) continue;
+        allOwnerCompany.set(cid.toUpperCase(), { id: String(x.company_id), name: String(x.company_name || '') });
+      }
+      const r = await query(
+        `SELECT agent_send_id FROM company_agent_ids WHERE company_id = $1 ORDER BY agent_send_id`,
+        [options.companyId],
+      );
+      for (const x of r.rows as any[]) {
+        const cid = String(x.agent_send_id).trim();
+        // 중계 계정 제외 — 부달 조회가 따로 담당한다. 안 빼면 같은 행이 두 번 잡힌다(고객사 CSV 이중 계상)
+        if (cid && !isRelayCustId(cid)) custIds.push(cid);
+      }
+    } else {
+      // ★ 2026-07-25 매핑은 전사 조회 후 회사 필터 적용 — 부달 귀속을 필터된 매핑으로 해석하면
+      //   다른 회사 소유 부달이 (미귀속)으로 둔갑해 선택한 회사 CSV에 섞인다(Codex 적대검증 발견).
+      const r = await query(
+        `SELECT cai.agent_send_id, c.id AS company_id, c.company_name
+           FROM company_agent_ids cai
+           JOIN companies c ON c.id = cai.company_id
+          WHERE c.usage_type IN ('agent','both')`,
+      );
+      for (const x of r.rows as any[]) {
+        const cid = String(x.agent_send_id).trim();
+        if (!cid) continue;
+        allOwnerCompany.set(cid.toUpperCase(), { id: String(x.company_id), name: String(x.company_name || '') });
+        if (isRelayCustId(cid)) continue; // 중계 계정 제외 — 부달 조회가 따로 담당(이중 계상 차단)
+        if (options.companyId && String(x.company_id) !== options.companyId) continue;
+        custToCompany.set(cid, String(x.company_name || ''));
+        custIds.push(cid);
+      }
+    }
+    if (custIds.length === 0) return [];
+
+    // 2) 날짜/조건 (화면 함수와 동일 규칙)
+    const { startDate, endDate } = expandMonthly(options.view, options.startDate, options.endDate);
+    const fromDt = toDestDt(startDate);
+    const toDt = toDestDt(endDate);
+    const conds: string[] = [`CustId IN (${custIds.map(() => '?').join(',')})`];
+    const params: any[] = [...custIds];
+    if (fromDt) { conds.push('DestDt >= ?'); params.push(fromDt); }
+    if (toDt) { conds.push('DestDt <= ?'); params.push(toDt); }
+
+    // 3) 대상ID(StoreId)별 집계 — GROUP BY에 StoreId 추가
+    const [rows] = await pool.query(
+      `SELECT DestDt, CustId, StoreId, MsgType,
+              SUM(TotCnt) AS tot, SUM(OkCnt) AS ok, SUM(FailCnt) AS fl, SUM(ReadyCnt) AS rd
+         FROM RSRM_SalesStts
+        WHERE ${conds.join(' AND ')}
+        GROUP BY DestDt, CustId, StoreId, MsgType`,
+      params,
+    );
+
+    // 4) 발급명 부착 소스 + 순수 그룹핑(공백 정규화·정렬·이름 부착)은 groupStoreRows에 위임(단위 테스트 대상)
+    const nameMap = await fetchCustNames(pool, custIds);
+    const baseRows = groupStoreRows(rows as any[], { scope: options.scope, view: options.view, custToCompany, nameMap });
+
+    // 5) ★ 2026-07-25 (서수란 #4) 부달 재전송 귀속 행 추가.
+    //    대상ID(store_id)에는 원본 마커(`b0179_16601910` 등)를 그대로 남긴다 — 어느 계정·번호에서 온 부달인지가 정산 근거다.
+    //    슈퍼 축은 미귀속분도 `(미귀속)`으로 남겨 "총량 = 귀속 + 미귀속" 대조가 가능하게 한다.
+    const ownScope = new Set(custIds.map((c) => c.toUpperCase())); // 이번 조회 대상(회사 필터 적용분)
+    const relayRows: PayAgentStoreRow[] = [];
+    const relayKey = new Map<string, PayAgentStoreRow>();
+    for (const rr of await fetchRelayRows(pool, fromDt, toDt)) {
+      // 해석은 전사 매핑으로, 채택은 조회 범위로 — 남의 회사 부달이 (미귀속)으로 새는 것 차단
+      const resolved = rr.owner_cust_id && allOwnerCompany.has(rr.owner_cust_id) ? rr.owner_cust_id : null;
+      const owner = resolved && ownScope.has(resolved) ? resolved : null;
+      if (!owner && (options.scope === 'company' || options.companyId || resolved)) continue;
+      const period = periodOf(rr.period_dt, options.view);
+      const sendId = owner || rr.relay_cust_id;
+      const key = `${period}|${sendId}|${rr.store_id}|${rr.msg_type}`;
+      if (!relayKey.has(key)) {
+        const row: PayAgentStoreRow = {
+          period, agent_send_id: sendId, store_id: rr.store_id, is_relay: true,
+          msg_type: rr.msg_type, type_label: agentTypeLabel(rr.msg_type),
+          sent: 0, success: 0, fail: 0, pending: 0,
+        };
+        if (options.scope === 'admin') row.company_name = owner ? (allOwnerCompany.get(owner)?.name || '') : '(미귀속)';
+        const nm = owner ? nameMap.get(owner) : undefined;
+        if (nm) row.cust_name = nm;
+        relayKey.set(key, row);
+        relayRows.push(row);
+      }
+      const rb = relayKey.get(key)!;
+      rb.sent += rr.sent; rb.success += rr.success; rb.fail += rr.fail; rb.pending += rr.pending;
+    }
+
+    // ★ 정렬은 통합 후 한 번 — 부달 행을 뒤에 이어붙이기만 하면 DB 반환 순서대로 흩어진다(Codex 지적)
+    return baseRows.concat(relayRows).sort((a, b) => {
+      if (a.period !== b.period) return b.period.localeCompare(a.period);
+      if (options.scope === 'admin') {
+        const nc = (a.company_name || '').localeCompare(b.company_name || '');
+        if (nc !== 0) return nc;
+      }
+      if (a.agent_send_id !== b.agent_send_id) return a.agent_send_id.localeCompare(b.agent_send_id);
+      const sa = a.store_id || '', sb = b.store_id || '';
+      if (sa !== sb) return sa.localeCompare(sb);
+      const to = typeOrder(a.msg_type) - typeOrder(b.msg_type);
+      if (to !== 0) return to;
+      if (a.msg_type !== b.msg_type) return a.msg_type.localeCompare(b.msg_type);
+      return Number(a.is_relay || false) - Number(b.is_relay || false);
+    });
+  } catch (err: any) {
+    console.log('[pay-stats] 대상ID 분해 조회 실패:', err?.message || err);
     return null;
   }
 }

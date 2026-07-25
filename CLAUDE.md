@@ -82,7 +82,12 @@
     </RULE>
 
     <RULE id="no_parallel_tasks">
-      에이전트 병렬 사용 및 다중 버그 동시 수정을 금지한다. 하나씩 세심하게 근본 원인을 파악하여 수정한다.
+      [쓰기 = 병렬 절대 금지] 에이전트에게 코드 수정을 맡기거나, 다중 버그를 동시 수정하지 않는다. 파일 수정은 언제나 본 AI 단독·순차. 하나씩 근본 원인을 파악해 고친다.
+      [읽기·브레인스토밍 = Harold 명시 발동 시에만 허용] ★2026-07-25 Harold 지시 신설.
+      **Harold님이 "브레인스토밍"이라고 말하면 즉시 `status/COLLAB.md` §1을 정독하고 그 절차대로 진행한다(의무).**
+      해당 업무의 역할 담당(기획/프론트/백엔드/디자이너/회의론자)을 소환표대로 전원 소환하고, 본 AI가 회의 주재자가 되어 수렴한다.
+      역할 에이전트는 반드시 읽기 전용(`Explore`) 타입 — 파일 수정 도구 자체를 주지 않는다. 승인권도 없다.
+      AI가 임의로 회의를 소집하지 않는다. 그 외 모든 작업은 위 [쓰기] 원칙대로 단독·순차 진행한다.
     </RULE>
 
     <RULE id="answer_format_strict" priority="HIGHEST">
@@ -166,30 +171,16 @@
       - `/codex:rescue` — 본 AI 디버깅 막힘 / root cause 안 보임 / 3회+ fix 실패 / 사이트 다운 호출 의무
       [흐름] 본 AI 작성 → tsc 0 + 자가 grep 통과 → Codex 호출 → 이슈 발견 시 정정 (최대 5라운드) → 표준 종료 멘트
       [면제] 단순 typo / 주석 정정 / 메모리 / SCHEMA.md / STATUS.md / Harold 직접 명시 면제 작업
-      [설치] Harold 직접 4단계: `/plugin marketplace add openai/codex-plugin-cc` → `/plugin install codex@openai-codex` → `/reload-plugins` → `/codex:setup`
-      [상세 룰] `memory/feedback_default_codex_review_workflow.md` 참조
+      [라운드 운영·지적 취사·설치] `status/COLLAB.md` §3
     </RULE>
 
     <RULE id="design_quality_minimum_journey_level" priority="HIGHEST">
       ★ D215+ 신규 — 디자인 퀄리티 최소 기준 = AI 여정 동급 영구 룰 (Harold 명시 2026-05-25).
       신규 메뉴 / 신규 페이지 / UI 신설 / 옛 페이지 전면 재작성 = **최소 AI 여정 자동화 (Journey Builder, `/ai-journeys`) 동급 디자인 퀄리티 의무**.
       [절대 금지] 옛 단순 form (input + textarea + select + 단순 button) / 옛 단순 table view / 옛 native dialog (alert/confirm/prompt)
-      [의무 요소]
-      - 상단 헤더 sticky + 그라데이션 아이콘 (10x10 rounded-xl) + 라벨 3단 정책(★2026-07-07 Harold 확정 — BETA 뱃지 의무 폐지): 정가 과금 코어=무라벨 / 갓 출시=NEW(4~6주 유효기간, 지나면 제거) / 품질 미보증 실험 기능만="실험실"
-      - AI 자율 진단 카드 (violet → fuchsia 그라데이션 + Sparkles + topInsight) — AI 활용 페이지
-      - 자연어 입력 카드 (fuchsia/purple/indigo 그라데이션 + Enter 키) — 자동 생성 페이지
-      - 빠른 시작 카드 7건 (각 시나리오 고유 icon + gradient) — 자동 생성 페이지
-      - 6 sub-agent 진행 카드 (700ms 간격 시각 효과) — AI 자동 생성 진행
-      - 1-click 액션 3 카드 (color-coded — rose/emerald/amber) — 개선 추천
-      - 요약 5 metric + 이전 30일 대비 +/-% (TrendingUp/Down icon) — 통계
-      - 자세히 분석 토글 (ChevronDown/Up + 6 차트) — 통계
-      - 다크 톤 + violet 액센트 (bg-slate-950 + border-white/10) — 모든 페이지
-      - Source caption (`text-[10px] text-white/30 italic Data source — ...`) — 모든 차트/카드
-      - 모바일 반응형 (flex-wrap + md:/lg: 분기 + grid-cols-2 md:grid-cols-4) — 모든 페이지
-      - ConfirmModal + useToast (native dialog 0건) — 모든 페이지
-      - 모달 디자인 (bg-slate-900 + border-white/10 + rounded-2xl + shadow-2xl) — 모든 모달
-      [자가 검증] 매 신규 페이지 / 전면 재작성 직전 = "Journey Builder /ai-journeys 동급 디자인 요소 적용?" 자가 질의 의무.
-      [상세 룰] `memory/feedback_design_quality_minimum_journey_level.md` 참조
+      [라벨 3단 정책] ★2026-07-07 Harold 확정 (BETA 뱃지 의무 폐지) — 정가 과금 코어=무라벨 / 갓 출시=NEW(4~6주 유효기간, 지나면 제거) / 품질 미보증 실험 기능만="실험실"
+      [의무 요소 체크리스트 = `status/lessons/LESSONS_FRONTEND.md` "디자인 최소 기준" 절] 신규 화면·전면 재작성 **착수 직전 정독 의무**. 헤더 sticky·AI 자율진단 카드·자연어 입력·빠른시작 7건·6 sub-agent 진행·1-click 3카드·요약 5 metric·자세히 분석 토글·다크톤·Source caption·모바일 반응형·ConfirmModal·모달 규격 전 항목이 거기 있다.
+      [자가 검증] 매 신규 페이지 / 전면 재작성 직전 = "LESSONS_FRONTEND 디자인 최소 기준을 읽고 Journey Builder(/ai-journeys) 동급으로 맞췄는가?" 자가 질의 의무.
     </RULE>
 
     <RULE id="marketing_user_ux_priority" priority="HIGHEST">
@@ -209,21 +200,9 @@
 
     <RULE id="superpowers_workflow_default">
       ★ D215+ 신규 — Superpowers Plugin 14 skills 작업 흐름 영구 룰 (Harold 명시 2026-05-25).
-      Harold settings.json `superpowers@claude-plugins-official` 활성 + 본 세션 자동 로드 14건 (https://github.com/obra/superpowers).
-      [흐름 의무 매핑]
-      - 큰 작업 진입 직전 = `superpowers:brainstorming` (creative work 의도/요구사항/디자인 의논)
-      - 작업 설계 = `superpowers:writing-plans` (multi-step Plan 작성)
-      - Plan 실행 = `superpowers:executing-plans` (separate session) 또는 `superpowers:subagent-driven-development` (본 세션 분할)
-      - 신규 기능 / 버그 fix = `superpowers:test-driven-development` (RED-GREEN-REFACTOR)
-      - 완료 보고 직전 = `superpowers:verification-before-completion` (실제 verify 명령어 실행 후 evidence 출력 의무)
-      - 디버깅 / 오류 = `superpowers:systematic-debugging` (root cause 추적)
-      - 2건+ 독립 task = `superpowers:dispatching-parallel-agents` (병렬 sub-agent)
-      - worktree 격리 = `superpowers:using-git-worktrees`
-      - 작업 종결 + merge/PR = `superpowers:finishing-a-development-branch`
-      - 큰 작업 코드 리뷰 = `superpowers:requesting-code-review` + `receiving-code-review`
-      - 신규 skill 작성 = `superpowers:writing-skills`
-      자가 검증: 매 큰 작업 진입 직전 = "어떤 superpowers skill 호출 의무?" 자가 질의 의무.
-      [상세 룰] `memory/feedback_default_superpowers_workflow.md` 참조
+      Harold settings.json `superpowers@claude-plugins-official` 활성 + 본 세션 자동 로드 (https://github.com/obra/superpowers).
+      [자가 검증] 매 큰 작업 진입 직전 = **"어떤 superpowers skill 호출 의무?" 자가 질의 의무.** 특히 완료 보고 직전 = `verification-before-completion`(실제 검증 명령 실행 + 증거 출력), 버그·신규 기능 = `test-driven-development`, 디버깅 = `systematic-debugging`.
+      [상황↔스킬 매핑표] `status/COLLAB.md` §2. 어떤 스킬인지 헷갈리면 거기서 찾는다.
     </RULE>
 
     <RULE id="doc_routing" priority="HIGH">

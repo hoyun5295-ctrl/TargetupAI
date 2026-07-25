@@ -707,3 +707,4 @@ export function firstPositiveAmount(...vals: unknown[]): number {
   }
   return 0;
 }
+

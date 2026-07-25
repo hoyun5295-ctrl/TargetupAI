@@ -183,6 +183,31 @@
 
 ---
 
+## 디자인 최소 기준 — 신규 화면 착수 직전 정독 (CLAUDE.md `design_quality_minimum_journey_level` 상세)
+
+> 룰(의무·절대금지·라벨 정책)의 원천은 CLAUDE.md다. 여기는 **그 화면을 만들 때 펼쳐 보는 체크리스트**만 담는다.
+> 기준 화면 = Journey Builder(`/ai-journeys`). 신규 메뉴·페이지·UI 신설·옛 페이지 전면 재작성은 이 목록을 만족해야 한다.
+
+| 요소 | 적용 범위 |
+|------|-----------|
+| 상단 헤더 sticky + 그라데이션 아이콘(10x10 rounded-xl) | 모든 페이지 |
+| AI 자율 진단 카드 (violet→fuchsia 그라데이션 + Sparkles + topInsight) | AI 활용 페이지 |
+| 자연어 입력 카드 (fuchsia/purple/indigo 그라데이션 + Enter 키) | 자동 생성 페이지 |
+| 빠른 시작 카드 7건 (시나리오별 고유 icon + gradient) | 자동 생성 페이지 |
+| 6 sub-agent 진행 카드 (700ms 간격 시각 효과) | AI 자동 생성 진행 |
+| 1-click 액션 3 카드 (color-coded rose/emerald/amber) | 개선 추천 |
+| 요약 5 metric + 이전 30일 대비 +/-% (TrendingUp/Down) | 통계 |
+| 자세히 분석 토글 (ChevronDown/Up + 6 차트) | 통계 |
+| 다크 톤 + violet 액센트 (`bg-slate-950` + `border-white/10`) | 모든 페이지 |
+| Source caption (`text-[10px] text-white/30 italic` + `Data source — …`) | 모든 차트/카드 |
+| 모바일 반응형 (flex-wrap + md:/lg: 분기 + grid-cols-2 md:grid-cols-4) | 모든 페이지 |
+| ConfirmModal + useToast (native dialog 0건) | 모든 페이지 |
+| 모달 (`bg-slate-900` + `border-white/10` + `rounded-2xl` + `shadow-2xl`) | 모든 모달 |
+
+> 라벨 3단 정책·1클릭 UX 정합·절대금지 항목은 **CLAUDE.md가 소유**한다(`design_quality_minimum_journey_level` / `marketing_user_ux_priority`). 여기 복사하지 않는다.
+
+---
+
 ## 자가 검증 매트릭스 (Frontend 작업 시)
 
 - [ ] 모델명 (Opus/Sonnet/GPT/Claude) 단어 grep = 0건

@@ -124,6 +124,9 @@ export default function AdminDashboard() {
     costPerLms: 27,
     costPerMms: 50,
     costPerKakao: 7.5,
+    // ★ 2026-07-25 테스트발송 단가 — 빈 값이면 일반 SMS/LMS 단가를 따른다(청구서 폴백)
+    costPerTestSms: '' as string | number,
+    costPerTestLms: '' as string | number,
     billingType: 'postpaid',
     balance: 0,
     balanceAdjustType: 'charge' as 'charge' | 'deduct',
@@ -245,6 +248,10 @@ const [messageDetailContent, setMessageDetailContent] = useState<{ name: string;
   // ★ D135+ (B10): 회사별 발신번호 페이지네이션 — 한 회사당 160개 등 무한 스크롤 방지, 10개씩 페이징
   const [callbackCompanyPages, setCallbackCompanyPages] = useState<Record<string, number>>({});
   const CALLBACKS_PER_COMPANY_PAGE = 10;
+  // ★ 2026-07-25 (서수란) 회사 목록 자체가 무페이징이라 화면이 아래로 끝없이 늘어남 → 회사 단위 페이징.
+  //   회사별 번호 페이징(위)은 이미 있었고, 바깥 회사 루프만 빠져 있었다.
+  const [callbackCompanyListPage, setCallbackCompanyListPage] = useState(1);
+  const CALLBACK_COMPANIES_PER_PAGE = 20;
   const [newCallback, setNewCallback] = useState({
     companyId: '',
     phone: '',
@@ -2441,6 +2448,8 @@ const handleApproveRequest = async (id: string) => {
           costPerLms: c.cost_per_lms ?? 27,
           costPerMms: c.cost_per_mms ?? 50,
           costPerKakao: c.cost_per_kakao ?? 7.5,
+          costPerTestSms: c.cost_per_test_sms ?? '',
+          costPerTestLms: c.cost_per_test_lms ?? '',
           billingType: c.billing_type || 'postpaid',
           balance: Number(c.balance) || 0,
           balanceAdjustType: 'charge' as 'charge' | 'deduct',
@@ -3555,11 +3564,12 @@ const handleApproveRequest = async (id: string) => {
               <input
                 type="text"
                 value={callbackSearch}
-                onChange={(e) => setCallbackSearch(e.target.value)}
+                onChange={(e) => { setCallbackSearch(e.target.value); setCallbackCompanyListPage(1); }}
                 placeholder="고객사명, 번호로 검색..."
                 className="w-full max-w-xs px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
               />
-              <span className="text-sm text-gray-500">총 {callbackNumbers.length}개</span>
+              {/* 검색과 무관한 전체 등록 수 — 검색 결과 건수는 아래 페이저가 '총 N개 회사 중' 으로 따로 보여준다 */}
+              <span className="text-sm text-gray-500">전체 등록 {callbackNumbers.length}개</span>
             </div>
 
             <div>
@@ -3587,6 +3597,21 @@ const handleApproveRequest = async (id: string) => {
                 }, {});
 
                 const companyIds = Object.keys(grouped);
+                // ★ 2026-07-25 (서수란) 회사 목록 페이징.
+                //   '미지정'(회사 연결이 없는 발신번호)은 항상 첫 페이지에 둔다 — 페이징 때문에 뒤 페이지로 밀려
+                //   슈퍼관리자 눈에서 사라지면 안 된다. 발신번호는 발송 가능 번호 원장이라 안 보이는 것 자체가 위험.
+                const orderedCompanyIds = [...companyIds].sort((a, b) => {
+                  if (a === 'none') return -1;
+                  if (b === 'none') return 1;
+                  return (grouped[a].companyName || '').localeCompare(grouped[b].companyName || '');
+                });
+                const companyTotalPages = Math.max(1, Math.ceil(orderedCompanyIds.length / CALLBACK_COMPANIES_PER_PAGE));
+                // 삭제·승인 후 재조회로 회사 수가 줄면 현재 페이지가 범위를 넘어 빈 화면이 되므로 표시용으로 clamp
+                const safeCompanyPage = Math.min(callbackCompanyListPage, companyTotalPages);
+                const pagedCompanyIds = orderedCompanyIds.slice(
+                  (safeCompanyPage - 1) * CALLBACK_COMPANIES_PER_PAGE,
+                  safeCompanyPage * CALLBACK_COMPANIES_PER_PAGE,
+                );
 
                 if (filtered.length === 0) {
                   return (
@@ -3597,8 +3622,9 @@ const handleApproveRequest = async (id: string) => {
                 }
 
                 return (
+                  <>
                   <div className="divide-y">
-                    {companyIds.map(cid => {
+                    {pagedCompanyIds.map(cid => {
                       const group = grouped[cid];
                       const isExpanded = expandedCallbackCompanies.has(cid);
                       return (
@@ -3720,6 +3746,15 @@ const handleApproveRequest = async (id: string) => {
                       );
                     })}
                   </div>
+                  {/* ★ 2026-07-25 회사 단위 페이저 — 회사 20개 이하면 컴포넌트가 스스로 렌더하지 않는다 */}
+                  <TablePagination
+                    total={orderedCompanyIds.length}
+                    page={safeCompanyPage}
+                    perPage={CALLBACK_COMPANIES_PER_PAGE}
+                    onChange={setCallbackCompanyListPage}
+                    unit="개 회사"
+                  />
+                  </>
                 );
               })()}
             </div>
@@ -4796,7 +4831,7 @@ const handleApproveRequest = async (id: string) => {
                 조회
               </button>
               {/* ★ D114 P10: 발송통계 엑셀(CSV) 다운로드 — fetch+blob (Authorization 헤더 필수).
-                  ★2026-07-24 에이전트 탭도 지원 — /stats/export/agent (기간×고객사×발송ID×유형, 정산 대조용) */}
+                  ★2026-07-24 에이전트 탭도 지원 — /stats/export/agent (기간×고객사×발송ID×발급명×대상ID×유형, 정산 대조용) */}
               <button
                 onClick={async () => {
                   const token = localStorage.getItem('token');
@@ -4861,7 +4896,13 @@ const handleApproveRequest = async (id: string) => {
                         <tr key={idx} className="hover:bg-gray-50">
                           <td className="px-4 py-3 font-medium text-gray-900 font-mono">{row.date || row.month || row.period}</td>
                           <td className="px-4 py-3 text-gray-700">{row.company_name}</td>
-                          {statsChannel === 'agent' && <td className="px-4 py-3 font-mono text-xs text-gray-600">{row.agent_send_id || '-'}</td>}
+                          {statsChannel === 'agent' && (
+                            <td className="px-4 py-3 font-mono text-xs text-gray-600">
+                              {row.agent_send_id || '-'}{row.cust_name ? <span className="text-gray-400"> / {row.cust_name}</span> : null}
+                              {/* ★ 2026-07-25 부달 재전송 귀속분(공용 엔진 계정 → 원 발송ID). 해석 실패분은 고객사가 (미귀속)으로 표시된다 */}
+                              {row.is_relay ? <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-sans">부달 재전송</span> : null}
+                            </td>
+                          )}
                           {statsChannel === 'agent' && <td className="px-4 py-3"><span className="px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 text-xs font-medium">{row.type_label || row.msg_type}</span></td>}
                           <td className="px-4 py-3 text-center text-blue-600 font-medium">{sent.toLocaleString()}</td>
                           <td className="px-4 py-3 text-center text-green-600">{success.toLocaleString()}</td>
@@ -6706,7 +6747,29 @@ const handleApproveRequest = async (id: string) => {
                         <span className="text-sm text-gray-500">원</span>
                       </div>
                     </div>
+                    {/* ★ 2026-07-25 테스트발송 단가 — 청구서 항목인데 입력 경로가 없어 설정할 수 없었다 */}
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">테스트 SMS</label>
+                      <div className="flex items-center gap-1">
+                        <input type="number" step="0.1" value={editCompany.costPerTestSms}
+                          placeholder="비우면 SMS 단가 적용"
+                          onChange={(e) => setEditCompany({ ...editCompany, costPerTestSms: e.target.value === '' ? '' : Number(e.target.value) })}
+                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                        <span className="text-sm text-gray-500">원</span>
+                      </div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">테스트 LMS</label>
+                      <div className="flex items-center gap-1">
+                        <input type="number" step="0.1" value={editCompany.costPerTestLms}
+                          placeholder="비우면 LMS 단가 적용"
+                          onChange={(e) => setEditCompany({ ...editCompany, costPerTestLms: e.target.value === '' ? '' : Number(e.target.value) })}
+                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                        <span className="text-sm text-gray-500">원</span>
+                      </div>
+                    </div>
                   </div>
+                  <p className="text-xs text-gray-400">스팸필터 테스트는 별도 단가 없이 SMS·LMS 단가를 그대로 적용합니다.</p>
                 </div>
               )}
 

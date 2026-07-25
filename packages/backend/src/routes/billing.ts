@@ -6,6 +6,8 @@ import { SUCCESS_CODES_SQL, PENDING_CODES_SQL } from '../utils/sms-result-map';
 import { INVITO_INFO } from '../config/defaults';
 import { getAllBulkSmsTables, getBitoSmsTables, getTestSmsTables, mergeLineTables } from '../utils/sms-queue';
 import { CREDIT_UNIT_PRICE } from '../utils/ai-credit-calc';
+// ★ 2026-07-25 사용량 집계 CT — 청구서(이 파일)와 발송통계 엑셀이 같은 집계를 쓴다(정산 정합).
+import { buildCompanyUsageByDay, getTablesForBillingPeriod, getBillingCompanyTables, getBillingTestTables } from '../utils/send-usage-aggregation';
 
 // SMTP transporter (재사용)
 const getTransporter = () => nodemailer.createTransport({
@@ -14,73 +16,6 @@ const getTransporter = () => nodemailer.createTransport({
   secure: true,
   auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
 });
-
-// ============================================================
-//  정산 전용 헬퍼 — CT-04(sms-queue.ts) 컨트롤타워 재사용
-// ============================================================
-
-// 하위호환 래퍼 (호출부 변경 최소화). 내부적으로 CT-04 함수 사용.
-// ★ 2026-06-11: 회사 라인만 → 전 bulk 라인 합집합. 사용자 개별 라인 발송분(에이치피오 87,014 = 대량발송(1))이
-//   회사 라인({7,8,9})만 보던 정산에서 통째로 빠지던 누락 fix. 라인 해제/재배정에도 내성.
-//   회사 격리는 whereClause(app_etc1 IN (그 회사 run/campaign id) · app_etc2=company_id)가 보장 — 타사 혼입 0.
-// ★ 2026-07-17: bulk → bulk + bito 합집합 (Harold 승인). getAllBulkSmsTables는 group_type='bulk'만 봐서
-//   비토 게이트웨이 라인(13·14·15) 발송분이 정산에서 통째로 빠져 있었다. 라인13이 담당자 테스트
-//   전용이라 실피해가 없었을 뿐, 실업체로 확대하면 그대로 청구 누락이 된다.
-//   적용 전 실측(2026-07-17): 라인13 소급 대상 = 테스트계정 22건·테스트계정2 18건뿐 — 실고객사 0.
-const getBillingCompanyTables = async (_companyId: string) => {
-  const [bulk, bito] = await Promise.all([getAllBulkSmsTables(), getBitoSmsTables()]);
-  return mergeLineTables(bulk, bito);
-};
-const getBillingTestTables = () => getTestSmsTables();
-
-async function getBillingLogTables(): Promise<Set<string>> {
-  const rows = await mysqlQuery(
-    `SELECT TABLE_NAME FROM information_schema.TABLES
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME REGEXP '^SMSQ_SEND(_[0-9]+)?_[0-9]{6}$'`
-  ) as any[];
-  const tables = new Set<string>();
-  for (const row of rows) {
-    tables.add(String(row.TABLE_NAME));
-  }
-  return tables;
-}
-
-async function getTablesForBillingPeriod(baseTables: string[], startDate: string, endDate: string): Promise<string[]> {
-  const existingLogs = await getBillingLogTables();
-  const allTables = [...baseTables];
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  const cur = new Date(start.getFullYear(), start.getMonth(), 1);
-  while (cur <= end) {
-    const ym = `${cur.getFullYear()}${String(cur.getMonth() + 1).padStart(2, '0')}`;
-    for (const t of baseTables) {
-      const logTable = `${t}_${ym}`;
-      if (existingLogs.has(logTable) && !allTables.includes(logTable)) {
-        allTables.push(logTable);
-      }
-    }
-    cur.setMonth(cur.getMonth() + 1);
-  }
-  return allTables;
-}
-
-async function smsAggByDateType(tables: string[], whereClause: string, params: any[]): Promise<any[]> {
-  const allRows: any[] = [];
-  for (const t of tables) {
-    const rows = await mysqlQuery(
-      `SELECT msg_type, DATE(sendreq_time) as send_date,
-              COUNT(*) as total_count,
-              SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count,
-              SUM(CASE WHEN status_code NOT IN (${SUCCESS_CODES_SQL},${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail_count,
-              SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending_count
-       FROM ${t} WHERE ${whereClause}
-       GROUP BY msg_type, DATE(sendreq_time)`,
-      params
-    ) as any[];
-    allRows.push(...rows);
-  }
-  return allRows;
-}
 
 async function smsAggByRunAndType(tables: string[], whereClause: string, params: any[]): Promise<any[]> {
   const allRows: any[] = [];
@@ -183,202 +118,15 @@ router.post('/generate', async (req: Request, res: Response) => {
       TEST_LMS: Number(co.cost_per_test_lms) || Number(co.cost_per_lms) || 0,
     };
 
-    // 3) campaign_runs 조회
-    let runsSql = `
-      SELECT cr.id as run_id
-      FROM campaign_runs cr
-      JOIN campaigns c ON c.id = cr.campaign_id
-      WHERE c.company_id = $1
-        AND cr.sent_at >= $2::date
-        AND cr.sent_at < ($3::date + interval '1 day')
-        AND cr.status = 'completed'`;
-    const runsParams: any[] = [company_id, billing_start, billing_end];
-
-    if (user_id) {
-      runsParams.push(user_id);
-      runsSql += ` AND c.user_id = $${runsParams.length}`;
-    }
-
-    // ★ 2026-06-11: 신규 직접발송 파이프라인(staging worker, 5/30+)은 campaign_runs를 만들지 않고
-    //   큐 app_etc1에 campaigns.id를 기록 — campaign_runs만 보던 정산 집계에서 통째로 빠지던 누락 fix.
-    //   양쪽을 IN에 넣어도 MySQL 행은 자기 app_etc1 하나에만 매칭되므로 이중 계상 0.
-    //   발송시각 = COALESCE(scheduled_at, sent_at) (예약 sent_at은 등록 시점 기록 — 2026-06-09 원칙).
-    runsSql += `
-      UNION
-      SELECT c2.id as run_id
-      FROM campaigns c2
-      WHERE c2.company_id = $1
-        AND c2.send_type = 'direct'
-        AND c2.send_phase = 'sent'
-        AND c2.status = 'completed'
-        AND COALESCE(c2.scheduled_at, c2.sent_at) >= $2::date
-        AND COALESCE(c2.scheduled_at, c2.sent_at) < ($3::date + interval '1 day')`;
-    if (user_id) {
-      runsSql += ` AND c2.created_by = $${runsParams.length}`;
-    }
-
-    const runsResult = await pool.query(runsSql, runsParams);
-    const runIds = runsResult.rows.map((r: any) => r.run_id);
-
-    // 4) MySQL 일자별 집계 구조
-    interface DayCounts { total: number; success: number; fail: number; pending: number }
-    const dayData: Record<string, Record<string, DayCounts>> = {};
-
-    // 5) 일반발송 집계 — 회사 라인그룹 + LOG 테이블 통합
-    if (runIds.length > 0) {
-      const companyTables = await getBillingCompanyTables(company_id);
-      const billingTables = await getTablesForBillingPeriod(companyTables, billing_start, billing_end);
-      const ph = runIds.map(() => '?').join(',');
-      const rows = await smsAggByDateType(billingTables, `app_etc1 IN (${ph})`, runIds);
-
-      rows.forEach((row: any) => {
-        const d = row.send_date instanceof Date
-          ? row.send_date.toISOString().slice(0, 10)
-          : String(row.send_date).slice(0, 10);
-        const t = row.msg_type === 'S' ? 'SMS' : row.msg_type === 'L' ? 'LMS' : row.msg_type;
-        if (!dayData[d]) dayData[d] = {};
-        if (!dayData[d][t]) dayData[d][t] = { total: 0, success: 0, fail: 0, pending: 0 };
-        dayData[d][t].total += Number(row.total_count);
-        dayData[d][t].success += Number(row.success_count);
-        dayData[d][t].fail += Number(row.fail_count);
-        dayData[d][t].pending += Number(row.pending_count);
-      });
-    }
-
-    // 6) 테스트발송 집계 — 테스트 전용 라인 + LOG 테이블 통합
-    if (!user_id) {
-      const testBaseTables = await getBillingTestTables();
-      const testTables = await getTablesForBillingPeriod(testBaseTables, billing_start, billing_end);
-      const testRows = await smsAggByDateType(
-        testTables,
-        `app_etc1 = 'test' AND app_etc2 = ? AND sendreq_time >= ? AND sendreq_time < DATE_ADD(?, INTERVAL 1 DAY)`,
-        [company_id, billing_start, billing_end]
-      );
-
-      testRows.forEach((row: any) => {
-        const d = row.send_date instanceof Date
-          ? row.send_date.toISOString().slice(0, 10)
-          : String(row.send_date).slice(0, 10);
-        const t = row.msg_type === 'S' ? 'TEST_SMS' : 'TEST_LMS';
-        if (!dayData[d]) dayData[d] = {};
-        if (!dayData[d][t]) dayData[d][t] = { total: 0, success: 0, fail: 0, pending: 0 };
-        dayData[d][t].total += Number(row.total_count);
-        dayData[d][t].success += Number(row.success_count);
-        dayData[d][t].fail += Number(row.fail_count);
-        dayData[d][t].pending += Number(row.pending_count);
-      });
-    }
-
-    // 6-A) 스팸필터 테스트 집계 (PostgreSQL)
-    if (!user_id) {
-      const spamResult = await pool.query(`
-        SELECT
-          r.message_type,
-          DATE(t.created_at AT TIME ZONE 'Asia/Seoul') as send_date,
-          COUNT(*) as total_count,
-          SUM(CASE WHEN r.result IS NOT NULL THEN 1 ELSE 0 END) as success_count
-        FROM spam_filter_test_results r
-        JOIN spam_filter_tests t ON r.test_id = t.id
-        WHERE t.company_id = $1
-          AND t.created_at >= ($2 || ' 00:00:00+09')::timestamptz
-          AND t.created_at < (($3::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz
-        GROUP BY r.message_type, DATE(t.created_at AT TIME ZONE 'Asia/Seoul')
-      `, [company_id, billing_start, billing_end]);
-
-      spamResult.rows.forEach((row: any) => {
-        const d = row.send_date instanceof Date
-          ? row.send_date.toISOString().slice(0, 10)
-          : String(row.send_date).slice(0, 10);
-        const t = row.message_type === 'LMS' ? 'SPAM_LMS' : 'SPAM_SMS';
-        if (!dayData[d]) dayData[d] = {};
-        if (!dayData[d][t]) dayData[d][t] = { total: 0, success: 0, fail: 0, pending: 0 };
-        dayData[d][t].total += Number(row.total_count);
-        dayData[d][t].success += Number(row.success_count);
-      });
-    }
-
-    // 6-B) 카카오 브랜드메시지 집계 (IMC_BM_FREE_BIZ_MSG)
-    if (runIds.length > 0) {
-      // campaign_runs → campaigns.id → REQUEST_UID로 매핑
-      const campaignIdsResult = await pool.query(
-        `SELECT DISTINCT c.id as campaign_id
-         FROM campaign_runs cr
-         JOIN campaigns c ON c.id = cr.campaign_id
-         WHERE cr.id = ANY($1::uuid[])
-           AND (c.send_channel = 'kakao' OR c.send_channel = 'both')`,
-        [runIds]
-      );
-      const kakaoCampaignIds = campaignIdsResult.rows.map((r: any) => r.campaign_id);
-
-      if (kakaoCampaignIds.length > 0) {
-        const kph = kakaoCampaignIds.map(() => '?').join(',');
-        const kakaoRows = await mysqlQuery(
-          `SELECT DATE(REQUEST_DATE) as send_date,
-                  COUNT(*) as total_count,
-                  SUM(CASE WHEN REPORT_CODE = '0000' THEN 1 ELSE 0 END) as success_count,
-                  SUM(CASE WHEN REPORT_CODE != '0000' AND STATUS IN ('3','4') THEN 1 ELSE 0 END) as fail_count,
-                  SUM(CASE WHEN STATUS IN ('1','2') THEN 1 ELSE 0 END) as pending_count
-           FROM IMC_BM_FREE_BIZ_MSG
-           WHERE REQUEST_UID IN (${kph})
-             AND REQUEST_DATE >= ? AND REQUEST_DATE < DATE_ADD(?, INTERVAL 1 DAY)
-           GROUP BY DATE(REQUEST_DATE)`,
-          [...kakaoCampaignIds, billing_start, billing_end]
-        );
-
-        (kakaoRows as any[]).forEach((row: any) => {
-          const d = row.send_date instanceof Date
-            ? row.send_date.toISOString().slice(0, 10)
-            : String(row.send_date).slice(0, 10);
-          if (!dayData[d]) dayData[d] = {};
-          if (!dayData[d]['KAKAO']) dayData[d]['KAKAO'] = { total: 0, success: 0, fail: 0, pending: 0 };
-          dayData[d]['KAKAO'].total += Number(row.total_count);
-          dayData[d]['KAKAO'].success += Number(row.success_count);
-          dayData[d]['KAKAO'].fail += Number(row.fail_count);
-          dayData[d]['KAKAO'].pending += Number(row.pending_count);
-        });
-      }
-    }
-
-    // 또한 직접발송(direct-send) 카카오도 집계
-    {
-      const directKakaoResult = await pool.query(
-        `SELECT id FROM campaigns
-         WHERE company_id = $1
-           AND send_type = 'manual'
-           AND (send_channel = 'kakao' OR send_channel = 'both')
-           AND sent_at >= $2::date
-           AND sent_at < ($3::date + interval '1 day')`,
-        [company_id, billing_start, billing_end]
-      );
-      const directKakaoIds = directKakaoResult.rows.map((r: any) => r.id);
-
-      if (directKakaoIds.length > 0) {
-        const dkph = directKakaoIds.map(() => '?').join(',');
-        const dkRows = await mysqlQuery(
-          `SELECT DATE(REQUEST_DATE) as send_date,
-                  COUNT(*) as total_count,
-                  SUM(CASE WHEN REPORT_CODE = '0000' THEN 1 ELSE 0 END) as success_count,
-                  SUM(CASE WHEN REPORT_CODE != '0000' AND STATUS IN ('3','4') THEN 1 ELSE 0 END) as fail_count,
-                  SUM(CASE WHEN STATUS IN ('1','2') THEN 1 ELSE 0 END) as pending_count
-           FROM IMC_BM_FREE_BIZ_MSG
-           WHERE REQUEST_UID IN (${dkph})
-           GROUP BY DATE(REQUEST_DATE)`,
-          directKakaoIds
-        );
-
-        (dkRows as any[]).forEach((row: any) => {
-          const d = row.send_date instanceof Date
-            ? row.send_date.toISOString().slice(0, 10)
-            : String(row.send_date).slice(0, 10);
-          if (!dayData[d]) dayData[d] = {};
-          if (!dayData[d]['KAKAO']) dayData[d]['KAKAO'] = { total: 0, success: 0, fail: 0, pending: 0 };
-          dayData[d]['KAKAO'].total += Number(row.total_count);
-          dayData[d]['KAKAO'].success += Number(row.success_count);
-          dayData[d]['KAKAO'].fail += Number(row.fail_count);
-          dayData[d]['KAKAO'].pending += Number(row.pending_count);
-        });
-      }
-    }
+    // 3~6) 사용량 집계 — ★ 2026-07-25 컨트롤타워로 이동(utils/send-usage-aggregation.ts).
+    //   발송통계 엑셀이 청구서와 **같은 함수**를 호출하게 하려고 뺐다. 로직을 복사하면 언젠가 갈라져
+    //   "엑셀 유형 ≠ 청구 유형"이 되고 그러면 정산 대조가 성립하지 않는다.
+    const dayData = await buildCompanyUsageByDay({
+      companyId: company_id,
+      startDate: billing_start,
+      endDate: billing_end,
+      userId: user_id || undefined,
+    });
 
     // 7) 합산
     let totalSms = 0, totalLms = 0, totalMms = 0, totalKakao = 0;
@@ -1072,6 +820,9 @@ router.get('/preview', async (req: Request, res: Response) => {
         }
         if (row.msg_type === 'S') brandMap[key].sms_success += Number(row.success_count);
         if (row.msg_type === 'L') brandMap[key].lms_success += Number(row.success_count);
+        // ★ 2026-07-25 M·K가 빠져 MMS·알림톡이 미리보기에서 0원으로 나왔다(SMSQ msg_type = S/L/M/K)
+        if (row.msg_type === 'M') brandMap[key].mms_success += Number(row.success_count);
+        if (row.msg_type === 'K') brandMap[key].kakao_success += Number(row.success_count);
       });
       // 카카오는 브랜드 구분 없이 전체 합산 (default에 넣기)
       if (kakaoSuccessTotal > 0) {
@@ -1093,6 +844,9 @@ router.get('/preview', async (req: Request, res: Response) => {
       normalCounts.forEach((row: any) => {
         if (row.msg_type === 'S') sms_success += Number(row.success_count);
         if (row.msg_type === 'L') lms_success += Number(row.success_count);
+        // ★ 2026-07-25 M·K 누락 정정 — 청구 생성부(send-usage-aggregation)와 같은 축으로 맞춘다
+        if (row.msg_type === 'M') mms_success += Number(row.success_count);
+        if (row.msg_type === 'K') kakao_success += Number(row.success_count);
       });
 
       const summary = {

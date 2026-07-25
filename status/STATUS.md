@@ -11,20 +11,15 @@
 | 상황 | 참조 문서 | 읽는 범위 |
 |------|-----------|-----------|
 | DB 쿼리 작성 / 스키마 확인 | SCHEMA.md | 대상 테이블 절만 |
-| DB·돈·환불·마이그레이션 작업 | lessons/LESSONS_DB.md | 도메인 전체 |
-| Frontend·UI·모달 작업 | lessons/LESSONS_FRONTEND.md | 도메인 전체 |
-| Backend·API·발송·AI 작업 | lessons/LESSONS_BACKEND.md | 도메인 전체 |
-| 배포·빌드·SSH·의존성 | lessons/LESSONS_DEPLOY.md + OPS.md | 도메인 전체 / 해당 절 |
-| 매 답변 직전 | lessons/LESSONS_META.md | 전체 (경량 유지) |
-| 컨트롤타워·도메인 흐름 | lessons/LESSONS_ARCHITECTURE.md | 해당 CT |
+| 도메인 작업 착수 전 사고 이력 (룰 원천=CLAUDE.md `read_lessons_first`) | lessons/LESSONS_{DB,FRONTEND,BACKEND,DEPLOY,ARCHITECTURE,META}.md | 해당 도메인 전체. DB·돈·환불=DB / UI·모달=FRONTEND / API·발송·AI=BACKEND / 배포·빌드·SSH=DEPLOY+OPS.md 해당 절 / 컨트롤타워=ARCHITECTURE / **매 답변 직전=META** |
+| **Harold님이 "브레인스토밍"이라고 말했을 때** · superpowers 스킬 선택 · Codex 라운드 운영 | **COLLAB.md** | 브레인스토밍 = §1 전체 정독 후 그대로 진행(의무) / 그 외 = 해당 절만 |
 | 시스템 구조 파악 | ARCHITECTURE.md | 해당 절만 |
 | 자사몰 연동·CDP·커넥터 작업 | INTEGRATIONS.md | 해당 provider 카드 / CDP 공통 절 |
 | 버그 수정 | BUGS.md | 해당 버그 항목 (해결분은 archive/BUGS_RESOLVED.md) |
 | 과거 작업 조회·회귀 의심 | archive/INDEX.md → TASKS_YYYY-MM.md | grep 적중 항목만 |
 | 의사결정 배경 확인 | DECISIONS.md | 해당 ADR |
 | 리스크 전체 확인 | RISKS.md | 전체 |
-| 싱크에이전트 이슈 진단 | SYNC-AGENT-TROUBLESHOOTING.md | 해당 증상 절 |
-| 싱크에이전트 isae 현장(완료 이력) | archive/SYNC-AGENT-ISAE-2026-06-30-HANDOFF.md | grep 적중 절만 (2026-07-07 archive 이동) |
+| 싱크에이전트 이슈 진단 | SYNC-AGENT-TROUBLESHOOTING.md | 해당 증상 절 (isae 현장 완료 이력 = archive/SYNC-AGENT-ISAE-2026-06-30-HANDOFF.md grep) |
 | AI Operator·CDP·Provider | docs/AI_OPERATOR_기능정의서.md + ai_operator_progress.md | 해당 절 |
 | CRM 캠페인 대행(설계 대행) 기능 | docs/2026-07-09-crm-campaign-agency-implementation.md | 전체 |
 | 레거시 서버(27.102.203.143) 폐기 | docs/레거시서버_폐기_플랜.md | 전체 (SoT — 진행 시 갱신). **하위 트랙 = 에이전트 선불 충전·잔액 축 흡수: docs/2026-07-24-agent-prepaid-charge-design.md** (서버 실측 원문 포함·다음 세션 단독 재개용) |
@@ -41,113 +36,70 @@
 
 ## 2) CURRENT_TASK (활성 작업만)
 
-> **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
+> **회전 룰:** 완료(★배포완료)면서 남은 일이 없으면 STATUS에서 **지운다**(원문 = archive/TASKS_YYYY-MM.md + memory). 남은 일이 있으면 아래 "완료분 잔여"에 **한 줄**만. 경위·수치·함정을 여기 재서술하지 않는다(doc_ownership). 30KB 초과 = 회전 미이행.
 
-### 🟡 진행중 — 레거시 PAY 흡수 (Track D — ★0720 통계 3서버 완료 / ★0723 Phase 2 유형별 조회 배포대기 / 충전 축 미완)
-> 서팀장 2차 회신 전부 반영. **수신 DB 구축완료(2026-07-07)**: invito `pay-ingest-db`(MariaDB 10.11, --sql-mode="") — 143 dump 3테이블 82MB 복원(934,232/730/7,026 일치)·SysId 백필(B/C/D=54/57/58)·계정(sales×3 IP host·root@% 제거)·방화벽 systemd `pay-ingest-fw`. **0709 원격 접속 사고 해결(종결)**: 근본=DOCKER-USER 리턴(ESTABLISHED) 허용 룰 누락(SYN-ACK가 DROP에 걸림). 상세=설계문서 §7-2·⑪. **★0717 강문희 54·57·58 3서버 전부 구현·적용 완료. ★0720 실측: 통계 3서버 20240101~당일 실시간 유입 정상(커버 930/909/926일·마지막 적재 0분 전) = 정방향 통계 완료.** **단 충전·원장 축 미완**: FillAmtHist 최신 0706(0707 복원분 그대로·유입 0)·SalesMst 최신 2/26·58 빈 행 1건(0717 05:00 배치). **★0720 서팀장 확인 = 충전 입력 창구는 PAY 화면 하나뿐**(게이트웨이 직접 경로 없음 — 0707 "게이트웨이 직접" 기재는 오기)·**입력 주체=인비토 내부** → **143 폐기 시 충전 단절 → 슈퍼관리자 충전 입력 화면 필수 승격**(설계 §4 전면 개정). 마이너스 상계는 실증(1,202건·전부 Y). 다음 = ①강문희 수집엔진 소스 62 전환(선행) ②143 대조(§7-4·통계 수치+원장) ③PAY↔companies 매핑 ④충전 화면 구현+실측 1건 → Phase 2. SoT=[docs/레거시서버_폐기_플랜.md](docs/레거시서버_폐기_플랜.md) · 런북=[docs/2026-07-07-pay-absorption-track-d-design.md](docs/2026-07-07-pay-absorption-track-d-design.md) §7. 교훈=[[feedback_verify_in_same_env_before_external_request]].
-> **★0723 Phase 2 배포대기** — 에이전트 발송통계 유형별(SMS/LMS/MMS/카카오) 재개발 3화면(고객사·슈퍼·전송결과) + 웹/에이전트/테스트 탭. tsc0·vitest900·Codex1R. 매핑=agent_send_id=CustId·MsgType S/L/M/K·env=paystats. **58 484만 미적재=전환갭(dump 0707→라이브 0714) 58 07-08~13·54 07-08~09 누락→143→62 자체 백필 완료**. 잔여=배포·57갭·정산. [[project_2026_0723_pay_agent_stats_tabs]].
+### 🟡 진행중 — 레거시 PAY 흡수 (Track D)
+> SoT = [docs/2026-07-07-pay-absorption-track-d-design.md](docs/2026-07-07-pay-absorption-track-d-design.md)(통계·인프라) · [docs/2026-07-24-agent-prepaid-charge-design.md](docs/2026-07-24-agent-prepaid-charge-design.md)(충전·잔액, 단독 재개 가능) · [[project_2026_0724_agent_prepaid_charge]] · [[project_2026_0723_pay_agent_stats_tabs]]
+> **충전·잔액 축 잔여**: 서수란 선불 발송ID·단가 자료 수령 → 지정 → 충전 왕복 실측 / §5-4 충전 요청 / §5-5 고아 대조 워커 / 컷오버(143 SeqNo>7042 백필 — **RsApplyFlag 'Y' 그대로**, 'N'이면 이중 증액) + 강문희 143 연동 종료 통지 / §8-2·8-8 실측.
+> **★0725 서수란 접수 6건 — #1·#2 코드완료·배포대기 / #3~#6 미착수.** 순서 = ①발급명 병기 ②대상ID 출력 ③웹 발송유형 NULL ④알림톡 부달 B0061 귀속 ⑤7/6~7 불일치 진단 ⑥슈퍼 발신번호 페이징. ③ 착수 시 근본 = 웹 통계 소스(querySendStats)에 유형 축이 없어 CSV만 고쳐선 안 됨. 상세·함정 = [[project_2026_0725_pay_stats_custnm_storeid]].
+> **별건(미해결)**: 피케이포유 대상ID 인코딩 손상 — 같은 매장이 정상 UTF-8과 EUC-KR 이중인코딩 두 벌(hex 실측 확정). 게이트웨이 ingest 손상이라 복원은 별도 과제. 상세 = Track D SoT §2-4.
 
 ### 🔵 다음 세션 (예정)
-> **0716~17 배포완료 4건 archive 회전 완료(2026-07-17)** — DM 편집기 AI퍼스트(M1~M5)·인앱 범용보장계약·서체 자가호스팅·**0717 인앱 중앙정렬 근본수정+전층 전수점검+앱 통합 계약(5커밋)**. 잔여 실측 = 최근 완료 인덱스 참조. (`public/about-ai-operator-v5.html`·`v6.html`=소개 실험·반려·미커밋=폐기.)
-> **★인앱 잔여(0718~)**: **팝폰 1.0.2 출시·OTA 성립 확인(0720 양 OS 실측)** — 실측 3종(재실행 재표시=세션당 1회 / 닫기 억제 / 다시 보지 않기) = **B-0717-2 해소 확인**(BUGS.md). 1.0.2부터 EAS Update 런타임 성립(이후 JS 수정=검수 없이 OTA). 웹 실측 = 쿠폰·CTA 정렬·허용표·AI 생성 1건. 0717 직원 디버깅분(수신거부·DM #1~3·이메일)=코드완료·미검증.
-> **별건 잔여**: 인앱/DM M3 네이버 후보 env 키(NAVER_CLIENT_ID/SECRET) 등록 시 활성 · DM M6 이메일·인앱 이식(별도 설계).
-> **★아임웹·아이디룩 시연(활성 0719~)**: 앱 승인 완료·앱스토어 콘텐츠 제출 완료(회신 대기). 순서 = 스토어 등록 확인(또는 파트너센터 "연동 사이트 관리"가 등록 전 테스트 연동 경로인지 확인) → 테스트 몰 OAuth 리허설(pm2 로그 + 회원가입 1건 webhook = 실측 미검증 3건 확정) → 아이디룩 시연. 스펙=INTEGRATIONS.md 아임웹 카드 · 제출물=docs/imweb-appstore/ · 상세=[[project_2026_0719_imweb_appstore_idlook]].
-> **★이미지 스튜디오 잔여(0719~)**: 인앱 웹 디자인 탭 단순화 · 원샷 이식(인앱·이메일) · 판독 3축 확장(내용+디자인신호+이미지 역할) · 템플릿 exampleUrl 실샘플 · **미해결 = DM 상품 링크 입력 시 멈춤(원인 미확정 — 재현 정보 대기)**. 상세=[[project_2026_0719_p4_image_studio]].
-> **★0718 성능·사고 후속(활성)**: B-0718-1 종결 조건 ①서버 git 일치(d6958238) ②재발 방지 게이트(safe-build 3-1 lazy 청크 실존/3-2 비literal 동적 import 검출 + verify-live-chunks.sh 라이브 전수) 완료 — Codex 5라운드 통과·하네스 실측. 로컬 "온전" 빌드도 19/38지점 암호화 불량 실측 정정. **0718 오후: ③exclude 3회 반복 빌드 실측 완료(청크 8/8·비literal 0·원복) · ⑦ 백엔드 실측 종결(이새 진입 2회 후 SLOW 0) · 양쪽 프론트 게이트 배포·라이브 검사 통과. **④M1 재도입 배포·종결(0718 저녁 eab1f413 — Codex 3R 성능 정정 3건 동반·서버 게이트 실전 통과·라이브 전수 177건 실패 0·Harold 화면 실측 통과 → B-0718-1 Closed·archive/BUGS_RESOLVED 회전. 첫 로드 5MB→0.37MB).** 잔여 = 화(0722~) 관측 사이클 1회전 — **0718 저녁 조기 판독 완료: 1순위=campaigns 발송 단계 폴러 인덱스(14,478콜·총 115초=PG 전체 30%·EXPLAIN 후 처방) · 2순위=balance_transactions 잔액 SUM N+1(78만 콜·호출처 추적) · MySQL 슬로우=버퍼풀 2GB 이후 0건** · 그 후 M3/롤업. M2=무효 — 고객사 관리자=hanjul.ai "관리" 메뉴 정책(별도 로그인 사이트 금지·Harold 0718). **app.hanjul.ai 관리자 화면 nginx 차단 + SDK 실물 backend/sdk-serving 이전 + company-frontend 패키지 제거 = 전부 배포·외부 실측 종결(0718 — 전 버전 200 js·v0.3.6/7은 설계 의도 폴백 서빙·api 정상·migrations/callback-self-register.sql 이관).** 단축 URL 실태 확정 = 발급은 모바일 DM(hlj.kr)뿐·message_short_urls 0건 실측(hlj.kr 통일 불필요 판정).** SoT=docs/2026-07-18-frontend-splitting-incident-handoff.md · 상세=[[project_2026_0717_dashboard_performance]] · 0717 성능 1~7차 원문=archive/TASKS_2026-07.md.
-> **비토 라인 14·15 미결 4건(활성)**: ①배정 화면 게이팅 범위(Harold 미확인) ②라인그룹 DELETE가 users.line_group_id 미체크(무경고 배정 해제) ③sweeper 2종 bulk-only 사각 ④Codex 결과 미수령(Harold 직접 /codex:result). 상세=[[project_2026_0717_bito_line14_15_lineadmin]] · 원문=archive/TASKS_2026-07.md.
-> ★ **1순위 = 템플릿관리자 흡수(Track B+C)** — ★0715~16 관문 1·2 통과(import 2종 배포·아난티 847 pull). **★0720 Track C API 개통**: 강문희 구현 완료·API 정의서 수령·62서버 조회 실측 통과(화이트리스트·토큰·응답 정상). 계약 확정 = **54=P코드/58=R코드 · billid=고객사(납입자ID) 단위 · usemod 서버별 상수(54:HM1~3/58:HM1~6) · 삭제 없음 · 1초 500회 제한**. **★0720 PUT 왕복 점검(R0001) 완료 — 서버 결함 1건: `tran_tmplcd` 빈 값 전송 시 tmplcd까지 유실**(계약 역전). 회피책=tran_tmplcd 항상 채움(기본=tmplcd 복사)=tran_tmplcd 정책 확정. **★0720 매핑 시드 확보**(서팀장 0716 엑셀 = API payload 1:1 · Bill_ID 41/4,681행) → 추가 요청 불요. P=54·R=58·병기 실사례. **usemod=서버상수 아닌 행 단위**(54 HM1~4 혼재)→기존분 조회 유지. tran_tmplcd=tmplcd 불일치 0. **58 계약 전 항목 검증 통과**(발견 결함=빈 tran_tmplcd→tmplcd 유실, 강문희 당일 수정·재검증). 삭제=웹관리자에 존재(API 무 → 자동삭제 배제 유지). **★0720(7) 카카오 M2 + PAY 축(회사 50·계정 38·CustId 283·에이전트 발송결과 화면 실측 통과) 전부 종결**(상세=[[project_2026_0705_legacy_template_migration]] 0720절). **★0720(8~9) 이관 3,579건 + 54 개통 + 게이트웨이 720건 등록·자동 등록 가동(§4-9-I·J·K, 전부 배포완료)** → 다음=서팀장 점검표 회신(계정·코드 정정)→컷오버. 전문=설계문서 §4-0~4-9. 병행 = M4 실발송 1건 · 497 기준 서팀장 · M5(B-3 계정·Bill_ID) · 브랜드 스코프(B-2) · 다우 2사 senderKey 이관 실측. SoT=설계문서 §1 · [[project_2026_0705_legacy_template_migration]].
-> ② **PAY Track D** — ★0715 54 병행 적재 개시. 다음 = 익일 143 마감 대조(§7-4) → 57(golang)→58 → 최종 전환일 dump 재복원 → Phase 2.
-> ③ **Local AI Ops Hub(비토 24시간화)** — 미래 대비. 설계 3부작 완료(docs/2026-07-15-local-ai-ops-hub-{design·agents-design·jarvis-spec}.md). Harold 결정(H-2 M0 착수) 대기. **현재 실무(①②)보다 후순위.** [[project_2026_0715_local_ai_ops_hub]].
-> (지속) ⓪ 비토 API 발송 경로 전환 검토(선택) [[project_2026_0710_bito_api_direct_test]] · ⓪-2 싱크에이전트 1.5.7 유지(종결) · (보류) 팝폰 SDK 검증.
+> ① **템플릿관리자 흡수(Track B+C) — 1순위**: 다음 = 서팀장 점검표 회신(계정·코드 정정) → 컷오버. 병행 = M4 실발송 1건 · 497 기준 서팀장 · M5(B-3 계정·Bill_ID) · 브랜드 스코프(B-2) · 다우 2사 senderKey 이관 실측. 계약·이관 이력 전문 = 설계문서 §1·§4 · [[project_2026_0705_legacy_template_migration]].
+> ② **0718 성능 후속(활성)**: 관측 사이클 1회전 — 1순위 campaigns 발송 단계 폴러 인덱스(EXPLAIN 후 처방) · 2순위 balance_transactions 잔액 SUM N+1(호출처 추적) · 그 후 M3/롤업. SoT = docs/2026-07-18-frontend-splitting-incident-handoff.md · [[project_2026_0717_dashboard_performance]].
+> ③ **아임웹·아이디룩 시연(활성)**: 스토어 등록 확인 → 테스트 몰 OAuth 리허설(pm2 로그 + 회원가입 1건 webhook) → 아이디룩 시연. 스펙 = INTEGRATIONS.md 아임웹 카드 · [[project_2026_0719_imweb_appstore_idlook]].
+> ④ **이미지 스튜디오 잔여**: 인앱 웹 디자인 탭 단순화 · 원샷 이식(인앱·이메일) · 판독 3축 확장 · 템플릿 exampleUrl 실샘플 · **미해결 = DM 상품 링크 입력 시 멈춤(재현 정보 대기)**. [[project_2026_0719_p4_image_studio]].
+> ⑤ **비토 라인 14·15 미결 4건**: ①배정 화면 게이팅 범위(Harold 미확인) ②라인그룹 DELETE가 users.line_group_id 미체크(무경고 배정 해제) ③sweeper 2종 bulk-only 사각 ④Codex 결과 미수령. [[project_2026_0717_bito_line14_15_lineadmin]].
+> ⑥ **인앱 잔여**: 웹 실측(쿠폰·CTA 정렬·허용표·AI 생성 1건) · 0717 직원 디버깅분(수신거부·DM #1~3·이메일) 코드완료·미검증 · M3 네이버 env 키(NAVER_CLIENT_ID/SECRET) 등록 시 활성 · M6 이메일·인앱 이식(별도 설계).
+> ⑦ **Local AI Ops Hub** — 설계 3부작 완료·Harold 결정(H-2 M0 착수) 대기. 실무보다 후순위. [[project_2026_0715_local_ai_ops_hub]].
+> (지속) 비토 API 발송 경로 전환 검토(선택) [[project_2026_0710_bito_api_direct_test]] · (보류) 팝폰 SDK 검증.
 
 ---
 
-### 최근 완료 인덱스 (원문 = 링크의 월별 아카이브)
+### 완료분 잔여 (실측·후속 대기만)
 
-- 🟢 2026-07-22 (4) — 모바일 DM 편집≠단말 전수 정정(임은지 접수 2건 발단): 탭 밑줄→알약 / 상품슬라이드 인디케이터=페이지 단위(ceil(N/2) 페이지래퍼·뷰어 자식↔점 1:1 무변경) / click_rewards 참여버튼 / map 죽은 200px 상자 제거 / limited signup 링크 / **탭 content_type 이미지·상품목록 실제 렌더**(백엔드 미러 파서 dm-tab-content) / 이메일 완료문구 data-success-text 배선 / 룰렛·추첨 경품 노출. 신규16 3면 감사·옛11 클린·골든 무변. BE·FE tsc0·backend vitest900(신규21). ★배포완료(잔여=Harold 실측) → [[project_2026_0722_mobile_dm_editor_publish_parity]]
-- 🟢 2026-07-22 (3) — 카카오 템플릿 관리 서수란 5티켓: 목록 페이징(공용 TablePagination)+발신프로필 검색+템플릿 검색 프로필옵션 / 등록폼 발신프로필 검색형 콤보+"관리 이름"→"템플릿명" / 슈퍼 발신프로필·관리코드 검색 / 고객사관리코드 템플릿코드 열 이동 / **이관 템플릿명 복원**(레거시 event_admin title→template_name·순수 로컬 라벨·IMC/발송 무접촉·changed 3242·remainingDiff 0). FE·BE tsc0·vitest879·★배포완료(접수2 프론트 배포대기) → [[project_2026_0722_kakao_template_mgmt_tickets]]
-- 🟢 2026-07-22 (2) — 영업용 테스트발송/저장 3채널(인앱 테스트저장=웹·앱 이미지·loginId 게이팅·html-to-image / 이메일 테스트발송=완성분 3개 직접입력·(광고)없음·통계무오염) + 완성 이메일 HTML 내보내기(완성 게이트 서버강제=크레딧 없이 산출물 추출 차단). Codex1R·★배포완료 → [[project_2026_0722_sales_test_send]]
-- 🟢 2026-07-21 — 브랜드 학습 통합(AI메모리 단일 모달 3탭 집약·DM 브랜드킷 편집 제거[override 보존]·업태=business_type·서체 한/영·연락처 생성시드·자동추출 폐기). Codex 3R·tsc0·vitest212·★배포완료. SoT=[[project_2026_0721_brand_learning_consolidation]]
-- 🟢 2026-07-21 — 모바일 DM 디버깅 10건(갤러리캡션·상품슬라이드 스와이프·연결부색·정지버튼·매장정보 편집=발송·고아기능5). Codex 2R·★배포완료. SoT=[[project_2026_0721_mobile_dm_feature_wiring]]
-- 🟢 2026-07-21 — 담당자 생성물 격리 + 인앱 관리자 전용(스튜디오 로그아웃 근본=역할 라우트 가드 불일치). owner-scope.ts CT+created_by 격리·인앱=관리자 전용·이메일=담당자 개방. Codex 7R·★배포가능. SoT=[[project_2026_0721_role_isolation_inapp_admin]]
-- 🟢 2026-07-22 — 이미지 스튜디오 채널 변환 폐기→완성 포스터 통짜 재사용 + GPT 폴백 전부 gpt-5.5(analysis.ts temperature 제거 세트) + 제품명 줄바꿈(DM+이메일 공용). ★배포완료·vitest822 → [[project_2026_0722_studio_reuse_gpt55_linebreak]]
-- 🟢 2026-07-21 (4) — 인앱 포스터형 **좌우 슬라이드 캐러셀(스타벅스형)**: 1메시지=N슬라이드. 신규 `poster_slides` jsonb(ALTER 실행완료)·slide0→flat 합성(구버전 폴백)·CSS scroll-snap(웹)/ScrollView pagingEnabled(팝폰 RN·OTA 안전). 6층+팝폰 네이티브(백엔드·웹SDK renderPosterCarousel·편집기 PosterSlidesEditor·미리보기 PosterCarouselPreview·계약·poppon-app InAppBottomSheet 캐러셀)·**Codex 3라운드 이중검증(실수정 10·보류 2)** (★배포완료 웹+팝폰 EAS OTA·전 tsc0·backend14+SDK5 테스트 / 잔여=Harold 실기기·왕복 실측만) → [[project_2026_0721_inapp_poster_carousel]] · SoT=docs/인앱메세지전용.md §10-C
-- 🟢 2026-07-21 (3) — 이미지 스튜디오 4대 개선: 파일명 헤드라인_채널(용도 체킹 동시·신규만)·다운로드 제거(악용 차단)·워터마크 CSS 오버레이(발송 원본 무손)·채널 변환(1크레딧·**★0722 폐기→통짜 재사용으로 대체**) (★배포완료·DDL 0·vitest816 / 크레딧≠balance=ai_credits 2버킷 / 실측=변환 시 credits_total -1+cdp_assets 새 행) → [[project_2026_0721_image_studio_improvements]]
-- 🟢 2026-07-20~21 — 모바일 DM 편집≠발행 4번째 재오픈 근본(모티프 rule 제목 클래스 dm-text-h2 캔버스 미부여·앞 3회 divider 오진) + 셸 정합(4섹션 DmEventCard·패딩형 8섹션) + 인앱 포스터 SDK 정합 (★배포완료·게이트 3종 신설=title/shell/inapp-poster·골든 무변·DDL 0 / 실측=주황막대·노치·이벤트카드·인앱포스터) → [[project_2026_0720_mobile_dm_title_parity]]
-- 🟢 2026-07-21 — 문안 생성 참조 업종 셀렉트 신설(companies.industry_code 입력 UI 0곳→슈퍼관리자 고객사 수정·사업자등록증 업태/종목과 별개·경량 GET /industry-codes SSOT) (★배포완료·DDL 0) → [[project_2026_0721_copy_industry_category]]
-- 🟢 2026-07-19~20 — 계절 템플릿 22종(★7e613613) + 의류 단독컷 원칙 + 팝폰 가로줄 종결(양 OS 실측) + 아임웹 앱스토어 제출 (잔여=의류 안내 1줄 커밋·배포 / 아임웹 잔여는 위 활성 트랙, 회전 0720) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · [[project_2026_0719_p4_image_studio]] · [[project_2026_0719_imweb_appstore_idlook]]
-- 🟢 2026-07-17 (3) — 대시보드 성능 1~7차(측정→소거→처방·관측 인프라 가동) + 0718 M1 스플리팅 사고 롤백·재발 방지 게이트 ①② (★배포완료·Codex 5R / 잔여=③④·⑦실측·관측 사이클, 회전 2026-07-18) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0717_dashboard_performance]]
-- 🟢 2026-07-17 (2) — 비토 라인 14·15 신설(자비스 요청) + 슈퍼관리자 `발송 라인 설정` 탭 신설(ceo·admin 전용) + 정산 bito 라인 포함 (★배포완료 · **E2E 왕복 Harold 실측 통과 = 트랙 종결** / 잔여 = 미결 4건, 회전 2026-07-18) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0717_bito_line14_15_lineadmin]]
-- 🟢 2026-07-17 — 인앱 중앙정렬 근본수정(SDK 버전 폴더 동기화 누락)+전층 전수점검(허용표 3면 통일)+앱 네이티브 통합 계약 2면 (★배포완료 5커밋·DDL 0 / B-0717-1 종결(Harold 실측) · B-0717-2=팝폰 1.0.2 심사 중 / 잔여=웹 실측(쿠폰정렬·허용표)+앱 출시 후 실측 3종, 회전 2026-07-17) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0717_inapp_debug_session_incomplete]]
-- 🟢 2026-07-16 (3) — DM 편집기 AI 퍼스트 재개편 M1~M5 (★배포완료 3d40dfb1 / 잔여=직원 모바일 DM 실측+M3 네이버 env 키+M6 이메일·인앱 이식, 회전 2026-07-17) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0716_dm_editor_ai_first_redesign]]
-- 🟢 2026-07-16 (2) — 인앱 범용 안전 편집기(블록→flat 합성·다시 보지 않기·SDK v0.3.11) (★배포완료·DDL 0 / 잔여=팝폰 앱 커밋·빌드(Harold 직접)+실기기 실측, 회전 2026-07-17) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0716_inapp_universal_safe_editor]]
-- 🟢 2026-07-16 — DM·이메일 서체 자가호스팅+무료글꼴 12종(궁서체 해소) (★배포완료 e1e3c61b·24b4e9e8 / 잔여=직원 실측, 회전 2026-07-17) → 상세 [[project_2026_0716_dm_email_font_selfhosting]]
-- 🟢 2026-07-15 (3) — 템플릿관리자 흡수 Track B: import 2종+아난티 847 pull (★배포완료·DDL 0 / 관문 1·2 통과 / 잔여=답신 발신→M2 매핑 CT·M4 실발송·다우 2사 이관, 회전 2026-07-16) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0705_legacy_template_migration]]
-- 🟢 2026-07-15 (4) — 모바일 DM 직원 신고 3파트: 완성이미지 풀화면(full_bleed)·색표시 5건9항목(연결부 그라데이션·버튼색·헤더 제목색/브랜드토글·상품 배경/글씨공간/이미지높이)·섹션추가 메뉴 신규 11종 편입 (DDL 0·3면 미러+계약테스트 / full_bleed·5건9항목 ★배포완료 / **섹션메뉴(c3cd455e) frontend build:safe 잔여** / 직원 실측, 회전 2026-07-16) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0715_mobile_dm_bugfix_5]]
-- 🟢 2026-07-15 (2) — AI Operator 소개 v4 스펙터클 (★배포완료, 회전 2026-07-15 / 잔여=Harold 시각 확인) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0713_operator_intro_effects]]
-- 🟢 2026-07-15 — 모바일 DM 한글 주소(hlj.kr/반짝세일_07)+추적 2원화 (★배포완료, 회전 2026-07-15 / 잔여=DDL 3건 확인+실측(단말 문자 링크 인식=성패 축·직원)+Codex 합류) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0715_dm_korean_alias]]
-- 🟢 2026-07-14 (2) — 디자인 4.0: 코어 통합+정예 10종+브랜드 학습+행사 자동 완성 (★배포완료, 회전 2026-07-15 / 잔여=Harold 시각 승인(게이트 7)+실측 3건(직원)) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · SoT=[specs/2026-07-14-design-4-core.md](../specs/2026-07-14-design-4-core.md)
-- 🟢 2026-07-14 — 인앱 디자인 3.0 대개편+행사 상품 매핑 (★배포완료·DDL 1 실행완료·SDK v0.3.10, 회전 2026-07-15 / 잔여=실측(팝폰 베드·직원·Harold)) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0714_inapp_design_3]]
-- 🟢 2026-07-13 (5) — 이메일 디자인 3.0+제품 링크 자동 매핑 (★배포완료, 회전 2026-07-15 / 잔여=ALTER design jsonb 실행 확인+실측 4건(직원)) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0713_email_design_3]]
-- 🟢 2026-07-14 (3) — 모바일 DM 직원 신고 8건 + 재발 방지 게이트 2종(속성 계약·동작 불변식·pre-push 훅) (★대부분 배포완료·DDL 0, 회전 2026-07-15 / 잔여=DB로그 정리 push+직원 실측 8건) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0714_mobile_dm_bugfix_6]]
-- 🟢 2026-07-12 (2) — 모바일 DM 강화 D-1~D-4: 발행비 402·야간 광고 가드·재타겟 4종·전환 라벨 (★배포완료, 회전 2026-07-14 / 잔여=실측 3건 직원) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0712_dm_reinforcement]]
-- 🟢 2026-07-10 (4) — 비토 게이트웨이 API 직접연동 테스트 통과 (LMS 3건 왕복, 회전 2026-07-14 / 다음=발송 경로 API 전환 검토) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0710_bito_api_direct_test]]
-- 🟢 2026-07-13 (4) — DM 텍스트 넣기 상품 URL·이미지 자동 매핑 + 타이포 구도 함정 정정 (★배포완료·DDL 0, 회전 2026-07-13) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0713_dm_design_3]]
-- 🟢 2026-07-13 (3) — 모바일 DM 디자인 3.0 대개편: 테마 8종·구도 10섹션·모션 2.0·서체 실로딩·골든 템플릿 12 (★배포완료·DDL 0, 회전 2026-07-13 / 잔여=실측 6건 직원) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0713_dm_design_3]]
-- 🟢 2026-07-13 (2) — AI Operator 소개 v3 시네마틱 + 미체감 근본 원인 종결(휴리스틱 캐시→?v=3 버스터 3곳) (★배포완료, 회전 2026-07-13) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0713_operator_intro_effects]]
-- 🟢 2026-07-12 (5·4·3·1) — 일괄강화: AI 학습메모리 전수점검(Codex 4R·주입 5종 화이트리스트)·인앱 P0-1~P2-2(SDK v0.3.8/9)·이메일 법준수 14건·자동마케팅 C1~5(DDL 완료) (★배포완료 / 잔여=실측 직원) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · [[project_2026_0712_ai_memory_full_reinforcement]] · [[project_2026_0712_inapp_full_reinforcement]]
-- 🟢 2026-07-11 (2·1) — 여정 전수점검 9건(0db38480·DDL 6) + 직원 디버깅 2건 + AI Operator 소개 11장(ece2f4a8) (★배포완료 / 잔여=실측 직원) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · [[project_2026_0711_journey_full_reinforcement]]
-- 🟢 2026-07-10(2) — 발송 대상 [타겟확인] 자동마케팅 카드+오퍼레이터 메인 (★배포완료, 회전 2026-07-12) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0710_send_target_list_three_phase]]
-- 🟢 2026-07-10(5) — 직원 리포트 3건: 여정 엔터·MDM 단축 URL(hlj.kr)·DM 히어로/가격 (★배포완료, 회전 2026-07-12) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0710_staff_reports_shortlink_dm]]
-- 🟢 2026-07-10(3) — 싱크에이전트 원격 관리 개편 P0~P2·v1.6.1 (★배포완료·릴리즈 등록 완료·트랙 종결, 회전 2026-07-12) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0710_sync_agent_remote_admin_audit]]
-- 🟢 2026-07-10 — 여정 "목표 달성 시 자동 종료"(goal_met)+옵션 UI 2단 (★배포완료, STATUS→archive 회전 2026-07-10) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0710_journey_goal_exit]]
-> 2026-07-09 이하 완료분 = [archive/INDEX.md](archive/INDEX.md) 카탈로그 경유 (날짜·증상어 grep). ★2026-07-21 회전: 07-01(4)·07-02(6)·07-07~09 통합. ★2026-07-22 회전: 07-04~07-09 인덱스 1줄 회전(원문은 각 project 파일 + TASKS_2026-07.md 무손실 보존).
+> 배포까지 끝나고 할 일이 없는 건은 여기 남기지 않는다. **아직 남은 것만** 적는다.
+> 경위·함정·수치 원문 = 각 memory 파일 + [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md). 여기에 재서술 금지(doc_ownership).
+> 위 활성 트랙(진행중·다음 세션)에 이미 있는 잔여는 중복 기재하지 않는다.
+
+| 건 | 남은 것 | 상세 |
+|---|---|---|
+| 0725 PAY 통계 발급명·대상ID | **배포 대기** + 커밋 시 신규파일 `packages/backend/src/utils/pay-stats.test.ts` git add | [[project_2026_0725_pay_stats_custnm_storeid]] |
+| 0724 DM 테스트 무과금 차단 | 서수란 실측 · 기존 running A/B 미발행 variant 점검 SQL | [[project_2026_0724_dm_test_no_charge_bypass]] |
+| 0723~24 PAY 에이전트 통계(발송ID·엑셀) | 서수란 실측 · 54/57 전환갭 확인 · billing 정산 반영 | [[project_2026_0723_pay_agent_stats_tabs]] |
+| 0722 모바일 DM 편집≠단말 | Harold 실측 | [[project_2026_0722_mobile_dm_editor_publish_parity]] |
+| 0722 카카오 템플릿 관리 | 화면 실측 (접수2 프론트 배포 대기) | [[project_2026_0722_kakao_template_mgmt_tickets]] |
+| 0722 영업용 테스트발송/저장 | 실측 | [[project_2026_0722_sales_test_send]] |
+| 0721 브랜드 학습 · DM 고아기능 배선 · 역할 격리+인앱 관리자 | **코드완료·배포 대기 3건** | [[project_2026_0721_brand_learning_consolidation]] · [[project_2026_0721_mobile_dm_feature_wiring]] · [[project_2026_0721_role_isolation_inapp_admin]] |
+| 0721 인앱 포스터 캐러셀 | 실기기·왕복 실측 | [[project_2026_0721_inapp_poster_carousel]] |
+| 0720~21 모바일 DM 제목 정합 | 실측(주황막대·노치·이벤트카드·인앱포스터) | [[project_2026_0720_mobile_dm_title_parity]] |
+| 0719~20 계절 템플릿 | 의류 안내 1줄 커밋·배포 | [[project_2026_0719_p4_image_studio]] |
+| 0717 인앱 중앙정렬 | 웹 실측(쿠폰정렬·허용표) + 앱 출시 후 실측 3종 | [[project_2026_0717_inapp_debug_session_incomplete]] |
+| 0716 DM 편집기 AI퍼스트 | 직원 실측 · M3 네이버 env 키 · M6 이메일·인앱 이식 | [[project_2026_0716_dm_editor_ai_first_redesign]] |
+| 0716 인앱 안전편집기 · 서체 자가호스팅 | 팝폰 앱 커밋·빌드(Harold) + 실기기 / 직원 실측 | [[project_2026_0716_inapp_universal_safe_editor]] · [[project_2026_0716_dm_email_font_selfhosting]] |
+| 0715 DM 한글주소 · DM bugfix5 | DDL 3건 확인 + 단말 링크 인식 실측 / 섹션메뉴 build:safe + 직원 실측 | [[project_2026_0715_dm_korean_alias]] · [[project_2026_0715_mobile_dm_bugfix_5]] |
+| 0713~15 디자인 3.0/4.0 · Operator 소개 v4 | Harold·직원 시각 실측 | [[project_2026_0713_operator_intro_effects]] |
+
+> 잔여 없는 완료분 + 2026-07-09 이하 = [archive/INDEX.md](archive/INDEX.md) → TASKS_YYYY-MM.md grep.
+> 회전 이력: 0721(07-01~09) · 0722(07-04~09) · **0725(완료 서술 전량 archive 위임 — STATUS에는 잔여만)**.
 
 ---
 
 ## 3) 진행 예정 작업 (TODO)
 
-> 완료분(D39·대시보드 리팩토링·AI 맞춤한줄 완료분·080·Sync Agent 완료분·보안 완료분·인비토AI 완료분) 원문 = [archive/DONE_LOG_2026.md](archive/DONE_LOG_2026.md) "STATUS §3 TODO 완료분 회전 (2026-07-07)" 절로 무손실 이동.
+> 완료분 원문 = [archive/DONE_LOG_2026.md](archive/DONE_LOG_2026.md) "STATUS §3 TODO 완료분 회전 (2026-07-07)" 절.
+> Sync Agent v1.6.1 = 2026-07-10 종결(이새 1.5.7 유지가 정상 — 자기교체 결함, 타 ERP 전환 때 신규 배포).
 
-### 🟡 잔여 — 직원 버그리포트 실동작 검증 (코드 수정 전체 완료)
-- [ ] **8차 B8-01~B8-13: 직원 실서비스 테스트** (app.hanjul.ai)
-- [ ] **9차 S9-04/S9-08: 발송결과 조회 성능 + sent_at 정확성 확인**
-- [ ] **D39 세션2 실동작 검증: 필터 UI + AI 보유필드 확인**
-
-### AI 맞춤한줄 Phase 2 (잔여)
-- [ ] 실서비스 통합 테스트 (실제 발송 확인) — Harold님 검증 대기
-
-### 카카오 알림톡 템플릿 관리 (Humuson API v2.1.1)
-- [ ] 고객사 관리자(app.hanjul.ai) 템플릿 CRUD + 검수 프로세스 + 발신프로필 조회 + 관리 UI
-- [ ] 슈퍼관리자(sys.hanjullo.com) 고객사별 Humuson 연동 설정 (humuson_user_id, uuid)
-- [ ] 서비스 사용자(hanjul.ai) 캠페인 발송 시 APR 상태 템플릿만 선택
-- [ ] 기술: 백엔드 프록시 /api/kakao-templates/*, DB kakao_templates 확장, 상태 전이 규칙
-- [ ] Phase 2: 이미지 업로드, 알림 수신자 관리, 발신프로필 그룹
-
-### 선불 요금제 Phase 1-B~2
-- [ ] Phase 1-B: KCP PG 연동 (카드결제만, 가상계좌 제외)
-- [ ] Phase 2: 입금감지 API 자동화
-
-### Sync Agent (잔여)
-- [x] v1.6.1 빌드+업로드+릴리즈 등록 — **2026-07-10 완료(Harold) — 종결**. 이새(1.5.7)=자기교체 결함으로 원격 업데이트 불가 → 2달 뒤 타 ERP 전환 때 새 에이전트 신규 배포(그때까지 1.5.7 유지가 정상)
-
-### 보안 (잔여)
-- [ ] 슈퍼관리자 IP 화이트리스트 설정
-- [ ] SSH 키 인증 전용 전환 (비밀번호 로그인 비활성화) — 선택
-
-### 인비토AI (잔여)
-- [ ] 데이터 충분히 축적 후 모델 학습 파이프라인 설계
-- [ ] 이용약관 제14조(데이터 활용) 배포 후 서비스 공지 (조항 신설은 2026-07-03 완료)
+- [ ] **직원 버그리포트 실동작 검증**: 8차 B8-01~B8-13(app.hanjul.ai) · 9차 S9-04/S9-08(발송결과 성능 + sent_at 정확성) · D39 세션2(필터 UI + AI 보유필드)
+- [ ] **AI 맞춤한줄 Phase 2**: 실서비스 통합 테스트(실제 발송) — Harold 검증 대기
+- [ ] **카카오 알림톡 템플릿 관리(Humuson API v2.1.1)**: 고객사 CRUD+검수+발신프로필 UI · 슈퍼 고객사별 연동 설정(humuson_user_id·uuid) · 발송 시 APR 상태만 선택 · 백엔드 프록시 `/api/kakao-templates/*`+kakao_templates 확장+상태 전이 규칙 · Phase 2(이미지 업로드·알림 수신자·발신프로필 그룹)
+- [ ] **선불 요금제**: Phase 1-B KCP PG 연동(카드결제만) → Phase 2 입금감지 API 자동화
+- [ ] **보안**: 슈퍼관리자 IP 화이트리스트 · SSH 키 인증 전용 전환(선택)
+- [ ] **인비토AI**: 데이터 축적 후 모델 학습 파이프라인 설계 · 이용약관 제14조 배포 후 서비스 공지(조항 신설 2026-07-03 완료)
 
 ---
 
-## 4) 가정 목록 (ASSUMPTION LEDGER)
-
-(아직 없음)
-
----
-
-## 5) 활성 리스크 상위 (1줄 요약 — 전체는 RISKS.md)
+## 4) 활성 리스크 상위 (1줄 요약 — 전체는 RISKS.md)
 
 - R1 타입 에러 배포 → 서버 크래시 (확률2·영향5) — 배포 전 tsc --noEmit 필수
 - R2 DB 파괴적 작업 데이터 유실 (확률2·영향5) — pg_dump 백업 후 작업
@@ -156,7 +108,7 @@
 
 ---
 
-## 6) 최근 결정 5건 (1줄 요약 — 전체는 DECISIONS.md)
+## 5) 최근 결정 5건 (1줄 요약 — 전체는 DECISIONS.md)
 
 - D78 (03-16) 프로 자동 스팸필터 테스트 + CT-09 spam-test-queue — 차단 시 자동 재생성(최대 2회)
 - D73 (03-14) 무료체험 PRO 게이팅 + 수신거부 브랜드 자동배정(CT-03) + 커스텀 라벨 UPSERT(CT-07)
@@ -167,6 +119,6 @@
 
 ---
 
-## 7) DONE LOG
+## 6) DONE LOG
 
-> 최근 완료는 §2 "최근 완료 인덱스"가 담당한다. 과거 DONE LOG(3월 이전 31건) + STATUS §3 완료분 회전(2026-07-07) 원문 = [archive/DONE_LOG_2026.md](archive/DONE_LOG_2026.md).
+> 최근 완료는 §2 "완료분 잔여"가 담당한다. 과거 DONE LOG(3월 이전 31건) + STATUS §3 완료분 회전(2026-07-07) 원문 = [archive/DONE_LOG_2026.md](archive/DONE_LOG_2026.md).

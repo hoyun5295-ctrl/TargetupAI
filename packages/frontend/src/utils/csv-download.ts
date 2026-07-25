@@ -37,6 +37,26 @@ export function downloadCsv(filename: string, headers: string[], rows: CsvCell[]
   URL.revokeObjectURL(url);
 }
 
+/**
+ * blob 응답(responseType:'blob') API의 오류 메시지 추출 — ★ 2026-07-25 신설.
+ * 서버가 400/503 JSON을 내도 blob이라 `err.response.data.error`가 안 잡혀 "다운로드 실패"만 뜨던 문제 해결.
+ * (에이전트 통계 엑셀의 기간 오류·PAY 미설정 안내가 사용자에게 그대로 보여야 한다.)
+ * 파싱 실패 시 fallback 반환.
+ */
+export async function extractBlobErrorMessage(err: any, fallback: string): Promise<string> {
+  try {
+    const data = err?.response?.data;
+    if (data instanceof Blob) {
+      const text = await data.text();
+      const parsed = JSON.parse(text);
+      return parsed?.error || fallback;
+    }
+    return data?.error || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 /** 파일명 안전화 — 캠페인명 등 임의 문자열에서 OS 금지 문자 제거 */
 export function safeCsvFilename(base: string, suffix: string): string {
   const cleaned = String(base || '').replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 40) || 'export';

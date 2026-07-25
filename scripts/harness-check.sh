@@ -24,9 +24,24 @@ if [ "$T" -gt 61440 ]; then
   FAIL=1
 fi
 
+# 2-1) 조기 경고 50KB (★2026-07-25 신설 — 벽에 부딪혀 급히 깎는 일 방지)
+#      상한(60KB)에 닿아서야 회전하면 매 세션 압축에 시간을 쓴다. 여유 10KB 남았을 때 미리 알린다.
+if [ "$T" -le 61440 ] && [ "$T" -gt 51200 ]; then
+  say "경고: 상시 로드 합계 ${T}B > 50KB — 상한(60KB)까지 여유가 줄었다. 급해지기 전에 회전·통폐합 검토."
+fi
+
 # 3) CLAUDE.md 단독 35KB 경고선 (팽창 감시 — 위반은 아님, 경고)
 if [ "$C" -gt 35840 ]; then
   say "경고: CLAUDE.md ${C}B > 35KB — 팽창 추세. 다음 정비 때 중복 룰 통폐합 검토."
+fi
+
+# 3-1) STATUS "완료분 잔여" 항목 수 상한 (★2026-07-25 신설 — 이 표가 재팽창의 진원지였다)
+#      완료 서술은 archive가 소유한다. STATUS에는 남은 일이 있는 건만 한 줄씩.
+D=$(awk '/^### 완료분 잔여/,/^## /' status/STATUS.md 2>/dev/null | grep -c '^| ' || echo 0)
+D=$((D > 1 ? D - 1 : 0)) # 헤더 1행만 제외 (구분선 |--- 는 '^| ' 에 애초에 안 걸린다)
+if [ "$D" -gt 20 ]; then
+  say "위반: 완료분 잔여 ${D}행 > 20행 — 실측이 끝난 건은 지우고, 서술은 archive/TASKS_YYYY-MM.md에 맡겨라."
+  FAIL=1
 fi
 
 # 4) LESSONS_META 5KB 상한 (매 답변 정독 문서 — 경량 유지가 전제)
@@ -38,7 +53,7 @@ fi
 
 # 5) 라우팅 표 25행 상한 (초과 = 문서 통폐합 먼저)
 R=$(awk '/^## 1\) 라우팅 표/,/^---$/' status/STATUS.md 2>/dev/null | grep -c '^| ' || echo 0)
-R=$((R > 2 ? R - 2 : 0)) # 헤더 2행 제외
+R=$((R > 1 ? R - 1 : 0)) # 헤더 1행만 제외 (구분선 |------ 는 '^| ' 에 애초에 안 걸린다 — 2를 빼면 1행씩 적게 세어 상한이 26으로 느슨해졌다. 2026-07-25 정정)
 if [ "$R" -gt 25 ]; then
   say "위반: 라우팅 표 ${R}행 > 25행 — 신규 등재 전 문서 통폐합 먼저."
   FAIL=1
@@ -74,6 +89,6 @@ if [ -f status/archive/INDEX.md ]; then
 fi
 
 if [ "$FAIL" = "0" ]; then
-  say "통과: STATUS ${S}B / CLAUDE ${C}B / 합계 ${T}B / META ${M}B / 라우팅 ${R}행 / INDEX 링크 정상"
+  say "통과: STATUS ${S}B / CLAUDE ${C}B / 합계 ${T}B / META ${M}B / 라우팅 ${R}행 / 완료잔여 ${D}행 / INDEX 링크 정상"
 fi
 exit $FAIL
