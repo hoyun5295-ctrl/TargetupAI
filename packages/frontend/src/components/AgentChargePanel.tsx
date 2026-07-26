@@ -40,6 +40,15 @@ export default function AgentChargePanel() {
   const [histStart, setHistStart] = useState('');
   const [histEnd, setHistEnd] = useState('');
   const [histLoading, setHistLoading] = useState(false);
+  const [histPage, setHistPage] = useState(1);
+  const [histTotal, setHistTotal] = useState(0);
+  const [histTotalPages, setHistTotalPages] = useState(1);
+  const HIST_PAGE_SIZE = 10;
+  // ★ 2026-07-26 원장 유입 정지 감지 — 62 pay-ingest-db는 강문희가 push하는 수신 DB다.
+  //   통계는 실시간인데 충전 원장이 0707 dump 이후 유입 0이었고, 화면은 그걸 최신인 양 보여줬다.
+  //   월 13~35건이 정상이라 14일 공백은 비정상 신호다.
+  const [latestFilledAt, setLatestFilledAt] = useState<string | null>(null);
+  const STALE_DAYS = 14;
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCount = useRef(0);
   // 멱등키 — 네트워크 오류(응답 유실)로 재시도해도 같은 키 재전송 = 서버가 중복 충전 차단 (Codex 7R-1).
@@ -66,11 +75,13 @@ export default function AgentChargePanel() {
     } catch { /* 대상 로드 실패 시 빈 목록 유지 */ }
   };
 
-  const loadHistory = async (override?: { sendId?: string; start?: string; end?: string }) => {
+  const loadHistory = async (override?: { sendId?: string; start?: string; end?: string; page?: number }) => {
     const sendId = override?.sendId ?? histSendId;
     const start = override?.start ?? histStart;
     const end = override?.end ?? histEnd;
-    const qs = new URLSearchParams({ limit: '100' });
+    // 조건이 바뀌면 1페이지로 돌아간다 — 3페이지를 보다 조건을 바꾸면 빈 화면이 나온다.
+    const page = override?.page ?? (override && ('sendId' in override || 'start' in override || 'end' in override) ? 1 : histPage);
+    const qs = new URLSearchParams({ limit: String(HIST_PAGE_SIZE), page: String(page) });
     if (sendId) qs.set('agentSendId', sendId);
     if (start) qs.set('startDate', start);
     if (end) qs.set('endDate', end);
@@ -80,6 +91,10 @@ export default function AgentChargePanel() {
       if (res.ok) {
         const d = await res.json();
         setHistory(Array.isArray(d.rows) ? d.rows : []);
+        setHistTotal(Number(d.total) || 0);
+        setLatestFilledAt(d.latestFilledAt || null);
+        setHistTotalPages(Math.max(1, Number(d.totalPages) || 1));
+        setHistPage(page);
       }
     } catch { /* 이력 로드 실패 시 기존 유지 */ }
     finally { setHistLoading(false); }
@@ -96,6 +111,14 @@ export default function AgentChargePanel() {
     targets.forEach((t) => m.set(t.company_id, t.company_name));
     return Array.from(m.entries()).map(([id, name]) => ({ id, name }));
   }, [targets]);
+
+  /** 원장 최신 시각으로부터 지난 일수. 값이 없으면 null(판단 불가 — 경고도 띄우지 않는다). */
+  const staleDays = useMemo(() => {
+    if (!latestFilledAt) return null;
+    const t = new Date(String(latestFilledAt).replace(' ', 'T')).getTime();
+    if (!Number.isFinite(t)) return null;
+    return Math.floor((Date.now() - t) / 86400000);
+  }, [latestFilledAt]);
 
   const idOptions = useMemo(
     () => (companyFilter ? targets.filter((t) => t.company_id === companyFilter) : targets),
@@ -417,16 +440,27 @@ export default function AgentChargePanel() {
       <div className="px-6 pb-5">
         <div className="mb-2 space-y-2">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-medium text-gray-500">충전 이력 (게이트웨이 원장)</p>
+            <p className="text-xs font-medium text-gray-500">
+              충전 이력 (게이트웨이 원장)
+              {histTotal > 0 && <span className="ml-1.5 text-gray-400">총 {histTotal.toLocaleString()}건</span>}
+              {latestFilledAt && <span className="ml-1.5 text-gray-400">· 원장 최신 {String(latestFilledAt).slice(0, 16)}</span>}
+            </p>
             <button type="button" onClick={() => loadHistory()} className="text-xs text-gray-400 hover:text-gray-600">새로고침</button>
           </div>
+          {staleDays !== null && staleDays >= STALE_DAYS && (
+            <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
+              <b>게이트웨이 충전 원장이 {String(latestFilledAt).slice(0, 10)} 이후 갱신되지 않고 있습니다({staleDays}일째).</b>
+              {' '}이 목록은 그 시점까지만 담고 있어 실제 충전과 다를 수 있습니다 — 통장·게이트웨이 원본과 대조하기 전까지 잔액 판단 근거로 쓰지 마십시오.
+            </div>
+          )}
+
           {/* ★ 2026-07-26 발송ID·기간 필터 — 이력이 길어져 눈으로 찾기 어렵다는 운영 지적 */}
           <div className="flex flex-wrap items-center gap-2">
             <div className="min-w-[220px] flex-1">
               <SearchableSelect
                 options={targets.map((t) => ({ value: t.agent_send_id, label: targetLabel(t) }))}
                 value={histSendId}
-                onChange={(value) => { setHistSendId(value); loadHistory({ sendId: value }); }}
+                onChange={(value) => { setHistSendId(value); loadHistory({ sendId: value, page: 1 }); }}
                 placeholder="발송ID·회사명 검색..."
                 emptyLabel="전체 발송ID"
                 className="w-full"
@@ -447,7 +481,7 @@ export default function AgentChargePanel() {
             />
             <button
               type="button"
-              onClick={() => loadHistory()}
+              onClick={() => loadHistory({ page: 1 })}
               disabled={histLoading}
               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-lg text-xs font-medium shrink-0"
             >
@@ -456,7 +490,7 @@ export default function AgentChargePanel() {
             {(histSendId || histStart || histEnd) && (
               <button
                 type="button"
-                onClick={() => { setHistSendId(''); setHistStart(''); setHistEnd(''); loadHistory({ sendId: '', start: '', end: '' }); }}
+                onClick={() => { setHistSendId(''); setHistStart(''); setHistEnd(''); loadHistory({ sendId: '', start: '', end: '', page: 1 }); }}
                 className="px-2.5 py-1.5 text-xs text-gray-400 hover:text-gray-600 shrink-0"
               >
                 초기화
@@ -497,6 +531,27 @@ export default function AgentChargePanel() {
             </tbody>
           </table>
         </div>
+        {histTotalPages > 1 && (
+          <div className="mt-2 flex items-center justify-center gap-2">
+            <button
+              type="button"
+              disabled={histPage <= 1 || histLoading}
+              onClick={() => loadHistory({ page: histPage - 1 })}
+              className="px-2.5 py-1 rounded border border-gray-200 text-xs disabled:opacity-30"
+            >
+              이전
+            </button>
+            <span className="text-xs text-gray-500 tabular-nums">{histPage} / {histTotalPages}</span>
+            <button
+              type="button"
+              disabled={histPage >= histTotalPages || histLoading}
+              onClick={() => loadHistory({ page: histPage + 1 })}
+              className="px-2.5 py-1 rounded border border-gray-200 text-xs disabled:opacity-30"
+            >
+              다음
+            </button>
+          </div>
+        )}
         <p className="mt-1.5 text-[10px] italic text-gray-300">Data source — 발송 게이트웨이 충전 원장 실시간 조회 (저장 없음)</p>
       </div>
     </div>

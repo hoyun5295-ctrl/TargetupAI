@@ -26,7 +26,7 @@ import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsChannel
 // ★ 2026-07-23: 슈퍼관리자 발송통계 웹/에이전트 구분 — 에이전트(엔진) 통계 CT 병행 반환
 import {
   queryPayAgentStatsAllCompanies, queryPayAgentStoreBreakdown, validateStatsDateRange, isPayStatsConfigured,
-  parseAgentCharges, insertAgentCharges, getAgentChargeStatus, listAgentCharges, findGatewayCharges, matchHealWindow,
+  parseAgentCharges, insertAgentCharges, getAgentChargeStatus, listAgentCharges, countAgentCharges, latestAgentChargeAt, findGatewayCharges, matchHealWindow,
 } from '../utils/pay-stats';
 import { handleDbMigrationError } from '../utils/db-migration-error';
 import { sendSystemAlert } from '../utils/system-alert';
@@ -3391,13 +3391,19 @@ router.get('/agent-charges/status', authenticate, requireSuperAdmin, async (req:
 // 최근 충전 이력 (회사명은 PG 매핑으로 라벨링 — 매핑 없는 ID는 고아 표시)
 router.get('/agent-charges', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
-    // ★ 2026-07-26 발송ID·기간 필터 — 이력이 길어져 눈으로 찾기 어렵다는 운영 지적.
-    const rows = await listAgentCharges({
-      limit: Number(req.query.limit) || 30,
+    // ★ 2026-07-26 발송ID·기간 필터 + 페이징 — 이력이 길게 나열돼 읽기 어렵다는 운영 지적.
+    const filter = {
       agentSendId: typeof req.query.agentSendId === 'string' ? req.query.agentSendId : undefined,
       startDate: typeof req.query.startDate === 'string' ? req.query.startDate : undefined,
       endDate: typeof req.query.endDate === 'string' ? req.query.endDate : undefined,
-    });
+    };
+    const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 200);
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const [rows, total, latestFilledAt] = await Promise.all([
+      listAgentCharges({ ...filter, limit, offset: (page - 1) * limit }),
+      countAgentCharges(filter),
+      latestAgentChargeAt(),
+    ]);
     const ids = Array.from(new Set(rows.map((r) => r.agentSendId).filter(Boolean)));
     const nameMap = new Map<string, string>();
     if (ids.length > 0) {
@@ -3407,7 +3413,14 @@ router.get('/agent-charges', authenticate, requireSuperAdmin, async (req: Reques
       );
       for (const r of named.rows as any[]) nameMap.set(String(r.agent_send_id), String(r.company_name || ''));
     }
-    return res.json({ rows: rows.map((r) => ({ ...r, companyName: nameMap.get(r.agentSendId) || null })) });
+    return res.json({
+      rows: rows.map((r: any) => ({ ...r, companyName: nameMap.get(r.agentSendId) || null })),
+      total,
+      page,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      // ★ 2026-07-26 원장 유입이 멈췄는지 화면이 알 수 있게 함께 내린다(필터 무관 전체 최신).
+      latestFilledAt,
+    });
   } catch (error) {
     console.error('에이전트 충전 이력 조회 실패:', error);
     return res.status(500).json({ error: '이력 조회 실패' });

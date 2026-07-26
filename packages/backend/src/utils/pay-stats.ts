@@ -1236,12 +1236,50 @@ export async function findGatewayCharges(inputs: AgentChargeInput[], center: Dat
 
 export interface AgentChargeListFilter {
   limit?: number;
+  /** 건너뛸 행 수(페이징) */
+  offset?: number;
   /** 발송ID 정확 일치 (화면 검색은 프론트 셀렉트에서 고른 값이라 정확 일치로 충분) */
   agentSendId?: string;
   /** YYYY-MM-DD (그날 00:00:00부터) */
   startDate?: string;
   /** YYYY-MM-DD (그날 23:59:59까지) */
   endDate?: string;
+}
+
+/** (순수) 필터 → WHERE 조각. 목록·건수가 **같은 조건**을 쓰도록 한 곳에서 만든다. */
+function buildChargeFilterSql(f: AgentChargeListFilter): { where: string; params: any[] } {
+  const conds: string[] = [];
+  const params: any[] = [];
+  const sendId = String(f.agentSendId || '').trim();
+  if (sendId) { conds.push('StoreId = ?'); params.push(sendId); }
+  if (f.startDate && DATE_ONLY.test(String(f.startDate))) { conds.push('FillDtTm >= ?'); params.push(`${f.startDate} 00:00:00`); }
+  if (f.endDate && DATE_ONLY.test(String(f.endDate))) { conds.push('FillDtTm <= ?'); params.push(`${f.endDate} 23:59:59`); }
+  return { where: conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '', params };
+}
+
+/**
+ * 원장 전체의 최신 충전 시각 — **유입이 멈췄는지 드러내는 값.** (★ 2026-07-26)
+ *
+ * 62 `pay-ingest-db`는 강문희가 push하는 수신 DB다. 통계(`RSRM_SalesStts`)는 실시간으로 들어오지만
+ * 충전 원장이 함께 오는지는 별개다 — 2026-07-26 실측에서 **0707 dump 이후 게이트웨이 충전 유입이 0**이었다.
+ * 그동안 화면은 멈춘 데이터를 최신인 양 보여줬고, 통장과 직접 대조하기 전까지 아무도 몰랐다.
+ * 필터와 무관하게 원장 전체를 본다 — "이 조건에 없다"가 아니라 "원장 자체가 멈췄다"를 알려야 한다.
+ */
+export async function latestAgentChargeAt(): Promise<string | null> {
+  const pool = getPool();
+  if (!pool) return null;
+  const [rows] = await pool.query(`SELECT MAX(FillDtTm) AS latest FROM RSRM_FillAmtHist`);
+  const v = (rows as any[])[0]?.latest;
+  return v ? String(v) : null;
+}
+
+/** 필터에 걸리는 전체 충전 건수 — 페이징 표시용. 목록과 **같은 조건**을 쓴다. */
+export async function countAgentCharges(filter: AgentChargeListFilter = {}): Promise<number> {
+  const pool = getPool();
+  if (!pool) return 0;
+  const { where, params } = buildChargeFilterSql(filter || {});
+  const [rows] = await pool.query(`SELECT COUNT(*) AS cnt FROM RSRM_FillAmtHist ${where}`, params);
+  return Number((rows as any[])[0]?.cnt) || 0;
 }
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
@@ -1257,17 +1295,12 @@ export async function listAgentCharges(filter: number | AgentChargeListFilter = 
   if (!pool) return [];
   const f: AgentChargeListFilter = typeof filter === 'number' ? { limit: filter } : (filter || {});
   const lim = Math.min(Math.max(Math.floor(Number(f.limit)) || 30, 1), 200);
+  const off = Math.max(Math.floor(Number(f.offset)) || 0, 0);
+  const { where, params } = buildChargeFilterSql(f);
 
-  const conds: string[] = [];
-  const params: any[] = [];
-  const sendId = String(f.agentSendId || '').trim();
-  if (sendId) { conds.push('StoreId = ?'); params.push(sendId); }
-  if (f.startDate && DATE_ONLY.test(String(f.startDate))) { conds.push('FillDtTm >= ?'); params.push(`${f.startDate} 00:00:00`); }
-  if (f.endDate && DATE_ONLY.test(String(f.endDate))) { conds.push('FillDtTm <= ?'); params.push(`${f.endDate} 23:59:59`); }
-  const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
-
+  // SeqNo는 채번 유일값이라 정렬이 결정적이다 — LIMIT/OFFSET 청크에 tie-breaker가 따로 필요 없다(D150-4).
   const [rows] = await pool.query(
-    `SELECT SeqNo, StoreId, FillAmt, FillDtTm, RsApplyFlag, RsApplyDtTm FROM RSRM_FillAmtHist ${where} ORDER BY SeqNo DESC LIMIT ${lim}`,
+    `SELECT SeqNo, StoreId, FillAmt, FillDtTm, RsApplyFlag, RsApplyDtTm FROM RSRM_FillAmtHist ${where} ORDER BY SeqNo DESC LIMIT ${lim} OFFSET ${off}`,
     params,
   );
   return (rows as any[]).map(toChargeRow);
