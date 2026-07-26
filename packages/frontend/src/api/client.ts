@@ -102,7 +102,10 @@ export const billingApi = {
   updateStatus: (id: string, status: string) => api.put(`/admin/billing/invoices/${id}/status`, { status }),
   getPdf: (id: string) => api.get(`/admin/billing/invoices/${id}/pdf`),
   // 정산
-  generateBilling: (data: { company_id: string; user_id?: string; billing_start: string; billing_end: string }) =>
+  // ★ 2026-07-26 발행 단위(scope) — 단일 계정 지정(user_id)은 서버가 422로 차단한다
+  //   (테스트·스팸·에이전트·크레딧이 빠진 청구서를 만들던 옛 방식). 계정별은 scope='by_user'로
+  //   회사 전체가 계정 장 N + 공통 장 1 묶음으로 나온다.
+  generateBilling: (data: { company_id: string; scope?: 'combined' | 'by_user'; billing_start: string; billing_end: string }) =>
     api.post('/admin/billing/generate', data),
   getBillings: (params?: { company_id?: string; year?: number; status?: string }) =>
     api.get('/admin/billing/list', { params }),
@@ -110,11 +113,21 @@ export const billingApi = {
     api.get(`/admin/billing/${id}/items`),
   updateBillingStatus: (id: string, status: string) =>
     api.put(`/admin/billing/${id}/status`, { status }),
-  deleteBilling: (id: string) =>
-    api.delete(`/admin/billing/${id}`),
+  // ★ 2026-07-26 확정·수금·메일 발송분은 서버가 사유를 요구한다(BILLING_DELETE_NEEDS_REASON 422).
+  //   묶음(batch) 발행분은 서버가 묶음 전체를 원자적으로 지운다.
+  deleteBilling: (id: string, reason?: string) =>
+    api.delete(`/admin/billing/${id}`, reason ? { data: { reason } } : undefined),
   getCompanyUsers: (companyId: string) =>
     api.get(`/admin/billing/company-users/${companyId}`),
-  sendBillingEmail: (id: string, data: { to: string; subject: string; body_html: string }) =>
+  // ★ 2026-07-26 본문(body_html) 전송 폐기 — 서버가 `billing_items`에서 항목표를 만들고
+  //   정합 검사(BILLING_ITEM_HEADER_MISMATCH)를 통과한 본문만 보낸다. 화면이 만든 본문을 넘기면
+  //   그 검사를 우회해 항목 합계가 안 맞는 청구서가 고객에게 나간다(회수 불가).
+  //   수신자·제목은 그 자리에서 고칠 수 있으므로 그대로 넘긴다.
+  //   `resend`는 이미 발송된 정산서를 다시 보낼 때만 true — 서버가 409(BILLING_ALREADY_EMAILED)로
+  //   한 번 되돌려 확인을 받는다(같은 청구서가 확인 없이 두 번 나가는 것을 막는다).
+  //   `resend_of`는 그 409에서 받은 발송 시각이다. 확인을 **그 이력에 묶어** 두 사람이 동시에
+  //   확인 화면을 보고 있을 때 뒤늦은 클릭이 남의 발송을 못 보고 또 보내는 것을 막는다.
+  sendBillingEmail: (id: string, data: { to: string; subject: string; resend?: boolean; resend_of?: string }) =>
     api.post(`/admin/billing/${id}/send-email`, data),
 };
 

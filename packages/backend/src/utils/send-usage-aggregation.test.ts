@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { rollupUsageByPeriod, USAGE_TYPE_LABEL, MSG_TYPE_TO_USAGE_KEY, resolveBillingUnitPrices, buildBillingTotals, findUnbillableUsageKeys, billingLogMonths, type UsageDayData } from './send-usage-aggregation';
+import {
+  agentUsageKey, AGENT_MSG_TYPE_TO_USAGE_KEY, rollupAgentRowsForBilling, findUnbillableBillingRows,
+  diffBillingRowsVsDayData, sortBillingUsageRows, priceBillingRows, toDayKey,
+  billingRowKey, resolveBillingUnitPricesDetailed, findUnsetPricedTypes, summarizeBlockList,
+  nullifyUnknownUserIds, checkBillingAmountIdentity, chunkArray,
+  splitBillingSheets, checkSheetSumIdentity, buildPlanBillingItems,
+  type BillingUsageRow, type AgentUnitPriceRow, type PricedBillingItem,
+} from './send-usage-aggregation';
+import type { PayAgentStoreRow } from './pay-stats';
 
 describe('rollupUsageByPeriod — 청구 사용량 일자 집계 → 기간×유형 롤업 (2026-07-25)', () => {
   const day = (t: number, s: number, f = 0, p = 0) => ({ total: t, success: s, fail: f, pending: p });
@@ -275,5 +284,727 @@ describe('resolveBillingUnitPrices — 청구 단가 스냅샷 (2026-07-25)', ()
     for (const k of ['SMS', 'LMS', 'MMS', 'KAKAO', 'TEST_SMS', 'TEST_LMS', 'SPAM_SMS', 'SPAM_LMS']) {
       expect(p[k]).toBeDefined();
     }
+  });
+});
+
+// ============================================================
+//  청구용 통합 집계 (2026-07-26 — 정산 재구성 ①)
+// ============================================================
+
+describe('splitBillingSheets — 발행 단위 장 분할 (2026-07-26)', () => {
+  const pi = (o: Partial<PricedBillingItem>): PricedBillingItem => ({
+    channel: 'web', itemDate: '2026-07-01', typeKey: 'SMS', userId: 'u1', agentSendId: null,
+    total: 0, success: 0, fail: 0, pending: 0, agentId: null, unitPrice: 9, amount: 0, ...o,
+  });
+
+  it('합산이면 한 장에 전부 들어간다', () => {
+    const sheets = splitBillingSheets([pi({ success: 10, amount: 90 }), pi({ channel: 'test', typeKey: 'TEST_SMS', amount: 18 })], 'combined');
+    expect(sheets).toHaveLength(1);
+    expect(sheets[0].sheetScope).toBe('combined');
+    expect(sheets[0].amount).toBe(108);
+    expect(sheets[0].carriesCompanyItems).toBe(true);
+  });
+
+  it('계정별이면 계정 장 N개 + 공통 장 1개', () => {
+    const sheets = splitBillingSheets([
+      pi({ userId: 'u1', success: 10, amount: 90 }),
+      pi({ userId: 'u2', success: 5, amount: 45 }),
+      pi({ channel: 'test', userId: 'u1', typeKey: 'TEST_SMS', success: 2, amount: 18 }),
+    ], 'by_user');
+    expect(sheets.map((s) => s.sheetScope)).toEqual(['by_user', 'by_user', 'common']);
+    expect(sheets[0].userId).toBe('u1');
+    expect(sheets[0].amount).toBe(90);
+    expect(sheets[2].amount).toBe(18); // 테스트는 계정이 있어도 공통 장
+  });
+
+  it('회사 단위 항목을 싣는 장은 하나뿐이다', () => {
+    const sheets = splitBillingSheets([pi({ userId: 'u1' }), pi({ userId: 'u2' })], 'by_user');
+    expect(sheets.filter((s) => s.carriesCompanyItems)).toHaveLength(1);
+    expect(sheets.filter((s) => s.carriesCompanyItems)[0].sheetScope).toBe('common');
+  });
+
+  it('에이전트 발송분은 공통 장으로 — 계정 축이 없다', () => {
+    const sheets = splitBillingSheets([
+      pi({ channel: 'agent', userId: null, agentSendId: 'D0018', typeKey: 'LMS', success: 100, amount: 2200 }),
+      pi({ userId: 'u1', success: 10, amount: 90 }),
+    ], 'by_user');
+    expect(sheets.find((s) => s.sheetScope === 'common')!.amount).toBe(2200);
+  });
+
+  it('계정 미상 웹 발송도 공통 장으로 — 삭제된 계정 방어와 맞물린다', () => {
+    const sheets = splitBillingSheets([pi({ userId: null, success: 3, amount: 27 })], 'by_user');
+    expect(sheets).toHaveLength(1);
+    expect(sheets[0].sheetScope).toBe('common');
+    expect(sheets[0].amount).toBe(27);
+  });
+
+  it('장별 유형 수량이 그 장 것만 담는다 — billings 헤더 컬럼에 그대로 들어간다', () => {
+    const sheets = splitBillingSheets([
+      pi({ userId: 'u1', typeKey: 'SMS', success: 10 }),
+      pi({ userId: 'u1', typeKey: 'LMS', success: 4 }),
+      pi({ userId: 'u2', typeKey: 'SMS', success: 7 }),
+    ], 'by_user');
+    expect(sheets[0].totals.SMS).toBe(10);
+    expect(sheets[0].totals.LMS).toBe(4);
+    expect(sheets[1].totals.SMS).toBe(7);
+  });
+
+  it('계정 장 정렬이 결정적이다 — 같은 입력이면 같은 순서', () => {
+    const rows = [pi({ userId: 'u2' }), pi({ userId: 'u1' })];
+    expect(splitBillingSheets(rows, 'by_user').map((s) => s.userId)).toEqual(['u1', 'u2', null]);
+  });
+
+  it('빈 입력에 안전하다', () => {
+    expect(splitBillingSheets([], 'combined')[0].amount).toBe(0);
+    expect(splitBillingSheets(undefined as any, 'by_user')).toHaveLength(1);
+  });
+});
+
+describe('checkSheetSumIdentity — 분산 N장 합 = 합산 1장 (2026-07-26)', () => {
+  const sheet = (amount: number) => ({
+    sheetScope: 'by_user' as const, userId: 'u', items: [], totals: {}, amount, carriesCompanyItems: false,
+  });
+
+  it('안분이 없으므로 정수 덧셈으로 정확히 맞는다', () => {
+    expect(checkSheetSumIdentity([sheet(90), sheet(45), sheet(18)], 4000, 4153).ok).toBe(true);
+  });
+
+  it('한 장이 빠지면 잡힌다 — 분산 발행이 회사 총액을 다 담았는지 보는 유일한 장치', () => {
+    const r = checkSheetSumIdentity([sheet(90), sheet(45)], 4000, 4153);
+    expect(r.ok).toBe(false);
+    expect(r.diff).toBe(-18);
+  });
+
+  it('AI 크레딧을 어느 장도 안 실으면 잡힌다', () => {
+    expect(checkSheetSumIdentity([sheet(153)], 0, 4153).ok).toBe(false);
+  });
+
+  it('빈 입력에 안전하다', () => {
+    expect(checkSheetSumIdentity([], 0, 0).ok).toBe(true);
+  });
+});
+
+describe('nullifyUnknownUserIds — 삭제된 계정 방어 (2026-07-26)', () => {
+  const it0 = (userId: string | null) => ({ userId, amount: 100 });
+
+  it('남아 있는 계정은 그대로', () => {
+    const { items, unknownUserIds } = nullifyUnknownUserIds([it0('u1')], new Set(['u1']));
+    expect(items[0].userId).toBe('u1');
+    expect(unknownUserIds).toEqual([]);
+  });
+
+  it('삭제된 계정은 null로 내리고 목록으로 돌려준다 — 청구서 전체를 막지 않는다', () => {
+    const { items, unknownUserIds } = nullifyUnknownUserIds([it0('gone'), it0('u1')], new Set(['u1']));
+    expect(items[0].userId).toBeNull();
+    expect(items[1].userId).toBe('u1');
+    expect(unknownUserIds).toEqual(['gone']);
+  });
+
+  it('금액은 건드리지 않는다 — 계정은 표시 축이지 금액 축이 아니다', () => {
+    const { items } = nullifyUnknownUserIds([it0('gone')], new Set());
+    expect(items[0].amount).toBe(100);
+  });
+
+  it('이미 null인 행은 미상 목록에 넣지 않는다', () => {
+    const { unknownUserIds } = nullifyUnknownUserIds([it0(null)], new Set());
+    expect(unknownUserIds).toEqual([]);
+  });
+
+  it('같은 계정이 여러 행이어도 목록에는 한 번만', () => {
+    const { unknownUserIds } = nullifyUnknownUserIds([it0('gone'), it0('gone')], new Set());
+    expect(unknownUserIds).toEqual(['gone']);
+  });
+
+  it('빈 입력에 안전하다', () => {
+    expect(nullifyUnknownUserIds([], new Set()).items).toEqual([]);
+    expect(nullifyUnknownUserIds(undefined as any, new Set()).items).toEqual([]);
+  });
+});
+
+describe('checkBillingAmountIdentity — 상세합 + 크레딧 = 공급가액 (2026-07-26)', () => {
+  it('맞으면 ok', () => {
+    const r = checkBillingAmountIdentity([{ amount: 900 }, { amount: 22000 }], 4000, 26900);
+    expect(r.ok).toBe(true);
+    expect(r.diff).toBe(0);
+  });
+
+  it('에이전트 금액이 헤더에만 들어가면 잡힌다 — 실제로 있었던 증상', () => {
+    // 웹 900 + 에이전트 22,000인데 항목표에는 웹만 있고 공급가액에는 둘 다 들어간 상태
+    const r = checkBillingAmountIdentity([{ amount: 900 }], 0, 22900);
+    expect(r.ok).toBe(false);
+    expect(r.diff).toBe(-22000);
+  });
+
+  it('AI 크레딧을 빼먹으면 잡힌다 — billing_items에 크레딧 행이 없다', () => {
+    expect(checkBillingAmountIdentity([{ amount: 900 }], 0, 4900).ok).toBe(false);
+  });
+
+  it('상세가 비고 크레딧만 있어도 성립한다', () => {
+    expect(checkBillingAmountIdentity([], 4000, 4000).ok).toBe(true);
+  });
+
+  it('전부 0이면 성립한다 — 발송 0건 회사', () => {
+    expect(checkBillingAmountIdentity([], 0, 0).ok).toBe(true);
+  });
+
+  it('값이 깨져도 NaN으로 통과시키지 않는다', () => {
+    const r = checkBillingAmountIdentity([{ amount: 'abc' as any }], 0, 100);
+    expect(r.ok).toBe(false);
+    expect(Number.isFinite(r.itemsSum)).toBe(true);
+  });
+});
+
+describe('chunkArray — PG 파라미터 상한 회피 (2026-07-26)', () => {
+  it('상한 이하면 한 덩어리', () => {
+    expect(chunkArray([1, 2, 3], 1000)).toEqual([[1, 2, 3]]);
+  });
+
+  it('나눠도 전체 개수가 보존된다 — 한 배치가 조용히 빠지면 안 된다', () => {
+    const rows = Array.from({ length: 4682 }, (_, i) => i);
+    const out = chunkArray(rows, 1000);
+    expect(out).toHaveLength(5);
+    expect(out.flat()).toHaveLength(4682);
+    expect(out.flat()).toEqual(rows);
+  });
+
+  it('한 배치가 파라미터 상한을 넘지 않는다 — 14컬럼 × 1,000행 = 14,000개', () => {
+    const rows = Array.from({ length: 4682 }, (_, i) => i);
+    for (const b of chunkArray(rows, 1000)) expect(b.length * 14).toBeLessThan(65535);
+  });
+
+  it('빈 배열·잘못된 크기에 안전하다', () => {
+    expect(chunkArray([], 1000)).toEqual([]);
+    expect(chunkArray(undefined as any, 1000)).toEqual([]);
+    expect(chunkArray([1, 2], 0)).toEqual([[1], [2]]);
+  });
+});
+
+describe('billingRowKey — 구분자 충돌 차단 (2026-07-26)', () => {
+  const r = (o: Partial<BillingUsageRow>): BillingUsageRow => ({
+    channel: 'agent', itemDate: '2026-07-01', typeKey: 'SMS', userId: null, agentSendId: 'A',
+    total: 0, success: 0, fail: 0, pending: 0, ...o,
+  });
+
+  it('파이프가 섞여도 서로 다른 행은 다른 키다 — 옛 문자열 연결에서는 같은 키였다', () => {
+    const a = billingRowKey(r({ agentSendId: 'A', typeKey: 'B|SMS' }));
+    const b = billingRowKey(r({ agentSendId: 'A|B', typeKey: 'SMS' }));
+    expect(a).not.toBe(b);
+  });
+
+  it('같은 내용이면 같은 키다', () => {
+    expect(billingRowKey(r({ success: 1 }))).toBe(billingRowKey(r({ success: 999 })));
+  });
+
+  it('채널이 다르면 다른 키다 — 옛 에이전트 키에는 채널 접두가 빠져 있었다', () => {
+    expect(billingRowKey(r({ channel: 'web', agentSendId: null, userId: 'u1' })))
+      .not.toBe(billingRowKey(r({ channel: 'test', agentSendId: null, userId: 'u1' })));
+  });
+
+  it('계정 null과 빈 문자열을 같게 본다 — 두 값이 같은 "계정 미상"이다', () => {
+    expect(billingRowKey(r({ channel: 'web', agentSendId: null, userId: null })))
+      .toBe(billingRowKey(r({ channel: 'web', agentSendId: null, userId: '' })));
+  });
+});
+
+describe('resolveBillingUnitPricesDetailed — 미설정 유형키 색출 (2026-07-26)', () => {
+  it('전부 설정돼 있으면 미설정 없음', () => {
+    const { unsetKeys } = resolveBillingUnitPricesDetailed({
+      cost_per_sms: 9, cost_per_lms: 27, cost_per_mms: 90, cost_per_kakao: 8,
+    });
+    expect(unsetKeys).toEqual([]);
+  });
+
+  it('MMS만 비면 MMS만 잡힌다', () => {
+    const { prices, unsetKeys } = resolveBillingUnitPricesDetailed({
+      cost_per_sms: 9, cost_per_lms: 27, cost_per_mms: null, cost_per_kakao: 8,
+    });
+    expect(unsetKeys).toEqual(['MMS']);
+    expect(prices.MMS).toBe(0); // 값은 기존과 같다 — 막는 건 게이트 쪽
+  });
+
+  it('명시적 0원은 미설정이 아니다', () => {
+    const { unsetKeys } = resolveBillingUnitPricesDetailed({
+      cost_per_sms: 0, cost_per_lms: '0.00', cost_per_mms: 0, cost_per_kakao: 0,
+    });
+    expect(unsetKeys).toEqual([]);
+  });
+
+  it('테스트 단가는 상속이 살아 있으면 미설정이 아니다 — 상속은 설계된 동작', () => {
+    const { unsetKeys } = resolveBillingUnitPricesDetailed({
+      cost_per_sms: 9, cost_per_lms: 27, cost_per_mms: 90, cost_per_kakao: 8,
+      cost_per_test_sms: null, cost_per_test_lms: null,
+    });
+    expect(unsetKeys).toEqual([]);
+  });
+
+  it('자기도 비고 상속원도 비면 테스트·스팸까지 잡힌다', () => {
+    const { unsetKeys } = resolveBillingUnitPricesDetailed({ cost_per_mms: 90, cost_per_kakao: 8 });
+    expect(unsetKeys).toEqual(['SMS', 'LMS', 'TEST_SMS', 'TEST_LMS', 'SPAM_SMS', 'SPAM_LMS']);
+  });
+
+  it('기존 함수와 단가 값이 같다 — 시그니처 호환', () => {
+    const row = { cost_per_sms: 9, cost_per_lms: 27, cost_per_mms: null, cost_per_kakao: 8 };
+    expect(resolveBillingUnitPricesDetailed(row).prices).toEqual(resolveBillingUnitPrices(row));
+  });
+});
+
+describe('findUnsetPricedTypes — 미설정 단가로 실제 발송된 유형만 (2026-07-26)', () => {
+  const r = (o: Partial<BillingUsageRow>): BillingUsageRow => ({
+    channel: 'web', itemDate: '2026-07-01', typeKey: 'MMS', userId: 'u1', agentSendId: null,
+    total: 0, success: 0, fail: 0, pending: 0, ...o,
+  });
+
+  it('미설정 유형에 성공이 있으면 잡힌다', () => {
+    expect(findUnsetPricedTypes(['MMS'], [r({ total: 1200, success: 1000 })]))
+      .toEqual([{ key: 'MMS', success: 1000, total: 1200 }]);
+  });
+
+  it('성공 0이면 막지 않는다 — 안 쓰는 유형까지 막으면 발행이 이유 없이 멈춘다', () => {
+    expect(findUnsetPricedTypes(['MMS'], [r({ total: 5, success: 0, fail: 5 })])).toEqual([]);
+  });
+
+  it('설정된 유형은 잡지 않는다', () => {
+    expect(findUnsetPricedTypes(['MMS'], [r({ typeKey: 'SMS', success: 100 })])).toEqual([]);
+  });
+
+  it('에이전트 행은 대상이 아니다 — 발송ID별 단가라 축이 다르다', () => {
+    expect(findUnsetPricedTypes(['LMS'], [r({ channel: 'agent', typeKey: 'LMS', userId: null, agentSendId: 'D0018', success: 596968 })]))
+      .toEqual([]);
+  });
+
+  it('여러 날짜가 합산된다', () => {
+    const out = findUnsetPricedTypes(['MMS'], [
+      r({ total: 10, success: 8 }),
+      r({ itemDate: '2026-07-02', total: 5, success: 5 }),
+    ]);
+    expect(out).toEqual([{ key: 'MMS', success: 13, total: 15 }]);
+  });
+
+  it('빈 입력에 안전하다', () => {
+    expect(findUnsetPricedTypes([], [])).toEqual([]);
+    expect(findUnsetPricedTypes(undefined as any, undefined as any)).toEqual([]);
+  });
+});
+
+describe('summarizeBlockList — 토스트를 뚫지 않게 절단 (2026-07-26)', () => {
+  it('상한 이하면 그대로', () => {
+    expect(summarizeBlockList(['A', 'B', 'C'])).toBe('A, B, C');
+  });
+
+  it('상한을 넘으면 상위 5건 + 외 N건', () => {
+    const ids = Array.from({ length: 283 }, (_, i) => `ID${i}`);
+    expect(summarizeBlockList(ids)).toBe('ID0, ID1, ID2, ID3, ID4 외 278건');
+  });
+
+  it('빈 값은 걸러진다', () => {
+    expect(summarizeBlockList(['A', '', 'B'])).toBe('A, B');
+    expect(summarizeBlockList([])).toBe('');
+    expect(summarizeBlockList(undefined as any)).toBe('');
+  });
+});
+
+describe('toDayKey — 드라이버가 준 날짜값 → YYYY-MM-DD (2026-07-26 밀림 정정)', () => {
+  it('로컬 자정 Date의 달력일을 그대로 돌려준다 — toISOString()이면 KST에서 하루 밀렸다', () => {
+    // 서버 실측: mysql2가 DATE('2026-07-15')를 `Wed Jul 15 2026 00:00:00 GMT+0900`로 준다.
+    // 옛 구현은 toISOString().slice(0,10) = '2026-07-14'였다.
+    expect(toDayKey(new Date(2026, 6, 15))).toBe('2026-07-15');
+  });
+
+  it('월·일이 한 자리여도 0을 채운다', () => {
+    expect(toDayKey(new Date(2026, 0, 1))).toBe('2026-01-01');
+    expect(toDayKey(new Date(2026, 8, 9))).toBe('2026-09-09');
+  });
+
+  it('월 경계 자정도 밀리지 않는다 — 청구 기간 양끝이 여기서 갈린다', () => {
+    expect(toDayKey(new Date(2026, 6, 1))).toBe('2026-07-01');
+    expect(toDayKey(new Date(2026, 6, 31))).toBe('2026-07-31');
+  });
+
+  it('문자열은 앞 10자를 그대로 쓴다 — 에이전트 축과 같은 결과', () => {
+    expect(toDayKey('2026-07-15')).toBe('2026-07-15');
+    expect(toDayKey('2026-07-15 10:00:00')).toBe('2026-07-15');
+  });
+
+  it('서버 시간대와 무관하게 같은 답이다 — 두 드라이버 모두 로컬 자정 Date를 준다', () => {
+    // 로컬 성분을 읽으므로 TZ가 UTC든 KST든 드라이버가 만든 자정의 달력일이 나온다.
+    const d = new Date(2026, 6, 15);
+    expect(toDayKey(d)).toBe(`${d.getFullYear()}-07-15`);
+  });
+});
+
+describe('agentUsageKey — 에이전트 MsgType → 청구 유형키', () => {
+  it('S/L/M/K는 청구 유형키로 변환된다', () => {
+    expect(agentUsageKey('S')).toBe('SMS');
+    expect(agentUsageKey('L')).toBe('LMS');
+    expect(agentUsageKey('M')).toBe('MMS');
+    expect(agentUsageKey('K')).toBe('KAKAO');
+  });
+
+  it('소문자·공백이 섞여도 같은 키로 — 게이트웨이 원천값을 신뢰하지 않는다', () => {
+    expect(agentUsageKey(' l ')).toBe('LMS');
+    expect(agentUsageKey('k')).toBe('KAKAO');
+  });
+
+  it('모르는 코드는 원본 그대로 남는다 — 임의로 뭉치면 그 유형이 조용히 0원이 된다', () => {
+    // 실측 2026-07-26: G = 여미지(B0227) 7월 성공 42,833건. 단가 칸이 없어 미청구로 드러나야 한다.
+    expect(agentUsageKey('G')).toBe('G');
+    expect(agentUsageKey('KS')).toBe('KS');
+    expect(agentUsageKey('X')).toBe('X');
+  });
+
+  it('빈 값은 (유형 미상)', () => {
+    expect(agentUsageKey('')).toBe('(유형 미상)');
+    expect(agentUsageKey(null)).toBe('(유형 미상)');
+    expect(agentUsageKey(undefined)).toBe('(유형 미상)');
+  });
+
+  it('변환표에는 청구 단가가 있는 4종만 있다', () => {
+    expect(Object.keys(AGENT_MSG_TYPE_TO_USAGE_KEY).sort()).toEqual(['K', 'L', 'M', 'S']);
+  });
+});
+
+describe('rollupAgentRowsForBilling — 대상ID 그레인 → 청구 그레인(일자×발송ID×유형)', () => {
+  const sr = (o: Partial<PayAgentStoreRow>): PayAgentStoreRow => ({
+    period: '2026-07-01', agent_send_id: 'D0018', store_id: '', msg_type: 'L', type_label: 'LMS',
+    sent: 0, success: 0, fail: 0, pending: 0, ...o,
+  });
+  const allow = (...ids: string[]) => new Set(ids.map((i) => i.toUpperCase()));
+
+  it('같은 일자·발송ID·유형이면 대상ID가 달라도 한 줄로 합쳐진다', () => {
+    const { rows } = rollupAgentRowsForBilling([
+      sr({ store_id: '지점A', sent: 10, success: 9, fail: 1 }),
+      sr({ store_id: '지점B', sent: 20, success: 18, fail: 2 }),
+      sr({ store_id: '', sent: 5, success: 5 }),
+    ], allow('D0018'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      channel: 'agent', itemDate: '2026-07-01', agentSendId: 'D0018', typeKey: 'LMS',
+      total: 35, success: 32, fail: 3, userId: null,
+    });
+  });
+
+  it('대상ID가 3만 개여도 청구 행은 유형 수만큼만 나온다 — 청구서가 건바이건이 되지 않는다', () => {
+    // 실측 2026-07-26: 제이씨패밀리(B0229) 7월 대상ID 29,598개 / 행 30,314개(거의 1:1)
+    const many = Array.from({ length: 3000 }, (_, i) => sr({ agent_send_id: 'B0229', store_id: `s${i}`, sent: 2, success: 1 }));
+    const { rows } = rollupAgentRowsForBilling(many, allow('B0229'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].success).toBe(3000);
+  });
+
+  it('일자·유형이 다르면 행이 나뉜다', () => {
+    const { rows } = rollupAgentRowsForBilling([
+      sr({ sent: 1, success: 1 }),
+      sr({ period: '2026-07-02', sent: 2, success: 2 }),
+      sr({ msg_type: 'S', sent: 3, success: 3 }),
+    ], allow('D0018'));
+    expect(rows).toHaveLength(3);
+  });
+
+  it('선불 발송ID는 청구에서 빠지고 목록으로 돌아온다 — 게이트웨이 잔액에서 이미 빠진 돈이다', () => {
+    const { rows, excludedSendIds } = rollupAgentRowsForBilling([
+      sr({ agent_send_id: 'D0018', sent: 10, success: 10 }),
+      sr({ agent_send_id: 'B0023', sent: 99, success: 99 }),
+    ], allow('D0018'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].agentSendId).toBe('D0018');
+    expect(excludedSendIds).toEqual(['B0023']);
+  });
+
+  it('허용 목록 판정은 대소문자를 가리지 않는다', () => {
+    const { rows, excludedSendIds } = rollupAgentRowsForBilling([sr({ agent_send_id: 'd0018', sent: 1, success: 1 })], allow('D0018'));
+    expect(rows).toHaveLength(1);
+    expect(excludedSendIds).toEqual([]);
+  });
+
+  it('월 그레인(YYYY-MM)·깨진 일자는 청구에 넣지 않는다 — item_date는 date 컬럼이다', () => {
+    const { rows } = rollupAgentRowsForBilling([
+      sr({ period: '2026-07', sent: 10, success: 10 }),
+      sr({ period: '', sent: 10, success: 10 }),
+      sr({ period: '2026-07-01', sent: 1, success: 1 }),
+    ], allow('D0018'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].itemDate).toBe('2026-07-01');
+  });
+
+  it('부달 재전송 귀속 행도 원 발송ID로 합산된다', () => {
+    const { rows } = rollupAgentRowsForBilling([
+      sr({ agent_send_id: 'D0018', sent: 10, success: 10 }),
+      sr({ agent_send_id: 'D0018', store_id: 'b0179_16601910', is_relay: true, sent: 3, success: 3 }),
+    ], allow('D0018'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].success).toBe(13);
+  });
+
+  it('빈 입력·발송ID 없는 행은 조용히 무시된다', () => {
+    expect(rollupAgentRowsForBilling([], allow('D0018')).rows).toEqual([]);
+    expect(rollupAgentRowsForBilling(undefined as any, allow('D0018')).rows).toEqual([]);
+    expect(rollupAgentRowsForBilling([sr({ agent_send_id: '  ', sent: 5, success: 5 })], allow('D0018')).rows).toEqual([]);
+  });
+});
+
+describe('findUnbillableBillingRows — 단가 없는 유형키 색출', () => {
+  const r = (o: Partial<BillingUsageRow>): BillingUsageRow => ({
+    channel: 'agent', itemDate: '2026-07-01', typeKey: 'SMS', userId: null, agentSendId: 'B0227',
+    total: 0, success: 0, fail: 0, pending: 0, ...o,
+  });
+
+  it('청구 유형키만 있으면 빈 배열', () => {
+    expect(findUnbillableBillingRows([r({ typeKey: 'SMS', success: 10 }), r({ typeKey: 'TEST_LMS', channel: 'test', success: 2 })])).toEqual([]);
+  });
+
+  it('G처럼 단가 없는 유형은 수량과 함께 잡힌다 — 조용한 0원 청구 차단', () => {
+    const out = findUnbillableBillingRows([
+      r({ typeKey: 'G', total: 20000, success: 19000 }),
+      r({ typeKey: 'G', itemDate: '2026-07-02', total: 24722, success: 23833 }),
+      r({ typeKey: 'SMS', success: 5 }),
+    ]);
+    expect(out).toEqual([{ key: 'G', success: 42833, total: 44722 }]);
+  });
+
+  it('여러 미지 유형은 성공 수량 내림차순', () => {
+    const out = findUnbillableBillingRows([r({ typeKey: 'X', success: 1 }), r({ typeKey: 'G', success: 100 })]);
+    expect(out.map((u) => u.key)).toEqual(['G', 'X']);
+  });
+
+  it('빈 입력에 안전하다', () => {
+    expect(findUnbillableBillingRows([])).toEqual([]);
+    expect(findUnbillableBillingRows(undefined as any)).toEqual([]);
+  });
+});
+
+describe('diffBillingRowsVsDayData — 새 청구 상세 ↔ 기존 집계 대조', () => {
+  const r = (o: Partial<BillingUsageRow>): BillingUsageRow => ({
+    channel: 'web', itemDate: '2026-07-01', typeKey: 'SMS', userId: 'u1', agentSendId: null,
+    total: 0, success: 0, fail: 0, pending: 0, ...o,
+  });
+
+  it('유형별 성공 수량이 같으면 차이 없음', () => {
+    const rows = [r({ typeKey: 'SMS', success: 60 }), r({ typeKey: 'SMS', userId: 'u2', success: 40 }), r({ typeKey: 'LMS', success: 9 })];
+    const day: UsageDayData = { '2026-07-01': { SMS: { total: 0, success: 100, fail: 0, pending: 0 }, LMS: { total: 0, success: 9, fail: 0, pending: 0 } } };
+    expect(diffBillingRowsVsDayData(rows, day)).toEqual([]);
+  });
+
+  it('한 유형이라도 어긋나면 그 유형이 잡힌다 — 발행을 막는 근거', () => {
+    const rows = [r({ typeKey: 'SMS', success: 95 })];
+    const day: UsageDayData = { '2026-07-01': { SMS: { total: 0, success: 100, fail: 0, pending: 0 } } };
+    expect(diffBillingRowsVsDayData(rows, day)).toEqual([{ typeKey: 'SMS', rowsSuccess: 95, dayDataSuccess: 100 }]);
+  });
+
+  it('한쪽에만 있는 유형도 잡힌다', () => {
+    const rows = [r({ typeKey: 'MMS', success: 7 })];
+    expect(diffBillingRowsVsDayData(rows, {})).toEqual([{ typeKey: 'MMS', rowsSuccess: 7, dayDataSuccess: 0 }]);
+    const day: UsageDayData = { '2026-07-01': { KAKAO: { total: 0, success: 3, fail: 0, pending: 0 } } };
+    expect(diffBillingRowsVsDayData([], day)).toEqual([{ typeKey: 'KAKAO', rowsSuccess: 0, dayDataSuccess: 3 }]);
+  });
+
+  it('에이전트 행은 대조에서 빠진다 — 기존 집계에 없는 채널이다', () => {
+    const rows = [r({ channel: 'agent', typeKey: 'LMS', userId: null, agentSendId: 'D0018', success: 596968 })];
+    expect(diffBillingRowsVsDayData(rows, {})).toEqual([]);
+  });
+
+  it('빈 입력에 안전하다', () => {
+    expect(diffBillingRowsVsDayData([], {})).toEqual([]);
+    expect(diffBillingRowsVsDayData(undefined as any, undefined as any)).toEqual([]);
+  });
+});
+
+describe('sortBillingUsageRows — 청구서 표시 순서', () => {
+  const r = (o: Partial<BillingUsageRow>): BillingUsageRow => ({
+    channel: 'web', itemDate: '2026-07-01', typeKey: 'SMS', userId: null, agentSendId: null,
+    total: 0, success: 0, fail: 0, pending: 0, ...o,
+  });
+
+  it('채널 → 일자 → 계정/발송ID → 유형 순', () => {
+    const out = sortBillingUsageRows([
+      r({ channel: 'spam', typeKey: 'SPAM_SMS' }),
+      r({ channel: 'agent', agentSendId: 'D0018', typeKey: 'LMS' }),
+      r({ channel: 'agent', agentSendId: 'B0077', typeKey: 'SMS' }),
+      r({ channel: 'web', userId: 'u1', typeKey: 'LMS' }),
+      r({ channel: 'web', userId: 'u1', typeKey: 'SMS' }),
+      r({ channel: 'test', typeKey: 'TEST_SMS' }),
+    ]);
+    expect(out.map((x) => `${x.channel}:${x.agentSendId || x.userId || '-'}:${x.typeKey}`)).toEqual([
+      'web:u1:SMS', 'web:u1:LMS', 'agent:B0077:SMS', 'agent:D0018:LMS', 'test:-:TEST_SMS', 'spam:-:SPAM_SMS',
+    ]);
+  });
+
+  it('같은 채널이면 일자 오름차순', () => {
+    const out = sortBillingUsageRows([r({ itemDate: '2026-07-03' }), r({ itemDate: '2026-07-01' })]);
+    expect(out.map((x) => x.itemDate)).toEqual(['2026-07-01', '2026-07-03']);
+  });
+
+  it('입력 배열을 바꾸지 않는다', () => {
+    const input = [r({ itemDate: '2026-07-03' }), r({ itemDate: '2026-07-01' })];
+    sortBillingUsageRows(input);
+    expect(input[0].itemDate).toBe('2026-07-03');
+  });
+});
+
+describe('priceBillingRows — 청구 상세 단가·금액 부착 (2026-07-26)', () => {
+  const web = { SMS: 9, LMS: 27, MMS: 90, KAKAO: 8, TEST_SMS: 9, TEST_LMS: 27, SPAM_SMS: 9, SPAM_LMS: 27 };
+  const r = (o: Partial<BillingUsageRow>): BillingUsageRow => ({
+    channel: 'web', itemDate: '2026-07-01', typeKey: 'SMS', userId: 'u1', agentSendId: null,
+    total: 0, success: 0, fail: 0, pending: 0, ...o,
+  });
+  const ap = (o: Partial<AgentUnitPriceRow>): AgentUnitPriceRow => ({
+    id: 'cai-1', agent_send_id: 'D0018', cost_per_sms: null, cost_per_lms: null, cost_per_mms: null, cost_per_kakao: null, ...o,
+  });
+
+  it('웹·테스트·스팸은 회사 단가로 계산된다', () => {
+    const out = priceBillingRows([
+      r({ typeKey: 'SMS', success: 100 }),
+      r({ channel: 'test', typeKey: 'TEST_LMS', success: 3 }),
+      r({ channel: 'spam', typeKey: 'SPAM_SMS', success: 2 }),
+    ], web, []);
+    expect(out.items.map((i) => i.amount)).toEqual([900, 81, 18]);
+    expect(out.amountByChannel).toEqual({ plan: 0, web: 900, agent: 0, test: 81, spam: 18 });
+  });
+
+  it('에이전트는 회사 단가가 아니라 발송ID별 단가로 계산되고 agent_id FK가 붙는다', () => {
+    const out = priceBillingRows(
+      [r({ channel: 'agent', typeKey: 'LMS', userId: null, agentSendId: 'D0018', success: 1000 })],
+      web,
+      [ap({ id: 'cai-D0018', cost_per_lms: 22 })],
+    );
+    expect(out.items[0]).toMatchObject({ agentId: 'cai-D0018', unitPrice: 22, amount: 22000 });
+    expect(out.amountByChannel.agent).toBe(22000);
+    expect(out.missingAgentPrices).toEqual([]);
+  });
+
+  it('발송ID 매칭은 대소문자를 가리지 않는다', () => {
+    const out = priceBillingRows(
+      [r({ channel: 'agent', typeKey: 'SMS', userId: null, agentSendId: 'd0018', success: 10 })],
+      web,
+      [ap({ agent_send_id: 'D0018', cost_per_sms: 7 })],
+    );
+    expect(out.items[0].amount).toBe(70);
+  });
+
+  it('단가 미설정(NULL)은 0원으로 밀지 않고 어디가 비었는지 돌려준다 — 조용한 0원 청구 차단', () => {
+    // 실측 2026-07-26: company_agent_ids 283행 전부 단가 미설정
+    const out = priceBillingRows([
+      r({ channel: 'agent', typeKey: 'LMS', userId: null, agentSendId: 'D0018', success: 596968 }),
+      r({ channel: 'agent', typeKey: 'SMS', userId: null, agentSendId: 'D0018', success: 5 }),
+    ], web, [ap({})]);
+    expect(out.amountByChannel.agent).toBe(0);
+    expect(out.missingAgentPrices).toEqual([
+      { agentSendId: 'D0018', typeKey: 'LMS', success: 596968 },
+      { agentSendId: 'D0018', typeKey: 'SMS', success: 5 },
+    ]);
+  });
+
+  it('같은 발송ID·유형의 여러 날짜는 미설정 목록에서 합산된다', () => {
+    const out = priceBillingRows([
+      r({ channel: 'agent', typeKey: 'LMS', userId: null, agentSendId: 'D0018', success: 10 }),
+      r({ channel: 'agent', itemDate: '2026-07-02', typeKey: 'LMS', userId: null, agentSendId: 'D0018', success: 5 }),
+    ], web, [ap({})]);
+    expect(out.missingAgentPrices).toEqual([{ agentSendId: 'D0018', typeKey: 'LMS', success: 15 }]);
+  });
+
+  it('명시된 0원은 0원 그대로 — 미설정과 구분한다', () => {
+    const out = priceBillingRows(
+      [r({ channel: 'agent', typeKey: 'SMS', userId: null, agentSendId: 'D0018', success: 100 })],
+      web,
+      [ap({ cost_per_sms: 0 })],
+    );
+    expect(out.items[0].unitPrice).toBe(0);
+    expect(out.missingAgentPrices).toEqual([]);
+  });
+
+  it('성공 0인 행은 단가가 없어도 발행을 막지 않는다', () => {
+    const out = priceBillingRows(
+      [r({ channel: 'agent', typeKey: 'SMS', userId: null, agentSendId: 'D0018', total: 5, success: 0, fail: 5 })],
+      web,
+      [ap({})],
+    );
+    expect(out.missingAgentPrices).toEqual([]);
+  });
+
+  it('매핑에 없는 발송ID는 단가 미설정으로 잡힌다 — 조용히 0원으로 새지 않는다', () => {
+    const out = priceBillingRows(
+      [r({ channel: 'agent', typeKey: 'SMS', userId: null, agentSendId: 'B9999', success: 3 })],
+      web, [ap({})],
+    );
+    expect(out.items[0].agentId).toBeNull();
+    expect(out.missingAgentPrices).toEqual([{ agentSendId: 'B9999', typeKey: 'SMS', success: 3 }]);
+  });
+
+  it('단가 정의 자체가 없는 유형은 성공 수량이 있을 때만 잡힌다', () => {
+    // 실측 2026-07-26: G = 여미지(B0227) 7월 성공 42,833건. 단가 칸이 아예 없다.
+    const out = priceBillingRows([
+      r({ channel: 'agent', typeKey: 'G', userId: null, agentSendId: 'B0227', total: 44722, success: 42833 }),
+      r({ channel: 'agent', typeKey: 'X', userId: null, agentSendId: 'B0227', total: 1, success: 0 }),
+    ], web, [ap({ id: 'cai-B0227', agent_send_id: 'B0227', cost_per_sms: 9 })]);
+    expect(out.unbillableTypes).toEqual([{ key: 'G', success: 42833, total: 44722 }]);
+  });
+
+  it('빈 입력에 안전하다', () => {
+    const out = priceBillingRows([], web, []);
+    expect(out.items).toEqual([]);
+    // 요금제는 단가 계산기를 거치지 않으므로 여기서는 항상 0이다 — 라우트가 따로 합친다.
+    expect(out.amountByChannel).toEqual({ plan: 0, web: 0, agent: 0, test: 0, spam: 0 });
+    expect(out.missingAgentPrices).toEqual([]);
+    expect(out.unbillableTypes).toEqual([]);
+    expect(priceBillingRows(undefined as any, web, undefined as any).items).toEqual([]);
+  });
+
+  it('깨진 단가 값은 금액을 NaN으로 만들지 않는다', () => {
+    const out = priceBillingRows(
+      [r({ channel: 'agent', typeKey: 'SMS', userId: null, agentSendId: 'D0018', success: 10 })],
+      web, [ap({ cost_per_sms: 'abc' })],
+    );
+    expect(Number.isFinite(out.items[0].amount)).toBe(true);
+    expect(out.missingAgentPrices).toHaveLength(1); // 숫자가 아니면 미설정과 같게 다룬다
+  });
+});
+
+// ============================================================
+//  요금제 행 전용 일수 컬럼 (★ 2026-07-26 Codex 3차 HIGH)
+// ============================================================
+
+describe('buildPlanBillingItems — 요금제 행 (2026-07-26)', () => {
+  const seg = (o: Record<string, any> = {}) => ({
+    planCode: 'BASIC', monthlyPrice: 350000,
+    from: '2026-07-01', to: '2026-07-09', days: 9, monthDays: 31, amount: 101613, ...o,
+  });
+
+  it('일수는 전용 필드로 나가고 발송 수량 4칸은 전부 0이다 — PDF 전송·실패 열과 화면 합계 오염 차단', () => {
+    const [it0] = buildPlanBillingItems([seg()]);
+    expect(it0.planDays).toBe(9);
+    expect(it0.planMonthDays).toBe(31);
+    expect([it0.total, it0.success, it0.fail, it0.pending]).toEqual([0, 0, 0, 0]);
+  });
+
+  it('금액·단가는 일할 결과와 월정액 그대로', () => {
+    const [it0] = buildPlanBillingItems([seg()]);
+    expect(it0.unitPrice).toBe(350000);
+    expect(it0.amount).toBe(101613);
+    expect(it0.channel).toBe('plan');
+    expect(it0.typeKey).toBe('PLAN_BASIC');
+  });
+
+  it('구간이 여럿이면 행도 여럿 — 구간 시작일이 item_date다', () => {
+    const items = buildPlanBillingItems([
+      seg({ from: '2026-07-01', to: '2026-07-09' }),
+      seg({ planCode: 'PRO', from: '2026-07-10', to: '2026-07-31', days: 22, amount: 709677 }),
+    ]);
+    expect(items.map((i) => i.itemDate)).toEqual(['2026-07-01', '2026-07-10']);
+  });
+
+  it('발송 행에는 요금제 일수 축이 없다 — null이 그 사실이다', () => {
+    const rows: BillingUsageRow[] = [{
+      channel: 'web', itemDate: '2026-07-01', typeKey: 'SMS', userId: 'u1', agentSendId: null,
+      total: 10, success: 10, fail: 0, pending: 0,
+    }];
+    const priced = priceBillingRows(rows, { SMS: 9 }, []);
+    expect(priced.items[0].planDays).toBeNull();
+    expect(priced.items[0].planMonthDays).toBeNull();
+  });
+
+  it('요금제 행은 장 헤더 수량(totals)에 섞이지 않는다 — 청구 수량 축은 성공 건수뿐', () => {
+    const [planRow] = buildPlanBillingItems([seg()]);
+    const sheets = splitBillingSheets([planRow], 'combined');
+    expect(Object.values(sheets[0].totals).every((v) => v === 0)).toBe(true);
+    expect(sheets[0].amount).toBe(101613);
   });
 });

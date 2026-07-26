@@ -1051,7 +1051,8 @@
 - **직전 플랜은 `companies`가 아니라 이 테이블 최신 행**(`ORDER BY effective_date DESC, changed_at DESC LIMIT 1`)에서 도출한다 — 호출 시점엔 `plan_id`가 이미 새 값으로 덮여 있고, 이력끼리 체인이 이어져야 일할계산이 구간을 끊을 수 있다.
 - 회사별 `pg_advisory_xact_lock(hashtext(company_id), hashtext('plan_change'))`로 직렬화. 승강등 판정(`classifyPlanChange`)은 INSERT에 쓰는 바로 그 prev 값으로만 한다.
 - **기준선 141행**(2026-07-25 21:18 UTC 일괄 INSERT): `change_type='initial'` · `effective_date = companies.created_at::date` · `from_*` 전부 NULL. reason에 "이력 도입 전 기준선 — 실제 변경 이력 없음" 명시. 분포 = FREE 129 / BASIC 6 / ENTERPRISE 3 / TRIAL 2 / BUSINESS 1.
-- 인덱스·FK·varchar 길이는 아직 `pg_indexes`/`pg_constraint` 미실측 — 생성 명세는 `docs/2026-07-25-billing-restructure-handoff.md` §3-1(`INDEX (company_id, effective_date)` · `(effective_date)`).
+- 인덱스 실측(2026-07-26 `pg_indexes`): `company_plan_changes_pkey`(id) · `idx_cpc_company_effective`(company_id, effective_date) · `idx_cpc_effective`(effective_date).
+- FK·varchar 길이는 아직 `pg_constraint`/`character_maximum_length` 미실측 — 생성 명세는 `docs/2026-07-25-billing-restructure-handoff.md` §3-1.
 
 ### saved_segments (저장 세그먼트 — D107)
 | 컬럼 | 타입 | 비고 |
@@ -1492,6 +1493,12 @@
 | created_at · updated_at | timestamptz NOT NULL now() | |
 | emailed_at · emailed_to · emailed_by · email_sent_at | — | 발송 이력 |
 
+| scope | varchar(20) NOT NULL DEFAULT 'combined' | ★2026-07-26 ALTER 실측. 발행 단위 — `combined`(회사 1장) / `by_user`(웹 계정별) / `common`(공통 장) / `by_agent`(발송ID별, **미구현·이월**) |
+| batch_id | uuid NULL | ★2026-07-26 ALTER 실측. 묶음 발행 식별. 부분 삭제 차단·"N+1장 중 k장" 표기 근거 |
+
+- 2026-07-26 ALTER 적용 실측: `scope`·`batch_id` 추가 + `idx_billings_company_period (company_id, billing_start, billing_end)` · `idx_billings_batch (batch_id) WHERE batch_id IS NOT NULL`. 기존 15행은 DEFAULT로 `combined` 자동 충전.
+- **`scope` 축을 값으로만 중복검사에 넣으면 안 된다** — `combined`(user_id·agent_id 둘 다 NULL)와 `by_user`는 키가 달라 둘 다 통과한다. 불변식은 "한 회사·한 기간에는 하나의 scope만"이고, 그래서 이 컬럼이 필요하다. 설계=docs/2026-07-26-billing-scope-and-corrections-design.md §1-6.
+- 두 컬럼을 쓰는 endpoint catch에 `column does not exist` → 503 `DB_MIGRATION_PENDING` 분기 의무.
 - **에이전트 축 컬럼이 없다** — 그래서 `usage_type='both'` 회사의 게이트웨이 발송분이 청구서에 안 들어간다(0725 발견, 재구성 대상).
 - `ai_credit_requests.billed_invoice_id`가 이 테이블을 가리키지만 **FK가 아니다** — 삭제해도 `billed=true`가 남아 재발행 시 크레딧이 영구 미청구. 0725에 `DELETE /:id`가 되돌리도록 수정함.
 
@@ -1513,8 +1520,11 @@
 | message_type | varchar NOT NULL | 유형키(SMS/LMS/MMS/KAKAO/TEST_*/SPAM_*) |
 | total_count · success_count · fail_count · pending_count | integer NOT NULL | **청구 수량 = success_count** |
 | unit_price · amount | numeric NOT NULL | 단가 스냅샷 × 성공 |
+| plan_days | integer NULL | ★2026-07-26 ALTER 신설. **요금제 행 전용** — 일할 구간 일수. 발송 행은 NULL |
+| plan_month_days | integer NULL | ★2026-07-26 ALTER 신설. **요금제 행 전용** — 그 달 일수(일할 분모). 발송 행은 NULL |
 | created_at | timestamptz NOT NULL | |
 - INDEX idx_billing_items_billing_channel (billing_id, channel)
+- **요금제(`channel='plan'`) 행은 발송 수량 4칸이 전부 0**이다. 2026-07-26 이전 코드는 일수를 `total_count`에, 월일수를 `fail_count`에 실었고 그 탓에 PDF 2페이지 '전송'·'실패' 열과 상세 모달 합계에 9·31이 발송 건수처럼 더해졌다(Codex 3차 HIGH) — 같은 컬럼이 채널에 따라 다른 뜻이 되는 구조를 전용 컬럼으로 끊었다.
 - 2026-07-25 ALTER 적용 실측: `channel`·`store_id` 추가 + `agent_id` FK 신설 + 인덱스. 기존 15행(금강제화 시험 발행분)은 전부 web.
 
 ### billing_invoices (거래내역서/정산)
@@ -1586,6 +1596,12 @@
 | balance_purchased_after | integer | 차감/리셋 후 구매분 잔액 (감사) |
 | created_by | uuid | 차감 유발 사용자 (nullable) |
 | created_at | timestamptz | DEFAULT now() |
+| reason | text NULL | ★2026-07-26 실측 등재. 슈퍼관리자 수동 지급/조정 사유(`adjustCreditWithClient`) |
+| overage_credits | integer NULL | ★2026-07-26 실측 등재. 후불 초과 사용분(base가 음수로 간 양). 정산이 이 합을 청구한다(`billing.ts` overage 집계) |
+| billed_billing_id | uuid NULL **FK → billings(id) ON DELETE SET NULL** | ★2026-07-26 ALTER 신설. 초과사용분 **청구 완료 마커**. 없던 동안은 기간으로만 합산해서, 기간 경계를 UTC→KST로 옮기면 KST 00~09시 9시간 구간이 두 청구서에 두 번 들어갈 수 있었다(기간 중복검사는 날짜만 본다). `ai_credit_requests.billed_invoice_id`가 FK가 아니라 돈이 샌 전례가 있어 이쪽은 **FK로** 걸었다 — 청구서를 지우면 자동으로 NULL이 되어 다시 청구 대상이 된다. INDEX `idx_ai_credit_tx_billed_billing (billed_billing_id) WHERE billed_billing_id IS NOT NULL` |
+
+- **CHECK 제약 없음** (2026-07-26 `pg_constraint` 실측 — FK 2·PK 1·UNIQUE(idempotency_key) 1뿐. 같은 날 `billed_billing_id` FK 신설로 FK 3). `type`·`bucket`은 문자열이라 새 값을 넣어도 DB가 막지 않는다. 막아주는 게 없으니 **오타가 조용히 새 종류로 적재된다** — 값 추가 시 소비처(집계·화면) 전수 확인 의무.
+- `type` 실사용값: `deduct` · `reset` · `grant` · `admin_deduct`. `bucket` 실사용값: `base` · `purchased` · `mixed` · `overage`.
 
 > CT `utils/ai-credit.ts` (checkCredit/deductCredit/resetMonthlyCreditsIfNeeded) 단일 진입점. 2버킷(base→purchased) 트랜잭션 차감 + SELECT FOR UPDATE 음수 방지 + idempotency_key 중복 차단. 순수 계산은 `utils/ai-credit-calc.ts`(node:assert 검증). 차감=호출 성공 후(실패 시 미차감). 인덱스 `idx_ai_credit_tx_company_created (company_id, created_at DESC)`.
 

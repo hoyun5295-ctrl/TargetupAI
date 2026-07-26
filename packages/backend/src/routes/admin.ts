@@ -2292,62 +2292,12 @@ router.put('/companies/:id/fields', authenticate, requireSuperAdmin, async (req:
 });
 
 // ===== 정산서 이메일 발송 =====
-router.post('/billing/:id/send-email', authenticate, requireSuperAdmin, async (req: any, res) => {
-  try {
-    const { id } = req.params;
-    const { to, subject, body_html } = req.body;
-    const adminId = req.user?.id || req.adminUser?.id;
-
-    if (!to || !subject) {
-      return res.status(400).json({ error: '수신자 이메일과 제목은 필수입니다' });
-    }
-
-    // 1) billing 조회 + 상태 체크
-    const billingResult = await query(
-      'SELECT * FROM billings WHERE id = $1', [id]
-    );
-    if (billingResult.rows.length === 0) {
-      return res.status(404).json({ error: '정산 데이터를 찾을 수 없습니다' });
-    }
-    const billing = billingResult.rows[0];
-    if (billing.status === 'draft') {
-      return res.status(400).json({ error: '초안 상태에서는 발송할 수 없습니다. 확정 후 발송해주세요.' });
-    }
-
-    // 2) PDF 생성 (기존 PDF 생성 로직 재활용)
-    //    ※ 기존 billing PDF 생성 함수를 여기서 호출하여 Buffer로 받기
-    //    예: const pdfBuffer = await generateBillingPdf(id);
-    //    현재는 stub이므로 PDF 생성까지만 확인
-
-    // 3) 이메일 발송 (현재 stub)
-    const { sendBillingEmail } = require('../services/emailService');
-    const emailResult = await sendBillingEmail({
-      to,
-      subject,
-      bodyHtml: body_html,
-      pdfBuffer: null, // TODO: 실제 PDF buffer 연결
-      pdfFilename: `정산서_${billing.company_name || 'billing'}_${billing.billing_year}_${billing.billing_month}.pdf`,
-    });
-
-    // 4) 발송 이력 기록 — 실발송 성공 시에만. 실패인데 emailed_at을 응답에 넣으면 거짓 상태(Codex HIGH 정정).
-    if (!emailResult.success) {
-      return res.status(502).json({ success: false, error: emailResult.message });
-    }
-    await query(
-      'UPDATE billings SET emailed_at = NOW(), emailed_to = $1, emailed_by = $2 WHERE id = $3',
-      [to, adminId, id]
-    );
-    res.json({
-      success: true,
-      message: emailResult.message,
-      emailed_at: new Date().toISOString(),
-      emailed_to: to,
-    });
-  } catch (error: any) {
-    console.error('정산서 이메일 발송 오류:', error);
-    res.status(500).json({ error: error.message || '이메일 발송 실패' });
-  }
-});
+// ※ 이 자리에 있던 `POST /billing/:id/send-email`은 삭제했다(2026-07-26).
+//   **닿지 않는 라우트였다.** `app.ts:319`가 `/api/admin/billing`에 billing 라우터를 먼저 마운트하므로
+//   `POST /api/admin/billing/:id/send-email`은 항상 `routes/billing.ts`에서 잡힌다.
+//   여기 있던 구현은 PDF가 stub(`pdfBuffer: null`)이라 첨부 없는 메일을 보내는 코드였고,
+//   같은 URL에 두 구현이 있으면 다음 사람이 닿지 않는 쪽을 고친다 — 실제로 이번에 그런 일이 있었다.
+//   실경로 = `routes/billing.ts` `/:id/send-email`(항목표를 `billing_items`에서 만들고 정합 검사 후 발송).
 
 // ===== 선불 잔액 관리 API =====
 

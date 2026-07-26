@@ -11,7 +11,7 @@ import SearchableSelect from '../components/SearchableSelect'; // ★ D144 P11+P
 import LoginBlocksManagement from '../components/admin/LoginBlocksManagement'; // ★ D145 P0 (2026-05-07): 로그인 차단 관리 (B안: IP+loginId 쌍)
 import AgentChargePanel from '../components/AgentChargePanel'; // ★ 2026-07-24 §5-3 에이전트 충전 실행 (게이트웨이 지갑)
 import AgentDeployWizard from '../components/admin/AgentDeployWizard'; // 싱크에이전트 OS별 배포 위저드
-import { COMPANY_NAME_EN, COMPANY_EMAIL } from '../constants/company';
+import { COMPANY_EMAIL } from '../constants/company';
 import { creditTxLabel } from '../constants/credit'; // 크레딧 사용 이력 작업명 라벨
 
 interface Company {
@@ -347,9 +347,7 @@ const [billingEnd, setBillingEnd] = useState(() => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
 });
 const [billingScope, setBillingScope] = useState<'company' | 'user'>('company');
-const [billingUserId, setBillingUserId] = useState('');
-const [billingUsers, setBillingUsers] = useState<any[]>([]);
-const [billingUsersLoading, setBillingUsersLoading] = useState(false);
+// ※ 옛 billingUserId·billingUsers 상태는 폐기(2026-07-26) — 단일 계정 발행이 서버에서 차단됐다.
 const [generating, setGenerating] = useState(false);
 const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
 const [billings, setBillings] = useState<any[]>([]);
@@ -358,9 +356,15 @@ const [filterYear, setFilterYear] = useState(new Date().getFullYear());
 const [showBillingDetail, setShowBillingDetail] = useState(false);
 const [detailBilling, setDetailBilling] = useState<any>(null);
 const [detailItems, setDetailItems] = useState<any[]>([]);
+// ★ 2026-07-26 항목 줄·정합 검사 — 서버(/items)가 PDF·이메일과 같은 함수로 만들어 내려준다.
+//   화면이 따로 합산하면 그 값이 청구서와 갈릴 수 있다("화면 금액 ≠ 청구서 금액"은 정산에서 가장 나쁜 부류).
+const [detailLines, setDetailLines] = useState<any[]>([]);
+const [detailHeaderCheck, setDetailHeaderCheck] = useState<any>(null);
 const [detailLoading, setDetailLoading] = useState(false);
 const [showBillingDeleteConfirm, setShowBillingDeleteConfirm] = useState(false);
 const [deleteTargetId, setDeleteTargetId] = useState('');
+// ★ 2026-07-26 확정·수금·메일 발송분 삭제는 서버가 사유를 요구한다 — 없으면 422로 막힌다.
+const [deleteReason, setDeleteReason] = useState('');
 
 // 고객 전체 삭제
 const [showCustomerDeleteAll, setShowCustomerDeleteAll] = useState(false);
@@ -385,6 +389,10 @@ const [emailTarget, setEmailTarget] = useState<any>(null);
 const [emailTo, setEmailTo] = useState('');
 const [emailSubject, setEmailSubject] = useState('');
 const [emailSending, setEmailSending] = useState(false);
+// ★ 2026-07-26 재발송 확인 — 값이 있으면 "이미 언제·누구에게 나갔다"를 보여주는 확인 단계가 열린다.
+const [emailResendInfo, setEmailResendInfo] = useState<string | null>(null);
+// 확인한 그 발송 시각(서버가 409로 알려준 값). 재발송 요청에 함께 보내 확인 대상이 바뀌었는지 서버가 판정한다.
+const [emailResendAt, setEmailResendAt] = useState<string | null>(null);
   // ===== Sync Agent 모니터링 =====
   const [syncAgents, setSyncAgents] = useState<any[]>([]);
   const [syncAgentsLoading, setSyncAgentsLoading] = useState(false);
@@ -878,18 +886,8 @@ const handleDeleteLineGroup = (lg: any) => {
   );
 };
 useEffect(() => { if (billingToast) { const t = setTimeout(() => setBillingToast(null), 3000); return () => clearTimeout(t); } }, [billingToast]);
-useEffect(() => {
-  if (billingScope === 'user' && billingCompanyId) {
-    setBillingUsersLoading(true);
-    billingApi.getCompanyUsers(billingCompanyId)
-      .then(res => setBillingUsers(res.data))
-      .catch(() => setBillingUsers([]))
-      .finally(() => setBillingUsersLoading(false));
-  } else {
-    setBillingUsers([]);
-    setBillingUserId('');
-  }
-}, [billingScope, billingCompanyId]);
+// ※ 옛 정산용 계정 목록 로드는 폐기했다(2026-07-26) — 단일 계정 발행 자체가 서버에서 차단되고,
+//   계정별 발행은 회사 전체 묶음이라 계정을 고를 일이 없다.
 
 // ===== Sync Agent 함수 =====
 const loadSyncAgents = async () => {
@@ -1243,18 +1241,30 @@ const handleBillingGenerate = async () => {
   setShowGenerateConfirm(false);
   setGenerating(true);
   try {
-    await billingApi.generateBilling({ company_id: billingCompanyId, user_id: billingScope === 'user' ? billingUserId : undefined, billing_start: billingStart, billing_end: billingEnd });
-    setBillingToast({ msg: `${billingStart} ~ ${billingEnd} 정산이 생성되었습니다`, type: 'success' });
+    // ★ 2026-07-26 단일 계정 지정(user_id) 폐기 — 서버가 422(BILLING_USER_SCOPE_CHANGED)로 차단한다.
+    //   계정별은 scope='by_user'로 회사 전체가 계정 장 N + 공통 장 1 묶음으로 나온다.
+    const res = await billingApi.generateBilling({
+      company_id: billingCompanyId,
+      scope: billingScope === 'user' ? 'by_user' : 'combined',
+      billing_start: billingStart, billing_end: billingEnd,
+    });
+    const sheetCount = Number(res.data?.sheet_count) || 1;
+    setBillingToast({ msg: `${billingStart} ~ ${billingEnd} 정산이 생성되었습니다${sheetCount > 1 ? ` (${sheetCount}장 묶음)` : ''}`, type: 'success' });
     loadBillings();
   } catch (e: any) {
-    if (e.response?.status === 409) setBillingToast({ msg: '해당 월 정산이 이미 존재합니다. 삭제 후 재생성해주세요.', type: 'error' });
-    else setBillingToast({ msg: e.response?.data?.error || '정산 생성 실패', type: 'error' });
+    // ★ 2026-07-26 409를 "삭제 후 재생성해주세요" 고정 문구로 덮지 않는다 — 그 안내대로 지우면
+    //   billed 크레딧이 얽힌 경로로 들어가는 것이 0725에 고친 결함이고, 서버 문구가 기간·단위까지 담는다.
+    setBillingToast({ msg: e.response?.data?.error || '정산 생성 실패', type: 'error' });
   } finally { setGenerating(false); }
 };
 const openBillingDetail = async (id: string) => {
   setShowBillingDetail(true);
   setDetailLoading(true);
-  try { const res = await billingApi.getBillingItems(id); setDetailBilling(res.data.billing); setDetailItems(res.data.items); }
+  try {
+    const res = await billingApi.getBillingItems(id);
+    setDetailBilling(res.data.billing); setDetailItems(res.data.items);
+    setDetailLines(res.data.lines || []); setDetailHeaderCheck(res.data.header_check || null);
+  }
   catch (e) { setBillingToast({ msg: '상세 조회 실패', type: 'error' }); setShowBillingDetail(false); }
   finally { setDetailLoading(false); }
 };
@@ -1269,11 +1279,17 @@ const handleBillingStatusChange = async (id: string, newStatus: string) => {
 const handleBillingDelete = async () => {
   setShowBillingDeleteConfirm(false);
   try {
-    await billingApi.deleteBilling(deleteTargetId);
-    setBillingToast({ msg: '정산이 삭제되었습니다', type: 'success' });
+    const res = await billingApi.deleteBilling(deleteTargetId, deleteReason.trim() || undefined);
+    const deleted = Number(res.data?.deleted_ids?.length) || 1;
+    setBillingToast({ msg: deleted > 1 ? `묶음 ${deleted}장이 함께 삭제되었습니다` : '정산이 삭제되었습니다', type: 'success' });
+    setDeleteReason('');
     loadBillings();
     if (showBillingDetail && detailBilling?.id === deleteTargetId) setShowBillingDetail(false);
-  } catch (e: any) { setBillingToast({ msg: e.response?.data?.error || '삭제 실패', type: 'error' }); }
+  } catch (e: any) {
+    // 확정·수금·메일 발송분은 사유가 없으면 서버가 막는다 — 모달을 다시 열어 사유를 받는다.
+    if (e.response?.data?.code === 'BILLING_DELETE_NEEDS_REASON') setShowBillingDeleteConfirm(true);
+    setBillingToast({ msg: e.response?.data?.error || '삭제 실패', type: 'error' });
+  }
 };
 
 // 고객 전체 삭제 실행
@@ -1412,12 +1428,18 @@ const downloadBillingPdf = async (id: string, label: string) => {
   try {
     const token = localStorage.getItem('token');
     const response = await fetch(`/api/admin/billing/${id}/pdf`, { headers: { 'Authorization': `Bearer ${token}` } });
-    if (!response.ok) throw new Error('PDF 생성 실패');
+    // ★ 2026-07-26 서버 사유를 그대로 띄운다 — 항목합↔공급가액 불일치는 422 JSON으로 오는데
+    //   그 전에는 'PDF 생성 실패' 한 줄로 덮여 운영자가 왜 막혔는지 알 수 없었다(정합 검사가 무의미해진다).
+    if (!response.ok) {
+      let msg = 'PDF 생성 실패';
+      try { const j = await response.json(); msg = j.error || msg; } catch { /* 스트림이면 JSON이 아니다 */ }
+      throw new Error(msg);
+    }
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `정산서_${label}.pdf`; a.click();
     window.URL.revokeObjectURL(url);
-  } catch (e) { setBillingToast({ msg: 'PDF 다운로드 실패', type: 'error' }); }
+  } catch (e: any) { setBillingToast({ msg: e?.message || 'PDF 다운로드 실패', type: 'error' }); }
 };
 const handleInvoiceStatusChange = async (id: string, newStatus: string) => {
   try { await billingApi.updateStatus(id, newStatus); setBillingToast({ msg: '상태가 변경되었습니다', type: 'success' }); loadInvoices(); }
@@ -1427,11 +1449,17 @@ const downloadInvoicePdf = async (inv: any) => {
   try {
     const token = localStorage.getItem('token');
     const response = await fetch(`/api/admin/billing/invoices/${inv.id}/pdf`, { headers: { 'Authorization': `Bearer ${token}` } });
+    // ★ 2026-07-26 응답 검사 추가 — 그 전에는 오류 JSON을 그대로 .pdf로 저장해, 열리지 않는 파일이 내려왔다.
+    if (!response.ok) {
+      let msg = 'PDF 생성 실패';
+      try { const j = await response.json(); msg = j.error || msg; } catch { /* 스트림이면 JSON이 아니다 */ }
+      throw new Error(msg);
+    }
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `거래내역서_${inv.company_name}_${String(inv.billing_start).slice(0, 10)}.pdf`; a.click();
     window.URL.revokeObjectURL(url);
-  } catch (e) { setBillingToast({ msg: 'PDF 다운로드 실패', type: 'error' }); }
+  } catch (e: any) { setBillingToast({ msg: e?.message || 'PDF 다운로드 실패', type: 'error' }); }
 };
 const billingFmt = (n: number) => (n || 0).toLocaleString('ko-KR');
 const billingFmtWon = (n: number) => `₩${(n || 0).toLocaleString('ko-KR')}`;
@@ -1440,7 +1468,22 @@ const billingStatusBadge = (s: string) => {
   const label: Record<string, string> = { draft: '초안', confirmed: '확정', paid: '수금완료' };
   return <span className={`px-2 py-0.5 rounded text-xs font-medium ${map[s] || ''}`}>{label[s] || s}</span>;
 };
-const billingTypeLabel: Record<string, string> = { SMS: 'SMS', LMS: 'LMS', MMS: 'MMS', KAKAO: '카카오', TEST_SMS: '테스트SMS', TEST_LMS: '테스트LMS' };
+// ★ 2026-07-26 청구 축 라벨 통일 — KAKAO는 '카카오알림톡'(0725 웹·에이전트 한 컬럼 라벨 통일과 같은 축),
+//   스팸필터 유형키 추가. PDF·이메일(billing-invoice-lines CT)과 같은 이름이라야 화면=청구서다.
+const billingTypeLabel: Record<string, string> = {
+  SMS: 'SMS', LMS: 'LMS', MMS: 'MMS', KAKAO: '카카오알림톡',
+  TEST_SMS: '테스트SMS', TEST_LMS: '테스트LMS', SPAM_SMS: '스팸SMS', SPAM_LMS: '스팸LMS',
+};
+// 상세 행 '구분' 라벨·행 배경 — PDF 2페이지와 같은 분류(채널 판정은 유형키 접두가 아니라 channel).
+const billingChannelLabel: Record<string, string> = { plan: '요금제', web: '한줄로', agent: '에이전트', test: '테스트', spam: '스팸필터' };
+const billingChannelBg: Record<string, string> = { plan: 'bg-violet-50', agent: 'bg-blue-50/70', test: 'bg-amber-50', spam: 'bg-orange-50' };
+// 요금제 구간 끝일 — item_date(YYYY-MM-DD) + (plan_days - 1). UTC 성분 산술이라 TZ 무관.
+const billingShiftDay = (day: string, delta: number) => {
+  const [y, m, d] = String(day).slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return String(day).slice(5, 10);
+  const dt = new Date(Date.UTC(y, m - 1, d + delta));
+  return `${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+};
 const billingCurrentYear = new Date().getFullYear();
 const billingYearOptions = [billingCurrentYear - 1, billingCurrentYear, billingCurrentYear + 1];
 
@@ -1449,47 +1492,45 @@ const openEmailModal = (billing: any) => {
   const company = companies.find(c => c.id === billing.company_id);
   setEmailTarget(billing);
   setEmailTo(company?.contact_email || '');
-  setEmailSubject(`[인비토] ${billing.company_name} ${billing.billing_year}년 ${billing.billing_month}월 거래내역서`);
+  // ★ 2026-07-26 이 메일이 보내는 문서는 정산서다(첨부 PDF·본문 항목표 모두 정산서). 제목을 실물과 맞춘다.
+  setEmailSubject(`[인비토] ${billing.company_name} ${billing.billing_year}년 ${billing.billing_month}월 정산서`);
+  // 재발송 확인 상태는 모달을 열 때마다 초기화한다 — 앞 건의 확인이 남으면 확인 없이 재발송된다.
+  setEmailResendInfo(null);
+  setEmailResendAt(null);
   setShowEmailModal(true);
 };
 
+// ★ 2026-07-26 발송 전 PDF 선생성 — 서버는 첨부할 PDF가 디스크에 있어야 발송한다(BILLING_PDF_NOT_READY).
+//   운영자가 "PDF 먼저 다운로드"라는 순서를 외워야 하는 UI는 마감일에 사고가 된다.
+//   이 호출은 서버에서 PDF를 만들고 항목↔공급가액 정합 검사(422)를 함께 통과시킨다.
+const ensureBillingPdf = async (id: string) => {
+  const token = localStorage.getItem('token');
+  const res = await fetch(`/api/admin/billing/${id}/pdf`, { headers: { 'Authorization': `Bearer ${token}` } });
+  if (!res.ok) {
+    let msg = '청구서 PDF 생성에 실패했습니다';
+    try { const j = await res.json(); msg = j.error || msg; } catch { /* PDF 스트림이면 본문이 JSON이 아니다 */ }
+    throw new Error(msg);
+  }
+  await res.blob();   // 파일은 서버에 남는다 — 화면에 내려받지 않는다
+};
+
 // 정산서 이메일 발송 처리
-const handleSendBillingEmail = async () => {
+//   ★ 2026-07-26 `resend` — 이미 발송된 정산서는 서버가 409로 한 번 되돌린다(확인 없는 중복 발송 차단).
+//   확인 모달에서 다시 누르면 이 인자가 true로 들어와 그대로 발송된다.
+const handleSendBillingEmail = async (resend = false) => {
   if (!emailTo) return setBillingToast({ msg: '수신자 이메일을 입력해주세요', type: 'error' });
   if (!emailTarget) return;
   setEmailSending(true);
   try {
-    const bodyHtml = `
-      <div style="font-family:'Apple SD Gothic Neo','맑은 고딕',sans-serif;max-width:600px;margin:0 auto;padding:24px;">
-        <div style="border-bottom:3px solid #4F46E5;padding-bottom:16px;margin-bottom:24px;">
-          <h2 style="margin:0;color:#1F2937;font-size:20px;">INVITO 거래내역서</h2>
-        </div>
-        <p style="color:#374151;font-size:14px;line-height:1.8;">
-          안녕하세요, <strong>${emailTarget.company_name}</strong> 담당자님.<br/>
-          아래와 같이 거래내역서를 송부드립니다.
-        </p>
-        <div style="background:#F3F4F6;border-radius:8px;padding:20px;margin:20px 0;">
-          <table style="width:100%;border-collapse:collapse;font-size:14px;color:#374151;">
-            <tr><td style="padding:6px 0;color:#6B7280;">정산 기간</td><td style="padding:6px 0;text-align:right;font-weight:600;">${emailTarget.billing_year}년 ${emailTarget.billing_month}월</td></tr>
-            <tr><td style="padding:6px 0;color:#6B7280;">공급가액</td><td style="padding:6px 0;text-align:right;">₩${Number(emailTarget.subtotal || 0).toLocaleString('ko-KR')}</td></tr>
-            <tr><td style="padding:6px 0;color:#6B7280;">부가세</td><td style="padding:6px 0;text-align:right;">₩${Number(emailTarget.vat || 0).toLocaleString('ko-KR')}</td></tr>
-            <tr style="border-top:2px solid #D1D5DB;"><td style="padding:10px 0 6px;color:#1F2937;font-weight:700;">합계</td><td style="padding:10px 0 6px;text-align:right;font-weight:700;color:#4F46E5;font-size:18px;">₩${Number(emailTarget.total_amount || 0).toLocaleString('ko-KR')}</td></tr>
-          </table>
-        </div>
-        <p style="color:#374151;font-size:14px;line-height:1.8;">
-          첨부된 거래내역서(PDF)를 확인해 주세요.<br/>
-          문의사항이 있으시면 아래 연락처로 연락 부탁드립니다.
-        </p>
-        <div style="margin-top:32px;padding-top:16px;border-top:1px solid #E5E7EB;color:#9CA3AF;font-size:12px;">
-          <strong style="color:#6B7280;">${COMPANY_NAME_EN}</strong><br/>
-          이메일: ${COMPANY_EMAIL}
-        </div>
-      </div>
-    `;
+    // ★ 2026-07-26 본문은 서버가 만든다 — `billing_items`에서 항목표를 만들고 정합 검사를 통과한 본문만
+    //   고객에게 나간다. 화면이 만든 HTML을 넘기면 그 검사를 우회하고, 실제로 그 본문에는 항목표가 없었다.
+    //   첨부 PDF도 서버 파일이라 먼저 만들어 둔다.
+    await ensureBillingPdf(emailTarget.id);
     const res = await billingApi.sendBillingEmail(emailTarget.id, {
       to: emailTo,
       subject: emailSubject,
-      body_html: bodyHtml,
+      // 확인을 그 이력에 묶어 보낸다 — 확인 후 다른 발송이 있었으면 서버가 다시 409로 되돌린다.
+      ...(resend && emailResendAt ? { resend: true, resend_of: emailResendAt } : {}),
     });
     // ★ 2026-07-12 성공 분기 (Codex HIGH 정정) — 실패 응답을 성공 토스트로 표시하던 무분기 제거
     if (!res.data?.success) {
@@ -1498,13 +1539,23 @@ const handleSendBillingEmail = async () => {
     }
     setBillingToast({ msg: res.data.message || '정산서가 발송되었습니다', type: 'success' });
     setShowEmailModal(false);
+    setEmailResendInfo(null);
+    setEmailResendAt(null);
     // 발송 이력 반영
     if (detailBilling?.id === emailTarget.id) {
       setDetailBilling((prev: any) => prev ? { ...prev, emailed_at: res.data.emailed_at, emailed_to: res.data.emailed_to } : prev);
     }
     loadBillings();
   } catch (e: any) {
-    setBillingToast({ msg: e.response?.data?.error || '이메일 발송 실패', type: 'error' });
+    // 이미 발송된 정산서 = 409. 언제·누구에게 나갔는지 보여주고 재발송 확인을 받는다.
+    if (e.response?.data?.code === 'BILLING_ALREADY_EMAILED') {
+      const at = e.response.data.emailed_at ? formatDateTime(e.response.data.emailed_at) : '이전';
+      setEmailResendInfo(`${at} · ${e.response.data.emailed_to || '수신자 미상'}`);
+      setEmailResendAt(e.response.data.emailed_at || null);
+      return;
+    }
+    // PDF 선생성 실패(정합 불일치 422 포함)는 fetch가 던진 Error라 `message`에 담긴다.
+    setBillingToast({ msg: e.response?.data?.error || e.message || '이메일 발송 실패', type: 'error' });
   } finally {
     setEmailSending(false);
   }
@@ -8454,26 +8505,21 @@ const handleApproveRequest = async (id: string) => {
                 </label>
                 <label className="flex items-center gap-1.5 text-sm cursor-pointer">
                   <input type="radio" checked={billingScope === 'user'} onChange={() => setBillingScope('user')} className="accent-indigo-600" />
-                  사용자별
+                  계정별
                 </label>
               </div>
-              {/* 사용자 선택 */}
+              {/* ★ 2026-07-26 계정 선택 폐기 — 단일 계정 발행은 테스트·스팸·에이전트·크레딧이 빠진
+                  청구서를 만들어 서버가 차단한다. 계정별 = 회사 전체를 계정 장 N + 공통 장 1로 발행. */}
               {billingScope === 'user' && (
-                <div className="min-w-[160px]">
-                  <label className="block text-xs font-medium text-gray-500 mb-1">사용자</label>
-                  <select value={billingUserId} onChange={e => setBillingUserId(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                    disabled={billingUsersLoading || !billingCompanyId}>
-                    <option value="">{billingUsersLoading ? '로딩...' : !billingCompanyId ? '고객사 먼저 선택' : '선택'}</option>
-                    {billingUsers.map((u: any) => <option key={u.id} value={u.id}>{u.name} ({u.department || u.login_id})</option>)}
-                  </select>
+                <div className="text-xs text-gray-500 pb-1 max-w-[240px]">
+                  회사 전체가 <strong>계정 장 + 공통 장 묶음</strong>으로 발행됩니다.
+                  테스트·스팸필터·에이전트·AI 크레딧·요금제는 공통 장에 담깁니다.
                 </div>
               )}
               {/* 생성 버튼 */}
               <button
                 onClick={() => {
                   if (!billingCompanyId) return setBillingToast({ msg: '고객사를 선택해주세요', type: 'error' });
-                  if (billingScope === 'user' && !billingUserId) return setBillingToast({ msg: '사용자를 선택해주세요', type: 'error' });
                   setShowGenerateConfirm(true);
                 }}
                 disabled={generating}
@@ -8523,7 +8569,15 @@ const handleApproveRequest = async (id: string) => {
                     {billings.map((b: any) => (
                       <tr key={b.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => openBillingDetail(b.id)}>
                         <td className="px-4 py-2.5 font-medium text-gray-900">{b.company_name}</td>
-                        <td className="px-4 py-2.5 text-center text-gray-500">{b.user_name || '전체'}</td>
+                        {/* ★ 2026-07-26 '구분' — 계정별 발행은 한 회사·한 기간에 여러 행이 생긴다.
+                            계정 이름만 보이면 공통 장(계정 없음)이 '전체'로 보여 합산 발행과 구분되지 않는다. */}
+                        <td className="px-4 py-2.5 text-center text-gray-500">
+                          {b.scope === 'common'
+                            ? <span className="px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 text-xs font-medium">공통 장</span>
+                            : b.scope === 'by_user'
+                              ? <span className="text-indigo-600">{b.user_name || '(계정 미상)'}</span>
+                              : '전체'}
+                        </td>
                         <td className="px-4 py-2.5 text-center text-gray-500">{b.billing_year}년 {b.billing_month}월</td>
                         <td className="px-4 py-2.5 text-right tabular-nums">{billingFmt(Number(b.sms_success))}</td>
                         <td className="px-4 py-2.5 text-right tabular-nums">{billingFmt(Number(b.lms_success))}</td>
@@ -8558,7 +8612,7 @@ const handleApproveRequest = async (id: string) => {
                                 발송
                               </button>
                             )}
-                            <button onClick={() => { setDeleteTargetId(b.id); setShowBillingDeleteConfirm(true); }}
+                            <button onClick={() => { setDeleteTargetId(b.id); setDeleteReason(''); setShowBillingDeleteConfirm(true); }}
                               className="px-2 py-1 text-xs bg-red-100 text-red-600 rounded hover:bg-red-200 transition-colors">삭제</button>
                           </div>
                         </td>
@@ -8650,7 +8704,7 @@ const handleApproveRequest = async (id: string) => {
                     {billingStart} ~ {billingEnd}
                   </p>
                   <p className="text-xs text-center text-gray-400 mb-4">
-                    {billingScope === 'company' ? '고객사 전체' : `사용자: ${billingUsers.find((u: any) => u.id === billingUserId)?.name || ''}`}
+                    {billingScope === 'company' ? '고객사 전체 (1장)' : '계정별 — 계정 장 + 공통 장 묶음'}
                   </p>
                   <p className="text-xs text-center text-gray-500">
                     MySQL 발송 데이터를 집계하여 정산을 생성합니다.
@@ -8680,8 +8734,16 @@ const handleApproveRequest = async (id: string) => {
                   </div>
                   <h3 className="text-lg font-semibold text-center text-gray-900 mb-2">정산 삭제</h3>
                   <p className="text-sm text-center text-gray-600">
-                    이 정산과 일자별 상세 데이터가 모두 삭제됩니다.<br />계속하시겠습니까?
+                    이 정산과 일자별 상세 데이터가 모두 삭제됩니다.<br />
+                    계정별 묶음 발행분은 <strong>묶음 전체(계정 장 + 공통 장)</strong>가 함께 삭제됩니다.<br />계속하시겠습니까?
                   </p>
+                  {/* ★ 2026-07-26 확정·수금·메일 발송분은 사유 필수 — 없으면 서버가 422로 막고 이 칸을 다시 연다 */}
+                  <div className="mt-3">
+                    <label className="block text-xs font-medium text-gray-500 mb-1">삭제 사유 (확정·수금·메일 발송분은 필수)</label>
+                    <textarea value={deleteReason} onChange={e => setDeleteReason(e.target.value)} rows={2}
+                      placeholder="예: 단가 오설정으로 금액 오류 — 재발행 예정"
+                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-red-400 outline-none resize-none" />
+                  </div>
                 </div>
                 <div className="flex border-t">
                   <button onClick={() => setShowBillingDeleteConfirm(false)}
@@ -8709,6 +8771,9 @@ const handleApproveRequest = async (id: string) => {
                         <p className="text-sm text-gray-500 mt-0.5">
                           {detailBilling.company_name} · {detailBilling.billing_year}년 {detailBilling.billing_month}월
                           {detailBilling.user_name && <span className="ml-2 text-indigo-600">({detailBilling.user_name})</span>}
+                          {/* ★ 2026-07-26 발행 단위 — 묶음 발행이면 이 장이 어떤 장인지가 보여야 한다 */}
+                          {detailBilling.scope === 'by_user' && <span className="ml-2 px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 text-xs font-medium">계정 장</span>}
+                          {detailBilling.scope === 'common' && <span className="ml-2 px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 text-xs font-medium">공통 장 (회사 단위 항목)</span>}
                         </p>
                         {detailBilling.emailed_at && (
                           <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
@@ -8733,45 +8798,49 @@ const handleApproveRequest = async (id: string) => {
                   </div>
                 ) : detailBilling && (
                   <div className="flex-1 overflow-y-auto">
-                    {/* 요약 카드 */}
+                    {/* ★ 2026-07-26 항목표 — 서버가 PDF·이메일과 같은 함수(buildInvoiceLines)로 내려준 줄.
+                        헤더 컬럼 카드(SMS/LMS/MMS/카카오)를 폐기한 이유: 헤더에는 에이전트·요금제 칸이
+                        없는데 공급가액에는 그 금액이 들어가서, 카드 세로합 ≠ 공급가액이었다. */}
                     <div className="px-6 py-4">
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-                        {Number(detailBilling.sms_success) > 0 && (
-                          <div className="bg-blue-50 rounded-lg p-3 text-center">
-                            <div className="text-xs text-blue-600 font-medium">SMS</div>
-                            <div className="text-lg font-bold text-blue-800">{billingFmt(Number(detailBilling.sms_success))}건</div>
-                            <div className="text-xs text-blue-500">@{billingFmtWon(Number(detailBilling.sms_unit_price))}</div>
-                          </div>
-                        )}
-                        {Number(detailBilling.lms_success) > 0 && (
-                          <div className="bg-purple-50 rounded-lg p-3 text-center">
-                            <div className="text-xs text-purple-600 font-medium">LMS</div>
-                            <div className="text-lg font-bold text-purple-800">{billingFmt(Number(detailBilling.lms_success))}건</div>
-                            <div className="text-xs text-purple-500">@{billingFmtWon(Number(detailBilling.lms_unit_price))}</div>
-                          </div>
-                        )}
-                        {Number(detailBilling.mms_success) > 0 && (
-                          <div className="bg-pink-50 rounded-lg p-3 text-center">
-                            <div className="text-xs text-pink-600 font-medium">MMS</div>
-                            <div className="text-lg font-bold text-pink-800">{billingFmt(Number(detailBilling.mms_success))}건</div>
-                            <div className="text-xs text-pink-500">@{billingFmtWon(Number(detailBilling.mms_unit_price))}</div>
-                          </div>
-                        )}
-                        {Number(detailBilling.kakao_success) > 0 && (
-                          <div className="bg-yellow-50 rounded-lg p-3 text-center">
-                            <div className="text-xs text-yellow-600 font-medium">카카오</div>
-                            <div className="text-lg font-bold text-yellow-800">{billingFmt(Number(detailBilling.kakao_success))}건</div>
-                            <div className="text-xs text-yellow-500">@{billingFmtWon(Number(detailBilling.kakao_unit_price))}</div>
-                          </div>
-                        )}
-                      </div>
+                      {/* 정합 경고 — 항목합 + 크레딧 ≠ 공급가액이면 PDF·메일도 같은 이유로 막힌다 */}
+                      {detailHeaderCheck && !detailHeaderCheck.ok && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700">
+                          <span className="font-semibold">항목 합계가 공급가액과 일치하지 않습니다</span>
+                          <span className="ml-2">(차이 {billingFmtWon(Number(detailHeaderCheck.diff))})</span>
+                          <span className="block text-xs text-red-500 mt-1">이 상태로는 PDF·메일 발행이 서버에서 차단됩니다. 발행 경로 점검이 필요합니다.</span>
+                        </div>
+                      )}
 
-                      {/* 테스트 발송 */}
-                      {(Number(detailBilling.test_sms_count) > 0 || Number(detailBilling.test_lms_count) > 0) && (
-                        <div className="bg-amber-50 rounded-lg p-3 mb-4 flex items-center gap-4 text-sm">
-                          <span className="text-amber-700 font-medium">테스트:</span>
-                          {Number(detailBilling.test_sms_count) > 0 && <span className="text-amber-600">SMS {billingFmt(Number(detailBilling.test_sms_count))}건</span>}
-                          {Number(detailBilling.test_lms_count) > 0 && <span className="text-amber-600">LMS {billingFmt(Number(detailBilling.test_lms_count))}건</span>}
+                      {detailLines.length > 0 && (
+                        <div className="border rounded-lg overflow-hidden mb-4">
+                          <table className="w-full text-sm">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-3 py-2 text-left text-gray-600 font-medium">항목</th>
+                                <th className="px-3 py-2 text-right text-gray-600 font-medium">수량</th>
+                                <th className="px-3 py-2 text-right text-gray-600 font-medium">단가</th>
+                                <th className="px-3 py-2 text-right text-gray-600 font-medium">금액</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                              {detailLines.map((line: any, idx: number) => (
+                                <tr key={idx} className={billingChannelBg[line.channel] || 'bg-white'}>
+                                  <td className="px-3 py-2 text-gray-800">{line.label}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums">{line.quantityText || `${billingFmt(Number(line.count))}건`}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums">{billingFmtWon(Number(line.unitPrice))}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums font-medium">{billingFmtWon(Number(line.amount))}</td>
+                                </tr>
+                              ))}
+                              {Number(detailBilling.ai_credit_supply) > 0 && (
+                                <tr className="bg-violet-50/60">
+                                  <td className="px-3 py-2 text-gray-800">AI 크레딧</td>
+                                  <td className="px-3 py-2 text-right tabular-nums">{billingFmt(Number(detailBilling.ai_credit_count))} 크레딧</td>
+                                  <td className="px-3 py-2 text-right tabular-nums">{Number(detailBilling.ai_credit_count) > 0 ? billingFmtWon(Math.round(Number(detailBilling.ai_credit_supply) / Number(detailBilling.ai_credit_count))) : '-'}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums font-medium">{billingFmtWon(Number(detailBilling.ai_credit_supply))}</td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
                         </div>
                       )}
 
@@ -8803,6 +8872,9 @@ const handleApproveRequest = async (id: string) => {
                             <thead className="bg-gray-50">
                               <tr>
                                 <th className="px-3 py-2 text-left text-gray-600 font-medium">일자</th>
+                                {/* ★ 2026-07-26 '구분' 열 — 축이 채널·계정·발송ID로 쪼개지면서 같은 날 같은 유형
+                                    행이 여러 줄 생긴다. 구분이 없으면 중복 오류로 보인다(PDF 2페이지와 같은 열). */}
+                                <th className="px-3 py-2 text-left text-gray-600 font-medium">구분</th>
                                 <th className="px-3 py-2 text-left text-gray-600 font-medium">유형</th>
                                 <th className="px-3 py-2 text-right text-gray-600 font-medium">전송</th>
                                 <th className="px-3 py-2 text-right text-gray-600 font-medium">성공</th>
@@ -8814,15 +8886,41 @@ const handleApproveRequest = async (id: string) => {
                             </thead>
                             <tbody className="divide-y divide-gray-100">
                               {detailItems.map((item: any, idx: number) => {
-                                const isTest = item.message_type.startsWith('TEST');
+                                // 채널 판정은 유형키 접두가 아니라 channel — 접두 판정은 새 유형이 생기면 조용히 어긋난다.
+                                const ch = String(item.channel || 'web');
+                                const isPlan = ch === 'plan';
+                                const planDays = Number(item.plan_days) || 0;
+                                // 요금제 행은 발송이 아니다 — 일자 칸에 적용 구간, 수량 4칸에 '-'.
+                                const dateText = isPlan && planDays > 1
+                                  ? `${String(item.item_date).slice(5, 10)}~${billingShiftDay(item.item_date, planDays - 1)}`
+                                  : String(item.item_date).slice(5, 10);
+                                const typeText = isPlan
+                                  ? String(item.message_type).replace(/^PLAN_/, '')
+                                  : (billingTypeLabel[item.message_type] || item.message_type);
+                                const scopeText = ch === 'agent'
+                                  ? String(item.agent_send_id || '(발송ID 미상)')
+                                  : (billingChannelLabel[ch] || ch);
+                                const rowBg = billingChannelBg[ch] || (idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50');
                                 return (
-                                  <tr key={idx} className={isTest ? 'bg-amber-50' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                                    <td className="px-3 py-2 text-gray-700 font-mono text-xs">{String(item.item_date).slice(5, 10)}</td>
-                                    <td className="px-3 py-2">{billingTypeLabel[item.message_type] || item.message_type}</td>
-                                    <td className="px-3 py-2 text-right tabular-nums">{billingFmt(Number(item.total_count))}</td>
-                                    <td className="px-3 py-2 text-right tabular-nums text-green-700 font-medium">{billingFmt(Number(item.success_count))}</td>
-                                    <td className={`px-3 py-2 text-right tabular-nums ${Number(item.fail_count) > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}`}>{billingFmt(Number(item.fail_count))}</td>
-                                    <td className={`px-3 py-2 text-right tabular-nums ${Number(item.pending_count) > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{billingFmt(Number(item.pending_count))}</td>
+                                  <tr key={idx} className={rowBg}>
+                                    <td className="px-3 py-2 text-gray-700 font-mono text-xs whitespace-nowrap">{dateText}</td>
+                                    <td className="px-3 py-2 text-gray-600 text-xs whitespace-nowrap">{scopeText}</td>
+                                    <td className="px-3 py-2">{typeText}</td>
+                                    {isPlan ? (
+                                      <>
+                                        <td className="px-3 py-2 text-right text-gray-400">-</td>
+                                        <td className="px-3 py-2 text-right text-gray-400">-</td>
+                                        <td className="px-3 py-2 text-right text-gray-400">-</td>
+                                        <td className="px-3 py-2 text-right text-gray-400">-</td>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <td className="px-3 py-2 text-right tabular-nums">{billingFmt(Number(item.total_count))}</td>
+                                        <td className="px-3 py-2 text-right tabular-nums text-green-700 font-medium">{billingFmt(Number(item.success_count))}</td>
+                                        <td className={`px-3 py-2 text-right tabular-nums ${Number(item.fail_count) > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}`}>{billingFmt(Number(item.fail_count))}</td>
+                                        <td className={`px-3 py-2 text-right tabular-nums ${Number(item.pending_count) > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{billingFmt(Number(item.pending_count))}</td>
+                                      </>
+                                    )}
                                     <td className="px-3 py-2 text-right tabular-nums">{billingFmtWon(Number(item.unit_price))}</td>
                                     <td className="px-3 py-2 text-right tabular-nums font-medium">{billingFmtWon(Number(item.amount))}</td>
                                   </tr>
@@ -8831,7 +8929,9 @@ const handleApproveRequest = async (id: string) => {
                             </tbody>
                             <tfoot className="border-t-2 border-gray-300 bg-indigo-50">
                               <tr>
-                                <td colSpan={2} className="px-3 py-2.5 font-bold text-indigo-800">합계</td>
+                                {/* ★ 2026-07-26 라벨 정정 — 이 합계는 AI 크레딧·부가세가 빠진 값이다.
+                                    '합계'라고만 쓰면 상단 카드의 합계(총액)와 다른 이유를 알 수 없다. */}
+                                <td colSpan={3} className="px-3 py-2.5 font-bold text-indigo-800">항목 합계 <span className="font-normal text-xs text-indigo-500">(AI 크레딧·부가세 제외)</span></td>
                                 <td className="px-3 py-2.5 text-right tabular-nums font-medium">{billingFmt(detailItems.reduce((s: number, i: any) => s + Number(i.total_count), 0))}</td>
                                 <td className="px-3 py-2.5 text-right tabular-nums font-medium text-green-700">{billingFmt(detailItems.reduce((s: number, i: any) => s + Number(i.success_count), 0))}</td>
                                 <td className="px-3 py-2.5 text-right tabular-nums font-medium text-red-600">{billingFmt(detailItems.reduce((s: number, i: any) => s + Number(i.fail_count), 0))}</td>
@@ -8933,19 +9033,21 @@ const handleApproveRequest = async (id: string) => {
                     />
                   </div>
 
-                  {/* 본문 미리보기 */}
+                  {/* 본문 구성 — ★ 2026-07-26 목업 폐기.
+                      본문은 서버가 청구 상세(billing_items)에서 만들고 항목합↔공급가액 정합 검사를 통과해야 나간다.
+                      화면이 다른 본문을 그려두면 "미리보기와 실제가 다른" 거짓 표시가 된다. */}
                   <div className="mb-3">
-                    <label className="block text-xs font-medium text-gray-500 mb-1">본문 미리보기</label>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">본문 구성 (서버 생성)</label>
                     <div className="border rounded-lg p-3 bg-gray-50 text-xs text-gray-600 space-y-1.5 max-h-[140px] overflow-y-auto">
                       <p>안녕하세요, <strong>{emailTarget.company_name}</strong> 담당자님.</p>
-                      <p>아래와 같이 거래내역서를 송부드립니다.</p>
+                      <p><strong>{emailTarget.billing_year}년 {emailTarget.billing_month}월</strong> 정산서를 안내드립니다.</p>
                       <div className="bg-white rounded p-2 mt-2 border">
-                        <div className="flex justify-between"><span className="text-gray-400">정산 기간</span><span className="font-medium">{emailTarget.billing_year}년 {emailTarget.billing_month}월</span></div>
+                        <div className="text-gray-500 mb-1">청구 항목표 — 요금제 · 한줄로 · 에이전트 · 테스트 · 스팸필터 · AI 크레딧 (청구 상세와 동일)</div>
                         <div className="flex justify-between"><span className="text-gray-400">공급가액</span><span>{billingFmtWon(Number(emailTarget.subtotal || 0))}</span></div>
                         <div className="flex justify-between"><span className="text-gray-400">부가세</span><span>{billingFmtWon(Number(emailTarget.vat || 0))}</span></div>
                         <div className="flex justify-between border-t pt-1 mt-1"><span className="font-bold">합계</span><span className="font-bold text-indigo-700">{billingFmtWon(Number(emailTarget.total_amount || 0))}</span></div>
                       </div>
-                      <p className="text-gray-400 mt-2">+ 거래내역서 PDF 첨부</p>
+                      <p className="text-gray-400 mt-2">+ 정산서 PDF 첨부 (발송 시 자동 생성)</p>
                     </div>
                   </div>
 
@@ -8953,18 +9055,28 @@ const handleApproveRequest = async (id: string) => {
                   <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-400">
                     발신: {COMPANY_EMAIL} (하이웍스)
                   </div>
+
+                  {/* ★ 2026-07-26 재발송 확인 — 서버가 409로 되돌린 경우에만 열린다.
+                      같은 청구서가 확인 없이 두 번 고객에게 나가는 것을 막는다(메일은 회수 불가). */}
+                  {emailResendInfo && (
+                    <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 text-xs text-amber-800">
+                      <div className="font-semibold mb-0.5">이미 발송된 정산서입니다</div>
+                      <div className="text-amber-700">{emailResendInfo}</div>
+                      <div className="mt-1.5 text-amber-600">아래 &quot;재발송&quot;을 누르면 같은 청구서를 다시 보냅니다.</div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex border-t">
                   <button
-                    onClick={() => setShowEmailModal(false)}
+                    onClick={() => { setShowEmailModal(false); setEmailResendInfo(null); setEmailResendAt(null); }}
                     className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r"
                     disabled={emailSending}
                   >
                     취소
                   </button>
                   <button
-                    onClick={handleSendBillingEmail}
+                    onClick={() => handleSendBillingEmail(Boolean(emailResendInfo))}
                     disabled={emailSending || !emailTo}
                     className="flex-1 px-4 py-3 text-amber-600 font-medium hover:bg-amber-50 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
                   >
@@ -8976,7 +9088,7 @@ const handleApproveRequest = async (id: string) => {
                     ) : (
                       <>
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                        발송하기
+                        {emailResendInfo ? '재발송' : '발송하기'}
                       </>
                     )}
                   </button>

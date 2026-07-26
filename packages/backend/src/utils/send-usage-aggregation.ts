@@ -17,6 +17,9 @@
 import pool, { mysqlQuery } from '../config/database';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL } from './sms-result-map';
 import { getAllBulkSmsTables, getBitoSmsTables, getTestSmsTables, mergeLineTables } from './sms-queue';
+import { queryPayAgentStoreBreakdown, type PayAgentStoreRow } from './pay-stats';
+import { loadBillingLedger, hasAgentMapping, type BillingLedger } from './billing-ledger';
+import type { PlanSegment } from './plan-proration';
 
 /** SMSQ msg_type → 청구 유형키. 변환 누락 = 그 유형이 청구 합산에서 통째로 빠진다. */
 export const MSG_TYPE_TO_USAGE_KEY: Record<string, string> = { S: 'SMS', L: 'LMS', M: 'MMS', K: 'KAKAO' };
@@ -48,18 +51,55 @@ function priceOrNull(v: any): number | null {
  * 스팸필터는 전용 단가를 두지 않고 일반 SMS/LMS 단가를 그대로 쓴다(D16 결정).
  */
 export function resolveBillingUnitPrices(co: any): Record<string, number> {
-  const sms = priceOrNull(co?.cost_per_sms) ?? 0;
-  const lms = priceOrNull(co?.cost_per_lms) ?? 0;
-  return {
+  return resolveBillingUnitPricesDetailed(co).prices;
+}
+
+/**
+ * 단가와 함께 **"미설정이라 0원으로 떨어진 유형키"** 를 돌려준다. (★ 2026-07-26 신설)
+ *
+ * `priceOrNull`이 미설정(NULL)과 명시적 0원을 구분해 놓고도 곧바로 `?? 0`으로 합쳐지고 있었다.
+ * 그래서 `cost_per_mms`가 비어 있는 회사가 MMS를 1,000건 보내면 **아무 경고 없이 0원으로 청구**된다.
+ * 에이전트 단가는 미설정을 막게 해놨는데(`priceBillingRows`) 웹만 뚫려 있던 것이다 —
+ * MMS 308,043건 0원 청구가 정확히 이 계열의 사고였다.
+ *
+ * 기존 함수 시그니처는 그대로 둔다(소비처 3곳 + 기존 테스트 9개 무수정 통과).
+ *
+ * ★ 테스트 단가는 미설정 시 일반 단가를 상속하는 것이 **설계된 동작**이다(0725 정정).
+ *   그래서 자기도 비어 있고 **상속원까지 비어 있을 때만** 미설정으로 본다.
+ *   스팸은 전용 단가가 없고 일반 SMS/LMS를 그대로 쓰므로(D16) 그 원본을 따른다.
+ */
+export function resolveBillingUnitPricesDetailed(co: any): { prices: Record<string, number>; unsetKeys: string[] } {
+  const smsRaw = priceOrNull(co?.cost_per_sms);
+  const lmsRaw = priceOrNull(co?.cost_per_lms);
+  const mmsRaw = priceOrNull(co?.cost_per_mms);
+  const kakaoRaw = priceOrNull(co?.cost_per_kakao);
+  const testSmsRaw = priceOrNull(co?.cost_per_test_sms);
+  const testLmsRaw = priceOrNull(co?.cost_per_test_lms);
+
+  const sms = smsRaw ?? 0;
+  const lms = lmsRaw ?? 0;
+  const prices: Record<string, number> = {
     SMS: sms,
     LMS: lms,
-    MMS: priceOrNull(co?.cost_per_mms) ?? 0,
-    KAKAO: priceOrNull(co?.cost_per_kakao) ?? 0,
-    TEST_SMS: priceOrNull(co?.cost_per_test_sms) ?? sms,
-    TEST_LMS: priceOrNull(co?.cost_per_test_lms) ?? lms,
+    MMS: mmsRaw ?? 0,
+    KAKAO: kakaoRaw ?? 0,
+    TEST_SMS: testSmsRaw ?? sms,
+    TEST_LMS: testLmsRaw ?? lms,
     SPAM_SMS: sms,
     SPAM_LMS: lms,
   };
+
+  const unsetKeys: string[] = [];
+  if (smsRaw === null) unsetKeys.push('SMS');
+  if (lmsRaw === null) unsetKeys.push('LMS');
+  if (mmsRaw === null) unsetKeys.push('MMS');
+  if (kakaoRaw === null) unsetKeys.push('KAKAO');
+  if (testSmsRaw === null && smsRaw === null) unsetKeys.push('TEST_SMS');
+  if (testLmsRaw === null && lmsRaw === null) unsetKeys.push('TEST_LMS');
+  if (smsRaw === null) unsetKeys.push('SPAM_SMS');
+  if (lmsRaw === null) unsetKeys.push('SPAM_LMS');
+
+  return { prices, unsetKeys };
 }
 
 // ============================================================
@@ -150,6 +190,53 @@ async function queryImcOrSkipIfMissing(sql: string, params: any[], context: stri
   }
 }
 
+/**
+ * SMSQ 테이블들에서 (발송ID × 일자 × msg_type) 카운트.
+ *
+ * ★ 2026-07-26 신설 — `smsAggByDateType`은 `app_etc1`을 내리지 않아 **계정 축을 만들 수 없다.**
+ *   청구서는 "일자 × 계정 × 유형"으로 나와야 하므로(Harold 정의 항목 2) run_id를 함께 받아
+ *   PG에서 `campaigns.created_by`로 되매핑한다. 기존 함수는 화면·엑셀이 쓰고 있어 건드리지 않는다.
+ */
+export async function smsAggByRunDateType(tables: string[], whereClause: string, params: any[]): Promise<any[]> {
+  const allRows: any[] = [];
+  for (const t of tables) {
+    const rows = await mysqlQuery(
+      `SELECT app_etc1 as run_id, msg_type, DATE(sendreq_time) as send_date,
+              COUNT(*) as total_count,
+              SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count,
+              SUM(CASE WHEN status_code NOT IN (${SUCCESS_CODES_SQL},${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail_count,
+              SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending_count
+       FROM ${t} WHERE ${whereClause}
+       GROUP BY app_etc1, msg_type, DATE(sendreq_time)`,
+      params
+    ) as any[];
+    allRows.push(...rows);
+  }
+  return allRows;
+}
+
+/**
+ * 테스트 라인 테이블에서 (계정 × 일자 × msg_type) 카운트.
+ * 계정은 `bill_id`에 들어간다 — `sms-queue.ts insertTestSmsQueue`가 `extra.billId = userId`로 적재한다.
+ */
+export async function testSmsAggByUserDateType(tables: string[], whereClause: string, params: any[]): Promise<any[]> {
+  const allRows: any[] = [];
+  for (const t of tables) {
+    const rows = await mysqlQuery(
+      `SELECT bill_id, msg_type, DATE(sendreq_time) as send_date,
+              COUNT(*) as total_count,
+              SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count,
+              SUM(CASE WHEN status_code NOT IN (${SUCCESS_CODES_SQL},${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail_count,
+              SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending_count
+       FROM ${t} WHERE ${whereClause}
+       GROUP BY bill_id, msg_type, DATE(sendreq_time)`,
+      params
+    ) as any[];
+    allRows.push(...rows);
+  }
+  return allRows;
+}
+
 /** SMSQ 테이블들에서 (일자 × msg_type) 카운트 — 청구 단가 산정의 기준 축 */
 export async function smsAggByDateType(tables: string[], whereClause: string, params: any[]): Promise<any[]> {
   const allRows: any[] = [];
@@ -169,10 +256,53 @@ export async function smsAggByDateType(tables: string[], whereClause: string, pa
   return allRows;
 }
 
-/** MySQL/PG가 돌려주는 날짜값을 YYYY-MM-DD 문자열로 */
-function toDayKey(v: any): string {
-  return v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10);
+/**
+ * MySQL/PG가 돌려주는 날짜값을 YYYY-MM-DD 문자열로.
+ *
+ * ★ 2026-07-26 정정 — `toISOString()`을 쓰면 **하루가 앞으로 밀린다.**
+ *   mysql2 풀에 `dateStrings` 옵션이 없어 `DATE()` 결과가 **로컬 자정 Date 객체**로 오고
+ *   (`config/database.ts` mysql 풀 설정), PG도 `date`(oid 1082) 파서를 재정의하지 않아 같다
+ *   (`types.setTypeParser`는 1114=timestamp만 덮는다).
+ *   서버 실측(2026-07-26): `DATE('2026-07-15 10:00:00')` → `Wed Jul 15 2026 00:00:00 GMT+0900`
+ *   → `toISOString().slice(0,10)` = **`2026-07-14`**.
+ *
+ *   그래서 발송통계 엑셀 웹 행과 청구서 일자별 상세가 하루씩 밀려 있었다.
+ *   에이전트 축은 `YYYYMMDD` 문자열을 자르므로(`pay-stats.ts periodOf`) 안 밀려서,
+ *   같은 파일·같은 청구서 안에서 웹 행과 에이전트 행의 날짜 기준이 갈려 있었다.
+ *
+ *   두 드라이버 모두 **로컬 자정 Date**를 주므로 로컬 연·월·일 성분을 그대로 읽는 게 정답이다.
+ *   서버 TZ가 무엇이든 옳다 — UTC든 KST든 드라이버가 만든 그 자정의 달력일을 되돌려준다.
+ */
+export function toDayKey(v: any): string {
+  if (v instanceof Date) {
+    const y = v.getFullYear();
+    const m = String(v.getMonth() + 1).padStart(2, '0');
+    const d = String(v.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return String(v).slice(0, 10);
 }
+
+// ============================================================
+//  청구 기간 경계 — KST 자정 (★ 2026-07-26 신설)
+// ============================================================
+
+/**
+ * PG 세션 TZ가 `Etc/UTC`(2026-07-26 `SHOW timezone` 실측)라 `sent_at >= $2::date`로 쓰면
+ * 경계가 **UTC 자정 = KST 09:00**이 된다. 그러면 매달 양끝에서 9시간씩 어긋난다 —
+ * 7/1 KST 00~09시 발송이 7월 청구에서 빠져 6월로 가고, 8/1 새벽 발송이 7월에 들어온다.
+ * 실측(2026-07-26): 7/1 KST 00~09시 완료 직접발송 6건(7월 전체 4,670건 중).
+ *
+ * 이 결함은 위 `toDayKey` 밀림과 **정확히 서로를 상쇄하고 있었다.** 한쪽만 고치면 상쇄가 깨져
+ * 청구서에 기간 밖 날짜(`07-01`이 6월 청구서에)가 인쇄된다. 반드시 세트로 고친다.
+ *
+ * 스팸필터 조회가 이미 이 형태를 쓰고 있어 그것을 기준으로 통일한다.
+ */
+const kstStart = (p: string) => `(${p} || ' 00:00:00+09')::timestamptz`;
+const kstEnd = (p: string) => `((${p}::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz`;
+/** `timestamp without time zone` 컬럼용 — 값이 UTC 벽시계로 저장돼 있으므로 같은 축으로 내린다. */
+const kstStartNaive = (p: string) => `(${kstStart(p)} AT TIME ZONE 'UTC')`;
+const kstEndNaive = (p: string) => `(${kstEnd(p)} AT TIME ZONE 'UTC')`;
 
 function bump(dayData: UsageDayData, day: string, type: string, row: { total?: any; success?: any; fail?: any; pending?: any }): void {
   if (!dayData[day]) dayData[day] = {};
@@ -213,8 +343,8 @@ export async function selectBillingRunIds(opts: {
     FROM campaign_runs cr
     JOIN campaigns c ON c.id = cr.campaign_id
     WHERE c.company_id = $1
-      AND cr.sent_at >= $2::date
-      AND cr.sent_at < ($3::date + interval '1 day')
+      AND cr.sent_at >= ${kstStartNaive('$2')}
+      AND cr.sent_at < ${kstEndNaive('$3')}
       AND cr.status = 'completed'`;
   const runsParams: any[] = [companyId, startDate, endDate];
   if (userId) {
@@ -232,8 +362,8 @@ export async function selectBillingRunIds(opts: {
       AND c2.send_type = 'direct'
       AND c2.send_phase = 'sent'
       AND c2.status = 'completed'
-      AND COALESCE(c2.scheduled_at, c2.sent_at) >= $2::date
-      AND COALESCE(c2.scheduled_at, c2.sent_at) < ($3::date + interval '1 day')`;
+      AND COALESCE(c2.scheduled_at, c2.sent_at) >= ${kstStart('$2')}
+      AND COALESCE(c2.scheduled_at, c2.sent_at) < ${kstEnd('$3')}`;
   if (userId) runsSql += ` AND c2.created_by = $${runsParams.length}`;
 
   const runsResult = await pool.query(runsSql, runsParams);
@@ -410,8 +540,8 @@ export async function buildCompanyUsageByDay(opts: {
        WHERE company_id = $1
          AND send_type = 'manual'
          AND (send_channel = 'kakao' OR send_channel = 'both')
-         AND sent_at >= $2::date
-         AND sent_at < ($3::date + interval '1 day')${dkUserWhere}`,
+         AND sent_at >= ${kstStart('$2')}
+         AND sent_at < ${kstEnd('$3')}${dkUserWhere}`,
       dkParams
     );
     const directKakaoIds = directKakaoResult.rows.map((r: any) => r.id);
@@ -498,4 +628,772 @@ export function rollupUsageByPeriod(dayData: UsageDayData, view: 'daily' | 'mont
     const o = order(a.type_key) - order(b.type_key);
     return o !== 0 ? o : a.type_key.localeCompare(b.type_key);
   });
+}
+
+// ============================================================
+//  청구용 통합 집계 (★ 2026-07-26 신설 — 정산 재구성 ①)
+// ============================================================
+
+/**
+ * Harold 정의 청구서(2026-07-25)는 채널이 나뉜 항목별 청구서다:
+ *   ② 한줄로 웹 = 일자 × 계정 × 유형 / ③ 에이전트 = 일자 × 발송ID × 유형 / ④ 테스트 = 일자 × 계정 × 유형
+ *
+ * 그런데 기존 청구 집계(`buildCompanyUsageByDay`)는 **일자 × 유형**뿐이라 계정도 발송ID도 없고,
+ * 무엇보다 **에이전트(`sales.RSRM_SalesStts`)를 아예 읽지 않는다.**
+ * 그 결과 `usage_type='both'` 회사 17곳(베네통·아난티·마리오아울렛 등)의 게이트웨이 발송분이
+ * 청구서에서 통째로 빠져 있었다. MMS 308,043건 0원 청구와 같은 계열인데 채널 하나가 통째로 빠진 것.
+ *
+ * 기존 함수는 발송통계 화면·엑셀이 쓰고 있고 0725에 축을 맞춰놨으므로 **건드리지 않는다.**
+ * 대신 이 함수가 청구 축을 그대로 내고, 발행 직전에 두 결과를 대조한다(`diffBillingRowsVsDayData`).
+ * 화면·엑셀·청구서가 갈라지지 않는다는 걸 사람 눈이 아니라 기계가 보증하게 하려는 것이다.
+ *
+ * ★ 대상ID(StoreId)는 청구서 축이 아니다(Harold 지시 2026-07-26 — "하루씩 묶어서, 건바이건은 통계에서").
+ *   게이트웨이 입력값이라 계정마다 의미가 갈린다: 아난티(D0018)는 22개짜리 지점 코드인데
+ *   제이씨패밀리(B0229)는 7월 한 달에 29,598개 — 사실상 발송 건 식별자다(행 30,314개와 거의 1:1).
+ *   우리가 카디널리티를 통제할 수 없는 값을 청구 축으로 삼으면 청구서가 3만 줄이 된다.
+ *   지점별 확인은 기존 발송통계 엑셀(`queryPayAgentStoreBreakdown` 대상ID 분해)이 이미 담당한다.
+ */
+/** `plan`은 발송이 아니라 구독료다 — 수량 축이 없고 금액이 일할로 미리 정해져 온다. */
+export type BillingChannel = 'plan' | 'web' | 'agent' | 'test' | 'spam';
+
+/** 청구 상세 한 줄 = `billing_items` 한 행 */
+export interface BillingUsageRow {
+  channel: BillingChannel;
+  /** YYYY-MM-DD */
+  itemDate: string;
+  /** 유형키. 청구 단가가 붙는 키(SMS·LMS·MMS·KAKAO·TEST_SMS·TEST_LMS·SPAM_SMS·SPAM_LMS)가 아니면 미청구로 드러난다 */
+  typeKey: string;
+  /** web·test·spam 계정. 없으면 null(계정 미상) */
+  userId: string | null;
+  /** agent 발송ID(= RSRM_SalesStts.CustId). 그 외 채널은 null */
+  agentSendId: string | null;
+  total: number;
+  success: number;
+  fail: number;
+  pending: number;
+}
+
+export interface BillingUsageResult {
+  rows: BillingUsageRow[];
+  /** 청구 단가가 정의되지 않은 유형키 — 조용한 0원 청구를 막기 위해 발행 전에 드러낸다 */
+  unbillable: UnbillableUsageKey[];
+  /** 선불 발송ID라 청구에서 뺀 분 — 게이트웨이 잔액에서 이미 빠졌으므로 청구하면 이중 청구다 */
+  excludedPrepaidSendIds: string[];
+  /** `usage_type`이 agent·both인데 발송ID 매핑이 0행 — 게이트웨이 발송분이 통째로 빠지는 신호 */
+  agentMappingMissing: boolean;
+}
+
+/**
+ * 에이전트 MsgType → 청구 유형키.
+ * 여기 없는 코드는 **원본 코드를 그대로 유형키로 쓴다.** 임의로 뭉치면 그 유형이 조용히 0원이 된다 —
+ * 2026-07-26 실측에서 `G`(여미지 B0227, 7월 성공 42,833건)가 그 자리에 있었다.
+ * 원본으로 남겨야 `findUnbillableUsageKeys`가 발행 시점에 집어낸다.
+ */
+export const AGENT_MSG_TYPE_TO_USAGE_KEY: Record<string, string> = { S: 'SMS', L: 'LMS', M: 'MMS', K: 'KAKAO' };
+
+export function agentUsageKey(msgType: any): string {
+  const k = String(msgType || '').trim().toUpperCase();
+  if (!k) return '(유형 미상)';
+  return AGENT_MSG_TYPE_TO_USAGE_KEY[k] || k;
+}
+
+/**
+ * (순수) 청구 상세 행의 그룹 키.
+ *
+ * ★ 2026-07-26 문자열 연결(`채널|일자|계정|유형`)에서 교체.
+ *   `typeKey`는 매핑에 없는 게이트웨이 `MsgType`을 원본 그대로 쓰고(`agentUsageKey`),
+ *   `agentSendId`도 외부 입력이라 `|`가 안 들어온다는 보장이 없다.
+ *   `sendId='A' + type='B|C'`와 `sendId='A|B' + type='C'`가 같은 키가 되면
+ *   서로 다른 유형이 한 행으로 합쳐지고 그 행에 한쪽 단가만 붙는다.
+ *
+ *   키를 행에서 직접 만들게 해서 **키와 행 내용이 갈라질 수 없게** 한다 —
+ *   그 전에는 같은 정보를 키 문자열과 seed에 두 번 썼고, 실제로 에이전트 키만 채널 접두가 빠져 있었다.
+ */
+export function billingRowKey(r: BillingUsageRow): string {
+  return JSON.stringify([r.channel, r.itemDate, r.userId ?? '', r.agentSendId ?? '', r.typeKey]);
+}
+
+function bumpRow(acc: Map<string, BillingUsageRow>, seed: BillingUsageRow, c: { total?: any; success?: any; fail?: any; pending?: any }): void {
+  const key = billingRowKey(seed);
+  if (!acc.has(key)) acc.set(key, seed);
+  const b = acc.get(key)!;
+  b.total += Number(c.total || 0);
+  b.success += Number(c.success || 0);
+  b.fail += Number(c.fail || 0);
+  b.pending += Number(c.pending || 0);
+}
+
+/** 청구 상세 정렬 — 채널 → 일자 → 계정/발송ID → 유형. PDF·화면이 이 순서를 그대로 쓴다. */
+// 요금제가 청구서 항목 1번이다(Harold 정의) — 정렬 맨 앞.
+const CHANNEL_ORDER: BillingChannel[] = ['plan', 'web', 'agent', 'test', 'spam'];
+const TYPE_ORDER_FOR_BILLING = ['SMS', 'LMS', 'MMS', 'KAKAO', 'TEST_SMS', 'TEST_LMS', 'SPAM_SMS', 'SPAM_LMS'];
+
+export function sortBillingUsageRows(rows: BillingUsageRow[]): BillingUsageRow[] {
+  const ch = (c: BillingChannel) => CHANNEL_ORDER.indexOf(c);
+  const ty = (t: string) => {
+    const i = TYPE_ORDER_FOR_BILLING.indexOf(t);
+    return i === -1 ? 99 : i;
+  };
+  return [...rows].sort((a, b) => {
+    if (a.channel !== b.channel) return ch(a.channel) - ch(b.channel);
+    if (a.itemDate !== b.itemDate) return a.itemDate.localeCompare(b.itemDate);
+    const ka = a.agentSendId || a.userId || '';
+    const kb = b.agentSendId || b.userId || '';
+    if (ka !== kb) return ka.localeCompare(kb);
+    const o = ty(a.typeKey) - ty(b.typeKey);
+    return o !== 0 ? o : a.typeKey.localeCompare(b.typeKey);
+  });
+}
+
+/**
+ * (순수) 대상ID 그레인 에이전트 행 → 청구 그레인(일자 × 발송ID × 유형)으로 롤업.
+ *
+ * `allowedSendIds`(후불 발송ID 집합, 대문자)에 없는 발송ID는 제외하고 목록으로 돌려준다.
+ * 발송ID별 `billing_type`은 회사 후불·선불과 **완전히 독립**이라(2026-07-24 ALTER),
+ * 회사가 후불이어도 선불 발송ID가 섞여 있으면 그건 게이트웨이 잔액에서 이미 빠진 돈이다.
+ */
+export function rollupAgentRowsForBilling(
+  storeRows: PayAgentStoreRow[],
+  allowedSendIds: Set<string>,
+): { rows: BillingUsageRow[]; excludedSendIds: string[] } {
+  const acc = new Map<string, BillingUsageRow>();
+  const excluded = new Set<string>();
+  for (const r of storeRows || []) {
+    const sendId = String(r?.agent_send_id || '').trim();
+    if (!sendId) continue;
+    if (!allowedSendIds.has(sendId.toUpperCase())) { excluded.add(sendId); continue; }
+    const day = String(r?.period || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue; // 월별 그레인·깨진 일자는 청구에 넣지 않는다
+    const typeKey = agentUsageKey(r.msg_type);
+    bumpRow(acc, {
+      channel: 'agent', itemDate: day, typeKey, userId: null, agentSendId: sendId,
+      total: 0, success: 0, fail: 0, pending: 0,
+    }, { total: r.sent, success: r.success, fail: r.fail, pending: r.pending });
+  }
+  return { rows: sortBillingUsageRows(Array.from(acc.values())), excludedSendIds: Array.from(excluded).sort() };
+}
+
+/** (순수) 청구 상세 행 중 단가가 정의되지 않은 유형키 — `findUnbillableUsageKeys`의 행 버전 */
+export function findUnbillableBillingRows(rows: BillingUsageRow[]): UnbillableUsageKey[] {
+  const acc = new Map<string, UnbillableUsageKey>();
+  for (const r of rows || []) {
+    if (r.typeKey in EMPTY_BILLING_TOTALS) continue;
+    if (!acc.has(r.typeKey)) acc.set(r.typeKey, { key: r.typeKey, success: 0, total: 0 });
+    const a = acc.get(r.typeKey)!;
+    a.success += Number(r.success) || 0;
+    a.total += Number(r.total) || 0;
+  }
+  return Array.from(acc.values()).sort((a, b) => b.success - a.success || a.key.localeCompare(b.key));
+}
+
+/**
+ * (순수) 회사 단가가 미설정이라 0원으로 청구될 유형키 — **성공 수량이 있는 것만**. (★ 2026-07-26 신설)
+ *
+ * 에이전트 쪽 `missingAgentPrices`와 정확히 같은 규칙이다: 수량이 0인 유형까지 막으면
+ * 발행이 이유 없이 멈춘다. 실측(2026-07-26)상 단가가 비어 있는 후불 회사 65곳은 전부
+ * 에이전트 전용이라 웹 발송이 0이고, `both` 13곳·`web` 25곳은 단가 NULL이 한 곳도 없다 —
+ * 즉 이 게이트를 켜도 지금 막히는 회사는 없고, 앞으로의 회귀만 막는다.
+ */
+export function findUnsetPricedTypes(unsetKeys: string[], rows: BillingUsageRow[]): UnbillableUsageKey[] {
+  const unset = new Set(unsetKeys || []);
+  const acc = new Map<string, UnbillableUsageKey>();
+  for (const r of rows || []) {
+    if (r.channel === 'agent') continue;           // 에이전트는 발송ID별 단가라 축이 다르다
+    if (!unset.has(r.typeKey)) continue;
+    if ((Number(r.success) || 0) <= 0) continue;
+    if (!acc.has(r.typeKey)) acc.set(r.typeKey, { key: r.typeKey, success: 0, total: 0 });
+    const a = acc.get(r.typeKey)!;
+    a.success += Number(r.success) || 0;
+    a.total += Number(r.total) || 0;
+  }
+  return Array.from(acc.values()).sort((a, b) => b.success - a.success || a.key.localeCompare(b.key));
+}
+
+/**
+ * (순수) 차단 사유 목록을 사람이 읽을 한 줄로 — 상위 N건만. (★ 2026-07-26 신설)
+ *
+ * 관리자 화면 토스트는 한 줄짜리이고 3초 뒤 사라진다. 발송ID 283개를 그대로 이어붙이면
+ * 화면을 뚫고 지나가 운영자가 아무것도 못 읽는다. 전체 목록은 응답 배열에 그대로 실려 있다.
+ */
+export function summarizeBlockList(items: string[], head = 5): string {
+  const list = (items || []).filter(Boolean);
+  if (list.length <= head) return list.join(', ');
+  return `${list.slice(0, head).join(', ')} 외 ${list.length - head}건`;
+}
+
+export interface BillingUsageDiff { typeKey: string; rowsSuccess: number; dayDataSuccess: number }
+
+/**
+ * (순수) 새 청구 상세(web·test·spam)와 기존 집계(`buildCompanyUsageByDay`)를 유형별 성공 수량으로 대조.
+ *
+ * 두 경로가 갈라지면 화면·엑셀 숫자와 청구서 금액이 어긋난다. 0725에 축을 맞춘 걸
+ * 이번 재구성이 조용히 되돌리는 것을 막는 유일한 기계적 장치다 — 어긋나면 발행을 막는다.
+ * 에이전트는 기존 집계에 없는 채널이라 대조 대상이 아니다.
+ */
+export function diffBillingRowsVsDayData(rows: BillingUsageRow[], dayData: UsageDayData): BillingUsageDiff[] {
+  const fromRows = new Map<string, number>();
+  for (const r of rows || []) {
+    if (r.channel === 'agent') continue;
+    fromRows.set(r.typeKey, (fromRows.get(r.typeKey) || 0) + (Number(r.success) || 0));
+  }
+  const fromDay = new Map<string, number>();
+  Object.values(dayData || {}).forEach((types) => {
+    Object.entries(types || {}).forEach(([key, c]) => {
+      fromDay.set(key, (fromDay.get(key) || 0) + (Number(c?.success) || 0));
+    });
+  });
+  const keys = Array.from(new Set([...fromRows.keys(), ...fromDay.keys()])).sort();
+  const diffs: BillingUsageDiff[] = [];
+  for (const key of keys) {
+    const a = fromRows.get(key) || 0;
+    const b = fromDay.get(key) || 0;
+    if (a !== b) diffs.push({ typeKey: key, rowsSuccess: a, dayDataSuccess: b });
+  }
+  return diffs;
+}
+
+// ============================================================
+//  청구 상세 단가 부착 (★ 2026-07-26 — 정산 재구성 ②)
+// ============================================================
+
+/** `company_agent_ids` 단가 행 — 발송ID별 단가는 회사 단가와 별개 축이다(2026-07-24 ALTER) */
+export interface AgentUnitPriceRow {
+  id: string;
+  agent_send_id: string;
+  cost_per_sms: any;
+  cost_per_lms: any;
+  cost_per_mms: any;
+  cost_per_kakao: any;
+}
+
+/** `billing_items` 한 행 — 청구 상세에 단가·금액과 FK가 붙은 상태 */
+export interface PricedBillingItem extends BillingUsageRow {
+  /** `company_agent_ids.id` (agent 채널만) */
+  agentId: string | null;
+  unitPrice: number;
+  amount: number;
+  /**
+   * 요금제 행 전용 — 일할 구간 일수 / 그 달 일수(`billing_items.plan_days`·`plan_month_days`).
+   * 발송 행은 null이다. 발송 수량 컬럼(`total_count`·`fail_count`)에 이 값을 실으면
+   * PDF 2페이지 '전송'·'실패' 열과 상세 모달 합계가 오염된다(★ 2026-07-26 Codex 3차 HIGH).
+   */
+  planDays: number | null;
+  planMonthDays: number | null;
+}
+
+/**
+ * (순수) 요금제 구간 → 청구 상세 행. (★ 2026-07-26 — 정산 재구성 ④)
+ *
+ * 요금제는 발송이 아니라 구독료다. 수량 축이 없고 금액이 **일할로 이미 정해져** 온다.
+ * 그래서 `priceBillingRows`(성공 × 단가)를 태우지 않는다 — 태우면 수량이 0이라 금액이 0원이 된다.
+ *
+ * `message_type`에 플랜 코드를 함께 담는다(`PLAN_BASIC` 등, varchar(20) 안에 들어간다).
+ * 청구서에 "어느 요금제 몇 일치"가 보여야 고객이 일할 금액을 검산할 수 있다.
+ *
+ * ★ 2026-07-26 일수를 **전용 컬럼**(`plan_days`·`plan_month_days`)으로 옮겼다(Codex 3차 HIGH).
+ *   그 전에는 구간 일수를 `total_count`에, 그 달 일수를 `fail_count`에 실었다.
+ *   같은 컬럼이 채널에 따라 다른 뜻이 되면서 PDF 2페이지 '전송'·'실패' 열과
+ *   상세 모달 합계(`detailItems.reduce`)에 9·31이 발송 건수처럼 더해졌다 — D132 계열이다.
+ *   발송 수량 4칸은 전부 0으로 둔다. 요금제는 발송이 아니다.
+ */
+export function buildPlanBillingItems(segments: PlanSegment[]): PricedBillingItem[] {
+  return (segments || []).map((s) => ({
+    channel: 'plan' as const,
+    itemDate: s.from,
+    typeKey: `PLAN_${String(s.planCode || '').slice(0, 15)}`,
+    userId: null,
+    agentSendId: null,
+    agentId: null,
+    total: 0, success: 0, fail: 0, pending: 0,
+    planDays: Number(s.days) || 0,
+    planMonthDays: Number(s.monthDays) || 0,
+    unitPrice: Number(s.monthlyPrice) || 0,
+    amount: Number(s.amount) || 0,
+  }));
+}
+
+export interface AgentPriceMiss { agentSendId: string; typeKey: string; success: number }
+
+export interface PricedBillingResult {
+  items: PricedBillingItem[];
+  /** 채널별 공급가 소계 — 청구서 1페이지 항목이 이 값이다 */
+  amountByChannel: Record<BillingChannel, number>;
+  /** 단가가 비어 있는 (발송ID × 유형) — 채우기 전에는 발행을 막는다 */
+  missingAgentPrices: AgentPriceMiss[];
+  /** 청구 단가 자체가 정의되지 않은 유형키(성공 수량이 있는 것만) */
+  unbillableTypes: UnbillableUsageKey[];
+}
+
+const AGENT_PRICE_COLUMN: Record<string, keyof AgentUnitPriceRow> = {
+  SMS: 'cost_per_sms', LMS: 'cost_per_lms', MMS: 'cost_per_mms', KAKAO: 'cost_per_kakao',
+};
+
+/**
+ * (순수) 청구 상세 행에 단가·금액을 붙인다.
+ *
+ * ★ 에이전트 단가는 **회사 단가가 아니라 발송ID별 단가**(`company_agent_ids.cost_per_*`)다.
+ *   2026-07-26 실측: 283개 발송ID 전부 미설정(NULL)이다. 운영에서 채우는 값이므로,
+ *   비어 있으면 **0원으로 계산하지 않고 어느 발송ID·유형이 비었는지를 돌려준다.**
+ *   0원 폴백은 청구서를 조용히 축소시킨다 — MMS 308,043건 0원 청구가 정확히 그 사고였다.
+ *   0원을 명시적으로 설정한 경우(`0`)는 0원 그대로 쓴다. 미설정(NULL·빈값)만 막는다.
+ *
+ * ★ 단가 정의가 없는 유형키(에이전트 `G` 등)는 성공 수량이 있을 때만 막는다.
+ *   수량 0인 유형까지 막으면 발행이 이유 없이 멈춘다.
+ */
+export function priceBillingRows(
+  rows: BillingUsageRow[],
+  webPrices: Record<string, number>,
+  agentPriceRows: AgentUnitPriceRow[],
+): PricedBillingResult {
+  const bySendId = new Map<string, AgentUnitPriceRow>();
+  for (const p of agentPriceRows || []) {
+    const key = String(p?.agent_send_id || '').trim().toUpperCase();
+    if (key) bySendId.set(key, p);
+  }
+
+  const items: PricedBillingItem[] = [];
+  const amountByChannel: Record<BillingChannel, number> = { plan: 0, web: 0, agent: 0, test: 0, spam: 0 };
+  const missMap = new Map<string, AgentPriceMiss>();
+
+  for (const r of rows || []) {
+    const success = Number(r.success) || 0;
+    let unitPrice = 0;
+    let agentId: string | null = null;
+
+    if (r.channel === 'agent') {
+      const p = bySendId.get(String(r.agentSendId || '').trim().toUpperCase());
+      agentId = p ? String(p.id) : null;
+      const col = AGENT_PRICE_COLUMN[r.typeKey];
+      const raw = col && p ? (p as any)[col] : null;
+      const resolved = priceOrNull(raw);
+      if (resolved === null) {
+        // 단가를 못 정한다. 0원으로 밀어넣지 않고 어디가 비었는지 남긴다.
+        if (success > 0) {
+          const k = `${r.agentSendId || ''}|${r.typeKey}`;
+          if (!missMap.has(k)) missMap.set(k, { agentSendId: String(r.agentSendId || ''), typeKey: r.typeKey, success: 0 });
+          missMap.get(k)!.success += success;
+        }
+      } else {
+        unitPrice = resolved;
+      }
+    } else {
+      unitPrice = Number(webPrices?.[r.typeKey]) || 0;
+    }
+
+    const amount = success * unitPrice;
+    amountByChannel[r.channel] += amount;
+    // 발송 행은 요금제 일수 축이 없다 — null이 그 사실이다(0은 "0일"과 구분이 안 된다).
+    items.push({ ...r, agentId, unitPrice, amount, planDays: null, planMonthDays: null });
+  }
+
+  const unbillableTypes = findUnbillableBillingRows(items.filter((i) => (Number(i.success) || 0) > 0));
+
+  return {
+    items,
+    amountByChannel,
+    missingAgentPrices: Array.from(missMap.values()).sort(
+      (a, b) => b.success - a.success || a.agentSendId.localeCompare(b.agentSendId) || a.typeKey.localeCompare(b.typeKey),
+    ),
+    unbillableTypes,
+  };
+}
+
+// ※ 옛 `getPostpaidAgentSendIds`는 삭제했다(2026-07-26).
+//   같은 원장을 여기서 한 번, 라우트에서 한 번 따로 읽어 그 사이 값이 바뀌면 조용히 어긋났다.
+//   이제 `utils/billing-ledger.ts`가 한 스냅샷으로 읽고 발행 트랜잭션 안에서 지문을 재확인한다.
+
+// ============================================================
+//  계정 실재 확인 (★ 2026-07-26 — 정산 재구성 A-7)
+// ============================================================
+
+/**
+ * 상세 행이 가리키는 계정 중 **실제로 남아 있는** 것만 돌려준다.
+ *
+ * `billing_items.user_id`는 `users` FK인데, 사용자 삭제가 soft가 아니라 **하드 삭제**다
+ * (`admin.ts`·`manage-users.ts`의 `DELETE FROM users`). 퇴사자 계정을 지우면 그 사람이 그 달에 한
+ * 발송의 계정 uuid가 MySQL 큐·`campaigns.created_by`에는 그대로 남아 있어,
+ * INSERT에서 FK 위반(23503)이 나고 **그 회사 청구서를 통째로 못 뽑는다.**
+ * 월 정산은 지난 달을 뽑는데 그 사이 퇴사 처리가 일어나는 건 드문 일이 아니다.
+ *
+ * 이 결함은 축을 계정별로 쪼갠 이번 변경이 **처음 만들어낸 것**이다 —
+ * 그 전에는 `user_id`가 헤더값 복사라 항상 유효했다.
+ */
+export async function resolveExistingUserIds(companyId: string, userIds: string[]): Promise<Set<string>> {
+  const ids = Array.from(new Set((userIds || []).filter(Boolean)));
+  if (ids.length === 0) return new Set();
+  const res = await pool.query(
+    `SELECT id FROM users WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`,
+    [companyId, ids],
+  );
+  return new Set((res.rows as any[]).map((r) => String(r.id)));
+}
+
+/**
+ * (순수) 남아 있지 않은 계정을 `null`로 내린다. **차단하지 않는다.**
+ * 청구서 전체를 못 뽑는 것보다 계정 하나가 미상인 편이 낫다 — 수량·금액은 그대로 청구된다.
+ * 계정은 표시 축이지 금액 축이 아니다(웹 단가는 회사 단가라 계정과 무관).
+ */
+export function nullifyUnknownUserIds<T extends { userId: string | null }>(
+  items: T[],
+  existing: Set<string>,
+): { items: T[]; unknownUserIds: string[] } {
+  const unknown = new Set<string>();
+  const out = (items || []).map((it) => {
+    const uid = it.userId;
+    if (!uid || existing.has(uid)) return it;
+    unknown.add(uid);
+    return { ...it, userId: null };
+  });
+  return { items: out, unknownUserIds: Array.from(unknown).sort() };
+}
+
+// ============================================================
+//  발행 단위(scope) 장 분할 (★ 2026-07-26 — 정산 재구성 A-0)
+// ============================================================
+
+export type BillingScope = 'combined' | 'by_user';
+
+/** 청구서 한 장 */
+export interface BillingSheet {
+  /** `combined`(회사 1장) / `by_user`(계정 장) / `common`(공통 장) */
+  sheetScope: 'combined' | 'by_user' | 'common';
+  /** 계정 장이면 그 계정. 공통·합산 장은 null */
+  userId: string | null;
+  items: PricedBillingItem[];
+  /** 유형키별 성공 수량 — `billings` 헤더 컬럼에 그대로 들어간다 */
+  totals: Record<string, number>;
+  /** 이 장의 공급가 소계(AI 크레딧 제외) */
+  amount: number;
+  /** 회사 단위 항목(AI 크레딧·요금제)을 싣는 장인가 — 묶음에 하나뿐이다 */
+  carriesCompanyItems: boolean;
+}
+
+function sheetTotals(items: PricedBillingItem[]): Record<string, number> {
+  const t: Record<string, number> = { ...EMPTY_BILLING_TOTALS };
+  for (const i of items) if (i.typeKey in t) t[i.typeKey] += Number(i.success) || 0;
+  return t;
+}
+
+/**
+ * (순수) 청구 상세를 발행 단위대로 장으로 나눈다.
+ *
+ * **회사 단위 항목은 공통 장 하나에 모은다**(Harold 결정 2026-07-26 "고객사 관리자 = 본사").
+ * 테스트·스팸필터·AI 크레딧·에이전트 발송분·계정 미상 발송분이 여기 들어간다.
+ *
+ * 대표 장에 몰거나 계정별로 안분하지 않는 이유:
+ * - **대표를 정할 규칙이 없다.** 계정이 추가·삭제되면 대표가 바뀌어 같은 항목이 달마다 다른 사람 청구서에 붙는다.
+ * - **안분 기준이 사실이 아니다.** AI 크레딧 충전은 회사 행위라 계정으로 나눌 근거가 없다.
+ *   기준을 만드는 순간 그건 우리가 만든 숫자이고 분쟁 시 근거를 못 댄다.
+ *   게다가 VAT가 장마다 반올림돼 합계가 장 수의 절반만큼 어긋난다.
+ * - 별도 장으로 빼면 `Σ(계정 장) + 공통 장 === 합산 1장`이 **정수 덧셈으로 정확히** 성립한다.
+ *
+ * ★ 에이전트 발송분은 계정 축이 없어 공통 장으로 간다. 웹 발송은 본사가 보내는 것이라
+ *   지점·계정에 섞지 않는다는 Harold 확정과 같은 원칙이다.
+ */
+export function splitBillingSheets(items: PricedBillingItem[], scope: BillingScope): BillingSheet[] {
+  const all = items || [];
+  if (scope === 'combined') {
+    return [{
+      sheetScope: 'combined', userId: null, items: all,
+      totals: sheetTotals(all),
+      amount: all.reduce((s, i) => s + (Number(i.amount) || 0), 0),
+      carriesCompanyItems: true,
+    }];
+  }
+
+  const byUser = new Map<string, PricedBillingItem[]>();
+  const common: PricedBillingItem[] = [];
+  for (const it of all) {
+    // 계정 축이 있는 것만 계정 장으로. 에이전트·테스트·스팸과 계정 미상 웹 발송은 공통 장.
+    if (it.channel === 'web' && it.userId) {
+      if (!byUser.has(it.userId)) byUser.set(it.userId, []);
+      byUser.get(it.userId)!.push(it);
+    } else {
+      common.push(it);
+    }
+  }
+
+  const sheets: BillingSheet[] = Array.from(byUser.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([userId, list]) => ({
+      sheetScope: 'by_user' as const, userId, items: list,
+      totals: sheetTotals(list),
+      amount: list.reduce((s, i) => s + (Number(i.amount) || 0), 0),
+      carriesCompanyItems: false,
+    }));
+
+  sheets.push({
+    sheetScope: 'common', userId: null, items: common,
+    totals: sheetTotals(common),
+    amount: common.reduce((s, i) => s + (Number(i.amount) || 0), 0),
+    carriesCompanyItems: true,
+  });
+  return sheets;
+}
+
+/**
+ * (순수) 묶음 합계 불변식 — `Σ(장별 공급가) + AI 크레딧 === 합산 공급가`.
+ *
+ * VAT에는 걸지 않는다. 장마다 `Math.round(subtotal × 0.1)`가 일어나 장 수의 절반만큼 어긋나므로,
+ * VAT까지 묶으면 정상 발행이 반올림 때문에 막힌다.
+ */
+export function checkSheetSumIdentity(sheets: BillingSheet[], aiCreditSupply: number, combinedSubtotal: number): BillingAmountCheck {
+  const itemsSum = (sheets || []).reduce((s, sh) => s + (Number(sh.amount) || 0), 0);
+  return checkBillingAmountIdentity([{ amount: itemsSum }], aiCreditSupply, combinedSubtotal);
+}
+
+// ============================================================
+//  금액 항등식 (★ 2026-07-26 — 정산 재구성 A-8)
+// ============================================================
+
+export interface BillingAmountCheck {
+  ok: boolean;
+  itemsSum: number;
+  aiCreditSupply: number;
+  subtotal: number;
+  diff: number;
+}
+
+/**
+ * (순수) 상세 행 합 + AI 크레딧 = 공급가액.
+ *
+ * 헤더 `subtotal`은 `totals × 단가`로, 상세는 `priceBillingRows`로 **서로 다른 코드가 계산한다.**
+ * 그래서 축이 어긋나면 청구서 1페이지 항목 합계와 공급가액이 안 맞는다 —
+ * 에이전트 금액이 subtotal에만 들어가고 항목표에는 없던 것이 정확히 그 증상이었다.
+ *
+ * AI 크레딧은 `billing_items`에 행이 없으므로(충전은 발송이 아니다) 따로 더한다.
+ * 반올림은 VAT 한 곳뿐이고 여기는 정수 덧셈이라 **오차 허용 없이** 같아야 한다.
+ */
+export function checkBillingAmountIdentity(
+  items: Array<{ amount: number }>,
+  aiCreditSupply: number,
+  subtotal: number,
+): BillingAmountCheck {
+  const itemsSum = (items || []).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+  const credit = Number(aiCreditSupply) || 0;
+  const sub = Number(subtotal) || 0;
+  const diff = itemsSum + credit - sub;
+  return { ok: Math.abs(diff) < 0.005, itemsSum, aiCreditSupply: credit, subtotal: sub, diff };
+}
+
+/** (순수) 배열을 고정 크기로 나눈다 — PG 바인드 파라미터 상한(65,535) 회피용. */
+export function chunkArray<T>(arr: T[], size: number): T[][] {
+  if (!Array.isArray(arr) || arr.length === 0) return [];
+  const n = Math.max(1, Math.floor(size));
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+}
+
+/** 청구 대상 발송(run) → 그 발송을 만든 계정. `selectBillingRunIds` 집합에서만 뽑으므로 두 경로가 갈릴 수 없다. */
+async function mapRunOwners(runIds: string[]): Promise<Map<string, string | null>> {
+  const m = new Map<string, string | null>();
+  if (runIds.length === 0) return m;
+  const res = await pool.query(
+    `SELECT cr.id AS run_id, c.created_by
+       FROM campaign_runs cr JOIN campaigns c ON c.id = cr.campaign_id
+      WHERE cr.id = ANY($1::uuid[])
+      UNION
+     SELECT c2.id AS run_id, c2.created_by
+       FROM campaigns c2
+      WHERE c2.id = ANY($1::uuid[])`,
+    [runIds],
+  );
+  for (const r of res.rows as any[]) {
+    m.set(String(r.run_id), r.created_by ? String(r.created_by) : null);
+  }
+  return m;
+}
+
+/**
+ * 회사의 청구 상세를 **채널 × 일자 × (계정 | 발송ID) × 유형**으로 낸다. `/generate`가 그대로 저장한다.
+ *
+ * @param userId 지정 시 그 사용자 발송분만. 테스트·스팸·에이전트·크레딧은 회사 단위 항목이라 제외된다
+ *               (기존 청구서 동작 그대로 — 사용자별로 나눌 근거가 없다).
+ */
+export async function buildBillingUsageRows(opts: {
+  companyId: string;
+  startDate: string; // YYYY-MM-DD
+  endDate: string;   // YYYY-MM-DD
+  userId?: string;
+  /** 발행 경로가 넘기는 단가·선불여부 스냅샷. 미전달 시 자체 1회 로드(미리보기·단독 호출 하위호환). */
+  ledger?: BillingLedger;
+}): Promise<BillingUsageResult> {
+  const { companyId, startDate, endDate, userId } = opts;
+  const acc = new Map<string, BillingUsageRow>();
+  let excludedPrepaidSendIds: string[] = [];
+  let agentMappingMissing = false;
+
+  // 1) 웹 일반발송 — 일자 × 계정 × 유형
+  const runIds = await selectBillingRunIds({ companyId, startDate, endDate, userId });
+  if (runIds.length > 0) {
+    const owners = await mapRunOwners(runIds);
+    const companyTables = await getBillingCompanyTables(companyId);
+    const billingTables = await getTablesForBillingPeriod(companyTables, startDate, endDate);
+    const ph = runIds.map(() => '?').join(',');
+    const rows = await smsAggByRunDateType(billingTables, `app_etc1 IN (${ph})`, runIds);
+    for (const row of rows) {
+      const day = toDayKey(row.send_date);
+      const typeKey = MSG_TYPE_TO_USAGE_KEY[row.msg_type] || String(row.msg_type || '');
+      const uid = owners.get(String(row.run_id)) ?? null;
+      bumpRow(acc, {
+        channel: 'web', itemDate: day, typeKey, userId: uid, agentSendId: null,
+        total: 0, success: 0, fail: 0, pending: 0,
+      }, { total: row.total_count, success: row.success_count, fail: row.fail_count, pending: row.pending_count });
+    }
+  }
+
+  // 2) 웹 카카오 브랜드메시지(IMC) — 계정은 캠페인 생성자
+  //    ※ 알림톡은 여기가 아니다(SMSQ msg_type='K'라 위 1)이 담당). IMC 테이블은 없으면 조용히 건너뛴다.
+  //    ※ 캠페인 arm에는 기간조건이 있고 직접발송 arm에는 없다 — `buildCompanyUsageByDay`와 **같은 조건**이라야
+  //      대조(diffBillingRowsVsDayData)가 성립한다. 한쪽만 바꾸면 그 순간 두 숫자가 갈라진다.
+  const IMC_AGG_SQL = (kph: string) =>
+    `SELECT REQUEST_UID as campaign_id, DATE(REQUEST_DATE) as send_date,
+            COUNT(*) as total_count,
+            SUM(CASE WHEN REPORT_CODE = '0000' THEN 1 ELSE 0 END) as success_count,
+            SUM(CASE WHEN REPORT_CODE != '0000' AND STATUS IN ('3','4') THEN 1 ELSE 0 END) as fail_count,
+            SUM(CASE WHEN STATUS IN ('1','2') THEN 1 ELSE 0 END) as pending_count
+       FROM IMC_BM_FREE_BIZ_MSG
+      WHERE REQUEST_UID IN (${kph})`;
+  const addImcRows = (imcRows: any[], owners: Map<string, string | null>) => {
+    for (const row of imcRows || []) {
+      const day = toDayKey(row.send_date);
+      const uid = owners.get(String(row.campaign_id)) ?? null;
+      bumpRow(acc, {
+        channel: 'web', itemDate: day, typeKey: 'KAKAO', userId: uid, agentSendId: null,
+        total: 0, success: 0, fail: 0, pending: 0,
+      }, { total: row.total_count, success: row.success_count, fail: row.fail_count, pending: row.pending_count });
+    }
+  };
+
+  if (runIds.length > 0) {
+    const r = await pool.query(
+      `SELECT DISTINCT c.id AS campaign_id, c.created_by
+         FROM campaign_runs cr JOIN campaigns c ON c.id = cr.campaign_id
+        WHERE cr.id = ANY($1::uuid[]) AND (c.send_channel = 'kakao' OR c.send_channel = 'both')`,
+      [runIds],
+    );
+    const owners = new Map<string, string | null>();
+    for (const x of r.rows as any[]) owners.set(String(x.campaign_id), x.created_by ? String(x.created_by) : null);
+    if (owners.size > 0) {
+      const ids = Array.from(owners.keys());
+      const kph = ids.map(() => '?').join(',');
+      const imcRows = await queryImcOrSkipIfMissing(
+        `${IMC_AGG_SQL(kph)} AND REQUEST_DATE >= ? AND REQUEST_DATE < DATE_ADD(?, INTERVAL 1 DAY)
+          GROUP BY REQUEST_UID, DATE(REQUEST_DATE)`,
+        [...ids, startDate, endDate],
+        `청구 상세 캠페인 브랜드메시지 ${ids.length}건`,
+      );
+      addImcRows(imcRows as any[], owners);
+    }
+  }
+  {
+    // 직접발송(manual) 카카오 — 'direct'를 넣으면 구형 경로가 campaign_runs도 만들어 위 arm과 겹쳐 두 번 센다.
+    const dkParams: any[] = [companyId, startDate, endDate];
+    let dkUserWhere = '';
+    if (userId) { dkParams.push(userId); dkUserWhere = ` AND created_by = $${dkParams.length}`; }
+    const r = await pool.query(
+      `SELECT id, created_by FROM campaigns
+        WHERE company_id = $1 AND send_type = 'manual'
+          AND (send_channel = 'kakao' OR send_channel = 'both')
+          AND sent_at >= ${kstStart('$2')} AND sent_at < ${kstEnd('$3')}${dkUserWhere}`,
+      dkParams,
+    );
+    const owners = new Map<string, string | null>();
+    for (const x of r.rows as any[]) owners.set(String(x.id), x.created_by ? String(x.created_by) : null);
+    if (owners.size > 0) {
+      const ids = Array.from(owners.keys());
+      const kph = ids.map(() => '?').join(',');
+      const imcRows = await queryImcOrSkipIfMissing(
+        `${IMC_AGG_SQL(kph)} GROUP BY REQUEST_UID, DATE(REQUEST_DATE)`,
+        ids,
+        `청구 상세 직접발송 브랜드메시지 ${ids.length}건`,
+      );
+      addImcRows(imcRows as any[], owners);
+    }
+  }
+
+  // 3) 테스트발송 — 계정은 bill_id
+  if (!userId) {
+    const testBase = await getBillingTestTables();
+    const testTables = await getTablesForBillingPeriod(testBase, startDate, endDate);
+    const testRows = await testSmsAggByUserDateType(
+      testTables,
+      `app_etc1 = 'test' AND app_etc2 = ? AND sendreq_time >= ? AND sendreq_time < DATE_ADD(?, INTERVAL 1 DAY)`,
+      [companyId, startDate, endDate],
+    );
+    for (const row of testRows) {
+      const day = toDayKey(row.send_date);
+      const typeKey = row.msg_type === 'S' ? 'TEST_SMS' : 'TEST_LMS';
+      const uid = String(row.bill_id || '').trim() || null;
+      bumpRow(acc, {
+        channel: 'test', itemDate: day, typeKey, userId: uid, agentSendId: null,
+        total: 0, success: 0, fail: 0, pending: 0,
+      }, { total: row.total_count, success: row.success_count, fail: row.fail_count, pending: row.pending_count });
+    }
+  }
+
+  // 4) 스팸필터 테스트 (PostgreSQL) — 계정은 spam_filter_tests.user_id
+  if (!userId) {
+    const spamRes = await pool.query(`
+      SELECT t.user_id, r.message_type,
+             DATE(t.created_at AT TIME ZONE 'Asia/Seoul') as send_date,
+             COUNT(*) as total_count,
+             SUM(CASE WHEN r.result IS NOT NULL THEN 1 ELSE 0 END) as success_count
+        FROM spam_filter_test_results r
+        JOIN spam_filter_tests t ON r.test_id = t.id
+       WHERE t.company_id = $1
+         AND t.created_at >= ($2 || ' 00:00:00+09')::timestamptz
+         AND t.created_at < (($3::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz
+       GROUP BY t.user_id, r.message_type, DATE(t.created_at AT TIME ZONE 'Asia/Seoul')
+    `, [companyId, startDate, endDate]);
+    for (const row of spamRes.rows as any[]) {
+      const day = toDayKey(row.send_date);
+      const typeKey = row.message_type === 'LMS' ? 'SPAM_LMS' : 'SPAM_SMS';
+      const uid = row.user_id ? String(row.user_id) : null;
+      bumpRow(acc, {
+        channel: 'spam', itemDate: day, typeKey, userId: uid, agentSendId: null,
+        total: 0, success: 0, fail: 0, pending: 0,
+      }, { total: row.total_count, success: row.success_count });
+    }
+  }
+
+  const rows = Array.from(acc.values());
+
+  // 5) 에이전트(게이트웨이) — 일자 × 발송ID × 유형
+  if (!userId) {
+    const ledger = opts.ledger ?? await loadBillingLedger(companyId);
+
+    if (hasAgentMapping(ledger)) {
+      // ★ `null`은 "0건"이 아니라 **미설정·조회 실패**다. 0건으로 삼키면 이 채널이 통째로 빠진 청구서가
+      //   조용히 나간다 — 지금 고치려는 결함과 정확히 같은 모양이 된다. 반드시 터뜨린다.
+      //
+      // ★ 2026-07-26 터뜨리는 **범위를 좁혔다.** 그 전에는 매핑이 하나도 없는 순수 웹 회사에서도
+      //   `queryPayAgentStoreBreakdown`을 불러, `PAY_STATS_DB_*` env가 비어 있으면 `getPool()`이 null →
+      //   항상 null 반환 → **게이트웨이와 무관한 회사까지 전 발행이 중단**됐다.
+      //   판정 축을 `usage_type`이 아니라 **매핑 실재**로 잡는다 — 매핑은 있는데 usage_type이 'web'인
+      //   회사가 조용히 빠지는 것을 막기 위해서다.
+      const storeRows = await queryPayAgentStoreBreakdown({
+        scope: 'company', view: 'daily', startDate, endDate, companyId,
+      });
+      if (storeRows === null) {
+        throw new Error('에이전트 발송 통계를 조회하지 못했습니다(PAY 통계DB 미설정 또는 조회 실패). 게이트웨이 발송분이 빠진 청구서가 나가지 않도록 발행을 중단합니다.');
+      }
+      if (storeRows.length > 0) {
+        const agg = rollupAgentRowsForBilling(storeRows, ledger.postpaidSendIds);
+        rows.push(...agg.rows);
+        excludedPrepaidSendIds = agg.excludedSendIds;
+      }
+    } else if (ledger.usageType === 'agent' || ledger.usageType === 'both') {
+      // ★ 2026-07-26 경고에서 차단으로(Codex 2차 수용). 매핑이 0인데 에이전트를 쓴다고 표시된 회사는
+      //   게이트웨이 발송분이 청구에서 통째로 빠지는데 **금액 검사 3중이 전부 0을 기준으로 통과한다.**
+      //   이번에 고치려는 `both` 17사 누락과 정확히 같은 모양이라, 로그만 남기면 같은 사고가 반복된다.
+      //   매핑을 지운 게 의도였다면 `usage_type`을 'web'으로 바꾸는 게 맞는 표현이다.
+      agentMappingMissing = true;
+      console.log(`[정산][에이전트매핑없음] company=${companyId} usage_type=${ledger.usageType} — company_agent_ids 0행. 게이트웨이 발송분이 있다면 청구에서 통째로 빠진다.`);
+    }
+  }
+
+  const sorted = sortBillingUsageRows(rows);
+  return { rows: sorted, unbillable: findUnbillableBillingRows(sorted), excludedPrepaidSendIds, agentMappingMissing };
 }

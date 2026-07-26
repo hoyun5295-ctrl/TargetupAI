@@ -33,6 +33,9 @@
 
 import type { PoolClient } from 'pg';
 import { sendSystemAlert } from './system-alert';
+import { needsMonthlyReset } from './ai-credit-calc';
+import { loadCreditRow } from './ai-credit-tx';
+import { buildPlanSegments, prorateMonthlyCredits, buildCreditAdjustment, daysInMonth } from './plan-proration';
 
 export type PlanChangeType =
   | 'initial'       // 회사 생성 시 최초 플랜
@@ -62,6 +65,8 @@ export interface RecordPlanChangeResult {
   recorded: boolean;
   skipped?: 'same_plan' | 'plan_not_found';
   changeType?: PlanChangeType;
+  /** ★ 2026-07-26 크레딧 일할 조정 결과 — 건너뛴 경우 그 이유까지 담는다 */
+  creditAdjust?: PlanCreditAdjustResult;
 }
 
 /** 오늘 날짜(KST, YYYY-MM-DD) — 요금 적용 기준일은 한국 시간 기준이다. */
@@ -154,7 +159,141 @@ export async function recordPlanChange(params: RecordPlanChangeParams): Promise<
     `[plan-change] company=${companyId} ${prev?.to_plan_code || '(없음)'} → ${to.plan_code} ` +
     `type=${changeType} effective=${effectiveDate}`,
   );
+
+  // ★ 2026-07-26 크레딧 일할 조정은 **아직 여기서 부르지 않는다.** (Codex 2차 CRITICAL 수용)
+  //
+  //   호출부가 `plan_id`를 바꾸는 **같은 UPDATE에서 이미** `ai_credits_base_remaining`을
+  //   새 플랜 월 크레딧으로 덮어쓰고 `ai_credits_reset_at`도 NOW()로 찍는다
+  //   (`basic-trial.ts` 무료체험 부여 · `companies.ts` 체험 취소 · `trial-downgrade-worker.ts` 만료 강등).
+  //   그런데 그 UPDATE는 `ai_credit_transactions`에 `reset` 행을 남기지 않는다.
+  //
+  //   여기서 조정을 걸면: base는 이미 한 달치(750)로 세팅됐는데 `granted` 집계는 0으로 보이고,
+  //   `reset_at`이 방금이라 "리셋 대기" 건너뛰기에도 안 걸린다 →
+  //   **일할 권리 532가 그 위에 더해져 1,282이 된다.** 7/10 체험 전환에서 과다 부여가 확정적으로 난다.
+  //
+  //   근본은 "크레딧 잔액을 누가 쓰는가"가 두 곳으로 갈려 있다는 것이다.
+  //   조정을 붙이기 전에 **호출부의 선행 크레딧 UPDATE를 걷어내고 이 함수를 단일 작성자로** 만들어야 한다.
+  //   9개 호출 경로를 전부 옮기는 일이라 별도 작업으로 분리한다 —
+  //   돈 잔액을 두 곳에서 쓰는 상태로 조정을 얹는 것이 이 결함의 본체다.
+  //
+  //   순수 산식(`prorateMonthlyCredits`·`buildCreditAdjustment`)과 `adjustPlanCreditsWithClient`는
+  //   테스트까지 끝나 있으므로, 단일 작성자 정리가 끝나면 이 자리에서 한 줄로 켜면 된다.
+
   return { recorded: true, changeType };
+}
+
+export interface PlanCreditAdjustResult {
+  applied: boolean;
+  /** 건너뛴 이유 — 운영에서 "왜 안 들어왔나"를 로그로 되짚을 수 있어야 한다 */
+  skipped?: 'credit_disabled' | 'reset_pending' | 'no_history' | 'no_change';
+  entitlement?: number;
+  granted?: number;
+  adjustment?: number;
+}
+
+/**
+ * 요금제 변경에 따라 **그 달 크레딧 권리를 다시 계산해 `base`에 반영**한다. (★ 2026-07-26 신설)
+ *
+ * Harold 지시 두 갈래를 하나의 산식으로 합친 것이다.
+ *   - 올릴 때: "일할계산해서 추가 크레딧을 자동으로 지급해야 하잖아?"
+ *   - 내릴 때: "다운그레이드하려는 요금제 미만의 크레딧이 남아 있다면 이미 다 써버리고 내린 것 아니냐"
+ *
+ * 방향별로 다른 규칙을 두면 **다 쓰고 내리는 게 이득이 되는 구조**가 남는다 —
+ * PRO 크레딧 2,400을 열흘에 다 쓰고 BASIC으로 내리면 열흘치 요금만 내고 한 달치 크레딧을 가져간다.
+ * 그래서 권리를 일할로 재계산하고 이미 부여된 양과의 차이만 반영한다. 올림·내림이 같은 식이 된다.
+ *
+ * ★ 리셋이 아직 안 된 달이면 **건너뛴다.** 그 상태에서 조정을 넣어도 곧 리셋이
+ *   `base = 새 플랜 한 달치`로 덮어써 조정이 사라지고, 리셋이 먼저 일어나면 이중 지급이 된다.
+ *   (`applyResetIfNeeded`는 차감 직전에 lazy로 도는데, 이 함수는 그보다 앞설 수 있다.)
+ *
+ * ★ 결과가 음수여도 자르지 않는다. `base` 음수는 이미 있는 구조다 —
+ *   다음 달 리셋이 `min(0, 지난 base)`로 상계하고, 후불이면 초과분으로 청구된다.
+ *   0에서 자르면 위의 "다 쓰고 내리는 이득"이 그대로 남는다.
+ */
+export async function adjustPlanCreditsWithClient(
+  client: PoolClient,
+  companyId: string,
+  now: Date = new Date(),
+): Promise<PlanCreditAdjustResult> {
+  const row = await loadCreditRow(client, companyId, true);
+  if (!row) return { applied: false, skipped: 'credit_disabled' };
+
+  // 크레딧제 미적용(요금제 크레딧 미설정 + 구매분 0)이면 손대지 않는다 — 차감도 안 도는 회사다.
+  if (row.plan_credits == null && (Number(row.purchased) || 0) === 0) {
+    return { applied: false, skipped: 'credit_disabled' };
+  }
+
+  const resetAt = row.reset_at ? new Date(row.reset_at) : null;
+  if (needsMonthlyReset(resetAt, now)) {
+    console.log(`[plan-credit] company=${companyId} 월 리셋 대기 상태라 일할 조정 건너뜀 — 리셋이 새 플랜 한 달치를 부여한다.`);
+    return { applied: false, skipped: 'reset_pending' };
+  }
+
+  const today = todayKst(now.getTime());
+  const monthStart = `${today.slice(0, 7)}-01`;
+  const [y, m] = today.slice(0, 7).split('-').map(Number);
+  const monthEnd = `${today.slice(0, 7)}-${String(daysInMonth(y, m)).padStart(2, '0')}`;
+
+  // 이 달 권리를 정하려면 **달 시작 이전 이력까지** 필요하다 — 없으면 달 초 플랜을 모른다.
+  const changesRes = await client.query(
+    `SELECT cpc.effective_date, cpc.to_plan_code, cpc.to_monthly_price, p.ai_credits_per_month
+       FROM company_plan_changes cpc
+       LEFT JOIN plans p ON p.id = cpc.to_plan_id
+      WHERE cpc.company_id = $1::uuid AND cpc.effective_date <= $2::date
+      ORDER BY cpc.effective_date ASC, cpc.changed_at ASC`,
+    [companyId, monthEnd],
+  );
+  if (changesRes.rows.length === 0) return { applied: false, skipped: 'no_history' };
+
+  const creditsByCode = new Map<string, number>();
+  for (const r of changesRes.rows as any[]) {
+    creditsByCode.set(String(r.to_plan_code || ''), Number(r.ai_credits_per_month) || 0);
+  }
+
+  const segments = buildPlanSegments(changesRes.rows as any[], monthStart, monthEnd);
+  const entitlementRaw = prorateMonthlyCredits(
+    segments.map((s) => ({ planCredits: creditsByCode.get(s.planCode) || 0, days: s.days, monthDays: s.monthDays })),
+  );
+
+  // 이 달에 이미 부여된 양 = 월 리셋 grant + 앞선 일할 조정들.
+  // `reset`의 amount는 상계 전 gross라 "이 달 권리로 준 양"과 의미가 맞는다.
+  const grantedRes = await client.query(
+    `SELECT COALESCE(SUM(amount), 0) AS granted
+       FROM ai_credit_transactions
+      WHERE company_id = $1::uuid AND type IN ('reset', 'plan_prorate')
+        AND created_at >= ($2 || ' 00:00:00+09')::timestamptz
+        AND created_at < (($3::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz`,
+    [companyId, monthStart, monthEnd],
+  );
+
+  const { entitlement, granted, adjustment } = buildCreditAdjustment(
+    entitlementRaw, Number(grantedRes.rows[0]?.granted) || 0,
+  );
+  if (adjustment === 0) return { applied: false, skipped: 'no_change', entitlement, granted, adjustment };
+
+  const base = Number(row.base) || 0;
+  const purchased = Number(row.purchased) || 0;
+  const baseAfter = base + adjustment;
+
+  await client.query(
+    `UPDATE companies SET ai_credits_base_remaining = $2 WHERE id = $1::uuid`,
+    [companyId, baseAfter],
+  );
+  // amount의 **부호가 방향**이다(양수=지급, 음수=회수). 다른 type과 달리 type이 방향을 담지 않는다.
+  await client.query(
+    `INSERT INTO ai_credit_transactions
+       (company_id, type, amount, bucket, source, idempotency_key, balance_base_after, balance_purchased_after, reason)
+     VALUES ($1::uuid, 'plan_prorate', $2, 'base', 'plan-prorate', $3, $4, $5, $6)
+     ON CONFLICT (idempotency_key) DO NOTHING`,
+    [
+      companyId, adjustment, `plan-prorate:${companyId}:${today}:${entitlement}:${granted}`,
+      baseAfter, purchased,
+      `요금제 변경 일할 조정 — 이 달 권리 ${entitlement} / 기부여 ${granted}`,
+    ],
+  );
+
+  console.log(`[plan-credit] company=${companyId} 권리=${entitlement} 기부여=${granted} 조정=${adjustment >= 0 ? '+' : ''}${adjustment} base=${base}→${baseAfter}`);
+  return { applied: true, entitlement, granted, adjustment };
 }
 
 /**

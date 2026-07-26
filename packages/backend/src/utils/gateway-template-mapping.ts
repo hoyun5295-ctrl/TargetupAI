@@ -284,7 +284,7 @@ export function prepareSeedImport(rows: SeedRowInput[]): PreparedSeed {
 
   // (bill_id, tmplcd) 중복 = 최신행(뒤 행) 우선 — Map 덮어쓰기가 그 규칙 그 자체
   const byKey = new Map<string, PreparedSeedRow>();
-  for (const n of normalized) byKey.set(`${n.payload.billid} ${n.payload.tmplcd}`, n);
+  for (const n of normalized) byKey.set(`${n.payload.billid}\u0000${n.payload.tmplcd}`, n);
   const deduped = [...byKey.values()];
 
   // bill 집계
