@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { queryPayAgentBalances } from '../utils/pay-stats';
+import { resolveChargeUnitPrice } from '../utils/unit-price';
 
 const router = Router();
 
@@ -16,7 +17,8 @@ router.get('/', async (req: Request, res: Response) => {
     }
 
     const result = await query(
-      `SELECT billing_type, balance, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao
+      `SELECT billing_type, balance, unit_price_basis,
+              cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao
        FROM companies WHERE id = $1`,
       [companyId]
     );
@@ -26,15 +28,26 @@ router.get('/', async (req: Request, res: Response) => {
     }
 
     const c = result.rows[0];
+    // ★ 2026-07-26 화면이 이 단가로 "잔액으로 몇 건 보낼 수 있나"를 계산한다.
+    //   실제 차감은 부가세 포함가이므로 여기도 포함가여야 한다 — 공급가를 내리면 발송 가능 건수가 10% 과대 표시된다.
     res.json({
       billingType: c.billing_type,
       balance: Number(c.balance),
-      costPerSms: Number(c.cost_per_sms || 0),
-      costPerLms: Number(c.cost_per_lms || 0),
-      costPerMms: Number(c.cost_per_mms || 0),
-      costPerKakao: Number(c.cost_per_kakao || 0),
+      costPerSms: resolveChargeUnitPrice(c, 'SMS'),
+      costPerLms: resolveChargeUnitPrice(c, 'LMS'),
+      costPerMms: resolveChargeUnitPrice(c, 'MMS'),
+      costPerKakao: resolveChargeUnitPrice(c, 'KAKAO'),
     });
-  } catch (error) {
+  } catch (error: any) {
+    // ★ 2026-07-26 db_alter_safety_net — 이 endpoint는 신규 컬럼(unit_price_basis)을 읽는다.
+    //   ALTER가 빠진 환경에서 고객 잔액 화면이 통째로 500이 되지 않게 사유를 드러낸다.
+    const msg = error?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        error: 'DB 마이그레이션 필요 — 운영자에게 companies.unit_price_basis ALTER 실행 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
     console.error('잔액 조회 실패:', error);
     res.status(500).json({ error: '잔액 조회 실패' });
   }

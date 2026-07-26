@@ -58,6 +58,17 @@ export const companiesApi = {
   createAdmin: (id: string, data: any) => api.post(`/companies/${id}/admin`, data),
 };
 
+// 단가 설정 — ★ 2026-07-26 단가 쓰기 경로 단일화(슈퍼관리자 전용).
+//   단가와 부가세 기준(unit_price_basis)을 한 문장에서 함께 저장한다. 값은 **VAT 별도 공급가**다.
+//   빈 문자열 = 미설정으로 되돌림(청구 차단 신호).
+export const unitPriceApi = {
+  save: (
+    companyId: string,
+    prices: { sms?: string | number; lms?: string | number; mms?: string | number; kakao?: string | number; testSms?: string | number; testLms?: string | number },
+    applyToUnsetAgents?: boolean,
+  ) => api.put(`/admin/companies/${companyId}/unit-prices`, { prices, applyToUnsetAgents: !!applyToUnsetAgents }),
+};
+
 // Plans API
 export const plansApi = {
   list: () => api.get('/plans'),

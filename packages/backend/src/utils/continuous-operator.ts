@@ -574,7 +574,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
     `SELECT c.company_name, c.business_type, c.brand_name, c.brand_slogan,
             c.brand_description, c.brand_tone, c.customer_schema,
             COALESCE(c.reject_number, c.opt_out_080_number) AS reject_number,
-            c.cost_per_sms, c.cost_per_lms, c.cost_per_mms, c.cost_per_kakao,
+            c.cost_per_sms, c.cost_per_lms, c.cost_per_mms, c.cost_per_kakao, c.unit_price_basis,
             COALESCE(c.cdp_auto_execute_enabled, false) AS cdp_auto_execute_enabled,
             COALESCE(c.cdp_auto_execute_max_recipients, 1000) AS cdp_auto_execute_max_recipients,
             COALESCE(c.cdp_auto_execute_max_cost_krw, 50000) AS cdp_auto_execute_max_cost_krw,

@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
-import { DEFAULT_COSTS } from '../config/defaults';
+import { DEFAULT_COSTS, getCompanyCosts } from '../config/defaults';
 import { getCompanyScope } from '../utils/permission-helper';
 import { getTestSmsTables } from '../utils/sms-queue';
 // ★ 2026-07-25 `querySendStats`(campaigns 축) 미사용 — 화면·엑셀 모두 청구 축(send-usage-aggregation)으로 통일.
@@ -188,9 +188,8 @@ router.get('/send', async (req: Request, res: Response) => {
         testSummary.lms += Number(sf.lms) || 0;
 
         // 비용 계산 (회사 단가 기준)
-        const costRes = await pool.query('SELECT cost_per_sms, cost_per_lms FROM companies WHERE id = $1', [companyScope]);
-        const cSms = Number(costRes.rows[0]?.cost_per_sms) || DEFAULT_COSTS.sms;
-        const cLms = Number(costRes.rows[0]?.cost_per_lms) || DEFAULT_COSTS.lms;
+        const costRes = await pool.query('SELECT cost_per_sms, cost_per_lms, unit_price_basis FROM companies WHERE id = $1', [companyScope]);
+        const { sms: cSms, lms: cLms } = getCompanyCosts(costRes.rows[0] || {});
         testSummary.cost = Math.round(((testSummary.sms - testSummary.pending) * cSms + testSummary.lms * cLms) * 10) / 10;
       } catch (mysqlErr) {
         console.error('테스트 통계 조회 실패:', mysqlErr);

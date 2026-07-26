@@ -5,6 +5,74 @@
 
 import pool, { query } from '../config/database';
 import { buildDeductDescription } from './deduct-reference';
+// ★ 2026-07-26 단가의 부가세 기준(`companies.unit_price_basis`)을 해석하는 유일한 경로.
+//   선불 잔액은 고객이 입금한 현금이라 **부가세 포함가**로 깎아야 한다.
+//   전환 전 회사는 저장값이 곧 포함가라 이 배선으로 차감액이 바뀌지 않는다.
+import { resolveChargeUnitPrice, resolveChargeUnitPriceDetailed } from './unit-price';
+import { sendSystemAlert } from './system-alert';
+import { parseDeductDescription } from './deduct-reference';
+
+/**
+ * 이 (유형 × 참조)에 실제로 **차감된 총액과 건수**, 그리고 그 둘로 되살린 **정산 단가**.
+ * (★ 2026-07-26 — 환불·회수는 "지금 단가"가 아니라 "차감 당시 단가"로 계산해야 한다.)
+ *
+ * 왜: `차감 = 성공 + 순환불`이 성립하려면 실패 1건을 되돌리는 금액이 그 1건을 깎은 금액과 같아야 한다.
+ *   현재 단가를 곱하면 단가가 바뀐 순간 그 차이만큼 회계가 어긋난다 — 전 업체 단가를 재입력하는
+ *   지금은 확실히 발동한다(선불 38사).
+ *
+ * 되읽을 수 없는 옛 행이 하나라도 섞이면 건수를 신뢰할 수 없으므로 `unitPrice = null`로 돌려주고,
+ * 호출부가 현재 단가로 폴백한다(기존 동작). 총액은 어느 경우든 정확하다.
+ */
+export interface DeductLedger {
+  totalDeducted: number;
+  deductedCount: number;
+  /** 되살린 정산 단가. `null` = 되읽기 실패(호출부는 **정산하지 않고 멈춘다**) */
+  unitPrice: number | null;
+  /** 차감 원장은 있는데 설명을 되읽지 못했다 — 추측으로 돈을 움직이면 안 되는 상태 */
+  unresolved: boolean;
+}
+
+async function loadDeductLedger(
+  db: any, companyId: string, referenceType: string, referenceId: string, messageType: string,
+): Promise<DeductLedger> {
+  const rows = await db.query(
+    `SELECT amount, description FROM balance_transactions
+      WHERE company_id = $1 AND type = 'deduct' AND reference_type = $4 AND reference_id = $2
+        AND (message_type = $3 OR message_type IS NULL)`,
+    [companyId, referenceId, messageType, referenceType]
+  );
+  let totalDeducted = 0;
+  let deductedCount = 0;
+  let allParsed = rows.rows.length > 0;
+  for (const r of rows.rows as any[]) {
+    totalDeducted += Number(r.amount) || 0;
+    const parsed = parseDeductDescription(r.description);
+    if (parsed) deductedCount += parsed.count;
+    else allParsed = false;
+  }
+  totalDeducted = Math.round(totalDeducted * 100) / 100;
+  const unitPrice = allParsed && deductedCount > 0
+    ? Math.round((totalDeducted / deductedCount) * 100) / 100
+    : null;
+  // 차감이 있는데 단가를 못 되살렸다 = 위험 상태. 현재 단가로 폴백하면 단가가 바뀐 뒤엔 틀린 금액이 나간다.
+  return { totalDeducted, deductedCount, unitPrice, unresolved: totalDeducted > 0 && unitPrice === null };
+}
+
+/**
+ * 되읽기 실패를 드러낸다. (★ 2026-07-26 Codex #6 — 현재 단가 폴백 폐기)
+ *
+ * 정산을 멈추는 쪽이 안전한 이유: 환불 함수는 idempotent하고 sweeper가 30초마다 다시 부르므로,
+ * 원인을 고치면 **다음 사이클에 자동으로 밀린 환불이 나간다.** 반대로 틀린 금액이 한 번 나가면
+ * 되돌리는 경로(reverse)를 또 태워야 한다.
+ */
+async function warnUnresolvedLedger(companyId: string, referenceId: string, messageType: string, where: string) {
+  const msg = `[선불정산중단] ${where} — 차감 원장 설명을 되읽지 못해 정산을 멈췄다. company=${companyId} ref=${referenceId} ${messageType}`;
+  console.error(msg);
+  await sendSystemAlert({
+    dedupKey: `prepaid-ledger-unresolved:${referenceId}:${messageType}`,
+    message: `선불 정산 중단 — 차감 원장 설명을 되읽지 못했습니다(환불/회수 보류). company=${companyId} ref=${referenceId} ${messageType}`,
+  }).catch(() => { /* 경보 실패가 정산을 막지는 않는다 */ });
+}
 
 /**
  * 선불 차감
@@ -17,50 +85,92 @@ export async function prepaidDeduct(
   companyId: string, count: number, messageType: string, referenceId: string, createdBy?: string,
   referenceType: string = 'campaign'
 ): Promise<{ ok: boolean; error?: string; amount?: number; balance?: number; insufficientBalance?: boolean }> {
-  const co = await query(
-    'SELECT billing_type, balance, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1',
-    [companyId]
-  );
-  if (co.rows.length === 0) return { ok: false, error: '회사 정보를 찾을 수 없습니다' };
+  // 후불은 트랜잭션을 열지 않는다 — 발송마다 부르는 경로라 103사(후불)의 비용을 늘리지 않는다.
+  const pre = await query('SELECT billing_type FROM companies WHERE id = $1', [companyId]);
+  if (pre.rows.length === 0) return { ok: false, error: '회사 정보를 찾을 수 없습니다' };
+  if (pre.rows[0].billing_type !== 'prepaid') return { ok: true, amount: 0 };
 
-  const c = co.rows[0];
-  if (c.billing_type !== 'prepaid') return { ok: true, amount: 0 }; // 후불은 패스
+  // ★ 2026-07-26 잔액 갱신과 원장 INSERT를 **한 트랜잭션**으로 묶는다(Codex #3).
+  //   전에는 `query`(=pool.query) 두 문장이라 각각 즉시 커밋됐다 — INSERT가 실패하면
+  //   **잔액만 깎이고 차감 이력이 없는** 상태가 남고, 그러면 환불·sweep이 근거를 잃는다.
+  //   회사 행을 `FOR UPDATE`로 잠가 같은 회사의 차감·환불이 서로를 덮지 않게 직렬화한다.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const co = await client.query(
+      `SELECT billing_type, balance, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao
+         FROM companies WHERE id = $1 FOR UPDATE`,
+      [companyId]
+    );
+    if (co.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { ok: false, error: '회사 정보를 찾을 수 없습니다' };
+    }
+    const c = co.rows[0];
+    if (c.billing_type !== 'prepaid') {
+      await client.query('ROLLBACK');
+      return { ok: true, amount: 0 };
+    }
 
-  const unitPrice = messageType === 'SMS' ? Number(c.cost_per_sms || 0)
-    : messageType === 'LMS' ? Number(c.cost_per_lms || 0)
-    : messageType === 'MMS' ? Number(c.cost_per_mms || 0)
-    : messageType === 'KAKAO' ? Number(c.cost_per_kakao || 0) : 0;
+    // ★ 2026-07-26 단가 미설정이면 **발송을 막는다**(Codex #2). 전에는 0원으로 통과시켜
+    //   단가가 비어 있는 선불 회사가 공짜로 발송했다. 명시적 0원 계약은 그대로 통과시킨다.
+    const resolved = resolveChargeUnitPriceDetailed(c, messageType);
+    if (resolved.unset) {
+      await client.query('ROLLBACK');
+      console.error(`[선불차감차단] company=${companyId} ${messageType} 단가 미설정 — 차감 없이 발송되는 것을 막았다`);
+      return {
+        ok: false,
+        error: `${messageType} 단가가 설정되지 않아 발송할 수 없습니다. 슈퍼관리자 단가설정에서 단가를 입력해 주세요.`,
+        amount: 0,
+      };
+    }
+    if (resolved.unknownType) {
+      console.warn(`[선불차감] company=${companyId} 알 수 없는 발송 유형 '${messageType}' — 단가 축이 없어 0원 처리한다`);
+    }
+    const unitPrice = resolved.price;
 
-  const totalAmount = Math.round(unitPrice * count * 100) / 100; // 부동소수점 보정
-  if (totalAmount === 0) return { ok: true, amount: 0 };
+    const totalAmount = Math.round(unitPrice * count * 100) / 100; // 부동소수점 보정
+    if (totalAmount === 0) {
+      await client.query('ROLLBACK');
+      return { ok: true, amount: 0 };
+    }
 
-  // Atomic 차감: balance >= totalAmount 일 때만 성공
-  const result = await query(
-    'UPDATE companies SET balance = balance - $1, updated_at = NOW() WHERE id = $2 AND balance >= $1 RETURNING balance',
-    [totalAmount, companyId]
-  );
+    // Atomic 차감: balance >= totalAmount 일 때만 성공
+    const result = await client.query(
+      'UPDATE companies SET balance = balance - $1, updated_at = NOW() WHERE id = $2 AND balance >= $1 RETURNING balance',
+      [totalAmount, companyId]
+    );
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return {
+        ok: false,
+        error: `잔액이 부족합니다. 필요: ${totalAmount.toLocaleString()}원 / 현재: ${Number(c.balance).toLocaleString()}원`,
+        amount: totalAmount,
+        balance: Number(c.balance),
+        insufficientBalance: true,
+      };
+    }
 
-  if (result.rows.length === 0) {
-    return {
-      ok: false,
-      error: `잔액이 부족합니다. 필요: ${totalAmount.toLocaleString()}원 / 현재: ${Number(c.balance).toLocaleString()}원`,
-      amount: totalAmount,
-      balance: Number(c.balance),
-      insufficientBalance: true
-    };
+    // 거래 기록 — ★ D98: created_by 추가 (사용자별 사용금액 격리)
+    // ★ D145 PDF 후속 (2026-05-07): message_type 컬럼 추가 — both 채널 발송 시 messageType별 환불 분리
+    // ★ 2026-07-07: reference_type를 유형별로 기록 + 설명에 유형 라벨(스팸/테스트 위장 해소)
+    // ★ 설명에 담기는 건수·단가는 환불·회수·sweep이 되읽는 **정산의 근거**다(parseDeductDescription).
+    await client.query(
+      `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method, created_by, message_type)
+       VALUES ($1, 'deduct', $2, $3, $4, $5, $6, 'system', $7, $8)`,
+      [companyId, totalAmount, result.rows[0].balance, buildDeductDescription(referenceType, messageType, count, unitPrice), referenceType, referenceId, createdBy || null, messageType]
+    );
+    await client.query('COMMIT');
+
+    console.log(`[선불차감] company=${companyId} ${messageType}×${count} = ${totalAmount}원 차감 → 잔액 ${result.rows[0].balance}원`);
+    return { ok: true, amount: totalAmount, balance: Number(result.rows[0].balance) };
+  } catch (e: any) {
+    try { await client.query('ROLLBACK'); } catch { /* 이미 종료된 트랜잭션 */ }
+    console.error('[선불차감] 롤백:', e?.message || e);
+    return { ok: false, error: '차감 처리 중 오류가 발생했습니다' };
+  } finally {
+    client.release();
   }
-
-  // 거래 기록 — ★ D98: created_by 추가 (사용자별 사용금액 격리)
-  // ★ D145 PDF 후속 (2026-05-07): message_type 컬럼 추가 — both 채널 발송 시 messageType별 환불 분리
-  // ★ 2026-07-07: reference_type를 유형별로 기록 + 설명에 유형 라벨(스팸/테스트 위장 해소)
-  await query(
-    `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method, created_by, message_type)
-     VALUES ($1, 'deduct', $2, $3, $4, $5, $6, 'system', $7, $8)`,
-    [companyId, totalAmount, result.rows[0].balance, buildDeductDescription(referenceType, messageType, count, unitPrice), referenceType, referenceId, createdBy || null, messageType]
-  );
-
-  console.log(`[선불차감] company=${companyId} ${messageType}×${count} = ${totalAmount}원 차감 → 잔액 ${result.rows[0].balance}원`);
-  return { ok: true, amount: totalAmount, balance: Number(result.rows[0].balance) };
 }
 
 /**
@@ -72,84 +182,104 @@ export async function prepaidRefund(
   companyId: string, count: number, messageType: string, campaignId: string, reason: string,
   referenceType: string = 'campaign'
 ): Promise<{ refunded: number }> {
-  const co = await query(
-    'SELECT billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1',
-    [companyId]
-  );
-  if (co.rows.length === 0 || co.rows[0].billing_type !== 'prepaid') return { refunded: 0 };
   if (count <= 0) return { refunded: 0 };
+  // 후불은 트랜잭션을 열지 않는다(차감과 같은 이유).
+  const pre = await query('SELECT billing_type FROM companies WHERE id = $1', [companyId]);
+  if (pre.rows.length === 0 || pre.rows[0].billing_type !== 'prepaid') return { refunded: 0 };
 
-  const c = co.rows[0];
-  const unitPrice = messageType === 'SMS' ? Number(c.cost_per_sms || 0)
-    : messageType === 'LMS' ? Number(c.cost_per_lms || 0)
-    : messageType === 'MMS' ? Number(c.cost_per_mms || 0)
-    : messageType === 'KAKAO' ? Number(c.cost_per_kakao || 0) : 0;
+  // ★ 2026-07-26 환불 전 과정을 **한 트랜잭션·행 잠금** 안에서 한다(Codex #3).
+  //   전에는 누적 환불액을 잠금 없이 읽고 잔액 UPDATE와 원장 INSERT를 따로 커밋했다:
+  //   ① 동시 호출 둘이 같은 `alreadyRefunded=0`을 보고 각자 전액을 환불(D145 폴라초이스 113,559원 계열)
+  //   ② INSERT가 실패하면 잔액만 늘고 환불 이력이 없어 다음 호출이 또 환불한다.
+  //   회사 행을 잠그면 그 회사의 차감·환불·회수가 한 줄로 선다.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const co = await client.query(
+      `SELECT billing_type, balance, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao
+         FROM companies WHERE id = $1 FOR UPDATE`,
+      [companyId]
+    );
+    if (co.rows.length === 0 || co.rows[0].billing_type !== 'prepaid') {
+      await client.query('ROLLBACK');
+      return { refunded: 0 };
+    }
+    const c = co.rows[0];
 
-  // 이미 환불된 금액 조회 (중복 환불 방지)
-  // ★ D145 PDF 후속 (2026-05-07): messageType 필터 — both 채널 발송 시 SMS/카카오 환불 분리
-  //   기존 row(message_type=NULL) 호환 — NULL은 옛 패턴이므로 함께 합산
-  //   사고 사례: directChannel='both' SMS 환불(15,000원) → 카카오 환불 호출 시 alreadyRefunded=15,000으로
-  //              누적되어 카카오 환불 차단됨 → 카카오 실패분 환불 누락
-  //   해결: messageType별로 alreadyRefunded/totalDeducted 분리 조회
-  const existing = await query(
-    `SELECT COALESCE(SUM(amount), 0) as total FROM balance_transactions
-     WHERE company_id = $1 AND type = 'refund' AND reference_type = $4 AND reference_id = $2
-       AND (message_type = $3 OR message_type IS NULL)`,
-    [companyId, campaignId, messageType, referenceType]
-  );
-  const alreadyRefunded = Number(existing.rows[0].total);
+    // ★ 2026-07-26 환불 단가 = **차감 당시 단가**. 현재 단가를 곱하면 단가가 바뀐 뒤의 환불이
+    //   차감과 짝이 안 맞아 `차감 = 성공 + 순환불`이 깨진다.
+    //   되읽지 못하면 **현재 단가로 폴백하지 않고 멈춘다**(Codex #6) — 추측으로 돈을 움직이지 않는다.
+    //   환불은 idempotent하고 sweeper가 30초마다 다시 부르므로, 원인을 고치면 다음 사이클에 자동으로 나간다.
+    const ledger = await loadDeductLedger(client, companyId, referenceType, campaignId, messageType);
+    if (ledger.unresolved) {
+      await client.query('ROLLBACK');
+      await warnUnresolvedLedger(companyId, campaignId, messageType, 'prepaidRefund');
+      return { refunded: 0 };
+    }
+    const unitPrice = ledger.unitPrice ?? resolveChargeUnitPrice(c, messageType);
+    if (unitPrice <= 0) {
+      await client.query('ROLLBACK');
+      return { refunded: 0 };
+    }
 
-  // 원래 차감 금액 조회
-  const deducted = await query(
-    `SELECT COALESCE(SUM(amount), 0) as total FROM balance_transactions
-     WHERE company_id = $1 AND type = 'deduct' AND reference_type = $4 AND reference_id = $2
-       AND (message_type = $3 OR message_type IS NULL)`,
-    [companyId, campaignId, messageType, referenceType]
-  );
-  const totalDeducted = Number(deducted.rows[0].total);
+    // 이미 환불된 금액 — **잠근 뒤에** 읽어야 동시 호출이 같은 값을 보고 이중 환불하지 않는다.
+    // ★ D145 PDF 후속 (2026-05-07): messageType 필터 — both 채널 발송 시 SMS/카카오 환불 분리
+    //   기존 row(message_type=NULL) 호환 — NULL은 옛 패턴이므로 함께 합산
+    const existing = await client.query(
+      `SELECT COALESCE(SUM(amount), 0) as total FROM balance_transactions
+       WHERE company_id = $1 AND type = 'refund' AND reference_type = $4 AND reference_id = $2
+         AND (message_type = $3 OR message_type IS NULL)`,
+      [companyId, campaignId, messageType, referenceType]
+    );
+    const alreadyRefunded = Number(existing.rows[0].total);
+    const totalDeducted = ledger.totalDeducted;
 
-  // ★ D145 P0+ (2026-05-07): idempotent 환불 패턴 — 호출측 누적값 + 함수측 차이 계산
-  //   설계: count = "이 캠페인의 총 실패 건수"(누적). 함수가 alreadyRefunded와 비교해 차이만 환불.
-  //   - 호출측은 매번 누적 fail 그대로 보냄 (delta 계산 불필요, 호출/함수 의미 일치)
-  //   - 함수가 idempotent — 같은 count 반복 호출해도 추가 환불 0
-  //   - fail 증가 시 자동으로 차이만큼만 환불 (sync-results 누락 사고 자동 보정)
-  //   - 차감 한도 안전망(totalDeducted - alreadyRefunded)으로 무한환불 0%
-  //   사고 사례 검증:
-  //   - D145 P0 폴라초이스 5/4: 같은 fail로 24회 호출 → 113,559원 이상지급
-  //     → 새 패턴: 2회차부터 additionalRefund=0 → 자동 차단 ✅
-  //   - D145 트렉스타 5/7: delta 계산 깨져서 사실상 누적값 호출 → D145 가드가 정상 환불 차단 → 607건 누락
-  //     → 새 패턴: 누적값이 정상 의미 → 자연스럽게 차이만 환불 + 5/8 sync에서 누락분 자동 보정 ✅
-  const targetTotalRefund = Math.round(unitPrice * count * 100) / 100;
-  const additionalRefund = Math.round((targetTotalRefund - alreadyRefunded) * 100) / 100;
+    // ★ D145 P0+ (2026-05-07): idempotent 환불 패턴 — 호출측 누적값 + 함수측 차이 계산
+    //   count = "이 캠페인의 총 실패 건수"(누적). 함수가 alreadyRefunded와 비교해 차이만 환불한다.
+    //   차감 한도 안전망(totalDeducted − alreadyRefunded)으로 무한환불 0%.
+    const targetTotalRefund = Math.round(unitPrice * count * 100) / 100;
+    const additionalRefund = Math.round((targetTotalRefund - alreadyRefunded) * 100) / 100;
+    if (additionalRefund <= 0) {
+      await client.query('ROLLBACK');
+      return { refunded: 0 };   // 이미 충분히 환불됨 (idempotency)
+    }
 
-  if (additionalRefund <= 0) return { refunded: 0 };  // 이미 충분히 환불됨 (idempotency)
+    const refundAmount = Math.round(Math.min(additionalRefund, totalDeducted - alreadyRefunded) * 100) / 100;
+    if (refundAmount <= 0) {
+      await client.query('ROLLBACK');
+      return { refunded: 0 };
+    }
 
-  // 차감 한도 안전망 — 누적 환불이 차감 총액 초과 절대 금지
-  const refundAmount = Math.round(Math.min(additionalRefund, totalDeducted - alreadyRefunded) * 100) / 100;
-  if (refundAmount <= 0) return { refunded: 0 };
+    const result = await client.query(
+      'UPDATE companies SET balance = balance + $1, updated_at = NOW() WHERE id = $2 RETURNING balance',
+      [refundAmount, companyId]
+    );
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { refunded: 0 };
+    }
 
-  const result = await query(
-    'UPDATE companies SET balance = balance + $1, updated_at = NOW() WHERE id = $2 RETURNING balance',
-    [refundAmount, companyId]
-  );
-
-  if (result.rows.length > 0) {
-    // ★ D150-2 (2026-05-09) PDF #3 — description 행 단위 일치: 신규 환불 건수 표시 + 누적 보존
-    //   직원 신고: 트렉스타 5/7 11:50:11 행 "LMS 112건 × 26.4원" + 환불 +1,161.6원 → "112×26.4=2,956.8원이어야 하는데?" 오해
-    //   원인: count=누적fail, refundAmount=차액 → 행 단위 모순 (전체 누적은 정확)
+    // ★ D150-2 (2026-05-09) — description 행 단위 일치: 신규 환불 건수 표시 + 누적 보존
     const newRefundCount = Math.round(refundAmount / unitPrice);
     const desc = alreadyRefunded > 0
       ? `${reason} (${messageType} 추가 ${newRefundCount}건 × ${unitPrice}원, 누적 ${count}건)`
       : `${reason} (${messageType} ${count}건 × ${unitPrice}원)`;
-    await query(
+    await client.query(
       `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method, message_type)
        VALUES ($1, 'refund', $2, $3, $4, $7, $5, 'system', $6)`,
       [companyId, refundAmount, result.rows[0].balance, desc, campaignId, messageType, referenceType]
     );
-    console.log(`[선불환불] company=${companyId} ${refundAmount}원 환불 → 잔액 ${result.rows[0].balance}원`);
-  }
+    await client.query('COMMIT');
 
-  return { refunded: refundAmount };
+    console.log(`[선불환불] company=${companyId} ${refundAmount}원 환불 → 잔액 ${result.rows[0].balance}원`);
+    return { refunded: refundAmount };
+  } catch (e: any) {
+    try { await client.query('ROLLBACK'); } catch { /* 이미 종료된 트랜잭션 */ }
+    console.error('[선불환불] 롤백:', e?.message || e);
+    return { refunded: 0 };
+  } finally {
+    client.release();
+  }
 }
 
 /**
@@ -171,50 +301,70 @@ export async function prepaidRefund(
 export async function prepaidReverseOverRefund(
   companyId: string, maxLegitRefundCount: number, messageType: string, campaignId: string
 ): Promise<{ reversed: number; netRefundedAmt: number; skipped: boolean }> {
-  const co = await query(
-    'SELECT billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1',
-    [companyId]
-  );
-  if (co.rows.length === 0 || co.rows[0].billing_type !== 'prepaid') return { reversed: 0, netRefundedAmt: 0, skipped: true };
+  // 후불은 트랜잭션을 열지 않는다.
+  const pre = await query('SELECT billing_type FROM companies WHERE id = $1', [companyId]);
+  if (pre.rows.length === 0 || pre.rows[0].billing_type !== 'prepaid') return { reversed: 0, netRefundedAmt: 0, skipped: true };
 
-  const c = co.rows[0];
-  const unitPrice = messageType === 'SMS' ? Number(c.cost_per_sms || 0)
-    : messageType === 'LMS' ? Number(c.cost_per_lms || 0)
-    : messageType === 'MMS' ? Number(c.cost_per_mms || 0)
-    : messageType === 'KAKAO' ? Number(c.cost_per_kakao || 0) : 0;
-  if (unitPrice <= 0) return { reversed: 0, netRefundedAmt: 0, skipped: true };
-
-  // 누적 환불 / 이미 되돌린 분 / 타임아웃 환불 존재 여부 — 한 번에 집계
-  //   message_type=NULL 옛 row 호환 (prepaidRefund와 동일 필터)
-  const agg = await query(
-    `SELECT
-       COALESCE(SUM(amount) FILTER (WHERE type = 'refund'), 0) AS refunded,
-       COALESCE(SUM(-amount) FILTER (WHERE type = 'admin_deduct' AND description LIKE '%환불 reverse%'), 0) AS reversed,
-       COALESCE(SUM(CASE WHEN type = 'refund' AND description LIKE '%타임아웃 실패 환불%' THEN 1 ELSE 0 END), 0) AS timeout_refunds
-     FROM balance_transactions
-     WHERE company_id = $1 AND reference_type = 'campaign' AND reference_id = $2
-       AND (message_type = $3 OR message_type IS NULL)`,
-    [companyId, campaignId, messageType]
-  );
-  const refunded = Number(agg.rows[0].refunded);
-  const alreadyReversed = Number(agg.rows[0].reversed); // 양수
-  const netRefunded = Math.round((refunded - alreadyReversed) * 100) / 100;
-
-  // 타임아웃 환불이 있는 캠페인은 기존 타임아웃 reverse가 소유 — 이중 차감 차단 + 불변식 검증도 위임(skipped)
-  if (Number(agg.rows[0].timeout_refunds) > 0) return { reversed: 0, netRefundedAmt: netRefunded, skipped: true };
-
-  const maxLegit = Math.round(unitPrice * Math.max(0, Math.floor(maxLegitRefundCount)) * 100) / 100;
-  const excess = Math.round((netRefunded - maxLegit) * 100) / 100;
-  if (excess <= 0) return { reversed: 0, netRefundedAmt: netRefunded, skipped: false }; // 정당 한도 이내 (idempotency)
-
-  // ★ 2026-07-25 트랜잭션을 실제로 성립시킨다.
-  //   전에는 `query('BEGIN')`을 썼는데 `config/database.ts`의 `query`는 `pool.query`다 —
-  //   BEGIN·UPDATE·INSERT·COMMIT이 **각각 다른 커넥션**에 나뉘어 나갈 수 있어 트랜잭션이 성립하지 않았다.
-  //   그 상태에서 INSERT가 실패하면 잔액만 깎이고 이력이 안 남는다(돈이 조용히 사라진다).
-  //   커넥션을 고정해야 BEGIN~COMMIT이 한 트랜잭션이 된다.
+  // ★ 2026-07-26 판정과 회수를 **한 트랜잭션·행 잠금** 안에서 한다(Codex #3).
+  //   전에는 환불 집계를 트랜잭션 밖에서 읽고 나서 커넥션을 잡아, 두 사이클이 같은 초과분을
+  //   각자 회수해 고객에게서 두 번 빼갈 수 있었다.
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const co = await client.query(
+      `SELECT billing_type, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao
+         FROM companies WHERE id = $1 FOR UPDATE`,
+      [companyId]
+    );
+    if (co.rows.length === 0 || co.rows[0].billing_type !== 'prepaid') {
+      await client.query('ROLLBACK');
+      return { reversed: 0, netRefundedAmt: 0, skipped: true };
+    }
+    const c = co.rows[0];
+
+    // ★ 회수도 **차감 당시 단가**로 한다. 정당 한도(`maxLegitRefundCount × 단가`)를 현재 단가로 재면,
+    //   단가를 올린 뒤엔 한도가 부풀어 초과 환불을 못 잡고(회사 손해), 내린 뒤엔 정상 환불을
+    //   초과로 오인해 회수한다(고객 손해). 되읽지 못하면 회수하지 않고 멈춘다(Codex #6).
+    const ledger = await loadDeductLedger(client, companyId, 'campaign', campaignId, messageType);
+    if (ledger.unresolved) {
+      await client.query('ROLLBACK');
+      await warnUnresolvedLedger(companyId, campaignId, messageType, 'prepaidReverseOverRefund');
+      return { reversed: 0, netRefundedAmt: 0, skipped: true };
+    }
+    const unitPrice = ledger.unitPrice ?? resolveChargeUnitPrice(c, messageType);
+    if (unitPrice <= 0) {
+      await client.query('ROLLBACK');
+      return { reversed: 0, netRefundedAmt: 0, skipped: true };
+    }
+
+    // 누적 환불 / 이미 되돌린 분 / 타임아웃 환불 존재 여부 — 잠근 뒤 한 번에 집계
+    const agg = await client.query(
+      `SELECT
+         COALESCE(SUM(amount) FILTER (WHERE type = 'refund'), 0) AS refunded,
+         COALESCE(SUM(-amount) FILTER (WHERE type = 'admin_deduct' AND description LIKE '%환불 reverse%'), 0) AS reversed,
+         COALESCE(SUM(CASE WHEN type = 'refund' AND description LIKE '%타임아웃 실패 환불%' THEN 1 ELSE 0 END), 0) AS timeout_refunds
+       FROM balance_transactions
+       WHERE company_id = $1 AND reference_type = 'campaign' AND reference_id = $2
+         AND (message_type = $3 OR message_type IS NULL)`,
+      [companyId, campaignId, messageType]
+    );
+    const refunded = Number(agg.rows[0].refunded);
+  const alreadyReversed = Number(agg.rows[0].reversed); // 양수
+  const netRefunded = Math.round((refunded - alreadyReversed) * 100) / 100;
+
+    // 타임아웃 환불이 있는 캠페인은 기존 타임아웃 reverse가 소유 — 이중 차감 차단 + 불변식 검증도 위임(skipped)
+    if (Number(agg.rows[0].timeout_refunds) > 0) {
+      await client.query('ROLLBACK');
+      return { reversed: 0, netRefundedAmt: netRefunded, skipped: true };
+    }
+
+    const maxLegit = Math.round(unitPrice * Math.max(0, Math.floor(maxLegitRefundCount)) * 100) / 100;
+    const excess = Math.round((netRefunded - maxLegit) * 100) / 100;
+    if (excess <= 0) {
+      await client.query('ROLLBACK');
+      return { reversed: 0, netRefundedAmt: netRefunded, skipped: false }; // 정당 한도 이내 (idempotency)
+    }
+
     const bal = await client.query(
       'UPDATE companies SET balance = balance - $1, updated_at = NOW() WHERE id = $2 RETURNING balance',
       [excess, companyId]
@@ -234,7 +384,7 @@ export async function prepaidReverseOverRefund(
       console.error('[초과환불reverse] 롤백 실패:', rb?.message || rb);
     }
     console.error('[초과환불reverse] 롤백:', e?.message || e);
-    return { reversed: 0, netRefundedAmt: netRefunded, skipped: false };
+    return { reversed: 0, netRefundedAmt: 0, skipped: false };
   } finally {
     client.release();
   }

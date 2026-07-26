@@ -14,6 +14,7 @@
  */
 
 import { query } from '../config/database';
+import { resolveChargeUnitPrice } from './unit-price';
 import {
   selectJourneyTargetCustomerIds,
   gradeBreakdownForIds,
@@ -61,15 +62,17 @@ export async function simulateJourney(
 
   // 회사 실 단가(원/건) — 임의 상수 대신 그 회사 설정값.
   const costRes = await query(
-    `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1::uuid`,
+    `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, unit_price_basis FROM companies WHERE id = $1::uuid`,
     [companyId],
   );
   const c = costRes.rows[0] || {};
+  // ★ 2026-07-26 시뮬레이터가 보여주는 비용은 고객이 실제로 낼 금액(부가세 포함)이다.
+  //   폴백 상수는 두지 않는다 — 단가 미설정이면 0으로 두어 "데이터 부족"이 드러나야 한다.
   const channelCost: Record<string, number> = {
-    sms: Number(c.cost_per_sms) || 0,
-    lms: Number(c.cost_per_lms) || 0,
-    mms: Number(c.cost_per_mms) || 0,
-    kakao: Number(c.cost_per_kakao) || 0,
+    sms: resolveChargeUnitPrice(c, 'SMS'),
+    lms: resolveChargeUnitPrice(c, 'LMS'),
+    mms: resolveChargeUnitPrice(c, 'MMS'),
+    kakao: resolveChargeUnitPrice(c, 'KAKAO'),
   };
 
   // 발송과 동일 함수로 매칭 ID 1회 추출 → 등급 분포 + 실데이터 평균(객단가·전환·클릭).

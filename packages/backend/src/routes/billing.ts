@@ -23,9 +23,12 @@ import {
   type PricedBillingItem, type BillingScope,
 } from '../utils/send-usage-aggregation';
 import { loadBillingLedger, readBillingLedgerFingerprint } from '../utils/billing-ledger';
+import { floorWon, vatOfSupply } from '../utils/money';
+import { drawPartyBlock, drawThanksNote, THANKS_NOTE_HEIGHT } from '../utils/pdf-party-block';
+import { normalizeUnitPriceBasis } from '../utils/unit-price';
 import { buildInvoiceLines, checkInvoiceLinesAgainstHeader } from '../utils/billing-invoice-lines';
 import {
-  loadPlanChanges, buildPlanSegments, sumPlanSegments, evaluatePlanHistoryGate, shiftDayKey,
+  loadPlanChanges, buildPlanSegments, sumPlanSegments, evaluatePlanHistoryGate,
   countPlanChanges, planChangesFingerprint,
 } from '../utils/plan-proration';
 
@@ -238,7 +241,10 @@ router.post('/generate', async (req: Request, res: Response) => {
       });
     }
 
-    const priced = priceBillingRows(usage.rows, allPrices, ledger.postpaidPriceRows);
+    const priced = priceBillingRows(
+      usage.rows, allPrices, ledger.postpaidPriceRows,
+      normalizeUnitPriceBasis(ledger.companyPriceRow?.unit_price_basis),
+    );
 
     // ★ 2026-07-26 회사 단가 미설정 — 그 전에는 `?? 0`으로 조용히 0원 청구됐다(MMS 308,043건과 같은 계열).
     //   성공 수량이 있는 유형만 막는다. 수량 0인 유형까지 막으면 발행이 이유 없이 멈춘다.
@@ -336,7 +342,11 @@ router.post('/generate', async (req: Request, res: Response) => {
     }
 
     const billingItems = [...planItems, ...sendingItems];
-    const agentAmount = priced.amountByChannel.agent;
+    // 헤더 공급가액 교차검증(A-8)은 **절사 전** 값으로 한다 — 절사 후끼리 비교하면 헤더를 상세에서
+    // 파생시킨 셈이라 "두 코드가 갈라졌는가"를 못 본다.
+    const agentAmountExact = priced.amountExactByChannel.agent;
+    // 실제 청구된 요금제 금액 — 구간별 절사 후 합. 응답·화면에는 이 값이 나간다.
+    const planAmountBilled = planItems.reduce((s, i) => s + (Number(i.amount) || 0), 0);
     if (usage.excludedPrepaidSendIds.length > 0) {
       console.log(`[정산] company=${company_id} 선불 발송ID ${usage.excludedPrepaidSendIds.join(',')} 청구 제외(게이트웨이 잔액에서 이미 차감)`);
     }
@@ -471,22 +481,21 @@ router.post('/generate', async (req: Request, res: Response) => {
       // ★ 2026-07-26 에이전트 금액 합산. 헤더(`billings`)에는 에이전트 수량 컬럼이 없지만 컬럼을 늘리지 않는다 —
       //   항목별 수량·금액의 진실은 `billing_items`이고 청구서 1페이지는 거기서 채널별로 집계한다.
       //   헤더는 합계(subtotal·vat·total_amount)만 정확히 담는다.
-      subtotal =
+      // ★ 2026-07-26 금액 항등식 — 헤더는 `totals × 단가`로, 상세는 `priceBillingRows`로
+      //   **서로 다른 코드가 계산한다.** 축이 어긋나면 청구서 항목 합계와 공급가액이 안 맞는다.
+      //   AI 크레딧은 발송이 아니라 `billing_items` 행이 없으므로 따로 더한다.
+      //   대조는 **절사 전** 값끼리 한다 — 절사는 그 뒤 한 번만 적용하므로 탐지력이 줄지 않는다.
+      const subtotalExact =
         (totalSms * prices.SMS) + (totalLms * prices.LMS) +
         (totalMms * prices.MMS) + (totalKakao * prices.KAKAO) +
         (totalTestSms * prices.TEST_SMS) + (totalTestLms * prices.TEST_LMS) +
         (totalSpamSms * spamSmsCost) + (totalSpamLms * spamLmsCost) +
-        agentAmount +
+        agentAmountExact +
         planAmount +
         aiCreditSupply;
-      vat = Math.round(subtotal * 0.1);
-      totalAmount = subtotal + vat;
-
-      // ★ 2026-07-26 금액 항등식 — 헤더 subtotal은 `totals × 단가`로, 상세는 `priceBillingRows`로
-      //   **서로 다른 코드가 계산한다.** 축이 어긋나면 청구서 항목 합계와 공급가액이 안 맞는다.
-      //   AI 크레딧은 발송이 아니라 `billing_items` 행이 없으므로 따로 더한다.
-      //   반올림은 VAT 한 곳뿐이라 여기는 정수 덧셈이고, 오차 허용 없이 같아야 한다.
-      const amountCheck = checkBillingAmountIdentity(billingItems, aiCreditSupply, subtotal);
+      const amountCheck = checkBillingAmountIdentity(
+        billingItems.map((i) => ({ amount: i.amountExact })), aiCreditSupply, subtotalExact,
+      );
       if (!amountCheck.ok) {
         await client.query('ROLLBACK');
         console.log(`[정산][금액불일치] company=${company_id} ${billing_start}~${billing_end} — 상세합 ${amountCheck.itemsSum} + 크레딧 ${amountCheck.aiCreditSupply} ≠ 공급가액 ${amountCheck.subtotal} (차이 ${amountCheck.diff})`);
@@ -496,6 +505,14 @@ router.post('/generate', async (req: Request, res: Response) => {
           amount_check: amountCheck,
         });
       }
+
+      // ★ 2026-07-26 저장 금액은 **원 미만 절사 후 정수 덧셈**이다(Harold 지시).
+      //   상세 행(`billing_items.amount`)이 이미 절사돼 있으므로 공급가액은 그 정수들의 합이고,
+      //   장 소계·부가세·합계까지 전부 정수가 된다 — 청구서 1페이지 항목표와 2페이지 일자별 상세를
+      //   각각 세로로 더한 값이 둘 다 공급가액과 정확히 맞는다.
+      subtotal = billingItems.reduce((s, i) => s + (Number(i.amount) || 0), 0) + aiCreditSupply;
+      vat = vatOfSupply(subtotal);
+      totalAmount = subtotal + vat;
 
       // 8~9) 장별 발행 — 한 요청이 N+1장을 **원자적으로** 만든다.
       //   장 단위로 반복 발행하면 "N장 중 3장까지 만들고 4장째에서 단가 미설정으로 막힌 상태"가 허용된다.
@@ -536,7 +553,7 @@ router.post('/generate', async (req: Request, res: Response) => {
         if (!hasBillableContent && !(carries && (aiCreditSupply > 0 || aiCreditCount > 0))) continue;
 
         const sheetSubtotal = sheet.amount + (carries ? aiCreditSupply : 0);
-        const sheetVat = Math.round(sheetSubtotal * 0.1);
+        const sheetVat = vatOfSupply(sheetSubtotal);
         const t = sheet.totals;
 
         const billingResult = await client.query(
@@ -664,16 +681,17 @@ router.post('/generate', async (req: Request, res: Response) => {
       })),
       // ★ 2026-07-26 채널별 소계 — 청구서 1페이지 항목이 이 값이다(헤더 컬럼이 아니라 billing_items가 진실).
       //   요금제는 단가 계산기를 안 거치므로 여기서 합쳐 넣는다.
-      channel_amounts: { ...priced.amountByChannel, plan: planAmount },
+      //   전부 **절사 후 청구된 값**이다 — 응답에 절사 전 값을 섞으면 화면 합계가 청구서와 갈라진다.
+      channel_amounts: { ...priced.amountByChannel, plan: planAmountBilled },
       plan: {
-        amount: planAmount,
+        amount: planAmountBilled,
         segments: planSegments.map((s) => ({
           plan_code: s.planCode, monthly_price: s.monthlyPrice,
-          from: s.from, to: s.to, days: s.days, month_days: s.monthDays, amount: s.amount,
+          from: s.from, to: s.to, days: s.days, month_days: s.monthDays, amount: floorWon(s.amount),
         })),
       },
       agent: {
-        amount: agentAmount,
+        amount: priced.amountByChannel.agent,
         excluded_prepaid_send_ids: usage.excludedPrepaidSendIds,
       },
     });
@@ -1121,36 +1139,38 @@ router.get('/:id/pdf', async (req: Request, res: Response) => {
     doc.moveTo(50, bil.user_name ? 118 : 115).lineTo(545, bil.user_name ? 118 : 115).strokeColor('#e5e7eb').stroke();
 
     // 공급자 / 공급받는자
-    let y = 130;
-    setFont(true);
-    doc.fontSize(10).fillColor(primary).text('공급자', 50, y);
-    setFont(false);
-    doc.fontSize(9).fillColor(dark);
-    y += 18;
-    doc.text(`상호: ${INVITO_INFO.companyName}`, 50, y); y += 14;
-    doc.text(`대표: ${INVITO_INFO.ceoName}`, 50, y); y += 14;
-    doc.text(`사업자번호: ${INVITO_INFO.bizNumber}`, 50, y); y += 14;
-    doc.text(`업태/종목: ${INVITO_INFO.bizType}`, 50, y); y += 14;
-    doc.text(`주소: ${INVITO_INFO.address}`, 50, y); y += 14;
-    doc.text(`연락처: ${INVITO_INFO.phone} / ${INVITO_INFO.email}`, 50, y);
+    // ★ 2026-07-26 고정 y 증가(+14) 폐기. 대표자가 두 명인 회사(각자대표)는 대표 줄이 칸 폭을 넘어
+    //   두 줄로 흐르는데 다음 줄을 14pt만 내려서 사업자번호 줄과 겹쳐 인쇄됐다(Harold 실측).
+    //   블록이 실제로 끝난 y를 받아 구분선·항목표 시작을 거기서 잡는다 — 고정 좌표를 남기면 재발한다.
+    const partyTop = 130;
+    const leftBottom = drawPartyBlock(doc, {
+      x: 50, y: partyTop, width: rightX - 50 - 20, title: '공급자', primary, dark, setFont,
+      lines: [
+        { label: '상호', value: INVITO_INFO.companyName },
+        { label: '대표', value: INVITO_INFO.ceoName },
+        { label: '사업자번호', value: INVITO_INFO.bizNumber },
+        { label: '업태/종목', value: INVITO_INFO.bizType },
+        { label: '주소', value: INVITO_INFO.address },
+        { label: '연락처', value: `${INVITO_INFO.phone} / ${INVITO_INFO.email}` },
+      ],
+    });
+    const rightBottom = drawPartyBlock(doc, {
+      x: rightX, y: partyTop, width: 545 - rightX, title: '공급받는자', primary, dark, setFont,
+      lines: [
+        { label: '상호', value: bil.company_name || '-' },
+        { label: '대표', value: bil.ceo_name || '-' },
+        { label: '사업자번호', value: bil.business_number || '-' },
+        { label: '업태/종목', value: `${bil.business_type || '-'} / ${bil.business_category || '-'}` },
+        { label: '주소', value: bil.address || '-' },
+        { label: '연락처', value: `${bil.contact_phone || '-'} / ${bil.contact_email || '-'}` },
+      ],
+    });
 
-    y = 130;
-    setFont(true);
-    doc.fontSize(10).fillColor(primary).text('공급받는자', rightX, y);
-    setFont(false);
-    doc.fontSize(9).fillColor(dark);
-    y += 18;
-    doc.text(`상호: ${bil.company_name || '-'}`, rightX, y); y += 14;
-    doc.text(`대표: ${bil.ceo_name || '-'}`, rightX, y); y += 14;
-    doc.text(`사업자번호: ${bil.business_number || '-'}`, rightX, y); y += 14;
-    doc.text(`업태/종목: ${bil.business_type || '-'} / ${bil.business_category || '-'}`, rightX, y); y += 14;
-    doc.text(`주소: ${bil.address || '-'}`, rightX, y); y += 14;
-    doc.text(`연락처: ${bil.contact_phone || '-'} / ${bil.contact_email || '-'}`, rightX, y);
-
-    doc.moveTo(50, 245).lineTo(545, 245).strokeColor('#e5e7eb').stroke();
+    const partyBottom = Math.max(leftBottom, rightBottom);
+    doc.moveTo(50, partyBottom + 4).lineTo(545, partyBottom + 4).strokeColor('#e5e7eb').stroke();
 
     // 내역 테이블
-    y = 260;
+    let y = partyBottom + 19;
     doc.rect(50, y, 495, 25).fill(primary);
     setFont(true);
     doc.fontSize(9).fillColor('white');
@@ -1208,12 +1228,27 @@ router.get('/:id/pdf', async (req: Request, res: Response) => {
     doc.text('합계:', summaryX, y + 5, { width: 80, align: 'right' });
     doc.fontSize(13).text(`₩${n(bil.total_amount).toLocaleString()}`, 430, y + 3, { width: 105, align: 'right' });
 
+    // 합계 박스가 끝난 지점 — 감사 인사 위치를 여기서부터 잡는다(고정 y를 쓰면 항목 많은 회사에서 겹친다).
+    let contentBottom = y + 28;
     if (bil.notes) {
       y += 50;
       setFont(true);
       doc.fontSize(9).fillColor(gray).text('비고:', 50, y);
       setFont(false);
       doc.fillColor(dark).text(bil.notes, 50, y + 15, { width: 495 });
+      contentBottom = y + 15 + Math.ceil(doc.heightOfString(String(bil.notes), { width: 495 }));
+    }
+
+    // ★ 2026-07-26 감사 인사(Harold 지시). 청구서는 매달 고객에게 나가는 유일한 정기 문서다.
+    //   합계·비고 아래, 자동생성 안내(y=770) 위에 둔다. 728 = 770 − 블록 높이 34 − 여백 8.
+    // ★ 2026-07-26 자리가 없으면 **그리지 않는다**(Codex #11). 고정 728로 밀어 넣으면
+    //   항목·비고가 길 때 기존 내용 위에 겹쳐 인쇄된다 — 없는 것보다 나쁘다.
+    const thanksY = Math.max(contentBottom + 16, 690);
+    if (thanksY + THANKS_NOTE_HEIGHT <= 762) {
+      drawThanksNote(doc, {
+        x: 50, y: thanksY, width: 495, primary, gray, setFont,
+        message: `${bil.billing_month}월도 한줄로를 이용해 주셔서 감사합니다.`,
+      });
     }
 
     doc.fontSize(8).fillColor(gray);
@@ -1296,11 +1331,13 @@ router.get('/:id/pdf', async (req: Request, res: Response) => {
         setFont(false);
         doc.fontSize(8).fillColor(dark);
         // ★ 2026-07-26 요금제 행은 발송 수량 축이 없다(plan_days 전용 컬럼으로 분리).
-        //   일자 칸에 적용 구간을, 수량 4칸에는 '-'를 찍는다 — 0을 찍으면 "전송 0건인데 35만원"으로 읽힌다.
-        const planDays = ch === 'plan' ? Number(item.plan_days) || 0 : 0;
-        const dateStr = ch === 'plan' && planDays > 1
-          ? `${toDayKey(item.item_date).slice(5, 10)}~${shiftDayKey(toDayKey(item.item_date), planDays - 1).slice(5, 10)}`
-          : toDayKey(item.item_date).slice(5, 10);
+        //   수량 4칸에는 '-'를 찍는다 — 0을 찍으면 "전송 0건인데 35만원"으로 읽힌다.
+        // ★ 2026-07-26 일자 칸은 **모든 행이 시작일만**이다. 요금제 행에만 적용 구간(`07-01~07-26`, 11자)을
+        //   넣었더니 칸 폭(55pt, 안쪽 47pt)을 넘겨 `lineBreak: false`로도 안 막히고 두 줄로 흘러
+        //   다음 행과 겹쳤다(Harold 스크린샷 실측). 적용 구간은 1페이지 항목표가
+        //   `요금제 FREE (07-01~07-26)` + `26일 / 31일`로 이미 담고 있어 정보 손실이 없고,
+        //   2페이지는 다른 행과 같은 폭·형식을 유지하는 게 표로서 맞다.
+        const dateStr = toDayKey(item.item_date).slice(5, 10);
         // 에이전트는 발송ID, 그 외는 채널 이름. 계정은 장 자체가 계정 단위라 행마다 반복하지 않는다.
         const scopeLabel = ch === 'agent'
           ? String(item.agent_send_id || '(발송ID 미상)')
@@ -1329,22 +1366,24 @@ router.get('/:id/pdf', async (req: Request, res: Response) => {
 
           doc.text(n(item.pending_count).toLocaleString(), cols[6].x + 4, iy + 5, { width: cols[6].w - 8, align: 'right' });
         }
-        doc.text(`₩${n(item.unit_price).toLocaleString()}`, cols[7].x + 4, iy + 5, { width: cols[7].w - 8, align: 'right' });
+        // ★ 2026-07-26 금액 칸은 `lineBreak: false`다. 원 단위 절사로 소수는 사라졌지만,
+        //   자릿수가 큰 회사에서 다시 두 줄로 흘러 아래 행과 겹치는 사고를 구조적으로 막는다.
+        doc.text(`₩${n(item.unit_price).toLocaleString()}`, cols[7].x + 4, iy + 5, { width: cols[7].w - 8, align: 'right', lineBreak: false });
         setFont(true);
-        doc.text(`₩${n(item.amount).toLocaleString()}`, cols[8].x + 4, iy + 5, { width: cols[8].w - 8, align: 'right' });
+        doc.text(`₩${n(item.amount).toLocaleString()}`, cols[8].x + 4, iy + 5, { width: cols[8].w - 8, align: 'right', lineBreak: false });
 
         detailSubtotal += n(item.amount);
         iy += rowH;
         doc.moveTo(50, iy).lineTo(545, iy).strokeColor('#eeeeee').stroke();
       });
 
-      // 합계 행
+      // 합계 행 — Harold 실측(2026-07-26): `₩13,397,454.84`가 칸 폭을 넘겨 두 줄로 흘렀다.
       iy += 4;
       doc.rect(50, iy, 495, 22).fill('#eef2ff');
       setFont(true);
       doc.fontSize(9).fillColor(primary);
       doc.text('합계', cols[0].x + 4, iy + 6);
-      doc.text(`₩${detailSubtotal.toLocaleString()}`, cols[8].x + 4, iy + 6, { width: cols[8].w - 8, align: 'right' });
+      doc.text(`₩${detailSubtotal.toLocaleString()}`, cols[8].x + 4, iy + 6, { width: cols[8].w - 8, align: 'right', lineBreak: false });
     }
 
     doc.end();
@@ -1415,13 +1454,18 @@ router.get('/preview', async (req: Request, res: Response) => {
     //   여기서는 막지 않고 발행이 막힐 이유를 billing_guard로 함께 알린다.
     const usage = await buildBillingUsageRows({ companyId, startDate, endDate, userId, ledger });
     const axisDiffs = diffBillingRowsVsDayData(usage.rows, dayData);
-    const priced = priceBillingRows(usage.rows, prices, ledger.postpaidPriceRows);
+    const priced = priceBillingRows(
+      usage.rows, prices, ledger.postpaidPriceRows,
+      normalizeUnitPriceBasis(ledger.companyPriceRow?.unit_price_basis),
+    );
     const unbillable = priced.unbillableTypes;
     const webUnsetPriced = findUnsetPricedTypes(webUnsetPriceKeys, usage.rows);
     const agentAmount = priced.amountByChannel.agent;
     // ★ 2026-07-26 요금제 일할 — 발행과 같은 함수. 미리보기만 빼면 금액이 갈라진다.
     const planSegments = buildPlanSegments(await loadPlanChanges(companyId, endDate), startDate, endDate);
-    const planAmount = sumPlanSegments(planSegments);
+    // 원 단위 절사가 행 단위라, 미리보기 총액도 **발행이 저장할 그 행들**에서 더해야 값이 갈라지지 않는다.
+    // (구 `sumPlanSegments` 합계는 절사 전 값이라 발행 금액과 몇 원 어긋난다 — 쓰지 않는다.)
+    const previewItems = [...buildPlanBillingItems(planSegments), ...priced.items];
     // 발행이 막힐 이유를 미리보기에서 **같은 함수로** 판정한다 — 다른 기준으로 판정하면
     // 미리보기는 통과인데 발행만 422가 되고, 마감일에 그 차이를 찾을 시간이 없다.
     const planGate = evaluatePlanHistoryGate({
@@ -1466,29 +1510,22 @@ router.get('/preview', async (req: Request, res: Response) => {
     const aiCreditCount = chargeCount + overageCount;
     const aiCreditSupply = chargeSupply + overageCount * CREDIT_UNIT_PRICE;
 
-    // 4) 금액 — 발행과 같은 식(에이전트 포함)
-    const subtotal =
-      (totals.SMS * prices.SMS) + (totals.LMS * prices.LMS) +
-      (totals.MMS * prices.MMS) + (totals.KAKAO * prices.KAKAO) +
-      (totals.TEST_SMS * prices.TEST_SMS) + (totals.TEST_LMS * prices.TEST_LMS) +
-      (totals.SPAM_SMS * prices.SPAM_SMS) + (totals.SPAM_LMS * prices.SPAM_LMS) +
-      agentAmount +
-      planAmount +
-      aiCreditSupply;
-    const vat = Math.round(subtotal * 0.1);
+    // 4) 금액 — 발행과 같은 식(에이전트·요금제 포함, 원 미만 절사 후 정수 덧셈)
+    const subtotal = previewItems.reduce((s, i) => s + (Number(i.amount) || 0), 0) + aiCreditSupply;
+    const vat = vatOfSupply(subtotal);
     const totalAmount = subtotal + vat;
 
     const test = {
       test_sms: totals.TEST_SMS,
       test_lms: totals.TEST_LMS,
-      test_sms_amount: totals.TEST_SMS * prices.TEST_SMS,
-      test_lms_amount: totals.TEST_LMS * prices.TEST_LMS,
+      test_sms_amount: floorWon(totals.TEST_SMS * prices.TEST_SMS),
+      test_lms_amount: floorWon(totals.TEST_LMS * prices.TEST_LMS),
     };
     const spam = {
       spam_sms: totals.SPAM_SMS,
       spam_lms: totals.SPAM_LMS,
-      spam_sms_amount: totals.SPAM_SMS * prices.SPAM_SMS,
-      spam_lms_amount: totals.SPAM_LMS * prices.SPAM_LMS,
+      spam_sms_amount: floorWon(totals.SPAM_SMS * prices.SPAM_SMS),
+      spam_lms_amount: floorWon(totals.SPAM_LMS * prices.SPAM_LMS),
     };
     const ai_credit = { count: aiCreditCount, supply_amount: aiCreditSupply };
     const amounts = { subtotal, vat, total_amount: totalAmount };
@@ -1504,11 +1541,12 @@ router.get('/preview', async (req: Request, res: Response) => {
       excluded_prepaid_send_ids: usage.excludedPrepaidSendIds,
     };
     // ★ 2026-07-26 요금제 항목 — 플랜 × 적용기간, 변경 시 일할. 청구서 항목 1번.
+    //   금액은 발행이 저장할 값(구간별 원 미만 절사)과 같아야 한다.
     const plan = {
-      amount: planAmount,
+      amount: previewItems.filter((i) => i.channel === 'plan').reduce((s, i) => s + (Number(i.amount) || 0), 0),
       segments: planSegments.map((s) => ({
         plan_code: s.planCode, monthly_price: s.monthlyPrice,
-        from: s.from, to: s.to, days: s.days, month_days: s.monthDays, amount: s.amount,
+        from: s.from, to: s.to, days: s.days, month_days: s.monthDays, amount: floorWon(s.amount),
       })),
     };
     // 발행 가능 여부를 미리보기에서 먼저 알린다 — 선불 회사·축 불일치·단가 미설정은 발행이 막힌다.
@@ -1655,15 +1693,18 @@ router.post('/invoices', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '필수: company_id, billing_start, billing_end' });
     }
 
+    // ★ 2026-07-26 거래내역서도 **항목별 원 미만 절사**다(Harold 지시). 단가가 소수 둘째 자리라
+    //   유형별 금액이 소수로 떨어지고, 고객이 항목을 세로로 더한 값이 공급가액과 맞아야 한다.
+    //   PDF의 유형별 행도 같은 함수를 거치므로 표와 합계가 정확히 일치한다.
     const subtotal =
-      (sms_success_count * sms_unit_price) +
-      (lms_success_count * lms_unit_price) +
-      (mms_success_count * mms_unit_price) +
-      (kakao_success_count * kakao_unit_price) +
-      (test_sms_count * test_sms_unit_price) +
-      (test_lms_count * test_lms_unit_price) +
-      (spam_filter_count * spam_filter_unit_price);
-    const vat = Math.round(subtotal * 0.1);
+      floorWon(sms_success_count * sms_unit_price) +
+      floorWon(lms_success_count * lms_unit_price) +
+      floorWon(mms_success_count * mms_unit_price) +
+      floorWon(kakao_success_count * kakao_unit_price) +
+      floorWon(test_sms_count * test_sms_unit_price) +
+      floorWon(test_lms_count * test_lms_unit_price) +
+      floorWon(spam_filter_count * spam_filter_unit_price);
+    const vat = vatOfSupply(subtotal);
     const total_amount = subtotal + vat;
 
     const result = await pool.query(
@@ -1825,36 +1866,35 @@ router.get('/invoices/:id/pdf', async (req: Request, res: Response) => {
 
     doc.moveTo(50, 105).lineTo(545, 105).strokeColor('#e5e7eb').stroke();
 
-    // 공급자 / 공급받는자
-    let iy = 120;
-    setFont(true);
-    doc.fontSize(10).fillColor(primary).text('공급자', 50, iy);
-    setFont(false);
-    doc.fontSize(9).fillColor(dark);
-    iy += 18;
-    doc.text(`상호: ${INVITO_INFO.companyName}`, 50, iy); iy += 14;
-    doc.text(`대표: ${INVITO_INFO.ceoName}`, 50, iy); iy += 14;
-    doc.text(`사업자번호: ${INVITO_INFO.bizNumber}`, 50, iy); iy += 14;
-    doc.text(`업태/종목: ${INVITO_INFO.bizType}`, 50, iy); iy += 14;
-    doc.text(`주소: ${INVITO_INFO.address}`, 50, iy); iy += 14;
-    doc.text(`연락처: ${INVITO_INFO.phone} / ${INVITO_INFO.email}`, 50, iy);
+    // 공급자 / 공급받는자 — 정산서와 같은 CT. 대표자 2명 줄바꿈 겹침(2026-07-26)이 여기도 그대로 있었다.
+    const invPartyTop = 120;
+    const invLeftBottom = drawPartyBlock(doc, {
+      x: 50, y: invPartyTop, width: rightX - 50 - 20, title: '공급자', primary, dark, setFont,
+      lines: [
+        { label: '상호', value: INVITO_INFO.companyName },
+        { label: '대표', value: INVITO_INFO.ceoName },
+        { label: '사업자번호', value: INVITO_INFO.bizNumber },
+        { label: '업태/종목', value: INVITO_INFO.bizType },
+        { label: '주소', value: INVITO_INFO.address },
+        { label: '연락처', value: `${INVITO_INFO.phone} / ${INVITO_INFO.email}` },
+      ],
+    });
+    const invRightBottom = drawPartyBlock(doc, {
+      x: rightX, y: invPartyTop, width: 545 - rightX, title: '공급받는자', primary, dark, setFont,
+      lines: [
+        { label: '상호', value: inv.company_name || '-' },
+        { label: '대표', value: inv.ceo_name || '-' },
+        { label: '사업자번호', value: inv.business_number || '-' },
+        { label: '업태/종목', value: `${inv.business_type || '-'} / ${inv.business_category || '-'}` },
+        { label: '주소', value: inv.address || '-' },
+        { label: '연락처', value: `${inv.contact_phone || '-'} / ${inv.contact_email || '-'}` },
+      ],
+    });
 
-    iy = 120;
-    setFont(true);
-    doc.fontSize(10).fillColor(primary).text('공급받는자', rightX, iy);
-    setFont(false);
-    doc.fontSize(9).fillColor(dark);
-    iy += 18;
-    doc.text(`상호: ${inv.company_name || '-'}`, rightX, iy); iy += 14;
-    doc.text(`대표: ${inv.ceo_name || '-'}`, rightX, iy); iy += 14;
-    doc.text(`사업자번호: ${inv.business_number || '-'}`, rightX, iy); iy += 14;
-    doc.text(`업태/종목: ${inv.business_type || '-'} / ${inv.business_category || '-'}`, rightX, iy); iy += 14;
-    doc.text(`주소: ${inv.address || '-'}`, rightX, iy); iy += 14;
-    doc.text(`연락처: ${inv.contact_phone || '-'} / ${inv.contact_email || '-'}`, rightX, iy);
+    const invPartyBottom = Math.max(invLeftBottom, invRightBottom);
+    doc.moveTo(50, invPartyBottom + 4).lineTo(545, invPartyBottom + 4).strokeColor('#e5e7eb').stroke();
 
-    doc.moveTo(50, 230).lineTo(545, 230).strokeColor('#e5e7eb').stroke();
-
-    iy = 240;
+    let iy = invPartyBottom + 14;
     if (inv.store_name && inv.invoice_type === 'brand') {
       setFont(false);
       doc.fontSize(9).fillColor(gray).text(`브랜드: ${inv.store_name} (${inv.store_code || ''})`, 50, iy);
@@ -1886,13 +1926,15 @@ router.get('/invoices/:id/pdf', async (req: Request, res: Response) => {
     };
 
     const n = (v: any) => Number(v) || 0;
-    drawInvRow('SMS', n(inv.sms_success_count), n(inv.sms_unit_price), n(inv.sms_success_count) * n(inv.sms_unit_price));
-    drawInvRow('LMS', n(inv.lms_success_count), n(inv.lms_unit_price), n(inv.lms_success_count) * n(inv.lms_unit_price));
-    drawInvRow('MMS', n(inv.mms_success_count), n(inv.mms_unit_price), n(inv.mms_success_count) * n(inv.mms_unit_price));
-    drawInvRow('카카오', n(inv.kakao_success_count), n(inv.kakao_unit_price), n(inv.kakao_success_count) * n(inv.kakao_unit_price));
-    drawInvRow('테스트 SMS', n(inv.test_sms_count), n(inv.test_sms_unit_price), n(inv.test_sms_count) * n(inv.test_sms_unit_price), '#fefce8');
-    drawInvRow('테스트 LMS', n(inv.test_lms_count), n(inv.test_lms_unit_price), n(inv.test_lms_count) * n(inv.test_lms_unit_price), '#fefce8');
-    drawInvRow('스팸필터', n(inv.spam_filter_count), n(inv.spam_filter_unit_price), n(inv.spam_filter_count) * n(inv.spam_filter_unit_price), '#fef3c7');
+    // ★ 2026-07-26 행 금액은 저장 시점과 **같은 절사 함수**를 거친다. 다른 규칙으로 그리면
+    //   표의 세로합이 아래 공급가액과 어긋난다(고객이 가장 먼저 검산하는 자리다).
+    drawInvRow('SMS', n(inv.sms_success_count), n(inv.sms_unit_price), floorWon(n(inv.sms_success_count) * n(inv.sms_unit_price)));
+    drawInvRow('LMS', n(inv.lms_success_count), n(inv.lms_unit_price), floorWon(n(inv.lms_success_count) * n(inv.lms_unit_price)));
+    drawInvRow('MMS', n(inv.mms_success_count), n(inv.mms_unit_price), floorWon(n(inv.mms_success_count) * n(inv.mms_unit_price)));
+    drawInvRow('카카오', n(inv.kakao_success_count), n(inv.kakao_unit_price), floorWon(n(inv.kakao_success_count) * n(inv.kakao_unit_price)));
+    drawInvRow('테스트 SMS', n(inv.test_sms_count), n(inv.test_sms_unit_price), floorWon(n(inv.test_sms_count) * n(inv.test_sms_unit_price)), '#fefce8');
+    drawInvRow('테스트 LMS', n(inv.test_lms_count), n(inv.test_lms_unit_price), floorWon(n(inv.test_lms_count) * n(inv.test_lms_unit_price)), '#fefce8');
+    drawInvRow('스팸필터', n(inv.spam_filter_count), n(inv.spam_filter_unit_price), floorWon(n(inv.spam_filter_count) * n(inv.spam_filter_unit_price)), '#fef3c7');
 
     // 합계
     iy += 15;
@@ -1916,12 +1958,23 @@ router.get('/invoices/:id/pdf', async (req: Request, res: Response) => {
     doc.text('합계:', invSummaryX, iy + 5, { width: 80, align: 'right' });
     doc.fontSize(13).text(`₩${n(inv.total_amount).toLocaleString()}`, 430, iy + 3, { width: 105, align: 'right' });
 
+    let invContentBottom = iy + 28;
     if (inv.notes) {
       iy += 50;
       setFont(true);
       doc.fontSize(9).fillColor(gray).text('비고:', 50, iy);
       setFont(false);
       doc.fillColor(dark).text(inv.notes, 50, iy + 15, { width: 495 });
+      invContentBottom = iy + 15 + Math.ceil(doc.heightOfString(String(inv.notes), { width: 495 }));
+    }
+
+    // ★ 2026-07-26 감사 인사 — 정산서와 같은 CT·같은 배치(문서 간 톤이 갈리지 않게).
+    const invThanksY = Math.max(invContentBottom + 16, 690);
+    if (invThanksY + THANKS_NOTE_HEIGHT <= 762) {
+      drawThanksNote(doc, {
+        x: 50, y: invThanksY, width: 495, primary, gray, setFont,
+        message: `${Number(String(bEnd).slice(5, 7))}월도 한줄로를 이용해 주셔서 감사합니다.`,
+      });
     }
 
     doc.fontSize(8).fillColor(gray);

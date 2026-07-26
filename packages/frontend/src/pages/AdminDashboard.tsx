@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { companiesApi, plansApi, billingApi } from '../api/client';
+import { companiesApi, plansApi, billingApi, unitPriceApi } from '../api/client';
+import { previewUnitPrice, fmtPrice, toSupplyInputs } from '../utils/unitPrice'; // ★ 2026-07-26 단가 = VAT 별도 공급가
 import { useAuthStore } from '../stores/authStore';
 import { formatDateTime, formatDate, formatDateTimeShort, formatCampaignMessageForDisplay, getAlimtalkTemplateStatus, kstTodayStr } from '../utils/formatDate';
 import SessionTimer from '../components/SessionTimer';
@@ -120,13 +121,15 @@ export default function AdminDashboard() {
     sendHourEnd: 21,
     dailyLimit: 0,
     duplicateDays: 7,
-    costPerSms: 9.9,
-    costPerLms: 27,
-    costPerMms: 50,
-    costPerKakao: 7.5,
-    // ★ 2026-07-25 테스트발송 단가 — 빈 값이면 일반 SMS/LMS 단가를 따른다(청구서 폴백)
+    // ★ 2026-07-26 단가는 **부가세 별도(공급가)** 입력이다. 빈 값 = 미설정(청구가 막힌다).
+    //   기본 상수를 채워 두면 미설정 회사가 그 값으로 저장돼 조용히 계약과 다른 단가가 굳는다.
+    costPerSms: '' as string | number,
+    costPerLms: '' as string | number,
+    costPerMms: '' as string | number,
+    costPerKakao: '' as string | number,
     costPerTestSms: '' as string | number,
     costPerTestLms: '' as string | number,
+    unitPriceBasis: 'vat_included' as 'vat_included' | 'vat_excluded',
     billingType: 'postpaid',
     balance: 0,
     balanceAdjustType: 'charge' as 'charge' | 'deduct',
@@ -383,6 +386,11 @@ const [adminCustDeleteLoading, setAdminCustDeleteLoading] = useState(false);
 const [invoices, setInvoices] = useState<any[]>([]);
 const [invoicesLoading, setInvoicesLoading] = useState(false);
 const [billingToast, setBillingToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+// ★ 2026-07-26 단가 저장 — 기본정보 저장과 분리한다. 단가는 부가세 기준(unit_price_basis)과
+//   **한 문장에서** 써야 해서 전용 엔드포인트만 쓰고, 저장 즉시 그 회사의 청구·차감 기준이 전환된다.
+const [savingUnitPrices, setSavingUnitPrices] = useState(false);
+const [applyUnitPriceToAgents, setApplyUnitPriceToAgents] = useState(false);
+
 // 정산서 이메일 발송
 const [showEmailModal, setShowEmailModal] = useState(false);
 const [emailTarget, setEmailTarget] = useState<any>(null);
@@ -2495,12 +2503,12 @@ const handleApproveRequest = async (id: string) => {
           sendHourEnd: c.send_end_hour ?? 21,
           dailyLimit: c.daily_limit_per_customer ?? 0,
           duplicateDays: c.duplicate_prevention_days ?? 7,
-          costPerSms: c.cost_per_sms ?? 9.9,
-          costPerLms: c.cost_per_lms ?? 27,
-          costPerMms: c.cost_per_mms ?? 50,
-          costPerKakao: c.cost_per_kakao ?? 7.5,
-          costPerTestSms: c.cost_per_test_sms ?? '',
-          costPerTestLms: c.cost_per_test_lms ?? '',
+          // ★ 2026-07-26 미설정(NULL)을 기본단가로 위장하지 않는다 — 그대로 저장하면 계약과 다른 단가가 굳는다.
+          //   ★ 전환 전(vat_included) 회사는 저장값이 **VAT 포함가**다. 그걸 "VAT 별도" 칸에 그대로 채우면
+          //     수정 없이 저장만 해도 그 숫자가 공급가로 재해석돼 10% 과청구가 된다(Codex #1).
+          //     그래서 공급가 상당액(÷1.1)으로 환산해 채운다 — 그대로 저장하면 지불액이 그대로 유지된다.
+          ...toSupplyInputs(c),
+          unitPriceBasis: c.unit_price_basis === 'vat_excluded' ? 'vat_excluded' : 'vat_included',
           billingType: c.billing_type || 'postpaid',
           balance: Number(c.balance) || 0,
           balanceAdjustType: 'charge' as 'charge' | 'deduct',
@@ -2613,6 +2621,44 @@ const handleApproveRequest = async (id: string) => {
         }
       },
     );
+  };
+
+  // ★ 2026-07-26 단가 저장 — 기본정보 수정과 분리된 전용 경로.
+  //   저장 성공 시 그 회사의 기준이 'vat_excluded'로 전환되므로, 화면 상태도 즉시 맞춰
+  //   같은 화면에서 두 번 저장했을 때 안내 문구가 어긋나지 않게 한다.
+  const handleSaveUnitPrices = async () => {
+    if (!editCompany?.id) return;
+    setSavingUnitPrices(true);
+    try {
+      const res = await unitPriceApi.save(
+        editCompany.id,
+        {
+          sms: editCompany.costPerSms,
+          lms: editCompany.costPerLms,
+          mms: editCompany.costPerMms,
+          kakao: editCompany.costPerKakao,
+          testSms: editCompany.costPerTestSms,
+          testLms: editCompany.costPerTestLms,
+        },
+        applyUnitPriceToAgents,
+      );
+      if (!res.data?.success) throw new Error(res.data?.error || '단가 저장 실패');
+      // ★ 2026-07-26 서버가 반올림해 실제로 저장한 값을 화면에 되돌린다(Codex #10).
+      //   요청값을 그대로 두면 7.199처럼 입력한 뒤 화면과 DB가 갈린다.
+      const saved = res.data.company || {};
+      setEditCompany((prev: any) => ({
+        ...prev,
+        ...toSupplyInputs({ ...saved, unit_price_basis: 'vat_excluded' }),
+        unitPriceBasis: 'vat_excluded',
+      }));
+      setApplyUnitPriceToAgents(false);
+      setBillingToast({ msg: res.data.message || '단가를 저장했습니다.', type: 'success' });
+      await loadData();
+    } catch (err: any) {
+      setBillingToast({ msg: err?.response?.data?.error || err?.message || '단가 저장 실패', type: 'error' });
+    } finally {
+      setSavingUnitPrices(false);
+    }
   };
 
   const handleUpdateCompany = async (e: React.FormEvent) => {
@@ -6227,19 +6273,32 @@ const handleApproveRequest = async (id: string) => {
                                       ))}
                                       <span className="text-[10px] text-gray-400">선불 지정 시 고객 대시보드 잔액 표시·충전 대상</span>
                                     </div>
+                                    {/* ★ 2026-07-26 발송ID 단가도 회사 단가와 **같은 기준(VAT 별도 공급가)** 으로 해석된다.
+                                        라벨 없이 두면 계약서의 VAT 포함가를 그대로 넣어 10% 과청구가 난다(Codex #7). */}
+                                    <div className="rounded-lg bg-emerald-50/70 px-2 py-1.5 text-[10px] text-emerald-800">
+                                      발송ID 단가도 <b>VAT 별도 공급가</b>로 입력합니다. 건별 VAT 10%는 시스템이 자동 합산합니다.
+                                    </div>
                                     <div className="grid grid-cols-4 gap-1.5">
-                                      {([['costPerSms', 'SMS'], ['costPerLms', 'LMS'], ['costPerMms', 'MMS'], ['costPerKakao', '카카오']] as const).map(([k, label]) => (
-                                        <div key={k}>
-                                          <label className="block text-[10px] text-gray-500 mb-0.5">{label} 단가</label>
-                                          <input
-                                            type="text"
-                                            value={editAgentLedger[k]}
-                                            onChange={(e) => setEditAgentLedger({ ...editAgentLedger, [k]: sanitizeCostInput(e.target.value) })}
-                                            className="w-full px-2 py-1 border rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none"
-                                            placeholder="미설정"
-                                          />
-                                        </div>
-                                      ))}
+                                      {([['costPerSms', 'SMS'], ['costPerLms', 'LMS'], ['costPerMms', 'MMS'], ['costPerKakao', '카카오']] as const).map(([k, label]) => {
+                                        const raw = editAgentLedger[k];
+                                        const pv = previewUnitPrice(raw);
+                                        const empty = raw === '' || raw === null || raw === undefined;
+                                        return (
+                                          <div key={k}>
+                                            <label className="block text-[10px] text-gray-500 mb-0.5">{label} 단가 <span className="text-emerald-700">(VAT 별도)</span></label>
+                                            <input
+                                              type="text"
+                                              value={raw}
+                                              onChange={(e) => setEditAgentLedger({ ...editAgentLedger, [k]: sanitizeCostInput(e.target.value) })}
+                                              className="w-full px-2 py-1 border rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                                              placeholder="미설정"
+                                            />
+                                            <div className="mt-0.5 text-[10px] text-emerald-700">
+                                              {empty ? <span className="text-gray-400">미설정 — 청구 차단</span> : <>VAT 포함 {fmtPrice(pv.withVat)}원</>}
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
                                     </div>
                                     <div className="flex gap-1.5">
                                       <input
@@ -6761,67 +6820,95 @@ const handleApproveRequest = async (id: string) => {
                     </div>
                   )}
 
-                  <p className="text-sm text-gray-500">건당 단가를 설정합니다. (단위: 원)</p>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-gray-50 rounded-lg p-4">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">SMS</label>
-                      <div className="flex items-center gap-1">
-                        <input type="number" step="0.1" value={editCompany.costPerSms}
-                          onChange={(e) => setEditCompany({ ...editCompany, costPerSms: Number(e.target.value) })}
-                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                        <span className="text-sm text-gray-500">원</span>
+                  {/* ★ 2026-07-26 단가 입력 = 부가세 별도(공급가). 시스템이 건별 VAT를 자동 합산한다.
+                      배경: 단가가 부가세 포함으로 입력돼 있었는데 청구가 10%를 또 더해 과청구가 났다.
+                      화면에 기준을 못 박고, 칸마다 실제 차감액을 같이 보여줘 입력 즉시 검산되게 한다. */}
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-bold text-gray-900">
+                          {editCompany.companyName || '고객사'} 공급 단가 (VAT 별도)
+                        </div>
+                        <p className="mt-1 text-xs leading-relaxed text-gray-600">
+                          입력값은 <b>VAT 별도 공급가</b>입니다. 발송 시 건별 VAT 10%를 자동 계산해 합산하고,
+                          저장 즉시 이 고객사의 청구·차감에 적용됩니다.
+                        </p>
                       </div>
+                      <span className="shrink-0 rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white">VAT 10% 자동</span>
                     </div>
-                    <div className="bg-gray-50 rounded-lg p-4">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">LMS</label>
-                      <div className="flex items-center gap-1">
-                        <input type="number" step="0.1" value={editCompany.costPerLms}
-                          onChange={(e) => setEditCompany({ ...editCompany, costPerLms: Number(e.target.value) })}
-                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                        <span className="text-sm text-gray-500">원</span>
+                    {editCompany.unitPriceBasis !== 'vat_excluded' && (
+                      <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        이 고객사는 아직 <b>부가세 포함 단가</b>로 저장돼 있습니다. 계약서의 <b>공급가(VAT 별도)</b>를 입력해 저장하면
+                        기준이 전환되고, 그때부터 청구서에 부가세가 한 번만 붙습니다.
                       </div>
-                    </div>
-                    <div className="bg-gray-50 rounded-lg p-4">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">MMS</label>
-                      <div className="flex items-center gap-1">
-                        <input type="number" step="0.1" value={editCompany.costPerMms}
-                          onChange={(e) => setEditCompany({ ...editCompany, costPerMms: Number(e.target.value) })}
-                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                        <span className="text-sm text-gray-500">원</span>
-                      </div>
-                    </div>
-                    <div className="bg-gray-50 rounded-lg p-4">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">카카오</label>
-                      <div className="flex items-center gap-1">
-                        <input type="number" step="0.1" value={editCompany.costPerKakao}
-                          onChange={(e) => setEditCompany({ ...editCompany, costPerKakao: Number(e.target.value) })}
-                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                        <span className="text-sm text-gray-500">원</span>
-                      </div>
-                    </div>
-                    {/* ★ 2026-07-25 테스트발송 단가 — 청구서 항목인데 입력 경로가 없어 설정할 수 없었다 */}
-                    <div className="bg-gray-50 rounded-lg p-4">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">테스트 SMS</label>
-                      <div className="flex items-center gap-1">
-                        <input type="number" step="0.1" value={editCompany.costPerTestSms}
-                          placeholder="비우면 SMS 단가 적용"
-                          onChange={(e) => setEditCompany({ ...editCompany, costPerTestSms: e.target.value === '' ? '' : Number(e.target.value) })}
-                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                        <span className="text-sm text-gray-500">원</span>
-                      </div>
-                    </div>
-                    <div className="bg-gray-50 rounded-lg p-4">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">테스트 LMS</label>
-                      <div className="flex items-center gap-1">
-                        <input type="number" step="0.1" value={editCompany.costPerTestLms}
-                          placeholder="비우면 LMS 단가 적용"
-                          onChange={(e) => setEditCompany({ ...editCompany, costPerTestLms: e.target.value === '' ? '' : Number(e.target.value) })}
-                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                        <span className="text-sm text-gray-500">원</span>
-                      </div>
-                    </div>
+                    )}
                   </div>
-                  <p className="text-xs text-gray-400">스팸필터 테스트는 별도 단가 없이 SMS·LMS 단가를 그대로 적용합니다.</p>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    {([
+                      ['costPerSms', 'SMS', '단문 문자'],
+                      ['costPerLms', 'LMS', '장문 문자'],
+                      ['costPerMms', 'MMS', '이미지 문자'],
+                      ['costPerKakao', '알림톡', '카카오 알림톡'],
+                      ['costPerTestSms', '테스트 SMS', '비우면 SMS 단가'],
+                      ['costPerTestLms', '테스트 LMS', '비우면 LMS 단가'],
+                    ] as const).map(([key, label, hint]) => {
+                      const raw = (editCompany as any)[key];
+                      const p = previewUnitPrice(raw);
+                      const empty = raw === '' || raw === null || raw === undefined;
+                      return (
+                        <div key={key} className="rounded-xl border border-gray-200 bg-white p-4">
+                          <div className="mb-2 flex items-baseline justify-between">
+                            <label className="text-sm font-bold text-gray-900">{label}</label>
+                            <span className="text-[11px] text-gray-400">{hint}</span>
+                          </div>
+                          <div className="flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-2 focus-within:ring-2 focus-within:ring-emerald-500">
+                            <input
+                              type="number" step="0.01" min="0" inputMode="decimal"
+                              value={raw as any}
+                              placeholder={key.startsWith('costPerTest') ? '비우면 상속' : '0.00'}
+                              onChange={(e) => setEditCompany({ ...editCompany, [key]: e.target.value === '' ? '' : e.target.value })}
+                              className="w-full bg-transparent text-lg font-bold text-gray-900 outline-none"
+                            />
+                            <span className="shrink-0 text-xs text-gray-400">원 / 건</span>
+                          </div>
+                          <div className="mt-2 text-[11px] font-semibold text-emerald-700">
+                            {empty
+                              ? <span className="text-gray-400">미설정 — 청구서 발행이 차단됩니다</span>
+                              : <>VAT {fmtPrice(p.vat)}원 · <span className="text-emerald-800">VAT 포함 {fmtPrice(p.withVat)}원 차감</span></>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <label className="flex items-start gap-2 rounded-lg bg-gray-50 px-3 py-2.5 text-xs text-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={applyUnitPriceToAgents}
+                      onChange={(e) => setApplyUnitPriceToAgents(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      단가가 <b>비어 있는 발송ID</b>에도 이 값을 함께 적용합니다.
+                      이미 값이 있는 발송ID는 건드리지 않습니다 — 발송ID마다 계약이 다를 수 있어 자동 상속은 하지 않습니다.
+                    </span>
+                  </label>
+
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3">
+                    <p className="text-[11px] leading-relaxed text-gray-500">
+                      VAT는 건별 공급가의 10%를 소수점 둘째 자리로 반올림합니다.
+                      선불은 VAT 포함 금액을 발송 시 차감하고 최종 실패 건만 같은 금액으로 환불합니다.
+                      스팸필터 테스트는 별도 단가 없이 SMS·LMS 단가를 그대로 적용합니다.
+                    </p>
+                    <button
+                      onClick={handleSaveUnitPrices}
+                      disabled={savingUnitPrices}
+                      className="shrink-0 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      {savingUnitPrices ? '저장 중...' : '단가 저장'}
+                    </button>
+                  </div>
                 </div>
               )}
 

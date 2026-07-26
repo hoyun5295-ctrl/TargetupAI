@@ -37,7 +37,7 @@ async function collectContext(companyId: string): Promise<AgencyContext> {
   // 회사 기본 + 단가 (컬럼 전부 기존 운영 코드 SELECT 실증분 — continuous-operator ctx·report-pdf)
   const companyRes = await query(
     `SELECT company_name, business_type, brand_name, brand_tone, customer_schema,
-            cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao
+            cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, unit_price_basis
        FROM companies WHERE id = $1::uuid`,
     [companyId],
   );

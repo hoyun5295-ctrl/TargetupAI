@@ -227,7 +227,10 @@ describe('findUnbillableUsageKeys — 청구가 못 읽는 유형키 감지 (202
 
 describe('resolveBillingUnitPrices — 청구 단가 스냅샷 (2026-07-25)', () => {
   // PG numeric은 드라이버가 문자열로 준다 — 실제 행 모양대로 문자열로 쓴다.
+  // ★ 2026-07-26 단가는 회사별 부가세 기준(`unit_price_basis`)을 거쳐 **공급가**로 해석된다.
+  //   기존 케이스는 전환 후(공급가 입력) 기준 — 저장값이 곧 공급가다.
   const row = (o: Record<string, any> = {}) => ({
+    unit_price_basis: 'vat_excluded',
     cost_per_sms: '9.00', cost_per_lms: '27.00', cost_per_mms: '50.00', cost_per_kakao: '8.00',
     cost_per_test_sms: null, cost_per_test_lms: null, ...o,
   });
@@ -860,11 +863,35 @@ describe('priceBillingRows — 청구 상세 단가·금액 부착 (2026-07-26)'
     expect(out.amountByChannel).toEqual({ plan: 0, web: 900, agent: 0, test: 81, spam: 18 });
   });
 
+  it('소수 단가는 행 단위로 원 미만을 절사하고, 절사 전 값을 amountExact로 함께 남긴다 (2026-07-26)', () => {
+    // 금강제화 축 — 부가세 별도 단가 LMS 22.80 / SMS 7.20
+    const priceEx = { ...web, LMS: 22.8, SMS: 7.2 };
+    const out = priceBillingRows([
+      r({ typeKey: 'LMS', success: 2758 }),   // 62,882.4
+      r({ typeKey: 'SMS', success: 6793 }),   // 48,909.6
+    ], priceEx, []);
+
+    expect(out.items.map((i) => i.amount)).toEqual([62882, 48909]);
+    out.items.forEach((i) => expect(Number.isInteger(i.amount)).toBe(true));
+    expect(out.items[0].amountExact).toBeCloseTo(62882.4, 6);
+    expect(out.items[1].amountExact).toBeCloseTo(48909.6, 6);
+
+    // 저장·표시용 채널 소계는 절사 후, 교차검증용 소계는 절사 전
+    expect(out.amountByChannel.web).toBe(62882 + 48909);
+    expect(out.amountExactByChannel.web).toBeCloseTo(62882.4 + 48909.6, 6);
+  });
+
+  it('절사가 부동소수점 오차로 1원을 깎지 않는다', () => {
+    const out = priceBillingRows([r({ typeKey: 'SMS', success: 720 })], { ...web, SMS: 7 }, []);
+    expect(out.items[0].amount).toBe(5040);
+  });
+
   it('에이전트는 회사 단가가 아니라 발송ID별 단가로 계산되고 agent_id FK가 붙는다', () => {
     const out = priceBillingRows(
       [r({ channel: 'agent', typeKey: 'LMS', userId: null, agentSendId: 'D0018', success: 1000 })],
       web,
       [ap({ id: 'cai-D0018', cost_per_lms: 22 })],
+      'vat_excluded',
     );
     expect(out.items[0]).toMatchObject({ agentId: 'cai-D0018', unitPrice: 22, amount: 22000 });
     expect(out.amountByChannel.agent).toBe(22000);
@@ -876,6 +903,7 @@ describe('priceBillingRows — 청구 상세 단가·금액 부착 (2026-07-26)'
       [r({ channel: 'agent', typeKey: 'SMS', userId: null, agentSendId: 'd0018', success: 10 })],
       web,
       [ap({ agent_send_id: 'D0018', cost_per_sms: 7 })],
+      'vat_excluded',
     );
     expect(out.items[0].amount).toBe(70);
   });
@@ -981,6 +1009,14 @@ describe('buildPlanBillingItems — 요금제 행 (2026-07-26)', () => {
     expect(it0.amount).toBe(101613);
     expect(it0.channel).toBe('plan');
     expect(it0.typeKey).toBe('PLAN_BASIC');
+  });
+
+  it('일할 금액도 원 미만을 절사한다 — 발송 행과 같은 규칙이어야 장 소계가 정수로 성립한다 (2026-07-26)', () => {
+    // 350,000 × 9/31 = 101,612.903…
+    const [it0] = buildPlanBillingItems([seg({ amount: 101612.903225806 })]);
+    expect(it0.amount).toBe(101612);
+    expect(it0.amountExact).toBeCloseTo(101612.903225806, 6);
+    expect(Number.isInteger(it0.amount)).toBe(true);
   });
 
   it('구간이 여럿이면 행도 여럿 — 구간 시작일이 item_date다', () => {

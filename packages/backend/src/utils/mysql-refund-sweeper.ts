@@ -23,6 +23,8 @@
 // ===========================================================================
 
 import pool, { query } from '../config/database';
+import { resolveChargeUnitPrice } from './unit-price';
+import { parseDeductDescription } from './deduct-reference';
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
 import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, kakaoBatchAggByGroup, type CampaignAggCounts } from './sms-queue';
 import { prepaidRefund, prepaidReverseOverRefund } from './prepaid';
@@ -65,19 +67,22 @@ interface CampaignRow {
 //   재시작 시 비어 첫 사이클만 전수 집계(기존과 동일) 후 다시 차등화 — PG 컬럼 추가 0.
 const _lastSweptAt = new Map<string, number>();
 
-/** 회사·메시지타입별 단가 조회 (사이클 내 캐시) — prepaid.ts와 동일한 단가 컬럼 기준 */
+/**
+ * 회사·메시지타입별 단가 조회 (사이클 내 캐시) — `prepaid.ts`와 **같은 CT**를 지난다.
+ *
+ * ★ 2026-07-26 단가 선택을 SQL `CASE`에서 걷어냈다. 부가세 기준(`unit_price_basis`)에 따라
+ *   차감·환불 단가가 달라지는데, SQL 안에서 컬럼만 고르면 그 변환이 빠져 **회수 금액만 기준이 달라진다.**
+ *   차감·환불·회수 셋의 단가가 갈리면 잔액이 수렴하지 않는다(D182 계열).
+ */
 async function getUnitPrice(companyId: string, messageType: string, cache: Map<string, number>): Promise<number> {
   const key = `${companyId}:${messageType}`;
   if (cache.has(key)) return cache.get(key)!;
   const r = await query(
-    `SELECT CASE $2
-              WHEN 'SMS' THEN cost_per_sms WHEN 'LMS' THEN cost_per_lms
-              WHEN 'MMS' THEN cost_per_mms WHEN 'KAKAO' THEN cost_per_kakao
-              ELSE NULL END AS unit
+    `SELECT unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao
      FROM companies WHERE id = $1`,
-    [companyId, messageType]
+    [companyId]
   );
-  const unit = Number(r.rows[0]?.unit || 0);
+  const unit = resolveChargeUnitPrice(r.rows[0], messageType);
   cache.set(key, unit);
   return unit;
 }
@@ -214,15 +219,44 @@ async function runOnce(): Promise<void> {
         //   차감 건수 = balance_transactions deduct 실측(금액/단가) — 기록(target_count)이 아니라 돈이 진실.
         //   적재가 끝난 캠페인만(send_phase 'sent' 또는 NULL=동기 적재 경로) — 적재 진행 중 오발동 차단.
         if (camp.send_phase == null || camp.send_phase === 'sent') {
-          const unit = await getUnitPrice(camp.company_id, camp.message_type, unitCache);
+          // ★ 2026-07-26 **차감 원장을 먼저 읽는다**(Codex #5·#6).
+          //   그 전에는 ①`현재 단가 > 0`인지로 환불 진입을 판정하고 ②차감 건수를 `총차감액 ÷ 현재단가`로
+          //   역산했다. 둘 다 "지금 단가"에 기대는 구조라, 단가를 비우면 환불이 통째로 건너뛰어지고(미환불)
+          //   단가를 바꾸면 건수가 부풀어 없는 실패가 환불된다(2026-07-26 패밀리투 83건 622.5원 실측).
+          //   정산의 근거는 그 차감이 남긴 값이다.
+          const dedRes = await query(
+            `SELECT amount, description FROM balance_transactions
+             WHERE company_id = $1 AND type = 'deduct' AND reference_type = 'campaign' AND reference_id = $2
+               AND (message_type = $3 OR message_type IS NULL)`,
+            [camp.company_id, camp.id, camp.message_type]
+          );
+          let dedTotal = 0;
+          let parsedCount = 0;
+          let allParsed = dedRes.rows.length > 0;
+          for (const d of dedRes.rows as any[]) {
+            dedTotal += Number(d.amount) || 0;
+            const parsed = parseDeductDescription(d.description);
+            if (parsed) parsedCount += parsed.count;
+            else allParsed = false;
+          }
+          dedTotal = Math.round(dedTotal * 100) / 100;
+          const ledgerUnit = allParsed && parsedCount > 0 ? Math.round((dedTotal / parsedCount) * 100) / 100 : null;
+
+          // 차감은 있는데 되읽지 못했다 = 추측으로 돈을 움직이면 안 되는 상태. 이번 사이클은 건너뛴다.
+          // 환불은 idempotent하고 30초마다 다시 도므로, 원인을 고치면 밀린 환불이 자동으로 나간다.
+          if (dedTotal > 0 && ledgerUnit === null) {
+            log(`[정산보류] campaign=${camp.id} ${camp.message_type} — 차감 원장 설명을 되읽지 못해 환불·회수를 건너뛴다`);
+            await sendSystemAlert({
+              dedupKey: `sweep-ledger-unresolved:${camp.id}`,
+              message: `선불 sweep 보류 — 차감 원장 설명을 되읽지 못했습니다(환불 보류). campaign=${camp.id} ${camp.message_type}`,
+            }).catch(() => { /* 경보 실패가 sweep을 막지는 않는다 */ });
+            continue;
+          }
+
+          // 차감 자체가 없는 캠페인만 현재 단가로 떨어진다(그 경우 건수 0이라 환불도 0이다).
+          const unit = ledgerUnit ?? await getUnitPrice(camp.company_id, camp.message_type, unitCache);
           if (unit > 0) {
-            const dedRes = await query(
-              `SELECT COALESCE(SUM(amount), 0) AS total FROM balance_transactions
-               WHERE company_id = $1 AND type = 'deduct' AND reference_type = 'campaign' AND reference_id = $2
-                 AND (message_type = $3 OR message_type IS NULL)`,
-              [camp.company_id, camp.id, camp.message_type]
-            );
-            const deductedCount = Math.round(Number(dedRes.rows[0].total) / unit);
+            const deductedCount = parsedCount > 0 ? parsedCount : Math.round(dedTotal / unit);
             const sentCount = Number(camp.sent_count || 0);
             // ★ 2026-06-29: 미적재 = 차감 − max(적재기록, 성공+실패+대기). sent_count 과소 기록 초과환불 fix.
             const processed = Math.max(sentCount, mysqlSuccess + mysqlFail + mysqlPending);

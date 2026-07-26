@@ -515,7 +515,7 @@ router.get('/preview', async (req: Request, res: Response) => {
       teaser.segmentCount = parseInt(segmentResult.rows[0]?.segment_count || '0');
 
       // 회사별 채널 단가로 정확한 비용 계산 (하드코딩 15 제거)
-      const companyForCost = await query('SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1', [companyId]);
+      const companyForCost = await query('SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, unit_price_basis FROM companies WHERE id = $1', [companyId]);
       const costs = getCompanyCosts(companyForCost.rows[0] || {});
       const sentRow = sentCountResult.rows[0];
       const estimatedCost =

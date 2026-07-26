@@ -726,7 +726,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
 
   // 비용 산정 (회사별 단가) — channel별 단가
   const compRes = await query(
-    `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1::uuid`,
+    `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, unit_price_basis FROM companies WHERE id = $1::uuid`,
     [exec.company_id]
   );
   const costs = getCompanyCosts(compRes.rows[0] || {});

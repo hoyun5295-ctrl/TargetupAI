@@ -19,6 +19,8 @@ import { SUCCESS_CODES_SQL, PENDING_CODES_SQL } from './sms-result-map';
 import { getAllBulkSmsTables, getBitoSmsTables, getTestSmsTables, mergeLineTables } from './sms-queue';
 import { queryPayAgentStoreBreakdown, type PayAgentStoreRow } from './pay-stats';
 import { loadBillingLedger, hasAgentMapping, type BillingLedger } from './billing-ledger';
+import { floorWon } from './money';
+import { normalizeUnitPriceBasis, toSupplyPrice, type UnitPriceBasis } from './unit-price';
 import type { PlanSegment } from './plan-proration';
 
 /** SMSQ msg_type → 청구 유형키. 변환 누락 = 그 유형이 청구 합산에서 통째로 빠진다. */
@@ -69,12 +71,18 @@ export function resolveBillingUnitPrices(co: any): Record<string, number> {
  *   스팸은 전용 단가가 없고 일반 SMS/LMS를 그대로 쓰므로(D16) 그 원본을 따른다.
  */
 export function resolveBillingUnitPricesDetailed(co: any): { prices: Record<string, number>; unsetKeys: string[] } {
-  const smsRaw = priceOrNull(co?.cost_per_sms);
-  const lmsRaw = priceOrNull(co?.cost_per_lms);
-  const mmsRaw = priceOrNull(co?.cost_per_mms);
-  const kakaoRaw = priceOrNull(co?.cost_per_kakao);
-  const testSmsRaw = priceOrNull(co?.cost_per_test_sms);
-  const testLmsRaw = priceOrNull(co?.cost_per_test_lms);
+  // ★ 2026-07-26 청구는 **공급가(부가세 별도)** 로 계산한다. 저장값이 어느 기준인지는 회사마다 다르므로
+  //   `unit_price_basis`를 통해 변환한다(전환 전 회사는 ÷1.1, 전환 후 회사는 그대로).
+  //   변환을 여기 한 곳에 두는 이유: 청구 단가를 읽는 경로가 `/generate`·`/preview` 둘뿐이고
+  //   둘 다 이 함수를 지난다. 라우트에서 각자 나누면 두 금액이 갈라진다.
+  const basis = normalizeUnitPriceBasis(co?.unit_price_basis);
+  const supply = (v: any) => toSupplyPrice(priceOrNull(v), basis);
+  const smsRaw = supply(co?.cost_per_sms);
+  const lmsRaw = supply(co?.cost_per_lms);
+  const mmsRaw = supply(co?.cost_per_mms);
+  const kakaoRaw = supply(co?.cost_per_kakao);
+  const testSmsRaw = supply(co?.cost_per_test_sms);
+  const testLmsRaw = supply(co?.cost_per_test_lms);
 
   const sms = smsRaw ?? 0;
   const lms = lmsRaw ?? 0;
@@ -871,7 +879,14 @@ export interface PricedBillingItem extends BillingUsageRow {
   /** `company_agent_ids.id` (agent 채널만) */
   agentId: string | null;
   unitPrice: number;
+  /** 청구 금액 — **원 미만 절사**(`floorWon`). `billing_items.amount`에 이 값이 저장된다. */
   amount: number;
+  /**
+   * 절사 전 원값(`성공 × 단가`). 저장하지 않는다 — 헤더 공급가액을 상세와 **다른 코드**로 계산해
+   * 대조하는 A-8 항등식이 절사 오차에 걸려 죽지 않도록, 대조는 이 값으로 한다.
+   * (절사 후 값끼리 비교하면 헤더를 상세에서 파생시킨 셈이라 검사 자체가 없어진다.)
+   */
+  amountExact: number;
   /**
    * 요금제 행 전용 — 일할 구간 일수 / 그 달 일수(`billing_items.plan_days`·`plan_month_days`).
    * 발송 행은 null이다. 발송 수량 컬럼(`total_count`·`fail_count`)에 이 값을 실으면
@@ -908,7 +923,10 @@ export function buildPlanBillingItems(segments: PlanSegment[]): PricedBillingIte
     planDays: Number(s.days) || 0,
     planMonthDays: Number(s.monthDays) || 0,
     unitPrice: Number(s.monthlyPrice) || 0,
-    amount: Number(s.amount) || 0,
+    // ★ 2026-07-26 일할 금액도 원 미만 절사(350,000 × 9/31 = 101,612.90…). 발송 행과 같은 규칙이어야
+    //   장 소계·공급가액이 정수 덧셈으로 성립한다.
+    amount: floorWon(Number(s.amount) || 0),
+    amountExact: Number(s.amount) || 0,
   }));
 }
 
@@ -916,8 +934,10 @@ export interface AgentPriceMiss { agentSendId: string; typeKey: string; success:
 
 export interface PricedBillingResult {
   items: PricedBillingItem[];
-  /** 채널별 공급가 소계 — 청구서 1페이지 항목이 이 값이다 */
+  /** 채널별 공급가 소계(원 단위 절사 후) — 청구서 1페이지 항목이 이 값이다 */
   amountByChannel: Record<BillingChannel, number>;
+  /** 채널별 소계의 **절사 전** 값 — 헤더 공급가액 교차검증(A-8) 전용. 저장·표시에 쓰지 않는다. */
+  amountExactByChannel: Record<BillingChannel, number>;
   /** 단가가 비어 있는 (발송ID × 유형) — 채우기 전에는 발행을 막는다 */
   missingAgentPrices: AgentPriceMiss[];
   /** 청구 단가 자체가 정의되지 않은 유형키(성공 수량이 있는 것만) */
@@ -944,6 +964,10 @@ export function priceBillingRows(
   rows: BillingUsageRow[],
   webPrices: Record<string, number>,
   agentPriceRows: AgentUnitPriceRow[],
+  // ★ 2026-07-26 발송ID 단가도 회사의 부가세 기준을 따른다. 같은 회사의 단가 입력 기준이 두 개일 수 없다.
+  //   (`webPrices`는 `resolveBillingUnitPricesDetailed`가 이미 공급가로 바꿔 넘겨준다.)
+  //   기본값은 전환 전 — 인자를 빠뜨린 호출부가 조용히 ÷1.1을 하는 쪽으로 기울지 않게 한다.
+  agentPriceBasis: UnitPriceBasis = 'vat_included',
 ): PricedBillingResult {
   const bySendId = new Map<string, AgentUnitPriceRow>();
   for (const p of agentPriceRows || []) {
@@ -953,6 +977,7 @@ export function priceBillingRows(
 
   const items: PricedBillingItem[] = [];
   const amountByChannel: Record<BillingChannel, number> = { plan: 0, web: 0, agent: 0, test: 0, spam: 0 };
+  const amountExactByChannel: Record<BillingChannel, number> = { plan: 0, web: 0, agent: 0, test: 0, spam: 0 };
   const missMap = new Map<string, AgentPriceMiss>();
 
   for (const r of rows || []) {
@@ -965,7 +990,7 @@ export function priceBillingRows(
       agentId = p ? String(p.id) : null;
       const col = AGENT_PRICE_COLUMN[r.typeKey];
       const raw = col && p ? (p as any)[col] : null;
-      const resolved = priceOrNull(raw);
+      const resolved = toSupplyPrice(priceOrNull(raw), agentPriceBasis);
       if (resolved === null) {
         // 단가를 못 정한다. 0원으로 밀어넣지 않고 어디가 비었는지 남긴다.
         if (success > 0) {
@@ -980,10 +1005,15 @@ export function priceBillingRows(
       unitPrice = Number(webPrices?.[r.typeKey]) || 0;
     }
 
-    const amount = success * unitPrice;
+    // ★ 2026-07-26 원 미만 절사(Harold 지시). 단가가 소수 둘째 자리라 `성공 × 단가`가 소수로 떨어지고
+    //   그대로 두면 청구서·거래내역서에 `₩13,343,638.44`가 인쇄된다. 절사를 **행 단위**에 두어야
+    //   그 위의 모든 합이 정수 덧셈이 된다(1페이지 항목표·2페이지 상세 세로합이 둘 다 공급가액과 일치).
+    const amountExact = success * unitPrice;
+    const amount = floorWon(amountExact);
     amountByChannel[r.channel] += amount;
+    amountExactByChannel[r.channel] += amountExact;
     // 발송 행은 요금제 일수 축이 없다 — null이 그 사실이다(0은 "0일"과 구분이 안 된다).
-    items.push({ ...r, agentId, unitPrice, amount, planDays: null, planMonthDays: null });
+    items.push({ ...r, agentId, unitPrice, amount, amountExact, planDays: null, planMonthDays: null });
   }
 
   const unbillableTypes = findUnbillableBillingRows(items.filter((i) => (Number(i.success) || 0) > 0));
@@ -991,6 +1021,7 @@ export function priceBillingRows(
   return {
     items,
     amountByChannel,
+    amountExactByChannel,
     missingAgentPrices: Array.from(missMap.values()).sort(
       (a, b) => b.success - a.success || a.agentSendId.localeCompare(b.agentSendId) || a.typeKey.localeCompare(b.typeKey),
     ),

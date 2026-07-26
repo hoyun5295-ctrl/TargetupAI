@@ -10,9 +10,18 @@
 
 > **여기부터 읽으면 된다.** 대화 맥락 없이 이 문서만으로 이어갈 수 있다.
 
-**상태: ★배포완료 — 커밋 `b49a3821`(= origin/main), 2026-07-26. backend tsc 0 · 1,272 테스트(101파일) / frontend tsc 0 · vite 빌드.**
+**상태: 코드 ★배포완료(커밋 `b49a3821`) + 그 위에 **미커밋 3묶음** — §9-2 · §9-5(원 단위 절사·PDF 대표자 겹침·감사 인사) · **§9-6(부가세 기준 전환 전량)**. ⛔ 실청구 발행은 **직원 단가 재입력이 끝난 회사부터** 가능하다.**
 
-**배포 후 남은 것 = Harold 운영 검증 3건**(§7): ①금강제화 시험건 `f64794c7` **화면에서** 삭제 ②실회사 1건 드라이런(발행 → PDF → 메일 본문 → 삭제) ③거래내역서에 MMS 308,043건.
+**남은 순서 = 직원 단가 재입력(운영) → §9-3 유형별 수량 버튼 → §9-4 속도(2분).**
+
+**Harold 결정 확정(2026-07-26)**: 단가는 **부가세 별도(공급가)로 통일 입력**하고 시스템이 자동 합산한다.
+**÷1.1 일괄 마이그레이션은 폐기했다** — Harold 지시로 **전 업체 단가를 직원이 재점검·재입력**한다.
+그래서 "÷1.1이 안 떨어지는 11사"를 판정할 필요가 사라졌다(§9-1 표는 그 판단의 근거 기록으로만 남긴다).
+
+전환이 회사마다 순차적으로 일어나므로 **`companies.unit_price_basis`(ALTER 적용 완료)** 가 회사별 기준을 들고 있다.
+재입력 전 회사는 오늘과 **완전히 동일하게** 동작하고, 재입력한 회사부터 청구서의 이중과세가 사라진다. 상세 = §9-6.
+
+**드라이런 결과(2026-07-26 3세션, 금강제화 재발행)**: 22행(웹 LMS 19 + 웹 SMS 2 + 요금제 1) · 항목합 = `subtotal` 13,397,454.84 **정확히 일치** · `total_amount` 14,737,199.84. 그 total이 **이중과세 금액**이다(단가가 이미 부가세 포함). 이 draft는 과청구 상태라 §9-1 수정 후 삭제·재발행해야 한다.
 
 **Codex 3차 9건(§2-2) · 4차 3건(§2-3) · 5차 3건(§2-6) · 6차 2건(§2-7) · 7차 3건(§2-8) + 상세 모달 프론트(§2-4) + 메일 실경로 착오(§2-5)까지 전부 닫았다.**
 6차 ③(프론트 메일 모달)·7차 일부(lock_timeout·시각 비교·`SET LOCAL`)는 **결함 없음** 판정. 4차 #1은 실측으로 **발동 불가 확정**(§7).
@@ -54,6 +63,13 @@
 - **`billings` 전건 = 금강제화 7월 draft 1건**(`f64794c7`·subtotal 13,397,454.84·생성 07-25). 구코드 6월 청구서 없음 → 4차 #1 발동 불가 (3세션 실측)
 - **매월 1일 KST 00~09시 `overage_credits > 0` 거래 = 전 기간 0행** (3세션 실측). 경계 전환으로 두 번 청구될 물량 자체가 없다
 - **`plan_id`를 NULL로 쓰는 코드 경로 = 0건**(전수 grep). 해지 미기록 과청구는 현재 발생 불가 — 해지 표현 방식은 Harold 결정 대기(§2-7 별건)
+
+### 3세션 추가 실측 (2026-07-26 — 속도·부가세 진단)
+
+- **MySQL `SMSQ_SEND%` = VIEW 1개 + BASE TABLE 103개.** 큰 테이블은 6월분(`_8_202606` 84.7만 · `_9_202606` 84.5만 · `_6_202606` 77.9만), 7월분은 52.7만/52.4만/45.7만 수준
+- **인덱스는 이미 있다** — 7월 전 테이블에 `idx_app_etc1_sendreq(app_etc1, sendreq_time)` · `idx_app_etc1_status(app_etc1, status_code)` · `PRIMARY(seqno)`. **2분의 원인은 인덱스 부재가 아니다**(§9-4)
+- **후불 39사 단가 실측**: `cost_per_sms` 7.70~11.00 / `cost_per_lms` 24.97~29.70. 양끝이 전부 ×1.1로 설명된다 — 7.70=7×1.1 · 11.00=10×1.1 · 24.97=22.7×1.1 · 29.70=27×1.1 · 25.08(금강제화)=22.8×1.1. **즉 단가가 부가세 포함으로 입력돼 있다**(§9-1의 근거)
+- `plans.monthly_price` = TRIAL·FREE 0 / STARTER 150,000 / BASIC 350,000 / PRO 1,000,000 / BUSINESS 3,000,000 / ENTERPRISE 5,500,000 — **전부 정수·라운드 숫자라 부가세 별도로 보인다**(단가와 기준이 다를 수 있다 → §9-1 축별 확정 대상)
 
 ---
 
@@ -498,3 +514,320 @@ ALTER TABLE billings ADD COLUMN batch_id uuid;
 - **차단을 늘리는 방향이 항상 안전한 게 아니다.** 금액에 영향 없는 것(음수 대기·계정 미상)으로 발행을 막으면 마감일에 아무도 못 뽑는다. 차단 기준은 "틀린 금액이 나가는가" 하나다.
 - **에이전트 판단보다 실측이 이긴다.** 회의론자가 정황 추론으로 TZ 밀림을 철회했는데 서버 실측이 뒤집었다. 반대로 회의론자가 실측 없이 지적한 기간 경계는 실측으로 확정됐다.
 - **"실사용 흔적 0"은 폐기 근거가 못 된다.** 문서·커밋에 없다고 요구가 없는 게 아니다. 사용자별 정산은 5개월간 고장난 채였고 아무도 신고하지 않았지만, 실제 요구는 있었다.
+
+---
+
+## 9. 3세션 발견 — 미착수 4건 (2026-07-26)
+
+배포는 끝났지만 **이 4건 전에 실청구를 발행하면 안 된다.** ①은 돈이 틀리고, ②는 고객에게 나가는 문서가 깨지고, ③은 운영자가 유형을 못 보고, ④는 141사를 감당할 수 없다.
+
+### 9-1. ⛔ 부가세 이중과세 — 최우선
+
+**사실**: 단가가 **부가세 포함**으로 입력돼 있다(3세션 실측 — 후불 39사 단가 양끝이 전부 ×1.1, 금강제화 LMS 25.08 = 22.8×1.1 · SMS 7.92 = 7.2×1.1).
+그런데 코드는 `Σ(수량 × 단가)`를 **공급가액**으로 놓고 `vat = Math.round(subtotal × 0.1)`을 더한다 — `billing.ts` **4곳**(`482` 발행 헤더 · `539` 장별 `sheetVat` · `1478` `/preview` · `1666` `POST /invoices`) + PDF·이메일의 "부가세 (10%)" 표기 2곳(`1200`·`1908`).
+
+**실측 피해**: 금강제화 7월 = 공급가액 13,397,454.84 + 부가세 1,339,745 = **14,737,199.84 청구**. 정상은 13,397,454.84이므로 **+1,339,745원 과청구**. 세금계산서 대조에서 바로 걸리는 부류다.
+
+**Harold 결정(2026-07-26 확정)**: 단가를 **부가세 별도(공급가)로 통일 입력**하고 시스템이 자동 합산한다.
+→ **코드 계산식은 지금 그대로**(공급가액 × 10%)가 정답이고, 본체는 **데이터 마이그레이션 + 선불 보정 + 입력 화면 라벨**이다.
+
+#### 축 6개 — 기준 확정 (2026-07-26 실측 근거)
+
+| 축 | 실체 | 현재 기준 | 근거 | 처분 |
+|---|---|---|---|---|
+| ① 웹 발송 | `companies.cost_per_sms/lms/mms/kakao` | 부가세 **포함** | 값 흔적이 전부 ×1.1 | **÷1.1 변환** |
+| ② 테스트 | `companies.cost_per_test_sms/test_lms` | — | **77사 전부 NULL**(실측) | 변환 대상 없음. 입력 기준만 확정 |
+| ③ 스팸필터 | 별도 컬럼 없음 — `billing.ts` `spamSmsCost = prices.SMS` | ①에 종속 | 웹 단가 재사용 | ① 따라감. `companies.cost_per_spam_filter`는 **코드 소비처 0건**(사장 컬럼) |
+| ④ 에이전트 | `company_agent_ids.cost_per_*` | — | **283행 전부 NULL**(실측 재확인) | 변환 없음. 입력 **전에** "부가세 별도" 확정 + 화면 라벨 |
+| ⑤ 요금제 | `plans.monthly_price` | 이미 **별도** | `PricingPage.tsx:479`가 고객 화면에 "VAT 별도" 표기 중 | 변환 없음 |
+| ⑥ AI 크레딧 | `CREDIT_UNIT_PRICE=500` · `ai_credit_requests.supply_amount` | 이미 **별도** | `ai-credit-calc.ts:204` 주석 + `calcRechargeAmount`가 supply/vat/total 분리 | 변환 없음 |
+
+#### 변환 대상 실측 (2026-07-26 — 단가 보유 77사)
+
+후불 39 · 선불 38. **66사는 ÷1.1이 정확히 떨어진다**(7.92=7.20×1.1 · 25.08=22.80×1.1 · 24.97=22.70×1.1).
+**11사는 ÷1.1이 깨끗하게 안 떨어져 Harold 판정이 필요하다** — 계약이 이미 부가세 별도면 변환 시 청구액이 10% 낮아진다(우리 손해).
+
+| 회사 | SMS/LMS/MMS/카카오 | ÷1.1 하면 |
+|---|---|---|
+| 한국마사회 (후불) | 8.50 / 25.00 / 65.00 / 6.00 | 7.73 / 22.73 / 59.09 / 5.45 |
+| 무주덕유산리조트 (후불) | 9.00 / 26.00 / 60.00 / 6.00 | 8.18 / 23.64 / 54.55 / 5.45 |
+| 시세이도 · 아이디룩(2행 중 하나) · 마트테스트 · 주식회사 인비토 · 더화이트(수퍼빈) (후불) | 9.90 / 27.00 / 50.00 / 7.50 | 9.00 / 24.55 / 45.45 / 6.82 |
+| 테스트계정 · 토스페이먼츠 · KCP테스트 · KISA 테스트_1 (선불) | 동일 세트 | 동일 |
+
+뒤 9곳은 `DEFAULT_COSTS` 기본값(9.9/27/50/7.5)이 그대로 남은 것이다. 서버 `.env`에 `DEFAULT_COST_*` 오버라이드 **없음**(grep 0건) → 그 상수도 같은 기준으로 재정의 대상이다(9.9는 9×1.1로 보이고 27/50/7.5는 라운드 숫자다).
+
+#### ⛔ 단가 의미 변경은 정산 밖까지 닿는다 — `cost_per_*` 소비처 25곳
+
+| 경로 | 위치 | ÷1.1만 하고 두면 |
+|---|---|---|
+| 선불 차감 | `prepaid.ts:29` | 잔액이 9.1% 덜 깎임 = 선불 고객이 낸 돈보다 10% 더 발송 |
+| 선불 환불 | `prepaid.ts:83` | 환불액 축소(차감·환불 짝은 맞고 매출만 손실) |
+| 초과환불 회수 | `prepaid.ts:181` | 동일 |
+| 타임아웃 환불 reverse | `mysql-refund-sweeper.ts:74` (SQL CASE) | 동일 |
+| 잔액 화면 단가 | `balance.ts:32` | 발송 가능 건수 10% 과대 표시 |
+| 표시·추정 20곳 | `results.ts:212` · `campaigns.ts:1109` · `customers.ts:805` · `manage-stats.ts:192` · `stats-aggregation.ts:648` · `journey-*` · `next-action-advisor` · `crm-agency-proposal` · `continuous-operator` · `ai-orchestrator` · `full-analysis-collect` · `analysis.ts` · `admin.ts:1636` · 프론트 4곳 | 화면 비용이 9.1% 낮게 표시 |
+
+**처방**: `utils/unit-price.ts` CT를 신설해 `cost_per_*`를 공급가로 확정하고, **고객이 실제로 지불하는 금액을 다루는 경로**(선불 차감·환불·회수·잔액 예상건수·비용 표시)만 `withVat()`를 거친다. 변환이 무손실이면 차감액·표시액은 **오늘과 원 단위까지 동일**하고, 바뀌는 것은 후불 청구서뿐이다.
+(`next-action-advisor.ts:406`에 `getCompanyCosts` 인라인 중복 정의가 있어 이때 CT로 흡수한다.)
+
+#### 남은 실행 순서
+
+1. Harold가 위 11사의 계약 기준을 판정한다.
+2. 66사(+판정 결과) `cost_per_*` ÷1.1 UPDATE. **운영 PG 직접 UPDATE는 금지**(feedback_no_manual_sql_update) → 실행 방식은 그때 협의.
+3. `utils/unit-price.ts` CT + 선불·표시 경로 배선.
+4. 입력 화면 라벨에 "부가세 별도" 명시(`companies` 단가 폼 · `company_agent_ids` 발송ID 단가 폼).
+5. **검증**: 금강제화 재발행 시 `total_amount`가 부가세 포함 총액과 맞는지 + `checkBillingAmountIdentity`·`checkSheetSumIdentity`·`checkInvoiceLinesAgainstHeader` 3중 검사 통과.
+
+확인 SQL(변환 대상 전수):
+```sql
+SELECT company_name, billing_type,
+       cost_per_sms, round(cost_per_sms/1.1,2) AS sms_ex,
+       cost_per_lms, round(cost_per_lms/1.1,2) AS lms_ex,
+       cost_per_mms, round(cost_per_mms/1.1,2) AS mms_ex,
+       cost_per_kakao, round(cost_per_kakao/1.1,2) AS kko_ex
+  FROM companies
+ WHERE COALESCE(cost_per_sms,cost_per_lms,cost_per_mms,cost_per_kakao,
+                cost_per_test_sms,cost_per_test_lms) IS NOT NULL
+ ORDER BY billing_type, company_name;
+```
+
+### 9-2. PDF 요금제 행 일자 줄바꿈 깨짐 — **완료 (미커밋)**
+
+2페이지 요금제 행의 일자 칸에 `07-01~07-26`(11자)을 넣어 칸 폭(47pt)을 넘겼고, `lineBreak: false`로도 막히지 않아 **두 줄로 흘러 다음 행과 겹쳤다**(Harold 스크린샷 실측).
+→ **요금제 행 일자를 시작일만**(`07-01`)으로 되돌린다. 적용 구간은 1페이지 항목표가 `요금제 FREE (07-01~07-26)` + `26일 / 31일`로 이미 담고 있어 정보 손실이 없고, 2페이지는 다른 행과 같은 폭·형식을 유지하는 게 표로서 맞다. 위치 = `billing.ts:1301` `const dateStr`.
+
+### 9-3. 유형별 수량 버튼 (Harold 지시)
+
+목록이 SMS·LMS 두 컬럼만 보여준다. 청구 축은 최대 **14종**(웹 4 + 에이전트 4 + 테스트 2 + 스팸 2 + 요금제 + AI크레딧)이라 컬럼으로 못 담는다 — 금강제화처럼 SMS/LMS뿐인 회사에선 맞아 보이고 `both` 17사에선 틀려 보인다.
+→ 목록에서 SMS·LMS 컬럼을 빼고 `유형별` 버튼으로 교체. 누르면 모달에 채널별로 묶인 전체 유형(수량·단가·금액). **데이터는 이미 서버가 내려주는 `/items`의 `lines`**(PDF·이메일과 같은 `buildInvoiceLines`)를 그대로 쓴다 — 새 엔드포인트·새 집계 없음. 합계 컬럼은 유지.
+
+### 9-4. 속도 — 회사 1곳에 2분
+
+**인덱스는 원인이 아니다**(3세션 실측 — `idx_app_etc1_sendreq`·`idx_app_etc1_status`가 전 테이블에 존재). 원인은 구조다:
+
+| 원인 | 실체 | 처방 |
+|---|---|---|
+| **같은 테이블을 두 번 훑는다** | `buildCompanyUsageByDay`(일자×유형)와 `buildBillingUsageRows`(일자×계정×유형)가 동일 테이블·동일 WHERE를 각각 스캔 | **두 번째 스캔 폐기** — 상세 행에서 일자×유형을 파생. 런타임 대조(`diffBillingRowsVsDayData`)는 §4-2가 세운 원칙대로 **소스 스캔 테스트**로 대체(두 함수가 갈라지는 통로는 사람이 한쪽만 고치는 것뿐). 발송통계 엑셀은 기존 함수를 계속 쓴다 |
+| **테이블 루프가 직렬** | `smsAggByDateType`·`smsAggByRunDateType`·`testSmsAggByUserDateType`이 `for` 안에서 하나씩 `await`. 라인 11~12개 + LOG 3개월치 = 회사당 40~48개 → 두 집계 합쳐 **90~100 왕복이 순차** | 동시성 상한 병렬(**MySQL 풀 `connectionLimit: 10`**이라 6~8) |
+| **테이블 목록 조회 중복** | `getBillingLogTables()`(information_schema REGEXP)가 `getTablesForBillingPeriod` 호출마다 재실행 — 발송·테스트 × 두 집계 = 4회 | 요청 단위 캐시 |
+| **미확인: VIEW 혼입** | `SMSQ_SEND`가 VIEW다(실측). `getAllBulkSmsTables()`는 `sms_line_groups.sms_tables`(DB 값)를 그대로 쓰므로, 그 배열에 뷰 이름이 있으면 **라인 테이블과 뷰를 함께 훑어 이중 계상**이 된다 | 다음 세션 첫 확인: `SELECT group_type, is_active, sms_tables FROM sms_line_groups ORDER BY group_type;` + `SHOW CREATE VIEW SMSQ_SEND` |
+
+①②만으로 2분 → 10~20초권을 기대한다(측정으로 확인). **141사 일괄 발행은 별건** — 단건이 빨라진 뒤에 설계한다.
+
+---
+
+## 9-5. 금액 원 단위 절사 + PDF 3건 — 완료 (2026-07-26 4세션, 미커밋)
+
+Harold 실측(금강제화 정산서 PDF)에서 나온 4건이다. 전부 `b49a3821` 위의 미커밋 변경이다.
+
+| # | 증상 | 처분 |
+|---|---|---|
+| 1 | 공급받는자 **대표가 두 명**인 회사(각자대표)에서 대표 줄이 칸 폭(195pt)을 넘어 두 줄로 흐르는데 다음 줄 y를 **고정 14pt**만 내려 사업자번호 줄과 겹쳐 인쇄 | **`utils/pdf-party-block.ts` CT 신설.** 줄마다 `heightOfString`으로 실제 높이를 재서 내리고 블록이 끝난 y를 돌려준다. 구분선(옛 고정 245/230)과 항목표 시작(옛 260/240)도 그 값에서 잡는다. 정산서·거래내역서 **두 PDF 모두** |
+| 2 | 금액에 소수 두 자리가 남아 `₩13,397,454.84`가 인쇄되고, 2페이지 합계가 칸을 넘겨 두 줄로 흐름 | **원 미만 절사(`utils/money.ts` CT 신설).** Harold 지시 = "최종금액에 소숫점 그냥 버림으로 하고 부가세합산해서 적용". 절사 지점은 **`billing_items` 행 단위** — 그래야 1페이지 항목표와 2페이지 일자별 상세를 **각각 세로로 더한 값이 둘 다 공급가액과 일치**한다. 총액에서 한 번만 절사하면 두 표의 세로합이 어긋난다 |
+| 3 | 2페이지 금액·단가·합계 칸 줄바꿈 | 절사로 자릿수가 줄었고, 그 위에 `lineBreak: false`를 걸어 자릿수 큰 회사에서도 겹치지 않게 구조적으로 막았다 |
+| 4 | 감사 인사 없음 | `drawThanksNote` CT — 정산서·거래내역서 1페이지 하단. 위치는 합계·비고가 끝난 지점에서 계산(고정 y면 항목 많은 회사에서 비고와 겹친다) |
+
+**절사 설계의 핵심** — A-8 교차검증을 죽이지 않는다. 헤더 공급가액은 `수량 × 단가`로, 상세는 `priceBillingRows`로 서로 다른 코드가 계산하는데, 둘 다 절사하면 헤더를 상세에서 파생시킨 셈이라 검사가 사라진다. 그래서 `PricedBillingItem.amountExact`(절사 전)를 함께 실어 **대조는 절사 전 값끼리** 하고, 절사는 그 뒤 한 번만 적용한다. 저장되는 `subtotal`은 절사된 행들의 정수 덧셈이다.
+
+**부동소수점 주의** — `Math.floor`를 그냥 걸면 `720 × 7`처럼 정확히 정수여야 하는 값이 오차로 5039가 된다. `floorWon`은 소수 둘째 자리 반올림으로 오차를 걷어낸 뒤 버린다(테스트로 고정).
+
+적용 경로 4곳(전수): `/generate` 헤더·장별 · `/preview` · `POST /invoices` · 거래내역서 PDF 행. 부가세는 네 곳 모두 `vatOfSupply` 하나로 통일(옛 `Math.round(subtotal * 0.1)` 폐기).
+
+**기계 게이트 3건 추가**(`billing-route-invariants.test.ts` 13건으로): ①부가세는 `vatOfSupply`만(라우트 직접 곱셈 금지) ②공급가액은 절사된 상세의 합이고 교차검증은 `amountExact`로 ③당사자 블록은 CT로만(라우트 인라인 재작성 차단).
+
+**검증**: backend tsc 0 · **1,292 테스트**(103파일 — 1,272에서 신규 20: `money` 11 · 당사자 블록·감사 인사 5 · 절사 회귀 3 · 요금제 절사 1). 당사자 블록 테스트는 **실제 PDFKit + 실제 malgun.ttf**로 재서, 두 명 대표 문자열이 195pt에서 실제로 14pt를 넘는다는 것(= 옛 코드가 겹쳤다는 것)을 함께 고정했다.
+
+---
+
+## 9-6. 부가세 기준 전환 — 구현 완료 (2026-07-26 4세션, 미커밋)
+
+Harold 확정: **단가는 부가세 별도(공급가)로 입력하고 시스템이 자동 합산한다. 단가는 전 업체 직원이 재점검·재입력한다.**
+참고 사양은 자체 게이트웨이의 단가 입력 화면(고객사 수정 → 단가설정 탭)이다 — 한줄로에는 없던 UI라 새로 만들었다.
+
+### 왜 마커가 필요한가
+
+배포 시점과 직원 재입력 시점은 같을 수 없다. 그 사이 회사는 **저장값이 부가세 포함**인데 코드는 공급가로 읽는다 —
+청구서는 10% 과청구, 선불 차감은 10% 부족이 된다. 그래서 회사별 기준을 `companies.unit_price_basis`에 들고,
+**단가와 기준을 같은 UPDATE 문에서** 쓴다.
+
+| basis | 청구서 공급가액 | 선불 차감·환불·회수 | 화면 비용 표시 |
+|---|---|---|---|
+| `vat_included` (재입력 전, DB 기본값) | 저장값 ÷ 1.1 | 저장값 그대로 | 저장값 그대로 |
+| `vat_excluded` (재입력 후) | 저장값 그대로 | 저장값 × 1.1 | 저장값 × 1.1 |
+
+**두 상태 모두 고객이 내는 금액은 같다.** 재입력 전 회사는 오늘과 1원도 다르지 않고, 재입력한 회사부터 청구서가 정상화된다.
+전 회사 전환이 끝나면 `vat_included` 분기와 마커를 함께 제거한다.
+
+### 신설 CT — `utils/unit-price.ts`
+
+`toSupplyPrice`(청구) · `toVatIncludedPrice`(선불·표시) · `resolveChargeUnitPrice`(회사행+유형 → 차감 단가) ·
+`previewUnitPrice`(모달 표시 3종) · `normalizeUnitPriceBasis`(모르는 값은 **전환 전**으로 — 안전한 쪽).
+
+### 배선 (전 소비처 25곳)
+
+| 축 | 경로 | 적용 |
+|---|---|---|
+| 청구 | `resolveBillingUnitPricesDetailed` · `priceBillingRows`(발송ID 단가도 회사 기준을 따른다) | 공급가 |
+| 원장 | `billing-ledger` SELECT + **지문** | 발행 중 전환되면 `BILLING_LEDGER_CHANGED`로 막힌다 |
+| 선불 | `prepaid.ts` 3곳(차감·환불·회수) · `mysql-refund-sweeper.ts` | 부가세 포함가 |
+| 잔액 | `balance.ts` | 부가세 포함가(발송 가능 건수 과대 표시 차단) |
+| 표시·추정 | `config/defaults.getCompanyCosts` 단일 진입점 + 직접 소비 9곳 | 부가세 포함가 |
+
+### 선불 회계 재감사에서 나온 결함 2건 (Harold 지시로 재점검, 2026-07-26)
+
+단가 배선만으로는 부족했다. **환불·회수·sweep이 "지금 단가"를 곱하고 있었다** — 차감은 과거 단가로 일어났는데
+되돌릴 때 현재 단가를 쓰면 그 차이만큼 `차감 = 성공 + 순환불`(LESSONS_DB 2026-06-29)이 깨진다.
+평소엔 단가가 안 바뀌어 드러나지 않지만 **전 업체 단가를 재입력하는 지금은 확실히 발동한다**(선불 38사, sweeper 윈도우 14일).
+
+| # | 위치 | 증상 | 처분 |
+|---|---|---|---|
+| 1 | `prepaid.ts` 환불·회수 | 환불액·정당 한도를 **현재 단가**로 계산. 단가를 올리면 한도가 부풀어 초과 환불을 못 잡고(회사 손해), 내리면 정상 환불을 초과로 오인해 회수한다(고객 손해). 양쪽 다 조용하다 | `loadDeductLedger`로 그 참조의 **차감 총액 ÷ 차감 건수**를 되살려 쓴다. 되읽을 수 없는 옛 행이 섞이면 현재 단가로 폴백(기존 동작) |
+| 2 | `mysql-refund-sweeper.ts` | 차감 건수를 `총차감액 ÷ 현재단가`로 구한다. 단가가 바뀌면 건수가 틀리고 **그 틀린 건수가 그대로 환불액**(`calcRefundDue`)이 된다 | 차감 행이 설명에 기록한 건수를 되읽는다(`parseDeductDescription`). 옛 형식이 섞이면 기존 나눗셈으로 폴백 |
+
+되읽기 함수는 `buildDeductDescription`과 **같은 파일**에 뒀다 — 형식을 바꾸면 두 함수를 함께 고치게 된다(따로 두면 조용히 어긋난다).
+
+**부수 발견(별건 확인 필요)** — `resolveChargeUnitPrice`가 유형을 대문자로 정규화하면서, 소문자 유형을 넘기던 호출이
+**0원 무차감에서 정상 차감으로 바뀐다.** 옛 코드는 `messageType === 'KAKAO'` 같은 정확 일치라 소문자면 단가 0 → 차감 없이 발송됐다.
+확인된 호출부 = `utils/brand-message.ts`가 `'kakao'`(소문자) 전달 — 다만 `/brand-send`는 현재 비가동이다(§5-4).
+`campaigns.message_type`에 소문자 값이 있으면 그 회사도 같은 전환을 겪으므로 배포 전 실측이 필요하다(§9-6 확인 SQL).
+
+**환불 sweeper의 SQL `CASE` 단가 선택을 걷어냈다** — SQL 안에서 컬럼만 고르면 기준 변환이 빠져 회수 금액만 축이 달라진다.
+`next-action-advisor.ts`의 `getCompanyCosts` 인라인 중복 정의도 CT로 흡수했다.
+
+### 단가 쓰기 경로 단일화
+
+기존 쓰기 3곳(회사 수정·고객사 설정·관리자 회사 수정)에서 단가를 **받는 식별자 자체를 제거**했다.
+주석만으로는 못 막고, 이름이 없으면 다시 바인딩하려는 순간 tsc가 잡는다.
+(SQL의 `cost_per_sms = COALESCE($14, ...)`는 남겼다 — placeholder를 지우면 미사용 파라미터가 되어 42P08을 부른다. LESSONS_DB D162.)
+
+신설: **`PUT /api/admin/companies/:id/unit-prices`**(슈퍼관리자). 6종 단가 + `unit_price_basis='vat_excluded'`를 한 문장에서 쓰고,
+형식 검증(숫자·음수)·`FOR UPDATE`·감사 로그·`DB_MIGRATION_PENDING` 503 분기를 포함한다.
+빈 문자열은 NULL로 되돌린다(미설정 = 청구 차단 신호이므로 "0원 계약"과 구분해야 한다).
+
+**발송ID 단가는 상속시키지 않는다.** 게이트웨이 화면은 "저장 즉시 하위 Agent에 적용"이지만, 한줄로는 발송ID마다 계약과
+선·후불이 따로다(283행). 암묵 상속은 계약이 다른 발송ID를 조용히 회사 단가로 청구하고 그건 금액 검사가 못 잡는다.
+대신 모달에 **"단가가 비어 있는 발송ID에도 적용"** 체크를 두어 명시적으로 복사한다(이미 값이 있는 행은 건드리지 않는다).
+
+### 화면 (슈퍼관리자 → 고객사 수정 → 단가설정)
+
+VAT 별도 안내 배너 + 6칸(SMS·LMS·MMS·알림톡·테스트 SMS·테스트 LMS), 칸마다 `VAT 0.80원 · VAT 포함 8.80원 차감`을 실시간 표시.
+재입력 전 회사에는 노란 안내(“아직 부가세 포함 단가로 저장돼 있습니다”)를 띄운다. 전용 `단가 저장` 버튼(기본정보 저장과 분리).
+**미설정(NULL)을 기본 상수 9.9/27/50/7.5로 위장하던 것을 없앴다** — 그대로 저장하면 계약과 다른 단가가 조용히 굳는다.
+
+유형은 6종이다. 게이트웨이 화면의 친구톡·친구톡 이미지·브랜드 메시지는 한줄로에 단가 컬럼이 없고, 친구톡은 폐지,
+브랜드 메시지는 `/brand-send`가 비가동이다(§5-4). 없는 축을 화면에 만들면 직원이 값을 채우고 청구는 안 되는 상태가 된다.
+
+### 기계 게이트 — `utils/unit-price-invariants.test.ts` (13건)
+
+이 부류는 **런타임으로 안 잡힌다**(tsc·테스트·금액 항등식 3중이 전부 통과했다). 그래서 계약을 소스로 고정했다:
+①단가+기준을 같은 UPDATE 문에서 쓴다 ②슈퍼관리자 전용 ③옛 3경로에 단가 식별자가 없다 ④선불 3곳이 CT를 지난다
+⑤선불 SELECT에 `unit_price_basis`가 있다 ⑥sweeper에 SQL CASE 단가가 없다 ⑦잔액·표시가 포함가다
+⑧청구가 `toSupplyPrice`를 지난다 ⑨발송ID 단가도 같은 기준 ⑩원장 지문에 기준이 들어간다 ⑪청구 경로가 포함가 함수를 안 쓴다.
+
+**검증**: backend tsc 0 · **1,324 테스트**(105파일 — 1,292에서 신규 32) / frontend tsc 0 · vite 빌드.
+빌드 산출물 실측: `AdminDashboard` 청크에 새 UI 문자열과 저장 호출(`ud.save(...)`) 존재, `index` 청크에
+`save:(x,i,o)=>g.put(U(551)+x+U(524),{prices:i,applyToUnsetAgents:!!o})` 존재(문자열 난독화 테이블 경유라 경로 문자열 직접 grep은 0건 — 0718 교훈대로 호출 형태로 확인).
+
+### 남은 것 (운영) — 순서 고정
+
+**Harold 지시(2026-07-26)**: 마커만으로 두지 말고 **지금 단가를 ÷1.1로 한 번 마이그레이션**해 전 회사를 공급가 기준으로
+맞춘 뒤, 직원이 업체를 하나하나 점검하게 한다. 마이그레이션은 **고객이 내는 금액을 바꾸지 않는다**(÷1.1 후 ×1.1 = 원값).
+
+1. **pg_dump 백업**(R2).
+2. **차감액이 달라지는 회사 사전 확인** — 아래 ②. 예상 10곳(LMS 27.00 계열 9 + 무주덕유산리조트 MMS 60.00)이며 차이는 건당 0.01원이다.
+3. **마이그레이션 UPDATE** — 아래 ③. `WHERE unit_price_basis='vat_included'`라 두 번 돌려도 안전하다.
+4. **DEFAULT 전환** — 아래 ④. 이후 생성되는 회사는 공급가 기준이 기본이 된다.
+5. **직원 전 업체 단가 재점검·재입력** — 특히 ÷1.1이 깨끗하지 않은 11사(§9-1 표)는 계약 단가로 바로잡아야 한다.
+6. 그 뒤 금강제화 draft 삭제·재발행 → 금액 검증.
+7. 전 회사 점검 완료 후 `vat_included` 분기·마커 제거(별건).
+
+```sql
+-- ① 진행 상황
+SELECT unit_price_basis, count(*) FROM companies
+ WHERE COALESCE(cost_per_sms,cost_per_lms,cost_per_mms,cost_per_kakao) IS NOT NULL
+ GROUP BY unit_price_basis;
+
+-- ② 마이그레이션 후 실제 차감액이 달라지는 회사만
+SELECT company_name, billing_type,
+       cost_per_sms,   round(round(cost_per_sms/1.1,2)*1.1,2)   AS sms_after,
+       cost_per_lms,   round(round(cost_per_lms/1.1,2)*1.1,2)   AS lms_after,
+       cost_per_mms,   round(round(cost_per_mms/1.1,2)*1.1,2)   AS mms_after,
+       cost_per_kakao, round(round(cost_per_kakao/1.1,2)*1.1,2) AS kko_after
+  FROM companies
+ WHERE unit_price_basis = 'vat_included'
+   AND ( round(round(cost_per_sms/1.1,2)*1.1,2)       IS DISTINCT FROM cost_per_sms
+      OR round(round(cost_per_lms/1.1,2)*1.1,2)       IS DISTINCT FROM cost_per_lms
+      OR round(round(cost_per_mms/1.1,2)*1.1,2)       IS DISTINCT FROM cost_per_mms
+      OR round(round(cost_per_kakao/1.1,2)*1.1,2)     IS DISTINCT FROM cost_per_kakao
+      OR round(round(cost_per_test_sms/1.1,2)*1.1,2)  IS DISTINCT FROM cost_per_test_sms
+      OR round(round(cost_per_test_lms/1.1,2)*1.1,2)  IS DISTINCT FROM cost_per_test_lms )
+ ORDER BY billing_type, company_name;
+
+-- ③ 마이그레이션 (NULL은 NULL로 남는다 · 재실행 안전)
+BEGIN;
+UPDATE companies SET
+  cost_per_sms      = round(cost_per_sms/1.1, 2),
+  cost_per_lms      = round(cost_per_lms/1.1, 2),
+  cost_per_mms      = round(cost_per_mms/1.1, 2),
+  cost_per_kakao    = round(cost_per_kakao/1.1, 2),
+  cost_per_test_sms = round(cost_per_test_sms/1.1, 2),
+  cost_per_test_lms = round(cost_per_test_lms/1.1, 2),
+  unit_price_basis  = 'vat_excluded',
+  updated_at        = NOW()
+ WHERE unit_price_basis = 'vat_included'
+   AND COALESCE(cost_per_sms,cost_per_lms,cost_per_mms,cost_per_kakao,
+                cost_per_test_sms,cost_per_test_lms) IS NOT NULL;
+COMMIT;
+
+-- ④ 기본값 전환 (마이그레이션 후)
+ALTER TABLE companies ALTER COLUMN unit_price_basis SET DEFAULT 'vat_excluded';
+
+-- ⑤ 소문자 유형 실측 — 있으면 그 회사는 선불 차감이 0원에서 정상 과금으로 바뀐다
+SELECT message_type, count(*) FROM campaigns
+ WHERE message_type IS NOT NULL AND message_type <> upper(message_type)
+ GROUP BY message_type;
+```
+
+---
+
+## 9-7. Codex 적대검증 + 실사고 (2026-07-26 4세션)
+
+### 실사고 — 마이그레이션을 배포 전에 실행
+
+**증상**: 실패 0건인 패밀리투에 `발송 실패 환불 (sweep) (SMS 1건 × 7.5원)`이 반복 입금. 실측 **83건 622.50원**(22:30:27~28 한 사이클).
+
+**원인**: 마이그레이션으로 SMS 단가가 8.25 → 7.50이 됐는데 운영 서버는 **옛 코드**였다. 옛 sweeper는
+차감 건수를 `총차감액 ÷ 현재단가`로 역산한다 — 차감은 8.25원에 일어났으므로 `49.50 ÷ 7.50 = 6.6 → 7건`으로 읽고,
+`7 − 성공 6 = 1건`을 "차감했는데 안 나간 건"으로 환불했다. 캠페인마다 반올림된 1~2건씩 나갔다.
+
+**내가 틀린 곳**: "배포 뒤에 마이그레이션하라"고 안내해 놓고, 발송이 없다는 말에 그 판단을 뒤집었다.
+**sweeper는 새 발송과 무관하게 최근 14일 캠페인을 30초마다 다시 계산한다** — 발송 창이 닫혀 있어도 노출은 열려 있다.
+
+**회수**: 새 코드 배포 시 `deductedCount`가 기록된 건수(정확)로 잡혀 정당 한도가 0이 되고,
+`prepaidReverseOverRefund`(0629 양방향 수렴)가 초과분을 자동 회수한다.
+
+**진단 SQL 교훈** — 마이그레이션 시각을 `max(companies.updated_at)`로 잡으면 안 된다.
+`prepaidRefund`가 환불할 때마다 `updated_at`을 갱신해 기준 시각이 앞으로 밀리고, 결과적으로 **마지막 1건만** 잡힌다.
+시각이 아니라 **내용**으로 찾아야 한다 — 차감 설명의 단가(8.25)와 환불 설명의 단가(7.5)가 다른 행이 피해 건이다.
+
+### Codex 판정 11건 처분
+
+| # | 심각도 | 지적 | 처분 |
+|---|---|---|---|
+| 1 | CRITICAL | 전환 전 VAT 포함 저장값을 "VAT 별도" 입력칸에 그대로 채운 뒤 저장하면 공급가로 재해석 → 10% 과청구 | **수용** — `toSupplyInputs`로 전환 전 회사는 ÷1.1 환산해 채운다(그대로 저장해도 지불액 불변). 마이그레이션 완료로 현재 발동 회사는 0곳이지만 구멍은 닫았다 |
+| 2 | CRITICAL | ①부분 요청이 나머지 유형을 NULL로 만든다 ②선불은 미설정 단가를 "0원 차감 성공"으로 통과시켜 **공짜 발송** | **수용** — ①전체 교체 API로 확정, 키 누락 시 422 `UNIT_PRICE_INCOMPLETE` ②`resolveChargeUnitPriceDetailed`로 미설정과 0원 계약을 갈라, 미설정이면 발송을 막는다(명시적 0원은 통과) |
+| 3 | HIGH | 차감·환불의 잔액 UPDATE와 원장 INSERT가 별도 커밋 + 환불 idempotency 판정이 무잠금 → 잔액만 움직인 상태·동시 이중 환불 | **수용** — 차감·환불·회수 3경로를 `pool.connect()` 고정 커넥션 + 회사 행 `FOR UPDATE` 트랜잭션으로. 누적 환불액도 **잠근 뒤** 읽는다. 후불은 사전 조회로 걸러 트랜잭션을 열지 않는다(발송마다 부르는 경로) |
+| 4 | HIGH | 소문자 `kakao`가 이번 변경으로 과금되기 시작하는데 원장(`kakao`)과 캠페인(`LMS`) 유형이 불일치 | **이월** — `/brand-send`는 `campaigns.name` 부재로 호출 즉시 터져 **실행 불가**(§5-4). 되살릴 때 유형 정규화와 함께 고친다. `campaigns.message_type` 소문자 실측 **0건** |
+| 5 | HIGH | sweeper가 `현재 단가 > 0`으로 환불 진입을 판정하고 불변식 건수도 현재 단가로 환산 | **수용** — 차감 원장을 **먼저** 읽고 그 단가로 판정. 단가를 비워도 환불이 멈추지 않는다 |
+| 6 | HIGH | 되읽기 실패 시 현재 단가 폴백은 단가 변경 중 안전하지 않다 | **수용 — 폴백 폐기, 보류로 전환.** 차감이 있는데 되읽지 못하면 환불·회수·sweep을 건너뛰고 `sendSystemAlert`. 환불은 idempotent하고 30초마다 다시 돌므로 원인을 고치면 밀린 환불이 자동으로 나간다 |
+| 7 | HIGH | 발송ID 단가 입력 UI에 VAT 기준 표기가 없어 계약서의 포함가를 넣으면 10% 과청구 | **수용** — 발송ID 단가에도 "VAT 별도" 라벨 + 칸별 포함가 미리보기 |
+| 8 | MEDIUM | 명시적 0원 계약을 미설정과 합쳐 기본 단가로 되돌린다(화면·추정) | **수용** — `getCompanyCosts`가 null·빈값만 폴백 |
+| 9 | MEDIUM | `/api/balance`가 신규 컬럼 미존재를 500으로 낸다 | **수용** — 503 `DB_MIGRATION_PENDING` 분기 |
+| 10 | LOW | 저장 후 서버가 반올림한 실제 값을 화면에 반영하지 않는다 | **수용** — 응답 `company`를 입력칸에 되돌린다(함수형 갱신) |
+| 11 | LOW | 감사 인사를 728에 고정해 본문이 길면 겹친다 | **수용** — 자리가 없으면 그리지 않는다(`THANKS_NOTE_HEIGHT` 기준) |
+
+**결함 없음 판정(Codex)**: `parseDeductDescription` 정규식 · `floorWon`·계층 합산 · A-8 탐지력 · 원장 지문 · 신규 엔드포인트 권한·트랜잭션·감사·503 · 프론트/백 VAT preview 산식 일치.
+
+**기계 게이트 5건 추가**(`unit-price-invariants.test.ts` 19건): ①sweeper 원장 선행 ②환불·회수 보류 분기 ③3경로 트랜잭션·행 잠금 ④미설정 차감 차단 ⑤전체 교체 API.
+
+**검증**: backend tsc 0 · **1,335 테스트**(105파일) / frontend tsc 0 · vite 빌드 산출물 실측.

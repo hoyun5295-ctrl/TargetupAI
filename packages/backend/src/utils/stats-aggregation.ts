@@ -16,6 +16,7 @@ import { classifyResultTables, computeDisplayCounts, DisplayCounts } from './sms
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, tallySmsChannelCounts, SmsChannel, ChannelCount } from './sms-result-map';
 import { CampaignTableMeta, recordedLiveTables, logTablesForLive } from './stats-table-scope';
 import { expandMonthlyRange } from './stats-period';
+import { resolveChargeUnitPrice } from './unit-price';
 
 // ============================================================
 // KST 날짜 범위 필터 빌더
@@ -644,9 +645,12 @@ export async function querySendStatsDetail(
   const detailParams: any[] = filterUserId ? [date, companyId, filterUserId] : [date, companyId];
 
   // 비용 단가
-  const costRes = await query('SELECT cost_per_sms, cost_per_lms FROM companies WHERE id = $1', [companyId]);
-  const cSms = Number(costRes.rows[0]?.cost_per_sms) || DEFAULT_COSTS_PARAM.sms;
-  const cLms = Number(costRes.rows[0]?.cost_per_lms) || DEFAULT_COSTS_PARAM.lms;
+  const costRes = await query('SELECT cost_per_sms, cost_per_lms, unit_price_basis FROM companies WHERE id = $1', [companyId]);
+  // ★ 2026-07-26 화면 비용 = 부가세 포함가. 기본단가는 이 파일이 주입받는 값을 그대로 쓴다
+  //   (config/defaults를 import하면 Redis 커넥션이 딸려오므로 순수 CT만 부른다).
+  const coRow = costRes.rows[0] || {};
+  const cSms = resolveChargeUnitPrice(coRow, 'SMS') || DEFAULT_COSTS_PARAM.sms;
+  const cLms = resolveChargeUnitPrice(coRow, 'LMS') || DEFAULT_COSTS_PARAM.lms;
 
   // 1) PG에서 캠페인 + 사용자 + opt080 메타만 SELECT (카운트 컬럼 제거)
   //    ★ alias 'c' 필수 (CAMPAIGN_OPT080_LEFT_JOIN 가정)

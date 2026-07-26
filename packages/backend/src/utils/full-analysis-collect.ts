@@ -2,6 +2,7 @@
 // 순수 계산은 multidim-comparison/message-analysis/forecast/message-byte(전부 TDD). 여기는 DB SELECT + 매핑만.
 // 기간 필터 = 발송일 기준 COALESCE(scheduled_at, sent_at)(2026-06-08 통일) + 발송 완료분(sent_at IS NOT NULL).
 import { query } from '../config/database';
+import { resolveChargeUnitPrice } from './unit-price';
 import { computeTypeComparison, computeNewVsExisting, type TypeComparison, type NewVsExistingResult } from './multidim-comparison';
 import { computeMessageTypePerformance, computeLengthDistribution, type MessageTypePerf, type LengthBucket } from './message-analysis';
 import { computeSendTrendForecast, computeMissedOpportunity, type TrendForecast, type MissedOpportunity } from './forecast';
@@ -67,16 +68,17 @@ export async function buildMessageAnalysis(companyId: string, period: string): P
     [companyId, String(days)],
   );
   const costRes = await query(
-    `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1::uuid`,
+    `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, unit_price_basis FROM companies WHERE id = $1::uuid`,
     [companyId],
   );
   const c = costRes.rows[0] || {};
   // 단가가 0/null이면 costMap에 넣지 않는다 → 순수 코어가 비용을 null(데이터부족)로 둔다. 임의 fallback 상수 금지.
   const costMap: Record<string, number> = {};
-  if (c.cost_per_sms != null && Number(c.cost_per_sms) > 0) costMap.SMS = Number(c.cost_per_sms);
-  if (c.cost_per_lms != null && Number(c.cost_per_lms) > 0) costMap.LMS = Number(c.cost_per_lms);
-  if (c.cost_per_mms != null && Number(c.cost_per_mms) > 0) costMap.MMS = Number(c.cost_per_mms);
-  if (c.cost_per_kakao != null && Number(c.cost_per_kakao) > 0) costMap.KAKAO = Number(c.cost_per_kakao);
+  // ★ 2026-07-26 부가세 포함가로 환산(고객이 실제로 내는 금액). 미설정·0은 그대로 제외한다.
+  for (const t of ['SMS', 'LMS', 'MMS', 'KAKAO'] as const) {
+    const v = resolveChargeUnitPrice(c, t);
+    if (v > 0) costMap[t] = v;
+  }
   const byType = computeMessageTypePerformance(
     res.rows.map((r: any) => ({ messageType: r.message_type, sent: Number(r.sent) || 0, success: Number(r.success) || 0 })),
     costMap,

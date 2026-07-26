@@ -12,7 +12,7 @@ import {
   kakaoBatchAggByGroup,
 } from '../utils/sms-queue';
 import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, getSendTypeLabel, getQueueRowStatus } from '../utils/sms-result-map';
-import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
+import { DEFAULT_COSTS, getCompanyCosts, redis, CACHE_TTL } from '../config/defaults';
 import { buildDateRangeFilter, buildPeriodFilter, STAT_DATE_EXPR, STAT_STARTED_GUARD, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
 import { computeDisplayCounts } from '../utils/sms-table-split';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
@@ -166,10 +166,11 @@ router.get('/summary', async (req: Request, res: Response) => {
     const totalCampaigns = summaryMeta.rows.length;
 
     const costResult = await query(
-      `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1`,
+      `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, unit_price_basis FROM companies WHERE id = $1`,
       [companyId]
     );
-    const costs = costResult.rows[0] || {};
+    // ★ 2026-07-26 화면 비용은 고객이 실제로 지불하는 금액(부가세 포함)이다 — CT가 기준을 해석한다.
+    const costs = getCompanyCosts(costResult.rows[0] || {});
 
     const successRate = totalSent > 0
       ? ((totalSuccess / totalSent) * 100).toFixed(1)
@@ -209,10 +210,10 @@ router.get('/summary', async (req: Request, res: Response) => {
         successRate: parseFloat(successRate),
       },
       costs: {
-        perSms: parseFloat(costs.cost_per_sms) || DEFAULT_COSTS.sms,
-        perLms: parseFloat(costs.cost_per_lms) || DEFAULT_COSTS.lms,
-        perMms: parseFloat(costs.cost_per_mms) || DEFAULT_COSTS.mms,
-        perKakao: parseFloat(costs.cost_per_kakao) || DEFAULT_COSTS.kakao,
+        perSms: costs.sms,
+        perLms: costs.lms,
+        perMms: costs.mms,
+        perKakao: costs.kakao,
       },
       // ★ 2026-07-23 에이전트(엔진) 발송 유형별 (agent·both만 채워짐)
       agent: { summary: agentSummary, byType: agentByType },

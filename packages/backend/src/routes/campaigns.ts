@@ -9,7 +9,7 @@ import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/t
 import { recordCustomerSends } from '../utils/customer-send-stats';
 import { replaceVariables, enrichWithCustomFields, getOpt080Number, buildAdMessage, prepareFieldMappings, prepareSendMessage, stripAdParts } from '../utils/messageUtils';
 import { SUCCESS_CODES, PENDING_CODES, isSuccess, isFail, SPAM_RESULT } from '../utils/sms-result-map';
-import { DEFAULT_COSTS, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
+import { DEFAULT_COSTS, getCompanyCosts, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
 import { isValidSmsTable } from '../utils/sms-table-validator';
 import { normalizePhone } from '../utils/normalize-phone';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
@@ -1105,10 +1105,11 @@ router.get('/test-stats', async (req: Request, res: Response) => {
     };
 
     // 비용 계산 (회사 실제 단가 기준)
-    const costResult = await query('SELECT cost_per_sms, cost_per_lms, cost_per_mms FROM companies WHERE id = $1', [companyId]);
-    const costSms = Number(costResult.rows[0]?.cost_per_sms) || DEFAULT_COSTS.sms;
-    const costLms = Number(costResult.rows[0]?.cost_per_lms) || DEFAULT_COSTS.lms;
-    const costMms = Number(costResult.rows[0]?.cost_per_mms) || DEFAULT_COSTS.mms;
+    const costResult = await query('SELECT cost_per_sms, cost_per_lms, cost_per_mms, unit_price_basis FROM companies WHERE id = $1', [companyId]);
+    const costRow = getCompanyCosts(costResult.rows[0] || {});
+    const costSms = costRow.sms;
+    const costLms = costRow.lms;
+    const costMms = costRow.mms;
     allResults.forEach((r: any) => {
       if (isSuccess(r.status_code)) {
         stats.cost += r.msg_type === 'S' ? costSms : r.msg_type === 'M' ? costMms : costLms;

@@ -68,6 +68,9 @@ export function billingLedgerFingerprint(companyPriceRow: any, agentRows: AgentL
     fp(companyPriceRow?.billing_type),
     fp(companyPriceRow?.usage_type),
     fp(companyPriceRow?.plan_monthly_price),
+    // ★ 2026-07-26 부가세 기준. 단가 숫자가 그대로여도 이 값이 바뀌면 **공급가액이 10% 달라진다.**
+    //   직원들이 회사별로 단가를 재입력하는 중이라 발행과 겹칠 확률이 구조적으로 높다.
+    fp(companyPriceRow?.unit_price_basis),
     // ※ `plan_id`는 지문에 넣지 않는다(2026-07-26 Codex 6차 수용).
     //   한 번 넣었다가 되돌렸다 — 7월분을 8월에 뽑는 동안 8월 플랜이 **같은 금액**의 다른 플랜으로 바뀌면
     //   7월 금액과 무관한데도 `BILLING_LEDGER_CHANGED`로 발행이 막힌다.
@@ -92,7 +95,8 @@ const AGENT_SQL = `SELECT id, agent_send_id, billing_type, cost_per_sms, cost_pe
 //   `plans.monthly_price`는 "유료인데 요금제 이력이 없다"를 판정하는 근거다.
 // `c.plan_id`는 조회만 한다(지문 제외) — 해지·미지정 관측용이고 판정 근거는 `company_plan_changes` 이력이다.
 const COMPANY_SQL = `SELECT ${COMPANY_PRICE_COLS.map((c) => `c.${c}`).join(', ')},
-                            c.usage_type, c.billing_type, c.plan_id, p.monthly_price AS plan_monthly_price
+                            c.usage_type, c.billing_type, c.plan_id, c.unit_price_basis,
+                            p.monthly_price AS plan_monthly_price
                        FROM companies c
                        LEFT JOIN plans p ON p.id = c.plan_id
                       WHERE c.id = $1::uuid`;

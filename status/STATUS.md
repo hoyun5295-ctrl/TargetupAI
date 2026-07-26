@@ -13,7 +13,7 @@
 | DB 쿼리 작성 / 스키마 확인 | SCHEMA.md | 대상 테이블 절만 |
 | 도메인 작업 착수 전 사고 이력 (룰 원천=CLAUDE.md `read_lessons_first`) | lessons/LESSONS_{DB,FRONTEND,BACKEND,DEPLOY,ARCHITECTURE,META}.md | 해당 도메인 전체. DB·돈·환불=DB / UI·모달=FRONTEND / API·발송·AI=BACKEND / 배포·빌드·SSH=DEPLOY+OPS.md 해당 절 / 컨트롤타워=ARCHITECTURE / **매 답변 직전=META** |
 | **Harold님이 "브레인스토밍"이라고 말했을 때** · superpowers 스킬 선택 · Codex 라운드 운영 | **COLLAB.md** | 브레인스토밍 = §1 전체 정독 후 그대로 진행(의무) / 그 외 = 해당 절만 |
-| **정산(청구서 5항목·발행 단위 scope·요금제 일할·에이전트 축) 작업 재개·회귀 의심** | **docs/2026-07-26-billing-scope-and-corrections-design.md** | 해당 절만 (SoT — §0-A 실측 확정값 → §2-x 라운드별 처분 → §7 배포·검증). 0725 착수 기록 = docs/2026-07-25-billing-restructure-handoff.md |
+| **정산(청구서 5항목·발행 단위 scope·요금제 일할·에이전트 축) 작업 재개·회귀 의심** | **docs/2026-07-26-billing-scope-and-corrections-design.md** | **§0-A 먼저**(현재 상태·실측 확정값) → **§9 미착수 4건**(부가세 이중과세·PDF 줄바꿈·유형별 버튼·속도) → 필요 시 §2-x 라운드별 처분·§7 배포·검증. 0725 착수 기록 = docs/2026-07-25-billing-restructure-handoff.md |
 | 시스템 구조 파악 | ARCHITECTURE.md | 해당 절만 |
 | 자사몰 연동·CDP·커넥터 작업 | INTEGRATIONS.md | 해당 provider 카드 / CDP 공통 절 |
 | 버그 수정 | BUGS.md | 해당 버그 항목 (해결분은 archive/BUGS_RESOLVED.md) |
@@ -49,10 +49,17 @@
 > (구) 서수란 접수 6건 착수 기록 — 순서 = ①발급명 병기 ②대상ID 출력 ③웹 발송유형 NULL ④알림톡 부달 B0061 귀속 ⑤7/6~7 불일치 진단 ⑥슈퍼 발신번호 페이징. ③ 착수 시 근본 = 웹 통계 소스(querySendStats)에 유형 축이 없어 CSV만 고쳐선 안 됨. 상세·함정 = [[project_2026_0725_pay_stats_custnm_storeid]].
 > **별건(미해결)**: 피케이포유 대상ID 인코딩 손상 — 같은 매장이 정상 UTF-8과 EUC-KR 이중인코딩 두 벌(hex 실측 확정). 게이트웨이 ingest 손상이라 복원은 별도 과제. 상세 = Track D SoT §2-4.
 
-### 🟢 정산 재구성 — ★배포완료 (커밋 `b49a3821` · 2026-07-26)
-> 경위·라운드별 처분·실측값 = [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) 2026-07-26 항목 + SoT [docs/2026-07-26-billing-scope-and-corrections-design.md](docs/2026-07-26-billing-scope-and-corrections-design.md). 여기 재서술하지 않는다(doc_ownership).
-> **잔여 = Harold 운영 검증 3건**: ①금강제화 시험건 `f64794c7` **화면에서** 삭제(psql DELETE 금지 — 크레딧 되돌림이 API에만 있다. 크레딧 0행·상세 15행 CASCADE 확인) ②실회사 1건 드라이런: 발행 → PDF → 메일 본문 → 삭제 ③검증 1건 = 거래내역서에 **MMS 308,043건**.
-> **이월(판단 필요)**: `G` 유형(여미지 B0227·7월 42,833건) 과금 분류 / 요금제 이력 크레딧 스냅샷 소급(ALTER) / 크레딧 일할 자동지급 재배선 / 요금제 해지 표현(`plan_id=NULL` 단독은 과청구 — 현재 그 경로 0건) / `by_agent` 지점별 발행 / `/preview` 화면 배선·단가 딥링크 모달.
+### 🔴 진행중 — 정산: 코드 배포완료(`b49a3821`)·⛔실청구 발행 보류 (다음 세션 1순위)
+> **SoT = [docs/2026-07-26-billing-scope-and-corrections-design.md](docs/2026-07-26-billing-scope-and-corrections-design.md) §0-A → §9.** 경위·라운드별 처분 = [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) 2026-07-26 항목. 여기 재서술하지 않는다(doc_ownership).
+> **⛔ 발행 보류 사유 = 부가세 이중과세**(§9-1). 단가가 **부가세 포함**으로 입력돼 있는데(실측: 7.70=7×1.1·25.08=22.8×1.1) 코드가 10%를 또 더한다 — 금강제화 7월 **+1,339,745원 과청구**. 금액 검사 3중이 전부 통과하므로 코드로는 안 잡힌다.
+> **미커밋 3묶음 완료(0726 4세션)** = §9-2 PDF 요금제 일자 · §9-5(원 미만 **절사** `utils/money.ts` CT · 대표자 2명 줄바꿈 겹침 `utils/pdf-party-block.ts` CT · 감사 인사) · **§9-6 부가세 기준 전환 전량**(`utils/unit-price.ts` CT + 소비처 25곳 + 슈퍼관리자 단가설정 모달 + 기계 게이트 13건). backend tsc 0 · **1,324 테스트** / frontend tsc 0 · vite 빌드 산출물 실측.
+> **운영 순서(Harold 확정)** = ①pg_dump ②차감액 변동 회사 사전 확인 ③**단가 ÷1.1 마이그레이션**(재실행 안전·고객 지불액 불변) ④DEFAULT 전환 ⑤**직원 전 업체 점검·재입력** ⑥금강제화 재발행 검증. SQL 전문 = SoT §9-6 "남은 것(운영)".
+> 회사별 기준은 `companies.unit_price_basis`(ALTER 적용·SCHEMA 등재)가 들고, 마이그레이션 전 회사도 오늘과 1원도 다르지 않다. 단가 쓰기 경로는 `PUT /api/admin/companies/:id/unit-prices` **하나**로 좁혔다(옛 3경로는 식별자 자체 제거 — tsc가 막는다).
+> **⛔ 실사고(0726 밤)** — 마이그레이션을 **배포 전에** 실행해, 옛 sweeper가 차감 건수를 `총차감액÷현재단가`로 역산하며 실패 0건인 패밀리투에 **83건 622.50원** 환불. 배포 시 자동 회수된다(정당 한도 0 → `prepaidReverseOverRefund`). 원인·진단 SQL 함정(=`max(updated_at)` 기준 금지) = SoT §9-7.
+> **선불 회계 재감사 + Codex 적대검증 11건 전건 처분** — 환불·회수·sweep을 **차감 당시 단가**로 전환 / 되읽기 실패는 폴백 아닌 **보류+경보** / 차감·환불·회수 3경로를 트랜잭션·행 잠금으로 / 단가 미설정 선불 발송 차단 / 단가 저장은 전체 교체 API. 기계 게이트 19건. 처분표 = SoT §9-7, 교훈 = LESSONS_DB 핵심원칙.
+> **남은 순서 = 직원 단가 재입력(운영) → §9-3 유형별 수량 버튼 → §9-4 속도(회사 1곳 2분).** 인덱스는 이미 있어(실측) 속도 원인은 ①두 번 스캔 ②직렬 루프 ③테이블 목록 중복 ④VIEW 혼입 의심.
+> **완료분 잔여(운영 검증)**: 금강제화 draft는 과청구 상태라 §9-1 수정 후 **화면에서** 삭제·재발행(psql DELETE 금지 — 크레딧 되돌림이 API에만 있다) / 실회사 드라이런(발행→PDF→메일→삭제) / 거래내역서 **MMS 308,043건**.
+> **이월(판단 필요)**: `G` 유형(여미지 B0227·7월 42,833건) 과금 분류 / 요금제 이력 크레딧 스냅샷 소급(ALTER) / 크레딧 일할 자동지급 재배선 / 요금제 해지 표현(`plan_id=NULL` 단독은 과청구 — 현재 그 경로 0건) / `by_agent` 지점별 발행 / `/preview` 화면 배선·단가 딥링크 모달 / 141사 일괄 발행.
 
 ### 🔵 다음 세션 (예정)
 > ① **템플릿관리자 흡수(Track B+C) — 1순위**: 다음 = 서팀장 점검표 회신(계정·코드 정정) → 컷오버. 병행 = M4 실발송 1건 · 497 기준 서팀장 · M5(B-3 계정·Bill_ID) · 브랜드 스코프(B-2) · 다우 2사 senderKey 이관 실측. 계약·이관 이력 전문 = 설계문서 §1·§4 · [[project_2026_0705_legacy_template_migration]].
@@ -74,7 +81,7 @@
 
 | 건 | 남은 것 | 상세 |
 |---|---|---|
-| 0726 정산 재구성 (커밋 `b49a3821`) | 금강제화 시험건 `f64794c7` 화면 삭제 · 실회사 1건 드라이런(발행→PDF→메일→삭제) · 거래내역서 MMS 308,043건 확인 | [[project_2026_0726_billing_scope_corrections]] |
+| 0726 정산 재구성 (커밋 `b49a3821`) | **§9-1 부가세 수정 후** 금강제화 draft 화면 삭제·재발행 · 실회사 드라이런 · MMS 308,043건 | [[project_2026_0726_billing_scope_corrections]] |
 | 0725 PAY 통계 발급명·대상ID | **배포 대기** + 커밋 시 신규파일 `packages/backend/src/utils/pay-stats.test.ts` git add | [[project_2026_0725_pay_stats_custnm_storeid]] |
 | 0724 DM 테스트 무과금 차단 | 서수란 실측 · 기존 running A/B 미발행 variant 점검 SQL | [[project_2026_0724_dm_test_no_charge_bypass]] |
 | 0723~24 PAY 에이전트 통계(발송ID·엑셀) | 서수란 실측 · 54/57 전환갭 확인 · billing 정산 반영 | [[project_2026_0723_pay_agent_stats_tabs]] |

@@ -1293,7 +1293,7 @@ router.post('/operator/propose', async (req: Request, res: Response) => {
     const companyResult = await query(
       `SELECT company_name, business_type, COALESCE(reject_number, opt_out_080_number) as reject_number,
               brand_name, brand_slogan, brand_description, brand_tone, customer_schema,
-              cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao
+              cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, unit_price_basis
        FROM companies WHERE id = $1::uuid`,
       [companyId]
     );
@@ -1826,16 +1826,11 @@ router.get('/operator/performance/campaigns', async (req: Request, res: Response
     const kakaoCountMap = await kakaoBatchAggByGroup(metaRows.map((c: any) => c.id));
 
     const costResult = await query(
-      `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1::uuid`,
+      `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, unit_price_basis FROM companies WHERE id = $1::uuid`,
       [companyId]
     );
-    const costRow = costResult.rows[0] || {};
-    const costs = {
-      sms: Number(costRow.cost_per_sms) || 9,
-      lms: Number(costRow.cost_per_lms) || 27,
-      mms: Number(costRow.cost_per_mms) || 80,
-      kakao: Number(costRow.cost_per_kakao) || 7,
-    };
+    // ★ 2026-07-26 인라인 폴백 상수 폐기 — 부가세 기준 해석과 기본 단가를 CT 하나로 통일한다.
+    const costs = getCompanyCosts(costResult.rows[0] || {});
 
     const campaigns = metaRows.map((c: any) => {
       const sms = smsCountMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };

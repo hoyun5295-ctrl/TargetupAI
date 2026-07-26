@@ -325,7 +325,8 @@
 | billing_cycle_type | varchar | ★ 실측 |
 | cost_per_test_sms | numeric | ★ 실측 |
 | cost_per_test_lms | numeric | ★ 실측 |
-| cost_per_spam_filter | numeric | ★ 실측 |
+| cost_per_spam_filter | numeric | ★ 실측 — **코드 소비처 0건(사장 컬럼)**. 스팸필터는 `cost_per_sms/lms`를 그대로 쓴다(D16) |
+| unit_price_basis | varchar(20) NOT NULL DEFAULT 'vat_included' | ★ 2026-07-26 ALTER 적용 — **`cost_per_*` 값이 부가세 포함인가 별도인가.** `vat_included`(전환 전, 기존 77사) / `vat_excluded`(단가설정 모달로 재입력 완료). 청구는 공급가, 선불 차감·화면 표시는 부가세 포함가를 쓰는데 그 변환 방향을 이 값이 정한다. 전 회사 전환 완료 시 `vat_included` 분기와 함께 제거 대상. CT=`utils/unit-price.ts` |
 | business_category | varchar | ★ 실측 |
 | business_item | varchar | ★ 실측 |
 | allow_callback_self_register | boolean | ★ 실측 |

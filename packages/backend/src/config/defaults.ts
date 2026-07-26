@@ -7,6 +7,7 @@
  */
 
 import Redis from 'ioredis';
+import { normalizeUnitPriceBasis, toVatIncludedPrice } from '../utils/unit-price';
 
 // ============================================================
 // Redis 공통 인스턴스
@@ -66,6 +67,8 @@ export function resolveMaxTokens(baseMaxTokens: number, modelName: string): numb
 
 // ============================================================
 // 서비스 기본 단가 (원) — 고객사 DB 미설정 시 폴백
+// ★ 이 값들은 **부가세 포함가**다(9.9 = 9 × 1.1). 화면 표시·예상 비용 추정에만 쓰이고
+//   청구서에는 절대 들어가지 않는다 — 단가 미설정 회사는 발행이 422로 막힌다(WEB_UNIT_PRICE_UNSET).
 // ============================================================
 export const DEFAULT_COSTS = {
   sms: parseFloat(process.env.DEFAULT_COST_SMS || '9.9'),
@@ -75,15 +78,32 @@ export const DEFAULT_COSTS = {
 };
 
 /**
- * 고객사 단가 조회 헬퍼
- * company 레코드에서 단가를 추출하되, 미설정 시 환경변수 기본값 사용
+ * 고객사 단가 조회 헬퍼 — **고객이 실제로 지불하는 건별 금액(부가세 포함)**을 돌려준다.
+ *
+ * ★ 2026-07-26: 이 함수의 소비처는 전부 "화면에 보이는 비용"과 "예상 비용 추정"이다
+ *   (발송결과 비용·대시보드·여정 시뮬레이터·AI 제안·캠페인 대행 제안서).
+ *   고객에게 보이는 금액은 청구서 합계와 같은 축이어야 하므로 부가세 포함가가 맞다.
+ *   청구서 공급가액은 이 함수가 아니라 `resolveBillingUnitPricesDetailed`가 담당한다.
+ *
+ *   `company.unit_price_basis`가 SELECT에 없으면 전환 전(`vat_included`)으로 해석돼
+ *   저장값을 그대로 돌려준다 = 오늘과 같은 값. 전환한 회사에서만 ×1.1이 붙는다.
  */
 export function getCompanyCosts(company: Record<string, any>) {
+  const basis = normalizeUnitPriceBasis(company?.unit_price_basis);
+  // ★ 2026-07-26 **명시적 0원은 0원 그대로** 둔다(Codex #8). 미설정(null·빈값·비수치)만 기본 단가로 폴백.
+  //   청구·차감 경로는 이미 0원 계약을 보존하는데 표시 경로만 기본 단가로 되돌리면
+  //   "무료 계약인데 화면엔 9.9원"이 되어 화면과 청구서가 갈린다.
+  const pick = (raw: any, fallback: number) => {
+    if (raw === null || raw === undefined || String(raw).trim() === '') return fallback;
+    const v = parseFloat(raw);
+    if (!Number.isFinite(v)) return fallback;
+    return toVatIncludedPrice(v, basis) ?? fallback;
+  };
   return {
-    sms: parseFloat(company?.cost_per_sms) || DEFAULT_COSTS.sms,
-    lms: parseFloat(company?.cost_per_lms) || DEFAULT_COSTS.lms,
-    mms: parseFloat(company?.cost_per_mms) || DEFAULT_COSTS.mms,
-    kakao: parseFloat(company?.cost_per_kakao) || DEFAULT_COSTS.kakao,
+    sms: pick(company?.cost_per_sms, DEFAULT_COSTS.sms),
+    lms: pick(company?.cost_per_lms, DEFAULT_COSTS.lms),
+    mms: pick(company?.cost_per_mms, DEFAULT_COSTS.mms),
+    kakao: pick(company?.cost_per_kakao, DEFAULT_COSTS.kakao),
   };
 }
 

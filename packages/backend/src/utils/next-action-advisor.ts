@@ -19,6 +19,7 @@ import { callAIWithFallback } from '../services/ai';
 import { aggregateCampaignPerformance, aggregateSmsCountsByCampaign } from './stats-aggregation';
 import { kakaoBatchAggByGroup } from './sms-queue';
 import { computeRoasMetric } from './performance-roas-core';
+import { getCompanyCosts } from '../config/defaults';
 import type { RoasMetric } from './performance-roas-core';
 
 // ════════════════════════════════════════════════════════════════════
@@ -403,18 +404,18 @@ export interface PerformanceSnapshotV2 {
   source: string;
 }
 
-async function getCompanyCosts(companyId: string): Promise<{ sms: number; lms: number; mms: number; kakao: number }> {
+/**
+ * ★ 2026-07-26 인라인 중복 정의를 폐기하고 컨트롤타워(`config/defaults.getCompanyCosts`)로 흡수했다.
+ *   같은 이름의 함수가 두 벌이라, 부가세 기준(`unit_price_basis`)을 CT에만 반영하면
+ *   이 화면만 조용히 옛 기준으로 남는다. 폴백 상수도 CT의 `DEFAULT_COSTS` 하나로 통일된다.
+ */
+async function loadCompanyCosts(companyId: string): Promise<{ sms: number; lms: number; mms: number; kakao: number }> {
   const r = await query(
-    `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1::uuid`,
+    `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, unit_price_basis
+       FROM companies WHERE id = $1::uuid`,
     [companyId]
   );
-  const row = r.rows[0] || {};
-  return {
-    sms: Number(row.cost_per_sms) || 9,
-    lms: Number(row.cost_per_lms) || 27,
-    mms: Number(row.cost_per_mms) || 80,
-    kakao: Number(row.cost_per_kakao) || 7,
-  };
+  return getCompanyCosts(r.rows[0] || {});
 }
 
 function calcDiffPct(current: number, previous: number): number {
@@ -433,7 +434,7 @@ export async function buildPerformanceSnapshotV2(
   period: PerformancePeriod = '30d'
 ): Promise<PerformanceSnapshotV2> {
   const days = PERIOD_DAYS[period];
-  const costs = await getCompanyCosts(companyId);
+  const costs = await loadCompanyCosts(companyId);
 
   // 1) 캠페인 메타 조회 (current + previous 2 윈도우)
   //    current  = NOW() - $days ~ NOW()

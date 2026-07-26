@@ -16,7 +16,8 @@ import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
 import { detectEnabledFields, clearEnabledFieldsCache } from '../utils/enabled-fields';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus } from '../utils/sms-result-map';
-import { DEFAULT_COSTS } from '../config/defaults';
+import { DEFAULT_COSTS, getCompanyCosts } from '../config/defaults';
+import { round2 } from '../utils/unit-price';
 import { validateSmsTables } from '../utils/sms-table-validator';
 // ★ D145 P0: 예약 캠페인 자동 정리 (모든 발송 관련 라우트 정합성)
 import { cleanupScheduledCampaigns, cancelCampaign } from '../utils/campaign-lifecycle';
@@ -454,6 +455,149 @@ router.get('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
   }
 });
 
+// ============================================================
+//  단가 설정 — 쓰기 경로 단일화 (★ 2026-07-26 Harold 확정)
+// ============================================================
+//
+// 신설 사유: 단가가 **부가세 포함**으로 입력돼 있었는데 청구 코드는 그 값을 공급가액으로 놓고
+//   10%를 또 더했다(금강제화 7월 실측 +1,339,745원 과청구). 컬럼명에 포함 여부가 안 적혀 있어
+//   tsc·테스트·금액 항등식 3중 검사가 전부 통과한다 — 코드로는 절대 안 잡히는 부류다.
+//
+// 그래서 ①입력을 "부가세 별도(공급가)"로 통일하고 ②그 사실을 `unit_price_basis`에 **같은 문장에서**
+//   함께 기록한다. 단가와 기준이 따로 써지면 그 사이가 곧 사고다.
+//   기존 3개 쓰기 경로(회사 수정·고객사 설정·관리자 회사 수정)의 단가 쓰기는 전부 걷어냈다.
+//
+// 값이 없으면(빈 문자열) NULL로 되돌린다 — 미설정은 청구를 막는 신호라 "0원 계약"과 구분해야 한다.
+router.put('/companies/:id/unit-prices', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { prices, applyToUnsetAgents } = req.body || {};
+
+  const FIELDS: Array<[string, string]> = [
+    ['sms', 'cost_per_sms'], ['lms', 'cost_per_lms'], ['mms', 'cost_per_mms'], ['kakao', 'cost_per_kakao'],
+    ['testSms', 'cost_per_test_sms'], ['testLms', 'cost_per_test_lms'],
+  ];
+
+  // ★ 2026-07-26 이 API는 **전체 교체**다(Codex #2). 키가 빠지면 그 유형이 조용히 NULL이 되고,
+  //   선불 회사라면 그 유형이 차감 없이 발송된다. 부분 요청은 받지 않는다 —
+  //   "비우려는 의도"는 빈 문자열로 명시해야 한다.
+  const missing = FIELDS.filter(([key]) => !(prices && Object.prototype.hasOwnProperty.call(prices, key)))
+    .map(([key]) => key);
+  if (!prices || typeof prices !== 'object' || missing.length > 0) {
+    return res.status(422).json({
+      success: false,
+      error: `단가는 전체를 한 번에 저장합니다. 빠진 항목이 있습니다: ${missing.join(', ') || 'prices'}. 비우려면 빈 값으로 보내 주세요.`,
+      code: 'UNIT_PRICE_INCOMPLETE',
+      missing_fields: missing,
+    });
+  }
+
+  // 형식 검증 — 숫자가 아닌 값이 들어오면 조용히 0원으로 저장되는 일이 없게 여기서 막는다.
+  const values: Record<string, number | null> = {};
+  const invalid: string[] = [];
+  for (const [key, col] of FIELDS) {
+    const raw = prices?.[key];
+    if (raw === undefined || raw === null || String(raw).trim() === '') { values[col] = null; continue; }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) { invalid.push(key); continue; }
+    values[col] = round2(n);
+  }
+  if (invalid.length > 0) {
+    return res.status(422).json({
+      success: false,
+      error: `단가에 숫자가 아니거나 음수인 값이 있습니다: ${invalid.join(', ')}`,
+      code: 'UNIT_PRICE_INVALID',
+      invalid_fields: invalid,
+    });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const before = await client.query(
+      `SELECT company_name, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
+              cost_per_test_sms, cost_per_test_lms
+         FROM companies WHERE id = $1::uuid FOR UPDATE`,
+      [id]
+    );
+    if (before.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, error: '회사를 찾을 수 없습니다.' });
+    }
+
+    // 단가 6개와 기준을 **한 문장**으로 쓴다. 기준만 먼저 바뀌면 그 순간 청구 금액이 10% 틀린다.
+    const updated = await client.query(
+      `UPDATE companies
+          SET cost_per_sms = $2, cost_per_lms = $3, cost_per_mms = $4, cost_per_kakao = $5,
+              cost_per_test_sms = $6, cost_per_test_lms = $7,
+              unit_price_basis = 'vat_excluded',
+              updated_at = NOW()
+        WHERE id = $1::uuid
+        RETURNING company_name, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
+                  cost_per_test_sms, cost_per_test_lms`,
+      [id, values.cost_per_sms, values.cost_per_lms, values.cost_per_mms, values.cost_per_kakao,
+       values.cost_per_test_sms, values.cost_per_test_lms]
+    );
+
+    // 발송ID 단가는 **상속시키지 않는다** — 발송ID마다 계약이 다를 수 있고, 암묵 상속은
+    // 계약이 다른 발송ID를 조용히 회사 단가로 청구한다(금액 검사가 못 잡는다).
+    // 대신 운영자가 명시적으로 누를 때만 **미설정 행에** 복사한다. 이미 값이 있는 행은 건드리지 않는다.
+    let agentCopied = 0;
+    if (applyToUnsetAgents === true) {
+      const copied = await client.query(
+        `UPDATE company_agent_ids
+            SET cost_per_sms = COALESCE(cost_per_sms, $2),
+                cost_per_lms = COALESCE(cost_per_lms, $3),
+                cost_per_mms = COALESCE(cost_per_mms, $4),
+                cost_per_kakao = COALESCE(cost_per_kakao, $5)
+          WHERE company_id = $1::uuid
+            AND (cost_per_sms IS NULL OR cost_per_lms IS NULL OR cost_per_mms IS NULL OR cost_per_kakao IS NULL)`,
+        [id, values.cost_per_sms, values.cost_per_lms, values.cost_per_mms, values.cost_per_kakao]
+      );
+      agentCopied = copied.rowCount || 0;
+    }
+
+    await client.query('COMMIT');
+
+    await recordAuditLog({
+      actorUserId: req.user?.userId,
+      action: 'company_unit_price_update',
+      targetType: 'company',
+      targetId: id,
+      details: {
+        company_name: updated.rows[0].company_name,
+        basis: { before: before.rows[0].unit_price_basis, after: 'vat_excluded' },
+        before: before.rows[0],
+        after: updated.rows[0],
+        agent_rows_filled: agentCopied,
+      },
+      req,
+    });
+
+    return res.json({
+      success: true,
+      company: updated.rows[0],
+      agent_rows_filled: agentCopied,
+      message: agentCopied > 0
+        ? `단가를 저장했습니다. 단가가 비어 있던 발송ID ${agentCopied}건에 함께 적용했습니다.`
+        : '단가를 저장했습니다.',
+    });
+  } catch (error: any) {
+    try { await client.query('ROLLBACK'); } catch { /* 이미 종료된 트랜잭션 */ }
+    const msg = error?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        error: 'DB 마이그레이션 필요 — 운영자에게 companies.unit_price_basis ALTER 실행 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    console.error('단가 저장 실패:', error);
+    return res.status(500).json({ success: false, error: '단가 저장 실패' });
+  } finally {
+    client.release();
+  }
+});
+
 // 회사 수정
 router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
@@ -461,10 +605,10 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
     companyName, contactName, contactEmail, contactPhone,
     status, planId, rejectNumber, brandName,
     sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays,
-    costPerSms, costPerLms, costPerMms, costPerKakao,
-    // ★ 2026-07-25 청구서가 쓰는 단가인데 입력 경로가 없어 설정 불가였다(billing.ts 테스트발송 항목).
-    //   스팸필터는 일반 SMS/LMS 단가를 그대로 쓰므로(billing.ts D16 결정) 별도 단가를 두지 않는다.
-    costPerTestSms, costPerTestLms,
+    // ★ 2026-07-26 단가 6종을 이 라우트에서 **받지 않는다.** 식별자를 없애 두면
+    //   나중에 누가 다시 바인딩하려 해도 컴파일이 막는다(주석만으로는 못 막는다).
+    //   단가는 기준(unit_price_basis)과 원자적으로 써야 해서 전용 엔드포인트 하나로 좁혔다:
+    //   PUT /api/admin/companies/:id/unit-prices
     storeCodeList,
     businessNumber, ceoName, businessType, businessItem, address,
     allowCallbackSelfRegister, maxUsers, sessionTimeoutMinutes,
@@ -567,7 +711,9 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           updated_at = NOW()
       WHERE id = $32
       RETURNING *
-    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, finalSubscriptionStatus, id, userIsolationEnabled !== undefined ? userIsolationEnabled : null, usageType || null, industryCodeParam, costPerTestSms === undefined ? null : String(costPerTestSms ?? ''), costPerTestLms === undefined ? null : String(costPerTestLms ?? '')]);
+    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, null /* ★2026-07-26 단가 쓰기 경로 통합 — 이 라우트는 단가를 더 이상 저장하지 않는다.
+             기준(unit_price_basis)과 원자적으로 써야 하는 값이라 쓰기 경로를 하나로 좁혔다:
+             PUT /api/admin/companies/:id/unit-prices */, null, null, null, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, finalSubscriptionStatus, id, userIsolationEnabled !== undefined ? userIsolationEnabled : null, usageType || null, industryCodeParam, null /* 테스트 단가도 위 전용 엔드포인트에서만 저장한다 */, null]);
 
       // 요금제가 실제로 바뀐 때만 기록한다(COALESCE라 planId가 null이면 미변경).
       const newPlanId = result.rows[0]?.plan_id;
@@ -1632,9 +1778,8 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
         testSummary.lms += Number(sf.lms) || 0;
 
         // 비용 계산
-        const costRes = await query('SELECT cost_per_sms, cost_per_lms FROM companies WHERE id = $1', [targetCompanyId]);
-        const cSms = Number(costRes.rows[0]?.cost_per_sms) || DEFAULT_COSTS.sms;
-        const cLms = Number(costRes.rows[0]?.cost_per_lms) || DEFAULT_COSTS.lms;
+        const costRes = await query('SELECT cost_per_sms, cost_per_lms, unit_price_basis FROM companies WHERE id = $1', [targetCompanyId]);
+        const { sms: cSms, lms: cLms } = getCompanyCosts(costRes.rows[0] || {});
         testSummary.cost = Math.round((testSummary.sms * cSms + testSummary.lms * cLms) * 10) / 10;
       } catch (err) {
         console.error('테스트 통계 조회 실패:', err);

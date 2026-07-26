@@ -96,7 +96,7 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
     const userId = (req as any).user?.userId;
     const {
       brand_name, business_type, reject_number, manager_phones,
-      monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
+      monthly_budget,
       send_start_hour, send_end_hour, daily_limit_per_customer,
       holiday_send_allowed, duplicate_prevention_days,
       target_strategy, cross_category_allowed, excluded_segments,
@@ -136,7 +136,11 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
       WHERE id = $19
     `, [
       brand_name, business_type, reject_number, managerPhoneJson,
-      monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
+      monthly_budget,
+      // ★2026-07-26 단가 쓰기 경로 통합 — 고객사 설정 화면은 단가를 저장하지 않는다.
+      //   단가는 계약 값이고 기준(unit_price_basis)과 원자적으로 써야 해서 슈퍼관리자 전용
+      //   PUT /api/admin/companies/:id/unit-prices 하나로 좁혔다.
+      null, null, null, null,
       send_start_hour, send_end_hour, daily_limit_per_customer,
       holiday_send_allowed, duplicate_prevention_days,
       target_strategy, cross_category_allowed, excluded_segments ? JSON.stringify(excluded_segments) : null,
@@ -1955,8 +1959,8 @@ router.put('/:id', requireUuidId, requireSuperAdmin, async (req: Request, res: R
       // 발송정책
       sendHourStart, sendHourEnd, dailyLimit,
       holidaySend, duplicateDays,
-      // 단가
-      costPerSms, costPerLms, costPerMms, costPerKakao,
+      // ★ 2026-07-26 단가는 이 라우트에서 받지 않는다 — 식별자를 없애 두면 재바인딩을 tsc가 막는다.
+      //   전용 경로 = PUT /api/admin/companies/:id/unit-prices (기준과 원자적으로 저장)
       // AI설정
       targetStrategy, crossCategoryAllowed, excludedSegments,
       approvalRequired,
@@ -2020,7 +2024,8 @@ router.put('/:id', requireUuidId, requireSuperAdmin, async (req: Request, res: R
         status, dataInputMethod, rejectNumber,
         sendHourStart, sendHourEnd, dailyLimit,
         holidaySend, duplicateDays,
-        costPerSms, costPerLms, costPerMms, costPerKakao,
+        // ★2026-07-26 단가는 전용 엔드포인트(PUT /api/admin/companies/:id/unit-prices)에서만 저장한다.
+        null, null, null, null,
         targetStrategy, crossCategoryAllowed,
         excludedSegments ? JSON.stringify(excludedSegments) : null,
         approvalRequired,

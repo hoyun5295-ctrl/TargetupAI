@@ -99,6 +99,29 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
     expect(body, '요청 본문(body_html)을 메일 본문으로 쓰면 정합 검사가 무력해진다').not.toContain('body_html');
   });
 
+  it('부가세는 vatOfSupply 하나로만 만든다 — 라우트에서 직접 곱하면 절사 규칙이 문서마다 갈린다 (2026-07-26)', () => {
+    // 정산 헤더·장별·미리보기·거래내역서 네 곳이 각자 `Math.round(x * 0.1)`을 하고 있었다.
+    expect(billingSrc, '부가세 산출은 utils/money.ts vatOfSupply만 쓴다')
+      .not.toMatch(/Math\.round\(\s*\w*[sS]ubtotal\s*\*\s*0\.1\s*\)/);
+    expect(billingSrc).toContain('vatOfSupply');
+  });
+
+  it('청구 금액은 원 미만 절사를 거친다 — 소수가 남으면 세금계산서와 안 맞고 PDF 칸을 넘겨 겹친다 (2026-07-26)', () => {
+    const start = billingSrc.indexOf("router.post('/generate'");
+    const end = billingSrc.indexOf("router.get('/list'", start);
+    const body = billingSrc.slice(start, end === -1 ? undefined : end);
+    // 공급가액은 절사된 상세 행의 정수 덧셈이어야 한다(헤더가 별도로 `수량 × 단가`를 더하면 소수가 되살아난다).
+    expect(body).toContain('billingItems.reduce');
+    expect(body, '헤더 교차검증은 절사 전 값(amountExact)으로 해야 탐지력이 유지된다').toContain('i.amountExact');
+  });
+
+  it('PDF 당사자 블록은 CT로만 그린다 — 고정 y 증가로 그리면 각자대표 회사에서 줄이 겹친다 (2026-07-26)', () => {
+    // 금강제화(대표 2명) 실측: 대표 줄이 두 줄로 흐르는데 다음 줄을 14pt만 내려 사업자번호와 겹쳤다.
+    expect(billingSrc).toContain('drawPartyBlock');
+    expect(billingSrc, '라우트에서 당사자 줄을 직접 그리면 같은 사고가 재발한다')
+      .not.toMatch(/doc\.text\(`사업자번호: /);
+  });
+
   it('발행·삭제·메일이 전부 같은 트랜잭션 헬퍼를 쓴다 — pool.query로 BEGIN을 걸면 커넥션이 갈려 트랜잭션이 성립하지 않는다', () => {
     // `pool.query('BEGIN')`이 있으면 그 트랜잭션은 서로 다른 커넥션에 나뉜다(0725 실제 결함).
     expect(billingSrc).not.toMatch(/pool\.query\(\s*['"`]BEGIN/);

@@ -6,7 +6,7 @@ import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVarian
 // ★ 2026-06-25: 고객 전체 삭제 시 데이터 프로필 캐시 무효화(게이트 즉시 반영)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { getColumnFields, FIELD_DISPLAY_MAP, reverseDisplayValue, renderFieldValue } from '../utils/standard-field-map';
-import { DEFAULT_COSTS, CACHE_TTL } from '../config/defaults';
+import { DEFAULT_COSTS, getCompanyCosts, CACHE_TTL } from '../config/defaults';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildDynamicFilterCompat } from '../utils/customer-filter';
@@ -754,7 +754,7 @@ router.get('/stats', async (req: Request, res: Response) => {
       ),
       // 회사 요금 정보 조회
       query(
-        `SELECT monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, use_db_sync, use_file_upload
+        `SELECT monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, unit_price_basis, use_db_sync, use_file_upload
          FROM companies WHERE id = $1`,
         [companyId]
       ),
@@ -802,10 +802,8 @@ router.get('/stats', async (req: Request, res: Response) => {
     }
 
     // 월 사용금액 계산 (고객사 DB 단가 우선, 없으면 환경변수 기본단가)
-    const costSms = parseFloat(company.cost_per_sms) || DEFAULT_COSTS.sms;
-    const costLms = parseFloat(company.cost_per_lms) || DEFAULT_COSTS.lms;
-    const costMms = parseFloat(company.cost_per_mms) || DEFAULT_COSTS.mms;
-    const costKakao = parseFloat(company.cost_per_kakao) || DEFAULT_COSTS.kakao;
+    // ★ 2026-07-26 화면에 보이는 사용금액은 고객이 실제로 낼 금액(부가세 포함) — CT가 기준을 해석한다.
+    const { sms: costSms, lms: costLms, mms: costMms, kakao: costKakao } = getCompanyCosts(company);
 
     let monthlyCost =
       smsSent * costSms +
@@ -884,10 +882,10 @@ router.get('/stats', async (req: Request, res: Response) => {
         lms_sent: lmsSent,
         mms_sent: mmsSent,
         kakao_sent: kakaoSent,
-        cost_per_sms: parseFloat(company.cost_per_sms) || DEFAULT_COSTS.sms,
-        cost_per_lms: parseFloat(company.cost_per_lms) || DEFAULT_COSTS.lms,
-        cost_per_mms: parseFloat(company.cost_per_mms) || DEFAULT_COSTS.mms,
-        cost_per_kakao: parseFloat(company.cost_per_kakao) || DEFAULT_COSTS.kakao,
+        cost_per_sms: costSms,
+        cost_per_lms: costLms,
+        cost_per_mms: costMms,
+        cost_per_kakao: costKakao,
         use_db_sync: company.use_db_sync ?? true,
         use_file_upload: company.use_file_upload ?? true
       }

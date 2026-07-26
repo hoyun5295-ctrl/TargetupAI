@@ -328,7 +328,7 @@ async function estimateCost(
   // ★ Fix #7 (2026-06-05): 임의 단가(9.9/27/81/8) 제거 → 회사 실 단가(companies.cost_per_*).
   //   executor·simulator와 동일 CT(getCompanyCosts). 채널 기준 단가로 실제 차감과 일치.
   const costRes = await query(
-    `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1::uuid`,
+    `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, unit_price_basis FROM companies WHERE id = $1::uuid`,
     [companyId],
   );
   const costs = getCompanyCosts(costRes.rows[0] || {});
