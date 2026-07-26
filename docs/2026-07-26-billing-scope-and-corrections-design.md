@@ -831,3 +831,41 @@ SELECT message_type, count(*) FROM campaigns
 **기계 게이트 5건 추가**(`unit-price-invariants.test.ts` 19건): ①sweeper 원장 선행 ②환불·회수 보류 분기 ③3경로 트랜잭션·행 잠금 ④미설정 차감 차단 ⑤전체 교체 API.
 
 **검증**: backend tsc 0 · **1,335 테스트**(105파일) / frontend tsc 0 · vite 빌드 산출물 실측.
+
+### 부수 — 충전관리 화면 분리 (Harold 지시)
+
+한줄로(웹 선불 잔액)와 에이전트(게이트웨이 지갑)는 **서로 다른 지갑**인데 한 화면에 세로로 쌓여 있어
+스크롤이 길고 어느 지갑을 보는지 헷갈렸다. 충전관리 탭 안에 서브탭 2개(`한줄로 충전` / `에이전트 충전`)로 갈랐다.
+한줄로 탭에는 승인 대기 건수를 배지로 띄워 탭을 바꾸지 않아도 밀린 일이 보인다.
+
+에이전트 패널에는 **발송ID 검색**(283개라 기본 셀렉트로는 못 찾는다 — `SearchableSelect`)과
+**충전 이력 기간·발송ID 필터**를 넣었다. 서버(`listAgentCharges`)는 게이트웨이 원장을 조회만 하고
+날짜는 `YYYY-MM-DD` 형식을 통과한 값만 바인딩한다(형식이 어긋나면 조건을 걸지 않는다 — 잘못된 구간을 만들지 않는다).
+
+---
+
+## 9-8. 속도 1차 처방 — 병렬화·중복 조회 제거·계측 (2026-07-26 4세션)
+
+§9-4 표의 ②③을 적용했다. ①(두 번째 스캔 폐기)은 금액 검증 장치(`diffBillingRowsVsDayData`)를 걷어내는 변경이라
+**계측 로그를 보고 나서** 판단한다 — 추측으로 돈 검증을 떼지 않는다.
+
+| 처방 | 내용 |
+|---|---|
+| ★ 정산 전용 MySQL 풀 분리 | **기간계 격리가 먼저다**(Harold 지시). 발송 풀에서 병렬로 돌리면 정산이 커넥션을 가져가 그동안 발송·환불 sweeper가 자리를 못 잡는다 — 월 1회 작업이 실발송을 밀어내면 안 된다. `mysqlBillingPool`(`connectionLimit` 8, env `MYSQL_BILLING_POOL_LIMIT`) + `mysqlBillingQuery` 신설. 발송 풀(10)은 정산과 무관하게 항상 10이다. 쿼리 1건 실행 상한도 함께(`max_execution_time` 60s — MariaDB엔 없는 변수라 미지원 서버에서는 조용히 건너뛴다) |
+| ② 직렬 → 동시성 상한 병렬 | 세 집계 함수(`smsAggByDateType`·`smsAggByRunDateType`·`testSmsAggByUserDateType`)가 테이블을 `for await`로 하나씩 훑었다. 회사당 40~48개 × 두 집계 = **90~100회 순차 왕복**이 2분의 지배 요인이다. `utils/concurrency.ts` CT 신설(`mapWithConcurrency`) + 상한 = 정산 전용 풀 크기(8). 전용 풀이라 다 써도 기간계에 닿지 않는다. `concurrency.ts`는 순수 유틸로 두고 상한 값은 풀을 소유한 `config/database.ts`가 정한다 |
+| ③ 테이블 목록 중복 조회 제거 | `getBillingLogTables()`(information_schema REGEXP)가 발행 1회에 **4번** 돌았다. 각 집계 함수가 시작할 때 한 번 읽어 넘긴다. **모듈 캐시로 두지 않는다** — 월 경계에 새로 생긴 LOG 테이블을 못 보면 그 달 첫 발행이 통째로 미청구가 된다 |
+| 계측 | `/generate`에 `[정산][소요] 일자축 집계 Nms · 상세축 집계 Nms` 로그. 다음 개선은 이 숫자 위에서 판단한다 |
+
+`mapWithConcurrency`는 **입력 순서를 보존**하고 **하나라도 실패하면 throw**한다 — 테이블 하나를 조용히 건너뛰면
+그 라인 발송분이 미청구가 된다(IMC의 `queryImcOrSkipIfMissing`과 달리 SMSQ 라인 테이블은 반드시 터져야 한다).
+
+**④ VIEW 혼입 — 실측으로 종결(2026-07-26).** `SMSQ_SEND`는 뷰가 맞지만(`information_schema` 확인),
+`sms_line_groups.sms_tables`에는 **접미사 있는 실테이블만** 들어 있다:
+`auth {SMSQ_SEND_11}` · `bito {13,14,15}` · `bulk {1,2,3}{4,5,6}{7,8,9}` · `test {SMSQ_SEND_10}`.
+뷰 이름이 목록에 없으므로 **이중 계상은 발생하지 않는다.** 이 축은 더 볼 것이 없다.
+
+**검증 팁(기록)** — `SHOW CREATE VIEW`는 `SHOW VIEW` 권한이 필요해 `smsuser`로는 1142가 난다.
+유형만 볼 때는 `information_schema.TABLES`의 `TABLE_TYPE`을 쓴다(권한 불필요).
+참고로 `SHOW CREATE VIEW`가 1142를 낸 것 자체가 그 객체가 뷰라는 증거다 — 뷰가 아니면 1347(wrong object)이 난다.
+
+**검증**: backend tsc 0 · **1,342 테스트**(106파일 — `concurrency` 5건 신규).

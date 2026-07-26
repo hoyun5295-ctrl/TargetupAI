@@ -1234,13 +1234,41 @@ export async function findGatewayCharges(inputs: AgentChargeInput[], center: Dat
   return (rows as any[]).map(toChargeRow);
 }
 
-/** 최근 충전 이력 (표시용 — 최신순) */
-export async function listAgentCharges(limit: number): Promise<AgentChargeStatusRow[]> {
+export interface AgentChargeListFilter {
+  limit?: number;
+  /** 발송ID 정확 일치 (화면 검색은 프론트 셀렉트에서 고른 값이라 정확 일치로 충분) */
+  agentSendId?: string;
+  /** YYYY-MM-DD (그날 00:00:00부터) */
+  startDate?: string;
+  /** YYYY-MM-DD (그날 23:59:59까지) */
+  endDate?: string;
+}
+
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * 충전 이력 (표시용 — 최신순). (★ 2026-07-26 발송ID·기간 필터 추가)
+ *
+ * 게이트웨이 원장을 조회만 한다(복제 저장 없음). 날짜는 형식을 검증한 값만 바인딩한다 —
+ * 형식이 어긋난 값은 조건 자체를 걸지 않는다(전체 조회로 떨어질 뿐 잘못된 구간을 만들지 않는다).
+ */
+export async function listAgentCharges(filter: number | AgentChargeListFilter = {}): Promise<AgentChargeStatusRow[]> {
   const pool = getPool();
   if (!pool) return [];
-  const lim = Math.min(Math.max(Math.floor(limit) || 30, 1), 200);
+  const f: AgentChargeListFilter = typeof filter === 'number' ? { limit: filter } : (filter || {});
+  const lim = Math.min(Math.max(Math.floor(Number(f.limit)) || 30, 1), 200);
+
+  const conds: string[] = [];
+  const params: any[] = [];
+  const sendId = String(f.agentSendId || '').trim();
+  if (sendId) { conds.push('StoreId = ?'); params.push(sendId); }
+  if (f.startDate && DATE_ONLY.test(String(f.startDate))) { conds.push('FillDtTm >= ?'); params.push(`${f.startDate} 00:00:00`); }
+  if (f.endDate && DATE_ONLY.test(String(f.endDate))) { conds.push('FillDtTm <= ?'); params.push(`${f.endDate} 23:59:59`); }
+  const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
+
   const [rows] = await pool.query(
-    `SELECT SeqNo, StoreId, FillAmt, FillDtTm, RsApplyFlag, RsApplyDtTm FROM RSRM_FillAmtHist ORDER BY SeqNo DESC LIMIT ${lim}`,
+    `SELECT SeqNo, StoreId, FillAmt, FillDtTm, RsApplyFlag, RsApplyDtTm FROM RSRM_FillAmtHist ${where} ORDER BY SeqNo DESC LIMIT ${lim}`,
+    params,
   );
   return (rows as any[]).map(toChargeRow);
 }

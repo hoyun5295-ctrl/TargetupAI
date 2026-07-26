@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import SearchableSelect from './SearchableSelect'; // ★ 2026-07-26 발송ID 검색(목록이 283개라 셀렉트만으론 못 찾는다)
 
 /**
  * ★ 2026-07-24 §5-3 — 에이전트 충전 실행 패널 (슈퍼관리자 · 충전 관리 탭)
@@ -34,6 +35,11 @@ export default function AgentChargePanel() {
   const [registered, setRegistered] = useState<RegisteredRow[]>([]);
   const [pollNote, setPollNote] = useState('');
   const [history, setHistory] = useState<HistoryRow[]>([]);
+  // ★ 2026-07-26 이력 필터 — 발송ID·기간. 서버가 게이트웨이 원장을 그대로 조회한다(저장 없음).
+  const [histSendId, setHistSendId] = useState('');
+  const [histStart, setHistStart] = useState('');
+  const [histEnd, setHistEnd] = useState('');
+  const [histLoading, setHistLoading] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCount = useRef(0);
   // 멱등키 — 네트워크 오류(응답 유실)로 재시도해도 같은 키 재전송 = 서버가 중복 충전 차단 (Codex 7R-1).
@@ -60,14 +66,23 @@ export default function AgentChargePanel() {
     } catch { /* 대상 로드 실패 시 빈 목록 유지 */ }
   };
 
-  const loadHistory = async () => {
+  const loadHistory = async (override?: { sendId?: string; start?: string; end?: string }) => {
+    const sendId = override?.sendId ?? histSendId;
+    const start = override?.start ?? histStart;
+    const end = override?.end ?? histEnd;
+    const qs = new URLSearchParams({ limit: '100' });
+    if (sendId) qs.set('agentSendId', sendId);
+    if (start) qs.set('startDate', start);
+    if (end) qs.set('endDate', end);
+    setHistLoading(true);
     try {
-      const res = await fetch('/api/admin/agent-charges?limit=30', { headers: { Authorization: `Bearer ${token()}` } });
+      const res = await fetch(`/api/admin/agent-charges?${qs.toString()}`, { headers: { Authorization: `Bearer ${token()}` } });
       if (res.ok) {
         const d = await res.json();
         setHistory(Array.isArray(d.rows) ? d.rows : []);
       }
     } catch { /* 이력 로드 실패 시 기존 유지 */ }
+    finally { setHistLoading(false); }
   };
 
   useEffect(() => {
@@ -280,16 +295,17 @@ export default function AgentChargePanel() {
       <div className="px-6 py-4 space-y-2">
         {rows.map((r, idx) => (
           <div key={idx} className="flex gap-2">
-            <select
-              value={r.agentSendId}
-              onChange={(e) => setRows(rows.map((x, i) => (i === idx ? { ...x, agentSendId: e.target.value } : x)))}
-              className="flex-1 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-            >
-              <option value="">발송ID 선택</option>
-              {idOptions.map((t) => (
-                <option key={`${t.agent_send_id}`} value={t.agent_send_id}>{targetLabel(t)}</option>
-              ))}
-            </select>
+            {/* ★ 2026-07-26 발송ID가 283개라 기본 셀렉트로는 못 찾는다 — 검색 가능한 셀렉트로 교체 */}
+            <div className="flex-1 min-w-0">
+              <SearchableSelect
+                options={idOptions.map((t) => ({ value: t.agent_send_id, label: targetLabel(t) }))}
+                value={r.agentSendId}
+                onChange={(value) => setRows(rows.map((x, i) => (i === idx ? { ...x, agentSendId: value } : x)))}
+                placeholder="발송ID·회사명 검색..."
+                emptyLabel="발송ID 선택"
+                className="w-full"
+              />
+            </div>
             <input
               type="text"
               value={r.amount}
@@ -399,9 +415,54 @@ export default function AgentChargePanel() {
       </div>
 
       <div className="px-6 pb-5">
-        <div className="flex items-center justify-between mb-1.5">
-          <p className="text-xs font-medium text-gray-500">최근 충전 이력 (게이트웨이 원장)</p>
-          <button type="button" onClick={loadHistory} className="text-xs text-gray-400 hover:text-gray-600">새로고침</button>
+        <div className="mb-2 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium text-gray-500">충전 이력 (게이트웨이 원장)</p>
+            <button type="button" onClick={() => loadHistory()} className="text-xs text-gray-400 hover:text-gray-600">새로고침</button>
+          </div>
+          {/* ★ 2026-07-26 발송ID·기간 필터 — 이력이 길어져 눈으로 찾기 어렵다는 운영 지적 */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-[220px] flex-1">
+              <SearchableSelect
+                options={targets.map((t) => ({ value: t.agent_send_id, label: targetLabel(t) }))}
+                value={histSendId}
+                onChange={(value) => { setHistSendId(value); loadHistory({ sendId: value }); }}
+                placeholder="발송ID·회사명 검색..."
+                emptyLabel="전체 발송ID"
+                className="w-full"
+              />
+            </div>
+            <input
+              type="date"
+              value={histStart}
+              onChange={(e) => setHistStart(e.target.value)}
+              className="px-2.5 py-1.5 border rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            <span className="text-xs text-gray-400">~</span>
+            <input
+              type="date"
+              value={histEnd}
+              onChange={(e) => setHistEnd(e.target.value)}
+              className="px-2.5 py-1.5 border rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => loadHistory()}
+              disabled={histLoading}
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-lg text-xs font-medium shrink-0"
+            >
+              {histLoading ? '조회 중...' : '조회'}
+            </button>
+            {(histSendId || histStart || histEnd) && (
+              <button
+                type="button"
+                onClick={() => { setHistSendId(''); setHistStart(''); setHistEnd(''); loadHistory({ sendId: '', start: '', end: '' }); }}
+                className="px-2.5 py-1.5 text-xs text-gray-400 hover:text-gray-600 shrink-0"
+              >
+                초기화
+              </button>
+            )}
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -429,7 +490,9 @@ export default function AgentChargePanel() {
                 </tr>
               ))}
               {history.length === 0 && (
-                <tr><td colSpan={6} className="py-3 text-center text-xs text-gray-300">이력이 없습니다.</td></tr>
+                <tr><td colSpan={6} className="py-3 text-center text-xs text-gray-300">
+                  {histSendId || histStart || histEnd ? '조건에 맞는 충전 이력이 없습니다.' : '이력이 없습니다.'}
+                </td></tr>
               )}
             </tbody>
           </table>

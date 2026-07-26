@@ -197,11 +197,15 @@ router.post('/generate', async (req: Request, res: Response) => {
     //   "엑셀 유형 ≠ 청구 유형"이 되고 그러면 정산 대조가 성립하지 않는다.
     // ★ 2026-07-26 집계는 항상 **회사 전체**다. 계정별 발행은 이 결과를 장으로 쪼개서 내지,
     //   집계 단계에서 거르지 않는다 — 거르면 그 계정 장에 회사 단위 항목이 통째로 빠진다.
+    // ★ 2026-07-26 단계별 소요 계측 — 느린 지점을 추측이 아니라 로그로 본다.
+    //   금강제화 발행이 2분대였는데 인덱스는 이미 있었다(실측). 다음 개선은 이 로그 위에서 판단한다.
+    const tStart = Date.now();
     const dayData = await buildCompanyUsageByDay({
       companyId: company_id,
       startDate: billing_start,
       endDate: billing_end,
     });
+    const tDayData = Date.now();
 
     // 7) 합산 — ★ 2026-07-25 미리보기와 같은 함수로(금액 불일치 차단)
     const totals = buildBillingTotals(dayData);
@@ -224,6 +228,7 @@ router.post('/generate', async (req: Request, res: Response) => {
       endDate: billing_end,
       ledger,
     });
+    console.log(`[정산][소요] company=${company_id} ${billing_start}~${billing_end} — 일자축 집계 ${tDayData - tStart}ms · 상세축 집계 ${Date.now() - tDayData}ms`);
 
     // 새 상세와 기존 집계가 갈라지면 화면·엑셀 숫자와 청구서 금액이 어긋난다.
     // 0725에 맞춰놓은 축을 이번 재구성이 조용히 되돌리는 것을 여기서 막는다.
@@ -1170,29 +1175,46 @@ router.get('/:id/pdf', async (req: Request, res: Response) => {
     doc.moveTo(50, partyBottom + 4).lineTo(545, partyBottom + 4).strokeColor('#e5e7eb').stroke();
 
     // 내역 테이블
+    // ★ 2026-07-26 항목표에 **페이지 넘김**을 넣는다. 그 전에는 줄 수와 무관하게 y만 늘려서,
+    //   항목이 많은 회사(웹+에이전트 병용·발송ID 여러 개)는 합계·감사 인사·하단 안내를 뚫고 인쇄됐다.
+    //   웹만 쓰는 회사는 11줄이라 안 터지고, 에이전트가 섞이는 순간 터지는 구조였다.
+    const ITEM_ROW_H = 22;
+    const ITEM_TABLE_BOTTOM = 620;   // 이 아래로는 새 줄을 그리지 않는다(합계 블록·감사 인사 자리 확보)
     let y = partyBottom + 19;
-    doc.rect(50, y, 495, 25).fill(primary);
-    setFont(true);
-    doc.fontSize(9).fillColor('white');
-    doc.text('항목', 60, y + 7);
-    doc.text('수량', 250, y + 7, { width: 80, align: 'right' });
-    doc.text('단가', 340, y + 7, { width: 80, align: 'right' });
-    doc.text('금액', 430, y + 7, { width: 105, align: 'right' });
-    y += 25;
+
+    const drawItemHeader = () => {
+      doc.rect(50, y, 495, 25).fill(primary);
+      setFont(true);
+      doc.fontSize(9).fillColor('white');
+      doc.text('항목', 60, y + 7);
+      doc.text('수량', 250, y + 7, { width: 80, align: 'right' });
+      doc.text('단가', 340, y + 7, { width: 80, align: 'right' });
+      doc.text('금액', 430, y + 7, { width: 105, align: 'right' });
+      y += 25;
+    };
+    drawItemHeader();
 
     // ★ 2026-07-26 `quantityText`가 있으면 수량 칸을 그 문구로 쓴다 — 요금제는 `9일 / 31일`이다.
     //   없으면 `0건 × ₩350,000 = ₩101,613`이라는 거짓 산식이 인쇄된다.
     const drawRow = (label: string, count: number, price: number, amount: number, bg = 'white', quantityText?: string) => {
       if (count <= 0 && !quantityText) return;
-      if (bg !== 'white') doc.rect(50, y, 495, 22).fill(bg);
+      if (y + ITEM_ROW_H > ITEM_TABLE_BOTTOM) {
+        doc.addPage();
+        y = 50;
+        setFont(true);
+        doc.fontSize(10).fillColor(primary).text('청구 내역 (계속)', 50, y);
+        y += 25;
+        drawItemHeader();
+      }
+      if (bg !== 'white') doc.rect(50, y, 495, ITEM_ROW_H).fill(bg);
       setFont(false);
       doc.fontSize(9).fillColor(dark);
-      doc.text(label, 60, y + 6);
-      doc.text(quantityText || count.toLocaleString(), 250, y + 6, { width: 80, align: 'right' });
-      doc.text(`₩${price.toLocaleString()}`, 340, y + 6, { width: 80, align: 'right' });
+      doc.text(label, 60, y + 6, { width: 185, lineBreak: false });
+      doc.text(quantityText || count.toLocaleString(), 250, y + 6, { width: 80, align: 'right', lineBreak: false });
+      doc.text(`₩${price.toLocaleString()}`, 340, y + 6, { width: 80, align: 'right', lineBreak: false });
       setFont(true);
-      doc.text(`₩${amount.toLocaleString()}`, 430, y + 6, { width: 105, align: 'right' });
-      y += 22;
+      doc.text(`₩${amount.toLocaleString()}`, 430, y + 6, { width: 105, align: 'right', lineBreak: false });
+      y += ITEM_ROW_H;
       doc.moveTo(50, y).lineTo(545, y).strokeColor('#e5e7eb').stroke();
     };
 
@@ -1251,8 +1273,6 @@ router.get('/:id/pdf', async (req: Request, res: Response) => {
       });
     }
 
-    doc.fontSize(8).fillColor(gray);
-    doc.text('본 정산서는 INVITO Target-UP 시스템에서 자동 생성되었습니다.', 50, 770, { align: 'center', width: 495 });
 
     // ============================
     // PAGE 2+ — 일자별 상세
@@ -1977,8 +1997,6 @@ router.get('/invoices/:id/pdf', async (req: Request, res: Response) => {
       });
     }
 
-    doc.fontSize(8).fillColor(gray);
-    doc.text('본 거래내역서는 INVITO Target-UP 시스템에서 자동 생성되었습니다.', 50, 770, { align: 'center', width: 495 });
 
     doc.end();
     await new Promise<void>((resolve) => stream.on('finish', resolve));

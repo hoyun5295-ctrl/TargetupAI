@@ -14,12 +14,13 @@
  *   (청구 단가가 이 키 단위로 매겨진다 — billing.ts 단가 스냅샷과 1:1)
  */
 
-import pool, { mysqlQuery } from '../config/database';
+import pool, { mysqlBillingQuery, MYSQL_BILLING_POOL_LIMIT } from '../config/database';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL } from './sms-result-map';
 import { getAllBulkSmsTables, getBitoSmsTables, getTestSmsTables, mergeLineTables } from './sms-queue';
 import { queryPayAgentStoreBreakdown, type PayAgentStoreRow } from './pay-stats';
 import { loadBillingLedger, hasAgentMapping, type BillingLedger } from './billing-ledger';
 import { floorWon } from './money';
+import { mapWithConcurrency } from './concurrency';
 import { normalizeUnitPriceBasis, toSupplyPrice, type UnitPriceBasis } from './unit-price';
 import type { PlanSegment } from './plan-proration';
 
@@ -126,7 +127,7 @@ export const getBillingCompanyTables = async (_companyId: string) => {
 export const getBillingTestTables = () => getTestSmsTables();
 
 export async function getBillingLogTables(): Promise<Set<string>> {
-  const rows = await mysqlQuery(
+  const rows = await mysqlBillingQuery(
     `SELECT TABLE_NAME FROM information_schema.TABLES
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME REGEXP '^SMSQ_SEND(_[0-9]+)?_[0-9]{6}$'`
   ) as any[];
@@ -163,8 +164,16 @@ export function billingLogMonths(startDate: string, endDate: string): string[] {
   return months;
 }
 
-export async function getTablesForBillingPeriod(baseTables: string[], startDate: string, endDate: string): Promise<string[]> {
-  const existingLogs = await getBillingLogTables();
+/**
+ * @param existingLogTables 이미 읽어 둔 LOG 테이블 목록. 넘기면 `information_schema` REGEXP 조회를 건너뛴다.
+ *   한 번의 발행에서 이 함수가 네 번 불리는데(발송·테스트 × 두 집계) 매번 전 테이블 목록을 다시 읽고 있었다.
+ *   **요청 안에서만 재사용한다** — 모듈 캐시로 두면 월 경계에 새로 생긴 LOG 테이블을 못 봐서
+ *   그 달 첫 발행이 통째로 미청구가 될 수 있다.
+ */
+export async function getTablesForBillingPeriod(
+  baseTables: string[], startDate: string, endDate: string, existingLogTables?: Set<string>,
+): Promise<string[]> {
+  const existingLogs = existingLogTables ?? await getBillingLogTables();
   const allTables = [...baseTables];
   for (const ym of billingLogMonths(startDate, endDate)) {
     for (const t of baseTables) {
@@ -188,7 +197,7 @@ export async function getTablesForBillingPeriod(baseTables: string[], startDate:
  */
 async function queryImcOrSkipIfMissing(sql: string, params: any[], context: string): Promise<any[]> {
   try {
-    return await mysqlQuery(sql, params) as any[];
+    return await mysqlBillingQuery(sql, params) as any[];
   } catch (e: any) {
     if (e?.errno === 1146 || e?.code === 'ER_NO_SUCH_TABLE') {
       console.log(`[정산] ${context} — IMC 테이블 없음, 집계에서 제외. (${e?.message || ''})`);
@@ -206,9 +215,11 @@ async function queryImcOrSkipIfMissing(sql: string, params: any[], context: stri
  *   PG에서 `campaigns.created_by`로 되매핑한다. 기존 함수는 화면·엑셀이 쓰고 있어 건드리지 않는다.
  */
 export async function smsAggByRunDateType(tables: string[], whereClause: string, params: any[]): Promise<any[]> {
-  const allRows: any[] = [];
-  for (const t of tables) {
-    const rows = await mysqlQuery(
+  // ★ 2026-07-26 직렬 `for await`를 동시성 상한 병렬로 바꿨다. 테이블 수만큼 왕복이 순차라
+  //   회사당 40~48개 × 두 집계 = 90~100회가 한 줄로 섰다(금강제화 발행 2분의 지배 요인).
+  //   풀(10)을 독점하지 않도록 상한을 둔다 — 발송·환불 워커가 같은 풀을 쓴다.
+  const perTable = await mapWithConcurrency(tables, MYSQL_BILLING_POOL_LIMIT, async (t) => {
+    return await mysqlBillingQuery(
       `SELECT app_etc1 as run_id, msg_type, DATE(sendreq_time) as send_date,
               COUNT(*) as total_count,
               SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count,
@@ -218,9 +229,8 @@ export async function smsAggByRunDateType(tables: string[], whereClause: string,
        GROUP BY app_etc1, msg_type, DATE(sendreq_time)`,
       params
     ) as any[];
-    allRows.push(...rows);
-  }
-  return allRows;
+  });
+  return perTable.flat();
 }
 
 /**
@@ -228,9 +238,11 @@ export async function smsAggByRunDateType(tables: string[], whereClause: string,
  * 계정은 `bill_id`에 들어간다 — `sms-queue.ts insertTestSmsQueue`가 `extra.billId = userId`로 적재한다.
  */
 export async function testSmsAggByUserDateType(tables: string[], whereClause: string, params: any[]): Promise<any[]> {
-  const allRows: any[] = [];
-  for (const t of tables) {
-    const rows = await mysqlQuery(
+  // ★ 2026-07-26 직렬 `for await`를 동시성 상한 병렬로 바꿨다. 테이블 수만큼 왕복이 순차라
+  //   회사당 40~48개 × 두 집계 = 90~100회가 한 줄로 섰다(금강제화 발행 2분의 지배 요인).
+  //   풀(10)을 독점하지 않도록 상한을 둔다 — 발송·환불 워커가 같은 풀을 쓴다.
+  const perTable = await mapWithConcurrency(tables, MYSQL_BILLING_POOL_LIMIT, async (t) => {
+    return await mysqlBillingQuery(
       `SELECT bill_id, msg_type, DATE(sendreq_time) as send_date,
               COUNT(*) as total_count,
               SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count,
@@ -240,16 +252,17 @@ export async function testSmsAggByUserDateType(tables: string[], whereClause: st
        GROUP BY bill_id, msg_type, DATE(sendreq_time)`,
       params
     ) as any[];
-    allRows.push(...rows);
-  }
-  return allRows;
+  });
+  return perTable.flat();
 }
 
 /** SMSQ 테이블들에서 (일자 × msg_type) 카운트 — 청구 단가 산정의 기준 축 */
 export async function smsAggByDateType(tables: string[], whereClause: string, params: any[]): Promise<any[]> {
-  const allRows: any[] = [];
-  for (const t of tables) {
-    const rows = await mysqlQuery(
+  // ★ 2026-07-26 직렬 `for await`를 동시성 상한 병렬로 바꿨다. 테이블 수만큼 왕복이 순차라
+  //   회사당 40~48개 × 두 집계 = 90~100회가 한 줄로 섰다(금강제화 발행 2분의 지배 요인).
+  //   풀(10)을 독점하지 않도록 상한을 둔다 — 발송·환불 워커가 같은 풀을 쓴다.
+  const perTable = await mapWithConcurrency(tables, MYSQL_BILLING_POOL_LIMIT, async (t) => {
+    return await mysqlBillingQuery(
       `SELECT msg_type, DATE(sendreq_time) as send_date,
               COUNT(*) as total_count,
               SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count,
@@ -259,9 +272,8 @@ export async function smsAggByDateType(tables: string[], whereClause: string, pa
        GROUP BY msg_type, DATE(sendreq_time)`,
       params
     ) as any[];
-    allRows.push(...rows);
-  }
-  return allRows;
+  });
+  return perTable.flat();
 }
 
 /**
@@ -444,10 +456,13 @@ export async function buildCompanyUsageByDay(opts: {
   // 1) 대상 run_id 수집
   const runIds = await selectBillingRunIds({ companyId, startDate, endDate, userId });
 
+  // ★ 2026-07-26 LOG 테이블 목록은 요청당 한 번만 읽는다(information_schema REGEXP는 싸지 않다).
+  const logTables = await getBillingLogTables();
+
   // 2) 일반발송 — 회사 라인그룹 + LOG 테이블 통합
   if (runIds.length > 0) {
     const companyTables = await getBillingCompanyTables(companyId);
-    const billingTables = await getTablesForBillingPeriod(companyTables, startDate, endDate);
+    const billingTables = await getTablesForBillingPeriod(companyTables, startDate, endDate, logTables);
     const ph = runIds.map(() => '?').join(',');
     const rows = await smsAggByDateType(billingTables, `app_etc1 IN (${ph})`, runIds);
     rows.forEach((row: any) => {
@@ -464,7 +479,7 @@ export async function buildCompanyUsageByDay(opts: {
   // 3) 테스트발송 — 테스트 전용 라인 + LOG 테이블 통합 (회사 단위라 사용자 필터 시 제외)
   if (!userId) {
     const testBaseTables = await getBillingTestTables();
-    const testTables = await getTablesForBillingPeriod(testBaseTables, startDate, endDate);
+    const testTables = await getTablesForBillingPeriod(testBaseTables, startDate, endDate, logTables);
     const testRows = await smsAggByDateType(
       testTables,
       `app_etc1 = 'test' AND app_etc2 = ? AND sendreq_time >= ? AND sendreq_time < DATE_ADD(?, INTERVAL 1 DAY)`,
@@ -1254,13 +1269,15 @@ export async function buildBillingUsageRows(opts: {
   const acc = new Map<string, BillingUsageRow>();
   let excludedPrepaidSendIds: string[] = [];
   let agentMappingMissing = false;
+  // ★ 2026-07-26 LOG 테이블 목록은 요청당 한 번만 읽는다(발송·테스트 두 곳이 공유).
+  const logTables = await getBillingLogTables();
 
   // 1) 웹 일반발송 — 일자 × 계정 × 유형
   const runIds = await selectBillingRunIds({ companyId, startDate, endDate, userId });
   if (runIds.length > 0) {
     const owners = await mapRunOwners(runIds);
     const companyTables = await getBillingCompanyTables(companyId);
-    const billingTables = await getTablesForBillingPeriod(companyTables, startDate, endDate);
+    const billingTables = await getTablesForBillingPeriod(companyTables, startDate, endDate, logTables);
     const ph = runIds.map(() => '?').join(',');
     const rows = await smsAggByRunDateType(billingTables, `app_etc1 IN (${ph})`, runIds);
     for (const row of rows) {
@@ -1347,7 +1364,7 @@ export async function buildBillingUsageRows(opts: {
   // 3) 테스트발송 — 계정은 bill_id
   if (!userId) {
     const testBase = await getBillingTestTables();
-    const testTables = await getTablesForBillingPeriod(testBase, startDate, endDate);
+    const testTables = await getTablesForBillingPeriod(testBase, startDate, endDate, logTables);
     const testRows = await testSmsAggByUserDateType(
       testTables,
       `app_etc1 = 'test' AND app_etc2 = ? AND sendreq_time >= ? AND sendreq_time < DATE_ADD(?, INTERVAL 1 DAY)`,

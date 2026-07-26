@@ -115,6 +115,19 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
     expect(body, '헤더 교차검증은 절사 전 값(amountExact)으로 해야 탐지력이 유지된다').toContain('i.amountExact');
   });
 
+  it('청구서 항목표에 페이지 넘김이 있다 — 줄이 많으면 합계·감사 인사·하단을 뚫고 인쇄된다 (2026-07-26)', () => {
+    // 웹만 쓰는 회사는 11줄이라 안 터지고, 에이전트가 섞이는 순간(발송ID마다 유형별 줄) 터지는 구조였다.
+    const start = billingSrc.indexOf('const drawItemHeader = ()');
+    expect(start, '항목표 헤더 함수를 찾지 못했다').toBeGreaterThan(-1);
+    const body = billingSrc.slice(start, billingSrc.indexOf('const invoiceLines = buildInvoiceLines', start));
+    expect(body, '행을 그리기 전에 남은 높이를 봐야 한다').toContain('ITEM_TABLE_BOTTOM');
+    expect(body, '넘칠 때 새 페이지를 열고 헤더를 다시 그려야 한다').toMatch(/doc\.addPage\(\)[\s\S]*drawItemHeader\(\)/);
+  });
+
+  it('청구 문서에 시스템 자동 생성 안내를 넣지 않는다 — 고객에게 나가는 문서다 (Harold 2026-07-26)', () => {
+    expect(billingSrc).not.toContain('시스템에서 자동 생성되었습니다');
+  });
+
   it('PDF 당사자 블록은 CT로만 그린다 — 고정 y 증가로 그리면 각자대표 회사에서 줄이 겹친다 (2026-07-26)', () => {
     // 금강제화(대표 2명) 실측: 대표 줄이 두 줄로 흐르는데 다음 줄을 14pt만 내려 사업자번호와 겹쳤다.
     expect(billingSrc).toContain('drawPartyBlock');

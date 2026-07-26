@@ -3391,7 +3391,13 @@ router.get('/agent-charges/status', authenticate, requireSuperAdmin, async (req:
 // 최근 충전 이력 (회사명은 PG 매핑으로 라벨링 — 매핑 없는 ID는 고아 표시)
 router.get('/agent-charges', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
-    const rows = await listAgentCharges(Number(req.query.limit) || 30);
+    // ★ 2026-07-26 발송ID·기간 필터 — 이력이 길어져 눈으로 찾기 어렵다는 운영 지적.
+    const rows = await listAgentCharges({
+      limit: Number(req.query.limit) || 30,
+      agentSendId: typeof req.query.agentSendId === 'string' ? req.query.agentSendId : undefined,
+      startDate: typeof req.query.startDate === 'string' ? req.query.startDate : undefined,
+      endDate: typeof req.query.endDate === 'string' ? req.query.endDate : undefined,
+    });
     const ids = Array.from(new Set(rows.map((r) => r.agentSendId).filter(Boolean)));
     const nameMap = new Map<string, string>();
     if (ids.length > 0) {

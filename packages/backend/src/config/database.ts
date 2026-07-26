@@ -93,4 +93,56 @@ export const mysqlQuery = async (sql: string, params?: any[]) => {
   }
 };
 
+// ============================================================
+//  정산 집계 전용 MySQL 풀 (★ 2026-07-26)
+// ============================================================
+//
+// 왜 나누는가: 정산 집계는 회사당 40~48개 테이블을 훑는다. 이걸 발송 풀에서 병렬로 돌리면
+// **커넥션을 정산이 가져가 그동안 발송·환불 sweeper가 자리를 못 잡는다.**
+// 기간계 발송 시스템에서 월 1회 작업이 실발송을 밀어내면 안 된다.
+//
+// 풀을 나누면 정산이 아무리 병렬로 돌아도 발송 풀(10)은 그대로 10이다.
+// 정산 쪽은 자기 풀 안에서만 경쟁하므로 상한을 올려도 기간계에 닿지 않는다.
+//
+// `connectionLimit`은 MySQL `max_connections`를 넘기지 않는 선에서 잡는다 —
+// 두 풀 합쳐 18이고, 여기에 다른 프로세스(게이트웨이 엔진)가 붙어도 여유가 있다.
+export const MYSQL_BILLING_POOL_LIMIT = Number(process.env.MYSQL_BILLING_POOL_LIMIT) || 8;
+
+export const mysqlBillingPool = mysql.createPool({
+  host: process.env.MYSQL_HOST || 'localhost',
+  port: Number(process.env.MYSQL_PORT) || 3306,
+  database: process.env.MYSQL_DATABASE || 'smsdb',
+  user: process.env.MYSQL_USER || 'smsuser',
+  password: process.env.MYSQL_PASSWORD,
+  waitForConnections: true,
+  connectionLimit: MYSQL_BILLING_POOL_LIMIT,
+  charset: 'utf8mb4',
+});
+
+/** 정산 쿼리 1건 실행 시간 상한(ms). 0 = 미설정. */
+export const MYSQL_BILLING_STMT_TIMEOUT_MS = Number(process.env.MYSQL_BILLING_STMT_TIMEOUT_MS) || 60_000;
+
+/**
+ * 정산 집계 전용 쿼리. **발송 풀을 쓰지 않는다.**
+ *
+ * 한 쿼리가 오래 물고 있으면 정산 풀도 고갈되므로 서버 측 실행 시간 상한을 함께 건다.
+ * 상한에 걸리면 그 발행만 실패하고 발송은 영향을 받지 않는다.
+ * `max_execution_time`은 MySQL 5.7.8+ 세션 변수이고 MariaDB에는 없다 —
+ * 없는 서버에서는 조용히 건너뛴다(상한이 없을 뿐, 쿼리는 정상 실행된다).
+ */
+export const mysqlBillingQuery = async (sql: string, params?: any[]) => {
+  const conn = await mysqlBillingPool.getConnection();
+  try {
+    if (MYSQL_BILLING_STMT_TIMEOUT_MS > 0) {
+      try {
+        await conn.query(`SET SESSION max_execution_time = ${Math.floor(MYSQL_BILLING_STMT_TIMEOUT_MS)}`);
+      } catch { /* MariaDB 등 미지원 서버 — 상한 없이 진행 */ }
+    }
+    const [rows] = await conn.query(sql, params);
+    return rows;
+  } finally {
+    conn.release();
+  }
+};
+
 export default pool;

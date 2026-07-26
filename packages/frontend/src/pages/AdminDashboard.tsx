@@ -386,6 +386,9 @@ const [adminCustDeleteLoading, setAdminCustDeleteLoading] = useState(false);
 const [invoices, setInvoices] = useState<any[]>([]);
 const [invoicesLoading, setInvoicesLoading] = useState(false);
 const [billingToast, setBillingToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+// ★ 2026-07-26 충전관리 서브탭 — 한줄로(웹 선불 잔액)와 에이전트(게이트웨이 지갑)는 **서로 다른 지갑**이다.
+//   한 화면에 세로로 쌓아 두니 스크롤이 길어 어느 지갑을 보고 있는지 헷갈린다는 운영 지적.
+const [chargeScope, setChargeScope] = useState<'web' | 'agent'>('web');
 // ★ 2026-07-26 단가 저장 — 기본정보 저장과 분리한다. 단가는 부가세 기준(unit_price_basis)과
 //   **한 문장에서** 써야 해서 전용 엔드포인트만 쓰고, 저장 즉시 그 회사의 청구·차감 기준이 전환된다.
 const [savingUnitPrices, setSavingUnitPrices] = useState(false);
@@ -4496,11 +4499,37 @@ const handleApproveRequest = async (id: string) => {
           </div>
         )}
 
-        {/* 충전 관리 탭 (통합) */}
+        {/* 충전 관리 탭 — 한줄로 / 에이전트 지갑 분리 (★ 2026-07-26) */}
         {activeTab === 'deposits' && (
           <div className="space-y-4">
+            <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-1.5 flex gap-1.5">
+              {([
+                ['web', '한줄로 충전', '웹 선불 잔액 · 무통장입금 승인'],
+                ['agent', '에이전트 충전', '발송ID(게이트웨이) 지갑'],
+              ] as const).map(([key, label, hint]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setChargeScope(key)}
+                  className={`flex-1 rounded-xl px-4 py-2.5 text-left transition-colors ${
+                    chargeScope === key ? 'bg-indigo-600 text-white' : 'hover:bg-gray-50 text-gray-600'
+                  }`}
+                >
+                  <div className="text-sm font-bold flex items-center gap-2">
+                    {label}
+                    {key === 'web' && pendingDeposits.length > 0 && (
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${chargeScope === key ? 'bg-white/25 text-white' : 'bg-amber-100 text-amber-800'}`}>
+                        대기 {pendingDeposits.length}
+                      </span>
+                    )}
+                  </div>
+                  <div className={`text-[11px] mt-0.5 ${chargeScope === key ? 'text-indigo-100' : 'text-gray-400'}`}>{hint}</div>
+                </button>
+              ))}
+            </div>
+
             {/* 대기 건 알림 */}
-            {pendingDeposits.length > 0 && (
+            {chargeScope === 'web' && pendingDeposits.length > 0 && (
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-lg">⏳</span>
@@ -4537,10 +4566,10 @@ const handleApproveRequest = async (id: string) => {
             )}
 
             {/* ★ 2026-07-24 §5-3 에이전트 충전 실행 — 웹 잔액과 별개 지갑(게이트웨이 원장 직결) */}
-            <AgentChargePanel />
+            {chargeScope === 'agent' && <AgentChargePanel />}
 
-            {/* 전체 잔액 변동 이력 */}
-            <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
+            {/* 전체 잔액 변동 이력 — 한줄로(웹) 지갑 */}
+            <div className={`bg-white rounded-2xl border border-gray-200/70 shadow-sm ${chargeScope === 'web' ? '' : 'hidden'}`}>
               <div className="px-6 py-4 border-b">
                 <div className="flex flex-wrap justify-between items-center gap-3 mb-3">
                   <h2 className="text-lg font-semibold">💰 잔액 변동 이력</h2>
