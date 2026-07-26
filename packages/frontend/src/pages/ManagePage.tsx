@@ -7,8 +7,9 @@ import ScheduledTab from '../components/manage/ScheduledTab';
 import StatsTab from '../components/manage/StatsTab';
 import ManageCustomersTab from '../components/manage/ManageCustomersTab';
 import ManagePurchasesTab from '../components/manage/ManagePurchasesTab';
+import AgentChargeRequestTab from '../components/manage/AgentChargeRequestTab'; // ★ 2026-07-27 §5-4 에이전트 충전 요청
 
-type Tab = 'users' | 'callbacks' | 'scheduled' | 'stats' | 'customers' | 'purchases';
+type Tab = 'users' | 'callbacks' | 'scheduled' | 'stats' | 'customers' | 'purchases' | 'chargeRequest';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'users', label: '사용자' },
@@ -28,6 +29,7 @@ function TabIcon({ k }: { k: Tab }) {
     case 'stats': return <svg {...p}><path d="M3 3v18h18" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" /></svg>;
     case 'customers': return <svg {...p}><path d="M17 21v-2a4 4 0 0 0-3-3.87" /><path d="M9 21v-2a4 4 0 0 0-4-4H4" /><circle cx="9" cy="7" r="4" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>;
     case 'purchases': return <svg {...p}><path d="M16 11V7a4 4 0 0 0-8 0v4M5 9h14l1 12H4L5 9z" /></svg>;
+    case 'chargeRequest': return <svg {...p}><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20" /><path d="M12 15h4" /></svg>;
   }
 }
 
@@ -38,12 +40,18 @@ export default function ManagePage() {
 
   // ★ 2026-07-20 에이전트 전용 회사 = 발송결과(stats)·발신번호(callbacks) 탭만 (Harold 확정 3메뉴 중 2)
   const isAgentOnly = isAgentOnlyCompany(user);
-  const visibleTabs = isAgentOnly
-    ? [
-        { key: 'stats' as Tab, label: '발송결과' },
-        { key: 'callbacks' as Tab, label: '발신번호' },
-      ]
-    : TABS;
+  // ★ 2026-07-27 §5-4 — 발송ID 지갑을 쓰는 회사(에이전트·겸용)에만 충전 요청 탭.
+  //   웹 전용 회사는 무통장입금(대시보드)이 따로 있어 노출하지 않는다.
+  const hasAgentWallet = user?.company?.usageType === 'agent' || user?.company?.usageType === 'both';
+  const visibleTabs: { key: Tab; label: string }[] = [
+    ...(isAgentOnly
+      ? [
+          { key: 'stats' as Tab, label: '발송결과' },
+          { key: 'callbacks' as Tab, label: '발신번호' },
+        ]
+      : TABS),
+    ...(hasAgentWallet ? [{ key: 'chargeRequest' as Tab, label: '충전 요청' }] : []),
+  ];
 
   // ?tab= 초기 탭 (카카오 템플릿 페이지의 3메뉴 네비에서 진입) — 허용 탭만 수용
   const tabParam = searchParams.get('tab') as Tab | null;
@@ -125,6 +133,7 @@ export default function ManagePage() {
         {activeTab === 'stats' && <StatsTab />}
         {activeTab === 'customers' && <ManageCustomersTab />}
         {activeTab === 'purchases' && <ManagePurchasesTab />}
+        {activeTab === 'chargeRequest' && <AgentChargeRequestTab />}
       </div>
     </div>
   );

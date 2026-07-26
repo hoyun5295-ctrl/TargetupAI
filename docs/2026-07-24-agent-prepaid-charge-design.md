@@ -356,8 +356,59 @@ CREATE INDEX IF NOT EXISTS idx_agent_charge_requests_created ON agent_charge_req
 ```
 status 값: reserved(예약) → registered(반영 대기) / uncertain(커밋 응답 유실) → resolve로 registered|not_applied.
 
-### 5-4. 충전 요청 (고객사)
-- 에이전트 업체가 요청 등록 → 직원이 확인 후 5-3으로 실행. 기존 무통장입금 요청(`deposit_requests`) 흐름 재사용 검토.
+### 5-4. 충전 요청 (고객사) — ★2026-07-27 구현 완료 (DDL 대기)
+
+**`deposit_requests` 재사용은 폐기했다.** 그 테이블의 승인 경로는 한줄로 `companies.balance`(웹 지갑)를 올린다.
+에이전트 요청을 같은 테이블에 섞으면 기존 무통장입금 승인 화면이 **게이트웨이 지갑 요청을 웹 잔액으로 잘못 증액**할 수 있다
+(6원칙 ④ — 축이 다르면 테이블도 다르다). 또한 단위가 회사가 아니라 **발송ID**다(런소프트 = C0130·D0078·D0079).
+
+**흐름**
+1. 고객사 `/manage` → **충전 요청** 탭(`usage_type` agent/both + 선불 지정 발송ID 보유 회사에만 노출)
+   → 발송ID·금액·입금자명(+입금일·메모) 등록 = `pending`.
+2. 슈퍼관리자 `AgentChargePanel` 상단 **접수함**에 뜬다 → **[충전 폼에 담기]** 1클릭으로 발송ID·금액·사유가 채워짐
+   → 기존 §5-3 [충전 등록] 그대로 실행. 등록 성공 시 요청은 `processing` + `charge_request_id` 연결.
+3. §5-3 폴링이 **전건 반영(`RsApplyFlag='Y'`)** 을 확인한 순간에만 `fulfilled`. 등록만으로 완료 표시하지 않는다(6원칙 ②).
+4. 반려 = `pending`에서만 가능, **사유 필수**(고객사 화면에 그대로 표시).
+
+**불변 규칙**
+- **요청은 어떤 잔액도 건드리지 않는다.** 증액 경로는 §5-3 하나뿐 — 요청 행은 직원 화면을 채워 주는 대기열일 뿐이다.
+- **고객사 입력은 양수 정수만.** 음수 상계는 내부 회계 조정이라 요청 창구에 열면 고객사 입력으로 차감이 접수된다.
+- 발송ID 소유·`billing_type='prepaid'`는 **서버에서 재검증**(프론트 목록 신뢰 금지 — 남의 발송ID 직접 POST 차단).
+- 같은 발송ID·같은 금액 `pending`이 10분 내 있으면 이중 접수로 차단(같은 금액 반복 입금이 실무에 있어 영구 차단은 안 한다).
+- 테이블 미생성 = 503 `DB_MIGRATION_PENDING`(500 노출 금지).
+- 충전 성공 후 요청 연결에 실패해도 **500을 내지 않는다** — 충전은 이미 확정이라 프론트가 새 키로 재시도하면 이중 충전이 된다.
+
+**코드**: CT `utils/agent-charge-orders.ts`(파싱·상태 전이 판정·라벨) + 계약 테스트 24건 / 고객사 라우트 `routes/agent-charge-orders.ts`(targets·목록·등록)
+/ 슈퍼 `routes/admin.ts`(`GET /agent-charge-orders`·`POST /agent-charge-orders/:id/reject` + `POST /agent-charges`에 `orderIds` 선택 파라미터 + `settleLinkedChargeOrders`)
+/ 프론트 `components/manage/AgentChargeRequestTab.tsx`(신규)·`ManagePage.tsx`(탭)·`AgentChargePanel.tsx`(접수함).
+
+### 5-4 DDL (Harold 실행 — 서버 PG)
+```sql
+CREATE TABLE IF NOT EXISTS agent_charge_orders (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id),
+  agent_send_id varchar(40) NOT NULL,
+  amount numeric(15,2) NOT NULL CHECK (amount > 0),
+  depositor_name varchar(50) NOT NULL,
+  expected_at date,
+  memo varchar(200),
+  status varchar(20) NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending','processing','fulfilled','rejected')),
+  reject_reason varchar(200),
+  charge_request_id uuid REFERENCES agent_charge_requests(id) ON DELETE SET NULL,
+  requested_by varchar(80),
+  resolved_by varchar(80),
+  resolved_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_agent_charge_orders_status ON agent_charge_orders (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_charge_orders_company ON agent_charge_orders (company_id, created_at DESC);
+```
+
+**⛔ 오픈 전 선행 2건**: ①발송ID `billing_type='prepaid'` 지정(현재 283행 전부 postpaid라 요청 탭이 "선불 지정된 발송ID가 없습니다"로만 뜬다)
+②실측 1건(요청 등록 → 담기 → 충전 등록 → `Y` 반영 → `fulfilled` 전이까지 왕복, 6원칙 ⑤).
+
+**미확정(서팀장 확인 대상)**: ①에이전트 업체가 웹으로 요청하길 원하는지(현행은 전화·메일 후 직원 입력) ②에이전트 입금 계좌가 웹 무통장입금과 같은 계좌인지 — **화면에 계좌번호를 넣지 않은 이유** ③승인 권한을 직원 계정까지 열지 여부(현재 슈퍼관리자 전용).
 
 ### 5-5. 고아 발송ID 대조 워커
 - 게이트웨이(충전 이력/통계)에는 있는데 `company_agent_ids`에 없는 ID를 주기적으로 표시(F11의 C0119·D0131이 실증).

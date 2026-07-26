@@ -28,6 +28,8 @@ import {
   queryPayAgentStatsAllCompanies, queryPayAgentStoreBreakdown, validateStatsDateRange, isPayStatsConfigured,
   parseAgentCharges, insertAgentCharges, getAgentChargeStatus, listAgentCharges, countAgentCharges, latestAgentChargeAt, findGatewayCharges, matchHealWindow,
 } from '../utils/pay-stats';
+// ★ 2026-07-27 §5-4: 고객사 충전 요청 접수 원장 (요청 → 직원 1클릭 실행 → 반영 확인 후 완료)
+import { parseRejectReason } from '../utils/agent-charge-orders';
 import { handleDbMigrationError } from '../utils/db-migration-error';
 import { sendSystemAlert } from '../utils/system-alert';
 // ★ 2026-07-24 슈퍼 에이전트 통계 엑셀(CSV) — 기간×고객사×발송ID×유형 (정산 대조)
@@ -3203,6 +3205,30 @@ router.post('/agent-charges', authenticate, requireSuperAdmin, async (req: Reque
       console.error('[agent-charges] 확정 기록 실패(충전은 성공·멱등 예약 유지 — 이력에서 확인 가능):', bookErr);
     }
 
+    // ★ 2026-07-27 §5-4 — 이 실행이 고객사 충전 요청에서 온 것이면 그 요청을 '처리 중'으로 잇는다.
+    //   'fulfilled'(완료)로 바로 넘기지 않는 이유: 지금은 게이트웨이 등록만 끝났고 반영(RsApplyFlag='Y')은
+    //   아직이다. 완료 표시는 status 폴링이 반영을 확인한 뒤에만 한다(6원칙 ②).
+    //   충전은 이미 확정됐으므로 이 연결이 실패해도 500을 내지 않는다 — 실패 시 요청은 pending으로 남고
+    //   운영자가 다시 실행하려 하면 중복 등록이 아니라 "이미 충전됨"을 이력에서 확인하게 된다.
+    if (Array.isArray((req.body as any)?.orderIds) && (req.body as any).orderIds.length > 0) {
+      try {
+        const orderIds = ((req.body as any).orderIds as any[])
+          .map((v) => String(v || '').trim())
+          .filter((v) => /^[0-9a-fA-F-]{36}$/.test(v));
+        if (orderIds.length > 0) {
+          const linked = await query(
+            `UPDATE agent_charge_orders
+                SET status = 'processing', charge_request_id = $2, resolved_by = $3, resolved_at = NOW()
+              WHERE id = ANY($1::uuid[]) AND status = 'pending' AND agent_send_id = ANY($4)`,
+            [orderIds, requestId, requestedBy || null, registered.map((r) => r.agentSendId)]
+          );
+          console.log(`[agent-charges] 충전 요청 ${linked.rowCount ?? 0}건을 처리 중으로 연결 (req ${requestId})`);
+        }
+      } catch (linkErr) {
+        console.error('[agent-charges] 충전 요청 연결 실패(충전은 성공 — 요청은 대기로 남음):', linkErr);
+      }
+    }
+
     // 고액 배치(절대합 5천만+) 즉시 알림 — 단독 운영 통제 보강(Codex 9R). 알림 실패는 충전 결과 무영향
     if (absBatch >= 50_000_000) {
       sendSystemAlert({
@@ -3314,6 +3340,28 @@ router.post('/agent-charges/:requestId/resolve', authenticate, requireSuperAdmin
   }
 });
 
+/**
+ * ★ 2026-07-27 §5-4 — 이 실행에 연결된 고객사 충전 요청을 '완료'로 종결한다.
+ * **전건 반영(applied=true)일 때만** 부른다 — 등록만으로 완료 표시하면 시스템이 거짓말한다(6원칙 ②).
+ * 실패해도 조회 응답을 막지 않는다(다음 폴링이 다시 시도한다).
+ */
+async function settleLinkedChargeOrders(requestId: string, rows: Array<{ applied?: boolean }>): Promise<void> {
+  if (rows.length === 0 || !rows.every((r) => !!r.applied)) return;
+  try {
+    const r = await query(
+      `UPDATE agent_charge_orders
+          SET status = 'fulfilled', resolved_at = NOW()
+        WHERE charge_request_id = $1 AND status = 'processing'`,
+      [requestId]
+    );
+    if ((r.rowCount ?? 0) > 0) {
+      console.log(`[agent-charges] 충전 요청 ${r.rowCount}건 완료 처리 (req ${requestId})`);
+    }
+  } catch (err) {
+    console.error('[agent-charges] 충전 요청 완료 처리 실패(조회는 계속 — 다음 폴링이 재시도):', err);
+  }
+}
+
 // 반영 상태 폴링 — requestId 기준(우리가 발행한 요청의 SeqNo만 조회 — 임의 SeqNo 탐색 차단, Codex 7R).
 // applied=true(RsApplyFlag='Y')만 성공 신호 (6원칙 ②)
 router.get('/agent-charges/status', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
@@ -3356,6 +3404,7 @@ router.get('/agent-charges/status', authenticate, requireSuperAdmin, async (req:
             );
             if ((heal.rowCount ?? 0) > 0) {
               console.log(`[agent-charges] 확정 기록 자가 복구 (req ${requestId} · SeqNo ${inWindow.map((r) => r.seqNo).join(',')})`);
+              await settleLinkedChargeOrders(requestId, inWindow);
               return res.json({ rows: inWindow });
             }
           } catch (healErr) {
@@ -3380,6 +3429,7 @@ router.get('/agent-charges/status', authenticate, requireSuperAdmin, async (req:
       return res.json({ rows: [] });
     }
     const rows = await getAgentChargeStatus(seqNos);
+    await settleLinkedChargeOrders(requestId, rows);
     return res.json({ rows });
   } catch (error: any) {
     console.error('에이전트 충전 상태 조회 실패:', error);
@@ -3424,6 +3474,91 @@ router.get('/agent-charges', authenticate, requireSuperAdmin, async (req: Reques
   } catch (error) {
     console.error('에이전트 충전 이력 조회 실패:', error);
     return res.status(500).json({ error: '이력 조회 실패' });
+  }
+});
+
+// ===== ★ 2026-07-27 §5-4 — 고객사 충전 요청 처리 (슈퍼관리자) =====
+
+// 요청 목록 — 기본 pending. 실행은 이 목록에서 [실행]을 눌러 §5-3 폼이 채워지는 방식이다.
+router.get('/agent-charge-orders', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const status = String(req.query.status || 'pending').trim();
+    const allowed = ['pending', 'processing', 'fulfilled', 'rejected', 'all'];
+    if (!allowed.includes(status)) {
+      return res.status(400).json({ error: '조회할 수 없는 상태입니다.' });
+    }
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 200);
+    const page = Math.max(Number(req.query.page) || 1, 1);
+
+    const where = status === 'all' ? '' : 'WHERE o.status = $1';
+    const params: any[] = status === 'all' ? [] : [status];
+
+    const cnt = await query(`SELECT COUNT(*)::int AS n FROM agent_charge_orders o ${where}`, params);
+    const total = Number(cnt.rows[0]?.n || 0);
+
+    const rows = await query(
+      `SELECT o.id, o.company_id, o.agent_send_id, o.amount, o.depositor_name, o.expected_at,
+              o.memo, o.status, o.reject_reason, o.created_at, o.resolved_at, c.company_name
+         FROM agent_charge_orders o
+         JOIN companies c ON c.id = o.company_id
+         ${where}
+        ORDER BY o.created_at DESC
+        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, (page - 1) * limit]
+    );
+
+    return res.json({
+      rows: rows.rows.map((x: any) => ({
+        id: String(x.id),
+        companyId: String(x.company_id),
+        companyName: x.company_name,
+        agentSendId: String(x.agent_send_id),
+        amount: Number(x.amount),
+        depositorName: x.depositor_name,
+        expectedAt: x.expected_at ? String(x.expected_at).slice(0, 10) : null,
+        memo: x.memo,
+        status: String(x.status),
+        rejectReason: x.reject_reason,
+        createdAt: x.created_at,
+        resolvedAt: x.resolved_at,
+      })),
+      total,
+      page,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    });
+  } catch (error: any) {
+    console.error('충전 요청 목록 조회 실패:', error);
+    if (handleDbMigrationError(error, res, 'agent_charge_orders')) return;
+    return res.status(500).json({ error: '충전 요청 목록 조회 실패' });
+  }
+});
+
+// 요청 반려 — 사유 필수(고객사 화면에 그대로 표시된다). pending만 반려 가능.
+router.post('/agent-charge-orders/:id/reject', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      return res.status(400).json({ error: '요청 id(uuid)가 올바르지 않습니다.' });
+    }
+    const parsed = parseRejectReason(req.body);
+    if ('error' in parsed) return res.status(400).json({ error: parsed.error });
+
+    // status='pending' 가드 = 이미 실행된(processing) 건을 반려로 덮어 회계가 어긋나는 경로 차단
+    const upd = await query(
+      `UPDATE agent_charge_orders
+          SET status = 'rejected', reject_reason = $2, resolved_by = $3, resolved_at = NOW()
+        WHERE id = $1 AND status = 'pending'`,
+      [id, parsed.reason, String((req as any).user?.userId || '') || null]
+    );
+    if ((upd.rowCount ?? 0) === 0) {
+      return res.status(409).json({ error: '접수 대기 상태의 요청만 반려할 수 있습니다. (이미 처리됐거나 반려된 건)' });
+    }
+    console.log(`[agent-charge-orders] 반려 ${id} — ${parsed.reason}`);
+    return res.json({ message: '반려 처리되었습니다.' });
+  } catch (error: any) {
+    console.error('충전 요청 반려 실패:', error);
+    if (handleDbMigrationError(error, res, 'agent_charge_orders')) return;
+    return res.status(500).json({ error: '반려 처리 실패' });
   }
 });
 

@@ -12,6 +12,11 @@ interface Target { company_id: string; company_name: string; agent_send_id: stri
 interface ChargeFormRow { agentSendId: string; amount: string }
 interface RegisteredRow { seqNo: number; agentSendId: string; amount: number; applied: boolean; appliedAt?: string | null }
 interface HistoryRow { seqNo: number; agentSendId: string; amount: number; filledAt: string; applied: boolean; appliedAt: string | null; companyName: string | null }
+// ★ 2026-07-27 §5-4 — 고객사가 올린 충전 요청(접수 대기). 여기서 폼에 담아 그대로 실행한다.
+interface OrderRow {
+  id: string; companyName: string | null; agentSendId: string; amount: number;
+  depositorName: string; expectedAt: string | null; memo: string | null; createdAt: string;
+}
 
 // 금액 입력 정제 — 선행 '-' 하나 + 숫자 + 점 하나만 허용
 const sanitizeAmountInput = (v: string) => {
@@ -62,6 +67,12 @@ export default function AgentChargePanel() {
   const [uncertainHold, setUncertainHold] = useState(false);
   const [uncertainList, setUncertainList] = useState<{ id: string; reason: string; abs_total: any; created_at: string }[]>([]);
   const [resolveNote, setResolveNote] = useState('');
+  // ★ 2026-07-27 §5-4 — 접수 대기 요청. 담은 요청 id는 등록 시 함께 보내 '처리 중'으로 이어진다.
+  //   완료 표시는 서버가 반영(RsApplyFlag='Y')을 확인한 뒤에만 한다.
+  const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [linkedOrderIds, setLinkedOrderIds] = useState<string[]>([]);
+  const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
 
   const token = () => localStorage.getItem('token');
 
@@ -100,9 +111,56 @@ export default function AgentChargePanel() {
     finally { setHistLoading(false); }
   };
 
+  // ★ 2026-07-27 §5-4 — 접수 대기 요청 목록
+  const loadOrders = async () => {
+    try {
+      const res = await fetch('/api/admin/agent-charge-orders?status=pending&limit=50', { headers: { Authorization: `Bearer ${token()}` } });
+      if (res.ok) {
+        const d = await res.json();
+        setOrders(Array.isArray(d.rows) ? d.rows : []);
+      }
+    } catch { /* 요청 목록 로드 실패 시 기존 유지 */ }
+  };
+
+  /** 요청 1건을 충전 폼에 담는다 — 직원이 발송ID·금액을 다시 타이핑하지 않게. */
+  const pickOrder = (o: OrderRow) => {
+    setErrorMsg('');
+    if (linkedOrderIds.includes(o.id)) return;
+    setRows((prev) => {
+      const blank = prev.findIndex((r) => !r.agentSendId && !r.amount);
+      const next = { agentSendId: o.agentSendId, amount: String(o.amount) };
+      if (blank >= 0) return prev.map((r, i) => (i === blank ? next : r));
+      return prev.length < 50 ? [...prev, next] : prev;
+    });
+    setLinkedOrderIds((prev) => [...prev, o.id]);
+    setReason((prev) => prev || `고객사 충전 요청 — ${o.depositorName} 입금분`);
+  };
+
+  const rejectOrder = async (id: string) => {
+    const reason = rejectReason.trim();
+    if (!reason) { setErrorMsg('반려 사유를 입력하세요. (고객사 화면에 그대로 표시됩니다)'); return; }
+    try {
+      const res = await fetch(`/api/admin/agent-charge-orders/${id}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ reason }),
+      });
+      const d = await res.json();
+      if (!res.ok) { setErrorMsg(d.error || '반려 처리 실패'); return; }
+      setRejectTargetId(null);
+      setRejectReason('');
+      setErrorMsg('');
+      setLinkedOrderIds((prev) => prev.filter((x) => x !== id));
+      loadOrders();
+    } catch {
+      setErrorMsg('네트워크 오류 — 반려 처리를 다시 시도하세요.');
+    }
+  };
+
   useEffect(() => {
     loadTargets();
     loadHistory();
+    loadOrders();
     return () => { if (pollTimer.current) clearInterval(pollTimer.current); };
   }, []);
 
@@ -189,6 +247,8 @@ export default function AgentChargePanel() {
     const payload = {
       reason: reason.trim(),
       charges: cleaned.map((r) => ({ agentSendId: r.agentSendId, amount: Number(r.amount) })),
+      // ★ 2026-07-27 §5-4 — 폼에 담은 고객사 요청. 서버가 등록 성공 후 '처리 중'으로 잇는다.
+      ...(linkedOrderIds.length > 0 ? { orderIds: linkedOrderIds } : {}),
     };
     const payloadJson = JSON.stringify(payload);
     const idempotencyKey =
@@ -230,6 +290,8 @@ export default function AgentChargePanel() {
         const reg: RegisteredRow[] = (d.registered || []).filter((r: any) => Number.isInteger(r?.seqNo));
         setRows([{ agentSendId: '', amount: '' }]);
         setReason('');
+        setLinkedOrderIds([]);
+        loadOrders(); // 담았던 요청이 '처리 중'으로 빠졌는지 목록 갱신
         if (d.duplicated) {
           // 이미 접수된 요청 — 반영 확인이 안 끝났을 수 있으니 폴링 재개(Codex 8R-4).
           // 단 다른 배치가 확인 중이면 그 폴러를 뺏지 않는다(Codex 9R-4 — 이력에서 확인 안내).
@@ -314,6 +376,76 @@ export default function AgentChargePanel() {
           </select>
         </div>
       </div>
+
+      {/* ★ 2026-07-27 §5-4 — 고객사 충전 요청 접수함. 담으면 아래 폼이 채워지고, 등록 후 반영되면 자동 완료 처리된다. */}
+      {orders.length > 0 && (
+        <div className="px-6 pt-4">
+          <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-amber-800">
+                고객사 충전 요청 {orders.length}건 대기
+              </p>
+              <button type="button" onClick={loadOrders} className="text-[11px] text-amber-600 hover:text-amber-800">
+                새로고침
+              </button>
+            </div>
+            <div className="space-y-1.5">
+              {orders.map((o) => (
+                <div key={o.id} className="rounded-lg bg-white border border-amber-100 px-3 py-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0 text-xs text-gray-600">
+                      <span className="font-medium text-gray-800">{o.companyName || '(회사 미상)'}</span>
+                      <span className="mx-1.5 text-gray-300">·</span>
+                      <span className="font-mono">{o.agentSendId}</span>
+                      <span className="mx-1.5 text-gray-300">·</span>
+                      <span className="font-semibold tabular-nums text-gray-800">{o.amount.toLocaleString()}원</span>
+                      <span className="mx-1.5 text-gray-300">·</span>
+                      <span>입금자 {o.depositorName}</span>
+                      {o.expectedAt && <span className="ml-1.5 text-gray-400">({o.expectedAt} 입금)</span>}
+                    </div>
+                    <span className="flex gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => pickOrder(o)}
+                        disabled={linkedOrderIds.includes(o.id)}
+                        className="px-2.5 py-1 text-xs border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 disabled:border-gray-200 disabled:text-gray-300 disabled:hover:bg-transparent"
+                      >
+                        {linkedOrderIds.includes(o.id) ? '담김' : '충전 폼에 담기'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setRejectTargetId(rejectTargetId === o.id ? null : o.id); setRejectReason(''); }}
+                        className="px-2.5 py-1 text-xs border border-gray-300 text-gray-500 rounded-lg hover:bg-gray-50"
+                      >
+                        반려
+                      </button>
+                    </span>
+                  </div>
+                  {o.memo && <p className="mt-1 text-[11px] text-gray-400">메모: {o.memo}</p>}
+                  {rejectTargetId === o.id && (
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={rejectReason}
+                        onChange={(e) => setRejectReason(e.target.value.slice(0, 200))}
+                        placeholder="반려 사유 (고객사 화면에 그대로 표시됩니다)"
+                        className="flex-1 min-w-[200px] px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-gray-400 outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => rejectOrder(o.id)}
+                        className="px-2.5 py-1.5 text-xs bg-gray-700 hover:bg-gray-800 text-white rounded-lg shrink-0"
+                      >
+                        반려 확정
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="px-6 py-4 space-y-2">
         {rows.map((r, idx) => (

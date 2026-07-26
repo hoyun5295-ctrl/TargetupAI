@@ -73,6 +73,8 @@
 | 56 | company_agent_ids | 에이전트(QTmsg) 발송ID ↔ 회사 매핑 (2026-07-03 신설) |
 | 57 | customer_send_stats | 고객별 발송 누적 카운터 (2026-07-03 신설 — 예측 분모 전용. customer_id PK(FK customers CASCADE), company_id(idx), total_sent, last_sent_at. 고객당 1행) |
 | 58 | customer_send_stats_marks | 발송 카운터 캠페인 멱등 마커 (2026-07-03 신설 — campaign_ref varchar(120) PK, 재시도 중복 카운트 차단) |
+| 59 | agent_charge_requests | 에이전트 충전 **실행** 요청 원장 (2026-07-24 §5-3 신설·DDL 적용완료 — 멱등키 UNIQUE·감사. 게이트웨이 잔액/반영의 진실은 여전히 62 `RSRM_FillAmtHist`) |
+| 60 | agent_charge_orders **(2026-07-27 CREATE 대기)** | 에이전트 충전 **요청**(고객사 접수) — §5-4. 웹 `deposit_requests`와 축이 달라 별도 테이블(승인 시 올라가는 지갑이 다르다) |
 | - | ai_training_logs | 문안 학습 로그 (회사별 tenant_ref HMAC 격리). ★ 2026-07-03 실측: `ck_training_message_type` CHECK = message_type IN ('SMS','LMS','MMS','KAKAO','EMAIL','DM') — DM 추가(전 채널 학습 통합 Phase 1). 적재=fire-and-forget 격리(발송 무영향), source_ref 멱등 |
 | - | ai_training_logs **(2026-07-04 ADD 대기)** | `click_count int` · `conversion_count int` — Tier1 반응 신호(DM·이메일 클릭 환류, 랭커/검색기 클릭 우선 정렬). 코드 42703 폴백이라 미실행 무영향. `ALTER TABLE ai_training_logs ADD COLUMN click_count integer; ADD COLUMN conversion_count integer;` |
 | - | best_copy_seed_usage **(2026-07-04 CREATE 대기)** | 시드 사용 기록(성과 환류). `id bigserial PK, seed_id uuid, tenant_ref varchar(64)=getTenantRef, channel varchar(10), used_at timestamptz`. INDEX(seed_id),(tenant_ref,used_at). 코드 42P01 폴백(미생성 무영향) |
@@ -326,7 +328,7 @@
 | cost_per_test_sms | numeric | ★ 실측 |
 | cost_per_test_lms | numeric | ★ 실측 |
 | cost_per_spam_filter | numeric | ★ 실측 — **코드 소비처 0건(사장 컬럼)**. 스팸필터는 `cost_per_sms/lms`를 그대로 쓴다(D16) |
-| unit_price_basis | varchar(20) NOT NULL DEFAULT 'vat_included' | ★ 2026-07-26 ALTER 적용 — **`cost_per_*` 값이 부가세 포함인가 별도인가.** `vat_included`(전환 전, 기존 77사) / `vat_excluded`(단가설정 모달로 재입력 완료). 청구는 공급가, 선불 차감·화면 표시는 부가세 포함가를 쓰는데 그 변환 방향을 이 값이 정한다. 전 회사 전환 완료 시 `vat_included` 분기와 함께 제거 대상. CT=`utils/unit-price.ts` |
+| unit_price_basis | varchar(20) NOT NULL DEFAULT `'vat_excluded'` | ★ 2026-07-26 ALTER 적용 — **`cost_per_*` 값이 부가세 포함인가 별도인가.** `vat_included`(전환 전 값) / `vat_excluded`(공급가 — 전 77사 마이그레이션 완료). 청구는 공급가, 선불 차감·화면 표시는 부가세 포함가를 쓰는데 그 변환 방향을 이 값이 정한다. 전 회사 전환 완료 시 `vat_included` 분기와 함께 제거 대상. CT=`utils/unit-price.ts`<br>**DEFAULT 실측 = `'vat_excluded'`** (2026-07-27 `information_schema.columns.column_default` 확인 — 신규 회사가 공급가 기준으로 생성된다. 옛 기재 `DEFAULT 'vat_included'`는 마이그레이션 전 값이라 정정) |
 | business_category | varchar | ★ 실측 |
 | business_item | varchar | ★ 실측 |
 | allow_callback_self_register | boolean | ★ 실측 |
@@ -1674,6 +1676,44 @@
 | confirmed_at | timestamptz | |
 | admin_note | text | 관리자 메모 |
 | created_at | timestamptz | |
+
+> **⛔ 이 테이블에 에이전트(발송ID) 충전을 섞지 말 것** — 승인 경로가 `companies.balance`(웹 지갑)를 올린다. 에이전트 지갑은 게이트웨이 `RSRM_FillAmtHist`라 아래 `agent_charge_orders`로 분리돼 있다.
+
+### agent_charge_requests (에이전트 충전 **실행** 요청 원장)
+> ★ 2026-07-24 §5-3 신설 — DDL 적용 완료(운영 실존 확인 2026-07-27). 슈퍼관리자가 게이트웨이 지갑에 INSERT한 **실행 단위**의 멱등·감사 원장이다.
+> 잔액·반영 상태의 진실은 여기가 아니라 62 `pay-ingest-db`의 `RSRM_FillAmtHist`(복제 금지 — 6원칙 ③).
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK DEFAULT gen_random_uuid() | |
+| idempotency_key | varchar(80) NOT NULL **UNIQUE** | 재전송·더블클릭·응답 유실 재시도에서 이중 충전을 막는 유일 장치 |
+| requested_by | varchar(80) | 실행한 슈퍼관리자 |
+| reason | varchar(200) NOT NULL | 충전 사유(감사) |
+| charges | jsonb NOT NULL DEFAULT '[]' | `[{seqNo, agentSendId, amount, applied}]` — 게이트웨이 SeqNo 연결 |
+| total_amount / abs_total | numeric NOT NULL | 순합 / 절대합(일 한도·고액 알림 판정) |
+| status | varchar(20) NOT NULL DEFAULT 'reserved' | reserved(예약) → registered(반영 대기) / uncertain(커밋 응답 유실) → resolve로 registered\|not_applied |
+| resolved_by / resolved_at / resolve_note | varchar(80) / timestamptz / varchar(200) | 불확실 해소 감사 |
+| created_at | timestamptz NOT NULL DEFAULT now() | INDEX(created_at DESC) |
+
+### agent_charge_orders (에이전트 충전 **요청** — 고객사 접수) **(2026-07-27 CREATE 대기)**
+> ★ 2026-07-27 §5-4 신설. 고객사가 "입금했으니 충전해 달라"를 올리는 접수 원장. **이 테이블은 어떤 잔액도 움직이지 않는다** — 증액은 §5-3 실행 경로 하나뿐이고, 여기 행은 직원이 그 화면을 1클릭으로 채우게 해주는 대기열이다.
+> 상태 전이: `pending` → `processing`(실행 접수·`charge_request_id` 연결) → `fulfilled`(게이트웨이 `RsApplyFlag='Y'` 확인 후에만) / `pending` → `rejected`(사유 필수).
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK DEFAULT gen_random_uuid() | |
+| company_id | uuid NOT NULL FK companies | 요청 회사 |
+| agent_send_id | varchar(40) NOT NULL | 충전 대상 발송ID (회사 아님 — 한 회사가 서버별로 여럿 보유) |
+| amount | numeric(15,2) NOT NULL CHECK (amount > 0) | **양수만**(상계·차감은 내부 전용이라 요청 창구에서 차단) |
+| depositor_name | varchar(50) NOT NULL | 입금자명 |
+| expected_at | date NULL | 입금(예정)일 |
+| memo | varchar(200) NULL | 고객사 메모 |
+| status | varchar(20) NOT NULL DEFAULT 'pending' CHECK (pending/processing/fulfilled/rejected) | |
+| reject_reason | varchar(200) NULL | 반려 사유 — 고객사 화면에 그대로 표시 |
+| charge_request_id | uuid NULL FK agent_charge_requests **ON DELETE SET NULL** | 실행 단위 연결 |
+| requested_by / resolved_by | varchar(80) NULL | 요청자 / 처리자 |
+| created_at | timestamptz NOT NULL DEFAULT now() | INDEX(status, created_at DESC) · INDEX(company_id, created_at DESC) |
+| resolved_at | timestamptz NULL | |
 
 ### analysis_results (AI 분석 결과 캐시)
 | 컬럼 | 타입 | 설명 |
