@@ -7,6 +7,7 @@
  *   --setup-cli          → 설치 마법사 강제 CLI (터미널)
  *   --edit-config        → 설정 편집 (대화형 CLI)
  *   --show-config        → 현재 설정 조회 (민감정보 마스킹)
+ *   --test-db            → DB 접속 진단 (비대화형·읽기 전용, 설정 저장 안 함)
  *   --install-service    → 서비스 설치 (Windows 작업 스케줄러 / Linux systemd)
  *   --uninstall-service  → 서비스 제거
  *   --service-status     → 서비스 상태 확인
@@ -80,6 +81,19 @@ else if (args.includes('--config-status')) {
     console.log(r.exists ? `configured (${r.source})` : 'not-configured');
     process.exit(r.exists ? 0 : 1);
   }).catch(() => process.exit(1));
+}
+
+// ─── DB 접속 진단 (비대화형) ────────────────────────────
+// ★ 2026-07-28: 설치 마법사는 대화형이라 스크립트로 몰 수 없다(입력이 밀린다).
+//   조합 검증과 현장 원인 확인을 한 줄로 끝내기 위한 읽기 전용 진단.
+//   설정을 저장하지도, Agent를 띄우지도 않는다.
+else if (args.includes('--test-db')) {
+  import('./setup/test-db').then(({ runTestDb }) => {
+    runTestDb(args);
+  }).catch((e) => {
+    console.error(`[TEST-DB] 진단 모듈 로드 실패: ${e instanceof Error ? e.message : e}`);
+    process.exit(1);
+  });
 }
 
 // ─── 설정 편집 / 조회 ──────────────────────────────────

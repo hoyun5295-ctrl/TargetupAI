@@ -7,6 +7,9 @@
 
 ## 핵심 원칙
 
+- **nginx `location = /` 에 `alias`를 쓰면 500** (2026-07-28, invitobiz 종료 안내) — URI가 `/`로 끝나 nginx가 alias 대상을 디렉터리로 보고 뒤에 `/`를 덧붙인다. 같은 서버의 `location = /transition { alias …html; }`은 URI가 슬래시로 안 끝나서 되던 것이라 "되던 패턴"으로 착각하기 쉽다. **루트에 단일 파일을 물릴 때는 `root` + `try_files /파일 =404;`**. 반영 전 `nginx -t`는 통과하므로(문법은 정상) 반드시 실제 응답 코드로 확인한다.
+- **대화형 셸에 붙여넣는 heredoc에 탭을 넣지 마라** (2026-07-28, 레거시 143) — readline이 탭을 **파일명 자동완성**으로 처리해 완성 목록이 입력에 섞이고 파일이 조용히 오염된다. **셸 종류 문제가 아니다** — 143은 bash인데도 발생했다(`$(date …)` 치환이 정상 동작하는 것으로 확인. 프롬프트가 `[user@dir]` 커스텀이라 csh로 오인하기 쉽다). 들여쓰기는 **공백으로만** 하고, 쓴 뒤 `cat`으로 육안 확인한다. 같은 세션에서 공백 heredoc은 전부 정상이었고 탭을 쓴 것만 깨졌다.
+- **`grep tomcat6`은 `tomcat6_b`도 잡는다** (2026-07-28) — 143에서 8080=PAY(`/usr/local/tomcat6`) / 8070=invitobiz(`/usr/local/tomcat6_b`)로 **완전히 다른 톰캣**이다. 정지 판정은 프로세스 이름이 아니라 `catalina.base` 값과 `netstat` 포트로 한다.
 - **`atomic safe-build` 강제** — `npm run build:safe` 만 허용. `tp-deploy-full` 절대 금지 (D145 9시간 사고)
 - **AI SSH 직접 실행 절대 금지** — D93 IP 차단 사고
 - **`sudo` 안내 절대 금지** — root 권한 = Harold 본인 직접 진입
