@@ -885,6 +885,24 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       return 'failed';
     }
 
+    // ★ 2026-07-27 실적재 테이블 기록 — 직접발송(direct-send-worker)이 0611 사고 후 넣은 안전장치를
+    //   여정만 갖고 있지 않았다(실측: 여정 campaign의 send_config가 비어 있음).
+    //   라인그룹이 나중에 재배정되면 "이 발송이 어느 테이블에 들어갔는지" 알 방법이 사라져,
+    //   집계·결과조회·안전망이 발송 당시 라인을 못 찾는다(에이치피오 취소 미삭제와 같은 뿌리).
+    //   공유 campaign(여정·step·일당 1건)에 기록하므로 배치마다 덮어써도 값은 동일하다.
+    //   실패해도 발송은 계속한다 — 기록은 추적용이지 발송 조건이 아니다.
+    try {
+      await query(
+        `UPDATE campaigns
+            SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{sentTables}', $1::jsonb),
+                updated_at = NOW()
+          WHERE id = $2::uuid`,
+        [JSON.stringify(tables), campaignId],
+      );
+    } catch (cfgErr: any) {
+      console.error(`[JourneyExecutor] sentTables 기록 실패 campaign=${campaignId}:`, cfgErr?.message || cfgErr);
+    }
+
     if (isKakao && kakaoTemplateRow) {
       // 알림톡 영역 — insertAlimtalkQueue 사용. buttons → buttonJson 변환.
       const buttonJson = convertButtonsToQTmsg(kakaoTemplateRow.buttons || []);
