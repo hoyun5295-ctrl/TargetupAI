@@ -33,6 +33,31 @@ function kstDateString(): string {
 }
 
 /**
+ * `campaigns.message_type` CHECK 제약이 허용하는 값 — 2026-07-27 `pg_constraint` 실측.
+ * 이 목록 밖 값을 넣으면 INSERT가 통째로 깨진다(값이 조용히 무시되는 게 아니다).
+ */
+const CAMPAIGN_MESSAGE_TYPES = new Set(['SMS', 'LMS', 'MMS', 'KMS', 'FMS', 'GMS']);
+
+/**
+ * (순수) 발송 유형 → `campaigns.message_type` 저장값.
+ *
+ * ★ 2026-07-27 여정 알림톡 전건 실패 정정.
+ * 여정 실행기가 알림톡 step에서 `'KAKAO'`를 넣어 `campaigns_message_type_check` 위반으로
+ * INSERT가 깨졌고, 6건이 5분마다 재시도하며 발송이 하나도 안 나갔다(step_logs 0건).
+ *
+ * 이 시스템은 **카카오를 `message_type`이 아니라 `send_channel`로 구분**한다 —
+ * 운영 실측: 알림톡 102건이 전부 `message_type='LMS'` + `send_channel='alimtalk'`,
+ * 브랜드메시지도 `'LMS'` + `'kakao_brand'`. 여정만 다른 축을 쓰고 있었다.
+ *
+ * 과금·큐·학습 축의 `'KAKAO'`는 그대로 둔다 — 바뀌는 건 campaigns에 저장하는 값 하나뿐이다.
+ * 허용값 밖은 `'LMS'`로 안전 변환한다(이미지 불필요한 유형 — `toQtmsgType`의 안전 기본값과 같은 정신).
+ */
+export function toCampaignMessageType(msgType: string): string {
+  const t = String(msgType ?? '').trim().toUpperCase();
+  return CAMPAIGN_MESSAGE_TYPES.has(t) ? t : 'LMS';
+}
+
+/**
  * (journey, step, 오늘 KST)당 campaign find-or-create. 매핑 테이블 ON CONFLICT로 동시 진입에도 1건만.
  */
 export async function getOrCreateStepCampaign(spec: StepCampaignSpec): Promise<string> {
@@ -58,7 +83,8 @@ export async function getOrCreateStepCampaign(spec: StepCampaignSpec): Promise<s
     [
       spec.companyId,
       `[여정] step ${spec.stepOrder}`,
-      spec.msgType,
+      // 알림톡(KAKAO)은 CHECK 허용값이 아니다 — 카카오 구분은 아래 send_channel이 담당한다.
+      toCampaignMessageType(spec.msgType),
       spec.representativeMessage,
       spec.subject,
       spec.isAd,

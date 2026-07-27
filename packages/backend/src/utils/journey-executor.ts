@@ -195,7 +195,28 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
         else if (outcome === 'failed') summary.failed++;
       } catch (err: any) {
         summary.failed++;
-        console.error(`[JourneyExecutor] execution=${row.execution_id} 처리 실패:`, err?.message || err);
+        const reason = err?.message || String(err);
+        console.error(`[JourneyExecutor] execution=${row.execution_id} 처리 실패:`, reason);
+        // ★ 2026-07-27 실패를 실행행에도 남긴다.
+        //   전에는 PM2 로그에만 찍혀서, 화면에서는 `error_count=0`·`error_log=[]`인 채로
+        //   6건이 5분마다 조용히 실패만 반복했다(여정 알림톡 CHECK 위반 건에서 실측).
+        //   로그를 못 보는 사람에겐 "이유 없이 안 나가는" 상태가 된다 — 원인을 데이터에 남겨야 한다.
+        //   ⚠ 기록 자체가 실패해도 워커 루프는 멈추지 않는다(다음 실행행 처리가 우선).
+        try {
+          await query(
+            `UPDATE journey_executions
+                SET error_count = COALESCE(error_count, 0) + 1,
+                    last_error_at = NOW(),
+                    error_log = COALESCE(error_log, '[]'::jsonb) || $2::jsonb
+              WHERE id = $1::uuid`,
+            [
+              row.execution_id,
+              JSON.stringify([{ at: new Date().toISOString(), stage: 'process_execution', reason: reason.slice(0, 500) }]),
+            ]
+          );
+        } catch (logErr: any) {
+          console.error(`[JourneyExecutor] execution=${row.execution_id} 실패 기록 실패:`, logErr?.message || logErr);
+        }
       }
     }
 
