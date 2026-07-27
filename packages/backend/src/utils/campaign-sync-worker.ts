@@ -137,8 +137,16 @@ async function notifyJourneyResultsToManagers(): Promise<void> {
             j.name AS journey_name,
             s.id AS step_id, s.step_order, s.notify_manager_on_pretest, s.channel,
             (SELECT COUNT(*) FROM journey_steps WHERE journey_id = e.journey_id AND COALESCE(step_type,'message')='message') AS total_steps,
-            (SELECT COUNT(*) FROM journey_step_logs jsl WHERE jsl.execution_id = e.id AND jsl.status = 'sent') AS success_count,
-            (SELECT COUNT(*) FROM journey_step_logs jsl WHERE jsl.execution_id = e.id AND jsl.status = 'failed') AS failed_count
+            -- ★ 2026-07-27 정정: step_logs의 'sent'는 **큐 적재 성공** 마커지 도달 결과가 아니다.
+            --   이 값을 성공 건수로 쓰던 탓에 알림톡이 차단된 번호까지 "성공"으로 보고됐다
+            --   (직원 실측: 실제 5성공 + 1대기인데 "성공 6건"으로 통보). 6원칙 ② 위반.
+            --   여기서는 적재 건수로만 쓰고, 성공/실패/대기는 공유 campaign의 실결과에서 가져온다.
+            (SELECT COUNT(*) FROM journey_step_logs jsl WHERE jsl.execution_id = e.id AND jsl.status = 'sent') AS queued_count,
+            (SELECT jsl.campaign_id FROM journey_step_logs jsl
+              WHERE jsl.execution_id = e.id AND jsl.status = 'sent' AND jsl.campaign_id IS NOT NULL
+              ORDER BY jsl.sent_at DESC LIMIT 1) AS campaign_id,
+            j.created_by AS journey_created_by,
+            EXTRACT(EPOCH FROM (NOW() - e.completed_at)) AS completed_ago_sec
        FROM journey_executions e
        JOIN journeys j ON j.id = e.journey_id
        JOIN journey_steps s ON s.journey_id = e.journey_id AND s.step_order = e.current_step_order
@@ -215,19 +223,61 @@ async function notifyJourneyResultsToManagers(): Promise<void> {
         continue;
       }
 
-      // 묶음 합계 — 대상 인원과 성공/실패 건수를 함께 보여준다.
       const targetCount = rows.length;
-      const successCount = rows.reduce((s, r) => s + Number(r.success_count || 0), 0);
-      const failedCount = rows.reduce((s, r) => s + Number(r.failed_count || 0), 0);
+
+      // ★ 2026-07-27 성공/실패/대기는 **공유 campaign의 실결과**에서 가져온다(6원칙 ②).
+      //   옛 코드는 journey_step_logs의 'sent'(=큐 적재 성공)를 성공으로 세어,
+      //   알림톡이 차단된 번호까지 "성공"으로 보고했다(직원 실측: 실제 5성공+1대기 → "성공 6건").
+      //   발송결과 화면·정산이 쓰는 집계 함수를 그대로 써서 같은 숫자를 보게 한다.
+      const campaignId = rows.map((r) => r.campaign_id).find((v) => !!v) || null;
+      let successCount = 0;
+      let failedCount = 0;
+      let pendingCount = 0;
+      let countsKnown = false;
+      if (campaignId) {
+        try {
+          const tables = await getCompanySmsTablesWithLogs(head.company_id, head.journey_created_by || undefined);
+          if (tables.length > 0) {
+            const agg = await smsCampaignCountsSafe(tables, [campaignId]);
+            const c = agg.get(String(campaignId));
+            if (c) {
+              successCount = Number(c.success || 0);
+              failedCount = Number(c.fail || 0);
+              pendingCount = Number(c.pending || 0);
+              countsKnown = true;
+            }
+          }
+        } catch (aggErr) {
+          log('여정 결과 집계 실패 campaign=' + campaignId + ':', aggErr instanceof Error ? aggErr.message : aggErr);
+        }
+      }
+
+      // 결과가 아직 안 나왔거나 대기가 남아 있으면 **알리지 않는다**.
+      //   result_notified_at을 찍지 않으므로 다음 5분 주기에 다시 본다 = 확정 후 1통.
+      //   무한 보류는 막는다 — 완료 후 2시간(조회 윈도우와 동일)이 지나면 대기 건수를 밝히고 보낸다.
+      const agedSec = Number(head.completed_ago_sec || 0);
+      const AGED_LIMIT_SEC = 2 * 60 * 60;
+      if (!countsKnown && agedSec < AGED_LIMIT_SEC) {
+        log('여정 결과 집계 전 — 알림 보류 journey=' + head.journey_name + ' step=' + stepOrder);
+        continue;
+      }
+      if (countsKnown && pendingCount > 0 && agedSec < AGED_LIMIT_SEC) {
+        log('여정 결과 대기 ' + pendingCount + '건 — 알림 보류 journey=' + head.journey_name + ' step=' + stepOrder);
+        continue;
+      }
+
       const isLastStep = stepOrder === totalSteps;
+      const resultLine = countsKnown
+        ? '성공: ' + successCount + '건 / 실패: ' + failedCount + '건' + (pendingCount > 0 ? ' / 대기: ' + pendingCount + '건' : '')
+        : '결과 집계 전 — 발송결과 화면에서 확인해 주세요';
       const lmsBody = [
-        `[여정 발송 결과]`,
-        ``,
-        `여정: ${head.journey_name || '여정 자동 발송'}`,
-        `step ${stepOrder} / ${totalSteps} ${isLastStep ? '(최종)' : ''}`,
-        `대상: ${targetCount}명`,
-        `성공: ${successCount}건 / 실패: ${failedCount}건`,
-        ``,
+        '[여정 발송 결과]',
+        '',
+        '여정: ' + (head.journey_name || '여정 자동 발송'),
+        'step ' + stepOrder + ' / ' + totalSteps + ' ' + (isLastStep ? '(최종)' : ''),
+        '대상: ' + targetCount + '명',
+        resultLine,
+        '',
         isLastStep ? '여정 완료 — 다음 step 없음' : '다음 step 자동 진행 예정',
       ].join('\n');
 
@@ -251,7 +301,7 @@ async function notifyJourneyResultsToManagers(): Promise<void> {
       );
 
       await markNotified(rows);
-      log(`✓ 여정 결과 LMS 발송 journey=${head.journey_name} step=${stepOrder} 대상 ${targetCount}명 (성공 ${successCount}/실패 ${failedCount})`);
+      log(`✓ 여정 결과 LMS 발송 journey=${head.journey_name} step=${stepOrder} 대상 ${targetCount}명 (성공 ${successCount}/실패 ${failedCount}/대기 ${pendingCount})`);
     } catch (oneErr: any) {
       log(`✗ 여정 결과 알림 묶음 사고 ${key}:`, oneErr?.message || oneErr);
     }
