@@ -53,6 +53,7 @@ import UploadResultModal from '../components/UploadResultModal';
 import { useAuthStore } from '../stores/authStore';
 import { formatDate, formatPreviewValue, formatByType, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl, resolveRecipientCallback, buildAdMessageFront, validateMmsBeforeSend, getMaxByteMessage, cellToString } from '../utils/formatDate';
 import { insertAtCursorOrAppend } from '../utils/textInsert';
+import { formatAgentIdLabel, formatAgentBalance } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스
 // ★ 2026-07-02 특수문자 세트 컨트롤타워 (MessageEditorModal과 공유 — 목록 변경은 utils/smsSafeChars.ts 1곳)
 import { SMS_SAFE_CHARS } from '../utils/smsSafeChars';
 import { getMmsImagePath, getMmsImageDisplayName, toMmsImagePaths, type MmsImageItem } from '../utils/mmsImage';
@@ -212,7 +213,7 @@ export default function Dashboard() {
   const [balanceInfo, setBalanceInfo] = useState<{billingType: string, balance: number, costPerSms: number, costPerLms: number, costPerMms: number, costPerKakao: number} | null>(null);
   // ★ 2026-07-24 §5-2 에이전트(게이트웨이) 선불 발송ID별 잔액 — 웹 잔액과 다른 지갑. 빈 배열 = 미노출.
   //   remAmt null = 집계 전(금액 미확정 — 0원과 구분해 표시)
-  const [agentBalances, setAgentBalances] = useState<{agentSendId: string; remAmt: number | null; asOfDate: string}[]>([]);
+  const [agentBalances, setAgentBalances] = useState<{agentSendId: string; custName: string | null; remAmt: number | null}[]>([]);
   const [showBalanceModal, setShowBalanceModal] = useState(false);
   const [showChargeModal, setShowChargeModal] = useState(false);
   const [chargeStep, setChargeStep] = useState<'select' | 'deposit'>('select');
@@ -1141,8 +1142,10 @@ export default function Dashboard() {
               .filter((b: any) => b && typeof b.agentSendId === 'string' && b.agentSendId.trim())
               .map((b: any) => ({
                 agentSendId: String(b.agentSendId),
+                // ★ 2026-07-27 발급명(게이트웨이 원장) — 없으면 발송ID만. 문자열이 아닌 값은 버린다.
+                custName: typeof b.custName === 'string' && b.custName.trim() ? b.custName : null,
+                // 잔액 = 원장 실시간값. 기준일 축은 폐기(옛 일별 통계 스냅샷의 잔재).
                 remAmt: typeof b.remAmt === 'number' && Number.isFinite(b.remAmt) ? b.remAmt : null,
-                asOfDate: typeof b.asOfDate === 'string' ? b.asOfDate : '',
               }))
           );
         })
@@ -2440,19 +2443,18 @@ const campaignData = {
                   <div className="mt-2 rounded-lg border border-emerald-100/80 bg-gradient-to-r from-emerald-50/60 to-teal-50/30 px-3.5 py-2.5">
                     <div className="mb-1.5 flex items-center justify-between">
                       <span className="text-xs font-medium text-gray-500">에이전트 발송 잔액</span>
-                      <span className="text-[10px] italic text-gray-300">Data source — 발송 게이트웨이 일별 잔액</span>
+                      <span className="text-[10px] italic text-gray-300">Data source — 발송 게이트웨이 계정 원장 실시간 잔액</span>
                     </div>
                     <div className="space-y-1">
                       {agentBalances.map((b) => (
                         <div key={b.agentSendId} className="flex items-center justify-between">
-                          <span className="text-xs tabular-nums text-gray-500">{b.agentSendId}</span>
+                          <span className="text-xs tabular-nums text-gray-500">{formatAgentIdLabel(b.agentSendId, b.custName)}</span>
                           {b.remAmt === null ? (
-                            <span className="text-[10px] text-gray-400">집계 전 — 잔액 미확인</span>
+                            <span className="text-[10px] text-gray-400">잔액 확인 불가</span>
                           ) : (
                             <span className="flex items-baseline gap-1.5">
-                              {b.asOfDate && <span className="text-[10px] text-gray-400">{b.asOfDate} 기준</span>}
                               <span className={`text-sm font-bold tabular-nums ${b.remAmt < 10000 ? 'text-rose-500' : 'text-gray-800'}`}>
-                                {Math.floor(b.remAmt).toLocaleString()}<span className="text-[10px] font-normal text-gray-400">원</span>
+                                {formatAgentBalance(b.remAmt)}<span className="text-[10px] font-normal text-gray-400">원</span>
                               </span>
                             </span>
                           )}

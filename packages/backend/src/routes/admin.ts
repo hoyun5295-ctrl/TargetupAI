@@ -27,6 +27,7 @@ import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsChannel
 import {
   queryPayAgentStatsAllCompanies, queryPayAgentStoreBreakdown, validateStatsDateRange, isPayStatsConfigured,
   parseAgentCharges, insertAgentCharges, getAgentChargeStatus, listAgentCharges, countAgentCharges, latestAgentChargeAt, findGatewayCharges, matchHealWindow,
+  getAgentCustNameMap,
 } from '../utils/pay-stats';
 // ★ 2026-07-27 §5-4: 고객사 충전 요청 접수 원장 (요청 → 직원 1클릭 실행 → 반영 확인 후 완료)
 import { parseRejectReason } from '../utils/agent-charge-orders';
@@ -3010,7 +3011,12 @@ router.get('/agent-charges/targets', authenticate, requireSuperAdmin, async (req
         WHERE c.usage_type IN ('agent','both')
         ORDER BY c.company_name ASC, cai.agent_send_id ASC`
     );
-    res.json({ targets: result.rows });
+    // ★ 2026-07-27 발급명(게이트웨이 RSRM_SalesMst.CustNm) 동반 — 회사명만 주면 한 회사의 발송ID 여럿이
+    //   전부 같은 이름으로 보인다(런소프트 C0130·D0078·D0079). 이 목록이 충전 폼·이력 검색의 이름 소스다.
+    const nameMap = await getAgentCustNameMap();
+    res.json({
+      targets: result.rows.map((r: any) => ({ ...r, cust_name: nameMap.get(String(r.agent_send_id)) || null })),
+    });
   } catch (error: any) {
     console.error('에이전트 충전 대상 조회 실패:', error);
     if (handleDbMigrationError(error, res, 'company_agent_ids')) return;
@@ -3463,8 +3469,15 @@ router.get('/agent-charges', authenticate, requireSuperAdmin, async (req: Reques
       );
       for (const r of named.rows as any[]) nameMap.set(String(r.agent_send_id), String(r.company_name || ''));
     }
+    // ★ 2026-07-27 발급명 동반. 게이트웨이 원장 기준이라 **우리 매핑에 없는 고아 발송ID도 이름이 나온다**
+    //   (C0119 = 준네트웍스_미1) — "매핑 없음"만 뜨던 행이 무엇인지 화면에서 바로 읽힌다.
+    const custNameMap = await getAgentCustNameMap();
     return res.json({
-      rows: rows.map((r: any) => ({ ...r, companyName: nameMap.get(r.agentSendId) || null })),
+      rows: rows.map((r: any) => ({
+        ...r,
+        companyName: nameMap.get(r.agentSendId) || null,
+        custName: custNameMap.get(String(r.agentSendId)) || null,
+      })),
       total,
       page,
       totalPages: Math.max(1, Math.ceil(total / limit)),
@@ -3507,12 +3520,15 @@ router.get('/agent-charge-orders', authenticate, requireSuperAdmin, async (req: 
       [...params, limit, (page - 1) * limit]
     );
 
+    // ★ 2026-07-27 접수함도 같은 이름 규칙(발송ID / 발급명) — 직원이 폼에 담기 전에 어느 계정인지 읽어야 한다.
+    const custNameMap = await getAgentCustNameMap();
     return res.json({
       rows: rows.rows.map((x: any) => ({
         id: String(x.id),
         companyId: String(x.company_id),
         companyName: x.company_name,
         agentSendId: String(x.agent_send_id),
+        custName: custNameMap.get(String(x.agent_send_id)) || null,
         amount: Number(x.amount),
         depositorName: x.depositor_name,
         expectedAt: x.expected_at ? String(x.expected_at).slice(0, 10) : null,

@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { handleDbMigrationError } from '../utils/db-migration-error';
-import { queryPayAgentBalances } from '../utils/pay-stats';
+import { queryPayAgentBalances, getAgentCustNameMap } from '../utils/pay-stats';
 import { parseAgentChargeOrder } from '../utils/agent-charge-orders';
 
 /**
@@ -36,10 +36,10 @@ async function loadEligibleSendIds(companyId: string): Promise<string[]> {
   return r.rows.map((x: any) => String(x.agent_send_id));
 }
 
-// GET /api/agent-charge-orders/targets — 내 회사의 선불 발송ID + 게이트웨이 잔액(기준일 동반)
-//   잔액은 저장하지 않고 게이트웨이 실값을 읽는다(6원칙 ③ 이중 진실 금지).
-//   기준일(asOfDate)을 반드시 함께 내린다 — 최근 발송이 없는 ID는 값이 stale일 수 있고,
-//   기준일 없이 숫자만 보여주면 오래된 값을 현재 잔액으로 읽는다(§8-1).
+// GET /api/agent-charge-orders/targets — 내 회사의 선불 발송ID + 게이트웨이 잔액
+//   잔액은 저장하지 않고 게이트웨이 원장(RSRM_SalesMst.RemAmt) 실값을 읽는다(6원칙 ③ 이중 진실 금지).
+//   ★ 2026-07-27 기준일(asOfDate) 폐기 — 옛 소스였던 일별 통계 스냅샷의 축이다.
+//   원장 값은 발송이 나가는 대로 실시간으로 깎이므로 기준일이 없고, 미확정은 숫자 대신 사유로 내린다.
 router.get('/targets', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -47,14 +47,14 @@ router.get('/targets', async (req: Request, res: Response) => {
 
     const sendIds = await loadEligibleSendIds(companyId);
 
-    let balances: Array<{ agentSendId: string; remAmt: number | null; asOfDate: string | null }> = [];
+    let balances: Array<{ agentSendId: string; remAmt: number | null; unknownReason: string | null }> = [];
     if (sendIds.length > 0) {
       try {
         const rows = await queryPayAgentBalances(companyId);
-        balances = rows.map((b: any) => ({
+        balances = rows.map((b) => ({
           agentSendId: String(b.agent_send_id),
           remAmt: b.rem_amt,
-          asOfDate: b.as_of_date,
+          unknownReason: b.unknown_reason,
         }));
       } catch (balErr) {
         // 잔액 조회 실패는 요청 등록을 막지 않는다 — 요청은 잔액과 무관한 접수 행위다.
@@ -62,7 +62,15 @@ router.get('/targets', async (req: Request, res: Response) => {
       }
     }
 
-    res.json({ sendIds, balances });
+    // ★ 2026-07-27 발급명(게이트웨이 원장) 동반 — 고객사 화면도 "발송ID / 발급명" 같은 규칙으로 보여준다.
+    const nameMap = await getAgentCustNameMap();
+    const custNames: Record<string, string> = {};
+    for (const id of sendIds) {
+      const nm = nameMap.get(id);
+      if (nm) custNames[id] = nm;
+    }
+
+    res.json({ sendIds, custNames, balances });
   } catch (error: any) {
     console.error('충전 요청 대상 조회 실패:', error);
     if (handleDbMigrationError(error, res, 'company_agent_ids')) return;
@@ -93,10 +101,12 @@ router.get('/', async (req: Request, res: Response) => {
       [companyId, limit, offset]
     );
 
+    const nameMap = await getAgentCustNameMap();
     res.json({
       rows: r.rows.map((x: any) => ({
         id: String(x.id),
         agentSendId: String(x.agent_send_id),
+        custName: nameMap.get(String(x.agent_send_id)) || null,
         amount: Number(x.amount),
         depositorName: x.depositor_name,
         expectedAt: x.expected_at ? String(x.expected_at).slice(0, 10) : null,

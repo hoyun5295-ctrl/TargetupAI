@@ -400,11 +400,30 @@
 | **OkCnt** | **성공** (★`SuccCnt` 아님 — 청구 수량의 기준) |
 | FailCnt | 실패 |
 | ReadyCnt | 대기. **음수가 관측된다**(게이트웨이 원천값이 완료분을 차감) — 우리 파생 아님 |
-| RemAmt | 잔액. `StoreId=''` 계정 행에만 유효(SoT=docs/2026-07-24-agent-prepaid-charge-design.md) |
+| RemAmt | ⛔ **잔액 소스로 쓰지 말 것**(★2026-07-27 정정). 통계 적재 시점의 스냅샷이고 계정에 따라 **전 기간 0**이다(C0130 실측 — 원장은 640,281.625). 현재 잔액은 `RSRM_SalesMst.RemAmt` |
 | SysId | 수집 서버 구분 |
 
 - 소비 CT = `utils/pay-stats.ts`(집계 SQL 전량). 월 확장은 `utils/stats-period.ts` 공용.
 - 2026-07-25 실측: 청구서(`billing.ts`)는 이 테이블을 **전혀 읽지 않는다** → `usage_type='both'` 회사(금강제화 등)의 에이전트 발송분이 청구서에서 통째로 누락. 재구성 대상.
+
+### [외부 MySQL] sales.RSRM_SalesMst — 발송ID 원장(발급명) ★2026-07-27 등재
+
+> 같은 `pay-ingest-db`(62)에 있다. **발송ID 표시명(발급명)의 유일한 소스**다 — 우리 PG에는 표시명 컬럼이 없고, 두지 않는다.
+> 한 회사가 발송ID를 여럿 갖는 게 기본이라(런소프트 = C0130·D0078·D0079) 회사명으로 대체하면 세 줄이 같은 이름으로 보인다.
+
+| 컬럼 | 용도 |
+|------|------|
+| CustId | **발송ID**. `company_agent_ids.agent_send_id`·`RSRM_FillAmtHist.StoreId`와 같은 축 |
+| CustNm | **발급명**(= PAY에 저장된 고객사명). 예 `C0130 런소프트3` · `D0078 런소프트` · `D0079 런소프트2` |
+| **RemAmt** | **현재 잔액 (float) — 잔액의 유일한 소스.** ★2026-07-27 확정. 발송이 나가는 대로 실시간으로 깎인다(D0078 4,881,401.2 → 몇 분 뒤 4,881,227.5). 62·143 값 완전 일치 |
+| StoreId | **`StoreId = CustId`인 행이 계정 대표 행**이고 잔액은 거기 실린다. 지점 행은 대개 0 |
+| UpdTm · SeqNo | `UpdTm` = **계정 생성·정보 수정 시각**(2023~2024에 멈춰 있다) — ⛔ 잔액 갱신 시각이 아니다. 최신행 결정은 `SeqNo`/`ORDER BY CustId, UpdTm DESC, SeqNo DESC` |
+| PayTp · StoreNm · MobNo · Email · Memo | PAY 회원 원장 컬럼(미사용) |
+
+- 2026-07-27 실측: **730행 · 발급명 빈 값 0건**(499 CustId — 계정×지점으로 한 CustId에 여러 행).
+- 다중 행 계정 실측: 대부분 대표 행 1개에만 잔액이 실린다. **대표 행이 없는 계정도 있다**(`B0046` 200행·`B0021`·`B0062`) → 그 계정은 지점 행을 **합산하지 않고 미확정(null)** 처리한다(근거 없는 합산 금지).
+- 소비 CT = `utils/pay-stats.ts` — `fetchCustNames`(IN 조회, 통계 경로) · `getAgentCustNameMap`(전량 60초 캐시, 화면 공용) · `formatAgentIdLabel`(`발송ID / 발급명`) · **`queryPayAgentBalances`/`pickLedgerBalances`(잔액)**.
+- 조회 실패·env 미설정 = 이름 없이 발송ID만·잔액은 빈 배열(폴백). 이름·잔액 때문에 화면이 500이 되면 안 된다.
 
 ### company_settings (고객사 설정 KV)
 | 컬럼 | 타입 |

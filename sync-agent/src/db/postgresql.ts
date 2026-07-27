@@ -15,6 +15,7 @@
  */
 
 import type { IDbConnector, DbConnectionConfig, RawRow, ColumnInfo } from './types';
+import { resolveDbSslOption } from './ssl';
 import { getLogger } from '../logger';
 
 const logger = getLogger('db:postgres');
@@ -43,6 +44,7 @@ export class PostgresConnector implements IDbConnector {
         );
       }
 
+      const pgTls = resolveDbSslOption(this.config);
       this.pool = new this.pg.Pool({
         host: this.config.host,
         port: this.config.port,
@@ -53,6 +55,9 @@ export class PostgresConnector implements IDbConnector {
         idleTimeoutMillis: 60000,
         connectionTimeoutMillis: 10000,
         statement_timeout: this.config.queryTimeout,
+        // ★ 2026-07-27 Aurora/RDS PostgreSQL 등 TLS 강제 환경. 미설정 = 평문(기존 동작 보존).
+        //   CA 해석은 ssl.ts CT 하나뿐 — 어댑터마다 규칙이 갈리지 않게 한다(Codex 2R-4).
+        ...(pgTls ? { ssl: pgTls } : {}),
       });
 
       // 새 커넥션마다 UTF-8 강제 (소스 DB client_encoding이 다를 경우 대응)

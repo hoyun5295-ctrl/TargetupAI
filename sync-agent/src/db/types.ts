@@ -16,6 +16,22 @@ export interface DbConnectionConfig {
   password: string;
   queryTimeout: number; // ms
 
+  // ─── 암호화 연결 (★ 2026-07-27) ─────────────────────
+  /**
+   * TLS(암호화) 연결 사용 여부. 기본 false = 기존 동작 그대로(사내망 평문 연결).
+   *
+   * 클라우드 DB(AWS Aurora/RDS, Azure SQL 등)는 `require_secure_transport=ON`이 켜져 있으면
+   * 평문 연결을 서버가 거부한다. 2026-07-27 MySQL 8.0.45 실측: 옵션 없으면 `ER_SECURE_TRANSPORT_REQUIRED`(3159),
+   * ssl 옵션만 주면 TLS_AES_256_GCM_SHA384로 접속 성공.
+   */
+  ssl?: boolean;
+  /**
+   * 서버 인증서 검증에 쓸 CA 번들 파일 경로(선택).
+   * 미지정 = **암호화만 하고 인증서 검증은 생략**(사설·자체서명 인증서 허용).
+   * 폐쇄망/VPC 안에서 도는 전제라 기본을 검증 생략으로 둔다 — 지정하면 검증까지 한다.
+   */
+  sslCaPath?: string;
+
   // ─── Excel/CSV 전용 (optional) ──────────────────────
   /** 파일 경로 (excel/csv 타입 시 필수) */
   filePath?: string;

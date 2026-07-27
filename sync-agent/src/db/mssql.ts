@@ -6,6 +6,7 @@
 import sql from 'mssql';
 import type { IDbConnector, DbConnectionConfig, RawRow, ColumnInfo } from './types';
 import { singleColumnPk } from './types';
+import { resolveDbSslOption } from './ssl';
 import { getLogger } from '../logger';
 
 const logger = getLogger('db:mssql');
@@ -22,6 +23,9 @@ export class MssqlConnector implements IDbConnector {
   async connect(): Promise<void> {
     if (this.pool) return;
 
+    // ★ 2026-07-27 TLS 옵션 단일 해석(ssl.ts CT). ssl 미설정 = undefined = 기존 평문 동작.
+    const tls = resolveDbSslOption(this.config);
+
     const poolConfig: sql.config = {
       server: this.config.host,
       port: this.config.port,
@@ -30,8 +34,15 @@ export class MssqlConnector implements IDbConnector {
       password: this.config.password,
       requestTimeout: this.config.queryTimeout,
       options: {
-        encrypt: false,          // 로컬 네트워크 — 고객사 환경
-        trustServerCertificate: true,
+        // ★ 2026-07-27 기본 false = 사내망 고객사 환경(기존 동작 보존).
+        //   Azure SQL·암호화 강제 인스턴스는 설정에서 ssl=true로 켠다.
+        encrypt: tls !== undefined,
+        // 사설·자체서명 인증서 허용. CA를 지정한 경우에만 검증한다.
+        trustServerCertificate: !tls?.ca,
+        // ★ Codex 2R-4 정정: CA를 실제로 Tedious에 넘긴다.
+        //   전에는 trustServerCertificate만 뒤집어서, CA를 지정해도 검증이 안 되고
+        //   경로가 틀려도 아무도 몰랐다(검증되는 줄 아는 상태).
+        ...(tls?.ca ? { cryptoCredentialsDetails: { ca: tls.ca } } : {}),
         enableArithAbort: true,
       },
       pool: {

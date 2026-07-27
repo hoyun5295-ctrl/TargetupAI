@@ -31,6 +31,8 @@ import {
   loadPlanChanges, buildPlanSegments, sumPlanSegments, evaluatePlanHistoryGate,
   countPlanChanges, planChangesFingerprint,
 } from '../utils/plan-proration';
+// ★ 2026-07-27 발송ID 표시명(발급명) 단일 소스 — 청구서 상세·미리보기도 화면과 같은 이름을 쓴다.
+import { getAgentCustNameMap } from '../utils/pay-stats';
 
 // SMTP transporter (재사용)
 // ★ 2026-07-26 타임아웃 3종 명시 — 정산서 발송은 **행 잠금을 든 트랜잭션 안에서** SMTP를 부른다.
@@ -851,13 +853,20 @@ router.get('/:id/items', async (req: Request, res: Response) => {
     //   집계·PDF는 `toDayKey`로 고쳤는데 이 응답만 원본 Date를 그대로 흘려보내고 있었다.
     //   같은 이유로 헤더의 청구 기간도 함께 내린다(모달·엑셀 파일명이 이 값을 쓴다).
     const bil = billing.rows[0];
+    // ★ 2026-07-27 발급명 병기 — 상세 모달의 '구분' 칸이 발송ID만 보여주면 어느 계정인지 사람이 못 읽는다.
+    //   이름 소스는 게이트웨이 원장 하나(RSRM_SalesMst.CustNm). 조회 실패해도 발송ID는 그대로 나온다.
+    const custNameMap = await getAgentCustNameMap();
     return res.json({
       billing: {
         ...bil,
         billing_start: toDayKey(bil.billing_start),
         billing_end: toDayKey(bil.billing_end),
       },
-      items: items.rows.map((r: any) => ({ ...r, item_date: toDayKey(r.item_date) })),
+      items: items.rows.map((r: any) => ({
+        ...r,
+        item_date: toDayKey(r.item_date),
+        cust_name: r.agent_send_id ? custNameMap.get(String(r.agent_send_id)) || null : null,
+      })),
       lines,
       header_check: headerCheck,
     });
@@ -1550,12 +1559,15 @@ router.get('/preview', async (req: Request, res: Response) => {
     const ai_credit = { count: aiCreditCount, supply_amount: aiCreditSupply };
     const amounts = { subtotal, vat, total_amount: totalAmount };
     // ★ 2026-07-26 에이전트(게이트웨이) 항목 — 일자 × 발송ID × 유형. 대상ID는 청구 축이 아니다.
+    // ★ 2026-07-27 발급명 병기 — 발송ID만으론 어느 계정인지 안 읽힌다(이름 규칙은 전 화면 공통).
+    const previewCustNames = await getAgentCustNameMap();
     const agent = {
       amount: agentAmount,
       rows: priced.items
         .filter((it) => it.channel === 'agent')
         .map((it) => ({
           item_date: it.itemDate, agent_send_id: it.agentSendId, type_key: it.typeKey,
+          cust_name: it.agentSendId ? previewCustNames.get(String(it.agentSendId)) || null : null,
           sent: it.total, success: it.success, unit_price: it.unitPrice, amount: it.amount,
         })),
       excluded_prepaid_send_ids: usage.excludedPrepaidSendIds,

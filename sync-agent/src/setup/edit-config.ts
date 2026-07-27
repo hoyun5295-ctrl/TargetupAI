@@ -115,6 +115,7 @@ function printConfig(config: AgentConfig, showSecrets: boolean = false): void {
   console.log(`  │  사용자:      ${d.username}`);
   console.log(`  │  비밀번호:    ${showSecrets ? d.password : mask(d.password)}`);
   console.log(`  │  쿼리 타임아웃: ${d.queryTimeout}ms`);
+  console.log(`  │  암호화(TLS): ${d.ssl ? (d.sslCaPath ? '사용 (인증서 검증)' : '사용 (검증 안 함)') : '사용 안 함'}`);
   console.log('  └───────────────────────────────────────────────┘');
 
   // ③ 동기화
@@ -202,6 +203,11 @@ async function editDatabase(config: AgentConfig): Promise<AgentConfig> {
   const database = await ask('DB 이름', d.database);
   const username = await ask('사용자', d.username);
   const password = await ask('비밀번호', d.password);
+  // ★ 2026-07-27 클라우드 DB(Aurora/RDS·Azure)는 암호화 연결만 허용하는 경우가 있다(MySQL 3159).
+  const ssl = await askConfirm('암호화(TLS) 연결을 사용할까요? (클라우드 DB면 예)', d.ssl === true);
+  const sslCaPath = ssl
+    ? (await ask('CA 인증서 파일 경로 (Enter=검증 없이 암호화만)', d.sslCaPath || '')).trim() || undefined
+    : undefined;
 
   return {
     ...config,
@@ -212,6 +218,8 @@ async function editDatabase(config: AgentConfig): Promise<AgentConfig> {
       database,
       username,
       password,
+      ssl,
+      sslCaPath,
     },
   };
 }

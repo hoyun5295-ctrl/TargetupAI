@@ -258,6 +258,14 @@ async function stepDbConnection(): Promise<{
 
   const dbPassword = await askPassword('비밀번호');
 
+  // ★ 2026-07-27 클라우드 DB(AWS Aurora/RDS·Azure)는 암호화 연결만 허용하는 경우가 있다.
+  //   끄면 서버가 접속을 거부한다(MySQL 3159). 사내망 DB는 기본값(아니오)으로 둔다.
+  const useSsl = await askConfirm('암호화(TLS) 연결을 사용할까요? (클라우드 DB면 예)', false);
+  // CA를 비우면 통신만 암호화하고 서버 인증서는 검증하지 않는다 — 사용자가 그 사실을 알고 고르게 한다.
+  const sslCa = useSsl
+    ? await ask('CA 인증서 파일 경로 (Enter=검증 없이 암호화만)')
+    : '';
+
   const dbConfig: DbConnectionConfig = {
     type: dbType as DbConnectionConfig['type'],
     host,
@@ -266,6 +274,8 @@ async function stepDbConnection(): Promise<{
     username,
     password: dbPassword,
     queryTimeout: 30000,
+    ssl: useSsl,
+    sslCaPath: sslCa.trim() || undefined,
   };
 
   // 접속 테스트
@@ -789,6 +799,8 @@ export async function startSetupCli(
         username: dbConfig.username || '',
         password: dbConfig.password || '',
         queryTimeout: dbConfig.queryTimeout || 30000,
+        ssl: dbConfig.ssl === true, // ★ 2026-07-27 암호화 연결 여부 저장(설치 후 재기동에도 유지)
+        sslCaPath: dbConfig.sslCaPath,
         delimiter: dbConfig.delimiter || ',',
         encoding: dbConfig.encoding || 'utf-8',
         watchMode: dbConfig.watchMode || false,

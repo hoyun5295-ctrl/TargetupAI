@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import SearchableSelect from './SearchableSelect'; // ★ 2026-07-26 발송ID 검색(목록이 283개라 셀렉트만으론 못 찾는다)
+import { formatAgentIdLabel } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스
 
 /**
  * ★ 2026-07-24 §5-3 — 에이전트 충전 실행 패널 (슈퍼관리자 · 충전 관리 탭)
@@ -8,13 +9,14 @@ import SearchableSelect from './SearchableSelect'; // ★ 2026-07-26 발송ID �
  * 음수 = 상계(차감). 웹 잔액(balance)과는 별개 지갑.
  */
 
-interface Target { company_id: string; company_name: string; agent_send_id: string; billing_type?: string | null }
+// cust_name = 게이트웨이 원장 발급명(RSRM_SalesMst.CustNm). 한 회사의 발송ID를 구분하는 유일한 이름이다.
+interface Target { company_id: string; company_name: string; agent_send_id: string; cust_name?: string | null; billing_type?: string | null }
 interface ChargeFormRow { agentSendId: string; amount: string }
 interface RegisteredRow { seqNo: number; agentSendId: string; amount: number; applied: boolean; appliedAt?: string | null }
-interface HistoryRow { seqNo: number; agentSendId: string; amount: number; filledAt: string; applied: boolean; appliedAt: string | null; companyName: string | null }
+interface HistoryRow { seqNo: number; agentSendId: string; amount: number; filledAt: string; applied: boolean; appliedAt: string | null; companyName: string | null; custName?: string | null }
 // ★ 2026-07-27 §5-4 — 고객사가 올린 충전 요청(접수 대기). 여기서 폼에 담아 그대로 실행한다.
 interface OrderRow {
-  id: string; companyName: string | null; agentSendId: string; amount: number;
+  id: string; companyName: string | null; agentSendId: string; custName?: string | null; amount: number;
   depositorName: string; expectedAt: string | null; memo: string | null; createdAt: string;
 }
 
@@ -183,6 +185,18 @@ export default function AgentChargePanel() {
     [targets, companyFilter]
   );
 
+  // ★ 2026-07-27 발송ID → 발급명. 대상 목록이 이 화면의 이름 소스라, 이름을 따로 안 내려주는 행
+  //   (등록 결과 등)도 같은 이름으로 보인다. 목록에 없는 고아 발송ID는 서버가 행마다 이름을 함께 준다.
+  const custNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    targets.forEach((t) => { if (t.cust_name) m.set(t.agent_send_id, String(t.cust_name)); });
+    return m;
+  }, [targets]);
+
+  /** `C0130 / 런소프트3` — 행이 이름을 갖고 있으면 그것, 없으면 대상 목록에서 찾는다. */
+  const idLabel = (sendId: string, custName?: string | null) =>
+    formatAgentIdLabel(sendId, custName || custNameById.get(sendId) || null);
+
   const stopPolling = () => {
     if (pollTimer.current) { clearInterval(pollTimer.current); pollTimer.current = null; }
   };
@@ -237,7 +251,7 @@ export default function AgentChargePanel() {
       if (!r.agentSendId) { setErrorMsg('발송ID를 선택하지 않은 행이 있습니다.'); return; }
       const n = Number(r.amount);
       if (!r.amount || r.amount === '-' || r.amount === '.' || !Number.isFinite(n) || n === 0) {
-        setErrorMsg(`금액이 올바르지 않습니다. (${r.agentSendId})`);
+        setErrorMsg(`금액이 올바르지 않습니다. (${idLabel(r.agentSendId)})`);
         return;
       }
     }
@@ -351,8 +365,9 @@ export default function AgentChargePanel() {
     }
   };
 
+  // 발급명이 앞(계정 식별), 회사명은 뒤(검색·귀속 확인용). 회사명으로 발송ID를 찾는 검색을 유지해야 한다.
   const targetLabel = (t: Target) =>
-    `${t.agent_send_id} — ${t.company_name}${t.billing_type === 'prepaid' ? ' · 선불' : ''}`;
+    `${idLabel(t.agent_send_id, t.cust_name)} — ${t.company_name}${t.billing_type === 'prepaid' ? ' · 선불' : ''}`;
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
@@ -396,7 +411,7 @@ export default function AgentChargePanel() {
                     <div className="min-w-0 text-xs text-gray-600">
                       <span className="font-medium text-gray-800">{o.companyName || '(회사 미상)'}</span>
                       <span className="mx-1.5 text-gray-300">·</span>
-                      <span className="font-mono">{o.agentSendId}</span>
+                      <span className="font-mono">{idLabel(o.agentSendId, o.custName)}</span>
                       <span className="mx-1.5 text-gray-300">·</span>
                       <span className="font-semibold tabular-nums text-gray-800">{o.amount.toLocaleString()}원</span>
                       <span className="mx-1.5 text-gray-300">·</span>
@@ -555,7 +570,7 @@ export default function AgentChargePanel() {
             <div className="space-y-1">
               {registered.map((r) => (
                 <div key={r.seqNo} className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600 tabular-nums">#{r.seqNo} {r.agentSendId} · {r.amount.toLocaleString()}원</span>
+                  <span className="text-gray-600 tabular-nums">#{r.seqNo} {idLabel(r.agentSendId)} · {r.amount.toLocaleString()}원</span>
                   {r.applied ? (
                     <span className="text-emerald-600 font-medium text-xs">반영 완료 {r.appliedAt || ''}</span>
                   ) : (
@@ -646,7 +661,7 @@ export default function AgentChargePanel() {
               {history.map((h) => (
                 <tr key={h.seqNo} className="border-b border-gray-50">
                   <td className="py-1.5 pr-3 tabular-nums text-gray-400">{h.seqNo}</td>
-                  <td className="py-1.5 pr-3 font-mono text-gray-700">{h.agentSendId}</td>
+                  <td className="py-1.5 pr-3 font-mono text-gray-700">{idLabel(h.agentSendId, h.custName)}</td>
                   <td className="py-1.5 pr-3 text-gray-600">{h.companyName || <span className="text-amber-600">매핑 없음</span>}</td>
                   <td className={`py-1.5 pr-3 text-right tabular-nums font-medium ${h.amount < 0 ? 'text-rose-500' : 'text-gray-800'}`}>{h.amount.toLocaleString()}</td>
                   <td className="py-1.5 pr-3 text-xs text-gray-400">{h.filledAt}</td>

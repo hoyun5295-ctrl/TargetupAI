@@ -32,6 +32,10 @@ const DatabaseConfigSchema = z.object({
   password: z.string().default(''),
   queryTimeout: z.number().int().positive().default(30000), // 30초
 
+  // ★ 2026-07-27 클라우드 DB(Aurora/RDS/Azure) TLS 강제 대응. 기본 false = 기존 동작 보존.
+  ssl: z.boolean().default(false),
+  sslCaPath: z.string().optional(),
+
   // Excel/CSV 전용 (optional)
   filePath: z.string().optional(),
   sheetName: z.string().optional(),

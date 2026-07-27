@@ -54,7 +54,7 @@ export async function startSetupWizard(
   // ─── API: DB 접속 테스트 ────────────────────────────────
   app.post('/api/setup/test-db', async (req, res) => {
     const t0 = Date.now();
-    const { type, host, port, database, username, password } = req.body;
+    const { type, host, port, database, username, password, ssl, sslCaPath } = req.body;
     logger.info('[api:test-db] ← 요청', { type, host, port, database, username });
 
     try {
@@ -63,6 +63,10 @@ export async function startSetupWizard(
         port: parseInt(port, 10),
         database, username, password,
         queryTimeout: 10000,
+        // ★ 2026-07-27 설치 마법사 접속 테스트는 본 연결과 동일 조건(암호화·CA)으로 수행한다.
+        //   CA를 빼면 검증 없이 통과했다가 저장 후 본 연결에서만 실패한다(Codex 2R-5).
+        ssl: ssl === true || ssl === 'true',
+        sslCaPath: typeof sslCaPath === 'string' && sslCaPath.trim() ? sslCaPath.trim() : undefined,
       };
 
       const connector = createDbConnector(config);
@@ -88,7 +92,7 @@ export async function startSetupWizard(
   // ─── API: 테이블 목록 조회 ──────────────────────────────
   app.post('/api/setup/tables', async (req, res) => {
     const t0 = Date.now();
-    const { type, host, port, database, username, password } = req.body;
+    const { type, host, port, database, username, password, ssl, sslCaPath } = req.body;
     logger.info('[api:tables] ← 요청', { type, host, database, username });
 
     try {
@@ -97,6 +101,10 @@ export async function startSetupWizard(
         port: parseInt(port, 10),
         database, username, password,
         queryTimeout: 10000,
+        // ★ 2026-07-27 설치 마법사 접속 테스트는 본 연결과 동일 조건(암호화·CA)으로 수행한다.
+        //   CA를 빼면 검증 없이 통과했다가 저장 후 본 연결에서만 실패한다(Codex 2R-5).
+        ssl: ssl === true || ssl === 'true',
+        sslCaPath: typeof sslCaPath === 'string' && sslCaPath.trim() ? sslCaPath.trim() : undefined,
       };
 
       const connector = createDbConnector(config);
@@ -121,7 +129,7 @@ export async function startSetupWizard(
   // ─── API: 컬럼 목록 조회 ───────────────────────────────
   app.post('/api/setup/columns', async (req, res) => {
     const t0 = Date.now();
-    const { type, host, port, database, username, password, tableName } = req.body;
+    const { type, host, port, database, username, password, ssl, sslCaPath, tableName } = req.body;
     logger.info('[api:columns] ← 요청', { type, host, database, tableName });
 
     try {
@@ -130,6 +138,10 @@ export async function startSetupWizard(
         port: parseInt(port, 10),
         database, username, password,
         queryTimeout: 10000,
+        // ★ 2026-07-27 설치 마법사 접속 테스트는 본 연결과 동일 조건(암호화·CA)으로 수행한다.
+        //   CA를 빼면 검증 없이 통과했다가 저장 후 본 연결에서만 실패한다(Codex 2R-5).
+        ssl: ssl === true || ssl === 'true',
+        sslCaPath: typeof sslCaPath === 'string' && sslCaPath.trim() ? sslCaPath.trim() : undefined,
       };
 
       const connector = createDbConnector(config);

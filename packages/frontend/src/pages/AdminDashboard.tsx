@@ -13,6 +13,7 @@ import LoginBlocksManagement from '../components/admin/LoginBlocksManagement'; /
 import AgentChargePanel from '../components/AgentChargePanel'; // ★ 2026-07-24 §5-3 에이전트 충전 실행 (게이트웨이 지갑)
 import AgentDeployWizard from '../components/admin/AgentDeployWizard'; // 싱크에이전트 OS별 배포 위저드
 import { COMPANY_EMAIL } from '../constants/company';
+import { formatAgentIdLabel } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스(발급명 병기)
 import { creditTxLabel } from '../constants/credit'; // 크레딧 사용 이력 작업명 라벨
 
 interface Company {
@@ -522,8 +523,10 @@ const [emailResendAt, setEmailResendAt] = useState<string | null>(null);
 
   // ★ 2026-07-03 에이전트(QTmsg) 발송ID 매핑 관리 (수정 모달 내)
   //   ★ 2026-07-24 §5-1 원장 격상 — ID별 선/후불(billing_type)·단가 4종 표시/편집 (웹 축 companies.*와 별개 지갑)
+  //   ★ 2026-07-27 cust_name = 게이트웨이 원장 발급명(RSRM_SalesMst.CustNm). 한 회사에 발송ID가 여럿일 때
+  //     (런소프트 = C0130 런소프트3 · D0078 런소프트 · D0079 런소프트2) 세 줄을 구분하는 유일한 이름이다.
   const [agentIds, setAgentIds] = useState<{
-    id: string; agent_send_id: string; memo: string | null;
+    id: string; agent_send_id: string; memo: string | null; cust_name?: string | null;
     billing_type?: string | null;
     cost_per_sms?: string | number | null; cost_per_lms?: string | number | null;
     cost_per_mms?: string | number | null; cost_per_kakao?: string | number | null;
@@ -6257,7 +6260,7 @@ const handleApproveRequest = async (id: string) => {
                               <div key={a.id} className="bg-white rounded-lg border border-gray-200 px-3 py-1.5">
                                 <div className="flex items-center justify-between">
                                   <div className="min-w-0 flex items-center gap-2 flex-wrap">
-                                    <span className="text-sm font-mono text-gray-800">{a.agent_send_id}</span>
+                                    <span className="text-sm font-mono text-gray-800">{formatAgentIdLabel(a.agent_send_id, a.cust_name)}</span>
                                     <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${a.billing_type === 'prepaid' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-500'}`}>
                                       {a.billing_type === 'prepaid' ? '선불' : '후불'}
                                     </span>
@@ -9013,8 +9016,9 @@ const handleApproveRequest = async (id: string) => {
                                 const typeText = isPlan
                                   ? String(item.message_type).replace(/^PLAN_/, '')
                                   : (billingTypeLabel[item.message_type] || item.message_type);
+                                // ★ 2026-07-27 에이전트 행은 `발송ID / 발급명` — 발송ID만으론 어느 계정 청구인지 안 읽힌다.
                                 const scopeText = ch === 'agent'
-                                  ? String(item.agent_send_id || '(발송ID 미상)')
+                                  ? (formatAgentIdLabel(item.agent_send_id, item.cust_name) || '(발송ID 미상)')
                                   : (billingChannelLabel[ch] || ch);
                                 const rowBg = billingChannelBg[ch] || (idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50');
                                 return (

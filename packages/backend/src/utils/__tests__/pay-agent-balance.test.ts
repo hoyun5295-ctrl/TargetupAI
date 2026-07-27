@@ -1,132 +1,103 @@
 /**
- * pay-agent-balance.test.ts — queryPayAgentBalances 순수 선택 로직(pickLatestBalances) 검증
- * (★ 2026-07-24 §5-2 에이전트 선불 잔액 · Codex R1 정정 회귀 방지)
+ * pay-agent-balance.test.ts — queryPayAgentBalances 순수 선택 로직(pickLedgerBalances) 검증
+ * (★ 2026-07-24 §5-2 에이전트 선불 잔액 · ★ 2026-07-27 잔액 소스 정정)
+ *
+ * ★ 2026-07-27 소스 교체: 일별 통계 `RSRM_SalesStts.RemAmt` → 계정 원장 `RSRM_SalesMst.RemAmt`.
+ *   통계 행은 잔액이 아니었다(C0130 전 기간 0 vs 원장 640,281.625) — 화면이 "07-09 기준 0원"을 현재 잔액처럼 보여줬다.
+ *   옛 pickLatestBalances(DestDt/UpdTm 기준 선택)는 그 잘못된 소스 전용이라 폐기.
  *
  * 핵심 계약:
- *  - 통계 행 없는 ID = rem_amt null(집계 전) — 0원으로 합성 금지 (Codex R1-2)
- *  - CustId별 선택 = DestDt 최대 → UpdTm 최신 → MsgType·StoreId 사전순 결정적 (Codex R1-1)
- *  - 입력 행 순서와 무관하게 같은 결과 (SQL ORDER BY 의존 제거)
- *  - custIds 순서 보존 + 전 ID 반환 (조용한 누락 방지)
+ *  - 원장 행 없는 ID = rem_amt null(no_row) — 0원 합성 금지
+ *  - 권위 행 = StoreId = CustId(계정 대표 행). 지점 행(RemAmt 0)이 잔액을 가리지 않는다
+ *  - 대표 행이 없는 계정 = null(no_account_row) — **지점 행 합산 금지**(근거 없음, 돈은 틀린 숫자보다 미확정)
+ *  - 입력 행 순서와 무관하게 같은 결과 / custIds 순서 보존 + 전 ID 반환(조용한 누락 방지)
  */
 import { describe, it, expect } from 'vitest';
-import { pickLatestBalances, PayBalanceSourceRow, parseAgentLedgerFields, parseAgentLedgerPatch, parseAgentCharges, toChargeRow, matchHealWindow } from '../pay-stats';
+import { pickLedgerBalances, PayLedgerRow, parseAgentLedgerFields, parseAgentLedgerPatch, parseAgentCharges, toChargeRow, matchHealWindow } from '../pay-stats';
 
-const row = (o: Partial<PayBalanceSourceRow>): PayBalanceSourceRow => o;
+const row = (o: Partial<PayLedgerRow>): PayLedgerRow => o;
 
-describe('pickLatestBalances', () => {
-  it('통계 행이 없는 ID는 rem_amt null(집계 전)로 반환 — 0원 합성 금지', () => {
-    const out = pickLatestBalances(['C0119'], []);
+describe('pickLedgerBalances', () => {
+  it('원장에 계정이 없으면 rem_amt null(no_row) — 0원 합성 금지', () => {
+    const out = pickLedgerBalances(['C0119'], []);
     expect(out).toHaveLength(1);
     expect(out[0].agent_send_id).toBe('C0119');
     expect(out[0].rem_amt).toBeNull();
-    expect(out[0].as_of_date).toBe('');
+    expect(out[0].unknown_reason).toBe('no_row');
   });
 
-  it('CustId별 MAX(DestDt) 행의 RemAmt를 선택하고 as_of_date를 YYYY-MM-DD로 변환', () => {
-    const out = pickLatestBalances(['D0079'], [
-      row({ CustId: 'D0079', DestDt: '20260722', RemAmt: 10396100, UpdTm: '2026-07-24 05:00:17' }),
-      row({ CustId: 'D0079', DestDt: '20260723', RemAmt: 10383500, UpdTm: '2026-07-24 05:00:17' }),
-      row({ CustId: 'D0079', DestDt: '20260721', RemAmt: 10511100, UpdTm: '2026-07-24 05:00:17' }),
+  it('대표 행(StoreId=CustId)의 RemAmt를 잔액으로 — 0727 실측값 소수까지 보존', () => {
+    const out = pickLedgerBalances(['C0130', 'D0078', 'D0079'], [
+      row({ CustId: 'C0130', StoreId: 'C0130', RemAmt: 640281.625, SeqNo: 9034 }),
+      row({ CustId: 'D0078', StoreId: 'D0078', RemAmt: 4881227.5, SeqNo: 8956 }),
+      row({ CustId: 'D0079', StoreId: 'D0079', RemAmt: 10384423, SeqNo: 8957 }),
     ]);
-    expect(out[0].rem_amt).toBe(10383500);
-    expect(out[0].as_of_date).toBe('2026-07-23');
+    expect(out.map((o) => o.rem_amt)).toEqual([640281.625, 4881227.5, 10384423]);
+    expect(out.every((o) => o.unknown_reason === null)).toBe(true);
   });
 
-  it('같은 DestDt·같은 RemAmt면 UpdTm 최신 행을 선택 (Date 객체 UpdTm 포함)', () => {
-    const out = pickLatestBalances(['C0130'], [
-      row({ CustId: 'C0130', DestDt: '20260703', RemAmt: 200, UpdTm: new Date('2026-07-07T05:00:00') }),
-      row({ CustId: 'C0130', DestDt: '20260703', RemAmt: 200, UpdTm: new Date('2026-07-07T07:00:00') }),
-    ]);
-    expect(out[0].rem_amt).toBe(200);
-    expect(out[0].updated_at).toContain('07:00:00');
+  it('지점 행(RemAmt 0)이 대표 행 잔액을 가리지 않는다 — 입력 순서 무관', () => {
+    const account = row({ CustId: 'C0002', StoreId: 'C0002', RemAmt: 12345.5, SeqNo: 100 });
+    const branch1 = row({ CustId: 'C0002', StoreId: 'shop-a', RemAmt: 0, SeqNo: 101 });
+    const branch2 = row({ CustId: 'C0002', StoreId: 'shop-b', RemAmt: 0, SeqNo: 102 });
+    expect(pickLedgerBalances(['C0002'], [branch1, account, branch2])[0].rem_amt).toBe(12345.5);
+    expect(pickLedgerBalances(['C0002'], [branch2, branch1, account])[0].rem_amt).toBe(12345.5);
   });
 
-  it('권위 행 = StoreId 빈 계정 합계 행만 — 상세 행(RemAmt 0)이 잔액을 가리지 않는다 (§8-9 행 단위 실측: D0130)', () => {
-    const account = row({ CustId: 'D0130', DestDt: '20260723', StoreId: '', MsgType: 'L', RemAmt: 18445, UpdTm: '2026-07-24 05:00:17' });
-    const account2 = row({ CustId: 'D0130', DestDt: '20260723', StoreId: '', MsgType: 'S', RemAmt: 18445, UpdTm: '2026-07-24 05:00:17' });
-    const detail = row({ CustId: 'D0130', DestDt: '20260723', StoreId: 'c2dca7c8-50be-44fd-b8e1-0a24cc2f642d', MsgType: 'L', RemAmt: 0, UpdTm: '2026-07-24 05:00:17' });
-    const o1 = pickLatestBalances(['D0130'], [detail, account, account2]);
-    const o2 = pickLatestBalances(['D0130'], [account2, detail, account]);
-    expect(o1[0].rem_amt).toBe(18445);
-    expect(o2[0].rem_amt).toBe(18445);
-  });
-
-  it('상세 행만 있으면(계정 행 부재) 잔액 미확정 null — 상세 행 0을 잔액으로 오인하지 않는다', () => {
-    const out = pickLatestBalances(['B0001'], [
-      row({ CustId: 'B0001', DestDt: '20260721', StoreId: 'alarm', MsgType: 'S', RemAmt: 0, UpdTm: '2026-07-24 08:00:07' }),
+  it('대표 행이 없는 계정(지점 행만)은 합산하지 않고 null(no_account_row) — B0046형 200행 실측', () => {
+    const out = pickLedgerBalances(['B0046'], [
+      row({ CustId: 'B0046', StoreId: 'b1', RemAmt: 1000, SeqNo: 1 }),
+      row({ CustId: 'B0046', StoreId: 'b2', RemAmt: 2000, SeqNo: 2 }),
+      row({ CustId: 'B0046', StoreId: 'b3', RemAmt: 0, SeqNo: 3 }),
     ]);
     expect(out[0].rem_amt).toBeNull();
+    expect(out[0].unknown_reason).toBe('no_account_row');
   });
 
-  it('최신 날짜에 계정 행이 없으면 계정 행이 있는 이전 날짜로 — 상세 행 날짜에 끌려가지 않는다', () => {
-    const out = pickLatestBalances(['D0130'], [
-      row({ CustId: 'D0130', DestDt: '20260723', StoreId: 'ca3fef1f-b614-485e-9cc5-ebd0a27f093f', MsgType: 'L', RemAmt: 0, UpdTm: '2026-07-24 05:00:17' }),
-      row({ CustId: 'D0130', DestDt: '20260722', StoreId: '', MsgType: 'L', RemAmt: 18445, UpdTm: '2026-07-24 05:00:17' }),
-    ]);
-    expect(out[0].rem_amt).toBe(18445);
-    expect(out[0].as_of_date).toBe('2026-07-22');
+  it('대표 행이 여럿이면 SeqNo 최대 — 입력 순서 무관하게 결정적', () => {
+    const older = row({ CustId: 'B0019', StoreId: 'B0019', RemAmt: 100, SeqNo: 10 });
+    const newer = row({ CustId: 'B0019', StoreId: 'B0019', RemAmt: 200, SeqNo: 20 });
+    expect(pickLedgerBalances(['B0019'], [older, newer])[0].rem_amt).toBe(200);
+    expect(pickLedgerBalances(['B0019'], [newer, older])[0].rem_amt).toBe(200);
   });
 
-  it('같은 UpdTm에 값이 어긋나면 MsgType 사전순 — 큰 값 우선 아님(과대 표시 편향 차단, Codex R3), 입력 순서 무관', () => {
-    const a = row({ CustId: 'B0225', DestDt: '20260723', UpdTm: '2026-07-24 05:00:17', MsgType: 'L', StoreId: '', RemAmt: 111 });
-    const b = row({ CustId: 'B0225', DestDt: '20260723', UpdTm: '2026-07-24 05:00:17', MsgType: 'S', StoreId: '', RemAmt: 222 });
-    const o1 = pickLatestBalances(['B0225'], [a, b]);
-    const o2 = pickLatestBalances(['B0225'], [b, a]);
-    expect(o1[0].rem_amt).toBe(111); // MsgType 'L' < 'S' — 222(큰 값)가 아니라 사전순 승자
-    expect(o2[0].rem_amt).toBe(111);
+  it('RemAmt null·빈 문자열·비수치는 0으로 강제 변환하지 않고 null(no_value)', () => {
+    const out = pickLedgerBalances(['A0', 'A1', 'A2'], [
+      row({ CustId: 'A0', StoreId: 'A0', RemAmt: null, SeqNo: 1 }),
+      row({ CustId: 'A1', StoreId: 'A1', RemAmt: '', SeqNo: 2 }),
+      row({ CustId: 'A2', StoreId: 'A2', RemAmt: 'abc', SeqNo: 3 }),
+    ]);
+    expect(out.map((o) => o.rem_amt)).toEqual([null, null, null]);
+    expect(out.map((o) => o.unknown_reason)).toEqual(['no_value', 'no_value', 'no_value']);
   });
 
-  it('RemAmt null·빈 문자열은 0으로 강제 변환하지 않고 null(미확정) (Codex R2 실버그)', () => {
-    const onlyNull = pickLatestBalances(['A0'], [
-      row({ CustId: 'A0', DestDt: '20260701', RemAmt: null, UpdTm: '2026-07-02 05:00:00' }),
-      row({ CustId: 'A0', DestDt: '20260701', RemAmt: '', UpdTm: '2026-07-02 06:00:00' }),
+  it('음수·0은 실값 그대로 (상계 계정)', () => {
+    const out = pickLedgerBalances(['B0114', 'C0083'], [
+      row({ CustId: 'B0114', StoreId: 'B0114', RemAmt: -645884, SeqNo: 1 }),
+      row({ CustId: 'C0083', StoreId: 'C0083', RemAmt: 0, SeqNo: 2 }),
     ]);
-    expect(onlyNull[0].rem_amt).toBeNull();
-
-    // 같은 UpdTm이면 값 보유 행 우선
-    const sameTime = pickLatestBalances(['A1'], [
-      row({ CustId: 'A1', DestDt: '20260701', RemAmt: null, UpdTm: '2026-07-02 05:00:00' }),
-      row({ CustId: 'A1', DestDt: '20260701', RemAmt: 7390.1, UpdTm: '2026-07-02 05:00:00' }),
-    ]);
-    expect(sameTime[0].rem_amt).toBe(7390.1);
-
-    // 최신 스냅샷(UpdTm)이 값 없음이면 fail-closed로 null — 옛 값으로 과대/과소 표시하지 않는다 (Codex R3 방향)
-    const newerNull = pickLatestBalances(['A2'], [
-      row({ CustId: 'A2', DestDt: '20260701', RemAmt: null, UpdTm: '2026-07-02 07:00:00' }),
-      row({ CustId: 'A2', DestDt: '20260701', RemAmt: 7390.1, UpdTm: '2026-07-02 05:00:00' }),
-    ]);
-    expect(newerNull[0].rem_amt).toBeNull();
+    expect(out[0].rem_amt).toBe(-645884);
+    expect(out[1].rem_amt).toBe(0);
+    expect(out.every((o) => o.unknown_reason === null)).toBe(true);
   });
 
-  it('custIds 순서를 보존하고 전 ID를 반환한다 (일부만 통계 보유)', () => {
-    const out = pickLatestBalances(['B0225', 'C0119', 'D0079'], [
-      row({ CustId: 'D0079', DestDt: '20260723', RemAmt: 10383500, UpdTm: '2026-07-24 05:00:17' }),
-      row({ CustId: 'B0225', DestDt: '20260601', RemAmt: 91277, UpdTm: '2026-06-02 05:00:01' }),
+  it('custIds 순서를 보존하고 전 ID를 반환한다 (일부만 원장 보유)', () => {
+    const out = pickLedgerBalances(['B0225', 'C0119', 'D0079'], [
+      row({ CustId: 'D0079', StoreId: 'D0079', RemAmt: 10384423, SeqNo: 8957 }),
+      row({ CustId: 'B0225', StoreId: 'B0225', RemAmt: 91277, SeqNo: 500 }),
     ]);
     expect(out.map((o) => o.agent_send_id)).toEqual(['B0225', 'C0119', 'D0079']);
-    expect(out[0].rem_amt).toBe(91277);
-    expect(out[1].rem_amt).toBeNull();
-    expect(out[2].rem_amt).toBe(10383500);
+    expect(out.map((o) => o.rem_amt)).toEqual([91277, null, 10384423]);
   });
 
-  it('RemAmt가 수치가 아니면 null(미확정) — NaN 노출 금지 / 음수·0은 실값 그대로', () => {
-    const out = pickLatestBalances(['A1', 'A2', 'A3'], [
-      row({ CustId: 'A1', DestDt: '20260701', RemAmt: 'abc', UpdTm: '2026-07-02 05:00:00' }),
-      row({ CustId: 'A2', DestDt: '20260701', RemAmt: -645884, UpdTm: '2026-07-02 05:00:00' }),
-      row({ CustId: 'A3', DestDt: '20260701', RemAmt: 0, UpdTm: '2026-07-02 05:00:00' }),
-    ]);
-    expect(out[0].rem_amt).toBeNull();
-    expect(out[1].rem_amt).toBe(-645884);
-    expect(out[2].rem_amt).toBe(0);
-  });
-
-  it('CustId 빈 행은 무시하고, 대상 외 CustId 행은 결과에 섞이지 않는다', () => {
-    const out = pickLatestBalances(['D0079'], [
-      row({ CustId: '', DestDt: '20260723', RemAmt: 999, UpdTm: '2026-07-24 05:00:17' }),
-      row({ CustId: 'Z9999', DestDt: '20260723', RemAmt: 888, UpdTm: '2026-07-24 05:00:17' }),
-      row({ CustId: 'D0079', DestDt: '20260716', RemAmt: 6822770, UpdTm: '2026-07-19 05:00:40' }),
+  it('CustId 빈 행·대상 외 계정은 결과에 섞이지 않는다 · 공백/대소문자 정규화', () => {
+    const out = pickLedgerBalances(['D0079'], [
+      row({ CustId: '', StoreId: '', RemAmt: 999, SeqNo: 1 }),
+      row({ CustId: 'Z9999', StoreId: 'Z9999', RemAmt: 888, SeqNo: 2 }),
+      row({ CustId: ' d0079 ', StoreId: ' D0079 ', RemAmt: 6822770, SeqNo: 3 }),
     ]);
     expect(out).toHaveLength(1);
+    expect(out[0].agent_send_id).toBe('D0079');
     expect(out[0].rem_amt).toBe(6822770);
   });
 });

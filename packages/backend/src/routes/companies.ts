@@ -11,7 +11,7 @@ import { normalizeOpt080Input } from '../utils/normalize';
 import { grantBasicTrial, isTrialApplyOpen } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
-import { parseAgentLedgerFields, parseAgentLedgerPatch } from '../utils/pay-stats';
+import { parseAgentLedgerFields, parseAgentLedgerPatch, getAgentCustNameMap } from '../utils/pay-stats';
 
 const router = Router();
 
@@ -2092,7 +2092,12 @@ router.get('/:id/agent-ids', requireUuidId, requireSuperAdmin, async (req: Reque
        FROM company_agent_ids WHERE company_id = $1 ORDER BY created_at ASC`,
       [id]
     );
-    return res.json({ agentIds: result.rows });
+    // ★ 2026-07-27 발급명(게이트웨이 RSRM_SalesMst.CustNm) 동반 — 매핑 화면이 회사명만 보여주면
+    //   런소프트처럼 발송ID 여럿인 회사에서 세 줄이 전부 같은 이름으로 읽힌다. 이름 소스는 게이트웨이 하나다.
+    const nameMap = await getAgentCustNameMap();
+    return res.json({
+      agentIds: result.rows.map((r: any) => ({ ...r, cust_name: nameMap.get(String(r.agent_send_id)) || null })),
+    });
   } catch (error: any) {
     console.error('에이전트 발송ID 목록 조회 에러:', error);
     const msg = error?.message || '';

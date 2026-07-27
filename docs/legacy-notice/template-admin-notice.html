@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>서비스 이전 안내 · 한줄로</title>
+<meta name="description" content="알림톡 템플릿 등록·검수는 한줄로(hanjul.ai)로 이전되었습니다.">
+<style>
+*, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    background: #08080e;
+    color: #0b0b0f;
+    font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont,
+                 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    word-break: keep-all;
+    line-height: 1.6;
+  }
+  a { color: #6d28d9; }
+  a:hover { color: #4c1d95; }
+  @keyframes dcRise { from { opacity: 0; transform: translateY(20px) scale(.985); } to { opacity: 1; transform: none; } }
+  @keyframes dcFade { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  @keyframes dcArrow { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(5px); } }
+  @keyframes dcScrim { from { opacity: 0; } to { opacity: 1; } }
+
+  @media (max-width: 600px) {
+    [data-t="scrim"] { padding: 0 !important; align-items: stretch !important; }
+    [data-t="card"] { border-radius: 0 !important; min-height: 100vh !important; }
+    [data-t="head"] { padding: 24px 22px 26px !important; }
+    [data-t="body"] { padding: 28px 22px 26px !important; }
+    [data-t="trans"] { grid-template-columns: 1fr !important; gap: 10px !important; }
+    [data-t="arrow"] { transform: rotate(90deg); height: 20px !important; }
+    [data-t="h1"] { font-size: 28px !important; }
+  }
+  @media (max-width: 380px) {
+    [data-t="h1"] { font-size: 25px !important; }
+    [data-t="sk"] { width: 60px !important; }
+  }
+
+  @media (prefers-color-scheme: dark) {
+    body { background: #050509; color: #e8e8ee; }
+    a { color: #c4b5fd; }
+    a:hover { color: #ddd6fe; }
+    [data-t="scrim"] { background: #050509 !important; }
+    [data-t="card"] { background: #121218 !important; box-shadow: 0 40px 90px -30px rgba(0,0,0,.9), 0 0 0 1px rgba(255,255,255,.07) !important; }
+    [data-t="body"] { background: #121218 !important; }
+    [data-t="h1"] { color: #f4f4f7 !important; }
+    [data-t="em"] { color: #c4b5fd !important; }
+    [data-t="lead"] { color: #a3a3ae !important; }
+    [data-t="lead"] b { color: #e0e0e8 !important; }
+    [data-t="row"] { border-color: #22222c !important; }
+    [data-t="rt"] { color: #f0f0f4 !important; }
+    [data-t="rd"] { color: #82828e !important; }
+    [data-t="num"] { color: #a78bfa !important; }
+    [data-t="signin"] { background: #17171f !important; border-color: #24242e !important; }
+    [data-t="sk"] { color: #7d7d89 !important; }
+    [data-t="sv"] { color: #c8c8d2 !important; }
+    [data-t="sv"] strong { color: #c4b5fd !important; }
+    [data-t="sv"] a { color: #c4b5fd !important; border-bottom-color: rgba(196,181,253,.45) !important; }
+    [data-t="cta"] { background: #7c3aed !important; }
+    [data-t="cta"]:hover { background: #6d28d9 !important; }
+    [data-t="sv"] a:hover { border-bottom-color: rgba(196,181,253,.95) !important; }
+    [data-t="foot"] a:hover { color: #c4b5fd !important; }
+    [data-t="ctasub"] { color: #74747f !important; }
+    [data-t="ctasub"] span { color: #c8c8d2 !important; }
+    [data-t="foot"] { border-color: #22222c !important; }
+    [data-t="foot"] a { color: #d0d0d8 !important; }
+    [data-t="hours"], [data-t="flabel"], [data-t="copy"] { color: #6b6b76 !important; }
+  }
+  /* interaction states */
+  .x-i1:hover { border-bottom-color: rgba(109,40,217,.95); }
+  .x-i2:hover { transform: translateY(-2px); background: #5b21b6; box-shadow: 0 22px 40px -18px rgba(109,40,217,.9); }
+  .x-i2:active { transform: translateY(0); }
+  .x-i3:hover { color: #6d28d9; }
+  .x-i4:hover { color: #6d28d9; }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-t] { animation: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div data-t="scrim" style="position: relative; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 40px 20px; background: #08080e; overflow: hidden;">
+
+  <div aria-hidden="true" style="position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(to right, rgba(255,255,255,.05) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,.05) 1px, transparent 1px); background-size: 64px 64px; -webkit-mask-image: radial-gradient(ellipse 80% 65% at 50% 45%, #000 20%, transparent 75%); mask-image: radial-gradient(ellipse 80% 65% at 50% 45%, #000 20%, transparent 75%); animation: dcScrim 1s ease both;"></div>
+  <div aria-hidden="true" style="position: absolute; top: -22%; left: 50%; width: 900px; height: 620px; margin-left: -450px; pointer-events: none; background: radial-gradient(ellipse at center, rgba(124,58,237,.30), rgba(124,58,237,0) 66%); filter: blur(20px); animation: dcScrim 1.2s ease both;"></div>
+
+  <main data-t="card" role="dialog" aria-modal="true" aria-labelledby="notice-title" style="position: relative; z-index: 1; width: 100%; max-width: 640px; background: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 40px 80px -32px rgba(0,0,0,.72), 0 0 0 1px rgba(255,255,255,.08); animation: dcRise .62s cubic-bezier(.2,.7,.2,1) both;">
+
+    <header data-t="head" style="position: relative; background: #2b0f5e; padding: 26px 36px 28px; overflow: hidden;">
+      <div aria-hidden="true" style="position: absolute; top: -140px; right: -80px; width: 380px; height: 300px; background: radial-gradient(ellipse at center, rgba(167,139,250,.38), rgba(167,139,250,0) 68%); pointer-events: none;"></div>
+
+      <div style="position: relative; display: flex; align-items: center; gap: 9px;">
+        <span style="width: 6px; height: 6px; border-radius: 999px; background: #a78bfa; flex: none;"></span>
+        <span style="font-size: 12px; font-weight: 600; letter-spacing: .17em; color: #c4b5fd;">서비스 이전 안내</span>
+      </div>
+
+      <div data-t="trans" style="position: relative; margin-top: 22px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px;">
+
+        <div style="border: 1px dashed rgba(255,255,255,.22); border-radius: 14px; padding: 13px 15px; background: rgba(255,255,255,.03);">
+          <div style="font-size: 11px; font-weight: 600; letter-spacing: .14em; color: rgba(255,255,255,.38);">이전 서비스</div>
+          <div style="margin-top: 7px; font-size: 15.5px; font-weight: 500; color: rgba(255,255,255,.46); text-decoration: line-through; text-decoration-color: rgba(255,255,255,.32); font-variant-numeric: tabular-nums; letter-spacing: -.01em;">event-admin.invitocorp.com</div>
+        </div>
+
+        <div data-t="arrow" aria-hidden="true" style="display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,.5); animation: dcArrow 2.4s ease-in-out infinite;">
+          <svg width="26" height="12" viewBox="0 0 26 12" fill="none">
+            <path d="M1 6h22M18.5 1 23.5 6l-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+
+        <div style="border: 1px solid rgba(255,255,255,.18); border-radius: 14px; padding: 13px 15px; background: rgba(255,255,255,.11); box-shadow: 0 10px 24px -14px rgba(0,0,0,.6);">
+          <div style="font-size: 11px; font-weight: 600; letter-spacing: .14em; color: #c4b5fd;">현재 서비스</div>
+          <div style="margin-top: 6px; display: flex; align-items: baseline; gap: 9px;">
+            <img src="data:image/png;base64,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" alt="한줄로" style="height: 19px; width: auto; display: block;">
+            <span style="font-size: 13.5px; color: rgba(255,255,255,.62); font-variant-numeric: tabular-nums;">hanjul.ai</span>
+          </div>
+        </div>
+
+      </div>
+    </header>
+
+    <div data-t="body" style="background: #ffffff; padding: 34px 36px 30px;">
+
+      <div style="animation: dcFade .5s cubic-bezier(.2,.7,.2,1) .10s both;">
+        <h1 data-t="h1" id="notice-title" style="margin: 0; font-size: 33px; line-height: 1.32; font-weight: 700; letter-spacing: -.035em; color: #0b0b0f;">템플릿 관리는 이제<br><span data-t="em" style="color: #6d28d9;">한줄로</span>에서 하세요.</h1>
+        <p data-t="lead" style="margin: 16px 0 0; font-size: 16.5px; line-height: 1.78; color: #55555f;">이 사이트의 로그인은 <b style="color: #2a2a31; font-weight: 600;">종료되었습니다</b>. 등록하신 알림톡 템플릿과 발신프로필은 모두 <b style="color: #2a2a31; font-weight: 600;">한줄로(hanjul.ai)</b>로 이관을 마쳤습니다.</p>
+      </div>
+
+        <div style="margin-top: 26px; animation: dcFade .5s cubic-bezier(.2,.7,.2,1) .16s both;">
+          <div data-t="row" style="display: grid; grid-template-columns: 26px 1fr; gap: 0 14px; padding: 15px 0; border-top: 1px solid #ededf1;">
+            <span data-t="num" style="font-size: 12.5px; font-weight: 700; color: #7c3aed; font-variant-numeric: tabular-nums; padding-top: 3px;">01</span>
+            <div>
+              <div data-t="rt" style="font-size: 16.5px; font-weight: 600; color: #0b0b0f; letter-spacing: -.02em;">템플릿 등록·검수 요청</div>
+              <div data-t="rd" style="margin-top: 5px; font-size: 14.5px; line-height: 1.72; color: #8e8e99;">등록하면 검수 요청까지 한 번에 진행되고, 승인 결과가 자동으로 반영됩니다.</div>
+            </div>
+          </div>
+          <div data-t="row" style="display: grid; grid-template-columns: 26px 1fr; gap: 0 14px; padding: 15px 0; border-top: 1px solid #ededf1;">
+            <span data-t="num" style="font-size: 12.5px; font-weight: 700; color: #7c3aed; font-variant-numeric: tabular-nums; padding-top: 3px;">02</span>
+            <div>
+              <div data-t="rt" style="font-size: 16.5px; font-weight: 600; color: #0b0b0f; letter-spacing: -.02em;">발신프로필·기존 템플릿</div>
+              <div data-t="rd" style="margin-top: 5px; font-size: 14.5px; line-height: 1.72; color: #8e8e99;">쓰시던 발신프로필과 승인 템플릿이 그대로 옮겨져 있습니다. 다시 등록하지 않으셔도 됩니다.</div>
+            </div>
+          </div>
+          <div data-t="row" style="display: grid; grid-template-columns: 26px 1fr; gap: 0 14px; padding: 15px 0; border-top: 1px solid #ededf1; border-bottom: 1px solid #ededf1;">
+            <span data-t="num" style="font-size: 12.5px; font-weight: 700; color: #7c3aed; font-variant-numeric: tabular-nums; padding-top: 3px;">03</span>
+            <div>
+              <div data-t="rt" style="font-size: 16.5px; font-weight: 600; color: #0b0b0f; letter-spacing: -.02em;">반려 사유 확인</div>
+              <div data-t="rd" style="margin-top: 5px; font-size: 14.5px; line-height: 1.72; color: #8e8e99;">검수에서 반려되면 사유가 화면에 바로 표시되어 수정 후 재요청하실 수 있습니다.</div>
+            </div>
+          </div>
+        </div>
+
+        <div data-t="signin" style="margin-top: 24px; background: #f8f8fa; border: 1px solid #ededf1; border-radius: 16px; padding: 16px 18px; display: grid; gap: 10px; animation: dcFade .5s cubic-bezier(.2,.7,.2,1) .22s both;">
+          <div style="display: grid; grid-template-columns: 72px 1fr; gap: 12px; align-items: baseline;">
+            <span data-t="sk" style="font-size: 13.5px; font-weight: 600; color: #8e8e99;">아이디</span>
+            <span data-t="sv" style="font-size: 15.5px; line-height: 1.62; color: #2a2a31;">기존에 사용하시던 <strong style="color: #6d28d9; font-weight: 700;">아이디 그대로</strong> 로그인하실 수 있습니다.</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 72px 1fr; gap: 12px; align-items: baseline;">
+            <span data-t="sk" style="font-size: 13.5px; font-weight: 600; color: #8e8e99;">비밀번호</span>
+            <span data-t="sv" style="font-size: 15.5px; line-height: 1.62; color: #2a2a31;"><a class="x-i1" href="tel:18008125" style="color: #6d28d9; font-weight: 700; text-decoration: none; border-bottom: 1px solid rgba(109,40,217,.35); transition: border-color .18s ease;">고객센터</a>로 문의해 주시면 안내해 드립니다.</span>
+          </div>
+        </div>
+
+      <div style="margin-top: 26px; animation: dcFade .5s cubic-bezier(.2,.7,.2,1) .28s both;">
+        <a class="x-i2" data-t="cta" href="https://hanjul.ai" target="_blank" rel="noopener" style="display: flex; align-items: center; justify-content: center; gap: 11px; width: 100%; height: 60px; background: #6d28d9; color: #ffffff; font-size: 17px; font-weight: 700; letter-spacing: -.015em; text-decoration: none; border-radius: 14px; box-shadow: 0 16px 32px -16px rgba(109,40,217,.85); transition: transform .22s cubic-bezier(.2,.7,.2,1), box-shadow .22s ease, background .22s ease;">
+          한줄로 바로가기
+          <svg width="19" height="15" viewBox="0 0 18 14" fill="none" aria-hidden="true">
+            <path d="M1 7h14M11 1.5 16.5 7 11 12.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </a>
+        <p data-t="ctasub" style="margin: 11px 0 0; text-align: center; font-size: 13.5px; color: #8e8e99;">주소창에 <span style="color: #2a2a31; font-weight: 600;">hanjul.ai</span> 를 입력하셔도 됩니다.</p>
+      </div>
+
+      <footer data-t="foot" style="margin-top: 26px; padding-top: 18px; border-top: 1px solid #ededf1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; animation: dcFade .5s cubic-bezier(.2,.7,.2,1) .34s both;">
+        <span data-t="flabel" style="font-size: 11.5px; font-weight: 600; letter-spacing: .14em; color: #b9b9c2;">고객센터</span>
+        <a class="x-i3" href="tel:18008125" style="font-size: 15px; font-weight: 600; color: #2a2a31; text-decoration: none; font-variant-numeric: tabular-nums; transition: color .18s ease;">1800-8125</a>
+        <a class="x-i4" href="mailto:mobile@invitocorp.com" style="font-size: 15px; font-weight: 600; color: #2a2a31; text-decoration: none; transition: color .18s ease;">mobile@invitocorp.com</a>
+        <span data-t="hours" style="font-size: 13.5px; color: #8e8e99;">평일 10:00 – 18:00</span>
+        <span data-t="copy" style="margin-left: auto; font-size: 12.5px; color: #b9b9c2;">© INVITO</span>
+      </footer>
+
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

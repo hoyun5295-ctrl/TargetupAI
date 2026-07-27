@@ -316,6 +316,9 @@ function buildConfigFromEnv(): Record<string, unknown> {
       username: env.DB_USER || '',
       password: env.DB_PASSWORD || '',
       queryTimeout: parseInt(env.DB_QUERY_TIMEOUT || '30000', 10),
+      // ★ 2026-07-27 DB_SSL=true 면 암호화 연결(Aurora/RDS 등 TLS 강제 환경).
+      ssl: String(env.DB_SSL || '').toLowerCase() === 'true',
+      sslCaPath: env.DB_SSL_CA || undefined,
     },
     sync: {
       customerInterval: parseInt(env.SYNC_CUSTOMER_INTERVAL || '60', 10),

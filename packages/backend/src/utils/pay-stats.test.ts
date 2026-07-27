@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fetchCustNames, groupStoreRows, validateStatsDateRange, resolveRelayOwnerCustId, isRelayCustId } from './pay-stats';
+import {
+  fetchCustNames, groupStoreRows, validateStatsDateRange, resolveRelayOwnerCustId, isRelayCustId,
+  reduceCustNameRows, formatAgentIdLabel,
+} from './pay-stats';
 
 // RSRM_SalesStts 집계 결과 원본 행 형태(SUM alias tot/ok/fl/rd)
 const raw = (o: Partial<{ DestDt: string; CustId: string; StoreId: string; MsgType: string; tot: number; ok: number; fl: number; rd: number }>) =>
@@ -66,6 +69,46 @@ describe('fetchCustNames — 발송ID(CustId) → 발급명(CustNm) 맵 (서수�
     const errPool = { query: async () => { throw new Error('boom'); } } as any;
     const map = await fetchCustNames(errPool, ['B0039']);
     expect(map.size).toBe(0);
+  });
+});
+
+describe('reduceCustNameRows — 원장 행 → 발급명 맵 (순수)', () => {
+  it('빈 입력·null 안전', () => {
+    expect(reduceCustNameRows([]).size).toBe(0);
+    expect(reduceCustNameRows(null as any).size).toBe(0);
+  });
+
+  it('CustId별 first-wins + 공백 트림 + 빈 값 제외', () => {
+    const map = reduceCustNameRows([
+      { CustId: 'C0130', CustNm: '런소프트3' },
+      { CustId: 'C0130', CustNm: '옛이름' },
+      { CustId: ' D0078 ', CustNm: ' 런소프트 ' },
+      { CustId: 'D0079', CustNm: '' },
+      { CustId: '', CustNm: '이름만' },
+    ]);
+    expect(map.get('C0130')).toBe('런소프트3');
+    expect(map.get('D0078')).toBe('런소프트');
+    expect(map.has('D0079')).toBe(false);
+    expect(map.size).toBe(2);
+  });
+});
+
+describe('formatAgentIdLabel — 발송ID 표시 라벨 단일 규칙 (2026-07-27)', () => {
+  it('발급명 있으면 "발송ID / 발급명"', () => {
+    expect(formatAgentIdLabel('C0130', '런소프트3')).toBe('C0130 / 런소프트3');
+    expect(formatAgentIdLabel('D0079', '런소프트2')).toBe('D0079 / 런소프트2');
+  });
+
+  it('발급명 없으면 발송ID만 — 회사명으로 대체하지 않는다(세 ID가 같은 이름으로 보이는 증상의 원인)', () => {
+    expect(formatAgentIdLabel('C0130')).toBe('C0130');
+    expect(formatAgentIdLabel('C0130', null)).toBe('C0130');
+    expect(formatAgentIdLabel('C0130', '   ')).toBe('C0130');
+  });
+
+  it('공백 트림 · 발송ID 없으면 발급명만', () => {
+    expect(formatAgentIdLabel(' C0130 ', ' 런소프트3 ')).toBe('C0130 / 런소프트3');
+    expect(formatAgentIdLabel('', '런소프트3')).toBe('런소프트3');
+    expect(formatAgentIdLabel(null, null)).toBe('');
   });
 });
 

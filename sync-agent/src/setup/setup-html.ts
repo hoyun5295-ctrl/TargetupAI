@@ -308,6 +308,19 @@ export const SETUP_HTML = `<!DOCTYPE html>
         <input type="password" id="dbPassword" placeholder="DB 비밀번호" />
       </div>
     </div>
+    <!-- ★ 2026-07-27 클라우드 DB(AWS Aurora/RDS, Azure 등)는 암호화 연결만 허용하는 경우가 있다.
+         켜지 않으면 서버가 접속을 거부한다(MySQL 오류 3159). 사내망 DB는 끈 채로 두면 된다. -->
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <input type="checkbox" id="dbSsl" style="width:auto;margin:0;" />
+        <span>암호화(TLS) 연결 사용 — 클라우드 DB(Aurora·RDS·Azure)에서 필요</span>
+      </label>
+      <div style="font-size:12px;color:#888;margin-top:4px;">
+        접속이 "암호화되지 않은 연결은 허용되지 않습니다" 류 오류로 막히면 이 항목을 켜세요.
+        <b>CA 파일을 비워 두면 통신만 암호화하고 서버 인증서는 검증하지 않습니다.</b>
+      </div>
+      <input type="text" id="dbSslCa" placeholder="CA 인증서 파일 경로 (선택 — 비우면 인증서 검증 안 함)" style="margin-top:6px;" />
+    </div>
 
     <button class="btn btn-success" onclick="testDbConnection()" id="btnTestDb">
       🔌 접속 테스트
@@ -939,6 +952,8 @@ export const SETUP_HTML = `<!DOCTYPE html>
         username: $('dbUser').value.trim(),
         password: $('dbPassword').value.trim(),
         queryTimeout: 30000,
+        ssl: $('dbSsl').checked, // ★ 2026-07-27 암호화 연결(클라우드 DB)
+        sslCaPath: $('dbSslCa').value.trim() || undefined,
       },
       sync: {
         customerInterval: parseInt($('customerInterval').value, 10),
@@ -996,6 +1011,10 @@ export const SETUP_HTML = `<!DOCTYPE html>
       database: $('dbName').value.trim(),
       username: $('dbUser').value.trim(),
       password: $('dbPassword').value.trim(),
+      // 접속 테스트도 본 연결과 같은 조건으로 — 테스트만 평문이거나 CA를 빼면
+      // "테스트는 됐는데 본 연결이 막히는" 불일치가 된다(Codex 2R-5).
+      ssl: $('dbSsl').checked,
+      sslCaPath: $('dbSslCa').value.trim() || undefined,
     };
   }
 

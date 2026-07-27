@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { queryPayAgentBalances } from '../utils/pay-stats';
+import { queryPayAgentBalances, getAgentCustNameMap } from '../utils/pay-stats';
 import { resolveChargeUnitPrice } from '../utils/unit-price';
 
 const router = Router();
@@ -63,11 +63,15 @@ router.get('/agent', async (req: Request, res: Response) => {
     }
 
     const balances = await queryPayAgentBalances(companyId);
+    // ★ 2026-07-27 발급명 동반 — 고객사는 내부 코드(D0078)가 아니라 자기 발급명(런소프트)으로 계정을 안다.
+    const nameMap = await getAgentCustNameMap();
     res.json({
       balances: balances.map((b) => ({
         agentSendId: b.agent_send_id,
+        custName: nameMap.get(String(b.agent_send_id)) || null,
         remAmt: b.rem_amt,
-        asOfDate: b.as_of_date,
+        // ★ 2026-07-27 asOfDate 폐기 — 원장 실시간 잔액이라 기준일이 없다(통계 스냅샷 시절의 축).
+        unknownReason: b.unknown_reason,
       })),
     });
   } catch (error: any) {

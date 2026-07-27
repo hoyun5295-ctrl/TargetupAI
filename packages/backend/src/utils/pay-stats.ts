@@ -306,9 +306,8 @@ async function fetchRelayRows(pool: any, fromDt: string | null, toDt: string | n
  * 한 CustId에 원장 행이 여럿(계정×지점 730행/499 CustId)일 수 있어, ORDER BY로 최신행(UpdTm→SeqNo)을 결정적으로 채택한다.
  */
 export async function fetchCustNames(pool: any, custIds: string[]): Promise<Map<string, string>> {
-  const map = new Map<string, string>();
   const ids = Array.from(new Set(custIds.map((c) => String(c).trim()).filter(Boolean)));
-  if (ids.length === 0) return map;
+  if (ids.length === 0) return new Map<string, string>();
   try {
     const [rows] = await pool.query(
       `SELECT CustId, CustNm FROM RSRM_SalesMst
@@ -316,16 +315,126 @@ export async function fetchCustNames(pool: any, custIds: string[]): Promise<Map<
         ORDER BY CustId, UpdTm DESC, SeqNo DESC`,
       ids,
     );
-    // ORDER BY로 CustId별 최신행이 먼저 오므로, 첫 항목(!map.has)이 최신 이름 = 결정적.
-    for (const r of rows as any[]) {
-      const id = String(r.CustId || '').trim();
-      const nm = String(r.CustNm || '').trim();
-      if (id && nm && !map.has(id)) map.set(id, nm);
-    }
+    return reduceCustNameRows(rows as any[]);
   } catch (err: any) {
     console.log('[pay-stats] 발급명(CustNm) 조회 실패 — CustId만 표시:', err?.message || err);
+    return new Map<string, string>();
+  }
+}
+
+/**
+ * (순수) 원장 행 → CustId별 발급명 맵.
+ * ORDER BY(CustId, UpdTm DESC, SeqNo DESC)로 CustId별 최신행이 먼저 오므로 첫 항목이 최신 이름 = 결정적.
+ * 빈 이름·빈 CustId는 버린다(맵에 없음 = 호출부가 발송ID만 표시).
+ */
+export function reduceCustNameRows(rows: any[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const r of rows || []) {
+    const id = String(r?.CustId || '').trim();
+    const nm = String(r?.CustNm || '').trim();
+    if (id && nm && !map.has(id)) map.set(id, nm);
   }
   return map;
+}
+
+/**
+ * ★ 2026-07-27 발송ID 표시명 단일 규칙 (Harold 지시 — "PAY에 저장된 고객사명을 그대로 모든 곳에서 통일").
+ *
+ * 표시 소스는 게이트웨이 원장 `RSRM_SalesMst.CustNm`(발급명) **하나뿐**이다. 우리 DB에 표시명 컬럼을 두지 않는다
+ * (두면 두 이름이 갈려 지금 문제가 그대로 재현된다 — 이중 진실 금지, 6원칙 ③).
+ * 회사명으로 대체하지 않는 이유: 한 회사가 발송ID를 여럿 갖는 게 기본(런소프트 = C0130·D0078·D0079)이라
+ * 회사명 폴백은 세 줄이 전부 "런소프트"로 보이는 바로 그 증상을 만든다.
+ */
+export function formatAgentIdLabel(sendId: string | null | undefined, custName?: string | null): string {
+  const id = String(sendId ?? '').trim();
+  const nm = String(custName ?? '').trim();
+  if (!id) return nm;
+  return nm ? `${id} / ${nm}` : id;
+}
+
+/** 발급명 원장 캐시 TTL. 화면 진입마다 730행을 다시 읽지 않게 하되, 원장 변경 반영은 1분 안에. */
+export const CUST_NAME_CACHE_TTL_MS = 60_000;
+/**
+ * 발급명 조회 데드라인. ★ Codex 1R-P1 정정.
+ * `catch`는 reject되어야 돈다 — 게이트웨이 MySQL이 응답 없이 멎으면(TCP 블랙홀·풀 고갈) 영원히 기다린다.
+ * 그 대기를 **정산 상세·발행 미리보기가 동기로 붙들고** 있어서, 표시용 이름 하나가 정산 화면을 막을 수 있었다.
+ * 이름은 있으면 좋은 값이지 화면을 지연시킬 값이 아니다 — 시간이 지나면 그냥 없이 간다.
+ */
+export const CUST_NAME_QUERY_TIMEOUT_MS = 3_000;
+let _custNameCache: { at: number; map: Map<string, string> } | null = null;
+/** 진행 중 조회 공유(single-flight) — 동시 캐시 미스가 커넥션 3개(풀 상한)를 함께 점유하던 것 차단(Codex 1R-P1). */
+let _custNameInflight: Promise<Map<string, string>> | null = null;
+
+/** 테스트·운영 진단용 캐시 무효화. */
+export function resetCustNameCache(): void {
+  _custNameCache = null;
+  _custNameInflight = null;
+}
+
+/**
+ * 발송ID(CustId) → 발급명(CustNm) **전량** 맵 (60초 캐시).
+ * 발송ID를 노출하는 모든 화면(매핑·충전·요청·잔액·청구서 상세)이 같은 이름을 쓰도록 하는 단일 진입점이다.
+ * - PAY env 미설정 = 빈 맵(기능은 그대로, 이름만 미표시).
+ * - 조회 실패 = 직전 캐시 유지(있으면). 이름 때문에 화면이 죽지 않게 절대 throw하지 않는다.
+ * 원장은 730행 규모(0727 실측: 730행·발급명 빈 값 0)라 전량 로드가 IN 조회보다 단순하고 캐시 적중도 좋다.
+ */
+export async function getAgentCustNameMap(): Promise<Map<string, string>> {
+  const now = Date.now();
+  if (_custNameCache && now - _custNameCache.at < CUST_NAME_CACHE_TTL_MS) return _custNameCache.map;
+  // 이미 같은 조회가 돌고 있으면 거기 합류한다 — 미스가 겹칠 때 커넥션을 나눠 먹지 않는다.
+  if (_custNameInflight) return _custNameInflight;
+
+  /** 실패·지연 시 돌려줄 값 — 직전 캐시가 있으면 그것(이름은 잠깐 낡아도 무해), 없으면 빈 맵. */
+  const fallback = (): Map<string, string> => _custNameCache?.map ?? new Map<string, string>();
+
+  const run = (async (): Promise<Map<string, string>> => {
+    try {
+      // 풀 생성까지 try 안에 둔다 — 이름은 표시용이라 어떤 실패도 화면을 죽이면 안 된다.
+      const pool = getPool();
+      if (!pool) return fallback();
+
+      // 응답이 아예 안 오는 경우까지 막으려면 데드라인이 필요하다(reject가 없으면 catch도 안 돈다).
+      const query = pool
+        .query(
+          `SELECT CustId, CustNm FROM RSRM_SalesMst
+            WHERE CustNm <> ''
+            ORDER BY CustId, UpdTm DESC, SeqNo DESC`,
+        )
+        .then((r: any) => ({ ok: true as const, rows: r[0] as any[] }))
+        // 데드라인을 넘긴 뒤 늦게 도착한 실패가 unhandled rejection이 되지 않게 여기서 삼킨다.
+        .catch((err: any) => {
+          console.log('[pay-stats] 발급명 원장 조회 실패 — 발송ID만 표시:', err?.message || err);
+          return { ok: false as const };
+        });
+
+      let timer: NodeJS.Timeout | undefined;
+      const deadline = new Promise<{ ok: false }>((resolve) => {
+        timer = setTimeout(() => resolve({ ok: false as const }), CUST_NAME_QUERY_TIMEOUT_MS);
+        // 이 타이머 하나 때문에 프로세스가 안 죽는 일이 없게(워커·CLI 종료 지연 방지).
+        if (typeof timer.unref === 'function') timer.unref();
+      });
+
+      const result = await Promise.race([query, deadline]);
+      if (timer) clearTimeout(timer);
+
+      if (!result.ok) {
+        console.log(`[pay-stats] 발급명 원장 조회 ${CUST_NAME_QUERY_TIMEOUT_MS}ms 초과 — 발송ID만 표시`);
+        return fallback();
+      }
+
+      const map = reduceCustNameRows(result.rows);
+      _custNameCache = { at: Date.now(), map };
+      return map;
+    } catch (err: any) {
+      console.log('[pay-stats] 발급명 원장 조회 실패 — 발송ID만 표시:', err?.message || err);
+      return fallback();
+    } finally {
+      _custNameInflight = null;
+    }
+  })();
+
+  _custNameInflight = run;
+  return run;
 }
 
 /**
@@ -852,19 +961,13 @@ export async function queryPayAgentStoreBreakdown(options: {
 
 export interface PayAgentBalance {
   agent_send_id: string;
-  rem_amt: number | null; // null = 통계 행 없음/값 미확정(집계 전) — 실제 0원과 구분(Codex R1-2)
-  as_of_date: string; // 'YYYY-MM-DD' — 게이트웨이 일별 통계의 최신 기준일(DestDt). ''=집계 전
-  updated_at: string; // 그 행의 게이트웨이 갱신 시각(UpdTm)
+  rem_amt: number | null; // null = 잔액 미확정 — 실제 0원과 구분(0원으로 보이면 불필요한 충전을 부른다)
+  /** null 사유 — no_row(원장에 계정 없음) / no_account_row(대표 행 없음·지점 행만) / no_value(RemAmt 비수치) */
+  unknown_reason: 'no_row' | 'no_account_row' | 'no_value' | null;
 }
 
-export interface PayBalanceSourceRow {
-  CustId?: any; DestDt?: any; RemAmt?: any; UpdTm?: any; MsgType?: any; StoreId?: any;
-}
-
-function updTmMs(v: any): number {
-  if (v instanceof Date) return v.getTime();
-  const t = Date.parse(String(v || '').replace(' ', 'T'));
-  return Number.isFinite(t) ? t : 0;
+export interface PayLedgerRow {
+  CustId?: any; StoreId?: any; RemAmt?: any; SeqNo?: any;
 }
 
 // RemAmt 원값 정규화 — null/undefined/빈 문자열은 "값 없음"(NaN)으로. Number(null)=0 강제 변환 차단(Codex R2 실버그).
@@ -873,53 +976,48 @@ function remAmtNum(v: any): number {
   return Number(v);
 }
 
-// ★ 권위 행 확정(§8-9 행 단위 실측 0724): RemAmt는 **StoreId=''(계정 합계 행)에만** 실린다.
-//   D0130 실증 — 빈 StoreId 행(L·S)은 둘 다 18,445(같은 값 복제), UUID StoreId 상세 행은 전부 0. B0001 동일('alarm' 행 0).
-//   → pickLatestBalances는 StoreId 빈 행만 잔액 소스로 쓴다. PK가 (DestDt,CustId,StoreId,MsgType)라 StoreId는 NOT NULL('' 비교로 충분).
-// 잔액 행 우선순위(계정 행 안에서) — DestDt 최대 → UpdTm 최신 → 값 보유(비NaN) 우선 → MsgType·StoreId 사전순.
-// ⚠ "큰 값 우선" 축은 두지 않는다(Codex R3 — 계정 행 간 값이 어긋나는 미관측 상황에서 잔액 과대 표시 편향 차단).
-//   실측상 같은 날 계정 행 RemAmt는 동일 복제(D0130 L·S 둘 다 18,445)라 값 축 자체가 불필요하고,
-//   어긋나면 최신 스냅샷(UpdTm)이 이기며, 그마저 같으면 MsgType 사전순으로 결정적이다.
-function balanceRowRank(a: PayBalanceSourceRow, b: PayBalanceSourceRow): number {
-  const da = String(a.DestDt || ''), db = String(b.DestDt || '');
-  if (da !== db) return da > db ? -1 : 1;
-  const ua = updTmMs(a.UpdTm), ub = updTmMs(b.UpdTm);
-  if (ua !== ub) return ua > ub ? -1 : 1;
-  const ha = Number.isFinite(remAmtNum(a.RemAmt)) ? 0 : 1;
-  const hb = Number.isFinite(remAmtNum(b.RemAmt)) ? 0 : 1;
-  if (ha !== hb) return ha - hb; // 값 보유 행 > 값 없는(null) 행 — 동시각 한정
-  const ma = String(a.MsgType || ''), mb = String(b.MsgType || '');
-  if (ma !== mb) return ma < mb ? -1 : 1;
-  const sa = String(a.StoreId || ''), sb = String(b.StoreId || '');
-  if (sa !== sb) return sa < sb ? -1 : 1;
-  return 0;
-}
-
 /**
- * 순수 선택 로직(테스트 대상) — CustId별 최우선 행 1건을 골라 custIds 순서대로 반환.
- * 통계 행이 없는 ID는 rem_amt=null(집계 전)로 합성해 조용한 누락을 막되, 0원으로 오인시키지 않는다.
- * RemAmt가 수치가 아니면 null(미확정) 처리.
+ * 순수 선택 로직(테스트 대상) — 계정 원장 `RSRM_SalesMst`에서 CustId별 잔액 1건을 골라 custIds 순서대로 반환.
+ *
+ * ★ 2026-07-27 잔액 소스 정정 (Harold 지적 + 실측):
+ *   옛 소스였던 일별 통계 `RSRM_SalesStts.RemAmt`는 **잔액이 아니었다.**
+ *   실측 — C0130은 전 기간 통계 행 RemAmt=0인데 원장은 640,281.625다. 통계 행 UpdTm도 DestDt+6일(배치 후적재)이라
+ *   화면이 "07-09 기준 0원"을 현재 잔액처럼 보여줬다. 실제 잔액은 발송이 나가는 대로 실시간으로 깎인다
+ *   (D0078: 4,881,401.2 → 몇 분 뒤 4,881,227.5). 62와 143의 원장 값이 완전히 일치해 62 사본도 살아 있음이 확인됐다.
+ *   원장 `UpdTm`은 **계정 생성·정보 수정 시각**이지 잔액 갱신 시각이 아니다(2023~2024에 멈춰 있음) — 기준일로 쓸 수 없다.
+ *
+ * 권위 행 = **StoreId = CustId(계정 대표 행)**. 0727 실측: 다중 행 계정은 대부분 대표 행 1개에만 잔액이 실리고
+ * 나머지 지점 행은 0이다. 대표 행이 없는 계정(B0046 200행·B0021·B0062)은 **합산하지 않고 미확정(null)** 으로 둔다 —
+ * 지점 지갑의 합이 계정 잔액이라는 근거가 없고, 돈은 틀린 숫자보다 "확인 불가"가 낫다.
  */
-export function pickLatestBalances(custIds: string[], rows: PayBalanceSourceRow[]): PayAgentBalance[] {
-  const best = new Map<string, PayBalanceSourceRow>();
-  for (const r of rows) {
-    const cid = String(r.CustId || '').trim();
+export function pickLedgerBalances(custIds: string[], rows: PayLedgerRow[]): PayAgentBalance[] {
+  const byCust = new Map<string, PayLedgerRow[]>();
+  for (const r of rows || []) {
+    const cid = String(r?.CustId ?? '').trim().toUpperCase();
     if (!cid) continue;
-    if (String(r.StoreId || '').trim() !== '') continue; // 권위 행 = StoreId 빈 계정 합계 행만(§8-9 확정) — 상세 행 RemAmt=0 오염 차단
-    const cur = best.get(cid);
-    if (!cur || balanceRowRank(r, cur) < 0) best.set(cid, r);
+    const arr = byCust.get(cid);
+    if (arr) arr.push(r); else byCust.set(cid, [r]);
   }
-  return custIds.map((cid) => {
-    const r = best.get(cid);
-    if (!r) return { agent_send_id: cid, rem_amt: null, as_of_date: '', updated_at: '' };
-    const dt = String(r.DestDt || '');
-    const amt = remAmtNum(r.RemAmt); // null/''=값 없음 → null (0원 강제 변환 금지 — Codex R2)
-    return {
-      agent_send_id: cid,
-      rem_amt: Number.isFinite(amt) ? amt : null,
-      as_of_date: /^\d{8}$/.test(dt) ? `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}` : '',
-      updated_at: String(r.UpdTm || ''),
-    };
+
+  return custIds.map((raw) => {
+    const cid = String(raw ?? '').trim();
+    const key = cid.toUpperCase();
+    const all = byCust.get(key);
+    if (!all || all.length === 0) {
+      return { agent_send_id: cid, rem_amt: null, unknown_reason: 'no_row' as const };
+    }
+    // 대표 행만 후보. 여러 개면 SeqNo 최대(결정적) — 실측상 계정당 1개지만 순서 의존을 남기지 않는다.
+    const account = all
+      .filter((r) => String(r?.StoreId ?? '').trim().toUpperCase() === key)
+      .sort((a, b) => (Number(b?.SeqNo) || 0) - (Number(a?.SeqNo) || 0))[0];
+    if (!account) {
+      return { agent_send_id: cid, rem_amt: null, unknown_reason: 'no_account_row' as const };
+    }
+    const amt = remAmtNum(account.RemAmt); // null/''=값 없음 → null (0원 강제 변환 금지 — Codex R2)
+    if (!Number.isFinite(amt)) {
+      return { agent_send_id: cid, rem_amt: null, unknown_reason: 'no_value' as const };
+    }
+    return { agent_send_id: cid, rem_amt: amt, unknown_reason: null };
   });
 }
 
@@ -1004,9 +1102,10 @@ export function parseAgentLedgerPatch(body: any): AgentLedgerPatch | { error: st
 
 /**
  * ★ 2026-07-24 §5-2 — 발송ID별 게이트웨이 잔액 조회 (선불 prepaid ID만).
- * 잔액 = RSRM_SalesStts에서 CustId별 MAX(DestDt) 행의 RemAmt(같은 날 복수 행이면 UpdTm 최신 행).
- * 저장하지 않는다(이중 진실 금지) — 조회만. 과거 적재분(dump 복원·0715 이전)은 RemAmt=0이라
- * as_of_date를 반드시 함께 노출해 stale 여부를 사용자가 식별하게 한다(0724 실측 근거).
+ * ★ 2026-07-27 소스 정정: 일별 통계(`RSRM_SalesStts.RemAmt`) → **계정 원장 `RSRM_SalesMst.RemAmt`**.
+ *   통계 행은 잔액이 아니었다(C0130 전 기간 0 vs 원장 640,281.625). 원장 값은 발송이 나가는 대로 실시간으로 깎인다.
+ *   기준일(as_of_date) 개념도 함께 폐기 — 원장 `UpdTm`은 계정 생성·수정 시각이라 잔액 기준일이 될 수 없다.
+ * 저장하지 않는다(이중 진실 금지) — 조회만.
  * PAY env 미설정 = 기능 자체 비활성 — PG 검증 없이 빈 배열(의도. 이 경로에선 503 분기 미작동이 정상).
  * MySQL 연결/조회 실패 = 빈 배열(호출부 미노출 폴백).
  * 단 PG 에러(billing_type 컬럼 미마이그레이션 등)는 그대로 던진다 — 라우트 catch의 503 분기용.
@@ -1318,17 +1417,22 @@ export async function queryPayAgentBalances(companyId: string): Promise<PayAgent
   if (custIds.length === 0) return [];
 
   try {
-    // 계정 합계 행(StoreId='')만 — MAX(DestDt) 산정도 계정 행 기준(상세 행만 있는 날짜로 끌려가는 것 방지). 규칙 자체는 pickLatestBalances에도 이중 적용.
+    // 계정 원장 전 행을 가져와 대표 행 판정은 순수 함수(pickLedgerBalances)가 한다 —
+    // SQL에서 StoreId=CustId로 걸러버리면 "대표 행이 없는 계정"과 "계정 자체가 없는 경우"를 구분할 수 없다.
     const ph = custIds.map(() => '?').join(',');
     const [rows] = await pool.query(
-      `SELECT s.CustId, s.DestDt, s.RemAmt, s.UpdTm, s.MsgType, s.StoreId
-         FROM RSRM_SalesStts s
-         JOIN (SELECT CustId, MAX(DestDt) AS mx FROM RSRM_SalesStts WHERE CustId IN (${ph}) AND StoreId = '' GROUP BY CustId) m
-           ON m.CustId = s.CustId AND m.mx = s.DestDt
-        WHERE s.StoreId = ''`,
+      `SELECT CustId, StoreId, RemAmt, SeqNo FROM RSRM_SalesMst WHERE CustId IN (${ph})`,
       custIds,
     );
-    return pickLatestBalances(custIds, rows as PayBalanceSourceRow[]);
+    const picked = pickLedgerBalances(custIds, rows as PayLedgerRow[]);
+    // 미확정은 조용히 넘기지 않는다 — 원장 구조가 예상과 다른 계정(대표 행 없음 등)을 운영이 알아야 한다.
+    const unknown = picked.filter((p) => p.unknown_reason);
+    if (unknown.length > 0) {
+      console.log(
+        `[pay-stats] 잔액 미확정 ${unknown.length}건: ${unknown.map((u) => `${u.agent_send_id}(${u.unknown_reason})`).join(', ')}`,
+      );
+    }
+    return picked;
   } catch (err: any) {
     console.log('[pay-stats] 잔액 조회 실패(미노출 폴백):', err?.message || err);
     return [];

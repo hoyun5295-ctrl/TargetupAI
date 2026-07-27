@@ -196,6 +196,37 @@ ALTER TABLE sync_releases ADD COLUMN IF NOT EXISTS checksum VARCHAR(255);
 
 ---
 
+### 2-7. 2026-07-27 아난티(2번째 설치 업체) 사전 검증 — 클라우드 DB TLS 미지원 + MySQL 키셋 부재 (v1.6.2)
+
+**발단**: 아난티 서버 = Windows Server 2016 + **Aurora MySQL 8.0**(3.09.0). 발송 전에 "지금 빌드로 그대로 보내도 되는가"를 확인.
+
+**사전 판정(코드·공식문서 근거)**: 이새가 원격 3회 실패한 두 뿌리(2008 R2 구형 커널 → node 티어 / Oracle 11g thick)는 **둘 다 무관**.
+Node 20 공식 지원표가 `>= Windows 10/Server 2016` **Tier 1**이라 `win-modern`(node20) 그대로. 웹 설치 마법사도 major≥10이라 정상 경로.
+
+**실측으로 드러난 진짜 결함 2건** (MySQL 8.0.45 컨테이너 · 200,000행 실테이블):
+1. **TLS 강제 환경에서 연결 불가** — `require_secure_transport=ON`이면 `ER_SECURE_TRANSPORT_REQUIRED`(3159)로 거부된다.
+   `mysql.ts`의 `createPool`에 `ssl` 항목이 아예 없었고 `DbConnectionConfig`에도 필드가 없었다(mssql은 `encrypt:false` 하드코딩, pg도 미지원).
+   사내망 MySQL만 상대해 온 커넥터라 클라우드 DB 전제가 빠져 있었다. **`ssl` 옵션만 주면 TLS_AES_256_GCM_SHA384로 접속 성공**까지 같이 실측.
+2. **MySQL에 키셋 페이지네이션 부재** — `fetchAllKeyset`가 `oracle.ts`에만 있어 MySQL 고객은 OFFSET 폴백.
+   2026-06-30 이새 전체동기화 조기 종료(13만 중 ~10만에서 끊김)의 근본 정정이 키셋이었는데 **MySQL이 그 보호 밖**이었다.
+
+**수정(v1.6.2)**:
+- `DbConnectionConfig.ssl` / `sslCaPath` 신설 → zod 스키마·env(`DB_SSL`·`DB_SSL_CA`)·설치 마법사 3경로(웹·CLI·편집기)·접속테스트 3엔드포인트 전수 배선.
+  **기본값 false = 기존 사내망 고객 동작 그대로.** CA 미지정 = 암호화만(검증 생략, VPC 전제), CA 지정 = 검증까지. **CA 읽기 실패는 평문 폴백 없이 throw**(암호화된 줄 아는 상태 차단).
+- 순수 함수 `resolveMysqlSslOption` + 유닛 6건. mssql `encrypt`는 `config.ssl`로, pg도 동일 옵션.
+- `MysqlConnector.fetchAllKeyset` 신설 — 단일 PK 커서. **PK 없으면 throw → 엔진이 OFFSET 폴백**(조용한 부분 결과 금지).
+  실측: 중복 0·오름차순·깊은 구간(afterKey=199990) 즉시 응답·한글 정상.
+
+**교훈**:
+- **커넥터의 "연결 옵션"은 고객 DB가 온프렘일 때만 맞는 전제 위에 있다.** 클라우드 DB(Aurora·RDS·Azure)는 암호화 강제·인증 플러그인·엔드포인트가 다르다 — 새 고객 환경을 받으면 OS·DB 버전만이 아니라 **연결 정책(TLS 강제 여부·인증 플러그인)** 을 함께 묻는다.
+- **한 어댑터에만 들어간 근본 수정은 반쪽이다.** 키셋은 이새 사고의 근본 fix였는데 oracle에만 들어가 MySQL 고객이 같은 사고에 노출돼 있었다. 어댑터 공통 계약(IDbConnector)에 추가되는 보호 장치는 **전 어댑터 이행표**를 만들어 닫는다.
+- **영업이 전달한 사양은 기계 출력으로 재확인한다.** 이번에도 "Windows Server 2026"으로 왔다가 실제는 2016이었다(티어 판정이 바뀔 수 있는 값이었다). `systeminfo` · `SELECT VERSION()` · `SHOW VARIABLES LIKE 'require_secure_transport'` 출력을 받는다.
+
+**아난티 발송 전 잔여**: ①`require_secure_transport` 값 회신 ②동기화 대상 테이블·수정일시 컬럼명 ③1.6.2 5티어 재빌드 산출물 서버 업로드(Harold 실행).
+⛔ **`sync_releases`에 1.6.2 active 등록은 별도 판단** — 이새 박스는 1.5.7이라 등록 시 깨진 updater가 자가교체를 시도한다(§2-6).
+
+---
+
 ## § 3. 진단 체크리스트 (문제 발생 시 순서대로 실행)
 
 ### STEP 1. 슈퍼관리자 UI에서 상태 확인

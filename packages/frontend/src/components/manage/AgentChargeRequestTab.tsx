@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { formatAgentIdLabel, formatAgentBalance } from '../../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스
 
 /**
  * ★ 2026-07-27 §5-4 — 에이전트 충전 요청 (고객사 화면)
@@ -7,10 +8,13 @@ import { useEffect, useMemo, useState } from 'react';
  * 실제 증액은 담당자가 확인 후 처리한다. 요청 등록만으로 잔액이 오르지 않는다.
  */
 
-interface BalanceRow { agentSendId: string; remAmt: number | null; asOfDate: string | null }
+// ★ 2026-07-27 잔액 = 게이트웨이 계정 원장 실시간값. 기준일 축은 없다(옛 일별 통계 스냅샷의 잔재).
+interface BalanceRow { agentSendId: string; remAmt: number | null; unknownReason?: string | null }
 interface OrderRow {
   id: string;
   agentSendId: string;
+  /** 발급명(게이트웨이 원장) — 발송ID만으론 어느 계정인지 고객사도 모른다. */
+  custName?: string | null;
   amount: number;
   depositorName: string;
   expectedAt: string | null;
@@ -41,6 +45,8 @@ const PAGE_SIZE = 10;
 
 export default function AgentChargeRequestTab() {
   const [sendIds, setSendIds] = useState<string[]>([]);
+  // ★ 2026-07-27 발송ID → 발급명(게이트웨이 원장). 화면 전체가 `발송ID / 발급명` 한 규칙으로 보인다.
+  const [custNames, setCustNames] = useState<Record<string, string>>({});
   const [balances, setBalances] = useState<BalanceRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -69,6 +75,7 @@ export default function AgentChargeRequestTab() {
         const d = await res.json();
         const ids: string[] = Array.isArray(d.sendIds) ? d.sendIds : [];
         setSendIds(ids);
+        setCustNames(d.custNames && typeof d.custNames === 'object' ? d.custNames : {});
         setBalances(Array.isArray(d.balances) ? d.balances : []);
         if (ids.length === 1) setAgentSendId(ids[0]);
       }
@@ -99,6 +106,10 @@ export default function AgentChargeRequestTab() {
     balances.forEach((b) => m.set(b.agentSendId, b));
     return m;
   }, [balances]);
+
+  /** `D0078 / 런소프트` — 행이 이름을 갖고 있으면 그것, 없으면 대상 목록에서 찾는다. */
+  const idLabel = (id: string, custName?: string | null) =>
+    formatAgentIdLabel(id, custName || custNames[id] || null);
 
   const submit = async () => {
     setErrorMsg('');
@@ -165,19 +176,18 @@ export default function AgentChargeRequestTab() {
             const b = balanceOf.get(id);
             return (
               <div key={id} className="rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
-                <div className="font-mono text-xs text-slate-500">{id}</div>
+                <div className="font-mono text-xs text-slate-500">{idLabel(id)}</div>
                 <div className="mt-1 text-lg font-semibold text-slate-800 tabular-nums">
-                  {b && b.remAmt !== null ? `${Number(b.remAmt).toLocaleString()}원` : <span className="text-sm font-normal text-slate-400">집계 전 — 잔액 미확인</span>}
+                  {b && b.remAmt !== null
+                    ? `${formatAgentBalance(Number(b.remAmt))}원`
+                    : <span className="text-sm font-normal text-slate-400">잔액 확인 불가</span>}
                 </div>
-                {b?.asOfDate && (
-                  <div className="mt-0.5 text-[11px] text-slate-400">{String(b.asOfDate).slice(0, 10)} 기준</div>
-                )}
               </div>
             );
           })}
         </div>
         <p className="mt-3 text-[11px] italic text-slate-300">
-          Data source — 발송 게이트웨이 잔액 실시간 조회 (저장 없음)
+          Data source — 발송 게이트웨이 계정 원장 실시간 잔액 (저장 없음). 발송이 나가는 동안 값이 계속 바뀝니다.
         </p>
       </div>
 
@@ -199,7 +209,7 @@ export default function AgentChargeRequestTab() {
               className="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
             >
               <option value="">선택하세요</option>
-              {sendIds.map((id) => <option key={id} value={id}>{id}</option>)}
+              {sendIds.map((id) => <option key={id} value={id}>{idLabel(id)}</option>)}
             </select>
           </label>
 
@@ -296,7 +306,7 @@ export default function AgentChargeRequestTab() {
                   <td className="px-5 py-2.5 text-xs text-slate-400 whitespace-nowrap">
                     {String(o.createdAt).slice(0, 10)}
                   </td>
-                  <td className="px-3 py-2.5 font-mono text-xs text-slate-600">{o.agentSendId}</td>
+                  <td className="px-3 py-2.5 font-mono text-xs text-slate-600">{idLabel(o.agentSendId, o.custName)}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums font-medium text-slate-800">
                     {o.amount.toLocaleString()}
                   </td>
