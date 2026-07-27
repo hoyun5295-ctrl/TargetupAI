@@ -26,6 +26,20 @@ export type ValidationItem = {
   section_id?: string;
   message: string;
   fix_suggestion?: string;
+  /**
+   * 사용자가 자기 책임으로 넘기고 발행할 수 있는 치명인가 (★ 2026-07-28 서수란 접수).
+   *
+   * 완성 슬라이드 이미지만 올린 DM은 footer 섹션이 없어 required_info 치명에 항상 걸리는데,
+   * 홍보용 웹페이지는 게시 의무가 없다는 회신을 받아 발행 자체가 막히는 것이 문제가 됐다.
+   *
+   * 다만 **일괄 무시는 두지 않는다.** URL이 빈 CTA 버튼이나 이미 지나간 카운트다운까지
+   * 무시하고 발행되면 고객이 깨진 DM을 그대로 발송한다. 무시 대상은 우리가 대신 판단할 수 없는
+   * **법정 고지 성격**(required_info)뿐이고, 오작동(link·coupon·countdown·layout·operation)과
+   * 표시광고 판단(content 금지 표현)은 무시 대상이 아니다.
+   *
+   * 미지정 = false = 무시 불가.
+   */
+  overridable?: boolean;
 };
 
 export type ValidationResult = {
@@ -37,6 +51,8 @@ export type ValidationResult = {
     fatal: number;
     recommend: number;
     improve: number;
+    /** 무시 불가 치명 수. fatal > 0 이면서 blocking === 0 이면 사용자 확인 후 발행할 수 있다. */
+    blocking: number;
   };
 };
 
@@ -253,16 +269,19 @@ export function validateRequiredInfo(sections: Section[]): ValidationItem[] {
   const footer = sections.find((s) => s.type === 'footer' && s.visible);
   const storeInfo = sections.find((s) => s.type === 'store_info' && s.visible);
 
+  // ★ 2026-07-28 required_info 치명 3건은 overridable — 발행 가부를 우리가 대신 판단할 수 없는 영역이다.
+  //   (완성 슬라이드 이미지만 올린 DM은 footer가 구조적으로 없어 여기에 항상 걸린다)
+  //   무시하면 누가 언제 무엇을 넘겼는지 dm_pages.validation_result에 기록된다 — 기록 없는 우회는 두지 않는다.
   if (!footer) {
-    out.push({ area: 'required_info', severity: 'fatal', message: 'Footer 섹션이 없어요. 고객센터/수신거부 정보 노출 의무를 위해 필수예요.' });
+    out.push({ area: 'required_info', severity: 'fatal', overridable: true, message: 'Footer 섹션이 없어요. 고객센터/수신거부 정보 노출 의무를 위해 필수예요.' });
   } else {
     const p: any = footer.props;
     const hasCs = !!(p.cs_phone || p.cs_hours);
     if (!hasCs && !storeInfo) {
-      out.push({ area: 'required_info', severity: 'fatal', section_id: footer.id, message: '고객센터 정보가 없어요 (KISA 발송 가이드).', fix_suggestion: 'Footer의 고객센터 전화 또는 Store Info 섹션을 추가해 주세요.' });
+      out.push({ area: 'required_info', severity: 'fatal', overridable: true, section_id: footer.id, message: '고객센터 정보가 없어요 (KISA 발송 가이드).', fix_suggestion: 'Footer의 고객센터 전화 또는 Store Info 섹션을 추가해 주세요.' });
     }
     if (p.show_unsubscribe_link === false) {
-      out.push({ area: 'required_info', severity: 'fatal', section_id: footer.id, message: '수신거부 링크가 숨김 상태예요. 광고성 메시지는 수신거부 링크 노출이 의무예요.' });
+      out.push({ area: 'required_info', severity: 'fatal', overridable: true, section_id: footer.id, message: '수신거부 링크가 숨김 상태예요. 광고성 메시지는 수신거부 링크 노출이 의무예요.' });
     }
     if (!p.notes && !p.legal_text) {
       out.push({ area: 'required_info', severity: 'improve', section_id: footer.id, message: '유의사항/법정 안내 문구를 1줄 이상 권장해요.' });
@@ -361,10 +380,14 @@ export async function validateDm(
     ...validateOperation({ sections, scheduled_at: dm.scheduled_at, publish_mode: dm.publish_mode }),
   ];
 
+  const fatals = items.filter((i) => i.severity === 'fatal');
   const stats = {
-    fatal:     items.filter((i) => i.severity === 'fatal').length,
+    fatal:     fatals.length,
     recommend: items.filter((i) => i.severity === 'recommend').length,
     improve:   items.filter((i) => i.severity === 'improve').length,
+    // ★ 2026-07-28 무시 불가 치명 수. 0이면서 fatal > 0 = "사용자가 확인 후 넘길 수 있는 상태".
+    //   can_publish의 의미는 바꾸지 않는다(치명 0 + 섹션 1개 이상) — 기존 소비처 3곳이 그대로 돈다.
+    blocking:  fatals.filter((i) => !i.overridable).length,
   };
 
   const level: ValidationResult['level'] = stats.fatal > 0 ? 'error' : stats.recommend > 0 ? 'warning' : 'pass';

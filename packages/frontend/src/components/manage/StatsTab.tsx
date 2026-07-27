@@ -4,11 +4,64 @@ import { useLegacyToast } from '../ToastProvider';
 import { formatDateTime, formatCampaignMessageForDisplay } from '../../utils/formatDate';
 import { extractBlobErrorMessage } from '../../utils/csv-download';
 
+/** 페이지 번호 목록(양끝 + 현재 주변, 사이는 …). 웹(서버 페이징)·에이전트(클라이언트 페이징) 공용. */
+function buildPageNumbers(page: number, totalPages: number): (number | string)[] {
+  const pages: (number | string)[] = [];
+  if (totalPages <= 7) {
+    for (let i = 1; i <= totalPages; i++) pages.push(i);
+  } else {
+    pages.push(1);
+    if (page > 3) pages.push('...');
+    for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) pages.push(i);
+    if (page < totalPages - 2) pages.push('...');
+    pages.push(totalPages);
+  }
+  return pages;
+}
+
+/**
+ * 발송통계 페이저 — 웹 탭(서버 페이징)과 에이전트 탭(클라이언트 페이징)이 같은 모양을 쓴다.
+ * ★ 2026-07-28 에이전트 탭 페이징을 붙이면서 웹 탭 마크업을 그대로 옮겨 공용화했다(모양 회귀 0).
+ */
+function StatsPager({ page, totalPages, startIdx, endIdx, totalCount, onChange }: {
+  page: number; totalPages: number; startIdx: number; endIdx: number; totalCount: number;
+  onChange: (p: number) => void;
+}) {
+  return (
+    <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
+      <span className="text-xs text-slate-400 tabular-nums">
+        {startIdx}–{endIdx} / 전체 {totalCount}건
+      </span>
+      <div className="flex items-center gap-1">
+        <button onClick={() => onChange(Math.max(1, page - 1))} disabled={page === 1}
+          className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition">
+          이전
+        </button>
+        {buildPageNumbers(page, totalPages).map((p, i) =>
+          p === '...' ? (
+            <span key={`dots-${i}`} className="px-2 text-slate-300">…</span>
+          ) : (
+            <button key={p} onClick={() => onChange(p as number)}
+              className={`min-w-[2.25rem] px-3 py-1.5 text-sm font-medium rounded-lg transition tabular-nums ${p === page ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/20' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+              {p}
+            </button>
+          )
+        )}
+        <button onClick={() => onChange(Math.min(totalPages, page + 1))} disabled={page === totalPages}
+          className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition">
+          다음
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function StatsTab() {
   const [view, setView] = useState<'daily' | 'monthly'>('daily');
   const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [page, setPage] = useState(1);
+  const [agentPage, setAgentPage] = useState(1); // ★ 2026-07-28 에이전트 탭 클라이언트 페이징
   const [channel, setChannel] = useState<'web' | 'agent' | 'test'>('web'); // ★ 2026-07-23 웹/에이전트/테스트 탭
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -112,19 +165,7 @@ export default function StatsTab() {
   const endIdx = rows.length > 0 ? (page - 1) * perPage + rows.length : 0;
   const totalCount = stats?.total || 0;
 
-  const getPageNumbers = () => {
-    const pages: (number | string)[] = [];
-    if (totalPages <= 7) {
-      for (let i = 1; i <= totalPages; i++) pages.push(i);
-    } else {
-      pages.push(1);
-      if (page > 3) pages.push('...');
-      for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) pages.push(i);
-      if (page < totalPages - 2) pages.push('...');
-      pages.push(totalPages);
-    }
-    return pages;
-  };
+  const getPageNumbers = () => buildPageNumbers(page, totalPages);
 
   const testSummary = stats?.testSummary;
 
@@ -141,6 +182,19 @@ export default function StatsTab() {
   const TAB_LABEL: Record<string, string> = { web: '웹 발송', agent: '에이전트 발송', test: '테스트 발송' };
   const agentSummary = stats?.agentSummary;
   const agentRows: any[] = stats?.agentRows || [];
+
+  // ★ 2026-07-28 (서수란) 에이전트 탭 페이징.
+  //   백엔드는 에이전트를 의도적으로 전량 반환한다 — manage-stats.ts 주석 "전량 반환 후 프론트에서 별도 탭 페이징".
+  //   그 프론트 페이징이 없어서 일자를 넓게 잡으면 행이 아래로 끝없이 이어졌다.
+  //   서버 왕복 없이 받은 배열을 자른다. 웹 탭은 서버 페이징이라 축이 달라 상태를 따로 둔다.
+  const agentPerPage = 20;
+  const agentTotalPages = Math.max(1, Math.ceil(agentRows.length / agentPerPage));
+  // 조회 조건이 바뀌어 행 수가 줄면 현재 페이지가 범위 밖이 된다 — 마지막 페이지로 당겨 빈 화면을 막는다.
+  const agentSafePage = Math.min(Math.max(1, agentPage), agentTotalPages);
+  const agentPageRows = agentRows.slice((agentSafePage - 1) * agentPerPage, agentSafePage * agentPerPage);
+  useEffect(() => { if (agentPage !== agentSafePage) setAgentPage(agentSafePage); }, [agentPage, agentSafePage]);
+  // 새로 조회하면 1페이지부터 — 옛 페이지 번호가 남아 다른 기간의 중간 페이지가 열리지 않게.
+  useEffect(() => { setAgentPage(1); }, [view, startDate, endDate, filterUserId]);
   const agentByType: any[] = stats?.agentByType || [];
   const activeSummary = channel === 'agent' ? agentSummary : stats?.summary;
 
@@ -309,7 +363,7 @@ export default function StatsTab() {
               <tbody className="divide-y divide-slate-50">
                 {agentRows.length === 0 ? (
                   <tr><td colSpan={7} className="px-4 py-16 text-center text-sm text-slate-400">표시할 에이전트 발송 내역이 없습니다.</td></tr>
-                ) : agentRows.map((r: any, i: number) => (
+                ) : agentPageRows.map((r: any, i: number) => (
                   <tr key={i} className="transition hover:bg-slate-50/70">
                     <td className="px-6 py-3.5 font-semibold text-slate-700">{r.period}</td>
                     <td className="px-4 py-3.5 text-left font-mono text-xs text-slate-600">
@@ -374,33 +428,26 @@ export default function StatsTab() {
         </div>
         )}
 
-        {/* 페이징 — 웹만 서버 페이징 */}
+        {/* 페이징 — 웹은 서버 페이징, 에이전트는 클라이언트 페이징(백엔드가 전량 반환하는 축) */}
         {channel === 'web' && totalPages > 1 && (
-          <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
-            <span className="text-xs text-slate-400 tabular-nums">
-              {startIdx}–{endIdx} / 전체 {totalCount}건
-            </span>
-            <div className="flex items-center gap-1">
-              <button onClick={() => loadStats(Math.max(1, page - 1))} disabled={page === 1}
-                className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition">
-                이전
-              </button>
-              {getPageNumbers().map((p, i) =>
-                p === '...' ? (
-                  <span key={`dots-${i}`} className="px-2 text-slate-300">…</span>
-                ) : (
-                  <button key={p} onClick={() => loadStats(p as number)}
-                    className={`min-w-[2.25rem] px-3 py-1.5 text-sm font-medium rounded-lg transition tabular-nums ${p === page ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/20' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
-                    {p}
-                  </button>
-                )
-              )}
-              <button onClick={() => loadStats(Math.min(totalPages, page + 1))} disabled={page === totalPages}
-                className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition">
-                다음
-              </button>
-            </div>
-          </div>
+          <StatsPager
+            page={page}
+            totalPages={totalPages}
+            startIdx={startIdx}
+            endIdx={endIdx}
+            totalCount={totalCount}
+            onChange={(p) => loadStats(p)}
+          />
+        )}
+        {channel === 'agent' && agentTotalPages > 1 && (
+          <StatsPager
+            page={agentSafePage}
+            totalPages={agentTotalPages}
+            startIdx={(agentSafePage - 1) * agentPerPage + 1}
+            endIdx={(agentSafePage - 1) * agentPerPage + agentPageRows.length}
+            totalCount={agentRows.length}
+            onChange={(p) => setAgentPage(p)}
+          />
         )}
       </div>
 

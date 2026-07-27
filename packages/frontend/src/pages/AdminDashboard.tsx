@@ -198,6 +198,17 @@ const [statsStartDate, setStatsStartDate] = useState(() => new Date().toLocaleDa
 const [statsEndDate, setStatsEndDate] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' }));
 const [statsCompanyFilter, setStatsCompanyFilter] = useState('');
 const [statsPage, setStatsPage] = useState(1);
+// ★ 2026-07-28 (서수란) 에이전트 탭은 서버가 전량 반환하는 축이라 여기서 자른다.
+//   페이징이 없어 일자를 넓게 잡으면 행이 아래로 끝없이 이어졌다.
+const [agentStatsPage, setAgentStatsPage] = useState(1);
+const AGENT_STATS_PER_PAGE = 20;
+const agentStatsRows: any[] = sendStats?.agentRows || [];
+const agentStatsTotalPages = Math.max(1, Math.ceil(agentStatsRows.length / AGENT_STATS_PER_PAGE));
+// 조회 조건이 바뀌어 행 수가 줄면 현재 페이지가 범위 밖이 된다 — 마지막 페이지로 당겨 빈 화면을 막는다.
+const agentStatsSafePage = Math.min(Math.max(1, agentStatsPage), agentStatsTotalPages);
+useEffect(() => { if (agentStatsPage !== agentStatsSafePage) setAgentStatsPage(agentStatsSafePage); }, [agentStatsPage, agentStatsSafePage]);
+// 새로 조회하면 1페이지부터 — 옛 페이지 번호가 남아 다른 기간의 중간 페이지가 열리지 않게.
+useEffect(() => { setAgentStatsPage(1); }, [sendStats]);
 const [statsTotal, setStatsTotal] = useState(0);
 const [statsDetail, setStatsDetail] = useState<any>(null);
 const [statsDetailLoading, setStatsDetailLoading] = useState(false);
@@ -5015,7 +5026,10 @@ const handleApproveRequest = async (id: string) => {
                   <tbody className="divide-y">
                     {!(statsChannel === 'agent' ? sendStats?.agentRows : sendStats?.rows)?.length ? (
                       <tr><td colSpan={statsChannel === 'agent' ? 10 : 8} className="px-4 py-12 text-center text-gray-400">데이터가 없습니다.</td></tr>
-                    ) : (statsChannel === 'agent' ? sendStats.agentRows : sendStats.rows).map((row: any, idx: number) => {
+                    ) : (statsChannel === 'agent'
+                        ? agentStatsRows.slice((agentStatsSafePage - 1) * AGENT_STATS_PER_PAGE, agentStatsSafePage * AGENT_STATS_PER_PAGE)
+                        : sendStats.rows
+                      ).map((row: any, idx: number) => {
                       const sent = Number(row.sent);
                       const success = Number(row.success);
                       const fail = Number(row.fail);
@@ -5055,7 +5069,29 @@ const handleApproveRequest = async (id: string) => {
                 </table>
               </div>
 
-              {/* 페이징 — 웹만 서버 페이징 (에이전트는 전량 표시) */}
+              {/* 페이징 — 웹은 서버 페이징, 에이전트는 클라이언트 페이징(서버가 전량 반환하는 축) */}
+              {statsChannel === 'agent' && agentStatsTotalPages > 1 && (
+                <div className="px-6 py-4 border-t flex items-center justify-between">
+                  <span className="text-xs text-gray-400 tabular-nums">
+                    {(agentStatsSafePage - 1) * AGENT_STATS_PER_PAGE + 1}–
+                    {Math.min(agentStatsSafePage * AGENT_STATS_PER_PAGE, agentStatsRows.length)} / 전체 {agentStatsRows.length}건
+                  </span>
+                  <div className="flex justify-center gap-2">
+                    <button onClick={() => setAgentStatsPage(Math.max(1, agentStatsSafePage - 1))} disabled={agentStatsSafePage === 1}
+                      className="px-3 h-8 rounded text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed">이전</button>
+                    {Array.from({ length: agentStatsTotalPages }, (_, i) => i + 1).slice(
+                      Math.max(0, agentStatsSafePage - 3), Math.min(agentStatsTotalPages, agentStatsSafePage + 2)
+                    ).map(p => (
+                      <button key={p} onClick={() => setAgentStatsPage(p)}
+                        className={`w-8 h-8 rounded text-sm ${p === agentStatsSafePage ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+                        {p}
+                      </button>
+                    ))}
+                    <button onClick={() => setAgentStatsPage(Math.min(agentStatsTotalPages, agentStatsSafePage + 1))} disabled={agentStatsSafePage === agentStatsTotalPages}
+                      className="px-3 h-8 rounded text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed">다음</button>
+                  </div>
+                </div>
+              )}
               {statsChannel === 'web' && statsTotal > 10 && (
                 <div className="px-6 py-4 border-t flex justify-center gap-2">
                   {Array.from({ length: Math.ceil(statsTotal / 10) }, (_, i) => i + 1).slice(
@@ -5340,6 +5376,76 @@ const handleApproveRequest = async (id: string) => {
                   </div>
                 );
               })()}
+              {/* ★ 2026-07-28 서수란 접수 — 업체가 등록 시 입력한 부가기능이 상세에 하나도 안 나와
+                  발송 실패 원인(대표링크 누락 등)을 슈퍼관리자에서 확인할 수 없었다(무주덕유산리조트).
+                  값은 이미 kakao_templates에 저장돼 있고 목록 API가 kt.*로 실어 보낸다 — 렌더만 없었다.
+                  대표링크만 채우면 같은 접수가 반복되므로 등록 폼이 받는 항목을 한 번에 노출한다.
+                  값이 없는 항목은 그리지 않는다(기존 강조표기·버튼 블록과 동일한 규칙). */}
+              {(() => {
+                const raw = (templateDetail as any).represent_link;
+                let rl: any = null;
+                if (raw && typeof raw === 'object') rl = raw;
+                else if (typeof raw === 'string' && raw.trim()) { try { rl = JSON.parse(raw); } catch { /* 파싱 실패 무시 */ } }
+                const mo = rl?.urlMobile || rl?.linkMo || '';
+                const pc = rl?.urlPc || rl?.linkPc || '';
+                const ios = rl?.schemeIos || '';
+                const and = rl?.schemeAndroid || '';
+                if (!mo && !pc && !ios && !and) return null;
+                return (
+                  <div>
+                    <div className="text-xs text-gray-400 mb-1">대표링크 (말풍선 전역 클릭)</div>
+                    <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 space-y-1 text-xs text-gray-800">
+                      {mo && <div><span className="text-gray-400">Mobile</span> <span className="break-all">{mo}</span></div>}
+                      {pc && <div><span className="text-gray-400">PC</span> <span className="break-all">{pc}</span></div>}
+                      {ios && <div><span className="text-gray-400">iOS scheme</span> <span className="break-all">{ios}</span></div>}
+                      {and && <div><span className="text-gray-400">Android scheme</span> <span className="break-all">{and}</span></div>}
+                    </div>
+                  </div>
+                );
+              })()}
+              {templateDetail.preview_message && (
+                <div>
+                  <div className="text-xs text-gray-400 mb-1">미리보기 메시지 (앱 알림 문구)</div>
+                  <div className="bg-gray-50 border rounded-lg p-3 whitespace-pre-wrap break-words text-gray-800">{templateDetail.preview_message}</div>
+                </div>
+              )}
+              {templateDetail.template_header && (
+                <div>
+                  <div className="text-xs text-gray-400 mb-1">헤더</div>
+                  <div className="bg-gray-50 border rounded-lg p-3 whitespace-pre-wrap break-words text-gray-800">{templateDetail.template_header}</div>
+                </div>
+              )}
+              {templateDetail.ad_content && (
+                <div>
+                  <div className="text-xs text-gray-400 mb-1">광고 문구</div>
+                  <div className="bg-gray-50 border rounded-lg p-3 whitespace-pre-wrap break-words text-gray-800">{templateDetail.ad_content}</div>
+                </div>
+              )}
+              {(() => {
+                const raw = (templateDetail as any).quick_replies;
+                let qrs: any[] = [];
+                if (Array.isArray(raw)) qrs = raw;
+                else if (typeof raw === 'string' && raw.trim()) { try { const p = JSON.parse(raw); if (Array.isArray(p)) qrs = p; } catch { /* 파싱 실패 무시 */ } }
+                if (qrs.length === 0) return null;
+                return (
+                  <div>
+                    <div className="text-xs text-gray-400 mb-1">바로연결 ({qrs.length})</div>
+                    <div className="space-y-1">
+                      {qrs.map((q: any, i: number) => (
+                        <div key={i} className="bg-gray-50 border rounded px-3 py-1.5 text-xs text-gray-800">
+                          <span className="font-medium">{q?.name || q?.title || `바로연결 ${i + 1}`}</span>
+                          {(q?.linkMo || q?.urlMobile) ? <span className="text-gray-400 break-all"> · {q.linkMo || q.urlMobile}</span> : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+              {templateDetail.security_flag && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                  보안 템플릿 — 메인 디바이스(모바일) 외 서브 디바이스에는 메시지 내용이 노출되지 않습니다.
+                </div>
+              )}
               {templateDetail.extra_content && (
                 <div>
                   <div className="text-xs text-gray-400 mb-1">부가 정보</div>

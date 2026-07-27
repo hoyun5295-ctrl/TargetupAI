@@ -755,6 +755,38 @@ dmRouter.post('/:id/publish', async (req: any, res: any) => {
     if (firstPublish) await checkCredit(companyId, pubCost);
     const result = await publishDm(req.params.id, companyId);
     if (!result) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
+
+    // ★ 2026-07-28 검수 치명 무시 발행 기록 (서수란 접수 — 이미지만 올린 DM이 footer 부재로 막히던 건).
+    //   무시 가능한 치명(required_info)만 프론트가 넘길 수 있고, 여기서는 "누가 언제 무엇을 넘겼는지"를 남긴다.
+    //   기록이 없으면 "고객이 확인하고 본인이 발행했다"는 방어가 성립하지 않는다.
+    //   컬럼은 신규가 아니다 — validation_result는 /validate가 이미 쓰고 있는 기존 jsonb.
+    //   실패해도 발행은 유지한다(경품 동기화와 같은 원칙 — 기록 실패로 발행을 되돌리지 않는다).
+    const overrideReq = req.body?.validation_override;
+    if (overrideReq && Array.isArray(overrideReq.items) && overrideReq.items.length > 0) {
+      try {
+        await query(
+          // dm_pages.validation_result = jsonb (2026-07-28 information_schema 실측 확정).
+          // ::jsonb 캐스팅은 그대로 둔다 — || 가 jsonb 전용 연산자라 타입이 바뀌면 런타임에 터지고 tsc는 못 잡는다.
+          `UPDATE dm_pages
+              SET validation_result = (COALESCE(validation_result::jsonb, '{}'::jsonb) || $1::jsonb),
+                  updated_at = NOW()
+            WHERE id = $2 AND company_id = $3`,
+          [
+            JSON.stringify({
+              overridden_at: new Date().toISOString(),
+              overridden_by: req.user?.userId || null,
+              overridden_items: overrideReq.items
+                .filter((i: any) => i && typeof i.message === 'string')
+                .map((i: any) => ({ area: String(i.area || ''), message: String(i.message) })),
+            }),
+            req.params.id,
+            companyId,
+          ],
+        );
+      } catch (e: any) {
+        console.error('[DM발행] 검수 무시 기록 실패:', e?.message);
+      }
+    }
     // ★ B 연계: lucky_draw/roulette 경품 설정 → dm_prizes 동기화 (실패해도 발행은 유지)
     try { await syncPrizesFromSections(companyId, req.params.id); }
     catch (e: any) { console.error('[DM발행] 경품 동기화 오류:', e?.message); }

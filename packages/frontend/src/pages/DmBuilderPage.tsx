@@ -1311,6 +1311,14 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
   const INTERACTION_TYPES = ['lucky_draw', 'roulette', 'poll', 'survey', 'email_capture', 'click_rewards'];
   const hasInteraction = pages.some((p: any) => (p?.sections || []).some((sec: any) => sec && INTERACTION_TYPES.includes(sec.type)));
   const [confirmPublish, setConfirmPublish] = useState(false);
+  // ★ 2026-07-28 검수 치명을 확인하고 넘긴 발행 (서수란 접수). 검수 모달이 스토어에 채워 넣으면
+  //   여기서 크레딧 확인 모달을 열고, 발행 시 서버로 함께 보내 기록으로 남긴다.
+  //   null = 일반 발행(기존 경로 그대로).
+  const validationOverride = useDmBuilderStore((s) => s.validationOverride);
+  const setValidationOverride = useDmBuilderStore((s) => s.setValidationOverride);
+  useEffect(() => {
+    if (validationOverride) setConfirmPublish(true);
+  }, [validationOverride]);
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [sendModalOpen, setSendModalOpen] = useState(false);
 
@@ -1342,11 +1350,16 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
     }
   };
 
-  const handlePublish = async () => {
+  const handlePublish = async (validationOverride?: { items: { area: string; message: string }[] }) => {
     await saveStore();
     if (dmId) {
       try {
-        const res = await api.post(`/dm/${dmId}/publish`);
+        // ★ 2026-07-28 검수 치명을 확인하고 넘긴 경우 그 사실을 함께 보낸다 — 서버가 무시 항목·시각·사용자를
+        //   validation_result에 기록한다. 넘기지 않은 일반 발행은 body 없이 그대로(기존 동작 무변경).
+        const res = await api.post(
+          `/dm/${dmId}/publish`,
+          validationOverride ? { validation_override: validationOverride } : undefined,
+        );
         setPublished(true); // 발행 확정 — 버튼 [발송] 전환 + 이후 크레딧 모달 미노출
         const url = res?.data?.short_url || '';
         if (url) {
@@ -1385,8 +1398,9 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
           }
           const result = await st().runValidation();
           if (!result) return; // 검수 호출 실패 — 토스트는 store가 띄움
+          setValidationOverride(null); // 이전 무시 이력이 남아 다음 발행에 딸려가지 않게
           if (result.can_publish === false) {
-            st().setOpenModal('validation'); // 문제 항목 + 바로 고치기
+            st().setOpenModal('validation'); // 문제 항목 + 바로 고치기 (넘길 수 있으면 모달이 그 버튼을 띄운다)
             return;
           }
           setConfirmPublish(true);
@@ -1395,8 +1409,13 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
       <CreditConfirmModal
         open={confirmPublish}
         source={hasInteraction ? 'dm-interaction-publish' : 'dm-builder'}
-        onConfirm={() => { setConfirmPublish(false); handlePublish(); }}
-        onCancel={() => setConfirmPublish(false)}
+        onConfirm={() => {
+          const ov = validationOverride;
+          setConfirmPublish(false);
+          setValidationOverride(null);
+          handlePublish(ov || undefined);
+        }}
+        onCancel={() => { setConfirmPublish(false); setValidationOverride(null); }}
       />
       <ModalBase
         open={!!publishedUrl}
@@ -1463,13 +1482,24 @@ function ConfirmDiscardModal({
 function EditorModals() {
   const openModal = useDmBuilderStore((s) => s.openModal);
   const setOpenModal = useDmBuilderStore((s) => s.setOpenModal);
+  const setValidationOverride = useDmBuilderStore((s) => s.setValidationOverride);
   const close = () => setOpenModal(null);
 
   return (
     <>
       <AiPromptModal open={openModal === 'ai-prompt'} onClose={close} />
       <AiImproveModal open={openModal === 'ai-improve'} onClose={close} />
-      <ValidationModal open={openModal === 'validation'} onClose={close} />
+      {/* ★ 2026-07-28 넘길 수 있는 치명(required_info)만 남은 경우 확인 후 발행 — 크레딧 확인 모달을 그대로 거친다.
+          넘긴 항목은 발행 시 서버가 validation_result에 기록한다. */}
+      <ValidationModal
+        open={openModal === 'validation'}
+        onClose={close}
+        onOverridePublish={(items) => {
+          // 발행 바(TopBarWithBack)가 형제 컴포넌트라 스토어를 경유한다 — 이 값이 채워지면 그쪽이 크레딧 확인 모달을 연다.
+          setValidationOverride({ items: items.map((i) => ({ area: i.area, message: i.message })) });
+          close();
+        }}
+      />
       <VersionHistoryModal open={openModal === 'version-history'} onClose={close} />
       {/* ★ 2026-07-21 BrandKitModal 제거 — 브랜드 편집은 AI메모리 "브랜드 학습" 단일 창구로 일원화 */}
       <DesignThemeModal open={openModal === 'design-theme'} onClose={close} />

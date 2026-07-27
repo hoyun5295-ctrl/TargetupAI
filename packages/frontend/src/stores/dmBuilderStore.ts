@@ -63,6 +63,11 @@ export type ValidationItem = {
   section_id?: string;
   message: string;
   fix_suggestion?: string;
+  /**
+   * ★ 2026-07-28 사용자가 확인 후 넘기고 발행할 수 있는 치명인가 (백엔드 dm-validate.ts가 판정).
+   * required_info(법정 고지 판단)만 true. 오작동·표시광고 판단은 넘길 수 없다.
+   */
+  overridable?: boolean;
 };
 
 export type ValidationResult = {
@@ -70,6 +75,13 @@ export type ValidationResult = {
   items: ValidationItem[];
   can_publish: boolean;
   checked_at: string;
+  /** 백엔드 집계. 옛 응답에는 없을 수 있어 optional — 화면은 items에서 다시 세므로 없어도 동작한다. */
+  stats?: {
+    fatal: number;
+    recommend: number;
+    improve: number;
+    blocking: number;
+  };
 };
 
 export type ModalKey =
@@ -116,6 +128,13 @@ export type DmBuilderState = {
   aiGenerating: boolean;
   validationResult: ValidationResult | null;
   validationRunning: boolean;
+  /**
+   * ★ 2026-07-28 사용자가 확인하고 넘긴 치명 항목 (서수란 접수).
+   * 검수 모달(ValidationModal)과 발행 바(TopBarWithBack)가 형제 컴포넌트라 스토어를 경유한다.
+   * null이 아니면 발행 확인 모달이 열리고, 발행 시 서버로 함께 보내 기록으로 남는다.
+   * 발행·취소 어느 쪽으로 끝나든 반드시 null로 되돌린다 — 다음 발행에 딸려가면 안 된다.
+   */
+  validationOverride: { items: { area: string; message: string }[] } | null;
 
   // ── Modal ──
   openModal: ModalKey;
@@ -172,6 +191,7 @@ export type DmBuilderState = {
   hoverSection: (id: string | null) => void;
   setToast: (toast: DmBuilderState['toast']) => void;
   setOpenModal: (key: ModalKey) => void;
+  setValidationOverride: (v: DmBuilderState['validationOverride']) => void;
 
   // ── Actions: AI 적용 ──
   applyAiGenerated: (sections: Section[], brandKit?: DmBrandKit, prompt?: string, opts?: { pages?: Section[][]; layoutMode?: LayoutMode }) => void;
@@ -209,7 +229,7 @@ const INITIAL_STATE: Pick<
   | 'approvalStatus' | 'isPublished' | 'templateId' | 'aiPrompt'
   | 'selectedSectionId' | 'hoveredSectionId' | 'isDirty' | 'lastSavedAt'
   | 'isSaving' | 'loadError' | 'aiGenerating' | 'validationResult'
-  | 'validationRunning' | 'openModal' | 'toast'
+  | 'validationRunning' | 'validationOverride' | 'openModal' | 'toast'
   | 'historyPast' | 'historyFuture'
 > = {
   dmId: null,
@@ -233,6 +253,7 @@ const INITIAL_STATE: Pick<
   aiGenerating: false,
   validationResult: null,
   validationRunning: false,
+  validationOverride: null,
   openModal: null,
   toast: null,
   historyPast: [],
@@ -780,6 +801,7 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
   hoverSection: (id) => set({ hoveredSectionId: id }),
   setToast: (toast) => set({ toast }),
   setOpenModal: (openModal) => set({ openModal }),
+  setValidationOverride: (validationOverride) => set({ validationOverride }),
 
   // ── AI 적용 (현재 페이지의 sections 교체) ──
   applyAiGenerated: (sections, brandKit, prompt, opts) => {

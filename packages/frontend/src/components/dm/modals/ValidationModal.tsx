@@ -7,9 +7,10 @@
  *  3. 각 항목 클릭 시 해당 섹션 선택
  *  4. "재검수" / "발행" 버튼
  */
-import { useEffect, useMemo } from 'react';
-import { useDmBuilderStore, selectAllSectionsFlat } from '../../../stores/dmBuilderStore';
+import { useEffect, useMemo, useState } from 'react';
+import { useDmBuilderStore, selectAllSectionsFlat, type ValidationItem } from '../../../stores/dmBuilderStore';
 import ModalBase, { ModalButton } from './ModalBase';
+import ConfirmModal, { type ConfirmState } from '../../ConfirmModal';
 
 const AREA_LABELS: Record<string, string> = {
   link: '링크',
@@ -43,13 +44,26 @@ const SEVERITY_STYLE: Record<string, { color: string; bg: string; label: string 
   improve: { color: '#2563eb', bg: '#eff6ff', label: '개선' },
 };
 
-export default function ValidationModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function ValidationModal({
+  open,
+  onClose,
+  onOverridePublish,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /**
+   * ★ 2026-07-28 치명을 확인하고 그대로 발행 (서수란 접수).
+   * 미전달이면 버튼 자체가 안 뜬다 — 발행 흐름을 가진 화면에서만 넘길 수 있다.
+   */
+  onOverridePublish?: (items: ValidationItem[]) => void;
+}) {
   const runValidation = useDmBuilderStore((s) => s.runValidation);
   const result = useDmBuilderStore((s) => s.validationResult);
   const running = useDmBuilderStore((s) => s.validationRunning);
   const selectSection = useDmBuilderStore((s) => s.selectSection);
   /** 검수는 전체 DM(모든 페이지의 섹션) 대상 */
   const sections = useDmBuilderStore(selectAllSectionsFlat);
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -79,6 +93,42 @@ export default function ValidationModal({ open, onClose }: { open: boolean; onCl
     return s;
   }, [result]);
 
+  /**
+   * ★ 2026-07-28 넘길 수 있는 치명 / 넘길 수 없는 치명.
+   * 백엔드 stats.blocking을 그대로 쓰지 않고 items에서 다시 센다 — 옛 응답(stats 없음)이나
+   * 저장돼 있던 예전 검수 결과가 그대로 들어와도 같은 판정이 나와야 하기 때문이다.
+   * overridable 미지정 = 넘길 수 없음(안전한 쪽 기본값).
+   */
+  const { overridableFatals, blockingCount } = useMemo(() => {
+    const fatals = (result?.items || []).filter((i) => i.severity === 'fatal');
+    return {
+      overridableFatals: fatals.filter((i) => i.overridable === true),
+      blockingCount: fatals.filter((i) => i.overridable !== true).length,
+    };
+  }, [result]);
+
+  /** 치명이 있는데 전부 넘길 수 있는 것뿐일 때만 그대로 발행할 수 있다. */
+  const canOverride = !!onOverridePublish && stats.fatal > 0 && blockingCount === 0;
+
+  const handleOverrideClick = () => {
+    if (!onOverridePublish) return;
+    setConfirm({
+      mode: 'warning',
+      title: '이 항목들을 확인하고 발행할까요?',
+      description:
+        `아래 ${overridableFatals.length}건을 수정하지 않고 발행합니다.\n\n`
+        + overridableFatals.map((i) => `· ${i.message}`).join('\n')
+        + '\n\n광고성 메시지의 고객센터·수신거부 표기 여부는 발송 주체가 판단할 영역이에요.'
+        + '\n발행하면 무시한 항목과 시각이 기록으로 남습니다.',
+      confirmLabel: '확인했어요 · 발행',
+      cancelLabel: '돌아가서 수정',
+      onConfirm: () => {
+        setConfirm(null);
+        onOverridePublish(overridableFatals);
+      },
+    });
+  };
+
   const handleItemClick = (sectionId: string | undefined) => {
     if (sectionId && sections.find((s) => s.id === sectionId)) {
       selectSection(sectionId);
@@ -91,6 +141,11 @@ export default function ValidationModal({ open, onClose }: { open: boolean; onCl
       <ModalButton variant="secondary" onClick={() => runValidation()} loading={running}>
         재검수
       </ModalButton>
+      {canOverride && (
+        <ModalButton variant="primary" onClick={handleOverrideClick}>
+          확인했어요 · 이대로 발행
+        </ModalButton>
+      )}
       {result?.can_publish && (
         <ModalButton variant="primary">✅ 발행 가능</ModalButton>
       )}
@@ -143,7 +198,9 @@ export default function ValidationModal({ open, onClose }: { open: boolean; onCl
             <StatCard label="개선" count={stats.improve} severity="improve" />
           </div>
 
-          {!result.can_publish && stats.fatal > 0 && (
+          {/* ★ 2026-07-28 넘길 수 있는 치명만 남았으면 "발행 불가"가 아니다 — 판단을 넘길 수 있다고 안내한다.
+              (이미지만 올린 DM이 footer 부재로 영구히 막히던 것이 이 갈래의 계기다) */}
+          {!result.can_publish && blockingCount > 0 && (
             <div
               style={{
                 padding: 12,
@@ -155,7 +212,24 @@ export default function ValidationModal({ open, onClose }: { open: boolean; onCl
                 marginBottom: 16,
               }}
             >
-              <strong>⚠️ 발행 불가:</strong> 치명 {stats.fatal}건을 먼저 수정해야 해요.
+              <strong>⚠️ 발행 불가:</strong> 치명 {blockingCount}건을 먼저 수정해야 해요.
+              {overridableFatals.length > 0 && ` (그 외 ${overridableFatals.length}건은 확인 후 넘길 수 있어요)`}
+            </div>
+          )}
+
+          {!result.can_publish && blockingCount === 0 && stats.fatal > 0 && (
+            <div
+              style={{
+                padding: 12,
+                background: '#fffbeb',
+                border: '1px solid #fcd34d',
+                borderRadius: 8,
+                color: '#92400e',
+                fontSize: 13,
+                marginBottom: 16,
+              }}
+            >
+              <strong>확인이 필요해요:</strong> 치명 {stats.fatal}건은 수정하거나, 내용을 확인한 뒤 그대로 발행할 수 있어요.
             </div>
           )}
 
@@ -177,6 +251,8 @@ export default function ValidationModal({ open, onClose }: { open: boolean; onCl
           ))}
         </>
       )}
+      {/* 확인 모달 — z-[2000] 인터럽트 티어(ConfirmModal 내장). 이 모달(ModalBase z-1000)보다 위에 뜬다. */}
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
     </ModalBase>
   );
 }

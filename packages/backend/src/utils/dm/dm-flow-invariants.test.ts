@@ -13,6 +13,7 @@ import { resolve } from 'node:path';
 vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })) }));
 import { query } from '../../config/database';
 import { getDmList } from './dm-builder';
+import { validateDm } from './dm-validate';
 
 const qmock = query as unknown as ReturnType<typeof vi.fn>;
 
@@ -46,6 +47,82 @@ describe('DM 위험 동작 불변식 (재발 방지책 2)', () => {
       expect(
         /silent\s*&&\s*[\w.]*isPublished/.test(saveBody),
         'save()의 발행 DM 자동저장 차단 가드(silent && isPublished)가 사라짐',
+      ).toBe(true);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // 검수 치명 "확인 후 발행" 경계 (2026-07-28 서수란 접수)
+  //
+  // 이미지만 올린 DM이 footer 부재로 영구히 막히던 것을 풀면서, **무엇을 넘길 수 있는가**의
+  // 경계를 코드로 고정한다. 이 경계가 조용히 넓어지면 URL이 빈 CTA나 지나간 카운트다운까지
+  // 넘기고 발행돼 고객이 깨진 DM을 그대로 발송한다.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('검수 치명 무시 경계 — 법정 고지 판단만 넘길 수 있다', () => {
+    const sec = (type: string, props: any = {}, id = `s-${type}`) =>
+      ({ id, type, visible: true, props } as any);
+
+    it('footer 부재(required_info) = 치명이지만 넘길 수 있다 → blocking 0', async () => {
+      const r = await validateDm({ sections: [sec('text', { text: '안내문' })] });
+      const footerItem = r.items.find((i) => i.area === 'required_info' && i.message.includes('Footer'));
+      expect(footerItem, 'footer 부재 치명이 사라짐').toBeTruthy();
+      expect(footerItem!.severity).toBe('fatal');
+      expect(footerItem!.overridable, 'footer 부재를 넘길 수 없게 되면 이미지 전용 DM이 다시 영구 차단된다').toBe(true);
+      expect(r.stats.blocking, '넘길 수 있는 치명만 있는데 blocking이 잡히면 확인 후 발행 버튼이 안 뜬다').toBe(0);
+      expect(r.can_publish, 'can_publish 의미는 그대로 — 치명이 있으면 false').toBe(false);
+    });
+
+    it('CTA URL 빈칸(link) = 넘길 수 없다 → blocking 1 이상', async () => {
+      const r = await validateDm({
+        sections: [sec('cta', { buttons: [{ label: '자세히', url: '' }] })],
+      });
+      const linkItem = r.items.find((i) => i.area === 'link' && i.severity === 'fatal');
+      expect(linkItem, 'CTA URL 빈칸 치명이 사라짐').toBeTruthy();
+      expect(linkItem!.overridable, '오작동을 넘길 수 있게 되면 고객이 깨진 DM을 발송한다').not.toBe(true);
+      expect(r.stats.blocking).toBeGreaterThan(0);
+    });
+
+    it('넘길 수 없는 치명이 섞이면 blocking > 0 — 부분 무시를 허용하지 않는다', async () => {
+      const r = await validateDm({
+        sections: [sec('cta', { buttons: [{ label: 'x', url: '' }] })], // footer 부재(넘김 가능) + CTA 빈 URL(불가)
+      });
+      expect(r.items.some((i) => i.overridable === true), '넘길 수 있는 치명도 함께 있어야 하는 시나리오').toBe(true);
+      expect(r.stats.blocking, '하나라도 넘길 수 없으면 확인 후 발행이 막혀야 한다').toBeGreaterThan(0);
+    });
+
+    it('넘길 수 있는 치명은 required_info 영역뿐 — 다른 영역으로 번지지 않았는가', async () => {
+      const r = await validateDm({
+        sections: [
+          sec('cta', { buttons: [{ label: 'x', url: '' }] }),
+          sec('coupon', { discount_label: '' }, 's-coupon'),
+          sec('countdown', { ends_at: '' }, 's-cd'),
+        ],
+      });
+      const overridableAreas = [...new Set(r.items.filter((i) => i.overridable === true).map((i) => i.area))];
+      expect(overridableAreas, '무시 허용 영역이 required_info 밖으로 번졌다').toEqual(['required_info']);
+    });
+
+    it('검수 모달은 blocking이 0일 때만 "확인 후 발행"을 띄운다 (소스 계약)', () => {
+      const src = readFileSync(
+        resolve(process.cwd(), '../frontend/src/components/dm/modals/ValidationModal.tsx'),
+        'utf8',
+      );
+      expect(
+        /blockingCount\s*===\s*0/.test(src),
+        'blocking 0 조건이 사라지면 넘길 수 없는 치명까지 무시하고 발행된다',
+      ).toBe(true);
+      expect(
+        /overridable\s*!==\s*true/.test(src),
+        'overridable 미지정을 넘길 수 있는 것으로 취급하면 기본값이 위험한 쪽으로 뒤집힌다',
+      ).toBe(true);
+    });
+
+    it('무시 기록은 발행 시 서버가 남긴다 (소스 계약)', () => {
+      const src = readFileSync(resolve(process.cwd(), 'src/routes/dm.ts'), 'utf8');
+      const publishBody = src.slice(src.indexOf("dmRouter.post('/:id/publish'"));
+      expect(
+        /validation_override/.test(publishBody) && /overridden_by/.test(publishBody),
+        '무시 기록이 빠지면 "고객이 확인하고 발행했다"는 근거가 남지 않는다',
       ).toBe(true);
     });
   });
