@@ -222,7 +222,21 @@ Node 20 공식 지원표가 `>= Windows 10/Server 2016` **Tier 1**이라 `win-mo
 - **한 어댑터에만 들어간 근본 수정은 반쪽이다.** 키셋은 이새 사고의 근본 fix였는데 oracle에만 들어가 MySQL 고객이 같은 사고에 노출돼 있었다. 어댑터 공통 계약(IDbConnector)에 추가되는 보호 장치는 **전 어댑터 이행표**를 만들어 닫는다.
 - **영업이 전달한 사양은 기계 출력으로 재확인한다.** 이번에도 "Windows Server 2026"으로 왔다가 실제는 2016이었다(티어 판정이 바뀔 수 있는 값이었다). `systeminfo` · `SELECT VERSION()` · `SHOW VARIABLES LIKE 'require_secure_transport'` 출력을 받는다.
 
-**아난티 발송 전 잔여**: ①`require_secure_transport` 값 회신 ②동기화 대상 테이블·수정일시 컬럼명 ③1.6.2 5티어 재빌드 산출물 서버 업로드(Harold 실행).
+**★ 2026-07-27 진행 상태 (다음 세션 인계)**
+- **코드 완료·빌드 대기**: TLS 일체(ssl.ts CT + mysql/pg/mssql + 마법사 3경로 + `sslCaPath`) · `supportBigNumbers` · MySQL 키셋(가드 포함). tsc 0 · vitest 67.
+- **버전**: `package.json` = **1.6.4**(라벨만 올림). 서버 `agent-builds/`에는 **1.6.3 zip 20개**가 올라가 있다 — 다음 세션 빌드 후 교체 대상.
+- **매뉴얼**: `build-manual.js` 갱신 완료(1.6.4 라벨·zip 설치 절차·TLS 항목 추가·버전 히스토리/.env/원격제어 절 삭제). docx는 빌드 후 1회 재생성.
+- **아난티**: TLS 비강제 회신 받음(옵션 불필요·보험용). **테이블·컬럼은 받을 필요 없다 — 설치 마법사가 목록을 읽고 AI가 매핑한다.**
+- **다음 세션 순서**: Codex 결과 반영 → **빌드 1회** → zip 20개 교체(`npm run upload:agents`) → 매뉴얼 docx 1회 → VM 2016 검증(가짜 DB·Aurora 세팅부터 Harold와 함께).
+
+**키셋 정확성 — 2026-07-27 Codex 3R 지적과 처방**
+소수 PK(`decimal`·`numeric`)를 `DECIMAL(65,0)`으로 캐스팅하면 소수부가 잘려 커서가 앞 행을 재조회하거나 건너뛴다.
+커서 별칭(`__sync_keyset_cursor__`)과 같은 이름의 컬럼이 고객 테이블에 실재하면 반환 전 delete로 **원본 값이 조용히 사라진다**.
+처방 = **키셋 사용 조건을 좁혔다** — 정수 PK(tinyint~bigint)이고 별칭 충돌이 없을 때만 사용, 그 외는 throw해 엔진이 OFFSET 폴백.
+실측(0727): BIGINT PK=키셋(커서 9223372036854775806 정확) / DECIMAL(10,2) PK=폴백 / 동명 컬럼 테이블=폴백(OFFSET 조회 시 원본 보존) / 정수 20만 행=키셋.
+**미해결(다음 트랙)**: 엔진 완전성 가드가 "받은 행 수"만 세어 **중복 1건 + 누락 1건이 상쇄되면 경고조차 못 한다**(`engine.ts:458`). PK 유일값 기준으로 세도록 고쳐야 닫힌다.
+
+**아난티 발송 전 잔여**: ①빌드 1회 + zip 교체 ②VM 2016 실행 검증.
 ⛔ **`sync_releases`에 1.6.2 active 등록은 별도 판단** — 이새 박스는 1.5.7이라 등록 시 깨진 updater가 자가교체를 시도한다(§2-6).
 
 ---

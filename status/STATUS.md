@@ -64,6 +64,12 @@
 > **완료분 잔여(운영 검증)**: 금강제화 draft **화면에서** 삭제·재발행(psql DELETE 금지) / 실회사 드라이런(발행→PDF→메일→삭제) / 거래내역서 **MMS 308,043건** / 발행 소요 재측정.
 > **이월(판단 필요)**: `G` 유형(여미지 B0227·7월 42,833건) 과금 분류 / 요금제 이력 크레딧 스냅샷 소급(ALTER) / 크레딧 일할 자동지급 재배선 / 요금제 해지 표현 / `by_agent` 지점별 발행(+에이전트 청구 줄에 발송ID 표기) / `/preview` 화면 배선 / 141사 일괄 발행 / 테스트 발송 환불이 고정 zero-uuid 참조라 회사·유형당 1회만 나가는 기존 결함.
 
+### 🟢 0727 완료·잔여 — 여정 알림톡 + 싱크에이전트
+> **한줄로 배포완료**: 발송ID 표시명=발급명 통일 + 에이전트 잔액 소스 **계정원장 전환**(`0fe700c0`) · 여정 알림톡 `campaigns.message_type` CHECK 위반 전건 미발송 정정(`0af8d427`) · 결과 알림 묶음+발신번호(`353cb42a`) · 결과 알림 **실결과 기준**(큐 적재를 성공으로 세던 것) + `sentTables` 기록(미커밋 잔여 있으면 함께 push). 상세 = [[project_2026_0727_journey_alimtalk_and_agent_tls]]
+> **여정 확정 사실**: 워커 주기 진입 5분 + 발송 5분 = 업로드 후 **최대 10분**(부하 때문에 유지). **전환발송은 게이트웨이가 정상 수행**(7300 실패 → 대체 LMS 1000 성공 실측) — "우리가 전환" 설계 불요.
+> **다음 세션 1순위**: 대체문안(`alimtalk_next_contents`) **비면 원본 알림톡 본문 자동 사용**(알림톡 4경로) + 그 메뉴. 그다음 VM 2016 검증(가짜 DB·Aurora 세팅부터).
+> **싱크에이전트 코드완료·빌드대기**: TLS 일체 + `supportBigNumbers` + MySQL 키셋(정수 PK·별칭 비충돌만, 그 외 OFFSET 폴백). `package.json` 1.6.4 / 서버엔 **1.6.3 zip 20개** → 빌드 1회로 교체. 매뉴얼 스크립트 갱신 완료(docx는 빌드 후). SoT = status/SYNC-AGENT-TROUBLESHOOTING.md §2-7.
+
 ### 🔵 다음 세션 (예정)
 > ⓪ **레거시 PAY·템플릿관리자 로그인 차단 + 전환 안내(0727 착수·중단 — 서팀장 회의 후 재개, Harold 지시)**: 두 사이트 로그인을 막고 모던한 안내 화면(한줄로 바로가기 버튼 + "비밀번호는 고객센터 문의" 1800-8125·mobile@invitocorp.com)으로 대체. 차단 방식 초안 = PAY는 `/www/pay/WEB-INF/web.xml` `<security-constraint>`+403 error-page(로그인 POST까지 컨테이너 단 차단·클래스 재빌드 없음), 템플릿관리자는 nginx server 블록 교체. **미실행 선행** = 143 실측 4종(netstat / `readlink -f /home/pay` / web.xml / nginx conf)·`Downloads/pay-app.tgz` 소스 확인. **안내 화면 2종 = 확정**(Harold 디자인 보강판 반영, 0727) — `docs/legacy-notice/pay-notice.html` · `docs/legacy-notice/template-admin-notice.html`. 외부 요청 0(로고=data URI)·인라인 CSS 단일 파일·다크모드 대응. 헤더에 옛 도메인 → hanjul.ai 전환 표시. **PAY 차단 전 확인** = 선불 충전은 §5-4까지 한줄로에 있으나 `prepaid` 지정 0건이라 아직 실사용 불가 → 지정·왕복 실측이 차단보다 앞선다.
 > ① **템플릿관리자 흡수(Track B+C) — 1순위**: 다음 = 서팀장 점검표 회신(계정·코드 정정) → 컷오버. 병행 = M4 실발송 1건 · 497 기준 서팀장 · M5(B-3 계정·Bill_ID) · 브랜드 스코프(B-2) · 다우 2사 senderKey 이관 실측. 계약·이관 이력 전문 = 설계문서 §1·§4 · [[project_2026_0705_legacy_template_migration]].

@@ -64,16 +64,18 @@ function containsKorean(str: string): boolean {
 }
 
 /**
- * 수치형 PK 타입 — 키셋 커서를 **문자열로 주고받되 비교는 수치로** 하기 위한 판별표(★ Codex 2R-2).
- * MySQL은 정수 컬럼과 문자열 상수를 비교할 때 문자열을 double로 바꾸므로, 2^53을 넘는 BIGINT에서
- * 커서가 어긋난다(행 누락·중복·정지). `CAST(? AS DECIMAL(65,0))`으로 넘기면 정확히 비교된다.
+ * 키셋 커서를 **정확히 비교할 수 있는** PK 타입 — 정수 계열만.
+ * MySQL은 정수 컬럼과 문자열 상수를 비교할 때 문자열을 double로 바꿔 2^53 초과에서 어긋나므로
+ * `CAST(? AS DECIMAL(65,0))`으로 넘긴다.
+ * 소수 계열(decimal·numeric·float·double)은 넣지 않는다(Codex 3R-1) —
+ * 스케일을 모르는 채 DECIMAL(65,0)으로 캐스팅하면 소수부가 잘려 커서가 앞 행을 다시 읽거나 건너뛴다.
+ * 그런 PK는 키셋을 포기하고 OFFSET 경로로 폴백하는 것이 안전하다.
  */
-const MYSQL_NUMERIC_PK_TYPES = new Set([
+const MYSQL_KEYSET_PK_TYPES = new Set([
   'tinyint', 'smallint', 'mediumint', 'int', 'integer', 'bigint',
-  'decimal', 'numeric',
 ]);
 
-/** 키셋 커서 전용 별칭 — SELECT * 와 충돌하지 않도록 실사용에 없을 이름을 쓰고, 반환 전 제거한다. */
+/** 키셋 커서 전용 별칭. 고객 테이블에 같은 이름의 컬럼이 실재하면 키셋을 쓰지 않는다(Codex 3R-2). */
 const KEYSET_CURSOR_ALIAS = '__sync_keyset_cursor__';
 
 function hasNonAscii(str: string): boolean {
@@ -319,8 +321,8 @@ export class MysqlConnector implements IDbConnector {
 
   /** 단일 PK 캐시 — 전체 동기화 안정 정렬 키 (매 배치 메타 조회 방지). */
   private pkCache = new Map<string, string | null>();
-  /** PK가 수치형인지 캐시 — 키셋 커서 비교 방식을 가른다(Codex 2R-2). */
-  private pkNumericCache = new Map<string, boolean>();
+  /** 키셋 사용 가능 여부 — 정수 PK이고 커서 별칭과 충돌하지 않을 때만 true. */
+  private keysetOkCache = new Map<string, boolean>();
 
   private async resolvePk(tableName: string): Promise<string | null> {
     const cached = this.pkCache.get(tableName);
@@ -331,10 +333,16 @@ export class MysqlConnector implements IDbConnector {
       pk = singleColumnPk(cols);
       if (pk) {
         const t = String(cols.find((c) => c.name === pk)?.dataType || '').toLowerCase();
-        this.pkNumericCache.set(tableName, MYSQL_NUMERIC_PK_TYPES.has(t));
+        // 정수 PK가 아니거나(소수 절삭 위험) 커서 별칭과 같은 이름의 컬럼이 실재하면(payload 손실 위험)
+        // 키셋을 쓰지 않는다. 두 경우 모두 엔진이 OFFSET 경로로 폴백한다.
+        const aliasClash = cols.some((c) => c.name === KEYSET_CURSOR_ALIAS);
+        this.keysetOkCache.set(tableName, MYSQL_KEYSET_PK_TYPES.has(t) && !aliasClash);
+      } else {
+        this.keysetOkCache.set(tableName, false);
       }
     } catch {
       pk = null;
+      this.keysetOkCache.set(tableName, false);
     }
     this.pkCache.set(tableName, pk);
     return pk;
@@ -360,14 +368,15 @@ export class MysqlConnector implements IDbConnector {
   }
 
   /**
-   * 키셋(안정 키) 전체 조회 — ★ 2026-07-27 MySQL 구현 신설.
+   * 키셋(안정 키) 전체 조회 — **정수 단일 PK 테이블 전용**.
    *
-   * 배경: 2026-06-30 이새에프앤씨 전체동기화 조기 종료(13만 중 ~10만에서 끊김)의 근본 정정이 키셋이었는데
-   * 그때 `oracle.ts`에만 들어가고 MySQL은 빠져 있었다. MySQL 고객은 깊은 OFFSET 재스캔 경로에 그대로 남아
-   * 같은 사고에 노출된다(원천이 라이브 테이블이면 페이지가 밀린다).
+   * 배경: 2026-06-30 이새에프앤씨 전체동기화 조기 종료의 근본 정정이 키셋인데 oracle에만 있었다.
+   * 깊은 OFFSET 재스캔이 없어 동기화 중 앞쪽 행이 삽입·삭제돼도 건너뛰지 않는다.
    *
-   * 키 = 단일 PK. PK가 없거나 복합키면 **던진다** — 엔진(`engine.ts`)이 그 예외를 잡아 OFFSET 폴백으로 내려간다.
-   * 조용히 부분 결과를 돌려주면 그게 곧 조기 종료라, 여기서는 실패를 감추지 않는다.
+   * 아래는 **던져서** 엔진이 OFFSET으로 폴백하게 한다(조용한 부분 결과 금지):
+   *  - 단일 컬럼 PK 없음(복합·무 PK)
+   *  - PK가 정수 계열이 아님 — 소수 PK는 커서 캐스팅이 정확할 수 없다(Codex 3R-1)
+   *  - 고객 테이블에 커서 별칭과 같은 이름의 컬럼이 실재 — 반환 전 삭제 시 원본이 사라진다(Codex 3R-2)
    */
   async fetchAllKeyset(
     tableName: string,
@@ -379,22 +388,18 @@ export class MysqlConnector implements IDbConnector {
 
     const pk = await this.resolvePk(tableName);
     if (!pk) {
-      throw new Error(`키셋 조회 불가: ${tableName}에 단일 컬럼 PK가 없습니다 (OFFSET 폴백 대상)`);
+      throw new Error(`키셋 조회 불가: ${tableName}에 단일 컬럼 PK가 없습니다 (OFFSET 폴백)`);
+    }
+    if (this.keysetOkCache.get(tableName) !== true) {
+      throw new Error(`키셋 조회 불가: ${tableName}의 PK가 정수형이 아니거나 커서 별칭과 충돌합니다 (OFFSET 폴백)`);
     }
     const safePk = this.sanitizeIdentifier(pk);
-    const numericPk = this.pkNumericCache.get(tableName) === true;
 
-    // ★ Codex 2R-2 정정 ①: 커서 비교 축.
-    //   PK가 수치형이면 문자열 상수를 그대로 비교시키지 않는다 — MySQL이 double로 바꿔
-    //   2^53 초과 BIGINT에서 커서가 어긋난다(행 누락·중복·정지). DECIMAL로 캐스팅해 정확히 비교한다.
-    const cursorExpr = numericPk ? 'CAST(? AS DECIMAL(65,0))' : '?';
-    const where = afterKey == null ? '' : `WHERE \`${safePk}\` > ${cursorExpr}`;
+    // 커서 비교는 DECIMAL 캐스팅으로 정확히 — 정수 컬럼 vs 문자열 상수는 double 변환이라 2^53 위에서 어긋난다.
+    const where = afterKey == null ? '' : `WHERE \`${safePk}\` > CAST(? AS DECIMAL(65,0))`;
     const params: unknown[] = afterKey == null ? [limit] : [afterKey, limit];
 
-    // ★ Codex 2R-2 정정 ②: 커서 값의 출처.
-    //   PK를 CHAR로 함께 받아 **원본 그대로**(정밀도 손실 없이) 커서로 쓴다.
-    //   행 값에서 뽑으면 (a) BIGINT가 Number로 오면서 정밀도가 깎이고
-    //   (b) 이중 인코딩 보정이 걸린 문자열 PK는 보정된 값이 나가 WHERE가 원본과 안 맞는다.
+    // 커서는 CHAR 별칭으로 받아 **인코딩 보정 전 원본**을 쓴다(보정된 값이 커서로 나가면 WHERE가 안 맞는다).
     const [rows] = await this.pool!.query(
       `SELECT t.*, CAST(t.\`${safePk}\` AS CHAR) AS \`${KEYSET_CURSOR_ALIAS}\`
          FROM \`${safeTable}\` t ${where}
@@ -405,14 +410,13 @@ export class MysqlConnector implements IDbConnector {
     const raw = rows as Record<string, unknown>[];
     const lastRaw = raw[raw.length - 1];
     const lastVal = lastRaw ? lastRaw[KEYSET_CURSOR_ALIAS] : undefined;
-    // 값이 없으면(NULL PK 등) null로 끊어 엔진이 종료하게 둔다 — 억지로 이어가면 같은 페이지를 반복한다.
     const lastKey = lastVal === undefined || lastVal === null ? null : String(lastVal);
 
-    // 커서 별칭은 동기화 payload에 새어 나가면 안 된다(고객 DB에 없는 컬럼).
+    // 커서 별칭은 동기화 payload로 새어 나가면 안 된다(고객 DB에 없는 컬럼).
     for (const r of raw) delete r[KEYSET_CURSOR_ALIAS];
     const result = this.fixRowEncoding(raw as RawRow[]);
 
-    logger.debug(`키셋 전체 조회: ${result.length}건`, { tableName, afterKey, numericPk });
+    logger.debug(`키셋 전체 조회: ${result.length}건`, { tableName, afterKey });
     return { rows: result, lastKey };
   }
 
