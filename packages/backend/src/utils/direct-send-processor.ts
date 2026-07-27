@@ -12,7 +12,8 @@ import { query } from '../config/database';
 import { normalizePhone } from './normalize-phone';
 import { prepareSendMessage, replaceVariables } from './messageUtils';
 import { fillAlimtalkVarMap } from './alimtalk-vars';
-import { bulkInsertSmsQueue, insertKakaoQueue, insertAlimtalkQueue, toQtmsgType } from './sms-queue';
+import { resolveAlimtalkFallback } from './alimtalk-fallback';
+import { bulkInsertSmsQueue, insertKakaoQueue, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType } from './sms-queue';
 import { normalizeMmsImagePaths } from './mms-image-util';
 import { resolveCustomerCallback } from './callback-filter';
 // ★ 2026-07-05: 발송 피로도 카운터 (광고성 발송 기록 — 발송 무영향 fire-and-forget)
@@ -199,6 +200,15 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
         if (parsedEtc?.attachment_link && Object.keys(parsedEtc.attachment_link).length > 0) alimAttachmentLink = parsedEtc.attachment_link;
       } catch { /* 형식 오류 → title 없음 취급 */ }
     }
+    // ★ 2026-07-27: 전환재발송 설정 검증은 행을 만들기 전에 1회. 청크가 순차라 행 중간에서 죽으면
+    //   앞 청크는 이미 큐에 들어간 뒤라 부분 발송이 된다 — 설정 결함은 첫 INSERT 전에 걸러낸다.
+    resolveAlimtalkFallback({
+      nextType: p.alimtalkNextType,
+      nextContents: p.alimtalkNextContents,
+      nextSubject: p.alimtalkNextSubject,
+    });
+    // 강등은 행마다 찍지 않고 청크당 1줄로 센다 — 대량 캠페인에서 수십만 줄 + 전화번호 원문이 로그에 쌓인다.
+    let alimDowngradedCount = 0;
     const alimtalkRows = recipients.map((recipient) => {
       const cleanPhone = normalizePhone(recipient.phone);
       const dbCustomer = custMap.get(cleanPhone) || null;
@@ -214,22 +224,34 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
         );
       }
       // ★ 대체문구(k_next_contents)도 본문과 동일 치환 — raw 발송 시 #{변수} 노출 차단.
-      let finalNextContents: string | undefined;
-      if ((p.alimtalkNextType === 'A' || p.alimtalkNextType === 'B') && p.alimtalkNextContents) {
+      let filledNextContents: string | undefined;
+      if (p.alimtalkNextContents) {
         const ncBase = replaceVariables(
           p.alimtalkNextContents, dbCustomer, p.directFieldMappings,
           toAddressBookFields(recipient), { skipNumberFormatting: true }
         );
-        finalNextContents = fillAlimtalkVarMap(ncBase, p.alimtalkVariableMap, dbCustomer, recipient as Record<string, any>);
+        filledNextContents = fillAlimtalkVarMap(ncBase, p.alimtalkVariableMap, dbCustomer, recipient as Record<string, any>);
       }
+      // ★ 2026-07-27: 전환재발송 규칙 CT 단일 진입점(alimtalk-fallback) — 4경로 공통.
+      //   설정은 위에서 이미 통과했다. 여기서 비는 경우는 이 수신자의 변수가 전부 빈 값이라
+      //   치환 후 문안이 사라진 행뿐이므로, 그 행만 전환 없음으로 내리고 본 발송은 그대로 보낸다.
+      const alimFallback = resolveAlimtalkFallback(
+        {
+          nextType: p.alimtalkNextType,
+          nextContents: filledNextContents,
+          nextSubject: p.alimtalkNextSubject,
+        },
+        { emptyContentsPolicy: 'disableFallback' },
+      );
+      if (alimFallback.downgradedToNone) alimDowngradedCount++;
       return {
         phone: cleanPhone,
         callback: normalizePhone(p.callback),
         message: finalMessage,
         templateCode: p.alimtalkTemplateCode as string,
-        nextType: p.alimtalkNextType || 'L',
-        nextContents: finalNextContents,
-        titleStr: (p.alimtalkNextType === 'L' || p.alimtalkNextType === 'B') ? (p.alimtalkNextSubject || '') : undefined,
+        nextType: alimFallback.nextType,
+        nextContents: alimFallback.nextContents,
+        titleStr: alimFallback.titleStr,
         buttonJson: p.alimtalkButtonJson || undefined,
         // ★ QTmsg 매뉴얼: 알림톡 강조 k_etc_json = {title}만(senderkey는 CT-04가 비토 라인만 주입) — #{변수} 본문과 동일 치환.
         etcJson: buildAlimtalkEtcJson({
@@ -243,6 +265,9 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
         companyId: p.companyId,
       };
     });
+    if (alimDowngradedCount > 0) {
+      console.log(`[direct-send-processor] 대체문안 치환 결과 공백 ${alimDowngradedCount}건 — 해당 수신자만 전환 없이 알림톡 발송 campaign=${p.campaignId}`);
+    }
     try {
       // 강조표기형 7300 진단 로그(ALIMTALK-DEBUG2)는 원인 확정으로 제거(2026-06-10).
       // 근본 = 에이전트 qtmsg.xml select_sql의 sendercode 합성에서 sender_code NULL → k_etc_json 전체 NULL.
@@ -250,7 +275,9 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
       sentCount = await insertAlimtalkQueue(p.companyTables, alimtalkRows, p.campaignId);
     } catch (alimtalkErr) {
       console.error('[direct-send-processor] 알림톡 INSERT 실패:', alimtalkErr);
-      sentCount = 0;
+      // ★ 2026-07-27 (B-0727-1): 실패해도 앞 배치는 커밋되어 발송된다. 0으로 지우면 워커가
+      //   그만큼을 미적재로 보고 환불한 뒤 실제로는 나가버린다(환불 후 실발송).
+      sentCount = alimtalkErr instanceof AlimtalkQueueInsertError ? alimtalkErr.inserted : 0;
     }
   }
 

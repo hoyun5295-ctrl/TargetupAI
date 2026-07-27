@@ -27,6 +27,23 @@ export function calcRefundDue(p: {
   mysqlFail: number;
   mysqlPending: number;
 }): number {
+  const parts = calcRefundParts(p);
+  return parts.fail + parts.notLoaded;
+}
+
+/**
+ * 같은 산식을 **원인별로 나눠** 돌려준다 — ★ 2026-07-27 (B-0727-2).
+ * 환불 항아리를 원인별로 분리하면서, sweeper가 실패분(fail)과 미적재분(notloaded)을
+ * 각자의 키로 정산할 수 있어야 워커가 넣어둔 미적재 환불과 같은 키에서 수렴한다.
+ * 합계는 기존 calcRefundDue와 항상 같다(상한 포함).
+ */
+export function calcRefundParts(p: {
+  deductedCount: number;
+  sentCount: number;
+  mysqlSuccess: number;
+  mysqlFail: number;
+  mysqlPending: number;
+}): { fail: number; notLoaded: number } {
   const deducted = Math.max(0, Math.floor(p.deductedCount));
   const sent = Math.max(0, Math.floor(p.sentCount));
   const success = Math.max(0, Math.floor(p.mysqlSuccess));
@@ -35,8 +52,11 @@ export function calcRefundDue(p: {
   // 실제 큐에 올라간(처리된) 수 = max(워커 기록 적재, MySQL 실측 성공+실패+대기)
   const processed = Math.max(sent, success + fail + pending);
   const notLoaded = processed > 0 ? Math.max(0, deducted - processed) : 0;
-  // 상한 — 누적 환불이 차감 총액을 넘지 않도록 (prepaidRefund에도 한도 가드 있으나 산식 자체로도 보장)
-  return Math.min(deducted, fail + notLoaded);
+  // 상한 — 누적 환불이 차감 총액을 넘지 않도록 (prepaidRefund에도 한도 가드 있으나 산식 자체로도 보장).
+  //   상한에 걸리면 실패분을 먼저 채우고 남은 만큼만 미적재분에 배분한다(실패는 실측, 미적재는 파생값).
+  const cappedFail = Math.min(deducted, fail);
+  const cappedNotLoaded = Math.max(0, Math.min(deducted - cappedFail, notLoaded));
+  return { fail: cappedFail, notLoaded: cappedNotLoaded };
 }
 
 /**

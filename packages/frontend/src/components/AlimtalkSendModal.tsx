@@ -16,6 +16,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Bell, X, Contact } from 'lucide-react';
 import AlimtalkChannelPanel, {
+  validateAlimtalkChannelState,
   type AlimtalkChannelState,
   type AlimtalkSenderProfile,
   type AlimtalkTemplate,
@@ -380,19 +381,16 @@ export default function AlimtalkSendModal({
       setToast({ show: true, type: 'error', message: '승인된 템플릿만 발송 가능합니다.' });
       return;
     }
-    if (
-      ['A', 'B'].includes(alimtalkFallback) &&
-      !alimtalkNextContents.trim()
-    ) {
-      setToast({ show: true, type: 'error', message: '대체 문구를 입력해주세요.' });
-      return;
-    }
     // ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): L(LMS 대체) + B(LMS+문구) 시 LMS 제목 필수.
-    if (
-      ['L', 'B'].includes(alimtalkFallback) &&
-      !(alimtalkNextSubject || '').trim()
-    ) {
-      setToast({ show: true, type: 'error', message: 'LMS 대체 발송 시 제목을 입력해주세요.' });
+    // ★ 2026-07-27: 전환재발송 검증을 공용 CT(validateAlimtalkChannelState)로 통일 — 백엔드 규칙과 동일.
+    const fallbackViolation = validateAlimtalkChannelState({
+      profileId: '', templateCode: '', templateId: '', variableMap: {},
+      nextType: alimtalkFallback as any,
+      nextContents: alimtalkNextContents,
+      nextSubject: alimtalkNextSubject,
+    });
+    if (fallbackViolation) {
+      setToast({ show: true, type: 'error', message: fallbackViolation });
       return;
     }
     // ★ #3-2 (2026-06-01): 발송 전 변수 검증 — 빈 변수 / 데이터 없는 @@필드@@ 차단 (깨진 알림톡·미수신 방지)

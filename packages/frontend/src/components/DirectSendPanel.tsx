@@ -44,6 +44,7 @@ import { insertAtCursorPos } from '../utils/textInsert';
 import MmsImagePreview from './shared/MmsImagePreview';
 import AiRefineModal from './AiRefineModal';
 import AlimtalkChannelPanel, {
+  validateAlimtalkChannelState,
   type AlimtalkChannelState,
   type AlimtalkSenderProfile,
   type AlimtalkTemplate,
@@ -424,12 +425,15 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     if (!['approved', 'APPROVED', 'APR', 'A'].includes(kakaoSelectedTemplate.status)) { setToast({ show: true, type: 'error', message: '승인된 템플릿만 발송 가능합니다' }); return; }
     // ★ D224+ (2026-05-27) 영업팀장 박성용 신고 fix: frontend self-fail-safe 검증 분기 추가 (AlimtalkSendModal:371~384 패턴 미러).
     //   옛 사고 = 본 함수 검증 누락 → backend 진입 후 catch → toast 발생 + 사용자 혼란.
-    if (['A', 'B'].includes(alimtalkFallback) && !alimtalkNextContents.trim()) {
-      setToast({ show: true, type: 'error', message: '대체 문구를 입력해주세요.' });
-      return;
-    }
-    if (['L', 'B'].includes(alimtalkFallback) && !(alimtalkNextSubject || '').trim()) {
-      setToast({ show: true, type: 'error', message: 'LMS 대체 발송 시 LMS 제목을 입력해주세요.' });
+    // ★ 2026-07-27: 전환재발송 검증을 공용 CT(validateAlimtalkChannelState)로 통일 — 백엔드 규칙과 동일.
+    const fallbackViolation = validateAlimtalkChannelState({
+      profileId: '', templateCode: '', templateId: '', variableMap: {},
+      nextType: alimtalkFallback as any,
+      nextContents: alimtalkNextContents,
+      nextSubject: alimtalkNextSubject,
+    });
+    if (fallbackViolation) {
+      setToast({ show: true, type: 'error', message: fallbackViolation });
       return;
     }
     let finalContent = kakaoSelectedTemplate.content;

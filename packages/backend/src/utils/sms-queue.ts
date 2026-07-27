@@ -989,6 +989,18 @@ export async function insertKakaoBasicQueue(params: {
 }
 
 /**
+ * 알림톡 큐 INSERT 실패 — **그 전까지 커밋된 건수**를 함께 전달한다.
+ * ★ 2026-07-27 (B-0727-1): 배치가 독립 커밋이라 "실패 = 0건 적재"가 아니다.
+ *   호출부는 이 값을 적재 성공분으로 세야 환불이 실제 발송분을 넘지 않는다.
+ */
+export class AlimtalkQueueInsertError extends Error {
+  constructor(message: string, public readonly inserted: number) {
+    super(message);
+    this.name = 'AlimtalkQueueInsertError';
+  }
+}
+
+/**
  * CT-04: 알림톡 발송 큐 INSERT (SMSQ_SEND에 msg_type='K')
  * QTmsg Agent가 SMSQ_SEND에서 가져가서 발송
  */
@@ -1082,14 +1094,25 @@ export async function insertAlimtalkQueue(
       );
     }
 
-    await mysqlQuery(
-      `INSERT INTO ${table} (
-        dest_no, call_back, msg_contents, msg_type, title_str,
-        k_template_code, k_next_type, k_next_contents, k_button_json,
-        sendreq_time, msg_instm, rsv1, k_etc_json, app_etc1, app_etc2
-      ) VALUES ${values.join(',')}`,
-      params
-    );
+    // ★ 2026-07-27 (B-0727-1): 배치는 각각 독립 커밋이다(풀에서 연결을 빌려 단일 쿼리 실행, 전체를 감싸는
+    //   트랜잭션 없음). 뒤 배치가 실패해도 앞 배치는 이미 큐에 남아 발송된다. 그래서 실패를 그냥 던지면
+    //   호출부가 "한 건도 안 들어갔다"로 알고 전량 환불하는데 실제로는 앞 배치가 나간다(환불 후 실발송).
+    //   실패해도 **커밋된 건수를 실어서** 던진다 — 호출부가 그만큼은 적재된 것으로 세게.
+    try {
+      await mysqlQuery(
+        `INSERT INTO ${table} (
+          dest_no, call_back, msg_contents, msg_type, title_str,
+          k_template_code, k_next_type, k_next_contents, k_button_json,
+          sendreq_time, msg_instm, rsv1, k_etc_json, app_etc1, app_etc2
+        ) VALUES ${values.join(',')}`,
+        params
+      );
+    } catch (batchErr: any) {
+      throw new AlimtalkQueueInsertError(
+        `알림톡 큐 INSERT 실패 (앞선 ${inserted}건은 커밋됨): ${batchErr?.message || batchErr}`,
+        inserted,
+      );
+    }
     inserted += batch.length;
   }
 

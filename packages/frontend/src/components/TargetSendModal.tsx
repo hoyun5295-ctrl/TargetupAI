@@ -6,6 +6,7 @@ import { insertAtCursor } from '../utils/textInsert';
 import BrandLinkChips from './BrandLinkChips';
 import MmsImagePreview from './shared/MmsImagePreview';
 import AlimtalkChannelPanel, {
+  validateAlimtalkChannelState,
   type AlimtalkChannelState,
   type AlimtalkSenderProfile,
   type AlimtalkTemplate,
@@ -353,6 +354,14 @@ export default function TargetSendModal({
   const handleAlimtalkSend = async () => {
     if (targetRecipients.length === 0) { setToast({ show: true, type: 'error', message: '수신자가 없습니다' }); return; }
     if (!kakaoSelectedTemplate) { setToast({ show: true, type: 'error', message: '템플릿을 선택해주세요' }); return; }
+    // ★ 2026-07-27: 전환재발송 검증 공용 CT — 백엔드(400)와 같은 규칙을 확인 모달 전에 먼저 건다.
+    const fallbackViolation = validateAlimtalkChannelState({
+      profileId: '', templateCode: '', templateId: '', variableMap: {},
+      nextType: alimtalkFallback,
+      nextContents: alimtalkNextContents,
+      nextSubject: alimtalkNextSubject,
+    });
+    if (fallbackViolation) { setToast({ show: true, type: 'error', message: fallbackViolation }); return; }
     const token = localStorage.getItem('token');
     const phones = targetRecipients.map((r: any) => r.phone);
     const checkRes = await fetch('/api/unsubscribes/check', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ phones }) });
@@ -749,6 +758,9 @@ export default function TargetSendModal({
                     variableMap: kakaoTemplateVars,
                     nextType: alimtalkFallback,
                     nextContents: alimtalkNextContents,
+                    // ★ 2026-07-27: nextSubject 배선 누락 정정 — 값을 안 내려주고 안 받아올려
+                    //   LMS 대체 제목이 화면엔 떠도 발송 payload엔 항상 빈 값이었다(D224+와 같은 사고).
+                    nextSubject: alimtalkNextSubject,
                   }}
                   onChange={(v: AlimtalkChannelState) => {
                     if (setAlimtalkProfileId) setAlimtalkProfileId(v.profileId);
@@ -758,6 +770,7 @@ export default function TargetSendModal({
                     setKakaoTemplateVars(v.variableMap);
                     if (setAlimtalkFallback) setAlimtalkFallback(v.nextType);
                     if (setAlimtalkNextContents) setAlimtalkNextContents(v.nextContents);
+                    if (setAlimtalkNextSubject) setAlimtalkNextSubject(v.nextSubject || '');
                   }}
                 />
                 <div className="bg-white rounded-2xl border-2 border-blue-200 px-3 py-2">

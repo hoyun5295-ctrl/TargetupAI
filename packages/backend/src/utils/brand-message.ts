@@ -11,7 +11,7 @@
  */
 
 import { insertKakaoQueue, insertKakaoBasicQueue } from './sms-queue';
-import { prepaidDeduct, prepaidRefund } from './prepaid';
+import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from './prepaid';
 import { buildUnsubscribeExistsFilter } from './unsubscribe-helper';
 import { normalizePhone } from './normalize-phone';
 import { query } from '../config/database';
@@ -482,7 +482,7 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
 
   // 6. 실패분 환불
   if (failCount > 0) {
-    await prepaidRefund(params.companyId, failCount, 'kakao', params.campaignId || '', '브랜드메시지 발송 실패분 환불');
+    await prepaidRefund(params.companyId, failCount, 'kakao', params.campaignId || '', '브랜드메시지 미적재분 환불', 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
   }
 
   // ★ 2026-07-03 KAKAO 문안 학습 코퍼스 적재 (Phase 2, fire-and-forget)
@@ -578,7 +578,7 @@ export async function sendBrandMessageTemplate(params: BrandTemplateParams): Pro
   }
 
   if (failCount > 0) {
-    await prepaidRefund(params.companyId, failCount, 'kakao', params.campaignId || '', '브랜드메시지 발송 실패분 환불');
+    await prepaidRefund(params.companyId, failCount, 'kakao', params.campaignId || '', '브랜드메시지 미적재분 환불', 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
   }
 
   // ★ 2026-07-03 KAKAO 문안 학습 코퍼스 적재 (Phase 2, fire-and-forget)

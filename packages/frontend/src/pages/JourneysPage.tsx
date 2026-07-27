@@ -35,7 +35,7 @@ import JourneyMessageEditModal from '../components/journey/JourneyMessageEditMod
 // 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
 import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
 import JourneyStepNotifyToggle from '../components/journey/JourneyStepNotifyToggle';
-import AlimtalkChannelPanel, { type AlimtalkSenderProfile, type AlimtalkTemplate, type AlimtalkChannelState } from '../components/alimtalk/AlimtalkChannelPanel';
+import AlimtalkChannelPanel, { validateAlimtalkChannelState, type AlimtalkSenderProfile, type AlimtalkTemplate, type AlimtalkChannelState } from '../components/alimtalk/AlimtalkChannelPanel';
 import InfoAlertJourneyBuilder, { type InfoAlertBuildResult } from '../components/journey/InfoAlertJourneyBuilder';
 import DateAnchorJourneyBuilder, { type DateAnchorBuildResult } from '../components/journey/DateAnchorJourneyBuilder';
 import { detectLiquidSyntax, renderLiquid, flattenCustomerForLiquid, SAMPLE_CUSTOMERS } from '../utils/liquid-templating';
@@ -2816,6 +2816,12 @@ export default function JourneysPage() {
                             value={stepToAlimtalkState(s)}
                             onChange={(next) => updateStep(idx, alimtalkStateToStepPatch(next))}
                           />
+                        )}
+                        {/* ★ 2026-07-27: 전환재발송 규칙 위반은 저장(400)·활성화에서 막힌다 — 화면에서 먼저 알려준다. */}
+                        {s.alimtalkTemplateCode && validateAlimtalkChannelState(stepToAlimtalkState(s)) && (
+                          <div className="mt-2 p-2 bg-rose-500/10 border border-rose-500/30 rounded text-[11px] text-rose-200">
+                            {validateAlimtalkChannelState(stepToAlimtalkState(s))}
+                          </div>
                         )}
                       </div>
                     )}

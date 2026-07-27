@@ -25,6 +25,7 @@ import CallbackConfirmModal, { CallbackConfirmData } from './CallbackConfirmModa
 // ★ D130: 알림톡 공용 패널 (설계서 §6-3-D)
 import AlimtalkVariableMappingPanel from './alimtalk/AlimtalkVariableMappingPanel';
 import AlimtalkChannelPanel, {
+  validateAlimtalkChannelState,
   type AlimtalkChannelState,
   type AlimtalkSenderProfile,
   type AlimtalkTemplate,
@@ -481,9 +482,9 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
       // ★ D130: 알림톡 검증
       if (!alimtalkState.profileId) { setError('발신프로필을 선택해주세요.'); setStep(5); return; }
       if (!alimtalkState.templateCode) { setError('알림톡 템플릿을 선택해주세요.'); setStep(5); return; }
-      if (['A', 'B'].includes(alimtalkState.nextType) && !alimtalkState.nextContents.trim()) {
-        setError('부달 A/B 타입은 대체 문구가 필요합니다.'); setStep(5); return;
-      }
+      // ★ 2026-07-27: 전환재발송 검증을 공용 CT(validateAlimtalkChannelState)로 통일 — LMS 제목 누락도 함께 차단.
+      const fallbackViolation = validateAlimtalkChannelState(alimtalkState);
+      if (fallbackViolation) { setError(fallbackViolation); setStep(5); return; }
     } else {
       if (!messageContent.trim()) { setError('메시지 내용을 입력해주세요.'); setStep(5); return; }
     }

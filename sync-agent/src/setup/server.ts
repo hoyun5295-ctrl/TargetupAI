@@ -30,6 +30,32 @@ import {
 import { getLogger, initLogger } from '../logger';
 import { ZodError } from 'zod';
 import { SETUP_HTML } from './setup-html';
+import { isInternetExplorer } from './setup-mode';
+
+/**
+ * IE 전용 안내 화면 — 스크립트를 한 줄도 쓰지 않는다(IE에서 죽으면 안내 자체가 안 뜬다).
+ * CSS도 IE11이 이해하는 범위만 쓴다(flex/grid·CSS 변수 미사용).
+ */
+const IE_NOTICE_HTML = `<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>Sync Agent 설치 마법사</title>
+<style>
+ body{margin:0;padding:40px 20px;background:#f1f5f9;font-family:'Malgun Gothic',dotum,sans-serif;color:#1e293b}
+ .box{max-width:640px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:32px}
+ h1{margin:0 0 8px;font-size:22px}
+ p{line-height:1.7;color:#475569}
+ .cmd{margin:16px 0;padding:14px 16px;background:#0f172a;color:#e2e8f0;border-radius:8px;font-family:consolas,monospace;font-size:15px}
+ .note{margin-top:24px;padding-top:16px;border-top:1px solid #e2e8f0;font-size:13px;color:#64748b}
+</style></head>
+<body><div class="box">
+<h1>이 브라우저에서는 설치를 진행할 수 없습니다</h1>
+<p>Internet Explorer는 설치 마법사 화면을 실행하지 못합니다. 화면은 보이지만 버튼이 동작하지 않습니다.</p>
+<p><strong>명령 프롬프트 설치 마법사</strong>로 진행해 주세요. 설치 폴더에서 아래 명령을 실행하면 됩니다.</p>
+<div class="cmd">sync-agent.exe --setup-cli</div>
+<p>기능은 동일합니다. DB 연결, 컬럼 자동 매핑, 동기화 설정까지 모두 진행됩니다.</p>
+<div class="note">Microsoft Edge 또는 Chrome이 설치되어 있다면, 그 브라우저에서 <strong>http://localhost:9876</strong> 을 열어 이 화면 대신 마법사를 사용할 수 있습니다.</div>
+</div></body></html>`;
 
 const PORT = 9876;
 const DEV_MODE = process.env.DEV_MODE === 'true';
@@ -341,14 +367,20 @@ export async function startSetupWizard(
   // ─── HTML 서빙 (인라인 — pkg exe 호환) ─────────────────
   // esbuild→pkg 번들링 시 파일시스템의 HTML이 포함되지 않으므로
   // HTML을 JS 문자열로 임베드하여 직접 응답
-  app.get('/', (_req, res) => {
+  // ★ 2026-07-27 (Server 2016 VM 실측): IE로 열면 화면은 정상 렌더링되지만 스크립트가 파싱되지 않아
+  //   (화살표 함수·템플릿 문자열·async/await·fetch) 버튼이 전부 죽는다. 사용자는 원인을 알 수 없다.
+  //   그래서 IE 요청에는 스크립트가 하나도 없는 안내 화면을 돌려 CLI 마법사로 안내한다.
+  const serveSetupPage = (req: any, res: any) => {
+    if (isInternetExplorer(req?.headers?.['user-agent'])) {
+      res.type('html').send(IE_NOTICE_HTML);
+      return;
+    }
     res.type('html').send(SETUP_HTML);
-  });
+  };
+  app.get('/', serveSetupPage);
   // ★ express 4·5 공용 catch-all(정규식). express 5 전용 '/{*splat}'는 express 4에서
   //   미동작 → 메인(express5/node20)과 레거시(express4/node16) 빌드가 같은 소스로 SPA fallback.
-  app.get(/.*/, (_req, res) => {
-    res.type('html').send(SETUP_HTML);
-  });
+  app.get(/.*/, serveSetupPage);
 
   // ─── 서버 시작 ─────────────────────────────────────────
   const server = app.listen(PORT, () => {

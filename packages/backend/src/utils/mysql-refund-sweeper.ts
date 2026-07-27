@@ -27,10 +27,10 @@ import { resolveChargeUnitPrice } from './unit-price';
 import { parseDeductDescription } from './deduct-reference';
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
 import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, kakaoBatchAggByGroup, type CampaignAggCounts } from './sms-queue';
-import { prepaidRefund, prepaidReverseOverRefund } from './prepaid';
+import { prepaidRefund, prepaidReverseOverRefund, REFUND_KEYS } from './prepaid';
 // ★ 2026-06-11: 환불 누적 단일 산식 — 정당 환불 = 차감 실측 − 성공 − 대기 (미적재분 과소 환불 근본 fix)
 // ★ 2026-06-29: refundInvariantGap — 차감 = 성공 + 순환불 머니 불변식 감시
-import { calcRefundDue, refundInvariantGap } from './refund-calc';
+import { calcRefundParts, refundInvariantGap } from './refund-calc';
 // ★ 2026-06-29: 머니 불변식 위반 시 운영자 LMS 경보 (쿨다운·미설정 시 무발송)
 import { sendSystemAlert } from './system-alert';
 // ★ D182 (2026-05-19): 캠페인 종료 시 회사별 학습 메모리 자동 누적
@@ -261,13 +261,25 @@ async function runOnce(): Promise<void> {
             // ★ 2026-06-29: 미적재 = 차감 − max(적재기록, 성공+실패+대기). sent_count 과소 기록 초과환불 fix.
             const processed = Math.max(sentCount, mysqlSuccess + mysqlFail + mysqlPending);
             const notLoaded = processed > 0 ? Math.max(0, deductedCount - processed) : 0;
-            const refundDue = calcRefundDue({ deductedCount, sentCount, mysqlSuccess, mysqlFail, mysqlPending });
-            if (refundDue > 0) {
-              const r = await prepaidRefund(camp.company_id, refundDue, camp.message_type, camp.id, '발송 실패 환불 (sweep)');
+            // ★ 2026-07-27 (B-0727-2): 한 덩어리로 환불하던 것을 원인별 항아리로 나눈다.
+            //   미적재분(notloaded)은 워커가 종결 때 넣는 것과 **같은 키**라 둘이 서로를 삼키지 않고 수렴한다.
+            //   실패분(fail)은 결과가 도착할수록 커지므로 그 키 안에서 계속 top-up된다.
+            //   합계는 옛 calcRefundDue와 동일하다(상한 포함).
+            const parts = calcRefundParts({ deductedCount, sentCount, mysqlSuccess, mysqlFail, mysqlPending });
+            const refundDue = parts.fail + parts.notLoaded;
+            for (const [key, dueCount, label] of [
+              [REFUND_KEYS.FAIL, parts.fail, '실패'],
+              [REFUND_KEYS.NOT_LOADED, parts.notLoaded, '미적재'],
+            ] as const) {
+              if (dueCount <= 0) continue;
+              const r = await prepaidRefund(
+                camp.company_id, dueCount, camp.message_type, camp.id, `발송 ${label} 환불 (sweep)`,
+                'campaign', { refundKey: key },
+              );
               if (r.refunded > 0) {
                 refundCount++;
                 totalRefundAmount += r.refunded;
-                log(`✓ campaign=${camp.id} ${camp.message_type} 정당환불 ${refundDue}건 (실패 ${mysqlFail} + 미적재 ${notLoaded} / 차감 ${deductedCount} 처리 ${processed}) 차액 ${r.refunded}원`);
+                log(`✓ campaign=${camp.id} ${camp.message_type} ${label} ${dueCount}건 (실패 ${mysqlFail} + 미적재 ${notLoaded} / 차감 ${deductedCount} 처리 ${processed}) 차액 ${r.refunded}원`);
               }
             }
 

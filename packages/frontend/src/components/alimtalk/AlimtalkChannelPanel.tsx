@@ -99,10 +99,30 @@ export function createEmptyAlimtalkState(): AlimtalkChannelState {
 const NEXT_TYPE_OPTIONS: { value: AlimtalkNextType; label: string; desc: string }[] = [
   // ★ 2026-06-01 (영업팀장 박성용 신고): SMS 대체 계열(S·A:SMS+문구) 제거 — 알림톡 문구가 길어 SMS 대체 부적합.
   // ★ 2026-06-02 (직원 신고): LMS+문구(B) 재추가 — LMS로 대체하되 별도 문구가 필요한 경우. SMS 계열(S·A)은 계속 제외.
-  { value: 'N', label: '대체 안함', desc: '알림톡 실패 시 발송 안 함' },
-  { value: 'L', label: 'LMS 대체', desc: '알림톡 실패 시 LMS로 자동 발송' },
-  { value: 'B', label: 'LMS+문구', desc: '알림톡 실패 시 별도 문구로 LMS 발송' },
+  // ★ 2026-07-27: 라벨을 "무엇이 나가는가"로 정정. 옛 'LMS 대체'/'LMS+문구'는 두 선택의 차이가
+  //   나가는 문구인지 발송 유형인지 읽히지 않았다. 규칙 원천 = backend utils/alimtalk-fallback.ts.
+  { value: 'N', label: '대체 안함', desc: '알림톡 실패 시 아무것도 보내지 않음' },
+  { value: 'L', label: '원문 그대로', desc: '알림톡 본문 그대로 LMS로 발송' },
+  { value: 'B', label: '대체문안 작성', desc: '직접 작성한 문안으로 LMS 발송' },
 ];
+
+/**
+ * 알림톡 전환재발송 저장 검증 — 호출부(직접발송·타겟발송·자동발송·여정) 공통.
+ * 백엔드 CT(utils/alimtalk-fallback.ts)와 같은 규칙·같은 문구. 호출부 인라인 판정 금지.
+ */
+export function validateAlimtalkChannelState(v: AlimtalkChannelState): string | null {
+  // ★ 2026-07-27: 백엔드 normalizeAlimtalkNextType과 같은 정규화 — 공백·소문자·알 수 없는 값 처리가
+  //   한쪽만 다르면 "프론트는 통과, 백엔드는 차단"이 생긴다(Codex 3R 지적).
+  const raw = String(v.nextType ?? '').trim().toUpperCase();
+  const t = (['N', 'S', 'L', 'A', 'B'].includes(raw) ? raw : 'L') as AlimtalkNextType;
+  if ((t === 'A' || t === 'B') && !String(v.nextContents || '').trim()) {
+    return '대체문안을 직접 작성하도록 선택했습니다. 대체문안을 입력하거나 "원문 그대로 발송"을 선택해주세요.';
+  }
+  if ((t === 'L' || t === 'B') && !String(v.nextSubject || '').trim()) {
+    return 'LMS 대체 발송 시 LMS 제목을 입력해주세요.';
+  }
+  return null;
+}
 
 const APPROVED_TEMPLATE_STATUSES = new Set(['APPROVED', 'APR', 'A', 'approved']);
 const APPROVED_SENDER_STATUSES = new Set(['APPROVED']);
@@ -209,7 +229,14 @@ export default function AlimtalkChannelPanel({
   //   외부에서 variableMap state를 직접 setting하는 패턴으로 통일. (호출부 onVariableMapChange 직접 호출)
 
   const setNextType = (t: AlimtalkNextType) => {
-    onChange({ ...value, nextType: t });
+    // ★ 2026-07-27: '대체문안 작성'으로 바꾸는 순간 문안이 비어 있으면 알림톡 원문을 편집 출발점으로 넣는다.
+    //   빈 화면에서 새로 쓰게 하지 않는다. 이미 작성한 문안은 절대 덮지 않는다(사용자 입력 보존).
+    const seedNeeded = (t === 'A' || t === 'B') && !String(value.nextContents || '').trim();
+    onChange({
+      ...value,
+      nextType: t,
+      nextContents: seedNeeded ? (selectedTemplate?.content || value.nextContents) : value.nextContents,
+    });
   };
 
   const setNextContents = (v: string) => {
@@ -473,24 +500,42 @@ export default function AlimtalkChannelPanel({
                 </div>
               </div>
             )}
+            {/* ★ 2026-07-27: '원문 그대로'는 무엇이 나가는지 화면에서 확정해 보여준다(추측 여지 제거). */}
+            {(value.nextType === 'L' || value.nextType === 'S') && (
+              <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                <div className="text-[11px] font-medium text-gray-600 mb-1">전환 시 나갈 문구 — 위 알림톡 본문 그대로</div>
+                <div className="text-[11px] text-gray-500 whitespace-pre-wrap max-h-24 overflow-y-auto leading-relaxed">
+                  {renderPreview(selectedTemplate?.content) || '템플릿을 선택하면 표시됩니다.'}
+                </div>
+              </div>
+            )}
             {/* ★ D188 (2026-05-21) 영업팀장 신고 #7-(1): 부달 textarea 영역 확대 rows={3}→{6} + resize-y. */}
             {requiresNextContents && (
               <div className="mt-2">
                 <label className="block text-[11px] text-gray-500 mb-1">
-                  대체 문구 {value.nextType === 'A' ? '(SMS)' : '(LMS)'}{' '}
+                  대체문안 {value.nextType === 'A' ? '(SMS)' : '(LMS)'}{' '}
                   <span className="text-red-500">*</span>
                 </label>
                 <textarea
                   value={value.nextContents}
                   onChange={(e) => setNextContents(e.target.value)}
                   rows={6}
-                  placeholder="알림톡 실패 시 이 문구로 대체 발송됩니다. (알림톡 본문 변수 #{...}가 자동 적용됩니다)"
-                  className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs resize-y"
+                  placeholder="알림톡 실패 시 이 문안으로 대체 발송됩니다. (알림톡 본문 변수 #{...}가 자동 적용됩니다)"
+                  className={`w-full border rounded px-2 py-1.5 text-xs resize-y ${
+                    value.nextContents.trim() ? 'border-gray-300' : 'border-red-300 bg-red-50/40'
+                  }`}
                   maxLength={value.nextType === 'A' ? 90 : 2000}
                 />
-                <div className="text-right text-[10px] text-gray-400 mt-0.5">
-                  {value.nextContents.length} /{' '}
-                  {value.nextType === 'A' ? '90' : '2000'}자
+                <div className="flex items-center justify-between mt-0.5">
+                  <div className="text-[10px] text-red-500">
+                    {value.nextContents.trim()
+                      ? ''
+                      : '대체문안이 비어 있으면 저장할 수 없습니다. 원문을 쓰려면 "원문 그대로"를 선택하세요.'}
+                  </div>
+                  <div className="text-[10px] text-gray-400">
+                    {value.nextContents.length} /{' '}
+                    {value.nextType === 'A' ? '90' : '2000'}자
+                  </div>
                 </div>
               </div>
             )}

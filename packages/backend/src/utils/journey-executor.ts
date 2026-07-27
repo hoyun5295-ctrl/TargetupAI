@@ -35,6 +35,7 @@ import {
 import { convertButtonsToQTmsg } from './alimtalk-button';
 import { buildAlimtalkEtcJson, type RepresentLink } from './alimtalk-emphasize';
 import { fillAlimtalkVarMap } from './alimtalk-vars';
+import { resolveAlimtalkFallback } from './alimtalk-fallback';
 import { buildDefaultFallbacks } from './var-fallback';
 import {
   listJourneyStepVariants,
@@ -906,19 +907,27 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     if (isKakao && kakaoTemplateRow) {
       // 알림톡 영역 — insertAlimtalkQueue 사용. buttons → buttonJson 변환.
       const buttonJson = convertButtonsToQTmsg(kakaoTemplateRow.buttons || []);
+      // ★ 2026-07-27: 전환재발송 규칙 CT 단일 진입점(alimtalk-fallback). 4경로 공통.
+      //   원문 그대로(L)면 k_next_contents는 NULL로 정규화(게이트웨이가 msg_contents 사용),
+      //   대체문안(B)인데 문구가 비면 여기서 throw → 바깥 catch가 error_log에 사유 기록 후 차단.
+      //   ★ 알림톡 실패 대체문구(k_next_contents)도 본문(472)과 동일 변수 치환 — raw 발송 시 #{변수} 노출 차단.
+      const alimFallback = resolveAlimtalkFallback({
+        nextType: step.alimtalk_next_type,
+        nextContents: step.alimtalk_next_contents
+          ? fillAlimtalkVarMap(step.alimtalk_next_contents, step.alimtalk_variable_map || {}, customerWithEvent, undefined, buildDefaultFallbacks(step.alimtalk_variable_map || {}))
+          : step.alimtalk_next_contents,
+        nextSubject: subject,
+      });
       await insertAlimtalkQueue(
         tables,
         [{
           phone: cleanPhone,
           callback: callbackNumber,
           message,
-          titleStr: subject || undefined,  // L/B 시 LMS 대체 제목
+          titleStr: alimFallback.titleStr,  // L/B 시 LMS 대체 제목
           templateCode: step.alimtalk_template_code || '',
-          nextType: (step.alimtalk_next_type as 'N' | 'S' | 'L' | 'A' | 'B' | undefined) || 'L',
-          // ★ 알림톡 실패 대체문구(k_next_contents)도 본문(472)과 동일 변수 치환 — raw 발송 시 #{변수} 노출 차단.
-          nextContents: step.alimtalk_next_contents
-            ? fillAlimtalkVarMap(step.alimtalk_next_contents, step.alimtalk_variable_map || {}, customerWithEvent, undefined, buildDefaultFallbacks(step.alimtalk_variable_map || {}))
-            : undefined,
+          nextType: alimFallback.nextType,
+          nextContents: alimFallback.nextContents,
           buttonJson: buttonJson || undefined,
           // ★ 매뉴얼(qtmsg): 강조표기형 emphasize_title(본문과 동일 치환)만 → k_etc_json (senderkey는 CT-04가 비토 라인만 주입). 직접/자동과 동일 형태.
           etcJson: buildAlimtalkEtcJson({

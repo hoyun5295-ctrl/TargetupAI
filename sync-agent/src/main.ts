@@ -25,6 +25,20 @@ import os from 'node:os';
 import { resolveSetupMode } from './setup/setup-mode';
 dotenv.config();
 
+/**
+ * OS 제품명. Windows Server 판별용 — Server 2016 커널(10.0.14393)은 Windows 10 1607과 같아
+ * 커널 버전으로는 구분할 수 없다. os.version()은 node 13.11+에만 있으므로(win-legacy 티어는 node12)
+ * 없으면 undefined를 돌려 기존 커널 버전 규칙으로 떨어진다.
+ */
+function detectOsVersion(): string | undefined {
+  try {
+    const fn = (os as unknown as { version?: () => string }).version;
+    return typeof fn === 'function' ? fn.call(os) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const args = process.argv;
 
 // ─── 버전 출력 (★ 2026-06-11) ───────────────────────────
@@ -52,6 +66,20 @@ else if (args.includes('--install-service')) {
   import('./service').then(({ serviceStatus }) => {
     serviceStatus();
   });
+}
+
+// ─── 설정 유무 (종료 코드) ──────────────────────────────
+// ★ 2026-07-27: 설치 bat이 "마법사를 띄울지"를 판단하는 단일 기준.
+//   bat이 config.enc 파일 존재만 보면 .env·config.json으로 설정된 서버에서 오판한다
+//   (이미 정상 가동 중인데 마법사를 또 띄워 Agent 인스턴스가 둘이 된다).
+//   판정은 Agent 자신의 hasConfigFile()과 **같은 함수**로만 한다.
+//   종료 코드 0 = 설정 있음 / 1 = 없음.
+else if (args.includes('--config-status')) {
+  import('./config').then(({ hasConfigFile }) => {
+    const r = hasConfigFile();
+    console.log(r.exists ? `configured (${r.source})` : 'not-configured');
+    process.exit(r.exists ? 0 : 1);
+  }).catch(() => process.exit(1));
 }
 
 // ─── 설정 편집 / 조회 ──────────────────────────────────
@@ -83,8 +111,8 @@ else if (args.includes('--setup-web')) {
 // ─── 설치 마법사 (OS 자동 감지) ──────────────────────────
 
 else if (args.includes('--setup')) {
-  // old Windows(IE8 등 구형 브라우저)·비Windows는 웹 마법사가 안 뜨므로 CLI 마법사로 라우팅.
-  if (resolveSetupMode(process.platform, os.release()) === 'web') {
+  // old Windows(IE8 등 구형 브라우저)·Windows Server(기본 IE11)·비Windows는 웹 마법사가 안 뜨므로 CLI로 라우팅.
+  if (resolveSetupMode(process.platform, os.release(), detectOsVersion()) === 'web') {
     console.log('[SETUP] 설치 마법사 (웹 UI) 모드로 실행합니다...');
     import('./setup/server').then(({ startSetupWizard }) => {
       startSetupWizard({ autoLaunchAgent: true });
@@ -122,8 +150,8 @@ else {
       console.log('==================================================');
       console.log('');
 
-      // old Windows(IE8 등)·비Windows는 웹 마법사가 안 뜨므로 CLI 마법사로 라우팅.
-      if (resolveSetupMode(process.platform, os.release()) === 'web') {
+      // old Windows(IE8 등)·Windows Server(기본 IE11)·비Windows는 웹 마법사가 안 뜨므로 CLI로 라우팅.
+      if (resolveSetupMode(process.platform, os.release(), detectOsVersion()) === 'web') {
         import('./setup/server').then(({ startSetupWizard }) => {
           startSetupWizard({ autoLaunchAgent: true });
         });

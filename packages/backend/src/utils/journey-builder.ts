@@ -22,6 +22,7 @@ import { seedBaselineForJourney } from './journey-entry-ledger';
 import { formatStepTiming, formatConditionChip } from './journey-step-format';
 import { journeyListWhere, executionStatusFilter } from './journey-list-filter';
 import { StartKind, normalizeStartKind, classifyStartKind } from './journey-start-kind';
+import { validateAlimtalkFallback, AlimtalkFallbackError } from './alimtalk-fallback';
 
 // 앵커 반복 규칙 화이트리스트 — 설계 잠금(4종). 미지원 값은 'none'으로.
 const ANCHOR_RECURRENCES = ['none', 'monthly_day', 'monthly_last', 'yearly'];
@@ -626,7 +627,10 @@ export async function activateJourney(companyId: string, journeyId: string, user
               'condition', condition_jsonb,
               'delayMode', delay_mode,
               'targetHourKst', target_hour_kst,
-              'anchorOffset', anchor_offset_days
+              'anchorOffset', anchor_offset_days,
+              'alimtalkNextType', alimtalk_next_type,
+              'alimtalkNextContents', alimtalk_next_contents,
+              'alimtalkNextSubject', alimtalk_next_subject
             ) ORDER BY step_order) FROM journey_steps WHERE journey_id = j.id) AS steps
      FROM journeys j
      WHERE j.id = $1::uuid AND j.company_id = $2::uuid`,
@@ -780,6 +784,20 @@ export async function activateJourney(companyId: string, journeyId: string, user
       const subj = String(s.subject || '').trim();
       if (!subj) {
         return { ok: false, reason: `step ${s.order} (${channel.toUpperCase()}) 제목이 비어있습니다. 본문 요약 단순 텍스트 한 줄로 작성해주세요.` };
+      }
+    }
+
+    // ★ 2026-07-27: 알림톡 step 전환재발송(대체발송) 검증 — CT(alimtalk-fallback) 단일 기준.
+    //   '대체문안 직접 작성'인데 문안이 비거나 LMS 전환인데 제목이 비면 발송 시점에 막힌다.
+    //   발송 때 죽는 대신 활성화에서 먼저 막아 사용자가 화면에서 고치게 한다.
+    if (channel === 'kakao') {
+      const violation = validateAlimtalkFallback({
+        nextType: s.alimtalkNextType,
+        nextContents: s.alimtalkNextContents,
+        nextSubject: s.alimtalkNextSubject,
+      });
+      if (violation) {
+        return { ok: false, reason: `step ${s.order} (알림톡) ${violation}` };
       }
     }
 
@@ -955,6 +973,35 @@ export async function updateJourneyStep(
   // ★ D188 Phase 2-B-1: step_type 변경 시 conditionJsonb 정합 검증 (condition은 conditionJsonb 필수).
   if (patch.stepType === 'condition' && (!patch.conditionJsonb || typeof patch.conditionJsonb !== 'object')) {
     throw new Error('condition step은 conditionJsonb가 필수입니다.');
+  }
+
+  // ★ 2026-07-27: 알림톡 전환재발송 검증은 "저장 후 최종 상태" 기준. 부분 수정(PATCH)이라
+  //   요청에 든 값만 보면 두 방향으로 다 틀린다 — 제목만 ''로 보내면 검증을 건너뛰고 빈 제목이 저장되고,
+  //   타입만 보내면 DB에 멀쩡한 문안·제목이 있어도 거부된다. 아래 UPDATE의 COALESCE와 같은 규칙으로
+  //   기존값과 병합한 뒤 검증한다(undefined·null = 기존값 유지, 빈 문자열 = 덮어씀).
+  const touchesFallback =
+    patch.alimtalkNextType !== undefined ||
+    patch.alimtalkNextContents !== undefined ||
+    patch.alimtalkNextSubject !== undefined;
+  if (touchesFallback) {
+    const cur = await query(
+      `SELECT channel, alimtalk_next_type, alimtalk_next_contents, alimtalk_next_subject
+         FROM journey_steps WHERE id = $1::uuid AND journey_id = $2::uuid`,
+      [stepId, journeyId]
+    );
+    if (cur.rows.length === 0) return false;
+    const row = cur.rows[0];
+    const merge = <T>(patched: T | null | undefined, existing: T): T =>
+      (patched === undefined || patched === null ? existing : patched);
+    const mergedChannel = String(merge(patch.channel, row.channel) || '').toLowerCase();
+    if (mergedChannel === 'kakao') {
+      const violation = validateAlimtalkFallback({
+        nextType: merge(patch.alimtalkNextType, row.alimtalk_next_type),
+        nextContents: merge(patch.alimtalkNextContents, row.alimtalk_next_contents),
+        nextSubject: merge(patch.alimtalkNextSubject, row.alimtalk_next_subject),
+      });
+      if (violation) throw new AlimtalkFallbackError(violation);
+    }
   }
 
   const r = await query(

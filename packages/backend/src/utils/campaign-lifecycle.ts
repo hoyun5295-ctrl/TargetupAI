@@ -11,7 +11,7 @@ import {
   kakaoCountPending, kakaoCancelPending, kakaoBatchAggByGroup,
   type CampaignAggCounts,
 } from './sms-queue';
-import { prepaidRefund } from './prepaid';
+import { prepaidRefund, REFUND_KEYS } from './prepaid';
 import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
 import { getSourceRef, updateTrainingMetrics } from './training-logger';
 
@@ -84,7 +84,7 @@ export async function cleanupScheduledCampaigns(filter: CleanupScheduledFilter =
       );
 
       if (failCount > 0 && messageType) {
-        await prepaidRefund(camp.company_id, failCount, messageType, camp.id, '발송 실패 환불');
+        await prepaidRefund(camp.company_id, failCount, messageType, camp.id, '발송 실패 환불', 'campaign', { refundKey: REFUND_KEYS.FAIL });
       }
 
       cleaned++;
@@ -176,6 +176,45 @@ export async function cancelCampaign(
   // - status_code != 100 (Agent 픽업됨): status_code를 9999(취소)로 변경
   const alreadyPickedUp = await smsCountAll(cancelTables, 'app_etc1 = ? AND status_code != 100', [campaignId]);
 
+  // ★ 2026-07-27 (B-0727-2): 환불 의무를 **삭제 전에 prepared로** 남긴다.
+  //   삭제한 뒤에 기록하면, 기록이 실패한 순간 대기 건수가 0이 되어 얼마를 돌려줘야 했는지가 사라진다
+  //   (사용자가 재시도해도 0건으로 잡혀 그대로 cancelled가 되고 삭제분이 영구 미환불).
+  //   반대로 prepared를 그냥 활성 의무로 두면 아직 안 지워진 큐를 두고 워커가 먼저 환불할 수 있으므로,
+  //   삭제·검증이 끝난 뒤에만 ready로 올린다. 워커는 ready만 집는다.
+  if (totalCancelCount > 0) {
+    try {
+      // ★ 기존 의무가 있으면 **절대 덮어쓰지 않는다.** 앞선 시도에서 DELETE가 부분 실패했다면
+      //   지금 세는 대기 건수는 "남은 것"이지 "돌려줘야 할 것"이 아니다. 원본 의무 건수로 덮으면
+      //   먼저 지워진 몫이 환불 목표에서 사라진다(100건 중 60건 삭제 후 실패 → 재시도가 40으로 덮음).
+      //   큐 삭제용 "현재 잔여"와 환불 목표인 "최초 의무"를 분리한다.
+      await query(
+        `UPDATE campaigns
+            SET send_config = jsonb_set(
+                  COALESCE(send_config, '{}'::jsonb), '{refundPendingCancel}',
+                  CASE WHEN send_config ? 'refundPendingCancel'
+                       THEN send_config->'refundPendingCancel'
+                       ELSE $2::jsonb END),
+                updated_at = NOW()
+          WHERE id = $1`,
+        [campaignId, JSON.stringify({
+          state: 'prepared',
+          sms: { count: cancelCount, messageType: camp.message_type },
+          kakao: { count: kakaoCancelCount, messageType: 'KAKAO' },
+          at: new Date().toISOString(),
+        })],
+      );
+    } catch (obligationErr: any) {
+      // 큐를 아직 건드리지 않았으므로 여기서 멈추면 아무것도 바뀌지 않는다(재시도 가능).
+      console.error(`[취소] campaign ${campaignId} 환불 의무 기록 실패 — 취소 중단:`, obligationErr?.message || obligationErr);
+      return {
+        success: false,
+        error: '취소 처리를 시작하지 못했습니다. 잠시 후 다시 시도해주세요.',
+        cancelledCount: 0,
+        refundedAmount: 0,
+      };
+    }
+  }
+
   await smsExecAll(cancelTables,
     `DELETE FROM SMSQ_SEND WHERE app_etc1 = ? AND status_code = 100`,
     [campaignId]
@@ -208,16 +247,57 @@ export async function cancelCampaign(
     };
   }
 
+  // 삭제·검증이 끝났으므로 의무를 ready로 올린다 — 이제 워커가 집어도 안전하다.
+  //   이 UPDATE가 실패해도 의무는 prepared로 남아 있고, 워커가 실제 대기 0을 확인해 승격시킨다.
+  if (totalCancelCount > 0) {
+    await query(
+      `UPDATE campaigns
+          SET send_config = jsonb_set(send_config, '{refundPendingCancel,state}', '"ready"'::jsonb),
+              updated_at = NOW()
+        WHERE id = $1 AND send_config ? 'refundPendingCancel'`,
+      [campaignId],
+    ).catch((e) => console.error(`[취소] campaign ${campaignId} 환불 의무 ready 전환 실패(워커가 승격):`, e?.message || e));
+  }
+
   // 6. 선불 환불
+  // ★ 2026-07-27 (B-0727-1): 'additional' 모드 — 취소분은 **추가 환불**이지 누적 목표가 아니다.
+  //   옛 코드는 취소 대기건수를 누적 목표로 넘겼다. 워커가 앞서 미적재분을 환불해 둔 캠페인에서는
+  //   (예: 1만 중 4천 적재 후 중단 → 미적재 6천 환불) 취소 4천을 누적 목표로 넘기면 6천 > 4천이라
+  //   추가 환불이 0원이 되고, 실제 미발송 1만 건 중 6천만 환불된 채 굳는다.
+  //   취소는 status='cancelled'로 끝나 sweeper(sending/completed) 보정 대상도 아니라 영구 누락이었다.
   let totalRefunded = 0;
+  let smsOk = true;
+  let kakaoOk = true;
   if (totalCancelCount > 0) {
     if (cancelCount > 0) {
-      const smsRefund = await prepaidRefund(companyId, cancelCount, camp.message_type, campaignId, '예약 취소 환불');
+      const smsRefund = await prepaidRefund(
+        companyId, cancelCount, camp.message_type, campaignId, '예약 취소 환불', 'campaign',
+        // 취소 환불은 캠페인당 한 번뿐이라 그 항아리가 비어 있음이 보장된다 → 항아리 기준 누적 = 멱등.
+        // (레거시 폴백으로 떨어지면 재시도가 이중 환불되거나 기존 환불에 삼켜진다 — B-0727-2)
+        { refundKey: REFUND_KEYS.CANCEL, forceKeyedPot: true },
+      );
       totalRefunded += smsRefund.refunded;
+      smsOk = smsRefund.ok;
+      if (!smsOk) console.error(`[취소] campaign ${campaignId} 문자 취소 환불 실패 — 워커 재시도 대기(${cancelCount}건)`);
     }
     if (kakaoCancelCount > 0) {
-      const kakaoRefund = await prepaidRefund(companyId, kakaoCancelCount, 'KAKAO', campaignId, '카카오 예약 취소 환불');
+      const kakaoRefund = await prepaidRefund(
+        companyId, kakaoCancelCount, 'KAKAO', campaignId, '카카오 예약 취소 환불', 'campaign',
+        // 취소 환불은 캠페인당 한 번뿐이라 그 항아리가 비어 있음이 보장된다 → 항아리 기준 누적 = 멱등.
+        // (레거시 폴백으로 떨어지면 재시도가 이중 환불되거나 기존 환불에 삼켜진다 — B-0727-2)
+        { refundKey: REFUND_KEYS.CANCEL, forceKeyedPot: true },
+      );
       totalRefunded += kakaoRefund.refunded;
+      kakaoOk = kakaoRefund.ok;
+      if (!kakaoOk) console.error(`[취소] campaign ${campaignId} 카카오 취소 환불 실패 — 워커 재시도 대기(${kakaoCancelCount}건)`);
+    }
+    // ★ 2026-07-27 (B-0727-2): 의무 해제는 **여기서 하지 않는다.**
+    //   앞선 시도가 부분 삭제로 끝났다면 의무에 남은 건수(원본)와 이번 회차의 cancelCount(잔여)가 다르다.
+    //   이번 환불이 성공했다고 의무를 지우면 먼저 지워진 몫이 목표에서 사라진다.
+    //   워커가 의무에 적힌 원본 건수로 다시 부르고(CANCEL 항아리 누적 = 멱등) 충족됐을 때 해제한다.
+    //   건수가 같은 일반적인 경우엔 워커 첫 사이클에서 추가 0원 + 해제로 바로 끝난다.
+    if (!smsOk || !kakaoOk) {
+      console.warn(`[취소] campaign ${campaignId} 취소 환불 미완료 — 워커 재시도가 이어받는다`);
     }
   }
 
@@ -364,7 +444,7 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
           if (failCount > 0) {
             const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [runInfo.rows[0].campaign_id]);
             if (campInfo.rows.length > 0) {
-              await prepaidRefund(campInfo.rows[0].company_id, failCount, campInfo.rows[0].message_type, runInfo.rows[0].campaign_id, '발송 실패 환불');
+              await prepaidRefund(campInfo.rows[0].company_id, failCount, campInfo.rows[0].message_type, runInfo.rows[0].campaign_id, '발송 실패 환불', 'campaign', { refundKey: REFUND_KEYS.FAIL });
             }
           }
 
@@ -467,7 +547,7 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
         if (failCount > 0) {
           const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [campaign.id]);
           if (campInfo.rows.length > 0) {
-            await prepaidRefund(campInfo.rows[0].company_id, failCount, campInfo.rows[0].message_type, campaign.id, '발송 실패 환불');
+            await prepaidRefund(campInfo.rows[0].company_id, failCount, campInfo.rows[0].message_type, campaign.id, '발송 실패 환불', 'campaign', { refundKey: REFUND_KEYS.FAIL });
           }
         }
 

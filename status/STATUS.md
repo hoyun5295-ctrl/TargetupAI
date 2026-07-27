@@ -21,6 +21,7 @@
 | 의사결정 배경 확인 | DECISIONS.md | 해당 ADR |
 | 리스크 전체 확인 | RISKS.md | 전체 |
 | 싱크에이전트 이슈 진단 | SYNC-AGENT-TROUBLESHOOTING.md | 해당 증상 절 (isae 현장 완료 이력 = archive/SYNC-AGENT-ISAE-2026-06-30-HANDOFF.md grep) |
+| **싱크에이전트 빌드 산출물 20개 검증·아난티 발송 재개** | **docs/2026-07-28-sync-agent-build-verification-runbook.md** | 전체 (SoT — 다음 세션 실행 지시서. 호출어 "싱크에이전트 빌드 검증 이어가자") |
 | AI Operator·CDP·Provider | docs/AI_OPERATOR_기능정의서.md + ai_operator_progress.md | 해당 절 |
 | CRM 캠페인 대행(설계 대행) 기능 | docs/2026-07-09-crm-campaign-agency-implementation.md | 전체 |
 | 레거시 서버(27.102.203.143) 폐기 | docs/레거시서버_폐기_플랜.md | 전체 (SoT — 진행 시 갱신). **하위 트랙 = 에이전트 선불 충전·잔액 축 흡수: docs/2026-07-24-agent-prepaid-charge-design.md** (서버 실측 원문 포함·다음 세션 단독 재개용) |
@@ -64,11 +65,18 @@
 > **완료분 잔여(운영 검증)**: 금강제화 draft **화면에서** 삭제·재발행(psql DELETE 금지) / 실회사 드라이런(발행→PDF→메일→삭제) / 거래내역서 **MMS 308,043건** / 발행 소요 재측정.
 > **이월(판단 필요)**: `G` 유형(여미지 B0227·7월 42,833건) 과금 분류 / 요금제 이력 크레딧 스냅샷 소급(ALTER) / 크레딧 일할 자동지급 재배선 / 요금제 해지 표현 / `by_agent` 지점별 발행(+에이전트 청구 줄에 발송ID 표기) / `/preview` 화면 배선 / 141사 일괄 발행 / 테스트 발송 환불이 고정 zero-uuid 참조라 회사·유형당 1회만 나가는 기존 결함.
 
-### 🟢 0727 완료·잔여 — 여정 알림톡 + 싱크에이전트
-> **한줄로 배포완료**: 발송ID 표시명=발급명 통일 + 에이전트 잔액 소스 **계정원장 전환**(`0fe700c0`) · 여정 알림톡 `campaigns.message_type` CHECK 위반 전건 미발송 정정(`0af8d427`) · 결과 알림 묶음+발신번호(`353cb42a`) · 결과 알림 **실결과 기준**(큐 적재를 성공으로 세던 것) + `sentTables` 기록(미커밋 잔여 있으면 함께 push). 상세 = [[project_2026_0727_journey_alimtalk_and_agent_tls]]
-> **여정 확정 사실**: 워커 주기 진입 5분 + 발송 5분 = 업로드 후 **최대 10분**(부하 때문에 유지). **전환발송은 게이트웨이가 정상 수행**(7300 실패 → 대체 LMS 1000 성공 실측) — "우리가 전환" 설계 불요.
-> **다음 세션 1순위**: 대체문안(`alimtalk_next_contents`) **비면 원본 알림톡 본문 자동 사용**(알림톡 4경로) + 그 메뉴. 그다음 VM 2016 검증(가짜 DB·Aurora 세팅부터).
-> **싱크에이전트 코드완료·빌드대기**: TLS 일체 + `supportBigNumbers` + MySQL 키셋(정수 PK·별칭 비충돌만, 그 외 OFFSET 폴백). `package.json` 1.6.4 / 서버엔 **1.6.3 zip 20개** → 빌드 1회로 교체. 매뉴얼 스크립트 갱신 완료(docx는 빌드 후). SoT = status/SYNC-AGENT-TROUBLESHOOTING.md §2-7.
+### 🔴 0727 싱크에이전트 — 서버 zip 20개 배포 금지 (아난티 발송 보류)
+> **SoT = [docs/2026-07-28-sync-agent-build-verification-runbook.md](docs/2026-07-28-sync-agent-build-verification-runbook.md)** — 다음 세션은 이 문서만 보고 시작. 경위 = SYNC-AGENT-TROUBLESHOOTING.md §2-8·§2-9. 여기 재서술하지 않는다.
+> ⛔ 서버 `agent-builds/` 1.6.4 zip 20개 = **웹 마법사가 IE11에서 전면 무동작**인 채 올라가 있다. Server 2016·2019 고객은 설치 화면에서 멈춘다. **아난티 포함 발송 금지.**
+> 실검증은 **`win-modern × mysql` 1개뿐**(설치→마법사 자동 진입→CLI→접속→AI 매핑→2만 건 동기화). 나머지 19개 미검증. 리눅스는 exe 실행만 확인, DB 연결 미검증.
+> 로컬 코드 수정 완료·**커밋 필요**(Server→CLI 라우팅·IE 안내 화면·bat 마법사 자동 실행). tsc 0 · vitest 74.
+> 다음 세션 4건 = ①Server 2022+ 과교정 정정 ②CLI에 `--setup-web` 안내 ③20조합 환경별 검증 ④매뉴얼 수정 후 docx 1회. **검증 → 빌드 순서 고정.**
+
+### 🟢 0727 완료·잔여 — 여정 알림톡 + 환불 의무
+> **한줄로 배포완료**: 발송ID 표시명=발급명 통일 + 에이전트 잔액 계정원장 전환(`0fe700c0`) · 여정 알림톡 CHECK 위반 전건 미발송 정정(`0af8d427`) · 결과 알림 묶음(`353cb42a`)·실결과 기준·`sentTables`. 상세 = [[project_2026_0727_journey_alimtalk_and_agent_tls]]
+> **알림톡 대체문안 — 코드완료·배포대기**: 전환재발송을 원인별 CT(`utils/alimtalk-fallback.ts`)로 단일화. 선택은 `대체 안함`/`원문 그대로(L)`/`대체문안 작성(B)` 3지이고, 게이트웨이 매뉴얼상 L은 우리가 넣은 `msg_contents`가 그대로 나간다. B인데 문안이 비면 저장·활성화·발송에서 차단. 4경로 + 저장 4곳 + 화면 CT 1곳.
+> **환불 의무 재설계 — 코드완료·배포대기(B-0727-1·2)**: `balance_transactions.refund_key`(DDL 실행 완료)로 미적재·실패·취소를 원인별 항아리로 분리. Codex 10라운드 SHIP. 상세 = BUGS.md.
+> **여정 확정 사실**: 업로드 후 최대 10분(워커 5분+발송 5분). 전환발송은 게이트웨이가 정상 수행(7300→대체 LMS 1000 실측).
 
 ### 🔵 다음 세션 (예정)
 > ⓪ **레거시 PAY·템플릿관리자 로그인 차단 + 전환 안내(0727 착수·중단 — 서팀장 회의 후 재개, Harold 지시)**: 두 사이트 로그인을 막고 모던한 안내 화면(한줄로 바로가기 버튼 + "비밀번호는 고객센터 문의" 1800-8125·mobile@invitocorp.com)으로 대체. 차단 방식 초안 = PAY는 `/www/pay/WEB-INF/web.xml` `<security-constraint>`+403 error-page(로그인 POST까지 컨테이너 단 차단·클래스 재빌드 없음), 템플릿관리자는 nginx server 블록 교체. **미실행 선행** = 143 실측 4종(netstat / `readlink -f /home/pay` / web.xml / nginx conf)·`Downloads/pay-app.tgz` 소스 확인. **안내 화면 2종 = 확정**(Harold 디자인 보강판 반영, 0727) — `docs/legacy-notice/pay-notice.html` · `docs/legacy-notice/template-admin-notice.html`. 외부 요청 0(로고=data URI)·인라인 CSS 단일 파일·다크모드 대응. 헤더에 옛 도메인 → hanjul.ai 전환 표시. **PAY 차단 전 확인** = 선불 충전은 §5-4까지 한줄로에 있으나 `prepaid` 지정 0건이라 아직 실사용 불가 → 지정·왕복 실측이 차단보다 앞선다.

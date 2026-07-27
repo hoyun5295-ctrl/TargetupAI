@@ -30,14 +30,16 @@ import { query } from '../config/database';
 import { buildFilterQueryCompat } from './customer-filter';
 import { getOpt080Number, prepareFieldMappings, prepareSendMessage } from './messageUtils';
 import { fillAlimtalkVarMap } from './alimtalk-vars';
+import { resolveAlimtalkFallback } from './alimtalk-fallback';
 import { convertButtonsToQTmsg } from './alimtalk-button';
 import { buildAlimtalkEtcJson } from './alimtalk-emphasize';
 import {
   toKoreaTimeStr, toQtmsgType,
   getCompanySmsTables, getAuthSmsTable, hasCompanyLineGroup, getNextSmsTable,
-  bulkInsertSmsQueue,
+  bulkInsertSmsQueue, AlimtalkQueueInsertError,
 } from './sms-queue';
-import { prepaidDeduct, prepaidRefund } from './prepaid';
+import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from './prepaid';
+import { markRefundPending } from './refund-pending';
 import { normalizePhone } from './normalize-phone';
 import { resolveCustomerCallback } from './callback-filter';
 // ★ 2026-07-05: 발송 피로도 보호 — 차감 전 게이트 + 광고 발송 카운터
@@ -890,6 +892,8 @@ async function executeAutoCampaign(ac: any): Promise<void> {
           ac.message_type,
           campaignId,
           '개별회신번호 미보유로 전체 제외 — 환불',
+          'campaign',
+          { refundKey: REFUND_KEYS.NOT_LOADED },   // 큐에 한 건도 안 들어간 분 = 미적재 항아리
         );
       } catch (refundErr) {
         console.error(`${logPrefix} 환불 실패:`, refundErr);
@@ -983,20 +987,31 @@ async function executeAutoCampaign(ac: any): Promise<void> {
         const cleanPhone = normalizePhone(customer.phone);
         const callback = resolveCustomerCallback(customer, ac.use_individual_callback || false, ac.callback_number);
         // ★ 대체문구(k_next_contents)도 본문과 동일 치환 — raw 발송 시 #{변수} 노출 차단.
-        let finalNextContents: string | undefined;
-        if ((ac.alimtalk_next_type === 'A' || ac.alimtalk_next_type === 'B') && ac.alimtalk_next_contents) {
+        let filledNextContents: string | undefined;
+        if (ac.alimtalk_next_contents) {
           const { message: ncBase } = prepareSendMessage(ac.alimtalk_next_contents, customer, fieldMappings, {
             msgType: 'LMS', isAd: false, opt080Number: '', subject: '',
           });
-          finalNextContents = fillAlimtalkVarMap(ncBase, ac.alimtalk_variable_map || {}, customer);
+          filledNextContents = fillAlimtalkVarMap(ncBase, ac.alimtalk_variable_map || {}, customer);
         }
+        // ★ 2026-07-27: 전환재발송 규칙 CT 단일 진입점(alimtalk-fallback) — 4경로 공통.
+        //   이 경로는 title_str을 아예 안 넣고 있었다(L/B 대체 LMS 제목 NULL = 통신사 검증 실패 미수신, D225+와 같은 사고).
+        //   ⚠ auto_campaigns에는 alimtalk_next_subject 컬럼이 없다(2026-07-27 information_schema 실측).
+        //   지금은 channel='alimtalk' 행이 0건이고 신규 생성도 410 Gone이라 도달 불가라서 컬럼을 만들지 않았다.
+        //   이 경로를 되살린다면 ALTER로 컬럼부터 만들고 PUT·화면까지 배선해야 L/B가 제목을 갖는다.
+        const alimFallback = resolveAlimtalkFallback({
+          nextType: ac.alimtalk_next_type,
+          nextContents: filledNextContents,
+          nextSubject: ac.alimtalk_next_subject,
+        });
         return {
           phone: cleanPhone,
           callback,
           message: finalMessage,
           templateCode: ac.alimtalk_template_code,
-          nextType: ac.alimtalk_next_type || 'L',
-          nextContents: finalNextContents,
+          nextType: alimFallback.nextType,
+          nextContents: alimFallback.nextContents,
+          titleStr: alimFallback.titleStr,
           buttonJson: autoButtonJson || undefined,
           // ★ 매뉴얼(qtmsg): 강조표기 title(#{변수} 본문과 동일 치환)만 → row별 k_etc_json (senderkey는 CT-04가 비토 라인만 주입).
           etcJson: buildAlimtalkEtcJson({
@@ -1010,7 +1025,16 @@ async function executeAutoCampaign(ac: any): Promise<void> {
           companyId: ac.company_id,
         };
       });
-      sentCount = await insertAlimtalkQueue(companyTables, alimRows, campaignId);
+      // ★ 2026-07-27 (B-0727-2): 배치 독립 커밋이라 실패해도 앞 배치는 큐에 남아 발송된다.
+      //   여기서 그냥 던지면 아래 공통 종결·환불 블록을 건너뛰어, 적재된 건은 나가는데 전량이 미적재로 처리된다.
+      //   커밋된 건수를 살려 정상 흐름(부분 실패 환불 + 상태 기록)을 그대로 타게 한다.
+      try {
+        sentCount = await insertAlimtalkQueue(companyTables, alimRows, campaignId);
+      } catch (alimErr) {
+        console.error(`${logPrefix} 알림톡 INSERT 실패:`, alimErr);
+        if (alimErr instanceof AlimtalkQueueInsertError) sentCount = alimErr.inserted;
+        else throw alimErr;
+      }
     } else {
       // ★ D102: (광고)+080 — CT-AD 컨트롤타워 사용 (기존 누락 수정)
       const autoOpt080 = (ac.is_ad) ? await getOpt080Number(ac.user_id, ac.company_id) : '';
@@ -1046,9 +1070,13 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     if (failCount > 0) {
       console.warn(`${logPrefix} 부분 실패 — 성공: ${sentCount}, 실패: ${failCount}`);
       try {
-        await prepaidRefund(ac.company_id, failCount, ac.message_type, campaignId, `자동발송 부분실패 ${failCount}건 환불`);
+        // 대상 − 큐 적재 성공 = 미적재(게이트웨이 실패가 아니다) — B-0727-2
+        // prepaidRefund는 실패해도 throw하지 않으므로 ok를 봐야 한다. 실패분은 durable 의무로 남겨 워커가 재시도.
+        const r = await prepaidRefund(ac.company_id, failCount, ac.message_type, campaignId, `자동발송 미적재 ${failCount}건 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
+        if (!r.ok) await markRefundPending(campaignId, failCount, ac.message_type);
       } catch (refundErr) {
         console.error(`${logPrefix} 부분 실패 환불 오류:`, refundErr);
+        await markRefundPending(campaignId, failCount, ac.message_type);
       }
     }
 

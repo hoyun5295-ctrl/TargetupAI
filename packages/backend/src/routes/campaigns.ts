@@ -26,15 +26,17 @@ import {
   smsCountAll, smsAggAll, smsSelectAll, smsMinAll, smsExecAll,
   getCompanySmsTablesWithLogs, getCampaignQueueTables,
   insertKakaoQueue, kakaoAgg, kakaoCountPending, kakaoCancelPending,
-  bulkInsertSmsQueue, insertAlimtalkQueue, toQtmsgType, insertTestSmsQueue
+  bulkInsertSmsQueue, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType, insertTestSmsQueue
 } from '../utils/sms-queue';
-import { prepaidDeduct, prepaidRefund } from '../utils/prepaid';
+import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
+import { markRefundPending } from '../utils/refund-pending';
 import { normalizeMmsImagePaths, type MmsImageItem } from '../utils/mms-image-util';
 import { validateMmsPayload } from '../utils/mms-validator';
 import { buildDateRangeFilter, getCampaignResultCounts, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
 import { cancelCampaign, syncCampaignResults, cleanupScheduledCampaigns } from '../utils/campaign-lifecycle';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { findUnfilledAlimtalkVars, fillAlimtalkVarMap } from '../utils/alimtalk-vars';
+import { resolveAlimtalkFallback, validateAlimtalkFallback } from '../utils/alimtalk-fallback';
 import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse, resolveCustomerCallback } from '../utils/callback-filter';
 // ★ 2026-07-05: 발송 피로도 보호 — 회사 opt-in "최근 N일 광고 M건" 게이트(차감 전 제외) + 광고 발송 카운터
 import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from '../utils/fatigue-guard';
@@ -405,7 +407,9 @@ router.post('/test-send', async (req: Request, res: Response) => {
     // ★ P0-3: 테스트 발송 실패건 환불 (차감은 전원 기준, 실패분 돌려줌)
     const testFailCount = managerContacts.length - sentCount;
     if (testFailCount > 0) {
-      await prepaidRefund(companyId, testFailCount, testMsgType, '00000000-0000-0000-0000-000000000000', '테스트 발송 실패 자동 환불', 'test');
+      // ⚠ 이 경로는 전 건이 고정 zero-uuid를 reference로 공유한다(기존 결함, B-0727-2 ⑥). 키를 달아 다른 원인과
+      //   섞이지는 않게 하되, 요청별 고유 reference로 바꾸는 것은 별도 과제로 남는다.
+      await prepaidRefund(companyId, testFailCount, testMsgType, '00000000-0000-0000-0000-000000000000', '테스트 발송 실패 자동 환불', 'test', { refundKey: REFUND_KEYS.TEST });
     }
 
     // ★ C5: 실패 건 DB 기록 (비동기, 발송 응답에 영향 없음)
@@ -825,6 +829,11 @@ if (!sendDeduct.ok) {
   });
 }
 
+// ★ D72 성능개선: 건건이 INSERT → sms-queue.ts 컨트롤타워 bulkInsertSmsQueue 사용
+// ★ 2026-07-27 (B-0727-2): try **밖**에서 선언 — 전체 실패 catch가 실제 적재 건수를 봐야
+//   미적재분만 환불한다(적재는 끝났는데 후처리만 실패한 경우 실발송분까지 환불하던 경로 차단).
+let aiSentCount = 0;
+
 // ★ P0-3: 차감 성공 후 발송 실패 시 자동 환불 보장
 try {
 
@@ -851,8 +860,7 @@ const kakaoResendType = campaign.kakao_resend_type || 'SM';
 const opt080Number = campaign.is_ad ? await getOpt080Number(userId || null, companyId) : '';
 let opt080Auth = '';
 
-// ★ D72 성능개선: 건건이 INSERT → sms-queue.ts 컨트롤타워 bulkInsertSmsQueue 사용
-let aiSentCount = 0;
+// (aiSentCount 선언은 try 밖으로 이동 — B-0727-2)
 
 // 1단계: 메시지 치환 + 발송 데이터 준비 (메모리 연산)
 const aiSmsRows: any[][] = [];
@@ -925,7 +933,9 @@ const aiFailCount = filteredCustomers.length - aiSentCount;
 if (aiFailCount > 0) {
   console.warn(`[AI발송] 부분 실패 — 성공: ${aiSentCount}, 실패: ${aiFailCount} → 실패분 환불 처리`);
   try {
-    await prepaidRefund(companyId, aiFailCount, deductType, id, `AI발송 부분실패 ${aiFailCount}건 환불`);
+    // ★ 2026-07-27 (B-0727-2): 이 건수는 `대상 − 큐 적재 성공`이라 게이트웨이 실패가 아니라 **미적재**다.
+    //   fail 항아리에 넣으면 나중에 sweeper가 얹는 실제 실패분이 그 항아리에서 삼켜져 환불이 모자란다.
+    await prepaidRefund(companyId, aiFailCount, deductType, id, `AI발송 미적재 ${aiFailCount}건 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
   } catch (partialRefundErr) {
     console.error('[AI발송] 부분 실패 환불 오류:', partialRefundErr);
   }
@@ -991,7 +1001,9 @@ await query(
       // ★ C1: 전체 실패 (루프 진입 전 오류 등) — 전액 환불
       console.error('[AI발송] 큐 처리 전체 실패 — 차감 환불 처리:', sendError);
       try {
-        await prepaidRefund(companyId, filteredCustomers.length, deductType, id, '발송 전체 실패 자동 환불');
+        // ★ 2026-07-27 (B-0727-2): 후처리 실패로도 이 catch에 온다 — 이미 적재된 건은 빼고 환불한다.
+        const aiNotLoaded = Math.max(0, filteredCustomers.length - aiSentCount);
+        await prepaidRefund(companyId, aiNotLoaded, deductType, id, `발송 실패 미적재 ${aiNotLoaded}건 자동 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
         await query(`UPDATE campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1`, [id]);
       } catch (refundErr) {
         console.error('[AI발송] 환불 처리 중 추가 오류:', refundErr);
@@ -1387,8 +1399,14 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
 
     // 검증 (즉시 피드백) — 제목 / 회신번호 등록 / 알림톡 승인
     const isAlimtalkSend = sendChannel === 'alimtalk';
-    if (isAlimtalkSend && (alimtalkNextType === 'L' || alimtalkNextType === 'B')) {
-      if (!alimtalkNextSubject?.trim()) return res.status(400).json({ success: false, error: 'LMS 대체 발송 시 LMS 제목을 입력해주세요.' });
+    if (isAlimtalkSend) {
+      // ★ 2026-07-27: 전환재발송 검증 CT 단일 기준(alimtalk-fallback) — 제목 + 대체문안 동시.
+      const violation = validateAlimtalkFallback({
+        nextType: alimtalkNextType,
+        nextContents: alimtalkNextContents,
+        nextSubject: alimtalkNextSubject,
+      });
+      if (violation) return res.status(400).json({ success: false, error: violation });
     } else if (!isAlimtalkSend && (msgType === 'LMS' || msgType === 'MMS')) {
       if (!subject?.trim()) return res.status(400).json({ success: false, error: 'LMS/MMS 발송 시 제목을 입력해주세요.' });
     }
@@ -1636,11 +1654,15 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     //   옛 D218+ = subject 검증 → 알림톡 흐름에서 subject는 일반 directSubject (사용자 입력 X) = 항상 빈 값 → L/B 시 alimtalkNextSubject 입력했어도 영구 알럴 발생 사고.
     //   진정 fix = 알림톡 L/B 흐름 시 alimtalkNextSubject 검증 + 일반 LMS/MMS 흐름 시 subject 검증 (분기 분리).
     const isAlimtalkSend = sendChannel === 'alimtalk';
-    if (isAlimtalkSend && (alimtalkNextType === 'L' || alimtalkNextType === 'B')) {
-      // 알림톡 L/B 흐름: LMS 대체 제목 (alimtalkNextSubject) 검증
-      if (!alimtalkNextSubject?.trim()) {
-        return res.status(400).json({ success: false, error: 'LMS 대체 발송 시 LMS 제목을 입력해주세요.' });
-      }
+    if (isAlimtalkSend) {
+      // ★ 2026-07-27: 전환재발송 검증을 CT(alimtalk-fallback) 단일 기준으로 통일.
+      //   L/B = LMS 제목 필수(기존 규칙 유지) + A/B = 대체문안 필수(신규 — 빈 문안이 큐에 들어가던 구멍).
+      const violation = validateAlimtalkFallback({
+        nextType: alimtalkNextType,
+        nextContents: alimtalkNextContents,
+        nextSubject: alimtalkNextSubject,
+      });
+      if (violation) return res.status(400).json({ success: false, error: violation });
     } else if (!isAlimtalkSend && (msgType === 'LMS' || msgType === 'MMS')) {
       // 일반 LMS/MMS 발송: 기존 subject 검증 유지 (옛 D91)
       if (!subject?.trim()) {
@@ -1844,13 +1866,19 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       });
     }
 
+    // ★ C1: 채널별 발송 성공 건수 추적 (선별적 환불 계산용)
+    // ★ 2026-07-27 (B-0727-2): try **밖**으로 올린다. 전체 실패 catch가 "실제로 큐에 들어간 수"를 봐야
+    //   미적재분만 환불한다. 안에서 선언하면 catch가 그 값을 못 봐, 적재는 다 됐는데 뒤 후처리만
+    //   실패한 경우에도 전량을 미적재로 환불해 실발송분까지 돌려주게 된다.
+    let directSmsSentCount = 0;
+    let directKakaoSentCount = 0;
+    let directAlimtalkSentCount = 0;
+
     // ★ P0-3: 차감 성공 후 발송 실패 시 자동 환불 보장
     try {
 
     // 2. MySQL 큐에 메시지 삽입 — 회사 라인그룹 테이블 라운드로빈 분배
     const isScheduledSend = scheduled && scheduledAt;
-    // ★ C1: 채널별 발송 성공 건수 추적 (블록 밖에서 선언 — 선별적 환불 계산용)
-    let directSmsSentCount = 0;
 
     // ★ D102: 080 수신거부번호 — CT-AD 컨트롤타워 사용
     // ★ D142+ B1: finalIsAd(광고 자동 승격 결과) 기준 — 사용자가 본문에 (광고) 박았으면 080번호 조회
@@ -1929,8 +1957,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     }
 
     // 카카오 발송 (kakao 또는 both)
-    // ★ C1: per-recipient try/catch로 카카오 부분 실패 추적
-    let directKakaoSentCount = 0;
+    // ★ C1: per-recipient try/catch로 카카오 부분 실패 추적 (선언은 try 밖으로 이동 — B-0727-2)
     if (directChannel === 'kakao' || directChannel === 'both') {
       for (let i = 0; i < filteredRecipients.length; i++) {
         try {
@@ -1993,7 +2020,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         console.warn(`[직접발송] SMS 부분 실패 — 성공: ${directSmsSentCount}, 실패: ${smsFailCount} → 실패분 환불`);
         try {
           const smsDeductType = directChannel === 'kakao' ? 'KAKAO' : msgType;
-          await prepaidRefund(companyId, smsFailCount, smsDeductType, campaignId, `직접발송 SMS 부분실패 ${smsFailCount}건 환불`);
+          // 대상 − 큐 적재 성공 = 미적재(게이트웨이 실패가 아니다) — B-0727-2
+          await prepaidRefund(companyId, smsFailCount, smsDeductType, campaignId, `직접발송 SMS 미적재 ${smsFailCount}건 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
         } catch (refundErr) {
           console.error('[직접발송] SMS 부분 실패 환불 오류:', refundErr);
         }
@@ -2005,7 +2033,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       if (kakaoFailCount > 0) {
         console.warn(`[직접발송] 카카오 부분 실패 — 성공: ${directKakaoSentCount}, 실패: ${kakaoFailCount} → 실패분 환불`);
         try {
-          await prepaidRefund(companyId, kakaoFailCount, 'KAKAO', campaignId, `직접발송 카카오 부분실패 ${kakaoFailCount}건 환불`);
+          await prepaidRefund(companyId, kakaoFailCount, 'KAKAO', campaignId, `직접발송 카카오 미적재 ${kakaoFailCount}건 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
         } catch (refundErr) {
           console.error('[직접발송] 카카오 부분 실패 환불 오류:', refundErr);
         }
@@ -2013,7 +2041,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     }
 
     // ★ 알림톡 발송 (CT-04 insertAlimtalkQueue 사용 / D130: 설계서 §6-3-D 반영)
-    let directAlimtalkSentCount = 0;
+    //   (선언은 try 밖으로 이동 — B-0727-2)
     if (directChannel === 'alimtalk') {
       if (!alimtalkTemplateCode) {
         return res.status(400).json({ success: false, error: '알림톡 템플릿 코드가 필요합니다' });
@@ -2084,6 +2112,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         return out;
       };
 
+      // 강등은 행마다 찍지 않고 1줄로 센다 — 대량 발송에서 전화번호 원문이 로그에 쌓인다.
+      let alimDowngradedCount = 0;
       const alimtalkRows = filteredRecipients.map((recipient: any) => {
         const dbAlimCustomer = directCustomerMap.get(normalizePhone(recipient.phone)) || null;
         const extraVars = toExtraFromVarMap(recipient, dbAlimCustomer);
@@ -2097,14 +2127,26 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           finalMessage = finalMessage.replace(new RegExp(`#\\{${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\}`, 'g'), v);
         }
         // ★ 대체문구(k_next_contents)도 본문과 동일 치환 — raw 발송 시 #{변수} 노출 차단. (%변수% + #{} 변수맵)
-        let finalNextContents: string | undefined;
-        if ((alimtalkNextType === 'A' || alimtalkNextType === 'B') && alimtalkNextContents) {
+        let filledNextContents: string | undefined;
+        if (alimtalkNextContents) {
           const ncBase = replaceVariables(alimtalkNextContents, dbAlimCustomer, directFieldMappings, {
             name: recipient.name, extra1: recipient.extra1, extra2: recipient.extra2,
             extra3: recipient.extra3, callback: recipient.callback,
           }, { skipNumberFormatting: true });
-          finalNextContents = fillAlimtalkVarMap(ncBase, alimtalkVariableMap, dbAlimCustomer, recipient);
+          filledNextContents = fillAlimtalkVarMap(ncBase, alimtalkVariableMap, dbAlimCustomer, recipient);
         }
+        // ★ 2026-07-27: 전환재발송 규칙 CT 단일 진입점(alimtalk-fallback) — 4경로 공통.
+        //   설정 자체는 위 검증(400)에서 이미 걸러졌다. 여기서 문안이 비는 경우는 이 수신자의 변수가
+        //   전부 빈 값이라 치환 후 사라진 행뿐이라, 그 행만 전환 없음으로 내리고 본 발송은 보낸다.
+        const alimFallback = resolveAlimtalkFallback(
+          {
+            nextType: alimtalkNextType,
+            nextContents: filledNextContents,
+            nextSubject: alimtalkNextSubject,
+          },
+          { emptyContentsPolicy: 'disableFallback' },
+        );
+        if (alimFallback.downgradedToNone) alimDowngradedCount++;
         // ★ 매뉴얼(qtmsg): 강조표기 title(#{변수} 본문과 동일 치환)만 → row별 k_etc_json (senderkey는 CT-04가 비토 라인만 주입)
         const rowEtcJson = buildAlimtalkEtcJson({
           emphasizeTitle: gate.temphasize_title,
@@ -2125,24 +2167,47 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           callback: normalizePhone(callback),
           message: finalMessage,
           templateCode: alimtalkTemplateCode,
-          nextType: alimtalkNextType || 'L',
-          nextContents: finalNextContents,
+          nextType: alimFallback.nextType,
+          nextContents: alimFallback.nextContents,
           // ★ D225+ (2026-05-28 영업팀장 박성용 신고 재발 fix): alimtalkNextSubject → QTmsg title_str 매핑 누락 정정.
           //   옛 D224+ fix = destructure + 검증만. 실제 QTmsg INSERT 시 titleStr 영역 누락 = title_str NULL.
           //   결과 = 알림톡 발송 실패 후 LMS 자동 대체 발송 시 = 제목 NULL = 통신사 검증 실패 = 미수신 사고.
-          titleStr: (alimtalkNextType === 'L' || alimtalkNextType === 'B') ? (alimtalkNextSubject || '') : undefined,
+          titleStr: alimFallback.titleStr,
           // ★ 버그1 fix: 검수 승인 템플릿 buttons로 k_button_json 생성(QTmsg 매뉴얼 형식). 프론트 전송값은 폴백.
           buttonJson: convertButtonsToQTmsg(gate.tbuttons) || alimtalkButtonJson || null,
           etcJson: rowEtcJson,
           companyId,
         };
       });
+      if (alimDowngradedCount > 0) {
+        console.log(`[직접발송] 대체문안 치환 결과 공백 ${alimDowngradedCount}건 — 해당 수신자만 전환 없이 알림톡 발송 campaign=${campaignId}`);
+      }
 
       try {
         directAlimtalkSentCount = await insertAlimtalkQueue(companyTables, alimtalkRows, campaignId);
         console.log(`[직접발송] 알림톡 INSERT 완료: ${directAlimtalkSentCount}건`);
       } catch (alimtalkErr) {
         console.error('[직접발송] 알림톡 INSERT 실패:', alimtalkErr);
+        // ★ 2026-07-27 (B-0727-1): 배치 독립 커밋 — 앞 배치는 이미 큐에 남아 발송된다.
+        //   커밋된 건수를 살려야 이후 성공 건수·환불 산식이 실제 발송분과 어긋나지 않는다.
+        if (alimtalkErr instanceof AlimtalkQueueInsertError) directAlimtalkSentCount = alimtalkErr.inserted;
+      }
+      // ★ 2026-07-27 (B-0727-2): 알림톡만 미적재분 환불 경로가 없었다(SMS·카카오는 위에 있다).
+      //   첫 배치부터 실패하면 적재 0인데 캠페인은 그대로 종결돼 sweeper 산식(처리수 0 → 미적재 0)도
+      //   손대지 않아 차감액이 통째로 남았다. 여기서 적재되지 않은 몫을 미적재 항아리로 돌려준다.
+      const alimNotLoaded = Math.max(0, filteredRecipients.length - directAlimtalkSentCount);
+      if (alimNotLoaded > 0) {
+        console.warn(`[직접발송] 알림톡 미적재 ${alimNotLoaded}건 (적재 ${directAlimtalkSentCount}/${filteredRecipients.length}) → 환불`);
+        // ★ 2026-07-27 (B-0727-2): prepaidRefund는 실패해도 throw하지 않고 ok=false로 돌아온다.
+        //   try/catch만으로는 실패를 못 잡는다. 실패하면 durable 의무로 남겨 워커가 재시도한다
+        //   (적재 0건이면 status='failed'로 끝나 sweeper 보정 대상에서도 빠지기 때문).
+        try {
+          const r = await prepaidRefund(companyId, alimNotLoaded, directDeductType, campaignId, `직접발송 알림톡 미적재 ${alimNotLoaded}건 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
+          if (!r.ok) await markRefundPending(campaignId, alimNotLoaded, directDeductType);
+        } catch (refundErr) {
+          console.error('[직접발송] 알림톡 미적재 환불 오류:', refundErr);
+          await markRefundPending(campaignId, alimNotLoaded, directDeductType);
+        }
       }
     }
 
@@ -2218,7 +2283,12 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       // ★ C1: 전체 실패 (루프 진입 전 오류 등) — 전액 환불
       console.error('[직접발송] 큐 처리 전체 실패 — 차감 환불 처리:', sendError);
       try {
-        await prepaidRefund(companyId, filteredRecipients.length, directDeductType, campaignId, '발송 전체 실패 자동 환불');
+        // ★ 2026-07-27 (B-0727-2): 이 catch는 큐 적재뿐 아니라 그 뒤 후처리(상태 UPDATE·학습 적재)까지 감싼다.
+        //   전량을 미적재로 환불하면, 적재는 다 됐는데 후처리만 실패한 경우 실제로 나갈 발송분까지 돌려준다.
+        //   실제 큐에 들어간 수를 빼고 남은 몫만 환불한다. 채널별 최대값 = 그 캠페인이 적재한 건수.
+        const directLoaded = Math.max(directSmsSentCount, directKakaoSentCount, directAlimtalkSentCount);
+        const directNotLoaded = Math.max(0, filteredRecipients.length - directLoaded);
+        await prepaidRefund(companyId, directNotLoaded, directDeductType, campaignId, `발송 실패 미적재 ${directNotLoaded}건 자동 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
         await query(`UPDATE campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1`, [campaignId]);
       } catch (refundErr) {
         console.error('[직접발송] 환불 처리 중 추가 오류:', refundErr);

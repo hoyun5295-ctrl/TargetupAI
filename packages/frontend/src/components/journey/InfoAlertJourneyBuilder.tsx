@@ -11,6 +11,7 @@
 import { useState } from 'react';
 import { Bell, ShoppingBag, CalendarCheck, ShoppingCart, Truck, ArrowLeft, Zap, Clock, Users, MessageSquare } from 'lucide-react';
 import AlimtalkChannelPanel, {
+  validateAlimtalkChannelState,
   type AlimtalkSenderProfile,
   type AlimtalkTemplate,
   type AlimtalkChannelState,
@@ -87,7 +88,10 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
   const selectedTemplate = templates.find((t) => t.template_code === alimtalk.templateCode);
   const eventVars = startKind === 'event' ? (EVENT_FIELDS[txKey] || []) : [];
 
+  // ★ 2026-07-27: 전환재발송 검증 공용 CT — 여정 활성화(백엔드)에서 막히기 전에 여기서 먼저 알려준다.
+  const fallbackViolation = validateAlimtalkChannelState(alimtalk);
   const canBuild = Boolean(alimtalk.profileId && alimtalk.templateCode)
+    && !fallbackViolation
     && (startKind !== 'one_shot' || scheduleMode === 'now' || !!scheduledAt);
 
   const handleBuild = () => {
@@ -204,7 +208,10 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
       {/* 대상 — 요약 버튼 → 모달 */}
       <SummaryButton icon={<Users className="w-4 h-4 text-white" />} label={startKind === 'event' ? '대상 (이벤트 발생 고객 + 조건)' : '대상'} value={audienceSummary(conditions)} accent="teal" onClick={() => setShowAudience(true)} />
 
-      <div className="flex justify-end pt-1">
+      <div className="flex justify-end items-center gap-3 pt-1">
+        {alimtalk.templateCode && fallbackViolation && (
+          <span className="text-[11px] text-rose-300">{fallbackViolation}</span>
+        )}
         <button onClick={handleBuild} disabled={!canBuild} className="px-5 py-3 bg-gradient-to-r from-teal-500 to-emerald-500 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">다음 — 흐름 검토</button>
       </div>
 

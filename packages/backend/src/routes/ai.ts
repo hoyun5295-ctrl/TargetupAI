@@ -105,6 +105,7 @@ import {
   JourneyTemplateCode,
   JourneyStatus,
 } from '../utils/journey-builder';
+import { AlimtalkFallbackError } from '../utils/alimtalk-fallback';
 // ★ D218+ (2026-05-26): 활성화 검증 + 정지 이력 조회
 import { validateJourneyForActivation } from '../utils/journey-pretest-validator';
 import { getPauseLogs } from '../utils/journey-pause-handler';
@@ -3414,6 +3415,9 @@ router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: R
       notifyManagerOnPretest,
       allowActiveMessageEdit,
     } = req.body || {};
+    // ★ 2026-07-27: 알림톡 전환재발송 검증은 updateJourneyStep 안에서 기존값과 병합한 최종 상태로 한다.
+    //   여기서 요청값만 보고 판정하면, 제목만 ''로 보내는 요청은 검증을 건너뛰고 타입만 보내는 요청은
+    //   멀쩡한 저장값이 있어도 거부된다(Codex 3R 지적). 위반은 AlimtalkFallbackError로 올라와 아래 catch가 400으로 돌린다.
     const ok = await updateJourneyStep(companyId, req.params.id, req.params.stepId, {
       allowActiveMessageEdit: allowActiveMessageEdit === true,
       messageTemplate,
@@ -3435,6 +3439,10 @@ router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: R
     if (!ok) return res.status(404).json({ success: false, error: 'step을 찾을 수 없거나 수정 권한이 없습니다.' });
     return res.json({ success: true });
   } catch (err: any) {
+    // ★ 2026-07-27: 전환재발송 규칙 위반은 입력 오류라 400으로 돌린다(500 = 서버 결함으로 오인).
+    if (err instanceof AlimtalkFallbackError) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
     console.error('[Journeys update step] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'step 수정 실패' });
   }

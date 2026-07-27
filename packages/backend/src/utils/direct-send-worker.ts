@@ -7,13 +7,165 @@
  */
 import { query } from '../config/database';
 import { prepareFieldMappings, getOpt080Number } from './messageUtils';
-import { prepaidRefund } from './prepaid';
+import { prepaidRefund, REFUND_KEYS } from './prepaid';
+import { buildRefundPending } from './refund-pending';
+import { getCampaignQueueTables, smsCountAll } from './sms-queue';
 import { getCompanySmsTables, smsExecAll, toKoreaTimeStr } from './sms-queue';
 import { calcSplitSendTime } from './send-time-util';
 import { processSendChunk, type ChunkRecipient } from './direct-send-processor';
 
 const CHUNK = 10000;
 let running = false;
+
+/**
+ * ★ 2026-07-27 (B-0727-1): 미완료 환불 재시도.
+ * prepaidRefund가 단가 미상·DB 오류로 처리하지 못하면 워커가 send_config.refundPending에 남긴다.
+ * 그 캠페인은 종결 상태라 다른 어떤 워커도 다시 보지 않으므로(sweeper는 처리수 0인 전량 미적재를
+ * 구조적으로 손대지 않는다) 여기서 되돌아와야 미환불이 영구화되지 않는다.
+ * prepaidRefund는 누적 목표 기준 idempotent라 여러 번 불려도 이중 환불이 없다.
+ */
+/**
+ * ★ 2026-07-27 (B-0727-2): 취소 환불 의무 재시도.
+ * 취소는 MySQL 대기 행을 지운 뒤 환불하므로, 환불이 실패하면 "얼마를 돌려줘야 했는지"가 사라진다.
+ * 그래서 cancelCampaign이 **지우기 전에** send_config.refundPendingCancel에 몫을 남긴다. 여기서 그걸 소진한다.
+ * 키가 'cancel'이라 같은 항아리 기준 멱등 — 여러 번 불려도 이중 환불이 없다.
+ */
+async function retryPendingCancelRefunds(): Promise<void> {
+  try {
+    // 실패가 굳은 몇 건이 매 사이클 LIMIT을 점유해 뒤 의무를 굶기지 않도록, 미적재 재시도와 같은
+    // due-time(backoff) 방식으로 집는다.
+    const rows = await query(
+      `SELECT id, company_id, created_by, send_config, send_config->'refundPendingCancel' AS rp
+         FROM campaigns
+        WHERE send_config ? 'refundPendingCancel'
+          AND COALESCE((send_config->'refundPendingCancel'->>'nextAttemptAt')::timestamptz, TIMESTAMPTZ '-infinity') <= NOW()
+        ORDER BY COALESCE((send_config->'refundPendingCancel'->>'nextAttemptAt')::timestamptz, TIMESTAMPTZ '-infinity') ASC
+        LIMIT 20`
+    );
+    for (const row of rows.rows) {
+      const rp = row.rp || {};
+      // ★ prepared = 큐 삭제 전에 남긴 의무. 아직 안 지워진 큐를 두고 환불하면 환불 후 실발송이 된다.
+      //   ready 전환 UPDATE가 실패해 prepared로 남은 경우를 위해, 실제 대기 행이 0인지 직접 확인해 승격시킨다.
+      if (rp.state !== 'ready') {
+        try {
+          const tables = await getCampaignQueueTables(row.company_id, row.created_by || undefined, row.send_config);
+          const stillPending = await smsCountAll(tables, 'app_etc1 = ? AND status_code = 100', [row.id]);
+          if (stillPending > 0) continue;   // 삭제가 끝나지 않았다 — 환불하지 않는다
+          await query(
+            `UPDATE campaigns SET send_config = jsonb_set(send_config, '{refundPendingCancel,state}', '"ready"'::jsonb),
+                    updated_at = NOW() WHERE id = $1`,
+            [row.id],
+          );
+          console.log(`[direct-send-worker] 취소 환불 의무 승격(prepared→ready) campaign=${row.id}`);
+        } catch (e: any) {
+          console.error(`[direct-send-worker] 취소 의무 승격 확인 실패 campaign=${row.id}:`, e?.message || e);
+          continue;
+        }
+      }
+      const parts = [rp.sms, rp.kakao].filter((p: any) => p && Number(p.count) > 0);
+      const clear = () => query(
+        `UPDATE campaigns SET send_config = send_config - 'refundPendingCancel', updated_at = NOW() WHERE id = $1`,
+        [row.id],
+      ).catch(() => {});
+      if (parts.length === 0) { await clear(); continue; }
+      let allOk = true;
+      for (const part of parts) {
+        try {
+          // 최초 호출과 **같은 옵션**으로 부른다. 키 항아리에서는 mode가 무시되어 멱등이고,
+          // 키 이전 환불이 있는 레거시 캠페인에서는 최초 호출처럼 추가 환불로 동작한다
+          //   — 재시도만 누적 목표로 계산하면 기존 환불이 더 커서 취소분이 통째로 사라진다.
+          const res = await prepaidRefund(
+            row.company_id, Number(part.count), String(part.messageType), row.id, '예약 취소 환불(재시도)',
+            'campaign', { refundKey: REFUND_KEYS.CANCEL, forceKeyedPot: true },
+          );
+          if (!res.ok) allOk = false;
+          else if (res.refunded > 0) console.log(`[direct-send-worker] 취소 환불 재시도 성공 campaign=${row.id} ${res.refunded}원`);
+        } catch (e: any) {
+          allOk = false;
+          console.error(`[direct-send-worker] 취소 환불 재시도 오류 campaign=${row.id}:`, e?.message || e);
+        }
+      }
+      if (allOk) { await clear(); continue; }
+      const attempts = Number(rp.attempts || 0);
+      const backoffMin = Math.min(60, 2 ** Math.min(attempts, 5));
+      await query(
+        `UPDATE campaigns SET send_config = jsonb_set(send_config, '{refundPendingCancel}', $2::jsonb), updated_at = NOW() WHERE id = $1`,
+        [row.id, JSON.stringify({
+          ...rp,
+          state: 'ready',   // 여기까지 왔으면 승격은 끝난 상태 — 다음 사이클이 다시 확인하지 않게 고정
+          attempts: attempts + 1,
+          lastAttemptAt: new Date().toISOString(),
+          nextAttemptAt: new Date(Date.now() + backoffMin * 60_000).toISOString(),
+        })],
+      ).catch(() => {});
+    }
+  } catch (e: any) {
+    console.error('[direct-send-worker] 취소 환불 재시도 조회 실패:', e?.message || e);
+  }
+}
+
+async function retryPendingRefunds(): Promise<void> {
+  try {
+    // ★ 만료 없음 — 돈 채무에 유효기간을 두지 않는다. 대신 시도 간격(backoff)으로 부하를 제어한다.
+    //   `nextAttemptAt` 순으로 집어야 실패가 굳은 몇 건이 LIMIT을 영구 점유해 뒤 채무를 굶기지 않는다.
+    // 취소 환불 의무(refundPendingCancel)를 먼저 정리한다 — 취소 캠페인은 sweeper 보정 대상이 아니라
+    // 여기서 되살리지 않으면 영구 미환불이다. 키가 'cancel'이라 반복 호출해도 그 항아리 안에서 멱등이다.
+    await retryPendingCancelRefunds();
+    const pending = await query(
+      `SELECT id, company_id, send_config->'refundPending' AS rp
+         FROM campaigns
+        WHERE send_config ? 'refundPending'
+          AND COALESCE((send_config->'refundPending'->>'nextAttemptAt')::timestamptz, TIMESTAMPTZ '-infinity') <= NOW()
+        ORDER BY COALESCE((send_config->'refundPending'->>'nextAttemptAt')::timestamptz, TIMESTAMPTZ '-infinity') ASC
+        LIMIT 20`
+    );
+    for (const row of pending.rows) {
+      const rp = row.rp || {};
+      const count = Number(rp.count || 0);
+      const messageType = String(rp.messageType || '');
+      const attempts = Number(rp.attempts || 0);
+      const clear = () => query(
+        `UPDATE campaigns SET send_config = send_config - 'refundPending', updated_at = NOW() WHERE id = $1`,
+        [row.id],
+      ).catch(() => {});
+      // 다음 시도까지 대기 — 2분에서 시작해 최대 60분. 같은 건이 매 사이클을 잡아먹지 않게 한다.
+      const backoffMin = Math.min(60, 2 ** Math.min(attempts, 5));
+      const defer = (err?: string) => query(
+        `UPDATE campaigns
+            SET send_config = jsonb_set(send_config, '{refundPending}', $2::jsonb),
+                updated_at = NOW()
+          WHERE id = $1`,
+        [row.id, JSON.stringify({
+          ...rp,
+          attempts: attempts + 1,
+          lastAttemptAt: new Date().toISOString(),
+          nextAttemptAt: new Date(Date.now() + backoffMin * 60_000).toISOString(),
+          ...(err ? { lastError: err.slice(0, 200) } : {}),
+        })],
+      ).catch(() => {});
+      if (count <= 0 || !messageType) { await clear(); continue; }
+      try {
+        const res = await prepaidRefund(
+          row.company_id, count, messageType, row.id, `대량 발송 미적재 ${count}건 자동 환불(재시도)`,
+          'campaign', { refundKey: REFUND_KEYS.NOT_LOADED },
+        );
+        if (res.ok) {
+          await clear();
+          if (res.refunded > 0) {
+            console.log(`[direct-send-worker] 미적재분 환불 재시도 성공 campaign=${row.id} ${res.refunded}원`);
+          }
+        } else {
+          await defer('prepaidRefund ok=false');
+        }
+      } catch (e: any) {
+        console.error(`[direct-send-worker] 환불 재시도 오류 campaign=${row.id}:`, e?.message || e);
+        await defer(String(e?.message || e));
+      }
+    }
+  } catch (e: any) {
+    console.error('[direct-send-worker] 환불 재시도 조회 실패:', e?.message || e);
+  }
+}
 
 /** queued 캠페인을 순차 처리 (동시 진입 방지 플래그) */
 export async function runDirectSendOnce(): Promise<void> {
@@ -26,11 +178,33 @@ export async function runDirectSendOnce(): Promise<void> {
     for (const row of due.rows) {
       try {
         await processCampaign(row.id);
-      } catch (e) {
+      } catch (e: any) {
         console.error(`[direct-send-worker] 캠페인 ${row.id} 처리 실패:`, e);
-        await query(`UPDATE campaigns SET send_phase = 'failed', updated_at = NOW() WHERE id = $1`, [row.id]).catch(() => {});
+        // ★ 2026-07-27 (B-0727-1): 여기는 최후 안전망이다. 적재 중 예외는 processCampaign 안에서 잡아
+        //   정상 종결 블록(환불·건수·staging 정리)을 태우므로, 이 catch까지 오는 건 종결 블록 자체가 실패한 경우뿐.
+        //   그때는 환불·집계가 수렴하지 않으므로 사유를 남겨 사람이 찾을 수 있게 한다.
+        //   ⛔ status는 건드리지 않는다 — failed로 바꾸면 예약 캠페인이 예약 목록·취소 게이트(scheduled/draft만 허용)
+        //   에서 빠지는데 이미 적재된 큐 행은 예약 시각에 그대로 나간다(취소 불가).
+        //   ⛔ `send_phase IS DISTINCT FROM 'sent'` 가드 필수 — 종결 UPDATE는 성공했는데 그 뒤 staging 삭제만
+        //   실패해도 여기로 온다. 가드가 없으면 정상 종결된 'sent'를 'failed'로 강등해, 실제로 나간 발송이
+        //   후불 집계(send_phase='sent' AND status='completed')와 선불 sweeper에서 통째로 빠진다.
+        const failure = JSON.stringify({
+          at: new Date().toISOString(),
+          reason: String(e?.message || e).slice(0, 300),
+        });
+        await query(
+          `UPDATE campaigns
+              SET send_phase = 'failed',
+                  send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{failure}', $2::jsonb),
+                  updated_at = NOW()
+            WHERE id = $1 AND send_phase IS DISTINCT FROM 'sent'`,
+          [row.id, failure],
+        ).catch(() => {});
       }
     }
+    // ★ 2026-07-27 (B-0727-1): 미완료 환불 재시도는 **신규 발송 처리 뒤**에 돈다.
+    //   앞에 두면 밀린 환불 재시도가 발송 적재를 지연시킨다(발송이 늦는 편이 더 눈에 띄는 사고).
+    await retryPendingRefunds();
   } finally {
     running = false;
   }
@@ -97,6 +271,13 @@ async function processCampaign(campaignId: string): Promise<void> {
     }
   }
 
+  // ★ 2026-07-27 (B-0727-1): 적재 중 예외가 나면 종결 블록(미적재분 환불 → 최종 상태·건수 기록 → staging 정리)에
+  //   도달하지 못한 채 바깥 catch로 빠져나가, 선차감분이 환불되지 않고 실제로 나간 발송분도 후불 집계에서 빠졌다.
+  //   (차감은 워커 실행 전 전량 선차감이고, 선불 sweeper는 send_phase IS NULL/'sent'만, 후불 집계는
+  //    send_phase='sent' AND status='completed'만 본다.) 예외를 여기서 잡아 아래 종결 블록을 그대로 태운다 —
+  //   중단 지점까지 적재된 건은 정상 발송분으로 집계되고, 나머지는 정상 경로와 같은 산식으로 환불된다.
+  let failureReason: string | null = null;
+  try {
   while (processed < total) {
     // ★ 2026-06-11: 적재 중 취소 감지 — 취소되면 이미 넣은 큐 행을 지우고 중단 (취소-적재 경합 차단).
     const cancelCheck = await query(`SELECT status FROM campaigns WHERE id = $1`, [campaignId]);
@@ -150,14 +331,31 @@ async function processCampaign(campaignId: string): Promise<void> {
     await query(`UPDATE campaigns SET processed_count = $1, updated_at = NOW() WHERE id = $2`, [processed, campaignId]);
     await new Promise((res) => setImmediate(res)); // 이벤트루프 양보 — 다른 요청 블로킹 방지
   }
+  } catch (loopErr: any) {
+    failureReason = String(loopErr?.message || loopErr).slice(0, 300);
+    console.error(`[direct-send-worker] 캠페인 ${campaignId} 적재 중단 (적재 ${sent}/${total}):`, loopErr);
+  }
 
   // 미적재분(정제 제외 + 큐 INSERT skip) 환불 — 즉시성. 최종 수렴은 mysql-refund-sweeper 단일 산식이 보장.
+  // ★ 2026-07-27 (B-0727-1): 환불 결과를 확인한다. prepaidRefund는 실패해도 throw하지 않고 refunded=0을
+  //   돌려주므로, 옛 코드는 환불이 안 된 채로 캠페인을 종결했다. 전량 미적재(처리수 0)는 sweeper 산식이
+  //   구조적으로 손대지 않는 자리라(refund-calc: 처리수 0이면 미적재 0) 그대로 영구 미환불이 됐다.
+  //   실패하면 send_config.refundPending에 남겨 다음 워커 사이클이 재시도한다.
   const failed = Math.max(0, total - sent);
+  const deductType = (cfg.sendChannel === 'kakao') ? 'KAKAO' : cfg.msgType;
+  let refundPending: string | null = null;
   if (failed > 0) {
     try {
-      const deductType = (cfg.sendChannel === 'kakao') ? 'KAKAO' : cfg.msgType;
-      await prepaidRefund(companyId, failed, deductType, campaignId, `대량 발송 미적재 ${failed}건 자동 환불`);
+      const refundRes = await prepaidRefund(
+        companyId, failed, deductType, campaignId, `대량 발송 미적재 ${failed}건 자동 환불`,
+        'campaign', { refundKey: REFUND_KEYS.NOT_LOADED },
+      );
+      if (!refundRes.ok) {
+        refundPending = JSON.stringify(buildRefundPending(failed, deductType));
+        console.error(`[direct-send-worker] 미적재분 환불 미완료 — 재시도 대기 등록 campaign=${campaignId} ${failed}건`);
+      }
     } catch (refundErr) {
+      refundPending = JSON.stringify({ count: failed, messageType: deductType, at: new Date().toISOString() });
       console.error('[direct-send-worker] 미적재분 환불 오류:', refundErr);
     }
   }
@@ -171,19 +369,41 @@ async function processCampaign(campaignId: string): Promise<void> {
     unsub: unsubRemoved, dup: dupRemoved, skipped: chunkSkipped,
     deducted: total, loaded: sent, recordedAt: new Date().toISOString(),
   });
+  // ★ 2026-07-27 (B-0727-1): 적재가 중단됐어도 종결은 정상 경로와 같은 형태로 남긴다 —
+  //   중단 사유만 send_config.failure에 덧붙인다. status는 건드리지 않는다(예약 캠페인은 'scheduled'를 유지해야
+  //   예약 목록·취소 게이트에 남고, 이미 적재된 큐 행을 사용자가 취소할 수 있다).
+  const failureJson = failureReason
+    ? JSON.stringify({ at: new Date().toISOString(), reason: failureReason, loaded: sent, deducted: total })
+    : null;
   const fin = await query(
     `UPDATE campaigns SET send_phase = 'sent', status = $1, sent_count = $2, fail_count = $3, sent_at = NOW(),
-       send_config = CASE WHEN send_config->'exclusions' IS NULL
-         THEN jsonb_set(COALESCE(send_config, '{}'::jsonb), '{exclusions}', $5::jsonb)
-         ELSE send_config END,
+       send_config = CASE WHEN $6::jsonb IS NULL THEN (
+           CASE WHEN send_config->'exclusions' IS NULL
+             THEN jsonb_set(COALESCE(send_config, '{}'::jsonb), '{exclusions}', $5::jsonb)
+             ELSE send_config END
+         ) ELSE jsonb_set(
+           CASE WHEN send_config->'exclusions' IS NULL
+             THEN jsonb_set(COALESCE(send_config, '{}'::jsonb), '{exclusions}', $5::jsonb)
+             ELSE COALESCE(send_config, '{}'::jsonb) END,
+           '{failure}', $6::jsonb)
+         END,
        updated_at = NOW()
      WHERE id = $4 AND status != 'cancelled'`,
-    [finalStatus, sent, failed, campaignId, exclusions]
+    [finalStatus, sent, failed, campaignId, exclusions, failureJson]
   );
   if (fin.rowCount === 0) {
     await smsExecAll(companyTables, `DELETE FROM SMSQ_SEND WHERE app_etc1 = ? AND status_code = 100`, [campaignId]);
     await query(`UPDATE campaigns SET send_phase = 'sent', updated_at = NOW() WHERE id = $1`, [campaignId]);
     console.log(`[direct-send-worker] 캠페인 ${campaignId} 완료 직전 취소 감지 — 적재분 큐 삭제`);
+  }
+  // ★ 2026-07-27 (B-0727-1): 환불 미완료 표시는 종결 UPDATE와 분리해 남긴다(종결 표시는 이미 끝났고,
+  //   이 값이 없어도 발송 자체는 정상이라 실패해도 다음 사이클이 다시 시도한다).
+  if (refundPending) {
+    await query(
+      `UPDATE campaigns SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{refundPending}', $2::jsonb),
+              updated_at = NOW() WHERE id = $1`,
+      [campaignId, refundPending],
+    ).catch((e) => console.error('[direct-send-worker] refundPending 기록 실패:', e?.message || e));
   }
   await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1`, [stagingId]);
   console.log(`[direct-send-worker] 캠페인 ${campaignId} 완료 — 발송 ${sent}/${total}, 실패 ${failed}`);
