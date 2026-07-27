@@ -20,7 +20,7 @@
 import { query } from '../config/database';
 import { syncCampaignResults } from './campaign-lifecycle';
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
-import { getAuthSmsTable, bulkInsertSmsQueue, getCompanySmsTablesWithLogs, smsCampaignCountsSafe, kakaoBatchAggByGroup } from './sms-queue';
+import { getAuthSmsTable, bulkInsertSmsQueue, getCompanySmsTablesWithLogs, smsCampaignCountsSafe, kakaoBatchAggByGroup, getPlatformNoticeCallback } from './sms-queue';
 import { shouldFinalizeCampaign } from './sms-table-split';
 
 const INTERVAL_MS = 5 * 60 * 1000; // 5분
@@ -148,54 +148,84 @@ async function notifyJourneyResultsToManagers(): Promise<void> {
         AND e.completed_at >= NOW() - INTERVAL '2 hours'
         AND COALESCE(s.step_type, 'message') = 'message'
       ORDER BY e.completed_at DESC
-      LIMIT 50`
+      -- ★ 2026-07-27 묶음 발송으로 바뀌면서 상한을 올렸다. 실행행 50개에서 잘리면 같은 여정이
+      --   두 주기에 걸쳐 알림을 두 번 받는다(묶음의 의미가 사라진다). 행은 가볍고 발송은 묶음당 1건이다.
+      LIMIT 500`
   );
 
   if (completedRes.rows.length === 0) return;
 
+  // ★ 2026-07-27 (Harold 지적) 실행행(고객)마다 1통 → **(여정, step)당 1통**으로 묶는다.
+  //   실측 사고: 회원가입 감사안내 여정에 6명이 진입하자 담당자에게 같은 내용 LMS가 **6통** 갔다
+  //   (전부 "성공 1건 / 실패 0건"). 담당자가 알고 싶은 건 "이 여정이 몇 명에게 나갔나"지
+  //   고객 한 명 한 명이 아니다. 게다가 이 안내도 고객사 과금분이라 6배로 새어 나간다.
+  const groups = new Map<string, any[]>();
   for (const exec of completedRes.rows) {
+    const key = `${exec.journey_id}::${exec.step_order}`;
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(exec); else groups.set(key, [exec]);
+  }
+
+  /** 묶음 전체를 통지 완료로 마킹 — 발송했든 skip했든 재조회를 막는다(중복 알림 차단). */
+  const markNotified = async (rows: any[]): Promise<void> => {
+    await query(
+      `UPDATE journey_executions SET result_notified_at = NOW() WHERE id = ANY($1::uuid[])`,
+      [rows.map((r) => r.execution_id)],
+    );
+  };
+
+  // 담당자 번호는 회사당 한 번만 조회한다(묶음마다 같은 회사를 반복 조회하지 않도록).
+  const managerCache = new Map<string, string | null>();
+  const resolveManagerPhone = async (companyId: string): Promise<string | null> => {
+    const cached = managerCache.get(companyId);
+    if (cached !== undefined) return cached;
+    const mgrRes = await query(
+      `SELECT phone_number FROM kakao_alarm_users
+        WHERE company_id = $1::uuid AND COALESCE(active_yn,'Y')='Y'
+        ORDER BY created_at ASC LIMIT 1`,
+      [companyId],
+    );
+    const raw = mgrRes.rows.length > 0 ? String(mgrRes.rows[0].phone_number).replace(/\D/g, '') : '';
+    const phone = /^01\d{8,9}$/.test(raw) ? raw : null;
+    managerCache.set(companyId, phone);
+    return phone;
+  };
+
+  for (const [key, rows] of groups) {
+    const head = rows[0];
     try {
-      // step별 default 적용 — 첫/마지막 ON / 중간 OFF / 명시 TRUE/FALSE 우선.
-      const totalSteps = Number(exec.total_steps || 0);
-      const stepOrder = Number(exec.step_order || 0);
+      // step별 default 적용 — 첫/마지막 ON / 중간 OFF / 명시 TRUE/FALSE 우선. (묶음 내 step은 동일)
+      const totalSteps = Number(head.total_steps || 0);
+      const stepOrder = Number(head.step_order || 0);
       const shouldNotify =
-        exec.notify_manager_on_pretest === true ||
-        (exec.notify_manager_on_pretest === null &&
+        head.notify_manager_on_pretest === true ||
+        (head.notify_manager_on_pretest === null &&
           (stepOrder === 1 || stepOrder === totalSteps));
 
       if (!shouldNotify) {
-        // 알림 skip — result_notified_at UPDATE 의무 (중복 조회 차단)
-        await query(`UPDATE journey_executions SET result_notified_at = NOW() WHERE id = $1::uuid`, [exec.execution_id]);
+        await markNotified(rows);
         continue;
       }
 
       // 담당자 phone 조회 (kakao_alarm_users 첫 활성 — D218+ Fix A fallback)
-      const mgrRes = await query(
-        `SELECT phone_number FROM kakao_alarm_users
-          WHERE company_id = $1::uuid AND COALESCE(active_yn,'Y')='Y'
-          ORDER BY created_at ASC LIMIT 1`,
-        [exec.company_id],
-      );
-      if (mgrRes.rows.length === 0) {
-        // 담당자 등록 X = 발송 skip + 재조회 차단 UPDATE
-        await query(`UPDATE journey_executions SET result_notified_at = NOW() WHERE id = $1::uuid`, [exec.execution_id]);
-        continue;
-      }
-      const managerPhone = String(mgrRes.rows[0].phone_number).replace(/\D/g, '');
-      if (!/^01\d{8,9}$/.test(managerPhone)) {
-        await query(`UPDATE journey_executions SET result_notified_at = NOW() WHERE id = $1::uuid`, [exec.execution_id]);
+      const managerPhone = await resolveManagerPhone(head.company_id);
+      if (!managerPhone) {
+        // 담당자 등록 X 또는 번호 형식 이상 = 발송 skip + 재조회 차단
+        await markNotified(rows);
         continue;
       }
 
-      // LMS 본문 빌드
-      const successCount = Number(exec.success_count || 0);
-      const failedCount = Number(exec.failed_count || 0);
+      // 묶음 합계 — 대상 인원과 성공/실패 건수를 함께 보여준다.
+      const targetCount = rows.length;
+      const successCount = rows.reduce((s, r) => s + Number(r.success_count || 0), 0);
+      const failedCount = rows.reduce((s, r) => s + Number(r.failed_count || 0), 0);
       const isLastStep = stepOrder === totalSteps;
       const lmsBody = [
         `[여정 발송 결과]`,
         ``,
-        `여정: ${exec.journey_name || '여정 자동 발송'}`,
+        `여정: ${head.journey_name || '여정 자동 발송'}`,
         `step ${stepOrder} / ${totalSteps} ${isLastStep ? '(최종)' : ''}`,
+        `대상: ${targetCount}명`,
         `성공: ${successCount}건 / 실패: ${failedCount}건`,
         ``,
         isLastStep ? '여정 완료 — 다음 step 없음' : '다음 step 자동 진행 예정',
@@ -205,25 +235,25 @@ async function notifyJourneyResultsToManagers(): Promise<void> {
       await bulkInsertSmsQueue(
         [authTable],
         [[
-          managerPhone,
-          managerPhone,
-          lmsBody,
-          'L',
-          `[여정 발송 결과]`.slice(0, 40),
-          null,
-          '',
-          exec.company_id,
-          '',
-          '',
-          '',
+          managerPhone,                // dest_no
+          getPlatformNoticeCallback(), // call_back — ★ 2026-07-27 한줄로 대표번호.
+                                       //   옛 코드는 수신자 본인 번호를 발신으로 써서 번호도용차단 가입 담당자는 통째로 못 받았다
+                                       //   (2026-07-09 여정 사전알림·자동마케팅에서 고친 것과 같은 결함이 이 경로에만 남아 있었다).
+          lmsBody,                     // msg_contents
+          'L',                         // msg_type (LMS)
+          `[여정 발송 결과]`.slice(0, 40), // title_str
+          null,                        // sendreq_time (useNow)
+          '',                          // app_etc1
+          head.company_id,             // app_etc2
+          '', '', '',                  // file_name1~3
         ]],
         true,
       );
 
-      await query(`UPDATE journey_executions SET result_notified_at = NOW() WHERE id = $1::uuid`, [exec.execution_id]);
-      log(`✓ 여정 결과 LMS 발송 execution=${exec.execution_id} journey=${exec.journey_name} step=${stepOrder}`);
+      await markNotified(rows);
+      log(`✓ 여정 결과 LMS 발송 journey=${head.journey_name} step=${stepOrder} 대상 ${targetCount}명 (성공 ${successCount}/실패 ${failedCount})`);
     } catch (oneErr: any) {
-      log(`✗ 여정 결과 알림 1건 사고 execution=${exec.execution_id}:`, oneErr?.message || oneErr);
+      log(`✗ 여정 결과 알림 묶음 사고 ${key}:`, oneErr?.message || oneErr);
     }
   }
 }
