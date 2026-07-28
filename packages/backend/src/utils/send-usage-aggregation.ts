@@ -214,21 +214,63 @@ async function queryImcOrSkipIfMissing(sql: string, params: any[], context: stri
  *   청구서는 "일자 × 계정 × 유형"으로 나와야 하므로(Harold 정의 항목 2) run_id를 함께 받아
  *   PG에서 `campaigns.created_by`로 되매핑한다. 기존 함수는 화면·엑셀이 쓰고 있어 건드리지 않는다.
  */
-export async function smsAggByRunDateType(tables: string[], whereClause: string, params: any[]): Promise<any[]> {
+/**
+ * ★ 2026-07-28 `app_etc1 IN (...)` 집계 전용 인덱스 힌트.
+ *
+ * **실측으로 확정한 처방이다.** `SMSQ_SEND_5_202607`(606,016행·876MB)에서 캠페인 5개를 집계할 때:
+ *   · 힌트 없음 = **12.92초**  (EXPLAIN `type: ALL` · `key: NULL` — 인덱스를 아예 안 쓴다)
+ *   · `COUNT(msg_type)` 통짜 읽기 = 12.26초  ← 집계가 통짜 읽기와 같은 값이다
+ *   · `FORCE INDEX (idx_app_etc1_sendreq)` = **1.17초** (결과 동일, 11배)
+ *
+ * 왜 옵티마이저가 인덱스를 버렸나 — EXPLAIN의 `filtered: 49.60`. 캠페인 5개가 실제로는
+ * 테이블의 23.4%(144,676/617,523)인데 절반이 걸린다고 추정해서 풀스캔이 싸다고 판단했다.
+ * **IN 값이 5개일 때도 그렇다** — 그래서 IN 목록을 잘라 주는 것(청킹)으로는 전혀 해결되지 않았다.
+ * 개수가 아니라 선택률 추정이 문제였다.
+ *
+ * ⚠ `app_etc1 = 'test'`처럼 **단일값**으로 거르는 집계에는 붙이지 않는다. 그쪽은 그 값이 테이블
+ *   전체라 인덱스를 강제하면 오히려 느려진다. 그래서 힌트는 호출부가 켠다(기본은 꺼짐).
+ * ⚠ 2026-07-28 실측: SMSQ 계열 103개 테이블 **전부** 이 인덱스를 갖고 있다. 그래도 없는 테이블이
+ *   생기면 MySQL이 1176으로 죽으므로, 아래 러너가 그때만 힌트 없이 한 번 더 던진다(느릴 뿐 결과는 같다).
+ */
+export const SMSQ_APP_ETC1_INDEX_HINT = ' FORCE INDEX (idx_app_etc1_sendreq)';
+
+async function queryWithIndexHint(
+  buildSql: (hint: string) => string,
+  params: any[],
+  indexHint: string,
+): Promise<any[]> {
+  if (!indexHint) return (await mysqlBillingQuery(buildSql(''), params)) as any[];
+  try {
+    return (await mysqlBillingQuery(buildSql(indexHint), params)) as any[];
+  } catch (e: any) {
+    // 1176 = Key ... doesn't exist in table. 인덱스 없는 테이블에서만 난다 — 힌트를 빼고 재시도.
+    if (e?.errno === 1176) return (await mysqlBillingQuery(buildSql(''), params)) as any[];
+    throw e;
+  }
+}
+
+export async function smsAggByRunDateType(
+  tables: string[],
+  whereClause: string,
+  params: any[],
+  indexHint = '',
+): Promise<any[]> {
   // ★ 2026-07-26 직렬 `for await`를 동시성 상한 병렬로 바꿨다. 테이블 수만큼 왕복이 순차라
   //   회사당 40~48개 × 두 집계 = 90~100회가 한 줄로 섰다(금강제화 발행 2분의 지배 요인).
   //   풀(10)을 독점하지 않도록 상한을 둔다 — 발송·환불 워커가 같은 풀을 쓴다.
   const perTable = await mapWithConcurrency(tables, MYSQL_BILLING_POOL_LIMIT, async (t) => {
-    return await mysqlBillingQuery(
-      `SELECT app_etc1 as run_id, msg_type, DATE(sendreq_time) as send_date,
+    return await queryWithIndexHint(
+      (hint) =>
+        `SELECT app_etc1 as run_id, msg_type, DATE(sendreq_time) as send_date,
               COUNT(*) as total_count,
               SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count,
               SUM(CASE WHEN status_code NOT IN (${SUCCESS_CODES_SQL},${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail_count,
               SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending_count
-       FROM ${t} WHERE ${whereClause}
+       FROM ${t}${hint} WHERE ${whereClause}
        GROUP BY app_etc1, msg_type, DATE(sendreq_time)`,
-      params
-    ) as any[];
+      params,
+      indexHint,
+    );
   });
   return perTable.flat();
 }
@@ -257,21 +299,28 @@ export async function testSmsAggByUserDateType(tables: string[], whereClause: st
 }
 
 /** SMSQ 테이블들에서 (일자 × msg_type) 카운트 — 청구 단가 산정의 기준 축 */
-export async function smsAggByDateType(tables: string[], whereClause: string, params: any[]): Promise<any[]> {
+export async function smsAggByDateType(
+  tables: string[],
+  whereClause: string,
+  params: any[],
+  indexHint = '',
+): Promise<any[]> {
   // ★ 2026-07-26 직렬 `for await`를 동시성 상한 병렬로 바꿨다. 테이블 수만큼 왕복이 순차라
   //   회사당 40~48개 × 두 집계 = 90~100회가 한 줄로 섰다(금강제화 발행 2분의 지배 요인).
   //   풀(10)을 독점하지 않도록 상한을 둔다 — 발송·환불 워커가 같은 풀을 쓴다.
   const perTable = await mapWithConcurrency(tables, MYSQL_BILLING_POOL_LIMIT, async (t) => {
-    return await mysqlBillingQuery(
-      `SELECT msg_type, DATE(sendreq_time) as send_date,
+    return await queryWithIndexHint(
+      (hint) =>
+        `SELECT msg_type, DATE(sendreq_time) as send_date,
               COUNT(*) as total_count,
               SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count,
               SUM(CASE WHEN status_code NOT IN (${SUCCESS_CODES_SQL},${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail_count,
               SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending_count
-       FROM ${t} WHERE ${whereClause}
+       FROM ${t}${hint} WHERE ${whereClause}
        GROUP BY msg_type, DATE(sendreq_time)`,
-      params
-    ) as any[];
+      params,
+      indexHint,
+    );
   });
   return perTable.flat();
 }
@@ -300,14 +349,16 @@ export const RUN_ID_IN_CHUNK = Math.max(1, Number(process.env.BILLING_RUN_ID_IN_
 async function aggregateByRunIdChunks(
   tables: string[],
   runIds: string[],
-  agg: (tables: string[], whereClause: string, params: any[]) => Promise<any[]>,
+  agg: (tables: string[], whereClause: string, params: any[], indexHint?: string) => Promise<any[]>,
 ): Promise<any[]> {
   const out: any[] = [];
   // 청크는 순차로 돈다 — 각 청크가 이미 테이블 수만큼 병렬로 퍼지므로,
   // 청크까지 병렬로 겹치면 정산 풀(8)을 넘겨 서로를 굶긴다.
   for (const chunk of chunkArray(runIds, RUN_ID_IN_CHUNK)) {
     const ph = chunk.map(() => '?').join(',');
-    out.push(...(await agg(tables, `app_etc1 IN (${ph})`, chunk)));
+    // ★ 2026-07-28 여기서만 인덱스 힌트를 켠다 — `app_etc1 IN (...)` 형태에서만 유효하다.
+    //   실측 12.92초 → 1.17초(11배). 근거는 SMSQ_APP_ETC1_INDEX_HINT 주석.
+    out.push(...(await agg(tables, `app_etc1 IN (${ph})`, chunk, SMSQ_APP_ETC1_INDEX_HINT)));
   }
   return out;
 }
