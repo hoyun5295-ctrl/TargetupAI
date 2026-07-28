@@ -1043,7 +1043,12 @@
 | **cdp_enabled** | **boolean DEFAULT false** | **★ D172: 한줄로 CDP (자사몰 → 한줄로 customers/이벤트 sync) feature 플래그. BUSINESS+ true** |
 | **cdp_events_per_month** | **integer** | **★ D172: CDP API 월 호출 한도. BASIC=10,000 / PRO=100,000 / BUSINESS=1,000,000 / ENTERPRISE NULL(무제한)** |
 | **ai_credits_per_month** | **integer** | **★ D227+ 종량제: 요금제별 월 기본 AI 크레딧 (NULL=0). 실 DB 기준 2026-06-02 확인: 스타터300/베이직750/프로2400/비즈7800/엔터16500 (FREE 0·TRIAL 600). 과거 설계값(스타터50 등)은 폐기 — plans row(SQL)가 진실** |
+| **advanced_access_enabled** | **boolean NOT NULL DEFAULT false** | **★2026-07-28 ALTER 실측. 상위 등급 전용 기능(베타 진입 `isBetaAccessAllowed`·자율 발송 자격 `continuous-operator`) 판정. 그 전에는 두 곳이 `plan_code IN ('ENTERPRISE','BUSINESS')`를 직접 비교해서, 요금제가 늘 때마다 코드를 고쳐야 했다. 현재 true = ENTERPRISE·BUSINESS·STAFF. 조회 조각은 컬럼 부재 시 옛 규칙으로 폴백한다(`to_jsonb(p) ->> ...`) — ALTER 전후 동작이 같다** |
 | created_at | timestamp | |
+
+- **2026-07-28 실측 행 8개**: ENTERPRISE 5,500,000 / BUSINESS 3,000,000 / PRO 1,000,000 / BASIC 350,000 / STARTER 150,000 / **STAFF(임직원) 0** / FREE(미가입) 0 / TRIAL(무료체험) 0.
+- **★2026-07-28 `STAFF`(임직원) 신설** — 직원이 전 기능을 테스트·디버깅하는 계정용. **ENTERPRISE 행을 통째로 복제**하고 `plan_code`·`plan_name`·`monthly_price(0)`만 덮었다(컬럼 나열 없이 `jsonb_populate_record`로 복사 — 항목 누락 구조적 차단). 고객용 요금제 안내에는 노출하지 않는다(`frontend/src/utils/planLabel.ts` `INTERNAL_PLAN_CODES` = FREE·TRIAL·STAFF).
+- **★2026-07-28 `TRIAL`을 BASIC과 동일 권한으로 맞춤** — 무료체험 부여가 BASIC 대신 TRIAL(월 0원)을 배정하도록 바뀌면서, TRIAL이 BASIC보다 좁던 세 칸(`cdp_enabled` f→t · `cdp_events_per_month` NULL→10,000 · `ai_credits_per_month` 600→750)을 BASIC 값으로 동기화했다. 요금(0)·이름·활성 여부는 그대로.
 
 **companies 추가 컬럼 (CT-17 활용):**
 - `subscription_status` varchar(20) — `null | 'trial' | 'trial_expired' | 'paid' | 'active' | 'expired' | 'suspended'`
@@ -1541,13 +1546,15 @@
 | item_date | date NOT NULL | |
 | message_type | varchar NOT NULL | 유형키(SMS/LMS/MMS/KAKAO/TEST_*/SPAM_*) |
 | total_count · success_count · fail_count · pending_count | integer NOT NULL | **청구 수량 = success_count** |
-| unit_price · amount | numeric NOT NULL | 단가 스냅샷 × 성공 |
+| unit_price | **numeric(12,2) NOT NULL** | 단가 스냅샷. **★2026-07-28 (6,2)→(12,2) ALTER** — 요금제 행이 월정액을 이 칸에 싣는데 상한 9,999.99를 넘어 `numeric field overflow`(22003)로 **발행이 통째로 실패**했다(0727 5건). 원본 `company_plan_changes.to_monthly_price`가 (12,2)인데 저장 칸만 좁았던 것 |
+| amount | numeric(12,2) NOT NULL | 단가 × 성공 |
 | plan_days | integer NULL | ★2026-07-26 ALTER 신설. **요금제 행 전용** — 일할 구간 일수. 발송 행은 NULL |
 | plan_month_days | integer NULL | ★2026-07-26 ALTER 신설. **요금제 행 전용** — 그 달 일수(일할 분모). 발송 행은 NULL |
 | created_at | timestamptz NOT NULL | |
 - INDEX idx_billing_items_billing_channel (billing_id, channel)
 - **요금제(`channel='plan'`) 행은 발송 수량 4칸이 전부 0**이다. 2026-07-26 이전 코드는 일수를 `total_count`에, 월일수를 `fail_count`에 실었고 그 탓에 PDF 2페이지 '전송'·'실패' 열과 상세 모달 합계에 9·31이 발송 건수처럼 더해졌다(Codex 3차 HIGH) — 같은 컬럼이 채널에 따라 다른 뜻이 되는 구조를 전용 컬럼으로 끊었다.
-- 2026-07-25 ALTER 적용 실측: `channel`·`store_id` 추가 + `agent_id` FK 신설 + 인덱스. 기존 15행(금강제화 시험 발행분)은 전부 web.
+- 2026-07-25 ALTER 적용 실측: `channel`·`store_id` 추가 + `agent_id` FK 신설 + 인덱스. 당시 15행(금강제화 시험 발행분)은 전부 web.
+- **★2026-07-28 실측 = 0행.** 위 15행은 그 뒤 삭제됐다. **아직 굳은 청구서가 하나도 없다** = 단가·요금제 이력을 정정할 수 있는 창이 열려 있다는 뜻이다(발행이 쌓이면 스냅샷이 굳어 소급 정정 불가).
 
 ### billing_invoices (거래내역서/정산)
 | 컬럼 | 타입 | 설명 |

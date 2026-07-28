@@ -277,6 +277,42 @@ export async function smsAggByDateType(tables: string[], whereClause: string, pa
 }
 
 /**
+ * ★ 2026-07-28 `app_etc1 IN (...)` 목록을 청크로 나눠 집계한다.
+ *
+ * 왜 나누는가 — 회사 하나의 run_id가 수백~수천 개가 되면 그 목록을 통째로 IN에 넣는다.
+ * MySQL은 IN 값이 `eq_range_index_dive_limit`(기본 200)을 넘으면 인덱스 다이브를 포기하고
+ * 평균 통계로 행수를 추정하는데, 그 추정이 테이블의 수십 %가 되면 **인덱스를 버리고 풀스캔**을 고른다.
+ * `SMSQ_SEND_5_202607` 실측이 606,016행·876MB였고, 0727 발행에서 그 한 쿼리가 60초 상한을 넘겨 죽었다.
+ *
+ * 목록을 200 이하로 자르면 인덱스 탐색이 살아난다. 그러면 **그 회사 발송이 없는 테이블은
+ * range scan이 즉시 0행을 돌려주고 876MB를 아예 안 읽는다** — 회사당 40~48개 테이블 중
+ * 대부분이 그런 테이블이다.
+ *
+ * ⚠ 스캔 대상 테이블 목록은 그대로 둔다. 목록을 좁히는 방식(`sentTables` 등)은 적재 기록이
+ *   불완전할 때 실발송분이 조용히 미청구로 빠진다(에이치피오 87,014건 계열). 여기서는
+ *   **우리가 목록을 좁히는 게 아니라 인덱스가 좁힌다** — 누락이 구조적으로 불가능하다.
+ *
+ * 청크별 결과는 호출부의 `bump`/`bumpRow`가 누적한다. run_id는 정확히 한 청크에만 속하므로
+ * 합계는 통짜 쿼리와 같다.
+ */
+export const RUN_ID_IN_CHUNK = Math.max(1, Number(process.env.BILLING_RUN_ID_IN_CHUNK) || 200);
+
+async function aggregateByRunIdChunks(
+  tables: string[],
+  runIds: string[],
+  agg: (tables: string[], whereClause: string, params: any[]) => Promise<any[]>,
+): Promise<any[]> {
+  const out: any[] = [];
+  // 청크는 순차로 돈다 — 각 청크가 이미 테이블 수만큼 병렬로 퍼지므로,
+  // 청크까지 병렬로 겹치면 정산 풀(8)을 넘겨 서로를 굶긴다.
+  for (const chunk of chunkArray(runIds, RUN_ID_IN_CHUNK)) {
+    const ph = chunk.map(() => '?').join(',');
+    out.push(...(await agg(tables, `app_etc1 IN (${ph})`, chunk)));
+  }
+  return out;
+}
+
+/**
  * MySQL/PG가 돌려주는 날짜값을 YYYY-MM-DD 문자열로.
  *
  * ★ 2026-07-26 정정 — `toISOString()`을 쓰면 **하루가 앞으로 밀린다.**
@@ -463,8 +499,8 @@ export async function buildCompanyUsageByDay(opts: {
   if (runIds.length > 0) {
     const companyTables = await getBillingCompanyTables(companyId);
     const billingTables = await getTablesForBillingPeriod(companyTables, startDate, endDate, logTables);
-    const ph = runIds.map(() => '?').join(',');
-    const rows = await smsAggByDateType(billingTables, `app_etc1 IN (${ph})`, runIds);
+    // ★ 2026-07-28 IN 목록을 청크로 — 통짜로 넣으면 옵티마이저가 인덱스를 버린다(위 헬퍼 주석).
+    const rows = await aggregateByRunIdChunks(billingTables, runIds, smsAggByDateType);
     rows.forEach((row: any) => {
       // ★ 2026-07-25 정정 — 'M'·'K'가 변환되지 않아 청구 합산(types.MMS·types.KAKAO)에서 통째로 빠졌다.
       //   SMSQ msg_type은 S/L/M/K다(qtmsg-type.ts toQtmsgType · 알림톡은 sms-queue insertAlimtalkQueue가 'K'로 적재).
@@ -1278,8 +1314,8 @@ export async function buildBillingUsageRows(opts: {
     const owners = await mapRunOwners(runIds);
     const companyTables = await getBillingCompanyTables(companyId);
     const billingTables = await getTablesForBillingPeriod(companyTables, startDate, endDate, logTables);
-    const ph = runIds.map(() => '?').join(',');
-    const rows = await smsAggByRunDateType(billingTables, `app_etc1 IN (${ph})`, runIds);
+    // ★ 2026-07-28 IN 목록 청크 — 일자축과 **같은 분할 규칙**을 써야 두 축 대조가 성립한다.
+    const rows = await aggregateByRunIdChunks(billingTables, runIds, smsAggByRunDateType);
     for (const row of rows) {
       const day = toDayKey(row.send_date);
       const typeKey = MSG_TYPE_TO_USAGE_KEY[row.msg_type] || String(row.msg_type || '');
