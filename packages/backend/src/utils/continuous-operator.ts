@@ -515,6 +515,9 @@ interface CompanyContextRow {
   // ★ D210+ Phase 3 B-1 (2026-05-23 Harold 명시): 회사별 risk 임계값 영역 (default 'low' — 옛 hardcoded 정합)
   cdp_auto_execute_max_risk: 'low' | 'medium' | 'high';
   plan_code: string;
+  // ★ 2026-07-28: 상위 등급 전용 자격(자율 발송). plans.advanced_access_enabled가 진실의 원천이고,
+  //   컬럼 신설 전에는 옛 하드코딩 규칙(ENTERPRISE|BUSINESS)으로 폴백한다.
+  advanced_access_enabled: boolean;
 }
 
 export async function generateProposalForOperator(operatorId: string): Promise<OperatorProposal | null> {
@@ -579,7 +582,13 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
             COALESCE(c.cdp_auto_execute_max_recipients, 1000) AS cdp_auto_execute_max_recipients,
             COALESCE(c.cdp_auto_execute_max_cost_krw, 50000) AS cdp_auto_execute_max_cost_krw,
             COALESCE(c.cdp_auto_execute_max_risk, 'low') AS cdp_auto_execute_max_risk,
-            COALESCE(p.plan_code, 'FREE') AS plan_code
+            COALESCE(p.plan_code, 'FREE') AS plan_code,
+            -- ★ 2026-07-28 자율 발송 자격을 plans 플래그로. ALTER 전에는 옛 규칙으로 폴백(to_jsonb는 없는 키를 NULL로 준다).
+            COALESCE(
+              (to_jsonb(p) ->> 'advanced_access_enabled')::boolean,
+              p.plan_code IN ('ENTERPRISE', 'BUSINESS'),
+              false
+            ) AS advanced_access_enabled
      FROM companies c
      LEFT JOIN plans p ON c.plan_id = p.id
      WHERE c.id = $1::uuid`,
@@ -712,7 +721,9 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
 
   const autoExecuteEligible =
     ctx.cdp_auto_execute_enabled &&
-    (ctx.plan_code === 'ENTERPRISE' || ctx.plan_code === 'BUSINESS') &&
+    // ★ 2026-07-28 요금제 코드 직접 비교 → plans 플래그. 회사별 옵션(cdp_auto_execute_enabled)이
+    //   여전히 앞단에 있으므로, 요금제만으로 자율 발송이 켜지지는 않는다.
+    ctx.advanced_access_enabled &&
     recipientCount <= ctx.cdp_auto_execute_max_recipients &&
     costEstimate <= ctx.cdp_auto_execute_max_cost_krw &&
     riskWithinThreshold &&
@@ -724,7 +735,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
     ? `자동 실행 임계값 통과: ${recipientCount}명 / ${costEstimate.toLocaleString()}원 / ${compliance.riskLevel} risk (회사 max ${ctx.cdp_auto_execute_max_risk}) / 광고`
     : `자동 실행 미통과 — ${[
         !ctx.cdp_auto_execute_enabled && '옵션 OFF',
-        !['ENTERPRISE', 'BUSINESS'].includes(ctx.plan_code) && '요금제',
+        !ctx.advanced_access_enabled && '요금제',
         recipientCount > ctx.cdp_auto_execute_max_recipients && `${recipientCount}건 > ${ctx.cdp_auto_execute_max_recipients}`,
         costEstimate > ctx.cdp_auto_execute_max_cost_krw && `${costEstimate}원 > ${ctx.cdp_auto_execute_max_cost_krw}원`,
         !riskWithinThreshold && `compliance ${compliance.riskLevel} > 회사 max ${ctx.cdp_auto_execute_max_risk}`,

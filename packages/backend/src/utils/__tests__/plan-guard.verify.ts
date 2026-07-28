@@ -50,6 +50,9 @@ function mkCtx(
     autoCampaignOverride: null,
     directRecipientLimit: null,
     legacyGrandfathered: false,
+    // ★ 2026-07-28 상위 등급 전용 자격. 기본값은 옛 하드코딩 규칙과 같게 둬서 기존 기대값이 유지된다
+    //   (`extra`로 덮어쓸 수 있다 — 임직원 요금제처럼 코드가 달라도 켜지는 경우 검증용).
+    advancedAccessEnabled: planCode === 'ENTERPRISE' || planCode === 'BUSINESS',
     aiOperatorTrialStartedAt: null,
     aiOperatorTrialUntil: null,
     isAiOperatorTrialActive: false,

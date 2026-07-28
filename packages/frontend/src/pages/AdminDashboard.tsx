@@ -14,6 +14,7 @@ import AgentChargePanel from '../components/AgentChargePanel'; // ★ 2026-07-24
 import AgentDeployWizard from '../components/admin/AgentDeployWizard'; // 싱크에이전트 OS별 배포 위저드
 import { COMPANY_EMAIL } from '../constants/company';
 import { formatAgentIdLabel } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스(발급명 병기)
+import { formatPlanOptionLabel } from '../utils/planLabel'; // ★ 2026-07-28 요금제 라벨 = 월정액(고객 수 축 폐기)
 import { creditTxLabel } from '../constants/credit'; // 크레딧 사용 이력 작업명 라벨
 
 interface Company {
@@ -5632,7 +5633,7 @@ const handleApproveRequest = async (id: string) => {
                   <option value="">선택하세요</option>
                   {plans.map((plan) => (
                     <option key={plan.id} value={plan.id}>
-                      {plan.plan_name} ({plan.max_customers.toLocaleString()}명)
+                      {formatPlanOptionLabel(plan.plan_name, plan.monthly_price)}
                     </option>
                   ))}
                 </select>
@@ -6304,7 +6305,7 @@ const handleApproveRequest = async (id: string) => {
                       className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" required>
                       <option value="">선택하세요</option>
                       {plans.map((plan) => (
-                        <option key={plan.id} value={plan.id}>{plan.plan_name} ({plan.max_customers.toLocaleString()}명)</option>
+                        <option key={plan.id} value={plan.id}>{formatPlanOptionLabel(plan.plan_name, plan.monthly_price)}</option>
                       ))}
                     </select>
                   </div>

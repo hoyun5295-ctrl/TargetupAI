@@ -1723,6 +1723,9 @@ router.post('/:id/revoke-trial', requireUuidId, requireSuperAdmin, async (req: R
         `UPDATE companies c
             SET plan_id             = $1,
                 subscription_status = 'trial_expired',
+                -- ★ 2026-07-28 만료일도 함께 비운다. 남겨 두면 이 회사에 체험을 다시 줄 때
+                --   옛 만료일이 살아나 부여 즉시 만료 상태가 된다.
+                trial_expires_at    = NULL,
                 updated_at          = NOW()
            FROM plans p
           WHERE c.id = $2
@@ -1911,6 +1914,8 @@ router.post('/:id/revoke-basic-trial', requireUuidId, requireSuperAdmin, async (
         `UPDATE companies
             SET plan_id                   = $1,
                 subscription_status       = 'trial_expired',
+                -- ★ 2026-07-28 만료일도 함께 비운다(재부여 시 옛 만료일이 살아나는 것을 막는다).
+                trial_expires_at          = NULL,
                 ai_credits_base_remaining = $2,
                 ai_credits_reset_at       = NOW(),
                 updated_at                = NOW()

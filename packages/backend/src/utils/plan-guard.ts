@@ -84,6 +84,9 @@ export interface PlanContext {
   autoCampaignOverride: number | null;   // 회사별 오버라이드 (D76)
   directRecipientLimit: number | null;   // 직접발송 주소록 최대 건수 (FREE=99,999, 나머지 NULL=무제한)
   legacyGrandfathered: boolean;          // ★ D209+ (Harold 명시 2026-05-23): 기존 고객사 영역 (PRO + AI Operator 진입 허용 — 레퍼런스 확보 본질)
+  // ★ 2026-07-28: 상위 등급 전용 기능(베타 진입·자율 발송 자격) 허용 여부.
+  //   plans.advanced_access_enabled가 진실의 원천이고, 컬럼 신설 전에는 옛 하드코딩 규칙으로 폴백한다.
+  advancedAccessEnabled: boolean;
   // ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 30일 무료체험 별도 컬럼.
   //   기존 plan_id(TRIAL) + trial_expires_at = 전체 PRO 기능 무료 흐름과 분리.
   //   본 2 컬럼 = AI 오퍼레이션 메뉴만 무료체험 부여 (BASIC 사용자도 부여 가능).
@@ -118,6 +121,15 @@ export const PLAN_STATUS_SELECT_EXPR = `
   COALESCE(p.cdp_enabled, false) AS cdp_enabled,
   p.cdp_events_per_month,
   p.direct_recipient_limit,
+  -- ★ 2026-07-28 상위 등급 전용 기능(베타 진입·자율 발송 자격) 판정을 plans 플래그로 옮긴다.
+  --   plan_code 하드코딩('ENTERPRISE'|'BUSINESS')은 요금제가 늘 때마다 코드를 고쳐야 해서,
+  --   임직원 요금제 신설처럼 "등급은 같은데 코드가 다른" 경우를 매번 놓친다.
+  --   ⚠ ALTER 실행 전에도 깨지지 않도록 to_jsonb로 읽는다 — 컬럼이 없으면 키가 없어 NULL이 되고,
+  --     그때는 옛 하드코딩 규칙으로 폴백한다(마이그레이션 전후 동작이 동일하다).
+  COALESCE(
+    (to_jsonb(p) ->> 'advanced_access_enabled')::boolean,
+    p.plan_code IN ('ENTERPRISE', 'BUSINESS')
+  ) AS advanced_access_enabled,
   c.auto_campaign_override, c.subscription_status, c.trial_expires_at,
   COALESCE(c.legacy_grandfathered, false) AS legacy_grandfathered,
   c.ai_operator_trial_started_at, c.ai_operator_trial_until
@@ -194,6 +206,7 @@ export async function loadPlanContext(companyId: string): Promise<PlanContext | 
     autoCampaignOverride: row.auto_campaign_override != null ? Number(row.auto_campaign_override) : null,
     directRecipientLimit: row.direct_recipient_limit != null ? Number(row.direct_recipient_limit) : null,
     legacyGrandfathered: !!row.legacy_grandfathered,
+    advancedAccessEnabled: !!row.advanced_access_enabled,
     aiOperatorTrialStartedAt,
     aiOperatorTrialUntil,
     isAiOperatorTrialActive,
@@ -235,9 +248,14 @@ export function isSubscriptionBlocked(ctx: PlanContext): { blocked: boolean; rea
  *   - 그 외 (TRIAL/FREE/STARTER/BASIC/PRO) = BetaFeatureModal 표시
  *
  * 안정성 검증 후 단계적 확장 예정 (PRO → BASIC).
+ *
+ * ★ 2026-07-28 판정을 `plans.advanced_access_enabled` 플래그로 옮겼다.
+ *   요금제 코드를 직접 비교하면 요금제가 늘 때마다 이 함수를 고쳐야 하고, 실제로
+ *   임직원 요금제(0원 · 엔터프라이즈 동급)를 만들 때 여기서 막혔다.
+ *   플래그가 없는 DB(ALTER 전)에서는 SELECT 조각이 옛 규칙으로 폴백하므로 동작이 같다.
  */
 export function isBetaAccessAllowed(ctx: PlanContext): boolean {
-  return ctx.planCode === 'ENTERPRISE' || ctx.planCode === 'BUSINESS';
+  return ctx.advancedAccessEnabled;
 }
 
 /**

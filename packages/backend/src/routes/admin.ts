@@ -643,11 +643,24 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
     // ★ CT-17: planId 변경 시 TRIAL plan이면 'trial' 유지, 그 외 유료 플랜이면 'paid'(정식 구독).
     //   (과거 버그 ①: planId 있으면 무조건 'active'로 덮어써서 grant-trial 직후 재저장 시 체험 상태 파괴)
     //   (네이밍 정리 ②: 'active'는 companies.status(운영 활성)와 네이밍 충돌 → 구독 상태는 'paid'로 통일)
+    // ★ 2026-07-28 요금제를 바꿀 때 체험 만료일(trial_expires_at)도 같은 UPDATE에서 정한다.
+    //   그 전에는 이 라우트가 만료일을 아예 건드리지 않아, 체험 이력이 있는 회사에 무료체험을
+    //   다시 주면 **옛 만료일이 그대로 남아 부여 즉시 만료 상태**가 됐고 다음 04:00에
+    //   trial-downgrade-worker가 FREE로 강등했다(= 부여가 안 먹는 것처럼 보인 원인).
+    //   체험 이력이 없는 회사는 반대로 만료일이 NULL로 남아 강등 대상에서도 빠지고(워커 조건이
+    //   `trial_expires_at IS NOT NULL`), 화면 3곳의 "체험 중 D-n" 표시도 안 뜬다 — 어중간하게 남는다.
+    //   상태·만료일 판정은 **요금제가 실제로 바뀐 경우에만** 한다 — 연락처만 고쳐도 planId가
+    //   함께 실려 오면 진행 중인 체험이 조용히 'paid'로 덮이던 결함을 같은 자리에서 닫는다.
     let finalSubscriptionStatus: string | null = subscriptionStatus || null;
+    let planIsTrial = false;
+    let planTrialDays = 0;
     if (planId) {
-      const planCodeRes = await query(`SELECT plan_code FROM plans WHERE id = $1`, [planId]);
-      const isTrialPlan = planCodeRes.rows[0]?.plan_code === 'TRIAL';
-      finalSubscriptionStatus = isTrialPlan ? 'trial' : 'paid';
+      const planCodeRes = await query(
+        `SELECT plan_code, COALESCE(trial_days, 0) AS trial_days FROM plans WHERE id = $1`,
+        [planId],
+      );
+      planIsTrial = planCodeRes.rows[0]?.plan_code === 'TRIAL';
+      planTrialDays = Number(planCodeRes.rows[0]?.trial_days) || 0;
     }
 
     // ★ 2026-06-11 감사: 회사 라인그룹 변경 추적 — 변경 전 값 확보
@@ -669,6 +682,16 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
         await planClient.query('ROLLBACK');
         return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
       }
+      // ★ 2026-07-28 잠근 행에서 읽은 직전 플랜으로만 "실제 변경"을 판정한다(이력 기록과 같은 기준).
+      //   planChanged=false면 구독 상태·체험 만료일을 건드리지 않는다.
+      //   trialDaysParam: null = 체험 아님(만료일 삭제) / N = 오늘부터 N일.
+      const planChanged =
+        Boolean(planId) && String(beforePlan.rows[0].plan_id || '') !== String(planId);
+      let trialDaysParam: number | null = null;
+      if (planChanged) {
+        finalSubscriptionStatus = planIsTrial ? 'trial' : 'paid';
+        trialDaysParam = planIsTrial ? (planTrialDays > 0 ? planTrialDays : 30) : null;
+      }
       result = await planClient.query(`
       UPDATE companies
       SET company_name = COALESCE($1, company_name),
@@ -677,7 +700,16 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           contact_phone = COALESCE($4, contact_phone),
           status = COALESCE($5, status),
           plan_id = COALESCE($6, plan_id),
-          subscription_status = CASE WHEN $6 IS NOT NULL THEN $31::varchar ELSE COALESCE($31, subscription_status) END,
+          -- ★ 2026-07-28 판정 축을 "planId가 실려 왔는가"($6)에서 "요금제가 실제로 바뀌었는가"($38)로 바꿨다.
+          --   전자는 연락처만 고쳐도 planId가 함께 오면 진행 중인 체험을 'paid'로 덮었다.
+          subscription_status = CASE WHEN $38::boolean IS TRUE THEN $31::varchar ELSE COALESCE($31, subscription_status) END,
+          -- ★ 2026-07-28 체험 만료일도 같은 트랜잭션에서. $39 = 체험 일수(NULL이면 체험 아님 → 만료일 삭제).
+          --   요금제가 안 바뀌면 손대지 않는다.
+          trial_expires_at = CASE
+            WHEN $38::boolean IS NOT TRUE THEN trial_expires_at
+            WHEN $39::int IS NULL THEN NULL
+            ELSE NOW() + ($39::int || ' days')::interval
+          END,
           reject_number = COALESCE($7, reject_number),
           brand_name = COALESCE($8, brand_name),
           send_start_hour = COALESCE($9, send_start_hour),
@@ -716,7 +748,7 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
       RETURNING *
     `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, null /* ★2026-07-26 단가 쓰기 경로 통합 — 이 라우트는 단가를 더 이상 저장하지 않는다.
              기준(unit_price_basis)과 원자적으로 써야 하는 값이라 쓰기 경로를 하나로 좁혔다:
-             PUT /api/admin/companies/:id/unit-prices */, null, null, null, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, finalSubscriptionStatus, id, userIsolationEnabled !== undefined ? userIsolationEnabled : null, usageType || null, industryCodeParam, null /* 테스트 단가도 위 전용 엔드포인트에서만 저장한다 */, null]);
+             PUT /api/admin/companies/:id/unit-prices */, null, null, null, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, finalSubscriptionStatus, id, userIsolationEnabled !== undefined ? userIsolationEnabled : null, usageType || null, industryCodeParam, null /* 테스트 단가도 위 전용 엔드포인트에서만 저장한다 */, null, planChanged, trialDaysParam]);
 
       // 요금제가 실제로 바뀐 때만 기록한다(COALESCE라 planId가 null이면 미변경).
       const newPlanId = result.rows[0]?.plan_id;

@@ -72,6 +72,9 @@ export async function runTrialDowngradeJob(): Promise<{ downgraded: number }> {
         `UPDATE companies
             SET plan_id                   = $1,
                 subscription_status       = 'trial_expired',
+                -- ★ 2026-07-28 만료일을 비운다. 남겨 두면 그 회사에 체험을 다시 줄 때
+                --   옛 만료일이 살아나 부여 즉시 만료 상태가 된다(WHERE는 갱신 전 값으로 판정되므로 안전).
+                trial_expires_at          = NULL,
                 ai_credits_base_remaining = $2,
                 ai_credits_reset_at       = NOW(),
                 updated_at                = NOW()

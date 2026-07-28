@@ -25,6 +25,7 @@
 | AI Operator·CDP·Provider | docs/AI_OPERATOR_기능정의서.md + ai_operator_progress.md | 해당 절 |
 | CRM 캠페인 대행(설계 대행) 기능 | docs/2026-07-09-crm-campaign-agency-implementation.md | 전체 |
 | 레거시 서버(27.102.203.143) 폐기 | docs/레거시서버_폐기_플랜.md | 전체 (SoT — 진행 시 갱신). **하위 트랙 = 에이전트 선불 충전·잔액 축 흡수: docs/2026-07-24-agent-prepaid-charge-design.md** (서버 실측 원문 포함·다음 세션 단독 재개용) |
+| **선불 자동충전(기업은행 입금 감지) 착수·재개** | **docs/2026-07-28-auto-charge-ibk-design.md** | 전체 (SoT — 호출어 "자동충전 개발재개". 문안 2종 확정·IBK API 실측·재개 전 확인 2건) |
 | 인앱메시지 설계 | docs/인앱메세지전용.md | 해당 절 |
 | DM 편집기 AI 퍼스트 재개편 | docs/2026-07-16-dm-editor-ai-first-redesign.md | 전체 (SoT — Harold 검토 대기) |
 | 장기 로드맵·비전 | docs/한줄로_BEYOND_BRAZE_비전.md | 해당 절 |
@@ -65,12 +66,17 @@
 > **완료분 잔여(운영 검증)**: 금강제화 draft **화면에서** 삭제·재발행(psql DELETE 금지) / 실회사 드라이런(발행→PDF→메일→삭제) / 거래내역서 **MMS 308,043건** / 발행 소요 재측정.
 > **이월(판단 필요)**: `G` 유형(여미지 B0227·7월 42,833건) 과금 분류 / 요금제 이력 크레딧 스냅샷 소급(ALTER) / 크레딧 일할 자동지급 재배선 / 요금제 해지 표현 / `by_agent` 지점별 발행(+에이전트 청구 줄에 발송ID 표기) / `/preview` 화면 배선 / 141사 일괄 발행 / 테스트 발송 환불이 고정 zero-uuid 참조라 회사·유형당 1회만 나가는 기존 결함.
 
-### 🔴 0727 싱크에이전트 — 서버 zip 20개 배포 금지 (아난티 발송 보류)
-> **SoT = [docs/2026-07-28-sync-agent-build-verification-runbook.md](docs/2026-07-28-sync-agent-build-verification-runbook.md)** — 다음 세션은 이 문서만 보고 시작. 경위 = SYNC-AGENT-TROUBLESHOOTING.md §2-8·§2-9. 여기 재서술하지 않는다.
-> ⛔ 서버 `agent-builds/` 1.6.4 zip 20개 = **웹 마법사가 IE11에서 전면 무동작**인 채 올라가 있다. Server 2016·2019 고객은 설치 화면에서 멈춘다. **아난티 포함 발송 금지.**
-> 실검증은 **`win-modern × mysql` 1개뿐**(설치→마법사 자동 진입→CLI→접속→AI 매핑→2만 건 동기화). 나머지 19개 미검증. 리눅스는 exe 실행만 확인, DB 연결 미검증.
-> 로컬 코드 수정 완료·**커밋 필요**(Server→CLI 라우팅·IE 안내 화면·bat 마법사 자동 실행). tsc 0 · vitest 74.
-> 다음 세션 4건 = ①Server 2022+ 과교정 정정 ②CLI에 `--setup-web` 안내 ③20조합 환경별 검증 ④매뉴얼 수정 후 docx 1회. **검증 → 빌드 순서 고정.**
+### 🟢 0728 싱크에이전트 — 검증 자동화 완료 (아난티 발송 대기)
+> **SoT = [docs/2026-07-28-sync-agent-build-verification-runbook.md](docs/2026-07-28-sync-agent-build-verification-runbook.md)**(0728 전면 개정 — 정책·도구·조합 현황). 경위 = SYNC-AGENT-TROUBLESHOOTING.md §2-8. 여기 재서술하지 않는다.
+> **배포완료(`c16fc242`)**: `--test-db` 비대화형 DB 진단(1.6.5+) · `scripts/smoke-combos.sh` 조합 스모크 · 설치 매뉴얼 실제 흐름 정정(docx v1.6.4). 대화형 마법사를 스크립트로 몰던 방식은 입력이 밀려 재현이 안 돼 폐기.
+> **1.6.5 빌드 20개 로컬 완료 · 스모크 9조합 PASS**(win-modern·linux-modern·linux-legacy × mysql/pg + win-legacy×oracle + launch 2). Oracle 3종은 IC 미동봉으로 SKIP(설계상 결과).
+> ⛔ **아난티는 1.6.4로 나간다** — 보존본 `sync-agent/release-verified/1.6.4/`(해시 대조 완료) + 매뉴얼 docx v1.6.4 **세트로**. 1.6.5는 Server 2016 실환경 미검증이라 서버 zip 교체·업로드 안 함.
+> **잔여**: 아난티 발송(zip+매뉴얼) · 20조합 전수 검증 폐기(검증된 것만 유지 정책으로 대체) · 마법사 탈출구 두 줄(`--setup-web`/`--setup-cli` 배너)은 1.6.5에 미포함.
+
+### 🟢 0728 접수 3건 + 여정 트리거 — ★배포완료
+> **접수 3건(`2c44ae77`)**: ①DM 자동검수 치명 확인 후 발행 — `required_info`만 무시 가능(오작동·표시광고는 불가), 무시 항목·시각·사용자를 `dm_pages.validation_result`에 기록 ②슈퍼관리자 템플릿 상세에 대표링크 등 부가기능 노출(데이터는 이미 있었고 렌더만 없었다) ③발송통계 에이전트 탭 페이징(슈퍼·고객 2곳, 백엔드가 전량 반환하는 축이라 클라이언트 페이징).
+> **여정 트리거(`b0bd9d7b`)**: 정보 알림 빌더가 거래 4종만 열던 것을 **8종 전부 개방**(가입·휴면·생일·포인트소멸 추가 — 백엔드 switch는 이미 8종 처리 중이었다). 템플릿 변수↔트리거 호환 게이트 신설(이벤트 변수 템플릿은 properties를 싣는 4종에만) + 템플릿 본문 기반 AI 트리거 추천(후보 밖 값 거부). Codex 3라운드.
+> **잔여(화면 실측 — Harold)**: 이미지 전용 DM 발행 시 `확인했어요 · 이대로 발행` 노출 / 무주덕유산리조트 `B_MJ_008_02_82177` 상세 대표링크 / 에이전트 탭 20건 초과 시 페이저 / 정보 알림에 **신규 가입** 선택지 + AI 추천 동작.
 
 ### 🟢 0727 완료·잔여 — 여정 알림톡 + 환불 의무
 > **한줄로 배포완료**: 발송ID 표시명=발급명 통일 + 에이전트 잔액 계정원장 전환(`0fe700c0`) · 여정 알림톡 CHECK 위반 전건 미발송 정정(`0af8d427`) · 결과 알림 묶음(`353cb42a`)·실결과 기준·`sentTables`. 상세 = [[project_2026_0727_journey_alimtalk_and_agent_tls]]
@@ -86,6 +92,7 @@
 > ⑤ **비토 라인 14·15 미결 4건**: ①배정 화면 게이팅 범위(Harold 미확인) ②라인그룹 DELETE가 users.line_group_id 미체크(무경고 배정 해제) ③sweeper 2종 bulk-only 사각 ④Codex 결과 미수령. [[project_2026_0717_bito_line14_15_lineadmin]].
 > ⑥ **인앱 잔여**: 웹 실측(쿠폰·CTA 정렬·허용표·AI 생성 1건) · 0717 직원 디버깅분(수신거부·DM #1~3·이메일) 코드완료·미검증 · M3 네이버 env 키(NAVER_CLIENT_ID/SECRET) 등록 시 활성 · M6 이메일·인앱 이식(별도 설계).
 > ⑦ **Local AI Ops Hub** — 설계 3부작 완료·Harold 결정(H-2 M0 착수) 대기. 실무보다 후순위. [[project_2026_0715_local_ai_ops_hub]].
+> ⑧ **선불 자동충전(기업은행 입금 감지) — 설계 확정·착수 대기**: 기업은행 오픈API 이용 승인이 나면 착수. 호출어 "자동충전 개발재개". 문안 2종·인증 방향(2-legged)·구분 축(게이트웨이=`발송ID / 발급명` / 웹=사용자명)·조회 방식(대기 요청 있을 때만) 확정. **코드 전 확인 2건** = ⓐ2-legged에서 `oapiUserSrn` 얻는 경로(사용자등록 문서 필요) ⓑ웹 선불 잔액이 사용자 단위인지. 선행 = `billing_type='prepaid'` 지정(현재 0건). SoT = docs/2026-07-28-auto-charge-ibk-design.md
 > (지속) 비토 API 발송 경로 전환 검토(선택) [[project_2026_0710_bito_api_direct_test]] · (보류) 팝폰 SDK 검증.
 
 ---
@@ -109,14 +116,10 @@
 | 0721 인앱 포스터 캐러셀 | 실기기·왕복 실측 | [[project_2026_0721_inapp_poster_carousel]] |
 | 0720~21 모바일 DM 제목 정합 | 실측(주황막대·노치·이벤트카드·인앱포스터) | [[project_2026_0720_mobile_dm_title_parity]] |
 | 0719~20 계절 템플릿 | 의류 안내 1줄 커밋·배포 | [[project_2026_0719_p4_image_studio]] |
-| 0717 인앱 중앙정렬 | 웹 실측(쿠폰정렬·허용표) + 앱 출시 후 실측 3종 | [[project_2026_0717_inapp_debug_session_incomplete]] |
-| 0716 DM 편집기 AI퍼스트 | 직원 실측 · M3 네이버 env 키 · M6 이메일·인앱 이식 | [[project_2026_0716_dm_editor_ai_first_redesign]] |
-| 0716 인앱 안전편집기 · 서체 자가호스팅 | 팝폰 앱 커밋·빌드(Harold) + 실기기 / 직원 실측 | [[project_2026_0716_inapp_universal_safe_editor]] · [[project_2026_0716_dm_email_font_selfhosting]] |
-| 0715 DM 한글주소 · DM bugfix5 | DDL 3건 확인 + 단말 링크 인식 실측 / 섹션메뉴 build:safe + 직원 실측 | [[project_2026_0715_dm_korean_alias]] · [[project_2026_0715_mobile_dm_bugfix_5]] |
-| 0713~15 디자인 3.0/4.0 · Operator 소개 v4 | Harold·직원 시각 실측 | [[project_2026_0713_operator_intro_effects]] |
+| 0713~17 실측 대기 6건 (인앱 중앙정렬 · DM 편집기 AI퍼스트 · 인앱 안전편집기 · 서체 자가호스팅 · DM 한글주소 · DM bugfix5 · 디자인 3.0/4.0·Operator 소개 v4) | 직원·Harold 시각 실측 / DDL 3건 확인 / 팝폰 앱 커밋·빌드 / M3 네이버 env 키 · M6 이식 | [[project_2026_0717_inapp_debug_session_incomplete]] · [[project_2026_0716_dm_editor_ai_first_redesign]] · [[project_2026_0716_inapp_universal_safe_editor]] · [[project_2026_0716_dm_email_font_selfhosting]] · [[project_2026_0715_dm_korean_alias]] · [[project_2026_0715_mobile_dm_bugfix_5]] · [[project_2026_0713_operator_intro_effects]] |
 
 > 잔여 없는 완료분 + 2026-07-09 이하 = [archive/INDEX.md](archive/INDEX.md) → TASKS_YYYY-MM.md grep.
-> 회전 이력: 0721(07-01~09) · 0722(07-04~09) · **0725(완료 서술 전량 archive 위임 — STATUS에는 잔여만)**.
+> 회전 이력: 0721(07-01~09) · 0722(07-04~09) · 0725(완료 서술 전량 archive 위임) · **0728(0713~17 실측대기 5행 → 1행 통합 — 상시 로드 상한 근접)**.
 
 ---
 
