@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { formatDate } from '../utils/formatDate';
+import { isCustomerSelectablePlan } from '../utils/planLabel'; // ★ 2026-07-28 내부 요금제(임직원 등) 노출 차단 — 단일 소스
 import { COMPANY_PHONE, COMPANY_PHONE_TEL } from '../constants/company';
 import { Sparkles, Users, Server, Cpu } from 'lucide-react';
 import CreditSummaryBar from '../components/credit/CreditSummaryBar';
@@ -73,7 +74,7 @@ export default function PricingPage() {
       //   · FREE = 요금제 미가입 상태, 사용자가 선택 대상 아님
       //   · TRIAL = 슈퍼관리자가 부여하는 체험 plan, 사용자 선택 대상 아님
       const sortedPlans = (plansData.plans || [])
-        .filter((p: Plan) => p.plan_code !== 'FREE' && p.plan_code !== 'TRIAL' && p.is_active)
+        .filter((p: Plan) => isCustomerSelectablePlan(p.plan_code, p.is_active))
         .sort((a: Plan, b: Plan) => a.monthly_price - b.monthly_price);
       setPlans(sortedPlans);
 
