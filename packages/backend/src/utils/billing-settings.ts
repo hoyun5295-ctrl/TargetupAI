@@ -22,25 +22,33 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export interface CompanyBillingSettings {
   issueScope: BillingIssueScope;
   taxbillDayPolicy: TaxbillDayPolicy;
+  /** 자동 일괄발급 대상에서 뺀다 — 우리 정산으로 발행할 수 없어 사람이 따로 처리하는 회사. */
+  manualBilling: boolean;
 }
 
-/** 설정 행이 없으면 기본값(전체 발급 · 말일) — 행 생성은 저장 시에만. */
+/** 설정 행이 없으면 기본값(전체 발급 · 말일 · 자동 발급 대상) — 행 생성은 저장 시에만. */
 export async function getCompanyBillingSettings(companyId: string, db: any = pool): Promise<CompanyBillingSettings> {
   const r = await db.query(
-    `SELECT issue_scope, taxbill_day_policy FROM company_billing_settings WHERE company_id = $1::uuid`,
+    `SELECT issue_scope, taxbill_day_policy, manual_billing FROM company_billing_settings WHERE company_id = $1::uuid`,
     [companyId],
   );
-  if (r.rows.length === 0) return { issueScope: 'combined', taxbillDayPolicy: 'last_day' };
+  if (r.rows.length === 0) return { issueScope: 'combined', taxbillDayPolicy: 'last_day', manualBilling: false };
   return {
     issueScope: r.rows[0].issue_scope as BillingIssueScope,
     taxbillDayPolicy: r.rows[0].taxbill_day_policy as TaxbillDayPolicy,
+    manualBilling: r.rows[0].manual_billing === true,
   };
 }
 
+/**
+ * ★ 2026-07-29 `manualBilling`은 **페이로드에 없으면 기존 값을 보존**한다(undefined = 미전송).
+ *   담당자·사업자 6필드와 같은 함정이다 — UPSERT가 EXCLUDED로 통째 덮으므로, 이 키를 담지 않는 옛 번들이
+ *   한 번 저장하면 "수동 정산 회사" 표시가 조용히 풀려 다음 일괄발급에 딸려 들어간다.
+ */
 export async function upsertCompanyBillingSettings(
   db: any,
   companyId: string,
-  s: { issueScope: string; taxbillDayPolicy: string; updatedBy?: string | null },
+  s: { issueScope: string; taxbillDayPolicy: string; manualBilling?: boolean; updatedBy?: string | null },
 ): Promise<void> {
   if (!ISSUE_SCOPES.includes(s.issueScope as BillingIssueScope)) {
     throw new Error(`발행 단위 값이 올바르지 않습니다: ${s.issueScope}`);
@@ -49,15 +57,17 @@ export async function upsertCompanyBillingSettings(
     throw new Error(`계산서 발급일자 정책 값이 올바르지 않습니다: ${s.taxbillDayPolicy}`);
   }
   const updatedBy = s.updatedBy && UUID_RE.test(s.updatedBy) ? s.updatedBy : null;
+  const manualProvided = s.manualBilling !== undefined;
   await db.query(
-    `INSERT INTO company_billing_settings (company_id, issue_scope, taxbill_day_policy, updated_by, updated_at)
-     VALUES ($1::uuid, $2, $3, $4::uuid, NOW())
+    `INSERT INTO company_billing_settings (company_id, issue_scope, taxbill_day_policy, manual_billing, updated_by, updated_at)
+     VALUES ($1::uuid, $2, $3, $5::boolean, $4::uuid, NOW())
      ON CONFLICT (company_id) DO UPDATE SET
        issue_scope        = EXCLUDED.issue_scope,
        taxbill_day_policy = EXCLUDED.taxbill_day_policy,
+       manual_billing     = CASE WHEN $6 THEN EXCLUDED.manual_billing ELSE company_billing_settings.manual_billing END,
        updated_by         = EXCLUDED.updated_by,
        updated_at         = NOW()`,
-    [companyId, s.issueScope, s.taxbillDayPolicy, updatedBy],
+    [companyId, s.issueScope, s.taxbillDayPolicy, updatedBy, s.manualBilling === true, manualProvided],
   );
 }
 

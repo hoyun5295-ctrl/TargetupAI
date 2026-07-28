@@ -1312,6 +1312,8 @@ const [bulkMonth, setBulkMonth] = useState<string>(prevMonthStr());
 //   낡은 클로저가 이전 월로 발급하는 경로를 끊는다. 요청 시퀀스는 늦게 도착한 목록 응답을 버린다.
 const bulkMonthRef = useRef(prevMonthStr());
 const bulkReqSeqRef = useRef(0);
+// ★ 2026-07-29 job이 시작된 월. 완료 콜백이 "그 사이 다른 월로 옮겨 담아둔 목록"을 지우지 않게 한다.
+const bulkJobMonthRef = useRef('');
 const [bulkListLoading, setBulkListLoading] = useState(false);
 const [bulkList, setBulkList] = useState<any[] | null>(null);   // null = 아직 조회 전
 const [bulkPage, setBulkPage] = useState(1);
@@ -1327,10 +1329,18 @@ const [confirmLoading, setConfirmLoading] = useState(false);
 const [confirmStatusFilter, setConfirmStatusFilter] = useState('');
 const [confirmTruncated, setConfirmTruncated] = useState(false);
 const [manualDateDraft, setManualDateDraft] = useState<Record<string, string>>({});
+// ★ 2026-07-29 수동 정산완료 — 우리 정산으로 발행할 수 없어 사람이 따로 처리한 회사의 그 달 기록.
+//   담긴 좌/우 목록의 다중 선택(빼기)도 여기에 둔다 — 91개사를 한 줄씩 빼는 것은 쓸 수 없다.
+const [bulkManualRows, setBulkManualRows] = useState<any[]>([]);
+const [bulkManualOpen, setBulkManualOpen] = useState(false);
+const [bulkManualBusy, setBulkManualBusy] = useState(false);
+const [bulkManualReason, setBulkManualReason] = useState('');
+const [bulkManualAsk, setBulkManualAsk] = useState<string[] | null>(null); // 사유 입력 모달 대상(회사 id) — null = 닫힘
+const [bulkPickedSel, setBulkPickedSel] = useState<string[]>([]);          // 담긴 좌/우 목록 체크
 
 const bulkPickedIds = () => new Set([...bulkCombined, ...bulkByUser].map((c) => c.id));
 
-const loadBulkList = async () => {
+const fetchBulkList = async (opts: { keepPicked: boolean }) => {
   // ★ Codex 2R HIGH 수용 — 월은 ref에서 읽고(낡은 클로저 무력화), 시퀀스가 다르면 응답을 버린다
   //   (월 변경 직전에 나간 조회가 늦게 도착해 이전 월 목록을 되살리는 경로 차단).
   const seq = ++bulkReqSeqRef.current;
@@ -1343,22 +1353,68 @@ const loadBulkList = async () => {
     if (seq !== bulkReqSeqRef.current) return; // 그 사이 월이 바뀜 — 이 응답은 폐기
     if (!res.ok) throw new Error(data?.error || '대상 조회 실패');
     setBulkList(Array.isArray(data.companies) ? data.companies : []);
-    setBulkSelected([]); setBulkCombined([]); setBulkByUser([]); setBulkPage(1);
+    setBulkSelected([]);
+    // ★ 2026-07-29 수동완료·해제 뒤의 재조회는 **담긴 목록을 지우지 않는다.**
+    //   담아둔 뒤 남은 회사를 수동완료로 표시하면 애써 담은 수십 개사가 통째로 날아간다.
+    //   수동완료는 담기지 않은 회사만 대상이라(체크박스가 그 행에만 있다) 담긴 목록과 겹치지 않는다.
+    if (!opts.keepPicked) {
+      setBulkCombined([]); setBulkByUser([]); setBulkPickedSel([]); setBulkPage(1);
+    }
+    // 수동완료 목록은 같은 기간을 보므로 함께 읽는다 — 목록에서 빠진 회사가 어디로 갔는지 화면에서 설명된다.
+    void loadManualCompletions(seq);
   } catch (e: any) {
     if (seq === bulkReqSeqRef.current) setBillingToast({ msg: e?.message || '일괄발급 대상 조회 실패', type: 'error' });
   } finally {
     if (seq === bulkReqSeqRef.current) setBulkListLoading(false);
   }
 };
+// 인자 없는 두 진입점 — onClick에 직접 걸어도 이벤트 객체가 옵션으로 새지 않는다(LESSONS_FRONTEND 기본 인자 함정).
+const loadBulkList = () => fetchBulkList({ keepPicked: false });
+const refreshBulkList = () => fetchBulkList({ keepPicked: true });
+
+// 수동완료 목록 — loadBulkList와 같은 시퀀스를 쓴다(월이 바뀐 뒤 늦게 온 응답은 버린다).
+const loadManualCompletions = async (seq?: number) => {
+  const mySeq = seq ?? bulkReqSeqRef.current;
+  const { start, end } = monthToPeriod(bulkMonthRef.current);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/admin/billing/bulk/manual-completions?start=${start}&end=${end}`, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    if (mySeq !== bulkReqSeqRef.current) return;
+    if (!res.ok) throw new Error(data?.error || '수동 정산완료 조회 실패');
+    setBulkManualRows(Array.isArray(data.rows) ? data.rows : []);
+  } catch (e: any) {
+    if (mySeq === bulkReqSeqRef.current) setBillingToast({ msg: e?.message || '수동 정산완료 조회 실패', type: 'error' });
+  }
+};
 
 // 담기 — 정산 탭에 저장된 발행 단위(issue_scope)에 따라 좌/우 기본 배치. 담긴 회사는 상단에서 잠긴다.
+//
+// ★ 2026-07-29 `manual_billing` 회사는 **선택 담기에서도** 빠진다. 체크는 되게 두되(수동완료를 쳐야 하므로)
+//   담기지는 않는다 — 자동 발급하면 안 되는 회사가 체크 한 번으로 딸려 들어가면 그게 사고다.
+//   정말 자동으로 발급하려면 정산 탭에서 "수동 정산 회사"를 끄면 된다(명시적 행위).
+const bulkAddRows = (rows: any[]): number => {
+  const picked = bulkPickedIds();
+  const adds = rows.filter((c) => !picked.has(c.id) && c.manual_billing !== true);
+  if (adds.length > 0) {
+    setBulkCombined((prev) => [...prev, ...adds.filter((c) => c.issue_scope !== 'by_user')]);
+    setBulkByUser((prev) => [...prev, ...adds.filter((c) => c.issue_scope === 'by_user')]);
+  }
+  return rows.length - adds.length;
+};
 const bulkAddSelected = () => {
   if (!bulkList) return;
-  const picked = bulkPickedIds();
-  const adds = bulkList.filter((c) => bulkSelected.includes(c.id) && !picked.has(c.id));
-  setBulkCombined((prev) => [...prev, ...adds.filter((c) => c.issue_scope !== 'by_user')]);
-  setBulkByUser((prev) => [...prev, ...adds.filter((c) => c.issue_scope === 'by_user')]);
+  const skipped = bulkAddRows(bulkList.filter((c) => bulkSelected.includes(c.id)));
   setBulkSelected([]);
+  if (skipped > 0) setBillingToast({ msg: `수동 정산 회사 ${skipped}개사는 담지 않았습니다`, type: 'error' });
+};
+/** 전체 담기 — 이 달 미발급 후불 전량. 일괄발급의 본래 목적이라 한 번에 담는다. */
+const bulkAddAll = () => {
+  if (!bulkList) return;
+  const picked = bulkPickedIds();
+  const skipped = bulkAddRows(bulkList.filter((c) => !picked.has(c.id)));
+  setBulkSelected([]);
+  if (skipped > 0) setBillingToast({ msg: `수동 정산 회사 ${skipped}개사는 담지 않았습니다`, type: 'error' });
 };
 const bulkMoveToByUser = (id: string) => {
   const row = bulkCombined.find((c) => c.id === id);
@@ -1375,11 +1431,74 @@ const bulkMoveToCombined = (id: string) => {
 const bulkRemove = (id: string) => {
   setBulkCombined((prev) => prev.filter((c) => c.id !== id));
   setBulkByUser((prev) => prev.filter((c) => c.id !== id));
+  setBulkPickedSel((prev) => prev.filter((x) => x !== id));
+};
+/** 담긴 목록에서 체크한 회사를 한 번에 뺀다 — 빠진 회사는 상단 미발급 목록으로 되돌아간다. */
+const bulkRemoveSelected = () => {
+  if (bulkPickedSel.length === 0) return;
+  const drop = new Set(bulkPickedSel);
+  setBulkCombined((prev) => prev.filter((c) => !drop.has(c.id)));
+  setBulkByUser((prev) => prev.filter((c) => !drop.has(c.id)));
+  setBulkPickedSel([]);
+};
+
+// ── 수동 정산완료 ───────────────────────────────────────────
+// 청구서를 만들지 않는다. 그 달 목록에서만 빠지고, 해제하면 곧바로 돌아온다.
+const handleManualComplete = async () => {
+  const ids = bulkManualAsk || [];
+  if (ids.length === 0) return;
+  const { start, end } = monthToPeriod(bulkMonthRef.current);
+  setBulkManualBusy(true);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch('/api/admin/billing/bulk/manual-completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ period_start: start, period_end: end, company_ids: ids, reason: bulkManualReason }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || '수동 정산완료 처리 실패');
+    setBulkManualAsk(null); setBulkManualReason('');
+    // 실제 효과를 다시 읽어 확인한다 — 목록에서 빠졌는지는 서버 응답이 아니라 재조회가 증거다.
+    await refreshBulkList();
+    const skipped: string[] = Array.isArray(data.skipped) ? data.skipped : [];
+    setBillingToast({
+      msg: skipped.length > 0
+        ? `${data.added}개사 수동 정산완료 · ${skipped.length}개사는 제외 — 이미 발행됐거나 이미 수동완료입니다(${skipped.join(', ')})`
+        : `${data.added}개사를 수동 정산완료로 표시했습니다`,
+      type: skipped.length > 0 ? 'error' : 'success',
+    });
+  } catch (e: any) {
+    setBillingToast({ msg: e?.message || '수동 정산완료 처리 실패', type: 'error' });
+  } finally {
+    setBulkManualBusy(false);
+  }
+};
+const handleManualRelease = async (id: string) => {
+  setBulkManualBusy(true);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/admin/billing/bulk/manual-completions/${id}`, {
+      method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || '해제 실패');
+    await refreshBulkList();
+    setBillingToast({ msg: '수동 정산완료를 해제했습니다 — 미발급 목록으로 돌아갑니다', type: 'success' });
+  } catch (e: any) {
+    setBillingToast({ msg: e?.message || '해제 실패', type: 'error' });
+  } finally {
+    setBulkManualBusy(false);
+  }
 };
 
 const handleBulkStart = async () => {
   // ★ Codex 2R HIGH 수용 — 발급 기간도 ref에서. 담기 목록은 월 변경 시 비워지므로 ref 월과 항상 한 쌍이다.
-  const { start, end } = monthToPeriod(bulkMonthRef.current);
+  // ★ 2026-07-29 요청 월을 **여기서 한 번 캡처**해 기간 계산·job 월 기록·409 처리가 같은 값을 쓴다.
+  //   응답을 받은 뒤에 ref를 다시 읽으면, 요청 중에 월을 바꾼 경우 job 월이 새 월로 잘못 기록되고
+  //   완료 콜백이 "같은 월"로 오판해 새로 담아둔 목록을 통째로 지운다.
+  const requestMonth = bulkMonthRef.current;
+  const { start, end } = monthToPeriod(requestMonth);
   const items = [
     ...bulkCombined.map((c) => ({ company_id: c.id, scope: 'combined' })),
     ...bulkByUser.map((c) => ({ company_id: c.id, scope: 'by_user' })),
@@ -1394,7 +1513,17 @@ const handleBulkStart = async () => {
       body: JSON.stringify({ period_start: start, period_end: end, items }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data?.error || '일괄발급 시작 실패');
+    if (!res.ok) {
+      // ★ 2026-07-29 서버가 대상을 다시 판정해 거부한 경우(수동 정산 회사·이미 발행·수동완료)는
+      //   화면이 낡은 것이므로 목록을 다시 읽어 준다 — 사람이 무엇이 바뀌었는지 바로 본다.
+      //   화면이 그 사이 다른 월로 옮겨갔으면 담긴 목록을 지우지 않는다(보존 새로고침).
+      if (data?.code === 'BULK_TARGET_NOT_BILLABLE') {
+        if (bulkMonthRef.current === requestMonth) void loadBulkList();
+        else void refreshBulkList();
+      }
+      throw new Error(data?.error || '일괄발급 시작 실패');
+    }
+    bulkJobMonthRef.current = requestMonth;
     setBulkJob(null);
     setBulkJobId(String(data.job_id));
   } catch (e: any) {
@@ -1423,7 +1552,10 @@ useEffect(() => {
       if (data?.job?.status && data.job.status !== 'running') {
         stopped = true;
         clearInterval(timer);
-        loadBulkList();
+        // ★ 2026-07-29 job 실행 중 다른 월로 옮겨 담았을 수 있다. 그 경우 전량 초기화하면
+        //   새 월에 담아둔 목록이 통째로 날아간다 — 월이 같을 때만 초기화하고, 다르면 보존 새로고침.
+        if (bulkJobMonthRef.current === bulkMonthRef.current) loadBulkList();
+        else refreshBulkList();
       }
     } catch { /* 다음 주기 재시도 */ } finally {
       inFlight = false;
@@ -2792,7 +2924,7 @@ const handleApproveRequest = async (id: string) => {
   //   SoT = docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md §2. 백엔드 = /api/admin/billing/company-billing-settings.
   const [btLoading, setBtLoading] = useState(false);
   const [btSaving, setBtSaving] = useState(false);
-  const [btSettings, setBtSettings] = useState({ issue_scope: 'combined', taxbill_day_policy: 'last_day' });
+  const [btSettings, setBtSettings] = useState({ issue_scope: 'combined', taxbill_day_policy: 'last_day', manual_billing: false });
   // 회사 레벨 = billing_contacts(user_id NULL) 한 행 — 정산 담당자 + 계산서 사업자를 함께 갖는다.
   //   any로 두면 6개 키 이름 오타를 tsc가 못 잡는다(load·save·모달 3곳에 같은 키를 적는다).
   type BillingBizFields = {
@@ -2858,6 +2990,7 @@ const handleApproveRequest = async (id: string) => {
       setBtSettings({
         issue_scope: sData?.settings?.issueScope || 'combined',
         taxbill_day_policy: sData?.settings?.taxbillDayPolicy || 'last_day',
+        manual_billing: sData?.settings?.manualBilling === true,
       });
       setBtCompanyContact({
         name: companyC?.contact_name || '', email: companyC?.contact_email || '',
@@ -2903,6 +3036,7 @@ const handleApproveRequest = async (id: string) => {
         body: JSON.stringify({
           issue_scope: btSettings.issue_scope,
           taxbill_day_policy: btSettings.taxbill_day_policy,
+          manual_billing: btSettings.manual_billing,
           // 회사 레벨은 담당자 + 계산서 사업자를 함께 보낸다. 사업자를 비워 보내면 그대로 NULL이 되고,
           // 발급 시 회사 기본정보(companies)로 내려간다 — 우선순위는 SoT §5 참조.
           company_contact: {
@@ -7698,6 +7832,23 @@ const handleApproveRequest = async (id: string) => {
                         </div>
                       </div>
 
+                      {/* ★ 2026-07-29 수동 정산 회사 — 일괄발급 담기에서 자동으로 빠진다 (목록에서 숨기지는 않는다) */}
+                      <div className={`rounded-lg border p-4 ${btSettings.manual_billing ? 'border-amber-300 bg-amber-50/50' : 'border-gray-200'}`}>
+                        <label className="flex items-start gap-3 cursor-pointer">
+                          <input type="checkbox" checked={btSettings.manual_billing}
+                            onChange={(e) => setBtSettings({ ...btSettings, manual_billing: e.target.checked })}
+                            className="mt-0.5 w-4 h-4 accent-amber-600" />
+                          <span className="flex-1 min-w-0">
+                            <span className="block text-sm font-semibold text-gray-800">수동 정산 회사 — 일괄발급 대상 제외</span>
+                            <span className="block text-xs text-gray-500 mt-1">
+                              우리 정산으로 거래내역서를 발행할 수 없어 사람이 따로 처리하는 회사입니다. 켜두면 일괄발급 화면의
+                              [전체 담기]와 [선택 담기] 양쪽에서 이 회사가 빠집니다. 목록에서 숨기지는 않습니다 —
+                              그 달 처리 여부를 볼 수 있어야 하고, 처리했으면 그 화면에서 [수동 정산완료]를 눌러 목록에서 뺍니다.
+                            </span>
+                          </span>
+                        </label>
+                      </div>
+
                       {/* 회사 정산 담당자 — 전체 발급 수신자 + 계정별일 때 공통 장 수신자 */}
                       <div className="rounded-lg border border-gray-200 p-4">
                         <p className="text-sm font-semibold text-gray-800 mb-1">회사 정산 담당자</p>
@@ -9241,6 +9392,7 @@ const handleApproveRequest = async (id: string) => {
                     bulkMonthRef.current = e.target.value;
                     bulkReqSeqRef.current++;
                     setBulkList(null); setBulkSelected([]); setBulkCombined([]); setBulkByUser([]); setBulkPage(1);
+                    setBulkPickedSel([]); setBulkManualRows([]); setBulkManualOpen(false); setBulkManualAsk(null);
                   }}
                   className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
                 <button onClick={loadBulkList} disabled={bulkListLoading}
@@ -9258,49 +9410,81 @@ const handleApproveRequest = async (id: string) => {
             {bulkList !== null && (() => {
               const picked = bulkPickedIds();
               const avail = bulkList.filter((c) => !picked.has(c.id));
-              const PAGE = 10;
+              // ★ 2026-07-29 2열 · 페이지당 20 — 한 줄에 회사명뿐이라 화면 절반이 늘 비어 있었다.
+              //   박스 높이는 그대로 두고 담는 용량만 2배로 늘린다(91개사 = 10페이지 → 5페이지).
+              const PAGE = 20;
               const totalPages = Math.max(1, Math.ceil(avail.length / PAGE));
               const page = Math.min(bulkPage, totalPages);
               const visible = avail.slice((page - 1) * PAGE, page * PAGE);
+              const availAuto = avail.filter((c) => c.manual_billing !== true);   // 전체 담기에 실제로 담기는 것
+              const availManual = avail.length - availAuto.length;
+              const pageIds = visible.map((c) => c.id);
+              const pageAllChecked = pageIds.length > 0 && pageIds.every((id) => bulkSelected.includes(id));
               return (
                 <div className="space-y-4">
-                  {/* 상단 — 미발급 후불 리스트 (페이징) */}
+                  {/* 상단 — 미발급 후불 리스트 (2열 · 페이징) */}
                   <div className="border rounded-lg">
-                    <div className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-t-lg">
-                      <p className="text-xs font-semibold text-gray-600">미발급 후불 {avail.length}개사 {bulkList.length !== avail.length ? `(담김 ${bulkList.length - avail.length})` : ''}</p>
-                      <button onClick={bulkAddSelected} disabled={bulkSelected.length === 0}
-                        className="px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-semibold disabled:opacity-40">
-                        선택 담기 ({bulkSelected.length})
-                      </button>
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-gray-50 rounded-t-lg">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <label className="flex items-center gap-1.5 cursor-pointer shrink-0" title="이 페이지 전체 선택">
+                          <input type="checkbox" checked={pageAllChecked} disabled={pageIds.length === 0}
+                            onChange={() => setBulkSelected((prev) => pageAllChecked
+                              ? prev.filter((x) => !pageIds.includes(x))
+                              : Array.from(new Set([...prev, ...pageIds])))}
+                            className="w-4 h-4 accent-indigo-600" />
+                          <span className="text-[11px] text-gray-500">이 페이지</span>
+                        </label>
+                        <p className="text-xs font-semibold text-gray-600 truncate">
+                          미발급 후불 {avail.length}개사 {bulkList.length !== avail.length ? `(담김 ${bulkList.length - avail.length})` : ''}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={() => setBulkManualAsk([...bulkSelected])} disabled={bulkSelected.length === 0 || bulkManualBusy}
+                          className="px-3 py-1.5 border border-amber-300 text-amber-700 bg-amber-50 rounded text-xs font-semibold hover:bg-amber-100 disabled:opacity-40">
+                          선택 수동 정산완료 ({bulkSelected.length})
+                        </button>
+                        <button onClick={bulkAddSelected} disabled={bulkSelected.length === 0}
+                          className="px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-semibold disabled:opacity-40">
+                          선택 담기 ({bulkSelected.length})
+                        </button>
+                        <button onClick={bulkAddAll} disabled={availAuto.length === 0}
+                          className="px-3 py-1.5 bg-violet-600 text-white rounded text-xs font-semibold hover:bg-violet-700 disabled:opacity-40">
+                          전체 {availAuto.length}개사 담기{availManual > 0 ? ` (수동 ${availManual} 제외)` : ''}
+                        </button>
+                      </div>
                     </div>
                     {avail.length === 0 ? (
                       <p className="text-sm text-gray-400 text-center py-6">{bulkList.length === 0 ? '이 달 미발급 후불 회사가 없습니다.' : '전부 담았습니다.'}</p>
                     ) : (
                       <>
-                        <div className="divide-y">
+                        <div className="grid grid-cols-1 md:grid-cols-2 md:[&>*:nth-child(even)]:border-l">
                           {visible.map((c) => (
-                            <label key={c.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-gray-50">
+                            <label key={c.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-gray-50 border-b">
                               <input type="checkbox" checked={bulkSelected.includes(c.id)}
                                 onChange={() => setBulkSelected((prev) => prev.includes(c.id) ? prev.filter((x) => x !== c.id) : [...prev, c.id])}
-                                className="w-4 h-4 accent-indigo-600" />
-                              <span className="text-sm text-gray-800 flex-1 truncate">{c.company_name}</span>
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded ${c.issue_scope === 'by_user' ? 'bg-sky-100 text-sky-700' : 'bg-gray-100 text-gray-500'}`}>
+                                className="w-4 h-4 shrink-0 accent-indigo-600" />
+                              {/* min-w-0 = 2열 폭에서 긴 회사명이 뱃지를 밀어내지 않게 (flex-1만으로는 줄지 않는다) */}
+                              <span className="text-sm text-gray-800 flex-1 min-w-0 truncate">{c.company_name}</span>
+                              {c.manual_billing === true && (
+                                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold">수동 정산</span>
+                              )}
+                              <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${c.issue_scope === 'by_user' ? 'bg-sky-100 text-sky-700' : 'bg-gray-100 text-gray-500'}`}>
                                 {c.issue_scope === 'by_user' ? '계정별' : '전체'}
                               </span>
                               {c.taxbill_day_policy === 'manual' && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">날짜 직접선택</span>
+                                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">날짜 직접선택</span>
                               )}
                               {!c.company_contact_email && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-600">이메일 미등록</span>
+                                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-600">이메일 미등록</span>
                               )}
                               {c.issue_scope === 'by_user' && Number(c.missing_account_emails) > 0 && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-600">계정 메일 {c.missing_account_emails}건 미등록</span>
+                                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-600">계정 메일 {c.missing_account_emails}건 미등록</span>
                               )}
                             </label>
                           ))}
                         </div>
                         {totalPages > 1 && (
-                          <div className="flex items-center justify-center gap-2 py-2 border-t">
+                          <div className="flex items-center justify-center gap-2 py-2">
                             <button onClick={() => setBulkPage(Math.max(1, page - 1))} disabled={page <= 1}
                               className="px-2 py-1 text-xs text-gray-500 disabled:opacity-30">이전</button>
                             <span className="text-xs text-gray-500">{page} / {totalPages}</span>
@@ -9312,34 +9496,83 @@ const handleApproveRequest = async (id: string) => {
                     )}
                   </div>
 
-                  {/* 좌우 배치 */}
-                  <div className="grid grid-cols-2 gap-3">
+                  {/* 수동 정산완료 목록 — 목록에서 빠진 회사가 어디로 갔는지 여기서 설명된다(해제하면 되돌아온다) */}
+                  {bulkManualRows.length > 0 && (
+                    <div className="border border-amber-200 rounded-lg bg-amber-50/40">
+                      <button onClick={() => setBulkManualOpen(!bulkManualOpen)}
+                        className="w-full flex items-center justify-between px-3 py-2 text-left">
+                        <span className="text-xs font-semibold text-amber-800">수동 정산완료 {bulkManualRows.length}개사 — 이 달 목록에서 빠져 있습니다</span>
+                        <span className="text-[11px] text-amber-700">{bulkManualOpen ? '접기' : '보기'}</span>
+                      </button>
+                      {bulkManualOpen && (
+                        <div className="divide-y divide-amber-100 border-t border-amber-200 max-h-60 overflow-y-auto">
+                          {bulkManualRows.map((m) => (
+                            <div key={m.id} className="flex items-center gap-2 px-3 py-1.5">
+                              <span className="text-sm text-gray-800 shrink-0">{m.company_name}</span>
+                              <span className="text-[11px] text-gray-500 flex-1 min-w-0 truncate">{m.reason || '사유 없음'}</span>
+                              <button onClick={() => handleManualRelease(m.id)} disabled={bulkManualBusy}
+                                className="shrink-0 text-[11px] text-amber-700 hover:underline disabled:opacity-40">해제</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 담긴 목록 선택 빼기 — 전체 담기 뒤 몇 곳만 빼는 흐름. 행마다 [빼기] 하나로는 91건에서 쓸 수 없다 */}
+                  {(bulkCombined.length + bulkByUser.length) > 0 && (
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs text-gray-500">담김 {bulkCombined.length + bulkByUser.length}개사 — 체크해서 한 번에 뺄 수 있습니다.</p>
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={() => setBulkPickedSel(
+                          bulkPickedSel.length === bulkCombined.length + bulkByUser.length
+                            ? []
+                            : [...bulkCombined, ...bulkByUser].map((c) => c.id))}
+                          className="px-3 py-1.5 border border-gray-300 text-gray-600 rounded text-xs font-semibold hover:bg-gray-50">
+                          {bulkPickedSel.length === bulkCombined.length + bulkByUser.length ? '전체 해제' : '전체 선택'}
+                        </button>
+                        <button onClick={bulkRemoveSelected} disabled={bulkPickedSel.length === 0}
+                          className="px-3 py-1.5 border border-rose-300 text-rose-600 bg-rose-50 rounded text-xs font-semibold hover:bg-rose-100 disabled:opacity-40">
+                          선택 빼기 ({bulkPickedSel.length})
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 좌우 배치 — 전량 담으면 수십~백 행이라 pane 안에서 스크롤한다(발급 시작 버튼이 화면 밖으로 밀리지 않게) */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div className="border rounded-lg">
                       <p className="px-3 py-2 bg-indigo-50 text-xs font-semibold text-indigo-700 rounded-t-lg">고객사 전체 발급 ({bulkCombined.length})</p>
-                      <div className="divide-y min-h-[60px]">
+                      <div className="divide-y min-h-[60px] max-h-80 overflow-y-auto">
                         {bulkCombined.length === 0 && <p className="text-xs text-gray-300 text-center py-4">비어 있음</p>}
                         {bulkCombined.map((c) => (
                           <div key={c.id} className="flex items-center gap-2 px-3 py-1.5">
-                            <span className="text-sm text-gray-800 flex-1 truncate">{c.company_name}</span>
-                            {!c.company_contact_email && <span className="text-[10px] text-rose-500">메일 없음</span>}
-                            <button onClick={() => bulkMoveToByUser(c.id)} className="text-[11px] text-sky-600 hover:underline">계정별 ▶</button>
-                            <button onClick={() => bulkRemove(c.id)} className="text-[11px] text-gray-400 hover:text-rose-500">빼기</button>
+                            <input type="checkbox" checked={bulkPickedSel.includes(c.id)}
+                              onChange={() => setBulkPickedSel((prev) => prev.includes(c.id) ? prev.filter((x) => x !== c.id) : [...prev, c.id])}
+                              className="w-4 h-4 shrink-0 accent-rose-600" />
+                            <span className="text-sm text-gray-800 flex-1 min-w-0 truncate">{c.company_name}</span>
+                            {!c.company_contact_email && <span className="shrink-0 text-[10px] text-rose-500">메일 없음</span>}
+                            <button onClick={() => bulkMoveToByUser(c.id)} className="shrink-0 text-[11px] text-sky-600 hover:underline">계정별 ▶</button>
+                            <button onClick={() => bulkRemove(c.id)} className="shrink-0 text-[11px] text-gray-400 hover:text-rose-500">빼기</button>
                           </div>
                         ))}
                       </div>
                     </div>
                     <div className="border rounded-lg">
                       <p className="px-3 py-2 bg-sky-50 text-xs font-semibold text-sky-700 rounded-t-lg">계정별 발급 ({bulkByUser.length})</p>
-                      <div className="divide-y min-h-[60px]">
+                      <div className="divide-y min-h-[60px] max-h-80 overflow-y-auto">
                         {bulkByUser.length === 0 && <p className="text-xs text-gray-300 text-center py-4">비어 있음</p>}
                         {bulkByUser.map((c) => (
                           <div key={c.id} className="flex items-center gap-2 px-3 py-1.5">
-                            <span className="text-sm text-gray-800 flex-1 truncate">{c.company_name}</span>
-                            {!c.company_contact_email && <span className="text-[10px] text-rose-500">메일 없음</span>}
+                            <input type="checkbox" checked={bulkPickedSel.includes(c.id)}
+                              onChange={() => setBulkPickedSel((prev) => prev.includes(c.id) ? prev.filter((x) => x !== c.id) : [...prev, c.id])}
+                              className="w-4 h-4 shrink-0 accent-rose-600" />
+                            <span className="text-sm text-gray-800 flex-1 min-w-0 truncate">{c.company_name}</span>
+                            {!c.company_contact_email && <span className="shrink-0 text-[10px] text-rose-500">메일 없음</span>}
                             {/* ★ Codex 2R 수용 — 이 pane에 있으면 실제 발급이 계정별이다. 저장 scope와 무관하게 계정 메일 누락을 보여준다 */}
-                            {Number(c.missing_account_emails) > 0 && <span className="text-[10px] text-orange-500">계정 메일 {c.missing_account_emails}건 미등록</span>}
-                            <button onClick={() => bulkMoveToCombined(c.id)} className="text-[11px] text-indigo-600 hover:underline">◀ 전체</button>
-                            <button onClick={() => bulkRemove(c.id)} className="text-[11px] text-gray-400 hover:text-rose-500">빼기</button>
+                            {Number(c.missing_account_emails) > 0 && <span className="shrink-0 text-[10px] text-orange-500">계정 메일 {c.missing_account_emails}건 미등록</span>}
+                            <button onClick={() => bulkMoveToCombined(c.id)} className="shrink-0 text-[11px] text-indigo-600 hover:underline">◀ 전체</button>
+                            <button onClick={() => bulkRemove(c.id)} className="shrink-0 text-[11px] text-gray-400 hover:text-rose-500">빼기</button>
                           </div>
                         ))}
                       </div>
@@ -9353,6 +9586,32 @@ const handleApproveRequest = async (id: string) => {
                 </div>
               );
             })()}
+
+            {/* 수동 정산완료 사유 입력 — 청구서를 만들지 않으므로 금액이 남지 않는다. 사유가 유일한 근거다 */}
+            {bulkManualAsk !== null && (
+              <div className="fixed inset-0 z-[2000] bg-black/50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5">
+                  <h3 className="text-base font-bold text-gray-900 mb-1">수동 정산완료 ({bulkManualAsk.length}개사)</h3>
+                  <p className="text-xs text-gray-500 mb-3">
+                    {bulkMonth} 대상 목록에서 이 회사들을 뺍니다. <span className="font-semibold text-gray-700">거래내역서는 만들지 않습니다</span> —
+                    금액은 시스템에 남지 않으니 어떻게 처리했는지 사유에 적어 주세요. 잘못 눌렀으면 목록에서 해제할 수 있습니다.
+                  </p>
+                  <textarea value={bulkManualReason} onChange={(e) => setBulkManualReason(e.target.value)} rows={3} maxLength={500}
+                    placeholder="예) 별도 양식으로 직접 청구 — 담당자 협의분"
+                    className="w-full px-3 py-2 border rounded-lg text-sm resize-none focus:ring-2 focus:ring-amber-500 outline-none" autoFocus />
+                  <div className="flex gap-2 mt-4">
+                    <button onClick={() => { setBulkManualAsk(null); setBulkManualReason(''); }} disabled={bulkManualBusy}
+                      className="flex-1 py-2 border border-gray-300 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-40">
+                      취소
+                    </button>
+                    <button onClick={handleManualComplete} disabled={bulkManualBusy}
+                      className="flex-1 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold disabled:opacity-40">
+                      {bulkManualBusy ? '처리 중...' : '수동 정산완료로 표시'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* 진행률 + 결과 */}
             {bulkJob?.job && (() => {

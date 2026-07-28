@@ -395,7 +395,7 @@
 | CustId | **발송ID**. `company_agent_ids.agent_send_id`와 매칭되는 회사 축 |
 | StoreId | **대상ID**. 발송 시 입력하는 청구 구분 축(지점·브랜드). 빈 값 가능 |
 | DestDt | 일자 **`YYYYMMDD` 문자열**(date 아님). 기간 필터는 문자열 비교 |
-| MsgType | 유형 코드 S/L/M/K/X(+KS·KL 대체발송) — `pay-stats.ts AGENT_MSG_TYPE_LABEL` |
+| MsgType | 유형 코드 S/L/M/K/X(+KS·KL 대체발송) · **`G` = 브랜드메시지(구 친구톡)** ★2026-07-29 Harold 확인 — `pay-stats.ts AGENT_MSG_TYPE_LABEL`에 미등재라 화면에 코드 `G`가 그대로 노출되고, 단가 축(`company_agent_ids.cost_per_*` 4개)에도 없어 **청구에서 빠진다**(여미지 7월 46,736건 실측) |
 | TotCnt | 전송 |
 | **OkCnt** | **성공** (★`SuccCnt` 아님 — 청구 수량의 기준) |
 | FailCnt | 실패 |
@@ -1556,12 +1556,14 @@
 - 2026-07-25 ALTER 적용 실측: `channel`·`store_id` 추가 + `agent_id` FK 신설 + 인덱스. 당시 15행(금강제화 시험 발행분)은 전부 web.
 - **★2026-07-28 실측 = 0행.** 위 15행은 그 뒤 삭제됐다. **아직 굳은 청구서가 하나도 없다** = 단가·요금제 이력을 정정할 수 있는 창이 열려 있다는 뜻이다(발행이 쌓이면 스냅샷이 굳어 소급 정정 불가).
 
-### 일괄발급·컨펌·세금계산서 5테이블 ★2026-07-28 신설·실측 등재
+### 일괄발급·컨펌·세금계산서 5테이블 ★2026-07-28 신설·실측 등재 (+2026-07-29 수동 정산완료 1테이블·1컬럼 — 실행 대기)
 
-> SoT = docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md §1. DDL 실행·검증 완료(5테이블, 컬럼 수 5/14/19/10/9).
+> SoT = docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md §1(+§3-1 수동 정산완료). DDL 실행·검증 완료(5테이블, 컬럼 수 5/14/19/10/9).
+> **2026-07-29분(`billing_manual_completions` CREATE + `company_billing_settings.manual_billing` ALTER)은 아직 실행 전이다** — 실행·information_schema 실측 후 이 줄을 지운다.
 > 공통 원칙: **실행자 컬럼(updated_by·created_by)에 users FK를 걸지 않는다** — 슈퍼관리자는 super_admins 소속이라 FK가 23503으로 터진다(2026-07-28 회사 수정 실패 사고). id만 기록.
 
-- **company_billing_settings** (회사당 1행): company_id PK FK→companies CASCADE · issue_scope `combined`/`by_user`(CHECK, DEFAULT combined — 일괄발급 좌우 기본값) · taxbill_day_policy `last_day`/`first_day`/`manual`(CHECK, DEFAULT last_day) · updated_by(FK 없음) · updated_at
+- **company_billing_settings** (회사당 1행): company_id PK FK→companies CASCADE · issue_scope `combined`/`by_user`(CHECK, DEFAULT combined — 일괄발급 좌우 기본값) · taxbill_day_policy `last_day`/`first_day`/`manual`(CHECK, DEFAULT last_day) · updated_by(FK 없음) · updated_at · **manual_billing** boolean NOT NULL DEFAULT false **(★2026-07-29 ALTER — 실행 대기)**: 우리 정산으로 발행할 수 없어 사람이 따로 처리하는 회사. 일괄발급 화면의 [전체 담기]·[선택 담기] 양쪽에서 빠진다(목록에는 뜬다 — 숨기면 그 달 처리 여부를 아무도 모른다). **UPSERT에서 이 값은 페이로드에 없으면 보존한다**(EXCLUDED 통째 덮기 → 옛 번들 한 번에 표시가 풀리던 사업자 6필드와 같은 함정)
+- **billing_manual_completions** (월 단위 수동 정산완료 — **★2026-07-29 신설·실행 대기**): id uuid PK `gen_random_uuid()` · company_id FK→companies CASCADE · period_start·period_end date · reason text NULL · created_by uuid(**FK 없음** — 0728 `23503` 원칙) · created_at. UNIQUE(company_id, period_start, period_end). **청구서(`billings`)를 만들지 않는다** — 만들면 PDF·세금계산서·매출 집계가 그 가짜 장을 센다. `listUnbilledPostpaid`가 `billings`와 **같은 겹침(overlap) 식**으로 이 테이블도 제외한다(축이 다르면 중간정산 조회에서 화면마다 대상이 달라진다). 해제(DELETE)하면 그 회사는 곧바로 미발급 목록으로 돌아온다. 이미 발행된 회사는 기록 자체를 막는다(어느 쪽이 진실인지 모르게 되는 것을 차단)
 - **billing_contacts** (정산 담당자+계산서 사업자, **user_id NULL = 회사 레벨**): id PK · company_id FK CASCADE · user_id FK→users **CASCADE**(SET NULL 금지 — 계정 삭제 시 회사 레벨 행으로 둔갑) · contact_name/email · taxbill_biz_number/company_name/ceo_name/address/biz_type/biz_item(전부 NULL이면 회사 기본 사업자 사용) · updated_by · created/updated_at. UNIQUE = (company_id,user_id) WHERE user_id IS NOT NULL + (company_id) WHERE user_id IS NULL (partial 2본)
 - **invoice_confirmations** (메일 1통=1행): id PK · billing_id FK→billings CASCADE(draft 삭제 시 추적행 동반 삭제) · company_id FK · recipient_user_id FK SET NULL · recipient_email · token UNIQUE(공개 컨펌 링크) · sent_at(3일 타이머 기점) · confirmed_at/ip · objection_at/text/resolved_at · taxbill_status CHECK(`pending`/`confirmed`/`due`/`objected`/`manual_wait`/`ready`/`issued`) · taxbill_issue_date · taxbill_due_at(= min(sent+3일, 익월 10일)) · issued_at · popbill_invoice_key · **superseded_at**(재발급 무효화 마커 — 상태값 아님) · created_at. INDEX = (taxbill_status,taxbill_due_at)·(company_id)·(billing_id)
 - **billing_bulk_jobs**: id PK · period_start/end · total/done/failed_count · status CHECK(`running`/`done`/`cancelled`) · created_by(FK 없음) · created_at/finished_at

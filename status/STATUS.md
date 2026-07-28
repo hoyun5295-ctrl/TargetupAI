@@ -49,8 +49,8 @@
 
 ### 0728 정산 파이프라인 — 배포완료, 팝빌 실호출만 잔여
 > SoT [일괄발급·컨펌·세금계산서](docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md) §9(종결 상태·이월) · §7-0(팝빌 API 요지) · 기억 [[project_2026_0728_bulk_invoice_confirm_taxbill]] [[project_2026_0728_tickets_journey_triggers]] · 다음 = 팝빌 공동인증서 등록 → 테스트베드 웹훅·포인트 → `RegistIssue` 연결(ENV 4종 등록됨)
-> ⛔ 신규 테이블 실행자 컬럼에 users FK 금지 = SCHEMA.md 공통 원칙(0728 `23503` 사고에서 확정) / 공급받는자 사업자 우선순위 = 계정 → 회사(`billing_contacts`) → `companies` 3단, 세 곳을 섞지 않는다(SoT §5-1). PDF 5곳은 아직 `companies`만 본다
-> 잔여 = 화면 실측 5건(정산 탭 저장 / 일괄발급 1건 / 공개 페이지 컨펌=CSP / 현황판 / 사업자등록증 자동입력) · 메일 문안·PDF 첨부 논의 · 접수·여정 트리거 실측 4건([[project_2026_0728_tickets_journey_triggers]]) · **0728 추가 배포대기 3건**(작성일자 미리보기 / 회사 계산서 사업자·사업자번호 검증 / **컨펌 메일 PDF 첨부+버튼 하나·페이지 컨펌 전용·`rowCount` ack**)
+> ⛔ 신규 테이블 실행자 컬럼에 users FK 금지 = SCHEMA.md 공통 원칙(0728 `23503` 사고) / 공급받는자 사업자 우선순위 = 계정 → 회사(`billing_contacts`) → `companies` 3단, 섞지 않는다(SoT §5-1 — PDF 5곳은 아직 `companies`만 본다) / **통지 추적행은 메일보다 먼저 만든다**(SoT §4-1 — 발송 뒤에 만들면 부분발송·중복·고아PDF가 되살아난다)
+> 잔여 = **0729 수동 정산완료 DDL 2건 실행**(SoT §3-1 — 실행 전엔 일괄발급 화면이 503) · 화면 실측 8건(정산 탭 저장 / 일괄발급 / 공개 컨펌=CSP / 현황판 / 사업자등록증 자동입력 / 회사 계산서 사업자 / 메일 재시도 / 미발송 필터) · 메일 첨부 실물(PDF 제목·파일명) · 접수·여정 실측 4건([[project_2026_0728_tickets_journey_triggers]]) · **재구성분 Codex 미검토**(4·5차 무산)
 
 ### 0727 여정 알림톡 + 환불 의무 — 배포대기 2건
 > SoT 알림톡·잔액 = 기억 [[project_2026_0727_journey_alimtalk_and_agent_tls]] · 환불 = [BUGS.md](BUGS.md) B-0727-1·2 · 다음 = 배포대기 2건 배포(알림톡 대체문안 CT `utils/alimtalk-fallback.ts` 커밋 `f91d5ea5` / `balance_transactions.refund_key` 원인별 분리, DDL 실행 완료)

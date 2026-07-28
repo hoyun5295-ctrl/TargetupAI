@@ -327,6 +327,25 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
       });
     }
 
+    // ★ 2026-07-29 수동 정산완료도 **같은 잠금 아래에서** 본다.
+    //   사람이 따로 청구한 구간을 자동 청구서가 덮으면 이중청구다. 화면 목록은 "완전히 덮을 때만" 숨기지만
+    //   발급 차단은 **조금이라도 겹치면** 막는다 — 숨김 기준과 차단 기준은 다르다(6월 수동완료 + 6/25~7/25 발행).
+    //   판정을 이 트랜잭션 밖에 두면 검사와 커밋 사이가 항상 열린다. 그래서 여기에 둔다.
+    const manualDone = await client.query(
+      `SELECT period_start, period_end, reason FROM billing_manual_completions
+        WHERE company_id = $1
+          AND period_start <= $3::date AND period_end >= $2::date
+        LIMIT 1`,
+      [company_id, billing_start, billing_end]
+    );
+    if (manualDone.rows.length > 0) {
+      const m = manualDone.rows[0];
+      throw new BillingIssueError(409, {
+        error: `해당 기간과 겹치는 구간이 수동 정산완료로 처리돼 있습니다 (${String(m.period_start).slice(0, 10)} ~ ${String(m.period_end).slice(0, 10)}${m.reason ? ` · ${String(m.reason).slice(0, 100)}` : ''}). 자동 발행하려면 일괄발급 화면에서 그 기록을 먼저 해제해 주세요.`,
+        code: 'BILLING_MANUAL_COMPLETED',
+      });
+    }
+
     // ★ 2026-07-26 원장 재검증 — 지문 대조(잠금 대신).
     const fingerprintNow = await readBillingLedgerFingerprint(company_id, client);
     if (fingerprintNow !== ledger.fingerprint) {

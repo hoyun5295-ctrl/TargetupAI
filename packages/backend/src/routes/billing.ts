@@ -43,7 +43,10 @@ import {
   listBillingContacts, upsertBillingContact, normalizeBizNumber,
 } from '../utils/billing-settings';
 // ★ 2026-07-28 일괄발급 배치 CT — 대상 산출·job 실행·진행률.
-import { listUnbilledPostpaid, createBulkJob, getBulkJob, findRunningBulkJob } from '../utils/billing-bulk';
+import {
+  listUnbilledPostpaid, createBulkJob, getBulkJob, findRunningBulkJob,
+  listManualCompletions, addManualCompletions, removeManualCompletion, isWholeMonthPeriod,
+} from '../utils/billing-bulk';
 // ★ 2026-07-28 사업자등록증 자동입력 — 정산 탭 모달 (vision 판독, 크레딧 미차감)
 import multer from 'multer';
 import { sniffImageMediaType } from '../utils/event-image-extract';
@@ -229,7 +232,7 @@ router.put('/company-billing-settings/:companyId', async (req: Request, res: Res
   try {
     const { companyId } = req.params;
     const adminId = (req as any).user?.userId || null;
-    const { issue_scope, taxbill_day_policy, company_contact, account_contacts } = (req.body || {}) as any;
+    const { issue_scope, taxbill_day_policy, manual_billing, company_contact, account_contacts } = (req.body || {}) as any;
 
     // ★ 2026-07-28 사업자등록번호는 **트랜잭션 전에 전부** 검증한다.
     //   BEGIN 안에서 던지면 한 줄 때문에 같이 입력한 다른 값까지 통째로 롤백되고,
@@ -255,6 +258,8 @@ router.put('/company-billing-settings/:companyId', async (req: Request, res: Res
     await upsertCompanyBillingSettings(client, companyId, {
       issueScope: String(issue_scope || 'combined'),
       taxbillDayPolicy: String(taxbill_day_policy || 'last_day'),
+      // ★ 2026-07-29 키가 없으면 undefined 그대로 넘겨 기존 값을 보존한다(CT가 미전송/지움을 구분).
+      manualBilling: manual_billing === undefined ? undefined : manual_billing === true,
       updatedBy: adminId,
     });
     if (company_contact && typeof company_contact === 'object') {
@@ -345,12 +350,91 @@ router.get('/bulk/unbilled', async (req: Request, res: Response) => {
   }
 });
 
+// ═══ 수동 정산완료 (★2026-07-29) — 우리 정산으로 발행할 수 없는 회사의 그 달 처리 기록 ═══
+//   청구서를 만들지 않는다. 미발급 목록에서만 빠지고, 해제하면 곧바로 돌아온다.
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const BULK_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** 새 테이블·컬럼 미생성 상태를 500이 아니라 503으로 알린다(db_alter_safety_net). */
+const isMigrationPending = (error: any): boolean => {
+  const m = error?.message || '';
+  return m.includes('does not exist') && (m.includes('relation') || m.includes('column'));
+};
+const MIGRATION_MSG = 'DB 마이그레이션 필요 — billing_manual_completions 테이블·company_billing_settings.manual_billing 컬럼 생성 요청';
+
+// GET /bulk/manual-completions?start&end — 그 기간 수동완료 목록
+router.get('/bulk/manual-completions', async (req: Request, res: Response) => {
+  try {
+    const start = String(req.query.start || '');
+    const end = String(req.query.end || '');
+    if (!DATE_RE.test(start) || !DATE_RE.test(end) || start > end) {
+      return res.status(400).json({ error: '기간(start·end)이 올바르지 않습니다.' });
+    }
+    const rows = await listManualCompletions(start, end);
+    return res.json({ rows });
+  } catch (error: any) {
+    if (isMigrationPending(error)) return res.status(503).json({ error: MIGRATION_MSG, code: 'DB_MIGRATION_PENDING' });
+    console.error('수동 정산완료 조회 오류:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /bulk/manual-completions — 선택 회사를 그 달 수동완료로 기록
+router.post('/bulk/manual-completions', async (req: Request, res: Response) => {
+  try {
+    const { period_start, period_end, company_ids, reason } = (req.body || {}) as any;
+    if (!DATE_RE.test(String(period_start)) || !DATE_RE.test(String(period_end)) || String(period_start) > String(period_end)) {
+      return res.status(400).json({ error: '기간(period_start·period_end)이 올바르지 않습니다.' });
+    }
+    // ★ 2026-07-29 달 단위로만 받는다 — 하루짜리 기록이 그 달 전체를 가리는 매출 누락 경로를 입구에서 막는다.
+    if (!isWholeMonthPeriod(String(period_start), String(period_end))) {
+      return res.status(400).json({ error: '수동 정산완료는 달 단위로만 기록합니다 — 대상월 1일부터 말일까지여야 합니다.' });
+    }
+    const ids = Array.from(new Set((Array.isArray(company_ids) ? company_ids : []).map((v: any) => String(v))));
+    if (ids.length === 0) return res.status(400).json({ error: '수동 정산완료로 표시할 회사를 선택해 주세요.' });
+    for (const id of ids) {
+      if (!BULK_UUID_RE.test(id)) return res.status(400).json({ error: '회사 식별자가 올바르지 않습니다.' });
+    }
+    const text = String(reason ?? '').trim();
+    const { added, skipped } = await addManualCompletions(
+      ids, String(period_start), String(period_end),
+      text === '' ? null : text.slice(0, 500),
+      (req as any).user?.userId || null,
+    );
+    return res.json({ success: true, added, skipped });
+  } catch (error: any) {
+    if (isMigrationPending(error)) return res.status(503).json({ error: MIGRATION_MSG, code: 'DB_MIGRATION_PENDING' });
+    console.error('수동 정산완료 기록 오류:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /bulk/manual-completions/:id — 해제(미발급 목록으로 되돌림)
+router.delete('/bulk/manual-completions/:id', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!BULK_UUID_RE.test(id)) return res.status(400).json({ error: '기록 식별자가 올바르지 않습니다.' });
+    const removed = await removeManualCompletion(id);
+    if (!removed) return res.status(404).json({ error: '이미 해제된 기록입니다.' });
+    return res.json({ success: true });
+  } catch (error: any) {
+    if (isMigrationPending(error)) return res.status(503).json({ error: MIGRATION_MSG, code: 'DB_MIGRATION_PENDING' });
+    console.error('수동 정산완료 해제 오류:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 // POST /bulk/jobs — 일괄발급 시작 (비동기 배치 — 진행률은 GET /bulk/jobs/:id 폴링)
 router.post('/bulk/jobs', async (req: Request, res: Response) => {
   try {
     const { period_start, period_end, items } = (req.body || {}) as any;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(period_start)) || !/^\d{4}-\d{2}-\d{2}$/.test(String(period_end)) || String(period_start) > String(period_end)) {
       return res.status(400).json({ error: '기간(period_start·period_end)이 올바르지 않습니다.' });
+    }
+    // ★ 2026-07-29 일괄발급도 달 단위로만 받는다(화면이 월만 보낸다). 수동완료와 같은 격자에 놓여야
+    //   "6월 수동완료 + 6/25~7/25 일괄발급" 같은 부분 겹침 자체가 생기지 않는다. 임의 기간은 단건 발행 경로다.
+    if (!isWholeMonthPeriod(String(period_start), String(period_end))) {
+      return res.status(400).json({ error: '일괄발급은 달 단위로만 실행합니다 — 대상월 1일부터 말일까지여야 합니다.' });
     }
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const list = Array.isArray(items) ? items : [];
@@ -374,6 +458,10 @@ router.post('/bulk/jobs', async (req: Request, res: Response) => {
     // ★ Codex 1R MEDIUM 수용 — 트랜잭션 안 재검사(TOCTOU 차단)가 던진 실행 중 충돌은 409로.
     if (error?.code === 'BULK_JOB_RUNNING') {
       return res.status(409).json({ error: error.message, code: 'BULK_JOB_RUNNING', job_id: error.jobId || null });
+    }
+    // ★ 2026-07-29 트랜잭션 안 대상 재판정에 걸린 건 사람이 목록을 다시 불러오면 풀리는 상태다 — 409로 알린다.
+    if (error?.code === 'BULK_TARGET_NOT_BILLABLE') {
+      return res.status(409).json({ error: error.message, code: 'BULK_TARGET_NOT_BILLABLE', company_ids: error.companyIds || [] });
     }
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
