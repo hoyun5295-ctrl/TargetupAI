@@ -395,7 +395,7 @@
 | CustId | **발송ID**. `company_agent_ids.agent_send_id`와 매칭되는 회사 축 |
 | StoreId | **대상ID**. 발송 시 입력하는 청구 구분 축(지점·브랜드). 빈 값 가능 |
 | DestDt | 일자 **`YYYYMMDD` 문자열**(date 아님). 기간 필터는 문자열 비교 |
-| MsgType | 유형 코드 S/L/M/K/X(+KS·KL 대체발송) · **`G` = 브랜드메시지(구 친구톡)** ★2026-07-29 Harold 확인 — `pay-stats.ts AGENT_MSG_TYPE_LABEL`에 미등재라 화면에 코드 `G`가 그대로 노출되고, 단가 축(`company_agent_ids.cost_per_*` 4개)에도 없어 **청구에서 빠진다**(여미지 7월 46,736건 실측) |
+| MsgType | 유형 코드 S/L/M/K/X(+KS·KL 대체발송) · **`G` = 브랜드메시지(구 친구톡)** ★2026-07-29 Harold 확인. `pay-stats.ts AGENT_MSG_TYPE_LABEL` 미등재라 화면에 코드가 그대로 노출됐고(0729 등재), 단가 축(`company_agent_ids.cost_per_*` 4개)에 브랜드가 없어 **발행이 차단된다**(0원 조용한 축소가 아니다 — `send-usage-aggregation.ts` `agentUsageKey`가 미매핑 코드를 원본 그대로 유형키로 남기고 `findUnbillableUsageKeys`가 발행 시점에 잡는다. 여미지 B0227 7월 성공 42,833건이 그 자리) |
 | TotCnt | 전송 |
 | **OkCnt** | **성공** (★`SuccCnt` 아님 — 청구 수량의 기준) |
 | FailCnt | 실패 |

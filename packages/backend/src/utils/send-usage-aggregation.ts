@@ -24,8 +24,56 @@ import { mapWithConcurrency } from './concurrency';
 import { normalizeUnitPriceBasis, toSupplyPrice, type UnitPriceBasis } from './unit-price';
 import type { PlanSegment } from './plan-proration';
 
+// ============================================================
+//  ★ 청구 유형 축의 단일 정의 (2026-07-29 신설)
+//
+//  유형키·표시명·단가컬럼·큐 코드가 이 파일 안에서만 **7군데에 복제**돼 있었다.
+//  하나를 빠뜨리면 그 유형이 조용히 0원이 되거나 발행이 막힌다 —
+//  2026-07-25 `M`·`L` 미변환으로 청구 합산에서 통째로 빠진 사고가 정확히 그 부류다.
+//  아래 표에만 추가하면 매핑·초기값·라벨·순서·단가컬럼이 전부 따라온다.
+//  ⚠ 표의 **순서가 곧 청구서 항목 순서**다. 중간에 끼워 넣으면 인쇄 순서가 바뀐다.
+// ============================================================
+
+/**
+ * 발송ID 단가 컬럼명 — `AgentUnitPriceRow`의 `cost_per_*` 키만 뽑는다.
+ *
+ * ★ 단순 `string`으로 두면 오타가 tsc를 통과하고, 잘못된 컬럼 조회는 `undefined`가 되어
+ *   성공 발송이 통째로 `missingAgentPrices`로 분류돼 **발행이 차단된다**(Codex 적대검증 수용).
+ *   `keyof AgentUnitPriceRow`만으로는 `id`·`agent_send_id`까지 통과하므로 접두로 좁힌다.
+ *   컬럼을 추가할 땐 `AgentUnitPriceRow`에 넣으면 여기가 자동으로 넓어진다 — 목록을 두 벌 두지 않는다.
+ */
+export type AgentPriceColumn = Extract<keyof AgentUnitPriceRow, `cost_per_${string}`>;
+
+export interface BillingTypeDef {
+  /** 청구 유형키 — `billing_items.message_type`에 그대로 들어간다 */
+  key: string;
+  /** 사용자 표시명 (엑셀·청구서). 웹·에이전트가 같은 이름을 써야 피벗이 갈라지지 않는다 */
+  label: string;
+  /** 발송ID 단가 컬럼(`company_agent_ids`). null = 에이전트 축에 없는 유형(테스트·스팸) */
+  agentPriceColumn: AgentPriceColumn | null;
+  /** SMSQ `msg_type`(웹 일반발송 큐). null = 그 큐로 나가지 않는 유형 */
+  smsqCode: string | null;
+  /** 게이트웨이 `RSRM_SalesStts.MsgType`(에이전트). null = 에이전트 발송이 없는 유형 */
+  agentCode: string | null;
+}
+
+export const BILLING_TYPES: readonly BillingTypeDef[] = [
+  { key: 'SMS',      label: 'SMS',           agentPriceColumn: 'cost_per_sms',   smsqCode: 'S',  agentCode: 'S' },
+  { key: 'LMS',      label: 'LMS',           agentPriceColumn: 'cost_per_lms',   smsqCode: 'L',  agentCode: 'L' },
+  { key: 'MMS',      label: 'MMS',           agentPriceColumn: 'cost_per_mms',   smsqCode: 'M',  agentCode: 'M' },
+  // ★ 2026-07-25 '카카오' → '카카오알림톡'. 같은 엑셀의 에이전트 행이 '카카오알림톡'이라
+  //   한 '유형' 컬럼에 알림톡이 두 이름으로 갈리면 피벗에서 두 줄이 되어 정산 대조가 깨진다.
+  { key: 'KAKAO',    label: '카카오알림톡',    agentPriceColumn: 'cost_per_kakao', smsqCode: 'K',  agentCode: 'K' },
+  { key: 'TEST_SMS', label: '테스트 SMS',     agentPriceColumn: null,             smsqCode: null, agentCode: null },
+  { key: 'TEST_LMS', label: '테스트 LMS',     agentPriceColumn: null,             smsqCode: null, agentCode: null },
+  { key: 'SPAM_SMS', label: '스팸테스트 SMS', agentPriceColumn: null,             smsqCode: null, agentCode: null },
+  { key: 'SPAM_LMS', label: '스팸테스트 LMS', agentPriceColumn: null,             smsqCode: null, agentCode: null },
+];
+
 /** SMSQ msg_type → 청구 유형키. 변환 누락 = 그 유형이 청구 합산에서 통째로 빠진다. */
-export const MSG_TYPE_TO_USAGE_KEY: Record<string, string> = { S: 'SMS', L: 'LMS', M: 'MMS', K: 'KAKAO' };
+export const MSG_TYPE_TO_USAGE_KEY: Record<string, string> = Object.fromEntries(
+  BILLING_TYPES.filter((t) => t.smsqCode).map((t) => [t.smsqCode as string, t.key]),
+);
 
 export interface UsageDayCounts { total: number; success: number; fail: number; pending: number }
 /** 일자(YYYY-MM-DD) → 유형키 → 카운트 */
@@ -482,9 +530,7 @@ export async function selectBillingRunIds(opts: {
  * 청구서 발행과 미리보기가 같은 수량을 쓰도록 합산도 한 함수로 묶는다.
  */
 /** 청구가 합산하는 유형키 — 여기 없는 키는 수량이 아무리 많아도 0원이 된다. */
-const EMPTY_BILLING_TOTALS: Record<string, number> = {
-  SMS: 0, LMS: 0, MMS: 0, KAKAO: 0, TEST_SMS: 0, TEST_LMS: 0, SPAM_SMS: 0, SPAM_LMS: 0,
-};
+const EMPTY_BILLING_TOTALS: Record<string, number> = Object.fromEntries(BILLING_TYPES.map((t) => [t.key, 0]));
 
 export function buildBillingTotals(dayData: UsageDayData): Record<string, number> {
   const totals: Record<string, number> = { ...EMPTY_BILLING_TOTALS };
@@ -680,23 +726,11 @@ export async function buildCompanyUsageByDay(opts: {
   return dayData;
 }
 
-/** 발송통계 엑셀 웹 행용 — 청구 유형키를 사용자 표시명으로 */
-export const USAGE_TYPE_LABEL: Record<string, string> = {
-  SMS: 'SMS',
-  LMS: 'LMS',
-  MMS: 'MMS',
-  // ★ 2026-07-25 '카카오' → '카카오알림톡'. 같은 엑셀의 에이전트 행이 '카카오알림톡'(pay-stats.ts AGENT_MSG_TYPE_LABEL.K)이라
-  //   한 '유형' 컬럼에 알림톡이 두 이름으로 갈렸다 — 피벗하면 두 줄이 되어 정산 대조가 깨진다.
-  //   웹 KAKAO의 실체도 SMSQ msg_type='K' 알림톡이라 에이전트 쪽 이름이 의미상 정확하다.
-  KAKAO: '카카오알림톡',
-  TEST_SMS: '테스트 SMS',
-  TEST_LMS: '테스트 LMS',
-  SPAM_SMS: '스팸테스트 SMS',
-  SPAM_LMS: '스팸테스트 LMS',
-};
+/** 발송통계 엑셀 웹 행용 — 청구 유형키를 사용자 표시명으로 (표시명 원천 = BILLING_TYPES.label) */
+export const USAGE_TYPE_LABEL: Record<string, string> = Object.fromEntries(BILLING_TYPES.map((t) => [t.key, t.label]));
 
 /** 유형 표시 순서 — 청구서 항목 순서와 동일 */
-const USAGE_TYPE_ORDER = ['SMS', 'LMS', 'MMS', 'KAKAO', 'TEST_SMS', 'TEST_LMS', 'SPAM_SMS', 'SPAM_LMS'];
+const USAGE_TYPE_ORDER = BILLING_TYPES.map((t) => t.key);
 
 export interface UsagePeriodTypeRow {
   period: string;
@@ -799,7 +833,9 @@ export interface BillingUsageResult {
  * 2026-07-26 실측에서 `G`(여미지 B0227, 7월 성공 42,833건)가 그 자리에 있었다.
  * 원본으로 남겨야 `findUnbillableUsageKeys`가 발행 시점에 집어낸다.
  */
-export const AGENT_MSG_TYPE_TO_USAGE_KEY: Record<string, string> = { S: 'SMS', L: 'LMS', M: 'MMS', K: 'KAKAO' };
+export const AGENT_MSG_TYPE_TO_USAGE_KEY: Record<string, string> = Object.fromEntries(
+  BILLING_TYPES.filter((t) => t.agentCode).map((t) => [t.agentCode as string, t.key]),
+);
 
 export function agentUsageKey(msgType: any): string {
   const k = String(msgType || '').trim().toUpperCase();
@@ -836,7 +872,7 @@ function bumpRow(acc: Map<string, BillingUsageRow>, seed: BillingUsageRow, c: { 
 /** 청구 상세 정렬 — 채널 → 일자 → 계정/발송ID → 유형. PDF·화면이 이 순서를 그대로 쓴다. */
 // 요금제가 청구서 항목 1번이다(Harold 정의) — 정렬 맨 앞.
 const CHANNEL_ORDER: BillingChannel[] = ['plan', 'web', 'agent', 'test', 'spam'];
-const TYPE_ORDER_FOR_BILLING = ['SMS', 'LMS', 'MMS', 'KAKAO', 'TEST_SMS', 'TEST_LMS', 'SPAM_SMS', 'SPAM_LMS'];
+const TYPE_ORDER_FOR_BILLING = BILLING_TYPES.map((t) => t.key);
 
 export function sortBillingUsageRows(rows: BillingUsageRow[]): BillingUsageRow[] {
   const ch = (c: BillingChannel) => CHANNEL_ORDER.indexOf(c);
@@ -1046,9 +1082,10 @@ export interface PricedBillingResult {
   unbillableTypes: UnbillableUsageKey[];
 }
 
-const AGENT_PRICE_COLUMN: Record<string, keyof AgentUnitPriceRow> = {
-  SMS: 'cost_per_sms', LMS: 'cost_per_lms', MMS: 'cost_per_mms', KAKAO: 'cost_per_kakao',
-};
+// 단언 캐스팅을 쓰지 않는다 — 캐스팅이 있으면 표의 오타를 tsc가 못 본다(Codex 적대검증 수용).
+const AGENT_PRICE_COLUMN: Record<string, AgentPriceColumn> = Object.fromEntries(
+  BILLING_TYPES.flatMap((t) => (t.agentPriceColumn ? [[t.key, t.agentPriceColumn] as const] : [])),
+);
 
 /**
  * (순수) 청구 상세 행에 단가·금액을 붙인다.

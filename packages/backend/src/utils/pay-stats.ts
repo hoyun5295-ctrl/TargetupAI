@@ -96,13 +96,15 @@ export async function fetchPayDbSnapshot(): Promise<PayDbSnapshot | null> {
 export const AGENT_MSG_TYPE_LABEL: Record<string, string> = {
   S: 'SMS', L: 'LMS', M: 'MMS', K: '카카오알림톡', X: '팩스',
   KS: '카카오(SMS대체)', KL: '카카오(LMS대체)',
+  // ★ 2026-07-29 G = 브랜드메시지(구 친구톡). 라벨이 없어 화면에 코드 `G`가 그대로 노출됐다.
+  G: '브랜드메시지',
 };
 export function agentTypeLabel(t: string): string {
   const key = String(t || '').trim().toUpperCase();
   return AGENT_MSG_TYPE_LABEL[key] || (key ? key : '기타');
 }
-// 유형 표시 순서 (SMS→LMS→MMS→카카오→기타)
-const TYPE_ORDER = ['S', 'L', 'M', 'K', 'KS', 'KL', 'X'];
+// 유형 표시 순서 (SMS→LMS→MMS→카카오→브랜드메시지→기타)
+const TYPE_ORDER = ['S', 'L', 'M', 'K', 'KS', 'KL', 'G', 'X'];
 function typeOrder(mt: string): number {
   const i = TYPE_ORDER.indexOf(String(mt || '').trim().toUpperCase());
   return i < 0 ? 99 : i;
