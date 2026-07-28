@@ -8,8 +8,10 @@
  *   - [대상] 버튼 → 조건 모달. event=이벤트 발생 고객+조건 / segment=조건으로 대상 지정.
  */
 
-import { useState } from 'react';
-import { Bell, ShoppingBag, CalendarCheck, ShoppingCart, Truck, ArrowLeft, Zap, Clock, Users, MessageSquare } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Bell, ShoppingBag, CalendarCheck, ShoppingCart, Truck, ArrowLeft, Zap, Clock, Users, MessageSquare, UserPlus, Moon, Cake, Coins } from 'lucide-react';
+// ★ 2026-07-28 트리거 카탈로그 + 템플릿 호환 판정 — 백엔드 switch 8종과 1:1(단일 출처).
+import { TRIGGER_EVENTS, resolveTriggerCompat, type TriggerDef } from '../../utils/journey-trigger-catalog';
 import AlimtalkChannelPanel, {
   validateAlimtalkChannelState,
   type AlimtalkSenderProfile,
@@ -39,23 +41,20 @@ export interface InfoAlertBuildResult {
   };
 }
 
-const TX_EVENTS = [
-  { key: 'purchase', templateCode: 'repeat' as const, triggerEvent: 'cdp.purchase', label: '주문 완료', desc: '구매가 일어나면', icon: ShoppingBag, gradient: 'from-emerald-400 to-teal-500', gated: false, filters: {} as Record<string, any> },
-  { key: 'reservation', templateCode: 'reservation' as const, triggerEvent: 'cdp.reservation_created', label: '예약 확인', desc: '예약이 등록되면', icon: CalendarCheck, gradient: 'from-blue-400 to-indigo-500', gated: false, filters: {} },
-  { key: 'cart', templateCode: 'cart' as const, triggerEvent: 'cdp.cart_abandon', label: '장바구니', desc: '장바구니에 담기면', icon: ShoppingCart, gradient: 'from-amber-400 to-orange-500', gated: false, filters: { abandon_hours: 24 } },
-  { key: 'shipped', templateCode: 'cart' as const, triggerEvent: 'custom_order_shipped', label: '배송 시작', desc: '배송이 시작되면', icon: Truck, gradient: 'from-violet-400 to-purple-500', gated: true, filters: {} },
-];
-type TxKey = (typeof TX_EVENTS)[number]['key'];
-
-const EVENT_FIELDS: Record<TxKey, { key: string; label: string }[]> = {
-  purchase: [{ key: 'order_no', label: '주문번호' }, { key: 'product_name', label: '상품명' }, { key: 'total_amount', label: '결제금액' }],
-  reservation: [{ key: 'reservation_no', label: '예약번호' }, { key: 'reservation_date', label: '예약일시' }],
-  cart: [{ key: 'product_name', label: '상품명' }],
-  shipped: [{ key: 'tracking_no', label: '운송장번호' }, { key: 'carrier', label: '택배사' }],
+// 아이콘·색은 화면 관심사라 여기 둔다. 트리거 정의(백엔드 계약)는 카탈로그가 단일 출처.
+const TRIGGER_DECOR: Record<string, { icon: typeof ShoppingBag; gradient: string }> = {
+  purchase: { icon: ShoppingBag, gradient: 'from-emerald-400 to-teal-500' },
+  reservation: { icon: CalendarCheck, gradient: 'from-blue-400 to-indigo-500' },
+  cart: { icon: ShoppingCart, gradient: 'from-amber-400 to-orange-500' },
+  shipped: { icon: Truck, gradient: 'from-violet-400 to-purple-500' },
+  signup: { icon: UserPlus, gradient: 'from-teal-400 to-cyan-500' },
+  dormant: { icon: Moon, gradient: 'from-slate-400 to-slate-600' },
+  birthday: { icon: Cake, gradient: 'from-pink-400 to-rose-500' },
+  points: { icon: Coins, gradient: 'from-yellow-400 to-amber-500' },
 };
 
 const START_KINDS: { key: InfoAlertStartKind; label: string; desc: string; icon: typeof Zap; gradient: string }[] = [
-  { key: 'event', label: '거래가 일어날 때', desc: '주문·예약·장바구니·배송 시 자동', icon: Zap, gradient: 'from-emerald-400 to-teal-500' },
+  { key: 'event', label: '어떤 일이 생기면', desc: '가입·주문·예약·생일 등 발생 시 자동', icon: Zap, gradient: 'from-emerald-400 to-teal-500' },
   { key: 'one_shot', label: '지금 또는 예약', desc: '대상군에게 1회 발송', icon: Clock, gradient: 'from-sky-400 to-blue-500' },
   { key: 'standing', label: '조건 충족 시 계속', desc: '조건 만족 고객 상시', icon: Users, gradient: 'from-fuchsia-400 to-purple-500' },
 ];
@@ -77,27 +76,124 @@ interface Props {
 export default function InfoAlertJourneyBuilder({ senders, templates, customerFieldOptions, hasMallIntegration = false, embedded = false, onBuild, onBack }: Props) {
   const [alimtalk, setAlimtalk] = useState<AlimtalkChannelState>(EMPTY_STATE);
   const [startKind, setStartKind] = useState<InfoAlertStartKind>('event');
-  const [txKey, setTxKey] = useState<TxKey>('purchase');
+  const [txKey, setTxKey] = useState<string>('purchase');
+  // ★ 2026-07-28 포인트 소멸 트리거는 백엔드 기본 points_min이 0이라 그대로 열면 사실상 전원이 대상이 된다.
+  //   숫자를 지어내지 않고 사용자에게 받는다(미입력이면 이 트리거로는 만들 수 없다).
+  const [pointsMin, setPointsMin] = useState<string>('');
+  // ★ 2026-07-28 템플릿 본문을 읽고 트리거를 제안받는다. 제안일 뿐 저장이 아니다 — 아래 [다음]에서 사람이 확인한다.
+  const [suggesting, setSuggesting] = useState(false);
+  // 추천은 **어느 템플릿에 대한 것인지**를 함께 들고 다닌다. 템플릿을 바꾸면 옛 추천은 자동으로 무효가 된다.
+  // (템플릿별 초기화를 안 하면 바꾼 뒤에도 이전 근거가 그대로 보인다 — Codex 1R 지적)
+  const [suggestion, setSuggestion] = useState<{ forTemplate: string; key: string; reason: string; delayDays: number } | null>(null);
+  const [suggestFailed, setSuggestFailed] = useState<string | null>(null);
   const [scheduleMode, setScheduleMode] = useState<'now' | 'scheduled'>('now');
   const [scheduledAt, setScheduledAt] = useState<string>('');
   const [conditions, setConditions] = useState<AudienceCondition[]>([]);
   const [showTemplate, setShowTemplate] = useState(false);
   const [showAudience, setShowAudience] = useState(false);
 
-  const tx = TX_EVENTS.find((t) => t.key === txKey) || TX_EVENTS[0];
   const selectedTemplate = templates.find((t) => t.template_code === alimtalk.templateCode);
-  const eventVars = startKind === 'event' ? (EVENT_FIELDS[txKey] || []) : [];
+
+  // ★ 2026-07-28 템플릿이 쓰는 변수로 붙일 수 있는 트리거를 가른다.
+  //   `#{주문번호}`가 든 템플릿을 가입 트리거에 붙이면 진입 properties가 없어 빈 값으로 나간다.
+  //   AI 판단이 아니라 규칙으로 갈리는 문제라 순수 함수(카탈로그)가 판정한다.
+  const compat = resolveTriggerCompat(selectedTemplate?.content || '', hasMallIntegration);
+  const allowedTriggers = compat.allowed;
+  // ★ 허용 목록으로 **폴백하지 않는다**. 첫 허용 트리거로 갈아끼우면 아래 mismatch가 영원히 false가 되고,
+  //   사용자가 고르지도 않은 트리거로 여정이 저장된다. (Codex 1R 지적, 실결함)
+  //   고른 값이 못 쓰게 됐으면 그대로 두고 막은 뒤, 사용자가 다시 고르게 한다.
+  const tx: TriggerDef = TRIGGER_EVENTS.find((t) => t.key === txKey) || TRIGGER_EVENTS[0];
+  const eventVars = startKind === 'event' ? tx.eventFields : [];
+  const triggerMismatch = startKind === 'event'
+    && !!selectedTemplate
+    && !allowedTriggers.some((t) => t.key === tx.key);
+  // ★ one_shot·standing은 트리거가 'custom'이라 진입 이벤트 properties가 없다.
+  //   이벤트 변수를 쓰는 템플릿을 그 경로로 보내면 값이 빈 채로 나간다 — event와 같은 기준으로 막는다.
+  const eventVarsInNonEventFlow = startKind !== 'event' && compat.eventVarsFound.length > 0;
+
+  // AI 추천 응답이 도착했을 때 "그 사이 템플릿이 바뀌었는지"를 콜백 시점 값으로 판정하기 위한 ref.
+  // ★ useEffect로 갱신하면 렌더 **이후**라 한 박자 늦고, 그 틈에 옛 응답이 통과한다(Codex 2R 지적).
+  //   렌더 중에 바로 맞춰 그 창을 없앤다(최신값 미러라 멱등 — StrictMode 이중 렌더에도 안전).
+  const selectedTemplateCodeRef = useRef(alimtalk.templateCode);
+  // 요청 순번 — 연달아 누르면 마지막 요청만 반영한다(늦게 온 옛 응답이 이기지 못하게).
+  const suggestReqRef = useRef(0);
+  if (selectedTemplateCodeRef.current !== alimtalk.templateCode) {
+    selectedTemplateCodeRef.current = alimtalk.templateCode;
+    // ★ 템플릿이 바뀌면 **진행 중인 요청을 전부 무효화**한다.
+    //   순번만으로는 A→B→A로 되돌아왔을 때 순번·템플릿이 다시 일치해 옛 A 응답이 통과한다(Codex 3R 지적).
+    //   그때 사용자가 손으로 고른 트리거가 조용히 덮인다 — 바뀌는 순간 끊는 게 확실하다.
+    suggestReqRef.current += 1;
+  }
+  const needsPointsMin = startKind === 'event' && tx.requiresConfig === 'points_min';
+  const pointsMinValue = Number(pointsMin);
+  const pointsMinOk = !needsPointsMin || (Number.isFinite(pointsMinValue) && pointsMinValue > 0);
 
   // ★ 2026-07-27: 전환재발송 검증 공용 CT — 여정 활성화(백엔드)에서 막히기 전에 여기서 먼저 알려준다.
   const fallbackViolation = validateAlimtalkChannelState(alimtalk);
   const canBuild = Boolean(alimtalk.profileId && alimtalk.templateCode)
     && !fallbackViolation
+    && !triggerMismatch
+    && !eventVarsInNonEventFlow
+    && pointsMinOk
     && (startKind !== 'one_shot' || scheduleMode === 'now' || !!scheduledAt);
+
+  /**
+   * ★ 2026-07-28 고른 템플릿 본문을 읽고 트리거를 제안받는다.
+   *   후보는 변수 호환으로 이미 걸러진 목록만 보낸다 — AI가 무엇을 고르든 치환이 깨지지 않는다.
+   *   서버가 후보 밖 값을 버리므로 여기서는 받은 key가 후보에 있을 때만 반영한다(이중 가드).
+   */
+  const handleSuggestTrigger = async () => {
+    if (!selectedTemplate?.content || allowedTriggers.length === 0) return;
+    const askedFor = selectedTemplate.template_code;   // 응답 도착 시 같은 템플릿인지 대조할 기준
+    const myReq = ++suggestReqRef.current;             // 이 요청의 순번
+    setSuggesting(true);
+    setSuggestFailed(null);
+    setSuggestion(null);
+    try {
+      const res = await fetch('/api/ai/operator/journeys-suggest-trigger', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
+        },
+        body: JSON.stringify({
+          templateName: selectedTemplate.template_name || selectedTemplate.template_code,
+          templateContent: selectedTemplate.content,
+          candidates: allowedTriggers.map((t) => ({ key: t.key, label: t.label, desc: t.desc })),
+        }),
+      });
+      const data = await res.json();
+      // ★ 응답이 오는 동안 사용자가 템플릿을 바꿨으면 그 추천은 다른 템플릿의 것이다 — 버린다.
+      //   (재검증 없이 반영하면 옛 템플릿 기준 트리거가 새 템플릿에 붙는다 — Codex 1R 지적)
+      if (myReq !== suggestReqRef.current) return;                    // 더 최신 요청이 있으면 이 응답은 버린다
+      if (selectedTemplateCodeRef.current !== askedFor) return;       // 그 사이 템플릿이 바뀌었으면 버린다
+      const s = data?.suggestion;
+      if (data?.success && s?.key && allowedTriggers.some((t) => t.key === s.key)) {
+        setTxKey(s.key);
+        setStartKind('event');
+        setSuggestion({
+          forTemplate: askedFor,
+          key: s.key,
+          reason: String(s.reason || ''),
+          delayDays: Math.max(0, Math.min(30, Math.floor(Number(s.delayDays) || 0))),
+        });
+      } else {
+        // 판단이 안 서면 억지로 고르지 않는다 — 사용자가 직접 고르면 된다.
+        setSuggestFailed(askedFor);
+      }
+    } catch {
+      setSuggestFailed(askedFor);
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
 
   const handleBuild = () => {
     if (!canBuild) return;
     const conds = buildCustomerConditions(conditions);
     const triggerFilters: Record<string, any> = startKind === 'event' ? { ...tx.filters } : {};
+    if (needsPointsMin) triggerFilters.points_min = pointsMinValue;
     if (conds) Object.assign(triggerFilters, conds);
     const name = startKind === 'event' ? `${tx.label} 알림` : startKind === 'one_shot' ? '알림톡 1회 발송' : '알림톡 상시 발송';
     onBuild({
@@ -142,6 +238,30 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
       {/* 어떤 알림톡 — 요약 버튼 → 모달 */}
       <SummaryButton icon={<MessageSquare className="w-4 h-4 text-white" />} label="어떤 알림톡" value={templateSummary} accent="teal" onClick={() => setShowTemplate(true)} />
 
+      {/* ★ 2026-07-28 템플릿을 고르면 본문을 읽고 트리거를 제안한다 — 사용자가 8개를 훑지 않아도 되게. */}
+      {selectedTemplate && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={handleSuggestTrigger}
+            disabled={suggesting || allowedTriggers.length === 0}
+            className="px-3 py-1.5 rounded-lg bg-violet-500/20 hover:bg-violet-500/30 border border-violet-400/40 text-violet-100 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {suggesting ? '템플릿 읽는 중…' : '이 템플릿, 언제 보낼까요? — AI 추천'}
+          </button>
+          {/* 추천·실패 표시는 **지금 고른 템플릿에 대한 것일 때만** 보여준다(템플릿 바꾸면 자동 소멸). */}
+          {suggestion && suggestion.forTemplate === alimtalk.templateCode && (
+            <span className="text-[11px] text-violet-200/90">
+              {TRIGGER_EVENTS.find((t) => t.key === suggestion.key)?.label || suggestion.key} 추천
+              {` · ${suggestion.delayDays === 0 ? '발생 즉시' : `${suggestion.delayDays}일 뒤`}`}
+              {suggestion.reason ? ` — ${suggestion.reason}` : ''}
+            </span>
+          )}
+          {suggestFailed === alimtalk.templateCode && (
+            <span className="text-[11px] text-white/50">추천하지 못했어요. 아래에서 직접 골라주세요.</span>
+          )}
+        </div>
+      )}
+
       {/* 언제 보낼까 — 시작 방식 카드 */}
       <div>
         <div className="text-xs font-semibold text-white/70 mb-1.5">언제 보낼까요</div>
@@ -159,26 +279,66 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
           })}
         </div>
 
-        {startKind === 'event' && (
-          <div className="mt-2">
-            <p className="text-[11px] text-white/50 mb-1.5">어떤 거래에 보낼까요 — 이벤트 변수(#{'{주문번호}'} 등) 사용 가능</p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {TX_EVENTS.map((t) => {
-                const Icon = t.icon;
-                const active = t.key === txKey;
-                const locked = t.gated && !hasMallIntegration;
+        {startKind === 'event' && (() => {
+          // ★ 2026-07-28 거래 4종 + 고객 상태 4종. 백엔드 switch가 이미 8종을 처리하므로 전부 연다.
+          //   템플릿이 이벤트 변수를 쓰면 그 값을 못 주는 트리거는 사유와 함께 잠근다.
+          const blockedMap = new Map(compat.blocked.map((b) => [b.trigger.key, b.reason]));
+          const groups: { group: 'tx' | 'lifecycle'; title: string }[] = [
+            { group: 'tx', title: '거래가 일어났을 때 — 주문번호·상품명 같은 거래 정보를 쓸 수 있어요' },
+            { group: 'lifecycle', title: '고객 상태가 바뀌었을 때 — 이름·등급 같은 고객 정보만 쓸 수 있어요' },
+          ];
+          return (
+            <div className="mt-2 space-y-2.5">
+              {compat.eventVarsFound.length > 0 && (
+                <p className="text-[11px] text-teal-200/80">
+                  이 템플릿은 <strong>{compat.eventVarsFound.join('·')}</strong>를 쓰기 때문에, 그 값을 주는 트리거만 고를 수 있어요.
+                </p>
+              )}
+              {groups.map(({ group, title }) => {
+                const items = TRIGGER_EVENTS.filter((t) => t.group === group);
                 return (
-                  <button key={t.key} onClick={() => { if (!locked) setTxKey(t.key); }} disabled={locked}
-                    className={`p-2.5 rounded-lg border text-left transition-colors ${active ? 'bg-teal-500/20 border-teal-400/60' : 'bg-white/[0.06] border-white/15 hover:bg-white/[0.1]'} ${locked ? 'opacity-40 cursor-not-allowed' : ''}`}>
-                    <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${t.gradient} flex items-center justify-center mb-1.5`}><Icon className="w-3.5 h-3.5 text-white" /></div>
-                    <div className="text-xs font-semibold text-white">{t.label}</div>
-                    <div className="text-[10px] text-white/55 mt-0.5">{locked ? '자사몰 연동 시' : t.desc}</div>
-                  </button>
+                  <div key={group}>
+                    <p className="text-[11px] text-white/50 mb-1.5">{title}</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {items.map((t) => {
+                        const decor = TRIGGER_DECOR[t.key] || { icon: Zap, gradient: 'from-slate-400 to-slate-600' };
+                        const Icon = decor.icon;
+                        const active = t.key === tx.key;
+                        const gatedOff = t.gated && !hasMallIntegration;
+                        const blockedReason = blockedMap.get(t.key);
+                        const locked = gatedOff || !!blockedReason;
+                        return (
+                          <button key={t.key} onClick={() => { if (!locked) setTxKey(t.key); }} disabled={locked}
+                            title={blockedReason || undefined}
+                            className={`p-2.5 rounded-lg border text-left transition-colors ${active ? 'bg-teal-500/20 border-teal-400/60' : 'bg-white/[0.06] border-white/15 hover:bg-white/[0.1]'} ${locked ? 'opacity-40 cursor-not-allowed' : ''}`}>
+                            <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${decor.gradient} flex items-center justify-center mb-1.5`}><Icon className="w-3.5 h-3.5 text-white" /></div>
+                            <div className="text-xs font-semibold text-white">{t.label}</div>
+                            <div className="text-[10px] text-white/55 mt-0.5">
+                              {gatedOff ? '자사몰 연동 시' : blockedReason || t.desc}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 );
               })}
+              {needsPointsMin && (
+                <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-400/30">
+                  <label className="block text-[11px] text-amber-100/90 mb-1">
+                    보유 포인트 최소 (이 값 이상인 고객만) — 입력해야 만들 수 있어요
+                  </label>
+                  <input
+                    type="number" min={1} value={pointsMin} onChange={(e) => setPointsMin(e.target.value)}
+                    placeholder="예: 1000"
+                    className="w-40 px-2 py-1.5 rounded-lg bg-slate-800 border border-white/15 text-sm text-white"
+                  />
+                  <p className="text-[10px] text-white/45 mt-1">비워두면 포인트가 0인 고객까지 전부 대상이 되어 막아두었습니다.</p>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {startKind === 'one_shot' && (
           <div className="mt-2 space-y-2">
@@ -200,8 +360,19 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
           </div>
         )}
 
-        {startKind !== 'event' && (
+        {(startKind !== 'event' || tx.eventFields.length === 0) && (
           <p className="text-[11px] text-amber-200/70 mt-2">이벤트 데이터가 없어 템플릿 변수는 고객 필드(이름·등급 등)만 매핑됩니다.</p>
+        )}
+        {triggerMismatch && (
+          <p className="text-[11px] text-rose-300 mt-2">
+            이 템플릿에 맞는 트리거를 다시 골라주세요 — 지금 선택({tx.label})은 템플릿이 쓰는 값을 채워줄 수 없습니다.
+          </p>
+        )}
+        {eventVarsInNonEventFlow && (
+          <p className="text-[11px] text-rose-300 mt-2">
+            이 템플릿은 {compat.eventVarsFound.join('·')}를 쓰기 때문에 이 방식으로는 보낼 수 없어요.
+            값을 채우려면 “어떤 일이 생기면”을 골라 해당 거래 트리거를 지정해주세요.
+          </p>
         )}
       </div>
 

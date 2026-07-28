@@ -113,6 +113,8 @@ import { getPauseLogs } from '../utils/journey-pause-handler';
 import { dispatchOneShotJourney } from '../utils/journey-anchor-scheduler';
 // ★ D187-fix3 (2026-05-21): Journey AI Generator — One-shot 자연어 + 시즌 + 회사 메모리
 import { generateJourneyPackage, refineStepMessage, generateAnchorJourneyPlan } from '../utils/journey-ai-generator';
+// ★ 2026-07-28 알림톡 템플릿 → 트리거 제안 (후보 밖 값 거부는 CT가 담당)
+import { suggestJourneyTrigger } from '../utils/journey-trigger-suggest';
 // ★ 2026-06-29: 대화형 여정 수정 — 초안 패키지에 자연어 수정 반영
 import { editJourneyPackage } from '../utils/journey-ai-editor';
 // ★ 2026-06-29: AI 꾸미기 — 추천 메시지에 선택 컬럼(%변수%) 자연스럽게 녹임
@@ -3906,6 +3908,43 @@ router.post('/operator/journeys-refine-step', async (req: Request, res: Response
   } catch (err: any) {
     console.error('[Journeys refine step] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'AI 다듬기 실패' });
+  }
+});
+
+// POST /api/ai/operator/journeys-suggest-trigger — 알림톡 템플릿 → 트리거 제안 (2026-07-28)
+//   알림톡은 승인 템플릿이 본체라 AI가 문안을 지을 수 없다. 방향을 뒤집어, 고른 템플릿 본문을 읽고
+//   "언제 보낼지"만 고르게 한다. 후보는 프론트가 템플릿 변수 호환으로 이미 걸러 보낸 목록이고,
+//   그 목록 밖 값은 CT가 버린다(트리거 = 발송 대상이라 지어낸 값이 채택되면 안 된다).
+//   제안일 뿐 저장이 아니다 — 사용자가 검토 화면에서 확인한 뒤에야 여정이 만들어진다.
+router.post('/operator/journeys-suggest-trigger', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const { templateName, templateContent, candidates } = req.body || {};
+    if (!templateContent || !String(templateContent).trim()) {
+      return res.status(400).json({ success: false, error: '템플릿을 먼저 선택해주세요.' });
+    }
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+      return res.status(400).json({ success: false, error: '고를 수 있는 트리거가 없습니다.' });
+    }
+    const suggestion = await suggestJourneyTrigger({
+      companyId,
+      templateName: String(templateName || ''),
+      templateContent: String(templateContent),
+      candidates: candidates
+        .filter((c: any) => c && c.key)
+        .map((c: any) => ({ key: String(c.key), label: String(c.label || ''), desc: String(c.desc || '') })),
+    });
+    // 판단이 안 서면 제안하지 않는다 — 억지로 고른 트리거가 발송 대상이 되는 것보다 낫다.
+    return res.json({ success: true, suggestion });
+  } catch (err: any) {
+    console.error('[Journeys suggest trigger] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '트리거 제안 실패' });
   }
 });
 
