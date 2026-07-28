@@ -117,3 +117,28 @@ CLAUDE.md `superpowers_workflow_default`의 자가 질의("어떤 skill 호출 �
 - **지적 수용 원칙**: 무조건 수용하지 않는다. `superpowers:receiving-code-review`대로 실무 위험 기준으로 취사한다. 과한 처방(예: 연결 강제 종료)은 거부하고 단순한 대안으로 대체한 전례가 있다.
 - **같은 스레드 이어가기**: 후속 라운드는 `SendMessage`로 기존 에이전트에 이어 붙인다. 새로 띄우면 앞 맥락이 사라진다.
 - **설치**(최초 1회, Harold님 직접): `/plugin marketplace add openai/codex-plugin-cc` → `/plugin install codex@openai-codex` → `/reload-plugins` → `/codex:setup`
+
+### 3-1. 실행 실무 — 2026-07-28 헛돈 4시간에서 확정
+
+**리뷰는 전용 커맨드로만 돌린다.** `codex-companion.mjs review` 또는 `adversarial-review`(돈·환불·DB 마이그레이션은 후자).
+`task`(= rescue 서브에이전트)로 리뷰를 돌리면 자율 조사 에이전트라 테스트 실행·환경 구성으로 새다가 멈춘다. 0728에 30분을 그렇게 태웠다.
+
+**요청문에 백틱을 넣지 않는다.** 셸 큰따옴표 안에서 명령 치환으로 해석돼 요청문이 잘린 채 작업이 뜬다
+(0728: `` `const client = lockClient` `` → `const: command not found`, 요청문 손상). 파일에 적어 PowerShell 변수로 넘긴다.
+
+**살아 있는지 판정 — 한 가지로 못 정한다. 두 신호를 같이 본다.**
+
+| 신호 | 판정 |
+|---|---|
+| ① `codex-command-runner`를 **한 번이라도 목격** | 착수 확인. ⚠ 셸 명령마다 떴다 사라지는 일회성이라 **순간 부재는 죽음이 아니다** |
+| ② `codex` CPU **60초 표본에서 지속 증가**(10%+) | 진행 확인. 단독으로는 안 된다 — 공유 프로세스라 다른 것 때문에도 오른다 |
+| ①+② 둘 다 없음 | **죽음.** 컴패니언 CPU도 1초 미만이면 확정 |
+| `jobs/review-*.json`·`.log` 존재 | 근거 아님 — 완료 시점에 쓰이는 모드가 있다 |
+| 실행 시간 경과 | 근거 아님 — 정상 1라운드 7~10분, 20분 무응답이면 의심만 |
+
+0728 실측: 죽은 실행 = 컴패니언 CPU 0.3초·runner 목격 0회 / 정상 실행 = runner 목격 후 CPU 60초에 15.3초 증가.
+**순간 스냅샷 한 번으로 판정하지 않는다** — 60초 표본을 뜬다.
+
+**막혔을 때**: `auth.loggedIn=false`면 파이프 `ENOENT`가 난다 → Harold님이 `codex login`(인증이라 본 AI가 대행하지 않는다).
+좀비 판정은 PID 실존으로 하고, 상태 json이 `running`이어도 프로세스가 없으면 갱신 안 된 기록이다.
+`cancel <job-id>`는 Git Bash에서 `/PID` 경로 변환 버그로 실패한다 — PowerShell `Stop-Process`로 내린다.

@@ -22,6 +22,13 @@ const adminSrc = read('../routes/admin.ts');
 // ★ 2026-07-28 발행 코어가 utils/billing-issue.ts로 추출됐다(일괄발급 배치와 공유).
 //   /generate 내부를 보던 검사들은 이 파일을 스캔한다 — 파일 전체가 곧 발행 코어다.
 const issueSrc = read('./billing-issue.ts');
+// ★ 2026-07-28 PDF 생성이 utils/billing-pdf.ts로 추출됐다(일괄발급 메일 첨부와 공유).
+//   PDF 그림 코드를 보던 검사들은 이 파일을 스캔한다 — 라우트만 보면 코드가 옮겨간 뒤 **조용히 통과**한다.
+const pdfSrc = read('./billing-pdf.ts');
+// ★ 2026-07-28 컨펌 요청 메일(첨부·버튼 하나)과 공개 컨펌 페이지(항목표 제거·ack).
+const confirmSrc = read('./invoice-confirm.ts');
+const publicSrc = read('../routes/invoice-public.ts');
+const bulkSrc = read('./billing-bulk.ts');
 
 describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
   it('billing 라우터가 admin 라우터보다 먼저 마운트된다 — 순서가 뒤집히면 send-email 실경로가 조용히 바뀐다', () => {
@@ -129,22 +136,148 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
 
   it('청구서 항목표에 페이지 넘김이 있다 — 줄이 많으면 합계·감사 인사·하단을 뚫고 인쇄된다 (2026-07-26)', () => {
     // 웹만 쓰는 회사는 11줄이라 안 터지고, 에이전트가 섞이는 순간(발송ID마다 유형별 줄) 터지는 구조였다.
-    const start = billingSrc.indexOf('const drawItemHeader = ()');
+    const start = pdfSrc.indexOf('const drawItemHeader = ()');
     expect(start, '항목표 헤더 함수를 찾지 못했다').toBeGreaterThan(-1);
-    const body = billingSrc.slice(start, billingSrc.indexOf('const invoiceLines = buildInvoiceLines', start));
+    const body = pdfSrc.slice(start, pdfSrc.indexOf('const invoiceLines = buildInvoiceLines', start));
     expect(body, '행을 그리기 전에 남은 높이를 봐야 한다').toContain('ITEM_TABLE_BOTTOM');
     expect(body, '넘칠 때 새 페이지를 열고 헤더를 다시 그려야 한다').toMatch(/doc\.addPage\(\)[\s\S]*drawItemHeader\(\)/);
   });
 
   it('청구 문서에 시스템 자동 생성 안내를 넣지 않는다 — 고객에게 나가는 문서다 (Harold 2026-07-26)', () => {
     expect(billingSrc).not.toContain('시스템에서 자동 생성되었습니다');
+    expect(pdfSrc, 'PDF 그림 코드가 추출됐으므로 여기도 함께 본다 — 라우트만 보면 조용히 통과한다')
+      .not.toContain('시스템에서 자동 생성되었습니다');
   });
 
   it('PDF 당사자 블록은 CT로만 그린다 — 고정 y 증가로 그리면 각자대표 회사에서 줄이 겹친다 (2026-07-26)', () => {
     // 금강제화(대표 2명) 실측: 대표 줄이 두 줄로 흐르는데 다음 줄을 14pt만 내려 사업자번호와 겹쳤다.
-    expect(billingSrc).toContain('drawPartyBlock');
-    expect(billingSrc, '라우트에서 당사자 줄을 직접 그리면 같은 사고가 재발한다')
+    expect(pdfSrc, 'PDF CT가 당사자 블록 CT를 써야 한다').toContain('drawPartyBlock');
+    expect(pdfSrc, 'PDF CT에서 당사자 줄을 직접 그리면 같은 사고가 재발한다')
       .not.toMatch(/doc\.text\(`사업자번호: /);
+    expect(billingSrc, '라우트에는 PDF 그림 코드가 남아 있으면 안 된다 — 생성기는 CT 하나다')
+      .not.toContain('new PDFDocument(');
+  });
+
+  // ═══ 컨펌 메일·공개 페이지 계약 (★2026-07-28 — Harold 지시로 구조를 바꿨다) ═══
+
+  it('컨펌 요청 메일은 거래내역서 PDF를 첨부한다 — 첨부가 빠지면 고객이 내역을 볼 방법이 없다', () => {
+    expect(confirmSrc, '첨부 없이 보내면 안 된다').toContain('attachments');
+    expect(confirmSrc, '장(billings 행)마다 그 장의 PDF를 렌더해야 한다 — 계정별은 계정 장이 각각이다')
+      .toContain('renderBillingStatementPdf');
+    expect(confirmSrc, '다운로드 라우트와 같은 로더를 써야 줄 순서가 갈리지 않는다')
+      .toContain('loadBillingStatementData');
+  });
+
+  it('항목합이 공급가액과 어긋나면 메일을 보내지 않는다 — 틀린 문서는 회수가 안 된다', () => {
+    expect(confirmSrc, '다운로드 라우트와 같은 정합 검사를 걸어야 한다')
+      .toContain('checkInvoiceLinesAgainstHeader');
+  });
+
+  it('통지 대상을 메일보다 먼저 DB에 확정한다 — 적재 INSERT가 첫 SMTP보다 앞', () => {
+    // 발송 성공 뒤에야 추적행을 만들면 "이 장이 통지됐는가"의 진실이 메일 뒤에만 생긴다.
+    // 부분 발송·중복·고아 PDF는 전부 거기서 파생됐다. 행을 먼저 만들면 남은 행이 곧 재시도 목록이다.
+    const claimIdx = confirmSrc.indexOf('INSERT INTO invoice_confirmations');
+    const sendIdx = confirmSrc.indexOf('transporter.sendMail');
+    expect(claimIdx, '적재 INSERT를 찾지 못했다').toBeGreaterThan(-1);
+    expect(claimIdx, '적재가 발송 뒤로 가면 재구성 이전 구조로 되돌아간 것이다').toBeLessThan(sendIdx);
+  });
+
+  it('적재는 한 트랜잭션에서 장을 잠그고 이미 나갔거나 추적행이 있으면 건너뛴다', () => {
+    const start = confirmSrc.indexOf('1단계: 적재');
+    const body = confirmSrc.slice(start, confirmSrc.indexOf('2단계: 전송', start));
+    expect(body, '장을 잠그지 않으면 동시 적재가 겹친다').toContain('FOR UPDATE');
+    expect(body, '이미 발송된 장을 다시 적재하면 안 된다').toContain('emailed_at');
+    expect(body, '살아 있는 추적행이 있으면 대상이 아니다').toMatch(/NOT NULL\) AS has_confirmation|has_confirmation/);
+  });
+
+  it('발송 소유권은 조건부 UPDATE 하나로 잡는다 — 0행이면 남이 가져간 것이다', () => {
+    expect(confirmSrc).toMatch(/UPDATE billings SET emailed_at = NOW\(\)[\s\S]{0,120}emailed_at IS NULL RETURNING id/);
+    expect(confirmSrc, '표시는 SMTP 앞에 남겨야 발송 중 삭제가 막힌다')
+      .toSatisfy(() => confirmSrc.indexOf('emailed_at IS NULL RETURNING id') < confirmSrc.indexOf('transporter.sendMail'));
+  });
+
+  it('PDF는 보내기 직전에 만든다 — 미리 렌더하면 막힌 회차마다 렌더본이 쌓인다', () => {
+    const claimIdx = confirmSrc.indexOf('INSERT INTO invoice_confirmations');
+    const renderIdx = confirmSrc.indexOf('renderBillingStatementPdf(');
+    expect(renderIdx, '렌더가 적재보다 앞이면 안 나간 PDF가 남는다').toBeGreaterThan(claimIdx);
+  });
+
+  it('재구성으로 걷어낸 장치가 되살아나지 않는다 — 행 상태가 자물쇠다', () => {
+    expect(confirmSrc, '회사 세션 잠금은 durable 상태가 없던 시절의 보상 장치였다').not.toContain('pg_advisory_lock');
+    expect(confirmSrc, 'preflight 사전 렌더도 마찬가지다').not.toContain('const prepared');
+  });
+
+  it('미발송 장은 발행을 다시 하지 않고 통지 단계만 재시도한다 — 재발행은 기간 중복에 막힌다', () => {
+    expect(confirmSrc).toContain('retryUnsentConfirmations');
+    expect(confirmSrc, '이미 나간 장은 대상이 아니다').toContain('b.emailed_at IS NULL');
+    expect(billingSrc, '화면이 부를 경로가 없으면 복구 수단이 아니다').toContain("router.post('/bulk/retry-confirmations'");
+    // batch_id는 장이 2개 이상일 때만 생긴다(billing-issue). 그걸로만 받으면 기본 발급(단일 장)에 안 닿는다.
+    expect(billingSrc, '입력은 장 id여야 한다').toContain('billing_id');
+    expect(billingSrc, 'batch_id를 입력으로 받으면 단일 장이 복구 불가가 된다').not.toContain('req.body || {}).batch_id');
+  });
+
+  it('발송 차단 사유를 금액 불일치와 인프라 장애로 나눠 센다 — 뭉치면 멀쩡한 묶음을 지우고 재발행하게 된다', () => {
+    expect(confirmSrc, '금액이 틀린 장 — 재발송으로 안 풀린다').toContain('mismatchBlocked');
+    expect(confirmSrc, '조회·렌더·디스크 장애 — 재시도하면 풀린다').toContain('renderFailed');
+    expect(bulkSrc, '작업 결과 문구도 둘을 나눠 안내해야 한다').toContain('메일 재시도');
+  });
+
+  it('PDF 쓰기 스트림 오류를 reject로 올린다 — finish만 기다리면 디스크 오류에서 배치가 영원히 멈춘다', () => {
+    expect(pdfSrc).toMatch(/stream\.on\('error'/);
+    expect(pdfSrc, '부분 파일을 남기면 다음 실행이 헷갈린다').toMatch(/unlinkSync\(pdfPath\)/);
+  });
+
+  it('다운로드본은 응답 뒤 지운다 — 렌더마다 새 파일이라 정리하지 않으면 누를 때마다 쌓인다', () => {
+    expect(billingSrc).toMatch(/fileStream\.on\('close'[\s\S]{0,160}unlinkSync\(pdfPath\)/);
+  });
+
+  it('메일 버튼은 컨펌 하나다 — "확인 · 컨펌" 합성 라벨은 누르는 순간 컨펌된 것처럼 읽힌다 (Harold 2026-07-28)', () => {
+    expect(confirmSrc).not.toContain('거래내역서 확인 · 컨펌하기');
+  });
+
+  it('공개 페이지는 항목표를 다시 그리지 않는다 — 내역의 진실은 첨부 PDF 하나다 (Harold 2026-07-28)', () => {
+    expect(publicSrc, '항목 줄 CT를 페이지에서 다시 쓰면 내역이 두 벌이 된다')
+      .not.toContain('buildInvoiceLines');
+    expect(publicSrc, 'billing_items를 페이지가 다시 조회하면 안 된다').not.toContain('FROM billing_items');
+  });
+
+  it('컨펌·이의신청은 바뀐 행 수를 확인하고 성공을 말한다 — 6원칙 ②', () => {
+    // 상태 점검과 UPDATE 사이 경합에서 지면 0행인데, 그대로 success를 주면 화면이 "완료"를 띄운다.
+    const confirmBlock = publicSrc.slice(publicSrc.indexOf("router.post('/:token/confirm'"), publicSrc.indexOf("router.post('/:token/objection'"));
+    expect(confirmBlock, '컨펌이 rowCount를 안 본다').toMatch(/rowCount/);
+    const objectionBlock = publicSrc.slice(publicSrc.indexOf("router.post('/:token/objection'"));
+    expect(objectionBlock, '이의신청이 rowCount를 안 본다').toMatch(/rowCount/);
+  });
+
+  it('PDF 표시 이름과 디스크 경로는 분리돼 있다 — 같으면 동시 렌더가 같은 파일을 물고 재발행이 옛 문서를 덮는다', () => {
+    expect(pdfSrc).toContain('buildDisplayFilename');
+    expect(pdfSrc, '디스크 파일명은 렌더마다 달라야 한다(시각+난수)').toContain('buildDiskFilename');
+    expect(pdfSrc, '디스크 이름에 난수가 없으면 동시 렌더가 겹친다').toContain('randomBytes');
+    // 라우트는 표시 이름을 Content-Disposition에, 디스크 경로를 스트림에 쓴다.
+    expect(billingSrc).toMatch(/Content-Disposition[\s\S]{0,80}encodeURIComponent\(displayFilename\)/);
+  });
+
+  it('메일 라우트는 PDF가 디스크에 있는지 추측하지 않는다 — 파일명 규칙이 바뀌면 조용히 깨지던 자리', () => {
+    expect(billingSrc, '"먼저 다운로드하세요" 분기는 폐기됐다').not.toContain('BILLING_PDF_NOT_READY');
+    expect(billingSrc).not.toContain('PDF가 아직 생성되지 않았습니다');
+  });
+
+  it('사업자등록번호는 트랜잭션 전에 전부 검증하고 어느 계정인지 알려준다', () => {
+    const putIdx = billingSrc.indexOf("router.put('/company-billing-settings/:companyId'");
+    const beginIdx = billingSrc.indexOf("client.query('BEGIN')", putIdx);
+    const preamble = billingSrc.slice(putIdx, beginIdx);
+    expect(preamble, 'BEGIN 뒤에서 던지면 같이 넣은 다른 값까지 롤백된다').toContain('normalizeBizNumber');
+    expect(preamble, '오류에 계정 라벨이 붙어야 한다').toContain('c.label');
+  });
+
+  it('정산 목록에서 발행됨·미발송 장을 다시 찾을 수 있다 — 발송이 막힌 장은 컨펌 목록에 안 뜬다', () => {
+    expect(billingSrc).toContain('b.emailed_at IS NULL');
+  });
+
+  it('소스에 NUL 바이트가 없다 — 조립·치환 중 제어문자가 섞이면 도구가 파일을 바이너리로 본다', () => {
+    for (const [name, src] of [['billing-pdf', pdfSrc], ['invoice-confirm', confirmSrc], ['invoice-public', publicSrc], ['billing', billingSrc]] as const) {
+      expect(src.includes(String.fromCharCode(0)), `${name}.ts에 NUL 바이트가 있다`).toBe(false);
+    }
   });
 
   it('발행·삭제·메일이 전부 같은 트랜잭션 헬퍼를 쓴다 — pool.query로 BEGIN을 걸면 커넥션이 갈려 트랜잭션이 성립하지 않는다', () => {

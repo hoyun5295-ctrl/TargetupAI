@@ -460,7 +460,7 @@ CREATE INDEX IF NOT EXISTS idx_agent_charge_orders_company ON agent_charge_order
 | 8-5 | ~~PayMethod·PayFkey 코드 체계~~ **★0724 종결(강문희 회신)**: PayMethod 1=카드·2=계좌이체(코드명 RSRMPYTY), PayFkey=PG 결제키(별도 테이블 연결용). **둘 다 PAY쪽 충전관리 전용 — 중계서버 미사용, 비워도 무방.** 분포 실측(현행 전부 '2'+PayFkey 빈 값)과 정합. **우리 INSERT = PayMethod '2' + PayFkey 비움 확정** | 완료 |
 | 8-6 | ~~SeqNo 채번 충돌~~ **★0724 종결(강문희 회신)**: 엔진 반영 기준 = **RsApplyFlag**(N 읽어 증액 후 Y update, 중복 방지). SeqNo는 이력용 auto_increment일 뿐 워터마크 아님 → 62 재채번 무해. 백필 시 SeqNo 제외 INSERT | 완료 |
 | 8-7 | 62에 INSERT 권한 있는 계정 — 현재 backend용 `paystats`는 **SELECT 전용** | 충전용 쓰기 계정 신설 필요 (§5-3 구현 단계) |
-| 8-8 | 서수란 Q2의 런소프트 "1,2,3"이 `C0130`·`D0078`·`D0079` 맞는지 | 서수란 확인 |
+| 8-8 | 서수란 Q2의 런소프트 "1,2,3"이 `C0130`·`D0078`·`D0079` 맞는지 + **통장 대조 미해소**(런소프트 통장 3,100만 vs 143 실측 2,600만 — 차 500만. `C0130`은 1월 이후 충전 0이라 143에 안 잡히는 입금 경로가 따로 있는지 확인 필요) | 서수란 확인 |
 | 8-9 | ~~동일 (CustId, DestDt) RemAmt 불일치 여부~~ **★0724 행 단위 실측까지 완료 — 권위 행 확정**: RemAmt는 **StoreId=''(계정 합계 행)에만** 실린다. D0130 실증 = 빈 StoreId 행(L·S) 둘 다 18,445(같은 값 복제), UUID StoreId 상세 행 전부 0. B0001 = 빈 행 7,390.1 / 'alarm' 행 0. 부수 확정: SalesStts.StoreId(§8-3)의 정체 = 하위 스토어/채널 상세 축('' = 계정 합계). 코드 규칙 = StoreId 빈 행만 잔액 소스(SQL+순수 함수 이중 적용) + DestDt 최대 → 값 보유·최대(방어) → UpdTm → MsgType. **배포 게이트 해소** | 완료 |
 | 8-10 | ~~RSRM_SalesStts 인덱스~~ **★0724 실측: PK = (DestDt, CustId, StoreId, MsgType)** — DestDt 선두라 CustId 조건 MAX(DestDt)는 범위 스캔(총 959,106행). **소견 = `(CustId, DestDt)` 보조 인덱스 추가 필요**(조회 자주 아님·대시보드 로드당 1회지만 안전). 실행 전 강문희 엔진(replace 쓰기) 영향 확인. 부수 확정: PK 덕에 완전 동일 키 중복 행 불가(선택 결정성 보장) | 실측 완료 — 인덱스 추가 대기 |
 

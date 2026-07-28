@@ -14,12 +14,19 @@
  */
 
 import { randomBytes } from 'crypto';
+import { unlinkSync } from 'node:fs';
 import nodemailer from 'nodemailer';
 import pool from '../config/database';
 import {
   getCompanyBillingSettings, listBillingContacts,
   computeTaxbillIssueDate, computeTaxbillDueAt,
 } from './billing-settings';
+// ★ 2026-07-28 거래내역서 PDF를 메일에 첨부한다. 첨부가 없어서 웹페이지에서 항목표를 다시 그려야 했고,
+//   그 페이지가 "확인"과 "컨펌"을 한 화면에 섞어 버튼 뜻이 흐려졌다(Harold 2026-07-28).
+//   장(billings 행)마다 PDF가 따로다 — 전체 발급은 한 장, 계정별 발급은 계정 장 각각 + 공통 장.
+import { loadBillingStatementData, renderBillingStatementPdf } from './billing-pdf';
+import { buildInvoiceLines, checkInvoiceLinesAgainstHeader } from './billing-invoice-lines';
+import { INVITO_INFO } from '../config/defaults';
 
 /** 발송 총시간 상한(ms) — send-email 라우트와 동일 60초. 행 잠금·풀 커넥션 체류의 상한이다. */
 const MAIL_TOTAL_TIMEOUT_MS = 60_000;
@@ -49,6 +56,72 @@ export interface ConfirmSendSummary {
   skippedNoEmail: number;  // 담당자 이메일 미등록 — 자동화 제외
   mailFailed: number;      // SMTP 실패 — 행 미생성(수동 재발송 대상)
   manualWait: number;      // 직접선택 정책 — 자동 발급 제외로 생성된 행 수
+  // ★ 2026-07-28 두 축을 나눈다 — 하나로 세면 일시적 디스크 장애에도 운영자가 멀쩡한 묶음을 지우고 재발행한다.
+  mismatchBlocked: number; // 항목합 ≠ 공급가액. 금액이 틀린 문서라 **재발송으로 안 풀린다** — 삭제 후 재발행
+  renderFailed: number;    // 조회·렌더·디스크 장애. 금액과 무관하니 **재시도하면 풀린다** — 삭제 대상 아님
+}
+
+// ═══════════════════════════════════════════════════════════
+// 미발송 재시도 (★2026-07-28 재구성)
+// ═══════════════════════════════════════════════════════════
+//
+// 발행은 메일 단계보다 **먼저 커밋된다.** 그래서 발송이 막히면 장은 남고 메일만 안 나간 상태가 되는데,
+// 일괄발급을 다시 돌리면 기존 장 때문에 `BILLING_PERIOD_OVERLAP`에 먼저 막혀 재시도할 길이 없었다.
+// ⇒ **발행은 그대로 두고 통지 단계만 다시 태운다.**
+//
+// 재구성 후에는 별도 판정이 필요 없다 — 적재 단계가 "이미 나갔거나 살아 있는 추적행이 있으면 건너뛴다"를
+// 트랜잭션 안에서 보장하므로, 같은 함수를 그대로 다시 부르면 그것이 곧 멱등 재시도다.
+// 여기서는 "어느 장들을 다시 태울지"만 고른다.
+
+export interface RetryResult extends ConfirmSendSummary {
+  /** 재시도 대상으로 잡힌 장 수. 0이면 보낼 것이 없었다는 뜻(이미 다 나갔거나 장을 못 찾았다). */
+  targeted: number;
+  companyName: string | null;
+}
+
+export async function retryUnsentConfirmations(billingId: string): Promise<RetryResult> {
+  const empty: RetryResult = {
+    sent: 0, skippedNoEmail: 0, mailFailed: 0, manualWait: 0,
+    mismatchBlocked: 0, renderFailed: 0, targeted: 0, companyName: null,
+  };
+
+  // 입력은 **장 id**다. `batch_id`는 장이 2개 이상일 때만 생기므로(billing-issue.ts),
+  // batch 기준으로만 받으면 기본 단위인 전체 발급(장 1개)에 복구 경로가 닿지 않는다.
+  // 장이 묶음의 일부면 형제 장까지 함께 태운다.
+  const r = await pool.query(
+    `WITH target AS (
+       SELECT batch_id, company_id, billing_start, billing_end FROM billings WHERE id = $1::uuid
+     )
+     SELECT b.id, b.scope, b.user_id, b.total_amount, b.company_id,
+            to_char(b.billing_start, 'YYYY-MM-DD') AS billing_start,
+            to_char(b.billing_end,   'YYYY-MM-DD') AS billing_end,
+            c.company_name
+       FROM billings b
+       JOIN companies c ON c.id = b.company_id
+       JOIN target t ON (
+              (t.batch_id IS NOT NULL
+                AND b.batch_id = t.batch_id AND b.company_id = t.company_id
+                AND b.billing_start = t.billing_start AND b.billing_end = t.billing_end)
+           OR (t.batch_id IS NULL AND b.id = $1::uuid)
+            )
+      WHERE b.emailed_at IS NULL
+      ORDER BY b.id`,
+    [billingId],
+  );
+  if (r.rows.length === 0) return empty;
+
+  const first = r.rows[0];
+  const summary = await createAndSendConfirmations({
+    companyId: String(first.company_id),
+    companyName: String(first.company_name || ''),
+    billingStart: String(first.billing_start),
+    billingEnd: String(first.billing_end),
+    sheets: r.rows.map((row: any) => ({
+      id: String(row.id), scope: String(row.scope), user_id: row.user_id ? String(row.user_id) : null,
+      total_amount: row.total_amount,
+    })),
+  });
+  return { ...summary, targeted: r.rows.length, companyName: String(first.company_name || '') };
 }
 
 /** 발행 직후 장별 메일 발송 + 컨펌 추적 행 생성. 실패는 집계로 돌려주고 던지지 않는다(발행 자체는 성공이다). */
@@ -60,7 +133,10 @@ export async function createAndSendConfirmations(opts: {
   sheets: SheetForConfirm[];
 }): Promise<ConfirmSendSummary> {
   const { companyId, companyName, billingStart, billingEnd, sheets } = opts;
-  const summary: ConfirmSendSummary = { sent: 0, skippedNoEmail: 0, mailFailed: 0, manualWait: 0 };
+  const summary: ConfirmSendSummary = {
+    sent: 0, skippedNoEmail: 0, mailFailed: 0, manualWait: 0,
+    mismatchBlocked: 0, renderFailed: 0,
+  };
 
   const settings = await getCompanyBillingSettings(companyId);
   const contacts = await listBillingContacts(companyId);
@@ -74,64 +150,144 @@ export async function createAndSendConfirmations(opts: {
 
   const transporter = getTransporter();
 
-  for (const sheet of sheets) {
-    const contact = sheet.scope === 'by_user' && sheet.user_id
-      ? (byUser.get(String(sheet.user_id)) || null)
-      : companyContact;
-    const email = String(contact?.contact_email || '').trim();
-    if (!email) {
-      summary.skippedNoEmail += 1;
-      continue;
+  // ═══ 1단계: 적재 — "누가 통지 대상인가"를 **메일보다 먼저 DB에 확정한다** ═══
+  //
+  // ★ 2026-07-28 재구성. 그전에는 발송이 성공한 뒤에야 추적행을 만들었다. 그래서 "이 장이 통지됐는가"의
+  //   진실이 메일이 나간 뒤에만 생겼고, 중간에 무엇이든 어긋나면 상태가 어디에도 남지 않았다.
+  //   부분 발송·중복 발송·고아 PDF·커넥션 고갈은 전부 그 하나에서 파생된 가지였다 —
+  //   preflight, 회사 세션 잠금, 발송 직전 재확인, 렌더본 추적을 하나씩 덧대도 다음 구멍이 계속 나왔다.
+  //   ⇒ 행을 **먼저** 만든다. 이 트랜잭션이 끝나면 대상자 명단은 DB에 있고, 그 뒤 무엇이 실패해도
+  //     남은 행이 곧 재시도 목록이다. 그래서 덧댔던 장치들이 전부 필요 없어졌다.
+  //
+  // 여기서 메일을 보내지 않고 PDF도 만들지 않는다(2단계에서 장별로 만든다 — 안 나간 렌더본이 남지 않는다).
+  type Claimed = { sheet: SheetForConfirm; contact: any; email: string; token: string };
+  const claimed: Claimed[] = [];
+  const claimClient = await pool.connect();
+  try {
+    await claimClient.query('BEGIN');
+    await claimClient.query(`SET LOCAL lock_timeout = '10s'`);
+    for (const sheet of sheets) {
+      const contact = sheet.scope === 'by_user' && sheet.user_id
+        ? (byUser.get(String(sheet.user_id)) || null)
+        : companyContact;
+      const email = String(contact?.contact_email || '').trim();
+      if (!email) {
+        // 이메일 미등록은 그 장만 자동 발송에서 빠지는 정상 경로다 — 다른 장을 멈추지 않는다.
+        summary.skippedNoEmail += 1;
+        continue;
+      }
+      // 장을 잠그고, 이미 나갔거나 살아 있는 추적행이 있으면 건너뛴다. 이 두 조건이 중복 발송 자물쇠다.
+      const row = await claimClient.query(
+        `SELECT b.id, b.emailed_at,
+                EXISTS (SELECT 1 FROM invoice_confirmations ic
+                         WHERE ic.billing_id = b.id AND ic.superseded_at IS NULL) AS has_confirmation
+           FROM billings b WHERE b.id = $1::uuid FOR UPDATE`,
+        [sheet.id],
+      );
+      if (row.rows.length === 0) {
+        console.error(`[일괄발급][장없음] billing=${sheet.id} — 적재 중 장이 사라져 건너뛴다.`);
+        summary.mailFailed += 1;
+        continue;
+      }
+      if (row.rows[0].emailed_at || row.rows[0].has_confirmation === true) {
+        console.log(`[일괄발급][이미적재] billing=${sheet.id} — 추적행이 이미 있거나 발송된 장이다. 다시 만들지 않는다.`);
+        continue;
+      }
+      const token = randomBytes(24).toString('hex'); // 48자 — 컬럼 varchar(64)
+      await claimClient.query(
+        `INSERT INTO invoice_confirmations (
+           billing_id, company_id, recipient_user_id, recipient_email, token,
+           sent_at, taxbill_status, taxbill_issue_date, taxbill_due_at
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, NOW(), $6, $7::date, $8)`,
+        [
+          sheet.id, companyId,
+          sheet.scope === 'by_user' ? sheet.user_id : null,
+          email, token, initialStatus, issueDate,
+          computeTaxbillDueAt(Date.now(), billingEnd),
+        ],
+      );
+      claimed.push({ sheet, contact, email, token });
     }
+    await claimClient.query('COMMIT');
+  } catch (claimErr: any) {
+    try { await claimClient.query('ROLLBACK'); } catch { /* 아래 로그가 사실을 전달한다 */ }
+    console.error(`[일괄발급][적재실패] company=${companyId} — ${claimErr?.message || claimErr}. 메일은 한 통도 나가지 않았다.`);
+    summary.mailFailed += sheets.length;
+    return summary;
+  } finally {
+    claimClient.release();
+  }
 
-    const token = randomBytes(24).toString('hex'); // 48자 — 컬럼 varchar(64)
+  // ═══ 2단계: 전송 — 적재된 행을 하나씩 실제로 내보낸다 ═══
+  //   여기서 무엇이 실패해도 행은 남는다. 남은 행이 곧 재시도 목록이라 "부분 발송"이 복구 가능한 상태가 된다.
+  //   PDF는 보내기 직전에 만든다 — 안 나간 렌더본이 디스크에 남지 않는다.
+  for (const { sheet, contact, email, token } of claimed) {
     const viewUrl = `${base}/api/invoice-view/${token}`;
     const amount = Number(sheet.total_amount) || 0;
 
-    // ★ 메일 문안 초안 — 확정 문구는 Harold 검토 후 교체(설계문서 §9).
+    // ★ 2026-07-28 버튼은 하나다. 내역은 첨부 PDF가 담당하고, 이 링크는 컨펌 화면으로만 보낸다.
+    //   ("확인 · 컨펌"으로 붙여두면 누르는 순간 컨펌된 것처럼 읽힌다 — Harold 2026-07-28)
     const html = `
       <div style="max-width:560px;margin:0 auto;font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#1f2937;">
         <div style="padding:28px 24px;border:1px solid #e5e7eb;border-radius:12px;">
-          <p style="font-size:18px;font-weight:700;margin:0 0 4px;">한줄로 거래내역서 확인 요청</p>
+          <p style="font-size:18px;font-weight:700;margin:0 0 4px;">거래내역서를 보내드립니다</p>
           <p style="font-size:13px;color:#6b7280;margin:0 0 20px;">${esc(companyName)} · ${esc(periodLabel)}</p>
           <p style="font-size:14px;line-height:1.7;margin:0 0 16px;">
             안녕하세요, ${esc(contact?.contact_name || '담당자')}님.<br/>
-            ${esc(periodLabel)} 이용분 거래내역서가 발행되어 안내드립니다.
+            ${esc(periodLabel)} 이용분 거래내역서를 <b>첨부</b>해 드렸습니다. 내용을 확인하신 뒤 아래 버튼을 눌러 주세요.
           </p>
           <p style="font-size:15px;margin:0 0 20px;">청구 금액(부가세 포함): <b>${amount.toLocaleString()}원</b></p>
-          <a href="${viewUrl}" style="display:inline-block;padding:12px 22px;background:#4f46e5;color:#fff;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">거래내역서 확인 · 컨펌하기</a>
+          <a href="${viewUrl}" style="display:inline-block;padding:14px 30px;background:#4f46e5;color:#fff;border-radius:8px;text-decoration:none;font-size:15px;font-weight:600;">컨펌하기</a>
           <p style="font-size:12px;color:#6b7280;line-height:1.7;margin:20px 0 0;">
-            내용 확인 후 [컨펌]을 눌러 주시면 세금계산서 발행이 진행됩니다.<br/>
-            내용에 이견이 있으시면 같은 화면의 [이의신청]으로 의견을 남겨 주세요.<br/>
-            3일 안에 응답이 없으면 내역이 확정된 것으로 보고 세금계산서 발행이 진행됩니다.
+            컨펌해 주시면 세금계산서 발행이 진행됩니다.<br/>
+            3일 안에 응답이 없으면 내역이 확정된 것으로 보고 발행이 진행됩니다.<br/>
+            내용에 이견이 있으시면 같은 화면에서 이의신청을 남겨 주세요.
           </p>
         </div>
       </div>`;
 
-    // ★ Codex 3R HIGH 수용 — 삭제 경합을 **행 잠금 트랜잭션**으로 봉인한다. 마커 선행만으로는
-    //   사유를 적은 삭제가 가드를 통과해 "마커 → 삭제 → 발송" 순서가 남았다.
-    //   이 코드베이스의 정석을 그대로 미러링한다: 정산서 메일 라우트가 "행 잠금을 든 트랜잭션
-    //   안에서 SMTP를 부른다"(위 transporter 주석·타임아웃 15/15/40초로 잠금 시간 유계).
-    //   FOR UPDATE를 잡고 있는 동안 삭제는 대기하고, COMMIT 후에는 마커가 보여 발송 보호에 걸린다.
-    //   실패 모드: 발송 실패 → ROLLBACK(마커·행 없음, 메일도 없음 — 깨끗). 발송 후 DB 실패 →
-    //   ROLLBACK 후 마커만 자동커밋으로 재적용(발송 사실 보존) + 죽은 링크는 1R 이월 그대로
-    //   (복구 = 삭제 후 재발행). outbox 체계는 설계문서 §9 이월.
+    // 이 장의 PDF는 **보내기 직전에** 만든다. 미리 만들어 두면 발송이 막힌 회차마다 렌더본이 그대로 쌓인다.
+    //   정합 검사는 다운로드 라우트와 같은 것을 쓴다 — 항목합이 공급가액과 어긋나는 문서는 회수가 안 된다.
+    let attachment: { filename: string; path: string };
+    try {
+      const pdfData = await loadBillingStatementData(sheet.id);
+      if (!pdfData) throw new Error('정산 행을 찾지 못했습니다');
+      const check = checkInvoiceLinesAgainstHeader(
+        buildInvoiceLines(pdfData.items),
+        Number(pdfData.bil.ai_credit_supply) || 0,
+        Number(pdfData.bil.subtotal) || 0,
+      );
+      if (!check.ok) {
+        console.error(`[일괄발급][정합실패] billing=${sheet.id} — 항목합 ${check.linesSum} + 크레딧 ${check.aiCreditSupply} ≠ 공급가액 ${check.subtotal} (차이 ${check.diff}). 금액을 정정한 뒤 재시도해야 한다.`);
+        summary.mismatchBlocked += 1;
+        continue; // 추적행은 남는다 — 금액을 고치면 [메일 재시도]로 그대로 이어진다
+      }
+      const rendered = await renderBillingStatementPdf(pdfData.bil, pdfData.items);
+      attachment = { filename: rendered.displayFilename, path: rendered.pdfPath };
+    } catch (pdfErr: any) {
+      console.error(`[일괄발급][PDF실패] billing=${sheet.id} — ${pdfErr?.message || pdfErr}. 재시도 가능한 장애다.`);
+      summary.renderFailed += 1;
+      continue; // 마찬가지로 추적행이 남아 재시도 대상이 된다
+    }
+
+    // 발송 표시를 SMTP **앞에** 남기고 그 트랜잭션 안에서 보낸다(이 레포의 정석 — 발송 중 삭제 차단).
+    //   실패하면 ROLLBACK으로 표시가 지워져 추적행과 함께 그대로 재시도 대상이 된다.
     const client = await pool.connect();
     let mailWasSent = false;
     try {
       await client.query('BEGIN');
-      // ★ Codex 4R 수용 — 잠금 대기·발송 총시간에 **명시 상한**을 건다(기존 send-email 라우트 정석 미러).
-      //   nodemailer 타임아웃 3종은 연결·인사·소켓 무활동 기준이라 총 발송시간 상한이 아니다 —
-      //   저속 응답 서버면 행 잠금·풀 커넥션을 무기한 쥔다. lock_timeout은 남의 잠금을 기다리는 쪽 상한.
+      // 잠금 대기·발송 총시간에 명시 상한을 건다(nodemailer 타임아웃 3종은 총 소요시간 상한이 아니다).
       await client.query(`SET LOCAL lock_timeout = '10s'`);
-      const locked = await client.query(
-        `SELECT id FROM billings WHERE id = $1::uuid FOR UPDATE`,
-        [sheet.id],
+      // 발송 소유권을 조건부 UPDATE 하나로 잡는다 — 0행이면 다른 요청이 이미 가져갔다는 뜻이다.
+      const claimRes = await client.query(
+        `UPDATE billings SET emailed_at = NOW(), emailed_to = $2
+          WHERE id = $1::uuid AND emailed_at IS NULL RETURNING id`,
+        [sheet.id, email],
       );
-      if (locked.rows.length === 0) {
+      if (claimRes.rowCount === 0) {
         await client.query('ROLLBACK');
-        console.error(`[일괄발급][장삭제경합] billing=${sheet.id} — 발송 직전에 장이 사라져 발송을 중단한다.`);
-        summary.mailFailed += 1;
+        try { unlinkSync(attachment.path); } catch { /* 안 나간 렌더본은 남기지 않는다 */ }
+        console.log(`[일괄발급][중복차단] billing=${sheet.id} — 다른 요청이 먼저 가져갔다(또는 장이 사라졌다).`);
         continue;
       }
       await client.query(
@@ -144,16 +300,19 @@ export async function createAndSendConfirmations(opts: {
       let mailTimedOut = false;
       await Promise.race([
         transporter.sendMail({
-          from: process.env.SMTP_USER,
+          // 고객문의 메일과 같은 계정(SMTP_USER)이다 — 표시명·회신 주소만 명시한다.
+          from: `"한줄로" <${process.env.SMTP_USER || INVITO_INFO.email}>`,
+          replyTo: INVITO_INFO.email,
           to: email,
-          subject: `[한줄로] ${companyName} 거래내역서 확인 요청 (${billingStart.slice(0, 7)})`,
+          subject: `[한줄로] ${companyName} 거래내역서 (${billingStart.slice(0, 7)}) — 확인 요청`,
           html,
+          attachments: [attachment],
         }),
         new Promise((_, reject) => setTimeout(() => { mailTimedOut = true; reject(new Error('MAIL_TOTAL_TIMEOUT')); }, MAIL_TOTAL_TIMEOUT_MS)),
       ]).catch(async (raceErr) => {
         if (mailTimedOut) {
-          // 발송 불확정 — 마커는 **커밋해 남긴다**(전달됐을 수 있어 삭제·중복 보호 유지).
-          //   추적 행은 만들지 않는다 — 도착 불명 메일에 3일 타이머를 걸면 고객이 못 본 채 자동 발급된다.
+          // 발송 불확정 — 표시를 **커밋해 남긴다**(전달됐을 수 있으므로 중복 발송을 막는 쪽을 택한다).
+          //   추적행은 이미 1단계에서 만들어졌고, 마감은 아래에서 못 채우므로 적재 시점 값이 남는다.
           await client.query('COMMIT');
           console.error(`[일괄발급][발송불확정] billing=${sheet.id} to=${email} — ${MAIL_TOTAL_TIMEOUT_MS / 1000}초 초과. 발송 여부 불명, 표식만 남김. 수동 확인 필요.`);
         }
@@ -161,24 +320,20 @@ export async function createAndSendConfirmations(opts: {
       });
       mailWasSent = true;
 
+      // 실제로 나간 시각으로 추적행을 확정한다. 마감은 **발송일 기준** 3일 뒤 09:00 KST(익월 10일 캡).
+      //   적재는 오늘 값으로 넣어두는데, 재시도가 다음 날 성공하면 그날 기준으로 다시 잡혀야 한다.
       await client.query(
-        `INSERT INTO invoice_confirmations (
-           billing_id, company_id, recipient_user_id, recipient_email, token,
-           sent_at, taxbill_status, taxbill_issue_date, taxbill_due_at
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, NOW(), $6, $7::date, $8)`,
-        [
-          sheet.id, companyId,
-          sheet.scope === 'by_user' ? sheet.user_id : null,
-          email, token, initialStatus, issueDate,
-          computeTaxbillDueAt(Date.now(), billingEnd),
-        ],
+        `UPDATE invoice_confirmations
+            SET sent_at = NOW(), recipient_email = $2, taxbill_due_at = $3
+          WHERE billing_id = $1::uuid AND superseded_at IS NULL`,
+        [sheet.id, email, computeTaxbillDueAt(Date.now(), billingEnd)],
       );
       await client.query('COMMIT');
     } catch (err: any) {
       try { await client.query('ROLLBACK'); } catch { /* 타임아웃 경로는 이미 COMMIT됨 — 무해한 no-op */ }
       if (mailWasSent) {
-        // 메일은 나갔는데 행·마커가 롤백됐다 — 마커만 되살려 발송 사실을 보존한다(삭제 보호 유지).
-        console.error(`[일괄발급][추적행실패] billing=${sheet.id} to=${email} — 메일은 발송됨, 링크 무효 상태. 수동 확인 필요:`, err?.message || err);
+        // 메일은 나갔는데 확정 UPDATE가 롤백됐다 — 표시만 되살려 발송 사실을 보존한다(중복 발송 차단 유지).
+        console.error(`[일괄발급][확정실패] billing=${sheet.id} to=${email} — 메일은 발송됨. 수동 확인 필요:`, err?.message || err);
         try {
           await pool.query(
             `UPDATE billings SET emailed_at = COALESCE(emailed_at, NOW()), emailed_to = COALESCE(emailed_to, $2) WHERE id = $1::uuid`,
@@ -186,8 +341,9 @@ export async function createAndSendConfirmations(opts: {
           );
         } catch { /* 장 자체가 사라진 경우 — 위 로그로 충분 */ }
       } else if (String(err?.message) !== 'MAIL_TOTAL_TIMEOUT') {
-        // 타임아웃(발송 불확정)은 race 안에서 이미 로그·마커 커밋까지 끝냈다 — 여기선 일반 실패만 남긴다.
         console.error(`[일괄발급][메일실패] billing=${sheet.id} to=${email}:`, err?.message || err);
+        // 안 나간 첨부는 남기지 않는다. 추적행은 살아 있으니 재시도하면 새로 렌더된다.
+        try { unlinkSync(attachment.path); } catch { /* 이미 없으면 그만 */ }
       }
       summary.mailFailed += 1;
       continue;

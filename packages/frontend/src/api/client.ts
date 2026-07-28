@@ -118,7 +118,8 @@ export const billingApi = {
   //   회사 전체가 계정 장 N + 공통 장 1 묶음으로 나온다.
   generateBilling: (data: { company_id: string; scope?: 'combined' | 'by_user'; billing_start: string; billing_end: string }) =>
     api.post('/admin/billing/generate', data),
-  getBillings: (params?: { company_id?: string; year?: number; status?: string }) =>
+  // unsent: '1' = 발행됐지만 고객에게 안 나간 장만(★2026-07-28 — 정합 검사로 발송이 막힌 장을 다시 찾는 경로)
+  getBillings: (params?: { company_id?: string; year?: number; status?: string; unsent?: '1' }) =>
     api.get('/admin/billing/list', { params }),
   getBillingItems: (id: string) =>
     api.get(`/admin/billing/${id}/items`),

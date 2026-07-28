@@ -15,6 +15,7 @@ import AgentDeployWizard from '../components/admin/AgentDeployWizard'; // 싱크
 import { COMPANY_EMAIL } from '../constants/company';
 import { formatAgentIdLabel } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스(발급명 병기)
 import { formatPlanOptionLabel } from '../utils/planLabel'; // ★ 2026-07-28 요금제 라벨 = 월정액(고객 수 축 폐기)
+import { taxbillIssueDatePreviewText, type TaxbillDayPolicy } from '../utils/taxbillDate'; // ★ 2026-07-28 작성일자 미리보기(예시 월 하드코딩 제거)
 import { creditTxLabel } from '../constants/credit'; // 크레딧 사용 이력 작업명 라벨
 
 interface Company {
@@ -370,6 +371,10 @@ const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
 const [billings, setBillings] = useState<any[]>([]);
 const [billingsLoading, setBillingsLoading] = useState(false);
 const [filterYear, setFilterYear] = useState(new Date().getFullYear());
+// ★ 2026-07-28 발행됨·미발송만 보기 토글 (emailed_at IS NULL)
+const [billingUnsentOnly, setBillingUnsentOnly] = useState(false);
+// 컨펌 메일 재시도 중인 장 — 같은 행을 연타해 중복 요청이 겹치지 않게 한다.
+const [retryingBillingId, setRetryingBillingId] = useState<string | null>(null);
 const [showBillingDetail, setShowBillingDetail] = useState(false);
 const [detailBilling, setDetailBilling] = useState<any>(null);
 const [detailItems, setDetailItems] = useState<any[]>([]);
@@ -690,7 +695,7 @@ const [emailResendAt, setEmailResendAt] = useState<string | null>(null);
   }, []);
 // ===== 정산 useEffect =====
 useEffect(() => { if (activeTab === 'billing') { loadBillings(); loadInvoices(); } }, [activeTab]);
-useEffect(() => { if (activeTab === 'billing') loadBillings(); }, [filterYear]);
+useEffect(() => { if (activeTab === 'billing') loadBillings(); }, [filterYear, billingUnsentOnly]);
 useEffect(() => { if (activeTab === 'deposits') loadChargeManagement(1); }, [activeTab, chargeTxCompanyFilter, chargeTxTypeFilter, chargeTxMethodFilter, chargeTxStartDate, chargeTxEndDate]);
 useEffect(() => { if (activeTab === 'deposits' || activeTab === 'credits') loadCreditRequests(); if (activeTab === 'credits') { loadAllCreditTx(1); loadCreditRisk(); } }, [activeTab]);
 useEffect(() => { loadCreditRequests(); }, []);  // 크레딧 관리 알람 badge 상시 표시용 mount 로드
@@ -1254,9 +1259,36 @@ const syncTimeAgo = (dateStr: string | null) => {
 // ===== 정산 함수 =====
 const loadBillings = async () => {
   setBillingsLoading(true);
-  try { const res = await billingApi.getBillings({ year: filterYear }); setBillings(res.data); }
+  // ★ 2026-07-28 미발송만 보기 — 일괄발급에서 금액 불일치로 발송이 막힌 장은 컨펌 추적 목록에 안 뜬다.
+  //   작업 결과 문구는 화면을 닫으면 사라지므로, 여기서 언제든 다시 찾을 수 있어야 한다.
+  try {
+    const res = await billingApi.getBillings({ year: filterYear, ...(billingUnsentOnly ? { unsent: '1' as const } : {}) });
+    setBillings(res.data);
+  }
   catch (e) { console.error(e); }
   finally { setBillingsLoading(false); }
+};
+// ★ 2026-07-28 발행은 됐고 메일만 안 나간 묶음의 컨펌 단계 재시도.
+//   발행을 다시 하지 않는다(기간 중복에 막힌다). 이미 나간 장은 서버가 대상에서 빼므로 중복 발송이 없다.
+const handleRetryConfirmations = async (billingId: string, companyName: string) => {
+  if (!billingId) return;
+  setRetryingBillingId(billingId);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch('/api/admin/billing/bulk/retry-confirmations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ billing_id: billingId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || '재시도에 실패했습니다.');
+    showAlert(data.targeted === 0 ? '확인' : '완료', `${companyName} — ${data.message}`, data.targeted === 0 ? 'info' : 'success');
+    await loadBillings();
+  } catch (e: any) {
+    showAlert('오류', e?.message || '재시도에 실패했습니다.', 'error');
+  } finally {
+    setRetryingBillingId(null);
+  }
 };
 const loadInvoices = async () => {
   setInvoicesLoading(true);
@@ -2761,9 +2793,18 @@ const handleApproveRequest = async (id: string) => {
   const [btLoading, setBtLoading] = useState(false);
   const [btSaving, setBtSaving] = useState(false);
   const [btSettings, setBtSettings] = useState({ issue_scope: 'combined', taxbill_day_policy: 'last_day' });
-  const [btCompanyContact, setBtCompanyContact] = useState({ name: '', email: '' });
+  // 회사 레벨 = billing_contacts(user_id NULL) 한 행 — 정산 담당자 + 계산서 사업자를 함께 갖는다.
+  //   any로 두면 6개 키 이름 오타를 tsc가 못 잡는다(load·save·모달 3곳에 같은 키를 적는다).
+  type BillingBizFields = {
+    taxbill_biz_number: string; taxbill_company_name: string; taxbill_ceo_name: string;
+    taxbill_address: string; taxbill_biz_type: string; taxbill_biz_item: string;
+  };
+  const [btCompanyContact, setBtCompanyContact] =
+    useState<{ name: string; email: string } & Partial<BillingBizFields>>({ name: '', email: '' });
   const [btAccounts, setBtAccounts] = useState<any[]>([]);
-  const [btBizModalUserId, setBtBizModalUserId] = useState<string | null>(null);
+  // 사업자 모달 대상: 'company' = 회사 기본 사업자 / 그 외 문자열 = 계정 user_id / null = 닫힘.
+  //   ⚠ 회사 레벨의 user_id는 NULL이라 null을 대상 식별자로 쓰면 "닫힘"과 구분되지 않는다 — sentinel을 둔다.
+  const [btBizTarget, setBtBizTarget] = useState<string | null>(null);
   const [btBizDraft, setBtBizDraft] = useState<any>({});
   const [btBizExtracting, setBtBizExtracting] = useState(false);
 
@@ -2818,7 +2859,12 @@ const handleApproveRequest = async (id: string) => {
         issue_scope: sData?.settings?.issueScope || 'combined',
         taxbill_day_policy: sData?.settings?.taxbillDayPolicy || 'last_day',
       });
-      setBtCompanyContact({ name: companyC?.contact_name || '', email: companyC?.contact_email || '' });
+      setBtCompanyContact({
+        name: companyC?.contact_name || '', email: companyC?.contact_email || '',
+        taxbill_biz_number: companyC?.taxbill_biz_number || '', taxbill_company_name: companyC?.taxbill_company_name || '',
+        taxbill_ceo_name: companyC?.taxbill_ceo_name || '', taxbill_address: companyC?.taxbill_address || '',
+        taxbill_biz_type: companyC?.taxbill_biz_type || '', taxbill_biz_item: companyC?.taxbill_biz_item || '',
+      });
       const users: any[] = Array.isArray(uData) ? uData : [];
       setBtAccounts(users.map((u: any) => {
         const c: any = contacts.find((x: any) => String(x.user_id) === String(u.id)) || {};
@@ -2857,10 +2903,18 @@ const handleApproveRequest = async (id: string) => {
         body: JSON.stringify({
           issue_scope: btSettings.issue_scope,
           taxbill_day_policy: btSettings.taxbill_day_policy,
-          company_contact: { name: btCompanyContact.name, email: btCompanyContact.email },
+          // 회사 레벨은 담당자 + 계산서 사업자를 함께 보낸다. 사업자를 비워 보내면 그대로 NULL이 되고,
+          // 발급 시 회사 기본정보(companies)로 내려간다 — 우선순위는 SoT §5 참조.
+          company_contact: {
+            name: btCompanyContact.name, email: btCompanyContact.email,
+            taxbill_biz_number: btCompanyContact.taxbill_biz_number, taxbill_company_name: btCompanyContact.taxbill_company_name,
+            taxbill_ceo_name: btCompanyContact.taxbill_ceo_name, taxbill_address: btCompanyContact.taxbill_address,
+            taxbill_biz_type: btCompanyContact.taxbill_biz_type, taxbill_biz_item: btCompanyContact.taxbill_biz_item,
+          },
           // 토글이 전체 발급이어도 계정 담당자 입력분은 보존 저장한다 — 토글을 되돌렸을 때 다시 입력하지 않게.
           account_contacts: btAccounts.map((a) => ({
-            user_id: a.user_id, name: a.contact_name, email: a.contact_email,
+            // label = 사업자번호 검증 오류에 "어느 계정인지"를 담기 위한 표시용(서버 저장 대상 아님).
+            user_id: a.user_id, label: a.name || a.login_id, name: a.contact_name, email: a.contact_email,
             taxbill_biz_number: a.taxbill_biz_number, taxbill_company_name: a.taxbill_company_name,
             taxbill_ceo_name: a.taxbill_ceo_name, taxbill_address: a.taxbill_address,
             taxbill_biz_type: a.taxbill_biz_type, taxbill_biz_item: a.taxbill_biz_item,
@@ -7656,6 +7710,23 @@ const handleApproveRequest = async (id: string) => {
                             onChange={(e) => setBtCompanyContact({ ...btCompanyContact, email: e.target.value })}
                             className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
                         </div>
+                        {/* ★ 2026-07-28 회사 기본 사업자 — 전체 발급이면 이 사업자로 계산서가 나간다.
+                            계정별과 같은 모달·같은 사업자등록증 자동입력을 쓴다(문구만 분기). */}
+                        <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium text-gray-700">계산서 발급 사업자 (회사 기본)</p>
+                            <p className="text-[11px] text-gray-400 truncate">
+                              {btCompanyContact.taxbill_biz_number
+                                ? `${btCompanyContact.taxbill_company_name || ''} ${btCompanyContact.taxbill_biz_number}`.trim()
+                                : '미등록 — 비워두면 기본정보 탭의 회사 사업자정보로 발급됩니다.'}
+                            </p>
+                          </div>
+                          <button type="button"
+                            onClick={() => { setBtBizDraft({ ...btCompanyContact }); setBtBizTarget('company'); }}
+                            className={`shrink-0 px-2.5 py-1.5 rounded text-[11px] font-semibold border ${btCompanyContact.taxbill_biz_number ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}>
+                            {btCompanyContact.taxbill_biz_number ? '사업자 수정' : '사업자등록증 등록'}
+                          </button>
+                        </div>
                       </div>
 
                       {/* 계산서 발급일자 정책 */}
@@ -7665,10 +7736,12 @@ const handleApproveRequest = async (id: string) => {
                         <select value={btSettings.taxbill_day_policy}
                           onChange={(e) => setBtSettings({ ...btSettings, taxbill_day_policy: e.target.value })}
                           className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
-                          <option value="last_day">대상월 말일 (7월분 = 7/31, 30일 달이면 30일)</option>
-                          <option value="first_day">익월 1일 (7월분 = 8/1)</option>
+                          <option value="last_day">대상월 말일 (30일 달이면 30일, 2월이면 28·29일)</option>
+                          <option value="first_day">익월 1일 (12월분은 익년 1월 1일)</option>
                           <option value="manual">직접선택 (중간정산 등 — 발급 때마다 날짜 지정, 자동 발급 제외)</option>
                         </select>
+                        {/* ★ 2026-07-28 예시 월을 글자로 적어두면 그 달에만 맞는 안내가 된다 — 현재 달 기준으로 계산해 보여준다(CT: utils/taxbillDate) */}
+                        <p className="mt-2 text-xs text-indigo-600">{taxbillIssueDatePreviewText(btSettings.taxbill_day_policy as TaxbillDayPolicy)}</p>
                       </div>
 
                       {/* 계정별 담당자·사업자 (개별 발급일 때 펼침) */}
@@ -7691,7 +7764,7 @@ const handleApproveRequest = async (id: string) => {
                                   onChange={(e) => setBtAccounts((prev) => prev.map((x) => x.user_id === a.user_id ? { ...x, contact_email: e.target.value } : x))}
                                   className="flex-1 px-2 py-1.5 border rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none" />
                                 <button type="button"
-                                  onClick={() => { setBtBizDraft({ ...a }); setBtBizModalUserId(a.user_id); }}
+                                  onClick={() => { setBtBizDraft({ ...a }); setBtBizTarget(a.user_id); }}
                                   className={`shrink-0 px-2.5 py-1.5 rounded text-[11px] font-semibold border ${a.taxbill_biz_number ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
                                   {a.taxbill_biz_number ? `사업자 ${a.taxbill_biz_number}` : '계산서 사업자'}
                                 </button>
@@ -7708,12 +7781,18 @@ const handleApproveRequest = async (id: string) => {
                     </>
                   )}
 
-                  {/* 계산서 발급 사업자 등록 모달 (계정별 — 사업장이 다른 경우) */}
-                  {btBizModalUserId && (
-                    <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4" onClick={() => setBtBizModalUserId(null)}>
+                  {/* 계산서 발급 사업자 등록 모달 — 회사 기본('company')과 계정별(user_id)이 같은 화면을 쓴다 */}
+                  {btBizTarget && (
+                    <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4" onClick={() => setBtBizTarget(null)}>
                       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
-                        <h3 className="text-base font-bold text-gray-900 mb-1">계산서 발급 사업자 등록</h3>
-                        <p className="text-xs text-gray-500 mb-3">이 계정의 계산서를 받을 사업자 정보입니다. 전부 비우면 회사 기본 사업자로 발급됩니다.</p>
+                        <h3 className="text-base font-bold text-gray-900 mb-1">
+                          {btBizTarget === 'company' ? '회사 기본 계산서 사업자' : '계산서 발급 사업자 등록'}
+                        </h3>
+                        <p className="text-xs text-gray-500 mb-3">
+                          {btBizTarget === 'company'
+                            ? '고객사 전체 발급이면 이 사업자로 세금계산서가 나갑니다. 전부 비우면 기본정보 탭의 회사 사업자정보로 발급됩니다.'
+                            : '이 계정의 계산서를 받을 사업자 정보입니다. 전부 비우면 회사 기본 사업자로 발급됩니다.'}
+                        </p>
                         {/* ★ 2026-07-28 사업자등록증 자동입력 — 파일을 올리면 상호·사업자번호·대표자·주소·업태·종목을 읽어 채운다 */}
                         <label className={`flex items-center justify-center gap-2 mb-4 px-3 py-2.5 border-2 border-dashed rounded-lg cursor-pointer text-xs font-semibold ${btBizExtracting ? 'border-gray-200 text-gray-400' : 'border-indigo-300 text-indigo-600 hover:bg-indigo-50'}`}>
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -7741,12 +7820,25 @@ const handleApproveRequest = async (id: string) => {
                           ))}
                         </div>
                         <div className="flex gap-2 mt-5">
-                          <button type="button" onClick={() => setBtBizModalUserId(null)}
+                          <button type="button" onClick={() => setBtBizTarget(null)}
                             className="flex-1 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50">취소</button>
                           <button type="button"
                             onClick={() => {
-                              setBtAccounts((prev) => prev.map((x) => x.user_id === btBizModalUserId ? { ...x, ...btBizDraft } : x));
-                              setBtBizModalUserId(null);
+                              // 회사 기본은 담당자 이름·이메일을 덮지 않도록 사업자 6필드만 병합한다(모달 draft에 담당자 값이 섞여 들어온다).
+                              if (btBizTarget === 'company') {
+                                setBtCompanyContact((prev: any) => ({
+                                  ...prev,
+                                  taxbill_biz_number: btBizDraft.taxbill_biz_number || '',
+                                  taxbill_company_name: btBizDraft.taxbill_company_name || '',
+                                  taxbill_ceo_name: btBizDraft.taxbill_ceo_name || '',
+                                  taxbill_address: btBizDraft.taxbill_address || '',
+                                  taxbill_biz_type: btBizDraft.taxbill_biz_type || '',
+                                  taxbill_biz_item: btBizDraft.taxbill_biz_item || '',
+                                }));
+                              } else {
+                                setBtAccounts((prev) => prev.map((x) => x.user_id === btBizTarget ? { ...x, ...btBizDraft } : x));
+                              }
+                              setBtBizTarget(null);
                             }}
                             className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold">적용 (저장 버튼으로 확정)</button>
                         </div>
@@ -9374,10 +9466,17 @@ const handleApproveRequest = async (id: string) => {
                 </svg>
                 정산 목록
               </h3>
-              <select value={filterYear} onChange={e => setFilterYear(Number(e.target.value))}
-                className="px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
-                {billingYearOptions.map(y => <option key={y} value={y}>{y}년</option>)}
-              </select>
+              <div className="flex items-center gap-2">
+                {/* ★ 2026-07-28 발행됐는데 고객에게 안 나간 장. 금액 불일치로 발송이 막힌 장은 컨펌 추적 목록에 안 뜬다 */}
+                <button type="button" onClick={() => setBillingUnsentOnly(!billingUnsentOnly)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${billingUnsentOnly ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
+                  발행됨 · 미발송만
+                </button>
+                <select value={filterYear} onChange={e => setFilterYear(Number(e.target.value))}
+                  className="px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                  {billingYearOptions.map(y => <option key={y} value={y}>{y}년</option>)}
+                </select>
+              </div>
             </div>
 
             {billingsLoading ? (
@@ -9430,6 +9529,16 @@ const handleApproveRequest = async (id: string) => {
                         </td>
                         <td className="px-4 py-2.5 text-center" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center justify-center gap-1">
+                          {/* ★ 2026-07-28 발행은 됐는데 메일이 안 나간 장 — 발행을 다시 하지 않고 컨펌 단계만 재시도한다.
+                              일괄발급 재실행은 기간 중복에 막히므로 이게 유일한 복구 경로다.
+                              장 id로 보낸다 — batch_id는 장이 2개 이상일 때만 생겨서 기본 발급(단일 장)에 안 닿는다. */}
+                          {!b.emailed_at && (
+                              <button onClick={() => handleRetryConfirmations(b.id, b.company_name)}
+                                disabled={retryingBillingId === b.id}
+                                className="px-2 py-1 text-xs bg-amber-100 text-amber-700 rounded hover:bg-amber-200 disabled:opacity-50 transition-colors">
+                                {retryingBillingId === b.id ? '재시도 중...' : '메일 재시도'}
+                              </button>
+                            )}
                           {b.status === 'draft' && (
                               <button onClick={() => handleBillingStatusChange(b.id, 'confirmed')}
                                 className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors">확정</button>

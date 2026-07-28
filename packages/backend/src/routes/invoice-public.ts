@@ -5,16 +5,17 @@
  * 마운트: /api/invoice-view (app.ts — 공개, 정산 담당자가 한줄로 계정이 없을 수 있다)
  *
  * 원칙:
- *  - 메일 클릭 즉시 확정 금지 — GET은 **중간 확인 페이지**(금액 요약)만 그리고,
- *    확정은 페이지 안 [컨펌] POST로만 된다(오클릭·메일 전달 사고 차단).
+ *  - 메일 클릭 즉시 확정 금지 — GET은 금액 요약과 [컨펌하기] 버튼만 그리고,
+ *    확정은 사람이 그 버튼을 눌러 보내는 POST로만 된다.
+ *    ⛔ GET으로 확정하면 보안 스캐너·메일 클라이언트의 링크 미리열기에 컨펌이 찍힌다.
+ *  - ★2026-07-28 상세 내역은 **메일 첨부 PDF**가 담당한다(Harold 지시). 여기서 항목표를 다시 그리지 않는다 —
+ *    같은 내역이 두 벌이 되고, 화면이 "검토"와 "컨펌"을 겸하면서 버튼 뜻이 흐려졌다.
  *  - 토큰 = invoice_confirmations.token 1회성 랜덤값. 재발급(superseded)·발급 완료(issued) 후 무효.
  *  - 이의신청 접수 즉시 자동 계산서 제외(status='objected') — 슈퍼관리자 목록에서 사람이 처리한다.
  */
 
 import express, { Router, Request, Response } from 'express';
 import pool from '../config/database';
-// ★ Codex 1R HIGH 수용 — 고객이 내역을 못 보고 컨펌하는 구조 정정: 청구서와 같은 항목 줄(CT)을 페이지에 그린다.
-import { buildInvoiceLines } from '../utils/billing-invoice-lines';
 
 const router = Router();
 // helmet·전역 json 파서보다 앞에 마운트되므로(CSP 차단 회피) 본문 파서는 라우터가 직접 든다.
@@ -53,19 +54,12 @@ function actionState(row: any): 'actionable' | 'confirmed' | 'objected' | 'issue
   return 'actionable';
 }
 
-function renderPage(row: any, lines: Array<{ label: string; unitPrice: number; count: number; amount: number; quantityText?: string }>): string {
+function renderPage(row: any): string {
   const state = actionState(row);
   const amount = (Number(row.total_amount) || 0).toLocaleString();
   const period = `${row.billing_start} ~ ${row.billing_end}`;
-  // ★ 재발급 무효분은 금액·내역을 숨긴다(Codex 1R 부분 수용) — 낡은 금액이 최신처럼 읽히는 것 차단.
+  // ★ 재발급 무효분은 금액을 숨긴다(Codex 1R 부분 수용) — 낡은 금액이 최신처럼 읽히는 것 차단.
   const hideDetail = state === 'superseded';
-  const detailRows = hideDetail ? '' : lines.map((l) => `
-        <tr>
-          <td>${esc(l.label)}</td>
-          <td class="num">${l.quantityText ? esc(l.quantityText) : (Number(l.count) || 0).toLocaleString()}</td>
-          <td class="num">${(Number(l.unitPrice) || 0).toLocaleString()}</td>
-          <td class="num">${(Number(l.amount) || 0).toLocaleString()}</td>
-        </tr>`).join('');
   const statusBanner =
     state === 'superseded' ? '<div class="banner warn">이 거래내역서는 재발급되어 더 이상 유효하지 않습니다. 새로 받으신 메일을 확인해 주세요.</div>'
     : state === 'issued' ? '<div class="banner ok">세금계산서 발행이 완료된 건입니다.</div>'
@@ -73,11 +67,17 @@ function renderPage(row: any, lines: Array<{ label: string; unitPrice: number; c
     : state === 'confirmed' ? `<div class="banner ok">컨펌이 완료되었습니다 (${new Date(row.confirmed_at).toLocaleString('ko-KR')}). 세금계산서 발행이 진행됩니다.</div>`
     : '';
 
+  // ★ 2026-07-28 주 버튼은 컨펌 하나다. 이의신청은 같은 무게의 버튼이 아니라 아래 작은 링크로 둔다 —
+  //   대다수는 컨펌하러 들어오는데 버튼 둘을 나란히 두면 무엇을 눌러야 하는지 한 번 더 생각하게 된다.
+  //   ⛔ 메일 링크(GET)만으로는 절대 컨펌하지 않는다. 보안 스캐너·메일 클라이언트가 링크를 미리 열면
+  //      사람이 누르지 않은 컨펌이 찍힌다. 사람이 이 버튼을 눌러 보내는 POST 하나만 컨펌으로 친다.
   const actions = state === 'actionable' ? `
     <div class="actions">
-      <button id="btnConfirm" class="btn primary">내용을 확인했습니다 · 컨펌</button>
-      <button id="btnObjection" class="btn ghost">이의신청</button>
+      <button id="btnConfirm" class="btn primary" style="width:100%;">컨펌하기</button>
     </div>
+    <p class="note" id="objectionLink" style="text-align:center;margin-top:12px;">
+      내용에 이견이 있으신가요? <a id="btnObjection" href="javascript:void(0)" style="color:#fca5a5;">이의신청하기</a>
+    </p>
     <div id="objectionBox" style="display:none;margin-top:14px;">
       <textarea id="objectionText" rows="4" placeholder="정산에서 이상한 부분, 수정이 필요한 내용을 적어 주세요."></textarea>
       <button id="btnObjectionSubmit" class="btn warn-btn" style="margin-top:8px;">이의신청 접수</button>
@@ -111,17 +111,13 @@ function renderPage(row: any, lines: Array<{ label: string; unitPrice: number; c
   .msg{margin-top:14px;font-size:13px;line-height:1.6;display:none;padding:12px 14px;border-radius:10px;}
 </style></head>
 <body><div class="wrap"><div class="card">
-  <h1>거래내역서 확인</h1>
+  <h1>거래내역서 컨펌</h1>
   <p class="sub">${esc(row.company_name)} · ${esc(period)}</p>
   ${hideDetail ? '' : `
   <div class="row"><span>청구 기간</span><b>${esc(period)}</b></div>
   <div class="row"><span>청구 금액 (부가세 포함)</span><b>${amount}원</b></div>
   <div class="row"><span>수신</span><b>${esc(row.recipient_email)}</b></div>
-  ${detailRows ? `
-  <table class="lines">
-    <thead><tr><th>항목</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th></tr></thead>
-    <tbody>${detailRows}</tbody>
-  </table>` : ''}`}
+  <p class="note">상세 내역은 메일에 첨부된 거래내역서 PDF에 있습니다.</p>`}
   ${statusBanner}
   ${actions}
   <div id="msg" class="msg"></div>
@@ -142,7 +138,8 @@ function renderPage(row: any, lines: Array<{ label: string; unitPrice: number; c
   if(bc){ bc.addEventListener('click', function(){
     bc.disabled=true;
     post('/confirm', {}, function(){ show('컨펌이 완료되었습니다. 세금계산서 발행이 진행됩니다. 감사합니다.', true);
-      document.querySelector('.actions').style.display='none';
+      var ac=document.querySelector('.actions'); if(ac) ac.style.display='none';
+      var ol=document.getElementById('objectionLink'); if(ol) ol.style.display='none';
       var ob=document.getElementById('objectionBox'); if(ob) ob.style.display='none'; });
   }); }
   var bo=document.getElementById('btnObjection');
@@ -156,7 +153,8 @@ function renderPage(row: any, lines: Array<{ label: string; unitPrice: number; c
     if(text.length<5){ show('이의신청 내용을 5자 이상 적어 주세요.', false); return; }
     bs.disabled=true;
     post('/objection', {text:text}, function(){ show('이의신청이 접수되었습니다. 세금계산서 자동 발행이 보류되고, 담당자가 확인 후 연락드립니다.', true);
-      document.querySelector('.actions').style.display='none';
+      var ac=document.querySelector('.actions'); if(ac) ac.style.display='none';
+      var ol=document.getElementById('objectionLink'); if(ol) ol.style.display='none';
       document.getElementById('objectionBox').style.display='none'; });
   }); }
 })();
@@ -170,41 +168,11 @@ router.get('/:token', async (req: Request, res: Response) => {
     if (!row) {
       return res.status(404).send('<meta charset="utf-8"/>유효하지 않은 링크입니다. 메일의 최신 링크로 다시 접속해 주세요.');
     }
-    // 항목 줄 = billing_items → buildInvoiceLines(청구서 1페이지와 같은 CT) — 실패해도 페이지는 요약으로 뜬다.
-    let lines: any[] = [];
-    let itemsLoaded = false;
-    if (!row.superseded_at) {
-      try {
-        const itemsRes = await pool.query(
-          `SELECT channel, item_date, message_type, total_count, success_count, fail_count, pending_count,
-                  unit_price, amount, plan_days, plan_month_days
-             FROM billing_items WHERE billing_id = $1::uuid`,
-          [row.billing_id],
-        );
-        lines = buildInvoiceLines(itemsRes.rows);
-        itemsLoaded = true;
-      } catch (lineErr: any) {
-        console.error('거래내역서 확인 페이지 항목 조회 실패(요약만 표시):', lineErr?.message || lineErr);
-      }
-      // ★ Codex 2R·3R 수용 — AI 크레딧은 billing_items에 행이 없다(헤더 전용 축).
-      //   단 **항목 조회가 성공했을 때만** 붙인다 — 조회 실패 상태에 크레딧 한 줄만 얹으면
-      //   "크레딧이 전부"인 불완전한 표가 되어 요약만 보여주느니만 못하다.
-      if (itemsLoaded) {
-        const creditSupply = Number(row.ai_credit_supply) || 0;
-        const creditCount = Number(row.ai_credit_count) || 0;
-        if (creditSupply > 0 || creditCount > 0) {
-          lines.push({
-            label: 'AI 크레딧 (충전·초과사용)',
-            quantityText: `${creditCount.toLocaleString()} 크레딧`,
-            unitPrice: creditCount > 0 ? Math.round(creditSupply / creditCount) : 0,
-            count: creditCount,
-            amount: creditSupply,
-          } as any);
-        }
-      }
-    }
+    // ★ 2026-07-28 항목표 조회를 걷어냈다. 내역은 **메일에 첨부된 PDF**가 담당한다 —
+    //   여기서 항목표를 다시 그리면 같은 내역이 두 벌이 되고(어느 쪽이 진실인지 흐려진다),
+    //   화면이 "검토"와 "컨펌"을 겸하면서 버튼 뜻이 흐려졌다(Harold 2026-07-28). 이 페이지는 컨펌만 한다.
     res.setHeader('Cache-Control', 'no-store');
-    return res.send(renderPage(row, lines));
+    return res.send(renderPage(row));
   } catch (error: any) {
     console.error('거래내역서 확인 페이지 오류:', error);
     return res.status(500).send('<meta charset="utf-8"/>일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
@@ -221,7 +189,7 @@ router.post('/:token/confirm', async (req: Request, res: Response) => {
       return res.status(409).json({ error: '이미 처리된 건입니다. 화면을 새로고침해 주세요.' });
     }
     // manual_wait(직접선택 정책)은 컨펌 시각만 기록하고 상태는 유지한다 — 발급은 사람이 날짜를 정한 뒤다.
-    await pool.query(
+    const upd = await pool.query(
       `UPDATE invoice_confirmations
           SET confirmed_at = NOW(),
               confirmed_ip = $2,
@@ -229,6 +197,12 @@ router.post('/:token/confirm', async (req: Request, res: Response) => {
         WHERE id = $1::uuid AND confirmed_at IS NULL AND objection_at IS NULL AND superseded_at IS NULL AND issued_at IS NULL`,
       [row.id, String(req.ip || '').slice(0, 64)],
     );
+    // ★ 2026-07-28 6원칙 ② — 바뀐 행이 없으면 성공이라고 말하지 않는다.
+    //   위 상태 점검과 이 UPDATE 사이에 다른 요청이 끼면 WHERE 가드가 0행을 걸러내는데,
+    //   그대로 success를 주면 화면은 "컨펌 완료"를 띄운다. 시스템이 거짓말하는 자리다.
+    if ((upd.rowCount || 0) === 0) {
+      return res.status(409).json({ error: '이미 처리된 건입니다. 화면을 새로고침해 주세요.' });
+    }
     return res.json({ success: true });
   } catch (error: any) {
     console.error('거래내역서 컨펌 오류:', error);
@@ -253,12 +227,17 @@ router.post('/:token/objection', async (req: Request, res: Response) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query(
+      const objUpd = await client.query(
         `UPDATE invoice_confirmations
             SET objection_at = NOW(), objection_text = $2, taxbill_status = 'objected'
           WHERE id = $1::uuid AND objection_at IS NULL AND superseded_at IS NULL AND issued_at IS NULL`,
         [row.id, text.slice(0, 4000)],
       );
+      // ★ 2026-07-28 6원칙 ② — 0행이면 접수되지 않은 것이다. 발급 큐 회수도 하지 않고 되돌린다.
+      if ((objUpd.rowCount || 0) === 0) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: '이미 처리된 건입니다. 화면을 새로고침해 주세요.' });
+      }
       await client.query(
         `UPDATE taxbill_issues SET status = 'cancelled', error = '이의신청 접수로 발급 보류'
           WHERE confirmation_id = $1::uuid AND status = 'ready'`,

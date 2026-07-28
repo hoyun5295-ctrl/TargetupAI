@@ -186,6 +186,11 @@ async function runBulkJob(jobId: string, periodStart: string, periodEnd: string,
           ` · 메일 ${conf.sent}건` +
           (conf.skippedNoEmail > 0 ? ` · 이메일 미등록 ${conf.skippedNoEmail}장` : '') +
           (conf.mailFailed > 0 ? ` · 메일실패 ${conf.mailFailed}건` : '') +
+          // ★ 2026-07-28 두 축을 나눠 적는다. 뭉치면 일시적 디스크 장애에도 멀쩡한 묶음을 지우고 재발행하게 된다.
+          // ★ 2026-07-28 복구 경로가 생겼다 — 발행은 두고 컨펌 단계만 다시 태우는 [메일 재시도](정산 목록).
+          //   일괄발급 재실행은 여전히 기간 중복에 막히므로 그쪽을 안내하지 않는다.
+          (conf.mismatchBlocked > 0 ? ` · ⛔ 금액 불일치 ${conf.mismatchBlocked}장 — 금액을 정정한 뒤 정산 목록에서 [메일 재시도]를 눌러 주세요` : '') +
+          (conf.renderFailed > 0 ? ` · ⛔ PDF 생성 장애 ${conf.renderFailed}장 — 금액은 정상입니다. 장애 해소 후 정산 목록에서 [메일 재시도]를 눌러 주세요` : '') +
           (conf.manualWait > 0 ? ` · 계산서 날짜 직접선택 대기 ${conf.manualWait}건` : '');
       } catch (mailPhaseErr: any) {
         note += ` · 메일 단계 실패(발행은 완료): ${String(mailPhaseErr?.message || mailPhaseErr).slice(0, 300)}`;

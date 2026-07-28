@@ -24,6 +24,9 @@ import {
 import { loadBillingLedger } from '../utils/billing-ledger';
 import { floorWon, vatOfSupply } from '../utils/money';
 import { drawPartyBlock, drawThanksNote, THANKS_NOTE_HEIGHT } from '../utils/pdf-party-block';
+// ★ 2026-07-28 PDF 생성 CT — 라우트 인라인이었던 것을 추출. 일괄발급·메일 첨부가 같은 함수를 쓴다.
+import { renderBillingStatementPdf, renderInvoicePdf, loadBillingStatementData } from '../utils/billing-pdf';
+import { retryUnsentConfirmations } from '../utils/invoice-confirm';
 import { normalizeUnitPriceBasis } from '../utils/unit-price';
 import { buildInvoiceLines, checkInvoiceLinesAgainstHeader } from '../utils/billing-invoice-lines';
 import {
@@ -37,7 +40,7 @@ import { issueBilling, BillingIssueError } from '../utils/billing-issue';
 // ★ 2026-07-28 정산 설정·담당자 CT — 고객사 상세 "정산" 탭 + 일괄발급·발송·계산서 워커가 공유.
 import {
   getCompanyBillingSettings, upsertCompanyBillingSettings,
-  listBillingContacts, upsertBillingContact,
+  listBillingContacts, upsertBillingContact, normalizeBizNumber,
 } from '../utils/billing-settings';
 // ★ 2026-07-28 일괄발급 배치 CT — 대상 산출·job 실행·진행률.
 import { listUnbilledPostpaid, createBulkJob, getBulkJob, findRunningBulkJob } from '../utils/billing-bulk';
@@ -124,7 +127,7 @@ router.post('/generate', async (req: Request, res: Response) => {
 // GET /list - 정산 목록
 router.get('/list', async (req: Request, res: Response) => {
   try {
-    const { company_id, year, status } = req.query;
+    const { company_id, year, status, unsent } = req.query;
     let sql = `SELECT b.*, c.company_name, u.name as user_name
                FROM billings b
                JOIN companies c ON c.id = b.company_id
@@ -135,12 +138,49 @@ router.get('/list', async (req: Request, res: Response) => {
     if (company_id) { params.push(company_id); sql += ` AND b.company_id = $${params.length}`; }
     if (year) { params.push(year); sql += ` AND b.billing_year = $${params.length}`; }
     if (status) { params.push(status); sql += ` AND b.status = $${params.length}`; }
+    // ★ 2026-07-28 발행됐는데 고객에게 안 나간 장 필터. 일괄발급에서 정합 검사에 걸려 발송을 막은 장은
+    //   `invoice_confirmations` 행이 없어 컨펌 추적 목록에도 안 뜬다 — 작업 note 한 줄이 사라지면
+    //   발행만 되고 잊히는 장이 남는다. 여기서 항상 다시 찾을 수 있어야 한다.
+    if (String(unsent || '') === '1') { sql += ' AND b.emailed_at IS NULL'; }
     sql += ' ORDER BY b.billing_year DESC, b.billing_month DESC, b.created_at DESC';
 
     const result = await pool.query(sql, params);
     return res.json(result.rows);
   } catch (error: any) {
     console.error('정산 목록 오류:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /bulk/retry-confirmations — 발행은 됐는데 메일이 안 나간 묶음만 컨펌 단계 재시도 (★2026-07-28)
+//   발행을 다시 하지 않는다(기간 중복에 막힌다). 이미 나간 장은 대상에서 빠지므로 두 번 눌러도 중복 발송이 없다.
+router.post('/bulk/retry-confirmations', async (req: Request, res: Response) => {
+  try {
+    // ★ 2026-07-28 입력은 장 id다 — batch_id는 장이 2개 이상일 때만 생겨서 기본 발급(단일 장)에 안 닿는다.
+    const billingId = String((req.body || {}).billing_id || '').trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(billingId)) {
+      return res.status(400).json({ error: '재시도할 정산(billing_id)이 올바르지 않습니다.' });
+    }
+    const r = await retryUnsentConfirmations(billingId);
+    if (r.targeted === 0) {
+      return res.json({ success: true, targeted: 0, message: '재시도할 미발송 장이 없습니다(이미 발송됐거나 장을 찾지 못했습니다).' });
+    }
+    const blocked = r.mismatchBlocked + r.renderFailed;
+    return res.json({
+      success: true,
+      targeted: r.targeted,
+      summary: r,
+      message: blocked > 0
+        ? `아직 ${blocked}장이 막혀 한 통도 보내지 않았습니다 (금액 불일치 ${r.mismatchBlocked} · PDF 장애 ${r.renderFailed}). 원인을 해소한 뒤 다시 시도해 주세요.`
+        : `${r.sent}건 발송했습니다.`
+          + (r.skippedNoEmail > 0 ? ` 이메일 미등록 ${r.skippedNoEmail}장은 제외했습니다.` : ''),
+    });
+  } catch (error: any) {
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — invoice_confirmations 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('컨펌 재시도 오류:', error);
     return res.status(500).json({ error: error.message });
   }
 });
@@ -191,6 +231,26 @@ router.put('/company-billing-settings/:companyId', async (req: Request, res: Res
     const adminId = (req as any).user?.userId || null;
     const { issue_scope, taxbill_day_policy, company_contact, account_contacts } = (req.body || {}) as any;
 
+    // ★ 2026-07-28 사업자등록번호는 **트랜잭션 전에 전부** 검증한다.
+    //   BEGIN 안에서 던지면 한 줄 때문에 같이 입력한 다른 값까지 통째로 롤백되고,
+    //   오류 문구에 어느 계정인지가 없어 계정이 많은 회사에서는 찾기가 일이다. 한 번에 다 알려준다.
+    const bizErrors: string[] = [];
+    const checkBiz = (label: string, v: any) => {
+      try { normalizeBizNumber(v); } catch { bizErrors.push(`${label}: ${String(v ?? '').trim()}`); }
+    };
+    if (company_contact && typeof company_contact === 'object') {
+      checkBiz('회사 기본 사업자', company_contact.taxbill_biz_number);
+    }
+    for (const c of (Array.isArray(account_contacts) ? account_contacts : [])) {
+      if (c?.user_id) checkBiz(String(c.label || c.name || c.user_id), c.taxbill_biz_number);
+    }
+    if (bizErrors.length > 0) {
+      return res.status(400).json({
+        error: `사업자등록번호는 숫자 10자리여야 합니다 — ${bizErrors.join(' / ')}`,
+        code: 'BILLING_CONTACT_INVALID',
+      });
+    }
+
     await client.query('BEGIN');
     await upsertCompanyBillingSettings(client, companyId, {
       issueScope: String(issue_scope || 'combined'),
@@ -198,10 +258,19 @@ router.put('/company-billing-settings/:companyId', async (req: Request, res: Res
       updatedBy: adminId,
     });
     if (company_contact && typeof company_contact === 'object') {
+      // ★ 2026-07-28 회사 기본 계산서 사업자도 함께 저장한다.
+      //   CT·컬럼(billing_contacts.taxbill_*)은 처음부터 회사 레벨(user_id NULL)을 받게 되어 있었는데
+      //   여기서 6필드를 빼고 넘겨 화면이 열려도 값이 들어갈 곳이 없었다. 계정 레벨(아래)과 같은 필드다.
       await upsertBillingContact(client, companyId, {
         userId: null,
         contactName: company_contact.name,
         contactEmail: company_contact.email,
+        taxbillBizNumber: company_contact.taxbill_biz_number,
+        taxbillCompanyName: company_contact.taxbill_company_name,
+        taxbillCeoName: company_contact.taxbill_ceo_name,
+        taxbillAddress: company_contact.taxbill_address,
+        taxbillBizType: company_contact.taxbill_biz_type,
+        taxbillBizItem: company_contact.taxbill_biz_item,
       }, adminId);
     }
     const list = Array.isArray(account_contacts) ? account_contacts : [];
@@ -242,6 +311,10 @@ router.put('/company-billing-settings/:companyId', async (req: Request, res: Res
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
       return res.status(503).json({ error: 'DB 마이그레이션 필요 — company_billing_settings·billing_contacts 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    // ★ 2026-07-28 입력값 검증 실패는 사람이 고칠 수 있는 문제라 400으로 그대로 알린다(500 노출 금지).
+    if (emsg.includes('사업자등록번호') || emsg.includes('값이 올바르지 않습니다')) {
+      return res.status(400).json({ error: emsg, code: 'BILLING_CONTACT_INVALID' });
     }
     console.error('정산 설정 저장 오류:', error);
     return res.status(500).json({ error: error.message });
@@ -624,6 +697,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
     const target = check.rows[0];
 
+
     // 2) 삭제 대상 묶음을 **한 문장으로, id 순서로** 잠근다.
     //   ★ 2026-07-26 CRITICAL 정정 — 그 전에는 `batch_id`만으로 형제를 찾았다.
     //   `batch_id`는 발행이 만드는 UUID라 지금 다른 회사와 충돌할 일은 없지만,
@@ -749,38 +823,12 @@ router.delete('/:id', async (req: Request, res: Response) => {
 // GET /:id/pdf - 정산 PDF (2페이지: 요약 + 일자별 상세)
 router.get('/:id/pdf', async (req: Request, res: Response) => {
   try {
-    // 1) 정산 + 회사 정보
-    const result = await pool.query(
-      `SELECT b.*, c.company_name, c.business_number, c.ceo_name, c.address,
-              c.contact_name, c.contact_phone, c.contact_email,
-              c.business_type, c.business_category,
-              u.name as user_name
-       FROM billings b
-       JOIN companies c ON c.id = b.company_id
-       LEFT JOIN users u ON u.id = b.user_id
-       WHERE b.id = $1`,
-      [req.params.id]
-    );
-    if (result.rows.length === 0) {
+    // 1) 정산 + 상세 = CT(utils/billing-pdf.ts). 컨펌 요청 메일 첨부가 같은 행·같은 정렬을 쓴다.
+    const data = await loadBillingStatementData(req.params.id);
+    if (!data) {
       return res.status(404).json({ error: '정산을 찾을 수 없습니다' });
     }
-    const bil = result.rows[0];
-
-    // 2) 일자별 상세
-    const itemsResult = await pool.query(
-      // ★ 2026-07-26 정렬에 channel·발송ID 추가. 축이 계정·발송ID로 쪼개지면서 같은 날 같은 유형 행이
-      //   여러 줄 생기는데 tie-breaker가 없어 순서가 비결정적이었다(D150-4와 같은 계열).
-      // ★ 2026-07-26 발송ID 병기 — 에이전트 행이 어느 발송ID 것인지가 정산 대조의 근거다.
-      //   JOIN 대상(`company_agent_ids.id`)·FK(`billing_items_agent_id_fkey`)는 pg_constraint 실측 확인분.
-      `SELECT bi.*, cai.agent_send_id
-         FROM billing_items bi
-         LEFT JOIN company_agent_ids cai ON cai.id = bi.agent_id
-        WHERE bi.billing_id = $1
-        ORDER BY bi.channel ASC, bi.item_date ASC, bi.message_type ASC,
-                 cai.agent_send_id ASC NULLS FIRST, bi.user_id ASC NULLS FIRST, bi.id ASC`,
-      [req.params.id]
-    );
-    const items = itemsResult.rows;
+    const { bil, items } = data;
 
     // ★ 2026-07-26 렌더 전 정합 검사. PDF는 고객에게 나가고 이메일은 회수가 안 된다.
     //   항목 줄 합 + AI 크레딧이 헤더 공급가액과 다르면 그 청구서는 세로 합이 안 맞는 문서다.
@@ -796,333 +844,18 @@ router.get('/:id/pdf', async (req: Request, res: Response) => {
       });
     }
 
-    // 3) PDF 생성
-    const PDFDocument = require('pdfkit');
-    const fs = require('fs');
-    const path = require('path');
-
-    const fontPath = path.join(__dirname, '../../fonts/malgun.ttf');
-    const fontBoldPath = path.join(__dirname, '../../fonts/malgunbd.ttf');
-    const hasFont = fs.existsSync(fontPath);
-
-    const doc = new PDFDocument({ size: 'A4', margin: 50 });
-
-    const pdfDir = path.join(__dirname, '../../pdfs');
-    if (!fs.existsSync(pdfDir)) fs.mkdirSync(pdfDir, { recursive: true });
-    const pdfFilename = `billing_${bil.id.slice(0, 8)}_${bil.billing_year}_${String(bil.billing_month).padStart(2, '0')}.pdf`;
-    const pdfPath = path.join(pdfDir, pdfFilename);
-    const stream = fs.createWriteStream(pdfPath);
-    doc.pipe(stream);
-
-    const setFont = (bold = false) => { if (hasFont) doc.font(bold ? fontBoldPath : fontPath); };
-    const primary = '#4338ca';
-    const dark = '#1f2937';
-    const gray = '#6b7280';
-    const n = (v: any) => Number(v) || 0;
-
-    // ============================
-    // PAGE 1 — 요약
-    // ============================
-    setFont(true);
-    doc.fontSize(22).fillColor(primary).text('정산서', 50, 50);
-    setFont(false);
-    doc.fontSize(9).fillColor(gray).text('BILLING STATEMENT', 50, 78);
-
-    const rightX = 350;
-    setFont(false);
-    doc.fontSize(9).fillColor(gray);
-    doc.text('정산번호:', rightX, 50, { continued: true });
-    setFont(true);
-    doc.fillColor(dark).text(`  BIL-${bil.id.slice(0, 8).toUpperCase()}`);
-    setFont(false);
-    doc.fontSize(9).fillColor(gray);
-    doc.text('발행일:', rightX, 65, { continued: true });
-    doc.fillColor(dark).text(`  ${toDayKey(new Date())}`);
-    // ★ 2026-07-26 `toISOString()` 폐기. PG `date`는 로컬 자정 Date로 오므로 ISO로 바꾸면 하루 밀린다.
-    //   집계(`toDayKey`)만 고치고 렌더를 안 고치면 청구서에 찍히는 날짜가 그대로 밀린 채 나간다.
-    const fmtDate = (d: any) => toDayKey(d);
-    doc.text('정산기간:', rightX, 80, { continued: true });
-    doc.fillColor(dark).text(`  ${fmtDate(bil.billing_start)} ~ ${fmtDate(bil.billing_end)}`);
-
-    if (bil.user_name) {
-      setFont(false);
-      doc.fontSize(9).fillColor(gray);
-      doc.text('사용자:', rightX, 98, { continued: true });
-      doc.fillColor(dark).text(`  ${bil.user_name}`);
-    }
-
-    doc.moveTo(50, bil.user_name ? 118 : 115).lineTo(545, bil.user_name ? 118 : 115).strokeColor('#e5e7eb').stroke();
-
-    // 공급자 / 공급받는자
-    // ★ 2026-07-26 고정 y 증가(+14) 폐기. 대표자가 두 명인 회사(각자대표)는 대표 줄이 칸 폭을 넘어
-    //   두 줄로 흐르는데 다음 줄을 14pt만 내려서 사업자번호 줄과 겹쳐 인쇄됐다(Harold 실측).
-    //   블록이 실제로 끝난 y를 받아 구분선·항목표 시작을 거기서 잡는다 — 고정 좌표를 남기면 재발한다.
-    const partyTop = 130;
-    const leftBottom = drawPartyBlock(doc, {
-      x: 50, y: partyTop, width: rightX - 50 - 20, title: '공급자', primary, dark, setFont,
-      lines: [
-        { label: '상호', value: INVITO_INFO.companyName },
-        { label: '대표', value: INVITO_INFO.ceoName },
-        { label: '사업자번호', value: INVITO_INFO.bizNumber },
-        { label: '업태/종목', value: INVITO_INFO.bizType },
-        { label: '주소', value: INVITO_INFO.address },
-        { label: '연락처', value: `${INVITO_INFO.phone} / ${INVITO_INFO.email}` },
-      ],
-    });
-    const rightBottom = drawPartyBlock(doc, {
-      x: rightX, y: partyTop, width: 545 - rightX, title: '공급받는자', primary, dark, setFont,
-      lines: [
-        { label: '상호', value: bil.company_name || '-' },
-        { label: '대표', value: bil.ceo_name || '-' },
-        { label: '사업자번호', value: bil.business_number || '-' },
-        { label: '업태/종목', value: `${bil.business_type || '-'} / ${bil.business_category || '-'}` },
-        { label: '주소', value: bil.address || '-' },
-        { label: '연락처', value: `${bil.contact_phone || '-'} / ${bil.contact_email || '-'}` },
-      ],
-    });
-
-    const partyBottom = Math.max(leftBottom, rightBottom);
-    doc.moveTo(50, partyBottom + 4).lineTo(545, partyBottom + 4).strokeColor('#e5e7eb').stroke();
-
-    // 내역 테이블
-    // ★ 2026-07-26 항목표에 **페이지 넘김**을 넣는다. 그 전에는 줄 수와 무관하게 y만 늘려서,
-    //   항목이 많은 회사(웹+에이전트 병용·발송ID 여러 개)는 합계·감사 인사·하단 안내를 뚫고 인쇄됐다.
-    //   웹만 쓰는 회사는 11줄이라 안 터지고, 에이전트가 섞이는 순간 터지는 구조였다.
-    const ITEM_ROW_H = 22;
-    const ITEM_TABLE_BOTTOM = 620;   // 이 아래로는 새 줄을 그리지 않는다(합계 블록·감사 인사 자리 확보)
-    let y = partyBottom + 19;
-
-    const drawItemHeader = () => {
-      doc.rect(50, y, 495, 25).fill(primary);
-      setFont(true);
-      doc.fontSize(9).fillColor('white');
-      doc.text('항목', 60, y + 7);
-      doc.text('수량', 250, y + 7, { width: 80, align: 'right' });
-      doc.text('단가', 340, y + 7, { width: 80, align: 'right' });
-      doc.text('금액', 430, y + 7, { width: 105, align: 'right' });
-      y += 25;
-    };
-    drawItemHeader();
-
-    // ★ 2026-07-26 `quantityText`가 있으면 수량 칸을 그 문구로 쓴다 — 요금제는 `9일 / 31일`이다.
-    //   없으면 `0건 × ₩350,000 = ₩101,613`이라는 거짓 산식이 인쇄된다.
-    const drawRow = (label: string, count: number, price: number, amount: number, bg = 'white', quantityText?: string) => {
-      if (count <= 0 && !quantityText) return;
-      if (y + ITEM_ROW_H > ITEM_TABLE_BOTTOM) {
-        doc.addPage();
-        y = 50;
-        setFont(true);
-        doc.fontSize(10).fillColor(primary).text('청구 내역 (계속)', 50, y);
-        y += 25;
-        drawItemHeader();
-      }
-      if (bg !== 'white') doc.rect(50, y, 495, ITEM_ROW_H).fill(bg);
-      setFont(false);
-      doc.fontSize(9).fillColor(dark);
-      doc.text(label, 60, y + 6, { width: 185, lineBreak: false });
-      doc.text(quantityText || count.toLocaleString(), 250, y + 6, { width: 80, align: 'right', lineBreak: false });
-      doc.text(`₩${price.toLocaleString()}`, 340, y + 6, { width: 80, align: 'right', lineBreak: false });
-      setFont(true);
-      doc.text(`₩${amount.toLocaleString()}`, 430, y + 6, { width: 105, align: 'right', lineBreak: false });
-      y += ITEM_ROW_H;
-      doc.moveTo(50, y).lineTo(545, y).strokeColor('#e5e7eb').stroke();
-    };
-
-    // ★ 2026-07-26 항목표를 헤더 컬럼이 아니라 `billing_items`에서 만든다.
-    //   헤더에는 에이전트 칸이 없는데 공급가액에는 에이전트 금액이 더해져,
-    //   **고객이 항목을 세로로 더하면 공급가액과 안 맞는** 상태였다(1페이지↔2페이지 합계도 갈렸다).
-    const invoiceLines = buildInvoiceLines(items);
-    const CHANNEL_BG: Record<string, string> = { web: 'white', agent: '#eff6ff', test: '#fefce8', spam: '#fef3c7' };
-    invoiceLines.forEach((line) => {
-      drawRow(line.label, line.count, line.unitPrice, line.amount, CHANNEL_BG[line.channel] || 'white', line.quantityText);
-    });
-    drawRow('AI 크레딧', n(bil.ai_credit_count), n(bil.ai_credit_count) > 0 ? Math.round(n(bil.ai_credit_supply) / n(bil.ai_credit_count)) : 0, n(bil.ai_credit_supply), '#f5f3ff');
-
-    // 합계
-    y += 15;
-    const summaryX = 340;
-    setFont(false);
-    doc.fontSize(9).fillColor(gray);
-    doc.text('공급가액:', summaryX, y, { width: 80, align: 'right' });
-    setFont(true);
-    doc.fillColor(dark).text(`₩${n(bil.subtotal).toLocaleString()}`, 430, y, { width: 105, align: 'right' });
-    y += 18;
-    setFont(false);
-    doc.fillColor(gray);
-    doc.text('부가세 (10%):', summaryX, y, { width: 80, align: 'right' });
-    setFont(true);
-    doc.fillColor(dark).text(`₩${n(bil.vat).toLocaleString()}`, 430, y, { width: 105, align: 'right' });
-    y += 22;
-
-    doc.rect(summaryX - 10, y - 2, 225, 28).fill('#eef2ff');
-    setFont(true);
-    doc.fontSize(11).fillColor(primary);
-    doc.text('합계:', summaryX, y + 5, { width: 80, align: 'right' });
-    doc.fontSize(13).text(`₩${n(bil.total_amount).toLocaleString()}`, 430, y + 3, { width: 105, align: 'right' });
-
-    // 합계 박스가 끝난 지점 — 감사 인사 위치를 여기서부터 잡는다(고정 y를 쓰면 항목 많은 회사에서 겹친다).
-    let contentBottom = y + 28;
-    if (bil.notes) {
-      y += 50;
-      setFont(true);
-      doc.fontSize(9).fillColor(gray).text('비고:', 50, y);
-      setFont(false);
-      doc.fillColor(dark).text(bil.notes, 50, y + 15, { width: 495 });
-      contentBottom = y + 15 + Math.ceil(doc.heightOfString(String(bil.notes), { width: 495 }));
-    }
-
-    // ★ 2026-07-26 감사 인사(Harold 지시). 청구서는 매달 고객에게 나가는 유일한 정기 문서다.
-    //   합계·비고 아래, 자동생성 안내(y=770) 위에 둔다. 728 = 770 − 블록 높이 34 − 여백 8.
-    // ★ 2026-07-26 자리가 없으면 **그리지 않는다**(Codex #11). 고정 728로 밀어 넣으면
-    //   항목·비고가 길 때 기존 내용 위에 겹쳐 인쇄된다 — 없는 것보다 나쁘다.
-    const thanksY = Math.max(contentBottom + 16, 690);
-    if (thanksY + THANKS_NOTE_HEIGHT <= 762) {
-      drawThanksNote(doc, {
-        x: 50, y: thanksY, width: 495, primary, gray, setFont,
-        message: `${bil.billing_month}월도 한줄로를 이용해 주셔서 감사합니다.`,
-      });
-    }
-
-
-    // ============================
-    // PAGE 2+ — 일자별 상세
-    // ============================
-    if (items.length > 0) {
-      doc.addPage();
-
-      setFont(true);
-      doc.fontSize(14).fillColor(primary).text('일자별 상세 내역', 50, 50);
-      setFont(false);
-      doc.fontSize(9).fillColor(gray).text(
-        `${bil.company_name} | ${bil.billing_year}년 ${bil.billing_month}월${bil.user_name ? ' | ' + bil.user_name : ''}`,
-        50, 72
-      );
-
-      doc.moveTo(50, 90).lineTo(545, 90).strokeColor('#e5e7eb').stroke();
-
-      // 테이블 헤더
-      // ★ 2026-07-26 '구분' 열 추가. 축이 채널·계정·발송ID로 쪼개지면서 같은 날 같은 유형 행이
-      //   여러 줄 생기는데, 구분이 없으면 고객 눈에 중복 오류로 보인다.
-      //   에이전트 행은 발송ID를 그대로 적는다 — 고객이 게이트웨이 쪽 통계와 대조하는 근거다.
-      const cols = [
-        { label: '일자', x: 50, w: 55, align: 'left' as const },
-        { label: '구분', x: 105, w: 70, align: 'left' as const },
-        { label: '유형', x: 175, w: 55, align: 'left' as const },
-        { label: '전송', x: 230, w: 48, align: 'right' as const },
-        { label: '성공', x: 278, w: 48, align: 'right' as const },
-        { label: '실패', x: 326, w: 45, align: 'right' as const },
-        { label: '대기', x: 371, w: 45, align: 'right' as const },
-        { label: '단가', x: 416, w: 55, align: 'right' as const },
-        { label: '금액', x: 471, w: 74, align: 'right' as const },
-      ];
-
-      let iy = 95;
-      const rowH = 18;
-      const pageBottom = 760;
-
-      const drawDetailHeader = () => {
-        doc.rect(50, iy, 495, 22).fill('#f3f4f6');
-        setFont(true);
-        doc.fontSize(8).fillColor(gray);
-        cols.forEach(c => doc.text(c.label, c.x + 4, iy + 6, { width: c.w - 8, align: c.align }));
-        iy += 22;
-      };
-
-      drawDetailHeader();
-
-      const typeLabel: Record<string, string> = {
-        SMS: 'SMS', LMS: 'LMS', MMS: 'MMS', KAKAO: '카카오',
-        TEST_SMS: '테스트SMS', TEST_LMS: '테스트LMS',
-        SPAM_SMS: '스팸SMS', SPAM_LMS: '스팸LMS'
-      };
-
-      let detailSubtotal = 0;
-      items.forEach((item: any, idx: number) => {
-        // 페이지 넘김 체크
-        if (iy + rowH > pageBottom) {
-          setFont(false);
-          doc.fontSize(8).fillColor(gray).text('(다음 페이지에 계속)', 50, iy + 5, { align: 'center', width: 495 });
-          doc.addPage();
-          iy = 50;
-          setFont(true);
-          doc.fontSize(10).fillColor(primary).text('일자별 상세 내역 (계속)', 50, iy);
-          iy += 25;
-          drawDetailHeader();
-        }
-
-        // ★ 2026-07-26 판정을 유형키 접두가 아니라 `channel`로. 접두 판정은 새 유형이 생기면 조용히 어긋난다.
-        const ch = String(item.channel || 'web');
-        if (ch === 'plan') doc.rect(50, iy, 495, rowH).fill('#f5f3ff');
-        else if (ch === 'spam') doc.rect(50, iy, 495, rowH).fill('#fef3c7');
-        else if (ch === 'test') doc.rect(50, iy, 495, rowH).fill('#fefce8');
-        else if (ch === 'agent') doc.rect(50, iy, 495, rowH).fill('#eff6ff');
-        else if (idx % 2 === 0) doc.rect(50, iy, 495, rowH).fill('#fafafa');
-
-        setFont(false);
-        doc.fontSize(8).fillColor(dark);
-        // ★ 2026-07-26 요금제 행은 발송 수량 축이 없다(plan_days 전용 컬럼으로 분리).
-        //   수량 4칸에는 '-'를 찍는다 — 0을 찍으면 "전송 0건인데 35만원"으로 읽힌다.
-        // ★ 2026-07-26 일자 칸은 **모든 행이 시작일만**이다. 요금제 행에만 적용 구간(`07-01~07-26`, 11자)을
-        //   넣었더니 칸 폭(55pt, 안쪽 47pt)을 넘겨 `lineBreak: false`로도 안 막히고 두 줄로 흘러
-        //   다음 행과 겹쳤다(Harold 스크린샷 실측). 적용 구간은 1페이지 항목표가
-        //   `요금제 FREE (07-01~07-26)` + `26일 / 31일`로 이미 담고 있어 정보 손실이 없고,
-        //   2페이지는 다른 행과 같은 폭·형식을 유지하는 게 표로서 맞다.
-        const dateStr = toDayKey(item.item_date).slice(5, 10);
-        // 에이전트는 발송ID, 그 외는 채널 이름. 계정은 장 자체가 계정 단위라 행마다 반복하지 않는다.
-        const scopeLabel = ch === 'agent'
-          ? String(item.agent_send_id || '(발송ID 미상)')
-          : ch === 'plan' ? '요금제'
-          : ch === 'test' ? '테스트'
-          : ch === 'spam' ? '스팸필터'
-          : '한줄로';
-        // 요금제 행의 '유형' 칸은 플랜 코드다 — `PLAN_` 접두는 내부 키라 고객에게 보일 값이 아니다.
-        const typeText = ch === 'plan'
-          ? String(item.message_type || '').replace(/^PLAN_/, '')
-          : (typeLabel[item.message_type] || item.message_type);
-        doc.text(dateStr, cols[0].x + 4, iy + 5, { width: cols[0].w - 8, lineBreak: false });
-        doc.text(scopeLabel, cols[1].x + 4, iy + 5, { width: cols[1].w - 8, lineBreak: false });
-        doc.text(typeText, cols[2].x + 4, iy + 5, { width: cols[2].w - 8, lineBreak: false });
-
-        if (ch === 'plan') {
-          // 수량 4칸 = '-'. 일수는 1페이지 항목표의 `9일 / 31일`이 담당한다.
-          [3, 4, 5, 6].forEach((c) => doc.text('-', cols[c].x + 4, iy + 5, { width: cols[c].w - 8, align: 'right' }));
-        } else {
-          doc.text(n(item.total_count).toLocaleString(), cols[3].x + 4, iy + 5, { width: cols[3].w - 8, align: 'right' });
-          doc.text(n(item.success_count).toLocaleString(), cols[4].x + 4, iy + 5, { width: cols[4].w - 8, align: 'right' });
-
-          if (n(item.fail_count) > 0) doc.fillColor('#dc2626');
-          doc.text(n(item.fail_count).toLocaleString(), cols[5].x + 4, iy + 5, { width: cols[5].w - 8, align: 'right' });
-          doc.fillColor(dark);
-
-          doc.text(n(item.pending_count).toLocaleString(), cols[6].x + 4, iy + 5, { width: cols[6].w - 8, align: 'right' });
-        }
-        // ★ 2026-07-26 금액 칸은 `lineBreak: false`다. 원 단위 절사로 소수는 사라졌지만,
-        //   자릿수가 큰 회사에서 다시 두 줄로 흘러 아래 행과 겹치는 사고를 구조적으로 막는다.
-        doc.text(`₩${n(item.unit_price).toLocaleString()}`, cols[7].x + 4, iy + 5, { width: cols[7].w - 8, align: 'right', lineBreak: false });
-        setFont(true);
-        doc.text(`₩${n(item.amount).toLocaleString()}`, cols[8].x + 4, iy + 5, { width: cols[8].w - 8, align: 'right', lineBreak: false });
-
-        detailSubtotal += n(item.amount);
-        iy += rowH;
-        doc.moveTo(50, iy).lineTo(545, iy).strokeColor('#eeeeee').stroke();
-      });
-
-      // 합계 행 — Harold 실측(2026-07-26): `₩13,397,454.84`가 칸 폭을 넘겨 두 줄로 흘렀다.
-      iy += 4;
-      doc.rect(50, iy, 495, 22).fill('#eef2ff');
-      setFont(true);
-      doc.fontSize(9).fillColor(primary);
-      doc.text('합계', cols[0].x + 4, iy + 6);
-      doc.text(`₩${detailSubtotal.toLocaleString()}`, cols[8].x + 4, iy + 6, { width: cols[8].w - 8, align: 'right', lineBreak: false });
-    }
-
-    doc.end();
-    await new Promise<void>((resolve) => stream.on('finish', resolve));
+    // 3) PDF 생성 = CT(utils/billing-pdf.ts). 라우트·메일·발급이 같은 함수를 쓴다.
+    const fs = require("fs");
+    const { pdfPath, displayFilename } = await renderBillingStatementPdf(bil, items);
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(pdfFilename)}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(displayFilename)}"`);
     const fileStream = fs.createReadStream(pdfPath);
     fileStream.pipe(res);
+    // ★ 2026-07-28 다운로드본은 임시다. 렌더마다 새 파일이라 정리하지 않으면 누를 때마다 쌓인다.
+    //   보존해야 하는 건 "고객에게 실제로 보낸" 첨부뿐이고 그건 메일 경로가 따로 남긴다.
+    //   읽기 스트림이 닫힌 뒤에 지운다 — 핸들이 열린 채 unlink하면 윈도우에서 실패한다.
+    fileStream.on('close', () => { try { fs.unlinkSync(pdfPath); } catch { /* 이미 없거나 잠김 — 다음 렌더가 새 파일을 쓴다 */ } });
 
   } catch (error: any) {
     console.error('정산 PDF 오류:', error);
@@ -1554,175 +1287,19 @@ router.get('/invoices/:id/pdf', async (req: Request, res: Response) => {
     }
     const inv = result.rows[0];
 
-    const PDFDocument = require('pdfkit');
-    const fs = require('fs');
-    const path = require('path');
+    // PDF 생성 = CT(utils/billing-pdf.ts). 라우트·메일·발급이 같은 함수를 쓴다.
+    const fs = require("fs");
+    const { pdfPath, displayFilename } = await renderInvoicePdf(inv);
 
-    const fontPath = path.join(__dirname, '../../fonts/malgun.ttf');
-    const fontBoldPath = path.join(__dirname, '../../fonts/malgunbd.ttf');
-    const hasFont = fs.existsSync(fontPath);
-
-    const doc = new PDFDocument({ size: 'A4', margin: 50 });
-
-    const pdfDir = path.join(__dirname, '../../pdfs');
-    if (!fs.existsSync(pdfDir)) fs.mkdirSync(pdfDir, { recursive: true });
-    const bStart = toDayKey(inv.billing_start);
-    const bEnd = toDayKey(inv.billing_end);
-    const pdfFilename = `invoice_${inv.id.slice(0, 8)}_${bStart}_${bEnd}.pdf`;
-    const pdfPath = path.join(pdfDir, pdfFilename);
-    const stream = fs.createWriteStream(pdfPath);
-    doc.pipe(stream);
-
-    const setFont = (bold = false) => { if (hasFont) doc.font(bold ? fontBoldPath : fontPath); };
-    const primary = '#4338ca';
-    const dark = '#1f2937';
-    const gray = '#6b7280';
-
-    // 헤더
-    setFont(true);
-    doc.fontSize(22).fillColor(primary).text('거래내역서', 50, 50);
-    setFont(false);
-    doc.fontSize(9).fillColor(gray).text('INVOICE', 50, 78);
-
-    const rightX = 350;
-    setFont(false);
-    doc.fontSize(9).fillColor(gray);
-    doc.text('내역서 번호:', rightX, 50, { continued: true });
-    setFont(true);
-    doc.fillColor(dark).text(`  INV-${inv.id.slice(0, 8).toUpperCase()}`);
-    setFont(false);
-    doc.fontSize(9).fillColor(gray);
-    doc.text('발행일:', rightX, 65, { continued: true });
-    doc.fillColor(dark).text(`  ${toDayKey(new Date())}`);
-    doc.text('정산기간:', rightX, 80, { continued: true });
-    doc.fillColor(dark).text(`  ${bStart} ~ ${bEnd}`);
-
-    doc.moveTo(50, 105).lineTo(545, 105).strokeColor('#e5e7eb').stroke();
-
-    // 공급자 / 공급받는자 — 정산서와 같은 CT. 대표자 2명 줄바꿈 겹침(2026-07-26)이 여기도 그대로 있었다.
-    const invPartyTop = 120;
-    const invLeftBottom = drawPartyBlock(doc, {
-      x: 50, y: invPartyTop, width: rightX - 50 - 20, title: '공급자', primary, dark, setFont,
-      lines: [
-        { label: '상호', value: INVITO_INFO.companyName },
-        { label: '대표', value: INVITO_INFO.ceoName },
-        { label: '사업자번호', value: INVITO_INFO.bizNumber },
-        { label: '업태/종목', value: INVITO_INFO.bizType },
-        { label: '주소', value: INVITO_INFO.address },
-        { label: '연락처', value: `${INVITO_INFO.phone} / ${INVITO_INFO.email}` },
-      ],
-    });
-    const invRightBottom = drawPartyBlock(doc, {
-      x: rightX, y: invPartyTop, width: 545 - rightX, title: '공급받는자', primary, dark, setFont,
-      lines: [
-        { label: '상호', value: inv.company_name || '-' },
-        { label: '대표', value: inv.ceo_name || '-' },
-        { label: '사업자번호', value: inv.business_number || '-' },
-        { label: '업태/종목', value: `${inv.business_type || '-'} / ${inv.business_category || '-'}` },
-        { label: '주소', value: inv.address || '-' },
-        { label: '연락처', value: `${inv.contact_phone || '-'} / ${inv.contact_email || '-'}` },
-      ],
-    });
-
-    const invPartyBottom = Math.max(invLeftBottom, invRightBottom);
-    doc.moveTo(50, invPartyBottom + 4).lineTo(545, invPartyBottom + 4).strokeColor('#e5e7eb').stroke();
-
-    let iy = invPartyBottom + 14;
-    if (inv.store_name && inv.invoice_type === 'brand') {
-      setFont(false);
-      doc.fontSize(9).fillColor(gray).text(`브랜드: ${inv.store_name} (${inv.store_code || ''})`, 50, iy);
-      iy += 20;
-    }
-
-    // 내역 테이블
-    doc.rect(50, iy, 495, 25).fill(primary);
-    setFont(true);
-    doc.fontSize(9).fillColor('white');
-    doc.text('항목', 60, iy + 7);
-    doc.text('수량', 250, iy + 7, { width: 80, align: 'right' });
-    doc.text('단가', 340, iy + 7, { width: 80, align: 'right' });
-    doc.text('금액', 430, iy + 7, { width: 105, align: 'right' });
-    iy += 25;
-
-    const drawInvRow = (label: string, count: number, price: number, amount: number, bg = 'white') => {
-      if (count <= 0) return;
-      if (bg !== 'white') doc.rect(50, iy, 495, 22).fill(bg);
-      setFont(false);
-      doc.fontSize(9).fillColor(dark);
-      doc.text(label, 60, iy + 6);
-      doc.text(count.toLocaleString(), 250, iy + 6, { width: 80, align: 'right' });
-      doc.text(`₩${price.toLocaleString()}`, 340, iy + 6, { width: 80, align: 'right' });
-      setFont(true);
-      doc.text(`₩${amount.toLocaleString()}`, 430, iy + 6, { width: 105, align: 'right' });
-      iy += 22;
-      doc.moveTo(50, iy).lineTo(545, iy).strokeColor('#e5e7eb').stroke();
-    };
-
-    const n = (v: any) => Number(v) || 0;
-    // ★ 2026-07-26 행 금액은 저장 시점과 **같은 절사 함수**를 거친다. 다른 규칙으로 그리면
-    //   표의 세로합이 아래 공급가액과 어긋난다(고객이 가장 먼저 검산하는 자리다).
-    drawInvRow('SMS', n(inv.sms_success_count), n(inv.sms_unit_price), floorWon(n(inv.sms_success_count) * n(inv.sms_unit_price)));
-    drawInvRow('LMS', n(inv.lms_success_count), n(inv.lms_unit_price), floorWon(n(inv.lms_success_count) * n(inv.lms_unit_price)));
-    drawInvRow('MMS', n(inv.mms_success_count), n(inv.mms_unit_price), floorWon(n(inv.mms_success_count) * n(inv.mms_unit_price)));
-    drawInvRow('카카오', n(inv.kakao_success_count), n(inv.kakao_unit_price), floorWon(n(inv.kakao_success_count) * n(inv.kakao_unit_price)));
-    drawInvRow('테스트 SMS', n(inv.test_sms_count), n(inv.test_sms_unit_price), floorWon(n(inv.test_sms_count) * n(inv.test_sms_unit_price)), '#fefce8');
-    drawInvRow('테스트 LMS', n(inv.test_lms_count), n(inv.test_lms_unit_price), floorWon(n(inv.test_lms_count) * n(inv.test_lms_unit_price)), '#fefce8');
-    drawInvRow('스팸필터', n(inv.spam_filter_count), n(inv.spam_filter_unit_price), floorWon(n(inv.spam_filter_count) * n(inv.spam_filter_unit_price)), '#fef3c7');
-
-    // 합계
-    iy += 15;
-    const invSummaryX = 340;
-    setFont(false);
-    doc.fontSize(9).fillColor(gray);
-    doc.text('공급가액:', invSummaryX, iy, { width: 80, align: 'right' });
-    setFont(true);
-    doc.fillColor(dark).text(`₩${n(inv.subtotal).toLocaleString()}`, 430, iy, { width: 105, align: 'right' });
-    iy += 18;
-    setFont(false);
-    doc.fillColor(gray);
-    doc.text('부가세 (10%):', invSummaryX, iy, { width: 80, align: 'right' });
-    setFont(true);
-    doc.fillColor(dark).text(`₩${n(inv.vat).toLocaleString()}`, 430, iy, { width: 105, align: 'right' });
-    iy += 22;
-
-    doc.rect(invSummaryX - 10, iy - 2, 225, 28).fill('#eef2ff');
-    setFont(true);
-    doc.fontSize(11).fillColor(primary);
-    doc.text('합계:', invSummaryX, iy + 5, { width: 80, align: 'right' });
-    doc.fontSize(13).text(`₩${n(inv.total_amount).toLocaleString()}`, 430, iy + 3, { width: 105, align: 'right' });
-
-    let invContentBottom = iy + 28;
-    if (inv.notes) {
-      iy += 50;
-      setFont(true);
-      doc.fontSize(9).fillColor(gray).text('비고:', 50, iy);
-      setFont(false);
-      doc.fillColor(dark).text(inv.notes, 50, iy + 15, { width: 495 });
-      invContentBottom = iy + 15 + Math.ceil(doc.heightOfString(String(inv.notes), { width: 495 }));
-    }
-
-    // ★ 2026-07-26 감사 인사 — 정산서와 같은 CT·같은 배치(문서 간 톤이 갈리지 않게).
-    const invThanksY = Math.max(invContentBottom + 16, 690);
-    if (invThanksY + THANKS_NOTE_HEIGHT <= 762) {
-      drawThanksNote(doc, {
-        x: 50, y: invThanksY, width: 495, primary, gray, setFont,
-        message: `${Number(String(bEnd).slice(5, 7))}월도 한줄로를 이용해 주셔서 감사합니다.`,
-      });
-    }
-
-
-    doc.end();
-    await new Promise<void>((resolve) => stream.on('finish', resolve));
-
-    await pool.query(
-      'UPDATE billing_invoices SET pdf_path = $1, updated_at = now() WHERE id = $2',
-      [pdfPath, req.params.id]
-    );
+    // ★ 2026-07-28 `pdf_path` 기록 폐기 — 다운로드본은 응답 뒤 지우므로 경로를 남기면 없는 파일을 가리킨다.
+    //   이 컬럼을 읽는 코드는 전 소스에 없다(grep 확인). 보존이 필요한 건 메일로 나간 첨부뿐이다.
+    await pool.query('UPDATE billing_invoices SET updated_at = now() WHERE id = $1', [req.params.id]);
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(pdfFilename)}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(displayFilename)}"`);
     const fileStream = fs.createReadStream(pdfPath);
     fileStream.pipe(res);
+    fileStream.on('close', () => { try { fs.unlinkSync(pdfPath); } catch { /* 위 정산서 다운로드와 같은 이유 */ } });
 
   } catch (error: any) {
     console.error('PDF 생성 오류:', error);
@@ -1777,18 +1354,15 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '고객사 담당자 이메일이 등록되어 있지 않습니다. 수신자를 직접 입력해 주세요.' });
     }
 
-    // 2) PDF 파일 확인 — 없으면 생성 요청
-    const pdfDir = path.join(__dirname, '../../pdfs');
-    const pdfFilename = `billing_${bil.id.slice(0, 8)}_${bil.billing_year}_${String(bil.billing_month).padStart(2, '0')}.pdf`;
-    const pdfPath = path.join(pdfDir, pdfFilename);
-
-    if (!fs.existsSync(pdfPath)) {
-      // 화면은 이 코드를 보고 PDF 생성을 먼저 호출한 뒤 재시도한다 — 운영자가 순서를 외울 일이 아니다.
-      return res.status(400).json({
-        error: 'PDF가 아직 생성되지 않았습니다. 청구서 PDF를 먼저 생성한 뒤 다시 발송해 주세요.',
-        code: 'BILLING_PDF_NOT_READY',
-      });
+    // 2) PDF는 여기서 만든다 (★2026-07-28) — 예전에는 디스크에 파일이 있는지 확인하고 없으면 400을 돌려주며
+    //    "먼저 다운로드하라"고 했다. 파일명 규칙을 재구성해 찾는 방식이라 규칙이 바뀌면 조용히 깨지고,
+    //    운영자가 순서를 외워야 했다. CT로 직접 렌더하면 항상 방금 만든 최신 문서가 나간다.
+    const pdfData = await loadBillingStatementData(req.params.id);
+    if (!pdfData) {
+      return res.status(404).json({ error: '정산을 찾을 수 없습니다.' });
     }
+    const { pdfPath, displayFilename } = await renderBillingStatementPdf(pdfData.bil, pdfData.items);
+    const pdfFilename = displayFilename;
 
     const n = (v: any) => Number(v) || 0;
     const bStart = toDayKey(bil.billing_start);
@@ -2026,16 +1600,11 @@ router.post('/invoices/:id/send-email', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '고객사 담당자 이메일이 등록되어 있지 않습니다.' });
     }
 
-    // 2) PDF 파일 확인
-    const pdfDir = path.join(__dirname, '../../pdfs');
+    // 2) PDF는 여기서 만든다 (★2026-07-28 — 위 정산서 메일과 같은 이유. 다운로드 선행 요구 폐기)
     const bStart = toDayKey(inv.billing_start);
     const bEnd = toDayKey(inv.billing_end);
-    const pdfFilename = `invoice_${inv.id.slice(0, 8)}_${bStart}_${bEnd}.pdf`;
-    const pdfPath = path.join(pdfDir, pdfFilename);
-
-    if (!fs.existsSync(pdfPath)) {
-      return res.status(400).json({ error: 'PDF가 아직 생성되지 않았습니다. 먼저 PDF를 다운로드해주세요.' });
-    }
+    const { pdfPath, displayFilename } = await renderInvoicePdf(inv);
+    const pdfFilename = displayFilename;
 
     const n = (v: any) => Number(v) || 0;
 

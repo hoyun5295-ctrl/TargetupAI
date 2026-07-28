@@ -13,7 +13,7 @@
 | DB 쿼리 작성 / 스키마 확인 | SCHEMA.md | 대상 테이블 절만 |
 | 도메인 작업 착수 전 사고 이력 (룰 원천=CLAUDE.md `read_lessons_first`) | lessons/LESSONS_{DB,FRONTEND,BACKEND,DEPLOY,ARCHITECTURE,META}.md | 해당 도메인 전체. DB·돈·환불=DB / UI·모달=FRONTEND / API·발송·AI=BACKEND / 배포·빌드·SSH=DEPLOY+OPS.md 해당 절 / 컨트롤타워=ARCHITECTURE / **매 답변 직전=META** |
 | **Harold님이 "브레인스토밍"이라고 말했을 때** · superpowers 스킬 선택 · Codex 라운드 운영 | **COLLAB.md** | 브레인스토밍 = §1 전체 정독 후 그대로 진행(의무) / 그 외 = 해당 절만 |
-| **정산(청구서 5항목·발행 단위 scope·요금제 일할·에이전트 축) 작업 재개·회귀 의심** | **docs/2026-07-26-billing-scope-and-corrections-design.md** | **§0-A 먼저**(현재 상태·실측 확정값) → **§9 미착수 4건**(부가세 이중과세·PDF 줄바꿈·유형별 버튼·속도) → 필요 시 §2-x 라운드별 처분·§7 배포·검증. 0725 착수 기록 = docs/2026-07-25-billing-restructure-handoff.md |
+| **프로젝트·트랙 SoT 문서·호출어를 찾을 때** | **[SOT-INDEX.md](SOT-INDEX.md)** | 해당 트랙 행만. **신규 프로젝트 SoT는 이 라우팅 표가 아니라 SOT-INDEX.md에 등재한다**(이 표는 도메인 문서 전용 12행 상설) |
 | 시스템 구조 파악 | ARCHITECTURE.md | 해당 절만 |
 | 자사몰 연동·CDP·커넥터 작업 | INTEGRATIONS.md | 해당 provider 카드 / CDP 공통 절 |
 | 버그 수정 | BUGS.md | 해당 버그 항목 (해결분은 archive/BUGS_RESOLVED.md) |
@@ -21,92 +21,64 @@
 | 의사결정 배경 확인 | DECISIONS.md | 해당 ADR |
 | 리스크 전체 확인 | RISKS.md | 전체 |
 | 싱크에이전트 이슈 진단 | SYNC-AGENT-TROUBLESHOOTING.md | 해당 증상 절 (isae 현장 완료 이력 = archive/SYNC-AGENT-ISAE-2026-06-30-HANDOFF.md grep) |
-| **싱크에이전트 빌드 산출물 20개 검증·아난티 발송 재개** | **docs/2026-07-28-sync-agent-build-verification-runbook.md** | 전체 (SoT — 다음 세션 실행 지시서. 호출어 "싱크에이전트 빌드 검증 이어가자") |
-| AI Operator·CDP·Provider | docs/AI_OPERATOR_기능정의서.md + ai_operator_progress.md | 해당 절 |
-| CRM 캠페인 대행(설계 대행) 기능 | docs/2026-07-09-crm-campaign-agency-implementation.md | 전체 |
-| 레거시 서버(27.102.203.143) 폐기 | docs/레거시서버_폐기_플랜.md | 전체 (SoT — 진행 시 갱신). **하위 트랙 = 에이전트 선불 충전·잔액 축 흡수: docs/2026-07-24-agent-prepaid-charge-design.md** (서버 실측 원문 포함·다음 세션 단독 재개용) |
-| **선불 자동충전(기업은행 입금 감지) 착수·재개** | **docs/2026-07-28-auto-charge-ibk-design.md** | 전체 (SoT — 호출어 "자동충전 개발재개". 문안 2종 확정·IBK API 실측·재개 전 확인 2건) |
-| 인앱메시지 설계 | docs/인앱메세지전용.md | 해당 절 |
-| DM 편집기 AI 퍼스트 재개편 | docs/2026-07-16-dm-editor-ai-first-redesign.md | 전체 (SoT — Harold 검토 대기) |
-| 장기 로드맵·비전 | docs/한줄로_BEYOND_BRAZE_비전.md | 해당 절 |
 | 옛 설계서·핸드오프·디버그노트 | archive/DESIGNS/ (archive/INDEX.md 경유) | grep 적중 문서만 |
 | Codex 등 외부 에이전트 온보딩·리뷰 판정 기준 | AGENTS.md (레포 루트) | 전체 (경량 유지 — 룰 원천은 CLAUDE.md, 여긴 축약판) |
-| 0718 프론트 스플리팅 사고 후속(B-0718-1)·성능 최적화 재개 | docs/2026-07-18-frontend-splitting-incident-handoff.md | 전체 (SoT — §4 작업 순서) |
-| 아임웹 앱스토어 등록·제출물(한줄로AI) | docs/imweb-appstore/app-intro-copy.md + deliverables/ | 전체 (SoT — 문구 원고·산출물. 연동 스펙은 INTEGRATIONS.md 아임웹 카드) |
-| AI 규제 대응(고영향 판단·생성물 표시) | docs/compliance/ | 해당 문서 (고영향AI 사전검토서 = 법 제31조 이행 기록) |
-| **거래내역서 일괄발급·컨펌·세금계산서(팝빌) 착수·재개** | **docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md** | 전체 (SoT — §8 구현 순서. 팝빌 API 호출부만 계약 후) |
 
 ---
 
 ## 2) CURRENT_TASK (활성 작업만)
 
-> **회전 룰:** 완료(★배포완료)면서 남은 일이 없으면 STATUS에서 **지운다**(원문 = archive/TASKS_YYYY-MM.md + memory). 남은 일이 있으면 아래 "완료분 잔여"에 **한 줄**만. 경위·수치·함정을 여기 재서술하지 않는다(doc_ownership). 30KB 초과 = 회전 미이행.
+> **카드 스키마(고정 4줄):** 제목 / `SoT·기억·다음` / `⛔` 금지·불변 조건(있을 때만) / `잔여`. 그 이상 쓰지 않는다.
+> **경위·수치·근본원인·함정은 SoT 문서와 memory가 소유한다.** 여기 재서술 = doc_ownership 위반. 지우기 전 소유 문서에 그 사실이 실존하는지 grep으로 확인하고, 없으면 소유 문서에 먼저 옮긴 뒤 지운다.
+> **회전 룰:** 잔여가 0이면 카드를 지운다(원문 = archive/TASKS_YYYY-MM.md + memory). 남은 일만 아래 "완료분 잔여"에 한 줄. 30KB 초과 = 회전 미이행.
 
-### 🟡 진행중 — 레거시 PAY 흡수 (Track D)
-> SoT = [docs/2026-07-07-pay-absorption-track-d-design.md](docs/2026-07-07-pay-absorption-track-d-design.md)(통계·인프라) · [docs/2026-07-24-agent-prepaid-charge-design.md](docs/2026-07-24-agent-prepaid-charge-design.md)(충전·잔액, 단독 재개 가능) · [[project_2026_0724_agent_prepaid_charge]] · [[project_2026_0723_pay_agent_stats_tabs]]
-> **충전·잔액 축 = §5-1·5-2·5-3 ★배포완료**(`124ada62` 신설 → `bc9ccdff` 개선). **슈퍼관리자 "에이전트 충전 실행" 화면이 이미 가동 중**(`AgentChargePanel.tsx` — 발송ID 다건·음수 상계·`RsApplyFlag='Y'` 폴링 확인 후에만 성공 표시·원장 최신 시각 표기+14일 공백 경고·10건 페이징·발송ID 검색·기간 필터) + 발송ID 선불 지정·단가 인라인 편집 + 대시보드 에이전트 잔액. 62 왕복 실측 통과(0724 B0023 ±1,000 → `Y` 반영·순변동 0). ⇒ **PAY(143) 화면 없이도 충전 등록 경로는 한줄로에 이미 있다.** ⚠ §5-4는 이 화면이 아니라 **고객사 충전 요청**(직원 확인 후 5-3으로 실행) — 혼동 금지.
-> **★0727 §5-4 충전 요청(고객사) ★DDL 실행·배포완료.** 고객사 `/manage` **충전 요청** 탭(에이전트·겸용 회사만) → 슈퍼 접수함 **[충전 폼에 담기] 1클릭** → §5-3 그대로 실행 → **반영(`Y`) 확인 후에만 완료 전이**. `deposit_requests` 재사용은 폐기(그 승인은 웹 `balance`를 올린다 — 지갑이 다르다). 신규 CT `utils/agent-charge-orders.ts`(계약 테스트 24)·신규 테이블 `agent_charge_orders`. 불변규칙 = SoT §5-4.
-> **★0727 143→62 충전 원장 백필 ★실행 완료(SoT §12)**: `SeqNo>7042` **10건·순합 25,955,131원·미반영 0**. 143이 INSERT문을 생성하게 해 값 전사(轉寫)를 없애고, `SeqNo` 제외 재채번 + `RsApplyFlag='Y'` 그대로 + 트랜잭션 안 검증 후 수동 COMMIT. 62 = **7,038행/MAX 7055**(143 게이트웨이 7,036 + 우리 테스트 2와 교차 일치). 7월 12건이 143에서 전부 `Y`였으므로 **잔액은 원래 정상이었고 우리 원장만 뒤처진 것**. ⛔ **백필 경계 = 143 SeqNo 7052(07-23 14:38)** — 컷오버 시 143 MAX가 그보다 크면 초과분 1회 더.
-> **★0727 잔액 소스 정정 — 코드완료·배포대기(SoT §14)**: 잔액을 일별 통계 스냅샷(`RSRM_SalesStts.RemAmt`)에서 **계정 원장 `RSRM_SalesMst.RemAmt`(실시간)**로 바꿨다. 통계 행은 잔액이 아니어서 C0130이 실제 640,281원인데 화면에 **0원(07-09 기준)**으로 떴다. 기준일 축 폐기·미확정은 "잔액 확인 불가". 권위 행=`StoreId=CustId`, 대표 행 없는 계정(B0046 등)은 합산 금지.
-> **★0727 발송ID 표시명 통일 — 코드완료·배포대기(SoT §13)**: 이름 소스를 게이트웨이 발급명(`RSRM_SalesMst.CustNm`) 하나로 통일하고 라벨을 `발송ID / 발급명`으로 맞췄다(매핑·충전 대상/이력/접수함·고객사 요청·잔액·청구서 상세). 우리 DB에 표시명 컬럼은 만들지 않았다(이중 진실 금지). 제외 1건 = 거래내역서 PDF '구분' 칸(칸 폭 47pt 잘림).
-> **★0727 §8-2 종결**: 고아 발송ID 2건은 실업체 누락이 아니었다 — `C0119`=준네트웍스_미1(0720에 내부 계정으로 회사 생성 제외), `D0131`=한줄로·스팸필터 테스트 충전. 부수: 143 `sales` 한글은 **UTF-8**(`SET NAMES utf8` 없으면 `?`로 보일 뿐 손상 아님).
-> **충전·잔액 축 잔여**: `billing_type='prepaid'` 지정(283행 전부 postpaid = **지금은 충전 등록도 요청 탭도 열리지 않는다**. 오늘 컷오버 최소분 = 7월 실충전 4개 `B0082·D0078·D0079·C0112`) → 한줄로 실측 1건 → 직원 143 PAY 충전 입력 중단 → 서수란 전수 선불·단가 자료 / §5-5 고아 대조 워커(위 내부 2건 예외 등록) / 강문희 143 연동 종료 통지 / §8-8(런소프트 통장 3,100만 vs 143 실측 2,600만 — `C0130`은 1월 이후 충전 0).
-> **★0725 ★배포완료(d19f48fd) — 서수란 6건 + 첫 청구서 발행 전 정산 결함 9건 + xlsx 전환·정합성 5건.** 배포 실측: HEAD=origin/main · exceljs 설치 · `dist/utils/{xlsx-writer,stats-period}.js` 실존 · 프론트 청크 해시 전량 교체 + `개 회사`(발신번호 페이징) 서빙 번들 실존 확인.
-> **추가 5건(d19f48fd)**: 발송통계 3경로 CSV→**.xlsx**(exceljs·`utils/xlsx-writer.ts` CT 신설 — 행빌더 공유로 CSV=xlsx 보장, 수량 숫자형·헤더고정·자동필터) · 알림톡 라벨 통일(웹 '카카오'→'카카오알림톡', 에이전트와 한 컬럼에서 두 줄로 갈리던 것) · 월 확장 `utils/stats-period.ts` CT 단일화(**웹 행만 미확장이라 월별에서 하루치가 한 달로 라벨링되던 과소집계**) · 엑셀 폴백 제거+날짜검증 전건화(청구 축 아닌 숫자가 조용히 나가던 경로) · 슈퍼 엑셀 유형 빈칸→'(유형 미상)'.
-> **서수란 접수 2건(웹 유형 NULL·발신번호 페이징) = 코드·배포 모두 완료** — 남은 건 화면 실측뿐. 접수대기였던 이유는 **프론트 미배포**였다(브레인스토밍 회의론자 지적이 실측으로 확인됨).
-> (이하 0725 1차분) MMS 308,043건 0원 청구(msg_type M·K 미변환) 수정에 이어, 같은 날 2세션에서 ①preview≠발행(자체 SQL 폐기·발행 드라이런으로 재작성) ②정산 생성 비트랜잭션(+`billed` 되돌림 — `billed_invoice_id`는 FK 아님이라 "삭제 후 재생성"에서 크레딧이 영구 미청구되던 경로) ③테스트단가 0원 폴백 ④사용자별 정산 크레딧 축 불일치 ⑤선불 회사 이중 청구 가드 ⑥집계 유형키 누락 자동 감지 ⑦IMC 부재 500 방어 ⑧**월 경계 누락(6월 LOG에 앉은 7/1 발송 385건이 6·7월 어디에도 안 잡히던 구조 — LOG 스캔 ±1개월)** 완료. **7월 청구 금액을 바꾸는 미해결 항목 없음.** Codex 적대검증 4건 중 3건은 실측으로 기각(브랜드메시지는 `IMC%` 테이블 전 스키마 0개 + `campaigns.name` 컬럼 부재로 발송 자체가 비가동 — 별건 분리). tsc 0·1,033 테스트 통과. **발행은 대기 소진 후 8/4 이후, 검증 1건 = 거래내역서에 MMS 308,043건.** 62 원장 07-05~07 + C서버 6일 복구 완료. 상세=[[project_2026_0725_settlement_mms_gap_and_seo_tickets]].
-> (구) 서수란 접수 6건 착수 기록 — 순서 = ①발급명 병기 ②대상ID 출력 ③웹 발송유형 NULL ④알림톡 부달 B0061 귀속 ⑤7/6~7 불일치 진단 ⑥슈퍼 발신번호 페이징. ③ 착수 시 근본 = 웹 통계 소스(querySendStats)에 유형 축이 없어 CSV만 고쳐선 안 됨. 상세·함정 = [[project_2026_0725_pay_stats_custnm_storeid]].
-> **별건(미해결)**: 피케이포유 대상ID 인코딩 손상 — 같은 매장이 정상 UTF-8과 EUC-KR 이중인코딩 두 벌(hex 실측 확정). 게이트웨이 ingest 손상이라 복원은 별도 과제. 상세 = Track D SoT §2-4.
+### 레거시 PAY 흡수 (Track D) — 충전·잔액 축 배포완료, 컷오버 전
+> SoT [통계·인프라](docs/2026-07-07-pay-absorption-track-d-design.md) · [충전·잔액](docs/2026-07-24-agent-prepaid-charge-design.md)(단독 재개용) · 기억 [[project_2026_0724_agent_prepaid_charge]] · 다음 = 7월 실충전 4개(`B0082`·`D0078`·`D0079`·`C0112`)에 `billing_type='prepaid'` 지정(283행 전부 postpaid라 지금은 충전 등록도 요청 탭도 열리지 않는다)
+> ⛔ 백필 경계 = 143 `SeqNo 7052`(07-23 14:38) — 컷오버 시 143 MAX가 그보다 크면 초과분 1회 더 / 잔액 권위 행 = `StoreId=CustId`, 대표 행 없는 계정(`B0046` 등) 합산 금지 / §5-4(고객사 충전 요청)와 §5-3(충전 실행)은 다른 화면 — 혼동 금지 / `deposit_requests` 재사용 폐기(지갑이 다르다)
+> 잔여 = 한줄로 실측 1건 → 직원 143 PAY 입력 중단 → 서수란 선불·단가 자료 · §5-5 고아 대조 워커 · 강문희 143 종료 통지 · §8-8 런소프트 통장 대조 · 표시명·잔액 배포(SoT §13·§14) · 별건 피케이포유 인코딩 손상(§2-4)
 
-### 🔴 진행중 — 정산: ★전량 배포완료(`bc9ccdff`)·⛔실청구 발행은 직원 점검 후
-> **SoT = [docs/2026-07-26-billing-scope-and-corrections-design.md](docs/2026-07-26-billing-scope-and-corrections-design.md) §0-A → §9.** 경위·라운드별 처분·실사고 = SoT §9-x + [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md). 여기 재서술하지 않는다(doc_ownership).
-> **배포**: `b49a3821`(정산 재구성) → `d446856e`(선불 차감·단가 전면 재개편) → `8e8fab94`(속도) → `bc9ccdff`(에이전트 선불). **DB 적용 완료** = `companies.unit_price_basis` ALTER + 전 77사 `vat_excluded` 마이그레이션 + DEFAULT 전환.
-> **부가세 이중과세 해소** — 단가를 부가세 **별도(공급가)**로 통일. 쓰기 경로는 `PUT /api/admin/companies/:id/unit-prices` 하나(옛 3경로는 식별자 제거 — tsc가 막는다). 선불 차감·표시는 `withVat`, 청구는 공급가.
-> **⛔ 실청구 발행 조건 = 직원 단가·선불 재점검 완료.** `DEFAULT_COSTS` 잔존 9곳 + 라운드 숫자 2곳(SoT §9-1 표)은 ÷1.1 결과가 계약과 다를 수 있다. 발송ID 단가·선불 지정도 같은 화면(고객사 수정 → 에이전트 발송ID 매핑)에서 함께.
-> **남은 개발 = §9-3 유형별 수량 버튼 → §9-4 ①두 번째 스캔 폐기**(`[정산][소요]` 계측 로그 확인 후 판단. ②③④는 처리·종결).
-> **완료분 잔여(운영 검증)**: 금강제화 draft **화면에서** 삭제·재발행(psql DELETE 금지) / 실회사 드라이런(발행→PDF→메일→삭제) / 거래내역서 **MMS 308,043건** / 발행 소요 재측정.
-> **이월(판단 필요)**: `G` 유형(여미지 B0227·7월 42,833건) 과금 분류 / 요금제 이력 크레딧 스냅샷 소급(ALTER) / 크레딧 일할 자동지급 재배선 / 요금제 해지 표현 / `by_agent` 지점별 발행(+에이전트 청구 줄에 발송ID 표기) / `/preview` 화면 배선 / 141사 일괄 발행 / 테스트 발송 환불이 고정 zero-uuid 참조라 회사·유형당 1회만 나가는 기존 결함.
+### 정산 — 전량 배포완료(`bc9ccdff`), 실청구 발행 대기
+> SoT [정산 범위·정정](docs/2026-07-26-billing-scope-and-corrections-design.md) §0-A → §9(속도 결론 = **§9-9**) · 기억 [[project_2026_0726_billing_scope_corrections]] · 다음 = §9-3 유형별 수량 버튼(남은 개발은 이것뿐)
+> ⛔ 실청구 발행은 직원 단가·선불 재점검 완료 후 — `DEFAULT_COSTS` 잔존 9곳 + 라운드 숫자 2곳(SoT §9-1)은 ÷1.1 결과가 계약과 다를 수 있다(발송ID 단가·선불 지정도 같은 화면 = 고객사 수정 → 에이전트 발송ID 매핑) / 금강제화 draft 삭제·재발행은 **화면에서**, psql DELETE 금지
+> 잔여 = 실회사 드라이런(발행→PDF→메일→삭제) · 거래내역서 MMS 308,043건 · 이월 판단 8건(SoT §9 — `G` 유형 과금 분류 · 크레딧 스냅샷 소급 ALTER · 일할 자동지급 재배선 · 해지 표현 · `by_agent` 지점별 발행 · `/preview` 배선 · 141사 일괄 발행 · 테스트 발송 환불 zero-uuid 결함=BUGS.md)
 
-### 🟢 0728 싱크에이전트 — 검증 자동화 완료 (아난티 발송 대기)
-> **SoT = [docs/2026-07-28-sync-agent-build-verification-runbook.md](docs/2026-07-28-sync-agent-build-verification-runbook.md)**(0728 전면 개정 — 정책·도구·조합 현황). 경위 = SYNC-AGENT-TROUBLESHOOTING.md §2-8. 여기 재서술하지 않는다.
-> **배포완료(`c16fc242`)**: `--test-db` 비대화형 DB 진단(1.6.5+) · `scripts/smoke-combos.sh` 조합 스모크 · 설치 매뉴얼 실제 흐름 정정(docx v1.6.4). 대화형 마법사를 스크립트로 몰던 방식은 입력이 밀려 재현이 안 돼 폐기.
-> **1.6.5 빌드 20개 로컬 완료 · 스모크 9조합 PASS**(win-modern·linux-modern·linux-legacy × mysql/pg + win-legacy×oracle + launch 2). Oracle 3종은 IC 미동봉으로 SKIP(설계상 결과).
-> ⛔ **아난티는 1.6.4로 나간다** — 보존본 `sync-agent/release-verified/1.6.4/`(해시 대조 완료) + 매뉴얼 docx v1.6.4 **세트로**. 1.6.5는 Server 2016 실환경 미검증이라 서버 zip 교체·업로드 안 함.
-> **잔여**: 아난티 발송(zip+매뉴얼) · 20조합 전수 검증 폐기(검증된 것만 유지 정책으로 대체) · 마법사 탈출구 두 줄(`--setup-web`/`--setup-cli` 배너)은 1.6.5에 미포함.
+### 싱크에이전트 — 검증 자동화 배포완료(`c16fc242`), 아난티 발송 대기
+> SoT [빌드 검증 런북](docs/2026-07-28-sync-agent-build-verification-runbook.md)(정책·조합 현황·경위 전부) · 기억 [[project_2026_0727_sync_agent_vm_verification]] · 다음 = 아난티 발송(zip+매뉴얼). 호출어 "싱크에이전트 빌드 검증 이어가자"
+> ⛔ 아난티는 **1.6.4 세트**로 — 1.6.5는 Server 2016 미검증이라 서버 zip 교체 금지
+> 잔여 = 마법사 탈출구 배너 미포함
 
-### 🟢 0728 접수 3건 + 여정 트리거 — ★배포완료
-> **접수 3건(`2c44ae77`)**: ①DM 자동검수 치명 확인 후 발행 — `required_info`만 무시 가능(오작동·표시광고는 불가), 무시 항목·시각·사용자를 `dm_pages.validation_result`에 기록 ②슈퍼관리자 템플릿 상세에 대표링크 등 부가기능 노출(데이터는 이미 있었고 렌더만 없었다) ③발송통계 에이전트 탭 페이징(슈퍼·고객 2곳, 백엔드가 전량 반환하는 축이라 클라이언트 페이징).
-> **여정 트리거(`b0bd9d7b`)**: 정보 알림 빌더가 거래 4종만 열던 것을 **8종 전부 개방**(가입·휴면·생일·포인트소멸 추가 — 백엔드 switch는 이미 8종 처리 중이었다). 템플릿 변수↔트리거 호환 게이트 신설(이벤트 변수 템플릿은 properties를 싣는 4종에만) + 템플릿 본문 기반 AI 트리거 추천(후보 밖 값 거부). Codex 3라운드.
-> **잔여(화면 실측 — Harold)**: 이미지 전용 DM 발행 시 `확인했어요 · 이대로 발행` 노출 / 무주덕유산리조트 `B_MJ_008_02_82177` 상세 대표링크 / 에이전트 탭 20건 초과 시 페이저 / 정보 알림에 **신규 가입** 선택지 + AI 추천 동작.
+### 0728 정산 파이프라인 — 배포완료, 팝빌 실호출만 잔여
+> SoT [일괄발급·컨펌·세금계산서](docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md) §9(종결 상태·이월) · §7-0(팝빌 API 요지) · 기억 [[project_2026_0728_bulk_invoice_confirm_taxbill]] [[project_2026_0728_tickets_journey_triggers]] · 다음 = 팝빌 공동인증서 등록 → 테스트베드 웹훅·포인트 → `RegistIssue` 연결(ENV 4종 등록됨)
+> ⛔ 신규 테이블 실행자 컬럼에 users FK 금지 = SCHEMA.md 공통 원칙(0728 `23503` 사고에서 확정) / 공급받는자 사업자 우선순위 = 계정 → 회사(`billing_contacts`) → `companies` 3단, 세 곳을 섞지 않는다(SoT §5-1). PDF 5곳은 아직 `companies`만 본다
+> 잔여 = 화면 실측 5건(정산 탭 저장 / 일괄발급 1건 / 공개 페이지 컨펌=CSP / 현황판 / 사업자등록증 자동입력) · 메일 문안·PDF 첨부 논의 · 접수·여정 트리거 실측 4건([[project_2026_0728_tickets_journey_triggers]]) · **0728 추가 배포대기 3건**(작성일자 미리보기 / 회사 계산서 사업자·사업자번호 검증 / **컨펌 메일 PDF 첨부+버튼 하나·페이지 컨펌 전용·`rowCount` ack**)
 
-### 🟢 0727 완료·잔여 — 여정 알림톡 + 환불 의무
-> **한줄로 배포완료**: 발송ID 표시명=발급명 통일 + 에이전트 잔액 계정원장 전환(`0fe700c0`) · 여정 알림톡 CHECK 위반 전건 미발송 정정(`0af8d427`) · 결과 알림 묶음(`353cb42a`)·실결과 기준·`sentTables`. 상세 = [[project_2026_0727_journey_alimtalk_and_agent_tls]]
-> **알림톡 대체문안 — 코드완료·배포대기**: 전환재발송을 원인별 CT(`utils/alimtalk-fallback.ts`)로 단일화. 선택은 `대체 안함`/`원문 그대로(L)`/`대체문안 작성(B)` 3지이고, 게이트웨이 매뉴얼상 L은 우리가 넣은 `msg_contents`가 그대로 나간다. B인데 문안이 비면 저장·활성화·발송에서 차단. 4경로 + 저장 4곳 + 화면 CT 1곳.
-> **환불 의무 재설계 — 코드완료·배포대기(B-0727-1·2)**: `balance_transactions.refund_key`(DDL 실행 완료)로 미적재·실패·취소를 원인별 항아리로 분리. Codex 10라운드 SHIP. 상세 = BUGS.md.
-> **여정 확정 사실**: 업로드 후 최대 10분(워커 5분+발송 5분). 전환발송은 게이트웨이가 정상 수행(7300→대체 LMS 1000 실측).
+### 0727 여정 알림톡 + 환불 의무 — 배포대기 2건
+> SoT 알림톡·잔액 = 기억 [[project_2026_0727_journey_alimtalk_and_agent_tls]] · 환불 = [BUGS.md](BUGS.md) B-0727-1·2 · 다음 = 배포대기 2건 배포(알림톡 대체문안 CT `utils/alimtalk-fallback.ts` 커밋 `f91d5ea5` / `balance_transactions.refund_key` 원인별 분리, DDL 실행 완료)
+> ⛔ 대체문안 선택이 `대체문안 작성(B)`인데 문안이 비면 저장·활성화·발송 세 지점에서 차단 — `원문 그대로(L)`는 게이트웨이가 우리 `msg_contents`를 그대로 내보낸다
+> 잔여 = 위 2건 배포. 배포완료분(`0fe700c0`·`0af8d427`·`353cb42a`)은 운영 확인만
 
-### 🔵 다음 세션 (예정)
-> ① **템플릿관리자 흡수(Track B+C) — 1순위**: 다음 = 서팀장 점검표 회신(계정·코드 정정) → 컷오버. 병행 = M4 실발송 1건 · 497 기준 서팀장 · M5(B-3 계정·Bill_ID) · 브랜드 스코프(B-2) · 다우 2사 senderKey 이관 실측. 계약·이관 이력 전문 = 설계문서 §1·§4 · [[project_2026_0705_legacy_template_migration]].
-> ② **0718 성능 후속(활성)**: 관측 사이클 1회전 — 1순위 campaigns 발송 단계 폴러 인덱스(EXPLAIN 후 처방) · 2순위 balance_transactions 잔액 SUM N+1(호출처 추적) · 그 후 M3/롤업. SoT = docs/2026-07-18-frontend-splitting-incident-handoff.md · [[project_2026_0717_dashboard_performance]].
-> ③ **아임웹·아이디룩 시연(활성)**: 스토어 등록 확인 → 테스트 몰 OAuth 리허설(pm2 로그 + 회원가입 1건 webhook) → 아이디룩 시연. 스펙 = INTEGRATIONS.md 아임웹 카드 · [[project_2026_0719_imweb_appstore_idlook]].
-> ④ **이미지 스튜디오 잔여**: 인앱 웹 디자인 탭 단순화 · 원샷 이식(인앱·이메일) · 판독 3축 확장 · 템플릿 exampleUrl 실샘플 · **미해결 = DM 상품 링크 입력 시 멈춤(재현 정보 대기)**. [[project_2026_0719_p4_image_studio]].
-> ⑤ **비토 라인 14·15 미결 4건**: ①배정 화면 게이팅 범위(Harold 미확인) ②라인그룹 DELETE가 users.line_group_id 미체크(무경고 배정 해제) ③sweeper 2종 bulk-only 사각 ④Codex 결과 미수령. [[project_2026_0717_bito_line14_15_lineadmin]].
-> ⑥ **인앱 잔여**: 웹 실측(쿠폰·CTA 정렬·허용표·AI 생성 1건) · 0717 직원 디버깅분(수신거부·DM #1~3·이메일) 코드완료·미검증 · M3 네이버 env 키(NAVER_CLIENT_ID/SECRET) 등록 시 활성 · M6 이메일·인앱 이식(별도 설계).
-> ⑦ **Local AI Ops Hub** — 설계 3부작 완료·Harold 결정(H-2 M0 착수) 대기. 실무보다 후순위. [[project_2026_0715_local_ai_ops_hub]].
-> ⑧ **선불 자동충전(기업은행 입금 감지) — 설계 확정·착수 대기**: 기업은행 오픈API 이용 승인이 나면 착수. 호출어 "자동충전 개발재개". 문안 2종·인증 방향(2-legged)·구분 축(게이트웨이=`발송ID / 발급명` / 웹=사용자명)·조회 방식(대기 요청 있을 때만) 확정. **코드 전 확인 2건** = ⓐ2-legged에서 `oapiUserSrn` 얻는 경로(사용자등록 문서 필요) ⓑ웹 선불 잔액이 사용자 단위인지. 선행 = `billing_type='prepaid'` 지정(현재 0건). SoT = docs/2026-07-28-auto-charge-ibk-design.md
-> (지속) 비토 API 발송 경로 전환 검토(선택) [[project_2026_0710_bito_api_direct_test]] · (보류) 팝폰 SDK 검증.
+### 다음 세션 (예정)
+> 경위·범위·확정 사실은 링크가 소유한다. 여기엔 제목·다음 한 수·호출어만.
+> ① **템플릿관리자 흡수(Track B+C)** 1순위 — 다음 = 서팀장 점검표 회신(계정·코드 정정) → 컷오버. 병행 = M4 실발송 1건 · 497 기준 · M5(B-3 계정·`Bill_ID`) · 브랜드 스코프(B-2) · 다우 2사 senderKey 이관 실측. [설계 §1·§4](docs/2026-07-14-template-migration-track-bc-design.md) · [[project_2026_0705_legacy_template_migration]]
+> ② **0718 성능 후속** — 관측 사이클 1회전: 1순위 campaigns 발송 폴러 인덱스(EXPLAIN 후 처방) · 2순위 `balance_transactions` 잔액 SUM N+1(호출처 추적) · 그 후 M3/롤업. [핸드오프](docs/2026-07-18-frontend-splitting-incident-handoff.md) · [[project_2026_0717_dashboard_performance]]
+> ③ **아임웹·아이디룩 시연** — 스토어 등록 확인 → 테스트 몰 OAuth 리허설(pm2 로그+회원가입 1건 webhook) → 시연. INTEGRATIONS.md 아임웹 카드 · [[project_2026_0719_imweb_appstore_idlook]]
+> ④ **이미지 스튜디오 잔여** — 인앱 웹 디자인 탭 단순화 · 원샷 이식(인앱·이메일) · 판독 3축 확장 · 템플릿 `exampleUrl` 실샘플 · 미해결 = DM 상품 링크 입력 시 멈춤(재현 정보 대기). [[project_2026_0719_p4_image_studio]]
+> ⑤ **비토 라인 14·15 미결 4건** — ①배정 화면 게이팅 범위(Harold 미확인) ②라인그룹 DELETE가 `users.line_group_id` 미체크 ③sweeper 2종 bulk-only 사각 ④Codex 결과 미수령. [[project_2026_0717_bito_line14_15_lineadmin]]
+> ⑥ **인앱 잔여** — 웹 실측(쿠폰·CTA 정렬·허용표·AI 생성 1건) · 0717 직원 디버깅분 코드완료·미검증 · M3 네이버 env 키 등록 시 활성 · M6 이메일·인앱 이식(별도 설계). [[project_2026_0717_inapp_debug_session_incomplete]]
+> ⑦ **Local AI Ops Hub** — 설계 3부작 완료·Harold 결정(H-2 M0 착수) 대기. 실무보다 후순위. [[project_2026_0715_local_ai_ops_hub]]
+> ⑧ **선불 자동충전(기업은행 입금 감지)** — IBK 오픈API 승인 후 착수. 호출어 "자동충전 개발재개". 착수 전 확인 2건(`oapiUserSrn` 경로 · 웹 잔액이 사용자 단위인지) · 선행 = `billing_type='prepaid'` 지정(현재 0건). [SoT](docs/2026-07-28-auto-charge-ibk-design.md)
+> (지속) 비토 API 발송 경로 전환 검토 [[project_2026_0710_bito_api_direct_test]] · (보류) 팝폰 SDK 검증
 
 ---
 
 ### 완료분 잔여 (실측·후속 대기만)
 
-> 배포까지 끝나고 할 일이 없는 건은 여기 남기지 않는다. **아직 남은 것만** 적는다.
-> 경위·함정·수치 원문 = 각 memory 파일 + [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md). 여기에 재서술 금지(doc_ownership).
-> 위 활성 트랙(진행중·다음 세션)에 이미 있는 잔여는 중복 기재하지 않는다.
+> **아직 남은 것만** 한 줄. 경위·함정·수치 원문 = 각 memory 파일 + [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) — 여기 재서술 금지.
+> 위 활성 카드(진행중·다음 세션)에 이미 있는 잔여는 중복 기재하지 않는다.
 
 | 건 | 남은 것 | 상세 |
 |---|---|---|
-| 0726 정산 재구성 (커밋 `b49a3821`) | **§9-1 부가세 수정 후** 금강제화 draft 화면 삭제·재발행 · 실회사 드라이런 · MMS 308,043건 | [[project_2026_0726_billing_scope_corrections]] |
+| 0725 정산 결함·서수란 6건 (커밋 `d19f48fd`) | 화면 실측(웹 유형 NULL · 발신번호 페이징). 7월 청구 금액을 바꾸는 미해결 항목은 없다 | [[project_2026_0725_settlement_mms_gap_and_seo_tickets]] |
 | 0725 PAY 통계 발급명·대상ID | **배포 대기** + 커밋 시 신규파일 `packages/backend/src/utils/pay-stats.test.ts` git add | [[project_2026_0725_pay_stats_custnm_storeid]] |
 | 0724 DM 테스트 무과금 차단 | 서수란 실측 · 기존 running A/B 미발행 variant 점검 SQL | [[project_2026_0724_dm_test_no_charge_bypass]] |
 | 0723~24 PAY 에이전트 통계(발송ID·엑셀) | 서수란 실측 · 54/57 전환갭 확인 · billing 정산 반영 | [[project_2026_0723_pay_agent_stats_tabs]] |
@@ -120,7 +92,7 @@
 | 0713~17 실측 대기 6건 (인앱 중앙정렬 · DM 편집기 AI퍼스트 · 인앱 안전편집기 · 서체 자가호스팅 · DM 한글주소 · DM bugfix5 · 디자인 3.0/4.0·Operator 소개 v4) | 직원·Harold 시각 실측 / DDL 3건 확인 / 팝폰 앱 커밋·빌드 / M3 네이버 env 키 · M6 이식 | [[project_2026_0717_inapp_debug_session_incomplete]] · [[project_2026_0716_dm_editor_ai_first_redesign]] · [[project_2026_0716_inapp_universal_safe_editor]] · [[project_2026_0716_dm_email_font_selfhosting]] · [[project_2026_0715_dm_korean_alias]] · [[project_2026_0715_mobile_dm_bugfix_5]] · [[project_2026_0713_operator_intro_effects]] |
 
 > 잔여 없는 완료분 + 2026-07-09 이하 = [archive/INDEX.md](archive/INDEX.md) → TASKS_YYYY-MM.md grep.
-> 회전 이력: 0721(07-01~09) · 0722(07-04~09) · 0725(완료 서술 전량 archive 위임) · **0728(0713~17 실측대기 5행 → 1행 통합 — 상시 로드 상한 근접)**.
+> 회전 이력: 0721(07-01~09) · 0722(07-04~09) · 0725(완료 서술 전량 archive 위임) · 0728(0713~17 실측대기 5행 → 1행 통합) · **0728 §2 카드 스키마 전환(트랙 서술 → SoT 링크. 지운 문장은 소유 문서 실존을 건별 grep 확인, 미소유 3건은 SoT §9-9·memory로 선이관)**.
 
 ---
 

@@ -103,9 +103,26 @@ const trimOrNull = (v: any): string | null => {
   return s === '' ? null : s;
 };
 
+/** 사업자등록번호 정규화 — 숫자 10자리만 통과시키고 `000-00-00000`으로 통일한다. */
+export function normalizeBizNumber(raw: any): string | null {
+  const s = trimOrNull(raw);
+  if (!s) return null;
+  const d = s.replace(/\D/g, '');
+  if (d.length !== 10) {
+    throw new Error(`사업자등록번호는 숫자 10자리여야 합니다 (입력: ${s})`);
+  }
+  return `${d.slice(0, 3)}-${d.slice(3, 5)}-${d.slice(5)}`;
+}
+
 /**
  * 담당자·사업자 UPSERT. 회사 레벨(user_id NULL)과 계정 레벨을 partial unique 인덱스에 각각 맞춘다.
  * ⚠ 계정 레벨은 **그 회사 소속 계정인지** 호출부(라우트 트랜잭션)가 먼저 검증한다 — 여기서는 값만 쓴다.
+ *
+ * ★ 2026-07-28 사업자 6필드가 **페이로드에 아예 없으면 기존 값을 보존**한다.
+ *   UPSERT가 EXCLUDED로 통째 덮기 때문에, 담당자만 담아 보내는 호출(배포 후 캐시된 옛 번들 등) 한 번에
+ *   등록해둔 계산서 사업자가 조용히 NULL이 되던 구멍을 막는다.
+ *   빈 문자열('')은 "지움"이라 그대로 NULL이 된다 — **미전송과 지움을 구분한다.**
+ *   6필드는 한 사업자의 신원이라 개별이 아니라 묶음으로 판단한다(SoT §5-1 — 부분 병합 금지).
  */
 export async function upsertBillingContact(
   db: any,
@@ -114,11 +131,15 @@ export async function upsertBillingContact(
   updatedBy?: string | null,
 ): Promise<void> {
   const by = updatedBy && UUID_RE.test(updatedBy) ? updatedBy : null;
+  const taxbillProvided = [
+    input.taxbillBizNumber, input.taxbillCompanyName, input.taxbillCeoName,
+    input.taxbillAddress, input.taxbillBizType, input.taxbillBizItem,
+  ].some((v) => v !== undefined);
   const vals = [
     companyId,
     trimOrNull(input.contactName),
     trimOrNull(input.contactEmail),
-    trimOrNull(input.taxbillBizNumber),
+    normalizeBizNumber(input.taxbillBizNumber),
     trimOrNull(input.taxbillCompanyName),
     trimOrNull(input.taxbillCeoName),
     trimOrNull(input.taxbillAddress),
@@ -136,15 +157,15 @@ export async function upsertBillingContact(
        ON CONFLICT (company_id, user_id) WHERE user_id IS NOT NULL DO UPDATE SET
          contact_name = EXCLUDED.contact_name,
          contact_email = EXCLUDED.contact_email,
-         taxbill_biz_number = EXCLUDED.taxbill_biz_number,
-         taxbill_company_name = EXCLUDED.taxbill_company_name,
-         taxbill_ceo_name = EXCLUDED.taxbill_ceo_name,
-         taxbill_address = EXCLUDED.taxbill_address,
-         taxbill_biz_type = EXCLUDED.taxbill_biz_type,
-         taxbill_biz_item = EXCLUDED.taxbill_biz_item,
+         taxbill_biz_number   = CASE WHEN $12 THEN EXCLUDED.taxbill_biz_number   ELSE billing_contacts.taxbill_biz_number   END,
+         taxbill_company_name = CASE WHEN $12 THEN EXCLUDED.taxbill_company_name ELSE billing_contacts.taxbill_company_name END,
+         taxbill_ceo_name     = CASE WHEN $12 THEN EXCLUDED.taxbill_ceo_name     ELSE billing_contacts.taxbill_ceo_name     END,
+         taxbill_address      = CASE WHEN $12 THEN EXCLUDED.taxbill_address      ELSE billing_contacts.taxbill_address      END,
+         taxbill_biz_type     = CASE WHEN $12 THEN EXCLUDED.taxbill_biz_type     ELSE billing_contacts.taxbill_biz_type     END,
+         taxbill_biz_item     = CASE WHEN $12 THEN EXCLUDED.taxbill_biz_item     ELSE billing_contacts.taxbill_biz_item     END,
          updated_by = EXCLUDED.updated_by,
          updated_at = NOW()`,
-      [...vals, input.userId],
+      [...vals, input.userId, taxbillProvided],
     );
   } else {
     await db.query(
@@ -156,15 +177,15 @@ export async function upsertBillingContact(
        ON CONFLICT (company_id) WHERE user_id IS NULL DO UPDATE SET
          contact_name = EXCLUDED.contact_name,
          contact_email = EXCLUDED.contact_email,
-         taxbill_biz_number = EXCLUDED.taxbill_biz_number,
-         taxbill_company_name = EXCLUDED.taxbill_company_name,
-         taxbill_ceo_name = EXCLUDED.taxbill_ceo_name,
-         taxbill_address = EXCLUDED.taxbill_address,
-         taxbill_biz_type = EXCLUDED.taxbill_biz_type,
-         taxbill_biz_item = EXCLUDED.taxbill_biz_item,
+         taxbill_biz_number   = CASE WHEN $11 THEN EXCLUDED.taxbill_biz_number   ELSE billing_contacts.taxbill_biz_number   END,
+         taxbill_company_name = CASE WHEN $11 THEN EXCLUDED.taxbill_company_name ELSE billing_contacts.taxbill_company_name END,
+         taxbill_ceo_name     = CASE WHEN $11 THEN EXCLUDED.taxbill_ceo_name     ELSE billing_contacts.taxbill_ceo_name     END,
+         taxbill_address      = CASE WHEN $11 THEN EXCLUDED.taxbill_address      ELSE billing_contacts.taxbill_address      END,
+         taxbill_biz_type     = CASE WHEN $11 THEN EXCLUDED.taxbill_biz_type     ELSE billing_contacts.taxbill_biz_type     END,
+         taxbill_biz_item     = CASE WHEN $11 THEN EXCLUDED.taxbill_biz_item     ELSE billing_contacts.taxbill_biz_item     END,
          updated_by = EXCLUDED.updated_by,
          updated_at = NOW()`,
-      vals,
+      [...vals, taxbillProvided],
     );
   }
 }
@@ -199,12 +220,20 @@ export function computeTaxbillIssueDate(policy: TaxbillDayPolicy, billingEnd: st
 }
 
 /**
- * (순수) 자동 발급 시각 = min(발송 +3일, 대상월 익월 10일 00:00 KST).
- * 세금계산서는 공급월 익월 10일까지 발급해야 하므로, 3일 대기가 그 기한을 넘지 않게 캡을 건다.
+ * (순수) 자동 발급 시각 = min(**발송일 기준** 3일 뒤 09:00 KST, 대상월 익월 10일 00:00 KST).
+ *
+ * ★ 2026-07-28 Harold 지시로 "발송 시각 +72시간"에서 **발송일로 잘라 세는 방식**으로 바꿨다.
+ *   5일에 보냈으면 보낸 날을 1일로 쳐서 5·6·7일 사흘을 주고, **8일 아침 9시**에 자동 발급 대상이 된다.
+ *   시각이 아니라 날짜로 자르니 밤 11시에 보낸 고객과 아침 9시에 보낸 고객이 같은 마감을 받는다.
+ *   (KST 09:00 = 같은 날 UTC 00:00 — KST가 UTC+9이라 자정 계산이 그대로 09시가 된다)
+ *
+ * 세금계산서는 공급월 익월 10일까지 발급해야 하므로 그 기한을 넘지 않게 캡을 건다.
  * 캡에 걸리면 10일 자정(KST) 도래 즉시 자동 발급 대상이 된다 — 기한 안이다.
  */
 export function computeTaxbillDueAt(sentAtMs: number, billingEnd: string): Date {
-  const threeDays = sentAtMs + 3 * 24 * 60 * 60 * 1000;
+  // 발송 시각을 KST 달력 날짜로 읽는다(+9시간 후 UTC 필드를 보면 그것이 KST 날짜다).
+  const kst = new Date(sentAtMs + 9 * 60 * 60 * 1000);
+  const threeDays = Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate() + 3, 0, 0, 0);
   const y = Number(billingEnd.slice(0, 4));
   const m = Number(billingEnd.slice(5, 7)); // 1-based → Date.UTC의 0-based로 쓰면 그대로 "익월"
   const capUtcMs = Date.UTC(y, m, 10, 0, 0, 0) - 9 * 60 * 60 * 1000; // 익월 10일 00:00 KST
