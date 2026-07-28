@@ -165,7 +165,8 @@ export default function AdminDashboard() {
     aiOperatorTrialStartedAt: '' as string | null | '',
     aiOperatorTrialUntil: '' as string | null | '',
   });
-  const [editCompanyTab, setEditCompanyTab] = useState<'basic' | 'send' | 'cost' | 'ai' | 'store' | 'fields' | 'cards' | 'customers' | 'sync'>('basic');
+  // ★ 2026-07-28 'fields'(필터항목) → 'billing'(정산) 탭 교체
+  const [editCompanyTab, setEditCompanyTab] = useState<'basic' | 'send' | 'cost' | 'ai' | 'store' | 'billing' | 'cards' | 'customers' | 'sync'>('basic');
   // ★ 2026-07-21 문안 생성 참조 업종 목록 — SSOT=백엔드 industry-codes.ts (프론트 하드코딩 금지, GET /api/admin/industry-codes)
   const [industryOptions, setIndustryOptions] = useState<Array<{ code: string; label: string }>>([]);
   const [standardFields, setStandardFields] = useState<any[]>([]);
@@ -1263,6 +1264,189 @@ const loadInvoices = async () => {
   catch (e) { console.error(e); }
   finally { setInvoicesLoading(false); }
 };
+// ═══ ★ 2026-07-28 거래내역서 일괄발급 + 컨펌·세금계산서 현황 — SoT docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md §3·§4 ═══
+const prevMonthStr = () => {
+  const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+};
+const monthToPeriod = (ym: string) => {
+  const y = Number(ym.slice(0, 4)); const m = Number(ym.slice(5, 7));
+  const last = new Date(y, m, 0).getDate();
+  return { start: `${ym}-01`, end: `${ym}-${String(last).padStart(2, '0')}` };
+};
+
+const [bulkMonth, setBulkMonth] = useState<string>(prevMonthStr());
+// ★ Codex 2R HIGH 수용 — 월은 ref로도 든다. 폴링 완료 콜백·발급 시작이 **화면의 현재 월**을 읽게 해
+//   낡은 클로저가 이전 월로 발급하는 경로를 끊는다. 요청 시퀀스는 늦게 도착한 목록 응답을 버린다.
+const bulkMonthRef = useRef(prevMonthStr());
+const bulkReqSeqRef = useRef(0);
+const [bulkListLoading, setBulkListLoading] = useState(false);
+const [bulkList, setBulkList] = useState<any[] | null>(null);   // null = 아직 조회 전
+const [bulkPage, setBulkPage] = useState(1);
+const [bulkSelected, setBulkSelected] = useState<string[]>([]); // 상단 리스트 체크
+const [bulkCombined, setBulkCombined] = useState<any[]>([]);    // 왼쪽 = 고객사 전체 발급
+const [bulkByUser, setBulkByUser] = useState<any[]>([]);        // 오른쪽 = 계정별 발급
+const [bulkJobId, setBulkJobId] = useState<string | null>(null);
+const [bulkJob, setBulkJob] = useState<any>(null);
+const [bulkStarting, setBulkStarting] = useState(false);
+const [confirmBoardOpen, setConfirmBoardOpen] = useState(false);
+const [confirmRows, setConfirmRows] = useState<any[]>([]);
+const [confirmLoading, setConfirmLoading] = useState(false);
+const [confirmStatusFilter, setConfirmStatusFilter] = useState('');
+const [confirmTruncated, setConfirmTruncated] = useState(false);
+const [manualDateDraft, setManualDateDraft] = useState<Record<string, string>>({});
+
+const bulkPickedIds = () => new Set([...bulkCombined, ...bulkByUser].map((c) => c.id));
+
+const loadBulkList = async () => {
+  // ★ Codex 2R HIGH 수용 — 월은 ref에서 읽고(낡은 클로저 무력화), 시퀀스가 다르면 응답을 버린다
+  //   (월 변경 직전에 나간 조회가 늦게 도착해 이전 월 목록을 되살리는 경로 차단).
+  const seq = ++bulkReqSeqRef.current;
+  const { start, end } = monthToPeriod(bulkMonthRef.current);
+  setBulkListLoading(true);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/admin/billing/bulk/unbilled?start=${start}&end=${end}`, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    if (seq !== bulkReqSeqRef.current) return; // 그 사이 월이 바뀜 — 이 응답은 폐기
+    if (!res.ok) throw new Error(data?.error || '대상 조회 실패');
+    setBulkList(Array.isArray(data.companies) ? data.companies : []);
+    setBulkSelected([]); setBulkCombined([]); setBulkByUser([]); setBulkPage(1);
+  } catch (e: any) {
+    if (seq === bulkReqSeqRef.current) setBillingToast({ msg: e?.message || '일괄발급 대상 조회 실패', type: 'error' });
+  } finally {
+    if (seq === bulkReqSeqRef.current) setBulkListLoading(false);
+  }
+};
+
+// 담기 — 정산 탭에 저장된 발행 단위(issue_scope)에 따라 좌/우 기본 배치. 담긴 회사는 상단에서 잠긴다.
+const bulkAddSelected = () => {
+  if (!bulkList) return;
+  const picked = bulkPickedIds();
+  const adds = bulkList.filter((c) => bulkSelected.includes(c.id) && !picked.has(c.id));
+  setBulkCombined((prev) => [...prev, ...adds.filter((c) => c.issue_scope !== 'by_user')]);
+  setBulkByUser((prev) => [...prev, ...adds.filter((c) => c.issue_scope === 'by_user')]);
+  setBulkSelected([]);
+};
+const bulkMoveToByUser = (id: string) => {
+  const row = bulkCombined.find((c) => c.id === id);
+  if (!row) return;
+  setBulkCombined((prev) => prev.filter((c) => c.id !== id));
+  setBulkByUser((prev) => [...prev, row]);
+};
+const bulkMoveToCombined = (id: string) => {
+  const row = bulkByUser.find((c) => c.id === id);
+  if (!row) return;
+  setBulkByUser((prev) => prev.filter((c) => c.id !== id));
+  setBulkCombined((prev) => [...prev, row]);
+};
+const bulkRemove = (id: string) => {
+  setBulkCombined((prev) => prev.filter((c) => c.id !== id));
+  setBulkByUser((prev) => prev.filter((c) => c.id !== id));
+};
+
+const handleBulkStart = async () => {
+  // ★ Codex 2R HIGH 수용 — 발급 기간도 ref에서. 담기 목록은 월 변경 시 비워지므로 ref 월과 항상 한 쌍이다.
+  const { start, end } = monthToPeriod(bulkMonthRef.current);
+  const items = [
+    ...bulkCombined.map((c) => ({ company_id: c.id, scope: 'combined' })),
+    ...bulkByUser.map((c) => ({ company_id: c.id, scope: 'by_user' })),
+  ];
+  if (items.length === 0) { setBillingToast({ msg: '발급할 회사를 담아 주세요', type: 'error' }); return; }
+  setBulkStarting(true);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch('/api/admin/billing/bulk/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ period_start: start, period_end: end, items }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || '일괄발급 시작 실패');
+    setBulkJob(null);
+    setBulkJobId(String(data.job_id));
+  } catch (e: any) {
+    setBillingToast({ msg: e?.message || '일괄발급 시작 실패', type: 'error' });
+  } finally {
+    setBulkStarting(false);
+  }
+};
+
+// 진행률 폴링 — job이 끝나면(부분 실패 포함) 대상 목록을 다시 읽어 발급된 회사가 빠지게 한다.
+// ★ Codex 1R MEDIUM 수용 — 요청 중첩(2초 넘게 걸리는 tick)과 종료 후 늦게 도착한 응답의 화면 덮어쓰기 차단.
+useEffect(() => {
+  if (!bulkJobId) return;
+  let alive = true;
+  let stopped = false;
+  let inFlight = false;
+  const tick = async () => {
+    if (inFlight || stopped) return;
+    inFlight = true;
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/admin/billing/bulk/jobs/${bulkJobId}`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!alive || stopped || !res.ok) return;
+      setBulkJob(data);
+      if (data?.job?.status && data.job.status !== 'running') {
+        stopped = true;
+        clearInterval(timer);
+        loadBulkList();
+      }
+    } catch { /* 다음 주기 재시도 */ } finally {
+      inFlight = false;
+    }
+  };
+  const timer = setInterval(tick, 2000);
+  tick();
+  return () => { alive = false; stopped = true; clearInterval(timer); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [bulkJobId]);
+
+const loadConfirmBoard = async (statusFilter?: string) => {
+  const { start, end } = monthToPeriod(bulkMonth);
+  setConfirmLoading(true);
+  try {
+    const token = localStorage.getItem('token');
+    const st = statusFilter !== undefined ? statusFilter : confirmStatusFilter;
+    const q = st ? `&status=${st}` : '';
+    const res = await fetch(`/api/admin/billing/confirmations?start=${start}&end=${end}${q}`, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || '현황 조회 실패');
+    setConfirmRows(Array.isArray(data.confirmations) ? data.confirmations : []);
+    setConfirmTruncated(!!data.truncated);
+  } catch (e: any) {
+    setBillingToast({ msg: e?.message || '컨펌 현황 조회 실패', type: 'error' });
+  } finally {
+    setConfirmLoading(false);
+  }
+};
+
+// 직접선택(중간정산) 건 — 작성일자 지정 → 발급 대기(ready) 진입
+const handleManualIssueDate = async (confirmationId: string) => {
+  const d = manualDateDraft[confirmationId] || '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { setBillingToast({ msg: '작성일자를 선택해 주세요', type: 'error' }); return; }
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/admin/billing/confirmations/${confirmationId}/issue-date`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ issue_date: d }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || '작성일자 지정 실패');
+    setBillingToast({ msg: data?.message || '발급 대기에 올렸습니다', type: 'success' });
+    loadConfirmBoard();
+  } catch (e: any) {
+    setBillingToast({ msg: e?.message || '작성일자 지정 실패', type: 'error' });
+  }
+};
+
+const CONFIRM_STATUS_LABELS: Record<string, string> = {
+  pending: '컨펌 대기', confirmed: '컨펌됨', due: '기한 경과', objected: '이의신청',
+  manual_wait: '날짜 지정 대기', ready: '계산서 발급 대기', issued: '발급 완료',
+};
+
 const handleBillingGenerate = async () => {
   setShowGenerateConfirm(false);
   setGenerating(true);
@@ -2569,6 +2753,127 @@ const handleApproveRequest = async (id: string) => {
       }
     } catch (error) {
       console.error('회사 정보 로드 실패:', error);
+    }
+  };
+
+  // ═══ ★ 2026-07-28 정산 탭 (필터항목 대체) — 발행 단위·정산 담당자·계산서 날짜 정책 ═══
+  //   SoT = docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md §2. 백엔드 = /api/admin/billing/company-billing-settings.
+  const [btLoading, setBtLoading] = useState(false);
+  const [btSaving, setBtSaving] = useState(false);
+  const [btSettings, setBtSettings] = useState({ issue_scope: 'combined', taxbill_day_policy: 'last_day' });
+  const [btCompanyContact, setBtCompanyContact] = useState({ name: '', email: '' });
+  const [btAccounts, setBtAccounts] = useState<any[]>([]);
+  const [btBizModalUserId, setBtBizModalUserId] = useState<string | null>(null);
+  const [btBizDraft, setBtBizDraft] = useState<any>({});
+  const [btBizExtracting, setBtBizExtracting] = useState(false);
+
+  // ★ 2026-07-28 사업자등록증 자동입력 — 파일 선택 즉시 판독해 입력칸을 채운다(저장은 사람이 확정)
+  const handleBizRegistrationFile = async (file: File | null) => {
+    if (!file) return;
+    setBtBizExtracting(true);
+    try {
+      const token = localStorage.getItem('token');
+      const form = new FormData();
+      form.append('image', file);
+      const res = await fetch('/api/admin/billing/biz-registration-extract', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.success) throw new Error(data?.error || '사업자등록증 판독 실패');
+      const info = data.info || {};
+      setBtBizDraft((prev: any) => ({
+        ...prev,
+        taxbill_biz_number: info.biz_number || prev.taxbill_biz_number || '',
+        taxbill_company_name: info.company_name || prev.taxbill_company_name || '',
+        taxbill_ceo_name: info.ceo_name || prev.taxbill_ceo_name || '',
+        taxbill_address: info.address || prev.taxbill_address || '',
+        taxbill_biz_type: info.biz_type || prev.taxbill_biz_type || '',
+        taxbill_biz_item: info.biz_item || prev.taxbill_biz_item || '',
+      }));
+      showAlert('완료', '사업자등록증에서 정보를 읽어 입력칸에 채웠습니다. 내용을 확인한 뒤 적용해 주세요.', 'success');
+    } catch (e: any) {
+      showAlert('오류', e?.message || '사업자등록증 판독 실패', 'error');
+    } finally {
+      setBtBizExtracting(false);
+    }
+  };
+
+  const loadBillingTab = async (companyId: string) => {
+    if (!companyId) return;
+    setBtLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const [sRes, uRes] = await Promise.all([
+        fetch(`/api/admin/billing/company-billing-settings/${companyId}`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`/api/admin/billing/company-users/${companyId}`, { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+      const sData = await sRes.json();
+      const uData = await uRes.json();
+      if (!sRes.ok) throw new Error(sData?.error || '정산 설정 조회 실패');
+      const contacts: any[] = Array.isArray(sData.contacts) ? sData.contacts : [];
+      const companyC = contacts.find((c: any) => !c.user_id);
+      setBtSettings({
+        issue_scope: sData?.settings?.issueScope || 'combined',
+        taxbill_day_policy: sData?.settings?.taxbillDayPolicy || 'last_day',
+      });
+      setBtCompanyContact({ name: companyC?.contact_name || '', email: companyC?.contact_email || '' });
+      const users: any[] = Array.isArray(uData) ? uData : [];
+      setBtAccounts(users.map((u: any) => {
+        const c: any = contacts.find((x: any) => String(x.user_id) === String(u.id)) || {};
+        return {
+          user_id: u.id, name: u.name, login_id: u.login_id,
+          contact_name: c.contact_name || '', contact_email: c.contact_email || '',
+          taxbill_biz_number: c.taxbill_biz_number || '', taxbill_company_name: c.taxbill_company_name || '',
+          taxbill_ceo_name: c.taxbill_ceo_name || '', taxbill_address: c.taxbill_address || '',
+          taxbill_biz_type: c.taxbill_biz_type || '', taxbill_biz_item: c.taxbill_biz_item || '',
+        };
+      }));
+    } catch (e: any) {
+      showAlert('오류', e?.message || '정산 설정을 불러오지 못했습니다.', 'error');
+    } finally {
+      setBtLoading(false);
+    }
+  };
+
+  const handleSaveBillingTab = async () => {
+    if (!editCompany.id) return;
+    const emailRe = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+    if (btCompanyContact.email && !emailRe.test(btCompanyContact.email)) {
+      showAlert('확인', '회사 정산 담당자 이메일 형식을 확인해 주세요.', 'error'); return;
+    }
+    for (const a of btAccounts) {
+      if (a.contact_email && !emailRe.test(a.contact_email)) {
+        showAlert('확인', `${a.name || a.login_id} 계정의 이메일 형식을 확인해 주세요.`, 'error'); return;
+      }
+    }
+    setBtSaving(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/admin/billing/company-billing-settings/${editCompany.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          issue_scope: btSettings.issue_scope,
+          taxbill_day_policy: btSettings.taxbill_day_policy,
+          company_contact: { name: btCompanyContact.name, email: btCompanyContact.email },
+          // 토글이 전체 발급이어도 계정 담당자 입력분은 보존 저장한다 — 토글을 되돌렸을 때 다시 입력하지 않게.
+          account_contacts: btAccounts.map((a) => ({
+            user_id: a.user_id, name: a.contact_name, email: a.contact_email,
+            taxbill_biz_number: a.taxbill_biz_number, taxbill_company_name: a.taxbill_company_name,
+            taxbill_ceo_name: a.taxbill_ceo_name, taxbill_address: a.taxbill_address,
+            taxbill_biz_type: a.taxbill_biz_type, taxbill_biz_item: a.taxbill_biz_item,
+          })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || '정산 설정 저장 실패');
+      showAlert('성공', '정산 설정이 저장되었습니다. 이메일이 등록된 회사는 거래내역서가 자동 발송됩니다.', 'success');
+    } catch (e: any) {
+      showAlert('오류', e?.message || '정산 설정 저장 실패', 'error');
+    } finally {
+      setBtSaving(false);
     }
   };
 
@@ -6203,7 +6508,7 @@ const handleApproveRequest = async (id: string) => {
                 { key: 'cost', label: '단가/요금', icon: '💰' },
                 { key: 'ai', label: '크레딧', icon: '💳' },
                 { key: 'store', label: '분류코드', icon: '🏷️' },
-                { key: 'fields', label: '필터항목', icon: '🔍' },
+                { key: 'billing', label: '정산', icon: '🧾' },
                 { key: 'cards', label: '대시보드', icon: '📊' },
                 { key: 'customers', label: '고객DB', icon: '👥' },
                 { key: 'sync', label: 'Sync', icon: '🔄' },
@@ -6216,6 +6521,7 @@ const handleApproveRequest = async (id: string) => {
                     if (tab.key === 'customers') { setAdminCustSearch(''); loadAdminCustomers(1); }
                     if (tab.key === 'cost' && editCompany?.billingType === 'prepaid') { loadBalanceTx(editCompany.id); }
                     if (tab.key === 'sync') { loadSyncKeys(editCompany.id); }
+                    if (tab.key === 'billing') { loadBillingTab(editCompany.id); }
                   }}
                   className={`flex-1 py-2.5 text-[11px] font-medium text-center border-b-2 transition-colors ${
                     editCompanyTab === tab.key
@@ -7315,73 +7621,138 @@ const handleApproveRequest = async (id: string) => {
                 </div>
               )}
 
-              {/* 필터항목 탭 */}
-              {editCompanyTab === 'fields' && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-sm text-gray-600">이 고객사에서 사용할 필터 항목을 선택하세요.</p>
-                    <div className="flex gap-2">
-                      <button type="button" onClick={() => setEnabledFields(standardFields.map((f: any) => f.field_key))}
-                        className="text-xs text-blue-600 hover:underline">전체선택</button>
-                      <button type="button" onClick={() => setEnabledFields([])}
-                        className="text-xs text-gray-500 hover:underline">전체해제</button>
-                    </div>
-                  </div>
-                  <p className="text-xs text-gray-400 mb-3">선택: {enabledFields.length} / {standardFields.length}개</p>
-
-                  {['basic', 'segment', 'purchase', 'loyalty', 'store', 'preference', 'marketing', 'custom'].map(cat => {
-                    const catFields = standardFields.filter((f: any) => f.category === cat);
-                    if (catFields.length === 0) return null;
-                    const catLabels: Record<string, string> = {
-                      basic: '기본정보', segment: '등급/세그먼트', purchase: '구매/거래',
-                      loyalty: '충성도/활동', store: '소속/채널', preference: '선호/관심',
-                      marketing: '마케팅수신', custom: '커스텀'
-                    };
-                    const allChecked = catFields.every((f: any) => enabledFields.includes(f.field_key));
-                    return (
-                      <div key={cat} className="border rounded-lg p-3">
-                        <div className="flex items-center gap-2 mb-2">
-                          <input type="checkbox" checked={allChecked}
-                            onChange={() => {
-                              if (allChecked) {
-                                setEnabledFields(enabledFields.filter(k => !catFields.some((f: any) => f.field_key === k)));
-                              } else {
-                                const newKeys = catFields.map((f: any) => f.field_key).filter((k: string) => !enabledFields.includes(k));
-                                setEnabledFields([...enabledFields, ...newKeys]);
-                              }
-                            }}
-                            className="w-4 h-4 text-blue-600 rounded" />
-                          <span className="text-sm font-semibold text-gray-700">{catLabels[cat] || cat}</span>
-                          <span className="text-xs text-gray-400">({catFields.filter((f: any) => enabledFields.includes(f.field_key)).length}/{catFields.length})</span>
+              {/* ★ 2026-07-28 정산 탭 (필터항목 대체 — Harold 판정: 의미 없는 메뉴) — SoT §2 */}
+              {editCompanyTab === 'billing' && (
+                <div className="space-y-5">
+                  {btLoading ? (
+                    <p className="text-sm text-gray-400 py-8 text-center">정산 설정을 불러오는 중...</p>
+                  ) : (
+                    <>
+                      {/* 발행 단위 토글 */}
+                      <div className="rounded-lg border border-gray-200 p-4">
+                        <p className="text-sm font-semibold text-gray-800 mb-1">거래내역서 발행 단위</p>
+                        <p className="text-xs text-gray-500 mb-3">일괄발급 화면에서 이 회사가 기본으로 앉는 자리입니다. 계정별 = 계정 장 N개 + 공통 장(테스트·스팸·크레딧·요금제) 1개.</p>
+                        <div className="flex rounded-lg overflow-hidden border border-gray-300 w-fit">
+                          <button type="button" onClick={() => setBtSettings({ ...btSettings, issue_scope: 'combined' })}
+                            className={`px-4 py-2 text-sm font-semibold transition-colors ${btSettings.issue_scope === 'combined' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                            고객사 전체 발급
+                          </button>
+                          <button type="button" onClick={() => setBtSettings({ ...btSettings, issue_scope: 'by_user' })}
+                            className={`px-4 py-2 text-sm font-semibold transition-colors ${btSettings.issue_scope === 'by_user' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                            개별(계정별) 발급
+                          </button>
                         </div>
-                        <div className="grid grid-cols-2 gap-1 ml-6">
-  {catFields.map((field: any) => {
-    const dc = fieldDataCheck[field.field_key];
-    const hasData = dc?.hasData ?? false;
-    const count = dc?.count ?? 0;
-    return (
-      <label key={field.field_key} className={`flex items-center gap-2 py-1 cursor-pointer rounded px-1 ${hasData ? 'hover:bg-gray-50' : 'opacity-50'}`}>
-        <input type="checkbox"
-          checked={enabledFields.includes(field.field_key)}
-          onChange={() => {
-            setEnabledFields(prev =>
-              prev.includes(field.field_key)
-                ? prev.filter(k => k !== field.field_key)
-                : [...prev, field.field_key]
-            );
-          }}
-          className="w-3.5 h-3.5 text-blue-600 rounded" />
-        <span className={`text-xs ${hasData ? 'text-gray-700' : 'text-gray-400'}`}>{field.display_name}</span>
-        <span className={`text-[10px] ${hasData ? 'text-green-600' : 'text-red-400'}`}>
-          {hasData ? `🟢 ${count.toLocaleString()}건` : '🔴 0건'}
-        </span>
-      </label>
-    );
-  })}
-</div>
                       </div>
-                    );
-                  })}
+
+                      {/* 회사 정산 담당자 — 전체 발급 수신자 + 계정별일 때 공통 장 수신자 */}
+                      <div className="rounded-lg border border-gray-200 p-4">
+                        <p className="text-sm font-semibold text-gray-800 mb-1">회사 정산 담당자</p>
+                        <p className="text-xs text-gray-500 mb-3">거래내역서 자동 발송 수신자입니다. 기본정보 탭의 담당자(마케팅)와 별개입니다. 계정별 발급이어도 공통 장은 이분에게 갑니다.</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <input type="text" value={btCompanyContact.name} placeholder="담당자 이름"
+                            onChange={(e) => setBtCompanyContact({ ...btCompanyContact, name: e.target.value })}
+                            className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                          <input type="text" value={btCompanyContact.email} placeholder="이메일 (비우면 자동 발송 제외)"
+                            onChange={(e) => setBtCompanyContact({ ...btCompanyContact, email: e.target.value })}
+                            className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                        </div>
+                      </div>
+
+                      {/* 계산서 발급일자 정책 */}
+                      <div className="rounded-lg border border-gray-200 p-4">
+                        <p className="text-sm font-semibold text-gray-800 mb-1">세금계산서 작성일자</p>
+                        <p className="text-xs text-gray-500 mb-3">컨펌(또는 3일 경과) 후 자동 발급될 때 계산서에 적히는 작성일자입니다.</p>
+                        <select value={btSettings.taxbill_day_policy}
+                          onChange={(e) => setBtSettings({ ...btSettings, taxbill_day_policy: e.target.value })}
+                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                          <option value="last_day">대상월 말일 (7월분 = 7/31, 30일 달이면 30일)</option>
+                          <option value="first_day">익월 1일 (7월분 = 8/1)</option>
+                          <option value="manual">직접선택 (중간정산 등 — 발급 때마다 날짜 지정, 자동 발급 제외)</option>
+                        </select>
+                      </div>
+
+                      {/* 계정별 담당자·사업자 (개별 발급일 때 펼침) */}
+                      {btSettings.issue_scope === 'by_user' && (
+                        <div className="rounded-lg border border-gray-200 p-4">
+                          <p className="text-sm font-semibold text-gray-800 mb-1">계정별 정산 담당자</p>
+                          <p className="text-xs text-gray-500 mb-3">계정 장은 여기 등록된 이메일로 각각 발송·컨펌됩니다. 사업장이 다른 계정은 [계산서 사업자]로 별도 사업자를 등록하세요 — 미등록이면 회사 기본 사업자로 발급됩니다.</p>
+                          <div className="space-y-2">
+                            {btAccounts.length === 0 && <p className="text-xs text-gray-400">활성 계정이 없습니다.</p>}
+                            {btAccounts.map((a) => (
+                              <div key={a.user_id} className="flex items-center gap-2 border rounded-lg px-3 py-2">
+                                <div className="w-32 shrink-0">
+                                  <p className="text-sm font-medium text-gray-800 truncate">{a.name || a.login_id}</p>
+                                  <p className="text-[10px] text-gray-400 truncate">{a.login_id}</p>
+                                </div>
+                                <input type="text" value={a.contact_name} placeholder="담당자 이름"
+                                  onChange={(e) => setBtAccounts((prev) => prev.map((x) => x.user_id === a.user_id ? { ...x, contact_name: e.target.value } : x))}
+                                  className="w-28 px-2 py-1.5 border rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none" />
+                                <input type="text" value={a.contact_email} placeholder="이메일"
+                                  onChange={(e) => setBtAccounts((prev) => prev.map((x) => x.user_id === a.user_id ? { ...x, contact_email: e.target.value } : x))}
+                                  className="flex-1 px-2 py-1.5 border rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none" />
+                                <button type="button"
+                                  onClick={() => { setBtBizDraft({ ...a }); setBtBizModalUserId(a.user_id); }}
+                                  className={`shrink-0 px-2.5 py-1.5 rounded text-[11px] font-semibold border ${a.taxbill_biz_number ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
+                                  {a.taxbill_biz_number ? `사업자 ${a.taxbill_biz_number}` : '계산서 사업자'}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <button type="button" onClick={handleSaveBillingTab} disabled={btSaving}
+                        className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-sm font-semibold">
+                        {btSaving ? '저장 중...' : '정산 설정 저장'}
+                      </button>
+                    </>
+                  )}
+
+                  {/* 계산서 발급 사업자 등록 모달 (계정별 — 사업장이 다른 경우) */}
+                  {btBizModalUserId && (
+                    <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4" onClick={() => setBtBizModalUserId(null)}>
+                      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+                        <h3 className="text-base font-bold text-gray-900 mb-1">계산서 발급 사업자 등록</h3>
+                        <p className="text-xs text-gray-500 mb-3">이 계정의 계산서를 받을 사업자 정보입니다. 전부 비우면 회사 기본 사업자로 발급됩니다.</p>
+                        {/* ★ 2026-07-28 사업자등록증 자동입력 — 파일을 올리면 상호·사업자번호·대표자·주소·업태·종목을 읽어 채운다 */}
+                        <label className={`flex items-center justify-center gap-2 mb-4 px-3 py-2.5 border-2 border-dashed rounded-lg cursor-pointer text-xs font-semibold ${btBizExtracting ? 'border-gray-200 text-gray-400' : 'border-indigo-300 text-indigo-600 hover:bg-indigo-50'}`}>
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 9l5-5 5 5M12 4v12" />
+                          </svg>
+                          {btBizExtracting ? '사업자등록증 읽는 중...' : '사업자등록증으로 자동입력 (JPG·PNG·WebP)'}
+                          <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" disabled={btBizExtracting}
+                            onChange={(e) => { handleBizRegistrationFile(e.target.files?.[0] || null); e.target.value = ''; }} />
+                        </label>
+                        <div className="space-y-2.5">
+                          {[
+                            { k: 'taxbill_biz_number', label: '사업자등록번호', ph: '000-00-00000' },
+                            { k: 'taxbill_company_name', label: '상호', ph: '' },
+                            { k: 'taxbill_ceo_name', label: '대표자명', ph: '' },
+                            { k: 'taxbill_address', label: '사업장 주소', ph: '' },
+                            { k: 'taxbill_biz_type', label: '업태', ph: '' },
+                            { k: 'taxbill_biz_item', label: '종목', ph: '' },
+                          ].map((f) => (
+                            <div key={f.k}>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">{f.label}</label>
+                              <input type="text" value={btBizDraft[f.k] || ''} placeholder={f.ph}
+                                onChange={(e) => setBtBizDraft({ ...btBizDraft, [f.k]: e.target.value })}
+                                className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex gap-2 mt-5">
+                          <button type="button" onClick={() => setBtBizModalUserId(null)}
+                            className="flex-1 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50">취소</button>
+                          <button type="button"
+                            onClick={() => {
+                              setBtAccounts((prev) => prev.map((x) => x.user_id === btBizModalUserId ? { ...x, ...btBizDraft } : x));
+                              setBtBizModalUserId(null);
+                            }}
+                            className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold">적용 (저장 버튼으로 확정)</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -8758,6 +9129,240 @@ const handleApproveRequest = async (id: string) => {
                 {generating ? '생성 중...' : '정산 생성'}
               </button>
             </div>
+          </div>
+
+          {/* ===== 1.5 거래내역서 일괄발급 (★2026-07-28 — SoT §3) ===== */}
+          <div className="px-6 py-5 border-b">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
+              <h3 className="text-base font-semibold text-gray-800 flex items-center gap-2">
+                <svg className="w-5 h-5 text-violet-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 13l-7 7-7-7m14-8l-7 7-7-7" />
+                </svg>
+                거래내역서 일괄발급
+              </h3>
+              <div className="flex items-center gap-2">
+                <input type="month" value={bulkMonth}
+                  onChange={(e) => {
+                    // ★ Codex 1R·2R HIGH 수용 — 월을 바꾸면 담긴 목록·조회 결과를 비우고,
+                    //   ref·시퀀스를 올려 진행 중이던 옛 월 응답·낡은 클로저를 전부 무효화한다.
+                    setBulkMonth(e.target.value);
+                    bulkMonthRef.current = e.target.value;
+                    bulkReqSeqRef.current++;
+                    setBulkList(null); setBulkSelected([]); setBulkCombined([]); setBulkByUser([]); setBulkPage(1);
+                  }}
+                  className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
+                <button onClick={loadBulkList} disabled={bulkListLoading}
+                  className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 disabled:opacity-50">
+                  {bulkListLoading ? '조회 중...' : '미발급 대상 불러오기'}
+                </button>
+                <button onClick={() => { const next = !confirmBoardOpen; setConfirmBoardOpen(next); if (next) loadConfirmBoard(); }}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium border ${confirmBoardOpen ? 'bg-slate-700 text-white border-slate-700' : 'text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+                  세금계산서·컨펌 현황
+                </button>
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">후불이면서 대상월 거래내역서가 아직 발급되지 않은 회사만 나옵니다. 담으면 정산 탭의 발행 단위대로 좌우에 앉고, 발급 시 이메일 등록 회사는 자동 발송·컨펌 흐름까지 이어집니다.</p>
+
+            {bulkList !== null && (() => {
+              const picked = bulkPickedIds();
+              const avail = bulkList.filter((c) => !picked.has(c.id));
+              const PAGE = 10;
+              const totalPages = Math.max(1, Math.ceil(avail.length / PAGE));
+              const page = Math.min(bulkPage, totalPages);
+              const visible = avail.slice((page - 1) * PAGE, page * PAGE);
+              return (
+                <div className="space-y-4">
+                  {/* 상단 — 미발급 후불 리스트 (페이징) */}
+                  <div className="border rounded-lg">
+                    <div className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-t-lg">
+                      <p className="text-xs font-semibold text-gray-600">미발급 후불 {avail.length}개사 {bulkList.length !== avail.length ? `(담김 ${bulkList.length - avail.length})` : ''}</p>
+                      <button onClick={bulkAddSelected} disabled={bulkSelected.length === 0}
+                        className="px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-semibold disabled:opacity-40">
+                        선택 담기 ({bulkSelected.length})
+                      </button>
+                    </div>
+                    {avail.length === 0 ? (
+                      <p className="text-sm text-gray-400 text-center py-6">{bulkList.length === 0 ? '이 달 미발급 후불 회사가 없습니다.' : '전부 담았습니다.'}</p>
+                    ) : (
+                      <>
+                        <div className="divide-y">
+                          {visible.map((c) => (
+                            <label key={c.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-gray-50">
+                              <input type="checkbox" checked={bulkSelected.includes(c.id)}
+                                onChange={() => setBulkSelected((prev) => prev.includes(c.id) ? prev.filter((x) => x !== c.id) : [...prev, c.id])}
+                                className="w-4 h-4 accent-indigo-600" />
+                              <span className="text-sm text-gray-800 flex-1 truncate">{c.company_name}</span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded ${c.issue_scope === 'by_user' ? 'bg-sky-100 text-sky-700' : 'bg-gray-100 text-gray-500'}`}>
+                                {c.issue_scope === 'by_user' ? '계정별' : '전체'}
+                              </span>
+                              {c.taxbill_day_policy === 'manual' && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">날짜 직접선택</span>
+                              )}
+                              {!c.company_contact_email && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-600">이메일 미등록</span>
+                              )}
+                              {c.issue_scope === 'by_user' && Number(c.missing_account_emails) > 0 && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-600">계정 메일 {c.missing_account_emails}건 미등록</span>
+                              )}
+                            </label>
+                          ))}
+                        </div>
+                        {totalPages > 1 && (
+                          <div className="flex items-center justify-center gap-2 py-2 border-t">
+                            <button onClick={() => setBulkPage(Math.max(1, page - 1))} disabled={page <= 1}
+                              className="px-2 py-1 text-xs text-gray-500 disabled:opacity-30">이전</button>
+                            <span className="text-xs text-gray-500">{page} / {totalPages}</span>
+                            <button onClick={() => setBulkPage(Math.min(totalPages, page + 1))} disabled={page >= totalPages}
+                              className="px-2 py-1 text-xs text-gray-500 disabled:opacity-30">다음</button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  {/* 좌우 배치 */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="border rounded-lg">
+                      <p className="px-3 py-2 bg-indigo-50 text-xs font-semibold text-indigo-700 rounded-t-lg">고객사 전체 발급 ({bulkCombined.length})</p>
+                      <div className="divide-y min-h-[60px]">
+                        {bulkCombined.length === 0 && <p className="text-xs text-gray-300 text-center py-4">비어 있음</p>}
+                        {bulkCombined.map((c) => (
+                          <div key={c.id} className="flex items-center gap-2 px-3 py-1.5">
+                            <span className="text-sm text-gray-800 flex-1 truncate">{c.company_name}</span>
+                            {!c.company_contact_email && <span className="text-[10px] text-rose-500">메일 없음</span>}
+                            <button onClick={() => bulkMoveToByUser(c.id)} className="text-[11px] text-sky-600 hover:underline">계정별 ▶</button>
+                            <button onClick={() => bulkRemove(c.id)} className="text-[11px] text-gray-400 hover:text-rose-500">빼기</button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="border rounded-lg">
+                      <p className="px-3 py-2 bg-sky-50 text-xs font-semibold text-sky-700 rounded-t-lg">계정별 발급 ({bulkByUser.length})</p>
+                      <div className="divide-y min-h-[60px]">
+                        {bulkByUser.length === 0 && <p className="text-xs text-gray-300 text-center py-4">비어 있음</p>}
+                        {bulkByUser.map((c) => (
+                          <div key={c.id} className="flex items-center gap-2 px-3 py-1.5">
+                            <span className="text-sm text-gray-800 flex-1 truncate">{c.company_name}</span>
+                            {!c.company_contact_email && <span className="text-[10px] text-rose-500">메일 없음</span>}
+                            {/* ★ Codex 2R 수용 — 이 pane에 있으면 실제 발급이 계정별이다. 저장 scope와 무관하게 계정 메일 누락을 보여준다 */}
+                            {Number(c.missing_account_emails) > 0 && <span className="text-[10px] text-orange-500">계정 메일 {c.missing_account_emails}건 미등록</span>}
+                            <button onClick={() => bulkMoveToCombined(c.id)} className="text-[11px] text-indigo-600 hover:underline">◀ 전체</button>
+                            <button onClick={() => bulkRemove(c.id)} className="text-[11px] text-gray-400 hover:text-rose-500">빼기</button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button onClick={handleBulkStart} disabled={bulkStarting || (bulkCombined.length + bulkByUser.length === 0)}
+                    className="w-full py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-sm font-semibold disabled:opacity-40">
+                    {bulkStarting ? '접수 중...' : `일괄 발급 시작 (${bulkCombined.length + bulkByUser.length}개사)`}
+                  </button>
+                </div>
+              );
+            })()}
+
+            {/* 진행률 + 결과 */}
+            {bulkJob?.job && (() => {
+              const j = bulkJob.job;
+              const total = Number(j.total_count) || 0;
+              const done = Number(j.done_count) || 0;
+              const failed = Number(j.failed_count) || 0;
+              const pct = total > 0 ? Math.round(((done + failed) / total) * 100) : 0;
+              return (
+                <div className="mt-4 border rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-semibold text-gray-800">
+                      {j.status === 'running' ? '발급 진행 중...' : '발급 완료'}
+                      <span className="ml-2 text-xs font-normal text-gray-500">성공 {done} · 실패 {failed} / 전체 {total}</span>
+                    </p>
+                    <span className="text-sm font-bold text-violet-600">{pct}%</span>
+                  </div>
+                  <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-violet-500 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
+                  </div>
+                  <div className="mt-3 max-h-56 overflow-y-auto divide-y">
+                    {(bulkJob.items || []).map((it: any) => (
+                      <div key={it.id} className="flex items-start gap-2 py-1.5 text-xs">
+                        <span className={`shrink-0 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                          it.status === 'success' ? 'bg-emerald-100 text-emerald-700'
+                          : it.status === 'failed' ? 'bg-rose-100 text-rose-600'
+                          : it.status === 'running' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'
+                        }`}>
+                          {it.status === 'success' ? '성공' : it.status === 'failed' ? '실패' : it.status === 'running' ? '진행' : '대기'}
+                        </span>
+                        <span className="w-40 shrink-0 truncate text-gray-800">{it.company_name}</span>
+                        <span className="text-gray-500 break-all">{it.error || ''}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* 세금계산서·컨펌 현황판 (★2026-07-28 — 수정세금계산서 대비 내역 축) */}
+            {confirmBoardOpen && (
+              <div className="mt-4 border rounded-lg p-4">
+                <div className="flex flex-wrap items-center gap-1.5 mb-3">
+                  {['', 'pending', 'confirmed', 'objected', 'manual_wait', 'ready', 'issued'].map((s) => (
+                    <button key={s || 'all'}
+                      onClick={() => { setConfirmStatusFilter(s); loadConfirmBoard(s); }}
+                      className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${confirmStatusFilter === s ? 'bg-slate-700 text-white border-slate-700' : 'text-slate-500 border-slate-300 hover:bg-slate-50'}`}>
+                      {s === '' ? '전체' : CONFIRM_STATUS_LABELS[s]}
+                    </button>
+                  ))}
+                  <button onClick={() => loadConfirmBoard()} className="ml-auto text-[11px] text-slate-500 hover:underline">새로고침</button>
+                </div>
+                {confirmTruncated && (
+                  <p className="mb-2 px-2 py-1.5 bg-amber-50 text-amber-700 rounded text-[11px]">500건을 넘어 일부만 표시 중입니다 — 상태 필터로 좁혀 주세요.</p>
+                )}
+                {confirmLoading ? (
+                  <p className="text-sm text-gray-400 text-center py-4">불러오는 중...</p>
+                ) : confirmRows.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-4">대상월에 해당 내역이 없습니다.</p>
+                ) : (
+                  <div className="max-h-72 overflow-y-auto divide-y">
+                    {confirmRows.map((r) => (
+                      <div key={r.id} className="py-2 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                            r.taxbill_status === 'issued' ? 'bg-emerald-100 text-emerald-700'
+                            : r.taxbill_status === 'objected' ? 'bg-rose-100 text-rose-600'
+                            : r.taxbill_status === 'ready' ? 'bg-violet-100 text-violet-700'
+                            : r.taxbill_status === 'confirmed' ? 'bg-sky-100 text-sky-700'
+                            : r.taxbill_status === 'manual_wait' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'
+                          }`}>
+                            {CONFIRM_STATUS_LABELS[r.taxbill_status] || r.taxbill_status}
+                          </span>
+                          <span className="font-medium text-gray-800 truncate">{r.company_name}</span>
+                          {r.account_name && <span className="text-gray-400">({r.account_name})</span>}
+                          <span className="text-gray-500 truncate">{r.recipient_email}</span>
+                          <span className="ml-auto shrink-0 font-semibold text-gray-700">{(Number(r.total_amount) || 0).toLocaleString()}원</span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-400">
+                          <span>발송 {r.sent_at ? new Date(r.sent_at).toLocaleString('ko-KR') : '-'}</span>
+                          {r.confirmed_at && <span className="text-sky-600">컨펌 {new Date(r.confirmed_at).toLocaleString('ko-KR')}</span>}
+                          {r.taxbill_issue_date && <span>작성일자 {String(r.taxbill_issue_date).slice(0, 10)}</span>}
+                          {r.superseded_at && <span className="text-gray-400">재발급으로 무효</span>}
+                          {r.taxbill_status === 'manual_wait' && !r.superseded_at && (
+                            <span className="flex items-center gap-1 ml-auto">
+                              <input type="date" value={manualDateDraft[r.id] || ''}
+                                onChange={(e) => setManualDateDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                                className="px-1.5 py-0.5 border rounded text-[10px]" />
+                              <button onClick={() => handleManualIssueDate(r.id)}
+                                className="px-2 py-0.5 bg-amber-500 text-white rounded text-[10px] font-semibold">작성일자 지정</button>
+                            </span>
+                          )}
+                        </div>
+                        {r.objection_text && (
+                          <p className="mt-1 px-2 py-1.5 bg-rose-50 text-rose-700 rounded text-[11px] whitespace-pre-wrap">이의신청: {r.objection_text}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* ===== 2. 정산 목록 ===== */}

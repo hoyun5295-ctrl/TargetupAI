@@ -19,6 +19,9 @@ const read = (p: string) => readFileSync(resolve(__dirname, p), 'utf8');
 const appSrc = read('../app.ts');
 const billingSrc = read('../routes/billing.ts');
 const adminSrc = read('../routes/admin.ts');
+// ★ 2026-07-28 발행 코어가 utils/billing-issue.ts로 추출됐다(일괄발급 배치와 공유).
+//   /generate 내부를 보던 검사들은 이 파일을 스캔한다 — 파일 전체가 곧 발행 코어다.
+const issueSrc = read('./billing-issue.ts');
 
 describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
   it('billing 라우터가 admin 라우터보다 먼저 마운트된다 — 순서가 뒤집히면 send-email 실경로가 조용히 바뀐다', () => {
@@ -76,11 +79,20 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
 
   it('요금제 이력도 발행 트랜잭션 안에서 재검증한다 — 발행 중 소급 변경이 구간을 바꾼다', () => {
     // ★ 7차 ②-2 — 원장 지문은 같은 월정액의 플랜 변경을 못 잡는다(plan_id를 지문에서 뺐다).
+    // ★ 2026-07-28 발행 코어 추출로 스캔 대상 = billing-issue.ts.
+    expect(issueSrc).toContain('BILLING_PLAN_HISTORY_CHANGED');
+    expect(issueSrc, '재검증은 트랜잭션 client로 다시 읽어야 의미가 있다').toContain('loadPlanChanges(company_id, billing_end, client)');
+  });
+
+  it('라우트는 발행 코어를 부른다 — 코어를 복사한 두 번째 발행 구현이 생기면 반드시 갈라진다 (2026-07-28)', () => {
     const start = billingSrc.indexOf("router.post('/generate'");
     const end = billingSrc.indexOf("router.get('/list'", start);
     const body = billingSrc.slice(start, end === -1 ? undefined : end);
-    expect(body).toContain('BILLING_PLAN_HISTORY_CHANGED');
-    expect(body, '재검증은 트랜잭션 client로 다시 읽어야 의미가 있다').toContain('loadPlanChanges(company_id, billing_end, client)');
+    expect(body).toContain('issueBilling(');
+    expect(body, '차단 응답은 코어의 BillingIssueError를 그대로 옮겨야 코드·문구 계약이 유지된다').toContain('BillingIssueError');
+    // 발행 본체(트랜잭션·장 분할)가 라우트에 되살아나면 코어와 두 벌이 된다.
+    expect(body, '발행 본체는 코어에만 있어야 한다').not.toContain('splitBillingSheets');
+    expect(body, '발행 본체는 코어에만 있어야 한다').not.toContain("hashtext('billing')");
   });
 
   it('재발송은 확인을 받는다 — 잠근 행에서 기존 발송 이력을 보고 409로 되돌린다', () => {
@@ -107,12 +119,12 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
   });
 
   it('청구 금액은 원 미만 절사를 거친다 — 소수가 남으면 세금계산서와 안 맞고 PDF 칸을 넘겨 겹친다 (2026-07-26)', () => {
-    const start = billingSrc.indexOf("router.post('/generate'");
-    const end = billingSrc.indexOf("router.get('/list'", start);
-    const body = billingSrc.slice(start, end === -1 ? undefined : end);
+    // ★ 2026-07-28 발행 코어 추출로 스캔 대상 = billing-issue.ts.
     // 공급가액은 절사된 상세 행의 정수 덧셈이어야 한다(헤더가 별도로 `수량 × 단가`를 더하면 소수가 되살아난다).
-    expect(body).toContain('billingItems.reduce');
-    expect(body, '헤더 교차검증은 절사 전 값(amountExact)으로 해야 탐지력이 유지된다').toContain('i.amountExact');
+    expect(issueSrc).toContain('billingItems.reduce');
+    expect(issueSrc, '헤더 교차검증은 절사 전 값(amountExact)으로 해야 탐지력이 유지된다').toContain('i.amountExact');
+    expect(issueSrc, '부가세 산출은 vatOfSupply만 쓴다').toContain('vatOfSupply');
+    expect(issueSrc).not.toMatch(/Math\.round\(\s*\w*[sS]ubtotal\s*\*\s*0\.1\s*\)/);
   });
 
   it('청구서 항목표에 페이지 넘김이 있다 — 줄이 많으면 합계·감사 인사·하단을 뚫고 인쇄된다 (2026-07-26)', () => {
@@ -139,5 +151,6 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
     // `pool.query('BEGIN')`이 있으면 그 트랜잭션은 서로 다른 커넥션에 나뉜다(0725 실제 결함).
     expect(billingSrc).not.toMatch(/pool\.query\(\s*['"`]BEGIN/);
     expect(adminSrc).not.toMatch(/pool\.query\(\s*['"`]BEGIN/);
+    expect(issueSrc, '발행 코어도 같은 규칙 — client 고정 트랜잭션만').not.toMatch(/pool\.query\(\s*['"`]BEGIN/);
   });
 });

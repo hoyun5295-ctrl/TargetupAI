@@ -1556,6 +1556,18 @@
 - 2026-07-25 ALTER 적용 실측: `channel`·`store_id` 추가 + `agent_id` FK 신설 + 인덱스. 당시 15행(금강제화 시험 발행분)은 전부 web.
 - **★2026-07-28 실측 = 0행.** 위 15행은 그 뒤 삭제됐다. **아직 굳은 청구서가 하나도 없다** = 단가·요금제 이력을 정정할 수 있는 창이 열려 있다는 뜻이다(발행이 쌓이면 스냅샷이 굳어 소급 정정 불가).
 
+### 일괄발급·컨펌·세금계산서 5테이블 ★2026-07-28 신설·실측 등재
+
+> SoT = docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md §1. DDL 실행·검증 완료(5테이블, 컬럼 수 5/14/19/10/9).
+> 공통 원칙: **실행자 컬럼(updated_by·created_by)에 users FK를 걸지 않는다** — 슈퍼관리자는 super_admins 소속이라 FK가 23503으로 터진다(2026-07-28 회사 수정 실패 사고). id만 기록.
+
+- **company_billing_settings** (회사당 1행): company_id PK FK→companies CASCADE · issue_scope `combined`/`by_user`(CHECK, DEFAULT combined — 일괄발급 좌우 기본값) · taxbill_day_policy `last_day`/`first_day`/`manual`(CHECK, DEFAULT last_day) · updated_by(FK 없음) · updated_at
+- **billing_contacts** (정산 담당자+계산서 사업자, **user_id NULL = 회사 레벨**): id PK · company_id FK CASCADE · user_id FK→users **CASCADE**(SET NULL 금지 — 계정 삭제 시 회사 레벨 행으로 둔갑) · contact_name/email · taxbill_biz_number/company_name/ceo_name/address/biz_type/biz_item(전부 NULL이면 회사 기본 사업자 사용) · updated_by · created/updated_at. UNIQUE = (company_id,user_id) WHERE user_id IS NOT NULL + (company_id) WHERE user_id IS NULL (partial 2본)
+- **invoice_confirmations** (메일 1통=1행): id PK · billing_id FK→billings CASCADE(draft 삭제 시 추적행 동반 삭제) · company_id FK · recipient_user_id FK SET NULL · recipient_email · token UNIQUE(공개 컨펌 링크) · sent_at(3일 타이머 기점) · confirmed_at/ip · objection_at/text/resolved_at · taxbill_status CHECK(`pending`/`confirmed`/`due`/`objected`/`manual_wait`/`ready`/`issued`) · taxbill_issue_date · taxbill_due_at(= min(sent+3일, 익월 10일)) · issued_at · popbill_invoice_key · **superseded_at**(재발급 무효화 마커 — 상태값 아님) · created_at. INDEX = (taxbill_status,taxbill_due_at)·(company_id)·(billing_id)
+- **billing_bulk_jobs**: id PK · period_start/end · total/done/failed_count · status CHECK(`running`/`done`/`cancelled`) · created_by(FK 없음) · created_at/finished_at
+- **billing_bulk_job_items**: id PK · job_id FK CASCADE · company_id FK CASCADE · scope CHECK(`combined`/`by_user`) · status CHECK(`pending`/`running`/`success`/`failed`) · error · billing_batch_id · started/finished_at. INDEX(job_id). **한 item 실패는 그 item만 failed — job은 계속**
+- **taxbill_issues** (세금계산서 내역 — 18컬럼, 2026-07-28 실측): id PK · confirmation_id FK→invoice_confirmations **SET NULL** · billing_id FK→billings **SET NULL**(정산 삭제 후에도 계산서 내역은 남는다 — 국세청 신고물) · company_id FK CASCADE · kind CHECK(`original`/`modify`) · modify_code smallint CHECK(1~6 — 팝빌 modifyCode) · org_nts_confirm_num(24 — 당초 국세청승인번호, 수정분만) · invoicer_mgt_key(24 — 팝빌 문서번호, 우리 발번) · nts_confirm_num(24 — 발행 후 팝빌 할당) · issue_date · supply/tax/total_amount numeric(15,2) · status CHECK(`ready`/`submitted`/`issued`/`failed`/`cancelled`) · error · created_by(FK 없음) · created/issued_at. INDEX(company_id)·(status). **정산 1건에 원본+수정 N장이 달리는 축** — 컨펌 추적(메일 1통=1행)과 다르다. 웹훅 매칭 축 = invoicer_mgt_key
+
 ### billing_invoices (거래내역서/정산)
 | 컬럼 | 타입 | 설명 |
 |------|------|------|

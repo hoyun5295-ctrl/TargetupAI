@@ -1,5 +1,4 @@
 import { Router, Request, Response } from 'express';
-import { randomUUID } from 'crypto';
 import nodemailer from 'nodemailer';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
@@ -18,11 +17,11 @@ import {
 import {
   buildBillingUsageRows, diffBillingRowsVsDayData, priceBillingRows,
   resolveBillingUnitPricesDetailed, findUnsetPricedTypes, summarizeBlockList,
-  resolveExistingUserIds, nullifyUnknownUserIds, checkBillingAmountIdentity, chunkArray,
-  splitBillingSheets, checkSheetSumIdentity, buildPlanBillingItems, toDayKey,
+  // ★ 2026-07-28 발행 전용 식별자(장 분할·항등식·계정 정리·청크)는 utils/billing-issue.ts로 이동했다.
+  buildPlanBillingItems, toDayKey,
   type PricedBillingItem, type BillingScope,
 } from '../utils/send-usage-aggregation';
-import { loadBillingLedger, readBillingLedgerFingerprint } from '../utils/billing-ledger';
+import { loadBillingLedger } from '../utils/billing-ledger';
 import { floorWon, vatOfSupply } from '../utils/money';
 import { drawPartyBlock, drawThanksNote, THANKS_NOTE_HEIGHT } from '../utils/pdf-party-block';
 import { normalizeUnitPriceBasis } from '../utils/unit-price';
@@ -33,6 +32,19 @@ import {
 } from '../utils/plan-proration';
 // ★ 2026-07-27 발송ID 표시명(발급명) 단일 소스 — 청구서 상세·미리보기도 화면과 같은 이름을 쓴다.
 import { getAgentCustNameMap } from '../utils/pay-stats';
+// ★ 2026-07-28 발행 코어 CT — /generate와 거래내역서 일괄발급 배치가 같은 함수를 쓴다(동작 무변경 추출).
+import { issueBilling, BillingIssueError } from '../utils/billing-issue';
+// ★ 2026-07-28 정산 설정·담당자 CT — 고객사 상세 "정산" 탭 + 일괄발급·발송·계산서 워커가 공유.
+import {
+  getCompanyBillingSettings, upsertCompanyBillingSettings,
+  listBillingContacts, upsertBillingContact,
+} from '../utils/billing-settings';
+// ★ 2026-07-28 일괄발급 배치 CT — 대상 산출·job 실행·진행률.
+import { listUnbilledPostpaid, createBulkJob, getBulkJob, findRunningBulkJob } from '../utils/billing-bulk';
+// ★ 2026-07-28 사업자등록증 자동입력 — 정산 탭 모달 (vision 판독, 크레딧 미차감)
+import multer from 'multer';
+import { sniffImageMediaType } from '../utils/event-image-extract';
+import { extractBizRegistration } from '../utils/biz-registration-extract';
 
 // SMTP transporter (재사용)
 // ★ 2026-07-26 타임아웃 3종 명시 — 정산서 발송은 **행 잠금을 든 트랜잭션 안에서** SMTP를 부른다.
@@ -84,625 +96,22 @@ router.use(authenticate, requireSuperAdmin);
 
 // POST /generate - 정산 데이터 생성 (월별 집계)
 router.post('/generate', async (req: Request, res: Response) => {
+  // ★ 2026-07-28 발행 코어를 utils/billing-issue.ts로 추출(동작 무변경) — 거래내역서 일괄발급 배치와 공유한다.
+  //   차단·검증 실패는 BillingIssueError(status·body)로 올라오고, 여기서는 HTTP로 옮기기만 한다.
+  //   코드·문구·상태코드 계약은 코어가 그대로 들고 있다(billing-route-invariants.test.ts가 코어 소스를 스캔한다).
   try {
     const { company_id, user_id, billing_start, billing_end } = req.body;
     const adminId = (req as any).user?.userId;
-
-    if (!company_id || !billing_start || !billing_end) {
-      return res.status(400).json({ error: '필수: company_id, billing_start, billing_end' });
-    }
-
-    if (billing_start > billing_end) {
-      return res.status(400).json({ error: '시작일이 종료일보다 늦을 수 없습니다' });
-    }
-
-    const startDate = new Date(billing_start);
-    const billing_year = startDate.getFullYear();
-    const billing_month = startDate.getMonth() + 1;
-
-    // ★ 2026-07-26 발행 단위(scope). 지금은 `combined`(회사 1장)와 `by_user`(계정별)만 구현한다 —
-    //   발송ID별(`by_agent`)은 Harold 결정으로 이월. 값만 나중에 추가하면 되도록 축은 지금 잡는다.
-    const scope: string = String((req.body || {}).scope || (user_id ? 'by_user' : 'combined'));
-    if (scope === 'by_agent') {
-      return res.status(422).json({
-        error: '발송ID별 발행은 아직 준비되지 않았습니다. 회사 합산으로 발행해 주세요.',
-        code: 'BILLING_SCOPE_NOT_SUPPORTED',
-      });
-    }
-    if (scope !== 'combined' && scope !== 'by_user') {
-      return res.status(400).json({ error: `발행 단위 값이 올바르지 않습니다: ${scope}`, code: 'BILLING_SCOPE_INVALID' });
-    }
-    // ★ 2026-07-26 `user_id`의 의미가 바뀌었다. 그 전에는 "이 계정 발송분만 담은 한 장"이었고,
-    //   그래서 테스트·스팸·에이전트·크레딧이 통째로 빠진 청구서가 나갔다(그 상태가 5개월 이상 유지됐다).
-    //   이제 계정별 발행은 **회사 전체를 한 번에** 계정 장 N개 + 공통 장 1개로 낸다.
-    //   옛 호출이 조용히 다른 동작을 하지 않도록, 단일 계정 지정은 받지 않고 새 흐름을 안내한다.
-    if (user_id && !(req.body || {}).scope) {
-      return res.status(422).json({
-        error: '계정 하나만 지정하는 발행은 더 이상 지원하지 않습니다. 그 방식은 테스트·스팸필터·에이전트·AI 크레딧이 빠진 청구서를 만듭니다. 계정별 발행은 발행 단위를 "계정별"로 선택하면 회사 전체가 계정 장 + 공통 장으로 한 번에 나옵니다.',
-        code: 'BILLING_USER_SCOPE_CHANGED',
-      });
-    }
-
-    // 1) 중복 체크 (기간 겹침)
-    // ★ 2026-07-26 축 정정 — 그 전에는 `COALESCE(user_id, nil)`로 비교해서 **회사 정산과 계정별 정산이
-    //   서로를 못 막았다.** 회사 1장을 뽑고 같은 달 계정별 정산을 또 뽑으면 그 계정 웹 발송분이 두 번 청구된다.
-    //   반대로 계정별만 뽑으면 에이전트·테스트·스팸·크레딧이 통째로 미청구가 된다.
-    //   불변식은 하나다 — **한 회사·한 기간에는 하나의 발행만 존재한다.**
-    const existCheck = await pool.query(
-      `SELECT id, status, scope, user_id, billing_start, billing_end FROM billings
-       WHERE company_id = $1
-         AND billing_start <= $3::date AND billing_end >= $2::date`,
-      [company_id, billing_start, billing_end]
-    );
-    if (existCheck.rows.length > 0) {
-      const ex = existCheck.rows[0];
-      return res.status(409).json({
-        error: `해당 기간과 겹치는 정산이 이미 존재합니다 (${String(ex.billing_start).slice(0,10)} ~ ${String(ex.billing_end).slice(0,10)})`,
-        // ★ 2026-07-26 code 부여 — 차단 3종이 422로 빠지면서 409는 이 케이스 전용이 됐다.
-        //   가장 흔한 케이스만 무명으로 두면 화면이 필드 부재로 판별하게 되고, 그건 조용한 폴백을 부른다.
-        code: 'BILLING_PERIOD_OVERLAP',
-        existing_id: ex.id,
-        existing_status: ex.status,
-        // ★ 2026-07-26 기존 발행의 단위를 함께 알린다 — 회사 정산이 이미 있는데 계정별을 또 뽑으면
-        //   그 계정 웹 발송분이 두 번 청구되고, 그 사실이 화면에 안 보이면 운영자가 그냥 다시 시도한다.
-        existing_scope: ex.scope,
-        existing_user_id: ex.user_id
-      });
-    }
-
-    // 2) 고객사 단가 조회 (스냅샷)
-    // ★ 2026-07-26 `created_at`을 함께 읽는다(SCHEMA.md 등재분·information_schema 실측 확인).
-    //   요금제 이력 공백 검사의 기준일이다 — 기준선 141행이 `effective_date = created_at::date`로
-    //   들어갔으므로, 회사가 생기기 전 날짜까지 이력을 요구하면 월 중간에 계약한 회사가 전부 막힌다.
-    const companyResult = await pool.query(
-      `SELECT company_name, billing_type, created_at,
-              cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
-              cost_per_test_sms, cost_per_test_lms
-       FROM companies WHERE id = $1`,
-      [company_id]
-    );
-    if (companyResult.rows.length === 0) {
-      return res.status(404).json({ error: '고객사를 찾을 수 없습니다' });
-    }
-    const co = companyResult.rows[0];
-
-    // ★ 2026-07-26 단가·선불여부를 **한 스냅샷으로 한 번만** 읽는다.
-    //   그 전에는 회사 단가·후불 집합·발송ID 단가를 서로 다른 시점에 세 번 읽어,
-    //   그 사이 값이 바뀌면 사용량은 빠졌는데 단가는 있는 식으로 조용히 어긋났다.
-    //   금액에 쓰는 값과 지문에 들어가는 값이 **같은 읽기**여야 재검증이 의미를 갖는다.
-    //   ★ 선불 판정보다 **먼저** 읽는다 — 판정 근거와 지문이 같은 스냅샷이라야
-    //     "검사 후 선불로 바뀜"이 재검증에 걸린다(Codex 3차 CRITICAL).
-    const ledger = await loadBillingLedger(company_id);
-
-    // ★ 2026-07-25 선불 회사 이중 청구 차단.
-    //   선불은 발송하는 순간 잔액에서 빠진다(prepaid.ts prepaidDeduct — 후불이면 그냥 통과한다).
-    //   이미 받은 돈을 월 정산서로 또 청구하면 그대로 이중 청구다.
-    //   화면은 선불·후불을 한 목록에 섞어 보여주고 회사를 하나씩 골라 뽑는 방식이라 오선택이 실제로 가능하다.
-    // ★ 2026-07-26 판정 근거를 **원장 스냅샷**으로 옮겼다(Codex 3차 CRITICAL 수용).
-    //   첫 회사 조회값으로 판정하면, 그 뒤 원장을 읽기 전에 선불로 바뀐 경우
-    //   원장은 선불을 스냅샷하고 트랜잭션 재검증도 선불끼리 비교해 **그대로 통과한다.**
-    //   금액·포함 여부를 정하는 값은 전부 지문에 들어간 그 스냅샷 하나로만 판정해야 한다.
-    if (String(ledger.companyPriceRow?.billing_type) === 'prepaid') {
-      return res.status(400).json({
-        error: `${co.company_name || '해당 고객사'}는 선불 고객사입니다. 발송 시점에 잔액에서 이미 차감되었으므로 월 정산서를 발행하면 이중 청구가 됩니다.`,
-        code: 'PREPAID_COMPANY_NOT_BILLABLE',
-        billing_type: co.billing_type,
-      });
-    }
-
-    // ★ 2026-07-25 단가 해석을 CT로 — 0원 설정이 `|| 일반단가` 폴백에 먹히던 결함 정정.
-    // ★ 2026-07-26 미설정(NULL) 유형키도 함께 받는다 — `?? 0`으로 0원 청구되던 경로를 아래에서 막는다.
-    const { prices, unsetKeys: webUnsetPriceKeys } = resolveBillingUnitPricesDetailed(ledger.companyPriceRow);
-
-    // 3~6) 사용량 집계 — ★ 2026-07-25 컨트롤타워로 이동(utils/send-usage-aggregation.ts).
-    //   발송통계 엑셀이 청구서와 **같은 함수**를 호출하게 하려고 뺐다. 로직을 복사하면 언젠가 갈라져
-    //   "엑셀 유형 ≠ 청구 유형"이 되고 그러면 정산 대조가 성립하지 않는다.
-    // ★ 2026-07-26 집계는 항상 **회사 전체**다. 계정별 발행은 이 결과를 장으로 쪼개서 내지,
-    //   집계 단계에서 거르지 않는다 — 거르면 그 계정 장에 회사 단위 항목이 통째로 빠진다.
-    // ★ 2026-07-26 단계별 소요 계측 — 느린 지점을 추측이 아니라 로그로 본다.
-    //   금강제화 발행이 2분대였는데 인덱스는 이미 있었다(실측). 다음 개선은 이 로그 위에서 판단한다.
-    const tStart = Date.now();
-    const dayData = await buildCompanyUsageByDay({
-      companyId: company_id,
-      startDate: billing_start,
-      endDate: billing_end,
+    const result = await issueBilling({
+      company_id, user_id, billing_start, billing_end,
+      scope: (req.body || {}).scope ?? null,
+      adminId,
     });
-    const tDayData = Date.now();
-
-    // 7) 합산 — ★ 2026-07-25 미리보기와 같은 함수로(금액 불일치 차단)
-    const totals = buildBillingTotals(dayData);
-    // 청구가 못 읽는 유형키가 섞여 있으면 그 유형은 조용히 0원이 된다 — 발행 시점에 로그로 드러낸다.
-    logUnbillableUsageKeys(dayData, `정산생성 company=${company_id} ${billing_start}~${billing_end}`);
-    const totalSms = totals.SMS, totalLms = totals.LMS, totalMms = totals.MMS, totalKakao = totals.KAKAO;
-    const totalTestSms = totals.TEST_SMS, totalTestLms = totals.TEST_LMS;
-    const totalSpamSms = totals.SPAM_SMS, totalSpamLms = totals.SPAM_LMS;
-
-    // 스팸필터 단가 = 일반 단가와 동일 (D16 결정)
-    const spamSmsCost = prices.SMS;
-    const spamLmsCost = prices.LMS;
-    const allPrices: Record<string, number> = { ...prices, SPAM_SMS: spamSmsCost, SPAM_LMS: spamLmsCost };
-
-    // ★ 2026-07-26 청구 상세 — 채널 × 일자 × (계정 | 발송ID) × 유형.
-    //   여기서 처음으로 에이전트(게이트웨이) 발송분이 청구에 들어온다.
-    const usage = await buildBillingUsageRows({
-      companyId: company_id,
-      startDate: billing_start,
-      endDate: billing_end,
-      ledger,
-    });
-    console.log(`[정산][소요] company=${company_id} ${billing_start}~${billing_end} — 일자축 집계 ${tDayData - tStart}ms · 상세축 집계 ${Date.now() - tDayData}ms`);
-
-    // 새 상세와 기존 집계가 갈라지면 화면·엑셀 숫자와 청구서 금액이 어긋난다.
-    // 0725에 맞춰놓은 축을 이번 재구성이 조용히 되돌리는 것을 여기서 막는다.
-    const axisDiffs = diffBillingRowsVsDayData(usage.rows, dayData);
-    if (axisDiffs.length > 0) {
-      console.log(`[정산][축불일치] company=${company_id} ${billing_start}~${billing_end} — ${axisDiffs.map((d) => `${d.typeKey}: 상세 ${d.rowsSuccess} vs 집계 ${d.dayDataSuccess}`).join(', ')}`);
-      // ★ 2026-07-26 409 → 422. 관리자 화면이 **409만** "해당 월 정산이 이미 존재합니다. 삭제 후 재생성해주세요"로
-      //   덮어쓰기 때문에(AdminDashboard handleBillingGenerate), 차단 사유가 그 문구에 전부 가려졌다.
-      //   그 안내대로 삭제하면 `ai_credit_requests.billed`가 얽혀 돈이 새는 경로로 들어간다.
-      //   409는 "기간 중복" 하나에만 남기고 차단은 422로 낸다 — 화면 수정 없이 서버 문구가 그대로 표시된다.
-      return res.status(422).json({
-        error: '청구 상세와 사용량 집계의 수량이 일치하지 않아 발행을 중단했습니다. 두 경로가 갈라진 상태로 발행하면 화면·엑셀과 청구서 금액이 어긋납니다.',
-        code: 'BILLING_AXIS_MISMATCH',
-        mismatches: axisDiffs,
-      });
-    }
-
-    const priced = priceBillingRows(
-      usage.rows, allPrices, ledger.postpaidPriceRows,
-      normalizeUnitPriceBasis(ledger.companyPriceRow?.unit_price_basis),
-    );
-
-    // ★ 2026-07-26 회사 단가 미설정 — 그 전에는 `?? 0`으로 조용히 0원 청구됐다(MMS 308,043건과 같은 계열).
-    //   성공 수량이 있는 유형만 막는다. 수량 0인 유형까지 막으면 발행이 이유 없이 멈춘다.
-    const webUnsetPriced = findUnsetPricedTypes(webUnsetPriceKeys, usage.rows);
-    if (webUnsetPriced.length > 0) {
-      return res.status(422).json({
-        error: `고객사 단가가 설정되지 않은 발송 유형이 있어 발행을 중단했습니다. 고객사 관리에서 단가를 채운 뒤 다시 발행해 주세요: ${summarizeBlockList(webUnsetPriced.map((u) => `${u.key}(성공 ${u.success.toLocaleString()})`))}`,
-        code: 'WEB_UNIT_PRICE_UNSET',
-        unset_price_types: webUnsetPriced,
-      });
-    }
-
-    // 단가를 못 정하는 유형이 남아 있으면 그 유형은 0원으로 청구된다 — 발행 전에 막는다.
-    if (priced.unbillableTypes.length > 0) {
-      return res.status(422).json({
-        error: `청구 단가가 정의되지 않은 발송 유형이 있어 발행을 중단했습니다: ${summarizeBlockList(priced.unbillableTypes.map((u) => `${u.key}(성공 ${u.success.toLocaleString()})`))}. 그대로 발행하면 이 유형이 0원으로 청구됩니다.`,
-        code: 'UNBILLABLE_TYPE_KEY',
-        unbillable_types: priced.unbillableTypes,
-      });
-    }
-    if (priced.missingAgentPrices.length > 0) {
-      return res.status(422).json({
-        error: `에이전트 발송ID 단가가 설정되지 않아 발행을 중단했습니다. 발송ID별 단가를 채운 뒤 다시 발행해 주세요: ${summarizeBlockList(priced.missingAgentPrices.map((m) => `${m.agentSendId} ${m.typeKey}(성공 ${m.success.toLocaleString()})`))}`,
-        code: 'AGENT_UNIT_PRICE_MISSING',
-        missing_agent_prices: priced.missingAgentPrices,
-      });
-    }
-
-    // ★ 2026-07-26 계정 실재 확인. 퇴사자 계정을 지우면(하드 삭제) 그 사람 발송분의 uuid가 남아 있어
-    //   `billing_items.user_id` FK 위반으로 **그 회사 청구서를 통째로 못 뽑는다.**
-    //   차단하지 않고 계정만 미상으로 내린다 — 수량·금액은 그대로 청구된다.
-    const existingUserIds = await resolveExistingUserIds(
-      company_id,
-      priced.items.map((i) => i.userId).filter(Boolean) as string[],
-    );
-    const { items: sendingItems, unknownUserIds } = nullifyUnknownUserIds(priced.items, existingUserIds);
-    if (unknownUserIds.length > 0) {
-      console.log(`[정산][계정미상] company=${company_id} 삭제되었거나 이 회사 소속이 아닌 계정 ${unknownUserIds.length}건 — 해당 행은 계정 미상으로 청구한다: ${summarizeBlockList(unknownUserIds)}`);
-    }
-
-    // ★ 2026-07-26 ④ 요금제(구독) 이용요금 — Harold 정의 청구서 항목 1번.
-    //   그 전에는 이 항목 자체가 청구서에 없었다(5항목 중 1번이 통째로 빠져 있었다).
-    //   `company_plan_changes`를 읽어 구간별 일할로 낸다. **기간 이전 이력까지** 읽어야 시작 시점 플랜을 안다.
-    //   요금제 행은 수량 축이 없고 금액이 이미 정해져 있어 단가 계산기(`priceBillingRows`)를 거치지 않는다.
-    const planChanges = await loadPlanChanges(company_id, billing_end);
-    const planSegments = buildPlanSegments(planChanges, billing_start, billing_end);
-    const planItems = buildPlanBillingItems(planSegments);
-    const planAmount = sumPlanSegments(planSegments);
-    // 이 기간에 걸리는 이력의 지문 — 발행 트랜잭션 안에서 다시 만들어 대조한다(그 사이 변경 차단).
-    const planFingerprint = planChangesFingerprint(planChanges);
-    // 전 기간 이력 건수 — "기간 안 0건"과 "아예 0건"을 가른다(전자는 최초 배정 전이라 정상).
-    const planHistoryTotal = await countPlanChanges(company_id);
-    if (planChanges.length === 0) {
-      console.log(`[정산][요금제이력없음] company=${company_id} — 이 기간에 걸리는 요금제 이력이 없다(전 기간 이력 ${planHistoryTotal}건). 요금제 이용요금을 청구하지 않는다.`);
-    }
-
-    // ★ 2026-07-26 에이전트 매핑 0 차단(Codex 2차 수용). 로그만 남기면 게이트웨이 발송분이
-    //   통째로 빠진 청구서가 조용히 나가고, 금액 검사 3중이 전부 0을 기준으로 통과한다.
-    if (usage.agentMappingMissing) {
-      return res.status(422).json({
-        error: '이 고객사는 에이전트를 사용하는 것으로 설정돼 있는데 발송ID 매핑이 하나도 없습니다. 이대로 발행하면 게이트웨이 발송분이 통째로 빠집니다. 발송ID를 등록하거나, 실제로 안 쓴다면 사용 구분을 웹으로 바꿔 주세요.',
-        code: 'AGENT_MAPPING_MISSING',
-        usage_type: ledger.usageType,
-      });
-    }
-
-    // ★ 2026-07-26 요금제 이력이 **끊겨 있으면** 막는다 — 그 구간 구독료가 0원으로 조용히 빠지고
-    //   합계 검사 3중은 빠진 값을 기준으로 전부 통과하기 때문이다.
-    //   판정 축은 "공백의 종류"다(Codex 6차 수용). 첫 이력 이전 공백은 요금제가 없던 사실이므로
-    //   막지 않고 로그로만 드러낸다 — 기간 중 최초 배정·플랜 미지정 회사가 정상 발행돼야 한다.
-    const planMonthlyNow = Number(ledger.companyPriceRow?.plan_monthly_price) || 0;
-    const planGate = evaluatePlanHistoryGate({
-      segments: planSegments,
-      billingStart: billing_start,
-      billingEnd: billing_end,
-      companyCreatedDay: co.created_at ? toDayKey(co.created_at) : null,
-      monthlyPrice: planMonthlyNow,
-      planAssigned: Boolean(ledger.companyPriceRow?.plan_id),
-      historyTotal: planHistoryTotal,
-    });
-    if (!planGate.ok) {
-      return res.status(422).json({
-        error: planGate.blockReason === 'history_absent'
-          ? '요금제가 배정돼 있는데 요금제 변경 이력이 한 건도 없습니다. 이대로 발행하면 구독료가 0원으로 빠집니다 — 이력을 먼저 확인해 주세요.'
-          : `요금제 변경 이력이 중간에 끊겨 구독료를 계산할 수 없습니다 (${planGate.gap!.from} ~ ${planGate.gap!.to}, ${planGate.gap!.days}일). 이대로 발행하면 그 구간 구독료가 0원으로 빠집니다.`,
-        code: 'PLAN_HISTORY_MISSING',
-        block_reason: planGate.blockReason,
-        plan_gap: planGate.gap,
-        cover_from: planGate.coverFrom,
-      });
-    }
-    if (planGate.uncoveredHead) {
-      // 차단하지 않는다. 다만 "그 기간 앞부분에 요금제가 없었다"는 사실은 청구서 금액을 바꾸므로 남긴다.
-      console.log(`[정산][요금제없는구간] company=${company_id} ${planGate.uncoveredHead.from}~${planGate.uncoveredHead.to} (${planGate.uncoveredHead.days}일) — 그 구간 구독료 없음(기간 중 최초 배정이거나 요금제 미지정). plan_id=${ledger.companyPriceRow?.plan_id || '없음'}`);
-    }
-
-    const billingItems = [...planItems, ...sendingItems];
-    // 헤더 공급가액 교차검증(A-8)은 **절사 전** 값으로 한다 — 절사 후끼리 비교하면 헤더를 상세에서
-    // 파생시킨 셈이라 "두 코드가 갈라졌는가"를 못 본다.
-    const agentAmountExact = priced.amountExactByChannel.agent;
-    // 실제 청구된 요금제 금액 — 구간별 절사 후 합. 응답·화면에는 이 값이 나간다.
-    const planAmountBilled = planItems.reduce((s, i) => s + (Number(i.amount) || 0), 0);
-    if (usage.excludedPrepaidSendIds.length > 0) {
-      console.log(`[정산] company=${company_id} 선불 발송ID ${usage.excludedPrepaidSendIds.join(',')} 청구 제외(게이트웨이 잔액에서 이미 차감)`);
-    }
-
-    // ★ 2026-07-25 7~9) 정산 쓰기를 단일 트랜잭션으로 묶는다.
-    //   기존에는 billings INSERT → ai_credit_requests.billed=true → billing_items INSERT가 각각 따로 커밋됐다.
-    //   중간에 실패하면 헤더만 남고 위 기간 중복검사(1번)가 재발행을 막는다.
-    //   더 나쁜 쪽은 회복 경로다 — 화면 안내대로 "삭제 후 재생성"을 하면 billed=true는 되돌아오지 않아
-    //   그 후불 크레딧 충전분이 영구 미청구가 된다(billed_invoice_id는 FK가 아니라 삭제에 반응하지 않는다).
-    //   무거운 사용량 집계(MySQL 멀티테이블)는 트랜잭션 밖에 두고, 쓰기와 그 근거가 되는 PG 조회만 안에 넣는다.
-    //   ※ config/database.ts의 `query`는 pool.query라 BEGIN/COMMIT이 서로 다른 커넥션에 나뉜다 — 반드시 client 고정.
-    const client = await pool.connect();
-    let billing: any;
-    let itemsCount = 0;
-    let aiCreditCount = 0, aiCreditSupply = 0;
-    let subtotal = 0, vat = 0, totalAmount = 0;
-    let sheetsIssued: any[] = [];
-    let batchIdIssued: string | null = null;
-    try {
-      await client.query('BEGIN');
-
-      // 같은 회사 정산을 동시에 생성하면 위 1번 중복검사를 양쪽 다 통과할 수 있다 — 직렬화한다.
-      // ★ 2026-07-26 잠금 축을 **회사 단위로** 되돌렸다. 사용자를 두 번째 축에 넣으면
-      //   회사 정산과 계정별 정산이 서로 다른 잠금을 잡아 동시에 통과한다 — 중복검사와 같은 구멍이다.
-      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext('billing'))`, [String(company_id)]);
-
-      // 잠금을 기다리는 동안 다른 요청이 먼저 만들었을 수 있다 — 잠금 획득 후 재검사.
-      const dupInTx = await client.query(
-        `SELECT id, status, scope, user_id, billing_start, billing_end FROM billings
-         WHERE company_id = $1
-           AND billing_start <= $3::date AND billing_end >= $2::date`,
-        [company_id, billing_start, billing_end]
-      );
-      if (dupInTx.rows.length > 0) {
-        await client.query('ROLLBACK');
-        const ex = dupInTx.rows[0];
-        return res.status(409).json({
-          error: `해당 기간과 겹치는 정산이 이미 존재합니다 (${String(ex.billing_start).slice(0,10)} ~ ${String(ex.billing_end).slice(0,10)})`,
-          // ★ 2026-07-26 잠금 후 재검사 경로에도 같은 계약을 준다. 여기만 code가 없으면
-          //   동시 발행에서 진 쪽이 "알 수 없는 오류"로 떨어져 원인을 못 밝힌다.
-          code: 'BILLING_PERIOD_OVERLAP',
-          existing_id: ex.id,
-          existing_status: ex.status,
-          existing_scope: ex.scope,
-          existing_user_id: ex.user_id
-        });
-      }
-
-      // ★ 2026-07-26 원장 재검증. 집계와 금액 계산은 무거워서 트랜잭션 밖에서 돌았다.
-      //   그 사이 단가나 선불여부가 바뀌었으면 지금 계산한 금액은 이미 낡은 값이다.
-      //   지금은 283개 발송ID 단가를 직원들이 채워 넣는 중이라 발행과 저장이 겹칠 확률이 구조적으로 높다.
-      //   잠금 대신 지문 대조를 쓰는 이유는, 원장이 화면에서 수시로 갱신되는 축이라
-      //   잠금을 걸면 발행이 그 화면을 붙잡기 때문이다.
-      //   문구에 "방금 저장했다면 다시"를 명시한다 — 없으면 사람이 자기가 한 일과 충돌한 걸 버그로 오인한다.
-      const fingerprintNow = await readBillingLedgerFingerprint(company_id, client);
-      if (fingerprintNow !== ledger.fingerprint) {
-        await client.query('ROLLBACK');
-        return res.status(422).json({
-          error: '발행 중에 단가 또는 선불 설정이 변경되어 중단했습니다. 방금 단가를 저장하셨다면 그대로 다시 발행해 주세요.',
-          code: 'BILLING_LEDGER_CHANGED',
-        });
-      }
-
-      // ★ 2026-07-26 요금제 이력 재검증(Codex 7차 ②-2 수용). 구간·금액은 트랜잭션 밖에서 계산됐고,
-      //   그 사이 `recordPlanChange`가 **이 기간에 걸리는** 변경을 넣으면(호출부가 `effectiveDate`를
-      //   과거로 줄 수 있다) 우리가 든 구간은 낡은 값이 된다. 원장 지문은 그걸 못 잡는다 —
-      //   `plan_id`를 지문에 넣었다가 무관한 다음 달 변경까지 막아서 되돌렸기 때문이다(6차 ②).
-      //   기간에 걸리는 이력만으로 대조하면 이 청구서 금액을 바꾸는 변경만 정확히 걸린다.
-      const planFingerprintNow = planChangesFingerprint(await loadPlanChanges(company_id, billing_end, client));
-      if (planFingerprintNow !== planFingerprint) {
-        await client.query('ROLLBACK');
-        return res.status(422).json({
-          error: '발행 중에 요금제 변경 이력이 바뀌어 중단했습니다. 방금 요금제를 변경하셨다면 그대로 다시 발행해 주세요.',
-          code: 'BILLING_PLAN_HISTORY_CHANGED',
-        });
-      }
-
-      // ★ D229+ 후불 AI 크레딧 충전 합산 — 이 기간 승인·미청구분(supply=공급가 VAT 별도)을 정산서에 합산.
-      //   선불 충전은 status='completed'(즉시 결제)라 미포함 — 후불(status='approved')만 월말 청구 대상.
-      //   FOR UPDATE = 합산에 넣은 행과 아래 billed 처리 대상 행이 같음을 보장(그 사이 상태 변경 차단).
-      //
-      // ★ 2026-07-25 사용자 지정 정산에서는 크레딧을 청구하지 않는다.
-      //   발송 사용량은 `created_by`로 그 사용자 것만 거르는데 크레딧 조회는 `company_id`만 봤다.
-      //   축이 어긋나 한 사용자의 청구서에 회사 전체 크레딧이 붙었고, 더 나쁜 건 그 행에 billed=true가 찍혀
-      //   정작 회사 정산에서는 그만큼 빠져 버린 점이다(한 번 찍히면 되돌아오지 않는다).
-      //   크레딧 충전은 회사 단위 행위라 사용자별로 나눌 근거 자체가 없다 — 회사 정산에서만 청구한다.
-      // ★ 2026-07-26 크레딧은 **항상** 청구한다. 그 전에는 사용자 지정이면 통째로 빼서,
-      //   계정별 정산만 뽑는 회사는 크레딧이 영영 청구되지 않았다.
-      //   이제 발행이 회사 전체 단위라 크레딧은 공통 장(회사 단위 항목을 싣는 장)에 들어간다.
-      let creditChargeRes: { rows: any[] } = { rows: [] };
-      {
-        creditChargeRes = await client.query(
-          `SELECT id, credits, supply_amount FROM ai_credit_requests
-            WHERE company_id = $1::uuid AND status = 'approved' AND billed = false
-              -- ★ 2026-07-26 KST 경계. date 캐스트는 세션 TZ(Etc/UTC) 기준이라 KST 09:00에서 잘렸다.
-              AND processed_at >= ($2 || ' 00:00:00+09')::timestamptz
-              AND processed_at < (($3::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz
-            FOR UPDATE`,
-          [company_id, billing_start, billing_end]
-        );
-      }
-      const chargeSupply = creditChargeRes.rows.reduce((s: number, r: any) => s + Number(r.supply_amount || 0), 0);
-      const chargeCount = creditChargeRes.rows.reduce((s: number, r: any) => s + Number(r.credits || 0), 0);
-      // ★ #3 후불 overage(기본 크레딧 초과해 한도 음수로 쓴 분)도 같은 기간 합산 — 솔루션 이용요금 통합(단가 동일 2,000원)
-      //   이중 방지: 위 기간 겹침 중복 차단(409)으로 월 1회만 생성 → created_at 기간 집계가 다음 달과 안 겹침.
-      let overageCount = 0;
-      let overageTxIds: string[] = [];
-      {
-        // ★ 2026-07-26 청구 완료 마커(`billed_billing_id`)를 붙였다(Codex 3차 HIGH 수용).
-        //   그 전에는 기간으로만 합산해서, 기간 경계를 UTC→KST로 옮긴 이번 변경 때문에
-        //   옛 경계로 발행된 청구서와 **KST 00~09시 9시간 구간이 두 번 청구**될 수 있었다
-        //   (기간 중복검사는 날짜만 보므로 6/1~6/30과 7/1~7/31은 겹치지 않는다고 판단한다).
-        //   충전분(`ai_credit_requests.billed`)에는 이미 있던 안전장치가 초과사용분에만 없었다.
-        //   FOR UPDATE = 합산에 넣은 행과 아래에서 마커를 찍는 행이 같음을 보장한다.
-        const overageRes = await client.query(
-          `SELECT id, overage_credits FROM ai_credit_transactions
-            WHERE company_id = $1::uuid AND type = 'deduct' AND overage_credits > 0
-              AND billed_billing_id IS NULL
-              -- ★ 2026-07-26 KST 경계. PG 세션 TZ가 Etc/UTC라 date 캐스트로 쓰면 경계가 KST 09:00이 된다.
-              -- 발송 집계는 KST 자정으로 고쳤는데 크레딧만 UTC로 남아 있어 청구 월이 또 어긋났다.
-              AND created_at >= ($2 || ' 00:00:00+09')::timestamptz
-              AND created_at < (($3::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz
-            FOR UPDATE`,
-          [company_id, billing_start, billing_end]
-        );
-        overageCount = (overageRes.rows as any[]).reduce((s, r) => s + (Number(r.overage_credits) || 0), 0);
-        overageTxIds = (overageRes.rows as any[]).map((r) => String(r.id));
-      }
-      aiCreditCount = chargeCount + overageCount;                       // 충전 + 초과사용 크레딧 수량
-      aiCreditSupply = chargeSupply + overageCount * CREDIT_UNIT_PRICE; // 공급가(크레딧×단가=공급가 일관)
-
-      // ★ 2026-07-26 에이전트 금액 합산. 헤더(`billings`)에는 에이전트 수량 컬럼이 없지만 컬럼을 늘리지 않는다 —
-      //   항목별 수량·금액의 진실은 `billing_items`이고 청구서 1페이지는 거기서 채널별로 집계한다.
-      //   헤더는 합계(subtotal·vat·total_amount)만 정확히 담는다.
-      // ★ 2026-07-26 금액 항등식 — 헤더는 `totals × 단가`로, 상세는 `priceBillingRows`로
-      //   **서로 다른 코드가 계산한다.** 축이 어긋나면 청구서 항목 합계와 공급가액이 안 맞는다.
-      //   AI 크레딧은 발송이 아니라 `billing_items` 행이 없으므로 따로 더한다.
-      //   대조는 **절사 전** 값끼리 한다 — 절사는 그 뒤 한 번만 적용하므로 탐지력이 줄지 않는다.
-      const subtotalExact =
-        (totalSms * prices.SMS) + (totalLms * prices.LMS) +
-        (totalMms * prices.MMS) + (totalKakao * prices.KAKAO) +
-        (totalTestSms * prices.TEST_SMS) + (totalTestLms * prices.TEST_LMS) +
-        (totalSpamSms * spamSmsCost) + (totalSpamLms * spamLmsCost) +
-        agentAmountExact +
-        planAmount +
-        aiCreditSupply;
-      const amountCheck = checkBillingAmountIdentity(
-        billingItems.map((i) => ({ amount: i.amountExact })), aiCreditSupply, subtotalExact,
-      );
-      if (!amountCheck.ok) {
-        await client.query('ROLLBACK');
-        console.log(`[정산][금액불일치] company=${company_id} ${billing_start}~${billing_end} — 상세합 ${amountCheck.itemsSum} + 크레딧 ${amountCheck.aiCreditSupply} ≠ 공급가액 ${amountCheck.subtotal} (차이 ${amountCheck.diff})`);
-        return res.status(422).json({
-          error: '청구 상세 금액의 합이 공급가액과 일치하지 않아 발행을 중단했습니다. 그대로 발행하면 청구서 항목을 더한 값과 합계가 어긋납니다.',
-          code: 'BILLING_AMOUNT_MISMATCH',
-          amount_check: amountCheck,
-        });
-      }
-
-      // ★ 2026-07-26 저장 금액은 **원 미만 절사 후 정수 덧셈**이다(Harold 지시).
-      //   상세 행(`billing_items.amount`)이 이미 절사돼 있으므로 공급가액은 그 정수들의 합이고,
-      //   장 소계·부가세·합계까지 전부 정수가 된다 — 청구서 1페이지 항목표와 2페이지 일자별 상세를
-      //   각각 세로로 더한 값이 둘 다 공급가액과 정확히 맞는다.
-      subtotal = billingItems.reduce((s, i) => s + (Number(i.amount) || 0), 0) + aiCreditSupply;
-      vat = vatOfSupply(subtotal);
-      totalAmount = subtotal + vat;
-
-      // 8~9) 장별 발행 — 한 요청이 N+1장을 **원자적으로** 만든다.
-      //   장 단위로 반복 발행하면 "N장 중 3장까지 만들고 4장째에서 단가 미설정으로 막힌 상태"가 허용된다.
-      //   그러면 그 회사는 부분 청구로 남고, 나머지를 뽑으려면 앞 장들과의 겹침을 매번 검사해야 하며,
-      //   고객은 받은 것이 전부인지 알 수 없다. 한 트랜잭션에서 전부 만들거나 전부 안 만든다.
-      const sheets = splitBillingSheets(billingItems, scope as BillingScope);
-
-      // 장으로 쪼갠 합이 회사 합산과 같은지 — 분산 발행이 회사 총액을 다 담았는지 보는 유일한 장치다.
-      // 안분이 없으므로 정수 덧셈이고, 오차 허용 없이 같아야 한다.
-      const sheetSum = checkSheetSumIdentity(sheets, aiCreditSupply, subtotal);
-      if (!sheetSum.ok) {
-        await client.query('ROLLBACK');
-        console.log(`[정산][장합불일치] company=${company_id} ${billing_start}~${billing_end} — 장합 ${sheetSum.itemsSum} + 크레딧 ${sheetSum.aiCreditSupply} ≠ 공급가액 ${sheetSum.subtotal} (차이 ${sheetSum.diff})`);
-        return res.status(422).json({
-          error: '장별 금액의 합이 회사 합산 공급가액과 일치하지 않아 발행을 중단했습니다.',
-          code: 'BILLING_SHEET_SUM_MISMATCH',
-          amount_check: sheetSum,
-        });
-      }
-
-      // 묶음 식별자 — 부분 삭제 차단과 "N장 중 k장" 표기의 근거. 한 장짜리 발행에는 붙이지 않는다.
-      const batchId = sheets.length > 1 ? randomUUID() : null;
-      // ★ 2026-07-26 14 → 16. 요금제 일수 전용 컬럼(plan_days·plan_month_days) 추가분.
-      const COLS = 16;
-      const ITEM_CHUNK_ROWS = 1000;
-      const issuedSheets: any[] = [];
-
-      for (const sheet of sheets) {
-        const carries = sheet.carriesCompanyItems;
-        // 청구할 내용이 없는 장은 만들지 않는다 — 0원 청구서가 나가는 것을 막는다.
-        // ★ 2026-07-26 조건을 "항목 0건"에서 **"청구 내용 0"**으로 넓혔다(Harold 지시).
-        //   요금제 기준선 141행이 들어가면서 모든 회사에 요금제 행이 최소 1건 생기는데,
-        //   FREE(0원) 구간 행도 항목이라서 발송 0건인 무료 회사가 전부 0원 청구서 발행 대상이 됐다.
-        //   금액이 있거나(유료 요금제 포함), 성공 수량이 있거나(명시 0원 단가 사용량은 문서화 대상),
-        //   크레딧을 싣는 장만 발행한다.
-        const hasBillableContent =
-          sheet.amount > 0 || sheet.items.some((i) => (Number(i.success) || 0) > 0);
-        if (!hasBillableContent && !(carries && (aiCreditSupply > 0 || aiCreditCount > 0))) continue;
-
-        const sheetSubtotal = sheet.amount + (carries ? aiCreditSupply : 0);
-        const sheetVat = vatOfSupply(sheetSubtotal);
-        const t = sheet.totals;
-
-        const billingResult = await client.query(
-          `INSERT INTO billings (
-            company_id, user_id, billing_year, billing_month, billing_start, billing_end,
-            sms_success, lms_success, mms_success, kakao_success,
-            sms_unit_price, lms_unit_price, mms_unit_price, kakao_unit_price,
-            test_sms_count, test_lms_count, test_sms_unit_price, test_lms_unit_price,
-            spam_filter_sms_count, spam_filter_lms_count, spam_filter_sms_unit_price, spam_filter_lms_unit_price,
-            subtotal, vat, total_amount, ai_credit_count, ai_credit_supply, created_by, scope, batch_id
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
-          RETURNING *`,
-          [
-            company_id, sheet.userId, billing_year, billing_month, billing_start, billing_end,
-            t.SMS, t.LMS, t.MMS, t.KAKAO,
-            prices.SMS, prices.LMS, prices.MMS, prices.KAKAO,
-            t.TEST_SMS, t.TEST_LMS, prices.TEST_SMS, prices.TEST_LMS,
-            t.SPAM_SMS, t.SPAM_LMS, spamSmsCost, spamLmsCost,
-            sheetSubtotal, sheetVat, sheetSubtotal + sheetVat,
-            carries ? aiCreditCount : 0, carries ? aiCreditSupply : 0,
-            adminId, sheet.sheetScope, batchId,
-          ]
-        );
-        const sheetBilling = billingResult.rows[0];
-        issuedSheets.push(sheetBilling);
-        if (carries || !billing) billing = sheetBilling;   // 응답 대표 = 회사 단위 항목을 실은 장
-
-        // ★ D229+ 후불 크레딧 충전 행을 billed 처리 (id 배열로 정확히 — 중복 청구 차단)
-        //   크레딧을 실은 장에만 건다. 여러 장에 걸면 그 충전분이 어느 청구서 것인지가 갈린다.
-        if (carries && creditChargeRes.rows.length > 0) {
-          await client.query(
-            `UPDATE ai_credit_requests SET billed = true, billed_invoice_id = $1::uuid WHERE id = ANY($2::uuid[])`,
-            [sheetBilling.id, creditChargeRes.rows.map((r: any) => r.id)]
-          );
-        }
-
-        // ★ 2026-07-26 초과사용 크레딧에도 같은 마커. 이 청구서가 지워지면
-        //   FK(`ON DELETE SET NULL`)가 자동으로 되돌려 다시 청구 대상이 된다 —
-        //   충전분처럼 "삭제해도 마커가 남아 영구 미청구"가 되는 구조를 애초에 만들지 않는다.
-        if (carries && overageTxIds.length > 0) {
-          await client.query(
-            `UPDATE ai_credit_transactions SET billed_billing_id = $1::uuid WHERE id = ANY($2::uuid[])`,
-            [sheetBilling.id, overageTxIds]
-          );
-        }
-
-        // billing_items INSERT (채널 × 일자 × 계정|발송ID × 유형 상세)
-        //   ★ `user_id`는 헤더값 복사가 아니라 **행별 실제 계정**이고, 에이전트 행은 `agent_id`가 발송ID를 가리킨다.
-        //   `store_id`(대상ID)는 청구 축이 아니다 — 계정마다 의미가 갈리고 카디널리티를 통제할 수 없다
-        //   (제이씨패밀리 7월 29,598개). 지점별 확인은 발송통계 엑셀이 담당한다.
-        const itemValues: any[][] = sheet.items.map((it: PricedBillingItem) => ([
-          sheetBilling.id, company_id,
-          it.channel === 'agent' ? null : it.userId,
-          it.agentId,
-          null,                 // store_id — 청구 축 아님
-          it.channel,
-          it.itemDate, it.typeKey,
-          it.total, it.success, it.fail, it.pending,
-          it.unitPrice, it.amount,
-          // ★ 2026-07-26 요금제 일수는 전용 컬럼으로. 발송 행은 null이다 —
-          //   발송 수량 컬럼에 일수를 실으면 PDF '전송'·'실패' 열과 화면 합계가 오염된다.
-          it.planDays, it.planMonthDays,
-        ]));
-
-        // ★ 청크 INSERT. 14컬럼이라 4,681행이면 PG 바인드 파라미터 상한(65,535)을 넘어 **발행 자체가 실패**한다.
-        //   1,000행이면 배치당 14,000개라 상한의 1/4 수준이다. 전 배치가 같은 트랜잭션 안이라 원자성은 유지된다.
-        //   검증은 `count(*)`가 아니라 **`rowCount` 합**으로 한다 — 같은 트랜잭션 안 count는 자기 INSERT를
-        //   전부 보고 PG는 부분 INSERT가 없어서, 그 대조는 항상 통과하는 장식이 된다.
-        let insertedRows = 0;
-        for (const batch of chunkArray(itemValues, ITEM_CHUNK_ROWS)) {
-          const ph = batch.map((_, i) => {
-            const b = i * COLS;
-            return `(${Array.from({ length: COLS }, (_, k) => `$${b + k + 1}`).join(',')})`;
-          }).join(',');
-
-          const ins = await client.query(
-            `INSERT INTO billing_items (
-              billing_id, company_id, user_id, agent_id, store_id, channel,
-              item_date, message_type,
-              total_count, success_count, fail_count, pending_count,
-              unit_price, amount,
-              plan_days, plan_month_days
-            ) VALUES ${ph}`,
-            batch.flat()
-          );
-          insertedRows += ins.rowCount || 0;
-        }
-        if (insertedRows !== itemValues.length) {
-          throw new Error(`청구 상세 적재 수량이 맞지 않습니다 (적재 ${insertedRows} / 대상 ${itemValues.length}). 청크 분할에 결함이 있습니다.`);
-        }
-        itemsCount += itemValues.length;
-      }
-
-      if (issuedSheets.length === 0) {
-        await client.query('ROLLBACK');
-        return res.status(422).json({
-          error: '이 기간에 청구할 발송·크레딧이 없어 발행할 내용이 없습니다.',
-          code: 'BILLING_NOTHING_TO_ISSUE',
-        });
-      }
-      sheetsIssued = issuedSheets;
-      batchIdIssued = batchId;
-
-      await client.query('COMMIT');
-    } catch (txError: any) {
-      try { await client.query('ROLLBACK'); } catch (rbError: any) {
-        console.error('정산 생성 롤백 실패:', rbError?.message || rbError);
-      }
-      throw txError;
-    } finally {
-      client.release();
-    }
-
-    return res.json({
-      billing,
-      items_count: itemsCount,
-      summary: { totalSms, totalLms, totalMms, totalKakao, totalTestSms, totalTestLms, totalSpamSms, totalSpamLms, subtotal, vat, totalAmount },
-      // ★ 2026-07-26 발행 단위 결과 — 계정별이면 계정 장 N개 + 공통 장 1개가 한 묶음으로 나온다.
-      scope,
-      batch_id: batchIdIssued,
-      sheet_count: sheetsIssued.length,
-      sheets: sheetsIssued.map((b: any) => ({
-        id: b.id, scope: b.scope, user_id: b.user_id,
-        subtotal: b.subtotal, total_amount: b.total_amount,
-      })),
-      // ★ 2026-07-26 채널별 소계 — 청구서 1페이지 항목이 이 값이다(헤더 컬럼이 아니라 billing_items가 진실).
-      //   요금제는 단가 계산기를 안 거치므로 여기서 합쳐 넣는다.
-      //   전부 **절사 후 청구된 값**이다 — 응답에 절사 전 값을 섞으면 화면 합계가 청구서와 갈라진다.
-      channel_amounts: { ...priced.amountByChannel, plan: planAmountBilled },
-      plan: {
-        amount: planAmountBilled,
-        segments: planSegments.map((s) => ({
-          plan_code: s.planCode, monthly_price: s.monthlyPrice,
-          from: s.from, to: s.to, days: s.days, month_days: s.monthDays, amount: floorWon(s.amount),
-        })),
-      },
-      agent: {
-        amount: priced.amountByChannel.agent,
-        excluded_prepaid_send_ids: usage.excludedPrepaidSendIds,
-      },
-    });
+    return res.json(result);
   } catch (error: any) {
+    if (error instanceof BillingIssueError) {
+      return res.status(error.status).json(error.body);
+    }
     const emsg = error?.message || '';
     if (emsg.includes('column') && emsg.includes('does not exist')) {
       return res.status(503).json({ error: 'DB 마이그레이션 필요 — billing_items.channel·store_id·plan_days·plan_month_days, billings.scope·batch_id, ai_credit_transactions.overage_credits·billed_billing_id 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
@@ -751,6 +160,298 @@ router.get('/company-users/:companyId', async (req: Request, res: Response) => {
     console.error('사용자 목록 오류:', error);
     return res.status(500).json({ error: error.message });
   }
+});
+
+// ═══ 정산 설정·담당자 — 고객사 상세 "정산" 탭 (2026-07-28) ═══
+//   SoT = docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md §2. CT = utils/billing-settings.ts.
+
+// GET /company-billing-settings/:companyId — 설정(발행 단위·계산서 날짜 정책) + 담당자 목록
+router.get('/company-billing-settings/:companyId', async (req: Request, res: Response) => {
+  try {
+    const { companyId } = req.params;
+    const settings = await getCompanyBillingSettings(companyId);
+    const contacts = await listBillingContacts(companyId);
+    return res.json({ settings, contacts });
+  } catch (error: any) {
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — company_billing_settings·billing_contacts 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('정산 설정 조회 오류:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /company-billing-settings/:companyId — 정산 탭 전체 저장 (설정 + 회사 담당자 + 계정 담당자·사업자)
+//   한 트랜잭션. 계정 담당자는 **이 회사 소속 계정인지** 검증 후에만 쓴다(남의 회사 계정 차단).
+router.put('/company-billing-settings/:companyId', async (req: Request, res: Response) => {
+  const client = await pool.connect();
+  try {
+    const { companyId } = req.params;
+    const adminId = (req as any).user?.userId || null;
+    const { issue_scope, taxbill_day_policy, company_contact, account_contacts } = (req.body || {}) as any;
+
+    await client.query('BEGIN');
+    await upsertCompanyBillingSettings(client, companyId, {
+      issueScope: String(issue_scope || 'combined'),
+      taxbillDayPolicy: String(taxbill_day_policy || 'last_day'),
+      updatedBy: adminId,
+    });
+    if (company_contact && typeof company_contact === 'object') {
+      await upsertBillingContact(client, companyId, {
+        userId: null,
+        contactName: company_contact.name,
+        contactEmail: company_contact.email,
+      }, adminId);
+    }
+    const list = Array.isArray(account_contacts) ? account_contacts : [];
+    if (list.length > 0) {
+      const ids = Array.from(new Set(list.map((c: any) => String(c?.user_id || '')).filter(Boolean)));
+      const owned = await client.query(
+        `SELECT id FROM users WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`,
+        [companyId, ids],
+      );
+      const okIds = new Set(owned.rows.map((r: any) => String(r.id)));
+      const bad = ids.filter((i) => !okIds.has(i));
+      if (bad.length > 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error: `이 회사 소속이 아닌 계정이 포함되어 저장을 중단했습니다 (${bad.length}건).`,
+          code: 'BILLING_CONTACT_USER_MISMATCH',
+        });
+      }
+      for (const c of list) {
+        if (!c?.user_id) continue;
+        await upsertBillingContact(client, companyId, {
+          userId: String(c.user_id),
+          contactName: c.name,
+          contactEmail: c.email,
+          taxbillBizNumber: c.taxbill_biz_number,
+          taxbillCompanyName: c.taxbill_company_name,
+          taxbillCeoName: c.taxbill_ceo_name,
+          taxbillAddress: c.taxbill_address,
+          taxbillBizType: c.taxbill_biz_type,
+          taxbillBizItem: c.taxbill_biz_item,
+        }, adminId);
+      }
+    }
+    await client.query('COMMIT');
+    return res.json({ success: true, message: '정산 설정이 저장되었습니다.' });
+  } catch (error: any) {
+    try { await client.query('ROLLBACK'); } catch { /* 아래 응답이 사실을 전달한다 */ }
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — company_billing_settings·billing_contacts 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('정산 설정 저장 오류:', error);
+    return res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ═══ 거래내역서 일괄발급 (2026-07-28) — SoT §3. CT = utils/billing-bulk.ts ═══
+
+// GET /bulk/unbilled?start&end — 후불·해당 기간 미발급 회사 목록 (담기 리스트)
+router.get('/bulk/unbilled', async (req: Request, res: Response) => {
+  try {
+    const start = String(req.query.start || '');
+    const end = String(req.query.end || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || start > end) {
+      return res.status(400).json({ error: '기간(start·end)이 올바르지 않습니다.' });
+    }
+    const companies = await listUnbilledPostpaid(start, end);
+    return res.json({ companies });
+  } catch (error: any) {
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — 일괄발급 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('일괄발급 대상 조회 오류:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /bulk/jobs — 일괄발급 시작 (비동기 배치 — 진행률은 GET /bulk/jobs/:id 폴링)
+router.post('/bulk/jobs', async (req: Request, res: Response) => {
+  try {
+    const { period_start, period_end, items } = (req.body || {}) as any;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(period_start)) || !/^\d{4}-\d{2}-\d{2}$/.test(String(period_end)) || String(period_start) > String(period_end)) {
+      return res.status(400).json({ error: '기간(period_start·period_end)이 올바르지 않습니다.' });
+    }
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const list = Array.isArray(items) ? items : [];
+    if (list.length === 0) return res.status(400).json({ error: '발급할 회사를 담아 주세요.' });
+    for (const it of list) {
+      if (!UUID_RE.test(String(it?.company_id || ''))) return res.status(400).json({ error: '회사 식별자가 올바르지 않습니다.' });
+      if (it?.scope !== 'combined' && it?.scope !== 'by_user') return res.status(400).json({ error: `발행 단위 값이 올바르지 않습니다: ${it?.scope}` });
+    }
+    // 실행 중 job이 있으면 새 job을 막는다 — 진행률 화면 혼선·중복 클릭 차단(회사 단위 이중 발행은 코어 잠금이 별도로 막는다).
+    const running = await findRunningBulkJob();
+    if (running) {
+      return res.status(409).json({ error: '이미 실행 중인 일괄발급이 있습니다. 완료 후 다시 시도해 주세요.', code: 'BULK_JOB_RUNNING', job_id: running });
+    }
+    const { jobId } = await createBulkJob(
+      String(period_start), String(period_end),
+      list.map((it: any) => ({ companyId: String(it.company_id), scope: it.scope })),
+      (req as any).user?.userId || null,
+    );
+    return res.json({ success: true, job_id: jobId });
+  } catch (error: any) {
+    // ★ Codex 1R MEDIUM 수용 — 트랜잭션 안 재검사(TOCTOU 차단)가 던진 실행 중 충돌은 409로.
+    if (error?.code === 'BULK_JOB_RUNNING') {
+      return res.status(409).json({ error: error.message, code: 'BULK_JOB_RUNNING', job_id: error.jobId || null });
+    }
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — 일괄발급 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('일괄발급 시작 오류:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /bulk/jobs/:id — 진행률 폴링 (job 헤더 + item 목록)
+router.get('/bulk/jobs/:id', async (req: Request, res: Response) => {
+  try {
+    const data = await getBulkJob(String(req.params.id));
+    if (!data) return res.status(404).json({ error: '일괄발급 작업을 찾을 수 없습니다.' });
+    return res.json(data);
+  } catch (error: any) {
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — 일괄발급 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('일괄발급 조회 오류:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /confirmations?start&end&status — 컨펌·이의신청·계산서 상태 목록 (슈퍼관리자 현황판)
+router.get('/confirmations', async (req: Request, res: Response) => {
+  try {
+    const start = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.start || '')) ? String(req.query.start) : null;
+    const end = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.end || '')) ? String(req.query.end) : null;
+    const ALLOWED = ['pending', 'confirmed', 'due', 'objected', 'manual_wait', 'ready', 'issued'];
+    const status = ALLOWED.includes(String(req.query.status || '')) ? String(req.query.status) : null;
+    // ★ Codex 1R 수용 — date는 to_char로 못 박고(파서가 Date 객체로 줘 표시가 깨진다),
+    //   501건을 읽어 500 초과 여부(truncated)를 화면에 알린다(조용한 절단 차단).
+    const r = await pool.query(
+      `SELECT ic.id, ic.billing_id, ic.recipient_email, ic.recipient_user_id, ic.sent_at,
+              ic.confirmed_at, ic.objection_at, ic.objection_text,
+              ic.taxbill_status, to_char(ic.taxbill_issue_date, 'YYYY-MM-DD') AS taxbill_issue_date,
+              ic.taxbill_due_at, ic.issued_at, ic.superseded_at,
+              to_char(b.billing_start, 'YYYY-MM-DD') AS billing_start,
+              to_char(b.billing_end, 'YYYY-MM-DD')   AS billing_end,
+              b.total_amount, b.scope AS billing_scope,
+              c.company_name, u.name AS account_name
+         FROM invoice_confirmations ic
+         JOIN billings b ON b.id = ic.billing_id
+         JOIN companies c ON c.id = ic.company_id
+         LEFT JOIN users u ON u.id = ic.recipient_user_id
+        WHERE ($1::date IS NULL OR b.billing_end >= $1::date)
+          AND ($2::date IS NULL OR b.billing_start <= $2::date)
+          AND ($3::text IS NULL OR ic.taxbill_status = $3::text)
+        ORDER BY ic.sent_at DESC
+        LIMIT 501`,
+      [start, end, status],
+    );
+    const truncated = r.rows.length > 500;
+    return res.json({ confirmations: truncated ? r.rows.slice(0, 500) : r.rows, truncated });
+  } catch (error: any) {
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — invoice_confirmations 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('컨펌 현황 조회 오류:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /confirmations/:id/issue-date — 직접선택(중간정산) 건의 작성일자 지정 → 발급 큐 진입
+router.put('/confirmations/:id/issue-date', async (req: Request, res: Response) => {
+  try {
+    const issueDate = String((req.body as any)?.issue_date || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(issueDate)) {
+      return res.status(400).json({ error: '작성일자(issue_date)가 올바르지 않습니다. YYYY-MM-DD 형식으로 지정해 주세요.' });
+    }
+    // ★ Codex 2R HIGH 수용 — 직접선택 건도 ready 전이와 **같은 트랜잭션**에서 장부(taxbill_issues)를 만든다.
+    //   워커 CTE는 confirmed·due만 소비하므로, 여기서 안 만들면 이 건은 팝빌 소비 큐에 영영 안 들어간다.
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const r = await client.query(
+        `UPDATE invoice_confirmations
+            SET taxbill_issue_date = $2::date, taxbill_status = 'ready'
+          WHERE id = $1::uuid AND taxbill_status = 'manual_wait' AND superseded_at IS NULL
+        RETURNING id, billing_id, company_id, taxbill_issue_date`,
+        [String(req.params.id), issueDate],
+      );
+      if (r.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: '날짜 지정 대기 상태인 건을 찾을 수 없습니다. (이미 처리됐거나 재발급된 건일 수 있습니다)' });
+      }
+      const m = r.rows[0];
+      await client.query(
+        `INSERT INTO taxbill_issues (
+           confirmation_id, billing_id, company_id, kind, issue_date,
+           supply_amount, tax_amount, total_amount, status
+         )
+         SELECT $1::uuid, b.id, $2::uuid, 'original', $3::date, b.subtotal, b.vat, b.total_amount, 'ready'
+           FROM billings b WHERE b.id = $4::uuid
+            AND NOT EXISTS (SELECT 1 FROM taxbill_issues t WHERE t.confirmation_id = $1::uuid AND t.kind = 'original')`,
+        [m.id, m.company_id, m.taxbill_issue_date, m.billing_id],
+      );
+      await client.query('COMMIT');
+    } catch (txErr) {
+      try { await client.query('ROLLBACK'); } catch { /* 응답이 사실을 전달한다 */ }
+      throw txErr;
+    } finally {
+      client.release();
+    }
+    return res.json({ success: true, message: `작성일자 ${issueDate}로 발급 대기에 올렸습니다.` });
+  } catch (error: any) {
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — invoice_confirmations 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('작성일자 지정 오류:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /biz-registration-extract — 사업자등록증 이미지 → 사업자 정보 자동입력 (정산 탭 모달)
+//   크레딧 미차감(슈퍼관리자 내부 기능). CT = utils/biz-registration-extract.ts.
+const bizRegUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const mime = (file.mimetype || '').toLowerCase();
+    if (['image/jpeg', 'image/png', 'image/webp'].includes(mime)) cb(null, true);
+    else cb(new Error('JPG, PNG, WebP 이미지만 업로드 가능합니다.'));
+  },
+});
+router.post('/biz-registration-extract', (req: Request, res: Response) => {
+  bizRegUpload.single('image')(req as any, res as any, async (uploadErr: any) => {
+    if (uploadErr) {
+      return res.status(400).json({ success: false, error: uploadErr.message || '이미지 업로드 오류' });
+    }
+    try {
+      const file = (req as any).file as Express.Multer.File | undefined;
+      if (!file) return res.status(400).json({ success: false, error: '사업자등록증 이미지를 올려주세요.' });
+      // 매직 바이트 검증 — 확장자·mimetype 위장 차단(event-image-extract 자산 재사용)
+      const sniffed = sniffImageMediaType(file.buffer);
+      if (!sniffed) return res.status(400).json({ success: false, error: '이미지 형식을 확인할 수 없습니다. JPG/PNG/WebP로 다시 올려주세요.' });
+      const info = await extractBizRegistration({
+        image: { media_type: sniffed, data: file.buffer.toString('base64') },
+        adminId: (req as any).user?.userId || null,
+      });
+      return res.json({ success: true, info });
+    } catch (error: any) {
+      console.error('사업자등록증 판독 오류:', error?.message || error);
+      return res.status(500).json({ success: false, error: error?.message || '사업자등록증 판독 실패' });
+    }
+  });
 });
 
 // GET /agent-price-gaps - 단가가 비어 있는 에이전트 발송ID 목록

@@ -34,6 +34,7 @@
 | 0718 프론트 스플리팅 사고 후속(B-0718-1)·성능 최적화 재개 | docs/2026-07-18-frontend-splitting-incident-handoff.md | 전체 (SoT — §4 작업 순서) |
 | 아임웹 앱스토어 등록·제출물(한줄로AI) | docs/imweb-appstore/app-intro-copy.md + deliverables/ | 전체 (SoT — 문구 원고·산출물. 연동 스펙은 INTEGRATIONS.md 아임웹 카드) |
 | AI 규제 대응(고영향 판단·생성물 표시) | docs/compliance/ | 해당 문서 (고영향AI 사전검토서 = 법 제31조 이행 기록) |
+| **거래내역서 일괄발급·컨펌·세금계산서(팝빌) 착수·재개** | **docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md** | 전체 (SoT — §8 구현 순서. 팝빌 API 호출부만 계약 후) |
 
 ---
 

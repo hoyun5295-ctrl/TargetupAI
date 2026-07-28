@@ -34,6 +34,8 @@ import agentChargeOrdersRoutes from './routes/agent-charge-orders';
 import paymentsRoutes from './routes/payments';
 import testContactsRoutes from './routes/test-contacts';
 import billingRoutes from './routes/billing';
+// ★ 2026-07-28 거래내역서 공개 확인 페이지 (토큰 인증 — 컨펌·이의신청)
+import invoicePublicRoutes from './routes/invoice-public';
 import adminSyncRoutes from './routes/admin-sync';
 import adminRoutes from './routes/admin';
 import smsTemplatesRoutes from './routes/sms-templates';
@@ -81,6 +83,8 @@ import { startCopyLabelSweeperWorker } from './utils/copy-label-sweeper';
 import { startPayIngestMonitor } from './utils/pay-ingest-monitor';
 // ★ CT-17: 30일 PRO 무료체험 자동 강등 Cron (2026-04-22)
 import { startTrialDowngradeWorker } from './utils/trial-downgrade-worker';
+// ★ 2026-07-28 세금계산서 상태 전이 워커 (pending→due, confirmed·due→ready. 팝빌 연동 전 = ready 정지)
+import { startTaxbillWorker } from './utils/taxbill-worker';
 // ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 30일 무료체험 자동 만료 Cron (매일 04:00 KST 로그)
 import { startAiOperatorTrialExpireWorker } from './utils/ai-operator-trial-expire-worker';
 // ★ D219+ Part 2 (2026-05-27): Wizard 종결 회사 매일 9시 인사이트 메일 (1시간 cron)
@@ -170,6 +174,11 @@ const PORT = process.env.PORT || 3000;
 
 // ★ 모바일 DM 공개 뷰어 — helmet 전에 마운트 (인라인 스크립트 필요)
 app.use('/api/dm/v', dmPublicRouter);
+
+// ★ 2026-07-28 거래내역서 공개 확인 페이지 — DM 뷰어와 같은 이유로 helmet 전에 마운트.
+//   (Codex 1R HIGH 수용: helmet 뒤에 두면 CSP script-src가 페이지 인라인 스크립트를 막아
+//    컨펌·이의신청 버튼이 동작하지 않는다.) 전역 json 파서보다도 앞이라 라우터가 자체 파서를 쓴다.
+app.use('/api/invoice-view', invoicePublicRoutes);
 
 // 미들웨어
 app.use(helmet());
@@ -424,6 +433,9 @@ app.listen(PORT, () => {
 
   // ★ CT-17: 30일 PRO 무료체험 자동 강등 (매일 04:00 KST)
   startTrialDowngradeWorker();
+
+  // ★ 2026-07-28 세금계산서 상태 전이 (5분 주기 — 팝빌 연동 전에는 ready에서 정지)
+  startTaxbillWorker();
 
   // ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 30일 무료체험 자동 만료 로그 (매일 04:00 KST)
   startAiOperatorTrialExpireWorker();
