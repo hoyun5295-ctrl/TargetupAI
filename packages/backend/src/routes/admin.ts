@@ -39,7 +39,7 @@ import { buildAdminAgentStatsXlsx } from '../utils/manage-stats-export';
 import { buildXlsxBuffer, XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
 import { normalizePhone } from '../utils/normalize-phone';
 import { normalizeCdpAutoExecuteGate } from '../utils/autosend-policy';
-import { grantBasicTrial } from '../utils/basic-trial';
+import { grantFreeTrial } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
@@ -1538,10 +1538,11 @@ router.put('/plan-requests/:id/approve', authenticate, requireSuperAdmin, async 
       return res.status(400).json({ error: '이미 처리된 신청입니다.' });
     }
     
-    // ★ 2026-06-08: 무료체험 신청([무료체험] 센티넬)이면 BASIC 1개월 체험 부여(grantBasicTrial), 그 외는 일반 플랜 변경.
+    // ★ 2026-06-08: 무료체험 신청([무료체험] 센티넬)이면 1개월 체험 부여, 그 외는 일반 플랜 변경.
+    //   ★ 2026-07-28 배정 플랜 BASIC → TRIAL(월 0원). 기능 권한은 TRIAL 플래그가 BASIC과 동일하게 맞춰져 있다.
     const isTrialReq = typeof request.message === 'string' && request.message.startsWith('[무료체험]');
     if (isTrialReq) {
-      await grantBasicTrial(request.company_id);
+      await grantFreeTrial(request.company_id);
     } else {
       // ★ CT-17: 요금제 승인 시 TRIAL plan이면 'trial' 유지, 그 외는 'paid'(정식 구독).
       //   (과거: 무조건 'active'로 덮어써서 ① 체험 상태 파괴 ② companies.status='active'와 네이밍 충돌)

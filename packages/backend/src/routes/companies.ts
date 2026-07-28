@@ -8,7 +8,7 @@ import { getCardDef, isDynamicCardId, parseDynamicCardId, type ParsedDynamicCard
 import { getStoreScope } from '../utils/store-scope';
 import { getOpt080Number } from '../utils/messageUtils';
 import { normalizeOpt080Input } from '../utils/normalize';
-import { grantBasicTrial, isTrialApplyOpen } from '../utils/basic-trial';
+import { grantFreeTrial, isTrialApplyOpen } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
 import { parseAgentLedgerFields, parseAgentLedgerPatch, getAgentCustNameMap } from '../utils/pay-stats';
@@ -1889,8 +1889,15 @@ router.post('/:id/grant-basic-trial', requireUuidId, requireSuperAdmin, async (r
     const days = Math.max(1, Math.min(Number((req.body as any)?.days) || 30, 365));
     const exists = await query(`SELECT id FROM companies WHERE id = $1`, [id]);
     if (exists.rows.length === 0) return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
-    const company = await grantBasicTrial(id, days);
-    return res.json({ success: true, message: `${days}일 BASIC 무료체험이 부여되었습니다.`, company });
+    const company = await grantFreeTrial(id, days);
+    return res.json({
+      success: true,
+      // ★ 2026-07-28 연장이면 문구를 바꾼다 — 같은 버튼이 두 가지 일을 하므로 결과를 구분해 알린다.
+      message: company?.extended
+        ? `무료체험 ${days}일이 추가되었습니다. (남은 기간에 더해집니다)`
+        : `${days}일 무료체험이 부여되었습니다.`,
+      company,
+    });
   } catch (err: any) {
     console.error('grant-basic-trial 실패:', err);
     return res.status(500).json({ error: err?.message || 'BASIC 무료체험 부여 실패' });

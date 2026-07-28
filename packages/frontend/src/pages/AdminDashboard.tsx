@@ -2578,9 +2578,13 @@ const handleApproveRequest = async (id: string) => {
   //   plan=BASIC + base 크레딧(750) 30일 → trial-downgrade-worker가 30일 후 FREE 자동 강등.
   const handleGrantBasicTrial = () => {
     if (!editCompany.id) return;
+    // ★ 2026-07-28 같은 버튼이 신규 부여와 추가 부여(연장) 두 가지를 한다 — 문구로 구분한다.
+    const isExtending = editCompany.subscriptionStatus === 'trial';
     showConfirm(
-      'BASIC 1개월 무료체험 부여',
-      `"${editCompany.companyName}" 에 베이직 1개월 무료체험을 부여할까요?\n\n· 베이직 플랜 + 베이직 크레딧(750) 1개월 개방\n· 30일 후 자동으로 미가입(FREE)으로 강등`,
+      isExtending ? '무료체험 1개월 추가 부여' : '무료체험 1개월 부여',
+      isExtending
+        ? `"${editCompany.companyName}" 의 무료체험을 1개월 더 연장할까요?\n\n· 남은 기간에 30일이 더해집니다\n· 크레딧은 다시 채우지 않습니다(중복 지급 방지)`
+        : `"${editCompany.companyName}" 에 1개월 무료체험을 부여할까요?\n\n· 베이직과 같은 기능 + 크레딧 1개월 개방 (요금 0원)\n· 30일 후 자동으로 미가입(FREE)으로 강등`,
       async () => {
         try {
           const token = localStorage.getItem('token');
@@ -2597,7 +2601,7 @@ const handleApproveRequest = async (id: string) => {
               subscriptionStatus: data.company.subscription_status || 'trial',
               trialExpiresAt: data.company.trial_expires_at || '',
               planId: data.company.plan_id || prev.planId,
-              planCode: data.company.plan_code || 'BASIC',
+              planCode: data.company.plan_code || 'TRIAL',
             }));
           }
           showAlert('성공', data.message || 'BASIC 무료체험이 부여되었습니다.', 'success');
@@ -6510,7 +6514,7 @@ const handleApproveRequest = async (id: string) => {
                   <div className="col-span-2 rounded-lg border border-violet-200 bg-violet-50/40 p-3">
                     <div className="flex items-center justify-between gap-3 flex-wrap">
                       <div>
-                        <p className="text-sm font-semibold text-violet-900">BASIC 1개월 무료체험</p>
+                        <p className="text-sm font-semibold text-violet-900">무료체험 (베이직과 같은 기능 · 요금 0원)</p>
                         {editCompany.subscriptionStatus === 'trial' && editCompany.trialExpiresAt ? (
                           <p className="text-xs text-violet-700 mt-0.5">
                             체험 중 — 만료: <b>{new Date(editCompany.trialExpiresAt).toLocaleString('ko-KR')}</b>
@@ -6518,7 +6522,7 @@ const handleApproveRequest = async (id: string) => {
                             (D-{Math.max(0, Math.ceil((new Date(editCompany.trialExpiresAt).getTime() - Date.now()) / 86400000))})
                           </p>
                         ) : (
-                          <p className="text-xs text-violet-600 mt-0.5">체험 미부여 상태. 부여 시 베이직 플랜 + 베이직 크레딧(750) 1개월 개방, 30일 후 자동 미가입(FREE) 강등.</p>
+                          <p className="text-xs text-violet-600 mt-0.5">체험 미부여 상태. 부여 시 무료체험 요금제(베이직과 같은 기능·크레딧, 요금 0원) 1개월 개방, 30일 후 자동 미가입(FREE) 강등.</p>
                         )}
                       </div>
                       <div className="flex gap-2">
@@ -6527,7 +6531,7 @@ const handleApproveRequest = async (id: string) => {
                           onClick={handleGrantBasicTrial}
                           className="px-3 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-semibold"
                         >
-                          BASIC 1개월 체험 부여
+                          {editCompany.subscriptionStatus === 'trial' ? '1개월 추가 부여' : '1개월 체험 부여'}
                         </button>
                         {editCompany.subscriptionStatus === 'trial' && (
                           <button

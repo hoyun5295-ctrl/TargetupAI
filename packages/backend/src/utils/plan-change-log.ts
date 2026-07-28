@@ -135,6 +135,35 @@ export async function recordPlanChange(params: RecordPlanChangeParams): Promise<
     ? classifyPlanChange(prev ? Number(prev.to_monthly_price) : null, Number(to.monthly_price) || 0)
     : params.changeType;
 
+  // ★ 2026-07-28 `changed_by`는 users FK인데 **슈퍼관리자는 `super_admins`에 산다**(auth.ts 로그인 분기).
+  //   그 id를 그대로 넣으면 23503(FK 위반)으로 이 트랜잭션이 통째로 죽고, 호출부가 하려던
+  //   요금제 변경 자체가 막힌다 — 실제로 슈퍼관리자가 요금제를 바꿀 때마다 "회사 수정 실패"가 났다.
+  //   두 테이블을 한 FK 컬럼으로 가리킬 수 없으므로, users에 있는 id만 컬럼에 넣는다.
+  //   ⚠ 실행자를 그냥 버리면 안 된다 — 이 이력은 청구 금액의 근거이고, 요금제 변경은
+  //     audit_logs에도 안 남는다(그쪽은 라인그룹 변경만 기록). 그래서 `reason`에 보존한다.
+  //   존재 확인과 슈퍼관리자 이름 조회를 한 번의 왕복으로 끝낸다(같은 파라미터를 양쪽 다 ::uuid로 —
+  //   타입 문맥을 섞으면 42P08이 난다, D162).
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  let changedByParam: string | null = changedBy || null;
+  let actorNote = '';
+  if (changedByParam && UUID_RE.test(changedByParam)) {
+    const actor = await client.query(
+      `SELECT EXISTS(SELECT 1 FROM users WHERE id = $1::uuid) AS in_users,
+              (SELECT login_id FROM super_admins WHERE id = $1::uuid) AS super_login`,
+      [changedByParam],
+    );
+    if (!actor.rows[0]?.in_users) {
+      const who = actor.rows[0]?.super_login ? `슈퍼관리자 ${actor.rows[0].super_login}` : `id ${changedByParam}`;
+      actorNote = ` [실행자: ${who}]`;
+      changedByParam = null;
+    }
+  } else if (changedByParam) {
+    // uuid 형식이 아니면 캐스팅에서 죽으므로 컬럼에 넣지 않는다.
+    actorNote = ` [실행자: ${changedByParam}]`;
+    changedByParam = null;
+  }
+  const reasonWithActor = `${reason || ''}${actorNote}`.trim() || null;
+
   await client.query(
     `INSERT INTO company_plan_changes (
        company_id, from_plan_id, to_plan_id, from_plan_code, to_plan_code,
@@ -150,8 +179,8 @@ export async function recordPlanChange(params: RecordPlanChangeParams): Promise<
       to.monthly_price,
       effectiveDate,
       changeType,
-      changedBy || null,
-      reason || null,
+      changedByParam,
+      reasonWithActor,
     ],
   );
 
