@@ -23,52 +23,14 @@ import { floorWon } from './money';
 import { mapWithConcurrency } from './concurrency';
 import { normalizeUnitPriceBasis, toSupplyPrice, type UnitPriceBasis } from './unit-price';
 import type { PlanSegment } from './plan-proration';
+import {
+  BILLING_TYPES, BRAND_CHANNEL_SQL_IN,
+  type BillingTypeDef, type AgentPriceColumn, type AgentUnitPriceRow,
+} from './billing-types';
 
-// ============================================================
-//  ★ 청구 유형 축의 단일 정의 (2026-07-29 신설)
-//
-//  유형키·표시명·단가컬럼·큐 코드가 이 파일 안에서만 **7군데에 복제**돼 있었다.
-//  하나를 빠뜨리면 그 유형이 조용히 0원이 되거나 발행이 막힌다 —
-//  2026-07-25 `M`·`L` 미변환으로 청구 합산에서 통째로 빠진 사고가 정확히 그 부류다.
-//  아래 표에만 추가하면 매핑·초기값·라벨·순서·단가컬럼이 전부 따라온다.
-//  ⚠ 표의 **순서가 곧 청구서 항목 순서**다. 중간에 끼워 넣으면 인쇄 순서가 바뀐다.
-// ============================================================
-
-/**
- * 발송ID 단가 컬럼명 — `AgentUnitPriceRow`의 `cost_per_*` 키만 뽑는다.
- *
- * ★ 단순 `string`으로 두면 오타가 tsc를 통과하고, 잘못된 컬럼 조회는 `undefined`가 되어
- *   성공 발송이 통째로 `missingAgentPrices`로 분류돼 **발행이 차단된다**(Codex 적대검증 수용).
- *   `keyof AgentUnitPriceRow`만으로는 `id`·`agent_send_id`까지 통과하므로 접두로 좁힌다.
- *   컬럼을 추가할 땐 `AgentUnitPriceRow`에 넣으면 여기가 자동으로 넓어진다 — 목록을 두 벌 두지 않는다.
- */
-export type AgentPriceColumn = Extract<keyof AgentUnitPriceRow, `cost_per_${string}`>;
-
-export interface BillingTypeDef {
-  /** 청구 유형키 — `billing_items.message_type`에 그대로 들어간다 */
-  key: string;
-  /** 사용자 표시명 (엑셀·청구서). 웹·에이전트가 같은 이름을 써야 피벗이 갈라지지 않는다 */
-  label: string;
-  /** 발송ID 단가 컬럼(`company_agent_ids`). null = 에이전트 축에 없는 유형(테스트·스팸) */
-  agentPriceColumn: AgentPriceColumn | null;
-  /** SMSQ `msg_type`(웹 일반발송 큐). null = 그 큐로 나가지 않는 유형 */
-  smsqCode: string | null;
-  /** 게이트웨이 `RSRM_SalesStts.MsgType`(에이전트). null = 에이전트 발송이 없는 유형 */
-  agentCode: string | null;
-}
-
-export const BILLING_TYPES: readonly BillingTypeDef[] = [
-  { key: 'SMS',      label: 'SMS',           agentPriceColumn: 'cost_per_sms',   smsqCode: 'S',  agentCode: 'S' },
-  { key: 'LMS',      label: 'LMS',           agentPriceColumn: 'cost_per_lms',   smsqCode: 'L',  agentCode: 'L' },
-  { key: 'MMS',      label: 'MMS',           agentPriceColumn: 'cost_per_mms',   smsqCode: 'M',  agentCode: 'M' },
-  // ★ 2026-07-25 '카카오' → '카카오알림톡'. 같은 엑셀의 에이전트 행이 '카카오알림톡'이라
-  //   한 '유형' 컬럼에 알림톡이 두 이름으로 갈리면 피벗에서 두 줄이 되어 정산 대조가 깨진다.
-  { key: 'KAKAO',    label: '카카오알림톡',    agentPriceColumn: 'cost_per_kakao', smsqCode: 'K',  agentCode: 'K' },
-  { key: 'TEST_SMS', label: '테스트 SMS',     agentPriceColumn: null,             smsqCode: null, agentCode: null },
-  { key: 'TEST_LMS', label: '테스트 LMS',     agentPriceColumn: null,             smsqCode: null, agentCode: null },
-  { key: 'SPAM_SMS', label: '스팸테스트 SMS', agentPriceColumn: null,             smsqCode: null, agentCode: null },
-  { key: 'SPAM_LMS', label: '스팸테스트 LMS', agentPriceColumn: null,             smsqCode: null, agentCode: null },
-];
+// 축 정의는 `billing-types.ts`(순수)로 옮겼다. 소비처가 이 모듈에서 가져다 쓰던 이름은 그대로 둔다.
+export { BILLING_TYPES };
+export type { BillingTypeDef, AgentPriceColumn, AgentUnitPriceRow };
 
 /** SMSQ msg_type → 청구 유형키. 변환 누락 = 그 유형이 청구 합산에서 통째로 빠진다. */
 export const MSG_TYPE_TO_USAGE_KEY: Record<string, string> = Object.fromEntries(
@@ -130,6 +92,8 @@ export function resolveBillingUnitPricesDetailed(co: any): { prices: Record<stri
   const lmsRaw = supply(co?.cost_per_lms);
   const mmsRaw = supply(co?.cost_per_mms);
   const kakaoRaw = supply(co?.cost_per_kakao);
+  // ★ 2026-07-29 브랜드메시지 — 알림톡과 다른 단가다. 그 전에는 브랜드 발송이 KAKAO 단가로 청구됐다.
+  const brandRaw = supply(co?.cost_per_brand);
   const testSmsRaw = supply(co?.cost_per_test_sms);
   const testLmsRaw = supply(co?.cost_per_test_lms);
 
@@ -140,6 +104,7 @@ export function resolveBillingUnitPricesDetailed(co: any): { prices: Record<stri
     LMS: lms,
     MMS: mmsRaw ?? 0,
     KAKAO: kakaoRaw ?? 0,
+    BRAND: brandRaw ?? 0,
     TEST_SMS: testSmsRaw ?? sms,
     TEST_LMS: testLmsRaw ?? lms,
     SPAM_SMS: sms,
@@ -151,6 +116,8 @@ export function resolveBillingUnitPricesDetailed(co: any): { prices: Record<stri
   if (lmsRaw === null) unsetKeys.push('LMS');
   if (mmsRaw === null) unsetKeys.push('MMS');
   if (kakaoRaw === null) unsetKeys.push('KAKAO');
+  // 브랜드 단가는 알림톡을 상속하지 않는다 — 상속시키면 미설정이 조용히 알림톡 단가로 청구된다.
+  if (brandRaw === null) unsetKeys.push('BRAND');
   if (testSmsRaw === null && smsRaw === null) unsetKeys.push('TEST_SMS');
   if (testLmsRaw === null && lmsRaw === null) unsetKeys.push('TEST_LMS');
   if (smsRaw === null) unsetKeys.push('SPAM_SMS');
@@ -656,7 +623,7 @@ export async function buildCompanyUsageByDay(opts: {
        FROM campaign_runs cr
        JOIN campaigns c ON c.id = cr.campaign_id
        WHERE cr.id = ANY($1::uuid[])
-         AND (c.send_channel = 'kakao' OR c.send_channel = 'both')`,
+         AND c.send_channel IN (${BRAND_CHANNEL_SQL_IN})`,
       [runIds]
     );
     const kakaoCampaignIds = campaignIdsResult.rows.map((r: any) => r.campaign_id);
@@ -676,7 +643,9 @@ export async function buildCompanyUsageByDay(opts: {
         `캠페인 브랜드메시지 ${kakaoCampaignIds.length}건`
       );
       (kakaoRows as any[]).forEach((row: any) => {
-        bump(dayData, toDayKey(row.send_date), 'KAKAO', {
+        // ★ 2026-07-29 이 arm은 IMC_BM_FREE_BIZ_MSG(브랜드메시지 전용 테이블)를 읽는다.
+        //   소스는 원래 알림톡과 갈라져 있었는데 유형키만 KAKAO로 합쳐 넣어 단가가 뭉쳐 있었다.
+        bump(dayData, toDayKey(row.send_date), 'BRAND', {
           total: row.total_count, success: row.success_count, fail: row.fail_count, pending: row.pending_count,
         });
       });
@@ -695,7 +664,7 @@ export async function buildCompanyUsageByDay(opts: {
       `SELECT id FROM campaigns
        WHERE company_id = $1
          AND send_type = 'manual'
-         AND (send_channel = 'kakao' OR send_channel = 'both')
+         AND send_channel IN (${BRAND_CHANNEL_SQL_IN})
          AND sent_at >= ${kstStart('$2')}
          AND sent_at < ${kstEnd('$3')}${dkUserWhere}`,
       dkParams
@@ -716,7 +685,9 @@ export async function buildCompanyUsageByDay(opts: {
         `직접발송 브랜드메시지 ${directKakaoIds.length}건`
       );
       (dkRows as any[]).forEach((row: any) => {
-        bump(dayData, toDayKey(row.send_date), 'KAKAO', {
+        // ★ 2026-07-29 이 arm은 IMC_BM_FREE_BIZ_MSG(브랜드메시지 전용 테이블)를 읽는다.
+        //   소스는 원래 알림톡과 갈라져 있었는데 유형키만 KAKAO로 합쳐 넣어 단가가 뭉쳐 있었다.
+        bump(dayData, toDayKey(row.send_date), 'BRAND', {
           total: row.total_count, success: row.success_count, fail: row.fail_count, pending: row.pending_count,
         });
       });
@@ -1003,14 +974,7 @@ export function diffBillingRowsVsDayData(rows: BillingUsageRow[], dayData: Usage
 // ============================================================
 
 /** `company_agent_ids` 단가 행 — 발송ID별 단가는 회사 단가와 별개 축이다(2026-07-24 ALTER) */
-export interface AgentUnitPriceRow {
-  id: string;
-  agent_send_id: string;
-  cost_per_sms: any;
-  cost_per_lms: any;
-  cost_per_mms: any;
-  cost_per_kakao: any;
-}
+// AgentUnitPriceRow는 축 정의와 한 몸이라 billing-types.ts로 옮겼다(위에서 re-export).
 
 /** `billing_items` 한 행 — 청구 상세에 단가·금액과 FK가 붙은 상태 */
 export interface PricedBillingItem extends BillingUsageRow {
@@ -1432,7 +1396,9 @@ export async function buildBillingUsageRows(opts: {
       const day = toDayKey(row.send_date);
       const uid = owners.get(String(row.campaign_id)) ?? null;
       bumpRow(acc, {
-        channel: 'web', itemDate: day, typeKey: 'KAKAO', userId: uid, agentSendId: null,
+        // ★ 2026-07-29 일자축(bump)과 **같은 유형키**여야 한다. 한쪽만 바꾸면 축 대조가
+        //   BILLING_AXIS_MISMATCH로 발행을 막는다(적대검증에서 실제로 걸린 지점).
+        channel: 'web', itemDate: day, typeKey: 'BRAND', userId: uid, agentSendId: null,
         total: 0, success: 0, fail: 0, pending: 0,
       }, { total: row.total_count, success: row.success_count, fail: row.fail_count, pending: row.pending_count });
     }
@@ -1442,7 +1408,7 @@ export async function buildBillingUsageRows(opts: {
     const r = await pool.query(
       `SELECT DISTINCT c.id AS campaign_id, c.created_by
          FROM campaign_runs cr JOIN campaigns c ON c.id = cr.campaign_id
-        WHERE cr.id = ANY($1::uuid[]) AND (c.send_channel = 'kakao' OR c.send_channel = 'both')`,
+        WHERE cr.id = ANY($1::uuid[]) AND c.send_channel IN (${BRAND_CHANNEL_SQL_IN})`,
       [runIds],
     );
     const owners = new Map<string, string | null>();
@@ -1467,7 +1433,7 @@ export async function buildBillingUsageRows(opts: {
     const r = await pool.query(
       `SELECT id, created_by FROM campaigns
         WHERE company_id = $1 AND send_type = 'manual'
-          AND (send_channel = 'kakao' OR send_channel = 'both')
+          AND send_channel IN (${BRAND_CHANNEL_SQL_IN})
           AND sent_at >= ${kstStart('$2')} AND sent_at < ${kstEnd('$3')}${dkUserWhere}`,
       dkParams,
     );

@@ -1575,6 +1575,7 @@
 |------|------|------|
 | id | uuid PK | |
 | company_id | uuid FK | 고객사 |
+| billing_id | uuid NULL | ★2026-07-29 information_schema 실측 등재(그 전엔 미등재인데 코드가 쓰고 있었다). 연결된 `billings` 행. **공급받는자 사업자 3단 판정에서 계정 축(`billings.user_id`)을 따라가는 통로** — 이게 없으면 같은 건인데 정산서와 거래내역서가 다른 사업자를 인쇄한다. nullable이라 반드시 LEFT JOIN |
 | store_code | varchar(50) | 브랜드별 정산 시 매장코드 |
 | store_name | varchar(100) | 브랜드별 정산 시 매장명 |
 | billing_start | date | 정산 시작일 |

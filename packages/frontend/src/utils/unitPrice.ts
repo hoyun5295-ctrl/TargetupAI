@@ -57,6 +57,7 @@ export function toSupplyInputs(company: Record<string, any> | null | undefined) 
     costPerLms: conv(company?.cost_per_lms),
     costPerMms: conv(company?.cost_per_mms),
     costPerKakao: conv(company?.cost_per_kakao),
+    costPerBrand: conv(company?.cost_per_brand),
     costPerTestSms: conv(company?.cost_per_test_sms),
     costPerTestLms: conv(company?.cost_per_test_lms),
   };

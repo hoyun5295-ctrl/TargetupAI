@@ -102,9 +102,9 @@ describe('MSG_TYPE_TO_USAGE_KEY — SMSQ 유형코드 → 청구 유형키 (2026
 describe('buildBillingTotals — 청구 수량 합산 (2026-07-25)', () => {
   const day = (t: number, s: number, f = 0, p = 0) => ({ total: t, success: s, fail: f, pending: p });
 
-  it('빈 입력 — 8개 유형키가 전부 0으로 존재한다', () => {
+  it('빈 입력 — 9개 유형키가 전부 0으로 존재한다', () => {
     const t = buildBillingTotals({});
-    expect(t).toEqual({ SMS: 0, LMS: 0, MMS: 0, KAKAO: 0, TEST_SMS: 0, TEST_LMS: 0, SPAM_SMS: 0, SPAM_LMS: 0 });
+    expect(t).toEqual({ SMS: 0, LMS: 0, MMS: 0, KAKAO: 0, BRAND: 0, TEST_SMS: 0, TEST_LMS: 0, SPAM_SMS: 0, SPAM_LMS: 0 });
     expect(buildBillingTotals(undefined as any).SMS).toBe(0);
   });
 
@@ -512,29 +512,38 @@ describe('billingRowKey — 구분자 충돌 차단 (2026-07-26)', () => {
 describe('resolveBillingUnitPricesDetailed — 미설정 유형키 색출 (2026-07-26)', () => {
   it('전부 설정돼 있으면 미설정 없음', () => {
     const { unsetKeys } = resolveBillingUnitPricesDetailed({
-      cost_per_sms: 9, cost_per_lms: 27, cost_per_mms: 90, cost_per_kakao: 8,
+      cost_per_sms: 9, cost_per_lms: 27, cost_per_mms: 90, cost_per_kakao: 8, cost_per_brand: 12,
     });
     expect(unsetKeys).toEqual([]);
   });
 
   it('MMS만 비면 MMS만 잡힌다', () => {
     const { prices, unsetKeys } = resolveBillingUnitPricesDetailed({
-      cost_per_sms: 9, cost_per_lms: 27, cost_per_mms: null, cost_per_kakao: 8,
+      cost_per_sms: 9, cost_per_lms: 27, cost_per_mms: null, cost_per_kakao: 8, cost_per_brand: 12,
     });
     expect(unsetKeys).toEqual(['MMS']);
     expect(prices.MMS).toBe(0); // 값은 기존과 같다 — 막는 건 게이트 쪽
   });
 
+  // ★ 2026-07-29 브랜드메시지는 알림톡과 다른 단가다. 상속시키면 미설정이 조용히 알림톡 단가로 청구된다.
+  it('브랜드 단가만 비면 BRAND만 잡힌다 — 알림톡을 상속하지 않는다', () => {
+    const { prices, unsetKeys } = resolveBillingUnitPricesDetailed({
+      cost_per_sms: 9, cost_per_lms: 27, cost_per_mms: 90, cost_per_kakao: 8, cost_per_brand: null,
+    });
+    expect(unsetKeys).toEqual(['BRAND']);
+    expect(prices.BRAND).toBe(0);   // 알림톡 8원이 새어 들어오면 안 된다
+  });
+
   it('명시적 0원은 미설정이 아니다', () => {
     const { unsetKeys } = resolveBillingUnitPricesDetailed({
-      cost_per_sms: 0, cost_per_lms: '0.00', cost_per_mms: 0, cost_per_kakao: 0,
+      cost_per_sms: 0, cost_per_lms: '0.00', cost_per_mms: 0, cost_per_kakao: 0, cost_per_brand: 0,
     });
     expect(unsetKeys).toEqual([]);
   });
 
   it('테스트 단가는 상속이 살아 있으면 미설정이 아니다 — 상속은 설계된 동작', () => {
     const { unsetKeys } = resolveBillingUnitPricesDetailed({
-      cost_per_sms: 9, cost_per_lms: 27, cost_per_mms: 90, cost_per_kakao: 8,
+      cost_per_sms: 9, cost_per_lms: 27, cost_per_mms: 90, cost_per_kakao: 8, cost_per_brand: 12,
       cost_per_test_sms: null, cost_per_test_lms: null,
     });
     expect(unsetKeys).toEqual([]);
@@ -542,7 +551,7 @@ describe('resolveBillingUnitPricesDetailed — 미설정 유형키 색출 (2026-
 
   it('자기도 비고 상속원도 비면 테스트·스팸까지 잡힌다', () => {
     const { unsetKeys } = resolveBillingUnitPricesDetailed({ cost_per_mms: 90, cost_per_kakao: 8 });
-    expect(unsetKeys).toEqual(['SMS', 'LMS', 'TEST_SMS', 'TEST_LMS', 'SPAM_SMS', 'SPAM_LMS']);
+    expect(unsetKeys).toEqual(['SMS', 'LMS', 'BRAND', 'TEST_SMS', 'TEST_LMS', 'SPAM_SMS', 'SPAM_LMS']);
   });
 
   it('기존 함수와 단가 값이 같다 — 시그니처 호환', () => {
@@ -649,10 +658,17 @@ describe('agentUsageKey — 에이전트 MsgType → 청구 유형키', () => {
   });
 
   it('모르는 코드는 원본 그대로 남는다 — 임의로 뭉치면 그 유형이 조용히 0원이 된다', () => {
-    // 실측 2026-07-26: G = 여미지(B0227) 7월 성공 42,833건. 단가 칸이 없어 미청구로 드러나야 한다.
-    expect(agentUsageKey('G')).toBe('G');
+    // ★ 2026-07-29 G(브랜드메시지)는 이제 아는 코드다 — 단가 축과 함께 정식 등재됐다.
+    //   이 테스트의 취지는 "미지 코드를 기존 유형에 뭉치지 않는다"이므로 예시를 미등재 코드로 바꾼다.
     expect(agentUsageKey('KS')).toBe('KS');
     expect(agentUsageKey('X')).toBe('X');
+    expect(agentUsageKey('ZZ')).toBe('ZZ');
+  });
+
+  it('G는 브랜드메시지로 변환된다 — 미등재 시절엔 발행이 통째로 차단됐다', () => {
+    // 실측 2026-07-26: G = 여미지(B0227) 7월 성공 42,833건.
+    expect(agentUsageKey('G')).toBe('BRAND');
+    expect(agentUsageKey(' g ')).toBe('BRAND');
   });
 
   it('빈 값은 (유형 미상)', () => {
@@ -661,8 +677,8 @@ describe('agentUsageKey — 에이전트 MsgType → 청구 유형키', () => {
     expect(agentUsageKey(undefined)).toBe('(유형 미상)');
   });
 
-  it('변환표에는 청구 단가가 있는 4종만 있다', () => {
-    expect(Object.keys(AGENT_MSG_TYPE_TO_USAGE_KEY).sort()).toEqual(['K', 'L', 'M', 'S']);
+  it('변환표에는 청구 단가가 있는 5종만 있다', () => {
+    expect(Object.keys(AGENT_MSG_TYPE_TO_USAGE_KEY).sort()).toEqual(['G', 'K', 'L', 'M', 'S']);
   });
 });
 

@@ -15,6 +15,7 @@
  */
 
 import { shiftDayKey } from './plan-proration';
+import { BILLING_TYPES } from './billing-types';
 
 /** 청구서 항목 한 줄 */
 export interface InvoiceLine {
@@ -42,14 +43,20 @@ const CHANNEL_LABEL: Record<string, string> = {
   web: '', agent: '에이전트 ', test: '', spam: '',
 };
 
+/**
+ * 항목명 — 유형 축(`billing-types.ts`)의 표시명을 그대로 쓰고, **이 문서에서만 다른 문구만** 덮어쓴다.
+ *
+ * ★ 2026-07-29 그 전에는 여기에 유형 목록이 통째로 복제돼 있었다(순서 배열까지 둘째 복제).
+ *   유형을 늘릴 때 이 파일을 잊으면 청구서에서 그 줄의 항목명이 비고 정렬이 맨 뒤로 밀린다.
+ *   축에서 파생하면 잊을 수가 없다. 스팸 문구만 인쇄물 유지를 위해 예외로 남긴다.
+ */
 const TYPE_LABEL: Record<string, string> = {
-  SMS: 'SMS', LMS: 'LMS', MMS: 'MMS', KAKAO: '카카오알림톡',
-  TEST_SMS: '테스트 SMS', TEST_LMS: '테스트 LMS',
+  ...Object.fromEntries(BILLING_TYPES.map((t) => [t.key, t.label])),
   SPAM_SMS: '스팸필터 SMS', SPAM_LMS: '스팸필터 LMS',
 };
 
 const CHANNEL_ORDER = ['plan', 'web', 'agent', 'test', 'spam'];
-const TYPE_ORDER = ['SMS', 'LMS', 'MMS', 'KAKAO', 'TEST_SMS', 'TEST_LMS', 'SPAM_SMS', 'SPAM_LMS'];
+const TYPE_ORDER = BILLING_TYPES.map((t) => t.key);
 
 /**
  * 항목명.

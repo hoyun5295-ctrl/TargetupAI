@@ -29,6 +29,9 @@ import {
   bulkInsertSmsQueue, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType, insertTestSmsQueue
 } from '../utils/sms-queue';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
+// ★ 2026-07-29 브랜드메시지 판정은 CT 하나에서만 한다 — 채널 리터럴을 라우트에 다시 적으면
+//   집계(일자·상세)와 차감·환불이 서로 다른 기준을 갖게 되고, 그 차이가 곧 미청구나 발행 차단이다.
+import { isBrandOnlyChannel } from '../utils/billing-types';
 import { markRefundPending } from '../utils/refund-pending';
 import { normalizeMmsImagePaths, type MmsImageItem } from '../utils/mms-image-util';
 import { validateMmsPayload } from '../utils/mms-validator';
@@ -818,7 +821,7 @@ if (sendChannel === 'kakao' || sendChannel === 'both') {
   }
 }
 
-const deductType = sendChannel === 'kakao' ? 'KAKAO' : campaign.message_type;
+const deductType = isBrandOnlyChannel(sendChannel) ? 'BRAND' : campaign.message_type;
 const sendDeduct = await prepaidDeduct(companyId, filteredCustomers.length, deductType, id, userId);
 if (!sendDeduct.ok) {
   return res.status(402).json({
@@ -827,6 +830,32 @@ if (!sendDeduct.ok) {
     balance: sendDeduct.balance,
     requiredAmount: sendDeduct.amount
   });
+}
+
+// ★ 2026-07-29 `both`는 **같은 수신자를 두 큐에 적재한다** — 아래 발송 단계가
+//   bulkInsertSmsQueue(문자)와 insertKakaoQueue(브랜드) 양쪽에 넣는다.
+//   그런데 차감은 위 한 번뿐이라 브랜드 발송분이 통째로 무료로 나가고 있었다(적대검증 실측).
+//   두 축 모두 차감하고, 뒤가 실패하면 **앞선 차감을 되돌린다** — 한쪽만 깎인 채로 발송하면
+//   그 캠페인의 회계가 영구히 어긋나고 환불 sweeper도 짝을 못 찾는다.
+if (sendChannel === 'both') {
+  const brandDeduct = await prepaidDeduct(companyId, filteredCustomers.length, 'BRAND', id, userId);
+  if (!brandDeduct.ok) {
+    try {
+      await prepaidRefund(
+        companyId, filteredCustomers.length, deductType, id,
+        '브랜드메시지 차감 실패로 문자 차감분 회수', 'campaign', { refundKey: REFUND_KEYS.CANCEL },
+      );
+    } catch (revertErr) {
+      // 회수까지 실패하면 잔액이 깎인 채 발송이 멈춘다 — 로그로 드러내 사람이 처리하게 한다.
+      console.error(`[선불][both 보상실패] campaign=${id} ${deductType} ${filteredCustomers.length}건 회수 실패:`, revertErr);
+    }
+    return res.status(402).json({
+      error: brandDeduct.error,
+      insufficientBalance: true,
+      balance: brandDeduct.balance,
+      requiredAmount: brandDeduct.amount,
+    });
+  }
 }
 
 // ★ D72 성능개선: 건건이 INSERT → sms-queue.ts 컨트롤타워 bulkInsertSmsQueue 사용
@@ -1852,7 +1881,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     const campaignId = campaignResult.rows[0].id;
 
     // ★ 선불 잔액 체크 + 차감
-    const directDeductType = directChannel === 'kakao' ? 'KAKAO' : msgType;
+    const directDeductType = isBrandOnlyChannel(directChannel) ? 'BRAND' : msgType;
     const directDeduct = await prepaidDeduct(companyId, filteredRecipients.length, directDeductType, campaignId, userId);
     if (!directDeduct.ok) {
       // 캠페인 레코드 롤백
@@ -1864,6 +1893,32 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         balance: directDeduct.balance,
         requiredAmount: directDeduct.amount
       });
+    }
+
+    // ★ 2026-07-29 캠페인 발송과 같은 구멍이 직접발송에도 있었다 — `both`는 아래에서
+    //   bulkInsertSmsQueue(문자)와 insertKakaoQueue(브랜드) 양쪽에 같은 수신자를 적재하는데
+    //   차감은 위 한 번뿐이라 브랜드 발송분이 무료로 나갔다. 두 축 모두 차감하고, 뒤가 실패하면
+    //   앞선 차감과 캠페인 레코드를 함께 되돌린다(한쪽만 깎인 채로 남기지 않는다).
+    if (directChannel === 'both') {
+      const brandDeduct = await prepaidDeduct(companyId, filteredRecipients.length, 'BRAND', campaignId, userId);
+      if (!brandDeduct.ok) {
+        try {
+          await prepaidRefund(
+            companyId, filteredRecipients.length, directDeductType, campaignId,
+            '브랜드메시지 차감 실패로 문자 차감분 회수', 'campaign', { refundKey: REFUND_KEYS.CANCEL },
+          );
+        } catch (revertErr) {
+          console.error(`[선불][직접발송 both 보상실패] campaign=${campaignId} ${directDeductType} ${filteredRecipients.length}건 회수 실패:`, revertErr);
+        }
+        await query('DELETE FROM campaigns WHERE id = $1', [campaignId]);
+        return res.status(402).json({
+          success: false,
+          error: brandDeduct.error,
+          insufficientBalance: true,
+          balance: brandDeduct.balance,
+          requiredAmount: brandDeduct.amount,
+        });
+      }
     }
 
     // ★ C1: 채널별 발송 성공 건수 추적 (선별적 환불 계산용)
@@ -2019,7 +2074,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       if (smsFailCount > 0) {
         console.warn(`[직접발송] SMS 부분 실패 — 성공: ${directSmsSentCount}, 실패: ${smsFailCount} → 실패분 환불`);
         try {
-          const smsDeductType = directChannel === 'kakao' ? 'KAKAO' : msgType;
+          const smsDeductType = isBrandOnlyChannel(directChannel) ? 'BRAND' : msgType;
           // 대상 − 큐 적재 성공 = 미적재(게이트웨이 실패가 아니다) — B-0727-2
           await prepaidRefund(companyId, smsFailCount, smsDeductType, campaignId, `직접발송 SMS 미적재 ${smsFailCount}건 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
         } catch (refundErr) {
@@ -2033,7 +2088,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       if (kakaoFailCount > 0) {
         console.warn(`[직접발송] 카카오 부분 실패 — 성공: ${directKakaoSentCount}, 실패: ${kakaoFailCount} → 실패분 환불`);
         try {
-          await prepaidRefund(companyId, kakaoFailCount, 'KAKAO', campaignId, `직접발송 카카오 미적재 ${kakaoFailCount}건 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
+          await prepaidRefund(companyId, kakaoFailCount, 'BRAND', campaignId, `직접발송 브랜드메시지 미적재 ${kakaoFailCount}건 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
         } catch (refundErr) {
           console.error('[직접발송] 카카오 부분 실패 환불 오류:', refundErr);
         }

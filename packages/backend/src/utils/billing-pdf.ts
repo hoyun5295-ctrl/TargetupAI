@@ -21,6 +21,7 @@ import { toDayKey } from './send-usage-aggregation';
 import { buildInvoiceLines } from './billing-invoice-lines';
 import { floorWon } from './money';
 import pool from '../config/database';
+import { pickTaxbillParty } from './billing-settings';
 import { randomBytes } from 'node:crypto';
 
 export interface BillingStatementData { bil: any; items: any[]; }
@@ -34,13 +35,31 @@ export interface BillingStatementData { bil: any; items: any[]; }
 export async function loadBillingStatementData(billingId: string, db: any = pool): Promise<BillingStatementData | null> {
   // 1) 정산 + 회사 정보
   const result = await db.query(
+    // ★ 2026-07-29 공급받는자 사업자를 3단(계정 → 회사 → companies)으로 읽는다.
+    //   그 전에는 `companies`만 봐서 정산 탭에 등록한 사업자가 인쇄물에 반영되지 않았다.
+    //   단계 선택은 `pickTaxbillParty`(순수)가 하고 여기서는 **후보를 접두로 구분해 내려주기만** 한다 —
+    //   SQL에서 COALESCE로 섞으면 상호와 대표자가 다른 사업자에서 조합된다.
     `SELECT b.*, c.company_name, c.business_number, c.ceo_name, c.address,
             c.contact_name, c.contact_phone, c.contact_email,
             c.business_type, c.business_category,
-            u.name as user_name
+            u.name as user_name,
+            bca.taxbill_company_name AS acct_taxbill_company_name,
+            bca.taxbill_biz_number   AS acct_taxbill_biz_number,
+            bca.taxbill_ceo_name     AS acct_taxbill_ceo_name,
+            bca.taxbill_address      AS acct_taxbill_address,
+            bca.taxbill_biz_type     AS acct_taxbill_biz_type,
+            bca.taxbill_biz_item     AS acct_taxbill_biz_item,
+            bcc.taxbill_company_name AS co_taxbill_company_name,
+            bcc.taxbill_biz_number   AS co_taxbill_biz_number,
+            bcc.taxbill_ceo_name     AS co_taxbill_ceo_name,
+            bcc.taxbill_address      AS co_taxbill_address,
+            bcc.taxbill_biz_type     AS co_taxbill_biz_type,
+            bcc.taxbill_biz_item     AS co_taxbill_biz_item
      FROM billings b
      JOIN companies c ON c.id = b.company_id
      LEFT JOIN users u ON u.id = b.user_id
+     LEFT JOIN billing_contacts bca ON bca.company_id = b.company_id AND bca.user_id = b.user_id
+     LEFT JOIN billing_contacts bcc ON bcc.company_id = b.company_id AND bcc.user_id IS NULL
      WHERE b.id = $1`,
     [billingId]
   );
@@ -181,14 +200,16 @@ export async function renderBillingStatementPdf(bil: any, items: any[]): Promise
         { label: '연락처', value: `${INVITO_INFO.phone} / ${INVITO_INFO.email}` },
       ],
     });
+    // ★ 2026-07-29 계정 → 회사 → companies 3단에서 **묶음으로** 고른다(섞으면 유령 사업자가 찍힌다).
+    const party = pickTaxbillParty(bil);
     const rightBottom = drawPartyBlock(doc, {
       x: rightX, y: partyTop, width: 545 - rightX, title: '공급받는자', primary, dark, setFont,
       lines: [
-        { label: '상호', value: bil.company_name || '-' },
-        { label: '대표', value: bil.ceo_name || '-' },
-        { label: '사업자번호', value: bil.business_number || '-' },
-        { label: '업태/종목', value: `${bil.business_type || '-'} / ${bil.business_category || '-'}` },
-        { label: '주소', value: bil.address || '-' },
+        { label: '상호', value: party.companyName || '-' },
+        { label: '대표', value: party.ceoName || '-' },
+        { label: '사업자번호', value: party.bizNumber || '-' },
+        { label: '업태/종목', value: `${party.bizType || '-'} / ${party.bizItem || '-'}` },
+        { label: '주소', value: party.address || '-' },
         { label: '연락처', value: `${bil.contact_phone || '-'} / ${bil.contact_email || '-'}` },
       ],
     });
@@ -442,6 +463,46 @@ export async function renderBillingStatementPdf(bil: any, items: any[]): Promise
   return { pdfPath, displayFilename };
 }
 
+/**
+ * 거래내역서 PDF용 행 로더 (★ 2026-07-29 신설).
+ *
+ * 신설 사유: 다운로드 라우트와 메일 발송 라우트가 **각자 SELECT를 적고 있었다.**
+ *   메일 쪽은 사업자 필드를 아예 조회하지 않아, 같은 거래내역서인데 다운로드본에는 사업자가 찍히고
+ *   고객이 받는 발송본에는 `-`가 찍혔다. 대외 문서가 서로 다른 말을 하는 상태였다.
+ *   정산서(`loadBillingStatementData`)는 이미 단일 로더 구조다 — 거래내역서도 같게 만든다.
+ *   ⚠ 이 함수 밖에서 거래내역서 행을 새로 조회하지 않는다. 복사하면 다시 갈라진다.
+ */
+export async function loadInvoicePdfData(invoiceId: string, db: any = pool): Promise<any | null> {
+  const r = await db.query(
+    `SELECT bi.*, c.company_name, c.business_number, c.ceo_name, c.address,
+            c.contact_name, c.contact_phone, c.contact_email,
+            c.business_type, c.business_category,
+            bca.taxbill_company_name AS acct_taxbill_company_name,
+            bca.taxbill_biz_number   AS acct_taxbill_biz_number,
+            bca.taxbill_ceo_name     AS acct_taxbill_ceo_name,
+            bca.taxbill_address      AS acct_taxbill_address,
+            bca.taxbill_biz_type     AS acct_taxbill_biz_type,
+            bca.taxbill_biz_item     AS acct_taxbill_biz_item,
+            bcc.taxbill_company_name AS co_taxbill_company_name,
+            bcc.taxbill_biz_number   AS co_taxbill_biz_number,
+            bcc.taxbill_ceo_name     AS co_taxbill_ceo_name,
+            bcc.taxbill_address      AS co_taxbill_address,
+            bcc.taxbill_biz_type     AS co_taxbill_biz_type,
+            bcc.taxbill_biz_item     AS co_taxbill_biz_item
+       FROM billing_invoices bi
+       JOIN companies c ON c.id = bi.company_id
+       -- ★ 2026-07-29 연결된 정산의 **계정 축**까지 따라간다(billing_id는 nullable이라 LEFT JOIN).
+       --   이게 없으면 계정 사업자가 등록된 정산에서 정산서는 account를, 거래내역서는 회사/기본을 골라
+       --   같은 건에 대해 고객이 서로 다른 공급받는자를 받는다.
+       LEFT JOIN billings b ON b.id = bi.billing_id
+       LEFT JOIN billing_contacts bca ON bca.company_id = bi.company_id AND bca.user_id = b.user_id
+       LEFT JOIN billing_contacts bcc ON bcc.company_id = bi.company_id AND bcc.user_id IS NULL
+      WHERE bi.id = $1`,
+    [invoiceId],
+  );
+  return r.rows.length === 0 ? null : r.rows[0];
+}
+
 /** 거래내역서(Invoice) PDF. `inv` = billing_invoices + companies 조인 행. */
 export async function renderInvoicePdf(inv: any): Promise<RenderedPdf> {
     const PDFDocument = require('pdfkit');
@@ -502,14 +563,16 @@ export async function renderInvoicePdf(inv: any): Promise<RenderedPdf> {
         { label: '연락처', value: `${INVITO_INFO.phone} / ${INVITO_INFO.email}` },
       ],
     });
+    // ★ 2026-07-29 정산서와 같은 3단 판정 — 문서마다 다른 사업자가 찍히면 안 된다.
+    const invParty = pickTaxbillParty(inv);
     const invRightBottom = drawPartyBlock(doc, {
       x: rightX, y: invPartyTop, width: 545 - rightX, title: '공급받는자', primary, dark, setFont,
       lines: [
-        { label: '상호', value: inv.company_name || '-' },
-        { label: '대표', value: inv.ceo_name || '-' },
-        { label: '사업자번호', value: inv.business_number || '-' },
-        { label: '업태/종목', value: `${inv.business_type || '-'} / ${inv.business_category || '-'}` },
-        { label: '주소', value: inv.address || '-' },
+        { label: '상호', value: invParty.companyName || '-' },
+        { label: '대표', value: invParty.ceoName || '-' },
+        { label: '사업자번호', value: invParty.bizNumber || '-' },
+        { label: '업태/종목', value: `${invParty.bizType || '-'} / ${invParty.bizItem || '-'}` },
+        { label: '주소', value: invParty.address || '-' },
         { label: '연락처', value: `${inv.contact_phone || '-'} / ${inv.contact_email || '-'}` },
       ],
     });

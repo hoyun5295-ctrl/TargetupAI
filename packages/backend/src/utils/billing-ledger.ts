@@ -20,16 +20,15 @@
  */
 
 import pool from '../config/database';
+import { BILLING_TYPES, type AgentUnitPriceRow, type AgentPriceColumn } from './billing-types';
 
-/** `company_agent_ids` 한 행 — 발송ID별 선불여부와 단가는 회사 축과 완전히 독립이다(2026-07-24 ALTER). */
-export interface AgentLedgerRow {
-  id: string;
-  agent_send_id: string;
+/**
+ * `company_agent_ids` 한 행 — 발송ID별 선불여부와 단가는 회사 축과 완전히 독립이다(2026-07-24 ALTER).
+ * ★ 2026-07-29 단가 컬럼은 `AgentUnitPriceRow`(축 정의)를 그대로 상속한다. 따로 나열하면
+ *   유형이 늘 때 한쪽만 늘어나고, 그 차이가 곧 그 유형의 미청구다.
+ */
+export interface AgentLedgerRow extends AgentUnitPriceRow {
   billing_type: string;
-  cost_per_sms: any;
-  cost_per_lms: any;
-  cost_per_mms: any;
-  cost_per_kakao: any;
 }
 
 export interface BillingLedger {
@@ -47,10 +46,15 @@ export interface BillingLedger {
   fingerprint: string;
 }
 
-const COMPANY_PRICE_COLS = [
-  'cost_per_sms', 'cost_per_lms', 'cost_per_mms', 'cost_per_kakao',
-  'cost_per_test_sms', 'cost_per_test_lms',
-] as const;
+/** 회사 단가 컬럼 — 축 정의에서 뽑는다. 유형이 늘면 지문도 자동으로 그 단가를 감시한다. */
+const COMPANY_PRICE_COLS: string[] = BILLING_TYPES
+  .map((t) => t.companyPriceColumn)
+  .filter((c): c is string => !!c);
+
+/** 발송ID 단가 컬럼 — 지문·SELECT가 같은 목록을 쓴다(둘이 갈라지면 감시 못 하는 단가가 생긴다). */
+const AGENT_PRICE_COLS: AgentPriceColumn[] = BILLING_TYPES
+  .map((t) => t.agentPriceColumn)
+  .filter((c): c is AgentPriceColumn => !!c);
 
 /** 값이 없는 것과 0원을 지문에서 구분한다 — 그 둘이 청구에서 다르게 다뤄지기 때문이다. */
 function fp(v: any): string {
@@ -80,14 +84,16 @@ export function billingLedgerFingerprint(companyPriceRow: any, agentRows: AgentL
   const agents = (agentRows || [])
     .map((r) => [
       String(r.id), String(r.billing_type || ''),
-      fp(r.cost_per_sms), fp(r.cost_per_lms), fp(r.cost_per_mms), fp(r.cost_per_kakao),
+      ...AGENT_PRICE_COLS.map((c) => fp((r as any)[c])),
     ].join(':'))
     .sort()
     .join('|');
   return `co(${co})/agent(${agents})`;
 }
 
-const AGENT_SQL = `SELECT id, agent_send_id, billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao
+// 컬럼 목록은 축에서 만든다 — SELECT와 지문이 갈라지면 감시하지 않는 단가가 생긴다.
+// (조립에 들어가는 값은 전부 소스 상수라 외부 입력이 섞이지 않는다)
+const AGENT_SQL = `SELECT id, agent_send_id, billing_type, ${AGENT_PRICE_COLS.join(', ')}
                      FROM company_agent_ids WHERE company_id = $1::uuid`;
 // ★ 2026-07-26 `billing_type`·요금제 월정액도 스냅샷에 넣는다(Codex 2차 수용).
 //   `billing_type`은 **청구 가능 여부 자체**를 바꾸는 값인데 지문에 없어서,

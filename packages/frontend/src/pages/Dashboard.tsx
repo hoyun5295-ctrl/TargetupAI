@@ -59,6 +59,8 @@ import { SMS_SAFE_CHARS } from '../utils/smsSafeChars';
 import { getMmsImagePath, getMmsImageDisplayName, toMmsImagePaths, type MmsImageItem } from '../utils/mmsImage';
 import DirectSendPanel from '../components/DirectSendPanel';
 import AlimtalkSendModal from '../components/AlimtalkSendModal';
+// ★ 2026-07-29 브랜드메시지 발송 풀 화면 — 알림톡과 같은 진입 패턴, 성격은 다르다(템플릿 검수 불필요)
+import BrandSendModal from '../components/BrandSendModal';
 import DirectSendAiRefinePopup from '../components/DirectSendAiRefinePopup';
 // ★ D209+ (Harold 명시 2026-05-23): BetaFeatureModal → AiOperatorWalkthroughModal 정합 (AI Operator 메뉴 클릭 시 walkthrough + 특별혜택 안내 본질).
 import AiOperatorWalkthroughModal from '../components/AiOperatorWalkthroughModal';
@@ -343,6 +345,10 @@ export default function Dashboard() {
   const [showAlimtalkSend, setShowAlimtalkSend] = useState(false);
   // ★ D162-4 (2026-05-15) 4차: 직접타겟발송 → 알림톡 진입 시 추출된 수신자 그대로 인계 (Harold님 명시).
   const [alimtalkInitialRecipients, setAlimtalkInitialRecipients] = useState<any[]>([]);
+  // ★ 2026-07-29 브랜드메시지 발송 모달
+  const [showBrandSend, setShowBrandSend] = useState(false);
+  const [brandInitialRecipients, setBrandInitialRecipients] = useState<string[]>([]);
+  const [brandSending, setBrandSending] = useState(false);
   const [alimtalkResetSignal, setAlimtalkResetSignal] = useState(0);  // ★ #2 (2026-06-01): 알림톡 발송 성공 → 모달 수신자 리스트 초기화 신호
   const [showTargetSend, setShowTargetSend] = useState(false);
   // ★ D152+ (PDF 0511 funnel fix): 직접발송 진입 시 24h 1회 AI 다듬기 안내 팝업.
@@ -3599,8 +3605,46 @@ const campaignData = {
             setAlimtalkInitialRecipients(directRecipients);
             setShowAlimtalkSend(true);
           }}
+          onBrandOpen={() => {
+            // ★ 2026-07-29 브랜드메시지 진입. 알림톡과 같이 입력해 둔 수신자를 그대로 인계한다.
+            setBrandInitialRecipients(directRecipients.map((r: any) => String(r?.phone ?? r)).filter(Boolean));
+            setShowBrandSend(true);
+          }}
         />
       )}
+
+      {/* ★ 2026-07-29 브랜드메시지 발송 풀 화면. 수신자 3방식 중 AI 타겟추출만 유료 게이팅이고,
+          그 기준은 스팸필터·AI 다듬기와 동일하다(새 축을 만들지 않는다). */}
+      <BrandSendModal
+        show={showBrandSend}
+        onClose={() => { setShowBrandSend(false); setBrandInitialRecipients([]); }}
+        profiles={alimtalkSenders}
+        initialRecipients={brandInitialRecipients}
+        isAiTargetLocked={isAiMessagingLocked}
+        onLockedFeature={(f, p) => { setPlanUpgradeFeature(f); setPlanUpgradeRequired(p); setShowPlanUpgradeModal(true); }}
+        sending={brandSending}
+        onSend={async (payload: any) => {
+          if (!payload?.senderKey) { setToast({ show: true, type: 'error', message: '발신 프로필을 선택해주세요' }); return; }
+          if (!payload?.phones?.length) { setToast({ show: true, type: 'error', message: '수신자를 입력해주세요' }); return; }
+          setBrandSending(true);
+          try {
+            const res = await fetch('/api/campaigns/brand-send', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (!res.ok || data?.success === false) throw new Error(data?.error || '브랜드메시지 발송 실패');
+            setToast({ show: true, type: 'success', message: `브랜드메시지 ${Number(data?.sentCount || 0).toLocaleString()}건 발송했습니다` });
+            setShowBrandSend(false);
+            setBrandInitialRecipients([]);
+          } catch (e: any) {
+            setToast({ show: true, type: 'error', message: e?.message || '브랜드메시지 발송 실패' });
+          } finally {
+            setBrandSending(false);
+          }
+        }}
+      />
 
       {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1+#3 후속: 알림톡 발송 전용 풀 화면 모달.
           Harold님 명시 — 직접발송 모달에 squeeze 사고 영구 종결. 좌측 채널 패널 + 우측 수신자/매칭/발송. */}

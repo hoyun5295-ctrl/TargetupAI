@@ -98,7 +98,7 @@ export async function prepaidDeduct(
   try {
     await client.query('BEGIN');
     const co = await client.query(
-      `SELECT billing_type, balance, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao
+      `SELECT billing_type, balance, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand
          FROM companies WHERE id = $1 FOR UPDATE`,
       [companyId]
     );
@@ -227,7 +227,7 @@ export async function prepaidRefund(
   try {
     await client.query('BEGIN');
     const co = await client.query(
-      `SELECT billing_type, balance, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao
+      `SELECT billing_type, balance, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand
          FROM companies WHERE id = $1 FOR UPDATE`,
       [companyId]
     );
@@ -375,7 +375,7 @@ export async function prepaidReverseOverRefund(
   try {
     await client.query('BEGIN');
     const co = await client.query(
-      `SELECT billing_type, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao
+      `SELECT billing_type, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand
          FROM companies WHERE id = $1 FOR UPDATE`,
       [companyId]
     );

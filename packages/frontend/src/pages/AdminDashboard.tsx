@@ -130,6 +130,8 @@ export default function AdminDashboard() {
     costPerLms: '' as string | number,
     costPerMms: '' as string | number,
     costPerKakao: '' as string | number,
+    // ★ 2026-07-29 브랜드메시지(구 친구톡) — 알림톡과 다른 단가다. 비우면 청구·차감이 막힌다.
+    costPerBrand: '' as string | number,
     costPerTestSms: '' as string | number,
     costPerTestLms: '' as string | number,
     unitPriceBasis: 'vat_included' as 'vat_included' | 'vat_excluded',
@@ -547,7 +549,7 @@ const [emailResendAt, setEmailResendAt] = useState<string | null>(null);
     id: string; agent_send_id: string; memo: string | null; cust_name?: string | null;
     billing_type?: string | null;
     cost_per_sms?: string | number | null; cost_per_lms?: string | number | null;
-    cost_per_mms?: string | number | null; cost_per_kakao?: string | number | null;
+    cost_per_mms?: string | number | null; cost_per_kakao?: string | number | null; cost_per_brand?: string | number | null;
   }[]>([]);
   const [newAgentSendId, setNewAgentSendId] = useState('');
   const [newAgentMemo, setNewAgentMemo] = useState('');
@@ -555,7 +557,7 @@ const [emailResendAt, setEmailResendAt] = useState<string | null>(null);
   // 원장(선/후불·단가) 인라인 편집 상태
   const [editingAgentRowId, setEditingAgentRowId] = useState<string | null>(null);
   const [editAgentLedger, setEditAgentLedger] = useState({
-    billingType: 'postpaid', costPerSms: '', costPerLms: '', costPerMms: '', costPerKakao: '', memo: '',
+    billingType: 'postpaid', costPerSms: '', costPerLms: '', costPerMms: '', costPerKakao: '', costPerBrand: '', memo: '',
   });
   const [agentLedgerSaving, setAgentLedgerSaving] = useState(false);
 
@@ -642,6 +644,7 @@ const [emailResendAt, setEmailResendAt] = useState<string | null>(null);
       costPerLms: a.cost_per_lms != null && String(a.cost_per_lms) !== '' ? String(Number(a.cost_per_lms)) : '',
       costPerMms: a.cost_per_mms != null && String(a.cost_per_mms) !== '' ? String(Number(a.cost_per_mms)) : '',
       costPerKakao: a.cost_per_kakao != null && String(a.cost_per_kakao) !== '' ? String(Number(a.cost_per_kakao)) : '',
+      costPerBrand: a.cost_per_brand != null && String(a.cost_per_brand) !== '' ? String(Number(a.cost_per_brand)) : '',
       memo: a.memo || '',
     });
   };
@@ -660,6 +663,7 @@ const [emailResendAt, setEmailResendAt] = useState<string | null>(null);
           costPerLms: normalizeCostForSave(editAgentLedger.costPerLms),
           costPerMms: normalizeCostForSave(editAgentLedger.costPerMms),
           costPerKakao: normalizeCostForSave(editAgentLedger.costPerKakao),
+          costPerBrand: normalizeCostForSave(editAgentLedger.costPerBrand),
           memo: editAgentLedger.memo.trim(),
         }),
       });
@@ -3152,6 +3156,7 @@ const handleApproveRequest = async (id: string) => {
           lms: editCompany.costPerLms,
           mms: editCompany.costPerMms,
           kakao: editCompany.costPerKakao,
+          brand: editCompany.costPerBrand,
           testSms: editCompany.costPerTestSms,
           testLms: editCompany.costPerTestLms,
         },
@@ -6860,6 +6865,7 @@ const handleApproveRequest = async (id: string) => {
                               { l: 'L', v: a.cost_per_lms },
                               { l: 'M', v: a.cost_per_mms },
                               { l: '카카오', v: a.cost_per_kakao },
+                              { l: '브랜드', v: a.cost_per_brand },
                             ].filter((c) => c.v != null && String(c.v) !== '').map((c) => `${c.l} ${Number(c.v)}`).join(' · ');
                             return (
                               <div key={a.id} className="bg-white rounded-lg border border-gray-200 px-3 py-1.5">
@@ -6915,8 +6921,8 @@ const handleApproveRequest = async (id: string) => {
                                     <div className="rounded-lg bg-emerald-50/70 px-2 py-1.5 text-[10px] text-emerald-800">
                                       발송ID 단가도 <b>VAT 별도 공급가</b>로 입력합니다. 건별 VAT 10%는 시스템이 자동 합산합니다.
                                     </div>
-                                    <div className="grid grid-cols-4 gap-1.5">
-                                      {([['costPerSms', 'SMS'], ['costPerLms', 'LMS'], ['costPerMms', 'MMS'], ['costPerKakao', '카카오']] as const).map(([k, label]) => {
+                                    <div className="grid grid-cols-3 lg:grid-cols-5 gap-1.5">
+                                      {([['costPerSms', 'SMS'], ['costPerLms', 'LMS'], ['costPerMms', 'MMS'], ['costPerKakao', '카카오'], ['costPerBrand', '브랜드']] as const).map(([k, label]) => {
                                         const raw = editAgentLedger[k];
                                         const pv = previewUnitPrice(raw);
                                         const empty = raw === '' || raw === null || raw === undefined;
@@ -7487,6 +7493,7 @@ const handleApproveRequest = async (id: string) => {
                       ['costPerLms', 'LMS', '장문 문자'],
                       ['costPerMms', 'MMS', '이미지 문자'],
                       ['costPerKakao', '알림톡', '카카오 알림톡'],
+                      ['costPerBrand', '브랜드메시지', '구 친구톡 · 알림톡과 별도 단가'],
                       ['costPerTestSms', '테스트 SMS', '비우면 SMS 단가'],
                       ['costPerTestLms', '테스트 LMS', '비우면 LMS 단가'],
                     ] as const).map(([key, label, hint]) => {

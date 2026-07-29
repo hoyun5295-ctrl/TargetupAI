@@ -105,19 +105,19 @@ describe('pickLedgerBalances', () => {
 describe('parseAgentLedgerFields (§5-1 원장 입력 검증)', () => {
   it('미지정/빈 값 = postpaid + 단가 전부 null — 기존 등록 동작 보존', () => {
     expect(parseAgentLedgerFields({})).toEqual({
-      billingType: 'postpaid', costPerSms: null, costPerLms: null, costPerMms: null, costPerKakao: null,
+      billingType: 'postpaid', costPerSms: null, costPerLms: null, costPerMms: null, costPerKakao: null, costPerBrand: null,
     });
     expect(parseAgentLedgerFields({ billingType: '', costPerSms: '' })).toEqual({
-      billingType: 'postpaid', costPerSms: null, costPerLms: null, costPerMms: null, costPerKakao: null,
+      billingType: 'postpaid', costPerSms: null, costPerLms: null, costPerMms: null, costPerKakao: null, costPerBrand: null,
     });
   });
 
   it('prepaid + 소수 단가 허용·문자열 숫자 수용·빈 문자열 = null', () => {
     expect(parseAgentLedgerFields({ billingType: 'prepaid', costPerSms: '8.4', costPerLms: '', costPerKakao: 6.5 })).toEqual({
-      billingType: 'prepaid', costPerSms: 8.4, costPerLms: null, costPerMms: null, costPerKakao: 6.5,
+      billingType: 'prepaid', costPerSms: 8.4, costPerLms: null, costPerMms: null, costPerKakao: 6.5, costPerBrand: null,
     });
     expect(parseAgentLedgerFields({ billingType: 'prepaid', costPerMms: 0 })).toEqual({
-      billingType: 'prepaid', costPerSms: null, costPerLms: null, costPerMms: 0, costPerKakao: null,
+      billingType: 'prepaid', costPerSms: null, costPerLms: null, costPerMms: 0, costPerKakao: null, costPerBrand: null,
     });
   });
 

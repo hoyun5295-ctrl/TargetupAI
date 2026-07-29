@@ -25,7 +25,7 @@ import { loadBillingLedger } from '../utils/billing-ledger';
 import { floorWon, vatOfSupply } from '../utils/money';
 import { drawPartyBlock, drawThanksNote, THANKS_NOTE_HEIGHT } from '../utils/pdf-party-block';
 // ★ 2026-07-28 PDF 생성 CT — 라우트 인라인이었던 것을 추출. 일괄발급·메일 첨부가 같은 함수를 쓴다.
-import { renderBillingStatementPdf, renderInvoicePdf, loadBillingStatementData } from '../utils/billing-pdf';
+import { renderBillingStatementPdf, renderInvoicePdf, loadBillingStatementData, loadInvoicePdfData } from '../utils/billing-pdf';
 import { retryUnsentConfirmations } from '../utils/invoice-confirm';
 import { normalizeUnitPriceBasis } from '../utils/unit-price';
 import { buildInvoiceLines, checkInvoiceLinesAgainstHeader } from '../utils/billing-invoice-lines';
@@ -628,12 +628,14 @@ router.get('/agent-price-gaps', async (_req: Request, res: Response) => {
               cai.cost_per_sms IS NULL AS sms_unset,
               cai.cost_per_lms IS NULL AS lms_unset,
               cai.cost_per_mms IS NULL AS mms_unset,
-              cai.cost_per_kakao IS NULL AS kakao_unset
+              cai.cost_per_kakao IS NULL AS kakao_unset,
+              cai.cost_per_brand IS NULL AS brand_unset
          FROM company_agent_ids cai
          JOIN companies c ON c.id = cai.company_id
         WHERE cai.billing_type = 'postpaid'
           AND (cai.cost_per_sms IS NULL OR cai.cost_per_lms IS NULL
-               OR cai.cost_per_mms IS NULL OR cai.cost_per_kakao IS NULL)
+               OR cai.cost_per_mms IS NULL OR cai.cost_per_kakao IS NULL
+               OR cai.cost_per_brand IS NULL)
         ORDER BY c.company_name, cai.agent_send_id`,
     );
 
@@ -650,6 +652,7 @@ router.get('/agent-price-gaps', async (_req: Request, res: Response) => {
         unset: [
           r.sms_unset ? 'SMS' : '', r.lms_unset ? 'LMS' : '',
           r.mms_unset ? 'MMS' : '', r.kakao_unset ? 'KAKAO' : '',
+          r.brand_unset ? 'BRAND' : '',
         ].filter(Boolean),
       });
     }
@@ -1362,18 +1365,11 @@ router.put('/invoices/:id/status', async (req: Request, res: Response) => {
 // GET /invoices/:id/pdf - PDF 거래내역서 생성 & 다운로드
 router.get('/invoices/:id/pdf', async (req: Request, res: Response) => {
   try {
-    const result = await pool.query(
-      `SELECT bi.*, c.company_name, c.business_number, c.ceo_name, c.address,
-              c.contact_name, c.contact_phone, c.contact_email, c.business_type, c.business_category
-       FROM billing_invoices bi
-       JOIN companies c ON c.id = bi.company_id
-       WHERE bi.id = $1`,
-      [req.params.id]
-    );
-    if (result.rows.length === 0) {
+    // 다운로드와 메일이 **같은 로더**를 쓴다 — 각자 조회하면 두 문서의 사업자가 갈린다.
+    const inv = await loadInvoicePdfData(req.params.id);
+    if (!inv) {
       return res.status(404).json({ error: '거래내역서를 찾을 수 없습니다' });
     }
-    const inv = result.rows[0];
 
     // PDF 생성 = CT(utils/billing-pdf.ts). 라우트·메일·발급이 같은 함수를 쓴다.
     const fs = require("fs");
@@ -1390,6 +1386,11 @@ router.get('/invoices/:id/pdf', async (req: Request, res: Response) => {
     fileStream.on('close', () => { try { fs.unlinkSync(pdfPath); } catch { /* 위 정산서 다운로드와 같은 이유 */ } });
 
   } catch (error: any) {
+    // ★ 2026-07-29 거래내역서 PDF가 billing_contacts(공급받는자 사업자)에 의존하게 됐다 —
+    //   그 테이블·컬럼이 없으면 500이 아니라 마이그레이션 안내를 낸다(db_alter_safety_net).
+    if (isMigrationPending(error)) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — billing_contacts 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
     console.error('PDF 생성 오류:', error);
     return res.status(500).json({ error: error.message });
   }
@@ -1672,17 +1673,10 @@ router.post('/invoices/:id/send-email', async (req: Request, res: Response) => {
     const path = require('path');
 
     // 1) 거래내역서 + 회사 정보 조회
-    const result = await pool.query(
-      `SELECT bi.*, c.company_name, c.contact_email, c.contact_name
-       FROM billing_invoices bi
-       JOIN companies c ON c.id = bi.company_id
-       WHERE bi.id = $1`,
-      [req.params.id]
-    );
-    if (result.rows.length === 0) {
+    const inv = await loadInvoicePdfData(req.params.id);
+    if (!inv) {
       return res.status(404).json({ error: '거래내역서를 찾을 수 없습니다' });
     }
-    const inv = result.rows[0];
 
     if (!inv.contact_email) {
       return res.status(400).json({ error: '고객사 담당자 이메일이 등록되어 있지 않습니다.' });
@@ -1763,6 +1757,9 @@ router.post('/invoices/:id/send-email', async (req: Request, res: Response) => {
 
     return res.json({ message: '거래내역서 메일이 발송되었습니다.', sent_to: inv.contact_email });
   } catch (error: any) {
+    if (isMigrationPending(error)) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — billing_contacts 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
     console.error('거래내역서 메일 발송 오류:', error);
     return res.status(500).json({ error: '메일 발송에 실패했습니다: ' + error.message });
   }

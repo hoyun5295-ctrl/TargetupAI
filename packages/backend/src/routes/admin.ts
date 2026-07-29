@@ -477,6 +477,9 @@ router.put('/companies/:id/unit-prices', authenticate, requireSuperAdmin, async 
 
   const FIELDS: Array<[string, string]> = [
     ['sms', 'cost_per_sms'], ['lms', 'cost_per_lms'], ['mms', 'cost_per_mms'], ['kakao', 'cost_per_kakao'],
+    // ★ 2026-07-29 브랜드메시지. 전체 교체 규칙이라 화면이 이 키를 반드시 담아 보내야 한다
+    //   (배포는 프론트 먼저 — 옛 백엔드는 모르는 키를 무시하므로 그 순서가 무중단이다).
+    ['brand', 'cost_per_brand'],
     ['testSms', 'cost_per_test_sms'], ['testLms', 'cost_per_test_lms'],
   ];
 
@@ -518,7 +521,7 @@ router.put('/companies/:id/unit-prices', authenticate, requireSuperAdmin, async 
     await client.query('BEGIN');
     const before = await client.query(
       `SELECT company_name, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
-              cost_per_test_sms, cost_per_test_lms
+              cost_per_brand, cost_per_test_sms, cost_per_test_lms
          FROM companies WHERE id = $1::uuid FOR UPDATE`,
       [id]
     );
@@ -531,14 +534,14 @@ router.put('/companies/:id/unit-prices', authenticate, requireSuperAdmin, async 
     const updated = await client.query(
       `UPDATE companies
           SET cost_per_sms = $2, cost_per_lms = $3, cost_per_mms = $4, cost_per_kakao = $5,
-              cost_per_test_sms = $6, cost_per_test_lms = $7,
+              cost_per_test_sms = $6, cost_per_test_lms = $7, cost_per_brand = $8,
               unit_price_basis = 'vat_excluded',
               updated_at = NOW()
         WHERE id = $1::uuid
         RETURNING company_name, unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
-                  cost_per_test_sms, cost_per_test_lms`,
+                  cost_per_brand, cost_per_test_sms, cost_per_test_lms`,
       [id, values.cost_per_sms, values.cost_per_lms, values.cost_per_mms, values.cost_per_kakao,
-       values.cost_per_test_sms, values.cost_per_test_lms]
+       values.cost_per_test_sms, values.cost_per_test_lms, values.cost_per_brand]
     );
 
     // 발송ID 단가는 **상속시키지 않는다** — 발송ID마다 계약이 다를 수 있고, 암묵 상속은
@@ -551,10 +554,13 @@ router.put('/companies/:id/unit-prices', authenticate, requireSuperAdmin, async 
             SET cost_per_sms = COALESCE(cost_per_sms, $2),
                 cost_per_lms = COALESCE(cost_per_lms, $3),
                 cost_per_mms = COALESCE(cost_per_mms, $4),
-                cost_per_kakao = COALESCE(cost_per_kakao, $5)
+                cost_per_kakao = COALESCE(cost_per_kakao, $5),
+                cost_per_brand = COALESCE(cost_per_brand, $6)
           WHERE company_id = $1::uuid
-            AND (cost_per_sms IS NULL OR cost_per_lms IS NULL OR cost_per_mms IS NULL OR cost_per_kakao IS NULL)`,
-        [id, values.cost_per_sms, values.cost_per_lms, values.cost_per_mms, values.cost_per_kakao]
+            AND (cost_per_sms IS NULL OR cost_per_lms IS NULL OR cost_per_mms IS NULL
+                 OR cost_per_kakao IS NULL OR cost_per_brand IS NULL)`,
+        [id, values.cost_per_sms, values.cost_per_lms, values.cost_per_mms, values.cost_per_kakao,
+         values.cost_per_brand]
       );
       agentCopied = copied.rowCount || 0;
     }

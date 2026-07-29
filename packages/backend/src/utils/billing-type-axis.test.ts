@@ -18,6 +18,7 @@ import {
   AGENT_MSG_TYPE_TO_USAGE_KEY,
   USAGE_TYPE_LABEL,
 } from './send-usage-aggregation';
+import { MESSAGE_TYPE_PRICE_COLUMN } from './unit-price';
 
 /** 리팩터 직전 소스의 값 그대로 (손으로 옮김 — 표에서 유도 금지) */
 const LEGACY_MSG_TYPE_TO_USAGE_KEY = { S: 'SMS', L: 'LMS', M: 'MMS', K: 'KAKAO' };
@@ -86,6 +87,16 @@ describe('청구 유형 축 — 추가 시 빠뜨림 차단', () => {
   it('표시명이 중복되지 않는다 — 같은 이름이면 엑셀에서 두 유형이 한 줄로 합쳐진다', () => {
     const labels = BILLING_TYPES.map((t) => t.label);
     expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it('선불 차감 단가 컬럼이 청구 유형 축과 어긋나지 않는다', () => {
+    // 선불 차감(MESSAGE_TYPE_PRICE_COLUMN)은 축보다 **범위가 좁다**(테스트·스팸이 없다).
+    // 범위 차이는 허용하되, 겹치는 유형의 단가 컬럼이 갈라지면 차감과 청구가 다른 단가를 쓰게 된다.
+    for (const [key, col] of Object.entries(MESSAGE_TYPE_PRICE_COLUMN)) {
+      const def = BILLING_TYPES.find((t) => t.key === key);
+      expect(def, `${key}가 청구 유형 축에 없다`).toBeTruthy();
+      expect(def?.companyPriceColumn).toBe(col);
+    }
   });
 
   it('큐 코드가 중복되지 않는다 — 한 코드가 두 유형으로 갈리면 매핑이 덮어써진다', () => {

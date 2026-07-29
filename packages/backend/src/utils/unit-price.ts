@@ -82,8 +82,17 @@ export function vatOfUnitPrice(supply: number | null | undefined): number {
 }
 
 /** 메시지 유형 → `companies` 단가 컬럼. 유형 판정을 세 군데서 따로 쓰던 것을 여기로 모은다. */
+/**
+ * 선불 차감·환불이 쓰는 유형 → 회사 단가 컬럼.
+ *
+ * ★ 청구 유형 축(`billing-types.ts`)과 **범위가 다르다** — 여기는 발송 시점에 잔액을 깎는 유형만이고
+ *   테스트·스팸은 들어오지 않는다. 그래서 축에서 통째로 파생하지 않는다(파생하면 없던 유형이 차감 대상이 된다).
+ *   대신 여기 있는 항목이 축의 회사 단가 컬럼과 어긋나지 않는지는 `unit-price.test.ts`가 잡는다.
+ * ★ 2026-07-29 BRAND 추가. 없으면 브랜드 발송이 알림톡 단가로 깎인다.
+ */
 export const MESSAGE_TYPE_PRICE_COLUMN: Record<string, string> = {
   SMS: 'cost_per_sms', LMS: 'cost_per_lms', MMS: 'cost_per_mms', KAKAO: 'cost_per_kakao',
+  BRAND: 'cost_per_brand',
 };
 
 /**

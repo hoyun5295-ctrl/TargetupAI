@@ -425,7 +425,7 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
   }
 
   // 3. 선불 차감 (카카오 단가 기준)
-  const deduct = await prepaidDeduct(params.companyId, filteredPhones.length, 'kakao', params.campaignId || '', params.userId);
+  const deduct = await prepaidDeduct(params.companyId, filteredPhones.length, 'brand', params.campaignId || '', params.userId);
   if (!deduct.ok) {
     return { success: false, sentCount: 0, failCount: 0, error: deduct.error || '잔액 부족' };
   }
@@ -482,7 +482,7 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
 
   // 6. 실패분 환불
   if (failCount > 0) {
-    await prepaidRefund(params.companyId, failCount, 'kakao', params.campaignId || '', '브랜드메시지 미적재분 환불', 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
+    await prepaidRefund(params.companyId, failCount, 'brand', params.campaignId || '', '브랜드메시지 미적재분 환불', 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
   }
 
   // ★ 2026-07-03 KAKAO 문안 학습 코퍼스 적재 (Phase 2, fire-and-forget)
@@ -518,7 +518,7 @@ export async function sendBrandMessageTemplate(params: BrandTemplateParams): Pro
   }
 
   // 선불 차감
-  const deduct = await prepaidDeduct(params.companyId, filteredPhones.length, 'kakao', params.campaignId || '', params.userId);
+  const deduct = await prepaidDeduct(params.companyId, filteredPhones.length, 'brand', params.campaignId || '', params.userId);
   if (!deduct.ok) {
     return { success: false, sentCount: 0, failCount: 0, error: deduct.error || '잔액 부족' };
   }
@@ -578,7 +578,7 @@ export async function sendBrandMessageTemplate(params: BrandTemplateParams): Pro
   }
 
   if (failCount > 0) {
-    await prepaidRefund(params.companyId, failCount, 'kakao', params.campaignId || '', '브랜드메시지 미적재분 환불', 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
+    await prepaidRefund(params.companyId, failCount, 'brand', params.campaignId || '', '브랜드메시지 미적재분 환불', 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
   }
 
   // ★ 2026-07-03 KAKAO 문안 학습 코퍼스 적재 (Phase 2, fire-and-forget)

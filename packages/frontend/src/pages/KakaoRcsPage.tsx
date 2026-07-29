@@ -36,10 +36,11 @@ export default function KakaoRcsPage() {
   const [brandSubTab, setBrandSubTab] = useState<BrandSubTab>('template');
   const [loading, setLoading] = useState(false);
 
-  // ★ 브랜드메시지 엔터프라이즈 게이팅
-  const [planCode, setPlanCode] = useState<string>('');
-  const [brandLockedModal, setBrandLockedModal] = useState(false);
-  const isBrandLocked = !['ENTERPRISE'].includes(planCode);
+  // ★ 2026-07-29 브랜드메시지 요금제 게이팅 폐지 (Harold 확정) — 모든 요금제에서 모든 기능을 쓴다.
+  //   그 전에는 ENTERPRISE만 통과해 임직원 요금제까지 막혀 있었다. 잠금 상태·잠금 모달·플랜 조회를
+  //   함께 지웠다 — 게이트를 없앴는데 장치가 남으면 다음 사람이 제한이 있는 줄 안다.
+  //   남은 게이트는 **채널 연동 여부**(`companies.kakao_enabled`)뿐이고, 그건 요금제가 아니라
+  //   발신프로필이 있어야 나가는 기술적 전제라 유지한다.
 
   // 알림톡 탭은 D130 `<AlimtalkManagementSection />`이 전담 — 상태는 해당 컴포넌트 내부에서 관리.
   // 브랜드메시지 탭용 프로필 목록만 KakaoRcsPage에서 유지.
@@ -93,11 +94,6 @@ export default function KakaoRcsPage() {
     Promise.all([fetchRcsTemplates(), fetchProfiles()])
       .finally(() => setLoading(false));
 
-    // 플랜 정보 조회 (브랜드메시지 게이팅용)
-    fetch('/api/companies/my-plan', { headers: { Authorization: `Bearer ${getToken()}` } })
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.plan_code) setPlanCode(d.plan_code); })
-      .catch(() => {});
   }, [fetchRcsTemplates, fetchProfiles]);
 
   // RCS 템플릿 삭제 (알림톡은 Section 내부에서 담당)
@@ -181,24 +177,17 @@ export default function KakaoRcsPage() {
       <div className="bg-white border-b border-gray-200">
         <div className="max-w-6xl mx-auto px-6 flex">
           {tabs.map(tab => {
-            const locked = tab.key === 'brand' && isBrandLocked;
             return (
               <button
                 key={tab.key}
-                onClick={() => {
-                  if (locked) { setBrandLockedModal(true); return; }
-                  setActiveTab(tab.key);
-                }}
+                onClick={() => setActiveTab(tab.key)}
                 className={`px-5 py-3 text-sm font-medium transition-colors border-b-2 relative ${
                   activeTab === tab.key
                     ? `border-${tab.color}-500 text-${tab.color}-600`
-                    : locked
-                      ? 'border-transparent text-gray-300 cursor-not-allowed'
-                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
                 }`}
               >
                 {tab.icon} {tab.label}
-                {locked && <span className="ml-1 text-[10px]">🔒</span>}
               </button>
             );
           })}
@@ -368,33 +357,6 @@ export default function KakaoRcsPage() {
 
       {/* ★ D130: 레거시 발신 프로필 등록 모달(Sender Key 수동 입력)은 AlimtalkManagementSection의 Wizard로 대체됨 */}
 
-      {/* 브랜드메시지 잠금 모달 */}
-      {brandLockedModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full mx-4 p-6">
-            <div className="text-center">
-              <div className="text-4xl mb-3">🔒</div>
-              <h3 className="text-lg font-bold text-gray-900 mb-2">브랜드메시지</h3>
-              <p className="text-sm text-gray-600 mb-4">
-                브랜드메시지는 <span className="font-bold text-purple-600">엔터프라이즈</span> 요금제부터 이용 가능합니다.
-              </p>
-              <p className="text-xs text-gray-400 mb-6">
-                카카오 브랜드메시지 8종 유형 발송 + 템플릿 기반 개인화 발송 기능이 포함됩니다.
-              </p>
-              <div className="flex gap-2">
-                <button onClick={() => setBrandLockedModal(false)}
-                  className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm transition">
-                  닫기
-                </button>
-                <button onClick={() => { setBrandLockedModal(false); navigate('/settings'); }}
-                  className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition">
-                  요금제 확인
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Toast */}
       {toast.show && (

@@ -24,7 +24,7 @@ import {
   Eye, ShieldCheck, Lock,
   CalendarClock, ChevronDown, Image as ImageIcon,
   Trash2, XCircle, RotateCcw, ChevronRight,
-  Plus, Sparkles,
+  Plus, Sparkles, Megaphone,
 } from 'lucide-react';
 import {
   calculateSmsBytes,
@@ -171,6 +171,10 @@ export interface DirectSendPanelProps {
   // ★ D162-4 (2026-05-15) 2차: 직접발송 모달 헤더에서 알림톡 발송 풀 화면 모달 진입 callback.
   //   Harold님 명시 정합 — DashboardHeader 메뉴 대신 모달 내부에서 진입해 사용자 혼란 차단.
   onAlimtalkOpen?: () => void;
+  /** ★ 2026-07-29 브랜드메시지 발송 풀 화면 진입. 알림톡과 같은 패턴이되 성격이 다르다 —
+   *  알림톡은 검수된 템플릿을 고르러 가는 진입이고, 브랜드는 발신프로필만 있으면
+   *  이 수신자에게 바로 쓰는 진입이다(자유형은 템플릿 코드를 요구하지 않는다). */
+  onBrandOpen?: () => void;
 }
 
 // ============================================================
@@ -217,6 +221,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     getMaxByteMessage, formatPhoneNumber, formatRejectNumber,
     onClose,
     onAlimtalkOpen,
+    onBrandOpen,
   } = props;
 
   // ★ D120: 커서 위치 기반 변수 삽입용 ref
@@ -596,6 +601,18 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
               >
                 <Bell size={14} strokeWidth={1.75} />
                 <span>알림톡 발송</span>
+              </button>
+            )}
+            {/* ★ 2026-07-29 브랜드메시지 — 요금제 제한 없이 전체 개방. 채널 연동(발신프로필)만 전제다. */}
+            {onBrandOpen && (
+              <button
+                type="button"
+                onClick={onBrandOpen}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition border border-violet-200 bg-violet-50 hover:bg-violet-100 text-violet-700"
+                title="브랜드메시지 발송 화면으로 전환"
+              >
+                <Megaphone size={14} strokeWidth={1.75} />
+                <span>브랜드메시지</span>
               </button>
             )}
             <button className="ds-close-btn ds-t" onClick={onClose}>

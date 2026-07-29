@@ -201,6 +201,64 @@ export async function upsertBillingContact(
 }
 
 // ═══════════════════════════════════════════════════════════
+// 공급받는자 사업자 (순수 — PDF·메일·계산서가 공유)
+// ═══════════════════════════════════════════════════════════
+
+/** 거래내역서·계산서의 공급받는자 6필드. 한 사업자의 신원이라 **항상 묶음으로** 다룬다. */
+export interface TaxbillParty {
+  companyName: string | null;
+  bizNumber: string | null;
+  ceoName: string | null;
+  address: string | null;
+  bizType: string | null;
+  bizItem: string | null;
+  /** 어디서 왔는지 — 화면·로그가 근거를 설명할 수 있어야 한다 */
+  source: 'account' | 'company_contact' | 'companies';
+}
+
+const pick = (v: any): string | null => {
+  const s = String(v ?? '').trim();
+  return s === '' ? null : s;
+};
+
+/**
+ * (순수) 공급받는자 사업자 = **계정 → 회사(billing_contacts) → companies** 3단.
+ *
+ * ★ 2026-07-29 PDF가 `companies`만 보고 있어서, 정산 탭에서 등록한 사업자가 인쇄물에 반영되지 않았다
+ *   (Harold 실측 — 등록했는데 `대표: -`, `사업자번호: -`로 나감). 저장 화면만 먼저 나가고 읽는 쪽이 없었다.
+ *
+ * ⚠ **단계를 섞지 않는다.** 상호는 계정에서, 대표자는 회사에서 가져오면 국세청 신고물에
+ *   실재하지 않는 사업자가 찍힌다. 판정 기준은 **사업자등록번호 하나**다 — 그 값이 있는 첫 단계를
+ *   통째로 채택하고, 나머지 필드가 비어 있으면 비어 있는 채로 간다(빈 칸이 조합된 거짓보다 낫다).
+ *   SoT = docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md §5-1.
+ */
+export function pickTaxbillParty(row: any): TaxbillParty {
+  const build = (
+    source: TaxbillParty['source'],
+    companyName: any, bizNumber: any, ceoName: any, address: any, bizType: any, bizItem: any,
+  ): TaxbillParty => ({
+    source,
+    companyName: pick(companyName), bizNumber: pick(bizNumber), ceoName: pick(ceoName),
+    address: pick(address), bizType: pick(bizType), bizItem: pick(bizItem),
+  });
+
+  if (pick(row?.acct_taxbill_biz_number)) {
+    return build('account',
+      row?.acct_taxbill_company_name, row?.acct_taxbill_biz_number, row?.acct_taxbill_ceo_name,
+      row?.acct_taxbill_address, row?.acct_taxbill_biz_type, row?.acct_taxbill_biz_item);
+  }
+  if (pick(row?.co_taxbill_biz_number)) {
+    return build('company_contact',
+      row?.co_taxbill_company_name, row?.co_taxbill_biz_number, row?.co_taxbill_ceo_name,
+      row?.co_taxbill_address, row?.co_taxbill_biz_type, row?.co_taxbill_biz_item);
+  }
+  // 기본정보 탭의 회사 사업자정보. 여기도 비면 인쇄물에 `-`가 찍힌다(그게 지금 화면이다).
+  return build('companies',
+    row?.company_name, row?.business_number, row?.ceo_name,
+    row?.address, row?.business_type, row?.business_category);
+}
+
+// ═══════════════════════════════════════════════════════════
 // 계산서 날짜 산식 (순수 — 워커·발송·화면이 공유)
 // ═══════════════════════════════════════════════════════════
 

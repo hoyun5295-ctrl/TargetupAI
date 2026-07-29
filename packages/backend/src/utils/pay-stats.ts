@@ -1029,6 +1029,8 @@ export interface AgentLedgerFields {
   costPerLms: number | null;
   costPerMms: number | null;
   costPerKakao: number | null;
+  /** ★ 2026-07-29 브랜드메시지(구 친구톡) — 게이트웨이 MsgType `G` */
+  costPerBrand: number | null;
 }
 
 // 단가 1개 값 검증 (등록·수정 공용) — null/빈 값 = 미설정(null), 그 외 0~1,000,000 유한수(소수 허용)
@@ -1060,7 +1062,13 @@ export function parseAgentLedgerFields(body: any): AgentLedgerFields | { error: 
   if ('error' in mms) return mms;
   const kakao = parseCostValue(body?.costPerKakao, '카카오');
   if ('error' in kakao) return kakao;
-  return { billingType: rawBilling, costPerSms: sms.value, costPerLms: lms.value, costPerMms: mms.value, costPerKakao: kakao.value };
+  const brand = parseCostValue(body?.costPerBrand, '브랜드메시지');
+  if ('error' in brand) return brand;
+  return {
+    billingType: rawBilling,
+    costPerSms: sms.value, costPerLms: lms.value, costPerMms: mms.value,
+    costPerKakao: kakao.value, costPerBrand: brand.value,
+  };
 }
 
 export interface AgentLedgerPatch {
@@ -1070,6 +1078,7 @@ export interface AgentLedgerPatch {
     cost_per_lms?: number | null;
     cost_per_mms?: number | null;
     cost_per_kakao?: number | null;
+    cost_per_brand?: number | null;
   };
 }
 
@@ -1087,11 +1096,12 @@ export function parseAgentLedgerPatch(body: any): AgentLedgerPatch | { error: st
     }
     updates.billing_type = bt;
   }
-  const entries: Array<['cost_per_sms' | 'cost_per_lms' | 'cost_per_mms' | 'cost_per_kakao', any, string]> = [
+  const entries: Array<[keyof AgentLedgerPatch['updates'] & `cost_per_${string}`, any, string]> = [
     ['cost_per_sms', body?.costPerSms, 'SMS'],
     ['cost_per_lms', body?.costPerLms, 'LMS'],
     ['cost_per_mms', body?.costPerMms, 'MMS'],
     ['cost_per_kakao', body?.costPerKakao, '카카오'],
+    ['cost_per_brand', body?.costPerBrand, '브랜드메시지'],
   ];
   for (const [col, v, label] of entries) {
     if (v === undefined) continue;
