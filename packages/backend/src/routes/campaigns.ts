@@ -3037,10 +3037,16 @@ router.post('/brand-send', async (req: Request, res: Response) => {
     );
 
     // campaign_runs INSERT
+    // ★ 2026-07-29 존재하지 않는 컬럼 3개(company_id·total_sent·total_success)를 쓰고 있었다.
+    //   campaign_runs는 campaign_id로 회사에 닿으므로 company_id 축 자체가 없다.
+    //   다른 INSERT 3곳(422·796·2286)과 같은 컬럼으로 통일한다 — 이 경로만 이름을 지어 쓰고 있었다.
     await query(
-      `INSERT INTO campaign_runs (campaign_id, company_id, total_sent, total_success, sent_at)
-       VALUES ($1, $2, $3, $3, NOW())`,
-      [campaignId, companyId, result.sentCount]
+      //   컬럼은 2286행 INSERT와 **완전히 같은 집합**만 쓴다 — 그건 운영에서 도는 코드라 실존이 검증돼 있다.
+      //   SCHEMA.md에 있는 success_count는 여기 넣지 않았다(같은 날 send_channel 길이가 오기로 드러나
+      //   문서를 근거로 컬럼을 쓰면 또 22001·42703을 밟는다). 필요해지면 information_schema 확인 후 추가.
+      `INSERT INTO campaign_runs (campaign_id, run_number, target_count, sent_count, status, sent_at, created_at)
+       VALUES ($1, 1, $2, $2, 'completed', NOW(), NOW())`,
+      [campaignId, result.sentCount]
     );
 
     return res.json({

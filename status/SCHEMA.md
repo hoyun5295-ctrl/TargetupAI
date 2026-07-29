@@ -225,7 +225,7 @@
 | created_at | timestamptz |
 | updated_at | timestamptz |
 | mms_image_paths | jsonb | ★ 2026-06-08 실측 보강 |
-| send_channel | varchar(20) | ★ 실측 |
+| send_channel | **varchar(10)** | ★2026-07-29 실측 정정(그 전 기재 varchar(20)은 오기 — ★실측 표시가 붙어 있었다). **`kakao_brand`(11자)가 안 들어가 `/brand-send`가 22001로 죽고 있었다.** 값을 늘릴 땐 길이부터 확인 |
 | send_phase | varchar(20) | ★ 실측 (발송 단계) |
 | send_config | jsonb | ★ 실측 |
 | staging_id | uuid | ★ 실측 (직접발송 staging) |
