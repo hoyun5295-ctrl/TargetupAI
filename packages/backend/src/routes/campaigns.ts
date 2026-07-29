@@ -2965,7 +2965,10 @@ router.post('/brand-send', async (req: Request, res: Response) => {
 
     // 캠페인 레코드 생성
     const campaignResult = await query(
-      `INSERT INTO campaigns (company_id, user_id, name, message_content, message_type, send_channel, status, created_at)
+      // ★ 2026-07-29 `name` → `campaign_name`. 실제 컬럼명이 다른데 이 INSERT만 틀려서
+      //   브랜드메시지 발송이 **처음부터 500으로 죽고 있었다**(42703). 다른 campaigns INSERT 5곳은
+      //   전부 campaign_name을 쓴다 — 이 경로만 아무도 안 눌러서 드러나지 않았다.
+      `INSERT INTO campaigns (company_id, user_id, campaign_name, message_content, message_type, send_channel, status, created_at)
        VALUES ($1, $2, $3, $4, 'LMS', 'kakao_brand', 'sending', NOW())
        RETURNING id`,
       [companyId, userId, `브랜드메시지 ${bubbleType || 'TEXT'}`, message || `[${bubbleType}] 브랜드메시지`]
