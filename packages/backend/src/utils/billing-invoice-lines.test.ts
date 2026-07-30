@@ -58,6 +58,39 @@ describe('buildInvoiceLines — 청구서 항목 줄 (2026-07-26)', () => {
   });
 });
 
+describe('080 등 월별 추가 항목 (channel=extra — 2026-07-30 서수란 접수)', () => {
+  const extra = (o: Record<string, any> = {}) => ({
+    channel: 'extra', message_type: 'EXTRA_080_FEE', unit_price: 9000, success_count: 0, amount: 9000, ...o,
+  });
+
+  it('수량 0(발송 아님)이어도 합쳐진 항목 수가 수량이 된다 — "2건 × ₩9,000 = ₩18,000" 참 산식', () => {
+    const lines = buildInvoiceLines([extra(), extra()]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ label: '080 번호 이용료', count: 2, unitPrice: 9000, amount: 18000 });
+  });
+
+  it('통화료는 번호마다 단가가 달라 각자 줄 — 실측 672원·27,790원', () => {
+    const lines = buildInvoiceLines([
+      extra({ message_type: 'EXTRA_080_CALL', unit_price: 672, amount: 672 }),
+      extra({ message_type: 'EXTRA_080_CALL', unit_price: 27790, amount: 27790 }),
+    ]);
+    expect(lines).toHaveLength(2);
+    expect(lines.map((l) => l.label)).toEqual(['080 통화료', '080 통화료']);
+    expect(lines.map((l) => l.count)).toEqual([1, 1]);
+  });
+
+  it('extra는 항목표 맨 뒤(발송·테스트·스팸 뒤)에 온다 + 내부 키(EXTRA_*)가 노출되지 않는다', () => {
+    const lines = buildInvoiceLines([
+      extra({ message_type: 'EXTRA_080_SVC', unit_price: 4000, amount: 4000 }),
+      item({ channel: 'spam', message_type: 'SPAM_SMS' }),
+      item({ channel: 'web', message_type: 'SMS' }),
+    ]);
+    expect(lines.map((l) => l.channel)).toEqual(['web', 'spam', 'extra']);
+    expect(lines[2].label).toBe('080 부가서비스');
+    expect(lines[2].label).not.toContain('EXTRA');
+  });
+});
+
 describe('요금제 항목 (2026-07-26 ④)', () => {
   it('요금제 줄이 항목표 맨 앞에 온다 — 청구서 항목 1번', () => {
     const lines = buildInvoiceLines([

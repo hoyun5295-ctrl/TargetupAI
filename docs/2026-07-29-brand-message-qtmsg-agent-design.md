@@ -118,9 +118,17 @@ msg_contents = {
 1. **테이블 선택 축** — 알림톡은 호출부가 라인그룹별 테이블 목록을 넘겨 첫 번째를 쓴다
    (`insertAlimtalkQueue(tables, ...)`). 브랜드도 같은 라인을 타는지, 별도 라인인지 확인 필요.
    이걸 정해야 호출부 6곳의 시그니처가 정해진다.
+   → **확정(2026-07-30 Harold)**: 지금 설치된 QTmsg가 브랜드메시지를 처리한다 — 별도 라인 없음.
+   **알림톡과 같은 라인·같은 `SMSQ_SEND` 테이블 축에 `msg_type='F'`만 다르게** 넣는다. 버전 확인 불요.
 2. **`TARGETING` 기본값** — 현재 코드에 이 축이 없다. 매뉴얼 예시는 `I`지만 자격 조건이 코드마다 달라
    운영실 확인 대상. 화면에서 고르게 할지 `I` 고정으로 갈지 결정 필요.
 3. **`attachment_method.pdf` 확보 여부** — 있으면 8종 전체, 없으면 3종으로 확정.
+   → **확보(2026-07-30)**: `C:\Users\ceo\OneDrive\문서\카카오톡 받은 파일\attachment_method.pdf`(23p).
+   내용 = ATTACHMENT(버튼 WL·AL·BK·MD·BC·BT·AC·BF 등 + image·item·coupon·commerce·video 필드 구조,
+   브랜드 기본형 §3.3·자유형 §3.4) + SUPPLEMENT(quick_reply) + CAROUSEL(§5.2·§5.3 브랜드 기본형·자유형 —
+   CAROUSEL_FEED·CAROUSEL_COMMERCE 시 필수, list 2~6·인트로 시 1~5).
+   **단 이 문서도 `msg_contents` 상위 조립 예시(캐러셀·커머스·비디오의 최상위 키명·대소문자)는 없다** —
+   SQL 조립 실예시가 있는 것은 여전히 본 매뉴얼의 TEXT·IMAGE·WIDE 셋뿐.
 4. **`campaign_runs.success_count` 실존** — 0729에 SCHEMA.md만 보고 넣지 않았다(같은 날
    `send_channel` 길이가 오기로 드러나 문서를 근거로 컬럼을 쓰지 않기로 했다). `information_schema` 확인 후 판단.
    → **확정(2026-07-30 실측)**: `success_count` integer 실존. `sent_count`·`fail_count`·`target_count`도 실존 —

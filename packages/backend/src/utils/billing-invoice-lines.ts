@@ -41,7 +41,7 @@ export interface InvoiceLine {
 }
 
 const CHANNEL_LABEL: Record<string, string> = {
-  web: '', agent: '에이전트 ', test: '', spam: '',
+  web: '', agent: '에이전트 ', test: '', spam: '', extra: '',
 };
 
 /**
@@ -54,9 +54,11 @@ const CHANNEL_LABEL: Record<string, string> = {
 const TYPE_LABEL: Record<string, string> = {
   ...Object.fromEntries(BILLING_TYPES.map((t) => [t.key, t.label])),
   SPAM_SMS: '스팸필터 SMS', SPAM_LMS: '스팸필터 LMS',
+  // ★ 2026-07-30 080 청구(billing_extra_items — 서수란 접수). 내부 키(EXTRA_*)는 고객에게 보일 값이 아니다.
+  EXTRA_080_FEE: '080 번호 이용료', EXTRA_080_SVC: '080 부가서비스', EXTRA_080_CALL: '080 통화료',
 };
 
-const CHANNEL_ORDER = ['plan', 'web', 'agent', 'test', 'spam'];
+const CHANNEL_ORDER = ['plan', 'web', 'agent', 'test', 'spam', 'extra'];
 const TYPE_ORDER = BILLING_TYPES.map((t) => t.key);
 
 /**
@@ -121,7 +123,10 @@ export function buildInvoiceLines(items: any[]): InvoiceLine[] {
       acc.set(key, seed);
     }
     const line = acc.get(key)!;
-    line.count += count;
+    // ★ 2026-07-30 extra(080 등 월별 항목)는 발송 수량 축이 없어 success_count가 0이다(2페이지 오염 차단 —
+    //   요금제와 같은 이유). 항목줄 수량은 **합쳐진 항목 수**로 센다 — 같은 단가 그룹만 합쳐지므로
+    //   "2건 × ₩9,000 = ₩18,000"이 참 산식이 된다. 0으로 두면 "0건 × ₩9,000 = ₩18,000" 거짓 산식이 인쇄된다.
+    line.count += channel === 'extra' ? 1 : count;
     line.amount += amount;
   }
 

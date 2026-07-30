@@ -769,7 +769,8 @@ export function rollupUsageByPeriod(dayData: UsageDayData, view: 'daily' | 'mont
  *   지점별 확인은 기존 발송통계 엑셀(`queryPayAgentStoreBreakdown` 대상ID 분해)이 이미 담당한다.
  */
 /** `plan`은 발송이 아니라 구독료다 — 수량 축이 없고 금액이 일할로 미리 정해져 온다. */
-export type BillingChannel = 'plan' | 'web' | 'agent' | 'test' | 'spam';
+// ★ 2026-07-30 'extra' = 월별 추가 항목(080 이용료·부가서비스·통화료 — billing_extra_items). 발송 축이 아니다.
+export type BillingChannel = 'plan' | 'web' | 'agent' | 'test' | 'spam' | 'extra';
 
 /** 청구 상세 한 줄 = `billing_items` 한 행 */
 export interface BillingUsageRow {
@@ -842,7 +843,7 @@ function bumpRow(acc: Map<string, BillingUsageRow>, seed: BillingUsageRow, c: { 
 
 /** 청구 상세 정렬 — 채널 → 일자 → 계정/발송ID → 유형. PDF·화면이 이 순서를 그대로 쓴다. */
 // 요금제가 청구서 항목 1번이다(Harold 정의) — 정렬 맨 앞.
-const CHANNEL_ORDER: BillingChannel[] = ['plan', 'web', 'agent', 'test', 'spam'];
+const CHANNEL_ORDER: BillingChannel[] = ['plan', 'web', 'agent', 'test', 'spam', 'extra'];
 const TYPE_ORDER_FOR_BILLING = BILLING_TYPES.map((t) => t.key);
 
 export function sortBillingUsageRows(rows: BillingUsageRow[]): BillingUsageRow[] {
@@ -1036,6 +1037,39 @@ export function buildPlanBillingItems(segments: PlanSegment[]): PricedBillingIte
   }));
 }
 
+/**
+ * (순수) 월별 추가 항목(billing_extra_items — 080 이용료·부가서비스·통화료) → 청구 상세 행. (★ 2026-07-30 신설)
+ *
+ * 요금제(buildPlanBillingItems)와 같은 부류다 — 발송이 아니라서 수량 4칸은 전부 0으로 둔다
+ * (수량 칸에 실으면 PDF 2페이지 전송·실패 열이 오염된다 — 2026-07-26 Codex 3차 HIGH와 같은 함정).
+ * 항목줄 수량 표시는 buildInvoiceLines가 extra 채널 전용으로 합친 행 수를 세어 담당한다.
+ * 금액은 공급가 정수라 amount === amountExact(절사 멱등).
+ */
+export function buildExtraBillingItems(rows: Array<{ kind: string; supply_amount: any; period_month: any }>): PricedBillingItem[] {
+  const KIND_TO_TYPE: Record<string, string> = {
+    '080_fee': 'EXTRA_080_FEE',
+    '080_svc': 'EXTRA_080_SVC',
+    '080_call': 'EXTRA_080_CALL',
+  };
+  return (rows || []).map((r) => {
+    const amount = Math.round(Number(r.supply_amount) || 0);
+    return {
+      channel: 'extra' as const,
+      itemDate: toDayKey(r.period_month),
+      typeKey: KIND_TO_TYPE[String(r.kind)] || `EXTRA_${String(r.kind || '').toUpperCase().slice(0, 13)}`,
+      userId: null,
+      agentSendId: null,
+      agentId: null,
+      total: 0, success: 0, fail: 0, pending: 0,
+      planDays: null,
+      planMonthDays: null,
+      unitPrice: amount,
+      amount,
+      amountExact: amount,
+    };
+  });
+}
+
 export interface AgentPriceMiss { agentSendId: string; typeKey: string; success: number }
 
 export interface PricedBillingResult {
@@ -1083,8 +1117,8 @@ export function priceBillingRows(
   }
 
   const items: PricedBillingItem[] = [];
-  const amountByChannel: Record<BillingChannel, number> = { plan: 0, web: 0, agent: 0, test: 0, spam: 0 };
-  const amountExactByChannel: Record<BillingChannel, number> = { plan: 0, web: 0, agent: 0, test: 0, spam: 0 };
+  const amountByChannel: Record<BillingChannel, number> = { plan: 0, web: 0, agent: 0, test: 0, spam: 0, extra: 0 };
+  const amountExactByChannel: Record<BillingChannel, number> = { plan: 0, web: 0, agent: 0, test: 0, spam: 0, extra: 0 };
   const missMap = new Map<string, AgentPriceMiss>();
 
   for (const r of rows || []) {

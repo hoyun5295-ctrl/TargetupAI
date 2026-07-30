@@ -22,6 +22,7 @@ import {
   findUnsetPricedTypes, summarizeBlockList,
   resolveExistingUserIds, nullifyUnknownUserIds, checkBillingAmountIdentity, chunkArray,
   splitBillingSheets, checkSheetSumIdentity, buildPlanBillingItems, toDayKey,
+  buildExtraBillingItems,
   type PricedBillingItem, type BillingScope,
 } from './send-usage-aggregation';
 // ★ 2026-07-30 절사 위치 정정 — 헤더·장 공급가액을 절사된 항목줄 합에서 파생(그룹핑·절사 단일원).
@@ -305,6 +306,7 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
   let subtotal = 0, vat = 0, totalAmount = 0;
   let sheetsIssued: any[] = [];
   let batchIdIssued: string | null = null;
+  let extraSupplyIssued = 0; // ★ 2026-07-30 월별 추가 항목(080 등) 공급가 합 — 응답 channel_amounts용
   try {
     await client.query('BEGIN');
 
@@ -404,6 +406,27 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
     aiCreditCount = chargeCount + overageCount;                       // 충전 + 초과사용 크레딧 수량
     aiCreditSupply = chargeSupply + overageCount * CREDIT_UNIT_PRICE; // 공급가(크레딧×단가=공급가 일관)
 
+    // ★ 2026-07-30 월별 추가 항목(080 이용료·부가서비스·통화료 — billing_extra_items, 서수란 접수).
+    //   발행 기간과 겹치는 달의 **미소비** 항목만 싣는다 — 겹침 판정은 billings와 같은 식(월 = [1일, 말일]).
+    //   소비 마커 = billed_billing_id(AI 크레딧 billed_billing_id 선례 미러 — Codex 1R critical 수용):
+    //   분할 기간 발행(7/1~15 + 7/16~31)이 같은 달 항목을 두 번 싣는 이중청구를 마커가 구조로 막고,
+    //   FK ON DELETE SET NULL이라 발행 삭제 시 자동으로 미소비 복귀한다. FOR UPDATE = 반영 취소(DELETE)와의 경합 차단.
+    const extraRes = await client.query(
+      `SELECT id, kind, supply_amount, period_month FROM billing_extra_items
+        WHERE company_id = $1
+          AND billed_billing_id IS NULL
+          AND period_month <= $3::date
+          AND (period_month + INTERVAL '1 month' - INTERVAL '1 day')::date >= $2::date
+        ORDER BY period_month, kind
+        FOR UPDATE`,
+      [company_id, billing_start, billing_end],
+    );
+    const extraItems = buildExtraBillingItems(extraRes.rows);
+    const extraIds: string[] = extraRes.rows.map((r: any) => String(r.id));
+    const extraSupply = extraItems.reduce((s, i) => s + i.amountExact, 0);
+    extraSupplyIssued = extraSupply;
+    const allBillingItems = extraItems.length > 0 ? [...billingItems, ...extraItems] : billingItems;
+
     // ★ 2026-07-26 금액 항등식 — 헤더는 `totals × 단가`, 상세는 `priceBillingRows`로 **서로 다른 코드가 계산한다.**
     //   대조는 **절사 전** 값끼리 한다.
     const subtotalExact =
@@ -413,9 +436,10 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
       (totalSpamSms * spamSmsCost) + (totalSpamLms * spamLmsCost) +
       agentAmountExact +
       planAmount +
+      extraSupply + // ★ 2026-07-30 080 등 월별 추가 항목 — 빠지면 상세합≠공급가액으로 발행이 막힌다(BRAND 선례)
       aiCreditSupply;
     const amountCheck = checkBillingAmountIdentity(
-      billingItems.map((i) => ({ amount: i.amountExact })), aiCreditSupply, subtotalExact,
+      allBillingItems.map((i) => ({ amount: i.amountExact })), aiCreditSupply, subtotalExact,
     );
     if (!amountCheck.ok) {
       console.log(`[정산][금액불일치] company=${company_id} ${billing_start}~${billing_end} — 상세합 ${amountCheck.itemsSum} + 크레딧 ${amountCheck.aiCreditSupply} ≠ 공급가액 ${amountCheck.subtotal} (차이 ${amountCheck.diff})`);
@@ -427,7 +451,7 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
     }
 
     // 8~9) 장별 발행 — 한 요청이 N+1장을 **원자적으로** 만든다.
-    const sheets = splitBillingSheets(billingItems, scope as BillingScope);
+    const sheets = splitBillingSheets(allBillingItems, scope as BillingScope);
 
     // ★ 2026-07-30 절사 위치 정정(Harold — "최종 청구 금액의 소수점만 버려라").
     //   일자행은 정확값이고, 절사는 각 장의 **항목줄에서 1회**(buildInvoiceLines)다.
@@ -516,6 +540,15 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
         );
       }
 
+      // ★ 2026-07-30 월별 추가 항목(080 등) 소비 마킹 — 크레딧과 같은 계약. 공통 장(carries)에 실리므로 그 장 id로.
+      //   이 마커가 분할 기간 재발행의 이중청구를 막고, 발행 삭제 시 FK가 자동 복귀시킨다(Codex 1R critical 수용).
+      if (carries && extraIds.length > 0) {
+        await client.query(
+          `UPDATE billing_extra_items SET billed_billing_id = $1::uuid WHERE id = ANY($2::uuid[])`,
+          [sheetBilling.id, extraIds]
+        );
+      }
+
       // billing_items INSERT (채널 × 일자 × 계정|발송ID × 유형 상세)
       //   ★ `user_id`는 행별 실제 계정, 에이전트 행은 `agent_id`가 발송ID.
       //   `store_id`(대상ID)는 청구 축이 아니다.
@@ -593,8 +626,8 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
       id: b.id, scope: b.scope, user_id: b.user_id,
       subtotal: b.subtotal, total_amount: b.total_amount,
     })),
-    // ★ 2026-07-26 채널별 소계 — 전부 **절사 후 청구된 값**이다.
-    channel_amounts: { ...priced.amountByChannel, plan: planAmountBilled },
+    // ★ 2026-07-26 채널별 소계 — 전부 **절사 후 청구된 값**이다. extra(080 등)는 공급가 정수라 절사 멱등.
+    channel_amounts: { ...priced.amountByChannel, plan: planAmountBilled, extra: extraSupplyIssued },
     plan: {
       amount: planAmountBilled,
       segments: planSegments.map((s) => ({

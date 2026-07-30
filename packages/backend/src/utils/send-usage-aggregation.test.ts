@@ -908,7 +908,8 @@ describe('priceBillingRows — 청구 상세 단가·금액 부착 (2026-07-26)'
       r({ channel: 'spam', typeKey: 'SPAM_SMS', success: 2 }),
     ], web, []);
     expect(out.items.map((i) => i.amount)).toEqual([900, 81, 18]);
-    expect(out.amountByChannel).toEqual({ plan: 0, web: 900, agent: 0, test: 81, spam: 18 });
+    // ★ 2026-07-30 extra(080 등 월별 추가 항목) 채널 축 추가 — 단가 계산기(발송 축)에서는 항상 0이다.
+    expect(out.amountByChannel).toEqual({ plan: 0, web: 900, agent: 0, test: 81, spam: 18, extra: 0 });
   });
 
   it('★소수 단가 행은 절사 없이 정확값이다 — 절사는 항목줄에서 1회 (2026-07-30 Harold 정정)', () => {
@@ -1024,7 +1025,7 @@ describe('priceBillingRows — 청구 상세 단가·금액 부착 (2026-07-26)'
     const out = priceBillingRows([], web, []);
     expect(out.items).toEqual([]);
     // 요금제는 단가 계산기를 거치지 않으므로 여기서는 항상 0이다 — 라우트가 따로 합친다.
-    expect(out.amountByChannel).toEqual({ plan: 0, web: 0, agent: 0, test: 0, spam: 0 });
+    expect(out.amountByChannel).toEqual({ plan: 0, web: 0, agent: 0, test: 0, spam: 0, extra: 0 });
     expect(out.missingAgentPrices).toEqual([]);
     expect(out.unbillableTypes).toEqual([]);
     expect(priceBillingRows(undefined as any, web, undefined as any).items).toEqual([]);

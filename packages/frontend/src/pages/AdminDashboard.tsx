@@ -16,6 +16,7 @@ import { COMPANY_EMAIL } from '../constants/company';
 import { formatAgentIdLabel } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스(발급명 병기)
 import { formatPlanOptionLabel } from '../utils/planLabel'; // ★ 2026-07-28 요금제 라벨 = 월정액(고객 수 축 폐기)
 import { taxbillIssueDatePreviewText, type TaxbillDayPolicy } from '../utils/taxbillDate'; // ★ 2026-07-28 작성일자 미리보기(예시 월 하드코딩 제거)
+import Billing080Modal from '../components/Billing080Modal'; // ★ 2026-07-30 080 청구 관리 (서수란 접수 — KT 명세서 분할 청구)
 import { creditTxLabel } from '../constants/credit'; // 크레딧 사용 이력 작업명 라벨
 
 interface Company {
@@ -1328,6 +1329,8 @@ const [bulkJobId, setBulkJobId] = useState<string | null>(null);
 const [bulkJob, setBulkJob] = useState<any>(null);
 const [bulkStarting, setBulkStarting] = useState(false);
 const [confirmBoardOpen, setConfirmBoardOpen] = useState(false);
+// ★ 2026-07-30 080 청구 관리 모달 (서수란 접수)
+const [billing080Open, setBilling080Open] = useState(false);
 const [confirmRows, setConfirmRows] = useState<any[]>([]);
 const [confirmLoading, setConfirmLoading] = useState(false);
 const [confirmStatusFilter, setConfirmStatusFilter] = useState('');
@@ -9522,9 +9525,18 @@ const handleApproveRequest = async (id: string) => {
                   className={`px-4 py-2 rounded-lg text-sm font-medium border ${confirmBoardOpen ? 'bg-slate-700 text-white border-slate-700' : 'text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
                   세금계산서·컨펌 현황
                 </button>
+                {/* ★ 2026-07-30 080 청구 (서수란 접수 — 번호 매핑 + KT 명세서 업로드 → 통화료 자동 귀속) */}
+                <button onClick={() => setBilling080Open(true)}
+                  className="px-4 py-2 rounded-lg text-sm font-medium border text-slate-600 border-slate-300 hover:bg-slate-50">
+                  080 청구 관리
+                </button>
               </div>
             </div>
             <p className="text-xs text-gray-500 mb-4">후불이면서 대상월 거래내역서가 아직 발급되지 않은 회사만 나옵니다. 담으면 정산 탭의 발행 단위대로 좌우에 앉고, 발급 시 이메일 등록 회사는 자동 발송·컨펌 흐름까지 이어집니다.</p>
+
+            {/* ★ 2026-07-30 080 청구 관리 (서수란 접수) — 매핑·KT 명세서 업로드·반영 현황 */}
+            <Billing080Modal open={billing080Open} onClose={() => setBilling080Open(false)}
+              companies={companies.map((c) => ({ id: c.id, company_name: c.company_name }))} />
 
             {bulkList !== null && (() => {
               const picked = bulkPickedIds();

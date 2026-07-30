@@ -1556,6 +1556,13 @@
 - 2026-07-25 ALTER 적용 실측: `channel`·`store_id` 추가 + `agent_id` FK 신설 + 인덱스. 당시 15행(금강제화 시험 발행분)은 전부 web.
 - **★2026-07-28 실측 = 0행.** 위 15행은 그 뒤 삭제됐다. **아직 굳은 청구서가 하나도 없다** = 단가·요금제 이력을 정정할 수 있는 창이 열려 있다는 뜻이다(발행이 쌓이면 스냅샷이 굳어 소급 정정 불가).
 
+### 080 청구·월별 추가 항목 2테이블 ★2026-07-30 신설·실행 완료 (Harold psql)
+
+> 기원 = 서수란 0729 "정산 관련 체크 사항" 티켓 + KT 명세서 실측(인비토 명의 1장·080 번호 18대·번호당 부가서비스 4,000+통화료 변동+VAT). 금액은 전부 **공급가 저장**(VAT는 청구서가 파생 — 0726 원칙).
+
+- **billing_080_numbers** (080 번호↔회사 매핑 — 손글씨 매핑의 시스템화): id uuid PK gen_random_uuid() · number varchar(20) NOT NULL **UNIQUE**(숫자만) · company_id FK→companies · label varchar(100)(부서/브랜드 — 시세이도 Nars 등) · monthly_fee_supply int NOT NULL DEFAULT 9000(080 이용료 공급가 = 인비토 관리료, VAT 포함 9,900. 리스킨=0) · kt_fee_supply int NOT NULL DEFAULT 4000(KT 부가서비스 실비 공급가, VAT 포함 4,400) · charge_call_fee bool DEFAULT true(통화료 귀속 여부) · is_active bool DEFAULT true · memo text · created/updated_at. INDEX(company_id). ※ 기존 `users/companies.opt_out_080_number`(수신거부 콜백 축)와 **별개** — 그쪽은 회사당 1개뿐이고 의미가 다르다(재사용 불가 실측 grep)
+- **billing_extra_items** (월별 추가 청구 항목 — KT 명세서 [반영]이 생성): id uuid PK · company_id FK→companies · period_month date(그 달 1일) · kind varchar(30)(`080_call`/`080_fee`/`080_svc`, 향후 수기 항목 확장) · label varchar(200) · supply_amount int(공급가) · source_ref varchar(100)(귀속 근거 — 080 번호) · created_by(FK 없음 — 0728 23503 원칙) · created_at · **billed_billing_id uuid FK→billings ON DELETE SET NULL**(★2026-07-30 2차 ALTER 실행완료 — 소비 마커. ai_credit_transactions.billed_billing_id 선례 미러: 발행이 미소비 행만 싣고 공통 장 id로 마킹 → 분할 기간 재발행 이중청구 구조 차단, 발행 삭제 시 자동 미소비 복귀. Codex 적대검증 1R critical 수용). INDEX(company_id, period_month) + **UNIQUE(period_month, kind, source_ref) WHERE source_ref IS NOT NULL**(같은 달 재반영 중복 차단)
+
 ### 일괄발급·컨펌·세금계산서 5테이블 ★2026-07-28 신설·실측 등재 (+2026-07-29 수동 정산완료 1테이블·1컬럼 — 실행 대기)
 
 > SoT = docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md §1(+§3-1 수동 정산완료). DDL 실행·검증 완료(5테이블, 컬럼 수 5/14/19/10/9).

@@ -53,6 +53,12 @@ import {
 import multer from 'multer';
 import { sniffImageMediaType } from '../utils/event-image-extract';
 import { extractBizRegistration } from '../utils/biz-registration-extract';
+// ★ 2026-07-30 080 청구 CT (서수란 접수 — 번호 매핑 + KT 명세서 판독·반영)
+import {
+  list080Numbers, normalize080Number, format080Number,
+  extractKtStatement, validateKtStatement, reconcileKtStatement, applyKtStatement,
+  signKtStatement,
+} from '../utils/billing-080';
 
 // SMTP transporter (재사용)
 // ★ 2026-07-26 타임아웃 3종 명시 — 정산서 발송은 **행 잠금을 든 트랜잭션 안에서** SMTP를 부른다.
@@ -785,6 +791,193 @@ router.post('/biz-registration-extract', (req: Request, res: Response) => {
       return res.status(500).json({ success: false, error: error?.message || '사업자등록증 판독 실패' });
     }
   });
+});
+
+// ════════════════════════════════════════════════════════════════
+// 080 청구 (★2026-07-30 서수란 접수 — 번호↔회사 매핑 + KT 명세서 업로드 → 통화료 자동 귀속)
+//   CT = utils/billing-080.ts. 금액은 전부 공급가(VAT는 청구서가 파생 — 0726 원칙).
+// ════════════════════════════════════════════════════════════════
+
+// GET /080-numbers — 매핑 목록 (회사명 조인)
+router.get('/080-numbers', async (_req: Request, res: Response) => {
+  try {
+    const numbers = await list080Numbers();
+    return res.json({ success: true, numbers: numbers.map((n) => ({ ...n, display_number: format080Number(n.number) })) });
+  } catch (error: any) {
+    console.error('080 번호 목록 오류:', error?.message || error);
+    return res.status(500).json({ success: false, error: '080 번호 목록 조회 실패' });
+  }
+});
+
+// POST /080-numbers — 등록/수정 (id 있으면 수정). 번호는 숫자만 저장·전사 유일.
+router.post('/080-numbers', async (req: Request, res: Response) => {
+  try {
+    const { id, number, company_id, label, monthly_fee_supply, kt_fee_supply, charge_call_fee, is_active, memo } = req.body || {};
+    const digits = normalize080Number(number);
+    if (digits.length < 9) return res.status(400).json({ success: false, error: '080 번호를 정확히 입력해주세요.' });
+    if (!company_id) return res.status(400).json({ success: false, error: '회사를 선택해주세요.' });
+    const monthlyFee = Math.round(Number(monthly_fee_supply));
+    const ktFee = Math.round(Number(kt_fee_supply));
+    if (!Number.isFinite(monthlyFee) || monthlyFee < 0 || !Number.isFinite(ktFee) || ktFee < 0) {
+      return res.status(400).json({ success: false, error: '이용료·부가서비스 금액(공급가)을 0 이상 정수로 입력해주세요.' });
+    }
+    const params = [
+      digits, company_id, String(label || '').slice(0, 100) || null,
+      monthlyFee, ktFee, charge_call_fee !== false, is_active !== false,
+      String(memo || '').slice(0, 500) || null,
+    ];
+    if (id) {
+      const r = await pool.query(
+        `UPDATE billing_080_numbers SET number=$1, company_id=$2, label=$3, monthly_fee_supply=$4,
+                kt_fee_supply=$5, charge_call_fee=$6, is_active=$7, memo=$8, updated_at=NOW()
+          WHERE id=$9 RETURNING id`,
+        [...params, id],
+      );
+      if (r.rows.length === 0) return res.status(404).json({ success: false, error: '수정할 번호를 찾을 수 없습니다.' });
+      return res.json({ success: true, id: r.rows[0].id });
+    }
+    const r = await pool.query(
+      `INSERT INTO billing_080_numbers (number, company_id, label, monthly_fee_supply, kt_fee_supply, charge_call_fee, is_active, memo)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      params,
+    );
+    return res.json({ success: true, id: r.rows[0].id });
+  } catch (error: any) {
+    if (String(error?.code) === '23505') {
+      return res.status(409).json({ success: false, error: '이미 등록된 번호입니다. 목록에서 수정해주세요.' });
+    }
+    console.error('080 번호 저장 오류:', error?.message || error);
+    return res.status(500).json({ success: false, error: '080 번호 저장 실패' });
+  }
+});
+
+// DELETE /080-numbers/:id — 매핑 삭제. 반영된 항목(billing_extra_items)은 남는다(청구 근거 보존).
+router.delete('/080-numbers/:id', async (req: Request, res: Response) => {
+  try {
+    const r = await pool.query(`DELETE FROM billing_080_numbers WHERE id = $1 RETURNING id`, [req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ success: false, error: '삭제할 번호를 찾을 수 없습니다.' });
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('080 번호 삭제 오류:', error?.message || error);
+    return res.status(500).json({ success: false, error: '080 번호 삭제 실패' });
+  }
+});
+
+// POST /kt-statement/parse — KT 명세서 PDF/이미지 판독 (저장 0 — 결과는 화면 확인용)
+//   검산 실패도 결과와 함께 돌려준다(valid=false) — 화면이 사유를 보여주고 [반영]만 막는다.
+router.post('/kt-statement/parse', (req: Request, res: Response) => {
+  bizRegUpload.single('image')(req as any, res as any, async (uploadErr: any) => {
+    if (uploadErr) return res.status(400).json({ success: false, error: uploadErr.message || '파일 업로드 오류' });
+    try {
+      const file = (req as any).file as Express.Multer.File | undefined;
+      if (!file) return res.status(400).json({ success: false, error: 'KT 명세서 PDF 또는 이미지를 올려주세요.' });
+      const sniffed = sniffPdf(file.buffer) ? 'application/pdf' : sniffImageMediaType(file.buffer);
+      if (!sniffed) return res.status(400).json({ success: false, error: '파일 형식을 확인할 수 없습니다. PDF나 JPG/PNG로 다시 올려주세요.' });
+      const parsed = await extractKtStatement({
+        image: { media_type: sniffed, data: file.buffer.toString('base64') },
+        adminId: (req as any).user?.userId || null,
+      });
+      const validation = validateKtStatement(parsed);
+      const rows = await reconcileKtStatement(parsed.entries);
+      return res.json({
+        success: true,
+        usage_period: parsed.usage_period,
+        count_080: parsed.count_080,
+        total_080: parsed.total_080,
+        valid: validation.ok,
+        validation_errors: validation.errors,
+        rows,
+        // ★ 판독 결과 전문 + 서버 서명 — [반영]이 이걸 그대로 되보내고 서버가 서명·검산을 다시 확인한다.
+        //   서명은 **검산 통과 결과에만** 발급한다(Codex 3R — 무효 전문에 서명을 주면 NaN→null→0 왕복으로
+        //   "판독 불가 통화료"가 0원으로 반영될 길이 열린다). 서명 없음 = 반영 불가.
+        entries: parsed.entries,
+        signature: validation.ok ? signKtStatement(parsed) : null,
+      });
+    } catch (error: any) {
+      console.error('KT 명세서 판독 오류:', error?.message || error);
+      return res.status(500).json({ success: false, error: error?.message || 'KT 명세서 판독 실패' });
+    }
+  });
+});
+
+// POST /kt-statement/apply — 판독 결과 확정 반영 → billing_extra_items 생성.
+//   ★ 입력 = 판독 결과 전문(statement) — CT가 검산을 서버에서 다시 실행한다(클라이언트 금액 신뢰 금지 — Codex 1R).
+router.post('/kt-statement/apply', async (req: Request, res: Response) => {
+  try {
+    const { period_month, statement, signature } = req.body || {};
+    if (!statement || !Array.isArray(statement.entries) || statement.entries.length === 0) {
+      return res.status(400).json({ success: false, error: '반영할 판독 결과가 없습니다. 명세서를 다시 판독해주세요.' });
+    }
+    const result = await applyKtStatement({
+      periodMonth: String(period_month || ''),
+      statement,
+      signature: String(signature || ''),
+      adminId: (req as any).user?.userId || null,
+    });
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error('KT 명세서 반영 오류:', error?.message || error);
+    return res.status(400).json({ success: false, error: error?.message || 'KT 명세서 반영 실패' });
+  }
+});
+
+// GET /extra-items?month=YYYY-MM — 그 달 반영 현황 (회사별)
+router.get('/extra-items', async (req: Request, res: Response) => {
+  try {
+    const month = String(req.query.month || '');
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ success: false, error: '조회 월 형식: YYYY-MM' });
+    const r = await pool.query(
+      `SELECT e.id, e.company_id, c.company_name, e.kind, e.label, e.supply_amount, e.source_ref, e.created_at,
+              e.billed_billing_id
+         FROM billing_extra_items e JOIN companies c ON c.id = e.company_id
+        WHERE e.period_month = ($1 || '-01')::date
+        ORDER BY c.company_name, e.source_ref, e.kind`,
+      [month],
+    );
+    return res.json({ success: true, items: r.rows });
+  } catch (error: any) {
+    console.error('추가 항목 조회 오류:', error?.message || error);
+    return res.status(500).json({ success: false, error: '추가 항목 조회 실패' });
+  }
+});
+
+// DELETE /extra-items?month=YYYY-MM&company_id= — 반영 취소 (회사 단위·발행 전만).
+//   ★ 단일 트랜잭션 + 발행과 같은 회사 잠금 + DELETE 조건에 미소비(billed_billing_id IS NULL) —
+//     발행과 경합해도 소비된 근거 행은 구조적으로 지워지지 않는다(Codex 1R 수용). 발행 존재 조회는 안내용이다.
+router.delete('/extra-items', async (req: Request, res: Response) => {
+  const month = String(req.query.month || '');
+  const companyId = String(req.query.company_id || '');
+  if (!/^\d{4}-\d{2}$/.test(month) || !companyId) {
+    return res.status(400).json({ success: false, error: 'month(YYYY-MM)와 company_id가 필요합니다.' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext('billing'))`, [companyId]);
+    const billed = await client.query(
+      `SELECT id FROM billings WHERE company_id = $1
+         AND billing_start <= (($2 || '-01')::date + INTERVAL '1 month' - INTERVAL '1 day')::date
+         AND billing_end >= ($2 || '-01')::date LIMIT 1`,
+      [companyId, month],
+    );
+    if (billed.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ success: false, error: '그 달 정산이 이미 발행돼 있어 취소할 수 없습니다. 발행 삭제 후 취소해주세요(발행 삭제 시 항목은 자동으로 미소비로 돌아옵니다).' });
+    }
+    const r = await client.query(
+      `DELETE FROM billing_extra_items
+        WHERE company_id = $1 AND period_month = ($2 || '-01')::date AND billed_billing_id IS NULL`,
+      [companyId, month],
+    );
+    await client.query('COMMIT');
+    return res.json({ success: true, deleted: r.rowCount || 0 });
+  } catch (error: any) {
+    try { await client.query('ROLLBACK'); } catch { /* release가 파기 */ }
+    console.error('추가 항목 취소 오류:', error?.message || error);
+    return res.status(500).json({ success: false, error: '추가 항목 취소 실패' });
+  } finally {
+    client.release();
+  }
 });
 
 // GET /agent-price-gaps - 단가가 비어 있는 에이전트 발송ID 목록
