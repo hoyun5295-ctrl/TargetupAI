@@ -1333,6 +1333,20 @@ const [confirmLoading, setConfirmLoading] = useState(false);
 const [confirmStatusFilter, setConfirmStatusFilter] = useState('');
 const [confirmTruncated, setConfirmTruncated] = useState(false);
 const [manualDateDraft, setManualDateDraft] = useState<Record<string, string>>({});
+// ★ 2026-07-30 세금계산서 장부(taxbill_issues — 원본+수정 축) + 수정발행 모달
+const [taxbillRows, setTaxbillRows] = useState<any[]>([]);
+const [taxbillLoading, setTaxbillLoading] = useState(false);
+const [taxbillStatusFilter, setTaxbillStatusFilter] = useState('');
+const [taxbillTruncated, setTaxbillTruncated] = useState(false);
+const [taxbillBoardOpen, setTaxbillBoardOpen] = useState(false);
+const [modifyTarget, setModifyTarget] = useState<any | null>(null); // 수정발행 대상 장(issued 행)
+const [modifyCode, setModifyCode] = useState<number>(6);
+const [modifyWriteDate, setModifyWriteDate] = useState('');
+const [modifyDeltaSupply, setModifyDeltaSupply] = useState('');
+const [modifyDeltaTax, setModifyDeltaTax] = useState('');
+const [modifyCorrectedSupply, setModifyCorrectedSupply] = useState('');
+const [modifyCorrectedTax, setModifyCorrectedTax] = useState('');
+const [modifySubmitting, setModifySubmitting] = useState(false);
 // ★ 2026-07-29 수동 정산완료 — 우리 정산으로 발행할 수 없어 사람이 따로 처리한 회사의 그 달 기록.
 //   담긴 좌/우 목록의 다중 선택(빼기)도 여기에 둔다 — 91개사를 한 줄씩 빼는 것은 쓸 수 없다.
 const [bulkManualRows, setBulkManualRows] = useState<any[]>([]);
@@ -1613,6 +1627,104 @@ const handleManualIssueDate = async (confirmationId: string) => {
 const CONFIRM_STATUS_LABELS: Record<string, string> = {
   pending: '컨펌 대기', confirmed: '컨펌됨', due: '기한 경과', objected: '이의신청',
   manual_wait: '날짜 지정 대기', ready: '계산서 발급 대기', issued: '발급 완료',
+};
+
+// ★ 2026-07-30 세금계산서 장부 — 컨펌 추적과 다른 축(정산 1건에 원본+수정 N장)
+const TAXBILL_STATUS_LABELS: Record<string, string> = {
+  ready: '발급 대기', submitted: '발행 확인 중', issued: '발행 완료', failed: '실패', cancelled: '취소',
+};
+const MODIFY_CODE_LABELS: Record<number, string> = {
+  1: '기재사항 착오정정 (부+정 2장)', 2: '공급가액 변동 (±1장)', 4: '계약 해제 (-1장)', 6: '착오 이중발급 취소 (-1장)',
+};
+
+const loadTaxbillIssues = async (statusFilter?: string) => {
+  const { start, end } = monthToPeriod(bulkMonth);
+  setTaxbillLoading(true);
+  try {
+    const token = localStorage.getItem('token');
+    const st = statusFilter !== undefined ? statusFilter : taxbillStatusFilter;
+    const q = st ? `&status=${st}` : '';
+    const res = await fetch(`/api/admin/billing/taxbill-issues?start=${start}&end=${end}${q}`, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || '장부 조회 실패');
+    setTaxbillRows(Array.isArray(data.issues) ? data.issues : []);
+    setTaxbillTruncated(!!data.truncated);
+  } catch (e: any) {
+    setBillingToast({ msg: e?.message || '세금계산서 장부 조회 실패', type: 'error' });
+  } finally {
+    setTaxbillLoading(false);
+  }
+};
+
+// 수정발행 모달 열기 — 대상 장 기준으로 입력 초기화
+const openModifyModal = (row: any) => {
+  setModifyTarget(row);
+  setModifyCode(6);
+  setModifyWriteDate('');
+  setModifyDeltaSupply('');
+  setModifyDeltaTax('');
+  setModifyCorrectedSupply(String(Math.trunc(Number(row.supply_amount) || 0)));
+  setModifyCorrectedTax(String(Math.trunc(Number(row.tax_amount) || 0)));
+};
+
+// 빈 문자열·소수·비숫자를 Number 변환 전에 거부 — Number('')=0 함정(D150-3 계열)이 0원 장을 만든다
+const intOrNull = (v: string): number | null => (/^-?\d+$/.test(String(v).trim()) ? Number(v) : null);
+
+const handleModifySubmit = async () => {
+  if (!modifyTarget || modifySubmitting) return;
+  // 서버(planModifyIssue)가 최종 계약을 지키지만, 여기서 먼저 걸러야 사용자가 이유를 바로 본다
+  if (modifyCode === 2 || modifyCode === 4) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(modifyWriteDate)) {
+      setBillingToast({ msg: modifyCode === 2 ? '변동일을 선택해 주세요' : '해제일을 선택해 주세요', type: 'error' });
+      return;
+    }
+  }
+  if (modifyCode === 2 && (intOrNull(modifyDeltaSupply) === null || intOrNull(modifyDeltaTax) === null)) {
+    setBillingToast({ msg: '변동분 공급가액·세액을 정수로 입력해 주세요', type: 'error' });
+    return;
+  }
+  if (modifyCode === 1 && (intOrNull(modifyCorrectedSupply) === null || intOrNull(modifyCorrectedTax) === null)) {
+    setBillingToast({ msg: '정정 후 공급가액·세액을 정수로 입력해 주세요', type: 'error' });
+    return;
+  }
+  setModifySubmitting(true);
+  try {
+    const token = localStorage.getItem('token');
+    const body: any = { code: modifyCode };
+    if (modifyCode === 2 || modifyCode === 4) body.write_date = modifyWriteDate;
+    if (modifyCode === 2) { body.delta_supply = intOrNull(modifyDeltaSupply); body.delta_tax = intOrNull(modifyDeltaTax); }
+    if (modifyCode === 1) { body.corrected_supply = intOrNull(modifyCorrectedSupply); body.corrected_tax = intOrNull(modifyCorrectedTax); }
+    const res = await fetch(`/api/admin/billing/taxbill-issues/${modifyTarget.id}/modify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || '수정발행 요청 실패');
+    setBillingToast({ msg: data?.message || '수정세금계산서를 발급 대기에 올렸습니다', type: 'success' });
+    setModifyTarget(null);
+    loadTaxbillIssues();
+  } catch (e: any) {
+    setBillingToast({ msg: e?.message || '수정발행 요청 실패', type: 'error' });
+  } finally {
+    setModifySubmitting(false);
+  }
+};
+
+// 실패 장 재시도 — failed → ready (문서번호가 결정적이라 같은 번호로 재발행 = 중복 없음)
+const handleTaxbillRetry = async (issueId: string) => {
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/admin/billing/taxbill-issues/${issueId}/retry`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || '재시도 요청 실패');
+    setBillingToast({ msg: data?.message || '발급 대기에 다시 올렸습니다', type: 'success' });
+    loadTaxbillIssues();
+  } catch (e: any) {
+    setBillingToast({ msg: e?.message || '재시도 요청 실패', type: 'error' });
+  }
 };
 
 const handleBillingGenerate = async () => {
@@ -9719,6 +9831,153 @@ const handleApproveRequest = async (id: string) => {
                     ))}
                   </div>
                 )}
+
+                {/* ── 세금계산서 장부 (★2026-07-30 — 원본+수정 축, 수정발행 진입점) ── */}
+                <div className="mt-4 pt-3 border-t">
+                  <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                    <button onClick={() => { const next = !taxbillBoardOpen; setTaxbillBoardOpen(next); if (next) loadTaxbillIssues(); }}
+                      className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${taxbillBoardOpen ? 'bg-slate-700 text-white border-slate-700' : 'text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+                      세금계산서 장부 {taxbillBoardOpen ? '접기' : '열기'}
+                    </button>
+                    {taxbillBoardOpen && ['', 'ready', 'submitted', 'issued', 'failed'].map((s) => (
+                      <button key={s || 'all'}
+                        onClick={() => { setTaxbillStatusFilter(s); loadTaxbillIssues(s); }}
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${taxbillStatusFilter === s ? 'bg-indigo-600 text-white border-indigo-600' : 'text-slate-500 border-slate-300 hover:bg-slate-50'}`}>
+                        {s === '' ? '전체' : TAXBILL_STATUS_LABELS[s]}
+                      </button>
+                    ))}
+                    {taxbillBoardOpen && <button onClick={() => loadTaxbillIssues()} className="ml-auto text-[11px] text-slate-500 hover:underline">새로고침</button>}
+                  </div>
+                  {taxbillBoardOpen && (
+                    taxbillLoading ? (
+                      <p className="text-sm text-gray-400 text-center py-4">불러오는 중...</p>
+                    ) : taxbillRows.length === 0 ? (
+                      <p className="text-sm text-gray-400 text-center py-4">대상월에 장부 내역이 없습니다.</p>
+                    ) : (
+                      <>
+                        {taxbillTruncated && (
+                          <p className="mb-2 px-2 py-1.5 bg-amber-50 text-amber-700 rounded text-[11px]">500건을 넘어 일부만 표시 중입니다 — 상태 필터로 좁혀 주세요.</p>
+                        )}
+                        <div className="max-h-72 overflow-y-auto divide-y">
+                          {taxbillRows.map((t) => (
+                            <div key={t.id} className="py-2 text-xs">
+                              <div className="flex items-center gap-2">
+                                <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                  t.status === 'issued' ? 'bg-emerald-100 text-emerald-700'
+                                  : t.status === 'failed' ? 'bg-rose-100 text-rose-600'
+                                  : t.status === 'submitted' ? 'bg-sky-100 text-sky-700'
+                                  : t.status === 'ready' ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-500'
+                                }`}>
+                                  {TAXBILL_STATUS_LABELS[t.status] || t.status}
+                                </span>
+                                <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${t.kind === 'modify' ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-600'}`}>
+                                  {t.kind === 'modify' ? `수정(사유${t.modify_code})` : '원본'}
+                                </span>
+                                <span className="font-medium text-gray-800 truncate">{t.company_name}</span>
+                                <span className="text-gray-400">{t.issue_date}</span>
+                                <span className={`ml-auto shrink-0 font-semibold ${Number(t.total_amount) < 0 ? 'text-rose-600' : 'text-gray-700'}`}>
+                                  {(Number(t.total_amount) || 0).toLocaleString()}원
+                                </span>
+                                {t.status === 'issued' && t.nts_confirm_num && (
+                                  <button onClick={() => openModifyModal(t)}
+                                    className="shrink-0 px-2 py-0.5 bg-orange-500 text-white rounded text-[10px] font-semibold hover:bg-orange-600">수정발행</button>
+                                )}
+                                {t.status === 'failed' && (
+                                  <button onClick={() => handleTaxbillRetry(t.id)}
+                                    className="shrink-0 px-2 py-0.5 bg-slate-500 text-white rounded text-[10px] font-semibold hover:bg-slate-600">재시도</button>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-400">
+                                {t.nts_confirm_num ? <span>승인번호 {t.nts_confirm_num}</span> : <span>승인번호 대기</span>}
+                                {t.org_nts_confirm_num && <span>당초 {t.org_nts_confirm_num}</span>}
+                                {t.issued_at && <span>발행 {new Date(t.issued_at).toLocaleString('ko-KR')}</span>}
+                              </div>
+                              {t.error && (
+                                <p className="mt-1 px-2 py-1.5 bg-rose-50 text-rose-700 rounded text-[11px] whitespace-pre-wrap">{t.error}</p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── 수정세금계산서 발급 모달 (★2026-07-30) ── */}
+            {modifyTarget && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+                  <div className="p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-1">수정세금계산서 발급</h3>
+                    <p className="text-sm text-gray-600 mb-1"><strong>{modifyTarget.company_name}</strong> · 당초 작성일자 {modifyTarget.issue_date}</p>
+                    <p className="text-xs text-gray-500 mb-4">
+                      당초 공급가액 {Number(modifyTarget.supply_amount).toLocaleString()}원 · 세액 {Number(modifyTarget.tax_amount).toLocaleString()}원 · 승인번호 {modifyTarget.nts_confirm_num}
+                    </p>
+
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">수정 사유</label>
+                    <select value={modifyCode} onChange={(e) => setModifyCode(Number(e.target.value))}
+                      className="w-full px-3 py-2 border rounded-lg text-sm mb-3 focus:ring-2 focus:ring-indigo-500 outline-none">
+                      {[6, 4, 2, 1].map((c) => <option key={c} value={c}>{MODIFY_CODE_LABELS[c]}</option>)}
+                    </select>
+
+                    {(modifyCode === 2 || modifyCode === 4) && (
+                      <div className="mb-3">
+                        <label className="block text-xs font-semibold text-gray-600 mb-1">{modifyCode === 2 ? '변동일 (작성일자)' : '해제일 (작성일자)'}</label>
+                        <input type="date" value={modifyWriteDate} onChange={(e) => setModifyWriteDate(e.target.value)}
+                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                        {modifyCode === 2 && <p className="mt-1 text-[10px] text-amber-600">공급가액 변동은 변동일 기준 익월 10일이 발급 기한입니다.</p>}
+                      </div>
+                    )}
+
+                    {modifyCode === 2 && (
+                      <div className="grid grid-cols-2 gap-2 mb-3">
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">공급가액 변동분 (±원)</label>
+                          <input type="number" step="1" value={modifyDeltaSupply} onChange={(e) => setModifyDeltaSupply(e.target.value)} placeholder="-200000"
+                            className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">세액 변동분 (±원)</label>
+                          <input type="number" step="1" value={modifyDeltaTax} onChange={(e) => setModifyDeltaTax(e.target.value)} placeholder="-20000"
+                            className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                        </div>
+                      </div>
+                    )}
+
+                    {modifyCode === 1 && (
+                      <div className="grid grid-cols-2 gap-2 mb-3">
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">정정 후 공급가액 (원)</label>
+                          <input type="number" step="1" value={modifyCorrectedSupply} onChange={(e) => setModifyCorrectedSupply(e.target.value)}
+                            className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">정정 후 세액 (원)</label>
+                          <input type="number" step="1" value={modifyCorrectedTax} onChange={(e) => setModifyCorrectedTax(e.target.value)}
+                            className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="px-3 py-2 bg-slate-50 rounded-lg text-[11px] text-slate-600">
+                      {modifyCode === 6 && <>당초 전액을 취소하는 <strong className="text-rose-600">-{Number(modifyTarget.total_amount).toLocaleString()}원</strong> 1장이 만들어집니다. 작성일자는 당초 작성일자 그대로입니다.</>}
+                      {modifyCode === 4 && <>해제일 작성일자로 당초 전액을 취소하는 <strong className="text-rose-600">-{Number(modifyTarget.total_amount).toLocaleString()}원</strong> 1장이 만들어집니다.</>}
+                      {modifyCode === 2 && <>변동분만큼의 ±1장이 만들어집니다. 감액이면 음수로 입력합니다.</>}
+                      {modifyCode === 1 && <>당초 전액 취소(부) 1장 + 정정 금액(정) 1장, 총 2장이 함께 만들어집니다.</>}
+                      <span className="block mt-1 text-slate-400">발급 대기에 오르면 5분 주기 워커가 팝빌로 발행합니다.</span>
+                    </div>
+                  </div>
+                  <div className="flex border-t">
+                    <button onClick={() => setModifyTarget(null)} disabled={modifySubmitting}
+                      className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
+                    <button onClick={handleModifySubmit} disabled={modifySubmitting}
+                      className="flex-1 px-4 py-3 bg-orange-500 text-white font-semibold hover:bg-orange-600 transition-colors disabled:opacity-50">
+                      {modifySubmitting ? '요청 중...' : '발급 대기에 올리기'}
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>

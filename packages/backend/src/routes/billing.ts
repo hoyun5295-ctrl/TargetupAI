@@ -37,6 +37,8 @@ import {
 import { getAgentCustNameMap } from '../utils/pay-stats';
 // ★ 2026-07-28 발행 코어 CT — /generate와 거래내역서 일괄발급 배치가 같은 함수를 쓴다(동작 무변경 추출).
 import { issueBilling, BillingIssueError } from '../utils/billing-issue';
+// ★ 2026-07-30 수정세금계산서 — 사유별 장 구성 계약(순수). 라우트는 이 계획을 트랜잭션 INSERT만 한다.
+import { planModifyIssue, ModifyPlanError } from '../utils/taxbill-popbill';
 // ★ 2026-07-28 정산 설정·담당자 CT — 고객사 상세 "정산" 탭 + 일괄발급·발송·계산서 워커가 공유.
 import {
   getCompanyBillingSettings, upsertCompanyBillingSettings,
@@ -525,6 +527,173 @@ router.get('/confirmations', async (req: Request, res: Response) => {
       return res.status(503).json({ error: 'DB 마이그레이션 필요 — invoice_confirmations 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('컨펌 현황 조회 오류:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /taxbill-issues?start&end&status — 세금계산서 장부 목록 (원본+수정 — 컨펌 추적과 다른 축)
+router.get('/taxbill-issues', async (req: Request, res: Response) => {
+  try {
+    const start = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.start || '')) ? String(req.query.start) : null;
+    const end = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.end || '')) ? String(req.query.end) : null;
+    const ALLOWED = ['ready', 'submitted', 'issued', 'failed', 'cancelled'];
+    const status = ALLOWED.includes(String(req.query.status || '')) ? String(req.query.status) : null;
+    const r = await pool.query(
+      `SELECT t.id, t.kind, t.modify_code, t.org_nts_confirm_num, t.invoicer_mgt_key, t.nts_confirm_num,
+              to_char(t.issue_date, 'YYYY-MM-DD') AS issue_date,
+              t.supply_amount, t.tax_amount, t.total_amount, t.status, t.error,
+              t.created_at, t.issued_at,
+              to_char(b.billing_start, 'YYYY-MM-DD') AS billing_start,
+              to_char(b.billing_end, 'YYYY-MM-DD')   AS billing_end,
+              c.company_name
+         FROM taxbill_issues t
+         LEFT JOIN billings b ON b.id = t.billing_id
+         LEFT JOIN companies c ON c.id = t.company_id
+        WHERE ($1::date IS NULL OR COALESCE(b.billing_end, t.issue_date) >= $1::date)
+          AND ($2::date IS NULL OR COALESCE(b.billing_start, t.issue_date) <= $2::date)
+          AND ($3::text IS NULL OR t.status = $3::text)
+        ORDER BY t.created_at DESC
+        LIMIT 501`,
+      [start, end, status],
+    );
+    const truncated = r.rows.length > 500;
+    return res.json({ issues: truncated ? r.rows.slice(0, 500) : r.rows, truncated });
+  } catch (error: any) {
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('세금계산서 장부 조회 오류:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /taxbill-issues/:id/modify — 수정세금계산서 발급 요청 (사유 1·2·4·6)
+//   장 구성은 planModifyIssue(순수·사유별 부호 계약)가 정하고, 여기는 그 계획을 한 트랜잭션으로
+//   ready에 넣기만 한다 — 실제 발행·효과 검증은 워커(issueReadyTaxbills)의 몫.
+router.post('/taxbill-issues/:id/modify', async (req: Request, res: Response) => {
+  try {
+    const origId = String(req.params.id || '');
+    if (!/^[0-9a-f-]{36}$/i.test(origId)) return res.status(400).json({ error: '장부 id 형식 오류' });
+    const body = (req.body || {}) as any;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // 당초 장 — 발행 완료(승인번호 보유)만 수정 대상. FOR UPDATE로 이중 클릭 직렬화.
+      const o = await client.query(
+        `SELECT t.id, t.confirmation_id, t.billing_id, t.company_id, t.status, t.nts_confirm_num,
+                to_char(t.issue_date, 'YYYY-MM-DD') AS issue_date,
+                t.supply_amount, t.tax_amount, t.total_amount
+           FROM taxbill_issues t
+          WHERE t.id = $1::uuid
+            FOR UPDATE`,
+        [origId],
+      );
+      const orig = o.rows[0];
+      if (!orig) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: '장부를 찾을 수 없습니다.' });
+      }
+      if (orig.status !== 'issued' || !String(orig.nts_confirm_num || '').trim()) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: '발행 완료(국세청승인번호 수신) 상태에서만 수정발행이 가능합니다. 전송실패 건은 팝빌 사이트에서 재전송 후 진행해 주세요.' });
+      }
+      // 같은 당초 장의 수정이 아직 진행 중이면 중복 생성 차단(연타·동시 요청).
+      const inflight = await client.query(
+        `SELECT count(*)::int AS cnt FROM taxbill_issues
+          WHERE org_nts_confirm_num = $1 AND status IN ('ready', 'submitted')`,
+        [orig.nts_confirm_num],
+      );
+      if (Number(inflight.rows[0]?.cnt ?? 0) > 0) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: '이 장의 수정발행이 이미 진행 중입니다. 완료 후 다시 시도해 주세요.' });
+      }
+
+      // 사유별 장 계획(순수) — 계약 위반은 throw로 떨어져 400이 된다.
+      const planned = planModifyIssue(
+        {
+          ntsConfirmNum: orig.nts_confirm_num,
+          issueDate: String(orig.issue_date),
+          supplyAmount: Number(orig.supply_amount),
+          taxAmount: Number(orig.tax_amount),
+          totalAmount: Number(orig.total_amount),
+        },
+        {
+          code: Number(body.code),
+          writeDate: body.write_date ?? null,
+          // 금액은 원형 그대로 — 여기서 Number()를 걸면 Number('')=0이 검증(requiredInt)보다 먼저
+          // 값을 굳혀 빈 입력이 0원 장이 된다(0730 Codex 4R ③). 검증·변환은 planModifyIssue가 한다.
+          deltaSupply: body.delta_supply,
+          deltaTax: body.delta_tax,
+          correctedSupply: body.corrected_supply,
+          correctedTax: body.corrected_tax,
+        },
+      );
+
+      for (const row of planned) {
+        await client.query(
+          `INSERT INTO taxbill_issues (
+             confirmation_id, billing_id, company_id, kind, modify_code, org_nts_confirm_num,
+             issue_date, supply_amount, tax_amount, total_amount, status, created_by
+           ) VALUES ($1, $2, $3, 'modify', $4, $5, $6::date, $7, $8, $9, 'ready', $10)`,
+          [
+            orig.confirmation_id, orig.billing_id, orig.company_id,
+            row.modifyCode, row.orgNtsConfirmNum, row.issueDate,
+            row.supplyAmount, row.taxAmount, row.totalAmount,
+            (req as any).user?.userId ?? null,
+          ],
+        );
+      }
+      await client.query('COMMIT');
+      return res.json({
+        success: true,
+        message: `수정세금계산서 ${planned.length}장을 발급 대기에 올렸습니다. (사유 ${body.code})`,
+        planned: planned.map((p) => ({ issueDate: p.issueDate, supply: p.supplyAmount, tax: p.taxAmount, total: p.totalAmount })),
+      });
+    } catch (txErr: any) {
+      try { await client.query('ROLLBACK'); } catch { /* 응답이 사실을 전달한다 */ }
+      // 계약 위반(전용 타입)만 400 — 코드 첫 글자 휴리스틱은 DB·연결 장애까지 400으로 숨긴다(Codex 3R ④).
+      if (txErr instanceof ModifyPlanError) {
+        return res.status(400).json({ error: txErr.message });
+      }
+      throw txErr;
+    } finally {
+      client.release();
+    }
+  } catch (error: any) {
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('수정세금계산서 생성 오류:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /taxbill-issues/:id/retry — 실패 장 재시도 (failed → ready)
+//   문서번호가 행마다 결정적이라 재시도가 같은 번호로 나간다 = 팝빌 쪽 중복 발행 없음.
+//   사유 1 반쪽(부만 발행·정 실패)도 이 경로로 정 장만 다시 올려 짝을 완성한다.
+router.post('/taxbill-issues/:id/retry', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: '장부 id 형식 오류' });
+    const r = await pool.query(
+      `UPDATE taxbill_issues SET status = 'ready', error = NULL
+        WHERE id = $1::uuid AND status = 'failed'
+        RETURNING id`,
+      [id],
+    );
+    if (r.rows.length === 0) {
+      return res.status(409).json({ error: '실패 상태의 장만 재시도할 수 있습니다. (이미 처리 중이거나 발행된 장일 수 있습니다)' });
+    }
+    return res.json({ success: true, message: '발급 대기에 다시 올렸습니다. 5분 주기 워커가 재발행합니다.' });
+  } catch (error: any) {
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('세금계산서 재시도 오류:', error);
     return res.status(500).json({ error: error.message });
   }
 });

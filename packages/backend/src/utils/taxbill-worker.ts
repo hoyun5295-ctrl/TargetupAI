@@ -6,13 +6,15 @@
  *   1) `pending`이고 기한(taxbill_due_at = min(발송+3일, 익월 10일 00:00 KST)) 도래 → `due`
  *   2) `confirmed`·`due` → `ready` (발급 큐)
  *
- * ⛔ 팝빌 미연동 상태에서는 `ready`가 종착지다 — 여기서 멈추고 슈퍼관리자 "계산서 발급 대기" 목록에 보인다.
- *    연동 후 이 워커 뒤에 발급 호출(utils/taxbill-popbill.ts)이 붙는다. 그 전에는 어떤 외부 호출도 없다.
+ * ★ 2026-07-30 팝빌 연동 — ready 이후를 utils/taxbill-popbill.ts `issueReadyTaxbills`가 소비한다.
+ *    단 이중 게이트(POPBILL_ENABLED='true' + ENV 3종) 안에서만 — 게이트가 닫혀 있으면 예전처럼
+ *    `ready`가 종착지고 어떤 외부 호출도 없다(슈퍼관리자 "계산서 발급 대기" 목록에 보인다).
  *  - `manual_wait`(직접선택 정책)·`objected`(이의신청)는 어떤 전이에도 걸리지 않는다 — 사람 몫.
  *  - `superseded_at`(재발급 무효화) 행도 제외.
  */
 
 import pool from '../config/database';
+import { isPopbillEnabled, issueReadyTaxbills } from './taxbill-popbill';
 
 const log = (msg: string) => console.log(`[세금계산서워커] ${msg}`);
 
@@ -49,7 +51,14 @@ async function tick(): Promise<void> {
         )`,
     );
     if ((due.rowCount || 0) > 0 || (ready.rowCount || 0) > 0) {
-      log(`기한 도래 ${due.rowCount || 0}건 → due · 발급 대기 장부 생성 ${ready.rowCount || 0}건 → taxbill_issues ready (팝빌 연동 전 — 발급 호출 없음)`);
+      log(`기한 도래 ${due.rowCount || 0}건 → due · 발급 대기 장부 생성 ${ready.rowCount || 0}건 → taxbill_issues ready`);
+    }
+
+    // ★ 2026-07-30 팝빌 발행 패스 — 게이트가 닫혀 있으면 함수가 스스로 skip을 돌려준다(외부 호출 0).
+    //   여기서 한 번 더 isPopbillEnabled를 보는 것은 로그 소음 방지용이다(5분마다 skip 로그 금지).
+    if (isPopbillEnabled()) {
+      const pass = await issueReadyTaxbills(10);
+      if (pass.skipped) log(`발행 패스 건너뜀 — ${pass.skipped}`);
     }
   } catch (err: any) {
     const msg = err?.message || '';
@@ -65,5 +74,5 @@ export function startTaxbillWorker(): void {
   // 부팅 30초 후 1회 + 5분 주기. 상태 전이 UPDATE 두 문장뿐이라 가볍다.
   setTimeout(() => { void tick(); }, 30 * 1000);
   setInterval(() => { void tick(); }, 5 * 60 * 1000);
-  log('시작 — 5분 주기 (pending→due, confirmed·due→ready. 팝빌 연동 전이라 ready에서 정지)');
+  log(`시작 — 5분 주기 (pending→due, confirmed·due→ready${isPopbillEnabled() ? ', 팝빌 발행 패스 ON' : '. 팝빌 게이트 닫힘 — ready에서 정지'})`);
 }

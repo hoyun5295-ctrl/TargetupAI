@@ -52,8 +52,8 @@
 > ⛔ 브랜드 단가 미설정 = 후불 발행 차단·선불 발송 차단(0원 청구보다 막는 쪽) / 브랜드 단가는 **알림톡을 상속하지 않는다** / 유형을 늘릴 땐 `utils/billing-types.ts` 표에만 추가한다(복제 10곳을 거기서 파생 — 손으로 적으면 그 유형이 조용히 0원이 되거나 발행이 막힌다) / `send_channel='kakao'`는 이름만 카카오고 실체가 브랜드메시지다
 > 잔여 = 단가 입력·발행 실측 · **웹 오픈 전 2건**(템플릿형 `IMC_BM_BASIC_BIZ_MSG` 집계 미배선 — 두 축이 함께 0건이라 경보도 안 울린다 · AI 타겟추출이 대상 전량을 한 번에 받아 대규모에서 페이징 필요)
 
-### 0728 정산 파이프라인 — 배포완료, 팝빌 실호출만 잔여
-> SoT [일괄발급·컨펌·세금계산서](docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md) §9(종결 상태·이월) · §7-0(팝빌 API 요지) · 기억 [[project_2026_0728_bulk_invoice_confirm_taxbill]] [[project_2026_0728_tickets_journey_triggers]] · 다음 = 팝빌 공동인증서 등록 → 테스트베드 웹훅·포인트 → `RegistIssue` 연결(ENV 4종 등록됨)
+### 0728 정산 파이프라인 — 팝빌 발행·수정발행 코드완료(Codex 5R approve), 배포·테스트베드 실측 대기
+> SoT [일괄발급·컨펌·세금계산서](docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md) §9(종결 상태·이월) · §7-0(팝빌 API 요지) · 기억 [[project_2026_0728_bulk_invoice_confirm_taxbill]] 0730(2)절(구현·함정·테스트베드 절차 전부) · 다음 = 배포(백엔드+프론트+`npm install popbill`) → 테스트베드 실측(Callback URL → 방화벽 → `POPBILL_ENABLED=true` → 발급·웹훅·수정발행 각 1건) → 운영 전환
 > ⛔ 신규 테이블 실행자 컬럼에 users FK 금지 = SCHEMA.md 공통 원칙(0728 `23503` 사고) / 공급받는자 사업자 우선순위 = 계정 → 회사(`billing_contacts`) → `companies` 3단, 섞지 않는다(**0729 PDF 배선 완료** — `pickTaxbillParty` 순수 함수 + 거래내역서 단일 로더) / **통지 추적행은 메일보다 먼저 만든다**(SoT §4-1 — 발송 뒤에 만들면 부분발송·중복·고아PDF가 되살아난다)
 > 잔여 = 화면 실측 8건(정산 탭 저장 / 일괄발급 / 공개 컨펌=CSP / 현황판 / 사업자등록증 자동입력 / 회사 계산서 사업자 / 메일 재시도 / 미발송 필터) · 메일 첨부 실물(PDF 제목·파일명) · 접수·여정 실측 4건([[project_2026_0728_tickets_journey_triggers]]) · **재구성분 Codex 미검토**(4·5차 무산)
 

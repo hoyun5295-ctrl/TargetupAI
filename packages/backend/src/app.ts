@@ -85,6 +85,8 @@ import { startPayIngestMonitor } from './utils/pay-ingest-monitor';
 import { startTrialDowngradeWorker } from './utils/trial-downgrade-worker';
 // ★ 2026-07-28 세금계산서 상태 전이 워커 (pending→due, confirmed·due→ready. 팝빌 연동 전 = ready 정지)
 import { startTaxbillWorker } from './utils/taxbill-worker';
+// ★ 2026-07-30: 팝빌 세금계산서 웹훅 (공개 — 팝빌 서버 POST 수신)
+import popbillWebhookRouter from './routes/popbill-webhook';
 // ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 30일 무료체험 자동 만료 Cron (매일 04:00 KST 로그)
 import { startAiOperatorTrialExpireWorker } from './utils/ai-operator-trial-expire-worker';
 // ★ D219+ Part 2 (2026-05-27): Wizard 종결 회사 매일 9시 인사이트 메일 (1시간 cron)
@@ -351,6 +353,8 @@ app.use('/api/naver-commerce', naverCommerceRoutes);
 // ★ 2026-07-04: 아임웹 OAuth callback (authenticate 우회) → imwebRoutes보다 먼저 등록
 app.use('/api/imweb', imwebCallbackRouter);
 app.use('/api/imweb', imwebRoutes);
+// ★ 2026-07-30: 팝빌 세금계산서 웹훅 (인증 우회 — 팝빌 서버가 POST. 항상 200 "OK" 계약, X-Api-Key 옵션)
+app.use('/api/popbill', popbillWebhookRouter);
 // ★ 2026-06-18: 고도몰(NHN커머스) BYO-키 폴링 커넥터 (OAuth/Webhook 없음 — callback 라우터 불필요)
 app.use('/api/godo', godoRoutes);
 // ★ 2026-07-06: 메이크샵 커머스 API 폴링 커넥터 (client_credentials 자격 입력 — OAuth/webhook 없음)
