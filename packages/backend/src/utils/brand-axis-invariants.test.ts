@@ -11,9 +11,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
-import { BRAND_CAMPAIGN_CHANNELS, BRAND_CHANNEL_SQL_IN, isBrandOnlyChannel } from './billing-types';
+import { BRAND_CAMPAIGN_CHANNELS, BRAND_CHANNEL_SQL_IN, isBrandOnlyChannel, resolveRefundAxes, BILLING_TYPES } from './billing-types';
+import { MSG_TYPE_TO_USAGE_KEY } from './send-usage-aggregation';
 
 const read = (rel: string) => readFileSync(join(__dirname, rel), 'utf8');
 
@@ -35,37 +36,68 @@ describe('브랜드 채널 판정 — 단일 기준', () => {
   });
 });
 
-describe('집계 두 축이 같은 기준을 쓴다 (소스 스캔)', () => {
-  const agg = read('./send-usage-aggregation.ts');
-
-  // ★ 2026-07-29 부정·개수 검사에서 **긍정 검사로 바꿨다**(Codex 적대검증 수용).
-  //   그 전에는 `bump\(dayData,[^)]*'KAKAO'` 로 잡으려 했는데 `[^)]*`가 `toDayKey(...)`의
-  //   닫는 괄호에서 끊겨, 일자축을 KAKAO로 되돌려도 통과했다 — 막으려던 회귀를 정확히 통과시켰다.
-  //   개수 검사도 무력했다: 단가 게이트에 쓰이는 'BRAND'가 따로 있어 한 arm이 회귀해도 총합이 유지된다.
-
-  it('일자축 브랜드 bump 2곳이 모두 BRAND다', () => {
-    const brandBumps = agg.match(/bump\(dayData, toDayKey\(row\.send_date\), 'BRAND',/g) || [];
-    expect(brandBumps.length).toBe(2);   // 캠페인 arm + 직접발송 arm
-    // 되돌아간 형태가 하나라도 있으면 즉시 실패한다.
-    expect(agg).not.toMatch(/bump\(dayData, toDayKey\(row\.send_date\), 'KAKAO',/);
+describe('브랜드 SMSQ 합류 (2026-07-30 재구축) — 정산·환불 축', () => {
+  it("SMSQ 'F'가 BRAND 청구 키로 변환된다 — 빠지면 브랜드 발송이 0원 청구", () => {
+    expect(BILLING_TYPES.find((t) => t.key === 'BRAND')?.smsqCode).toBe('F');
+    expect(MSG_TYPE_TO_USAGE_KEY.F).toBe('BRAND');
   });
 
-  it('상세축 IMC 행의 유형키가 BRAND다', () => {
-    const detailKeys = agg.match(/typeKey: 'BRAND'/g) || [];
-    expect(detailKeys.length).toBe(1);   // addImcRows 공용 헬퍼 한 곳
-    expect(agg).not.toContain("typeKey: 'KAKAO'");
+  it('환불 축 판정 — 브랜드 전용=BRAND 단일 / both=문자+브랜드 분리 / 그 외=message_type 단일', () => {
+    expect(resolveRefundAxes('kakao', 'LMS')).toEqual([{ type: 'BRAND', scope: 'all' }]);
+    expect(resolveRefundAxes('kakao_brand', 'LMS')).toEqual([{ type: 'BRAND', scope: 'all' }]);
+    expect(resolveRefundAxes('both', 'LMS')).toEqual([
+      { type: 'LMS', scope: 'nonBrand' },
+      { type: 'BRAND', scope: 'brand' },
+    ]);
+    expect(resolveRefundAxes('sms', 'SMS')).toEqual([{ type: 'SMS', scope: 'all' }]);
+    expect(resolveRefundAxes('alimtalk', 'LMS')).toEqual([{ type: 'LMS', scope: 'all' }]);
+  });
+});
+
+describe('차감 축 — 채널 리터럴 판정 금지 (0730 적대검증 critical 재발 차단)', () => {
+  it('대량 직접발송 차감이 축 판정 CT를 쓴다 — 채널 리터럴로 KAKAO를 되살리면 브랜드가 알림톡 단가로 깎인다', () => {
+    const core = read('./direct-send-core.ts');
+    expect(core).toContain('resolveRefundAxes');
+    expect(core).not.toMatch(/===\s*'kakao'\s*\?\s*'KAKAO'/);
   });
 
-  it('브랜드 채널 조건 4곳이 모두 공유 목록을 쓴다', () => {
-    // 일자축 2 + 상세축 2. 하나라도 리터럴로 되돌아가면 그 지점만 kakao_brand를 놓친다.
-    const shared = agg.match(/IN \(\$\{BRAND_CHANNEL_SQL_IN\}\)/g) || [];
-    expect(shared.length).toBe(4);
+  it('워커 미적재 환불도 같은 축 CT를 쓴다', () => {
+    const worker = read('./direct-send-worker.ts');
+    expect(worker).toContain('resolveRefundAxes');
+    expect(worker).not.toMatch(/===\s*'kakao'\s*\?\s*'KAKAO'/);
   });
 
-  it('브랜드 채널을 리터럴로 다시 적은 곳이 없다 — equality와 IN 둘 다', () => {
-    expect(agg).not.toMatch(/send_channel\s*=\s*'(kakao|kakao_brand|both)'/);
-    // `IN ('kakao','both')` 처럼 목록을 손으로 적은 형태도 막는다(앞 정규식이 놓치던 형태).
-    expect(agg).not.toMatch(/send_channel\s+IN\s*\(\s*'/);
+  it('브랜드 전용 발송(CT-12)의 원장 키는 정규형 BRAND뿐이다 — 소문자는 후속 환불이 원장을 못 찾는다', () => {
+    const bm = read('./brand-message.ts');
+    expect(bm).not.toMatch(/prepaid(Deduct|Refund)\([^)]*'brand'/);
+  });
+});
+
+describe('유령 테이블 참조 0건 (소스 스캔) — 재구축 회귀 차단', () => {
+  // IMC_BM_* 테이블은 운영 MySQL에 실재한 적이 없다(1146). 참조가 되살아나면
+  // 그 경로는 "차감은 되고 발송은 조용히 실패"로 돌아간다 — SQL 문자열 참조를 전수 차단한다.
+  const walk = (dir: string, out: string[] = []): string[] => {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) {
+        if (name === 'node_modules' || name === 'dist') continue;
+        walk(p, out);
+      } else if (/\.tsx?$/.test(name) && !name.endsWith('.test.ts')) {
+        out.push(p);
+      }
+    }
+    return out;
+  };
+
+  it('backend src 전체에 IMC_BM 테이블을 읽고 쓰는 SQL이 없다', () => {
+    const srcRoot = join(__dirname, '..');
+    const offenders: string[] = [];
+    for (const file of walk(srcRoot)) {
+      const text = readFileSync(file, 'utf8');
+      // 주석 언급(폐기 기록)은 허용 — FROM/INSERT INTO/DELETE FROM/UPDATE 등 SQL 문맥만 잡는다.
+      if (/(FROM|INTO|UPDATE|JOIN)\s+IMC_BM/i.test(text)) offenders.push(file);
+    }
+    expect(offenders).toEqual([]);
   });
 });
 

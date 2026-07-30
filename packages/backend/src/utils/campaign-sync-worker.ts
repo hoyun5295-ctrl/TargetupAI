@@ -20,7 +20,7 @@
 import { query } from '../config/database';
 import { syncCampaignResults } from './campaign-lifecycle';
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
-import { getAuthSmsTable, bulkInsertSmsQueue, getCompanySmsTablesWithLogs, smsCampaignCountsSafe, kakaoBatchAggByGroup, getPlatformNoticeCallback } from './sms-queue';
+import { getAuthSmsTable, bulkInsertSmsQueue, getCompanySmsTablesWithLogs, smsCampaignCountsSafe, getPlatformNoticeCallback } from './sms-queue';
 import { shouldFinalizeCampaign } from './sms-table-split';
 
 const INTERVAL_MS = 5 * 60 * 1000; // 5분
@@ -382,8 +382,7 @@ async function markFinalizedCampaigns(): Promise<void> {
  *   → terminal + result_final=false + 발송 72h 경과(21일 하한 없음 — 유한 무리·1회 졸업)는
  *     실측값으로 counts 교정 후 result_final=true로 굳힘. 굳힘값=실측값이라 화면 숫자 연속(퇴행 0),
  *     굳힘 후에도 선불은 sweeper가 14일까지 계속 보정하므로 정확성 유지.
- *   ★ 동시에 실측에 카카오(IMC_BM_FREE_BIZ_MSG)를 합산 — PG 값(sweeper가 SMS+카카오 합산 기록)을
- *     SMS 단독 실측으로 덮어 카카오 몫이 깎이던 잠재 과소 기록도 함께 차단.
+ *   ★ 2026-07-30: 브랜드메시지가 SMSQ(msg_type='F')로 합류 — 실측 한 번이 전 채널을 담는다(옛 IMC 합산 폐기).
  */
 const RECONCILE_BATCH = 50;
 /** 완전집계 미충족 캠페인의 강제 굳힘 시점 — 실측 최장 결과 지연(+24h)의 3배 마진 */
@@ -427,13 +426,11 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
     try {
       const tables = await getCompanySmsTablesWithLogs(camp.company_id);
       // ★ 2026-06-11 정합성 100% 산식 — 이력=결과/라이브=대기 분리 (이동 중 이중 카운트 차단)
+      // ★ 2026-07-30: 브랜드 행(msg_type='F')도 같은 SMSQ 집계에 자동 포함 — 옛 카카오 IMC 합산 폐기.
       const counts = (await smsCampaignCountsSafe(tables, [camp.id])).get(camp.id);
-      // ★ 2026-06-13 카카오 합산 — PG 값은 sweeper가 SMS+카카오 합산으로 기록하므로
-      //   SMS 단독 실측으로 덮으면 카카오 몫이 깎인다. 동일 산식으로 합산 후 기록.
-      const kakao = (await kakaoBatchAggByGroup([camp.id])).get(camp.id) || { total: 0, success: 0, fail: 0, pending: 0 };
-      const sentCount = (counts?.total || 0) + Number(kakao.total || 0);
-      const successCount = (counts?.success || 0) + Number(kakao.success || 0);
-      const failCount = (counts?.fail || 0) + Number(kakao.fail || 0);
+      const sentCount = (counts?.total || 0);
+      const successCount = (counts?.success || 0);
+      const failCount = (counts?.fail || 0);
 
       // 발송 기록이 있는 failed = 오판 → completed 복원. 진짜 0건 실패는 failed 유지.
       const newStatus = (camp.status === 'failed' && sentCount > 0) ? 'completed' : camp.status;

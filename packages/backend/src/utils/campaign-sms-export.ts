@@ -12,7 +12,8 @@
 import { Response } from 'express';
 import { mysqlQuery } from '../config/database';
 import { getCompanySmsTablesWithLogs } from './sms-queue';
-import { SUCCESS_CODES, PENDING_CODES, isSuccess, getQueueRowStatus, getSendTypeLabel, getCarrierLabel } from './sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, getQueueRowStatus, getSendTypeLabel, getCarrierLabel, getDisplayContents } from './sms-result-map';
+import { BRAND_CAMPAIGN_CHANNELS } from './billing-types';
 
 // ★ B10: 엑셀 2컬럼(전송요청/발송) — 수신확인 제거. mobsend_time은 UTC 저장이라 +9h (D98).
 const SMS_EXPORT_FIELDS = `dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
@@ -65,29 +66,14 @@ export async function streamCampaignSmsCsv(res: Response, params: CampaignSmsCsv
   else if (exportStatus === 'substitute') smsStatusWhere = ` AND k_oriseq > 0 AND msg_type IN ('L', 'S')`;
 
   // ★ 알림톡(alimtalk)도 SMSQ_SEND msg_type='K' 경로라 SMS 분기에 포함
-  if (sendChannel === 'sms' || sendChannel === 'both' || sendChannel === 'alimtalk') {
+  // ★ 2026-07-30: 브랜드(kakao·kakao_brand)도 SMSQ(msg_type='F') 합류 — 옛 IMC 서브쿼리 폐기.
+  if (sendChannel === 'sms' || sendChannel === 'both' || sendChannel === 'alimtalk'
+      || (BRAND_CAMPAIGN_CHANNELS as readonly string[]).includes(sendChannel)) {
     const exportTables = await getCompanySmsTablesWithLogs(companyId, userId || undefined);
     for (const t of exportTables) {
       subqueries.push(`(SELECT ${SMS_EXPORT_FIELDS} FROM ${t} WHERE app_etc1 = ?${smsStatusWhere})`);
       baseParams.push(id);
     }
-  }
-
-  if ((sendChannel === 'kakao' || sendChannel === 'both') && exportStatus !== 'substitute') {
-    let kakaoStatusWhere = '';
-    if (exportStatus === 'success') kakaoStatusWhere = ` AND REPORT_CODE = '0000'`;
-    else if (exportStatus === 'fail') kakaoStatusWhere = ` AND REPORT_CODE != '0000' AND STATUS IN ('3','4')`;
-    // ★ SMS_EXPORT_FIELDS와 컬럼 위치 1:1 정렬 — UNION ALL은 위치 기반이라 순서/수 다르면 both 채널에서 깨짐.
-    const kakaoFields = `PHONE_NUMBER AS dest_no, '-' AS call_back,
-      CONCAT('카카오(', COALESCE(CHAT_BUBBLE_TYPE, 'TEXT'), ')') AS msg_type,
-      MESSAGE AS msg_contents,
-      CASE WHEN REPORT_CODE='0000' THEN 1800 WHEN STATUS='1' THEN 100 ELSE 9999 END AS status_code,
-      '카카오' AS mob_company,
-      REQUEST_DATE AS sendreq_time, RESPONSE_DATE AS mobsend_time,
-      'kakao' AS _channel, REPORT_CODE AS report_code_raw, NULL AS k_oriseq,
-      0 AS is_future`;
-    subqueries.push(`(SELECT ${kakaoFields} FROM IMC_BM_FREE_BIZ_MSG WHERE REQUEST_UID = ?${kakaoStatusWhere})`);
-    baseParams.push(id);
   }
 
   // ===== CSV 헤더 스트리밍 시작 (웹 발송상세 UI와 컬럼명·순서 통일) =====
@@ -114,27 +100,17 @@ export async function streamCampaignSmsCsv(res: Response, params: CampaignSmsCsv
     if (rows.length === 0) break;
 
     for (const m of rows) {
-      const channel = m._channel;
-      let msgTypeDisplay: string;
-      let statusDisplay: string;
-      let carrierDisplay: string;
-
-      if (channel === 'kakao') {
-        msgTypeDisplay = m.msg_type;
-        statusDisplay = isSuccess(m.status_code) ? '카카오성공' : `카카오실패(${m.report_code_raw || '미수신'})`;
-        carrierDisplay = '카카오';
-      } else {
-        // 발송 요청 시각이 미래인 대기 행 = "발송 예약" (화면 상세와 동일 산출)
-        const rowStatus = getQueueRowStatus(Number(m.status_code), !!Number(m.is_future));
-        msgTypeDisplay = getSendTypeLabel(m.msg_type, m.k_oriseq);
-        statusDisplay = rowStatus.label;
-        carrierDisplay = rowStatus.type === 'scheduled' ? '-' : getCarrierLabel(m.mob_company);
-      }
+      // ★ 2026-07-30: 브랜드 행도 SMSQ 합류 — 라벨은 msg_type 축(getSendTypeLabel 'F'=브랜드메시지) 단일.
+      // 발송 요청 시각이 미래인 대기 행 = "발송 예약" (화면 상세와 동일 산출)
+      const rowStatus = getQueueRowStatus(Number(m.status_code), !!Number(m.is_future));
+      const msgTypeDisplay = getSendTypeLabel(m.msg_type, m.k_oriseq);
+      const statusDisplay = rowStatus.label;
+      const carrierDisplay = rowStatus.type === 'scheduled' ? '-' : getCarrierLabel(m.mob_company);
 
       res.write([
         m.dest_no,
         m.call_back,
-        `"${(m.msg_contents || '').replace(/"/g, '""')}"`,
+        `"${getDisplayContents(m.msg_type, m.msg_contents).replace(/"/g, '""')}"`,
         formatCsvDateTime(campaignCreatedAt), // 등록일시 = 캠페인 created_at (모든 행 동일)
         formatCsvDateTime(m.sendreq_time),    // 발송일시 = 발송요청/예약 시각(KST·D98) — 목록·상세와 동일 기준(D233+)
         statusDisplay,

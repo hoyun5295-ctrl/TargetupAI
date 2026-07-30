@@ -47,15 +47,20 @@
 > ⛔ 아난티는 **1.6.4 세트**로 — 1.6.5는 Server 2016 미검증이라 서버 zip 교체 금지
 > 잔여 = 마법사 탈출구 배너 미포함
 
-### 0729 브랜드메시지 — 청구축 배포완료 / **발송축은 경로 자체가 틀렸다(재구축 대기)**
-> SoT [청구·개방](docs/2026-07-29-brand-message-billing-design.md) §7 · [발송경로 재구축](docs/2026-07-29-brand-message-qtmsg-agent-design.md) §5→§7 · 기억 [[project_2026_0729_brand_message_billing]] · 다음 = 브랜드 단가 입력(여미지 발송ID `B0227`) → 발행 실측. 발송축 호출어 **"브랜드메시지 발송경로 재구축"**
-> ⛔ **웹 브랜드 발송은 지금도 안 나간다**(적재 테이블 미실재 1146 — 재구축 SoT §0·§4. 미적재분 환불 상쇄로 돈은 안 샌다) / 브랜드 단가 미설정 = 후불 발행·선불 발송 차단이고 **알림톡을 상속하지 않는다** / 유형을 늘릴 땐 `utils/billing-types.ts` 표에만 추가 / `send_channel='kakao'`는 이름만 카카오고 실체가 브랜드메시지
-> 잔여 = 단가 입력·발행 실측 · **발송경로 재구축**(별도 SoT) · AI 타겟추출이 대상 전량을 한 번에 받아 대규모에서 페이징 필요
+### 0729 브랜드메시지 — 청구축 배포완료 / 발송경로 재구축 **코드완료·배포대기**(0731 Codex 11R SHIP)
+> SoT [청구·개방](docs/2026-07-29-brand-message-billing-design.md) §7 · [발송경로 재구축](docs/2026-07-29-brand-message-qtmsg-agent-design.md) **§8 구현 결과** · 기억 [[project_2026_0729_brand_message_billing]] · 다음 = 배포 → 실측 1건(자유형 TEXT — SoT §8 시나리오) → 브랜드 단가 입력(여미지 `B0227`)·발행 실측
+> ⛔ 배포 전에는 웹 브랜드 발송 불가 유지(미적재 환불 상쇄) / 지원 유형 = **TEXT·IMAGE·WIDE만**(캐러셀·커머스·비디오는 `msg_contents` 실예시 확보 후 — SoT §5-3) / 유형을 늘릴 땐 `utils/billing-types.ts` 표에만 추가 / `send_channel='kakao'`는 이름만 카카오고 실체가 브랜드메시지 / 직접발송 신설 `send_phase='preparing'` = 차감 완료 전 워커 픽업 차단 게이트(SCHEMA.md)
+> 잔여 = 배포+실측 1건 · 단가 입력·발행 실측 · AI 타겟추출 페이징(별건)
 
 ### 0728 정산 파이프라인 — 팝빌 발행·수정발행 배포완료(`d4430454`), 테스트베드 실측 대기
 > SoT [일괄발급·컨펌·세금계산서](docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md) **§7(연동 구현)·§9 남은 것(절차·마감 조건)** · §7-0(API 계약) · 기억 [[project_2026_0728_bulk_invoice_confirm_taxbill]] · 다음 = **호출어 "팝빌 발행 테스트 재개"**(게이트 ON 상태 — Callback URL 등록 → 방화벽 IP 2개 → 발급·웹훅·수정발행 각 1건 → `POPBILL_IS_TEST=false`)
 > ⛔ **실청구 컨펌 메일 전에 테스트 완료·운영 전환**(게이트 ON+`IS_TEST=true` — SoT §9 남은 것) / 신규 테이블 실행자 컬럼에 users FK 금지 / 공급받는자 사업자 = 계정 → `billing_contacts` → `companies` 3단 / **통지 추적행은 메일보다 먼저**(§4-1)
 > 잔여 = 화면 실측 8건(정산 탭 저장 / 일괄발급 / 공개 컨펌=CSP / 현황판 / 사업자등록증 자동입력 / 회사 계산서 사업자 / 메일 재시도 / 미발송 필터) · 메일 첨부 실물(PDF 제목·파일명) · 접수·여정 실측 4건([[project_2026_0728_tickets_journey_triggers]]) · **재구성분 Codex 미검토**(4·5차 무산)
+
+### 0730 정산 특례 — 축 A(080·최소과금·부가서비스) 코드완료·배포대기
+> SoT [정산 특례·발행 그룹](docs/2026-07-30-billing-extras-and-groups-design.md) **§9(남은 것) → §7(확인 5건)** · 기억 [[project_2026_0730_billing_080_extras]] · 다음 = 배포 → 실측 3종(080 매핑 18번호→PDF 업로드→반영→발행 / 최소과금 4사 정액 발행 / 부가서비스 1건)
+> ⛔ 금액은 전부 **공급가 저장**(VAT는 청구서가 파생) / 080 반영·최소과금 발행·항목 취소는 **발행과 같은 회사 잠금** 축 / 월별 항목은 `billed_billing_id` 소비 마커로만 이중청구가 막힌다(발행 삭제 시 FK로 자동 복귀) / 판독 결과는 서명·재검산을 통과한 전문만 반영 / 최소과금은 **완료월만**·게이트 6종 중 하나라도 걸리면 일반 발행으로
+> 잔여 = 실측 3종 · 정액 특례(시세이도 부서 10만·에이스 5만 — SoT §5) · **발행 그룹**(대상ID·계정 묶음·Agent 귀속·`by_agent` 개방 — SoT §6, 공사 큼) · 서 팀장 확인 5건(SoT §7)
 
 ### 0727 여정 알림톡 + 환불 의무 — 배포대기 2건
 > SoT 알림톡·잔액 = 기억 [[project_2026_0727_journey_alimtalk_and_agent_tls]] · 환불 = [BUGS.md](BUGS.md) B-0727-1·2 · 다음 = 배포대기 2건 배포(알림톡 대체문안 CT `utils/alimtalk-fallback.ts` 커밋 `f91d5ea5` / `balance_transactions.refund_key` 원인별 분리, DDL 실행 완료)
@@ -83,6 +88,7 @@
 
 | 건 | 남은 것 | 상세 |
 |---|---|---|
+| 0730 이미지 스튜디오 단일 생성 + 접수 4건 | **코드완료·배포대기** — SDK 변경 포함이라 배포에 `build:all` 필수. 실측 6건(생성 1장·2크레딧 / 인앱 삽입 크롭 0 / 헤더 D-Day·쿠폰강조 끝색 / 슬라이드 크기 4종 / 발신프로필 채널ID 검색 / 자동마케팅 MMS 첨부·미첨부 보류 통지) | [[project_2026_0730_studio_single_gen_and_tickets]] |
 | 0725 정산 결함·서수란 6건 (커밋 `d19f48fd`) | 화면 실측(웹 유형 NULL · 발신번호 페이징). 7월 청구 금액을 바꾸는 미해결 항목은 없다 | [[project_2026_0725_settlement_mms_gap_and_seo_tickets]] |
 | 0725 PAY 통계 발급명·대상ID | **배포 대기** + 커밋 시 신규파일 `packages/backend/src/utils/pay-stats.test.ts` git add | [[project_2026_0725_pay_stats_custnm_storeid]] |
 | 0724 DM 테스트 무과금 차단 | 서수란 실측 · 기존 running A/B 미발행 variant 점검 SQL | [[project_2026_0724_dm_test_no_charge_bypass]] |

@@ -13,7 +13,9 @@ import { normalizePhone } from './normalize-phone';
 import { prepareSendMessage, replaceVariables } from './messageUtils';
 import { fillAlimtalkVarMap } from './alimtalk-vars';
 import { resolveAlimtalkFallback } from './alimtalk-fallback';
-import { bulkInsertSmsQueue, insertKakaoQueue, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType } from './sms-queue';
+import { bulkInsertSmsQueue, insertBrandQueue, BrandQueueInsertError, type BrandQueueRow, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType } from './sms-queue';
+// ★ 2026-07-30 브랜드 msg_contents 조립·대체발송 매핑 — CT-12 단일 진입점
+import { buildBrandMsgContents, resolveBrandFallback } from './brand-message';
 import { normalizeMmsImagePaths } from './mms-image-util';
 import { resolveCustomerCallback } from './callback-filter';
 // ★ 2026-07-05: 발송 피로도 카운터 (광고성 발송 기록 — 발송 무영향 fire-and-forget)
@@ -74,6 +76,12 @@ export interface SendChunkParams {
 export interface SendChunkResult {
   sentCount: number;
   failedCount: number;
+  /**
+   * ★ 2026-07-30 브랜드 축 적재수(kakao/both에서만 의미) — both는 차감이 두 원장(message_type+BRAND)이라
+   * worker가 축별 미적재 환불을 계산하려면 브랜드 적재수를 따로 알아야 한다(적대검증 수용).
+   * kakao 단독은 sentCount와 동일 값이 들어간다.
+   */
+  brandSentCount: number;
 }
 
 /**
@@ -92,7 +100,7 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
 
   // 수신거부·중복제거·금액필터는 commit에서 staging 전체 대상 1회 처리 (청크별 X — 청크 간 중복 누락 방지)
   const recipients = p.recipients;
-  if (recipients.length === 0) return { sentCount: 0, failedCount: 0 };
+  if (recipients.length === 0) return { sentCount: 0, failedCount: 0, brandSentCount: 0 };
 
   // 2. customers 변수매핑 SELECT (storageType 동적 컬럼 — D72)
   const mappingCols = Object.values(p.directFieldMappings)
@@ -108,6 +116,7 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
   custResult.rows.forEach((c: any) => custMap.set(normalizePhone(c.phone), c));
 
   let sentCount = 0;
+  let brandSentCount = 0;   // ★ 2026-07-30 브랜드 축 적재수 — both 환불 분리용
 
   // 3-A. SMS (sms 또는 both)
   if (p.sendChannel === 'sms' || p.sendChannel === 'both') {
@@ -134,11 +143,11 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
     sentCount = await bulkInsertSmsQueue(p.companyTables, smsRows, p.useNow);
   }
 
-  // 3-B. 카카오 (kakao 또는 both) — per-recipient 축적
+  // 3-B. 브랜드메시지 (kakao 또는 both) — 2026-07-30 재구축: SMSQ 배치(msg_type='F')
   if (p.sendChannel === 'kakao' || p.sendChannel === 'both') {
     let kakaoSent = 0;
-    for (const r of recipients) {
-      try {
+    try {
+      const brandRows: BrandQueueRow[] = recipients.map((r) => {
         const cleanPhone = normalizePhone(r.phone);
         const dbCustomer = custMap.get(cleanPhone) || null;
         const finalMessage = replaceVariables(
@@ -147,27 +156,41 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
           { skipNumberFormatting: true }
         );
         const recipientCallback = resolveCustomerCallback(r, p.useIndividualCallback, p.callback);
-        await insertKakaoQueue({
-          bubbleType: p.kakaoBubbleType || 'TEXT',
-          senderKey: p.kakaoSenderKey || '',
-          phone: cleanPhone,
-          targeting: p.kakaoTargeting || 'I',
-          message: finalMessage,
-          isAd: p.finalIsAd,
-          reservedDate: p.useNow ? undefined : r.sendTime,
-          attachmentJson: p.kakaoAttachmentJson || undefined,
-          carouselJson: p.kakaoCarouselJson || undefined,
+        // 조립·대체발송 결함은 throw — 청크 전체 미적재로 처리되어 worker 환불이 되돌린다(fail-closed).
+        const brandFallback = resolveBrandFallback({
           resendType: p.sendChannel === 'both' ? 'NO' : (p.kakaoResendType || 'SM'),
-          resendFrom: recipientCallback,
-          unsubscribePhone: p.opt080,
-          requestUid: p.campaignId,
+          originalMessage: finalMessage,
         });
-        kakaoSent++;
-      } catch (kakaoErr) {
-        console.error('[direct-send-processor] 카카오 INSERT 실패:', kakaoErr);
+        return {
+          phone: cleanPhone,
+          callback: recipientCallback,
+          senderKey: p.kakaoSenderKey || '',
+          msgContents: buildBrandMsgContents({
+            typeDef: 'FREE',
+            targeting: p.kakaoTargeting || 'I',
+            bubbleType: p.kakaoBubbleType || 'TEXT',
+            message: finalMessage,
+            attachmentJson: p.kakaoAttachmentJson || undefined,
+            carouselJson: p.kakaoCarouselJson || undefined,
+          }),
+          nextType: brandFallback.nextType,
+          nextContents: brandFallback.nextContents,
+          titleStr: brandFallback.titleStr,
+          reservedDate: p.useNow ? undefined : r.sendTime,
+          companyId: p.companyId,
+        };
+      });
+      kakaoSent = await insertBrandQueue(p.companyTables, brandRows, p.campaignId);
+    } catch (brandErr) {
+      if (brandErr instanceof BrandQueueInsertError) {
+        kakaoSent = brandErr.inserted; // 앞선 배치는 커밋됨(B-0727-1 계약)
+        console.error(`[direct-send-processor] 브랜드 큐 INSERT 부분 실패 (적재 ${kakaoSent}건):`, brandErr.message);
+      } else {
+        console.error('[direct-send-processor] 브랜드 큐 INSERT 실패:', brandErr);
       }
     }
-    // both이면 SMS 성공수 유지, kakao 단독이면 kakao 성공수
+    // both이면 SMS 성공수 유지, kakao 단독이면 kakao 성공수. 브랜드 축 적재수는 별도 반환.
+    brandSentCount = kakaoSent;
     if (p.sendChannel === 'kakao') sentCount = kakaoSent;
   }
 
@@ -286,5 +309,5 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
     void recordFatigueSends(p.companyId, recipients.map((r) => String(r.phone || '')));
   }
 
-  return { sentCount, failedCount: recipients.length - sentCount };
+  return { sentCount, failedCount: recipients.length - sentCount, brandSentCount };
 }

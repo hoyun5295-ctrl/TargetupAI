@@ -13,9 +13,16 @@ import { getCampaignQueueTables, smsCountAll } from './sms-queue';
 import { getCompanySmsTables, smsExecAll, toKoreaTimeStr } from './sms-queue';
 import { calcSplitSendTime } from './send-time-util';
 import { processSendChunk, type ChunkRecipient } from './direct-send-processor';
+// ★ 2026-07-30 환불 축 판정 — 차감(direct-send-core)과 같은 CT
+import { resolveRefundAxes } from './billing-types';
+import { sendSystemAlert } from './system-alert';
 
 const CHUNK = 10000;
 let running = false;
+// ★ 2026-07-31 (10R): preparing 잔존 경보 — 미종료 작업 1개 상한(in-flight, settle 시에만 해제)
+//   + 시도 간 최소 간격 10분. hang이면 그 1개가 복구 시 유일한 발송이 된다(누적·폭주 구조 불가).
+let _preparingAlertInFlight = false;
+let _preparingAlertLastAttemptMs = 0;
 
 /**
  * ★ 2026-07-27 (B-0727-1): 미완료 환불 재시도.
@@ -62,7 +69,8 @@ async function retryPendingCancelRefunds(): Promise<void> {
           continue;
         }
       }
-      const parts = [rp.sms, rp.kakao].filter((p: any) => p && Number(p.count) > 0);
+      // ★ 2026-07-30: 브랜드 슬롯(brand·BRAND 축) 추가 — 옛 kakao 슬롯은 하위호환으로 함께 읽는다(항상 0이었음).
+      const parts = [rp.sms, rp.brand, rp.kakao].filter((p: any) => p && Number(p.count) > 0);
       const clear = () => query(
         `UPDATE campaigns SET send_config = send_config - 'refundPendingCancel', updated_at = NOW() WHERE id = $1`,
         [row.id],
@@ -143,20 +151,26 @@ async function retryPendingRefunds(): Promise<void> {
           ...(err ? { lastError: err.slice(0, 200) } : {}),
         })],
       ).catch(() => {});
-      if (count <= 0 || !messageType) { await clear(); continue; }
+      // ★ 2026-07-30: both의 두 원장이 모두 실패한 경우 brand 보조 슬롯이 함께 남는다 — 둘 다 소진해야 해제.
+      const parts: Array<{ count: number; messageType: string }> = [
+        { count, messageType },
+        ...(rp.brand && Number(rp.brand.count) > 0 ? [{ count: Number(rp.brand.count), messageType: String(rp.brand.messageType || '') }] : []),
+      ].filter((p) => p.count > 0 && p.messageType);
+      if (parts.length === 0) { await clear(); continue; }
       try {
-        const res = await prepaidRefund(
-          row.company_id, count, messageType, row.id, `대량 발송 미적재 ${count}건 자동 환불(재시도)`,
-          'campaign', { refundKey: REFUND_KEYS.NOT_LOADED },
-        );
-        if (res.ok) {
-          await clear();
-          if (res.refunded > 0) {
-            console.log(`[direct-send-worker] 미적재분 환불 재시도 성공 campaign=${row.id} ${res.refunded}원`);
+        let allOk = true;
+        for (const part of parts) {
+          const res = await prepaidRefund(
+            row.company_id, part.count, part.messageType, row.id, `대량 발송 미적재 ${part.count}건 자동 환불(재시도)`,
+            'campaign', { refundKey: REFUND_KEYS.NOT_LOADED },
+          );
+          if (!res.ok) allOk = false;
+          else if (res.refunded > 0) {
+            console.log(`[direct-send-worker] 미적재분 환불 재시도 성공 campaign=${row.id} ${part.messageType} ${res.refunded}원`);
           }
-        } else {
-          await defer('prepaidRefund ok=false');
         }
+        if (allOk) await clear();
+        else await defer('prepaidRefund ok=false');
       } catch (e: any) {
         console.error(`[direct-send-worker] 환불 재시도 오류 campaign=${row.id}:`, e?.message || e);
         await defer(String(e?.message || e));
@@ -205,6 +219,46 @@ export async function runDirectSendOnce(): Promise<void> {
     // ★ 2026-07-27 (B-0727-1): 미완료 환불 재시도는 **신규 발송 처리 뒤**에 돈다.
     //   앞에 두면 밀린 환불 재시도가 발송 적재를 지연시킨다(발송이 늦는 편이 더 눈에 띄는 사고).
     await retryPendingRefunds();
+    // ★ 2026-07-30 (3R): 'preparing' 잔존 감시 — commit이 차감 도중 죽으면 캠페인이 preparing으로 남는다.
+    //   발송은 구조적으로 불가(fail-closed)지만 차감 여부가 불명이라 자동 환불하지 않는다 —
+    //   돈은 틀린 자동보다 미확정+사람이 낫다.
+    // ★ 2026-07-31 (6R 구조 정정): 행 단위 "정확한 1회 경보"를 best-effort 경보 인프라 위에 쌓으려던
+    //   마커·Set 구조를 폐기했다 — 4R(기아)·5R(미전달 마킹)·6R(적재 실패 오인·쿨다운 미수렴·점유) 세 라운드
+    //   연속으로 같은 부류가 샜다. 감시의 목적은 "발견"이지 행별 전달 보장이 아니다.
+    //   **개수만 센다**: 잔존이 있으면 단일 dedupKey로 경보 — 쿨다운(전 인프라 공통)이 중복을 누르고,
+    //   미전달이면 다음 쿨다운 창에서 자동 재경보된다(잔존이 남아 있는 한 COUNT>0이므로 수렴).
+    //   행 목록은 경보를 받은 사람이 SQL로 뽑는다. 사이클당 COUNT 1회라 워커 점유도 상한이 명확하다.
+    try {
+      const stale = await query(
+        `SELECT COUNT(*)::int AS cnt, MIN(created_at) AS oldest
+           FROM campaigns
+          WHERE send_phase = 'preparing' AND created_at < NOW() - INTERVAL '10 minutes'`,
+      );
+      const staleCnt = Number(stale.rows[0]?.cnt || 0);
+      // ★ 2026-07-31 (7R): 경보는 동시 1개만(in-flight 가드) — 경보 MySQL이 지연되는 동안 다음 사이클이
+      //   겹쳐 쌓이지 않게 한다. 안내 SQL은 감시와 **같은 10분 조건**으로 제한 — 전 preparing을 보여주면
+      //   정상 차감 진행 중인 신규 캠페인이 섞여 운영자 수동 조치가 실제 활성화와 경합한다.
+      //   (경보 적재 실패 시 쿨다운 창만큼 재경보가 늦는 것은 잔여 한계로 수용 — 잔존이 남는 한
+      //    COUNT>0이라 다음 창에 반드시 재경보되고, 발생 시점의 direct-deduct-orphan 경보·CRITICAL 로그가 1차 신호다.)
+      // ★ 2026-07-31 (10R 확정 구조): **미종료 작업 1개 상한 + 시도 간격 10분**.
+      //   - in-flight 가드는 settle(성공·실패)에서만 해제 — hang이어도 미종료 작업은 정확히 1개이고,
+      //     그 1개가 MySQL 복구 시 유일한 발송이 된다(누적·복구 폭주 구조 불가 — 9R·10R).
+      //   - hang 중 감시가 새 시도를 안 하는 것은 결함이 아니다: 이미 떠 있는 작업이 곧 배달될 경보다.
+      //     rejection으로 끝나면 catch가 소비하고 가드가 풀려 다음 10분 창에 재시도된다(8R).
+      //   - 정상 상태에선 공통 쿨다운이 실발송을 1회로 누른다. MySQL 드라이버 취소 배관은 별도 과제.
+      if (staleCnt > 0 && !_preparingAlertInFlight && Date.now() - _preparingAlertLastAttemptMs > 10 * 60 * 1000) {
+        _preparingAlertInFlight = true;
+        _preparingAlertLastAttemptMs = Date.now();
+        void sendSystemAlert({
+          dedupKey: 'direct-preparing-stale',
+          message: `직접발송 preparing 잔존 ${staleCnt}건(최고령 ${stale.rows[0]?.oldest}) — 차감 여부 수동 확인 필요(발송은 차단된 상태). 목록: SELECT id, company_id, created_at FROM campaigns WHERE send_phase = 'preparing' AND created_at < NOW() - INTERVAL '10 minutes' ORDER BY created_at`,
+        }).catch((alertErr: any) => {
+          console.error('[direct-send-worker] preparing 잔존 경보 실패:', alertErr?.message || alertErr);
+        }).finally(() => { _preparingAlertInFlight = false; });
+      }
+    } catch (staleErr: any) {
+      console.error('[direct-send-worker] preparing 잔존 감시 오류:', staleErr?.message || staleErr);
+    }
   } finally {
     running = false;
   }
@@ -240,6 +294,7 @@ async function processCampaign(campaignId: string): Promise<void> {
 
   let processed: number = c.processed_count || 0;
   let sent = 0;
+  let brandSent = 0;   // ★ 2026-07-30 브랜드 축(msg_type='F') 적재수 — both 환불 분리용
   // ★ 2026-06-11 (근원 C): 정제 제외·청크 skip 건수를 send_config.exclusions에 기록 —
   //   "대상−전송 차이 사유"(수신거부/중복/무효)를 업체에 즉시 설명 가능하게 (폴라초이스 227건 문의 계열 차단).
   let unsubRemoved = 0;
@@ -325,6 +380,7 @@ async function processCampaign(campaignId: string): Promise<void> {
       alimtalkEtcJson: cfg.alimtalkEtcJson,
     });
     sent += result.sentCount;
+    brandSent += result.brandSentCount || 0;
     chunkSkipped += Math.max(0, chunkRes.rows.length - result.sentCount);
     processed += chunkRes.rows.length;
 
@@ -342,22 +398,40 @@ async function processCampaign(campaignId: string): Promise<void> {
   //   구조적으로 손대지 않는 자리라(refund-calc: 처리수 0이면 미적재 0) 그대로 영구 미환불이 됐다.
   //   실패하면 send_config.refundPending에 남겨 다음 워커 사이클이 재시도한다.
   const failed = Math.max(0, total - sent);
-  const deductType = (cfg.sendChannel === 'kakao') ? 'KAKAO' : cfg.msgType;
-  let refundPending: string | null = null;
-  if (failed > 0) {
+  // ★ 2026-07-30 적대검증 수용 — 차감 축(direct-send-core resolveRefundAxes)과 같은 축으로 환불한다.
+  //   kakao/kakao_brand=BRAND 단일(적재수=brandSent=sent), both=message_type(적재수 sent)+BRAND(적재수 brandSent)
+  //   두 원장 각각의 미적재분을 되돌린다. 옛 코드는 kakao를 KAKAO 원장으로 되돌려 차감(BRAND)과 어긋났다.
+  const sendChannel = cfg.sendChannel || 'sms';
+  const refundAxes = resolveRefundAxes(sendChannel, cfg.msgType).map((axis) => ({
+    type: axis.type,
+    failedCount: Math.max(0, total - (axis.scope === 'brand' ? brandSent : sent)),
+  }));
+  const pendingParts: Array<{ count: number; messageType: string }> = [];
+  for (const axis of refundAxes) {
+    if (axis.failedCount <= 0) continue;
     try {
       const refundRes = await prepaidRefund(
-        companyId, failed, deductType, campaignId, `대량 발송 미적재 ${failed}건 자동 환불`,
+        companyId, axis.failedCount, axis.type, campaignId, `대량 발송 미적재 ${axis.failedCount}건 자동 환불`,
         'campaign', { refundKey: REFUND_KEYS.NOT_LOADED },
       );
       if (!refundRes.ok) {
-        refundPending = JSON.stringify(buildRefundPending(failed, deductType));
-        console.error(`[direct-send-worker] 미적재분 환불 미완료 — 재시도 대기 등록 campaign=${campaignId} ${failed}건`);
+        pendingParts.push({ count: axis.failedCount, messageType: axis.type });
+        console.error(`[direct-send-worker] 미적재분 환불 미완료 — 재시도 대기 등록 campaign=${campaignId} ${axis.type} ${axis.failedCount}건`);
       }
     } catch (refundErr) {
-      refundPending = JSON.stringify({ count: failed, messageType: deductType, at: new Date().toISOString() });
-      console.error('[direct-send-worker] 미적재분 환불 오류:', refundErr);
+      pendingParts.push({ count: axis.failedCount, messageType: axis.type });
+      console.error(`[direct-send-worker] 미적재분 환불 오류 (${axis.type}):`, refundErr);
     }
+  }
+  // refundPending 단일 슬롯 + brand 보조 슬롯(취소 의무의 parts 구조 미러 — 워커 재시도가 둘 다 읽는다)
+  let refundPending: string | null = null;
+  if (pendingParts.length > 0) {
+    const main = buildRefundPending(pendingParts[0].count, pendingParts[0].messageType);
+    refundPending = JSON.stringify(
+      pendingParts.length > 1
+        ? { ...main, brand: { count: pendingParts[1].count, messageType: pendingParts[1].messageType } }
+        : main,
+    );
   }
 
   // 완료 처리 + staging 정리

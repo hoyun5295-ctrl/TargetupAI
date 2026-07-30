@@ -8,9 +8,10 @@ import { query } from '../config/database';
 import {
   getCompanySmsTablesWithLogs, getCampaignQueueTables,
   smsCountAll, smsExecAll, smsCampaignCountsSafe,
-  kakaoCountPending, kakaoCancelPending, kakaoBatchAggByGroup,
   type CampaignAggCounts,
 } from './sms-queue';
+// ★ 2026-07-30 브랜드 SMSQ 합류 — 환불 유형 축(BRAND vs message_type)은 CT 판정 하나만 쓴다
+import { resolveRefundAxes } from './billing-types';
 import { prepaidRefund, REFUND_KEYS } from './prepaid';
 import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
 import { getSourceRef, updateTrainingMetrics } from './training-logger';
@@ -35,7 +36,7 @@ export interface CleanupScheduledFilter {
 export async function cleanupScheduledCampaigns(filter: CleanupScheduledFilter = {}): Promise<{ cleaned: number }> {
   let cleaned = 0;
 
-  let sql = `SELECT id, company_id, scheduled_at FROM campaigns
+  let sql = `SELECT id, company_id, scheduled_at, send_channel, message_type FROM campaigns
              WHERE status = 'scheduled' AND scheduled_at < NOW()`;
   const params: any[] = [];
 
@@ -74,17 +75,23 @@ export async function cleanupScheduledCampaigns(filter: CleanupScheduledFilter =
       // ★ D145 P0+ (2026-05-07): idempotent 환불 패턴 — 호출측은 누적 failCount 그대로 보냄
       //   prepaidRefund 함수가 alreadyRefunded와 비교해 차이만 환불 (idempotency 함수 측 보장)
       //   delta 계산 폐기 — 호출/함수 의미 일치 + 누락 사고 자동 보정
-      const messageTypeResult = await query('SELECT message_type FROM campaigns WHERE id = $1', [camp.id]);
-      const messageType = messageTypeResult.rows[0]?.message_type;
-
       await query(
         `UPDATE campaigns SET status = $1, sent_count = $2, success_count = $3, fail_count = $4,
          sent_at = COALESCE(sent_at, scheduled_at, NOW()), updated_at = NOW() WHERE id = $5`,
         [newStatus, sentCount, successCount, failCount, camp.id]
       );
 
-      if (failCount > 0 && messageType) {
-        await prepaidRefund(camp.company_id, failCount, messageType, camp.id, '발송 실패 환불', 'campaign', { refundKey: REFUND_KEYS.FAIL });
+      // ★ 2026-07-30 적대검증 수용 — 브랜드 F행이 집계에 합류해 환불 축(BRAND vs message_type)을 가른다.
+      //   both는 F/비F 실패를 각자 원장으로(섞으면 성공한 문자 원장이 환불되고 BRAND 원장이 남는다).
+      if (failCount > 0 && camp.message_type) {
+        for (const axis of resolveRefundAxes(camp.send_channel, camp.message_type)) {
+          const axisFail = axis.scope === 'all'
+            ? failCount
+            : Number((await smsCampaignCountsSafe(tablesWithLogs, [camp.id], 'app_etc1', axis.scope)).get(camp.id)?.fail || 0);
+          if (axisFail > 0) {
+            await prepaidRefund(camp.company_id, axisFail, axis.type, camp.id, '발송 실패 환불', 'campaign', { refundKey: REFUND_KEYS.FAIL });
+          }
+        }
       }
 
       cleaned++;
@@ -162,14 +169,12 @@ export async function cancelCampaign(
   //   불일치로 DELETE 0건 → 예약 시각 실발송 사고(에이치피오 87,014건).
   //   발송 당시 기록(send_config.sentTables) 1순위 + 회사+사용자 전 라인 합집합에서 삭제.
   const cancelTables = await getCampaignQueueTables(companyId, camp.created_by || undefined, camp.send_config);
-  const cancelCount = await smsCountAll(cancelTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
-  let kakaoCancelCount = 0;
-  try {
-    kakaoCancelCount = await kakaoCountPending(campaignId);
-  } catch (kakaoErr) {
-    console.warn(`[취소] 카카오 대기건 조회 실패 (무시):`, (kakaoErr as Error).message);
-  }
-  const totalCancelCount = cancelCount + kakaoCancelCount;
+  // ★ 2026-07-30 브랜드 SMSQ 합류 — 같은 큐 안에서 행 단위로 환불 축을 가른다.
+  //   브랜드 행(msg_type='F')은 BRAND 단가로 차감됐으므로 환불도 BRAND 축이어야 회계가 맞는다.
+  //   문자 축(비F)은 기존대로 camp.message_type. DELETE 자체는 아래에서 전 행 공통.
+  const brandCancelCount = await smsCountAll(cancelTables, `app_etc1 = ? AND status_code = 100 AND msg_type = 'F'`, [campaignId]);
+  const cancelCount = await smsCountAll(cancelTables, `app_etc1 = ? AND status_code = 100 AND (msg_type IS NULL OR msg_type <> 'F')`, [campaignId]);
+  const totalCancelCount = cancelCount + brandCancelCount;
 
   // 4. MySQL 메시지 취소 처리
   // - status_code = 100 (대기): 삭제 (Agent 미픽업 → 환불 대상)
@@ -199,7 +204,9 @@ export async function cancelCampaign(
         [campaignId, JSON.stringify({
           state: 'prepared',
           sms: { count: cancelCount, messageType: camp.message_type },
-          kakao: { count: kakaoCancelCount, messageType: 'KAKAO' },
+          // ★ 2026-07-30: 브랜드 행(msg_type='F')은 BRAND 축으로 — 차감(BRAND)과 같은 원장.
+          //   (옛 kakao 슬롯은 IMC 미실재로 항상 0이었다. 워커는 brand·kakao 둘 다 읽는다 — 하위호환.)
+          brand: { count: brandCancelCount, messageType: 'BRAND' },
           at: new Date().toISOString(),
         })],
       );
@@ -220,18 +227,18 @@ export async function cancelCampaign(
     [campaignId]
   );
 
+  // ★ 2026-07-30 적대검증 부분 수용 — 사전 카운트(alreadyPickedUp) 게이트를 없애고 항상 마킹한다.
+  //   COUNT와 DELETE 사이에 Agent가 픽업한 행(100→다른 상태)은 사전 카운트가 0이면 마킹이 통째로
+  //   건너뛰어져 취소 후 실발송될 수 있었다. 무조건 실행하면 그 창의 행도 9999로 막힌다(0건이면 no-op).
+  await smsExecAll(cancelTables,
+    `UPDATE SMSQ_SEND SET status_code = 9999 WHERE app_etc1 = ? AND status_code NOT IN (${SUCCESS_CODES.join(',')}) AND status_code != 100`,
+    [campaignId]
+  );
   if (alreadyPickedUp > 0) {
-    await smsExecAll(cancelTables,
-      `UPDATE SMSQ_SEND SET status_code = 9999 WHERE app_etc1 = ? AND status_code NOT IN (${SUCCESS_CODES.join(',')}) AND status_code != 100`,
-      [campaignId]
-    );
     console.warn(`[취소] campaign ${campaignId}: Agent 픽업된 ${alreadyPickedUp}건 status_code→9999 처리`);
   }
 
-  // 5. 카카오 대기건 삭제
-  if (kakaoCancelCount > 0) {
-    try { await kakaoCancelPending(campaignId); } catch (kakaoErr) { console.warn(`[취소] 카카오 대기건 삭제 실패 (무시):`, (kakaoErr as Error).message); }
-  }
+  // (2026-07-30) 옛 5. 카카오 대기건 삭제 폐기 — 브랜드 행도 같은 SMSQ 테이블이라 위 DELETE가 함께 지운다.
 
   // 5-1. ★ 2026-06-11 취소 검증 — 삭제 후 대기(100) 행이 남으면 'cancelled' 표시를 거부한다.
   //   잘못된 테이블 DELETE 0건인데 화면만 취소로 표시되어 예약 시각에 실발송되던 사고 차단.
@@ -267,7 +274,7 @@ export async function cancelCampaign(
   //   취소는 status='cancelled'로 끝나 sweeper(sending/completed) 보정 대상도 아니라 영구 누락이었다.
   let totalRefunded = 0;
   let smsOk = true;
-  let kakaoOk = true;
+  let brandOk = true;
   if (totalCancelCount > 0) {
     if (cancelCount > 0) {
       const smsRefund = await prepaidRefund(
@@ -280,23 +287,22 @@ export async function cancelCampaign(
       smsOk = smsRefund.ok;
       if (!smsOk) console.error(`[취소] campaign ${campaignId} 문자 취소 환불 실패 — 워커 재시도 대기(${cancelCount}건)`);
     }
-    if (kakaoCancelCount > 0) {
-      const kakaoRefund = await prepaidRefund(
-        companyId, kakaoCancelCount, 'KAKAO', campaignId, '카카오 예약 취소 환불', 'campaign',
-        // 취소 환불은 캠페인당 한 번뿐이라 그 항아리가 비어 있음이 보장된다 → 항아리 기준 누적 = 멱등.
-        // (레거시 폴백으로 떨어지면 재시도가 이중 환불되거나 기존 환불에 삼켜진다 — B-0727-2)
+    if (brandCancelCount > 0) {
+      // ★ 2026-07-30: 브랜드 행(msg_type='F')은 차감과 같은 BRAND 축으로 환불한다.
+      const brandRefund = await prepaidRefund(
+        companyId, brandCancelCount, 'BRAND', campaignId, '브랜드메시지 예약 취소 환불', 'campaign',
         { refundKey: REFUND_KEYS.CANCEL, forceKeyedPot: true },
       );
-      totalRefunded += kakaoRefund.refunded;
-      kakaoOk = kakaoRefund.ok;
-      if (!kakaoOk) console.error(`[취소] campaign ${campaignId} 카카오 취소 환불 실패 — 워커 재시도 대기(${kakaoCancelCount}건)`);
+      totalRefunded += brandRefund.refunded;
+      brandOk = brandRefund.ok;
+      if (!brandOk) console.error(`[취소] campaign ${campaignId} 브랜드 취소 환불 실패 — 워커 재시도 대기(${brandCancelCount}건)`);
     }
     // ★ 2026-07-27 (B-0727-2): 의무 해제는 **여기서 하지 않는다.**
     //   앞선 시도가 부분 삭제로 끝났다면 의무에 남은 건수(원본)와 이번 회차의 cancelCount(잔여)가 다르다.
     //   이번 환불이 성공했다고 의무를 지우면 먼저 지워진 몫이 목표에서 사라진다.
     //   워커가 의무에 적힌 원본 건수로 다시 부르고(CANCEL 항아리 누적 = 멱등) 충족됐을 때 해제한다.
     //   건수가 같은 일반적인 경우엔 워커 첫 사이클에서 추가 0원 + 해제로 바로 끝난다.
-    if (!smsOk || !kakaoOk) {
+    if (!smsOk || !brandOk) {
       console.warn(`[취소] campaign ${campaignId} 취소 환불 미완료 — 워커 재시도가 이어받는다`);
     }
   }
@@ -346,8 +352,9 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
   console.log(`[sync-results] 시작 — companyId: ${companyId}`);
 
   // === 1. AI 캠페인 (campaign_runs) ===
+  // ★ 2026-07-30: send_channel·message_type 동반 조회 — 환불 축(BRAND vs message_type) 판정에 필요.
   const runsResult = await query(
-    `SELECT cr.id, cr.campaign_id, c.company_id, c.created_by
+    `SELECT cr.id, cr.campaign_id, c.company_id, c.created_by, c.send_channel, c.message_type
      FROM campaign_runs cr
      JOIN campaigns c ON c.id = cr.campaign_id
      WHERE c.company_id = $1
@@ -372,26 +379,30 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
 
   // ★ 2026-06-11 정합성 100% 산식 — 이력=결과/라이브=대기 분리 (이동 중 이중 카운트 차단)
   const smsAggMap = new Map<string, CampaignAggCounts>();
+  // ★ 2026-07-30: 'both' 캠페인만 브랜드/문자 분리 집계 추가 — 환불 축이 두 원장으로 갈리기 때문.
+  //   전체 카운트(smsAggMap)는 표시·상태용으로 기존 그대로(브랜드 행 자동 포함).
+  const brandAggMap = new Map<string, CampaignAggCounts>();
+  const nonBrandAggMap = new Map<string, CampaignAggCounts>();
   for (const [key, runs] of runsByUser) {
     const [cid, uid] = key.split('::');
     const runTables = await getCompanySmsTablesWithLogs(cid, uid || undefined);
     const ids = runs.map(r => r.campaign_id);
     const partial = await smsCampaignCountsSafe(runTables, ids);
     for (const [g, v] of partial) smsAggMap.set(g, v);
+    const bothIds = runs.filter((r: any) => String(r.send_channel || '') === 'both').map((r: any) => r.campaign_id);
+    if (bothIds.length > 0) {
+      for (const [g, v] of await smsCampaignCountsSafe(runTables, bothIds, 'app_etc1', 'brand')) brandAggMap.set(g, v);
+      for (const [g, v] of await smsCampaignCountsSafe(runTables, bothIds, 'app_etc1', 'nonBrand')) nonBrandAggMap.set(g, v);
+    }
   }
-
-  // 카카오는 단일 테이블이므로 한 번에 배치 집계
-  const allRunIds: string[] = runsResult.rows.map((r: any) => r.campaign_id);
-  const kakaoAggMap = await kakaoBatchAggByGroup(allRunIds);
 
   for (const run of runsResult.rows) {
     try {
       const smsAgg = smsAggMap.get(run.campaign_id);
-      const kakaoResult = kakaoAggMap.get(run.campaign_id) || { total: 0, success: 0, fail: 0, pending: 0 };
 
-      const successCount = (smsAgg?.success || 0) + kakaoResult.success;
-      const failCount = (smsAgg?.fail || 0) + kakaoResult.fail;
-      const pendingCount = (smsAgg?.pending || 0) + kakaoResult.pending;
+      const successCount = (smsAgg?.success || 0);
+      const failCount = (smsAgg?.fail || 0);
+      const pendingCount = (smsAgg?.pending || 0);
       console.log(`[sync-results] AI run ${run.id} — success:${successCount}, fail:${failCount}, pending:${pendingCount}`);
 
       // ★ 2026-07-06 120분 타임아웃(pending→fail 변환) 제거 — 통신사 리포트는 최대 48h 지연이 정상(단말 꺼짐 재시도).
@@ -441,10 +452,17 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
           );
 
           // ★ D145 P0+: idempotent 패턴 — 누적 fail 그대로 (함수가 차이만 환불)
+          // ★ 2026-07-30: 환불 유형은 축 판정 CT(resolveRefundAxes)로 — 브랜드 전용은 BRAND 원장,
+          //   'both'는 문자/브랜드 분리 집계의 fail을 각자 원장으로 되돌린다(차감과 같은 축).
           if (failCount > 0) {
-            const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [runInfo.rows[0].campaign_id]);
-            if (campInfo.rows.length > 0) {
-              await prepaidRefund(campInfo.rows[0].company_id, failCount, campInfo.rows[0].message_type, runInfo.rows[0].campaign_id, '발송 실패 환불', 'campaign', { refundKey: REFUND_KEYS.FAIL });
+            const axes = resolveRefundAxes(run.send_channel, run.message_type);
+            for (const axis of axes) {
+              const axisFail = axis.scope === 'all' ? failCount
+                : axis.scope === 'brand' ? Number(brandAggMap.get(run.campaign_id)?.fail || 0)
+                : Number(nonBrandAggMap.get(run.campaign_id)?.fail || 0);
+              if (axisFail > 0) {
+                await prepaidRefund(run.company_id, axisFail, axis.type, run.campaign_id, '발송 실패 환불', 'campaign', { refundKey: REFUND_KEYS.FAIL });
+              }
             }
           }
 
@@ -477,8 +495,9 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
   }
 
   // === 2. 직접발송 캠페인 ===
+  // ★ 2026-07-30: send_channel·message_type 동반 조회 — 환불 축 판정에 필요.
   const directCampaigns = await query(
-    `SELECT id, company_id, scheduled_at, created_at, sent_at, created_by FROM campaigns
+    `SELECT id, company_id, scheduled_at, created_at, sent_at, created_by, send_channel, message_type FROM campaigns
      WHERE company_id = $1 AND send_type = 'direct'
        AND (status IN ('sending', 'completed') OR (status = 'scheduled' AND scheduled_at <= NOW()))
        AND (target_count IS NULL
@@ -496,25 +515,30 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
     directByUser.get(key)!.push(c);
   }
   // ★ 2026-06-11 정합성 100% 산식 — 이력=결과/라이브=대기 분리 (이동 중 이중 카운트 차단)
+  // ★ 2026-07-30: 'both' 캠페인만 브랜드/문자 분리 집계 추가(환불 축 분리) — AI 블록과 동일 구조.
   const directSmsAggMap = new Map<string, CampaignAggCounts>();
+  const directBrandAggMap = new Map<string, CampaignAggCounts>();
+  const directNonBrandAggMap = new Map<string, CampaignAggCounts>();
   for (const [key, camps] of directByUser) {
     const [cid, uid] = key.split('::');
     const directTables = await getCompanySmsTablesWithLogs(cid, uid || undefined);
     const ids = camps.map(c => c.id);
     const partial = await smsCampaignCountsSafe(directTables, ids);
     for (const [g, v] of partial) directSmsAggMap.set(g, v);
+    const bothIds = camps.filter((c: any) => String(c.send_channel || '') === 'both').map((c: any) => c.id);
+    if (bothIds.length > 0) {
+      for (const [g, v] of await smsCampaignCountsSafe(directTables, bothIds, 'app_etc1', 'brand')) directBrandAggMap.set(g, v);
+      for (const [g, v] of await smsCampaignCountsSafe(directTables, bothIds, 'app_etc1', 'nonBrand')) directNonBrandAggMap.set(g, v);
+    }
   }
-  const allDirectIds: string[] = directCampaigns.rows.map((c: any) => c.id);
-  const directKakaoAggMap = await kakaoBatchAggByGroup(allDirectIds);
 
   for (const campaign of directCampaigns.rows) {
     try {
       const smsDirectAgg = directSmsAggMap.get(campaign.id);
-      const kakaoDirectResult = directKakaoAggMap.get(campaign.id) || { total: 0, success: 0, fail: 0, pending: 0 };
 
-      const successCount = (smsDirectAgg?.success || 0) + kakaoDirectResult.success;
-      const failCount = (smsDirectAgg?.fail || 0) + kakaoDirectResult.fail;
-      const pendingCount = (smsDirectAgg?.pending || 0) + kakaoDirectResult.pending;
+      const successCount = (smsDirectAgg?.success || 0);
+      const failCount = (smsDirectAgg?.fail || 0);
+      const pendingCount = (smsDirectAgg?.pending || 0);
       console.log(`[sync-results] direct campaign ${campaign.id} — success:${successCount}, fail:${failCount}, pending:${pendingCount}`);
 
       // ★ 2026-07-06 120분 타임아웃(pending→fail 변환) 제거 — AI 캠페인 블록과 동일 근거.
@@ -544,10 +568,16 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
         );
 
         // ★ D145 P0+: idempotent 패턴 — 누적 fail 그대로 (함수가 차이만 환불)
+        // ★ 2026-07-30: 환불 유형은 축 판정 CT — 브랜드 전용=BRAND / both=문자·브랜드 분리 원장.
         if (failCount > 0) {
-          const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [campaign.id]);
-          if (campInfo.rows.length > 0) {
-            await prepaidRefund(campInfo.rows[0].company_id, failCount, campInfo.rows[0].message_type, campaign.id, '발송 실패 환불', 'campaign', { refundKey: REFUND_KEYS.FAIL });
+          const axes = resolveRefundAxes(campaign.send_channel, campaign.message_type);
+          for (const axis of axes) {
+            const axisFail = axis.scope === 'all' ? failCount
+              : axis.scope === 'brand' ? Number(directBrandAggMap.get(campaign.id)?.fail || 0)
+              : Number(directNonBrandAggMap.get(campaign.id)?.fail || 0);
+            if (axisFail > 0) {
+              await prepaidRefund(campaign.company_id, axisFail, axis.type, campaign.id, '발송 실패 환불', 'campaign', { refundKey: REFUND_KEYS.FAIL });
+            }
           }
         }
 

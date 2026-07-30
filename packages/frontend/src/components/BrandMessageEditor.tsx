@@ -10,15 +10,12 @@ import BrandMessagePreview from './BrandMessagePreview';
 // ============================================================
 // 상수 (프론트 컨트롤타워 — 백엔드 CT-12와 동기)
 // ============================================================
+// ★ 2026-07-30 발송경로 재구축 — 발송 스펙이 확보된 TEXT·IMAGE·WIDE만 노출한다.
+//   나머지 유형은 백엔드 CT-12가 입구에서 거부하므로 화면에도 두지 않는다(실패할 버튼 노출 금지).
 export const BUBBLE_TYPES = [
   { code: 'TEXT', label: '텍스트', icon: '💬', maxMsg: 1300, maxBtn: 5, needImage: false, needHeader: false, desc: '텍스트 + 버튼' },
   { code: 'IMAGE', label: '이미지', icon: '🖼️', maxMsg: 1300, maxBtn: 5, needImage: true, needHeader: false, desc: '이미지 + 텍스트 + 버튼' },
   { code: 'WIDE', label: '와이드', icon: '🌅', maxMsg: 76, maxBtn: 2, needImage: true, needHeader: false, desc: '가로 배너 + 짧은 텍스트' },
-  { code: 'WIDE_ITEM_LIST', label: '리스트', icon: '📋', maxMsg: 0, maxBtn: 2, needImage: false, needHeader: true, desc: '헤더 + 아이템 3~4개', minItems: 3, maxItems: 4 },
-  { code: 'CAROUSEL_FEED', label: '캐러셀', icon: '🎠', maxMsg: 0, maxBtn: 0, needImage: false, needHeader: false, desc: '좌우 스크롤 카드 2~6개', minItems: 2, maxItems: 6 },
-  { code: 'PREMIUM_VIDEO', label: '동영상', icon: '🎬', maxMsg: 76, maxBtn: 1, needImage: false, needHeader: true, desc: '카카오TV 동영상', needVideo: true },
-  { code: 'COMMERCE', label: '커머스', icon: '🛒', maxMsg: 0, maxBtn: 2, needImage: true, needHeader: false, desc: '상품 카드 + 가격', needCommerce: true },
-  { code: 'CAROUSEL_COMMERCE', label: '캐러셀 커머스', icon: '🛍️', maxMsg: 0, maxBtn: 0, needImage: false, needHeader: false, desc: '상품 캐러셀 2~6개', minItems: 2, maxItems: 6, needCommerce: true },
 ] as const;
 
 export const BUTTON_TYPES = [
@@ -97,10 +94,11 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
     { title: '', desc: '', imgUrl: '', link: '' },
   ]);
 
-  // 대체 발송
+  // 대체 발송 — SMS/LMS만(브랜드는 MMS 대체 불가). LMS는 제목 필수.
   const [resendType, setResendType] = useState('NO');
   const [resendFrom, setResendFrom] = useState('');
   const [resendMessage, setResendMessage] = useState('');
+  const [resendTitle, setResendTitle] = useState('');
 
   // 수신거부
   const [unsubPhone, setUnsubPhone] = useState('');
@@ -162,6 +160,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
       resendType,
       resendFrom: resendFrom || undefined,
       resendMessage: resendMessage || undefined,
+      resendTitle: resendTitle || undefined,
       unsubscribePhone: unsubPhone || undefined,
       unsubscribeAuth: unsubAuth || undefined,
     };
@@ -458,11 +457,13 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
             <option value="NO">대체발송 없음</option>
             <option value="SM">SMS</option>
             <option value="LM">LMS</option>
-            <option value="MM">MMS</option>
           </select>
           {resendType !== 'NO' && (
             <>
               <input type="text" value={resendFrom} onChange={(e) => setResendFrom(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="대체발송 발신번호" />
+              {resendType === 'LM' && (
+                <input type="text" value={resendTitle} onChange={(e) => setResendTitle(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="LMS 제목 (필수)" />
+              )}
               <textarea value={resendMessage} onChange={(e) => setResendMessage(e.target.value)} rows={2} className="w-full border rounded-lg px-3 py-2 text-sm resize-none" placeholder="대체발송 메시지 (빈칸이면 본문 재사용)" />
             </>
           )}

@@ -25,14 +25,18 @@ import {
   invalidateLineGroupCache, getNextSmsTable,
   smsCountAll, smsAggAll, smsSelectAll, smsMinAll, smsExecAll,
   getCompanySmsTablesWithLogs, getCampaignQueueTables,
-  insertKakaoQueue, kakaoAgg, kakaoCountPending, kakaoCancelPending,
+  insertBrandQueue, BrandQueueInsertError, type BrandQueueRow,
   bulkInsertSmsQueue, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType, insertTestSmsQueue
 } from '../utils/sms-queue';
+// ★ 2026-07-30 브랜드 msg_contents 조립·대체발송 매핑은 CT-12에서만 — 라우트 인라인 금지
+import { buildBrandMsgContents, resolveBrandFallback } from '../utils/brand-message';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 // ★ 2026-07-29 브랜드메시지 판정은 CT 하나에서만 한다 — 채널 리터럴을 라우트에 다시 적으면
 //   집계(일자·상세)와 차감·환불이 서로 다른 기준을 갖게 되고, 그 차이가 곧 미청구나 발행 차단이다.
-import { isBrandOnlyChannel } from '../utils/billing-types';
+import { isBrandOnlyChannel, resolveRefundAxes } from '../utils/billing-types';
 import { markRefundPending } from '../utils/refund-pending';
+// ★ 2026-07-30 (2R): 테스트 경로 환불 미완 경보 — 캠페인 레코드가 없어 durable 의무 대신 사람 호출
+import { sendSystemAlert } from '../utils/system-alert';
 import { normalizeMmsImagePaths, type MmsImageItem } from '../utils/mms-image-util';
 import { validateMmsPayload } from '../utils/mms-validator';
 import { buildDateRangeFilter, getCampaignResultCounts, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
@@ -342,11 +346,33 @@ router.post('/test-send', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '등록된 담당자 번호가 없습니다. 설정에서 번호를 추가해주세요.' });
     }
 
-    // ★ 선불 잔액 체크
+    // ★ 선불 잔액 체크 — ★ 2026-07-30 적대검증 수용: 차감 축을 채널로 가른다.
+    //   kakao=BRAND 단일 / both=문자(messageType)+BRAND 이중 / sms=messageType.
+    //   옛 코드는 both 브랜드분이 무료였고, kakao 단독은 문자 단가로 깎였다.
     const testMsgType = (messageType || 'SMS') as string;
-    const testDeduct = await prepaidDeduct(companyId, managerContacts.length, testMsgType, '00000000-0000-0000-0000-000000000000', userId, 'test');
-    if (!testDeduct.ok) {
-      return res.status(402).json({ error: testDeduct.error, insufficientBalance: true, balance: testDeduct.balance, requiredAmount: testDeduct.amount });
+    const TEST_REF = '00000000-0000-0000-0000-000000000000';
+    const testAxes = resolveRefundAxes(testChannel, testMsgType);
+    const testDeductedTypes: string[] = [];
+    for (const axis of testAxes) {
+      const testDeduct = await prepaidDeduct(companyId, managerContacts.length, axis.type, TEST_REF, userId, 'test');
+      if (!testDeduct.ok) {
+        for (const doneType of testDeductedTypes) {
+          // ★ 2026-07-30 (2R): 보상은 ok까지 확인한다. 이 경로는 의무를 붙일 캠페인 레코드가 없으므로
+          //   (전 건 zero-uuid 공유 — B-0727-2 ⑥ 기존 계약) 실패는 경보+로그로 사람이 수동 정산한다.
+          try {
+            const rev = await prepaidRefund(companyId, managerContacts.length, doneType, TEST_REF, `${axis.type} 차감 실패로 ${doneType} 차감분 회수`, 'test', { refundKey: REFUND_KEYS.TEST });
+            if (!rev.ok) {
+              console.error(`[테스트발송][보상미완] company=${companyId} ${doneType} ${managerContacts.length}건 — 수동 환불 필요`);
+              void sendSystemAlert({ dedupKey: `test-refund-miss:${companyId}:${doneType}`, message: `테스트 발송 보상 환불 미완 — company=${companyId} ${doneType} ${managerContacts.length}건 수동 확인 필요` });
+            }
+          } catch (revertErr) {
+            console.error(`[테스트발송][보상실패] ${doneType} ${managerContacts.length}건 회수 실패:`, revertErr);
+            void sendSystemAlert({ dedupKey: `test-refund-miss:${companyId}:${doneType}`, message: `테스트 발송 보상 환불 실패 — company=${companyId} ${doneType} ${managerContacts.length}건 수동 확인 필요` });
+          }
+        }
+        return res.status(402).json({ error: testDeduct.error, insufficientBalance: true, balance: testDeduct.balance, requiredAmount: testDeduct.amount });
+      }
+      testDeductedTypes.push(axis.type);
     }
 
     // 담당자별로 테스트 전용 라인으로 INSERT
@@ -361,14 +387,18 @@ router.post('/test-send', async (req: Request, res: Response) => {
     //   기존 testBillId 사용 → 결과 조회 시 bill_id=userId 필터와 불일치 → company_user 결과 미표시
     const testBillId = userId || '';
     let sentCount = 0;
+    let testSmsSent = 0;    // 문자 축 적재수 (sms/both)
+    let testBrandSent = 0;  // 브랜드 축 적재수 (kakao/both)
     const failedContacts: { phone: string; error: string }[] = [];
 
     // ★ D103: 테스트발송도 백엔드에서 (광고)+080 추가 (전 경로 동일 원칙)
     const testOpt080 = isAd ? await getOpt080Number(userId || null, companyId) : '';
 
     for (const contact of managerContacts) {
+      const cleanPhone = normalizePhone(contact.phone);
+      let contactOk = true;
+      let contactErr = '';
       try {
-        const cleanPhone = normalizePhone(contact.phone);
         // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 + ★ KISA 2026-05 제목(광고) 통합
         const { message: testMsg, subject: testSubject } = prepareSendMessage(messageContent, testFirstCustomer, testFieldMappings, {
           msgType: messageType || 'SMS', isAd: isAd || false, opt080Number: testOpt080,
@@ -376,43 +406,71 @@ router.post('/test-send', async (req: Request, res: Response) => {
         });
 
         if (testChannel === 'sms' || testChannel === 'both') {
-          // ★ D103: insertTestSmsQueue 컨트롤타워 사용 (인라인 INSERT 제거)
-          await insertTestSmsQueue(cleanPhone, callbackNumber, testMsg, messageType || 'SMS', 'test', testSubject, {
-            companyId, billId: testBillId, mmsImages: mmsImagePaths,
-          });
+          try {
+            // ★ D103: insertTestSmsQueue 컨트롤타워 사용 (인라인 INSERT 제거)
+            await insertTestSmsQueue(cleanPhone, callbackNumber, testMsg, messageType || 'SMS', 'test', testSubject, {
+              companyId, billId: testBillId, mmsImages: mmsImagePaths,
+            });
+            testSmsSent++;
+          } catch (smsErr) {
+            contactOk = false;
+            contactErr = smsErr instanceof Error ? smsErr.message : String(smsErr);
+          }
         }
 
         if (testChannel === 'kakao' || testChannel === 'both') {
-          // 카카오 테스트 발송
-          await insertKakaoQueue({
-            bubbleType: testKakaoBubbleType,
-            senderKey: testKakaoSenderKey,
-            phone: cleanPhone,
-            targeting: 'I',
-            message: testMsg,
-            isAd: false,
-            resendType: 'NO',  // 테스트는 대체발송 안함
-            requestUid: testBillId,
-          });
+          try {
+            // 브랜드메시지 테스트 발송 — SMSQ msg_type='F' (2026-07-30 재구축)
+            await insertBrandQueue(testTables, [{
+              phone: cleanPhone,
+              callback: callbackNumber,
+              senderKey: testKakaoSenderKey,
+              msgContents: buildBrandMsgContents({
+                typeDef: 'FREE', targeting: 'I', bubbleType: testKakaoBubbleType, message: testMsg,
+              }),
+              nextType: 'N',  // 테스트는 대체발송 안함
+              companyId,
+            }], testBillId);
+            testBrandSent++;
+          } catch (brandErr) {
+            contactOk = false;
+            contactErr = brandErr instanceof Error ? brandErr.message : String(brandErr);
+          }
         }
-
-        sentCount++;
       } catch (err) {
-        console.error(`담당자 테스트 발송 실패 (${contact.phone}):`, err);
-        // ★ C5: 실패 건 기록
-        failedContacts.push({
-          phone: contact.phone,
-          error: err instanceof Error ? err.message : String(err)
-        });
+        contactOk = false;
+        contactErr = err instanceof Error ? err.message : String(err);
+      }
+      if (contactOk) {
+        sentCount++;
+      } else {
+        console.error(`담당자 테스트 발송 실패 (${contact.phone}):`, contactErr);
+        failedContacts.push({ phone: contact.phone, error: contactErr });
       }
     }
 
-    // ★ P0-3: 테스트 발송 실패건 환불 (차감은 전원 기준, 실패분 돌려줌)
-    const testFailCount = managerContacts.length - sentCount;
-    if (testFailCount > 0) {
-      // ⚠ 이 경로는 전 건이 고정 zero-uuid를 reference로 공유한다(기존 결함, B-0727-2 ⑥). 키를 달아 다른 원인과
-      //   섞이지는 않게 하되, 요청별 고유 reference로 바꾸는 것은 별도 과제로 남는다.
-      await prepaidRefund(companyId, testFailCount, testMsgType, '00000000-0000-0000-0000-000000000000', '테스트 발송 실패 자동 환불', 'test', { refundKey: REFUND_KEYS.TEST });
+    // ★ P0-3: 테스트 발송 실패건 환불 — ★ 2026-07-30: 차감과 같은 축으로, 축별 실제 미적재분만 돌려준다.
+    //   (옛 코드는 both에서 한 채널만 실패해도 유일한 차감 전체를 환불해 성공 발송이 무료가 됐다.)
+    // ⚠ 이 경로는 전 건이 고정 zero-uuid를 reference로 공유한다(기존 결함, B-0727-2 ⑥). 키를 달아 다른 원인과
+    //   섞이지는 않게 하되, 요청별 고유 reference로 바꾸는 것은 별도 과제로 남는다.
+    for (const axis of testAxes) {
+      const axisSent = axis.scope === 'brand' ? testBrandSent
+        : axis.scope === 'nonBrand' ? testSmsSent
+        : (testChannel === 'kakao' ? testBrandSent : testSmsSent);
+      const axisFail = managerContacts.length - axisSent;
+      if (axisFail > 0) {
+        // ★ 2026-07-30 (2R): ok 확인 — 실패는 경보+로그(캠페인 레코드가 없어 durable 의무 불가, 수동 정산)
+        try {
+          const refundRes = await prepaidRefund(companyId, axisFail, axis.type, TEST_REF, '테스트 발송 실패 자동 환불', 'test', { refundKey: REFUND_KEYS.TEST });
+          if (!refundRes.ok) {
+            console.error(`[테스트발송][환불미완] company=${companyId} ${axis.type} ${axisFail}건 — 수동 환불 필요`);
+            void sendSystemAlert({ dedupKey: `test-refund-miss:${companyId}:${axis.type}`, message: `테스트 발송 실패 환불 미완 — company=${companyId} ${axis.type} ${axisFail}건 수동 확인 필요` });
+          }
+        } catch (refundErr) {
+          console.error(`[테스트발송][환불오류] company=${companyId} ${axis.type} ${axisFail}건:`, refundErr);
+          void sendSystemAlert({ dedupKey: `test-refund-miss:${companyId}:${axis.type}`, message: `테스트 발송 실패 환불 오류 — company=${companyId} ${axis.type} ${axisFail}건 수동 확인 필요` });
+        }
+      }
     }
 
     // ★ C5: 실패 건 DB 기록 (비동기, 발송 응답에 영향 없음)
@@ -832,8 +890,8 @@ if (!sendDeduct.ok) {
   });
 }
 
-// ★ 2026-07-29 `both`는 **같은 수신자를 두 큐에 적재한다** — 아래 발송 단계가
-//   bulkInsertSmsQueue(문자)와 insertKakaoQueue(브랜드) 양쪽에 넣는다.
+// ★ 2026-07-29 `both`는 **같은 수신자를 두 축으로 적재한다** — 아래 발송 단계가
+//   bulkInsertSmsQueue(문자)와 insertBrandQueue(브랜드) 양쪽에 넣는다.
 //   그런데 차감은 위 한 번뿐이라 브랜드 발송분이 통째로 무료로 나가고 있었다(적대검증 실측).
 //   두 축 모두 차감하고, 뒤가 실패하면 **앞선 차감을 되돌린다** — 한쪽만 깎인 채로 발송하면
 //   그 캠페인의 회계가 영구히 어긋나고 환불 sweeper도 짝을 못 찾는다.
@@ -893,7 +951,7 @@ let opt080Auth = '';
 
 // 1단계: 메시지 치환 + 발송 데이터 준비 (메모리 연산)
 const aiSmsRows: any[][] = [];
-const aiKakaoQueue: any[] = [];
+const aiBrandRows: BrandQueueRow[] = [];
 
 for (const customer of filteredCustomers) {
   // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 + ★ KISA 2026-05 제목(광고) 통합
@@ -916,23 +974,30 @@ for (const customer of filteredCustomers) {
     ]);
   }
 
-  // ★ 카카오 — 개별 큐 축적 (insertKakaoQueue는 개별 호출 필요)
+  // ★ 브랜드메시지 — SMSQ 배치 행 축적 (2026-07-30 재구축: 알림톡과 같은 라인·msg_type='F')
+  //   조립·대체발송 결함은 여기서 throw → 아래 전체 catch가 미적재 기준으로 환불한다(fail-closed).
   if (sendChannel === 'kakao' || sendChannel === 'both') {
-    aiKakaoQueue.push({
-      bubbleType: kakaoBubbleType,
-      senderKey: kakaoSenderKey,
-      phone: cleanPhone,
-      targeting: kakaoTargeting,
-      message: personalizedMessage,
-      isAd: campaign.is_ad || false,
-      reservedDate: sendTime || undefined,
-      attachmentJson: kakaoAttachmentJson,
-      carouselJson: kakaoCarouselJson,
+    const brandFallback = resolveBrandFallback({
       resendType: sendChannel === 'both' ? 'NO' : kakaoResendType,
-      resendFrom: customerCallback,
-      resendMessage: sendChannel === 'both' ? undefined : undefined,
-      unsubscribePhone: opt080Number,
-      requestUid: id,
+      originalMessage: personalizedMessage,
+    });
+    aiBrandRows.push({
+      phone: cleanPhone,
+      callback: customerCallback,
+      senderKey: kakaoSenderKey,
+      msgContents: buildBrandMsgContents({
+        typeDef: 'FREE',
+        targeting: kakaoTargeting,
+        bubbleType: kakaoBubbleType,
+        message: personalizedMessage,
+        attachmentJson: kakaoAttachmentJson,
+        carouselJson: kakaoCarouselJson,
+      }),
+      nextType: brandFallback.nextType,
+      nextContents: brandFallback.nextContents,
+      titleStr: brandFallback.titleStr,
+      reservedDate: sendTime || undefined,
+      companyId,
     });
   }
 }
@@ -942,13 +1007,29 @@ if (sendChannel === 'sms' || sendChannel === 'both') {
   aiSentCount += await bulkInsertSmsQueue(companyTables, aiSmsRows, !isScheduled);
 }
 
-// 3단계: 카카오 발송 (개별 호출 — 카카오 API 특성상 bulk 미지원)
-for (const kakaoItem of aiKakaoQueue) {
+// 3단계: 브랜드메시지 배치 INSERT — CT-04 insertBrandQueue (msg_type='F')
+if (aiBrandRows.length > 0) {
+  let aiBrandInserted = 0;
   try {
-    await insertKakaoQueue(kakaoItem);
-    if (sendChannel === 'kakao') aiSentCount++;
-  } catch (kakaoErr) {
-    console.error(`[AI발송] 카카오 INSERT 실패 (phone: ${kakaoItem.phone}):`, kakaoErr);
+    aiBrandInserted = await insertBrandQueue(companyTables, aiBrandRows, id);
+  } catch (brandErr) {
+    if (brandErr instanceof BrandQueueInsertError) {
+      aiBrandInserted = brandErr.inserted; // 앞선 배치는 커밋됨 — 그만큼은 발송분(B-0727-1 계약)
+      console.error(`[AI발송] 브랜드 큐 INSERT 부분 실패 (적재 ${aiBrandInserted}건):`, brandErr.message);
+    } else {
+      console.error(`[AI발송] 브랜드 큐 INSERT 실패:`, brandErr);
+    }
+  }
+  if (sendChannel === 'kakao') aiSentCount += aiBrandInserted;
+  // ★ both는 차감이 두 축(message_type + BRAND) — 아래 aiFailCount 환불은 문자 축이므로
+  //   브랜드 축 미적재분은 여기서 BRAND로 되돌린다(직접발송 경로와 동일 계약).
+  if (sendChannel === 'both' && aiBrandInserted < aiBrandRows.length) {
+    const aiBrandShort = aiBrandRows.length - aiBrandInserted;
+    try {
+      await prepaidRefund(companyId, aiBrandShort, 'BRAND', id, `AI발송 브랜드 미적재 ${aiBrandShort}건 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
+    } catch (brandRefundErr) {
+      console.error('[AI발송] 브랜드 미적재 환불 오류:', brandRefundErr);
+    }
   }
 }
 
@@ -1896,7 +1977,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     }
 
     // ★ 2026-07-29 캠페인 발송과 같은 구멍이 직접발송에도 있었다 — `both`는 아래에서
-    //   bulkInsertSmsQueue(문자)와 insertKakaoQueue(브랜드) 양쪽에 같은 수신자를 적재하는데
+    //   bulkInsertSmsQueue(문자)와 insertBrandQueue(브랜드) 양쪽에 같은 수신자를 적재하는데
     //   차감은 위 한 번뿐이라 브랜드 발송분이 무료로 나갔다. 두 축 모두 차감하고, 뒤가 실패하면
     //   앞선 차감과 캠페인 레코드를 함께 되돌린다(한쪽만 깎인 채로 남기지 않는다).
     if (directChannel === 'both') {
@@ -2011,58 +2092,70 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       directSmsSentCount = await bulkInsertSmsQueue(companyTables, directSmsRows, useNow);
     }
 
-    // 카카오 발송 (kakao 또는 both)
-    // ★ C1: per-recipient try/catch로 카카오 부분 실패 추적 (선언은 try 밖으로 이동 — B-0727-2)
+    // 브랜드메시지 발송 (kakao 또는 both) — 2026-07-30 재구축: SMSQ 배치(msg_type='F')
     if (directChannel === 'kakao' || directChannel === 'both') {
+      const directBrandRows: BrandQueueRow[] = [];
       for (let i = 0; i < filteredRecipients.length; i++) {
-        try {
-          const recipient = filteredRecipients[i];
-          // ★ D102: 항상 백엔드 replaceVariables 컨트롤타워 사용 (customMessages 분기 제거)
-          const cleanKakaoPhone = normalizePhone(recipient.phone);
-          const dbKakaoCustomer = directCustomerMap.get(cleanKakaoPhone) || null;
-          // ★ D123: 직접발송 카카오도 고객 원본 데이터 그대로
-          // ★ D142+ B1: sanitizedMessage(D103 순수본문) 사용 — INSERT와 발송 본문 일관
-          const finalMessage = replaceVariables(sanitizedMessage, dbKakaoCustomer, directFieldMappings, {
-            name: recipient.name,
-            extra1: recipient.extra1,
-            extra2: recipient.extra2,
-            extra3: recipient.extra3,
-            callback: recipient.callback,
-          }, { skipNumberFormatting: true });
+        const recipient = filteredRecipients[i];
+        // ★ D102: 항상 백엔드 replaceVariables 컨트롤타워 사용 (customMessages 분기 제거)
+        const cleanKakaoPhone = normalizePhone(recipient.phone);
+        const dbKakaoCustomer = directCustomerMap.get(cleanKakaoPhone) || null;
+        // ★ D123: 직접발송 카카오도 고객 원본 데이터 그대로
+        // ★ D142+ B1: sanitizedMessage(D103 순수본문) 사용 — INSERT와 발송 본문 일관
+        const finalMessage = replaceVariables(sanitizedMessage, dbKakaoCustomer, directFieldMappings, {
+          name: recipient.name,
+          extra1: recipient.extra1,
+          extra2: recipient.extra2,
+          extra3: recipient.extra3,
+          callback: recipient.callback,
+        }, { skipNumberFormatting: true });
 
-          // ★ C3: 분할전송 시간 계산 (오버플로우 방지 — calcSplitSendTime 적용)
-          let kakaoSendTime: string | undefined;
-          if (isScheduledSend) {
-            if (splitEnabled && splitCount > 0) {
-              const batchIndex = Math.floor(i / splitCount);
-              kakaoSendTime = toKoreaTimeStr(calcSplitSendTime(new Date(scheduledAt), batchIndex));
-            } else {
-              kakaoSendTime = toKoreaTimeStr(new Date(scheduledAt));
-            }
+        // ★ C3: 분할전송 시간 계산 (오버플로우 방지 — calcSplitSendTime 적용)
+        let kakaoSendTime: string | undefined;
+        if (isScheduledSend) {
+          if (splitEnabled && splitCount > 0) {
+            const batchIndex = Math.floor(i / splitCount);
+            kakaoSendTime = toKoreaTimeStr(calcSplitSendTime(new Date(scheduledAt), batchIndex));
+          } else {
+            kakaoSendTime = toKoreaTimeStr(new Date(scheduledAt));
           }
+        }
 
-          // ★ D103: resolveCustomerCallback 컨트롤타워
-          const recipientCallback = resolveCustomerCallback(recipient, useIndividualCallback, callback);
+        // ★ D103: resolveCustomerCallback 컨트롤타워
+        const recipientCallback = resolveCustomerCallback(recipient, useIndividualCallback, callback);
 
-          await insertKakaoQueue({
-            bubbleType: kakaoBubbleType || 'TEXT',
-            senderKey: kakaoSenderKey || '',
-            phone: normalizePhone(recipient.phone),
+        // 조립·대체발송 결함은 throw → 바깥 try의 미적재 환불이 되돌린다(fail-closed).
+        const brandFallback = resolveBrandFallback({
+          resendType: directChannel === 'both' ? 'NO' : (kakaoResendType || 'SM'),
+          originalMessage: finalMessage,
+        });
+        directBrandRows.push({
+          phone: cleanKakaoPhone,
+          callback: recipientCallback,
+          senderKey: kakaoSenderKey || '',
+          msgContents: buildBrandMsgContents({
+            typeDef: 'FREE',
             targeting: kakaoTargeting || 'I',
+            bubbleType: kakaoBubbleType || 'TEXT',
             message: finalMessage,
-            // ★ D142+ B1: finalIsAd(자동 승격) 사용 — INSERT/SMS 발송과 일관
-            isAd: finalIsAd,
-            reservedDate: kakaoSendTime,
             attachmentJson: kakaoAttachmentJson || undefined,
             carouselJson: kakaoCarouselJson || undefined,
-            resendType: directChannel === 'both' ? 'NO' : (kakaoResendType || 'SM'),
-            resendFrom: recipientCallback,
-            unsubscribePhone: directOpt080,
-            requestUid: campaignId,
-          });
-          directKakaoSentCount++;
-        } catch (kakaoErr) {
-          console.error(`[직접발송] 카카오 INSERT 실패 (index: ${i}):`, kakaoErr);
+          }),
+          nextType: brandFallback.nextType,
+          nextContents: brandFallback.nextContents,
+          titleStr: brandFallback.titleStr,
+          reservedDate: kakaoSendTime,
+          companyId,
+        });
+      }
+      try {
+        directKakaoSentCount = await insertBrandQueue(companyTables, directBrandRows, campaignId);
+      } catch (brandErr) {
+        if (brandErr instanceof BrandQueueInsertError) {
+          directKakaoSentCount = brandErr.inserted; // 앞선 배치는 커밋됨(B-0727-1 계약)
+          console.error(`[직접발송] 브랜드 큐 INSERT 부분 실패 (적재 ${directKakaoSentCount}건):`, brandErr.message);
+        } else {
+          console.error(`[직접발송] 브랜드 큐 INSERT 실패:`, brandErr);
         }
       }
     }
@@ -2968,8 +3061,10 @@ router.post('/brand-send', async (req: Request, res: Response) => {
       // ★ 2026-07-29 `name` → `campaign_name`. 실제 컬럼명이 다른데 이 INSERT만 틀려서
       //   브랜드메시지 발송이 **처음부터 500으로 죽고 있었다**(42703). 다른 campaigns INSERT 5곳은
       //   전부 campaign_name을 쓴다 — 이 경로만 아무도 안 눌러서 드러나지 않았다.
-      `INSERT INTO campaigns (company_id, user_id, campaign_name, message_content, message_type, send_channel, status, created_at)
-       VALUES ($1, $2, $3, $4, 'LMS', 'kakao_brand', 'sending', NOW())
+      // ★ 2026-07-30 (2R 범위 밖 수용): created_by 동반 기록 — 사용자 지정 청구(created_by 축)와
+      //   담당자 격리·발송결과 소유자 매핑이 전부 이 컬럼을 본다. 비면 그 축들에서 통째로 빠진다.
+      `INSERT INTO campaigns (company_id, user_id, created_by, campaign_name, message_content, message_type, send_channel, status, created_at)
+       VALUES ($1, $2, $2, $3, $4, 'LMS', 'kakao_brand', 'sending', NOW())
        RETURNING id`,
       [companyId, userId, `브랜드메시지 ${bubbleType || 'TEXT'}`, message || `[${bubbleType}] 브랜드메시지`]
     );

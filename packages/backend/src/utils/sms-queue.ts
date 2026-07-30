@@ -450,13 +450,15 @@ export async function smsBatchAggByGroup(
   tables: string[],
   groupField: string,
   aggFields: string,
-  ids: (string | number)[]
+  ids: (string | number)[],
+  // ★ 2026-07-30: 파라미터 없는 정적 조건만(예 msg_type = 'F') — smsCampaignCountsSafe 축 분리용.
+  extraWhere?: string,
 ): Promise<Map<string, Record<string, number>>> {
   const result = new Map<string, Record<string, number>>();
   if (tables.length === 0 || ids.length === 0) return result;
 
   const placeholders = ids.map(() => '?').join(',');
-  const where = `${groupField} IN (${placeholders})`;
+  const where = `${groupField} IN (${placeholders})${extraWhere ? ` AND ${extraWhere}` : ''}`;
 
   // 각 테이블에서 group + 집계 값을 UNION ALL 한 뒤, outer에서 다시 GROUP BY로 합산
   const unions = tables
@@ -490,6 +492,9 @@ export async function smsCampaignCountsSafe(
   tables: string[],
   ids: (string | number)[],
   groupField: string = 'app_etc1',
+  // ★ 2026-07-30 브랜드 합류 후 환불 축 분리용 — 'brand'=msg_type 'F'만 / 'nonBrand'=그 외 / 'all'=전체(기본, 기존 동작 불변).
+  //   차감이 두 축(BRAND + message_type)으로 갈리는 'both' 캠페인의 환불 계산에서만 분리 집계를 쓴다.
+  msgTypeScope: 'all' | 'brand' | 'nonBrand' = 'all',
 ): Promise<Map<string, CampaignAggCounts>> {
   const out = new Map<string, CampaignAggCounts>();
   if (tables.length === 0 || ids.length === 0) return out;
@@ -498,18 +503,21 @@ export async function smsCampaignCountsSafe(
   const { resultTables, pendingLiveTables } = classifyResultTables(tables);
   const SUC = SUCCESS_CODES.join(',');
   const PEN = PENDING_CODES.join(',');
+  const scopeWhere = msgTypeScope === 'brand' ? `msg_type = 'F'`
+    : msgTypeScope === 'nonBrand' ? `(msg_type IS NULL OR msg_type <> 'F')`
+    : '';
 
   const logAgg = resultTables.length > 0
     ? await smsBatchAggByGroup(resultTables, groupField, `
         COUNT(*) as t,
         SUM(CASE WHEN status_code IN (${SUC}) THEN 1 ELSE 0 END) as s,
         SUM(CASE WHEN status_code NOT IN (${SUC}, ${PEN}) THEN 1 ELSE 0 END) as f,
-        SUM(CASE WHEN status_code IN (${PEN}) THEN 1 ELSE 0 END) as p`, ids)
+        SUM(CASE WHEN status_code IN (${PEN}) THEN 1 ELSE 0 END) as p`, ids, scopeWhere)
     : new Map<string, Record<string, number>>();
   const liveAgg = pendingLiveTables.length > 0
     ? await smsBatchAggByGroup(pendingLiveTables, groupField, `
         SUM(CASE WHEN status_code IN (${PEN}) THEN 1 ELSE 0 END) as lp,
-        SUM(CASE WHEN status_code NOT IN (${SUC}, ${PEN}) AND mobsend_time IS NULL THEN 1 ELSE 0 END) as lf`, ids)
+        SUM(CASE WHEN status_code NOT IN (${SUC}, ${PEN}) AND mobsend_time IS NULL THEN 1 ELSE 0 END) as lf`, ids, scopeWhere)
     : new Map<string, Record<string, number>>();
 
   for (const rawId of ids) {
@@ -833,159 +841,125 @@ export async function ensureMonthlyLogTables(): Promise<void> {
   }
 }
 
-// ===== 카카오 브랜드메시지 헬퍼 =====
+// ===== 브랜드메시지 큐 (2026-07-30 재구축 — SMSQ msg_type='F') =====
+// 옛 IMC_BM_FREE_BIZ_MSG/IMC_BM_BASIC_BIZ_MSG 적재는 테이블 미실재(1146)로 폐기.
+// 알림톡(msg_type='K')과 같은 라인 테이블·같은 컬럼 집합을 쓴다 — 결과·집계·취소·정산이 자동 합류.
 
-/** 카카오 브랜드메시지 큐 INSERT */
-export async function insertKakaoQueue(params: {
-  bubbleType: string;
-  senderKey: string;
+/**
+ * 브랜드 큐 INSERT 실패 — 그 전까지 커밋된 건수를 함께 전달한다(AlimtalkQueueInsertError와 동일 계약).
+ * 배치가 독립 커밋이라 "실패 = 0건 적재"가 아니다. 호출부는 inserted만큼을 발송분으로 센다.
+ */
+export class BrandQueueInsertError extends Error {
+  constructor(message: string, public readonly inserted: number) {
+    super(message);
+    this.name = 'BrandQueueInsertError';
+  }
+}
+
+export interface BrandQueueRow {
   phone: string;
-  targeting: string;
-  message: string;
-  isAd: boolean;
+  /** 대체발송(SMS/LMS) 발신번호 — call_back */
+  callback: string;
+  /** CT-12 buildBrandMsgContents 산출물(JSON 문자열) */
+  msgContents: string;
+  /** 발신프로필 키 — k_etc_json {"senderkey":...}. 브랜드는 템플릿 도출이 없어 항상 필수 */
+  senderKey: string;
+  /** 기본형만 — k_template_code */
+  templateCode?: string;
+  /** 'S'/'L'(원문 그대로)은 본문이 JSON이라 불가 — 게이트웨이가 오류 로그 없이 버린다 */
+  nextType: 'N' | 'A' | 'B';
+  nextContents?: string;
+  /** 'B'(LMS 대체) 제목 — title_str */
+  titleStr?: string;
+  /** 예약 시각(KST 문자열). 없으면 NOW() = 즉시 */
   reservedDate?: string;
-  attachmentJson?: string;
-  carouselJson?: string;
-  header?: string;
-  resendType?: string;
-  resendFrom?: string;
-  resendMessage?: string;
-  resendTitle?: string;
-  unsubscribePhone?: string;
-  unsubscribeAuth?: string;
-  requestUid?: string;
-}): Promise<void> {
-  const {
-    bubbleType, senderKey, phone, targeting, message, isAd,
-    reservedDate, attachmentJson, carouselJson, header,
-    resendType = 'SM', resendFrom, resendMessage, resendTitle,
-    unsubscribePhone, unsubscribeAuth, requestUid
-  } = params;
-
-  const reservedDateStr = reservedDate || toKoreaTimeStr(new Date());
-  const messageReuse = resendMessage ? 'N' : 'Y';
-
-  await mysqlQuery(
-    `INSERT INTO IMC_BM_FREE_BIZ_MSG (
-      CHAT_BUBBLE_TYPE, STATUS, AD_FLAG, RESERVED_DATE,
-      SENDER_KEY, PHONE_NUMBER, TARGETING,
-      HEADER, MESSAGE, ATTACHMENT_JSON, CAROUSEL_JSON,
-      RESEND_MT_TYPE, RESEND_MT_FROM, RESEND_MT_TITLE,
-      RESEND_MT_MESSAGE_REUSE, RESEND_MT_MESSAGE,
-      UNSUBSCRIBE_PHONE_NUMBER, UNSUBSCRIBE_AUTH_NUMBER,
-      REQUEST_UID
-    ) VALUES (?, '1', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      bubbleType,
-      isAd ? 'Y' : 'N',
-      reservedDateStr,
-      senderKey,
-      phone,
-      targeting,
-      header || null,
-      message,
-      attachmentJson || null,
-      carouselJson || null,
-      resendType,
-      resendFrom || null,
-      resendTitle || null,
-      messageReuse,
-      resendMessage || null,
-      unsubscribePhone || null,
-      unsubscribeAuth || null,
-      requestUid || null
-    ]
-  );
+  /** app_etc2 — companyId 추적 */
+  companyId?: string;
 }
 
 /**
- * CT-04: 기본형 브랜드메시지 발송 큐 INSERT (IMC_BM_BASIC_BIZ_MSG)
- * 템플릿 코드 + 변수 JSON 기반 발송
+ * CT-04: 브랜드메시지 발송 큐 INSERT (SMSQ_SEND에 msg_type='F')
+ * QTmsg Agent가 SMSQ_SEND에서 가져가서 발송. 결과는 알림톡과 동일하게 SMSQ_SEND_YYYYMM.
+ *
+ * @param appEtc1 캠페인/추적 식별자 — 결과·정산·취소 매칭 축(app_etc1). 누락 시 결과 미조회.
  */
-export async function insertKakaoBasicQueue(params: {
-  bubbleType: string;
-  senderKey: string;
-  phone: string;
-  targeting: string;
-  templateCode: string;
-  isAd: boolean;
-  reservedDate?: string;
-  header?: string;
-  message?: string;
-  additionalContent?: string;
-  attachmentJson?: string;
-  carouselJson?: string;
-  messageVariableJson?: string;
-  buttonVariableJson?: string;
-  couponVariableJson?: string;
-  imageVariableJson?: string;
-  videoVariableJson?: string;
-  commerceVariableJson?: string;
-  carouselVariableJson?: string;
-  resendType?: string;
-  resendFrom?: string;
-  resendMessage?: string;
-  resendTitle?: string;
-  unsubscribePhone?: string;
-  unsubscribeAuth?: string;
-  requestUid?: string;
-}): Promise<void> {
-  const {
-    bubbleType, senderKey, phone, targeting, templateCode, isAd,
-    reservedDate, header, message, additionalContent,
-    attachmentJson, carouselJson,
-    messageVariableJson, buttonVariableJson, couponVariableJson,
-    imageVariableJson, videoVariableJson, commerceVariableJson, carouselVariableJson,
-    resendType = 'NO', resendFrom, resendMessage, resendTitle,
-    unsubscribePhone, unsubscribeAuth, requestUid
-  } = params;
+export async function insertBrandQueue(
+  tables: string[],
+  rows: BrandQueueRow[],
+  appEtc1?: string,
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  if (tables.length === 0) throw new BrandQueueInsertError('브랜드메시지 발송 테이블이 없습니다', 0);
 
-  const reservedDateStr = reservedDate || toKoreaTimeStr(new Date());
-  const messageReuse = resendMessage ? 'N' : 'Y';
+  const table = tables[0]; // 알림톡과 동일 — 첫 번째 테이블 사용
 
-  await mysqlQuery(
-    `INSERT INTO IMC_BM_BASIC_BIZ_MSG (
-      CHAT_BUBBLE_TYPE, STATUS, PRIORITY, AD_FLAG, RESERVED_DATE,
-      SENDER_KEY, PHONE_NUMBER, TARGETING, TEMPLATE_CODE, PUSH_ALARM,
-      HEADER, MESSAGE, ADDITIONAL_CONTENT,
-      ATTACHMENT_JSON, CAROUSEL_JSON,
-      MESSAGE_VARIABLE_JSON, BUTTON_VARIABLE_JSON, COUPON_VARIABLE_JSON,
-      IMAGE_VARIABLE_JSON, VIDEO_VARIABLE_JSON, COMMERCE_VARIABLE_JSON, CAROUSEL_VARIABLE_JSON,
-      RESEND_MT_TYPE, RESEND_MT_FROM, RESEND_MT_TITLE,
-      RESEND_MT_MESSAGE_REUSE, RESEND_MT_MESSAGE,
-      UNSUBSCRIBE_PHONE_NUMBER, UNSUBSCRIBE_AUTH_NUMBER,
-      REQUEST_UID
-    ) VALUES (?, '1', 'N', ?, ?, ?, ?, ?, ?, 'Y', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      bubbleType,
-      isAd ? 'Y' : 'N',
-      reservedDateStr,
-      senderKey,
-      phone,
-      targeting,
-      templateCode,
-      header || null,
-      message || null,
-      additionalContent || null,
-      attachmentJson || null,
-      carouselJson || null,
-      messageVariableJson || null,
-      buttonVariableJson || null,
-      couponVariableJson || null,
-      imageVariableJson || null,
-      videoVariableJson || null,
-      commerceVariableJson || null,
-      carouselVariableJson || null,
-      resendType,
-      resendFrom || null,
-      resendTitle || null,
-      messageReuse,
-      resendMessage || null,
-      unsubscribePhone || null,
-      unsubscribeAuth || null,
-      requestUid || null
-    ]
-  );
+  // 첫 INSERT 전 전 행 검증 — 형식 결함이 배치 중간에 터져 부분 발송이 되지 않게(fail-closed).
+  for (const r of rows) {
+    if (!String(r.senderKey || '').trim()) {
+      throw new BrandQueueInsertError('브랜드메시지 발신프로필 키(senderKey)가 없습니다', 0);
+    }
+    if (!String(r.msgContents || '').trim()) {
+      throw new BrandQueueInsertError('브랜드메시지 msg_contents가 비어 있습니다', 0);
+    }
+    if (!['N', 'A', 'B'].includes(r.nextType)) {
+      throw new BrandQueueInsertError(`브랜드메시지 대체발송 코드가 올바르지 않습니다: ${r.nextType}`, 0);
+    }
+    if ((r.nextType === 'A' || r.nextType === 'B') && !String(r.nextContents || '').trim()) {
+      throw new BrandQueueInsertError('대체발송(A/B)인데 대체 문구(k_next_contents)가 없습니다', 0);
+    }
+    if (r.nextType === 'B' && !String(r.titleStr || '').trim()) {
+      throw new BrandQueueInsertError('LMS 대체발송(B)인데 제목(title_str)이 없습니다', 0);
+    }
+  }
+
+  let inserted = 0;
+  const BATCH = 5000;
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const batch = rows.slice(i, i + BATCH);
+    const values: string[] = [];
+    const params: any[] = [];
+
+    for (const r of batch) {
+      // 예약이면 지정 시각, 아니면 NOW() — bulkInsertSmsQueue 즉시발송과 동일 기준.
+      const reservedExpr = r.reservedDate ? '?' : 'NOW()';
+      values.push(`(?, ?, ?, 'F', ?, ?, ?, ?, NULL, ${reservedExpr}, NOW(), '1', ?, ?, ?)`);
+      params.push(
+        r.phone,                                      // dest_no
+        r.callback || '',                             // call_back (대체발송 발신번호)
+        r.msgContents,                                // msg_contents (JSON 문자열)
+        r.titleStr || null,                           // title_str (B = LMS 대체 제목)
+        r.templateCode || null,                       // k_template_code (기본형만)
+        r.nextType,                                   // k_next_type (N/A/B만 — S/L 불가)
+        r.nextContents || null,                       // k_next_contents
+      );
+      if (r.reservedDate) params.push(r.reservedDate); // sendreq_time
+      params.push(
+        JSON.stringify({ senderkey: r.senderKey }),   // k_etc_json — 브랜드는 항상 필수
+        appEtc1 || null,                              // app_etc1 (캠페인/추적 식별자)
+        r.companyId || null,                          // app_etc2 (companyId 추적)
+      );
+    }
+
+    // 배치는 각각 독립 커밋 — 실패해도 커밋된 건수를 실어서 던진다(B-0727-1 계약 미러).
+    try {
+      await mysqlQuery(
+        `INSERT INTO ${table} (
+          dest_no, call_back, msg_contents, msg_type, title_str,
+          k_template_code, k_next_type, k_next_contents, k_button_json,
+          sendreq_time, msg_instm, rsv1, k_etc_json, app_etc1, app_etc2
+        ) VALUES ${values.join(',')}`,
+        params
+      );
+    } catch (batchErr: any) {
+      throw new BrandQueueInsertError(
+        `브랜드메시지 큐 INSERT 실패 (앞선 ${inserted}건은 커밋됨): ${batchErr?.message || batchErr}`,
+        inserted,
+      );
+    }
+    inserted += batch.length;
+  }
+
+  return inserted;
 }
 
 /**
@@ -1147,124 +1121,9 @@ export async function insertAlimtalkQueue(
   return inserted;
 }
 
-/** 카카오 발송 결과 집계 */
-export async function kakaoAgg(whereClause: string, params: any[]): Promise<{ total: number; success: number; fail: number; pending: number }> {
-  const rows = await mysqlQuery(
-    `SELECT
-       COUNT(*) as total,
-       COUNT(CASE WHEN REPORT_CODE = '0000' THEN 1 END) as success,
-       COUNT(CASE WHEN REPORT_CODE IS NOT NULL AND REPORT_CODE != '0000' THEN 1 END) as fail,
-       COUNT(CASE WHEN REPORT_CODE IS NULL AND STATUS = '1' THEN 1 END) as pending
-     FROM IMC_BM_FREE_BIZ_MSG WHERE ${whereClause}`,
-    params
-  ) as any[];
-  return {
-    total: Number(rows[0]?.total || 0),
-    success: Number(rows[0]?.success || 0),
-    fail: Number(rows[0]?.fail || 0),
-    pending: Number(rows[0]?.pending || 0)
-  };
-}
-
-/** 카카오 예약 대기 건수 */
-export async function kakaoCountPending(requestUid: string): Promise<number> {
-  const rows = await mysqlQuery(
-    `SELECT COUNT(*) as cnt FROM IMC_BM_FREE_BIZ_MSG WHERE REQUEST_UID = ? AND STATUS = '1'`,
-    [requestUid]
-  ) as any[];
-  return Number(rows[0]?.cnt || 0);
-}
-
-/** 카카오 예약 취소 (대기 건 삭제) */
-export async function kakaoCancelPending(requestUid: string): Promise<number> {
-  const rows = await mysqlQuery(
-    `DELETE FROM IMC_BM_FREE_BIZ_MSG WHERE REQUEST_UID = ? AND STATUS = '1'`,
-    [requestUid]
-  ) as any[];
-  return (rows as any).affectedRows || 0;
-}
-
-// ===== ★ 카카오 범용 조회 헬퍼 (단일 테이블 IMC_BM_FREE_BIZ_MSG) =====
-// admin.ts, results.ts, billing.ts 등에서 인라인으로 중복 쿼리하던 패턴 통합.
-
-/** 카카오 COUNT — whereClause는 "WHERE" 접두사 선택적 */
-export async function kakaoCountWhere(whereClause: string, params: any[]): Promise<number> {
-  const w = whereClause.replace(/^\s*WHERE\s+/i, '');
-  const rows = await mysqlQuery(
-    `SELECT COUNT(*) AS cnt FROM IMC_BM_FREE_BIZ_MSG WHERE ${w}`,
-    params
-  ) as any[];
-  return Number(rows[0]?.cnt || 0);
-}
-
-/** 카카오 SELECT — suffix에 ORDER BY/LIMIT/GROUP BY 지정 가능 */
-export async function kakaoSelectWhere(
-  fields: string,
-  whereClause: string,
-  params: any[],
-  suffix?: string
-): Promise<any[]> {
-  const w = whereClause.replace(/^\s*WHERE\s+/i, '');
-  return await mysqlQuery(
-    `SELECT ${fields} FROM IMC_BM_FREE_BIZ_MSG WHERE ${w} ${suffix || ''}`,
-    params
-  ) as any[];
-}
-
-/**
- * ★ 카카오 다중 REQUEST_UID 배치 집계 — GROUP BY 단일 쿼리
- * sync-results 등에서 여러 캠페인 한 번에 집계.
- */
-export async function kakaoBatchAggByGroup(
-  ids: string[]
-): Promise<Map<string, { total: number; success: number; fail: number; pending: number }>> {
-  const result = new Map();
-  if (ids.length === 0) return result;
-  try {
-    const placeholders = ids.map(() => '?').join(',');
-    const rows = await mysqlQuery(
-      `SELECT REQUEST_UID as _grp,
-         COUNT(*) as total,
-         COUNT(CASE WHEN REPORT_CODE = '0000' THEN 1 END) as success,
-         COUNT(CASE WHEN REPORT_CODE IS NOT NULL AND REPORT_CODE != '0000' THEN 1 END) as fail,
-         COUNT(CASE WHEN REPORT_CODE IS NULL AND STATUS = '1' THEN 1 END) as pending
-       FROM IMC_BM_FREE_BIZ_MSG
-       WHERE REQUEST_UID IN (${placeholders})
-       GROUP BY REQUEST_UID`,
-      ids
-    ) as any[];
-    for (const r of rows) {
-      result.set(String(r._grp), {
-        total: Number(r.total || 0),
-        success: Number(r.success || 0),
-        fail: Number(r.fail || 0),
-        pending: Number(r.pending || 0),
-      });
-    }
-  } catch (err: any) {
-    // IMC_BM_FREE_BIZ_MSG 테이블 미존재 환경 대응
-    if (!err.message?.includes("doesn't exist")) throw err;
-  }
-  return result;
-}
-
-/** 카카오 GROUP BY — 오류사유별/상태별 집계 */
-export async function kakaoGroupBy(
-  rawField: string,
-  whereClause: string,
-  params: any[]
-): Promise<Record<string, number>> {
-  const w = whereClause.replace(/^\s*WHERE\s+/i, '');
-  const rows = await mysqlQuery(
-    `SELECT ${rawField} AS _grp, COUNT(*) AS cnt
-     FROM IMC_BM_FREE_BIZ_MSG WHERE ${w}
-     GROUP BY _grp`,
-    params
-  ) as any[];
-  const result: Record<string, number> = {};
-  for (const r of rows) result[String(r._grp ?? '')] = Number(r.cnt || 0);
-  return result;
-}
+// (2026-07-30) 옛 카카오 전용 조회 헬퍼 7종(kakaoAgg·kakaoCountPending·kakaoCancelPending·
+// kakaoCountWhere·kakaoSelectWhere·kakaoBatchAggByGroup·kakaoGroupBy)은 삭제됐다.
+// 브랜드 행이 SMSQ(msg_type='F')로 합류해 smsCampaignCountsSafe·smsCountAll·smsExecAll이 그대로 커버한다.
 
 // ===== ★ D72: SMS/LMS/MMS bulk INSERT (성능 컨트롤타워) =====
 

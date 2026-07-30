@@ -17,7 +17,7 @@
 import { query } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
 import { aggregateCampaignPerformance, aggregateSmsCountsByCampaign } from './stats-aggregation';
-import { kakaoBatchAggByGroup } from './sms-queue';
+// (2026-07-30) 브랜드 SMSQ 합류 — 옛 카카오 IMC 집계 import 폐기
 import { computeRoasMetric } from './performance-roas-core';
 import { getCompanyCosts } from '../config/defaults';
 import type { RoasMetric } from './performance-roas-core';
@@ -458,8 +458,8 @@ export async function buildPerformanceSnapshotV2(
   const allCampaigns = campaignsResult.rows;
 
   // 2) MySQL 큐 직접 집계 (D144 정합) — 전체 캠페인 일괄 처리
+  // ★ 2026-07-30: 브랜드 행(msg_type='F')이 SMSQ 합류 — SMS 집계 하나가 전 채널을 담는다.
   const smsCountMap = await aggregateSmsCountsByCampaign(allCampaigns as any);
-  const kakaoCountMap = await kakaoBatchAggByGroup(allCampaigns.map((c: any) => c.id));
 
   type CampaignMetric = {
     id: string;
@@ -476,10 +476,9 @@ export async function buildPerformanceSnapshotV2(
 
   const campaignMetrics: CampaignMetric[] = allCampaigns.map((c: any) => {
     const sms = smsCountMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
-    const kakao = kakaoCountMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
-    const sent = Number(sms.total_count || 0) + kakao.total;
-    const success = Number(sms.success_count || 0) + kakao.success;
-    const fail = Number(sms.fail_count || 0) + kakao.fail;
+    const sent = Number(sms.total_count || 0);
+    const success = Number(sms.success_count || 0);
+    const fail = Number(sms.fail_count || 0);
     const channelRaw = String(c.message_type || 'SMS').toUpperCase();
     // 'S' → 'SMS', 'L' → 'LMS', 'M' → 'MMS' 변환
     const channel =
@@ -784,6 +783,6 @@ export async function buildPerformanceSnapshotV2(
     funnelStats,
     topCampaigns,
     computedAt: new Date().toISOString(),
-    source: 'campaigns + MySQL 큐 직접 집계 (D144 정합 — aggregateSmsCountsByCampaign + kakaoBatchAggByGroup) + cdp_events.purchase + customers + email_campaigns/dm_recipient_tokens(2026-07-03 채널 합류)',
+    source: 'campaigns + MySQL 큐 직접 집계 (D144 정합 — aggregateSmsCountsByCampaign, 브랜드 msg_type F 포함) + cdp_events.purchase + customers + email_campaigns/dm_recipient_tokens(2026-07-03 채널 합류)',
   };
 }

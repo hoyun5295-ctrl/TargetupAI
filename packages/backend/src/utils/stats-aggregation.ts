@@ -11,7 +11,7 @@ import { query, mysqlQuery } from '../config/database';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from './unsubscribe-helper';
 // ★ D144: PG sent_count 캐시 의존 제거 — MySQL 직접 카운트로 전환
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
-import { getAllSmsTablesWithLogs, getCompanySmsTablesWithLogs, smsCampaignCountsSafe, kakaoBatchAggByGroup } from './sms-queue';
+import { getAllSmsTablesWithLogs, getCompanySmsTablesWithLogs, smsCampaignCountsSafe } from './sms-queue';
 import { classifyResultTables, computeDisplayCounts, DisplayCounts } from './sms-table-split';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, tallySmsChannelCounts, SmsChannel, ChannelCount } from './sms-result-map';
 import { CampaignTableMeta, recordedLiveTables, logTablesForLive } from './stats-table-scope';
@@ -447,16 +447,16 @@ export async function aggregateSmsSendTimesByCampaign(
  * 고객사관리자/사용자(companyId 지정): 자사 통계
  *
  * ★ D144: PG `c.sent_count/success_count/fail_count` 캐시 의존 제거.
- * 모든 카운트는 MySQL 큐(SMSQ_SEND_*) + 카카오(IMC_BM_FREE_BIZ_MSG)에서 직접 집계.
+ * 모든 카운트는 MySQL 큐(SMSQ_SEND_*)에서 직접 집계 — 브랜드메시지도 msg_type='F'로 합류(2026-07-30).
  * billing.ts 정상 패턴 미러. 응답 키(summary/rows) 형태는 그대로 유지하여 frontend 변경 0.
  */
 /**
  * ★ D228+ (2026-05-30) 발송결과 속도 — 캠페인별 결과 카운트(SMS+카카오 합산) 캐시 인지 조회 CT.
  *   result_final=true = campaign-sync-worker가 발송 6h 경과 후 확정한 PG 캐시(이미 SMS+카카오 합산, pending=0)
  *     → MySQL 집계 skip (대형 캠페인 GROUP BY 제거 = 발송결과/상세/통계 공통 병목 해소).
- *   진행 중(result_final=false) = aggregateSmsCountsByCampaign(SMS) + kakaoBatchAggByGroup(카카오) 실시간 합산.
- *   반환 = Map<campaignId, { sent, success, fail }> — 이미 SMS+카카오 합산 완료값.
- *   ★ 호출부는 카카오를 따로 더하지 말 것 (final PG값이 이미 합산이라 이중 합산 위험).
+ *   진행 중(result_final=false) = aggregateSmsCountsByCampaign 실시간 집계(브랜드 msg_type='F' 포함).
+ *   반환 = Map<campaignId, { sent, success, fail }> — 전 채널 합산 완료값.
+ *   ★ 호출부는 채널별 집계를 따로 더하지 말 것 (이중 합산 위험).
  *   ★ 필요 필드: id, company_id, created_by, result_final, sent_count, success_count, fail_count.
  *   ★ 2026-06-17: 대기(pending)를 직접 반환 — frontend 자체 파생(sent-success-fail) 종결. 산식 = computeDisplayCounts 단일.
  */
@@ -473,22 +473,16 @@ export async function getCampaignResultCounts(
     }
   }
 
-  // 진행 중 캠페인만 MySQL 실시간 집계 (SMS + 카카오). 대기 = 실측(total - 성공 - 실패).
+  // 진행 중 캠페인만 MySQL 실시간 집계. 대기 = 실측(total - 성공 - 실패).
+  // ★ 2026-07-30: 브랜드 행(msg_type='F')이 SMSQ에 합류 — SMS 집계 하나가 전 채널을 담는다(옛 IMC 합산 폐기).
   const nonFinal = campaigns.filter((c) => !c.result_final);
   if (nonFinal.length > 0) {
-    // ★ 2026-07-17: 서로 독립인 SMS·카카오 집계 병렬(동시 2 — MySQL 공용 풀 상한 정책과 일치).
-    //   대시보드 2라우트가 이 CT로 합류하면서 기존 라우트별 병렬성을 CT 안에서 보존(Codex 지적 수용 —
-    //   결과·시그니처 불변, 실행 시점만 병렬. 전 소비처(관리자·발송통계 포함) 공통 이득).
-    const [smsMap, kakaoMap] = await Promise.all([
-      aggregateSmsCountsByCampaign(nonFinal),
-      kakaoBatchAggByGroup(nonFinal.map((c) => c.id)),
-    ]);
+    const smsMap = await aggregateSmsCountsByCampaign(nonFinal);
     for (const c of nonFinal) {
       const sms = smsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
-      const kakao = (kakaoMap.get(c.id) as any) || { total: 0, success: 0, fail: 0, pending: 0 };
-      const success = Number(sms.success_count || 0) + Number(kakao.success || 0);
-      const fail = Number(sms.fail_count || 0) + Number(kakao.fail || 0);
-      const total = Number(sms.total_count || 0) + Number(kakao.total || 0);
+      const success = Number(sms.success_count || 0);
+      const fail = Number(sms.fail_count || 0);
+      const total = Number(sms.total_count || 0);
       out.set(c.id, computeDisplayCounts(false, c.sent_count, success, fail, Math.max(0, total - success - fail)));
     }
   }

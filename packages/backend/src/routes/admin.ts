@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query, pool } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
-import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsSelectPagedAll, smsAggAll, getTestSmsTables, findMissingSmsTables, kakaoCountWhere, kakaoSelectWhere, kakaoBatchAggByGroup } from '../utils/sms-queue';
+import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsSelectPagedAll, smsAggAll, getTestSmsTables, findMissingSmsTables } from '../utils/sms-queue';
 import { streamCampaignSmsCsv } from '../utils/campaign-sms-export';
 import { insertCuratedSeeds, listCuratedSeeds, listCuratedSeedCounts, deleteCuratedSeed, saveCuratedSeedOne, updateCuratedSeed, SeedGateFail } from '../utils/copy-seed-curator';
 import { startMiningJob, getMiningJob } from '../utils/best-copy-miner';
@@ -15,7 +15,7 @@ import { distillIndustryFormula } from '../utils/industry-formula';
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
 import { detectEnabledFields, clearEnabledFieldsCache } from '../utils/enabled-fields';
-import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus } from '../utils/sms-result-map';
+import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus, getDisplayContents } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, getCompanyCosts } from '../config/defaults';
 import { round2 } from '../utils/unit-price';
 import { validateSmsTables } from '../utils/sms-table-validator';
@@ -2207,12 +2207,13 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
       }
     }
     const sendChannel = campaign.send_channel || 'sms';
-    const showSms = (!channelFilter || channelFilter === 'sms') && (sendChannel === 'sms' || sendChannel === 'both');
-    const showKakao = (!channelFilter || channelFilter === 'kakao') && (sendChannel === 'kakao' || sendChannel === 'both');
+    // ★ 2026-07-30: 브랜드(kakao·kakao_brand)·알림톡도 SMSQ(app_etc1) 합류 — 전 채널이 SMS 경로 하나로 조회된다.
+    //   channelFilter 'kakao'도 같은 큐를 보므로 SMS 경로로 수렴(브랜드 행은 msg_type='F' 라벨로 구분).
+    const showSms = (!channelFilter || channelFilter === 'sms' || channelFilter === 'kakao');
 
     let allDetail: any[] = [];
     let totalSms = 0;
-    let totalKakao = 0;
+    const totalKakao = 0;   // 응답 형태 유지용 — IMC 폐기로 항상 0
 
     // ===== SMS 내역 조회 =====
     if (showSms) {
@@ -2280,8 +2281,9 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
           seqno: r.seqno,
           destNo: r.dest_no,
           callBack: r.call_back,
-          msgContents: r.msg_contents,
-          msgType: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'L' ? 'LMS' : r.msg_type === 'M' ? 'MMS' : r.msg_type,
+          // ★ 2026-07-30: 브랜드 행(msg_type='F')은 msg_contents가 JSON — 본문(MESSAGE)만 풀어 표시.
+          msgContents: getDisplayContents(r.msg_type, r.msg_contents),
+          msgType: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'L' ? 'LMS' : r.msg_type === 'M' ? 'MMS' : getSendTypeLabel(r.msg_type, r.k_oriseq),
           sendType: getSendTypeLabel(r.msg_type, r.k_oriseq),
           statusCode: r.status_code,
           statusText: rowStatus.label,
@@ -2294,61 +2296,8 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
       });
     }
 
-    // ===== 카카오 내역 조회 =====
-    if (showKakao) {
-      // CT-04: 카카오 조회도 컨트롤타워 사용 (IMC_BM_FREE_BIZ_MSG 단일 테이블)
-      let kakaoWhere = `REQUEST_UID = ?`;
-      const kakaoParams: any[] = [id];
-
-      if (statusFilter === 'success') {
-        kakaoWhere += ` AND REPORT_CODE = '0000'`;
-      } else if (statusFilter === 'fail') {
-        kakaoWhere += ` AND REPORT_CODE != '0000' AND STATUS IN ('3','4')`;
-      } else if (statusFilter === 'pending') {
-        kakaoWhere += ` AND STATUS IN ('1','2')`;
-      }
-
-      if (searchValue && searchType === 'dest_no') {
-        kakaoWhere += ` AND PHONE_NUMBER LIKE ?`;
-        kakaoParams.push(`%${searchValue.replace(/-/g, '')}%`);
-      }
-
-      totalKakao = await kakaoCountWhere(kakaoWhere, kakaoParams);
-
-      const kakaoRows = await kakaoSelectWhere(
-        `ID, PHONE_NUMBER, MESSAGE, CHAT_BUBBLE_TYPE, STATUS, REPORT_CODE, REPORT_DATE,
-         REQUEST_DATE, RESPONSE_DATE, RESEND_MT_TYPE, RESEND_REPORT_CODE`,
-        kakaoWhere,
-        kakaoParams,
-        `ORDER BY ID DESC LIMIT ${Number(limit)} OFFSET ${Number(offset)}`
-      );
-
-      const kakaoStatusMap: Record<string, string> = {
-        '0000': '카카오성공', '': '대기',
-      };
-
-      (kakaoRows as any[]).forEach(r => {
-        allDetail.push({
-          seqno: r.ID,
-          destNo: r.PHONE_NUMBER,
-          callBack: '-',
-          msgContents: r.MESSAGE,
-          msgType: `카카오(${r.CHAT_BUBBLE_TYPE || 'TEXT'})`,
-          sendType: '카카오',
-          statusCode: r.REPORT_CODE === '0000' ? 1800 : (r.STATUS <= '2' ? 100 : 9999),
-          statusText: kakaoStatusMap[r.REPORT_CODE] || `카카오:${r.REPORT_CODE || '처리중'}`,
-          statusType: r.REPORT_CODE === '0000' ? 'success' : (r.STATUS <= '2' ? 'pending' : 'fail'),
-          carrier: '카카오',
-          sendreqTime: r.REQUEST_DATE,
-          mobsendTime: r.RESPONSE_DATE,
-          recvTime: r.REPORT_DATE,
-          channel: 'kakao',
-          kakaoReportCode: r.REPORT_CODE,
-          resendType: r.RESEND_MT_TYPE,
-          resendReportCode: r.RESEND_REPORT_CODE,
-        });
-      });
-    }
+    // (2026-07-30 재구축) 옛 카카오 IMC 내역 조회 폐기 — 브랜드 행은 위 SMS 경로(app_etc1)에 포함되며
+    // sendType 라벨은 getSendTypeLabel('F')='브랜드메시지'로 구분된다.
 
     const total = totalSms + totalKakao;
 
@@ -4673,8 +4622,8 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
     );
 
     // 일반 캠페인 — result_final 캐시 우선(완료 MySQL skip). 알림톡은 채널 분리라 실시간 유지.
+    // ★ 2026-07-30: 브랜드 행(msg_type='F')이 SMSQ 합류 — getCampaignResultCounts가 전 채널을 담는다.
     const exportResultMap = await getCampaignResultCounts(exportMetaResult.rows);
-    const exportKakaoMap = await kakaoBatchAggByGroup(exportMetaResult.rows.map((c: any) => c.id));
     // 알림톡 캠페인만 채널 분리 집계(알림톡 K / 대체발송 L·k_oriseq>0) → 엑셀에서 2행으로 분리
     const alimtalkCampaigns = exportMetaResult.rows.filter((c: any) => c.send_channel === 'alimtalk');
     const exportSplitMap = await aggregateSmsChannelSplitByCampaign(alimtalkCampaigns);
@@ -4707,15 +4656,14 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
     };
 
     for (const c of exportMetaResult.rows) {
-      const kakao = exportKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
       if (c.send_channel === 'alimtalk') {
         const split = exportSplitMap.get(c.id);
         const a = split?.alimtalk ?? { total: 0, success: 0, fail: 0, pending: 0 };
         const sLms = split?.substitute_lms ?? { total: 0, success: 0, fail: 0, pending: 0 };
         const sSms = split?.substitute_sms ?? { total: 0, success: 0, fail: 0, pending: 0 };
-        // 알림톡 행 — SMS 큐 K + 카카오 IMC 합산(이 운영은 IMC 0이라 kakao=0). 대상건수는 여기에 귀속.
+        // 알림톡 행 — SMS 큐 K 실측(옛 카카오 IMC 합산은 2026-07-30 폐기 — 항상 0이었다). 대상건수는 여기에 귀속.
         addExportBucket(c, 'alimtalk', '알림톡', Number(c.target_count || 0),
-          a.total + kakao.total, a.success + kakao.success, a.fail + kakao.fail, a.pending + kakao.pending);
+          a.total, a.success, a.fail, a.pending);
         // 알림톡대체발송 — 카카오 실패 후 LMS/SMS 대체분 각각(0이면 행 생략, 대상건수 중복 방지 0). 정산 단가 구분용.
         if (sLms.total > 0) {
           addExportBucket(c, 'substitute_lms', '알림톡대체발송(LMS)', 0, sLms.total, sLms.success, sLms.fail, sLms.pending);

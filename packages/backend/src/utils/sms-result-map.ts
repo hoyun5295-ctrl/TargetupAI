@@ -6,6 +6,8 @@
 // 참조: campaigns.ts, results.ts, spam-filter.ts, ResultsModal.tsx (백엔드→프론트 전달)
 // ============================================================
 
+import { isBrandOnlyChannel } from './billing-types';
+
 // ========================
 // Part 1: QTmsg status_code 매핑
 // ========================
@@ -203,10 +205,28 @@ export const PENDING_CODES_SQL = PENDING_CODES.join(', ');
  * - 'M'                          → MMS
  * - 그 외(IMC '카카오(TEXT)' 등)   → 원본 그대로
  */
+/**
+ * ★ 2026-07-30 브랜드 SMSQ 합류 — 브랜드 행(msg_type='F')의 msg_contents는 JSON 문자열이다.
+ * 화면·엑셀 본문 컬럼에는 안의 MESSAGE(사용자 본문)를 풀어 보여준다. 그 외 유형은 원문 그대로.
+ */
+export function getDisplayContents(msgType: string, msgContents: any): string {
+  const raw = String(msgContents ?? '');
+  if (msgType !== 'F') return raw;
+  try {
+    const j = JSON.parse(raw);
+    if (j && typeof j === 'object') {
+      if (typeof j.MESSAGE === 'string' && j.MESSAGE) return j.MESSAGE;
+      return '(기본형 템플릿 발송)';   // BASIC_TCD/BASIC_VAR — 본문은 템플릿에 있다
+    }
+  } catch { /* JSON이 아니면 원문 유지 */ }
+  return raw;
+}
+
 export function getSendTypeLabel(msgType: string, kOriseq?: number | string | null): string {
   const ori = Number(kOriseq);
   const isSub = kOriseq != null && kOriseq !== '' && !Number.isNaN(ori) && ori > 0;
   if (msgType === 'K') return '알림톡';
+  if (msgType === 'F') return '브랜드메시지';   // ★ 2026-07-30 브랜드 SMSQ 합류(msg_type='F')
   if (msgType === 'L') return isSub ? '카카오실패 대체발송(LMS)' : 'LMS';
   if (msgType === 'S') return isSub ? '카카오실패 대체발송(SMS)' : 'SMS';
   if (msgType === 'M') return 'MMS';
@@ -222,6 +242,8 @@ export function getSendTypeLabel(msgType: string, kOriseq?: number | string | nu
  */
 export function getCampaignChannelLabel(sendChannel: string | null | undefined, messageType: string): string {
   if (sendChannel === 'alimtalk') return '알림톡';
+  // ★ 2026-07-30: 브랜드 전용 채널은 message_type(LMS)이 아니라 브랜드메시지로 표기 (both는 문자 혼합이라 제외)
+  if (isBrandOnlyChannel(sendChannel)) return '브랜드메시지';
   // ★ 2026-07-25 message_type이 비어 있으면 엑셀 '문자타입' 셀이 통째로 빈칸이 됐다.
   //   빈 셀은 담당자에게 "데이터 누락"으로 읽힌다(고객사 발송통계에서 접수된 그 증상과 같다).
   //   값이 없는 것과 유형을 모르는 것을 구분해 표기한다.
@@ -232,12 +254,13 @@ export function getCampaignChannelLabel(sendChannel: string | null | undefined, 
  * 발송 채널 분류 (집계 키) — getSendTypeLabel과 동일 규칙의 영문 키 버전.
  * 통계에서 알림톡(K)과 카카오실패 대체발송(L·k_oriseq>0)을 분리 집계할 때 사용.
  */
-export type SmsChannel = 'alimtalk' | 'substitute_lms' | 'substitute_sms' | 'lms' | 'sms' | 'mms' | 'other';
+export type SmsChannel = 'alimtalk' | 'brand' | 'substitute_lms' | 'substitute_sms' | 'lms' | 'sms' | 'mms' | 'other';
 
 export function classifyMsgChannel(msgType: string, kOriseq?: number | string | null): SmsChannel {
   const ori = Number(kOriseq);
   const isSub = kOriseq != null && kOriseq !== '' && !Number.isNaN(ori) && ori > 0;
   if (msgType === 'K') return 'alimtalk';
+  if (msgType === 'F') return 'brand';   // ★ 2026-07-30 브랜드 SMSQ 합류
   if (msgType === 'L') return isSub ? 'substitute_lms' : 'lms';  // 카카오 실패 → LMS 대체
   if (msgType === 'S') return isSub ? 'substitute_sms' : 'sms';  // 카카오 실패 → SMS 대체
   if (msgType === 'M') return 'mms';
@@ -255,7 +278,7 @@ export function tallySmsChannelCounts(
 ): Record<SmsChannel, ChannelCount> {
   const init = (): ChannelCount => ({ total: 0, success: 0, fail: 0, pending: 0 });
   const out: Record<SmsChannel, ChannelCount> = {
-    alimtalk: init(), substitute_lms: init(), substitute_sms: init(), lms: init(), sms: init(), mms: init(), other: init(),
+    alimtalk: init(), brand: init(), substitute_lms: init(), substitute_sms: init(), lms: init(), sms: init(), mms: init(), other: init(),
   };
   for (const r of rows) {
     const ch = classifyMsgChannel(r.msg_type, r.k_oriseq);

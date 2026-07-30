@@ -8,7 +8,7 @@ import { CREDIT_UNIT_PRICE } from '../utils/ai-credit-calc';
 // ★ 2026-07-25 사용량 집계 CT — 청구서(이 파일)와 발송통계 엑셀이 같은 집계를 쓴다(정산 정합).
 //   미리보기(/preview)도 여기를 거친다 — 미리보기와 발행 금액이 갈라지지 않게 하는 유일한 장치다.
 import {
-  buildCompanyUsageByDay, buildBillingTotals, selectBillingRunIds, resolveBillingUnitPrices,
+  buildCompanyUsageByDay, buildBillingTotals, selectBillingSendIds, aggregateBillingSendIds, smsAggByRunDateType, resolveBillingUnitPrices,
   getTablesForBillingPeriod, getBillingCompanyTables, MSG_TYPE_TO_USAGE_KEY, logUnbillableUsageKeys,
 } from '../utils/send-usage-aggregation';
 // ★ 2026-07-26 정산 재구성 ② — 청구 상세를 채널 축(웹·에이전트·테스트·스팸)으로 저장한다.
@@ -74,21 +74,8 @@ const getTransporter = () => nodemailer.createTransport({
   socketTimeout: 40000,
 });
 
-async function smsAggByRunAndType(tables: string[], whereClause: string, params: any[]): Promise<any[]> {
-  const allRows: any[] = [];
-  for (const t of tables) {
-    const rows = await mysqlQuery(
-      `SELECT app_etc1 as run_id, msg_type,
-              COUNT(*) as total_count,
-              SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count
-       FROM ${t} WHERE ${whereClause}
-       GROUP BY app_etc1, msg_type`,
-      params
-    ) as any[];
-    allRows.push(...rows);
-  }
-  return allRows;
-}
+// (2026-07-30 3R) 옛 로컬 smsAggByRunAndType 삭제 — 청킹·인덱스 힌트·정산 전용 풀을 전부 우회하는
+// 인라인 집계였다. 이제 utils/send-usage-aggregation의 aggregateBillingSendIds + smsAggByRunDateType 하나만 쓴다.
 
 // ※ 옛 `loadAgentUnitPriceRows`는 삭제했다(2026-07-26).
 //   라우트 안에 정의한 인라인 헬퍼였고(`no_inline_duplication` 위반), 같은 원장을 집계 CT가 또 따로 읽어
@@ -1640,20 +1627,21 @@ router.get('/preview', async (req: Request, res: Response) => {
     };
 
     if (type === 'brand') {
-      // 매장(발신번호) 축은 청구 집계에 없다. 그래서 **같은 run 집합·같은 테이블·같은 where**를 매장별로
+      // 매장(발신번호) 축은 청구 집계에 없다. 그래서 **같은 ID 집합·같은 테이블·같은 where**를 매장별로
       // 나누기만 한다 — 그러면 매장 합계가 아래 combined 합계와 항상 일치한다.
-      // (기간조건을 덧붙이면 그 순간 두 숫자가 갈라진다. 그게 이번에 고친 결함이다.)
-      const runIds = await selectBillingRunIds({ companyId, startDate, endDate, userId });
+      // ★ 2026-07-30 (2R): ID 집합이 이벤트 축/기간 한정 캠페인 축 둘로 갈렸다 — 집계 CT와 같은 규칙으로
+      //   두 번 모아야 합계가 일치한다(캠페인 축을 기간 없이 넣으면 인접 월 재발송분이 이중 계상).
+      const billingIds = await selectBillingSendIds({ companyId, startDate, endDate, userId });
+      const allBillingIds = [...billingIds.eventIds, ...billingIds.periodCampaignIds];
       const brandMap: Record<string, any> = {};
       const ensureStore = (code: string, name: string) => {
         if (!brandMap[code]) {
-          brandMap[code] = { store_code: code, store_name: name, sms_success: 0, lms_success: 0, mms_success: 0, kakao_success: 0 };
+          brandMap[code] = { store_code: code, store_name: name, sms_success: 0, lms_success: 0, mms_success: 0, kakao_success: 0, brand_success: 0 };
         }
         return brandMap[code];
       };
 
-      let queueKakao = 0;
-      if (runIds.length > 0) {
+      if (allBillingIds.length > 0) {
         const storeRes = await pool.query(
           `SELECT cr.id AS run_id, cb.store_code, cb.store_name
              FROM campaign_runs cr
@@ -1665,7 +1653,7 @@ router.get('/preview', async (req: Request, res: Response) => {
              FROM campaigns c2
              LEFT JOIN callback_numbers cb2 ON cb2.phone = c2.callback_number AND cb2.company_id = c2.company_id
             WHERE c2.id = ANY($1::uuid[])`,
-          [runIds]
+          [allBillingIds]
         );
         const storeMap: Record<string, { store_code: string; store_name: string }> = {};
         storeRes.rows.forEach((r: any) => {
@@ -1674,8 +1662,11 @@ router.get('/preview', async (req: Request, res: Response) => {
 
         const companyTables = await getBillingCompanyTables(companyId);
         const billingTables = await getTablesForBillingPeriod(companyTables, startDate, endDate);
-        const ph = runIds.map(() => '?').join(',');
-        const rows = await smsAggByRunAndType(billingTables, `app_etc1 IN (${ph})`, runIds);
+        // ★ 2026-07-30 (3R): 집계는 공용 CT 경로 하나로 — 청킹(RUN_ID_IN_CHUNK)·FORCE INDEX 힌트·
+        //   정산 전용 풀(mysqlBillingQuery)을 다 지나는 aggregateBillingSendIds + smsAggByRunDateType.
+        //   (옛 로컬 smsAggByRunAndType은 셋 다 우회해 대형 고객사 월말 미리보기가 풀스캔이었다 — 삭제.)
+        //   run×일자 행을 run×유형으로 합산하는 것은 아래 forEach가 그대로 한다(일자 축은 무시).
+        const rows = await aggregateBillingSendIds(billingTables, billingIds, smsAggByRunDateType, startDate, endDate);
         rows.forEach((row: any) => {
           const store = storeMap[row.run_id] || { store_code: 'default', store_name: '본사' };
           const b = ensureStore(store.store_code, store.store_name);
@@ -1684,14 +1675,14 @@ router.get('/preview', async (req: Request, res: Response) => {
             case 'SMS': b.sms_success += n; break;
             case 'LMS': b.lms_success += n; break;
             case 'MMS': b.mms_success += n; break;
-            case 'KAKAO': b.kakao_success += n; queueKakao += n; break;
+            case 'KAKAO': b.kakao_success += n; break;
+            // ★ 2026-07-30 (2R): 브랜드 F행 — 빠지면 매장별 상세 합이 combined 합계와 갈린다.
+            case 'BRAND': b.brand_success += n; break;
           }
         });
       }
 
-      // 브랜드메시지(IMC)는 매장 축이 없다 — 큐에서 센 알림톡을 뺀 차액을 본사로 몰아 합계를 맞춘다.
-      const imcKakao = Math.max(0, totals.KAKAO - queueKakao);
-      if (imcKakao > 0) ensureStore('default', '본사').kakao_success += imcKakao;
+      // (2026-07-30) 옛 IMC 차액 보정 삭제 — 브랜드가 같은 SMSQ 집계로 합류해 차액 축 자체가 사라졌다.
 
       const brands = Object.values(brandMap).map((b: any) => ({
         ...b,
@@ -1699,6 +1690,7 @@ router.get('/preview', async (req: Request, res: Response) => {
         lms_amount: b.lms_success * prices.LMS,
         mms_amount: b.mms_success * prices.MMS,
         kakao_amount: b.kakao_success * prices.KAKAO,
+        brand_amount: b.brand_success * prices.BRAND,
       }));
 
       return res.json({ type: 'brand', brands, test, spam, agent, plan, ai_credit, amounts, billing_guard });
@@ -1709,10 +1701,12 @@ router.get('/preview', async (req: Request, res: Response) => {
       lms_success: totals.LMS,
       mms_success: totals.MMS,
       kakao_success: totals.KAKAO,
+      brand_success: totals.BRAND,
       sms_amount: totals.SMS * prices.SMS,
       lms_amount: totals.LMS * prices.LMS,
       mms_amount: totals.MMS * prices.MMS,
       kakao_amount: totals.KAKAO * prices.KAKAO,
+      brand_amount: totals.BRAND * prices.BRAND,
     };
 
     return res.json({ type: 'combined', summary, test, spam, agent, plan, ai_credit, amounts, billing_guard });

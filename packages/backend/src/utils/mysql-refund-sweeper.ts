@@ -26,7 +26,9 @@ import pool, { query } from '../config/database';
 import { resolveChargeUnitPrice } from './unit-price';
 import { parseDeductDescription } from './deduct-reference';
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
-import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, kakaoBatchAggByGroup, type CampaignAggCounts } from './sms-queue';
+import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, type CampaignAggCounts } from './sms-queue';
+// ★ 2026-07-30 브랜드 SMSQ 합류 — 환불 원장 축(BRAND vs message_type) 판정 CT
+import { resolveRefundAxes } from './billing-types';
 import { prepaidRefund, prepaidReverseOverRefund, REFUND_KEYS } from './prepaid';
 // ★ 2026-06-11: 환불 누적 단일 산식 — 정당 환불 = 차감 실측 − 성공 − 대기 (미적재분 과소 환불 근본 fix)
 // ★ 2026-06-29: refundInvariantGap — 차감 = 성공 + 순환불 머니 불변식 감시
@@ -56,6 +58,7 @@ interface CampaignRow {
   company_id: string;
   created_by: string | null;
   message_type: string;
+  send_channel: string | null;   // ★ 2026-07-30 환불 축 판정(BRAND vs message_type)
   success_count: number | null;
   fail_count: number | null;
   sent_count: number | null;
@@ -78,7 +81,7 @@ async function getUnitPrice(companyId: string, messageType: string, cache: Map<s
   const key = `${companyId}:${messageType}`;
   if (cache.has(key)) return cache.get(key)!;
   const r = await query(
-    `SELECT unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao
+    `SELECT unit_price_basis, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand
      FROM companies WHERE id = $1`,
     [companyId]
   );
@@ -110,7 +113,7 @@ async function runOnce(): Promise<void> {
   try {
     // === 1. 후보 캠페인 SELECT (PG fail_count 무관) ===
     const candidates = await query(`
-      SELECT c.id, c.company_id, c.created_by, c.message_type,
+      SELECT c.id, c.company_id, c.created_by, c.message_type, c.send_channel,
              c.success_count, c.fail_count, c.sent_count, c.send_phase,
              COALESCE(c.scheduled_at, c.sent_at, c.created_at) AS send_base
       FROM campaigns c
@@ -156,18 +159,23 @@ async function runOnce(): Promise<void> {
     }
 
     // === 3. 회사/유저별 MySQL 배치 집계 — ★ 2026-06-11 정합성 100% 산식(이력=결과/라이브=대기) ===
+    // ★ 2026-07-30: 브랜드 행(msg_type='F')이 같은 테이블에 합류 — 전체 집계가 자동 포함.
+    //   'both' 캠페인만 브랜드/문자 분리 집계 추가(환불 원장이 BRAND와 message_type으로 갈린다).
     const smsAggMap = new Map<string, CampaignAggCounts>();
+    const brandAggMap = new Map<string, CampaignAggCounts>();
+    const nonBrandAggMap = new Map<string, CampaignAggCounts>();
     for (const [key, camps] of byUserKey) {
       const [cid, uid] = key.split('::');
       const tables = await getCompanySmsTablesWithLogs(cid, uid || undefined);
       const ids = camps.map(c => c.id);
       const partial = await smsCampaignCountsSafe(tables, ids);
       for (const [g, v] of partial) smsAggMap.set(g, v);
+      const bothIds = camps.filter(c => String(c.send_channel || '') === 'both').map(c => c.id);
+      if (bothIds.length > 0) {
+        for (const [g, v] of await smsCampaignCountsSafe(tables, bothIds, 'app_etc1', 'brand')) brandAggMap.set(g, v);
+        for (const [g, v] of await smsCampaignCountsSafe(tables, bothIds, 'app_etc1', 'nonBrand')) nonBrandAggMap.set(g, v);
+      }
     }
-
-    // 카카오 배치 집계 (단일 테이블) — 차등 주기 통과분만
-    const allIds = activeRows.map(c => c.id);
-    const kakaoAggMap = await kakaoBatchAggByGroup(allIds);
 
     // === 4. 캠페인별 sweep ===
     let pgUpdateCount = 0;
@@ -181,11 +189,10 @@ async function runOnce(): Promise<void> {
     for (const camp of activeRows) {
       try {
         const smsAgg = smsAggMap.get(camp.id);
-        const kakaoAgg = kakaoAggMap.get(camp.id) || { total: 0, success: 0, fail: 0, pending: 0 };
 
-        const mysqlSuccess = Number(smsAgg?.success || 0) + kakaoAgg.success;
-        const mysqlFail = Number(smsAgg?.fail || 0) + kakaoAgg.fail;
-        const mysqlPending = Number(smsAgg?.pending || 0) + kakaoAgg.pending;
+        const mysqlSuccess = Number(smsAgg?.success || 0);
+        const mysqlFail = Number(smsAgg?.fail || 0);
+        const mysqlPending = Number(smsAgg?.pending || 0);
 
         // === 4-1. PG count 동시 갱신 (화면 보조) — 결과가 하나라도 있을 때만 ===
         // target_count는 절대 건드리지 않음 (protect_completed_target_count trigger 호환)
@@ -218,101 +225,125 @@ async function runOnce(): Promise<void> {
         //   worker의 미적재 환불과 같은 누적 풀에서 max로 수렴 — 미적재 발생 시(D231 톤28형) 그 몫이 사라짐.
         //   차감 건수 = balance_transactions deduct 실측(금액/단가) — 기록(target_count)이 아니라 돈이 진실.
         //   적재가 끝난 캠페인만(send_phase 'sent' 또는 NULL=동기 적재 경로) — 적재 진행 중 오발동 차단.
+        // ★ 2026-07-30: 환불·회수·불변식 전부를 **원장 축 단위**로 돈다(resolveRefundAxes) —
+        //   브랜드 전용 캠페인은 BRAND 원장 하나, 'both'는 문자/브랜드 두 원장이 각자 수렴한다.
+        //   축을 섞으면 한쪽 차감이 다른 쪽 실패를 삼켜 미환불·초과환불이 동시에 생긴다.
         if (camp.send_phase == null || camp.send_phase === 'sent') {
-          // ★ 2026-07-26 **차감 원장을 먼저 읽는다**(Codex #5·#6).
-          //   그 전에는 ①`현재 단가 > 0`인지로 환불 진입을 판정하고 ②차감 건수를 `총차감액 ÷ 현재단가`로
-          //   역산했다. 둘 다 "지금 단가"에 기대는 구조라, 단가를 비우면 환불이 통째로 건너뛰어지고(미환불)
-          //   단가를 바꾸면 건수가 부풀어 없는 실패가 환불된다(2026-07-26 패밀리투 83건 622.5원 실측).
-          //   정산의 근거는 그 차감이 남긴 값이다.
-          const dedRes = await query(
-            `SELECT amount, description FROM balance_transactions
-             WHERE company_id = $1 AND type = 'deduct' AND reference_type = 'campaign' AND reference_id = $2
-               AND (message_type = $3 OR message_type IS NULL)`,
-            [camp.company_id, camp.id, camp.message_type]
-          );
-          let dedTotal = 0;
-          let parsedCount = 0;
-          let allParsed = dedRes.rows.length > 0;
-          for (const d of dedRes.rows as any[]) {
-            dedTotal += Number(d.amount) || 0;
-            const parsed = parseDeductDescription(d.description);
-            if (parsed) parsedCount += parsed.count;
-            else allParsed = false;
-          }
-          dedTotal = Math.round(dedTotal * 100) / 100;
-          const ledgerUnit = allParsed && parsedCount > 0 ? Math.round((dedTotal / parsedCount) * 100) / 100 : null;
+          for (const axis of resolveRefundAxes(camp.send_channel, camp.message_type)) {
+            const axisCounts = axis.scope === 'all'
+              ? { success: mysqlSuccess, fail: mysqlFail, pending: mysqlPending }
+              : (axis.scope === 'brand' ? brandAggMap : nonBrandAggMap).get(camp.id)
+                ?? { success: 0, fail: 0, pending: 0 };
+            const axisSuccess = Number(axisCounts.success || 0);
+            const axisFail = Number(axisCounts.fail || 0);
+            const axisPending = Number(axisCounts.pending || 0);
+            // 분리 축은 PG sent_count(전 채널 합)를 못 쓴다 — MySQL 실측만으로 처리수를 잡는다.
+            const axisSentCount = axis.scope === 'all' ? Number(camp.sent_count || 0) : 0;
 
-          // 차감은 있는데 되읽지 못했다 = 추측으로 돈을 움직이면 안 되는 상태. 이번 사이클은 건너뛴다.
-          // 환불은 idempotent하고 30초마다 다시 도므로, 원인을 고치면 밀린 환불이 자동으로 나간다.
-          if (dedTotal > 0 && ledgerUnit === null) {
-            log(`[정산보류] campaign=${camp.id} ${camp.message_type} — 차감 원장 설명을 되읽지 못해 환불·회수를 건너뛴다`);
-            await sendSystemAlert({
-              dedupKey: `sweep-ledger-unresolved:${camp.id}`,
-              message: `선불 sweep 보류 — 차감 원장 설명을 되읽지 못했습니다(환불 보류). campaign=${camp.id} ${camp.message_type}`,
-            }).catch(() => { /* 경보 실패가 sweep을 막지는 않는다 */ });
-            continue;
-          }
+            // ★ 2026-07-26 **차감 원장을 먼저 읽는다**(Codex #5·#6).
+            //   그 전에는 ①`현재 단가 > 0`인지로 환불 진입을 판정하고 ②차감 건수를 `총차감액 ÷ 현재단가`로
+            //   역산했다. 둘 다 "지금 단가"에 기대는 구조라, 단가를 비우면 환불이 통째로 건너뛰어지고(미환불)
+            //   단가를 바꾸면 건수가 부풀어 없는 실패가 환불된다(2026-07-26 패밀리투 83건 622.5원 실측).
+            //   정산의 근거는 그 차감이 남긴 값이다.
+            //   NULL(옛 세대) 행은 기본 축에만 합산한다 — BRAND 원장은 2026-07-29 이후 세대라 NULL이 없다.
+            const dedRes = axis.type === 'BRAND'
+              ? await query(
+                  `SELECT amount, description FROM balance_transactions
+                   WHERE company_id = $1 AND type = 'deduct' AND reference_type = 'campaign' AND reference_id = $2
+                     AND message_type = $3`,
+                  [camp.company_id, camp.id, axis.type]
+                )
+              : await query(
+                  `SELECT amount, description FROM balance_transactions
+                   WHERE company_id = $1 AND type = 'deduct' AND reference_type = 'campaign' AND reference_id = $2
+                     AND (message_type = $3 OR message_type IS NULL)`,
+                  [camp.company_id, camp.id, axis.type]
+                );
+            let dedTotal = 0;
+            let parsedCount = 0;
+            let allParsed = dedRes.rows.length > 0;
+            for (const d of dedRes.rows as any[]) {
+              dedTotal += Number(d.amount) || 0;
+              const parsed = parseDeductDescription(d.description);
+              if (parsed) parsedCount += parsed.count;
+              else allParsed = false;
+            }
+            dedTotal = Math.round(dedTotal * 100) / 100;
+            const ledgerUnit = allParsed && parsedCount > 0 ? Math.round((dedTotal / parsedCount) * 100) / 100 : null;
 
-          // 차감 자체가 없는 캠페인만 현재 단가로 떨어진다(그 경우 건수 0이라 환불도 0이다).
-          const unit = ledgerUnit ?? await getUnitPrice(camp.company_id, camp.message_type, unitCache);
-          if (unit > 0) {
-            const deductedCount = parsedCount > 0 ? parsedCount : Math.round(dedTotal / unit);
-            const sentCount = Number(camp.sent_count || 0);
-            // ★ 2026-06-29: 미적재 = 차감 − max(적재기록, 성공+실패+대기). sent_count 과소 기록 초과환불 fix.
-            const processed = Math.max(sentCount, mysqlSuccess + mysqlFail + mysqlPending);
-            const notLoaded = processed > 0 ? Math.max(0, deductedCount - processed) : 0;
-            // ★ 2026-07-27 (B-0727-2): 한 덩어리로 환불하던 것을 원인별 항아리로 나눈다.
-            //   미적재분(notloaded)은 워커가 종결 때 넣는 것과 **같은 키**라 둘이 서로를 삼키지 않고 수렴한다.
-            //   실패분(fail)은 결과가 도착할수록 커지므로 그 키 안에서 계속 top-up된다.
-            //   합계는 옛 calcRefundDue와 동일하다(상한 포함).
-            const parts = calcRefundParts({ deductedCount, sentCount, mysqlSuccess, mysqlFail, mysqlPending });
-            const refundDue = parts.fail + parts.notLoaded;
-            for (const [key, dueCount, label] of [
-              [REFUND_KEYS.FAIL, parts.fail, '실패'],
-              [REFUND_KEYS.NOT_LOADED, parts.notLoaded, '미적재'],
-            ] as const) {
-              if (dueCount <= 0) continue;
-              const r = await prepaidRefund(
-                camp.company_id, dueCount, camp.message_type, camp.id, `발송 ${label} 환불 (sweep)`,
-                'campaign', { refundKey: key },
-              );
-              if (r.refunded > 0) {
-                refundCount++;
-                totalRefundAmount += r.refunded;
-                log(`✓ campaign=${camp.id} ${camp.message_type} ${label} ${dueCount}건 (실패 ${mysqlFail} + 미적재 ${notLoaded} / 차감 ${deductedCount} 처리 ${processed}) 차액 ${r.refunded}원`);
-              }
+            // 차감은 있는데 되읽지 못했다 = 추측으로 돈을 움직이면 안 되는 상태. 이번 사이클은 건너뛴다.
+            // 환불은 idempotent하고 30초마다 다시 도므로, 원인을 고치면 밀린 환불이 자동으로 나간다.
+            if (dedTotal > 0 && ledgerUnit === null) {
+              log(`[정산보류] campaign=${camp.id} ${axis.type} — 차감 원장 설명을 되읽지 못해 환불·회수를 건너뛴다`);
+              await sendSystemAlert({
+                dedupKey: `sweep-ledger-unresolved:${camp.id}:${axis.type}`,
+                message: `선불 sweep 보류 — 차감 원장 설명을 되읽지 못했습니다(환불 보류). campaign=${camp.id} ${axis.type}`,
+              }).catch(() => { /* 경보 실패가 sweep을 막지는 않는다 */ });
+              continue;
             }
 
-            // === 4-3. ★ 2026-06-29: 초과 환불 자동 회수 (양방향 수렴) ===
-            //   누적 환불이 정당 한도(차감 − 성공 − 대기)를 넘었으면 초과분만 reverse 차감.
-            //   sent_count 과소·과거 ratchet 고착분을 코드로 자동 회수하고, 미래 어떤 변수가 튀어도 스스로 보정.
-            //   settle 가드 — 정산 끝난 캠페인에서만: 대기 0(발송 중 아님) + 집계 유효(0/0 agg 실패 제외) + 30분 경과.
-            //   (정당 한도 = MySQL 실측 성공으로만 계산 → 성공은 이력 append-only라 과대 불가 = 과다 회수 0)
-            const ageMs = camp.send_base ? (Date.now() - new Date(camp.send_base).getTime()) : 0;
-            if (mysqlPending === 0 && (mysqlSuccess + mysqlFail) > 0 && ageMs > 30 * 60 * 1000) {
-              const maxLegitRefund = Math.max(0, deductedCount - mysqlSuccess - mysqlPending);
-              const rev = await prepaidReverseOverRefund(camp.company_id, maxLegitRefund, camp.message_type, camp.id);
-              if (rev.reversed > 0) {
-                reverseOverCount++;
-                totalReverseOverAmount += rev.reversed;
-                log(`✓ campaign=${camp.id} ${camp.message_type} 초과환불 회수 ${rev.reversed}원 (정당한도 ${maxLegitRefund}건 = 차감 ${deductedCount} − 성공 ${mysqlSuccess})`);
+            // 차감 자체가 없는 캠페인만 현재 단가로 떨어진다(그 경우 건수 0이라 환불도 0이다).
+            const unit = ledgerUnit ?? await getUnitPrice(camp.company_id, axis.type, unitCache);
+            if (unit > 0) {
+              const deductedCount = parsedCount > 0 ? parsedCount : Math.round(dedTotal / unit);
+              // ★ 2026-06-29: 미적재 = 차감 − max(적재기록, 성공+실패+대기). sent_count 과소 기록 초과환불 fix.
+              const processed = Math.max(axisSentCount, axisSuccess + axisFail + axisPending);
+              const notLoaded = processed > 0 ? Math.max(0, deductedCount - processed) : 0;
+              // ★ 2026-07-27 (B-0727-2): 한 덩어리로 환불하던 것을 원인별 항아리로 나눈다.
+              //   미적재분(notloaded)은 워커가 종결 때 넣는 것과 **같은 키**라 둘이 서로를 삼키지 않고 수렴한다.
+              //   실패분(fail)은 결과가 도착할수록 커지므로 그 키 안에서 계속 top-up된다.
+              //   합계는 옛 calcRefundDue와 동일하다(상한 포함).
+              const parts = calcRefundParts({
+                deductedCount, sentCount: axisSentCount,
+                mysqlSuccess: axisSuccess, mysqlFail: axisFail, mysqlPending: axisPending,
+              });
+              for (const [key, dueCount, label] of [
+                [REFUND_KEYS.FAIL, parts.fail, '실패'],
+                [REFUND_KEYS.NOT_LOADED, parts.notLoaded, '미적재'],
+              ] as const) {
+                if (dueCount <= 0) continue;
+                const r = await prepaidRefund(
+                  camp.company_id, dueCount, axis.type, camp.id, `발송 ${label} 환불 (sweep)`,
+                  'campaign', { refundKey: key },
+                );
+                if (r.refunded > 0) {
+                  refundCount++;
+                  totalRefundAmount += r.refunded;
+                  log(`✓ campaign=${camp.id} ${axis.type} ${label} ${dueCount}건 (실패 ${axisFail} + 미적재 ${notLoaded} / 차감 ${deductedCount} 처리 ${processed}) 차액 ${r.refunded}원`);
+                }
               }
 
-              // === 4-4. ★ 2026-06-29: 머니 불변식 감시 — 차감 = 성공 + 순환불(환불−회수). 깨지면 즉시 경보 ===
-              //   "발송사는 한 건도 안 잃는다"를 코드로 보장. gap>0=미환불(고객 손해)·gap<0=초과환불 잔존.
-              //   reverse가 소유한 캠페인(타임아웃 등 skipped)은 제외. 반올림 노이즈는 임계값으로 차단.
-              //   순환불은 reverse가 같은 집계로 돌려준 값 재사용(추가 쿼리 0).
-              if (!rev.skipped) {
-                const netRefundedCnt = Math.round(rev.netRefundedAmt / unit);
-                const gapCnt = refundInvariantGap({ deductedCount, successCount: mysqlSuccess, netRefundedCount: netRefundedCnt });
-                if (Math.abs(gapCnt) >= INVARIANT_ALERT_THRESHOLD) {
-                  invariantAlertCount++;
-                  const dir = gapCnt > 0 ? '미환불 의심(고객 손해)' : '초과환불 잔존';
-                  log(`[불변식위반] campaign=${camp.id} ${camp.message_type} 차감 ${deductedCount} ≠ 성공 ${mysqlSuccess} + 순환불 ${netRefundedCnt} (차이 ${gapCnt}건, ${dir})`);
-                  await sendSystemAlert({
-                    dedupKey: `refund-invariant:${camp.id}`,
-                    message: `환불 불변식 위반 — ${camp.message_type} 캠페인: 차감 ${deductedCount}건 ≠ 성공 ${mysqlSuccess} + 순환불 ${netRefundedCnt} (차이 ${gapCnt}건, ${dir}). campaign=${camp.id}`,
-                  });
+              // === 4-3. ★ 2026-06-29: 초과 환불 자동 회수 (양방향 수렴) ===
+              //   누적 환불이 정당 한도(차감 − 성공 − 대기)를 넘었으면 초과분만 reverse 차감.
+              //   sent_count 과소·과거 ratchet 고착분을 코드로 자동 회수하고, 미래 어떤 변수가 튀어도 스스로 보정.
+              //   settle 가드 — 정산 끝난 캠페인에서만: 대기 0(발송 중 아님) + 집계 유효(0/0 agg 실패 제외) + 30분 경과.
+              //   (정당 한도 = MySQL 실측 성공으로만 계산 → 성공은 이력 append-only라 과대 불가 = 과다 회수 0)
+              const ageMs = camp.send_base ? (Date.now() - new Date(camp.send_base).getTime()) : 0;
+              if (axisPending === 0 && (axisSuccess + axisFail) > 0 && ageMs > 30 * 60 * 1000) {
+                const maxLegitRefund = Math.max(0, deductedCount - axisSuccess - axisPending);
+                const rev = await prepaidReverseOverRefund(camp.company_id, maxLegitRefund, axis.type, camp.id);
+                if (rev.reversed > 0) {
+                  reverseOverCount++;
+                  totalReverseOverAmount += rev.reversed;
+                  log(`✓ campaign=${camp.id} ${axis.type} 초과환불 회수 ${rev.reversed}원 (정당한도 ${maxLegitRefund}건 = 차감 ${deductedCount} − 성공 ${axisSuccess})`);
+                }
+
+                // === 4-4. ★ 2026-06-29: 머니 불변식 감시 — 차감 = 성공 + 순환불(환불−회수). 깨지면 즉시 경보 ===
+                //   "발송사는 한 건도 안 잃는다"를 코드로 보장. gap>0=미환불(고객 손해)·gap<0=초과환불 잔존.
+                //   reverse가 소유한 캠페인(타임아웃 등 skipped)은 제외. 반올림 노이즈는 임계값으로 차단.
+                //   순환불은 reverse가 같은 집계로 돌려준 값 재사용(추가 쿼리 0).
+                if (!rev.skipped) {
+                  const netRefundedCnt = Math.round(rev.netRefundedAmt / unit);
+                  const gapCnt = refundInvariantGap({ deductedCount, successCount: axisSuccess, netRefundedCount: netRefundedCnt });
+                  if (Math.abs(gapCnt) >= INVARIANT_ALERT_THRESHOLD) {
+                    invariantAlertCount++;
+                    const dir = gapCnt > 0 ? '미환불 의심(고객 손해)' : '초과환불 잔존';
+                    log(`[불변식위반] campaign=${camp.id} ${axis.type} 차감 ${deductedCount} ≠ 성공 ${axisSuccess} + 순환불 ${netRefundedCnt} (차이 ${gapCnt}건, ${dir})`);
+                    await sendSystemAlert({
+                      dedupKey: `refund-invariant:${camp.id}:${axis.type}`,
+                      message: `환불 불변식 위반 — ${axis.type} 캠페인: 차감 ${deductedCount}건 ≠ 성공 ${axisSuccess} + 순환불 ${netRefundedCnt} (차이 ${gapCnt}건, ${dir}). campaign=${camp.id}`,
+                    });
+                  }
                 }
               }
             }

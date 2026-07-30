@@ -225,8 +225,8 @@
 | created_at | timestamptz |
 | updated_at | timestamptz |
 | mms_image_paths | jsonb | ★ 2026-06-08 실측 보강 |
-| send_channel | **varchar(10)** | ★2026-07-29 실측 정정(그 전 기재 varchar(20)은 오기 — ★실측 표시가 붙어 있었다). **`kakao_brand`(11자)가 안 들어가 `/brand-send`가 22001로 죽고 있었다.** 값을 늘릴 땐 길이부터 확인 |
-| send_phase | varchar(20) | ★ 실측 (발송 단계) |
+| send_channel | varchar(20) | ★2026-07-29 ALTER 실행 완료(옛 varchar(10)에 `kakao_brand` 11자가 안 들어가 22001 — SoT 브랜드 재구축 §0). 값을 늘릴 땐 길이부터 확인 |
+| send_phase | varchar(20) | ★ 실측 (발송 단계). 값: queued/processing/sent/failed + **preparing**(2026-07-31 신설 — 차감 완료 전 워커 픽업 차단). **CHECK 제약 없음**(2026-07-31 pg_constraint 실측 — campaigns의 CHECK는 message_type·status 2건뿐) |
 | send_config | jsonb | ★ 실측 |
 | staging_id | uuid | ★ 실측 (직접발송 staging) |
 | processed_count | integer | ★ 실측 |

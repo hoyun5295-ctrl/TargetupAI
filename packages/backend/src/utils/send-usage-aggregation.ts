@@ -24,7 +24,7 @@ import { mapWithConcurrency } from './concurrency';
 import { normalizeUnitPriceBasis, toSupplyPrice, type UnitPriceBasis } from './unit-price';
 import type { PlanSegment } from './plan-proration';
 import {
-  BILLING_TYPES, BRAND_CHANNEL_SQL_IN,
+  BILLING_TYPES,
   type BillingTypeDef, type AgentPriceColumn, type AgentUnitPriceRow,
 } from './billing-types';
 
@@ -199,28 +199,8 @@ export async function getTablesForBillingPeriod(
   return allTables;
 }
 
-/**
- * 카카오 브랜드메시지(IMC) 조회 전용 — 테이블이 없으면 조용히 건너뛴다.
- *
- * ★ 2026-07-25 실측: 운영 MySQL에 `IMC%` 테이블이 전 스키마에 하나도 없다(SMSQ_SEND는 104개 존재).
- *   지금은 카카오/both 채널 발송이 0건이라 이 쿼리 자체가 실행되지 않아 안 터지지만,
- *   어느 회사든 카카오 채널로 한 건만 보내면 `/generate`가 ER_NO_SUCH_TABLE(1146)로 500이 된다.
- *   정산은 한 달에 한 번 뽑는 작업이라 그 자리에서 막히면 마감을 놓친다.
- *
- * ※ SMSQ 라인 테이블에는 이 방어를 쓰지 않는다. 라인 테이블이 없는 건 설정 오류이고,
- *   조용히 건너뛰면 그 라인 발송분이 통째로 미청구가 된다 — 반드시 터져야 한다.
- */
-async function queryImcOrSkipIfMissing(sql: string, params: any[], context: string): Promise<any[]> {
-  try {
-    return await mysqlBillingQuery(sql, params) as any[];
-  } catch (e: any) {
-    if (e?.errno === 1146 || e?.code === 'ER_NO_SUCH_TABLE') {
-      console.log(`[정산] ${context} — IMC 테이블 없음, 집계에서 제외. (${e?.message || ''})`);
-      return [];
-    }
-    throw e;
-  }
-}
+// (2026-07-30 재구축) 옛 queryImcOrSkipIfMissing 헬퍼 삭제 — IMC 테이블을 읽는 arm이 전부 폐기됐다.
+// 브랜드는 SMSQ msg_type='F'로 일반발송 arm이 담당하며, SMSQ 라인 테이블 부재는 설정 오류라 반드시 터져야 한다.
 
 /**
  * SMSQ 테이블들에서 (발송ID × 일자 × msg_type) 카운트.
@@ -379,6 +359,33 @@ async function aggregateByRunIdChunks(
 }
 
 /**
+ * ★ 2026-07-30 (적대검증 2R): 두 ID 집합의 이중 집계 —
+ *   eventIds는 기존 그대로 기간 조건 없이(1 ID = 1 발송 이벤트 — 산식 불변),
+ *   periodCampaignIds는 **청구 기간의 sendreq_time 조건과 함께** 집계한다.
+ *   같은 캠페인 ID가 여러 달 재발송돼도 그 달 발송분만 그 달 청구에 실린다.
+ *   두 집합은 selectBillingSendIds가 서로소로 만들었으므로 행이 두 번 세어질 수 없다.
+ */
+export async function aggregateBillingSendIds(
+  tables: string[],
+  ids: BillingSendIdSets,
+  agg: (tables: string[], whereClause: string, params: any[], indexHint?: string) => Promise<any[]>,
+  startDate: string,
+  endDate: string,
+): Promise<any[]> {
+  const out: any[] = [...(await aggregateByRunIdChunks(tables, ids.eventIds, agg))];
+  for (const chunk of chunkArray(ids.periodCampaignIds, RUN_ID_IN_CHUNK)) {
+    const ph = chunk.map(() => '?').join(',');
+    out.push(...(await agg(
+      tables,
+      `app_etc1 IN (${ph}) AND sendreq_time >= ? AND sendreq_time < DATE_ADD(?, INTERVAL 1 DAY)`,
+      [...chunk, startDate, endDate],
+      SMSQ_APP_ETC1_INDEX_HINT,
+    )));
+  }
+  return out;
+}
+
+/**
  * MySQL/PG가 돌려주는 날짜값을 YYYY-MM-DD 문자열로.
  *
  * ★ 2026-07-26 정정 — `toISOString()`을 쓰면 **하루가 앞으로 밀린다.**
@@ -453,43 +460,77 @@ function bump(dayData: UsageDayData, day: string, type: string, row: { total?: a
  *   큐 app_etc1에 campaigns.id를 기록 — campaign_runs만 보던 집계에서 통째로 빠지던 누락 fix.
  *   양쪽을 IN에 넣어도 MySQL 행은 자기 app_etc1 하나에만 매칭되므로 이중 계상 0.
  */
-export async function selectBillingRunIds(opts: {
+/**
+ * ★ 2026-07-30 적대검증 2R 수용 — 청구 대상 ID를 **두 집합으로 분리**해서 돌려준다.
+ *
+ *   · eventIds = cr.id(완료 run) ∪ direct c.id — 한 ID = 한 발송 이벤트라 app_etc1 매칭에 기간 조건이
+ *     필요 없다(기존 계약 그대로 — 산식 불변).
+ *   · periodCampaignIds = run 기반 캠페인의 campaigns.id — 큐 적재 경로(AI /:id/send·/brand-send)는
+ *     app_etc1에 campaigns.id를 기록하므로 cr.id만으로는 그 발송분이 통째로 빠진다(브랜드 F행이 이 축에
+ *     얹히며 드러났고, AI SMS도 같은 갭). 단 같은 캠페인이 run_number를 늘리며 **여러 달에 걸쳐 재발송**될
+ *     수 있어, 이 집합은 반드시 sendreq_time 기간 조건과 함께 집계해야 한다 — 기간 없이 넣으면 인접 월
+ *     발송분이 양쪽 달에 모두 계상된다(2R critical).
+ *   direct 캠페인이 구형 경로로 campaign_runs를 함께 만든 경우 periodCampaignIds에서 빼서(이중 계상 차단)
+ *   기존 dateless 집계(eventIds)에만 남긴다. mapRunOwners는 두 축을 다 해석한다.
+ */
+export interface BillingSendIdSets {
+  eventIds: string[];
+  periodCampaignIds: string[];
+}
+
+export async function selectBillingSendIds(opts: {
   companyId: string;
   startDate: string;
   endDate: string;
   userId?: string;
-}): Promise<string[]> {
+}): Promise<BillingSendIdSets> {
   const { companyId, startDate, endDate, userId } = opts;
-  let runsSql = `
-    SELECT cr.id as run_id
-    FROM campaign_runs cr
-    JOIN campaigns c ON c.id = cr.campaign_id
-    WHERE c.company_id = $1
-      AND cr.sent_at >= ${kstStartNaive('$2')}
-      AND cr.sent_at < ${kstEndNaive('$3')}
-      AND cr.status = 'completed'`;
-  const runsParams: any[] = [companyId, startDate, endDate];
+  const params: any[] = [companyId, startDate, endDate];
+  let userWhereRun = '';
+  let userWhereDirect = '';
   if (userId) {
-    runsParams.push(userId);
+    params.push(userId);
     // ★ 2026-07-25 정정 — 캠페인 생성 경로가 채우는 컬럼은 `created_by`다(user_id는 대부분 비어 있다).
-    //   `c.user_id`로 걸러 왔던 탓에 사용자 지정 청구서에서 캠페인 발송분이 통째로 빠졌다.
-    //   통계 화면도 `created_by` 기준이라 이제 화면·엑셀·청구서가 같은 축을 본다.
-    runsSql += ` AND c.created_by = $${runsParams.length}`;
+    userWhereRun = ` AND c.created_by = $${params.length}`;
+    userWhereDirect = ` AND c2.created_by = $${params.length}`;
   }
-  runsSql += `
-    UNION
-    SELECT c2.id as run_id
-    FROM campaigns c2
-    WHERE c2.company_id = $1
-      AND c2.send_type = 'direct'
-      AND c2.send_phase = 'sent'
-      AND c2.status = 'completed'
-      AND COALESCE(c2.scheduled_at, c2.sent_at) >= ${kstStart('$2')}
-      AND COALESCE(c2.scheduled_at, c2.sent_at) < ${kstEnd('$3')}`;
-  if (userId) runsSql += ` AND c2.created_by = $${runsParams.length}`;
 
-  const runsResult = await pool.query(runsSql, runsParams);
-  return runsResult.rows.map((r: any) => r.run_id);
+  const runsResult = await pool.query(
+    `SELECT cr.id AS run_id, c.id AS campaign_id
+       FROM campaign_runs cr
+       JOIN campaigns c ON c.id = cr.campaign_id
+      WHERE c.company_id = $1
+        AND cr.sent_at >= ${kstStartNaive('$2')}
+        AND cr.sent_at < ${kstEndNaive('$3')}
+        AND cr.status = 'completed'${userWhereRun}`,
+    params,
+  );
+  const directResult = await pool.query(
+    `SELECT c2.id AS run_id
+       FROM campaigns c2
+      WHERE c2.company_id = $1
+        AND c2.send_type = 'direct'
+        AND c2.send_phase = 'sent'
+        AND c2.status = 'completed'
+        AND COALESCE(c2.scheduled_at, c2.sent_at) >= ${kstStart('$2')}
+        AND COALESCE(c2.scheduled_at, c2.sent_at) < ${kstEnd('$3')}${userWhereDirect}`,
+    params,
+  );
+
+  const eventIds = new Set<string>();
+  for (const r of runsResult.rows as any[]) eventIds.add(String(r.run_id));
+  for (const r of directResult.rows as any[]) eventIds.add(String(r.run_id));
+  const periodCampaignIds = new Set<string>();
+  for (const r of runsResult.rows as any[]) {
+    const cid = String(r.campaign_id);
+    if (!eventIds.has(cid)) periodCampaignIds.add(cid);
+  }
+  return { eventIds: Array.from(eventIds), periodCampaignIds: Array.from(periodCampaignIds) };
+}
+
+/** 두 집합의 총 개수 — "청구 대상 있음" 판정용 */
+export function countBillingSendIds(ids: BillingSendIdSets): number {
+  return ids.eventIds.length + ids.periodCampaignIds.length;
 }
 
 /**
@@ -553,18 +594,18 @@ export async function buildCompanyUsageByDay(opts: {
   const { companyId, startDate, endDate, userId } = opts;
   const dayData: UsageDayData = {};
 
-  // 1) 대상 run_id 수집
-  const runIds = await selectBillingRunIds({ companyId, startDate, endDate, userId });
+  // 1) 대상 발송 ID 수집 (이벤트 축 + 기간 한정 캠페인 축 — 2R)
+  const billingIds = await selectBillingSendIds({ companyId, startDate, endDate, userId });
 
   // ★ 2026-07-26 LOG 테이블 목록은 요청당 한 번만 읽는다(information_schema REGEXP는 싸지 않다).
   const logTables = await getBillingLogTables();
 
   // 2) 일반발송 — 회사 라인그룹 + LOG 테이블 통합
-  if (runIds.length > 0) {
+  if (countBillingSendIds(billingIds) > 0) {
     const companyTables = await getBillingCompanyTables(companyId);
     const billingTables = await getTablesForBillingPeriod(companyTables, startDate, endDate, logTables);
     // ★ 2026-07-28 IN 목록을 청크로 — 통짜로 넣으면 옵티마이저가 인덱스를 버린다(위 헬퍼 주석).
-    const rows = await aggregateByRunIdChunks(billingTables, runIds, smsAggByDateType);
+    const rows = await aggregateBillingSendIds(billingTables, billingIds, smsAggByDateType, startDate, endDate);
     rows.forEach((row: any) => {
       // ★ 2026-07-25 정정 — 'M'·'K'가 변환되지 않아 청구 합산(types.MMS·types.KAKAO)에서 통째로 빠졌다.
       //   SMSQ msg_type은 S/L/M/K다(qtmsg-type.ts toQtmsgType · 알림톡은 sms-queue insertAlimtalkQueue가 'K'로 적재).
@@ -614,85 +655,10 @@ export async function buildCompanyUsageByDay(opts: {
     });
   }
 
-  // 5) 카카오 브랜드메시지 (IMC_BM_FREE_BIZ_MSG) — 캠페인 발송분
-  //   ※ 알림톡은 여기가 아니다. 알림톡은 SMSQ에 msg_type='K'로 적재된다(sms-queue.ts insertAlimtalkQueue).
-  //     위 2) 일반발송 집계가 담당하며, 유형키 변환(K→KAKAO)이 그 몫이다.
-  if (runIds.length > 0) {
-    const campaignIdsResult = await pool.query(
-      `SELECT DISTINCT c.id as campaign_id
-       FROM campaign_runs cr
-       JOIN campaigns c ON c.id = cr.campaign_id
-       WHERE cr.id = ANY($1::uuid[])
-         AND c.send_channel IN (${BRAND_CHANNEL_SQL_IN})`,
-      [runIds]
-    );
-    const kakaoCampaignIds = campaignIdsResult.rows.map((r: any) => r.campaign_id);
-    if (kakaoCampaignIds.length > 0) {
-      const kph = kakaoCampaignIds.map(() => '?').join(',');
-      const kakaoRows = await queryImcOrSkipIfMissing(
-        `SELECT DATE(REQUEST_DATE) as send_date,
-                COUNT(*) as total_count,
-                SUM(CASE WHEN REPORT_CODE = '0000' THEN 1 ELSE 0 END) as success_count,
-                SUM(CASE WHEN REPORT_CODE != '0000' AND STATUS IN ('3','4') THEN 1 ELSE 0 END) as fail_count,
-                SUM(CASE WHEN STATUS IN ('1','2') THEN 1 ELSE 0 END) as pending_count
-         FROM IMC_BM_FREE_BIZ_MSG
-         WHERE REQUEST_UID IN (${kph})
-           AND REQUEST_DATE >= ? AND REQUEST_DATE < DATE_ADD(?, INTERVAL 1 DAY)
-         GROUP BY DATE(REQUEST_DATE)`,
-        [...kakaoCampaignIds, startDate, endDate],
-        `캠페인 브랜드메시지 ${kakaoCampaignIds.length}건`
-      );
-      (kakaoRows as any[]).forEach((row: any) => {
-        // ★ 2026-07-29 이 arm은 IMC_BM_FREE_BIZ_MSG(브랜드메시지 전용 테이블)를 읽는다.
-        //   소스는 원래 알림톡과 갈라져 있었는데 유형키만 KAKAO로 합쳐 넣어 단가가 뭉쳐 있었다.
-        bump(dayData, toDayKey(row.send_date), 'BRAND', {
-          total: row.total_count, success: row.success_count, fail: row.fail_count, pending: row.pending_count,
-        });
-      });
-    }
-  }
-
-  // 6) 직접발송(direct-send) 카카오
-  {
-    // ★ 2026-07-25 사용자 지정 정산에 사용자 필터가 없어 같은 회사 타 사용자 발송분이 섞였다
-    const dkParams: any[] = [companyId, startDate, endDate];
-    let dkUserWhere = '';
-    if (userId) { dkParams.push(userId); dkUserWhere = ` AND created_by = $${dkParams.length}`; }
-    const directKakaoResult = await pool.query(
-      // ※ 'direct'를 넣으면 구형 /direct-send 경로가 campaign_runs도 만들기 때문에
-      //   위 캠페인 arm과 겹쳐 같은 IMC 행을 두 번 센다. 원 동작('manual')을 유지한다.
-      `SELECT id FROM campaigns
-       WHERE company_id = $1
-         AND send_type = 'manual'
-         AND send_channel IN (${BRAND_CHANNEL_SQL_IN})
-         AND sent_at >= ${kstStart('$2')}
-         AND sent_at < ${kstEnd('$3')}${dkUserWhere}`,
-      dkParams
-    );
-    const directKakaoIds = directKakaoResult.rows.map((r: any) => r.id);
-    if (directKakaoIds.length > 0) {
-      const dkph = directKakaoIds.map(() => '?').join(',');
-      const dkRows = await queryImcOrSkipIfMissing(
-        `SELECT DATE(REQUEST_DATE) as send_date,
-                COUNT(*) as total_count,
-                SUM(CASE WHEN REPORT_CODE = '0000' THEN 1 ELSE 0 END) as success_count,
-                SUM(CASE WHEN REPORT_CODE != '0000' AND STATUS IN ('3','4') THEN 1 ELSE 0 END) as fail_count,
-                SUM(CASE WHEN STATUS IN ('1','2') THEN 1 ELSE 0 END) as pending_count
-         FROM IMC_BM_FREE_BIZ_MSG
-         WHERE REQUEST_UID IN (${dkph})
-         GROUP BY DATE(REQUEST_DATE)`,
-        directKakaoIds,
-        `직접발송 브랜드메시지 ${directKakaoIds.length}건`
-      );
-      (dkRows as any[]).forEach((row: any) => {
-        // ★ 2026-07-29 이 arm은 IMC_BM_FREE_BIZ_MSG(브랜드메시지 전용 테이블)를 읽는다.
-        //   소스는 원래 알림톡과 갈라져 있었는데 유형키만 KAKAO로 합쳐 넣어 단가가 뭉쳐 있었다.
-        bump(dayData, toDayKey(row.send_date), 'BRAND', {
-          total: row.total_count, success: row.success_count, fail: row.fail_count, pending: row.pending_count,
-        });
-      });
-    }
-  }
+  // (2026-07-30 재구축) 옛 5)·6) 브랜드메시지 IMC arm 폐기 —
+  //   브랜드는 SMSQ에 msg_type='F'로 적재되어 위 2) 일반발송 집계가 담당한다.
+  //   유형키 변환(F→BRAND)은 MSG_TYPE_TO_USAGE_KEY(billing-types 표 smsqCode 파생)가 맡는다.
+  //   알림톡(K→KAKAO)과 완전히 같은 구조 — 채널별 전용 arm이 더는 없다.
 
   return dayData;
 }
@@ -1401,14 +1367,14 @@ export async function buildBillingUsageRows(opts: {
   // ★ 2026-07-26 LOG 테이블 목록은 요청당 한 번만 읽는다(발송·테스트 두 곳이 공유).
   const logTables = await getBillingLogTables();
 
-  // 1) 웹 일반발송 — 일자 × 계정 × 유형
-  const runIds = await selectBillingRunIds({ companyId, startDate, endDate, userId });
-  if (runIds.length > 0) {
-    const owners = await mapRunOwners(runIds);
+  // 1) 웹 일반발송 — 일자 × 계정 × 유형 (이벤트 축 + 기간 한정 캠페인 축 — 일자축과 같은 분리 규칙, 2R)
+  const billingIds = await selectBillingSendIds({ companyId, startDate, endDate, userId });
+  if (countBillingSendIds(billingIds) > 0) {
+    const owners = await mapRunOwners([...billingIds.eventIds, ...billingIds.periodCampaignIds]);
     const companyTables = await getBillingCompanyTables(companyId);
     const billingTables = await getTablesForBillingPeriod(companyTables, startDate, endDate, logTables);
     // ★ 2026-07-28 IN 목록 청크 — 일자축과 **같은 분할 규칙**을 써야 두 축 대조가 성립한다.
-    const rows = await aggregateByRunIdChunks(billingTables, runIds, smsAggByRunDateType);
+    const rows = await aggregateBillingSendIds(billingTables, billingIds, smsAggByRunDateType, startDate, endDate);
     for (const row of rows) {
       const day = toDayKey(row.send_date);
       const typeKey = MSG_TYPE_TO_USAGE_KEY[row.msg_type] || String(row.msg_type || '');
@@ -1420,77 +1386,9 @@ export async function buildBillingUsageRows(opts: {
     }
   }
 
-  // 2) 웹 카카오 브랜드메시지(IMC) — 계정은 캠페인 생성자
-  //    ※ 알림톡은 여기가 아니다(SMSQ msg_type='K'라 위 1)이 담당). IMC 테이블은 없으면 조용히 건너뛴다.
-  //    ※ 캠페인 arm에는 기간조건이 있고 직접발송 arm에는 없다 — `buildCompanyUsageByDay`와 **같은 조건**이라야
-  //      대조(diffBillingRowsVsDayData)가 성립한다. 한쪽만 바꾸면 그 순간 두 숫자가 갈라진다.
-  const IMC_AGG_SQL = (kph: string) =>
-    `SELECT REQUEST_UID as campaign_id, DATE(REQUEST_DATE) as send_date,
-            COUNT(*) as total_count,
-            SUM(CASE WHEN REPORT_CODE = '0000' THEN 1 ELSE 0 END) as success_count,
-            SUM(CASE WHEN REPORT_CODE != '0000' AND STATUS IN ('3','4') THEN 1 ELSE 0 END) as fail_count,
-            SUM(CASE WHEN STATUS IN ('1','2') THEN 1 ELSE 0 END) as pending_count
-       FROM IMC_BM_FREE_BIZ_MSG
-      WHERE REQUEST_UID IN (${kph})`;
-  const addImcRows = (imcRows: any[], owners: Map<string, string | null>) => {
-    for (const row of imcRows || []) {
-      const day = toDayKey(row.send_date);
-      const uid = owners.get(String(row.campaign_id)) ?? null;
-      bumpRow(acc, {
-        // ★ 2026-07-29 일자축(bump)과 **같은 유형키**여야 한다. 한쪽만 바꾸면 축 대조가
-        //   BILLING_AXIS_MISMATCH로 발행을 막는다(적대검증에서 실제로 걸린 지점).
-        channel: 'web', itemDate: day, typeKey: 'BRAND', userId: uid, agentSendId: null,
-        total: 0, success: 0, fail: 0, pending: 0,
-      }, { total: row.total_count, success: row.success_count, fail: row.fail_count, pending: row.pending_count });
-    }
-  };
-
-  if (runIds.length > 0) {
-    const r = await pool.query(
-      `SELECT DISTINCT c.id AS campaign_id, c.created_by
-         FROM campaign_runs cr JOIN campaigns c ON c.id = cr.campaign_id
-        WHERE cr.id = ANY($1::uuid[]) AND c.send_channel IN (${BRAND_CHANNEL_SQL_IN})`,
-      [runIds],
-    );
-    const owners = new Map<string, string | null>();
-    for (const x of r.rows as any[]) owners.set(String(x.campaign_id), x.created_by ? String(x.created_by) : null);
-    if (owners.size > 0) {
-      const ids = Array.from(owners.keys());
-      const kph = ids.map(() => '?').join(',');
-      const imcRows = await queryImcOrSkipIfMissing(
-        `${IMC_AGG_SQL(kph)} AND REQUEST_DATE >= ? AND REQUEST_DATE < DATE_ADD(?, INTERVAL 1 DAY)
-          GROUP BY REQUEST_UID, DATE(REQUEST_DATE)`,
-        [...ids, startDate, endDate],
-        `청구 상세 캠페인 브랜드메시지 ${ids.length}건`,
-      );
-      addImcRows(imcRows as any[], owners);
-    }
-  }
-  {
-    // 직접발송(manual) 카카오 — 'direct'를 넣으면 구형 경로가 campaign_runs도 만들어 위 arm과 겹쳐 두 번 센다.
-    const dkParams: any[] = [companyId, startDate, endDate];
-    let dkUserWhere = '';
-    if (userId) { dkParams.push(userId); dkUserWhere = ` AND created_by = $${dkParams.length}`; }
-    const r = await pool.query(
-      `SELECT id, created_by FROM campaigns
-        WHERE company_id = $1 AND send_type = 'manual'
-          AND send_channel IN (${BRAND_CHANNEL_SQL_IN})
-          AND sent_at >= ${kstStart('$2')} AND sent_at < ${kstEnd('$3')}${dkUserWhere}`,
-      dkParams,
-    );
-    const owners = new Map<string, string | null>();
-    for (const x of r.rows as any[]) owners.set(String(x.id), x.created_by ? String(x.created_by) : null);
-    if (owners.size > 0) {
-      const ids = Array.from(owners.keys());
-      const kph = ids.map(() => '?').join(',');
-      const imcRows = await queryImcOrSkipIfMissing(
-        `${IMC_AGG_SQL(kph)} GROUP BY REQUEST_UID, DATE(REQUEST_DATE)`,
-        ids,
-        `청구 상세 직접발송 브랜드메시지 ${ids.length}건`,
-      );
-      addImcRows(imcRows as any[], owners);
-    }
-  }
+  // (2026-07-30 재구축) 옛 2) 브랜드메시지 IMC arm 폐기 — 브랜드는 SMSQ msg_type='F'로
+  //   위 1) 웹 일반발송 집계가 담당하고, 유형키(F→BRAND)는 MSG_TYPE_TO_USAGE_KEY가 맡는다.
+  //   일자축(buildCompanyUsageByDay)과 같은 축이라 대조(diffBillingRowsVsDayData)도 그대로 성립한다.
 
   // 3) 테스트발송 — 계정은 bill_id
   if (!userId) {

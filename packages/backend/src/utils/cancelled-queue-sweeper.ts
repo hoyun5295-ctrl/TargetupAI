@@ -3,14 +3,13 @@
  *
  * status='cancelled'인데 MySQL 발송 큐에 대기(status_code=100) 행이 남은 캠페인을 1분 주기로 스캔해 삭제한다.
  * 취소 경로가 어떤 이유로든(라인 불일치/적재 경합/향후 신규 코드 누락) 큐를 못 지워도 여기서 막는다.
- * 카카오 대기 큐도 동일하게 정리한다 (cancelCampaign과 같은 kakaoCancelPending 사용).
+ * 브랜드메시지(msg_type='F')도 같은 SMSQ 테이블이라 동일 DELETE가 커버한다(2026-07-30 합류).
  *
  * 패턴 기준: utils/campaign-sync-worker.ts setInterval + 중복 진입 방지 플래그 미러.
  */
 import { query } from '../config/database';
 import {
   getCampaignQueueTables, smsCountAll, smsExecAll,
-  kakaoCountPending, kakaoCancelPending,
 } from './sms-queue';
 import { SUCCESS_CODES } from './sms-result-map';
 
@@ -63,17 +62,8 @@ export async function sweepCancelledQueuesOnce(): Promise<{ scanned: number; del
         console.log(`[cancelled-queue-sweeper] 취소 캠페인 ${c.id} 정리 — 대기 ${pending} 삭제 / 픽업잔존 ${stuck} 취소마킹 / 재카운트 대기 잔존 ${remain}`);
       }
 
-      let kakaoPending = 0;
-      try { kakaoPending = await kakaoCountPending(c.id); } catch { /* 카카오 큐 조회 실패는 무시 */ }
-      if (kakaoPending > 0) {
-        try {
-          await kakaoCancelPending(c.id);
-          deleted += kakaoPending;
-          console.log(`[cancelled-queue-sweeper] 취소 캠페인 ${c.id} 카카오 잔존 대기 ${kakaoPending}건 삭제`);
-        } catch (kErr: any) {
-          console.error(`[cancelled-queue-sweeper] 캠페인 ${c.id} 카카오 삭제 오류:`, kErr?.message);
-        }
-      }
+      // (2026-07-30) 옛 카카오 IMC 큐 정리 폐기 — 브랜드 행(msg_type='F')도 같은 SMSQ 테이블이라
+      // 위 DELETE·9999 마킹이 함께 처리한다.
     } catch (err: any) {
       console.error(`[cancelled-queue-sweeper] 캠페인 ${c.id} 처리 오류:`, err?.message);
     }

@@ -82,21 +82,23 @@ describe('rollupUsageByPeriod — 청구 사용량 일자 집계 → 기간×유
 });
 
 describe('MSG_TYPE_TO_USAGE_KEY — SMSQ 유형코드 → 청구 유형키 (2026-07-25)', () => {
-  it('S/L/M/K 네 코드가 모두 청구 키로 변환된다', () => {
+  it('S/L/M/K/F 다섯 코드가 모두 청구 키로 변환된다', () => {
     expect(MSG_TYPE_TO_USAGE_KEY.S).toBe('SMS');
     expect(MSG_TYPE_TO_USAGE_KEY.L).toBe('LMS');
     expect(MSG_TYPE_TO_USAGE_KEY.M).toBe('MMS');
     expect(MSG_TYPE_TO_USAGE_KEY.K).toBe('KAKAO');
+    // ★ 2026-07-30 브랜드 SMSQ 합류 — 'F'가 빠지면 브랜드 발송이 통째로 0원 청구된다.
+    expect(MSG_TYPE_TO_USAGE_KEY.F).toBe('BRAND');
   });
 
   it('청구 합산이 읽는 키와 정확히 일치한다 — 어긋나면 그 유형이 0원 청구된다', () => {
-    // billing.ts 합산부가 읽는 키: SMS·LMS·MMS·KAKAO.
+    // billing.ts 합산부가 읽는 키: SMS·LMS·MMS·KAKAO·BRAND.
     // 과거 'M'·'K'가 변환되지 않아 MMS·알림톡이 통째로 청구에서 빠졌다.
-    const billingKeys = ['SMS', 'LMS', 'MMS', 'KAKAO'];
+    const billingKeys = ['SMS', 'LMS', 'MMS', 'KAKAO', 'BRAND'];
     for (const v of Object.values(MSG_TYPE_TO_USAGE_KEY)) {
       expect(billingKeys).toContain(v);
     }
-    expect(new Set(Object.values(MSG_TYPE_TO_USAGE_KEY)).size).toBe(4); // 중복 매핑 없음
+    expect(new Set(Object.values(MSG_TYPE_TO_USAGE_KEY)).size).toBe(5); // 중복 매핑 없음
   });
 });
 

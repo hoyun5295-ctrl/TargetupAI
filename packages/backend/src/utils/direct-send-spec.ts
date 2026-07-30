@@ -55,10 +55,13 @@ export interface DirectSendSpec {
   alimtalkTemplateUuid?: string | null;   // campaigns.kakao_template_id FK
 }
 
-// campaigns INSERT — 컬럼 순서 고정(/direct-send/commit 원본과 동일). send_type='direct', send_phase='queued', processed_count=0, created_at=NOW().
+// campaigns INSERT — 컬럼 순서 고정(/direct-send/commit 원본과 동일). send_type='direct', processed_count=0, created_at=NOW().
+// ★ 2026-07-30 (3R): 초기 send_phase='preparing' — 워커 due 쿼리는 'queued'만 집는다.
+//   차감이 전부 성공한 뒤에만 createDirectSendCampaign이 'queued'로 전환하므로,
+//   차감 도중·보상 도중 어떤 실패가 나도 미차감(또는 부분 차감) 캠페인이 발송될 수 없다(fail-closed).
 export const CAMPAIGN_INSERT_SQL =
   `INSERT INTO campaigns (company_id, campaign_name, message_type, message_content, subject, callback_number, target_count, send_type, status, scheduled_at, message_template, message_subject, created_by, is_ad, send_channel, staging_id, send_phase, processed_count, send_config, kakao_template_id, mms_image_paths, created_at)
-   VALUES ($1, $2, $3, $4, $5, $6, $7, 'direct', $8, $9, $10, $11, $12, $13, $14, $15, 'queued', 0, $16, $17, $18, NOW()) RETURNING id`;
+   VALUES ($1, $2, $3, $4, $5, $6, $7, 'direct', $8, $9, $10, $11, $12, $13, $14, $15, 'preparing', 0, $16, $17, $18, NOW()) RETURNING id`;
 
 /** campaigns INSERT 파라미터($1~$18)를 합성. /direct-send/commit 원본 매핑과 동일. */
 export function buildDirectSendCampaignParams(

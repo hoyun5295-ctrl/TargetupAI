@@ -148,3 +148,37 @@ msg_contents = {
 4. 정산 집계 3곳을 `msg_type='F'` 기준으로 (유형키 `BRAND`는 이미 배선돼 있다)
 5. 소스 스캔 불변식에 "유령 테이블 참조 0건" 추가
 6. Codex 적대검증 → 실측 1건(자유형 TEXT) → 배포
+
+## §8 구현 결과 (2026-07-31 코드완료 — Codex 적대검증 11라운드 SHIP)
+
+§7 1~5 전부 구현. backend tsc 0 · frontend tsc 0 · vitest **1,617/1,617**(불변식·CT-12 계약 테스트 신설 포함).
+
+**구현 축** — ①적재: CT-04 `insertBrandQueue`(SMSQ `msg_type='F'`·5000 배치·부분커밋 계약), 유령 테이블
+적재 2함수·전용 조회 헬퍼 7종 삭제 ②조립: CT-12 `buildBrandMsgContents`(대문자 3키·fail-closed)·
+`resolveBrandFallback`(NO/SM/LM→N/A/B·MM 거부·대체문안 미입력=원문) ③호출부 5곳 배치 전환
+④조회·취소·집계·엑셀 SMSQ 합류(라벨 `'F'→브랜드메시지`·본문은 JSON에서 MESSAGE만 표시)
+⑤정산 `BRAND.smsqCode='F'` + IMC arm 3곳 삭제.
+
+**적대검증이 키운 범위**(수용 16건 — 상세는 라운드 기록):
+- **차감 축 CT 통일**(`resolveRefundAxes`) — 대량 직접발송(`direct-send-core`)이 브랜드를 알림톡 단가로
+  차감·both 브랜드 무료이던 결함, 테스트 발송 축 오류까지 동근원 수정. 환불(취소·sync·cleanup·sweeper)도
+  같은 축으로 분리(both=문자·브랜드 두 원장 각자 수렴).
+- **정산 ID 이중 축**(`selectBillingSendIds`) — 큐 `app_etc1`은 campaigns.id인데 청구 대상은 run id라
+  브랜드·AI 발송이 통째 미청구이던 갭. 이벤트 축(무기간)+캠페인 축(기간 한정)으로 분리해
+  재발송 이중 청구까지 차단. 미리보기 매장 상세 BRAND 합류.
+- **`send_phase='preparing'` 게이트** — 차감 완료 전 캠페인을 워커가 못 집는 상태로 만들어
+  차감-발송 원자성 부재를 구조로 봉인. 활성화 실패는 phase 재확인 3분기(커밋됨/실패/미확정),
+  잔존은 개수 기반 단일 경보(행 단위 마커 구조는 3라운드 연속 누수로 폐기).
+- 원장 키 'BRAND' 정규화 · 환불 ok 확인+durable 의무 · `/brand-send` created_by 기록.
+
+**불수용 3건**(근거 기록): 소문자 'brand' 원장 호환(배포 전·과거분 상쇄 종결·미매칭=무동작 안전) /
+취소 DELETE 원자 재설계(기존 구조 동일·미악화 — 9999 무조건 마킹으로 창만 축소) /
+MySQL 드라이버 취소 배관·경보 쿨다운 개편(전 소비처 영향 별도 과제 — 미종료 1개 상한으로 대체).
+
+**실측 1건 시나리오(배포 후·6원칙 ⑤)** — hoyun 계정, 직접발송 브랜드 모달 자유형 TEXT·수신 1건(도달
+가능 실번호 1건만), 발신프로필 선택 → 발송 → ①SMSQ 라인 테이블에 `msg_type='F'`·`k_etc_json` senderkey
+행 확인 ②실수신 확인 ③발송결과 화면 카운트·상세(브랜드메시지 라벨·본문) ④`balance_transactions`
+BRAND 차감 1건 ⑤발송통계/청구 미리보기 BRAND 1건.
+
+**DDL 불요**(기존 컬럼·값만 사용. `send_phase` CHECK 없음 실측 — 2026-07-31 pg_constraint).
+신규 파일 = `utils/brand-message.test.ts`(커밋 시 git add 대상).

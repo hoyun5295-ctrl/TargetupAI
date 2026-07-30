@@ -46,7 +46,7 @@ import { listStyleExamples } from '../utils/best-copy-assets';
 import { getTenantRef } from '../utils/training-logger';
 import { industryLabel } from '../utils/industry-codes';
 import { aggregateSmsCountsByCampaign } from '../utils/stats-aggregation';
-import { kakaoBatchAggByGroup } from '../utils/sms-queue';
+// (2026-07-30) 브랜드 SMSQ 합류 — 옛 카카오 IMC 집계 import 폐기
 // ★ D176 (2026-05-19): Continuous Agentic Operator (사용자 동의 흐름)
 import {
   createOperator,
@@ -1825,8 +1825,8 @@ router.get('/operator/performance/campaigns', async (req: Request, res: Response
     );
 
     const metaRows = metaResult.rows;
+    // ★ 2026-07-30: 브랜드 행(msg_type='F')이 SMSQ 합류 — SMS 집계 하나가 전 채널을 담는다.
     const smsCountMap = await aggregateSmsCountsByCampaign(metaRows as any);
-    const kakaoCountMap = await kakaoBatchAggByGroup(metaRows.map((c: any) => c.id));
 
     const costResult = await query(
       `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, unit_price_basis FROM companies WHERE id = $1::uuid`,
@@ -1837,9 +1837,8 @@ router.get('/operator/performance/campaigns', async (req: Request, res: Response
 
     const campaigns = metaRows.map((c: any) => {
       const sms = smsCountMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
-      const kakao = kakaoCountMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
-      const sent = Number(sms.total_count || 0) + kakao.total;
-      const success = Number(sms.success_count || 0) + kakao.success;
+      const sent = Number(sms.total_count || 0);
+      const success = Number(sms.success_count || 0);
       const channelRaw = String(c.message_type || 'SMS').toUpperCase();
       const channel =
         channelRaw === 'S' ? 'SMS' :

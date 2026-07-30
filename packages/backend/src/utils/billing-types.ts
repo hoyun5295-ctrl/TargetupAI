@@ -16,12 +16,13 @@
 /**
  * 브랜드메시지로 나가는 캠페인 채널값.
  *
- * ★ `kakao`는 **역사적 이름이고 실체가 브랜드메시지**다 — 그 캠페인의 발송은 SMSQ가 아니라
- *   `IMC_BM_FREE_BIZ_MSG`에 적재된다(알림톡은 alimtalk 경로·SMSQ `msg_type='K'`로 완전히 다른 축).
+ * ★ `kakao`는 **역사적 이름이고 실체가 브랜드메시지**다.
+ *   ★ 2026-07-30 재구축: 발송은 알림톡과 같은 SMSQ 라인 테이블에 `msg_type='F'`로 적재된다
+ *   (옛 `IMC_BM_FREE_BIZ_MSG` 적재는 테이블 미실재로 폐기 — 정산·집계는 SMSQ msg_type 축이 담당).
  *   `kakao_brand`는 전용 발송(`POST /brand-send`)이 쓰는 값이고, `both`는 문자와 함께 나가는 캠페인이라
  *   그 안에 브랜드 발송분이 섞여 있다.
  *
- * 이 목록이 **일자 집계·상세 집계·차감·환불이 공유하는 유일한 판정**이다.
+ * 이 목록이 **차감·환불·발송결과 채널 분기가 공유하는 유일한 판정**이다.
  * 리터럴로 흩어져 있던 탓에 전용 발송(`kakao_brand`)이 집계 두 곳 모두에서 빠져 0건이 됐고,
  * 일자축만 유형을 바꾸고 상세축을 안 바꿔 축 불일치로 발행이 422로 막혔다(2026-07-29 적대검증).
  */
@@ -37,6 +38,33 @@ export const BRAND_CHANNEL_SQL_IN = BRAND_CAMPAIGN_CHANNELS.map((c) => `'${c}'`)
 export function isBrandOnlyChannel(sendChannel: any): boolean {
   const v = String(sendChannel || '').trim();
   return v === 'kakao' || v === 'kakao_brand';
+}
+
+/**
+ * ★ 2026-07-30 환불·정산 축 — 캠페인 하나의 차감이 어느 유형 축으로 갈라져 있는가.
+ * 브랜드가 SMSQ(msg_type='F')로 합류하면서, MySQL 실측(fail·pending)을 환불로 되돌릴 때
+ * 그 건수가 **어느 차감 원장**(BRAND vs message_type)의 몫인지를 행 단위로 갈라야 한다.
+ *   - 브랜드 전용(kakao·kakao_brand): 전 행이 F → BRAND 축 하나 (scope 'all')
+ *   - both: 문자(message_type) + 브랜드(BRAND) 두 축 — smsCampaignCountsSafe의 msgTypeScope로 분리
+ *   - 그 외: message_type 축 하나 (기존 동작 그대로)
+ * 차감을 넣는 쪽(campaigns.ts deductType·both 이중 차감)과 같은 판정을 쓴다 — 갈라지면 회계가 어긋난다.
+ */
+export interface RefundAxis {
+  /** prepaidDeduct/prepaidRefund에 넘긴 message_type 축 */
+  type: string;
+  /** smsCampaignCountsSafe msgTypeScope — 이 축이 소유하는 MySQL 행 범위 */
+  scope: 'all' | 'brand' | 'nonBrand';
+}
+
+export function resolveRefundAxes(sendChannel: any, messageType: any): RefundAxis[] {
+  if (isBrandOnlyChannel(sendChannel)) return [{ type: 'BRAND', scope: 'all' }];
+  if (String(sendChannel || '').trim() === 'both') {
+    return [
+      { type: String(messageType || 'SMS'), scope: 'nonBrand' },
+      { type: 'BRAND', scope: 'brand' },
+    ];
+  }
+  return [{ type: String(messageType || 'SMS'), scope: 'all' }];
 }
 
 /** `company_agent_ids` 단가 행 — 발송ID별 단가는 회사 단가와 별개 축이다 */
@@ -84,9 +112,9 @@ export const BILLING_TYPES: readonly BillingTypeDef[] = [
   //   한 '유형' 컬럼에 알림톡이 두 이름으로 갈리면 피벗에서 두 줄이 되어 정산 대조가 깨진다.
   { key: 'KAKAO',    label: '카카오알림톡',    companyPriceColumn: 'cost_per_kakao',    agentPriceColumn: 'cost_per_kakao', smsqCode: 'K',  agentCode: 'K' },
   // ★ 2026-07-29 브랜드메시지(구 친구톡).
-  //   웹은 SMSQ 큐가 아니라 `IMC_BM_FREE_BIZ_MSG`에 적재되므로 `smsqCode`가 없다 —
-  //   그래서 웹 집계는 큐 매핑이 아니라 그 테이블을 읽는 arm이 유형키를 직접 얹는다.
-  { key: 'BRAND',    label: '브랜드메시지',    companyPriceColumn: 'cost_per_brand',    agentPriceColumn: 'cost_per_brand', smsqCode: null, agentCode: 'G' },
+  //   ★ 2026-07-30 재구축: 웹도 SMSQ 큐에 `msg_type='F'`로 적재된다 — smsqCode 'F' 등재로
+  //   일자·상세 정산 두 축의 유형키 맵(MSG_TYPE_TO_USAGE_KEY)이 자동 확장된다(전용 IMC arm 폐기).
+  { key: 'BRAND',    label: '브랜드메시지',    companyPriceColumn: 'cost_per_brand',    agentPriceColumn: 'cost_per_brand', smsqCode: 'F',  agentCode: 'G' },
   { key: 'TEST_SMS', label: '테스트 SMS',     companyPriceColumn: 'cost_per_test_sms', agentPriceColumn: null,             smsqCode: null, agentCode: null },
   { key: 'TEST_LMS', label: '테스트 LMS',     companyPriceColumn: 'cost_per_test_lms', agentPriceColumn: null,             smsqCode: null, agentCode: null },
   // 스팸테스트는 전용 단가가 없고 일반 SMS/LMS 단가를 그대로 쓴다(D16) — 그래서 컬럼이 없다.
