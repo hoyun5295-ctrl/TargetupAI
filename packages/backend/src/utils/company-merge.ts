@@ -449,7 +449,9 @@ async function listCompanyScopedUniqueIndexes(
     `SELECT c.relname AS table_name,
             ir.relname AS index_name,
             i.indnkeyatts AS key_att_count,
-            array_agg(COALESCE(a.attname, '(expr)') ORDER BY g.pos) AS key_cols,
+            -- ★ ::text 캐스팅 필수 — attname은 name 타입이라 array_agg 결과가 name[]이 되고
+            --   node-pg가 그 타입을 배열로 파싱하지 않아 문자열로 온다(0729 실측 TypeError).
+            array_agg(COALESCE(a.attname::text, '(expr)') ORDER BY g.pos) AS key_cols,
             pg_get_expr(i.indpred, i.indrelid) AS predicate,
             pg_get_indexdef(i.indexrelid) AS indexdef
        FROM pg_index i
@@ -507,10 +509,11 @@ async function detectIndirectFkRefs(client: Queryable, moveTableNames: string[])
   const r = await client.query(
     `SELECT ch.relname AS child_table,
             pt.relname AS parent_table,
-            (SELECT array_agg(ca.attname ORDER BY ck.ord)
+            -- ::text 캐스팅 이유는 위 UNIQUE 인덱스 쿼리와 같다(name[]은 드라이버가 파싱하지 않는다).
+            (SELECT array_agg(ca.attname::text ORDER BY ck.ord)
                FROM unnest(con.conkey) WITH ORDINALITY ck(attnum, ord)
                JOIN pg_attribute ca ON ca.attrelid = con.conrelid AND ca.attnum = ck.attnum) AS child_columns,
-            (SELECT array_agg(pa.attname ORDER BY pk.ord)
+            (SELECT array_agg(pa.attname::text ORDER BY pk.ord)
                FROM unnest(con.confkey) WITH ORDINALITY pk(attnum, ord)
                JOIN pg_attribute pa ON pa.attrelid = con.confrelid AND pa.attnum = pk.attnum) AS parent_columns
        FROM pg_constraint con
