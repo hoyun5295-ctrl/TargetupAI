@@ -243,10 +243,41 @@ PDF 생성기도 라우트 인라인이었고, 그래서 **일괄발급 경로�
 
 수정발행은 "당초 승인번호에 연결된 새 계산서"라 정산 1건에 원본+수정 N장이 달린다. 컨펌 추적(`invoice_confirmations` — 메일 1통=1행)과 축이 달라 **별도 테이블**이 내역의 진실이다. 내역 페이지(정산 메뉴 안 버튼)는 이 테이블 + 컨펌 현황을 보여준다. 팝빌 연동 전에는 `ready` 대기 행이 여기 쌓이고, 연동 후 발행 결과(`nts_confirm_num`)가 채워진다.
 
-## §7 팝빌 스텁 (오늘) → 연동 (계약 후)
+## §7 팝빌 연동 — **구현 완료 (2026-07-30 `d4430454` 배포)**
 
-- `utils/taxbill-popbill.ts`: `issueTaxbill(confirmation)` 인터페이스 + ENV 자리(`POPBILL_LINK_ID`·`POPBILL_SECRET`·사업자번호). 오늘은 미구현 예외 대신 **호출부가 `ready`에서 멈추는 구조**라 스텁 호출 자체가 없다.
-- 연동 시: 샌드박스(팝빌 테스트베드)에서 전 흐름 실측 → 실발급 전환. 작성일자 = `taxbill_issue_date`. 계정별 사업자 등록(1-2) 있으면 그 사업자로, 없으면 회사 기본.
+옛 계획(스텁 → 계약 후 연동)은 소진됐다. 아래가 구현 실체다. 계약 근거 = §7-0.
+
+**파일 4** — `utils/taxbill-popbill.ts`(발행 CT) · `utils/taxbill-popbill.test.ts`(계약 41) · `routes/popbill-webhook.ts`(`POST /api/popbill/webhook`) · `utils/taxbill-worker.ts`(ready 뒤 발행 패스 배선) + `routes/billing.ts` 3 endpoint(장부 목록·수정발행·재시도) + AdminDashboard(장부 목록·수정발행 모달). **신규 의존성 `popbill@1.64.2`** — 배포 시 `npm install` 필수. SDK 계약은 문서가 아니라 **설치본 소스로 실측**(`config()` → 서비스 싱글톤 / `registIssue(CorpNum, Taxinvoice, …, success, error)` 콜백형 / `getInfo(CorpNum,'SELL',MgtKey,…)`).
+
+**안전 구조 5** (국세청 실문서라 발송·돈과 같은 등급)
+
+| 장치 | 내용 |
+|---|---|
+| 이중 게이트 | `POPBILL_ENABLED='true'`(기본 false — 배포만으로 외부 호출 0) + 필수 ENV 3종. `POPBILL_IS_TEST` **미설정 = 테스트베드**(SDK 기본값과 반대로 뒤집음 — 운영으로 새는 사고 차단) |
+| 추적 먼저 | 문서번호(`TU`+YYMMDD+uuid 13자 = 22자)를 **외부 호출 전에** 행에 저장. 행마다 결정적이라 재시도가 같은 번호 = 팝빌 쪽 중복 발행 차단 |
+| 효과 검증 후 성공 표시 | `registIssue` 성공 응답만으로 issued를 찍지 않는다. `getInfo` 재조회 → `judgeInfoState`(3xx=issued / **305=국세청 전송실패**(웹훅 판정과 통일) / 6xx=취소 → issued 승격 차단 / 그 외 unknown = submitted 유지) |
+| 패스 직렬화 | `pg_try_advisory_lock('taxbill_issue_pass')` 세션 락. SDK 타임아웃(호출당 180초)이 tick(5분)을 넘어 겹칠 수 있고 PM2 다중 인스턴스도 겹친다. 잡기 실패 = 그 tick 건너뜀 |
+| 컨펌 동기화 | issued 시 같은 트랜잭션에서 `invoice_confirmations`(taxbill_status·issued_at·popbill_invoice_key) 갱신. 장부만 알면 공개 컨펌 페이지가 발행 후에도 이의신청을 받는다 |
+
+**웹훅 계약** — 무조건 **HTTP 200 + "OK"**(매칭 실패·파싱 실패 포함). 그 외 응답은 팝빌이 5분 간격 4회 재전송하므로 실패를 실패로 돌려주면 폭주가 된다. raw 페이로드는 전량 로그(필드 표기 실측 근거). `X-Api-Key`는 `POPBILL_WEBHOOK_API_KEY` 설정 시에만 검증. 304 수신 시 `error`는 NULL로 비운다 — 그 컬럼은 이력이 아니라 **현재 상태의 사유**다(이력은 이월된 이벤트 테이블의 몫).
+
+**수정세금계산서 — `planModifyIssue`(순수) 사유별 계약**
+
+| 사유 | 장 구성 | 작성일자 |
+|---|---|---|
+| 6 착오 이중발급 | −당초 전액 1장 | 당초 작성일자 |
+| 4 계약 해제 | −당초 전액 1장 | 해제일(입력 필수) |
+| 2 공급가액 변동 | ±변동분 1장 | 변동일(입력 필수) |
+| 1 기재사항 착오정정 | **부(−전액) + 정(정정액) 2장** | 당초 작성일자 |
+
+빌더가 부호를 재검증한다(4·6은 음수 문서만·부호 섞임 거부·합계 0 거부). 사유 2는 **잔액 검증** — 변동 후 공급가액 ≤ 0이면 "변동"이 아니라 전액 취소이므로 4·6으로 안내하며 거부. 사유 2·4는 `remark1`에 당초 작성일자 기재(장부 역참조 — DDL 0). 사유 1은 워커가 **부(−) 장을 먼저** 발행하고 부가 issued가 아니면 정(+) 장을 시도하지 않고 failed로 묶는다(정만 국세청에 남는 반쪽 차단). 실패 장은 재시도(`POST /taxbill-issues/:id/retry` — failed→ready, 같은 문서번호라 안전).
+
+**금액 입력 계약** — 라우트는 금액을 `Number()`로 변환하지 않고 **원형 그대로** CT에 넘긴다. `requiredInt`가 null·undefined·빈문자열·공백·소수·unsafe integer를 전부 거부한다. 호출부가 먼저 변환하면 `Number('')=0`이 검증 앞에서 값을 굳혀 0원 장이 만들어진다.
+
+**함정 2건(같은 세션에 두 번 — 둘 다 "검증 앞에서 값이 굳는다")** — ①이 프로젝트 pg는 `DATE`(1082)를 **JS Date**로 파싱한다(`database.ts`는 1114만 재정의). `String(row.issue_date)`가 `'Fri Jul 31'`이 되어 운영 행 전부가 작성일자 형식 오류로 failed될 상태였다 → `to_char(…, 'YYYY-MM-DD')`로 고정. **문자열 픽스처 단위 테스트로는 안 잡힌다.** ②위 금액 입력 계약. Codex 적대검증 5라운드(1R 6 → 2R 4 → 3R 5 → 4R 2 → **5R approve**).
+
+**이월(DDL 필요)** — 사유 1 그룹 상태 컬럼 · 웹훅 이벤트 이력 테이블 · `invoicer_mgt_key` UNIQUE 인덱스.
+
 - 외부 API 원칙: 응답 추측 금지 — raw 확인 후 파싱(feedback_external_api_response_verification).
 
 ## §8 구현 순서 (오늘)
@@ -291,6 +322,19 @@ preflight → 회사 세션 advisory lock → 발송 직전 재확인 → 렌더
 - **필터항목 탭**: UI 진입점만 제거(데이터·백엔드 무변경). `standardFields`/`enabledFields` 상태·저장 배선은 잔존 — 완전 철거는 소비처 grep 후 별건.
 - **taxbill_issues 내역 전용 화면**: 현황판(confirmations 축)이 현재 담당. 팝빌 연동 후 원본/수정 장부 목록 + 수정발급 버튼(§7-0 사유 1·2·4·6) 추가.
 
-### 남은 것 (팝빌 연동 시 — §7)
-- 공동인증서 등록(팝빌 사이트) → 테스트베드 Webhook URL 등록·테스트포인트 → `utils/taxbill-popbill.ts` RegistIssue 연결(ready 소비) → 웹훅 수신부(`invoicerMgtKey` 매칭·200 "OK") → 수정세금계산서(modifyCode 1·2·4·6) → 운영 전환(`POPBILL_IS_TEST=false`).
-- ENV 등록 완료: `POPBILL_LINK_ID`·`POPBILL_SECRET_KEY`·`POPBILL_CORP_NUM`·`POPBILL_IS_TEST=true` (2026-07-28 Harold 직접).
+### 남은 것 (팝빌 — 2026-07-30 갱신. 연동 구현은 §7 완료)
+
+**끝난 것** — 팝빌 정식 사용 승인·파트너포인트 충전(0730 Harold) · 공동인증서 등록 완료 · 연동·수정발행 구현·배포(`d4430454`) · 웹훅 수신부 200 "OK" 실측 · 게이트 ON 시 워커 로그 실측. ENV 등록 완료(`POPBILL_LINK_ID`·`POPBILL_SECRET_KEY`·`POPBILL_CORP_NUM`·`POPBILL_IS_TEST=true` 0728 / `POPBILL_ENABLED=true` 0730).
+
+**테스트/운영은 완전 분리 환경**이라(§7-0 SDK 요지) 운영 전환 후에도 테스트베드가 남는다 → 테스트베드로 끝까지 검증한 뒤 마지막에 `POPBILL_IS_TEST=false`가 성립한다. Callback URL은 환경별 각각 등록(테스트 `test.popbill.com` / 운영 `www.popbill.com`), 포인트도 별개(파트너포인트=운영 / 테스트포인트=테스트베드).
+
+**남은 절차 — 호출어 "팝빌 발행 테스트 재개"** (게이트는 이미 ON, `taxbill_issues`·`invoice_confirmations` 0행 확인)
+1. test.popbill.com > 관리 > Webhook에 `https://hanjul.ai/api/popbill/webhook`(인증 미사용) 등록 — **0730 등록 여부 미확인**
+2. 62 방화벽에 팝빌 Source IP 2개 허용(`54.180.62.221`·`13.124.72.158`)
+3. hoyun 테스트 회사(`테스트계정` ABC001)로 정산 생성 → 컨펌 메일(수신자 = Harold) → 컨펌 클릭 → 5분 워커 ready 전이 → 자동 발행
+4. 장부 화면 issued + 웹훅 승인번호 수신 확인 → 수정발행(사유 6) 1건
+5. 전부 통과 후 `POPBILL_IS_TEST=false` 운영 전환
+
+⛔**실청구 컨펌 메일을 보내기 시작하기 전에 위 절차를 끝내야 한다.** 지금 상태(게이트 ON + `IS_TEST=true`)로 실청구 컨펌을 흘리면 컨펌 클릭이 없어도 기한(발송+3일) 도래 시 워커가 실고객 장을 자동 발행하는데, 그 발행이 **테스트베드로** 나간다. 입구(정산 발행·컨펌 메일)는 사람이 열지만 **입구가 열린 뒤는 전자동**이라 사람이 멈출 지점이 설계상 없다.
+
+**한계(명시)** — 팝빌 사이트에서 수동 발행·수정한 문서는 우리 문서번호가 아니라 웹훅 매칭이 안 된다(raw 로그에만 남고 장부에 안 잡힌다). 사후 대사는 팝빌 사이트 목록과 대조.

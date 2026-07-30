@@ -254,7 +254,7 @@ export default function AlimtalkSendersSection() {
     return c;
   }, [senders]);
 
-  // ★ 2026-07-22 발신프로필 검색(#2 슈퍼관리자) — 프로필명·회사명·키
+  // ★ 2026-07-22 발신프로필 검색(#2 슈퍼관리자) — 프로필명·회사명·키 + ★2026-07-30 채널ID(yellow_id, 서수란 접수)
   const [senderSearch, setSenderSearch] = useState('');
 
   const filtered = useMemo(() => {
@@ -266,7 +266,8 @@ export default function AlimtalkSendersSection() {
     return byTab.filter((s) =>
       String(s.profile_name || '').toLowerCase().includes(kw) ||
       String(s.company_name || '').toLowerCase().includes(kw) ||
-      String(s.profile_key || '').toLowerCase().includes(kw));
+      String(s.profile_key || '').toLowerCase().includes(kw) ||
+      String(s.yellow_id || '').toLowerCase().includes(kw));
   }, [senders, tab, senderSearch]);
 
   // ★ 2026-07-20: 이관으로 프로필이 199개가 되어 전량 렌더는 세로 스크롤이 과함 → 10개씩 페이징
@@ -297,7 +298,7 @@ export default function AlimtalkSendersSection() {
             type="text"
             value={senderSearch}
             onChange={(e) => setSenderSearch(e.target.value)}
-            placeholder="프로필·회사·키 검색"
+            placeholder="프로필·회사·키·채널ID 검색"
             className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg w-44 focus:outline-none focus:border-green-400 placeholder:text-gray-400"
           />
           <button

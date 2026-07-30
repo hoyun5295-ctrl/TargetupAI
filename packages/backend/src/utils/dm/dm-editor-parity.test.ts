@@ -11,7 +11,7 @@ import { resolve } from 'node:path';
 import { renderSection } from './dm-section-renderer';
 import { renderDmDesign3Css, renderDmBaseCss, renderDmTokensCss, renderDmDividerSvg } from './dm-tokens';
 import type { Section } from './dm-section-registry';
-import { DM_BACKGROUNDS, DM_DIVIDERS, DM_NEWLINE_FIELDS, DM_IMAGE_FITS, DM_GALLERY_FULL_BLEED, DM_GALLERY_CAPTION_VISIBLE, DM_SLIDESHOW_PAUSE, DM_STORE_INFO_NEWLINE_FIELDS, DM_STORE_INFO_LABELS, DM_PRODUCT_CAROUSEL_SWIPE_MIN, DM_PRODUCT_CAROUSEL_PER_PAGE, DM_WIRED_ORPHAN_MARKERS } from './dm-property-contract';
+import { DM_BACKGROUNDS, DM_DIVIDERS, DM_NEWLINE_FIELDS, DM_IMAGE_FITS, DM_GALLERY_FULL_BLEED, DM_GALLERY_CAPTION_VISIBLE, DM_SLIDESHOW_PAUSE, DM_SLIDESHOW_RATIOS, DM_STORE_INFO_NEWLINE_FIELDS, DM_STORE_INFO_LABELS, DM_PRODUCT_CAROUSEL_SWIPE_MIN, DM_PRODUCT_CAROUSEL_PER_PAGE, DM_WIRED_ORPHAN_MARKERS } from './dm-property-contract';
 import { parseTabProductList } from './dm-tab-content';
 // FE 상품 붙여넣기 파서 원본(SoT) — 백엔드 미러(parseTabProductList)와 결과 일치 교차 고정
 import { parsePastedProducts } from '../../../../frontend/src/utils/product-paste';
@@ -94,6 +94,17 @@ describe('DM 편집기↔발행 속성 계약 (재발 방지책 1)', () => {
       );
       expect(html).toContain('--dm-grad-to:#abcdef');
     });
+    // ★ 2026-07-30 (임은지 0729 접수) 헤더 countdown/coupon = 자체 그라데이션이 래퍼를 덮으므로 끝 색을 직접 소비해야 한다.
+    for (const variant of ['countdown', 'coupon'] as const) {
+      it(`헤더 ${variant} — 그라데이션 끝 색 var(--dm-grad-to) 소비 + 주입값 전달`, () => {
+        const html = renderSection(
+          mk('header', { variant, brand_name: 'B', event_title: 'E', discount_label: 'D' }, { background: 'gradient', accent_color_2: '#abcdef' } as any),
+          {} as any,
+        );
+        expect(html, `${variant} 헤더가 --dm-grad-to를 소비하지 않음`).toContain('var(--dm-grad-to');
+        expect(html).toContain('--dm-grad-to:#abcdef');
+      });
+    }
   });
 
   // ── #1 상품 이미지 맞춤: cover/contain 이 출력에서 실제 달라짐 ──
@@ -181,6 +192,23 @@ describe('DM 편집기↔발행 속성 계약 (재발 방지책 1)', () => {
     it('슬라이드 1장 — 정지 컨트롤 미렌더(전환 없음)', () => {
       const html = renderSection(mk('slideshow', { slides: [{ image_url: 'https://ex.com/a.jpg' }] }), {} as any);
       expect(html).not.toContain('data-dm-slide-pause');
+    });
+    // ★ 2026-07-30 (남지현 접수) 슬라이드 크기 — slide_ratio가 발행물 출력에서 실제로 달라져야 한다.
+    for (const ratio of DM_SLIDESHOW_RATIOS) {
+      it(`slide_ratio=${ratio} — 발행물 이미지 스타일 소비`, () => {
+        const html = renderSection(mk('slideshow', { slides: twoSlides, slide_ratio: ratio }), {} as any);
+        if (ratio === 'original') {
+          expect(html, 'original은 aspect-ratio 없이 원본 비율(height:auto)').toContain('width:100%;height:auto');
+          expect(html).not.toContain('aspect-ratio');
+        } else {
+          const css = ratio === '1:1' ? '1/1' : ratio === '3:4' ? '3/4' : '16/9';
+          expect(html).toContain(`aspect-ratio:${css};object-fit:cover`);
+        }
+      });
+    }
+    it('slide_ratio 미지정 — 기존 16:9 출력 그대로(무회귀)', () => {
+      const html = renderSection(mk('slideshow', { slides: twoSlides }), {} as any);
+      expect(html).toContain('width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--dm-radius-md)');
     });
   });
 

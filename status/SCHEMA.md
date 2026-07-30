@@ -160,7 +160,7 @@
 | created_at | timestamptz |
 | UNIQUE(callback_number_id, user_id) | |
 
-### campaign_runs (캠페인 실행)
+### campaign_runs (캠페인 실행) — 2026-07-30 information_schema 실측 일치(16컬럼)
 | 컬럼 | 타입 |
 |------|------|
 | id | uuid PK |
@@ -1569,6 +1569,8 @@
 - **billing_bulk_jobs**: id PK · period_start/end · total/done/failed_count · status CHECK(`running`/`done`/`cancelled`) · created_by(FK 없음) · created_at/finished_at
 - **billing_bulk_job_items**: id PK · job_id FK CASCADE · company_id FK CASCADE · scope CHECK(`combined`/`by_user`) · status CHECK(`pending`/`running`/`success`/`failed`) · error · billing_batch_id · started/finished_at. INDEX(job_id). **한 item 실패는 그 item만 failed — job은 계속**
 - **taxbill_issues** (세금계산서 내역 — 18컬럼, 2026-07-28 실측): id PK · confirmation_id FK→invoice_confirmations **SET NULL** · billing_id FK→billings **SET NULL**(정산 삭제 후에도 계산서 내역은 남는다 — 국세청 신고물) · company_id FK CASCADE · kind CHECK(`original`/`modify`) · modify_code smallint CHECK(1~6 — 팝빌 modifyCode) · org_nts_confirm_num(24 — 당초 국세청승인번호, 수정분만) · invoicer_mgt_key(24 — 팝빌 문서번호, 우리 발번) · nts_confirm_num(24 — 발행 후 팝빌 할당) · issue_date · supply/tax/total_amount numeric(15,2) · status CHECK(`ready`/`submitted`/`issued`/`failed`/`cancelled`) · error · created_by(FK 없음) · created/issued_at. INDEX(company_id)·(status). **정산 1건에 원본+수정 N장이 달리는 축** — 컨펌 추적(메일 1통=1행)과 다르다. 웹훅 매칭 축 = invoicer_mgt_key
+  - **★2026-07-30 소비처 확정(팝빌 연동 배포 `d4430454`)**: `utils/taxbill-popbill.ts`(ready 소비·발행·getInfo 재조회) · `routes/popbill-webhook.ts`(invoicer_mgt_key 매칭 갱신) · `routes/billing.ts`(장부 목록·수정발행 INSERT·재시도) · `utils/taxbill-worker.ts`(original 행 생성). **날짜 컬럼은 `to_char`로 읽는다** — 이 프로젝트 pg는 `DATE`(1082)를 JS Date로 파싱해(`database.ts`는 1114만 재정의) `String(issue_date)`가 `'Fri Jul 31'`이 된다(0730 실측 — 운영 행 전부 발행 실패할 상태였다). `supply/tax/total_amount`는 numeric이라 **문자열로 온다** → Number 변환 후 정수 검증(팝빌은 정수 String 요구).
+  - 이월 DDL 3(미실행): 사유 1 부+정 그룹 상태 컬럼 · 웹훅 이벤트 이력 테이블 · `invoicer_mgt_key` UNIQUE 인덱스.
 
 ### billing_invoices (거래내역서/정산)
 | 컬럼 | 타입 | 설명 |
@@ -2178,7 +2180,7 @@ CAFE24_REDIRECT_URI=https://app.hanjul.ai/api/cafe24/oauth/callback
 - INDEX: company_id, message_id, occurred_at DESC
 - INDEX: message_id, event_type
 
-### cdp_assets (에셋 라이브러리) — 2026-07-18 P3 신규 (★ 운영 psql 실행·information_schema 실측 13컬럼)
+### cdp_assets (에셋 라이브러리) — 2026-07-18 P3 신규 (★ 2026-07-30 운영 information_schema 실측 16컬럼·제약=PK뿐)
 
 회사별 이미지 소재 저장소 — 업로드/AI 생성물(P4) 등재 → 전 채널 에디터 "라이브러리에서 선택" 재사용. CT=`utils/assets.ts`, API=`/api/assets`. 설계 SoT=docs/2026-07-18-inapp-simplify-image-studio-design.md §5.
 
@@ -2197,6 +2199,9 @@ CAFE24_REDIRECT_URI=https://app.hanjul.ai/api/cafe24/oauth/callback
 | prompt | text | AI 생성물 프롬프트 (P4) |
 | created_at | timestamptz NOT NULL DEFAULT NOW() | |
 | updated_at | timestamptz NOT NULL DEFAULT NOW() | |
+| channel_spec | varchar NULL | 용도 태그 (inapp-poster/dm/email/mms/free + 2026-07-30 poster=채널 무관 단일 생성). CHECK 없음(자유 문자열) — 2026-07-30 pg_constraint 실측 제약=PK뿐 |
+| width | integer NULL | 0721 추가 (현행 생성 경로는 null 저장) |
+| height | integer NULL | 0721 추가 (현행 생성 경로는 null 저장) |
 - INDEX: idx_cdp_assets_company(company_id, created_at DESC)
 - 삭제 규약: 발행 인앱 메시지 참조 중 = 409 거부 / 미참조 = 행+실물 파일 동시 삭제 (디스크 증식 차단)
 
@@ -2347,6 +2352,7 @@ cd /home/administrator/targetup-app/packages/backend && npm install web-push @ty
 | copy_style | text | 문안 스타일 courteous/friendly/witty/punchy, NULL=브랜드 톤 자동 (2026-07-02 ALTER 실측) |
 | prep_reminder_sent_for | date | 월간 캠페인 D-2 사전 준비 문자 멱등(발송일 기록) (2026-07-02 ALTER — 세션 종료 시점 미실행 확인, Harold 실행 예정) |
 | target_hint | text | 발송 대상 축(all/dormant/recent_buyers/vip/birthday/new_customers, NULL=자유 해석) — 마케팅 캘린더 완비 (2026-07-07 ALTER 실행완료 — Harold 배포 선언) |
+| mms_image_paths | text[] | 채널 mms 첨부 이미지 serverPath 최대 3, NULL=없음 — 자율발송이 validateMmsPayload 게이트 후 직접발송 spec으로 전달 (★2026-07-30 ALTER 실행완료 — Harold, 임은지 접수) |
 - INDEX: company_id, status WHERE status='active'
 - INDEX: status, next_run_at WHERE status='active' (worker 호출용)
 - 2026-06-26 information_schema 덤프 = 위 33컬럼 전부 존재 확정. 중복 4컬럼(notify_phones/backup_phones/notify_channel/lead_minutes)은 DROP 완료(데이터 0). 재질의 금지.

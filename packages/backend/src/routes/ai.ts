@@ -2024,7 +2024,7 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       channel, benefit_content, admin_phone_numbers, backup_admin_phone, admin_alert_channel,
       auto_send_lead_minutes, budget_monthly, budget_daily, budget_alert_threshold, delivery_policy,
       sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode, copy_style,
-      calendar_month, target_hint,
+      calendar_month, target_hint, mms_image_paths,
     } = req.body;
 
     // ★ 2026-07-05 마케팅 캘린더 경유 등록 — 같은 달에 살아있는 등록이 있으면 409(200크레딧 중복 차감 차단)
@@ -2073,6 +2073,8 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       copyStyle: typeof copy_style === 'string' ? copy_style : null,
       // ★ 2026-07-07 마케팅 캘린더 완비: 발송 대상 축 (createOperator가 화이트리스트 정규화)
       targetHint: typeof target_hint === 'string' ? target_hint : null,
+      // ★ 2026-07-30 (임은지 접수): MMS 이미지 (createOperator가 채널 mms + 최대 3장으로 정규화)
+      mmsImagePaths: Array.isArray(mms_image_paths) ? mms_image_paths : null,
     });
     // ★ 2026-07-05: 캘린더 경유 등록 기록 — 실패해도 등록은 성공(fire-safe, 테이블 미생성 = 내부 생략)
     if (calendarMonth != null) {
@@ -2087,7 +2089,7 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
     }
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: '요일/날짜 지정 기능은 DB 마이그레이션이 필요합니다. 운영자에게 continuous_operators 컬럼 추가를 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션이 필요합니다. 운영자에게 continuous_operators 컬럼 추가(ALTER)를 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[Operator continuous POST] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'Continuous Operator 신설 실패' });
@@ -2352,7 +2354,7 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
       budget_monthly, budget_daily, budget_alert_threshold,
       admin_phone_numbers, backup_admin_phone, admin_alert_channel,
       auto_send_lead_minutes,
-      channel, benefit_content,
+      channel, benefit_content, mms_image_paths,
       sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode, copy_style,
       target_hint,
     } = req.body;
@@ -2374,6 +2376,8 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
       targetHint: target_hint === undefined ? undefined : (typeof target_hint === 'string' ? target_hint : null),
       // ★ 2026-06-26: 발송 채널 + 관리자 입력 혜택
       channel: ['sms', 'lms', 'mms'].includes(channel) ? channel : undefined,
+      // ★ 2026-07-30 (임은지 접수): MMS 이미지 — 미전송 = 유지, null = 해제, 배열 = 교체(CT가 최대 3장 정규화)
+      mmsImagePaths: mms_image_paths === undefined ? undefined : (Array.isArray(mms_image_paths) ? mms_image_paths : null),
       benefitContent: typeof benefit_content === 'string' ? benefit_content : undefined,
       // ★ Phase3 C: 다단계 시퀀스
       sequenceEnabled: sequence_enabled === undefined ? undefined : (sequence_enabled === true),
@@ -2389,7 +2393,7 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: '요일/날짜 지정 기능은 DB 마이그레이션이 필요합니다. 운영자에게 continuous_operators 컬럼 추가를 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션이 필요합니다. 운영자에게 continuous_operators 컬럼 추가(ALTER)를 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[Operator continuous PUT] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '수정 실패' });

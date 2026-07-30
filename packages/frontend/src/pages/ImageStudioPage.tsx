@@ -41,16 +41,13 @@ interface StudioTemplatePublic {
 }
 interface Candidate { tempId: string; url: string; blob?: string; presetKey: string; title?: string }
 
-// 채널 사이즈 (백엔드 CHANNEL_PRESETS와 key 1:1)
+// ★ 2026-07-30 채널 축 폐기(Harold) — 생성 = 'poster' 단일(3:4·채널 무관·2크레딧). 완성 포스터는 인앱/DM/이메일 어디든 통짜 삽입.
 // ★ MMS 전용 생성 없음(Harold 확정 2026-07-19) — 항상 고품질 생성·저장, MMS는 발송 시 라이브러리 소재 자동 변환.
-const PRESETS = [
-  { key: 'inapp-poster', label: '인앱 포스터', sub: '3:4' },
-  { key: 'dm-card', label: '모바일 DM', sub: '1:1' },
-  { key: 'email-hero', label: '이메일 히어로', sub: '16:9' },
-];
-const presetLabel = (key: string) => PRESETS.find((p) => p.key === key)?.label || key;
+const GENERATE_PRESET_KEY = 'poster';
+const presetLabel = (key: string) =>
+  key === 'poster' ? '포스터' : key === 'inapp-poster' ? '인앱 포스터' : key === 'dm-card' ? '모바일 DM' : key === 'email-hero' ? '이메일 히어로' : key;
 // 소재 channel_spec → 짧은 한글 라벨(용도 배지·캡션). 백엔드 channelLabelKo 미러.
-const specKo = (s?: string | null) => (s === 'inapp-poster' ? '인앱' : s === 'dm' ? 'DM' : s === 'email' ? '이메일' : s === 'mms' ? 'MMS' : s === 'free' ? '자유' : '소재');
+const specKo = (s?: string | null) => (s === 'poster' ? '포스터' : s === 'inapp-poster' ? '인앱' : s === 'dm' ? 'DM' : s === 'email' ? '이메일' : s === 'mms' ? 'MMS' : s === 'free' ? '자유' : '소재');
 
 // ★ 2026-07-21 스크린샷 유출 억제 워터마크(CSS 오버레이) — 화면 표시본에만. 발송물 원본 무손(오버레이는 DOM).
 //   대각선 반복 텍스트 = 회사명·사용자. 유출돼도 출처 추적. pointer-events:none·select-none로 조작·선택 차단.
@@ -114,9 +111,8 @@ export default function ImageStudioPage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // 문구·채널·힌트
+  // 문구·힌트 (채널 선택 없음 — 단일 포스터 생성)
   const [texts, setTexts] = useState({ label: '', title: '', subtitle: '' });
-  const [presetKey, setPresetKey] = useState('inapp-poster');
   const [hint, setHint] = useState('');
 
   // 결과
@@ -218,11 +214,11 @@ export default function ImageStudioPage() {
     e.target.value = '';
   };
 
-  // ── 완성 포스터 생성 (템플릿 + 누끼 + 지정 문구, 2크레딧·후보 2장) ──
-  const generate = async (overridePreset?: string) => {
+  // ── 완성 포스터 생성 (템플릿 + 누끼 + 지정 문구, 2크레딧·1장) ──
+  const generate = async () => {
     if (!template) { toast.error('템플릿을 먼저 골라주세요'); return; }
     if (!ready) { toast.error('이미지 스튜디오가 준비 중입니다'); return; }
-    const useKey = overridePreset || presetKey;
+    const useKey = GENERATE_PRESET_KEY;
     setBusyMsg('완성 포스터를 만드는 중... (약 20~30초)');
     try {
       const { r, d } = await postJson('/api/image-studio/generate', {
@@ -238,7 +234,6 @@ export default function ImageStudioPage() {
       for (const im of imgs) im.blob = await loadBlob(im.url);
       setCandidates((prev) => [...imgs, ...prev]);
       setStage('result');
-      if (d.partial) toast.success('1장만 생성됐어요 (1크레딧만 차감)');
     } catch (e: any) {
       toast.error(e?.message || '생성에 실패했어요');
     } finally {
@@ -372,7 +367,7 @@ export default function ImageStudioPage() {
                 </button>
               ))}
             </div>
-            <p className="text-[10px] text-white/30 italic mt-3">Data source — 카테고리를 고르면 템플릿 목록으로 이동합니다. 생성 1회 2크레딧(후보 2장).</p>
+            <p className="text-[10px] text-white/30 italic mt-3">Data source — 카테고리를 고르면 템플릿 목록으로 이동합니다. 생성 1회 2크레딧.</p>
           </section>
         )}
 
@@ -454,7 +449,7 @@ export default function ImageStudioPage() {
               </div>
             </div>
 
-            {/* 우: 문구 + 채널 + 생성 */}
+            {/* 우: 문구 + 생성 (★2026-07-30 채널 사이즈 픽커 폐기 — 단일 포스터가 전 채널 통짜 삽입) */}
             <div className="lg:col-span-3 space-y-4">
               <div className="rounded-2xl border border-fuchsia-400/20 bg-gradient-to-br from-fuchsia-500/10 to-indigo-500/5 p-4 space-y-2.5">
                 <h3 className="text-sm font-bold flex items-center gap-2"><PenLine className="w-4 h-4 text-fuchsia-300" /> 포스터에 들어갈 문구</h3>
@@ -465,25 +460,12 @@ export default function ImageStudioPage() {
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <h3 className="text-sm font-bold mb-2.5">어떤 채널 사이즈로 만들까요?</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {PRESETS.map((p) => (
-                    <button key={p.key} onClick={() => setPresetKey(p.key)} className={`px-3 py-2 rounded-lg text-xs border text-left ${presetKey === p.key ? 'bg-violet-500/15 border-violet-400/40 text-white' : 'border-white/10 text-white/60 hover:bg-white/5'}`}>
-                      <div className="font-semibold">{p.label}</div>
-                      <div className="text-[10px] text-white/40">{p.sub}</div>
-                    </button>
-                  ))}
-                </div>
-                <p className="text-[10px] text-white/30 italic mt-2">생성 후 다른 채널 사이즈도 각각 만들 수 있어요(사이즈당 생성 1회).</p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                 <label className="text-xs font-semibold text-white/70 flex items-center gap-1.5 mb-2"><Wand2 className="w-3.5 h-3.5 text-fuchsia-300" /> 장면 힌트 (선택)</label>
                 <input value={hint} onChange={(e) => setHint(e.target.value)} placeholder="예: 대리석 카운터, 은은한 램프 조명" className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50" />
               </div>
 
               <button onClick={() => generate()} disabled={busy || !ready} className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-sm font-bold hover:opacity-90 disabled:opacity-40 shadow-lg shadow-violet-500/25">
-                <Sparkles className="w-4 h-4" /> 완성 포스터 만들기 · 2크레딧 (후보 2장)
+                <Sparkles className="w-4 h-4" /> 완성 포스터 만들기 · 2크레딧
               </button>
             </div>
           </section>
@@ -494,12 +476,7 @@ export default function ImageStudioPage() {
           <section className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-sm font-bold text-white/90 mr-2">완성 포스터</h2>
-              <span className="text-[11px] text-white/40 mr-1">이 포스터는 인앱·DM·이메일 어디서든 그대로 쓸 수 있어요. 특정 채널 전용 비율이 필요할 때만:</span>
-              {PRESETS.map((p) => (
-                <button key={p.key} onClick={() => generate(p.key)} disabled={busy} className="px-3 py-1.5 rounded-lg text-[11px] border border-white/10 text-white/60 hover:bg-white/10 disabled:opacity-40">
-                  + {p.label} <span className="text-white/35">2크레딧</span>
-                </button>
-              ))}
+              <span className="text-[11px] text-white/40 mr-1">이 포스터는 인앱·DM·이메일 어디서든 그대로 쓸 수 있어요 — 저장하면 각 채널에 자동으로 맞춰 들어갑니다.</span>
               <button onClick={() => setStage('setup')} className="ml-auto text-xs text-white/40 hover:text-white/70">문구·상품 수정</button>
             </div>
 

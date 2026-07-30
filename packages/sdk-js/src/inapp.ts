@@ -980,7 +980,9 @@ export class HanjulloInAppModule {
     });
     this.applyAnimation(root, animation, 'modal'); // fade=rise(살짝 떠오름) — 하단 시트에 자연스러운 기존 컨텍스트 재사용
 
-    // 이미지 = 카드 전체. 원본 비율 유지(이미지 안 문구가 잘리지 않게 크롭 없음), 과도한 세로만 62vh에서 컷
+    // 이미지 = 카드 전체. 원본 비율 유지(이미지 안 문구가 잘리지 않게 크롭 없음).
+    // ★ 2026-07-30 자동맞춤(Harold): 옛 maxHeight 62vh + cover는 세로가 캡에 걸리면 하단을 잘랐다(원본 훼손).
+    //   정답 = 시트 폭을 이미지 비율에 맞춰 축소해 62vh 안에 통째 표시 — 크롭 0·좌우 빈공간 0·왜곡 0 (onload에서 실측 비율로 계산).
     const imgWrap = document.createElement('div');
     Object.assign(imgWrap.style, { position: 'relative', width: '100%' });
     const hero = document.createElement('img');
@@ -989,6 +991,21 @@ export class HanjulloInAppModule {
     hero.loading = 'lazy';
     hero.referrerPolicy = 'no-referrer';
     Object.assign(hero.style, { width: '100%', height: 'auto', maxHeight: '62vh', objectFit: 'cover', display: 'block' });
+    // 62vh 안에 원본 비율로 통째 들어가는 폭으로 시트 상한을 좁힌다(가로형·짧은 이미지는 무변화).
+    //   하한 클램프 없음(Codex 1R 지적 — 하한을 두면 그만큼 다시 크롭된다) + 리사이즈/회전 시 재계산.
+    const fitSheet = () => {
+      const nw = hero.naturalWidth; const nh = hero.naturalHeight;
+      if (!(nw > 0 && nh > 0)) return;
+      const capPx = Math.round((window.innerHeight || 0) * 0.62);
+      if (capPx <= 0) return;
+      const fitWidth = Math.round(capPx * (nw / nh));
+      root.style.maxWidth = Math.min(520, fitWidth) + 'px';
+    };
+    const onResize = () => {
+      if (!document.body.contains(root)) { window.removeEventListener('resize', onResize); return; }
+      fitSheet();
+    };
+    hero.onload = () => { fitSheet(); window.addEventListener('resize', onResize); };
     // 이미지 로드 실패 시 — 숨기기만 하면 imgWrap이 0높이로 접혀 스크림 텍스트까지 사라진다(Codex 지적).
     // 회색 판을 유지해 제목/본문 오버레이는 계속 보이게 한다.
     hero.onerror = () => {

@@ -1,5 +1,5 @@
 import type { SlideshowProps, SlideshowSlide } from '../../../../utils/dm-section-defaults';
-import { Field, TextInput, Toggle, ImageUploader, MultiImageUploader } from '../FormControls';
+import { Field, TextInput, Select, Toggle, ImageUploader, MultiImageUploader } from '../FormControls';
 import { RepeatableList } from '../RepeatableList';
 import type { EditorProps } from '../SectionPropsEditor';
 
@@ -27,6 +27,19 @@ export default function SlideshowEditor({ props, onUpdate }: EditorProps<Slidesh
               <TextInput type="url" value={it.link_url} onChange={(v) => setItem(i, { link_url: v })} placeholder="슬라이드 링크 https:// (선택)" />
             </>
           )}
+        />
+      </Field>
+      {/* ★ 2026-07-30 (남지현 접수) 슬라이드 크기 — 발행 SSR renderSlideshow·캔버스 SlideshowSection이 동일 소비 */}
+      <Field label="슬라이드 크기" hint="원본 비율 = 이미지를 자르지 않고 그대로 (슬라이드마다 높이가 달라질 수 있어요)">
+        <Select
+          value={props.slide_ratio || '16:9'}
+          onChange={(v) => onUpdate({ slide_ratio: v as SlideshowProps['slide_ratio'] })}
+          options={[
+            { value: '16:9', label: '가로 직사각 (16:9)' },
+            { value: '1:1', label: '정방형 (1:1)' },
+            { value: '3:4', label: '세로 직사각 (3:4)' },
+            { value: 'original', label: '원본 비율 그대로' },
+          ]}
         />
       </Field>
       <Field label="전환 간격 (밀리초)" hint="예: 4000 = 4초">

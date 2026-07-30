@@ -47,6 +47,8 @@ export interface ContinuousOperator {
   // 문안 스타일 4종 — null/미지정 = 브랜드 톤 자동
   copyStyle?: 'courteous' | 'friendly' | 'witty' | 'punchy' | null;
   channel?: 'sms' | 'lms' | 'mms';
+  // ★ 2026-07-30 (임은지 접수): 채널 mms 첨부 이미지(serverPath, 최대 3) — 매 자율 발송에 첨부
+  mmsImagePaths?: string[] | null;
   benefitContent?: string | null;
   sequenceEnabled?: boolean;
   sequenceDelayDays?: number | null;

@@ -114,21 +114,31 @@ ssh administrator@58.227.193.62
 cd /home/administrator/targetup-app
 git pull
 
-# 2. 의존성 설치 (새 패키지 추가 시)
+# 2. 의존성 설치 (새 패키지 추가 시 — 그 패키지 폴더에서)
+cd packages/backend && npm install     # 예: 0730 popbill 추가
 cd packages/frontend && npm install
 
 # ⚠️ 3. 백엔드 빌드 (TypeScript → JavaScript, 변경 시 필수!)
 # git pull만으로는 dist/ 미갱신 → 코드 수정이 서버에 반영 안 됨 (D67 교훈)
-cd /home/administrator/targetup-app/packages/backend && npm run build
+# ★ 2026-07-30 정정 — 빌드는 **atomic safe-build만** 허용(CLAUDE.md). `npm run build`는 실패 시
+#   dist를 깨진 상태로 남겨 pm2 restart가 죽는다. build:safe는 dist-new에 빌드→검증→atomic mv.
+cd /home/administrator/targetup-app/packages/backend && npm run build:safe
 
 # 4. 프론트엔드 빌드 (변경 시) — D61 난독화 플러그인 포함
-cd /home/administrator/targetup-app/packages/frontend && npm run build
+# ★ build:safe는 backend·frontend **각자의 스크립트**다. 프론트가 바뀌었으면 이 줄을 반드시 실행 —
+#   백엔드만 빌드하고 끝내면 화면 변경이 서버에 반영되지 않는다(0730 실수 지점).
+cd /home/administrator/targetup-app/packages/frontend && npm run build:safe
 # (company-frontend = 2026-07-18 폐기 — 고객사 관리자는 hanjul.ai "관리" 메뉴)
 # ⚠️ 최초 빌드 시 vite-plugin-javascript-obfuscator 미설치 에러 발생하면:
 # npm install vite-plugin-javascript-obfuscator --save-dev
 
-# 5. 백엔드 재시작 (변경 시)
-pm2 restart all
+# 4-1. git pull이 거부되면 (★2026-07-30 실측) — 서버 npm install이 고쳐 둔 lock 파일 드리프트다.
+# `error: Your local changes to the following files would be overwritten by merge: …package-lock.json`
+# lock은 생성물이고 정본은 커밋에 있으므로 서버 변경만 버린다. **소스 파일이 목록에 있으면 멈추고 확인.**
+# git checkout -- packages/backend/package-lock.json && git pull
+
+# 5. 백엔드 재시작 (변경 시) — env를 바꿨으면 `pm2 restart all --update-env`
+pm2 reload targetup-backend
 
 # 6. 확인
 pm2 status

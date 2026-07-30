@@ -7,7 +7,7 @@
  *
  * endpoint:
  *   GET  /status                       — 준비 여부 + temp 사용량
- *   POST /generate                     — 배경 후보 2장(2크레딧, 부분성공 1)
+ *   POST /generate                     — 완성 포스터 1장(2크레딧) ★2026-07-30 후보 2장→1장(같은 프롬프트 무작위 2회였음·레시피 차이 없음), 크레딧 2 유지(Harold 확정)
  *   POST /ingest-product {url}         — 연동몰 CDN 이미지 SSRF 가드 fetch → source temp
  *   POST /upload-product (multipart)   — 제품 이미지 업로드 → source temp
  *   POST /remove-bg {sourceTempId}     — 누끼(무료) → cutout temp
@@ -80,7 +80,7 @@ imageStudioRouter.get('/templates', (_req: any, res: Response) => {
   return res.json({ success: true, templates: listTemplatesPublic() });
 });
 
-// ── POST /generate — 템플릿 + 누끼 + 지정 문구 → 완성 포스터 후보 2장 ──
+// ── POST /generate — 템플릿 + 누끼 + 지정 문구 → 완성 포스터 1장 (2크레딧 고정) ──
 imageStudioRouter.post('/generate', async (req: any, res: Response) => {
   const companyId = req.user?.companyId;
   const userId = req.user?.userId;
@@ -123,19 +123,9 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
       hasProduct: !!cutout,
     });
 
-    // 후보 2장 병렬 생성
-    const settled = await Promise.allSettled([
-      generatePoster(prompt, preset, cutout),
-      generatePoster(prompt, preset, cutout),
-    ]);
-    const oks = settled.filter((s) => s.status === 'fulfilled').map((s: any) => s.value);
-
-    if (oks.length === 0) {
-      // 전부 실패 — 세이프티면 미차감 SAFETY, 아니면 첫 에러.
-      const firstErr = (settled.find((s) => s.status === 'rejected') as any)?.reason;
-      const anySafety = settled.some((s) => s.status === 'rejected' && (s as any).reason?.code === 'SAFETY_BLOCKED');
-      return respondStudioError(res, anySafety ? new StudioError('SAFETY_BLOCKED', 400) : (firstErr || new StudioError('GEN_FAILED', 502)));
-    }
+    // ★ 2026-07-30 1장 생성 (Harold 확정) — 옛 후보 2장은 같은 prompt·preset 무작위 2회 호출이라 레시피 차이가 없었다.
+    //   1회 호출로 줄이고 크레딧은 2 유지 → 크레딧당 Gemini 호출 0.5회(원가 절반). 실패 = 미차감(throw → respondStudioError).
+    const oks = [await generatePoster(prompt, preset, cutout)];
 
     // temp 기록
     const images = oks.map((img) => {
@@ -148,8 +138,8 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
       return { tempId, url: `/api/image-studio/temp/${tempId}`, presetKey: preset.key };
     });
 
-    // 성공 후 차감 — 성공 장수만큼(부분성공 1). 멱등키 = 생성 요청 uuid.
-    const cost = Math.min(2, oks.length);
+    // 성공 후 차감 — 생성 1회 = 2크레딧 고정(★2026-07-30 Harold 확정: 1장 생성이어도 2). 멱등키 = 생성 요청 uuid.
+    const cost = 2;
     const genReqId = newTempId();
     await deductCreditSafe({
       companyId, cost, source: CREDIT_SOURCE.generate, createdBy: userId,
@@ -159,7 +149,6 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
     return res.json({
       success: true,
       images,
-      partial: oks.length < 2,
       benefitNotice: benefitInHint ? '혜택 문구는 문구 칸(라벨·헤드라인·부제)에 입력해주세요 — 장면 힌트에는 장면 묘사만 들어가요.' : null,
     });
   } catch (err) {

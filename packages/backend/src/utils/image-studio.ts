@@ -90,6 +90,9 @@ export interface ChannelPreset {
 }
 
 export const CHANNEL_PRESETS: Record<string, ChannelPreset> = {
+  // ★ 2026-07-30 채널 축 폐기(Harold) — 생성은 'poster' 단일(3:4·채널 무관). 완성 포스터는 인앱/DM/이메일 어디든 통짜 삽입(0722 원칙).
+  'poster':       { key: 'poster',       label: '포스터',        aspectRatio: '3:4', imageSize: '2K', track: 'quality', channelSpec: 'poster',       textZone: 'top' },
+  // 아래 4종 = 레거시 호환(옛 temp meta·기존 자산 channel_spec 해석용). 신규 생성 UI는 'poster'만 보낸다.
   'inapp-poster': { key: 'inapp-poster', label: '인앱 포스터형', aspectRatio: '3:4', imageSize: '2K', track: 'quality', channelSpec: 'inapp-poster', textZone: 'top' },
   'dm-card':      { key: 'dm-card',      label: 'DM 카드',      aspectRatio: '1:1', imageSize: '2K', track: 'quality', channelSpec: 'dm',           textZone: 'bottom' },
   'email-hero':   { key: 'email-hero',   label: '이메일 히어로', aspectRatio: '16:9', imageSize: '2K', track: 'quality', channelSpec: 'email',       textZone: 'bottom' },
@@ -99,12 +102,12 @@ export const CHANNEL_PRESETS: Record<string, ChannelPreset> = {
 };
 
 export function resolvePreset(presetKey: string | undefined): ChannelPreset {
-  return (presetKey && CHANNEL_PRESETS[presetKey]) || CHANNEL_PRESETS['inapp-poster'];
+  return (presetKey && CHANNEL_PRESETS[presetKey]) || CHANNEL_PRESETS['poster'];
 }
 
 // ★ 2026-07-21 채널 한글 라벨(파일명·표시용) — cdp_assets.channel_spec → 짧은 한글. 파일명만 봐도 용도 체킹.
 const CHANNEL_LABEL_KO: Record<string, string> = {
-  'inapp-poster': '인앱', inapp: '인앱', dm: 'DM', email: '이메일', mms: 'MMS', free: '자유',
+  poster: '포스터', 'inapp-poster': '인앱', inapp: '인앱', dm: 'DM', email: '이메일', mms: 'MMS', free: '자유',
 };
 export function channelLabelKo(channelSpec: string | null | undefined): string {
   return (channelSpec && CHANNEL_LABEL_KO[channelSpec]) || '이미지';

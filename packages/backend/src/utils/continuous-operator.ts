@@ -49,6 +49,8 @@ import { buildFilterWhereClauseCompat } from './customer-filter';
 import { buildSendableStagingInsertSql } from './operator-recipients';
 import { createDirectSendCampaign } from './direct-send-core';
 import { DirectSendError } from './direct-send-spec';
+// ★ 2026-07-30 (Codex 2R): MMS 이미지 필수 가드 CT(D131) — 자율발송 경로 배선
+import { validateMmsPayload } from './mms-validator';
 // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용 — 타겟 선정 무관)
 import { recordCustomerSendsByFilter } from './customer-send-stats';
 // ★ 2026-07-05: 발송 피로도 보호 — staging 추출 anti-join용 cap 조회
@@ -101,6 +103,8 @@ export interface CreateOperatorInput {
   sequenceReminderContent?: string | null; // 관리자 직접 입력 (AI 임의 생성 금지)
   // ★ 2026-07-07 마케팅 캘린더 완비: 발송 대상 축(TARGET_HINTS 화이트리스트) — 제안 생성 때 타겟 AI에 고정 지시.
   targetHint?: string | null;
+  // ★ 2026-07-30 (임은지 접수): 채널 mms 전용 첨부 이미지(serverPath, 최대 3) — 매 자율 발송에 첨부.
+  mmsImagePaths?: string[] | null;
 }
 
 export interface ContinuousOperator {
@@ -152,6 +156,8 @@ export interface ContinuousOperator {
   sequenceReminderContent: string | null;           // 관리자 직접 입력 리마인드 문안
   // ★ 2026-07-07 마케팅 캘린더 완비: 발송 대상 축 — null = 축 미지정(objective 자유 해석)
   targetHint: TargetHint | null;
+  // ★ 2026-07-30 (임은지 접수): 채널 mms 첨부 이미지(serverPath) — 컬럼 미생성/NULL = []
+  mmsImagePaths: string[];
 }
 
 export interface OperatorProposal {
@@ -233,6 +239,11 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   const sequenceReminderContent = typeof input.sequenceReminderContent === 'string' && input.sequenceReminderContent.trim() ? input.sequenceReminderContent.trim().slice(0, 2000) : null;
   // ★ 2026-07-07: 타겟 축 — 화이트리스트 정규화(이상값·미지정 = null → 기존 자유 해석).
   const targetHint = normalizeTargetHint(input.targetHint);
+  // ★ 2026-07-30 (임은지 접수): MMS 이미지 — 채널 mms일 때만 저장(최대 3장·serverPath 문자열).
+  //   컬럼(mms_image_paths text[])은 2026-07-30 운영 ALTER 완료(Harold 실행·코드 배포보다 선행) — 42703 분기 불요.
+  const mmsImagePaths = channel === 'mms' && Array.isArray(input.mmsImagePaths)
+    ? input.mmsImagePaths.filter((p) => typeof p === 'string' && p.trim()).slice(0, 3)
+    : [];
 
   // ★ 2026-06-02 종량제: 자동마케팅 저장(활성화) = 200 1회. 사전 잔액 확인(선불 부족 차단) → INSERT → 성공 후 차감(멱등키 operatorId).
   // ★ 2026-07-07 DDL 의존: target_hint 컬럼 미생성 시 42703 → 라우트 catch가 503 DB_MIGRATION_PENDING(배포 블록에 ALTER 선행 명시).
@@ -245,7 +256,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       channel, benefit_content, admin_phone_numbers, backup_admin_phone, admin_alert_channel,
       auto_send_lead_minutes, budget_monthly, budget_daily, budget_alert_threshold, delivery_policy,
       sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode, copy_style,
-      schedule_month, target_hint,
+      schedule_month, target_hint, mms_image_paths,
       created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2::uuid, $3, $4,
@@ -253,7 +264,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       $10, $11, $12, $13, $14,
       $15, $16, $17, $18, $19,
       $20, $21, $22, $23, $24,
-      $25, $26,
+      $25, $26, $27::text[],
       NOW(), NOW()
     ) RETURNING *`,
     [
@@ -267,6 +278,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       deliveryPolicy,
       sequenceEnabled, sequenceDelayDays, sequenceReminderContent, sendTimeMode, copyStyle,
       scheduleMonth, targetHint,
+      mmsImagePaths.length > 0 ? mmsImagePaths : null,
     ]
   );
   const operator = mapRowToOperator(result.rows[0]);
@@ -343,6 +355,8 @@ export async function updateOperator(
     sendTimeMode?: 'fixed' | 'ai_optimal';
     // ★ 2026-07-02 2단계: 문안 스타일 (undefined = 변경 없음, null/화이트리스트 밖 = 해제 → 브랜드 톤 자동)
     copyStyle?: string | null;
+    // ★ 2026-07-30 (임은지 접수): MMS 이미지 — undefined = 유지, null/[] = 해제, 배열 = 교체(최대 3)
+    mmsImagePaths?: string[] | null;
   }
 ): Promise<ContinuousOperator | null> {
   // ★ 2026-07-12 C-1: 야간 광고 발송 제한 — 발송 희망 시각 변경도 발송 가능 창 안만 허용.
@@ -383,6 +397,16 @@ export async function updateOperator(
   );
   if (curRes.rows.length === 0) return null;
   const cur = curRes.rows[0];
+  // ★ 2026-07-30 (임은지 접수·Codex 2R·3R 정정): MMS 이미지 — 본 UPDATE 단문에 포함(부분 커밋 0) + "유지" 판정도
+  //   SQL CASE로 같은 시점에(선조회 되쓰기 금지 — 0710 read-modify-write 교훈). undefined = 유지, null/[] = 해제(NULL), 배열 = 교체(최대 3).
+  const mmsImagesProvided = patch.mmsImagePaths !== undefined;
+  const nextMmsImages = (() => {
+    if (!mmsImagesProvided) return null;
+    const cleaned = Array.isArray(patch.mmsImagePaths)
+      ? patch.mmsImagePaths.filter((p) => typeof p === 'string' && p.trim()).slice(0, 3)
+      : [];
+    return cleaned.length > 0 ? cleaned : null;
+  })();
 
   // ★ 2026-07-12 C-2: 죽은 설정 SET 제거(delivery_policy·verification_required_days·opt_out_minutes·
   //   spam_score_threshold·max_spam_retries) — 소비 로직 0. DB 컬럼은 보존, 이 UPDATE만 참조 정리.
@@ -411,6 +435,7 @@ export async function updateOperator(
       send_time_mode = COALESCE($23, send_time_mode),
       copy_style = CASE WHEN $24::text = '__keep__' THEN copy_style ELSE NULLIF($24::text, '') END,
       schedule_month = COALESCE($25, schedule_month),
+      mms_image_paths = CASE WHEN $26::boolean THEN $27::text[] ELSE mms_image_paths END,
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid
      RETURNING *`,
@@ -440,6 +465,8 @@ export async function updateOperator(
       // copy_style: undefined = 유지('__keep__'), 그 외 = 정규화 값 or ''(해제 → SQL NULLIF로 null)
       patch.copyStyle === undefined ? '__keep__' : (normalizeCopyStyle(patch.copyStyle) ?? ''),
       nextMonth,
+      mmsImagesProvided,
+      nextMmsImages,
     ]
   );
   if (result.rows.length === 0) return null;
@@ -1446,6 +1473,8 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
   // filterWhere 컴파일은 try 안에서(throw 시 admin_review 정리 보존) — 값은 발송 후 예측 카운터에서도 쓰므로 스코프 선언.
   let filterWhere = '';
   let filterParams: any[] = [];
+  // ★ 2026-07-30 (임은지 접수): MMS 첨부 이미지 — try 안 게이트에서 확정, 아래 createDirectSendCampaign에 전달.
+  let mmsImagePaths: string[] | null = null;
   try {
     // operator(통지 대상 · created_by · Phase3 C 시퀀스 설정 · 2026-07-07 혜택 재치환용 benefit_content)
     const opRes = await query(
@@ -1482,6 +1511,24 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
         await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 광고 무료거부 번호(080)가 없어 발송을 보류했습니다. 080 등록 후 다시 진행해주세요.`);
         return { action: 'skipped', reason: '광고 무료거부 번호(080) 미설정' };
       }
+    }
+
+    // ★ 2026-07-30 (임은지 접수·Codex 2R 정정) MMS 이미지 게이트 — 발송 라우트 공통 CT(validateMmsPayload·D131)를
+    //   자율발송에도 배선(종전엔 이 경로만 우회 → 무이미지 MMS = 통신사 9007 실패 부류가 차감까지 하고 죽는 구조).
+    //   staging 적재·캠페인 생성·차감 전에 보류(혜택 미입력 게이트와 동일 패턴). 조회 = company_id 동스코프(테넌트 경계) — 행 없음도 보류.
+    if (msgType === 'MMS') {
+      const imgRes = await query(
+        `SELECT mms_image_paths FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [p.operator_id, companyId],
+      );
+      const arr = imgRes.rows[0]?.mms_image_paths;
+      const cleaned = Array.isArray(arr) ? arr.filter((x: any) => typeof x === 'string' && x.trim()).slice(0, 3) : [];
+      if (imgRes.rows.length === 0 || !validateMmsPayload(msgType, cleaned).ok) {
+        await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = 'MMS 이미지 미첨부 — 발송 보류' WHERE id = $1::uuid`, [proposalId]);
+        await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' MMS 이미지가 없어 발송을 보류했습니다. 자동마케팅 수정에서 이미지를 첨부한 뒤 승인해 주세요.`);
+        return { action: 'skipped', reason: 'MMS 이미지 미첨부 — 발송 보류' };
+      }
+      mmsImagePaths = cleaned;
     }
 
     // 발송 발신번호 먼저 확인 (없으면 staging 적재 자체가 무의미 — 매 사이클 대량 적재+삭제 낭비 차단).
@@ -1530,6 +1577,7 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
     : resolvedBody;
 
   // 발송 (직접발송 파이프라인 공유) — 잔액 부족이면 skip+통지
+  //   MMS면 위 게이트에서 확정한 mmsImagePaths가 spec → campaigns.mms_image_paths/send_config → file_name 1~3로 흐른다(기존 계약).
   let campaignId: string;
   try {
     const res = await createDirectSendCampaign(
@@ -1538,6 +1586,7 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
         campaignName: `AI 자동마케팅 ${op.name || ''} ${new Date().toLocaleDateString('ko-KR')}`,
         msgType, message: trackedBody, subject: resolvedSubject || null, callback, sendChannel: 'sms',
         adEnabled: isAd, total: recipientTotal, dedupEnabled: true, unsubFilterEnabled: true,
+        mmsImagePaths,
       },
       { companyId, userId },
       { finalSource: 'selected_as_is', aiMessages: [trackedBody] },
@@ -1862,6 +1911,8 @@ function mapRowToOperator(row: any): ContinuousOperator {
     sequenceReminderContent: row.sequence_reminder_content || null,
     // ★ 2026-07-07: 타겟 축 (컬럼 미생성/NULL = null → 기존 자유 해석)
     targetHint: normalizeTargetHint(row.target_hint),
+    // ★ 2026-07-30 (임은지 접수): MMS 이미지 (컬럼 미생성/NULL = [])
+    mmsImagePaths: Array.isArray(row.mms_image_paths) ? row.mms_image_paths.filter((p: any) => typeof p === 'string' && p.trim()) : [],
   };
 }
 

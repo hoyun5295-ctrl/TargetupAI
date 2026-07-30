@@ -134,18 +134,20 @@ function renderHeader(props: HeaderProps, ctx: SectionRenderContext): string {
         ${img ? `<img src="${escapeHtml(img)}" alt="${brand}" style="width:100%;display:block">` : ''}
       </div>`;
     }
+    // ★ 2026-07-30 (임은지 0729 접수) countdown·coupon 그라데이션 끝 색 = var(--dm-grad-to, 기존값) 소비.
+    //   옛: 하드코딩 그라데이션이 래퍼(dm-bgx-gradient)를 덮어 "그라데이션 끝 색"이 로고형에서만 먹었다. 미지정=기존 폴백(발행물 무회귀). 캔버스 HeaderSection 미러.
     case 'countdown': {
       const eventDate = props.event_date ? new Date(props.event_date) : null;
       const dday = eventDate ? Math.ceil((eventDate.getTime() - Date.now()) / 86400000) : 0;
       const ddayText = dday > 0 ? `D-${dday}` : dday === 0 ? 'D-Day' : `D+${Math.abs(dday)}`;
-      return `<div class="dm-header dm-header-countdown" data-variant="${escapeHtml(variant)}" style="background:linear-gradient(135deg,var(--dm-primary) 0%,var(--dm-primary-hover) 100%);color:#fff;padding:var(--dm-sp-6) var(--dm-sp-5)">
+      return `<div class="dm-header dm-header-countdown" data-variant="${escapeHtml(variant)}" style="background:linear-gradient(135deg,var(--dm-primary) 0%,var(--dm-grad-to,var(--dm-primary-hover)) 100%);color:#fff;padding:var(--dm-sp-6) var(--dm-sp-5)">
         <div style="font-size:36px;font-weight:900;letter-spacing:2px">${escapeHtml(ddayText)}</div>
         ${props.event_title ? `<div style="font-size:var(--dm-fs-small);opacity:0.9;margin-top:var(--dm-sp-2);font-weight:500">${escapeHtml(props.event_title)}</div>` : ''}
         ${brand ? `<div style="font-size:var(--dm-fs-tiny);opacity:0.6;margin-top:var(--dm-sp-1)">${brand}</div>` : ''}
       </div>`;
     }
     case 'coupon': {
-      return `<div class="dm-header dm-header-coupon" data-variant="${escapeHtml(variant)}" style="background:linear-gradient(135deg,var(--dm-accent) 0%,var(--dm-primary) 100%);color:#fff;padding:var(--dm-sp-6) var(--dm-sp-5)">
+      return `<div class="dm-header dm-header-coupon" data-variant="${escapeHtml(variant)}" style="background:linear-gradient(135deg,var(--dm-accent) 0%,var(--dm-grad-to,var(--dm-primary)) 100%);color:#fff;padding:var(--dm-sp-6) var(--dm-sp-5)">
         ${props.discount_label ? `<div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-2)">${escapeHtml(props.discount_label)}</div>` : ''}
         ${props.coupon_code ? `<div style="background:rgba(255,255,255,0.25);display:inline-block;padding:var(--dm-sp-2) var(--dm-sp-6);border-radius:var(--dm-radius-md);font-size:var(--dm-fs-h2);font-weight:900;letter-spacing:3px;font-family:var(--dm-font-mono)">${escapeHtml(props.coupon_code)}</div>` : ''}
         ${brand ? `<div style="font-size:var(--dm-fs-tiny);opacity:0.7;margin-top:var(--dm-sp-2)">${brand}</div>` : ''}
@@ -957,8 +959,15 @@ function renderSlideshow(p: any): string {
   }
   // ★ 2026-07-02(3) 첫 장만 고정 렌더되던 결함 수정 — 전 슬라이드 렌더 + 자동 전환 + 인디케이터 + 링크 (뷰어 스크립트 연동)
   const interval = Math.max(1500, Math.min(60000, Number(p.interval_ms) || 4000));
+  // ★ 2026-07-30 (남지현 접수) 슬라이드 크기 — 옛 16:9 cover 하드코딩이라 크기 조절 자체가 없었다.
+  //   16:9(기본·미지정=현행 출력 그대로)/1:1/3:4 = 고정 비율 cover(슬라이드 간 높이 통일), original = 원본 비율(크롭 0·높이가 이미지를 따라감).
+  //   캔버스 SlideshowSection 미러. 계약=DM_SLIDESHOW_RATIOS(dm-property-contract).
+  const ratio = (p.slide_ratio === '1:1' || p.slide_ratio === '3:4' || p.slide_ratio === 'original') ? p.slide_ratio : '16:9';
+  const slideImgFit = ratio === 'original'
+    ? 'width:100%;height:auto;display:block'
+    : `width:100%;aspect-ratio:${ratio === '1:1' ? '1/1' : ratio === '3:4' ? '3/4' : '16/9'};object-fit:cover`;
   const slidesHtml = slides.map((s: any, i: number) => {
-    const img = `<img src="${escapeHtml(publicImageUrl(s.image_url || ''))}" loading="lazy" alt="${escapeHtml(s.caption || '')}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--dm-radius-md)"/>`;
+    const img = `<img src="${escapeHtml(publicImageUrl(s.image_url || ''))}" loading="lazy" alt="${escapeHtml(s.caption || '')}" style="${slideImgFit};border-radius:var(--dm-radius-md)"/>`;
     const href = s.link_url ? safeUrl(s.link_url) : '#';
     const inner = href !== '#' ? `<a href="${href}" target="_blank" rel="noopener" style="display:block">${img}</a>` : img;
     return `<div data-dm-slide style="display:${i === 0 ? 'block' : 'none'}">${inner}${s.caption ? `<div style="font-size:var(--dm-fs-small);margin-top:var(--dm-sp-2)">${escapeHtml(s.caption)}</div>` : ''}</div>`;

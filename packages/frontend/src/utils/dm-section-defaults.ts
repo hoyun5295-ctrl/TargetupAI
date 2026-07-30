@@ -220,7 +220,7 @@ export type GalleryImage = { url: string; caption?: string; link_url?: string; }
 export type GalleryProps = { title?: string; images: GalleryImage[]; layout: 'grid_2x2' | 'grid_3x3' | 'list_1xN' | 'masonry'; enable_zoom?: boolean; enable_fullscreen?: boolean; full_bleed?: boolean; };
 
 export type SlideshowSlide = { image_url: string; caption?: string; link_url?: string; };
-export type SlideshowProps = { slides: SlideshowSlide[]; interval_ms: number; show_pause?: boolean; show_indicator?: boolean; };
+export type SlideshowProps = { slides: SlideshowSlide[]; interval_ms: number; show_pause?: boolean; show_indicator?: boolean; slide_ratio?: '16:9' | '1:1' | '3:4' | 'original'; };
 
 export type TabCardItem = { label: string; content_type: 'text' | 'image' | 'product_list'; content: string; };
 // ★ 2026-07-23 (임은지) tab_active_bg/text_color = 활성 탭 버튼 배경/글씨색(미지정=#171717/#fff·회귀 0). backend 미러.
@@ -384,7 +384,7 @@ export const SECTION_DEFAULTS: { [K in SectionType]: SectionPropsMap[K] } = {
   // D216+ 신규 16
   product_carousel: { products: [], show_indicator: true, auto_slide: false, slide_interval_ms: 4000 },
   gallery: { images: [], layout: 'grid_2x2', enable_zoom: true, enable_fullscreen: false },
-  slideshow: { slides: [], interval_ms: 4000, show_pause: true, show_indicator: true },
+  slideshow: { slides: [], interval_ms: 4000, slide_ratio: '16:9', show_pause: true, show_indicator: true },
   tab_cards: { tabs: [{ label: '탭 1', content_type: 'text', content: '[직접 작성해주세요]' }], default_tab_index: 0 },
   poll: { question: '[직접 작성해주세요]', options: [{ id: '1', label: '옵션 1' }, { id: '2', label: '옵션 2' }], one_vote_per_user: true, show_result_after_vote: true, allow_multiple: false },
   survey: { questions: [], show_progress: true },

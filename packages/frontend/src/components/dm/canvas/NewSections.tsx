@@ -12,7 +12,7 @@
  *   - 카드 영역 = bg + border + rounded + padding 정합
  *   - placeholder 안내 = `[직접 작성해주세요]` 영역 명시 (영구 룰 정합)
  */
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import type {
   ProductCarouselProps,
   GalleryProps,
@@ -295,6 +295,11 @@ export function SlideshowSection({ props }: { props: SlideshowProps }) {
   const slides = props?.slides || [];
   const [idx, setIdx] = useState(0);
   const cur = slides[idx];
+  // ★ 2026-07-30 (남지현 접수) 슬라이드 크기 — 발행 SSR(renderSlideshow) 미러. 16:9(기본)/1:1/3:4=cover, original=원본 비율(크롭 0).
+  const ratio = (props?.slide_ratio === '1:1' || props?.slide_ratio === '3:4' || props?.slide_ratio === 'original') ? props.slide_ratio : '16:9';
+  const slideImgStyle: CSSProperties = ratio === 'original'
+    ? { width: '100%', height: 'auto', display: 'block', borderRadius: 8 }
+    : { width: '100%', aspectRatio: ratio === '1:1' ? '1/1' : ratio === '3:4' ? '3/4' : '16/9', objectFit: 'cover', borderRadius: 8 };
   return (
     <div className="dm-section dm-slideshow" style={{ ...SECTION_SHELL_SM, position: 'relative' }}>
       {slides.length === 0 ? (
@@ -306,9 +311,9 @@ export function SlideshowSection({ props }: { props: SlideshowProps }) {
             <div aria-hidden style={{ position: 'absolute', top: 'var(--dm-sp-3)', right: 'var(--dm-sp-3)', width: 32, height: 32, borderRadius: 999, background: 'rgba(0,0,0,0.45)', color: '#fff', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2, pointerEvents: 'none' }}>⏸</div>
           )}
           {cur?.image_url ? (
-            <img src={dmImageUrl(cur.image_url)} alt={cur.caption || ''} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', borderRadius: 8 }} />
+            <img src={dmImageUrl(cur.image_url)} alt={cur.caption || ''} style={slideImgStyle} />
           ) : (
-            <div style={{ width: '100%', aspectRatio: '16/9', background: 'var(--dm-neutral-100)', borderRadius: 8 }} />
+            <div style={{ width: '100%', aspectRatio: ratio === 'original' ? '16/9' : ratio === '1:1' ? '1/1' : ratio === '3:4' ? '3/4' : '16/9', background: 'var(--dm-neutral-100)', borderRadius: 8 }} />
           )}
           {cur?.caption && <div style={{ fontSize: 13, color: 'var(--dm-neutral-700)', marginTop: 8 }}>{cur.caption}</div>}
           <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 10 }}>

@@ -25,8 +25,9 @@ export default function HeaderSection({ props, storeName = '', onEdit }: { props
     const eventDate = props.event_date ? new Date(props.event_date) : null;
     const dday = eventDate ? Math.ceil((eventDate.getTime() - Date.now()) / 86400000) : 0;
     const ddayText = dday > 0 ? `D-${dday}` : dday === 0 ? 'D-Day' : `D+${Math.abs(dday)}`;
+    // ★ 2026-07-30 그라데이션 끝 색(--dm-grad-to) 소비 — SSR renderHeader 미러 (임은지 0729 접수)
     return (
-      <div className="dm-header dm-header-countdown" style={{ background: 'linear-gradient(135deg,var(--dm-primary) 0%,var(--dm-primary-hover) 100%)', color: '#fff', padding: 'var(--dm-sp-6) var(--dm-sp-5)' }}>
+      <div className="dm-header dm-header-countdown" style={{ background: 'linear-gradient(135deg,var(--dm-primary) 0%,var(--dm-grad-to,var(--dm-primary-hover)) 100%)', color: '#fff', padding: 'var(--dm-sp-6) var(--dm-sp-5)' }}>
         <div style={{ fontSize: 36, fontWeight: 900, letterSpacing: 2 }}>{ddayText}</div>
         {(props.event_title || editable) && (
           <InlineEditable
@@ -54,7 +55,7 @@ export default function HeaderSection({ props, storeName = '', onEdit }: { props
 
   if (variant === 'coupon') {
     return (
-      <div className="dm-header dm-header-coupon" style={{ background: 'linear-gradient(135deg,var(--dm-accent) 0%,var(--dm-primary) 100%)', color: '#fff', padding: 'var(--dm-sp-6) var(--dm-sp-5)' }}>
+      <div className="dm-header dm-header-coupon" style={{ background: 'linear-gradient(135deg,var(--dm-accent) 0%,var(--dm-grad-to,var(--dm-primary)) 100%)', color: '#fff', padding: 'var(--dm-sp-6) var(--dm-sp-5)' }}>
         {(props.discount_label || editable) && (
           <InlineEditable
             style={{ fontSize: 'var(--dm-fs-h3)', fontWeight: 700, marginBottom: 'var(--dm-sp-2)' }}

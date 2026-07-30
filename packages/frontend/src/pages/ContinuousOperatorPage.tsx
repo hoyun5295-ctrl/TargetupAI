@@ -154,6 +154,8 @@ export default function ContinuousOperatorPage() {
     // ★ 2026-07-12 C-4: 발송 대상 축 — 미선택 = null(목표 문장 자유 해석)
     target_hint: e.targetHint ?? null,
     channel: e.channel || 'lms',
+    // ★ 2026-07-30 (임은지 접수): MMS 이미지 — mms가 아니면 null(해제)로 보내 채널 전환 시 이미지 잔존 차단
+    mms_image_paths: (e.channel === 'mms') ? (e.mmsImagePaths ?? []) : null,
     benefit_content: e.benefitContent ?? null,
     sequence_enabled: e.sequenceEnabled === true,
     sequence_delay_days: e.sequenceEnabled ? (e.sequenceDelayDays ?? 3) : null,

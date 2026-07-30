@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import { ContinuousOperator, Schedule, OperatorStatus, TARGET_HINT_OPTIONS, won } from './types';
 import CopyStylePicker from './CopyStylePicker';
+// ★ 2026-07-30 (임은지 접수): MMS 이미지 첨부 — 여정 MMS 업로더 재사용(300KB JPG·최대 3장·라이브러리 자동 변환)
+import JourneyMmsUploader from '../journey/JourneyMmsUploader';
 
 const INP = 'w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 transition-colors';
 const LAB = 'text-xs font-medium text-white/70 block mb-1.5';
@@ -66,6 +68,17 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
                 );
               })}
             </div>
+            {/* ★ 2026-07-30 (임은지 접수): 채널 MMS = 이미지 첨부 — 신규·실행중 수정 공용(이 모달이 양쪽 공용) */}
+            {(editing.channel || 'lms') === 'mms' && (
+              <div className="mt-3">
+                <JourneyMmsUploader
+                  value={editing.mmsImagePaths || []}
+                  onChange={(paths) => setEditing({ ...editing, mmsImagePaths: paths })}
+                  disabled={saving}
+                />
+                <div className="text-[10px] text-white/40 mt-1.5">MMS로 나가는 매 발송에 이 이미지가 첨부됩니다. 비워두면 이미지 없이 발송됩니다.</div>
+              </div>
+            )}
           </div>
 
           <div>

@@ -259,6 +259,8 @@ export type SlideshowProps = {
   interval_ms: number;
   show_pause?: boolean;
   show_indicator?: boolean;
+  /** ★ 2026-07-30 (남지현 접수) 슬라이드 크기 — 16:9(기본·현행)/1:1 정방형/3:4 세로 = 고정 비율 cover, original = 원본 비율 그대로(크롭 0) */
+  slide_ratio?: '16:9' | '1:1' | '3:4' | 'original';
 };
 
 export type TabCardItem = {
@@ -555,6 +557,7 @@ export const SECTION_DEFAULTS: { [K in SectionType]: SectionPropsMap[K] } = {
   slideshow: {
     slides: [],
     interval_ms: 4000,
+    slide_ratio: '16:9',
     show_pause: true,
     show_indicator: true,
   },

@@ -53,6 +53,12 @@ export const DM_GALLERY_CAPTION_VISIBLE = true;
  *  기본 노출(default true). 슬라이드 2장 이상에서만(1장은 전환 없음). 캔버스 SlideshowSection 미러(미리보기라 비상호작용). */
 export const DM_SLIDESHOW_PAUSE = true;
 
+/** ★ 2026-07-30 (남지현 접수) 자동 슬라이드 크기 — 편집기(SlideshowEditor) slide_ratio가 발행 SSR·캔버스 슬라이드 이미지에 실제 소비돼야 한다.
+ *  종전엔 16:9 cover 하드코딩이라 크기 조절 자체가 없었다. 16:9(기본·미지정=현행 출력 그대로=무회귀)/1:1/3:4 = 고정 비율 cover(슬라이드 간 높이 통일),
+ *  original = 원본 비율 그대로(aspect-ratio 없음·height:auto·크롭 0 — 슬라이드마다 높이가 이미지를 따라감).
+ *  SSR renderSlideshow ↔ 캔버스 SlideshowSection 미러. */
+export const DM_SLIDESHOW_RATIOS = ['16:9', '1:1', '3:4', 'original'] as const;
+
 /** ★ 2026-07-21 (#4a 임은지) 상품 슬라이드 = 상품 3개 초과 시 가로 스와이프 캐러셀(data-dm-pcarousel, scroll-snap) + 인디케이터 점(data-dm-pc-dots).
  *  2개 이하는 기존 그리드(회귀 0). 자동 전환은 미도입(auto_slide 토글 제거·수신자 수동 스와이프). 뷰어(dm-viewer.ts)가 스크롤↔점 동기화. 캔버스 NewSections 미러.
  *  (종전엔 show_indicator·auto_slide가 렌더/뷰어 어디서도 소비 안 되는 고아 속성이라 토글해도 단말 무변화였다.) */
