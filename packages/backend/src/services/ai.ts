@@ -117,12 +117,22 @@ export async function callAIWithFallback(params: {
     const adaptiveOnly = isAdaptiveOnlyModel(modelName);
 
     // ★ 2026-07-08 vision — 이미지 있으면 image 블록 + text 블록 배열, 없으면 문자열(기존 동작 불변)
+    // ★ 2026-07-30 PDF — `application/pdf`는 image 블록이 아니라 **document 블록**으로 보낸다
+    //   (사업자등록증 판독 — 고객사 보관 파일 90%가 PDF, 서수란 0730 접수). 기존 이미지 소비처는
+    //   PDF를 보내지 않으므로 동작 불변. GPT 폴백은 PDF를 못 받는다(아래 주석).
     const claudeUserContent: any = hasImages
       ? [
-          ...(params.images || []).map((im) => ({
-            type: 'image' as const,
-            source: { type: 'base64' as const, media_type: im.media_type as any, data: im.data },
-          })),
+          ...(params.images || []).map((im) =>
+            im.media_type === 'application/pdf'
+              ? {
+                  type: 'document' as const,
+                  source: { type: 'base64' as const, media_type: 'application/pdf' as any, data: im.data },
+                }
+              : {
+                  type: 'image' as const,
+                  source: { type: 'base64' as const, media_type: im.media_type as any, data: im.data },
+                },
+          ),
           { type: 'text' as const, text: params.userMessage },
         ]
       : params.userMessage;
@@ -230,10 +240,19 @@ export async function callAIWithFallback(params: {
 
   try {
     // ★ 2026-07-08 vision — GPT fallback도 이미지 지원(data URL). 없으면 문자열(기존 동작 불변)
-    const gptUserContent: any = hasImages
+    // ★ 2026-07-30 PDF는 GPT 이미지 입력이 받지 않는 형식이라 걸러낸다 — data URL로 넣으면
+    //   API 에러로 폴백 자체가 죽는다.
+    const gptImages = (params.images || []).filter((im) => im.media_type !== 'application/pdf');
+    // ★ fail-closed(Codex 0730 지적 ③ 수용) — 첨부가 전부 PDF였으면 폴백은 첨부 없는 텍스트 요청이
+    //   되는데, 모델이 문맥만으로 그럴듯한 JSON을 지어내면 **허구의 사업자 정보가 화면에 채워진다**
+    //   (AI 날조 금지 계열). 폴백을 부르지 않고 명확한 실패로 끝낸다.
+    if (hasImages && gptImages.length === 0) {
+      throw new Error('PDF 첨부는 보조 경로가 지원하지 않습니다. 잠시 후 다시 시도하거나 이미지(JPG/PNG)로 올려주세요.');
+    }
+    const gptUserContent: any = hasImages && gptImages.length > 0
       ? [
           { type: 'text', text: params.userMessage },
-          ...(params.images || []).map((im) => ({
+          ...gptImages.map((im) => ({
             type: 'image_url',
             image_url: { url: `data:${im.media_type};base64,${im.data}` },
           })),

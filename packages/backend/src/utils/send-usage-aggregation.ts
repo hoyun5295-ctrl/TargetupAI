@@ -981,12 +981,16 @@ export interface PricedBillingItem extends BillingUsageRow {
   /** `company_agent_ids.id` (agent 채널만) */
   agentId: string | null;
   unitPrice: number;
-  /** 청구 금액 — **원 미만 절사**(`floorWon`). `billing_items.amount`에 이 값이 저장된다. */
+  /**
+   * 청구 금액 = `성공 × 단가` **정확값(소수 유지)**. `billing_items.amount`에 이 값이 저장된다.
+   * ★ 2026-07-30 절사 위치 정정(Harold) — 행 단위 절사는 0726 지시("최종 금액의 소수점만 버려라")의
+   * 과대 해석이었다. 절사는 `buildInvoiceLines` 항목줄에서 1회만 한다. 발송 행은 amount === amountExact.
+   * (요금제 행만 구간이 곧 항목줄이라 `buildPlanBillingItems`에서 구간 단위 절사값이 실린다.)
+   */
   amount: number;
   /**
-   * 절사 전 원값(`성공 × 단가`). 저장하지 않는다 — 헤더 공급가액을 상세와 **다른 코드**로 계산해
-   * 대조하는 A-8 항등식이 절사 오차에 걸려 죽지 않도록, 대조는 이 값으로 한다.
-   * (절사 후 값끼리 비교하면 헤더를 상세에서 파생시킨 셈이라 검사 자체가 없어진다.)
+   * `성공 × 단가` 원값. 헤더 공급가액을 상세와 **다른 코드**로 계산해 대조하는 A-8 항등식이
+   * 절사 축과 얽히지 않도록, 대조는 항상 이 값으로 한다.
    */
   amountExact: number;
   /**
@@ -1108,11 +1112,14 @@ export function priceBillingRows(
       unitPrice = Number(webPrices?.[r.typeKey]) || 0;
     }
 
-    // ★ 2026-07-26 원 미만 절사(Harold 지시). 단가가 소수 둘째 자리라 `성공 × 단가`가 소수로 떨어지고
-    //   그대로 두면 청구서·거래내역서에 `₩13,343,638.44`가 인쇄된다. 절사를 **행 단위**에 두어야
-    //   그 위의 모든 합이 정수 덧셈이 된다(1페이지 항목표·2페이지 상세 세로합이 둘 다 공급가액과 일치).
+    // ★ 2026-07-30 절사 위치 정정(Harold — 0726 지시의 원뜻은 "최종 청구 금액의 소수점만 버려라").
+    //   행(일자) 단위 절사는 그 지시의 과대 해석이었다 — 절사가 일자 수만큼 누적돼 항목표가
+    //   `수량 × 단가`와 수십 원씩 어긋났고(서수란 0729 접수: 1,733×7.2 = 12,477.6 → 12,456 표시),
+    //   고객이 검산할 때마다 걸린다. 일자 행은 **정확값(소수 유지)** 그대로 두고,
+    //   절사는 `buildInvoiceLines`의 **항목줄에서 1회**만 한다(같은 단가 그룹은 Σ(일자×단가)=총수량×단가라
+    //   항목줄 절사값이 정확히 floor(수량×단가)가 된다). 헤더 공급가액은 그 절사된 항목줄들의 정수 합.
     const amountExact = success * unitPrice;
-    const amount = floorWon(amountExact);
+    const amount = amountExact;
     amountByChannel[r.channel] += amount;
     amountExactByChannel[r.channel] += amountExact;
     // 발송 행은 요금제 일수 축이 없다 — null이 그 사실이다(0은 "0일"과 구분이 안 된다).

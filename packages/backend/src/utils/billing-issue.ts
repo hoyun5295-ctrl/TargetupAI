@@ -24,6 +24,8 @@ import {
   splitBillingSheets, checkSheetSumIdentity, buildPlanBillingItems, toDayKey,
   type PricedBillingItem, type BillingScope,
 } from './send-usage-aggregation';
+// ★ 2026-07-30 절사 위치 정정 — 헤더·장 공급가액을 절사된 항목줄 합에서 파생(그룹핑·절사 단일원).
+import { sumFlooredInvoiceLines } from './billing-invoice-lines';
 import { loadBillingLedger, readBillingLedgerFingerprint } from './billing-ledger';
 import { floorWon, vatOfSupply } from './money';
 import { normalizeUnitPriceBasis } from './unit-price';
@@ -424,16 +426,25 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
       });
     }
 
-    // ★ 2026-07-26 저장 금액은 **원 미만 절사 후 정수 덧셈**이다(Harold 지시).
-    subtotal = billingItems.reduce((s, i) => s + (Number(i.amount) || 0), 0) + aiCreditSupply;
-    vat = vatOfSupply(subtotal);
-    totalAmount = subtotal + vat;
-
     // 8~9) 장별 발행 — 한 요청이 N+1장을 **원자적으로** 만든다.
     const sheets = splitBillingSheets(billingItems, scope as BillingScope);
 
+    // ★ 2026-07-30 절사 위치 정정(Harold — "최종 청구 금액의 소수점만 버려라").
+    //   일자행은 정확값이고, 절사는 각 장의 **항목줄에서 1회**(buildInvoiceLines)다.
+    //   공급가액 = 장별 절사 합의 합 — 장 문서에 인쇄되는 값의 합과 헤더가 정의상 일치한다.
+    //   (그 전에는 일자행 절사 합이라 항목표가 수량×단가와 수십 원 어긋났다 — 서수란 0729 접수)
+    //   ⚠ 계정별(by_account) 발행은 합산 발행과 1원 수준 차이가 날 수 있다 — 장이 늘면 절사 횟수도
+    //   는다. **장 = 독립 문서 = 세금계산서 단위**라 각 장의 공급가는 그 장 항목표의 절사 합이어야
+    //   하고(전역 절사 후 배분하면 장 문서 검산이 깨진다 — 서수란 문제의 장 단위 재발), 차이 방향은
+    //   항상 고객 유리(절사 횟수↑ = 금액↓)다. 계약 테스트 = send-usage-aggregation.test.ts.
+    const sheetFloored = sheets.map((sh) => sumFlooredInvoiceLines(sh.items as any));
+    subtotal = sheetFloored.reduce((s, v) => s + v, 0) + aiCreditSupply;
+    vat = vatOfSupply(subtotal);
+    totalAmount = subtotal + vat;
+
     // 장으로 쪼갠 합이 회사 합산과 같은지 — 분산 발행이 회사 총액을 다 담았는지 보는 유일한 장치다.
-    const sheetSum = checkSheetSumIdentity(sheets, aiCreditSupply, subtotal);
+    //   대조는 **정확값 축**끼리 한다(장별 정확합 vs totals×단가 — 절사 축과 얽히면 검사가 사라진다).
+    const sheetSum = checkSheetSumIdentity(sheets, aiCreditSupply, subtotalExact);
     if (!sheetSum.ok) {
       console.log(`[정산][장합불일치] company=${company_id} ${billing_start}~${billing_end} — 장합 ${sheetSum.itemsSum} + 크레딧 ${sheetSum.aiCreditSupply} ≠ 공급가액 ${sheetSum.subtotal} (차이 ${sheetSum.diff})`);
       throw new BillingIssueError(422, {
@@ -450,7 +461,7 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
     const ITEM_CHUNK_ROWS = 1000;
     const issuedSheets: any[] = [];
 
-    for (const sheet of sheets) {
+    for (const [sheetIdx, sheet] of sheets.entries()) {
       const carries = sheet.carriesCompanyItems;
       // 청구할 내용이 없는 장은 만들지 않는다 — 0원 청구서가 나가는 것을 막는다.
       // ★ 2026-07-26 조건 = "청구 내용 0"(Harold 지시).
@@ -458,7 +469,8 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
         sheet.amount > 0 || sheet.items.some((i) => (Number(i.success) || 0) > 0);
       if (!hasBillableContent && !(carries && (aiCreditSupply > 0 || aiCreditCount > 0))) continue;
 
-      const sheetSubtotal = sheet.amount + (carries ? aiCreditSupply : 0);
+      // ★ 2026-07-30 장 공급가액 = 그 장의 절사된 항목줄 합 — 문서에 인쇄되는 항목표와 정의상 일치.
+      const sheetSubtotal = sheetFloored[sheetIdx] + (carries ? aiCreditSupply : 0);
       const sheetVat = vatOfSupply(sheetSubtotal);
       const t = sheet.totals;
 

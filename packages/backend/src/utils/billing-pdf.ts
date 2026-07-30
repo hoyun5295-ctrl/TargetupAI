@@ -445,8 +445,13 @@ export async function renderBillingStatementPdf(bil: any, items: any[]): Promise
       doc.rect(50, iy, 495, 22).fill('#eef2ff');
       setFont(true);
       doc.fontSize(9).fillColor(primary);
-      doc.text('합계', cols[0].x + 4, iy + 6);
-      doc.text(`₩${detailSubtotal.toLocaleString()}`, cols[8].x + 4, iy + 6, { width: cols[8].w - 8, align: 'right', lineBreak: false });
+      doc.text('합계 (원 미만 절사)', cols[0].x + 4, iy + 6);
+      // ★ 2026-07-30 합계 = 헤더 공급가액 − AI 크레딧(상세에 없는 축) — 1페이지 항목표와 정의상 일치.
+      //   일자행이 정확값(소수)이 되면서 세로합(detailSubtotal)에 소수가 생길 수 있는데,
+      //   Σ소수를 그대로 찍으면 0726 `₩13,397,454.84` 사고가 재현되고, floor(Σ)는 1페이지와 1원 갈릴 수 있다.
+      //   최종 표시 금액은 항상 절사된 항목줄 합 하나에서 나온다(Harold 0730 — 절사는 최종 금액에서 1회).
+      const detailTotalShown = floorWon(n(bil.subtotal) - n(bil.ai_credit_supply));
+      doc.text(`₩${detailTotalShown.toLocaleString()}`, cols[8].x + 4, iy + 6, { width: cols[8].w - 8, align: 'right', lineBreak: false });
     }
 
     doc.end();

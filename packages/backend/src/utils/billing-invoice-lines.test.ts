@@ -229,3 +229,28 @@ describe('요금제 포함 청구서 세로합 (2026-07-26)', () => {
     expect(dbRows.reduce((s, r) => s + Number(r.fail_count), 0)).toBe(2);
   });
 });
+
+// ★ 2026-07-30 절사 위치 정정(Harold) — 절사는 항목줄에서 1회. 서수란 0729 접수 수치 그대로 고정한다.
+describe('항목줄 절사 — 소수 단가 (2026-07-30)', () => {
+  it('일자별 정확값 행이 합쳐진 항목줄은 정확히 floor(수량×단가)다 — 1,733×7.2 → 12,477 (12,456이 아니다)', () => {
+    const days = [311, 402, 297, 356, 188, 179]; // 합 1,733
+    const rows = days.map((s, i) => ({
+      channel: 'agent', message_type: 'SMS', item_date: `2026-07-0${i + 1}`,
+      unit_price: 7.2, success_count: s, amount: s * 7.2, plan_days: null, plan_month_days: null,
+    }));
+    const lines = buildInvoiceLines(rows);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].count).toBe(1733);
+    expect(lines[0].amount).toBe(12477); // 옛 행 단위 절사는 12,456을 만들었다
+    expect(Number.isInteger(lines[0].amount)).toBe(true);
+  });
+
+  it('기존 발행분(행 단위 절사로 저장된 정수 금액)은 값이 변하지 않는다 — 절사가 멱등이라 옛 장 검산도 통과', () => {
+    const rows = [
+      { channel: 'web', message_type: 'LMS', item_date: '2026-07-01', unit_price: 22.8, success_count: 100, amount: 2280, plan_days: null, plan_month_days: null },
+      { channel: 'web', message_type: 'LMS', item_date: '2026-07-02', unit_price: 22.8, success_count: 51, amount: 1162, plan_days: null, plan_month_days: null },
+    ];
+    const lines = buildInvoiceLines(rows);
+    expect(lines[0].amount).toBe(2280 + 1162);
+  });
+});

@@ -9,6 +9,7 @@ import {
   type BillingUsageRow, type AgentUnitPriceRow, type PricedBillingItem,
 } from './send-usage-aggregation';
 import type { PayAgentStoreRow } from './pay-stats';
+import { sumFlooredInvoiceLines } from './billing-invoice-lines';
 
 describe('rollupUsageByPeriod — 청구 사용량 일자 집계 → 기간×유형 롤업 (2026-07-25)', () => {
   const day = (t: number, s: number, f = 0, p = 0) => ({ total: t, success: s, fail: f, pending: p });
@@ -293,6 +294,37 @@ describe('resolveBillingUnitPrices — 청구 단가 스냅샷 (2026-07-25)', ()
 // ============================================================
 //  청구용 통합 집계 (2026-07-26 — 정산 재구성 ①)
 // ============================================================
+
+
+// ★ 2026-07-30 절사 위치 정정의 장 분리 계약 — 장 = 독립 문서 = 절사 단위.
+//   계정별 발행은 장이 늘어 절사 횟수도 늘므로 합산 발행과 1원 수준 차이가 **의도적으로** 난다
+//   (전역 절사 후 배분하면 각 장의 공급가가 그 장 항목표와 어긋난다 — 서수란 0729 문제의 장 단위 재발).
+//   방향은 항상 고객 유리(장 합 ≤ 합산). Codex 0730 지적 ①에 대한 불수용 근거의 박제.
+describe('장별 절사 계약 — 합산 vs 계정별 (2026-07-30)', () => {
+  const mk = (userId: string, success: number): PricedBillingItem => ({
+    channel: 'web', itemDate: '2026-07-01', typeKey: 'SMS', userId, agentSendId: null,
+    total: success, success, fail: 0, pending: 0, agentId: null,
+    unitPrice: 7.2, amount: success * 7.2, amountExact: success * 7.2, planDays: null, planMonthDays: null,
+  });
+
+  it('합산 1장 = floor(총수량×단가), 계정별 N장 = 각 장 floor의 합 — 1원 차이는 의도(고객 유리)', () => {
+    const items = [mk('u1', 1), mk('u2', 4)]; // 7.2 + 28.8 = 36.0
+    const combined = splitBillingSheets(items, 'combined').map((sh) => sumFlooredInvoiceLines(sh.items as any));
+    const byUser = splitBillingSheets(items, 'by_user').map((sh) => sumFlooredInvoiceLines(sh.items as any));
+    expect(combined.reduce((a, b) => a + b, 0)).toBe(36);          // floor(36.0)
+    expect(byUser.reduce((a, b) => a + b, 0)).toBe(35);            // floor(7.2)+floor(28.8) = 7+28
+    // 방향 불변식 — 장이 늘수록 금액은 같거나 줄어든다(고객에게 불리해지는 방향은 없다)
+    expect(byUser.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(combined.reduce((a, b) => a + b, 0));
+  });
+
+  it('각 장의 공급가는 그 장 항목표의 절사 합과 정확히 같다 — 장만 받아 본 고객의 검산이 성립한다', () => {
+    const items = [mk('u1', 1), mk('u2', 4)];
+    for (const sh of splitBillingSheets(items, 'by_user')) {
+      const lineSum = sumFlooredInvoiceLines(sh.items as any);
+      expect(Number.isInteger(lineSum)).toBe(true);
+    }
+  });
+});
 
 describe('splitBillingSheets — 발행 단위 장 분할 (2026-07-26)', () => {
   const pi = (o: Partial<PricedBillingItem>): PricedBillingItem => ({
@@ -879,27 +911,33 @@ describe('priceBillingRows — 청구 상세 단가·금액 부착 (2026-07-26)'
     expect(out.amountByChannel).toEqual({ plan: 0, web: 900, agent: 0, test: 81, spam: 18 });
   });
 
-  it('소수 단가는 행 단위로 원 미만을 절사하고, 절사 전 값을 amountExact로 함께 남긴다 (2026-07-26)', () => {
-    // 금강제화 축 — 부가세 별도 단가 LMS 22.80 / SMS 7.20
+  it('★소수 단가 행은 절사 없이 정확값이다 — 절사는 항목줄에서 1회 (2026-07-30 Harold 정정)', () => {
+    // 0726 "행 단위 절사"는 지시("최종 청구 금액의 소수점만 버려라")의 과대 해석이었다.
+    // 일자행마다 절사하면 항목표가 수량×단가와 수십 원 어긋난다(서수란 0729 접수:
+    // 1,733×7.2 = 12,477.6인데 12,456 표시). 행은 정확값, 절사는 buildInvoiceLines 항목줄에서 1회.
     const priceEx = { ...web, LMS: 22.8, SMS: 7.2 };
     const out = priceBillingRows([
       r({ typeKey: 'LMS', success: 2758 }),   // 62,882.4
       r({ typeKey: 'SMS', success: 6793 }),   // 48,909.6
     ], priceEx, []);
 
-    expect(out.items.map((i) => i.amount)).toEqual([62882, 48909]);
-    out.items.forEach((i) => expect(Number.isInteger(i.amount)).toBe(true));
-    expect(out.items[0].amountExact).toBeCloseTo(62882.4, 6);
-    expect(out.items[1].amountExact).toBeCloseTo(48909.6, 6);
-
-    // 저장·표시용 채널 소계는 절사 후, 교차검증용 소계는 절사 전
-    expect(out.amountByChannel.web).toBe(62882 + 48909);
+    expect(out.items[0].amount).toBeCloseTo(62882.4, 6);
+    expect(out.items[1].amount).toBeCloseTo(48909.6, 6);
+    // amount === amountExact — 발송 행에서 두 축은 같은 값이다(절사 축이 사라졌으므로)
+    out.items.forEach((i) => expect(i.amount).toBe(i.amountExact));
+    expect(out.amountByChannel.web).toBeCloseTo(62882.4 + 48909.6, 6);
     expect(out.amountExactByChannel.web).toBeCloseTo(62882.4 + 48909.6, 6);
   });
 
-  it('절사가 부동소수점 오차로 1원을 깎지 않는다', () => {
-    const out = priceBillingRows([r({ typeKey: 'SMS', success: 720 })], { ...web, SMS: 7 }, []);
-    expect(out.items[0].amount).toBe(5040);
+  it('★서수란 0729 접수 재현 — 일자별로 쪼개 절사 없이 합하면 정확히 수량×단가가 된다', () => {
+    // 1,733건이 여러 날로 쪼개져도 Σ(일자수량×7.2) = 1,733×7.2 = 12,477.6 — 절사 누적 손실 0.
+    const days = [311, 402, 297, 356, 188, 179]; // 합 1,733
+    const out = priceBillingRows(
+      days.map((s, i) => r({ typeKey: 'SMS', success: s, itemDate: `2026-07-${String(i + 1).padStart(2, '0')}` })),
+      { ...web, SMS: 7.2 }, [],
+    );
+    const sum = out.items.reduce((s, i) => s + i.amount, 0);
+    expect(sum).toBeCloseTo(1733 * 7.2, 6); // 12,477.6 — 항목줄 절사가 12,477을 만든다
   });
 
   it('에이전트는 회사 단가가 아니라 발송ID별 단가로 계산되고 agent_id FK가 붙는다', () => {

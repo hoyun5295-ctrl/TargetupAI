@@ -69,14 +69,20 @@ function parseInfo(raw: string): BizRegistrationInfo | null {
   }
 }
 
-/** 사업자등록증 이미지 1장 → 기재 정보. 판독 불가 시 throw(호출측이 사용자 안내). */
+// ★ 2026-07-30 PDF 허용(서수란 접수 — 고객사 보관 파일 90%가 PDF). 이 CT에서만 넓힌다 —
+//   공유 상수(ALLOWED_IMAGE_MEDIA_TYPES)를 넓히면 행사 이미지 판독 등 다른 소비처까지 열린다.
+//   PDF는 services/ai.ts가 document 블록으로 보낸다(기본 모델 전용 — 폴백 모델은 PDF 미지원이라
+//   기본 모델 장애 중에는 명확한 판독 실패로 떨어진다. 그때는 이미지로 재시도 안내).
+const BIZREG_MEDIA_TYPES = new Set([...ALLOWED_IMAGE_MEDIA_TYPES, 'application/pdf']);
+
+/** 사업자등록증 이미지/PDF 1장 → 기재 정보. 판독 불가 시 throw(호출측이 사용자 안내). */
 export async function extractBizRegistration(params: {
   image: EventImageInput;
   adminId?: string | null;
 }): Promise<BizRegistrationInfo> {
   const { image } = params;
-  if (!image || typeof image.data !== 'string' || image.data.length === 0 || !ALLOWED_IMAGE_MEDIA_TYPES.has(image.media_type)) {
-    throw new Error('판독할 이미지가 없습니다. jpg/png/webp 이미지를 올려주세요.');
+  if (!image || typeof image.data !== 'string' || image.data.length === 0 || !BIZREG_MEDIA_TYPES.has(image.media_type)) {
+    throw new Error('판독할 파일이 없습니다. jpg/png/webp 이미지 또는 PDF를 올려주세요.');
   }
 
   const raw = await callAIWithFallback({

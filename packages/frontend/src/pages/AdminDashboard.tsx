@@ -8068,8 +8068,8 @@ const handleApproveRequest = async (id: string) => {
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 9l5-5 5 5M12 4v12" />
                           </svg>
-                          {btBizExtracting ? '사업자등록증 읽는 중...' : '사업자등록증으로 자동입력 (JPG·PNG·WebP)'}
-                          <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" disabled={btBizExtracting}
+                          {btBizExtracting ? '사업자등록증 읽는 중...' : '사업자등록증으로 자동입력 (JPG·PNG·WebP·PDF)'}
+                          <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden" disabled={btBizExtracting}
                             onChange={(e) => { handleBizRegistrationFile(e.target.files?.[0] || null); e.target.value = ''; }} />
                         </label>
                         <div className="space-y-2.5">
@@ -10401,13 +10401,16 @@ const handleApproveRequest = async (id: string) => {
                               <tr>
                                 {/* ★ 2026-07-26 라벨 정정 — 이 합계는 AI 크레딧·부가세가 빠진 값이다.
                                     '합계'라고만 쓰면 상단 카드의 합계(총액)와 다른 이유를 알 수 없다. */}
-                                <td colSpan={3} className="px-3 py-2.5 font-bold text-indigo-800">항목 합계 <span className="font-normal text-xs text-indigo-500">(AI 크레딧·부가세 제외)</span></td>
+                                <td colSpan={3} className="px-3 py-2.5 font-bold text-indigo-800">항목 합계 <span className="font-normal text-xs text-indigo-500">(AI 크레딧·부가세 제외 · 원 미만 절사)</span></td>
                                 <td className="px-3 py-2.5 text-right tabular-nums font-medium">{billingFmt(detailItems.reduce((s: number, i: any) => s + Number(i.total_count), 0))}</td>
                                 <td className="px-3 py-2.5 text-right tabular-nums font-medium text-green-700">{billingFmt(detailItems.reduce((s: number, i: any) => s + Number(i.success_count), 0))}</td>
                                 <td className="px-3 py-2.5 text-right tabular-nums font-medium text-red-600">{billingFmt(detailItems.reduce((s: number, i: any) => s + Number(i.fail_count), 0))}</td>
                                 <td className="px-3 py-2.5 text-right tabular-nums">{billingFmt(detailItems.reduce((s: number, i: any) => s + Number(i.pending_count), 0))}</td>
                                 <td className="px-3 py-2.5"></td>
-                                <td className="px-3 py-2.5 text-right tabular-nums font-bold text-indigo-800">{billingFmtWon(detailItems.reduce((s: number, i: any) => s + Number(i.amount), 0))}</td>
+                                {/* ★ 2026-07-30 일자행이 정확값(소수)이 되면서 세로합에 소수가 생긴다.
+                                    표시 금액은 항목줄 절사 합(서버 lines — 청구서 1페이지와 같은 값)으로 통일한다.
+                                    Σ소수를 floor하면 항목표와 1원 갈릴 수 있어 쓰지 않는다. */}
+                                <td className="px-3 py-2.5 text-right tabular-nums font-bold text-indigo-800">{billingFmtWon(detailLines.length > 0 ? detailLines.reduce((s: number, l: any) => s + Number(l.amount), 0) : Math.floor(detailItems.reduce((s: number, i: any) => s + Number(i.amount), 0)))}</td>
                               </tr>
                             </tfoot>
                           </table>

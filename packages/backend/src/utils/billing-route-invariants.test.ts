@@ -125,13 +125,17 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
     expect(billingSrc).toContain('vatOfSupply');
   });
 
-  it('청구 금액은 원 미만 절사를 거친다 — 소수가 남으면 세금계산서와 안 맞고 PDF 칸을 넘겨 겹친다 (2026-07-26)', () => {
-    // ★ 2026-07-28 발행 코어 추출로 스캔 대상 = billing-issue.ts.
-    // 공급가액은 절사된 상세 행의 정수 덧셈이어야 한다(헤더가 별도로 `수량 × 단가`를 더하면 소수가 되살아난다).
-    expect(issueSrc).toContain('billingItems.reduce');
-    expect(issueSrc, '헤더 교차검증은 절사 전 값(amountExact)으로 해야 탐지력이 유지된다').toContain('i.amountExact');
+  it('★공급가액은 장별 "절사된 항목줄 합"에서 파생된다 — 절사는 최종 금액에서 1회 (2026-07-30 Harold 정정)', () => {
+    // 0726 "행 단위 절사"는 과대 해석이었다(서수란 0729 접수 — 항목표가 수량×단가와 수십 원 어긋남).
+    // 새 계약: 일자행 정확값 → buildInvoiceLines 항목줄 절사 1회 → 헤더 = 장별 절사 합의 정수 덧셈.
+    expect(issueSrc, '헤더는 장별 절사 합(sumFlooredInvoiceLines)에서 파생돼야 한다').toContain('sumFlooredInvoiceLines');
+    expect(issueSrc, '장 공급가액도 같은 파생값을 쓴다(sheet.amount 직접 사용 금지 — 그건 정확값 축이다)').toContain('sheetFloored[sheetIdx]');
+    expect(issueSrc, '헤더 교차검증은 정확값 축(amountExact)으로 해야 탐지력이 유지된다').toContain('i.amountExact');
     expect(issueSrc, '부가세 산출은 vatOfSupply만 쓴다').toContain('vatOfSupply');
     expect(issueSrc).not.toMatch(/Math\.round\(\s*\w*[sS]ubtotal\s*\*\s*0\.1\s*\)/);
+    // 항목줄 절사의 소유자는 buildInvoiceLines 하나다 — 발행 코드가 따로 절사하면 두 절사가 갈라진다.
+    const linesSrc = readFileSync(resolve(__dirname, 'billing-invoice-lines.ts'), 'utf8');
+    expect(linesSrc, '항목줄 절사는 buildInvoiceLines 안에 있어야 한다').toMatch(/amount:\s*floorWon\(line\.amount\)/);
   });
 
   it('청구서 항목표에 페이지 넘김이 있다 — 줄이 많으면 합계·감사 인사·하단을 뚫고 인쇄된다 (2026-07-26)', () => {

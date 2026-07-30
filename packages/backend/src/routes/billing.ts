@@ -28,7 +28,7 @@ import { drawPartyBlock, drawThanksNote, THANKS_NOTE_HEIGHT } from '../utils/pdf
 import { renderBillingStatementPdf, renderInvoicePdf, loadBillingStatementData, loadInvoicePdfData } from '../utils/billing-pdf';
 import { retryUnsentConfirmations } from '../utils/invoice-confirm';
 import { normalizeUnitPriceBasis } from '../utils/unit-price';
-import { buildInvoiceLines, checkInvoiceLinesAgainstHeader } from '../utils/billing-invoice-lines';
+import { buildInvoiceLines, checkInvoiceLinesAgainstHeader, sumFlooredInvoiceLines } from '../utils/billing-invoice-lines';
 import {
   loadPlanChanges, buildPlanSegments, sumPlanSegments, evaluatePlanHistoryGate,
   countPlanChanges, planChangesFingerprint,
@@ -754,24 +754,27 @@ router.put('/confirmations/:id/issue-date', async (req: Request, res: Response) 
 //   크레딧 미차감(슈퍼관리자 내부 기능). CT = utils/biz-registration-extract.ts.
 const bizRegUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  // ★ 2026-07-30 PDF 허용(서수란 접수 — 고객사 보관 파일 90%가 PDF) + 스캔 PDF 대비 10MB로 상향
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, cb) => {
     const mime = (file.mimetype || '').toLowerCase();
-    if (['image/jpeg', 'image/png', 'image/webp'].includes(mime)) cb(null, true);
-    else cb(new Error('JPG, PNG, WebP 이미지만 업로드 가능합니다.'));
+    if (['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(mime)) cb(null, true);
+    else cb(new Error('JPG, PNG, WebP 이미지 또는 PDF만 업로드 가능합니다.'));
   },
 });
+/** PDF 매직 바이트(%PDF) — 확장자·mimetype 위장 차단. 이미지 스니핑과 같은 원칙이다. */
+const sniffPdf = (buf: Buffer): boolean => buf.length >= 4 && buf.toString('latin1', 0, 4) === '%PDF';
 router.post('/biz-registration-extract', (req: Request, res: Response) => {
   bizRegUpload.single('image')(req as any, res as any, async (uploadErr: any) => {
     if (uploadErr) {
-      return res.status(400).json({ success: false, error: uploadErr.message || '이미지 업로드 오류' });
+      return res.status(400).json({ success: false, error: uploadErr.message || '파일 업로드 오류' });
     }
     try {
       const file = (req as any).file as Express.Multer.File | undefined;
-      if (!file) return res.status(400).json({ success: false, error: '사업자등록증 이미지를 올려주세요.' });
-      // 매직 바이트 검증 — 확장자·mimetype 위장 차단(event-image-extract 자산 재사용)
-      const sniffed = sniffImageMediaType(file.buffer);
-      if (!sniffed) return res.status(400).json({ success: false, error: '이미지 형식을 확인할 수 없습니다. JPG/PNG/WebP로 다시 올려주세요.' });
+      if (!file) return res.status(400).json({ success: false, error: '사업자등록증 이미지 또는 PDF를 올려주세요.' });
+      // 매직 바이트 검증 — 확장자·mimetype 위장 차단(event-image-extract 자산 재사용 + PDF 스니핑)
+      const sniffed = sniffPdf(file.buffer) ? 'application/pdf' : sniffImageMediaType(file.buffer);
+      if (!sniffed) return res.status(400).json({ success: false, error: '파일 형식을 확인할 수 없습니다. JPG/PNG/WebP 이미지나 PDF로 다시 올려주세요.' });
       const info = await extractBizRegistration({
         image: { media_type: sniffed, data: file.buffer.toString('base64') },
         adminId: (req as any).user?.userId || null,
@@ -1233,8 +1236,11 @@ router.get('/preview', async (req: Request, res: Response) => {
     const aiCreditCount = chargeCount + overageCount;
     const aiCreditSupply = chargeSupply + overageCount * CREDIT_UNIT_PRICE;
 
-    // 4) 금액 — 발행과 같은 식(에이전트·요금제 포함, 원 미만 절사 후 정수 덧셈)
-    const subtotal = previewItems.reduce((s, i) => s + (Number(i.amount) || 0), 0) + aiCreditSupply;
+    // 4) 금액 — 발행 코어와 같은 절사 경로(항목줄 1회 절사 — 0730 정정 후 일자행은 소수라
+    //    raw 합산이면 미리보기에 소수가 노출되고 실발행과 갈린다. Codex 0730 지적 ② 수용).
+    //    계정별(by_account) 발행은 장별 절사라 이 합산 미리보기와 1원 수준 차이가 날 수 있다 —
+    //    장 = 독립 문서 = 절사 단위이므로 의도된 차이다(billing-issue 주석 참조).
+    const subtotal = sumFlooredInvoiceLines(previewItems as any) + aiCreditSupply;
     const vat = vatOfSupply(subtotal);
     const totalAmount = subtotal + vat;
 

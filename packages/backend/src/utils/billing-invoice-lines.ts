@@ -16,6 +16,7 @@
 
 import { shiftDayKey } from './plan-proration';
 import { BILLING_TYPES } from './billing-types';
+import { floorWon } from './money';
 
 /** 청구서 항목 한 줄 */
 export interface InvoiceLine {
@@ -141,7 +142,47 @@ export function buildInvoiceLines(items: any[]): InvoiceLine[] {
     if (a.unitPrice !== b.unitPrice) return a.unitPrice - b.unitPrice;
     // 요금제는 같은 플랜·같은 단가로 여러 구간이 나온다 — 구간 시작일로 순서를 고정한다(D150-4 계열).
     return String(a.itemDate || '').localeCompare(String(b.itemDate || ''));
-  });
+  }).map((line) => ({
+    // ★ 2026-07-30 원 미만 절사는 **여기, 항목줄에서 1회**다(Harold 정정 — 0726 지시의 원뜻은
+    //   "최종 청구 금액의 소수점만 버려라"였는데 일자행마다 절사해 항목표가 수량×단가와 수십 원씩
+    //   어긋났다. 서수란 0729 접수). 일자행(billing_items.amount)은 정확값이고, 같은 단가 그룹은
+    //   Σ(일자수량×단가) = 총수량×단가라 이 절사값이 정확히 floor(수량×단가)다.
+    //   요금제 줄은 구간 단위로 이미 정수라 여기 절사는 무해(멱등)하다.
+    ...line,
+    amount: floorWon(line.amount),
+  }));
+}
+
+/**
+ * (순수) 발행 시점의 메모리 항목(PricedBillingItem 모양) → `buildInvoiceLines` 입력 행.
+ * 발행(billing-issue)과 표시(PDF·메일·화면)가 **같은 그룹핑·같은 절사**를 쓰게 하는 어댑터다 —
+ * 헤더 공급가액이 항목줄 절사 합에서 파생되므로, 그룹핑 코드가 둘이면 언젠가 1원이 갈라진다.
+ */
+export function invoiceRowFromPricedItem(it: {
+  channel: string;
+  typeKey: string;
+  itemDate?: string | null;
+  unitPrice: number;
+  success?: number;
+  amount: number;
+  planDays?: number | null;
+  planMonthDays?: number | null;
+}): any {
+  return {
+    channel: it.channel,
+    message_type: it.typeKey,
+    item_date: it.itemDate ?? null,
+    unit_price: it.unitPrice,
+    success_count: Number(it.success) || 0,
+    amount: it.amount,
+    plan_days: it.planDays ?? null,
+    plan_month_days: it.planMonthDays ?? null,
+  };
+}
+
+/** (순수) 항목 묶음의 청구 합 = 절사된 항목줄들의 정수 합. 헤더·장 공급가액이 이 값에서 파생된다. */
+export function sumFlooredInvoiceLines(items: Array<Parameters<typeof invoiceRowFromPricedItem>[0]>): number {
+  return buildInvoiceLines(items.map(invoiceRowFromPricedItem)).reduce((s, l) => s + (Number(l.amount) || 0), 0);
 }
 
 export interface InvoiceLineCheck {
