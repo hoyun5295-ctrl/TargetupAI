@@ -21,7 +21,7 @@ export default function FooterEditor({ props, onUpdate }: EditorProps<FooterProp
         <TextArea value={props.legal_text} onChange={(v) => onUpdate({ legal_text: v })} rows={3} placeholder="(주)브랜드 | 대표 홍길동 | 사업자 000-00-00000" />
       </Field>
 
-      <Field label="수신거부 링크 표시" hint="KISA 가이드 준수 권장">
+      <Field label="수신거부 링크 표시" hint="광고 문자 규정상 표시를 권장해요">
         <Toggle value={props.show_unsubscribe_link !== false} onChange={(v) => onUpdate({ show_unsubscribe_link: v })} labelOn="표시" labelOff="숨김" />
       </Field>
     </>

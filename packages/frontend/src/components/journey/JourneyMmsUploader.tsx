@@ -192,10 +192,11 @@ export default function JourneyMmsUploader({ value, onChange, disabled, maxCount
         className="hidden"
       />
 
+      {/* ★ 2026-07-30 Harold 지적 — 내부 코드명(KISA 매트릭스·D152-1 영구 룰)이 고객 화면에 노출되던 문구 정정. 규칙 자체(JPG·300KB·ASCII 변환)는 동일 */}
       <div className="text-[10px] text-cyan-200/60 leading-relaxed">
-        JPG만 / 300KB 이하 / 1280x720 권장 (KISA 매트릭스).
-        한글 파일명은 자동 ASCII 변환됩니다 (D152-1 영구 룰).
-        PNG/GIF는 통신사 거절 위험 — JPG로 변환 후 업로드해주세요.
+        JPG만 / 300KB 이하 / 1280x720 권장.
+        한글 파일명은 자동으로 영문 파일명으로 바뀝니다.
+        PNG/GIF는 통신사에서 거절될 수 있어요 — JPG로 변환 후 업로드해주세요.
       </div>
 
       {error && (

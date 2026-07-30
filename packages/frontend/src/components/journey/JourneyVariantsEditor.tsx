@@ -344,7 +344,7 @@ export default function JourneyVariantsEditor({
       <div className="text-[11px] text-violet-200/60 leading-relaxed">
         Variant A/B/C에 다른 메시지를 작성하면 Thompson Sampling이 누적 발송 결과(클릭/전환)를 학습하여 자동으로 최선의 variant를 선택합니다.
         <br />
-        <span className="text-amber-300/70">AI 임의 혜택 작성 금지 — 회사 admin이 직접 작성 (영구 룰).</span>
+        <span className="text-amber-300/70">구체 혜택(%·원·쿠폰)은 AI가 임의로 만들지 않아요 — 관리자가 직접 작성해주세요.</span>
       </div>
 
       {/* ★ D211+ Phase A 3번 (2026-05-23 Harold 명시): AI 자동 생성 영역 — 3 톤 (감성/실용/캐주얼) */}

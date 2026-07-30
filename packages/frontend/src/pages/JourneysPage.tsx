@@ -2310,7 +2310,7 @@ export default function JourneysPage() {
               <div className="text-[11px] text-white/50 flex flex-wrap gap-x-3 gap-y-0.5">
                 <span>트리거: {aiPkg.triggerEvent}</span>
                 <span>재진입: {aiPkg.allowReentry ? (aiPkg.reentryCooldownDays ? `${aiPkg.reentryCooldownDays}일 후` : '즉시') : '불가'}</span>
-                <span className="text-amber-300/80">(광고)+무료거부+발송시간+KISA 제목 자동 합성</span>
+                <span className="text-amber-300/80">(광고) 표기 · 무료거부 번호 · 발송 가능 시간 · 광고 제목 자동 합성</span>
               </div>
             </div>
 

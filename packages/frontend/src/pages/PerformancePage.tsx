@@ -1131,7 +1131,7 @@ export default function PerformancePage() {
           </PerfModal>
 
           {/* 채널 ROI 모달 */}
-          <PerfModal open={activeModal === 'channel'} onClose={closeModal} title="채널 ROI" icon={<Sparkles className="w-4 h-4 text-fuchsia-300" />} source="campaigns + MySQL 큐 직접 집계 (D144 기준)" wide>
+          <PerfModal open={activeModal === 'channel'} onClose={closeModal} title="채널 ROI" icon={<Sparkles className="w-4 h-4 text-fuchsia-300" />} source="캠페인·발송 큐 직접 집계" wide>
             {snapshot.byChannelROI.length > 0 ? (
               <>
                 <ResponsiveContainer width="100%" height={240}>
@@ -1346,7 +1346,7 @@ export default function PerformancePage() {
           </PerfModal>
 
           {/* 캠페인 드릴다운 모달 */}
-          <PerfModal open={activeModal === 'campaigns'} onClose={closeModal} title="캠페인 드릴다운" icon={<Sparkles className="w-4 h-4 text-fuchsia-300" />} source="campaigns + MySQL 큐 직접 집계 (D144 기준)" wide>
+          <PerfModal open={activeModal === 'campaigns'} onClose={closeModal} title="캠페인 드릴다운" icon={<Sparkles className="w-4 h-4 text-fuchsia-300" />} source="캠페인·발송 큐 직접 집계" wide>
             <div className="flex flex-col md:flex-row gap-2 mb-3">
               <form onSubmit={handleSearch} className="flex-1 flex gap-2">
                 <div className="relative flex-1">
