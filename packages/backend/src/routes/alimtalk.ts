@@ -379,6 +379,44 @@ router.get('/senders', async (req: Request, res: Response) => {
   }
 });
 
+// ── 슈퍼관리자 디버그: 우리 IMC 계정의 발신프로필 "목록" raw 조회 (채널명 검색)
+//    ★2026-07-30 신설 — 옛 senderKey로 getSender를 부르면 4011만 나와서 "이관 때 키가 새로 발급된 것"과
+//    "이관이 우리 계정에 반영되지 않은 것"을 가릴 수 없다(아이올리 다우 4키 전부 4011 실측).
+//    계정에 실제로 무엇이 있는지는 목록으로만 확인된다. listSenders CT는 있었는데 소비처가 0이었다.
+//    DB 무접촉(read-only)·응답은 계정 판별용이라 IMC 원문 그대로(super_admin 전용).
+//    `/senders/:id`보다 앞에 배치 — 뒤에 두면 id='imc'로 가로채인다 (D162-4 교훈).
+router.get('/senders/imc', requireSuperAdmin as any, async (req: Request, res: Response) => {
+  const nameRaw = typeof req.query.name === 'string' ? req.query.name.trim() : '';
+  const pageNum = Number(req.query.page);
+  const sizeNum = Number(req.query.size);
+  const params: { name?: string; page?: number; size?: number } = {};
+  if (nameRaw) params.name = nameRaw;
+  if (Number.isFinite(pageNum) && pageNum > 0) params.page = Math.floor(pageNum);
+  // 목록이 커도 터미널에서 잘라 보므로 상한을 둔다(운영 조회용 디버그 endpoint).
+  if (Number.isFinite(sizeNum) && sizeNum > 0) params.size = Math.min(Math.floor(sizeNum), 100);
+  try {
+    const r = await imc.listSenders(params);
+    console.log(
+      `[alimtalk][debug-listSenders] name=${nameRaw || '-'} code=${r.code} total=${r.data?.total} count=${r.data?.list?.length ?? 0}`,
+    );
+    return res.json({ success: true, imc: r });
+  } catch (err: any) {
+    if (err instanceof ImcApiError) {
+      console.log(
+        `[alimtalk][debug-listSenders] name=${nameRaw || '-'} 실패 code=${err.code} http=${err.httpStatus}`,
+      );
+      return res.json({
+        success: false,
+        imcCode: err.code,
+        httpStatus: err.httpStatus,
+        responseBody: err.responseBody ?? null,
+        message: err.message,
+      });
+    }
+    return handleImcError(res, err);
+  }
+});
+
 // ── 슈퍼관리자 디버그: 임의 senderKey IMC 발신프로필 raw 1콜 조회
 //    Track B 관문 1 실측용 (docs/2026-07-14-template-migration-track-bc-design.md §5-1).
 //    kakao_sender_profiles 미등록 키도 IMC에 직접 조회 — 우리 IMC 계정에서 보이는지(같은 계정 소속)를 확인한다.
