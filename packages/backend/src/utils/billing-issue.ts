@@ -641,3 +641,218 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
     },
   };
 }
+
+/**
+ * ★ 2026-07-30 최소과금 정액 발행 (서수란 접수 · Harold 확정 — "금액이 너무 안 나오는 업체는 기본요금 5만+VAT 5천").
+ *
+ * 대상 = `company_billing_settings.min_charge_supply`가 설정된 회사. 이 회사들은 일괄발급 담기에서 빠지고
+ * (filterBillableCompanies), 최소과금 모달의 [발행]이 이 함수로 **기본요금 정액 청구서**를 만든다.
+ * 발행 후 메일·컨펌·세금계산서는 기존 정산 흐름(발행 목록 메일 발송·invoice_confirmations) 그대로.
+ *
+ * 안전핀 3 (전부 fail-closed — 티켓 원문이 "5만 미만의 경우"라는 조건부라서):
+ *  1. **사용량 초과 차단** — 그 달 실사용 공급가를 발행 코어와 같은 집계·단가로 정확 계산해 최소과금을
+ *     넘으면 발행 거부(일반 발행 안내). 정액 5만을 끊으면 회사 손해가 나는 달을 막는다.
+ *  2. **단가 미설정 = 판정 불가 = 거부** — "5만 미만"인지 계산할 수 없으면 발행하지 않는다.
+ *  3. **미소비 추가 항목(080 등) 존재 = 거부** — 정액과 extra가 섞이면 이중청구/누락 어느 쪽이든 난다
+ *     (벨루티류 080+최소과금 겹침의 규칙은 서 팀장 확인 후 별도). 요금제(plan_id) 회사도 부적격.
+ *
+ * 발행 불변식은 issueBilling과 동일 — 회사 advisory lock·겹침 409·수동완료 409·단일 트랜잭션.
+ */
+export async function issueMinimumChargeBilling(input: {
+  company_id: string;
+  billing_start: string;
+  billing_end: string;
+  adminId?: string | null;
+}): Promise<any> {
+  const { company_id, billing_start, billing_end } = input;
+  if (!company_id || !billing_start || !billing_end || billing_start > billing_end) {
+    throw new BillingIssueError(400, { error: '필수: company_id, billing_start, billing_end (시작 ≤ 종료)' });
+  }
+
+  // ★ Codex 1R 수용 — **끝나지 않은 달은 발행하지 않는다**(KST). 사용량은 가변(MySQL 발송 결과)이라
+  //   진행 중인 달의 스냅샷으로 정액을 확정하면 이후 발송이 최소과금을 넘어도 겹침 차단 때문에 되돌릴 수 없다.
+  //   서수란 정산 관례도 익월 초라 운영 영향 0.
+  const kstToday = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  if (billing_end >= kstToday) {
+    throw new BillingIssueError(422, {
+      error: `아직 끝나지 않은 기간(${billing_end}까지)은 정액 발행할 수 없습니다. 달이 끝난 뒤 발행해주세요.`,
+      code: 'MIN_CHARGE_MONTH_OPEN',
+    });
+  }
+
+  const coRes = await pool.query(
+    `SELECT c.company_name, c.billing_type, s.min_charge_supply
+       FROM companies c LEFT JOIN company_billing_settings s ON s.company_id = c.id
+      WHERE c.id = $1`,
+    [company_id],
+  );
+  if (coRes.rows.length === 0) throw new BillingIssueError(404, { error: '고객사를 찾을 수 없습니다' });
+  const co = coRes.rows[0];
+  const minCharge = Number(co.min_charge_supply);
+  if (!Number.isSafeInteger(minCharge) || minCharge <= 0) {
+    throw new BillingIssueError(422, { error: `${co.company_name}은(는) 최소과금 회사로 등록돼 있지 않습니다.`, code: 'MIN_CHARGE_NOT_SET' });
+  }
+  if (String(co.billing_type) !== 'postpaid') {
+    throw new BillingIssueError(400, { error: `${co.company_name}은(는) 후불 회사가 아닙니다.`, code: 'MIN_CHARGE_NOT_POSTPAID' });
+  }
+
+  const ledger = await loadBillingLedger(company_id);
+  if (ledger.companyPriceRow?.plan_id) {
+    throw new BillingIssueError(422, { error: `${co.company_name}은(는) 요금제(구독) 회사라 최소과금 정액 발행 대상이 아닙니다.`, code: 'MIN_CHARGE_PLAN_COMPANY' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // 발행·반영·취소와 같은 회사 잠금 — 한 회사·한 기간 = 발행 1건 불변식을 같은 축에서 지킨다.
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext('billing'))`, [String(company_id)]);
+
+    const dup = await client.query(
+      `SELECT id, billing_start, billing_end FROM billings
+        WHERE company_id = $1 AND billing_start <= $3::date AND billing_end >= $2::date`,
+      [company_id, billing_start, billing_end],
+    );
+    if (dup.rows.length > 0) {
+      const ex = dup.rows[0];
+      throw new BillingIssueError(409, {
+        error: `해당 기간과 겹치는 정산이 이미 존재합니다 (${String(ex.billing_start).slice(0, 10)} ~ ${String(ex.billing_end).slice(0, 10)})`,
+        code: 'BILLING_PERIOD_OVERLAP', existing_id: ex.id,
+      });
+    }
+    const manual = await client.query(
+      `SELECT 1 FROM billing_manual_completions
+        WHERE company_id = $1 AND period_start <= $3::date AND period_end >= $2::date LIMIT 1`,
+      [company_id, billing_start, billing_end],
+    );
+    if (manual.rows.length > 0) {
+      throw new BillingIssueError(409, { error: '해당 기간이 수동 정산완료로 처리돼 있습니다. 기록 해제 후 발행해주세요.', code: 'BILLING_MANUAL_COMPLETED' });
+    }
+    // 안전핀 3 — 그 기간에 걸리는 미소비 추가 항목(080·부가서비스)이 있으면 정액과 섞지 않는다.
+    const extras = await client.query(
+      `SELECT 1 FROM billing_extra_items
+        WHERE company_id = $1 AND billed_billing_id IS NULL
+          AND period_month <= $3::date
+          AND (period_month + INTERVAL '1 month' - INTERVAL '1 day')::date >= $2::date
+        LIMIT 1`,
+      [company_id, billing_start, billing_end],
+    );
+    if (extras.rows.length > 0) {
+      throw new BillingIssueError(422, {
+        error: `${co.company_name}에 이 기간 080·부가서비스 항목이 반영돼 있습니다. 정액 발행과 섞이면 이중청구가 되므로, 일반 발행으로 청구하거나 항목을 취소한 뒤 발행해주세요.`,
+        code: 'MIN_CHARGE_EXTRA_EXISTS',
+      });
+    }
+
+    // ★ Codex 2R 수용 — 회사 행 잠금으로 크레딧 승인·차감 경로(companies FOR UPDATE 직렬화)와 줄을 세운다.
+    //   KST 자정 경계에서 전월 타임스탬프를 가진 미커밋 크레딧 트랜잭션이 READ COMMITTED 조회에 안 보이는
+    //   창을 닫는다 — 잠금 대기 후 조회하므로 커밋된 뒤의 상태를 본다.
+    await client.query(`SELECT 1 FROM companies WHERE id = $1::uuid FOR UPDATE`, [company_id]);
+
+    // ★ Codex 1R 수용 — 미청구 AI 크레딧(승인 충전·초과사용)이 있으면 정액 발행 거부(fail-closed).
+    //   정액 청구서가 그 기간을 덮으면 겹침 차단 때문에 일반 발행이 막혀 크레딧이 영구 미청구가 된다.
+    const unbilledCredit = await client.query(
+      `SELECT 1 FROM ai_credit_requests
+        WHERE company_id = $1::uuid AND status = 'approved' AND billed = false
+          AND processed_at >= ($2 || ' 00:00:00+09')::timestamptz
+          AND processed_at < (($3::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz
+        LIMIT 1`,
+      [company_id, billing_start, billing_end],
+    );
+    const unbilledOverage = unbilledCredit.rows.length > 0 ? null : await client.query(
+      `SELECT 1 FROM ai_credit_transactions
+        WHERE company_id = $1::uuid AND type = 'deduct' AND overage_credits > 0
+          AND billed_billing_id IS NULL
+          AND created_at >= ($2 || ' 00:00:00+09')::timestamptz
+          AND created_at < (($3::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz
+        LIMIT 1`,
+      [company_id, billing_start, billing_end],
+    );
+    if (unbilledCredit.rows.length > 0 || (unbilledOverage && unbilledOverage.rows.length > 0)) {
+      throw new BillingIssueError(422, {
+        error: `${co.company_name}에 이 기간 미청구 AI 크레딧(충전·초과사용)이 있습니다. 정액으로 발행하면 크레딧이 영구 미청구가 되므로 일반 발행(일괄발급)으로 청구해주세요.`,
+        code: 'MIN_CHARGE_CREDIT_EXISTS',
+      });
+    }
+
+    // ★ Codex 1R 수용 — 실사용 공급가 판정을 **잠금 이후 단일 시점**으로. 일반 발행 코어와 같은
+    //   차단 3종을 전부 본다: 회사 단가 미설정(findUnsetPricedTypes) · 에이전트 매핑 0(agentMappingMissing) ·
+    //   단가 정의 없음/발송ID 단가 공백. 어느 하나라도 "5만 미만인지"를 계산할 수 없으면 발행하지 않는다 —
+    //   0원으로 계산된 가짜 미달로 정액을 끊으면 겹침 차단 때문에 정정 경로가 없다.
+    const { prices, unsetKeys: webUnsetPriceKeys } = resolveBillingUnitPricesDetailed(ledger.companyPriceRow);
+    const allPrices: Record<string, number> = { ...prices, SPAM_SMS: prices.SMS, SPAM_LMS: prices.LMS };
+    const usage = await buildBillingUsageRows({ companyId: company_id, startDate: billing_start, endDate: billing_end, ledger });
+    if (usage.agentMappingMissing) {
+      throw new BillingIssueError(422, {
+        error: `${co.company_name}은(는) 에이전트 사용 회사인데 발송ID 매핑이 없어 사용량을 계산할 수 없습니다. 발송ID를 등록한 뒤 발행해주세요.`,
+        code: 'MIN_CHARGE_AGENT_MAPPING_MISSING',
+      });
+    }
+    const priced = priceBillingRows(
+      usage.rows, allPrices, ledger.postpaidPriceRows,
+      normalizeUnitPriceBasis(ledger.companyPriceRow?.unit_price_basis),
+    );
+    const webUnsetPriced = findUnsetPricedTypes(webUnsetPriceKeys, usage.rows);
+    if (webUnsetPriced.length > 0 || priced.unbillableTypes.length > 0 || priced.missingAgentPrices.length > 0) {
+      throw new BillingIssueError(422, {
+        error: `${co.company_name}의 단가가 비어 있어 "사용량이 최소과금 미만인지"를 계산할 수 없습니다. 단가를 채운 뒤 발행해주세요.`,
+        code: 'MIN_CHARGE_PRICE_UNSET',
+      });
+    }
+    const usageSupply = priced.items.reduce((s, i) => s + (Number(i.amountExact) || 0), 0);
+    if (usageSupply > minCharge) {
+      throw new BillingIssueError(422, {
+        error: `${co.company_name}의 이 기간 실사용 공급가가 ${Math.ceil(usageSupply).toLocaleString()}원으로 최소과금 ${minCharge.toLocaleString()}원을 넘습니다. 일반 발행(일괄발급)으로 청구해주세요.`,
+        code: 'MIN_CHARGE_USAGE_EXCEEDS',
+        usage_supply: usageSupply,
+      });
+    }
+
+    // ★ Codex 2R 수용 — 원장 지문 재검증(일반 발행 코어와 같은 계약). ledger는 잠금 전에 읽었으므로
+    //   집계 중 단가가 바뀌었으면 "이전 단가로는 미달"인 가짜 판정일 수 있다 — 변경 시 발행 거부.
+    const fingerprintNow = await readBillingLedgerFingerprint(company_id, client);
+    if (fingerprintNow !== ledger.fingerprint) {
+      throw new BillingIssueError(422, {
+        error: '발행 중에 단가 또는 선불 설정이 변경되어 중단했습니다. 방금 단가를 저장하셨다면 그대로 다시 발행해 주세요.',
+        code: 'BILLING_LEDGER_CHANGED',
+      });
+    }
+
+    const startDate = new Date(billing_start);
+    const vat = vatOfSupply(minCharge);
+    const billingResult = await client.query(
+      `INSERT INTO billings (
+        company_id, user_id, billing_year, billing_month, billing_start, billing_end,
+        sms_success, lms_success, mms_success, kakao_success,
+        sms_unit_price, lms_unit_price, mms_unit_price, kakao_unit_price,
+        test_sms_count, test_lms_count, test_sms_unit_price, test_lms_unit_price,
+        spam_filter_sms_count, spam_filter_lms_count, spam_filter_sms_unit_price, spam_filter_lms_unit_price,
+        subtotal, vat, total_amount, ai_credit_count, ai_credit_supply, created_by, scope, batch_id
+      ) VALUES ($1, NULL, $2, $3, $4, $5, 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0, $6, $7, $8, 0, 0, $9, 'combined', NULL)
+      RETURNING *`,
+      [
+        company_id, startDate.getFullYear(), startDate.getMonth() + 1, billing_start, billing_end,
+        minCharge, vat, minCharge + vat, input.adminId ?? null,
+      ],
+    );
+    const billing = billingResult.rows[0];
+
+    // 항목 1행 — 항목표(buildInvoiceLines)가 "기본요금 1건 × 금액"으로 인쇄하고, 항목합 = 공급가액이 정의상 성립.
+    await client.query(
+      `INSERT INTO billing_items (
+        billing_id, company_id, user_id, agent_id, store_id, channel, item_date, message_type,
+        total_count, success_count, fail_count, pending_count, unit_price, amount, plan_days, plan_month_days
+      ) VALUES ($1, $2, NULL, NULL, NULL, 'extra', $3::date, 'EXTRA_BASE_FEE', 0,0,0,0, $4, $4, NULL, NULL)`,
+      [billing.id, company_id, billing_start, minCharge],
+    );
+
+    await client.query('COMMIT');
+    return { billing, usage_supply: usageSupply, min_charge_supply: minCharge };
+  } catch (txError: any) {
+    try { await client.query('ROLLBACK'); } catch (rbError: any) {
+      console.error('최소과금 발행 롤백 실패:', rbError?.message || rbError);
+    }
+    throw txError;
+  } finally {
+    client.release();
+  }
+}

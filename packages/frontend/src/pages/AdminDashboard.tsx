@@ -16,7 +16,8 @@ import { COMPANY_EMAIL } from '../constants/company';
 import { formatAgentIdLabel } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스(발급명 병기)
 import { formatPlanOptionLabel } from '../utils/planLabel'; // ★ 2026-07-28 요금제 라벨 = 월정액(고객 수 축 폐기)
 import { taxbillIssueDatePreviewText, type TaxbillDayPolicy } from '../utils/taxbillDate'; // ★ 2026-07-28 작성일자 미리보기(예시 월 하드코딩 제거)
-import Billing080Modal from '../components/Billing080Modal'; // ★ 2026-07-30 080 청구 관리 (서수란 접수 — KT 명세서 분할 청구)
+import Billing080Modal from '../components/Billing080Modal'; // ★ 2026-07-30 추가 청구 관리 (서수란 접수 — 080 KT 명세서 분할 + 부가서비스 수기)
+import MinimumChargeModal from '../components/MinimumChargeModal'; // ★ 2026-07-30 최소과금 정액 발행 (Harold 확정)
 import { creditTxLabel } from '../constants/credit'; // 크레딧 사용 이력 작업명 라벨
 
 interface Company {
@@ -1329,8 +1330,9 @@ const [bulkJobId, setBulkJobId] = useState<string | null>(null);
 const [bulkJob, setBulkJob] = useState<any>(null);
 const [bulkStarting, setBulkStarting] = useState(false);
 const [confirmBoardOpen, setConfirmBoardOpen] = useState(false);
-// ★ 2026-07-30 080 청구 관리 모달 (서수란 접수)
+// ★ 2026-07-30 추가 청구(080·부가서비스) + 최소과금 모달 (서수란 접수)
 const [billing080Open, setBilling080Open] = useState(false);
+const [minChargeOpen, setMinChargeOpen] = useState(false);
 const [confirmRows, setConfirmRows] = useState<any[]>([]);
 const [confirmLoading, setConfirmLoading] = useState(false);
 const [confirmStatusFilter, setConfirmStatusFilter] = useState('');
@@ -1414,9 +1416,10 @@ const loadManualCompletions = async (seq?: number) => {
 // ★ 2026-07-29 `manual_billing` 회사는 **선택 담기에서도** 빠진다. 체크는 되게 두되(수동완료를 쳐야 하므로)
 //   담기지는 않는다 — 자동 발급하면 안 되는 회사가 체크 한 번으로 딸려 들어가면 그게 사고다.
 //   정말 자동으로 발급하려면 정산 탭에서 "수동 정산 회사"를 끄면 된다(명시적 행위).
+// ★ 2026-07-30 최소과금(min_charge_supply) 회사도 동일 — 정액 발행(최소과금 모달)이 그 회사의 청구 경로다.
 const bulkAddRows = (rows: any[]): number => {
   const picked = bulkPickedIds();
-  const adds = rows.filter((c) => !picked.has(c.id) && c.manual_billing !== true);
+  const adds = rows.filter((c) => !picked.has(c.id) && c.manual_billing !== true && c.min_charge_supply == null);
   if (adds.length > 0) {
     setBulkCombined((prev) => [...prev, ...adds.filter((c) => c.issue_scope !== 'by_user')]);
     setBulkByUser((prev) => [...prev, ...adds.filter((c) => c.issue_scope === 'by_user')]);
@@ -1427,7 +1430,7 @@ const bulkAddSelected = () => {
   if (!bulkList) return;
   const skipped = bulkAddRows(bulkList.filter((c) => bulkSelected.includes(c.id)));
   setBulkSelected([]);
-  if (skipped > 0) setBillingToast({ msg: `수동 정산 회사 ${skipped}개사는 담지 않았습니다`, type: 'error' });
+  if (skipped > 0) setBillingToast({ msg: `수동 정산·최소과금 회사 ${skipped}개사는 담지 않았습니다`, type: 'error' });
 };
 /** 전체 담기 — 이 달 미발급 후불 전량. 일괄발급의 본래 목적이라 한 번에 담는다. */
 const bulkAddAll = () => {
@@ -1435,7 +1438,7 @@ const bulkAddAll = () => {
   const picked = bulkPickedIds();
   const skipped = bulkAddRows(bulkList.filter((c) => !picked.has(c.id)));
   setBulkSelected([]);
-  if (skipped > 0) setBillingToast({ msg: `수동 정산 회사 ${skipped}개사는 담지 않았습니다`, type: 'error' });
+  if (skipped > 0) setBillingToast({ msg: `수동 정산·최소과금 회사 ${skipped}개사는 담지 않았습니다`, type: 'error' });
 };
 const bulkMoveToByUser = (id: string) => {
   const row = bulkCombined.find((c) => c.id === id);
@@ -9525,18 +9528,25 @@ const handleApproveRequest = async (id: string) => {
                   className={`px-4 py-2 rounded-lg text-sm font-medium border ${confirmBoardOpen ? 'bg-slate-700 text-white border-slate-700' : 'text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
                   세금계산서·컨펌 현황
                 </button>
-                {/* ★ 2026-07-30 080 청구 (서수란 접수 — 번호 매핑 + KT 명세서 업로드 → 통화료 자동 귀속) */}
+                {/* ★ 2026-07-30 추가 청구(080 매핑·KT 명세서·부가서비스 수기) + 최소과금 정액 발행 (서수란 접수) */}
                 <button onClick={() => setBilling080Open(true)}
                   className="px-4 py-2 rounded-lg text-sm font-medium border text-slate-600 border-slate-300 hover:bg-slate-50">
-                  080 청구 관리
+                  추가 청구 관리
+                </button>
+                <button onClick={() => setMinChargeOpen(true)}
+                  className="px-4 py-2 rounded-lg text-sm font-medium border text-slate-600 border-slate-300 hover:bg-slate-50">
+                  최소과금
                 </button>
               </div>
             </div>
             <p className="text-xs text-gray-500 mb-4">후불이면서 대상월 거래내역서가 아직 발급되지 않은 회사만 나옵니다. 담으면 정산 탭의 발행 단위대로 좌우에 앉고, 발급 시 이메일 등록 회사는 자동 발송·컨펌 흐름까지 이어집니다.</p>
 
-            {/* ★ 2026-07-30 080 청구 관리 (서수란 접수) — 매핑·KT 명세서 업로드·반영 현황 */}
+            {/* ★ 2026-07-30 추가 청구(080·부가서비스) + 최소과금 (서수란 접수) */}
             <Billing080Modal open={billing080Open} onClose={() => setBilling080Open(false)}
               companies={companies.map((c) => ({ id: c.id, company_name: c.company_name }))} />
+            <MinimumChargeModal open={minChargeOpen} onClose={() => setMinChargeOpen(false)}
+              companies={companies.map((c) => ({ id: c.id, company_name: c.company_name }))}
+              onChanged={() => { if (bulkList !== null) loadBulkList(); }} />
 
             {bulkList !== null && (() => {
               const picked = bulkPickedIds();
@@ -9547,7 +9557,8 @@ const handleApproveRequest = async (id: string) => {
               const totalPages = Math.max(1, Math.ceil(avail.length / PAGE));
               const page = Math.min(bulkPage, totalPages);
               const visible = avail.slice((page - 1) * PAGE, page * PAGE);
-              const availAuto = avail.filter((c) => c.manual_billing !== true);   // 전체 담기에 실제로 담기는 것
+              // 전체 담기에 실제로 담기는 것 — 수동 정산 + ★2026-07-30 최소과금 회사 제외(정액 발행 모달이 청구 경로)
+              const availAuto = avail.filter((c) => c.manual_billing !== true && c.min_charge_supply == null);
               const availManual = avail.length - availAuto.length;
               const pageIds = visible.map((c) => c.id);
               const pageAllChecked = pageIds.length > 0 && pageIds.every((id) => bulkSelected.includes(id));
@@ -9580,7 +9591,7 @@ const handleApproveRequest = async (id: string) => {
                         </button>
                         <button onClick={bulkAddAll} disabled={availAuto.length === 0}
                           className="px-3 py-1.5 bg-violet-600 text-white rounded text-xs font-semibold hover:bg-violet-700 disabled:opacity-40">
-                          전체 {availAuto.length}개사 담기{availManual > 0 ? ` (수동 ${availManual} 제외)` : ''}
+                          전체 {availAuto.length}개사 담기{availManual > 0 ? ` (수동·최소과금 ${availManual} 제외)` : ''}
                         </button>
                       </div>
                     </div>
@@ -9598,6 +9609,10 @@ const handleApproveRequest = async (id: string) => {
                               <span className="text-sm text-gray-800 flex-1 min-w-0 truncate">{c.company_name}</span>
                               {c.manual_billing === true && (
                                 <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold">수동 정산</span>
+                              )}
+                              {/* ★ 2026-07-30 최소과금 회사 — 담기에서 빠지고 최소과금 모달에서 정액 발행 */}
+                              {c.min_charge_supply != null && (
+                                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 font-semibold">최소과금</span>
                               )}
                               <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${c.issue_scope === 'by_user' ? 'bg-sky-100 text-sky-700' : 'bg-gray-100 text-gray-500'}`}>
                                 {c.issue_scope === 'by_user' ? '계정별' : '전체'}

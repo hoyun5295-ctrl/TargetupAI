@@ -321,6 +321,79 @@ export async function reconcileKtStatement(entries: KtStatementEntry[]): Promise
   });
 }
 
+// ============================================================
+//  부가서비스 수기 항목 (kind='manual' — ★2026-07-30 Harold 확정: 시세이도 단축 URL 장당 5만 등
+//  "직접 입력해놓으면 거래내역서에 부가서비스 항목으로 추가")
+// ============================================================
+
+/**
+ * 수기 항목 추가 — 단가×수량을 **수량만큼의 행**으로 넣는다(행당 supply_amount=단가).
+ * 청구서 항목줄(buildInvoiceLines)이 같은 단가를 합쳐 "부가서비스 N건 × 단가"로 참 산식을 인쇄한다.
+ * 발행과 같은 회사 잠금 + 그 달 발행 존재 시 409(굳은 청구서에 안 실리는 항목을 만들지 않는다 — 080 반영과 동일 계약).
+ */
+export async function addManualExtraItems(params: {
+  companyId: string;
+  periodMonth: string;   // 'YYYY-MM-01'
+  label: string;         // 항목 내용 (예: 단축 URL 제작)
+  unitSupply: number;    // 건당 공급가
+  qty: number;           // 1~100
+  adminId?: string | null;
+}): Promise<{ inserted: number; supplyTotal: number }> {
+  const periodMonth = String(params.periodMonth || '');
+  if (!/^\d{4}-\d{2}-01$/.test(periodMonth)) throw new Error('대상월 형식이 올바르지 않습니다 (YYYY-MM-01).');
+  const label = String(params.label || '').trim().slice(0, 180);
+  if (!label) throw new Error('항목 내용을 입력해주세요.');
+  const unit = params.unitSupply;
+  if (!(typeof unit === 'number' && Number.isSafeInteger(unit)) || unit <= 0) {
+    throw new Error('건당 금액(공급가)을 1원 이상 정수로 입력해주세요.');
+  }
+  const qty = params.qty;
+  if (!(typeof qty === 'number' && Number.isSafeInteger(qty)) || qty < 1 || qty > 100) {
+    throw new Error('수량은 1~100 사이로 입력해주세요.');
+  }
+  if (!params.companyId) throw new Error('회사를 선택해주세요.');
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext('billing'))`, [String(params.companyId)]);
+    const billed = await client.query(
+      `SELECT id FROM billings WHERE company_id = $1
+         AND billing_start <= ($2::date + INTERVAL '1 month' - INTERVAL '1 day')::date
+         AND billing_end >= $2::date LIMIT 1`,
+      [params.companyId, periodMonth],
+    );
+    if (billed.rows.length > 0) {
+      throw new Error('그 달 정산이 이미 발행돼 있어 항목을 추가할 수 없습니다. 다음 달에 청구하거나 발행을 삭제한 뒤 추가해주세요.');
+    }
+    let inserted = 0;
+    for (let i = 0; i < qty; i++) {
+      const r = await client.query(
+        `INSERT INTO billing_extra_items (company_id, period_month, kind, label, supply_amount, source_ref, created_by)
+         VALUES ($1, $2::date, 'manual', $3, $4, NULL, $5)`,
+        [params.companyId, periodMonth, label, unit, params.adminId || null],
+      );
+      inserted += r.rowCount || 0;
+    }
+    await client.query('COMMIT');
+    return { inserted, supplyTotal: unit * qty };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* release가 파기 */ }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** 수기/080 항목 개별 삭제 — **미소비(billed_billing_id IS NULL)만**. 소비된 행은 발행 삭제로만 되돌린다. */
+export async function deleteExtraItem(id: string): Promise<boolean> {
+  const r = await pool.query(
+    `DELETE FROM billing_extra_items WHERE id = $1 AND billed_billing_id IS NULL`,
+    [id],
+  );
+  return (r.rowCount || 0) > 0;
+}
+
 export interface KtApplyResult {
   applied: Array<{ company_id: string; company_name: string; numbers: number; items: number; supply_total: number }>;
   skipped: Array<{ company_id?: string; company_name?: string; number?: string; reason: string }>;

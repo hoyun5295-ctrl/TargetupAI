@@ -36,7 +36,7 @@ import {
 // ★ 2026-07-27 발송ID 표시명(발급명) 단일 소스 — 청구서 상세·미리보기도 화면과 같은 이름을 쓴다.
 import { getAgentCustNameMap } from '../utils/pay-stats';
 // ★ 2026-07-28 발행 코어 CT — /generate와 거래내역서 일괄발급 배치가 같은 함수를 쓴다(동작 무변경 추출).
-import { issueBilling, BillingIssueError } from '../utils/billing-issue';
+import { issueBilling, issueMinimumChargeBilling, BillingIssueError } from '../utils/billing-issue';
 // ★ 2026-07-30 수정세금계산서 — 사유별 장 구성 계약(순수). 라우트는 이 계획을 트랜잭션 INSERT만 한다.
 import { planModifyIssue, ModifyPlanError } from '../utils/taxbill-popbill';
 // ★ 2026-07-28 정산 설정·담당자 CT — 고객사 상세 "정산" 탭 + 일괄발급·발송·계산서 워커가 공유.
@@ -57,7 +57,7 @@ import { extractBizRegistration } from '../utils/biz-registration-extract';
 import {
   list080Numbers, normalize080Number, format080Number,
   extractKtStatement, validateKtStatement, reconcileKtStatement, applyKtStatement,
-  signKtStatement,
+  signKtStatement, addManualExtraItems, deleteExtraItem,
 } from '../utils/billing-080';
 
 // SMTP transporter (재사용)
@@ -977,6 +977,138 @@ router.delete('/extra-items', async (req: Request, res: Response) => {
     return res.status(500).json({ success: false, error: '추가 항목 취소 실패' });
   } finally {
     client.release();
+  }
+});
+
+// POST /extra-items — 부가서비스 수기 항목 추가 (★2026-07-30 Harold 확정 — 시세이도 URL 장당 5만 등)
+router.post('/extra-items', async (req: Request, res: Response) => {
+  try {
+    const { company_id, month, label, unit_supply, qty } = req.body || {};
+    if (!/^\d{4}-\d{2}$/.test(String(month || ''))) {
+      return res.status(400).json({ success: false, error: '대상월 형식: YYYY-MM' });
+    }
+    const result = await addManualExtraItems({
+      companyId: String(company_id || ''),
+      periodMonth: `${month}-01`,
+      label: String(label || ''),
+      unitSupply: unit_supply,
+      qty,
+      adminId: (req as any).user?.userId || null,
+    });
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error('부가서비스 항목 추가 오류:', error?.message || error);
+    return res.status(400).json({ success: false, error: error?.message || '항목 추가 실패' });
+  }
+});
+
+// DELETE /extra-items/:id — 항목 개별 삭제 (미소비만 — 발행에 실린 행은 발행 삭제로만 복귀)
+router.delete('/extra-items/:id', async (req: Request, res: Response) => {
+  try {
+    const ok = await deleteExtraItem(String(req.params.id));
+    if (!ok) return res.status(409).json({ success: false, error: '이미 발행에 실렸거나 없는 항목입니다. 발행에 실린 항목은 발행 삭제 시 자동으로 되돌아옵니다.' });
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('부가서비스 항목 삭제 오류:', error?.message || error);
+    return res.status(500).json({ success: false, error: '항목 삭제 실패' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════
+// 최소과금 (★2026-07-30 Harold 확정 — 금액이 안 나오는 업체 = 기본요금 정액 발행·일괄발급 담기 제외)
+// ════════════════════════════════════════════════════════════════
+
+// GET /minimum-charge?month=YYYY-MM — 등록 회사 목록 + 그 달 발행 여부
+router.get('/minimum-charge', async (req: Request, res: Response) => {
+  try {
+    const month = String(req.query.month || '');
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ success: false, error: '조회 월 형식: YYYY-MM' });
+    const r = await pool.query(
+      `SELECT s.company_id, c.company_name, s.min_charge_supply,
+              (SELECT b.id FROM billings b
+                WHERE b.company_id = s.company_id
+                  AND b.billing_start <= (($1 || '-01')::date + INTERVAL '1 month' - INTERVAL '1 day')::date
+                  AND b.billing_end >= ($1 || '-01')::date
+                LIMIT 1) AS billed_id
+         FROM company_billing_settings s
+         JOIN companies c ON c.id = s.company_id
+        WHERE s.min_charge_supply IS NOT NULL
+        ORDER BY c.company_name`,
+      [month],
+    );
+    return res.json({ success: true, companies: r.rows });
+  } catch (error: any) {
+    const msg = error?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션이 필요합니다. 운영자에게 company_billing_settings 컬럼 추가(ALTER)를 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('최소과금 목록 오류:', msg || error);
+    return res.status(500).json({ success: false, error: '최소과금 목록 조회 실패' });
+  }
+});
+
+// POST /minimum-charge — 등록/수정/해제 (min_charge_supply null = 해제). UPSERT는 이 컬럼만 만진다.
+router.post('/minimum-charge', async (req: Request, res: Response) => {
+  try {
+    const { company_id, min_charge_supply } = req.body || {};
+    if (!company_id) return res.status(400).json({ success: false, error: '회사를 선택해주세요.' });
+    let value: number | null = null;
+    if (min_charge_supply !== null && min_charge_supply !== undefined) {
+      if (!(typeof min_charge_supply === 'number' && Number.isSafeInteger(min_charge_supply)) || min_charge_supply <= 0) {
+        return res.status(400).json({ success: false, error: '최소과금(공급가)을 1원 이상 정수로 입력해주세요.' });
+      }
+      value = min_charge_supply;
+    }
+    await pool.query(
+      `INSERT INTO company_billing_settings (company_id, min_charge_supply, updated_by, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (company_id) DO UPDATE SET min_charge_supply = EXCLUDED.min_charge_supply, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+      [company_id, value, (req as any).user?.userId || null],
+    );
+    return res.json({ success: true });
+  } catch (error: any) {
+    const msg = error?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션이 필요합니다. 운영자에게 company_billing_settings 컬럼 추가(ALTER)를 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('최소과금 저장 오류:', msg || error);
+    return res.status(500).json({ success: false, error: '최소과금 저장 실패' });
+  }
+});
+
+// POST /minimum-charge/issue — 등록 회사 전부 그 달 정액 발행 (회사별 독립 — 부분 실패 허용)
+router.post('/minimum-charge/issue', async (req: Request, res: Response) => {
+  try {
+    const month = String((req.body || {}).month || '');
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ success: false, error: '대상월 형식: YYYY-MM' });
+    const start = `${month}-01`;
+    const endRes = await pool.query(`SELECT (($1 || '-01')::date + INTERVAL '1 month' - INTERVAL '1 day')::date::text AS d`, [month]);
+    const end = String(endRes.rows[0].d);
+    const list = await pool.query(
+      `SELECT s.company_id, c.company_name FROM company_billing_settings s
+         JOIN companies c ON c.id = s.company_id
+        WHERE s.min_charge_supply IS NOT NULL ORDER BY c.company_name`,
+    );
+    const issued: any[] = [];
+    const skipped: any[] = [];
+    for (const row of list.rows) {
+      try {
+        const r = await issueMinimumChargeBilling({
+          company_id: row.company_id, billing_start: start, billing_end: end,
+          adminId: (req as any).user?.userId || null,
+        });
+        issued.push({ company_id: row.company_id, company_name: row.company_name, total_amount: r.billing.total_amount });
+      } catch (e: any) {
+        skipped.push({
+          company_id: row.company_id, company_name: row.company_name,
+          reason: e instanceof BillingIssueError ? String(e.body?.error || e.message) : String(e?.message || e).slice(0, 200),
+        });
+      }
+    }
+    return res.json({ success: true, issued, skipped });
+  } catch (error: any) {
+    console.error('최소과금 일괄 발행 오류:', error?.message || error);
+    return res.status(500).json({ success: false, error: '최소과금 발행 실패' });
   }
 });
 

@@ -25,6 +25,8 @@ export interface UnbilledCompanyRow {
   missing_account_emails: number;
   /** true = 우리 정산으로 발행할 수 없는 회사 — 목록에는 뜨지만 담기에서 빠진다. */
   manual_billing: boolean;
+  /** ★ 2026-07-30 최소과금 공급가(서수란 접수) — 값 있으면 정액 발행 대상 = 일괄발급 담기에서 빠진다(목록엔 뜸). */
+  min_charge_supply: number | null;
 }
 
 /**
@@ -52,6 +54,7 @@ export async function listUnbilledPostpaid(
             COALESCE(s.issue_scope, 'combined')        AS issue_scope,
             COALESCE(s.taxbill_day_policy, 'last_day') AS taxbill_day_policy,
             COALESCE(s.manual_billing, false)          AS manual_billing,
+            s.min_charge_supply                        AS min_charge_supply,
             bc.contact_email                           AS company_contact_email,
             (SELECT count(*)::int FROM users u
               WHERE u.company_id = c.id AND u.is_active = true AND COALESCE(u.is_system, false) = false
@@ -94,7 +97,9 @@ export async function filterBillableCompanies(
 ): Promise<Set<string>> {
   if (companyIds.length === 0) return new Set();
   const rows = await listUnbilledPostpaid(periodStart, periodEnd, { companyIds, db });
-  return new Set(rows.filter((r) => r.manual_billing !== true).map((r) => String(r.id)));
+  // ★ 2026-07-30 최소과금 회사도 일괄발급 부적격 — 정액 발행(최소과금 모달)이 그 회사의 청구 경로다.
+  //   사용량 발행과 정액 발행이 겹치면 이중청구라 발급 대상에서 구조로 뺀다(수동 정산과 같은 계약).
+  return new Set(rows.filter((r) => r.manual_billing !== true && r.min_charge_supply == null).map((r) => String(r.id)));
 }
 
 // ═══════════════════════════════════════════════════════════

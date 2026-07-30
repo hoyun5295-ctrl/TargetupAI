@@ -54,8 +54,9 @@ const CHANNEL_LABEL: Record<string, string> = {
 const TYPE_LABEL: Record<string, string> = {
   ...Object.fromEntries(BILLING_TYPES.map((t) => [t.key, t.label])),
   SPAM_SMS: '스팸필터 SMS', SPAM_LMS: '스팸필터 LMS',
-  // ★ 2026-07-30 080 청구(billing_extra_items — 서수란 접수). 내부 키(EXTRA_*)는 고객에게 보일 값이 아니다.
+  // ★ 2026-07-30 080·부가서비스·최소과금 청구(서수란 접수). 내부 키(EXTRA_*)는 고객에게 보일 값이 아니다.
   EXTRA_080_FEE: '080 번호 이용료', EXTRA_080_SVC: '080 부가서비스', EXTRA_080_CALL: '080 통화료',
+  EXTRA_MANUAL: '부가서비스', EXTRA_BASE_FEE: '기본요금',
 };
 
 const CHANNEL_ORDER = ['plan', 'web', 'agent', 'test', 'spam', 'extra'];

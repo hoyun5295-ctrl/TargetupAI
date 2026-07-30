@@ -79,6 +79,19 @@ describe('080 등 월별 추가 항목 (channel=extra — 2026-07-30 서수란 �
     expect(lines.map((l) => l.count)).toEqual([1, 1]);
   });
 
+  it('★부가서비스 수기·최소과금 기본요금 라벨 (2026-07-30 Harold 확정) — "부가서비스 3건 × 50,000" 참 산식', () => {
+    const lines = buildInvoiceLines([
+      extra({ message_type: 'EXTRA_MANUAL', unit_price: 50000, amount: 50000 }),
+      extra({ message_type: 'EXTRA_MANUAL', unit_price: 50000, amount: 50000 }),
+      extra({ message_type: 'EXTRA_MANUAL', unit_price: 50000, amount: 50000 }),
+      extra({ message_type: 'EXTRA_BASE_FEE', unit_price: 50000, amount: 50000 }),
+    ]);
+    // 같은 extra 채널 안 순서는 typeKey 사전순(BASE_FEE < MANUAL) — 실청구에선 섞일 일 없다(최소과금 발행은 extra 존재 시 차단)
+    expect(lines.map((l) => l.label)).toEqual(['기본요금', '부가서비스']);
+    expect(lines[0]).toMatchObject({ count: 1, amount: 50000 });
+    expect(lines[1]).toMatchObject({ count: 3, unitPrice: 50000, amount: 150000 });
+  });
+
   it('extra는 항목표 맨 뒤(발송·테스트·스팸 뒤)에 온다 + 내부 키(EXTRA_*)가 노출되지 않는다', () => {
     const lines = buildInvoiceLines([
       extra({ message_type: 'EXTRA_080_SVC', unit_price: 4000, amount: 4000 }),

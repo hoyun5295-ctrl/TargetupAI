@@ -66,7 +66,8 @@ const won = (n: number) => `₩${Number(n || 0).toLocaleString()}`;
 const withVat = (n: number) => `${won(n)} (VAT 포함 ${won(Math.round(n * 1.1))})`;
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem('token') || ''}` });
 const prevMonth = () => {
-  const d = new Date(); d.setMonth(d.getMonth() - 1);
+  // ★ setDate(1) 선행(Codex 수용 — MinimumChargeModal 미러) — 7/31에서 한 달을 빼면 "6/31"→7/1 보정으로 당월이 나온다.
+  const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 
@@ -77,7 +78,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
   onClose: () => void;
   companies: CompanyOpt[];
 }) {
-  const [tab, setTab] = useState<'mapping' | 'upload' | 'status'>('mapping');
+  const [tab, setTab] = useState<'mapping' | 'upload' | 'manual' | 'status'>('mapping');
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const say = (msg: string, type: 'success' | 'error' = 'success') => {
@@ -177,11 +178,46 @@ export default function Billing080Modal({ open, onClose, companies }: {
     } catch { say('반영 실패', 'error'); } finally { setApplying(false); }
   };
 
-  // ── ③ 반영 현황 ──
+  // ── ③ 부가서비스 수기 입력 (★2026-07-30 Harold — 시세이도 단축 URL 장당 5만 등) ──
+  const [mCompany, setMCompany] = useState('');
+  const [mMonth, setMMonth] = useState(prevMonth());
+  const [mLabel, setMLabel] = useState('');
+  const [mUnit, setMUnit] = useState(50000);
+  const [mQty, setMQty] = useState(1);
+  const [mSaving, setMSaving] = useState(false);
+
+  const addManual = async () => {
+    if (!mCompany || !mLabel.trim()) { say('회사와 항목 내용을 입력해주세요.', 'error'); return; }
+    setMSaving(true);
+    try {
+      const r = await fetch('/api/admin/billing/extra-items', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...auth() },
+        body: JSON.stringify({ company_id: mCompany, month: mMonth, label: mLabel.trim(), unit_supply: mUnit, qty: mQty }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        say(`추가했습니다 — 공급가 ${won(d.supplyTotal)} (${mQty}건). ${mMonth}월 발행 때 "부가서비스" 항목으로 실립니다.`);
+        setMLabel(''); setMQty(1);
+        if (statusMonth === mMonth) loadItems(mMonth);
+      } else say(d.error || '추가 실패', 'error');
+    } catch { say('추가 실패', 'error'); } finally { setMSaving(false); }
+  };
+
+  // ── ④ 반영 현황 ──
   const [statusMonth, setStatusMonth] = useState(prevMonth());
   const [items, setItems] = useState<ExtraItem[] | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
   const [cancelAsk, setCancelAsk] = useState<string | null>(null);
+  const [itemAsk, setItemAsk] = useState<string | null>(null); // 개별 항목 삭제 2단 확인
+
+  const removeItem = async (id: string) => {
+    try {
+      const r = await fetch(`/api/admin/billing/extra-items/${id}`, { method: 'DELETE', headers: auth() });
+      const d = await r.json();
+      if (d.success) { say('항목을 삭제했습니다.'); setItemAsk(null); loadItems(statusMonth); }
+      else say(d.error || '삭제 실패', 'error');
+    } catch { say('삭제 실패', 'error'); }
+  };
 
   const loadItems = useCallback(async (m: string) => {
     setStatusLoading(true);
@@ -220,14 +256,14 @@ export default function Billing080Modal({ open, onClose, companies }: {
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
           <div>
-            <h3 className="text-base font-semibold text-gray-800">080 청구 관리</h3>
-            <p className="text-xs text-gray-500 mt-0.5">번호↔회사 매핑을 등록해두면, KT 명세서 업로드만으로 통화료가 업체별 청구에 자동 귀속됩니다.</p>
+            <h3 className="text-base font-semibold text-gray-800">추가 청구 관리 (080 · 부가서비스)</h3>
+            <p className="text-xs text-gray-500 mt-0.5">080 매핑을 등록해두면 KT 명세서 업로드만으로 통화료가 자동 귀속되고, 부가서비스는 직접 입력하면 거래내역서 항목으로 실립니다.</p>
           </div>
           <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400" aria-label="닫기">✕</button>
         </div>
 
         <div className="flex gap-1 px-6 pt-3 border-b shrink-0">
-          {([['mapping', '번호 매핑'], ['upload', 'KT 명세서 업로드'], ['status', '반영 현황']] as const).map(([k, label]) => (
+          {([['mapping', '080 번호 매핑'], ['upload', 'KT 명세서 업로드'], ['manual', '부가서비스 입력'], ['status', '반영 현황']] as const).map(([k, label]) => (
             <button key={k} onClick={() => { setTab(k); if (k === 'status' && items === null) loadItems(statusMonth); }}
               className={`px-4 py-2 text-sm rounded-t-lg border border-b-0 ${tab === k ? 'bg-violet-600 text-white border-violet-600 font-medium' : 'text-gray-600 border-transparent hover:bg-gray-50'}`}>
               {label}
@@ -446,6 +482,55 @@ export default function Billing080Modal({ open, onClose, companies }: {
             </div>
           )}
 
+          {tab === 'manual' && (
+            <div className="space-y-4">
+              <div className="border rounded-lg p-4 bg-gray-50">
+                <div className="text-sm font-medium text-gray-700 mb-3">부가서비스 항목 추가</div>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  <div className="col-span-2 md:col-span-1">
+                    <label className="block text-[11px] text-gray-500 mb-1">회사</label>
+                    <select value={mCompany} onChange={(e) => setMCompany(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                      <option value="">선택</option>
+                      {companies.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-gray-500 mb-1">청구 대상월</label>
+                    <input type="month" value={mMonth} onChange={(e) => setMMonth(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                  </div>
+                  <div className="col-span-2 md:col-span-1">
+                    <label className="block text-[11px] text-gray-500 mb-1">항목 내용</label>
+                    <input value={mLabel} onChange={(e) => setMLabel(e.target.value)} placeholder="예: 단축 URL 제작" maxLength={180}
+                      className="w-full px-3 py-2 border rounded-lg text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-gray-500 mb-1">건당 금액 (공급가)</label>
+                    <input type="number" min={1} value={mUnit}
+                      onChange={(e) => setMUnit(Math.max(1, Math.floor(Number(e.target.value) || 0)))}
+                      className="w-full px-3 py-2 border rounded-lg text-sm" />
+                    <div className="text-[10px] text-gray-400 mt-0.5">VAT 포함 {won(Math.round(mUnit * 1.1))}</div>
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <div>
+                      <label className="block text-[11px] text-gray-500 mb-1">수량</label>
+                      <input type="number" min={1} max={100} value={mQty}
+                        onChange={(e) => setMQty(Math.min(100, Math.max(1, Math.floor(Number(e.target.value) || 1))))}
+                        className="w-20 px-3 py-2 border rounded-lg text-sm" />
+                    </div>
+                    <button onClick={addManual} disabled={mSaving}
+                      className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 disabled:opacity-50">
+                      {mSaving ? '추가 중...' : '추가'}
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-2.5">
+                  거래내역서에는 <b>"부가서비스 {mQty}건 × {won(mUnit)} = {won(mUnit * mQty)}"</b>로 인쇄됩니다.
+                  입력 내용은 반영 현황 탭에서 확인·삭제할 수 있습니다. 이미 발행된 달에는 추가할 수 없습니다.
+                </p>
+              </div>
+            </div>
+          )}
+
           {tab === 'status' && (
             <div className="space-y-4">
               <div className="flex items-center gap-2">
@@ -479,9 +564,20 @@ export default function Billing080Modal({ open, onClose, companies }: {
                       </div>
                       <div className="px-4 py-2 text-xs text-gray-600 space-y-1">
                         {g.rows.map((it) => (
-                          <div key={it.id} className="flex justify-between">
-                            <span>{it.label}</span>
-                            <span>{won(Number(it.supply_amount))}</span>
+                          <div key={it.id} className="flex items-center justify-between gap-2">
+                            <span className="flex-1 min-w-0 truncate">{it.label}</span>
+                            <span className="shrink-0">{won(Number(it.supply_amount))}</span>
+                            {/* 개별 삭제 — 미소비만(서버 강제). 발행에 실린 행은 발행 삭제 시 자동 복귀 */}
+                            {!it.billed_billing_id && (
+                              itemAsk === it.id ? (
+                                <span className="shrink-0">
+                                  <button onClick={() => removeItem(it.id)} className="text-red-600 font-medium mr-1.5">삭제</button>
+                                  <button onClick={() => setItemAsk(null)} className="text-gray-400">취소</button>
+                                </span>
+                              ) : (
+                                <button onClick={() => setItemAsk(it.id)} className="shrink-0 text-gray-300 hover:text-red-500" aria-label="항목 삭제">✕</button>
+                              )
+                            )}
                           </div>
                         ))}
                       </div>
