@@ -12,6 +12,14 @@ import { grantFreeTrial, isTrialApplyOpen } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
 import { parseAgentLedgerFields, parseAgentLedgerPatch, getAgentCustNameMap } from '../utils/pay-stats';
+// ★ 2026-07-29 회사 병합 CT — 이관 때 계정명이 달라 회사가 둘로 생긴 업체를 합친다(축 표·차단 게이트·잔존 0 검증)
+import {
+  previewCompanyMerge,
+  executeCompanyMerge,
+  isUuid,
+  CompanyMergeBlockedError,
+  CompanyMergeResidueError,
+} from '../utils/company-merge';
 
 const router = Router();
 
@@ -2084,6 +2092,59 @@ router.put('/:id', requireUuidId, requireSuperAdmin, async (req: Request, res: R
       });
     }
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ============================================================
+// ★ 2026-07-29 회사 병합 (슈퍼관리자 전용)
+//   레거시 템플릿관리자 이관 때 계정명이 달라 같은 업체가 회사 2개로 생성된 건을 합친다.
+//   로직은 utils/company-merge.ts 축 표 하나 — 여기에 UPDATE를 나열하지 않는다.
+//   dryRun 기본 true. 옛 회사는 삭제하지 않는다(FK CASCADE로 자산이 딸려 지워진다).
+// ============================================================
+router.post('/:id/merge', requireUuidId, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const fromCompanyId = req.params.id;
+    const { toCompanyId, dryRun, fromCompanyCode, toCompanyCode } = req.body || {};
+    if (!isUuid(toCompanyId)) {
+      return res.status(400).json({ success: false, error: '병합 목적지 회사 id(toCompanyId)가 필요합니다.' });
+    }
+    // 기본은 dryRun — 명시적으로 false를 보내야 실행된다.
+    if (dryRun !== false) {
+      const plan = await previewCompanyMerge(fromCompanyId, toCompanyId);
+      return res.json({ success: true, dryRun: true, plan });
+    }
+    // 실행은 회사코드 2개를 함께 받아 DB 값과 대조한다 — uuid만으로는 서로 무관한 두 회사도
+    // 상태 게이트를 통과하므로, 무엇을 무엇에 합치는지 적게 해서 오입력을 막는다.
+    if (typeof fromCompanyCode !== 'string' || typeof toCompanyCode !== 'string' || !fromCompanyCode.trim() || !toCompanyCode.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: '실행에는 fromCompanyCode·toCompanyCode(회사코드)가 함께 필요합니다.',
+        code: 'PAIR_CONFIRMATION_REQUIRED',
+      });
+    }
+    const result = await executeCompanyMerge(fromCompanyId, toCompanyId, {
+      fromCompanyCode,
+      toCompanyCode,
+    });
+    return res.json({ success: true, dryRun: false, result });
+  } catch (error: any) {
+    if (error instanceof CompanyMergeBlockedError) {
+      return res.status(409).json({ success: false, error: '병합이 차단되었습니다.', plan: error.plan });
+    }
+    if (error instanceof CompanyMergeResidueError) {
+      // 이동 후 잔존이 남아 롤백된 상태 — 성공으로 표시하지 않는다(6원칙 ②).
+      return res.status(500).json({ success: false, error: error.message, residue: error.residue });
+    }
+    const msg = error?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        error: 'DB 마이그레이션 필요 — 운영자에게 해당 테이블 ALTER 실행 요청 의무',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    console.error('회사 병합 에러:', error);
+    return res.status(500).json({ success: false, error: '회사 병합에 실패했습니다.' });
   }
 });
 
