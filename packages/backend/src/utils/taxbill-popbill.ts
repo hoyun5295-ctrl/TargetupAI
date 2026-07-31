@@ -480,6 +480,120 @@ function getInfoAsync(svc: any, corpNum: string, mgtKey: string): Promise<any> {
   });
 }
 
+// ★ 2026-07-31(2) Codex 지적 수용 — 설치 SDK(1.64.2)는 요청 timeout·error 이벤트에서 error 콜백을
+//   호출하지 않는 경로가 있어(로그만) 콜백만 기다리면 Promise가 영원히 안 끝날 수 있다.
+//   애플리케이션이 보장하는 유한 타임아웃으로 반드시 settle시킨다 — 워커 정지 차단.
+export const TAXBILL_SENDMAIL_TIMEOUT_MS = 30_000;
+
+export function sendEmailAsync(svc: any, corpNum: string, mgtKey: string, receiver: string, userId: string | null): Promise<any> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (fn: (v: any) => void) => (v: any) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(v);
+    };
+    const timer = setTimeout(
+      () => settle(reject)(new Error(`sendEmail 응답 없음 — ${TAXBILL_SENDMAIL_TIMEOUT_MS / 1000}초 초과`)),
+      TAXBILL_SENDMAIL_TIMEOUT_MS,
+    );
+    try {
+      // 소스 실측 시그니처: (CorpNum, KeyType, MgtKey, Receiver, UserID, success, error)
+      svc.sendEmail(corpNum, 'SELL', mgtKey, receiver, userId || '', settle(resolve), settle(reject));
+    } catch (err) {
+      settle(reject)(err);
+    }
+  });
+}
+
+/**
+ * ★ 2026-07-31(2) 세금계산서 참조 재전송 대상(순수) — 대표와 중복·상호 중복 제거, 형식 유효 주소만.
+ * 발행은 대표 1명(invoiceeEmail1)으로 하고, 참조는 발행 확정 직후 팝빌 sendEmail 재전송으로 같은
+ * 계산서 메일을 받는다. 설치 SDK에 addContactList가 없어(실측) 미검증 필드를 payload에 넣지 않는
+ * 0731 결정은 그대로 유지 — 재전송이 실측된 유일한 복수 통지 축이다.
+ */
+/** 참조 재전송 상한(장당) — 외부 호출 노출 횟수 제한(Codex). 등록 자체는 막지 않고 재전송만 앞 N명. */
+export const TAXBILL_RESEND_MAX_TARGETS = 10;
+/** 행당 재시도 상한 — 초과 시 failed 확정(수동 재전송 몫). */
+export const TAXBILL_RESEND_MAX_ATTEMPTS = 5;
+
+// 재전송 테이블 실존 확인 — 양성만 캐시(생성 후 자가 치유). 미생성 = 발행은 진행·기록만 건너뜀.
+// ★ Codex 2R — 조회 예외를 '없음'으로 강등하지 않는다: 일시 오류 한 번이 pending 미기록인 채 issued 커밋
+//   = 참조 재전송 영구 유실이 된다. 예외는 전파 — 호출부(issued 분기 = submitted 유지 재시도 /
+//   재전송 패스 = 워커 tick catch)가 재시도를 소유한다.
+let taxbillResendTableKnown: boolean | null = null;
+async function taxbillResendTableExists(): Promise<boolean> {
+  if (taxbillResendTableKnown === true) return true;
+  const r = await pool.query(`SELECT 1 FROM information_schema.tables WHERE table_name = 'taxbill_email_resends'`);
+  if (r.rows.length > 0) {
+    taxbillResendTableKnown = true;
+    return true;
+  }
+  return false;
+}
+
+let resendTableWarned = false;
+function warnResendTableMissingOnce(): void {
+  if (resendTableWarned) return;
+  resendTableWarned = true;
+  log('참조 재전송 테이블(taxbill_email_resends) 미생성 — 참조 수신자가 등록된 계산서는 DDL 실행 전까지 발행 확정을 미룹니다');
+}
+
+/**
+ * ★ 2026-07-31(2) Codex 3R·4R — issued 승격의 단일 계약:
+ *   "참조 대상이 있으면, pending 기록과 같은 트랜잭션이 아니고서는 issued가 되지 않는다."
+ * ★ 4R부터 **승격 소유자는 발행 패스(processOne) 하나뿐**이다 — 웹훅 304는 승격하지 않고 failed만
+ * submitted로 재큐잉해 워커에 위임한다(웹훅은 순서 보장 없는 외부 신호라 내구 계약의 주체가 될 수 없다).
+ * 이 함수는 processOne의 확정 트랜잭션 전용: 같은 트랜잭션에서 pending을 기록하고, 기록 불가(테이블
+ * 미생성 등)면 throw로 승격 자체를 막는다(호출부 catch = submitted 유지·다음 tick 재시도).
+ * 대상 0명 = 기록 없이 통과(약속이 없다). 멱등 = UNIQUE(taxbill_issue_id, lower(email)) ON CONFLICT DO NOTHING.
+ * opts.tableExists 주입은 테스트 전용(기본 = 실제 카탈로그 조회).
+ */
+export async function enqueueTaxbillResendsForIssue(
+  client: { query: (sql: string, params?: any[]) => Promise<any> },
+  issueId: string,
+  mgtKey: string,
+  to: { primary: { email: string; name?: string | null } | null; cc: string[] },
+  opts?: { tableExists?: () => Promise<boolean> },
+): Promise<number> {
+  const targets = selectTaxbillResendTargets(to);
+  if (targets.length === 0) return 0;
+  const exists = await (opts?.tableExists ?? taxbillResendTableExists)();
+  if (!exists) {
+    warnResendTableMissingOnce();
+    throw new Error('참조 재전송 테이블(taxbill_email_resends) 미생성 — 참조 수신자가 등록된 계산서는 기록 가능해질 때까지 발행 확정을 미룹니다');
+  }
+  for (const rcpt of targets) {
+    await client.query(
+      `INSERT INTO taxbill_email_resends (taxbill_issue_id, invoicer_mgt_key, email)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (taxbill_issue_id, lower(email)) DO NOTHING`,
+      [issueId, mgtKey, rcpt],
+    );
+  }
+  return targets.length;
+}
+
+export function selectTaxbillResendTargets(to: {
+  primary: { email: string; name?: string | null } | null;
+  cc: string[];
+}): string[] {
+  const primary = (to.primary?.email || '').trim().toLowerCase();
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const c of to.cc || []) {
+    const e = String(c || '').trim();
+    if (!e || !e.includes('@')) continue;
+    const key = e.toLowerCase();
+    if (key === primary || seen.has(key)) continue;
+    seen.add(key);
+    out.push(e);
+    if (out.length >= TAXBILL_RESEND_MAX_TARGETS) break;
+  }
+  return out;
+}
+
 // ════════════════════════════════════════════════════════════
 // 발행 실행 (워커 소비부)
 // ════════════════════════════════════════════════════════════
@@ -526,8 +640,17 @@ const ISSUE_ROW_SQL = `
     LEFT JOIN billing_contacts bcc ON bcc.company_id = t.company_id AND bcc.user_id IS NULL
    WHERE t.id = $1`;
 
+// ★ Codex 5R — 실패 기록은 조건부(CAS)다: 이 패스가 claim한 상태(submitted) 그대로일 때만 쓴다.
+//   그 사이 웹훅 304 관측이 상태를 ready로 돌렸다면(팝빌은 발행됐다는 뜻) 실패 기록을 거부하고
+//   다음 tick의 getInfo 자가치유에 맡긴다 — 외부 발행 문서를 내부에서 failed로 덮는 경합 차단.
 async function markFailed(id: string, error: string): Promise<void> {
-  await pool.query(`UPDATE taxbill_issues SET status = 'failed', error = $2 WHERE id = $1`, [id, error]);
+  const r = await pool.query(
+    `UPDATE taxbill_issues SET status = 'failed', error = $2 WHERE id = $1 AND status = 'submitted'`,
+    [id, error],
+  );
+  if ((r.rowCount || 0) === 0) {
+    log(`실패 기록 거부 — id=${id} 행 상태가 claim 이후 바뀜(웹훅 304 관측 등) → 다음 tick 재확인에 위임. 사유였던 것: ${error.slice(0, 200)}`);
+  }
 }
 
 /** 발행 1건 — 순차 전용. 결과는 'issued' | 'submitted'(재조회 실패 — 사람 확인) | 'failed'. */
@@ -631,6 +754,14 @@ async function processOne(id: string, cfg: PopbillConfig): Promise<'issued' | 's
       // 팝빌 GetInfo 필드 표기는 소문자 c(ntsconfirmNum) — camelCase도 방어적으로 수용.
       const ntsNum =
         String(issueRes?.ntsConfirmNum || issueRes?.ntsconfirmNum || info?.ntsconfirmNum || info?.ntsConfirmNum || '').trim() || null;
+      // ★ 2026-07-31(2) 참조 재전송은 이 패스 안에서 보내지 않는다(Codex — 전역 발행 락 안 외부 호출·비내구 유실).
+      //   issued 확정 트랜잭션에 수신자별 pending 행을 함께 기록(내구)하고, 락 밖 재전송 패스가 소비한다.
+      //   테이블 미생성 환경은 기록만 건너뛴다(발행은 진행 — 경고 1회).
+      // ★ Codex 2R — verdict=issued 이후의 로컬 실패(카탈로그 조회·트랜잭션·큐 INSERT)는 절대 failed로
+      //   강등하지 않는다: 팝빌엔 이미 발행·과금된 문서라 거짓 실패가 된다. 행은 claim 시점의 submitted
+      //   그대로 두고 반환 — 다음 tick 재수집 → registIssue 중복 → getInfo 3xx 자가치유가 장부 확정과
+      //   pending 기록까지 통째로 재시도한다(문서번호가 행마다 결정적 = 재시도에도 중복 발행 없음).
+      try {
       // ★ 발행 사실은 두 테이블이 함께 알아야 한다(0730 Codex 지적 ④ 수용) — 장부(taxbill_issues)만
       //   issued로 바꾸면 공개 컨펌 페이지(invoice_confirmations 축)가 발행 후에도 이의신청을 받는다.
       //   한 트랜잭션으로 컨펌 행의 taxbill_status·issued_at·popbill_invoice_key까지 동기화한다.
@@ -644,6 +775,9 @@ async function processOne(id: string, cfg: PopbillConfig): Promise<'issued' | 's
             WHERE id = $1`,
           [id, ntsNum],
         );
+        // ★ 3R·4R — issued 승격 계약: 참조 pending 기록과 같은 트랜잭션. 승격 소유자는 이 패스 하나뿐
+        //   (웹훅 304는 관측·failed 재큐잉만 — 여기가 유일한 기록 지점이라 수신자 집합도 한 벌만 커밋된다).
+        await enqueueTaxbillResendsForIssue(client, id, mgtKey, taxbillTo);
         if (row.confirmation_id) {
           await client.query(
             `UPDATE invoice_confirmations
@@ -660,6 +794,17 @@ async function processOne(id: string, cfg: PopbillConfig): Promise<'issued' | 's
         throw txErr;
       } finally {
         client.release();
+      }
+      } catch (localErr: any) {
+        // 팝빌 발행은 확정 — 여기 실패는 우리 쪽 반영 실패일 뿐이다. submitted 유지 = 다음 tick 자가치유.
+        log(`issued 확정 후 로컬 반영 실패 — key=${mgtKey} 다음 tick 자가치유 대기 ${JSON.stringify({ message: localErr?.message || String(localErr) })}`);
+        try {
+          await pool.query(
+            `UPDATE taxbill_issues SET error = $2 WHERE id = $1`,
+            [id, `발행은 확정(팝빌 3xx)됐으나 내부 반영 실패 — 다음 주기 자동 재시도: ${String(localErr?.message ?? localErr).slice(0, 300)}`],
+          );
+        } catch { /* best-effort — 로그가 진실 */ }
+        return 'submitted';
       }
       return 'issued';
     }
@@ -784,6 +929,79 @@ export async function issueReadyTaxbills(limit = 10): Promise<IssuePassResult> {
   } finally {
     try {
       await lockClient.query(`SELECT pg_advisory_unlock(hashtext('taxbill_issue_pass'))`);
+    } catch {
+      /* 커넥션 종료 시 세션 락은 자동 해제 */
+    }
+    lockClient.release();
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+// ★ 2026-07-31(2) 세금계산서 참조 재전송 패스 (발행 패스와 분리 — Codex 수용)
+//   발행 락 밖에서 pending 행을 소비한다: 행 단위 상태(sent/failed)·시도 카운트·유한 타임아웃.
+//   한 주소가 느려도 발행 패스는 영향 없고, 크래시 시 pending 행이 남아 다음 tick이 이어간다.
+// ════════════════════════════════════════════════════════════
+
+export interface ResendPassResult {
+  picked: number;
+  sent: number;
+  failed: number;
+  skipped?: string;
+}
+
+export async function processTaxbillEmailResends(limit = 20): Promise<ResendPassResult> {
+  const cfg = getPopbillConfig();
+  if (!cfg) return { picked: 0, sent: 0, failed: 0, skipped: '팝빌 게이트 닫힘' };
+  if (!(await taxbillResendTableExists())) {
+    return { picked: 0, sent: 0, failed: 0, skipped: 'taxbill_email_resends 미생성 — DDL 실행 필요' };
+  }
+  const lockClient = await pool.connect();
+  try {
+    const lock = await lockClient.query(`SELECT pg_try_advisory_lock(hashtext('taxbill_email_resend_pass')) AS ok`);
+    if (!lock.rows[0]?.ok) {
+      return { picked: 0, sent: 0, failed: 0, skipped: '다른 재전송 패스가 진행 중 — 이번 tick 건너뜀' };
+    }
+    // 단일 패스 락이라 이중 집기 없음 — claim 전이 없이 행 단위로 결과를 기록한다.
+    const rows = await pool.query(
+      `SELECT id, invoicer_mgt_key, email, attempts FROM taxbill_email_resends
+        WHERE status = 'pending' AND attempts < $2
+        ORDER BY created_at
+        LIMIT $1`,
+      [limit, TAXBILL_RESEND_MAX_ATTEMPTS],
+    );
+    const svc = getService(cfg);
+    let sent = 0;
+    let failed = 0;
+    for (const r of rows.rows) {
+      try {
+        await sendEmailAsync(svc, cfg.corpNum, String(r.invoicer_mgt_key), String(r.email), cfg.userId);
+        await pool.query(
+          `UPDATE taxbill_email_resends
+              SET status = 'sent', attempts = attempts + 1, last_error = NULL, updated_at = NOW()
+            WHERE id = $1`,
+          [r.id],
+        );
+        sent += 1;
+      } catch (err: any) {
+        const nextAttempts = Number(r.attempts) + 1;
+        const final = nextAttempts >= TAXBILL_RESEND_MAX_ATTEMPTS;
+        await pool.query(
+          `UPDATE taxbill_email_resends
+              SET status = $2, attempts = $3, last_error = $4, updated_at = NOW()
+            WHERE id = $1`,
+          [r.id, final ? 'failed' : 'pending', nextAttempts, String(err?.message || err).slice(0, 500)],
+        );
+        failed += 1;
+        log(`참조 재전송 실패 — key=${r.invoicer_mgt_key} to=${r.email} 시도 ${nextAttempts}/${TAXBILL_RESEND_MAX_ATTEMPTS}${final ? ' · 최종 실패(수동 재전송 몫)' : ''}`);
+      }
+    }
+    if (rows.rows.length > 0) {
+      log(`참조 재전송 패스 — 대상 ${rows.rows.length} / 성공 ${sent} / 실패 ${failed}`);
+    }
+    return { picked: rows.rows.length, sent, failed };
+  } finally {
+    try {
+      await lockClient.query(`SELECT pg_advisory_unlock(hashtext('taxbill_email_resend_pass'))`);
     } catch {
       /* 커넥션 종료 시 세션 락은 자동 해제 */
     }

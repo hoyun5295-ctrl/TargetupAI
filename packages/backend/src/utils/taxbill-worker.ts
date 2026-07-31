@@ -14,7 +14,7 @@
  */
 
 import pool from '../config/database';
-import { isPopbillEnabled, issueReadyTaxbills } from './taxbill-popbill';
+import { isPopbillEnabled, issueReadyTaxbills, processTaxbillEmailResends } from './taxbill-popbill';
 
 const log = (msg: string) => console.log(`[세금계산서워커] ${msg}`);
 
@@ -59,6 +59,10 @@ async function tick(): Promise<void> {
     if (isPopbillEnabled()) {
       const pass = await issueReadyTaxbills(10);
       if (pass.skipped) log(`발행 패스 건너뜀 — ${pass.skipped}`);
+      // ★ 2026-07-31(2) 참조 재전송 패스 — 발행 락 밖 별도 소비(내구 pending 행·타임아웃·재시도 상한).
+      //   같은 tick에서 발행 직후 돌아 "발행 직후 참조 수신" 안내가 성립한다. 결과 로그는 패스 내부가 남긴다.
+      const resend = await processTaxbillEmailResends(20);
+      if (resend.skipped && resend.skipped.includes('미생성')) log(`재전송 패스 건너뜀 — ${resend.skipped}`);
     }
   } catch (err: any) {
     const msg = err?.message || '';

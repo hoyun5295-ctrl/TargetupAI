@@ -42,49 +42,43 @@ router.post('/webhook', async (req: Request, res: Response) => {
       return res.status(200).send('OK');
     }
 
-    // error 규칙: issued 전이 = NULL(회복 명시) / failed 전이 = 사유 기록 / 그 외 = 기존 유지.
+    // error 규칙: 재큐잉(아래 issued 번역) = 유지 / failed 전이 = 사유 기록 / 그 외 = 기존 유지.
     // (무조건 $err로 덮으면 304가 기존 실패 사유를 지운다 — 0730 Codex 지적 ⑥ 수용)
     // 잔여 위험(수용): 재전송이 순서를 뒤집으면(실제 305 후 지연 304) 상태가 마지막 수신 기준이 된다.
     // raw 전량 로그가 대사 근거고, 이벤트 이력 테이블은 DDL이라 이월.
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const r = await client.query(
-        `UPDATE taxbill_issues
-            SET status = COALESCE($2, status),
-                nts_confirm_num = COALESCE($3, nts_confirm_num),
-                error = CASE WHEN $2 = 'issued' THEN NULL
-                             WHEN $4::text IS NOT NULL THEN $4::text
-                             ELSE error END,
-                issued_at = CASE WHEN $2 = 'issued' THEN COALESCE(issued_at, NOW()) ELSE issued_at END
-          WHERE invoicer_mgt_key = $1
-          RETURNING confirmation_id`,
-        [decision.mgtKey, decision.set.status ?? null, decision.set.ntsConfirmNum ?? null, decision.set.error ?? null],
-      );
-      // 발행 확정(304)은 공개 컨펌 축에도 동기화 — 장부만 알면 컨펌 페이지가 발행 후에도 이의신청을 받는다.
-      const confirmationId = r.rows[0]?.confirmation_id ?? null;
-      if (decision.set.status === 'issued' && confirmationId) {
-        await client.query(
-          `UPDATE invoice_confirmations
-              SET taxbill_status = 'issued',
-                  issued_at = COALESCE(issued_at, NOW()),
-                  popbill_invoice_key = COALESCE(popbill_invoice_key, $2)
-            WHERE id = $1`,
-          [confirmationId, decision.mgtKey],
-        );
-      }
-      await client.query('COMMIT');
-      if ((r.rowCount || 0) === 0) {
-        // 우리 행이 없다 — 그래도 200 (재전송 폭주 방지). 사후 대사는 팝빌 사이트 목록과 대조.
-        log(`매칭 실패 — key=${decision.mgtKey} 행 없음 (사후 대사 대상)`);
-      } else {
-        log(`갱신 — key=${decision.mgtKey} ${JSON.stringify(decision.set)}`);
-      }
-    } catch (txErr) {
-      try { await client.query('ROLLBACK'); } catch { /* 아래 로그로 */ }
-      throw txErr;
-    } finally {
-      client.release();
+    //
+    // ★ 2026-07-31(2) Codex 4R — **issued 승격 단일 소유자 = 발행 패스(processOne)**.
+    //   웹훅을 공동 확정자로 두면(3R안) 수신자 스냅샷 경합·롤백 후 재시도 부재·트랜잭션 안 풀 재진입이
+    //   계속 파생됐다 — 웹훅은 순서 보장 없는 외부 신호라 내구 계약(참조 pending 기록)의 주체가 될 수 없다.
+    //   그래서 304는 상태를 승격하지 않는다: ready/submitted/issued = 관측만(번호 기록), **failed만 submitted로
+    //   재큐잉**해 워커에 위임한다 — 워커가 재수집 → registIssue 중복 → getInfo 3xx 자가치유로
+    //   장부 확정·컨펌 동기화·참조 pending 기록을 **한 트랜잭션(단일 소유자)**에서 수행한다.
+    //   (3R의 "failed→issued 직접 정정"은 "재큐잉을 통한 정정"으로 보존 — 확정 경로는 하나가 됐다.)
+    // ★ Codex 5R — 304 관측은 상태 축에 내구로 남긴다: submitted/failed → **ready(재확인 필요)**.
+    //   진행 중인 발행 패스가 registIssue 오류+getInfo 실패로 markFailed를 찍으려 해도, markFailed가
+    //   조건부(WHERE status='submitted')라 이 관측 이후에는 거부된다 — 팝빌엔 발행된 문서가 내부에
+    //   영구 failed로 남는 경합 차단. ready 행은 다음 tick이 재수집해 getInfo 자가치유로 확정한다.
+    const r = await pool.query(
+      `UPDATE taxbill_issues
+          SET status = CASE
+                WHEN $2 = 'issued' THEN CASE WHEN status IN ('failed', 'submitted') THEN 'ready' ELSE status END
+                ELSE COALESCE($2, status)
+              END,
+              nts_confirm_num = COALESCE($3, nts_confirm_num),
+              error = CASE WHEN $2 = 'issued' THEN error
+                           WHEN $4::text IS NOT NULL THEN $4::text
+                           ELSE error END
+        WHERE invoicer_mgt_key = $1
+        RETURNING status`,
+      [decision.mgtKey, decision.set.status ?? null, decision.set.ntsConfirmNum ?? null, decision.set.error ?? null],
+    );
+    if ((r.rowCount || 0) === 0) {
+      // 우리 행이 없다 — 그래도 200 (재전송 폭주 방지). 사후 대사는 팝빌 사이트 목록과 대조.
+      log(`매칭 실패 — key=${decision.mgtKey} 행 없음 (사후 대사 대상)`);
+    } else if (decision.set.status === 'issued') {
+      log(`304 관측 — key=${decision.mgtKey} 행 상태=${r.rows[0]?.status} (승격은 발행 패스 소유 — submitted/failed였다면 ready 재확인 큐잉됨)`);
+    } else {
+      log(`갱신 — key=${decision.mgtKey} ${JSON.stringify(decision.set)}`);
     }
   } catch (err: any) {
     // 어떤 실패도 응답 계약(200)을 깨지 않는다 — 원인은 로그로.

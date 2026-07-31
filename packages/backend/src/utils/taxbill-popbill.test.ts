@@ -5,7 +5,7 @@
  * 국세청으로 나가는 실문서라 payload 계약을 순수 함수로 고정한다 — 금액 정수 String·
  * 회계 항등식·24자 문서번호·수정발행 짝·웹훅 판정. 기대값은 리터럴로 적는다(표에서 유도 금지).
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   normalizeCorpNum,
   toWriteDate,
@@ -17,6 +17,10 @@ import {
   planModifyIssue,
   getPopbillConfig,
   isPopbillEnabled,
+  selectTaxbillResendTargets,
+  sendEmailAsync,
+  enqueueTaxbillResendsForIssue,
+  TAXBILL_SENDMAIL_TIMEOUT_MS,
   TaxinvoiceBuildInput,
 } from './taxbill-popbill';
 import { TaxbillParty } from './billing-settings';
@@ -370,5 +374,117 @@ describe('게이트 — 기본은 닫힘', () => {
         if (keep[k] === undefined) delete (process.env as any)[k];
       }
     }
+  });
+});
+
+// ★ 2026-07-31(2) 세금계산서 참조 재전송 대상 — 대표 1명 발행 + 참조 N명 sendEmail 재전송 계약
+describe('selectTaxbillResendTargets — 참조 재전송 대상 선별', () => {
+  it('참조 없음 = 빈 배열(재전송 무호출)', () => {
+    expect(selectTaxbillResendTargets({ primary: { email: 'a@x.co' }, cc: [] })).toEqual([]);
+    expect(selectTaxbillResendTargets({ primary: null, cc: [] })).toEqual([]);
+  });
+
+  it('대표와 중복(대소문자 무시)·상호 중복 제거, 형식 무효 제외, 순서 보존', () => {
+    expect(
+      selectTaxbillResendTargets({
+        primary: { email: 'Billing@Kumkang.co.kr' },
+        cc: ['billing@kumkang.co.kr', 'cfo@kumkang.co.kr', ' cfo@kumkang.co.kr ', 'not-an-email', 'tax@kumkang.co.kr'],
+      }),
+    ).toEqual(['cfo@kumkang.co.kr', 'tax@kumkang.co.kr']);
+  });
+
+  it('공백·빈 값은 제외', () => {
+    expect(selectTaxbillResendTargets({ primary: { email: 'a@x.co' }, cc: ['', '   ', 'b@x.co'] })).toEqual(['b@x.co']);
+  });
+});
+
+// ★ 2026-07-31(2) Codex 수용분 — 재전송 상한 + sendEmail 유한 타임아웃(워커 정지 차단) 계약
+describe('selectTaxbillResendTargets — 상한(장당 최대 10명)', () => {
+  it('11명 이상이면 앞 10명까지만 재전송 대상', () => {
+    const cc = Array.from({ length: 13 }, (_, i) => `cc${i}@x.co`);
+    const out = selectTaxbillResendTargets({ primary: { email: 'p@x.co' }, cc });
+    expect(out).toHaveLength(10);
+    expect(out[0]).toBe('cc0@x.co');
+    expect(out[9]).toBe('cc9@x.co');
+  });
+});
+
+describe('sendEmailAsync — 유한 타임아웃 보장(콜백 미호출 SDK에서도 settle)', () => {
+  it('success/error 콜백을 전혀 호출하지 않는 SDK = 타임아웃으로 reject (전역 워커 무한 대기 차단)', async () => {
+    vi.useFakeTimers();
+    try {
+      const fakeSvc = { sendEmail: () => { /* 콜백 미호출 — SDK timeout/error 이벤트 미전달 재현 */ } };
+      const p = sendEmailAsync(fakeSvc, '6678600578', 'TU260731-abc', 'cc@x.co', null);
+      const guarded = p.catch((e: any) => e);
+      await vi.advanceTimersByTimeAsync(TAXBILL_SENDMAIL_TIMEOUT_MS + 1);
+      const err = await guarded;
+      expect(err).toBeInstanceOf(Error);
+      expect(String(err.message)).toContain('응답 없음');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('success 콜백 = resolve, error 콜백 = reject (타이머 정리 포함)', async () => {
+    const okSvc = {
+      sendEmail: (_c: any, _k: any, _m: any, _r: any, _u: any, ok: (v: any) => void) => ok({ code: 1 }),
+    };
+    await expect(sendEmailAsync(okSvc, '6678600578', 'TU-1', 'a@x.co', null)).resolves.toMatchObject({ code: 1 });
+
+    const errSvc = {
+      sendEmail: (_c: any, _k: any, _m: any, _r: any, _u: any, _ok: any, fail: (e: any) => void) =>
+        fail(new Error('팝빌 거절')),
+    };
+    await expect(sendEmailAsync(errSvc, '6678600578', 'TU-1', 'a@x.co', null)).rejects.toThrow('팝빌 거절');
+  });
+
+  it('sendEmail 동기 throw도 reject로 수렴', async () => {
+    const throwSvc = { sendEmail: () => { throw new Error('연결 불가'); } };
+    await expect(sendEmailAsync(throwSvc, '6678600578', 'TU-1', 'a@x.co', null)).rejects.toThrow('연결 불가');
+  });
+});
+
+// ★ 2026-07-31(2) Codex 3R — issued 승격 계약: "참조 대상이 있으면 pending 기록과 같은 트랜잭션이 아니면 승격 불가"
+//   (발행 패스·웹훅 304 공유). tableExists 주입 + fake client로 단위 고정.
+describe('enqueueTaxbillResendsForIssue — issued 승격 계약', () => {
+  const fakeClient = () => {
+    const calls: { sql: string; params: any[] }[] = [];
+    return {
+      calls,
+      query: async (sql: string, params?: any[]) => { calls.push({ sql, params: params || [] }); return { rows: [] }; },
+    };
+  };
+
+  it('참조 0명 = 기록 없이 통과(0 반환·카탈로그 조회도 안 한다)', async () => {
+    const c = fakeClient();
+    let existsCalled = 0;
+    const n = await enqueueTaxbillResendsForIssue(c, 'issue-1', 'TU-1', { primary: { email: 'p@x.co' }, cc: [] }, {
+      tableExists: async () => { existsCalled += 1; return true; },
+    });
+    expect(n).toBe(0);
+    expect(c.calls).toHaveLength(0);
+    expect(existsCalled).toBe(0);
+  });
+
+  it('참조 있음 + 테이블 미생성 = throw(승격 차단 — 조용한 유실 금지)', async () => {
+    const c = fakeClient();
+    await expect(
+      enqueueTaxbillResendsForIssue(c, 'issue-1', 'TU-1', { primary: { email: 'p@x.co' }, cc: ['a@x.co'] }, {
+        tableExists: async () => false,
+      }),
+    ).rejects.toThrow('미생성');
+    expect(c.calls).toHaveLength(0);
+  });
+
+  it('참조 있음 + 테이블 실존 = 대상별 멱등 INSERT + 대상 수 반환', async () => {
+    const c = fakeClient();
+    const n = await enqueueTaxbillResendsForIssue(c, 'issue-1', 'TU-1', { primary: { email: 'p@x.co' }, cc: ['a@x.co', 'b@x.co'] }, {
+      tableExists: async () => true,
+    });
+    expect(n).toBe(2);
+    expect(c.calls).toHaveLength(2);
+    expect(c.calls[0].sql).toContain('ON CONFLICT (taxbill_issue_id, lower(email)) DO NOTHING');
+    expect(c.calls[0].params).toEqual(['issue-1', 'TU-1', 'a@x.co']);
+    expect(c.calls[1].params).toEqual(['issue-1', 'TU-1', 'b@x.co']);
   });
 });

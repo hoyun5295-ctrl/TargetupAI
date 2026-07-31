@@ -57,10 +57,10 @@
 > ⛔ **실청구 컨펌 메일 전에 테스트 완료·운영 전환**(게이트 ON+`IS_TEST=true` — SoT §9 남은 것) / 신규 테이블 실행자 컬럼에 users FK 금지 / 공급받는자 사업자 = 계정 → `billing_contacts` → `companies` 3단 / **통지 추적행은 메일보다 먼저**(§4-1)
 > 잔여 = 화면 실측 8건(정산 탭 저장 / 일괄발급 / 공개 컨펌=CSP / 현황판 / 사업자등록증 자동입력 / 회사 계산서 사업자 / 메일 재시도 / 미발송 필터) · 메일 첨부 실물(PDF 제목·파일명) · 접수·여정 실측 4건([[project_2026_0728_tickets_journey_triggers]]) · **재구성분 Codex 미검토**(4·5차 무산)
 
-### 0731 정산 수신자·귀속 축 — 배포완료, 실측 대기
-> SoT [SCHEMA `billing_recipients` 절](SCHEMA.md) + [정산 특례](docs/2026-07-30-billing-extras-and-groups-design.md) 머리말 갱신 · 기억 [[project_2026_0731_billing_recipients_and_scope]] · 다음 = 실측 1건(수신자 2명+계산서 전용 1명 등록 → 일괄발급 → 대표 컨펌 링크·참조 사본 → 컨펌 → 계산서가 세 번째 주소로)
-> ⛔ 수신자 원장은 `billing_recipients` 하나 — `billing_contacts.contact_email`·`companies.contact_email`을 정산 메일에 다시 쓰지 않는다(셋으로 갈려 있던 것을 합친 것) / 발송 모달 수신자 칸은 **비워야** 참조가 함께 간다(값이 있으면 서버가 override로 보고 cc를 뺀다) / 세금계산서는 대표 1명까지만(팝빌 참조 동시 전달 미검증) / 채널이 늘면 `USER_SHEET_CHANNELS`를 함께 본다
-> 잔여 = 실측 1건 · 080 귀속 실측 · 팝빌 `addContactList` 스펙 확인
+### 0731 정산 수신자·귀속 축 — 배포완료 + **(2) 세금계산서 복수 수신 코드완료·배포대기**(Codex 5R)
+> SoT [SCHEMA `billing_recipients`·`taxbill_email_resends` 절](SCHEMA.md) · 기억 [[project_2026_0731_billing_recipients_and_scope]](0731(2) 절 포함) · 다음 = (2) 배포 → 실측(참조 2명 등록 → 발행 → `taxbill_email_resends` sent·참조 수신) + 기존 실측 1건
+> ⛔ 수신자 원장은 `billing_recipients` 하나 / 발송 모달 수신자 칸은 **비워야** 참조가 함께 간다 / **세금계산서 발행은 대표 1명(invoiceeEmail1) 불변 — 참조는 issued 트랜잭션의 pending 기록+락 밖 재전송 패스**(인라인 재전송·웹훅 확정자 복원 금지: 웹훅 304=관측·ready 재큐잉만, markFailed는 CAS) / 채널이 늘면 `USER_SHEET_CHANNELS`
+> 잔여 = (2) 배포·참조 실측 · 실측 1건 · 080 귀속 실측
 
 ### 0730 정산 특례 — 축 A(080·최소과금·부가서비스) 배포완료, 실측 대기
 > SoT [정산 특례·발행 그룹](docs/2026-07-30-billing-extras-and-groups-design.md) **§9(남은 것) → §7(확인 5건)** · 기억 [[project_2026_0730_billing_080_extras]] · 다음 = 실측 3종(080 매핑 18번호→PDF 업로드→반영→발행 / 최소과금 4사 정액 발행 / 부가서비스 1건)

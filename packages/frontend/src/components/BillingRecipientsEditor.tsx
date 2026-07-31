@@ -141,14 +141,8 @@ export default function BillingRecipientsEditor({
               ))}
             </div>
 
-            {/* ★ 2026-07-31 세금계산서는 **한 주소로만 통지**된다 — 계산서는 팝빌이 발행 주소로 직접 보내고,
-                우리가 참조를 함께 넣는 방법(addContactList)은 설치된 SDK에서 확인되지 않았다.
-                확인 전까지 참조 등록을 열어두면 화면이 지키지 못할 약속을 하게 되므로 대표 한 명까지만 받는다. */}
-            {docType === 'taxbill' && rows.length > 0 ? (
-              <p className="px-3 py-2 border-t border-gray-100 text-[11px] text-gray-500">
-                세금계산서는 위 주소 한 곳으로 발행·통지됩니다. 주소를 바꾸려면 지운 뒤 다시 등록해 주세요.
-              </p>
-            ) : (
+            {/* ★ 2026-07-31(2) 세금계산서도 복수 수신 개방(Harold) — 대표 주소로 팝빌 발행, 참조는 발행 확정 직후
+                설치 SDK 실측 API(sendEmail 재전송)로 같은 계산서 메일을 받는다. 미검증 필드(addContactList)는 여전히 안 쓴다. */}
             <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-t border-gray-100">
               <input
                 type="email"
@@ -177,12 +171,11 @@ export default function BillingRecipientsEditor({
                 추가
               </button>
             </div>
-            )}
           </div>
         );
       })}
       <p className="text-[11px] text-gray-500">
-        거래내역서는 대표에게 컨펌 링크가 가고 참조는 같은 메일을 사본으로 받습니다(참조도 그 링크로 컨펌할 수 있습니다). 세금계산서는 등록한 한 주소로 발행·통지됩니다.
+        거래내역서는 대표에게 컨펌 링크가 가고 참조는 같은 메일을 사본으로 받습니다(참조도 그 링크로 컨펌할 수 있습니다). 세금계산서는 대표 주소로 발행되고, 참조는 발행 직후 같은 계산서 메일을 받습니다.
       </p>
     </div>
   );
