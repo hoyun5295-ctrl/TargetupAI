@@ -598,8 +598,10 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
     for (const m of messages as any[]) {
       if (m.actionUrl) m.actionUrl = sanitizeActionUrl(m.actionUrl);
       if (Array.isArray(m.buttons)) m.buttons = sanitizeButtonsActionUrls(m.buttons);
-      // ★ 2026-07-21 포스터 캐러셀 슬라이드 CTA URL도 서빙 정규화(프로토콜 없는 도메인→https)
+      // ★ 2026-07-21 포스터 캐러셀 슬라이드 CTA URL도 서빙 정규화(프로토콜 없는 도메인→https) — 2026-07-31 슬라이드 link_url 포함
       if (Array.isArray(m.posterSlides)) m.posterSlides = sanitizePosterSlidesActionUrls(m.posterSlides);
+      // ★ 2026-07-31 이미지 클릭 링크도 동일 정규화
+      if (m.imageLinkUrl) m.imageLinkUrl = sanitizeActionUrl(m.imageLinkUrl);
     }
 
     // web 채널 허용 형태 — 그 밖 형태(옛 배너 등)는 모달로 보정. 기존 메시지 포함, DB 무변경.

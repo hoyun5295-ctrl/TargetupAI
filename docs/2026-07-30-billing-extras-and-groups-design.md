@@ -3,6 +3,8 @@
 > 2026-07-30. 기원 = 서수란 팀장 "정산 관련 체크 사항"(0729 접수) + KT 명세서 실측(Harold 제공).
 > SoT = 이 문서. 상태·잔여·금지 조건은 STATUS §2 카드가 소유한다(doc_ownership) — 여기엔 구조와 근거만.
 > 인접 SoT: [정산 범위·정정](2026-07-26-billing-scope-and-corrections-design.md)(공급가·절사 계약) · [일괄발급·컨펌·세금계산서](2026-07-28-bulk-invoice-confirm-taxbill-design.md)(발행·메일·계산서 흐름).
+>
+> **★2026-07-31 갱신 — 청구 귀속 축 신설(서수란 접수).** `billing_080_numbers`·`billing_extra_items`에 `user_id`가 붙어 080·부가서비스를 **고객사 전체 / 사용자별**로 지정한다. 계정별 발행에서 값이 있으면 그 계정 장, 없으면 공통 장으로 **분배가 저절로 맞는다**(장 분배 판정 집합 `USER_SHEET_CHANNELS`에 `extra` 포함 — 그전엔 `web` 리터럴이라 귀속을 실어도 전부 공통 장으로 갔다). 소비 마커(`billed_billing_id`)도 **그 항목이 실제로 실린 장**에 걸린다 — 공통 장 일괄 마킹을 그대로 뒀으면 공통 장 하나를 지울 때 계정 장 항목까지 미청구로 풀려 이중청구가 됐다. 화면은 업체 **검색**(`SearchableSelect` 재사용) + 귀속 라디오를 공통 컴포넌트(`CompanyScopePicker`)로 만들어 080 매핑 탭과 부가서비스 입력 탭에 같이 쓴다. 컬럼·불변식 상세 = status/SCHEMA.md 080 2테이블 절.
 
 ---
 

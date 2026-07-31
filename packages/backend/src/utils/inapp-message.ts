@@ -87,6 +87,10 @@ export interface CreateInAppMessageInput {
   design?: Record<string, any> | null;
   // ★ 2026-07-21 포스터형 캐러셀 — 슬라이드 배열(full_image 전용). undefined=유지 / 배열=교체(빈 배열=단일 포스터로 복귀)
   poster_slides?: any[] | null;
+  // ★ 2026-07-31 이미지 클릭 랜딩 — 이미지 자체 클릭 시 이동 링크(전 템플릿 공용). undefined=유지 / null=비우기 / 값=교체.
+  //   캐러셀 첫 장(slide0)의 link_url도 이 값에서 합성(프론트 assemblePosterSlides) — 단일·캐러셀 동작 일치.
+  imageLinkUrl?: string | null;
+  image_link_url?: string | null;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -179,6 +183,20 @@ async function ensureInAppDesignColumnOrThrow(): Promise<void> {
 
 // ★ 2026-07-21 poster_slides 컬럼 선확인 — ensureInAppDesignColumnOrThrow 미러(양성만 캐시).
 //   부재 = throw('column ... does not exist') → 라우트 503 DB_MIGRATION_PENDING 변환(부분 상태 0).
+// ★ 2026-07-31 이미지 클릭 랜딩 — image_link_url 쓰기 전 컬럼 선확인 (poster_slides 안전망 미러, 부재 시 503 변환).
+let inappImageLinkColumnExists: boolean | null = null;
+async function ensureImageLinkUrlColumnOrThrow(): Promise<void> {
+  if (inappImageLinkColumnExists !== true) {
+    const res = await query(
+      `SELECT 1 FROM information_schema.columns WHERE table_name = 'cdp_inapp_messages' AND column_name = 'image_link_url'`,
+    );
+    if (res.rows.length === 0) {
+      throw new Error('cdp_inapp_messages.image_link_url column does not exist — ALTER 실행 필요');
+    }
+    inappImageLinkColumnExists = true;
+  }
+}
+
 let inappPosterSlidesColumnExists: boolean | null = null;
 async function ensurePosterSlidesColumnOrThrow(): Promise<void> {
   if (inappPosterSlidesColumnExists !== true) {
@@ -318,6 +336,8 @@ export interface PosterSlide {
   title?: string;
   body?: string;
   cta?: { label?: string; action_url?: string | null; background_color?: string; text_color?: string };
+  /** ★ 2026-07-31 이미지 클릭 랜딩 — 슬라이드 이미지 자체 클릭 시 이동 링크(CTA와 별개·선택). 미설정 = 무동작(기존과 동일). */
+  link_url?: string | null;
   title_color?: string;
   body_color?: string;
   title_size?: number;
@@ -364,6 +384,12 @@ export function sanitizePosterSlides(raw: any): PosterSlide[] {
         if (fg) cta.text_color = fg;
         slide.cta = cta;
       }
+    }
+    // ★ 2026-07-31 이미지 클릭 랜딩 — CTA action_url과 동일 무해화(위험 스킴 = 탈락). 값이 있을 때만 저장.
+    const hasLinkKey = s.link_url !== undefined || s.linkUrl !== undefined;
+    if (hasLinkKey) {
+      const linkUrl = sanitizeActionUrl(s.link_url ?? s.linkUrl);
+      if (linkUrl) slide.link_url = linkUrl;
     }
     const tc = posterHexOrUndef(s.title_color); if (tc) slide.title_color = tc;
     const bc = posterHexOrUndef(s.body_color); if (bc) slide.body_color = bc;
@@ -424,12 +450,16 @@ export function composeFlatFromPosterSlides(
   };
 }
 
-/** 서빙 시 슬라이드 CTA action_url 재정규화 (프로토콜 없는 도메인 → https 보정 — sanitizeButtonsActionUrls 미러, DB 무변경). */
+/** 서빙 시 슬라이드 CTA action_url + 이미지 클릭 link_url 재정규화 (프로토콜 없는 도메인 → https 보정 — sanitizeButtonsActionUrls 미러, DB 무변경). */
 export function sanitizePosterSlidesActionUrls(slides: any): any[] {
   if (!Array.isArray(slides)) return [];
-  return slides.map((s) => (s && typeof s === 'object' && s.cta && typeof s.cta === 'object'
-    ? { ...s, cta: { ...s.cta, action_url: sanitizeActionUrl(s.cta.action_url) } }
-    : s));
+  return slides.map((s) => {
+    if (!s || typeof s !== 'object') return s;
+    const out: any = { ...s };
+    if (out.cta && typeof out.cta === 'object') out.cta = { ...out.cta, action_url: sanitizeActionUrl(out.cta.action_url) };
+    if (out.link_url) out.link_url = sanitizeActionUrl(out.link_url);
+    return out;
+  });
 }
 
 // ★ 2026-07-17 템플릿별 허용 블록 — SDK inapp-blocks.ts ALLOWED_BLOCKS 1:1 미러 (frontend BlockPreview 미러와 3면 동일).
@@ -583,6 +613,12 @@ export async function createInAppMessage(
   if (design) await ensureInAppDesignColumnOrThrow();
   // ★ 2026-07-21 poster_slides는 INSERT에 항상 포함(컬럼 상시 참조) → 쓰기 전 컬럼 선확인(부재 시 503).
   await ensurePosterSlidesColumnOrThrow();
+  // ★ 2026-07-31 image_link_url도 INSERT 상시 포함 → 동일 선확인.
+  await ensureImageLinkUrlColumnOrThrow();
+  // ★ (Codex 2R) 블록이 진실인 메시지는 flat 전용 이미지 링크를 저장하지 않는다 — 블록 렌더 장애 시
+  //   legacy 폴백이 잔존 링크를 되살리는 경로 차단(범용 보장 계약: composed가 flat을 소유).
+  const blocksAreTruth = contentBlocks.length > 0 && !hasSlides;
+  const imageLinkPatch = blocksAreTruth ? { set: true, value: null } : resolveImageLinkUrlPatch(input);
 
   const result = await query(
     `INSERT INTO cdp_inapp_messages (
@@ -592,7 +628,7 @@ export async function createInAppMessage(
       template, image_url, buttons, segment_conditions, trigger_conditions,
       personalization_vars, auto_dismiss_seconds, max_displays_per_user,
       send_start_hour, send_end_hour, allowed_weekdays, animation, badge_text,
-      content_blocks, theme, accent_color, card_style, poster_slides${design ? ', design' : ''},
+      content_blocks, theme, accent_color, card_style, poster_slides, image_link_url${design ? ', design' : ''},
       created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2::uuid, $3, $4, $5, $6,
@@ -601,7 +637,7 @@ export async function createInAppMessage(
       $16, $17, $18::jsonb, $19::jsonb, $20::jsonb,
       $21::jsonb, $22, $23,
       $24, $25, $26, $27, $28,
-      $29::jsonb, $30, $31, $32, $33::jsonb${design ? ', $34::jsonb' : ''},
+      $29::jsonb, $30, $31, $32, $33::jsonb, $34${design ? ', $35::jsonb' : ''},
       NOW(), NOW()
     ) RETURNING *`,
     [
@@ -619,6 +655,7 @@ export async function createInAppMessage(
       JSON.stringify(contentBlocks), normalizeTheme(input.theme), input.accent_color ?? null,
       normalizeCardStyle(input.card_style),
       hasSlides ? JSON.stringify(posterSlides) : null,
+      imageLinkPatch.value,
       ...(design ? [JSON.stringify(design)] : []),
     ]
   );
@@ -658,6 +695,12 @@ export function patchPresence<T>(inputValue: T | null | undefined): { set: boole
  */
 export function resolveActionUrlPatch(input: Record<string, any>): { set: boolean; value: string | null } {
   const raw = input.actionUrl !== undefined ? input.actionUrl : input.action_url;
+  return patchPresence(raw !== undefined ? sanitizeActionUrl(raw) : undefined);
+}
+
+/** ★ 2026-07-31 이미지 클릭 랜딩 — image_link_url 입력 해석 (순수): camelCase 우선·snake_case 수용, sanitizeActionUrl 무해화. */
+export function resolveImageLinkUrlPatch(input: Record<string, any>): { set: boolean; value: string | null } {
+  const raw = input.imageLinkUrl !== undefined ? input.imageLinkUrl : input.image_link_url;
   return patchPresence(raw !== undefined ? sanitizeActionUrl(raw) : undefined);
 }
 
@@ -721,11 +764,14 @@ export async function updateInAppMessage(
   const designProvided = input.design !== undefined;
   if (designProvided) await ensureInAppDesignColumnOrThrow();
   const designValue = designProvided && input.design !== null ? sanitizeInAppDesign(input.design) : null;
-  // ★ 2026-07-21 poster_slides는 UPDATE에서 항상 참조(CASE $38/$39) → 쓰기 전 컬럼 선확인(부재 시 503). design은 $40으로 이동.
+  // ★ 2026-07-21 poster_slides는 UPDATE에서 항상 참조(CASE $38/$39) → 쓰기 전 컬럼 선확인(부재 시 503).
   await ensurePosterSlidesColumnOrThrow();
+  // ★ 2026-07-31 image_link_url도 항상 참조(CASE $40/$41) → 동일 선확인. design은 $42로 이동.
+  await ensureImageLinkUrlColumnOrThrow();
+  const imageLinkPatch = resolveImageLinkUrlPatch(input);
   const result = await query(
     `UPDATE cdp_inapp_messages SET
-      ${designProvided ? 'design = $40::jsonb,' : ''}
+      ${designProvided ? 'design = $42::jsonb,' : ''}
       title = COALESCE($3, title),
       body = COALESCE($4, body),
       action_url = CASE WHEN $32::boolean THEN $5 ELSE action_url END,
@@ -763,6 +809,17 @@ export async function updateInAppMessage(
       card_style = COALESCE($31, card_style),
       -- ★ 2026-07-21 포스터 캐러셀 슬라이드 — presence flag(제공 시 교체/비우기, 미제공 시 유지). full_image 아닌 메시지엔 무해(미판독).
       poster_slides = CASE WHEN $38::boolean THEN $39::jsonb ELSE poster_slides END,
+      -- ★ 2026-07-31 이미지 클릭 랜딩 — presence flag(제공 시 교체/비우기, 미제공 시 유지).
+      -- ★ (Codex 2R) 최종 블록이 비어있지 않은 메시지(블록이 진실)는 무조건 비움 — 부분 PUT로 블록만 갱신해도
+      --   flat 전용 잔존 링크가 legacy 폴백에서 되살아나지 않는다(content_blocks SET 판정식과 동일 반복).
+      image_link_url = CASE
+        WHEN (CASE
+          WHEN COALESCE($15, template) = 'full_image' THEN '[]'::jsonb
+          ELSE COALESCE($28::jsonb, content_blocks)
+        END) <> '[]'::jsonb THEN NULL
+        WHEN $40::boolean THEN $41
+        ELSE image_link_url
+      END,
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid
      RETURNING *`,
@@ -793,6 +850,7 @@ export async function updateInAppMessage(
       input.card_style !== undefined && input.card_style !== null ? normalizeCardStyle(input.card_style) : null,
       actionUrlPatch.set, imagePatch.set, dismissPatch.set, maxDispPatch.set, startHourPatch.set, endHourPatch.set,
       posterSlidesProvided, posterSlidesParam,
+      imageLinkPatch.set, imageLinkPatch.value,
       ...(designProvided ? [designValue ? JSON.stringify(designValue) : null] : []),
     ]
   );
@@ -1078,6 +1136,8 @@ export interface InAppMessageDetail extends InAppMessage {
   design: Record<string, any> | null;
   /** ★ 2026-07-21 포스터 캐러셀 — 슬라이드 배열(빈 배열 = 단일 포스터). SDK가 2장 이상이면 좌우 스와이프 렌더 */
   posterSlides: PosterSlide[];
+  /** ★ 2026-07-31 이미지 클릭 랜딩 — 이미지 자체 클릭 시 이동 링크(null = 무동작·기존과 동일). 구 SDK는 미지 필드라 무시 */
+  imageLinkUrl: string | null;
   audienceFilter?: Record<string, any> | null;
 }
 
@@ -1106,6 +1166,7 @@ function mapRowToMessageDetail(row: any): InAppMessageDetail {
     cardStyle: normalizeCardStyle(row.card_style),
     design: row.design && typeof row.design === 'object' ? row.design : null,
     posterSlides: Array.isArray(row.poster_slides) ? row.poster_slides : [],
+    imageLinkUrl: row.image_link_url || null,
     audienceFilter: row.audience_filter || null,
   };
 }
@@ -1138,7 +1199,7 @@ const FULL_COLUMNS = `id, title, body, action_url, action_label, position, backg
                       personalization_vars, parent_message_id, variant_weight,
                       auto_dismiss_seconds, max_displays_per_user,
                       send_start_hour, send_end_hour, allowed_weekdays, locale_variants, animation, channel,
-                      content_blocks, theme, accent_color, card_style, design, audience_filter, poster_slides`;
+                      content_blocks, theme, accent_color, card_style, design, audience_filter, poster_slides, image_link_url`;
 
 /**
  * ★ D215+ V2 — SDK GET /inapp/active 호출 진입.

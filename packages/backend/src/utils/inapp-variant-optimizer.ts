@@ -118,7 +118,7 @@ export async function createVariant(
     `SELECT id, title, body, template, segment_conditions, trigger_conditions, personalization_vars,
             display_frequency, auto_dismiss_seconds, max_displays_per_user,
             send_start_hour, send_end_hour, allowed_weekdays, locale_variants, is_ad, status,
-            content_blocks, theme, accent_color, card_style, badge_text, channel, design, poster_slides
+            content_blocks, theme, accent_color, card_style, badge_text, channel, design, poster_slides, image_link_url
      FROM cdp_inapp_messages
      WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
     [input.parentMessageId, companyId]
@@ -154,7 +154,7 @@ export async function createVariant(
        send_start_hour, send_end_hour, allowed_weekdays, locale_variants,
        animation, is_ad, status,
        parent_message_id, variant_weight,
-       content_blocks, theme, accent_color, card_style, badge_text, channel, design, poster_slides,
+       content_blocks, theme, accent_color, card_style, badge_text, channel, design, poster_slides, image_link_url,
        created_at, updated_at
      ) VALUES (
        gen_random_uuid(), $1::uuid, $2::uuid, $3, $4, $5, $6, $7::jsonb,
@@ -164,7 +164,7 @@ export async function createVariant(
        $16, $17, $18::integer[], $19::jsonb,
        $20, $21, 'active',
        $22::uuid, $23,
-       $24::jsonb, $25, $26, $27, $28, $29, $30::jsonb, $31::jsonb,
+       $24::jsonb, $25, $26, $27, $28, $29, $30::jsonb, $31::jsonb, $32,
        NOW(), NOW()
      ) RETURNING id`,
     [
@@ -197,6 +197,9 @@ export async function createVariant(
       parent.channel === 'app' ? 'app' : 'web',
       parent.design ? JSON.stringify(parent.design) : null,
       variantSlides ? JSON.stringify(variantSlides) : null,
+      // ★ 2026-07-31 이미지 클릭 링크 상속 — 미상속 시 variant만 이미지 클릭이 죽는다(0721 poster_slides 유실과 같은 부류).
+      // ★ (Codex 2R) 블록이 진실인 variant는 flat 전용 링크를 저장하지 않는다(create/update 계약 미러).
+      variantBlocks.length > 0 ? null : (parent.image_link_url ?? null),
     ]
   );
 

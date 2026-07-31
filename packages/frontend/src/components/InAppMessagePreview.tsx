@@ -95,6 +95,10 @@ function PosterCarouselPreview({
               {s.image_url
                 ? <img src={s.image_url} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                 : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#8a8a94', background: 'linear-gradient(135deg,#e8e8ee,#d4d4dd)' }}>이미지 필요</div>}
+              {/* ★ 2026-07-31 이미지 클릭 링크 표시 — 설정된 슬라이드만 칩(실렌더는 이미지 전체가 클릭 대상) */}
+              {s.link_url && String(s.link_url).trim() && (
+                <div style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 9.5, fontWeight: 700, padding: '2px 7px', borderRadius: 999, letterSpacing: '0.02em' }}>이미지 클릭 → 이동</div>
+              )}
               {(badge || title || body) && (
                 <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '42px 18px 14px', background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.66) 100%)', color: msgOverlay, maxHeight: '100%', overflowY: 'auto' }}>
                   {badge && <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.2)', fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 999, marginBottom: 7, color: tColor }}>{badge}</div>}

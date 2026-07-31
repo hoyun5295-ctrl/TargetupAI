@@ -159,6 +159,9 @@ export interface InAppMessageSdk {
   /** ★ 2026-07-21 포스터형 캐러셀 — 슬라이드 배열(2장 이상 = 좌우 스와이프). 미설정·1장 = 단일 포스터(회귀 0) */
   posterSlides?: PosterSlideSdk[] | null;
   poster_slides?: PosterSlideSdk[] | string | null;
+  /** ★ 2026-07-31 이미지 클릭 랜딩 — 이미지 자체 클릭 시 이동 링크(전 템플릿 공용). 미설정 = 무동작(기존과 동일) */
+  imageLinkUrl?: string | null;
+  image_link_url?: string | null;
 }
 
 /** ★ 2026-07-21 포스터 캐러셀 슬라이드 (백엔드 PosterSlide 미러) — image_url 필수, 나머지 옵셔널 */
@@ -167,6 +170,8 @@ export interface PosterSlideSdk {
   title?: string | null;
   body?: string | null;
   cta?: { label?: string; action_url?: string | null; background_color?: string; text_color?: string } | null;
+  /** ★ 2026-07-31 이미지 클릭 랜딩 — 슬라이드 이미지 자체 클릭 시 이동(CTA와 별개·선택) */
+  link_url?: string | null;
   title_color?: string | null;
   body_color?: string | null;
   title_size?: number | null;
@@ -830,7 +835,7 @@ export class HanjulloInAppModule {
     });
     this.applyAnimation(root, animation, template);
 
-    if (imageUrl) this.appendImage(root, imageUrl, 48);
+    if (imageUrl) this.appendImage(root, imageUrl, 48, undefined, undefined, msg, input);
     this.appendTextBlock(root, title, body, 'banner', !!(msg.is_ad ?? msg.isAd));
     this.appendButtons(root, msg, buttons, input);
     this.appendOptOutLink(root, msg, input, () => { try { document.body.removeChild(root); } catch {} }, 'inline');
@@ -890,6 +895,8 @@ export class HanjulloInAppModule {
       hero.referrerPolicy = 'no-referrer';
       Object.assign(hero.style, { width: '100%', maxHeight: '300px', objectFit: 'cover', display: 'block' });
       hero.onerror = () => { hero.style.display = 'none'; };
+      // ★ 2026-07-31 이미지 클릭 랜딩 — 링크 설정 시 hero 클릭으로 이동(버튼과 동일 계약)
+      this.makeImageClickable(hero, msg, input, this.resolveImageLink(msg), 'image');
       root.appendChild(hero);
     }
     // 콘텐츠 영역 (뱃지·제목·본문·CTA) — 이미지 유무에 따라 상단 여백 조정
@@ -903,6 +910,9 @@ export class HanjulloInAppModule {
     // 닫기 = 우상단 (이미지 위에도 보이게)
     this.appendCloseButton(root, msg, input, () => document.body.removeChild(backdrop), 'absolute-top-right');
 
+    // ★ 2026-07-31 (Codex 1R ①) — SDK가 만든 래퍼임을 명시 마킹. 제거·페이드 판정은 이 마커로만 한다
+    //   (parentElement 추론 금지 — inline_card의 부모는 고객사 호스트 컨테이너라 지우면 몰 DOM이 파손된다).
+    backdrop.setAttribute('data-hanjullo-wrap', '1');
     backdrop.appendChild(root);
     document.body.appendChild(backdrop);
     if (autoDismissSec && autoDismissSec > 0) this.setupAutoDismiss(backdrop, autoDismissSec);
@@ -1012,6 +1022,8 @@ export class HanjulloInAppModule {
       hero.style.display = 'none';
       Object.assign(imgWrap.style, { minHeight: '220px', background: 'linear-gradient(135deg,#3a3d46,#23252c)' });
     };
+    // ★ 2026-07-31 이미지 클릭 랜딩 — 단일 포스터 이미지 클릭 시 이동(스크림 텍스트 영역 제외 — 본문 스크롤과 충돌 방지)
+    this.makeImageClickable(hero, msg, input, this.resolveImageLink(msg), 'image');
     imgWrap.appendChild(hero);
 
     // ★ 2026-07-21 스크림(제목/본문/배지 오버레이) — 단일 포스터·캐러셀 슬라이드 공용 buildPosterScrim(동일 규격).
@@ -1030,6 +1042,9 @@ export class HanjulloInAppModule {
     imgWrap.style.color = '#ffffff';
     this.appendCloseButton(imgWrap, msg, input, () => document.body.removeChild(backdrop), 'absolute-top-right');
 
+    // ★ 2026-07-31 (Codex 1R ①) — SDK가 만든 래퍼임을 명시 마킹. 제거·페이드 판정은 이 마커로만 한다
+    //   (parentElement 추론 금지 — inline_card의 부모는 고객사 호스트 컨테이너라 지우면 몰 DOM이 파손된다).
+    backdrop.setAttribute('data-hanjullo-wrap', '1');
     backdrop.appendChild(root);
     document.body.appendChild(backdrop);
     if (autoDismissSec && autoDismissSec > 0) this.setupAutoDismiss(backdrop, autoDismissSec);
@@ -1142,7 +1157,7 @@ export class HanjulloInAppModule {
     });
     (track.style as any).webkitOverflowScrolling = 'touch';
 
-    slides.forEach((slide) => {
+    slides.forEach((slide, slideIdx) => {
       const cell = document.createElement('div');
       Object.assign(cell.style, { position: 'relative', flex: '0 0 100%', width: '100%', scrollSnapAlign: 'start', scrollSnapStop: 'always', boxSizing: 'border-box' });
       // 미디어 박스 — 캐러셀은 슬라이드 높이 통일 필수 → 4:5 박스 cover(62vh 상한). 단일 포스터(원본 비율)와 의도적 차이.
@@ -1153,6 +1168,9 @@ export class HanjulloInAppModule {
       img.alt = ''; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer';
       Object.assign(img.style, { width: '100%', height: '100%', objectFit: 'cover', display: 'block' });
       img.onerror = () => { img.style.display = 'none'; media.style.background = 'linear-gradient(135deg,#3a3d46,#23252c)'; };
+      // ★ 2026-07-31 이미지 클릭 랜딩 — 슬라이드별 link_url. 트래킹 button_id = slide_{i}_image(슬라이드별 성과).
+      //   터치 스와이프는 스크롤 제스처라 click 미발화(브라우저 기본) — 넘기기와 충돌 없음.
+      this.makeImageClickable(img, msg, input, slide.link_url, `slide_${slideIdx}_image`);
       media.appendChild(img);
 
       const scrim = this.buildPosterScrim({
@@ -1238,6 +1256,9 @@ export class HanjulloInAppModule {
     this.appendOptOutLink(bottom, msg, input, () => { try { document.body.removeChild(backdrop); } catch {} });
     root.appendChild(bottom);
 
+    // ★ 2026-07-31 (Codex 1R ①) — SDK가 만든 래퍼임을 명시 마킹. 제거·페이드 판정은 이 마커로만 한다
+    //   (parentElement 추론 금지 — inline_card의 부모는 고객사 호스트 컨테이너라 지우면 몰 DOM이 파손된다).
+    backdrop.setAttribute('data-hanjullo-wrap', '1');
     backdrop.appendChild(root);
     document.body.appendChild(backdrop);
     if (autoDismissSec && autoDismissSec > 0) this.setupAutoDismiss(backdrop, autoDismissSec);
@@ -1270,7 +1291,7 @@ export class HanjulloInAppModule {
     });
     this.applyAnimation(root, animation, 'full');
 
-    if (imageUrl) this.appendImage(root, imageUrl, 0, '100%', '240px');
+    if (imageUrl) this.appendImage(root, imageUrl, 0, '100%', '240px', msg, input);
     if (badge) this.appendBadge(root, badge, msg.textColor);
     this.appendTextBlock(root, title, body, 'full', !!(msg.is_ad ?? msg.isAd));
     this.appendButtons(root, msg, buttons, input);
@@ -1309,7 +1330,7 @@ export class HanjulloInAppModule {
     });
     this.applyAnimation(root, animation, 'slide-right');
 
-    if (imageUrl) this.appendImage(root, imageUrl, 0, '100%', '120px');
+    if (imageUrl) this.appendImage(root, imageUrl, 0, '100%', '120px', msg, input);
     if (badge) this.appendBadge(root, badge, msg.textColor);
     this.appendTextBlock(root, title, body, 'slide', !!(msg.is_ad ?? msg.isAd));
     this.appendButtons(root, msg, buttons, input);
@@ -1349,7 +1370,7 @@ export class HanjulloInAppModule {
       boxSizing: 'border-box',
     });
 
-    if (imageUrl) this.appendImage(root, imageUrl, 0, '100%', '160px');
+    if (imageUrl) this.appendImage(root, imageUrl, 0, '100%', '160px', msg, input);
     if (badge) this.appendBadge(root, badge, msg.textColor);
     this.appendTextBlock(root, title, body, 'inline', !!(msg.is_ad ?? msg.isAd));
     this.appendButtons(root, msg, buttons, input);
@@ -1852,6 +1873,63 @@ export class HanjulloInAppModule {
     if (target) window.location.href = target;
   }
 
+  /** ★ 2026-07-31 (Codex 1R ①) — 메시지 DOM 제거 단일 길목. SDK가 만든 래퍼(data-hanjullo-wrap)만 함께 제거하고,
+   *  그 외(인라인 카드 = 고객사 호스트 컨테이너 안)는 메시지 루트만 제거한다. parentElement 추론 금지. */
+  private removeMessageDom(msg: InAppMessageSdk): void {
+    const rootEl = document.querySelector(`[data-hanjullo-msg="${msg.id}"]`) as HTMLElement | null;
+    if (!rootEl) return;
+    const wrap = rootEl.parentElement;
+    if (wrap && wrap.getAttribute('data-hanjullo-wrap') === '1') wrap.remove();
+    else rootEl.remove();
+  }
+
+  /** ★ 2026-07-31 이미지 클릭 랜딩 — 메시지 수준 링크 판독 (camel/snake 양쪽 수용, 공백 = 없음).
+   *  ★ (Codex 2R·3R) 블록이 진실인 메시지는 메시지 수준 이미지 링크가 성립하지 않는다 — 블록 렌더 예외로
+   *  legacy 폴백이 돌 때 과거 잔존 링크가 되살아나지 않게 판독 단계에서 차단한다. 판정은 tri-state fail-closed:
+   *  링크 허용은 "블록 없음" 또는 "정상 파싱된 빈 배열"일 때만. 파싱 실패·비배열(판정 불가) = 차단.
+   *  별칭 두 필드(contentBlocks·content_blocks)는 각각 독립 판정 — 어느 한쪽이라도 차단이면 차단.
+   *  (슬라이드 link_url은 슬라이드 소유라 이 게이트와 무관) */
+  private resolveImageLink(msg: InAppMessageSdk): string | null {
+    const blockGate = (raw: any): 'allow' | 'block' => {
+      if (raw == null || raw === '') return 'allow';           // 블록 없음
+      let b: any = raw;
+      if (typeof raw === 'string') {
+        try { b = JSON.parse(raw); } catch { return 'block'; } // 손상 문자열 = 판정 불가 → fail-closed
+      }
+      if (!Array.isArray(b)) return 'block';                   // 비배열 = 판정 불가 → fail-closed
+      return b.length > 0 ? 'block' : 'allow';                 // 블록이 진실이면 차단
+    };
+    if (blockGate((msg as any).contentBlocks) === 'block' || blockGate((msg as any).content_blocks) === 'block') return null;
+    const v = msg.imageLinkUrl ?? msg.image_link_url;
+    return typeof v === 'string' && v.trim() ? v.trim() : null;
+  }
+
+  /** ★ 2026-07-31 이미지 클릭 랜딩 — 이미지 자체에 링크를 배선(선택). 버튼 클릭과 동일 계약:
+   *  track('click', button_id) → 세션 억제 → 모달 닫기 → safeNavigate(스킴 화이트리스트).
+   *  링크 미설정 = 리스너 자체를 안 붙임(기존 발행물 무동작 그대로 = 회귀 0). button_id = 'image' / 'slide_{i}_image'. */
+  private makeImageClickable(
+    el: HTMLElement,
+    msg: InAppMessageSdk,
+    input: InAppInitInput,
+    linkUrl: string | null | undefined,
+    buttonId: string,
+  ): void {
+    const url = typeof linkUrl === 'string' ? linkUrl.trim() : '';
+    if (!url) return;
+    el.style.cursor = 'pointer';
+    el.setAttribute('role', 'link');
+    el.setAttribute('tabindex', '0');
+    const go = () => {
+      this.track(msg.id, 'click', input, buttonId);
+      this.dismissForSession(msg);
+      // 이동 전 모달 닫기 — SPA 라우팅·placeholder URL에서도 모달이 남지 않게 (appendButtons와 동일 단일 길목)
+      this.removeMessageDom(msg);
+      this.safeNavigate(url);
+    };
+    el.addEventListener('click', go);
+    el.addEventListener('keydown', (e: KeyboardEvent) => { if (e.key === 'Enter') go(); });
+  }
+
   /** 상대경로 이미지(/uploads/...)를 SDK endpoint 도메인 기준 절대 URL로 — 자사몰 도메인 404 방지 */
   private toAbsoluteImageUrl(url: string): string {
     if (!url || /^(https?:)?\/\//i.test(url) || url.startsWith('data:')) return url;
@@ -1880,12 +1958,14 @@ export class HanjulloInAppModule {
     parent.appendChild(badge);
   }
 
-  private appendImage(parent: HTMLElement, imageUrl: string, sizePx: number, width?: string, height?: string): void {
+  private appendImage(parent: HTMLElement, imageUrl: string, sizePx: number, width?: string, height?: string, msg?: InAppMessageSdk, input?: InAppInitInput): void {
     const img = document.createElement('img');
     img.src = this.toAbsoluteImageUrl(imageUrl);
     img.loading = 'lazy';
     img.alt = '';
     img.referrerPolicy = 'no-referrer';
+    // ★ 2026-07-31 이미지 클릭 랜딩 — msg·input이 전달된 소비처(전 템플릿)는 메시지 링크가 있으면 클릭 가능
+    if (msg && input) this.makeImageClickable(img, msg, input, this.resolveImageLink(msg), 'image');
     if (sizePx > 0) {
       img.style.width = `${sizePx}px`;
       img.style.height = `${sizePx}px`;
@@ -1998,11 +2078,9 @@ export class HanjulloInAppModule {
       btnEl.addEventListener('click', () => {
         this.track(msg.id, 'click', input, btn.id);
         this.dismissForSession(msg); // ★ 2026-07-17 버튼 누르면(다음에 볼게요 등) 이번 세션 재표시 억제
-        // 이동 전 모달 닫기 — SPA 라우팅·placeholder URL에서도 모달이 남지 않게
-        const el = document.querySelector(`[data-hanjullo-msg="${msg.id}"]`) as HTMLElement | null;
-        const wrap = el?.parentElement;
-        if (wrap && wrap !== document.body) wrap.remove();
-        else el?.remove();
+        // 이동 전 모달 닫기 — SPA 라우팅·placeholder URL에서도 모달이 남지 않게.
+        // ★ 2026-07-31 (Codex 1R ①) 단일 길목으로 통일 — 옛 parentElement 추론은 inline_card에서 고객사 호스트를 지웠다.
+        this.removeMessageDom(msg);
         this.safeNavigate(btn.action_url);
       });
       wrapper.appendChild(btnEl);
@@ -2129,8 +2207,10 @@ export class HanjulloInAppModule {
     try {
       if (this.prefersReducedMotion()) { onClose(); return; }
       const rootEl = fromEl.closest('[data-hanjullo-msg]') as HTMLElement | null;
-      // 모달 = 카드의 부모(백드롭)까지 함께 페이드
-      const wrap = rootEl && rootEl.parentElement && rootEl.parentElement !== document.body ? rootEl.parentElement : rootEl;
+      // 모달 = 카드의 부모(백드롭)까지 함께 페이드.
+      // ★ 2026-07-31 (Codex 1R ① 동근원) — SDK 래퍼 마커로만 판정. 옛 parentElement 추론은 inline_card에서
+      //   고객사 호스트 컨테이너를 opacity 0으로 페이드시켜 몰 콘텐츠가 사라진 채 남았다.
+      const wrap = rootEl && rootEl.parentElement && rootEl.parentElement.getAttribute('data-hanjullo-wrap') === '1' ? rootEl.parentElement : rootEl;
       if (!wrap) { onClose(); return; }
       wrap.style.transition = 'opacity 0.22s ease';
       wrap.style.opacity = '0';

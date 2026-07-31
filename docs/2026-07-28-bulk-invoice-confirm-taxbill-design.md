@@ -38,7 +38,7 @@
 | id | uuid PK | |
 | company_id | uuid NOT NULL FK | |
 | user_id | uuid NULL FK users | **NULL = 회사 레벨**(전체 발급 수신자 + 계정별일 때 공통 장 수신자). 값 있으면 그 계정의 담당자 |
-| contact_name / contact_email | varchar | 정산 담당자 (기존 고객사 담당자명·이메일과 **별개** — 그쪽은 마케팅 담당자로 유지) |
+| contact_name / contact_email | varchar | 정산 담당자명. **★2026-07-31부터 `contact_email`은 읽지 않는다** — 수신자 원장이 `billing_recipients`(유형별·복수)로 옮겨졌고 이 테이블은 **공급받는자 사업자 전용**으로 역할이 좁혀졌다. 컬럼은 롤백 여지로 남아 있으나 저장 시 비워진다. 소유 = status/SCHEMA.md `billing_recipients` 절 |
 | taxbill_biz_number / taxbill_company_name / taxbill_ceo_name / taxbill_address / taxbill_biz_type / taxbill_biz_item | varchar NULL | **계산서 발급 사업자 등록**(계정별 발급 + 사업장이 다른 계정용). 전부 NULL이면 회사 기본 사업자 정보(companies.business_number 등) 사용 |
 | UNIQUE (company_id, user_id) | | user_id NULL 중복은 partial unique index로 차단 |
 
@@ -70,7 +70,8 @@
   - ⚠ 구현 선행: 필터항목 UI가 저장하는 값의 소비처 grep — UI만 제거하고 데이터·백엔드는 건드리지 않는다(영향 검토 후 확정).
 - 구성 (위→아래):
   1. **발행 단위 토글** — 기본 `고객사 전체 발급`. 누르면 `개별(계정별) 발급`.
-  2. **회사 정산 담당자** (이름·이메일, 항상 표시) — 전체 발급 수신자이자, 계정별일 때 **공통 장(테스트·스팸·크레딧·요금제) 수신자**.
+  2. **회사 정산 담당자** (이름) + **정산 메일 수신자 목록** — 전체 발급 수신자이자, 계정별일 때 **공통 장(테스트·스팸·크레딧·요금제) 수신자**.
+     **★2026-07-31 이메일 칸 하나가 목록형으로 바뀌었다** — 거래내역서·세금계산서를 **다른 사람이** 받을 수 있고 **여러 명**일 수 있다(서수란 접수). 유형당 대표 1명 + 참조 N명이고, 추가·삭제·대표 지정은 저장 버튼과 무관하게 행 단위로 즉시 반영된다.
   3. 계정별 ON 시: 계정 목록(company-users API) 각 행에 담당자 이름·이메일 입력 + **[계산서 사업자 등록]** 버튼 → 모달(사업자번호·상호·대표자·주소·업태·종목). 미등록 계정은 회사 기본 사업자로.
   4. **계산서 발급일자 정책** — 말일 / 익월 1일 / 직접선택.
 - 저장 = 1-1·1-2 UPSERT. 이메일 저장된 순간부터 거래내역서 자동 발송 대상이 된다.
@@ -228,7 +229,7 @@ PDF 생성기도 라우트 인라인이었고, 그래서 **일괄발급 경로�
 - 시그니처: `registIssue(CorpNum, Taxinvoice, WriteSpecification?, Memo?, ForceIssue?, DealInvoiceKey?, EmailSubject?, UserID?)`. **공급자(인비토) 인증서를 팝빌 인증서버에 사전 등록해야 발행 가능.** 발행 시 팝빌 포인트 과금 + 공급받는자에게 발행 메일 자동 발송.
 - Taxinvoice 필수 축(우리 값): `issueType='정발행'` · `taxType='과세'` · `chargeDirection='정과금'` · `writeDate=yyyyMMdd`(= `taxbill_issue_date`) · `purposeType='청구'` · `supplyCostTotal`/`taxTotal`/`totalAmount`(**정수 String** — 우리 절사 규칙과 일치) · `invoicerMgtKey`(24자, 정발행 필수 — `taxbill_issues.invoicer_mgt_key`)
 - 공급자(invoicer*) = 인비토 고정: corpNum·corpName·CEOName·addr·bizType·bizClass·contactName·email (`config/defaults INVITO_INFO` 재사용 검토)
-- 공급받는자(invoicee*) = `billing_contacts` 사업자(없으면 회사 기본): `invoiceeType='사업자'` · corpNum(사업자번호 '-' 제외) · corpName · CEOName · addr · bizType · bizClass · contactName1 · **email1**(= 정산 담당자 이메일 — 팝빌 발행 메일 수신)
+- 공급받는자(invoicee*) = `billing_contacts` 사업자(없으면 회사 기본): `invoiceeType='사업자'` · corpNum(사업자번호 '-' 제외) · corpName · CEOName · addr · bizType · bizClass · contactName1 · **email1**(**★2026-07-31 = `doc_type='taxbill'` 대표 수신자.** 그전엔 컨펌 메일을 받은 사람을 그대로 넘겨 거래내역서 수신자와 강제로 같았다. **수신자가 없으면 발행하지 않는다** — 팝빌은 빈 이메일도 받아 발행하므로 두면 국세청에 나가고 과금까지 끝난 뒤 고객만 통지를 못 받는다. 참조 동시 전달은 설치 SDK에서 미확인이라 화면에서 대표 1명까지만 받는다)
 - `modifyCode` + `orgNTSConfirmNum` = 수정분에만. `remark1`에 "당초 작성일자" 기재(사유 2·3·4).
 - `detailList`(품목) — 우리는 요약 1줄(예: "N월 메시징 이용료")로 시작, `supplyCost`·`tax` 정수.
 

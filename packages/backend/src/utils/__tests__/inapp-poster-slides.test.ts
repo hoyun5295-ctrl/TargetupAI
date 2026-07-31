@@ -12,6 +12,8 @@ import {
   sanitizePosterSlides,
   posterSlidesHaveUneditedPlaceholder,
   composeFlatFromPosterSlides,
+  sanitizePosterSlidesActionUrls,
+  resolveImageLinkUrlPatch,
   POSTER_SLIDE_MAX,
 } from '../inapp-message';
 
@@ -135,5 +137,57 @@ describe('composeFlatFromPosterSlides — slide[0] → flat 합성(구버전 폴
   it('슬라이드 없음 = fallback 그대로', () => {
     const flat = composeFlatFromPosterSlides([], { title: 'T', body: 'B', imageUrl: '/m.jpg', buttons: [] });
     expect(flat).toMatchObject({ title: 'T', body: 'B', imageUrl: '/m.jpg', buttons: [] });
+  });
+});
+
+// ★ 2026-07-31 이미지 클릭 랜딩 — 슬라이드 link_url + 메시지 image_link_url 계약
+describe('sanitizePosterSlides — 슬라이드 link_url(이미지 클릭 링크)', () => {
+  it('정상 링크는 저장, camelCase(linkUrl)도 수용', () => {
+    const [a, b] = sanitizePosterSlides([
+      { image_url: '/1.jpg', link_url: 'https://mall.example/event' },
+      { image_url: '/2.jpg', linkUrl: 'https://mall.example/p2' },
+    ]);
+    expect(a.link_url).toBe('https://mall.example/event');
+    expect(b.link_url).toBe('https://mall.example/p2');
+  });
+
+  it('위험 스킴은 탈락(필드 자체 생략) — 미설정과 동일한 무동작', () => {
+    const [s] = sanitizePosterSlides([{ image_url: '/1.jpg', link_url: 'javascript:alert(1)' }]);
+    expect(s.link_url).toBeUndefined();
+  });
+
+  it('미설정이면 필드 없음 (기존 발행물 회귀 0)', () => {
+    const [s] = sanitizePosterSlides([{ image_url: '/1.jpg', title: 'A' }]);
+    expect('link_url' in s).toBe(false);
+  });
+});
+
+describe('sanitizePosterSlidesActionUrls — 서빙 재정규화(cta + link_url)', () => {
+  it('프로토콜 없는 도메인을 https로 보정 (cta·link_url 동일 기준)', () => {
+    const out = sanitizePosterSlidesActionUrls([
+      { image_url: '/1.jpg', cta: { label: 'a', action_url: 'www.poppon.co.kr/e' }, link_url: 'www.poppon.co.kr/land' },
+    ]);
+    expect(out[0].cta.action_url).toMatch(/^https:\/\//);
+    expect(out[0].link_url).toMatch(/^https:\/\//);
+  });
+
+  it('link_url 없는 슬라이드는 그대로 (필드 미추가)', () => {
+    const out = sanitizePosterSlidesActionUrls([{ image_url: '/1.jpg' }]);
+    expect('link_url' in out[0]).toBe(false);
+  });
+});
+
+describe('resolveImageLinkUrlPatch — image_link_url 입력 해석(부분 PUT presence)', () => {
+  it('미제공 = 유지(set:false)', () => {
+    expect(resolveImageLinkUrlPatch({})).toEqual({ set: false, value: null });
+  });
+
+  it('명시 null = 비우기(set:true, null)', () => {
+    expect(resolveImageLinkUrlPatch({ image_link_url: null })).toEqual({ set: true, value: null });
+  });
+
+  it('camelCase 우선 + 무해화(위험 스킴 = null 클리어)', () => {
+    expect(resolveImageLinkUrlPatch({ imageLinkUrl: 'https://m.example/e', image_link_url: 'x' }).value).toBe('https://m.example/e');
+    expect(resolveImageLinkUrlPatch({ imageLinkUrl: 'javascript:alert(1)' })).toEqual({ set: true, value: null });
   });
 });

@@ -55,6 +55,11 @@ Header: X-Hanjullo-Key: hjl_...
         desc: 'posterSlides 배열이 오면(2장 이상) 포스터를 한 장이 아니라 좌우로 스와이프하는 카드로 그립니다. 각 슬라이드 = { image_url(필수), title, body, cta:{label, action_url, background_color, text_color}, title_color/body_color(hex), title_size(14~32)/body_size(10~22) }. 각 장은 자기 이미지(cover, 슬라이드 높이 통일)·오버레이 문구·CTA 1개를 가지며, 하단 CTA는 현재 보이는 슬라이드의 cta로 바뀝니다. 하단 점(1/N) 인디케이터 + "다시 보지 않기"는 공용. 슬라이드별 색·크기 미지정 시 design.poster_* 폴백. posterSlides[0]은 flat 필드(imageUrl/title/body/buttons[0])와 동일하므로, 캐러셀을 모르는 구버전 앱은 자동으로 "첫 장"만 단일 포스터로 안전 표시합니다.',
       },
       {
+        // ★ 2026-07-31 이미지 클릭 랜딩 — 이미지 자체가 링크(선택)
+        title: '이미지 클릭 랜딩 (imageLinkUrl · 슬라이드 link_url)',
+        desc: '메시지에 imageLinkUrl이 오면(선택) 이미지 자체를 눌렀을 때 그 주소로 이동합니다 — 버튼과 동일 계약(트래킹 → 이번 세션 재표시 억제 → 시트 닫기 → 이동). 트래킹 button_id = "image". 캐러셀은 슬라이드별 link_url(선택)을 쓰고 button_id = "slide_{index}_image"(0부터)로 보냅니다. 링크가 없으면 지금처럼 아무 동작 없음 — 이 필드를 모르는 구버전 앱도 그대로 무동작이라 안전합니다. http/https만 오며(서버 무해화), 상대경로·커스텀 스킴은 오지 않습니다.',
+      },
+      {
         title: '캐러셀 클릭 트래킹 + 그라데이션(네이티브 주의)',
         desc: '슬라이드 CTA 클릭은 button_id = "slide_{index}"(0부터)로 트래킹을 보내면 슬라이드별 성과가 집계됩니다. 스크림(이미지 하단 어두운 그라데이션)은 반투명 View를 여러 장 쌓지 말고 단일 요소(LinearGradient 또는 코드 내장 base64 PNG 알파 램프 1장을 늘려서)로 그리세요 — 반투명 뷰 쌓기는 Android에서 이음새마다 가로줄이 생깁니다(실사고). 좌우 스와이프는 RN 기본 가로 페이징(FlatList/ScrollView pagingEnabled)으로 충분해 네이티브 모듈 추가가 필요 없습니다(OTA 가능).',
       },

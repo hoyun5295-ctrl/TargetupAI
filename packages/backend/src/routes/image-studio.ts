@@ -36,12 +36,27 @@ import {
   writeTempBuffer, allocTempPath, writeTempMeta, readTempMeta, findTempFile, moveTempToPermanent,
   companyTempUsageBytes, isValidTempId, newTempId,
   tryAcquireGenerateLock, releaseGenerateLock,
+  findTemplateSample, writeTemplateSample,
   STUDIO_TEMP_CAP_BYTES, STUDIO_TEMP_TTL_DAYS,
   type ComposeTypography,
 } from '../utils/image-studio';
 import { getTemplate, listTemplatesPublic } from '../utils/image-studio-templates';
 
 export const imageStudioRouter = Router();
+
+// ── GET /template-sample/:id — 템플릿 예시 실샘플 서빙 (★인증 미들웨어 앞 = 공개) ──
+//   갤러리 카드가 <img src>로 직접 로드(인증 헤더 없음). 은닉 정보 없음(완성 목업 이미지뿐).
+//   경로는 카탈로그 실존 id로만 조립(getTemplate 검증) — 임의 경로 조작 차단.
+imageStudioRouter.get('/template-sample/:id', (req: any, res: Response) => {
+  const id = String(req.params.id || '');
+  if (!getTemplate(id)) return res.status(404).json({ success: false, error: '템플릿을 찾을 수 없습니다.' });
+  const sample = findTemplateSample(id);
+  if (!sample) return res.status(404).json({ success: false, error: '예시 이미지가 아직 없습니다.' });
+  res.setHeader('Content-Type', sample.mime);
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  return res.sendFile(sample.absPath);
+});
+
 imageStudioRouter.use(authenticate);
 
 const FONT_DIR = process.env.STUDIO_FONT_DIR || path.resolve('./uploads/fonts');
@@ -76,8 +91,70 @@ imageStudioRouter.get('/status', (req: any, res: Response) => {
 });
 
 // ── GET /templates — 갤러리 공개 목록(★은닉 스캐폴드 미포함) ─────────
+//   ★2026-07-31 exampleUrl 폴백 — 카탈로그 미지정이어도 배치 생성 실샘플 파일이 있으면 카드에 표시.
 imageStudioRouter.get('/templates', (_req: any, res: Response) => {
-  return res.json({ success: true, templates: listTemplatesPublic() });
+  const templates = listTemplatesPublic().map((t) => ({
+    ...t,
+    exampleUrl: t.exampleUrl || (findTemplateSample(t.id) ? `/api/image-studio/template-sample/${t.id}` : null),
+  }));
+  return res.json({ success: true, templates });
+});
+
+// ── POST /template-samples/generate — 예시 실샘플 배치 생성 (★슈퍼관리자 전용·내부 원가) ──
+//   템플릿 sample 카피(무드별 실카피·혜택 수치 0)로 제품 없이 1장씩 생성해 영구 저장.
+//   크레딧 미차감(고객 과금 아님 — Gemini 원가만). HTTP 타임아웃 대비 호출당 limit장(기본 2·최대 5)씩 진행,
+//   remaining이 0이 될 때까지 재호출. 동시 실행 1회(모듈 잠금).
+let sampleGenInFlight = false;
+imageStudioRouter.post('/template-samples/generate', async (req: any, res: Response) => {
+  if (req.user?.userType !== 'super_admin') {
+    return res.status(403).json({ success: false, error: '슈퍼관리자만 실행할 수 있습니다.' });
+  }
+  if (!isStudioReady()) return respondStudioError(res, new StudioError('STUDIO_NOT_READY', 503));
+  if (sampleGenInFlight) return res.status(409).json({ success: false, error: '샘플 생성이 이미 진행 중입니다.' });
+  sampleGenInFlight = true;
+  try {
+    const limit = Math.max(1, Math.min(5, Number(req.body?.limit) || 2));
+    const publicList = listTemplatesPublic();
+    const missing = publicList.filter((t) => !t.exampleUrl && !findTemplateSample(t.id));
+    const targets = missing.slice(0, limit);
+    const preset = resolvePreset('poster');
+    // 토큰({productName})·placeholder([...]) 포함 기본값은 샘플에 쓰지 않는다 — sample 카피가 항상 우선.
+    const clean = (s?: string) => (s && !s.includes('{') && !s.includes('[') ? s : '');
+    const generated: string[] = [];
+    const failed: string[] = [];
+    for (const pub of targets) {
+      const t = getTemplate(pub.id);
+      if (!t) continue;
+      try {
+        const prompt = buildPosterPrompt({
+          template: t,
+          preset,
+          texts: {
+            label: clean(t.defaultTexts.label),
+            title: t.sample?.title || clean(t.defaultTexts.title) || t.name,
+            subtitle: t.sample?.subtitle || '',
+          },
+          userHint: null,
+          hasProduct: false,
+        });
+        const img = await generatePoster(prompt, preset, null);
+        writeTemplateSample(t.id, Buffer.from(img.base64, 'base64'), img.mime);
+        generated.push(t.id);
+      } catch (err: any) {
+        console.error(`[image-studio] 템플릿 샘플 생성 실패(${t.id}):`, err?.message || err);
+        failed.push(t.id);
+      }
+    }
+    return res.json({
+      success: true,
+      generated,
+      failed,
+      remaining: missing.length - generated.length,
+      total: publicList.length,
+    });
+  } finally {
+    sampleGenInFlight = false;
+  }
 });
 
 // ── POST /generate — 템플릿 + 누끼 + 지정 문구 → 완성 포스터 1장 (2크레딧 고정) ──

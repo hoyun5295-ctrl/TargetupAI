@@ -112,6 +112,8 @@ interface MessageRow {
   poster_slides?: any[] | null;
   // ★ 2026-07-21 편집 중 "추가 슬라이드"(2번째~) 작업본 — 클라 전용. 저장 시 slide0(위 콘텐츠)와 합쳐 poster_slides로 전송
   extra_slides?: any[];
+  // ★ 2026-07-31 이미지 클릭 랜딩 — 이미지 자체 클릭 시 이동 링크(선택). 캐러셀 첫 장 link_url도 이 값에서 합성
+  image_link_url?: string | null;
   status: Status;
   channel?: 'web' | 'app';
   startAt?: string | null;
@@ -1688,7 +1690,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
   const [brandAccent, setBrandAccent] = useState<string | null>(null);
   // ★ 2026-07-18 P2 — CTA 몰 상품 픽커: 대상 버튼 id (null = 닫힘). 인덱스 저장은 픽커 열린 사이
   //   버튼 삭제 시 다른 버튼을 덮어쓰는 이동 결함이 있어 id로 고정 (Codex C1)
-  const [mallPickTarget, setMallPickTarget] = useState<string | null>(null);
+  // ★ 2026-07-31 (Codex 1R ③) — 판별 가능한 상태로. 문자열 sentinel은 실제 버튼 id와 충돌할 수 있다.
+  const [mallPickTarget, setMallPickTarget] = useState<{ kind: 'image' } | { kind: 'button'; id: string } | null>(null);
   // ★ 2026-07-18 P3 — 에셋 라이브러리 픽커 (이미지 재사용)
   const [assetPickOpen, setAssetPickOpen] = useState(false);
   const pickToast = useToast();
@@ -2508,6 +2511,28 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 />
               </div>
               )}
+              {/* ★ 2026-07-31 이미지 클릭 랜딩 — 이미지 자체 클릭 시 이동 링크(선택). 비우면 지금처럼 무동작.
+                  ★ (Codex 1R ②) 블록 메시지는 이미지가 블록 소유(SDK 블록 렌더가 이 링크를 소비하지 않음) — 죽은 컨트롤 방지 위해 숨김 */}
+              {!hasBlocks && ['center_modal', 'slide_in', 'top_banner', 'bottom_banner', 'full_screen', 'inline_card', 'full_image'].includes(editing.template || '') && (
+                <div className="mt-2.5">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="text-[11px] font-semibold text-white/60">이미지 클릭 링크 (선택)</span>
+                    <button
+                      onClick={() => setMallPickTarget({ kind: 'image' })}
+                      className="px-2 py-0.5 rounded bg-violet-500/15 border border-violet-400/30 text-[10px] text-violet-300 hover:bg-violet-500/25"
+                    >
+                      연동 몰에서
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={editing.image_link_url || ''}
+                    onChange={(e) => updateField('image_link_url', e.target.value || null)}
+                    placeholder="이미지를 누르면 이동할 주소 (https://…) — 비우면 이동 없음"
+                    className="w-full px-3 py-2 bg-slate-900/60 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
+                  />
+                </div>
+              )}
             </div>
 
             {/* 탭 내용: CTA 버튼 (블록 모드는 cta_group 블록 사용 — 레거시만) */}
@@ -2563,7 +2588,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     />
                     {/* ★ 2026-07-18 P2 — 연동 몰 상품 선택 → URL 자동 주입 (수기 입력 사고 차단) */}
                     <button
-                      onClick={() => setMallPickTarget(btn.id || `btn_${idx}`)}
+                      onClick={() => setMallPickTarget({ kind: 'button', id: btn.id || `btn_${idx}` })}
                       className="px-2 py-1.5 rounded border border-emerald-400/30 bg-emerald-500/10 text-[11px] text-emerald-300 hover:bg-emerald-500/20 whitespace-nowrap"
                       title="연동 몰에서 상품을 골라 이동 URL을 자동으로 채웁니다"
                     >
@@ -3193,9 +3218,9 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
         open={mallPickTarget !== null}
         onClose={() => setMallPickTarget(null)}
         onPick={(products: PickedMallProduct[]) => {
-          const targetId = mallPickTarget;
+          const target = mallPickTarget;
           setMallPickTarget(null);
-          if (!targetId || products.length === 0) return;
+          if (!target || products.length === 0) return;
           const p = products[0];
           if (!p.productUrl) {
             // ★ Codex C2 — 네이버 스마트스토어는 상품 API가 URL을 제공하지 않아 자동 연결 불가 (정직 안내)
@@ -3206,8 +3231,24 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
             );
             return;
           }
+          // ★ 2026-07-31 이미지 클릭 링크 대상 — 버튼이 아니라 image_link_url에 주입 (+이미지 비어 있으면 상품 이미지 채움)
+          if (target.kind === 'image') {
+            const patch: Partial<MessageRow> = { image_link_url: p.productUrl };
+            let filledImage = false;
+            if (!editing.image_url && p.imageUrl) {
+              (patch as any).image_url = p.imageUrl;
+              filledImage = true;
+            }
+            setEditing({ ...editing, ...patch });
+            pickToast.success(
+              filledImage
+                ? `"${p.name}" 연결 완료 — 이미지 클릭 링크와 이미지가 채워졌습니다.`
+                : `"${p.name}" 연결 완료 — 이미지 클릭 링크가 채워졌습니다.`,
+            );
+            return;
+          }
           // ★ Codex C1 — 픽커 열린 사이 버튼이 삭제/변경돼도 id로 정확 대상 판정
-          const idx = (editing.buttons || []).findIndex((b) => b.id === targetId);
+          const idx = (editing.buttons || []).findIndex((b) => b.id === target.id);
           if (idx < 0) {
             pickToast.warning('대상 버튼이 삭제되어 연결을 취소했습니다.');
             return;
@@ -3591,6 +3632,8 @@ function assemblePosterSlides(editing: Partial<MessageRow>): any[] | undefined {
       title: editing.title,
       body: editing.body,
       ...(b0 ? { cta: { label: b0.label, action_url: b0.action_url, ...(b0.background_color ? { background_color: b0.background_color } : {}), ...(b0.text_color ? { text_color: b0.text_color } : {}) } } : {}),
+      // ★ 2026-07-31 이미지 클릭 링크 — 첫 장은 메시지 수준 값에서 합성(단일·캐러셀 동작 일치)
+      ...(editing.image_link_url ? { link_url: editing.image_link_url } : {}),
       ...(d.poster_title_color ? { title_color: d.poster_title_color } : {}),
       ...(d.poster_body_color ? { body_color: d.poster_body_color } : {}),
       ...(d.poster_title_size ? { title_size: d.poster_title_size } : {}),
@@ -3659,6 +3702,8 @@ function PosterSlidesEditor({ slides, onChange, uploadImage }: { slides: any[]; 
                 <input type="text" value={s.cta?.label || ''} disabled={busy !== null} onChange={(e) => updateCta(i, { label: e.target.value })} placeholder="버튼 문구" className="w-1/3 min-w-0 px-2.5 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50 disabled:opacity-50" maxLength={30} />
                 <input type="text" value={s.cta?.action_url || ''} disabled={busy !== null} onChange={(e) => updateCta(i, { action_url: e.target.value })} placeholder="이동 링크 (https://…)" className="flex-1 min-w-0 px-2.5 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50 disabled:opacity-50" />
               </div>
+              {/* ★ 2026-07-31 이미지 클릭 랜딩 — 슬라이드 이미지 자체 클릭 시 이동(버튼과 별개·선택) */}
+              <input type="text" value={s.link_url || ''} disabled={busy !== null} onChange={(e) => update(i, { link_url: e.target.value })} placeholder="이미지 클릭 링크 (선택, https://…)" className="w-full px-2.5 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50 disabled:opacity-50" />
             </div>
           </div>
         </div>

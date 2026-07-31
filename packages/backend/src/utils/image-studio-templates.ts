@@ -13,12 +13,18 @@
  *  - 채널 사이즈(인앱 3:4 / DM 1:1 / 이메일 16:9)는 템플릿과 독립.
  */
 
-export type TemplateCategory = '뷰티' | '카페·음료' | '신메뉴·팝' | '세일·이벤트' | '패션' | '미니멀' | '시즌';
+// ★ 2026-07-31 행사 포스터 트랙(Harold) — 제품 없이 행사 내용만으로 만드는 포스터(멤버십데이·오픈·시즌 행사·팝업).
+//   kind='event' 카테고리 4종 신설. 기존 7종 = 제품 트랙(kind 생략 = 'product').
+export type TemplateCategory =
+  | '뷰티' | '카페·음료' | '신메뉴·팝' | '세일·이벤트' | '패션' | '미니멀' | '시즌'
+  | '멤버십·고객감사' | '오픈·기념일' | '시즌·명절 행사' | '팝업·페스티벌';
 
 export interface StudioTemplate {
   id: string;
   name: string;
   category: TemplateCategory;
+  /** ★ 2026-07-31 트랙 축 — 'product'(제품 포스터·누끼 전제) / 'event'(행사 포스터·제품 없이 성립, 첨부는 선택). 생략 = product */
+  kind?: 'product' | 'event';
   /** 갤러리 카드 한 줄 설명(고객 노출). */
   desc: string;
   /** 갤러리 카드 대표색(고객 노출). */
@@ -522,6 +528,414 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
     defaultTexts: { label: '봄 시즌', title: '{productName}', subtitle: '{salePrice}' },
     sample: { title: '봄, 새로움이 피다', subtitle: '스프링 컬렉션' },
   },
+
+  // ══ ★ 2026-07-31 행사 포스터 트랙 (kind='event' — 제품 없이 성립·첨부는 선택) ══════════
+  // ══ 멤버십·고객감사 (6) ══════════════════════════════════════
+  {
+    id: 'event-mem-blackgold', name: '미드나잇 멤버스', category: '멤버십·고객감사', kind: 'event',
+    desc: '블랙 벨벳·골드 컨페티의 멤버 전용 나이트', accent: '#b98a3c',
+    scaffold: 'A premium members-only event scene: deep black velvet backdrop with fine gold light streaks, a single soft spotlight beam from above, golden confetti particles frozen mid-air, dark polished marble floor with faint reflections. Exclusive VIP night atmosphere, restrained and luxurious, cinematic contrast.',
+    textStyle: 'Refined gold serif-feeling headline with generous letter spacing, small uppercase tracking-wide label, understated sub-line. Centered luxury-invitation placement in the upper area.',
+    defaultTexts: { label: 'MEMBERSHIP DAY', title: '멤버십 데이', subtitle: '멤버 전용 스페셜' },
+    sample: { title: '멤버십 데이', subtitle: '멤버만의 하루' },
+  },
+  {
+    id: 'event-mem-velvet', name: 'VIP 벨벳 라운지', category: '멤버십·고객감사', kind: 'event',
+    desc: '버건디 벨벳·샴페인의 프라이빗 라운지', accent: '#7a2f3d',
+    scaffold: 'A private VIP lounge scene: burgundy velvet drapes and a tufted velvet sofa corner, two champagne coupe glasses with fine bubbles on a low brass table, warm amber lamp glow, soft haze in the air. Intimate after-hours salon atmosphere, rich and inviting.',
+    textStyle: 'Elegant cream typography with a serif-feeling headline, delicate small label, soft letter spacing. Placed in the upper area like a private invitation card.',
+    defaultTexts: { label: 'VIP ONLY', title: 'VIP 위크', subtitle: '초대장을 확인해주세요' },
+    sample: { title: 'VIP 위크', subtitle: '프라이빗 초대' },
+  },
+  {
+    id: 'event-mem-thanks', name: '고객 감사제', category: '멤버십·고객감사', kind: 'event',
+    desc: '크림빛 리본·선물상자의 따뜻한 감사 무드', accent: '#c9a468',
+    scaffold: 'A warm customer-appreciation scene: cream and beige backdrop with soft window daylight, neatly stacked gift boxes wrapped in kraft and ivory paper with satin ribbons, a few dried flowers, gentle shadows. Heartfelt thank-you atmosphere, cozy and sincere.',
+    textStyle: 'Warm brown friendly typography — rounded-feeling headline, handwritten-mood small label, gentle spacing. Upper-third placement with soft breathing room.',
+    defaultTexts: { label: 'THANK YOU', title: '고객 감사제', subtitle: '늘 함께해주셔서 감사합니다' },
+    sample: { title: '고객 감사제', subtitle: '마음을 담은 일주일' },
+  },
+  {
+    id: 'event-mem-chrome', name: '등급 업그레이드', category: '멤버십·고객감사', kind: 'event',
+    desc: '실버→골드 메탈 그라데이션의 상승 무드', accent: '#9aa3b5',
+    scaffold: 'An abstract tier-upgrade scene: sweeping metallic gradient bands flowing from cool silver to warm gold, glossy chrome ribbon shapes rising diagonally upward, subtle lens flare highlights, dark studio backdrop. Futuristic premium ascension mood, sleek and aspirational.',
+    textStyle: 'Modern metallic-feeling sans headline with tight tracking, thin uppercase label, ascending diagonal energy. Upper placement with bold contrast.',
+    defaultTexts: { label: 'LEVEL UP', title: '등급 업그레이드', subtitle: '한 단계 높아진 혜택' },
+    sample: { title: '한 단계 위로', subtitle: '멤버스 업그레이드' },
+  },
+  {
+    id: 'event-mem-secret', name: '시크릿 나이트', category: '멤버십·고객감사', kind: 'event',
+    desc: '딥네이비·달빛 커튼의 비밀 행사', accent: '#2c3a5c',
+    scaffold: 'A secret midnight event scene: deep navy backdrop with a heavy velvet curtain slightly parted revealing a soft moonlit glow, scattered tiny star-like sparkles, a mysterious keyhole of warm light on the floor. Hush-hush exclusive reveal atmosphere, quiet drama.',
+    textStyle: 'Moonlight silver typography — thin elegant headline with wide spacing, whisper-small label. Centered upper placement, mysterious and calm.',
+    defaultTexts: { label: 'SECRET', title: '시크릿 나이트', subtitle: '단 하루, 조용히 열립니다' },
+    sample: { title: '시크릿 나이트', subtitle: '아는 사람만, 단 하루' },
+  },
+  {
+    id: 'event-mem-weekend', name: '위켄드 멤버스', category: '멤버십·고객감사', kind: 'event',
+    desc: '주말 오후 카페 코너의 여유로운 멤버 무드', accent: '#a4805a',
+    scaffold: 'A relaxed weekend members scene: sunlit cafe corner with a rattan chair and small round wooden table, latte cup with soft steam, an open magazine, leafy plant shadows on a warm white wall. Slow weekend afternoon atmosphere, effortless and warm.',
+    textStyle: 'Casual editorial typography in deep coffee brown — medium friendly headline, lowercase-feeling small label. Airy upper placement like a lifestyle magazine.',
+    defaultTexts: { label: 'WEEKEND', title: '위켄드 멤버스', subtitle: '주말이 더 특별해지도록' },
+    sample: { title: '주말의 특권', subtitle: '멤버스 위켄드' },
+  },
+
+  // ══ 오픈·기념일 (6) ══════════════════════════════════════════
+  {
+    id: 'event-open-grand', name: '그랜드 오픈', category: '오픈·기념일', kind: 'event',
+    desc: '리본 아치·컨페티의 축하 오픈 무드', accent: '#d04a4a',
+    scaffold: 'A grand opening celebration scene: an arch of ivory and red balloons, a wide satin ribbon stretched across ready to be cut, colorful confetti falling through bright daylight, clean storefront glass reflecting the sky. Festive ceremonial atmosphere, joyful and bright.',
+    textStyle: 'Bold celebratory typography — strong headline with confident weight, small festive label, clean sub-line. Centered upper placement with ceremonial symmetry.',
+    defaultTexts: { label: 'GRAND OPEN', title: '그랜드 오픈', subtitle: '드디어 문을 엽니다' },
+    sample: { title: '그랜드 오픈', subtitle: '드디어, 오픈' },
+  },
+  {
+    id: 'event-open-renewal', name: '리뉴얼 오픈', category: '오픈·기념일', kind: 'event',
+    desc: '민트·화이트의 새 단장 프레시 무드', accent: '#5fb3a1',
+    scaffold: 'A fresh renewal scene: bright white interior flooded with morning sunlight, fresh mint-green accents, young potted plants on clean shelving, a light linen curtain moving in a soft breeze, dust-free pristine surfaces. New-beginning atmosphere, airy and optimistic.',
+    textStyle: 'Clean modern typography in deep teal — light headline with fresh spacing, small uppercase label. Upper-left editorial placement with plenty of white space.',
+    defaultTexts: { label: 'RENEWAL', title: '리뉴얼 오픈', subtitle: '새로워진 공간에서 만나요' },
+    sample: { title: '새 단장, 새 시작', subtitle: '리뉴얼 오픈' },
+  },
+  {
+    id: 'event-open-anniv', name: '애니버서리 클래식', category: '오픈·기념일', kind: 'event',
+    desc: '샴페인 골드 보케·케이크의 기념일 무드', accent: '#c2a35c',
+    scaffold: 'An elegant anniversary scene: warm champagne-gold bokeh lights, a small classic cream cake with delicate piping and thin lit candles, gold-rimmed plates, soft glowing atmosphere. Milestone celebration mood, graceful and warm.',
+    textStyle: 'Classic serif-feeling typography in warm gold — refined headline, delicate small label with wide tracking. Centered upper placement like an anniversary card.',
+    defaultTexts: { label: 'ANNIVERSARY', title: '주년 기념전', subtitle: '함께한 시간을 기념합니다' },
+    sample: { title: '함께한 시간', subtitle: '애니버서리 위크' },
+  },
+  {
+    id: 'event-open-gallery', name: '모던 오프닝', category: '오픈·기념일', kind: 'event',
+    desc: '콘크리트 갤러리·단일 스포트라이트의 미니멀 오픈', accent: '#6e6e78',
+    scaffold: 'A minimal modern opening scene: raw concrete gallery walls, a single dramatic spotlight illuminating an empty sculptural pedestal, long soft shadows, one architectural arch doorway glowing at the far end. Quiet contemporary art-space atmosphere, austere and confident.',
+    textStyle: 'Architectural sans typography in off-white — thin large headline, tiny precise label, generous negative space. Asymmetric upper placement, museum caption energy.',
+    defaultTexts: { label: 'NOW OPEN', title: '뉴 스페이스 오픈', subtitle: '새로운 공간이 열렸습니다' },
+    sample: { title: '공간이 열리다', subtitle: '뉴 스페이스' },
+  },
+  {
+    id: 'event-open-night', name: '오픈 나이트', category: '오픈·기념일', kind: 'event',
+    desc: '해질녘 네온 글로우의 오픈 전야 무드', accent: '#d96a9b',
+    scaffold: 'An opening night scene: a storefront silhouette at dusk with warm glowing windows, soft pink and violet neon glow reflecting on wet pavement, string lights being lit, deep blue evening sky. Anticipation-of-opening atmosphere, cinematic and inviting.',
+    textStyle: 'Neon-glow typography — warm pink headline with subtle luminescence, small glowing label. Upper placement against the dusk sky, city-night romance.',
+    defaultTexts: { label: 'OPENING NIGHT', title: '오픈 나이트', subtitle: '저녁, 특별하게 시작합니다' },
+    sample: { title: '오픈 전야', subtitle: '이 밤, 함께해요' },
+  },
+  {
+    id: 'event-open-bloom', name: '플라워 오프닝', category: '오픈·기념일', kind: 'event',
+    desc: '꽃 아치·파스텔 꽃잎의 화사한 오픈', accent: '#dd8fa4',
+    scaffold: 'A floral opening scene: a lush arch of fresh pastel flowers (peonies, roses, baby breath) framing a bright doorway, petals scattered on a clean stone step, soft diffused daylight. Romantic garden-party opening atmosphere, fresh and delightful.',
+    textStyle: 'Romantic typography in deep rose — graceful headline with gentle curves, dainty small label. Centered upper placement framed by the floral arch.',
+    defaultTexts: { label: 'OPEN', title: '플라워 오픈', subtitle: '꽃과 함께 시작합니다' },
+    sample: { title: '꽃처럼, 오픈', subtitle: '오픈 위크' },
+  },
+
+  // ══ 시즌·명절 행사 (6) ══════════════════════════════════════
+  {
+    id: 'event-season-gift', name: '명절 선물전', category: '시즌·명절 행사', kind: 'event',
+    desc: '보자기 매듭·한지 결의 명절 무드', accent: '#a4494f',
+    scaffold: 'A Korean holiday gift scene: elegant silk bojagi wrapping cloths in deep red and jade tied with graceful knots, warm hanji paper texture backdrop with soft lantern light, a subtle traditional pattern shadow. Respectful seasonal gifting atmosphere, warm and dignified.',
+    textStyle: 'Dignified typography with brush-inspired weight in deep charcoal, small seal-stamp-feeling red label accent. Vertical-rhythm-inspired upper placement, calm and honorable.',
+    defaultTexts: { label: '명절 선물전', title: '마음을 전하는 선물', subtitle: '감사의 마음을 담았습니다' },
+    sample: { title: '마음을 전하다', subtitle: '명절 선물 제안' },
+  },
+  {
+    id: 'event-season-summer', name: '썸머 페스타', category: '시즌·명절 행사', kind: 'event',
+    desc: '풀사이드·물빛 반짝임의 한여름 축제', accent: '#3fa8c9',
+    scaffold: 'A summer festival scene: sparkling turquoise pool water with sun reflections, a striped float tube drifting, tropical palm leaf shadows on the pool edge, bright cloudless sky. High-summer vacation festival atmosphere, splashy and energetic.',
+    textStyle: 'Playful bold typography in white with an aqua shadow, fun rounded headline, small sunny label. Upper placement with tilted vacation energy.',
+    defaultTexts: { label: 'SUMMER FESTA', title: '썸머 페스타', subtitle: '한여름의 축제가 시작됩니다' },
+    sample: { title: '썸머 페스타', subtitle: '여름을 즐겨요' },
+  },
+  {
+    id: 'event-season-winter', name: '윈터 홀리데이', category: '시즌·명절 행사', kind: 'event',
+    desc: '눈 보케·전구빛·솔가지의 겨울 축제', accent: '#4a6b8a',
+    scaffold: 'A winter holiday scene: soft falling snow bokeh against a twilight blue backdrop, warm string light bulbs glowing, fresh pine branches with a light dusting of snow, a knitted texture at the edge. Cozy festive winter atmosphere, twinkling and warm-hearted.',
+    textStyle: 'Festive typography in warm ivory — cheerful serif-feeling headline, twinkling small label. Centered upper placement like a holiday greeting card.',
+    defaultTexts: { label: 'WINTER HOLIDAY', title: '윈터 홀리데이', subtitle: '따뜻한 겨울을 보내세요' },
+    sample: { title: '윈터 홀리데이', subtitle: '반짝이는 계절' },
+  },
+  {
+    id: 'event-season-autumn', name: '어텀 위크', category: '시즌·명절 행사', kind: 'event',
+    desc: '단풍·앰버빛·체크 담요의 가을 무드', accent: '#b06a35',
+    scaffold: 'An autumn week scene: golden maple and ginkgo leaves drifting in warm amber afternoon light, a plaid wool blanket draped over a wooden bench, steam rising from a ceramic mug, soft forest bokeh. Crisp cozy autumn atmosphere, nostalgic and comforting.',
+    textStyle: 'Warm editorial typography in deep chestnut — serif-feeling headline, cozy small label. Upper placement with falling-leaf rhythm.',
+    defaultTexts: { label: 'AUTUMN WEEK', title: '어텀 위크', subtitle: '깊어가는 가을과 함께' },
+    sample: { title: '가을, 깊어지다', subtitle: '어텀 위크' },
+  },
+  {
+    id: 'event-season-picnic', name: '스프링 피크닉', category: '시즌·명절 행사', kind: 'event',
+    desc: '벚꽃 아래 피크닉·바구니의 봄 나들이', accent: '#e2a0b2',
+    scaffold: 'A spring picnic scene: a gingham blanket under blossoming cherry trees, a woven picnic basket with a linen napkin, petals drifting in gentle sunlight, fresh green grass. Light-hearted spring outing atmosphere, breezy and joyful.',
+    textStyle: 'Light joyful typography in soft rose-brown — friendly headline, petal-light small label. Airy upper placement with picnic-day ease.',
+    defaultTexts: { label: 'SPRING PICNIC', title: '스프링 피크닉', subtitle: '봄나들이 함께 떠나요' },
+    sample: { title: '봄, 소풍 가요', subtitle: '스프링 피크닉' },
+  },
+  {
+    id: 'event-season-yearend', name: '이어엔드 파티', category: '시즌·명절 행사', kind: 'event',
+    desc: '미드나잇 블루·불꽃·샴페인의 연말 무드', accent: '#3b4a7a',
+    scaffold: 'A year-end party scene: midnight blue sky with distant golden fireworks bursting, champagne glasses catching sparkling light, silver and gold streamers, city skyline silhouette below. Glamorous countdown celebration atmosphere, dazzling and hopeful.',
+    textStyle: 'Glamorous typography in champagne gold — sparkling headline with elegant weight, celebratory small label. Upper placement against the night sky.',
+    defaultTexts: { label: 'YEAR END', title: '이어엔드 파티', subtitle: '한 해의 마지막을 함께' },
+    sample: { title: '이어엔드 파티', subtitle: '올해의 마지막 밤' },
+  },
+
+  // ══ 팝업·페스티벌 (6) ══════════════════════════════════════
+  {
+    id: 'event-pop-store', name: '팝업 스토어', category: '팝업·페스티벌', kind: 'event',
+    desc: '컬러블록·지오메트릭의 대담한 팝업 무드', accent: '#e8563f',
+    scaffold: 'A bold pop-up store scene: vivid color-blocked walls in tangerine, cobalt and cream, oversized geometric shapes (arches, spheres, columns) arranged like an installation, hard directional light casting graphic shadows. Hype pop-up launch atmosphere, loud and art-directed.',
+    textStyle: 'Oversized graphic typography — chunky headline with poster-like impact, stacked small label. Off-center placement integrated with the geometry.',
+    defaultTexts: { label: 'POP-UP', title: '팝업 스토어', subtitle: '한정 기간, 지금 만나요' },
+    sample: { title: '팝업 오픈', subtitle: '기간 한정 스토어' },
+  },
+  {
+    id: 'event-pop-festa', name: '브랜드 페스타', category: '팝업·페스티벌', kind: 'event',
+    desc: '가랜드·무대 조명의 축제 한마당', accent: '#d9903f',
+    scaffold: 'A brand festival scene: colorful triangle bunting garlands strung across a sunny outdoor plaza, warm stage spotlights and a subtle haze, confetti in the air, festival crowd silhouettes far in the background blurred. Open-air celebration atmosphere, communal and vibrant.',
+    textStyle: 'Festival poster typography — energetic bold headline, ticket-stub-feeling small label. Centered upper placement with celebratory scale.',
+    defaultTexts: { label: 'FESTA', title: '브랜드 페스타', subtitle: '모두를 위한 축제' },
+    sample: { title: '페스타 개막', subtitle: '함께 즐겨요' },
+  },
+  {
+    id: 'event-pop-collab', name: '컬래버 스페셜', category: '팝업·페스티벌', kind: 'event',
+    desc: '투톤 대비·글로시 오브제의 만남 무드', accent: '#7b52c9',
+    scaffold: 'A collaboration reveal scene: a striking split background of two contrasting color fields (deep violet meeting warm cream) joined by a glossy liquid ribbon flowing across the seam, two glossy abstract orbs facing each other. Two-worlds-meeting atmosphere, sleek and intriguing.',
+    textStyle: 'Dual-tone typography — headline straddling the split with alternating colors, precise small label. Balanced center placement expressing the encounter.',
+    defaultTexts: { label: 'COLLABORATION', title: '컬래버 스페셜', subtitle: '특별한 만남이 시작됩니다' },
+    sample: { title: '만남, 그 이상', subtitle: '컬래버 에디션' },
+  },
+  {
+    id: 'event-pop-market', name: '위켄드 마켓', category: '팝업·페스티벌', kind: 'event',
+    desc: '스트링 라이트·크라프트의 주말 장터 무드', accent: '#8a6d47',
+    scaffold: 'A weekend market scene: cozy wooden market stalls with striped canvas awnings, warm string lights zigzagging overhead at golden hour, kraft paper bags and wicker baskets, chalkboard easel standing blank. Friendly artisanal market atmosphere, warm and bustling.',
+    textStyle: 'Hand-crafted typography in warm charcoal — friendly medium headline with a hand-painted feeling, stamp-like small label. Upper placement like a market signboard.',
+    defaultTexts: { label: 'WEEKEND MARKET', title: '위켄드 마켓', subtitle: '주말, 장터가 열립니다' },
+    sample: { title: '주말 장터', subtitle: '위켄드 마켓' },
+  },
+  {
+    id: 'event-pop-neon', name: '나이트 팝업', category: '팝업·페스티벌', kind: 'event',
+    desc: '네온 글로우·도시 밤의 심야 팝업', accent: '#38c2b8',
+    scaffold: 'A late-night pop-up scene: abstract neon light tubes glowing in teal and magenta (pure light shapes, no readable signs), dark urban alley with wet asphalt reflections, soft fog catching the glow. Underground midnight pop-up atmosphere, electric and cool.',
+    textStyle: 'Neon typography — luminous teal headline with a soft glow halo, minimal dark label chip. Upper placement floating in the night.',
+    defaultTexts: { label: 'NIGHT POP-UP', title: '나이트 팝업', subtitle: '밤에만 열리는 공간' },
+    sample: { title: '심야 팝업', subtitle: '밤에만, 잠깐' },
+  },
+  {
+    id: 'event-pop-art', name: '아트 팝업', category: '팝업·페스티벌', kind: 'event',
+    desc: '추상 페인팅·미술관 벽의 아트 무드', accent: '#4d5a4e',
+    scaffold: 'An art pop-up scene: a gallery-white wall with one large abstract painting of bold expressive brush strokes in sage, ochre and ink, a polished concrete floor, a single bench, precise track lighting. Contemporary exhibition atmosphere, cultured and quiet.',
+    textStyle: 'Museum caption typography — small precise label, refined medium headline in ink black, generous margins. Lower-third placement like an exhibition title wall.',
+    defaultTexts: { label: 'ART POP-UP', title: '아트 팝업', subtitle: '일상 속 전시가 열립니다' },
+    sample: { title: '아트 팝업', subtitle: '작은 전시회' },
+  },
+
+  // ══ ★ 2026-07-31 제품 트랙 보강 (Harold — 카테고리별 3~4종, 장면·타이포가 실제 다른 아트 디렉션만) ══
+  // ── 뷰티 (+3) ──
+  {
+    id: 'beauty-glass-refract', name: '글래스 리프랙션', category: '뷰티',
+    desc: '유리 프리즘·굴절광의 투명 무드', accent: '#9fb6c9',
+    scaffold: 'A crystal refraction scene: clear glass prisms and acrylic blocks scattering soft rainbow-edged light bands across a pale grey surface, transparent layered panes creating depth, cool studio daylight. Ultra-clean optical clarity mood, modern and pure.',
+    textStyle: 'Precise thin typography in cool slate — light headline with crisp tracking, minimal small label. Upper placement among the light bands.',
+    defaultTexts: { label: 'CRYSTAL CLEAR', title: '{productName}', subtitle: '' },
+    sample: { title: '투명하게 빛나다', subtitle: '글로우 케어' },
+  },
+  {
+    id: 'beauty-silk-drape', name: '실크 드레이프', category: '뷰티',
+    desc: '흐르는 실크 물결의 부드러운 무드', accent: '#d3b3a3',
+    scaffold: 'A flowing silk scene: waves of blush and champagne silk fabric draped in soft sculptural folds filling the frame, gentle side light tracing the curves, a smooth satin platform emerging from the fabric. Sensuous softness mood, tactile and serene.',
+    textStyle: 'Soft elegant typography in deep mauve — graceful headline that follows the fabric flow, whisper-small label. Upper placement resting on a silk fold.',
+    defaultTexts: { label: 'SILKY', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '피부에 닿는 부드러움', subtitle: '실크 텍스처 라인' },
+  },
+  {
+    id: 'beauty-botanical-lab', name: '보태니컬 랩', category: '뷰티',
+    desc: '유리 비커·식물 줄기의 클린 랩 무드', accent: '#7f9b7a',
+    scaffold: 'A botanical laboratory scene: clear glass beakers and slim test tubes holding fresh green stems and leaves, water droplets on glass, clean white tile backdrop with a hint of chrome, bright even light. Science-meets-nature clean formulation mood, trustworthy and fresh.',
+    textStyle: 'Clinical yet warm typography in deep green — clean sans headline, small formula-note label. Orderly upper placement like a lab specification.',
+    defaultTexts: { label: 'BOTANICAL', title: '{productName}', subtitle: '' },
+    sample: { title: '자연에서 온 처방', subtitle: '보태니컬 포뮬러' },
+  },
+
+  // ── 카페·음료 (+4) ──
+  {
+    id: 'cafe-milk-pour', name: '밀크 푸어', category: '카페·음료',
+    desc: '우유가 쏟아지는 순간의 크림 무드', accent: '#e0d4c3',
+    scaffold: 'A frozen milk-pour scene: creamy milk mid-pour with a silky splash crown suspended in air, warm ivory backdrop, soft golden light catching the liquid, a smooth ceramic saucer below. Deliciously creamy dynamic moment, appetizing and warm.',
+    textStyle: 'Rounded cozy typography in mocha brown — smooth headline with soft edges, cute small label. Upper placement above the splash.',
+    defaultTexts: { label: 'CREAMY', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '부드러움이 쏟아지다', subtitle: '크림 라테 시리즈' },
+  },
+  {
+    id: 'cafe-terrazzo-morning', name: '테라조 브라이트', category: '카페·음료',
+    desc: '테라조·시트러스·강한 아침 그림자', accent: '#e0a44f',
+    scaffold: 'A bright terrazzo counter scene: speckled terrazzo surface in cream and terracotta, hard morning sunlight casting one long clean diagonal shadow, fresh citrus slices and a sprig of mint at the edges. Crisp mediterranean morning mood, zesty and modern.',
+    textStyle: 'Sunny modern typography in burnt orange — confident medium headline, fresh small label. Upper placement aligned to the diagonal light.',
+    defaultTexts: { label: 'MORNING FRESH', title: '{productName}', subtitle: '' },
+    sample: { title: '아침을 깨우는 한 잔', subtitle: '시트러스 에이드' },
+  },
+  {
+    id: 'cafe-matcha-zen', name: '말차 그린 젠', category: '카페·음료',
+    desc: '말차 가루·돌그릇·대나무 그림자의 젠 무드', accent: '#6f8f5a',
+    scaffold: 'A matcha zen scene: fine matcha powder dusted across a dark stone plate, a rustic ceramic bowl with whisked green foam, bamboo leaf shadows on a warm plaster wall, quiet natural light. Meditative tea-house calm, earthy and refined.',
+    textStyle: 'Quiet typography in deep moss — restrained headline with generous space, small vertical-feeling label. Calm upper placement, tea-ceremony stillness.',
+    defaultTexts: { label: 'MATCHA', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '차분한 초록의 시간', subtitle: '말차 시리즈' },
+  },
+  {
+    id: 'cafe-night-jazz', name: '나이트 카페', category: '카페·음료',
+    desc: '캔들·다크우드의 심야 재즈바 무드', accent: '#8a5a33',
+    scaffold: 'A late-night cafe scene: dark walnut bar counter with a single flickering candle, amber pendant light glow, a soft-focus shelf of glassware behind, wisps of warm smoke in the air. Jazz-bar intimacy mood, mellow and grown-up.',
+    textStyle: 'Smoky elegant typography in warm amber — jazz-poster headline with vintage weight, understated small label. Upper placement glowing against the dark.',
+    defaultTexts: { label: 'NIGHT MENU', title: '{productName}', subtitle: '' },
+    sample: { title: '깊어지는 밤의 메뉴', subtitle: '나이트 스페셜' },
+  },
+
+  // ── 신메뉴·팝 (+3) ──
+  {
+    id: 'pop-y2k-chrome', name: 'Y2K 크롬 팝', category: '신메뉴·팝',
+    desc: '리퀴드 메탈·홀로그램의 Y2K 무드', accent: '#b48ad9',
+    scaffold: 'A Y2K chrome scene: liquid-metal chrome blobs floating over a holographic gradient backdrop (silver, lilac, aqua), glossy reflective floor, subtle lens flares. Futuristic retro-tech pop mood, shiny and playful.',
+    textStyle: 'Chrome-effect typography — bubbly metallic headline with liquid curves, pixel-hint small label. Tilted upper placement with Y2K attitude.',
+    defaultTexts: { label: 'NEW DROP', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '뉴 드롭 도착', subtitle: '리미티드 컬러' },
+  },
+  {
+    id: 'pop-picnic-checker', name: '체커보드 팝', category: '신메뉴·팝',
+    desc: '체커보드 플랫레이의 키치 무드', accent: '#3f6bd9',
+    scaffold: 'A checkerboard flat-lay scene: bold cobalt-and-cream checkerboard surface shot from above, playful props at the corners (a daisy, a rolled ribbon, a tiny flag), crisp even light. Kitschy picnic-pop mood, graphic and fun.',
+    textStyle: 'Retro-diner typography — chunky headline with a bounce, badge-like small label. Centered placement over the checker pattern.',
+    defaultTexts: { label: 'NEW', title: '{productName}', subtitle: '' },
+    sample: { title: '새로 나왔어요', subtitle: '이번 주 신메뉴' },
+  },
+  {
+    id: 'pop-sticker-collage', name: '스티커 콜라주', category: '신메뉴·팝',
+    desc: '스티커·찢은 종이의 콜라주 무드', accent: '#e0567b',
+    scaffold: 'A sticker collage scene: layered torn-paper scraps in candy colors, die-cut sticker shapes (stars, hearts, wavy circles) with white borders scattered around, a zine-like pastel backdrop. DIY scrapbook pop mood, spontaneous and youthful.',
+    textStyle: 'Cut-out sticker typography — headline styled like layered die-cut letters with white outlines, doodle-feeling small label. Playfully off-grid upper placement.',
+    defaultTexts: { label: 'PICK!', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '오늘의 픽', subtitle: '취향저격 신상' },
+  },
+
+  // ── 세일·이벤트 (+3) ──
+  {
+    id: 'sale-neon-wire', name: '네온 와이어', category: '세일·이벤트',
+    desc: '네온 아웃라인·다크의 전자 특가 무드', accent: '#35d0c0',
+    scaffold: 'A neon wireframe scene: glowing teal and magenta neon outline shapes (arrows, starbursts, frames) floating on a near-black backdrop, soft reflections on a dark glossy floor, faint grid perspective lines. Electric flash-deal energy, sharp and modern.',
+    textStyle: 'Neon-sign typography — high-impact glowing headline, small electric label chip. Centered placement radiating from the dark.',
+    defaultTexts: { label: 'SPECIAL', title: '{productName}', subtitle: '[혜택은 직접 입력해주세요]' },
+    sample: { title: '단 며칠, 반짝 특가', subtitle: '놓치면 아쉬운 순간' },
+  },
+  {
+    id: 'sale-paper-tear', name: '페이퍼 테어', category: '세일·이벤트',
+    desc: '찢린 크라프트 너머 비비드가 드러나는 무드', accent: '#d97b2f',
+    scaffold: 'A torn-paper reveal scene: a kraft paper layer torn open across the middle revealing a vivid tangerine field underneath, curled ripped edges with realistic fiber texture, hard top light. Surprise-reveal sale mood, tactile and bold.',
+    textStyle: 'Stencil-strength typography in off-white on the vivid field — bold headline bursting through the tear, stamped small label on the kraft. Split placement following the tear line.',
+    defaultTexts: { label: 'OPEN EVENT', title: '{productName}', subtitle: '[혜택은 직접 입력해주세요]' },
+    sample: { title: '뜯는 순간, 이벤트', subtitle: '서프라이즈 위크' },
+  },
+  {
+    id: 'sale-balloon-pop', name: '벌룬 팝 세일', category: '세일·이벤트',
+    desc: '글로시 3D 벌룬이 떠오르는 축제 특가', accent: '#e05a8c',
+    scaffold: 'A glossy balloon scene: oversized shiny 3D balloon shapes in coral, cream and gold rising through a soft pink sky, delicate strings trailing, one balloon catching a bright highlight. Buoyant celebration-sale mood, cheerful and dimensional.',
+    textStyle: 'Inflated rounded typography — puffy balloon-like headline with glossy feeling, ribbon-tag small label. Upper placement floating among balloons.',
+    defaultTexts: { label: 'EVENT', title: '{productName}', subtitle: '[혜택은 직접 입력해주세요]' },
+    sample: { title: '두둥실, 이벤트 오픈', subtitle: '페스티브 위크' },
+  },
+
+  // ── 패션 (+3) ──
+  {
+    id: 'fashion-archive-film', name: '아카이브 필름', category: '패션',
+    desc: '필름 그레인·플래시의 아카이브 무드', accent: '#8f8578',
+    scaffold: 'An archive film scene: warm-toned photo studio with visible film grain, a direct on-camera flash look creating soft vignetting, a plain seamless backdrop with tape marks on the floor, a metal stool to the side. 90s fashion-archive documentary mood, raw and authentic.',
+    textStyle: 'Typewriter-meets-editorial typography in faded black — matter-of-fact headline, date-stamp-feeling small label. Corner placement like a contact-sheet annotation.',
+    defaultTexts: { label: 'ARCHIVE', title: '{productName}', subtitle: '' },
+    sample: { title: '아카이브 오픈', subtitle: '클래식 컬렉션' },
+  },
+  {
+    id: 'fashion-mono-sculpt', name: '모노 스컬프트', category: '패션',
+    desc: '단색 공간·조각적 드레이프의 무드', accent: '#5a5f8f',
+    scaffold: 'A monochrome sculptural scene: an entire room drenched in one deep periwinkle tone — walls, floor, and a sweeping drape of matching fabric frozen in a sculptural arc, single soft key light modelling the folds. High-fashion color-drench mood, artistic and intense.',
+    textStyle: 'Sculptural typography in a lighter tint of the same hue — tall condensed headline, tiny label. Vertical-feeling placement along the drape.',
+    defaultTexts: { label: 'COLLECTION', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '하나의 색, 하나의 무드', subtitle: '모노 컬렉션' },
+  },
+  {
+    id: 'fashion-after-runway', name: '애프터 런웨이', category: '패션',
+    desc: '백스테이지 조명·글로시 런웨이의 무드', accent: '#3a3a44',
+    scaffold: 'An after-runway scene: a glossy dark runway floor reflecting rows of dimmed spotlights, haze drifting in the empty venue, a single chair with a garment bag at the runway edge. Backstage-after-the-show mood, cinematic and exclusive.',
+    textStyle: 'Runway-credits typography in cool white — slim uppercase headline with wide tracking, tiny show-note label. Lower-third placement like closing credits.',
+    defaultTexts: { label: 'BACKSTAGE', title: '{productName}', subtitle: '' },
+    sample: { title: '쇼가 끝난 뒤', subtitle: '런웨이 피스' },
+  },
+
+  // ── 미니멀 (+4) ──
+  {
+    id: 'minimal-linen-light', name: '리넨 라이트', category: '미니멀',
+    desc: '리넨 결·창가 빛줄기의 잔잔한 무드', accent: '#c9bda9',
+    scaffold: 'A linen light scene: natural flax linen fabric softly rumpled across the frame, one warm bar of window light falling diagonally, fine fabric weave texture visible, muted oat tones. Quiet slow-living mood, breathable and honest.',
+    textStyle: 'Honest typography in warm taupe — light headline with natural spacing, lowercase-feeling label. Placed inside the light bar.',
+    defaultTexts: { label: 'ESSENTIAL', title: '{productName}', subtitle: '' },
+    sample: { title: '본질에 가깝게', subtitle: '에센셜 라인' },
+  },
+  {
+    id: 'minimal-arch-shadow', name: '아치 섀도', category: '미니멀',
+    desc: '회벽 아치·깊은 그림자의 건축 무드', accent: '#b09a85',
+    scaffold: 'An arch shadow scene: warm plaster walls with a series of receding arches, deep soft shadows pooling inside each arch, late-afternoon Mediterranean light raking across the texture. Architectural serenity mood, timeless and grounded.',
+    textStyle: 'Classical-modern typography in umber — balanced headline, engraved-feeling small label. Placed in the lit wall plane beside the arches.',
+    defaultTexts: { label: 'STILL', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '고요한 오후', subtitle: '스틸 컬렉션' },
+  },
+  {
+    id: 'minimal-water-ripple', name: '워터 리플', category: '미니멀',
+    desc: '얕은 물결·페일 스톤의 파동 무드', accent: '#a3b8bd',
+    scaffold: 'A water ripple scene: a shallow sheet of clear water over pale stone, delicate concentric ripples catching silver light, caustic light patterns dancing on the stone below, misty neutral backdrop. Meditative fluid stillness mood, cool and poetic.',
+    textStyle: 'Fluid typography in deep sea-grey — thin headline with ripple-like rhythm, minimal label. Upper placement above the waterline.',
+    defaultTexts: { label: 'PURE', title: '{productName}', subtitle: '' },
+    sample: { title: '잔잔하게, 깊게', subtitle: '퓨어 라인' },
+  },
+  {
+    id: 'minimal-ink-line', name: '잉크 라인', category: '미니멀',
+    desc: '한 획의 잉크 라인·웜 페이퍼 무드', accent: '#4a4a48',
+    scaffold: 'An ink line scene: one continuous elegant sumi-ink brush line sweeping across warm off-white paper with subtle fiber texture, a single small ink dot as punctuation, vast intentional emptiness. Calligraphic restraint mood, artistic and composed.',
+    textStyle: 'Gallery typography in ink black — poised headline, hairline small label. Asymmetric placement balancing the brush stroke.',
+    defaultTexts: { label: 'SIGNATURE', title: '{productName}', subtitle: '' },
+    sample: { title: '한 획의 완성', subtitle: '시그니처 에디션' },
+  },
+
+  // ── 시즌 (+4) ──
+  {
+    id: 'season-rainy-mood', name: '레이니 무드', category: '시즌',
+    desc: '빗방울 창가·실내 온기의 장마 무드', accent: '#5c7186',
+    scaffold: 'A rainy season scene: raindrops beading and streaking down a window pane, blurred cool blue city beyond, warm cozy lamp glow from inside reflected on the sill, a folded knit throw nearby. Rainy-day comfort mood, contemplative and snug.',
+    textStyle: 'Soft moody typography in slate blue — gentle headline, rain-light small label. Placed on the window glass area.',
+    defaultTexts: { label: 'RAINY DAYS', title: '{productName}', subtitle: '' },
+    sample: { title: '비 오는 날의 위로', subtitle: '레이니 시즌' },
+  },
+  {
+    id: 'season-first-snow', name: '첫눈 모먼트', category: '시즌',
+    desc: '첫눈 내리는 저녁·가로등 헤일로', accent: '#7d8ba8',
+    scaffold: 'A first snow scene: fine snowflakes drifting through the warm halo of a vintage street lamp at blue-hour dusk, a quiet cobblestone path lightly dusted white, breath-fog softness in the air. First-snow romance mood, tender and magical.',
+    textStyle: 'Tender typography in lamplight cream — softly glowing headline, small snowy label. Placed inside the lamp halo.',
+    defaultTexts: { label: 'FIRST SNOW', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '첫눈 오는 날', subtitle: '윈터 모먼트' },
+  },
+  {
+    id: 'season-golden-hour', name: '골든 아워', category: '시즌',
+    desc: '늦여름 들녘·금빛 역광의 무드', accent: '#cf9440',
+    scaffold: 'A golden hour scene: tall late-summer grass backlit by low golden sun, floating seed fluff glowing in the warm haze, long soft shadows across a field path. End-of-summer nostalgia mood, radiant and wistful.',
+    textStyle: 'Sun-warmed typography in deep honey — glowing headline with soft edges, small heartfelt label. Placed against the bright sky band.',
+    defaultTexts: { label: 'GOLDEN HOUR', title: '{productName}', subtitle: '' },
+    sample: { title: '가장 빛나는 시간', subtitle: '골든 아워' },
+  },
+  {
+    id: 'season-fresh-green', name: '초여름 그린', category: '시즌',
+    desc: '신록·바람의 초여름 산뜻 무드', accent: '#79a05b',
+    scaffold: 'An early summer scene: fresh young green leaves fluttering in a bright breeze, dappled sunlight through the canopy onto a white cotton cloth, a glass of clear water catching sparkle. New-green vitality mood, clean and breezy.',
+    textStyle: 'Breezy typography in leaf green — fresh light headline, small sprout-like label. Airy upper placement among the dappled light.',
+    defaultTexts: { label: 'FRESH GREEN', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '초여름의 산뜻함', subtitle: '프레시 그린' },
+  },
 ];
 
 export function getTemplate(id: string): StudioTemplate | undefined {
@@ -531,7 +945,7 @@ export function getTemplate(id: string): StudioTemplate | undefined {
 /** 갤러리용 공개 목록 — ★scaffold·textStyle(은닉 프롬프트) 절대 미포함. */
 export function listTemplatesPublic() {
   return STUDIO_TEMPLATES.map((t) => ({
-    id: t.id, name: t.name, category: t.category, desc: t.desc, accent: t.accent,
+    id: t.id, name: t.name, category: t.category, kind: t.kind || 'product', desc: t.desc, accent: t.accent,
     exampleUrl: t.exampleUrl || null, defaultTexts: t.defaultTexts, sample: t.sample,
   }));
 }

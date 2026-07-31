@@ -35,6 +35,31 @@ export const STUDIO_TEMP_CAP_BYTES = Number(process.env.STUDIO_TEMP_CAP_BYTES) |
 /** temp 보존일(스윕 기준). */
 export const STUDIO_TEMP_TTL_DAYS = Number(process.env.STUDIO_TEMP_TTL_DAYS) || 7;
 
+// ── ★ 2026-07-31 템플릿 예시 실샘플 (Harold — "이 템플릿은 이런 이미지로 나온다") ──────
+//   배치 생성 산출물(영구·temp 스윕 제외). 카드 exampleUrl 폴백 소스 — 파일이 있으면 카드가 실샘플을 표시.
+//   경로 인자는 카탈로그 id로만 조립(라우트에서 getTemplate 검증 후 호출 — 경로 조작 차단).
+const STUDIO_SAMPLE_BASE = process.env.STUDIO_SAMPLE_PATH || path.resolve('./uploads/studio-samples');
+const SAMPLE_EXTS = ['jpg', 'jpeg', 'png', 'webp'] as const;
+
+export function findTemplateSample(templateId: string): { absPath: string; mime: string } | null {
+  try {
+    for (const ext of SAMPLE_EXTS) {
+      const p = path.join(STUDIO_SAMPLE_BASE, `${templateId}.${ext}`);
+      if (fs.existsSync(p)) {
+        return { absPath: p, mime: ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg' };
+      }
+    }
+  } catch { /* noop */ }
+  return null;
+}
+
+export function writeTemplateSample(templateId: string, buffer: Buffer, mime: string): void {
+  fs.mkdirSync(STUDIO_SAMPLE_BASE, { recursive: true });
+  const ext = ((mime.split('/')[1] || 'jpeg').toLowerCase()).replace('jpeg', 'jpg');
+  const safeExt = (SAMPLE_EXTS as readonly string[]).includes(ext) ? ext : 'jpg';
+  fs.writeFileSync(path.join(STUDIO_SAMPLE_BASE, `${templateId}.${safeExt}`), buffer);
+}
+
 /** 스튜디오 사용 가능 여부(키 미설정 = 카드 "준비 중", 500 금지 §5-3). */
 export function isStudioReady(): boolean {
   return !!GEMINI_API_KEY;

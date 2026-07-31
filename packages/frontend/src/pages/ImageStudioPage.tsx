@@ -34,6 +34,8 @@ const won = (n: number) => `${Math.round(Number(n) || 0).toLocaleString()}원`;
 
 interface StudioTemplatePublic {
   id: string; name: string; category: string; desc: string; accent: string;
+  /** ★ 2026-07-31 트랙 축 — 'product'(제품 포스터) / 'event'(행사 포스터·제품 없이 성립). 서버 미제공 시 product */
+  kind?: 'product' | 'event';
   exampleUrl: string | null;
   defaultTexts: { label?: string; title?: string; subtitle?: string };
   /** 카드 목업 예시 카피(템플릿 무드별 실카피). */
@@ -87,6 +89,8 @@ export default function ImageStudioPage() {
   const [templates, setTemplates] = useState<StudioTemplatePublic[]>([]);
   const [category, setCategory] = useState<string | null>(null);
   const [template, setTemplate] = useState<StudioTemplatePublic | null>(null);
+  // ★ 2026-07-31 트랙 축 — 제품 포스터(누끼) / 행사 포스터(멤버십데이·오픈·시즌 행사, 제품 없이 성립)
+  const [trackKind, setTrackKind] = useState<'product' | 'event'>('product');
 
   // 내 라이브러리(저장 소재) — 갤러리 상단 폴더. 소재 클릭 = 채널 발사대(인앱/DM/이메일/MMS 변환).
   const [assetAction, setAssetAction] = useState<{ id: string; url: string; filename: string | null; bytes: number; channelSpec?: string | null } | null>(null);
@@ -140,16 +144,17 @@ export default function ImageStudioPage() {
   const categories = useMemo(() => {
     const map = new Map<string, { count: number; accents: string[] }>();
     for (const t of templates) {
+      if ((t.kind || 'product') !== trackKind) continue;
       const e = map.get(t.category) || { count: 0, accents: [] };
       e.count++;
       if (e.accents.length < 3) e.accents.push(t.accent);
       map.set(t.category, e);
     }
     return Array.from(map.entries()).map(([name, v]) => ({ name, ...v }));
-  }, [templates]);
+  }, [templates, trackKind]);
   const visibleTemplates = useMemo(
-    () => (category ? templates.filter((t) => t.category === category) : []),
-    [templates, category],
+    () => (category ? templates.filter((t) => (t.kind || 'product') === trackKind && t.category === category) : []),
+    [templates, category, trackKind],
   );
 
   // 템플릿·상품 변경 시 문구 자동 채움 ({productName}/{salePrice} = 몰 실데이터 — 사용자 수정 가능)
@@ -353,7 +358,30 @@ export default function ImageStudioPage() {
         {/* 1단계-a — 카테고리 선택 */}
         {stage === 'gallery' && !category && (
           <section>
-            <h2 className="text-sm font-bold text-white/90 mb-3">어떤 종류의 포스터인가요?</h2>
+            {/* ★ 2026-07-31 트랙 축 — 제품 포스터 / 행사 포스터 명확 분리 (Harold) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+              <button
+                onClick={() => { setTrackKind('product'); setCategory(null); }}
+                className={`rounded-2xl border p-4 text-left transition ${trackKind === 'product' ? 'border-violet-400/60 bg-violet-500/10' : 'border-white/10 bg-white/5 hover:border-white/25'}`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <ShoppingBag className={`w-4 h-4 ${trackKind === 'product' ? 'text-violet-300' : 'text-white/40'}`} />
+                  <span className="text-sm font-bold">제품 포스터</span>
+                </div>
+                <p className="text-[11px] text-white/45 leading-relaxed">내 상품이 주인공 — 제품 사진을 넣으면 원본 그대로 보존하고 배경·문구를 새로 그립니다.</p>
+              </button>
+              <button
+                onClick={() => { setTrackKind('event'); setCategory(null); }}
+                className={`rounded-2xl border p-4 text-left transition ${trackKind === 'event' ? 'border-fuchsia-400/60 bg-fuchsia-500/10' : 'border-white/10 bg-white/5 hover:border-white/25'}`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <Sparkles className={`w-4 h-4 ${trackKind === 'event' ? 'text-fuchsia-300' : 'text-white/40'}`} />
+                  <span className="text-sm font-bold">행사 포스터</span>
+                </div>
+                <p className="text-[11px] text-white/45 leading-relaxed">멤버십데이·오픈·시즌 행사 안내 — 제품 없이 행사명과 문구만으로 완성됩니다.</p>
+              </button>
+            </div>
+            <h2 className="text-sm font-bold text-white/90 mb-3">{trackKind === 'event' ? '어떤 행사인가요?' : '어떤 종류의 포스터인가요?'}</h2>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
               {categories.map((c) => (
                 <button key={c.name} onClick={() => setCategory(c.name)} className="rounded-2xl border border-white/10 bg-white/5 p-4 text-left hover:border-violet-400/40 hover:bg-white/10 transition">
@@ -396,7 +424,7 @@ export default function ImageStudioPage() {
                         <div className="text-[11px] font-bold text-white leading-tight">{t.sample?.title || t.name}</div>
                         {t.sample?.subtitle ? <div className="text-[8px] text-white/60 truncate">{t.sample.subtitle}</div> : null}
                       </div>
-                      <div className="w-7 h-10 rounded bg-white/15 border border-white/25 mb-3" title="상품 자리" />
+                      {(t.kind || 'product') === 'product' && <div className="w-7 h-10 rounded bg-white/15 border border-white/25 mb-3" title="상품 자리" />}
                     </div>
                   )}
                   <div className="p-2">
@@ -426,8 +454,12 @@ export default function ImageStudioPage() {
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <h3 className="text-sm font-bold mb-1 flex items-center gap-2"><ShoppingBag className="w-4 h-4 text-violet-300" /> 상품 이미지</h3>
-                <p className="text-[11px] text-white/40 mb-3">제품 원본은 그대로 보존하고(누끼) 배경·문구만 새로 그립니다.</p>
+                <h3 className="text-sm font-bold mb-1 flex items-center gap-2"><ShoppingBag className="w-4 h-4 text-violet-300" /> {(template.kind || 'product') === 'event' ? '제품 이미지 (선택)' : '상품 이미지'}</h3>
+                <p className="text-[11px] text-white/40 mb-3">
+                  {(template.kind || 'product') === 'event'
+                    ? '행사 포스터는 제품 없이 완성됩니다 — 포스터에 제품을 함께 넣고 싶을 때만 첨부하세요.'
+                    : '제품 원본은 그대로 보존하고(누끼) 배경·문구만 새로 그립니다.'}
+                </p>
                 <div className="flex flex-wrap gap-2">
                   <button onClick={() => setPickerOpen(true)} disabled={busy} className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-xs font-semibold hover:opacity-90 disabled:opacity-40">
                     <ShoppingBag className="w-3.5 h-3.5" /> 연동 몰에서
@@ -444,8 +476,12 @@ export default function ImageStudioPage() {
                   </div>
                 )}
                 {product && <div className="mt-2 text-[11px] text-white/50 truncate">{product.name}{product.salePrice ? ` · ${won(product.salePrice)}` : ''}</div>}
-                <p className="text-[10px] text-white/30 italic mt-2">상품 없이도 생성할 수 있어요(문구 포스터). 단일 제품 사진에서 가장 잘 작동합니다.</p>
-                <p className="text-[10px] text-amber-300/60 italic mt-1">의류는 모델 착용컷 대신 옷 단독컷을 권장해요 — 착용컷은 배경과 합성한 티가 나기 쉬워요.</p>
+                {(template.kind || 'product') === 'product' && (
+                  <>
+                    <p className="text-[10px] text-white/30 italic mt-2">상품 없이도 생성할 수 있어요(문구 포스터). 단일 제품 사진에서 가장 잘 작동합니다.</p>
+                    <p className="text-[10px] text-amber-300/60 italic mt-1">의류는 모델 착용컷 대신 옷 단독컷을 권장해요 — 착용컷은 배경과 합성한 티가 나기 쉬워요.</p>
+                  </>
+                )}
               </div>
             </div>
 
@@ -453,9 +489,9 @@ export default function ImageStudioPage() {
             <div className="lg:col-span-3 space-y-4">
               <div className="rounded-2xl border border-fuchsia-400/20 bg-gradient-to-br from-fuchsia-500/10 to-indigo-500/5 p-4 space-y-2.5">
                 <h3 className="text-sm font-bold flex items-center gap-2"><PenLine className="w-4 h-4 text-fuchsia-300" /> 포스터에 들어갈 문구</h3>
-                <input value={texts.label} onChange={(e) => setTexts({ ...texts, label: e.target.value })} placeholder="작은 라벨 (예: ONLINE EXCLUSIVE)" className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
-                <input value={texts.title} onChange={(e) => setTexts({ ...texts, title: e.target.value })} placeholder="헤드라인 (예: 제품명 30% 할인 · 2+1 이벤트)" className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-sm font-semibold text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
-                <input value={texts.subtitle} onChange={(e) => setTexts({ ...texts, subtitle: e.target.value })} placeholder="부제 (예: 한정 수량 특별 혜택)" className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
+                <input value={texts.label} onChange={(e) => setTexts({ ...texts, label: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '작은 라벨 (예: MEMBERSHIP DAY)' : '작은 라벨 (예: ONLINE EXCLUSIVE)'} className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
+                <input value={texts.title} onChange={(e) => setTexts({ ...texts, title: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '행사명 (예: 멤버십 데이)' : '헤드라인 (예: 제품명 30% 할인 · 2+1 이벤트)'} className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-sm font-semibold text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
+                <input value={texts.subtitle} onChange={(e) => setTexts({ ...texts, subtitle: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '안내 문구 (예: 행사 기간·안내를 적어주세요)' : '부제 (예: 한정 수량 특별 혜택)'} className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
                 <p className="text-[10px] text-white/35 italic">입력한 문구 그대로 이미지 안에 고급 타이포로 새겨집니다. 혜택·수치는 직접 입력해주세요.</p>
               </div>
 

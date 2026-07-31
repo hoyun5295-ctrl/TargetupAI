@@ -48,24 +48,34 @@
 > 잔여 = 마법사 탈출구 배너 미포함
 
 ### 0729 브랜드메시지 — 청구축·발송경로 재구축 **전량 배포완료**(`4864d5d9` — 0731 Codex 11R SHIP)
-> SoT [청구·개방](docs/2026-07-29-brand-message-billing-design.md) §7 · [발송경로 재구축](docs/2026-07-29-brand-message-qtmsg-agent-design.md) §8 구현 결과 · **§9 표시 축 재구축**(0731 실측이 깬 것 — 코드완료·배포대기) · 기억 [[project_2026_0729_brand_message_billing]] · 다음 = §9 배포(**프론트 포함 = 빌드 필요**) → 재측정(대체발송 `SM`으로) → 브랜드 단가 입력(여미지 `B0227`)·발행 실측
+> SoT [청구·개방](docs/2026-07-29-brand-message-billing-design.md) §7 · [발송경로 재구축](docs/2026-07-29-brand-message-qtmsg-agent-design.md) §8 구현 결과 · **§9 표시 축 재구축**(0731 실측이 깬 것 — 배포완료) · 기억 [[project_2026_0729_brand_message_billing]] · 다음 = 재측정(대체발송 `SM`으로) → 브랜드 단가 입력(여미지 `B0227`)·발행 실측
 > ⛔ **발송 불가 = Agent 버전 미달**(SoT §9-1) / 지원 유형 = TEXT·IMAGE·WIDE만, 늘릴 땐 `utils/billing-types.ts` 표에만(SoT §5-3) / 축 복원 금지 — 채널=`resolveRefundAxes`, `send_phase='preparing'` 게이트
-> 잔여 = §9 배포+재측정 · 단가 입력·발행 실측 · AI 타겟추출 페이징(별건) · 학습 채널 키 이관(`mysql-refund-sweeper.ts:601` — 저장 키라 이관 판단 필요)
+> 잔여 = 재측정 · 단가 입력·발행 실측 · AI 타겟추출 페이징(별건) · 학습 채널 키 이관(`mysql-refund-sweeper.ts:601` — 저장 키라 이관 판단 필요)
 
 ### 0728 정산 파이프라인 — 팝빌 발행·수정발행 배포완료(`d4430454`), 테스트베드 실측 대기
 > SoT [일괄발급·컨펌·세금계산서](docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md) **§7(연동 구현)·§9 남은 것(절차·마감 조건)** · §7-0(API 계약) · 기억 [[project_2026_0728_bulk_invoice_confirm_taxbill]] · 다음 = **호출어 "팝빌 발행 테스트 재개"**(게이트 ON 상태 — Callback URL 등록 → 방화벽 IP 2개 → 발급·웹훅·수정발행 각 1건 → `POPBILL_IS_TEST=false`)
 > ⛔ **실청구 컨펌 메일 전에 테스트 완료·운영 전환**(게이트 ON+`IS_TEST=true` — SoT §9 남은 것) / 신규 테이블 실행자 컬럼에 users FK 금지 / 공급받는자 사업자 = 계정 → `billing_contacts` → `companies` 3단 / **통지 추적행은 메일보다 먼저**(§4-1)
 > 잔여 = 화면 실측 8건(정산 탭 저장 / 일괄발급 / 공개 컨펌=CSP / 현황판 / 사업자등록증 자동입력 / 회사 계산서 사업자 / 메일 재시도 / 미발송 필터) · 메일 첨부 실물(PDF 제목·파일명) · 접수·여정 실측 4건([[project_2026_0728_tickets_journey_triggers]]) · **재구성분 Codex 미검토**(4·5차 무산)
 
-### 0730 정산 특례 — 축 A(080·최소과금·부가서비스) 코드완료·배포대기
-> SoT [정산 특례·발행 그룹](docs/2026-07-30-billing-extras-and-groups-design.md) **§9(남은 것) → §7(확인 5건)** · 기억 [[project_2026_0730_billing_080_extras]] · 다음 = 배포 → 실측 3종(080 매핑 18번호→PDF 업로드→반영→발행 / 최소과금 4사 정액 발행 / 부가서비스 1건)
+### 0731 정산 수신자·귀속 축 — 배포완료, 실측 대기
+> SoT [SCHEMA `billing_recipients` 절](SCHEMA.md) + [정산 특례](docs/2026-07-30-billing-extras-and-groups-design.md) 머리말 갱신 · 기억 [[project_2026_0731_billing_recipients_and_scope]] · 다음 = 실측 1건(수신자 2명+계산서 전용 1명 등록 → 일괄발급 → 대표 컨펌 링크·참조 사본 → 컨펌 → 계산서가 세 번째 주소로)
+> ⛔ 수신자 원장은 `billing_recipients` 하나 — `billing_contacts.contact_email`·`companies.contact_email`을 정산 메일에 다시 쓰지 않는다(셋으로 갈려 있던 것을 합친 것) / 발송 모달 수신자 칸은 **비워야** 참조가 함께 간다(값이 있으면 서버가 override로 보고 cc를 뺀다) / 세금계산서는 대표 1명까지만(팝빌 참조 동시 전달 미검증) / 채널이 늘면 `USER_SHEET_CHANNELS`를 함께 본다
+> 잔여 = 실측 1건 · 080 귀속 실측 · 팝빌 `addContactList` 스펙 확인
+
+### 0730 정산 특례 — 축 A(080·최소과금·부가서비스) 배포완료, 실측 대기
+> SoT [정산 특례·발행 그룹](docs/2026-07-30-billing-extras-and-groups-design.md) **§9(남은 것) → §7(확인 5건)** · 기억 [[project_2026_0730_billing_080_extras]] · 다음 = 실측 3종(080 매핑 18번호→PDF 업로드→반영→발행 / 최소과금 4사 정액 발행 / 부가서비스 1건)
 > ⛔ 금액은 전부 **공급가 저장**(VAT는 청구서가 파생) / 080 반영·최소과금 발행·항목 취소는 **발행과 같은 회사 잠금** 축 / 월별 항목은 `billed_billing_id` 소비 마커로만 이중청구가 막힌다(발행 삭제 시 FK로 자동 복귀) / 판독 결과는 서명·재검산을 통과한 전문만 반영 / 최소과금은 **완료월만**·게이트 6종 중 하나라도 걸리면 일반 발행으로
 > 잔여 = 실측 3종 · 정액 특례(시세이도 부서 10만·에이스 5만 — SoT §5) · **발행 그룹**(대상ID·계정 묶음·Agent 귀속·`by_agent` 개방 — SoT §6, 공사 큼) · 서 팀장 확인 5건(SoT §7)
 
-### 0727 여정 알림톡 + 환불 의무 — 배포대기 2건
-> SoT 알림톡·잔액 = 기억 [[project_2026_0727_journey_alimtalk_and_agent_tls]] · 환불 = [BUGS.md](BUGS.md) B-0727-1·2 · 다음 = 배포대기 2건 배포(알림톡 대체문안 CT `utils/alimtalk-fallback.ts` 커밋 `f91d5ea5` / `balance_transactions.refund_key` 원인별 분리, DDL 실행 완료)
+### 0727 여정 알림톡 + 환불 의무 — 전량 배포완료
+> SoT 알림톡·잔액 = 기억 [[project_2026_0727_journey_alimtalk_and_agent_tls]] · 환불 = [BUGS.md](BUGS.md) B-0727-1·2 · 다음 = 운영 확인(알림톡 대체문안 CT `utils/alimtalk-fallback.ts` `f91d5ea5` / `balance_transactions.refund_key` 원인별 분리, DDL 실행 완료)
 > ⛔ 대체문안 선택이 `대체문안 작성(B)`인데 문안이 비면 저장·활성화·발송 세 지점에서 차단 — `원문 그대로(L)`는 게이트웨이가 우리 `msg_contents`를 그대로 내보낸다
-> 잔여 = 위 2건 배포. 배포완료분(`0fe700c0`·`0af8d427`·`353cb42a`)은 운영 확인만
+> 잔여 = 운영 확인만. **싱크에이전트 TLS+키셋(1.6.4)은 서버 배포 축이 아니라 에이전트 zip 빌드 대기**
+
+### 0731 인앱 이미지 클릭 랜딩 + 스튜디오 행사 트랙 — 코드완료·배포대기(Codex 4R approve)
+> SoT = 기억 [[project_2026_0731_inapp_image_link_studio_event_track]] · 다음 = 배포(⚠SDK 변경 = build:all 체인) → 실측 5건(포스터 링크 클릭·캐러셀 슬라이드별·인라인 카드 몰 DOM 무손상·행사 트랙 생성·샘플 배치 curl) — 0721 캐러셀 실측 이 왕복에 흡수
+> ⛔ `image_link_url` ALTER는 운영 실행 확인됨(SCHEMA 41컬럼) / 블록이 진실인 메시지는 flat 링크를 저장·판독 양층에서 비운다(legacy 폴백 계약 — 완화 금지) / 메시지 DOM 제거는 `data-hanjullo-wrap` 마커 단일 길목(parentElement 추론 복원 금지)
+> 잔여 = 배포 · 실측 5건 · 팝폰 네이티브 이미지 클릭(계약서 절 기준·OTA 별건) · 샘플 일괄 생성 실행 여부(내부 원가 ~2.4만원, Harold 결정)
 
 ### 다음 세션 (예정)
 > 경위·범위·확정 사실은 링크가 소유한다. 여기엔 제목·다음 한 수·호출어만.
@@ -88,15 +98,16 @@
 
 | 건 | 남은 것 | 상세 |
 |---|---|---|
-| 0730 이미지 스튜디오 단일 생성 + 접수 4건 | **코드완료·배포대기** — SDK 변경 포함이라 배포에 `build:all` 필수. 실측 6건(생성 1장·2크레딧 / 인앱 삽입 크롭 0 / 헤더 D-Day·쿠폰강조 끝색 / 슬라이드 크기 4종 / 발신프로필 채널ID 검색 / 자동마케팅 MMS 첨부·미첨부 보류 통지) | [[project_2026_0730_studio_single_gen_and_tickets]] |
+| 0731 레거시 143 폐기 — 이관·파기 완료 | 다우클라우드 반납 확인 3건(인스턴스+**볼륨** 삭제 / 스냅샷·백업 이미지 잔존 없음 / 과금 종료일) · 사무실 망에서 `pay.invitobiz.com:8080` 확인(66 경계는 통과 실측) | [[project_2026_0703_legacy_server_decommission]] · [폐기플랜](docs/레거시서버_폐기_플랜.md) §6·§7 0731행 |
+| 0730 이미지 스튜디오 단일 생성 + 접수 4건 | **배포완료** — ⚠SDK 변경 포함이라 이후 배포에도 `build:all` 필수. 실측 6건(생성 1장·2크레딧 / 인앱 삽입 크롭 0 / 헤더 D-Day·쿠폰강조 끝색 / 슬라이드 크기 4종 / 발신프로필 채널ID 검색 / 자동마케팅 MMS 첨부·미첨부 보류 통지) | [[project_2026_0730_studio_single_gen_and_tickets]] |
 | 0725 정산 결함·서수란 6건 (커밋 `d19f48fd`) | 화면 실측(웹 유형 NULL · 발신번호 페이징). 7월 청구 금액을 바꾸는 미해결 항목은 없다 | [[project_2026_0725_settlement_mms_gap_and_seo_tickets]] |
-| 0725 PAY 통계 발급명·대상ID | **배포 대기** + 커밋 시 신규파일 `packages/backend/src/utils/pay-stats.test.ts` git add | [[project_2026_0725_pay_stats_custnm_storeid]] |
+| 0725 PAY 통계 발급명·대상ID | **배포완료** — 서수란 실측 | [[project_2026_0725_pay_stats_custnm_storeid]] |
 | 0724 DM 테스트 무과금 차단 | 서수란 실측 · 기존 running A/B 미발행 variant 점검 SQL | [[project_2026_0724_dm_test_no_charge_bypass]] |
 | 0723~24 PAY 에이전트 통계(발송ID·엑셀) | 서수란 실측 · 54/57 전환갭 확인 · billing 정산 반영 | [[project_2026_0723_pay_agent_stats_tabs]] |
 | 0722 모바일 DM 편집≠단말 | Harold 실측 | [[project_2026_0722_mobile_dm_editor_publish_parity]] |
-| 0722 카카오 템플릿 관리 | 화면 실측 (접수2 프론트 배포 대기) | [[project_2026_0722_kakao_template_mgmt_tickets]] |
+| 0722 카카오 템플릿 관리 | 화면 실측 (배포완료) | [[project_2026_0722_kakao_template_mgmt_tickets]] |
 | 0722 영업용 테스트발송/저장 | 실측 | [[project_2026_0722_sales_test_send]] |
-| 0721 브랜드 학습 · DM 고아기능 배선 · 역할 격리+인앱 관리자 | **코드완료·배포 대기 3건** | [[project_2026_0721_brand_learning_consolidation]] · [[project_2026_0721_mobile_dm_feature_wiring]] · [[project_2026_0721_role_isolation_inapp_admin]] |
+| 0721 브랜드 학습 · DM 고아기능 배선 · 역할 격리+인앱 관리자 | **배포완료 3건** — 화면 실측 | [[project_2026_0721_brand_learning_consolidation]] · [[project_2026_0721_mobile_dm_feature_wiring]] · [[project_2026_0721_role_isolation_inapp_admin]] |
 | 0721 인앱 포스터 캐러셀 | 실기기·왕복 실측 | [[project_2026_0721_inapp_poster_carousel]] |
 | 0720~21 모바일 DM 제목 정합 | 실측(주황막대·노치·이벤트카드·인앱포스터) | [[project_2026_0720_mobile_dm_title_parity]] |
 | 0719~20 계절 템플릿 | 의류 안내 1줄 커밋·배포 | [[project_2026_0719_p4_image_studio]] |
