@@ -3,12 +3,9 @@ import { useNavigate } from 'react-router-dom';
 // ★ 2026-07-03 에이전트(QTmsg) 전용 회사 게이팅 — 요금제 가드 면제 + 알림톡 탭만 + 로그아웃 버튼
 import { useAuthStore, isAgentOnlyCompany } from '../stores/authStore';
 import RcsTemplateFormModal from '../components/RcsTemplateFormModal';
-import BrandMessageEditor from '../components/BrandMessageEditor';
-import DirectTargetFilterModal from '../components/DirectTargetFilterModal';
-import TargetRecipientsModal, { arrayPager, type TargetRecipient } from '../components/TargetRecipientsModal';
 // ★ D130: 알림톡 통합 관리 (IMC 연동)
 import AlimtalkManagementSection from '../components/alimtalk/AlimtalkManagementSection';
-// ★ D150-2 (2026-05-09): 브랜드메시지 템플릿 관리 (IMC 연동)
+// 브랜드 템플릿 관리 (기본형 발송용 템플릿 등록·검수)
 import BrandTemplateManagementSection from '../components/alimtalk/BrandTemplateManagementSection';
 
 function getToken(): string {
@@ -16,8 +13,6 @@ function getToken(): string {
 }
 
 type Tab = 'alimtalk' | 'brand' | 'rcs';
-// ★ D150-2 (2026-05-09): 브랜드 탭 sub-tab — 템플릿 관리 / 발송 분리
-type BrandSubTab = 'template' | 'send';
 
 const STATUS_BADGE: Record<string, { label: string; bg: string; text: string }> = {
   pending:  { label: '승인대기', bg: 'bg-amber-100', text: 'text-amber-700' },
@@ -33,7 +28,6 @@ export default function KakaoRcsPage() {
   const isAgentOnly = isAgentOnlyCompany(user);
   const [activeTab, setActiveTab] = useState<Tab>('alimtalk');
   // ★ D150-2 (2026-05-09): 브랜드 sub-tab (템플릿 관리 / 발송)
-  const [brandSubTab, setBrandSubTab] = useState<BrandSubTab>('template');
   const [loading, setLoading] = useState(false);
 
   // ★ 2026-07-29 브랜드메시지 요금제 게이팅 폐지 (Harold 확정) — 모든 요금제에서 모든 기능을 쓴다.
@@ -78,7 +72,7 @@ export default function KakaoRcsPage() {
     } catch { /* ignore */ }
   }, [rcsFilter]);
 
-  // 프로필 조회 (브랜드메시지 탭 BrandMessageEditor 전달용)
+  // 프로필 조회 (브랜드 템플릿 탭 전달용)
   const fetchProfiles = useCallback(async () => {
     try {
       const res = await fetch('/api/alimtalk/senders', {
@@ -132,7 +126,7 @@ export default function KakaoRcsPage() {
     { key: 'alimtalk' as Tab, label: '알림톡 템플릿', icon: '💬', color: 'amber' },
     // ★ 2026-07-03 에이전트 전용 회사 = 알림톡 템플릿만 (브랜드메시지·RCS 탭 숨김)
     ...(isAgentOnly ? [] : [
-      { key: 'brand' as Tab, label: '브랜드메시지', icon: '📢', color: 'blue' },
+      { key: 'brand' as Tab, label: '브랜드 템플릿', icon: '📢', color: 'blue' },
       { key: 'rcs' as Tab, label: 'RCS 템플릿', icon: '📱', color: 'purple' },
     ]),
   ];
@@ -145,7 +139,7 @@ export default function KakaoRcsPage() {
         <div className="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-gray-900">{isAgentOnly ? '카카오 템플릿 관리' : '카카오 & RCS'}</h1>
-            <p className="text-sm text-gray-500 mt-0.5">{isAgentOnly ? '알림톡 템플릿 등록 · 검수 관리' : '알림톡 템플릿, 브랜드메시지, RCS 관리'}</p>
+            <p className="text-sm text-gray-500 mt-0.5">{isAgentOnly ? '알림톡 템플릿 등록 · 검수 관리' : '카카오톡·RCS 템플릿을 등록하고 검수 상태를 관리합니다'}</p>
           </div>
           {isAgentOnly ? (
             // ★ 2026-07-03 에이전트 전용 회사 — 대시보드 진입점 제거
@@ -202,39 +196,11 @@ export default function KakaoRcsPage() {
 
         {/* ═══ 브랜드메시지 탭 ═══ */}
         {/* ★ D150-2 (2026-05-09): sub-tab 도입 — "템플릿 관리"(신규) / "발송"(기존) 분리 */}
+        {/* ═══ 브랜드 템플릿 탭 ═══ */}
+        {/* ★ 2026-07-31 '발송' 서브탭 제거 — 이 페이지는 템플릿 관리다.
+            브랜드메시지 발송은 직접발송 헤더의 브랜드메시지 모달이 유일한 경로다(입구를 둘로 두면 갈라진다). */}
         {activeTab === 'brand' && (
-          <div>
-            <div className="flex gap-1 mb-4 border-b border-gray-200">
-              <button
-                type="button"
-                onClick={() => setBrandSubTab('template')}
-                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                  brandSubTab === 'template'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                템플릿 관리
-              </button>
-              <button
-                type="button"
-                onClick={() => setBrandSubTab('send')}
-                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                  brandSubTab === 'send'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                발송
-              </button>
-            </div>
-            {brandSubTab === 'template' && (
-              <BrandTemplateManagementSection profiles={profiles} setToast={setToast} />
-            )}
-            {brandSubTab === 'send' && (
-              <BrandMessageTab profiles={profiles} setToast={setToast} />
-            )}
-          </div>
+          <BrandTemplateManagementSection profiles={profiles} setToast={setToast} />
         )}
 
         {/* ═══ RCS 템플릿 탭 ═══ */}
@@ -369,392 +335,3 @@ export default function KakaoRcsPage() {
   );
 }
 
-// ============================================================
-// BrandMessageTab — 브랜드메시지 발송 탭 (수신자 + 에디터 + 미리보기)
-// ============================================================
-function BrandMessageTab({ profiles, setToast }: {
-  profiles: { id: string; profile_key: string; profile_name: string }[];
-  setToast: (t: { show: boolean; type: 'success' | 'error'; message: string }) => void;
-}) {
-  const [sending, setSending] = useState(false);
-
-  // ★ 수신자 입력 3탭 (직접입력 / 파일등록 / DB추출)
-  type RecipientMode = 'direct' | 'file' | 'db';
-  const [recipientMode, setRecipientMode] = useState<RecipientMode>('direct');
-  const [phones, setPhones] = useState('');
-  const [recipientList, setRecipientList] = useState<{ phone: string }[]>([]);
-
-  // 파일 업로드
-  const [fileLoading, setFileLoading] = useState(false);
-  const [fileHeaders, setFileHeaders] = useState<string[]>([]);
-  const [filePreview, setFilePreview] = useState<any[]>([]);
-  const [fileData, setFileData] = useState<any[]>([]);
-  const [showMapping, setShowMapping] = useState(false);
-  const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
-  const [mappingLoading, setMappingLoading] = useState(false);
-  const [loadingProgress, setLoadingProgress] = useState(0);
-  const [fileName, setFileName] = useState('');
-
-  // DB추출
-  const [showDbExtract, setShowDbExtract] = useState(false);
-  // 2026-07-09: DB추출 전체 recipient 원본 보관 + 리스트 보기 모달
-  const [dbExtractedRecipients, setDbExtractedRecipients] = useState<TargetRecipient[]>([]);
-  const [showTargetList, setShowTargetList] = useState(false);
-
-  // 수신자 건수 계산
-  const getPhoneList = (): string[] => {
-    if (recipientMode === 'direct') {
-      return phones.split(/[\n,]/).map(p => p.trim().replace(/\D/g, '')).filter(p => p.length >= 10);
-    }
-    return recipientList.map(r => r.phone);
-  };
-
-  // 파일 업로드 처리
-  const handleFileUpload = async (file: File) => {
-    setFileLoading(true);
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/upload/parse?includeData=true', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      const data = await res.json();
-      if (data.success) {
-        setFileHeaders(data.headers);
-        setFilePreview(data.preview);
-        setFileData(data.allData || data.preview);
-        setFileName(file.name);
-        setColumnMapping({});
-        setShowMapping(true);
-      } else {
-        setToast({ show: true, type: 'error', message: data.error || '파일 파싱 실패' });
-      }
-    } catch {
-      setToast({ show: true, type: 'error', message: '파일 업로드 중 오류가 발생했습니다.' });
-    } finally {
-      setFileLoading(false);
-    }
-  };
-
-  // 파일 매핑 적용
-  const handleMappingApply = async () => {
-    if (!columnMapping.phone) {
-      setToast({ show: true, type: 'error', message: '수신번호는 필수입니다.' });
-      return;
-    }
-    setMappingLoading(true);
-    setLoadingProgress(0);
-    await new Promise(resolve => setTimeout(resolve, 10));
-
-    const total = fileData.length;
-    const chunkSize = 5000;
-    const mapped: { phone: string }[] = [];
-
-    for (let i = 0; i < total; i += chunkSize) {
-      const chunk = fileData.slice(i, i + chunkSize);
-      const processed = chunk.map(row => {
-        const phone = String(row[columnMapping.phone] || '').trim().replace(/\D/g, '');
-        return { phone };
-      }).filter(r => r.phone && r.phone.length >= 10);
-
-      mapped.push(...processed);
-      setLoadingProgress(Math.min(100, Math.round((i + chunkSize) / total * 100)));
-      await new Promise(resolve => setTimeout(resolve, 10));
-    }
-
-    // 중복 제거
-    const seen = new Set<string>();
-    const deduped = mapped.filter(r => { if (seen.has(r.phone)) return false; seen.add(r.phone); return true; });
-
-    setRecipientList(deduped);
-    setRecipientMode('file');
-    setMappingLoading(false);
-    setShowMapping(false);
-    const dupCount = mapped.length - deduped.length;
-    setToast({ show: true, type: 'success', message: `${deduped.length.toLocaleString()}건 등록 완료${dupCount > 0 ? ` (중복 ${dupCount}건 제거)` : ''}` });
-  };
-
-  // DB추출 완료 콜백
-  const handleDbExtracted = (recipients: any[], count: number) => {
-    const mapped = recipients.map(r => ({ phone: String(r.phone || '').replace(/\D/g, '') })).filter(r => r.phone.length >= 10);
-    setRecipientList(mapped);
-    // 리스트 보기용 전체 원본(이름·등급 등) 보관 — 유효 전화만
-    setDbExtractedRecipients(recipients.filter((r) => String(r.phone || '').replace(/\D/g, '').length >= 10));
-    setRecipientMode('db');
-    setShowDbExtract(false);
-    setToast({ show: true, type: 'success', message: `${count.toLocaleString()}명 추출 완료` });
-  };
-
-  const handleSend = async (data: any) => {
-    const phoneList = getPhoneList();
-    if (phoneList.length === 0) {
-      setToast({ show: true, type: 'error', message: '수신자 번호를 입력해주세요' });
-      return;
-    }
-    if (!data.senderKey) {
-      setToast({ show: true, type: 'error', message: '발신 프로필을 선택해주세요' });
-      return;
-    }
-
-    setSending(true);
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/campaigns/brand-send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ ...data, phones: phoneList }),
-      });
-      const result = await res.json();
-      if (result.success) {
-        setToast({ show: true, type: 'success', message: `브랜드메시지 ${result.sentCount}건 발송 완료` });
-        setPhones('');
-        setRecipientList([]);
-      } else {
-        setToast({ show: true, type: 'error', message: result.error || '발송 실패' });
-      }
-    } catch (err) {
-      setToast({ show: true, type: 'error', message: '발송 중 오류가 발생했습니다' });
-    } finally {
-      setSending(false);
-    }
-  };
-
-  return (
-    <>
-    <div className="space-y-6">
-      {/* 수신자 입력 — 3버튼 + 결과 영역 */}
-      <div className="bg-white rounded-xl border-2 border-gray-200 overflow-hidden">
-        {/* 3버튼 탭 */}
-        <div className="flex gap-3 p-4 pb-0">
-          <button
-            onClick={() => setRecipientMode('direct')}
-            className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
-              recipientMode === 'direct'
-                ? 'bg-emerald-500 text-white shadow-md shadow-emerald-200'
-                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-            }`}
-          >✏️ 직접입력</button>
-          <button
-            onClick={() => {
-              setRecipientMode('file');
-              if (recipientList.length === 0 || recipientMode !== 'file') {
-                // 파일 대화상자 열기
-                const inp = document.createElement('input');
-                inp.type = 'file'; inp.accept = '.xlsx,.xls,.csv';
-                inp.onchange = (ev) => { const f = (ev.target as HTMLInputElement).files?.[0]; if (f) handleFileUpload(f); };
-                inp.click();
-              }
-            }}
-            className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
-              recipientMode === 'file'
-                ? 'bg-amber-500 text-white shadow-md shadow-amber-200'
-                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-            } ${fileLoading ? 'opacity-60 cursor-wait' : ''}`}
-          >{fileLoading ? '⏳ 분석중...' : '📁 파일등록'}</button>
-          <button
-            onClick={() => { setRecipientMode('db'); setShowDbExtract(true); }}
-            className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
-              recipientMode === 'db'
-                ? 'bg-blue-500 text-white shadow-md shadow-blue-200'
-                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-            }`}
-          >🔍 DB추출</button>
-        </div>
-
-        {/* 컨텐츠 영역 */}
-        <div className="p-4">
-          {/* 직접입력 모드 */}
-          {recipientMode === 'direct' && (
-            <>
-              <textarea
-                value={phones}
-                onChange={(e) => setPhones(e.target.value)}
-                rows={3}
-                className="w-full border-2 border-gray-200 rounded-lg px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400"
-                placeholder="전화번호 입력 (줄바꿈 또는 쉼표로 구분)&#10;예: 01012345678, 01098765432"
-              />
-              <div className="flex items-center justify-between mt-2">
-                <span className="text-xs text-gray-400">
-                  총 <span className="font-bold text-emerald-600 text-sm">{getPhoneList().length.toLocaleString()}</span>건
-                </span>
-                {phones && (
-                  <button onClick={() => setPhones('')} className="text-xs text-gray-400 hover:text-red-500">초기화</button>
-                )}
-              </div>
-            </>
-          )}
-
-          {/* 파일등록 모드 */}
-          {recipientMode === 'file' && (
-            <>
-              {recipientList.length > 0 ? (
-                <div className="flex items-center justify-between bg-amber-50 rounded-lg p-3 border border-amber-200">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center text-lg">📁</div>
-                    <div>
-                      <div className="text-sm font-medium text-gray-800">{fileName}</div>
-                      <div className="text-xs text-gray-500">
-                        총 <span className="font-bold text-amber-600">{recipientList.length.toLocaleString()}</span>건
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => {
-                      const inp = document.createElement('input');
-                      inp.type = 'file'; inp.accept = '.xlsx,.xls,.csv';
-                      inp.onchange = (ev) => { const f = (ev.target as HTMLInputElement).files?.[0]; if (f) handleFileUpload(f); };
-                      inp.click();
-                    }} className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-100 hover:bg-amber-200 rounded-lg transition-colors">
-                      다시 업로드
-                    </button>
-                    <button onClick={() => { setRecipientList([]); setFileName(''); }} className="px-3 py-1.5 text-xs font-medium text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
-                      초기화
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button onClick={() => {
-                  const inp = document.createElement('input');
-                  inp.type = 'file'; inp.accept = '.xlsx,.xls,.csv';
-                  inp.onchange = (ev) => { const f = (ev.target as HTMLInputElement).files?.[0]; if (f) handleFileUpload(f); };
-                  inp.click();
-                }} className="w-full py-8 border-2 border-dashed border-amber-300 rounded-xl text-center hover:bg-amber-50 transition-colors cursor-pointer">
-                  <div className="text-3xl mb-2">📁</div>
-                  <div className="text-sm text-gray-600 font-medium">클릭하여 파일을 업로드하세요</div>
-                  <div className="text-xs text-gray-400 mt-1">.xlsx, .xls, .csv</div>
-                </button>
-              )}
-            </>
-          )}
-
-          {/* DB추출 모드 */}
-          {recipientMode === 'db' && (
-            <>
-              {recipientList.length > 0 ? (
-                <div className="flex items-center justify-between bg-blue-50 rounded-lg p-3 border border-blue-200">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center text-lg">🔍</div>
-                    <div>
-                      <div className="text-sm font-medium text-gray-800">DB 추출 결과</div>
-                      <div className="text-xs text-gray-500">
-                        총 <span className="font-bold text-blue-600">{recipientList.length.toLocaleString()}</span>건
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    {dbExtractedRecipients.length > 0 && (
-                      <button onClick={() => setShowTargetList(true)} className="px-3 py-1.5 text-xs font-semibold text-violet-700 bg-violet-100 hover:bg-violet-200 rounded-lg transition-colors">
-                        리스트 보기
-                      </button>
-                    )}
-                    <button onClick={() => setShowDbExtract(true)} className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors">
-                      다시 추출
-                    </button>
-                    <button onClick={() => { setRecipientList([]); setDbExtractedRecipients([]); }} className="px-3 py-1.5 text-xs font-medium text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
-                      초기화
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button onClick={() => setShowDbExtract(true)} className="w-full py-8 border-2 border-dashed border-blue-300 rounded-xl text-center hover:bg-blue-50 transition-colors cursor-pointer">
-                  <div className="text-3xl mb-2">🔍</div>
-                  <div className="text-sm text-gray-600 font-medium">클릭하여 고객 DB에서 추출하세요</div>
-                  <div className="text-xs text-gray-400 mt-1">필터 조건으로 대상자를 선택합니다</div>
-                </button>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* 메시지 에디터 (미리보기 통합) */}
-      <BrandMessageEditor profiles={profiles} onSend={handleSend} sending={sending} />
-    </div>
-
-    {/* 파일 매핑 모달 */}
-    {showMapping && (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
-        <div className="bg-white rounded-2xl shadow-2xl w-[550px] max-h-[80vh] overflow-y-auto">
-          <div className="px-5 py-3 border-b bg-blue-50 flex justify-between items-center">
-            <div>
-              <h3 className="font-bold text-sm">📁 컬럼 매핑</h3>
-              <p className="text-xs text-gray-500 mt-0.5">수신번호 컬럼을 선택해주세요</p>
-            </div>
-            <button onClick={() => setShowMapping(false)} className="text-gray-500 hover:text-gray-700">✕</button>
-          </div>
-          <div className="px-5 py-4">
-            <div className="flex items-center gap-3 p-3 bg-red-50 rounded-lg border border-red-200 mb-3">
-              <span className="text-xs font-bold text-red-700 w-20 shrink-0">📱 수신번호 *</span>
-              <span className="text-gray-400 text-xs">→</span>
-              <select className="flex-1 border border-red-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-red-400 min-w-0"
-                value={columnMapping.phone || ''} onChange={(e) => setColumnMapping({ ...columnMapping, phone: e.target.value })}>
-                <option value="">-- 선택 --</option>
-                {fileHeaders.map((h, i) => {
-                  const sample = fileData[0]?.[h];
-                  return <option key={i} value={h}>{h}{sample ? ` (예: ${String(sample).slice(0, 15)})` : ''}</option>;
-                })}
-              </select>
-            </div>
-            {filePreview.length > 0 && (
-              <div className="mt-3 border rounded-lg overflow-hidden">
-                <div className="bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">미리보기 (상위 {Math.min(filePreview.length, 3)}건)</div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="border-b bg-gray-50">
-                        {fileHeaders.slice(0, 5).map((h, i) => (
-                          <th key={i} className="px-2 py-1.5 text-left font-medium text-gray-600 whitespace-nowrap">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filePreview.slice(0, 3).map((row, ri) => (
-                        <tr key={ri} className="border-b">
-                          {fileHeaders.slice(0, 5).map((h, ci) => (
-                            <td key={ci} className="px-2 py-1.5 text-gray-700 whitespace-nowrap">{String(row[h] || '').slice(0, 20)}</td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="px-5 py-3 border-t bg-gray-50 flex justify-between items-center">
-            <span className="text-xs text-gray-600">총 <strong>{fileData.length.toLocaleString()}</strong>건</span>
-            <div className="flex gap-2">
-              <button onClick={() => setShowMapping(false)} className="px-4 py-2 border rounded-lg text-xs font-medium hover:bg-gray-100">취소</button>
-              <button onClick={handleMappingApply} disabled={!columnMapping.phone || mappingLoading}
-                className="px-6 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold disabled:opacity-50"
-              >{mappingLoading ? `처리중... ${loadingProgress}%` : '등록하기'}</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    )}
-
-    {/* DB추출 모달 */}
-    {showDbExtract && (
-      <DirectTargetFilterModal
-        show={showDbExtract}
-        onClose={() => setShowDbExtract(false)}
-        onExtracted={(recipients, count, _fieldsMeta, _cbPhone) => handleDbExtracted(recipients, count)}
-      />
-    )}
-
-    {/* 2026-07-09: DB추출 대상 리스트 (메모리 보유 recipients · 15명/페이징) */}
-    <TargetRecipientsModal
-      show={showTargetList}
-      onClose={() => setShowTargetList(false)}
-      title="DB 추출 대상"
-      channelLabel="카카오/RCS"
-      fetchPage={arrayPager(dbExtractedRecipients)}
-      sourceLabel="고객 DB 추출 (customer-filter)"
-    />
-    </>
-  );
-}
