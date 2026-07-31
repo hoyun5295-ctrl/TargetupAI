@@ -55,16 +55,34 @@ export async function listUnbilledPostpaid(
             COALESCE(s.taxbill_day_policy, 'last_day') AS taxbill_day_policy,
             COALESCE(s.manual_billing, false)          AS manual_billing,
             s.min_charge_supply                        AS min_charge_supply,
-            bc.contact_email                           AS company_contact_email,
+            br.email                                   AS company_contact_email,
+            -- ★ 2026-07-31 **resolver와 같은 판정으로 센다**(Codex 적대검증 low).
+            --   수신자 해석은 계정 행이 없으면 회사 레벨로 폴백한다. 그 폴백을 여기서 빼면
+            --   회사 대표가 있어 실제로는 발송되는 계정까지 "메일 미등록"으로 표시돼,
+            --   운영자가 없는 문제를 쫓게 된다. 회사 레벨이 있으면 계정 누락은 0이다.
             (SELECT count(*)::int FROM users u
               WHERE u.company_id = c.id AND u.is_active = true AND COALESCE(u.is_system, false) = false
                 AND NOT EXISTS (
-                  SELECT 1 FROM billing_contacts bc2
-                   WHERE bc2.user_id = u.id AND COALESCE(bc2.contact_email, '') <> ''
+                  SELECT 1 FROM billing_recipients br2
+                   WHERE br2.user_id = u.id AND br2.doc_type = 'statement' AND br2.is_active = true
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM billing_recipients br3
+                   WHERE br3.company_id = c.id AND br3.user_id IS NULL
+                     AND br3.doc_type = 'statement' AND br3.is_active = true
                 )) AS missing_account_emails
        FROM companies c
        LEFT JOIN company_billing_settings s ON s.company_id = c.id
-       LEFT JOIN billing_contacts bc ON bc.company_id = c.id AND bc.user_id IS NULL
+       -- ★ 2026-07-31 수신자 원장 일원화 — 뱃지가 보는 값과 실제 발송 수신자가 같아야 한다.
+       --   그전엔 이 뱃지가 billing_contacts를, 개별 메일은 companies.contact_email을 봐서 서로 달랐다.
+       --   대표(is_primary) 우선, 없으면 아무 활성 행 하나 — 발송 CT(pickRecipients)와 같은 판정이다.
+       LEFT JOIN LATERAL (
+         SELECT r.email FROM billing_recipients r
+          WHERE r.company_id = c.id AND r.user_id IS NULL
+            AND r.doc_type = 'statement' AND r.is_active = true
+          ORDER BY r.is_primary DESC, r.created_at
+          LIMIT 1
+       ) br ON true
       WHERE c.billing_type = 'postpaid'
         AND ($3::uuid[] IS NULL OR c.id = ANY($3::uuid[]))
         AND NOT EXISTS (

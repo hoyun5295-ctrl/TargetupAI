@@ -412,13 +412,20 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
     //   분할 기간 발행(7/1~15 + 7/16~31)이 같은 달 항목을 두 번 싣는 이중청구를 마커가 구조로 막고,
     //   FK ON DELETE SET NULL이라 발행 삭제 시 자동으로 미소비 복귀한다. FOR UPDATE = 반영 취소(DELETE)와의 경합 차단.
     const extraRes = await client.query(
-      `SELECT id, kind, supply_amount, period_month FROM billing_extra_items
-        WHERE company_id = $1
-          AND billed_billing_id IS NULL
-          AND period_month <= $3::date
-          AND (period_month + INTERVAL '1 month' - INTERVAL '1 day')::date >= $2::date
-        ORDER BY period_month, kind
-        FOR UPDATE`,
+      // ★ 2026-07-31 귀속 계정(user_id)을 함께 읽는다 — 계정별 발행에서 그 계정 장으로 분배된다.
+      //   `LEFT JOIN users`로 **그 회사에 실재하는 계정일 때만** 값을 살린다. 계정이 지워졌는데 id만
+      //   남아 있으면 존재하지 않는 계정 장이 생겨 발행 전체가 FK로 터진다 — 그 경우 공통 장으로 내린다
+      //   (회사가 갚아야 할 항목인 건 변하지 않는다. 항목을 빠뜨리는 쪽이 더 나쁘다).
+      `SELECT e.id, e.kind, e.supply_amount, e.period_month,
+              CASE WHEN u.id IS NULL THEN NULL ELSE e.user_id END AS user_id
+         FROM billing_extra_items e
+         LEFT JOIN users u ON u.id = e.user_id AND u.company_id = e.company_id
+        WHERE e.company_id = $1
+          AND e.billed_billing_id IS NULL
+          AND e.period_month <= $3::date
+          AND (e.period_month + INTERVAL '1 month' - INTERVAL '1 day')::date >= $2::date
+        ORDER BY e.period_month, e.kind
+        FOR UPDATE OF e`,
       [company_id, billing_start, billing_end],
     );
     const extraItems = buildExtraBillingItems(extraRes.rows);
@@ -540,12 +547,22 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
         );
       }
 
-      // ★ 2026-07-30 월별 추가 항목(080 등) 소비 마킹 — 크레딧과 같은 계약. 공통 장(carries)에 실리므로 그 장 id로.
+      // ★ 2026-07-30 월별 추가 항목(080 등) 소비 마킹 — 크레딧과 같은 계약.
       //   이 마커가 분할 기간 재발행의 이중청구를 막고, 발행 삭제 시 FK가 자동 복귀시킨다(Codex 1R critical 수용).
-      if (carries && extraIds.length > 0) {
+      //
+      // ★ 2026-07-31 **마커는 그 항목이 실제로 실린 장에 건다.** 그전에는 전부 공통 장(carries) id로 걸었는데,
+      //   귀속(user_id)이 생겨 항목이 계정 장으로 갈라진 뒤에도 그대로 두면 공통 장 하나를 지우는 순간
+      //   계정 장에 실려 있는 항목까지 미청구로 풀려 다음 발행에서 이중청구가 된다(Codex 적대검증 high 후속).
+      //   전체 발행(combined)은 장이 하나뿐이라 그 장이 전부 싣는다.
+      const sheetExtraIds = scope === 'combined'
+        ? extraIds
+        : extraRes.rows
+            .filter((r: any) => String(r.user_id || '') === String(sheet.userId || ''))
+            .map((r: any) => String(r.id));
+      if (sheetExtraIds.length > 0) {
         await client.query(
           `UPDATE billing_extra_items SET billed_billing_id = $1::uuid WHERE id = ANY($2::uuid[])`,
-          [sheetBilling.id, extraIds]
+          [sheetBilling.id, sheetExtraIds]
         );
       }
 

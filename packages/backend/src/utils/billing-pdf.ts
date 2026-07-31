@@ -497,7 +497,10 @@ export async function loadInvoicePdfData(invoiceId: string, db: any = pool): Pro
             bcc.taxbill_ceo_name     AS co_taxbill_ceo_name,
             bcc.taxbill_address      AS co_taxbill_address,
             bcc.taxbill_biz_type     AS co_taxbill_biz_type,
-            bcc.taxbill_biz_item     AS co_taxbill_biz_item
+            bcc.taxbill_biz_item     AS co_taxbill_biz_item,
+            -- ★ 2026-07-31 메일 수신자 해석도 **사업자 판정과 같은 계정 축**을 쓴다.
+            --   축이 갈리면 공급받는자는 계정 사업자인데 메일은 회사 담당자에게 가는 상태가 된다.
+            b.user_id                AS billing_user_id
        FROM billing_invoices bi
        JOIN companies c ON c.id = bi.company_id
        -- ★ 2026-07-29 연결된 정산의 **계정 축**까지 따라간다(billing_id는 nullable이라 LEFT JOIN).

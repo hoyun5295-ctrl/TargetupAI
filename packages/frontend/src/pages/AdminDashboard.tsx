@@ -9,6 +9,8 @@ import AlimtalkSendersSection from '../components/alimtalk/AlimtalkSendersSectio
 import TablePagination from '../components/common/TablePagination'; // ★ 2026-07-20 목록 공용 페이저
 import MessageDetailModal from '../components/MessageDetailModal'; // ★ D144 후속: 발송 상세 내역 모달의 메시지 셀 클릭 시 표시 + 복사
 import SearchableSelect from '../components/SearchableSelect'; // ★ D144 P11+P13: 검색 가능 select (사용자 추가 소속회사 + 발송통계 회사 필터)
+// ★ 2026-07-31 정산 메일 수신자 — 담당자 이메일 칸 하나를 유형별·복수 행 편집으로 대체
+import BillingRecipientsEditor, { type BillingRecipient } from '../components/BillingRecipientsEditor';
 import LoginBlocksManagement from '../components/admin/LoginBlocksManagement'; // ★ D145 P0 (2026-05-07): 로그인 차단 관리 (B안: IP+loginId 쌍)
 import AgentChargePanel from '../components/AgentChargePanel'; // ★ 2026-07-24 §5-3 에이전트 충전 실행 (게이트웨이 지갑)
 import AgentDeployWizard from '../components/admin/AgentDeployWizard'; // 싱크에이전트 OS별 배포 위저드
@@ -422,6 +424,8 @@ const [applyUnitPriceToAgents, setApplyUnitPriceToAgents] = useState(false);
 const [showEmailModal, setShowEmailModal] = useState(false);
 const [emailTarget, setEmailTarget] = useState<any>(null);
 const [emailTo, setEmailTo] = useState('');
+// ★ 2026-07-31 등록된 정산 수신자 — **표시 전용**. 입력칸에 넣으면 override가 되어 참조가 떨어진다.
+const [emailDefaultTo, setEmailDefaultTo] = useState<{ primary: string; cc: string[] } | null>(null);
 const [emailSubject, setEmailSubject] = useState('');
 const [emailSending, setEmailSending] = useState(false);
 // ★ 2026-07-26 재발송 확인 — 값이 있으면 "이미 언제·누구에게 나갔다"를 보여주는 확인 단계가 열린다.
@@ -1985,10 +1989,36 @@ const billingCurrentYear = new Date().getFullYear();
 const billingYearOptions = [billingCurrentYear - 1, billingCurrentYear, billingCurrentYear + 1];
 
 // 정산서 이메일 발송 모달 열기
-const openEmailModal = (billing: any) => {
-  const company = companies.find(c => c.id === billing.company_id);
+const openEmailModal = async (billing: any) => {
   setEmailTarget(billing);
-  setEmailTo(company?.contact_email || '');
+  // ★ 2026-07-31 입력칸은 **비워 둔다**(Codex 2R — 1차 수정이 안 닫혔던 지점).
+  //   원장에서 읽은 대표를 칸에 넣으면 그 값이 서버로 override로 가고, 서버는 override가 있으면
+  //   참조(cc)를 떨어뜨린다 — 복수 수신자의 요지가 이 경로에서만 무효가 된다.
+  //   그래서 **누구에게 가는지는 안내로 보여주고 칸은 비운다.** 칸을 채우면 그때만 그 한 사람에게 간다.
+  setEmailTo('');
+  setEmailDefaultTo(null);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/admin/billing/company-billing-settings/${billing.company_id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    const list: any[] = Array.isArray(data?.recipients) ? data.recipients : [];
+    const scoped = billing.user_id
+      ? list.filter((r) => String(r.user_id || '') === String(billing.user_id))
+      : [];
+    const pool_ = (scoped.length > 0 ? scoped : list.filter((r) => !r.user_id))
+      .filter((r) => r.doc_type === 'statement' && r.is_active !== false);
+    const primary = pool_.find((r) => r.is_primary) || pool_[0];
+    if (primary?.email) {
+      setEmailDefaultTo({
+        primary: String(primary.email),
+        cc: pool_.filter((r) => r.email !== primary.email).map((r) => String(r.email)),
+      });
+    }
+  } catch {
+    // 조회에 실패해도 안내만 비운 채로 연다 — 발송 자체는 서버가 등록된 수신자로 한다.
+  }
   // ★ 2026-07-26 이 메일이 보내는 문서는 정산서다(첨부 PDF·본문 항목표 모두 정산서). 제목을 실물과 맞춘다.
   setEmailSubject(`[인비토] ${billing.company_name} ${billing.billing_year}년 ${billing.billing_month}월 정산서`);
   // 재발송 확인 상태는 모달을 열 때마다 초기화한다 — 앞 건의 확인이 남으면 확인 없이 재발송된다.
@@ -2015,7 +2045,8 @@ const ensureBillingPdf = async (id: string) => {
 //   ★ 2026-07-26 `resend` — 이미 발송된 정산서는 서버가 409로 한 번 되돌린다(확인 없는 중복 발송 차단).
 //   확인 모달에서 다시 누르면 이 인자가 true로 들어와 그대로 발송된다.
 const handleSendBillingEmail = async (resend = false) => {
-  if (!emailTo) return setBillingToast({ msg: '수신자 이메일을 입력해주세요', type: 'error' });
+  // ★ 2026-07-31 비어 있어도 막지 않는다 — 서버가 등록된 수신자로 해석해 보내고, 그것도 없으면 400으로 알린다.
+  //   여기서 차단하면 새 원장에 대표가 있는데도 화면이 발송을 막는다(Codex 적대검증 high).
   if (!emailTarget) return;
   setEmailSending(true);
   try {
@@ -3057,6 +3088,9 @@ const handleApproveRequest = async (id: string) => {
   const [btCompanyContact, setBtCompanyContact] =
     useState<{ name: string; email: string } & Partial<BillingBizFields>>({ name: '', email: '' });
   const [btAccounts, setBtAccounts] = useState<any[]>([]);
+  // ★ 2026-07-31 정산 메일 수신자(billing_recipients) — 유형별·복수. 담당자 행의 이메일 칸을 대체한다.
+  //   이 목록은 저장 버튼과 무관하게 행 단위로 즉시 반영된다(추가·삭제·대표 지정이 각각 한 번의 호출).
+  const [btRecipients, setBtRecipients] = useState<BillingRecipient[]>([]);
   // 사업자 모달 대상: 'company' = 회사 기본 사업자 / 그 외 문자열 = 계정 user_id / null = 닫힘.
   //   ⚠ 회사 레벨의 user_id는 NULL이라 null을 대상 식별자로 쓰면 "닫힘"과 구분되지 않는다 — sentinel을 둔다.
   const [btBizTarget, setBtBizTarget] = useState<string | null>(null);
@@ -3109,6 +3143,7 @@ const handleApproveRequest = async (id: string) => {
       const uData = await uRes.json();
       if (!sRes.ok) throw new Error(sData?.error || '정산 설정 조회 실패');
       const contacts: any[] = Array.isArray(sData.contacts) ? sData.contacts : [];
+      setBtRecipients(Array.isArray(sData.recipients) ? sData.recipients : []);
       const companyC = contacts.find((c: any) => !c.user_id);
       setBtSettings({
         issue_scope: sData?.settings?.issueScope || 'combined',
@@ -3141,15 +3176,8 @@ const handleApproveRequest = async (id: string) => {
 
   const handleSaveBillingTab = async () => {
     if (!editCompany.id) return;
-    const emailRe = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-    if (btCompanyContact.email && !emailRe.test(btCompanyContact.email)) {
-      showAlert('확인', '회사 정산 담당자 이메일 형식을 확인해 주세요.', 'error'); return;
-    }
-    for (const a of btAccounts) {
-      if (a.contact_email && !emailRe.test(a.contact_email)) {
-        showAlert('확인', `${a.name || a.login_id} 계정의 이메일 형식을 확인해 주세요.`, 'error'); return;
-      }
-    }
+    // ★ 2026-07-31 이메일 검증은 여기서 하지 않는다 — 수신자는 `billing_recipients` 편집기가
+    //   행 단위로 즉시 저장하며 형식 검증도 그쪽(서버 CT 포함)에서 한다.
     setBtSaving(true);
     try {
       const token = localStorage.getItem('token');
@@ -3162,8 +3190,10 @@ const handleApproveRequest = async (id: string) => {
           manual_billing: btSettings.manual_billing,
           // 회사 레벨은 담당자 + 계산서 사업자를 함께 보낸다. 사업자를 비워 보내면 그대로 NULL이 되고,
           // 발급 시 회사 기본정보(companies)로 내려간다 — 우선순위는 SoT §5 참조.
+          // ★ 2026-07-31 `email`은 더 이상 보내지 않는다 — 수신자 원장이 `billing_recipients`로 옮겨졌고,
+          //   이 컬럼을 계속 채우면 "어느 쪽이 진짜 수신자인가"가 다시 갈린다(저장할 때마다 NULL로 빠진다).
           company_contact: {
-            name: btCompanyContact.name, email: btCompanyContact.email,
+            name: btCompanyContact.name,
             taxbill_biz_number: btCompanyContact.taxbill_biz_number, taxbill_company_name: btCompanyContact.taxbill_company_name,
             taxbill_ceo_name: btCompanyContact.taxbill_ceo_name, taxbill_address: btCompanyContact.taxbill_address,
             taxbill_biz_type: btCompanyContact.taxbill_biz_type, taxbill_biz_item: btCompanyContact.taxbill_biz_item,
@@ -3171,7 +3201,7 @@ const handleApproveRequest = async (id: string) => {
           // 토글이 전체 발급이어도 계정 담당자 입력분은 보존 저장한다 — 토글을 되돌렸을 때 다시 입력하지 않게.
           account_contacts: btAccounts.map((a) => ({
             // label = 사업자번호 검증 오류에 "어느 계정인지"를 담기 위한 표시용(서버 저장 대상 아님).
-            user_id: a.user_id, label: a.name || a.login_id, name: a.contact_name, email: a.contact_email,
+            user_id: a.user_id, label: a.name || a.login_id, name: a.contact_name,
             taxbill_biz_number: a.taxbill_biz_number, taxbill_company_name: a.taxbill_company_name,
             taxbill_ceo_name: a.taxbill_ceo_name, taxbill_address: a.taxbill_address,
             taxbill_biz_type: a.taxbill_biz_type, taxbill_biz_item: a.taxbill_biz_item,
@@ -7978,15 +8008,19 @@ const handleApproveRequest = async (id: string) => {
                       {/* 회사 정산 담당자 — 전체 발급 수신자 + 계정별일 때 공통 장 수신자 */}
                       <div className="rounded-lg border border-gray-200 p-4">
                         <p className="text-sm font-semibold text-gray-800 mb-1">회사 정산 담당자</p>
-                        <p className="text-xs text-gray-500 mb-3">거래내역서 자동 발송 수신자입니다. 기본정보 탭의 담당자(마케팅)와 별개입니다. 계정별 발급이어도 공통 장은 이분에게 갑니다.</p>
-                        <div className="grid grid-cols-2 gap-3">
-                          <input type="text" value={btCompanyContact.name} placeholder="담당자 이름"
-                            onChange={(e) => setBtCompanyContact({ ...btCompanyContact, name: e.target.value })}
-                            className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
-                          <input type="text" value={btCompanyContact.email} placeholder="이메일 (비우면 자동 발송 제외)"
-                            onChange={(e) => setBtCompanyContact({ ...btCompanyContact, email: e.target.value })}
-                            className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
-                        </div>
+                        <p className="text-xs text-gray-500 mb-3">거래내역서 자동 발송 수신자입니다. 기본정보 탭의 담당자(마케팅)와 별개입니다. 계정별 발급이어도 공통 장은 여기로 갑니다.</p>
+                        <input type="text" value={btCompanyContact.name} placeholder="담당자 이름"
+                          onChange={(e) => setBtCompanyContact({ ...btCompanyContact, name: e.target.value })}
+                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                        {/* ★ 2026-07-31 이메일은 칸 하나가 아니라 수신자 목록이다 — 유형(거래내역서/세금계산서)이
+                            다를 수 있고 여러 명일 수 있다. 저장 버튼과 무관하게 즉시 반영된다(행 단위 CRUD). */}
+                        <BillingRecipientsEditor
+                          companyId={editCompany.id}
+                          userId={null}
+                          recipients={btRecipients}
+                          onChanged={setBtRecipients}
+                          onError={(m) => showAlert('오류', m, 'error')}
+                        />
                         {/* ★ 2026-07-28 회사 기본 사업자 — 전체 발급이면 이 사업자로 계산서가 나간다.
                             계정별과 같은 모달·같은 사업자등록증 자동입력을 쓴다(문구만 분기). */}
                         <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2">
@@ -8029,22 +8063,32 @@ const handleApproveRequest = async (id: string) => {
                           <div className="space-y-2">
                             {btAccounts.length === 0 && <p className="text-xs text-gray-400">활성 계정이 없습니다.</p>}
                             {btAccounts.map((a) => (
-                              <div key={a.user_id} className="flex items-center gap-2 border rounded-lg px-3 py-2">
-                                <div className="w-32 shrink-0">
-                                  <p className="text-sm font-medium text-gray-800 truncate">{a.name || a.login_id}</p>
-                                  <p className="text-[10px] text-gray-400 truncate">{a.login_id}</p>
+                              <div key={a.user_id} className="border rounded-lg px-3 py-2">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-32 shrink-0">
+                                    <p className="text-sm font-medium text-gray-800 truncate">{a.name || a.login_id}</p>
+                                    <p className="text-[10px] text-gray-400 truncate">{a.login_id}</p>
+                                  </div>
+                                  <input type="text" value={a.contact_name} placeholder="담당자 이름"
+                                    onChange={(e) => setBtAccounts((prev) => prev.map((x) => x.user_id === a.user_id ? { ...x, contact_name: e.target.value } : x))}
+                                    className="flex-1 px-2 py-1.5 border rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none" />
+                                  <button type="button"
+                                    onClick={() => { setBtBizDraft({ ...a }); setBtBizTarget(a.user_id); }}
+                                    className={`shrink-0 px-2.5 py-1.5 rounded text-[11px] font-semibold border ${a.taxbill_biz_number ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
+                                    {a.taxbill_biz_number ? `사업자 ${a.taxbill_biz_number}` : '계산서 사업자'}
+                                  </button>
                                 </div>
-                                <input type="text" value={a.contact_name} placeholder="담당자 이름"
-                                  onChange={(e) => setBtAccounts((prev) => prev.map((x) => x.user_id === a.user_id ? { ...x, contact_name: e.target.value } : x))}
-                                  className="w-28 px-2 py-1.5 border rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none" />
-                                <input type="text" value={a.contact_email} placeholder="이메일"
-                                  onChange={(e) => setBtAccounts((prev) => prev.map((x) => x.user_id === a.user_id ? { ...x, contact_email: e.target.value } : x))}
-                                  className="flex-1 px-2 py-1.5 border rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none" />
-                                <button type="button"
-                                  onClick={() => { setBtBizDraft({ ...a }); setBtBizTarget(a.user_id); }}
-                                  className={`shrink-0 px-2.5 py-1.5 rounded text-[11px] font-semibold border ${a.taxbill_biz_number ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
-                                  {a.taxbill_biz_number ? `사업자 ${a.taxbill_biz_number}` : '계산서 사업자'}
-                                </button>
+                                {/* 계정 장의 수신자 — 회사 레벨과 같은 편집기·같은 규칙(유형별 대표 1명 + 참조) */}
+                                <div className="mt-2">
+                                  <BillingRecipientsEditor
+                                    companyId={editCompany.id}
+                                    userId={a.user_id}
+                                    recipients={btRecipients}
+                                    onChanged={setBtRecipients}
+                                    onError={(m) => showAlert('오류', m, 'error')}
+                                    compact
+                                  />
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -10512,12 +10556,20 @@ const handleApproveRequest = async (id: string) => {
                   {/* 수신자 이메일 */}
                   <div className="mb-3">
                     <label className="block text-xs font-medium text-gray-500 mb-1">수신자 이메일</label>
+                    {/* 등록된 수신자를 보여주되 칸에는 넣지 않는다 — 칸에 값이 있으면 서버가 override로 보고 참조를 뺀다 */}
+                    {emailDefaultTo && !emailTo && (
+                      <p className="mb-1.5 text-[11px] text-gray-500">
+                        등록된 수신자 <span className="font-medium text-gray-700">{emailDefaultTo.primary}</span>
+                        {emailDefaultTo.cc.length > 0 && ` · 참조 ${emailDefaultTo.cc.length}명`}
+                        <span className="text-gray-400"> — 비워두면 이대로 발송됩니다</span>
+                      </p>
+                    )}
                     <input
                       type="email"
                       value={emailTo}
                       onChange={e => setEmailTo(e.target.value)}
                       className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none"
-                      placeholder="담당자 이메일"
+                      placeholder="다른 사람에게만 보낼 때만 입력"
                     />
                   </div>
 
@@ -10576,7 +10628,7 @@ const handleApproveRequest = async (id: string) => {
                   </button>
                   <button
                     onClick={() => handleSendBillingEmail(Boolean(emailResendInfo))}
-                    disabled={emailSending || !emailTo}
+                    disabled={emailSending}
                     className="flex-1 px-4 py-3 text-amber-600 font-medium hover:bg-amber-50 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
                   >
                     {emailSending ? (

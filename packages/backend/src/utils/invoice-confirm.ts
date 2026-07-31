@@ -6,7 +6,8 @@
  * 메일을 보내고 `invoice_confirmations` 행(토큰·타이머)을 남긴다.
  *
  * 원칙:
- *  - 수신자 해석: 계정 장(by_user) = 그 계정의 정산 담당자 / 회사 장·공통 장 = 회사 레벨 담당자.
+ *  - 수신자 해석: `billing_recipients`(CT) 단일 원장. 계정 장(by_user) = 그 계정 수신자 / 회사 장·공통 장 = 회사 레벨.
+ *    대표 1명만 토큰 행을 받고 참조는 사본(cc)만 받는다 — 여러 명이 각각 컨펌·이의를 내면 상태가 갈라진다.
  *  - 이메일 없는 수신자 = 그 장은 자동화에서 빠진다(행을 만들지 않는다 — 타이머가 돌면 안 된다).
  *  - **메일 발송 성공 후에만 행을 INSERT한다.** 반대로 하면 SMTP 실패 시 고객이 링크를 못 받았는데
  *    3일 타이머가 돌아 자동 발급으로 이어진다 — 돈에 닿는 방향이라 죽은 링크(희귀)보다 나쁘다.
@@ -18,9 +19,12 @@ import { unlinkSync } from 'node:fs';
 import nodemailer from 'nodemailer';
 import pool from '../config/database';
 import {
-  getCompanyBillingSettings, listBillingContacts,
+  getCompanyBillingSettings,
   computeTaxbillIssueDate, computeTaxbillDueAt,
 } from './billing-settings';
+// ★ 2026-07-31 수신자는 billing_recipients가 소유한다(CT). 그전엔 billing_contacts의 컬럼 한 쌍이라
+//   유형별로도 인원수로도 늘어나지 못했고, 개별 메일 경로는 companies.contact_email을 따로 보고 있었다.
+import { listBillingRecipients, pickRecipients, isRecipientRejected } from './billing-recipients';
 // ★ 2026-07-28 거래내역서 PDF를 메일에 첨부한다. 첨부가 없어서 웹페이지에서 항목표를 다시 그려야 했고,
 //   그 페이지가 "확인"과 "컨펌"을 한 화면에 섞어 버튼 뜻이 흐려졌다(Harold 2026-07-28).
 //   장(billings 행)마다 PDF가 따로다 — 전체 발급은 한 장, 계정별 발급은 계정 장 각각 + 공통 장.
@@ -139,9 +143,8 @@ export async function createAndSendConfirmations(opts: {
   };
 
   const settings = await getCompanyBillingSettings(companyId);
-  const contacts = await listBillingContacts(companyId);
-  const companyContact = contacts.find((c) => c.user_id === null) || null;
-  const byUser = new Map(contacts.filter((c) => c.user_id).map((c) => [String(c.user_id), c]));
+  // 계정 장(by_user)이면 그 계정 수신자, 아니면 회사 레벨 — 판정은 CT가 한다(축이 갈리면 화면마다 대상이 달라진다).
+  const recipientRows = await listBillingRecipients(companyId);
 
   const base = String(process.env.HANJUL_BASE_URL || 'https://hanjul.ai').replace(/\/+$/, '');
   const periodLabel = `${billingStart} ~ ${billingEnd}`;
@@ -160,17 +163,19 @@ export async function createAndSendConfirmations(opts: {
   //     남은 행이 곧 재시도 목록이다. 그래서 덧댔던 장치들이 전부 필요 없어졌다.
   //
   // 여기서 메일을 보내지 않고 PDF도 만들지 않는다(2단계에서 장별로 만든다 — 안 나간 렌더본이 남지 않는다).
-  type Claimed = { sheet: SheetForConfirm; contact: any; email: string; token: string };
+  type Claimed = { sheet: SheetForConfirm; name: string | null; email: string; cc: string[]; token: string };
   const claimed: Claimed[] = [];
   const claimClient = await pool.connect();
   try {
     await claimClient.query('BEGIN');
     await claimClient.query(`SET LOCAL lock_timeout = '10s'`);
     for (const sheet of sheets) {
-      const contact = sheet.scope === 'by_user' && sheet.user_id
-        ? (byUser.get(String(sheet.user_id)) || null)
-        : companyContact;
-      const email = String(contact?.contact_email || '').trim();
+      const resolved = pickRecipients(
+        recipientRows,
+        sheet.scope === 'by_user' && sheet.user_id ? String(sheet.user_id) : null,
+        'statement',
+      );
+      const email = String(resolved.primary?.email || '').trim();
       if (!email) {
         // 이메일 미등록은 그 장만 자동 발송에서 빠지는 정상 경로다 — 다른 장을 멈추지 않는다.
         summary.skippedNoEmail += 1;
@@ -197,16 +202,18 @@ export async function createAndSendConfirmations(opts: {
       await claimClient.query(
         `INSERT INTO invoice_confirmations (
            billing_id, company_id, recipient_user_id, recipient_email, token,
-           sent_at, taxbill_status, taxbill_issue_date, taxbill_due_at
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, NOW(), $6, $7::date, $8)`,
+           sent_at, taxbill_status, taxbill_issue_date, taxbill_due_at, cc_emails
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, NOW(), $6, $7::date, $8, $9::text[])`,
         [
           sheet.id, companyId,
           sheet.scope === 'by_user' ? sheet.user_id : null,
           email, token, initialStatus, issueDate,
           computeTaxbillDueAt(Date.now(), billingEnd),
+          // 참조는 사본만 받는다 — 토큰 행을 따로 만들면 A는 컨펌·B는 이의인 상태가 생겨 판정이 갈라진다.
+          resolved.cc.length > 0 ? resolved.cc : null,
         ],
       );
-      claimed.push({ sheet, contact, email, token });
+      claimed.push({ sheet, name: resolved.primary?.name ?? null, email, cc: resolved.cc, token });
     }
     await claimClient.query('COMMIT');
   } catch (claimErr: any) {
@@ -221,7 +228,7 @@ export async function createAndSendConfirmations(opts: {
   // ═══ 2단계: 전송 — 적재된 행을 하나씩 실제로 내보낸다 ═══
   //   여기서 무엇이 실패해도 행은 남는다. 남은 행이 곧 재시도 목록이라 "부분 발송"이 복구 가능한 상태가 된다.
   //   PDF는 보내기 직전에 만든다 — 안 나간 렌더본이 디스크에 남지 않는다.
-  for (const { sheet, contact, email, token } of claimed) {
+  for (const { sheet, name, email, cc, token } of claimed) {
     const viewUrl = `${base}/api/invoice-view/${token}`;
     const amount = Number(sheet.total_amount) || 0;
 
@@ -233,7 +240,7 @@ export async function createAndSendConfirmations(opts: {
           <p style="font-size:18px;font-weight:700;margin:0 0 4px;">거래내역서를 보내드립니다</p>
           <p style="font-size:13px;color:#6b7280;margin:0 0 20px;">${esc(companyName)} · ${esc(periodLabel)}</p>
           <p style="font-size:14px;line-height:1.7;margin:0 0 16px;">
-            안녕하세요, ${esc(contact?.contact_name || '담당자')}님.<br/>
+            안녕하세요, ${esc(name || '담당자')}님.<br/>
             ${esc(periodLabel)} 이용분 거래내역서를 <b>첨부</b>해 드렸습니다. 내용을 확인하신 뒤 아래 버튼을 눌러 주세요.
           </p>
           <p style="font-size:15px;margin:0 0 20px;">청구 금액(부가세 포함): <b>${amount.toLocaleString()}원</b></p>
@@ -298,12 +305,15 @@ export async function createAndSendConfirmations(opts: {
 
       // 총 60초 상한 — 넘으면 발송 여부 불확정. sendMail은 취소되지 않으므로 "안 갔다"로 단정할 수 없다.
       let mailTimedOut = false;
-      await Promise.race([
+      const mailInfo: any = await Promise.race([
         transporter.sendMail({
           // 고객문의 메일과 같은 계정(SMTP_USER)이다 — 표시명·회신 주소만 명시한다.
           from: `"한줄로" <${process.env.SMTP_USER || INVITO_INFO.email}>`,
           replyTo: INVITO_INFO.email,
           to: email,
+          // 참조는 같은 본문을 사본으로 받는다 — 그 안의 컨펌 링크로 참조도 컨펌할 수 있다(의도).
+          //   상태는 갈라지지 않는다: 추적행이 장당 하나뿐이라 누가 누르든 한 곳에만 기록된다.
+          ...(cc.length > 0 ? { cc } : {}),
           subject: `[한줄로] ${companyName} 거래내역서 (${billingStart.slice(0, 7)}) — 확인 요청`,
           html,
           attachments: [attachment],
@@ -318,6 +328,11 @@ export async function createAndSendConfirmations(opts: {
         }
         throw raceErr;
       });
+      // ★ 2026-07-31 부분 거부를 성공으로 세지 않는다(판정은 CT — 발송 지점 셋이 같은 규칙을 쓴다).
+      //   여기서 던지면 아래 catch가 ROLLBACK 하고(발송 표시 원복) 추적행은 남아 재시도 대상이 된다.
+      if (isRecipientRejected(mailInfo, email)) {
+        throw new Error(`대표 수신자가 메일 서버에서 거부되었습니다 (${email})`);
+      }
       mailWasSent = true;
 
       // 실제로 나간 시각으로 추적행을 확정한다. 마감은 **발송일 기준** 3일 뒤 09:00 KST(익월 10일 캡).

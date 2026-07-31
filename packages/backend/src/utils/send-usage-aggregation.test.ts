@@ -328,6 +328,60 @@ describe('장별 절사 계약 — 합산 vs 계정별 (2026-07-30)', () => {
   });
 });
 
+// ★ 2026-07-31 귀속 축 회귀 차단 — Codex 적대검증 high.
+//   `extra`(080·부가서비스)에 귀속 계정을 실어 보냈는데 분배 조건이 `channel === 'web'` 리터럴이라
+//   계정 귀속 항목이 **전부 공통 장으로** 갔다. 채널을 늘릴 때 같은 사고가 나지 않도록 계약을 고정한다.
+describe('귀속 축 — 추가 항목(extra)의 장 분배 (2026-07-31)', () => {
+  const extra = (userId: string | null, amount: number): PricedBillingItem => ({
+    channel: 'extra' as any, itemDate: '2026-07-01', typeKey: 'EXTRA_080_FEE', userId, agentSendId: null,
+    total: 0, success: 0, fail: 0, pending: 0, agentId: null,
+    unitPrice: amount, amount, amountExact: amount, planDays: null, planMonthDays: null,
+  });
+  const web = (userId: string): PricedBillingItem => ({
+    channel: 'web', itemDate: '2026-07-01', typeKey: 'SMS', userId, agentSendId: null,
+    total: 10, success: 10, fail: 0, pending: 0, agentId: null,
+    unitPrice: 10, amount: 100, amountExact: 100, planDays: null, planMonthDays: null,
+  });
+
+  it('계정 귀속 extra는 그 계정 장에 실린다 (공통 장으로 새지 않는다)', () => {
+    const sheets = splitBillingSheets([web('u1'), extra('u1', 9000)], 'by_user');
+    const userSheet = sheets.find((s) => s.userId === 'u1');
+    expect(userSheet, '계정 장이 만들어져야 한다').toBeTruthy();
+    expect(userSheet!.items.some((i) => i.channel === 'extra')).toBe(true);
+    const common = sheets.find((s) => s.sheetScope === 'common');
+    expect(common!.items.some((i) => i.channel === 'extra'), '공통 장에 중복으로 실리면 안 된다').toBe(false);
+  });
+
+  it('귀속 없는 extra는 공통 장에 실린다 — 고객사 전체 귀속의 제자리', () => {
+    const sheets = splitBillingSheets([web('u1'), extra(null, 4000)], 'by_user');
+    const common = sheets.find((s) => s.sheetScope === 'common');
+    expect(common!.items.some((i) => i.channel === 'extra')).toBe(true);
+    expect(sheets.find((s) => s.userId === 'u1')!.items.some((i) => i.channel === 'extra')).toBe(false);
+  });
+
+  it('extra만 있는 계정도 장이 생긴다 — 발송이 없어도 그 계정 앞으로 청구된다', () => {
+    const sheets = splitBillingSheets([extra('u9', 50000)], 'by_user');
+    expect(sheets.find((s) => s.userId === 'u9')).toBeTruthy();
+  });
+
+  it('전체 발행(combined)은 귀속과 무관하게 한 장에 모인다', () => {
+    const sheets = splitBillingSheets([extra('u1', 9000), extra(null, 4000)], 'combined');
+    expect(sheets).toHaveLength(1);
+    expect(sheets[0].items.filter((i) => i.channel === 'extra')).toHaveLength(2);
+  });
+
+  it('계정 축이 없는 채널(agent)은 userId가 있어도 공통 장 — 집합 밖은 섞이지 않는다', () => {
+    const agentItem: PricedBillingItem = {
+      channel: 'agent' as any, itemDate: '2026-07-01', typeKey: 'SMS', userId: 'u1', agentSendId: 'B0001',
+      total: 5, success: 5, fail: 0, pending: 0, agentId: null,
+      unitPrice: 10, amount: 50, amountExact: 50, planDays: null, planMonthDays: null,
+    };
+    const sheets = splitBillingSheets([web('u1'), agentItem], 'by_user');
+    expect(sheets.find((s) => s.userId === 'u1')!.items.some((i) => i.channel === 'agent')).toBe(false);
+    expect(sheets.find((s) => s.sheetScope === 'common')!.items.some((i) => i.channel === 'agent')).toBe(true);
+  });
+});
+
 describe('splitBillingSheets — 발행 단위 장 분할 (2026-07-26)', () => {
   const pi = (o: Partial<PricedBillingItem>): PricedBillingItem => ({
     channel: 'web', itemDate: '2026-07-01', typeKey: 'SMS', userId: 'u1', agentSendId: null,

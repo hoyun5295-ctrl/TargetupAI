@@ -44,6 +44,12 @@ import {
   getCompanyBillingSettings, upsertCompanyBillingSettings,
   listBillingContacts, upsertBillingContact, normalizeBizNumber,
 } from '../utils/billing-settings';
+// ★ 2026-07-31 정산 메일 수신자 CT — 유형별(거래내역서/세금계산서)·복수 수신자를 이 원장 하나가 소유한다.
+//   그전엔 이 라우트만 `companies.contact_email`을 봐서 일괄발급과 개별 발송의 수신자가 갈릴 수 있었다.
+import {
+  listBillingRecipients, resolveBillingRecipients, upsertBillingRecipient,
+  deleteBillingRecipient, isBillingDocType, isRecipientRejected,
+} from '../utils/billing-recipients';
 // ★ 2026-07-28 일괄발급 배치 CT — 대상 산출·job 실행·진행률.
 import {
   listUnbilledPostpaid, createBulkJob, getBulkJob, findRunningBulkJob,
@@ -209,7 +215,9 @@ router.get('/company-billing-settings/:companyId', async (req: Request, res: Res
     const { companyId } = req.params;
     const settings = await getCompanyBillingSettings(companyId);
     const contacts = await listBillingContacts(companyId);
-    return res.json({ settings, contacts });
+    // ★ 2026-07-31 수신자는 별도 원장(복수·유형별)이라 함께 내려준다. 담당자 행의 연락처 컬럼은 더 이상 읽지 않는다.
+    const recipients = await listBillingRecipients(companyId);
+    return res.json({ settings, contacts, recipients });
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
@@ -322,6 +330,88 @@ router.put('/company-billing-settings/:companyId', async (req: Request, res: Res
     client.release();
   }
 });
+
+// ═══ 정산 메일 수신자 (2026-07-31) — CT = utils/billing-recipients.ts ═══
+//   거래내역서 받는 사람과 세금계산서 받는 사람이 다른 고객사가 있고, 둘 다 여러 명일 수 있다(서수란 접수).
+//   유형(doc_type)·인원수·귀속(회사/계정)이 전부 행으로 표현된다 — 컬럼 한 쌍으로는 셋 다 표현이 안 됐다.
+
+// POST /company-billing-settings/:companyId/recipients — 등록·수정(같은 이메일이면 갱신)
+router.post('/company-billing-settings/:companyId/recipients', async (req: Request, res: Response) => {
+  const client = await pool.connect();
+  try {
+    const { companyId } = req.params;
+    const adminId = (req as any).user?.userId || null;
+    const { user_id, doc_type, email, name, is_primary, is_active } = (req.body || {}) as any;
+    if (!isBillingDocType(doc_type)) {
+      return res.status(400).json({ success: false, error: '문서 유형은 거래내역서(statement)/세금계산서(taxbill) 중 하나여야 합니다.' });
+    }
+    const scopeUserId = String(user_id || '').trim() || null;
+    if (scopeUserId) {
+      // 남의 회사 계정으로 수신자를 만들면 그 계정 장의 청구서가 엉뚱한 곳으로 나간다.
+      const own = await client.query(
+        `SELECT 1 FROM users WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [scopeUserId, companyId],
+      );
+      if (own.rows.length === 0) {
+        return res.status(400).json({ success: false, error: '선택한 사용자가 이 고객사 소속이 아닙니다.' });
+      }
+    }
+    await client.query('BEGIN');
+    await upsertBillingRecipient(client, companyId, {
+      userId: scopeUserId,
+      docType: doc_type,
+      email: String(email || ''),
+      name,
+      isPrimary: is_primary === true,
+      isActive: is_active !== false,
+    }, adminId);
+    await client.query('COMMIT');
+    return res.json({ success: true, recipients: await listBillingRecipients(companyId) });
+  } catch (error: any) {
+    try { await client.query('ROLLBACK'); } catch { /* 아래 응답이 사실을 전달한다 */ }
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — billing_recipients 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    if (emsg.includes('이메일') || emsg.includes('문서 유형')) {
+      return res.status(400).json({ success: false, error: emsg });
+    }
+    console.error('정산 수신자 저장 오류:', error);
+    return res.status(500).json({ success: false, error: emsg || '수신자 저장 실패' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /company-billing-settings/:companyId/recipients/:id
+router.delete('/company-billing-settings/:companyId/recipients/:id', async (req: Request, res: Response) => {
+  // 삭제와 대표 승계는 한 트랜잭션 — 중간에 끊기면 대표가 없는 스코프가 남는다.
+  const client = await pool.connect();
+  try {
+    const { companyId, id } = req.params;
+    await client.query('BEGIN');
+    const ok = await deleteBillingRecipient(client, companyId, id);
+    if (!ok) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, error: '삭제할 수신자를 찾을 수 없습니다.' });
+    }
+    await client.query('COMMIT');
+    return res.json({ success: true, recipients: await listBillingRecipients(companyId) });
+  } catch (error: any) {
+    try { await client.query('ROLLBACK'); } catch { /* 아래 응답이 사실을 전달한다 */ }
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — billing_recipients 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('정산 수신자 삭제 오류:', emsg || error);
+    return res.status(500).json({ success: false, error: '수신자 삭제 실패' });
+  } finally {
+    client.release();
+  }
+});
+
+// ※ 귀속 선택용 계정 목록은 **위 `/company-users/:companyId`(193행)를 그대로 쓴다.**
+//   같은 경로를 또 등록하면 Express가 먼저 등록된 쪽만 실행해 새 핸들러는 죽은 코드가 된다.
 
 // ═══ 거래내역서 일괄발급 (2026-07-28) — SoT §3. CT = utils/billing-bulk.ts ═══
 
@@ -799,10 +889,22 @@ router.get('/080-numbers', async (_req: Request, res: Response) => {
 // POST /080-numbers — 등록/수정 (id 있으면 수정). 번호는 숫자만 저장·전사 유일.
 router.post('/080-numbers', async (req: Request, res: Response) => {
   try {
-    const { id, number, company_id, label, monthly_fee_supply, kt_fee_supply, charge_call_fee, is_active, memo } = req.body || {};
+    const { id, number, company_id, user_id, label, monthly_fee_supply, kt_fee_supply, charge_call_fee, is_active, memo } = req.body || {};
     const digits = normalize080Number(number);
     if (digits.length < 9) return res.status(400).json({ success: false, error: '080 번호를 정확히 입력해주세요.' });
     if (!company_id) return res.status(400).json({ success: false, error: '회사를 선택해주세요.' });
+    // ★ 2026-07-31 귀속 축 — 비면 고객사 전체, 값이 있으면 그 계정. **그 회사 소속인지 여기서 검증한다**
+    //   (남의 회사 계정 id를 넣으면 그 계정 장에 엉뚱한 청구가 붙는다).
+    const scopeUserId = String(user_id || '').trim() || null;
+    if (scopeUserId) {
+      const own = await pool.query(
+        `SELECT 1 FROM users WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [scopeUserId, company_id],
+      );
+      if (own.rows.length === 0) {
+        return res.status(400).json({ success: false, error: '선택한 사용자가 그 고객사 소속이 아닙니다.' });
+      }
+    }
     const monthlyFee = Math.round(Number(monthly_fee_supply));
     const ktFee = Math.round(Number(kt_fee_supply));
     if (!Number.isFinite(monthlyFee) || monthlyFee < 0 || !Number.isFinite(ktFee) || ktFee < 0) {
@@ -811,21 +913,21 @@ router.post('/080-numbers', async (req: Request, res: Response) => {
     const params = [
       digits, company_id, String(label || '').slice(0, 100) || null,
       monthlyFee, ktFee, charge_call_fee !== false, is_active !== false,
-      String(memo || '').slice(0, 500) || null,
+      String(memo || '').slice(0, 500) || null, scopeUserId,
     ];
     if (id) {
       const r = await pool.query(
         `UPDATE billing_080_numbers SET number=$1, company_id=$2, label=$3, monthly_fee_supply=$4,
-                kt_fee_supply=$5, charge_call_fee=$6, is_active=$7, memo=$8, updated_at=NOW()
-          WHERE id=$9 RETURNING id`,
+                kt_fee_supply=$5, charge_call_fee=$6, is_active=$7, memo=$8, user_id=$9::uuid, updated_at=NOW()
+          WHERE id=$10 RETURNING id`,
         [...params, id],
       );
       if (r.rows.length === 0) return res.status(404).json({ success: false, error: '수정할 번호를 찾을 수 없습니다.' });
       return res.json({ success: true, id: r.rows[0].id });
     }
     const r = await pool.query(
-      `INSERT INTO billing_080_numbers (number, company_id, label, monthly_fee_supply, kt_fee_supply, charge_call_fee, is_active, memo)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      `INSERT INTO billing_080_numbers (number, company_id, label, monthly_fee_supply, kt_fee_supply, charge_call_fee, is_active, memo, user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::uuid) RETURNING id`,
       params,
     );
     return res.json({ success: true, id: r.rows[0].id });
@@ -833,7 +935,12 @@ router.post('/080-numbers', async (req: Request, res: Response) => {
     if (String(error?.code) === '23505') {
       return res.status(409).json({ success: false, error: '이미 등록된 번호입니다. 목록에서 수정해주세요.' });
     }
-    console.error('080 번호 저장 오류:', error?.message || error);
+    // ★ 2026-07-31 `user_id` ALTER 미실행 서버에서 500 대신 안내로 (db_alter_safety_net)
+    const emsg080 = error?.message || '';
+    if (emsg080.includes('does not exist') && (emsg080.includes('column') || emsg080.includes('relation'))) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — billing_080_numbers.user_id 컬럼 추가 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('080 번호 저장 오류:', emsg080 || error);
     return res.status(500).json({ success: false, error: '080 번호 저장 실패' });
   }
 });
@@ -914,9 +1021,12 @@ router.get('/extra-items', async (req: Request, res: Response) => {
     const month = String(req.query.month || '');
     if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ success: false, error: '조회 월 형식: YYYY-MM' });
     const r = await pool.query(
+      // ★ 2026-07-31 귀속 계정 표시 — 반영 현황에서 "고객사 전체"인지 "누구 앞"인지 구분돼야 한다.
       `SELECT e.id, e.company_id, c.company_name, e.kind, e.label, e.supply_amount, e.source_ref, e.created_at,
-              e.billed_billing_id
-         FROM billing_extra_items e JOIN companies c ON c.id = e.company_id
+              e.billed_billing_id, e.user_id, u.name AS user_name, u.login_id AS user_login_id
+         FROM billing_extra_items e
+         JOIN companies c ON c.id = e.company_id
+         LEFT JOIN users u ON u.id = e.user_id
         WHERE e.period_month = ($1 || '-01')::date
         ORDER BY c.company_name, e.source_ref, e.kind`,
       [month],
@@ -970,12 +1080,24 @@ router.delete('/extra-items', async (req: Request, res: Response) => {
 // POST /extra-items — 부가서비스 수기 항목 추가 (★2026-07-30 Harold 확정 — 시세이도 URL 장당 5만 등)
 router.post('/extra-items', async (req: Request, res: Response) => {
   try {
-    const { company_id, month, label, unit_supply, qty } = req.body || {};
+    const { company_id, user_id, month, label, unit_supply, qty } = req.body || {};
     if (!/^\d{4}-\d{2}$/.test(String(month || ''))) {
       return res.status(400).json({ success: false, error: '대상월 형식: YYYY-MM' });
     }
+    // ★ 2026-07-31 귀속 계정 — 080 매핑과 같은 축·같은 검증(남의 회사 계정 차단).
+    const extraUserId = String(user_id || '').trim() || null;
+    if (extraUserId) {
+      const own = await pool.query(
+        `SELECT 1 FROM users WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [extraUserId, String(company_id || '')],
+      );
+      if (own.rows.length === 0) {
+        return res.status(400).json({ success: false, error: '선택한 사용자가 그 고객사 소속이 아닙니다.' });
+      }
+    }
     const result = await addManualExtraItems({
       companyId: String(company_id || ''),
+      userId: extraUserId,
       periodMonth: `${month}-01`,
       label: String(label || ''),
       unitSupply: unit_supply,
@@ -984,8 +1106,13 @@ router.post('/extra-items', async (req: Request, res: Response) => {
     });
     return res.json({ success: true, ...result });
   } catch (error: any) {
-    console.error('부가서비스 항목 추가 오류:', error?.message || error);
-    return res.status(400).json({ success: false, error: error?.message || '항목 추가 실패' });
+    // ★ 2026-07-31 `user_id` ALTER 미실행 서버에서 사람이 고칠 수 없는 오류를 400으로 흘리지 않는다.
+    const emsgX = error?.message || '';
+    if (emsgX.includes('does not exist') && (emsgX.includes('column') || emsgX.includes('relation'))) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — billing_extra_items.user_id 컬럼 추가 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('부가서비스 항목 추가 오류:', emsgX || error);
+    return res.status(400).json({ success: false, error: emsgX || '항목 추가 실패' });
   }
 });
 
@@ -1914,7 +2041,10 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
 
     // 1) 정산 + 회사 정보 조회
     const result = await pool.query(
-      `SELECT b.*, c.company_name, c.contact_email, c.contact_name
+      // ★ 2026-07-31 수신자는 여기서 읽지 않는다 — `billing_recipients`(CT)가 단일 원장이다.
+      //   그전엔 이 라우트만 `companies.contact_email`을 봐서, 같은 회사인데 일괄발급은 A에게
+      //   개별 재발송은 B에게 나갈 수 있었다. `contact_name`은 본문 인사말 표시용으로만 남긴다.
+      `SELECT b.*, c.company_name, c.contact_name
        FROM billings b
        JOIN companies c ON c.id = b.company_id
        WHERE b.id = $1`,
@@ -1930,7 +2060,11 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
     if (toOverride && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(toOverride)) {
       return res.status(400).json({ error: `수신자 이메일 형식이 올바르지 않습니다: ${toOverride}` });
     }
-    const sendTo = toOverride || bil.contact_email;
+    // 이 장의 축(회사 장이면 user_id NULL, 계정 장이면 그 계정)으로 수신자를 해석한다 — 일괄발급과 같은 판정.
+    const resolvedTo = await resolveBillingRecipients(String(bil.company_id), bil.user_id ? String(bil.user_id) : null, 'statement');
+    const sendTo = toOverride || String(resolvedTo.primary?.email || '');
+    // 화면에서 수신자를 직접 바꾼 경우엔 참조를 붙이지 않는다 — 그 자리에서 지정한 한 사람에게만 보낸다.
+    const ccList = toOverride ? [] : resolvedTo.cc;
     const subjectOverride = String((req.body || {}).subject || '').trim();
 
     if (!sendTo) {
@@ -2082,11 +2216,18 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
         transporter.sendMail({
           from: `"INVITO 정산" <${process.env.SMTP_USER}>`,
           to: sendTo,
+          ...(ccList.length > 0 ? { cc: ccList } : {}),
           bcc: process.env.SMTP_BCC || '',
           subject: subjectOverride || `[INVITO] ${bil.company_name} ${bil.billing_year}년 ${bil.billing_month}월 정산서`,
           html: htmlBody,
           attachments: [{ filename: pdfFilename, path: pdfPath }],
-        }).then(() => { mailSent = true; }),
+        }).then((info: any) => {
+          // ★ 2026-07-31 부분 거부를 성공으로 세지 않는다(판정은 CT — 발송 지점 셋이 같은 규칙).
+          if (isRecipientRejected(info, sendTo)) {
+            throw new Error(`수신자가 메일 서버에서 거부되었습니다 (${sendTo})`);
+          }
+          mailSent = true;
+        }),
         new Promise((_, reject) => {
           mailTimer = setTimeout(() => {
             mailTimedOut = true;
@@ -2172,7 +2313,14 @@ router.post('/invoices/:id/send-email', async (req: Request, res: Response) => {
       return res.status(404).json({ error: '거래내역서를 찾을 수 없습니다' });
     }
 
-    if (!inv.contact_email) {
+    // ★ 2026-07-31 수신자는 `billing_recipients`(CT) 단일 원장. 계정 축은 사업자 판정과 같은 값을 쓴다.
+    const invTo = await resolveBillingRecipients(
+      String(inv.company_id),
+      inv.billing_user_id ? String(inv.billing_user_id) : null,
+      'statement',
+    );
+    const invSendTo = String(invTo.primary?.email || '');
+    if (!invSendTo) {
       return res.status(400).json({ error: '고객사 담당자 이메일이 등록되어 있지 않습니다.' });
     }
 
@@ -2234,14 +2382,21 @@ router.post('/invoices/:id/send-email', async (req: Request, res: Response) => {
     `;
 
     const transporter = getTransporter();
-    await transporter.sendMail({
+    const invMailInfo: any = await transporter.sendMail({
       from: `"INVITO 정산" <${process.env.SMTP_USER}>`,
-      to: inv.contact_email,
+      to: invSendTo,
+      ...(invTo.cc.length > 0 ? { cc: invTo.cc } : {}),
       bcc: process.env.SMTP_BCC || '',
       subject: `[INVITO] ${inv.company_name}${inv.store_name ? ` (${inv.store_name})` : ''} 거래내역서 (${bStart} ~ ${bEnd})`,
       html: htmlBody,
       attachments: [{ filename: pdfFilename, path: pdfPath }],
     });
+
+    // ★ 2026-07-31 같은 판정을 여기에도 — 세 번째 발송 경로만 빠져 있었다(Codex 2R 범위 밖 지적).
+    //   발송 기록을 남기기 **전에** 본다. 뒤에 두면 안 나간 메일이 "발송됨"으로 굳는다.
+    if (isRecipientRejected(invMailInfo, invSendTo)) {
+      return res.status(502).json({ error: `수신자가 메일 서버에서 거부되었습니다 (${invSendTo})` });
+    }
 
     // 4) 발송 기록
     await pool.query(
@@ -2249,7 +2404,7 @@ router.post('/invoices/:id/send-email', async (req: Request, res: Response) => {
       [req.params.id]
     );
 
-    return res.json({ message: '거래내역서 메일이 발송되었습니다.', sent_to: inv.contact_email });
+    return res.json({ message: '거래내역서 메일이 발송되었습니다.', sent_to: invSendTo, cc: invTo.cc });
   } catch (error: any) {
     if (isMigrationPending(error)) {
       return res.status(503).json({ error: 'DB 마이그레이션 필요 — billing_contacts 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });

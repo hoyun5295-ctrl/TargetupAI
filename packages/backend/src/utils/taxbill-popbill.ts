@@ -24,6 +24,8 @@
 import pool from '../config/database';
 import { INVITO_INFO } from '../config/defaults';
 import { pickTaxbillParty, TaxbillParty } from './billing-settings';
+// ★ 2026-07-31 계산서 통지 수신자는 거래내역서와 별개 원장 축(doc_type='taxbill')이다.
+import { resolveBillingRecipients } from './billing-recipients';
 
 const log = (msg: string) => console.log(`[팝빌] ${msg}`);
 
@@ -499,6 +501,7 @@ const ISSUE_ROW_SQL = `
            WHERE o.nts_confirm_num = t.org_nts_confirm_num AND o.id <> t.id
            ORDER BY o.created_at LIMIT 1) AS org_write_date,
          ic.recipient_email,
+         t.company_id, b.user_id AS billing_user_id,
          to_char(b.billing_end, 'YYYY-MM-DD') AS billing_end,
          c.company_name, c.business_number, c.ceo_name, c.address,
          c.business_type, c.business_category,
@@ -567,13 +570,29 @@ async function processOne(id: string, cfg: PopbillConfig): Promise<'issued' | 's
     }
 
     const month = Number(String(row.billing_end).slice(5, 7));
+    // ★ 2026-07-31 계산서 통지 메일은 **거래내역서 수신자와 별개**다(서수란 접수 — 받는 사람이 다른 고객사가 있다).
+    //   그전엔 컨펌 메일을 받은 사람(`ic.recipient_email`)을 그대로 팝빌에 넘겨 둘이 강제로 같았다.
+    //   등록된 계산서 수신자가 없으면 null로 둔다 — 거래내역서 수신자로 되돌리면 원장이 다시 섞인다.
+    const taxbillTo = await resolveBillingRecipients(
+      String(row.company_id),
+      row.billing_user_id ? String(row.billing_user_id) : null,
+      'taxbill',
+    );
+    // ★ 2026-07-31 수신자가 없으면 **발행하지 않는다**(Codex 적대검증 high).
+    //   팝빌은 빈 이메일도 받아 발행을 진행하므로, 그대로 두면 계산서는 국세청에 나가고 과금까지 끝났는데
+    //   고객은 아무 통지를 못 받는다. 되돌리려면 수정발행이라 비용이 크다.
+    //   거래내역서 수신자로 되돌리는 폴백은 두지 않는다 — 원장을 다시 섞는 길이다.
+    if (!taxbillTo.primary?.email) {
+      await markFailed(id, '세금계산서 수신자가 등록되어 있지 않습니다 — 고객사 정산 탭에서 세금계산서 수신자를 등록한 뒤 재시도해주세요');
+      return 'failed';
+    }
     const payload = buildTaxinvoicePayload({
       issueDate,
       supplyAmount: supply,
       taxAmount: tax,
       totalAmount: total,
       party,
-      invoiceeEmail: row.recipient_email ?? null,
+      invoiceeEmail: taxbillTo.primary?.email ?? null,
       invoicerMgtKey: mgtKey,
       itemName: `${month}월 메시징 이용료${row.kind === 'modify' ? ' (수정)' : ''}`,
       modifyCode: row.kind === 'modify' ? row.modify_code : null,

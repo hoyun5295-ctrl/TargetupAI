@@ -13,6 +13,8 @@
  * 슈퍼관리자 내부 도구 — AdminDashboard 라이트 톤 미러.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+// ★ 2026-07-31 업체 검색 + 청구 귀속(고객사 전체/사용자별) 공통 선택 — 부가서비스 입력 탭과 같은 컴포넌트.
+import CompanyScopePicker from './CompanyScopePicker';
 
 interface CompanyOpt { id: string; company_name: string }
 
@@ -22,6 +24,9 @@ interface Mapping {
   display_number: string;
   company_id: string;
   company_name?: string;
+  user_id?: string | null;
+  user_name?: string | null;
+  user_login_id?: string | null;
   label: string | null;
   monthly_fee_supply: number;
   kt_fee_supply: number;
@@ -60,6 +65,8 @@ interface ExtraItem {
   id: string; company_id: string; company_name: string;
   kind: string; label: string; supply_amount: number; source_ref: string | null;
   billed_billing_id: string | null;
+  /** ★ 2026-07-31 청구 귀속 — null이면 고객사 전체(공통 장) */
+  user_id?: string | null; user_name?: string | null; user_login_id?: string | null;
 }
 
 const won = (n: number) => `₩${Number(n || 0).toLocaleString()}`;
@@ -71,7 +78,11 @@ const prevMonth = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 
-const EMPTY_FORM = { id: '', number: '', company_id: '', label: '', monthly_fee_supply: 9000, kt_fee_supply: 4000, charge_call_fee: true, is_active: true, memo: '' };
+// ★ 2026-07-31 `user_id` = 청구 귀속. null이면 고객사 전체(공통 장), 값이 있으면 그 계정 장으로 청구된다.
+const EMPTY_FORM = {
+  id: '', number: '', company_id: '', user_id: null as string | null, label: '',
+  monthly_fee_supply: 9000, kt_fee_supply: 4000, charge_call_fee: true, is_active: true, memo: '',
+};
 
 export default function Billing080Modal({ open, onClose, companies }: {
   open: boolean;
@@ -180,6 +191,8 @@ export default function Billing080Modal({ open, onClose, companies }: {
 
   // ── ③ 부가서비스 수기 입력 (★2026-07-30 Harold — 시세이도 단축 URL 장당 5만 등) ──
   const [mCompany, setMCompany] = useState('');
+  // ★ 2026-07-31 청구 귀속 — null이면 고객사 전체, 값이 있으면 그 계정 앞으로 청구된다.
+  const [mUser, setMUser] = useState<string | null>(null);
   const [mMonth, setMMonth] = useState(prevMonth());
   const [mLabel, setMLabel] = useState('');
   const [mUnit, setMUnit] = useState(50000);
@@ -192,7 +205,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
     try {
       const r = await fetch('/api/admin/billing/extra-items', {
         method: 'POST', headers: { 'Content-Type': 'application/json', ...auth() },
-        body: JSON.stringify({ company_id: mCompany, month: mMonth, label: mLabel.trim(), unit_supply: mUnit, qty: mQty }),
+        body: JSON.stringify({ company_id: mCompany, user_id: mUser, month: mMonth, label: mLabel.trim(), unit_supply: mUnit, qty: mQty }),
       });
       const d = await r.json();
       if (d.success) {
@@ -277,19 +290,21 @@ export default function Billing080Modal({ open, onClose, companies }: {
               {/* 등록/수정 폼 */}
               <div className="border rounded-lg p-4 bg-gray-50">
                 <div className="text-sm font-medium text-gray-700 mb-3">{form.id ? '번호 수정' : '번호 등록'}</div>
+                {/* ★ 2026-07-31 업체는 검색으로 고르고, 이 번호를 고객사 전체에 청구할지 특정 계정에 청구할지 함께 정한다. */}
+                <div className="mb-3">
+                  <CompanyScopePicker
+                    companies={companies}
+                    companyId={form.company_id}
+                    userId={form.user_id}
+                    disabled={saving}
+                    onChange={({ companyId, userId }) => setForm({ ...form, company_id: companyId, user_id: userId })}
+                  />
+                </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <div>
                     <label className="block text-[11px] text-gray-500 mb-1">080 번호</label>
                     <input value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} placeholder="080-284-1300"
                       className="w-full px-3 py-2 border rounded-lg text-sm" />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-gray-500 mb-1">회사</label>
-                    <select value={form.company_id} onChange={(e) => setForm({ ...form, company_id: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
-                      <option value="">선택</option>
-                      {companies.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-                    </select>
                   </div>
                   <div>
                     <label className="block text-[11px] text-gray-500 mb-1">라벨 (부서/브랜드 — 선택)</label>
@@ -344,6 +359,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
                     <tr>
                       <th className="px-3 py-2 text-left">번호</th>
                       <th className="px-3 py-2 text-left">회사</th>
+                      <th className="px-3 py-2 text-left">청구 귀속</th>
                       <th className="px-3 py-2 text-left">라벨</th>
                       <th className="px-3 py-2 text-right">이용료</th>
                       <th className="px-3 py-2 text-right">부가서비스</th>
@@ -354,13 +370,22 @@ export default function Billing080Modal({ open, onClose, companies }: {
                   </thead>
                   <tbody>
                     {mapLoading ? (
-                      <tr><td colSpan={8} className="px-3 py-6 text-center text-gray-400">불러오는 중...</td></tr>
+                      <tr><td colSpan={9} className="px-3 py-6 text-center text-gray-400">불러오는 중...</td></tr>
                     ) : mappings.length === 0 ? (
-                      <tr><td colSpan={8} className="px-3 py-6 text-center text-gray-400">등록된 번호가 없습니다 — 위에서 등록해주세요.</td></tr>
+                      <tr><td colSpan={9} className="px-3 py-6 text-center text-gray-400">등록된 번호가 없습니다 — 위에서 등록해주세요.</td></tr>
                     ) : mappings.map((m) => (
                       <tr key={m.id} className={`border-t ${m.is_active ? '' : 'opacity-50'}`}>
                         <td className="px-3 py-2 font-mono">{m.display_number}</td>
                         <td className="px-3 py-2">{m.company_name}</td>
+                        <td className="px-3 py-2">
+                          {m.user_id ? (
+                            <span className="inline-flex items-center rounded bg-violet-50 border border-violet-200 px-1.5 py-0.5 text-[11px] text-violet-700">
+                              {m.user_name || m.user_login_id}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-gray-400">고객사 전체</span>
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-gray-500">{m.label || '-'}</td>
                         <td className="px-3 py-2 text-right">{won(m.monthly_fee_supply)}</td>
                         <td className="px-3 py-2 text-right">{won(m.kt_fee_supply)}</td>
@@ -368,7 +393,8 @@ export default function Billing080Modal({ open, onClose, companies }: {
                         <td className="px-3 py-2 text-center">{m.is_active ? 'O' : '중지'}</td>
                         <td className="px-3 py-2 text-right whitespace-nowrap">
                           <button onClick={() => { setForm({
-                            id: m.id, number: m.display_number, company_id: m.company_id, label: m.label || '',
+                            id: m.id, number: m.display_number, company_id: m.company_id,
+                            user_id: m.user_id || null, label: m.label || '',
                             monthly_fee_supply: m.monthly_fee_supply, kt_fee_supply: m.kt_fee_supply,
                             charge_call_fee: m.charge_call_fee, is_active: m.is_active, memo: m.memo || '',
                           }); }} className="text-violet-600 hover:underline text-xs mr-3">수정</button>
@@ -486,14 +512,17 @@ export default function Billing080Modal({ open, onClose, companies }: {
             <div className="space-y-4">
               <div className="border rounded-lg p-4 bg-gray-50">
                 <div className="text-sm font-medium text-gray-700 mb-3">부가서비스 항목 추가</div>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                  <div className="col-span-2 md:col-span-1">
-                    <label className="block text-[11px] text-gray-500 mb-1">회사</label>
-                    <select value={mCompany} onChange={(e) => setMCompany(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
-                      <option value="">선택</option>
-                      {companies.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-                    </select>
-                  </div>
+                {/* ★ 2026-07-31 080 매핑 탭과 **같은 컴포넌트** — 귀속 축이 두 화면에서 다르게 동작하면 그대로 오청구가 된다. */}
+                <div className="mb-3">
+                  <CompanyScopePicker
+                    companies={companies}
+                    companyId={mCompany}
+                    userId={mUser}
+                    disabled={mSaving}
+                    onChange={({ companyId, userId }) => { setMCompany(companyId); setMUser(userId); }}
+                  />
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <div>
                     <label className="block text-[11px] text-gray-500 mb-1">청구 대상월</label>
                     <input type="month" value={mMonth} onChange={(e) => setMMonth(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
@@ -566,6 +595,12 @@ export default function Billing080Modal({ open, onClose, companies }: {
                         {g.rows.map((it) => (
                           <div key={it.id} className="flex items-center justify-between gap-2">
                             <span className="flex-1 min-w-0 truncate">{it.label}</span>
+                            {/* ★ 2026-07-31 귀속 — 계정 앞 항목만 표시한다(고객사 전체는 기본값이라 조용히 둔다). */}
+                            {it.user_id && (
+                              <span className="shrink-0 rounded bg-violet-50 border border-violet-200 px-1.5 py-0.5 text-[10px] text-violet-700">
+                                {it.user_name || it.user_login_id}
+                              </span>
+                            )}
                             <span className="shrink-0">{won(Number(it.supply_amount))}</span>
                             {/* 개별 삭제 — 미소비만(서버 강제). 발행에 실린 행은 발행 삭제 시 자동 복귀 */}
                             {!it.billed_billing_id && (

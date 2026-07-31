@@ -53,8 +53,11 @@ export function format080Number(digits: string): string {
 
 export async function list080Numbers(): Promise<Billing080Number[]> {
   const r = await pool.query(
-    `SELECT b.*, c.company_name FROM billing_080_numbers b
+    // ★ 2026-07-31 귀속 계정 표시 — 목록에서 "고객사 전체"인지 "누구 앞"인지 바로 보여야 한다.
+    `SELECT b.*, c.company_name, u.name AS user_name, u.login_id AS user_login_id
+       FROM billing_080_numbers b
        JOIN companies c ON c.id = b.company_id
+       LEFT JOIN users u ON u.id = b.user_id
       ORDER BY c.company_name, b.number`,
   );
   return r.rows.map((row: any) => ({
@@ -333,6 +336,8 @@ export async function reconcileKtStatement(entries: KtStatementEntry[]): Promise
  */
 export async function addManualExtraItems(params: {
   companyId: string;
+  /** ★ 2026-07-31 귀속 계정 — null이면 고객사 전체(공통 장), 값이 있으면 그 계정 장으로 청구된다. */
+  userId?: string | null;
   periodMonth: string;   // 'YYYY-MM-01'
   label: string;         // 항목 내용 (예: 단축 URL 제작)
   unitSupply: number;    // 건당 공급가
@@ -369,9 +374,9 @@ export async function addManualExtraItems(params: {
     let inserted = 0;
     for (let i = 0; i < qty; i++) {
       const r = await client.query(
-        `INSERT INTO billing_extra_items (company_id, period_month, kind, label, supply_amount, source_ref, created_by)
-         VALUES ($1, $2::date, 'manual', $3, $4, NULL, $5)`,
-        [params.companyId, periodMonth, label, unit, params.adminId || null],
+        `INSERT INTO billing_extra_items (company_id, user_id, period_month, kind, label, supply_amount, source_ref, created_by)
+         VALUES ($1, $6::uuid, $2::date, 'manual', $3, $4, NULL, $5)`,
+        [params.companyId, periodMonth, label, unit, params.adminId || null, params.userId || null],
       );
       inserted += r.rowCount || 0;
     }
@@ -495,9 +500,11 @@ export async function applyKtStatement(params: {
         if (m.charge_call_fee && call_fee > 0) rows.push({ kind: '080_call', label: `080 통화료 (${disp}${m.label ? ` ${m.label}` : ''})`, amount: call_fee });
         for (const it of rows) {
           await client.query(
-            `INSERT INTO billing_extra_items (company_id, period_month, kind, label, supply_amount, source_ref, created_by)
-             VALUES ($1, $2::date, $3, $4, $5, $6, $7)`,
-            [companyId, periodMonth, it.kind, it.label, it.amount, m.number, params.adminId || null],
+            // ★ 2026-07-31 귀속은 **번호 매핑에 등록된 계정을 그대로 물려받는다** — 반영 때 사람이 다시
+            //   고르게 하면 번호별 귀속과 항목별 귀속이 갈라져 어느 쪽이 진실인지 알 수 없게 된다.
+            `INSERT INTO billing_extra_items (company_id, user_id, period_month, kind, label, supply_amount, source_ref, created_by)
+             VALUES ($1, $8::uuid, $2::date, $3, $4, $5, $6, $7)`,
+            [companyId, periodMonth, it.kind, it.label, it.amount, m.number, params.adminId || null, (m as any).user_id || null],
           );
           items += 1;
           supplyTotal += it.amount;

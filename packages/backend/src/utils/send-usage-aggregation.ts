@@ -1011,7 +1011,14 @@ export function buildPlanBillingItems(segments: PlanSegment[]): PricedBillingIte
  * 항목줄 수량 표시는 buildInvoiceLines가 extra 채널 전용으로 합친 행 수를 세어 담당한다.
  * 금액은 공급가 정수라 amount === amountExact(절사 멱등).
  */
-export function buildExtraBillingItems(rows: Array<{ kind: string; supply_amount: any; period_month: any }>): PricedBillingItem[] {
+/**
+ * ★ 2026-07-31 `user_id`를 그대로 싣는다 — 계정별 발행에서 **분배가 저절로 맞는다.**
+ *   값이 있으면 그 계정 장, NULL이면 공통 장(회사 전체 귀속의 제자리)이다.
+ *   그전엔 `userId: null` 고정이라 계정 귀속 080·부가서비스를 표현할 방법이 없었다.
+ */
+export function buildExtraBillingItems(
+  rows: Array<{ kind: string; supply_amount: any; period_month: any; user_id?: string | null }>,
+): PricedBillingItem[] {
   const KIND_TO_TYPE: Record<string, string> = {
     '080_fee': 'EXTRA_080_FEE',
     '080_svc': 'EXTRA_080_SVC',
@@ -1023,7 +1030,7 @@ export function buildExtraBillingItems(rows: Array<{ kind: string; supply_amount
       channel: 'extra' as const,
       itemDate: toDayKey(r.period_month),
       typeKey: KIND_TO_TYPE[String(r.kind)] || `EXTRA_${String(r.kind || '').toUpperCase().slice(0, 13)}`,
-      userId: null,
+      userId: r.user_id ? String(r.user_id) : null,
       agentSendId: null,
       agentId: null,
       total: 0, success: 0, fail: 0, pending: 0,
@@ -1231,6 +1238,14 @@ function sheetTotals(items: PricedBillingItem[]): Record<string, number> {
  * ★ 에이전트 발송분은 계정 축이 없어 공통 장으로 간다. 웹 발송은 본사가 보내는 것이라
  *   지점·계정에 섞지 않는다는 Harold 확정과 같은 원칙이다.
  */
+/**
+ * ★ 2026-07-31 **계정 장에 실릴 수 있는 채널** — 계정 축 판정의 단일 출처.
+ *   `web` = 그 계정이 보낸 발송분. `extra` = 그 계정 앞으로 지정한 080·부가서비스(귀속 축).
+ *   여기 없는 채널(`agent`·`test`·`spam`)은 계정 축이 없어 공통 장이다.
+ *   ⚠ 채널을 늘릴 때 이 집합을 함께 보지 않으면 그 채널은 조용히 전부 공통 장으로 간다.
+ */
+export const USER_SHEET_CHANNELS = new Set<string>(['web', 'extra']);
+
 export function splitBillingSheets(items: PricedBillingItem[], scope: BillingScope): BillingSheet[] {
   const all = items || [];
   if (scope === 'combined') {
@@ -1246,7 +1261,10 @@ export function splitBillingSheets(items: PricedBillingItem[], scope: BillingSco
   const common: PricedBillingItem[] = [];
   for (const it of all) {
     // 계정 축이 있는 것만 계정 장으로. 에이전트·테스트·스팸과 계정 미상 웹 발송은 공통 장.
-    if (it.channel === 'web' && it.userId) {
+    // ★ 2026-07-31 채널을 여기 리터럴로 적어 두면 채널이 늘 때마다 이 줄을 놓친다 —
+    //   실제로 `extra`(080·부가서비스)에 귀속 계정을 실어 보냈는데 이 조건이 `web`만 보고 있어
+    //   계정 귀속 항목이 전부 공통 장으로 갔다(Codex 적대검증 high). 집합을 단일 출처로 둔다.
+    if (USER_SHEET_CHANNELS.has(String(it.channel)) && it.userId) {
       if (!byUser.has(it.userId)) byUser.set(it.userId, []);
       byUser.get(it.userId)!.push(it);
     } else {
