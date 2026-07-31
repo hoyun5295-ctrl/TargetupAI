@@ -215,6 +215,22 @@ BRAND 차감 1건 ⑤발송통계/청구 미리보기 BRAND 1건.
 `conf/` 최종 수정 2026-06-10 ≠ 설치일 2026-02-10 = 커스터마이즈됨). zip을 통째로 덮으면 날아간다.
 실제 스크립트는 매뉴얼의 `start.sh`/`stop.sh`가 아니라 `bin/startup.sh`·`bin/shutdown.sh`(안 되면 `fkill.sh`).
 
+**교체 범위 = `lib/qtmsg.jar` 파일 하나**(2026-07-31 사전 대조 실측). `conf/`·`bin/`은 손대지 않는다.
+- `bin/qtmsg.sh`에 **JDK 경로가 하드코딩**돼 있다(`/home/jdk1.8.0_65/bin/java`) — `bin/`을 덮으면 기동이 깨질 수 있다.
+- 신규 `conf/`는 공급사 **테스트 템플릿**이다(`id[test11]`·`58.227.193.57`·`testsms_m`). 덮으면 라인 설정이 날아간다.
+- classpath 3종 중 `mysql_jdbc510.jar`·`json_simple-1.1.jar`는 운영과 크기 동일, 바뀐 건 `qtmsg.jar`뿐
+  (209,890 → 232,129 / md5 `811bdbedd41403c4ce8d1bd92417e33a`).
+
+**xml 무수정 확정** — 운영 conf와 신규 템플릿을 같은 방법으로 뽑아 차집합을 냈다(태그명만, 값 미출력):
+| 섹션 | 운영 | 신규 | 차이 |
+|---|---|---|---|
+| `CODE_MAPPING` | 120 | 374 | **RCS 254개뿐**(우리는 RCS 미사용). 카카오 25종 양쪽 완전 동일 |
+| `FIELD_MAPPING` | 23 | 24 | `file_name6` 하나. `select_sql`이 conf의 `&(필드)` 치환으로 조립되므로 미정의=미참조 |
+
+> ⚠ 앞서 `grep -c "<키>"`로 7개만 센 것은 **주석 안인지 활성인지 구분하지 못하는 검사**였다.
+> 섹션 범위를 잘라 활성 태그만 뽑아 비교해야 결론이 선다(Harold 지적 — "xml 미리 체크해야 하지 않냐").
+> **남은 미검증 1건** = 신규 jar가 conf에 없는 `file_name6`을 내부적으로 요구하는지. 기동 로그로만 확인된다.
+
 전 라인 버전 확인:
 `for d in /home/administrator/agent*/; do printf "%-36s %s\n" "$d" "$(grep -ho 'QtMsg [0-9.]* version' $d/bin/qtmsg.out 2>/dev/null | tail -1)"; done`
 

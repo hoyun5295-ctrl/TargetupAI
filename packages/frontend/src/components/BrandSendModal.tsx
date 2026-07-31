@@ -1,5 +1,5 @@
 /**
- * BrandSendModal — 브랜드메시지 발송 풀 화면 (★ 2026-07-29 신설)
+ * BrandSendModal — 브랜드메시지 발송 풀 화면 (★ 2026-07-29 신설 / 2026-07-31 셸 교체)
  *
  * 왜 알림톡 모달과 따로인가:
  *   알림톡은 **검수 승인된 템플릿을 골라야만** 발송이 성립한다(템플릿이 없으면 보낼 방법이 없다).
@@ -14,11 +14,15 @@
  *
  * 타겟 추출은 `POST /api/customers/generate-from-text`를 재사용한다 —
  * 이미 `requirePlanFeature('ai_messaging')`로 게이팅된 CT다. 새 엔드포인트를 만들지 않는다.
+ *
+ * ★ 2026-07-31 셸을 `shared/SendWorkspaceShell`로 교체(화이트 고급형). 발송 로직·상태는 무변경 —
+ *   바뀐 것은 표현뿐이다.
  */
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { X, Megaphone, PencilLine, Upload, Sparkles, Lock, Loader2, Trash2 } from 'lucide-react';
+import { Megaphone, PencilLine, Upload, Sparkles, Lock, Loader2, Trash2, Users } from 'lucide-react';
 import BrandMessageEditor from './BrandMessageEditor';
+import SendWorkspaceShell, { WorkspaceNotice, FIELD_CLASS } from './shared/SendWorkspaceShell';
 
 type RecipientMode = 'manual' | 'file' | 'ai';
 
@@ -169,121 +173,121 @@ export default function BrandSendModal({
     { key: 'ai' as RecipientMode, label: 'AI 타겟추출', icon: Sparkles, locked: isAiTargetLocked },
   ]), [isAiTargetLocked]);
 
-  if (!show) return null;
-
-  return (
-    <div className="fixed inset-0 z-[2000] bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden">
-        {/* 헤더 */}
-        <div className="flex items-center justify-between px-6 py-4 border-b bg-violet-50/60">
-          <div className="flex items-center gap-2">
-            <Megaphone size={18} className="text-violet-600" strokeWidth={1.75} />
-            <div>
-              <h2 className="text-base font-bold text-gray-900">브랜드메시지 발송</h2>
-              <p className="text-xs text-gray-500">발신프로필이 연동돼 있으면 전화번호로 바로 보냅니다. 템플릿 검수는 필요 없습니다.</p>
-            </div>
-          </div>
-          <button onClick={onClose} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border hover:bg-gray-50">
-            <X size={14} strokeWidth={1.75} /><span>창닫기</span>
-          </button>
-        </div>
-
-        {/* 채널 미연동 안내 — 요금제가 아니라 기술적 전제라 문구를 구분한다 */}
-        {!hasProfile && (
-          <div className="mx-6 mt-4 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
-            카카오 채널 연동(발신프로필 등록)이 필요합니다. 발신프로필이 등록되면 요금제와 무관하게 바로 사용할 수 있습니다.
-          </div>
-        )}
-
-        <div className="flex-1 min-h-0 flex">
-          {/* 좌측 — 수신자 */}
-          <div className="w-[380px] shrink-0 border-r flex flex-col min-h-0">
-            <div className="flex border-b">
-              {modeTabs.map((t) => (
-                <button key={t.key}
-                  onClick={() => { if (t.locked) { onLockedFeature('AI 타겟추출', '베이직'); return; } setMode(t.key); }}
-                  className={`flex-1 px-3 py-2.5 text-xs font-medium inline-flex items-center justify-center gap-1 border-b-2 transition ${
-                    mode === t.key ? 'border-violet-500 text-violet-600' : 'border-transparent text-gray-500 hover:text-gray-700'
-                  }`}>
-                  <t.icon size={13} strokeWidth={1.75} />
-                  <span>{t.label}</span>
-                  {t.locked && <Lock size={11} strokeWidth={2} className="text-gray-400" />}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
-              {mode === 'manual' && (
-                <>
-                  <p className="text-xs text-gray-500">번호를 줄바꿈·쉼표로 구분해 붙여넣으세요.</p>
-                  <textarea value={manualText} onChange={(e) => applyManual(e.target.value)} rows={14}
-                    placeholder={'01012345678\n01087654321'}
-                    className="w-full border rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-violet-500 outline-none" />
-                </>
-              )}
-
-              {mode === 'file' && (
-                <label className="flex flex-col items-center justify-center gap-2 px-4 py-10 border-2 border-dashed border-violet-300 rounded-lg cursor-pointer text-sm text-violet-600 hover:bg-violet-50">
-                  <Upload size={20} strokeWidth={1.75} />
-                  <span>파일을 선택하세요 (CSV·TXT)</span>
-                  <span className="text-[11px] text-gray-400">번호만 골라 읽습니다</span>
-                  <input type="file" accept=".csv,.txt,text/plain" className="hidden"
-                    onChange={(e) => { handleFile(e.target.files?.[0] || null); e.target.value = ''; }} />
-                </label>
-              )}
-
-              {mode === 'ai' && (
-                <>
-                  <p className="text-xs text-gray-500">찾을 대상을 한 줄로 쓰세요. 연동된 고객DB에서 조건을 만들어 대상을 뽑습니다.</p>
-                  <textarea value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} rows={3}
-                    placeholder="예) 최근 3개월 구매 없는 VIP 고객"
-                    className="w-full border rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-violet-500 outline-none" />
-                  <button onClick={runAiTarget} disabled={aiLoading}
-                    className="w-full py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-sm font-semibold disabled:opacity-40 inline-flex items-center justify-center gap-1.5">
-                    {aiLoading ? <><Loader2 size={14} className="animate-spin" /> 추출 중...</> : <><Sparkles size={14} /> 타겟 추출</>}
-                  </button>
-                  {aiError && <p className="text-xs text-rose-600">{aiError}</p>}
-                  {aiResult && (
-                    <div className="px-3 py-2 rounded-lg bg-violet-50 border border-violet-200 text-xs text-violet-800 space-y-2">
-                      <p className="font-semibold">대상 {aiResult.matchCount.toLocaleString()}명</p>
-                      {/* 어떤 조건으로 뽑았는지 보여준다 — 근거 없이 담으면 사람이 검증할 수 없다 */}
-                      {aiResult.explanation && <p className="text-violet-700 leading-relaxed">{aiResult.explanation}</p>}
-                      <button onClick={applyAiTarget} disabled={aiApplying || aiResult.matchCount === 0}
-                        className="w-full py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded text-xs font-semibold disabled:opacity-40 inline-flex items-center justify-center gap-1.5">
-                        {aiApplying
-                          ? <><Loader2 size={12} className="animate-spin" /> 불러오는 중...</>
-                          : <>리스트에 담기 ({aiResult.matchCount.toLocaleString()}명)</>}
-                      </button>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-
-            <div className="border-t px-4 py-3 flex items-center justify-between">
-              <p className="text-xs text-gray-600">수신자 <span className="font-bold text-violet-600">{phones.length.toLocaleString()}</span>명</p>
-              {phones.length > 0 && (
-                <button onClick={() => setRecipients([])}
-                  className="inline-flex items-center gap-1 text-[11px] text-gray-400 hover:text-rose-500">
-                  <Trash2 size={12} strokeWidth={1.75} /> 비우기
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* 우측 — 메시지 (기존 에디터 재사용. 새로 만들면 두 벌이 되고 반드시 갈라진다) */}
-          <div className="flex-1 min-h-0 overflow-y-auto p-5">
-            <BrandMessageEditor
-              profiles={profiles}
-              sending={!!sending}
-              onSend={(payload: any) => {
-                if (!canSend) return;
-                return onSend({ ...payload, phones });
-              }}
-            />
-          </div>
+  // ── 좌측 패널(수신자) ─────────────────────────────────────────────
+  const aside = (
+    <>
+      {/* 세그먼트 탭 — 밑줄 대신 알약형. 회색 선을 줄이면 화면이 정돈돼 보인다 */}
+      <div className="shrink-0 px-4 pt-4">
+        <div className="flex gap-1 p-1 rounded-xl bg-slate-100/80">
+          {modeTabs.map((t) => {
+            const active = mode === t.key;
+            return (
+              <button key={t.key} type="button"
+                onClick={() => { if (t.locked) { onLockedFeature('AI 타겟추출', '베이직'); return; } setMode(t.key); }}
+                className={`flex-1 px-2 py-2 rounded-lg text-[12px] font-medium inline-flex items-center justify-center gap-1.5 transition ${
+                  active ? 'bg-white text-slate-800 shadow-sm ring-1 ring-slate-900/5' : 'text-slate-500 hover:text-slate-700'
+                }`}>
+                <t.icon size={13} strokeWidth={1.9} className={active ? 'text-violet-500' : ''} />
+                <span>{t.label}</span>
+                {t.locked && <Lock size={10} strokeWidth={2.2} className="text-slate-300" />}
+              </button>
+            );
+          })}
         </div>
       </div>
-    </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">
+        {mode === 'manual' && (
+          <>
+            <p className="text-[11px] text-slate-400">번호를 줄바꿈·쉼표로 구분해 붙여넣으세요.</p>
+            <textarea value={manualText} onChange={(e) => applyManual(e.target.value)} rows={14}
+              placeholder={'01012345678\n01087654321'}
+              className={`${FIELD_CLASS} resize-none leading-relaxed`} />
+          </>
+        )}
+
+        {mode === 'file' && (
+          <label className="flex flex-col items-center justify-center gap-2 px-4 py-12 rounded-2xl bg-white ring-1 ring-dashed ring-violet-200 cursor-pointer text-sm text-violet-600 hover:ring-violet-300 hover:bg-violet-50/40 transition shadow-sm">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-violet-500/25">
+              <Upload size={18} strokeWidth={1.9} className="text-white" />
+            </div>
+            <span className="font-medium text-slate-700">파일을 선택하세요</span>
+            <span className="text-[11px] text-slate-400">CSV · TXT — 번호만 골라 읽습니다</span>
+            <input type="file" accept=".csv,.txt,text/plain" className="hidden"
+              onChange={(e) => { handleFile(e.target.files?.[0] || null); e.target.value = ''; }} />
+          </label>
+        )}
+
+        {mode === 'ai' && (
+          <>
+            <p className="text-[11px] text-slate-400">찾을 대상을 한 줄로 쓰세요. 연동된 고객DB에서 조건을 만들어 대상을 뽑습니다.</p>
+            <textarea value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} rows={3}
+              placeholder="예) 최근 3개월 구매 없는 VIP 고객"
+              className={`${FIELD_CLASS} resize-none`} />
+            <button type="button" onClick={runAiTarget} disabled={aiLoading}
+              className="w-full py-2.5 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 shadow-lg shadow-violet-500/25 disabled:opacity-40 disabled:shadow-none inline-flex items-center justify-center gap-1.5 transition">
+              {aiLoading ? <><Loader2 size={14} className="animate-spin" /> 추출 중...</> : <><Sparkles size={14} /> 타겟 추출</>}
+            </button>
+            {aiError && <p className="text-xs text-rose-600">{aiError}</p>}
+            {aiResult && (
+              <div className="px-3.5 py-3 rounded-2xl bg-white ring-1 ring-violet-200/70 shadow-sm text-xs space-y-2">
+                <p className="font-semibold text-slate-800">대상 {aiResult.matchCount.toLocaleString()}명</p>
+                {/* 어떤 조건으로 뽑았는지 보여준다 — 근거 없이 담으면 사람이 검증할 수 없다 */}
+                {aiResult.explanation && <p className="text-slate-500 leading-relaxed">{aiResult.explanation}</p>}
+                <button type="button" onClick={applyAiTarget} disabled={aiApplying || aiResult.matchCount === 0}
+                  className="w-full py-2 rounded-lg text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 disabled:opacity-40 inline-flex items-center justify-center gap-1.5 transition">
+                  {aiApplying
+                    ? <><Loader2 size={12} className="animate-spin" /> 불러오는 중...</>
+                    : <>리스트에 담기 ({aiResult.matchCount.toLocaleString()}명)</>}
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="shrink-0 border-t border-slate-100 bg-white/70 px-4 py-3 flex items-center justify-between">
+        <p className="text-xs text-slate-500 inline-flex items-center gap-1.5">
+          <Users size={13} strokeWidth={1.9} className="text-slate-300" />
+          수신자 <span className="font-bold text-violet-600 tabular-nums">{phones.length.toLocaleString()}</span>명
+        </p>
+        {phones.length > 0 && (
+          <button type="button" onClick={() => setRecipients([])}
+            className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-rose-500 transition">
+            <Trash2 size={12} strokeWidth={1.9} /> 비우기
+          </button>
+        )}
+      </div>
+    </>
+  );
+
+  return (
+    <SendWorkspaceShell
+      show={show}
+      onClose={onClose}
+      title="브랜드메시지 발송"
+      subtitle="발신프로필이 연동돼 있으면 전화번호로 바로 보냅니다. 템플릿 검수는 필요 없습니다."
+      icon={<Megaphone size={19} strokeWidth={1.9} className="text-white" />}
+      accent="violet"
+      notice={!hasProfile ? (
+        <WorkspaceNotice>
+          카카오 채널 연동(발신프로필 등록)이 필요합니다. 발신프로필이 등록되면 요금제와 무관하게 바로 사용할 수 있습니다.
+        </WorkspaceNotice>
+      ) : undefined}
+      aside={aside}
+      maxW="max-w-7xl"
+    >
+      {/* 우측 — 메시지 (기존 에디터 재사용. 새로 만들면 두 벌이 되고 반드시 갈라진다) */}
+      <div className="p-5 sm:p-6">
+        <BrandMessageEditor
+          profiles={profiles}
+          sending={!!sending}
+          onSend={(payload: any) => {
+            if (!canSend) return;
+            return onSend({ ...payload, phones });
+          }}
+        />
+      </div>
+    </SendWorkspaceShell>
   );
 }

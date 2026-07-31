@@ -590,17 +590,24 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* ★ D162-4 (2026-05-15) 4차: Harold님 명시 정합 — 알림톡 버튼 톤 다운.
-                기존 카카오 노란색(#FEE500)이 너무 튐 → 옅은 amber 톤으로 창닫기와 괴리 없게 정리. */}
+            {/* ★ 2026-07-31 채널 전환 버튼 재작성 — 옅은 outline 칩이라 창닫기와 구분이 안 됐다.
+                발송 채널을 바꾸는 동작이라 화면에서 가장 무거운 축이어야 한다.
+                아이콘을 그라데이션 타일로 세우고 라벨 아래 한 줄 설명을 붙여 눌러야 할 것으로 읽히게 한다.
+                (0515에 카카오 노란색이 튄다고 톤다운한 이력이 있어, 색은 면이 아니라 아이콘에만 쓴다) */}
             {onAlimtalkOpen && (
               <button
                 type="button"
                 onClick={onAlimtalkOpen}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-700"
+                className="group inline-flex items-center gap-2.5 pl-2 pr-3.5 py-1.5 rounded-xl bg-white ring-1 ring-slate-200 shadow-sm hover:ring-amber-300 hover:shadow-md transition text-left"
                 title="알림톡 발송 화면으로 전환"
               >
-                <Bell size={14} strokeWidth={1.75} />
-                <span>알림톡 발송</span>
+                <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-sm shadow-amber-500/30 shrink-0">
+                  <Bell size={14} strokeWidth={2} className="text-white" />
+                </span>
+                <span className="leading-tight">
+                  <span className="block text-[13px] font-semibold text-slate-800">알림톡 발송</span>
+                  <span className="hidden lg:block text-[10px] text-slate-400">검수 템플릿으로 보내기</span>
+                </span>
               </button>
             )}
             {/* ★ 2026-07-29 브랜드메시지 — 요금제 제한 없이 전체 개방. 채널 연동(발신프로필)만 전제다. */}
@@ -608,11 +615,16 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
               <button
                 type="button"
                 onClick={onBrandOpen}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition border border-violet-200 bg-violet-50 hover:bg-violet-100 text-violet-700"
+                className="group inline-flex items-center gap-2.5 pl-2 pr-3.5 py-1.5 rounded-xl bg-white ring-1 ring-slate-200 shadow-sm hover:ring-violet-300 hover:shadow-md transition text-left"
                 title="브랜드메시지 발송 화면으로 전환"
               >
-                <Megaphone size={14} strokeWidth={1.75} />
-                <span>브랜드메시지</span>
+                <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-sm shadow-violet-500/30 shrink-0">
+                  <Megaphone size={14} strokeWidth={2} className="text-white" />
+                </span>
+                <span className="leading-tight">
+                  <span className="block text-[13px] font-semibold text-slate-800">브랜드메시지</span>
+                  <span className="hidden lg:block text-[10px] text-slate-400">검수 없이 바로 보내기</span>
+                </span>
               </button>
             )}
             <button className="ds-close-btn ds-t" onClick={onClose}>
