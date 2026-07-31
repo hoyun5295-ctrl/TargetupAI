@@ -472,10 +472,53 @@ function bump(dayData: UsageDayData, day: string, type: string, row: { total?: a
  *     발송분이 양쪽 달에 모두 계상된다(2R critical).
  *   direct 캠페인이 구형 경로로 campaign_runs를 함께 만든 경우 periodCampaignIds에서 빼서(이중 계상 차단)
  *   기존 dateless 집계(eventIds)에만 남긴다. mapRunOwners는 두 축을 다 해석한다.
+ *
+ * ★ 2026-07-31 레거시 예약 직접발송 누락 정정 (서수란 접수 "거래내역서 수량 상이" 실원인).
+ *   레거시 `POST /api/campaigns/direct-send`는 INSERT에 `send_phase` 컬럼이 아예 없어 NULL로 남고
+ *   (컬럼 DEFAULT 없음 — information_schema 실측), **예약 건은 `campaign_runs`도 만들지 않는다**
+ *   (`campaigns.ts`의 run INSERT가 `if (!scheduled)` 안에 있다). 그래서 위 두 축 어디에도 안 걸려
+ *   실제로 나간 발송이 통째로 미청구였다 — 라프레리 2026-06-16~07-15 성공 LMS 10·MMS 1 실측 확인.
+ *
+ *   ⛔ 이 건을 direct축(`eventIds`)에 그냥 더하면 **더 큰 사고**가 난다. 지금 `periodCampaignIds`에서
+ *   기간 조건의 보호를 받고 있는 레거시 즉시발송·브랜드메시지의 campaigns.id가 526행 `if (!eventIds.has(cid))`
+ *   때문에 dateless 축으로 옮겨가, 그 캠페인의 발송이 **발송 월과 무관하게 전량 이 달에 계상**된다.
+ *   그래서 레거시 NULL 건은 **반드시 `periodCampaignIds` 축**(sendreq_time 기간 조건 동반)으로 보낸다.
+ *   큐 적재가 app_etc1 = campaigns.id이므로 이 축으로 정확히 매칭되고, 월경계 이중계상도 막힌다.
  */
 export interface BillingSendIdSets {
   eventIds: string[];
   periodCampaignIds: string[];
+}
+
+/**
+ * (순수) 조회 결과 3갈래 → 두 집합. **어느 ID가 어느 축으로 가는가**가 청구 금액을 좌우하므로
+ * SQL과 분리해 테스트로 고정한다(2026-07-31 — 레거시 누락 정정에서 이 판정이 유일한 위험 지점이었다).
+ *
+ * 규칙:
+ *   · eventIds = 완료 run의 cr.id ∪ `send_phase='sent'` direct 캠페인의 id — 기간 조건 없이 집계된다.
+ *   · periodCampaignIds = run 기반 campaigns.id ∪ **레거시(send_phase NULL) direct campaigns.id**
+ *     — 반드시 sendreq_time 기간 조건과 함께 집계된다.
+ *   · 두 집합은 서로소다. eventIds에 이미 있는 id는 periodCampaignIds에 넣지 않는다(같은 행 이중 계상 차단).
+ */
+export function partitionBillingSendIds(input: {
+  runs: { run_id: any; campaign_id: any }[];
+  directs: { run_id: any }[];
+  legacyDirects: { campaign_id: any }[];
+}): BillingSendIdSets {
+  const eventIds = new Set<string>();
+  for (const r of input.runs || []) eventIds.add(String(r.run_id));
+  for (const r of input.directs || []) eventIds.add(String(r.run_id));
+
+  const periodCampaignIds = new Set<string>();
+  const addPeriod = (v: any) => {
+    const cid = String(v);
+    if (!eventIds.has(cid)) periodCampaignIds.add(cid);
+  };
+  for (const r of input.runs || []) addPeriod(r.campaign_id);
+  // ★ 레거시 direct(send_phase NULL)는 **여기로만** 온다 — eventIds로 보내면 기간 보호가 사라진다.
+  for (const r of input.legacyDirects || []) addPeriod(r.campaign_id);
+
+  return { eventIds: Array.from(eventIds), periodCampaignIds: Array.from(periodCampaignIds) };
 }
 
 export async function selectBillingSendIds(opts: {
@@ -488,11 +531,14 @@ export async function selectBillingSendIds(opts: {
   const params: any[] = [companyId, startDate, endDate];
   let userWhereRun = '';
   let userWhereDirect = '';
+  let userWhereLegacy = '';
   if (userId) {
     params.push(userId);
     // ★ 2026-07-25 정정 — 캠페인 생성 경로가 채우는 컬럼은 `created_by`다(user_id는 대부분 비어 있다).
     userWhereRun = ` AND c.created_by = $${params.length}`;
     userWhereDirect = ` AND c2.created_by = $${params.length}`;
+    // ★ 2026-07-31 레거시 축도 같은 계정 필터를 받는다 — 빠뜨리면 계정별 발행에서 이 축만 회사 전체가 실린다.
+    userWhereLegacy = ` AND c3.created_by = $${params.length}`;
   }
 
   const runsResult = await pool.query(
@@ -517,15 +563,28 @@ export async function selectBillingSendIds(opts: {
     params,
   );
 
-  const eventIds = new Set<string>();
-  for (const r of runsResult.rows as any[]) eventIds.add(String(r.run_id));
-  for (const r of directResult.rows as any[]) eventIds.add(String(r.run_id));
-  const periodCampaignIds = new Set<string>();
-  for (const r of runsResult.rows as any[]) {
-    const cid = String(r.campaign_id);
-    if (!eventIds.has(cid)) periodCampaignIds.add(cid);
-  }
-  return { eventIds: Array.from(eventIds), periodCampaignIds: Array.from(periodCampaignIds) };
+  // ★ 2026-07-31 레거시 직접발송(send_phase 미기재 = NULL) — 위 direct축이 `= 'sent'`라 통째로 빠지던 축.
+  //   여기서 뽑은 campaigns.id는 **periodCampaignIds로만** 보낸다(기간 조건 동반 — 위 주석 ⛔ 참조).
+  //   `status = 'completed'`를 요구하므로 예약만 걸고 안 나간 캠페인은 들어오지 않고,
+  //   실제 수량은 어차피 큐의 성공 행 수라 큐가 비어 있으면 0원을 더한다(미발송 청구 구조적 불가).
+  const legacyDirectResult = await pool.query(
+    `SELECT c3.id AS campaign_id
+       FROM campaigns c3
+      WHERE c3.company_id = $1
+        AND c3.send_type = 'direct'
+        AND c3.send_phase IS NULL
+        AND c3.status = 'completed'
+        AND COALESCE(c3.scheduled_at, c3.sent_at) >= ${kstStart('$2')}
+        AND COALESCE(c3.scheduled_at, c3.sent_at) < ${kstEnd('$3')}${userWhereLegacy}`,
+    params,
+  );
+
+  // 집합 배분은 순수 함수가 소유한다(테스트 고정 지점 — 이 판정이 틀리면 금액이 틀린다).
+  return partitionBillingSendIds({
+    runs: runsResult.rows as any[],
+    directs: directResult.rows as any[],
+    legacyDirects: legacyDirectResult.rows as any[],
+  });
 }
 
 /** 두 집합의 총 개수 — "청구 대상 있음" 판정용 */
@@ -539,6 +598,57 @@ export function countBillingSendIds(ids: BillingSendIdSets): number {
  */
 /** 청구가 합산하는 유형키 — 여기 없는 키는 수량이 아무리 많아도 0원이 된다. */
 const EMPTY_BILLING_TOTALS: Record<string, number> = Object.fromEntries(BILLING_TYPES.map((t) => [t.key, 0]));
+
+/** 결과 확정 유예(시간) — 이 안의 대기는 "아직 올 수 있다"로 보고 발행을 미룬다. 통신사 리포트 지연 상한 기준. */
+export const BILLING_PENDING_SLA_HOURS = Number(process.env.BILLING_PENDING_SLA_HOURS) || 48;
+
+export interface BlockingPendingRow { channel: string; key: string; pending: number; latestDate: string; stale: boolean }
+
+/**
+ * (순수) **발행을 막아야 하는 대기(pending)** 만 골라낸다. (★ 2026-07-31 Codex 적대검증 1R high·2R high 수용)
+ *
+ * 왜 필요한가 — 청구 수량은 성공 건수만 센다. 그런데 예약 발송 정리 워커는 **큐에 행이 있으면**
+ * 캠페인을 `completed`로 올리고, 그 행에는 통신사 처리 대기가 섞여 있다. 그대로 발행하면 대기 건이
+ * **0원으로 확정**되고, 뒤에 성공으로 바뀌어도 기간 겹침 차단 때문에 **영구 미청구**가 된다.
+ *
+ * ★ 2R 정정 두 가지:
+ *   ① 입력이 `dayData`가 아니라 **상세 행(usage.rows)** 이다. dayData는 에이전트 원장을 읽지 않아
+ *      에이전트 대기가 게이트를 통째로 우회했다 — 막으려던 사고가 그 채널에 그대로 남아 있었다.
+ *   ② 2R에서 "오래된 대기는 통과"로 완화했는데 **그건 틀렸다**(3R 지적 수용). 발송 일자는 상태의
+ *      종결을 증명하지 않는다 — 큐 만료 처리는 특정 예약 플래그 행만 실패로 확정하고 나머지는 그대로
+ *      두므로, 오래된 대기도 뒤늦게 성공으로 바뀔 수 있다. 그때는 이미 0원으로 발행된 뒤라
+ *      기간 겹침 차단 때문에 재청구가 불가능하다. 그래서 **대기는 나이와 무관하게 전부 막는다.**
+ *   ③ 대신 성격을 구분해 돌려준다(`stale`). 유예를 넘긴 대기는 기다려도 안 풀리므로 사람이 큐 만료
+ *      처리로 결말을 지어야 한다 — 차단 사유가 그 구분을 담아야 조치가 가능해진다.
+ *      "무시하고 발행"하는 우회로는 두지 않는다. 그 순간 영구 미청구가 확정된다.
+ */
+export function findBlockingPendingRows(
+  rows: BillingUsageRow[],
+  opts?: { now?: Date; slaHours?: number },
+): BlockingPendingRow[] {
+  const slaHours = opts?.slaHours ?? BILLING_PENDING_SLA_HOURS;
+  const now = opts?.now ?? new Date();
+  const cutoffDay = toDayKey(new Date(now.getTime() - slaHours * 3600 * 1000));
+  const acc = new Map<string, BlockingPendingRow>();
+  for (const r of rows || []) {
+    const pending = Number(r?.pending) || 0;
+    if (pending <= 0) continue;
+    const day = String(r.itemDate || '');
+    const channel = String(r.channel || 'web');
+    const key = String(r.typeKey || '');
+    const k = `${channel}\u0000${key}`;
+    const cur = acc.get(k);
+    if (cur) {
+      cur.pending += pending;
+      if (day > cur.latestDate) cur.latestDate = day;
+    } else {
+      acc.set(k, { channel, key, pending, latestDate: day, stale: false });
+    }
+  }
+  // 묶음의 **가장 최근 일자**가 유예를 넘었으면 그 묶음은 기다려도 안 풀린다 = 사람 조치(큐 만료 처리) 대상.
+  for (const v of acc.values()) v.stale = v.latestDate < cutoffDay;
+  return Array.from(acc.values()).sort((a, b) => b.pending - a.pending);
+}
 
 export function buildBillingTotals(dayData: UsageDayData): Record<string, number> {
   const totals: Record<string, number> = { ...EMPTY_BILLING_TOTALS };
@@ -1434,7 +1544,14 @@ export async function buildBillingUsageRows(opts: {
       SELECT t.user_id, r.message_type,
              DATE(t.created_at AT TIME ZONE 'Asia/Seoul') as send_date,
              COUNT(*) as total_count,
-             SUM(CASE WHEN r.result IS NOT NULL THEN 1 ELSE 0 END) as success_count
+             SUM(CASE WHEN r.result IS NOT NULL THEN 1 ELSE 0 END) as success_count,
+             -- ★ 2026-07-31 (Codex 3R high) 대기 수량 — 그 전에는 조회조차 하지 않아 스팸 축의 pending이
+             --   항상 0으로 내려갔다. 스팸 워커는 결과를 나중에 비동기로 채우므로, 그 사이에 발행하면
+             --   미확정 건이 0원으로 굳고 같은 기간을 다시 청구할 수 없다(발행 차단 게이트가 못 잡던 구멍).
+             --   판정은 **완료가 아닌 것 전부**를 대기로 본다(fail-closed). 상태값이 코드에서 queued·active로
+             --   갈리고 기존 쿼리는 pending까지 쓰는데 SCHEMA에는 active/completed만 적혀 있다 — 목록을 열거하면
+             --   빠뜨린 값이 곧 청구 누락이 된다. 완료만 통과시키면 새 상태가 생겨도 안전한 쪽으로 떨어진다.
+             SUM(CASE WHEN r.result IS NULL AND COALESCE(t.status, '') <> 'completed' THEN 1 ELSE 0 END) as pending_count
         FROM spam_filter_test_results r
         JOIN spam_filter_tests t ON r.test_id = t.id
        WHERE t.company_id = $1
@@ -1449,7 +1566,7 @@ export async function buildBillingUsageRows(opts: {
       bumpRow(acc, {
         channel: 'spam', itemDate: day, typeKey, userId: uid, agentSendId: null,
         total: 0, success: 0, fail: 0, pending: 0,
-      }, { total: row.total_count, success: row.success_count });
+      }, { total: row.total_count, success: row.success_count, pending: row.pending_count });
     }
   }
 

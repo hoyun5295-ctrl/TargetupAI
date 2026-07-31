@@ -19,6 +19,8 @@ import { INVITO_INFO } from '../config/defaults';
 import { drawPartyBlock, drawThanksNote, THANKS_NOTE_HEIGHT } from './pdf-party-block';
 import { toDayKey } from './send-usage-aggregation';
 import { buildInvoiceLines } from './billing-invoice-lines';
+import { resolveBillingScopeLabel } from './billing-scope-label';
+import { getAgentCustNameMap } from './pay-stats';
 import { floorWon } from './money';
 import pool from '../config/database';
 import { pickTaxbillParty } from './billing-settings';
@@ -74,15 +76,27 @@ export async function loadBillingStatementData(billingId: string, db: any = pool
     //   여러 줄 생기는데 tie-breaker가 없어 순서가 비결정적이었다(D150-4와 같은 계열).
     // ★ 2026-07-26 발송ID 병기 — 에이전트 행이 어느 발송ID 것인지가 정산 대조의 근거다.
     //   JOIN 대상(`company_agent_ids.id`)·FK(`billing_items_agent_id_fkey`)는 pg_constraint 실측 확인분.
-    `SELECT bi.*, cai.agent_send_id
+    // ★ 2026-07-31 계정명 병기(서수란 접수) — 구분 칸이 웹 행에 늘 '한줄로'만 찍어
+    //   한 회사 안에서 어느 계정(지점)이 쓴 발송인지 청구서로 구분할 수 없었다.
+    //   값은 이미 `bi.user_id`에 있었고 읽는 쪽이 users를 안 붙였을 뿐이다(admin.ts:1505와 같은 조인 형태).
+    `SELECT bi.*, cai.agent_send_id, u.name AS user_name, u.login_id AS user_login_id
        FROM billing_items bi
        LEFT JOIN company_agent_ids cai ON cai.id = bi.agent_id
+       LEFT JOIN users u ON u.id = bi.user_id
       WHERE bi.billing_id = $1
       ORDER BY bi.channel ASC, bi.item_date ASC, bi.message_type ASC,
                cai.agent_send_id ASC NULLS FIRST, bi.user_id ASC NULLS FIRST, bi.id ASC`,
     [billingId]
   );
-  const items = itemsResult.rows;
+  // ★ 2026-07-31 (Codex 적대검증) 발급명 보강을 **공용 로더로** 옮긴다.
+  //   그 전에는 상세 모달(routes/billing.ts)만 getAgentCustNameMap을 붙여서, 같은 청구서인데
+  //   화면은 `B0082 / 금강제화`, 다운로드·메일 PDF는 `B0082`로 갈렸다 — 라벨 단일화의 목적 자체가 무너진다.
+  //   조회 실패해도 발송ID는 그대로 나온다(이름만 비는 폴백).
+  const custNameMap = await getAgentCustNameMap().catch(() => new Map<string, string>());
+  const items = itemsResult.rows.map((r: any) => ({
+    ...r,
+    cust_name: r.agent_send_id ? custNameMap.get(String(r.agent_send_id)) || null : null,
+  }));
 
   return { bil, items };
 }
@@ -113,6 +127,38 @@ export function buildDisplayFilename(companyName: any, periodLabel: string): str
 }
 
 /** 디스크 파일명 — 장 ID + 렌더 시각 + 난수. 덮어쓰기·동시 쓰기가 구조적으로 불가능하다. */
+/**
+ * ★ 2026-07-31 (Codex 적대검증) 칸 폭에 맞춰 **실측 폭 기준으로 자른다**.
+ *
+ * 이 프로젝트는 같은 사고를 이미 겪었다 — 요금제 행의 적용 구간(11자)이 55pt 칸을 넘겨
+ * `lineBreak: false`로도 안 막히고 두 줄로 흘러 다음 행과 겹쳤다(Harold 스크린샷 실측, 아래 주석).
+ * 구분 칸에 길이 제한 없는 계정명·`발송ID / 발급명`이 들어오면서 같은 부류가 다시 열렸다.
+ * 행 높이가 고정(18pt)이라 두 번째 줄은 곧바로 다음 행을 침범한다.
+ *
+ * 폭 측정은 **현재 설정된 폰트·크기 기준**이므로 반드시 setFont·fontSize 뒤에 부른다.
+ */
+function fitToWidth(doc: any, text: any, maxWidth: number): string {
+  const s = String(text ?? '');
+  if (!s) return '';
+  try {
+    if (doc.widthOfString(s) <= maxWidth) return s;
+    const ell = '…';
+    const ellW = doc.widthOfString(ell);
+    let lo = 0;
+    let hi = s.length;
+    // 이진 탐색 — 문자 단위로 줄이며 말줄임표까지 포함해 칸 안에 들어가는 최대 길이를 찾는다.
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (doc.widthOfString(s.slice(0, mid)) + ellW <= maxWidth) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo > 0 ? s.slice(0, lo) + ell : ell;
+  } catch {
+    // 폭 측정 실패(폰트 미로드 등) — 자르지 않고 원문을 돌려준다. 렌더가 죽는 것보다 낫다.
+    return s;
+  }
+}
+
 function buildDiskFilename(prefix: string, id: any): string {
   const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15); // YYYYMMDDHHmmss
   return `${prefix}_${String(id ?? '').slice(0, 8)}_${stamp}_${randomBytes(3).toString('hex')}.pdf`;
@@ -404,21 +450,19 @@ export async function renderBillingStatementPdf(bil: any, items: any[]): Promise
         //   `요금제 FREE (07-01~07-26)` + `26일 / 31일`로 이미 담고 있어 정보 손실이 없고,
         //   2페이지는 다른 행과 같은 폭·형식을 유지하는 게 표로서 맞다.
         const dateStr = toDayKey(item.item_date).slice(5, 10);
-        // 에이전트는 발송ID, 그 외는 채널 이름. 계정은 장 자체가 계정 단위라 행마다 반복하지 않는다.
-        const scopeLabel = ch === 'agent'
-          ? String(item.agent_send_id || '(발송ID 미상)')
-          : ch === 'plan' ? '요금제'
-          : ch === 'test' ? '테스트'
-          : ch === 'spam' ? '스팸필터'
-          : ch === 'extra' ? '추가 항목'
-          : '한줄로';
+        // ★ 2026-07-31 구분 칸 판정을 CT 하나로 (PDF·상세 모달·화면 3면 동일).
+        //   그 전에는 여기와 AdminDashboard에 인라인 두 벌이라 이미 갈려 있었다 —
+        //   에이전트 발급명이 화면에만 있었고, `extra` 행은 화면에서 원문 'extra'로 노출됐다.
+        const scopeLabel = resolveBillingScopeLabel(item);
         // 요금제 행의 '유형' 칸은 플랜 코드다 — `PLAN_` 접두는 내부 키라 고객에게 보일 값이 아니다.
         const typeText = ch === 'plan'
           ? String(item.message_type || '').replace(/^PLAN_/, '')
           : (typeLabel[item.message_type] || item.message_type);
         doc.text(dateStr, cols[0].x + 4, iy + 5, { width: cols[0].w - 8, lineBreak: false });
-        doc.text(scopeLabel, cols[1].x + 4, iy + 5, { width: cols[1].w - 8, lineBreak: false });
-        doc.text(typeText, cols[2].x + 4, iy + 5, { width: cols[2].w - 8, lineBreak: false });
+        // ★ 2026-07-31 구분·유형은 길이 제한이 없는 값(계정명·발급명·플랜코드)이라 실측 폭으로 자른다.
+        //   자르지 않으면 두 줄로 흘러 다음 행과 겹친다(요금제 일자 칸에서 이미 겪은 사고).
+        doc.text(fitToWidth(doc, scopeLabel, cols[1].w - 8), cols[1].x + 4, iy + 5, { width: cols[1].w - 8, lineBreak: false });
+        doc.text(fitToWidth(doc, typeText, cols[2].w - 8), cols[2].x + 4, iy + 5, { width: cols[2].w - 8, lineBreak: false });
 
         if (ch === 'plan' || ch === 'extra') {
           // 수량 4칸 = '-'. 요금제 일수는 1페이지 `9일 / 31일`, 추가 항목(080 등)은 발송이 아니라 수량 축이 없다.

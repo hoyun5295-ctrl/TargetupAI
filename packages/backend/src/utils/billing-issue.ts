@@ -19,7 +19,7 @@ import { CREDIT_UNIT_PRICE } from './ai-credit-calc';
 import {
   buildCompanyUsageByDay, buildBillingTotals, resolveBillingUnitPricesDetailed, logUnbillableUsageKeys,
   buildBillingUsageRows, diffBillingRowsVsDayData, priceBillingRows,
-  findUnsetPricedTypes, summarizeBlockList,
+  findUnsetPricedTypes, summarizeBlockList, findBlockingPendingRows,
   resolveExistingUserIds, nullifyUnknownUserIds, checkBillingAmountIdentity, chunkArray,
   splitBillingSheets, checkSheetSumIdentity, buildPlanBillingItems, toDayKey,
   buildExtraBillingItems,
@@ -210,6 +210,28 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
       code: 'WEB_UNIT_PRICE_UNSET',
       unset_price_types: webUnsetPriced,
     });
+  }
+
+  // ★ 2026-07-31 (Codex 적대검증 high) 결과 미확정 차단 — 대기(통신사 처리 중) 건이 남아 있으면 발행하지 않는다.
+  //   예약 발송 정리 워커는 큐에 행이 있으면 캠페인을 completed로 올리는데 그 행에 대기가 섞여 있을 수 있다.
+  //   그 상태로 발행하면 대기 건이 0원으로 확정되고, 뒤에 성공으로 바뀌어도 기간 겹침 차단 때문에
+  //   재청구가 불가능하다(영구 미청구). 결과가 확정된 뒤 다시 발행하면 정확히 청구된다.
+  //   ★ 2R 정정 — 판정 입력은 **상세 행(usage.rows)**이다. 일자축(dayData)은 에이전트 원장을 읽지 않아
+  //   에이전트 대기가 이 게이트를 통째로 우회했다. 그리고 유예를 넘긴 오래된 대기는 막지 않는다
+  //   (결과가 영영 안 오는 행이라 0원이 맞고, 무조건 차단하면 그 회사 발행이 영구 봉쇄된다).
+  // ★ 2026-07-31 결과 미확정(대기) — **경고 로그만 남기고 발행은 막지 않는다.**
+  //   경위(Codex 적대검증 1R~4R): 대기 건이 0원으로 확정되면 기간 겹침 차단 때문에 재청구가 불가능하다.
+  //   그래서 처음엔 발행을 차단했는데, 라운드마다 다른 채널에서 구멍이 나왔다 — 스팸은 결과를 확정하지
+  //   않은 채 테스트만 완료로 넘기는 경로가 있어 게이트를 통과하고, 최소과금 정액 발행은 이 경로를 아예
+  //   지나지 않으며, 스팸 워커가 멈추면 그 회사 정산이 자동 회복되지 않는다.
+  //   **원인은 채널마다 "결과 확정"의 의미가 다르다는 것**이고, 한 함수로 덮을 수 있는 문제가 아니다
+  //   (채널별 종결 판정 정규화 = 별도 과제). 불완전한 차단은 "막혔으니 안전하다"는 거짓 확신을 주고,
+  //   워커 교착 시 정산을 멈춰 세우는 쪽이 더 큰 위험이라 **차단을 걷어내고 관측만 남긴다.**
+  //   미리보기는 같은 수치를 화면에 띄워 발행 전에 사람이 보게 한다(billing_guard.pending_types).
+  const pendingRows = findBlockingPendingRows(usage.rows);
+  if (pendingRows.length > 0) {
+    const pendingTotal = pendingRows.reduce((a, p) => a + p.pending, 0);
+    console.log(`[정산][대기주의] company=${company_id} ${billing_start}~${billing_end} — 결과 미확정 ${pendingTotal}건(${pendingRows.map((p) => `${p.channel} ${p.key} ${p.pending}${p.stale ? ' stale' : ''}`).join(', ')}). 이 건들은 0원으로 확정되며 같은 기간 재청구가 불가능하다.`);
   }
 
   // 단가를 못 정하는 유형이 남아 있으면 그 유형은 0원으로 청구된다 — 발행 전에 막는다.

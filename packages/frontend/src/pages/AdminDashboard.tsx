@@ -1975,8 +1975,10 @@ const billingTypeLabel: Record<string, string> = {
   SMS: 'SMS', LMS: 'LMS', MMS: 'MMS', KAKAO: '카카오알림톡',
   TEST_SMS: '테스트SMS', TEST_LMS: '테스트LMS', SPAM_SMS: '스팸SMS', SPAM_LMS: '스팸LMS',
 };
-// 상세 행 '구분' 라벨·행 배경 — PDF 2페이지와 같은 분류(채널 판정은 유형키 접두가 아니라 channel).
-const billingChannelLabel: Record<string, string> = { plan: '요금제', web: '한줄로', agent: '에이전트', test: '테스트', spam: '스팸필터' };
+// 상세 행 '구분' 라벨 — ★2026-07-31부터 **서버가 내리는 `scope_label`이 단일 진실**이다
+// (backend `utils/billing-scope-label.ts`). 이 맵은 구버전 응답용 폴백으로만 남는다.
+// `extra`(080·부가서비스)가 빠져 있어 화면에만 원문 'extra'가 노출되던 것도 함께 채운다.
+const billingChannelLabel: Record<string, string> = { plan: '요금제', web: '한줄로', agent: '에이전트', test: '테스트', spam: '스팸필터', extra: '추가 항목' };
 const billingChannelBg: Record<string, string> = { plan: 'bg-violet-50', agent: 'bg-blue-50/70', test: 'bg-amber-50', spam: 'bg-orange-50' };
 // 요금제 구간 끝일 — item_date(YYYY-MM-DD) + (plan_days - 1). UTC 성분 산술이라 TZ 무관.
 const billingShiftDay = (day: string, delta: number) => {
@@ -10436,10 +10438,14 @@ const handleApproveRequest = async (id: string) => {
                                 const typeText = isPlan
                                   ? String(item.message_type).replace(/^PLAN_/, '')
                                   : (billingTypeLabel[item.message_type] || item.message_type);
-                                // ★ 2026-07-27 에이전트 행은 `발송ID / 발급명` — 발송ID만으론 어느 계정 청구인지 안 읽힌다.
-                                const scopeText = ch === 'agent'
-                                  ? (formatAgentIdLabel(item.agent_send_id, item.cust_name) || '(발송ID 미상)')
-                                  : (billingChannelLabel[ch] || ch);
+                                // ★ 2026-07-31 구분 칸은 **서버가 확정한 값**(scope_label)을 그대로 쓴다 —
+                                //   화면이 자기 판정을 또 두면 청구서(PDF)와 갈린다(실제로 갈려 있었다:
+                                //   발급명은 화면에만, `extra` 행은 화면에서 원문 'extra' 노출).
+                                //   구버전 응답 대비 폴백만 남긴다.
+                                const scopeText = item.scope_label
+                                  || (ch === 'agent'
+                                    ? (formatAgentIdLabel(item.agent_send_id, item.cust_name) || '(발송ID 미상)')
+                                    : (billingChannelLabel[ch] || ch));
                                 const rowBg = billingChannelBg[ch] || (idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50');
                                 return (
                                   <tr key={idx} className={rowBg}>

@@ -16,7 +16,7 @@ import {
 //   게이트웨이 발송분이 청구서에서 통째로 빠져 있었다.
 import {
   buildBillingUsageRows, diffBillingRowsVsDayData, priceBillingRows,
-  resolveBillingUnitPricesDetailed, findUnsetPricedTypes, summarizeBlockList,
+  resolveBillingUnitPricesDetailed, findUnsetPricedTypes, summarizeBlockList, findBlockingPendingRows,
   // ★ 2026-07-28 발행 전용 식별자(장 분할·항등식·계정 정리·청크)는 utils/billing-issue.ts로 이동했다.
   buildPlanBillingItems, toDayKey,
   type PricedBillingItem, type BillingScope,
@@ -29,6 +29,7 @@ import { renderBillingStatementPdf, renderInvoicePdf, loadBillingStatementData, 
 import { retryUnsentConfirmations } from '../utils/invoice-confirm';
 import { normalizeUnitPriceBasis } from '../utils/unit-price';
 import { buildInvoiceLines, checkInvoiceLinesAgainstHeader, sumFlooredInvoiceLines } from '../utils/billing-invoice-lines';
+import { resolveBillingScopeLabel } from '../utils/billing-scope-label';
 import {
   loadPlanChanges, buildPlanSegments, sumPlanSegments, evaluatePlanHistoryGate,
   countPlanChanges, planChangesFingerprint,
@@ -1307,9 +1308,12 @@ router.get('/:id/items', async (req: Request, res: Response) => {
       //   여러 줄 생기는데 tie-breaker가 없어 순서가 비결정적이었다(D150-4와 같은 계열).
       // ★ 2026-07-26 발송ID 병기 — 에이전트 행이 어느 발송ID 것인지가 정산 대조의 근거다.
       //   JOIN 대상(`company_agent_ids.id`)·FK(`billing_items_agent_id_fkey`)는 pg_constraint 실측 확인분.
-      `SELECT bi.*, cai.agent_send_id
+      // ★ 2026-07-31 계정명 병기(서수란 접수) — PDF와 같은 조인. 구분 칸이 웹 행에 늘 '한줄로'만 찍어
+      //   한 회사 안에서 어느 계정(지점)이 쓴 발송인지 청구서·화면 어디서도 구분할 수 없었다.
+      `SELECT bi.*, cai.agent_send_id, u.name AS user_name, u.login_id AS user_login_id
          FROM billing_items bi
          LEFT JOIN company_agent_ids cai ON cai.id = bi.agent_id
+         LEFT JOIN users u ON u.id = bi.user_id
         WHERE bi.billing_id = $1
         ORDER BY bi.channel ASC, bi.item_date ASC, bi.message_type ASC,
                  cai.agent_send_id ASC NULLS FIRST, bi.user_id ASC NULLS FIRST, bi.id ASC`,
@@ -1338,11 +1342,17 @@ router.get('/:id/items', async (req: Request, res: Response) => {
         billing_start: toDayKey(bil.billing_start),
         billing_end: toDayKey(bil.billing_end),
       },
-      items: items.rows.map((r: any) => ({
-        ...r,
-        item_date: toDayKey(r.item_date),
-        cust_name: r.agent_send_id ? custNameMap.get(String(r.agent_send_id)) || null : null,
-      })),
+      items: items.rows.map((r: any) => {
+        const cust_name = r.agent_send_id ? custNameMap.get(String(r.agent_send_id)) || null : null;
+        // ★ 2026-07-31 구분 칸을 **서버가 확정해서 내린다** — 화면이 자기 판정을 또 두면 청구서와 갈린다
+        //   (실제로 갈려 있었다: 발급명은 화면에만, `extra` 행은 화면에서 원문 노출).
+        return {
+          ...r,
+          item_date: toDayKey(r.item_date),
+          cust_name,
+          scope_label: resolveBillingScopeLabel({ ...r, cust_name }),
+        };
+      }),
       lines,
       header_check: headerCheck,
     });
@@ -1619,6 +1629,9 @@ router.get('/preview', async (req: Request, res: Response) => {
     //   여기서는 막지 않고 발행이 막힐 이유를 billing_guard로 함께 알린다.
     const usage = await buildBillingUsageRows({ companyId, startDate, endDate, userId, ledger });
     const axisDiffs = diffBillingRowsVsDayData(usage.rows, dayData);
+    // ★ 2026-07-31 결과 미확정(대기) — 발행 차단과 **같은 함수·같은 입력**(상세 행)으로 판정한다.
+    //   일자축(dayData)으로 보면 에이전트 대기가 빠져 미리보기만 통과하는 어긋남이 생긴다(Codex 2R).
+    const previewPending = findBlockingPendingRows(usage.rows);
     const priced = priceBillingRows(
       usage.rows, prices, ledger.postpaidPriceRows,
       normalizeUnitPriceBasis(ledger.companyPriceRow?.unit_price_basis),
@@ -1729,6 +1742,9 @@ router.get('/preview', async (req: Request, res: Response) => {
     const block = (code: string, msg: string) => { blockerCodes.push(code); blockers.push(msg); };
     if (!billable) block('PREPAID_COMPANY_NOT_BILLABLE', '선불 고객사 — 발송 시점에 잔액에서 이미 차감되어 월 정산서 발행 시 이중 청구');
     if (axisDiffs.length > 0) block('BILLING_AXIS_MISMATCH', '청구 상세와 사용량 집계 수량 불일치');
+    // ★ 2026-07-31 결과 미확정 — **차단하지 않고 보여준다**(billing-issue와 같은 판정·같은 정책).
+    //   차단으로 두면 채널별 종결 의미가 달라 구멍이 남는 채 "막혔으니 안전"이라는 거짓 확신을 주고,
+    //   워커 교착 시 정산이 멈춘다. 수치는 아래 billing_guard.pending_types로 화면에 내려 사람이 판단한다.
     if (unbillable.length > 0) block('UNBILLABLE_TYPE_KEY', `청구 단가가 정의되지 않은 유형: ${summarizeBlockList(unbillable.map((u) => u.key))}`);
     if (webUnsetPriced.length > 0) block('WEB_UNIT_PRICE_UNSET', `고객사 단가 미설정: ${summarizeBlockList(webUnsetPriced.map((u) => u.key))}`);
     if (priced.missingAgentPrices.length > 0) block('AGENT_UNIT_PRICE_MISSING', `에이전트 발송ID 단가 미설정: ${summarizeBlockList(priced.missingAgentPrices.map((m) => `${m.agentSendId} ${m.typeKey}`))}`);
@@ -1749,6 +1765,9 @@ router.get('/preview', async (req: Request, res: Response) => {
       missing_agent_prices: priced.missingAgentPrices,
       agent_mapping_missing: usage.agentMappingMissing,
       plan_gap: planGate.gap,
+      // ★ 2026-07-31 결과 미확정(대기) — 차단은 아니지만 **그대로 발행하면 0원으로 굳고 재청구가 불가능**하다.
+      //   발행 전에 사람이 보고 판단하라고 내려보낸다(채널·유형·건수·최종 발송일·오래 남았는지).
+      pending_types: previewPending,
       // 차단은 아니지만 금액에 영향이 있다 — "그 기간 앞부분은 요금제 없음"을 미리보기에서 보여준다.
       plan_uncovered_head: planGate.uncoveredHead,
     };

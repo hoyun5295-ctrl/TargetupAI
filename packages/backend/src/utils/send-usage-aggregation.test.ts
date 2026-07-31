@@ -5,7 +5,7 @@ import {
   diffBillingRowsVsDayData, sortBillingUsageRows, priceBillingRows, toDayKey,
   billingRowKey, resolveBillingUnitPricesDetailed, findUnsetPricedTypes, summarizeBlockList,
   nullifyUnknownUserIds, checkBillingAmountIdentity, chunkArray,
-  splitBillingSheets, checkSheetSumIdentity, buildPlanBillingItems,
+  splitBillingSheets, checkSheetSumIdentity, buildPlanBillingItems, aggregateBillingSendIds, partitionBillingSendIds, findBlockingPendingRows,
   type BillingUsageRow, type AgentUnitPriceRow, type PricedBillingItem,
 } from './send-usage-aggregation';
 import type { PayAgentStoreRow } from './pay-stats';
@@ -1153,5 +1153,163 @@ describe('buildPlanBillingItems — 요금제 행 (2026-07-26)', () => {
     const sheets = splitBillingSheets([planRow], 'combined');
     expect(Object.values(sheets[0].totals).every((v) => v === 0)).toBe(true);
     expect(sheets[0].amount).toBe(101613);
+  });
+});
+
+// ★ 2026-07-31 레거시 예약 직접발송 누락 정정 — 두 집합의 **기간 조건 계약**을 고정한다.
+//   서수란 접수("거래내역서 수량 상이")의 실원인이 이 축이었다: 레거시 direct는 send_phase가 NULL이라
+//   `= 'sent'` 조건에서 빠지고, 예약 건은 campaign_runs도 없어 두 축 어디에도 안 걸렸다.
+//   정정은 "레거시 NULL 건을 periodCampaignIds(기간 조건 동반)로 보낸다"인데, 이때 **eventIds로 잘못 보내면**
+//   이미 기간 보호를 받던 캠페인이 dateless 축으로 옮겨가 발송 월과 무관하게 전량 계상되는 더 큰 사고가 난다.
+//   그 계약을 여기서 못 박는다 — agg가 주입 가능이라 실제 WHERE 절을 검사할 수 있다.
+describe('aggregateBillingSendIds — 집합별 기간 조건 계약 (2026-07-31)', () => {
+  const capture = () => {
+    const calls: { where: string; params: any[] }[] = [];
+    const agg = async (_tables: string[], where: string, params: any[]) => {
+      calls.push({ where, params });
+      return [];
+    };
+    return { calls, agg };
+  };
+
+  it('eventIds는 기간 조건 없이 app_etc1만으로 집계한다 (1 ID = 1 발송 이벤트 계약)', async () => {
+    const { calls, agg } = capture();
+    await aggregateBillingSendIds(['T1'], { eventIds: ['e1', 'e2'], periodCampaignIds: [] }, agg, '2026-07-01', '2026-07-31');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].where).toContain('app_etc1 IN');
+    expect(calls[0].where).not.toContain('sendreq_time');
+    expect(calls[0].params).toEqual(['e1', 'e2']);
+  });
+
+  it('periodCampaignIds는 **반드시** sendreq_time 기간 조건과 함께 집계한다 (월경계 이중계상 차단)', async () => {
+    const { calls, agg } = capture();
+    await aggregateBillingSendIds(['T1'], { eventIds: [], periodCampaignIds: ['c1'] }, agg, '2026-07-01', '2026-07-31');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].where).toContain('sendreq_time >= ?');
+    expect(calls[0].where).toContain('DATE_ADD(?, INTERVAL 1 DAY)');
+    // 기간 파라미터가 ID 뒤에 붙는다 — 순서가 바뀌면 엉뚱한 기간으로 집계된다.
+    expect(calls[0].params).toEqual(['c1', '2026-07-01', '2026-07-31']);
+  });
+
+  it('두 집합이 함께 있으면 각자의 계약대로 **따로** 나간다', async () => {
+    const { calls, agg } = capture();
+    await aggregateBillingSendIds(['T1'], { eventIds: ['e1'], periodCampaignIds: ['c1'] }, agg, '2026-07-01', '2026-07-31');
+    expect(calls).toHaveLength(2);
+    const dateless = calls.filter((c) => !c.where.includes('sendreq_time'));
+    const dated = calls.filter((c) => c.where.includes('sendreq_time'));
+    expect(dateless).toHaveLength(1);
+    expect(dated).toHaveLength(1);
+    expect(dateless[0].params).toEqual(['e1']);
+    expect(dated[0].params).toEqual(['c1', '2026-07-01', '2026-07-31']);
+  });
+
+  it('빈 집합은 쿼리를 만들지 않는다 (전 테이블 스캔 유발 차단)', async () => {
+    const { calls, agg } = capture();
+    await aggregateBillingSendIds(['T1'], { eventIds: [], periodCampaignIds: [] }, agg, '2026-07-01', '2026-07-31');
+    expect(calls).toHaveLength(0);
+  });
+});
+
+// ★ 2026-07-31 레거시 direct 배분 계약 — **이 판정이 틀리면 청구 금액이 틀린다.**
+//   실원인: 레거시 `POST /direct-send`가 send_phase를 안 넣어 NULL이고(컬럼 DEFAULT 없음 — 실측),
+//   예약 건은 campaign_runs도 없어 두 축 어디에도 안 걸려 실발송이 미청구였다(라프레리 6월 성공 11건 실측).
+describe('partitionBillingSendIds — 레거시 direct 배분 (2026-07-31)', () => {
+  it('레거시(send_phase NULL) direct는 **periodCampaignIds로** 간다 — eventIds로 가면 기간 보호가 사라진다', () => {
+    const out = partitionBillingSendIds({ runs: [], directs: [], legacyDirects: [{ campaign_id: 'legacy1' }] });
+    expect(out.periodCampaignIds).toEqual(['legacy1']);
+    expect(out.eventIds).toEqual([]);
+  });
+
+  it('기존 축은 그대로다 — run은 cr.id가 eventIds, 그 campaigns.id는 periodCampaignIds', () => {
+    const out = partitionBillingSendIds({
+      runs: [{ run_id: 'run1', campaign_id: 'camp1' }],
+      directs: [{ run_id: 'direct1' }],
+      legacyDirects: [],
+    });
+    expect(out.eventIds.sort()).toEqual(['direct1', 'run1']);
+    expect(out.periodCampaignIds).toEqual(['camp1']);
+  });
+
+  it('같은 id가 eventIds에 있으면 periodCampaignIds에 넣지 않는다 (한 행이 두 축에 걸리면 이중 계상)', () => {
+    // 구형 경로: direct 캠페인이 campaign_runs도 만들어 campaigns.id가 양쪽 후보가 되는 경우
+    const out = partitionBillingSendIds({
+      runs: [{ run_id: 'run1', campaign_id: 'dup' }],
+      directs: [{ run_id: 'dup' }],
+      legacyDirects: [{ campaign_id: 'dup' }],
+    });
+    expect(out.eventIds.sort()).toEqual(['dup', 'run1']);
+    expect(out.periodCampaignIds).toEqual([]);
+  });
+
+  it('레거시가 run 기반 campaigns.id와 겹쳐도 중복되지 않는다', () => {
+    const out = partitionBillingSendIds({
+      runs: [{ run_id: 'run1', campaign_id: 'camp1' }],
+      directs: [],
+      legacyDirects: [{ campaign_id: 'camp1' }],
+    });
+    expect(out.periodCampaignIds).toEqual(['camp1']);
+  });
+
+  it('빈 입력·누락 필드에도 터지지 않는다', () => {
+    expect(partitionBillingSendIds({ runs: [], directs: [], legacyDirects: [] }))
+      .toEqual({ eventIds: [], periodCampaignIds: [] });
+  });
+});
+
+
+// ★ 2026-07-31 (Codex 1R high + 2R high) 결과 미확정 차단 — 상세 행 기준·유예 반영.
+//   1R: 대기 건을 0원으로 확정하면 기간 겹침 차단 때문에 영구 미청구가 된다 → 막는다.
+//   2R: ① 입력이 dayData면 **에이전트 대기가 통째로 빠진다**(그 축은 일자 집계에 없다)
+//       ② 무조건 차단하면 결과가 영영 안 오는 행 하나가 그 회사 발행을 영구 봉쇄한다.
+describe('findBlockingPendingRows — 발행 차단 대기 판정 (2026-07-31)', () => {
+  const row = (over: any) => ({
+    channel: 'web', itemDate: '2026-07-30', typeKey: 'LMS', userId: null, agentSendId: null,
+    total: 0, success: 0, fail: 0, pending: 0, ...over,
+  }) as any;
+  const NOW = new Date('2026-07-31T12:00:00+09:00');
+
+  it('대기는 채널·유형별로 합산하고 많은 순으로 준다', () => {
+    const out = findBlockingPendingRows([
+      row({ pending: 2 }),
+      row({ pending: 3, itemDate: '2026-07-31' }),
+      row({ channel: 'agent', typeKey: 'SMS', pending: 1, agentSendId: 'B0082' }),
+    ], { now: NOW });
+    expect(out).toEqual([
+      { channel: 'web', key: 'LMS', pending: 5, latestDate: '2026-07-31', stale: false },
+      { channel: 'agent', key: 'SMS', pending: 1, latestDate: '2026-07-30', stale: false },
+    ]);
+  });
+
+  it('★ 에이전트 대기도 잡는다 (일자축 입력이면 이 채널이 통째로 빠졌다 — 2R high)', () => {
+    const out = findBlockingPendingRows([
+      row({ channel: 'agent', typeKey: 'LMS', pending: 7, agentSendId: 'B0082' }),
+    ], { now: NOW });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ channel: 'agent', pending: 7 });
+  });
+
+  it('★ 오래된 대기도 **막는다** — 나이는 종결을 증명하지 않는다 (3R high)', () => {
+    const out = findBlockingPendingRows([row({ pending: 9, itemDate: '2026-07-01' })], { now: NOW });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ pending: 9, stale: true });
+  });
+
+  it('유예 경계 — 안쪽은 stale=false, 바깥은 stale=true (둘 다 차단 대상)', () => {
+    // 기본 48h → 커트라인 2026-07-29
+    expect(findBlockingPendingRows([row({ pending: 1, itemDate: '2026-07-29' })], { now: NOW })[0].stale).toBe(false);
+    expect(findBlockingPendingRows([row({ pending: 1, itemDate: '2026-07-28' })], { now: NOW })[0].stale).toBe(true);
+  });
+
+  it('같은 묶음에 최근 대기가 섞여 있으면 stale이 아니다 (기다리면 풀릴 수 있다)', () => {
+    const out = findBlockingPendingRows([
+      row({ pending: 1, itemDate: '2026-07-01' }),
+      row({ pending: 1, itemDate: '2026-07-31' }),
+    ], { now: NOW });
+    expect(out[0]).toMatchObject({ pending: 2, latestDate: '2026-07-31', stale: false });
+  });
+
+  it('대기 0이거나 행이 없으면 빈 배열 = 발행 통과', () => {
+    expect(findBlockingPendingRows([row({ pending: 0 })], { now: NOW })).toEqual([]);
+    expect(findBlockingPendingRows([], { now: NOW })).toEqual([]);
   });
 });
