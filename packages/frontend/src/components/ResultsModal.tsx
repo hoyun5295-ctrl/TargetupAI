@@ -4,6 +4,16 @@ import MmsImagePreview from './shared/MmsImagePreview';
 import CalendarModal from './CalendarModal';
 import CampaignDetailModal from './CampaignDetailModal';
 import { Send, CheckCircle2, XCircle, TrendingUp, Wallet, Download } from 'lucide-react';
+import {
+  MSG_TYPE_LABEL,
+  SEND_TYPE_LABEL,
+  isAlimtalkChannel,
+  isBrandOnlyChannel,
+  matchesSendTypeFilter,
+  resolveChannelChipClass,
+  resolveChannelLabel,
+  resolveSendTypeLabel,
+} from '../utils/campaign-axis';
 
 interface ResultsModalProps {
   onClose: () => void;
@@ -232,7 +242,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
     }
   };
 
-  const msgTypeLabel: Record<string, string> = { SMS: 'SMS', LMS: 'LMS', MMS: 'MMS', S: 'SMS', L: 'LMS', M: 'MMS', K: '알림톡', F: '친구톡' };
+  const msgTypeLabel = MSG_TYPE_LABEL;
 
 
 
@@ -246,8 +256,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
 
   // 필터링
   const filteredCampaigns = campaigns.filter(c => {
-    if (filterType === 'direct' && c.send_type !== 'direct') return false;
-    if (filterType === 'ai' && c.send_type === 'direct') return false;
+    // ★ 2026-07-31 이분법 폐기 — 'direct'가 아니면 전부 AI로 보던 탓에 자동발송·여정이 AI 필터에 섞였다.
+    if (!matchesSendTypeFilter(c.send_type, filterType)) return false;
     if (filterSender !== 'all' && c.created_by_name !== filterSender) return false;
     return true;
   });
@@ -256,7 +266,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
   const messageTotalPages = Math.ceil(messageTotal / messagePerPage);
 
   const getStatusLabel = (c: any) => {
-    const type = c.send_type === 'direct' ? '수동' : 'AI';
+    const type = resolveSendTypeLabel(c.send_type);
     let status = c.status;
     if (status === 'completed') status = '완료';
     else if (status === 'scheduled') status = '예약';
@@ -351,8 +361,10 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                   className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-400"
                 >
                   <option value="all">전체</option>
-                  <option value="ai">AI</option>
-                  <option value="direct">수동</option>
+                  <option value="direct">{SEND_TYPE_LABEL.direct}</option>
+                  <option value="ai">{SEND_TYPE_LABEL.ai}</option>
+                  <option value="auto">{SEND_TYPE_LABEL.auto}</option>
+                  <option value="journey">{SEND_TYPE_LABEL.journey}</option>
                 </select>
                 <span className="text-sm text-slate-500 font-medium">발송자</span>
                 <select
@@ -381,16 +393,24 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                 // D183: 전송 분모 = sent_count(통신사 발송 누계) 또는 target_count(목표 수) — 대기분 포함
                 const totalSent = filteredCampaigns.reduce((sum, c) => sum + (c.sent_count || c.target_count || 0), 0);
                 const successRate = totalSent > 0 ? Math.round((totalSuccess / totalSent) * 100) : 0;
-                // 메시지 타입별 단가 적용 (SMS/LMS/MMS/카카오 구분)
-                const perSms = summary?.costs?.perSms || 9.9;
-                const perLms = summary?.costs?.perLms || 27;
-                const perMms = summary?.costs?.perMms || 50;
-                const perKakao = summary?.costs?.perKakao || 7.5;
+                // 메시지 타입별 단가 — 서버가 회사 계약 단가를 이미 해석해 보낸다(무료 계약은 0원 그대로).
+                // ★ 2026-07-31 `||` → `??`. 0원 계약이 오면 falsy라 기본 단가로 되살아나, 서버가 지키는
+                //   "명시적 0원은 0원" 계약을 화면만 깨고 있었다.
+                const perSms = summary?.costs?.perSms ?? 9.9;
+                const perLms = summary?.costs?.perLms ?? 27;
+                const perMms = summary?.costs?.perMms ?? 50;
+                const perKakao = summary?.costs?.perKakao ?? 7.5;
+                const perBrand = summary?.costs?.perBrand ?? perKakao;
                 const estimatedCost = filteredCampaigns.reduce((sum, c) => {
                   const success = c.success_count || 0;
                   const type = (c.message_type || 'SMS').toUpperCase();
-                  const channel = c.send_channel || 'sms';
-                  if (channel === 'kakao') return sum + success * perKakao;
+                  // ★ 2026-07-31 판정을 CT로 — 전에는 채널값 'kakao' 하나만 걸러서 전용 발송('kakao_brand')이
+                  //   message_type='LMS'로 떨어져 문자 단가로 계산됐다.
+                  //   브랜드는 BRAND 단가(cost_per_brand)로 차감되므로 그 단가로 센다 — 알림톡 단가가 아니다.
+                  //   ⚠ 'both'는 문자·브랜드가 섞여 있는데 성공 건수가 채널별로 안 나뉜다. 아래 문자 단가로
+                  //     계산되는 것은 기존 동작 그대로이고, 분리는 서버 실측 축이 필요한 별건이다.
+                  if (isBrandOnlyChannel(c)) return sum + success * perBrand;
+                  if (isAlimtalkChannel(c)) return sum + success * perKakao;
                   if (type === 'MMS') return sum + success * perMms;
                   if (type === 'LMS') return sum + success * perLms;
                   return sum + success * perSms;
@@ -467,17 +487,13 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
               {(() => {
                 const pageRows = filteredCampaigns.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
                 const rateBarClass = (rate: number) => rate >= 98 ? 'bg-emerald-500' : rate >= 95 ? 'bg-amber-500' : 'bg-rose-500';
+                // ★ 2026-07-31 판정은 campaign-axis CT 단일. 전에는 채널값 'kakao' 하나만 비교해서
+                //   전용 발송이 쓰는 'kakao_brand'가 안 걸리고 message_type('LMS')으로 흘러내렸다.
                 const channelChip = (c: any) => {
-                  const isLmsMms = c.message_type === 'LMS' || c.message_type === 'MMS' || c.message_type === 'L' || c.message_type === 'M';
-                  const cls = c.send_channel === 'kakao' ? 'bg-yellow-50 text-yellow-700 border border-yellow-200'
-                    : c.send_channel === 'alimtalk' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                    : c.send_channel === 'both' || isLmsMms ? 'bg-violet-50 text-violet-700 border border-violet-200'
-                    : 'bg-slate-100 text-slate-600 border border-slate-200';
-                  const label = c.send_channel === 'kakao' ? '💬 카카오'
-                    : c.send_channel === 'alimtalk' ? '📨 알림톡'
-                    : c.send_channel === 'both' ? '📱+💬'
-                    : `📱 ${msgTypeLabel[c.message_type] || 'SMS'}`;
-                  return { cls, label };
+                  const cls = resolveChannelChipClass(c);
+                  const name = resolveChannelLabel(c);
+                  const icon = isAlimtalkChannel(c) ? '📨' : isBrandOnlyChannel(c) ? '💬' : '📱';
+                  return { cls, label: `${icon} ${name}` };
                 };
                 return (
               <div className="rounded-2xl border border-slate-200 overflow-hidden">

@@ -1,4 +1,5 @@
 // ★ D89: 날짜 포맷팅 유틸 — 순수 날짜(YYYY-MM-DD)는 UTC 변환 없이 직접 파싱
+import { isAlimtalkChannel, isBrandOnlyChannel } from './campaign-axis';
 
 /**
  * ★ D144 P2 (2026-05-06): 잔여 %변수% 안전장치 컨트롤타워 (frontend)
@@ -1039,7 +1040,7 @@ export function formatCampaignMessageForDisplay(
 
   // ★ D227+ (2026-05-28 영업팀장 박성용 신고 fix): 알림톡 = message_content 영역 = 사용자 직접 입력 X 영역
   //   = 표시 시 templateCode 영역 활용 의무 (메시지 내용 영역 = 빈 영역 표시 사고 정정)
-  if (campaign.send_channel === 'alimtalk') {
+  if (isAlimtalkChannel(campaign)) {
     if (source && source.trim()) {
       // 실발송 텍스트 영역 OR 사용자 직접 본문 영역 = 영역 보존
       return source;
@@ -1049,6 +1050,11 @@ export function formatCampaignMessageForDisplay(
       ? `[알림톡 템플릿] ${campaign.alimtalk_template_code}`
       : '[알림톡 템플릿 미설정]';
   }
+
+  // ★ 2026-07-31 브랜드메시지도 문자 광고표기를 붙이지 않는다.
+  //   실제 큐에 실린 본문에는 (광고)·무료수신거부가 없는데(msg_contents MESSAGE 실측) 미리보기만
+  //   붙여, 화면이 보내지 않은 문구를 보여주고 있었다. 카카오는 문자 광고표기 규격을 쓰지 않는다.
+  if (isBrandOnlyChannel(campaign)) return source;
 
   // ★ D143 (2026-05-04, 정식 오픈 D-Day 1일 전) — Harold님 명시 정책:
   //   광고체크 OFF (is_ad=false) → 사용자 입력 본문 그대로 표시 (어떤 처리도 안 함)

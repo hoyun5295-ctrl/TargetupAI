@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { calculateSmsBytes, buildAdSubjectFront } from '../utils/formatDate';
+import { resolveChannelLabel } from '../utils/campaign-axis';
 import MmsImagePreview from './shared/MmsImagePreview';
 
 interface ScheduledCampaignModalProps {
@@ -103,7 +104,7 @@ export default function ScheduledCampaignModal({
                 >
                   <div className="font-semibold text-gray-800 text-sm truncate">{c.campaign_name}</div>
                   <div className="text-xs text-gray-500 mt-1">
-                    📱 {c.message_type} · 👥 {c.target_count?.toLocaleString()}명
+                    📱 {resolveChannelLabel(c)} · 👥 {c.target_count?.toLocaleString()}명
                     {c.status === 'draft' && <span className="ml-1 text-amber-600 font-medium">(미확정)</span>}
                   </div>
                   <div className="text-xs text-blue-600 mt-1">
@@ -126,7 +127,7 @@ export default function ScheduledCampaignModal({
                     <div>
                       <div className="font-bold text-lg">{selectedScheduled.campaign_name}</div>
                       <div className="text-sm text-gray-500 mt-1">
-                        {selectedScheduled.message_type} · {selectedScheduled.target_count?.toLocaleString()}명
+                        {resolveChannelLabel(selectedScheduled)} · {selectedScheduled.target_count?.toLocaleString()}명
                       </div>
                       {/* LMS/MMS 제목 표시 */}
                       {(selectedScheduled.message_type === 'LMS' || selectedScheduled.message_type === 'MMS') && (selectedScheduled.message_subject || selectedScheduled.subject) && (

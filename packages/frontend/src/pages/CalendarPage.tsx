@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '../stores/authStore';
 import { formatDateTime } from '../utils/formatDate';
+import { resolveChannelLabel } from '../utils/campaign-axis';
 
 interface Campaign {
   id: string;
   campaign_name: string;
   status: string;
   message_type: string;
+  // 카카오·알림톡은 message_type이 전부 'LMS'라 채널 구분은 이 값이 담당한다(GET /api/campaigns 응답).
+  send_channel?: string | null;
   target_count: number;
   sent_count: number;
   success_count: number;
@@ -254,7 +257,7 @@ export default function CalendarPage() {
 
                   <div className="flex items-center">
                     <span className="text-sm text-gray-500 w-16">채널</span>
-                    <span className="font-medium">{selectedCampaign.message_type}</span>
+                    <span className="font-medium">{resolveChannelLabel(selectedCampaign)}</span>
                   </div>
 
                   <div className="flex items-center">

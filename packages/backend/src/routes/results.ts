@@ -17,6 +17,7 @@ import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils
 import { buildCampaignListCsv, channelPlainLabel, CampaignCsvRow } from '../utils/campaign-list-csv';
 // ★ 2026-07-23: 에이전트(agent·both) 회사 발송결과에 엔진 통계 유형별 병행 표시
 import { queryPayAgentByType, isPayStatsConfigured } from '../utils/pay-stats';
+import { isSendTypeFilter } from '../utils/send-type-axis';
 
 const router = Router();
 
@@ -163,7 +164,9 @@ router.get('/summary', async (req: Request, res: Response) => {
     const totalCampaigns = summaryMeta.rows.length;
 
     const costResult = await query(
-      `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, unit_price_basis FROM companies WHERE id = $1`,
+      // ★ 2026-07-31 cost_per_brand 동반 조회 — 브랜드는 BRAND 단가로 차감되는데 표시 축에만 없어
+      //   화면이 알림톡 단가로 계산하고 있었다(실차감·환불 원장과 불일치).
+      `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand, unit_price_basis FROM companies WHERE id = $1`,
       [companyId]
     );
     // ★ 2026-07-26 화면 비용은 고객이 실제로 지불하는 금액(부가세 포함)이다 — CT가 기준을 해석한다.
@@ -211,6 +214,7 @@ router.get('/summary', async (req: Request, res: Response) => {
         perLms: costs.lms,
         perMms: costs.mms,
         perKakao: costs.kakao,
+        perBrand: costs.brand,
       },
       // ★ 2026-07-23 에이전트(엔진) 발송 유형별 (agent·both만 채워짐)
       agent: { summary: agentSummary, byType: agentByType },
@@ -430,13 +434,12 @@ router.get('/campaigns/export', async (req: Request, res: Response) => {
     params.push(...campDr.params);
     paramIndex = campDr.nextIndex;
 
-    // 화면 필터 정합 — 유형(filterType: ai/direct = send_type), 발송자(filterSender = u.login_id)
-    if (sendType === 'direct') {
+    // 화면 필터 정합 — 유형(filterType = send_type 값 그대로), 발송자(filterSender = u.login_id)
+    // ★ 2026-07-31 이분법 폐기. 'ai'가 `send_type <> 'direct'`였던 탓에 자동발송('auto')과
+    //   여정('journey')이 AI 필터에 통째로 섞였다. 화면 CT(campaign-axis)와 같은 값 집합을 쓴다.
+    if (isSendTypeFilter(sendType)) {
       whereClause += ` AND send_type = $${paramIndex++}`;
-      params.push('direct');
-    } else if (sendType === 'ai') {
-      whereClause += ` AND send_type <> $${paramIndex++}`;
-      params.push('direct');
+      params.push(sendType);
     }
     let senderFilter = '';
     if (sender && sender !== 'all' && typeof sender === 'string') {

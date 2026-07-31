@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../stores/authStore';
 import { formatDateTime, formatCampaignMessageForDisplay } from '../utils/formatDate';
+import { resolveChannelLabel } from '../utils/campaign-axis';
 import MmsImagePreview from './shared/MmsImagePreview';
 import { useToast } from './ToastProvider';
 import ConfirmModal, { type ConfirmState } from './ConfirmModal';
@@ -291,7 +292,7 @@ export default function CalendarModal({ onClose, token, onEdit, embedded }: Cale
                   {/* 채널 */}
                   <div className="flex items-center gap-2">
                     <span className="text-gray-500 w-16">채널</span>
-                    <span className="font-medium">{selectedCampaign.message_type}</span>
+                    <span className="font-medium">{resolveChannelLabel(selectedCampaign)}</span>
                   </div>
 
                   {/* 제목 (LMS/MMS) — 직원 신고(2026-06-01): 리뉴얼 후 캘린더에서 제목 미표시 정정 */}
@@ -426,7 +427,7 @@ export default function CalendarModal({ onClose, token, onEdit, embedded }: Cale
                           <span className={`px-1.5 py-0.5 rounded ${statusColors[c.status]}`}>
                             {statusLabels[c.status]}
                           </span>
-                          <span className="text-gray-400">{c.message_type}</span>
+                          <span className="text-gray-400">{resolveChannelLabel(c)}</span>
                           <span className="text-gray-400">{c.target_count?.toLocaleString()}명</span>
                         </div>
                       </div>

@@ -1,4 +1,5 @@
 import { formatDateTime } from '../utils/formatDate';
+import { resolveChannelLabel, resolveSendTypeChipClass, resolveSendTypeIcon, resolveSendTypeLabel } from '../utils/campaign-axis';
 
 interface RecentCampaignModalProps {
   show: boolean;
@@ -35,11 +36,11 @@ export default function RecentCampaignModal({ show, onClose, recentCampaigns }: 
                   </div>
                   <div className="text-sm text-gray-500 space-y-1">
                     <div>
-                      {c.send_type === 'direct' ? '📤' : '🤖'} 
-                      <span className={`ml-1 text-xs px-1.5 py-0.5 rounded ${c.send_type === 'direct' ? 'bg-emerald-100 text-emerald-700' : 'bg-purple-100 text-purple-700'}`}>
-                        {c.send_type === 'direct' ? '직접' : 'AI'}
+                      {resolveSendTypeIcon(c.send_type)}
+                      <span className={`ml-1 text-xs px-1.5 py-0.5 rounded ${resolveSendTypeChipClass(c.send_type)}`}>
+                        {resolveSendTypeLabel(c.send_type)}
                       </span>
-                      <span className="ml-2">📱 {c.message_type} · 👥 {c.target_count?.toLocaleString()}명</span>
+                      <span className="ml-2">📱 {resolveChannelLabel(c)} · 👥 {c.target_count?.toLocaleString()}명</span>
                     </div>
                     <div>✅ 성공 {c.success_count?.toLocaleString() || 0} · ❌ 실패 {c.fail_count?.toLocaleString() || 0}</div>
                     <div className="text-xs text-gray-400">{formatDateTime(c.created_at)}</div>

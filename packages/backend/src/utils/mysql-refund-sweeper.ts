@@ -39,6 +39,7 @@ import { sendSystemAlert } from './system-alert';
 import { recordCampaignLearning } from './company-memory';
 // ★ 2026-06-13: 차등 주기 — 발송 48h 이내 매 사이클 / 경과(휴면) 60분 1회 (PROCESSLIST 10초 쿼리 상시 점유 fix)
 import { isSweepDue } from './sweep-cadence';
+import { sendTypeLabel } from './send-type-axis';
 
 const INTERVAL_MS = 30 * 1000;     // 30초 — Harold님 명시 (D153 5/13): 레거시 실시간 환불 패턴 정합 + 후불 8.5/선불 1.5 부하 보수 마진 (1.5초/사이클 / 5% 점유 / 후불 업체는 billing_type filter로 쿼리 자체 X)
 const BOOT_DELAY_MS = 90 * 1000;   // campaign-sync-worker(60초)와 시작 시점 차이 둠
@@ -591,7 +592,8 @@ async function accumulateCampaignLearning(): Promise<{ learned: number }> {
     try {
       // click_count = cdp_events 'message_click' 집계 (campaign_id 매칭).
       // conversion_count는 cdp_events purchase/order 적재 후 연결 — 현재 데이터 없어 hasConversionData=false.
-      const channelLabel = row.send_type === 'direct' ? '직접발송' : 'AI추천';
+      // ★ 2026-07-31 이분법 폐기 — 'direct'가 아니면 전부 'AI추천'이라 자동발송·여정이 뭉개졌다.
+      const channelLabel = sendTypeLabel(row.send_type);
       await recordCampaignLearning({
         companyId: row.company_id,
         campaignId: row.campaign_id,

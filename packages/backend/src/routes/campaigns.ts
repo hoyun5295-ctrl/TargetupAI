@@ -29,7 +29,7 @@ import {
   bulkInsertSmsQueue, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType, insertTestSmsQueue
 } from '../utils/sms-queue';
 // ★ 2026-07-30 브랜드 msg_contents 조립·대체발송 매핑은 CT-12에서만 — 라우트 인라인 금지
-import { buildBrandMsgContents, resolveBrandFallback } from '../utils/brand-message';
+import { buildBrandMsgContents, resolveBrandFallback, resolveBrandCallback } from '../utils/brand-message';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 // ★ 2026-07-29 브랜드메시지 판정은 CT 하나에서만 한다 — 채널 리터럴을 라우트에 다시 적으면
 //   집계(일자·상세)와 차감·환불이 서로 다른 기준을 갖게 되고, 그 차이가 곧 미청구나 발행 차단이다.
@@ -163,6 +163,9 @@ router.get('/', async (req: Request, res: Response) => {
     const result = await query(
       `SELECT
         c.id, c.company_id, c.created_by, c.campaign_name, c.status, c.message_type, c.send_type,
+        -- ★ 2026-07-31 send_channel 동반. 이 응답을 쓰는 화면(최근 캠페인·캘린더)이 채널 판정 CT를
+        --   호출하는데 값이 없으면 message_type('LMS')으로 폴백해 알림톡·브랜드가 LMS로 보인다.
+        c.send_channel,
         c.target_count,
         c.scheduled_at, c.sent_at, c.created_at,
         TO_CHAR(c.event_start_date, 'YYYY-MM-DD') as event_start_date,
@@ -3056,6 +3059,9 @@ router.post('/brand-send', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '수신자 목록이 필요합니다' });
     }
 
+    // 큐에 실릴 회신번호를 먼저 확정한다 — campaigns와 큐가 다른 번호를 갖지 않게(판정은 CT 한 곳).
+    const resolvedCallback = await resolveBrandCallback(companyId, resendFrom);
+
     // 캠페인 레코드 생성
     const campaignResult = await query(
       // ★ 2026-07-29 `name` → `campaign_name`. 실제 컬럼명이 다른데 이 INSERT만 틀려서
@@ -3063,10 +3069,42 @@ router.post('/brand-send', async (req: Request, res: Response) => {
       //   전부 campaign_name을 쓴다 — 이 경로만 아무도 안 눌러서 드러나지 않았다.
       // ★ 2026-07-30 (2R 범위 밖 수용): created_by 동반 기록 — 사용자 지정 청구(created_by 축)와
       //   담당자 격리·발송결과 소유자 매핑이 전부 이 컬럼을 본다. 비면 그 축들에서 통째로 빠진다.
-      `INSERT INTO campaigns (company_id, user_id, created_by, campaign_name, message_content, message_type, send_channel, status, created_at)
-       VALUES ($1, $2, $2, $3, $4, 'LMS', 'kakao_brand', 'sending', NOW())
+      // ★ 2026-07-31 축약 INSERT 정정 — 이 경로만 9컬럼이라 나머지가 전부 컬럼 DEFAULT로 채워졌다.
+      //   `send_type`은 DEFAULT 'ai'라 직접 보낸 발송이 화면에 **AI**로 나왔고, `callback_number`가
+      //   비어 회신번호가 `-`로 나왔다. 더 나쁜 쪽은 `kakao_targeting='I'`·`kakao_resend_type='SM'`이다 —
+      //   사용자가 고르지 않은 값이 저장돼, 이 컬럼을 읽는 경로가 실제와 다른 설정을 보게 된다.
+      //   컬럼 집합은 직접발송 INSERT(1934행)와 같은 축으로 맞춘다.
+      //   `kakao_attachment_json`·`kakao_carousel_json`은 넣지 않는다 — 그 두 컬럼의 소비처는
+      //   저장 캠페인 재실행(`POST /:id/send`)뿐인데 이 경로는 즉시 적재라 재실행을 타지 않는다.
+      //   넣으려면 첨부 조립을 라우트에서 한 번 더 해야 하고, 그건 CT 이중 조립이다.
+      `INSERT INTO campaigns (
+         company_id, user_id, created_by, campaign_name, message_content, message_type, send_channel,
+         send_type, callback_number, target_count, is_ad,
+         kakao_bubble_type, kakao_sender_key, kakao_targeting, kakao_resend_type,
+         status, scheduled_at, created_at
+       ) VALUES (
+         $1, $2, $2, $3, $4, 'LMS', 'kakao_brand',
+         'direct', $5, $6, $7,
+         $8, $9, $10, $11,
+         'sending', $12, NOW()
+       )
        RETURNING id`,
-      [companyId, userId, `브랜드메시지 ${bubbleType || 'TEXT'}`, message || `[${bubbleType}] 브랜드메시지`]
+      [
+        companyId,
+        userId,
+        `브랜드메시지 ${bubbleType || 'TEXT'}`,
+        message || `[${bubbleType}] 브랜드메시지`,
+        resolvedCallback || null,
+        Array.isArray(phones) ? phones.length : 0,
+        isAd ?? true,
+        // 길이 가드 — 값 검증은 CT(buildBrandMsgContents·resolveBrandFallback)가 바로 뒤에서 하고
+        // 실패 시 이 캠페인은 status='failed'로 남는다. 여기서 22001로 깨지면 그 안내가 안 나간다.
+        String(bubbleType || 'TEXT').trim().toUpperCase().slice(0, 20),
+        senderKey || null,
+        String(targeting || 'I').trim().toUpperCase().slice(0, 1) || 'I',
+        String(resendType || 'NO').trim().toUpperCase().slice(0, 20),
+        reservedDate ? new Date(reservedDate) : null,
+      ]
     );
     const campaignId = campaignResult.rows[0].id;
 
@@ -3091,7 +3129,8 @@ router.post('/brand-send', async (req: Request, res: Response) => {
       carouselItems,
       carouselTail,
       resendType,
-      resendFrom,
+      // 위에서 확정한 값을 되넘긴다 — CT가 다시 조회해도 같은 번호가 나와 campaigns와 큐가 갈라지지 않는다.
+      resendFrom: resolvedCallback || resendFrom,
       resendMessage,
       resendTitle,
       unsubscribePhone,

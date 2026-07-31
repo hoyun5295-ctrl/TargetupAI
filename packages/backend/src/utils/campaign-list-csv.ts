@@ -3,14 +3,19 @@
  *
  * 고객사 발송결과 모달에서 기간 조회한 캠페인 목록을 엑셀(CSV)로 내보낼 때 사용.
  * 비즈웹 레거시 엑셀 형식 정합: 메시지내용/등록일시/발송일시/채널/전송건수/성공/실패/대기/성공률/발송자.
- * DB import 0 — 순수 함수(ts-node verify로 TDD).
+ * DB import 0 — 순수 함수(ts-node verify로 TDD). billing-types도 순수 파일이라 이 성질이 유지된다.
  */
 
-/** 캠페인 채널 라벨 (이모지 제거 순수 텍스트). 화면 channelChip과 동일 분기. */
+import { isBrandOnlyChannel } from './billing-types';
+
+/** 캠페인 채널 라벨 (이모지 제거 순수 텍스트). 화면 channelChip과 같은 판정. */
 export function channelPlainLabel(sendChannel: string | null | undefined, messageType: string | null | undefined): string {
-  if (sendChannel === 'kakao') return '카카오';
+  // ★ 2026-07-31 판정을 CT로. 전에는 채널값 'kakao' 하나만 비교해서 전용 발송이 쓰는 'kakao_brand'가
+  //   안 걸리고 message_type('LMS')으로 흘러내렸다 — 브랜드메시지가 엑셀에 LMS로 찍히던 원인이다.
+  //   라벨 '카카오'도 폐지된 이름이라 '브랜드메시지'로 바로잡는다(친구톡 폐지 후 실체가 그것이다).
+  if (isBrandOnlyChannel(sendChannel)) return '브랜드메시지';
   if (sendChannel === 'alimtalk') return '알림톡';
-  if (sendChannel === 'both') return 'SMS+카카오';
+  if (sendChannel === 'both') return 'SMS+브랜드메시지';
   const mt = String(messageType || '').toUpperCase();
   if (mt === 'LMS' || mt === 'L') return 'LMS';
   if (mt === 'MMS' || mt === 'M') return 'MMS';

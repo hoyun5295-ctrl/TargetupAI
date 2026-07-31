@@ -75,6 +75,9 @@ export const DEFAULT_COSTS = {
   lms: parseFloat(process.env.DEFAULT_COST_LMS || '27'),
   mms: parseFloat(process.env.DEFAULT_COST_MMS || '50'),
   kakao: parseFloat(process.env.DEFAULT_COST_KAKAO || '7.5'),
+  // ★ 2026-07-31 브랜드메시지는 `cost_per_brand`로 차감·청구되는데(BILLING_TYPES BRAND) 표시 축에만
+  //   단가가 없어, 화면이 알림톡 단가로 계산하고 있었다. 미설정 폴백은 알림톡과 같은 값으로 둔다.
+  brand: parseFloat(process.env.DEFAULT_COST_BRAND || process.env.DEFAULT_COST_KAKAO || '7.5'),
 };
 
 /**
@@ -104,6 +107,7 @@ export function getCompanyCosts(company: Record<string, any>) {
     lms: pick(company?.cost_per_lms, DEFAULT_COSTS.lms),
     mms: pick(company?.cost_per_mms, DEFAULT_COSTS.mms),
     kakao: pick(company?.cost_per_kakao, DEFAULT_COSTS.kakao),
+    brand: pick(company?.cost_per_brand, DEFAULT_COSTS.brand),
   };
 }
 

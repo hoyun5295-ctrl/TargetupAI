@@ -16,6 +16,16 @@
 import { callAIWithFallback } from '../services/ai';
 import type { PerformanceSnapshot } from './next-action-advisor';
 
+/**
+ * 채널 요인의 데이터 출처 — 서버가 고정한다(AI가 적게 두지 않는다).
+ *
+ * 채널 집계(`mergeByChannelLabel`)는 `send_channel`과 `message_type` 두 컬럼을 함께 묶는다.
+ * 알림톡·브랜드메시지가 전부 `message_type='LMS'`로 저장되므로 한 컬럼만으로는 채널이 구분되지 않고,
+ * 그 상태로 출처를 적으면 화면 Source caption이 재현 불가능한 근거를 말하게 된다.
+ */
+export const CHANNEL_SOURCE_FIELD =
+  'campaigns.send_channel + campaigns.message_type + success_count + fail_count';
+
 export interface ExplainFactor {
   category: 'channel' | 'time' | 'campaign_type' | 'audience' | 'cdp_funnel';
   label: string;
@@ -85,7 +95,7 @@ ${extraLines && extraLines.length > 0 ? `\n## 고객 축 실측 (등급·전 채
    - impactScore: 0~1 (영향력 크기)
    - direction: 'positive' (성과 견인) | 'negative' (성과 저하) | 'neutral'
    - detail: 구체 수치 안내 (예: "LMS 발송 성공률 96.2% — SMS 89.1% 대비 +7.1%p")
-   - sourceField: 데이터 source (예: "campaigns.message_type + success_count")
+   - sourceField: 데이터 source (예: "campaigns.sent_at AT TIME ZONE 'Asia/Seoul' + success_count")
 4. 1순위 권장 액션 (사용자 실행 가능 한 줄)
 
 ## 출력 형식 (JSON만 응답)
@@ -126,14 +136,23 @@ ${extraLines && extraLines.length > 0 ? `\n## 고객 축 실측 (등급·전 채
       overallScore: typeof parsed.overallScore === 'number' ? Math.max(0, Math.min(100, parsed.overallScore)) : 50,
       topInsight: String(parsed.topInsight || ''),
       factors: Array.isArray(parsed.factors)
-        ? parsed.factors.slice(0, 6).map((f: any) => ({
-            category: ['channel', 'time', 'campaign_type', 'audience', 'cdp_funnel'].includes(f.category) ? f.category : 'audience',
-            label: String(f.label || ''),
-            impactScore: typeof f.impactScore === 'number' ? Math.max(0, Math.min(1, f.impactScore)) : 0.5,
-            direction: ['positive', 'negative', 'neutral'].includes(f.direction) ? f.direction : 'neutral',
-            detail: String(f.detail || ''),
-            sourceField: String(f.sourceField || ''),
-          }))
+        ? parsed.factors.slice(0, 6).map((f: any) => {
+            const category = ['channel', 'time', 'campaign_type', 'audience', 'cdp_funnel'].includes(f.category)
+              ? f.category
+              : 'audience';
+            return {
+              category,
+              label: String(f.label || ''),
+              impactScore: typeof f.impactScore === 'number' ? Math.max(0, Math.min(1, f.impactScore)) : 0.5,
+              direction: ['positive', 'negative', 'neutral'].includes(f.direction) ? f.direction : 'neutral',
+              detail: String(f.detail || ''),
+              // ★ 2026-07-31 채널 요인의 출처는 서버가 고정한다.
+              //   채널 집계가 send_channel + message_type 두 컬럼으로 바뀌었는데(알림톡·브랜드가
+              //   전부 message_type='LMS'라 한 컬럼으로는 구분이 안 된다) AI가 옛 한 컬럼을 출처로
+              //   적으면 화면의 Source caption이 재현 불가능한 근거를 말하게 된다.
+              sourceField: category === 'channel' ? CHANNEL_SOURCE_FIELD : String(f.sourceField || ''),
+            };
+          })
         : [],
       recommendation: String(parsed.recommendation || ''),
       explainedAt: new Date().toISOString(),

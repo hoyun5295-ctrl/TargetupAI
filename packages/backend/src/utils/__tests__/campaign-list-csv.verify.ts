@@ -11,9 +11,10 @@ const ok = (n: string, f: () => void) => { f(); passed++; console.log(`  ok - ${
 
 console.log('[campaign-list-csv] channelPlainLabel');
 ok('kakao/alimtalk/both/LMS/MMS/SMS/default', () => {
-  assert.strictEqual(channelPlainLabel('kakao', 'SMS'), '카카오');
+  assert.strictEqual(channelPlainLabel('kakao', 'SMS'), '브랜드메시지');
+  assert.strictEqual(channelPlainLabel('kakao_brand', 'LMS'), '브랜드메시지');
   assert.strictEqual(channelPlainLabel('alimtalk', 'LMS'), '알림톡');
-  assert.strictEqual(channelPlainLabel('both', 'SMS'), 'SMS+카카오');
+  assert.strictEqual(channelPlainLabel('both', 'SMS'), 'SMS+브랜드메시지');
   assert.strictEqual(channelPlainLabel('sms', 'LMS'), 'LMS');
   assert.strictEqual(channelPlainLabel('sms', 'L'), 'LMS');
   assert.strictEqual(channelPlainLabel('sms', 'MMS'), 'MMS');

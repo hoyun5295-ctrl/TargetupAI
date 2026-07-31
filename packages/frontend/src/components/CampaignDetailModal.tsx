@@ -1,5 +1,12 @@
 import { X, FileText } from 'lucide-react';
 import { calculateSmsBytes, formatCampaignMessageForDisplay, buildAdSubjectFront, getAlimtalkTemplateStatus } from '../utils/formatDate';
+import {
+  isAlimtalkChannel,
+  isBrandOnlyChannel,
+  resolveChannelLabel,
+  resolveChannelChipClass,
+  resolveSendTypeLabel,
+} from '../utils/campaign-axis';
 import MmsImagePreview from './shared/MmsImagePreview';
 
 /**
@@ -19,7 +26,7 @@ interface CampaignDetailModalProps {
   onImageClick: (url: string, filename: string) => void;          // MMS 이미지 확대
 }
 
-const MSG_TYPE_LABEL: Record<string, string> = { SMS: 'SMS', LMS: 'LMS', MMS: 'MMS', S: 'SMS', L: 'LMS', M: 'MMS', K: '알림톡', F: '친구톡' };
+// 채널·유형 판정은 utils/campaign-axis CT 단일 진입점. 여기서 send_channel/send_type 리터럴 비교 금지.
 
 export default function CampaignDetailModal({
   campaign,
@@ -32,14 +39,10 @@ export default function CampaignDetailModal({
   onShowMessages,
   onImageClick,
 }: CampaignDetailModalProps) {
-  const isAlimtalk = campaign.send_channel === 'alimtalk';
-  const isKakao = campaign.send_channel === 'kakao';
-  const channelLabel = isAlimtalk ? '알림톡' : isKakao ? '카카오' : (MSG_TYPE_LABEL[campaign.message_type] || campaign.message_type || 'SMS');
-  const channelChipClass = isAlimtalk
-    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-    : isKakao
-      ? 'bg-yellow-50 text-yellow-700 border border-yellow-200'
-      : 'bg-violet-50 text-violet-700 border border-violet-200';
+  const isAlimtalk = isAlimtalkChannel(campaign);
+  const isKakao = isBrandOnlyChannel(campaign);
+  const channelLabel = resolveChannelLabel(campaign);
+  const channelChipClass = resolveChannelChipClass(campaign);
 
   // 차트 집계 (campaignDetail.charts.successFail). detail 로딩 전이면 0 처리.
   const sf = detail?.charts?.successFail;
@@ -65,7 +68,7 @@ export default function CampaignDetailModal({
   const mmsImages = Array.isArray(campaign.mms_image_paths) ? campaign.mms_image_paths : [];
 
   const previewChannelName = isAlimtalk ? '알림톡' : isKakao ? '카카오톡' : '문자메시지';
-  const previewTypeLabel = isAlimtalk ? '알림톡' : isKakao ? '카카오' : (MSG_TYPE_LABEL[campaign.message_type] || campaign.message_type);
+  const previewTypeLabel = resolveChannelLabel(campaign);
   const previewMaxBytes = (campaign.message_type === 'SMS' || campaign.message_type === 'S') ? 90 : 2000;
 
   const fmtFull = (dt: string) => new Date(dt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -74,7 +77,7 @@ export default function CampaignDetailModal({
   const infoRows: { label: string; value: string }[] = [
     { label: '캠페인명', value: campaign.campaign_name },
     ...(isLmsType && subject ? [{ label: '제목', value: buildAdSubjectFront(subject || '', campaign.message_type, campaign.is_ad ?? false) }] : []),
-    { label: '유형', value: `${campaign.send_type === 'direct' ? '수동' : 'AI'} / ${channelLabel}` },
+    { label: '유형', value: `${resolveSendTypeLabel(campaign.send_type)} / ${channelLabel}` },
     { label: '발송자', value: campaign.created_by_name || '-' },
     { label: '회신번호', value: campaign.callback_number || '-' },
     { label: '전송건수', value: `${(campaign.sent_count || campaign.target_count || 0).toLocaleString()}건` },

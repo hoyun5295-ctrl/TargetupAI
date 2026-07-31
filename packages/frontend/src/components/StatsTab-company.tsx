@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { manageStatsApi, manageUsersApi } from '../api/client';
 import { useLegacyToast } from './ToastProvider';
 import { formatDateTime } from '../utils/formatDate';
+import { resolveSendTypeChipClass, resolveSendTypeLabel } from '../utils/campaign-axis';
 
 export default function StatsTab() {
   const [view, setView] = useState<'daily' | 'monthly'>('daily');
@@ -302,8 +303,8 @@ export default function StatsTab() {
                           <tr key={i} className="hover:bg-gray-50">
                             <td className="px-3 py-2 font-medium max-w-[200px] truncate">{c.campaign_name}</td>
                             <td className="px-3 py-2">
-                              <span className={`px-1.5 py-0.5 rounded text-xs ${c.send_type === 'ai' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
-                                {c.send_type === 'ai' ? 'AI' : '수동'}
+                              <span className={`px-1.5 py-0.5 rounded text-xs ${resolveSendTypeChipClass(c.send_type)}`}>
+                                {resolveSendTypeLabel(c.send_type)}
                               </span>
                             </td>
                             <td className="px-3 py-2 text-gray-600">{c.user_name || '-'}</td>

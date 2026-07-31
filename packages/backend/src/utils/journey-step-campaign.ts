@@ -73,12 +73,16 @@ export async function getOrCreateStepCampaign(spec: StepCampaignSpec): Promise<s
 
   // 2. 신규 campaign (target/sent 0 — 발송마다 +1 누적). 원본 INSERT 컬럼 매핑 1:1.
   const camp = await query(
+    // ★ 2026-07-31 `send_type='journey'` 명시. 안 넣으면 컬럼 DEFAULT 'ai'가 들어가,
+    //   여정이 보낸 캠페인이 발송결과·통계에서 **AI 추천 발송**으로 표시된다(0731 Harold 지적 —
+    //   `[여정] step 1` 알림톡 3건이 전부 'ai'였다). `campaigns`의 CHECK는 message_type·status
+    //   2건뿐이라(2026-07-31 pg_constraint 실측) 새 값이 INSERT를 깨지 않는다.
     `INSERT INTO campaigns (
        company_id, campaign_name, message_type, message_content, subject, message_subject, message_template,
-       is_ad, target_count, sent_count, created_by, send_channel, callback_number, status, scheduled_at, sent_at, kakao_template_id, mms_image_paths
+       is_ad, target_count, sent_count, created_by, send_channel, callback_number, status, scheduled_at, sent_at, kakao_template_id, mms_image_paths, send_type
      ) VALUES (
        $1::uuid, $2, $3, $4, $5, $5, $4,
-       $6, 0, 0, $7::uuid, $9, $8, 'sending', NOW(), NOW(), $10::uuid, $11
+       $6, 0, 0, $7::uuid, $9, $8, 'sending', NOW(), NOW(), $10::uuid, $11, 'journey'
      ) RETURNING id`,
     [
       spec.companyId,

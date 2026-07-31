@@ -537,8 +537,12 @@ async function filterUnsubscribed(userId: string, phones: string[]): Promise<str
 /**
  * 대체발송 회신번호 — resendFrom 미지정이면 회사 기본 회신번호로 폴백.
  * SMSQ `call_back`은 전환재발송(SMS/LMS)의 발신번호가 된다.
+ *
+ * ★ 2026-07-31 export — `/brand-send`가 campaigns.callback_number를 기록해야 하는데,
+ *   큐에 실린 번호와 다른 값을 저장하면 화면과 실제 발신번호가 갈라진다.
+ *   라우트가 먼저 확정해 그 값을 `resendFrom`으로 되넘기므로 판정은 여기 한 곳뿐이다.
  */
-async function resolveBrandCallback(companyId: string, resendFrom?: string): Promise<string> {
+export async function resolveBrandCallback(companyId: string, resendFrom?: string): Promise<string> {
   const given = normalizePhone(resendFrom || '');
   if (given) return given;
   const r = await query(

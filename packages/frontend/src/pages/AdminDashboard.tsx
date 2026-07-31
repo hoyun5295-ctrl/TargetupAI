@@ -19,6 +19,7 @@ import { taxbillIssueDatePreviewText, type TaxbillDayPolicy } from '../utils/tax
 import Billing080Modal from '../components/Billing080Modal'; // ★ 2026-07-30 추가 청구 관리 (서수란 접수 — 080 KT 명세서 분할 + 부가서비스 수기)
 import MinimumChargeModal from '../components/MinimumChargeModal'; // ★ 2026-07-30 최소과금 정액 발행 (Harold 확정)
 import { creditTxLabel } from '../constants/credit'; // 크레딧 사용 이력 작업명 라벨
+import { resolveChannelLabel, resolveSendTypeChipClass, resolveSendTypeLabel } from '../utils/campaign-axis';
 
 interface Company {
   id: string;
@@ -5460,10 +5461,10 @@ const handleApproveRequest = async (id: string) => {
                       </td>
                       <td className="px-3 py-3 text-center">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
-                          c.campaign_type === 'ai' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'
-                        }`}>{c.campaign_type === 'ai' ? 'AI' : '수동'}</span>
+                          resolveSendTypeChipClass(c.send_type)
+                        }`}>{resolveSendTypeLabel(c.send_type)}</span>
                       </td>
-                      <td className="px-3 py-3 text-center text-xs text-gray-600">{c.message_type?.toUpperCase() || '-'}</td>
+                      <td className="px-3 py-3 text-center text-xs text-gray-600">{resolveChannelLabel(c)}</td>
                       <td className="px-3 py-3 text-center text-gray-700">{sent.toLocaleString()}</td>
                       <td className="px-3 py-3 text-center text-green-600 font-medium">{success.toLocaleString()}</td>
                       <td className="px-3 py-3 text-center text-red-600">{fail.toLocaleString()}</td>
@@ -8490,7 +8491,7 @@ const handleApproveRequest = async (id: string) => {
                     <span>•</span>
                     <span className="font-medium text-gray-700">{smsDetailCampaign.campaign_name}</span>
                     <span>•</span>
-                    <span>{smsDetailCampaign.message_type?.toUpperCase() || '-'}</span>
+                    <span>{resolveChannelLabel(smsDetailCampaign)}</span>
                     <span>•</span>
                     <span className={`font-medium ${smsDetailCampaign.status === 'completed' ? 'text-green-600' : smsDetailCampaign.status === 'scheduled' ? 'text-blue-600' : 'text-gray-600'}`}>
                       {smsDetailCampaign.status === 'completed' ? '완료' : smsDetailCampaign.status === 'scheduled' ? '예약' : smsDetailCampaign.status === 'sending' ? '발송중' : smsDetailCampaign.status === 'cancelled' ? '취소' : smsDetailCampaign.status}
@@ -9350,10 +9351,8 @@ const handleApproveRequest = async (id: string) => {
                                 {c.campaign_name}
                               </td>
                               <td className="px-4 py-2.5 text-center">
-                                <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
-                                  c.send_type === 'ai' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'
-                                }`}>
-                                  {c.send_type === 'ai' ? 'AI' : '수동'}
+                                <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${resolveSendTypeChipClass(c.send_type)}`}>
+                                  {resolveSendTypeLabel(c.send_type)}
                                 </span>
                               </td>
                               <td className="px-4 py-2.5 text-center text-gray-600">{c.user_name || '-'}</td>
@@ -9366,7 +9365,7 @@ const handleApproveRequest = async (id: string) => {
                                   c.message_type === 'LMS' ? 'bg-blue-100 text-blue-700' :
                                   c.message_type === 'MMS' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600'
                                 }`}>
-                                  {c.message_type || 'SMS'}
+                                  {resolveChannelLabel(c)}
                                 </span>
                               </td>
                               <td className="px-4 py-2.5 text-left text-xs text-gray-600 max-w-[250px]">

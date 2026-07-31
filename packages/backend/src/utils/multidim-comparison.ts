@@ -2,6 +2,8 @@
 // send_type별 매출은 산출하지 않는다 — estimatedRevenue는 채널 단위 snapshot 계산값이라 유형별 실측이 없다.
 // customers SELECT·snapshot 재활용(채널별/기간별)은 호출부(buildMultiDimComparison) 담당.
 
+import { sendTypeLabel } from './send-type-axis';
+
 export interface CampaignTypeRow {
   sendType: string | null;
   sent: number;
@@ -29,12 +31,16 @@ export interface NewVsExistingResult {
   reactionAvailable: boolean; // 발송 반응(구매) 비교 = cdp 필요 → 미연동이면 false
 }
 
-const TYPE_LABELS: Record<string, string> = {
-  manual: '직접 발송',
-  ai: 'AI 발송',
-  journey: '여정',
-  auto: '자동 마케팅',
-  auto_executed: '자동 마케팅',
+/**
+ * 저장되지 않는 옛 값만 여기서 흡수한다 — 현행 값(direct·ai·auto·journey)의 라벨은
+ * `send-type-axis` CT가 소유한다.
+ *
+ * ★ 2026-07-31 정정. 이 맵에 실제 저장값 `direct`가 없어서 **모든 직접발송이 '기타'로 집계**됐다
+ *   (`manual`은 어느 INSERT도 쓰지 않는 값이다). 축 라벨을 파일마다 복제하면 이렇게 조용히 어긋난다.
+ */
+const LEGACY_TYPE_LABELS: Record<string, string> = {
+  manual: '직접발송',
+  auto_executed: '자동발송',
 };
 
 /** send_type 유형별 발송/성공률 집계. 매출은 제외(유형별 실측 매출 없음). 발송량 내림차순 정렬. */
@@ -51,7 +57,7 @@ export function computeTypeComparison(rows: CampaignTypeRow[]): TypeComparison[]
   return Array.from(agg.entries())
     .map(([rawType, e]) => ({
       rawType,
-      label: TYPE_LABELS[rawType] || '기타',
+      label: LEGACY_TYPE_LABELS[rawType] || sendTypeLabel(rawType),
       campaigns: e.campaigns,
       sent: e.sent,
       success: e.success,

@@ -3,6 +3,7 @@ import { manageStatsApi, manageUsersApi } from '../../api/client';
 import { useLegacyToast } from '../ToastProvider';
 import { formatDateTime, formatCampaignMessageForDisplay } from '../../utils/formatDate';
 import { extractBlobErrorMessage } from '../../utils/csv-download';
+import { resolveSendTypeChipClass, resolveSendTypeLabel } from '../../utils/campaign-axis';
 
 /** 페이지 번호 목록(양끝 + 현재 주변, 사이는 …). 웹(서버 페이징)·에이전트(클라이언트 페이징) 공용. */
 function buildPageNumbers(page: number, totalPages: number): (number | string)[] {
@@ -546,8 +547,8 @@ export default function StatsTab() {
                           <tr key={i} className="hover:bg-slate-50/70 transition">
                             <td className="px-4 py-2.5 font-semibold text-slate-700 max-w-[280px] truncate">{c.campaign_name}</td>
                             <td className="px-4 py-2.5">
-                              <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${c.send_type === 'ai' ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600'}`}>
-                                {c.send_type === 'ai' ? 'AI' : '수동'}
+                              <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${resolveSendTypeChipClass(c.send_type)}`}>
+                                {resolveSendTypeLabel(c.send_type)}
                               </span>
                             </td>
                             <td className="px-4 py-2.5 text-slate-500">{c.user_name || '-'}</td>

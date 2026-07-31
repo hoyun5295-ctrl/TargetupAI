@@ -20,7 +20,36 @@ import { aggregateCampaignPerformance, aggregateSmsCountsByCampaign } from './st
 // (2026-07-30) 브랜드 SMSQ 합류 — 옛 카카오 IMC 집계 import 폐기
 import { computeRoasMetric } from './performance-roas-core';
 import { getCompanyCosts } from '../config/defaults';
+import { channelPlainLabel } from './campaign-list-csv';
 import type { RoasMetric } from './performance-roas-core';
+
+/**
+ * (순수) `(send_channel, message_type)` 집계 행 → 채널 라벨 단위 합산.
+ *
+ * 브랜드메시지는 채널값이 둘이고(`kakao`는 역사적 이름, `kakao_brand`는 전용 발송) 알림톡·브랜드가
+ * 전부 `message_type='LMS'`다. 라벨로 합쳐야 "브랜드메시지 N건"이 한 줄로 나온다.
+ * 발송량 내림차순 — AI 프롬프트에서 큰 채널이 먼저 읽히게 한다.
+ */
+export function mergeByChannelLabel(
+  rows: Array<{ send_channel?: string | null; message_type?: string | null; sent?: any; success?: any }>,
+): Array<{ channel: string; sent: number; success: number; successRate: number }> {
+  const agg = new Map<string, { sent: number; success: number }>();
+  for (const r of rows) {
+    const label = channelPlainLabel(r.send_channel, r.message_type);
+    const e = agg.get(label) || { sent: 0, success: 0 };
+    e.sent += parseInt(r.sent || '0', 10) || 0;
+    e.success += parseInt(r.success || '0', 10) || 0;
+    agg.set(label, e);
+  }
+  return Array.from(agg.entries())
+    .map(([channel, v]) => ({
+      channel,
+      sent: v.sent,
+      success: v.success,
+      successRate: v.sent > 0 ? v.success / v.sent : 0,
+    }))
+    .sort((a, b) => b.sent - a.sent);
+}
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -119,16 +148,21 @@ export async function buildPerformanceSnapshot(companyId: string): Promise<Perfo
   const performance = await aggregateCampaignPerformance(companyId);
 
   // 2. 채널별 성과
+  // ★ 2026-07-31 정정. 전에는 `message_type AS channel`로 묶었는데, 이 시스템은 카카오를
+  //   message_type이 아니라 send_channel로 구분한다 — 알림톡·브랜드메시지가 전부 'LMS'로 저장되므로
+  //   그 묶음은 **채널이 아니라 문자 규격**이었고, 세 채널이 LMS 한 줄로 합쳐져 AI에게 들어갔다.
+  //   두 컬럼으로 묶은 뒤 채널 라벨 CT로 합산한다(kakao·kakao_brand가 같은 라벨로 수렴).
   const byChannelResult = await query(
     `SELECT
-        message_type AS channel,
+        send_channel,
+        message_type,
         SUM(success_count) AS success,
         SUM(success_count + fail_count) AS sent
      FROM campaigns
      WHERE company_id = $1::uuid
        AND status = 'completed'
        AND sent_at > NOW() - INTERVAL '30 days'
-     GROUP BY message_type`,
+     GROUP BY send_channel, message_type`,
     [companyId]
   );
 
@@ -183,12 +217,7 @@ export async function buildPerformanceSnapshot(companyId: string): Promise<Perfo
     totalSent,
     totalSuccess,
     successRate: totalSent > 0 ? totalSuccess / totalSent : 0,
-    byChannel: byChannelResult.rows.map((r: any) => ({
-      channel: r.channel || 'SMS',
-      sent: parseInt(r.sent || '0'),
-      success: parseInt(r.success || '0'),
-      successRate: parseInt(r.sent || '0') > 0 ? parseInt(r.success || '0') / parseInt(r.sent || '0') : 0,
-    })),
+    byChannel: mergeByChannelLabel(byChannelResult.rows),
     byHour: byHourResult.rows.map((r: any) => ({
       hour: r.hour,
       sent: parseInt(r.sent || '0'),

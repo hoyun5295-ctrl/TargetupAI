@@ -1,7 +1,8 @@
-# 브랜드메시지 발송 경로 재구축 — QTmsg Agent 방식 (2026-07-29 설계, 착수 대기)
+# 브랜드메시지 발송 경로 재구축 — QTmsg Agent 방식 (2026-07-29 설계 → **2026-07-31 배포완료**)
 
 > **호출어: "브랜드메시지 발송경로 재구축"**
 > SoT. 현재 상태·잔여는 STATUS §2 카드가 소유한다. 기억 = `memory/project_2026_0729_brand_message_billing.md`
+> **구현 결과·수용/불수용·실측 시나리오 = §8**(아래 §0~§7은 착수 전 조사·설계 기록이며 그대로 보존한다).
 > 원본 = `C:\Users\ceo\OneDrive\문서\카카오톡 받은 파일\카카오-브랜드메시지-발송매뉴얼.pptx`(강문희, 2026.01.16, 11슬라이드)
 
 ## §0 왜 이 문서가 생겼나
@@ -119,7 +120,9 @@ msg_contents = {
    (`insertAlimtalkQueue(tables, ...)`). 브랜드도 같은 라인을 타는지, 별도 라인인지 확인 필요.
    이걸 정해야 호출부 6곳의 시그니처가 정해진다.
    → **확정(2026-07-30 Harold)**: 지금 설치된 QTmsg가 브랜드메시지를 처리한다 — 별도 라인 없음.
-   **알림톡과 같은 라인·같은 `SMSQ_SEND` 테이블 축에 `msg_type='F'`만 다르게** 넣는다. 버전 확인 불요.
+   **알림톡과 같은 라인·같은 `SMSQ_SEND` 테이블 축에 `msg_type='F'`만 다르게** 넣는다. ~~버전 확인 불요.~~
+   ⛔ **2026-07-31 뒤집힘 — 라인 축은 맞았고 "버전 확인 불요"가 틀렸다.** 실측 `QtMsg 3.0.7.4`(§1 요구 3.0.8.2 미만).
+   이것이 실측 1건이 실패한 진짜 원인이다(§9-1). **확인 비용은 명령 한 줄이었다.**
 2. **`TARGETING` 기본값** — 현재 코드에 이 축이 없다. 매뉴얼 예시는 `I`지만 자격 조건이 코드마다 달라
    운영실 확인 대상. 화면에서 고르게 할지 `I` 고정으로 갈지 결정 필요.
 3. **`attachment_method.pdf` 확보 여부** — 있으면 8종 전체, 없으면 3종으로 확정.
@@ -149,7 +152,7 @@ msg_contents = {
 5. 소스 스캔 불변식에 "유령 테이블 참조 0건" 추가
 6. Codex 적대검증 → 실측 1건(자유형 TEXT) → 배포
 
-## §8 구현 결과 (2026-07-31 코드완료 — Codex 적대검증 11라운드 SHIP)
+## §8 구현 결과 (2026-07-31 **배포완료** `4864d5d9` — Codex 적대검증 11라운드 SHIP)
 
 §7 1~5 전부 구현. backend tsc 0 · frontend tsc 0 · vitest **1,617/1,617**(불변식·CT-12 계약 테스트 신설 포함).
 
@@ -182,3 +185,77 @@ BRAND 차감 1건 ⑤발송통계/청구 미리보기 BRAND 1건.
 
 **DDL 불요**(기존 컬럼·값만 사용. `send_phase` CHECK 없음 실측 — 2026-07-31 pg_constraint).
 신규 파일 = `utils/brand-message.test.ts`(커밋 시 git add 대상).
+
+## §9-1 발송 실패 원인 확정 — Agent 버전 미달 (2026-07-31 실측)
+
+**`QtMsg 3.0.7.4`.** §1 요구는 **3.0.8.2 이상**이다. 코드가 아니라 게이트웨이가 못 받는 상태였다.
+
+증거 사슬(전부 실측):
+| 지점 | 값 | 뜻 |
+|---|---|---|
+| Agent deliver 로그 | `Seqno[761729] ... MsgType[F] BillId[]` → `Deliver ack 성공 : E_OK` | **우리 전문은 중계서버까지 정상 접수** |
+| Agent report 로그 | 5초 뒤 `Carr[0] Rcd[7421] RcdS[카톡:타임아웃]` | 거절 주체 = 중계서버 |
+| `bin/qtmsg.out` | `QtMsg 3.0.7.4` — **agent1~11 전 라인 동일**(실측) | 어느 라인으로 보내도 안 나간다 |
+| `qtmsg-manual.txt`(4.0) | `TYPE_DEF`·`CHAT_BUBBLE_TYPE`·`TARGETING` grep **0건**. `F`=친구톡(평문+`file_name1`) | 이 Agent 문서에 브랜드 규격이 없다 |
+| 같은 매뉴얼 257행 | "카카오톡 발송 실패는 **3초 이내에** 결과를 수신하여 status_code 세팅" | **3초는 정상 거절 응답 시간** — 대기 타임아웃이 아니다 |
+
+> ⚠ `7421`의 라벨 '타임아웃'은 코드표 이름(`E_K_SEND_TIMEOUT`)일 뿐이다. **라벨만 보고 "우리 문제 아님"으로
+> 판정하면 안 된다** — 실제로는 즉시 거절이었고, 원인은 우리 쪽 전제(버전 미확인)였다.
+> `k_etc_json`에 `senderkey`를 넣는 방식 자체는 이 매뉴얼 234~239행에 있고 우리 방식과 같다.
+> 성공한 알림톡은 `senderkey` 없이 `k_template_code`로만 나간다(대조군 실측).
+> `mob_company=0`은 성공한 알림톡도 같으므로 단서가 아니다.
+
+**조치** = Agent를 3.0.8.2 이상으로 교체(공급사 zip). 발송 입구 차단은 **넣지 않는다**(2026-07-31 Harold —
+"어차피 보낼 사람 없다").
+
+⛔ **교체는 운영 전 라인을 건드리는 작업이다.** 11개 Agent가 지금 문자·알림톡을 정상 발송 중이고
+브랜드 하나 때문에 그 전부를 올리는 것이다. **한 라인만 먼저 올려 문자·알림톡 회귀 없음 + 브랜드 성공을
+확인한 뒤 나머지로 확대**한다(교체 중 그 라인 발송은 멈춘다).
+⛔ **`conf/` 보존** — 라인마다 agent id·DB·`update_report`가 다르다(agent1 = `targetai_m`,
+`conf/` 최종 수정 2026-06-10 ≠ 설치일 2026-02-10 = 커스터마이즈됨). zip을 통째로 덮으면 날아간다.
+실제 스크립트는 매뉴얼의 `start.sh`/`stop.sh`가 아니라 `bin/startup.sh`·`bin/shutdown.sh`(안 되면 `fkill.sh`).
+
+전 라인 버전 확인:
+`for d in /home/administrator/agent*/; do printf "%-36s %s\n" "$d" "$(grep -ho 'QtMsg [0-9.]* version' $d/bin/qtmsg.out 2>/dev/null | tail -1)"; done`
+
+## §9 실측 1건 결과 → 표시 축 재구축 (2026-07-31 — Codex 적대검증 6R approve)
+
+§8 실측을 돌리자 발송은 나갔는데(큐 적재·전문 형식 정상, 한글 정상 — HEX 실측) 화면이 셋 다 틀렸다.
+**결과코드 7421 카카오 타임아웃**은 우리 전문 문제가 아니고, 대체발송이 사용자 설정대로 `NO`라
+`7830/7831`(카카오실패→문자성공)로 회수될 여지가 없었던 것이다(원인 미규명 — 대체발송 `SM`으로 재측정 대상).
+
+**뿌리 둘**
+1. **`/brand-send`만 campaigns 축약 INSERT**(9컬럼). 나머지는 컬럼 DEFAULT가 채웠다 —
+   `send_type='ai'`(유형 **AI**), `callback_number` 빈값(회신번호 `-`), 그리고 사용자가 고르지도 않은
+   `kakao_targeting='I'`·`kakao_resend_type='SM'`이 저장됐다(**거짓 데이터**).
+2. **채널·유형 판정이 화면에 리터럴로 흩어짐.** `send_channel === 'kakao'` 한 줄만 비교해
+   전용 발송값 `kakao_brand`가 어디에도 안 걸리고 `message_type='LMS'`로 흘러내렸다.
+   유형도 `send_type === 'direct' ? 수동 : AI` 이분법이라 자동발송·여정이 전부 AI로 뭉개졌다.
+
+**수정** — `/brand-send` INSERT 18컬럼(`send_type='direct'`·`callback_number`·`kakao_*` 4종·`is_ad`·
+`target_count`·`scheduled_at`) / 여정 `send_type='journey'`(campaigns CHECK는 `message_type`·`status`
+2건뿐 — pg_constraint 실측) / **CT 2개 신설**(`frontend/utils/campaign-axis.ts` 표시, `utils/send-type-axis.ts`
+값·라벨) / 판정 인라인 20곳 치환 / 유형 필터 5분기(서버·화면 같은 값 집합) / 브랜드 단가 축
+(`getCompanyCosts().brand`·요약 `perBrand` — 화면이 알림톡 단가로 계산하던 것) / 단가 폴백 `||`→`??`
+(0원 계약 보존) / `channelPlainLabel`도 같은 결함이라 CT 기반으로(엑셀 채널 컬럼) / 채널 성과 집계가
+`message_type AS channel`로 세 채널을 LMS 한 줄로 합치던 것을 두 컬럼 GROUP BY + `mergeByChannelLabel`로.
+
+**동반 발견** — `admin.ts`가 `c.send_type as campaign_type` 별칭을 써서 축 grep이 그 화면을 놓쳤다.
+별칭 제거 + **축 별칭 금지 불변식**. 목록·통계상세 응답에 `send_channel` 누락도 같은 부류였다
+(표시만 고치고 데이터를 안 실으면 그 화면은 안 닫힌다 — 2R·4R에서 연속 적발).
+
+**회귀 차단** — `brand-axis-invariants.test.ts` +11건. 프론트 CT를 **실제 import해 값 비교**(문자열
+매칭은 주석만으로 통과한다), 원값 렌더 검출기를 순수 함수로 분리해 **fixture로 커버리지 고정**
+(그 fixture가 검출기 자체 버그를 잡았다), 축 별칭 금지, 채널 라벨 CT 계약, 채널 출처 상수.
+회귀 주입 음성 검증 완료. backend tsc 0 · frontend tsc 0 · vitest **1,633/1,633**.
+
+**미종결 1건**(별건) — `utils/mysql-refund-sweeper.ts:601` `channel: row.message_type`도 같은 오명명이지만
+그 값이 회사 메모리의 `memoryKey`·`channel_*` **저장 키**가 된다. 고치면 기존 누적 학습과 키가 갈리므로
+키 이관(또는 dual-read)을 함께 정해야 한다.
+
+**재측정 시나리오** — 직접발송 헤더 브랜드메시지, 자유형 TEXT, **대체발송 `SMS 대체`+대체문안 입력**,
+수신 1건. ①campaigns에 `send_type='direct'`·`callback_number`·`kakao_bubble_type='TEXT'`·`kakao_resend_type='SM'`
+②큐 `k_next_type='A'`·`k_next_contents` 채워짐 ③발송결과 유형=`직접발송`·채널=`브랜드메시지`
+④여정 캠페인이 `여정`으로 표시 ⑤7421 재발 시 `7830/7831` 회수 여부.
+신규 파일 2개 = `utils/send-type-axis.ts` · `frontend/src/utils/campaign-axis.ts`(git add 대상).
+**프론트 변경 포함 — 배포에 빌드 필요.**

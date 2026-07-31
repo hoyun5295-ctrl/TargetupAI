@@ -47,10 +47,10 @@
 > ⛔ 아난티는 **1.6.4 세트**로 — 1.6.5는 Server 2016 미검증이라 서버 zip 교체 금지
 > 잔여 = 마법사 탈출구 배너 미포함
 
-### 0729 브랜드메시지 — 청구축 배포완료 / 발송경로 재구축 **코드완료·배포대기**(0731 Codex 11R SHIP)
-> SoT [청구·개방](docs/2026-07-29-brand-message-billing-design.md) §7 · [발송경로 재구축](docs/2026-07-29-brand-message-qtmsg-agent-design.md) **§8 구현 결과** · 기억 [[project_2026_0729_brand_message_billing]] · 다음 = 배포 → 실측 1건(자유형 TEXT — SoT §8 시나리오) → 브랜드 단가 입력(여미지 `B0227`)·발행 실측
-> ⛔ 배포 전에는 웹 브랜드 발송 불가 유지(미적재 환불 상쇄) / 지원 유형 = **TEXT·IMAGE·WIDE만**(캐러셀·커머스·비디오는 `msg_contents` 실예시 확보 후 — SoT §5-3) / 유형을 늘릴 땐 `utils/billing-types.ts` 표에만 추가 / `send_channel='kakao'`는 이름만 카카오고 실체가 브랜드메시지 / 직접발송 신설 `send_phase='preparing'` = 차감 완료 전 워커 픽업 차단 게이트(SCHEMA.md)
-> 잔여 = 배포+실측 1건 · 단가 입력·발행 실측 · AI 타겟추출 페이징(별건)
+### 0729 브랜드메시지 — 청구축·발송경로 재구축 **전량 배포완료**(`4864d5d9` — 0731 Codex 11R SHIP)
+> SoT [청구·개방](docs/2026-07-29-brand-message-billing-design.md) §7 · [발송경로 재구축](docs/2026-07-29-brand-message-qtmsg-agent-design.md) §8 구현 결과 · **§9 표시 축 재구축**(0731 실측이 깬 것 — 코드완료·배포대기) · 기억 [[project_2026_0729_brand_message_billing]] · 다음 = §9 배포(**프론트 포함 = 빌드 필요**) → 재측정(대체발송 `SM`으로) → 브랜드 단가 입력(여미지 `B0227`)·발행 실측
+> ⛔ **발송 불가 = Agent 버전 미달**(SoT §9-1) / 지원 유형 = TEXT·IMAGE·WIDE만, 늘릴 땐 `utils/billing-types.ts` 표에만(SoT §5-3) / 축 복원 금지 — 채널=`resolveRefundAxes`, `send_phase='preparing'` 게이트
+> 잔여 = §9 배포+재측정 · 단가 입력·발행 실측 · AI 타겟추출 페이징(별건) · 학습 채널 키 이관(`mysql-refund-sweeper.ts:601` — 저장 키라 이관 판단 필요)
 
 ### 0728 정산 파이프라인 — 팝빌 발행·수정발행 배포완료(`d4430454`), 테스트베드 실측 대기
 > SoT [일괄발급·컨펌·세금계산서](docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md) **§7(연동 구현)·§9 남은 것(절차·마감 조건)** · §7-0(API 계약) · 기억 [[project_2026_0728_bulk_invoice_confirm_taxbill]] · 다음 = **호출어 "팝빌 발행 테스트 재개"**(게이트 ON 상태 — Callback URL 등록 → 방화벽 IP 2개 → 발급·웹훅·수정발행 각 1건 → `POPBILL_IS_TEST=false`)

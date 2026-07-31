@@ -46,6 +46,7 @@ import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-l
 import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isLineGroupAdmin, diffFields } from '../utils/audit-log';
 // ★ 2026-07-01: 예측 일괄 분석·차감 수동 트리거 (9시 대기 없이 검증·복구·시연)
 import { runPredictiveBatchNow } from '../utils/predictive-worker';
+import { sendTypeLabel } from '../utils/send-type-axis';
 
 const router = Router();
 
@@ -1881,7 +1882,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
     const metaResult = await query(`
       SELECT
         c.id, c.company_id, c.created_by, c.campaign_name, c.send_type, c.message_content,
-        c.message_type, c.is_ad, c.callback_number, c.target_count, c.created_at, c.sent_at,
+        c.message_type, c.send_channel, c.is_ad, c.callback_number, c.target_count, c.created_at, c.sent_at,
         c.result_final, c.sent_count, c.success_count, c.fail_count,
         ${CAMPAIGN_OPT080_SELECT_EXPR},
         u.id as user_id, u.name as user_name, u.login_id, u.department, u.store_codes
@@ -1929,6 +1930,8 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
         send_type: c.send_type,
         message_content: c.message_content,
         message_type: c.message_type,
+        // 카카오·알림톡은 message_type이 전부 LMS다 — 채널 판정은 이 값이 담당한다(화면 CT가 읽는다).
+        send_channel: c.send_channel,
         is_ad: c.is_ad,
         callback_number: c.callback_number,
         opt_out_080_number: c.opt_out_080_number ?? null,
@@ -2085,7 +2088,7 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
     //   target_count/sent_at은 last_run 메타라 그대로 subquery 유지 (캐시 아님).
     const result = await query(`
       SELECT
-        c.id, c.campaign_name as name, c.status, c.send_type as campaign_type, c.created_at,
+        c.id, c.campaign_name as name, c.status, c.send_type, c.send_channel, c.created_at,
         c.company_id, c.created_by, c.message_type, c.send_channel, c.scheduled_at, c.sent_at,
         c.result_final, c.sent_count, c.success_count, c.fail_count,
         co.company_name, co.company_code,
@@ -4700,7 +4703,7 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
       r.login_id || '-',
       r.user_name || '-',
       r.channel_label,
-      r.send_type === 'auto' ? '자동' : r.send_type === 'direct' ? '직접' : 'AI',
+      sendTypeLabel(r.send_type),
       Number(r.campaign_count) || 0,
       Number(r.total_target) || 0,
       Number(r.total_sent) || 0,
