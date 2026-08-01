@@ -17,6 +17,8 @@ import {
   CalendarClock,
   // ★ 2026-07-10 목표 달성 시 자동 종료
   Target,
+  // ★ 2026-08-01 여정 재설계 §2-3: 회사 데이터로 못 만드는 여정 잠금 표시
+  Lock,
 } from 'lucide-react';
 import JourneyVariantsEditor from '../components/journey/JourneyVariantsEditor';
 import JourneyMmsUploader from '../components/journey/JourneyMmsUploader';
@@ -329,6 +331,21 @@ interface RefineCandidate {
   reasoning: string;
 }
 
+/**
+ * ★ 2026-08-01 설계서 §2-3 — 빠른 시작 칩이 어느 트리거를 쓰는지.
+ *   회사가 준 데이터로 그 트리거를 판정할 수 없으면 칩을 잠근다. custom은 트리거 데이터가 필요 없다.
+ *   만들어지고 켜졌는데 대상이 0건인 상태를 사용자가 모르는 것이 제일 나쁘다.
+ */
+const TEMPLATE_TRIGGER_KEY: Record<TemplateCode, string | null> = {
+  onboarding: 'signup',
+  repeat: 'purchase',
+  dormant: 'dormant',
+  cart: 'cart',
+  birthday: 'birthday',
+  reservation: 'reservation',
+  custom: null,
+};
+
 const TEMPLATE_VISUAL: Record<TemplateCode, { icon: typeof UserPlus; gradient: string; label: string; hint: string }> = {
   onboarding:  { icon: UserPlus,     gradient: 'from-emerald-400 to-teal-500',   label: '신규 가입 환영',  hint: '24시간 안 가입자' },
   repeat:      { icon: Repeat,       gradient: 'from-cyan-400 to-blue-500',      label: '재구매 유도',     hint: '구매 직후 follow-up' },
@@ -483,6 +500,9 @@ export default function JourneysPage() {
   // One-shot AI 생성 흐름
   const [objective, setObjective] = useState('');
   const [generating, setGenerating] = useState(false);
+  // ★ 2026-08-01 설계서 §2-3 — 이 회사가 지금 만들 수 있는 여정. 못 만드는 것은 사유와 함께 잠근다.
+  //   조회 실패면 잠그지 않는다(화면 편의 게이트). 실제 발송 차단은 백엔드가 담당한다.
+  const [dataCap, setDataCap] = useState<Record<string, { available: boolean; reason: string }> | null>(null);
   // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 6 sub-agent 진행 + 샘플 고객 머지 토글
   const [progressStep, setProgressStep] = useState(0);
   const [sampleCustomer, setSampleCustomer] = useState<Record<string, string | number | null> | null>(null);
@@ -561,6 +581,24 @@ export default function JourneysPage() {
 
   // ★ D211+ Phase 3 (2026-05-23 Harold 명시): statusFilter 변경 시 자동 재조회
   useEffect(() => { loadAll(); }, [statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ★ 2026-08-01 설계서 §2-3 — 이 회사 데이터로 만들 수 있는 여정을 받아온다.
+  //   실패해도 잠그지 않는다: 화면 편의 게이트일 뿐이고, 여기서 막으면 만들 수 있는 여정까지 못 만든다.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/ai/operator/journeys-data-capability', {
+          headers: { Authorization: `Bearer ${token()}` },
+        });
+        const data = await res.json();
+        if (alive && data?.success && data.triggers) setDataCap(data.triggers);
+      } catch {
+        /* 조회 실패 = 잠그지 않음(기존 동작 유지) */
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   // 자동마케팅 승격 — 검증된 목표를 여정으로 가져와 프리필 (sessionStorage 핸드오프)
   useEffect(() => {
@@ -1530,18 +1568,23 @@ export default function JourneysPage() {
                 {(Object.keys(TEMPLATE_VISUAL) as TemplateCode[]).map((code) => {
                   const v = TEMPLATE_VISUAL[code];
                   const Icon = v.icon;
+                  // ★ 2026-08-01 §2-3 — 이 회사 데이터로 못 만드는 여정은 사유와 함께 잠근다(숨기지 않는다).
+                  const trgKey = TEMPLATE_TRIGGER_KEY[code];
+                  const cap = trgKey ? dataCap?.[trgKey] : undefined;
+                  const capBlocked = cap && !cap.available ? cap.reason : null;
                   return (
                     <button
                       key={code}
-                      onClick={() => handleAIGenerate(code)}
-                      disabled={generating}
-                      title={v.hint}
+                      onClick={() => { if (!capBlocked) handleAIGenerate(code); }}
+                      disabled={generating || !!capBlocked}
+                      title={capBlocked || v.hint}
                       className="flex items-center gap-2 pl-2 pr-4 py-2 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 hover:border-white/20 transition-colors disabled:opacity-50"
                     >
                       <span className={`w-6 h-6 rounded-full bg-gradient-to-br ${v.gradient} flex items-center justify-center shrink-0`}>
                         <Icon className="w-3.5 h-3.5 text-white" />
                       </span>
                       <span className="text-xs font-medium">{v.label}</span>
+                      {capBlocked && <Lock className="w-3 h-3 text-white/40 shrink-0" />}
                     </button>
                   );
                 })}

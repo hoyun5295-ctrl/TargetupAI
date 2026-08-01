@@ -23,6 +23,9 @@ import { formatStepTiming, formatConditionChip } from './journey-step-format';
 import { journeyListWhere, executionStatusFilter } from './journey-list-filter';
 import { StartKind, normalizeStartKind, classifyStartKind } from './journey-start-kind';
 import { validateAlimtalkFallback, AlimtalkFallbackError } from './alimtalk-fallback';
+// ★ 2026-08-01 여정 재설계 — 활성화가 발송이 시작되는 유일한 길목이라 게이트를 여기 둔다(Codex 4R).
+import { resolveTriggerAvailability, toAvailabilityMap, triggerKeyForEvent, requiresRecipientCap, CAP_EXEMPT_TRIGGERS } from './journey-trigger-capability';
+import { getCompanyJourneyFacts } from './company-data-profile';
 
 // 앵커 반복 규칙 화이트리스트 — 설계 잠금(4종). 미지원 값은 'none'으로.
 const ANCHOR_RECURRENCES = ['none', 'monthly_day', 'monthly_last', 'yearly'];
@@ -617,6 +620,7 @@ export async function activateJourney(companyId: string, journeyId: string, user
   // ★ D194 (2026-05-22): Liquid 문법 사전 검증 + subject 빈 영역 검증 추가 (직원 테스트 발송 사고 0건 영구 안전망)
   const detail = await query(
     `SELECT j.callback_number, j.status, j.start_kind, j.anchor_date,
+            j.trigger_event, j.threshold_recipients_per_step,
             (SELECT json_agg(json_build_object(
               'order', step_order,
               'type', step_type,
@@ -647,6 +651,37 @@ export async function activateJourney(companyId: string, journeyId: string, user
   const steps = Array.isArray(row.steps) ? row.steps : [];
   if (steps.length === 0) {
     return { ok: false, reason: 'step이 없는 여정은 활성화할 수 없습니다.' };
+  }
+
+  // ★ 2026-08-01 Codex 4R 수용 — 발송이 시작되는 유일한 길목이 활성화다. 게이트는 여기 있어야 한다.
+  //   화면 잠금만으로는 새지 않는다: 자연어 생성 경로는 잠금을 안 보고, 조회가 실패해도 우회된다.
+  //   여기서 막으면 어느 경로로 만들어졌든 발송 직전에 걸린다.
+  //   가능 여부 조회가 실패하면 throw되어 활성화가 실패한다 — 발송 개시라서 fail-closed가 맞다.
+  const triggerEvent = String(row.trigger_event || '');
+  const trgKey = triggerKeyForEvent(triggerEvent);
+  // ★ 5R — 모르는 발송 조건은 추출 switch의 default에 걸려 **조용히 0건**이 된다.
+  //   생성 경로가 요청값을 그대로 저장하므로 오타·환각 한 번이면 화면상 활성인데 아무에게도 안 나간다.
+  //   'custom'(상시 세그먼트)은 트리거 데이터가 필요 없어 key가 없는 것이 정상이다.
+  if (!trgKey && triggerEvent !== 'custom') {
+    return { ok: false, reason: '지원하지 않는 발송 조건이라 켤 수 없습니다. 여정을 다시 만들어 주세요.' };
+  }
+  if (trgKey) {
+    const availability = toAvailabilityMap(resolveTriggerAvailability(await getCompanyJourneyFacts(companyId)));
+    const verdict = availability[trgKey];
+    if (verdict && !verdict.available) {
+      return { ok: false, reason: verdict.reason };
+    }
+  }
+
+  // ★ 이관 배치가 유예 만료일에 통째로 들어오는 것은 유예가 못 막는다(단조 조건).
+  //   그것을 막는 것은 수신자 상한이라 **커서 경로가 아닌 트리거**는 상한을 필수로 받는다.
+  //   ⛔ 5R 정정 — 유예 대상과 상한 필수 대상은 다른 집합이다. 옛 코드가 둘을 묶어 생일이 빠졌었다.
+  //     생일은 유예가 필요 없지만(실제 날짜), 생년월일 대량 적재는 그날 코호트를 한꺼번에 만든다.
+  if (requiresRecipientCap(triggerEvent) && row.threshold_recipients_per_step == null) {
+    return {
+      ok: false,
+      reason: '한 번에 보낼 최대 인원을 정해 주세요. 고객 정보를 한꺼번에 옮겨 올 때 예상보다 많은 분께 나가는 것을 막습니다.',
+    };
   }
 
   // ★ 2026-06-30 여정 일반화 — date_anchor/one_shot 시작 방식 검증.
@@ -825,9 +860,17 @@ export async function activateJourney(companyId: string, journeyId: string, user
       pause_reason = NULL,
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid AND status IN ('draft', 'paused')
+       AND (threshold_recipients_per_step IS NOT NULL OR trigger_event = ANY($4::text[]))
      RETURNING id`,
-    [journeyId, companyId, userId]
+    // ★ 2026-08-01 Codex 5R — 상한 검사를 쓰기와 원자화한다.
+    //   위에서 SELECT로 확인만 하면, 그 사이 옵션 저장이 상한을 비워도 활성화가 그대로 성사돼
+    //   상한 NULL인 활성 여정이 남는다(워커는 상한이 없으면 상한 검사를 건너뛴다).
+    //   면제 목록은 CT 단일 출처 — 커서 트리거만 상한 없이 켤 수 있다.
+    [journeyId, companyId, userId, CAP_EXEMPT_TRIGGERS]
   );
+  if (r.rows.length === 0) {
+    return { ok: false, reason: '여정 설정이 방금 바뀌어 켜지 못했습니다. 새로고침 후 다시 시도해 주세요.' };
+  }
 
   // 활성화 종결 직후 = step snapshot 보존 (활성화 시점 본문 = 발송 시점 본문 동일 보장).
   //   발송 2시간 전 스팸테스트·담당자 안내는 journey-pretest-notifier 스캐너가 실제 next_run_at 기준으로 처리(Phase 6B).

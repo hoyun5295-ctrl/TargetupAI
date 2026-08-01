@@ -8,7 +8,7 @@
  *   - [대상] 버튼 → 조건 모달. event=이벤트 발생 고객+조건 / segment=조건으로 대상 지정.
  */
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Bell, ShoppingBag, CalendarCheck, ShoppingCart, Truck, ArrowLeft, Zap, Clock, Users, MessageSquare, UserPlus, Moon, Cake, Coins } from 'lucide-react';
 // ★ 2026-07-28 트리거 카탈로그 + 템플릿 호환 판정 — 백엔드 switch 8종과 1:1(단일 출처).
 import { TRIGGER_EVENTS, resolveTriggerCompat, type TriggerDef } from '../../utils/journey-trigger-catalog';
@@ -91,6 +91,28 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
   const [conditions, setConditions] = useState<AudienceCondition[]>([]);
   const [showTemplate, setShowTemplate] = useState(false);
   const [showAudience, setShowAudience] = useState(false);
+  // ★ 2026-08-01 설계서 §2-3 — 회사가 준 데이터로 만들 수 있는 트리거만 연다.
+  //   못 만드는 것은 숨기지 않고 사유와 함께 잠근다. 만들어지고 켜졌는데 0건으로 도는 상태가 제일 나쁘다.
+  const [dataCap, setDataCap] = useState<Record<string, { available: boolean; reason: string }> | null>(null);
+  const [dataCapFailed, setDataCapFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/ai/operator/journeys-data-capability', {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+        });
+        const data = await res.json();
+        if (!alive) return;
+        if (data?.success && data.triggers) setDataCap(data.triggers);
+        else setDataCapFailed(true);
+      } catch {
+        if (alive) setDataCapFailed(true);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   const selectedTemplate = templates.find((t) => t.template_code === alimtalk.templateCode);
 
@@ -130,10 +152,17 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
 
   // ★ 2026-07-27: 전환재발송 검증 공용 CT — 여정 활성화(백엔드)에서 막히기 전에 여기서 먼저 알려준다.
   const fallbackViolation = validateAlimtalkChannelState(alimtalk);
+  // ★ 고른 트리거를 이 회사 데이터로 만들 수 있는가(설계서 §2-3).
+  //   조회 실패(dataCap=null)면 잠그지 않는다 — 화면 편의 게이트이고, 실제 발송 차단은 백엔드가 한다.
+  //   대신 아래 배너로 "지금 확인할 수 없다"를 알린다(조용히 넘어가지 않는다).
+  const selectedDataInfo = startKind === 'event' ? dataCap?.[tx.key] : undefined;
+  const dataBlockedForSelected = selectedDataInfo && !selectedDataInfo.available ? selectedDataInfo.reason : null;
+
   const canBuild = Boolean(alimtalk.profileId && alimtalk.templateCode)
     && !fallbackViolation
     && !triggerMismatch
     && !eventVarsInNonEventFlow
+    && !dataBlockedForSelected
     && pointsMinOk
     && (startKind !== 'one_shot' || scheduleMode === 'now' || !!scheduledAt);
 
@@ -294,6 +323,18 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
                   이 템플릿은 <strong>{compat.eventVarsFound.join('·')}</strong>를 쓰기 때문에, 그 값을 주는 트리거만 고를 수 있어요.
                 </p>
               )}
+              {/* ★ 2026-08-01 §2-3 — 회사 데이터로 못 만드는 트리거는 잠긴다. 왜 잠겼는지와 무엇을 연동하면 되는지를 보여준다. */}
+              {dataBlockedForSelected && (
+                <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-400/30">
+                  <p className="text-[11px] text-rose-100/90">{dataBlockedForSelected}</p>
+                  <p className="text-[10px] text-white/45 mt-1">지금 만들면 대상이 한 명도 잡히지 않아 다른 트리거를 골라 주세요.</p>
+                </div>
+              )}
+              {dataCapFailed && (
+                <p className="text-[11px] text-amber-200/70">
+                  어떤 여정을 만들 수 있는지 지금 확인하지 못했어요. 만들기 전에 대상 인원을 꼭 확인해 주세요.
+                </p>
+              )}
               {groups.map(({ group, title }) => {
                 const items = TRIGGER_EVENTS.filter((t) => t.group === group);
                 return (
@@ -306,15 +347,18 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
                         const active = t.key === tx.key;
                         const gatedOff = t.gated && !hasMallIntegration;
                         const blockedReason = blockedMap.get(t.key);
-                        const locked = gatedOff || !!blockedReason;
+                        // ★ 세 번째 잠금 축 — 이 회사 데이터로 이 트리거를 판정할 수 있는가.
+                        const dataInfo = dataCap?.[t.key];
+                        const dataBlocked = dataInfo && !dataInfo.available ? dataInfo.reason : null;
+                        const locked = gatedOff || !!blockedReason || !!dataBlocked;
                         return (
                           <button key={t.key} onClick={() => { if (!locked) setTxKey(t.key); }} disabled={locked}
-                            title={blockedReason || undefined}
+                            title={dataBlocked || blockedReason || undefined}
                             className={`p-2.5 rounded-lg border text-left transition-colors ${active ? 'bg-teal-500/20 border-teal-400/60' : 'bg-white/[0.06] border-white/15 hover:bg-white/[0.1]'} ${locked ? 'opacity-40 cursor-not-allowed' : ''}`}>
                             <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${decor.gradient} flex items-center justify-center mb-1.5`}><Icon className="w-3.5 h-3.5 text-white" /></div>
                             <div className="text-xs font-semibold text-white">{t.label}</div>
                             <div className="text-[10px] text-white/55 mt-0.5">
-                              {gatedOff ? '자사몰 연동 시' : blockedReason || t.desc}
+                              {dataBlocked || blockedReason || (gatedOff ? '자사몰 연동 시' : t.desc)}
                             </div>
                           </button>
                         );

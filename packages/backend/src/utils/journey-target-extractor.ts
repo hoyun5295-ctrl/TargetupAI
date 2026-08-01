@@ -20,7 +20,15 @@ import { query } from '../config/database';
 import { buildJourneySafetyFilter, buildReentryAntiJoin } from './journey-safety-filter';
 import { resolvePointsExpiringConfig } from './journey-points-trigger';
 import { buildLedgerAntiJoin, hasBaseline } from './journey-entry-ledger';
+// ★ 2026-08-01 여정 재설계 §3-0-2 — "우리가 처음 본 사람" ≠ "신규 고객".
+//   추출은 회사 능력을 조회하지 않는다(Codex 3R). 술어는 데이터로만 평가되고,
+//   "판정 가능한가" 게이트는 발송 진입 경로(journey-trigger-watcher)가 소유한다.
+import { buildExistingCustomerPredicate } from './journey-identity-signals';
+// ★ 2026-08-01 §3-0-3 — 이관 유예. "우리가 오늘 처음 봤다"는 "오늘 무언가 했다"가 아니다.
+//   기존 고객 DB를 처음 연동하면 수만 명의 created_at이 전부 오늘이라 상태형 트리거가 통째로 발화한다.
+import { isBulkStateTrigger, resolveIntakeGraceDays, buildIntakeGraceClause } from './journey-intake-grace';
 import { buildSegmentBreakdown, SegmentBreakdown } from './journey-simulator-core';
+import type { CdpEventRow } from './journey-cdp-cursor';
 
 export async function selectJourneyTargetCustomerIds(
   companyId: string,
@@ -31,6 +39,8 @@ export async function selectJourneyTargetCustomerIds(
   reentry?: { allowReentry: boolean; cooldownDays: number },
 ): Promise<string[]> {
   const filters = triggerFilters || {};
+  // 이관 유예 일수 — 대상 트리거 목록은 CT가 소유한다(isBulkStateTrigger). 대상이 아니면 0 = 조건 없음.
+  const graceDays = isBulkStateTrigger(triggerEvent) ? resolveIntakeGraceDays(filters) : 0;
 
   switch (triggerEvent) {
     // 1. 신규 가입 (customers.created_at 직전 N시간 안)
@@ -47,15 +57,36 @@ export async function selectJourneyTargetCustomerIds(
         params.push(String(Number(filters.recent_hours || 24)));    // $2 = hours (추정)
         entryClause = `c.created_at > NOW() - ($${params.length} || ' hours')::interval`;
       }
+      // ★ 2026-08-01 §3-0-2: 원장에 없다고 신규가 아니다.
+      //   자사몰로 먼저 등록된 고객(매장코드 없음)을 싱크가 매장코드와 함께 올리면 customers upsert 키
+      //   (company_id, COALESCE(store_code,'__NONE__'), phone)가 충돌하지 않아 **새 행이 생긴다**.
+      //   그 행은 원장에 없으니 옛 판정으로는 신규였고, 10년 단골에게 환영 문자가 나갔다.
+      //   회사가 준 근거로 "전에도 고객이었다"를 걸러낸다 — 근거는 회사마다 다르다(설계서 §2-3).
+      //   ⚠ 근거가 없는 회사를 생성·활성화 시점에 막는 것은 다음 조각이다. 여기서 빈 배열을 돌려주면
+      //     기존 여정이 사유 없이 죽는다("조용한 0건"은 우리가 고치려는 병 자체다) → 추출 동작은 보존하고 관측만.
+      const existingPred = buildExistingCustomerPredicate('c', params);
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
       params.push(String(limit));
+      // ★ 2026-08-01 Codex 2R 수용 — 같은 회차 안 중복 진입 차단.
+      //   판정을 사람 단위로 좁혀도 "이전 회차 기록"만 막힌다. 같은 전화번호의 무매장·매장 행이
+      //   한 회차에 함께 후보가 되면 둘 다 원장 이전 상태를 보고 통과해 **같은 번호로 두 번 나간다**.
+      //   DISTINCT ON (phone)으로 사람당 한 행만 남긴다(가장 최근 생성 행). LIMIT은 중복 제거 뒤에 건다 —
+      //   먼저 걸면 중복이 정원을 먹어 실제 신규가 밀린다.
+      //   전화번호 없는 행은 후보에서 뺀다 — 발송도 못 하고 진입 원장 기록(phone <> '')도 안 되어
+      //   매회 후보로 되살아나며 대량 차단 판정만 부풀린다.
       const r = await query(
-        `SELECT id AS customer_id FROM customers c
-         WHERE c.company_id = $1::uuid
-           AND ${buildJourneySafetyFilter('c')}
-           AND ${entryClause}
-           ${cond ? ` AND ${cond}` : ''}
-         ORDER BY c.created_at DESC
+        `SELECT s.customer_id FROM (
+           SELECT DISTINCT ON (c.phone) c.id AS customer_id, c.created_at
+             FROM customers c
+            WHERE c.company_id = $1::uuid
+              AND COALESCE(c.phone, '') <> ''
+              AND ${buildJourneySafetyFilter('c')}
+              AND ${entryClause}
+              AND NOT ${existingPred}
+              ${cond ? ` AND ${cond}` : ''}
+            ORDER BY c.phone, c.created_at DESC
+         ) s
+         ORDER BY s.created_at DESC
          LIMIT $${params.length}::int`,
         params,
       );
@@ -77,6 +108,8 @@ export async function selectJourneyTargetCustomerIds(
       const d = Number(filters.dormant_days || 30);
       const params: any[] = [companyId, String(d), String(d + 7)];
       const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays) : '';
+      // 이관 유예 — 3년 전 최근구매일이 오늘 적재되면 그 사람은 즉시 휴면 대상이 된다.
+      const grace = buildIntakeGraceClause('c', params, graceDays);
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
       params.push(String(limit));
       const r = await query(
@@ -87,6 +120,7 @@ export async function selectJourneyTargetCustomerIds(
            AND c.recent_purchase_date < (CURRENT_DATE - ($2 || ' days')::interval)
            AND c.recent_purchase_date > (CURRENT_DATE - ($3 || ' days')::interval)
            ${antiJoin}
+           ${grace ? ` AND ${grace}` : ''}
            ${cond ? ` AND ${cond}` : ''}
          ORDER BY c.recent_purchase_date DESC
          LIMIT $${params.length}::int`,
@@ -172,6 +206,8 @@ export async function selectJourneyTargetCustomerIds(
         edgeClause = `(c.recent_purchase_date IS NULL OR c.recent_purchase_date < (CURRENT_DATE - ($3 || ' days')::interval))`;
       }
       const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays) : '';
+      // 이관 유예 — inactivity 모드는 최근구매일 기반이라 이관 배치가 통째로 걸린다.
+      const grace = buildIntakeGraceClause('c', params, graceDays);
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
       params.push(String(limit));
       const r = await query(
@@ -181,6 +217,7 @@ export async function selectJourneyTargetCustomerIds(
            AND c.points IS NOT NULL AND c.points >= $2::int
            AND ${edgeClause}
            ${antiJoin}
+           ${grace ? ` AND ${grace}` : ''}
            ${cond ? ` AND ${cond}` : ''}
          ORDER BY c.points DESC
          LIMIT $${params.length}::int`,
@@ -198,6 +235,8 @@ export async function selectJourneyTargetCustomerIds(
         params.push(journeyId);
         dedupClause = `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE je.journey_id = $${params.length}::uuid AND je.customer_id = c.id)`;
       }
+      // 이관 유예 — 상시 세그먼트는 조건 맞는 전원이 들어오므로 이관 배치가 그대로 폭발한다.
+      const grace = buildIntakeGraceClause('c', params, graceDays);
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
       params.push(String(limit));
       const r = await query(
@@ -205,6 +244,7 @@ export async function selectJourneyTargetCustomerIds(
          WHERE c.company_id = $1::uuid
            AND ${buildJourneySafetyFilter('c')}
            ${dedupClause}
+           ${grace ? ` AND ${grace}` : ''}
            ${cond ? ` AND ${cond}` : ''}
          ORDER BY c.id
          LIMIT $${params.length}::int`,
@@ -288,33 +328,65 @@ export async function selectCdpEvent(
   return r.rows.map((x: any) => x.customer_id);
 }
 
-// ★ Fix #11 (2026-06-05): cdp 커서용 — (cursor, windowEnd] 이벤트를 occurred_at ASC로 chunk만큼(안전필터+조건).
-//   distinct가 아니라 행+시각을 반환 → 호출부가 커서를 마지막 처리 이벤트 시각까지만 전진(LIMIT로 이벤트 누락하던 문제 정정).
+// ★ Fix #11 (2026-06-05): cdp 커서용 — 커서 이후 창의 이벤트를 chunk만큼(안전필터+조건).
+//   distinct가 아니라 행을 그대로 반환 → 호출부가 실제로 본 마지막 행까지만 커서를 전진(LIMIT 누락 정정).
+// ★ 2026-08-01 §11-3: 커서 축을 occurred_at(발생) → created_at(도착)으로 전환.
+//   배치로 늦게 도착한 데이터, 익명→회원 소급으로 나중에 연결된 데이터가 커서 뒤에 떨어져 영영 안 잡히던 구멍을 닫는다.
+//   cursorEventId가 오면 (created_at, id) 행 비교로 동시각 타이까지 가른다 — 없으면 시각만(컬럼 미마이그레이션 환경).
+export interface CdpCursorQuery {
+  /** 커서 시각. */
+  at: Date | string;
+  /** 동시각 타이브레이커. null이면 시각만 비교한다. */
+  eventId?: string | null;
+  /**
+   * 커서 축. `journeys.last_event_cursor_id` 컬럼이 아직 없는 환경은 `occurred_at`(옛 축)을 유지한다.
+   * 옛 커서 값은 발생 시각이라, 컬럼이 생기기 전에 도착 축으로 읽으면 이미 처리한 이벤트를 다시 잡는다.
+   * DDL(컬럼 추가 + 커서 재기준)이 끝난 뒤에만 `created_at`으로 넘어간다.
+   */
+  axis: 'created_at' | 'occurred_at';
+}
+
 export async function selectCdpEventRowsForCursor(
   companyId: string,
   eventName: string,
   filters: Record<string, any>,
-  cursorStart: Date | string,
+  cursor: CdpCursorQuery,
   windowEnd: Date | string,
   chunkLimit: number,
-): Promise<{ customerId: string; occurredAt: Date; properties: Record<string, any> | null }[]> {
-  const params: any[] = [companyId, eventName, cursorStart, windowEnd];
+): Promise<CdpEventRow[]> {
+  // 축은 화이트리스트 두 값뿐 — 문자열이 그대로 SQL에 들어가므로 여기서 닫는다(주입 표면 0).
+  const axis = cursor.axis === 'created_at' ? 'created_at' : 'occurred_at';
+  const params: any[] = [companyId, eventName, cursor.at, windowEnd];
+  let cursorClause: string;
+  if (axis === 'created_at' && cursor.eventId) {
+    params.push(cursor.eventId);
+    cursorClause = `(e.created_at, e.id) > ($3::timestamptz, $${params.length}::uuid)`;
+  } else {
+    cursorClause = `e.${axis} > $3::timestamptz`;
+  }
   const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
   params.push(String(chunkLimit));
   const r = await query(
-    `SELECT e.customer_id, e.occurred_at, e.properties FROM cdp_events e
+    `SELECT e.id, e.customer_id, e.created_at, e.occurred_at, e.properties FROM cdp_events e
      INNER JOIN customers c ON c.id = e.customer_id AND c.company_id = $1::uuid
      WHERE e.company_id = $1::uuid
        AND e.event_name = $2
        AND e.customer_id IS NOT NULL
-       AND e.occurred_at > $3 AND e.occurred_at <= $4
+       AND ${cursorClause}
+       AND e.${axis} <= $4::timestamptz
        AND ${buildJourneySafetyFilter('c')}
        ${cond ? ` AND ${cond}` : ''}
-     ORDER BY e.occurred_at ASC
+     ORDER BY e.${axis} ASC, e.id ASC
      LIMIT $${params.length}::int`,
     params,
   );
-  return r.rows.map((x: any) => ({ customerId: x.customer_id, occurredAt: x.occurred_at, properties: x.properties ?? null }));
+  return r.rows.map((x: any) => ({
+    customerId: x.customer_id,
+    eventId: x.id,
+    createdAt: x.created_at,
+    occurredAt: x.occurred_at,
+    properties: x.properties ?? null,
+  }));
 }
 
 // ★ 2026-06-22: 장바구니(cart_abandon)는 커서가 아니라 enqueueCandidates 경로라 진입 시점 properties를 따로 모은다.

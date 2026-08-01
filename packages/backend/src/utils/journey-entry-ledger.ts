@@ -16,8 +16,21 @@
 import { query } from '../config/database';
 
 /**
- * 신규가입 추출용 안티조인 SQL 조각 — 원장에 없는 고객 식별자만 통과.
- * 시스템 upsert 키(회사+매장코드+전화번호)와 동일 기준. 파라미터는 journeyId 1개(호출부 $N 재사용).
+ * 신규가입 추출용 안티조인 SQL 조각 — 원장에 없는 **사람**만 통과.
+ *
+ * ★ 2026-08-01 판정 키에서 매장코드를 뺐다 (설계서 §3-0-2).
+ *   기록(INSERT)은 테이블 UNIQUE(회사+매장코드+전화번호) 그대로 두고 **판정만 사람 단위**로 좁힌다.
+ *   왜: customers upsert 키가 (company_id, COALESCE(store_code,'__NONE__'), phone)라
+ *   자사몰로 먼저 등록된 고객(매장코드 없음)을 싱크가 매장코드와 함께 올리면 충돌하지 않아
+ *   **새 행이 생긴다.** 옛 판정은 매장코드까지 비교해 그 행을 "처음 보는 사람"으로 봤고,
+ *   10년 단골에게 환영 문자가 나갔다. 매장을 옮겨 재등록되는 경우도 같다.
+ *   사람은 매장을 옮겨 다녀도 같은 사람이다.
+ *
+ *   방향 안전성: 비교 항목을 줄이는 변경이라 **제외 범위가 넓어진다**(덜 보낸다).
+ *   전화번호 표기가 갈리는 축(하이픈 유무)은 고객 행 병합 과제로 별건 — 자사몰 경로는
+ *   cdp-identity가 normalizePhone 후 (company_id, phone)으로 기존 행을 재사용한다.
+ *
+ * 파라미터는 journeyId 1개(호출부 $N 재사용).
  */
 export function buildLedgerAntiJoin(custAlias: string, journeyParamIndex: number): string {
   const a = custAlias;
@@ -25,7 +38,6 @@ export function buildLedgerAntiJoin(custAlias: string, journeyParamIndex: number
     `NOT EXISTS (SELECT 1 FROM journey_entry_ledger l ` +
     `WHERE l.journey_id = $${journeyParamIndex} ` +
     `AND l.company_id = ${a}.company_id ` +
-    `AND COALESCE(l.store_code, '__NONE__') = COALESCE(${a}.store_code, '__NONE__') ` +
     `AND l.phone = ${a}.phone)`
   );
 }

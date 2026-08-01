@@ -124,7 +124,9 @@ import { describeJourneyTrigger } from '../utils/journey-step-format';
 import { normalizeStartKind } from '../utils/journey-start-kind';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 조회.
 //   /operator/data-profile endpoint = 마케팅 담당자 검토 UI 안내 카드 data source.
-import { getCompanyDataProfile } from '../utils/company-data-profile';
+import { getCompanyDataProfile, getCompanyJourneyFacts } from '../utils/company-data-profile';
+// ★ 2026-08-01 여정 재설계 §2-3 — 회사가 준 데이터로 만들 수 있는 여정만 연다(못 여는 것은 사유와 함께 잠근다).
+import { resolveTriggerAvailability, toAvailabilityMap, hasAnyAvailableTrigger } from '../utils/journey-trigger-capability';
 // ★ D192 (2026-05-22): CT-51 Journey 통계 통합 진입점 — 옛 단순 통계(getJourneyStats/listExecutions)를 완전 진화 — buildJourneyStats (overview + steps + segments + hourly + weekday + variants) + listJourneyEnteredCustomers (회사 격리 + 페이지네이션)
 import { buildJourneyStats, listJourneyEnteredCustomers } from '../utils/journey-stats';
 // ★ D197 (2026-05-22) Phase B-2: Predictive Suite — 회사 예측 점수 분포 + Top 위험/구매 가능성 + 모델 정확도
@@ -3835,11 +3837,19 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
 
     sets.push('updated_at = NOW()');
 
+    // ★ 2026-08-01 Codex 5R — 읽은 status를 쓰기 조건으로 건다(낙관적 동시성).
+    //   status를 읽고 검증한 뒤 조건 없이 쓰면, 그 사이 활성화가 성사됐을 때
+    //   **활성 여정의 수신자 상한을 비울 수 있다**. 그러면 워커가 상한 검사를 건너뛴다.
+    params.push(cur.rows[0].status);
     const r = await query(
-      `UPDATE journeys SET ${sets.join(', ')} WHERE id = $1::uuid AND company_id = $2::uuid RETURNING id`,
+      `UPDATE journeys SET ${sets.join(', ')}
+        WHERE id = $1::uuid AND company_id = $2::uuid AND status = $${params.length}
+        RETURNING id`,
       params
     );
-    if (r.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    if (r.rows.length === 0) {
+      return res.status(409).json({ success: false, error: '여정 상태가 방금 바뀌었습니다. 새로고침 후 다시 시도해 주세요.', code: 'JOURNEY_STATE_CHANGED' });
+    }
     return res.json({ success: true });
   } catch (err: any) {
     const msg = err?.message || '';
@@ -3848,6 +3858,30 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
     }
     console.error('[Journeys update options] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '여정 옵션 수정 실패' });
+  }
+});
+
+// GET /api/ai/operator/journeys-data-capability — 이 회사가 지금 만들 수 있는 여정 (2026-08-01, 설계서 §2-3)
+//   우리는 정답표를 갖지 않는다. 고객사가 준 데이터로 판정하고, 못 만드는 트리거는 숨기지 않고 사유와 함께 잠근다.
+//   지금은 만들어지고 켜지고 0건으로 도는데, 고객사는 켜 뒀다고 믿고 우리는 아무것도 안 보낸다 — 그게 제일 나쁘다.
+router.get('/operator/journeys-data-capability', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const list = resolveTriggerAvailability(await getCompanyJourneyFacts(companyId));
+    return res.json({ success: true, triggers: toAvailabilityMap(list), anyAvailable: hasAnyAvailableTrigger(list) });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션이 필요합니다 — 운영자에게 확인을 요청해 주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[Journeys data capability] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '여정 가능 여부 조회 실패' });
   }
 });
 

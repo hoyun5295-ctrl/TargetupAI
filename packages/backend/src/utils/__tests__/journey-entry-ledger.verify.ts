@@ -14,8 +14,9 @@ const frag = buildLedgerAntiJoin('c', 9);
 ok('NOT EXISTS + 원장 테이블', () => assert.ok(/NOT\s+EXISTS\s*\([\s\S]*journey_entry_ledger\s+l/.test(frag)));
 ok('journey_id 파라미터 $9', () => assert.ok(/l\.journey_id\s*=\s*\$9/.test(frag)));
 ok('company_id 매칭', () => assert.ok(/l\.company_id\s*=\s*c\.company_id/.test(frag)));
-ok('store_code COALESCE 매칭(upsert 키와 동일)', () =>
-  assert.ok(/COALESCE\(l\.store_code,\s*'__NONE__'\)\s*=\s*COALESCE\(c\.store_code,\s*'__NONE__'\)/.test(frag)));
+// ★ 2026-08-01 판정 키에서 매장코드 제거(설계서 §3-0-2) — 매장을 옮겨 재등록된 사람이 신규가 되던 결함.
+//   회귀 방지로 "store_code가 조각에 없다"를 못 박는다. 되살리면 이 단정이 깨진다.
+ok('store_code를 판정에 쓰지 않는다(사람 단위 식별)', () => assert.ok(!/store_code/.test(frag)));
 ok('phone 매칭', () => assert.ok(/l\.phone\s*=\s*c\.phone/.test(frag)));
 ok('파라미터는 journeyId 1개만($n 1회)', () => assert.ok((frag.match(/\$\d+/g) || []).length === 1));
 

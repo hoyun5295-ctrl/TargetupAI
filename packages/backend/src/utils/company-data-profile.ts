@@ -28,6 +28,9 @@
 
 import { query } from '../config/database';
 import { getColumnFields } from './standard-field-map';
+// ★ 2026-08-01 여정 재설계 — 신규/기존 판정 능력(순수 CT). 타입·판정 규칙은 그쪽이 소유한다.
+import { resolveNewCustomerJudgement, type CompanyIdentityCapability } from './journey-identity-signals';
+import type { CompanyJourneyFacts } from './journey-trigger-capability';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 외부 노출 인터페이스
@@ -175,6 +178,88 @@ export async function getCompanyDataProfile(companyId: string): Promise<CompanyD
 export function clearCompanyDataProfileCache(companyId?: string): void {
   if (companyId) cache.delete(companyId);
   else cache.clear();
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ★ 2026-08-01 신규/기존 고객 판정 능력 (여정 재설계 §2-3)
+//   우리는 정답표를 갖지 않는다 — "이 회사가 준 것으로 신규를 가릴 수 있는가"를 여기서 계산한다.
+//   신규 CT를 만들지 않고 이 프로파일의 소비처를 늘린다(설계서 §2-3).
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/**
+ * 이 회사가 신규/기존을 가릴 근거를 갖고 있는가 — **발송 적격성 판정이라 전용 조회로 매번 새로 본다.**
+ *
+ * ⛔ 개인화 프로파일(getCompanyDataProfile)에서 파생시키지 않는다 (2026-08-01 Codex 적대검증 지적, 전량 수용).
+ *   1) 그 프로파일은 5분 캐시인데 싱크에이전트 적재 경로가 무효화를 호출하지 않는다.
+ *      근거가 false→true로 바뀐 직후 창에서 새 구매 근거가 술어에서 빠지고, 그 방향은 **더 보내는 쪽**이다.
+ *   2) 그 프로파일의 충족률은 반올림된 정수(fillRate)라 201명 중 1명 같은 희소 근거가 0으로 떨어진다.
+ *      다른 신호가 하나라도 true면 술어는 만들어지므로 **경고도 없이** 그 근거의 기존 고객이 통과한다.
+ *   발송 적격성은 문안 변수 선정과 요구 수준이 다르다. 캐시를 공유하면 안 된다.
+ *
+ * COUNT이 아니라 EXISTS다 — "한 명이라도 있는가"만 알면 되고, 근거가 있는 회사는 첫 행에서 멈춘다.
+ * 컬럼 타입은 운영 information_schema 실측(2026-08-01):
+ *   purchase_count int · recent_purchase_date date · total_purchase_amount numeric · points int.
+ *
+ * ⛔ 여기서 보는 신호는 buildExistingCustomerPredicate가 실제로 쓰는 것과 **같아야 한다**.
+ *   게이트가 통과시킨 근거를 술어가 안 보면 그 자체가 fail-open이다(Codex 3R 정정).
+ *
+ * 끈 것과 이유:
+ *   - grade: 기본등급이 무엇인지는 회사가 정해줘야 한다. 우리가 지어내면 그게 곧 정답표다(설계서 §2-3).
+ *   - signup_date: 표준 필드에 없다. 주는 회사가 생기면 그 회사에서만 켠다.
+ */
+export async function getCompanyIdentityCapability(companyId: string): Promise<CompanyIdentityCapability> {
+  const r = await query(
+    `SELECT
+       EXISTS (SELECT 1 FROM customers WHERE company_id = $1::uuid AND purchase_count IS NOT NULL AND purchase_count > 0) AS has_purchase_count,
+       EXISTS (SELECT 1 FROM customers WHERE company_id = $1::uuid AND recent_purchase_date IS NOT NULL) AS has_recent_purchase_date,
+       EXISTS (SELECT 1 FROM customers WHERE company_id = $1::uuid AND last_purchase_date IS NOT NULL AND last_purchase_date <> '') AS has_last_purchase_date,
+       EXISTS (SELECT 1 FROM customers WHERE company_id = $1::uuid AND total_purchase_amount IS NOT NULL AND total_purchase_amount > 0) AS has_total_purchase_amount,
+       EXISTS (SELECT 1 FROM customers WHERE company_id = $1::uuid AND points IS NOT NULL AND points > 0) AS has_points`,
+    [companyId],
+  );
+  const row = r.rows[0] || {};
+  return {
+    hasPurchaseCount: row.has_purchase_count === true,
+    hasRecentPurchaseDate: row.has_recent_purchase_date === true,
+    hasLastPurchaseDate: row.has_last_purchase_date === true,
+    hasTotalPurchaseAmount: row.has_total_purchase_amount === true,
+    hasPoints: row.has_points === true,
+    defaultGrade: null,
+    signupDateColumn: null,
+  };
+}
+
+/**
+ * 이 회사가 지금 만들 수 있는 여정을 가르는 사실(facts) — 화면 게이트용 (설계서 §2-3).
+ *
+ * 캐시하지 않는다. 발송 적격성과 같은 판단이고, 고객사가 방금 연동을 붙인 직후에
+ * "아직 안 된다"고 잘못 안내하면 그대로 이탈로 이어진다.
+ * 전부 EXISTS라 근거가 있는 회사는 첫 행에서 멈춘다.
+ *
+ * 사용 컬럼은 모두 운영 SQL이 이미 쓰는 것이다 — customers.birth_month_day·birth_date(생일 추출),
+ * cdp_events.event_name(커서·조건 평가). 신규 컬럼 0.
+ */
+export async function getCompanyJourneyFacts(companyId: string): Promise<CompanyJourneyFacts> {
+  const identity = await getCompanyIdentityCapability(companyId);
+  const r = await query(
+    `SELECT
+       EXISTS (SELECT 1 FROM customers WHERE company_id = $1::uuid
+                 AND ((birth_month_day IS NOT NULL AND birth_month_day <> '') OR birth_date IS NOT NULL)) AS has_birthday,
+       EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'purchase') AS has_purchase_events,
+       EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'cart_add') AS has_cart_events,
+       EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'custom_order_shipped') AS has_shipped_events`,
+    [companyId],
+  );
+  const row = r.rows[0] || {};
+  return {
+    canJudgeNewCustomer: resolveNewCustomerJudgement(identity).canJudge,
+    hasRecentPurchaseDate: identity.hasRecentPurchaseDate === true,
+    hasPoints: identity.hasPoints === true,
+    hasBirthday: row.has_birthday === true,
+    hasPurchaseEvents: row.has_purchase_events === true,
+    hasCartEvents: row.has_cart_events === true,
+    hasShippedEvents: row.has_shipped_events === true,
+  };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
