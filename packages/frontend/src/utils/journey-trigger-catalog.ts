@@ -62,25 +62,9 @@ export const TRIGGER_EVENTS: TriggerDef[] = [
     eventFields: [{ key: 'order_no', label: '주문번호' }, { key: 'product_name', label: '상품명' }, { key: 'total_amount', label: '결제금액' }],
     filters: {},
   },
-  {
-    key: 'reservation', triggerEvent: 'cdp.reservation_created', templateCode: 'reservation', group: 'tx',
-    label: '예약 확인', desc: '예약이 등록되면',
-    eventFields: [{ key: 'reservation_no', label: '예약번호' }, { key: 'reservation_date', label: '예약일시' }],
-    filters: {},
-  },
-  {
-    key: 'cart', triggerEvent: 'cdp.cart_abandon', templateCode: 'cart', group: 'tx',
-    label: '장바구니', desc: '장바구니에 담기면',
-    eventFields: [{ key: 'product_name', label: '상품명' }],
-    filters: { abandon_hours: 24 },
-  },
-  {
-    key: 'shipped', triggerEvent: 'custom_order_shipped', templateCode: 'cart', group: 'tx',
-    label: '배송 시작', desc: '배송이 시작되면',
-    eventFields: [{ key: 'tracking_no', label: '운송장번호' }, { key: 'carrier', label: '택배사' }],
-    filters: {}, gated: true,
-  },
-  // ★ §11-5 (2026-08-02) — 구매 스트림 분기 2종. 매장(싱크)·자사몰 어느 문이든 같은 트리거가 물린다.
+  // ★ §13-5 (2026-08-02) — 배열 순서 = 화면 표시 순서다(소비처가 group으로 거르고 그대로 그린다).
+  //   신규 5종이 뒤에 붙어 묻히던 것을 자주 쓰는 순서로 다시 놓았다. 구매 계열끼리 이웃하게 둔다.
+  //   ⛔ `purchase`는 첫 자리를 유지한다 — 소비처가 TRIGGER_EVENTS[0]을 기본값으로 쓴다.
   {
     key: 'first_purchase', triggerEvent: 'purchase.first', templateCode: 'repeat', group: 'tx',
     label: '첫 구매', desc: '생애 첫 구매가 일어나면',
@@ -94,13 +78,49 @@ export const TRIGGER_EVENTS: TriggerDef[] = [
     filters: { dormant_days: 30 },   // 복귀 판정 기준(직전 구매와의 간격) — 백엔드 기본값과 동일
   },
   {
+    key: 'cart', triggerEvent: 'cdp.cart_abandon', templateCode: 'cart', group: 'tx',
+    label: '장바구니', desc: '장바구니에 담기면',
+    eventFields: [{ key: 'product_name', label: '상품명' }],
+    filters: { abandon_hours: 24 },
+  },
+  {
     key: 'browse', triggerEvent: 'cdp.browse_no_purchase', templateCode: 'cart', group: 'tx',
     label: '조회 후 미구매', desc: '상품을 보고 구매하지 않으면',
     eventFields: [],
     filters: { browse_days: 3 },   // 백엔드 기본값과 동일(journey-target-extractor)
     gated: true,   // product_view는 자사몰 연동이 있어야 발생한다(Codex 지적 수용)
   },
+  {
+    key: 'shipped', triggerEvent: 'custom_order_shipped', templateCode: 'cart', group: 'tx',
+    label: '배송 시작', desc: '배송이 시작되면',
+    eventFields: [{ key: 'tracking_no', label: '운송장번호' }, { key: 'carrier', label: '택배사' }],
+    filters: {}, gated: true,
+  },
+  {
+    key: 'reservation', triggerEvent: 'cdp.reservation_created', templateCode: 'reservation', group: 'tx',
+    label: '예약 확인', desc: '예약이 등록되면',
+    eventFields: [{ key: 'reservation_no', label: '예약번호' }, { key: 'reservation_date', label: '예약일시' }],
+    filters: {},
+  },
   // ── 고객 상태가 바뀔 때 (이벤트 properties 없음 — 고객 변수만 쓸 수 있다) ──
+  {
+    key: 'signup', triggerEvent: 'customer.created', templateCode: 'custom', group: 'lifecycle',
+    label: '신규 가입', desc: '회원이 가입하면',
+    eventFields: [],
+    filters: {},
+  },
+  {
+    key: 'birthday', triggerEvent: 'customer.birthday_approaching', templateCode: 'custom', group: 'lifecycle',
+    label: '생일 D-7', desc: '생일이 다가오면',
+    eventFields: [],
+    filters: { days_before: 7 },     // 백엔드 기본값과 동일
+  },
+  {
+    key: 'dormant', triggerEvent: 'customer.dormant', templateCode: 'custom', group: 'lifecycle',
+    label: '휴면 전환', desc: '한동안 구매가 없으면',
+    eventFields: [],
+    filters: { dormant_days: 30 },   // 백엔드 기본값과 동일(journey-target-extractor)
+  },
   {
     key: 'cycle_lapsed', triggerEvent: 'customer.cycle_lapsed', templateCode: 'custom', group: 'lifecycle',
     label: '구매 주기 이탈', desc: '평소 구매 주기를 넘기면',
@@ -112,24 +132,6 @@ export const TRIGGER_EVENTS: TriggerDef[] = [
     label: '등급 변동', desc: '회원 등급이 바뀌면',
     eventFields: [],
     filters: {},
-  },
-  {
-    key: 'signup', triggerEvent: 'customer.created', templateCode: 'custom', group: 'lifecycle',
-    label: '신규 가입', desc: '회원이 가입하면',
-    eventFields: [],
-    filters: {},
-  },
-  {
-    key: 'dormant', triggerEvent: 'customer.dormant', templateCode: 'custom', group: 'lifecycle',
-    label: '휴면 전환', desc: '한동안 구매가 없으면',
-    eventFields: [],
-    filters: { dormant_days: 30 },   // 백엔드 기본값과 동일(journey-target-extractor)
-  },
-  {
-    key: 'birthday', triggerEvent: 'customer.birthday_approaching', templateCode: 'custom', group: 'lifecycle',
-    label: '생일 D-7', desc: '생일이 다가오면',
-    eventFields: [],
-    filters: { days_before: 7 },     // 백엔드 기본값과 동일
   },
   {
     key: 'points', triggerEvent: 'customer.points_expiring', templateCode: 'custom', group: 'lifecycle',

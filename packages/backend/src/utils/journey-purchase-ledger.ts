@@ -109,6 +109,36 @@ export async function isMallPurchaseDoorActive(companyId: string): Promise<boole
   return mallActive;
 }
 
+/**
+ * ★ 2026-08-02 §13-5 — 화면이 "매장 구매는 하루 모아 다음 날 오전에 나갑니다"를 말하려면
+ *   **어느 문이 진실인지**와 **마지막으로 언제 도착했는지**를 알아야 한다. 그 판정은 이 CT가 소유한다.
+ *   ⛔ 시각은 도착 축(created_at)이다 — 발생 축(occurred_at)으로 보여주면 "언제 동기화됐나"가 아니라
+ *     "언제 샀나"가 되어 사용자가 동기화 상태를 오판한다.
+ */
+export interface PurchaseDoorStatus {
+  /** 'mall' = 자사몰 이벤트가 진실 · 'ledger' = 매장·ERP 원장이 진실. */
+  door: 'mall' | 'ledger';
+  /** 그 문으로 구매가 마지막으로 도착한 시각(ISO). 한 건도 없으면 null. */
+  lastArrivalAt: string | null;
+}
+
+export async function getPurchaseDoorStatus(companyId: string): Promise<PurchaseDoorStatus> {
+  const mallActive = await isMallPurchaseDoorActive(companyId);
+  if (mallActive) {
+    const r = await query(
+      `SELECT MAX(created_at)::text AS last FROM cdp_events
+        WHERE company_id = $1::uuid AND event_name = 'purchase'`,
+      [companyId],
+    );
+    return { door: 'mall', lastArrivalAt: r.rows[0]?.last || null };
+  }
+  const r = await query(
+    `SELECT MAX(created_at)::text AS last FROM purchases WHERE company_id = $1::uuid`,
+    [companyId],
+  );
+  return { door: 'ledger', lastArrivalAt: r.rows[0]?.last || null };
+}
+
 export interface PurchaseLedgerGate {
   /** 원장 커서를 돌릴 것인가. */
   enabled: boolean;

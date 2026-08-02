@@ -28,6 +28,10 @@ import { stripAdParts } from './messageUtils';
 // ★ D210+ Phase 2 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 동적 주입.
 //   본질 = AI가 어설픈 변수 임의 작성 차단 (Harold 명시: "개인화 어설프게 실수로 들어가는게 더 안좋다").
 import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';
+// ★ 2026-08-02 §13-3: 발송 시점 문구는 화면·브리핑과 같은 단일 출처를 쓴다(AI에게 다른 말로 설명하지 않는다).
+import { formatStepTiming } from './journey-step-format';
+// ★ 2026-08-02 (Codex 1R): AI가 지어낸 혜택 기계 차단 — 프롬프트는 경계가 아니다.
+import { stripUnauthorizedBenefits } from './copy-benefit-detector';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -65,12 +69,35 @@ export interface JourneyAIPackage {
   reasoning: string;
 }
 
+/**
+ * ★ 2026-08-02 §13-3 — AI가 문안을 쓰려면 알아야 하는 여정 맥락.
+ *
+ * 지금까지 AI가 받은 것은 현재 본문·채널·광고 여부·의도 넷뿐이었다. **앞 스텝을 모른다.**
+ * 그래서 "앞 스텝과 겹치지 않게"가 원리적으로 불가능했고, 빈 스텝에서는 아예 부를 수도 없었다.
+ * 화면을 스텝별로 전환하면(설계서 §6-3) 앞 스텝이 확정된 채로 뒤에 있으므로 넘길 맥락이 그대로 갖춰진다 —
+ * 프롬프트에 컨텍스트를 더 밀어 넣는 방식은 땜질이라는 것이 §6-4 설계 메모의 결론이다.
+ */
+export interface JourneyStepAiContext {
+  /** 무엇으로 시작하는 여정인가 — 저장값이 아니라 사람 말로(예: "첫 구매"). */
+  triggerLabel?: string;
+  /** 이 여정의 목적 — 진입 자연어 또는 추천 모달이 만든 문장. */
+  objective?: string;
+  /** 지금이 몇 번째 스텝인가(1부터). */
+  stepOrder?: number;
+  /** 트리거 발생 시점으로부터 몇 시간 뒤인가(누적). */
+  hoursFromTrigger?: number;
+  /** 앞 스텝들의 확정 문안 전부 — 겹침을 피하려면 이것이 있어야 한다. */
+  previousMessages?: Array<{ stepOrder: number; hoursFromTrigger: number; message: string }>;
+}
+
 export interface StepRefineInput {
   companyId: string;
+  /** 비어 있으면 **생성 모드** — 여정 맥락(journey)으로 처음부터 쓴다(§13-3). */
   currentMessage: string;
   channel: 'sms' | 'lms' | 'mms';
   isAd: boolean;
   stepIntent?: string;
+  journey?: JourneyStepAiContext;
 }
 
 export interface StepRefineCandidate {
@@ -576,8 +603,46 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
 // step별 AI 다듬기 — 3 후보 다양성 (감성 / 실용 / 캐주얼)
 // ════════════════════════════════════════════════════════════════════
 
+/**
+ * 여정 맥락을 프롬프트 블록으로 (§13-3). 없는 값은 줄 자체를 넣지 않는다 — 빈 라벨은 AI를 헷갈리게 한다.
+ * 발송 시점 문구는 `formatStepTiming` 단일 출처를 그대로 쓴다(화면·브리핑과 같은 말이 나가야 한다).
+ */
+function buildJourneyContextBlock(jc: JourneyStepAiContext | undefined, hasBody: boolean): string {
+  if (!jc) return '';
+  const lines: string[] = [];
+  if (jc.triggerLabel) lines.push(`- 시작 신호: ${jc.triggerLabel}`);
+  if (jc.objective) lines.push(`- 여정 목적: ${String(jc.objective).slice(0, 300)}`);
+  if (jc.stepOrder != null) lines.push(`- 지금 쓰는 것: ${jc.stepOrder}번째 스텝`);
+  if (jc.hoursFromTrigger != null) {
+    lines.push(`- 발송 시점: ${formatStepTiming({ delayMode: 'relative', delayHours: Math.max(0, Number(jc.hoursFromTrigger) || 0), targetHourKst: null }, true)}`);
+  }
+
+  const prev = (jc.previousMessages || []).filter((p) => p && String(p.message || '').trim());
+  let prevBlock = '';
+  if (prev.length > 0) {
+    const rows = prev
+      .slice(0, 6)
+      .map((p) => `  · ${p.stepOrder}번째(${formatStepTiming({ delayMode: 'relative', delayHours: Math.max(0, Number(p.hoursFromTrigger) || 0), targetHourKst: null }, true)}): ${String(p.message).slice(0, 400)}`)
+      .join('\n');
+    prevBlock = `\n[앞 스텝 문안 — 이미 이 사람에게 나간 말]\n${rows}\n⛔ 위와 인사말·용건·마무리가 겹치면 같은 사람이 같은 말을 두 번 받는다. 이어지는 다음 말을 쓴다.`;
+  }
+
+  if (lines.length === 0 && !prevBlock) return '';
+  const head = lines.length > 0 ? `\n[여정 맥락]\n${lines.join('\n')}` : '';
+  const mode = hasBody
+    ? ''
+    : '\n[지금 하는 일] 이 스텝은 아직 비어 있다. 위 맥락에 맞는 문안을 처음부터 쓴다.';
+  return `${head}${prevBlock}${mode}`;
+}
+
 export async function refineStepMessage(input: StepRefineInput): Promise<{ candidates: StepRefineCandidate[] }> {
-  if (!input.currentMessage || input.currentMessage.trim().length < 5) {
+  // ★ 2026-08-02 §13-3 — 빈 스텝이면 **생성 모드**로 간다.
+  //   옛 흐름은 사람이 먼저 열 글자를 써야 AI를 부를 수 있었다(추가 입력 요구 = marketing_user_ux_priority 위반).
+  //   ⛔ 다만 맥락 없이 짓지는 않는다 — 여정 맥락도 본문도 없으면 지어낼 근거가 없으므로 빈손으로 돌린다.
+  const hasBody = !!input.currentMessage && input.currentMessage.trim().length >= 5;
+  const jc = input.journey;
+  const hasContext = !!jc && (!!jc.triggerLabel || !!jc.objective || (jc.previousMessages?.length ?? 0) > 0);
+  if (!hasBody && !hasContext) {
     return { candidates: [] };
   }
 
@@ -601,6 +666,7 @@ export async function refineStepMessage(input: StepRefineInput): Promise<{ candi
 ${memoryContext}
 
 [step 의도] ${input.stepIntent || '(미지정)'}
+${buildJourneyContextBlock(jc, hasBody)}
 
 [다듬기 원칙]
 ✓ 원본의 의미 / 변수 / 혜택 placeholder([혜택 안내 — 직접 수정해주세요]) / URL placeholder 모두 보존
@@ -629,7 +695,9 @@ ${memoryContext}
   ]
 }`;
 
-  const userMessage = `원본 메시지:\n${input.currentMessage}\n\n위 메시지를 3가지 톤 후보로 다듬어 JSON으로 응답하세요. 혜택 placeholder + 변수는 그대로 유지하고 안내문/감성 텍스트만 정련하세요.`;
+  const userMessage = hasBody
+    ? `원본 메시지:\n${input.currentMessage}\n\n위 메시지를 3가지 톤 후보로 다듬어 JSON으로 응답하세요. 혜택 placeholder + 변수는 그대로 유지하고 안내문/감성 텍스트만 정련하세요.`
+    : `이 스텝의 문안을 처음부터 3가지 톤 후보로 써서 JSON으로 응답하세요. 위 [여정 맥락]의 트리거·목적·순번·발송 시점에 맞추고, [앞 스텝 문안]과 내용이 겹치지 않게 하세요. 구체 혜택은 지어내지 말고 placeholder로 두세요.`;
 
   // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입 (회사 등록 미존재 시 옛 흐름 그대로)
   system = await buildSystemPromptWithBrandVoice(input.companyId, system);
@@ -656,14 +724,20 @@ ${memoryContext}
 
   const raw: any[] = Array.isArray(parsed.candidates) ? parsed.candidates : [];
   const validTones: Array<'감성적' | '실용적' | '캐주얼'> = ['감성적', '실용적', '캐주얼'];
+
+  // ★ 2026-08-02 (Codex 1R·4R) — 지어낸 혜택은 기계로 막는다. 프롬프트는 경계가 아니다.
+  //   ⛔ 근거는 **사람이 쓴 원본 본문 하나뿐**이다. 목적 문장·앞 스텝은 근거가 아니다 —
+  //     "30% 행사를 알리고 싶다"는 말이 AI에게 그 숫자를 문안에 렌더링할 면허는 아니다(혜택은 사용자가 편집기에서 쓴다).
+  //     생성 모드는 원본이 없으므로 구체 혜택이 전부 placeholder가 된다 = 의도한 동작.
   const candidates: StepRefineCandidate[] = raw.slice(0, 3).map((c: any) => {
     const rawMsg = String(c.message || '').slice(0, maxBytes * 2);
     // ★ D187-fix5: refine 응답도 sanitize 자동 적용
     const san = sanitizeForSms(rawMsg);
+    const pure = stripUnauthorizedBenefits(stripAdParts(san.sanitized), input.currentMessage || '');
     return {
-      message: stripAdParts(san.sanitized), // 순수 본문 — (광고)는 발송/미리보기 합성 (이중부착 방지)
+      message: pure, // 순수 본문 — (광고)는 발송/미리보기 합성 (이중부착 방지)
       tone: validTones.includes(c.tone) ? c.tone : '감성적',
-      bytes: getBytes(san.sanitized),
+      bytes: getBytes(pure),
       reasoning: String(c.reasoning || '').slice(0, 200),
     };
   });

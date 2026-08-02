@@ -26,7 +26,8 @@
  */
 
 import { query } from '../config/database';
-import { applyVariableDefaults } from './journey-builder';
+// ★ 2026-08-02 Codex 4R: 검증 무효화는 공용 문 하나를 지난다(부모 여정 잠금 + 마커·판 동시 갱신).
+import { applyVariableDefaults, withJourneyValidationReset } from './journey-builder';
 // ★ Phase2 A (2026-06-26): α/β는 실측 count에서 도출(단일 진실) — bandit-arm 순수 모듈.
 import { deriveBanditArm } from './bandit-arm';
 
@@ -516,7 +517,22 @@ export async function createJourneyStepVariant(input: {
   alimtalkVariableMap?: Record<string, string>;
   trafficWeight?: number;
 }): Promise<string> {
-  const r = await query(
+  // ⛔ 2026-08-02 Codex 4R — 변이 저장과 검증 무효화를 **한 트랜잭션**에서 커밋한다(공용 문).
+  //   따로 나가면 그 사이에 활성화가 끼어들어, 바뀐 변이 본문을 옛 통과 마커로 켠다.
+  const journeyRow = await query(
+    `SELECT journey_id FROM journey_steps WHERE id = $1::uuid`,
+    [input.stepId]
+  );
+  const ownerJourneyId: string | null = journeyRow.rows[0]?.journey_id ?? null;
+  if (!ownerJourneyId) throw new Error('변이를 붙일 step을 찾을 수 없습니다.');
+
+  const r = await withJourneyValidationReset(null, ownerJourneyId, (run, journey) => {
+    // ⛔ 2026-08-02 Codex 5R — 활성 판정은 **잠근 뒤에** 한다. 라우트가 먼저 읽은 status는
+    //   그 사이 활성화가 성사되면 옛 값이고, 그러면 운영 중 여정의 변이를 바꾸게 된다.
+    if (journey.status === 'active') {
+      throw new Error('운영 중인 여정의 변이는 바꿀 수 없습니다. 먼저 일시정지해 주세요.');
+    }
+    return run(
     `INSERT INTO journey_step_variants (
       id, step_id, variant_id, message_template, subject, channel,
       alimtalk_template_code, alimtalk_variable_map,
@@ -546,22 +562,35 @@ export async function createJourneyStepVariant(input: {
       input.alimtalkVariableMap ? JSON.stringify(input.alimtalkVariableMap) : null,
       input.trafficWeight != null ? Math.max(0, Math.min(1, input.trafficWeight)) : 0.5,
     ]
-  );
-  // ★ Fix #4 (2026-06-05): 변이 본문 추가/수정 시 발송 전 검증 마커 무효화(재검증 필요).
-  await query(
-    `UPDATE journeys SET last_pretest_passed_at = NULL
-      WHERE id = (SELECT journey_id FROM journey_steps WHERE id = $1::uuid)`,
-    [input.stepId]
-  );
+    );
+  });
+  // ★ Fix #4 (2026-06-05): 변이 본문 추가/수정 시 발송 전 검증 마커 무효화 — 위 트랜잭션이 함께 커밋했다.
+  if (!r || r.rows.length === 0) throw new Error('변이를 저장하지 못했습니다.');
   return r.rows[0].id as string;
 }
 
+/**
+ * ⛔ 2026-08-02 Codex 4R — **삭제도 검증을 무효로 만든다.**
+ *   마지막 변이를 지우면 검증기와 snapshot 생성기가 이전 검사에서 보지 않았던 기본 스텝 본문으로 되돌아간다.
+ *   그런데 옛 통과 마커는 그대로 남아 있어, 검사한 적 없는 본문이 그대로 켜진다.
+ */
 export async function deleteJourneyStepVariant(variantId: string): Promise<boolean> {
-  const r = await query(
-    `DELETE FROM journey_step_variants WHERE id = $1::uuid RETURNING id`,
+  const owner = await query(
+    `SELECT s.journey_id FROM journey_step_variants v
+       JOIN journey_steps s ON s.id = v.step_id
+      WHERE v.id = $1::uuid`,
     [variantId]
   );
-  return r.rows.length > 0;
+  const ownerJourneyId: string | null = owner.rows[0]?.journey_id ?? null;
+  if (!ownerJourneyId) return false;
+
+  const r = await withJourneyValidationReset(null, ownerJourneyId, (run, journey) => {
+    if (journey.status === 'active') {
+      throw new Error('운영 중인 여정의 변이는 지울 수 없습니다. 먼저 일시정지해 주세요.');
+    }
+    return run(`DELETE FROM journey_step_variants WHERE id = $1::uuid RETURNING id`, [variantId]);
+  });
+  return (r?.rows.length ?? 0) > 0;
 }
 
 // ════════════════════════════════════════════════════════════════════

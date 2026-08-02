@@ -38,8 +38,15 @@ import JourneyMessageEditModal from '../components/journey/JourneyMessageEditMod
 import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
 import JourneyStepNotifyToggle from '../components/journey/JourneyStepNotifyToggle';
 import AlimtalkChannelPanel, { validateAlimtalkChannelState, type AlimtalkSenderProfile, type AlimtalkTemplate, type AlimtalkChannelState } from '../components/alimtalk/AlimtalkChannelPanel';
+// ★ 2026-08-02 §13 화면 흐름 — 자연어 → 추천 모달 → 스텝별 전환 → 브리핑 모달
+import JourneyStepStudio from '../components/journey/JourneyStepStudio';
+import JourneyPlanModal from '../components/journey/JourneyPlanModal';
+import JourneyBriefingModal, { type BriefingIssue } from '../components/journey/JourneyBriefingModal';
+import SpamFilterTestModal from '../components/SpamFilterTestModal';
 import InfoAlertJourneyBuilder, { type InfoAlertBuildResult } from '../components/journey/InfoAlertJourneyBuilder';
 import DateAnchorJourneyBuilder, { type DateAnchorBuildResult } from '../components/journey/DateAnchorJourneyBuilder';
+import { TRIGGER_EVENTS } from '../utils/journey-trigger-catalog';
+import { buildAdMessageFront, buildAdSubjectFront } from '../utils/formatDate';
 import { detectLiquidSyntax, renderLiquid, flattenCustomerForLiquid, SAMPLE_CUSTOMERS } from '../utils/liquid-templating';
 // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 미리보기 컨트롤타워.
 import { highlightVars, mergeAndHighlightVars, mergeVarsPlain } from '../utils/highlightVars';
@@ -357,6 +364,18 @@ const TEMPLATE_VISUAL: Record<TemplateCode, { icon: typeof UserPlus; gradient: s
 };
 
 // ★ D222+ Phase 1 (2026-05-27): status badge 시인성 강화 (-300 → -200)
+/**
+ * ★ 2026-08-02 (Codex 1R P2-7) — **시작 조건은 실제 trigger_event에서 읽는다.**
+ *   `TEMPLATE_VISUAL.label`은 캠페인 목적('재구매 유도')이지 진입 조건('주문 완료')이 아니다.
+ *   추천 모달의 일이 "무엇이 이 여정을 시작하는가"를 확인시키는 것이라, 목적을 조건 자리에 쓰면 그 일을 못 한다.
+ */
+function triggerLabelOf(triggerEvent?: string, templateCode?: TemplateCode): string {
+  const def = triggerEvent ? TRIGGER_EVENTS.find((t) => t.triggerEvent === triggerEvent) : undefined;
+  if (def) return def.label;
+  if (triggerEvent === 'custom') return '설정한 대상 조건';
+  return templateCode ? TEMPLATE_VISUAL[templateCode]?.label || '설정한 조건' : '설정한 조건';
+}
+
 const STATUS_BADGE: Record<JourneyStatus, { label: string; cls: string }> = {
   draft:  { label: '초안',     cls: 'bg-violet-700/40 text-violet-100 border border-violet-400/30' },
   active: { label: '활성',     cls: 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/40' },
@@ -403,6 +422,58 @@ function hasPlaceholder(message: string): boolean {
   return /\[.*?\]/.test(message);
 }
 
+/**
+ * ★ 2026-08-02 §13-4 — 저장을 막는 문제를 모은다. **저장 검증과 브리핑 모달이 같은 함수를 쓴다.**
+ *   따로 쓰면 브리핑은 통과시키는데 저장은 거부하는(또는 그 반대) 어긋남이 생긴다.
+ *   ★ D188 Phase 2-B-1 (2026-05-21) step_type별 분기를 그대로 옮긴 것 — 규칙 자체는 바뀌지 않았다.
+ */
+/**
+ * ★ 2026-08-02 §13-5 — 매장 구매 정책 노출.
+ *   매장·ERP 문으로 구매가 들어오는 회사는 **하루 모아 다음 날 오전**에 나간다(설계서 §11-C-2).
+ *   고객사 동기화 주기는 우리 권한이 아니라서 정책으로 고정한 것이고, 그 사실을 사용자가 알아야 한다.
+ *   ⛔ 문구를 만드는 곳은 여기 하나다. 자사몰 문이면 즉시 나가므로 아무 말도 하지 않는다.
+ */
+function storePurchaseNotice(
+  triggerKey: string | null,
+  door: { door: 'mall' | 'ledger'; lastArrivalAt: string | null } | null,
+): string | undefined {
+  if (triggerKey !== 'purchase' || !door || door.door !== 'ledger') return undefined;
+  const last = door.lastArrivalAt
+    ? `마지막으로 들어온 매장 구매는 ${new Date(door.lastArrivalAt).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}입니다.`
+    : '아직 들어온 매장 구매가 없습니다.';
+  return `매장 구매는 하루치를 모아 다음 날 오전에 발송합니다. 그날 구매가 밤 11시까지 한 번은 동기화되어야 합니다. ${last}`;
+}
+
+const CONDITION_OPS = ['==', '!=', '>=', '<=', '>', '<', 'in', 'not_in', 'is_null', 'not_null'];
+function collectStepIssues(steps: AIGeneratedStep[]): Array<{ stepOrder: number; message: string }> {
+  const out: Array<{ stepOrder: number; message: string }> = [];
+  for (const s of steps) {
+    if (s.stepType === 'wait') {
+      if (Number(s.delayHours) <= 0) out.push({ stepOrder: s.stepOrder, message: '대기 시간을 1시간 이상으로' });
+      continue;
+    }
+    if (s.stepType === 'condition') {
+      const c = s.conditionJsonb;
+      if (!c || c.type !== 'customer_field' || !c.field || !c.field.trim()) {
+        out.push({ stepOrder: s.stepOrder, message: '조건 필드 선택 필요' });
+      } else if (!CONDITION_OPS.includes(c.operator)) {
+        out.push({ stepOrder: s.stepOrder, message: '조건 연산자 선택 필요' });
+      } else if (!['is_null', 'not_null'].includes(c.operator) && (c.value === undefined || c.value === null || c.value === '')) {
+        out.push({ stepOrder: s.stepOrder, message: '비교값 입력 필요' });
+      }
+      continue;
+    }
+    if (!s.messageTemplate?.trim() || s.messageTemplate.trim().length < 10) {
+      out.push({ stepOrder: s.stepOrder, message: '본문이 비었거나 너무 짧음' });
+      continue;
+    }
+    if ((s.channel === 'lms' || s.channel === 'mms') && (!s.subject || !s.subject.trim())) {
+      out.push({ stepOrder: s.stepOrder, message: '제목 없음(LMS·MMS 필수)' });
+    }
+  }
+  return out;
+}
+
 // D187-fix5: 이모지 + 비표준 특수문자 검출 (SMS/LMS 통신사 미지원 매트릭스)
 function isInRange(code: number, ranges: Array<[number, number]>): boolean {
   for (const [s, e] of ranges) if (code >= s && code <= e) return true;
@@ -433,7 +504,19 @@ function detectUnsafe(text: string): { emoji: string[]; special: string[] } {
 export default function JourneysPage() {
   const navigate = useNavigate();
   const toast = useToast();
-  const [view, setView] = useState<'main' | 'review'>('main');
+  // ★ 2026-08-02 §13-2 — 'studio' = 한 화면에서 스텝 하나를 완결하는 흐름(스텝마다 화면 전환).
+  //   'review'(한 화면에 전부)는 정보 알림·날짜축 빌더와 저장된 여정 편집이 계속 쓴다.
+  const [view, setView] = useState<'main' | 'review' | 'studio'>('main');
+  const [planOpen, setPlanOpen] = useState(false);
+  /**
+   * ★ 2026-08-02 (Codex 1R P2-5) — **생성에 실제로 쓴 목적**을 확정 저장한다.
+   *   `objective` 텍스트 상자는 생성 이후에도 바뀌고, 빠른 시작·기회 카드 경로는 그 상자를 아예 안 쓴다.
+   *   그 상자를 나중에 읽으면 AI 맥락과 화면이 생성과 무관한 문장을 물고 간다.
+   */
+  const [genObjective, setGenObjective] = useState('');
+  const [studioIdx, setStudioIdx] = useState(0);
+  const [briefingOpen, setBriefingOpen] = useState(false);
+  const [studioSpamIdx, setStudioSpamIdx] = useState<number | null>(null);
   const [journeys, setJourneys] = useState<JourneyRow[]>([]);
   // ★ 2026-06-29: "오늘의 여정 기회" 카드 (실데이터 집계) + 페이징
   const [opportunities, setOpportunities] = useState<JourneyOpportunity[]>([]);
@@ -503,6 +586,8 @@ export default function JourneysPage() {
   // ★ 2026-08-01 설계서 §2-3 — 이 회사가 지금 만들 수 있는 여정. 못 만드는 것은 사유와 함께 잠근다.
   //   조회 실패면 잠그지 않는다(화면 편의 게이트). 실제 발송 차단은 백엔드가 담당한다.
   const [dataCap, setDataCap] = useState<Record<string, { available: boolean; reason: string }> | null>(null);
+  // ★ 2026-08-02 §13-5 — 구매가 어느 문으로 들어오는지 + 마지막 도착 시각. 매장 문이면 하루 모아 다음 날 오전에 나간다.
+  const [purchaseDoor, setPurchaseDoor] = useState<{ door: 'mall' | 'ledger'; lastArrivalAt: string | null } | null>(null);
   // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 6 sub-agent 진행 + 샘플 고객 머지 토글
   const [progressStep, setProgressStep] = useState(0);
   const [sampleCustomer, setSampleCustomer] = useState<Record<string, string | number | null> | null>(null);
@@ -593,6 +678,7 @@ export default function JourneysPage() {
         });
         const data = await res.json();
         if (alive && data?.success && data.triggers) setDataCap(data.triggers);
+        if (alive && data?.success && data.purchaseDoor) setPurchaseDoor(data.purchaseDoor);
       } catch {
         /* 조회 실패 = 잠그지 않음(기존 동작 유지) */
       }
@@ -844,6 +930,65 @@ export default function JourneysPage() {
     }
   };
 
+  /**
+   * ★ 2026-08-02 §13-1 — 저장된 여정에 스텝을 더한다(맨 뒤). AI 추천을 클릭 한 번으로 반영하는 자리.
+   *   ⛔ 운영 중 여정은 서버가 거부한다(사전 스팸검사를 건너뛴 문안이 나가기 때문) — 사유를 그대로 보여준다.
+   */
+  const [savedStepBusy, setSavedStepBusy] = useState<string | null>(null);
+  const addSavedStep = async (journeyId: string, step: Record<string, any>) => {
+    setSavedStepBusy(journeyId);
+    try {
+      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/steps`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify(step),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        toast.error(data?.error || '스텝 추가 실패');
+        return;
+      }
+      toast.success(`스텝 ${data.stepOrder}을(를) 추가했습니다. 활성화하면 스팸 사전검사를 다시 받습니다.`);
+      await loadDetail(journeyId, true);
+      await loadAll();
+    } catch (e: any) {
+      toast.error(e?.message || '스텝 추가 중 오류');
+    } finally {
+      setSavedStepBusy(null);
+    }
+  };
+
+  /** 저장된 여정의 스텝 삭제 — 서버가 재번호까지 한 트랜잭션에서 한다(순번 구멍 = 여정 사망). */
+  const deleteSavedStep = (journeyId: string, stepId: string, stepOrder: number) => {
+    setConfirm({
+      mode: 'danger',
+      title: '스텝 삭제',
+      description: `${stepOrder}번째 스텝을 지웁니다. 뒤 스텝의 순서가 하나씩 당겨집니다. 이미 발송된 스텝이거나 곧 받을 고객이 진행 중이면 지워지지 않습니다.`,
+      confirmLabel: '삭제',
+      onConfirm: async () => {
+        setSavedStepBusy(journeyId);
+        try {
+          const res = await fetch(`/api/ai/operator/journeys/${journeyId}/steps/${stepId}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token()}` },
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || !data?.success) {
+            toast.error(data?.error || '스텝 삭제 실패');
+            return;
+          }
+          toast.success('스텝을 지우고 순서를 다시 매겼습니다.');
+          await loadDetail(journeyId, true);
+          await loadAll();
+        } catch (e: any) {
+          toast.error(e?.message || '스텝 삭제 중 오류');
+        } finally {
+          setSavedStepBusy(null);
+        }
+      },
+    });
+  };
+
   const toggleExpand = (journeyId: string) => {
     if (expandedId === journeyId) setExpandedId(null);
     else {
@@ -883,6 +1028,8 @@ export default function JourneysPage() {
       if (data.success) {
         const pkg: AIJourneyPackage = data.package;
         setAiPkg(pkg);
+        // 생성 요청에 실제로 실린 목적만 남긴다 — 빠른 시작(templateHint)은 목적 문장을 보내지 않는다.
+        setGenObjective(templateHint ? '' : effectiveObjective);
         setReviewName(pkg.name);
         setReviewCallback(pkg.callbackNumberHint || callbackOptions.find((c) => c.is_default)?.phone || (callbackOptions[0]?.phone || ''));
         setReviewBudget(pkg.budgetMonthlyHint != null ? String(pkg.budgetMonthlyHint) : '');
@@ -894,7 +1041,10 @@ export default function JourneysPage() {
           setProgressStep(JOURNEY_SUB_AGENT_STEPS.length);
         }, 1500);
         await new Promise((resolve) => setTimeout(resolve, 3700));
-        setView('review');
+        // ★ 2026-08-02 §13-4 — 검토 화면으로 바로 던지지 않고 **왜 이렇게 만들었는지**를 먼저 보여준다.
+        //   근거·목적·스텝 수 이유·이 회사 데이터로 가능한지 넷을 확인한 뒤 스텝 1로 넘어간다.
+        setStudioIdx(0);
+        setPlanOpen(true);
 
         // 여정 trigger 기준 미리보기 고객 1건 fetch — 발송과 동일 기준(신규가입 등)으로 추출.
         fetch('/api/ai/operator/sample-customer', {
@@ -1033,15 +1183,37 @@ export default function JourneysPage() {
     setAiPkg({ ...aiPkg, steps: [...aiPkg.steps, newStep] });
   };
 
+  /**
+   * ★ 2026-08-02 §13-3 — AI가 문안을 쓸 때 받아야 하는 여정 맥락.
+   *   앞 스텝 문안 전부 + 지금 몇 번째인지 + 트리거로부터 얼마 뒤인지. 이게 있어야 "겹치지 않게"가 성립한다.
+   */
+  const buildStepAiContext = (idx: number) => {
+    if (!aiPkg) return undefined;
+    const cumulative = (upto: number) =>
+      aiPkg.steps.slice(0, upto + 1).reduce((sum, s) => sum + (Number(s.delayHours) || 0), 0);
+    return {
+      triggerLabel: triggerLabelOf(aiPkg.triggerEvent, aiPkg.templateCode),
+      objective: genObjective.trim() || aiPkg.name || undefined,
+      stepOrder: aiPkg.steps[idx]?.stepOrder ?? idx + 1,
+      hoursFromTrigger: cumulative(idx),
+      previousMessages: aiPkg.steps
+        .slice(0, idx)
+        .map((s, i) => ({
+          stepOrder: s.stepOrder,
+          hoursFromTrigger: cumulative(i),
+          message: String(s.messageTemplate || '').trim(),
+        }))
+        .filter((p) => !!p.message),
+    };
+  };
+
   const handleRefineOpen = async (idx: number) => {
     if (!aiPkg) return;
     const step = aiPkg.steps[idx];
-    if (step.messageTemplate.trim().length < 10) {
-      toast.warning('메시지를 10자 이상 작성한 후 다듬기를 사용해주세요.');
-      return;
-    }
     setRefineLoading(true);
     try {
+      // 본문이 비어 있어도 부른다 — 여정 맥락으로 처음부터 쓰는 생성 모드(§13-3).
+      //   옛 흐름은 사람이 먼저 열 글자를 써야 눌렸다(추가 입력 요구 = 1클릭 원칙 위반).
       const res = await fetch('/api/ai/operator/journeys-refine-step', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
@@ -1050,6 +1222,7 @@ export default function JourneysPage() {
           channel: step.channel,
           isAd: step.isAd,
           stepIntent: step.stepIntent,
+          journey: buildStepAiContext(idx),
         }),
       });
       const data = await res.json();
@@ -1203,45 +1376,36 @@ export default function JourneysPage() {
     }
   };
 
+  /**
+   * ★ 2026-08-02 §13-2 — 스텝 화면의 AI 꾸미기. 날짜축과 **같은 엔드포인트**를 쓴다(새 경로를 만들지 않는다).
+   *   변수는 회사 보유 컬럼(dataProfileVars)만 넘긴다 — 없는 컬럼을 넣으면 발송에서 빈칸이 된다.
+   */
+  const [studioDecorating, setStudioDecorating] = useState(false);
+  const handleStudioDecorate = async (idx: number) => {
+    if (!aiPkg) return;
+    const step = aiPkg.steps[idx];
+    const body = String(step.messageTemplate || '').trim();
+    if (body.length < 5) { toast.warning('꾸밀 문안을 먼저 만들어 주세요. [AI 문안생성]을 눌러도 됩니다.'); return; }
+    if (dataProfileVars.length === 0) { toast.warning('고객 데이터에 넣을 수 있는 항목이 아직 없어요.'); return; }
+    setStudioDecorating(true);
+    try {
+      const decorated = await handleAnchorDecorate(body, dataProfileVars.map((v) => v.token));
+      if (decorated) {
+        updateStep(idx, { messageTemplate: decorated });
+        toast.success('고객 정보를 문안에 녹였습니다.');
+      }
+    } finally {
+      setStudioDecorating(false);
+    }
+  };
+
   const handleSaveDraft = async () => {
     if (!aiPkg) return;
     if (!reviewCallback) { toast.warning('회신번호를 선택해주세요.'); return; }
-    // ★ D188 Phase 2-B-1 (2026-05-21): step_type별 다른 검증 분기.
-    //   message = 본문 + subject 검증 / wait = delay_hours>0 / condition = conditionJsonb 정합.
-    const validOps = ['==', '!=', '>=', '<=', '>', '<', 'in', 'not_in', 'is_null', 'not_null'];
-    for (const s of aiPkg.steps) {
-      if (s.stepType === 'wait') {
-        if (Number(s.delayHours) <= 0) {
-          toast.warning(`step ${s.stepOrder} (wait) 대기 시간이 0 이하입니다. 1시간 이상 설정해주세요.`);
-          return;
-        }
-        continue;
-      }
-      if (s.stepType === 'condition') {
-        const c = s.conditionJsonb;
-        if (!c || c.type !== 'customer_field' || !c.field || !c.field.trim()) {
-          toast.warning(`step ${s.stepOrder} (condition) 조건 필드를 선택해주세요.`);
-          return;
-        }
-        if (!validOps.includes(c.operator)) {
-          toast.warning(`step ${s.stepOrder} (condition) 연산자를 선택해주세요.`);
-          return;
-        }
-        if (!['is_null', 'not_null'].includes(c.operator) && (c.value === undefined || c.value === null || c.value === '')) {
-          toast.warning(`step ${s.stepOrder} (condition) 비교값을 입력해주세요.`);
-          return;
-        }
-        continue;
-      }
-      // message step = 본문 + subject 검증
-      if (!s.messageTemplate.trim() || s.messageTemplate.trim().length < 10) {
-        toast.warning(`step ${s.stepOrder} 본문이 비어있거나 너무 짧습니다.`);
-        return;
-      }
-      if ((s.channel === 'lms' || s.channel === 'mms') && (!s.subject || !s.subject.trim())) {
-        toast.warning(`step ${s.stepOrder} LMS/MMS 제목이 비어있습니다.`);
-        return;
-      }
+    const issues = collectStepIssues(aiPkg.steps);
+    if (issues.length > 0) {
+      toast.warning(`스텝 ${issues[0].stepOrder} — ${issues[0].message}`);
+      return;
     }
     setSaving(true);
     try {
@@ -1392,17 +1556,19 @@ export default function JourneysPage() {
       <div className="border-b border-violet-400/30 bg-violet-800/50 backdrop-blur-md sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-3 md:px-6 py-3 md:py-4 flex items-center gap-2 md:gap-4">
           <button
-            onClick={() => view === 'review' ? setConfirm({ mode: 'warning', title: '메인으로 돌아가기', description: '생성한 여정이 사라집니다. 메인으로 돌아가시겠습니까?', confirmLabel: '나가기', onConfirm: () => { setView('main'); setAiPkg(null); } }) : goBackOr(navigate, '/ai-operator')}
+            onClick={() => view !== 'main' ? setConfirm({ mode: 'warning', title: '메인으로 돌아가기', description: '생성한 여정이 사라집니다. 메인으로 돌아가시겠습니까?', confirmLabel: '나가기', onConfirm: () => { setView('main'); setAiPkg(null); setStudioIdx(0); } }) : goBackOr(navigate, '/ai-operator')}
             className="p-2 rounded-lg hover:bg-white/15 transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="flex-1 min-w-0">
             <h1 className="text-lg md:text-2xl font-bold truncate text-white">
-              {view === 'review' ? 'AI 생성 여정 검토' : '여정 자동화 — AI Operator'}
+              {view === 'studio' ? `${aiPkg?.name || '여정'} — 스텝 ${studioIdx + 1}` : view === 'review' ? 'AI 생성 여정 검토' : '여정 자동화 — AI Operator'}
             </h1>
             <p className="text-xs md:text-sm text-white/80 mt-0.5">
-              {view === 'review' ? 'AI가 설계한 흐름을 검토 + 혜택 부분 수정 후 활성화' : '자연어 한 줄 또는 빠른 시작 — AI가 시즌·회사 톤 반영해 완전 자동 생성'}
+              {view === 'studio'
+                ? '한 화면에서 스텝 하나를 끝내고 [스텝 추가]로 넘어갑니다'
+                : view === 'review' ? 'AI가 설계한 흐름을 검토 + 혜택 부분 수정 후 활성화' : '자연어 한 줄 또는 빠른 시작 — AI가 시즌·회사 톤 반영해 완전 자동 생성'}
             </p>
           </div>
           {view === 'main' && (
@@ -2132,6 +2298,18 @@ export default function JourneysPage() {
                                           A/B 테스트 {variantsExpanded ? '닫기' : '열기'}
                                         </button>
                                       )}
+                                      {/* ★ 2026-08-02 §13-1 — 스텝 삭제. 서버가 재번호까지 한 트랜잭션에서 한다.
+                                          운영 중·발송 이력·진행 중 고객은 서버 게이트가 막고 사유를 돌려준다. */}
+                                      {detail.steps.length > 1 && j.status !== 'active' && (
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); deleteSavedStep(j.id, s.id, s.step_order); }}
+                                          disabled={savedStepBusy === j.id}
+                                          className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-white/40 hover:bg-rose-500/15 hover:text-rose-200 transition-colors disabled:opacity-40"
+                                          title="이 스텝 지우기"
+                                        >
+                                          <Trash2 className="w-3 h-3" /> 지우기
+                                        </button>
+                                      )}
                                     </div>
                                     {s.message_template && <div className="text-xs text-white/85 whitespace-pre-wrap">{s.message_template}</div>}
                                     {/* ★ D218+ (2026-05-26): message step 영역 = 담당자 알림 토글 (발송 2시간 전 + 발송 결과) */}
@@ -2241,8 +2419,35 @@ export default function JourneysPage() {
                                     {nextStepMap[j.id].reasoning}
                                   </div>
                                 )}
-                                <div className="text-[10px] text-white/40">
-                                  회사 admin 명시 검토 + 승인 후 추가 의무 (AI 자동 추가 X).
+                                {/* ★ 2026-08-02 §13-1 — 추천을 클릭 한 번으로 실제 스텝으로 만든다.
+                                    옛 화면은 추천만 보여주고 넣을 길이 없어 사용자가 처음부터 다시 만들어야 했다. */}
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const rec = nextStepMap[j.id].recommended;
+                                      void addSavedStep(j.id, {
+                                        stepType: rec.stepType || 'message',
+                                        delayHours: Number(rec.delayHours) || 0,
+                                        channel: rec.channel || 'lms',
+                                        messageTemplate: rec.messageTemplate || '',
+                                        // LMS·MMS는 제목이 필수라 여정 이름을 초기값으로 둔다(추가 후 문안 수정에서 고친다).
+                                        subject: (j.name || '').slice(0, 50),
+                                        isAd: true,
+                                        stepIntent: rec.reasoning || 'AI 추천 단계',
+                                      });
+                                    }}
+                                    disabled={savedStepBusy === j.id || j.status === 'active'}
+                                    className="px-3 py-1.5 bg-cyan-500/25 hover:bg-cyan-500/35 disabled:opacity-40 text-cyan-50 rounded text-xs font-semibold flex items-center gap-1.5"
+                                  >
+                                    {savedStepBusy === j.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                                    이 단계 추가
+                                  </button>
+                                  <span className="text-[10px] text-white/40">
+                                    {j.status === 'active'
+                                      ? '운영 중에는 더할 수 없습니다. 일시정지 후 추가해 주세요.'
+                                      : '검토 후 직접 눌러야 추가됩니다 (AI 자동 추가 X). 문안은 추가 후 고칠 수 있습니다.'}
+                                  </span>
                                 </div>
                               </div>
                             )}
@@ -2260,6 +2465,44 @@ export default function JourneysPage() {
         {/* ════════════════════════════════════════
             REVIEW VIEW — AI 생성 여정 검토 + 수정
             ════════════════════════════════════════ */}
+        {/* ★ 2026-08-02 §13-2 — 스텝별 전환 화면. 한 화면 = 스텝 하나 완결. */}
+        {view === 'studio' && aiPkg && (
+          <div className="max-w-5xl mx-auto px-3 md:px-6 py-4 md:py-6">
+            <JourneyStepStudio
+              steps={aiPkg.steps}
+              index={Math.min(studioIdx, aiPkg.steps.length - 1)}
+              maxSteps={7}
+              variables={dataProfileVars.map((v) => v.token.replace(/%/g, ''))}
+              triggerLabel={triggerLabelOf(aiPkg.triggerEvent, aiPkg.templateCode)}
+              objective={genObjective.trim() || undefined}
+              aiBusy={refineLoading || studioDecorating}
+              saving={saving}
+              onIndex={setStudioIdx}
+              onPatch={(i, patch) => updateStep(i, patch as Partial<AIGeneratedStep>)}
+              onAdd={() => { addStep(); setStudioIdx(aiPkg.steps.length); }}
+              onDelete={(i) => deleteStep(i)}
+              onAi={(i) => { void handleRefineOpen(i); }}
+              onDecorate={(i) => { void handleStudioDecorate(i); }}
+              onSpamTest={(i) => {
+                // 스팸필터 테스트는 실제로 발송해 통신사 판정을 본다 — 문안과 회신번호가 없으면 열지 않는다.
+                if (!String(aiPkg.steps[i]?.messageTemplate || '').trim()) { toast.warning('테스트할 문안을 먼저 만들어 주세요.'); return; }
+                if (!reviewCallback) { toast.warning('회신번호를 먼저 정해 주세요. 아래 [전체 설정]에서 고를 수 있습니다.'); return; }
+                setStudioSpamIdx(i);
+              }}
+              onSave={() => setBriefingOpen(true)}
+            />
+            <div className="mt-3 text-center">
+              <button
+                type="button"
+                onClick={() => setView('review')}
+                className="text-[11px] text-white/50 underline-offset-2 hover:text-white/80 hover:underline"
+              >
+                전체 설정 한 화면에서 보기 (회신번호·예산·활성화)
+              </button>
+            </div>
+          </div>
+        )}
+
         {view === 'review' && aiPkg && (
           <div className="space-y-4">
             {/* AI reasoning */}
@@ -3190,6 +3433,7 @@ export default function JourneysPage() {
           journeyName={activationModal.journeyName}
           journeyStatus={activationModal.journeyStatus}
           goalExitEnabled={journeys.find((j) => j.id === activationModal.journeyId)?.goal_exit_enabled === true}
+          thresholdRecipients={(journeys.find((j) => j.id === activationModal.journeyId) as any)?.threshold_recipients_per_step ?? null}
           token={token() || ''}
           onClose={() => setActivationModal(null)}
           onActivated={() => loadAll()}
@@ -3297,6 +3541,83 @@ export default function JourneysPage() {
         </div>,
         document.body,
       )}
+
+      {/* ★ 2026-08-02 §13-4 — 진입 추천 모달. 왜 이렇게 만들었는지 넷을 보여주고 스텝 1로 넘긴다. */}
+      {aiPkg && (() => {
+        const trgKey = TEMPLATE_TRIGGER_KEY[aiPkg.templateCode];
+        const cap = trgKey ? dataCap?.[trgKey] : undefined;
+        // 트리거 데이터가 필요 없는 자유 여정(custom)과 판정 결과를 못 받은 경우는 잠그지 않는다(기존 게이트 규약).
+        const available = !trgKey || cap?.available !== false;
+        return (
+          <JourneyPlanModal
+            open={planOpen}
+            onClose={() => setPlanOpen(false)}
+            onNext={() => { setPlanOpen(false); setStudioIdx(0); setView('studio'); }}
+            // 처음 생성에 실린 것과 같은 요청으로 다시 만든다(빠른 시작이었으면 그 템플릿으로).
+            onRegenerate={() => { setPlanOpen(false); void handleAIGenerate(genObjective.trim() ? undefined : aiPkg.templateCode, genObjective.trim() || undefined); }}
+            regenerating={generating}
+            name={aiPkg.name}
+            triggerLabel={triggerLabelOf(aiPkg.triggerEvent, aiPkg.templateCode)}
+            reasoning={aiPkg.reasoning}
+            objective={genObjective.trim() || undefined}
+            available={available}
+            unavailableReason={cap?.reason}
+            notice={storePurchaseNotice(trgKey, purchaseDoor)}
+            steps={aiPkg.steps.map((s) => ({
+              stepOrder: s.stepOrder,
+              timingLabel: s.stepOrder === 1 ? `시작하면 ${formatStepDelay(s)}` : `앞 스텝 후 ${formatStepDelay(s)}`,
+              intent: s.stepIntent || '',
+              channel: s.channel,
+            }))}
+          />
+        );
+      })()}
+
+      {/* ★ 2026-08-02 §13-4 — 저장 브리핑. 스텝을 누르면 상세 문안이 펼쳐진다. */}
+      {aiPkg && (
+        <JourneyBriefingModal
+          open={briefingOpen}
+          onClose={() => setBriefingOpen(false)}
+          onConfirm={() => { setBriefingOpen(false); void handleSaveDraft(); }}
+          saving={saving}
+          name={aiPkg.name}
+          triggerLabel={triggerLabelOf(aiPkg.triggerEvent, aiPkg.templateCode)}
+          issues={collectStepIssues(aiPkg.steps) as BriefingIssue[]}
+          footnote="저장하면 초안으로 만들어집니다. 발송은 활성화할 때 시작되고, 스텝을 더 늘려도 추가 비용은 없습니다."
+          steps={aiPkg.steps.map((s) => ({
+            stepOrder: s.stepOrder,
+            timingLabel: s.stepOrder === 1 ? `시작하면 ${formatStepDelay(s)}` : `앞 스텝 후 ${formatStepDelay(s)}`,
+            channel: s.channel,
+            subject: s.subject,
+            messageTemplate: s.messageTemplate,
+            isAd: s.isAd,
+          }))}
+        />
+      )}
+
+      {/* 스팸필터 테스트 — 공용 모달을 그대로 쓴다(새로 만들지 않는다).
+          ⛔ 2026-08-02 (Codex 1R P2-3): **실제로 나가는 형태로 보낸다.** 모달은 받은 본문·제목을 그대로 제출하고
+            `isAd`로 합성해 주지 않는다. 순수 본문을 넘기면 (광고) 접두사와 무료수신거부가 빠진 문안을 검사하게 되어
+            통과라고 나와도 실제 발송은 다른 문안이다. 합성은 발송 경로와 같은 단일 출처(buildAd*Front)로만 한다. */}
+      {studioSpamIdx != null && aiPkg?.steps[studioSpamIdx] && (() => {
+        const s = aiPkg.steps[studioSpamIdx];
+        const ch = s.channel === 'sms' ? 'SMS' : s.channel === 'mms' ? 'MMS' : 'LMS';
+        // ⛔ 두 합성기는 대문자 메시지 타입('SMS'|'LMS'|'MMS')을 받는다. 소문자 channel을 그대로 넘기면
+        //   분기를 못 타 (광고)가 안 붙은 채 "합성했다"고 착각하게 된다.
+        const sentBody = buildAdMessageFront(s.messageTemplate, ch, s.isAd, opt080Number);
+        const sentSubject = buildAdSubjectFront(s.subject || '', ch, s.isAd);
+        return (
+          <SpamFilterTestModal
+            onClose={() => setStudioSpamIdx(null)}
+            messageContentSms={s.channel === 'sms' ? sentBody : undefined}
+            messageContentLms={s.channel !== 'sms' ? sentBody : undefined}
+            callbackNumber={reviewCallback}
+            messageType={ch}
+            subject={sentSubject}
+            isAd={s.isAd}
+          />
+        );
+      })()}
     </div>
   );
 }

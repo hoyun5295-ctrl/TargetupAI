@@ -15,7 +15,7 @@
  *   - ai_operator_user_gating: AI_OPERATOR_ALLOWED_USERS 게이팅 (routes/ai.ts 영역)
  */
 
-import { query } from '../config/database';
+import { query, pool } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext } from './company-memory';
 import { seedBaselineForJourney, seedGradeStateForJourney } from './journey-entry-ledger';
@@ -391,69 +391,11 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
 
   const journeyId = journeyRes.rows[0].id as string;
 
-  // ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 + MMS 컬럼 7건 추가 (DB ALTER 정합).
-  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): wait step 정확도 — delay_mode + target_hour_kst 컬럼 2건 추가.
+  // ★ 2026-08-02 §13-1: step INSERT는 insertJourneyStepRow 단일 정의를 쓴다.
+  //   저장 후 스텝 추가 API(addJourneyStep)가 같은 컬럼 집합을 두 번째로 적으면 알림톡·MMS·앵커 컬럼이
+  //   한쪽에만 추가되는 어긋남이 생긴다 — 그래서 생성 경로도 같은 함수를 부른다.
   for (const step of steps) {
-    await query(
-      `INSERT INTO journey_steps (
-        id, journey_id, step_order, step_type, delay_hours, channel, message_template, subject, is_ad, condition_jsonb,
-        alimtalk_profile_id, alimtalk_template_code, alimtalk_variable_map,
-        alimtalk_next_type, alimtalk_next_contents, alimtalk_next_subject,
-        mms_image_paths, delay_mode, target_hour_kst, anchor_offset_days, created_at
-      ) VALUES (
-        gen_random_uuid(), $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::jsonb,
-        $10::uuid, $11, $12::jsonb,
-        $13, $14, $15,
-        $16::text[], $17, $18, $19, NOW()
-      )`,
-      [
-        journeyId,
-        step.stepOrder,
-        step.stepType,
-        step.delayHours,
-        step.channel || null,
-        step.messageTemplate ? applyVariableDefaults(step.messageTemplate) : null,
-        step.subject || null,
-        step.isAd !== undefined ? !!step.isAd : true,
-        step.conditionJsonb ? JSON.stringify(step.conditionJsonb) : null,
-        step.alimtalkProfileId || null,
-        step.alimtalkTemplateCode || null,
-        step.alimtalkVariableMap ? JSON.stringify(step.alimtalkVariableMap) : null,
-        step.alimtalkNextType || null,
-        step.alimtalkNextContents || null,
-        step.alimtalkNextSubject || null,
-        Array.isArray(step.mmsImagePaths) && step.mmsImagePaths.length > 0 ? step.mmsImagePaths : null,
-        step.delayMode || 'relative',
-        (step.delayMode === 'specific_hour' || step.delayMode === 'relative_at_hour') && typeof step.targetHourKst === 'number' ? step.targetHourKst : null,
-        step.anchorOffsetDays != null ? step.anchorOffsetDays : null,
-      ]
-    );
-
-    // ★ 2026-07-11 분기(not_met_goto)·이벤트 대기(wait_event_name/wait_timeout_hours) — 신규 컬럼이라 INSERT 밖 별도 UPDATE.
-    //   DDL 미실행(42703)이면 해당 설정만 조용히 누락(로그) — 여정 생성 본류는 절대 안 죽는다.
-    //   분기는 전방 점프만 허용(자기 자신 이하 = 무한루프 위험 → 저장 안 함).
-    if (step.stepType === 'condition' && step.notMetGoto != null && step.notMetGoto > step.stepOrder) {
-      try {
-        await query(
-          `UPDATE journey_steps SET not_met_goto = $1
-            WHERE journey_id = $2::uuid AND step_order = $3`,
-          [step.notMetGoto, journeyId, step.stepOrder]
-        );
-      } catch (e: any) {
-        console.log(`[JourneyBuilder] not_met_goto 저장 skip(컬럼 미마이그레이션 추정): ${e?.message || e}`);
-      }
-    }
-    if (step.stepType === 'wait' && step.waitEventName) {
-      try {
-        await query(
-          `UPDATE journey_steps SET wait_event_name = $1, wait_timeout_hours = $2
-            WHERE journey_id = $3::uuid AND step_order = $4`,
-          [step.waitEventName, step.waitTimeoutHours ?? 72, journeyId, step.stepOrder]
-        );
-      } catch (e: any) {
-        console.log(`[JourneyBuilder] wait_event 저장 skip(컬럼 미마이그레이션 추정): ${e?.message || e}`);
-      }
-    }
+    await insertJourneyStepRow(journeyId, step);
   }
 
   return { journeyId };
@@ -917,11 +859,15 @@ export async function activateJourney(companyId: string, journeyId: string, user
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid AND status IN ('draft', 'paused')
        AND (threshold_recipients_per_step IS NOT NULL OR trigger_event = ANY($4::text[]))
+       AND last_pretest_passed_at IS NOT NULL
      RETURNING id, approved_at`,
     // ★ 2026-08-01 Codex 5R — 상한 검사를 쓰기와 원자화한다.
     //   위에서 SELECT로 확인만 하면, 그 사이 옵션 저장이 상한을 비워도 활성화가 그대로 성사돼
     //   상한 NULL인 활성 여정이 남는다(워커는 상한이 없으면 상한 검사를 건너뛴다).
     //   면제 목록은 CT 단일 출처 — 커서 트리거만 상한 없이 켤 수 있다.
+    // ★ 2026-08-02 Codex 2R — **사전검사 마커도 같은 문장 안으로 옮겼다(같은 교훈의 두 번째 적용).**
+    //   라우트가 SELECT로 마커를 확인한 뒤 여기까지 오는 사이에 스텝이 추가되면(추가는 마커를 NULL로 만든다)
+    //   확인은 통과했는데 검사받지 않은 문안이 켜진다. 확인과 반영이 갈라져 있으면 그 틈이 곧 구멍이다.
     [journeyId, companyId, userId, CAP_EXEMPT_TRIGGERS]
   );
   if (r.rows.length === 0) {
@@ -1061,14 +1007,10 @@ export async function updateJourneyStep(
     allowActiveMessageEdit?: boolean;
   }
 ): Promise<boolean> {
-  // 회사 격리 + 활성 상태 게이트
-  const j = await query(
-    `SELECT status FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
-    [journeyId, companyId]
-  );
-  if (j.rows.length === 0) return false;
-  const isActive = j.rows[0].status === 'active';
-  if (isActive) {
+  // ⛔ 2026-08-02 Codex 5R — 활성 상태 게이트는 **잠금 안에서** 판정한다(아래 withJourneyValidationReset).
+  //   여기서 미리 읽으면 그 직후 활성화가 먼저 잠금을 가져갔을 때, 운영 중 여정을 비활성인 줄 알고 고친다.
+  const assertActiveEditAllowed = (status: string): boolean => {
+    if (status !== 'active') return false;
     const structuralKeys: Array<keyof typeof patch> = [
       'channel', 'delayHours', 'isAd', 'stepType', 'conditionJsonb',
       'alimtalkProfileId', 'alimtalkTemplateCode', 'alimtalkVariableMap',
@@ -1080,7 +1022,8 @@ export async function updateJourneyStep(
     if (!patch.allowActiveMessageEdit || touchesStructure || !touchesMessage) {
       throw new Error('활성 상태 여정은 문안(본문·제목)만 수정할 수 있습니다. 구조·일정 변경은 먼저 일시정지해주세요.');
     }
-  }
+    return true;
+  };
 
   // ★ D188 Phase 2-B-1: step_type 변경 시 conditionJsonb 정합 검증 (condition은 conditionJsonb 필수).
   if (patch.stepType === 'condition' && (!patch.conditionJsonb || typeof patch.conditionJsonb !== 'object')) {
@@ -1116,7 +1059,12 @@ export async function updateJourneyStep(
     }
   }
 
-  const r = await query(
+  // ⛔ 2026-08-02 Codex 4R — 스텝 변경과 검증 무효화를 **한 트랜잭션**에서 커밋한다.
+  //   따로 나가면 그 사이에 활성화가 끼어들어, 바뀐 문안을 옛 통과 마커로 켠다.
+  let isActive = false;
+  const r = (await withJourneyValidationReset(companyId, journeyId, (run, journey) => {
+    isActive = assertActiveEditAllowed(journey.status);   // 잠근 상태로 판정(5R)
+    return run(
     `UPDATE journey_steps SET
        message_template = COALESCE($4, message_template),
        channel = COALESCE($5, channel),
@@ -1162,39 +1110,19 @@ export async function updateJourneyStep(
       patch.notifyManagerOnPretest !== undefined ? patch.notifyManagerOnPretest : null,
       patch.notifyManagerOnPretest !== undefined,
     ]
-  );
+    );
+  })) ?? { rows: [] as any[] };
   // ★ Fix #4 (2026-06-05): step 편집 시 발송 전 검증 마커 무효화 — 편집 후 재검증해야 활성화 가능.
-  if (r.rows.length > 0) {
-    await query(`UPDATE journeys SET last_pretest_passed_at = NULL WHERE id = $1::uuid`, [journeyId]);
-  }
+  //   무효화는 위 트랜잭션이 함께 커밋했다. 스텝을 못 찾은 요청도 무효화되지만 그건 안전한 방향이다
+  //   (한 번 더 검증하게 할 뿐이고, 반대로 놓치면 미검증 문안이 켜진다).
 
   // ★ 2026-07-11 활성 중 문안 수정 — 발송은 최신 snapshot을 소비(D218 ORDER BY created_at DESC)하므로
   //   새 snapshot을 만들어야 수정 본문이 실제 발송에 반영된다. 함께 이 step의 pretest dedup을 지워
   //   발송 2시간 전 자동 스팸 재검사(scanAndPretest)가 새 본문을 다시 검사하게 강제한다(기존 파이프라인 재사용).
   //   snapshot 실패 = throw(문안만 바뀌고 발송은 옛 본문인 어긋남을 사용자에게 즉시 알림).
   if (isActive && r.rows.length > 0) {
-    const s = await query(
-      `SELECT s.channel, s.is_ad, s.message_template, s.subject,
-              s.alimtalk_variable_map, s.alimtalk_template_code, j.callback_number
-         FROM journey_steps s JOIN journeys j ON j.id = s.journey_id
-        WHERE s.id = $1::uuid AND s.journey_id = $2::uuid`,
-      [stepId, journeyId]
-    );
-    if (s.rows.length > 0) {
-      const row = s.rows[0];
-      await query(
-        `INSERT INTO journey_step_snapshots
-           (company_id, journey_id, step_id, variant_id, message_body, message_subject,
-            variable_map, channel, is_ad, callback_number, alimtalk_template_code, confidence_score)
-         VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, $10, 100)`,
-        [
-          companyId, journeyId, stepId,
-          row.message_template, row.subject,
-          row.alimtalk_variable_map || {}, row.channel, row.is_ad,
-          row.callback_number, row.alimtalk_template_code,
-        ]
-      );
-    }
+    // ★ 2026-08-02 §13-1: snapshot 생성은 createStepSnapshot 단일 정의(추가 API와 공용).
+    await createStepSnapshot(companyId, journeyId, stepId);
     await query(
       `DELETE FROM journey_pretest_schedules WHERE journey_id = $1::uuid AND step_id = $2::uuid`,
       [journeyId, stepId]
@@ -1203,16 +1131,419 @@ export async function updateJourneyStep(
   return r.rows.length > 0;
 }
 
-// 여정 callback_number 갱신
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-08-02 §13-1 — 저장 후 스텝 추가·삭제 (화면 흐름 재설계의 선행)
+//   지금까지 step INSERT는 여정 생성 함수 한 곳뿐이었고 DELETE는 아예 없었다.
+//   스텝을 늘려 가며 쓰는 화면(설계서 §6-3)이 이것 없이는 성립하지 않는다.
+//
+// ⛔ 순번에 구멍이 나면 여정이 통째로 죽는다
+//   실행기는 다음 step을 current_step_order + 1로 찾고(journey-executor.ts:284), 진입은 step_order = 1을 찾는다.
+//   그래서 삭제는 반드시 재번호를 동반한다. 그런데 UNIQUE(journey_id, step_order)가 즉시 검사라
+//   (condeferrable = f — 2026-08-02 pg_constraint 실조회) 한 문장으로 당기면 갱신 순서에 따라 충돌한다 → 2단계로 옮긴다.
+// ════════════════════════════════════════════════════════════════════
+
+/** step 상한 — 화면(JourneysPage)과 같은 값. 서버가 단일 출처로 강제한다. */
+export const MAX_JOURNEY_STEPS = 7;
+
+/** 재번호 임시 자리 — 상한이 7이라 실제 순번과 겹칠 수 없다. */
+const RENUMBER_OFFSET = 1000;
+
+/**
+ * ⛔ 런타임 화이트리스트 (Codex 1R P2-4) — **TypeScript 유니온은 `req.body`를 검사하지 않는다.**
+ *   `stepType: 'unknown'`이 그대로 저장되면 실행기는 message 경로로 흘려보내고, 그 step은
+ *   아무도 의도하지 않은 문안을 보낸다. 값 집합은 SCHEMA의 CHECK·주석과 같은 집합이다.
+ */
+const STEP_TYPES = ['message', 'wait', 'condition'];
+/**
+ * ⛔ 집합의 출처는 **실제로 검사·발송하는 쪽**이다 (Codex 2R).
+ *   `ChannelType`에는 email이 있지만 활성화 사전검사는 kakao·sms·lms·mms만 처리하고
+ *   (`journey-pretest-validator`), 실행기도 이메일 경로가 없다. 타입에 있다는 이유로 열어 두면
+ *   **스팸검사를 건너뛴 채 엉뚱한 채널로 나가고 과금된다.** 이메일은 그 경로가 생길 때 연다.
+ */
+const STEP_CHANNELS = ['sms', 'lms', 'mms', 'kakao'];
+const STEP_DELAY_MODES = ['relative', 'relative_at_hour', 'specific_hour', 'next_business_day'];
+
+/** 트랜잭션 client를 넘기면 그 안에서 실행된다. 기본 = 풀 직행. */
+type SqlRunner = (text: string, params?: any[]) => Promise<any>;
+
+/**
+ * ★ 2026-08-02 Codex 4R — **검증을 무효로 만드는 변경은 전부 이 문을 지난다.**
+ *
+ * 규약을 세 곳에 흩어 적었더니 라운드마다 빠진 경로가 나왔다(스텝 편집은 판을 안 올리고,
+ * 옵션은 마커를 안 지우고, 회신번호는 둘 다 안 했다). 그리고 문장이 따로 나가면 그 사이에 활성화가 끼어든다 —
+ * 변경은 됐는데 마커는 아직 살아 있는 순간이 실제로 존재한다.
+ *
+ * 그래서 **부모 여정을 잠그고, 변경과 무효화를 한 트랜잭션에서 함께 커밋**한다.
+ * 무효화 = `last_pretest_passed_at = NULL` + `updated_at = NOW()` 두 개가 한 몸이다
+ * (마커는 활성화가 읽고, 판은 사전검사 CAS가 읽는다).
+ *
+ * @param companyId 회사 격리. null이면 여정 id만으로 잠근다(내부 워커 경로).
+ * @returns fn의 반환값. 여정이 없으면 null.
+ */
+export async function withJourneyValidationReset<T>(
+  companyId: string | null,
+  journeyId: string,
+  fn: (run: SqlRunner, journey: { status: string }) => Promise<T>,
+): Promise<T | null> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const run: SqlRunner = (text, params) => client.query(text, params);
+    // ⛔ 2026-08-02 Codex 5R — 잠금과 함께 **현재 status를 읽어 콜백에 넘긴다.**
+    //   호출부가 잠금 전에 읽은 status는 이미 옛것일 수 있다. 활성화가 먼저 이 행을 잠그면
+    //   그 뒤에 들어온 변경이 "비활성인 줄 알고" 운영 중 여정을 고친다. 상태 판정도 잠금 안에서 한다.
+    const lock = await run(
+      companyId
+        ? `SELECT id, status FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`
+        : `SELECT id, status FROM journeys WHERE id = $1::uuid FOR UPDATE`,
+      companyId ? [journeyId, companyId] : [journeyId],
+    );
+    if (lock.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const out = await fn(run, { status: String(lock.rows[0].status) });
+    await run(
+      `UPDATE journeys SET last_pretest_passed_at = NULL, updated_at = NOW() WHERE id = $1::uuid`,
+      [journeyId],
+    );
+    await client.query('COMMIT');
+    return out;
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * 추가·삭제 게이트 위반 — 입력·상태 문제라 호출부가 409로 돌린다(500이면 서버 결함으로 오인된다).
+ */
+export class JourneyStepGateError extends Error {
+  code: string;
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = 'JourneyStepGateError';
+    this.code = code;
+  }
+}
+
+/**
+ * step 1행 INSERT — **생성 경로와 추가 API의 단일 정의.**
+ * ⛔ 컬럼 집합을 다른 곳에 두 번째로 적지 않는다 — 알림톡·MMS·앵커 컬럼이 한쪽에만 붙는 어긋남이 생긴다.
+ */
+async function insertJourneyStepRow(
+  journeyId: string,
+  step: JourneyStepDefinition,
+  run: SqlRunner = query,
+): Promise<string> {
+  // ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 + MMS 컬럼 7건 (DB ALTER 정합).
+  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): wait step 정확도 — delay_mode + target_hour_kst.
+  const r = await run(
+    `INSERT INTO journey_steps (
+      id, journey_id, step_order, step_type, delay_hours, channel, message_template, subject, is_ad, condition_jsonb,
+      alimtalk_profile_id, alimtalk_template_code, alimtalk_variable_map,
+      alimtalk_next_type, alimtalk_next_contents, alimtalk_next_subject,
+      mms_image_paths, delay_mode, target_hour_kst, anchor_offset_days, created_at
+    ) VALUES (
+      gen_random_uuid(), $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::jsonb,
+      $10::uuid, $11, $12::jsonb,
+      $13, $14, $15,
+      $16::text[], $17, $18, $19, NOW()
+    ) RETURNING id`,
+    [
+      journeyId,
+      step.stepOrder,
+      step.stepType,
+      step.delayHours,
+      step.channel || null,
+      step.messageTemplate ? applyVariableDefaults(step.messageTemplate) : null,
+      step.subject || null,
+      step.isAd !== undefined ? !!step.isAd : true,
+      step.conditionJsonb ? JSON.stringify(step.conditionJsonb) : null,
+      step.alimtalkProfileId || null,
+      step.alimtalkTemplateCode || null,
+      step.alimtalkVariableMap ? JSON.stringify(step.alimtalkVariableMap) : null,
+      step.alimtalkNextType || null,
+      step.alimtalkNextContents || null,
+      step.alimtalkNextSubject || null,
+      Array.isArray(step.mmsImagePaths) && step.mmsImagePaths.length > 0 ? step.mmsImagePaths : null,
+      step.delayMode || 'relative',
+      (step.delayMode === 'specific_hour' || step.delayMode === 'relative_at_hour') && typeof step.targetHourKst === 'number' ? step.targetHourKst : null,
+      step.anchorOffsetDays != null ? step.anchorOffsetDays : null,
+    ]
+  );
+  const stepId = r.rows[0].id as string;
+
+  // ★ 2026-07-11 분기(not_met_goto)·이벤트 대기(wait_event_name/wait_timeout_hours) — 신규 컬럼이라 INSERT 밖 별도 UPDATE.
+  //   분기는 전방 점프만 허용(자기 자신 이하 = 무한루프 위험 → 저장 안 함).
+  //   ⛔ 42703 삼킴은 **풀 직행일 때만**이다. 트랜잭션(run = client) 안에서 삼키면 이미 죽은 트랜잭션을
+  //     되살리지 못한 채 뒤 문장이 전부 실패한다 — 그때는 그대로 올려 호출부가 DB_MIGRATION_PENDING으로 돌린다.
+  //     세 컬럼 실존은 2026-08-02 information_schema로 확인했다.
+  const swallowMigrationError = run === query;
+  if (step.stepType === 'condition' && step.notMetGoto != null && step.notMetGoto > step.stepOrder) {
+    try {
+      await run(`UPDATE journey_steps SET not_met_goto = $1 WHERE id = $2::uuid`, [step.notMetGoto, stepId]);
+    } catch (e: any) {
+      if (!swallowMigrationError) throw e;
+      console.log(`[JourneyBuilder] not_met_goto 저장 skip(컬럼 미마이그레이션 추정): ${e?.message || e}`);
+    }
+  }
+  if (step.stepType === 'wait' && step.waitEventName) {
+    try {
+      await run(
+        `UPDATE journey_steps SET wait_event_name = $1, wait_timeout_hours = $2 WHERE id = $3::uuid`,
+        [step.waitEventName, step.waitTimeoutHours ?? 72, stepId]
+      );
+    } catch (e: any) {
+      if (!swallowMigrationError) throw e;
+      console.log(`[JourneyBuilder] wait_event 저장 skip(컬럼 미마이그레이션 추정): ${e?.message || e}`);
+    }
+  }
+  return stepId;
+}
+
+/**
+ * 활성 여정의 발송 본문 스냅샷 1건 — 발송은 최신 snapshot을 우선 소비한다(D218).
+ * 편집(updateJourneyStep)과 추가(addJourneyStep) 공용.
+ */
+async function createStepSnapshot(companyId: string, journeyId: string, stepId: string): Promise<void> {
+  const s = await query(
+    `SELECT s.channel, s.is_ad, s.message_template, s.subject,
+            s.alimtalk_variable_map, s.alimtalk_template_code, j.callback_number
+       FROM journey_steps s JOIN journeys j ON j.id = s.journey_id
+      WHERE s.id = $1::uuid AND s.journey_id = $2::uuid`,
+    [stepId, journeyId]
+  );
+  if (s.rows.length === 0) return;
+  const row = s.rows[0];
+  await query(
+    `INSERT INTO journey_step_snapshots
+       (company_id, journey_id, step_id, variant_id, message_body, message_subject,
+        variable_map, channel, is_ad, callback_number, alimtalk_template_code, confidence_score)
+     VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, $10, 100)`,
+    [
+      companyId, journeyId, stepId,
+      row.message_template, row.subject,
+      row.alimtalk_variable_map || {}, row.channel, row.is_ad,
+      row.callback_number, row.alimtalk_template_code,
+    ]
+  );
+}
+
+/**
+ * 저장 후 step 추가 — 맨 뒤에 붙인다(설계서 §13-1).
+ *   - 크레딧 0 — 200은 최초 활성화 1회다(설계서 §7).
+ *   - 상한 판정과 순번 계산 사이에 다른 요청이 끼지 못하도록 부모 여정 행을 잠근다.
+ *
+ * ⛔ **활성 여정에는 추가하지 않는다** (Codex 1R P1-1 수용).
+ *   설계 초안은 "활성도 허용하되 소급 안 됨"이었는데 그러면 **사전 스팸검사를 건너뛴 문안이 나간다** —
+ *   `last_pretest_passed_at`은 활성화 엔드포인트만 읽고 실행기는 보지 않으며(전수 grep),
+ *   자동 재검사 스캐너는 `next_run_at > NOW()`만 고르므로 지연 0으로 붙인 스텝은 검사 창 자체가 없다.
+ *   그리고 스텝을 늘리는 것은 문안 수정이 아니라 **구조 변경**이라, 이미 있는 규칙
+ *   (`updateJourneyStep`: 활성 중에는 문안만) 과도 어긋났다. 규칙을 하나로 되돌린다.
+ * @returns null = 여정이 없거나 그 회사 것이 아님
+ */
+export async function addJourneyStep(
+  companyId: string,
+  journeyId: string,
+  step: Omit<JourneyStepDefinition, 'stepOrder'>,
+): Promise<{ stepId: string; stepOrder: number } | null> {
+  // ★ D188 Phase 2-B-1과 같은 규칙 — condition step은 conditionJsonb가 있어야 판정이 성립한다.
+  if (step.stepType === 'condition' && (!step.conditionJsonb || typeof step.conditionJsonb !== 'object')) {
+    throw new JourneyStepGateError('조건 스텝은 조건 설정이 있어야 합니다.', 'CONDITION_REQUIRED');
+  }
+  // 런타임 화이트리스트 — 타입 유니온은 요청 본문을 검사하지 않는다.
+  if (!STEP_TYPES.includes(String(step.stepType))) {
+    throw new JourneyStepGateError('지원하지 않는 스텝 종류입니다.', 'INVALID_STEP_TYPE');
+  }
+  // ⛔ message 스텝은 채널이 **반드시** 있어야 한다. 비워 두면 검증도 건너뛰고 실행기가 기본 경로로 보낸다.
+  if (String(step.stepType) === 'message' && !step.channel) {
+    throw new JourneyStepGateError('발송 채널을 정해 주세요.', 'CHANNEL_REQUIRED');
+  }
+  if (step.channel != null && !STEP_CHANNELS.includes(String(step.channel))) {
+    throw new JourneyStepGateError('지원하지 않는 발송 채널입니다.', 'INVALID_CHANNEL');
+  }
+  if (step.delayMode != null && !STEP_DELAY_MODES.includes(String(step.delayMode))) {
+    throw new JourneyStepGateError('지원하지 않는 발송 시점 방식입니다.', 'INVALID_DELAY_MODE');
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const run: SqlRunner = (text, params) => client.query(text, params);
+
+    const j = await run(
+      `SELECT status FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`,
+      [journeyId, companyId]
+    );
+    if (j.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    if (String(j.rows[0].status) === 'active') {
+      throw new JourneyStepGateError(
+        '운영 중인 여정에는 스텝을 더할 수 없습니다. 먼저 일시정지해 주세요. 스팸 사전검사를 다시 받아야 나갈 수 있습니다.',
+        'JOURNEY_ACTIVE'
+      );
+    }
+
+    const agg = await run(
+      `SELECT COUNT(*)::int AS n, COALESCE(MAX(step_order), 0)::int AS mx
+         FROM journey_steps WHERE journey_id = $1::uuid`,
+      [journeyId]
+    );
+    if (agg.rows[0].n >= MAX_JOURNEY_STEPS) {
+      throw new JourneyStepGateError(`스텝은 최대 ${MAX_JOURNEY_STEPS}개까지 만들 수 있습니다.`, 'STEP_LIMIT');
+    }
+    const stepOrder = agg.rows[0].mx + 1;
+
+    const stepId = await insertJourneyStepRow(
+      journeyId,
+      { ...step, stepOrder, delayHours: Math.max(0, Math.min(MAX_STEP_DELAY_HOURS, Number(step.delayHours) || 0)) },
+      run
+    );
+
+    // 편집과 같은 규칙 — 스텝 구성이 바뀌었으니 발송 전 검증을 다시 받아야 한다.
+    //   활성 여정을 거부하므로 이 값은 **다음 활성화가 반드시 읽는다**(그때 스팸 사전검사가 걸린다).
+    //   snapshot은 만들지 않는다 — 활성화가 전 스텝 snapshot을 새로 만들기 때문이다(중복 생성 제거).
+    await run(`UPDATE journeys SET last_pretest_passed_at = NULL, updated_at = NOW() WHERE id = $1::uuid`, [journeyId]);
+    await client.query('COMMIT');
+    return { stepId, stepOrder };
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * 저장 후 step 삭제 + 재번호(설계서 §13-1).
+ *
+ * ⛔ 게이트 셋 — 하나라도 걸리면 지우지 않는다.
+ *   1. 스텝이 하나뿐이면 거부 (스텝 0개 여정은 성립하지 않는다)
+ *   2. 발송 이력이 있으면 거부 — `journey_step_logs`가 ON DELETE CASCADE라(2026-08-02 실조회)
+ *      지우는 순간 그 스텝의 발송 이력과 비용 기록이 함께 사라져 정산·통계 축이 조용히 깨진다.
+ *   3. 그 자리를 이미 지났거나 **바로 다음에 받을** 고객이 진행 중이면 거부 —
+ *      재번호가 `current_step_order`의 의미를 어긋나게 만든다. 날짜축 단발 실행행은
+ *      `current_step_order = 발송 순번 − 1`로 만들어지므로(journey-anchor-scheduler) 직전 자리까지 봐야 닫힌다.
+ *      이 게이트가 있어서 실행행 보정 코드가 통째로 필요 없다.
+ *
+ * `journey_anchor_dispatch`·`journey_step_variants`는 CASCADE라 함께 지워진다.
+ * `journey_step_snapshots`는 **FK가 없어** CASCADE가 안 되므로 직접 지운다(2026-08-02 실조회에서 드러남).
+ * @returns null = 여정·스텝이 없거나 그 회사 것이 아님
+ */
+export async function deleteJourneyStep(
+  companyId: string,
+  journeyId: string,
+  stepId: string,
+): Promise<{ deletedOrder: number; renumbered: number } | null> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const run: SqlRunner = (text, params) => client.query(text, params);
+
+    const j = await run(
+      `SELECT id FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`,
+      [journeyId, companyId]
+    );
+    if (j.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
+    const s = await run(
+      `SELECT step_order FROM journey_steps WHERE id = $1::uuid AND journey_id = $2::uuid FOR UPDATE`,
+      [stepId, journeyId]
+    );
+    if (s.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const deletedOrder = Number(s.rows[0].step_order);
+
+    const cnt = await run(`SELECT COUNT(*)::int AS n FROM journey_steps WHERE journey_id = $1::uuid`, [journeyId]);
+    if (cnt.rows[0].n <= 1) {
+      throw new JourneyStepGateError('스텝이 하나뿐인 여정은 그 스텝을 지울 수 없습니다.', 'LAST_STEP');
+    }
+
+    const logs = await run(`SELECT 1 FROM journey_step_logs WHERE step_id = $1::uuid LIMIT 1`, [stepId]);
+    if (logs.rows.length > 0) {
+      throw new JourneyStepGateError(
+        '이미 발송된 스텝은 지울 수 없습니다. 발송 이력과 비용 기록이 함께 사라집니다.',
+        'ALREADY_SENT'
+      );
+    }
+
+    // ⛔ 'paused'를 넣지 않는 근거 — 재번호가 해를 주는 것은 **앞으로 step_order를 다시 소비할** 실행행뿐이다.
+    //   paused를 active로 되돌리는 경로가 코드 전체에 없어(2026-08-02 전수 grep) 정지된 실행행은 순번을 다시 읽지 않는다.
+    //   정지가 영구라 넣으면 고객 한 명만 정지해도 그 여정은 스텝을 영영 못 지운다.
+    //   **재개 기능을 만들면 이 조건을 함께 고쳐야 한다.**
+    const busy = await run(
+      `SELECT 1 FROM journey_executions
+        WHERE journey_id = $1::uuid AND status = 'active' AND current_step_order >= $2
+        LIMIT 1`,
+      [journeyId, deletedOrder - 1]
+    );
+    if (busy.rows.length > 0) {
+      throw new JourneyStepGateError(
+        '이 스텝을 곧 받을 고객이 진행 중이라 지금은 지울 수 없습니다. 그 고객들이 끝난 뒤에 지워 주세요.',
+        'IN_PROGRESS'
+      );
+    }
+
+    // FK가 없어 CASCADE가 안 되는 것 — 직접 지운다.
+    await run(`DELETE FROM journey_step_snapshots WHERE step_id = $1::uuid`, [stepId]);
+    // CASCADE = journey_anchor_dispatch / journey_step_variants / journey_step_logs(위 게이트로 0건)
+    await run(`DELETE FROM journey_steps WHERE id = $1::uuid AND journey_id = $2::uuid`, [stepId, journeyId]);
+
+    // 재번호 2단계 — UNIQUE(journey_id, step_order)가 즉시 검사라 한 문장으로 당기면 충돌한다.
+    await run(
+      `UPDATE journey_steps SET step_order = step_order + $2 WHERE journey_id = $1::uuid AND step_order > $3`,
+      [journeyId, RENUMBER_OFFSET, deletedOrder]
+    );
+    const rn = await run(
+      `UPDATE journey_steps SET step_order = step_order - $2 WHERE journey_id = $1::uuid AND step_order > $3`,
+      [journeyId, RENUMBER_OFFSET + 1, RENUMBER_OFFSET]
+    );
+
+    // 분기 포인터 보정 — 지운 자리를 가리키던 값은 비우고(현행 동작 = 여정 종료), 뒤를 가리키던 값은 함께 당긴다.
+    //   ⛔ 순서를 바꾸면 안 된다. 당기기를 먼저 하면 지운 자리를 가리키던 값이 살아남는다.
+    await run(`UPDATE journey_steps SET not_met_goto = NULL WHERE journey_id = $1::uuid AND not_met_goto = $2`, [journeyId, deletedOrder]);
+    await run(`UPDATE journey_steps SET not_met_goto = not_met_goto - 1 WHERE journey_id = $1::uuid AND not_met_goto > $2`, [journeyId, deletedOrder]);
+
+    await run(`UPDATE journeys SET last_pretest_passed_at = NULL, updated_at = NOW() WHERE id = $1::uuid`, [journeyId]);
+    await client.query('COMMIT');
+
+    // 발송 전 자동 스팸 재검사 dedup 정리 — 실패해도 삭제는 이미 성립했다(편집 경로와 같은 방어).
+    await query(`DELETE FROM journey_pretest_schedules WHERE journey_id = $1::uuid AND step_id = $2::uuid`, [journeyId, stepId])
+      .catch((e: any) => console.log(`[JourneyBuilder] pretest dedup 정리 skip: ${e?.message || e}`));
+
+    return { deletedOrder, renumbered: rn.rowCount ?? 0 };
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * 여정 callback_number 갱신.
+ * ⛔ 2026-08-02 Codex 4R — 회신번호는 **사전검사 입력**이다(스팸 테스트를 그 번호로 넣는다).
+ *   여기서 마커를 안 지우면 통과 뒤에 번호만 바꿔 검사하지 않은 발신 구성으로 켤 수 있다.
+ *   옵션 PATCH와 같은 규약을 쓰도록 공용 문을 지난다.
+ */
 export async function updateJourneyCallback(companyId: string, journeyId: string, callbackNumber: string): Promise<boolean> {
   if (!callbackNumber || !callbackNumber.trim()) return false;
-  const r = await query(
-    `UPDATE journeys SET callback_number = $3, updated_at = NOW()
+  const r = await withJourneyValidationReset(companyId, journeyId, (run) => run(
+    `UPDATE journeys SET callback_number = $3
      WHERE id = $1::uuid AND company_id = $2::uuid AND status != 'active'
      RETURNING id`,
     [journeyId, companyId, callbackNumber.trim().slice(0, 20)]
-  );
-  return r.rows.length > 0;
+  ));
+  return (r?.rows.length ?? 0) > 0;
 }
 
 export async function pauseJourney(companyId: string, journeyId: string, reason?: string): Promise<boolean> {

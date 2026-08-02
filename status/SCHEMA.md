@@ -2825,6 +2825,16 @@ CREATE INDEX IF NOT EXISTS idx_journey_executions_journey_status ON journey_exec
 CREATE INDEX IF NOT EXISTS idx_journey_step_logs_execution ON journey_step_logs(execution_id, sent_at DESC);
 ```
 
+### ★ 2026-08-02 pg_constraint 실조회 — `journey_steps` 제약·참조 (재질의 금지)
+
+저장 후 스텝 추가·삭제(설계서 §13-1) 착수 전 실조회. **코드가 이 세 가지에 기대고 있다.**
+
+| 사실 | 값 | 코드가 이것에 기대는 곳 |
+|---|---|---|
+| `journey_steps_journey_id_step_order_key` | UNIQUE (journey_id, step_order) · **`condeferrable = f`(즉시 검사)** | 삭제 후 재번호를 한 문장으로 당길 수 없다 → **2단계**(+1000 → −1001). `deleteJourneyStep` |
+| `journey_step_logs` · `journey_anchor_dispatch` · `journey_step_variants` → `journey_steps(id)` | **ON DELETE CASCADE** | 스텝 삭제가 **발송 이력·비용 기록을 함께 지운다** → 발송 이력 있는 스텝은 삭제 거부(게이트) |
+| `journey_step_snapshots` | **`journey_steps`를 참조하는 FK가 없다**(참조 3건에 안 들어옴) | CASCADE가 안 되므로 삭제 API가 **직접 지운다**. 이 표에 미등재 테이블 — 전체 컬럼 덤프는 아직 없고 `step_id`·`journey_id`(uuid) 실존만 2026-08-02 확인 |
+
 ### ★ 2026-06-29 information_schema 실측 대조 (Harold 제공 — 재질의 금지, 이 기록 신뢰)
 운영 PG `information_schema`로 `customers` · `cdp_events` · `journeys` · `journey_executions` 4개 테이블 실측 대조 완료.
 - `customers` · `cdp_events`(위 6컬럼 보강 반영) = 문서와 일치.

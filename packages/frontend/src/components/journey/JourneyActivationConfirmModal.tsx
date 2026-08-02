@@ -29,6 +29,8 @@ interface Props {
   journeyStatus: string;
   /** ★ 2026-07-10 목표 달성 시 자동 종료 — 활성화 직전 마지막 확인 표시(옵션 상태) */
   goalExitEnabled?: boolean;
+  /** ★ 2026-08-02 §13-5 — 현재 저장된 "한 번에 보낼 최대 인원". 전 트리거 필수라 없으면 활성화가 거부된다. */
+  thresholdRecipients?: number | null;
   onClose: () => void;
   onActivated: () => void;
   token: string;
@@ -76,9 +78,12 @@ const SUB_AGENT_CARDS = [
 ];
 
 export default function JourneyActivationConfirmModal({
-  journeyId, journeyName, journeyStatus, goalExitEnabled, onClose, onActivated, token,
+  journeyId, journeyName, journeyStatus, goalExitEnabled, thresholdRecipients, onClose, onActivated, token,
 }: Props) {
   const toast = useToast();
+  const [capInput, setCapInput] = useState(thresholdRecipients != null ? String(thresholdRecipients) : '');
+  /** 서버에 저장된 값 — prop은 목록에서 오므로 저장 직후 갱신되지 않는다. 이걸 안 두면 저장·재검증이 반복된다. */
+  const [savedCap, setSavedCap] = useState<number | null>(thresholdRecipients ?? null);
   const [phase, setPhase] = useState<'validating' | 'failed' | 'ready' | 'activating' | 'migration_pending' | 'callback_confirm'>('validating');
   const [activeCardIndex, setActiveCardIndex] = useState(0);
   const [result, setResult] = useState<ValidationResult | null>(null);
@@ -132,6 +137,11 @@ export default function JourneyActivationConfirmModal({
         return;
       }
       setResult(validateData);
+      // ★ 2026-08-02 Codex 2R — 검증하는 사이에 스텝·옵션이 바뀌면 통과로 기록하지 않는다(서버 판정).
+      //   실패 항목이 없는 실패라 사유를 따로 보여주지 않으면 화면이 빈 채로 멈춘다.
+      if (validateData?.staleRevision) {
+        setError(validateData?.error || '검증하는 사이에 여정이 바뀌었습니다. 한 번 더 검증해 주세요.');
+      }
 
       if (balanceRes && balanceRes.ok) {
         const balanceData: CompanyBalance = await balanceRes.json();
@@ -150,6 +160,40 @@ export default function JourneyActivationConfirmModal({
   };
 
   const runActivate = async (confirmExclusion = false) => {
+    // ★ 2026-08-02 §13-5 — 상한을 먼저 저장하고 활성화한다. 순서를 바꾸면 활성화가 옛 값으로 판정된다.
+    //   ⛔ 저장이 실패하면 활성화하지 않는다 — 상한 없이 켜지는 것이 이 입력을 만든 이유 자체를 없앤다.
+    // ⛔ 2026-08-02 Codex 4R — 저장·비교·표시가 **같은 값**을 써야 한다.
+    //   1.5를 넣으면 서버엔 1이 저장되는데 입력칸은 1.5로 남아, 다음 확인에서도 다르다고 판정해
+    //   저장과 재검증만 무한히 반복하고 활성화에 도달하지 못한다.
+    const capNum = Math.floor(Number(capInput));
+    if (!capInput.trim() || !Number.isFinite(capNum) || capNum < 1) {
+      toast.warning('한 번에 보낼 최대 인원을 1 이상 정수로 정해 주세요.');
+      return;
+    }
+    if (String(capNum) !== capInput.trim()) setCapInput(String(capNum));
+    if (capNum !== savedCap) {
+      try {
+        const optRes = await fetch(`/api/ai/operator/journeys/${journeyId}/options`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ thresholdRecipients: capNum }),
+        });
+        const optData = await optRes.json().catch(() => ({}));
+        if (!optRes.ok || !optData?.success) {
+          toast.error(optData?.error || '최대 인원 저장 실패');
+          return;
+        }
+      } catch (e: any) {
+        toast.error(e?.message || '최대 인원 저장 중 오류');
+        return;
+      }
+      // ⛔ 2026-08-02 Codex 3R — 설정을 바꿨으면 **바꾼 구성으로 다시 검증**해야 켤 수 있다.
+      //   옵션 변경은 서버에서 사전검사 통과를 무효로 만든다(검사받지 않은 구성으로 발송이 시작되는 것을 막는 규약).
+      setSavedCap(capNum);
+      toast.info('최대 인원을 저장했습니다. 바뀐 설정으로 다시 검증합니다.');
+      await runValidate();
+      return;
+    }
     setPhase('activating');
     try {
       const res = await fetch(`/api/ai/operator/journeys/${journeyId}/activate`, {
@@ -299,6 +343,26 @@ export default function JourneyActivationConfirmModal({
           {/* 통과 — 비용 + 잔액 + 확인 카드 */}
           {phase === 'ready' && result && (
             <div className="space-y-3">
+              {/* ★ 2026-08-02 §13-5 — 한 번에 보낼 최대 인원. 전 트리거 필수라 받는 자리를 여기 만든다.
+                  옛 화면은 값이 없으면 활성화가 거부되는데 그 값을 넣을 곳이 없었다. */}
+              <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <ShieldCheck className="w-4 h-4 text-violet-300" />
+                  <span className="text-[12px] font-semibold text-white/85">한 번에 보낼 최대 인원</span>
+                </div>
+                <input
+                  type="number"
+                  min={1}
+                  value={capInput}
+                  onChange={(e) => setCapInput(e.target.value)}
+                  placeholder="예: 500"
+                  className="w-full rounded-lg border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white placeholder:text-white/25 focus:border-violet-400/50 focus:outline-none"
+                />
+                <p className="text-[11px] text-white/45 mt-1.5">
+                  고객 정보를 한꺼번에 옮겨 올 때 예상보다 많은 분께 나가는 것을 막습니다. 한 회차에 이 인원을 넘지 않습니다.
+                </p>
+              </div>
+
               <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-400/30">
                 <div className="flex items-center gap-2 mb-2">
                   <CheckCircle2 className="w-5 h-5 text-emerald-300" />

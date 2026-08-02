@@ -33,10 +33,10 @@
 > **경위·수치·근본원인·함정은 SoT 문서와 memory가 소유한다.** 여기 재서술 = doc_ownership 위반. 지우기 전 소유 문서에 그 사실이 실존하는지 grep으로 확인하고, 없으면 소유 문서에 먼저 옮긴 뒤 지운다.
 > **회전 룰:** 잔여가 0이면 카드를 지운다(원문 = archive/TASKS_YYYY-MM.md + memory). 남은 일만 아래 "완료분 잔여"에 한 줄. 30KB 초과 = 회전 미이행.
 
-### 0801 여정 재설계 — **§11 착수 1~5 전량 push(`387526bc`) + DDL 전부 실행완료**, 배포 대기
-> 기능 상설 = **[여정](docs/FEATURE-JOURNEY.md)**(호출어 "여정" — 불변 원칙·구조·이력) · 트랙 SoT [재설계 설계서](docs/2026-08-01-journey-redesign-design.md) · 기억 [[project_2026_0801_journey_redesign]] · **0802 배포완료** · 다음 = **호출어 「여정 예약 착수」** → 설계서 §12. ⛔ 착수 전 Harold 확인 2건이 범위를 가른다(§12-0) — 그것부터 묻고 시작
-> ⛔ 불변 원칙 8개는 [여정 문서 §2](docs/FEATURE-JOURNEY.md)가 소유 — 착수 전 그것부터 읽는다
-> 잔여 = 배포·실측(§11-C-6 + 신규 5종 화면) · §12(Harold 확인 2건 선행: 예약 데이터 보유사·취소 구분) · §13(화면) · 상품 결정 2(등급 방향 필터·자동 종료 기본화) · 별건 2(journey-stats 'order' 축 · schema template TIMESTAMPTZ)
+### 0801 여정 재설계 — 착수 1~5 배포완료. **0802 = 범위 재확정(예약 접음·트리거 12종+상시) + §13 화면 전량 코드 완료**
+> 기능 상설 = **[여정](docs/FEATURE-JOURNEY.md)**(호출어 "여정" — 불변 원칙·구조·이력) · 트랙 SoT [재설계 설계서](docs/2026-08-01-journey-redesign-design.md) **§13-A 구현 결과** · 기억 [[project_2026_0801_journey_redesign]] · tsc 0(양쪽) · 1,871 테스트 · **Codex 5R 종결**(§13-A-1~5) · 다음 = 빌드 → 화면 실측
+> ⛔ 불변 원칙 8개 = [여정 문서 §2](docs/FEATURE-JOURNEY.md) / **스텝 순번 구멍 = 여정 사망**(재번호·게이트 계약 = 설계서 §13-A) / **등급은 아직 방향을 못 가린다 — 켜면 하락 고객에게 축하** / **여정=마케팅**, 정보성은 정보 알림 축
+> 잔여 = 화면 실측 7종(설계서 §13-A) · 등급 상승 재작성(방향+서열+쿨다운) · 실측(§11-C-6 + 신규 5종) · 자동 종료 기본화 · ⛔**승인 대기 1**(A/B 변이 엔드포인트 크로스 테넌트 쓰기 = §13-A-4) · **별건 3**(활성화 snapshot 실패 시 active 잔존 = §13-A-2 · journey-stats 'order' 축 · schema template TIMESTAMPTZ) · **접음** = 예약 §12·§5-2(설계 보존, 정보 알림 축)
 
 ### 레거시 PAY 흡수 (Track D) — 충전·잔액 축 배포완료, 컷오버 전
 > SoT [통계·인프라](docs/2026-07-07-pay-absorption-track-d-design.md) · [충전·잔액](docs/2026-07-24-agent-prepaid-charge-design.md)(단독 재개용) · 기억 [[project_2026_0724_agent_prepaid_charge]] · 다음 = 7월 실충전 4개(`B0082`·`D0078`·`D0079`·`C0112`)에 `billing_type='prepaid'` 지정(283행 전부 postpaid라 지금은 충전 등록도 요청 탭도 열리지 않는다)

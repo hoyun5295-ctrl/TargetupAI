@@ -100,12 +100,18 @@ import {
   listJourneys,
   getJourneyDetail,
   updateJourneyStep,
+  // ★ 2026-08-02 §13-1 — 저장 후 스텝 추가·삭제(화면 흐름 재설계의 선행)
+  addJourneyStep,
+  deleteJourneyStep,
+  JourneyStepGateError,
   updateJourneyCallback,
   JOURNEY_TEMPLATES,
   JourneyTemplateCode,
   JourneyStatus,
 } from '../utils/journey-builder';
 import { AlimtalkFallbackError } from '../utils/alimtalk-fallback';
+// ★ 2026-08-02 §13-5: 구매 문 판정·마지막 도착 시각 — 판정은 CT가 소유하고 라우트는 그대로 전달만 한다.
+import { getPurchaseDoorStatus } from '../utils/journey-purchase-ledger';
 // ★ D218+ (2026-05-26): 활성화 검증 + 정지 이력 조회
 import { validateJourneyForActivation } from '../utils/journey-pretest-validator';
 import { getPauseLogs } from '../utils/journey-pause-handler';
@@ -3456,6 +3462,94 @@ router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: R
 });
 
 // ════════════════════════════════════════════════════════════════════
+// ★ 2026-08-02 §13-1 — 저장 후 스텝 추가·삭제
+//   스텝을 늘려 가며 쓰는 화면(설계서 §6-3)의 선행. 크레딧 0 — 200은 최초 활성화 1회다(§7).
+//   판정·재번호는 전부 CT(journey-builder)가 소유한다. 여기서 SQL을 쓰지 않는다.
+// ════════════════════════════════════════════════════════════════════
+
+// POST /api/ai/operator/journeys/:id/steps — step 추가 (맨 뒤)
+router.post('/operator/journeys/:id/steps', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const {
+      stepType, delayHours, channel, messageTemplate, subject, isAd, conditionJsonb,
+      alimtalkProfileId, alimtalkTemplateCode, alimtalkVariableMap,
+      alimtalkNextType, alimtalkNextContents, alimtalkNextSubject,
+      mmsImagePaths, delayMode, targetHourKst, anchorOffsetDays,
+      notMetGoto, waitEventName, waitTimeoutHours,
+    } = req.body || {};
+
+    const result = await addJourneyStep(companyId, req.params.id, {
+      stepType: stepType || 'message',
+      delayHours: delayHours != null ? Number(delayHours) : 0,
+      channel,
+      messageTemplate,
+      subject,
+      isAd,
+      conditionJsonb,
+      alimtalkProfileId,
+      alimtalkTemplateCode,
+      alimtalkVariableMap,
+      alimtalkNextType,
+      alimtalkNextContents,
+      alimtalkNextSubject,
+      mmsImagePaths,
+      delayMode,
+      targetHourKst: targetHourKst != null ? Number(targetHourKst) : undefined,
+      anchorOffsetDays: anchorOffsetDays != null ? Number(anchorOffsetDays) : undefined,
+      notMetGoto,
+      waitEventName,
+      waitTimeoutHours: waitTimeoutHours != null ? Number(waitTimeoutHours) : undefined,
+    });
+    if (!result) return res.status(404).json({ success: false, error: '여정을 찾을 수 없거나 수정 권한이 없습니다.' });
+    return res.json({ success: true, stepId: result.stepId, stepOrder: result.stepOrder });
+  } catch (err: any) {
+    if (err instanceof JourneyStepGateError) {
+      return res.status(409).json({ success: false, error: err.message, code: err.code });
+    }
+    const msg = String(err?.message || '');
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — journey_steps ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[Journeys add step] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'step 추가 실패' });
+  }
+});
+
+// DELETE /api/ai/operator/journeys/:id/steps/:stepId — step 삭제 + 재번호
+router.delete('/operator/journeys/:id/steps/:stepId', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const result = await deleteJourneyStep(companyId, req.params.id, req.params.stepId);
+    if (!result) return res.status(404).json({ success: false, error: 'step을 찾을 수 없거나 수정 권한이 없습니다.' });
+    return res.json({ success: true, deletedOrder: result.deletedOrder, renumbered: result.renumbered });
+  } catch (err: any) {
+    // 게이트(마지막 스텝·발송 이력·진행 중 고객)는 상태 문제라 409 — 사유가 화면에 그대로 나간다.
+    if (err instanceof JourneyStepGateError) {
+      return res.status(409).json({ success: false, error: err.message, code: err.code });
+    }
+    const msg = String(err?.message || '');
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — journey_steps ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[Journeys delete step] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'step 삭제 실패' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
 // ★ D188 Phase 2-B-3 (2026-05-21): journey_step_variants A/B + Bandit endpoint
 // ════════════════════════════════════════════════════════════════════
 
@@ -3816,8 +3910,14 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
     const add = (col: string, val: any) => { params.push(val); sets.push(`${col} = $${params.length}`); };
 
     // trigger_filters는 기존 jsonb에 병합(customer_conditions/logic 등 보존, 정규화된 키만 덮어씀).
-    params.push(JSON.stringify({ ...(cur.rows[0].trigger_filters || {}), ...norm.triggerFilters }));
-    sets.push(`trigger_filters = $${params.length}::jsonb`);
+    // ⛔ 2026-08-02 Codex 5R — **DB 안에서 병합**하고, 필터 키가 온 요청에서만 건드린다.
+    //   옛 코드는 트랜잭션 밖에서 읽은 JSON을 통째로 다시 썼다. 상한만 저장하는 요청과 다른 탭의
+    //   휴면일수·포인트 임계 편집이 겹치면 둘 다 같은 옛 JSON을 읽고 **나중 요청이 앞 요청의 필터를 되돌린다**
+    //   (그 뒤 모달이 되돌아간 필터로 재검증·활성화해 의도보다 넓은 고객군에 나간다).
+    if (Object.keys(norm.triggerFilters || {}).length > 0) {
+      params.push(JSON.stringify(norm.triggerFilters));
+      sets.push(`trigger_filters = COALESCE(trigger_filters, '{}'::jsonb) || $${params.length}::jsonb`);
+    }
 
     // 옵션 컬럼 — body에 실제로 온 키만(부분 갱신 안전).
     if ('thresholdRecipients' in body) add('threshold_recipients_per_step', norm.options.thresholdRecipients);
@@ -3834,6 +3934,14 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
     if ('goalKind' in body) add('goal_kind', norm.options.goalKind);
     if ('holdoutPct' in body) add('holdout_pct', norm.options.holdoutPct);
     if ('personalSendTime' in body) add('personal_send_time', norm.options.personalSendTime);
+
+    // ⛔ 2026-08-02 Codex 3R — **검증 입력을 바꾸는 옵션 변경은 사전검사 통과를 무효로 만든다.**
+    //   회신번호·상한·재진입을 검증 통과 뒤에 바꾸면, 활성화는 마커가 남아 있어 그대로 켜진다 —
+    //   검사받지 않은 구성으로 발송이 시작된다. 목표 자동 종료 토글 2종만 예외다(운영 중에도 허용되는,
+    //   발송을 줄이는 방향의 값이라 문안 검증 결과를 바꾸지 않는다).
+    const bodyKeys = Object.keys(body || {});
+    const onlyGoalKeys = bodyKeys.length > 0 && bodyKeys.every((k) => k === 'goalExitEnabled' || k === 'goalKind');
+    if (!onlyGoalKeys) sets.push('last_pretest_passed_at = NULL');
 
     sets.push('updated_at = NOW()');
 
@@ -3874,7 +3982,10 @@ router.get('/operator/journeys-data-capability', async (req: Request, res: Respo
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
     const list = resolveTriggerAvailability(await getCompanyJourneyFacts(companyId));
-    return res.json({ success: true, triggers: toAvailabilityMap(list), anyAvailable: hasAnyAvailableTrigger(list) });
+    // ★ 2026-08-02 §13-5 — 매장 구매 정책을 화면이 말하려면 어느 문이 진실인지와 마지막 도착 시각이 필요하다.
+    //   조회가 실패해도 가능 여부 판정까지 막지 않는다(문구가 빠질 뿐이다).
+    const purchaseDoor = await getPurchaseDoorStatus(companyId).catch(() => null);
+    return res.json({ success: true, triggers: toAvailabilityMap(list), anyAvailable: hasAnyAvailableTrigger(list), purchaseDoor });
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
@@ -3929,19 +4040,40 @@ router.post('/operator/journeys-refine-step', async (req: Request, res: Response
     if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
-    const { message, channel, isAd, stepIntent } = req.body || {};
-    if (!message || !String(message).trim()) {
+    // ★ 2026-08-02 §13-3: 본문이 비어도 **여정 맥락이 있으면** 생성 모드로 간다.
+    //   옛 흐름은 사람이 먼저 열 글자를 써야 AI를 부를 수 있었다(추가 입력 요구 = 1클릭 원칙 위반).
+    //   맥락도 본문도 없을 때만 거절한다 — 지어낼 근거가 없기 때문이다.
+    const { message, channel, isAd, stepIntent, journey } = req.body || {};
+    const body = message != null ? String(message) : '';
+    const jc = journey && typeof journey === 'object' ? journey : undefined;
+    const hasContext = !!jc && (!!jc.triggerLabel || !!jc.objective || (Array.isArray(jc.previousMessages) && jc.previousMessages.length > 0));
+    if (!body.trim() && !hasContext) {
       return res.status(400).json({ success: false, error: '메시지 본문이 비어있습니다.' });
     }
     const ch = ['sms', 'lms', 'mms'].includes(channel) ? channel : 'lms';
     const { candidates } = await refineStepMessage({
       companyId,
-      currentMessage: String(message),
+      currentMessage: body,
       channel: ch,
       isAd: isAd !== false,
       stepIntent: stepIntent ? String(stepIntent) : undefined,
+      journey: jc
+        ? {
+            triggerLabel: jc.triggerLabel ? String(jc.triggerLabel).slice(0, 100) : undefined,
+            objective: jc.objective ? String(jc.objective).slice(0, 300) : undefined,
+            stepOrder: jc.stepOrder != null ? Number(jc.stepOrder) : undefined,
+            hoursFromTrigger: jc.hoursFromTrigger != null ? Number(jc.hoursFromTrigger) : undefined,
+            previousMessages: Array.isArray(jc.previousMessages)
+              ? jc.previousMessages.slice(0, 6).map((p: any) => ({
+                  stepOrder: Number(p?.stepOrder) || 0,
+                  hoursFromTrigger: Number(p?.hoursFromTrigger) || 0,
+                  message: String(p?.message || '').slice(0, 400),
+                }))
+              : undefined,
+          }
+        : undefined,
     });
-    return res.json({ success: true, candidates });
+    return res.json({ success: true, candidates, mode: body.trim() ? 'refine' : 'create' });
   } catch (err: any) {
     console.error('[Journeys refine step] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'AI 다듬기 실패' });
@@ -4142,10 +4274,34 @@ router.post('/operator/journeys/:id/pretest-validate', async (req: Request, res:
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
 
+    // ★ 2026-08-02 Codex 2R — 검사 **시작 시점**의 여정 판을 잡아 둔다.
+    //   검사가 스텝 목록을 읽은 뒤 스텝이 추가되면(추가는 updated_at을 올린다) 마커는 옛 판을 통과시킨 기록이 된다.
+    //   ⛔ 시각은 `::text` 원문으로 주고받는다 — JS Date 왕복은 µs를 절사해 같은 판을 다른 판으로 만든다(§11 커서 교훈).
+    const beforeRow = await query(
+      `SELECT updated_at::text AS rev FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [req.params.id, companyId]
+    );
+    const revBefore: string | null = beforeRow.rows[0]?.rev ?? null;
+
     const result = await validateJourneyForActivation(companyId, req.params.id, userId);
     // ★ Fix #4 (2026-06-05): 검증 통과 시 발송 전 검증 마커 기록 — /activate가 이 마커로 미검증(프론트 우회) 활성화를 차단한다.
     if (result.ok) {
-      await query(`UPDATE journeys SET last_pretest_passed_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.id, companyId]);
+      const mark = await query(
+        `UPDATE journeys SET last_pretest_passed_at = NOW()
+          WHERE id = $1::uuid AND company_id = $2::uuid AND updated_at IS NOT DISTINCT FROM $3::timestamptz
+          RETURNING id`,
+        [req.params.id, companyId, revBefore]
+      );
+      if (mark.rows.length === 0) {
+        // 검사 도중 스텝·옵션이 바뀌었다 — 통과로 기록하지 않는다(안 켜지는 방향이 안전하다).
+        return res.json({
+          success: true,
+          ...result,
+          ok: false,
+          staleRevision: true,
+          error: '검증하는 사이에 여정이 바뀌었습니다. 한 번 더 검증해 주세요.',
+        });
+      }
     }
     return res.json({ success: true, ...result });
   } catch (err: any) {
