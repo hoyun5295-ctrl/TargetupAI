@@ -13,7 +13,8 @@
 | DB 쿼리 작성 / 스키마 확인 | SCHEMA.md | 대상 테이블 절만 |
 | 도메인 작업 착수 전 사고 이력 (룰 원천=CLAUDE.md `read_lessons_first`) | lessons/LESSONS_{DB,FRONTEND,BACKEND,DEPLOY,ARCHITECTURE,META}.md | 해당 도메인 전체. DB·돈·환불=DB / UI·모달=FRONTEND / API·발송·AI=BACKEND / 배포·빌드·SSH=DEPLOY+OPS.md 해당 절 / 컨트롤타워=ARCHITECTURE / **매 답변 직전=META** |
 | **Harold님이 "브레인스토밍"이라고 말했을 때** · superpowers 스킬 선택 · Codex 라운드 운영 | **COLLAB.md** | 브레인스토밍 = §1 전체 정독 후 그대로 진행(의무) / 그 외 = 해당 절만 |
-| **프로젝트·트랙 SoT 문서·호출어를 찾을 때** | **[SOT-INDEX.md](SOT-INDEX.md)** | 해당 트랙 행만. **신규 프로젝트 SoT는 이 라우팅 표가 아니라 SOT-INDEX.md에 등재한다**(이 표는 도메인 문서 전용 12행 상설) |
+| **기능 이름을 부를 때**(여정·정산·DM·인앱 등) — 그 기능의 구조·불변 원칙·이력 | **[SOT-INDEX.md §0 기능 상설 SoT](SOT-INDEX.md)** | 해당 기능 행 → 그 기능 문서. 예: **"여정"** → [FEATURE-JOURNEY.md](../docs/FEATURE-JOURNEY.md) |
+| **프로젝트·트랙 SoT 문서·호출어를 찾을 때** | **[SOT-INDEX.md](SOT-INDEX.md)** | 해당 트랙 행만. **신규 프로젝트 SoT는 이 라우팅 표가 아니라 SOT-INDEX.md에 등재한다**(이 표는 도메인 문서 전용 상설) |
 | 시스템 구조 파악 | ARCHITECTURE.md | 해당 절만 |
 | 자사몰 연동·CDP·커넥터 작업 | INTEGRATIONS.md | 해당 provider 카드 / CDP 공통 절 |
 | 버그 수정 | BUGS.md | 해당 버그 항목 (해결분은 archive/BUGS_RESOLVED.md) |
@@ -32,10 +33,10 @@
 > **경위·수치·근본원인·함정은 SoT 문서와 memory가 소유한다.** 여기 재서술 = doc_ownership 위반. 지우기 전 소유 문서에 그 사실이 실존하는지 grep으로 확인하고, 없으면 소유 문서에 먼저 옮긴 뒤 지운다.
 > **회전 룰:** 잔여가 0이면 카드를 지운다(원문 = archive/TASKS_YYYY-MM.md + memory). 남은 일만 아래 "완료분 잔여"에 한 줄. 30KB 초과 = 회전 미이행.
 
-### 0801 여정 재설계 — **§11-1~5 전량 push(`a16d859e`) + DDL 전부 실행완료**(0802 실측)
-> SoT [여정 재설계](docs/2026-08-01-journey-redesign-design.md) **§11-D~§11-D-7(§11-5 완결) → §11-C → §11-A·§11-B** · 기억 [[project_2026_0801_journey_redesign]] · 호출어 **여정 재설계 이어가자** · 다음 = 배포(빌드) → 실측(§11-C-6 + 신규 트리거 5종 화면 확인) → 착수 6번(예약 원장 — Harold 확인 2건 선행)·7번(화면)
-> ⛔ **정답표를 안 갖는다**(§2-3) / **진실을 복사하지 않는다**(§11-C-0) / **문은 회사마다 하나**(자사몰 현역이면 원장 잠금) / **커서를 DB 밖(JS Date)으로 내보내지 않는다**(F1) / **새 트리거 = 레지스트리+DB CHECK 동시**(어긋나면 저장·DB 거부가 갈린다)
-> 잔여 = 배포·실측(§11-C-6 + 신규 5종 화면) · 착수 6번(예약 원장+§5-2 — Harold 확인 2건 선행)·7번(화면) · 상품 결정 2(등급 방향 필터·자동 종료 기본화) · 별건 2(journey-stats 'order' 축 · schema template TIMESTAMPTZ)
+### 0801 여정 재설계 — **§11 착수 1~5 전량 push(`387526bc`) + DDL 전부 실행완료**, 배포 대기
+> 기능 상설 = **[여정](docs/FEATURE-JOURNEY.md)**(호출어 "여정" — 불변 원칙·구조·이력) · 트랙 SoT [재설계 설계서](docs/2026-08-01-journey-redesign-design.md) · 기억 [[project_2026_0801_journey_redesign]] · 호출어 **여정 재설계 이어가자** · 다음 = 배포 → 실측 → **§12(예약·날짜축·중단)** 또는 **§13(화면)** — 둘 다 착수 가능 수준 설계 완료
+> ⛔ 불변 원칙 8개는 [여정 문서 §2](docs/FEATURE-JOURNEY.md)가 소유 — 착수 전 그것부터 읽는다
+> 잔여 = 배포·실측(§11-C-6 + 신규 5종 화면) · §12(Harold 확인 2건 선행: 예약 데이터 보유사·취소 구분) · §13(화면) · 상품 결정 2(등급 방향 필터·자동 종료 기본화) · 별건 2(journey-stats 'order' 축 · schema template TIMESTAMPTZ)
 
 ### 레거시 PAY 흡수 (Track D) — 충전·잔액 축 배포완료, 컷오버 전
 > SoT [통계·인프라](docs/2026-07-07-pay-absorption-track-d-design.md) · [충전·잔액](docs/2026-07-24-agent-prepaid-charge-design.md)(단독 재개용) · 기억 [[project_2026_0724_agent_prepaid_charge]] · 다음 = 7월 실충전 4개(`B0082`·`D0078`·`D0079`·`C0112`)에 `billing_type='prepaid'` 지정(283행 전부 postpaid라 지금은 충전 등록도 요청 탭도 열리지 않는다)

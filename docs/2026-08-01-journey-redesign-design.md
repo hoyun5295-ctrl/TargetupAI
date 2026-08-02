@@ -753,3 +753,148 @@ ALTER TABLE journey_entry_ledger ADD COLUMN IF NOT EXISTS state_value varchar(10
 
 수용 2(둘 다 실결함) — ①**자기참조 구멍**: 기준선 이후 새로 나타난 고객은 state 행이 없어 대상이 아닌데 만드는 곳도 없어 이후 변동까지 영영 미포착 → 워커가 매 회차 **관측 적재**(`observeGradeStateForJourney` — state 없는 고객의 현재 등급 기록, 진입 없음. 첫 관측=기록만, 변동은 다음부터). ②**낡은 기준선 고착**: 거부된 활성화·정지 기간의 기준선이 다음 활성화 첫 회차에 변동을 몰아 발화 → **매 활성화마다 재기준**(등급=값 DO UPDATE, 신규가입=명단 보충 DO NOTHING — 둘 다 덜 보내는 방향. 정지 기간 변동은 보내지 않는다).
 미완 인지 — state 경합·동시성 행동 테스트는 미추가(소스 정합·게이트 집합 검사만 있음). 2R의 vitest 미검증 표시는 동일한 샌드박스 EPERM — 로컬 1,826 통과 확인.
+
+---
+
+## §12 착수 6번 완전 설계 — 예약 3종 + 고객별 날짜축 + 고객별 중단·재계산
+
+> **다음 세션이 이 절만 읽고 착수할 수 있게 쓴다.** 근거는 §3-3·§4-3·§5-2·§8.
+> 선행 = Harold 확인 2건(§10 미결 2). 그 답이 **무엇을 가르는지**를 §12-0에 못 박는다.
+
+### §12-0 Harold 확인 2건이 가르는 것 (착수 전 유일한 블로커)
+
+| 확인 | 답에 따라 갈리는 것 |
+|---|---|
+| **예약 데이터를 ERP·CRM에 가진 고객사가 어디인가** | 없으면 §12를 착수하지 않는다(만들어도 영영 0건 = §2-3이 없애려는 상태). 있으면 그 회사 필드 구성을 보고 §12-1 컬럼을 확정한다 — 우리가 필드를 지어내지 않는다. |
+| **그 데이터에 취소·노쇼가 구분되는가** | 구분되면 #14(방문 D-N)를 연다. **안 되면 #14를 열지 않는다** — 취소가 안 들어오면 리마인드를 멈출 수 없어 취소한 고객에게 "내일 뵙겠습니다"가 나간다. #13(접수)·#15(방문 완료 후)는 상태 전이가 없어 취소 구분 없이도 성립한다. |
+
+**둘 중 하나라도 답이 "없다"면 그 범위는 잠근 채로 둔다.** 코드가 이미 그 상태다 —
+`journey-trigger-capability`의 예약 사유가 회사 데이터와 무관하게 잠그고(RESERVATION_REASON),
+레지스트리의 `reservation.visit_dn`·`reservation.visit_done`은 `implemented: false`다.
+
+### §12-1 예약 원장 `reservations` — DDL (배포 후 실행)
+
+구매 원장과 같은 모양으로 둔다. 싱크에이전트가 적재한다(§8).
+
+```sql
+CREATE TABLE IF NOT EXISTS reservations (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id     uuid NOT NULL REFERENCES companies(id),
+  customer_id    uuid REFERENCES customers(id),         -- 고객보다 먼저 도착 가능(구매 원장과 같은 규약)
+  customer_phone varchar(20) NOT NULL,                  -- 사람 단위 연결 키
+  reservation_no varchar(80),                           -- 고객사 예약번호(멱등 축)
+  reserved_at    timestamp NOT NULL,                    -- 예약 일시 = 고객별 날짜축 기준(KST naive — purchases 규약과 동일)
+  status         varchar(20) NOT NULL,                  -- confirmed / cancelled / done / noshow / unknown
+  status_raw     varchar(50),                           -- 고객사 원문 보존(정규화 실패 추적)
+  store_code     varchar(50),
+  store_name     varchar(100),
+  staff_name     varchar(100),
+  service_name   varchar(200),                          -- 문안 변수
+  custom_fields  jsonb DEFAULT '{}',
+  created_at     timestamp DEFAULT CURRENT_TIMESTAMP,   -- 도착 축(커서)
+  updated_at     timestamp DEFAULT CURRENT_TIMESTAMP    -- 상태 변경 감지 축
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_reservations_company_no
+  ON reservations (company_id, reservation_no) WHERE reservation_no IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_reservations_company_created_id
+  ON reservations (company_id, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_reservations_company_reserved
+  ON reservations (company_id, reserved_at);
+CREATE INDEX IF NOT EXISTS idx_reservations_company_updated
+  ON reservations (company_id, updated_at);
+```
+
+**⛔ 구매 원장과 다른 점 하나 — 예약은 UPDATE된다.** 구매는 사건이라 불변이지만 예약은 취소·변경·완료로 상태가 바뀐다.
+그래서 `reservation_no` 유니크로 **upsert**하고 `updated_at`을 상태 변경 감지 축으로 쓴다.
+예약번호를 안 주는 고객사는 (전화번호, 예약일시) 대체 키 — 그 회사는 예약일 변경을 신규 예약으로 본다(정직한 한계, 화면 표기).
+
+**⛔ 과거 예약 소급 적재 금지(§8).** 적재 시작 이후 신규분만 트리거 대상. 구매와 같은 방식 — `reserved_at`이 과거인 행은 접수 트리거가 무시하고, 미래 예약만 방문 D-N 축에 오른다.
+
+### §12-2 적재 — `POST /api/sync/reservations`
+
+`POST /api/sync/purchases`와 같은 계약(배치 ≤5000 · mode · batchIndex · sync_logs 기록 · agentConfig 응답). 다른 점 둘:
+- **upsert** — `ON CONFLICT (company_id, reservation_no) DO UPDATE SET status·reserved_at·updated_at = NOW()`.
+- **상태 정규화 CT 신설** `utils/reservation-status.ts` — 고객사 원문(예약·확정·CONFIRM·취소·노쇼…)을 4값으로.
+  ⛔ 매핑표를 지어내지 않는다 — 못 읽은 값은 `status_raw`에 남기고 `status='unknown'`으로 두어 **트리거 대상에서 제외**한다(§2-3: 판정 불가는 정직하게 불가). 회사별 매핑 추가는 화면에서.
+
+### §12-3 고객별 날짜축 (§4-3) — 배관은 절반 이상 있다
+
+`journey_anchor_dispatch`의 PK가 (journey_id, step_id, customer_id, send_date)라 **고객마다 발송일이 달라도 중복 방지가 이미 성립한다**(SCHEMA 실측). 지금은 기준 날짜만 `journeys.anchor_date`(여정 단위)에 있다.
+
+**변경의 본체 = 기준 날짜를 고객 쪽에서 읽는 것.**
+- `journeys.anchor_source` 신규(varchar20, default `'company'`) — `'company'`(현행 anchor_date) / `'customer_reservation'`(예약일).
+- 앵커 스케줄러(`journey-anchor-scheduler.ts`)가 `anchor_source='customer_reservation'`이면 `reservations.reserved_at`을 고객별 기준일로 읽어 `step.anchor_offset_days`만큼 앞당겨 발송일을 잡는다.
+- 나머지(멱등·발송·야간 시프트)는 기존 경로 그대로 — **새 발송 경로를 만들지 않는다.**
+
+이 축이 서면 예약 말고도 렌탈·구독 만료일, 보증기간 종료, 시술 후 관리 주기, 차량 정비 주기가 같은 모양으로 붙는다.
+
+### §12-4 트리거 3종 — 레지스트리 계약
+
+| # | event | 진입 | 축 | 종료 | 개방 조건 |
+|---|---|---|---|---|---|
+| 13 | `cdp.reservation_created` | 예약이 confirmed로 **도착** | 도착 축 커서(`created_at`+id) — §11-C와 동일 규약 | `reservation_closed` | 예약 원장에 행이 있으면 |
+| 14 | `reservation.visit_dn` | 예약일 D-N (고객별 날짜축) | 앵커 스케줄러(커서 아님) | 취소·완료 = 즉시 중단(§12-5) | **취소 구분되는 회사만** |
+| 15 | `reservation.visit_done` | 상태가 done으로 바뀐 뒤 N일 | `updated_at` 변경 감지 커서 | `steps_done` | 완료 상태를 주는 회사만 |
+
+⛔ #13은 지금 `cdp_events`의 `reservation_created`를 읽는다(커서 경로 기등록). 원장이 생기면 구매와 같은 **두 문 구조**가 된다 — §11-C의 `usesPurchaseLedger`와 같은 모양으로 `usesReservationLedger`를 두고, 문 판정도 같은 규약(자사몰 예약 이벤트가 현역이면 원장 문 잠금). **새 구조를 발명하지 않는다.**
+
+### §12-5 고객별 중단·재계산 (§5-2) — 예약 때문에 만들지만 범용이다
+
+지금 여정이 멈추는 길은 넷뿐이다(수신거부·목표 달성·조건 미충족·관리자 정지). **"그 고객만" 끊는 길이 없다.**
+
+**신설: `journey_executions.status = 'cancelled'` + 사유.** 워커 하나가 소유한다.
+- `utils/journey-execution-canceller.ts`(5분 주기 또는 예약 워커에 흡수): `reservations.updated_at`이 마지막 스캔 이후이고 `status IN ('cancelled','noshow')`인 행 → **그 예약을 기준으로 진입한 실행행**을 `cancelled`로, 사유 기록.
+- **예약일 변경 = 재계산** — `reserved_at`이 바뀐 행은 `journey_anchor_dispatch`의 해당 (journey, step, customer) 행을 지우고 새 발송일로 다시 잡는다. **이미 발송된 스텝은 건드리지 않는다**(과거는 되돌리지 않는다).
+- 매칭 키 = `journey_executions.entry_event_properties->>'reservation_no'`(진입 시 동봉). 사람이 여러 예약을 동시에 가질 수 있으므로 **고객 단위로 끊으면 안 된다.**
+
+범용성 — 구독 해지·환불·등급 강등도 같은 축을 쓴다(진입 근거가 무효가 되면 그 실행행만 끊는다).
+
+### §12-6 착수 순서 (6번 내부)
+
+1. Harold 확인 2건 → 범위 확정(§12-0).
+2. `reservations` DDL + 적재 엔드포인트 + 상태 정규화 CT (트리거는 아직 잠금).
+3. capability 개방 — 원장에 행이 있으면 #13 열기(RESERVATION_REASON 해제 조건 신설).
+4. #13 커서(두 문 구조) → 실측 1건.
+5. 고객별 날짜축(`anchor_source`) + #14 — **취소 구분되는 회사만**.
+6. §12-5 중단·재계산 워커 → #15.
+
+---
+
+## §13 착수 7번 완전 설계 — 화면 흐름 (§6 구현 수준)
+
+> 근거 = §6-1~§6-7. **선행 조건이 하나 있다(§13-1) — 그것 없이는 나머지가 무의미하다.**
+> 디자인 기준 = Journey Builder 동급 의무(CLAUDE.md `design_quality_minimum_journey_level`), 착수 직전 `LESSONS_FRONTEND` "디자인 최소 기준" 정독.
+
+### §13-1 선행 — 저장 후 스텝 추가·삭제 API (§6-6)
+
+이 흐름은 스텝을 늘려 가며 쓰는 것이 전제인데 **지금은 저장 후 스텝을 못 늘린다**(백엔드 INSERT는 생성 함수 한 곳뿐, DELETE는 아예 없음 — grep 0건). 화면을 아무리 고쳐도 이것 없이는 성립하지 않는다.
+
+- `POST /api/journeys/:id/steps` — 추가(최대 7). 활성 여정도 허용하되 **진행 중 실행행에는 소급 안 됨**을 응답에 명시.
+- `DELETE /api/journeys/:id/steps/:stepId` — 삭제 후 **반드시 재번호**.
+- ⛔ **순번에 구멍이 생기면 여정이 통째로 죽는다** — 실행기는 `current_step_order + 1`을 찾고 진입은 `step_order = 1`을 찾는다. 재번호는 같은 트랜잭션에서 `journey_steps`·스텝 스냅샷·`journey_anchor_dispatch(step_id)` 3곳 정합을 함께 본다.
+- 크레딧 0 — 200은 최초 활성화 1회다(§7). 스텝을 늘려도 추가 과금 없음이 이 설계의 전제.
+
+### §13-2 화면 구조 — 스텝별 전환 (§6-2·§6-3)
+
+한 화면 = 스텝 하나 완결. 우측 [스텝 추가] → 화면이 스텝 N+1로 전환(지금이 몇 번째인지 명확히).
+- 스텝 화면 요소: 문안 추천 · 변수 · **AI 꾸미기 / AI 다듬기 / 스팸필터 테스트**(오퍼레이터 화면과 같은 정렬·품질) · 발송 시점(즉시 / N시간 후 / N일 후 특정 시각).
+- **야간 안내** — 광고성은 21~08시 KST 금지. 새벽에 걸리는 설정이면 "다음 날 오전 8시에 발송됩니다"를 화면이 알린다(코드는 이미 08:00로 미룬다 — 9시가 아니다).
+
+### §13-3 AI 문안생성이 받아야 하는 것 (§6-4)
+
+지금은 현재 본문·채널·광고 여부·의도 넷뿐이고, 본문 10자 미만이면 버튼이 거부돼 **빈 스텝에서 AI를 못 부른다.**
+앞으로 받는 것: 여정의 트리거·목적 / **앞 스텝들의 확정 문안 전부** / 지금이 몇 번째 스텝이고 트리거로부터 얼마 뒤인지 / 채널·광고 여부·브랜드보이스.
+
+> **화면 구조가 이 문제를 푼다.** 스텝별 전환이면 앞 스텝이 확정된 채로 뒤에 있고 순번·지연이 화면에 있어 넘길 맥락이 그대로 갖춰진다. 프롬프트에 컨텍스트를 더 밀어 넣는 방식은 땜질이다(§6-4 설계 메모).
+
+### §13-4 진입·저장 (§6-1·§6-5)
+
+- 진입 = 자연어 한 칸 → AI가 추천 여정을 **모달**로. 담는 것: 트리거를 왜 골랐는지 근거 / 목적 / 스텝 수 이유 / **이 회사 데이터로 가능한지**(§2-3 게이트, 불가면 무엇을 연동해야 하는지).
+- 저장 = 스텝 전체 브리핑 모달(스텝 클릭 시 상세 펼침).
+- **1클릭 원칙**(CLAUDE.md `marketing_user_ux_priority`) — 추가 입력·중간 선택 단계 금지. 자유 입력은 별도 버튼으로 분리.
+
+### §13-5 §11-5가 남긴 화면 몫
+
+- **매장 구매 정책 노출**(§11-C-2) — 활성화 브리핑·구매 트리거 카드에 "밤 11시까지 동기화" 문구 + 마지막 구매 동기화 시각.
+- **신규 트리거 5종 카드**는 이미 카탈로그에 있다 — 그룹·정렬만 정리.
+- **수신자 상한 입력이 전 트리거 필수**가 됐다(§11-D-1) — 활성화 모달에서 받는 자리를 만든다(지금은 거부 사유만 뜬다).
