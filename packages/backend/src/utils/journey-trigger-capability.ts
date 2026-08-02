@@ -19,12 +19,12 @@ export type TriggerKey =
   | 'purchase' | 'reservation' | 'cart' | 'shipped'
   | 'signup' | 'dormant' | 'birthday' | 'points'
   // ★ §11-5 신설 — 구매 스트림 분기 2종(#2 첫 구매 · #5 휴면 복귀)
-  | 'first_purchase' | 'dormant_return' | 'cycle_lapsed' | 'browse';
+  | 'first_purchase' | 'dormant_return' | 'cycle_lapsed' | 'browse' | 'grade';
 
 export const TRIGGER_KEYS: TriggerKey[] = [
   'purchase', 'reservation', 'cart', 'shipped',
   'signup', 'dormant', 'birthday', 'points',
-  'first_purchase', 'dormant_return', 'cycle_lapsed', 'browse',
+  'first_purchase', 'dormant_return', 'cycle_lapsed', 'browse', 'grade',
 ];
 
 /**
@@ -37,6 +37,8 @@ export interface CompanyJourneyFacts {
   hasRecentPurchaseDate: boolean;
   hasBirthday: boolean;
   hasPoints: boolean;
+  /** 등급 값 보유 — #7 등급 변동의 근거. */
+  hasGrade: boolean;
   /** 자사몰·SDK에서 들어온 행동 기록. */
   hasPurchaseEvents: boolean;
   hasCartEvents: boolean;
@@ -112,6 +114,10 @@ export function resolveTriggerAvailability(facts: CompanyJourneyFacts): TriggerA
     f.hasBrowseEvents
       ? yes('browse', '상품을 보고 구매하지 않으면 발송합니다.')
       : no('browse', '상품 조회 기록이 아직 들어오지 않았어요. 자사몰을 연동하면 열립니다.'),
+
+    f.hasGrade
+      ? yes('grade', '회원 등급이 바뀌면 발송합니다.')
+      : no('grade', '등급 정보가 없어요. 고객 정보에 등급이 있으면 열립니다.'),
   ];
 }
 
@@ -148,7 +154,7 @@ export const TRIGGER_CONTRACTS: TriggerContract[] = [
   { event: 'customer.dormant',              key: 'dormant',  cls: 'transition', implemented: true,  exit: 'purchase' },
   { event: 'customer.dormant_return',       key: 'dormant_return', cls: 'transition', implemented: true, exit: 'steps_done' },   // #5 — 구매 스트림 분기(직전 구매가 휴면 기준일 이상 과거)
   { event: 'customer.cycle_lapsed',         key: 'cycle_lapsed', cls: 'transition', implemented: true, exit: 'purchase', cooldownMinDays: 1 }, // #6
-  { event: 'customer.grade_changed',        key: null,       cls: 'transition', implemented: false, exit: 'steps_done' },        // #7 — B조각
+  { event: 'customer.grade_changed',        key: 'grade',    cls: 'transition', implemented: true,  exit: 'steps_done' },        // #7 — 원장 state 대조
   { event: 'customer.birthday_approaching', key: 'birthday', cls: 'transition', implemented: true,  exit: 'steps_done' },
   { event: 'customer.points_expiring',      key: 'points',   cls: 'transition', implemented: true,  exit: 'points_used' },
   // §3-2 사건 발생형

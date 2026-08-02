@@ -694,7 +694,7 @@ DDL 이전에 켜진 여정은 여기서 한 번 심어 줘야 한다. `NOW()`�
 - **§9-N2 종결 — baseline 적재 실패 = 여정 정지**(fail-open 금지). 활성화는 이미 커밋이라 정지+사유+실패 응답.
 - **§9-N5 종결 — 익명→회원 소급 연결이 `created_at`(도착 축)도 갱신**(cdp-events·cdp-identity 두 곳). 익명이던 행은 커서가 소비한 적 없어(customer_id IS NULL 필터) 중복 진입 0. `occurred_at`은 불변이라 통계·귀속 무영향.
 
-### §11-D-2 신규 트리거 4종 개방 (#2 첫 구매 · #5 휴면 복귀 · #6 주기 이탈 · #12 조회 후 미구매)
+### §11-D-2 신규 트리거 5종 개방 (#2 첫구매 · #5 휴면복귀 · #6 주기이탈 · #7 등급변동 · #12 조회 후 미구매)
 
 같은 구매 커서(이벤트+원장 양 문)를 읽고 **자격 필터**로 갈린다(`qualifyPurchaseTransition` — 커서는 자격과 무관하게 전진).
 이력 판정 = `selectLastPriorPurchase`(양 문 합산, 자기 자신은 strict < 제외 — 한쪽 문만 보면 문을 옮긴 단골이 "첫 구매"가 된다).
@@ -729,3 +729,27 @@ ALTER TABLE journeys VALIDATE CONSTRAINT journeys_trigger_event_registered;
 수용 5 — ①cycle_lapsed 양 문 중복 구매가 cnt를 부풀림 → 발생 시각 분 단위 dedupe(UNION DISTINCT). ②자격 필터의 진입 시각을 배치 내 **최소 발생 시각**으로(도착 역순 배치 오판 차단) + **신규 2종 커서 활성화 초기화 누락**(원장 문이 영영 안 열리던 실결함) → builder 초기화 목록에 purchase.first·dormant_return 추가. ③baseline을 활성화 **앞**으로 이동 — 실패 = 안 켜짐이라 N2 정지 장치 자체가 사라졌다(구조 수정). ④소급 갱신 부작용 — cdp-identity 소급에 30일 제한(ingest와 동일 계약), cdp-orders 중복 판정 정렬을 발생 축(occurred_at, id)으로(소급 created_at과 무관해짐). ⑤browse 카드 gated 누락.
 부분 불수용 1 — capability가 구매 1건으로 cycle을 여는 것: 게이트는 회사 단위 근거고 3건은 **고객 단위** 성립 조건(§2-3 "판정을 할 만큼 있나"의 고객측) — 대상 수는 미리보기가 보여준다.
 Codex의 vitest 미검증 표시는 샌드박스 EPERM — 로컬 재실행으로 1,826건 통과 확인.
+
+### §11-D-6 2차 구현 — #7 등급 변동 + §5-1 런타임 완결 (2026-08-02)
+
+**#7 등급 변동(`customer.grade_changed`) 개방 — 원장 상태 일반화(§3-0)의 본체.**
+- `journey_entry_ledger`에 `kind='state'` 행(**사람 단위, store_code NULL 고정** — 매장별로 쪼개면 같은 사람의 다른 행이 옛 등급을 들고 계속 발화)으로 이전 등급을 기억한다.
+- 활성화 **전에** 등급 기준선을 적재(`seedGradeStateForJourney` — baseline 선적재와 같은 규약, 실패 = 안 켜짐). `state_value` 미마이그레이션(42703)이면 활성화가 거부된다(fail-closed).
+- 추출 = 원장 state와 현재 등급이 `IS DISTINCT FROM`인 사람(state 행이 없으면 "변동"이 아니라 최초 관측 — 대상 아님). 진입 트랜잭션이 state를 현재 등급으로 갱신(안 하면 매 회차 재발화).
+- 상승·하락 방향 필터는 회사가 등급 서열을 준 경우에만 가능(정답표 금지) — 후속.
+
+**§5-1 런타임 완결.**
+- `goal_kind` 미지정 시 트리거 계약의 종료 신호에서 파생. purchase 계열은 기존 폴백과 동일(회귀 0), **`points_used` 신규** — 진입 시 포인트 스냅샷(`points_at_entry`, watcher가 entry_event_properties에 동봉)보다 현재 포인트가 줄면 종료. 스냅샷 없으면 판정 불가 = 계속.
+- `steps_done`·`reservation_closed`는 기존 폴백 유지 — 기존 활성 여정의 조기 종료 동작을 바꾸지 않는다(자동 종료 기본화는 상품 결정).
+
+**§11-D-3 DDL 추가(배포 후, CHECK보다 먼저):**
+```sql
+ALTER TABLE journey_entry_ledger ADD COLUMN IF NOT EXISTS state_value varchar(100);
+```
+
+**최종 잔여(§11-D-4 갱신)** — 예약 3종+§5-2(착수 6번: 예약 원장 §8 + Harold 확인 2건이 선행) · 화면 재설계(착수 7번) · 등급 방향 필터·자동 종료 기본화(상품 결정). **§11-5의 구현 가능 범위는 전부 종결.**
+
+### §11-D-7 Codex 2R 판정 반영 (2026-08-02)
+
+수용 2(둘 다 실결함) — ①**자기참조 구멍**: 기준선 이후 새로 나타난 고객은 state 행이 없어 대상이 아닌데 만드는 곳도 없어 이후 변동까지 영영 미포착 → 워커가 매 회차 **관측 적재**(`observeGradeStateForJourney` — state 없는 고객의 현재 등급 기록, 진입 없음. 첫 관측=기록만, 변동은 다음부터). ②**낡은 기준선 고착**: 거부된 활성화·정지 기간의 기준선이 다음 활성화 첫 회차에 변동을 몰아 발화 → **매 활성화마다 재기준**(등급=값 DO UPDATE, 신규가입=명단 보충 DO NOTHING — 둘 다 덜 보내는 방향. 정지 기간 변동은 보내지 않는다).
+미완 인지 — state 경합·동시성 행동 테스트는 미추가(소스 정합·게이트 집합 검사만 있음). 2R의 vitest 미검증 표시는 동일한 샌드박스 EPERM — 로컬 1,826 통과 확인.

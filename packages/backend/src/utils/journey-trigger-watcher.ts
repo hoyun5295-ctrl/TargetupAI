@@ -35,7 +35,7 @@ import { resolvePurchaseLedgerGate, isLedgerRunWindowHour, PURCHASE_TRIGGER_MAX_
 import { resolveNewCustomerJudgement } from './journey-identity-signals';
 import { getCompanyIdentityCapability } from './company-data-profile';
 import { calculateNextRunAt } from './send-time-util';
-import { getJourneyHoldoutPct } from './journey-entry-ledger';
+import { getJourneyHoldoutPct, syncGradeStateWithClient, observeGradeStateForJourney } from './journey-entry-ledger';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -199,6 +199,16 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
   //   상한 설정 시 cap+1까지 추출 → 진짜 급증(후보 > 상한)만 정지. 미설정(무제한)이면 500 스로틀로 회차 분산.
   const cap = j.threshold_recipients_per_step;
   const extractLimit = cap != null ? Number(cap) + 1 : JOURNEY_COUNT_CAP;
+  // ★ §11-5 #7(Codex 2R) — 관측 적재를 추출보다 먼저: 새 고객의 현재 등급을 state로 기록(진입 없음).
+  //   이 행이 없으면 그 고객의 이후 변동을 영영 못 잡는다. 42703(미마이그레이션)만 삼킨다.
+  if (j.trigger_event === 'customer.grade_changed') {
+    try {
+      await observeGradeStateForJourney(j.id, j.company_id);
+    } catch (err: any) {
+      if (err?.code !== '42703') throw err;
+      console.warn(`[JourneyTrigger] 등급 state 관측 — 컬럼 미마이그레이션(§11-D-3 DDL 필요) journey=${j.id}`);
+    }
+  }
   const ids = await selectJourneyTargetCustomerIds(j.company_id, j.trigger_event, j.trigger_filters || {}, extractLimit, j.id, reentry);
   if (ids.length === 0) {
     return { matched: 0, enqueued: 0, skipped: 0 };
@@ -216,6 +226,17 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
   if (j.trigger_event === 'cdp.cart_abandon') {
     const abandonHours = Number((j.trigger_filters || {}).abandon_hours || 24);
     const propsByCustomer = await selectCartAbandonProperties(j.company_id, ids, abandonHours);
+    return enqueueCandidates(j, ids, propsByCustomer);
+  }
+  // ★ §11-5(§5-1) — 포인트 소멸 여정은 진입 시점 포인트를 스냅샷으로 동봉한다.
+  //   종료 신호(points_used)는 "진입 때보다 포인트가 줄었다"로 판정하므로 기준값이 진입에 실려야 한다.
+  if (j.trigger_event === 'customer.points_expiring') {
+    const pr = await query(
+      `SELECT id, points FROM customers WHERE id = ANY($1::uuid[]) AND company_id = $2::uuid`,
+      [ids, j.company_id],
+    );
+    const propsByCustomer: Record<string, Record<string, any>> = {};
+    for (const row of pr.rows as any[]) propsByCustomer[row.id] = { points_at_entry: Number(row.points) || 0 };
     return enqueueCandidates(j, ids, propsByCustomer);
   }
   return enqueueCandidates(j, ids);
@@ -566,6 +587,11 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
     );
     enqueued = insRes.rows.length;
 
+    // ★ §11-5 #7 — 등급 변동: 진입한 고객의 state를 현재 등급으로 갱신(같은 트랜잭션).
+    //   갱신을 빼먹으면 같은 변동이 매 회차 재발화한다.
+    if (j.trigger_event === 'customer.grade_changed' && enqueued > 0) {
+      await syncGradeStateWithClient(client, j.id, j.company_id, insRes.rows.map((r: any) => r.customer_id));
+    }
     // 신규가입: 실제 진입한 고객만 진입 원장 'entered' 일괄 기록(같은 트랜잭션 — 원자성). 식별자=회사+매장코드+전화번호.
     if (isSignup && enqueued > 0) {
       const enteredIds = insRes.rows.map((r: any) => r.customer_id);

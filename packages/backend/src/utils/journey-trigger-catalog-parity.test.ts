@@ -61,6 +61,7 @@ describe('여정 트리거 카탈로그 ↔ 백엔드 실동작', () => {
       'customer.cycle_lapsed',
       'customer.dormant',
       'customer.dormant_return',
+      'customer.grade_changed',
       'customer.points_expiring',
       'purchase.first',
     ]);

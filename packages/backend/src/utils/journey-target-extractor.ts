@@ -264,6 +264,43 @@ export async function selectJourneyTargetCustomerIds(
       return r.rows.map((x: any) => x.customer_id);
     }
 
+    // ★ §11-5 #7 — 등급 변동: 원장 state(이전 등급)와 현재 등급이 다르면 진입 (§3-0 원장 일반화).
+    //   state 행이 없는 사람(기준선 이후 신규 관측)은 대상이 아니다 — 변동이 아니라 최초 관측이다.
+    //   기준선(seedGradeStateForJourney)이 없는 미리보기는 판정 불가 — 추정하지 않는다.
+    case 'customer.grade_changed': {
+      if (!journeyId) return [];
+      const params: any[] = [companyId, journeyId];
+      const antiJoin = reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays) : '';
+      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+      params.push(String(limit));
+      try {
+        const r = await query(
+          `SELECT s.customer_id FROM (
+             SELECT DISTINCT ON (c.phone) c.id AS customer_id
+               FROM customers c
+               INNER JOIN journey_entry_ledger l
+                       ON l.journey_id = $2::uuid AND l.company_id = c.company_id
+                      AND l.phone = c.phone AND l.kind = 'state'
+              WHERE c.company_id = $1::uuid
+                AND COALESCE(c.phone, '') <> ''
+                AND COALESCE(c.grade, '') <> ''
+                AND l.state_value IS DISTINCT FROM c.grade
+                AND ${buildJourneySafetyFilter('c')}
+                ${antiJoin}
+                ${cond ? ` AND ${cond}` : ''}
+              ORDER BY c.phone, c.created_at DESC
+           ) s
+           LIMIT $${params.length}::int`,
+          params,
+        );
+        return r.rows.map((x: any) => x.customer_id);
+      } catch (err: any) {
+        if (err?.code !== '42703') throw err;
+        console.warn('[JourneyExtractor] 등급 변동 — state_value 컬럼 미마이그레이션(§11-D-3 DDL 필요) → 0건');
+        return [];
+      }
+    }
+
     // 5. 생일 (D-N): NOW + N days의 MM-DD가 customers.birth_month_day 또는 birth_date와 일치
     case 'customer.birthday_approaching': {
       const days = Number(filters.days_before || 7);

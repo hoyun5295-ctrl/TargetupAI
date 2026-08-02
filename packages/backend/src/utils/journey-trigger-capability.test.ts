@@ -34,7 +34,7 @@ const STORED_EVENTS: Array<[string, string | null]> = [
   ['customer.birthday_approaching', 'birthday'],
   ['customer.points_expiring', 'points'],
   ['custom', null],
-  ['customer.grade_changed', null],               // 등록·미구현 — 화면 비노출
+  ['customer.grade_changed', 'grade'],            // ★ §11-5 신설(#7)
   ['customer.made_up_thing', null],
 ];
 
@@ -43,6 +43,7 @@ const NOTHING: CompanyJourneyFacts = {
   hasRecentPurchaseDate: false,
   hasBirthday: false,
   hasPoints: false,
+  hasGrade: false,
   hasPurchaseEvents: false,
   hasCartEvents: false,
   hasBrowseEvents: false,
@@ -105,7 +106,7 @@ describe('근거별 개방', () => {
 describe('예약은 구조적으로 잠긴다', () => {
   it('데이터가 전부 있어도 잠긴다 — 예약을 받는 연동 자체가 없다', () => {
     const all: CompanyJourneyFacts = {
-      canJudgeNewCustomer: true, hasRecentPurchaseDate: true, hasBirthday: true, hasPoints: true,
+      canJudgeNewCustomer: true, hasRecentPurchaseDate: true, hasBirthday: true, hasPoints: true, hasGrade: true,
       hasPurchaseEvents: true, hasCartEvents: true, hasBrowseEvents: true, hasShippedEvents: true,
     };
     expect(map(all).reservation.available).toBe(false);
@@ -155,7 +156,7 @@ describe('사유는 고객 언어로만 쓴다', () => {
   const allReasons = [
     ...resolveTriggerAvailability(NOTHING).map((a) => a.reason),
     ...resolveTriggerAvailability({
-      canJudgeNewCustomer: true, hasRecentPurchaseDate: true, hasBirthday: true, hasPoints: true,
+      canJudgeNewCustomer: true, hasRecentPurchaseDate: true, hasBirthday: true, hasPoints: true, hasGrade: true,
       hasPurchaseEvents: true, hasCartEvents: true, hasBrowseEvents: true, hasShippedEvents: true,
     }).map((a) => a.reason),
   ];

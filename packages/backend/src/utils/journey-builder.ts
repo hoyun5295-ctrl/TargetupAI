@@ -18,7 +18,7 @@
 import { query } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext } from './company-memory';
-import { seedBaselineForJourney } from './journey-entry-ledger';
+import { seedBaselineForJourney, seedGradeStateForJourney } from './journey-entry-ledger';
 import { formatStepTiming, formatConditionChip } from './journey-step-format';
 import { journeyListWhere, executionStatusFilter } from './journey-list-filter';
 import { StartKind, normalizeStartKind, classifyStartKind } from './journey-start-kind';
@@ -890,13 +890,21 @@ export async function activateJourney(companyId: string, journeyId: string, user
       `SELECT trigger_event, entry_baseline_at FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
       [journeyId, companyId],
     );
-    if (base.rows[0]?.trigger_event === 'customer.created' && !base.rows[0]?.entry_baseline_at) {
+    // ⛔ Codex 2R — 기준선은 매 활성화마다 재기준(거부된 시도·정지 기간의 낡은 기준선 고착 차단).
+    //   신규가입 = 명단 보충(DO NOTHING) / 등급 = 값 재기준(DO UPDATE). 둘 다 덜 보내는 방향.
+    if (base.rows[0]?.trigger_event === 'customer.created') {
       const { seeded } = await seedBaselineForJourney(journeyId, companyId);
       console.log(`[activateJourney] 진입 원장 baseline 선적재 journey=${journeyId} seeded=${seeded}`);
     }
+    // ★ §11-5 #7 — 등급 변동은 등급 기준선(kind='state')이 선행. state_value 미마이그레이션(42703)이면
+    //   여기서 던져져 활성화가 거부된다 — 기준 없이 켜면 첫 회차가 전 고객을 "변동"으로 오판한다.
+    if (base.rows[0]?.trigger_event === 'customer.grade_changed') {
+      const { seeded } = await seedGradeStateForJourney(journeyId, companyId);
+      console.log(`[activateJourney] 등급 기준선 선적재 journey=${journeyId} seeded=${seeded}`);
+    }
   } catch (e: any) {
     console.warn('[activateJourney] baseline 선적재 실패 — 활성화 중단:', e?.message);
-    return { ok: false, reason: '신규 고객 기준선 기록에 실패해 여정을 켜지 못했습니다. 잠시 후 다시 켜 주세요.' };
+    return { ok: false, reason: '진입 기준 기록에 실패해 여정을 켜지 못했습니다. 잠시 후 다시 켜 주세요.' };
   }
 
   const r = await query(

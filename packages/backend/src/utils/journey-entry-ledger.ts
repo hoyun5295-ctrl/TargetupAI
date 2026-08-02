@@ -81,6 +81,96 @@ export async function recordEnteredWithClient(
   );
 }
 
+// ═══════════════════════════════════════════════════════════
+// §11-5 #7 — 원장 상태 일반화 (2026-08-02, 설계서 §3-0)
+//   "전에 본 적 있나"(baseline/entered)에 "그때 상태값이 무엇이었나"(kind='state')를 얹는다.
+//   등급 변동이 첫 소비자 — 이전 등급을 기억해야 "변했다"를 판정한다.
+//   ⛔ state 행은 **사람 단위**(store_code NULL 고정)로 한 행만 둔다. 매장별로 쪼개면
+//     같은 사람의 두 행이 서로 다른 옛 등급을 들고 있어 갱신 후에도 다른 행이 계속 발화한다.
+//   state_value 컬럼은 §11-D-3 DDL — 없으면(42703) 호출부가 활성화를 거부한다(fail-closed).
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 등급 기준선 재기준 — 매 활성화마다 전 고객의 (사람, 등급)을 현재값으로.
+ * ⛔ Codex 2R — 거부된 활성화·정지 기간의 낡은 기준선이 다음 활성화 첫 회차에 변동을 몰아 발화시킨다.
+ *   재기준은 그 변동을 보내지 않는 방향(덜 보냄)이다.
+ */
+export async function seedGradeStateForJourney(journeyId: string, companyId: string): Promise<{ seeded: number }> {
+  const r = await query(
+    `INSERT INTO journey_entry_ledger (journey_id, company_id, store_code, phone, kind, state_value)
+     SELECT $1::uuid, s.company_id, NULL, s.phone, 'state', s.grade
+       FROM (
+         SELECT DISTINCT ON (c.phone) c.company_id, c.phone, c.grade
+           FROM customers c
+          WHERE c.company_id = $2::uuid AND c.phone IS NOT NULL AND c.phone <> ''
+            AND COALESCE(c.grade, '') <> ''
+          ORDER BY c.phone, c.created_at DESC
+       ) s
+     ON CONFLICT (journey_id, company_id, COALESCE(store_code, '__NONE__'), phone)
+     DO UPDATE SET state_value = EXCLUDED.state_value`,
+    [journeyId, companyId],
+  );
+  await query(
+    `UPDATE journeys SET entry_baseline_at = NOW() WHERE id = $1::uuid AND entry_baseline_at IS NULL`,
+    [journeyId],
+  );
+  return { seeded: r.rowCount || 0 };
+}
+
+/**
+ * 관측 적재 — state 행이 없는 고객의 현재 등급을 기록(진입 없음). 워커가 매 회차 호출.
+ * ⛔ Codex 2R — 기준선 이후 새로 나타난 고객은 state가 없어 "대상 아님"인데 만드는 곳도 없어
+ *   그 고객의 이후 변동까지 영영 못 잡는 자기참조 구멍이었다. 첫 관측 = 기록만, 변동은 다음부터.
+ */
+export async function observeGradeStateForJourney(journeyId: string, companyId: string): Promise<number> {
+  const r = await query(
+    `INSERT INTO journey_entry_ledger (journey_id, company_id, store_code, phone, kind, state_value)
+     SELECT $1::uuid, s.company_id, NULL, s.phone, 'state', s.grade
+       FROM (
+         SELECT DISTINCT ON (c.phone) c.company_id, c.phone, c.grade
+           FROM customers c
+          WHERE c.company_id = $2::uuid AND c.phone IS NOT NULL AND c.phone <> ''
+            AND COALESCE(c.grade, '') <> ''
+            AND NOT EXISTS (
+              SELECT 1 FROM journey_entry_ledger l
+               WHERE l.journey_id = $1::uuid AND l.company_id = c.company_id
+                 AND l.phone = c.phone AND l.kind = 'state'
+            )
+          ORDER BY c.phone, c.created_at DESC
+       ) s
+     ON CONFLICT (journey_id, company_id, COALESCE(store_code, '__NONE__'), phone) DO NOTHING`,
+    [journeyId, companyId],
+  );
+  return r.rowCount || 0;
+}
+
+/**
+ * 진입한 고객의 state를 **현재 등급**으로 갱신 — 진입 트랜잭션 안에서(원자성).
+ * 갱신을 빼먹으면 같은 변동이 매 회차 재발화한다.
+ */
+export async function syncGradeStateWithClient(
+  client: { query: (sql: string, params?: any[]) => Promise<any> },
+  journeyId: string,
+  companyId: string,
+  customerIds: string[],
+): Promise<void> {
+  if (customerIds.length === 0) return;
+  await client.query(
+    `INSERT INTO journey_entry_ledger (journey_id, company_id, store_code, phone, kind, state_value)
+     SELECT $1::uuid, s.company_id, NULL, s.phone, 'state', s.grade
+       FROM (
+         SELECT DISTINCT ON (c.phone) c.company_id, c.phone, c.grade
+           FROM customers c
+          WHERE c.id = ANY($2::uuid[]) AND c.company_id = $3::uuid
+            AND c.phone IS NOT NULL AND c.phone <> ''
+          ORDER BY c.phone, c.created_at DESC
+       ) s
+     ON CONFLICT (journey_id, company_id, COALESCE(store_code, '__NONE__'), phone)
+     DO UPDATE SET state_value = EXCLUDED.state_value`,
+    [journeyId, customerIds, companyId],
+  );
+}
+
 /**
  * baseline 적재 여부 — 추출이 원장 모드(활성)인지 created_at 추정 모드(초안 미리보기)인지 가른다.
  */

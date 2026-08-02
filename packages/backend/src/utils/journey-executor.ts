@@ -64,6 +64,8 @@ import { calculateNextRunAt, clampPersonalSendHour } from './send-time-util';
 import { getOrCreateStepCampaign, bumpStepCampaignCount } from './journey-step-campaign';
 import { evaluateCustomerFieldCondition, type ConditionOutcome } from './journey-condition';
 import { isCustomerSendable } from './journey-safety-filter';
+// ★ §11-5(§5-1) — 종료 신호는 트리거 계약(단일 출처)에서 파생한다.
+import { getTriggerContract } from './journey-trigger-capability';
 import { isSingleStepKind, normalizeStartKind } from './journey-start-kind';
 
 // ════════════════════════════════════════════════════════════════════
@@ -1257,9 +1259,16 @@ async function jumpToStep(exec: ExecutionRow, targetOrder: number): Promise<bool
 async function isGoalConvertedSinceEntry(exec: ExecutionRow): Promise<boolean> {
   let goalKind = 'purchase';
   try {
-    const gk = await query(`SELECT goal_kind FROM journeys WHERE id = $1::uuid`, [exec.journey_id]);
-    const v = String(gk.rows[0]?.goal_kind || 'purchase');
+    const gk = await query(`SELECT goal_kind, trigger_event FROM journeys WHERE id = $1::uuid`, [exec.journey_id]);
+    const v = String(gk.rows[0]?.goal_kind || '');
     if (v === 'click' || v === 'visit') goalKind = v;
+    else if (!v) {
+      // ★ §11-5(§5-1) — goal_kind 미지정이면 트리거 계약의 종료 신호에서 파생한다.
+      //   purchase 계열은 기존 폴백과 동일 = 회귀 0. points_used만 신규 분기.
+      //   steps_done·reservation_closed는 기존 폴백(purchase) 유지 — 기존 활성 여정 동작 불변(§11-D-6).
+      const exit = getTriggerContract(String(gk.rows[0]?.trigger_event || ''))?.exit;
+      if (exit === 'points_used') goalKind = 'points_used';
+    }
   } catch {
     /* goal_kind 컬럼 미마이그레이션 → purchase(현행) */
   }
@@ -1288,6 +1297,19 @@ async function isGoalConvertedSinceEntry(exec: ExecutionRow): Promise<boolean> {
         [exec.company_id, exec.customer_id, exec.entered_at]
       );
       return byVisit.rows.length > 0;
+    }
+
+    // ★ §11-5(§5-1) — 포인트 사용: 진입 스냅샷(points_at_entry)보다 현재 포인트가 줄었으면 종료.
+    //   스냅샷이 없으면 판정 불가 = 계속(덜 끈는 방향).
+    if (goalKind === 'points_used') {
+      const snap = Number((exec.entry_event_properties || ({} as Record<string, any>)).points_at_entry);
+      if (!Number.isFinite(snap)) return false;
+      const cur = await query(
+        `SELECT points FROM customers WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [exec.customer_id, exec.company_id],
+      );
+      const now = Number(cur.rows[0]?.points);
+      return Number.isFinite(now) && now < snap;
     }
 
     // purchase (기본 · 현행 동작 보존)

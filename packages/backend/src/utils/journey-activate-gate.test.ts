@@ -36,11 +36,11 @@ const OK_STEP = {
 };
 
 const NO_FACTS = {
-  canJudgeNewCustomer: false, hasRecentPurchaseDate: false, hasBirthday: false, hasPoints: false,
+  canJudgeNewCustomer: false, hasRecentPurchaseDate: false, hasBirthday: false, hasPoints: false, hasGrade: false,
   hasPurchaseEvents: false, hasCartEvents: false, hasBrowseEvents: false, hasShippedEvents: false,
 };
 const ALL_FACTS = {
-  canJudgeNewCustomer: true, hasRecentPurchaseDate: true, hasBirthday: true, hasPoints: true,
+  canJudgeNewCustomer: true, hasRecentPurchaseDate: true, hasBirthday: true, hasPoints: true, hasGrade: true,
   hasPurchaseEvents: true, hasCartEvents: true, hasBrowseEvents: true, hasShippedEvents: true,
 };
 
@@ -182,7 +182,7 @@ describe('저장되는 trigger_event 전수 — 데이터가 다 있고 상한�
     ['custom', true],
     ['cdp.reservation_created', false],          // 예약을 받는 연동 자체가 없다
     ['purchase.made_up', false],                  // 모르는 값 = 조용한 0건 → fail-closed
-    ['customer.grade_changed', false],            // 등록됐지만 미구현 — 켜지면 영원히 0건이라 거부(§5-4)
+    ['customer.grade_changed', true],             // ★ §11-5 신설(#7)
     ['customer.made_up_thing', false],
     ['', false],                                  // 빈 값도 막힌다
   ];

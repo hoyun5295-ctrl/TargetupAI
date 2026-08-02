@@ -108,6 +108,12 @@ export const TRIGGER_EVENTS: TriggerDef[] = [
     filters: { cycle_factor: 1.5 },   // 평균 구매 간격 × 계수 — 백엔드 기본값과 동일
   },
   {
+    key: 'grade', triggerEvent: 'customer.grade_changed', templateCode: 'custom', group: 'lifecycle',
+    label: '등급 변동', desc: '회원 등급이 바뀌면',
+    eventFields: [],
+    filters: {},
+  },
+  {
     key: 'signup', triggerEvent: 'customer.created', templateCode: 'custom', group: 'lifecycle',
     label: '신규 가입', desc: '회원이 가입하면',
     eventFields: [],
