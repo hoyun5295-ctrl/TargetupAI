@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { customersApi, manageUsersApi } from '../api/client';
 import { formatDateTime } from '../utils/formatDate';
+// ★ 2026-08-02 등급 서열 — 등급은 고객 데이터의 성질이라 설정의 집이 여기다(여정에서도 같은 모달을 연다).
+import GradeOrderModal from '../components/journey/GradeOrderModal';
 
 interface Customer {
   id: string;
@@ -33,6 +35,7 @@ interface UserOption {
 }
 
 export default function CustomersTab() {
+  const [gradeOrderOpen, setGradeOrderOpen] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [pagination, setPagination] = useState<Pagination>({ total: 0, page: 1, limit: 25, totalPages: 0 });
   const [search, setSearch] = useState('');
@@ -206,6 +209,13 @@ export default function CustomersTab() {
               조회
             </button>
 
+            {/* ★ 2026-08-02 — 등급 순서. 어느 등급이 위인지 알아야 "올라간 분에게만" 보낼 수 있다.
+                고객사마다 등급 체계가 달라 우리가 사전을 갖지 않고 여기서 한 번 확인받는다. */}
+            <button onClick={() => setGradeOrderOpen(true)}
+              className="px-4 py-2 bg-amber-50 text-amber-700 border border-amber-300 rounded-lg text-sm font-medium hover:bg-amber-100 transition">
+              등급 순서
+            </button>
+
             {/* 선택 삭제 */}
             {selectedIds.size > 0 && (
               <button onClick={confirmDeleteBulk}
@@ -372,6 +382,12 @@ export default function CustomersTab() {
           {setTimeout(() => setToast(null), 3000) && null}
         </div>
       )}
+
+      <GradeOrderModal
+        open={gradeOrderOpen}
+        onClose={() => setGradeOrderOpen(false)}
+        token={localStorage.getItem('token') || ''}
+      />
     </div>
   );
 }

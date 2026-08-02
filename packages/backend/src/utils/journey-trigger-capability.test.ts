@@ -106,7 +106,7 @@ describe('근거별 개방', () => {
 describe('예약은 구조적으로 잠긴다', () => {
   it('데이터가 전부 있어도 잠긴다 — 예약을 받는 연동 자체가 없다', () => {
     const all: CompanyJourneyFacts = {
-      canJudgeNewCustomer: true, hasRecentPurchaseDate: true, hasBirthday: true, hasPoints: true, hasGrade: true,
+      canJudgeNewCustomer: true, hasRecentPurchaseDate: true, hasBirthday: true, hasPoints: true, hasGrade: true, hasGradeOrder: true,
       hasPurchaseEvents: true, hasCartEvents: true, hasBrowseEvents: true, hasShippedEvents: true,
     };
     expect(map(all).reservation.available).toBe(false);
@@ -156,7 +156,7 @@ describe('사유는 고객 언어로만 쓴다', () => {
   const allReasons = [
     ...resolveTriggerAvailability(NOTHING).map((a) => a.reason),
     ...resolveTriggerAvailability({
-      canJudgeNewCustomer: true, hasRecentPurchaseDate: true, hasBirthday: true, hasPoints: true, hasGrade: true,
+      canJudgeNewCustomer: true, hasRecentPurchaseDate: true, hasBirthday: true, hasPoints: true, hasGrade: true, hasGradeOrder: true,
       hasPurchaseEvents: true, hasCartEvents: true, hasBrowseEvents: true, hasShippedEvents: true,
     }).map((a) => a.reason),
   ];
@@ -176,5 +176,35 @@ describe('사유는 고객 언어로만 쓴다', () => {
 
   it('사유가 비어 있지 않다', () => {
     for (const r of allReasons) expect(r.trim().length).toBeGreaterThan(5);
+  });
+});
+
+/**
+ * ★ 2026-08-02 — 등급은 **상승만** 발화한다. 값만 있고 서열이 없으면 방향을 못 가리므로 열지 않는다.
+ *   이 게이트가 없던 시절의 판정은 "값이 다르면 진입"이라 **떨어진 고객에게도 축하가 나갔다.**
+ */
+describe('등급 — 서열을 확인해야 열린다', () => {
+  const base = {
+    canJudgeNewCustomer: true, hasRecentPurchaseDate: true, hasBirthday: true, hasPoints: true,
+    hasPurchaseEvents: true, hasCartEvents: true, hasBrowseEvents: true, hasShippedEvents: true,
+  };
+  const gradeOf = (facts: any) => resolveTriggerAvailability(facts).find((x) => x.key === 'grade')!;
+
+  it('등급 값이 없으면 등급 정보를 안내한다', () => {
+    const r = gradeOf({ ...base, hasGrade: false, hasGradeOrder: false });
+    expect(r.available).toBe(false);
+    expect(r.reason).toContain('등급 정보가 없어요');
+  });
+
+  it('값은 있는데 서열을 안 정했으면 잠그고 무엇을 하면 되는지 말한다', () => {
+    const r = gradeOf({ ...base, hasGrade: true, hasGradeOrder: false });
+    expect(r.available).toBe(false);
+    expect(r.reason).toContain('등급 순서');
+  });
+
+  it('서열까지 확인됐을 때만 열리고, 문구도 상승으로 말한다', () => {
+    const r = gradeOf({ ...base, hasGrade: true, hasGradeOrder: true });
+    expect(r.available).toBe(true);
+    expect(r.reason).toContain('올라가면');
   });
 });

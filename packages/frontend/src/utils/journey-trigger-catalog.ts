@@ -129,7 +129,7 @@ export const TRIGGER_EVENTS: TriggerDef[] = [
   },
   {
     key: 'grade', triggerEvent: 'customer.grade_changed', templateCode: 'custom', group: 'lifecycle',
-    label: '등급 변동', desc: '회원 등급이 바뀌면',
+    label: '등급 상승', desc: '회원 등급이 올라가면',
     eventFields: [],
     filters: {},
   },

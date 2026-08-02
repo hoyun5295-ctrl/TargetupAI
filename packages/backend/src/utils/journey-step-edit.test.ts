@@ -282,3 +282,46 @@ describe('withJourneyValidationReset — 변경과 무효화는 한 트랜잭션
     expect(texts.some((t) => t === 'ROLLBACK')).toBe(true);
   });
 });
+
+/**
+ * ★ 2026-08-02 Harold 지시 — 이미지 없는 MMS 차단.
+ *   MMS는 이미지가 본체다. 없이 나가면 LMS보다 비싼 단가로 글자만 나간다(돈이 새는 방향).
+ *   화면이 먼저 막지만 서버가 다시 막는다 — 화면 검증만 있으면 직접 호출로 우회된다.
+ */
+describe('addJourneyStep — 이미지 없는 MMS', () => {
+  it('MMS인데 이미지가 없으면 INSERT가 나가지 않는다', async () => {
+    const { texts } = mockClient([
+      { match: /SELECT status FROM journeys/, rows: [{ status: 'draft' }] },
+      { match: /COUNT\(\*\)::int AS n/, rows: [{ n: 1, mx: 1 }] },
+      { match: /INSERT INTO journey_steps/, rows: [{ id: STEP }] },
+    ]);
+    await expect(
+      addJourneyStep(COMPANY, JOURNEY, { stepType: 'message', delayHours: 0, channel: 'mms' })
+    ).rejects.toMatchObject({ code: 'MMS_IMAGE_REQUIRED' });
+    expect(at(texts, /INSERT INTO journey_steps/)).toBe(-1);
+  });
+
+  it('이미지가 있으면 통과한다', async () => {
+    const { texts } = mockClient([
+      { match: /SELECT status FROM journeys/, rows: [{ status: 'draft' }] },
+      { match: /COUNT\(\*\)::int AS n/, rows: [{ n: 1, mx: 1 }] },
+      { match: /INSERT INTO journey_steps/, rows: [{ id: STEP }] },
+    ]);
+    const r = await addJourneyStep(COMPANY, JOURNEY, {
+      stepType: 'message', delayHours: 0, channel: 'mms', mmsImagePaths: ['/srv/mms/acme/a.jpg'],
+    });
+    expect(r?.stepId).toBe(STEP);
+    expect(at(texts, /INSERT INTO journey_steps/)).toBeGreaterThan(-1);
+  });
+
+  it('메시지 스텝이 아니면 보지 않는다 — 대기 스텝은 채널 자체가 없다', async () => {
+    const { texts } = mockClient([
+      { match: /SELECT status FROM journeys/, rows: [{ status: 'draft' }] },
+      { match: /COUNT\(\*\)::int AS n/, rows: [{ n: 1, mx: 1 }] },
+      { match: /INSERT INTO journey_steps/, rows: [{ id: STEP }] },
+    ]);
+    const r = await addJourneyStep(COMPANY, JOURNEY, { stepType: 'wait', delayHours: 24 });
+    expect(r?.stepId).toBe(STEP);
+    expect(at(texts, /INSERT INTO journey_steps/)).toBeGreaterThan(-1);
+  });
+});

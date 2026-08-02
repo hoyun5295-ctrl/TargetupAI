@@ -112,6 +112,8 @@ import {
 import { AlimtalkFallbackError } from '../utils/alimtalk-fallback';
 // ★ 2026-08-02 §13-5: 구매 문 판정·마지막 도착 시각 — 판정은 CT가 소유하고 라우트는 그대로 전달만 한다.
 import { getPurchaseDoorStatus } from '../utils/journey-purchase-ledger';
+// ★ 2026-08-02: 등급 서열 — 값 목록·저장·확인 판정은 CT 단일 출처.
+import { listCompanyGradeValues, saveGradeRanks, hasUsableGradeOrder, hasGradeOrderConfig } from '../utils/customer-grade-rank';
 // ★ D218+ (2026-05-26): 활성화 검증 + 정지 이력 조회
 import { validateJourneyForActivation } from '../utils/journey-pretest-validator';
 import { getPauseLogs } from '../utils/journey-pause-handler';
@@ -3207,6 +3209,9 @@ router.post('/operator/journeys', async (req: Request, res: Response) => {
     if (cm.includes('column') && cm.includes('does not exist')) {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 journeys/journey_steps 여정 일반화 ALTER 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
+    if (err instanceof JourneyStepGateError) {
+      return res.status(409).json({ success: false, error: err.message, code: err.code });
+    }
     console.error('[Journeys create] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '여정 생성 실패' });
   }
@@ -3456,6 +3461,9 @@ router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: R
     if (err instanceof AlimtalkFallbackError) {
       return res.status(400).json({ success: false, error: err.message });
     }
+    if (err instanceof JourneyStepGateError) {
+      return res.status(409).json({ success: false, error: err.message, code: err.code });
+    }
     console.error('[Journeys update step] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'step 수정 실패' });
   }
@@ -3563,8 +3571,15 @@ router.get('/operator/journeys/:journeyId/steps/:stepId/variants', async (req: R
     if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
-    // 회사 격리 검증 — journey가 해당 회사 소유인지 확인
-    const j = await query(`SELECT 1 FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.journeyId, companyId]);
+    // ⛔ 2026-08-02 — 여정만 회사로 검증하고 stepId는 안 보던 구멍(쓰기와 같은 부류의 읽기 판).
+    //   URL의 journeyId가 내 것이어도 stepId가 남의 것이면 **다른 회사 변이 본문이 읽힌다.**
+    //   대상 자원 자체를 소유 사슬(step → journey → company)로 확인한다.
+    const j = await query(
+      `SELECT 1 FROM journey_steps s
+         INNER JOIN journeys j ON j.id = s.journey_id
+        WHERE s.id = $1::uuid AND j.id = $2::uuid AND j.company_id = $3::uuid`,
+      [req.params.stepId, req.params.journeyId, companyId]
+    );
     if (j.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
     const variants = await listJourneyStepVariants(req.params.stepId);
     // ★ D210+ Phase 3 (2026-05-23 Harold 명시): winner 자동 선언 매트릭스 응답 통합 (회사 admin 안내 영역만 — 자동 적용 X)
@@ -3599,6 +3614,8 @@ router.post('/operator/journeys/:journeyId/steps/:stepId/variants', async (req: 
       return res.status(400).json({ success: false, error: 'variantId 필수 (예: A/B/C).' });
     }
     const id = await createJourneyStepVariant({
+      companyId,
+      journeyId: req.params.journeyId,
       stepId: req.params.stepId,
       variantId: variantId.trim(),
       messageTemplate,
@@ -3993,6 +4010,78 @@ router.get('/operator/journeys-data-capability', async (req: Request, res: Respo
     }
     console.error('[Journeys data capability] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '여정 가능 여부 조회 실패' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-08-02 등급 서열 — 회사가 한 번 확인하는 설정. 확인 전에는 등급 트리거가 잠긴다.
+//   ⛔ 값 목록은 그 회사 고객 데이터에서 뽑는다. 우리가 등급 사전을 갖지 않는다.
+// ════════════════════════════════════════════════════════════════════
+
+// GET /api/ai/operator/grade-ranks — 이 회사 등급 값 + 저장된 순서
+router.get('/operator/grade-ranks', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const values = await listCompanyGradeValues(companyId);
+    // configured = 저장한 적이 있는가 / confirmed = 상승 판정이 가능한가.
+    // ⛔ 둘은 다르다 — "전부 순서 없음"으로 저장한 회사는 configured이지만 confirmed는 아니다.
+    //   화면이 이 둘을 구분하지 못하면 저장한 상태를 못 복원하고 매번 초안으로 되돌아간다.
+    const [configured, confirmed] = await Promise.all([
+      hasGradeOrderConfig(companyId),
+      hasUsableGradeOrder(companyId),
+    ]);
+    return res.json({ success: true, values, configured, confirmed });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (err?.code === '42P01' || (msg.includes('relation') && msg.includes('does not exist'))) {
+      return res.status(503).json({ success: false, error: '등급 순서 설정을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 customer_grade_ranks 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[Grade ranks get] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '등급 순서 조회 실패' });
+  }
+});
+
+// PUT /api/ai/operator/grade-ranks — 순서 저장(사람이 확인한 것만 믿는다)
+router.put('/operator/grade-ranks', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const rows = Array.isArray(req.body?.ranks) ? req.body.ranks : null;
+    if (!rows) return res.status(400).json({ success: false, error: '등급 순서를 보내주세요.' });
+
+    // ⛔ 그 회사에 실제로 있는 값만 저장한다 — 없는 값을 넣으면 판정 표가 데이터와 어긋난다.
+    const actual = new Set((await listCompanyGradeValues(companyId)).map((v) => v.gradeValue));
+    const filtered = rows
+      .map((x: any) => ({
+        gradeValue: String(x?.gradeValue || '').trim(),
+        rankOrder: x?.rankOrder == null ? null : Number(x.rankOrder),
+      }))
+      .filter((x: any) => actual.has(x.gradeValue));
+
+    const { saved } = await saveGradeRanks(companyId, userId || null, filtered);
+    return res.json({ success: true, saved, confirmed: await hasUsableGradeOrder(companyId) });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (err?.code === '42P01' || (msg.includes('relation') && msg.includes('does not exist'))) {
+      return res.status(503).json({ success: false, error: '등급 순서 설정을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[Grade ranks put] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '등급 순서 저장 실패' });
   }
 });
 

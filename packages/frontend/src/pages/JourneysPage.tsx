@@ -17,8 +17,6 @@ import {
   CalendarClock,
   // ★ 2026-07-10 목표 달성 시 자동 종료
   Target,
-  // ★ 2026-08-01 여정 재설계 §2-3: 회사 데이터로 못 만드는 여정 잠금 표시
-  Lock,
 } from 'lucide-react';
 import JourneyVariantsEditor from '../components/journey/JourneyVariantsEditor';
 import JourneyMmsUploader from '../components/journey/JourneyMmsUploader';
@@ -40,6 +38,9 @@ import JourneyStepNotifyToggle from '../components/journey/JourneyStepNotifyTogg
 import AlimtalkChannelPanel, { validateAlimtalkChannelState, type AlimtalkSenderProfile, type AlimtalkTemplate, type AlimtalkChannelState } from '../components/alimtalk/AlimtalkChannelPanel';
 // ★ 2026-08-02 §13 화면 흐름 — 자연어 → 추천 모달 → 스텝별 전환 → 브리핑 모달
 import JourneyStepStudio from '../components/journey/JourneyStepStudio';
+import JourneyDataScopeNote from '../components/journey/JourneyDataScopeNote';
+import MarketingJourneyModal, { type QuickStartItem } from '../components/journey/MarketingJourneyModal';
+import GradeOrderModal from '../components/journey/GradeOrderModal';
 import JourneyPlanModal from '../components/journey/JourneyPlanModal';
 import JourneyBriefingModal, { type BriefingIssue } from '../components/journey/JourneyBriefingModal';
 import SpamFilterTestModal from '../components/SpamFilterTestModal';
@@ -369,6 +370,16 @@ const TEMPLATE_VISUAL: Record<TemplateCode, { icon: typeof UserPlus; gradient: s
  *   `TEMPLATE_VISUAL.label`은 캠페인 목적('재구매 유도')이지 진입 조건('주문 완료')이 아니다.
  *   추천 모달의 일이 "무엇이 이 여정을 시작하는가"를 확인시키는 것이라, 목적을 조건 자리에 쓰면 그 일을 못 한다.
  */
+/**
+ * ★ 2026-08-02 — 가능 여부 판정에 쓸 key. **trigger_event가 먼저**다.
+ *   템플릿 매핑(TEMPLATE_TRIGGER_KEY)은 빠른 시작 7종만 덮어서, 등급처럼 템플릿이 없는 트리거를 놓친다.
+ */
+function capabilityKeyOf(triggerEvent?: string, templateCode?: TemplateCode): string | null {
+  const def = triggerEvent ? TRIGGER_EVENTS.find((t) => t.triggerEvent === triggerEvent) : undefined;
+  if (def) return def.key;
+  return templateCode ? TEMPLATE_TRIGGER_KEY[templateCode] : null;
+}
+
 function triggerLabelOf(triggerEvent?: string, templateCode?: TemplateCode): string {
   const def = triggerEvent ? TRIGGER_EVENTS.find((t) => t.triggerEvent === triggerEvent) : undefined;
   if (def) return def.label;
@@ -469,6 +480,12 @@ function collectStepIssues(steps: AIGeneratedStep[]): Array<{ stepOrder: number;
     }
     if ((s.channel === 'lms' || s.channel === 'mms') && (!s.subject || !s.subject.trim())) {
       out.push({ stepOrder: s.stepOrder, message: '제목 없음(LMS·MMS 필수)' });
+      continue;
+    }
+    // ★ 2026-08-02 Harold 지시 — 이미지 없는 MMS는 저장하지 않는다.
+    //   그대로 두면 LMS보다 비싼 단가로 글자만 나간다(고객사 돈이 새는 방향).
+    if (s.channel === 'mms' && (s.mmsImagePaths?.length ?? 0) === 0) {
+      out.push({ stepOrder: s.stepOrder, message: '이미지 없음(MMS 필수)' });
     }
   }
   return out;
@@ -508,6 +525,8 @@ export default function JourneysPage() {
   //   'review'(한 화면에 전부)는 정보 알림·날짜축 빌더와 저장된 여정 편집이 계속 쓴다.
   const [view, setView] = useState<'main' | 'review' | 'studio'>('main');
   const [planOpen, setPlanOpen] = useState(false);
+  // ★ 2026-08-02 등급 서열 — 잠긴 자리에서 그 자리로 연다(설정 메뉴로 쫓아내지 않는다).
+  const [gradeOrderOpen, setGradeOrderOpen] = useState(false);
   /**
    * ★ 2026-08-02 (Codex 1R P2-5) — **생성에 실제로 쓴 목적**을 확정 저장한다.
    *   `objective` 텍스트 상자는 생성 이후에도 바뀌고, 빠른 시작·기회 카드 경로는 그 상자를 아예 안 쓴다.
@@ -595,7 +614,8 @@ export default function JourneysPage() {
   const [sampleCustomerFields, setSampleCustomerFields] = useState<Record<string, any> | null>(null);
   // ★ D210+ Phase 2-fix10 (Harold 명시 2026-05-23): 옛 showMergedPreview state 폐기 — 토글 영역 X, 위/아래 영역 명확 분리.
   const [aiPkg, setAiPkg] = useState<AIJourneyPackage | null>(null);
-  const [purpose, setPurpose] = useState<'marketing' | 'info-alert' | 'date-anchor'>('marketing');
+  // 'marketing' = 모달 닫힘(기본). 세 진입이 모두 모달이라 열림 상태를 값으로 구분한다(2026-08-02).
+  const [purpose, setPurpose] = useState<'marketing' | 'marketing-modal' | 'info-alert' | 'date-anchor'>('marketing');
   const [reviewName, setReviewName] = useState('');
   const [reviewCallback, setReviewCallback] = useState('');
   const [reviewUseStorePhone, setReviewUseStorePhone] = useState(false);
@@ -669,22 +689,19 @@ export default function JourneysPage() {
 
   // ★ 2026-08-01 설계서 §2-3 — 이 회사 데이터로 만들 수 있는 여정을 받아온다.
   //   실패해도 잠그지 않는다: 화면 편의 게이트일 뿐이고, 여기서 막으면 만들 수 있는 여정까지 못 만든다.
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const res = await fetch('/api/ai/operator/journeys-data-capability', {
-          headers: { Authorization: `Bearer ${token()}` },
-        });
-        const data = await res.json();
-        if (alive && data?.success && data.triggers) setDataCap(data.triggers);
-        if (alive && data?.success && data.purchaseDoor) setPurchaseDoor(data.purchaseDoor);
-      } catch {
-        /* 조회 실패 = 잠그지 않음(기존 동작 유지) */
-      }
-    })();
-    return () => { alive = false; };
-  }, []);
+  const loadDataCap = async () => {
+    try {
+      const res = await fetch('/api/ai/operator/journeys-data-capability', {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data?.success && data.triggers) setDataCap(data.triggers);
+      if (data?.success && data.purchaseDoor) setPurchaseDoor(data.purchaseDoor);
+    } catch {
+      /* 조회 실패 = 잠그지 않음(기존 동작 유지) */
+    }
+  };
+  useEffect(() => { void loadDataCap(); }, []);
 
   // 자동마케팅 승격 — 검증된 목표를 여정으로 가져와 프리필 (sessionStorage 핸드오프)
   useEffect(() => {
@@ -1184,6 +1201,42 @@ export default function JourneysPage() {
   };
 
   /**
+   * ★ 2026-08-02 — 이 회사가 지금 만들 수 있는 여정의 폭. 진입 화면·세 모달이 같은 숫자를 쓴다.
+   *   ⛔ 판정은 서버(회사 데이터 기준)가 하고 화면은 세기만 한다 — 여기서 조건을 만들지 않는다.
+   *   예약은 여정에서 빠졌으므로(정보 알림 축) 이 셈에서 제외한다.
+   */
+  const journeyScope = useMemo(() => {
+    const entries = Object.entries(dataCap || {}).filter(([k]) => k !== 'reservation');
+    const locked = entries.filter(([, v]) => !v.available);
+    return {
+      availableCount: entries.length - locked.length,
+      lockedCount: locked.length,
+      lockedHints: locked.map(([, v]) => v.reason),
+    };
+  }, [dataCap]);
+
+  /** 빠른 시작 카드 — 마케팅 모달 안에서만 쓴다(메인에서 옮김). 예약은 정보 알림 축이라 뺀다. */
+  const quickStartItems: QuickStartItem[] = useMemo(
+    () => (Object.keys(TEMPLATE_VISUAL) as TemplateCode[])
+      .filter((code) => code !== 'reservation')
+      .map((code) => {
+        const v = TEMPLATE_VISUAL[code];
+        const trgKey = TEMPLATE_TRIGGER_KEY[code];
+        const cap = trgKey ? dataCap?.[trgKey] : undefined;
+        const lockedReason = cap && !cap.available ? cap.reason : null;
+        return {
+          code,
+          label: v.label,
+          hint: v.hint,
+          icon: v.icon,
+          gradient: v.gradient,
+          lockedReason,
+        };
+      }),
+    [dataCap]
+  );
+
+  /**
    * ★ 2026-08-02 §13-3 — AI가 문안을 쓸 때 받아야 하는 여정 맥락.
    *   앞 스텝 문안 전부 + 지금 몇 번째인지 + 트리거로부터 얼마 뒤인지. 이게 있어야 "겹치지 않게"가 성립한다.
    */
@@ -1568,7 +1621,7 @@ export default function JourneysPage() {
             <p className="text-xs md:text-sm text-white/80 mt-0.5">
               {view === 'studio'
                 ? '한 화면에서 스텝 하나를 끝내고 [스텝 추가]로 넘어갑니다'
-                : view === 'review' ? 'AI가 설계한 흐름을 검토 + 혜택 부분 수정 후 활성화' : '자연어 한 줄 또는 빠른 시작 — AI가 시즌·회사 톤 반영해 완전 자동 생성'}
+                : view === 'review' ? 'AI가 설계한 흐름을 검토 + 혜택 부분 수정 후 활성화' : '만들 여정을 고르면 AI가 흐름을 설계합니다 — 연동한 데이터가 많을수록 고를 수 있는 여정이 늘어납니다'}
             </p>
           </div>
           {view === 'main' && (
@@ -1665,97 +1718,56 @@ export default function JourneysPage() {
 
             {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4 md:mb-5" />}
 
-            {/* 히어로 — 좌: 자연어 입력(크게) / 우: 마케팅·정보 알림 진입 버튼 (좌우 배치 → 우측 빈칸 제거 + 세로 압축) */}
-            <div className="grid grid-cols-1 lg:grid-cols-[1.7fr_1fr] gap-3 mb-5 md:mb-6">
-              <div className="bg-gradient-to-br from-fuchsia-500/10 via-purple-500/10 to-indigo-500/10 border border-fuchsia-500/30 rounded-2xl p-4 md:p-5 flex flex-col">
-                <div className="flex items-center gap-2 mb-2">
-                  <Sparkles className="w-5 h-5 text-fuchsia-300" />
-                  <h2 className="text-base md:text-lg font-semibold">자연어 한 줄로 여정 만들기</h2>
+            {/* ★ 2026-08-02 진입 재구성 — 메인은 "무엇을 만들지 고르는 자리"만 남긴다.
+                자연어 입력·빠른 시작은 마케팅 여정 모달로 옮겼다(세 진입의 방식을 하나로).
+                공통 메시지 = 연동 데이터가 여정의 폭을 정한다(JourneyDataScopeNote). */}
+            <div className="mb-4 grid grid-cols-1 gap-3 md:mb-5 md:grid-cols-3">
+              <button
+                onClick={() => setPurpose('marketing-modal')}
+                className="group rounded-2xl border border-fuchsia-400/40 bg-gradient-to-br from-fuchsia-500/15 via-purple-500/10 to-transparent p-4 text-left transition-colors hover:border-fuchsia-400/70 hover:from-fuchsia-500/25 md:p-5"
+              >
+                <div className="mb-2.5 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-fuchsia-400 to-purple-500">
+                  <Megaphone className="h-5 w-5 text-white" />
                 </div>
-                <p className="text-xs md:text-sm text-white/60 mb-3">
-                  AI가 시즌 + 회사 톤 + 학습 메모리를 종합해 완전한 여정을 자동 설계합니다. 검토 후 혜택 부분만 수정하시면 됩니다.
+                <div className="text-sm font-bold text-white">마케팅 여정</div>
+                <p className="mt-1 text-[11.5px] leading-relaxed text-white/55">
+                  하고 싶은 것을 한 줄로 쓰면 AI가 문자·LMS 흐름을 설계합니다
                 </p>
-                <textarea
-                  value={objective}
-                  onChange={(e) => setObjective(e.target.value)}
-                  placeholder="예: 신규 가입자 환영 7일 시리즈 / VIP 고객 분기 감사 / 휴면 30일 회수 / 신상품 출시 3단계 안내"
-                  rows={3}
-                  className="flex-1 w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-xl text-sm resize-none leading-relaxed placeholder-white/30 focus:outline-none focus:border-fuchsia-400"
-                  // ★ 2026-07-10 박성용 신고: 멀티라인 자연어 입력의 Enter=실행이라 줄바꿈 불가 →
-                  //   메인 오퍼레이터(AiOperatorPage)와 동일하게 Ctrl/Cmd+Enter만 실행, Enter는 기본 동작(줄바꿈).
-                  onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !generating) { e.preventDefault(); handleAIGenerate(); } }}
-                  disabled={generating}
-                />
-                <div className="flex justify-end mt-3">
-                  <button
-                    onClick={() => handleAIGenerate()}
-                    disabled={generating || objective.trim().length < 3}
-                    className="px-6 py-2.5 bg-gradient-to-r from-fuchsia-500 to-purple-500 rounded-xl text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                    AI 생성
-                  </button>
+              </button>
+
+              <button
+                onClick={() => setPurpose('info-alert')}
+                className="group rounded-2xl border border-white/10 bg-gradient-to-br from-teal-500/10 to-transparent p-4 text-left transition-colors hover:border-teal-400/50 hover:from-teal-500/20 md:p-5"
+              >
+                <div className="mb-2.5 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-teal-400 to-emerald-500">
+                  <Bell className="h-5 w-5 text-white" />
                 </div>
-              </div>
+                <div className="text-sm font-bold text-white">정보 알림</div>
+                <p className="mt-1 text-[11.5px] leading-relaxed text-white/55">
+                  주문·배송처럼 거래가 일어나면 승인된 알림톡을 보냅니다
+                </p>
+              </button>
 
-              {/* 우: 두 진입 버튼 (데스크탑 위아래 / 모바일 좌우) */}
-              <div className="grid grid-cols-2 lg:grid-cols-1 gap-3">
-                <button
-                  onClick={() => setPurpose('marketing')}
-                  className="rounded-2xl border border-fuchsia-400/50 bg-fuchsia-500/15 hover:bg-fuchsia-500/20 p-4 text-left transition-colors flex flex-col justify-center min-h-[88px]"
-                >
-                  <Megaphone className="w-6 h-6 text-fuchsia-300 mb-2" />
-                  <div className="text-sm font-semibold">마케팅 여정</div>
-                  <div className="text-[11px] text-white/55 mt-0.5">광고성 · 문자/LMS · AI 카피 자동</div>
-                </button>
-                <button
-                  onClick={() => setPurpose('info-alert')}
-                  className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 p-4 text-left transition-colors flex flex-col justify-center min-h-[88px]"
-                >
-                  <Bell className="w-6 h-6 text-teal-300 mb-2" />
-                  <div className="text-sm font-semibold">정보 알림</div>
-                  <div className="text-[11px] text-white/55 mt-0.5">알림톡 · 거래 발생 시 승인 템플릿</div>
-                </button>
-                <button
-                  onClick={() => setPurpose('date-anchor')}
-                  className="rounded-2xl border border-indigo-400/40 bg-indigo-500/10 hover:bg-indigo-500/15 p-4 text-left transition-colors flex flex-col justify-center min-h-[88px]"
-                >
-                  <CalendarClock className="w-6 h-6 text-indigo-300 mb-2" />
-                  <div className="text-sm font-semibold">날짜축 여정</div>
-                  <div className="text-[11px] text-white/55 mt-0.5">지정일 기준 D-7·D-3·D-1·D-0 단계 발송</div>
-                </button>
-              </div>
+              <button
+                onClick={() => setPurpose('date-anchor')}
+                className="group rounded-2xl border border-white/10 bg-gradient-to-br from-indigo-500/10 to-transparent p-4 text-left transition-colors hover:border-indigo-400/50 hover:from-indigo-500/20 md:p-5"
+              >
+                <div className="mb-2.5 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-400 to-violet-500">
+                  <CalendarClock className="h-5 w-5 text-white" />
+                </div>
+                <div className="text-sm font-bold text-white">날짜축 여정</div>
+                <p className="mt-1 text-[11.5px] leading-relaxed text-white/55">
+                  정해 둔 날짜를 기준으로 D-7·D-3·D-1·당일에 나눠 보냅니다
+                </p>
+              </button>
             </div>
 
-            {/* 빠른 시작 — 중앙정렬 칩 */}
-            <div className="mb-5 md:mb-6">
-              <div className="text-center text-xs font-semibold text-white/70 mb-2.5">또는 빠른 시작</div>
-              <div className="flex flex-wrap justify-center gap-2">
-                {(Object.keys(TEMPLATE_VISUAL) as TemplateCode[]).map((code) => {
-                  const v = TEMPLATE_VISUAL[code];
-                  const Icon = v.icon;
-                  // ★ 2026-08-01 §2-3 — 이 회사 데이터로 못 만드는 여정은 사유와 함께 잠근다(숨기지 않는다).
-                  const trgKey = TEMPLATE_TRIGGER_KEY[code];
-                  const cap = trgKey ? dataCap?.[trgKey] : undefined;
-                  const capBlocked = cap && !cap.available ? cap.reason : null;
-                  return (
-                    <button
-                      key={code}
-                      onClick={() => { if (!capBlocked) handleAIGenerate(code); }}
-                      disabled={generating || !!capBlocked}
-                      title={capBlocked || v.hint}
-                      className="flex items-center gap-2 pl-2 pr-4 py-2 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 hover:border-white/20 transition-colors disabled:opacity-50"
-                    >
-                      <span className={`w-6 h-6 rounded-full bg-gradient-to-br ${v.gradient} flex items-center justify-center shrink-0`}>
-                        <Icon className="w-3.5 h-3.5 text-white" />
-                      </span>
-                      <span className="text-xs font-medium">{v.label}</span>
-                      {capBlocked && <Lock className="w-3 h-3 text-white/40 shrink-0" />}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            <JourneyDataScopeNote
+              className="mb-5 md:mb-6"
+              availableCount={journeyScope.availableCount}
+              lockedCount={journeyScope.lockedCount}
+              lockedHints={journeyScope.lockedHints}
+            />
 
             {/* ★ D211+ Phase 3 (2026-05-23 Harold 명시): 여정 목록 + status 필터 토글 (보관함 영역 분리) */}
             <div>
@@ -3492,6 +3504,12 @@ export default function JourneysPage() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-5">
+              <JourneyDataScopeNote
+                className="mb-4"
+                availableCount={journeyScope.availableCount}
+                lockedCount={journeyScope.lockedCount}
+                lockedHints={journeyScope.lockedHints}
+              />
               <InfoAlertJourneyBuilder
                 embedded
                 senders={alimtalkSenders}
@@ -3526,6 +3544,12 @@ export default function JourneysPage() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-5">
+              <JourneyDataScopeNote
+                className="mb-4"
+                availableCount={journeyScope.availableCount}
+                lockedCount={journeyScope.lockedCount}
+                lockedHints={journeyScope.lockedHints}
+              />
               <DateAnchorJourneyBuilder
                 embedded
                 dataProfileVars={dataProfileVars}
@@ -3542,9 +3566,36 @@ export default function JourneysPage() {
         document.body,
       )}
 
+      {/* ★ 2026-08-02 등급 서열 — 고객 데이터 화면과 이 잠긴 자리, 두 곳에서 같은 모달을 연다. */}
+      <GradeOrderModal
+        open={gradeOrderOpen}
+        onClose={() => setGradeOrderOpen(false)}
+        onSaved={() => { void loadDataCap(); }}
+        token={token() || ''}
+      />
+
+      {/* ★ 2026-08-02 마케팅 여정 진입 — 자연어 입력 + 빠른 시작을 여기로 모았다. */}
+      <MarketingJourneyModal
+        open={view === 'main' && purpose === 'marketing-modal'}
+        onClose={() => setPurpose('marketing')}
+        objective={objective}
+        onObjectiveChange={setObjective}
+        generating={generating}
+        quickStarts={quickStartItems}
+        availableCount={journeyScope.availableCount}
+        lockedCount={journeyScope.lockedCount}
+        lockedHints={journeyScope.lockedHints}
+        onGenerate={(templateCode) => {
+          setPurpose('marketing');
+          void handleAIGenerate(templateCode as TemplateCode | undefined);
+        }}
+      />
+
       {/* ★ 2026-08-02 §13-4 — 진입 추천 모달. 왜 이렇게 만들었는지 넷을 보여주고 스텝 1로 넘긴다. */}
       {aiPkg && (() => {
-        const trgKey = TEMPLATE_TRIGGER_KEY[aiPkg.templateCode];
+        // ⛔ 2026-08-02 Codex — capability key는 **실제 trigger_event**에서 끌어온다.
+        //   templateCode로 판정하면 등급처럼 템플릿이 없는 트리거는 매핑이 없어 잠금 사유도, 푸는 버튼도 못 띄운다.
+        const trgKey = capabilityKeyOf(aiPkg.triggerEvent, aiPkg.templateCode);
         const cap = trgKey ? dataCap?.[trgKey] : undefined;
         // 트리거 데이터가 필요 없는 자유 여정(custom)과 판정 결과를 못 받은 경우는 잠그지 않는다(기존 게이트 규약).
         const available = !trgKey || cap?.available !== false;
@@ -3563,6 +3614,7 @@ export default function JourneysPage() {
             available={available}
             unavailableReason={cap?.reason}
             notice={storePurchaseNotice(trgKey, purchaseDoor)}
+            lockAction={!available && trgKey === 'grade' ? { label: '등급 순서 정하기', onClick: () => setGradeOrderOpen(true) } : undefined}
             steps={aiPkg.steps.map((s) => ({
               stepOrder: s.stepOrder,
               timingLabel: s.stepOrder === 1 ? `시작하면 ${formatStepDelay(s)}` : `앞 스텝 후 ${formatStepDelay(s)}`,

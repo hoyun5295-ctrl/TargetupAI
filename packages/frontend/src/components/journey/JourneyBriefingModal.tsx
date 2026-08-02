@@ -5,8 +5,8 @@
  * 마지막으로 무엇이 언제 누구에게 나가는지 사람이 한 화면에서 확인하고 확정하는 자리다.
  */
 import { useState } from 'react';
-import { createPortal } from 'react-dom';
 import { X, ChevronDown, ChevronUp, Save, Loader2, MessageSquare, Clock } from 'lucide-react';
+import JourneyModalShell from './JourneyModalShell';
 import { highlightVars } from '../../utils/highlightVars';
 
 export interface BriefingStep {
@@ -48,15 +48,15 @@ export default function JourneyBriefingModal({
 
   const issueByStep = new Map(issues.map((i) => [i.stepOrder, i.message]));
 
-  return createPortal(
-    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm md:items-center md:p-6">
-      <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl border border-white/10 bg-slate-900 shadow-2xl md:rounded-2xl">
+  return (
+    <JourneyModalShell open={open} onClose={onClose} labelledBy="journey-briefing-modal-title" zIndexClassName="z-[70]">
+      <>
         <div className="flex items-start gap-3 border-b border-white/10 px-5 py-4">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500">
             <MessageSquare className="h-5 w-5 text-white" />
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-base font-bold text-white">{name || '여정'}</h3>
+            <h3 id="journey-briefing-modal-title" className="truncate text-base font-bold text-white">{name || '여정'}</h3>
             <p className="text-[11px] text-white/45">
               <span className="text-violet-200">{triggerLabel}</span> 일 때 이 순서로 나갑니다 · 스텝 {steps.length}개
             </p>
@@ -142,8 +142,7 @@ export default function JourneyBriefingModal({
             </button>
           </div>
         </div>
-      </div>
-    </div>,
-    document.body
+      </>
+    </JourneyModalShell>
   );
 }

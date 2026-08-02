@@ -37,8 +37,14 @@ export interface CompanyJourneyFacts {
   hasRecentPurchaseDate: boolean;
   hasBirthday: boolean;
   hasPoints: boolean;
-  /** 등급 값 보유 — #7 등급 변동의 근거. */
+  /** 등급 값 보유 — #7의 1차 근거(값이 있는가). */
   hasGrade: boolean;
+  /**
+   * ★ 2026-08-02 — 등급 **서열을 회사가 확인**했는가(순위가 매겨진 값 2개 이상).
+   * ⛔ 값만 있고 서열이 없으면 상승·하락을 가릴 수 없다. 그 상태로 열면 **떨어진 고객에게 축하가 나간다.**
+   *   우리가 등급 사전을 갖지 않기로 한 이상, 서열은 사람이 한 번 확인한 것만 믿는다.
+   */
+  hasGradeOrder: boolean;
   /** 자사몰·SDK에서 들어온 행동 기록. */
   hasPurchaseEvents: boolean;
   hasCartEvents: boolean;
@@ -115,9 +121,12 @@ export function resolveTriggerAvailability(facts: CompanyJourneyFacts): TriggerA
       ? yes('browse', '상품을 보고 구매하지 않으면 발송합니다.')
       : no('browse', '상품 조회 기록이 아직 들어오지 않았어요. 자사몰을 연동하면 열립니다.'),
 
-    f.hasGrade
-      ? yes('grade', '회원 등급이 바뀌면 발송합니다.')
-      : no('grade', '등급 정보가 없어요. 고객 정보에 등급이 있으면 열립니다.'),
+    // ★ 2026-08-02 — 상승만 발화한다. 서열을 모르면 방향을 못 가리므로 값만으로는 열지 않는다.
+    !f.hasGrade
+      ? no('grade', '등급 정보가 없어요. 고객 정보에 등급이 있으면 열립니다.')
+      : !f.hasGradeOrder
+        ? no('grade', '등급 순서를 한 번 정해 주시면 열립니다. 어느 등급이 위인지 알아야 올라간 분에게만 보낼 수 있어요.')
+        : yes('grade', '회원 등급이 올라가면 발송합니다.'),
   ];
 }
 
@@ -154,7 +163,9 @@ export const TRIGGER_CONTRACTS: TriggerContract[] = [
   { event: 'customer.dormant',              key: 'dormant',  cls: 'transition', implemented: true,  exit: 'purchase' },
   { event: 'customer.dormant_return',       key: 'dormant_return', cls: 'transition', implemented: true, exit: 'steps_done' },   // #5 — 구매 스트림 분기(직전 구매가 휴면 기준일 이상 과거)
   { event: 'customer.cycle_lapsed',         key: 'cycle_lapsed', cls: 'transition', implemented: true, exit: 'purchase', cooldownMinDays: 1 }, // #6
-  { event: 'customer.grade_changed',        key: 'grade',    cls: 'transition', implemented: true,  exit: 'steps_done' },        // #7 — 원장 state 대조
+  // #7 — 원장 state와 **서열 비교**(상승만). 쿨다운은 오르내리락 왕복에서 축하가 연달아 나가는 것을 막는 바닥값이고,
+  //   진짜 방어는 "상승만 + 같은 급 제외"다(2026-08-02).
+  { event: 'customer.grade_changed',        key: 'grade',    cls: 'transition', implemented: true,  exit: 'steps_done', cooldownMinDays: 1 },
   { event: 'customer.birthday_approaching', key: 'birthday', cls: 'transition', implemented: true,  exit: 'steps_done' },
   { event: 'customer.points_expiring',      key: 'points',   cls: 'transition', implemented: true,  exit: 'points_used' },
   // §3-2 사건 발생형

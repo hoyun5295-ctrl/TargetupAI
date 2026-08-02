@@ -12,9 +12,12 @@
 import { useMemo, useRef, useState } from 'react';
 import {
   Sparkles, Wand2, Beaker, Plus, Trash2, ChevronLeft, ChevronRight, Clock, AlertTriangle, Save, Loader2,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { calculateSmsBytes } from '../../utils/formatDate';
 import { highlightVars } from '../../utils/highlightVars';
+// MMS는 이미지가 본체다 — 채널만 바꿔 두고 붙일 자리가 없으면 그 스텝은 만들다 만 것이 된다.
+import JourneyMmsUploader from './JourneyMmsUploader';
 
 export type StudioChannel = 'sms' | 'lms' | 'mms';
 export type StudioDelayMode = 'relative' | 'relative_at_hour' | 'specific_hour' | 'next_business_day';
@@ -29,6 +32,8 @@ export interface StudioStep {
   delayMode?: StudioDelayMode;
   targetHourKst?: number;
   stepIntent?: string;
+  /** MMS 첨부 이미지(서버 경로). 채널이 mms일 때만 쓴다. */
+  mmsImagePaths?: string[];
 }
 
 interface Props {
@@ -205,6 +210,27 @@ export default function JourneyStepStudio({
               over ? 'border-rose-400/50' : 'border-white/10 focus:border-violet-400/50'
             }`}
           />
+
+          {/* MMS 이미지 — 채널을 MMS로 바꾸면 바로 붙일 자리가 나온다.
+              ⛔ 이미지가 없는 MMS는 만들다 만 스텝이다. 채널만 바꿔 두고 넘어가지 못하게 이 자리에서 알린다. */}
+          {channel === 'mms' && (
+            <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+              <div className="mb-2 flex items-center gap-2">
+                <ImageIcon className="h-3.5 w-3.5 text-violet-300" />
+                <span className="text-[11px] font-semibold text-white/75">이미지 첨부</span>
+                <span className="text-[10px] text-white/35">MMS는 이미지가 함께 나갑니다</span>
+              </div>
+              <JourneyMmsUploader
+                value={step.mmsImagePaths || []}
+                onChange={(paths) => onPatch(index, { mmsImagePaths: paths })}
+              />
+              {(step.mmsImagePaths?.length ?? 0) === 0 && (
+                <p className="mt-2 text-[11px] leading-relaxed text-amber-200/80">
+                  아직 이미지가 없습니다. 이대로 두면 글자만 나가니, 이미지를 넣거나 채널을 LMS로 되돌려 주세요.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* 변수 — 회사가 가진 컬럼만 나온다 */}
           {variables.length > 0 && (

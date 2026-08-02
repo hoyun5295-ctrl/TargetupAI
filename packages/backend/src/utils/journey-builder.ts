@@ -1059,6 +1059,23 @@ export async function updateJourneyStep(
     }
   }
 
+  // ⛔ 2026-08-02 Harold 지시 — 이미지 없는 MMS로 **옮겨 가는 것**을 막는다.
+  //   채널이나 이미지를 건드리는 요청만 본다. 본문만 고치는 요청까지 막으면
+  //   이미 그 상태인 스텝을 고칠 길이 없어져 되레 갇힌다(고칠 수 있어야 빠져나온다).
+  if (patch.channel !== undefined || patch.mmsImagePaths !== undefined) {
+    const cur = await query(
+      `SELECT step_type, channel, mms_image_paths FROM journey_steps WHERE id = $1::uuid AND journey_id = $2::uuid`,
+      [stepId, journeyId]
+    );
+    if (cur.rows.length === 0) return false;
+    const row = cur.rows[0];
+    assertMmsHasImage(
+      patch.stepType ?? row.step_type,
+      patch.channel ?? row.channel,
+      patch.mmsImagePaths !== undefined ? patch.mmsImagePaths : row.mms_image_paths,
+    );
+  }
+
   // ⛔ 2026-08-02 Codex 4R — 스텝 변경과 검증 무효화를 **한 트랜잭션**에서 커밋한다.
   //   따로 나가면 그 사이에 활성화가 끼어들어, 바뀐 문안을 옛 통과 마커로 켠다.
   let isActive = false;
@@ -1230,6 +1247,21 @@ export class JourneyStepGateError extends Error {
 }
 
 /**
+ * ⛔ 이미지 없는 MMS 차단 (2026-08-02 Harold 지시).
+ *   MMS는 이미지가 본체다. 이미지 없이 나가면 **LMS보다 비싼 단가로 글자만** 나간다.
+ *   화면이 먼저 막지만 서버가 다시 막는다 — 화면 검증만 있으면 직접 호출로 우회된다.
+ */
+function assertMmsHasImage(stepType: unknown, channel: unknown, images: unknown): void {
+  if (String(stepType || 'message') !== 'message') return;
+  if (String(channel || '') !== 'mms') return;
+  if (Array.isArray(images) && images.length > 0) return;
+  throw new JourneyStepGateError(
+    'MMS는 이미지를 넣어야 저장할 수 있습니다. 이미지를 올리거나 채널을 LMS로 바꿔 주세요.',
+    'MMS_IMAGE_REQUIRED'
+  );
+}
+
+/**
  * step 1행 INSERT — **생성 경로와 추가 API의 단일 정의.**
  * ⛔ 컬럼 집합을 다른 곳에 두 번째로 적지 않는다 — 알림톡·MMS·앵커 컬럼이 한쪽에만 붙는 어긋남이 생긴다.
  */
@@ -1238,6 +1270,11 @@ async function insertJourneyStepRow(
   step: JourneyStepDefinition,
   run: SqlRunner = query,
 ): Promise<string> {
+  // ⛔ 2026-08-02 Harold 지시 — **이미지 없는 MMS는 저장하지 않는다.**
+  //   그대로 두면 LMS보다 비싼 단가로 글자만 나간다(고객사 돈이 새는 방향).
+  //   INSERT가 여기 하나뿐이라 여정 생성·스텝 추가 두 경로가 이 문장 하나로 함께 막힌다.
+  assertMmsHasImage(step.stepType, step.channel, step.mmsImagePaths);
+
   // ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 + MMS 컬럼 7건 (DB ALTER 정합).
   // ★ D210+ Phase 3 (2026-05-23 Harold 명시): wait step 정확도 — delay_mode + target_hour_kst.
   const r = await run(

@@ -2825,6 +2825,23 @@ CREATE INDEX IF NOT EXISTS idx_journey_executions_journey_status ON journey_exec
 CREATE INDEX IF NOT EXISTS idx_journey_step_logs_execution ON journey_step_logs(execution_id, sent_at DESC);
 ```
 
+### ★ 2026-08-02 신규 `customer_grade_ranks` (회사별 등급 서열 — 배포 후 DDL)
+
+등급 상승 판정의 **유일한 근거**. 우리가 등급 사전을 갖지 않고, 그 회사가 한 번 확인한 순서만 믿는다.
+
+| 컬럼 | 타입 | 뜻 |
+|---|---|---|
+| id | uuid PK | |
+| company_id | uuid FK → companies (CASCADE) | |
+| grade_value | varchar(50) | `customers.grade` 원문 그대로(같은 폭 — 2026-08-02 실측) |
+| rank_order | integer NULL | 낮을수록 아래 등급. **같은 값 = 같은 급** / **NULL = 순서 없음**(등급이 아닌 값) |
+| confirmed_by | uuid (FK 없음) | 확인한 사람 — 실행자 컬럼에 users FK 금지 규약 |
+| confirmed_at · created_at · updated_at | timestamptz | |
+| UNIQUE (company_id, grade_value) | | |
+
+⛔ 순위가 매겨진 값이 **2개 미만이면 등급 트리거는 잠긴다**(위로 갈 자리가 없다). 전부 NULL이면 등급이 아니라 분류다.
+⛔ `customers.grade` 원문은 건드리지 않는다(원본 보존).
+
 ### ★ 2026-08-02 pg_constraint 실조회 — `journey_steps` 제약·참조 (재질의 금지)
 
 저장 후 스텝 추가·삭제(설계서 §13-1) 착수 전 실조회. **코드가 이 세 가지에 기대고 있다.**

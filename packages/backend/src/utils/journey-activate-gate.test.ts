@@ -40,7 +40,7 @@ const NO_FACTS = {
   hasPurchaseEvents: false, hasCartEvents: false, hasBrowseEvents: false, hasShippedEvents: false,
 };
 const ALL_FACTS = {
-  canJudgeNewCustomer: true, hasRecentPurchaseDate: true, hasBirthday: true, hasPoints: true, hasGrade: true,
+  canJudgeNewCustomer: true, hasRecentPurchaseDate: true, hasBirthday: true, hasPoints: true, hasGrade: true, hasGradeOrder: true,
   hasPurchaseEvents: true, hasCartEvents: true, hasBrowseEvents: true, hasShippedEvents: true,
 };
 

@@ -27,6 +27,8 @@
  */
 
 import { query } from '../config/database';
+// ★ 2026-08-02: 등급 서열 확인 판정은 CT 단일 출처.
+import { hasUsableGradeOrder } from './customer-grade-rank';
 import { getColumnFields } from './standard-field-map';
 // ★ 2026-08-01 여정 재설계 — 신규/기존 판정 능력(순수 CT). 타입·판정 규칙은 그쪽이 소유한다.
 import { resolveNewCustomerJudgement, type CompanyIdentityCapability } from './journey-identity-signals';
@@ -256,6 +258,9 @@ export async function getCompanyJourneyFacts(companyId: string): Promise<Company
     [companyId],
   );
   const row = r.rows[0] || {};
+  // ★ 2026-08-02 — 등급 서열 확인 여부는 서열 CT가 판정한다(테이블 미생성이면 잠근 채로 둔다).
+  //   ⛔ 값만 있고 서열이 없으면 상승·하락을 못 가려 떨어진 고객에게 축하가 나간다.
+  const hasGradeOrder = row.has_grade === true ? await hasUsableGradeOrder(companyId) : false;
   return {
     canJudgeNewCustomer: resolveNewCustomerJudgement(identity).canJudge,
     hasRecentPurchaseDate: identity.hasRecentPurchaseDate === true,
@@ -265,6 +270,7 @@ export async function getCompanyJourneyFacts(companyId: string): Promise<Company
     hasCartEvents: row.has_cart_events === true,
     hasBrowseEvents: row.has_browse_events === true,
     hasGrade: row.has_grade === true,
+    hasGradeOrder,
     hasShippedEvents: row.has_shipped_events === true,
   };
 }

@@ -264,9 +264,15 @@ export async function selectJourneyTargetCustomerIds(
       return r.rows.map((x: any) => x.customer_id);
     }
 
-    // ★ §11-5 #7 — 등급 변동: 원장 state(이전 등급)와 현재 등급이 다르면 진입 (§3-0 원장 일반화).
+    // ★ §11-5 #7 — 등급: 원장 state(이전 등급)와 현재 등급을 **서열로 비교**해 올라간 사람만 진입.
     //   state 행이 없는 사람(기준선 이후 신규 관측)은 대상이 아니다 — 변동이 아니라 최초 관측이다.
     //   기준선(seedGradeStateForJourney)이 없는 미리보기는 판정 불가 — 추정하지 않는다.
+    //
+    // ⛔ 2026-08-02 Harold 확정 — **상승만 발화한다.** 하락 통지는 마케팅이 아니라 나쁜 소식 통지다.
+    //   옛 판정은 `state_value IS DISTINCT FROM grade`라 방향을 못 가려 **떨어진 고객에게도 축하가 나갔다.**
+    //   서열은 회사가 한 번 확인한 표(customer_grade_ranks)가 유일한 근거다 — 우리가 등급 사전을 갖지 않는다.
+    //   ⛔ 양쪽 중 하나라도 표에 없거나 순서 없음(NULL)이면 **제외**한다. 모르는 값을 추측해 넣으면 그 순간 오발송이다.
+    //   ⛔ 같은 순위(같은 급)는 상승이 아니다 — 이름만 바뀐 이동으로 축하가 나가지 않는다.
     case 'customer.grade_changed': {
       if (!journeyId) return [];
       const params: any[] = [companyId, journeyId];
@@ -275,28 +281,42 @@ export async function selectJourneyTargetCustomerIds(
       params.push(String(limit));
       try {
         const r = await query(
-          `SELECT s.customer_id FROM (
-             SELECT DISTINCT ON (c.phone) c.id AS customer_id
+          // ⛔ 2026-08-02 Codex — **최신 고객행을 먼저 확정한 뒤** 상승 조건을 건다.
+          //   WHERE가 DISTINCT ON보다 먼저 걸리면, 같은 번호의 최신 행이 하락이라 걸러졌을 때
+          //   **오래된 중복행(옛 상위 등급)이 대신 뽑혀 하락한 사람에게 축하가 나간다.**
+          `WITH latest AS (
+             SELECT DISTINCT ON (c.phone) c.*
                FROM customers c
+              WHERE c.company_id = $1::uuid AND COALESCE(c.phone, '') <> ''
+              ORDER BY c.phone, c.created_at DESC
+           )
+           SELECT s.customer_id FROM (
+             SELECT c.id AS customer_id
+               FROM latest c
                INNER JOIN journey_entry_ledger l
                        ON l.journey_id = $2::uuid AND l.company_id = c.company_id
                       AND l.phone = c.phone AND l.kind = 'state'
-              WHERE c.company_id = $1::uuid
-                AND COALESCE(c.phone, '') <> ''
-                AND COALESCE(c.grade, '') <> ''
-                AND l.state_value IS DISTINCT FROM c.grade
+               INNER JOIN customer_grade_ranks rn
+                       ON rn.company_id = c.company_id AND rn.grade_value = c.grade
+               INNER JOIN customer_grade_ranks ro
+                       ON ro.company_id = c.company_id AND ro.grade_value = l.state_value
+              WHERE COALESCE(c.grade, '') <> ''
+                AND rn.rank_order IS NOT NULL
+                AND ro.rank_order IS NOT NULL
+                AND rn.rank_order > ro.rank_order
                 AND ${buildJourneySafetyFilter('c')}
                 ${antiJoin}
                 ${cond ? ` AND ${cond}` : ''}
-              ORDER BY c.phone, c.created_at DESC
            ) s
            LIMIT $${params.length}::int`,
           params,
         );
         return r.rows.map((x: any) => x.customer_id);
       } catch (err: any) {
-        if (err?.code !== '42703') throw err;
-        console.warn('[JourneyExtractor] 등급 변동 — state_value 컬럼 미마이그레이션(§11-D-3 DDL 필요) → 0건');
+        // 42703 = state_value 컬럼 미마이그레이션 / 42P01 = 등급 서열표 미생성.
+        // 둘 다 **0건으로 닫는다** — 판정 근거가 없는데 보내는 것보다 안 보내는 쪽이 안전하다.
+        if (err?.code !== '42703' && err?.code !== '42P01') throw err;
+        console.warn(`[JourneyExtractor] 등급 상승 — 판정 근거 미비(${err?.code}) → 0건. DDL 실행 필요`);
         return [];
       }
     }

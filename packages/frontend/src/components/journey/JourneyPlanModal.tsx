@@ -10,8 +10,8 @@
  * ⛔ 4번이 이 모달의 핵심이다. 만들어지고 켜지는데 영원히 0건인 여정이 이 재설계가 없애려는 상태다.
  *   가능 여부는 우리가 미리 정해 두지 않고 그 회사가 준 데이터로 판정한 결과를 그대로 받아 보여준다.
  */
-import { createPortal } from 'react-dom';
 import { X, Sparkles, Target, Lock, CheckCircle2, ArrowRight, RefreshCw, Loader2 } from 'lucide-react';
+import JourneyModalShell from './JourneyModalShell';
 
 export interface PlanStepRow {
   stepOrder: number;
@@ -44,24 +44,24 @@ interface Props {
    * 판정은 페이지가 한다. 이 모달은 문구를 만들지 않는다.
    */
   notice?: string;
+  /** 잠금을 그 자리에서 풀 수 있으면 그 행동(예: 등급 순서 정하기). 판단은 페이지가 한다. */
+  lockAction?: { label: string; onClick: () => void };
 }
 
 export default function JourneyPlanModal({
   open, onClose, onNext, onRegenerate, regenerating = false,
-  name, triggerLabel, reasoning, objective, steps, available, unavailableReason, notice,
+  name, triggerLabel, reasoning, objective, steps, available, unavailableReason, notice, lockAction,
 }: Props) {
-  if (!open) return null;
-
-  return createPortal(
-    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm md:items-center md:p-6">
-      <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl border border-white/10 bg-slate-900 shadow-2xl md:rounded-2xl">
+  return (
+    <JourneyModalShell open={open} onClose={onClose} labelledBy="journey-plan-modal-title" zIndexClassName="z-[70]">
+      <>
         {/* 헤더 */}
         <div className="flex items-start gap-3 border-b border-white/10 px-5 py-4">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500">
             <Sparkles className="h-5 w-5 text-white" />
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-base font-bold text-white">{name || '추천 여정'}</h3>
+            <h3 id="journey-plan-modal-title" className="truncate text-base font-bold text-white">{name || '추천 여정'}</h3>
             <p className="text-[11px] text-white/45">이렇게 만들어 드릴게요. 확인하고 넘어가면 스텝을 하나씩 다듬습니다.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-white/40 transition-colors hover:bg-white/5 hover:text-white/70" aria-label="닫기">
@@ -139,6 +139,15 @@ export default function JourneyPlanModal({
                   ? '이 여정을 판단할 데이터가 들어와 있습니다.'
                   : unavailableReason || '이 여정을 판단할 데이터가 아직 들어오지 않았어요.'}
               </p>
+              {!available && lockAction && (
+                <button
+                  type="button"
+                  onClick={lockAction.onClick}
+                  className="mt-2 rounded-lg border border-amber-400/40 bg-amber-500/20 px-2.5 py-1.5 text-[11.5px] font-semibold text-amber-50 transition-colors hover:bg-amber-500/30"
+                >
+                  {lockAction.label}
+                </button>
+              )}
             </div>
           </section>
         </div>
@@ -165,8 +174,7 @@ export default function JourneyPlanModal({
             스텝 1 설정하기 <ArrowRight className="h-3.5 w-3.5" />
           </button>
         </div>
-      </div>
-    </div>,
-    document.body
+      </>
+    </JourneyModalShell>
   );
 }

@@ -508,6 +508,10 @@ export async function recordVariantClickConversion(
  * variant CRUD — step에 신규 variant 추가.
  */
 export async function createJourneyStepVariant(input: {
+  /** 회사 격리 — 잠금 SELECT가 이 값으로 여정 소유를 강제한다. */
+  companyId: string;
+  /** 이 step이 속해야 하는 여정. stepId만 믿으면 남의 step에 쓸 수 있다. */
+  journeyId: string;
   stepId: string;
   variantId: string;
   messageTemplate?: string;
@@ -519,19 +523,22 @@ export async function createJourneyStepVariant(input: {
 }): Promise<string> {
   // ⛔ 2026-08-02 Codex 4R — 변이 저장과 검증 무효화를 **한 트랜잭션**에서 커밋한다(공용 문).
   //   따로 나가면 그 사이에 활성화가 끼어들어, 바뀐 변이 본문을 옛 통과 마커로 켠다.
-  const journeyRow = await query(
-    `SELECT journey_id FROM journey_steps WHERE id = $1::uuid`,
-    [input.stepId]
-  );
-  const ownerJourneyId: string | null = journeyRow.rows[0]?.journey_id ?? null;
-  if (!ownerJourneyId) throw new Error('변이를 붙일 step을 찾을 수 없습니다.');
-
-  const r = await withJourneyValidationReset(null, ownerJourneyId, (run, journey) => {
+  //
+  // ⛔ 2026-08-02 (Harold 승인) — **stepId가 그 여정 소속인지 여기서 확인한다.**
+  //   옛 코드는 stepId로 여정을 거꾸로 찾아 그 여정에 썼다. 라우트가 URL의 journeyId만 회사로 검증했으므로,
+  //   자기 회사 여정 id + **다른 회사 stepId** 조합이면 남의 변이를 만들거나 덮어쓸 수 있었다.
+  //   소유 판정을 CT 안 트랜잭션으로 옮겨, 라우트가 무엇을 검사했든 이 문을 지나야만 써진다.
+  const r = await withJourneyValidationReset(input.companyId, input.journeyId, async (run, journey) => {
     // ⛔ 2026-08-02 Codex 5R — 활성 판정은 **잠근 뒤에** 한다. 라우트가 먼저 읽은 status는
     //   그 사이 활성화가 성사되면 옛 값이고, 그러면 운영 중 여정의 변이를 바꾸게 된다.
     if (journey.status === 'active') {
       throw new Error('운영 중인 여정의 변이는 바꿀 수 없습니다. 먼저 일시정지해 주세요.');
     }
+    const own = await run(
+      `SELECT 1 FROM journey_steps WHERE id = $1::uuid AND journey_id = $2::uuid`,
+      [input.stepId, input.journeyId],
+    );
+    if (own.rows.length === 0) throw new Error('그 여정의 step이 아닙니다.');
     return run(
     `INSERT INTO journey_step_variants (
       id, step_id, variant_id, message_template, subject, channel,
