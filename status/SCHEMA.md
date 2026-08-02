@@ -2845,6 +2845,10 @@ CREATE INDEX IF NOT EXISTS idx_journey_step_logs_execution ON journey_step_logs(
 
 - **journeys.entry_baseline_at** `timestamptz` — 신규가입 baseline 설정 시각(첫 활성화 1회·불변). created_at 의존 제거(진입 원장 anti-join 모드 가름).
 - **journeys.last_event_cursor** `timestamptz` — cdp 구매·예약 이벤트 처리 커서(이 시각 이후~지금 전수 처리 → 워처 멈춰도 누락 0).
+- **★2026-08-02 실행완료(Harold psql 실측)** — §11-4 구매 원장 커서 축:
+  - **journeys.last_purchase_cursor** `timestamptz` · **journeys.last_purchase_cursor_id** `uuid` — 구매 원장(purchases) 커서(도착축 created_at + 행 id 타이브레이커). 활성화(journey-builder)가 approved_at으로 심고, NULL이면 워커가 원장 문을 열지 않는다(소급 발송 차단). 커서 값은 `::text` 원문으로 읽고 쓴다(JS Date 왕복 = µs 절사 = 중복 발송 — LESSONS_BACKEND 최상단).
+  - **purchases 인덱스 idx_purchases_company_created_id** `(company_id, created_at, id)` — 원장 커서 조회용. `indisvalid = t` 확인. `purchases.created_at`·`purchase_date` = `timestamp without time zone` 실측(created_at=세션 TZ naive / purchase_date=KST naive — 변환은 파라미터 쪽).
+  - 재기준 UPDATE 대상 0건(활성 구매 여정 없음 — paused 1·draft 3, 활성화 시 자동 심김).
 - **journey_entry_ledger**(`journey_id` uuid FK→journeys CASCADE, `company_id` uuid, `store_code` varchar null, `phone` varchar, `kind` varchar 'baseline'|'entered', `created_at`) · **UNIQUE(journey_id, company_id, COALESCE(store_code,'__NONE__'), phone)** + idx(journey_id) — 신규가입 "전에 본 적 없는 식별자"만 진입. 키 = 시스템 upsert 식별자(회사+매장코드+전화번호).
 - **journey_step_campaigns**(`journey_id` uuid FK→journeys CASCADE, `step_id` uuid, `send_date` date, `campaign_id` uuid, `created_at`) · **PK(journey_id, step_id, send_date)** — 묶음 발송: (journey,step,KST날짜)당 campaign 1건 공유(발송결과 1줄 + app_etc1=campaignId 상세 검색).
 
