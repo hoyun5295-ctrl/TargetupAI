@@ -22,6 +22,10 @@ import {
 /** 저장되는 trigger_event 8종 + 상시 + 모르는 값. */
 const STORED_EVENTS: Array<[string, string | null]> = [
   ['cdp.purchase', 'purchase'],
+  ['purchase.first', 'first_purchase'],           // ★ §11-5 신설(#2)
+  ['customer.dormant_return', 'dormant_return'],  // ★ §11-5 신설(#5)
+  ['customer.cycle_lapsed', 'cycle_lapsed'],      // ★ §11-5 신설(#6)
+  ['cdp.browse_no_purchase', 'browse'],           // ★ §11-5 신설(#12)
   ['cdp.reservation_created', 'reservation'],
   ['cdp.cart_abandon', 'cart'],
   ['custom_order_shipped', 'shipped'],
@@ -30,6 +34,7 @@ const STORED_EVENTS: Array<[string, string | null]> = [
   ['customer.birthday_approaching', 'birthday'],
   ['customer.points_expiring', 'points'],
   ['custom', null],
+  ['customer.grade_changed', null],               // 등록·미구현 — 화면 비노출
   ['customer.made_up_thing', null],
 ];
 
@@ -40,6 +45,7 @@ const NOTHING: CompanyJourneyFacts = {
   hasPoints: false,
   hasPurchaseEvents: false,
   hasCartEvents: false,
+  hasBrowseEvents: false,
   hasShippedEvents: false,
 };
 
@@ -100,7 +106,7 @@ describe('예약은 구조적으로 잠긴다', () => {
   it('데이터가 전부 있어도 잠긴다 — 예약을 받는 연동 자체가 없다', () => {
     const all: CompanyJourneyFacts = {
       canJudgeNewCustomer: true, hasRecentPurchaseDate: true, hasBirthday: true, hasPoints: true,
-      hasPurchaseEvents: true, hasCartEvents: true, hasShippedEvents: true,
+      hasPurchaseEvents: true, hasCartEvents: true, hasBrowseEvents: true, hasShippedEvents: true,
     };
     expect(map(all).reservation.available).toBe(false);
     // 나머지는 전부 열려야 한다(예약만 막는 것이지 전부 막는 게 아니다).
@@ -150,7 +156,7 @@ describe('사유는 고객 언어로만 쓴다', () => {
     ...resolveTriggerAvailability(NOTHING).map((a) => a.reason),
     ...resolveTriggerAvailability({
       canJudgeNewCustomer: true, hasRecentPurchaseDate: true, hasBirthday: true, hasPoints: true,
-      hasPurchaseEvents: true, hasCartEvents: true, hasShippedEvents: true,
+      hasPurchaseEvents: true, hasCartEvents: true, hasBrowseEvents: true, hasShippedEvents: true,
     }).map((a) => a.reason),
   ];
 

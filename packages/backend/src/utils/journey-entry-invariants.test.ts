@@ -87,9 +87,10 @@ describe('이관 유예 배선 (journey-target-extractor)', () => {
     expect(src).toMatch(/isBulkStateTrigger\(triggerEvent\)/);
   });
 
-  it('상태형 3분기(휴면·포인트·상시)에 전부 걸린다', () => {
+  it('상태형 4분기(휴면·포인트·상시·주기이탈)에 전부 걸린다', () => {
+    // ★ §11-5 #6 — customer.cycle_lapsed도 이관 배치가 통째로 걸리는 상태형이라 유예 대상.
     const hits = src.match(/buildIntakeGraceClause\('c', params, graceDays\)/g) || [];
-    expect(hits).toHaveLength(3);
+    expect(hits).toHaveLength(4);
   });
 
   it('유예 절은 대상 조건(cond)보다 먼저 params에 들어간다 — $N 어긋남 방지', () => {

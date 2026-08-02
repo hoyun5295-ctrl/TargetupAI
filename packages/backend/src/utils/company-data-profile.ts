@@ -250,6 +250,7 @@ export async function getCompanyJourneyFacts(companyId: string): Promise<Company
         OR EXISTS (SELECT 1 FROM purchases WHERE company_id = $1::uuid
                      AND purchase_date IS NOT NULL AND customer_id IS NOT NULL)) AS has_purchase_events,
        EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'cart_add') AS has_cart_events,
+       EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'product_view') AS has_browse_events,
        EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'custom_order_shipped') AS has_shipped_events`,
     [companyId],
   );
@@ -261,6 +262,7 @@ export async function getCompanyJourneyFacts(companyId: string): Promise<Company
     hasBirthday: row.has_birthday === true,
     hasPurchaseEvents: row.has_purchase_events === true,
     hasCartEvents: row.has_cart_events === true,
+    hasBrowseEvents: row.has_browse_events === true,
     hasShippedEvents: row.has_shipped_events === true,
   };
 }

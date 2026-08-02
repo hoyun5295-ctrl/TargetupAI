@@ -44,6 +44,8 @@ const MAX_CONTENT = 1200;
 const SERVER_TRIGGER_KEYS = new Set([
   'purchase', 'reservation', 'cart', 'shipped',
   'signup', 'dormant', 'birthday', 'points',
+  // ★ §11-5 — 구매 스트림 분기 2종(카탈로그 parity 가드가 카탈로그와의 일치를 고정한다)
+  'first_purchase', 'dormant_return', 'cycle_lapsed', 'browse',
 ]);
 
 /**

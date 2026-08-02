@@ -24,7 +24,7 @@ import { journeyListWhere, executionStatusFilter } from './journey-list-filter';
 import { StartKind, normalizeStartKind, classifyStartKind } from './journey-start-kind';
 import { validateAlimtalkFallback, AlimtalkFallbackError } from './alimtalk-fallback';
 // ★ 2026-08-01 여정 재설계 — 활성화가 발송이 시작되는 유일한 길목이라 게이트를 여기 둔다(Codex 4R).
-import { resolveTriggerAvailability, toAvailabilityMap, triggerKeyForEvent, requiresRecipientCap, CAP_EXEMPT_TRIGGERS } from './journey-trigger-capability';
+import { resolveTriggerAvailability, toAvailabilityMap, triggerKeyForEvent, requiresRecipientCap, CAP_EXEMPT_TRIGGERS, isImplementedTriggerEvent, getTriggerContract } from './journey-trigger-capability';
 import { getCompanyJourneyFacts } from './company-data-profile';
 
 // 앵커 반복 규칙 화이트리스트 — 설계 잠금(4종). 미지원 값은 'none'으로.
@@ -328,6 +328,13 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
   // ★ 2026-06-30 여정 일반화 — 트리거/대상 오버라이드(미지정 시 템플릿 기본) + start_kind 도출 + 앵커 값.
   //   event = 거래 이벤트 트리거 / standing·one_shot·date_anchor = 'custom'(대상 조건 audience). 회귀: 미지정이면 옛 동작 그대로.
   const resolvedTriggerEvent = input.triggerEvent || tmpl.triggerEvent;
+  // ★ 2026-08-02 §11-5(§5-4) — 저장측 화이트리스트. 지금까지는 요청값을 그대로 저장해
+  //   오타·AI 환각 한 번이면 "화면상 정상인데 영원히 0건"인 여정이 만들어졌다(§9-C2).
+  //   활성화 게이트가 이미 막지만, 저장 단계에서 거부해야 사용자가 200크레딧 전에 안다.
+  //   미구현 트리거(레지스트리 implemented=false)도 같은 이유로 거부 — 만들 수 없는 것은 만들어지지 않아야 한다.
+  if (!isImplementedTriggerEvent(resolvedTriggerEvent)) {
+    throw new Error('지원하지 않는 발송 조건입니다. 트리거를 다시 선택해 주세요.');
+  }
   const resolvedTriggerFilters = input.triggerFilters !== undefined ? input.triggerFilters : tmpl.triggerFilters;
   const startKind: StartKind = normalizeStartKind(
     input.startKind || classifyStartKind(resolvedTriggerEvent, { expiryMode: (resolvedTriggerFilters as any)?.expiry_mode }),
@@ -621,6 +628,7 @@ export async function activateJourney(companyId: string, journeyId: string, user
   const detail = await query(
     `SELECT j.callback_number, j.status, j.start_kind, j.anchor_date,
             j.trigger_event, j.threshold_recipients_per_step,
+            j.allow_reentry, j.reentry_cooldown_days, j.trigger_filters,
             (SELECT json_agg(json_build_object(
               'order', step_order,
               'type', step_type,
@@ -658,18 +666,40 @@ export async function activateJourney(companyId: string, journeyId: string, user
   //   여기서 막으면 어느 경로로 만들어졌든 발송 직전에 걸린다.
   //   가능 여부 조회가 실패하면 throw되어 활성화가 실패한다 — 발송 개시라서 fail-closed가 맞다.
   const triggerEvent = String(row.trigger_event || '');
-  const trgKey = triggerKeyForEvent(triggerEvent);
-  // ★ 5R — 모르는 발송 조건은 추출 switch의 default에 걸려 **조용히 0건**이 된다.
-  //   생성 경로가 요청값을 그대로 저장하므로 오타·환각 한 번이면 화면상 활성인데 아무에게도 안 나간다.
-  //   'custom'(상시 세그먼트)은 트리거 데이터가 필요 없어 key가 없는 것이 정상이다.
-  if (!trgKey && triggerEvent !== 'custom') {
+  // ★ 2026-08-02 §11-5(§5-4) — 판정을 레지스트리 하나로. 모르는 값·미구현 값은 추출 default에 걸려
+  //   **조용히 0건**이 되므로 발송 개시 길목(활성화)에서 거부한다. 저장측 화이트리스트가 먼저 막지만
+  //   DDL 이전에 저장된 여정·직접 UPDATE가 남아 있을 수 있어 여기가 최종 게이트다.
+  if (!isImplementedTriggerEvent(triggerEvent)) {
     return { ok: false, reason: '지원하지 않는 발송 조건이라 켤 수 없습니다. 여정을 다시 만들어 주세요.' };
   }
+  const trgKey = triggerKeyForEvent(triggerEvent);
   if (trgKey) {
     const availability = toAvailabilityMap(resolveTriggerAvailability(await getCompanyJourneyFacts(companyId)));
     const verdict = availability[trgKey];
     if (verdict && !verdict.available) {
       return { ok: false, reason: verdict.reason };
+    }
+  }
+
+  // ★ §11-5(§9-N1 종결) — 재진입 허용 트리거의 최소 쿨다운을 레지스트리가 강제한다.
+  //   장바구니가 기원: 정보 알림 빌더가 쿨다운 0을 고정하면 추출 안티조인이 사라져
+  //   24시간 창 동안 5분마다 재발송·재차감됐다. 조건은 계약(TRIGGER_CONTRACTS)에만 산다.
+  const contract = getTriggerContract(triggerEvent);
+  if (contract?.cooldownMinDays != null && row.allow_reentry === true) {
+    const cd = Number(row.reentry_cooldown_days || 0);
+    if (cd < contract.cooldownMinDays) {
+      return {
+        ok: false,
+        reason: `이 발송 조건은 같은 분께 다시 보내기까지 최소 ${contract.cooldownMinDays}일이 필요합니다. 재진입 간격을 지정해 주세요.`,
+      };
+    }
+  }
+
+  // ★ §11-5(§9-N6 종결) — 포인트 임계 양수 강제. 기본값 0은 사실상 전원이다.
+  if (triggerEvent === 'customer.points_expiring') {
+    const pm = Number((row.trigger_filters || {}).points_min);
+    if (!Number.isFinite(pm) || pm < 1) {
+      return { ok: false, reason: '포인트 기준값을 1 이상으로 지정해 주세요. 0이면 포인트가 없는 분까지 전원 대상이 됩니다.' };
     }
   }
 
@@ -851,6 +881,24 @@ export async function activateJourney(companyId: string, journeyId: string, user
     }
   }
 
+  // ★ 2026-08-02 §11-5(§9-N2, Codex 정정) — baseline은 활성화 **전에** 심는다.
+  //   active 커밋 후 적재하면 그 사이 워커가 baseline 없는 추정 경로를 보고, 실패를 정지로 되돌리는
+  //   장치가 또 필요했다(fail-open). 순서를 바꾸면 실패 = 안 켜짐이라 그 장치 자체가 사라진다.
+  //   draft 상태 적재는 무해하다 — 활성화가 실패해도 baseline은 다음 활성화가 재사용한다(멱등).
+  try {
+    const base = await query(
+      `SELECT trigger_event, entry_baseline_at FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [journeyId, companyId],
+    );
+    if (base.rows[0]?.trigger_event === 'customer.created' && !base.rows[0]?.entry_baseline_at) {
+      const { seeded } = await seedBaselineForJourney(journeyId, companyId);
+      console.log(`[activateJourney] 진입 원장 baseline 선적재 journey=${journeyId} seeded=${seeded}`);
+    }
+  } catch (e: any) {
+    console.warn('[activateJourney] baseline 선적재 실패 — 활성화 중단:', e?.message);
+    return { ok: false, reason: '신규 고객 기준선 기록에 실패해 여정을 켜지 못했습니다. 잠시 후 다시 켜 주세요.' };
+  }
+
   const r = await query(
     `UPDATE journeys SET
       status = 'active',
@@ -880,26 +928,12 @@ export async function activateJourney(companyId: string, journeyId: string, user
     } catch (err: any) {
       console.warn('[activateJourney] snapshot 생성 실패 (skip):', err?.message);
     }
-    // ★ Phase 2: 신규가입(customer.created) 여정 첫 활성화 시 진입 원장 baseline 적재.
-    //   그 시점 회사 전체 고객 식별자(회사+매장코드+전화번호)를 'baseline'으로 1회 → 이후 원장에 없는 식별자만 신규.
-    try {
-      const jrow = await query(
-        `SELECT trigger_event, entry_baseline_at FROM journeys WHERE id = $1::uuid`,
-        [journeyId],
-      );
-      if (jrow.rows[0]?.trigger_event === 'customer.created' && !jrow.rows[0]?.entry_baseline_at) {
-        const { seeded } = await seedBaselineForJourney(journeyId, companyId);
-        console.log(`[activateJourney] 진입 원장 baseline 적재 journey=${journeyId} seeded=${seeded}`);
-      }
-    } catch (e: any) {
-      console.warn('[activateJourney] 진입 원장 baseline 적재 실패:', e?.message);
-    }
     // ★ Phase 3: cdp 구매·예약 여정 첫 활성화 시 이벤트 커서=NOW (과거 이벤트 소급 발송 0).
     try {
       await query(
         `UPDATE journeys SET last_event_cursor = NOW()
           WHERE id = $1::uuid
-            AND trigger_event IN ('cdp.purchase', 'cdp.reservation_created')
+            AND trigger_event IN ('cdp.purchase', 'purchase.first', 'customer.dormant_return', 'cdp.reservation_created')
             AND last_event_cursor IS NULL`,
         [journeyId],
       );
@@ -921,7 +955,7 @@ export async function activateJourney(companyId: string, journeyId: string, user
       await query(
         `UPDATE journeys SET last_purchase_cursor = $2::timestamptz
           WHERE id = $1::uuid
-            AND trigger_event = 'cdp.purchase'
+            AND trigger_event IN ('cdp.purchase', 'purchase.first', 'customer.dormant_return')
             AND last_purchase_cursor IS NULL`,
         [journeyId, r.rows[0].approved_at],
       );

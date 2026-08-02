@@ -23,6 +23,8 @@
 /** 진입 시점 이벤트 properties를 실어주는 트리거 — 백엔드 두 경로(커서 + 장바구니 전용)와 1:1. */
 export const TRIGGERS_WITH_EVENT_PROPS = [
   'cdp.purchase',
+  'purchase.first',
+  'customer.dormant_return',
   'cdp.reservation_created',
   'custom_order_shipped',
   'cdp.cart_abandon',
@@ -78,7 +80,33 @@ export const TRIGGER_EVENTS: TriggerDef[] = [
     eventFields: [{ key: 'tracking_no', label: '운송장번호' }, { key: 'carrier', label: '택배사' }],
     filters: {}, gated: true,
   },
+  // ★ §11-5 (2026-08-02) — 구매 스트림 분기 2종. 매장(싱크)·자사몰 어느 문이든 같은 트리거가 물린다.
+  {
+    key: 'first_purchase', triggerEvent: 'purchase.first', templateCode: 'repeat', group: 'tx',
+    label: '첫 구매', desc: '생애 첫 구매가 일어나면',
+    eventFields: [{ key: 'product_name', label: '상품명' }, { key: 'total_amount', label: '결제금액' }, { key: 'store_name', label: '매장명' }],
+    filters: {},
+  },
+  {
+    key: 'dormant_return', triggerEvent: 'customer.dormant_return', templateCode: 'repeat', group: 'tx',
+    label: '휴면 복귀', desc: '오래 쉬었다가 다시 구매하면',
+    eventFields: [{ key: 'product_name', label: '상품명' }, { key: 'total_amount', label: '결제금액' }, { key: 'store_name', label: '매장명' }],
+    filters: { dormant_days: 30 },   // 복귀 판정 기준(직전 구매와의 간격) — 백엔드 기본값과 동일
+  },
+  {
+    key: 'browse', triggerEvent: 'cdp.browse_no_purchase', templateCode: 'cart', group: 'tx',
+    label: '조회 후 미구매', desc: '상품을 보고 구매하지 않으면',
+    eventFields: [],
+    filters: { browse_days: 3 },   // 백엔드 기본값과 동일(journey-target-extractor)
+    gated: true,   // product_view는 자사몰 연동이 있어야 발생한다(Codex 지적 수용)
+  },
   // ── 고객 상태가 바뀔 때 (이벤트 properties 없음 — 고객 변수만 쓸 수 있다) ──
+  {
+    key: 'cycle_lapsed', triggerEvent: 'customer.cycle_lapsed', templateCode: 'custom', group: 'lifecycle',
+    label: '구매 주기 이탈', desc: '평소 구매 주기를 넘기면',
+    eventFields: [],
+    filters: { cycle_factor: 1.5 },   // 평균 구매 간격 × 계수 — 백엔드 기본값과 동일
+  },
   {
     key: 'signup', triggerEvent: 'customer.created', templateCode: 'custom', group: 'lifecycle',
     label: '신규 가입', desc: '회원이 가입하면',

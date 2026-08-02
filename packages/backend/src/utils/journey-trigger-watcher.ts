@@ -26,8 +26,9 @@
 
 import { query, pool } from '../config/database';
 // 추출 조건 = journey-target-extractor 공유 컨트롤타워 (발송·미리보기 동일 기준 단일 진입점)
-import { selectJourneyTargetCustomerIds, selectCdpEventRowsForCursor, selectPurchaseLedgerRowsForCursor, selectCartAbandonProperties, JOURNEY_COUNT_CAP } from './journey-target-extractor';
-import { planCdpCursorBatch, buildEntryPropsArray, resolveCdpCursorEventName, usesPurchaseLedger, type CdpCursorBatch } from './journey-cdp-cursor';
+import { selectJourneyTargetCustomerIds, selectCdpEventRowsForCursor, selectPurchaseLedgerRowsForCursor, selectCartAbandonProperties, selectLastPriorPurchase, JOURNEY_COUNT_CAP } from './journey-target-extractor';
+import { planCdpCursorBatch, buildEntryPropsArray, resolveCdpCursorEventName, usesPurchaseLedger, type CdpCursorBatch, type CdpEventRow } from './journey-cdp-cursor';
+import { clampInt } from './journey-points-trigger';
 // ★ 2026-08-01 §11-4 — 싱크 구매는 원장(purchases)이 문이다. 어느 회사에서 그 문을 열지·창 길이 판정.
 import { resolvePurchaseLedgerGate, isLedgerRunWindowHour, PURCHASE_TRIGGER_MAX_AGE_HOURS } from './journey-purchase-ledger';
 // ★ 2026-08-01 여정 재설계 §3-0-2 — 신규/기존을 가릴 근거가 없는 회사는 발송하지 않는다(fail-closed).
@@ -252,6 +253,41 @@ async function resolveCursorWindow(cursorAt: Date | string | null): Promise<{ cu
 }
 
 /**
+ * §11-5 #2·#5 — 구매 전이 자격 필터. 첫 구매 = 이전 구매 0건 / 휴면 복귀 = 직전 구매가 휴면 기준일 이상 과거.
+ *   batch.ids만 좁힌다 — 커서는 자격과 무관하게 전진해야 같은 구매를 다음 회차가 다시 재평가하지 않는다.
+ *   이력 판정은 selectLastPriorPurchase(양 문 합산)가 소유. 진입 시각은 배치 행의 발생 시각(첫 등장)이다.
+ */
+async function qualifyPurchaseTransition(j: ActiveJourney, batch: CdpCursorBatch, rows: CdpEventRow[]): Promise<void> {
+  if (j.trigger_event !== 'purchase.first' && j.trigger_event !== 'customer.dormant_return') return;
+  if (batch.ids.length === 0) return;
+  // 도착 역순 배치(늦게 온 옛 구매가 앞에)에서 첫 등장 행이 최신 구매일 수 있다(Codex 지적) —
+  // 자격 판정 기준은 그 고객 배치 행들 중 **가장 이른 발생 시각**으로 잡는다.
+  const enteredAt = new Map<string, Date | string>();
+  for (const r of rows) {
+    const cur = enteredAt.get(r.customerId);
+    if (!cur || new Date(r.occurredAt).getTime() < new Date(cur).getTime()) enteredAt.set(r.customerId, r.occurredAt);
+  }
+  const prior = await selectLastPriorPurchase(
+    j.company_id,
+    batch.ids.map((id) => ({ customerId: id, enteredAt: enteredAt.get(id) ?? new Date() })),
+  );
+  if (j.trigger_event === 'purchase.first') {
+    // 이전 구매가 하나라도 있으면 첫 구매가 아니다 — 3년 단골에게 "첫 구매 감사"가 나가는 경로 차단.
+    batch.ids = batch.ids.filter((id) => !prior.has(id));
+    return;
+  }
+  // 휴면 복귀 — 직전 구매가 휴면 기준일 이상 과거여야 "돌아온 것"이다. 이전 구매가 없으면 첫 구매지 복귀가 아니다.
+  const days = clampInt((j.trigger_filters || {}).dormant_days, 30, 1, 100000);
+  const ms = days * 24 * 3600 * 1000;
+  batch.ids = batch.ids.filter((id) => {
+    const last = prior.get(id);
+    if (!last) return false;
+    const at = new Date(enteredAt.get(id) ?? Date.now()).getTime();
+    return at - new Date(last).getTime() >= ms;
+  });
+}
+
+/**
  * 커서 배치 공통 뒷부분 — 대량 차단 → 첫 step → (진입 전부 + 커서 전진)을 한 트랜잭션.
  *
  * 구매는 문이 둘(자사몰 이벤트 / 싱크 원장)인데 커서 규약이 같다. 두 벌로 두면 한쪽만 고쳐지므로
@@ -395,6 +431,7 @@ async function processPurchaseLedgerJourney(j: ActiveJourney): Promise<CursorRun
   if (batch.truncated) {
     console.warn(`[JourneyTrigger] 구매 원장 절단 — journey=${j.id} 이번 회차 ${CDP_EVENT_CHUNK}건 처리, 남은 분은 다음 회차`);
   }
+  await qualifyPurchaseTransition(j, batch, rows);
   return finishCursorBatch(
     j,
     batch,
@@ -456,6 +493,7 @@ async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Pro
     CDP_EVENT_CHUNK + 1,
   );
   const batch = planCdpCursorBatch(rows, CDP_EVENT_CHUNK, windowEnd, axis);
+  await qualifyPurchaseTransition(j, batch, rows);
   // 커서 쓰기 — 컬럼이 있으면 (시각, 이벤트 id) 둘 다. 없으면 시각만.
   // ★ 2026-08-02 후진 금지 가드: 빈 창의 windowEnd(밀리초 절사 Date)가 저장된 마이크로초 커서보다
   //   이르면 커서가 뒤로 물러나 처리분을 다시 잡는다. (시각, id) 행 비교로 전진일 때만 쓴다.

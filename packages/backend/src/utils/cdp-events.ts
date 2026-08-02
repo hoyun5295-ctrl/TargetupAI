@@ -514,10 +514,15 @@ export async function ingestBrowserEvents(
   }
 
   // ── 3. 익명→회원 소급 (stitching) ──
+  //   ★ 2026-08-02 §11-5(§9-N5 종결) — created_at(도착 축)도 지금으로 갱신한다.
+  //     여정 커서는 도착 순서로 도는데, customer_id만 소급하면 그 행의 도착 시각이 커서 뒤라
+  //     식별된 구매·행동이 영영 여정에 못 들어간다(§11-B가 남긴 구멍). 여정에게 이 행은
+  //     "지금 도착"한 것이 맞다 — 익명이던 동안에는 커서가 소비할 수 없었으므로(customer_id IS NULL
+  //     필터) 재소비·중복 진입이 없다. occurred_at(발생 시각)은 그대로라 통계·귀속은 안 움직인다.
   let backfilled = 0;
   if (customerId && anonymousId && didIdentify) {
     const upd = await query(
-      `UPDATE cdp_events SET customer_id = $1::uuid
+      `UPDATE cdp_events SET customer_id = $1::uuid, created_at = NOW()
        WHERE company_id = $2::uuid AND anonymous_id = $3
          AND customer_id IS NULL
          AND received_at >= NOW() - INTERVAL '30 days'`,

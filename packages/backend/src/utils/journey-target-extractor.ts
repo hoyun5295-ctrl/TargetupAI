@@ -18,7 +18,7 @@
 
 import { query } from '../config/database';
 import { buildJourneySafetyFilter, buildReentryAntiJoin } from './journey-safety-filter';
-import { resolvePointsExpiringConfig } from './journey-points-trigger';
+import { resolvePointsExpiringConfig, clampInt } from './journey-points-trigger';
 import { buildLedgerAntiJoin, hasBaseline } from './journey-entry-ledger';
 // ★ 2026-08-01 여정 재설계 §3-0-2 — "우리가 처음 본 사람" ≠ "신규 고객".
 //   추출은 회사 능력을 조회하지 않는다(Codex 3R). 술어는 데이터로만 평가되고,
@@ -97,6 +97,10 @@ export async function selectJourneyTargetCustomerIds(
     // 라이브 발송은 trigger-watcher가 selectCdpEvent를 커서 모드로 직접 호출. 여기(미리보기)는 추정 모드.
     case 'cdp.purchase':
       return selectCdpEvent(companyId, 'purchase', filters, limit);
+    // ★ §11-5 #2·#5 — 같은 구매 스트림의 분기(자격 필터는 라이브 경로가 적용). 미리보기는 구매 근사치.
+    case 'purchase.first':
+    case 'customer.dormant_return':
+      return selectCdpEvent(companyId, 'purchase', filters, limit);
     case 'cdp.reservation_created':
       return selectCdpEvent(companyId, 'reservation_created', filters, limit);
     // ★ 2026-06-22: 배송 시작 = 자사몰 custom 이벤트(cdp_events.event_name='custom_order_shipped'). 라이브는 watcher가 커서 경로 호출, 여기는 미리보기·카운트 추정.
@@ -170,6 +174,90 @@ export async function selectJourneyTargetCustomerIds(
            AND ${buildJourneySafetyFilter('c')}
          ${antiJoin}
          ${cond ? ` AND ${cond}` : ''}
+         LIMIT $${params.length}::int`,
+        params,
+      );
+      return r.rows.map((x: any) => x.customer_id);
+    }
+
+    // ★ §11-5 #12 — 상품 조회 후 N일 미구매 (장바구니와 같은 창 구조, 구매 부재는 양 문 합산)
+    case 'cdp.browse_no_purchase': {
+      const d = clampInt(filters.browse_days, 3, 1, 30);
+      const h = d * 24;
+      const params: any[] = [companyId, String(h)];
+      const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays) : '';
+      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+      params.push(String(limit));
+      const r = await query(
+        `WITH viewed AS (
+           SELECT DISTINCT ON (customer_id) customer_id, occurred_at AS viewed_at
+           FROM cdp_events
+           WHERE company_id = $1::uuid
+             AND event_name = 'product_view'
+             AND customer_id IS NOT NULL
+             AND occurred_at >= NOW() - (($2::int + 24) || ' hours')::interval
+             AND occurred_at <= NOW() - ($2 || ' hours')::interval
+           ORDER BY customer_id, occurred_at DESC
+         )
+         SELECT v.customer_id
+         FROM viewed v
+         INNER JOIN customers c ON c.id = v.customer_id AND c.company_id = $1::uuid
+         WHERE NOT EXISTS (
+           SELECT 1 FROM cdp_events e2
+           WHERE e2.company_id = $1::uuid AND e2.customer_id = v.customer_id
+             AND e2.event_name = 'purchase' AND e2.occurred_at > v.viewed_at
+         )
+           AND NOT EXISTS (
+             SELECT 1 FROM purchases p2
+             WHERE p2.company_id = $1::uuid AND p2.customer_id = v.customer_id
+               AND p2.purchase_date IS NOT NULL
+               AND p2.purchase_date > (v.viewed_at AT TIME ZONE 'Asia/Seoul')
+           )
+           AND ${buildJourneySafetyFilter('c')}
+         ${antiJoin}
+         ${cond ? ` AND ${cond}` : ''}
+         LIMIT $${params.length}::int`,
+        params,
+      );
+      return r.rows.map((x: any) => x.customer_id);
+    }
+
+    // ★ §11-5 #6 — 구매 주기 이탈: 그 고객 평균 구매 간격 × 계수를 넘겼다 (구매 3건 이상만 성립 — §3-1).
+    //   이력은 양 문 합산. 간격 산술은 epoch 초(버전 무관). 반복 제어 = 재진입 안티조인 + 이관 유예 + 상한.
+    case 'customer.cycle_lapsed': {
+      const factor = Math.max(1.1, Math.min(5, Number(filters.cycle_factor) || 1.5));
+      const params: any[] = [companyId, String(factor)];
+      const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays) : '';
+      const grace = buildIntakeGraceClause('c', params, graceDays);
+      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+      params.push(String(limit));
+      const r = await query(
+        `WITH hist AS (
+           SELECT u.customer_id,
+                  EXTRACT(EPOCH FROM MIN(u.d)) AS first_e,
+                  EXTRACT(EPOCH FROM MAX(u.d)) AS last_e,
+                  COUNT(*)::int AS cnt
+             FROM (
+               -- 같은 구매가 양 문에 다 있으면(혼합 회사) cnt가 부풀어 간격이 준다(Codex 지적) —
+               -- 발생 시각 분 단위로 합쳐 한 건으로 센다. 같은 분의 실제 별건 구매는 마케팅상 한 건이다.
+               SELECT DISTINCT e.customer_id, date_trunc('minute', e.occurred_at) AS d FROM cdp_events e
+                WHERE e.company_id = $1::uuid AND e.event_name = 'purchase' AND e.customer_id IS NOT NULL
+               UNION
+               SELECT DISTINCT p.customer_id, date_trunc('minute', p.purchase_date AT TIME ZONE 'Asia/Seoul') FROM purchases p
+                WHERE p.company_id = $1::uuid AND p.customer_id IS NOT NULL AND p.purchase_date IS NOT NULL
+             ) u
+            GROUP BY u.customer_id
+           HAVING COUNT(*) >= 3
+         )
+         SELECT c.id AS customer_id
+         FROM hist h
+         INNER JOIN customers c ON c.id = h.customer_id AND c.company_id = $1::uuid
+         WHERE (EXTRACT(EPOCH FROM NOW()) - h.last_e) > ((h.last_e - h.first_e) / GREATEST(h.cnt - 1, 1)) * $2::float
+           AND ${buildJourneySafetyFilter('c')}
+         ${antiJoin}
+         ${grace ? ` AND ${grace}` : ''}
+         ${cond ? ` AND ${cond}` : ''}
+         ORDER BY h.last_e DESC
          LIMIT $${params.length}::int`,
         params,
       );
@@ -467,6 +555,46 @@ export async function selectPurchaseLedgerRowsForCursor(
     createdAtRaw: x.arrived_at_raw ?? null,
     properties: x.properties ?? null,
   }));
+}
+
+// ═══════════════════════════════════════════════════════════
+// §11-5 #2·#5 — 구매 전이 자격 필터 (2026-08-02)
+//   첫 구매·휴면 복귀는 같은 구매 스트림에서 "이전 구매 이력"으로 갈린다(§3-1).
+//   이력은 문과 무관하게 **양쪽**(자사몰 cdp_events + 싱크 purchases 원장)을 합쳐 본다 —
+//   한쪽만 보면 문을 옮긴 고객의 3년 단골이 "첫 구매"가 된다(§3-0-2와 같은 부류).
+//   비교는 발생 시각 축(occurred_at / purchase_date)이고 **자기 자신(트리거 구매)은 strict < 로 제외**한다.
+// ═══════════════════════════════════════════════════════════
+
+/** 후보별 직전 구매 시각(트리거 구매 이전, 양 문 합산). 없으면 그 고객 키 자체가 결과에 없다. */
+export async function selectLastPriorPurchase(
+  companyId: string,
+  candidates: Array<{ customerId: string; enteredAt: Date | string }>,
+): Promise<Map<string, Date>> {
+  if (candidates.length === 0) return new Map();
+  const ids = candidates.map((c) => c.customerId);
+  const ats = candidates.map((c) => c.enteredAt);
+  const r = await query(
+    `WITH cand AS (
+       SELECT unnest($2::uuid[]) AS customer_id, unnest($3::timestamptz[]) AS entered_at
+     )
+     SELECT c.customer_id,
+            GREATEST(
+              (SELECT MAX(e.occurred_at) FROM cdp_events e
+                WHERE e.company_id = $1::uuid AND e.customer_id = c.customer_id
+                  AND e.event_name = 'purchase' AND e.occurred_at < c.entered_at),
+              (SELECT MAX(p.purchase_date AT TIME ZONE 'Asia/Seoul') FROM purchases p
+                WHERE p.company_id = $1::uuid AND p.customer_id = c.customer_id
+                  AND p.purchase_date IS NOT NULL
+                  AND p.purchase_date < (c.entered_at AT TIME ZONE 'Asia/Seoul'))
+            ) AS last_prior
+       FROM cand c`,
+    [companyId, ids, ats],
+  );
+  const map = new Map<string, Date>();
+  for (const x of r.rows as any[]) {
+    if (x.last_prior != null) map.set(x.customer_id, x.last_prior);
+  }
+  return map;
 }
 
 // ★ 2026-06-22: 장바구니(cart_abandon)는 커서가 아니라 enqueueCandidates 경로라 진입 시점 properties를 따로 모은다.

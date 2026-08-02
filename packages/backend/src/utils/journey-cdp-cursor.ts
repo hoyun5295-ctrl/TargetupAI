@@ -140,7 +140,10 @@ export function buildEntryPropsArray(
  *   중복 진입은 구조가 막는다. 멱등키도, 대조 워커도, 새 이벤트 이름도 필요 없다.
  */
 export function usesPurchaseLedger(triggerEvent: string): boolean {
-  return triggerEvent === 'cdp.purchase';
+  // ★ §11-5: 첫 구매·휴면 복귀는 같은 구매 스트림의 분기 필터다 — 문 규약도 같다.
+  return triggerEvent === 'cdp.purchase'
+    || triggerEvent === 'purchase.first'
+    || triggerEvent === 'customer.dormant_return';
 }
 
 /**
@@ -151,6 +154,9 @@ export function usesPurchaseLedger(triggerEvent: string): boolean {
 export function resolveCdpCursorEventName(triggerEvent: string): string | null {
   switch (triggerEvent) {
     case 'cdp.purchase': return 'purchase';
+    // ★ §11-5: 첫 구매(#2)·휴면 복귀(#5)는 구매 스트림을 같이 읽고 자격 필터로 갈린다(§3-1).
+    case 'purchase.first': return 'purchase';
+    case 'customer.dormant_return': return 'purchase';
     case 'cdp.reservation_created': return 'reservation_created';
     case 'custom_order_shipped': return 'custom_order_shipped';
     default: return null;
@@ -170,6 +176,8 @@ export type JourneyTriggerClass = 'event_cursor' | 'event_special' | 'state';
 export function classifyJourneyTrigger(triggerEvent: string): JourneyTriggerClass {
   switch (triggerEvent) {
     case 'cdp.purchase':
+    case 'purchase.first':
+    case 'customer.dormant_return':
     case 'cdp.reservation_created':
     case 'custom_order_shipped':
       return 'event_cursor';

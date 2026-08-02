@@ -405,7 +405,7 @@ Harold님이 말씀하신 "3크레딧" 구조가 이미 그 값이다.
 4. ~~**연동 배선 통일**~~ (§2-2) — **2026-08-01 코드 완료** (§11-C). 배포+DDL 대기.
    행동기록으로 **복사하지 않고** 원장을 커서로 직접 읽는다(적대검증이 뒤집은 판단 = §11-C-0).
    배송 축은 **안 열린다** — 싱크가 받는 것은 `purchases`뿐이고 배송 상태를 올리는 경로가 없다(`purchases` 스키마에 배송 칸 없음). 배송은 자사몰 전용으로 남는다.
-5. **트리거 15종 재정의** (§3) — 원장 일반화(전이형) + 화이트리스트(§5-4) + 종료 신호(§5-1). 발송 배치 상한(§9-C6)·쿨다운 정책(§9-N1)을 여기 흡수한다.
+5. **트리거 15종 재정의** (§3) — **2026-08-02 §11-D 1차 구현**(레지스트리·화이트리스트·C6·N1·N2·N5·N6 종결 + 신규 트리거 2종 개방). 잔여 = §11-D-4.
 6. **고객별 날짜축**(§4-3) + **예약 원장**(§8) + **고객별 중단·재계산**(§5-2).
 7. **화면 흐름**(§6) — 저장 후 스텝 편집(§6-6)이 선행.
 
@@ -677,3 +677,55 @@ DDL 이전에 켜진 여정은 여기서 한 번 심어 줘야 한다. `NOW()`�
 3. 같은 구매가 다시 올라와도(에이전트 재전송) 진입이 늘지 않는지 — 커서 뒤라 안 잡히는 것이 정상.
 4. 구매 여정 화면에서 구매 트리거 잠금이 풀리는지(게이트가 원장도 근거로 본다).
 5. 매출 지표 불변 — 자동마케팅 ROI·캠페인 귀속 숫자가 그대로여야 한다.
+
+---
+
+## §11-D 5(트리거 재정의) 1차 구현 결과 (2026-08-02)
+
+**코드 완료.** backend tsc 0 / frontend tsc 0 / vitest 128파일 1,822건. DDL 1건(아래 §11-D-3, 배포 후).
+
+### §11-D-1 트리거 레지스트리 — 계약 단일 출처 (§5-4)
+
+`journey-trigger-capability.TRIGGER_CONTRACTS`가 15종 + 상시의 계약(분류·구현 여부·종료 신호·최소 쿨다운)을 소유한다.
+- **저장·활성화 화이트리스트**: 미등록·미구현 trigger_event는 저장 단계에서 거부(200크레딧 전에 안다) + 활성화가 최종 게이트. §9-C2 사용자 측 종결.
+- **§9-C6 종결 — 수신자 상한 전면 필수.** 옛 면제 근거("커서는 대량 적재가 과거 이벤트를 안 만든다")는 §11-4 원장 문이 깼다(첫 full sync = 3일 창 구매 일괄). `CAP_EXEMPT_TRIGGERS = []`.
+- **§9-N1 종결 — 장바구니 재진입 쿨다운 최소 1일**을 활성화가 강제(계약 `cooldownMinDays`).
+- **§9-N6 종결 — 포인트 임계 ≥ 1** 활성화 강제.
+- **§9-N2 종결 — baseline 적재 실패 = 여정 정지**(fail-open 금지). 활성화는 이미 커밋이라 정지+사유+실패 응답.
+- **§9-N5 종결 — 익명→회원 소급 연결이 `created_at`(도착 축)도 갱신**(cdp-events·cdp-identity 두 곳). 익명이던 행은 커서가 소비한 적 없어(customer_id IS NULL 필터) 중복 진입 0. `occurred_at`은 불변이라 통계·귀속 무영향.
+
+### §11-D-2 신규 트리거 4종 개방 (#2 첫 구매 · #5 휴면 복귀 · #6 주기 이탈 · #12 조회 후 미구매)
+
+같은 구매 커서(이벤트+원장 양 문)를 읽고 **자격 필터**로 갈린다(`qualifyPurchaseTransition` — 커서는 자격과 무관하게 전진).
+이력 판정 = `selectLastPriorPurchase`(양 문 합산, 자기 자신은 strict < 제외 — 한쪽 문만 보면 문을 옮긴 단골이 "첫 구매"가 된다).
+- `purchase.first`: 이전 구매 0건만. 종료 계약 = 두 번째 구매(진입 자체가 첫 구매라 기존 구매 goal 판정과 일치).
+- `customer.dormant_return`: 직전 구매가 `dormant_days`(기본 30) 이상 과거. 이전 구매가 없으면 복귀가 아니다.
+카탈로그 카드 + AI 추천 화이트리스트 + parity 가드 갱신. #2·#5는 진입 이벤트 변수(상품명·결제금액·매장명) 동봉.
+- `customer.cycle_lapsed`(#6): 평균 구매 간격 × 계수(기본 1.5) 초과 + 구매 3건 이상(양 문 합산, epoch 산술 = PG 버전 무관). 상태형 유예 대상 + 쿨다운 최소 1일.
+- `cdp.browse_no_purchase`(#12): product_view 후 N일(기본 3) 무구매 — 장바구니와 같은 창 구조, 구매 부재는 양 문 확인. 개방 근거 = product_view 보유(facts.hasBrowseEvents).
+
+### §11-D-3 배포 후 DDL — 화이트리스트 CHECK (§5-4 DB 측)
+
+```sql
+ALTER TABLE journeys ADD CONSTRAINT journeys_trigger_event_registered CHECK (trigger_event IN (
+  'customer.created','purchase.first','cdp.purchase','customer.dormant','customer.dormant_return',
+  'customer.cycle_lapsed','customer.grade_changed','customer.birthday_approaching','customer.points_expiring',
+  'cdp.cart_abandon','custom_order_shipped','cdp.browse_no_purchase',
+  'cdp.reservation_created','reservation.visit_dn','reservation.visit_done','custom'
+)) NOT VALID;
+ALTER TABLE journeys VALIDATE CONSTRAINT journeys_trigger_event_registered;
+```
+`NOT VALID` 후 `VALIDATE` — 기존 행(실측 5종, 전부 등록됨)을 잠그지 않고 검사한다. VALIDATE가 실패하면 미등록 값이 있는 것이니 결과를 보고 처리한다.
+
+### §11-D-4 남은 것 (후속 조각)
+
+- **#7 등급 변동** — 이전 등급 기억(원장 상태 일반화 DDL) 선행.
+- **§5-1 런타임 완결** — `points_used`·`reservation_closed` 판정 + 종료 자동화 기본값(기존 여정 동작을 바꾸는 상품 결정이라 Harold 판단 필요).
+- **§5-2 고객별 중단·재계산 + 예약 3종** — 착수 6번(예약 원장 §8)과 한 몸.
+- §5-5 유입 보류 게이트는 §11-A에서 **유예+상한 필수**로 대체 확정(별도 구현 없음).
+
+### §11-D-5 Codex 1R 판정 반영 (2026-08-02)
+
+수용 5 — ①cycle_lapsed 양 문 중복 구매가 cnt를 부풀림 → 발생 시각 분 단위 dedupe(UNION DISTINCT). ②자격 필터의 진입 시각을 배치 내 **최소 발생 시각**으로(도착 역순 배치 오판 차단) + **신규 2종 커서 활성화 초기화 누락**(원장 문이 영영 안 열리던 실결함) → builder 초기화 목록에 purchase.first·dormant_return 추가. ③baseline을 활성화 **앞**으로 이동 — 실패 = 안 켜짐이라 N2 정지 장치 자체가 사라졌다(구조 수정). ④소급 갱신 부작용 — cdp-identity 소급에 30일 제한(ingest와 동일 계약), cdp-orders 중복 판정 정렬을 발생 축(occurred_at, id)으로(소급 created_at과 무관해짐). ⑤browse 카드 gated 누락.
+부분 불수용 1 — capability가 구매 1건으로 cycle을 여는 것: 게이트는 회사 단위 근거고 3건은 **고객 단위** 성립 조건(§2-3 "판정을 할 만큼 있나"의 고객측) — 대상 수는 미리보기가 보여준다.
+Codex의 vitest 미검증 표시는 샌드박스 EPERM — 로컬 재실행으로 1,826건 통과 확인.

@@ -51,23 +51,27 @@ describe('여정 트리거 카탈로그 ↔ 백엔드 실동작', () => {
     const triggers = catalogTriggers();
     expect(new Set(triggers).size, `중복 정의된 트리거가 있다: ${triggers.join(', ')}`).toBe(triggers.length);
     expect([...triggers].sort()).toEqual([
+      'cdp.browse_no_purchase',
       'cdp.cart_abandon',
       'cdp.purchase',
       'cdp.reservation_created',
       'custom_order_shipped',
       'customer.birthday_approaching',
       'customer.created',
+      'customer.cycle_lapsed',
       'customer.dormant',
+      'customer.dormant_return',
       'customer.points_expiring',
+      'purchase.first',
     ]);
   });
 
   it('서버 화이트리스트가 카탈로그 key와 같다 (제안 단계에서 조용히 빠지는 트리거가 없게)', () => {
     const catalogSrc = readFileSync(CATALOG, 'utf8');
-    const catalogKeys = Array.from(catalogSrc.matchAll(/^\s*key:\s*'([a-z]+)',/gm)).map((m) => m[1]);
+    const catalogKeys = Array.from(catalogSrc.matchAll(/^\s*key:\s*'([a-z_]+)',/gm)).map((m) => m[1]);
     const suggestSrc = readFileSync(resolve(process.cwd(), 'src/utils/journey-trigger-suggest.ts'), 'utf8');
     const block = suggestSrc.slice(suggestSrc.indexOf('SERVER_TRIGGER_KEYS'), suggestSrc.indexOf('])'));
-    const serverKeys = Array.from(block.matchAll(/'([a-z]+)'/g)).map((m) => m[1]);
+    const serverKeys = Array.from(block.matchAll(/'([a-z_]+)'/g)).map((m) => m[1]);
     expect(
       [...new Set(serverKeys)].sort(),
       '서버 화이트리스트와 카탈로그 key가 어긋나면 화면엔 보이는데 AI 추천에서만 빠진다',

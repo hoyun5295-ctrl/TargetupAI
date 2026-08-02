@@ -37,11 +37,11 @@ const OK_STEP = {
 
 const NO_FACTS = {
   canJudgeNewCustomer: false, hasRecentPurchaseDate: false, hasBirthday: false, hasPoints: false,
-  hasPurchaseEvents: false, hasCartEvents: false, hasShippedEvents: false,
+  hasPurchaseEvents: false, hasCartEvents: false, hasBrowseEvents: false, hasShippedEvents: false,
 };
 const ALL_FACTS = {
   canJudgeNewCustomer: true, hasRecentPurchaseDate: true, hasBirthday: true, hasPoints: true,
-  hasPurchaseEvents: true, hasCartEvents: true, hasShippedEvents: true,
+  hasPurchaseEvents: true, hasCartEvents: true, hasBrowseEvents: true, hasShippedEvents: true,
 };
 
 /** 활성화 대상 여정 1건을 돌려주는 상세 SELECT. 그 밖 호출은 빈 결과(UPDATE 미적중 = 활성화 안 됨). */
@@ -140,14 +140,14 @@ describe('상태형 여정은 수신자 상한 없이 켜지지 않는다', () =
     expect(r.reason).toContain('최대 인원');
   });
 
-  it('커서 트리거는 상한을 요구하지 않는다 — 과잉 차단 금지', async () => {
-    // 구매·예약·배송·장바구니는 활성화 시점부터 앞으로만 흐르는 이벤트를 읽는다.
-    // 데이터 대량 적재가 과거 이벤트를 만들지 않으므로 코호트 폭발이 없다.
+  it('커서 트리거도 상한이 필요하다 — §11-5(§9-C6 종결)', async () => {
+    // 옛 면제 근거("대량 적재가 과거 이벤트를 만들지 않는다")는 §11-4 원장 문이 깼다 —
+    // 첫 full sync가 발생 시각 창(3일) 안 구매를 한꺼번에 만든다. 전면 필수가 정답.
     mockJourney({ trigger_event: 'cdp.purchase', threshold_recipients_per_step: null });
 
     const r = await activate();
-    expect(r.ok).toBe(true);
-    expect(didActivate()).toBe(true);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('최대 인원');
   });
 });
 
@@ -169,6 +169,10 @@ describe('저장되는 trigger_event 전수 — 데이터가 다 있고 상한�
 
   const CASES: Array<[string, boolean]> = [
     ['cdp.purchase', true],
+    ['purchase.first', true],                     // ★ §11-5 신설(#2)
+    ['customer.dormant_return', true],            // ★ §11-5 신설(#5)
+    ['customer.cycle_lapsed', true],              // ★ §11-5 신설(#6)
+    ['cdp.browse_no_purchase', true],             // ★ §11-5 신설(#12)
     ['cdp.cart_abandon', true],
     ['custom_order_shipped', true],
     ['customer.created', true],
@@ -177,15 +181,46 @@ describe('저장되는 trigger_event 전수 — 데이터가 다 있고 상한�
     ['customer.points_expiring', true],
     ['custom', true],
     ['cdp.reservation_created', false],          // 예약을 받는 연동 자체가 없다
-    ['customer.made_up_thing', false],           // 모르는 값 = 조용한 0건 → fail-closed
+    ['purchase.made_up', false],                  // 모르는 값 = 조용한 0건 → fail-closed
+    ['customer.grade_changed', false],            // 등록됐지만 미구현 — 켜지면 영원히 0건이라 거부(§5-4)
+    ['customer.made_up_thing', false],
     ['', false],                                  // 빈 값도 막힌다
   ];
 
   it.each(CASES)('%s → 활성화 %s', async (event, expected) => {
-    mockJourney({ trigger_event: event, threshold_recipients_per_step: 500 });
+    // ★ §11-5(§9-N1·N6): 장바구니는 쿨다운, 포인트는 양수 임계가 활성화 요건이 됐다 — 요건 충족값으로 mock.
+    mockJourney({
+      trigger_event: event,
+      threshold_recipients_per_step: 500,
+      allow_reentry: event === 'cdp.cart_abandon' ? true : false,
+      reentry_cooldown_days: event === 'cdp.cart_abandon' ? 7 : 0,
+      trigger_filters: event === 'customer.points_expiring' ? { points_min: 1000 } : {},
+    });
     const r = await activate();
     expect(r.ok).toBe(expected);
     expect(didActivate()).toBe(expected);
+  });
+
+  // ★ §11-5(§9-N1) — 장바구니 쿨다운 0은 24시간 창 동안 5분마다 재발송·재차감이던 결함의 뿌리.
+  it('장바구니 재진입 쿨다운 0 → 활성화 거부', async () => {
+    mockJourney({
+      trigger_event: 'cdp.cart_abandon', threshold_recipients_per_step: 500,
+      allow_reentry: true, reentry_cooldown_days: 0, trigger_filters: {},
+    });
+    const r = await activate();
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('최소 1일');
+  });
+
+  // ★ §11-5(§9-N6) — points_min 0은 사실상 전원이다.
+  it('포인트 임계 0 → 활성화 거부', async () => {
+    mockJourney({
+      trigger_event: 'customer.points_expiring', threshold_recipients_per_step: 500,
+      allow_reentry: false, reentry_cooldown_days: 0, trigger_filters: { points_min: 0 },
+    });
+    const r = await activate();
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('1 이상');
   });
 
   it('모르는 값은 사유를 남긴다 — 왜 못 켜는지 사용자가 알아야 한다', async () => {

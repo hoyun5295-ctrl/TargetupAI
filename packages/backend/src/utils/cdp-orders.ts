@@ -96,7 +96,7 @@ export async function syncOrder(
        AND event_name = 'purchase'
        AND source = $2
        AND properties->>'order_id' = $3
-     ORDER BY created_at ASC
+     ORDER BY occurred_at ASC, id ASC
      LIMIT 1`,
     [companyId, input.source, input.orderId]
   );

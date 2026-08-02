@@ -249,9 +249,12 @@ export async function identifyCustomer(
   //   (healing 경로에서만 실행 — company_id 조건 동반으로 회사 인덱스 활용)
   if (healAnonymousLinkId && customerId) {
     try {
+      // ★ 2026-08-02 §11-5(§9-N5) — created_at(도착 축)도 갱신. 여정 커서가 소급분을 잡게 한다
+      //   (cdp-events ingest 소급과 같은 계약 — 익명이던 행은 커서가 소비한 적이 없어 중복 진입 0).
       const backfilled = await query(
-        `UPDATE cdp_events SET customer_id = $3::uuid
-         WHERE company_id = $1::uuid AND identity_link_id = $2::uuid AND customer_id IS NULL`,
+        `UPDATE cdp_events SET customer_id = $3::uuid, created_at = NOW()
+         WHERE company_id = $1::uuid AND identity_link_id = $2::uuid AND customer_id IS NULL
+           AND received_at >= NOW() - INTERVAL '30 days'`,
         [companyId, healAnonymousLinkId, customerId]
       );
       if ((backfilled.rowCount || 0) > 0) {

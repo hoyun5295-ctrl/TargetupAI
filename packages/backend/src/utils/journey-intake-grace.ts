@@ -64,6 +64,7 @@ export function isBulkStateTrigger(triggerEvent: string): boolean {
   switch (triggerEvent) {
     case 'customer.dormant':
     case 'customer.points_expiring':
+    case 'customer.cycle_lapsed':  // §11-5 #6 — 이관 배치가 통째로 걸리는 상태형
     case 'custom':
       return true;
     default:
