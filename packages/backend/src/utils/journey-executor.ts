@@ -1249,7 +1249,7 @@ async function jumpToStep(exec: ExecutionRow, targetOrder: number): Promise<bool
  *  purchase(기본·현행): 신호 1 = recent_purchase_date가 진입일(KST) **다음 날 이후**(엄격 초과 — Codex P1 정정: 진입 당일 구매를 포함하면
  *    구매가 진입 사유인 여정(cdp.purchase 트리거 등)이 첫 tick에 전원 즉시 이탈해 여정이 죽는다.
  *    당일 정밀 판정은 신호 2(cdp 이벤트 시각)가 담당 — 프로필만 있는 회사는 다음 날 tick부터 이탈)
- *    신호 2 = 연동몰 cdp 구매 이벤트(event_name='purchase', extractor와 동일 값)가 진입 시각 이후(시각 정밀).
+ *    신호 2 = 진입 시각 이후 구매(시각 정밀) — 자사몰은 cdp 이벤트, 매장은 구매 원장. ★ §11-4: 문 둘 다 본다.
  *  click: 이 execution이 발송한 step(journey_step_logs status='sent') 이후 message_click(cdp) —
  *    evaluateJourneyStepClickedCondition과 동일 조인(전 step 합집합). 발송 전에는 절대 참이 안 됨(진입 즉시 이탈 없음).
  *  visit: 진입 시각 이후 page_view(브라우저 SDK 수집 회사 한정 — 미수집 회사는 판정 항상 거짓=여정 계속).
@@ -1301,10 +1301,20 @@ async function isGoalConvertedSinceEntry(exec: ExecutionRow): Promise<boolean> {
     );
     if (byProfile.rows.length > 0) return true;
     const byEvent = await query(
-      `SELECT 1 FROM cdp_events
-        WHERE company_id = $1::uuid AND customer_id = $2::uuid
-          AND event_name = 'purchase' AND occurred_at > $3::timestamptz
-        LIMIT 1`,
+      `SELECT 1
+        WHERE EXISTS (
+          SELECT 1 FROM cdp_events
+           WHERE company_id = $1::uuid AND customer_id = $2::uuid
+             AND event_name = 'purchase' AND occurred_at > $3::timestamptz
+        )
+        -- ★ 2026-08-01 §11-4: 매장(싱크) 구매는 원장에만 있다. 위 프로필 신호는 날짜 정밀이라
+        --   진입 당일 구매를 못 가르므로, 시각 정밀 판정을 위해 원장을 함께 본다(KST naive 규약).
+        OR EXISTS (
+          SELECT 1 FROM purchases
+           WHERE company_id = $1::uuid AND customer_id = $2::uuid
+             AND purchase_date IS NOT NULL
+             AND purchase_date > ($3::timestamptz AT TIME ZONE 'Asia/Seoul')
+        )`,
       [exec.company_id, exec.customer_id, exec.entered_at]
     );
     return byEvent.rows.length > 0;

@@ -642,6 +642,13 @@ export async function buildJourneyStats(journeyId: string, companyId: string): P
                       WHERE c.id = e.customer_id AND c.company_id = j.company_id
                         AND c.recent_purchase_date IS NOT NULL
                         AND c.recent_purchase_date > (e.entered_at AT TIME ZONE 'Asia/Seoul')::date
+                   ) OR EXISTS (
+                     -- ★ 2026-08-01 §11-4: 매장(싱크) 구매는 원장에만 있다. 위 프로필 신호는 날짜 정밀이라
+                     --   진입 당일 구매를 못 가르므로 원장을 시각 정밀로 함께 본다(KST naive 규약).
+                     SELECT 1 FROM purchases p
+                      WHERE p.company_id = j.company_id AND p.customer_id = e.customer_id
+                        AND p.purchase_date IS NOT NULL
+                        AND p.purchase_date > (e.entered_at AT TIME ZONE 'Asia/Seoul')
                    )) AS conv
              FROM journey_executions e
              JOIN journeys j ON j.id = e.journey_id

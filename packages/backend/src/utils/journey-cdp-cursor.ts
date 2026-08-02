@@ -30,12 +30,25 @@ export interface CdpEventRow {
   createdAt: Date;
   /** 발생 시각 — 문안·통계용으로 남긴다(커서 축 아님). */
   occurredAt: Date;
+  /**
+   * ★ 2026-08-02 도착 시각의 DB 원문(`::text`) — 커서 전진은 **이 값으로만** 한다.
+   *   DB 시각은 마이크로초인데 JS Date는 밀리초라, Date로 왕복하면 커서가 실제 마지막 행보다
+   *   최대 999µs 이르게 저장된다. 다음 회차 행 비교 `(created_at, id) > (커서, id)`는 첫 항이 이기면
+   *   끝이라, **마지막 밀리초에 속한 행 전부**(벌크 적재면 같은 시각 500행 전부)가 매 회차 다시 잡힌다 —
+   *   구매 여정은 재진입 허용·쿨다운 0·executions UNIQUE 없음이라 그대로 중복 발송·중복 과금이다.
+   */
+  createdAtRaw?: string | null;
+  /** 발생 시각의 DB 원문 — 구축(occurred_at) 커서 환경용. 같은 이유. */
+  occurredAtRaw?: string | null;
   properties?: Record<string, any> | null;
 }
 
-/** 커서 위치 — `at`은 축(도착/발생)에 해당하는 시각. eventId가 null이면 타이 보조 없이 시각만 쓴다. */
+/**
+ * 커서 위치 — `at`은 축(도착/발생)에 해당하는 시각. eventId가 null이면 타이 보조 없이 시각만 쓴다.
+ * `at`이 string이면 DB `::text` 원문(마이크로초 보존) — 그대로 파라미터로 나가 PG가 풀 정밀도로 캐스팅한다.
+ */
 export interface CdpCursorPosition {
-  at: Date;
+  at: Date | string;
   eventId: string | null;
 }
 
@@ -73,9 +86,16 @@ export function planCdpCursorBatch(
 
   // 실제로 본 마지막 행까지만 전진한다. 절단 여부와 무관 — 못 본 것을 건너뛰지 않는 쪽이 항상 안전하다.
   // 커서 값은 축에 맞춰 고른다. 옛 축(occurred_at)에 도착 시각을 써 넣으면 다음 회차 비교가 어긋난다.
+  // ★ 2026-08-02: DB 원문(raw)이 있으면 그것으로 전진한다 — JS Date는 마이크로초를 절사해
+  //   마지막 밀리초 묶음이 매 회차 재진입한다(CdpEventRow.createdAtRaw 주석). Date 폴백은 테스트·구경로용.
   const last = usable.length > 0 ? usable[usable.length - 1] : null;
   const newCursor: CdpCursorPosition = last
-    ? { at: axis === 'occurred_at' ? last.occurredAt : last.createdAt, eventId: last.eventId }
+    ? {
+        at: axis === 'occurred_at'
+          ? (last.occurredAtRaw ?? last.occurredAt)
+          : (last.createdAtRaw ?? last.createdAt),
+        eventId: last.eventId,
+      }
     : { at: windowEnd, eventId: null };
 
   return { ids, propertiesByCustomer, newCursor, truncated };
@@ -95,6 +115,32 @@ export function buildEntryPropsArray(
     if (p && typeof p === 'object' && Object.keys(p).length > 0) return JSON.stringify(p);
     return null;
   });
+}
+
+// ═══════════════════════════════════════════════════════════
+// 구매는 문(door)이 둘이다 — 원천이 다르지 커서 규약은 같다 (2026-08-01 §11-4)
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 이 트리거가 **구매 원장(`purchases`)** 도 커서로 읽는가 — 단일 출처.
+ *
+ * 배경 (설계서 §2-2)
+ *   구매가 들어오는 문이 둘인데 서로 다른 테이블에 쌓인다.
+ *     - 자사몰(웹훅·SDK) → `cdp_events`(event_name='purchase')
+ *     - 싱크에이전트(ERP·POS) → `purchases` 원장. `cdp_events`는 건드리지 않는다.
+ *   그래서 싱크 연동사는 구매를 정상 적재하고도 구매 여정을 못 썼다.
+ *
+ * ⛔ 왜 원장을 이벤트로 복사하지 않는가 (2026-08-01 Codex 적대검증이 뒤집은 판단)
+ *   처음엔 싱크 적재 시점에 `cdp_events`로 미러를 만들었다. 복사본을 만드는 순간 문제가 셋 생긴다 —
+ *   원본과 짝을 맞출 멱등키가 필요하고(시각으로 대신했다가 교차 문 중복 발송으로 깨졌다),
+ *   무엇이 새 것인지 몰라 창 전체를 다시 읽어야 하고(요청 경로 부하), 복사가 실패하면 복구할 길이 없다
+ *   (대조 워커 필요 = 이중 진실). 게다가 `cdp_events`를 **세는** 소비처(hasCdpData·활성고객·자가진단)가
+ *   이름과 무관하게 함께 움직인다.
+ *   **원장을 그대로 읽으면 진실이 하나다.** 원장 행 자체가 사건이고, 커서가 (도착시각, 행 id)로 도니까
+ *   중복 진입은 구조가 막는다. 멱등키도, 대조 워커도, 새 이벤트 이름도 필요 없다.
+ */
+export function usesPurchaseLedger(triggerEvent: string): boolean {
+  return triggerEvent === 'cdp.purchase';
 }
 
 /**

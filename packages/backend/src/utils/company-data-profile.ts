@@ -245,7 +245,10 @@ export async function getCompanyJourneyFacts(companyId: string): Promise<Company
     `SELECT
        EXISTS (SELECT 1 FROM customers WHERE company_id = $1::uuid
                  AND ((birth_month_day IS NOT NULL AND birth_month_day <> '') OR birth_date IS NOT NULL)) AS has_birthday,
-       EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'purchase') AS has_purchase_events,
+       -- ★ 2026-08-01 §11-4: 구매는 문이 둘이다 — 자사몰 이벤트 또는 싱크 원장 중 하나만 있으면 열린다.
+       (EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'purchase')
+        OR EXISTS (SELECT 1 FROM purchases WHERE company_id = $1::uuid
+                     AND purchase_date IS NOT NULL AND customer_id IS NOT NULL)) AS has_purchase_events,
        EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'cart_add') AS has_cart_events,
        EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'custom_order_shipped') AS has_shipped_events`,
     [companyId],

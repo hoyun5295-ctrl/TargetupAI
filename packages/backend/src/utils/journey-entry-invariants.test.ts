@@ -122,14 +122,15 @@ describe('커서 축 전환 (journey-target-extractor · journey-trigger-watcher
   });
 
   it('컬럼 확인은 트랜잭션 밖에서 한다 — 트랜잭션 안에서 실패하면 통째로 깨진다', () => {
-    const probe = wa.indexOf('SELECT last_event_cursor, last_event_cursor_id');
+    // ★2026-08-02 F1: 읽기에 ::text 원문 컬럼이 끼었다 — 시각·원문·id가 같은 SELECT라는 불변식은 유지.
+    const probe = wa.indexOf('SELECT last_event_cursor, last_event_cursor::text');
     const begin = wa.indexOf("client.query('BEGIN')", probe);
     expect(probe).toBeGreaterThan(-1);
     expect(begin).toBeGreaterThan(probe);
   });
 
   it('커서 시각과 id를 같은 조회에서 읽는다 — 따로 읽으면 옛 축 시각과 새 축 id가 한 쌍이 된다', () => {
-    expect(wa).toMatch(/SELECT last_event_cursor, last_event_cursor_id FROM journeys/);
+    expect(wa).toMatch(/SELECT last_event_cursor, last_event_cursor::text AS last_event_cursor_raw, last_event_cursor_id/);
   });
 
   it('컬럼 부재(42703)만 옛 축으로 폴백한다 — 다른 오류를 삼키면 축이 섞인다', () => {

@@ -26,8 +26,10 @@
 
 import { query, pool } from '../config/database';
 // 추출 조건 = journey-target-extractor 공유 컨트롤타워 (발송·미리보기 동일 기준 단일 진입점)
-import { selectJourneyTargetCustomerIds, selectCdpEventRowsForCursor, selectCartAbandonProperties, JOURNEY_COUNT_CAP } from './journey-target-extractor';
-import { planCdpCursorBatch, buildEntryPropsArray, resolveCdpCursorEventName } from './journey-cdp-cursor';
+import { selectJourneyTargetCustomerIds, selectCdpEventRowsForCursor, selectPurchaseLedgerRowsForCursor, selectCartAbandonProperties, JOURNEY_COUNT_CAP } from './journey-target-extractor';
+import { planCdpCursorBatch, buildEntryPropsArray, resolveCdpCursorEventName, usesPurchaseLedger, type CdpCursorBatch } from './journey-cdp-cursor';
+// ★ 2026-08-01 §11-4 — 싱크 구매는 원장(purchases)이 문이다. 어느 회사에서 그 문을 열지·창 길이 판정.
+import { resolvePurchaseLedgerGate, isLedgerRunWindowHour, PURCHASE_TRIGGER_MAX_AGE_HOURS } from './journey-purchase-ledger';
 // ★ 2026-08-01 여정 재설계 §3-0-2 — 신규/기존을 가릴 근거가 없는 회사는 발송하지 않는다(fail-closed).
 import { resolveNewCustomerJudgement } from './journey-identity-signals';
 import { getCompanyIdentityCapability } from './company-data-profile';
@@ -159,7 +161,17 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
   // ★ Phase 3: 구매·예약·배송(custom_order_shipped)은 이벤트 커서 경로(누락 0 + 정확히 1회 + properties 동봉). 그 외는 공유 컨트롤타워 추출.
   const cursorEvent = resolveCdpCursorEventName(j.trigger_event);
   if (cursorEvent) {
-    return processCdpCursorJourney(j, cursorEvent);
+    const fromEvents = await processCdpCursorJourney(j, cursorEvent);
+    // ★ 2026-08-01 §11-4: 구매는 문이 둘이다(자사몰 cdp_events / 싱크 purchases 원장).
+    //   원장을 이벤트로 복사하지 않고 그대로 읽는다 — 진실이 하나여야 중복 진입이 구조로 막힌다.
+    //   앞 문에서 대량 차단으로 정지했으면 뒤 문은 돌리지 않는다(정지한 여정에 진입을 더 넣지 않는다).
+    if (!usesPurchaseLedger(j.trigger_event) || fromEvents.paused) return fromEvents;
+    const fromLedger = await processPurchaseLedgerJourney(j);
+    return {
+      matched: fromEvents.matched + fromLedger.matched,
+      enqueued: fromEvents.enqueued + fromLedger.enqueued,
+      skipped: fromEvents.skipped + fromLedger.skipped,
+    };
   }
   // ★ 2026-08-01 Codex 1R 수용 — 판정 불가는 발송하지 않는다(fail-closed).
   //   신규 고객 여정인데 이 회사 데이터로 기존/신규를 가릴 근거가 하나도 없으면, "진입 원장에 없다"는
@@ -212,61 +224,47 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
 // ★ Phase 3: cdp 이벤트 커서 처리 (구매·예약) — 커서 이후~지금 이벤트 전수, 진입+커서 전진을 한 트랜잭션.
 // ════════════════════════════════════════════════════════════════════
 
-async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Promise<{ matched: number; enqueued: number; skipped: number }> {
-  // ★ 2026-08-01 §11-3 — 커서 축을 "발생"에서 "도착"으로 옮긴다.
-  //   옛 축은 배치로 늦게 도착한 데이터(매장 구매)를 영영 놓쳤다.
-  //   단, 저장돼 있는 옛 커서 값은 **발생 시각**이라 그대로 도착 축으로 읽으면 처리분을 다시 잡는다.
-  //   그래서 축 전환은 `last_event_cursor_id` 컬럼이 생긴 뒤에만 켠다(DDL이 커서 재기준을 함께 한다).
-  //   컬럼 확인은 트랜잭션 밖에서 — 트랜잭션 안에서 실패하면 그 트랜잭션이 통째로 깨진다.
-  //   ⛔ 시각과 id를 **같은 조회에서** 함께 읽는다. 시각을 바깥 SELECT에서, id를 여기서 따로 읽으면
-  //     그 사이 DDL이 커밋될 때 옛 축 시각과 새 축 id가 한 쌍이 된다(누락·재처리).
-  //   ⛔ 42703(컬럼 없음)만 폴백한다. 연결 끊김·타임아웃까지 삼키면 DDL 이후에도 옛 축으로 돌아가
-  //     도착 시각이 담긴 커서를 발생 시각으로 해석한다(Codex 지적).
-  let cursorAt: Date | string | null;
-  let cursorEventId: string | null = null;
-  let arrivalAxis = false;
-  try {
-    const c = await query(`SELECT last_event_cursor, last_event_cursor_id FROM journeys WHERE id = $1::uuid`, [j.id]);
-    cursorAt = c.rows[0]?.last_event_cursor ?? null;
-    cursorEventId = c.rows[0]?.last_event_cursor_id ?? null;
-    arrivalAxis = true;
-  } catch (err: any) {
-    if (err?.code !== '42703') throw err;
-    cursorAt = j.last_event_cursor;   // 컬럼 미마이그레이션 → 옛 축(occurred_at) 그대로
-  }
-  const axis = arrivalAxis ? 'created_at' : 'occurred_at';
+interface CursorRunResult {
+  matched: number;
+  enqueued: number;
+  skipped: number;
+  /** 대량 차단으로 여정을 정지시켰는가 — 뒤따르는 문을 돌리지 않기 위한 신호. */
+  paused?: boolean;
+}
 
-  // ★ 창 끝은 DB 시계에서 받고 안전 지연을 둔다(Codex 지적).
-  //   cdp 적재는 트랜잭션 안에서 created_at=NOW()를 쓰는데 PostgreSQL의 NOW()는 **트랜잭션 시작 시각**이다.
-  //   적재 트랜잭션이 먼저 시작되고 우리 SELECT가 먼저 실행되면 그 행은 안 보이는데,
-  //   창을 지금 시각까지 소모해 버리면 나중에 커밋된 그 행은 이미 커서 뒤라 영영 안 잡힌다.
-  //   지연은 적재 트랜잭션이 그 안에 끝난다는 가정 위에 선다 — 증명이 아니라 완화다.
-  //   커서보다 뒤로 물러나지 않게 max를 씌운다(활성화 직후 커서가 지금이면 창이 음수가 된다).
+/** 커서 한 회차에 읽는 최대 행 수. 남은 것은 다음 회차가 이어 읽는다(누락 0). */
+const CDP_EVENT_CHUNK = 1000;
+
+/**
+ * 커서 창 끝 — DB 시계에서 받아 1분 물린다(§11-B 안전 지연).
+ *   적재는 트랜잭션 안에서 시각을 찍는데 PostgreSQL의 NOW()는 **트랜잭션 시작 시각**이다.
+ *   적재 트랜잭션이 먼저 시작되고 우리 SELECT가 먼저 실행되면 그 행은 안 보이는데,
+ *   창을 지금 시각까지 소모하면 나중에 커밋된 그 행은 이미 커서 뒤라 영영 안 잡힌다.
+ *   ⚠ 지연은 적재 트랜잭션이 그 안에 끝난다는 가정 위의 완화지 증명이 아니다.
+ *   커서보다 뒤로 물러나지 않게 max를 씌운다(활성화 직후 커서가 지금이면 창이 음수가 된다).
+ */
+async function resolveCursorWindow(cursorAt: Date | string | null): Promise<{ cursorStart: Date | string; windowEnd: Date }> {
   const wr = await query(`SELECT NOW() - INTERVAL '1 minute' AS w`);
   const lagged: Date = wr.rows[0].w;
   const cursorStart = cursorAt || lagged;   // 커서 없으면 빈 창(다음 회차부터)
   const windowEnd = new Date(Math.max(new Date(lagged).getTime(), new Date(cursorStart).getTime()));
+  return { cursorStart, windowEnd };
+}
 
-  // ★ Fix #11 (2026-06-05): 한 윈도우 이벤트가 상한을 넘어도 LIMIT로 영구 누락하던 문제 정정.
-  //   축 순으로 chunk+1 조회 후, 실제로 본 마지막 행까지만 커서를 전진(나머지 다음 회차).
-  const CDP_EVENT_CHUNK = 1000;
-  const rows = await selectCdpEventRowsForCursor(
-    j.company_id,
-    eventName,
-    j.trigger_filters || {},
-    { at: cursorStart, eventId: cursorEventId, axis },
-    windowEnd,
-    CDP_EVENT_CHUNK + 1,
-  );
-  const batch = planCdpCursorBatch(rows, CDP_EVENT_CHUNK, windowEnd, axis);
+/**
+ * 커서 배치 공통 뒷부분 — 대량 차단 → 첫 step → (진입 전부 + 커서 전진)을 한 트랜잭션.
+ *
+ * 구매는 문이 둘(자사몰 이벤트 / 싱크 원장)인데 커서 규약이 같다. 두 벌로 두면 한쪽만 고쳐지므로
+ * 원천에 따라 달라지는 것(커서 컬럼·조회 SQL)만 호출부에 남기고 나머지는 여기 하나로 모은다.
+ */
+async function finishCursorBatch(
+  j: ActiveJourney,
+  batch: CdpCursorBatch,
+  cursorSql: string,
+  cursorParams: any[],
+  sourceLabel: string,
+): Promise<CursorRunResult> {
   const ids = batch.ids;
-  // 커서 쓰기 — 컬럼이 있으면 (시각, 이벤트 id) 둘 다. 없으면 시각만.
-  const cursorSql = arrivalAxis
-    ? `UPDATE journeys SET last_event_cursor = $2, last_event_cursor_id = $3::uuid WHERE id = $1::uuid`
-    : `UPDATE journeys SET last_event_cursor = $2 WHERE id = $1::uuid`;
-  const cursorParams = arrivalAxis
-    ? [j.id, batch.newCursor.at, batch.newCursor.eventId]
-    : [j.id, batch.newCursor.at];
 
   // 대량 차단기 — 후보 과다 시 정지+사유(커서 전진 안 함 → 재활성화 시 재평가).
   const cap = j.threshold_recipients_per_step;
@@ -276,8 +274,8 @@ async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Pro
       j.company_id,
       `대량 진입 감지 (${ids.length}건 > 상한 ${cap}건) — 자동 정지, 담당자 확인 필요`,
     );
-    console.warn(`[JourneyTrigger] 대량 차단(cdp) — journey=${j.id} 후보=${ids.length} 상한=${cap} → 정지`);
-    return { matched: ids.length, enqueued: 0, skipped: ids.length };
+    console.warn(`[JourneyTrigger] 대량 차단(${sourceLabel}) — journey=${j.id} 후보=${ids.length} 상한=${cap} → 정지`);
+    return { matched: ids.length, enqueued: 0, skipped: ids.length, paused: true };
   }
 
   const firstStepRes = await query(
@@ -322,6 +320,159 @@ async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Pro
   }
 
   return { matched: ids.length, enqueued, skipped };
+}
+
+/**
+ * 구매 원장(purchases) 문 — 싱크에이전트(ERP·POS)로 들어온 구매 (2026-08-01 §11-4).
+ *
+ * 이벤트 문과 같은 규약으로 돈다. 다른 것은 셋뿐이다 — 커서 컬럼, 조회 대상, 그리고
+ * **발생 시각 창**(이관 전량이 오늘 도착해도 옛 구매는 트리거가 아니다 — 도착 축으로는 못 막는다).
+ *
+ * ⛔ 커서 컬럼(`last_purchase_cursor`)이 아직 없으면 이 문을 열지 않는다.
+ *   컬럼 없이 열면 커서를 못 적어 매 회차 같은 구간을 다시 잡는다(중복 발송·중복 과금).
+ *   42703만 폴백한다 — 그 밖 오류를 삼키면 결함이 조용히 0건으로 남는다.
+ */
+async function processPurchaseLedgerJourney(j: ActiveJourney): Promise<CursorRunResult> {
+  const IDLE: CursorRunResult = { matched: 0, enqueued: 0, skipped: 0 };
+
+  // ★ 시각은 **DB 시계 하나로** 판단한다(Codex 지적 수용).
+  //   창 끝(자정)과 구매 나이는 DB가 재는데 실행 시간대만 앱 시계로 재면 축이 둘이 된다 —
+  //   시계가 어긋나면 발송 시간대가 밀리고, 뒤로 가면 같은 구간을 다시 연다.
+  //   창 끝 = **오늘 KST 00:00**. 이게 "하루 모아 다음 날 오전"의 실제 구현이다.
+  //   창 끝을 지금 시각으로 두면 실행 시간대 안에 도착한 것이 그날 바로 나가고, 그러면
+  //   **고객사가 언제 동기화하느냐에 따라 당일이 되기도 다음 날이 되기도 한다** — 없애려던 주기 의존이 그대로다.
+  //   덤: 창 끝이 9시간 이상 과거라 §11-B의 미커밋 적재 경합(안전 지연 1분)이 아예 성립하지 않는다.
+  const clk = await query(
+    `SELECT (date_trunc('day', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul') AS cutoff,
+            EXTRACT(HOUR FROM (NOW() AT TIME ZONE 'Asia/Seoul'))::int AS kst_hour`,
+  );
+  const cutoff: Date = clk.rows[0].cutoff;
+  if (!isLedgerRunWindowHour(Number(clk.rows[0].kst_hour))) return IDLE;
+
+  const gate = await resolvePurchaseLedgerGate(j.company_id);
+  if (!gate.enabled) return IDLE;
+
+  let cursorAt: Date | null = null;
+  // SQL 비교용 원문 — Date는 밀리초 절사라 마지막 밀리초 묶음이 다시 잡힌다(이벤트 문과 같은 이유, 2026-08-02).
+  let cursorRaw: string | null = null;
+  let cursorRowId: string | null = null;
+  try {
+    const c = await query(
+      `SELECT last_purchase_cursor, last_purchase_cursor::text AS last_purchase_cursor_raw, last_purchase_cursor_id
+         FROM journeys WHERE id = $1::uuid`,
+      [j.id],
+    );
+    cursorAt = c.rows[0]?.last_purchase_cursor ?? null;
+    cursorRaw = c.rows[0]?.last_purchase_cursor_raw ?? null;
+    cursorRowId = c.rows[0]?.last_purchase_cursor_id ?? null;
+  } catch (err: any) {
+    if (err?.code !== '42703') throw err;
+    // 조용히 0을 돌려주면 DDL을 안 했다는 사실이 아무 데도 안 남는다(Codex 지적) — 한 줄 남긴다.
+    console.warn(`[JourneyTrigger] 구매 원장 커서 컬럼 미마이그레이션 — 원장 문 미개방 journey=${j.id}`);
+    return IDLE;
+  }
+
+  // ⛔ 커서가 없으면 열지 않는다. 기준 없이 열면 창 안의 **활성화 이전 구매까지 소급 발송**된다.
+  //   커서는 활성화(journey-builder)가 심고, DDL 전에 켜진 여정은 DDL의 재기준 UPDATE가 심는다.
+  if (!cursorAt) {
+    console.warn(`[JourneyTrigger] 구매 원장 커서 미설정 — 소급 방지로 건너뜀 journey=${j.id}`);
+    return IDLE;
+  }
+
+  // 활성화가 오늘이면 커서가 자정보다 뒤라 창이 비고(음수 방지), 그 하루치는 내일 아침 몫이 된다.
+  const windowEnd = new Date(Math.max(new Date(cutoff).getTime(), new Date(cursorAt).getTime()));
+  const rows = await selectPurchaseLedgerRowsForCursor(
+    j.company_id,
+    j.trigger_filters || {},
+    { at: cursorRaw ?? cursorAt, rowId: cursorRowId },
+    windowEnd,
+    PURCHASE_TRIGGER_MAX_AGE_HOURS,
+    CDP_EVENT_CHUNK + 1,
+  );
+  const batch = planCdpCursorBatch(rows, CDP_EVENT_CHUNK, windowEnd, 'created_at');
+  // 절단은 "오늘 아침에 다 못 냈다"는 뜻이다. 밀린 분이 발생 시각 창(3일)을 넘기면 그대로 못 나가므로
+  // 조용히 두지 않는다 — 상한 필수화(§9-C6)를 판단할 유일한 관측점이다.
+  if (batch.truncated) {
+    console.warn(`[JourneyTrigger] 구매 원장 절단 — journey=${j.id} 이번 회차 ${CDP_EVENT_CHUNK}건 처리, 남은 분은 다음 회차`);
+  }
+  return finishCursorBatch(
+    j,
+    batch,
+    // 후진 금지 가드 — 이벤트 문 커서 쓰기와 같은 이유(밀리초 절사 windowEnd가 커서를 뒤로 물리는 것 차단).
+    `UPDATE journeys SET last_purchase_cursor = $2::timestamptz, last_purchase_cursor_id = $3::uuid
+      WHERE id = $1::uuid
+        AND (last_purchase_cursor IS NULL OR
+             ($2::timestamptz, COALESCE($3::uuid, '00000000-0000-0000-0000-000000000000'::uuid))
+             >= (last_purchase_cursor, COALESCE(last_purchase_cursor_id, '00000000-0000-0000-0000-000000000000'::uuid)))`,
+    [j.id, batch.newCursor.at, batch.newCursor.eventId],
+    'ledger',
+  );
+}
+
+async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Promise<CursorRunResult> {
+  // ★ 2026-08-01 §11-3 — 커서 축을 "발생"에서 "도착"으로 옮긴다.
+  //   옛 축은 배치로 늦게 도착한 데이터(매장 구매)를 영영 놓쳤다.
+  //   단, 저장돼 있는 옛 커서 값은 **발생 시각**이라 그대로 도착 축으로 읽으면 처리분을 다시 잡는다.
+  //   그래서 축 전환은 `last_event_cursor_id` 컬럼이 생긴 뒤에만 켠다(DDL이 커서 재기준을 함께 한다).
+  //   컬럼 확인은 트랜잭션 밖에서 — 트랜잭션 안에서 실패하면 그 트랜잭션이 통째로 깨진다.
+  //   ⛔ 시각과 id를 **같은 조회에서** 함께 읽는다. 시각을 바깥 SELECT에서, id를 여기서 따로 읽으면
+  //     그 사이 DDL이 커밋될 때 옛 축 시각과 새 축 id가 한 쌍이 된다(누락·재처리).
+  //   ⛔ 42703(컬럼 없음)만 폴백한다. 연결 끊김·타임아웃까지 삼키면 DDL 이후에도 옛 축으로 돌아가
+  //     도착 시각이 담긴 커서를 발생 시각으로 해석한다(Codex 지적).
+  let cursorAt: Date | string | null;
+  // ★ 2026-08-02: SQL 비교에 쓰는 커서는 `::text` 원문으로 읽는다 — 드라이버 Date 파싱은 밀리초라
+  //   저장된 마이크로초가 절사되고, 그러면 마지막 밀리초 묶음이 매 회차 다시 잡힌다(중복 발송).
+  //   Date 값(cursorAt)은 창 계산(Math.max)에만 쓴다.
+  let cursorRaw: string | null = null;
+  let cursorEventId: string | null = null;
+  let arrivalAxis = false;
+  try {
+    const c = await query(
+      `SELECT last_event_cursor, last_event_cursor::text AS last_event_cursor_raw, last_event_cursor_id
+         FROM journeys WHERE id = $1::uuid`,
+      [j.id],
+    );
+    cursorAt = c.rows[0]?.last_event_cursor ?? null;
+    cursorRaw = c.rows[0]?.last_event_cursor_raw ?? null;
+    cursorEventId = c.rows[0]?.last_event_cursor_id ?? null;
+    arrivalAxis = true;
+  } catch (err: any) {
+    if (err?.code !== '42703') throw err;
+    cursorAt = j.last_event_cursor;   // 컬럼 미마이그레이션 → 옛 축(occurred_at) 그대로
+  }
+  const axis = arrivalAxis ? 'created_at' : 'occurred_at';
+
+  const { cursorStart, windowEnd } = await resolveCursorWindow(cursorAt);
+
+  // ★ Fix #11 (2026-06-05): 한 윈도우 이벤트가 상한을 넘어도 LIMIT로 영구 누락하던 문제 정정.
+  //   축 순으로 chunk+1 조회 후, 실제로 본 마지막 행까지만 커서를 전진(나머지 다음 회차).
+  const rows = await selectCdpEventRowsForCursor(
+    j.company_id,
+    eventName,
+    j.trigger_filters || {},
+    // 커서 원문이 있으면 그것으로 비교한다 — Date는 밀리초 절사라 마지막 밀리초 묶음이 다시 잡힌다.
+    { at: cursorRaw ?? cursorStart, eventId: cursorEventId, axis },
+    windowEnd,
+    CDP_EVENT_CHUNK + 1,
+  );
+  const batch = planCdpCursorBatch(rows, CDP_EVENT_CHUNK, windowEnd, axis);
+  // 커서 쓰기 — 컬럼이 있으면 (시각, 이벤트 id) 둘 다. 없으면 시각만.
+  // ★ 2026-08-02 후진 금지 가드: 빈 창의 windowEnd(밀리초 절사 Date)가 저장된 마이크로초 커서보다
+  //   이르면 커서가 뒤로 물러나 처리분을 다시 잡는다. (시각, id) 행 비교로 전진일 때만 쓴다.
+  const cursorSql = arrivalAxis
+    ? `UPDATE journeys SET last_event_cursor = $2::timestamptz, last_event_cursor_id = $3::uuid
+        WHERE id = $1::uuid
+          AND (last_event_cursor IS NULL OR
+               ($2::timestamptz, COALESCE($3::uuid, '00000000-0000-0000-0000-000000000000'::uuid))
+               >= (last_event_cursor, COALESCE(last_event_cursor_id, '00000000-0000-0000-0000-000000000000'::uuid)))`
+    : `UPDATE journeys SET last_event_cursor = $2::timestamptz
+        WHERE id = $1::uuid
+          AND (last_event_cursor IS NULL OR $2::timestamptz >= last_event_cursor)`;
+  const cursorParams = arrivalAxis
+    ? [j.id, batch.newCursor.at, batch.newCursor.eventId]
+    : [j.id, batch.newCursor.at];
+
+  return finishCursorBatch(j, batch, cursorSql, cursorParams, 'cdp');
 }
 
 // ════════════════════════════════════════════════════════════════════

@@ -158,6 +158,15 @@ export async function selectJourneyTargetCustomerIds(
              AND e2.event_name IN ('checkout_start', 'purchase')
              AND e2.occurred_at > a.cart_add_at
          )
+           -- ★ 2026-08-01 §11-4: 매장(싱크)에서 산 사람에게 장바구니 리마인드를 보내지 않는다.
+           --   그 구매는 원장에만 있고 cdp_events에는 없다. KST naive 규약이라 변환 명시.
+           AND NOT EXISTS (
+             SELECT 1 FROM purchases p2
+             WHERE p2.company_id = $1::uuid
+               AND p2.customer_id = a.customer_id
+               AND p2.purchase_date IS NOT NULL
+               AND p2.purchase_date > (a.cart_add_at AT TIME ZONE 'Asia/Seoul')
+           )
            AND ${buildJourneySafetyFilter('c')}
          ${antiJoin}
          ${cond ? ` AND ${cond}` : ''}
@@ -367,7 +376,9 @@ export async function selectCdpEventRowsForCursor(
   const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
   params.push(String(chunkLimit));
   const r = await query(
-    `SELECT e.id, e.customer_id, e.created_at, e.occurred_at, e.properties FROM cdp_events e
+    `SELECT e.id, e.customer_id, e.created_at, e.occurred_at,
+            e.created_at::text AS created_at_raw, e.occurred_at::text AS occurred_at_raw,
+            e.properties FROM cdp_events e
      INNER JOIN customers c ON c.id = e.customer_id AND c.company_id = $1::uuid
      WHERE e.company_id = $1::uuid
        AND e.event_name = $2
@@ -385,6 +396,75 @@ export async function selectCdpEventRowsForCursor(
     eventId: x.id,
     createdAt: x.created_at,
     occurredAt: x.occurred_at,
+    // 커서 전진용 DB 원문 — JS Date 왕복은 마이크로초를 절사해 마지막 밀리초 묶음이 재진입한다(2026-08-02).
+    createdAtRaw: x.created_at_raw ?? null,
+    occurredAtRaw: x.occurred_at_raw ?? null,
+    properties: x.properties ?? null,
+  }));
+}
+
+// ★ 2026-08-01 §11-4 — 구매 원장(purchases) 커서. 싱크에이전트로 들어온 구매가 이 문이다.
+//   이벤트 커서와 **같은 규약**(도착 축 + 행 id 타이브레이커 + 실제로 본 마지막 행까지만 전진)이라
+//   planCdpCursorBatch를 그대로 재사용한다. 반환 형태도 CdpEventRow로 맞춘다.
+//
+//   시간대: `purchases.purchase_date`·`created_at`은 **timezone 없는 KST 적재값**이다(database/schema.sql).
+//     - 커서·창 비교는 우리 timestamptz를 세션 시간대 wall-clock으로 바꿔 컬럼과 같은 기준에 놓는다
+//       (컬럼 쪽에 변환을 걸면 인덱스를 못 탄다).
+//     - JS로 돌려줄 때만 timestamptz로 되돌린다 — 커서 컬럼이 timestamptz라 축이 섞이면 안 된다.
+//
+//   과거분 소급 차단 = `purchase_date` 창. 도착 축으로는 못 막는다(이관은 오늘 도착한다).
+export async function selectPurchaseLedgerRowsForCursor(
+  companyId: string,
+  filters: Record<string, any>,
+  cursor: { at: Date | string; rowId?: string | null },
+  windowEnd: Date | string,
+  maxAgeHours: number,
+  chunkLimit: number,
+): Promise<CdpEventRow[]> {
+  const params: any[] = [companyId, cursor.at, windowEnd, String(maxAgeHours)];
+  let cursorClause: string;
+  if (cursor.rowId) {
+    params.push(cursor.rowId);
+    cursorClause = `(p.created_at, p.id) > (($2::timestamptz AT TIME ZONE current_setting('TimeZone')), $${params.length}::uuid)`;
+  } else {
+    cursorClause = `p.created_at > ($2::timestamptz AT TIME ZONE current_setting('TimeZone'))`;
+  }
+  const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+  params.push(String(chunkLimit));
+  const r = await query(
+    `SELECT p.id,
+            p.customer_id,
+            (p.created_at AT TIME ZONE current_setting('TimeZone')) AS arrived_at,
+            (p.created_at AT TIME ZONE current_setting('TimeZone'))::text AS arrived_at_raw,
+            (p.purchase_date AT TIME ZONE 'Asia/Seoul') AS occurred_at,
+            jsonb_strip_nulls(jsonb_build_object(
+              'total_amount', ROUND(COALESCE(p.total_amount, 0))::bigint,
+              'product_name', p.product_name,
+              'product_code', p.product_code,
+              'store_name', COALESCE(NULLIF(p.store_name, ''), p.store_code)
+            )) AS properties
+       FROM purchases p
+       INNER JOIN customers c ON c.id = p.customer_id AND c.company_id = $1::uuid
+      WHERE p.company_id = $1::uuid
+        AND p.customer_id IS NOT NULL
+        AND ${cursorClause}
+        AND p.created_at <= ($3::timestamptz AT TIME ZONE current_setting('TimeZone'))
+        AND p.purchase_date IS NOT NULL
+        AND p.purchase_date >= ((NOW() - ($4 || ' hours')::interval) AT TIME ZONE 'Asia/Seoul')
+        AND p.purchase_date <= (NOW() AT TIME ZONE 'Asia/Seoul')
+        AND ${buildJourneySafetyFilter('c')}
+        ${cond ? ` AND ${cond}` : ''}
+      ORDER BY p.created_at ASC, p.id ASC
+      LIMIT $${params.length}::int`,
+    params,
+  );
+  return r.rows.map((x: any) => ({
+    customerId: x.customer_id,
+    eventId: x.id,
+    createdAt: x.arrived_at,
+    occurredAt: x.occurred_at,
+    // 커서 전진용 DB 원문 — JS Date 왕복은 마이크로초를 절사해 마지막 밀리초 묶음이 재진입한다(2026-08-02).
+    createdAtRaw: x.arrived_at_raw ?? null,
     properties: x.properties ?? null,
   }));
 }

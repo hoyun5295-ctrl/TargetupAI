@@ -60,9 +60,10 @@ export function resolveTriggerAvailability(facts: CompanyJourneyFacts): TriggerA
   const no = (key: TriggerKey, reason: string): TriggerAvailability => ({ key, available: false, reason });
 
   return [
+    // ★ 2026-08-01 §11-4: 구매는 문이 둘이다(자사몰 주문 / 매장·ERP 싱크). 사유도 한쪽만 가리키지 않는다.
     f.hasPurchaseEvents
-      ? yes('purchase', '주문이 들어오면 발송합니다.')
-      : no('purchase', '자사몰 주문 정보가 아직 들어오지 않았어요. 연동하면 열립니다.'),
+      ? yes('purchase', '구매가 들어오면 발송합니다.')
+      : no('purchase', '구매 정보가 아직 들어오지 않았어요. 자사몰이나 매장 시스템을 연동하면 열립니다.'),
 
     no('reservation', RESERVATION_REASON),
 

@@ -861,7 +861,7 @@ export async function activateJourney(companyId: string, journeyId: string, user
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid AND status IN ('draft', 'paused')
        AND (threshold_recipients_per_step IS NOT NULL OR trigger_event = ANY($4::text[]))
-     RETURNING id`,
+     RETURNING id, approved_at`,
     // ★ 2026-08-01 Codex 5R — 상한 검사를 쓰기와 원자화한다.
     //   위에서 SELECT로 확인만 하면, 그 사이 옵션 저장이 상한을 비워도 활성화가 그대로 성사돼
     //   상한 NULL인 활성 여정이 남는다(워커는 상한이 없으면 상한 검사를 건너뛴다).
@@ -905,6 +905,33 @@ export async function activateJourney(companyId: string, journeyId: string, user
       );
     } catch (e: any) {
       console.warn('[activateJourney] cdp 이벤트 커서 초기화 실패:', e?.message);
+    }
+    // ★ 2026-08-01 §11-4: 구매 원장 커서를 **활성화 시각(approved_at)** 으로 잡는다.
+    //   ⛔ NOW()를 쓰면 안 된다 — 활성화 UPDATE는 이미 커밋됐고 그 뒤로 여러 await가 지난다.
+    //     그 사이에 적재된 구매는 `created_at > 커서` 엄격 비교에서 영구히 빠진다(Codex 지적, 내 판단이 깨진 자리).
+    //     활성화가 찍은 시각을 그대로 쓰면 그 창이 0이 된다.
+    //   ⛔ 커서가 NULL인 여정은 워커가 원장 문을 아예 안 연다 — 기준이 없는 채로 열면 활성화 이전 구매까지
+    //     소급 발송된다. 그래서 이 자리가 원장 문의 유일한 개시 지점이다(DDL 후 기존 활성 여정은 DDL이 재기준).
+    //   ⛔ 여기서 throw하지 않는다. 활성화 UPDATE는 **이미 커밋**됐으므로 예외를 올리면
+    //     "여정은 켜졌는데 호출자는 실패를 받는" 상태가 된다. 재시도해도 status가 이미 active라
+    //     활성화 UPDATE의 WHERE(draft·paused)가 걸려 영원히 "켜지 못했습니다"만 돌아온다.
+    //     커서를 못 심으면 워커가 원장 문을 안 여는 쪽(=안전)으로 남고, DDL 재기준 UPDATE로 되살릴 수 있다.
+    //     앞의 snapshot·baseline 단계도 같은 이유로 삼킨다 — 같은 규약을 따른다.
+    try {
+      await query(
+        `UPDATE journeys SET last_purchase_cursor = $2::timestamptz
+          WHERE id = $1::uuid
+            AND trigger_event = 'cdp.purchase'
+            AND last_purchase_cursor IS NULL`,
+        [journeyId, r.rows[0].approved_at],
+      );
+    } catch (e: any) {
+      if (e?.code === '42703') {
+        console.warn('[activateJourney] 구매 원장 커서 컬럼 미마이그레이션 — 원장 문은 DDL 후 열린다');
+      } else {
+        // 조용히 넘기면 그 여정만 영원히 원장 진입 0이 된다 — 복구 대상으로 식별되게 남긴다.
+        console.error(`[activateJourney] 구매 원장 커서 초기화 실패 journey=${journeyId} — 원장 문 미개방(복구: DDL 재기준 UPDATE):`, e?.message || e);
+      }
     }
   }
 
