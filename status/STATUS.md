@@ -34,7 +34,7 @@
 > **회전 룰:** 잔여가 0이면 카드를 지운다(원문 = archive/TASKS_YYYY-MM.md + memory). 남은 일만 아래 "완료분 잔여"에 한 줄. 30KB 초과 = 회전 미이행.
 
 ### 0801 여정 재설계 — **§11 착수 1~5 전량 push(`387526bc`) + DDL 전부 실행완료**, 배포 대기
-> 기능 상설 = **[여정](docs/FEATURE-JOURNEY.md)**(호출어 "여정" — 불변 원칙·구조·이력) · 트랙 SoT [재설계 설계서](docs/2026-08-01-journey-redesign-design.md) · 기억 [[project_2026_0801_journey_redesign]] · 호출어 **여정 재설계 이어가자** · 다음 = 배포 → 실측 → **§12(예약·날짜축·중단)** 또는 **§13(화면)** — 둘 다 착수 가능 수준 설계 완료
+> 기능 상설 = **[여정](docs/FEATURE-JOURNEY.md)**(호출어 "여정" — 불변 원칙·구조·이력) · 트랙 SoT [재설계 설계서](docs/2026-08-01-journey-redesign-design.md) · 기억 [[project_2026_0801_journey_redesign]] · **0802 배포완료** · 다음 = **호출어 「여정 예약 착수」** → 설계서 §12. ⛔ 착수 전 Harold 확인 2건이 범위를 가른다(§12-0) — 그것부터 묻고 시작
 > ⛔ 불변 원칙 8개는 [여정 문서 §2](docs/FEATURE-JOURNEY.md)가 소유 — 착수 전 그것부터 읽는다
 > 잔여 = 배포·실측(§11-C-6 + 신규 5종 화면) · §12(Harold 확인 2건 선행: 예약 데이터 보유사·취소 구분) · §13(화면) · 상품 결정 2(등급 방향 필터·자동 종료 기본화) · 별건 2(journey-stats 'order' 축 · schema template TIMESTAMPTZ)
 
