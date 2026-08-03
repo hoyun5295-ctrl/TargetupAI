@@ -13,7 +13,7 @@
 | DB 쿼리 작성 / 스키마 확인 | SCHEMA.md | 대상 테이블 절만 |
 | 도메인 작업 착수 전 사고 이력 (룰 원천=CLAUDE.md `read_lessons_first`) | lessons/LESSONS_{DB,FRONTEND,BACKEND,DEPLOY,ARCHITECTURE,META}.md | 해당 도메인 전체. DB·돈·환불=DB / UI·모달=FRONTEND / API·발송·AI=BACKEND / 배포·빌드·SSH=DEPLOY+OPS.md 해당 절 / 컨트롤타워=ARCHITECTURE / **매 답변 직전=META** |
 | **Harold님이 "브레인스토밍"이라고 말했을 때** · superpowers 스킬 선택 · Codex 라운드 운영 | **COLLAB.md** | 브레인스토밍 = §1 전체 정독 후 그대로 진행(의무) / 그 외 = 해당 절만 |
-| **기능 이름을 부를 때**(여정·정산·DM·인앱 등) — 그 기능의 구조·불변 원칙·이력 | **[SOT-INDEX.md §0 기능 상설 SoT](SOT-INDEX.md)** | 해당 기능 행 → 그 기능 문서. 예: **"여정"** → [FEATURE-JOURNEY.md](../docs/FEATURE-JOURNEY.md) |
+| **기능 이름을 부를 때** — 그 기능의 구조·불변 원칙·이력 | **[SOT-INDEX.md §0 기능 상설 SoT](SOT-INDEX.md)** | 해당 기능 행 → 그 기능 문서. **"여정"** → [FEATURE-JOURNEY.md](../docs/FEATURE-JOURNEY.md) · **"싱크에이전트"** → [FEATURE-SYNC-AGENT.md](../docs/FEATURE-SYNC-AGENT.md). 기능마다 자기 .md가 이력을 소유하고 STATUS는 참조만 한다(신규 기능도 이 형태로 등재) |
 | **프로젝트·트랙 SoT 문서·호출어를 찾을 때** | **[SOT-INDEX.md](SOT-INDEX.md)** | 해당 트랙 행만. **신규 프로젝트 SoT는 이 라우팅 표가 아니라 SOT-INDEX.md에 등재한다**(이 표는 도메인 문서 전용 상설) |
 | 시스템 구조 파악 | ARCHITECTURE.md | 해당 절만 |
 | 자사몰 연동·CDP·커넥터 작업 | INTEGRATIONS.md | 해당 provider 카드 / CDP 공통 절 |
@@ -21,7 +21,7 @@
 | 과거 작업 조회·회귀 의심 | archive/INDEX.md → TASKS_YYYY-MM.md | grep 적중 항목만 |
 | 의사결정 배경 확인 | DECISIONS.md | 해당 ADR |
 | 리스크 전체 확인 | RISKS.md | 전체 |
-| 싱크에이전트 이슈 진단 | SYNC-AGENT-TROUBLESHOOTING.md | 해당 증상 절 (isae 현장 완료 이력 = archive/SYNC-AGENT-ISAE-2026-06-30-HANDOFF.md grep) |
+| 싱크에이전트 **증상별 진단**(구조·원칙은 위 기능 문서) | SYNC-AGENT-TROUBLESHOOTING.md | 해당 증상 절 (isae 현장 완료 이력 = archive/SYNC-AGENT-ISAE-2026-06-30-HANDOFF.md grep) |
 | 옛 설계서·핸드오프·디버그노트 | archive/DESIGNS/ (archive/INDEX.md 경유) | grep 적중 문서만 |
 | Codex 등 외부 에이전트 온보딩·리뷰 판정 기준 | AGENTS.md (레포 루트) | 전체 (경량 유지 — 룰 원천은 CLAUDE.md, 여긴 축약판) |
 
@@ -48,10 +48,9 @@
 > ⛔ 절사는 **항목줄에서 1회**(0730 정정 — 행 단위는 폐기. 계정별 발행이 합산과 1원 다른 것은 의도) / 미발행 draft 중 소수 단가 회사분은 삭제·재생성해야 새 산식 반영 / 실청구 발행은 직원 단가·선불 재점검 완료 후 — `DEFAULT_COSTS` 잔존 9곳 + 라운드 숫자 2곳(SoT §9-1) / draft 삭제·재발행은 **화면에서**, psql DELETE 금지
 > 잔여 = 실회사 드라이런(발행→PDF→메일→삭제) · 거래내역서 MMS 308,043건 · 이월 판단 8건(SoT §9 — `G` 유형 과금 분류 · 크레딧 스냅샷 소급 ALTER · 일할 자동지급 재배선 · 해지 표현 · `by_agent` 지점별 발행 · `/preview` 배선 · 141사 일괄 발행 · 테스트 발송 환불 zero-uuid 결함=BUGS.md)
 
-### 싱크에이전트 — 0803 구매 증분 유실 정정: 서버 배포완료 + 에이전트 1.7.0 코드완료(**Codex 적대검증 5R approve**)
-> 기능 상설 = **[싱크에이전트](../docs/FEATURE-SYNC-AGENT.md)**(호출어 "싱크에이전트" — 불변 원칙·커서 규약 §4·구조·이력) · 검증·출고 = [빌드 런북](../docs/2026-07-28-sync-agent-build-verification-runbook.md) §4 · 기억 [[project_2026_0727_sync_agent_vm_verification]] · 다음 = tp-push → 빌드(`build:tiers`) → 로컬 smoke(도커 MySQL 전체+증분) → 원격 릴리즈 경로 검증 → 아난티 출고
-> ⛔ **아난티 1.6.4 출고 폐기 → 1.7.0** — 커서 결함이 전 버전 공통(엔진 코드) / OS 민감 경로(마법사·라우팅·서비스 등록)는 1.7.0에서 무변경 — 1.6.4 검증 계보 유지, 커서 delta만 로컬 smoke(Server 2016 VM은 삭제됨) / 리뷰 판정 13건 전량 수용 이력 = 기능 문서 §4·§5(닫힌 버킷·fail-closed 키·fingerprint)
-> 잔여 = 빌드·smoke · 원격 릴리즈 경로 검증 · 아난티 출고 · backdating 재대조 워커(별건) · 마법사 탈출구 배너(이월)
+### 싱크에이전트 — 0803 구매 증분 유실 정정 배포완료 · 아난티 출고 대기
+> 호출어 **"싱크에이전트"** → **[FEATURE-SYNC-AGENT.md](../docs/FEATURE-SYNC-AGENT.md)가 전부 소유** — 착수 전 필독 §9 · 불변 원칙 §2 · 커서 규약 §4 · 배포 게이트 §5 · 원격 릴리즈 §6 · 이력 §7 · 재싱크·출고 절차 §8 · 기억 [[project_2026_0727_sync_agent_vm_verification]]
+> 잔여 = 아난티 출고([§8](../docs/FEATURE-SYNC-AGENT.md)) · 원격 릴리즈 버전 판정 가드([§6](../docs/FEATURE-SYNC-AGENT.md)) · backdating 재대조 워커([§4](../docs/FEATURE-SYNC-AGENT.md)) · 마법사 탈출구 배너([런북 §6](../docs/2026-07-28-sync-agent-build-verification-runbook.md))
 
 ### 0729 브랜드메시지 — 청구축·발송경로 재구축 **전량 배포완료**(`4864d5d9` — 0731 Codex 11R SHIP)
 > SoT [청구·개방](docs/2026-07-29-brand-message-billing-design.md) §7 · [발송경로 재구축](docs/2026-07-29-brand-message-qtmsg-agent-design.md) §8 구현 결과 · **§9 표시 축 재구축**(0731 실측이 깬 것 — 배포완료) · 기억 [[project_2026_0729_brand_message_billing]] · 다음 = 재측정(대체발송 `SM`으로) → 브랜드 단가 입력(여미지 `B0227`)·발행 실측
@@ -76,7 +75,7 @@
 ### 0727 여정 알림톡 + 환불 의무 — 전량 배포완료
 > SoT 알림톡·잔액 = 기억 [[project_2026_0727_journey_alimtalk_and_agent_tls]] · 환불 = [BUGS.md](BUGS.md) B-0727-1·2 · 다음 = 운영 확인(알림톡 대체문안 CT `utils/alimtalk-fallback.ts` `f91d5ea5` / `balance_transactions.refund_key` 원인별 분리, DDL 실행 완료)
 > ⛔ 대체문안 선택이 `대체문안 작성(B)`인데 문안이 비면 저장·활성화·발송 세 지점에서 차단 — `원문 그대로(L)`는 게이트웨이가 우리 `msg_contents`를 그대로 내보낸다
-> 잔여 = 운영 확인만. **싱크에이전트 TLS+키셋(1.6.4)은 서버 배포 축이 아니라 에이전트 zip 빌드 대기**
+> 잔여 = 운영 확인만 (에이전트 축은 0803 1.7.0에 흡수 — [싱크에이전트 문서](../docs/FEATURE-SYNC-AGENT.md))
 
 ### 0731 인앱 이미지 클릭 랜딩 + 스튜디오 행사 트랙 — 배포완료(Codex 4R approve), 실측 대기
 > SoT = 기억 [[project_2026_0731_inapp_image_link_studio_event_track]] · 다음 = 실측 5건(포스터 링크 클릭·캐러셀 슬라이드별·인라인 카드 몰 DOM 무손상·행사 트랙 생성·샘플 배치 curl) — 0721 캐러셀 실측 이 왕복에 흡수. ⚠몰 반영은 SDK 서빙 캐시·브라우저 캐시라 Ctrl+Shift+R 후 확인
@@ -132,7 +131,6 @@
 ## 3) 진행 예정 작업 (TODO)
 
 > 완료분 원문 = [archive/DONE_LOG_2026.md](archive/DONE_LOG_2026.md) "STATUS §3 TODO 완료분 회전 (2026-07-07)" 절.
-> Sync Agent v1.6.1 = 2026-07-10 종결(이새 1.5.7 유지가 정상 — 자기교체 결함, 타 ERP 전환 때 신규 배포).
 
 - [ ] **직원 버그리포트 실동작 검증**: 8차 B8-01~B8-13(app.hanjul.ai) · 9차 S9-04/S9-08(발송결과 성능 + sent_at 정확성) · D39 세션2(필터 UI + AI 보유필드)
 - [ ] **AI 맞춤한줄 Phase 2**: 실서비스 통합 테스트(실제 발송) — Harold 검증 대기

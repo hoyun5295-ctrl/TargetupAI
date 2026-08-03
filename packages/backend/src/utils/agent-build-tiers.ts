@@ -217,7 +217,9 @@ export const CURRENT_AGENT_VERSION = '1.7.0';
 //   win-2008r2__oracle-10g : 2026-06-24 VM(2008R2 RTM 6.1.7600) + Oracle 10g(10.2.0.4) 스모크 통과(당시 1.5.x 세대).
 //   win-modern__mysql      : 2026-07-27 Server 2016 VM 전체 통과(1.6.4 세대 — VM은 검증 후 삭제됨).
 export const VERIFIED_COMBOS = new Set<string>([
-  // 1.7.0 세대 등재 0건 — 조합별 스모크 통과 시마다 여기 추가한다(케이스바이케이스 개방).
+  // 조합별 스모크 통과 시마다 여기 추가한다(케이스바이케이스 개방).
+  // 2026-08-03 smoke-combos PASS — v1.7.0 exe 실행·도커 MySQL 접속·테이블/컬럼 판독·PK 해석(member_id) 확인.
+  'win-modern__mysql__1.7.0',
 ]);
 
 /**
