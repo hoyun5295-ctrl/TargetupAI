@@ -1088,7 +1088,7 @@ AI가 등급명을 읽고 초안 순서를 매겨 두므로 대부분 확인 한
   ⚠ 오래 열어 둔 모달의 나중 저장이 앞 설정을 덮는 것은 남겨 둔다(회사 설정이라 마지막 확인이 정답인 축).
 - 잠금 푸는 버튼이 **도달 불가능**했다 — 빠른 시작 7종에 등급 템플릿이 없어 `TEMPLATE_TRIGGER_KEY`로는 `grade` 키가 나오지 않는다. → capability key를 **`trigger_event`에서** 끌어오고(`capabilityKeyOf`), 죽은 분기는 지웠다. 진입점은 고객 데이터 화면과 추천 모달 둘이다.
 
-### §14-6 배포 후 DDL
+### §14-6 DDL — **2026-08-02 실행완료**
 
 ```sql
 CREATE TABLE IF NOT EXISTS customer_grade_ranks (

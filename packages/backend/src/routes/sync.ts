@@ -26,6 +26,14 @@ import { isAgentVersionGte, ACK_MIN_AGENT_VERSION, applyCommandAcks, markCommand
 import { updateCustomerPurchaseAggregates } from '../utils/customer-purchase-aggregates';
 // ★ 2026-07-03: 필드정의 변경 시 활성 필드 캐시 무효화 (고객DB 현황 성능 캐시)
 import { clearEnabledFieldsCache } from '../utils/enabled-fields';
+// ★ 2026-08-03: 원본 행 키 기반 구매 멱등 적재 CT — 재싱크·재전송이 중복 행을 만들지 않게 한다.
+import {
+  normalizeSourceRowKey,
+  dedupeBySourceRowKey,
+  buildPurchaseIngestSql,
+  isUndefinedColumnError,
+  PurchaseIngestRow,
+} from '../utils/sync-ingest';
 
 const router = Router();
 
@@ -947,12 +955,7 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
     const failures: Array<{ phone: string; reason: string }> = [];
 
     // 1단계: JS에서 phone validation + normalize 먼저 필터링
-    const validPurchases: Array<{
-      phone: string; purchase_date: string | null;
-      store_code: string | null; store_name: string | null;
-      product_code: string | null; product_name: string | null;
-      quantity: number | null; unit_price: number | null; total_amount: number | null;
-    }> = [];
+    const rawPurchases: PurchaseIngestRow[] = [];
 
     for (const p of purchases) {
       if (!p.customer_phone) {
@@ -966,13 +969,24 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
         failures.push({ phone: p.customer_phone, reason: 'invalid phone format' });
         continue;
       }
-      validPurchases.push({
+      // ★ 2026-08-03: 원본 행 키 — 상한을 넘으면 자르지 않고 그 행만 거부한다(자르면 다른 행이 같은 키가 된다).
+      const keyResult = normalizeSourceRowKey(p.source_row_key);
+      if (!keyResult.ok) {
+        failedCount++;
+        failures.push({ phone, reason: keyResult.reason });
+        continue;
+      }
+      rawPurchases.push({
         phone, purchase_date: p.purchase_date || null,
         store_code: p.store_code || null, store_name: p.store_name || null,
         product_code: p.product_code || null, product_name: p.product_name || null,
-        quantity: p.quantity || null, unit_price: p.unit_price || null, total_amount: p.total_amount || null
+        quantity: p.quantity || null, unit_price: p.unit_price || null, total_amount: p.total_amount || null,
+        source_row_key: keyResult.value,
       });
     }
+
+    // 같은 원본 행이 한 배치에 두 번 오면 ON CONFLICT가 터진다 — 마지막 것만 남긴다.
+    const validPurchases = dedupeBySourceRowKey(rawPurchases);
 
     // 2단계: 전체 phone 목록으로 customer_id 벌크 조회
     const allPhones = [...new Set(validPurchases.map(r => r.phone))];
@@ -988,55 +1002,32 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
       }
     }
 
-    // 3단계: 벌크 INSERT (500건씩 청크)
+    // 3단계: 벌크 적재 (500건씩 청크)
+    //   ★ 2026-08-03: SQL 조립은 sync-ingest CT가 소유한다(라우트 인라인 금지).
+    //     원본 행 키가 실린 행은 멱등 UPSERT, 키 없는 행(옛 에이전트)은 지금까지와 같은 INSERT.
+    //     배포 직후 ~ DDL 실행 전 구간은 42703을 잡아 legacy 경로로 한 번 내려가고 그대로 견딘다.
     const P_CHUNK = 500;
+    let useSourceKey = true;
     for (let i = 0; i < validPurchases.length; i += P_CHUNK) {
       const chunk = validPurchases.slice(i, i + P_CHUNK);
       try {
-        const COLS = 11; // 파라미터 개수 per row
-        const values: any[] = [];
-        const valueClauses: string[] = [];
-
-        for (let j = 0; j < chunk.length; j++) {
-          const offset = j * COLS;
-          valueClauses.push(`($${offset+1},$${offset+2},$${offset+3},$${offset+4},$${offset+5},$${offset+6},$${offset+7},$${offset+8},$${offset+9},$${offset+10},$${offset+11},NOW())`);
-          const r = chunk[j];
-          values.push(
-            companyId, phoneToCustomerId[r.phone] || null, r.phone,
-            r.purchase_date, r.store_code, r.store_name,
-            r.product_code, r.product_name,
-            r.quantity, r.unit_price, r.total_amount
-          );
-        }
-
-        const result = await query(
-          `INSERT INTO purchases (
-            company_id, customer_id, customer_phone, purchase_date,
-            store_code, store_name, product_code, product_name,
-            quantity, unit_price, total_amount, created_at
-          ) VALUES ${valueClauses.join(',')}`,
-          values
-        );
-
+        const built = buildPurchaseIngestSql(chunk, companyId, phoneToCustomerId, useSourceKey);
+        const result = await query(built.sql, built.params);
         insertedCount += result.rowCount || chunk.length;
       } catch (chunkError: any) {
+        // 신규 컬럼 미생성 = DB 마이그레이션 대기 구간. 적재를 멈추지 않고 legacy로 내려 같은 청크를 다시 처리한다.
+        if (useSourceKey && isUndefinedColumnError(chunkError)) {
+          console.warn('[Sync] purchases.source_row_key 미생성 — DB 마이그레이션 필요(ALTER 실행 요청). legacy 적재로 대체합니다.');
+          useSourceKey = false;
+          i -= P_CHUNK;
+          continue;
+        }
         // ★ D142 (2026-04-28) PDF 0428 #11: purchases도 동일 패턴 — 단건 재시도로 실패 행만 식별
-        console.warn(`[Sync] Purchases chunk ${Math.floor(i / P_CHUNK) + 1} 일괄 INSERT 실패 → 단건 재시도: ${chunkError.message || chunkError}`);
+        console.warn(`[Sync] Purchases chunk ${Math.floor(i / P_CHUNK) + 1} 일괄 적재 실패 → 단건 재시도: ${chunkError.message || chunkError}`);
         for (const r of chunk) {
           try {
-            await query(
-              `INSERT INTO purchases (
-                company_id, customer_id, customer_phone, purchase_date,
-                store_code, store_name, product_code, product_name,
-                quantity, unit_price, total_amount, created_at
-              ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())`,
-              [
-                companyId, phoneToCustomerId[r.phone] || null, r.phone,
-                r.purchase_date, r.store_code, r.store_name,
-                r.product_code, r.product_name,
-                r.quantity, r.unit_price, r.total_amount,
-              ]
-            );
+            const one = buildPurchaseIngestSql([r], companyId, phoneToCustomerId, useSourceKey);
+            await query(one.sql, one.params);
             insertedCount++;
           } catch (rowError: any) {
             failedCount++;

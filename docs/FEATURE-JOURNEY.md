@@ -45,12 +45,15 @@
 | **원장** | `utils/journey-entry-ledger.ts` | 진입 기억(baseline·entered) + 상태 기억(state) |
 | **문 판정** | `utils/journey-purchase-ledger.ts` | 구매 원장 문 개방 · 실행 시간대 · 창 |
 | **실행** | `utils/journey-executor.ts` | 스텝 발송 · 종료 신호 판정 · send-time |
-| **생성·활성화** | `utils/journey-builder.ts` | 템플릿 · 저장 화이트리스트 · 활성화 게이트 · 기준선 |
+| **생성·활성화** | `utils/journey-builder.ts` | 템플릿 · 저장 화이트리스트 · 활성화 게이트 · 기준선 · 스텝 추가/삭제 · **검증 무효화 단일 문**(`withJourneyValidationReset`) |
 | **안전** | `utils/journey-safety-filter.ts` · `journey-intake-grace.ts` | 발송 자격 필터 · 이관 유예 |
 | **화면 카탈로그** | `frontend/utils/journey-trigger-catalog.ts` | 트리거 카드 · 이벤트 변수 호환 판정 · **배열 순서 = 표시 순서** |
 | **화면 — 진입** | `frontend/components/journey/JourneyPlanModal.tsx` | 추천 근거·목적·스텝 수 이유·데이터 가능 여부 |
 | **화면 — 스텝** | `frontend/components/journey/JourneyStepStudio.tsx` | 한 화면 = 스텝 하나 완결 · 스텝별 전환 · 야간 안내 |
 | **화면 — 저장** | `frontend/components/journey/JourneyBriefingModal.tsx` | 브리핑 · 스텝 클릭 상세 (판정은 페이지의 `collectStepIssues`가 소유) |
+| **화면 — 마케팅 진입** | `frontend/components/journey/MarketingJourneyModal.tsx` | 자연어 입력 · 빠른 시작(메인에서 옮겨 온 것) |
+| **화면 — 데이터 안내** | `frontend/components/journey/JourneyDataScopeNote.tsx` | "연동이 여정의 폭을 정한다" 공통 문구 — 메인·세 모달이 공유 |
+| **화면 — 모달 껍데기** | `frontend/components/journey/JourneyModalShell.tsx` | dialog 의미 · 초기 포커스 · Tab 가둠 · Esc · 포커스 복귀. 여정 모달 전부가 이 안에 |
 
 **정합 가드** — `journey-trigger-catalog-parity.test.ts`가 카탈로그↔백엔드↔AI 추천 집합 일치를 고정한다. 어긋나면 화면엔 보이는데 0건이 된다.
 
@@ -85,6 +88,7 @@
 | `journey_anchor_dispatch` | PK(journey, step, customer, send_date) | 고객별 발송일 멱등 — §12 날짜축의 기반 |
 | `cdp_events` | `(company_id, event_name, created_at, id)` | 도착 축 커서 조회 |
 | `purchases` | `(company_id, created_at, id)` | 원장 커서 조회 |
+| `customer_grade_ranks` | 회사별 등급 서열(2026-08-02 실행완료) | 등급 **상승** 판정의 유일한 근거 — 표가 비면 트리거 잠금 |
 
 상세 = [SCHEMA.md](../status/SCHEMA.md) 해당 절.
 
@@ -96,13 +100,15 @@
 |---|---|---|
 | 2026-08-01~02 | **재설계** — 트리거 15종·데이터 게이트·커서 축 전환·연동 배선·트리거 재정의 | [설계서](2026-08-01-journey-redesign-design.md) — 착수 순서 §11 / 구현 결과 §11-A~§11-D-7 |
 | 2026-08-02 | **화면 흐름 전면 재작성** — 자연어 → 추천 모달 → 스텝별 전환 → 브리핑 모달 · 저장 후 스텝 추가·삭제 API · AI 문안 맥락 | [설계서 §13·§13-A](2026-08-01-journey-redesign-design.md) |
+| 2026-08-02 | **진입 재구성 · MMS 이미지 · 모달 접근성** — 메인은 카드 3+데이터 안내만, 프롬프트·빠른 시작은 마케팅 모달로 / 이미지 없는 MMS 저장 차단 / 모달 껍데기 공용화 | [설계서 §13-B](2026-08-01-journey-redesign-design.md) |
+| 2026-08-02 | **등급 상승** — 회사가 확인한 서열로 상승만 발화. 배포·DDL 완료 | [설계서 §14](2026-08-01-journey-redesign-design.md) |
+| 2026-08-02 | **A/B 변이 소유 검증** — 상위 자원만 보고 대상 소속을 안 보던 구멍(쓰기·읽기 양쪽) | [설계서 §13-A-4](2026-08-01-journey-redesign-design.md) |
 | 2026-07-28 | 트리거 8종 개방(정보 알림 빌더) | `memory/project_2026_0728_tickets_journey_triggers.md` |
 | 2026-07-27 | 알림톡 대체문안 CT | `memory/project_2026_0727_journey_alimtalk_and_agent_tls.md` |
 | 2026-06-30 | 여정 일반화(date_anchor·one_shot) | SCHEMA 여정 절 |
 
-**남은 로드맵** — 착수 7번(화면 흐름) **2026-08-02 전량 코드 완료**([설계서 §13-A](2026-08-01-journey-redesign-design.md)).
-**등급 상승 = 2026-08-02 완료**([설계서 §14](2026-08-01-journey-redesign-design.md)) — 배포 후 `customer_grade_ranks` DDL 필요.
-다음 = 자동 종료 기본화(상품 결정 1건 잔여) · 화면 실측.
+**남은 로드맵** — 2026-08-02로 **재설계 착수 1~5 + 7(화면) + 등급 상승까지 전량 배포완료**(DDL 포함).
+다음 = 화면 실측 · 자동 종료 기본화(기존 여정 동작을 바꾸는 건이라 상품 결정) · 별건 3(활성화 snapshot 실패 시 active 잔존 · journey-stats `order` 축 · schema template TIMESTAMPTZ).
 **접음** = 착수 6번 예약([설계서 §12](2026-08-01-journey-redesign-design.md) 보존) · §5-2 고객별 중단·재계산(예약과 한 몸이라 함께 보류).
 
 ---
