@@ -1335,7 +1335,7 @@
 | company_id | uuid FK |
 | login_id | varchar(50) |
 | password_hash | varchar(255) |
-| user_type | varchar(20) |
+| user_type | varchar(20) | ★ 2026-08-03 실측 분포 = `admin` 126 · `user` 101(매장 배정 7) · `system` 75. **JWT의 `company_admin`·`company_user`는 토큰 변환값이라 DB에 없다** — 권한 판정을 토큰 어휘로 하면 제한 사용자(`user`)가 전체 권한으로 승격된다(자동마케팅 발송 범위 사고 기원) |
 | role | varchar(20) |
 | name | varchar(100) |
 | email | varchar(100) |

@@ -2490,6 +2490,10 @@ export interface FilterCountResult {
  * - CT-01 buildFilterWhereClauseCompat 활용
  * - 수신거부 필터 포함 (user_id 기준 — B17-01 준수)
  * - 에러 시 0명 반환 (전체고객 폴백 절대 방지 — D77)
+ *
+ * ⚠️ 2026-08-03: 이 함수는 **발송 게이트(발송 피로도·미클릭)를 보지 않는다.** 캠페인 AI 추천·대행 제안서처럼
+ *   그 게이트가 없는 경로 전용이다. 자동마케팅은 `utils/operator-audience.ts countOperatorAudience`만 쓴다 —
+ *   여기로 되돌리면 화면·통지 수가 다시 실발송보다 커진다(0803 재설계 A-1이 닫은 결함).
  */
 export async function countFilteredCustomers(
   companyId: string,

@@ -13,7 +13,7 @@
 | DB 쿼리 작성 / 스키마 확인 | SCHEMA.md | 대상 테이블 절만 |
 | 도메인 작업 착수 전 사고 이력 (룰 원천=CLAUDE.md `read_lessons_first`) | lessons/LESSONS_{DB,FRONTEND,BACKEND,DEPLOY,ARCHITECTURE,META}.md | 해당 도메인 전체. DB·돈·환불=DB / UI·모달=FRONTEND / API·발송·AI=BACKEND / 배포·빌드·SSH=DEPLOY+OPS.md 해당 절 / 컨트롤타워=ARCHITECTURE / **매 답변 직전=META** |
 | **Harold님이 "브레인스토밍"이라고 말했을 때** · superpowers 스킬 선택 · Codex 라운드 운영 | **COLLAB.md** | 브레인스토밍 = §1 전체 정독 후 그대로 진행(의무) / 그 외 = 해당 절만 |
-| **기능 이름을 부를 때** — 그 기능의 구조·불변 원칙·이력 | **[SOT-INDEX.md §0 기능 상설 SoT](SOT-INDEX.md)** | 해당 기능 행 → 그 기능 문서. **"여정"** → [FEATURE-JOURNEY.md](../docs/FEATURE-JOURNEY.md) · **"싱크에이전트"** → [FEATURE-SYNC-AGENT.md](../docs/FEATURE-SYNC-AGENT.md). 기능마다 자기 .md가 이력을 소유하고 STATUS는 참조만 한다(신규 기능도 이 형태로 등재) |
+| **기능 이름을 부를 때** — 그 기능의 구조·불변 원칙·이력 | **[SOT-INDEX.md §0 기능 상설 SoT](SOT-INDEX.md)** | 해당 기능 행 → 그 기능 문서. **"여정"** → [FEATURE-JOURNEY.md](../docs/FEATURE-JOURNEY.md) · **"싱크에이전트"** → [FEATURE-SYNC-AGENT.md](../docs/FEATURE-SYNC-AGENT.md) · **"자동마케팅"** → [FEATURE-AUTOMARKETING.md](../docs/FEATURE-AUTOMARKETING.md). 기능마다 자기 .md가 이력을 소유하고 STATUS는 참조만 한다(신규 기능도 이 형태로 등재) |
 | **프로젝트·트랙 SoT 문서·호출어를 찾을 때** | **[SOT-INDEX.md](SOT-INDEX.md)** | 해당 트랙 행만. **신규 프로젝트 SoT는 이 라우팅 표가 아니라 SOT-INDEX.md에 등재한다**(이 표는 도메인 문서 전용 상설) |
 | 시스템 구조 파악 | ARCHITECTURE.md | 해당 절만 |
 | 자사몰 연동·CDP·커넥터 작업 | INTEGRATIONS.md | 해당 provider 카드 / CDP 공통 절 |
@@ -32,6 +32,11 @@
 > **카드 스키마(고정 4줄):** 제목 / `SoT·기억·다음` / `⛔` 금지·불변 조건(있을 때만) / `잔여`. 그 이상 쓰지 않는다.
 > **경위·수치·근본원인·함정은 SoT 문서와 memory가 소유한다.** 여기 재서술 = doc_ownership 위반. 지우기 전 소유 문서에 그 사실이 실존하는지 grep으로 확인하고, 없으면 소유 문서에 먼저 옮긴 뒤 지운다.
 > **회전 룰:** 잔여가 0이면 카드를 지운다(원문 = archive/TASKS_YYYY-MM.md + memory). 남은 일만 아래 "완료분 잔여"에 한 줄. 30KB 초과 = 회전 미이행.
+
+### 자동마케팅 타겟팅 재설계 — 코드 완료·Codex 8R 반영, **DDL·빌드 대기**
+> 호출어 **"자동마케팅"** → **[FEATURE-AUTOMARKETING.md](../docs/FEATURE-AUTOMARKETING.md)가 전부 소유** — 필독 §1 · 불변 원칙 §2 · 대상 판정 계약 §4 · 리마인드 §5 · 이력 §7 · 뒤집힌 판단 §8 · 시점 설계 근거 [설계서](docs/2026-08-03-automarketing-targeting-redesign-design.md) · 기억 [[project_2026_0803_automarketing_targeting_redesign]]
+> ⛔ 배포 뒤 DDL 3컬럼(`zero_target_notified_at`·`segment_key`·`segment_params`) 먼저 — 그 전엔 계약 저장이 503 / 리마인드는 보류 상태(기능 문서 §5) / frontend 포함이라 배포 시 빌드 필요
+> 잔여 = **[설계서 §5-B 확정 순서](docs/2026-08-03-automarketing-targeting-redesign-design.md)** ①행동 축 확장(사건 축 — 재설계 절반) → ②리마인드 되살리기(발송결과 `app_etc1` 코호트) → ③신규 등록 계약 필수화 → ④DDL·빌드·화면 실측·배포. 범위 밖 = 일회성 발송 경로 통합 · manage-users 역할값 보안
 
 ### 0801 여정 재설계 — **0802 전량 배포완료**(착수 1~5 + 화면 + 등급 상승, DDL 포함)
 > 기능 상설 = **[여정](docs/FEATURE-JOURNEY.md)**(호출어 "여정" — 구조·불변 원칙·이력 색인 전부) · 트랙 SoT [재설계 설계서](docs/2026-08-01-journey-redesign-design.md) · 기억 [[project_2026_0801_journey_redesign]] · 다음 = 화면 실측

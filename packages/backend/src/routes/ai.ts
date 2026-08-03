@@ -11,9 +11,13 @@ import { filterByIndividualCallback } from '../utils/callback-filter';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
-import { buildSendableRecipientsSql, buildSendableRecipientsTopSql, resolveConditionColumns } from '../utils/operator-recipients';
+import { buildSendableRecipientsSql, buildSendableRecipientsTopSql, buildAudienceCountSql, resolveConditionColumns } from '../utils/operator-recipients';
 // ★ 2026-07-10 [타겟확인]: 발송 피로도 cap — dispatchProposalSend 준비부와 동일 산출(원칙 2)
 import { getFatigueCap } from '../utils/fatigue-guard';
+// ★ 2026-08-03 타겟팅 재설계 A-1: 자동마케팅 대상 수·명단은 발송과 같은 게이트를 쓰는 단일 문 경유.
+import {
+  resolveOperatorAudienceGates, compileOperatorAudience, listSegmentAvailability, resolveOperatorStoreScope,
+} from '../utils/operator-audience';
 import { aggregateCampaignPerformance } from '../utils/stats-aggregation';
 import { formatDateValue, getOpt080Number, buildAdMessage, buildAdSubject } from '../utils/messageUtils';
 import { resolveJourneyAdFlag } from '../utils/journey-ad-policy';
@@ -1453,6 +1457,31 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
 //   propose 결과 필터라 소유 대상이 없다. 접근 정책 = 같은 데이터를 전량 반환하는 preview-recipients와 동일(게이트+storeScope).
 //   WHERE = preview-recipients(실발송 대상 조회)와 동일 합성(안전필터+storeScope+filters). 피로도·클릭제외는 이 발송
 //   경로가 추출 단계에서 적용하지 않으므로 동봉하지 않는다(보여준 명단 = 나가는 명단 — 원칙 2, campaigns.ts 1589 실측).
+/**
+ * ★ 2026-08-03 A-6 — 이 회사에서 지금 쓸 수 있는 발송 대상 축과 사유.
+ *   화면은 이 결과만 보여준다. 우리가 "이 회사는 이게 된다"를 미리 정하지 않고, 근거가 있는 축만 열린다.
+ *   잠긴 축도 숨기지 않고 사유와 함께 보여준다 — 숨기면 담당자는 왜 없는지 알 수 없다.
+ */
+router.get('/operator/segments', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const ctx = await loadPlanContext(companyId);
+    if (!ctx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(ctx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
+    }
+    return res.json({ success: true, segments: await listSegmentAvailability(companyId) });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 컬럼 확인을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[AI Operator] segments 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '발송 대상 축 조회 실패' });
+  }
+});
+
 router.post('/operator/target-recipients', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -1466,33 +1495,68 @@ router.post('/operator/target-recipients', async (req: Request, res: Response) =
       return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
     }
 
-    const { filters } = req.body;
-    if (!filters || typeof filters !== 'object') {
-      return res.status(400).json({ success: false, error: 'filters가 필요합니다.' });
+    // ★ 2026-08-03 A-7: 계약 축(segment_key)이 오면 그 축으로, 아니면 종전대로 filters로.
+    const { filters, segment_key, segment_params, operator_id } = req.body;
+    const hasSegment = typeof segment_key === 'string' && segment_key.trim();
+    if (!hasSegment && (!filters || typeof filters !== 'object')) {
+      return res.status(400).json({ success: false, error: 'filters 또는 segment_key가 필요합니다.' });
     }
 
-    // 브랜드 격리 — preview-recipients 미러
-    let storeFilter = '';
-    const baseParams: any[] = [companyId];
-    if (userType === 'company_user' && userId) {
-      const scope = await getStoreScope(companyId, userId);
-      if (scope.type === 'filtered') {
-        storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
-        baseParams.push(scope.storeCodes);
-      } else if (scope.type === 'blocked') {
-        return res.json({ success: true, recipients: [], conditionColumns: [] });
+    // ⛔ 2026-08-03 7R 정정: 화면과 실발송이 같은 해석기를 쓴다. 종전엔 화면은 JWT 역할, 발송은 DB 역할이라
+    //   같은 사용자에게 두 판정이 갈렸다(역할 승격 후 옛 토큰이면 화면은 매장 제한·실발송은 전사).
+    // ⛔ 8R 정정: 기존 오퍼레이터를 편집 중이면 **그 오퍼레이터 소유자** 기준으로 센다. 관리자가 직원 것을 열면
+    //   화면은 전사 수를 보여주고 실발송은 직원 매장으로 나가 서로 달랐다. 신규 등록이면 지금 계정 기준.
+    let scopeOwner: string | null = userId || null;
+    if (typeof operator_id === 'string' && operator_id.trim()) {
+      const own = await query(
+        `SELECT created_by FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [operator_id.trim(), companyId],
+      );
+      if (own.rows.length === 0) return res.status(404).json({ success: false, error: '자동마케팅을 찾을 수 없습니다.' });
+      // 열람 권한 — 비관리자는 본인 것만(listProposals·approve와 같은 기준).
+      if (userType !== 'company_admin' && own.rows[0].created_by !== userId) {
+        return res.status(403).json({ success: false, error: '본인이 만든 자동마케팅만 확인할 수 있습니다.' });
       }
+      scopeOwner = own.rows[0].created_by || null;
     }
+    const scope = await resolveOperatorStoreScope(companyId, scopeOwner);
+    if (scope.blocked) {
+      return res.json({
+        success: true, recipients: [], total: 0, conditionColumns: [],
+        blockedReason: '담당 매장이 지정되지 않아 발송 대상을 정할 수 없습니다.',
+      });
+    }
+    const storeFilter = scope.storeFilter;
+    const baseParams: any[] = scope.baseParams;
 
-    const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, baseParams.length + 1);
-    // 조건 필드 동적 컬럼 — FIELD_MAP 화이트리스트 + displayName 라벨 단일 소스
-    const conditionColumns = resolveConditionColumns(filters, FIELD_MAP);
-    const { sql, params } = buildSendableRecipientsTopSql(filterWhere, filterParams, baseParams, storeFilter, null, null, conditionColumns);
-    const result = await query(sql, params);
+    const compiled = await compileOperatorAudience({
+      companyId,
+      segmentKey: hasSegment ? String(segment_key) : null,
+      segmentParams: segment_params,
+      legacyFilters: filters || {},
+      baseParams,
+    });
+    // 조건 필드 동적 컬럼 — FIELD_MAP 화이트리스트 + displayName 라벨 단일 소스.
+    //   계약 축은 조건 컬럼을 계약이 정하므로 filters 기반 동적 컬럼을 붙이지 않는다.
+    const conditionColumns = compiled.basis === 'segment' ? [] : resolveConditionColumns(filters || {}, FIELD_MAP);
+    // ★ 2026-08-03 A-1: 발송 게이트(피로도·미클릭)를 명단에도 적용. 종전 null·null이라 이 화면만 실발송보다 넓었다.
+    const gates = await resolveOperatorAudienceGates(companyId, null);
+    const { sql, params } = buildSendableRecipientsTopSql(
+      compiled.filterWhere, compiled.filterParams, baseParams, storeFilter, gates, conditionColumns,
+    );
+    const countSql = buildAudienceCountSql(compiled.filterWhere, compiled.filterParams, baseParams, storeFilter, gates);
+    const [result, totalRes] = await Promise.all([
+      query(sql, params),
+      // 총 수도 같은 조건·같은 게이트로 실측 — 명단(상한 100)과 수의 기준이 갈리지 않게.
+      query(countSql.sql, countSql.params),
+    ]);
 
     return res.json({
       success: true,
       recipients: result.rows,
+      total: Number(totalRes.rows[0]?.count) || 0,
+      basis: compiled.basis,
+      segmentKey: compiled.segmentKey,
       conditionColumns: conditionColumns.map((c) => ({ key: c.key, label: c.label })),
     });
   } catch (err: any) {
@@ -2034,6 +2098,8 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       auto_send_lead_minutes, budget_monthly, budget_daily, budget_alert_threshold, delivery_policy,
       sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode, copy_style,
       calendar_month, target_hint, mms_image_paths,
+      // ★ 2026-08-03 A-7: 세그먼트 계약(축 + 파라미터) — 지정하면 회차마다 같은 조건으로 컴파일된다.
+      segment_key, segment_params,
     } = req.body;
 
     // ★ 2026-07-05 마케팅 캘린더 경유 등록 — 같은 달에 살아있는 등록이 있으면 409(200크레딧 중복 차감 차단)
@@ -2082,6 +2148,10 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       copyStyle: typeof copy_style === 'string' ? copy_style : null,
       // ★ 2026-07-07 마케팅 캘린더 완비: 발송 대상 축 (createOperator가 화이트리스트 정규화)
       targetHint: typeof target_hint === 'string' ? target_hint : null,
+      // ★ 2026-08-03 A-7: 계약(createOperator가 화이트리스트·범위 정규화). 미지정 = 옛 방식(자유 해석).
+      segmentKey: typeof segment_key === 'string' ? segment_key : null,
+      segmentParams: segment_params && typeof segment_params === 'object' && !Array.isArray(segment_params)
+        ? (segment_params as Record<string, number>) : null,
       // ★ 2026-07-30 (임은지 접수): MMS 이미지 (createOperator가 채널 mms + 최대 3장으로 정규화)
       mmsImagePaths: Array.isArray(mms_image_paths) ? mms_image_paths : null,
     });
@@ -2365,7 +2435,7 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
       auto_send_lead_minutes,
       channel, benefit_content, mms_image_paths,
       sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode, copy_style,
-      target_hint,
+      target_hint, segment_key, segment_params,
     } = req.body;
     // ★ 2026-07-12 C-2: 죽은 설정 수신 제거(delivery_policy·verification_required_days·opt_out_minutes·
     //   spam_score_threshold·max_spam_retries) — 소비 로직 0. 구클라이언트가 보내도 무시(에러 없음).
@@ -2383,6 +2453,10 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
       autoSendLeadMinutes: auto_send_lead_minutes !== undefined ? Number(auto_send_lead_minutes) : undefined,
       // ★ 2026-07-12 C-4: 타겟 축 — undefined = 유지, null/그 외 = 해제(CT가 화이트리스트 정규화)
       targetHint: target_hint === undefined ? undefined : (typeof target_hint === 'string' ? target_hint : null),
+      // ★ 2026-08-03 A-7: 계약 — 미전송 = 유지, null/화이트리스트 밖 = 해제(옛 방식으로 되돌림)
+      segmentKey: segment_key === undefined ? undefined : (typeof segment_key === 'string' ? segment_key : null),
+      segmentParams: segment_params && typeof segment_params === 'object' && !Array.isArray(segment_params)
+        ? (segment_params as Record<string, number>) : null,
       // ★ 2026-06-26: 발송 채널 + 관리자 입력 혜택
       channel: ['sms', 'lms', 'mms'].includes(channel) ? channel : undefined,
       // ★ 2026-07-30 (임은지 접수): MMS 이미지 — 미전송 = 유지, null = 해제, 배열 = 교체(CT가 최대 3장 정규화)
@@ -2619,29 +2693,48 @@ router.post('/operator/proposals/:id/recipients', async (req: Request, res: Resp
     const pj = prow.proposal_json || {};
     // dispatchProposalSend 준비부(utils/continuous-operator.ts 1380행대)와 동일 해석 — 값이 갈리면 원칙 2 위반.
     const filters = pj.target?.filters || {};
-    const excludeClickedSince = pj.meta?.excludeClickedSince ? new Date(pj.meta.excludeClickedSince) : null;
-    const fatigueCap = await getFatigueCap(companyId);
+    // ⛔ 2026-08-03 1R 정정: 게이트를 손으로 조립하지 않는다 — 발송이 쓰는 해석기 하나만 쓴다
+    //   (리마인드 코호트 경계가 여기 빠지면 화면 명단이 실발송보다 넓어진다).
+    const gates = await resolveOperatorAudienceGates(companyId, pj);
 
-    // 브랜드 격리 — preview-recipients 미러(열람자가 매장 사용자면 그 매장 고객만).
-    let storeFilter = '';
-    const baseParams: any[] = [companyId];
-    if (userType === 'company_user' && userId) {
-      const scope = await getStoreScope(companyId, userId);
-      if (scope.type === 'filtered') {
-        storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
-        baseParams.push(scope.storeCodes);
-      } else if (scope.type === 'blocked') {
-        return res.json({ success: true, recipients: [], displayTotal: 0, criteria: pj.target?.criteria || null, segmentName: null, basisLabel: null, conditionColumns: [] });
-      }
+    // ⛔ 2026-08-03 7R 정정: 이 화면이 답해야 하는 것은 "이 제안이 실제로 누구에게 나가는가"다.
+    //   열람자 기준이 아니라 **오퍼레이터 소유자 기준** 범위를 쓴다 — 관리자가 직원 제안을 열면 종전엔
+    //   화면은 전사, 실발송은 직원 매장이라 서로 달랐다. 열람 권한은 위 소유자 검증이 이미 담당한다.
+    const scope = await resolveOperatorStoreScope(companyId, prow.created_by || null);
+    if (scope.blocked) {
+      return res.json({
+        success: true, recipients: [], displayTotal: 0, proposedTotal: Number(prow.recipient_count) || 0,
+        criteria: pj.target?.criteria || null, segmentName: null,
+        basisLabel: '담당 매장이 지정되지 않아 발송 대상을 정할 수 없습니다 (발송 보류)',
+        conditionColumns: [],
+      });
     }
+    const storeFilter = scope.storeFilter;
+    const baseParams: any[] = scope.baseParams;
 
-    const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, baseParams.length + 1);
+    // ★ 2026-08-03 A-7: 발송이 쓰는 컴파일과 같은 문 — 계약 제안이면 축으로, 옛 제안이면 filters로.
+    const compiled = await compileOperatorAudience({
+      companyId,
+      segmentKey: pj.target?.segmentKey || null,
+      segmentParams: pj.target?.segmentParams || null,
+      legacyFilters: filters,
+      baseParams,
+    });
+    const filterWhere = compiled.filterWhere;
+    const filterParams = compiled.filterParams;
     // 조건 필드 동적 컬럼 — FIELD_MAP 화이트리스트 + displayName 라벨 단일 소스(0709 개인화 라벨 통일 교훈).
     const conditionColumns = resolveConditionColumns(filters, FIELD_MAP);
     const { sql, params } = buildSendableRecipientsTopSql(
-      filterWhere, filterParams, baseParams, storeFilter, excludeClickedSince, fatigueCap, conditionColumns,
+      filterWhere, filterParams, baseParams, storeFilter, gates, conditionColumns,
     );
-    const result = await query(sql, params);
+    // ★ 2026-08-03 A-1: 총 수도 명단과 같은 게이트로 실측. 종전엔 제안 생성 시점 recipient_count를 그대로 보여
+    //   같은 화면에서 "명단 기준 ≠ 총 수 기준"이었다(명단은 피로도 반영, 수는 미반영).
+    const liveCountSql = buildAudienceCountSql(filterWhere, filterParams, baseParams, storeFilter, gates);
+    const [result, liveTotalRes] = await Promise.all([
+      query(sql, params),
+      query(liveCountSql.sql, liveCountSql.params),
+    ]);
+    const liveTotal = Number(liveTotalRes.rows[0]?.count) || 0;
 
     // 시점 정직 라벨(원칙 1) — 승인 대기/예약(리스트화 이후)=확정 기준. 발송 직전 수신거부·피로도는 발송 시점에 또 걸러진다.
     const basisLabel = ['pending', 'scheduled', 'admin_review'].includes(String(prow.status))
@@ -2651,7 +2744,9 @@ router.post('/operator/proposals/:id/recipients', async (req: Request, res: Resp
     return res.json({
       success: true,
       recipients: result.rows,
-      displayTotal: Number(prow.recipient_count) || 0,
+      displayTotal: liveTotal,
+      // 제안 생성 시점 수 — 지금 수와 다르면 화면이 그 차이를 그대로 보여준다(감추면 담당자가 판단을 잘못한다).
+      proposedTotal: Number(prow.recipient_count) || 0,
       criteria: pj.target?.criteria || null,
       segmentName: pj.target?.suggestedName || prow.operator_name || null,
       basisLabel,

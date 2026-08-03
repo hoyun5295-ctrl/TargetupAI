@@ -17,7 +17,8 @@
  * 소비처: predictive-suite.ts (total_sent = 여정 + 본 카운터 합산, TS·벌크 SQL 두 벌 동일).
  */
 import { query } from '../config/database';
-import { buildJourneySafetyFilter } from './journey-safety-filter';
+// ★ 2026-08-03 A-1: 대상 WHERE는 공용 조각 하나만 쓴다(안전필터·미클릭·피로도 = 발송 추출과 동일).
+import { buildAudienceWhere, AudienceGates } from './operator-recipients';
 
 const BATCH = 5000;
 
@@ -65,7 +66,9 @@ export async function recordCustomerSends(input: {
 /**
  * 필터 기반 서버사이드 변형 — 발송 대상 id를 Node로 안 들고오고(대량 안전), 동일 안전필터 where로
  *   customers에서 직접 customer_send_stats에 +1 UPSERT 한다. 자동마케팅 서버사이드 staging 적재와 짝.
- *   where 배치: companyId=$1, filterParams=$2+, (excludeClickedSince). 안전필터·미클릭가드는 발송 추출과 동일.
+ *   where 배치: companyId=$1, filterParams=$2+, (excludeClickedSince), (fatigue days·max). 발송 추출과 같은 조각.
+ *   ★ 2026-08-03 A-1: WHERE를 여기서 따로 조립하던 것을 buildAudienceWhere 공용으로 교체 —
+ *     피로도 게이트가 빠져 있어 실제 발송보다 많은 고객에게 분모 +1이 들어가던 어긋남을 함께 닫는다.
  *   ⚠️ recordCustomerSends와 동일하게 발송 커밋 후 fire-and-forget(미await), 실패=경고뿐, campaignRef 멱등.
  */
 export async function recordCustomerSendsByFilter(input: {
@@ -74,7 +77,10 @@ export async function recordCustomerSendsByFilter(input: {
   filterWhere: string;
   filterParams: any[];
   storeFilter?: string;
-  excludeClickedSince?: Date | null;
+  /** ★ 2026-08-03 5R: 매장 범위 — [companyId] 또는 [companyId, storeCodes]. 발송 추출과 같은 배열을 그대로 받는다. */
+  baseParams?: any[];
+  /** ★ 2026-08-03 1R 정정: 게이트는 객체 하나로 — 발송 추출과 같은 것을 그대로 받는다(따로 조립하면 또 갈린다). */
+  gates?: AudienceGates;
 }): Promise<void> {
   try {
     if (!input.companyId || !input.campaignRef) return;
@@ -90,22 +96,14 @@ export async function recordCustomerSendsByFilter(input: {
     if (mark.rows.length === 0) return;
 
     // 2) 발송 대상(동일 안전필터 where) 고객당 +1 — 서버사이드 SELECT-INSERT (customers 자사 소속 검증 겸함)
-    const params: any[] = [input.companyId, ...input.filterParams];
-    let clickGuard = '';
-    if (input.excludeClickedSince) {
-      params.push(input.excludeClickedSince);
-      clickGuard =
-        `AND NOT EXISTS (SELECT 1 FROM cdp_events ce WHERE ce.customer_id = c.id AND ce.company_id = $1 AND ce.event_name = 'message_click' AND ce.occurred_at >= $${params.length})`;
-    }
+    const base = input.baseParams && input.baseParams.length > 0 ? input.baseParams : [input.companyId];
+    const params: any[] = [...base, ...input.filterParams];
+    const where = buildAudienceWhere(params, input.filterWhere, input.storeFilter || '', input.gates || {});
     await query(
       `INSERT INTO customer_send_stats (customer_id, company_id, total_sent, last_sent_at, updated_at)
        SELECT c.id, $1::uuid, 1, NOW(), NOW()
          FROM customers c
-        WHERE c.company_id = $1::uuid
-          AND ${buildJourneySafetyFilter('c')}
-          ${input.storeFilter || ''}
-          ${input.filterWhere}
-          ${clickGuard}
+        WHERE ${where}
        ON CONFLICT (customer_id) DO UPDATE SET
          total_sent = customer_send_stats.total_sent + 1,
          last_sent_at = NOW(),

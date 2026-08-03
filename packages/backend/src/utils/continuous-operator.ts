@@ -25,7 +25,7 @@
  *   7. 사용자: POST /api/ai/operator/proposals/:id/reject → 거부 → status='rejected'
  */
 
-import { query } from '../config/database';
+import { query, pool } from '../config/database';
 import { orchestrate } from '../services/ai-orchestrator';
 import { getCompanyCosts, SEND_HOURS } from '../config/defaults';
 import { shouldSkipProposalGeneration } from './operator-proposal-dedup';
@@ -45,8 +45,11 @@ import { getCreditCost } from './ai-credit-calc';
 import { runInCreditBundle } from './ai-credit-context';
 import { getAuthSmsTable, bulkInsertSmsQueue, getPlatformNoticeCallback } from './sms-queue';
 import { randomUUID } from 'crypto';
-import { buildFilterWhereClauseCompat } from './customer-filter';
 import { buildSendableStagingInsertSql } from './operator-recipients';
+// ★ 2026-08-03 타겟팅 재설계 A-1: 대상 수는 발송과 같은 게이트를 쓰는 단일 문으로만 센다.
+import { resolveOperatorAudienceGates, compileOperatorAudience, resolveOperatorStoreScope } from './operator-audience';
+import { AudienceGates } from './operator-recipients';
+import { normalizeSegmentKey, normalizeSegmentParams } from './automarketing-segment';
 import { createDirectSendCampaign } from './direct-send-core';
 import { DirectSendError } from './direct-send-spec';
 // ★ 2026-07-30 (Codex 2R): MMS 이미지 필수 가드 CT(D131) — 자율발송 경로 배선
@@ -55,6 +58,7 @@ import { validateMmsPayload } from './mms-validator';
 import { recordCustomerSendsByFilter } from './customer-send-stats';
 // ★ 2026-07-05: 발송 피로도 보호 — staging 추출 anti-join용 cap 조회
 import { getFatigueCap } from './fatigue-guard';
+import { FatigueCap } from './fatigue-guard-core';
 // ★ Phase2 A (2026-06-26): 발송 본문 URL 단축 + 변이 추적(클릭→operator 변이 보상). journey-executor와 동일 패턴.
 import { shortenUrlsInText } from './short-url';
 import { eucKrByteLength } from './message-byte';
@@ -103,6 +107,9 @@ export interface CreateOperatorInput {
   sequenceReminderContent?: string | null; // 관리자 직접 입력 (AI 임의 생성 금지)
   // ★ 2026-07-07 마케팅 캘린더 완비: 발송 대상 축(TARGET_HINTS 화이트리스트) — 제안 생성 때 타겟 AI에 고정 지시.
   targetHint?: string | null;
+  // ★ 2026-08-03 타겟팅 재설계 A-7: 세그먼트 계약(축 + 파라미터). 지정 시 회차마다 AI가 다시 해석하지 않는다.
+  segmentKey?: string | null;
+  segmentParams?: Record<string, number> | null;
   // ★ 2026-07-30 (임은지 접수): 채널 mms 전용 첨부 이미지(serverPath, 최대 3) — 매 자율 발송에 첨부.
   mmsImagePaths?: string[] | null;
 }
@@ -156,6 +163,14 @@ export interface ContinuousOperator {
   sequenceReminderContent: string | null;           // 관리자 직접 입력 리마인드 문안
   // ★ 2026-07-07 마케팅 캘린더 완비: 발송 대상 축 — null = 축 미지정(objective 자유 해석)
   targetHint: TargetHint | null;
+  /**
+   * ★ 2026-08-03 A-7: 세그먼트 계약 축. null = 계약 없음(옛 방식 — 저장된 filters를 그대로 쓴다).
+   * 계약이 있으면 대상 조건은 회차마다 같은 SQL로 컴파일된다(결정성).
+   * ⛔ 2R 정정: DB 원문 그대로다(화이트리스트 밖 값도 보존). 유효성 판정은 compileOperatorAudience가 한다 —
+   *   여기서 깎으면 미지의 축이 "계약 없음"으로 둔갑해 전체 고객 경로로 흐른다.
+   */
+  segmentKey: string | null;
+  segmentParams: Record<string, number> | null;
   // ★ 2026-07-30 (임은지 접수): 채널 mms 첨부 이미지(serverPath) — 컬럼 미생성/NULL = []
   mmsImagePaths: string[];
 }
@@ -234,7 +249,9 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   const benefitContent = typeof input.benefitContent === 'string' && input.benefitContent.trim() ? input.benefitContent.trim() : null;
   const backupAdminPhone = typeof input.backupAdminPhone === 'string' && input.backupAdminPhone.trim() ? input.backupAdminPhone.trim() : null;
   // ★ Phase3 C: 다단계 시퀀스 — delay 1~30일 클램프, 리마인드 문안 관리자 입력(슬라이스).
-  const sequenceEnabled = input.sequenceEnabled === true;
+  // ⛔ 2026-08-03 5R: 리마인드 보류 — 다른 클라이언트가 켠 상태로 저장해 "켜져 있는데 안 나가는" 거짓 상태를 만들지 않는다.
+  const sequenceEnabled = false;
+  void input.sequenceEnabled;
   const sequenceDelayDays = typeof input.sequenceDelayDays === 'number' && input.sequenceDelayDays > 0 ? Math.min(30, Math.floor(input.sequenceDelayDays)) : null;
   const sequenceReminderContent = typeof input.sequenceReminderContent === 'string' && input.sequenceReminderContent.trim() ? input.sequenceReminderContent.trim().slice(0, 2000) : null;
   // ★ 2026-07-07: 타겟 축 — 화이트리스트 정규화(이상값·미지정 = null → 기존 자유 해석).
@@ -249,6 +266,49 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   // ★ 2026-07-07 DDL 의존: target_hint 컬럼 미생성 시 42703 → 라우트 catch가 503 DB_MIGRATION_PENDING(배포 블록에 ALTER 선행 명시).
   const saveCost = getCreditCost('continuous-operator');
   await checkCredit(input.companyId, saveCost);
+
+  // ★ 2026-08-03 A-7 / ⛔ 2R 정정: 계약을 INSERT 본문에 함께 넣는다.
+  //   1R에서는 INSERT 뒤 별도 UPDATE + 실패 시 DELETE 보상이었는데, 그 보상 자체가 결함을 만들었다 —
+  //   계약을 안 고른 등록도 UPDATE를 거쳐 일시적 DB 오류에 정상 등록이 지워지고, DELETE가 실패하면
+  //   계약 없는 active 행이 남아 워커가 집었다. 한 문장에 넣으면 원자성은 DB가 보장하고 보상 코드는 사라진다.
+  //   컬럼 미생성(42703)이면 계약을 고른 등록만 실패한다 — 행도 크레딧도 남지 않는다(라우트가 503).
+  const wantsSegment = typeof input.segmentKey === 'string' && input.segmentKey.trim() !== '';
+  const segKey = wantsSegment ? normalizeSegmentKey(input.segmentKey) : null;
+  if (wantsSegment && !segKey) throw new Error(`알 수 없는 발송 대상 축입니다: ${String(input.segmentKey).slice(0, 40)}`);
+  const segParams = segKey ? normalizeSegmentParams(segKey, input.segmentParams) : null;
+  // ⛔ 5R 정정: 화이트리스트만 보고 저장하면 그 회사에서 쓸 수 없는 축도 active로 남고 크레딧까지 나간다
+  //   (생일 데이터가 없는 회사가 API로 birthday를 보내는 경우). 화면이 잠그는 것과 같은 판정을 서버에서 한 번 더 —
+  //   컴파일이 곧 근거 판정이므로 그 문을 그대로 쓴다. 잠긴 축이면 사유가 그대로 라우트로 올라간다.
+  if (segKey) {
+    await compileOperatorAudience({ companyId: input.companyId, segmentKey: segKey, segmentParams: segParams });
+  }
+
+  const insertParams: any[] = [
+    input.companyId, input.createdBy, input.name, input.objective.trim(),
+    schedule, scheduleTime, nextRunAt, scheduleDayOfWeek, scheduleDayOfMonth,
+    channel, benefitContent, adminPhones, backupAdminPhone, adminAlertChannel,
+    input.autoSendLeadMinutes != null ? input.autoSendLeadMinutes : null,
+    input.budgetMonthly != null ? input.budgetMonthly : null,
+    input.budgetDaily != null ? input.budgetDaily : null,
+    input.budgetAlertThreshold != null ? input.budgetAlertThreshold : 80,
+    deliveryPolicy,
+    sequenceEnabled, sequenceDelayDays, sequenceReminderContent, sendTimeMode, copyStyle,
+    // ⛔ 4R 정정: 대상 모드 상호배타 — 계약을 고른 등록에는 옛 힌트를 남기지 않는다(공존하면 무엇이 조건인지 모른다).
+    scheduleMonth, segKey ? null : targetHint,
+    mmsImagePaths.length > 0 ? mmsImagePaths : null,
+  ];
+  // 계약 미지정이면 컬럼을 아예 참조하지 않는다 — 마이그레이션 전에도 옛 등록은 그대로 된다.
+  // 계약을 고른 등록은 컬럼이 준비된 뒤에만 받는다(없으면 라우트가 503으로 안내).
+  if (segKey && !(await hasSegmentColumns())) {
+    throw new Error('DB 마이그레이션 필요 — continuous_operators segment column does not exist');
+  }
+  let segCols = '';
+  let segVals = '';
+  if (segKey) {
+    insertParams.push(segKey, JSON.stringify(segParams));
+    segCols = ', segment_key, segment_params';
+    segVals = `, $${insertParams.length - 1}, $${insertParams.length}::jsonb`;
+  }
   const result = await query(
     `INSERT INTO continuous_operators (
       id, company_id, created_by, name, objective,
@@ -256,7 +316,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       channel, benefit_content, admin_phone_numbers, backup_admin_phone, admin_alert_channel,
       auto_send_lead_minutes, budget_monthly, budget_daily, budget_alert_threshold, delivery_policy,
       sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode, copy_style,
-      schedule_month, target_hint, mms_image_paths,
+      schedule_month, target_hint, mms_image_paths${segCols},
       created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2::uuid, $3, $4,
@@ -264,22 +324,10 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       $10, $11, $12, $13, $14,
       $15, $16, $17, $18, $19,
       $20, $21, $22, $23, $24,
-      $25, $26, $27::text[],
+      $25, $26, $27::text[]${segVals},
       NOW(), NOW()
     ) RETURNING *`,
-    [
-      input.companyId, input.createdBy, input.name, input.objective.trim(),
-      schedule, scheduleTime, nextRunAt, scheduleDayOfWeek, scheduleDayOfMonth,
-      channel, benefitContent, adminPhones, backupAdminPhone, adminAlertChannel,
-      input.autoSendLeadMinutes != null ? input.autoSendLeadMinutes : null,
-      input.budgetMonthly != null ? input.budgetMonthly : null,
-      input.budgetDaily != null ? input.budgetDaily : null,
-      input.budgetAlertThreshold != null ? input.budgetAlertThreshold : 80,
-      deliveryPolicy,
-      sequenceEnabled, sequenceDelayDays, sequenceReminderContent, sendTimeMode, copyStyle,
-      scheduleMonth, targetHint,
-      mmsImagePaths.length > 0 ? mmsImagePaths : null,
-    ]
+    insertParams,
   );
   const operator = mapRowToOperator(result.rows[0]);
   await deductCreditSafe({
@@ -344,6 +392,9 @@ export async function updateOperator(
     autoSendLeadMinutes?: number | null;
     // ★ 2026-07-12 C-4: 타겟 축 — undefined = 유지, null/화이트리스트 밖 = 해제(자유 해석).
     targetHint?: string | null;
+    // ★ 2026-08-03 A-7: 세그먼트 계약 — undefined = 유지, null/화이트리스트 밖 = 해제(옛 방식).
+    segmentKey?: string | null;
+    segmentParams?: Record<string, number> | null;
     // ★ 2026-06-26: 발송 채널 + 관리자 입력 혜택
     channel?: 'sms' | 'lms' | 'mms';
     benefitContent?: string | null;
@@ -410,7 +461,42 @@ export async function updateOperator(
 
   // ★ 2026-07-12 C-2: 죽은 설정 SET 제거(delivery_policy·verification_required_days·opt_out_minutes·
   //   spam_score_threshold·max_spam_retries) — 소비 로직 0. DB 컬럼은 보존, 이 UPDATE만 참조 정리.
-  const result = await query(
+  // ⛔ 3R 정정: 계약을 본 UPDATE 안에 넣는다. 종전엔 일반 필드를 먼저 커밋하고 계약을 별도 UPDATE했는데,
+  //   계약 저장이 실패하면 이름·목표·스케줄만 바뀐 채 대상 계약은 옛것으로 남아(부분 커밋) 다음 회차가
+  //   바뀐 목표와 어긋난 대상에 나갈 수 있었다. createOperator와 같은 형태 — 원자성은 DB 한 문장이 보장한다.
+  const segTouched = patch.segmentKey !== undefined;
+  const segRaw = typeof patch.segmentKey === 'string' ? patch.segmentKey.trim() : '';
+  const segSetKey = segRaw ? normalizeSegmentKey(segRaw) : null;
+  if (segRaw && !segSetKey) throw new Error(`알 수 없는 발송 대상 축입니다: ${segRaw.slice(0, 40)}`);
+  const segSetParams = segSetKey ? normalizeSegmentParams(segSetKey, patch.segmentParams) : null;
+
+  // ⛔ 4R 정정: 대상 모드는 하나여야 한다. 종전엔 target_hint가 본 UPDATE 밖 별도 문이라 부분 커밋됐고,
+  //   계약을 골라도 옛 힌트가 남아 공존했다(화면엔 계약만 보이는데 다음 회차는 힌트대로 해석). 계약을 해제하면
+  //   프런트가 그 힌트를 다시 보내 되살아나기까지 했다. 한 문장에서 상호배타로 확정한다 —
+  //   계약을 설정하면 힌트는 무조건 해제, 계약을 안 건드리면 힌트 패치만 반영.
+  const hintTouched = patch.targetHint !== undefined;
+  const hintValue = hintTouched ? normalizeTargetHint(patch.targetHint) : null;
+  // ⛔ 5R 정정: target_hint 대입은 정확히 한 번이어야 한다. 4R에서 계약 절의 CASE와 힌트 SET이 함께 나가
+  //   같은 컬럼 이중 대입으로 저장이 전부 실패했다(현 UI는 계약과 힌트를 늘 함께 보낸다).
+  //   최종 대상 모드를 먼저 정하고, 그 결정에서 대입을 하나만 만든다.
+  //   계약 설정 = 힌트 강제 해제 / 힌트 설정 = 계약 해제 / 계약 해제만 = 힌트 불변.
+  // ⛔ 7R 정정: 두 값이 함께 오면 4R 로직이 서로를 지워 **둘 다 사라졌다**(구버전 클라이언트가 보내면 조용히
+  //   자유 해석으로 되돌아간다). 계약 우선으로 원자 적용한다 — 계약이 있으면 계약이 이기고 힌트는 해제.
+  const segFinalKey = segSetKey;
+  const segFinalParams = segFinalKey ? segSetParams : null;
+  const hintAssign: 'none' | 'null' | 'param' =
+    segFinalKey ? 'null'          // 계약이 이긴다 — 힌트는 해제
+    : hintTouched ? 'param'       // 계약이 없을 때만 힌트 패치를 반영(해제 요청 포함)
+    : 'none';
+  const withHintParam = hintAssign === 'param';
+  // 힌트를 세우는 요청이면 계약도 같은 문장에서 해제한다 — 두 축이 공존할 수 없게.
+  const withSegmentSet = segTouched || !!hintValue;
+  // ⛔ 5R 정정: 수정으로 계약을 세울 때도 근거 판정을 거친다(등록과 같은 우회를 막는다).
+  if (segFinalKey) {
+    await compileOperatorAudience({ companyId, segmentKey: segFinalKey, segmentParams: segFinalParams });
+  }
+
+  const runUpdate = (withSegment: boolean) => query(
     `UPDATE continuous_operators SET
       name = COALESCE($3, name),
       objective = COALESCE($4, objective),
@@ -436,6 +522,9 @@ export async function updateOperator(
       copy_style = CASE WHEN $24::text = '__keep__' THEN copy_style ELSE NULLIF($24::text, '') END,
       schedule_month = COALESCE($25, schedule_month),
       mms_image_paths = CASE WHEN $26::boolean THEN $27::text[] ELSE mms_image_paths END,
+      ${withSegment ? 'segment_key = $28, segment_params = $29::jsonb,' : ''}
+      ${hintAssign === 'null' ? 'target_hint = NULL,' : ''}
+      ${withHintParam ? `target_hint = $${withSegment ? 30 : 28},` : ''}
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid
      RETURNING *`,
@@ -458,7 +547,8 @@ export async function updateOperator(
       nextDom,
       patch.channel ?? null,
       (typeof patch.benefitContent === 'string' && patch.benefitContent.trim()) ? patch.benefitContent.trim() : null,
-      patch.sequenceEnabled ?? null,
+      // ⛔ 5R: 리마인드 보류 — 켜는 요청은 받지 않는다(끄는 요청·미지정은 그대로).
+      patch.sequenceEnabled === true ? false : (patch.sequenceEnabled ?? null),
       typeof patch.sequenceDelayDays === 'number' && patch.sequenceDelayDays > 0 ? Math.min(30, Math.floor(patch.sequenceDelayDays)) : null,
       (typeof patch.sequenceReminderContent === 'string' && patch.sequenceReminderContent.trim()) ? patch.sequenceReminderContent.trim().slice(0, 2000) : null,
       patch.sendTimeMode !== undefined ? normalizeSendTimeMode(patch.sendTimeMode) : null,
@@ -467,25 +557,21 @@ export async function updateOperator(
       nextMonth,
       mmsImagesProvided,
       nextMmsImages,
+      ...(withSegment ? [segFinalKey, segFinalParams ? JSON.stringify(segFinalParams) : null] : []),
+      ...(withHintParam ? [hintValue] : []),
     ]
   );
-  if (result.rows.length === 0) return null;
-  let updated = mapRowToOperator(result.rows[0]);
 
-  // ★ 2026-07-12 C-4: 타겟 축(target_hint) — 공용 UPDATE 본문 밖 별도 UPDATE(0711 여정 신규 컬럼 패턴 미러).
-  //   컬럼 미생성(42703) = 조용히 skip — 수정 저장 본류 보호. undefined = 유지, null/화이트리스트 밖 = 해제.
-  if (patch.targetHint !== undefined) {
-    try {
-      const th = await query(
-        `UPDATE continuous_operators SET target_hint = $3, updated_at = NOW()
-          WHERE id = $1::uuid AND company_id = $2::uuid RETURNING *`,
-        [operatorId, companyId, normalizeTargetHint(patch.targetHint)],
-      );
-      if (th.rows.length > 0) updated = mapRowToOperator(th.rows[0]);
-    } catch (thErr: any) {
-      console.warn('[ContinuousOperator] target_hint 갱신 skip(컬럼 미생성 가능):', thErr?.message);
-    }
+  // ⛔ 8R 정정 + 재검토: 42703 눈감기 폴백은 없앴다(부분 스키마에서 계약이 남은 채 힌트만 기록됐다).
+  //   대신 스키마를 실제로 보고 가른다 — 준비됐으면 쓰고, 아직이면 계약을 **세우는** 요청만 막는다.
+  //   폴백을 통째로 지우면 배포~DDL 구간에 일반 수정까지 전부 막혀 기능이 멈춘다(그건 처방이 아니라 사고다).
+  const segColumnsReady = withSegmentSet ? await hasSegmentColumns() : false;
+  if (segFinalKey && !segColumnsReady) {
+    throw new Error('DB 마이그레이션 필요 — continuous_operators segment column does not exist');
   }
+  const result = await runUpdate(withSegmentSet && segColumnsReady);
+  if (result.rows.length === 0) return null;
+  const updated = mapRowToOperator(result.rows[0]);
 
   // ★ 2026-07-12 C-1: 일시 중지·보관 전환 시 예약된 자율 발송(scheduled) 동반 취소 — "중지했는데 발송" 차단.
   if (patch.status === 'paused' || patch.status === 'archived') {
@@ -679,6 +765,11 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
       forcedIsAd: true,
       // ★ 2026-07-07: 타겟 축 고정(마케팅 캘린더 완비) — 발송 당일 타겟 해석이 등록 때 고른 축에 앵커.
       targetHint: operator.targetHint,
+      // ★ 2026-08-03 A-7: 계약이 있으면 대상 조건은 계약이 만든다 — 타겟 AI 해석 결과를 쓰지 않는다(결정성).
+      segmentKey: operator.segmentKey,
+      segmentParams: operator.segmentParams,
+      // ⛔ 1R 정정: 자동마케팅 회차임을 명시. 이 플래그가 있어야 발송 게이트가 붙은 대상 수를 쓴다.
+      audienceScope: 'operator',
     }, { source: 'continuous-operator', cost: 0 });  // ★ 2026-06-02: 제안서 생성(매일)은 무과금 — 200은 저장 1회, 발송 시 문안 3로 재배치. source는 이력용 유지.
     // ★ D227+ 종량제: 크레딧 충분해 정상 실행 — paused_no_credit였으면 자동 재개
     await query(
@@ -715,9 +806,14 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
   const recipientCount = orchestratorResult.target?.count || 0;
   if (recipientCount === 0) {
     console.log(`[ContinuousOperator] ${operator.name} 0건 매칭 → 제안서 생성 안 함 (Zero-Count 영구 원칙)`);
+    // ★ 2026-08-03 A-5: 조용한 0건 제거. 오발송은 종전에도 막았지만 사유가 담당자에게 가지 않아
+    //   "왜 이번 달은 아무것도 안 왔지"를 알 길이 없었다. 반복 0건은 7일 쿨다운으로 수렴시킨다.
+    await notifyZeroTargetOnce(operator, orchestratorResult.meta?.countError || null);
     await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0);
     return null;
   }
+  // 대상이 다시 잡히면 0건 통지 쿨다운 해제 — 다음 0건에 즉시 알린다(수렴 형태).
+  await clearZeroTargetNotice(operator.id);
 
   // 6. 자동 발송 자격 체크 (ENT 옵션)
   const costEstimate = orchestratorResult.cost?.estimated || 0;
@@ -1212,9 +1308,23 @@ export async function runOperatorWorker(): Promise<{ processed: number; failed: 
 export async function runAutoSendPass(limit: number = 20): Promise<{ sent: number; skipped: number }> {
   let sent = 0;
   let skipped = 0;
+  // ⛔ 7R 정정: 제외만 하면 배포 전 만들어진 리마인드가 영구 'scheduled'로 남아 화면·집계를 오염시키고,
+  //   롤링 배포 중 구버전 워커가 집어 갈 여지도 남는다. 매 패스에서 종결 상태로 수렴시킨다(멱등).
+  await query(
+    `UPDATE operator_proposals
+        SET status = 'admin_stopped', scheduled_send_at = NULL, reviewed_at = NOW(),
+            auto_execute_reason = '리마인드 보류 — 1차 수신자를 정확히 가려낼 수 없어 발송하지 않습니다'
+      WHERE status IN ('scheduled', 'pending', 'admin_review')
+        AND COALESCE((proposal_json -> 'meta' ->> 'is_reminder')::boolean, false) = true`,
+  ).catch((e: any) => console.warn('[ContinuousOperator AutoSend] 리마인드 수렴 경고:', e?.message));
+
+  // ⛔ 5R 정정: 배포 전에 이미 예약된 리마인드가 새 보류 정책을 우회해 그대로 나가던 구멍을 닫는다.
+  //   생성만 막으면 과거에 만들어진 scheduled 리마인드가 발송 시점에 대상을 재추출해 1차 미수신자에게 나간다.
+  //   가져오는 자리에서 제외하고(아래), 발송 진입에서도 한 번 더 막는다(sendScheduledProposal) — 둘 다 fail-closed.
   const due = await query(
     `SELECT id FROM operator_proposals
      WHERE status = 'scheduled' AND scheduled_send_at IS NOT NULL AND scheduled_send_at <= NOW()
+       AND COALESCE((proposal_json -> 'meta' ->> 'is_reminder')::boolean, false) = false
      ORDER BY scheduled_send_at ASC
      LIMIT $1`,
     [limit],
@@ -1299,11 +1409,23 @@ async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skip
   // ★ 2026-07-12 C-1: 발송 직전 오퍼레이터 상태 게이트 — 중지·보관 오퍼레이터의 잔여 예약 발송 최종 차단
   //   (중지 시점 일괄 취소와 2중 안전망). paused_no_credit은 생성 크레딧 문제라 기예약 발송은 기존대로 진행.
   const gateRes = await query(
-    `SELECT o.status AS operator_status
+    `SELECT o.status AS operator_status,
+            COALESCE((p.proposal_json -> 'meta' ->> 'is_reminder')::boolean, false) AS is_reminder
        FROM operator_proposals p JOIN continuous_operators o ON o.id = p.operator_id
       WHERE p.id = $1::uuid`,
     [proposalId],
   );
+  // ⛔ 5R 정정: 리마인드는 1차 수신자를 보장할 수 없어 보류 중이다. 배포 전에 예약된 행이 남아 있으면
+  //   여기서 최종 차단하고 보류 상태로 내린다(가져오기 필터와 이중 안전망 — 배포 순서 경쟁도 막는다).
+  if (gateRes.rows[0]?.is_reminder === true) {
+    await query(
+      `UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL,
+         auto_execute_reason = '리마인드 보류 — 1차 수신자를 정확히 가려낼 수 없어 자동 발송하지 않습니다'
+       WHERE id = $1::uuid AND status = 'scheduled'`,
+      [proposalId],
+    );
+    return 'skipped';
+  }
   const opStatus = String(gateRes.rows[0]?.operator_status || '');
   if (opStatus !== 'active' && opStatus !== 'paused_no_credit') {
     await query(
@@ -1384,7 +1506,8 @@ async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skip
     return 'skipped';
   }
 
-  const r = await dispatchProposalSend(p);
+  // 자율 발송 경로 — 발송 직전 실측 건수로 상한·예산을 한 번 더 본다(7R).
+  const r = await dispatchProposalSend(p, true);
   return r.action;
 }
 
@@ -1392,10 +1515,26 @@ async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skip
  * claim된('sending') 제안을 직접발송 파이프라인으로 발송 — 자동(scheduled)·수동(승인) 공유.
  * 크레딧은 발송 성공 시점 1회(멱등). 0건/잔액/발신번호 미설정은 skip + 통지.
  */
-async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped'; campaignId?: string; sentCount?: number; reason?: string }> {
+async function dispatchProposalSend(
+  p: any,
+  // ⛔ 7R: 자율 발송 경로에서만 발송 직전 상한·예산 재검사를 한다(수동 승인은 사람이 검토했다는 기존 계약 유지).
+  autoPath = false,
+): Promise<{ action: 'sent' | 'skipped'; campaignId?: string; sentCount?: number; reason?: string }> {
   const proposalId: string = p.id;
   const companyId: string = p.company_id;
   const pj: any = p.proposal_json || {};
+
+  // ⛔ 6R 정정: 리마인드 차단을 "발송이 실제로 시작되는 길목"으로 올린다. 자동 패스의 due 필터만으로는
+  //   담당자가 승인하는 경로(admin_review → 승인)가 그대로 열려 있었다 — 이 함수는 자동·수동이 공유한다.
+  if (pj.meta?.is_reminder === true) {
+    await query(
+      `UPDATE operator_proposals SET status = 'admin_stopped', scheduled_send_at = NULL, reviewed_at = NOW(),
+         auto_execute_reason = '리마인드 보류 — 1차 수신자를 정확히 가려낼 수 없어 발송하지 않습니다'
+       WHERE id = $1::uuid AND status IN ('scheduled', 'sending', 'admin_review', 'pending')`,
+      [proposalId],
+    ).catch((e: any) => console.warn('[ContinuousOperator] 리마인드 종결 경고:', e?.message));
+    return { action: 'skipped', reason: '리마인드 보류 — 1차 수신자 원장 없음' };
+  }
 
   // 통지/발신자 컨텍스트 — 커밋 전 예외는 아래 try가 'sending'을 admin_review로 내려 정지 방지.
   let op: any = {};
@@ -1473,6 +1612,13 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
   // filterWhere 컴파일은 try 안에서(throw 시 admin_review 정리 보존) — 값은 발송 후 예측 카운터에서도 쓰므로 스코프 선언.
   let filterWhere = '';
   let filterParams: any[] = [];
+  // ★ 2026-08-03 A-1: 게이트도 발송 후 예측 분모 적재가 같은 것을 쓰도록 함수 스코프로 올린다
+  //   (종전엔 try 안 지역 변수라 분모 적재만 피로도를 못 보고 실제 발송보다 많은 고객을 세었다).
+  let sendGates: AudienceGates = {};
+  let sendFatigueCap: FatigueCap | null = null;
+  // ⛔ 5R: 매장 범위도 발송 후 분모 적재가 같은 것을 쓰도록 함수 스코프.
+  let sendBaseParams: any[] = [companyId];
+  let sendStoreFilter = '';
   // ★ 2026-07-30 (임은지 접수): MMS 첨부 이미지 — try 안 게이트에서 확정, 아래 createDirectSendCampaign에 전달.
   let mmsImagePaths: string[] | null = null;
   try {
@@ -1546,14 +1692,134 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
     // 발송 시점 타겟 재추출 → campaign_send_staging 서버사이드 직접 적재(상한 없음 · Node 왕복 없음).
     //   옛 결함: preview 표본용 buildSendableRecipientsSql(LIMIT 10000)을 발송이 공유 → 1만 초과 조용한 누락.
     //   통제선은 고객 예산·선불 잔액뿐. 정지 창 동안 새 수신거부는 공통 안전필터가 발송 시점에 반영.
-    const compiled = buildFilterWhereClauseCompat(filters, 2);
-    filterWhere = compiled.sql;
-    filterParams = compiled.params;
+    // ⛔ 5R 정정: 매장 제한 계정이 만든 오퍼레이터는 그 범위 안에서만 보낸다. 종전엔 미리보기만 범위를 적용하고
+    //   실발송은 회사 전체였다(화면 1명 · 실발송 2명 · 차감 2건). 미할당 계정은 아예 보내지 않는다.
+    const scope = await resolveOperatorStoreScope(companyId, op.created_by || null);
+    if (scope.blocked) {
+      await query(
+        `UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL,
+           auto_execute_reason = '담당 매장이 지정되지 않아 발송 대상을 정할 수 없습니다 — 발송 보류'
+         WHERE id = $1::uuid`,
+        [proposalId],
+      );
+      await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 담당 매장이 지정되지 않아 발송을 보류했습니다. 매장 권한 확인 후 다시 진행해주세요.`);
+      return { action: 'skipped', reason: '담당 매장 미지정 — 발송 보류' };
+    }
+    sendBaseParams = scope.baseParams;
+    sendStoreFilter = scope.storeFilter;
+
+    // ★ 2026-08-03 A-7: 계약이 있으면 축으로 컴파일한다(저장된 filters 재해석 없음). 없으면 종전대로 filters.
+    //   잠긴 축이면 throw → 아래 catch가 admin_review로 내리고 사유를 담당자에게 알린다(조용한 발송 금지).
+    const compiled = await compileOperatorAudience({
+      companyId,
+      segmentKey: pj.target?.segmentKey || null,
+      segmentParams: pj.target?.segmentParams || null,
+      legacyFilters: filters,
+      baseParams: sendBaseParams,
+    });
+    filterWhere = compiled.filterWhere;
+    filterParams = compiled.filterParams;
     stagingId = randomUUID();
     // ★ 2026-07-05 발송 피로도 보호 — 자동마케팅은 광고 강제(0705 라벨 정정)라 cap 설정 회사면 추출 단계에서 제외(차감 전).
-    const fatigueCap = await getFatigueCap(companyId);
-    const { sql: insSql, params: insParams } = buildSendableStagingInsertSql(stagingId, companyId, filterWhere, filterParams, '', excludeClickedSince, fatigueCap);
+    // ⛔ 2026-08-03 1R 정정: 게이트를 손으로 조립하지 않는다 — 리마인드 코호트 경계가 여기 안 오면
+    //   1차를 안 받은 신규 유입에게 리마인드가 나간다. 게이트 해석은 단일 문(resolveOperatorAudienceGates)뿐.
+    sendGates = await resolveOperatorAudienceGates(companyId, pj);
+    sendFatigueCap = sendGates.fatigueCap ?? null;
+    // ⛔ 4R: 추출 시각 경계(CTE)는 폐기했다 — 리마인드를 보류하기로 하면서 그 값을 쓸 곳이 없어졌다.
+    //   구조를 고치면 덧댔던 장치도 함께 사라지는 게 정상이다.
+    const { sql: insSql, params: insParams } = buildSendableStagingInsertSql(stagingId, sendBaseParams, filterWhere, filterParams, sendStoreFilter, sendGates);
     recipientTotal = (await query(insSql, insParams)).rowCount || 0;
+
+    // ⛔ 7R 정정: 재추출된 **실제 건수**로 상한·예산을 다시 본다. 종전엔 제안 시점 수로 통과한 뒤
+    //   발송 직전 추출에서 대상이 늘어도 검사가 없어, 설정한 자율 발송 상한과 예산을 넘겨 실발송·실차감했다.
+    //   (자율 경로 전용 — 수동 승인은 사람이 이미 검토했다는 기존 계약을 유지한다.)
+    if (autoPath && recipientTotal > 0) {
+      // ⛔ 8R 정정: 제안서에 적힌 옛 단가로 검사하면 그 사이 단가가 바뀐 회사에서 검사와 실차감이 갈린다
+      //   (9.9원으로 통과시키고 20원으로 차감). 확정된 채널과 **지금 회사 단가**로 계산한다.
+      // ⛔ 8R 정정(원자성): 검사와 예약을 한 트랜잭션에서 한다. 종전엔 SUM 조회와 발송 사이에 잠금이 없고
+      //   claim된 'sending' 금액이 합계에서 빠져, 잔여 100원에 60원짜리 두 제안이 동시에 통과할 수 있었다.
+      //   오퍼레이터 행을 FOR UPDATE로 잡고, 'sending'(자기 자신 제외)까지 합산한 뒤 실측 수치를 같은 트랜잭션에 남긴다.
+      const budgetClient = await pool.connect();
+      let L: any = null;
+      let overReason = '';
+      let actualCost = 0;
+      try {
+        await budgetClient.query('BEGIN');
+        await budgetClient.query(`SELECT id FROM continuous_operators WHERE id = $1::uuid FOR UPDATE`, [p.operator_id]);
+        const lim = await budgetClient.query(
+          `SELECT COALESCE(c.cdp_auto_execute_max_recipients, 1000) AS max_recipients,
+                  COALESCE(c.cdp_auto_execute_max_cost_krw, 50000) AS max_cost,
+                  c.cost_per_sms, c.cost_per_lms, c.cost_per_mms, c.cost_per_kakao, c.unit_price_basis,
+                  o.budget_monthly, o.budget_daily,
+                  COALESCE((SELECT SUM(cost_estimate) FROM operator_proposals
+                     WHERE operator_id = o.id AND created_at >= date_trunc('month', NOW())
+                       AND status IN ('approved','auto_executed','sent','sending') AND id <> $2::uuid), 0) AS spent_month,
+                  COALESCE((SELECT SUM(cost_estimate) FROM operator_proposals
+                     WHERE operator_id = o.id AND created_at >= CURRENT_DATE
+                       AND status IN ('approved','auto_executed','sent','sending') AND id <> $2::uuid), 0) AS spent_today
+             FROM continuous_operators o JOIN companies c ON c.id = o.company_id
+            WHERE o.id = $1::uuid`,
+          [p.operator_id, proposalId],
+        );
+        L = lim.rows[0] || null;
+
+        if (!L) {
+          // 회사·오퍼레이터 행을 못 읽었다 = 검사 불가. 검사 없이 보내지 않는다(돈 보호 fail-closed).
+          overReason = '발송 직전 한도·단가를 확인하지 못했습니다';
+        } else {
+          const costs = getCompanyCosts(L as any);
+          const unit = msgType === 'MMS' ? Number(costs.mms) : msgType === 'LMS' ? Number(costs.lms) : Number(costs.sms);
+          if (!Number.isFinite(unit)) {
+            overReason = '발송 단가를 확인하지 못했습니다';
+          } else {
+            actualCost = Math.round(unit * recipientTotal);
+            if (recipientTotal > Number(L.max_recipients)) {
+              overReason = `발송 직전 대상이 ${recipientTotal.toLocaleString()}명으로 자동 발송 상한(${Number(L.max_recipients).toLocaleString()}명)을 넘었습니다`;
+            } else if (actualCost > Number(L.max_cost)) {
+              overReason = `발송 직전 예상 비용이 ${actualCost.toLocaleString()}원으로 자동 발송 한도(${Number(L.max_cost).toLocaleString()}원)를 넘었습니다`;
+            } else {
+              const g = decideBudgetGuard({
+                budgetMonthly: L.budget_monthly != null ? Number(L.budget_monthly) : null,
+                budgetDaily: L.budget_daily != null ? Number(L.budget_daily) : null,
+                spentMonth: Number(L.spent_month) || 0,
+                spentToday: Number(L.spent_today) || 0,
+                pendingCost: actualCost,
+              });
+              if (g.over) overReason = g.reason;
+            }
+          }
+        }
+
+        // 통과든 보류든 실측 수량·비용을 **같은 트랜잭션에서** 남긴다 — 이 값이 다음 제안의 예산 합계가 된다.
+        //   종전엔 보류 분기에서만 갱신해, 실제로 나간 금액이 제안에 남지 않아 예산이 계속 과소 집계됐다.
+        if (overReason) {
+          await budgetClient.query(
+            `UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL,
+               recipient_count = $2, cost_estimate = $3, auto_execute_reason = $4
+             WHERE id = $1::uuid`,
+            [proposalId, recipientTotal, actualCost, `${overReason} — 발송 보류`],
+          );
+        } else {
+          await budgetClient.query(
+            `UPDATE operator_proposals SET recipient_count = $2, cost_estimate = $3 WHERE id = $1::uuid`,
+            [proposalId, recipientTotal, actualCost],
+          );
+        }
+        await budgetClient.query('COMMIT');
+      } catch (budErr: any) {
+        await budgetClient.query('ROLLBACK').catch(() => {});
+        throw budErr;   // 바깥 catch가 admin_review로 내리고 통지한다(검사 실패 = 발송 금지)
+      } finally {
+        budgetClient.release();
+      }
+
+      if (overReason) {
+        // 커밋 후 정리 — 적재분을 치우고 담당자에게 사유를 알린다.
+        await cleanupOrphanStaging(stagingId);
+        await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' ${overReason}. 담당자 검토가 필요합니다.`);
+        return { action: 'skipped', reason: overReason };
+      }
+    }
 
     // 0건 → 스킵 + 통지 (operator는 다음 주기 정상). staging 0행이라 잔여 없음.
     const outcome = decideSendOutcome({ recipientCount: recipientTotal, balanceOk: true });
@@ -1564,6 +1830,9 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
     }
   } catch (preErr: any) {
     // 발송 커밋 전 예외 → 'sending' 정지 방지: 담당자 검토로 내리고(자동 재발송 X) 통지 후 재던짐.
+    // ⛔ 8R 정정: 적재해 둔 수신자 행도 함께 치운다. 캠페인이 소유권을 가져가기 전에 빠져나가면
+    //   전화번호·이름이 담긴 staging이 주인 없이 남고 정리 워커도 없다.
+    await cleanupOrphanStaging(stagingId);
     await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발송 준비 오류 — 담당자 검토' WHERE id = $1::uuid AND status = 'sending'`, [proposalId]).catch(() => {});
     await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 발송 준비 중 오류로 보류했습니다. 담당자 검토가 필요합니다.`);
     throw preErr;
@@ -1593,6 +1862,8 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
     );
     campaignId = res.campaignId;
   } catch (e: any) {
+    // ⛔ 8R 정정: 캠페인이 만들어지지 못했으면 staging의 주인이 없다 — 잔액 부족·발송 오류 모두에서 치운다.
+    await cleanupOrphanStaging(stagingId);
     if (e instanceof DirectSendError && e.code === 'INSUFFICIENT_BALANCE') {
       await query(`UPDATE operator_proposals SET status = 'skipped', auto_execute_reason = '잔액 부족 — 발송 생략' WHERE id = $1::uuid`, [proposalId]);
       await notify('[AI 자동마케팅] 발송 생략', `'${op.name || ''}' 잔액 부족으로 이번 사이클 발송을 생략했습니다.`);
@@ -1610,7 +1881,11 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
   void recordCustomerSendsByFilter({
     companyId,
     campaignRef: `op:${campaignId}`,
-    filterWhere, filterParams, excludeClickedSince,
+    filterWhere, filterParams, storeFilter: sendStoreFilter, baseParams: sendBaseParams,
+    // ⛔ 2R 정정: 발송 뒤 재조회에 피로도를 다시 걸지 않는다. 같은 발송 경로의 recordFatigueSends가 먼저 끝나면
+    //   방금 보낸 고객이 cap에 걸려 분모에서 빠진다(cap=1이면 전원 누락). 실행 순서에 따라 결과가 달라지는 축을 뺀다.
+    //   ⚠ 이 경로는 재설계 이전부터 피로도를 안 봤다(회귀 아님). 실제 수신자 원장 연결은 별건.
+    gates: { excludeClickedSince: sendGates.excludeClickedSince },
   });
 
   // 기능 크레딧 1회 차감 (멱등키 proposalId) — 발송 성공 시점에만.
@@ -1677,52 +1952,78 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
 }
 
 /**
- * ★ Phase3 C — 다단계 시퀀스 리마인드 예약. 1차 발송 성공 직후 호출.
- *   리마인드 = 같은 오퍼레이터의 'scheduled' 제안(관리자 직접 입력 문안), N일 후 발송 + 1차 후 클릭한 고객 제외
- *   (meta.excludeClickedSince). dispatchProposalSend 공유 발송 → 예산 가드·광고/080 가드 동일 적용.
- *   meta.is_reminder=true 표식으로 리마인드의 리마인드 재귀를 차단한다.
+ * ⛔ 2026-08-03 — 세그먼트 계약 컬럼이 운영에 있는지 판정.
+ *
+ * 왜 이렇게까지 하나: 8R에서 "부분 마이그레이션(한 컬럼만 존재)에 폴백이 계약을 남긴다"는 지적을 받고
+ * 폴백을 통째로 지웠는데, 그러면 **배포와 DDL 사이 구간에서 자동마케팅 수정 저장이 전부 503**이 된다.
+ * 화면은 계약 필드를 항상 함께 보내기 때문이다. 지적은 맞았지만 그 처방은 기능을 멈춘다.
+ * 스키마를 실제로 보고 셋으로 가른다 — 둘 다 있으면 쓰고, 둘 다 없으면 옛 방식으로 저장되고,
+ * 하나만 있으면(진짜 위험한 상태) 그때만 막는다.
+ *
+ * 캐시는 "준비됨"만 기억한다. 아직이면 매번 다시 본다 — DDL은 배포 뒤에 돌고, 그때 재기동 없이 자동 활성돼야 한다.
  */
-async function scheduleSequenceReminder(op: any, p: any, pj: any, companyId: string): Promise<void> {
-  const reminderContent = typeof op.sequence_reminder_content === 'string' ? op.sequence_reminder_content.trim() : '';
-  const delayDays = Number(op.sequence_delay_days) || 0;
-  if (!reminderContent || delayDays <= 0) return; // 설정 미완 → 리마인드 없음
-
-  const now = new Date();
-  const reminderSendAt = shiftToSendableHour(new Date(now.getTime() + delayDays * 24 * 60 * 60 * 1000));
-  const expiresAt = new Date(reminderSendAt.getTime() + 7 * 24 * 60 * 60 * 1000);
-
-  // 1차 구조 재사용 + 문안만 관리자 입력 리마인드로 교체 + 재귀 차단(is_reminder)·미클릭 기준(excludeClickedSince) 표식.
-  const baseMsg = (pj.messages && pj.messages[0]) || {};
-  const reminderPj = {
-    ...pj,
-    messages: [{ ...baseMsg, body: reminderContent, message: reminderContent }],
-    meta: { ...(pj.meta || {}), is_reminder: true, excludeClickedSince: now.toISOString() },
-  };
-
-  const ins = await query(
-    `INSERT INTO operator_proposals (
-       id, operator_id, company_id, proposal_json, recipient_count, cost_estimate,
-       status, auto_executed, auto_execute_reason, scheduled_send_at, expires_at, created_at
-     ) VALUES (
-       gen_random_uuid(), $1::uuid, $2::uuid, $3::jsonb, $4, $5,
-       'scheduled', false, '다단계 시퀀스 리마인드 (미반응자)', $6, $7, NOW()
-     ) RETURNING id`,
-    [p.operator_id, companyId, JSON.stringify(reminderPj), Number(p.recipient_count) || 0, Number(p.cost_estimate) || 0, reminderSendAt, expiresAt],
+let segmentColumnsReadyCache = false;
+async function hasSegmentColumns(): Promise<boolean> {
+  if (segmentColumnsReadyCache) return true;
+  const r = await query(
+    `SELECT COUNT(*)::int AS n FROM information_schema.columns
+      WHERE table_name = 'continuous_operators' AND column_name IN ('segment_key', 'segment_params')`,
   );
+  const n = Number(r.rows[0]?.n) || 0;
+  if (n === 1) {
+    throw new Error('DB 마이그레이션 필요 — continuous_operators segment column 하나만 존재합니다(두 컬럼 동시 추가 필요)');
+  }
+  segmentColumnsReadyCache = n === 2;
+  return segmentColumnsReadyCache;
+}
 
-  // 담당자 리마인드 예약 알림(실문안 + 정지 안내) — 무과금 인증 라인.
-  const operatorForNotice = {
-    adminPhoneNumbers: Array.isArray(op.admin_phone_numbers) ? op.admin_phone_numbers : [],
-    backupAdminPhone: op.backup_admin_phone || null,
-    companyId,
-    name: op.name || '',
-  };
-  await sendAutoSendPrepNotice(operatorForNotice, ins.rows[0].id, reminderContent, reminderSendAt, {
-    recipientCount: Number(p.recipient_count) || 0,
-    costEstimate: Number(p.cost_estimate) || 0,
-    channelLabel: String(pj.channel?.recommended || 'SMS').toUpperCase(),
-    unitCost: Number(pj.cost?.unitCost) || 0,
-  }).catch(() => {});
+/**
+ * ⛔ 2026-08-03 8R — 주인 없는 staging 정리. 캠페인이 소유권을 가져가기 전에 빠져나가는 모든 경로에서 부른다.
+ *   전화번호·이름이 담긴 행이라 남겨 두면 안 되고, 이 테이블을 청소하는 워커도 따로 없다.
+ *   삭제 실패는 삼키지 않고 남긴다(정리 대상이 남았다는 사실이 로그에 보여야 사람이 치울 수 있다).
+ */
+async function cleanupOrphanStaging(stagingId: string): Promise<void> {
+  if (!stagingId) return;
+  try {
+    await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1::uuid`, [stagingId]);
+  } catch (e: any) {
+    console.error(`[ContinuousOperator AutoSend] staging 정리 실패 — 수동 삭제 필요 staging_id=${stagingId}:`, e?.message || e);
+  }
+}
+
+/**
+ * ★ Phase3 C — 다단계 시퀀스 리마인드. 1차 발송 성공 직후 호출.
+ *
+ * ⛔ 2026-08-03 4R — 지금은 만들지 않는다. 대상을 보장할 수 없기 때문이다.
+ *   리마인드의 정의는 "1차를 받고 반응하지 않은 사람"인데 우리는 1차 수신자 집합을 갖고 있지 않다.
+ *   조건을 발송 시점에 다시 컴파일하므로 1차 때 조건 밖이었다가 나중에 들어온 고객(등급 승급 등)이 대상에 들어온다.
+ *   등록 시각 경계를 덧대 봤지만 신규 유입만 막고 조건 변동 진입은 못 막는 부분 방어였다.
+ *   campaign_send_staging은 워커가 수신거부·중복을 지우고 처리 후 삭제하므로 사후 조인으로도 복원할 수 없다
+ *   (스키마 실측: customer_id 없음 / direct-send-worker.ts 삭제 3곳).
+ *   → 수신자 원장을 세우기 전까지 보류하고 사유를 담당자에게 알린다. 잘못된 대상에 보내느니 안 보낸다.
+ */
+async function scheduleSequenceReminder(op: any, _p: any, _pj: any, companyId: string): Promise<void> {
+  // ⛔ 2026-08-03 4R 정정 — 리마인드는 "1차를 받고 반응하지 않은 사람"에게 가야 하는데, 우리는 1차 수신자 집합을 모른다.
+  //   조건을 발송 시점에 다시 컴파일하므로 1차 때 조건 밖이었다가 나중에 들어온 고객(등급 승급 등)이 리마인드를 받는다.
+  //   3R에서 등록 시각 경계를 덧댔지만 그건 신규 유입만 막고 조건 변동 진입은 못 막는다 — 부분 방어였다.
+  //   staging은 워커가 수신거부·중복 정리 후 삭제하므로 사후 조인으로도 1차 집합을 복원할 수 없다(스키마·워커 실측).
+  //   정확한 대상을 보장할 수 없으면 보내지 않는다. 수신자 원장이 생기기 전까지 리마인드를 만들지 않고 사유를 알린다.
+  // ⛔ 5R 정정: 통지가 한 건도 안 나갔으면 성공으로 끝내지 않는다(반환값을 버리면 조용한 실패가 된다).
+  //   담당자 번호가 없거나 큐가 죽으면 문자로는 알 길이 없으므로, 화면이 이 기능을 '준비 중'으로 명시해 그 공백을 메운다.
+  const notified = await notifyOperatorAdmins(
+    {
+      adminPhoneNumbers: Array.isArray(op.admin_phone_numbers) ? op.admin_phone_numbers : [],
+      backupAdminPhone: op.backup_admin_phone || null,
+      companyId,
+      createdBy: op.created_by || null,
+    },
+    '[AI 자동마케팅] 리마인드 보류',
+    `'${op.name || ''}' 1차 발송은 나갔지만 리마인드는 만들지 않았습니다. 1차를 받은 분만 정확히 추려낼 수 없어, 받지 않은 분께 나가는 것을 막기 위해 보류했습니다.`,
+  ).catch((e: any) => { console.warn('[ContinuousOperator] 리마인드 보류 통지 실패:', e?.message); return false; });
+  console.warn(
+    `[ContinuousOperator] ${op.name || ''} 리마인드 보류 — 1차 수신자 원장 없음`
+    + (notified ? '' : ' / 담당자 통지 미적재(번호 없음 또는 큐 실패)'),
+  );
 }
 
 export function startContinuousOperatorScheduler(): void {
@@ -1755,20 +2056,25 @@ export async function notifyOperatorAdmins(
   operator: { adminPhoneNumbers: string[]; backupAdminPhone: string | null; companyId: string; createdBy?: string | null },
   title: string,
   body: string,
-): Promise<void> {
+  // ⛔ 2026-08-03 1R 정정: 실제로 적재했는지 돌려준다. 호출부가 "보냈다"를 기록하려면 그 사실을 알아야 한다
+  //   (수신 번호 0건도 실패다 — 종전엔 조용히 아무것도 안 보내고 성공처럼 끝났다). 기존 호출부는 반환값을 안 봐도 무해하다.
+): Promise<boolean> {
   const phones = [...(operator.adminPhoneNumbers || []), operator.backupAdminPhone || '']
     .map((p) => String(p || '').replace(/\D/g, ''))
     .filter((p) => /^01\d{8,9}$/.test(p));
   let unique = Array.from(new Set(phones));
   // ★ 2026-07-07 폴백 (마케팅 캘린더 완비): 담당자 번호가 비면 통지가 조용히 전멸하던 구멍 차단.
-  //   ① 오퍼레이터 등록 계정(users.phone) ② 회사 대표 admin(user_type='company_admin' — predictive-worker와 동일 관례).
+  //   ① 오퍼레이터 등록 계정(users.phone) ② 회사 대표 관리자.
+  // ⛔ 2026-08-03 7R 정정: 종전 조건은 user_type='company_admin'이었는데 그 값은 **DB에 없다**(JWT 변환값).
+  //   실측 = admin 126 / user 101 / system 75. 그래서 담당자 번호가 비면 폴백이 늘 0건이었고,
+  //   0건 통지·발송 보류 안내가 한 통도 안 나간 채 조용히 끝났다. DB 원시값으로 고친다.
   //   기존 등록분(담당자 미입력)과 인라인 조립 호출부까지 CT 1곳에서 일괄 수혜. 조회 실패 = 기존 동작(무통지) 유지.
   if (unique.length === 0) {
     try {
       const fb = await query(
         `SELECT phone FROM users
           WHERE (($1::uuid IS NOT NULL AND id = $1::uuid)
-             OR (company_id = $2::uuid AND user_type = 'company_admin'))
+             OR (company_id = $2::uuid AND user_type = 'admin'))
             AND is_active = true AND COALESCE(is_system, false) = false
           ORDER BY (id = $1::uuid) DESC, id ASC`,
         [operator.createdBy || null, operator.companyId],
@@ -1781,7 +2087,7 @@ export async function notifyOperatorAdmins(
       console.log('[ContinuousOperator] 담당자 폴백 연락처 조회 실패(통지 생략):', e?.message || e);
     }
   }
-  if (unique.length === 0) return;
+  if (unique.length === 0) return false;
 
   // TODO(알림톡 템플릿 등록 후): 1순위 알림톡(insertAlimtalkQueue) → 실패 시 아래 문자(2순위)로 fallback.
   // ★ Harold 2026-07-02: 모든 담당자 안내 문자 첫 줄 = [한줄로 AI 자동마케팅 안내문자] (중앙 1곳 부착)
@@ -1800,7 +2106,76 @@ export async function notifyOperatorAdmins(
     operator.companyId,     // app_etc2
     '', '', '',             // file_name 1/2/3
   ]);
-  await bulkInsertSmsQueue([authTable], rows as any, true);
+  // ⛔ 2R 정정: bulkInsertSmsQueue는 적재 건수를 돌려주고 내부 오류를 삼켜 0을 낼 수 있다.
+  //   반환값을 버리고 true를 주면 "한 통도 안 나갔는데 보냈다"가 된다. 실제 적재 건수로만 판정한다.
+  const inserted = await bulkInsertSmsQueue([authTable], rows as any, true);
+  return Number(inserted) > 0;
+}
+
+/**
+ * ★ 2026-08-03 A-5 — 조용한 0건 제거. 대상 0으로 이번 회차 제안을 만들지 않았다는 사실과 사유를 담당자에게 알린다.
+ *
+ * 쿨다운 7일: 매일 도는 오퍼레이터가 계속 0건이면 매일 문자가 가서 그 자체가 사고다.
+ *   기록 컬럼(zero_target_notified_at) CAS로 창당 1회만 보내고, 대상이 다시 잡히면 clearZeroTargetNotice가 창을 연다.
+ * 컬럼 미생성(마이그레이션 전) = 통지 생략(종전 동작) — ALTER 후 다음 회차부터 자동 활성.
+ *   catch는 42703(undefined_column)만 삼킨다. 다른 오류를 삼키면 통지 실패가 조용해진다.
+ */
+async function notifyZeroTargetOnce(
+  operator: { id: string; name: string; adminPhoneNumbers: string[]; backupAdminPhone: string | null; companyId: string; createdBy?: string | null },
+  countError: string | null,
+): Promise<void> {
+  // 창을 먼저 잡아 같은 주기의 중복 발송을 막되, 직전 값을 들고 있다가 실패하면 그대로 되돌린다.
+  //   ⛔ 1R 정정: 종전엔 잡기만 하고 적재 실패를 삼켜, 큐 장애나 담당자 번호 부재로 한 통도 못 보낸 채
+  //   7일 동안 "통지함"으로 남았다. 기록은 효과가 끝난 뒤에만 확정한다.
+  let prev: Date | null = null;
+  let claimed: Date | null = null;
+  try {
+    const claim = await query(
+      `UPDATE continuous_operators c
+          SET zero_target_notified_at = NOW()
+         FROM continuous_operators old
+        WHERE c.id = old.id AND c.id = $1::uuid
+          AND (c.zero_target_notified_at IS NULL OR c.zero_target_notified_at < NOW() - INTERVAL '7 days')
+        RETURNING old.zero_target_notified_at AS prev, c.zero_target_notified_at AS claimed`,
+      [operator.id],
+    );
+    if (claim.rows.length === 0) return;
+    prev = claim.rows[0].prev ? new Date(claim.rows[0].prev) : null;
+    claimed = claim.rows[0].claimed ? new Date(claim.rows[0].claimed) : null;
+  } catch (e: any) {
+    if (e?.code === '42703') return;   // 컬럼 미생성 = 통지 생략(안전)
+    throw e;
+  }
+  const body = countError
+    ? `'${operator.name}' 이번 회차 발송 대상을 확인하지 못해 문자를 만들지 않았습니다. 사유: ${countError}. 조건을 확인해 주세요.`
+    : `'${operator.name}' 이번 회차 발송 대상이 0명이라 문자를 만들지 않았습니다. 조건에 해당하는 고객이 없습니다.`;
+  let sent = false;
+  try {
+    sent = await notifyOperatorAdmins(operator, '[AI 자동마케팅] 발송 대상 없음', body);
+  } catch (e: any) {
+    console.warn('[ContinuousOperator] 0건 통지 실패:', e?.message);
+  }
+  if (!sent) {
+    // 한 통도 못 보냈다 — 창을 되돌려 다음 주기에 다시 시도한다(번호를 채우거나 큐가 살아나면 즉시 나간다).
+    // ⛔ 2R 정정: 내 claim이 그대로 남아 있을 때만 되돌린다(CAS). 조건이 없으면 느리게 실패한 실행이
+    //   그 사이 성공한 다른 실행의 최신 창을 지워 같은 통지가 두 번 나간다.
+    await query(
+      `UPDATE continuous_operators SET zero_target_notified_at = $2
+        WHERE id = $1::uuid AND zero_target_notified_at IS NOT DISTINCT FROM $3`,
+      [operator.id, prev, claimed],
+    ).catch((e: any) => console.warn('[ContinuousOperator] 0건 통지 창 복원 경고:', e?.message));
+  }
+}
+
+/** 대상이 다시 잡히면 0건 통지 창을 연다(수렴). 컬럼 미생성·오류는 흐름에 영향 주지 않는다. */
+async function clearZeroTargetNotice(operatorId: string): Promise<void> {
+  await query(
+    `UPDATE continuous_operators SET zero_target_notified_at = NULL
+      WHERE id = $1::uuid AND zero_target_notified_at IS NOT NULL`,
+    [operatorId],
+  ).catch((e: any) => {
+    if (e?.code !== '42703') console.warn('[ContinuousOperator] 0건 통지 창 해제 경고:', e?.message);
+  });
 }
 
 /** 준비 시점 담당자 알림 — 실문안 1건 + 발송 정보(일시·타겟·비용)와 정지 안내 1건(무과금 인증 라인). admin_notified_at 기록. */
@@ -1911,6 +2286,14 @@ function mapRowToOperator(row: any): ContinuousOperator {
     sequenceReminderContent: row.sequence_reminder_content || null,
     // ★ 2026-07-07: 타겟 축 (컬럼 미생성/NULL = null → 기존 자유 해석)
     targetHint: normalizeTargetHint(row.target_hint),
+    // ★ 2026-08-03 A-7: 세그먼트 계약 (컬럼 미생성/NULL = null → 옛 방식 유지)
+    // ⛔ 2R 정정: 저장값을 여기서 화이트리스트로 깎지 않는다. 깎으면 우리가 모르는 축이 null이 되어
+    //   "계약 없음"으로 둔갑하고, 컴파일 단계의 fail-closed 검사에 도달하지 못한 채 옛 경로로 흐른다.
+    //   원문을 그대로 들고 가서 판정은 compileOperatorAudience 한 곳에서만 한다.
+    segmentKey: typeof row.segment_key === 'string' && row.segment_key.trim() ? row.segment_key.trim() : null,
+    segmentParams: row.segment_params && typeof row.segment_params === 'object' && !Array.isArray(row.segment_params)
+      ? (row.segment_params as Record<string, number>)
+      : null,
     // ★ 2026-07-30 (임은지 접수): MMS 이미지 (컬럼 미생성/NULL = [])
     mmsImagePaths: Array.isArray(row.mms_image_paths) ? row.mms_image_paths.filter((p: any) => typeof p === 'string' && p.trim()) : [],
   };

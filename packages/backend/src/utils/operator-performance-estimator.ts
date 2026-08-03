@@ -289,8 +289,15 @@ export interface GradeProfileRow {
 export async function fetchTargetProfileByGrade(
   companyId: string,
   filters: Record<string, any>,
+  // ⛔ 2026-08-03 3R 정정: 계약(세그먼트) 제안은 filters가 비어 있다. 그대로 두면 등급·객단가 프로파일이
+  //   전체 활성 고객 기준으로 잡혀 "대상 수는 VIP 20명인데 기대 성과는 1만명 기준"이 된다.
+  //   컴파일된 조건을 받으면 그것을 쓴다($1=companyId 전제로 이미 $2부터 매겨져 있어 배치가 같다).
+  targetWhere?: { sql: string; params: any[] } | null,
 ): Promise<GradeProfileRow[]> {
-  const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, 2);
+  const compiled = targetWhere && typeof targetWhere.sql === 'string'
+    ? { sql: targetWhere.sql, params: targetWhere.params || [] }
+    : buildFilterWhereClauseCompat(filters, 2);
+  const { sql: filterWhere, params: filterParams } = compiled;
   const r = await query(
     `SELECT
         COALESCE(NULLIF(TRIM(c.grade), ''), '(미분류)')                                AS grade,
@@ -307,7 +314,7 @@ export async function fetchTargetProfileByGrade(
         AVG(CASE WHEN c.recent_purchase_date >= CURRENT_DATE - INTERVAL '90 days'
                  THEN 1.0 ELSE 0.0 END)::float                                          AS active_ratio
       FROM customers c
-      WHERE c.company_id = $1::uuid AND c.is_active = true ${filterWhere}
+      WHERE ${targetWhere ? filterWhere : `c.company_id = $1::uuid AND c.is_active = true ${filterWhere}`}
       GROUP BY COALESCE(NULLIF(TRIM(c.grade), ''), '(미분류)')`,
     [companyId, ...filterParams],
   );
@@ -332,6 +339,11 @@ export interface EstimateInput {
   unitCost: number;
   fallbackAvgRevenue: number;      // 전체 고객 평균 (customerStats.avg_total_spent)
   eventWindowDays?: number | null; // 사용자 행사기간 (옵션 — 없으면 7일)
+  /**
+   * ⛔ 2026-08-03 3R 정정: 세그먼트 계약으로 뽑은 제안은 filters가 비어 있다. 대상 수와 기대 성과의
+   * 근거가 갈리지 않도록, 대상 판정에 실제로 쓰인 조건을 그대로 받는다(미전달 = filters 사용, 종전 동작).
+   */
+  targetWhere?: { sql: string; params: any[] } | null;
 }
 
 /**
@@ -345,7 +357,7 @@ export async function estimatePerformance(input: EstimateInput): Promise<Perform
   // 1) 등급별 타겟 프로필 (구매주기 + 객단가 + 활성도)
   let gradeProfiles: GradeProfileRow[] = [];
   try {
-    gradeProfiles = await fetchTargetProfileByGrade(companyId, filters);
+    gradeProfiles = await fetchTargetProfileByGrade(companyId, filters, input.targetWhere);
   } catch (e: any) {
     console.log('[estimator] fetchTargetProfileByGrade skip:', e?.message || e);
   }

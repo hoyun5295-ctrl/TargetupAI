@@ -2,6 +2,8 @@
  * operator-recipients.ts — 발송 가능 수신자 추출 SQL (공통 안전필터 통일)
  *
  * 순수 함수: 안전필터 + 회사 격리 + storeFilter + filterWhere를 합성한다(DB·필터빌더 미import → 순수 테스트).
+ * ★ 2026-08-03: WHERE 조립은 buildAudienceWhere 하나뿐이다. count·명단·staging은 SELECT 절과 LIMIT만 다르다.
+ *   게이트(미클릭·피로도) 조합은 호출부가 정하되, 자동마케팅은 operator-audience.ts 단일 문이 그 조합을 소유한다.
  * 안전필터는 buildJourneySafetyFilter(CT) 하나로 통일 —
  *   is_active·sms_opt_in·is_opt_out·is_invalid·수신거부(회사+전화 안티조인).
  * filterWhere/filterParams는 호출부가 buildFilterWhereClauseCompat(CT-01)로 만들어 주입한다.
@@ -14,17 +16,37 @@ import { buildJourneySafetyFilter } from './journey-safety-filter';
 // ★ 2026-07-05: 발송 피로도 보호 — 순수 clause 빌더(DB import 0)라 본 모듈 순수성 유지.
 import { buildFatigueGuardClause, FatigueCap } from './fatigue-guard-core';
 
-export function buildSendableRecipientsSql(
-  filterWhere: string,   // buildFilterWhereClauseCompat(...).sql ('' 가능)
-  filterParams: any[],   // buildFilterWhereClauseCompat(...).params
-  baseParams: any[],     // [companyId, ...storeScope]
-  storeFilter: string,   // ' AND id IN (...)' 또는 '' (단일 테이블이라 미qualified id = c.id)
-  excludeClickedSince?: Date | null,  // 지정 시 그 시각 이후 message_click 한 고객 제외(미반응자 리마인드)
-): { sql: string; params: any[] } {
-  const params = [...baseParams, ...filterParams];
+/**
+ * ★ 2026-08-03 자동마케팅 타겟팅 재설계 A-1 — 대상 판정 WHERE 단일 길목.
+ *
+ * 세는 곳(count)·보여주는 곳(명단)·적재하는 곳(staging)이 각자 WHERE를 조립하던 것을 여기 하나로 모은다.
+ * 조립이 세 벌이면 게이트 하나를 빠뜨려도 아무도 모른다 — 실제로 화면 수는 피로도·미클릭을 안 보고
+ * 실발송만 봐서 "보여준 수 ≠ 나가는 수"였다(0803 실측). 조각이 하나면 그 종류의 어긋남이 구조상 불가능하다.
+ *
+ * params 배치 계약(전 호출부 공유·테스트로 고정):
+ *   baseParams($1=companyId, storeScope…) → filterParams → (excludeClickedSince) → (fatigue days·max) → (stagingId)
+ * 이 함수는 넘겨받은 params 배열에 게이트 파라미터를 순서대로 push한다.
+ */
+export interface AudienceGates {
+  /** 지정 시 그 시각 이후 message_click 한 고객 제외(미반응자 리마인드) */
+  excludeClickedSince?: Date | null;
+  /** 지정 시 최근 N일 M건+ 수신자 제외(발송 피로도 — 광고성 전역 게이트) */
+  fatigueCap?: FatigueCap | null;
+  // ⛔ 2026-08-03 4R: 리마인드 코호트 경계(registeredBefore)는 폐기했다. 등록 시각으로는 "1차를 받은 사람"을
+  //   가려낼 수 없다(1차 때 조건 밖이었다가 등급 승급 등으로 들어온 기존 고객이 통과한다). 부분 방어를 두느니
+  //   리마인드 자체를 보류한다 — continuous-operator.ts scheduleSequenceReminder.
+}
+
+export function buildAudienceWhere(
+  params: any[],         // [...baseParams, ...filterParams]까지 채워진 상태로 받는다(뒤에 push)
+  filterWhere: string,
+  storeFilter: string,
+  rawGates: AudienceGates | null | undefined,
+): string {
+  const gates = rawGates || {};   // null 전달도 "게이트 없음"으로 — 호출부 한 곳의 null이 전 경로를 죽이지 않게
   let clickGuard = '';
-  if (excludeClickedSince) {
-    params.push(excludeClickedSince);
+  if (gates.excludeClickedSince) {
+    params.push(gates.excludeClickedSince);
     clickGuard =
       `AND NOT EXISTS (
          SELECT 1 FROM cdp_events ce
@@ -34,14 +56,49 @@ export function buildSendableRecipientsSql(
             AND ce.occurred_at >= $${params.length}
        )`;
   }
-  const sql =
-    `SELECT c.id, c.phone, c.name, c.gender, c.region, c.birth_date, c.age, c.grade, c.custom_fields
-     FROM customers c
-     WHERE c.company_id = $1
+  const fatigueGuard = gates.fatigueCap ? buildFatigueGuardClause(params, gates.fatigueCap, 'c') : '';
+  return `c.company_id = $1
        AND ${buildJourneySafetyFilter('c')}
        ${storeFilter}
        ${filterWhere}
        ${clickGuard}
+       ${fatigueGuard}`;
+}
+
+/**
+ * ★ 2026-08-03 A-1 — 대상 수 COUNT. 명단·발송 추출과 같은 WHERE를 쓴다.
+ *   자동마케팅의 제안 수·화면 수·사전 통지 수가 전부 이 함수를 지난다(operator-audience.ts 단일 문 경유).
+ */
+export function buildAudienceCountSql(
+  filterWhere: string,
+  filterParams: any[],
+  baseParams: any[],     // [companyId, ...storeScope]
+  storeFilter: string,
+  gates: AudienceGates = {},
+): { sql: string; params: any[] } {
+  const params = [...baseParams, ...filterParams];
+  const where = buildAudienceWhere(params, filterWhere, storeFilter, gates);
+  return {
+    sql: `SELECT COUNT(*)::int AS count
+     FROM customers c
+     WHERE ${where}`,
+    params,
+  };
+}
+
+export function buildSendableRecipientsSql(
+  filterWhere: string,   // buildFilterWhereClauseCompat(...).sql ('' 가능)
+  filterParams: any[],   // buildFilterWhereClauseCompat(...).params
+  baseParams: any[],     // [companyId, ...storeScope]
+  storeFilter: string,   // ' AND id IN (...)' 또는 '' (단일 테이블이라 미qualified id = c.id)
+  gates: AudienceGates = {},   // ⛔ 1R 정정: 게이트는 객체 하나로 — 포지셔널 인자가 게이트를 빠뜨리게 만들었다
+): { sql: string; params: any[] } {
+  const params = [...baseParams, ...filterParams];
+  const where = buildAudienceWhere(params, filterWhere, storeFilter, gates);
+  const sql =
+    `SELECT c.id, c.phone, c.name, c.gender, c.region, c.birth_date, c.age, c.grade, c.custom_fields
+     FROM customers c
+     WHERE ${where}
      LIMIT 10000`;
   return { sql, params };
 }
@@ -124,36 +181,18 @@ export function buildSendableRecipientsTopSql(
   filterParams: any[],
   baseParams: any[],     // [companyId, ...storeScope]
   storeFilter: string,   // ' AND id IN (...)' 또는 ''
-  excludeClickedSince?: Date | null,
-  fatigueCap?: FatigueCap | null,
+  gates: AudienceGates = {},
   extraColumns?: ResolvedConditionColumn[],
   limit = 100,
 ): { sql: string; params: any[] } {
   const params = [...baseParams, ...filterParams];
-  let clickGuard = '';
-  if (excludeClickedSince) {
-    params.push(excludeClickedSince);
-    clickGuard =
-      `AND NOT EXISTS (
-         SELECT 1 FROM cdp_events ce
-          WHERE ce.customer_id = c.id
-            AND ce.company_id = $1
-            AND ce.event_name = 'message_click'
-            AND ce.occurred_at >= $${params.length}
-       )`;
-  }
-  const fatigueGuard = fatigueCap ? buildFatigueGuardClause(params, fatigueCap, 'c') : '';
+  const where = buildAudienceWhere(params, filterWhere, storeFilter, gates);
   const extras = (extraColumns || []).map((c) => c.select);
   const lim = Math.max(1, Math.min(100, Math.floor(Number(limit) || 100)));
   const sql =
     `SELECT c.phone, c.name${extras.length ? ', ' + extras.join(', ') : ''}
      FROM customers c
-     WHERE c.company_id = $1
-       AND ${buildJourneySafetyFilter('c')}
-       ${storeFilter}
-       ${filterWhere}
-       ${clickGuard}
-       ${fatigueGuard}
+     WHERE ${where}
      ORDER BY c.id ASC
      LIMIT ${lim}`;
   return { sql, params };
@@ -161,28 +200,17 @@ export function buildSendableRecipientsTopSql(
 
 export function buildSendableStagingInsertSql(
   stagingId: string,
-  companyId: string,
-  filterWhere: string,   // buildFilterWhereClauseCompat(filters, 2).sql ('' 가능) — companyId가 $1이므로 시작 인덱스 2
+  // ⛔ 5R 정정: companyId 단일에서 baseParams로 넓혔다 — 매장 제한 사용자의 storeFilter가 $2를 쓰기 때문이다.
+  //   [companyId] 또는 [companyId, storeCodes]. 종전 호출부는 [companyId]만 넘기면 동작이 같다.
+  baseParams: any[],
+  filterWhere: string,   // buildFilterWhereClauseCompat(filters, baseParams.length + 1).sql ('' 가능)
   filterParams: any[],
-  storeFilter: string,   // operator 발송은 '' (store-scope 없음). 넘길 경우 $1=company 기준으로 합성됨.
-  excludeClickedSince?: Date | null,
-  // ★ 2026-07-05: 발송 피로도 보호 — cap 지정 시 최근 N일 M건+ 수신자를 추출 단계에서 제외(차감 전 = 환불 불필요)
-  fatigueCap?: FatigueCap | null,
+  storeFilter: string,   // ' AND id IN (...)' 또는 '' — 넘길 경우 $1=company·$2=storeCodes 기준으로 합성됨.
+  // ★ 2026-07-05 발송 피로도 · 미클릭 — 게이트는 객체 하나로 받는다(1R 정정).
+  gates: AudienceGates = {},
 ): { sql: string; params: any[] } {
-  const params: any[] = [companyId, ...filterParams];
-  let clickGuard = '';
-  if (excludeClickedSince) {
-    params.push(excludeClickedSince);
-    clickGuard =
-      `AND NOT EXISTS (
-         SELECT 1 FROM cdp_events ce
-          WHERE ce.customer_id = c.id
-            AND ce.company_id = $1
-            AND ce.event_name = 'message_click'
-            AND ce.occurred_at >= $${params.length}
-       )`;
-  }
-  const fatigueGuard = fatigueCap ? buildFatigueGuardClause(params, fatigueCap, 'c') : '';
+  const params: any[] = [...baseParams, ...filterParams];
+  const where = buildAudienceWhere(params, filterWhere, storeFilter, gates);
   params.push(stagingId);
   const stgIdx = params.length;
   const sql =
@@ -190,11 +218,6 @@ export function buildSendableStagingInsertSql(
      SELECT $${stgIdx}::uuid, $1::uuid,
             COALESCE(regexp_replace(c.phone, '[^0-9]', '', 'g'), ''), c.name
        FROM customers c
-      WHERE c.company_id = $1
-        AND ${buildJourneySafetyFilter('c')}
-        ${storeFilter}
-        ${filterWhere}
-        ${clickGuard}
-        ${fatigueGuard}`;
+      WHERE ${where}`;
   return { sql, params };
 }

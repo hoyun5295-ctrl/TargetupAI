@@ -35,6 +35,14 @@ import {
   filterVarCatalogByData,
   countFilteredCustomers,
 } from './ai';
+// ★ 2026-08-03 타겟팅 재설계 A-1: 자동마케팅 대상 수는 단일 문으로만 센다(피로도·미클릭·코호트 게이트 포함 —
+//   종전 countFilteredCustomers는 게이트를 안 봐서 제안 수·통지 수가 실발송보다 컸다).
+//   ⛔ 1R 정정: 이 문은 audienceScope==='operator'일 때만. 공용 제안 경로는 countFilteredCustomers 그대로.
+import { countOperatorAudienceFor, resolveOperatorStoreScope } from '../utils/operator-audience';
+// ★ 2026-08-03 A-7: 세그먼트 계약 — 축이 정해지면 SQL이 정해진다(AI 해석 개입 없음).
+import { normalizeSegmentParams, getSegmentContract } from '../utils/automarketing-segment';
+// 성과 추정도 대상 수와 같은 최종 WHERE(안전필터·미클릭·피로도 포함)를 쓰게 하려고 공용 조각 빌더를 함께 쓴다.
+import { buildAudienceWhere } from '../utils/operator-recipients';
 // ★ D227+ 성과 추정 실데이터 전환 — calculateCostROI(하드코딩) 대체
 import { estimatePerformance } from '../utils/operator-performance-estimator';
 // 문안 생성 objective 합성(seasonHint 결합) 공통 헬퍼 — orchestrate / orchestrateWithAI 일관
@@ -82,6 +90,20 @@ export interface AgentContext {
   // ★ 2026-07-07 마케팅 캘린더 완비: 발송 대상 축(TARGET_HINTS 화이트리스트) — 타겟 sub-agent에만 고정 지시로 주입.
   //   문안 세계와 타겟 세계 지시 분리 원칙(2026-07-06 Liquid 결선 교훈). 미지정 = 기존 자유 해석.
   targetHint?: string | null;
+  /**
+   * ★ 2026-08-03 타겟팅 재설계 A-7 — 세그먼트 계약. 지정되면 대상 조건은 계약이 만들고
+   *   타겟 sub-agent의 filters는 쓰지 않는다(회차마다 재해석하지 않는다 = 결정성).
+   *   미지정 = 종전대로 filters 해석(옛 오퍼레이터 호환).
+   */
+  segmentKey?: string | null;
+  segmentParams?: Record<string, number> | null;
+  /**
+   * ⛔ 2026-08-03 1R 정정 — 이 호출이 자동마케팅 회차인지 밝힌다.
+   *   orchestrate는 자동마케팅(continuous-operator)과 일반 AI 제안(/operator/propose)이 공유한다.
+   *   자동마케팅 게이트(발송 피로도·미클릭·리마인드 코호트)를 공용 경로에 그대로 적용하면 범위 밖 화면의
+   *   추천 수가 조용히 달라지고, 그 뒤 미리보기 명단과도 어긋난다. 'operator'일 때만 그 게이트를 쓴다.
+   */
+  audienceScope?: 'operator';
 }
 
 export interface ComplianceResult {
@@ -98,6 +120,12 @@ export interface OrchestratorResult {
     criteria: string;
     filters: Record<string, any>;
     suggestedName: string;
+    /**
+     * ★ 2026-08-03 A-7: 계약으로 뽑은 제안이면 축과 파라미터가 여기 남는다.
+     *   발송 시점 추출·명단 조회가 filters가 아니라 이 축으로 컴파일한다 — 저장 후에도 조건이 같다.
+     */
+    segmentKey?: string | null;
+    segmentParams?: Record<string, number> | null;
   };
   messages: Array<{
     variantId: string;
@@ -150,6 +178,11 @@ export interface OrchestratorResult {
     personalizationVars: string[];
     useIndividualCallback: boolean;
     countVerified: boolean;
+    /**
+     * ★ 2026-08-03 A-1: 대상 수 실측 실패 사유. 값이 있으면 target.count는 0(fail-closed)이며
+     *   AI 추정치로 대체하지 않는다. 0건 통지가 이 사유를 담당자에게 그대로 전달한다.
+     */
+    countError?: string;
     generatedAt: string;
     agentDurations: Record<string, number>;
     // ★ D171-D (2026-05-19): 진정 Orchestrator AI (Opus 4.7) Tool Use 흐름 진입 여부
@@ -339,7 +372,11 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
   // ============ 1. Target Sub-agent (Opus 4.7 — Harold 명시) ============
   const targetStart = Date.now();
   // ★ 2026-07-07: 타겟 축 고정 지시(마케팅 캘린더 완비) — 화이트리스트 정규화 후 지시 블록 생성(이상값 = 무지시).
-  const targetDirective = buildTargetHintPromptBlock(normalizeTargetHint(ctx.targetHint));
+  // ⛔ 7R 정정: 계약이 있으면 옛 힌트 지시를 주지 않는다. 대상은 계약이 정하는데 지시만 옛 축으로 가면
+  //   기준 설명과 문안이 실제 대상과 다른 사람을 가리킨다(계약 birthday인데 문안은 VIP를 말한다).
+  const hasContract = ctx.audienceScope === 'operator'
+    && typeof ctx.segmentKey === 'string' && !!ctx.segmentKey.trim();
+  const targetDirective = hasContract ? '' : buildTargetHintPromptBlock(normalizeTargetHint(ctx.targetHint));
   const targetResult = await recommendTarget(
     ctx.companyId,
     ctx.objective,
@@ -365,15 +402,69 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
   // ============ 2. Target Verification (D168 — Tool Use SQL Loop 정신) ============
   const verifyStart = Date.now();
   let countVerified = false;
+  let countError: string | undefined;
+  // ★ 2026-08-03 A-7: 계약이 있으면 AI가 만든 filters를 버린다. 대상 조건은 축이 정하고, 축이 정해지면 SQL이 정해진다.
+  //   ⛔ 1R 정정: 계약 해석은 자동마케팅 회차에서만. 공용 제안 경로는 종전 그대로 둔다(범위 밖 동작 변화 금지).
+  const isOperatorScope = ctx.audienceScope === 'operator';
+  // ⛔ 2R 정정: 여기서 화이트리스트로 깎지 않는다(깎으면 미지의 축이 "계약 없음"이 되어 옛 경로로 샌다).
+  //   원문을 컴파일 문에 넘기고, 유효성은 그 한 곳에서 판정한다. 모르는 축이면 아래 catch가 대상 0 + 사유로 받는다.
+  const rawSegmentKey = isOperatorScope && typeof ctx.segmentKey === 'string' && ctx.segmentKey.trim()
+    ? ctx.segmentKey.trim() : null;
+  let contractKey: string | null = null;
+  let contractParams: Record<string, number> | null = null;
+  let contractLabel = '';
+  let contractCriteria = '';
+  // 대상 판정에 실제로 쓰인 조건 — 성과 추정도 같은 WHERE를 봐야 수와 기대 성과의 근거가 갈리지 않는다(3R 정정).
+  let audienceWhere: { sql: string; params: any[] } | null = null;
+  if (rawSegmentKey) targetResult.filters = {};   // 계약이 조건이다 — AI가 만든 filters는 쓰지 않는다
   try {
-    const cnt = await countFilteredCustomers(ctx.companyId, targetResult.filters, ctx.userId || '');
-    if (cnt.count !== estimatedCount) {
-      console.log(`[Orchestrator] count 검증 — AI 추정 ${estimatedCount} → DB 실제 ${cnt.count}`);
+    // ★ 2026-08-03 A-1: 자동마케팅은 발송 게이트(피로도·미클릭)를 포함한 단일 문 — 센 수가 곧 화면 수·사전 통지 수다.
+    //   일반 제안 경로는 그 게이트가 발송에 걸리지 않으므로 종전 count를 유지한다.
+    let actual: number;
+    if (isOperatorScope) {
+      // ⛔ 5R 정정: 제안 수도 발송과 같은 매장 범위로 센다. 종전엔 미리보기만 범위를 적용하고 제안 수·통지 수는
+      //   회사 전체였다 — 담당자가 본 수와 실제 나가는 수가 갈렸다.
+      const scope = await resolveOperatorStoreScope(ctx.companyId, ctx.userId || null);
+      if (scope.blocked) throw new Error('담당 매장이 지정되지 않아 발송 대상을 정할 수 없습니다.');
+      const measured = await countOperatorAudienceFor({
+        companyId: ctx.companyId,
+        segmentKey: rawSegmentKey,
+        segmentParams: ctx.segmentParams,
+        legacyFilters: targetResult.filters,
+        storeFilter: scope.storeFilter,
+        baseParams: scope.baseParams,
+      });
+      actual = measured.count;
+      // 컴파일이 확정한 축을 제안에 남긴다 — 발송·명단이 같은 축으로 다시 컴파일한다.
+      contractKey = measured.compiled.segmentKey;
+      contractParams = contractKey ? normalizeSegmentParams(contractKey as any, ctx.segmentParams) : null;
+      if (contractKey) {
+        // 화면 기준·캠페인 이름의 근거를 계약으로 통일한다(파라미터까지 문장에 담아 두루뭉술을 없앤다).
+        const c = getSegmentContract(contractKey);
+        const dayPart = contractParams?.days ? ` (기준 ${contractParams.days}일)` : '';
+        contractLabel = c?.label || '';
+        contractCriteria = c ? `${c.label}${dayPart} — ${c.description}` : '';
+      }
+      // ⛔ 4R 정정: 조건 조각만 넘기면 추정기는 안전필터·수신거부·피로도를 안 본다 — VIP 100명 중 실제 10명인데
+      //   프로파일은 100명 기준으로 잡혀 기대 매출이 몇 배가 된다. count가 쓴 최종 WHERE 그대로를 넘긴다.
+      const estParams: any[] = [...scope.baseParams, ...measured.compiled.filterParams];
+      const estWhere = buildAudienceWhere(estParams, measured.compiled.filterWhere, scope.storeFilter, measured.gates);
+      audienceWhere = { sql: estWhere, params: estParams.slice(1) };
+    } else {
+      const cnt = await countFilteredCustomers(ctx.companyId, targetResult.filters, ctx.userId || '');
+      actual = cnt.count;
     }
-    estimatedCount = cnt.count;
+    if (actual !== estimatedCount) {
+      console.log(`[Orchestrator] count 검증 — AI 추정 ${estimatedCount} → DB 실제 ${actual}`);
+    }
+    estimatedCount = actual;
     countVerified = true;
-  } catch (cntErr) {
-    console.warn('[Orchestrator] count 검증 실패, AI 추정값 fallback:', cntErr);
+  } catch (cntErr: any) {
+    // ★ 2026-08-03 A-1 fail-closed: 종전엔 실패 시 AI 추정값으로 진행했다(대상 판정을 AI가 한 셈).
+    //   실측이 없으면 대상은 0이다 — Zero-Count 게이트가 제안 생성을 막고, 사유는 담당자에게 통지된다.
+    countError = cntErr?.message || '대상 수 실측 실패';
+    estimatedCount = 0;
+    console.warn('[Orchestrator] count 검증 실패 → 대상 0 처리(AI 추정값 사용 안 함):', cntErr);
   }
   mark('verify', verifyStart);
 
@@ -394,8 +485,16 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
   // ★ 2026-07-02 3단계: 회사 누적 학습(성공 패턴·채널 성과·정지 사유)을 문안 생성에 주입 — 계절 힌트와 같은 채널.
   //   그동안 쓰기만 되고 기본 경로에서 읽히지 않던 ai_company_memory가 여기서 처음 반영된다. 실패 시 빈 문자열(영향 0).
   const learnedMemoryContext = await buildCompanyMemoryPromptContext(ctx.companyId, 20).catch(() => '');
+  // ⛔ 8R 정정: 계약이 있으면 문안 생성에도 그 대상을 명시한다. 종전엔 목표 문장만 넘겨서
+  //   대상은 생일 고객인데 문안·개인화·채널 사유가 VIP를 말하는 일이 생겼다(수신자와 문안이 다른 사람을 가리킨다).
+  const contractAudienceBlock = contractCriteria
+    ? `[실제 발송 대상 — 이 대상에게 맞게 쓴다]\n${contractCriteria}\n목표 문장과 대상이 다르면 대상을 따른다. 다른 고객군을 지칭하지 않는다.`
+    : '';
   const messagesResult = await generateMessages(
-    buildMessageObjective(ctx.objective, [ctx.seasonHint, learnedMemoryContext].filter(Boolean).join('\n\n')),
+    buildMessageObjective(
+      ctx.objective,
+      [contractAudienceBlock, ctx.seasonHint, learnedMemoryContext].filter(Boolean).join('\n\n'),
+    ),
     {
       total_count: estimatedCount,
       avg_purchase_count: parseFloat(ctx.customerStats.avg_purchase_count) || 0,
@@ -472,6 +571,8 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
     channel: targetResult.recommended_channel || 'SMS',
     unitCost: unitCost5,
     fallbackAvgRevenue: parseFloat(ctx.customerStats.avg_total_spent) || 0,
+    // ⛔ 3R 정정: 계약 제안은 filters가 비어 있어 성과 프로파일이 전체 고객으로 잡혔다 — 같은 조건을 넘긴다.
+    targetWhere: audienceWhere,
   });
   mark('costRoi', costStart);
 
@@ -497,9 +598,13 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
     target: {
       count: estimatedCount,
       totalCount: parseInt(ctx.customerStats.total || '0'),
-      criteria: targetResult.reasoning,
+      // ⛔ 7R 정정: 계약이 있으면 기준 설명도 계약이 근거다. AI reasoning을 그대로 쓰면 화면이
+      //   실제 대상과 다른 사람을 설명한다(대상은 생일 고객인데 기준은 VIP 재구매라고 적힌다).
+      criteria: contractCriteria || targetResult.reasoning,
       filters: targetResult.filters,
-      suggestedName: targetResult.suggested_campaign_name,
+      suggestedName: contractLabel || targetResult.suggested_campaign_name,
+      // ★ 2026-08-03 A-7: 저장된 제안이 발송·명단 조회에서 같은 축으로 다시 컴파일되게 축을 함께 남긴다.
+      ...(contractKey ? { segmentKey: contractKey, segmentParams: contractParams } : {}),
     },
     messages: normalizedMessages,
     recommendation: messagesResult.recommendation,
@@ -521,6 +626,7 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
       personalizationVars: targetResult.personalization_vars || [],
       useIndividualCallback: !!targetResult.use_individual_callback,
       countVerified,
+      ...(countError ? { countError } : {}),
       generatedAt: new Date().toISOString(),
       agentDurations: durations,
     },
@@ -674,21 +780,27 @@ async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorRe
           return { error: 'target_analysis가 먼저 호출되어야 합니다.' };
         }
         try {
-          const cnt = await countFilteredCustomers(ctx.companyId, targetResult.filters, ctx.userId || '');
-          estimatedCount = cnt.count;
+          // ★ 2026-08-03 A-1 / 1R 정정: 자동마케팅 회차만 발송 게이트를 포함한 단일 문으로 센다.
+          //   이 tool 흐름은 공용 제안(/operator/propose)도 쓰므로 범위 밖에는 종전 count를 유지한다.
+          const actual = ctx.audienceScope === 'operator'
+            ? (await countOperatorAudienceFor({ companyId: ctx.companyId, legacyFilters: targetResult.filters })).count
+            : (await countFilteredCustomers(ctx.companyId, targetResult.filters, ctx.userId || '')).count;
+          estimatedCount = actual;
           countVerified = true;
           mark('verify', start);
           return {
-            actual_count: cnt.count,
-            unsubscribe_count: cnt.unsubscribeCount,
+            actual_count: actual,
             // ★ Zero-Count 영구 원칙 안내 (Harold 명시 D171)
-            warning: cnt.count === 0
+            warning: actual === 0
               ? '★ 매칭 0건 — 발송 차단 정합 (Harold 영구 원칙). 자동완화 절대 금지. message_composition 호출 X. 사용자에게 조건 재입력 안내 제공할 것.'
               : null,
           };
         } catch (cntErr: any) {
+          // ★ 2026-08-03 A-1 fail-closed: 실측 실패는 0으로 — message_composition 게이트가 그대로 막는다.
+          estimatedCount = 0;
+          countVerified = false;
           mark('verify', start);
-          return { error: `count_verification 실패: ${cntErr?.message || 'unknown'}` };
+          return { error: `count_verification 실패: ${cntErr?.message || 'unknown'} — 대상 0 처리(추정값 사용 금지)` };
         }
       }
       if (toolName === 'message_composition') {

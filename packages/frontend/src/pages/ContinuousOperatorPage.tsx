@@ -151,8 +151,13 @@ export default function ContinuousOperatorPage() {
     auto_send_lead_minutes: e.autoSendLeadMinutes ?? 120,
     send_time_mode: e.sendTimeMode === 'ai_optimal' ? 'ai_optimal' : 'fixed',
     copy_style: e.copyStyle ?? null,
-    // ★ 2026-07-12 C-4: 발송 대상 축 — 미선택 = null(목표 문장 자유 해석)
-    target_hint: e.targetHint ?? null,
+    // ★ 2026-08-03 타겟팅 재설계: 발송 대상 계약 — 고르면 매 회차 같은 조건으로 컴파일된다.
+    segment_key: e.segmentKey ?? null,
+    segment_params: e.segmentParams ?? null,
+    // ⛔ 2026-08-03 6R·8R 정정: 옛 축(target_hint)은 3상태로 다룬다.
+    //   미전송 = 서버 유지(무관한 수정이 옛 축을 지우면 안 된다) / 사용자가 "자동 판단"을 명시적으로 고른 경우에만 해제.
+    //   계약을 고르면 서버가 상호배타로 해제하므로 그때는 보낼 필요가 없다.
+    ...(e.targetHintTouched ? { target_hint: null } : {}),
     channel: e.channel || 'lms',
     // ★ 2026-07-30 (임은지 접수): MMS 이미지 — mms가 아니면 null(해제)로 보내 채널 전환 시 이미지 잔존 차단
     mms_image_paths: (e.channel === 'mms') ? (e.mmsImagePaths ?? []) : null,

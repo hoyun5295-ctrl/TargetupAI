@@ -122,7 +122,9 @@ export async function runPredictiveBatchNow(): Promise<{
         companiesProcessed++;
         // created_by = 회사 대표 admin(예측 자동 차감의 설정 주체). 없으면 null('자동').
         const adminRes = await query(
-          `SELECT id FROM users WHERE company_id = $1::uuid AND user_type = 'company_admin' ORDER BY id LIMIT 1`,
+          // ⛔ 2026-08-03: DB 원시 역할값은 admin/user/system이다('company_admin'은 JWT 변환값이라 DB에 없다).
+          //   종전 조건은 늘 0건이라 created_by가 항상 null로 기록됐다. 같은 원인 패턴 전수 정정(6원칙 ①).
+          `SELECT id FROM users WHERE company_id = $1::uuid AND user_type = 'admin' ORDER BY id LIMIT 1`,
           [row.id]
         );
         // 성공 후 차감 — 회사+날짜 멱등키로 하루 1회 보장(재시작·재진입 중복 차감 0).

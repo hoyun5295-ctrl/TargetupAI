@@ -42,6 +42,16 @@ export interface ContinuousOperator {
   autoSendLeadMinutes?: number | null;
   // ★ 2026-07-12 C-4: 발송 대상 축 — null/미지정 = 목표 문장 자유 해석
   targetHint?: string | null;
+  // ★ 2026-08-03 타겟팅 재설계: 발송 대상 계약 — 고르면 매 회차 같은 조건으로 대상을 뽑는다(재해석 없음).
+  //   null = 계약 없음(목표 문장 해석 — 종전 방식). 파라미터 범위·검증은 backend가 단일 진실.
+  segmentKey?: string | null;
+  segmentParams?: Record<string, number> | null;
+  /**
+   * ⛔ 화면 전용 3상태 플래그 — 사용자가 "목표 문장으로 자동 판단"을 **명시적으로** 골랐는지.
+   * 무관한 수정(이름·예산)에서는 옛 축을 건드리지 않아야 하고(미전송 = 서버 유지),
+   * 자동 판단을 직접 고른 경우에만 해제를 보낸다. 저장 payload에는 이 값 자체가 나가지 않는다.
+   */
+  targetHintTouched?: boolean;
   // 발송 시각 모드 — 'fixed'(기본, 희망 시각 정각 발송) | 'ai_optimal'(반응 좋은 시간대로 AI가 조정)
   sendTimeMode?: 'fixed' | 'ai_optimal';
   // 문안 스타일 4종 — null/미지정 = 브랜드 톤 자동
@@ -245,16 +255,32 @@ export interface ProposalApproveSelection {
   subject?: string;
 }
 
-// ★ 2026-07-12 C-4: 발송 대상 축 선택지 — backend autosend-policy TARGET_HINTS의 키·라벨 미러.
-//   검증(화이트리스트)·타겟 지시문은 backend가 단일 진실 — 여기는 표시용 라벨만.
-export const TARGET_HINT_OPTIONS: Array<{ key: string; label: string }> = [
-  { key: 'all', label: '전체 고객' },
-  { key: 'dormant', label: '휴면 고객' },
-  { key: 'recent_buyers', label: '최근 구매 고객' },
-  { key: 'vip', label: 'VIP·상위 등급' },
-  { key: 'birthday', label: '이달 생일 고객' },
-  { key: 'new_customers', label: '신규 등록 고객' },
-];
+/**
+ * ★ 2026-08-03 타겟팅 재설계 — 발송 대상 계약 축.
+ *   목록·라벨·사유·파라미터 정의를 전부 backend(GET /api/ai/operator/segments)가 준다.
+ *   ⛔ 프런트에 축 목록을 두지 않는다 — 회사 데이터로 열리고 잠기는 축이라 여기서 흉내 내면 화면이 거짓말을 한다.
+ */
+export interface SegmentParamDef {
+  key: string;
+  label: string;
+  unit: string;
+  default: number;
+  min: number;
+  max: number;
+}
+
+export interface SegmentAvailability {
+  key: string;
+  label: string;
+  available: boolean;
+  /** 왜 되는지 / 왜 안 되는지 — 그대로 노출한다. */
+  reason: string;
+  params: SegmentParamDef[];
+}
+
+// ★ 2026-08-03 타겟팅 재설계: 고정 축 목록(TARGET_HINT_OPTIONS)은 여기서 제거했다.
+//   목록을 프런트에 두면 그 회사에서 안 되는 축까지 늘 열려 보인다 — 자동마케팅은 SegmentAvailability(서버 판정)만 쓴다.
+//   마케팅 캘린더는 아직 옛 target_hint 축이라 그 화면이 자기 목록을 갖는다(계약 전환 = 별건).
 
 // ★ 2026-07-12 C-3③: 자동마케팅 매출 귀속(ROI) — GET /operator/performance/automarketing-roi 응답
 export interface AutoMarketingRoi {

@@ -5,8 +5,10 @@ import { ReactNode, useState } from 'react';
 import {
   Brain, X, Gift, Layers, Bell, Wallet, ChevronDown, ChevronUp, Loader2, AlertCircle,
 } from 'lucide-react';
-import { ContinuousOperator, Schedule, OperatorStatus, TARGET_HINT_OPTIONS, won } from './types';
+import { ContinuousOperator, Schedule, OperatorStatus, won } from './types';
 import CopyStylePicker from './CopyStylePicker';
+// ★ 2026-08-03 타겟팅 재설계: 발송 대상은 계약으로 고른다(회사 데이터로 열리고 잠긴다).
+import SegmentPicker from './SegmentPicker';
 // ★ 2026-07-30 (임은지 접수): MMS 이미지 첨부 — 여정 MMS 업로더 재사용(300KB JPG·최대 3장·라이브러리 자동 변환)
 import JourneyMmsUploader from '../journey/JourneyMmsUploader';
 
@@ -87,13 +89,18 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
           </div>
 
           <div>
-            {/* ★ 2026-07-12 C-4: 발송 대상 축 — 캘린더 등록 전용이던 target_hint 일반 개방 */}
-            <label className={LAB}>발송 대상 (선택)</label>
-            <select value={editing.targetHint ?? ''} onChange={(e) => setEditing({ ...editing, targetHint: e.target.value || null })} className={INP}>
-              <option value="">AI 자동 — 목표 문장으로 판단</option>
-              {TARGET_HINT_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}
-            </select>
-            <div className="text-[10px] text-white/40 mt-1">고르면 매 제안의 발송 대상이 이 축으로 고정됩니다. 비우면 목표 문장을 AI가 해석합니다.</div>
+            {/* ★ 2026-08-03 타겟팅 재설계: 고정 목록 select → 계약 선택. 이 회사에서 되는 축만 열리고,
+                안 되는 축은 사유와 함께 잠긴다. 고르면 지금 기준 대상 수를 바로 보여준다. */}
+            <label className={LAB}>발송 대상</label>
+            <SegmentPicker
+              value={editing.segmentKey ?? null}
+              params={editing.segmentParams ?? null}
+              onChange={(segmentKey, segmentParams) => setEditing({ ...editing, segmentKey, segmentParams })}
+              disabled={saving}
+              legacyHint={editing.targetHint ?? null}
+              operatorId={editing.id ?? null}
+              onClearLegacyHint={() => setEditing({ ...editing, segmentKey: null, segmentParams: null, targetHint: null, targetHintTouched: true })}
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -183,24 +190,16 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
             <div className="text-[10px] text-white/40">입력하면 생성 문안의 [혜택 내용을 입력해주세요] 자리에 그대로 들어갑니다. 비워두면 제안 단계에서 작성합니다. AI가 혜택을 임의로 만들지 않습니다.</div>
           </Section>
 
-          <Section icon={<Layers className="w-4 h-4" />} title="다단계 시퀀스" summary={editing.sequenceEnabled ? `${editing.sequenceDelayDays ?? 3}일 후 미반응자 리마인드` : '미반응자 리마인드 · 꺼짐'}>
-            <label className="flex items-center justify-between">
-              <span className="text-xs text-white/80">1차 발송 후 미반응자 리마인드</span>
-              <button type="button" onClick={() => setEditing({ ...editing, sequenceEnabled: !editing.sequenceEnabled })} className={`relative w-10 h-5 rounded-full transition-colors ${editing.sequenceEnabled ? 'bg-indigo-500' : 'bg-white/15'}`}>
-                <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${editing.sequenceEnabled ? 'translate-x-5' : ''}`} />
-              </button>
-            </label>
-            {editing.sequenceEnabled && (
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-white/70">리마인드 대기</span>
-                  <input type="number" min={1} max={30} value={editing.sequenceDelayDays ?? 3} onChange={(e) => setEditing({ ...editing, sequenceDelayDays: e.target.value === '' ? null : Number(e.target.value) })} className={`${INP} w-16 text-center`} />
-                  <span className="text-xs text-white/70">일 후</span>
-                </div>
-                <textarea value={editing.sequenceReminderContent || ''} onChange={(e) => setEditing({ ...editing, sequenceReminderContent: e.target.value })} className={`${INP} h-20 resize-none`} placeholder="리마인드 문안을 직접 작성해주세요 (예: 아직 확인 못 하셨나요? 준비한 혜택이 곧 마감됩니다)" maxLength={2000} />
-                <div className="text-[10px] text-white/40">리마인드 문안은 담당자가 직접 작성합니다. 발송 전 담당자에게 예약 알림이 전송됩니다.</div>
+          {/* ⛔ 2026-08-03: 미반응자 리마인드는 보류 중이다. 1차를 받은 분만 정확히 가려낼 수 없어
+              받지 않은 분께 나가는 것을 막기 위해 발송을 만들지 않는다. 켤 수 있게 두면 화면이 거짓말을 한다. */}
+          <Section icon={<Layers className="w-4 h-4" />} title="다단계 시퀀스" summary="미반응자 리마인드 · 준비 중">
+            <div className="flex items-start gap-2 px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg">
+              <AlertCircle className="w-4 h-4 text-white/40 shrink-0 mt-0.5" />
+              <div className="text-[11px] text-white/60 leading-relaxed">
+                미반응자 리마인드는 지금 사용할 수 없습니다. 1차 문자를 받은 분만 정확히 추려내야 하는데,
+                그 명단을 남기는 기능을 준비 중입니다. 받지 않은 분께 리마인드가 나가는 것을 막기 위해 잠시 닫아 두었습니다.
               </div>
-            )}
+            </div>
           </Section>
 
           {/* ★ 2026-07-12 C-2: "발송 주기" select 제거 — 소비 로직 0인 거짓 설정(실제 주기 = 위 '추천 주기') */}
