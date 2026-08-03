@@ -206,12 +206,18 @@ export const DB_OPTIONS: DbOption[] = [
   // 티베로·DB2·Altibase·Sybase·MS Access = 신규 커넥터(Phase B/C). 커넥터 구현 후 추가.
 ];
 
-// 실연결 스모크 통과 조합(`<osTierId>__<dbId>`) — 단일 진실원.
-// 비어 있으면 전부 candidate("검증 전") — fail-closed. VM/DB 스모크 통과분만 추가한다.
+// ★ 2026-08-03: 검증은 **버전 세대에 귀속**된다 — 1.7.0은 커서·적재가 통째로 바뀐 다른 물건이라
+//   옛 버전에서 통과한 조합이 승계되지 않는다(같은 라벨 다른 물건 금지의 검증판).
+//   이 값은 sync-agent/package.json version과 세트로 올린다(에이전트 버전 올림 = 여기도 올림 = 전 조합 자연 폐쇄).
+export const CURRENT_AGENT_VERSION = '1.7.0';
+
+// 실연결 스모크 통과 조합(`<osTierId>__<dbId>__<version>`) — 단일 진실원.
+// CURRENT_AGENT_VERSION과 일치하는 등재만 verified다. 비어 있으면 전부 candidate — fail-closed.
+// [이력 — 현 세대 미승계]
+//   win-2008r2__oracle-10g : 2026-06-24 VM(2008R2 RTM 6.1.7600) + Oracle 10g(10.2.0.4) 스모크 통과(당시 1.5.x 세대).
+//   win-modern__mysql      : 2026-07-27 Server 2016 VM 전체 통과(1.6.4 세대 — VM은 검증 후 삭제됨).
 export const VERIFIED_COMBOS = new Set<string>([
-  // 2026-06-24 VM(2008R2 RTM 6.1.7600) + Oracle 10g(10.2.0.4) 실연결 스모크 통과.
-  //   외부 동봉 oracledb 5.5.0 + Instant Client 11.2 thick로 연결 → CUSTOMERS/PURCHASES 테이블 조회 확인.
-  'win-2008r2__oracle-10g',
+  // 1.7.0 세대 등재 0건 — 조합별 스모크 통과 시마다 여기 추가한다(케이스바이케이스 개방).
 ]);
 
 /**
@@ -230,6 +236,23 @@ export function buildReleaseDownloadUrl(version: string, tier: string | null | u
 /** dbId → driver (DB_OPTIONS의 driver 필드가 진실, 헬퍼는 fallback). */
 export function driverOfDb(dbId: string): DriverId | null {
   return DB_OPTIONS.find((d) => d.id === dbId)?.driver ?? null;
+}
+
+/**
+ * ★ 2026-08-03: 다운로드 게이트 — packageKey(`<buildTier>-<driver>`)로 내려받을 수 있는가.
+ *   packageKey 하나에 여러 (osTier×dbId) 조합이 매핑되므로(oracle zip 하나 = 10g~21c),
+ *   그중 **하나라도 현 버전 세대에서 verified면** 그 zip은 열린다. 0건이면 닫힌다(fail-closed).
+ *   화면 잠금이 아니라 이 서버 길목이 실제 게이트다 — 화면만 잠그면 우회된다.
+ */
+export function isPackageKeyVerified(packageKey: string): boolean {
+  for (const tier of OS_TIERS) {
+    if (!tier.buildTier) continue;
+    for (const db of DB_OPTIONS) {
+      if (`${tier.buildTier}-${db.driver}` !== packageKey) continue;
+      if (VERIFIED_COMBOS.has(`${tier.id}__${db.id}__${CURRENT_AGENT_VERSION}`)) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -372,8 +395,8 @@ export function resolveAgentBuild(
       ? resolveOracle(node, dbId)
       : { mode: 'na' as const, nativeClient: null, connectionProfile: defaultProfile(driver) };
 
-  // ── state: 스모크 통과 조합만 verified, 나머지 candidate(검증 전) ──────────
-  const state: BuildState = VERIFIED_COMBOS.has(`${tier.id}__${dbId}`) ? 'verified' : 'candidate';
+  // ── state: 현 버전 세대에서 스모크 통과한 조합만 verified, 나머지 candidate(검증 전) ──────────
+  const state: BuildState = VERIFIED_COMBOS.has(`${tier.id}__${dbId}__${CURRENT_AGENT_VERSION}`) ? 'verified' : 'candidate';
 
   const installSummary =
     platform === 'windows'

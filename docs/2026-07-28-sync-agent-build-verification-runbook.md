@@ -30,9 +30,9 @@
 
 싱크에이전트 고객은 앞으로 늘어난다. 그래서 20조합을 미리 다 검증하는 것도, 미검증을 검증된 것처럼 화면에 내보이는 것도 답이 아니다. 검증을 **싸게** 만들어 조합이 생길 때마다 붙이는 쪽으로 간다.
 
-- 검증 상태의 단일 진실원 = `packages/backend/src/utils/agent-build-tiers.ts` 의 `VERIFIED_COMBOS`(키 = `<osTierId>__<dbId>`). 비어 있으면 전부 `candidate` — fail-closed다.
-- 한 번 등재되면 빠지지 않는다. 검증 집합은 쌓이기만 한다.
-- 슈퍼관리자 "싱크에이전트 배포" 메뉴는 **없애지 않는다.** 그 화면의 값은 다운로드 버튼이 아니라 OS → 티어 → 드라이버 판정이다(2008 R2에 node20 빌드를 보내는 실수를 막는 게 그 화면이다). **다운로드만 verified로 제한하고, candidate는 "확인되지 않음 — 담당자 확인 후 전달"로 바꾼다.** (미착수)
+- 검증 상태의 단일 진실원 = `packages/backend/src/utils/agent-build-tiers.ts` 의 `VERIFIED_COMBOS`. **키 = `<osTierId>__<dbId>__<version>`(2026-08-03 버전 스코프 전환)** — 검증은 버전 세대에 귀속되고, `CURRENT_AGENT_VERSION`과 일치하는 등재만 verified다. 비어 있으면 전부 `candidate` — fail-closed다. 에이전트 버전을 올리면 여기 상수도 함께 올린다(= 전 조합 자연 폐쇄 → 조합별 재검증 개방).
+- 한 번 등재되면 빠지지 않는다(이력 주석 보존). 검증 집합은 세대별로 쌓인다.
+- 슈퍼관리자 "싱크에이전트 배포" 메뉴는 **없애지 않는다.** 그 화면의 값은 다운로드 버튼이 아니라 OS → 티어 → 드라이버 판정이다(2008 R2에 node20 빌드를 보내는 실수를 막는 게 그 화면이다). **다운로드는 verified만**(서버 길목 403 게이트 `isPackageKeyVerified` — 2026-08-03 구현 완료), candidate는 화면에 "확인되지 않음 — 담당자 확인 후 개별 전달"로 표시된다.
 
 ---
 
@@ -124,7 +124,7 @@ node scripts/build-tier.js win-modern   # 단일 티어
 
 1. 1.6.5 빌드 후 `smoke-combos.sh` 재실행 → SKIP이 PASS로 바뀌는지 확인(검증 고리 닫기)
 2. PASS 조합을 `VERIFIED_COMBOS`에 등재 — 어디까지를 등재 기준으로 볼지 확정 필요(접속·조회까지인지, 전체 동기화까지인지)
-3. 슈퍼관리자 메뉴에서 candidate 다운로드 제거
+3. ~~슈퍼관리자 메뉴에서 candidate 다운로드 제거~~ — 2026-08-03 완료(서버 403 게이트 + 화면 안내)
 4. MSSQL 이미지 확보 → 3조합 추가
 5. Oracle IC 또는 12c+ 이미지 확보 → 3조합 추가
 6. Server 2012 R2 · 2008 R2 VM 상설 구축 → 8조합

@@ -12,7 +12,7 @@ import { Router, Request, Response } from 'express';
 import { randomUUID } from 'crypto';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { query } from '../config/database';
-import { PLATFORMS, OS_TIERS, DB_OPTIONS, VERIFIED_COMBOS, resolveAgentBuild, buildReleaseDownloadUrl, PlatformId } from '../utils/agent-build-tiers';
+import { PLATFORMS, OS_TIERS, DB_OPTIONS, VERIFIED_COMBOS, resolveAgentBuild, buildReleaseDownloadUrl, isPackageKeyVerified, PlatformId } from '../utils/agent-build-tiers';
 // ★ 2026-07-10 원격 관리: 진단 명령 버전 게이트 (v1.6.1+ ACK 전용)
 import { isAgentVersionGte, ACK_MIN_AGENT_VERSION } from '../utils/agent-protocol';
 import path from 'path';
@@ -60,6 +60,16 @@ router.get('/build-tiers/download/:packageKey', authenticate, requireSuperAdmin,
   const packageKey = req.params.packageKey;
   if (!VALID_PACKAGE_KEYS.has(packageKey)) {
     res.status(400).json({ success: false, error: '알 수 없는 빌드 패키지입니다.' });
+    return;
+  }
+  // ★ 2026-08-03: 검증된 조합만 내보낸다(런북 §1) — 현 버전 세대 verified 0건이면 전부 닫힘.
+  //   화면 잠금이 아니라 이 길목이 게이트다. 미검증 조합은 담당자가 확인 후 개별 전달한다.
+  if (!isPackageKeyVerified(packageKey)) {
+    res.status(403).json({
+      success: false,
+      code: 'AGENT_BUILD_NOT_VERIFIED',
+      error: '이 조합은 현재 버전에서 아직 검증되지 않았습니다. 담당자 확인 후 개별 전달합니다.',
+    });
     return;
   }
   const file = path.join(AGENT_BUILDS_DIR, `sync-agent-${packageKey}.zip`);
