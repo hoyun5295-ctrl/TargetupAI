@@ -60,6 +60,40 @@ export class SyncStateManager {
     this.save();
   }
 
+  // ─── 키셋 커서 (★ 2026-08-03 커서 재설계) ─────────────
+  //
+  // 커서 = 마지막 처리 행의 (타임스탬프 원문, PK 값들). 완료 시각을 넣던 옛 구조가
+  // 시각 없는 판매일 컬럼과 만나 하루치 유실을 만들었다(이새 실측 — 유실 98%).
+  // 청크마다 저장한다 — 중간에 죽어도 마지막 성공 청크 다음부터 이어받는다(서버 멱등이 겹침 흡수).
+
+  getCursor(target: SyncTarget): import('../types/sync').SyncCursorState | null {
+    return this.state.cursors?.[target] ?? null;
+  }
+
+  setCursor(target: SyncTarget, cursor: import('../types/sync').SyncCursorState): void {
+    if (!this.state.cursors) this.state.cursors = {};
+    this.state.cursors[target] = cursor;
+    this.save();
+  }
+
+  clearCursor(target: SyncTarget): void {
+    if (this.state.cursors) {
+      this.state.cursors[target] = null;
+      this.save();
+    }
+  }
+
+  /** 증분 보류 사유 — 있으면 증분을 건너뛴다(매 주기 전량 폭주 방지). 전량 동기화 시작이 지운다. */
+  getIncrementalHold(target: SyncTarget): string | null {
+    return this.state.incrementalHold?.[target] ?? null;
+  }
+
+  setIncrementalHold(target: SyncTarget, reason: string | null): void {
+    if (!this.state.incrementalHold) this.state.incrementalHold = {};
+    this.state.incrementalHold[target] = reason;
+    this.save();
+  }
+
   /** Agent ID 설정 (서버 등록 후) */
   setAgentId(agentId: string): void {
     this.state.agentId = agentId;

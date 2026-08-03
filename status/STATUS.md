@@ -48,10 +48,10 @@
 > ⛔ 절사는 **항목줄에서 1회**(0730 정정 — 행 단위는 폐기. 계정별 발행이 합산과 1원 다른 것은 의도) / 미발행 draft 중 소수 단가 회사분은 삭제·재생성해야 새 산식 반영 / 실청구 발행은 직원 단가·선불 재점검 완료 후 — `DEFAULT_COSTS` 잔존 9곳 + 라운드 숫자 2곳(SoT §9-1) / draft 삭제·재발행은 **화면에서**, psql DELETE 금지
 > 잔여 = 실회사 드라이런(발행→PDF→메일→삭제) · 거래내역서 MMS 308,043건 · 이월 판단 8건(SoT §9 — `G` 유형 과금 분류 · 크레딧 스냅샷 소급 ALTER · 일할 자동지급 재배선 · 해지 표현 · `by_agent` 지점별 발행 · `/preview` 배선 · 141사 일괄 발행 · 테스트 발송 환불 zero-uuid 결함=BUGS.md)
 
-### 싱크에이전트 — 검증 자동화 배포완료(`c16fc242`), 아난티 발송 대기
-> SoT [빌드 검증 런북](docs/2026-07-28-sync-agent-build-verification-runbook.md)(정책·조합 현황·경위 전부) · 기억 [[project_2026_0727_sync_agent_vm_verification]] · 다음 = 아난티 발송(zip+매뉴얼). 호출어 "싱크에이전트 빌드 검증 이어가자"
-> ⛔ 아난티는 **1.6.4 세트**로 — 1.6.5는 Server 2016 미검증이라 서버 zip 교체 금지
-> 잔여 = 마법사 탈출구 배너 미포함
+### 싱크에이전트 — 0803 구매 증분 유실 정정: 서버 배포완료 + 에이전트 1.7.0 코드완료(**Codex 적대검증 5R approve**)
+> 기능 상설 = **[싱크에이전트](../docs/FEATURE-SYNC-AGENT.md)**(호출어 "싱크에이전트" — 불변 원칙·커서 규약 §4·구조·이력) · 검증·출고 = [빌드 런북](../docs/2026-07-28-sync-agent-build-verification-runbook.md) §4 · 기억 [[project_2026_0727_sync_agent_vm_verification]] · 다음 = tp-push → 빌드(`build:tiers`) → 로컬 smoke(도커 MySQL 전체+증분) → 원격 릴리즈 경로 검증 → 아난티 출고
+> ⛔ **아난티 1.6.4 출고 폐기 → 1.7.0** — 커서 결함이 전 버전 공통(엔진 코드) / OS 민감 경로(마법사·라우팅·서비스 등록)는 1.7.0에서 무변경 — 1.6.4 검증 계보 유지, 커서 delta만 로컬 smoke(Server 2016 VM은 삭제됨) / 리뷰 판정 13건 전량 수용 이력 = 기능 문서 §4·§5(닫힌 버킷·fail-closed 키·fingerprint)
+> 잔여 = 빌드·smoke · 원격 릴리즈 경로 검증 · 아난티 출고 · backdating 재대조 워커(별건) · 마법사 탈출구 배너(이월)
 
 ### 0729 브랜드메시지 — 청구축·발송경로 재구축 **전량 배포완료**(`4864d5d9` — 0731 Codex 11R SHIP)
 > SoT [청구·개방](docs/2026-07-29-brand-message-billing-design.md) §7 · [발송경로 재구축](docs/2026-07-29-brand-message-qtmsg-agent-design.md) §8 구현 결과 · **§9 표시 축 재구축**(0731 실측이 깬 것 — 배포완료) · 기억 [[project_2026_0729_brand_message_billing]] · 다음 = 재측정(대체발송 `SM`으로) → 브랜드 단가 입력(여미지 `B0227`)·발행 실측

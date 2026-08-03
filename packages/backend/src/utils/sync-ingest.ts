@@ -45,7 +45,11 @@ export function normalizeSourceRowKey(raw: unknown): SourceRowKeyResult {
   return { ok: true, value: s };
 }
 
-/** 같은 원본 행이 한 배치에 두 번 오면 ON CONFLICT가 "같은 행을 두 번 고칠 수 없다"로 터진다 → 마지막 것만 남긴다. */
+/**
+ * 같은 원본 행이 한 배치에 두 번 오면 ON CONFLICT가 "같은 행을 두 번 고칠 수 없다"로 터진다 → 마지막 것만 남긴다.
+ * 키 행은 **키 정렬**로 돌려준다 — 동시 요청 둘이 겹치는 키를 서로 다른 순서로 UPSERT하면 교착이 된다.
+ * 전 요청이 같은 잠금 순서를 갖게 순서를 결정적으로 만든다(행 간 의존이 없어 순서 변경은 결과 무영향).
+ */
 export function dedupeBySourceRowKey<T extends { source_row_key: string | null }>(rows: T[]): T[] {
   const byKey = new Map<string, T>();
   const noKey: T[] = [];
@@ -56,7 +60,10 @@ export function dedupeBySourceRowKey<T extends { source_row_key: string | null }
     }
     byKey.set(r.source_row_key, r);
   }
-  return [...noKey, ...byKey.values()];
+  const keyed = [...byKey.values()].sort((a, b) =>
+    (a.source_row_key as string) < (b.source_row_key as string) ? -1
+    : (a.source_row_key as string) > (b.source_row_key as string) ? 1 : 0);
+  return [...noKey, ...keyed];
 }
 
 export interface PurchaseIngestRow {

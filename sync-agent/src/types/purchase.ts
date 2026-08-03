@@ -24,6 +24,10 @@ export const PurchaseSchema = z.object({
 
   // 확장
   custom_fields: z.record(z.unknown()).nullish(),
+
+  // ★ 2026-08-03: 원본 행 키 — 소스 테이블 PK 직렬화(keyset.serializeSourceRowKey).
+  //   서버 purchases.source_row_key 멱등 UPSERT의 원료. Zod가 미등록 키를 걷어내므로 여기 없으면 전송에서 사라진다.
+  source_row_key: z.string().nullish(),
 });
 
 export type Purchase = z.infer<typeof PurchaseSchema>;

@@ -108,6 +108,45 @@ export interface IDbConnector {
    * 테이블 전체 레코드 수 조회
    */
   getRowCount(tableName: string): Promise<number>;
+
+  /**
+   * 키셋 증분 조회 (★ 2026-08-03 커서 재설계).
+   *   커서 (tsRaw, keys) **다음** 행을 (ts ASC, pk... ASC) 순서로 최대 limit건.
+   *   - tsRaw는 이 어댑터 자신이 만들어 준 DB 원문 문자열이다 — 같은 형식으로 파싱해 비교한다.
+   *   - 타입 변환은 항상 상수(바인드) 쪽에서. 컬럼 쪽 캐스트는 인덱스를 죽인다.
+   *   - 타임스탬프 NULL 행은 제외한다(전량 동기화에서만 들어온다 — 기존 의미 보존).
+   *   - cursor=null이면 처음부터(ts 정렬 전체 스캔) — 큰 테이블에서는 비싸므로 엔진은 전량 경로를 쓴다.
+   *   반환 rows에는 내부 원문 컬럼이 제거되어 있고, meta[i]가 rows[i]의 커서 성분이다.
+   *   미구현 어댑터(excel·csv 등)는 엔진이 기존 fetchIncremental 경로를 유지한다.
+   */
+  fetchIncrementalKeyset?(
+    tableName: string,
+    timestampColumn: string,
+    pkColumns: string[],
+    cursor: import('./keyset').IncrementalCursor | null,
+    limit: number,
+  ): Promise<{ rows: RawRow[]; meta: import('./keyset').RowCursorMeta[] }>;
+
+  /**
+   * 현재 최대 (ts, pk...) 튜플 조회 (★ 2026-08-03) — 전량 동기화 **시작 시점**의 커서 씨앗.
+   *   전량 스캔은 PK 순서라 마지막 행이 최대 시각이 아니다. 시작 시점 최대값을 커서로 삼으면
+   *   스캔 중 새로 생긴 행(ts ≥ 씨앗)이 첫 증분에서 잡히고, 겹침은 서버 멱등이 흡수한다.
+   *   타임스탬프 NULL 행 제외. 행이 없으면 null.
+   *   beforeTsRawExclusive 지정 시 ts < 그 값인 행 중 최대 — "닫힌 버킷 경계" 조회용
+   *   (최대 ts 버킷은 아직 열려 있어 커서로 삼으면 같은 ts의 후행 삽입이 영구 유실된다 — Codex F2).
+   */
+  fetchMaxCursor?(
+    tableName: string,
+    timestampColumn: string,
+    pkColumns: string[],
+    beforeTsRawExclusive?: string | null,
+  ): Promise<import('./keyset').IncrementalCursor | null>;
+
+  /**
+   * 접속 대상 식별자 (★ 2026-08-03) — 커서 fingerprint 재료(host:port/database 등).
+   *   소스가 바뀌었는데 커서를 재사용하면 새 소스의 행을 건너뛴다(fail-closed 폐기 근거).
+   */
+  getSourceId?(): string;
 }
 
 // ─── 보조 타입 ──────────────────────────────────────────

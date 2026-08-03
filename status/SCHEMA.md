@@ -1163,6 +1163,11 @@
 | total_amount | numeric(15,2) |
 | custom_fields | jsonb |
 | created_at | timestamp |
+| source_row_key | varchar(200) NULL | ★ 2026-08-03 실행완료 — 고객사 소스 테이블 원본 행 PK. 싱크 재전송·재싱크 멱등키 |
+
+**시간 축 주의 (2026-08-03 실측)** — `purchase_date`는 **KST 날짜**(1,855,088건 전량 `00:00:00`, 시각 없음)이고 `created_at`은 `NOW()` 적재라 **UTC 벽시계**다(DB 세션 TimeZone = `Etc/UTC`). 한 행에 축이 둘이니 비교 시 반드시 변환을 명시한다.
+
+**멱등 인덱스** — `CREATE UNIQUE INDEX ux_purchases_company_source_row_key ON purchases (company_id, source_row_key) WHERE source_row_key IS NOT NULL` (2026-08-03 실행완료). 부분 인덱스라 키 없는 기존 행·옛 에이전트 적재분은 걸리지 않는다. 적재는 `ON CONFLICT ... DO UPDATE`이며 **`created_at`은 갱신 대상에서 제외**한다(여정 구매 원장 커서가 도착 축으로 읽어, 값을 올리면 이미 발화한 구매가 재발송된다). 소유 = `utils/sync-ingest.ts`.
 
 ### rcs_templates (RCS 템플릿)
 | 컬럼 | 타입 |

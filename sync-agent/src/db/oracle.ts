@@ -16,6 +16,8 @@
  */
 
 import type { IDbConnector, DbConnectionConfig, RawRow, ColumnInfo } from './types';
+// ★ 2026-08-03 커서 재설계 — 키셋 술어·행 커서 성분 추출(순수 공용 모듈)
+import { buildKeysetPredicate, extractRowCursorMeta, IncrementalCursor, RowCursorMeta } from './keyset';
 import { getLogger } from '../logger';
 
 const logger = getLogger('db:oracle');
@@ -290,12 +292,267 @@ export class OracleConnector implements IDbConnector {
     }
   }
 
+  // ─── 키셋 증분 (★ 2026-08-03 커서 재설계) ─────────────
+  //
+  // 커서 시각은 DB 원문 문자열로 왕복한다 — TO_CHAR로 만들고 같은 형식의 TO_TIMESTAMP/TO_DATE로 파싱.
+  // JS Date를 거치지 않아 프로세스 TZ와 무관하고, 옛 `TO_TIMESTAMP(:since,'..."Z"')`가 UTC 문자열을
+  // 벽시계로 오독하던 9시간 어긋남도 구조적으로 사라진다.
+  // 바인드는 컬럼 타입에 맞춘다 — DATE 컬럼에 TIMESTAMP 상수를 대면 컬럼 쪽이 캐스트되어 인덱스를 못 탄다.
+
+  /** 타임스탬프 컬럼 원시 타입 캐시(테이블.컬럼 → DATA_TYPE) */
+  private tsTypeCache = new Map<string, string>();
+
+  private async resolveRawColumnType(conn: any, tableName: string, columnName: string): Promise<string> {
+    const cacheKey = `${tableName}.${columnName}`;
+    const cached = this.tsTypeCache.get(cacheKey);
+    if (cached) return cached;
+    // 시노님이면 실제 소유자/테이블로 해석 — getColumns와 같은 이유(user_* 메타는 소유 테이블만 보인다).
+    const synResult = await conn.execute(
+      `SELECT table_owner, table_name FROM user_synonyms WHERE synonym_name = :name`,
+      { name: tableName },
+    );
+    const synRow = (synResult.rows || [])[0] as any;
+    let result;
+    if (synRow && synRow.TABLE_OWNER && synRow.TABLE_NAME) {
+      result = await conn.execute(
+        `SELECT data_type FROM all_tab_columns WHERE owner = :owner AND table_name = :tbl AND column_name = :col`,
+        { owner: synRow.TABLE_OWNER, tbl: synRow.TABLE_NAME, col: columnName.toUpperCase() },
+      );
+    } else {
+      result = await conn.execute(
+        `SELECT data_type FROM user_tab_columns WHERE table_name = :tbl AND column_name = :col`,
+        { tbl: tableName.toUpperCase(), col: columnName.toUpperCase() },
+      );
+    }
+    const row = (result.rows || [])[0] as any;
+    if (!row || !row.DATA_TYPE) {
+      throw new Error(`타임스탬프 컬럼 타입 조회 실패: ${tableName}.${columnName}`);
+    }
+    const t = String(row.DATA_TYPE).toUpperCase();
+    this.tsTypeCache.set(cacheKey, t);
+    return t;
+  }
+
+  /** 타입별 (원문 SELECT 식, 바인드 래퍼) — 변환은 항상 상수 쪽. */
+  private tsFormats(rawType: string): {
+    selectExpr: (colExpr: string) => string;
+    wrapBind: (bindToken: string) => string;
+  } {
+    if (rawType === 'DATE') {
+      return {
+        selectExpr: (col) => `TO_CHAR(${col}, 'YYYY-MM-DD HH24:MI:SS')`,
+        wrapBind: (t) => `TO_DATE(${t}, 'YYYY-MM-DD HH24:MI:SS')`,
+      };
+    }
+    if (rawType.startsWith('TIMESTAMP') && rawType.includes('TIME ZONE')) {
+      return {
+        selectExpr: (col) => `TO_CHAR(${col}, 'YYYY-MM-DD HH24:MI:SS.FF9 TZH:TZM')`,
+        wrapBind: (t) => `TO_TIMESTAMP_TZ(${t}, 'YYYY-MM-DD HH24:MI:SS.FF9 TZH:TZM')`,
+      };
+    }
+    if (rawType.startsWith('TIMESTAMP')) {
+      return {
+        selectExpr: (col) => `TO_CHAR(${col}, 'YYYY-MM-DD HH24:MI:SS.FF9')`,
+        wrapBind: (t) => `TO_TIMESTAMP(${t}, 'YYYY-MM-DD HH24:MI:SS.FF9')`,
+      };
+    }
+    throw new Error(
+      `타임스탬프 컬럼이 날짜/시각 타입이 아닙니다(${rawType}) — --edit-config로 올바른 컬럼을 지정해주세요.`,
+    );
+  }
+
+  private static readonly RAW_ALIAS = '__SYNC_TS_RAW__';
+
+  /** PK 컬럼 원시 타입 캐시 — NUMBER는 문자열로 fetch해야 한다(JS number는 2^53 위에서 반올림 — Codex F6). */
+  private pkTypeCache = new Map<string, Record<string, string>>();
+
+  /**
+   * PK 타입 검증 + 왕복 규약.
+   *   NUMBER → fetchInfo로 문자열 추출 + 바인드는 TO_NUMBER(상수 쪽) — 인접 대형 PK가 같은 키가 되는
+   *   반올림을 차단한다. 문자형은 그대로. 그 밖(RAW·FLOAT 등)은 정확 왕복이 불가하므로 명시 오류로 잠근다.
+   */
+  private async resolvePkBinding(
+    conn: any,
+    tableName: string,
+    safePks: string[],
+  ): Promise<{ fetchInfo: Record<string, any>; wrapKeyBind: (pkIdx: number, token: string) => string }> {
+    const cacheKey = tableName;
+    let types = this.pkTypeCache.get(cacheKey);
+    if (!types) {
+      types = {};
+      for (const col of safePks) {
+        types[col] = await this.resolveRawColumnType(conn, tableName, col);
+      }
+      this.pkTypeCache.set(cacheKey, types);
+    }
+    const fetchInfo: Record<string, any> = {};
+    const isNumber: boolean[] = [];
+    for (const col of safePks) {
+      const t = types[col];
+      if (t === 'NUMBER') {
+        fetchInfo[col] = { type: this.oracledb.STRING };
+        isNumber.push(true);
+      } else if (['VARCHAR2', 'NVARCHAR2', 'CHAR', 'NCHAR'].includes(t)) {
+        isNumber.push(false);
+      } else {
+        throw new Error(
+          `증분 불가: PK 컬럼 '${col}' 타입(${t})은 정확한 커서 왕복을 지원하지 않습니다(NUMBER·문자형만).`,
+        );
+      }
+    }
+    return {
+      fetchInfo,
+      wrapKeyBind: (pkIdx, token) => (isNumber[pkIdx] ? `TO_NUMBER(${token})` : token),
+    };
+  }
+
+  async fetchIncrementalKeyset(
+    tableName: string,
+    timestampColumn: string,
+    pkColumns: string[],
+    cursor: IncrementalCursor | null,
+    limit: number,
+  ): Promise<{ rows: RawRow[]; meta: RowCursorMeta[] }> {
+    this.ensureConnected();
+    const conn = await this.pool.getConnection();
+    try {
+      const safeTable = this.sanitizeIdentifier(tableName);
+      const safeTs = this.sanitizeIdentifier(timestampColumn);
+      const safePks = pkColumns.map((c) => this.sanitizeIdentifier(c));
+      const rawType = await this.resolveRawColumnType(conn, safeTable, safeTs);
+      const fmt = this.tsFormats(rawType);
+      const pkBind = await this.resolvePkBinding(conn, safeTable, safePks);
+      const tsCol = `"${safeTs}"`;
+
+      const binds: Record<string, any> = { maxRow: limit };
+      let predicate = `${tsCol} IS NOT NULL`;
+      if (cursor) {
+        binds.cts = cursor.tsRaw;
+        if (cursor.keys.length === 0) {
+          // 열린 버킷 시작 커서 — 그 버킷 전체를 재조회한다(ts >=). 서버 멱등이 겹침을 흡수.
+          predicate += ` AND ${tsCol} >= ${fmt.wrapBind(':cts')}`;
+        } else {
+          const bind = (name: string): string => {
+            if (name === 'ts') return ':cts';
+            const idx = Number(name.slice(1));
+            binds[name] = cursor.keys[idx];
+            return pkBind.wrapKeyBind(idx, `:${name}`);
+          };
+          predicate += ` AND ${buildKeysetPredicate(tsCol, fmt.wrapBind, bind, safePks.map((c) => `"${c}"`))}`;
+        }
+      }
+      const orderBy = [`${tsCol} ASC`, ...safePks.map((c) => `"${c}" ASC`)].join(', ');
+
+      // 11g 호환 ROWNUM 래퍼(기존 fetch 경로와 동일 이유). OFFSET 없음 — 커서가 페이지를 잇는다.
+      const sql = `SELECT * FROM (
+                     SELECT inner_.*, ROWNUM AS rnum_ FROM (
+                       SELECT t.*, ${fmt.selectExpr(tsCol)} AS "${OracleConnector.RAW_ALIAS}"
+                       FROM "${safeTable}" t
+                       WHERE ${predicate}
+                       ORDER BY ${orderBy}
+                     ) inner_ WHERE ROWNUM <= :maxRow
+                   )`;
+      const result = await conn.execute(sql, binds, {
+        outFormat: this.oracledb.OUT_FORMAT_OBJECT,
+        fetchInfo: pkBind.fetchInfo,
+      });
+      const { cleanRows, meta } = extractRowCursorMeta(result.rows || [], OracleConnector.RAW_ALIAS, pkColumns);
+      logger.debug(`키셋 증분 조회: ${meta.length}건`, { tableName, cursorTs: cursor?.tsRaw ?? null });
+      return { rows: this.normalizeRows(cleanRows), meta };
+    } finally {
+      await conn.close();
+    }
+  }
+
+  async fetchMaxCursor(
+    tableName: string,
+    timestampColumn: string,
+    pkColumns: string[],
+    beforeTsRawExclusive?: string | null,
+  ): Promise<IncrementalCursor | null> {
+    this.ensureConnected();
+    const conn = await this.pool.getConnection();
+    try {
+      const safeTable = this.sanitizeIdentifier(tableName);
+      const safeTs = this.sanitizeIdentifier(timestampColumn);
+      const safePks = pkColumns.map((c) => this.sanitizeIdentifier(c));
+      const rawType = await this.resolveRawColumnType(conn, safeTable, safeTs);
+      const fmt = this.tsFormats(rawType);
+      const pkBind = await this.resolvePkBinding(conn, safeTable, safePks);
+      const tsCol = `"${safeTs}"`;
+      const orderBy = [`${tsCol} DESC`, ...safePks.map((c) => `"${c}" DESC`)].join(', ');
+      const pkSelect = safePks.map((c) => `"${c}"`).join(', ');
+
+      const binds: Record<string, any> = {};
+      let where = `${tsCol} IS NOT NULL`;
+      if (beforeTsRawExclusive) {
+        binds.beforeTs = beforeTsRawExclusive;
+        where += ` AND ${tsCol} < ${fmt.wrapBind(':beforeTs')}`;
+      }
+      const sql = `SELECT * FROM (
+                     SELECT ${fmt.selectExpr(tsCol)} AS "${OracleConnector.RAW_ALIAS}"${pkSelect ? ', ' + pkSelect : ''}
+                     FROM "${safeTable}"
+                     WHERE ${where}
+                     ORDER BY ${orderBy}
+                   ) WHERE ROWNUM <= 1`;
+      const result = await conn.execute(sql, binds, {
+        outFormat: this.oracledb.OUT_FORMAT_OBJECT,
+        fetchInfo: pkBind.fetchInfo,
+      });
+      const row = (result.rows || [])[0] as Record<string, unknown> | undefined;
+      if (!row) return null;
+      return {
+        tsRaw: String(row[OracleConnector.RAW_ALIAS] ?? ''),
+        // 결과 키는 SELECT에 쓴(sanitize된) 이름이다 — 추출도 같은 이름으로.
+        keys: safePks.map((c) => row[c]) as (string | number)[],
+      };
+    } finally {
+      await conn.close();
+    }
+  }
+
+  /** 접속 대상 식별자 — 커서 fingerprint 재료. username이 현재 스키마·시노님 해석을 정하므로 포함(2R F9). JSON = 경계 단사(3R F11). */
+  getSourceId(): string {
+    return JSON.stringify([this.config.host, this.config.port, this.config.database, this.config.username]);
+  }
+
+  /**
+   * 전량 조회용 NUMBER PK 문자열 fetch 정보 (★ 2026-08-03 Codex 2R F8 · 3R F10).
+   *   전량 경로도 PK 값으로 source_row_key를 만들므로, NUMBER PK가 JS number로 반올림되면
+   *   2^53 초과 인접 PK가 같은 멱등키가 되어 서버 UPSERT가 한 구매를 삼킨다.
+   *   메타 조회 실패는 **fail-closed** — 실패를 캐시하거나 무보정으로 진행하면 반올림 경로가
+   *   프로세스 수명 동안 되살아난다(3R F10). 성공한 메타만 캐시하고, 실패는 그대로 던져
+   *   그 전량 배치를 중단시킨다(다음 주기 재시도).
+   */
+  private pkFetchInfoCache = new Map<string, Record<string, any>>();
+
+  private async pkFetchInfoForTable(tableName: string): Promise<Record<string, any>> {
+    const cached = this.pkFetchInfoCache.get(tableName);
+    if (cached) return cached;
+    const info: Record<string, any> = {};
+    const cols = await this.getColumns(tableName); // 실패 = throw (fail-closed, 캐시 없음)
+    if (cols.length === 0) {
+      // 0행도 성공이 아니다(4R F12) — 권한·메타 접근 이상이면 빈 배열이 정상 반환된다.
+      //   이걸 성공으로 캐시하면 NUMBER PK 반올림 경로가 프로세스 수명 동안 되살아난다.
+      throw new Error(`컬럼 메타 조회 결과가 비어 있습니다: ${tableName} — 권한 또는 테이블명을 확인해주세요.`);
+    }
+    for (const c of cols) {
+      // mapOracleType: NUMBER → 'int' 또는 'decimal'
+      if (c.isPrimaryKey && (c.dataType === 'int' || c.dataType === 'decimal')) {
+        info[this.sanitizeIdentifier(c.name)] = { type: this.oracledb.STRING };
+      }
+    }
+    this.pkFetchInfoCache.set(tableName, info);
+    return info;
+  }
+
   async fetchAll(
     tableName: string,
     limit: number,
     offset: number,
   ): Promise<RawRow[]> {
     this.ensureConnected();
+    const fetchInfo = await this.pkFetchInfoForTable(tableName);
     const conn = await this.pool.getConnection();
     try {
       const safeTable = this.sanitizeIdentifier(tableName);
@@ -309,6 +566,7 @@ export class OracleConnector implements IDbConnector {
 
       const result = await conn.execute(sql, { maxRow: offset + limit, minRow: offset }, {
         outFormat: this.oracledb.OUT_FORMAT_OBJECT,
+        fetchInfo,
       });
 
       const rows = this.normalizeRows(result.rows || []);
@@ -331,6 +589,8 @@ export class OracleConnector implements IDbConnector {
     afterKey: string | null,
   ): Promise<{ rows: RawRow[]; lastKey: string | null }> {
     this.ensureConnected();
+    // ★ 2026-08-03 Codex 2R F8 — 전량 경로도 NUMBER PK를 문자열로(멱등키 반올림 차단)
+    const fetchInfo = await this.pkFetchInfoForTable(tableName);
     const conn = await this.pool.getConnection();
     try {
       const safeTable = this.sanitizeIdentifier(tableName);
@@ -343,7 +603,7 @@ export class OracleConnector implements IDbConnector {
       const result = await conn.execute(
         sql,
         { afterKey: afterKey ?? null, lim: limit },
-        { outFormat: this.oracledb.OUT_FORMAT_OBJECT },
+        { outFormat: this.oracledb.OUT_FORMAT_OBJECT, fetchInfo },
       );
       const raw = (result.rows || []) as Array<Record<string, unknown>>;
       const lastRaw = raw[raw.length - 1];

@@ -12,11 +12,13 @@
  *   - getTimestampForTarget() 헬퍼로 타겟별 timestamp 컬럼 결정
  */
 
-import type { IDbConnector, RawRow } from '../db/types';
+import type { IDbConnector, RawRow, ColumnInfo } from '../db/types';
 import type { ApiClient } from '../api/client';
 import type { QueueManager } from '../queue';
 import type { AlertManager } from '../alert';
-import type { SyncTarget, SyncMode, SyncResult, SyncError } from '../types/sync';
+import type { SyncTarget, SyncMode, SyncResult, SyncError, SyncCursorState } from '../types/sync';
+// ★ 2026-08-03 커서 재설계 — 키셋 커서·원본 행 키 직렬화(순수 모듈, 어댑터 4종 공유)
+import { serializeSourceRowKey, cursorKeysValid } from '../db/keyset';
 import type { ColumnMapping } from '../mapping';
 import { mapBatch } from '../mapping';
 import { normalizeCustomerBatch, normalizePurchaseBatch } from '../normalize';
@@ -280,15 +282,6 @@ export class SyncEngine {
       : this.config.purchaseTable;
 
     const timestampCol = this.getTimestampForTarget(target);
-    const lastSyncAt = this.stateManager.getLastSyncAt(target);
-
-    logger.info(`증분 동기화 시작: ${target}`, { tableName, timestampCol, lastSyncAt });
-
-    // 마지막 동기화 시각이 없으면 → 전체 동기화로 폴백
-    if (!lastSyncAt) {
-      logger.info('마지막 동기화 기록 없음 → 전체 동기화로 전환');
-      return this.runFull(target);
-    }
 
     // ★ 2026-06-11: 증분 직전 타임스탬프 컬럼 실재 검증 (인비토 SyncTest updated_at 부재 실측)
     const columnStatus = await this.checkTimestampColumn(tableName, timestampCol);
@@ -305,6 +298,21 @@ export class SyncEngine {
         `fallbackToFullSync=false 설정이라 증분 동기화를 중단합니다. ` +
         `--edit-config로 올바른 컬럼을 지정해주세요.`,
       );
+    }
+
+    // ★ 2026-08-03 커서 재설계 — 키셋 지원 어댑터(oracle·mssql·mysql·postgresql)는 새 경로.
+    //   미지원(excel·csv — 해시 diff 방식이라 커서 무관)은 아래 기존 경로를 그대로 탄다.
+    if (this.db.fetchIncrementalKeyset) {
+      return this.runIncrementalKeyset(target, tableName, timestampCol, startedAt, startTime);
+    }
+
+    const lastSyncAt = this.stateManager.getLastSyncAt(target);
+    logger.info(`증분 동기화 시작: ${target}`, { tableName, timestampCol, lastSyncAt });
+
+    // 마지막 동기화 시각이 없으면 → 전체 동기화로 폴백
+    if (!lastSyncAt) {
+      logger.info('마지막 동기화 기록 없음 → 전체 동기화로 전환');
+      return this.runFull(target);
     }
 
     let totalCount = 0;
@@ -360,6 +368,245 @@ export class SyncEngine {
     return result;
   }
 
+  // ─── 증분 동기화: 키셋 커서 경로 (★ 2026-08-03 · Codex 적대검증 반영) ────────
+  //
+  // 커서 = 마지막 처리 행이 아니라 **닫힌 경계**. 완료 시각을 넣던 옛 구조가 시각 없는 판매일
+  // 컬럼(이새 — 전량 자정)과 만나 그날 첫 배치 뒤 하루치를 영구 탈락시켰고, "마지막 행" 커서도
+  // 같은 ts에 낮은 PK가 나중에 삽입되면(UUID·문자 PK) 그 행을 영구 유실한다(Codex F2 — PK 단조를
+  // 아무도 보장하지 않는다).
+  // 전진 규칙:
+  //   - 커서는 **더 큰 ts가 관측된 버킷의 마지막 행**까지만 저장한다. 최대 ts 버킷(열린 버킷)은
+  //     저장하지 않고 매 주기 재조회한다 — 겹침은 서버 멱등이 흡수한다(그래서 키 없는 행은 보내지 않는다).
+  //   - API 실패(네트워크·5xx) = 미전진(다음 주기 재시도)
+  //   - 행 검증 실패(전화번호 불량·키 직렬화 불가) = 전진 + failures 보고 — 멈추면 영구 재조회 루프
+  //   - 닫힌 경계는 그 행이 포함된 페이지 전송 성공 후에만 저장 — 중간에 죽어도 재개 지점이 안전하다
+  //   - 커서 fingerprint(소스·테이블·ts컬럼·PK 구성)가 하나라도 다르면 폐기 → 전량 재기준(Codex F3)
+
+  /**
+   * 커서 정체성 — 소스가 바뀌면 커서는 무효다.
+   * 구분자 결합은 값 안의 구분자로 서로 다른 소스가 같은 문자열이 될 수 있다(Codex 3R F11 —
+   * 비단사). JSON 직렬화는 경계를 이스케이프하므로 조립이 구조적으로 단사다.
+   */
+  private cursorFingerprint(tableName: string, timestampCol: string, pkCols: string[]): string {
+    const sourceId = this.db.getSourceId ? this.db.getSourceId() : '';
+    return JSON.stringify([this.db.dbType, sourceId, tableName, timestampCol, pkCols]);
+  }
+
+  /** PK 컬럼 해석 — getColumns 메타(isPrimaryKey, 복합 포함) 기반. 시노님 해석은 어댑터 getColumns가 이미 소유. */
+  private async resolvePkColumns(tableName: string): Promise<
+    | { ok: true; columns: string[]; nonScalarPk: string | null }
+    | { ok: false; error: string }
+  > {
+    let columns: ColumnInfo[];
+    try {
+      columns = await this.db.getColumns(tableName);
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    const pks = columns.filter((c) => c.isPrimaryKey);
+    // 날짜형 PK는 결정적 직렬화가 불가(드라이버 변환이 프로세스 TZ 의존) — 정직하게 잠근다.
+    const nonScalar = pks.find((c) => ['datetime', 'date', 'timestamp', 'binary'].includes((c.dataType || '').toLowerCase()));
+    return { ok: true, columns: pks.map((c) => c.name), nonScalarPk: nonScalar ? nonScalar.name : null };
+  }
+
+  private async runIncrementalKeyset(
+    target: SyncTarget,
+    tableName: string,
+    timestampCol: string,
+    startedAt: string,
+    startTime: number,
+  ): Promise<SyncResult> {
+    const errors: SyncError[] = [];
+    const finish = async (totals: { total: number; success: number; fail: number }): Promise<SyncResult> => {
+      const completedAt = new Date().toISOString();
+      if (totals.success > 0 && !this.config.dryRun) {
+        this.stateManager.updateAfterSync(target, completedAt, totals.success);
+      }
+      const result: SyncResult = {
+        target, mode: 'incremental',
+        totalCount: totals.total, successCount: totals.success, failCount: totals.fail,
+        skippedCount: 0, durationMs: Date.now() - startTime, startedAt, completedAt, errors,
+      };
+      this.logResult(result);
+      await this.sendSyncLog(result);
+      return result;
+    };
+
+    // 키셋 경로는 getSourceId가 필수 계약이다(4R F13) — 없으면 같은 dbType의 다른 소스가
+    // 같은 fingerprint를 만들어, 소스 교체 후 옛 커서 재사용으로 앞부분 행을 조용히 건너뛴다.
+    if (!this.db.getSourceId) {
+      errors.push({
+        code: 'INCREMENTAL_LOCKED_NO_SOURCE_ID',
+        message: '증분 불가: 이 어댑터는 소스 식별자(getSourceId)를 제공하지 않아 커서를 신뢰할 수 없습니다.',
+      });
+      logger.warn(`증분 잠금(${target}): getSourceId 미구현 어댑터`);
+      return finish({ total: 0, success: 0, fail: 0 });
+    }
+
+    // 증분 보류(타임스탬프 전부 NULL 등) — 매 주기 전량 폭주 대신 1행 탐침만 찔러 본다.
+    //   시각 값이 나타나면(소스가 갱신 시각을 채우기 시작) 보류를 풀고 전량으로 기준을 다시 잡는다 —
+    //   보류 기간에 쌓인 행은 커서 이전이라 증분으로는 영영 안 잡히기 때문에 전량 재기준이 유일한 길이다.
+    const hold = this.stateManager.getIncrementalHold(target);
+    if (hold) {
+      let probe: import('../db/keyset').IncrementalCursor | null = null;
+      if (this.db.fetchMaxCursor) {
+        const probePk = await this.resolvePkColumns(tableName);
+        if (probePk.ok && probePk.columns.length > 0 && !probePk.nonScalarPk) {
+          try {
+            probe = await this.db.fetchMaxCursor(tableName, timestampCol, probePk.columns);
+          } catch { /* 탐침 실패 = 보류 유지 */ }
+        }
+      }
+      if (probe) {
+        logger.info(`증분 보류 해제(${target}) — 타임스탬프 값 관측, 전체 동기화로 기준 재설정`);
+        this.stateManager.setIncrementalHold(target, null);
+        return this.runFull(target);
+      }
+      errors.push({ code: 'INCREMENTAL_HOLD', message: `증분 보류: ${hold}` });
+      logger.warn(`증분 보류 중(${target}): ${hold}`);
+      return finish({ total: 0, success: 0, fail: 0 });
+    }
+
+    const pkResult = await this.resolvePkColumns(tableName);
+    if (!pkResult.ok) {
+      // 메타 조회 실패(권한 등) — 커서를 움직이지 않고 이번 주기는 실패 보고(다음 주기 재시도).
+      errors.push({ code: 'PK_META_FAILED', message: `PK 메타 조회 실패: ${pkResult.error}` });
+      return finish({ total: 0, success: 0, fail: 0 });
+    }
+    if (pkResult.columns.length === 0) {
+      // PK 없는 테이블 — 자연키를 지어내면 같은 날 같은 상품 두 건이 한 건이 된다. 정직하게 잠근다.
+      errors.push({
+        code: 'INCREMENTAL_LOCKED_NO_PK',
+        message: `증분 불가: 테이블 '${tableName}'에 기본키가 없습니다. 전체 동기화만 가능합니다 — 소스 테이블에 기본키(또는 유일한 행 번호)를 두면 열립니다.`,
+      });
+      logger.warn(`증분 잠금(${target}): '${tableName}' PK 없음`);
+      return finish({ total: 0, success: 0, fail: 0 });
+    }
+    if (pkResult.nonScalarPk) {
+      errors.push({
+        code: 'INCREMENTAL_LOCKED_PK_TYPE',
+        message: `증분 불가: PK 컬럼 '${pkResult.nonScalarPk}'가 날짜/이진형입니다. 문자·숫자 PK만 증분을 지원합니다.`,
+      });
+      logger.warn(`증분 잠금(${target}): PK 타입 미지원(${pkResult.nonScalarPk})`);
+      return finish({ total: 0, success: 0, fail: 0 });
+    }
+    const pkCols = pkResult.columns;
+    const fingerprint = this.cursorFingerprint(tableName, timestampCol, pkCols);
+
+    let cursor = this.stateManager.getCursor(target);
+    if (cursor && cursor.fingerprint !== fingerprint) {
+      // 소스·테이블·ts컬럼·PK 구성 중 무엇이든 바뀌면 옛 커서는 새 소스의 행을 건너뛴다 — fail-closed 폐기.
+      logger.warn('커서 fingerprint 불일치 — 커서 폐기, 전체 동기화로 기준을 다시 잡습니다', {
+        stored: cursor.fingerprint, current: fingerprint,
+      });
+      cursor = null;
+    }
+    if (cursor && cursor.keys.length > 0 && !cursorKeysValid(cursor.keys)) {
+      logger.warn('저장된 커서 키가 스칼라가 아님 — 전체 동기화로 기준을 다시 잡습니다');
+      cursor = null;
+    }
+    if (!cursor) {
+      // 신규 설치·옛 형식(완료 시각) 커서·fingerprint 변경 — 전량이 기준을 다시 잡고 씨앗을 심는다(runFull).
+      logger.info(`키셋 커서 없음(${target}) → 전체 동기화로 기준 재설정`);
+      return this.runFull(target);
+    }
+
+    logger.info(`증분 동기화 시작(키셋): ${target}`, { tableName, timestampCol, pkCols, cursorTs: cursor.tsRaw, openBucket: cursor.keys.length === 0 });
+
+    let totalCount = 0;
+    let successCount = 0;
+    let failCount = 0;
+
+    // 페이지 넘김용 스캔 커서(메모리) — 저장 커서와 다르다. 스캔은 튜플 strict >로 앞으로만 가고,
+    // 저장은 닫힌 버킷 경계까지만 간다(열린 버킷은 다음 주기에 재조회).
+    let scanCursor: { tsRaw: string; keys: (string | number)[] } = { tsRaw: cursor.tsRaw, keys: cursor.keys };
+    let prevMeta: { tsRaw: string; keys: (string | number)[] } | null = null;
+    let closedBoundary: { tsRaw: string; keys: (string | number)[] } | null = null;
+    let persistedBoundaryTs: string | null = null;
+
+    while (true) {
+      const { rows, meta } = await this.db.fetchIncrementalKeyset!(
+        tableName, timestampCol, pkCols, scanCursor, this.config.batchSize,
+      );
+      if (rows.length === 0) break;
+
+      // 키 검증은 전송 **전에** — 스칼라 아닌 키가 하나라도 있으면 보내지도 전진하지도 않는다(Codex F4).
+      if (!meta.every((m) => cursorKeysValid(m.keys))) {
+        errors.push({
+          code: 'INCREMENTAL_LOCKED_KEY_TYPE',
+          message: 'PK 값이 문자·숫자로 왕복되지 않는 행이 있어 증분을 중단합니다(커서·멱등키 오염 방지).',
+        });
+        logger.warn(`증분 중단(${target}): 비스칼라 PK 값 관측`);
+        break;
+      }
+
+      // 직렬화 불가(초과 길이 등) 행은 키 없이 보내지 않는다 — 열린 버킷 재조회마다 중복이 쌓인다(Codex F4).
+      //   그 행만 제외하고 행 실패로 보고한다. 커서 경계 계산에는 남긴다(영구 실패로 기록된 행이다).
+      let sendRows = rows;
+      let srkList: (string | null)[] | undefined;
+      if (target === 'purchases') {
+        const all = meta.map((m) => serializeSourceRowKey(m.keys));
+        const excludedIdx: number[] = [];
+        for (let i = 0; i < all.length; i++) if (all[i] === null) excludedIdx.push(i);
+        if (excludedIdx.length > 0) {
+          for (const i of excludedIdx) {
+            failCount++;
+            errors.push({
+              code: 'SOURCE_KEY_UNSERIALIZABLE',
+              message: `원본 행 키 직렬화 불가(길이 초과 또는 NULL 포함) — 행을 보내지 않았습니다.`,
+              recordKey: String((rows[i] as Record<string, unknown>).customer_phone ?? meta[i].keys.join('|')),
+            });
+          }
+          const keep = (arr: any[]) => arr.filter((_, i) => !excludedIdx.includes(i));
+          sendRows = keep(rows);
+          srkList = keep(all);
+        } else {
+          srkList = all;
+        }
+      }
+
+      if (sendRows.length > 0) {
+        const result = await this.processBatch(target, sendRows, 'incremental', undefined, undefined, srkList);
+        totalCount += result.total;
+        successCount += result.success;
+        failCount += result.fail;
+        errors.push(...result.errors);
+
+        if (result.errors.some((e) => e.code === 'API_SEND_FAILED')) {
+          logger.warn('API 전송 실패 — 커서를 전진하지 않습니다(다음 주기 재시도, 서버 멱등이 겹침 흡수)');
+          break;
+        }
+      }
+
+      // 닫힌 버킷 경계 갱신 — ts가 바뀌는 지점의 직전 행이 "그 버킷의 끝"이다.
+      for (const m of meta) {
+        if (prevMeta && m.tsRaw !== prevMeta.tsRaw) closedBoundary = prevMeta;
+        prevMeta = m;
+      }
+      // 이 페이지 전송이 성공했으므로, 경계가 전진했으면 저장한다(경계 행은 이미 보낸 행이다).
+      if (closedBoundary && closedBoundary.tsRaw !== persistedBoundaryTs) {
+        const next: SyncCursorState = {
+          tsRaw: closedBoundary.tsRaw, keys: closedBoundary.keys, pkColumns: pkCols, fingerprint,
+        };
+        if (this.config.dryRun) {
+          logger.info('🧪 [DRY RUN] 커서 저장 스킵', { tsRaw: next.tsRaw });
+        } else {
+          this.stateManager.setCursor(target, next);
+        }
+        persistedBoundaryTs = closedBoundary.tsRaw;
+      }
+
+      const last = meta[meta.length - 1];
+      scanCursor = { tsRaw: last.tsRaw, keys: last.keys };
+
+      // 키셋은 짧은 페이지가 곧 끝(커서 이후 행 없음) — OFFSET과 달리 신뢰 가능.
+      // 마지막(최대 ts) 버킷은 저장하지 않은 채 끝난다 — 다음 주기가 재조회하고 서버 멱등이 흡수한다.
+      if (rows.length < this.config.batchSize) break;
+    }
+
+    return finish({ total: totalCount, success: successCount, fail: failCount });
+  }
+
   // ─── 전체 동기화 ──────────────────────────────────────
 
   async runFull(target: SyncTarget): Promise<SyncResult> {
@@ -387,6 +634,41 @@ export class SyncEngine {
 
     logger.info(`전체 동기화 시작: ${target}`, { tableName, totalRows, totalBatches });
 
+    // ★ 2026-08-03 커서 씨앗 (Codex 적대검증 반영) — 전량 스캔은 PK 순서라 "마지막 행"이 최대 시각이 아니다.
+    //   씨앗은 **시작 시점의 닫힌 버킷 경계**다: 최대 ts 버킷은 아직 열려 있어(같은 ts로 계속 삽입)
+    //   그 안의 튜플을 커서로 삼으면 낮은 PK 후행 삽입이 영구 유실된다(F2). 그래서 2단 조회 —
+    //   ①최대 튜플(T0) ②ts < T0.tsRaw 중 최대 = 닫힌 경계. ②가 없으면(버킷 하나뿐) 열린 버킷
+    //   시작 커서(keys=[] → ts >= T0)로 저장해 매 주기 재조회시킨다.
+    //   PK 추출은 srk(원본 행 키)에도 같이 쓴다.
+    let seedClosed: import('../db/keyset').IncrementalCursor | null = null;
+    let seedOpenTs: string | null = null;
+    let seedWanted = false;
+    let fullPkCols: string[] = [];
+    const probeSeed = async (tsCol: string): Promise<void> => {
+      const t0 = await this.db.fetchMaxCursor!(tableName, tsCol, fullPkCols);
+      if (!t0) { seedClosed = null; seedOpenTs = null; return; }
+      seedClosed = await this.db.fetchMaxCursor!(tableName, tsCol, fullPkCols, t0.tsRaw);
+      seedOpenTs = seedClosed ? null : t0.tsRaw;
+    };
+    if (this.db.fetchIncrementalKeyset && this.db.fetchMaxCursor && this.db.getSourceId) {
+      const tsCol = this.getTimestampForTarget(target);
+      const pkResult = await this.resolvePkColumns(tableName);
+      const tsOk = (await this.checkTimestampColumn(tableName, tsCol)) === 'ok';
+      if (pkResult.ok && pkResult.columns.length > 0 && !pkResult.nonScalarPk) {
+        fullPkCols = pkResult.columns;
+        if (tsOk) {
+          seedWanted = true;
+          try {
+            await probeSeed(tsCol);
+          } catch (seedErr) {
+            logger.warn('커서 씨앗 조회 실패 — 전량 완료 후 재시도', {
+              error: seedErr instanceof Error ? seedErr.message : String(seedErr),
+            });
+          }
+        }
+      }
+    }
+
     let totalCount = 0;
     let successCount = 0;
     let failCount = 0;
@@ -396,12 +678,40 @@ export class SyncEngine {
     const processFullBatch = async (rows: RawRow[]): Promise<void> => {
       batchIndex++;
       logger.info(`배치 ${batchIndex}/${totalBatches} 처리 중 (${rows.length}건)`);
-      const result = await this.processBatch(target, rows, 'full', batchIndex, totalBatches);
+      // 원본 행 키 — 전량도 멱등 적재(재싱크·재시도가 중복 행을 만들지 않는다). purchases만.
+      //   PK가 있는데 직렬화 불가한 행은 키 없이 보내지 않고 행 실패로 보고한다(Codex F4 —
+      //   키 없는 행은 재실행마다 중복이 쌓인다). PK 자체가 없는 테이블은 기존대로 키 없이 보낸다
+      //   (증분은 어차피 잠겨 있고, 재기준 시 선삭제가 운영 절차다).
+      let sendRows = rows;
+      let srkList: (string | null)[] | undefined;
+      if (target === 'purchases' && fullPkCols.length > 0) {
+        const all = rows.map((r) => serializeSourceRowKey(fullPkCols.map((c) => r[c])));
+        const excludedIdx: number[] = [];
+        for (let i = 0; i < all.length; i++) if (all[i] === null) excludedIdx.push(i);
+        if (excludedIdx.length > 0) {
+          for (const i of excludedIdx) {
+            failCount++;
+            errors.push({
+              code: 'SOURCE_KEY_UNSERIALIZABLE',
+              message: '원본 행 키 직렬화 불가(길이 초과·NULL·비스칼라) — 행을 보내지 않았습니다.',
+              recordKey: String(fullPkCols.map((c) => (rows[i] as Record<string, unknown>)[c]).join('|')),
+            });
+          }
+          const keep = (arr: any[]) => arr.filter((_, i) => !excludedIdx.includes(i));
+          sendRows = keep(rows);
+          srkList = keep(all);
+        } else {
+          srkList = all;
+        }
+      }
+      fetchedRows += rows.length;
+      totalCount += rows.length - sendRows.length; // 제외 행도 총량에 계상(실패로 이미 집계)
+      if (sendRows.length === 0) return;
+      const result = await this.processBatch(target, sendRows, 'full', batchIndex, totalBatches, srkList);
       totalCount += result.total;
       successCount += result.success;
       failCount += result.fail;
       errors.push(...result.errors);
-      fetchedRows += rows.length;
     };
 
     // ★ 2026-06-30 (이새에프앤씨 full 조기종료 근본 정정):
@@ -466,9 +776,56 @@ export class SyncEngine {
 
     // 상태 업데이트
     const completedAt = new Date().toISOString();
-    if (successCount > 0) {
+    if (successCount > 0 && !this.config.dryRun) {
       this.stateManager.updateAfterSync(target, completedAt, successCount);
       this.stateManager.updateFullSyncAt(completedAt);
+    }
+
+    // ★ 2026-08-03 — 커서 씨앗 심기 (Codex 1R F1 + 2R F7 게이트).
+    //   씨앗은 **시작 시점 탐침만** 쓴다. 종료 후 재탐침으로 씨앗을 만들면 마지막 페이지 이후
+    //   삽입된 미전송 행이 씨앗 아래로 들어가 영구 유실된다(2R F7). 재탐침은 아래 보류 판정에만 쓴다.
+    //   완전성: 카운트가 0인데 행을 받았다면 카운트 자체가 틀린 것 — 완결로 취급하지 않는다.
+    const scanComplete = totalRows > 0 ? fetchedRows >= totalRows : fetchedRows === 0;
+    const apiFailed = errors.some((e) => e.code === 'API_SEND_FAILED');
+    if (seedWanted && !scanComplete) {
+      logger.warn(
+        `전량 미완(수신 ${fetchedRows}/${totalRows}) — 커서를 남기지 않습니다. ` +
+        `다음 주기가 전체 동기화를 다시 시도합니다(서버 멱등이 겹침 흡수).`,
+        { target },
+      );
+    } else if (seedWanted && apiFailed) {
+      logger.warn(`전량 중 API 실패 — 커서를 남기지 않습니다(다음 주기 전량 재시도).`, { target });
+    } else if (seedWanted && successCount > 0 && !this.config.dryRun) {
+      const fp = this.cursorFingerprint(tableName, this.getTimestampForTarget(target), fullPkCols);
+      if (seedClosed && cursorKeysValid((seedClosed as any).keys)) {
+        const sc = seedClosed as import('../db/keyset').IncrementalCursor;
+        this.stateManager.setCursor(target, { tsRaw: sc.tsRaw, keys: sc.keys, pkColumns: fullPkCols, fingerprint: fp });
+        this.stateManager.setIncrementalHold(target, null);
+        logger.info(`커서 씨앗 저장(${target}) — 닫힌 버킷 경계`, { tsRaw: sc.tsRaw });
+      } else if (seedOpenTs) {
+        // 버킷이 하나뿐(신규 매장 첫날 등) — 열린 버킷 시작 커서로 저장, 매 주기 그 버킷을 재조회한다.
+        this.stateManager.setCursor(target, { tsRaw: seedOpenTs, keys: [], pkColumns: fullPkCols, fingerprint: fp });
+        this.stateManager.setIncrementalHold(target, null);
+        logger.info(`커서 씨앗 저장(${target}) — 열린 버킷 시작(ts >= 재조회)`, { tsRaw: seedOpenTs });
+      } else {
+        // 시작 탐침이 비었는데 행을 보냈다 — 시각 값이 전부 NULL이거나(보류) 스캔 중 새 행이 생긴 것(재기준).
+        //   재탐침은 **씨앗이 아니라 이 판정에만** 쓴다: 값이 관측되면 보류 없이 커서도 없이 두어
+        //   다음 주기가 전량으로 재기준한다. 여전히 비면 NULL 보류(매 주기 전량 폭주 방지).
+        let endProbe: import('../db/keyset').IncrementalCursor | null = null;
+        if (this.db.fetchMaxCursor) {
+          try { endProbe = await this.db.fetchMaxCursor(tableName, this.getTimestampForTarget(target), fullPkCols); } catch { /* 보류 유지 */ }
+        }
+        if (endProbe) {
+          logger.info(`씨앗 미저장(${target}) — 스캔 중 신규 행 관측, 다음 주기 전량 재기준`);
+        } else {
+          this.stateManager.setIncrementalHold(
+            target,
+            `타임스탬프 컬럼 값이 전부 NULL이라 증분 기준을 잡을 수 없습니다(전체 동기화만 가능). ` +
+            `소스에서 갱신 시각이 채워지기 시작하면 전체 동기화를 한 번 다시 실행해 주세요.`,
+          );
+          logger.warn(`증분 보류 설정(${target}): 타임스탬프 값 없음`);
+        }
+      }
     }
 
     const result: SyncResult = {
@@ -497,6 +854,8 @@ export class SyncEngine {
     mode: SyncMode,
     batchIndex?: number,
     totalBatches?: number,
+    // ★ 2026-08-03: 원본 행 키(rows[i]와 1:1, null=키 없이 legacy 적재) — purchases만 사용.
+    sourceRowKeys?: (string | null)[],
   ): Promise<{ total: number; success: number; fail: number; errors: SyncError[] }> {
     const errors: SyncError[] = [];
 
@@ -505,6 +864,14 @@ export class SyncEngine {
       ? this.config.customerMapping
       : this.config.purchaseMapping;
     const mapped = mapBatch(rows, mapping);
+
+    // ①-1 원본 행 키 부착 — mapBatch는 1:1 순서 보존(rows.map). 매핑이 만든 새 객체에는
+    //   소스 PK 컬럼이 없으므로 여기서 붙인다. 정규화는 spread 복사라 통과하고, Zod 스키마에 등재돼 있다.
+    if (sourceRowKeys && target === 'purchases') {
+      for (let i = 0; i < mapped.length; i++) {
+        if (sourceRowKeys[i]) (mapped[i] as Record<string, unknown>).source_row_key = sourceRowKeys[i];
+      }
+    }
 
     // ② 데이터 정규화
     const normalizeResult = target === 'customers'

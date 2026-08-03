@@ -62,6 +62,16 @@ describe('dedupeBySourceRowKey — 한 배치 안 같은 키는 ON CONFLICT를 �
     const out = dedupeBySourceRowKey([row(), row(), row({ source_row_key: 'K1' })]);
     expect(out).toHaveLength(3);
   });
+
+  it('키 행은 키 정렬로 나간다 — 동시 요청이 겹치는 키를 다른 순서로 잠그면 교착이 된다', () => {
+    const out = dedupeBySourceRowKey([
+      row({ source_row_key: 'B2' }),
+      row(),                          // 키 없는 행은 맨 앞 유지
+      row({ source_row_key: 'A1' }),
+      row({ source_row_key: 'C3' }),
+    ]);
+    expect(out.map((r) => r.source_row_key)).toEqual([null, 'A1', 'B2', 'C3']);
+  });
 });
 
 describe('buildPurchaseIngestSql', () => {

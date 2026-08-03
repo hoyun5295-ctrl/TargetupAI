@@ -12,6 +12,7 @@
 | 기능 | 호출어 | 문서 | 읽는 범위 |
 |---|---|---|---|
 | **여정(Journey)** — 트리거 자동화 | **여정** | [FEATURE-JOURNEY.md](../docs/FEATURE-JOURNEY.md) | §2 불변 원칙(필독) → §3 구조 → §4 트리거 현황. 이력·로드맵 = §6 |
+| **싱크에이전트(Sync Agent)** — 고객사 DB 동기화 | **싱크에이전트** | [FEATURE-SYNC-AGENT.md](../docs/FEATURE-SYNC-AGENT.md) | §2 불변 원칙(필독) → §4 커서 규약 → §3 구조. 검증·출고 = 런북, 증상 진단 = TROUBLESHOOTING |
 
 **등재 규칙** — 기능 문서는 상태·잔여를 쓰지 않는다(STATUS §2 카드 소유). 시점별 경위·근거는 설계서 소유, 여기엔 링크만.
 

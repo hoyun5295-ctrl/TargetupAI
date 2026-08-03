@@ -32,6 +32,30 @@ export interface SyncState {
   //   pendingCommandResults: 아직 서버에 전달 못 한 실행 결과 (다음 heartbeat 동봉 → 전송 성공 시 제거)
   executedCommandIds?: string[];
   pendingCommandResults?: import('./api').AgentCommandResult[];
+  // ★ 2026-08-03 커서 재설계: 대상별 키셋 커서 — 마지막 처리 행의 (타임스탬프 원문, PK 값들).
+  //   옛 lastXxxSyncAt(완료 시각)은 표시·정보용으로만 남는다. 커서가 없으면 전량 동기화가 기준을 다시 잡는다.
+  cursors?: {
+    customers?: SyncCursorState | null;
+    purchases?: SyncCursorState | null;
+  };
+  // 증분 보류 — 증분이 구조적으로 불가한 사유(타임스탬프 전부 NULL 등). 매 주기 전량으로 폭주하지 않게 막는다.
+  incrementalHold?: {
+    customers?: string | null;
+    purchases?: string | null;
+  };
+}
+
+/**
+ * 키셋 커서 저장 형태.
+ * - keys가 비어 있으면 "열린 버킷 시작" 커서 — 조회는 ts >= tsRaw (그 버킷 전체 재조회, 서버 멱등이 흡수).
+ * - fingerprint = dbType|접속대상|테이블|ts컬럼|PK구성. 하나라도 바뀌면 커서 폐기 → 전량 재기준(fail-closed).
+ *   (--edit-config로 테이블·날짜축을 바꾸면 옛 커서가 새 소스의 행을 건너뛴다 — Codex 2026-08-03 F3)
+ */
+export interface SyncCursorState {
+  tsRaw: string;
+  keys: (string | number)[];
+  pkColumns: string[];
+  fingerprint: string;
 }
 
 export const DEFAULT_SYNC_STATE: SyncState = {

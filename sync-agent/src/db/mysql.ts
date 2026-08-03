@@ -11,10 +11,15 @@
 import mysql from 'mysql2/promise';
 import type { IDbConnector, DbConnectionConfig, RawRow, ColumnInfo } from './types';
 import { singleColumnPk } from './types';
+// ★ 2026-08-03 커서 재설계 — 키셋 술어·행 커서 성분 추출(순수 공용 모듈)
+import { buildKeysetPredicate, extractRowCursorMeta, IncrementalCursor, RowCursorMeta } from './keyset';
 import { resolveDbSslOption } from './ssl';
 import { getLogger } from '../logger';
 
 const logger = getLogger('db:mysql');
+
+/** 키셋 증분의 타임스탬프 원문 별칭 — payload로 새면 안 되는 내부 컬럼 */
+const MYSQL_TS_RAW_ALIAS = '__sync_ts_raw__';
 
 // ─── MySQL latin1 = cp1252 역매핑 테이블 ────────────────────
 const CP1252_TO_BYTE: Record<number, number> = {
@@ -317,6 +322,185 @@ export class MysqlConnector implements IDbConnector {
     const result = rows as RawRow[];
     logger.debug(`증분 조회: ${result.length}건`, { tableName, since, offset });
     return this.fixRowEncoding(result);
+  }
+
+  // ─── 키셋 증분 (★ 2026-08-03 커서 재설계) ─────────────
+  //
+  // 커서 시각은 DB 원문 문자열로 왕복한다 — DATE_FORMAT으로 만들고 같은 자리(CAST 상수)로 되돌린다.
+  // 옛 경로의 `new Date(since).toLocaleString(... 'Asia/Seoul')` KST 수동 변환이 통째로 사라진다.
+  // 커서 성분은 **인코딩 보정 전 원본**에서 뽑는다(fetchAllKeyset 커서와 같은 이유 — 보정값이 커서로
+  // 나가면 WHERE가 안 맞는다).
+
+  /** 타임스탬프 컬럼 원시 타입 캐시 */
+  private tsTypeCache = new Map<string, string>();
+
+  private async resolveRawColumnType(tableName: string, columnName: string): Promise<string> {
+    const cacheKey = `${tableName}.${columnName}`;
+    const cached = this.tsTypeCache.get(cacheKey);
+    if (cached) return cached;
+    const [rows] = await this.pool!.query(
+      `SELECT DATA_TYPE AS dataType FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+      [tableName, columnName],
+    );
+    const row = (rows as Record<string, unknown>[])[0];
+    if (!row || !row.dataType) {
+      throw new Error(`타임스탬프 컬럼 타입 조회 실패: ${tableName}.${columnName}`);
+    }
+    const t = String(row.dataType).toLowerCase();
+    this.tsTypeCache.set(cacheKey, t);
+    return t;
+  }
+
+  /** 타입별 (원문 SELECT 식, 바인드 래퍼) — 변환은 항상 상수 쪽(컬럼 쪽 캐스트 = 인덱스 불가). */
+  private tsFormats(rawType: string): {
+    selectExpr: (colExpr: string) => string;
+    wrapBind: (bindToken: string) => string;
+  } {
+    if (rawType === 'date') {
+      return {
+        selectExpr: (col) => `DATE_FORMAT(${col}, '%Y-%m-%d')`,
+        wrapBind: (t) => `CAST(${t} AS DATE)`,
+      };
+    }
+    if (rawType === 'datetime' || rawType === 'timestamp') {
+      return {
+        selectExpr: (col) => `DATE_FORMAT(${col}, '%Y-%m-%d %H:%i:%s.%f')`,
+        wrapBind: (t) => `CAST(${t} AS DATETIME(6))`,
+      };
+    }
+    throw new Error(
+      `타임스탬프 컬럼이 날짜/시각 타입이 아닙니다(${rawType}) — --edit-config로 올바른 컬럼을 지정해주세요.`,
+    );
+  }
+
+  /** PK 컬럼 원시 타입 캐시 + 바인드 규약 — 정수 PK는 DECIMAL(65,0) 캐스트(문자열 비교는 2^53 위에서 근사 — Codex F5). */
+  private pkTypeCache2 = new Map<string, Record<string, string>>();
+
+  private static readonly PK_INT_TYPES = new Set(['tinyint', 'smallint', 'mediumint', 'int', 'bigint']);
+  private static readonly PK_CHAR_TYPES = new Set(['char', 'varchar']);
+
+  private async resolvePkBinding(
+    tableName: string,
+    safePks: string[],
+  ): Promise<{ wrapKeyBind: (pkIdx: number, token: string) => string }> {
+    let types = this.pkTypeCache2.get(tableName);
+    if (!types) {
+      types = {};
+      for (const col of safePks) {
+        types[col] = await this.resolveRawColumnType(tableName, col);
+      }
+      this.pkTypeCache2.set(tableName, types);
+    }
+    const isInt: boolean[] = [];
+    for (const col of safePks) {
+      const t = types[col];
+      if (MysqlConnector.PK_INT_TYPES.has(t)) isInt.push(true);
+      else if (MysqlConnector.PK_CHAR_TYPES.has(t)) isInt.push(false);
+      else {
+        throw new Error(
+          `증분 불가: PK 컬럼 '${col}' 타입(${t})은 정확한 커서 왕복을 지원하지 않습니다(정수·문자형만).`,
+        );
+      }
+    }
+    return {
+      wrapKeyBind: (pkIdx, token) => (isInt[pkIdx] ? `CAST(${token} AS DECIMAL(65,0))` : token),
+    };
+  }
+
+  async fetchIncrementalKeyset(
+    tableName: string,
+    timestampColumn: string,
+    pkColumns: string[],
+    cursor: IncrementalCursor | null,
+    limit: number,
+  ): Promise<{ rows: RawRow[]; meta: RowCursorMeta[] }> {
+    this.ensureConnected();
+    const safeTable = this.sanitizeIdentifier(tableName);
+    const safeTs = this.sanitizeIdentifier(timestampColumn);
+    const safePks = pkColumns.map((c) => this.sanitizeIdentifier(c));
+    const rawType = await this.resolveRawColumnType(safeTable, safeTs);
+    const fmt = this.tsFormats(rawType);
+    const pkBind = await this.resolvePkBinding(safeTable, safePks);
+    const tsCol = `\`${safeTs}\``;
+
+    const params: unknown[] = [];
+    let predicate = `${tsCol} IS NOT NULL`;
+    if (cursor) {
+      if (cursor.keys.length === 0) {
+        // 열린 버킷 시작 커서 — 그 버킷 전체를 재조회한다(ts >=). 서버 멱등이 겹침을 흡수.
+        params.push(cursor.tsRaw);
+        predicate += ` AND ${tsCol} >= ${fmt.wrapBind('?')}`;
+      } else {
+        // 위치 기반 ? — bind 호출 시점에 push해 SQL 텍스트 순서와 값 순서를 맞춘다.
+        const bind = (name: string): string => {
+          if (name === 'ts') { params.push(cursor.tsRaw); return '?'; }
+          const idx = Number(name.slice(1));
+          params.push(cursor.keys[idx]);
+          return pkBind.wrapKeyBind(idx, '?');
+        };
+        predicate += ` AND ${buildKeysetPredicate(tsCol, fmt.wrapBind, bind, safePks.map((c) => `\`${c}\``))}`;
+      }
+    }
+    const orderBy = [`${tsCol} ASC`, ...safePks.map((c) => `\`${c}\` ASC`)].join(', ');
+    params.push(limit);
+
+    const [rows] = await this.pool!.query(
+      `SELECT t.*, ${fmt.selectExpr(tsCol)} AS \`${MYSQL_TS_RAW_ALIAS}\`
+         FROM \`${safeTable}\` t
+        WHERE ${predicate}
+        ORDER BY ${orderBy}
+        LIMIT ?`,
+      params,
+    );
+    const { cleanRows, meta } = extractRowCursorMeta(rows as Record<string, unknown>[], MYSQL_TS_RAW_ALIAS, pkColumns);
+    logger.debug(`키셋 증분 조회: ${meta.length}건`, { tableName, cursorTs: cursor?.tsRaw ?? null });
+    return { rows: this.fixRowEncoding(cleanRows as RawRow[]), meta };
+  }
+
+  async fetchMaxCursor(
+    tableName: string,
+    timestampColumn: string,
+    pkColumns: string[],
+    beforeTsRawExclusive?: string | null,
+  ): Promise<IncrementalCursor | null> {
+    this.ensureConnected();
+    const safeTable = this.sanitizeIdentifier(tableName);
+    const safeTs = this.sanitizeIdentifier(timestampColumn);
+    const safePks = pkColumns.map((c) => this.sanitizeIdentifier(c));
+    const rawType = await this.resolveRawColumnType(safeTable, safeTs);
+    const fmt = this.tsFormats(rawType);
+    // 타입 검증(미지원 PK 조기 거부)
+    await this.resolvePkBinding(safeTable, safePks);
+    const tsCol = `\`${safeTs}\``;
+    const orderBy = [`${tsCol} DESC`, ...safePks.map((c) => `\`${c}\` DESC`)].join(', ');
+    const pkSelect = safePks.map((c) => `\`${c}\``).join(', ');
+
+    const params: unknown[] = [];
+    let where = `${tsCol} IS NOT NULL`;
+    if (beforeTsRawExclusive) {
+      params.push(beforeTsRawExclusive);
+      where += ` AND ${tsCol} < ${fmt.wrapBind('?')}`;
+    }
+    const [rows] = await this.pool!.query(
+      `SELECT ${fmt.selectExpr(tsCol)} AS \`${MYSQL_TS_RAW_ALIAS}\`${pkSelect ? ', ' + pkSelect : ''}
+         FROM \`${safeTable}\`
+        WHERE ${where}
+        ORDER BY ${orderBy}
+        LIMIT 1`,
+      params,
+    );
+    const row = (rows as Record<string, unknown>[])[0];
+    if (!row) return null;
+    return {
+      tsRaw: String(row[MYSQL_TS_RAW_ALIAS] ?? ''),
+      keys: safePks.map((c) => row[c]) as (string | number)[],
+    };
+  }
+
+  /** 접속 대상 식별자 — 커서 fingerprint 재료. 계정까지 포함(2R F9와 같은 축). JSON = 경계 단사(3R F11). */
+  getSourceId(): string {
+    return JSON.stringify([this.config.host, this.config.port, this.config.database, this.config.username]);
   }
 
   /** 단일 PK 캐시 — 전체 동기화 안정 정렬 키 (매 배치 메타 조회 방지). */
