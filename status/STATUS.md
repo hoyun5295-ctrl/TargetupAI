@@ -95,7 +95,7 @@
 
 ### 다음 세션 (예정)
 > 경위·범위·확정 사실은 링크가 소유한다. 여기엔 제목·다음 한 수·호출어만.
-> ① **템플릿관리자 흡수(Track B+C)** 1순위 — **0730 회사 병합 3건 완료**(CT `utils/company-merge.ts`). 다음 = 0723자 점검표 회신 수령 → 컷오버. 병행 = M4 실발송 1건 · 497 기준 · M5(B-3 계정·`Bill_ID`) · 브랜드 스코프(B-2) · 다우 2사 딜러 이관. [설계 §1·§4](docs/2026-07-14-template-migration-track-bc-design.md) · [[project_2026_0705_legacy_template_migration]]
+> ① **템플릿** — 호출어 **"템플릿"** → **[FEATURE-ALIMTALK-TEMPLATE.md](../docs/FEATURE-ALIMTALK-TEMPLATE.md)가 전부 소유**(구조·불변 원칙·이관 절차·이력·남은 것). 여기 다시 쓰지 않는다. 0804 = IMC 이관 실행 화면 신설·게이트 테넌트 격리·메트로시티 이관.
 > ② **0718 성능 후속** — 관측 사이클 1회전: 1순위 campaigns 발송 폴러 인덱스(EXPLAIN 후 처방) · 2순위 `balance_transactions` 잔액 SUM N+1(호출처 추적) · 그 후 M3/롤업. [핸드오프](docs/2026-07-18-frontend-splitting-incident-handoff.md) · [[project_2026_0717_dashboard_performance]]
 > ③ **아임웹·아이디룩 시연** — 스토어 등록 확인 → 테스트 몰 OAuth 리허설(pm2 로그+회원가입 1건 webhook) → 시연. INTEGRATIONS.md 아임웹 카드 · [[project_2026_0719_imweb_appstore_idlook]]
 > ④ **이미지 스튜디오 잔여** — 인앱 웹 디자인 탭 단순화 · 원샷 이식(인앱·이메일) · 판독 3축 확장 · 템플릿 `exampleUrl` 실샘플 · 미해결 = DM 상품 링크 입력 시 멈춤(재현 정보 대기). [[project_2026_0719_p4_image_studio]]

@@ -14,6 +14,7 @@
 | **여정(Journey)** — 트리거 자동화 | **여정** | [FEATURE-JOURNEY.md](../docs/FEATURE-JOURNEY.md) | §2 불변 원칙(필독) → §3 구조 → §4 트리거 현황. 이력·로드맵 = §6 |
 | **싱크에이전트(Sync Agent)** — 고객사 DB 동기화 | **싱크에이전트** | [FEATURE-SYNC-AGENT.md](../docs/FEATURE-SYNC-AGENT.md) | §2 불변 원칙(필독) → §4 커서 규약 → §3 구조. 검증·출고 = 런북, 증상 진단 = TROUBLESHOOTING |
 | **자동마케팅(Continuous Operator)** — 목표 자연어 → 주기 자동발송 | **자동마케팅** | [FEATURE-AUTOMARKETING.md](../docs/FEATURE-AUTOMARKETING.md) | §2 불변 원칙(필독) → §4 대상 판정 계약 → §3 구조. 리마인드 = §5, 뒤집힌 판단 = §8 |
+| **알림톡 템플릿** — 템플릿·발신프로필 관리와 IMC 이관 | **템플릿** | [FEATURE-ALIMTALK-TEMPLATE.md](../docs/FEATURE-ALIMTALK-TEMPLATE.md) | §2 불변 원칙(필독) → §3 구조 → 이관이면 §4 절차. 이력 = §6·§8, 뒤집힌 판단 = §7 |
 
 **등재 규칙** (★2026-08-03 Harold 확정 — 앞으로 모든 기능이 이 형태)
 - **기능 하나 = .md 하나.** 그 문서가 자기 **이력**(§이력 색인)과 구조·불변 원칙·계약을 소유하고, STATUS는 **참조만** 한다. 트랙이 archive로 가도 기능 문서는 남는다.
