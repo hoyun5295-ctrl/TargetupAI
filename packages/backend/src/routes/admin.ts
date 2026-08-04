@@ -4316,7 +4316,9 @@ router.get('/kakao-templates', authenticate, requireSuperAdmin, async (req: Requ
     const status = req.query.status as string | undefined;
     const companyId = req.query.company_id as string | undefined;
 
-    let sql = `SELECT kt.*, c.company_name, ksp.profile_name
+    // ★ 2026-08-04 yellow_id 동반 — 대행사(예: 유에스소프트)는 한 회사 밑에 여러 브랜드 채널을 갖는다.
+    //   회사명만 보이면 목록에서 어느 채널 템플릿인지 구분이 안 돼 상세를 열어봐야 했다.
+    let sql = `SELECT kt.*, c.company_name, ksp.profile_name, ksp.yellow_id
        FROM kakao_templates kt
        LEFT JOIN companies c ON kt.company_id = c.id
        LEFT JOIN kakao_sender_profiles ksp ON kt.profile_id = ksp.id

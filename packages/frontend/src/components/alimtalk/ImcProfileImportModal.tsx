@@ -28,6 +28,13 @@ interface Props {
   onClose: () => void;
   /** 연결·가져오기가 실제로 반영됐을 때 — 부모가 목록을 새로 읽는다. */
   onDone: (message: string) => void;
+  /**
+   * `full`(기본, 발신프로필 화면) = IMC 검색 → 프로필 연결 → 템플릿 가져오기.
+   * `templateOnly`(템플릿 화면) = **이미 연결된 프로필**을 골라 템플릿만 가져온다.
+   *   프로필이 이미 있는데 템플릿만 다시 받아야 하는 경우(딜러 이관이 프로필 먼저 끝나는 일이 잦다)를
+   *   위해 둔다. 이때 `/senders/import`는 부르지 않는다 — 이미 연결된 키는 409로 막히기 때문이다.
+   */
+  mode?: 'full' | 'templateOnly';
 }
 
 function getToken() {
@@ -45,7 +52,11 @@ function pickStatus(it: any): string {
   return String(it?.status || it?.senderStatus || it?.state || '-');
 }
 
-export default function ImcProfileImportModal({ companies, onClose, onDone }: Props) {
+export default function ImcProfileImportModal({ companies, onClose, onDone, mode = 'full' }: Props) {
+  const templateOnly = mode === 'templateOnly';
+  /** templateOnly 전용 — 선택한 회사에 **이미 연결된** 발신프로필(우리 DB) */
+  const [linkedProfiles, setLinkedProfiles] = useState<any[]>([]);
+  const [profilesLoading, setProfilesLoading] = useState(false);
   const [companyId, setCompanyId] = useState('');
   const [keyword, setKeyword] = useState('');
   const [searching, setSearching] = useState(false);
@@ -66,6 +77,28 @@ export default function ImcProfileImportModal({ companies, onClose, onDone }: Pr
     window.addEventListener('keydown', onEsc);
     return () => window.removeEventListener('keydown', onEsc);
   }, [onClose]);
+
+  /** templateOnly — 회사를 고르면 그 회사에 연결된 프로필을 우리 DB에서 읽는다(IMC 호출 없음). */
+  useEffect(() => {
+    if (!templateOnly || !companyId) { setLinkedProfiles([]); return; }
+    let alive = true;
+    setProfilesLoading(true); setError('');
+    (async () => {
+      try {
+        const res = await fetch('/api/alimtalk/senders', { headers: { Authorization: `Bearer ${getToken()}` } });
+        const data = await res.json();
+        if (!alive) return;
+        if (!res.ok || data?.success === false) throw new Error(data?.error || '발신프로필 조회 실패');
+        const mine = (data.profiles || []).filter((p: any) => String(p.company_id) === companyId);
+        setLinkedProfiles(mine);
+      } catch (e: any) {
+        if (alive) setError(e?.message || '발신프로필 조회 실패');
+      } finally {
+        if (alive) setProfilesLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [templateOnly, companyId]);
 
   const search = async () => {
     if (!keyword.trim()) { setError('찾을 채널명을 입력해주세요'); return; }
@@ -145,9 +178,13 @@ export default function ImcProfileImportModal({ companies, onClose, onDone }: Pr
         onClick={(e) => e.stopPropagation()}>
         <div className="px-6 py-4 border-b flex items-center justify-between">
           <div>
-            <h3 className="text-base font-semibold text-gray-900">IMC 계정에서 가져오기</h3>
+            <h3 className="text-base font-semibold text-gray-900">
+              {templateOnly ? 'IMC에서 템플릿 가져오기' : 'IMC 계정에서 가져오기'}
+            </h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              딜러 이관(다우 → 휴머스온)이 끝난 발신프로필과 템플릿을 우리 회사로 들여옵니다.
+              {templateOnly
+                ? '이미 연결된 발신프로필을 골라 그 프로필의 템플릿을 IMC에서 들여옵니다.'
+                : '딜러 이관(다우 → 휴머스온)이 끝난 발신프로필과 템플릿을 우리 회사로 들여옵니다.'}
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
@@ -158,7 +195,9 @@ export default function ImcProfileImportModal({ companies, onClose, onDone }: Pr
             목록이 두 줄만 보인다(0804 실측). 여기 두면 아래 스크롤 영역 위로 펼쳐진다. */}
         <div className="px-6 pt-4 shrink-0">
           <div className="rounded-xl border border-gray-200 p-4">
-            <p className="text-xs font-semibold text-gray-700 mb-2">1. 대상 회사와 채널명</p>
+            <p className="text-xs font-semibold text-gray-700 mb-2">
+              {templateOnly ? '1. 회사와 발신프로필' : '1. 대상 회사와 채널명'}
+            </p>
             <div className="flex flex-wrap gap-2">
               <div className="min-w-[220px]">
                 <SearchableSelect
@@ -168,18 +207,57 @@ export default function ImcProfileImportModal({ companies, onClose, onDone }: Pr
                   placeholder="회사명 입력해 검색"
                 />
               </div>
-              <input value={keyword} onChange={(e) => setKeyword(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') search(); }}
-                placeholder="채널명 일부 (예: 메트로시티)"
-                className="flex-1 min-w-[200px] px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-              <button onClick={search} disabled={searching}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
-                {searching ? '검색 중...' : '검색'}
-              </button>
+              {!templateOnly && (
+                <>
+                  <input value={keyword} onChange={(e) => setKeyword(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') search(); }}
+                    placeholder="채널명 일부 (예: 메트로시티)"
+                    className="flex-1 min-w-[200px] px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                  <button onClick={search} disabled={searching}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+                    {searching ? '검색 중...' : '검색'}
+                  </button>
+                </>
+              )}
             </div>
-            <p className="text-[11px] text-gray-400 mt-2">
-              옛 senderKey로는 찾을 수 없습니다 — 딜러 이관 시 키가 새로 발급되어 이전 키 조회는 `4011`이 됩니다. 채널명으로 찾습니다.
-            </p>
+
+            {templateOnly ? (
+              <div className="mt-3">
+                {!companyId ? (
+                  <p className="text-[11px] text-gray-400">회사를 먼저 고르면 연결된 발신프로필이 나옵니다.</p>
+                ) : profilesLoading ? (
+                  <p className="text-[11px] text-gray-400">발신프로필을 불러오는 중...</p>
+                ) : linkedProfiles.length === 0 ? (
+                  <p className="text-[11px] text-amber-600">
+                    이 회사에 연결된 발신프로필이 없습니다 — 발신프로필 관리 화면의 [IMC에서 가져오기]로 먼저 연결해 주세요.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {linkedProfiles.map((p: any) => {
+                      const k = String(p.profile_key || '');
+                      const on = k === linkedKey;
+                      return (
+                        <div key={p.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-50">
+                          <span className="text-sm text-gray-800 flex-1 min-w-0 truncate">{p.profile_name}</span>
+                          <span className="text-[10px] text-gray-400 shrink-0">{p.yellow_id || '-'}</span>
+                          <span className="text-[10px] font-mono text-gray-400 shrink-0 truncate max-w-[160px]">{k}</span>
+                          <button
+                            onClick={() => { setLinkedKey(k); setLinkedLabel(String(p.profile_name || '')); setPreview(null); }}
+                            disabled={on}
+                            className="shrink-0 px-2.5 py-1 text-xs rounded bg-indigo-100 text-indigo-700 hover:bg-indigo-200 disabled:opacity-40">
+                            {on ? '선택됨' : '선택'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-[11px] text-gray-400 mt-2">
+                옛 senderKey로는 찾을 수 없습니다 — 딜러 이관 시 키가 새로 발급되어 이전 키 조회는 `4011`이 됩니다. 채널명으로 찾습니다.
+              </p>
+            )}
           </div>
         </div>
 

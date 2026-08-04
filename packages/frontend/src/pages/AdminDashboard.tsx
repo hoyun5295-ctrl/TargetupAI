@@ -18,6 +18,8 @@ import { COMPANY_EMAIL } from '../constants/company';
 import { formatAgentIdLabel } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스(발급명 병기)
 import { formatPlanOptionLabel } from '../utils/planLabel'; // ★ 2026-07-28 요금제 라벨 = 월정액(고객 수 축 폐기)
 import { taxbillIssueDatePreviewText, type TaxbillDayPolicy } from '../utils/taxbillDate'; // ★ 2026-07-28 작성일자 미리보기(예시 월 하드코딩 제거)
+// ★ 2026-08-04 IMC 이관 모달 — 템플릿 화면에서는 이미 연결된 프로필로 템플릿만 가져온다(templateOnly)
+import ImcProfileImportModal from '../components/alimtalk/ImcProfileImportModal';
 import Billing080Modal from '../components/Billing080Modal'; // ★ 2026-07-30 추가 청구 관리 (서수란 접수 — 080 KT 명세서 분할 + 부가서비스 수기)
 import MinimumChargeModal from '../components/MinimumChargeModal'; // ★ 2026-07-30 최소과금 정액 발행 (Harold 확정)
 import QtyAdjustModal, { type QtyAdjustTarget } from '../components/QtyAdjustModal'; // ★ 2026-08-04 수량 수정 발행 (서수란 접수)
@@ -498,6 +500,8 @@ const [emailResendAt, setEmailResendAt] = useState<string | null>(null);
   const [editingLineGroup, setEditingLineGroup] = useState<any | null>(null);
   const [lineGroupSaving, setLineGroupSaving] = useState(false);
 
+  // ★ 2026-08-04 템플릿 화면의 IMC 가져오기(이미 연결된 프로필 기준) 모달
+  const [showImcTemplateImport, setShowImcTemplateImport] = useState(false);
   // ===== 템플릿 관리 =====
   const [adminTemplates, setAdminTemplates] = useState<any[]>([]);
   const [adminRcsTemplates, setAdminRcsTemplates] = useState<any[]>([]);
@@ -5815,10 +5819,18 @@ const handleApproveRequest = async (id: string) => {
               <h2 className="text-lg font-semibold">💬 템플릿 관리</h2>
               <p className="text-xs text-gray-500 mt-1">고객사 알림톡/RCS 템플릿 승인·반려 및 수동 등록</p>
             </div>
-            <button onClick={() => setShowManualTemplateForm(true)}
-              className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
-              + 수동 등록 (기존 템플릿)
-            </button>
+            <div className="flex items-center gap-2">
+              {/* ★ 2026-08-04 딜러 이관은 발신프로필이 먼저 끝나고 템플릿이 뒤따르는 일이 잦아,
+                  프로필 연결 뒤 템플릿만 다시 받아야 한다. 그 진입점을 템플릿 화면에도 둔다. */}
+              <button onClick={() => setShowImcTemplateImport(true)}
+                className="bg-violet-100 hover:bg-violet-200 text-violet-700 px-4 py-2 rounded-lg text-sm font-medium">
+                IMC에서 가져오기
+              </button>
+              <button onClick={() => setShowManualTemplateForm(true)}
+                className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
+                + 수동 등록 (기존 템플릿)
+              </button>
+            </div>
           </div>
 
           {/* 서브탭 + 검색 + 필터 */}
@@ -5865,6 +5877,9 @@ const handleApproveRequest = async (id: string) => {
                   <thead className="bg-gray-50 border-b">
                     <tr>
                       <th className="px-4 py-3 text-left font-medium text-gray-600">고객사</th>
+                      {/* ★ 2026-08-04 채널 컬럼 — 대행사는 한 회사 밑에 여러 브랜드 채널을 갖는다.
+                          회사명만 보이면 어느 채널 템플릿인지 상세를 열어야 알 수 있었다. */}
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">채널</th>
                       <th className="px-4 py-3 text-left font-medium text-gray-600">템플릿명</th>
                       <th className="px-4 py-3 text-left font-medium text-gray-600">카테고리</th>
                       <th className="px-4 py-3 text-center font-medium text-gray-600">상태</th>
@@ -5878,6 +5893,16 @@ const handleApproveRequest = async (id: string) => {
                       .map((t: any) => (
                       <tr key={t.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-gray-900 font-medium">{t.company_name || '-'}</td>
+                        <td className="px-4 py-3">
+                          {t.profile_name || t.yellow_id ? (
+                            <>
+                              <div className="text-gray-700">{t.profile_name || '-'}</div>
+                              {t.yellow_id && <div className="text-xs text-gray-400">{t.yellow_id}</div>}
+                            </>
+                          ) : (
+                            <span className="text-gray-300">-</span>
+                          )}
+                        </td>
                         <td className="px-4 py-3">
                           <div className="text-gray-900">{t.template_name}</div>
                           {t.template_code && (
@@ -6151,6 +6176,16 @@ const handleApproveRequest = async (id: string) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ★ 2026-08-04 IMC에서 템플릿 가져오기 — 이미 연결된 발신프로필을 골라 그 프로필 템플릿만 들여온다 */}
+      {showImcTemplateImport && (
+        <ImcProfileImportModal
+          companies={companies.map((c: any) => ({ id: c.id, company_name: c.company_name }))}
+          mode="templateOnly"
+          onClose={() => setShowImcTemplateImport(false)}
+          onDone={(msg) => { showAlert('완료', msg, 'success'); loadAdminTemplates(); }}
+        />
       )}
 
       {/* 수동 등록 모달 */}
