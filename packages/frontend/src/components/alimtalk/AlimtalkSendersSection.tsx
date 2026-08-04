@@ -103,7 +103,11 @@ export default function AlimtalkSendersSection() {
         fetch('/api/alimtalk/senders', {
           headers: { Authorization: `Bearer ${getToken()}` },
         }),
-        fetch('/api/companies', {
+        // ★ 2026-08-04 limit 명시 — `GET /api/companies`는 **기본 limit=20 + created_at DESC**라
+        //   파라미터 없이 부르면 최근 20개사만 온다. 이 목록은 발신프로필 등록·IMC 이관에서
+        //   "대상 회사 고르기"에 쓰이므로 잘리면 그 회사를 아예 선택할 수 없다(0804 실측: 유에스소프트 누락).
+        //   현재 고객사 141개 규모라 1000이면 전량이고, 넘치면 서버가 페이지를 잘라 같은 증상이 다시 보인다.
+        fetch('/api/companies?limit=1000', {
           headers: { Authorization: `Bearer ${getToken()}` },
         }),
       ]);
@@ -119,6 +123,9 @@ export default function AlimtalkSendersSection() {
                 id: c.id,
                 company_name: c.company_name || c.name || c.id,
               }))
+              // ★ 2026-08-04 가나다순 — 서버는 created_at DESC로 준다. 회사가 141개라
+              //   등록 역순으로 나열하면 드롭다운에서 특정 회사를 눈으로 못 찾는다.
+              .sort((a: any, b: any) => String(a.company_name).localeCompare(String(b.company_name), 'ko'))
             : [],
         );
       }

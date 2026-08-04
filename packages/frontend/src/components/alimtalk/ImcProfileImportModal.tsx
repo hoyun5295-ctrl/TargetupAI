@@ -14,7 +14,9 @@
  *      템플릿 가져오기는 ②가 끝나 있어야 동작한다(서버가 연결 여부를 먼저 본다).
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+// ★ 회사가 141개라 기본 select로는 눈으로 못 찾는다 — 검색 가능한 공용 CT를 쓴다(신규 구현 금지).
+import SearchableSelect from '../SearchableSelect';
 
 interface Company {
   id: string;
@@ -132,6 +134,10 @@ export default function ImcProfileImportModal({ companies, onClose, onDone }: Pr
   };
 
   const companyName = companies.find((c) => c.id === companyId)?.company_name || '';
+  const companyOptions = useMemo(
+    () => companies.map((c) => ({ value: c.id, label: c.company_name })),
+    [companies],
+  );
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[70]" onClick={onClose}>
@@ -152,11 +158,14 @@ export default function ImcProfileImportModal({ companies, onClose, onDone }: Pr
           <div className="rounded-xl border border-gray-200 p-4">
             <p className="text-xs font-semibold text-gray-700 mb-2">1. 대상 회사와 채널명</p>
             <div className="flex flex-wrap gap-2">
-              <select value={companyId} onChange={(e) => { setCompanyId(e.target.value); setLinkedKey(''); setPreview(null); }}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm min-w-[200px]">
-                <option value="">회사 선택</option>
-                {companies.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-              </select>
+              <div className="min-w-[220px]">
+                <SearchableSelect
+                  options={companyOptions}
+                  value={companyId}
+                  onChange={(v) => { setCompanyId(v); setLinkedKey(''); setPreview(null); }}
+                  placeholder="회사명 입력해 검색"
+                />
+              </div>
               <input value={keyword} onChange={(e) => setKeyword(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') search(); }}
                 placeholder="채널명 일부 (예: 메트로시티)"
