@@ -930,7 +930,10 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       const gate = await query(
         `SELECT t.status AS tstatus, t.buttons AS tbuttons, t.emphasize_title AS temphasize_title, t.represent_link AS trepresent_link, p.approval_status, p.profile_key
            FROM kakao_templates t
-           JOIN kakao_sender_profiles p ON p.id = t.profile_id
+           -- ★ 2026-08-04 (Codex 2R critical, 직접발송 게이트와 같은 정정) 프로필도 같은 회사만.
+           --   p를 id로만 조인하면 템플릿의 profile_id가 타사 프로필을 가리킬 때
+           --   그 회사의 approval_status로 이 발송 가드를 통과한다.
+           JOIN kakao_sender_profiles p ON p.id = t.profile_id AND p.company_id = t.company_id
           WHERE t.id = $1 AND t.company_id = $2 LIMIT 1`,
         [ac.alimtalk_template_id, ac.company_id]
       );

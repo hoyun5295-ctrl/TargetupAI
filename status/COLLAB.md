@@ -113,7 +113,7 @@ CLAUDE.md `superpowers_workflow_default`의 자가 질의("어떤 skill 호출 �
 
 호출 의무 단계와 면제 범위는 CLAUDE.md `codex_review_after_code_change`가 소유한다. 여기는 운영 방법만 담는다.
 
-- **라운드 운영**: 본 AI 작성 → tsc 0 + 자가 grep 통과 → Codex 호출 → 지적 정정 → 재검증. 최대 5라운드.
+- **라운드 운영**: 본 AI 작성 → tsc 0 + 자가 grep → **본 AI 적대 검토** → Codex 호출 → 정정 → 재검증. **최대 2라운드**(★2026-08-04 5→2). `critical`·`high` 0이면 종료, `medium` 이하는 SoT 등재만. 범위·종료 조건의 원천 = CLAUDE.md `codex_review_after_code_change`.
 - **지적 수용 원칙**: 무조건 수용하지 않는다. `superpowers:receiving-code-review`대로 실무 위험 기준으로 취사한다. 과한 처방(예: 연결 강제 종료)은 거부하고 단순한 대안으로 대체한 전례가 있다.
 - **같은 스레드 이어가기**: 후속 라운드는 `SendMessage`로 기존 에이전트에 이어 붙인다. 새로 띄우면 앞 맥락이 사라진다.
 - **설치**(최초 1회, Harold님 직접): `/plugin marketplace add openai/codex-plugin-cc` → `/plugin install codex@openai-codex` → `/reload-plugins` → `/codex:setup`

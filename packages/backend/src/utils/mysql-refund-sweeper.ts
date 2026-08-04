@@ -40,6 +40,8 @@ import { recordCampaignLearning } from './company-memory';
 // ★ 2026-06-13: 차등 주기 — 발송 48h 이내 매 사이클 / 경과(휴면) 60분 1회 (PROCESSLIST 10초 쿼리 상시 점유 fix)
 import { isSweepDue } from './sweep-cadence';
 import { sendTypeLabel } from './send-type-axis';
+// ★ 2026-08-04: sweep 대상 캠페인 상태 CT — lifecycle 동기화와 같은 집합을 본다
+import { SWEEPABLE_CAMPAIGN_STATUS_SQL } from './campaign-sweep-scope';
 
 const INTERVAL_MS = 30 * 1000;     // 30초 — Harold님 명시 (D153 5/13): 레거시 실시간 환불 패턴 정합 + 후불 8.5/선불 1.5 부하 보수 마진 (1.5초/사이클 / 5% 점유 / 후불 업체는 billing_type filter로 쿼리 자체 X)
 const BOOT_DELAY_MS = 90 * 1000;   // campaign-sync-worker(60초)와 시작 시점 차이 둠
@@ -120,7 +122,9 @@ async function runOnce(): Promise<void> {
       FROM campaigns c
       JOIN companies co ON co.id = c.company_id
       WHERE co.billing_type = 'prepaid'
-        AND c.status IN ('sending', 'completed')
+        -- ★ 2026-08-04 대상 상태는 CT(campaign-sweep-scope)가 소유한다 — lifecycle 동기화와
+        --   같은 집합을 봐야 한쪽에만 보이는 캠페인이 생기지 않는다. 'failed' 합류 근거도 그 파일에.
+        AND c.status IN (${SWEEPABLE_CAMPAIGN_STATUS_SQL})
         AND c.message_type IS NOT NULL
         AND COALESCE(c.scheduled_at, c.sent_at, c.created_at) >= NOW() - INTERVAL '14 days'
       ORDER BY c.created_at DESC
@@ -214,7 +218,7 @@ async function runOnce(): Promise<void> {
                      fail_count = $2,
                      sent_count = GREATEST(COALESCE(sent_count, 0), $4::int),
                      updated_at = NOW()
-               WHERE id = $3 AND status IN ('sending', 'completed')`,
+               WHERE id = $3 AND status IN (${SWEEPABLE_CAMPAIGN_STATUS_SQL})`,
               [mysqlSuccess, mysqlFail, camp.id, loaded]
             );
             pgUpdateCount++;

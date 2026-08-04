@@ -1539,7 +1539,7 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
     if (isAlimtalkSend) {
       if (!alimtalkTemplateCode) return res.status(400).json({ success: false, error: '알림톡 템플릿 코드가 필요합니다' });
       const gate = await query(
-        `SELECT t.id AS tid, t.status AS tstatus, t.content AS tcontent, t.buttons AS tbuttons, t.emphasize_title AS temphasize_title, t.represent_link AS trepresent_link, p.approval_status, p.profile_key FROM kakao_templates t JOIN kakao_sender_profiles p ON p.id = t.profile_id WHERE t.company_id = $1 AND t.template_code = $2 LIMIT 1`,
+        `SELECT t.id AS tid, t.status AS tstatus, t.content AS tcontent, t.buttons AS tbuttons, t.emphasize_title AS temphasize_title, t.represent_link AS trepresent_link, p.approval_status, p.profile_key FROM kakao_templates t JOIN kakao_sender_profiles p ON p.id = t.profile_id AND p.company_id = t.company_id WHERE t.company_id = $1 AND t.template_code = $2 LIMIT 1`,
         [companyId, alimtalkTemplateCode]
       );
       if (gate.rows.length === 0) return res.status(404).json({ success: false, error: '템플릿을 찾을 수 없습니다' });
@@ -1931,6 +1931,53 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
     }
 
+    // ★ 2026-08-04 알림톡 승인 게이트를 **차감 앞**으로 올렸다.
+    //   전에는 이 검증이 prepaidDeduct 뒤(발송 블록 안)에 있어서, 미승인 템플릿·미승인 프로필로
+    //   요청이 오면 큐 적재는 0건인데 차감만 남았다 — 그 자리의 return 5개에는 캠페인 DELETE도
+    //   환불도 없다. 검증 대상(템플릿·프로필 승인 상태)은 수신자·금액과 무관하므로 캠페인 생성 전에 끝낸다.
+    //   (LESSONS_BACKEND 핵심원칙 — "차감이 끝나기 전에는 발송 가능 상태를 만들지 마라")
+    //   대용량 경로 `/direct-send/commit`은 처음부터 게이트가 앞이라 이 정정 대상이 아니다.
+    if (directChannel === 'alimtalk') {
+      if (!alimtalkTemplateCode) {
+        return res.status(400).json({ success: false, error: '알림톡 템플릿 코드가 필요합니다' });
+      }
+
+      // ★ D130: 승인 이중 가드 — 발신프로필 APPROVED + 템플릿 APPROVED 확인
+      const gateCheck = await query(
+        `SELECT t.id AS tid,
+                t.status AS tstatus,
+                t.buttons AS tbuttons,
+                t.emphasize_title AS temphasize_title,
+                t.represent_link AS trepresent_link,
+                p.id AS pid,
+                p.approval_status,
+                p.profile_key
+           FROM kakao_templates t
+           -- ★ 2026-08-04 (Codex 2R critical) 프로필도 같은 회사만. p를 id로만 조인하면
+           --   템플릿의 profile_id가 타사 프로필을 가리킬 때 **그 회사의 승인 상태로 게이트를 통과**한다.
+           JOIN kakao_sender_profiles p ON p.id = t.profile_id AND p.company_id = t.company_id
+          WHERE t.company_id = $1
+            AND t.template_code = $2
+          LIMIT 1`,
+        [companyId, alimtalkTemplateCode]
+      );
+      if (gateCheck.rows.length === 0) {
+        return res.status(404).json({ success: false, error: '템플릿을 찾을 수 없습니다' });
+      }
+      const preGate = gateCheck.rows[0];
+      if (!['APPROVED', 'APR', 'A'].includes(String(preGate.tstatus).toUpperCase())) {
+        return res.status(400).json({ success: false, error: '승인 완료된 템플릿만 발송할 수 있습니다' });
+      }
+      if (preGate.approval_status !== 'APPROVED') {
+        return res.status(400).json({ success: false, error: '승인 완료된 발신프로필만 사용할 수 있습니다' });
+      }
+      // ★ CT-87 (2026-06-10): 카카오 활성상태(A) 가드 — 활성 대기(R)/중단(S) 템플릿 사전 차단
+      const directTplGuard = decideKakaoTemplateSendable(await getImcTemplateStatusSafe(companyId, alimtalkTemplateCode));
+      if (!directTplGuard.sendable) {
+        return res.status(400).json({ success: false, error: directTplGuard.reason, code: directTplGuard.code });
+      }
+    }
+
     // ★ B+0407 후속: is_ad 컬럼 INSERT 추가
     //   기존: 컬럼 자체가 누락되어 항상 DEFAULT(false)로 저장 → 광고 ON 발송이 발송결과에서 (광고) 미표시 + 캘린더 잘못 표시 등 연쇄 버그 발생
     const campaignResult = await query(
@@ -2194,12 +2241,15 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     // ★ 알림톡 발송 (CT-04 insertAlimtalkQueue 사용 / D130: 설계서 §6-3-D 반영)
     //   (선언은 try 밖으로 이동 — B-0727-2)
     if (directChannel === 'alimtalk') {
-      if (!alimtalkTemplateCode) {
-        return res.status(400).json({ success: false, error: '알림톡 템플릿 코드가 필요합니다' });
-      }
-
-      // ★ D130: 승인 이중 가드 — 발신프로필 APPROVED + 템플릿 APPROVED 확인
-      const gateCheck = await query(
+      // ★ 2026-08-04 (Codex 적대검증 high 수용) 큐 적재 직전 재확인.
+      //   승인 게이트는 캠페인 생성·차감 **앞**에서 이미 한 번 지났다 — 그것이 "적재 0인데 차감만 남는" 것을 막는다.
+      //   다만 그 스냅샷과 실제 적재 사이에는 캠페인 INSERT·차감·수신자 조회가 들어가서, 그 사이 템플릿이
+      //   철회·중단되면 죽은 템플릿으로 큐에 넣게 된다(게이트웨이가 전량 7300으로 거절한다).
+      //   ⇒ 조립 **직전**에 같은 검사를 한 번 더 하고, 메시지 메타데이터(강조표기·대표링크·버튼)도
+      //     그 최신 행에서 만든다. 창은 조립 구간만 남는다.
+      //   실패는 throw — 아래 catch(직접발송 큐 처리 전체 실패)가 **미적재분 전량 환불 + failed 종결**을
+      //   이미 담당한다. 알림톡 채널은 문자·브랜드 블록을 지나지 않아 적재 0이므로 전액이 돌아간다.
+      const recheck = await query(
         `SELECT t.id AS tid,
                 t.status AS tstatus,
                 t.buttons AS tbuttons,
@@ -2209,30 +2259,33 @@ router.post('/direct-send', async (req: Request, res: Response) => {
                 p.approval_status,
                 p.profile_key
            FROM kakao_templates t
-           JOIN kakao_sender_profiles p ON p.id = t.profile_id
+           -- ★ 2026-08-04 (Codex 2R critical) 프로필도 같은 회사만. p를 id로만 조인하면
+           --   템플릿의 profile_id가 타사 프로필을 가리킬 때 **그 회사의 승인 상태로 게이트를 통과**한다.
+           JOIN kakao_sender_profiles p ON p.id = t.profile_id AND p.company_id = t.company_id
           WHERE t.company_id = $1
             AND t.template_code = $2
           LIMIT 1`,
         [companyId, alimtalkTemplateCode]
       );
-      if (gateCheck.rows.length === 0) {
-        return res.status(404).json({ success: false, error: '템플릿을 찾을 수 없습니다' });
+      if (recheck.rows.length === 0) {
+        throw new Error('알림톡 템플릿이 발송 직전에 조회되지 않습니다 (삭제·이관 가능성)');
       }
-      const gate = gateCheck.rows[0];
+      const gate = recheck.rows[0];
       if (!['APPROVED', 'APR', 'A'].includes(String(gate.tstatus).toUpperCase())) {
-        return res.status(400).json({ success: false, error: '승인 완료된 템플릿만 발송할 수 있습니다' });
+        throw new Error('알림톡 템플릿 승인이 발송 직전에 해제됐습니다');
       }
       if (gate.approval_status !== 'APPROVED') {
-        return res.status(400).json({ success: false, error: '승인 완료된 발신프로필만 사용할 수 있습니다' });
+        throw new Error('알림톡 발신프로필 승인이 발송 직전에 해제됐습니다');
       }
-      // ★ CT-87 (2026-06-10): 카카오 활성상태(A) 가드 — 활성 대기(R)/중단(S) 템플릿 사전 차단
-      const directTplGuard = decideKakaoTemplateSendable(await getImcTemplateStatusSafe(companyId, alimtalkTemplateCode));
-      if (!directTplGuard.sendable) {
-        return res.status(400).json({ success: false, error: directTplGuard.reason, code: directTplGuard.code });
+      // ★ CT-87: 카카오 활성(A) 재확인 — 실제 7300 거절을 만드는 축이라 적재 직전 값이어야 한다.
+      const directTplRecheck = decideKakaoTemplateSendable(await getImcTemplateStatusSafe(companyId, alimtalkTemplateCode));
+      if (!directTplRecheck.sendable) {
+        throw new Error(`알림톡 발송 직전 상태 확인 실패 — ${directTplRecheck.reason}`);
       }
 
       // ★ #4-a (2026-06-01 알림톡 디버깅): 결과 조회용 campaigns.kakao_template_id FK 저장 (results.ts:560 JOIN).
-      //   INSERT(위 1686)가 게이트보다 앞이라 검증 통과 후 UPDATE. gate.tid 재사용(추가 조회 없음).
+      //   게이트는 캠페인 INSERT보다 앞에서 끝났고(2026-08-04), 이 UPDATE는 campaignId가 있어야
+      //   하므로 여기 남는다. gate.tid 재사용(추가 조회 없음).
       //   결과 표시용 FK 저장 실패가 실제 발송을 막지 않도록 try/catch 격리.
       if (gate.tid) {
         try {

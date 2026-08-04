@@ -42,7 +42,11 @@ import {
 // ★ 2026-07-27 발송ID 표시명(발급명) 단일 소스 — 청구서 상세·미리보기도 화면과 같은 이름을 쓴다.
 import { getAgentCustNameMap } from '../utils/pay-stats';
 // ★ 2026-07-28 발행 코어 CT — /generate와 거래내역서 일괄발급 배치가 같은 함수를 쓴다(동작 무변경 추출).
-import { issueBilling, issueMinimumChargeBilling, BillingIssueError } from '../utils/billing-issue';
+import {
+  issueBilling, issueMinimumChargeBilling, BillingIssueError,
+  // ★ 2026-08-04 미리보기가 발행과 **같은 문**으로 기간 축 차단을 판정한다(별건 5 — 미리보기 통과 후 발행 실패).
+  readBillingPeriodConflicts, describeBillingPeriodConflict,
+} from '../utils/billing-issue';
 // ★ 2026-07-30 수정세금계산서 — 사유별 장 구성 계약(순수). 라우트는 이 계획을 트랜잭션 INSERT만 한다.
 import { planModifyIssue, ModifyPlanError } from '../utils/taxbill-popbill';
 // ★ 2026-07-28 정산 설정·담당자 CT — 고객사 상세 "정산" 탭 + 일괄발급·발송·계산서 워커가 공유.
@@ -2134,6 +2138,12 @@ router.get('/preview', async (req: Request, res: Response) => {
     const block = (code: string, msg: string) => { blockerCodes.push(code); blockers.push(msg); };
     if (!billable) block('PREPAID_COMPANY_NOT_BILLABLE', '선불 고객사 — 발송 시점에 잔액에서 이미 차감되어 월 정산서 발행 시 이중 청구');
     if (axisDiffs.length > 0) block('BILLING_AXIS_MISMATCH', '청구 상세와 사용량 집계 수량 불일치');
+    // ★ 2026-08-04 기간 축 차단 2종(겹치는 발행·수동 정산완료) — 발행이 409로 막는 사유인데 미리보기에 없어
+    //   "미리보기 통과 → 발행 실패"가 났다(0731 별건 5). 판정·문구를 발행과 **같은 함수**에서 받는다.
+    const periodConflict = describeBillingPeriodConflict(
+      await readBillingPeriodConflicts(companyId, startDate, endDate),
+    );
+    if (periodConflict) block(periodConflict.code, periodConflict.message);
     // ★ 2026-07-31 결과 미확정 — **차단하지 않고 보여준다**(billing-issue와 같은 판정·같은 정책).
     //   차단으로 두면 채널별 종결 의미가 달라 구멍이 남는 채 "막혔으니 안전"이라는 거짓 확신을 주고,
     //   워커 교착 시 정산이 멈춘다. 수치는 아래 billing_guard.pending_types로 화면에 내려 사람이 판단한다.

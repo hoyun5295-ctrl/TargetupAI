@@ -51,6 +51,79 @@ export class BillingIssueError extends Error {
   }
 }
 
+/** 기간 축 충돌 — 겹치는 발행 · 수동 정산완료. */
+export interface BillingPeriodConflicts {
+  overlap: {
+    id: string; status: string; scope: string | null; user_id: string | null;
+    billing_start: string; billing_end: string;
+  } | null;
+  manualCompleted: { period_start: string; period_end: string; reason: string | null } | null;
+}
+
+/**
+ * ★ 2026-08-04 신설 — 같은 두 조회가 **세 벌로 복제**돼 있었다(발행 사전검사·잠금 안 재검사·정액 발행).
+ *   그리고 미리보기에는 아예 없어서 "미리보기는 통과인데 발행만 막힌다"가 났다 — 미리보기의 존재 이유가 그 반대다.
+ *   네 곳이 이 함수 하나를 쓴다. 잠금 안에서 재검사하는 경로 때문에 `db`로 트랜잭션 client를 받는다.
+ */
+export async function readBillingPeriodConflicts(
+  companyId: string,
+  billingStart: string,
+  billingEnd: string,
+  db: { query: (text: string, params?: any[]) => Promise<any> } = pool,
+): Promise<BillingPeriodConflicts> {
+  const overlap = await db.query(
+    `SELECT id, status, scope, user_id, billing_start, billing_end FROM billings
+     WHERE company_id = $1
+       AND billing_start <= $3::date AND billing_end >= $2::date
+     LIMIT 1`,
+    [companyId, billingStart, billingEnd],
+  );
+  // ★ 2026-07-29 수동 정산완료 — 화면 목록은 "완전히 덮을 때만" 숨기지만 발급 차단은 **조금이라도 겹치면** 막는다.
+  const manual = await db.query(
+    `SELECT period_start, period_end, reason FROM billing_manual_completions
+      WHERE company_id = $1
+        AND period_start <= $3::date AND period_end >= $2::date
+      LIMIT 1`,
+    [companyId, billingStart, billingEnd],
+  );
+  return { overlap: overlap.rows[0] || null, manualCompleted: manual.rows[0] || null };
+}
+
+/** 사람이 읽는 차단 사유 — 발행 에러 문구와 미리보기 blocker 문구를 한 곳에서 만든다. */
+export function describeBillingPeriodConflict(
+  c: BillingPeriodConflicts,
+): { code: string; message: string; detail: Record<string, any> } | null {
+  if (c.overlap) {
+    const ex = c.overlap;
+    return {
+      code: 'BILLING_PERIOD_OVERLAP',
+      message: `해당 기간과 겹치는 정산이 이미 존재합니다 (${String(ex.billing_start).slice(0, 10)} ~ ${String(ex.billing_end).slice(0, 10)})`,
+      detail: {
+        existing_id: ex.id,
+        existing_status: ex.status,
+        existing_scope: ex.scope,
+        existing_user_id: ex.user_id,
+      },
+    };
+  }
+  if (c.manualCompleted) {
+    const m = c.manualCompleted;
+    return {
+      code: 'BILLING_MANUAL_COMPLETED',
+      message: `해당 기간과 겹치는 구간이 수동 정산완료로 처리돼 있습니다 (${String(m.period_start).slice(0, 10)} ~ ${String(m.period_end).slice(0, 10)}${m.reason ? ` · ${String(m.reason).slice(0, 100)}` : ''}). 자동 발행하려면 일괄발급 화면에서 그 기록을 먼저 해제해 주세요.`,
+      detail: {},
+    };
+  }
+  return null;
+}
+
+/** 발행 경로 — 충돌이 있으면 409로 던진다(미리보기는 던지지 않고 문구만 읽는다). */
+export function assertNoBillingPeriodConflict(c: BillingPeriodConflicts): void {
+  const d = describeBillingPeriodConflict(c);
+  if (!d) return;
+  throw new BillingIssueError(409, { error: d.message, code: d.code, ...d.detail });
+}
+
 export interface IssueBillingInput {
   company_id: string;
   user_id?: string | null;
@@ -107,24 +180,12 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
   //   서로를 못 막았다.** 회사 1장을 뽑고 같은 달 계정별 정산을 또 뽑으면 그 계정 웹 발송분이 두 번 청구된다.
   //   반대로 계정별만 뽑으면 에이전트·테스트·스팸·크레딧이 통째로 미청구가 된다.
   //   불변식은 하나다 — **한 회사·한 기간에는 하나의 발행만 존재한다.**
-  const existCheck = await pool.query(
-    `SELECT id, status, scope, user_id, billing_start, billing_end FROM billings
-     WHERE company_id = $1
-       AND billing_start <= $3::date AND billing_end >= $2::date`,
-    [company_id, billing_start, billing_end]
+  // ★ 2026-07-26 code 부여 — 차단 3종이 422로 빠지면서 409는 이 케이스 전용이 됐다.
+  // ★ 2026-08-04 판정을 CT로 통일(readBillingPeriodConflicts) — 미리보기가 같은 문을 본다.
+  //   수동 정산완료도 여기서 함께 본다(전에는 잠금 안에서만 봐서 늦게 알았다. 잠금 안 재검사는 그대로 남는다).
+  assertNoBillingPeriodConflict(
+    await readBillingPeriodConflicts(company_id, billing_start, billing_end),
   );
-  if (existCheck.rows.length > 0) {
-    const ex = existCheck.rows[0];
-    throw new BillingIssueError(409, {
-      error: `해당 기간과 겹치는 정산이 이미 존재합니다 (${String(ex.billing_start).slice(0, 10)} ~ ${String(ex.billing_end).slice(0, 10)})`,
-      // ★ 2026-07-26 code 부여 — 차단 3종이 422로 빠지면서 409는 이 케이스 전용이 됐다.
-      code: 'BILLING_PERIOD_OVERLAP',
-      existing_id: ex.id,
-      existing_status: ex.status,
-      existing_scope: ex.scope,
-      existing_user_id: ex.user_id,
-    });
-  }
 
   // 2) 고객사 단가 조회 (스냅샷)
   // ★ 2026-07-26 `created_at`을 함께 읽는다(SCHEMA.md 등재분·information_schema 실측 확인).
@@ -342,42 +403,11 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
     await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext('billing'))`, [String(company_id)]);
 
     // 잠금을 기다리는 동안 다른 요청이 먼저 만들었을 수 있다 — 잠금 획득 후 재검사.
-    const dupInTx = await client.query(
-      `SELECT id, status, scope, user_id, billing_start, billing_end FROM billings
-       WHERE company_id = $1
-         AND billing_start <= $3::date AND billing_end >= $2::date`,
-      [company_id, billing_start, billing_end]
+    // ★ 2026-07-29 수동 정산완료도 **같은 잠금 아래에서** 본다. 사람이 따로 청구한 구간을 자동 청구서가
+    //   덮으면 이중청구다. 판정을 이 트랜잭션 밖에만 두면 검사와 커밋 사이가 항상 열린다. 그래서 여기에도 둔다.
+    assertNoBillingPeriodConflict(
+      await readBillingPeriodConflicts(company_id, billing_start, billing_end, client),
     );
-    if (dupInTx.rows.length > 0) {
-      const ex = dupInTx.rows[0];
-      throw new BillingIssueError(409, {
-        error: `해당 기간과 겹치는 정산이 이미 존재합니다 (${String(ex.billing_start).slice(0, 10)} ~ ${String(ex.billing_end).slice(0, 10)})`,
-        code: 'BILLING_PERIOD_OVERLAP',
-        existing_id: ex.id,
-        existing_status: ex.status,
-        existing_scope: ex.scope,
-        existing_user_id: ex.user_id,
-      });
-    }
-
-    // ★ 2026-07-29 수동 정산완료도 **같은 잠금 아래에서** 본다.
-    //   사람이 따로 청구한 구간을 자동 청구서가 덮으면 이중청구다. 화면 목록은 "완전히 덮을 때만" 숨기지만
-    //   발급 차단은 **조금이라도 겹치면** 막는다 — 숨김 기준과 차단 기준은 다르다(6월 수동완료 + 6/25~7/25 발행).
-    //   판정을 이 트랜잭션 밖에 두면 검사와 커밋 사이가 항상 열린다. 그래서 여기에 둔다.
-    const manualDone = await client.query(
-      `SELECT period_start, period_end, reason FROM billing_manual_completions
-        WHERE company_id = $1
-          AND period_start <= $3::date AND period_end >= $2::date
-        LIMIT 1`,
-      [company_id, billing_start, billing_end]
-    );
-    if (manualDone.rows.length > 0) {
-      const m = manualDone.rows[0];
-      throw new BillingIssueError(409, {
-        error: `해당 기간과 겹치는 구간이 수동 정산완료로 처리돼 있습니다 (${String(m.period_start).slice(0, 10)} ~ ${String(m.period_end).slice(0, 10)}${m.reason ? ` · ${String(m.reason).slice(0, 100)}` : ''}). 자동 발행하려면 일괄발급 화면에서 그 기록을 먼저 해제해 주세요.`,
-        code: 'BILLING_MANUAL_COMPLETED',
-      });
-    }
 
     // ★ 2026-07-26 원장 재검증 — 지문 대조(잠금 대신).
     const fingerprintNow = await readBillingLedgerFingerprint(company_id, client);
@@ -837,26 +867,11 @@ export async function issueMinimumChargeBilling(input: {
     // 발행·반영·취소와 같은 회사 잠금 — 한 회사·한 기간 = 발행 1건 불변식을 같은 축에서 지킨다.
     await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext('billing'))`, [String(company_id)]);
 
-    const dup = await client.query(
-      `SELECT id, billing_start, billing_end FROM billings
-        WHERE company_id = $1 AND billing_start <= $3::date AND billing_end >= $2::date`,
-      [company_id, billing_start, billing_end],
+    // ★ 2026-08-04 일반 발행과 **같은 판정 문**(readBillingPeriodConflicts) — 정액 경로만 문구·필드가
+    //   달라 운영자가 같은 사유를 다른 말로 받던 것을 함께 통일했다.
+    assertNoBillingPeriodConflict(
+      await readBillingPeriodConflicts(company_id, billing_start, billing_end, client),
     );
-    if (dup.rows.length > 0) {
-      const ex = dup.rows[0];
-      throw new BillingIssueError(409, {
-        error: `해당 기간과 겹치는 정산이 이미 존재합니다 (${String(ex.billing_start).slice(0, 10)} ~ ${String(ex.billing_end).slice(0, 10)})`,
-        code: 'BILLING_PERIOD_OVERLAP', existing_id: ex.id,
-      });
-    }
-    const manual = await client.query(
-      `SELECT 1 FROM billing_manual_completions
-        WHERE company_id = $1 AND period_start <= $3::date AND period_end >= $2::date LIMIT 1`,
-      [company_id, billing_start, billing_end],
-    );
-    if (manual.rows.length > 0) {
-      throw new BillingIssueError(409, { error: '해당 기간이 수동 정산완료로 처리돼 있습니다. 기록 해제 후 발행해주세요.', code: 'BILLING_MANUAL_COMPLETED' });
-    }
     // 안전핀 3 — 그 기간에 걸리는 미소비 추가 항목(080·부가서비스)이 있으면 정액과 섞지 않는다.
     //   ★ 2026-08-04 판정을 **발행과 같은 파생 함수**로 바꿨다(Codex 적대검증 medium 수용).
     //   그전에는 행이 있기만 하면 거부했는데, 전액 무료 080 번호는 파생 금액이 0줄이라 청구할 것이 없다.

@@ -42,6 +42,16 @@ export interface BrandSendModalProps {
   sending?: boolean;
 }
 
+/**
+ * ★ 2026-08-04 Harold 지정 — 화면에 펼치는 수신자 상한.
+ *
+ * AI 타겟추출은 조건에 맞는 대상을 **전량** 담는다(발송이 번호 배열을 그대로 받는 구조).
+ * 그런데 그 전량을 textarea에 부으면 타이핑 한 번마다 목록 전체를 다시 파싱해 수만 명에서 멈춘다.
+ * 데이터(phones)는 그대로 두고 **렌더만** 바꾼다 — 상한을 넘으면 편집 대신 확인용 목록을 보여준다.
+ * 화면과 실제 발송 대상이 갈리지 않도록, 담긴 총 인원과 추출 조건을 함께 적는다.
+ */
+const RECIPIENT_EDIT_LIMIT = 1000;
+
 const normalizePhones = (raw: string): string[] =>
   raw
     .split(/[\s,;\n\r\t]+/)
@@ -198,12 +208,43 @@ export default function BrandSendModal({
 
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">
         {mode === 'manual' && (
-          <>
-            <p className="text-[11px] text-slate-400">번호를 줄바꿈·쉼표로 구분해 붙여넣으세요.</p>
-            <textarea value={manualText} onChange={(e) => applyManual(e.target.value)} rows={14}
-              placeholder={'01012345678\n01087654321'}
-              className={`${FIELD_CLASS} resize-none leading-relaxed`} />
-          </>
+          phones.length > RECIPIENT_EDIT_LIMIT ? (
+            /* 상한 초과 — 편집을 열면 타이핑마다 전량 재파싱이라 화면이 멈춘다. 확인용 목록으로 바꾼다. */
+            <div className="space-y-2">
+              <div className="rounded-xl bg-violet-50 ring-1 ring-violet-100 px-3 py-2.5">
+                <p className="text-[12px] font-semibold text-violet-700">
+                  수신자 {phones.length.toLocaleString()}명이 담겼습니다
+                </p>
+                {aiResult?.explanation && (
+                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">{aiResult.explanation}</p>
+                )}
+                <p className="text-[11px] text-slate-400 mt-1">
+                  목록이 커서 직접 편집은 잠겼습니다. 아래는 앞 {RECIPIENT_EDIT_LIMIT.toLocaleString()}건입니다 — 발송은 담긴 {phones.length.toLocaleString()}명 전원에게 나갑니다.
+                </p>
+              </div>
+              <div className="max-h-[260px] overflow-y-auto rounded-xl bg-white ring-1 ring-slate-200 px-3 py-2 font-mono text-[11px] text-slate-500 leading-relaxed">
+                {phones.slice(0, RECIPIENT_EDIT_LIMIT).map((p, i) => (
+                  <div key={`${p}-${i}`}>{p}</div>
+                ))}
+              </div>
+              <button type="button" onClick={() => setRecipients([])}
+                className="w-full px-3 py-2 rounded-xl text-[12px] font-medium text-slate-600 bg-white ring-1 ring-slate-200 hover:bg-slate-50 transition">
+                비우고 다시 담기
+              </button>
+            </div>
+          ) : (
+            <>
+              <p className="text-[11px] text-slate-400">번호를 줄바꿈·쉼표로 구분해 붙여넣으세요.</p>
+              {aiResult?.explanation && phones.length > 0 && (
+                <p className="text-[11px] text-violet-600 bg-violet-50 ring-1 ring-violet-100 rounded-lg px-2.5 py-1.5 leading-relaxed">
+                  {aiResult.explanation}
+                </p>
+              )}
+              <textarea value={manualText} onChange={(e) => applyManual(e.target.value)} rows={14}
+                placeholder={'01012345678\n01087654321'}
+                className={`${FIELD_CLASS} resize-none leading-relaxed`} />
+            </>
+          )
         )}
 
         {mode === 'file' && (

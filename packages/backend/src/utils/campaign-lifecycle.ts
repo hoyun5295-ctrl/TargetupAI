@@ -15,6 +15,8 @@ import { resolveRefundAxes } from './billing-types';
 import { prepaidRefund, REFUND_KEYS } from './prepaid';
 import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
 import { getSourceRef, updateTrainingMetrics } from './training-logger';
+// ★ 2026-08-04: sweep 대상 캠페인 상태 CT — mysql-refund-sweeper와 같은 집합을 본다
+import { SWEEPABLE_CAMPAIGN_STATUS_SQL } from './campaign-sweep-scope';
 
 // ===== 예약 캠페인 자동 정리 (D145 P0) =====
 
@@ -499,7 +501,9 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
   const directCampaigns = await query(
     `SELECT id, company_id, scheduled_at, created_at, sent_at, created_by, send_channel, message_type FROM campaigns
      WHERE company_id = $1 AND send_type = 'direct'
-       AND (status IN ('sending', 'completed') OR (status = 'scheduled' AND scheduled_at <= NOW()))
+       -- ★ 2026-08-04 대상 상태는 CT(campaign-sweep-scope)가 소유 — 환불 sweeper와 같은 집합.
+       --   'failed' 합류로 예외 종결 캠페인의 결과 카운트·환불도 여기서 수렴한다.
+       AND (status IN (${SWEEPABLE_CAMPAIGN_STATUS_SQL}) OR (status = 'scheduled' AND scheduled_at <= NOW()))
        AND (target_count IS NULL
             OR success_count IS NULL
             OR target_count > COALESCE(success_count, 0) + COALESCE(fail_count, 0))

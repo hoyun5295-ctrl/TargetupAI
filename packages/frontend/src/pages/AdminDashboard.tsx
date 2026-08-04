@@ -376,6 +376,10 @@ const [billingScope, setBillingScope] = useState<'company' | 'user'>('company');
 // ※ 옛 billingUserId·billingUsers 상태는 폐기(2026-07-26) — 단일 계정 발행이 서버에서 차단됐다.
 const [generating, setGenerating] = useState(false);
 const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
+// ★ 2026-08-04 발행 전 점검 — `/preview`(발행과 같은 집계 함수)를 확인 모달에서 먼저 보여준다.
+//   이 엔드포인트는 만들어진 뒤 화면에 붙은 적이 없어(호출부 0건), 막힐 이유를 발행을 눌러야 알았다.
+const [billingPreviewLoading, setBillingPreviewLoading] = useState(false);
+const [billingPreview, setBillingPreview] = useState<any>(null);
 const [billings, setBillings] = useState<any[]>([]);
 const [billingsLoading, setBillingsLoading] = useState(false);
 const [filterYear, setFilterYear] = useState(new Date().getFullYear());
@@ -1739,6 +1743,27 @@ const handleTaxbillRetry = async (issueId: string) => {
   } catch (e: any) {
     setBillingToast({ msg: e?.message || '재시도 요청 실패', type: 'error' });
   }
+};
+
+// ★ 2026-08-04 발행 확인 모달을 열면서 미리보기를 함께 부른다.
+//   금액과 "발행이 막힐 이유"(billing_guard)를 발행 **전에** 같은 화면에서 본다 —
+//   서버는 미리보기와 발행을 같은 함수로 판정하므로 여기 통과하면 발행도 통과한다.
+const openBillingGenerateConfirm = async () => {
+  if (!billingCompanyId) { setBillingToast({ msg: '고객사를 선택해주세요', type: 'error' }); return; }
+  setBillingPreview(null);
+  setShowGenerateConfirm(true);
+  setBillingPreviewLoading(true);
+  try {
+    const res = await billingApi.preview({
+      company_id: billingCompanyId,
+      start: billingStart,
+      end: billingEnd,
+    });
+    setBillingPreview(res.data);
+  } catch (e: any) {
+    // 미리보기 실패가 발행을 막지는 않는다 — 사유만 알리고 모달은 열어 둔다(서버가 최종 판정).
+    setBillingToast({ msg: e.response?.data?.error || '미리보기 집계 실패 — 발행 시 서버가 다시 판정합니다', type: 'error' });
+  } finally { setBillingPreviewLoading(false); }
 };
 
 const handleBillingGenerate = async () => {
@@ -9535,10 +9560,7 @@ const handleApproveRequest = async (id: string) => {
               )}
               {/* 생성 버튼 */}
               <button
-                onClick={() => {
-                  if (!billingCompanyId) return setBillingToast({ msg: '고객사를 선택해주세요', type: 'error' });
-                  setShowGenerateConfirm(true);
-                }}
+                onClick={openBillingGenerateConfirm}
                 disabled={generating}
                 className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
               >
@@ -10095,8 +10117,10 @@ const handleApproveRequest = async (id: string) => {
                       <th className="px-4 py-2.5 text-left text-gray-600 font-medium">고객사</th>
                       <th className="px-4 py-2.5 text-center text-gray-600 font-medium">구분</th>
                       <th className="px-4 py-2.5 text-center text-gray-600 font-medium">정산월</th>
-                      <th className="px-4 py-2.5 text-right text-gray-600 font-medium">SMS</th>
-                      <th className="px-4 py-2.5 text-right text-gray-600 font-medium">LMS</th>
+                      {/* ★ 2026-08-04 SMS·LMS 두 컬럼을 '유형별'로 교체. 청구 축은 최대 14종(웹 4 + 에이전트 4 +
+                          테스트 2 + 스팸 2 + 요금제 + AI 크레딧)이라 두 컬럼으로는 담기지 않는다 —
+                          SMS/LMS뿐인 회사에선 맞아 보이고 `both` 회사에선 틀려 보였다. */}
+                      <th className="px-4 py-2.5 text-center text-gray-600 font-medium">유형별</th>
                       <th className="px-4 py-2.5 text-right text-gray-600 font-medium">합계</th>
                       <th className="px-4 py-2.5 text-center text-gray-600 font-medium">상태</th>
                       <th className="px-4 py-2.5 text-center text-gray-600 font-medium">발송일</th>
@@ -10117,8 +10141,14 @@ const handleApproveRequest = async (id: string) => {
                               : '전체'}
                         </td>
                         <td className="px-4 py-2.5 text-center text-gray-500">{b.billing_year}년 {b.billing_month}월</td>
-                        <td className="px-4 py-2.5 text-right tabular-nums">{billingFmt(Number(b.sms_success))}</td>
-                        <td className="px-4 py-2.5 text-right tabular-nums">{billingFmt(Number(b.lms_success))}</td>
+                        {/* 상세 모달이 서버 `lines`(PDF·이메일과 같은 함수)로 채널별 전체 유형을 보여준다 — 새 집계 없음 */}
+                        <td className="px-4 py-2.5 text-center">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openBillingDetail(b.id); }}
+                            className="px-2.5 py-1 text-xs font-medium text-indigo-600 border border-indigo-200 rounded-md hover:bg-indigo-50 transition-colors">
+                            유형별
+                          </button>
+                        </td>
                         <td className="px-4 py-2.5 text-right font-bold text-indigo-700 tabular-nums">{billingFmtWon(Number(b.total_amount))}</td>
                         <td className="px-4 py-2.5 text-center">{billingStatusBadge(b.status)}</td>
                         <td className="px-4 py-2.5 text-center text-xs text-gray-500">
@@ -10237,11 +10267,11 @@ const handleApproveRequest = async (id: string) => {
             )}
           </div>
 
-          {/* ===== 정산 생성 확인 모달 ===== */}
+          {/* ===== 정산 생성 확인 모달 (★2026-08-04 발행 전 점검 — 미리보기 금액·차단 사유 동반) ===== */}
           {showGenerateConfirm && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
-                <div className="p-6">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+                <div className="p-6 max-h-[75vh] overflow-y-auto">
                   <div className="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center mx-auto mb-4">
                     <svg className="w-6 h-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
@@ -10257,16 +10287,56 @@ const handleApproveRequest = async (id: string) => {
                   <p className="text-xs text-center text-gray-400 mb-4">
                     {billingScope === 'company' ? '고객사 전체 (1장)' : '계정별 — 계정 장 + 공통 장 묶음'}
                   </p>
-                  <p className="text-xs text-center text-gray-500">
-                    MySQL 발송 데이터를 집계하여 정산을 생성합니다.
-                  </p>
+                  {/* ★ 2026-08-04 발행 전 점검 — 발행과 같은 집계 함수(`/preview`)의 금액과 차단 사유.
+                      여기서 막히는 것은 발행에서도 막힌다(서버가 같은 문으로 판정한다). */}
+                  {billingPreviewLoading ? (
+                    <p className="text-xs text-center text-gray-500 py-4">발송 데이터를 집계하는 중입니다...</p>
+                  ) : billingPreview ? (
+                    <>
+                      <div className="rounded-xl border bg-gray-50 px-4 py-3 text-left">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-500">공급가액</span>
+                          <span className="tabular-nums font-medium text-gray-800">{billingFmtWon(Number(billingPreview.amounts?.subtotal || 0))}</span>
+                        </div>
+                        <div className="flex justify-between text-sm mt-1">
+                          <span className="text-gray-500">부가세</span>
+                          <span className="tabular-nums font-medium text-gray-800">{billingFmtWon(Number(billingPreview.amounts?.vat || 0))}</span>
+                        </div>
+                        <div className="flex justify-between text-base mt-2 pt-2 border-t">
+                          <span className="font-semibold text-gray-700">합계</span>
+                          <span className="tabular-nums font-bold text-indigo-700">{billingFmtWon(Number(billingPreview.amounts?.total_amount || 0))}</span>
+                        </div>
+                      </div>
+                      {billingPreview.billing_guard && billingPreview.billing_guard.billable === false && (
+                        <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-left">
+                          <p className="text-sm font-semibold text-red-700 mb-1.5">이 상태로는 발행이 막힙니다</p>
+                          <ul className="space-y-1">
+                            {String(billingPreview.billing_guard.reason || '').split(' / ').filter(Boolean).map((r: string, i: number) => (
+                              <li key={i} className="text-xs text-red-700 leading-relaxed">· {r}</li>
+                            ))}
+                          </ul>
+                          {(billingPreview.billing_guard.blocker_codes || []).some((c: string) => c === 'WEB_UNIT_PRICE_UNSET' || c === 'AGENT_UNIT_PRICE_MISSING') && (
+                            <p className="text-xs text-red-600 mt-2 pt-2 border-t border-red-200">
+                              고객사 관리 → 해당 고객사 수정 → 단가설정에서 빈 단가를 채운 뒤 다시 시도해 주세요.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-center text-gray-500">
+                      MySQL 발송 데이터를 집계하여 정산을 생성합니다.
+                    </p>
+                  )}
                 </div>
                 <div className="flex border-t">
                   <button onClick={() => setShowGenerateConfirm(false)}
                     className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
-                  <button onClick={handleBillingGenerate} disabled={generating}
-                    className="flex-1 px-4 py-3 text-indigo-600 font-medium hover:bg-indigo-50 transition-colors">
-                    {generating ? '생성 중...' : '확인'}
+                  <button
+                    onClick={handleBillingGenerate}
+                    disabled={generating || billingPreviewLoading || billingPreview?.billing_guard?.billable === false}
+                    className="flex-1 px-4 py-3 text-indigo-600 font-medium hover:bg-indigo-50 transition-colors disabled:opacity-40 disabled:hover:bg-transparent">
+                    {generating ? '생성 중...' : billingPreviewLoading ? '집계 중...' : '발행'}
                   </button>
                 </div>
               </div>

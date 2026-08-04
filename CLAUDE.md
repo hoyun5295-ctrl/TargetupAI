@@ -139,11 +139,22 @@
       [절대 금지] 미검증 상태로 SQL을 쓰고 "tsc 통과했으니 OK" 보고.
     </RULE>
 
+    <RULE id="scope_discipline_one_ticket_axis" priority="HIGHEST">
+      **접수 전수를 먼저 대조해 축을 확정한 뒤에 코드를 쓴다.**
+      (경위 = 2026-08-04 정산 6시간 — 접수 4개 중 2개만 보고 설계를 시작해 축을 세 번 뒤집었고 DDL을 세 번 다시 실행했다)
+      1. [축 대조표] 설계 착수 전 접수 항목을 **전부** 나열하고, 항목마다 "이 축이 없으면 이 접수가 닫히는가"를 적는다. 빠진 축이 0이 되기 전에는 코드를 시작하지 않는다.
+      2. [한 세션 = 접수 축 하나] 작업 중 새 접수가 오면 **읽고 분석만** 한다. 그 세션에서 착수하지 않고 다음으로 넘긴다.
+      3. [공용 컴포넌트 금지] 접수 하나 때문에 공용 컴포넌트·CT를 고치지 않는다. **호출부에서 막는다.** 공용 수정은 별도 과제로 분리한다.
+      4. [범위 확대 금지] 접수에 없는 기능을 같은 세션에 붙이지 않는다. 발견하면 "추가 과제"로 기록만.
+    </RULE>
+
     <RULE id="codex_review_after_code_change" priority="HIGHEST">
       작업 종결 직전 Codex 이중 검증 의무.
       `/codex:review` = 코드 신설·정정 후(5분+ 작업) / `/codex:adversarial-review` = DB 마이그레이션·돈·환불·balance·큰 영구 룰 / `/codex:rescue` = 디버깅 막힘·3회+ fix 실패·사이트 다운.
-      [흐름] 작성 → tsc 0 + 자가 grep → Codex → 정정(최대 5라운드) → 표준 종료 멘트.
-      [면제] typo·주석·메모리·SCHEMA.md·STATUS.md·Harold 명시 면제. [라운드 운영] `status/COLLAB.md` §3
+      [흐름] 작성 → tsc 0 + 자가 grep → **내 적대 검토** → Codex → 정정 → 표준 종료 멘트.
+      [범위 — 0804 확정] **돈·국세청 문서·DB 마이그레이션 경로에만.** UI·React 상호작용은 **대상 제외**(0804: 31건 중 18건이 거기서 나왔고 전부 체크리스트로 대체된다).
+      [종료 조건] `critical`·`high`가 0이면 종료. `medium` 이하는 SoT 문서에 등재만 하고 넘어간다. **라운드 최대 2회** — 넘기면 멈추고 Harold님께 남은 지적과 판단을 보고한다.
+      [면제] typo·주석·메모리·SCHEMA.md·STATUS.md·Harold 명시 면제. [실행 절차] `status/CODEX-RUNBOOK.md`
     </RULE>
 
     <RULE id="codex_review_scope_incremental" priority="HIGHEST">

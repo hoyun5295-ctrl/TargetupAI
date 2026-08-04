@@ -63,8 +63,8 @@
 > ⛔ **발송 불가 = Agent 버전 미달**(SoT §9-1) / 지원 유형 = TEXT·IMAGE·WIDE만, 늘릴 땐 `utils/billing-types.ts` 표에만(SoT §5-3) / 축 복원 금지 — 채널=`resolveRefundAxes`, `send_phase='preparing'` 게이트
 > 잔여 = 재측정 · 단가 입력·발행 실측 · AI 타겟추출 페이징(별건) · 학습 채널 키 이관(`mysql-refund-sweeper.ts:601` — 저장 키라 이관 판단 필요)
 
-### 0728 정산 파이프라인 — 팝빌 배포완료 + **0804 컨펌 창구·이의 통지·수량 수정 발행**(코드 완료·DDL 실행완료·빌드 대기)
-> SoT [일괄발급·컨펌·세금계산서](docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md) **§4-2(0804 3종)** → §7(연동 구현)·§9 남은 것 · 컬럼 = [SCHEMA `billing_qty_adjustments`·`invoice_confirmations` 절](SCHEMA.md) · 기억 [[project_2026_0728_bulk_invoice_confirm_taxbill]] · 다음 = 빌드·배포 → ENV 2개 등록 → 실측
+### 0728 정산 파이프라인 — 팝빌 + **0804 컨펌 창구·이의 통지·수량 수정 발행 전량 배포완료**(DDL 6·ENV 2 반영)
+> SoT [일괄발급·컨펌·세금계산서](docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md) **§4-2(0804 3종·재검증 결정 7)** → §7·§9 · 컬럼 = [SCHEMA `billing_qty_adjustments`·`invoice_confirmations` 절](SCHEMA.md) · 기억 [[project_2026_0804_billing_tickets]] · 다음 = 실측 5건 → 삭제·재발행 원자화(미착수)
 > ⛔ 0804분 5종(컨펌 토큰 없이 발송 금지 · 이의 통지는 트랜잭션 밖 워커 · 조정 축 · 음수 거부 · `superseded_at` 미사용) = SoT §4-2 / **실청구 컨펌 메일 전에 테스트 완료·운영 전환** / 실행자 컬럼 users FK 금지 / **통지 추적행은 메일보다 먼저**(§4-1)
 > 잔여 = 빌드·배포 + ENV 2개(`BILLING_OBJECTION_ALERT_TO`·`_BCC`) · 화면 실측 8건(정산 탭 저장 / 일괄발급 / 공개 컨펌=CSP / 현황판 / 사업자등록증 / 회사 계산서 사업자 / 메일 재시도 / 미발송 필터) · 메일 첨부 실물 · 접수·여정 실측 4건([[project_2026_0728_tickets_journey_triggers]])
 
@@ -73,8 +73,8 @@
 > ⛔ 수신자 원장은 `billing_recipients` 하나 / 발송 모달 수신자 칸은 **비워야** 참조가 함께 간다 / **세금계산서 발행은 대표 1명(invoiceeEmail1) 불변 — 참조는 issued 트랜잭션의 pending 기록+락 밖 재전송 패스**(인라인 재전송·웹훅 확정자 복원 금지: 웹훅 304=관측·ready 재큐잉만, markFailed는 CAS) / 채널이 늘면 `USER_SHEET_CHANNELS`
 > 잔여 = 참조 실측 · 실측 1건 · 080 귀속 실측
 
-### 0730 정산 특례 — 축 A 배포완료 + **0804 원장 파생 재설계**(서수란 0803 접수 2건, 코드 완료·빌드 대기)
-> SoT [정산 특례·발행 그룹](docs/2026-07-30-billing-extras-and-groups-design.md) **§2-4(원장 파생 — 0804 재설계) → §9(남은 것) → §7(확인 5건)** · 기억 [[project_2026_0730_billing_080_extras]] · 다음 = 빌드·배포 → 시세이도·금강제화 7월 [KT 반영 취소]→[재반영] 1회 → 발행
+### 0730 정산 특례 — 축 A + **0804 원장 파생 재설계 전량 배포완료**(서수란 0803 접수 4건)
+> SoT [정산 특례·발행 그룹](docs/2026-07-30-billing-extras-and-groups-design.md) **§2-4(원장 파생 — 0804) → §9(남은 것) → §7(확인 5건)** · 기억 [[project_2026_0730_billing_080_extras]] · 다음 = 시세이도·금강제화 7월 [KT 반영 취소]→[재반영] 1회 → 발행 금액 확인
 > ⛔ **원장 상태가 곧 청구 상태**(활성=파생 / 비활성=0줄 / 매핑없음=발행차단) · 계약값·귀속 복사 금지 · 회사·번호 변경은 반영분 동반 이관 — 전부 SoT §2-4 / 금액은 **공급가 저장** / 반영·취소·발행은 **같은 회사 잠금** / 판독은 서명·재검산 통과분만
 > 잔여 = 빌드·배포 · 실측 3종(080 매핑 18번호→PDF→반영→발행 / 최소과금 4사 정액 / 부가서비스 1건) · 에이스하드웨어 5만 정액(SoT §5 — 시세이도분은 매핑으로 해결됨) · **발행 그룹**(SoT §6, 공사 큼) · 서 팀장 확인 5건(SoT §7)
 
