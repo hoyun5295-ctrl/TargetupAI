@@ -9,19 +9,46 @@ import {
 
 const FULL: CompanySegmentFacts = {
   hasRecentPurchaseDate: true, hasBirthday: true, hasGradeValues: true, hasGradeOrder: true,
+  hasPurchaseCount: true, hasPurchaseAmount: true,
 };
 const NONE: CompanySegmentFacts = {
   hasRecentPurchaseDate: false, hasBirthday: false, hasGradeValues: false, hasGradeOrder: false,
+  hasPurchaseCount: false, hasPurchaseAmount: false,
 };
+/** 변화 축은 비교할 지난 회차가 있어야 컴파일된다 — 순수 테스트에서는 이 id 하나로 표현한다. */
+const OPERATOR = '44444444-4444-4444-4444-444444444444';
 const at = (iso: string) => new Date(iso);
 const availabilityOf = (facts: CompanySegmentFacts, key: string) =>
   resolveSegmentAvailability(facts).find((a) => a.key === key)!;
 
 describe('resolveSegmentAvailability — 근거가 있는 축만 열린다', () => {
-  it('근거가 다 있으면 6종 전부 열린다', () => {
+  it('근거가 다 있으면 전 축이 열린다', () => {
     const all = resolveSegmentAvailability(FULL);
     expect(all.map((a) => a.key)).toEqual(SEGMENT_KEYS);
     expect(all.every((a) => a.available)).toBe(true);
+  });
+
+  it('변화 축만 지난 회차 비교를 요구한다 — 상태 축은 요구하지 않는다', () => {
+    const byKey = Object.fromEntries(resolveSegmentAvailability(FULL).map((a) => [a.key, a.needsCycleBaseline]));
+    // 자동마케팅 고유 어휘 = 회차와 회차 사이의 변화. 여정은 사람마다 시계가 따로 돌아 구간을 못 자른다.
+    expect(byKey.grade_up).toBe(true);
+    expect(byKey.first_purchase).toBe(true);
+    expect(byKey.returned).toBe(true);
+    expect(byKey.went_quiet).toBe(true);
+    expect(byKey.spent_more).toBe(true);
+    for (const k of ['all', 'dormant', 'recent_buyers', 'vip', 'birthday', 'new_customers']) {
+      expect(byKey[k]).toBe(false);
+    }
+  });
+
+  it('구매 횟수·금액 근거가 각각 자기 축만 잠근다', () => {
+    const noCount = resolveSegmentAvailability({ ...FULL, hasPurchaseCount: false });
+    expect(noCount.find((a) => a.key === 'first_purchase')!.available).toBe(false);
+    expect(noCount.find((a) => a.key === 'spent_more')!.available).toBe(true);
+
+    const noAmount = resolveSegmentAvailability({ ...FULL, hasPurchaseAmount: false });
+    expect(noAmount.find((a) => a.key === 'spent_more')!.available).toBe(false);
+    expect(noAmount.find((a) => a.key === 'first_purchase')!.available).toBe(true);
   });
 
   it('근거가 하나도 없으면 전체·신규만 열린다 (나머지는 잠긴다)', () => {
@@ -158,10 +185,74 @@ describe('KST 경계 — 우리 프로세스 시계가 아니라 KST 날짜로 �
 });
 
 describe('normalizeSegmentKey — 화이트리스트 밖은 계약이 아니다', () => {
-  it('6종만 통과', () => {
+  it('등록된 축만 통과', () => {
     for (const k of SEGMENT_KEYS) expect(normalizeSegmentKey(k)).toBe(k);
-    for (const bad of ['', null, undefined, 'VIP', 'ltv_top', 1, {}]) {
+    // ⛔ 사건 반응(장바구니·상품 조회)은 여정이 소유한다 — 여기 들어오면 안 된다.
+    for (const bad of ['', null, undefined, 'VIP', 'ltv_top', 1, {}, 'cart_abandoned', 'browsed_no_purchase']) {
       expect(normalizeSegmentKey(bad)).toBeNull();
     }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// 변화 축 — 지난 회차와 지금을 비교한다 (2026-08-04)
+// ════════════════════════════════════════════════════════════════════
+describe('변화 축 — 비교 대상이 없으면 조건을 만들지 않는다', () => {
+  const now = at('2026-08-03T05:00:00Z');
+
+  it('지난 회차의 주인이 없으면 사유와 함께 멈춘다 (조용한 0건 금지)', () => {
+    for (const key of ['grade_up', 'first_purchase', 'returned', 'went_quiet', 'spent_more']) {
+      expect(() => buildSegmentPredicate(key as any, null, ['CID'], { now }))
+        .toThrow(/첫 회차에 기준을 잡고/);
+    }
+  });
+
+  it('짝은 고객 행 id로 맞춘다 — 전화번호로 이으면 남의 과거와 비교된다', () => {
+    const params: any[] = ['CID'];
+    const sql = buildSegmentPredicate('grade_up', null, params, { now, operatorId: OPERATOR });
+    expect(sql).toContain('s.customer_id = c.id');
+    expect(sql).not.toContain('s.phone = c.phone');
+    expect(params).toEqual(['CID', OPERATOR]);
+  });
+
+  it('등급 상승은 양쪽 순위가 모두 있고 실제로 올라간 경우만 — 같은 급은 상승이 아니다', () => {
+    const sql = buildSegmentPredicate('grade_up', null, ['CID'], { now, operatorId: OPERATOR });
+    expect(sql).toContain('ro.rank_order IS NOT NULL');
+    expect(sql).toContain('rn.rank_order IS NOT NULL');
+    expect(sql).toContain('rn.rank_order > ro.rank_order');
+  });
+
+  it('발길 끊김은 "그 사이 구매 없음"을 함께 건다 — 휴면과 다른 축이다', () => {
+    const params: any[] = ['CID'];
+    const sql = buildSegmentPredicate('went_quiet', { days: 45 }, params, { now, operatorId: OPERATOR });
+    expect(sql).toContain('IS NOT DISTINCT FROM s.recent_purchase_date');
+    expect(sql).toContain('COALESCE(c.purchase_count, 0) = COALESCE(s.purchase_count, 0)');
+    // 기준선은 스냅샷을 찍은 날에서 뺀다(오늘에서 빼면 회차 간격만큼 창이 밀린다) + 오늘 기준 경과일.
+    expect(params).toEqual(['CID', OPERATOR, 45, '2026-06-19']);
+  });
+
+  it('구매 증가는 증가분으로 본다 — 누적 총액 비교가 아니다', () => {
+    const params: any[] = ['CID'];
+    const sql = buildSegmentPredicate('spent_more', { amount: 300000 }, params, { now, operatorId: OPERATOR });
+    expect(sql).toContain('COALESCE(c.total_purchase_amount, 0) - COALESCE(s.total_purchase_amount, 0)');
+    expect(params[2]).toBe(300000);
+  });
+
+  it('파라미터는 계약 범위로 잘려 바인드로 나간다', () => {
+    const params: any[] = ['CID'];
+    buildSegmentPredicate('spent_more', { amount: 999999999999 }, params, { now, operatorId: OPERATOR });
+    expect(params[2]).toBe(100000000);
+    const p2: any[] = ['CID'];
+    const sql = buildSegmentPredicate('returned', { days: "1; DROP TABLE customers" }, p2, { now, operatorId: OPERATOR });
+    expect(sql).not.toContain('DROP');
+    expect(p2[2]).toBe(90);   // 숫자가 아니면 기본값
+  });
+
+  it('같은 축·같은 파라미터·같은 회차면 언제 만들어도 같은 SQL·같은 값', () => {
+    const a: any[] = ['CID']; const b: any[] = ['CID'];
+    const s1 = buildSegmentPredicate('went_quiet', { days: 60 }, a, { now, operatorId: OPERATOR });
+    const s2 = buildSegmentPredicate('went_quiet', { days: 60 }, b, { now, operatorId: OPERATOR });
+    expect(s1).toBe(s2);
+    expect(a).toEqual(b);
   });
 });

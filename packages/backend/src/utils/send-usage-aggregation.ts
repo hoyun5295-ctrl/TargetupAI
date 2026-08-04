@@ -1114,43 +1114,173 @@ export function buildPlanBillingItems(segments: PlanSegment[]): PricedBillingIte
 }
 
 /**
- * (순수) 월별 추가 항목(billing_extra_items — 080 이용료·부가서비스·통화료) → 청구 상세 행. (★ 2026-07-30 신설)
+ * 월별 추가 항목의 원천 행 — `billing_extra_items` 스냅샷 + `billing_080_numbers` 매핑 원장 조인.
+ *
+ * ★ 2026-08-04 조인이 생긴 이유(서수란 접수 2건) — 그전에는 [반영]이 매핑 원장의 값(이용료·KT
+ *   부가서비스·통화료 청구 여부·귀속 계정)을 `billing_extra_items`로 **복사해 굳혔다.** 원장을 고쳐도
+ *   복사본은 안 바뀌고 재반영은 UNIQUE 충돌로 막혀서, 화면에서 이용료를 10만원으로 고쳐도 청구서에는
+ *   기본값 9,000원이 나갔고(시세이도) 귀속을 계정으로 지정해도 공통 장으로 갔다(금강제화).
+ *   실측 = 항목 생성 05:38 / 원장 수정 05:40~06:20. **진실을 복사하면 원장이 죽은 값이 된다.**
+ *   그래서 스냅샷은 **명세서에서만 나오는 값 하나**(그 달 그 번호의 통화료)만 들고,
+ *   나머지는 발행 시점에 원장에서 읽는다.
+ */
+export interface ExtraItemSourceRow {
+  kind: string;
+  /** 스냅샷 금액 — `080_call`은 명세서 통화료 공급가, `manual`은 수기 건당 공급가 */
+  supply_amount: any;
+  period_month: any;
+  source_ref?: string | null;
+  /** 수기 항목의 귀속 계정. 호출측 SQL이 **그 회사 실재 계정일 때만** 값을 살려서 넘긴다 */
+  user_id?: string | null;
+  /** 매핑 원장이 그 회사에 실재하는가 — false면 계약값(이용료·부가서비스)의 근거가 없다 */
+  map_found?: boolean | null;
+  /** 원장 활성 — false면 그 번호는 **청구하지 않는다**(신성통상 0803 접수: 무료 전환을 비활성으로 표현했다) */
+  map_is_active?: boolean | null;
+  map_monthly_fee_supply?: any;
+  map_kt_fee_supply?: any;
+  map_charge_call_fee?: boolean | null;
+  /** 매핑 원장의 귀속 계정. 호출측 SQL이 그 회사 실재 계정일 때만 살려서 넘긴다 */
+  map_user_id?: string | null;
+  /**
+   * 같은 (회사·달·번호)에 현행 `080_call` 스냅샷이 있는가.
+   * 있으면 옛 `080_fee`·`080_svc` 행은 파생분과 겹치므로 청구하지 않는다(이중 계상 차단).
+   */
+  has_call_snapshot?: boolean | null;
+}
+
+/** 옛 구조가 만든 고정료 행 — 현행 스냅샷이 없는 달에는 이 행이 그 달의 유일한 근거다. */
+const LEGACY_080_KIND_TO_TYPE: Record<string, string> = {
+  '080_fee': 'EXTRA_080_FEE',
+  '080_svc': 'EXTRA_080_SVC',
+};
+
+/**
+ * (순수) 발행을 막아야 하는 행 — **매핑이 사라진 `080_call` 스냅샷.**
+ *
+ * ★ 2026-08-04 Codex 적대검증 수용. 그전에는 매핑이 없으면 통화료만 청구하는 폴백을 뒀는데,
+ *   그것이 fail-open이었다 — `charge_call_fee=false`로 등록해 통화료를 안 받던 번호도 매핑을 지우거나
+ *   다른 회사로 옮기는 순간 **없던 통화료가 새로 청구된다.** 근거가 사라진 금액은 내보내지 않고 멈춘다.
+ *   (옛 `080_fee`·`080_svc` 행은 자기 금액이 그 달의 근거라 여기 해당하지 않는다.)
+ */
+export function extraRowsBlockingIssue(rows: ExtraItemSourceRow[]): Array<{ sourceRef: string; periodMonth: string }> {
+  return (rows || [])
+    .filter((r) => String(r?.kind || '') === '080_call' && !r?.map_found)
+    .map((r) => ({ sourceRef: String(r?.source_ref || ''), periodMonth: toDayKey(r?.period_month) }));
+}
+
+/**
+ * 원천 행의 SELECT 조각 / 조인 — **발행 코어와 반영 현황 화면이 같은 문을 쓴다.**
+ * 별칭 `e` = `billing_extra_items`를 전제로 한다.
+ *
+ * 조각으로 뺀 이유: 이 조인을 두 곳에 각각 적으면 한쪽만 고쳐졌을 때 화면 금액과 청구서 금액이
+ * 갈라진다. 정산에서 그 갈라짐은 곧 오청구다(`billing-invoice-lines.ts`가 생긴 것과 같은 이유).
+ *
+ * `LEFT JOIN users`로 **그 회사에 실재하는 계정일 때만** 귀속을 살린다. 계정이 지워졌는데 id만
+ * 남아 있으면 존재하지 않는 계정 장이 생겨 발행 전체가 FK로 터진다 — 그 경우 공통 장으로 내린다
+ * (회사가 갚아야 할 항목인 건 변하지 않는다. 항목을 빠뜨리는 쪽이 더 나쁘다).
+ *
+ * 매핑 조인 조건은 **회사 축까지**다(`number` + `company_id`). 번호를 다른 회사로 옮기면 옛 회사에서는
+ * 조인이 끊겨 `map_found=false`가 되고, 그 상태로는 발행이 막힌다(`extraRowsBlockingIssue`).
+ * 활성 여부는 조인이 아니라 값(`map_is_active`)으로 넘긴다 — "매핑 없음(근거 소멸 = 차단)"과
+ * "비활성(청구 중단 = 0줄)"은 다른 상태이고, 조인에 섞으면 둘을 구분할 수 없다.
+ */
+export const EXTRA_ITEM_SOURCE_SELECT = `
+              CASE WHEN eu.id IS NULL THEN NULL ELSE e.user_id END AS user_id,
+              (en.id IS NOT NULL) AS map_found,
+              en.is_active AS map_is_active,
+              en.monthly_fee_supply AS map_monthly_fee_supply,
+              en.kt_fee_supply AS map_kt_fee_supply,
+              en.charge_call_fee AS map_charge_call_fee,
+              en.label AS map_label,
+              CASE WHEN enu.id IS NULL THEN NULL ELSE en.user_id END AS map_user_id,
+              EXISTS (SELECT 1 FROM billing_extra_items c080
+                       WHERE c080.company_id = e.company_id
+                         AND c080.period_month = e.period_month
+                         AND c080.kind = '080_call'
+                         AND c080.source_ref = e.source_ref) AS has_call_snapshot`;
+
+export const EXTRA_ITEM_SOURCE_JOIN = `
+         LEFT JOIN users eu ON eu.id = e.user_id AND eu.company_id = e.company_id
+         LEFT JOIN billing_080_numbers en ON en.number = e.source_ref AND en.company_id = e.company_id
+         LEFT JOIN users enu ON enu.id = en.user_id AND enu.company_id = e.company_id`;
+
+/**
+ * (순수) 그 항목이 실릴 장의 계정 — 계정별 발행의 **분배와 소비 마킹이 같은 판정**을 쓰게 하는 단일 출처.
+ *
+ * 080은 매핑 원장이 귀속의 진실이고(`map_user_id`), 수기 항목은 원장이 없어 자기 `user_id`가 진실이다.
+ * 둘을 각자 계산하면 "항목은 계정 장에 실렸는데 마커는 공통 장에 걸리는" 어긋남이 생기고,
+ * 그러면 공통 장 하나를 지울 때 계정 장 항목까지 미청구로 풀려 다음 발행에서 이중청구가 된다.
+ */
+export function extraRowUserId(r: ExtraItemSourceRow): string | null {
+  const kind = String(r?.kind || '');
+  if (kind === 'manual') return r?.user_id ? String(r.user_id) : null;
+  if (r?.map_user_id) return String(r.map_user_id);
+  // 현행 스냅샷은 귀속을 저장하지 않는다 — 원장이 없으면 귀속도 없다(그 행은 발행이 막힌다).
+  // 옛 고정료 행만 자기 값으로 폴백한다. 그 행은 금액도 자기 값이 근거다.
+  if (kind === '080_call') return null;
+  return r?.user_id ? String(r.user_id) : null;
+}
+
+/**
+ * (순수) 월별 추가 항목 → 청구 상세 행. (★ 2026-07-30 신설 · 2026-08-04 원장 파생으로 재설계)
  *
  * 요금제(buildPlanBillingItems)와 같은 부류다 — 발송이 아니라서 수량 4칸은 전부 0으로 둔다
  * (수량 칸에 실으면 PDF 2페이지 전송·실패 열이 오염된다 — 2026-07-26 Codex 3차 HIGH와 같은 함정).
  * 항목줄 수량 표시는 buildInvoiceLines가 extra 채널 전용으로 합친 행 수를 세어 담당한다.
  * 금액은 공급가 정수라 amount === amountExact(절사 멱등).
+ *
+ * `080_call` 스냅샷 1행에서 **최대 3개**(이용료·KT 부가서비스·통화료)를 파생한다.
+ * 금액 0은 줄을 만들지 않는다 — 무료 회사(리스킨)는 그 항목이 아예 없는 것이 맞다.
+ *
+ * **원장 상태가 곧 청구 상태다**(0803 접수 4건이 이 한 문장으로 닫힌다):
+ *  - 활성 + 그 회사 → 원장값 파생
+ *  - **비활성 → 0줄**(신성통상 — 무료 전환을 비활성으로 표현했는데 이용료가 계속 청구됐다)
+ *  - **매핑 없음 → 0줄이면서 발행 차단**(`extraRowsBlockingIssue`). 근거가 사라진 금액은 안 내보낸다
+ *
+ * 옛 `080_fee`·`080_svc` 행은 자기 금액이 그 달의 근거라 그대로 싣는다. 단 같은 번호에 현행
+ * `080_call` 스냅샷이 있으면 파생분과 겹치므로 건너뛴다 — 그 겹침이 이중 계상이다.
  */
-/**
- * ★ 2026-07-31 `user_id`를 그대로 싣는다 — 계정별 발행에서 **분배가 저절로 맞는다.**
- *   값이 있으면 그 계정 장, NULL이면 공통 장(회사 전체 귀속의 제자리)이다.
- *   그전엔 `userId: null` 고정이라 계정 귀속 080·부가서비스를 표현할 방법이 없었다.
- */
-export function buildExtraBillingItems(
-  rows: Array<{ kind: string; supply_amount: any; period_month: any; user_id?: string | null }>,
-): PricedBillingItem[] {
-  const KIND_TO_TYPE: Record<string, string> = {
-    '080_fee': 'EXTRA_080_FEE',
-    '080_svc': 'EXTRA_080_SVC',
-    '080_call': 'EXTRA_080_CALL',
-  };
-  return (rows || []).map((r) => {
-    const amount = Math.round(Number(r.supply_amount) || 0);
-    return {
-      channel: 'extra' as const,
-      itemDate: toDayKey(r.period_month),
-      typeKey: KIND_TO_TYPE[String(r.kind)] || `EXTRA_${String(r.kind || '').toUpperCase().slice(0, 13)}`,
-      userId: r.user_id ? String(r.user_id) : null,
-      agentSendId: null,
-      agentId: null,
-      total: 0, success: 0, fail: 0, pending: 0,
-      planDays: null,
-      planMonthDays: null,
-      unitPrice: amount,
-      amount,
-      amountExact: amount,
+export function buildExtraBillingItems(rows: ExtraItemSourceRow[]): PricedBillingItem[] {
+  const won = (v: any) => Math.round(Number(v) || 0);
+  const out: PricedBillingItem[] = [];
+  for (const r of rows || []) {
+    const kind = String(r?.kind || '');
+    const itemDate = toDayKey(r?.period_month);
+    const userId = extraRowUserId(r);
+    const push = (typeKey: string, amount: number) => {
+      if (!(amount > 0)) return;
+      out.push({
+        channel: 'extra' as const,
+        itemDate,
+        typeKey,
+        userId,
+        agentSendId: null,
+        agentId: null,
+        total: 0, success: 0, fail: 0, pending: 0,
+        planDays: null,
+        planMonthDays: null,
+        unitPrice: amount,
+        amount,
+        amountExact: amount,
+      });
     };
-  });
+    if (kind === 'manual') {
+      push('EXTRA_MANUAL', won(r?.supply_amount));
+      continue;
+    }
+    // 비활성 = 그 번호의 청구 중단. 매핑 없음과 달리 사람이 명시한 상태라 차단이 아니라 0줄이다.
+    if (r?.map_found && r?.map_is_active === false) continue;
+    if (kind === '080_call') {
+      if (!r?.map_found) continue; // 근거 소멸 — 금액을 만들지 않는다(발행은 별도로 막힌다)
+      push('EXTRA_080_FEE', won(r.map_monthly_fee_supply));
+      push('EXTRA_080_SVC', won(r.map_kt_fee_supply));
+      if (r.map_charge_call_fee) push('EXTRA_080_CALL', won(r.supply_amount));
+      continue;
+    }
+    const legacyType = LEGACY_080_KIND_TO_TYPE[kind];
+    if (legacyType && !r?.has_call_snapshot) push(legacyType, won(r?.supply_amount));
+  }
+  return out;
 }
 
 export interface AgentPriceMiss { agentSendId: string; typeKey: string; success: number }

@@ -30,6 +30,8 @@ export interface Billing080Number {
   number: string;            // 숫자만 (0802841300)
   company_id: string;
   company_name?: string;
+  /** 청구 귀속 계정 — NULL이면 고객사 전체(공통 장). 발행이 이 값을 읽는다(복사하지 않는다) */
+  user_id: string | null;
   label: string | null;      // 부서/브랜드 (시세이도 Nars 등)
   monthly_fee_supply: number; // 080 이용료 공급가 (인비토 관리료 — VAT 포함 9,900)
   kt_fee_supply: number;      // KT 부가서비스 실비 공급가 (VAT 포함 4,400)
@@ -400,7 +402,9 @@ export async function deleteExtraItem(id: string): Promise<boolean> {
 }
 
 export interface KtApplyResult {
-  applied: Array<{ company_id: string; company_name: string; numbers: number; items: number; supply_total: number }>;
+  /** `call_supply` = 이번 반영으로 확정된 **통화료 합**. 이용료·부가서비스는 매핑 원장이 소유하므로
+   *  실제 청구액은 반영 현황 탭이 원장과 함께 계산해 보여준다(여기서 따로 더하면 두 계산이 갈라진다). */
+  applied: Array<{ company_id: string; company_name: string; numbers: number; call_supply: number }>;
   skipped: Array<{ company_id?: string; company_name?: string; number?: string; reason: string }>;
 }
 
@@ -414,9 +418,15 @@ export interface KtApplyResult {
  * 회사 단위로 독립 반영(일괄발급 부분 실패 허용과 같은 원칙):
  *  - **발행과 같은 회사 잠금**(pg_advisory_xact_lock(company, 'billing'))을 잡고 발행 존재를 재검사한다(Codex 1R 수용 —
  *    잠금 없이 조회만 하면 발행 트랜잭션과 엇갈려 "발행엔 안 실렸는데 반영은 커밋"되는 고아 항목이 생긴다)
- *  - 이미 반영된 항목(UNIQUE 충돌) = 건너뜀(같은 달 이중 반영 차단)
- *  - 항목: 080_fee(이용료 — 매핑값) · 080_svc(KT 부가서비스 — 매핑값) · 080_call(통화료 — 명세서값, charge_call_fee만)
- *    0원 항목은 만들지 않는다(리스킨 이용료 0 = 줄 자체가 없음).
+ *
+ * ★ 2026-08-04 저장하는 것은 **번호당 1행**(`kind='080_call'`, 그 달 그 번호의 통화료)뿐이다(서수란 0803 접수).
+ *   그전에는 이용료·KT 부가서비스·통화료 청구 여부·귀속 계정까지 매핑 원장에서 복사해 3행으로 굳혔고,
+ *   그래서 매핑을 고쳐도 청구서가 옛 값으로 나갔다. 계약값은 원장이 소유하고 발행이 그때 읽는다
+ *   (`buildExtraBillingItems` — 이용료·부가서비스·통화료를 파생). 통화료만 명세서에서 오는 사실이라 남긴다.
+ *   통화료 0원인 번호도 행을 만든다 — "그 달 그 번호가 반영됐다"가 발행이 그 번호를 싣는 근거다.
+ *
+ *   이미 반영된 번호는 `ON CONFLICT DO NOTHING`으로 **그 번호만** 건너뛴다. 그전에는 23505가
+ *   회사 트랜잭션 전체를 롤백해서, 번호가 1개에서 4개로 늘어난 회사는 새 번호 3개까지 함께 죽었다.
  */
 export async function applyKtStatement(params: {
   periodMonth: string;         // 'YYYY-MM-01'
@@ -490,36 +500,62 @@ export async function applyKtStatement(params: {
         continue;
       }
 
-      let items = 0;
-      let supplyTotal = 0;
+      // ★ 2026-08-04 **잠금을 잡은 뒤 원장을 다시 읽는다**(Codex 2R high 수용).
+      //   매핑 목록은 잠금 밖에서 한 번 읽어 회사별로 묶는다. 그 사이 매핑 회사·번호가 옮겨지면
+      //   (추가 청구 관리의 이관 트랜잭션) 이 반복문은 잠금을 얻고도 **옛 회사로 행을 만든다.**
+      //   어느 직렬 순서로도 나올 수 없는 고아 행이고, 그 회사 발행이 통째로 막힌다.
+      const fresh = await client.query(
+        `SELECT number FROM billing_080_numbers
+          WHERE company_id = $1::uuid AND number = ANY($2::text[]) AND is_active`,
+        [companyId, list.map((x) => x.m.number)],
+      );
+      const stillMine = new Set<string>(fresh.rows.map((row: any) => String(row.number)));
+
+      let numbers = 0;
+      let callSupply = 0;
+      const already: string[] = [];
       for (const { m, call_fee } of list) {
         const disp = format080Number(m.number);
-        const rows: Array<{ kind: string; label: string; amount: number }> = [];
-        if (m.monthly_fee_supply > 0) rows.push({ kind: '080_fee', label: `080 번호 이용료 (${disp}${m.label ? ` ${m.label}` : ''})`, amount: m.monthly_fee_supply });
-        if (m.kt_fee_supply > 0) rows.push({ kind: '080_svc', label: `080 부가서비스 (${disp}${m.label ? ` ${m.label}` : ''})`, amount: m.kt_fee_supply });
-        if (m.charge_call_fee && call_fee > 0) rows.push({ kind: '080_call', label: `080 통화료 (${disp}${m.label ? ` ${m.label}` : ''})`, amount: call_fee });
-        for (const it of rows) {
-          await client.query(
-            // ★ 2026-07-31 귀속은 **번호 매핑에 등록된 계정을 그대로 물려받는다** — 반영 때 사람이 다시
-            //   고르게 하면 번호별 귀속과 항목별 귀속이 갈라져 어느 쪽이 진실인지 알 수 없게 된다.
-            `INSERT INTO billing_extra_items (company_id, user_id, period_month, kind, label, supply_amount, source_ref, created_by)
-             VALUES ($1, $8::uuid, $2::date, $3, $4, $5, $6, $7)`,
-            [companyId, periodMonth, it.kind, it.label, it.amount, m.number, params.adminId || null, (m as any).user_id || null],
-          );
-          items += 1;
-          supplyTotal += it.amount;
+        if (!stillMine.has(m.number)) {
+          skipped.push({ company_id: companyId, company_name: companyName, number: disp, reason: '반영 도중 그 번호의 매핑이 바뀌었습니다(회사 이관·중지) — 다시 판독해 반영해주세요' });
+          continue;
         }
+        const callFee = Math.max(0, Number(call_fee) || 0);
+        const r = await client.query(
+          // 라벨은 화면 표시용이고 청구서 항목명은 유형키(EXTRA_080_*)가 소유한다 — 여기에 계약 금액을
+          // 적어 넣지 않는다(적으면 그것이 또 하나의 죽은 복사본이 된다).
+          `INSERT INTO billing_extra_items (company_id, period_month, kind, label, supply_amount, source_ref, created_by)
+           VALUES ($1, $2::date, '080_call', $3, $4, $5, $6)
+           ON CONFLICT DO NOTHING`,
+          [companyId, periodMonth, `080 (${disp})`, callFee, m.number, params.adminId || null],
+        );
+        if ((r.rowCount || 0) === 0) {
+          // ★ UNIQUE(period_month, kind, source_ref)는 **전사 하나**다 — 충돌 상대가 다른 회사일 수 있다.
+          //   그것을 "이미 반영"으로 뭉개면 번호가 재배정된 달에 우리 회사 청구가 조용히 사라진다.
+          const owner = await client.query(
+            `SELECT company_id FROM billing_extra_items
+              WHERE period_month = $1::date AND kind = '080_call' AND source_ref = $2`,
+            [periodMonth, m.number],
+          );
+          const ownerId = String(owner.rows[0]?.company_id || '');
+          if (ownerId && ownerId !== String(companyId)) {
+            skipped.push({ company_id: companyId, company_name: companyName, number: disp, reason: '그 달 그 번호가 다른 고객사로 이미 반영돼 있습니다 — 번호 매핑을 확인해주세요' });
+          } else {
+            already.push(disp);
+          }
+          continue;
+        }
+        numbers += 1;
+        callSupply += callFee;
       }
       await client.query('COMMIT');
-      applied.push({ company_id: companyId, company_name: companyName, numbers: list.length, items, supply_total: supplyTotal });
+      if (numbers > 0) applied.push({ company_id: companyId, company_name: companyName, numbers, call_supply: callSupply });
+      for (const disp of already) {
+        skipped.push({ company_id: companyId, company_name: companyName, number: disp, reason: '이미 반영된 번호 — 중복 반영 차단(반영 현황에서 취소 후 다시 반영 가능)' });
+      }
     } catch (err: any) {
       try { await client.query('ROLLBACK'); } catch { /* release가 파기 */ }
-      // UNIQUE(period_month, kind, source_ref) 충돌 = 같은 달 이미 반영
-      if (String(err?.code) === '23505') {
-        skipped.push({ company_id: companyId, company_name: companyName, reason: '이미 반영된 달 — 중복 반영 차단(취소 후 다시 반영 가능)' });
-      } else {
-        skipped.push({ company_id: companyId, company_name: companyName, reason: `반영 실패: ${String(err?.message || err).slice(0, 200)}` });
-      }
+      skipped.push({ company_id: companyId, company_name: companyName, reason: `반영 실패: ${String(err?.message || err).slice(0, 200)}` });
     } finally {
       client.release();
     }

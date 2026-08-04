@@ -98,6 +98,11 @@ export interface AgentContext {
   segmentKey?: string | null;
   segmentParams?: Record<string, number> | null;
   /**
+   * ★ 2026-08-04 변화 축 — 비교할 지난 회차 스냅샷의 주인(오퍼레이터 id).
+   *   상태 축은 쓰지 않는다. 없으면 변화 축은 "첫 회차에 기준을 잡는다"는 사유로 멈춘다.
+   */
+  operatorId?: string | null;
+  /**
    * ⛔ 2026-08-03 1R 정정 — 이 호출이 자동마케팅 회차인지 밝힌다.
    *   orchestrate는 자동마케팅(continuous-operator)과 일반 AI 제안(/operator/propose)이 공유한다.
    *   자동마케팅 게이트(발송 피로도·미클릭·리마인드 코호트)를 공용 경로에 그대로 적용하면 범위 밖 화면의
@@ -433,6 +438,8 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
         legacyFilters: targetResult.filters,
         storeFilter: scope.storeFilter,
         baseParams: scope.baseParams,
+        // ★ 2026-08-04: 변화 축이 비교할 지난 회차. 없으면 그 축은 사유와 함께 멈춘다(아래 catch가 받는다).
+        operatorId: ctx.operatorId ?? null,
       });
       actual = measured.count;
       // 컴파일이 확정한 축을 제안에 남긴다 — 발송·명단이 같은 축으로 다시 컴파일한다.

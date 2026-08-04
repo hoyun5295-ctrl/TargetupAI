@@ -49,7 +49,9 @@ import { buildSendableStagingInsertSql } from './operator-recipients';
 // ★ 2026-08-03 타겟팅 재설계 A-1: 대상 수는 발송과 같은 게이트를 쓰는 단일 문으로만 센다.
 import { resolveOperatorAudienceGates, compileOperatorAudience, resolveOperatorStoreScope } from './operator-audience';
 import { AudienceGates } from './operator-recipients';
-import { normalizeSegmentKey, normalizeSegmentParams } from './automarketing-segment';
+import { normalizeSegmentKey, normalizeSegmentParams, segmentNeedsCycleBaseline } from './automarketing-segment';
+// ★ 2026-08-04 변화 축 — 회차 스냅샷(자동마케팅 고유 어휘의 유일한 근거).
+import { hasCycleBaseline, recordCycleSnapshot } from './operator-cycle-snapshot';
 import { createDirectSendCampaign } from './direct-send-core';
 import { DirectSendError } from './direct-send-spec';
 // ★ 2026-07-30 (Codex 2R): MMS 이미지 필수 가드 CT(D131) — 자율발송 경로 배선
@@ -685,6 +687,27 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
     return null;
   }
 
+  // ★ 2026-08-04 변화 축 — 첫 회차는 기준을 잡는 회차다.
+  //   "지난 회차와 지금 사이에 무엇이 달라졌나"는 비교할 과거가 있어야 성립한다. 과거가 없는데
+  //   조건을 만들면 아무도 못 맞히는 술어가 되어 조용한 0건이 된다 — 우리가 고치려는 병 그 자체다.
+  //   그래서 이 회차는 제안을 만들지 않고 기준선만 심고, 무슨 일이 일어났는지 담당자에게 알린다.
+  //   ⛔ 기준선 기록이 실패하면 제안도 만들지 않는다(다음 회차 재시도). 과거 없이 발송하는 쪽이 훨씬 나쁘다.
+  if (segmentNeedsCycleBaseline(operator.segmentKey) && !(await hasCycleBaseline(operator.id))) {
+    try {
+      const snap = await recordCycleSnapshot(operator.id, operator.companyId);
+      console.log(`[ContinuousOperator] ${operator.name} 변화 축 기준선 ${snap.rows}건 기록 → 이번 회차 제안 없음`);
+      await notifyOperatorAdmins(
+        operator,
+        '[AI 자동마케팅] 기준을 잡았습니다',
+        `'${operator.name}'은(는) 지난번과 달라진 점을 찾아 보내는 조건입니다. 이번 회차는 비교 기준을 잡았고, 다음 회차부터 대상이 잡힙니다.`,
+      ).catch((e: any) => console.warn('[ContinuousOperator] 기준선 통지 경고:', e?.message));
+    } catch (e: any) {
+      console.warn(`[ContinuousOperator] ${operator.name} 기준선 기록 실패 → 이번 회차 생성 없음:`, e?.message);
+    }
+    await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0);
+    return null;
+  }
+
   // 2. 회사 컨텍스트 + 자동 실행 옵션 조회
   const ctxRes = await query(
     `SELECT c.company_name, c.business_type, c.brand_name, c.brand_slogan,
@@ -768,6 +791,8 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
       // ★ 2026-08-03 A-7: 계약이 있으면 대상 조건은 계약이 만든다 — 타겟 AI 해석 결과를 쓰지 않는다(결정성).
       segmentKey: operator.segmentKey,
       segmentParams: operator.segmentParams,
+      // ★ 2026-08-04: 변화 축이 비교할 지난 회차 스냅샷의 주인. 상태 축은 이 값을 쓰지 않는다.
+      operatorId: operator.id,
       // ⛔ 1R 정정: 자동마케팅 회차임을 명시. 이 플래그가 있어야 발송 게이트가 붙은 대상 수를 쓴다.
       audienceScope: 'operator',
     }, { source: 'continuous-operator', cost: 0 });  // ★ 2026-06-02: 제안서 생성(매일)은 무과금 — 200은 저장 1회, 발송 시 문안 3로 재배치. source는 이력용 유지.
@@ -1716,6 +1741,10 @@ async function dispatchProposalSend(
       segmentParams: pj.target?.segmentParams || null,
       legacyFilters: filters,
       baseParams: sendBaseParams,
+      // ★ 2026-08-04: 발송 직전 재추출도 제안 생성 때와 **같은 지난 회차**와 비교한다.
+      //   스냅샷 갱신을 발송 뒤로 미루는 이유가 여기 있다 — 제안 시점에 갈아 끼우면 이 재추출이
+      //   방금 심은 자기 스냅샷과 비교해 변화 0이 되고, "보여준 수 = 나가는 수"가 깨진다.
+      operatorId: p.operator_id || null,
     });
     filterWhere = compiled.filterWhere;
     filterParams = compiled.filterParams;
@@ -1947,6 +1976,17 @@ async function dispatchProposalSend(
   if (op.sequence_enabled === true && pj.meta?.is_reminder !== true) {
     await scheduleSequenceReminder(op, p, pj, companyId).catch((e: any) =>
       console.warn('[ContinuousOperator Sequence] 리마인드 예약 경고:', e?.message));
+  }
+
+  // ★ 2026-08-04 변화 축 — 회차 마감. **발송이 끝난 뒤에** 지난 회차를 지금 모습으로 갈아 끼운다.
+  //   시점이 계약이다: 제안 생성 때 갈아 끼우면 발송 직전 재추출이 방금 심은 스냅샷과 비교해 변화 0이 되고,
+  //   갱신을 아예 안 하면 다음 회차가 같은 사람들을 또 잡는다(달라진 게 없는데 매번 나간다).
+  //   ⛔ 발송이 안 나간 회차는 여기 도달하지 않는다 — 그게 맞다. 안 알린 변화는 아직 남아 있는 변화다.
+  //   기록 실패는 발송을 되돌리지 않는다(이미 나갔다). 다음 회차가 더 긴 구간을 보게 될 뿐이다.
+  if (p.operator_id && segmentNeedsCycleBaseline(pj.target?.segmentKey || null)) {
+    await recordCycleSnapshot(p.operator_id, companyId)
+      .then((s) => console.log(`[ContinuousOperator] 회차 스냅샷 갱신 ${s.rows}건 (operator ${p.operator_id})`))
+      .catch((e: any) => console.warn('[ContinuousOperator] 회차 스냅샷 갱신 경고:', e?.message));
   }
   return { action: 'sent', campaignId, sentCount: recipientTotal };
 }

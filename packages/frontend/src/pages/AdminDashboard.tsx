@@ -20,6 +20,7 @@ import { formatPlanOptionLabel } from '../utils/planLabel'; // ★ 2026-07-28 �
 import { taxbillIssueDatePreviewText, type TaxbillDayPolicy } from '../utils/taxbillDate'; // ★ 2026-07-28 작성일자 미리보기(예시 월 하드코딩 제거)
 import Billing080Modal from '../components/Billing080Modal'; // ★ 2026-07-30 추가 청구 관리 (서수란 접수 — 080 KT 명세서 분할 + 부가서비스 수기)
 import MinimumChargeModal from '../components/MinimumChargeModal'; // ★ 2026-07-30 최소과금 정액 발행 (Harold 확정)
+import QtyAdjustModal, { type QtyAdjustTarget } from '../components/QtyAdjustModal'; // ★ 2026-08-04 수량 수정 발행 (서수란 접수)
 import { creditTxLabel } from '../constants/credit'; // 크레딧 사용 이력 작업명 라벨
 import { resolveChannelLabel, resolveSendTypeChipClass, resolveSendTypeLabel } from '../utils/campaign-axis';
 
@@ -1337,6 +1338,8 @@ const [bulkStarting, setBulkStarting] = useState(false);
 const [confirmBoardOpen, setConfirmBoardOpen] = useState(false);
 // ★ 2026-07-30 추가 청구(080·부가서비스) + 최소과금 모달 (서수란 접수)
 const [billing080Open, setBilling080Open] = useState(false);
+// ★ 2026-08-04 수량 수정 발행 대상 장 — null이면 닫힘(서수란 0804 접수)
+const [qtyAdjustTarget, setQtyAdjustTarget] = useState<QtyAdjustTarget | null>(null);
 const [minChargeOpen, setMinChargeOpen] = useState(false);
 const [confirmRows, setConfirmRows] = useState<any[]>([]);
 const [confirmLoading, setConfirmLoading] = useState(false);
@@ -9592,6 +9595,10 @@ const handleApproveRequest = async (id: string) => {
             <MinimumChargeModal open={minChargeOpen} onClose={() => setMinChargeOpen(false)}
               companies={companies.map((c) => ({ id: c.id, company_name: c.company_name }))}
               onChanged={() => { if (bulkList !== null) loadBulkList(); }} />
+            {/* ★ 2026-08-04 수량 수정 발행 — 정산 목록 각 행의 [수량 조정]에서 연다 */}
+            <QtyAdjustModal open={qtyAdjustTarget !== null} target={qtyAdjustTarget}
+              onClose={() => setQtyAdjustTarget(null)}
+              onReissued={() => { setQtyAdjustTarget(null); loadBillings(); }} />
 
             {bulkList !== null && (() => {
               const picked = bulkPickedIds();
@@ -10153,6 +10160,9 @@ const handleApproveRequest = async (id: string) => {
                                 발송
                               </button>
                             )}
+                            {/* ★ 2026-08-04 업체와 수량이 다를 때 사람이 실제 수량을 적고 다시 발행한다(서수란 접수). */}
+                            <button onClick={() => setQtyAdjustTarget({ id: b.id, companyName: b.company_name, accountName: b.account_name || null })}
+                              className="px-2 py-1 text-xs bg-violet-100 text-violet-700 rounded hover:bg-violet-200 transition-colors">수량 조정</button>
                             <button onClick={() => { setDeleteTargetId(b.id); setDeleteReason(''); setShowBillingDeleteConfirm(true); }}
                               className="px-2 py-1 text-xs bg-red-100 text-red-600 rounded hover:bg-red-200 transition-colors">삭제</button>
                           </div>

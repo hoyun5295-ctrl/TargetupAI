@@ -33,8 +33,8 @@ const LEGACY_HINT_LABEL: Record<string, string> = {
   vip: 'VIP·상위 등급', birthday: '이달 생일 고객', new_customers: '신규 등록 고객',
 };
 
-/** 담당자가 자주 쓰는 구간 — 직접 입력 없이 한 번에 바꾼다. 정의는 서버 범위 안으로 자른다. */
-const QUICK_DAYS = [30, 60, 90, 180, 365];
+// ★ 2026-08-04: 자주 쓰는 값 목록(옛 QUICK_DAYS)을 여기서 제거했다. 축마다 자연스러운 구간이 달라
+//   (일 단위 / 금액 단위) 화면이 목록을 들고 있으면 금액 축에 '30일' 버튼이 뜬다. 범위를 정하는 곳이 정한다.
 
 export default function SegmentPicker({ value, params, onChange, disabled, legacyHint, onClearLegacyHint, operatorId }: Props) {
   const [segments, setSegments] = useState<SegmentAvailability[]>([]);
@@ -92,16 +92,21 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
     }
   }, []);
 
+  const selected = segments.find((s) => s.key === value) || null;
+
+  /**
+   * ★ 2026-08-04 — 변화 축을 신규 등록에서 고른 상태. 비교할 지난번이 아직 없다.
+   * ⛔ 이때 대상 수를 세러 가지 않는다. 서버는 사유와 함께 멈추는데 화면에는 그게 붉은 오류로 보이고,
+   *   담당자는 고장으로 읽는다. 이건 정상 흐름이라 안내를 대신 띄우고 호출 자체를 하지 않는다.
+   */
+  const awaitingBaseline = !!selected?.needsCycleBaseline && !operatorId;
+
   // 선택된 축·파라미터가 바뀌면 지금 기준으로 다시 센다. 파라미터 연타는 마지막 값만 센다.
   useEffect(() => {
-    if (!value) { setCount(null); setCountError(null); reqSeq.current++; return; }
+    if (!value || awaitingBaseline) { setCount(null); setCountError(null); reqSeq.current++; return; }
     const t = setTimeout(() => { void measure(value, params); }, 350);
     return () => clearTimeout(t);
-  }, [value, params, measure, operatorId]);
-
-  const selected = segments.find((s) => s.key === value) || null;
-  const daysDef = selected?.params?.find((p) => p.key === 'days') || null;
-  const daysValue = daysDef ? (params?.days ?? daysDef.default) : null;
+  }, [value, params, measure, operatorId, awaitingBaseline]);
 
   const pick = (s: SegmentAvailability) => {
     if (disabled || !s.available) return;
@@ -110,10 +115,12 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
     onChange(s.key, s.params.length > 0 ? next : null);
   };
 
-  const setDays = (n: number) => {
-    if (!daysDef || !value) return;
-    const clamped = Math.min(daysDef.max, Math.max(daysDef.min, Math.floor(n)));
-    onChange(value, { ...(params || {}), days: clamped });
+  /** 파라미터는 축이 정의한 만큼 전부 보여준다 — 종전엔 'days' 하나만 그려서 금액 조건이 화면에 없었다. */
+  const setParam = (key: string, n: number) => {
+    const def = selected?.params?.find((p) => p.key === key);
+    if (!def || !value) return;
+    const clamped = Math.min(def.max, Math.max(def.min, Math.floor(n)));
+    onChange(value, { ...(params || {}), [key]: clamped });
   };
 
   if (loading) {
@@ -187,32 +194,49 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
         })}
       </div>
 
-      {daysDef && (
-        <div className="px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-white/60">{daysDef.label}</span>
-            <span className="text-[11px] text-white/80 font-medium">{daysValue}{daysDef.unit}</span>
+      {(selected?.params || []).map((def) => {
+        const cur = Number(params?.[def.key] ?? def.default);
+        const presets = (def.presets || []).filter((p) => p >= def.min && p <= def.max);
+        return (
+          <div key={def.key} className="px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-white/60">{def.label}</span>
+              <span className="text-[11px] text-white/80 font-medium">{cur.toLocaleString()}{def.unit}</span>
+            </div>
+            {presets.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {presets.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setParam(def.key, p)}
+                    disabled={disabled}
+                    className={`px-2.5 py-1 text-[11px] rounded-md border transition-colors ${
+                      cur === p ? 'bg-indigo-500/30 border-indigo-400/50 text-indigo-100'
+                        : 'bg-white/5 border-white/10 text-white/60 hover:text-white/90'
+                    } disabled:opacity-40`}
+                  >
+                    {p.toLocaleString()}{def.unit}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-          <div className="flex gap-1.5 mt-2">
-            {QUICK_DAYS.filter((d) => d >= daysDef.min && d <= daysDef.max).map((d) => (
-              <button
-                key={d}
-                type="button"
-                onClick={() => setDays(d)}
-                disabled={disabled}
-                className={`px-2.5 py-1 text-[11px] rounded-md border transition-colors ${
-                  daysValue === d ? 'bg-indigo-500/30 border-indigo-400/50 text-indigo-100'
-                    : 'bg-white/5 border-white/10 text-white/60 hover:text-white/90'
-                } disabled:opacity-40`}
-              >
-                {d}{daysDef.unit}
-              </button>
-            ))}
-          </div>
+        );
+      })}
+
+      {/* 변화 축 첫 회차 — 대상 수 대신 무슨 일이 일어날지 먼저 말한다(오류 아님). */}
+      {awaitingBaseline && (
+        <div className="flex items-start gap-2 px-3 py-2.5 bg-indigo-500/10 border border-indigo-400/30 rounded-lg">
+          <Sparkles className="w-3.5 h-3.5 text-indigo-300 shrink-0 mt-0.5" />
+          <span className="text-[11px] text-indigo-100/90 leading-relaxed">
+            지난번 발송 때와 비교해서 대상을 정하는 조건입니다. 저장하면 <span className="font-semibold">첫 회차에 비교 기준을 잡고</span>,
+            그다음 회차부터 달라진 분들이 대상으로 잡힙니다.
+          </span>
         </div>
       )}
 
-      {value && (
+      {value && !awaitingBaseline && (
         <div className="flex items-center gap-2 px-3 py-2 bg-white/5 border border-white/10 rounded-lg">
           <Users className="w-3.5 h-3.5 text-white/40 shrink-0" />
           {counting ? (

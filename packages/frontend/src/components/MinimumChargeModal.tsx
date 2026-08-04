@@ -9,6 +9,9 @@
  * 단가 미설정/요금제 회사/080 항목 있는 달 = 거부 · 겹침·수동완료 409. 결과에 사유가 그대로 표시된다.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+// ★ 2026-08-04 회사 선택을 타이핑 검색으로 (서수란 접수) — 141개사를 스크롤로 찾게 두면 매달 그 짓을 한다.
+//   080 매핑·부가서비스 입력 탭이 이미 쓰는 컴포넌트와 같은 것을 쓴다.
+import SearchableSelect from './SearchableSelect';
 
 interface CompanyOpt { id: string; company_name: string }
 interface MinChargeRow { company_id: string; company_name: string; min_charge_supply: number; billed_id: string | null }
@@ -110,10 +113,12 @@ export default function MinimumChargeModal({ open, onClose, companies, onChanged
           <div className="border rounded-lg p-4 bg-gray-50 flex flex-wrap items-end gap-3">
             <div className="flex-1 min-w-[200px]">
               <label className="block text-[11px] text-gray-500 mb-1">회사</label>
-              <select value={addCompany} onChange={(e) => setAddCompany(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
-                <option value="">선택</option>
-                {companies.filter((c) => !registeredIds.has(c.id)).map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-              </select>
+              <SearchableSelect
+                options={companies.filter((c) => !registeredIds.has(c.id)).map((c) => ({ value: c.id, label: c.company_name }))}
+                value={addCompany}
+                onChange={setAddCompany}
+                placeholder="회사명을 입력해 검색"
+              />
             </div>
             <div>
               <label className="block text-[11px] text-gray-500 mb-1">최소과금 (공급가)</label>

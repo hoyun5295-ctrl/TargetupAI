@@ -19,6 +19,9 @@ import {
   resolveBillingUnitPricesDetailed, findUnsetPricedTypes, summarizeBlockList, findBlockingPendingRows,
   // ★ 2026-07-28 발행 전용 식별자(장 분할·항등식·계정 정리·청크)는 utils/billing-issue.ts로 이동했다.
   buildPlanBillingItems, toDayKey,
+  // ★ 2026-08-04 추가 항목(080·부가서비스)의 파생 계약 — 반영 현황 화면이 **발행과 같은 함수**로
+  //   실제 청구 금액을 계산한다. 화면이 따로 더하면 그 순간 청구서와 갈라진다.
+  buildExtraBillingItems, extraRowUserId, EXTRA_ITEM_SOURCE_SELECT, EXTRA_ITEM_SOURCE_JOIN,
   type PricedBillingItem, type BillingScope,
 } from '../utils/send-usage-aggregation';
 import { loadBillingLedger } from '../utils/billing-ledger';
@@ -26,9 +29,11 @@ import { floorWon, vatOfSupply } from '../utils/money';
 import { drawPartyBlock, drawThanksNote, THANKS_NOTE_HEIGHT } from '../utils/pdf-party-block';
 // ★ 2026-07-28 PDF 생성 CT — 라우트 인라인이었던 것을 추출. 일괄발급·메일 첨부가 같은 함수를 쓴다.
 import { renderBillingStatementPdf, renderInvoicePdf, loadBillingStatementData, loadInvoicePdfData } from '../utils/billing-pdf';
-import { retryUnsentConfirmations } from '../utils/invoice-confirm';
+// ★ 2026-08-04 컨펌 토큰·안내 문구는 일괄발급과 **같은 CT**를 쓴다 — 개별 발송 메일에만 컨펌 버튼이
+//   없어서 업체가 이의를 낼 창구가 없었다(서수란 0803·0804 접수).
+import { retryUnsentConfirmations, ensureConfirmationToken, renderConfirmBlockHtml, markConfirmationDelivered } from '../utils/invoice-confirm';
 import { normalizeUnitPriceBasis } from '../utils/unit-price';
-import { buildInvoiceLines, checkInvoiceLinesAgainstHeader, sumFlooredInvoiceLines } from '../utils/billing-invoice-lines';
+import { buildInvoiceLines, checkInvoiceLinesAgainstHeader, sumFlooredInvoiceLines, invoiceLineLabel } from '../utils/billing-invoice-lines';
 import { resolveBillingScopeLabel } from '../utils/billing-scope-label';
 import {
   loadPlanChanges, buildPlanSegments, sumPlanSegments, evaluatePlanHistoryGate,
@@ -917,14 +922,74 @@ router.post('/080-numbers', async (req: Request, res: Response) => {
       String(memo || '').slice(0, 500) || null, scopeUserId,
     ];
     if (id) {
-      const r = await pool.query(
-        `UPDATE billing_080_numbers SET number=$1, company_id=$2, label=$3, monthly_fee_supply=$4,
-                kt_fee_supply=$5, charge_call_fee=$6, is_active=$7, memo=$8, user_id=$9::uuid, updated_at=NOW()
-          WHERE id=$10 RETURNING id`,
-        [...params, id],
-      );
-      if (r.rows.length === 0) return res.status(404).json({ success: false, error: '수정할 번호를 찾을 수 없습니다.' });
-      return res.json({ success: true, id: r.rows[0].id });
+      // ★ 2026-08-04 **회사를 바꾸면 미소비 반영분도 함께 옮긴다**(서수란 0803 접수 3 — 리스킨).
+      //   반영 항목의 회사 축은 스냅샷이 소유하므로, 매핑만 옮기면 옛 회사 청구서에 그대로 남는다.
+      //   "인비토로 바꿨는데 계속 리스킨으로 청구된다"가 정확히 그 증상이었다.
+      //   발행과 같은 회사 잠금을 **양쪽 다** 잡고, 어느 쪽이든 그 달 발행이 있으면 옮기지 않는다.
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const prev = await client.query(
+          `SELECT number, company_id FROM billing_080_numbers WHERE id = $1 FOR UPDATE`,
+          [id],
+        );
+        if (prev.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ success: false, error: '수정할 번호를 찾을 수 없습니다.' });
+        }
+        const fromCompany = String(prev.rows[0].company_id);
+        const fromNumber = String(prev.rows[0].number);
+        // 번호 표기를 고친 경우에도 같이 옮긴다 — `source_ref`가 옛 번호로 남으면 그 반영분은 매핑을
+        // 잃어버려(고아) 그 회사 발행이 통째로 막힌다.
+        const relinked = fromCompany !== String(company_id) || fromNumber !== digits;
+        // 잠금은 항상 같은 순서로 잡는다 — 두 요청이 서로를 기다리는 교착을 만들지 않는다.
+        for (const cid of Array.from(new Set([fromCompany, String(company_id)])).sort()) {
+          await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext('billing'))`, [cid]);
+        }
+        let moved = 0;
+        if (relinked) {
+          // ★ 소비 여부를 가리지 않는다(Codex 2R high 수용) — 미소비 행만 보면 **이미 청구서에 실린**
+          //   반영분이 옛 회사에 남는다. 그 청구서를 지우는 순간 FK가 그 행을 미소비로 되돌리는데
+          //   매핑은 이미 옮겨져 있어 옛 회사 발행이 영구히 막히고, 새 회사 재반영도 전역 UNIQUE에 걸린다.
+          const blocked = await client.query(
+            `SELECT 1 FROM billings b
+               JOIN billing_extra_items e
+                 ON e.company_id = $1::uuid AND e.source_ref = $3
+              WHERE b.company_id IN ($1::uuid, $2::uuid)
+                AND b.billing_start <= (e.period_month + INTERVAL '1 month' - INTERVAL '1 day')::date
+                AND b.billing_end >= e.period_month
+              LIMIT 1`,
+            [fromCompany, String(company_id), fromNumber],
+          );
+          if (blocked.rows.length > 0) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+              success: false,
+              error: '그 번호의 반영분이 걸린 달에 이미 발행된 정산이 있어 회사·번호를 바꿀 수 없습니다. 그 정산을 삭제하고 반영을 취소한 뒤 다시 시도해주세요.',
+              code: 'BILLING_080_TRANSFER_BLOCKED',
+            });
+          }
+          const mv = await client.query(
+            `UPDATE billing_extra_items SET company_id = $2::uuid, source_ref = $4
+              WHERE company_id = $1::uuid AND source_ref = $3 AND billed_billing_id IS NULL`,
+            [fromCompany, String(company_id), fromNumber, digits],
+          );
+          moved = mv.rowCount || 0;
+        }
+        const r = await client.query(
+          `UPDATE billing_080_numbers SET number=$1, company_id=$2, label=$3, monthly_fee_supply=$4,
+                  kt_fee_supply=$5, charge_call_fee=$6, is_active=$7, memo=$8, user_id=$9::uuid, updated_at=NOW()
+            WHERE id=$10 RETURNING id`,
+          [...params, id],
+        );
+        await client.query('COMMIT');
+        return res.json({ success: true, id: r.rows[0].id, moved_items: moved });
+      } catch (txErr) {
+        try { await client.query('ROLLBACK'); } catch { /* 아래 catch가 사실을 전달한다 */ }
+        throw txErr;
+      } finally {
+        client.release();
+      }
     }
     const r = await pool.query(
       `INSERT INTO billing_080_numbers (number, company_id, label, monthly_fee_supply, kt_fee_supply, charge_call_fee, is_active, memo, user_id)
@@ -934,7 +999,11 @@ router.post('/080-numbers', async (req: Request, res: Response) => {
     return res.json({ success: true, id: r.rows[0].id });
   } catch (error: any) {
     if (String(error?.code) === '23505') {
-      return res.status(409).json({ success: false, error: '이미 등록된 번호입니다. 목록에서 수정해주세요.' });
+      // 번호 중복 등록이거나, 회사·번호를 옮길 때 대상 번호에 그 달 반영분이 이미 있는 경우다.
+      return res.status(409).json({
+        success: false,
+        error: '이미 등록된 번호이거나, 옮기려는 번호에 그 달 반영분이 이미 있습니다. 목록에서 확인한 뒤 반영을 취소하고 다시 시도해주세요.',
+      });
     }
     // ★ 2026-07-31 `user_id` ALTER 미실행 서버에서 500 대신 안내로 (db_alter_safety_net)
     const emsg080 = error?.message || '';
@@ -1017,37 +1086,75 @@ router.post('/kt-statement/apply', async (req: Request, res: Response) => {
 });
 
 // GET /extra-items?month=YYYY-MM — 그 달 반영 현황 (회사별)
+//   ★ 2026-08-04 매핑 원장을 함께 읽어 **실제로 청구될 금액**을 발행과 같은 함수로 계산해 내린다.
+//     그전에는 스냅샷 금액(`supply_amount`)을 그대로 보여줬는데, 매핑을 고쳐도 그 값이 안 바뀌어
+//     화면이 옛 금액을 사실인 것처럼 보여줬다(서수란 0803 접수의 화면 쪽 얼굴).
 router.get('/extra-items', async (req: Request, res: Response) => {
   try {
     const month = String(req.query.month || '');
     if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ success: false, error: '조회 월 형식: YYYY-MM' });
     const r = await pool.query(
-      // ★ 2026-07-31 귀속 계정 표시 — 반영 현황에서 "고객사 전체"인지 "누구 앞"인지 구분돼야 한다.
       `SELECT e.id, e.company_id, c.company_name, e.kind, e.label, e.supply_amount, e.source_ref, e.created_at,
-              e.billed_billing_id, e.user_id, u.name AS user_name, u.login_id AS user_login_id
+              e.billed_billing_id, e.period_month,
+              eu.name AS user_name, eu.login_id AS user_login_id,
+              enu.name AS map_user_name, enu.login_id AS map_user_login_id,
+${EXTRA_ITEM_SOURCE_SELECT}
          FROM billing_extra_items e
          JOIN companies c ON c.id = e.company_id
-         LEFT JOIN users u ON u.id = e.user_id
+${EXTRA_ITEM_SOURCE_JOIN}
         WHERE e.period_month = ($1 || '-01')::date
         ORDER BY c.company_name, e.source_ref, e.kind`,
       [month],
     );
-    return res.json({ success: true, items: r.rows });
+    // 행마다 파생 항목(이용료·부가서비스·통화료)을 CT로 계산 — 청구서에 실릴 모습 그대로다.
+    const items = r.rows.map((row: any) => {
+      const kind = String(row.kind);
+      const parts = buildExtraBillingItems([row]);
+      const billed = !!row.billed_billing_id;
+      return {
+        ...row,
+        // 귀속은 080이면 매핑 원장, 수기 항목이면 자기 값 — 발행의 장 분배와 같은 판정.
+        sheet_user_id: extraRowUserId(row),
+        sheet_user_name: kind === 'manual' ? row.user_name : row.map_user_name,
+        sheet_user_login_id: kind === 'manual' ? row.user_login_id : row.map_user_login_id,
+        // 항목명은 청구서 항목줄과 **같은 함수**에서 온다 — 화면과 인쇄물의 이름이 갈라지지 않는다.
+        //   ★ 2026-08-04 이미 발행에 실린 행은 파생값을 보여주지 않는다(Codex 적대검증 수용) — 청구서는
+        //   `billing_items`에 굳어 있는데 원장을 고치면 화면 숫자만 바뀌어 "발행액이 바뀐 것처럼" 읽힌다.
+        billable_parts: billed ? [] : parts.map((p) => ({ type_key: p.typeKey, label: invoiceLineLabel('extra', p.typeKey), amount: p.amount })),
+        billable_supply: billed ? null : parts.reduce((s, p) => s + p.amount, 0),
+        // 매핑이 사라진 현행 스냅샷 = 그 회사 발행이 막힌다(BILLING_080_MAPPING_MISSING).
+        blocks_issue: kind === '080_call' && !row.map_found,
+        // 비활성 = 사람이 명시한 청구 중단. 매핑 없음과 다른 상태다.
+        inactive: !!row.map_found && row.map_is_active === false,
+        // 옛 `080_fee`·`080_svc` 행 중 현행 스냅샷과 겹쳐 청구되지 않는 것(정리 대상).
+        legacy_superseded: kind !== 'manual' && kind !== '080_call' && !!row.has_call_snapshot,
+      };
+    });
+    return res.json({ success: true, items });
   } catch (error: any) {
     console.error('추가 항목 조회 오류:', error?.message || error);
     return res.status(500).json({ success: false, error: '추가 항목 조회 실패' });
   }
 });
 
-// DELETE /extra-items?month=YYYY-MM&company_id= — 반영 취소 (회사 단위·발행 전만).
+// DELETE /extra-items?month=YYYY-MM&company_id=&kind=kt|manual — 반영 취소 (회사 단위·발행 전만).
 //   ★ 단일 트랜잭션 + 발행과 같은 회사 잠금 + DELETE 조건에 미소비(billed_billing_id IS NULL) —
 //     발행과 경합해도 소비된 근거 행은 구조적으로 지워지지 않는다(Codex 1R 수용). 발행 존재 조회는 안내용이다.
+//   ★ 2026-08-04 `kind` 필수. 그전에는 그 회사·그 달의 **미소비 전 항목**을 지워서, KT 반영을 되돌리면
+//     사람이 손으로 입력한 부가서비스까지 함께 사라졌다(시세이도 단축 URL 25행 = 125만원 규모).
+//     범위를 안 주면 지우지 않는다(fail-closed).
 router.delete('/extra-items', async (req: Request, res: Response) => {
   const month = String(req.query.month || '');
   const companyId = String(req.query.company_id || '');
+  const kind = String(req.query.kind || '');
   if (!/^\d{4}-\d{2}$/.test(month) || !companyId) {
     return res.status(400).json({ success: false, error: 'month(YYYY-MM)와 company_id가 필요합니다.' });
   }
+  if (kind !== 'kt' && kind !== 'manual') {
+    return res.status(400).json({ success: false, error: '취소 범위(kind=kt 또는 manual)가 필요합니다.' });
+  }
+  // 리터럴 분기 — `kt`는 옛 080_fee·080_svc 잔존 행까지 함께 정리해야 해서 접두 매칭이다.
+  const kindClause = kind === 'kt' ? `kind LIKE '080\\_%'` : `kind = 'manual'`;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1064,7 +1171,8 @@ router.delete('/extra-items', async (req: Request, res: Response) => {
     }
     const r = await client.query(
       `DELETE FROM billing_extra_items
-        WHERE company_id = $1 AND period_month = ($2 || '-01')::date AND billed_billing_id IS NULL`,
+        WHERE company_id = $1 AND period_month = ($2 || '-01')::date AND billed_billing_id IS NULL
+          AND ${kindClause}`,
       [companyId, month],
     );
     await client.query('COMMIT');
@@ -1126,6 +1234,176 @@ router.delete('/extra-items/:id', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('부가서비스 항목 삭제 오류:', error?.message || error);
     return res.status(500).json({ success: false, error: '항목 삭제 실패' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════
+// 수량 수정 발행 (★2026-08-04 서수란 접수 — 업체와 수량이 다를 때 사람이 조정해 다시 내보낸다)
+//   CT = utils/billing-qty-adjust.ts. 조정 축은 회사×기간이라 삭제·재발행에도 살아남는다.
+// ════════════════════════════════════════════════════════════════
+
+/**
+ * 그 정산의 회사·기간·장 계정을 읽는다 — 조정 축이 발행이 아니라 기간이라 매번 이 변환이 필요하다.
+ * `user_id`는 그 **장**의 계정이다. 계정별 발행 회사는 장마다 수량이 다르므로 조정도 장 단위로 붙는다.
+ */
+async function loadBillingPeriod(billingId: string) {
+  const r = await pool.query(
+    `SELECT company_id, user_id, to_char(billing_start, 'YYYY-MM-DD') AS billing_start,
+            to_char(billing_end, 'YYYY-MM-DD') AS billing_end, scope
+       FROM billings WHERE id = $1::uuid`,
+    [billingId],
+  );
+  return r.rows[0] || null;
+}
+
+// GET /:id/qty-adjustments — 그 장의 청구 줄 + 거기 걸린 조정
+//   ★ 화면은 "실제 수량"을 입력하고 델타는 서버가 준 `base`로 계산한다 — 사람에게 −3을 계산시키지 않는다.
+//   `base` = 조정을 빼기 전 원래 수량. 이미 조정이 반영된 청구서에서 또 조정할 때 이중 적용을 막는 값이다.
+router.get('/:id/qty-adjustments', async (req: Request, res: Response) => {
+  try {
+    const bil = await loadBillingPeriod(String(req.params.id));
+    if (!bil) return res.status(404).json({ success: false, error: '정산을 찾을 수 없습니다.' });
+    // ★ 2026-08-04 "이 청구서가 얼마를 실었는가"는 **발행이 적어 둔 `applied_delta`**가 답한다.
+    //   시각 비교(`billings.created_at > 조정.updated_at`)는 조정을 수정하는 순간 이미 실린 델타까지
+    //   미적용으로 뒤집혀 base가 통째로 어긋났다(Codex 재검증 high). 추론을 버리고 기록을 읽는다.
+    const r = await pool.query(
+      `SELECT a.*, u.name AS user_name, u.login_id AS user_login_id
+         FROM billing_qty_adjustments a
+         LEFT JOIN users u ON u.id = a.user_id
+        WHERE a.company_id = $1::uuid AND a.period_start = $2::date AND a.period_end = $3::date
+          AND a.user_id IS NOT DISTINCT FROM $4::uuid
+        ORDER BY a.channel, a.type_key`,
+      [bil.company_id, bil.billing_start, bil.billing_end, bil.user_id],
+    );
+    // 항목줄은 청구서·PDF와 **같은 함수**로 만든다 — 화면이 따로 묶으면 표시 수량이 인쇄물과 갈라진다.
+    const itemRows = await pool.query(
+      `SELECT * FROM billing_items WHERE billing_id = $1::uuid
+        ORDER BY channel ASC, item_date ASC, message_type ASC, id ASC`,
+      [req.params.id],
+    );
+    // 저장된 델타(표시용)와 **이 청구서에 실제로 실린 델타**(base 계산용)를 나눠 센다.
+    const deltaByKey = new Map<string, number>();
+    const appliedByKey = new Map<string, number>();
+    for (const a of r.rows) {
+      const k = `${a.channel} ${a.type_key}`;
+      const d = Number(a.qty_delta) || 0;
+      deltaByKey.set(k, (deltaByKey.get(k) || 0) + d);
+      appliedByKey.set(k, (appliedByKey.get(k) || 0) + (Number(a.applied_delta) || 0));
+    }
+    const rawLines = buildInvoiceLines(itemRows.rows)
+      // 요금제·추가 항목은 수량 축이 없다 — 조정 대상이 아니다.
+      .filter((l) => l.channel !== 'plan' && l.channel !== 'extra');
+    // ★ 같은 (채널·유형)에 단가가 여러 개면 조정 키가 어느 줄을 가리키는지 정해지지 않는다
+    //   (발송ID별 단가가 다른 에이전트가 그렇다). 그런 유형은 조정 대상에서 뺀다 — fail-closed.
+    const priceCount = new Map<string, Set<number>>();
+    for (const l of rawLines) {
+      const k = `${l.channel} ${l.typeKey}`;
+      if (!priceCount.has(k)) priceCount.set(k, new Set());
+      priceCount.get(k)!.add(l.unitPrice);
+    }
+    const lines = rawLines.map((l) => {
+      const k = `${l.channel} ${l.typeKey}`;
+      const delta = deltaByKey.get(k) || 0;
+      const applied = appliedByKey.get(k) || 0;
+      const multiPrice = (priceCount.get(k)?.size || 1) > 1;
+      return {
+        channel: l.channel, type_key: l.typeKey, label: l.label,
+        unit_price: l.unitPrice, count: l.count, amount: l.amount,
+        delta, base: l.count - applied,
+        adjustable: !multiPrice,
+        not_adjustable_reason: multiPrice ? '같은 유형에 단가가 여러 개입니다(발송ID별 단가) — 화면에서 조정할 수 없습니다' : null,
+      };
+    });
+    return res.json({
+      success: true,
+      // 재발행은 삭제 뒤에 회사·기간·발행 단위를 다시 넘겨야 한다 — 삭제 응답에는 그 값이 없으므로 여기서 준다.
+      company_id: bil.company_id,
+      // `billings.scope`는 **장**의 축(combined·by_user·common)이고 발행 단위는 둘뿐이다.
+      // 공통 장은 계정별 발행에서만 생기므로 재발행 단위는 by_user다.
+      issue_scope: String(bil.scope) === 'combined' ? 'combined' : 'by_user',
+      period: { start: bil.billing_start, end: bil.billing_end },
+      sheet_user_id: bil.user_id || null,
+      adjustments: r.rows,
+      lines,
+    });
+  } catch (error: any) {
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — billing_qty_adjustments 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('수량 조정 조회 오류:', emsg || error);
+    return res.status(500).json({ success: false, error: '수량 조정 조회 실패' });
+  }
+});
+
+// POST /:id/qty-adjustments — 조정 등록·갱신(같은 축은 UPSERT). 발행 전/후 아무 때나 넣을 수 있고,
+//   실제 반영은 발행이 한다. `reason`은 필수 — 왜 고쳤는지가 없으면 다음 달에 아무도 모른다.
+router.post('/:id/qty-adjustments', async (req: Request, res: Response) => {
+  try {
+    const bil = await loadBillingPeriod(String(req.params.id));
+    if (!bil) return res.status(404).json({ success: false, error: '정산을 찾을 수 없습니다.' });
+    // ★ 귀속 계정은 **그 장**의 것을 그대로 쓴다 — 화면이 따로 고르게 하면 장과 조정이 어긋난다.
+    const { channel, type_key, qty_delta, reason, agent_id } = req.body || {};
+    const ch = String(channel || '').trim();
+    const tk = String(type_key || '').trim();
+    const delta = Math.round(Number(qty_delta));
+    const why = String(reason || '').trim().slice(0, 1000);
+    if (!ch || !tk) return res.status(400).json({ success: false, error: '채널과 유형을 지정해주세요.' });
+    if (!Number.isSafeInteger(delta) || delta === 0) {
+      return res.status(400).json({ success: false, error: '조정 수량은 0이 아닌 정수로 입력해주세요(줄이려면 음수).' });
+    }
+    if (why.length < 2) return res.status(400).json({ success: false, error: '조정 사유를 입력해주세요.' });
+    // ★ 2026-08-04 단가가 여러 개인 유형은 조정 키가 어느 줄을 가리키는지 정해지지 않는다 — 화면 판정과
+    //   같은 검사를 서버가 다시 한다(화면만 막으면 API 직접 호출로 뚫린다).
+    const priceRows = await pool.query(
+      `SELECT DISTINCT unit_price FROM billing_items
+        WHERE billing_id = $1::uuid AND channel = $2 AND message_type = $3`,
+      [req.params.id, ch, tk],
+    );
+    if (priceRows.rows.length > 1) {
+      return res.status(422).json({
+        success: false,
+        error: '이 유형은 발송ID별로 단가가 달라 화면에서 수량을 조정할 수 없습니다. 발송ID 단위 조정이 필요하면 알려주세요.',
+        code: 'BILLING_QTY_ADJUST_MULTI_PRICE',
+      });
+    }
+    if (priceRows.rows.length === 0) {
+      return res.status(422).json({ success: false, error: '그 유형의 청구 항목이 이 정산에 없습니다.', code: 'BILLING_QTY_ADJUST_UNMATCHED' });
+    }
+    const scopeUserId = bil.user_id ? String(bil.user_id) : null;
+    const r = await pool.query(
+      `INSERT INTO billing_qty_adjustments
+         (company_id, period_start, period_end, channel, type_key, user_id, agent_id, qty_delta, reason, created_by)
+       VALUES ($1::uuid, $2::date, $3::date, $4, $5, $6::uuid, $7::uuid, $8, $9, $10)
+       ON CONFLICT (company_id, period_start, period_end, channel, type_key,
+                    COALESCE(user_id, '00000000-0000-0000-0000-000000000000'::uuid),
+                    COALESCE(agent_id, '00000000-0000-0000-0000-000000000000'::uuid))
+       DO UPDATE SET qty_delta = EXCLUDED.qty_delta, reason = EXCLUDED.reason,
+                     created_by = EXCLUDED.created_by, updated_at = now()
+       RETURNING id`,
+      [bil.company_id, bil.billing_start, bil.billing_end, ch, tk, scopeUserId,
+        String(agent_id || '').trim() || null, delta, why, (req as any).user?.userId || null],
+    );
+    return res.json({ success: true, id: r.rows[0].id });
+  } catch (error: any) {
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — billing_qty_adjustments 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('수량 조정 저장 오류:', emsg || error);
+    return res.status(500).json({ success: false, error: '수량 조정 저장 실패' });
+  }
+});
+
+// DELETE /qty-adjustments/:adjId — 조정 삭제. 발행에 이미 반영됐으면 그 발행을 다시 내야 되돌아간다.
+router.delete('/qty-adjustments/:adjId', async (req: Request, res: Response) => {
+  try {
+    const r = await pool.query(`DELETE FROM billing_qty_adjustments WHERE id = $1::uuid RETURNING id`, [req.params.adjId]);
+    if (r.rows.length === 0) return res.status(404).json({ success: false, error: '삭제할 조정을 찾을 수 없습니다.' });
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('수량 조정 삭제 오류:', error?.message || error);
+    return res.status(500).json({ success: false, error: '수량 조정 삭제 실패' });
   }
 });
 
@@ -1384,7 +1662,11 @@ router.put('/:id/status', async (req: Request, res: Response) => {
 });
 
 // DELETE /:id - 정산 삭제
-router.delete('/:id', async (req: Request, res: Response) => {
+//   ★ 2026-08-04 핸들러를 이름 있는 함수로 뺐다(동작 무변경) — 수정 재발행이 **같은 삭제 문**을 쓴다.
+//   화면에서 [삭제]와 [발행]을 두 번 호출하던 것이 결함이었다: 사이에 무엇이든 실패하면 정산이
+//   삭제된 채 남는다(Codex 적대검증 critical). 한 요청 안에서 삭제하고 곧바로 다시 발행한다.
+const handleBillingDelete = async (req: Request, res: Response) => {
+  const reissue = (req.body || {}).__reissue === true;
   const client = await pool.connect();
   try {
     // ★ 2026-07-25 삭제와 후불 크레딧 billed 되돌림을 한 트랜잭션으로.
@@ -1398,7 +1680,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
     //   동시에 지울 때 A가 1번 장을, B가 2번 장을 쥔 채 서로의 행을 기다려 데드락이 된다(Codex 3차 MEDIUM).
     //   묶음 축(회사·기간·batch_id)만 읽고, 잠금은 아래에서 **한 문장·id 순서로 한 번만** 잡는다.
     const check = await client.query(
-      `SELECT id, status, emailed_at, email_sent_at, batch_id, company_id, billing_start, billing_end
+      `SELECT id, status, emailed_at, email_sent_at, batch_id, company_id, billing_start, billing_end, scope
          FROM billings WHERE id = $1::uuid`,
       [req.params.id],
     );
@@ -1478,6 +1760,79 @@ router.delete('/:id', async (req: Request, res: Response) => {
     //   재발행을 막으므로 **부분 청구가 영구화**된다. 원자적으로 만들었으면 원자적으로 지워야 한다.
     const targetIds = locked.map((r) => String(r.id));
 
+    // ★ 2026-08-04 수정 재발행 가드 — **세금계산서가 이미 국세청에 나간 건은 지우고 다시 만들 수 없다.**
+    //   지우면 `taxbill_issues.billing_id`가 SET NULL로 끊기고, 새 정산에서 원본이 한 장 더 발행된다.
+    //   되돌릴 수 없는 문서라 fail-closed. 정정은 수정세금계산서 경로다(Codex 적대검증 critical).
+    if (reissue) {
+      // ★ `ready`도 막는다(Codex 재검증 critical) — 발급 큐에 들어간 상태다. 워커가 그 행을 집어
+      //   외부로 발행하는 동안 여기서 장을 지우면, 발행은 옛 내용으로 나가고 새 장이 다시 원본 발행
+      //   대상이 되어 **국세청에 같은 건이 두 장** 나간다. `FOR UPDATE`로 워커와 줄을 세운다.
+      const issuedBill = await client.query(
+        `SELECT 1 FROM taxbill_issues
+          WHERE billing_id = ANY($1::uuid[]) AND status IN ('ready', 'submitted', 'issued')
+          FOR UPDATE`,
+        [targetIds],
+      );
+      const issuedConfirm = issuedBill.rows.length > 0 ? null : await client.query(
+        `SELECT 1 FROM invoice_confirmations
+          WHERE billing_id = ANY($1::uuid[]) AND taxbill_status IN ('ready', 'issued')
+            AND superseded_at IS NULL LIMIT 1`,
+        [targetIds],
+      );
+      if (issuedBill.rows.length > 0 || (issuedConfirm && issuedConfirm.rows.length > 0)) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: '이 정산은 세금계산서가 발급 대기 이상 단계에 있어 수량 수정 재발행을 할 수 없습니다. 이미 발행됐다면 수정세금계산서로 정정해주세요.',
+          code: 'BILLING_TAXBILL_ALREADY_ISSUED',
+        });
+      }
+
+      // ★ 2026-08-04 **삭제하기 전에** 조정이 적용 가능한지 본다(Codex 재검증 high 완화).
+      //   삭제와 재발행은 트랜잭션이 둘이라, 재발행이 422로 막히면 정산만 사라진 채 남는다.
+      //   재발행 실패의 실질 원인 둘(조정 대상 줄 없음·조정 후 음수)을 여기서 미리 걸러낸다.
+      const adjRows = await client.query(
+        `SELECT channel, type_key, agent_id, qty_delta, applied_delta
+           FROM billing_qty_adjustments
+          WHERE company_id = $1::uuid AND period_start = $2::date AND period_end = $3::date`,
+        [target.company_id, toDayKey(target.billing_start), toDayKey(target.billing_end)],
+      );
+      if (adjRows.rows.length > 0) {
+        const agg = await client.query(
+          `SELECT channel, message_type, agent_id, unit_price, SUM(success_count)::int AS cnt
+             FROM billing_items WHERE billing_id = ANY($1::uuid[])
+            GROUP BY channel, message_type, agent_id, unit_price`,
+          [targetIds],
+        );
+        const bad: string[] = [];
+        for (const a of adjRows.rows) {
+          const hits = agg.rows.filter((g: any) =>
+            String(g.channel) === String(a.channel)
+            && String(g.message_type) === String(a.type_key)
+            && (a.agent_id ? String(g.agent_id || '') === String(a.agent_id) : true));
+          if (hits.length === 0) { bad.push(`${a.channel}/${a.type_key} — 청구 항목 없음`); continue; }
+          const base = hits.reduce((s: number, g: any) => s + (Number(g.cnt) || 0), 0) - (Number(a.applied_delta) || 0);
+          if (base + (Number(a.qty_delta) || 0) < 0) {
+            bad.push(`${a.channel}/${a.type_key} — 조정 후 ${base + (Number(a.qty_delta) || 0)}건`);
+          }
+        }
+        if (bad.length > 0) {
+          await client.query('ROLLBACK');
+          return res.status(422).json({
+            error: `수량 조정을 적용할 수 없어 재발행을 중단했습니다 (${bad.join(', ')}). 기존 정산은 그대로 있습니다 — 조정을 고친 뒤 다시 시도해주세요.`,
+            code: 'BILLING_QTY_ADJUST_PREFLIGHT',
+          });
+        }
+      }
+    }
+
+    // ★ 2026-08-04 이 장들이 실었던 수량 조정을 미적용으로 되돌린다 — 조정 자체는 회사×기간 축이라
+    //   남고, "어느 청구서에 얼마가 실렸는가"만 지운다. 안 되돌리면 재발행 화면의 원래 수량이 틀어진다.
+    await client.query(
+      `UPDATE billing_qty_adjustments SET applied_delta = 0, applied_billing_id = NULL
+        WHERE applied_billing_id = ANY($1::uuid[])`,
+      [targetIds],
+    );
+
     const restored = await client.query(
       `UPDATE ai_credit_requests
           SET billed = false, billed_invoice_id = NULL
@@ -1505,6 +1860,34 @@ router.delete('/:id', async (req: Request, res: Response) => {
     if (restoredOverage.rowCount) {
       console.log(`[정산삭제] billing=${req.params.id} 초과사용 크레딧 ${restoredOverage.rowCount}건 미청구 상태로 복구`);
     }
+    // ★ 2026-08-04 수정 재발행 — 삭제가 커밋된 **같은 요청 안에서** 곧바로 다시 발행한다.
+    //   회사·기간·발행 단위는 서버가 잠근 행에서 다시 구한다(화면이 넘긴 값을 믿지 않는다 —
+    //   조회가 실패해 옛 값이 남아 있으면 다른 회사로 발행될 수 있었다).
+    //   수량 조정은 회사×기간 축이라 이 재발행에 그대로 다시 실린다.
+    if (reissue) {
+      const issueScope = String(target.scope) === 'combined' ? 'combined' : 'by_user';
+      try {
+        const out = await issueBilling({
+          company_id: String(target.company_id),
+          scope: issueScope,
+          billing_start: toDayKey(target.billing_start),
+          billing_end: toDayKey(target.billing_end),
+          adminId: (req as any).user?.userId || null,
+        });
+        return res.json({ success: true, deleted_ids: targetIds, reissued: true, billing: out.billing, sheet_count: out.sheet_count });
+      } catch (reErr: any) {
+        // 삭제는 이미 커밋됐다 — 되돌릴 수 없으므로 상태를 정확히 알린다.
+        const body = reErr instanceof BillingIssueError ? reErr.body : { error: String(reErr?.message || reErr) };
+        console.error(`[정산][수정재발행실패] company=${target.company_id} ${toDayKey(target.billing_start)}~${toDayKey(target.billing_end)} — 삭제는 완료됨:`, body?.error || reErr);
+        return res.status(reErr instanceof BillingIssueError ? reErr.status : 500).json({
+          ...body,
+          code: body?.code || 'BILLING_REISSUE_FAILED',
+          deleted: true,
+          error: `기존 정산은 삭제됐지만 재발행에 실패했습니다 — ${body?.error || '알 수 없는 오류'}. 원인을 고친 뒤 정산 목록에서 같은 기간으로 다시 발행해주세요.`,
+        });
+      }
+    }
+
     return res.json({
       success: true,
       restored_credit_requests: restored.rowCount || 0,
@@ -1525,6 +1908,15 @@ router.delete('/:id', async (req: Request, res: Response) => {
   } finally {
     client.release();
   }
+};
+router.delete('/:id', handleBillingDelete);
+
+// POST /:id/reissue — 수량 정정 후 수정 재발행 (★2026-08-04 서수란 접수)
+//   삭제와 재발행을 **한 요청**으로 묶는다. 화면이 두 번 호출하면 사이의 어떤 실패도
+//   "정산만 사라진 상태"를 남기고, 조회 실패로 남아 있던 옛 회사·기간으로 발행할 여지도 있었다.
+router.post('/:id/reissue', async (req: Request, res: Response) => {
+  (req as any).body = { ...(req.body || {}), __reissue: true, reason: String((req.body || {}).reason || '').trim() || '수량 정정 후 수정 재발행' };
+  return handleBillingDelete(req, res);
 });
 
 // ============================================================
@@ -2131,7 +2523,8 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
             </tr>`).join('');
 
     // 3) 메일 발송
-    const htmlBody = `
+    // ★ 2026-08-04 컨펌 링크는 트랜잭션 안에서 확보한 토큰으로 만든다 — 본문을 함수로 둔다.
+    const buildHtmlBody = (viewUrl: string | null) => `
       <div style="font-family: 'Apple SD Gothic Neo', sans-serif; max-width: 600px; margin: 0 auto;">
         <div style="background: linear-gradient(135deg, #4338ca, #6366F1); padding: 24px; border-radius: 12px 12px 0 0;">
           <h2 style="color: white; margin: 0; font-size: 20px;">📊 정산서 안내</h2>
@@ -2154,6 +2547,7 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
             <span style="font-size: 13px; color: #6B7280;">공급가액 ₩${n(bil.subtotal).toLocaleString()} + VAT ₩${n(bil.vat).toLocaleString()}</span><br/>
             <span style="font-size: 20px; font-weight: 700; color: #4338CA;">합계 ₩${n(bil.total_amount).toLocaleString()}</span>
           </div>
+          ${viewUrl ? renderConfirmBlockHtml(viewUrl) : ''}
           <p style="font-size: 13px; color: #9CA3AF; margin-top: 16px;">
             상세 내역은 첨부된 PDF를 확인해주세요.<br/>
             문의사항이 있으시면 ${INVITO_INFO.phone}로 연락 부탁드립니다.
@@ -2226,6 +2620,32 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
       );
       emailedAt = marked.rows[0]?.emailed_at || null;
 
+      // ★ 2026-08-04 컨펌 토큰을 **같은 트랜잭션에서** 확보한다 — 메일은 나갔는데 추적행이 없으면
+      //   업체가 링크를 눌러도 유효하지 않은 링크가 되고, 이의를 낼 창구가 다시 사라진다.
+      //   살아 있는 추적행이 있으면 그 토큰을 그대로 쓴다(재발송에도 링크가 바뀌지 않는다).
+      //
+      //   토큰을 못 만들면 **보내지 않는다.** 컨펌 블록만 빼고 보내면 업체는 이의를 낼 창구가 없는데
+      //   3일 뒤 자동 계산서는 그대로 나간다 — 조용히 빠지는 쪽이 더 나쁘다(fail-closed).
+      let token: string;
+      try {
+        token = await ensureConfirmationToken(mailClient, {
+          billingId: String(req.params.id),
+          companyId: String(bil.company_id),
+          userId: bil.user_id ? String(bil.user_id) : null,
+          email: sendTo,
+          cc: ccList,
+          billingEnd: bEnd,
+        });
+      } catch (tokenErr: any) {
+        const tmsg = String(tokenErr?.message || '');
+        if (tmsg.includes('does not exist') && (tmsg.includes('relation') || tmsg.includes('column'))) {
+          throw new Error('DB 마이그레이션 필요 — invoice_confirmations 테이블·컬럼 확인 요청. 컨펌 링크 없는 정산서는 보내지 않습니다.');
+        }
+        throw tokenErr;
+      }
+      const viewUrl = `${String(process.env.HANJUL_BASE_URL || 'https://hanjul.ai').replace(/\/+$/, '')}/api/invoice-view/${token}`;
+      const htmlBody = buildHtmlBody(viewUrl);
+
       // SMTP는 잠금 안에서. 타임아웃이 없으면 이 트랜잭션이 커넥션과 잠금을 무한정 붙잡는다.
       //   nodemailer의 `socketTimeout`은 **비활동** 상한이라 총 소요 시간을 못 막는다(6차 ①-1) —
       //   조금씩 계속 오가면 40초를 넘길 수 있다. 그래서 총 시간 상한을 여기서 따로 건다.
@@ -2255,6 +2675,15 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
         }),
       ]).finally(() => { if (mailTimer) clearTimeout(mailTimer); });
 
+      // ★ 2026-08-04 메일이 실제로 나간 지금에야 자동 발행 대상으로 승격한다(정책 manual이면 그대로).
+      //   재발송으로 살아난 건도 여기서 마감이 다시 잡혀 "수동에 영영 갇히는" 경로가 사라진다.
+      await markConfirmationDelivered(mailClient, {
+        billingId: String(req.params.id),
+        companyId: String(bil.company_id),
+        billingEnd: bEnd,
+        email: sendTo,
+      });
+
       await mailClient.query('COMMIT');
     } catch (mailErr: any) {
       // ★ 2026-07-26 Codex 7차 ① — 타임아웃은 **되돌리지 않고 커밋한다.**
@@ -2264,6 +2693,8 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
       //   두 불확실 중 고객에게 두 번 가는 쪽을 막는다 — 표시를 남기면 다음 클릭은 반드시 재발송 확인을 거친다.
       if (mailTimedOut) {
         try {
+          // 전달 불명 — 컨펌 행은 만들 때부터 `manual_wait`이라 승격하지 않으면 자동 발행이 돌지 않는다.
+          //   여기서는 아무것도 승격하지 않고 그대로 커밋한다(발송 표시만 남겨 중복 발송을 막는다).
           await mailClient.query('COMMIT');
           console.error(`[정산][메일발송미확정] billing=${req.params.id} to=${sendTo} — ${MAIL_TOTAL_TIMEOUT_MS / 1000}초 초과로 대기 중단. 발송 여부 불명이라 발송 표시는 남긴다(중복 발송 차단).`);
         } catch (commitErr: any) {

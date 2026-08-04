@@ -15,6 +15,9 @@
 
 import pool from '../config/database';
 import { isPopbillEnabled, issueReadyTaxbills, processTaxbillEmailResends } from './taxbill-popbill';
+// ★ 2026-08-04 이의신청 내부 통지 — 이의 트랜잭션에서 SMTP를 부르면 회사 자원을 든 채 메일 서버를
+//   기다려 그 회사 발행이 멈춘다. 내구 기록(objection_at)만 남기고 여기서 소비한다.
+import { processObjectionNotifications } from './invoice-confirm';
 
 const log = (msg: string) => console.log(`[세금계산서워커] ${msg}`);
 
@@ -63,6 +66,22 @@ async function tick(): Promise<void> {
       //   같은 tick에서 발행 직후 돌아 "발행 직후 참조 수신" 안내가 성립한다. 결과 로그는 패스 내부가 남긴다.
       const resend = await processTaxbillEmailResends(20);
       if (resend.skipped && resend.skipped.includes('미생성')) log(`재전송 패스 건너뜀 — ${resend.skipped}`);
+    }
+
+    // ★ 2026-08-04 이의신청 통지 — 팝빌 게이트와 무관하다(계산서가 아니라 우리 담당자에게 가는 메일).
+    //   자기 try로 감싼다 — ALTER 미실행 환경에서 이 패스가 tick 전체(상태 전이·발행)를 멈추면 안 된다.
+    try {
+      const objection = await processObjectionNotifications(10);
+      if (objection.sent > 0 || objection.failed > 0) {
+        log(`이의신청 통지 ${objection.sent}건 발송${objection.failed > 0 ? ` · 실패 ${objection.failed}건` : ''}`);
+      }
+    } catch (objErr: any) {
+      const omsg = objErr?.message || '';
+      if (omsg.includes('does not exist') && (omsg.includes('relation') || omsg.includes('column'))) {
+        log('이의신청 통지 건너뜀 — DB 마이그레이션 미실행(invoice_confirmations.objection_notified_at 추가 필요)');
+      } else {
+        console.error('[세금계산서워커] 이의신청 통지 실패:', omsg || objErr);
+      }
     }
   } catch (err: any) {
     const msg = err?.message || '';

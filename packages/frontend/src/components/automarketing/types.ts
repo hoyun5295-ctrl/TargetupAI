@@ -264,6 +264,8 @@ export interface SegmentParamDef {
   key: string;
   label: string;
   unit: string;
+  /** 자주 쓰는 값 — backend가 축마다 정한다(프런트가 목록을 갖지 않는다). */
+  presets?: number[];
   default: number;
   min: number;
   max: number;
@@ -276,6 +278,12 @@ export interface SegmentAvailability {
   /** 왜 되는지 / 왜 안 되는지 — 그대로 노출한다. */
   reason: string;
   params: SegmentParamDef[];
+  /**
+   * ★ 2026-08-04 변화 축 — 지난번 발송 때와 비교해 대상을 정하는 조건.
+   * 신규 등록에는 비교할 지난번이 없다. 그 상태를 "대상 0"이나 오류로 보여주면 담당자는 고장으로 읽으므로
+   * 화면이 이 값을 보고 **첫 회차 안내**를 대신 띄운다(정상 동작이다).
+   */
+  needsCycleBaseline?: boolean;
 }
 
 // ★ 2026-08-03 타겟팅 재설계: 고정 축 목록(TARGET_HINT_OPTIONS)은 여기서 제거했다.

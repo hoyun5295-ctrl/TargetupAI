@@ -55,6 +55,100 @@ export interface SheetForConfirm {
   total_amount: any;
 }
 
+/**
+ * 컨펌 버튼 + 이의 안내 — **두 발송 경로가 같은 문구를 쓴다.**
+ *
+ * ★ 2026-08-04 신설(서수란 0803·0804 접수). 정산서 메일이 두 벌이었는데 컨펌·이의 안내가
+ * 일괄발급 쪽에만 있었다. 개별 발송(정산 목록의 발송 모달)으로 나간 메일에는 버튼도 이의 링크도
+ * 없어서, 업체가 "수량이 다르다"고 말할 창구 자체가 그 메일에 없었다(제주한라병원 LMS 3건 차이).
+ * 본문 전체를 합치지 않고 이 블록만 공용으로 둔다 — 문구가 한 곳이면 갈라지지 않는다.
+ */
+export function renderConfirmBlockHtml(viewUrl: string): string {
+  return `
+      <div style="text-align:center;margin:20px 0 0;">
+        <a href="${viewUrl}" style="display:inline-block;padding:14px 30px;background:#4f46e5;color:#fff;border-radius:8px;text-decoration:none;font-size:15px;font-weight:600;">컨펌하기</a>
+      </div>
+      <p style="font-size:12px;color:#6b7280;line-height:1.7;margin:14px 0 0;">
+        컨펌해 주시면 세금계산서 발행이 진행됩니다.<br/>
+        3일 안에 응답이 없으면 내역이 확정된 것으로 보고 발행이 진행됩니다.<br/>
+        <b>수량이나 금액이 다르면 같은 화면에서 이의신청을 남겨 주세요.</b> 확인 후 정정해 다시 보내드립니다.
+      </p>`;
+}
+
+/**
+ * 이 장의 컨펌 토큰을 확보한다 — 살아 있는 추적행이 있으면 그 토큰, 없으면 만든다.
+ *
+ * **호출측 트랜잭션 안에서 부른다**(client를 받는 이유) — 발송 표시와 같은 트랜잭션이어야
+ * "메일은 나갔는데 추적행이 없는" 상태가 생기지 않는다.
+ *
+ * 수신자를 화면에서 바꿔 보내도 **기존 추적행의 `recipient_email`은 건드리지 않는다.**
+ * 추적행은 장당 하나이고 누가 링크를 누르든 한 곳에만 기록돼야 상태가 갈라지지 않는다.
+ */
+export async function ensureConfirmationToken(
+  client: { query: (text: string, params?: any[]) => Promise<any> },
+  opts: {
+    billingId: string;
+    companyId: string;
+    /** 계정 장이면 그 계정, 회사·공통 장이면 null */
+    userId: string | null;
+    /** 새로 만들 때 기록할 수신자 */
+    email: string;
+    cc: string[];
+    /** 청구 종료일(YYYY-MM-DD) — 계산서 발행일·마감 계산 기준 */
+    billingEnd: string;
+  },
+): Promise<string> {
+  const found = await client.query(
+    `SELECT token FROM invoice_confirmations
+      WHERE billing_id = $1::uuid AND superseded_at IS NULL
+      ORDER BY created_at DESC LIMIT 1`,
+    [opts.billingId],
+  );
+  if (found.rows.length > 0) return String(found.rows[0].token);
+
+  const settings = await getCompanyBillingSettings(opts.companyId);
+  const token = randomBytes(24).toString('hex'); // 48자 — 컬럼 varchar(64)
+  await client.query(
+    // ★ 2026-08-04 **`manual_wait`으로 만든다**(Codex 재검증 critical) — 자동 발행 타이머는
+    //   메일이 실제로 나간 뒤에만 돌아야 한다. `pending`으로 먼저 만들면 SMTP 실패·타임아웃으로
+    //   고객이 못 받았는데도 3일 뒤 세금계산서가 자동 발행된다. 승격은 `markConfirmationDelivered`.
+    `INSERT INTO invoice_confirmations (
+       billing_id, company_id, recipient_user_id, recipient_email, token,
+       sent_at, taxbill_status, taxbill_issue_date, taxbill_due_at, cc_emails
+     ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, NOW(), 'manual_wait', $6::date, $7, $8::text[])`,
+    [
+      opts.billingId, opts.companyId, opts.userId, opts.email, token,
+      computeTaxbillIssueDate(settings.taxbillDayPolicy, opts.billingEnd),
+      computeTaxbillDueAt(Date.now(), opts.billingEnd),
+      opts.cc.length > 0 ? opts.cc : null,
+    ],
+  );
+  return token;
+}
+
+/**
+ * 메일이 실제로 나간 뒤 컨펌 행을 **자동 발행 대상으로 승격**한다.
+ *
+ * ★ 2026-08-04 신설(Codex 재검증 critical·high). 전달 여부와 자동 발행 정책이 한 컬럼에 섞여 있어
+ * ①전달 전에 타이머가 돌고 ②전달 불명으로 내려둔 행이 재발송에 성공해도 영영 수동에 갇혔다.
+ * 이제 만들 때는 항상 멈춰 있고, **여기서만** 정책대로 열린다. 마감은 실제 발송 시각 기준으로 다시 잡는다.
+ * 회사 정책이 `manual`(직접선택)이면 승격하지 않는다 — 그건 전달 상태가 아니라 정책이다.
+ */
+export async function markConfirmationDelivered(
+  client: { query: (text: string, params?: any[]) => Promise<any> },
+  opts: { billingId: string; companyId: string; billingEnd: string; email?: string },
+): Promise<void> {
+  const settings = await getCompanyBillingSettings(opts.companyId);
+  if (settings.taxbillDayPolicy === 'manual') return;
+  await client.query(
+    `UPDATE invoice_confirmations
+        SET taxbill_status = 'pending', sent_at = NOW(), taxbill_due_at = $2,
+            recipient_email = COALESCE($3, recipient_email)
+      WHERE billing_id = $1::uuid AND superseded_at IS NULL AND taxbill_status = 'manual_wait'`,
+    [opts.billingId, computeTaxbillDueAt(Date.now(), opts.billingEnd), opts.email || null],
+  );
+}
+
 export interface ConfirmSendSummary {
   sent: number;            // 메일 발송 + 추적 행 생성
   skippedNoEmail: number;  // 담당자 이메일 미등록 — 자동화 제외
@@ -127,7 +221,6 @@ export async function retryUnsentConfirmations(billingId: string): Promise<Retry
   });
   return { ...summary, targeted: r.rows.length, companyName: String(first.company_name || '') };
 }
-
 /** 발행 직후 장별 메일 발송 + 컨펌 추적 행 생성. 실패는 집계로 돌려주고 던지지 않는다(발행 자체는 성공이다). */
 export async function createAndSendConfirmations(opts: {
   companyId: string;
@@ -207,7 +300,9 @@ export async function createAndSendConfirmations(opts: {
         [
           sheet.id, companyId,
           sheet.scope === 'by_user' ? sheet.user_id : null,
-          email, token, initialStatus, issueDate,
+          // ★ 2026-08-04 적재는 항상 멈춘 상태로 — 자동 발행 타이머는 메일이 실제로 나간 뒤에만 돈다.
+          //   승격은 아래 2단계의 발송 성공 지점에서 `markConfirmationDelivered`가 한다.
+          email, token, 'manual_wait', issueDate,
           computeTaxbillDueAt(Date.now(), billingEnd),
           // 참조는 사본만 받는다 — 토큰 행을 따로 만들면 A는 컨펌·B는 이의인 상태가 생겨 판정이 갈라진다.
           resolved.cc.length > 0 ? resolved.cc : null,
@@ -244,12 +339,7 @@ export async function createAndSendConfirmations(opts: {
             ${esc(periodLabel)} 이용분 거래내역서를 <b>첨부</b>해 드렸습니다. 내용을 확인하신 뒤 아래 버튼을 눌러 주세요.
           </p>
           <p style="font-size:15px;margin:0 0 20px;">청구 금액(부가세 포함): <b>${amount.toLocaleString()}원</b></p>
-          <a href="${viewUrl}" style="display:inline-block;padding:14px 30px;background:#4f46e5;color:#fff;border-radius:8px;text-decoration:none;font-size:15px;font-weight:600;">컨펌하기</a>
-          <p style="font-size:12px;color:#6b7280;line-height:1.7;margin:20px 0 0;">
-            컨펌해 주시면 세금계산서 발행이 진행됩니다.<br/>
-            3일 안에 응답이 없으면 내역이 확정된 것으로 보고 발행이 진행됩니다.<br/>
-            내용에 이견이 있으시면 같은 화면에서 이의신청을 남겨 주세요.
-          </p>
+${renderConfirmBlockHtml(viewUrl)}
         </div>
       </div>`;
 
@@ -337,12 +427,10 @@ export async function createAndSendConfirmations(opts: {
 
       // 실제로 나간 시각으로 추적행을 확정한다. 마감은 **발송일 기준** 3일 뒤 09:00 KST(익월 10일 캡).
       //   적재는 오늘 값으로 넣어두는데, 재시도가 다음 날 성공하면 그날 기준으로 다시 잡혀야 한다.
-      await client.query(
-        `UPDATE invoice_confirmations
-            SET sent_at = NOW(), recipient_email = $2, taxbill_due_at = $3
-          WHERE billing_id = $1::uuid AND superseded_at IS NULL`,
-        [sheet.id, email, computeTaxbillDueAt(Date.now(), billingEnd)],
-      );
+      // ★ 2026-08-04 여기서 **처음으로** 자동 발행 대상이 된다(정책이 manual이면 그대로 멈춰 있다).
+      await markConfirmationDelivered(client, {
+        billingId: sheet.id, companyId, billingEnd, email,
+      });
       await client.query('COMMIT');
     } catch (err: any) {
       try { await client.query('ROLLBACK'); } catch { /* 타임아웃 경로는 이미 COMMIT됨 — 무해한 no-op */ }
@@ -371,4 +459,142 @@ export async function createAndSendConfirmations(opts: {
   }
 
   return summary;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 이의신청 내부 통지 (★2026-08-04 서수란 접수)
+// ═══════════════════════════════════════════════════════════
+//
+// 이의는 DB에만 남고 아무에게도 알리지 않았다 — 현황판에 들어가 봐야 알 수 있었다.
+// **이의 트랜잭션에서 메일을 보내지 않는다**: 그 트랜잭션은 발급 큐를 보류하며 회사 자원을 잡고 있고,
+// 거기서 SMTP를 기다리면 응답 없는 메일 서버 하나가 그 회사 발행을 통째로 멈춘다
+// (0731 `taxbill_email_resends`에서 이미 굳은 계약). `objection_at`이 이미 내구 기록이라
+// 별도 큐도 필요 없다 — 워커가 "아직 통지 안 한 이의"를 집어 보낸다.
+
+/** 재시도 상한 — 넘으면 그 행은 더 보내지 않는다(수동 확인 몫). `taxbill_email_resends`와 같은 값. */
+const OBJECTION_NOTIFY_MAX_ATTEMPTS = 5;
+let objectionRecipientWarned = false;
+
+/** (순수) ENV 수신처 파싱 — 쉼표 구분, 형식이 맞는 주소만. */
+export function parseObjectionAlertList(raw: any): string[] {
+  const out: string[] = [];
+  for (const part of String(raw ?? '').split(',')) {
+    const e = part.trim();
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) && !out.includes(e)) out.push(e);
+  }
+  return out;
+}
+
+export interface ObjectionNotifyResult { sent: number; failed: number; skipped?: string }
+
+/** 미통지 이의를 내부 담당자에게 메일로 알린다. 워커가 5분마다 부른다. */
+export async function processObjectionNotifications(limit = 10): Promise<ObjectionNotifyResult> {
+  const to = parseObjectionAlertList(process.env.BILLING_OBJECTION_ALERT_TO);
+  const bcc = parseObjectionAlertList(process.env.BILLING_OBJECTION_ALERT_BCC);
+  if (to.length === 0 && bcc.length === 0) {
+    // 조용히 넘기면 이의가 영영 묻힌다 — 기동 후 한 번은 반드시 남긴다.
+    if (!objectionRecipientWarned) {
+      objectionRecipientWarned = true;
+      console.error('[이의통지] 수신처 미설정(BILLING_OBJECTION_ALERT_TO/BCC) — 이의신청이 들어와도 메일이 나가지 않습니다.');
+    }
+    return { sent: 0, failed: 0, skipped: '수신처 미설정' };
+  }
+
+  // ★ 2026-08-04 패스 전체를 advisory lock으로 단일화한다(Codex 적대검증 high).
+  //   조회·시도증가·발송·확정이 각각 다른 트랜잭션이라, tick이 겹치거나 인스턴스가 둘이면
+  //   같은 이의를 두 번 보낸다. 세금계산서 재전송 패스와 같은 방식이다.
+  // ⚠ 세션 락은 **연결에 귀속**된다 — `pool.query`로 잡고 풀면 해제가 다른 연결에서 돌아 실패하고,
+  //   그 사이 소유 연결이 다른 실행에 대여되면 재진입으로 중복 실행이 뚫린다(Codex 재검증 high).
+  //   전용 client를 잡아 획득부터 해제까지 그 연결로 유지한다.
+  const lockClient = await pool.connect();
+  let held = false;
+  try {
+    const lock = await lockClient.query(`SELECT pg_try_advisory_lock(hashtext('billing-objection-notify')) AS ok`);
+    if (!lock.rows[0]?.ok) return { sent: 0, failed: 0, skipped: '다른 실행이 처리 중' };
+    held = true;
+    return await runObjectionNotifications(limit, to, bcc);
+  } finally {
+    if (held) {
+      try {
+        const un = await lockClient.query(`SELECT pg_advisory_unlock(hashtext('billing-objection-notify')) AS ok`);
+        if (!un.rows[0]?.ok) console.error('[이의통지] advisory lock 해제 실패 — 연결 반납으로 정리됨');
+      } catch (unErr: any) {
+        console.error('[이의통지] advisory lock 해제 오류:', unErr?.message || unErr);
+      }
+    }
+    lockClient.release();
+  }
+}
+
+async function runObjectionNotifications(limit: number, to: string[], bcc: string[]): Promise<ObjectionNotifyResult> {
+  const rows = await pool.query(
+    `SELECT ic.id, ic.objection_text, ic.recipient_email, ic.token, ic.objection_notify_attempts,
+            to_char(ic.objection_at, 'YYYY-MM-DD HH24:MI') AS objection_at,
+            to_char(b.billing_start, 'YYYY-MM-DD') AS billing_start,
+            to_char(b.billing_end,   'YYYY-MM-DD') AS billing_end,
+            b.total_amount, c.company_name
+       FROM invoice_confirmations ic
+       JOIN billings b ON b.id = ic.billing_id
+       JOIN companies c ON c.id = ic.company_id
+      WHERE ic.objection_at IS NOT NULL
+        AND ic.objection_notified_at IS NULL
+        AND ic.objection_notify_attempts < $2
+      ORDER BY ic.objection_at
+      LIMIT $1`,
+    [limit, OBJECTION_NOTIFY_MAX_ATTEMPTS],
+  );
+  if (rows.rows.length === 0) return { sent: 0, failed: 0 };
+
+  const transporter = getTransporter();
+  let sent = 0;
+  let failed = 0;
+  for (const r of rows.rows) {
+    // 시도 횟수를 **보내기 전에** 올린다 — 여기서 죽어도 다음 tick이 같은 행을 무한히 다시 잡지 않는다.
+    await pool.query(
+      `UPDATE invoice_confirmations SET objection_notify_attempts = objection_notify_attempts + 1 WHERE id = $1::uuid`,
+      [r.id],
+    );
+    const amount = Number(r.total_amount) || 0;
+    const html = `
+      <div style="max-width:560px;margin:0 auto;font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#1f2937;">
+        <div style="padding:24px;border:1px solid #e5e7eb;border-radius:12px;">
+          <p style="font-size:17px;font-weight:700;margin:0 0 4px;">거래내역서 이의신청이 접수됐습니다</p>
+          <p style="font-size:13px;color:#6b7280;margin:0 0 16px;">${esc(r.company_name)} · ${esc(r.billing_start)} ~ ${esc(r.billing_end)}</p>
+          <table style="width:100%;font-size:14px;border-collapse:collapse;">
+            <tr><td style="padding:6px 0;color:#6b7280;width:110px;">접수 시각</td><td style="padding:6px 0;">${esc(r.objection_at)}</td></tr>
+            <tr><td style="padding:6px 0;color:#6b7280;">청구 금액</td><td style="padding:6px 0;">${amount.toLocaleString()}원</td></tr>
+            <tr><td style="padding:6px 0;color:#6b7280;">수신 담당자</td><td style="padding:6px 0;">${esc(r.recipient_email)}</td></tr>
+          </table>
+          <div style="margin:16px 0 0;padding:14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:14px;line-height:1.7;white-space:pre-wrap;">${esc(r.objection_text)}</div>
+          <p style="font-size:12px;color:#6b7280;line-height:1.7;margin:16px 0 0;">
+            이 건은 세금계산서 자동 발행에서 제외돼 있습니다.<br/>
+            수량·금액을 정정한 뒤 수정 재발행하면 새 컨펌 메일이 나갑니다.
+          </p>
+        </div>
+      </div>`;
+    try {
+      await transporter.sendMail({
+        from: `"한줄로 정산" <${process.env.SMTP_USER || INVITO_INFO.email}>`,
+        replyTo: INVITO_INFO.email,
+        ...(to.length > 0 ? { to } : {}),
+        ...(bcc.length > 0 ? { bcc } : {}),
+        subject: `[한줄로] 이의신청 — ${r.company_name} (${String(r.billing_start).slice(0, 7)})`,
+        html,
+      });
+      await pool.query(
+        `UPDATE invoice_confirmations SET objection_notified_at = NOW() WHERE id = $1::uuid`,
+        [r.id],
+      );
+      sent += 1;
+    } catch (err: any) {
+      failed += 1;
+      const attemptsNow = (Number(r.objection_notify_attempts) || 0) + 1;
+      console.error(`[이의통지][실패] confirmation=${r.id} ${r.company_name} (${attemptsNow}/${OBJECTION_NOTIFY_MAX_ATTEMPTS}):`, err?.message || err);
+      // 상한에 닿으면 더는 시도하지 않는다 — 조용히 사라지면 이의가 묻히므로 한 줄을 크게 남긴다.
+      if (attemptsNow >= OBJECTION_NOTIFY_MAX_ATTEMPTS) {
+        console.error(`[이의통지][포기] confirmation=${r.id} ${r.company_name} — ${OBJECTION_NOTIFY_MAX_ATTEMPTS}회 실패로 자동 통지를 중단합니다. 슈퍼관리자 이의신청 목록에서 직접 확인해주세요.`);
+      }
+    }
+  }
+  return { sent, failed };
 }

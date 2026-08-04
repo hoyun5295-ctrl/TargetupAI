@@ -65,8 +65,25 @@ interface ExtraItem {
   id: string; company_id: string; company_name: string;
   kind: string; label: string; supply_amount: number; source_ref: string | null;
   billed_billing_id: string | null;
-  /** ★ 2026-07-31 청구 귀속 — null이면 고객사 전체(공통 장) */
-  user_id?: string | null; user_name?: string | null; user_login_id?: string | null;
+  /**
+   * ★ 2026-08-04 실제로 청구될 금액은 **서버가 발행과 같은 함수로 계산해** 내려준다.
+   *   080은 스냅샷 1행(통화료)에서 이용료·부가서비스·통화료를 매핑 원장으로 파생하므로,
+   *   화면이 `supply_amount`를 그대로 보여주면 매핑을 고쳐도 옛 금액이 보인다(접수 원인).
+   */
+  billable_parts: Array<{ type_key: string; label: string; amount: number }>;
+  /** 발행에 실린 행은 null — 청구서는 굳어 있으므로 원장에서 다시 계산한 값을 보여주지 않는다 */
+  billable_supply: number | null;
+  /** 매핑이 사라진 반영분 — 그 회사 발행이 막힌다 */
+  blocks_issue?: boolean;
+  /** 매핑 비활성 = 청구 중단 */
+  inactive?: boolean;
+  /** 현행 스냅샷과 겹쳐 청구되지 않는 옛 행 — 정리 대상 */
+  legacy_superseded?: boolean;
+  map_found?: boolean | null;
+  map_label?: string | null;
+  map_charge_call_fee?: boolean | null;
+  /** ★ 2026-07-31 청구 귀속 — null이면 고객사 전체(공통 장). 080은 매핑 원장이 소유한다 */
+  sheet_user_id?: string | null; sheet_user_name?: string | null; sheet_user_login_id?: string | null;
 }
 
 const won = (n: number) => `₩${Number(n || 0).toLocaleString()}`;
@@ -184,7 +201,12 @@ export default function Billing080Modal({ open, onClose, companies }: {
       const d = await r.json();
       if (d.success) {
         setApplyResult({ applied: d.applied || [], skipped: d.skipped || [] });
-        say(`${(d.applied || []).length}개사 반영 완료`);
+        say(`${(d.applied || []).length}개사 반영 완료 — 실제 청구 금액을 현황에서 확인해주세요.`);
+        // ★ 2026-08-04 반영 직후 그 달 현황으로 바로 이동한다 — 이용료·부가서비스는 매핑 설정에서
+        //   파생되므로 "얼마가 청구되는가"는 현황 탭이 답한다(추가 클릭 없이 그 화면을 띄운다).
+        setStatusMonth(month);
+        loadItems(month);
+        setTab('status');
       } else say(d.error || '반영 실패', 'error');
     } catch { say('반영 실패', 'error'); } finally { setApplying(false); }
   };
@@ -222,31 +244,44 @@ export default function Billing080Modal({ open, onClose, companies }: {
   const [statusLoading, setStatusLoading] = useState(false);
   const [cancelAsk, setCancelAsk] = useState<string | null>(null);
   const [itemAsk, setItemAsk] = useState<string | null>(null); // 개별 항목 삭제 2단 확인
+  // ★ 2026-08-04 **입력월과 화면에 실제로 실린 월을 분리한다**(Codex 적대검증 high 수용).
+  //   하나로 두면 월 입력만 바꾸고 [조회]를 안 눌러도 취소가 살아 있어, 6월 목록을 보면서 7월 근거를
+  //   지우는 요청이 나간다. 늦게 도착한 옛 응답이 새 목록을 덮는 것도 요청 순번으로 막는다.
+  const [loadedMonth, setLoadedMonth] = useState<string | null>(null);
+  const loadSeq = useRef(0);
 
   const removeItem = async (id: string) => {
     try {
       const r = await fetch(`/api/admin/billing/extra-items/${id}`, { method: 'DELETE', headers: auth() });
       const d = await r.json();
-      if (d.success) { say('항목을 삭제했습니다.'); setItemAsk(null); loadItems(statusMonth); }
+      if (d.success) { say('항목을 삭제했습니다.'); setItemAsk(null); if (loadedMonth) loadItems(loadedMonth); }
       else say(d.error || '삭제 실패', 'error');
     } catch { say('삭제 실패', 'error'); }
   };
 
   const loadItems = useCallback(async (m: string) => {
+    const seq = ++loadSeq.current;
     setStatusLoading(true);
+    setCancelAsk(null); setItemAsk(null);
     try {
       const r = await fetch(`/api/admin/billing/extra-items?month=${m}`, { headers: auth() });
       const d = await r.json();
-      if (d.success) setItems(d.items || []);
+      if (seq !== loadSeq.current) return; // 늦게 온 옛 응답은 버린다
+      if (d.success) { setItems(d.items || []); setLoadedMonth(m); }
       else say(d.error || '조회 실패', 'error');
-    } catch { say('조회 실패', 'error'); } finally { setStatusLoading(false); }
+    } catch { if (seq === loadSeq.current) say('조회 실패', 'error'); } finally {
+      if (seq === loadSeq.current) setStatusLoading(false);
+    }
   }, []);
 
-  const cancelCompany = async (companyId: string) => {
+  // ★ 2026-08-04 범위 필수 — KT 반영을 되돌릴 때 사람이 손으로 넣은 부가서비스까지 지워지던 것을 막는다.
+  //   월은 **화면에 실린 월**(loadedMonth)로 보낸다 — 입력값을 쓰면 안 본 달이 지워진다.
+  const cancelCompany = async (companyId: string, kind: 'kt' | 'manual') => {
+    if (!loadedMonth) return;
     try {
-      const r = await fetch(`/api/admin/billing/extra-items?month=${statusMonth}&company_id=${companyId}`, { method: 'DELETE', headers: auth() });
+      const r = await fetch(`/api/admin/billing/extra-items?month=${loadedMonth}&company_id=${companyId}&kind=${kind}`, { method: 'DELETE', headers: auth() });
       const d = await r.json();
-      if (d.success) { say(`${d.deleted}건 취소했습니다.`); setCancelAsk(null); loadItems(statusMonth); }
+      if (d.success) { say(`${d.deleted}건 취소했습니다.`); setCancelAsk(null); loadItems(loadedMonth); }
       else say(d.error || '취소 실패', 'error');
     } catch { say('취소 실패', 'error'); }
   };
@@ -256,13 +291,18 @@ export default function Billing080Modal({ open, onClose, companies }: {
   const mappedRows = parse ? parse.rows.filter((r) => r.mapped) : [];
   const unmappedRows = parse ? parse.rows.filter((r) => !r.mapped) : [];
   // 회사별 그룹(반영 현황). billed = 발행에 이미 실린 항목 존재 — 취소 불가(발행 삭제 시 자동 복귀)
-  const grouped = new Map<string, { name: string; rows: ExtraItem[]; total: number; billed: boolean }>();
+  //   ★ 2026-08-04 합계는 **파생 금액**(billable_supply)이다 — 실제 청구서에 실릴 값과 같다.
+  const grouped = new Map<string, { name: string; rows: ExtraItem[]; total: number; billed: boolean; hasKt: boolean; hasManual: boolean; blocked: boolean }>();
   for (const it of items || []) {
-    if (!grouped.has(it.company_id)) grouped.set(it.company_id, { name: it.company_name, rows: [], total: 0, billed: false });
+    if (!grouped.has(it.company_id)) grouped.set(it.company_id, { name: it.company_name, rows: [], total: 0, billed: false, hasKt: false, hasManual: false, blocked: false });
     const g = grouped.get(it.company_id)!;
-    g.rows.push(it); g.total += Number(it.supply_amount) || 0;
+    g.rows.push(it); g.total += Number(it.billable_supply) || 0;
     if (it.billed_billing_id) g.billed = true;
+    if (it.blocks_issue) g.blocked = true;
+    if (it.kind === 'manual') g.hasManual = true; else g.hasKt = true;
   }
+  // 화면에 실린 월과 입력월이 다르면 목록은 옛 달의 것이다 — 그 상태에서 취소를 허용하면 다른 달이 지워진다.
+  const monthStale = loadedMonth !== null && loadedMonth !== statusMonth;
 
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/50 p-4">
@@ -484,23 +524,18 @@ export default function Billing080Modal({ open, onClose, companies }: {
                   {!applyResult ? (
                     <div className="flex items-center justify-between">
                       <div className="text-xs text-gray-500">
-                        반영 = 매핑된 {mappedRows.length}개 번호의 이용료·부가서비스·통화료가 <b>{month}</b>월 청구 항목으로 생성됩니다.
+                        반영 = 매핑된 {mappedRows.length}개 번호의 <b>{month}</b>월 통화료가 기록됩니다.
+                        이용료·부가서비스·청구 귀속은 번호 매핑 설정을 따르므로, <b>매핑을 고치면 발행에 바로 반영됩니다</b>(재반영 불필요).
                         {unmappedRows.length > 0 && ` 미매핑 ${unmappedRows.length}개는 보류됩니다.`}
                       </div>
                       <button onClick={applyParse} disabled={!parse.valid || applying || mappedRows.length === 0}
-                        className="px-5 py-2.5 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 disabled:opacity-50">
+                        className="px-5 py-2.5 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 disabled:opacity-50 whitespace-nowrap">
                         {applying ? '반영 중...' : `${month}월 청구에 반영`}
                       </button>
                     </div>
                   ) : (
-                    <div className="border rounded-lg px-4 py-3 text-sm space-y-2">
-                      <div className="font-medium text-gray-700">반영 결과</div>
-                      {applyResult.applied.map((a: any) => (
-                        <div key={a.company_id} className="text-emerald-700 text-xs">{a.company_name} — 번호 {a.numbers}개 · 항목 {a.items}건 · 공급가 {won(a.supply_total)}</div>
-                      ))}
-                      {applyResult.skipped.map((s: any, i: number) => (
-                        <div key={i} className="text-amber-700 text-xs">{s.company_name || s.number} — {s.reason}</div>
-                      ))}
+                    <div className="border rounded-lg px-4 py-3 text-xs text-gray-500">
+                      반영을 마쳤습니다 — 실제 청구될 금액은 <b>반영 현황</b> 탭에 있습니다.
                     </div>
                   )}
                 </div>
@@ -562,13 +597,30 @@ export default function Billing080Modal({ open, onClose, companies }: {
 
           {tab === 'status' && (
             <div className="space-y-4">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <input type="month" value={statusMonth} onChange={(e) => setStatusMonth(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
                 <button onClick={() => loadItems(statusMonth)} disabled={statusLoading}
                   className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 disabled:opacity-50">
                   {statusLoading ? '조회 중...' : '조회'}
                 </button>
+                {loadedMonth && (
+                  <span className={`text-xs ${monthStale ? 'text-amber-600 font-medium' : 'text-gray-400'}`}>
+                    {monthStale ? `아래 목록은 ${loadedMonth} 기준입니다 — 조회를 눌러야 ${statusMonth}로 바뀝니다` : `${loadedMonth} 기준`}
+                  </span>
+                )}
               </div>
+              {applyResult && (
+                <div className="border rounded-lg px-4 py-3 text-sm space-y-1.5">
+                  <div className="font-medium text-gray-700">직전 반영 결과</div>
+                  {applyResult.applied.map((a: any) => (
+                    <div key={a.company_id} className="text-emerald-700 text-xs">{a.company_name} — 번호 {a.numbers}개 · 통화료 {won(a.call_supply)}</div>
+                  ))}
+                  {applyResult.skipped.map((s: any, i: number) => (
+                    <div key={i} className="text-amber-700 text-xs">{[s.company_name, s.number].filter(Boolean).join(' ') || '-'} — {s.reason}</div>
+                  ))}
+                  <div className="text-[11px] text-gray-400 pt-0.5">이용료·부가서비스·청구 귀속은 번호 매핑 설정에서 나옵니다 — 아래 금액이 실제 청구액입니다.</div>
+                </div>
+              )}
               {items !== null && (grouped.size === 0 ? (
                 <div className="py-8 text-center text-sm text-gray-400">이 달에 반영된 항목이 없습니다.</div>
               ) : (
@@ -577,31 +629,72 @@ export default function Billing080Modal({ open, onClose, companies }: {
                     <div key={cid} className="border rounded-lg">
                       <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 rounded-t-lg">
                         <div className="text-sm font-medium text-gray-700">
-                          {g.name} <span className="text-gray-400 font-normal">— 공급가 {won(g.total)}</span>
+                          {g.name} <span className="text-gray-400 font-normal">— 청구 예정 {won(g.total)}</span>
                           {g.billed && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">청구서에 반영됨</span>}
+                          {g.blocked && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700">매핑 없음 — 이 회사 발행이 막힙니다</span>}
                         </div>
-                        {g.billed ? (
+                        {/* ★ 2026-08-04 KT 반영분과 수기 입력분을 따로 지운다 — 한 버튼으로 묶여 있어서
+                            KT를 다시 반영하려고 취소하면 손으로 넣은 부가서비스까지 사라졌다.
+                            월 입력만 바꾼 상태(monthStale)에서는 취소를 아예 내리지 않는다. */}
+                        {monthStale ? (
+                          <span className="text-[11px] text-amber-600">조회 후 취소할 수 있습니다</span>
+                        ) : g.billed ? (
                           <span className="text-[11px] text-gray-400">발행됨 — 취소 불가</span>
-                        ) : cancelAsk === cid ? (
+                        ) : cancelAsk?.startsWith(`${cid}:`) ? (
                           <div className="flex items-center gap-2">
-                            <button onClick={() => cancelCompany(cid)} className="text-xs text-red-600 font-medium">정말 취소</button>
+                            <span className="text-[11px] text-gray-500">
+                              {cancelAsk.endsWith(':kt') ? 'KT 반영분(080)만 지웁니다' : '수기 부가서비스만 지웁니다'}
+                            </span>
+                            <button onClick={() => cancelCompany(cid, cancelAsk.endsWith(':kt') ? 'kt' : 'manual')} className="text-xs text-red-600 font-medium">정말 취소</button>
                             <button onClick={() => setCancelAsk(null)} className="text-xs text-gray-500">닫기</button>
                           </div>
                         ) : (
-                          <button onClick={() => setCancelAsk(cid)} className="text-xs text-gray-400 hover:text-red-600">반영 취소</button>
+                          <div className="flex items-center gap-3">
+                            {g.hasKt && (
+                              <button onClick={() => setCancelAsk(`${cid}:kt`)} className="text-xs text-gray-400 hover:text-red-600">KT 반영 취소</button>
+                            )}
+                            {g.hasManual && (
+                              <button onClick={() => setCancelAsk(`${cid}:manual`)} className="text-xs text-gray-400 hover:text-red-600">수기 항목 삭제</button>
+                            )}
+                          </div>
                         )}
                       </div>
-                      <div className="px-4 py-2 text-xs text-gray-600 space-y-1">
+                      {/* ★ 2026-08-04 각 행이 청구서에 어떻게 실릴지를 그대로 편다 — 080은 스냅샷(통화료) 1행에서
+                          매핑 설정으로 이용료·부가서비스·통화료가 파생되므로, 매핑을 고치면 이 표가 바로 바뀐다. */}
+                      <div className="px-4 py-2 text-xs text-gray-600 space-y-1.5">
                         {g.rows.map((it) => (
-                          <div key={it.id} className="flex items-center justify-between gap-2">
-                            <span className="flex-1 min-w-0 truncate">{it.label}</span>
+                          <div key={it.id} className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="truncate">{it.label}{it.map_label ? ` ${it.map_label}` : ''}</span>
+                                {it.legacy_superseded && (
+                                  <span className="shrink-0 rounded bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[10px] text-amber-700">옛 항목 — 새 반영분이 대신함 · 취소로 정리</span>
+                                )}
+                                {it.blocks_issue && (
+                                  <span className="shrink-0 rounded bg-red-50 border border-red-200 px-1.5 py-0.5 text-[10px] text-red-700">매핑 없음 — 발행 차단</span>
+                                )}
+                                {it.inactive && (
+                                  <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">비활성 — 청구 안 함</span>
+                                )}
+                                {it.kind === '080_call' && it.map_found && !it.inactive && !it.map_charge_call_fee && (
+                                  <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">통화료 미청구</span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-gray-400 mt-0.5">
+                                {it.billed_billing_id
+                                  ? '발행됨 — 금액은 발행된 청구서 기준'
+                                  : it.billable_parts.length === 0
+                                    ? '청구 항목 없음'
+                                    : it.billable_parts.map((p) => `${p.label} ${won(p.amount)}`).join(' · ')}
+                              </div>
+                            </div>
                             {/* ★ 2026-07-31 귀속 — 계정 앞 항목만 표시한다(고객사 전체는 기본값이라 조용히 둔다). */}
-                            {it.user_id && (
+                            {it.sheet_user_id && (
                               <span className="shrink-0 rounded bg-violet-50 border border-violet-200 px-1.5 py-0.5 text-[10px] text-violet-700">
-                                {it.user_name || it.user_login_id}
+                                {it.sheet_user_name || it.sheet_user_login_id}
                               </span>
                             )}
-                            <span className="shrink-0">{won(Number(it.supply_amount))}</span>
+                            <span className="shrink-0 font-medium text-gray-700">{it.billable_supply === null ? '—' : won(Number(it.billable_supply))}</span>
                             {/* 개별 삭제 — 미소비만(서버 강제). 발행에 실린 행은 발행 삭제 시 자동 복귀 */}
                             {!it.billed_billing_id && (
                               itemAsk === it.id ? (
@@ -618,7 +711,10 @@ export default function Billing080Modal({ open, onClose, companies }: {
                       </div>
                     </div>
                   ))}
-                  <p className="text-[11px] text-gray-400">반영 취소는 그 달 정산이 발행되기 전까지만 가능합니다. 발행된 뒤에는 발행 삭제 후 취소해주세요.</p>
+                  <p className="text-[11px] text-gray-400">
+                    금액은 <b>번호 매핑 설정에서 계산된 실제 청구액</b>입니다 — 이용료·부가서비스·통화료 청구 여부·청구 귀속을 매핑에서 고치면 여기와 청구서가 함께 바뀝니다(재반영 불필요).
+                    취소는 그 달 정산이 발행되기 전까지만 가능하고, 발행된 뒤에는 발행 삭제 후 취소해주세요.
+                  </p>
                 </div>
               ))}
             </div>

@@ -22,7 +22,10 @@ import { hasUsableGradeOrder } from './customer-grade-rank';
 import {
   CompanySegmentFacts, SegmentAvailability, SegmentKey,
   buildSegmentPredicate, normalizeSegmentKey, resolveSegmentAvailability, getSegmentContract,
+  segmentNeedsCycleBaseline,
 } from './automarketing-segment';
+// ★ 2026-08-04 변화 축 — 표 준비 여부를 컴파일 전에 단 한 곳에서 본다(없는 표 참조 = 42P01 = 화면 500).
+import { isCycleSnapshotReady, cycleSnapshotMigrationPending } from './operator-cycle-snapshot';
 
 /**
  * 자동마케팅 발송 게이트 조합 확정.
@@ -84,7 +87,9 @@ export async function loadCompanySegmentFacts(companyId: string): Promise<Compan
       `SELECT
          COUNT(*) FILTER (WHERE recent_purchase_date IS NOT NULL)::int AS recent_purchase,
          COUNT(*) FILTER (WHERE birth_date IS NOT NULL)::int           AS birthday,
-         COUNT(*) FILTER (WHERE COALESCE(grade, '') <> '')::int        AS grade_values
+         COUNT(*) FILTER (WHERE COALESCE(grade, '') <> '')::int        AS grade_values,
+         COUNT(*) FILTER (WHERE purchase_count IS NOT NULL AND purchase_count > 0)::int        AS purchase_count_filled,
+         COUNT(*) FILTER (WHERE total_purchase_amount IS NOT NULL AND total_purchase_amount > 0)::int AS purchase_amount_filled
        FROM customers WHERE company_id = $1::uuid AND is_active = true`,
       [companyId],
     ),
@@ -96,6 +101,10 @@ export async function loadCompanySegmentFacts(companyId: string): Promise<Compan
     hasBirthday: Number(r.birthday) > 0,
     hasGradeValues: Number(r.grade_values) > 0,
     hasGradeOrder: !!gradeOrder,
+    // ⛔ 0을 "값이 있다"로 세지 않는다. 컬럼이 0으로 채워진 회사(연동 전 기본값)에서 열면
+    //   첫 구매·구매 증가 축이 영원히 아무도 못 맞히는 조건이 된다 — 잠긴 채 사유를 보이는 쪽이 맞다.
+    hasPurchaseCount: Number(r.purchase_count_filled) > 0,
+    hasPurchaseAmount: Number(r.purchase_amount_filled) > 0,
   };
 }
 
@@ -216,6 +225,11 @@ export async function compileOperatorAudience(input: {
   legacyFilters?: Record<string, any> | null;
   baseParams?: any[];    // [companyId, ...storeScope] — 미전달 시 [companyId]
   now?: Date;
+  /**
+   * 변화 축 전용 — 지난 회차 스냅샷의 주인. 신규 등록(아직 오퍼레이터가 없음)에서는 비어 있고,
+   * 그때 변화 축은 컴파일되지 않고 "첫 회차에 기준을 잡는다"는 사유로 멈춘다.
+   */
+  operatorId?: string | null;
 }): Promise<CompiledAudience> {
   const baseParams = input.baseParams && input.baseParams.length > 0 ? input.baseParams : [input.companyId];
   const raw = typeof input.segmentKey === 'string' ? input.segmentKey.trim() : '';
@@ -238,11 +252,17 @@ export async function compileOperatorAudience(input: {
   if (!availability || !availability.available) {
     throw new Error(availability?.reason || '이 발송 대상 축을 지금은 쓸 수 없습니다.');
   }
+  // ⛔ 변화 축은 회차 스냅샷 표를 참조한다. 표가 아직 없으면 조건을 만들지 않고 여기서 멈춘다 —
+  //   만들면 42P01이 화면에 500으로 나가고, 담당자는 무엇이 잘못됐는지 알 수 없다.
+  if (segmentNeedsCycleBaseline(key) && !(await isCycleSnapshotReady())) {
+    throw cycleSnapshotMigrationPending();
+  }
 
   const scratch = [...baseParams];
   const filterWhere = buildSegmentPredicate(key, input.segmentParams, scratch, {
     now: input.now || new Date(),
     topGradeValues: key === 'vip' ? await resolveTopGradeValues(input.companyId) : undefined,
+    operatorId: input.operatorId ?? null,
   });
   return {
     filterWhere,
@@ -266,6 +286,8 @@ export async function countOperatorAudienceFor(input: {
   gates?: AudienceGates;
   storeFilter?: string;
   baseParams?: any[];
+  /** 변화 축 전용 — 지난 회차 스냅샷의 주인. 없으면 변화 축은 사유와 함께 멈춘다. */
+  operatorId?: string | null;
   /** 계약 축 컴파일 결과를 호출부가 다시 쓸 때(발송 추출 등) 받아 간다. */
 }): Promise<{ count: number; compiled: CompiledAudience; gates: AudienceGates; label: string }> {
   const baseParams = input.baseParams && input.baseParams.length > 0 ? input.baseParams : [input.companyId];
@@ -275,6 +297,7 @@ export async function countOperatorAudienceFor(input: {
     segmentParams: input.segmentParams,
     legacyFilters: input.legacyFilters ?? null,
     baseParams,
+    operatorId: input.operatorId ?? null,
   });
   const gates = input.gates ?? (await resolveOperatorAudienceGates(input.companyId, null));
   const count = await countCompiledAudience({ compiled, gates, storeFilter: input.storeFilter, baseParams });

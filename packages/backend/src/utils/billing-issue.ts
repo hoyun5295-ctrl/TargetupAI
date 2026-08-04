@@ -22,11 +22,16 @@ import {
   findUnsetPricedTypes, summarizeBlockList, findBlockingPendingRows,
   resolveExistingUserIds, nullifyUnknownUserIds, checkBillingAmountIdentity, chunkArray,
   splitBillingSheets, checkSheetSumIdentity, buildPlanBillingItems, toDayKey,
-  buildExtraBillingItems,
+  buildExtraBillingItems, extraRowUserId, extraRowsBlockingIssue,
+  EXTRA_ITEM_SOURCE_SELECT, EXTRA_ITEM_SOURCE_JOIN,
   type PricedBillingItem, type BillingScope,
 } from './send-usage-aggregation';
 // ★ 2026-07-30 절사 위치 정정 — 헤더·장 공급가액을 절사된 항목줄 합에서 파생(그룹핑·절사 단일원).
 import { sumFlooredInvoiceLines } from './billing-invoice-lines';
+// ★ 2026-08-04 수량 수정 발행 — 사람이 넣은 조정을 같은 유형·같은 단가 줄로 얹는다(서수란 0804 접수).
+import {
+  loadQtyAdjustments, buildAdjustmentBillingItems, findNegativeAdjustedTypes, QtyAdjustmentError,
+} from './billing-qty-adjust';
 import { loadBillingLedger, readBillingLedgerFingerprint } from './billing-ledger';
 import { floorWon, vatOfSupply } from './money';
 import { normalizeUnitPriceBasis } from './unit-price';
@@ -433,28 +438,67 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
     //   소비 마커 = billed_billing_id(AI 크레딧 billed_billing_id 선례 미러 — Codex 1R critical 수용):
     //   분할 기간 발행(7/1~15 + 7/16~31)이 같은 달 항목을 두 번 싣는 이중청구를 마커가 구조로 막고,
     //   FK ON DELETE SET NULL이라 발행 삭제 시 자동으로 미소비 복귀한다. FOR UPDATE = 반영 취소(DELETE)와의 경합 차단.
+    // ★ 2026-08-04 이용료·KT 부가서비스·통화료 청구 여부·귀속은 **매핑 원장에서 읽는다**(EXTRA_ITEM_SOURCE_*).
+    //   그전에는 [반영]이 그 값들을 항목 행에 복사해 굳혀서, 매핑을 고쳐도 청구서가 옛 값으로 나갔다
+    //   (서수란 0803 접수 2건 — 시세이도 이용료 9,000 고정 / 금강제화 귀속 무시하고 공통 장).
+    //   스냅샷은 명세서에서만 나오는 값(그 달 그 번호의 통화료) 하나뿐이다.
     const extraRes = await client.query(
-      // ★ 2026-07-31 귀속 계정(user_id)을 함께 읽는다 — 계정별 발행에서 그 계정 장으로 분배된다.
-      //   `LEFT JOIN users`로 **그 회사에 실재하는 계정일 때만** 값을 살린다. 계정이 지워졌는데 id만
-      //   남아 있으면 존재하지 않는 계정 장이 생겨 발행 전체가 FK로 터진다 — 그 경우 공통 장으로 내린다
-      //   (회사가 갚아야 할 항목인 건 변하지 않는다. 항목을 빠뜨리는 쪽이 더 나쁘다).
-      `SELECT e.id, e.kind, e.supply_amount, e.period_month,
-              CASE WHEN u.id IS NULL THEN NULL ELSE e.user_id END AS user_id
+      `SELECT e.id, e.kind, e.supply_amount, e.period_month, e.source_ref,
+${EXTRA_ITEM_SOURCE_SELECT}
          FROM billing_extra_items e
-         LEFT JOIN users u ON u.id = e.user_id AND u.company_id = e.company_id
+${EXTRA_ITEM_SOURCE_JOIN}
         WHERE e.company_id = $1
           AND e.billed_billing_id IS NULL
           AND e.period_month <= $3::date
           AND (e.period_month + INTERVAL '1 month' - INTERVAL '1 day')::date >= $2::date
-        ORDER BY e.period_month, e.kind
+        ORDER BY e.period_month, e.kind, e.source_ref
         FOR UPDATE OF e`,
       [company_id, billing_start, billing_end],
     );
+
+    // ★ 2026-08-04 근거가 사라진 080 스냅샷이 있으면 **발행하지 않는다**(Codex 적대검증 high 수용).
+    //   번호 매핑을 지우거나 다른 회사로 옮기면 그 달 스냅샷의 계약값 근거가 없어진다. 통화료만이라도
+    //   싣는 폴백을 뒀더니, 통화료를 안 받기로 등록한 번호에 **없던 통화료가 새로 청구되는** fail-open이었다.
+    const extraBlocking = extraRowsBlockingIssue(extraRes.rows);
+    if (extraBlocking.length > 0) {
+      const shown = extraBlocking.slice(0, 5).map((b) => `${b.periodMonth.slice(0, 7)} ${b.sourceRef}`).join(', ');
+      throw new BillingIssueError(422, {
+        error: `080 번호 매핑이 없는 반영분이 있어 발행을 중단했습니다 (${shown}${extraBlocking.length > 5 ? ` 외 ${extraBlocking.length - 5}건` : ''}). 추가 청구 관리에서 그 번호의 매핑을 되살리거나 해당 반영을 취소한 뒤 발행해주세요.`,
+        code: 'BILLING_080_MAPPING_MISSING',
+        numbers: extraBlocking,
+      });
+    }
     const extraItems = buildExtraBillingItems(extraRes.rows);
     const extraIds: string[] = extraRes.rows.map((r: any) => String(r.id));
     const extraSupply = extraItems.reduce((s, i) => s + i.amountExact, 0);
     extraSupplyIssued = extraSupply;
-    const allBillingItems = extraItems.length > 0 ? [...billingItems, ...extraItems] : billingItems;
+
+    // ★ 2026-08-04 수량 수정 발행(서수란 0804 접수) — 사람이 넣은 조정을 **같은 유형·같은 단가**의
+    //   상세 행으로 얹는다. 항목줄이 (채널·유형·단가)로 묶이므로 조정 줄이 따로 서지 않고
+    //   `LMS 9,435건 × ₩22.8` 한 줄로 인쇄된다. 발송 실적 자체는 사실이라 건드리지 않는다.
+    //   조정은 발행이 아니라 회사×기간 축이라, 삭제 후 재발행해도 그대로 살아남는다.
+    let adjustItems: PricedBillingItem[] = [];
+    let adjustAppliedIds: string[] = [];
+    try {
+      const adjustRows = await loadQtyAdjustments(client, company_id, billing_start, billing_end);
+      adjustItems = buildAdjustmentBillingItems(adjustRows, priced.items, toDayKey(billing_start));
+      adjustAppliedIds = adjustRows.map((a) => String(a.id));
+    } catch (adjErr: any) {
+      if (adjErr instanceof QtyAdjustmentError) {
+        throw new BillingIssueError(422, { error: adjErr.message, code: 'BILLING_QTY_ADJUST_UNMATCHED' });
+      }
+      const amsg = String(adjErr?.message || '');
+      if (amsg.includes('does not exist') && (amsg.includes('relation') || amsg.includes('column'))) {
+        throw new BillingIssueError(503, {
+          error: 'DB 마이그레이션 필요 — billing_qty_adjustments 테이블 생성 요청',
+          code: 'DB_MIGRATION_PENDING',
+        });
+      }
+      throw adjErr;
+    }
+    const adjustSupply = adjustItems.reduce((s, i) => s + i.amountExact, 0);
+
+    const allBillingItems = [...billingItems, ...extraItems, ...adjustItems];
 
     // ★ 2026-07-26 금액 항등식 — 헤더는 `totals × 단가`, 상세는 `priceBillingRows`로 **서로 다른 코드가 계산한다.**
     //   대조는 **절사 전** 값끼리 한다.
@@ -466,6 +510,7 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
       agentAmountExact +
       planAmount +
       extraSupply + // ★ 2026-07-30 080 등 월별 추가 항목 — 빠지면 상세합≠공급가액으로 발행이 막힌다(BRAND 선례)
+      adjustSupply + // ★ 2026-08-04 수량 조정 — 헤더는 집계 축(totals×단가)이라 조정을 모른다. 여기서 더한다
       aiCreditSupply;
     const amountCheck = checkBillingAmountIdentity(
       allBillingItems.map((i) => ({ amount: i.amountExact })), aiCreditSupply, subtotalExact,
@@ -481,6 +526,22 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
 
     // 8~9) 장별 발행 — 한 요청이 N+1장을 **원자적으로** 만든다.
     const sheets = splitBillingSheets(allBillingItems, scope as BillingScope);
+
+    // ★ 2026-08-04 조정 후 수량 음수 판정은 **장을 나눈 뒤 장별로** 한다(Codex 재검증 high).
+    //   계정 축은 장이 이미 갈랐으므로, 여기서 장 안의 항목줄(채널·유형·발송ID·단가)만 본다.
+    //   회사 전체 합으로 보면 계정 A가 -1인데 B가 100건이라 통과해 과청구가 되고,
+    //   반대로 계정을 키에 넣으면 합산 발행의 정상 조정이 거부된다. 둘 다 여기서 닫힌다.
+    for (const sh of sheets) {
+      const negatives = findNegativeAdjustedTypes(sh.items as PricedBillingItem[]);
+      if (negatives.length > 0) {
+        const shown = negatives.map((v) => `${v.channel}/${v.typeKey} ${v.total}건`).join(', ');
+        throw new BillingIssueError(422, {
+          error: `수량 조정이 실제 발송량보다 커서 수량이 음수가 됩니다 (${shown}). 조정 값을 확인해주세요.`,
+          code: 'BILLING_QTY_ADJUST_NEGATIVE',
+          negatives,
+        });
+      }
+    }
 
     // ★ 2026-07-30 절사 위치 정정(Harold — "최종 청구 금액의 소수점만 버려라").
     //   일자행은 정확값이고, 절사는 각 장의 **항목줄에서 1회**(buildInvoiceLines)다.
@@ -576,10 +637,13 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
       //   귀속(user_id)이 생겨 항목이 계정 장으로 갈라진 뒤에도 그대로 두면 공통 장 하나를 지우는 순간
       //   계정 장에 실려 있는 항목까지 미청구로 풀려 다음 발행에서 이중청구가 된다(Codex 적대검증 high 후속).
       //   전체 발행(combined)은 장이 하나뿐이라 그 장이 전부 싣는다.
+      //
+      // ★ 2026-08-04 귀속 판정은 `extraRowUserId` 하나 — 080은 매핑 원장, 수기 항목은 자기 값이다.
+      //   여기서 따로 계산하면 `buildExtraBillingItems`가 실은 장과 마커가 걸리는 장이 갈라진다.
       const sheetExtraIds = scope === 'combined'
         ? extraIds
         : extraRes.rows
-            .filter((r: any) => String(r.user_id || '') === String(sheet.userId || ''))
+            .filter((r: any) => String(extraRowUserId(r) || '') === String(sheet.userId || ''))
             .map((r: any) => String(r.id));
       if (sheetExtraIds.length > 0) {
         await client.query(
@@ -636,6 +700,33 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
         code: 'BILLING_NOTHING_TO_ISSUE',
       });
     }
+
+    // ★ 2026-08-04 파생 결과가 0원이라 어느 장에도 실리지 않은 스냅샷 행(이용료·부가서비스·통화료가
+    //   전부 0인 무료 번호 — 리스킨류)도 **이 발행이 소비한 것으로 마킹한다.** 안 하면 미소비로 남아
+    //   달마다 다시 읽히고 최소과금 게이트(MIN_CHARGE_EXTRA_EXISTS)를 영구히 막는다.
+    //   `billed_billing_id IS NULL` 조건이라 이미 자기 장에 마킹된 행은 건드리지 않고,
+    //   FK `ON DELETE SET NULL`이라 그 장을 지우면 함께 미소비로 돌아온다.
+    if (extraIds.length > 0 && billing?.id) {
+      await client.query(
+        `UPDATE billing_extra_items SET billed_billing_id = $1::uuid
+          WHERE id = ANY($2::uuid[]) AND billed_billing_id IS NULL`,
+        [billing.id, extraIds],
+      );
+    }
+
+    // ★ 2026-08-04 이 발행이 **실제로 실은 조정 델타를 기록한다**(Codex 재검증 high).
+    //   그전에는 화면이 `billings.created_at > 조정.updated_at`으로 "적용됐는가"를 추론했는데,
+    //   조정을 수정하면 `updated_at`이 갱신돼 이미 실린 델타까지 미적용으로 보였다(9,435에서 -4로
+    //   고치면 base가 9,435가 되어 다음 계산이 통째로 어긋난다). 추론을 버리고 사실을 적는다.
+    //   정산을 지우면 삭제 경로가 이 값을 0으로 되돌린다.
+    if (adjustAppliedIds.length > 0 && billing?.id) {
+      await client.query(
+        `UPDATE billing_qty_adjustments SET applied_delta = qty_delta, applied_billing_id = $1::uuid
+          WHERE id = ANY($2::uuid[])`,
+        [billing.id, adjustAppliedIds],
+      );
+    }
+
     sheetsIssued = issuedSheets;
     batchIdIssued = batchId;
 
@@ -767,20 +858,39 @@ export async function issueMinimumChargeBilling(input: {
       throw new BillingIssueError(409, { error: '해당 기간이 수동 정산완료로 처리돼 있습니다. 기록 해제 후 발행해주세요.', code: 'BILLING_MANUAL_COMPLETED' });
     }
     // 안전핀 3 — 그 기간에 걸리는 미소비 추가 항목(080·부가서비스)이 있으면 정액과 섞지 않는다.
+    //   ★ 2026-08-04 판정을 **발행과 같은 파생 함수**로 바꿨다(Codex 적대검증 medium 수용).
+    //   그전에는 행이 있기만 하면 거부했는데, 전액 무료 080 번호는 파생 금액이 0줄이라 청구할 것이 없다.
+    //   그런데 일반 발행은 청구 내용이 없어 `BILLING_NOTHING_TO_ISSUE`로 막히고 소비 마킹도 롤백되므로,
+    //   그 회사는 어느 경로로도 그 달 청구서를 만들 수 없는 교착에 빠졌다.
+    //   ⇒ **실제로 청구될 금액이 있는 행만** 거부하고, 0줄 스냅샷은 이 정액 발행이 함께 소비한다.
     const extras = await client.query(
-      `SELECT 1 FROM billing_extra_items
-        WHERE company_id = $1 AND billed_billing_id IS NULL
-          AND period_month <= $3::date
-          AND (period_month + INTERVAL '1 month' - INTERVAL '1 day')::date >= $2::date
-        LIMIT 1`,
+      `SELECT e.id, e.kind, e.supply_amount, e.period_month, e.source_ref,
+${EXTRA_ITEM_SOURCE_SELECT}
+         FROM billing_extra_items e
+${EXTRA_ITEM_SOURCE_JOIN}
+        WHERE e.company_id = $1 AND e.billed_billing_id IS NULL
+          AND e.period_month <= $3::date
+          AND (e.period_month + INTERVAL '1 month' - INTERVAL '1 day')::date >= $2::date
+        FOR UPDATE OF e`,
       [company_id, billing_start, billing_end],
     );
-    if (extras.rows.length > 0) {
+    const minChargeBlocking = extraRowsBlockingIssue(extras.rows);
+    if (minChargeBlocking.length > 0) {
+      const shown = minChargeBlocking.slice(0, 5).map((b) => `${b.periodMonth.slice(0, 7)} ${b.sourceRef}`).join(', ');
+      throw new BillingIssueError(422, {
+        error: `${co.company_name}에 080 번호 매핑이 없는 반영분이 있어 발행을 중단했습니다 (${shown}). 매핑을 되살리거나 반영을 취소한 뒤 발행해주세요.`,
+        code: 'BILLING_080_MAPPING_MISSING',
+        numbers: minChargeBlocking,
+      });
+    }
+    if (buildExtraBillingItems(extras.rows).length > 0) {
       throw new BillingIssueError(422, {
         error: `${co.company_name}에 이 기간 080·부가서비스 항목이 반영돼 있습니다. 정액 발행과 섞이면 이중청구가 되므로, 일반 발행으로 청구하거나 항목을 취소한 뒤 발행해주세요.`,
         code: 'MIN_CHARGE_EXTRA_EXISTS',
       });
     }
+    // 남은 것은 청구액 0인 스냅샷뿐이다(전액 무료 번호·비활성 번호). 이 발행이 소비해 교착을 끊는다.
+    const zeroExtraIds: string[] = extras.rows.map((r: any) => String(r.id));
 
     // ★ Codex 2R 수용 — 회사 행 잠금으로 크레딧 승인·차감 경로(companies FOR UPDATE 직렬화)와 줄을 세운다.
     //   KST 자정 경계에서 전월 타임스탬프를 가진 미커밋 크레딧 트랜잭션이 READ COMMITTED 조회에 안 보이는
@@ -883,6 +993,17 @@ export async function issueMinimumChargeBilling(input: {
       ) VALUES ($1, $2, NULL, NULL, NULL, 'extra', $3::date, 'EXTRA_BASE_FEE', 0,0,0,0, $4, $4, NULL, NULL)`,
       [billing.id, company_id, billing_start, minCharge],
     );
+
+    // ★ 2026-08-04 청구액 0인 스냅샷(전액 무료·비활성 번호)을 이 청구서가 소비한다 — 같은 트랜잭션.
+    //   안 하면 그 행이 다음 달에도 게이트에 걸려 이 회사는 영원히 정액 발행을 못 한다.
+    //   FK `ON DELETE SET NULL`이라 이 청구서를 지우면 함께 미소비로 돌아온다.
+    if (zeroExtraIds.length > 0) {
+      await client.query(
+        `UPDATE billing_extra_items SET billed_billing_id = $1::uuid
+          WHERE id = ANY($2::uuid[]) AND billed_billing_id IS NULL`,
+        [billing.id, zeroExtraIds],
+      );
+    }
 
     await client.query('COMMIT');
     return { billing, usage_supply: usageSupply, min_charge_supply: minCharge };

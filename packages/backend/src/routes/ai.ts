@@ -1535,6 +1535,9 @@ router.post('/operator/target-recipients', async (req: Request, res: Response) =
       segmentParams: segment_params,
       legacyFilters: filters || {},
       baseParams,
+      // ★ 2026-08-04 변화 축 — 비교할 지난 회차의 주인. 신규 등록(미전송)이면 비어 있고,
+      //   그때 변화 축은 "첫 회차에 기준을 잡는다"는 사유로 멈춘다(화면이 먼저 안내하고 여기는 방어선).
+      operatorId: typeof operator_id === 'string' && operator_id.trim() ? operator_id.trim() : null,
     });
     // 조건 필드 동적 컬럼 — FIELD_MAP 화이트리스트 + displayName 라벨 단일 소스.
     //   계약 축은 조건 컬럼을 계약이 정하므로 filters 기반 동적 컬럼을 붙이지 않는다.
@@ -1561,6 +1564,10 @@ router.post('/operator/target-recipients', async (req: Request, res: Response) =
     });
   } catch (err: any) {
     const msg = err?.message || '';
+    // ★ 2026-08-04 변화 축 — 회차 스냅샷 표 미생성. 컴파일 단계가 코드를 붙여 던진다(500 노출 금지).
+    if (err?.code === 'DB_MIGRATION_PENDING' || err?.code === '42P01') {
+      return res.status(503).json({ success: false, error: '지난번과 달라진 점을 찾는 조건은 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 customers 컬럼 확인을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
     }
@@ -2167,6 +2174,9 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       return res.status(402).json({ success: false, error: '자동 마케팅 시작에 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
     }
     const msg = err?.message || '';
+    if (err?.code === 'DB_MIGRATION_PENDING' || err?.code === '42P01') {
+      return res.status(503).json({ success: false, error: '지난번과 달라진 점을 찾는 조건은 준비 중입니다. 다른 조건으로 저장해 주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션이 필요합니다. 운영자에게 continuous_operators 컬럼 추가(ALTER)를 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
     }
@@ -2475,6 +2485,9 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
     return res.json({ success: true, operator });
   } catch (err: any) {
     const msg = err?.message || '';
+    if (err?.code === 'DB_MIGRATION_PENDING' || err?.code === '42P01') {
+      return res.status(503).json({ success: false, error: '지난번과 달라진 점을 찾는 조건은 준비 중입니다. 다른 조건으로 저장해 주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션이 필요합니다. 운영자에게 continuous_operators 컬럼 추가(ALTER)를 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
     }
