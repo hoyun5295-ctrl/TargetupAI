@@ -15,6 +15,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import SenderRegistrationWizard from './SenderRegistrationWizard';
+// ★ 2026-08-04 IMC 계정 → 회사 이관 모달 (딜러 이관 후 발신프로필 연결 + 템플릿 가져오기)
+import ImcProfileImportModal from './ImcProfileImportModal';
 import UnsubscribeSettingModal from './UnsubscribeSettingModal';
 import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
 import TablePagination from '../common/TablePagination'; // ★ 2026-07-20 목록 공용 페이저
@@ -83,6 +85,8 @@ export default function AlimtalkSendersSection() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [showWizard, setShowWizard] = useState(false);
+  // ★ 2026-08-04 IMC 계정 → 회사 이관(발신프로필 연결 + 템플릿 가져오기) 모달
+  const [showImcImport, setShowImcImport] = useState(false);
   const [unsubTarget, setUnsubTarget] = useState<Sender | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -317,6 +321,16 @@ export default function AlimtalkSendersSection() {
           >
             상태 동기화
           </button>
+          {/* ★ 2026-08-04 딜러 이관(다우 → 휴머스온) 후 우리 쪽으로 자산을 들여오는 경로.
+              백엔드 3개(senders/imc 검색 · senders/import 연결 · templates/import 가져오기)는
+              0714~0730에 이미 있었는데 화면이 없어 이관마다 사람이 직접 호출해야 했다. */}
+          <button
+            type="button"
+            onClick={() => setShowImcImport(true)}
+            className="px-3 py-1.5 text-sm bg-violet-100 hover:bg-violet-200 text-violet-700 rounded-lg"
+          >
+            IMC에서 가져오기
+          </button>
           <button
             type="button"
             onClick={() => setShowWizard(true)}
@@ -526,6 +540,15 @@ export default function AlimtalkSendersSection() {
             setToast('발신프로필 등록 완료');
             load();
           }}
+        />
+      )}
+
+      {/* ★ 2026-08-04 IMC 이관 — 연결·가져오기가 반영되면 목록을 다시 읽는다 */}
+      {showImcImport && (
+        <ImcProfileImportModal
+          companies={companies}
+          onClose={() => setShowImcImport(false)}
+          onDone={(msg) => { setToast(msg); load(); }}
         />
       )}
 
