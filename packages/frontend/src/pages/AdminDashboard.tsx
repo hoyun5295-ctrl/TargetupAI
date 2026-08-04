@@ -710,7 +710,8 @@ const [emailResendAt, setEmailResendAt] = useState<string | null>(null);
     loadData();
   }, []);
 // ===== 정산 useEffect =====
-useEffect(() => { if (activeTab === 'billing') { loadBillings(); loadInvoices(); } }, [activeTab]);
+// ★ 2026-08-04 loadInvoices 제거 — 그 데이터를 그리던 "거래내역서 목록" 섹션이 죽은 목록이라 사라졌다.
+useEffect(() => { if (activeTab === 'billing') { loadBillings(); } }, [activeTab]);
 useEffect(() => { if (activeTab === 'billing') loadBillings(); }, [filterYear, billingUnsentOnly]);
 useEffect(() => { if (activeTab === 'deposits') loadChargeManagement(1); }, [activeTab, chargeTxCompanyFilter, chargeTxTypeFilter, chargeTxMethodFilter, chargeTxStartDate, chargeTxEndDate]);
 useEffect(() => { if (activeTab === 'deposits' || activeTab === 'credits') loadCreditRequests(); if (activeTab === 'credits') { loadAllCreditTx(1); loadCreditRisk(); } }, [activeTab]);
@@ -1429,9 +1430,13 @@ const loadManualCompletions = async (seq?: number) => {
 //   담기지는 않는다 — 자동 발급하면 안 되는 회사가 체크 한 번으로 딸려 들어가면 그게 사고다.
 //   정말 자동으로 발급하려면 정산 탭에서 "수동 정산 회사"를 끄면 된다(명시적 행위).
 // ★ 2026-07-30 최소과금(min_charge_supply) 회사도 동일 — 정액 발행(최소과금 모달)이 그 회사의 청구 경로다.
+// ★ 2026-08-04 해지(status='terminated') 회사도 동일(서수란 접수) — 계약이 끝난 회사에 자동 발급이 나가면 안 된다.
+//   목록에서 숨기지는 않는다: 해지 시각을 남기지 않아 "해지 직전 달 미청구분"이 남았는지를 데이터로 가릴 수 없고,
+//   그 판단은 사람이 목록을 보고 해야 한다. 서버(filterBillableCompanies)가 job 생성·실행에서 같은 판정을
+//   다시 하므로 **개별로 담아도 발급되지 않는다** — 미청구분은 위 [정산 생성](단건 발행)으로 처리한다.
 const bulkAddRows = (rows: any[]): number => {
   const picked = bulkPickedIds();
-  const adds = rows.filter((c) => !picked.has(c.id) && c.manual_billing !== true && c.min_charge_supply == null);
+  const adds = rows.filter((c) => !picked.has(c.id) && c.manual_billing !== true && c.min_charge_supply == null && c.status !== 'terminated');
   if (adds.length > 0) {
     setBulkCombined((prev) => [...prev, ...adds.filter((c) => c.issue_scope !== 'by_user')]);
     setBulkByUser((prev) => [...prev, ...adds.filter((c) => c.issue_scope === 'by_user')]);
@@ -9632,7 +9637,8 @@ const handleApproveRequest = async (id: string) => {
               const page = Math.min(bulkPage, totalPages);
               const visible = avail.slice((page - 1) * PAGE, page * PAGE);
               // 전체 담기에 실제로 담기는 것 — 수동 정산 + ★2026-07-30 최소과금 회사 제외(정액 발행 모달이 청구 경로)
-              const availAuto = avail.filter((c) => c.manual_billing !== true && c.min_charge_supply == null);
+              //   + ★2026-08-04 해지 회사 제외(서수란 접수). 목록에는 남고 담기에서만 빠진다.
+              const availAuto = avail.filter((c) => c.manual_billing !== true && c.min_charge_supply == null && c.status !== 'terminated');
               const availManual = avail.length - availAuto.length;
               const pageIds = visible.map((c) => c.id);
               const pageAllChecked = pageIds.length > 0 && pageIds.every((id) => bulkSelected.includes(id));
@@ -9665,7 +9671,7 @@ const handleApproveRequest = async (id: string) => {
                         </button>
                         <button onClick={bulkAddAll} disabled={availAuto.length === 0}
                           className="px-3 py-1.5 bg-violet-600 text-white rounded text-xs font-semibold hover:bg-violet-700 disabled:opacity-40">
-                          전체 {availAuto.length}개사 담기{availManual > 0 ? ` (수동·최소과금 ${availManual} 제외)` : ''}
+                          전체 {availAuto.length}개사 담기{availManual > 0 ? ` (수동·최소과금·해지 ${availManual} 제외)` : ''}
                         </button>
                       </div>
                     </div>
@@ -9687,6 +9693,10 @@ const handleApproveRequest = async (id: string) => {
                               {/* ★ 2026-07-30 최소과금 회사 — 담기에서 빠지고 최소과금 모달에서 정액 발행 */}
                               {c.min_charge_supply != null && (
                                 <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 font-semibold">최소과금</span>
+                              )}
+                              {/* ★ 2026-08-04 해지 회사 — 전체 담기에서 빠진다. 남은 미청구분이 있으면 개별로 담는다 */}
+                              {c.status === 'terminated' && (
+                                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-semibold">해지</span>
                               )}
                               <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${c.issue_scope === 'by_user' ? 'bg-sky-100 text-sky-700' : 'bg-gray-100 text-gray-500'}`}>
                                 {c.issue_scope === 'by_user' ? '계정별' : '전체'}
@@ -10163,14 +10173,20 @@ const handleApproveRequest = async (id: string) => {
                         </td>
                         <td className="px-4 py-2.5 text-center" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center justify-center gap-1">
-                          {/* ★ 2026-07-28 발행은 됐는데 메일이 안 나간 장 — 발행을 다시 하지 않고 컨펌 단계만 재시도한다.
-                              일괄발급 재실행은 기간 중복에 막히므로 이게 유일한 복구 경로다.
-                              장 id로 보낸다 — batch_id는 장이 2개 이상일 때만 생겨서 기본 발급(단일 장)에 안 닿는다. */}
+                          {/* ★ 2026-07-28 발행은 됐는데 메일이 안 나간 장 — 발행을 다시 하지 않고 컨펌 단계만 보낸다.
+                              일괄발급 재실행은 기간 중복에 막히므로 이게 유일한 경로다.
+                              장 id로 보낸다 — batch_id는 장이 2개 이상일 때만 생겨서 기본 발급(단일 장)에 안 닿는다.
+                              ★ 2026-08-04 (서수란 접수) 이 버튼이 **정산 목록의 유일한 발송 버튼**이 됐다.
+                              그전에는 확정 상태에서 별도 [발송](옛 send-email)이 함께 떠 있었는데, 그쪽은
+                              컨펌 추적행을 만들지 않고 emailed_at만 찍었다. 운영자가 그것을 정식 발송으로 알고
+                              누르면 그 순간 이 버튼의 조건(!emailed_at)이 꺼져 **그 청구서는 컨펌·이의신청·
+                              세금계산서 흐름에 영영 진입하지 못했다**(일괄발급 탭에도 안 뜬다). 경로를 하나로 합쳤다. */}
                           {!b.emailed_at && (
                               <button onClick={() => handleRetryConfirmations(b.id, b.company_name)}
                                 disabled={retryingBillingId === b.id}
+                                title="거래내역서 PDF와 컨펌 링크를 등록된 정산 수신자에게 보냅니다"
                                 className="px-2 py-1 text-xs bg-amber-100 text-amber-700 rounded hover:bg-amber-200 disabled:opacity-50 transition-colors">
-                                {retryingBillingId === b.id ? '재시도 중...' : '메일 재시도'}
+                                {retryingBillingId === b.id ? '발송 중...' : '발송'}
                               </button>
                             )}
                           {b.status === 'draft' && (
@@ -10183,13 +10199,11 @@ const handleApproveRequest = async (id: string) => {
                             )}
                             <button onClick={() => downloadBillingPdf(b.id, `${b.company_name}_${b.billing_year}_${b.billing_month}`)}
                               className="px-2 py-1 text-xs bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200 transition-colors">PDF</button>
-                            {(b.status === 'confirmed' || b.status === 'paid') && (
-                              <button onClick={() => openEmailModal(b)}
-                                className="px-2 py-1 text-xs bg-amber-100 text-amber-700 rounded hover:bg-amber-200 transition-colors flex items-center gap-0.5">
-                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-                                발송
-                              </button>
-                            )}
+                            {/* ★ 2026-08-04 옛 [발송](openEmailModal → POST /:id/send-email)을 여기서 뺐다.
+                                그 경로는 emailed_at만 찍고 컨펌 추적행을 만들지 않아, 누르는 순간 그 청구서가
+                                컨펌·이의신청·세금계산서 흐름에서 통째로 빠졌다(서수란 0804 접수의 원인).
+                                발송은 위 컨펌 경로 하나로 통일했다. 모달·라우트 자체는 남아 있으나 화면 진입점은 없다
+                                — 완전 철거는 소비처 grep 후 별건(0728 필터항목 탭과 같은 방식). */}
                             {/* ★ 2026-08-04 업체와 수량이 다를 때 사람이 실제 수량을 적고 다시 발행한다(서수란 접수). */}
                             <button onClick={() => setQtyAdjustTarget({ id: b.id, companyName: b.company_name, accountName: b.account_name || null })}
                               className="px-2 py-1 text-xs bg-violet-100 text-violet-700 rounded hover:bg-violet-200 transition-colors">수량 조정</button>
@@ -10205,67 +10219,12 @@ const handleApproveRequest = async (id: string) => {
             )}
           </div>
 
-          {/* ===== 3. 거래내역서 목록 ===== */}
-          <div className="px-6 py-5">
-            <h3 className="text-base font-semibold text-gray-800 mb-4 flex items-center gap-2">
-              <svg className="w-5 h-5 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-              </svg>
-              거래내역서 목록
-            </h3>
-
-            {invoicesLoading ? (
-              <div className="text-center py-8 text-gray-400">로딩 중...</div>
-            ) : invoices.length === 0 ? (
-              <div className="text-center py-8 text-gray-400">생성된 거래내역서가 없습니다</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-2.5 text-left text-gray-600 font-medium">고객사</th>
-                      <th className="px-4 py-2.5 text-center text-gray-600 font-medium">브랜드</th>
-                      <th className="px-4 py-2.5 text-center text-gray-600 font-medium">정산기간</th>
-                      <th className="px-4 py-2.5 text-right text-gray-600 font-medium">공급가액</th>
-                      <th className="px-4 py-2.5 text-right text-gray-600 font-medium">부가세</th>
-                      <th className="px-4 py-2.5 text-right text-gray-600 font-medium">합계</th>
-                      <th className="px-4 py-2.5 text-center text-gray-600 font-medium">상태</th>
-                      <th className="px-4 py-2.5 text-center text-gray-600 font-medium">관리</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {invoices.map((inv: any) => (
-                      <tr key={inv.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2.5 font-medium text-gray-900">{inv.company_name}</td>
-                        <td className="px-4 py-2.5 text-center text-gray-500">{inv.store_name || '통합'}</td>
-                        <td className="px-4 py-2.5 text-center text-gray-500 font-mono text-xs">
-                          {String(inv.billing_start).slice(0, 10)} ~ {String(inv.billing_end).slice(0, 10)}
-                        </td>
-                        <td className="px-4 py-2.5 text-right">{billingFmtWon(Number(inv.subtotal))}</td>
-                        <td className="px-4 py-2.5 text-right">{billingFmtWon(Number(inv.vat))}</td>
-                        <td className="px-4 py-2.5 text-right font-bold text-indigo-700">{billingFmtWon(Number(inv.total_amount))}</td>
-                        <td className="px-4 py-2.5 text-center">{billingStatusBadge(inv.status)}</td>
-                        <td className="px-4 py-2.5 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            {inv.status === 'draft' && (
-                              <button onClick={() => handleInvoiceStatusChange(inv.id, 'confirmed')}
-                                className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors">확정</button>
-                            )}
-                            {inv.status === 'confirmed' && (
-                              <button onClick={() => handleInvoiceStatusChange(inv.id, 'paid')}
-                                className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors">수금완료</button>
-                            )}
-                            <button onClick={() => downloadInvoicePdf(inv)}
-                              className="px-2 py-1 text-xs bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200 transition-colors">PDF</button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+          {/* ★ 2026-08-04 (서수란 접수 "정산목록과 거래내역서 목록 차이") 옛 "거래내역서 목록" 섹션 제거.
+              그 목록은 `billing_invoices` 테이블을 봤는데, 거기에 행을 만드는 경로는
+              POST /admin/billing/invoices 하나뿐이고 **화면에 그 진입점이 없다** —
+              정산서를 몇 장 발행하든 영원히 "생성된 거래내역서가 없습니다"로 남는 죽은 목록이었다.
+              정산 축은 위 `billings`(정산 목록)로 통합됐고 이 섹션은 그 이전의 잔재다.
+              테이블·라우트 철거는 소비처 grep 후 별건(0728 필터항목 탭과 같은 방식). */}
 
           {/* ===== 정산 생성 확인 모달 (★2026-08-04 발행 전 점검 — 미리보기 금액·차단 사유 동반) ===== */}
           {showGenerateConfirm && (
@@ -10591,13 +10550,19 @@ const handleApproveRequest = async (id: string) => {
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                      {(detailBilling.status === 'confirmed' || detailBilling.status === 'paid') && (
-                        <button onClick={() => { setShowBillingDetail(false); setTimeout(() => openEmailModal(detailBilling), 200); }}
-                          className="px-4 py-1.5 text-sm bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors flex items-center gap-1.5">
+                      {/* ★ 2026-08-04 (서수란 접수) 상세 모달의 [정산서 발송]도 옛 경로(openEmailModal →
+                          POST /:id/send-email)였다. 목록 버튼만 고치면 여기서 같은 문제가 그대로 재발한다 —
+                          emailed_at만 찍히고 컨펌 추적행이 없어 그 청구서가 컨펌·세금계산서 흐름에서 빠진다.
+                          발송은 아직 안 나간 장에 한해 **컨펌 경로 하나**로 통일한다. */}
+                      {!detailBilling.emailed_at && (
+                        <button onClick={() => handleRetryConfirmations(detailBilling.id, detailBilling.company_name)}
+                          disabled={retryingBillingId === detailBilling.id}
+                          title="거래내역서 PDF와 컨펌 링크를 등록된 정산 수신자에게 보냅니다"
+                          className="px-4 py-1.5 text-sm bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 transition-colors flex items-center gap-1.5">
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                           </svg>
-                          정산서 발송
+                          {retryingBillingId === detailBilling.id ? '발송 중...' : '정산서 발송'}
                         </button>
                       )}
                       <button onClick={() => downloadBillingPdf(detailBilling.id, `${detailBilling.company_name}_${detailBilling.billing_year}_${detailBilling.billing_month}`)}

@@ -264,7 +264,7 @@
 | opt_out_080_number | varchar(20) | 수신거부 번호 |
 | reject_number | varchar(20) | |
 | sender_number_preregistered | boolean | |
-| status | varchar(20) | active 등 |
+| status | varchar(20) | 회사 상태. 코드가 쓰는 값 = `active`·`suspended`(정지)·`terminated`(해지)·`locked`(잠금)·`dormant`(휴면) — 라벨 맵 `AdminDashboard.tsx`. **`NULL`·미설정은 활성으로 취급한다**(판정이 전부 `!== 'terminated'` 형태의 부정 비교라 NULL이 통과한다). 해지 = `UPDATE companies SET status='terminated'`(`routes/admin.ts`) — **해지 시각을 남기는 컬럼이 없다**(`updated_at`은 다른 수정으로도 갱신되어 근거가 못 된다). 그래서 "해지 이후 기간만" 같은 시점 판정은 이 테이블만으로 불가능하다(★2026-08-04 서수란 접수 — 일괄발급 해지 제외 근거) |
 | plan_id | uuid FK | |
 | trial_expires_at | timestamp | |
 | monthly_budget | numeric(12,2) | 요금 |

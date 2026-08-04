@@ -27,6 +27,13 @@ export interface UnbilledCompanyRow {
   manual_billing: boolean;
   /** ★ 2026-07-30 최소과금 공급가(서수란 접수) — 값 있으면 정액 발행 대상 = 일괄발급 담기에서 빠진다(목록엔 뜸). */
   min_charge_supply: number | null;
+  /**
+   * ★ 2026-08-04 회사 상태(서수란 접수 — 해지 업체 제외 요청).
+   * `terminated` = 해지. 담기에서 빠지지만 **목록에는 남긴다** — 해지 시각을 따로 남기지 않아
+   * (해지는 `status`만 바꾸고 `updated_at`은 다른 수정으로도 갱신된다) "해지 이후 기간만 제외"를
+   * 데이터로 판정할 수 없다. 목록에서 통째로 지우면 해지 직전 달 미청구분이 조용히 사라진다.
+   */
+  status: string | null;
 }
 
 /**
@@ -51,6 +58,7 @@ export async function listUnbilledPostpaid(
     // ★ Codex 1R 수용 — 계정별(by_user) 회사는 계정 담당자 이메일 누락 수를 함께 내려
     //   담는 시점에 "계정 메일 N건 미등록"을 보여준다(회사 레벨 이메일만 보면 사각).
     `SELECT c.id, c.company_name,
+            c.status                                   AS status,
             COALESCE(s.issue_scope, 'combined')        AS issue_scope,
             COALESCE(s.taxbill_day_policy, 'last_day') AS taxbill_day_policy,
             COALESCE(s.manual_billing, false)          AS manual_billing,
@@ -117,7 +125,16 @@ export async function filterBillableCompanies(
   const rows = await listUnbilledPostpaid(periodStart, periodEnd, { companyIds, db });
   // ★ 2026-07-30 최소과금 회사도 일괄발급 부적격 — 정액 발행(최소과금 모달)이 그 회사의 청구 경로다.
   //   사용량 발행과 정액 발행이 겹치면 이중청구라 발급 대상에서 구조로 뺀다(수동 정산과 같은 계약).
-  return new Set(rows.filter((r) => r.manual_billing !== true && r.min_charge_supply == null).map((r) => String(r.id)));
+  // ★ 2026-08-04 해지 회사도 부적격(서수란 접수) — 계약이 끝난 회사에 자동 발급이 나가면 안 된다.
+  //   단 **목록에서는 지우지 않는다**(위 인터페이스 주석 참조) — 그 달 처리가 끝났는지 눈으로 봐야 한다.
+  //   ⚠ 이 판정은 job 생성·item 실행에서도 재검증되므로 **개별로 담아도 발급되지 않는다.**
+  //   해지 직전 달 미청구분이 남아 있으면 일괄발급이 아니라 **정산 생성(단건 발행)**으로 처리한다
+  //   — 그 경로는 이 필터를 지나지 않는다.
+  return new Set(
+    rows
+      .filter((r) => r.manual_billing !== true && r.min_charge_supply == null && r.status !== 'terminated')
+      .map((r) => String(r.id)),
+  );
 }
 
 // ═══════════════════════════════════════════════════════════
