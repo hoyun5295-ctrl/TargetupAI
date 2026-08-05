@@ -27,7 +27,9 @@ interface Props {
 export default function OperatorSetupModal({ editing, setEditing, saving, error, onClose, onSubmit }: Props) {
   const isEdit = !!editing.id;
   const phones = editing.adminPhoneNumbers || [];
-  const canSubmit = !!editing.name?.trim() && !!editing.objective?.trim() && !saving;
+  // ★ 2026-08-04: 리마인드를 켰으면 문안 필수 — 켜 놓고 비우면 매 1차 발송마다 "문안 없음" 통지만 나간다.
+  const canSubmit = !!editing.name?.trim() && !!editing.objective?.trim() && !saving
+    && !(editing.sequenceEnabled && !editing.sequenceReminderContent?.trim());
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -190,16 +192,33 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
             <div className="text-[10px] text-white/40">입력하면 생성 문안의 [혜택 내용을 입력해주세요] 자리에 그대로 들어갑니다. 비워두면 제안 단계에서 작성합니다. AI가 혜택을 임의로 만들지 않습니다.</div>
           </Section>
 
-          {/* ⛔ 2026-08-03: 미반응자 리마인드는 보류 중이다. 1차를 받은 분만 정확히 가려낼 수 없어
-              받지 않은 분께 나가는 것을 막기 위해 발송을 만들지 않는다. 켤 수 있게 두면 화면이 거짓말을 한다. */}
-          <Section icon={<Layers className="w-4 h-4" />} title="다단계 시퀀스" summary="미반응자 리마인드 · 준비 중">
-            <div className="flex items-start gap-2 px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg">
-              <AlertCircle className="w-4 h-4 text-white/40 shrink-0 mt-0.5" />
-              <div className="text-[11px] text-white/60 leading-relaxed">
-                미반응자 리마인드는 지금 사용할 수 없습니다. 1차 문자를 받은 분만 정확히 추려내야 하는데,
-                그 명단을 남기는 기능을 준비 중입니다. 받지 않은 분께 리마인드가 나가는 것을 막기 위해 잠시 닫아 두었습니다.
-              </div>
-            </div>
+          {/* ★ 2026-08-04 되살림 — 1차 수신 명단을 발송 기록에서 정확히 확보할 수 있게 되어 다시 열었다.
+              대상 = 1차를 실제로 받은 분 중 클릭하지 않은 분만(그 사이 새로 들어온 고객에게는 안 나간다). */}
+          <Section icon={<Layers className="w-4 h-4" />} title="미반응자 리마인드" summary={editing.sequenceEnabled ? `1차 후 ${editing.sequenceDelayDays ?? 3}일 뒤 재발송` : '꺼짐'}>
+            <label className="flex items-center justify-between rounded-lg border border-white/10 px-3 py-2.5">
+              <span className="min-w-0">
+                <span className="text-xs text-white/80 block">리마인드 사용</span>
+                <span className="text-[10px] text-white/40 block mt-0.5">
+                  1차 문자를 <span className="text-white/60">실제로 받은 분 중 클릭하지 않은 분에게만</span> 정한 일수 뒤 한 번 더 보냅니다.
+                </span>
+              </span>
+              <button type="button" onClick={() => setEditing({ ...editing, sequenceEnabled: !editing.sequenceEnabled })} className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ml-3 ${editing.sequenceEnabled ? 'bg-indigo-500' : 'bg-white/15'}`} aria-label="미반응자 리마인드">
+                <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${editing.sequenceEnabled ? 'translate-x-5' : ''}`} />
+              </button>
+            </label>
+            {editing.sequenceEnabled && (
+              <>
+                <div>
+                  <label className="text-[11px] text-white/60 block mb-1">1차 발송 후 대기 일수 (1~30일)</label>
+                  <input type="number" min="1" max="30" value={editing.sequenceDelayDays ?? 3} onChange={(e) => setEditing({ ...editing, sequenceDelayDays: Math.min(30, Math.max(1, Number(e.target.value) || 3)) })} className={INP} />
+                </div>
+                <div>
+                  <label className="text-[11px] text-white/60 block mb-1">리마인드 문안 <span className="text-rose-400">*</span></label>
+                  <textarea value={editing.sequenceReminderContent || ''} onChange={(e) => setEditing({ ...editing, sequenceReminderContent: e.target.value })} className={`${INP} h-20 resize-none leading-relaxed`} placeholder="예: 지난번 안내드린 혜택이 곧 마감됩니다. 놓치지 마세요!" maxLength={2000} />
+                  <div className="text-[10px] text-white/40 mt-1">직접 작성한 문안 그대로 나갑니다(AI가 고쳐 쓰지 않습니다). 발송 전 스팸 검증을 거치며, 통과하지 못하면 예약을 멈추고 알려드립니다.</div>
+                </div>
+              </>
+            )}
           </Section>
 
           {/* ★ 2026-07-12 C-2: "발송 주기" select 제거 — 소비 로직 0인 거짓 설정(실제 주기 = 위 '추천 주기') */}

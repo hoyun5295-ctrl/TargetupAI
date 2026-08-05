@@ -240,6 +240,14 @@ ok('게이트 null 전달도 게이트 없음으로 — 호출부 하나의 null
   const { sql } = buildSendableRecipientsSql('', [], ['CID'], '', null as any);
   assert.ok(!/message_click/.test(sql));
 });
+ok('★ 여정 겹침 제외(2026-08-04 Harold 확정) — opt-in일 때만 active 실행 안티조인, 파라미터 무추가', () => {
+  const on = buildAudienceCountSql('', [], ['CID'], '', { excludeInJourney: true, fatigueCap: { days: 7, max: 3 } });
+  assert.ok(/journey_executions/.test(on.sql), '켜면 안티조인');
+  assert.ok(/je\.status = 'active'/.test(on.sql), 'active만 — 종료·holdout은 제외 안 함');
+  assert.deepStrictEqual(on.params, ['CID', 7, 3], '파라미터 무추가(피로도 배치 불변)');
+  const off = buildAudienceCountSql('', [], ['CID'], '', { fatigueCap: { days: 7, max: 3 } });
+  assert.ok(!/journey_executions/.test(off.sql), '미지정 = 현행 그대로');
+});
 
 console.log('[operator-recipients] resolveConditionColumns — 조건 필드 화이트리스트 해석');
 const DEFS: ConditionFieldDef[] = [

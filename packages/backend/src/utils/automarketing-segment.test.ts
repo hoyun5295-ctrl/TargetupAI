@@ -215,6 +215,32 @@ describe('변화 축 — 비교 대상이 없으면 조건을 만들지 않는�
     expect(params).toEqual(['CID', OPERATOR]);
   });
 
+  it('스냅샷에도 회사 결합을 건다 — 어긋난 쌍이 와도 남의 회사 과거와 비교되지 않는다', () => {
+    for (const key of ['grade_up', 'first_purchase', 'returned', 'went_quiet', 'spent_more']) {
+      const sql = buildSegmentPredicate(key as any, null, ['CID'], { now, operatorId: OPERATOR });
+      expect(sql).toContain('s.company_id = c.company_id');
+    }
+  });
+
+  it('★ 구매 파생 전환 3종은 "그 구매가 이 구간에서 일어났는가"를 함께 건다 — backfill 오인 차단', () => {
+    // 과거 주문 뒤늦은 연결·옛 날짜 보정은 카운트·금액을 움직이지만 이 구간의 행동이 아니다.
+    const guard = "c.recent_purchase_date >= ((s.observed_at AT TIME ZONE 'Asia/Seoul')::date)";
+    for (const key of ['first_purchase', 'returned', 'spent_more']) {
+      const sql = buildSegmentPredicate(key as any, null, ['CID'], { now, operatorId: OPERATOR });
+      expect(sql).toContain(guard);
+      expect(sql).toContain('c.recent_purchase_date IS NOT NULL');
+    }
+    // 등급 상승·발길 끊김은 구매 발생형이 아니라 이 가드를 걸지 않는다(끊김은 "구매 없음"이 조건).
+    expect(buildSegmentPredicate('grade_up', null, ['CID'], { now, operatorId: OPERATOR })).not.toContain(guard);
+    expect(buildSegmentPredicate('went_quiet', null, ['CID'], { now, operatorId: OPERATOR })).not.toContain(guard);
+  });
+
+  it('구매 증가 최소 금액은 0을 받지 않는다 — 0이면 변화 없는 전원이 대상이 된다', () => {
+    expect(normalizeSegmentParams('spent_more', { amount: 0 })).toEqual({ amount: 1 });
+    expect(normalizeSegmentParams('spent_more', { amount: -5000 })).toEqual({ amount: 1 });
+    expect(normalizeSegmentParams('spent_more', null)).toEqual({ amount: 100000 });
+  });
+
   it('등급 상승은 양쪽 순위가 모두 있고 실제로 올라간 경우만 — 같은 급은 상승이 아니다', () => {
     const sql = buildSegmentPredicate('grade_up', null, ['CID'], { now, operatorId: OPERATOR });
     expect(sql).toContain('ro.rank_order IS NOT NULL');

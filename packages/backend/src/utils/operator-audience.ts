@@ -45,7 +45,25 @@ export async function resolveOperatorAudienceGates(
   return {
     excludeClickedSince: parse(proposalJson?.meta?.excludeClickedSince),
     fatigueCap: await getFatigueCap(companyId),
+    excludeInJourney: await getExcludeInJourneySetting(companyId),
   };
+}
+
+/**
+ * ★ 2026-08-04 (Harold 확정) — "여정 진행 중인 고객 제외" 회사 opt-in 조회.
+ * 피로도(getFatigueCap)와 같은 계약: 미설정·컬럼 미마이그레이션(42703) = false(게이트 비활성 — 현행 유지).
+ * 이 게이트는 자동마케팅 단일 문(resolveOperatorAudienceGates)만 소비한다 — 여정·캠페인 발송은 무관.
+ */
+export async function getExcludeInJourneySetting(companyId: string): Promise<boolean> {
+  try {
+    const r = await query(
+      `SELECT automarketing_exclude_journey FROM companies WHERE id = $1::uuid`,
+      [companyId],
+    );
+    return r.rows[0]?.automarketing_exclude_journey === true;
+  } catch {
+    return false;   // 42703 포함 — 비활성으로 우아한 열화(피로도와 같은 계약)
+  }
 }
 
 /**
@@ -172,6 +190,28 @@ export async function resolveOperatorStoreScope(
 /** 화면·등록 검증이 보는 축 목록(가능 여부 + 사유 + 파라미터 정의). */
 export async function listSegmentAvailability(companyId: string): Promise<SegmentAvailability[]> {
   return resolveSegmentAvailability(await loadCompanySegmentFacts(companyId));
+}
+
+/**
+ * 저장 검증 — "이 회사에서 이 축을 쓸 수 있는가"만 묻는다. SQL은 만들지 않는다.
+ *
+ * ⛔ 2026-08-04 Codex 정정(뿌리 R1): 종전엔 등록·수정이 compileOperatorAudience로 검증했는데,
+ *   그 함수는 근거 판정과 조건 컴파일을 함께 한다. 변화 축 컴파일은 "지난 회차의 주인(operatorId)"을
+ *   요구하므로 — 등록 시점엔 오퍼레이터가 아직 없다 — 변화 축 5종이 정상 API로 저장 자체가 안 됐다(500).
+ *   저장 시점에 물어야 할 것은 근거뿐이다. 판정과 컴파일을 가르면 저장·수정·명단 세 결함이 한 번에 닫힌다.
+ */
+export async function assertSegmentUsable(companyId: string, rawKey: string): Promise<void> {
+  const key = normalizeSegmentKey(String(rawKey || '').trim() || null);
+  if (!key) throw new Error(`알 수 없는 발송 대상 축입니다: ${String(rawKey).slice(0, 40)}`);
+  const facts = await loadCompanySegmentFacts(companyId);
+  const availability = resolveSegmentAvailability(facts).find((a) => a.key === key);
+  if (!availability || !availability.available) {
+    throw new Error(availability?.reason || '이 발송 대상 축을 지금은 쓸 수 없습니다.');
+  }
+  // 변화 축은 회차 스냅샷 표가 있어야 회차가 돈다 — 표 없이 저장을 받으면 워커가 42P01로 돈다.
+  if (segmentNeedsCycleBaseline(key) && !(await isCycleSnapshotReady())) {
+    throw cycleSnapshotMigrationPending();
+  }
 }
 
 /**

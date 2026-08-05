@@ -47,6 +47,11 @@ export interface ContinuousOperator {
   segmentKey?: string | null;
   segmentParams?: Record<string, number> | null;
   /**
+   * ★ 2026-08-04 화면 전용 — 세부설정 모달(SegmentPicker 노출)을 거쳐 저장했는가.
+   * true면 서버 등록 1회 AI 축 매핑이 개입하지 않는다(화면이 보여준 선택이 최종).
+   */
+  segmentChoiceSeen?: boolean;
+  /**
    * ⛔ 화면 전용 3상태 플래그 — 사용자가 "목표 문장으로 자동 판단"을 **명시적으로** 골랐는지.
    * 무관한 수정(이름·예산)에서는 옛 축을 건드리지 않아야 하고(미전송 = 서버 유지),
    * 자동 판단을 직접 고른 경우에만 해제를 보낸다. 저장 payload에는 이 값 자체가 나가지 않는다.

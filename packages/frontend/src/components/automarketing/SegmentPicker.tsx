@@ -44,6 +44,8 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
   const [count, setCount] = useState<number | null>(null);
   const [counting, setCounting] = useState(false);
   const [countError, setCountError] = useState<string | null>(null);
+  /** 서버가 "기준선 대기"로 답했는가 — 변화 축의 첫 회차 판정은 서버만 안다(2026-08-04). */
+  const [serverAwaiting, setServerAwaiting] = useState(false);
   /** 늦게 온 응답이 최신 선택을 덮지 않도록 — 축을 빠르게 바꿀 때 수가 뒤섞이면 그 화면은 거짓이 된다. */
   const reqSeq = useRef(0);
 
@@ -81,8 +83,14 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
       });
       const data = await res.json();
       if (seq !== reqSeq.current) return;
-      if (data?.success) setCount(Number(data.total) || 0);
-      else { setCount(null); setCountError(data?.error || '대상 수를 확인하지 못했습니다.'); }
+      if (data?.success && data.awaitingBaseline === true) {
+        // 변화 축인데 기준선이 아직 — 오류도 0명도 아니다. 첫 회차 안내로 바꾼다.
+        setServerAwaiting(true);
+        setCount(null);
+      } else if (data?.success) {
+        setServerAwaiting(false);
+        setCount(Number(data.total) || 0);
+      } else { setCount(null); setCountError(data?.error || '대상 수를 확인하지 못했습니다.'); }
     } catch (e: any) {
       if (seq !== reqSeq.current) return;
       setCount(null);
@@ -95,18 +103,22 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
   const selected = segments.find((s) => s.key === value) || null;
 
   /**
-   * ★ 2026-08-04 — 변화 축을 신규 등록에서 고른 상태. 비교할 지난번이 아직 없다.
-   * ⛔ 이때 대상 수를 세러 가지 않는다. 서버는 사유와 함께 멈추는데 화면에는 그게 붉은 오류로 보이고,
-   *   담당자는 고장으로 읽는다. 이건 정상 흐름이라 안내를 대신 띄우고 호출 자체를 하지 않는다.
+   * ★ 2026-08-04 — 변화 축인데 비교할 지난 회차가 아직 없는 상태.
+   * ⛔ 오퍼레이터가 있다고 기준선이 있는 게 아니다(Codex — 기존 오퍼레이터에서 변화 축을 처음 고르면
+   *   기준선은 첫 회차에야 생긴다). 기준선 유무는 서버만 알므로 서버 응답(awaitingBaseline)을 쓴다.
+   *   신규 등록(오퍼레이터 자체가 없음)만 화면이 즉답한다 — 그건 짐작이 아니라 정의다.
    */
-  const awaitingBaseline = !!selected?.needsCycleBaseline && !operatorId;
+  const awaitingBaseline = !!selected?.needsCycleBaseline && (!operatorId || serverAwaiting);
 
   // 선택된 축·파라미터가 바뀌면 지금 기준으로 다시 센다. 파라미터 연타는 마지막 값만 센다.
+  // 변화 축 + 오퍼레이터 없음만 호출 생략(기준선이 없다는 게 확정) — 오퍼레이터가 있으면 서버가 판정한다.
   useEffect(() => {
-    if (!value || awaitingBaseline) { setCount(null); setCountError(null); reqSeq.current++; return; }
+    setServerAwaiting(false);
+    if (!value || (selected?.needsCycleBaseline && !operatorId)) { setCount(null); setCountError(null); reqSeq.current++; return; }
     const t = setTimeout(() => { void measure(value, params); }, 350);
     return () => clearTimeout(t);
-  }, [value, params, measure, operatorId, awaitingBaseline]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, params, measure, operatorId]);
 
   const pick = (s: SegmentAvailability) => {
     if (disabled || !s.available) return;

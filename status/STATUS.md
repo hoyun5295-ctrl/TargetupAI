@@ -14,7 +14,7 @@
 | 도메인 작업 착수 전 사고 이력 (룰 원천=CLAUDE.md `read_lessons_first`) | lessons/LESSONS_{DB,FRONTEND,BACKEND,DEPLOY,ARCHITECTURE,META}.md | 해당 도메인 전체. DB·돈·환불=DB / UI·모달=FRONTEND / API·발송·AI=BACKEND / 배포·빌드·SSH=DEPLOY+OPS.md 해당 절 / 컨트롤타워=ARCHITECTURE / **매 답변 직전=META** |
 | **Harold님이 "브레인스토밍"이라고 말했을 때** · superpowers 스킬 선택 · Codex 라운드 운영·수용 판단 | **COLLAB.md** | 브레인스토밍 = §1 전체 정독 후 그대로 진행(의무) / 그 외 = 해당 절만 |
 | **Codex 리뷰를 돌릴 때** — 실행 절차·요청문 규격·멈춤 판정·복구 | **[CODEX-RUNBOOK.md](CODEX-RUNBOOK.md)** | 착수 전 §1·§2(의무) / 20분 무응답이면 §3·§4. 리뷰를 띄우기 전에 반드시 읽는다 — 같은 멈춤을 다섯 번 반복했다 |
-| **기능 이름을 부를 때** — 그 기능의 구조·불변 원칙·이력 | **[SOT-INDEX.md §0 기능 상설 SoT](SOT-INDEX.md)** | 해당 기능 행 → 그 기능 문서. **"여정"** → [FEATURE-JOURNEY.md](../docs/FEATURE-JOURNEY.md) · **"싱크에이전트"** → [FEATURE-SYNC-AGENT.md](../docs/FEATURE-SYNC-AGENT.md) · **"자동마케팅"** → [FEATURE-AUTOMARKETING.md](../docs/FEATURE-AUTOMARKETING.md). 기능마다 자기 .md가 이력을 소유하고 STATUS는 참조만 한다(신규 기능도 이 형태로 등재) |
+| **기능 이름을 부를 때** — 그 기능의 구조·불변 원칙·이력 | **[SOT-INDEX.md §0 기능 상설 SoT](SOT-INDEX.md)** | 해당 기능 행 → 그 기능 문서. **"여정"** · **"싱크에이전트"** · **"자동마케팅"** · **"템플릿"** · **"정산"** — 5개 기능이 각자 `docs/FEATURE-*.md`를 갖는다. 기능마다 자기 .md가 이력을 소유하고 STATUS는 참조만 한다(신규 기능도 이 형태로 등재) |
 | **프로젝트·트랙 SoT 문서·호출어를 찾을 때** | **[SOT-INDEX.md](SOT-INDEX.md)** | 해당 트랙 행만. **신규 프로젝트 SoT는 이 라우팅 표가 아니라 SOT-INDEX.md에 등재한다**(이 표는 도메인 문서 전용 상설) |
 | 시스템 구조 파악 | ARCHITECTURE.md | 해당 절만 |
 | 자사몰 연동·CDP·커넥터 작업 | INTEGRATIONS.md | 해당 provider 카드 / CDP 공통 절 |
@@ -34,10 +34,10 @@
 > **경위·수치·근본원인·함정은 SoT 문서와 memory가 소유한다.** 여기 재서술 = doc_ownership 위반. 지우기 전 소유 문서에 그 사실이 실존하는지 grep으로 확인하고, 없으면 소유 문서에 먼저 옮긴 뒤 지운다.
 > **회전 룰:** 잔여가 0이면 카드를 지운다(원문 = archive/TASKS_YYYY-MM.md + memory). 남은 일만 아래 "완료분 잔여"에 한 줄. 30KB 초과 = 회전 미이행.
 
-### 자동마케팅 — 정체성 확정 + 변화 축 5종 신설, **DDL 0 · 빌드·배포 대기**
-> 호출어 **"자동마케팅"** → **[FEATURE-AUTOMARKETING.md](../docs/FEATURE-AUTOMARKETING.md)가 전부 소유** — **정체성 §0**(새 축을 넣을지 가르는 기준) · 필독 §1 · 불변 원칙 §2 · 대상 판정 계약 §4 · 리마인드 §5 · 이력 §7 · 뒤집힌 판단 §8 · 시점 설계 근거 [설계서](docs/2026-08-03-automarketing-targeting-redesign-design.md) · 기억 [[project_2026_0803_automarketing_targeting_redesign]]
-> ⛔ 여기 들어오는 축은 "지금 어떤 상태다"·"지난 회차와 무엇이 달라졌다"만 — **사건 반응(장바구니·상품 조회·배송)은 여정이 소유**(기능 문서 §0) / 회차 스냅샷 갱신은 **발송 성공 뒤에만**(제안 시점에 갈면 재추출이 대상 0) / DDL 전량 실행 완료(`operator_cycle_snapshots` 포함) / frontend 포함이라 배포 시 빌드 필요
-> 잔여 = Codex 검증 반영 → 빌드 → 화면 실측 → 배포. 그다음 = 리마인드 되살리기(발송결과 `app_etc1` 코호트) → 신규 등록 계약 필수화. 범위 밖 = 일회성 발송 경로 통합 · manage-users 역할값 보안 · 여정 겹침 조절(설계서 §6 미결 1)
+### 자동마케팅 — 재설계 전량 완료(정체성·변화 축·리마인드·계약 필수화), **빌드·배포 대기**
+> 호출어 **"자동마케팅"** → **[FEATURE-AUTOMARKETING.md](../docs/FEATURE-AUTOMARKETING.md)가 전부 소유** — **정체성 §0**(새 축을 넣을지 가르는 기준) · 필독 §1 · 불변 원칙 §2 · 대상 판정 계약 §4 · **리마인드 §5(되살림)** · 이력 §7 · 뒤집힌 판단 §8 · 시점 설계 근거 [설계서](docs/2026-08-03-automarketing-targeting-redesign-design.md) · 기억 [[project_2026_0803_automarketing_targeting_redesign]]
+> ⛔ 사건 반응(장바구니·상품 조회·배송)은 여정이 소유(§0) / 스냅샷은 두 문 — 보충·발송분 갱신(**종결 확인 뒤** settle, §4) / 리마인드 = 1차 실수신 코호트, 조건 재컴파일 금지(§5) / DDL 전량 실행 완료 / frontend 포함이라 빌드 필요
+> 잔여 = **빌드 → 화면 실측 → 배포**(개발 전량 종료 — Codex 마무리 2건 1R 13건+2R 6건 반영, 판정 = §7-4·§7-5). 여정 겹침 제외 = Harold 확정·구현 완료(회사 opt-in — DDL 1건 42703 폴백)
 
 ### 0801 여정 재설계 — **0802 전량 배포완료**(착수 1~5 + 화면 + 등급 상승, DDL 포함)
 > 기능 상설 = **[여정](docs/FEATURE-JOURNEY.md)**(호출어 "여정" — 구조·불변 원칙·이력 색인 전부) · 트랙 SoT [재설계 설계서](docs/2026-08-01-journey-redesign-design.md) · 기억 [[project_2026_0801_journey_redesign]] · 다음 = 화면 실측
@@ -49,10 +49,10 @@
 > ⛔ 백필 경계 = 143 `SeqNo 7052`(07-23 14:38) — 컷오버 시 143 MAX가 그보다 크면 초과분 1회 더 / 잔액 권위 행 = `StoreId=CustId`, 대표 행 없는 계정(`B0046` 등) 합산 금지 / §5-4(고객사 충전 요청)와 §5-3(충전 실행)은 다른 화면 — 혼동 금지 / `deposit_requests` 재사용 폐기(지갑이 다르다)
 > 잔여 = 한줄로 실측 1건 → 직원 143 PAY 입력 중단 → 서수란 선불·단가 자료 · §5-5 고아 대조 워커 · 강문희 143 종료 통지 · §8-8 런소프트 통장 대조 · 표시명·잔액 배포(SoT §13·§14) · 별건 피케이포유 인코딩 손상(§2-4)
 
-### 정산 — 전량 배포완료(`b396e2a5`), 실청구 발행 대기
-> SoT [정산 범위·정정](docs/2026-07-26-billing-scope-and-corrections-design.md) **§9-5-A(절사 계약 — 현행)** · §0-A → §9(속도 결론 = §9-9) · 기억 [[project_2026_0726_billing_scope_corrections]] · 다음 = §9-3 유형별 수량 버튼(남은 개발은 이것뿐)
-> ⛔ 절사는 **항목줄에서 1회**(0730 정정 — 행 단위는 폐기. 계정별 발행이 합산과 1원 다른 것은 의도) / 미발행 draft 중 소수 단가 회사분은 삭제·재생성해야 새 산식 반영 / 실청구 발행은 직원 단가·선불 재점검 완료 후 — `DEFAULT_COSTS` 잔존 9곳 + 라운드 숫자 2곳(SoT §9-1) / draft 삭제·재발행은 **화면에서**, psql DELETE 금지
-> 잔여 = 실회사 드라이런(발행→PDF→메일→삭제) · 거래내역서 MMS 308,043건 · 이월 판단 8건(SoT §9 — `G` 유형 과금 분류 · 크레딧 스냅샷 소급 ALTER · 일할 자동지급 재배선 · 해지 표현 · `by_agent` 지점별 발행 · `/preview` 배선 · 141사 일괄 발행 · 테스트 발송 환불 zero-uuid 결함=BUGS.md)
+### 정산 — 호출어 **"정산"** → [FEATURE-BILLING.md](../docs/FEATURE-BILLING.md)가 전부 소유
+> 구조·불변 원칙 13개·이관 절차·남은 것·이력을 **그 문서 하나가** 갖는다. 시점별 설계서 6종은 그 문서 §9가 안내한다. 여기 다시 쓰지 않는다.
+> 상태 = 전량 배포완료(0726 `b396e2a5` · 0728~0731 · 0804 2차). **실청구 발행 전 필수 개발은 0건**(0804에 유형별 수량 버튼으로 종결).
+> 잔여 = 실측(실회사 드라이런 · 거래내역서 MMS 308,043건 · 0804 배포분 6종 · 팝빌 테스트 5단계) · 미착수 개발과 Harold 결정 2건은 문서 §7.
 
 ### 싱크에이전트 — 0803 구매 증분 유실 정정 배포완료 · 아난티 출고 대기
 > 호출어 **"싱크에이전트"** → **[FEATURE-SYNC-AGENT.md](../docs/FEATURE-SYNC-AGENT.md)가 전부 소유** — 착수 전 필독 §9 · 불변 원칙 §2 · 커서 규약 §4 · 배포 게이트 §5 · 원격 릴리즈 §6 · 이력 §7 · 재싱크·출고 절차 §8 · 기억 [[project_2026_0727_sync_agent_vm_verification]]
@@ -63,21 +63,6 @@
 > ⛔ **발송 불가 = Agent 버전 미달**(SoT §9-1) / 지원 유형 = TEXT·IMAGE·WIDE만, 늘릴 땐 `utils/billing-types.ts` 표에만(SoT §5-3) / 축 복원 금지 — 채널=`resolveRefundAxes`, `send_phase='preparing'` 게이트
 > 잔여 = 재측정 · 단가 입력·발행 실측 · AI 타겟추출 페이징(별건) · 학습 채널 키 이관(`mysql-refund-sweeper.ts:601` — 저장 키라 이관 판단 필요)
 
-### 0728 정산 파이프라인 — 팝빌 + **0804 컨펌 창구·이의 통지·수량 수정 발행 전량 배포완료**(DDL 6·ENV 2 반영)
-> SoT [일괄발급·컨펌·세금계산서](docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md) **§4-2(0804 3종·재검증 결정 7)** → §7·§9 · 컬럼 = [SCHEMA `billing_qty_adjustments`·`invoice_confirmations` 절](SCHEMA.md) · 기억 [[project_2026_0804_billing_tickets]] · 다음 = 실측 5건 → 삭제·재발행 원자화(미착수)
-> ⛔ 0804분 5종(컨펌 토큰 없이 발송 금지 · 이의 통지는 트랜잭션 밖 워커 · 조정 축 · 음수 거부 · `superseded_at` 미사용) = SoT §4-2 / **실청구 컨펌 메일 전에 테스트 완료·운영 전환** / 실행자 컬럼 users FK 금지 / **통지 추적행은 메일보다 먼저**(§4-1)
-> 잔여 = 빌드·배포 + ENV 2개(`BILLING_OBJECTION_ALERT_TO`·`_BCC`) · 화면 실측 8건(정산 탭 저장 / 일괄발급 / 공개 컨펌=CSP / 현황판 / 사업자등록증 / 회사 계산서 사업자 / 메일 재시도 / 미발송 필터) · 메일 첨부 실물 · 접수·여정 실측 4건([[project_2026_0728_tickets_journey_triggers]])
-
-### 0731 정산 수신자·귀속 축 + **(2) 세금계산서 복수 수신 — 전량 배포완료**(Codex 5R)
-> SoT [SCHEMA `billing_recipients`·`taxbill_email_resends` 절](SCHEMA.md) · 기억 [[project_2026_0731_billing_recipients_and_scope]](0731(2) 절 포함) · 다음 = 실측(참조 2명 등록 → 발행 → `taxbill_email_resends` sent·참조 수신) + 기존 실측 1건
-> ⛔ 수신자 원장은 `billing_recipients` 하나 / 발송 모달 수신자 칸은 **비워야** 참조가 함께 간다 / **세금계산서 발행은 대표 1명(invoiceeEmail1) 불변 — 참조는 issued 트랜잭션의 pending 기록+락 밖 재전송 패스**(인라인 재전송·웹훅 확정자 복원 금지: 웹훅 304=관측·ready 재큐잉만, markFailed는 CAS) / 채널이 늘면 `USER_SHEET_CHANNELS`
-> 잔여 = 참조 실측 · 실측 1건 · 080 귀속 실측
-
-### 0730 정산 특례 — 축 A + **0804 원장 파생 재설계 전량 배포완료**(서수란 0803 접수 4건)
-> SoT [정산 특례·발행 그룹](docs/2026-07-30-billing-extras-and-groups-design.md) **§2-4(원장 파생 — 0804) → §9(남은 것) → §7(확인 5건)** · 기억 [[project_2026_0730_billing_080_extras]] · 다음 = 시세이도·금강제화 7월 [KT 반영 취소]→[재반영] 1회 → 발행 금액 확인
-> ⛔ **원장 상태가 곧 청구 상태**(활성=파생 / 비활성=0줄 / 매핑없음=발행차단) · 계약값·귀속 복사 금지 · 회사·번호 변경은 반영분 동반 이관 — 전부 SoT §2-4 / 금액은 **공급가 저장** / 반영·취소·발행은 **같은 회사 잠금** / 판독은 서명·재검산 통과분만
-> 잔여 = 빌드·배포 · 실측 3종(080 매핑 18번호→PDF→반영→발행 / 최소과금 4사 정액 / 부가서비스 1건) · 에이스하드웨어 5만 정액(SoT §5 — 시세이도분은 매핑으로 해결됨) · **발행 그룹**(SoT §6, 공사 큼) · 서 팀장 확인 5건(SoT §7)
-
 ### 0727 여정 알림톡 + 환불 의무 — 전량 배포완료
 > SoT 알림톡·잔액 = 기억 [[project_2026_0727_journey_alimtalk_and_agent_tls]] · 환불 = [BUGS.md](BUGS.md) B-0727-1·2 · 다음 = 운영 확인(알림톡 대체문안 CT `utils/alimtalk-fallback.ts` `f91d5ea5` / `balance_transactions.refund_key` 원인별 분리, DDL 실행 완료)
 > ⛔ 대체문안 선택이 `대체문안 작성(B)`인데 문안이 비면 저장·활성화·발송 세 지점에서 차단 — `원문 그대로(L)`는 게이트웨이가 우리 `msg_contents`를 그대로 내보낸다
@@ -87,11 +72,6 @@
 > SoT = 기억 [[project_2026_0731_inapp_image_link_studio_event_track]] · 다음 = 실측 5건(포스터 링크 클릭·캐러셀 슬라이드별·인라인 카드 몰 DOM 무손상·행사 트랙 생성·샘플 배치 curl) — 0721 캐러셀 실측 이 왕복에 흡수. ⚠몰 반영은 SDK 서빙 캐시·브라우저 캐시라 Ctrl+Shift+R 후 확인
 > ⛔ `image_link_url` ALTER는 운영 실행 확인됨(SCHEMA 41컬럼) / 블록이 진실인 메시지는 flat 링크를 저장·판독 양층에서 비운다(legacy 폴백 계약 — 완화 금지) / 메시지 DOM 제거는 `data-hanjullo-wrap` 마커 단일 길목(parentElement 추론 복원 금지)
 > 잔여 = 실측 5건 · 팝폰 네이티브 이미지 클릭(계약서 절 기준·OTA 별건) · 샘플 일괄 생성 실행 여부(내부 원가 ~2.4만원, Harold 결정)
-
-### 0731 정산 누락 정정(레거시 예약 직접발송) + 거래내역서 구분 칸 — 배포완료(Codex 4R), 실측 대기
-> SoT = 기억 [[project_2026_0731_billing_legacy_direct_leak]] · **다음 세션 별건 5건 = [처리 결과·과제 문서](docs/2026-07-31-billing-detail-storeid-handoff.md)**(1순위 = 아이디룩 미발송 7,701건) · 배포 후 = 07-01~07-31 미리보기 금액 **불변** 확인(7월 누락 성공 0건이므로 증가분 0이 정답) + 상세 구분 칸에 웹 계정명·에이전트 `B0228 / 제이씨패밀리` 표시 확인
-> ⛔ **과거분 소급 발행 금지** — 5·6월은 수기 청구 완료라 시스템 재발행 시 이중청구(5월 후불 204만건·6월 20.6만건 규모) / 레거시 id는 반드시 `periodCampaignIds`(기간조건) 축으로 — `eventIds`로 보내면 기존 정상분이 발송 월 무관 전량 계상 / **고객사 통계도 정산과 같은 축**이라 이 누수는 두 화면 비교로 안 보인다
-> 잔여 = 실측 2건(7월 미리보기 금액 불변 · 구분 칸 표시) · 별건 3(아이디룩 미발송 7,701건 · 레거시 예약 1,653건 전량 실패 · 여정 후불 미청구 통로) · 대기 게이트 완성(채널별 종결 판정 정규화)
 
 ### 다음 세션 (예정)
 > 경위·범위·확정 사실은 링크가 소유한다. 여기엔 제목·다음 한 수·호출어만.

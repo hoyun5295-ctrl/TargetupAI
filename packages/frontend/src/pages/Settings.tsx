@@ -47,6 +47,8 @@ export default function Settings() {
     // ★ 2026-07-05 발송 피로도 보호 — null = 비활성(제한 없음). 둘 다 설정해야 동작.
     fatigue_cap_days: null as number | null,
     fatigue_cap_max: null as number | null,
+    // ★ 2026-08-04 여정 진행 중 고객 제외(자동마케팅) — 기본 꺼짐(겹침 허용)
+    automarketing_exclude_journey: false,
   });
 
   useEffect(() => {
@@ -424,6 +426,23 @@ export default function Settings() {
                     <span className="text-xs text-gray-500">건까지 허용</span>
                   </div>
                 )}
+              </div>
+
+              {/* ★ 2026-08-04 여정 진행 중 고객 제외(자동마케팅) — opt-in. 끄면(기본) 현행 그대로 겹침 허용 */}
+              <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50 p-3">
+                <label className="flex w-fit cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={settings.automarketing_exclude_journey === true}
+                    onChange={(e) => setSettings({ ...settings, automarketing_exclude_journey: e.target.checked })}
+                    className="h-4 w-4 rounded accent-violet-600"
+                  />
+                  <span className="text-sm text-gray-700">여정 진행 중인 고객은 자동마케팅에서 제외</span>
+                </label>
+                <p className="mt-1 text-[11px] text-gray-400">
+                  켜면 고객 여정이 진행 중인 고객(환영·장바구니 안내 등 대화가 이어지는 중)에게는 자동마케팅 문자가 나가지 않습니다.
+                  여정이 끝나면 다시 자동마케팅 대상에 포함됩니다. 끄면 지금처럼 둘 다 발송됩니다.
+                </p>
               </div>
             </section>
           )}

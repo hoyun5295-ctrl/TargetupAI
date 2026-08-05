@@ -32,9 +32,15 @@ export interface AudienceGates {
   excludeClickedSince?: Date | null;
   /** 지정 시 최근 N일 M건+ 수신자 제외(발송 피로도 — 광고성 전역 게이트) */
   fatigueCap?: FatigueCap | null;
-  // ⛔ 2026-08-03 4R: 리마인드 코호트 경계(registeredBefore)는 폐기했다. 등록 시각으로는 "1차를 받은 사람"을
-  //   가려낼 수 없다(1차 때 조건 밖이었다가 등급 승급 등으로 들어온 기존 고객이 통과한다). 부분 방어를 두느니
-  //   리마인드 자체를 보류한다 — continuous-operator.ts scheduleSequenceReminder.
+  /**
+   * ★ 2026-08-04 (Harold 확정) — 여정 진행 중(`journey_executions.status='active'`)인 고객 제외.
+   * 회사 opt-in(피로도와 같은 부류 — 발송 대상을 건드리는 규칙은 회사가 명시적으로 켠 것만).
+   * 피로도가 "몇 통"을 막는다면 이것은 "무슨 말"의 충돌을 막는다 — 여정은 그 고객과 진행 중인 대화라
+   * 일반 캠페인이 끼어드는 게 괜찮은지는 브랜드마다 다르다. 기본 꺼짐 = 동작 변화 0.
+   */
+  excludeInJourney?: boolean;
+  // ⛔ 2026-08-03 4R: 리마인드 코호트 경계(registeredBefore)는 폐기했다 — 2026-08-04 코호트를
+  //   발송 큐 원장에서 얻는 방식으로 되살림(continuous-operator.ts 코호트 분기가 소유).
 }
 
 export function buildAudienceWhere(
@@ -57,12 +63,21 @@ export function buildAudienceWhere(
        )`;
   }
   const fatigueGuard = gates.fatigueCap ? buildFatigueGuardClause(params, gates.fatigueCap, 'c') : '';
+  // ★ 2026-08-04 여정 겹침 제외 — customer_id는 전역 유일(uuid FK)이라 회사 결합 없이도 격리된다.
+  //   'active'만 본다: completed·ended·goal_met은 대화가 끝난 사람, holdout은 여정이 발송하지 않는 대조군이다.
+  const journeyGuard = gates.excludeInJourney
+    ? `AND NOT EXISTS (
+         SELECT 1 FROM journey_executions je
+          WHERE je.customer_id = c.id AND je.status = 'active'
+       )`
+    : '';
   return `c.company_id = $1
        AND ${buildJourneySafetyFilter('c')}
        ${storeFilter}
        ${filterWhere}
        ${clickGuard}
-       ${fatigueGuard}`;
+       ${fatigueGuard}
+       ${journeyGuard}`;
 }
 
 /**

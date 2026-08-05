@@ -120,8 +120,9 @@ const DAYS_PARAM = (label: string, def: number): SegmentParamDef => ({
   presets: [30, 60, 90, 180, 365],
 });
 
+// ⛔ min 1 — 0원을 허용하면 "증가분 0 >= 0"이 참이라 변화 없는 전원이 대상이 된다(2026-08-04 Codex 오발송1).
 const AMOUNT_PARAM = (label: string, def: number): SegmentParamDef => ({
-  key: 'amount', label, unit: '원', default: def, min: 0, max: 100000000,
+  key: 'amount', label, unit: '원', default: def, min: 1, max: 100000000,
   presets: [50000, 100000, 300000, 500000, 1000000],
 });
 
@@ -151,18 +152,38 @@ interface SegmentContract {
  *   변화로 잡히지 않는다(모르면 안 보내는 방향 = fail-closed).
  * ⛔ operatorId가 없으면 조건을 만들지 않고 사유와 함께 멈춘다. "지난 회차"가 없는데 술어를 만들면
  *   비교 대상 없는 조건이 조용히 0건을 낸다 — 담당자는 왜 0인지 알 수 없다.
+ * ⛔ 회사 결합(`s.company_id = c.company_id`)을 스냅샷 쪽에도 건다(2026-08-04 Codex 권한2).
+ *   지금 호출부는 올바른 쌍을 넘기지만, 훗날 어긋난 쌍이 오면 남의 회사 과거와 비교되는 축이라
+ *   방어 비용 0인 결합을 여기서 닫는다.
+ *
+ * requirePurchaseInWindow (2026-08-04 Codex 오발송2 — backfill 오인 차단):
+ *   구매에서 파생되는 전환(첫 구매·복귀·구매 증가)은 **그 구매가 이 구간 안에서 일어났을 때만** 변화다.
+ *   과거 주문을 뒤늦게 연결하거나 옛 날짜를 보정하면 카운트·금액·구매일이 움직이지만, 그건 이 구간의
+ *   행동이 아니다 — 마지막 구매일이 관측 시점 이후일 때만 발화시킨다. 순수 데이터 보정은 구매일이
+ *   과거라 걸러지고, 진짜 새 구매는 반드시 이 조건을 만족한다.
  */
-function cycleCompare(params: any[], ctx: SegmentBuildContext, inner: () => string): string {
+function cycleCompare(
+  params: any[],
+  ctx: SegmentBuildContext,
+  inner: () => string,
+  opts?: { requirePurchaseInWindow?: boolean },
+): string {
   const operatorId = String(ctx.operatorId || '').trim();
   if (!operatorId) {
     throw new Error('이 조건은 지난번 발송 때와 비교해서 대상을 정합니다. 저장하면 첫 회차에 기준을 잡고 그다음 회차부터 대상이 잡힙니다.');
   }
   params.push(operatorId);
   const opIdx = params.length;
+  const windowGuard = opts?.requirePurchaseInWindow
+    ? `
+            AND c.recent_purchase_date IS NOT NULL
+            AND c.recent_purchase_date >= ((s.observed_at AT TIME ZONE 'Asia/Seoul')::date)`
+    : '';
   return `AND EXISTS (
          SELECT 1 FROM ${CYCLE_SNAPSHOT_TABLE} s
           WHERE s.operator_id = $${opIdx}::uuid
             AND s.customer_id = c.id
+            AND s.company_id = c.company_id${windowGuard}
             ${inner()}
        )`;
 }
@@ -298,9 +319,10 @@ export const SEGMENT_CONTRACTS: SegmentContract[] = [
     resolve: (f) => (f.hasPurchaseCount
       ? { available: true, reason: '지난번 이후 첫 구매를 한 고객에게 보냅니다.' }
       : { available: false, reason: '고객의 구매 횟수 정보가 아직 없어요. 구매 이력을 연동하면 열립니다.' }),
+    // ⛔ 구매창 가드 필수 — 과거 주문 뒤늦은 연결(backfill)로 0→1이 되어도 그 구매일은 관측 이전이라 걸러진다.
     build: (params, _values, ctx) => cycleCompare(params, ctx, () => `
             AND COALESCE(s.purchase_count, 0) = 0
-            AND COALESCE(c.purchase_count, 0) >= 1`),
+            AND COALESCE(c.purchase_count, 0) >= 1`, { requirePurchaseInWindow: true }),
   },
   {
     key: 'returned',
@@ -313,15 +335,16 @@ export const SEGMENT_CONTRACTS: SegmentContract[] = [
       : { available: false, reason: '고객의 마지막 구매일 정보가 아직 없어요. 구매 이력을 연동하면 열립니다.' }),
     // 기준 날짜는 **그 스냅샷을 찍은 날**에서 뺀다 — 오늘에서 빼면 회차 간격만큼 창이 밀린다.
     // recent_purchase_date가 KST 날짜라 관측 시각도 KST로 잘라 같은 축에 놓는다.
+    // ⛔ 구매창 가드 필수 — 옛 날짜끼리의 보정(2020-01→2020-02)도 `> s.recent` 는 통과시킨다.
+    //   복귀 구매가 관측 이후에 실제로 일어난 경우만 발화한다.
     build: (params, values, ctx) => cycleCompare(params, ctx, () => {
       params.push(values.days);
       const d = params.length;
       return `
             AND s.recent_purchase_date IS NOT NULL
             AND s.recent_purchase_date <= ((s.observed_at AT TIME ZONE 'Asia/Seoul')::date - $${d}::int)
-            AND c.recent_purchase_date IS NOT NULL
             AND c.recent_purchase_date > s.recent_purchase_date`;
-    }),
+    }, { requirePurchaseInWindow: true }),
   },
   {
     key: 'went_quiet',
@@ -357,11 +380,12 @@ export const SEGMENT_CONTRACTS: SegmentContract[] = [
     resolve: (f) => (f.hasPurchaseAmount
       ? { available: true, reason: '지난번 이후 많이 구매해 주신 고객에게 보냅니다.' }
       : { available: false, reason: '고객의 구매 금액 정보가 아직 없어요. 구매 이력을 연동하면 열립니다.' }),
+    // ⛔ 구매창 가드 필수 — backfill로 누적액만 늘어난 사람은 이 구간의 구매가 아니라 걸러진다.
     build: (params, values, ctx) => cycleCompare(params, ctx, () => {
       params.push(values.amount);
       return `
             AND COALESCE(c.total_purchase_amount, 0) - COALESCE(s.total_purchase_amount, 0) >= $${params.length}::numeric`;
-    }),
+    }, { requirePurchaseInWindow: true }),
   },
 ];
 

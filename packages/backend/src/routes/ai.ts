@@ -1,7 +1,7 @@
 import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, recommendNextCampaign, refineDirectMessage, callAIWithFallback } from '../services/ai';
+import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, recommendNextCampaign, refineDirectMessage, callAIWithFallback, suggestSegmentForObjective } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
 import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue, getColumnFields, renderFieldValue } from '../utils/standard-field-map';
 import { replaceVariables } from '../utils/messageUtils';
@@ -17,7 +17,11 @@ import { getFatigueCap } from '../utils/fatigue-guard';
 // ★ 2026-08-03 타겟팅 재설계 A-1: 자동마케팅 대상 수·명단은 발송과 같은 게이트를 쓰는 단일 문 경유.
 import {
   resolveOperatorAudienceGates, compileOperatorAudience, listSegmentAvailability, resolveOperatorStoreScope,
+  assertSegmentUsable,
 } from '../utils/operator-audience';
+// ★ 2026-08-04 변화 축 — 기준선 유무 판정(화면 첫 회차 안내가 서버 답을 쓴다).
+import { segmentNeedsCycleBaseline, normalizeSegmentKey } from '../utils/automarketing-segment';
+import { hasCycleBaseline } from '../utils/operator-cycle-snapshot';
 import { aggregateCampaignPerformance } from '../utils/stats-aggregation';
 import { formatDateValue, getOpt080Number, buildAdMessage, buildAdSubject } from '../utils/messageUtils';
 import { resolveJourneyAdFlag } from '../utils/journey-ad-policy';
@@ -62,6 +66,8 @@ import {
   approveProposal,
   rejectProposal,
   generateProposalForOperator,
+  // ★ 2026-08-04 리마인드 명단 — 발송과 같은 코호트를 읽는다(보여준 수 = 나가는 수)
+  readCampaignQueuedPhones,
 } from '../utils/continuous-operator';
 // ★ D177 (2026-05-19): Self-Optimizing Bandit (Thompson Sampling)
 // ★ D188 Phase 2-B-3 (2026-05-21): journey_step_variants CRUD + reward + 추천 헬퍼 import 추가.
@@ -1529,15 +1535,30 @@ router.post('/operator/target-recipients', async (req: Request, res: Response) =
     const storeFilter = scope.storeFilter;
     const baseParams: any[] = scope.baseParams;
 
+    // ★ 2026-08-04 변화 축 — 비교할 지난 회차가 없으면 세지 않고 "기준 대기"로 답한다.
+    //   count 0으로 답하면 담당자는 "대상 없음"으로 오독한다(Codex 조용한0건4 — 오퍼레이터가 있어도
+    //   기준선이 아직이면 같은 상태다). 기준선 유무는 서버만 안다 — 화면의 짐작(!operatorId)을 대체한다.
+    const opIdForBaseline = typeof operator_id === 'string' && operator_id.trim() ? operator_id.trim() : null;
+    if (hasSegment && segmentNeedsCycleBaseline(normalizeSegmentKey(String(segment_key).trim()))) {
+      // ⛔ 2R(F7a): 기준선 판정보다 근거 판정이 먼저다. 이 순서가 뒤집히면 잠긴 축·표 미생성까지
+      //   "기준 대기" 200으로 포장된다 — 잠긴 사유·503이 먼저 나가야 담당자가 진짜 상태를 본다.
+      await assertSegmentUsable(companyId, String(segment_key).trim());
+      if (!opIdForBaseline || !(await hasCycleBaseline(opIdForBaseline, companyId))) {
+        return res.json({
+          success: true, awaitingBaseline: true, recipients: [], total: 0,
+          basis: 'segment', segmentKey: String(segment_key).trim(), conditionColumns: [],
+        });
+      }
+    }
+
     const compiled = await compileOperatorAudience({
       companyId,
       segmentKey: hasSegment ? String(segment_key) : null,
       segmentParams: segment_params,
       legacyFilters: filters || {},
       baseParams,
-      // ★ 2026-08-04 변화 축 — 비교할 지난 회차의 주인. 신규 등록(미전송)이면 비어 있고,
-      //   그때 변화 축은 "첫 회차에 기준을 잡는다"는 사유로 멈춘다(화면이 먼저 안내하고 여기는 방어선).
-      operatorId: typeof operator_id === 'string' && operator_id.trim() ? operator_id.trim() : null,
+      // ★ 2026-08-04 변화 축 — 비교할 지난 회차의 주인(위 기준선 게이트를 지난 뒤라 항상 존재).
+      operatorId: opIdForBaseline,
     });
     // 조건 필드 동적 컬럼 — FIELD_MAP 화이트리스트 + displayName 라벨 단일 소스.
     //   계약 축은 조건 컬럼을 계약이 정하므로 filters 기반 동적 컬럼을 붙이지 않는다.
@@ -2124,6 +2145,43 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       }
     }
 
+    // ★ 2026-08-04 계약 필수화(§5-B ③) — 축을 안 고른 등록(자연어·오늘의 추천·시나리오 미선택)은
+    //   **등록 1회에 한해** AI가 목표를 그 회사에서 열려 있는 축으로 옮긴다. 이게 되면 회차마다 목표를
+    //   다시 해석하지 않는다(결정성). 축으로 표현이 안 되거나 확신이 없으면 종전대로 자유 해석 —
+    //   매핑 실패로 등록을 막지 않는다(기능 우선). 무엇으로 고정됐는지는 응답에 실어 화면이 바로 알린다.
+    let finalSegmentKey: string | null = typeof segment_key === 'string' && segment_key.trim() ? segment_key : null;
+    let finalSegmentParams: Record<string, number> | null =
+      segment_params && typeof segment_params === 'object' && !Array.isArray(segment_params)
+        ? (segment_params as Record<string, number>) : null;
+    let appliedSegment: { key: string; label: string } | null = null;
+    // ⛔ 매핑이 서는 조건 넷(2026-08-04 Codex 반영):
+    //   ①축 미지정 ②화면에서 축 선택 UI를 본 등록이 아님(segment_choice_seen — 모달의 "자동 판단" 명시
+    //     선택을 덮으면 화면이 거짓말이 된다) ③옛 축(target_hint)도 명시 안 함 — 마케팅 캘린더는 그 축으로
+    //     대상을 골라 보낸다. 그 선택을 AI 계약이 덮으면 캘린더 화면이 보여준 축과 실제가 갈린다(2R #8)
+    //   ④이름·목표가 실재(빈 등록은 어차피 저장이 거부되는데 AI 호출·호출 한도만 소모한다).
+    if (
+      !finalSegmentKey
+      && req.body?.segment_choice_seen !== true
+      && !(typeof target_hint === 'string' && target_hint.trim())
+      && typeof objective === 'string' && objective.trim()
+      && typeof name === 'string' && name.trim()
+    ) {
+      try {
+        const openAxes = (await listSegmentAvailability(companyId)).filter((a) => a.available);
+        const mapped = await suggestSegmentForObjective(companyId, userId || null, objective.trim(), openAxes);
+        if (mapped) {
+          // 저장 검증을 여기서 미리 통과시킨다 — 매핑된 축이 표 미생성 등으로 저장 불가면 매핑을 버리고
+          //   자유 해석으로 등록한다(매핑 실패가 등록 전체를 503으로 만들면 안 된다 — 기능 우선).
+          await assertSegmentUsable(companyId, mapped.key);
+          finalSegmentKey = mapped.key;
+          finalSegmentParams = mapped.params;
+          appliedSegment = { key: mapped.key, label: openAxes.find((a) => a.key === mapped.key)?.label || mapped.key };
+        }
+      } catch (e: any) {
+        console.warn('[Operator continuous POST] 축 매핑 생략(자유 해석 등록):', e?.message);
+      }
+    }
+
     const operator = await createOperator({
       companyId,
       createdBy: userId,
@@ -2156,9 +2214,9 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       // ★ 2026-07-07 마케팅 캘린더 완비: 발송 대상 축 (createOperator가 화이트리스트 정규화)
       targetHint: typeof target_hint === 'string' ? target_hint : null,
       // ★ 2026-08-03 A-7: 계약(createOperator가 화이트리스트·범위 정규화). 미지정 = 옛 방식(자유 해석).
-      segmentKey: typeof segment_key === 'string' ? segment_key : null,
-      segmentParams: segment_params && typeof segment_params === 'object' && !Array.isArray(segment_params)
-        ? (segment_params as Record<string, number>) : null,
+      // ★ 2026-08-04: 사용자가 안 골랐으면 위 등록 1회 매핑 결과가 들어온다.
+      segmentKey: finalSegmentKey,
+      segmentParams: finalSegmentParams,
       // ★ 2026-07-30 (임은지 접수): MMS 이미지 (createOperator가 채널 mms + 최대 3장으로 정규화)
       mmsImagePaths: Array.isArray(mms_image_paths) ? mms_image_paths : null,
     });
@@ -2168,7 +2226,8 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       markCalendarRegistration(companyId, calendarMonth, operator.id).catch((e: any) =>
         console.log('[MarketingCalendar] 등록 기록 실패(등록은 성공):', e?.message || e));
     }
-    return res.json({ success: true, operator });
+    // appliedSegment — AI 매핑으로 고정된 축. 화면이 즉시 알린다(사용자 몰래 고정되는 상태 금지).
+    return res.json({ success: true, operator, appliedSegment });
   } catch (err: any) {
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: '자동 마케팅 시작에 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
@@ -2642,6 +2701,21 @@ router.post('/operator/continuous/:id/run-now', async (req: Request, res: Respon
     }
     const proposal = await generateProposalForOperator(req.params.id);
     if (!proposal) {
+      // ★ 2026-08-04: 변화 축 첫 회차는 실패가 아니라 기준을 잡은 정상 동작 — 일반 0건과 섞으면 고장으로 읽힌다.
+      try {
+        // 2R(#12): 회사 결합 — 소유 검증은 위에서 끝났지만 조회 축은 항상 테넌트 경계를 함께 진다.
+        const opRow = await query(
+          `SELECT segment_key FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`,
+          [req.params.id, companyId],
+        );
+        const segKey = String(opRow.rows[0]?.segment_key || '');
+        if (segKey && segmentNeedsCycleBaseline(normalizeSegmentKey(segKey)) && (await hasCycleBaseline(req.params.id, companyId))) {
+          return res.json({
+            success: true, proposal: null,
+            message: '비교 기준을 잡았습니다. 지난번과 달라진 고객이 생기면 다음 회차부터 대상으로 잡힙니다.',
+          });
+        }
+      } catch { /* 안내 실패 = 일반 메시지로 */ }
       return res.json({ success: true, proposal: null, message: '0건 매칭 또는 생성 실패 — 제안서가 생성되지 않았습니다.' });
     }
     return res.json({ success: true, proposal });
@@ -2690,8 +2764,9 @@ router.post('/operator/proposals/:id/recipients', async (req: Request, res: Resp
     }
 
     // 소유자 scope — listProposals/approve와 동일 기준(비관리자=본인 operator 제안만). 빠지면 타 담당자 고객 명단 노출.
+    // ★ 2026-08-04(R1): p.operator_id를 함께 — 변화 축 컴파일이 지난 회차의 주인을 요구한다(없으면 이 화면만 500이었다).
     const pRes = await query(
-      `SELECT p.proposal_json, p.recipient_count, p.status, o.created_by, o.name AS operator_name
+      `SELECT p.proposal_json, p.recipient_count, p.status, p.operator_id, o.created_by, o.name AS operator_name
          FROM operator_proposals p
          JOIN continuous_operators o ON o.id = p.operator_id
         WHERE p.id = $1::uuid AND p.company_id = $2::uuid`,
@@ -2710,6 +2785,30 @@ router.post('/operator/proposals/:id/recipients', async (req: Request, res: Resp
     //   (리마인드 코호트 경계가 여기 빠지면 화면 명단이 실발송보다 넓어진다).
     const gates = await resolveOperatorAudienceGates(companyId, pj);
 
+    // ★ 2026-08-04 리마인드 명단 = 발송과 같은 코호트(Codex 1R-a — target 재컴파일이면 화면 ≠ 실발송).
+    //   1차 캠페인의 실수신 성공 번호 ∩ 게이트. 1차가 종결 전이거나 명단이 비면 그 상태를 그대로 말한다.
+    let reminderCohort: string[] | null = null;
+    if (pj.meta?.is_reminder === true) {
+      const primaryCampaignId = String(pj.meta?.primary_campaign_id || '').trim();
+      const emptyReminder = (label: string) => res.json({
+        success: true, recipients: [], displayTotal: 0, proposedTotal: Number(prow.recipient_count) || 0,
+        criteria: pj.target?.criteria || null, segmentName: pj.target?.suggestedName || prow.operator_name || null,
+        basisLabel: label, conditionColumns: [],
+      });
+      if (!primaryCampaignId) return emptyReminder('1차 발송 정보가 없어 대상을 확인할 수 없습니다');
+      const camp = await query(
+        `SELECT status, send_config, created_by, COALESCE(sent_at, scheduled_at, created_at) AS ref_date
+           FROM campaigns WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [primaryCampaignId, companyId],
+      );
+      const crow = camp.rows[0];
+      if (!crow || String(crow.status) !== 'completed') {
+        return emptyReminder('1차 발송이 아직 완료되지 않아 리마인드 대상을 셀 수 없습니다 (완료 후 다시 확인해 주세요)');
+      }
+      reminderCohort = await readCampaignQueuedPhones(companyId, primaryCampaignId, crow, { successOnly: true });
+      if (reminderCohort.length === 0) return emptyReminder('1차를 실제로 받은 고객이 확인되지 않았습니다');
+    }
+
     // ⛔ 2026-08-03 7R 정정: 이 화면이 답해야 하는 것은 "이 제안이 실제로 누구에게 나가는가"다.
     //   열람자 기준이 아니라 **오퍼레이터 소유자 기준** 범위를 쓴다 — 관리자가 직원 제안을 열면 종전엔
     //   화면은 전사, 실발송은 직원 매장이라 서로 달랐다. 열람 권한은 위 소유자 검증이 이미 담당한다.
@@ -2726,15 +2825,25 @@ router.post('/operator/proposals/:id/recipients', async (req: Request, res: Resp
     const baseParams: any[] = scope.baseParams;
 
     // ★ 2026-08-03 A-7: 발송이 쓰는 컴파일과 같은 문 — 계약 제안이면 축으로, 옛 제안이면 filters로.
-    const compiled = await compileOperatorAudience({
-      companyId,
-      segmentKey: pj.target?.segmentKey || null,
-      segmentParams: pj.target?.segmentParams || null,
-      legacyFilters: filters,
-      baseParams,
-    });
-    const filterWhere = compiled.filterWhere;
-    const filterParams = compiled.filterParams;
+    //   리마인드는 조건 컴파일이 아니라 코호트 semi-join(발송 dispatch와 같은 형태).
+    let filterWhere: string;
+    let filterParams: any[];
+    if (reminderCohort) {
+      filterWhere = `AND regexp_replace(COALESCE(c.phone, ''), '[^0-9]', '', 'g') = ANY($${baseParams.length + 1}::text[])`;
+      filterParams = [reminderCohort];
+    } else {
+      const compiled = await compileOperatorAudience({
+        companyId,
+        segmentKey: pj.target?.segmentKey || null,
+        segmentParams: pj.target?.segmentParams || null,
+        legacyFilters: filters,
+        baseParams,
+        // ★ 2026-08-04(R1): 변화 축은 이 제안의 오퍼레이터 스냅샷과 비교한다 — 발송 경로와 같은 축.
+        operatorId: prow.operator_id || null,
+      });
+      filterWhere = compiled.filterWhere;
+      filterParams = compiled.filterParams;
+    }
     // 조건 필드 동적 컬럼 — FIELD_MAP 화이트리스트 + displayName 라벨 단일 소스(0709 개인화 라벨 통일 교훈).
     const conditionColumns = resolveConditionColumns(filters, FIELD_MAP);
     const { sql, params } = buildSendableRecipientsTopSql(
@@ -2750,9 +2859,11 @@ router.post('/operator/proposals/:id/recipients', async (req: Request, res: Resp
     const liveTotal = Number(liveTotalRes.rows[0]?.count) || 0;
 
     // 시점 정직 라벨(원칙 1) — 승인 대기/예약(리스트화 이후)=확정 기준. 발송 직전 수신거부·피로도는 발송 시점에 또 걸러진다.
-    const basisLabel = ['pending', 'scheduled', 'admin_review'].includes(String(prow.status))
-      ? '발송 확정 기준 명단 (지금 기준 실측 · 발송 시점 안전필터 재반영)'
-      : '예상 대상 (지금 기준 실측 · 발송 시점 재추출)';
+    const basisLabel = reminderCohort
+      ? '1차를 받은 고객 중 클릭하지 않은 분 (지금 기준 실측 · 발송 시점 재추출)'
+      : ['pending', 'scheduled', 'admin_review'].includes(String(prow.status))
+        ? '발송 확정 기준 명단 (지금 기준 실측 · 발송 시점 안전필터 재반영)'
+        : '예상 대상 (지금 기준 실측 · 발송 시점 재추출)';
 
     return res.json({
       success: true,
@@ -2767,6 +2878,10 @@ router.post('/operator/proposals/:id/recipients', async (req: Request, res: Resp
     });
   } catch (err: any) {
     const msg = err?.message || '';
+    // ★ 2026-08-04 2R(F7b): 변화 축 스냅샷 표 미생성 — 컴파일이 코드를 붙여 던진다(500 노출 금지).
+    if (err?.code === 'DB_MIGRATION_PENDING' || err?.code === '42P01') {
+      return res.status(503).json({ success: false, error: '지난번과 달라진 점을 찾는 조건은 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 customers/operator_proposals 컬럼 확인을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
     }

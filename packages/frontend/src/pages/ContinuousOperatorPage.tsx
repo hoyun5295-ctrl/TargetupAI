@@ -154,6 +154,9 @@ export default function ContinuousOperatorPage() {
     // ★ 2026-08-03 타겟팅 재설계: 발송 대상 계약 — 고르면 매 회차 같은 조건으로 컴파일된다.
     segment_key: e.segmentKey ?? null,
     segment_params: e.segmentParams ?? null,
+    // ★ 2026-08-04: 화면에서 축 선택 UI를 보고 저장했는가 — true면 서버 AI 매핑이 개입하지 않는다
+    //   (명시적 "자동 판단" 선택을 1회 고정으로 덮으면 화면이 거짓말이 된다). 자연어·추천 흐름은 미전송.
+    segment_choice_seen: e.segmentChoiceSeen === true,
     // ⛔ 2026-08-03 6R·8R 정정: 옛 축(target_hint)은 3상태로 다룬다.
     //   미전송 = 서버 유지(무관한 수정이 옛 축을 지우면 안 된다) / 사용자가 "자동 판단"을 명시적으로 고른 경우에만 해제.
     //   계약을 고르면 서버가 상호배타로 해제하므로 그때는 보낼 필요가 없다.
@@ -184,6 +187,11 @@ export default function ContinuousOperatorPage() {
         return;
       }
       toast.success('자동 마케팅이 시작되었습니다.');
+      // ★ 2026-08-04 계약 필수화 — 등록 1회 AI 매핑으로 축이 고정됐으면 즉시 알린다.
+      //   사용자 몰래 고정되는 상태를 만들지 않는다(수정 화면에서 언제든 바꿀 수 있다).
+      if (data.appliedSegment?.label) {
+        toast.info(`발송 대상을 '${data.appliedSegment.label}' 기준으로 고정했습니다. 매 회차 같은 기준으로 나가며, 수정에서 바꿀 수 있습니다.`);
+      }
       setEditing(null);
       let gotProposal = false;
       const newId = data.operator?.id;
@@ -234,10 +242,12 @@ export default function ContinuousOperatorPage() {
   };
 
   // 세부설정 모달 제출: 수정이면 PUT, 신규면 크레딧 확인 후 생성.
+  // ★ 2026-08-04: 모달을 거친 등록은 사용자가 SegmentPicker를 **봤다** — "목표 문장으로 자동 판단"을
+  //   그대로 두고 저장한 것도 선택이다. 서버 AI 매핑이 그 선택을 덮지 않도록 표식을 실어 보낸다.
   const handleSetupSubmit = () => {
     if (!editing) return;
     if (editing.id) { updateOperator(); return; }
-    setPendingConfig(editing);
+    setPendingConfig({ ...editing, segmentChoiceSeen: true });
   };
 
   // 자연어 제출: 스마트 기본값 + 목표 (+선택 문안 스타일) → 크레딧 확인 → 생성 + 즉시 초안.
@@ -247,6 +257,8 @@ export default function ContinuousOperatorPage() {
   };
 
   // 시나리오 선택: 세부설정 모달 prefill (가동 전 한 번 확인). 월간형(생일·VIP 데이)은 주기까지 프리필.
+  // ★ 2026-08-04 계약 필수화 — 축이 정확히 맞는 시나리오는 계약까지 프리필. 모달 SegmentPicker에 선택된
+  //   상태로 보여 사용자가 확인·변경한 뒤 저장된다(§4-3의 "AI 제안 → 담당자 확인 → 계약" 그대로).
   const handleScenarioSelect = (s: ScenarioPick) => {
     setEditing({
       ...SMART_DEFAULTS,
@@ -254,6 +266,7 @@ export default function ContinuousOperatorPage() {
       objective: s.objective,
       ...(s.schedule ? { schedule: s.schedule } : {}),
       ...(s.scheduleDayOfMonth != null ? { scheduleDayOfMonth: s.scheduleDayOfMonth } : {}),
+      ...(s.segmentKey ? { segmentKey: s.segmentKey, segmentParams: s.segmentParams ?? null } : {}),
     });
   };
 

@@ -6,11 +6,6 @@
     "auditLog": "C:\\Users\\ceo\\projects\\targetup\\logs\\.a6e60724e6547a0a1cedf8574ac59319a5144d52-audit.json",
     "files": [
         {
-            "date": 1782800885978,
-            "name": "C:\\Users\\ceo\\projects\\targetup\\logs\\error-2026-06-30.log",
-            "hash": "76c4a1b70772efa37c9cd3ce5eb94b3a322e98515f55e462b6315929e7caf2a8"
-        },
-        {
             "date": 1785139361757,
             "name": "C:\\Users\\ceo\\projects\\targetup\\logs\\error-2026-07-27.log",
             "hash": "e26261a80dd7dc27d2348243ae6eb8c0d2e122fa263898c6e5f8fb4b801ad501"
@@ -19,6 +14,11 @@
             "date": 1785280818886,
             "name": "C:\\Users\\ceo\\projects\\targetup\\logs\\error-2026-07-29.log",
             "hash": "231671af63dbc03db180228755e8553c1336b6e972b318eec580fa5a6f8cc887"
+        },
+        {
+            "date": 1785884629737,
+            "name": "C:\\Users\\ceo\\projects\\targetup\\logs\\error-2026-08-05.log",
+            "hash": "7a95129edb395d2fa4040a2015ccfde6cdf7a8af3633d2b13a258f3f213b1006"
         }
     ],
     "hashType": "sha256"

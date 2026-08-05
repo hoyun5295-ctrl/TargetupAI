@@ -6,8 +6,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../config/database', () => ({ query: vi.fn(), pool: {} }));
 
+// ★ 2026-08-04 — 스냅샷 표 준비 판정은 "준비됨"을 캐시하는 모듈이라 실물을 쓰면 테스트가 순서 의존이 된다
+//   (표 있음 케이스가 먼저 돌면 표 없음 케이스가 캐시에 가려 거짓 초록). 판정만 상태 주입으로 대체한다.
+const snapState = vi.hoisted(() => ({ ready: true }));
+vi.mock('./operator-cycle-snapshot', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./operator-cycle-snapshot')>();
+  return { ...actual, isCycleSnapshotReady: vi.fn(async () => snapState.ready) };
+});
+
 import { query } from '../config/database';
-import { compileOperatorAudience, resolveOperatorStoreScope } from './operator-audience';
+import { compileOperatorAudience, resolveOperatorStoreScope, assertSegmentUsable } from './operator-audience';
 
 const q = query as unknown as ReturnType<typeof vi.fn>;
 const COMPANY = '11111111-1111-1111-1111-111111111111';
@@ -19,6 +27,7 @@ const mockFacts = (opts: {
   /** 회차 스냅샷 표가 운영에 있는가(2026-08-04 변화 축). 미지정 = 있음. */
   snapshotTable?: boolean;
 }) => {
+  snapState.ready = opts.snapshotTable !== false;
   q.mockReset();
   q.mockImplementation(async (sql: string) => {
     if (/COUNT\(\*\) FILTER \(WHERE recent_purchase_date/.test(sql)) {
@@ -39,14 +48,11 @@ const mockFacts = (opts: {
     if (/FROM customer_grade_ranks r/.test(sql)) {
       return { rows: [{ grade_value: 'VVIP', rank_order: 3 }, { grade_value: '골드', rank_order: 2 }], rowCount: 2 };
     }
-    if (/information_schema\.tables/.test(sql)) {
-      return opts.snapshotTable === false ? { rows: [], rowCount: 0 } : { rows: [{ '?column?': 1 }], rowCount: 1 };
-    }
     return { rows: [], rowCount: 0 };
   });
 };
 
-beforeEach(() => { q.mockReset(); q.mockResolvedValue({ rows: [], rowCount: 0 }); });
+beforeEach(() => { snapState.ready = true; q.mockReset(); q.mockResolvedValue({ rows: [], rowCount: 0 }); });
 
 describe('알 수 없는 축 — fail-closed', () => {
   it('값이 있는데 등록되지 않은 축이면 멈춘다 (legacy 빈 WHERE로 강등 금지)', async () => {
@@ -199,8 +205,7 @@ describe('열린 축 — 계약이 SQL을 만든다', () => {
 
 // ════════════════════════════════════════════════════════════════════
 // 변화 축 (2026-08-04) — 자동마케팅만 가진 어휘. 여정은 사람마다 시계가 따로 돌아 구간을 못 자른다.
-//   ⛔ 이 describe는 **아래 두 describe보다 먼저** 온다. isCycleSnapshotReady가 "준비됨"만 캐시하므로
-//     표 있음을 먼저 단정하면 표 없음 케이스가 캐시에 가려 초록으로 통과한다(조용히 의미만 사라진다).
+//   표 준비 판정은 위 vi.mock이 상태 주입으로 대체 — 실물 캐시("준비됨"만 기억)의 순서 의존이 없다.
 // ════════════════════════════════════════════════════════════════════
 const OPERATOR = '44444444-4444-4444-4444-444444444444';
 
@@ -210,6 +215,46 @@ describe('변화 축 — 회차 스냅샷 표가 없으면 조건을 만들지 �
     await expect(compileOperatorAudience({
       companyId: COMPANY, segmentKey: 'grade_up', operatorId: OPERATOR,
     })).rejects.toMatchObject({ code: 'DB_MIGRATION_PENDING' });
+  });
+});
+
+describe('여정 겹침 제외 게이트 — 회사 opt-in (2026-08-04 Harold 확정)', () => {
+  it('설정이 켜진 회사만 게이트가 선다 — 미설정·조회 실패(42703)는 꺼짐(현행 유지)', async () => {
+    q.mockReset();
+    q.mockImplementation(async (sql: string) => {
+      if (/automarketing_exclude_journey/.test(sql)) return { rows: [{ automarketing_exclude_journey: true }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    });
+    const on = await (await import('./operator-audience')).getExcludeInJourneySetting(COMPANY);
+    expect(on).toBe(true);
+
+    q.mockReset();
+    q.mockRejectedValue(Object.assign(new Error('column does not exist'), { code: '42703' }));
+    const off = await (await import('./operator-audience')).getExcludeInJourneySetting(COMPANY);
+    expect(off).toBe(false);
+  });
+});
+
+describe('저장 검증(assertSegmentUsable) — 근거만 묻고 SQL은 만들지 않는다 (R1)', () => {
+  it('★ 변화 축은 오퍼레이터 없이도 저장 검증을 통과한다 — 컴파일로 검증하면 등록 자체가 안 됐다', async () => {
+    mockFacts({ recentPurchase: 5, gradeValues: 5, rankCount: 2 });
+    await expect(assertSegmentUsable(COMPANY, 'grade_up')).resolves.toBeUndefined();
+  });
+
+  it('알 수 없는 축은 저장을 받지 않는다', async () => {
+    mockFacts({ recentPurchase: 5 });
+    await expect(assertSegmentUsable(COMPANY, 'ltv_top_10')).rejects.toThrow(/알 수 없는 발송 대상 축/);
+  });
+
+  it('근거 없는 축은 사유와 함께 거부한다', async () => {
+    mockFacts({ recentPurchase: 0 });
+    await expect(assertSegmentUsable(COMPANY, 'dormant')).rejects.toThrow(/마지막 구매일/);
+  });
+
+  it('변화 축은 스냅샷 표가 없으면 마이그레이션 코드로 거부한다', async () => {
+    mockFacts({ purchaseCount: 5, snapshotTable: false });
+    await expect(assertSegmentUsable(COMPANY, 'first_purchase'))
+      .rejects.toMatchObject({ code: 'DB_MIGRATION_PENDING' });
   });
 });
 

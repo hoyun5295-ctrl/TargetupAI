@@ -27,6 +27,8 @@ import { detectLiquidSyntax, flattenLiquidToPlainText } from '../utils/liquid-te
 import { getCreditCost } from '../utils/ai-credit-calc';
 // ★ D227+ 종량제: orchestrate 묶음 차감 컨텍스트 (묶음 안 sub 호출은 차감 skip)
 import { isInCreditBundle } from '../utils/ai-credit-context';
+// ★ 2026-08-04 계약 필수화 — 등록 1회 축 매핑(suggestSegmentForObjective)이 계약 정의·범위를 읽는다.
+import { getSegmentContract, normalizeSegmentParams } from '../utils/automarketing-segment';
 
 // ★ 2026-07-22 기동 시 1회 진단 경고(운영 PM2용). vitest는 dotenv.config()를 안 거쳐(app.ts 부트스트랩 미실행)
 //   process.env가 비어 실제 키가 있어도 매 테스트 파일마다 오탐 경고가 찍힌다 → 테스트 컨텍스트에선 skip.
@@ -1580,6 +1582,66 @@ ${customLines}
 }
 
 // ============================================================
+// ★ 2026-08-04 등록 1회 축 매핑 (계약 필수화 §5-B ③)
+//   자연어 목표를 세그먼트 계약(축 + 파라미터)으로 옮긴다 — **등록 시 1회만** 부른다.
+//   회차마다 목표를 다시 해석하지 않는 것(결정성)이 목적이라, 이 함수를 회차 경로에서 부르면 안 된다.
+//   ⛔ 대상 판정은 AI가 하지 않는다 — AI는 어휘 번역만 하고, 실제 명단은 계약 SQL이 뽑는다(불변 원칙 1).
+//   ⛔ 정답표 금지 — 후보는 그 회사에서 지금 열려 있는 축뿐(호출부가 listSegmentAvailability로 준다).
+//   확신이 없거나 축으로 표현이 안 되는 목표는 null — 옛 방식(자유 해석)으로 등록된다(기능 우선).
+// ============================================================
+
+export async function suggestSegmentForObjective(
+  companyId: string,
+  userId: string | null,
+  objective: string,
+  availableAxes: Array<{ key: string; label: string; params: Array<{ key: string; label: string; unit: string; default: number; min: number; max: number }> }>,
+): Promise<{ key: string; params: Record<string, number> } | null> {
+  if (!process.env.ANTHROPIC_API_KEY || availableAxes.length === 0) return null;
+
+  const axisLines = availableAxes.map((a) => {
+    const desc = getSegmentContract(a.key)?.description || '';
+    const params = a.params.map((p) => `${p.key}(${p.label}, ${p.unit}, 기본 ${p.default}, ${p.min}~${p.max})`).join(' · ');
+    return `- "${a.key}": ${a.label} — ${desc}${params ? ` [조절값: ${params}]` : ''}`;
+  }).join('\n');
+
+  const system = `너는 마케팅 목표 문장을 발송 대상 축으로 분류하는 분류기다.
+아래 축 목록에서 목표가 말하는 대상과 **정확히 일치하는 축 하나**를 고른다.
+
+${axisLines}
+
+규칙:
+1. 목표의 "누구에게"가 축 정의와 정확히 맞을 때만 고른다. 비슷해 보이는 정도면 고르지 않는다.
+2. 축 하나로 표현이 안 되는 대상(두 조건의 결합, 목록에 없는 조건)은 고르지 않는다.
+3. 목표에 기간·금액 숫자가 있으면 그 축의 조절값 범위 안에서 반영한다. 없으면 기본값.
+4. 응답은 JSON 하나만: {"key": "축key", "params": {"days": 60}} 또는 확신이 없으면 {"key": null}.
+다른 텍스트 절대 금지.`;
+
+  try {
+    const raw = await callAIWithFallback({
+      system,
+      userMessage: `마케팅 목표: ${objective.slice(0, 500)}`,
+      maxTokens: 200,
+      temperature: 0,
+      model: 'opus',
+      companyId,
+      userId: userId || undefined,
+      source: 'operator-segment-map',
+      creditCost: 0,   // 등록 1회 매핑 — 등록 크레딧에 포함(별도 차감 없음)
+    });
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    const parsed = JSON.parse(m[0]);
+    const key = typeof parsed?.key === 'string' ? parsed.key.trim() : '';
+    if (!key || !availableAxes.some((a) => a.key === key)) return null;   // 목록 밖·null = 매핑 없음
+    // 파라미터는 계약 범위로 자른다 — AI 숫자를 그대로 믿지 않는다.
+    return { key, params: normalizeSegmentParams(key as any, parsed?.params) };
+  } catch (e: any) {
+    console.warn('[AI] 축 매핑 실패(자유 해석으로 등록):', e?.message);
+    return null;
+  }
+}
+
+// ============================================================
 // 타겟 추천 (recommendTarget)
 // ============================================================
 
@@ -2781,7 +2843,9 @@ const SMS_SAFE_SPECIAL_CHARS = new Set([
   '㎝','㎏','㎡','㎎',
 ]);
 
-function stripIncompatibleEmojis(text: string): string {
+// ★ 2026-08-04 export — 관리자 작성 리마인드 문안(continuous-operator)도 같은 EUC-KR 안전화를 지난다.
+//   AI 생성물만 걸러지고 수기 입력이 그대로 큐에 들어가면 같은 깨짐이 경로만 바꿔 재발한다.
+export function stripIncompatibleEmojis(text: string): string {
   // ★ D152+ Harold님 PM2 진단: 한글 다 제거 사고 fix.
   //   기존: `code < 0x2600` 통과 → 한글 U+AC00(44032) > 0x2600(9728)이라 한글 모두 제거됨.
   //   수정: 블랙리스트 방식 — 이모지 픽토그램 범위만 명시 제거, 그 외(ASCII/한글/한자/일반부호) 모두 통과.

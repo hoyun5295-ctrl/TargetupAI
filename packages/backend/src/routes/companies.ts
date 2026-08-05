@@ -90,6 +90,14 @@ router.get('/settings', authenticate, async (req: Request, res: Response) => {
       row.fatigue_cap_max = null;
     }
 
+    // ★ 2026-08-04 (Harold 확정) 여정 진행 중 고객 제외(자동마케팅) — 피로도와 같은 42703 격리 패턴
+    try {
+      const ej = await query(`SELECT automarketing_exclude_journey FROM companies WHERE id = $1`, [companyId]);
+      row.automarketing_exclude_journey = ej.rows[0]?.automarketing_exclude_journey === true;
+    } catch {
+      row.automarketing_exclude_journey = false;
+    }
+
     res.json(row);
   } catch (error) {
     console.error('설정 조회 에러:', error);
@@ -110,7 +118,9 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
       target_strategy, cross_category_allowed, excluded_segments,
       approval_required,
       // ★ 2026-07-05 발송 피로도 보호 — null 명시 = 해제(비활성). COALESCE 미사용 별도 UPDATE.
-      fatigue_cap_days, fatigue_cap_max
+      fatigue_cap_days, fatigue_cap_max,
+      // ★ 2026-08-04 (Harold 확정) 여정 진행 중 고객 제외(자동마케팅) — opt-in boolean
+      automarketing_exclude_journey
     } = req.body;
     // ★ D97: manager_contacts는 test_contacts 테이블로 완전 이관
     // PUT /settings에서 manager_contacts 저장 로직 완전 제거
@@ -181,6 +191,18 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
         );
       } catch (fgErr: any) {
         console.warn('[settings] 피로도 보호 설정 저장 실패 (컬럼 미마이그레이션?):', fgErr?.message);
+      }
+    }
+
+    // ★ 2026-08-04 (Harold 확정) 여정 진행 중 고객 제외(자동마케팅) — 피로도와 같은 격리 저장 패턴
+    if (automarketing_exclude_journey !== undefined) {
+      try {
+        await query(
+          `UPDATE companies SET automarketing_exclude_journey = $1, updated_at = NOW() WHERE id = $2`,
+          [automarketing_exclude_journey === true, companyId]
+        );
+      } catch (ejErr: any) {
+        console.warn('[settings] 여정 제외 설정 저장 실패 (컬럼 미마이그레이션?):', ejErr?.message);
       }
     }
 

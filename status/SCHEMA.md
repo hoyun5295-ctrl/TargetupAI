@@ -81,6 +81,7 @@
 | - | best_copy_assets **(2026-07-04 CREATE 대기)** | 업종 승리공식·AI 재창작 예시. `id uuid PK, kind varchar(20)[formula\|style_example], industry_code varchar(20), channel varchar(10), is_ad bool, content text, meta jsonb, created_at timestamptz`. INDEX(kind,industry_code). 코드 42P01 폴백 |
 | - | send_fatigue_daily **(2026-07-05 CREATE 대기)** | 발송 피로도 일일 버킷(광고성 문자+알림톡 합산, day=KST). `company_id uuid NOT NULL, phone varchar(20) NOT NULL, day date NOT NULL, sent_count int NOT NULL DEFAULT 0, PK(company_id,phone,day)` + INDEX(day). 45일 초과 프루닝(fatigue-guard 6h 워커). 코드 42P01 폴백(미생성=게이트·카운터 비활성) |
 | - | companies **(2026-07-05 ADD 대기)** | `fatigue_cap_days int` · `fatigue_cap_max int` — 발송 피로도 상한(최근 N일 M건). NULL=비활성(opt-in — 회사가 설정 화면에서 켠 경우만 게이트). 코드 42703 폴백. `ALTER TABLE companies ADD COLUMN fatigue_cap_days integer; ALTER TABLE companies ADD COLUMN fatigue_cap_max integer;` |
+| - | companies **(2026-08-04 ADD 대기)** | `automarketing_exclude_journey boolean` — 여정 진행 중(`journey_executions.status='active'`) 고객을 자동마케팅 대상에서 제외(Harold 확정, opt-in — NULL/false=현행 겹침 허용). 소비 = 자동마케팅 단일 문 게이트뿐(`operator-audience.getExcludeInJourneySetting`), 여정·캠페인 무관. 코드 42703 폴백. `ALTER TABLE companies ADD COLUMN automarketing_exclude_journey boolean;` |
 
 ---
 
