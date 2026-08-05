@@ -13,7 +13,7 @@ import { sendSystemAlert } from './system-alert';
 import { parseDeductDescription, parseFreeCount } from './deduct-reference';
 // ★ 2026-08-05 요금제 무료 메시징 — 소진 길목은 이 파일 하나다(설계 §5-1).
 //   호출부 11곳에 흩뿌리면 "발송 5경로 부분 패치"가 그대로 재발한다.
-import { isFreeMessagingEligible, consumeFreeQuota } from './free-messaging';
+import { isFreeMessagingEligible, consumeFreeQuota, recordFreeAttempt } from './free-messaging';
 
 /**
  * 이 (유형 × 참조)에 실제로 **차감된 총액과 건수**, 그리고 그 둘로 되살린 **정산 단가**.
@@ -113,7 +113,13 @@ export async function prepaidDeduct(
   //   둘을 한 값으로 묶었더니 무료가 전량 실패해 소멸한 뒤 유료분이 성공하면 그 성공분을
   //   0원 청구하는 과소청구가 났다. 후불의 무료 적용은 정산이 성공 행에 한도를 배분해 확정한다
   //   (`readFreeDeductibleForBilling` — 설계 §5-2·§6). 여기에 소진을 두지 않는 것이 그 축 분리다.
-  if (pre.rows[0].billing_type !== 'prepaid') return { ok: true, amount: 0 };
+  if (pre.rows[0].billing_type !== 'prepaid') {
+    // 청구 축은 그대로 두고 **표시용 시도 카운터만** 올린다 — 안 올리면 후불 고객 화면이 영원히 0이다.
+    if (isFreeMessagingEligible(messageType, referenceType)) {
+      await recordFreeAttempt({ query: (sql: string, params?: any[]) => query(sql, params) }, companyId, messageType, count);
+    }
+    return { ok: true, amount: 0 };
+  }
 
   // ★ 2026-07-26 잔액 갱신과 원장 INSERT를 **한 트랜잭션**으로 묶는다(Codex #3).
   //   전에는 `query`(=pool.query) 두 문장이라 각각 즉시 커밋됐다 — INSERT가 실패하면
@@ -159,9 +165,12 @@ export async function prepaidDeduct(
     //   단가가 없는 회사는 무료분만 보낼 수 있게 열어 주면 안 된다(0726 차단 계약 유지).
     //   이 소진은 같은 트랜잭션 안이라, 아래에서 잔액 부족으로 롤백되면 무료 소진도 함께 되돌아간다.
     //   ⚠ 반대로 커밋된 뒤에는 **어떤 경로로도 복원하지 않는다**(설계 §5-1-A).
-    const freeUsed = isFreeMessagingEligible(messageType, referenceType)
+    const freeEligible = isFreeMessagingEligible(messageType, referenceType);
+    const freeUsed = freeEligible
       ? await consumeFreeQuota(client, companyId, messageType, count, { inTransaction: true })
       : 0;
+    // 표시 축도 함께 올린다 — 선불·후불 화면이 같은 뜻("보낸 만큼 줄어든다")을 갖게 한다.
+    if (freeUsed > 0) await recordFreeAttempt(client, companyId, messageType, freeUsed);
     const chargeCount = Math.max(0, count - freeUsed);
 
     const totalAmount = Math.round(unitPrice * chargeCount * 100) / 100; // 부동소수점 보정

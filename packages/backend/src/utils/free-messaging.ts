@@ -201,6 +201,49 @@ export async function consumeFreeQuota(
   }
 }
 
+/**
+ * **표시용 시도 카운터**만 올린다 — 청구 축(`used_qty`)은 건드리지 않는다. (★ 2026-08-05 Harold 실측)
+ *
+ * 후불은 발송 시점에 소진하지 않는다(§5-2 — 시도 기준을 청구에 쓰면 실패로 소멸한 무료가 나중 성공분을
+ * 0원 청구시킨다). 그런데 그 탓에 **후불 고객은 문자를 보내도 화면 사용량이 영원히 0**이었다.
+ * 그래서 축을 하나 더 둔다: `attempted_qty`는 **화면에만** 쓰이고 돈 계산 어디에도 들어가지 않는다.
+ *
+ * 선불도 같은 값을 올려 두 결제방식의 화면이 같은 뜻을 갖게 한다. 되돌리지 않는 것은 `used_qty`와 같다.
+ */
+export async function recordFreeAttempt(
+  client: { query: (sql: string, params?: any[]) => Promise<any> },
+  companyId: string, messageType: string, count: number,
+): Promise<number> {
+  const want = Math.max(0, Math.floor(Number(count) || 0));
+  if (want <= 0) return 0;
+  const type = String(messageType || '').trim().toUpperCase();
+  if (!FREE_TYPE_KEYS.has(type)) return 0;
+  try {
+    const res = await client.query(
+      `WITH claim AS (
+         SELECT id, LEAST($3::int, granted_qty - attempted_qty) AS take
+           FROM free_messaging_grants
+          WHERE company_id = $1 AND msg_type = $2
+            AND period_month = ${KST_PERIOD_MONTH_SQL}
+            AND granted_qty > attempted_qty
+          FOR UPDATE
+       )
+       UPDATE free_messaging_grants g
+          SET attempted_qty = g.attempted_qty + claim.take
+         FROM claim
+        WHERE g.id = claim.id
+       RETURNING claim.take::int AS taken`,
+      [companyId, type, want],
+    );
+    return Math.max(0, Number(res.rows?.[0]?.taken) || 0);
+  } catch (err: any) {
+    // ⛔ 표시용이라 실패해도 발송을 막지 않는다 — 돈에 닿지 않는 축이다(청구는 `used_qty`·`free_count`가 소유).
+    if (isSchemaMissing(err)) warnSchemaMissing('recordFreeAttempt', err);
+    else console.error(`[무료메시징][표시카운터 실패] company=${companyId} ${type}:`, err?.message || err);
+    return 0;
+  }
+}
+
 // ════════════════════════════════════════════════════════════
 // 조회 — 화면·후불 공제
 // ════════════════════════════════════════════════════════════
@@ -233,8 +276,11 @@ export async function readFreeMessagingStatus(companyId: string): Promise<FreeMe
   const empty: FreeMessagingStatus = { periodMonth: null, available: false, lines: [] };
   try {
     const res = await query(
+      // ★ 2026-08-05 화면 사용량은 **표시 축(`attempted_qty`)**이다 — 선불·후불이 같은 뜻을 갖는다.
+      //   청구 축(`used_qty`·`free_count`)은 여기 쓰지 않는다: 후불은 발행 전까지 청구 축이 0이라
+      //   문자를 보내도 화면이 영원히 0으로 남았다(0805 Harold 실측).
       `SELECT g.msg_type, g.granted_qty, g.period_month::text AS period_month,
-              ${REMAINING_EXPR}::int AS remaining_qty
+              LEAST(g.attempted_qty, g.granted_qty)::int AS used_qty
          FROM free_messaging_grants g
         WHERE g.company_id = $1 AND g.period_month = ${KST_PERIOD_MONTH_SQL}`,
       [companyId],
@@ -244,9 +290,9 @@ export async function readFreeMessagingStatus(companyId: string): Promise<FreeMe
     const lines: FreeMessagingLine[] = FREE_MESSAGING_TYPES.map((t) => {
       const r = byType.get(t.key);
       const granted = Math.max(0, Number(r?.granted_qty) || 0);
-      const remaining = Math.max(0, Math.min(granted, Number(r?.remaining_qty) || 0));
-      // 사용량은 잔량에서 파생한다 — 잔량과 사용량을 따로 세면 둘이 갈린다(선불·후불 축이 다르기 때문).
-      return { type: t.key, label: t.label, granted, used: granted - remaining, remaining };
+      const used = Math.max(0, Math.min(granted, Number(r?.used_qty) || 0));
+      // 잔량은 사용량에서 파생한다 — 둘을 따로 세면 화면 안에서 합이 안 맞는다.
+      return { type: t.key, label: t.label, granted, used, remaining: granted - used };
     });
     return {
       periodMonth: String(res.rows[0].period_month || '') || null,
