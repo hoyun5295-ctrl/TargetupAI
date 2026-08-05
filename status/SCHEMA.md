@@ -1573,7 +1573,8 @@
 ### 일괄발급·컨펌·세금계산서 5테이블 ★2026-07-28 신설·실측 등재 (+2026-07-29 수동 정산완료 1테이블·1컬럼 — 실행 대기)
 
 > SoT = docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md §1(+§3-1 수동 정산완료). DDL 실행·검증 완료(5테이블, 컬럼 수 5/14/19/10/9).
-> **2026-07-29분(`billing_manual_completions` CREATE + `company_billing_settings.manual_billing` ALTER)은 아직 실행 전이다** — 실행·information_schema 실측 후 이 줄을 지운다.
+> **★2026-08-05 정정 — `billing_manual_completions`는 실존한다**(information_schema 실측 7컬럼: id · company_id · period_start · period_end · reason · created_by · created_at). **금액 컬럼이 없다** — "그 달은 수동 처리했다"는 기록이지 청구액 원장이 아니다. 특수정산업체 엑셀 업로드는 이 테이블에 얹을 수 없고 신규 테이블이 필요하다(docs/FEATURE-BILLING.md §7).
+> `company_billing_settings.manual_billing` ALTER는 **아직 실측 미확인**(0805에 그 컬럼은 조회하지 않았다).
 > 공통 원칙: **실행자 컬럼(updated_by·created_by)에 users FK를 걸지 않는다** — 슈퍼관리자는 super_admins 소속이라 FK가 23503으로 터진다(2026-07-28 회사 수정 실패 사고). id만 기록.
 
 - **company_billing_settings** (회사당 1행): company_id PK FK→companies CASCADE · issue_scope `combined`/`by_user`(CHECK, DEFAULT combined — 일괄발급 좌우 기본값) · taxbill_day_policy `last_day`/`first_day`/`manual`(CHECK, DEFAULT last_day) · updated_by(FK 없음) · updated_at · **manual_billing** boolean NOT NULL DEFAULT false **(★2026-07-29 ALTER — 실행 대기)**: 우리 정산으로 발행할 수 없어 사람이 따로 처리하는 회사. 일괄발급 화면의 [전체 담기]·[선택 담기] 양쪽에서 빠진다(목록에는 뜬다 — 숨기면 그 달 처리 여부를 아무도 모른다). **UPSERT에서 이 값은 페이로드에 없으면 보존한다**(EXCLUDED 통째 덮기 → 옛 번들 한 번에 표시가 풀리던 사업자 6필드와 같은 함정) · **min_charge_supply** integer NULL **(★2026-07-30 ALTER 실행완료 — Harold psql NOTICE로 실존 확인)**: 최소과금 공급가(서수란 접수·Harold 확정 — 기본 50,000·VAT는 발행이 파생). 값 있으면 일괄발급 발급 부적격(filterBillableCompanies 서버 단일 진실 + 화면 뱃지·담기 제외) — 청구 경로 = 최소과금 모달의 정액 발행(`issueMinimumChargeBilling`: 실사용 공급가 초과·단가 미설정·미소비 extra·요금제·선불 = 전부 발행 거부 fail-closed)
@@ -2511,6 +2512,13 @@ CREATE TABLE IF NOT EXISTS operator_proposals (
 CREATE INDEX IF NOT EXISTS idx_proposals_company ON operator_proposals(company_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_proposals_operator ON operator_proposals(operator_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_proposals_expires ON operator_proposals(status, expires_at) WHERE status = 'pending';
+-- ★ 2026-08-05 실행완료(설치 확인) — "리마인드가 아닌 scheduled는 오퍼레이터당 1건" 계약을 구조로 지킨다.
+--   동시 run-now 두 건이 확인→INSERT 사이(수십 초짜리 AI 호출)에 둘 다 통과해 같은 회차 2회 발송·2회 과금이
+--   가능했다. 코드는 조건부 INSERT(SELECT ... WHERE NOT EXISTS)로 창을 좁히고 이 인덱스가 최종 방어다.
+--   ⛔ scheduled 진입 경로는 셋(INSERT · 야간 승인 approveProposal · 리마인드 CAS 승격) — 리마인드는 조건에서
+--   빠지고, 야간 승인은 23505를 받아 승인을 거절한다. 경위 = docs/FEATURE-AUTOMARKETING.md §7-7
+CREATE UNIQUE INDEX ux_operator_proposals_one_scheduled ON operator_proposals (operator_id)
+  WHERE status = 'scheduled' AND COALESCE(proposal_json->'meta'->>'is_reminder', 'false') <> 'true';
 ```
 
 ### D172 운영 환경 실행 SQL (Harold 직접 진행)
