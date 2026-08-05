@@ -35,6 +35,11 @@ import {
 import { loadBillingLedger, readBillingLedgerFingerprint } from './billing-ledger';
 import { floorWon, vatOfSupply } from './money';
 import { normalizeUnitPriceBasis } from './unit-price';
+// ★ 2026-08-05 요금제 무료 제공 공제 — 발행과 미리보기가 같은 함수를 쓴다(§2-4 규약).
+import {
+  readFreeDeductibleForBilling, freeDeductibleFingerprint,
+  grantFreeMessagingForCompany, FreeMessagingSchemaPendingError,
+} from './free-messaging';
 import {
   loadPlanChanges, buildPlanSegments, sumPlanSegments, evaluatePlanHistoryGate,
   countPlanChanges, planChangesFingerprint,
@@ -262,9 +267,35 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
     });
   }
 
+  // ★ 2026-08-05 요금제 무료 제공 — 이번 발행에서 청구 수량에서 뺄 몫(유형별).
+  //   `used_qty − 이미 발행에 반영된 양`이라 중간정산으로 같은 달을 두 번 발행해도 두 번 빠지지 않는다.
+  //   DDL 미실행이면 빈 객체가 와서 공제 0 = 이 기능 도입 전과 완전히 같은 청구가 나간다.
+  // ★ 2026-08-05 (Codex 2R high) 공제량을 재기 **전에** 당월 지급행을 보장한다.
+  //   지급 워커는 회사 잠금을 쓰지 않으므로, 잠금 전후 두 조회가 모두 "지급행 없음"을 본 사이에
+  //   워커가 당월 행을 넣으면 지문이 같아 통과하고 **무료 공제 없이 전액 청구**된다(부재 행 phantom —
+  //   `ON CONFLICT`는 중복만 막지 존재하지 않던 행을 막지 못한다). 지급이 멱등이라 여기서 한 번
+  //   불러 두면 그 창이 닫힌다. 이미 있으면 아무 일도 일어나지 않는다.
+  await grantFreeMessagingForCompany(company_id);
+  let freeDeductible: Record<string, number>;
+  try {
+    freeDeductible = await readFreeDeductibleForBilling(company_id, billing_start, billing_end);
+  } catch (e: any) {
+    // DDL 미실행이면 발행을 멈춘다 — 무료 공제 없이 나가면 고객에게 틀린 금액이 청구된다(§2-1).
+    if (e instanceof FreeMessagingSchemaPendingError) {
+      throw new BillingIssueError(503, {
+        error: '요금제 무료 제공 정보를 읽을 수 없어 발행을 중단했습니다. DB 마이그레이션(무료 메시징 4문) 실행이 필요합니다.',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    throw e;
+  }
+  // 잠금 후 재검증용 지문 — 같은 달을 겹치지 않는 두 기간으로 동시에 발행하면 둘 다 같은 잔량을 읽어
+  // 같은 무료분을 두 번 적용할 수 있다(Codex 1R high). 원장·요금제 이력과 **같은 규약**으로 닫는다.
+  const freeFingerprint = freeDeductibleFingerprint(freeDeductible);
   const priced = priceBillingRows(
     usage.rows, allPrices, ledger.postpaidPriceRows,
     normalizeUnitPriceBasis(ledger.companyPriceRow?.unit_price_basis),
+    freeDeductible,
   );
 
   // ★ 2026-07-26 회사 단가 미설정 — 그 전에는 `?? 0`으로 조용히 0원 청구됐다.
@@ -427,6 +458,19 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
       });
     }
 
+    // ★ 2026-08-05 무료 제공 잔량 재검증(Codex 1R high) — 공제량을 잠금 **밖에서** 정했으므로,
+    //   그 사이 같은 달의 다른 발행이 일부를 소비했으면 이 발행은 이미 쓰인 무료를 또 적용하게 된다.
+    //   잠금 안에서 같은 함수로 다시 읽어 대조한다(원장 지문·요금제 이력과 같은 규약).
+    const freeFingerprintNow = freeDeductibleFingerprint(
+      await readFreeDeductibleForBilling(company_id, billing_start, billing_end, client),
+    );
+    if (freeFingerprintNow !== freeFingerprint) {
+      throw new BillingIssueError(422, {
+        error: '발행 중에 요금제 무료 제공 잔량이 바뀌어 중단했습니다. 같은 달의 다른 청구서가 먼저 발행됐을 수 있습니다 — 그대로 다시 발행해 주세요.',
+        code: 'BILLING_FREE_QUOTA_CHANGED',
+      });
+    }
+
     // ★ D229+ 후불 AI 크레딧 충전 합산 — 이 기간 승인·미청구분. FOR UPDATE = 합산 행과 billed 처리 행 일치 보장.
     // ★ 2026-07-26 크레딧은 **항상** 청구한다 — 회사 전체 발행이라 공통 장에 들어간다.
     let creditChargeRes: { rows: any[] } = { rows: [] };
@@ -530,6 +574,14 @@ ${EXTRA_ITEM_SOURCE_JOIN}
 
     const allBillingItems = [...billingItems, ...extraItems, ...adjustItems];
 
+    // ★ 2026-08-05 무료 제공으로 청구에서 뺀 금액(정확값). 헤더 축 보정에 쓴다 — 아래 subtotalExact 참조.
+    //   단가는 헤더가 쓰는 것과 **같은 `prices` 표**여야 두 축이 같은 기준으로 만난다.
+    const freeSupplyExact = billingItems.reduce((s, it) => {
+      const free = Number((it as any).freeCount) || 0;
+      if (it.channel !== 'web' || free <= 0) return s;
+      return s + free * (Number((prices as any)[it.typeKey]) || 0);
+    }, 0);
+
     // ★ 2026-07-26 금액 항등식 — 헤더는 `totals × 단가`, 상세는 `priceBillingRows`로 **서로 다른 코드가 계산한다.**
     //   대조는 **절사 전** 값끼리 한다.
     const subtotalExact =
@@ -541,6 +593,11 @@ ${EXTRA_ITEM_SOURCE_JOIN}
       planAmount +
       extraSupply + // ★ 2026-07-30 080 등 월별 추가 항목 — 빠지면 상세합≠공급가액으로 발행이 막힌다(BRAND 선례)
       adjustSupply + // ★ 2026-08-04 수량 조정 — 헤더는 집계 축(totals×단가)이라 조정을 모른다. 여기서 더한다
+      // ★ 2026-08-05 요금제 무료 제공 — 같은 이유로 **빼야** 한다. 헤더 축(`buildBillingTotals`)은
+      //   일자별 성공 합이라 무료 공제를 모르는데 상세 축(`priceBillingRows`)은 공제 후 금액이다.
+      //   이 항이 없으면 무료를 받는 회사는 항등식이 반드시 어긋나 **발행이 통째로 막힌다**(422).
+      //   `adjustSupply`가 조정을 더하는 것과 정확히 같은 형태의 보정이다.
+      (-freeSupplyExact) +
       aiCreditSupply;
     const amountCheck = checkBillingAmountIdentity(
       allBillingItems.map((i) => ({ amount: i.amountExact })), aiCreditSupply, subtotalExact,
@@ -603,7 +660,8 @@ ${EXTRA_ITEM_SOURCE_JOIN}
     // 묶음 식별자 — 부분 삭제 차단과 "N장 중 k장" 표기의 근거. 한 장짜리 발행에는 붙이지 않는다.
     const batchId = sheets.length > 1 ? randomUUID() : null;
     // ★ 2026-07-26 14 → 16. 요금제 일수 전용 컬럼(plan_days·plan_month_days) 추가분.
-    const COLS = 16;
+    // ★ 2026-08-05 16 → 17. 요금제 무료 제공 공제분(free_count).
+    const COLS = 17;
     const ITEM_CHUNK_ROWS = 1000;
     const issuedSheets: any[] = [];
 
@@ -698,6 +756,8 @@ ${EXTRA_ITEM_SOURCE_JOIN}
         it.unitPrice, it.amount,
         // ★ 2026-07-26 요금제 일수는 전용 컬럼으로. 발송 행은 null이다.
         it.planDays, it.planMonthDays,
+        // ★ 2026-08-05 무료 제공 공제분 — 이 칸이 곧 소비 마커다(발행을 지우면 함께 사라진다).
+        Number(it.freeCount) || 0,
       ]));
 
       // ★ 청크 INSERT. 검증은 count(*)가 아니라 **rowCount 합**으로 한다.
@@ -714,7 +774,8 @@ ${EXTRA_ITEM_SOURCE_JOIN}
             item_date, message_type,
             total_count, success_count, fail_count, pending_count,
             unit_price, amount,
-            plan_days, plan_month_days
+            plan_days, plan_month_days,
+            free_count
           ) VALUES ${ph}`,
           batch.flat()
         );

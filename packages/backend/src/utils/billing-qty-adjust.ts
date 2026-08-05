@@ -18,6 +18,8 @@
  */
 
 import type { PricedBillingItem } from './send-usage-aggregation';
+// ★ 2026-08-05 청구 수량 정의는 CT 하나가 소유한다 — 판정 축과 인쇄 축이 갈리지 않게.
+import { billableQuantity } from './billing-types';
 
 export interface QtyAdjustmentRow {
   id: string;
@@ -87,6 +89,9 @@ export function buildAdjustmentBillingItems(
     const unitPrice = Number(src.unitPrice) || 0;
     const amount = delta * unitPrice;
     out.push({
+      // ★ 2026-08-05 수량 조정 행은 무료 제공 축이 아니다 — 조정은 사람이 정한 증감이고
+      //   무료 공제는 발송 행에서 이미 반영돼 있다. 0이 그 사실이다.
+      freeCount: 0,
       channel: channel as any,
       itemDate,
       typeKey,
@@ -143,7 +148,11 @@ export function findNegativeAdjustedTypes(
     //   과청구 방향은 단가(다른 줄 = 다른 버킷)와 장 분할(계정)이 이미 막는다.
     const key = `${channel} ${it.typeKey} ${it.unitPrice}`;
     if (!acc.has(key)) acc.set(key, { channel, typeKey: String(it.typeKey), total: 0 });
-    acc.get(key)!.total += Number(it.success) || 0;
+    // ★ 2026-08-05 판정은 **청구 수량**으로 한다(정의 = `billableQuantity` CT). 원시 성공만 세면
+    //   성공 10건이 전량 무료인 줄에 -1 조정이 들어와도 합이 9라 통과하고, 인쇄되는 청구 수량은
+    //   -1이 되어 **음수 청구**가 나간다(Codex 3R high). 판정 축은 언제나 인쇄되는 줄의 축이다
+    //   — 0804 계정 축·0805 발송ID 축과 같은 뿌리로 이번이 세 번째다.
+    acc.get(key)!.total += billableQuantity(it);
   }
   return Array.from(acc.values()).filter((v) => v.total < 0);
 }

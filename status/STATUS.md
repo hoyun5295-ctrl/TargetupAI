@@ -39,6 +39,11 @@
 > ⛔ 새 축 판정 기준은 §0이 소유(사건 = 여정 / 상태·변화 = 자동마케팅) — 여기 재서술 금지. **DDL 전량 실행완료(0804 2건 + 0805 1건) · 남은 DDL 0**
 > 잔여 = **남은 개발 4건 = [문서 §12](../docs/FEATURE-AUTOMARKETING.md)가 착수 원장**(조건부 대기 = 상품 데이터 · 나머지는 다른 트랙과 함께) + 화면 실측 9건(§12 하단 7 + 0805분 2). 운영을 막는 건 0
 
+### 요금제 무료 메시징 — **코드 완료(0805) · 배포 + DDL 4문 대기**
+> SoT [설계서](../docs/2026-08-05-plan-free-messaging-design.md)(구현 결과 §7-A · 확정 기록 §9 · 수량표 §2) · 다음 = 배포 → DDL 4문 → 실측 1건(§8-7)
+> ⛔ 총 한도 = 월정액 **10% 하나**를 4유형 분할 · 선불 소진은 되돌리지 않고(§5-1-A) 정산 축은 **`부담 = 차감 + 무료`**(§5-1-B) · 후불은 소진 없이 성공 행에 한도 배분(§5-2) · 잔량 식 하나(`REMAINING_EXPR`) · **DDL은 배포 직후** — 그 전까지 후불 발행·미리보기·요금제 화면은 `DB_MIGRATION_PENDING`으로 막힌다 · TRIAL 0건 / STAFF는 ENTERPRISE 동일
+> 잔여 = 배포·DDL 4문 · 실측 1건 · 이월 2건(청구서 2페이지 수량 분리 · billing_type 전환 TOCTOU = [정산 문서](../docs/FEATURE-BILLING.md) §7). **Codex 4R + 헤더 소비처 전수 확인 완료**(1R critical 2·high 3 / 2R high 4 / 3R high 2·medium 1 / 4R high 1·medium 1 + 자체발견 2 — 청구 수량 정의는 `billableQuantity` CT 하나로 통합, 인라인 잔존 0)
+
 ### 0801 여정 재설계 — **0802 전량 배포완료**(착수 1~5 + 화면 + 등급 상승, DDL 포함)
 > 기능 상설 = **[여정](docs/FEATURE-JOURNEY.md)**(호출어 "여정" — 구조·불변 원칙·이력 색인 전부) · 트랙 SoT [재설계 설계서](docs/2026-08-01-journey-redesign-design.md) · 기억 [[project_2026_0801_journey_redesign]] · 다음 = 화면 실측
 > ⛔ 불변 원칙·판정 계약은 여정 문서와 설계서가 소유 — 착수 전 [여정 문서 §2·§3](docs/FEATURE-JOURNEY.md)부터 읽는다

@@ -24,7 +24,7 @@
 
 import pool, { query } from '../config/database';
 import { resolveChargeUnitPrice } from './unit-price';
-import { parseDeductDescription } from './deduct-reference';
+import { parseDeductDescription, parseFreeCount } from './deduct-reference';
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
 import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, type CampaignAggCounts } from './sms-queue';
 // ★ 2026-07-30 브랜드 SMSQ 합류 — 환불 원장 축(BRAND vs message_type) 판정 CT
@@ -266,9 +266,16 @@ async function runOnce(): Promise<void> {
                 );
             let dedTotal = 0;
             let parsedCount = 0;
+            // ★ 2026-08-05 요금제 무료 제공으로 덮인 건수 — 정산 축은 `부담 = 차감 + 무료`(설계 §5-1-B).
+            let freeCount = 0;
             let allParsed = dedRes.rows.length > 0;
             for (const d of dedRes.rows as any[]) {
-              dedTotal += Number(d.amount) || 0;
+              const amount = Number(d.amount) || 0;
+              dedTotal += amount;
+              freeCount += parseFreeCount(d.description);
+              // 금액 0 행 = 전량 무료라 차감이 없었던 행. 단가 역산에 기여할 것이 없고, 파싱 대상에 두면
+              // `allParsed`가 거짓이 되어 같은 캠페인의 유료 행 정산까지 통째로 보류된다(prepaid.ts와 같은 규칙).
+              if (amount === 0) continue;
               const parsed = parseDeductDescription(d.description);
               if (parsed) parsedCount += parsed.count;
               else allParsed = false;
@@ -291,15 +298,18 @@ async function runOnce(): Promise<void> {
             const unit = ledgerUnit ?? await getUnitPrice(camp.company_id, axis.type, unitCache);
             if (unit > 0) {
               const deductedCount = parsedCount > 0 ? parsedCount : Math.round(dedTotal / unit);
-              // ★ 2026-06-29: 미적재 = 차감 − max(적재기록, 성공+실패+대기). sent_count 과소 기록 초과환불 fix.
+              // ★ 2026-08-05 부담 건수 = 차감 + 무료. 무료로 덮인 건도 큐에 올라갔어야 할 발송이라
+              //   미적재·정당 한도·불변식은 전부 이 축으로 잰다. 무료 0이면 부담 = 차감이라 종전과 같다.
+              const coveredCount = deductedCount + freeCount;
+              // ★ 2026-06-29: 미적재 = 부담 − max(적재기록, 성공+실패+대기). sent_count 과소 기록 초과환불 fix.
               const processed = Math.max(axisSentCount, axisSuccess + axisFail + axisPending);
-              const notLoaded = processed > 0 ? Math.max(0, deductedCount - processed) : 0;
+              const notLoaded = processed > 0 ? Math.max(0, coveredCount - processed) : 0;
               // ★ 2026-07-27 (B-0727-2): 한 덩어리로 환불하던 것을 원인별 항아리로 나눈다.
               //   미적재분(notloaded)은 워커가 종결 때 넣는 것과 **같은 키**라 둘이 서로를 삼키지 않고 수렴한다.
               //   실패분(fail)은 결과가 도착할수록 커지므로 그 키 안에서 계속 top-up된다.
               //   합계는 옛 calcRefundDue와 동일하다(상한 포함).
               const parts = calcRefundParts({
-                deductedCount, sentCount: axisSentCount,
+                deductedCount, freeCount, sentCount: axisSentCount,
                 mysqlSuccess: axisSuccess, mysqlFail: axisFail, mysqlPending: axisPending,
               });
               for (const [key, dueCount, label] of [
@@ -314,7 +324,7 @@ async function runOnce(): Promise<void> {
                 if (r.refunded > 0) {
                   refundCount++;
                   totalRefundAmount += r.refunded;
-                  log(`✓ campaign=${camp.id} ${axis.type} ${label} ${dueCount}건 (실패 ${axisFail} + 미적재 ${notLoaded} / 차감 ${deductedCount} 처리 ${processed}) 차액 ${r.refunded}원`);
+                  log(`✓ campaign=${camp.id} ${axis.type} ${label} ${dueCount}건 (실패 ${axisFail} + 미적재 ${notLoaded} / 차감 ${deductedCount}${freeCount > 0 ? ` + 무료 ${freeCount}` : ''} 처리 ${processed}) 차액 ${r.refunded}원`);
                 }
               }
 
@@ -325,12 +335,14 @@ async function runOnce(): Promise<void> {
               //   (정당 한도 = MySQL 실측 성공으로만 계산 → 성공은 이력 append-only라 과대 불가 = 과다 회수 0)
               const ageMs = camp.send_base ? (Date.now() - new Date(camp.send_base).getTime()) : 0;
               if (axisPending === 0 && (axisSuccess + axisFail) > 0 && ageMs > 30 * 60 * 1000) {
-                const maxLegitRefund = Math.max(0, deductedCount - axisSuccess - axisPending);
+                // ★ 2026-08-05 정당 한도는 **부담 − 성공 − 대기**다. 차감만으로 재면 무료 제공이 낀 캠페인에서
+                //   성공이 차감보다 커져 한도가 0이 되고, **정상 실패 환불을 초과로 오인해 회수한다**(설계 §5-1-B).
+                const maxLegitRefund = Math.max(0, coveredCount - axisSuccess - axisPending);
                 const rev = await prepaidReverseOverRefund(camp.company_id, maxLegitRefund, axis.type, camp.id);
                 if (rev.reversed > 0) {
                   reverseOverCount++;
                   totalReverseOverAmount += rev.reversed;
-                  log(`✓ campaign=${camp.id} ${axis.type} 초과환불 회수 ${rev.reversed}원 (정당한도 ${maxLegitRefund}건 = 차감 ${deductedCount} − 성공 ${axisSuccess})`);
+                  log(`✓ campaign=${camp.id} ${axis.type} 초과환불 회수 ${rev.reversed}원 (정당한도 ${maxLegitRefund}건 = 부담 ${coveredCount} − 성공 ${axisSuccess})`);
                 }
 
                 // === 4-4. ★ 2026-06-29: 머니 불변식 감시 — 차감 = 성공 + 순환불(환불−회수). 깨지면 즉시 경보 ===
@@ -339,14 +351,14 @@ async function runOnce(): Promise<void> {
                 //   순환불은 reverse가 같은 집계로 돌려준 값 재사용(추가 쿼리 0).
                 if (!rev.skipped) {
                   const netRefundedCnt = Math.round(rev.netRefundedAmt / unit);
-                  const gapCnt = refundInvariantGap({ deductedCount, successCount: axisSuccess, netRefundedCount: netRefundedCnt });
+                  const gapCnt = refundInvariantGap({ deductedCount, freeCount, successCount: axisSuccess, netRefundedCount: netRefundedCnt });
                   if (Math.abs(gapCnt) >= INVARIANT_ALERT_THRESHOLD) {
                     invariantAlertCount++;
                     const dir = gapCnt > 0 ? '미환불 의심(고객 손해)' : '초과환불 잔존';
-                    log(`[불변식위반] campaign=${camp.id} ${axis.type} 차감 ${deductedCount} ≠ 성공 ${axisSuccess} + 순환불 ${netRefundedCnt} (차이 ${gapCnt}건, ${dir})`);
+                    log(`[불변식위반] campaign=${camp.id} ${axis.type} 부담 ${coveredCount} ≠ 성공 ${axisSuccess} + 순환불 ${netRefundedCnt} (차이 ${gapCnt}건, ${dir})`);
                     await sendSystemAlert({
                       dedupKey: `refund-invariant:${camp.id}:${axis.type}`,
-                      message: `환불 불변식 위반 — ${axis.type} 캠페인: 차감 ${deductedCount}건 ≠ 성공 ${axisSuccess} + 순환불 ${netRefundedCnt} (차이 ${gapCnt}건, ${dir}). campaign=${camp.id}`,
+                      message: `환불 불변식 위반 — ${axis.type} 캠페인: 부담 ${coveredCount}건(차감 ${deductedCount}${freeCount > 0 ? ` + 무료 ${freeCount}` : ''}) ≠ 성공 ${axisSuccess} + 순환불 ${netRefundedCnt} (차이 ${gapCnt}건, ${dir}). campaign=${camp.id}`,
                     });
                   }
                 }

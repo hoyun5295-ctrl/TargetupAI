@@ -1046,8 +1046,12 @@
 | **cdp_events_per_month** | **integer** | **★ D172: CDP API 월 호출 한도. BASIC=10,000 / PRO=100,000 / BUSINESS=1,000,000 / ENTERPRISE NULL(무제한)** |
 | **ai_credits_per_month** | **integer** | **★ D227+ 종량제: 요금제별 월 기본 AI 크레딧 (NULL=0). 실 DB 기준 2026-06-02 확인: 스타터300/베이직750/프로2400/비즈7800/엔터16500 (FREE 0·TRIAL 600). 과거 설계값(스타터50 등)은 폐기 — plans row(SQL)가 진실** |
 | **advanced_access_enabled** | **boolean NOT NULL DEFAULT false** | **★2026-07-28 ALTER 실측. 상위 등급 전용 기능(베타 진입 `isBetaAccessAllowed`·자율 발송 자격 `continuous-operator`) 판정. 그 전에는 두 곳이 `plan_code IN ('ENTERPRISE','BUSINESS')`를 직접 비교해서, 요금제가 늘 때마다 코드를 고쳐야 했다. 현재 true = ENTERPRISE·BUSINESS·STAFF. 조회 조각은 컬럼 부재 시 옛 규칙으로 폴백한다(`to_jsonb(p) ->> ...`) — ALTER 전후 동작이 같다** |
+| dm_builder_enabled | boolean DEFAULT false | ★2026-08-05 실측 등재. 옛 DM 빌더 플래그(현행 판정은 `mobile_dm_enabled`) |
+| ai_mapping_monthly_quota | integer DEFAULT 10 | ★2026-08-05 실측 등재 |
+| ai_calls_per_month | integer | ★2026-08-05 실측 등재. 종량제 전환 전 호출수 한도(현행 크레딧 축은 `ai_credits_per_month`) |
 | created_at | timestamp | |
 
+- **★2026-08-05 전 컬럼 실측 = 27개**(`information_schema` 순수 덤프). 위 표가 27개 전량이다. **무료 메시징 컬럼(`free_sms_qty` 등)은 존재하지 않는다** — [요금제 무료 메시징 설계서](../docs/2026-08-05-plan-free-messaging-design.md) §3-1의 ALTER 4건이 미실행 상태라는 근거.
 - **2026-07-28 실측 행 8개**: ENTERPRISE 5,500,000 / BUSINESS 3,000,000 / PRO 1,000,000 / BASIC 350,000 / STARTER 150,000 / **STAFF(임직원) 0** / FREE(미가입) 0 / TRIAL(무료체험) 0.
 - **★2026-07-28 `STAFF`(임직원) 신설** — 직원이 전 기능을 테스트·디버깅하는 계정용. **ENTERPRISE 행을 통째로 복제**하고 `plan_code`·`plan_name`·`monthly_price(0)`만 덮었다(컬럼 나열 없이 `jsonb_populate_record`로 복사 — 항목 누락 구조적 차단). 고객용 요금제 안내에는 노출하지 않는다(`frontend/src/utils/planLabel.ts` `INTERNAL_PLAN_CODES` = FREE·TRIAL·STAFF).
 - **★2026-07-28 `TRIAL`을 BASIC과 동일 권한으로 맞춤** — 무료체험 부여가 BASIC 대신 TRIAL(월 0원)을 배정하도록 바뀌면서, TRIAL이 BASIC보다 좁던 세 칸(`cdp_enabled` f→t · `cdp_events_per_month` NULL→10,000 · `ai_credits_per_month` 600→750)을 BASIC 값으로 동기화했다. 요금(0)·이름·활성 여부는 그대로.
@@ -1055,6 +1059,32 @@
 **companies 추가 컬럼 (CT-17 활용):**
 - `subscription_status` varchar(20) — `null | 'trial' | 'trial_expired' | 'paid' | 'active' | 'expired' | 'suspended'`
 - `trial_expires_at` timestamp — 30일 PRO 무료체험 만료 시각. `utils/trial-downgrade-worker.ts` Cron(매일 04:00 KST)이 만료 시 자동 강등.
+
+### free_messaging_grants (요금제 무료 메시징 월 지급 원장) ★2026-08-05 신설 — **DDL 대기**
+
+> 설계·확정 = [요금제 무료 메시징 설계서](../docs/2026-08-05-plan-free-messaging-design.md). CT = `utils/free-messaging.ts`.
+> 쓰기 진입점 둘뿐 — 지급 = `free-messaging-grant-worker`(기동 즉시 + 10분 주기, 멱등) / 소진 = `prepaidDeduct` 한 곳.
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK `gen_random_uuid()` | |
+| company_id | uuid NOT NULL FK companies ON DELETE CASCADE | |
+| period_month | date NOT NULL | 그 달 1일(KST). **항상 DB에서 계산**(`date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul')`) |
+| msg_type | varchar(20) NOT NULL | `SMS`/`LMS`/`MMS`/`KAKAO` — 차감·청구 유형키와 **같은 축**(BILLING_TYPES) |
+| granted_qty | integer NOT NULL DEFAULT 0 | 지급 시점 `plans` 값 **스냅샷**(plans를 나중에 바꿔도 지급된 달은 불변) |
+| used_qty | integer NOT NULL DEFAULT 0 | 소진 실적. **되돌리지 않는다**(설계 §5-1-A) |
+| plan_id / plan_code | uuid / varchar(20) | 어느 요금제 기준 지급인지 스냅샷 |
+| unit_value | numeric(12,2) | 수량 산정에 쓴 **일괄 공통 단가**(SMS 10·LMS 30·MMS 60·알림톡 6). 고객사 단가와 무관 |
+| created_at | timestamptz NOT NULL DEFAULT now() | |
+
+- **UNIQUE(company_id, period_month, msg_type)** = 지급 멱등의 전부. 재실행·중복 기동·강등 후 재승급이 이 하나로 막힌다.
+- **CHECK(used_qty >= 0 AND used_qty <= granted_qty)** = 초과 소진 구조 차단(코드의 `LEAST`가 1차, 이 제약이 최종).
+- 이월 없음 — 소진·조회가 **당월 행만** 보므로 월이 바뀌면 구조적으로 소멸(삭제 배치 없음).
+
+### plans·billing_items 무료 메시징 컬럼 ★2026-08-05 — **DDL 대기**
+
+- `plans` + `free_sms_qty`·`free_lms_qty`·`free_mms_qty`·`free_alimtalk_qty` (integer NOT NULL DEFAULT 0). 수량의 진실은 이 행이고 코드·화면은 파생만 한다.
+- `billing_items` + `free_count` (integer NOT NULL DEFAULT 0) — 그 발행이 청구에서 뺀 무료 건수. **소비 마커**라 중간정산으로 같은 달을 두 번 발행해도 이중 공제가 없고, 발행을 지우면 함께 사라져 자동으로 미반영으로 돌아온다. `success_count`는 실제 성공 건수 그대로 두고 **청구 수량만** `success_count − free_count`로 좁힌다.
 
 ### company_plan_changes (요금제 변경 이력 — 청구 일할계산의 입력) ★2026-07-25 신설 · 2026-07-26 실측 등재 (13컬럼)
 

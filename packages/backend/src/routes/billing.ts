@@ -47,6 +47,10 @@ import {
   // ★ 2026-08-04 미리보기가 발행과 **같은 문**으로 기간 축 차단을 판정한다(별건 5 — 미리보기 통과 후 발행 실패).
   readBillingPeriodConflicts, describeBillingPeriodConflict,
 } from '../utils/billing-issue';
+// ★ 2026-08-05 요금제 무료 제공 — 미리보기가 발행과 같은 공제를 적용하게 한다(§2-4 규약)
+import { readFreeDeductibleForBilling } from '../utils/free-messaging';
+// ★ 2026-08-05 청구 수량 정의 CT — 미리보기가 발행·인쇄와 같은 식을 쓰게 한다
+import { billableQuantity } from '../utils/billing-types';
 // ★ 2026-07-30 수정세금계산서 — 사유별 장 구성 계약(순수). 라우트는 이 계획을 트랜잭션 INSERT만 한다.
 import { planModifyIssue, ModifyPlanError } from '../utils/taxbill-popbill';
 // ★ 2026-07-28 정산 설정·담당자 CT — 고객사 상세 "정산" 탭 + 일괄발급·발송·계산서 워커가 공유.
@@ -2031,9 +2035,26 @@ router.get('/preview', async (req: Request, res: Response) => {
     // ★ 2026-07-31 결과 미확정(대기) — 발행 차단과 **같은 함수·같은 입력**(상세 행)으로 판정한다.
     //   일자축(dayData)으로 보면 에이전트 대기가 빠져 미리보기만 통과하는 어긋남이 생긴다(Codex 2R).
     const previewPending = findBlockingPendingRows(usage.rows);
+    // ★ 2026-08-05 미리보기도 **발행과 같은 공제**를 적용한다 — 다르면 "미리보기 금액 ≠ 발행 금액"이 된다.
+    //   읽기 전용이라 반복 미리보기가 무료 수량을 소모하지 않는다(마커는 발행에서만 쓰인다).
+    let previewFreeDeductible: Record<string, number>;
+    try {
+      previewFreeDeductible = await readFreeDeductibleForBilling(companyId, startDate, endDate);
+    } catch (e: any) {
+      // 발행과 같은 이유로 미리보기도 막는다 — 여기서 통과시키면 "미리보기 통과 후 발행 503"이 된다(§2-4).
+      if (e?.code === 'DB_MIGRATION_PENDING') {
+        return res.status(503).json({
+          success: false,
+          error: '요금제 무료 제공 정보를 읽을 수 없습니다. DB 마이그레이션(무료 메시징 4문) 실행이 필요합니다.',
+          code: 'DB_MIGRATION_PENDING',
+        });
+      }
+      throw e;
+    }
     const priced = priceBillingRows(
       usage.rows, prices, ledger.postpaidPriceRows,
       normalizeUnitPriceBasis(ledger.companyPriceRow?.unit_price_basis),
+      previewFreeDeductible,
     );
     const unbillable = priced.unbillableTypes;
     const webUnsetPriced = findUnsetPricedTypes(webUnsetPriceKeys, usage.rows);
@@ -2247,16 +2268,28 @@ router.get('/preview', async (req: Request, res: Response) => {
       return res.json({ type: 'brand', brands, test, spam, agent, plan, ai_credit, amounts, billing_guard });
     }
 
+    // ★ 2026-08-05 미리보기 수량·금액도 **청구 수량**(성공 − 무료 공제)이어야 한다.
+    //   `totals`는 일자축 성공 합이라 무료를 모르는데 발행은 공제 후로 나간다 —
+    //   그대로 두면 같은 응답 안에서 미리보기 금액과 발행 예정 금액이 갈린다(§2-4 "미리보기는 발행과 같은 값").
+    //   빼는 값은 한도가 아니라 **실제 배분된 양**(priced.items의 freeCount)이다.
+    const previewFreeByType: Record<string, number> = {};
+    for (const it of priced.items) {
+      const f = Number((it as any).freeCount) || 0;
+      if (it.channel !== 'web' || f <= 0) continue;
+      previewFreeByType[it.typeKey] = (previewFreeByType[it.typeKey] || 0) + f;
+    }
+    const billableQty = (key: string) =>
+      billableQuantity({ success: Number((totals as any)[key]) || 0, freeCount: previewFreeByType[key] || 0 });
     const summary = {
-      sms_success: totals.SMS,
-      lms_success: totals.LMS,
-      mms_success: totals.MMS,
-      kakao_success: totals.KAKAO,
+      sms_success: billableQty('SMS'),
+      lms_success: billableQty('LMS'),
+      mms_success: billableQty('MMS'),
+      kakao_success: billableQty('KAKAO'),
       brand_success: totals.BRAND,
-      sms_amount: totals.SMS * prices.SMS,
-      lms_amount: totals.LMS * prices.LMS,
-      mms_amount: totals.MMS * prices.MMS,
-      kakao_amount: totals.KAKAO * prices.KAKAO,
+      sms_amount: billableQty('SMS') * prices.SMS,
+      lms_amount: billableQty('LMS') * prices.LMS,
+      mms_amount: billableQty('MMS') * prices.MMS,
+      kakao_amount: billableQty('KAKAO') * prices.KAKAO,
       brand_amount: totals.BRAND * prices.BRAND,
     };
 

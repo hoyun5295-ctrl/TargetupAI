@@ -10,7 +10,10 @@ import { buildDeductDescription } from './deduct-reference';
 //   전환 전 회사는 저장값이 곧 포함가라 이 배선으로 차감액이 바뀌지 않는다.
 import { resolveChargeUnitPrice, resolveChargeUnitPriceDetailed } from './unit-price';
 import { sendSystemAlert } from './system-alert';
-import { parseDeductDescription } from './deduct-reference';
+import { parseDeductDescription, parseFreeCount } from './deduct-reference';
+// ★ 2026-08-05 요금제 무료 메시징 — 소진 길목은 이 파일 하나다(설계 §5-1).
+//   호출부 11곳에 흩뿌리면 "발송 5경로 부분 패치"가 그대로 재발한다.
+import { isFreeMessagingEligible, consumeFreeQuota } from './free-messaging';
 
 /**
  * 이 (유형 × 참조)에 실제로 **차감된 총액과 건수**, 그리고 그 둘로 되살린 **정산 단가**.
@@ -26,6 +29,11 @@ import { parseDeductDescription } from './deduct-reference';
 export interface DeductLedger {
   totalDeducted: number;
   deductedCount: number;
+  /**
+   * ★ 2026-08-05 요금제 무료 제공으로 덮인 건수. 정산 축은 `차감`이 아니라 **`부담 = 차감 + 무료`**다
+   * (설계 §5-1-B). 무료가 없던 옛 행은 0이라 부담 = 차감 = 종전 계산과 완전히 같다.
+   */
+  freeCount: number;
   /** 되살린 정산 단가. `null` = 되읽기 실패(호출부는 **정산하지 않고 멈춘다**) */
   unitPrice: number | null;
   /** 차감 원장은 있는데 설명을 되읽지 못했다 — 추측으로 돈을 움직이면 안 되는 상태 */
@@ -43,9 +51,17 @@ async function loadDeductLedger(
   );
   let totalDeducted = 0;
   let deductedCount = 0;
+  let freeCount = 0;
   let allParsed = rows.rows.length > 0;
   for (const r of rows.rows as any[]) {
-    totalDeducted += Number(r.amount) || 0;
+    const amount = Number(r.amount) || 0;
+    totalDeducted += amount;
+    freeCount += parseFreeCount(r.description);
+    // ★ 2026-08-05 금액 0 행 = 전량 무료라 **차감 자체가 없었던** 행이다. 단가 역산에 기여할 것이 없으므로
+    //   파싱 대상에서 뺀다. 빼지 않으면 그 행의 문구에 `발송 차감`이 없어 `allParsed`가 거짓이 되고,
+    //   같은 (유형, 참조)에 유료 행이 하나라도 있으면 **정산이 통째로 멈춘다**
+    //   — 여정은 같은 `journey_id`로 건당 차감 행을 계속 쌓으므로 실제로 섞인다.
+    if (amount === 0) continue;
     const parsed = parseDeductDescription(r.description);
     if (parsed) deductedCount += parsed.count;
     else allParsed = false;
@@ -55,7 +71,7 @@ async function loadDeductLedger(
     ? Math.round((totalDeducted / deductedCount) * 100) / 100
     : null;
   // 차감이 있는데 단가를 못 되살렸다 = 위험 상태. 현재 단가로 폴백하면 단가가 바뀐 뒤엔 틀린 금액이 나간다.
-  return { totalDeducted, deductedCount, unitPrice, unresolved: totalDeducted > 0 && unitPrice === null };
+  return { totalDeducted, deductedCount, freeCount, unitPrice, unresolved: totalDeducted > 0 && unitPrice === null };
 }
 
 /**
@@ -80,14 +96,23 @@ async function warnUnresolvedLedger(companyId: string, referenceId: string, mess
  * @param referenceType - ★ 2026-07-07: 차감 유형(campaign/test/spam/journey/brand). 기본 'campaign'(하위호환).
  *   차감이력에서 스팸/테스트 차감이 일반 발송으로 위장되던 결함 수정 — 차감↔환불은 (reference_type,reference_id)
  *   쌍으로 매칭되므로 짝이 되는 prepaidRefund 호출도 같은 referenceType을 넘겨야 한다.
+ *
+ * ★ 2026-08-05 요금제 무료 메시징 — `count`건 중 당월 무료 잔량으로 덮인 만큼은 **차감하지 않는다**.
+ *   소진 판정·기록이 이 함수 안에서 끝나므로 호출부 11곳은 한 줄도 바뀌지 않는다(설계 §5-1).
+ *   반환의 `freeUsed`는 정보용이고, 기존 소비처는 이 필드를 읽지 않아도 동작이 같다.
  */
 export async function prepaidDeduct(
   companyId: string, count: number, messageType: string, referenceId: string, createdBy?: string,
   referenceType: string = 'campaign'
-): Promise<{ ok: boolean; error?: string; amount?: number; balance?: number; insufficientBalance?: boolean }> {
+): Promise<{ ok: boolean; error?: string; amount?: number; balance?: number; insufficientBalance?: boolean; freeUsed?: number }> {
   // 후불은 트랜잭션을 열지 않는다 — 발송마다 부르는 경로라 103사(후불)의 비용을 늘리지 않는다.
   const pre = await query('SELECT billing_type FROM companies WHERE id = $1', [companyId]);
   if (pre.rows.length === 0) return { ok: false, error: '회사 정보를 찾을 수 없습니다' };
+  // ★ 2026-08-05 후불은 여기서 무료를 소진하지 **않는다**(Codex 1R로 구조 정정).
+  //   `used_qty`는 **발송 시도** 기준이라 실패해도 남는데, 후불 청구는 **성공** 기준이다.
+  //   둘을 한 값으로 묶었더니 무료가 전량 실패해 소멸한 뒤 유료분이 성공하면 그 성공분을
+  //   0원 청구하는 과소청구가 났다. 후불의 무료 적용은 정산이 성공 행에 한도를 배분해 확정한다
+  //   (`readFreeDeductibleForBilling` — 설계 §5-2·§6). 여기에 소진을 두지 않는 것이 그 축 분리다.
   if (pre.rows[0].billing_type !== 'prepaid') return { ok: true, amount: 0 };
 
   // ★ 2026-07-26 잔액 갱신과 원장 INSERT를 **한 트랜잭션**으로 묶는다(Codex #3).
@@ -129,10 +154,38 @@ export async function prepaidDeduct(
     }
     const unitPrice = resolved.price;
 
-    const totalAmount = Math.round(unitPrice * count * 100) / 100; // 부동소수점 보정
+    // ★ 2026-08-05 요금제 무료 메시징 — 과금 **전에** 덮는다(설계 §5-1).
+    //   단가 미설정 차단(위)을 지난 뒤에 둔다: 무료 초과분은 결국 과금해야 하므로
+    //   단가가 없는 회사는 무료분만 보낼 수 있게 열어 주면 안 된다(0726 차단 계약 유지).
+    //   이 소진은 같은 트랜잭션 안이라, 아래에서 잔액 부족으로 롤백되면 무료 소진도 함께 되돌아간다.
+    //   ⚠ 반대로 커밋된 뒤에는 **어떤 경로로도 복원하지 않는다**(설계 §5-1-A).
+    const freeUsed = isFreeMessagingEligible(messageType, referenceType)
+      ? await consumeFreeQuota(client, companyId, messageType, count, { inTransaction: true })
+      : 0;
+    const chargeCount = Math.max(0, count - freeUsed);
+
+    const totalAmount = Math.round(unitPrice * chargeCount * 100) / 100; // 부동소수점 보정
     if (totalAmount === 0) {
-      await client.query('ROLLBACK');
-      return { ok: true, amount: 0 };
+      if (freeUsed <= 0) {
+        await client.query('ROLLBACK');
+        return { ok: true, amount: 0 };
+      }
+      // ★ 전량 무료 — 잔액은 그대로지만 **원장 행은 반드시 남긴다.**
+      //   남기지 않으면 sweeper가 이 발송을 "차감 0"으로 보고, 성공 건수만 커져
+      //   정당 환불 한도가 음수로 계산된다(설계 §5-1-B). 금액 0 행은 단가 역산에서 제외되므로
+      //   같은 참조에 섞인 유료 행의 정산을 방해하지 않는다(loadDeductLedger).
+      await client.query(
+        `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method, created_by, message_type)
+         VALUES ($1, 'deduct', 0, $2, $3, $4, $5, 'system', $6, $7)`,
+        [
+          companyId, Number(c.balance),
+          buildDeductDescription(referenceType, messageType, 0, unitPrice, freeUsed),
+          referenceType, referenceId, createdBy || null, messageType,
+        ],
+      );
+      await client.query('COMMIT');
+      console.log(`[선불차감] company=${companyId} ${messageType}×${count} 전량 무료 제공 소진 — 과금 0원`);
+      return { ok: true, amount: 0, balance: Number(c.balance), freeUsed };
     }
 
     // Atomic 차감: balance >= totalAmount 일 때만 성공
@@ -155,15 +208,19 @@ export async function prepaidDeduct(
     // ★ D145 PDF 후속 (2026-05-07): message_type 컬럼 추가 — both 채널 발송 시 messageType별 환불 분리
     // ★ 2026-07-07: reference_type를 유형별로 기록 + 설명에 유형 라벨(스팸/테스트 위장 해소)
     // ★ 설명에 담기는 건수·단가는 환불·회수·sweep이 되읽는 **정산의 근거**다(parseDeductDescription).
+    // ★ 2026-08-05 설명이 싣는 건수는 **실제 차감 건수(chargeCount)**이고, 무료분은 별도 조각으로 붙는다.
+    //   `parseDeductDescription`은 종전과 똑같이 차감 건수를 되읽고(단가 역산 무손상),
+    //   `parseFreeCount`가 무료분을 따로 읽어 부담 축을 만든다.
     await client.query(
       `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method, created_by, message_type)
        VALUES ($1, 'deduct', $2, $3, $4, $5, $6, 'system', $7, $8)`,
-      [companyId, totalAmount, result.rows[0].balance, buildDeductDescription(referenceType, messageType, count, unitPrice), referenceType, referenceId, createdBy || null, messageType]
+      [companyId, totalAmount, result.rows[0].balance, buildDeductDescription(referenceType, messageType, chargeCount, unitPrice, freeUsed), referenceType, referenceId, createdBy || null, messageType]
     );
     await client.query('COMMIT');
 
-    console.log(`[선불차감] company=${companyId} ${messageType}×${count} = ${totalAmount}원 차감 → 잔액 ${result.rows[0].balance}원`);
-    return { ok: true, amount: totalAmount, balance: Number(result.rows[0].balance) };
+    const freeNote = freeUsed > 0 ? ` (무료 ${freeUsed}건 제외)` : '';
+    console.log(`[선불차감] company=${companyId} ${messageType}×${chargeCount}${freeNote} = ${totalAmount}원 차감 → 잔액 ${result.rows[0].balance}원`);
+    return { ok: true, amount: totalAmount, balance: Number(result.rows[0].balance), freeUsed };
   } catch (e: any) {
     try { await client.query('ROLLBACK'); } catch { /* 이미 종료된 트랜잭션 */ }
     console.error('[선불차감] 롤백:', e?.message || e);

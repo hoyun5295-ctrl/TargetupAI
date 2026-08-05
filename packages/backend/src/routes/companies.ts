@@ -214,6 +214,35 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
 });
 
 // GET /api/companies/my-credit - 회사 AI 크레딧 잔여 + 이번달 사용량 (종량제 Phase 5)
+/**
+ * ★ 2026-08-05 요금제 무료 메시징 — 당월 제공·사용 현황 + 요금제별 제공량.
+ *
+ * 화면 두 곳(현재 플랜 카드 아래 / 요금제 비교 카드)이 **한 번의 호출**로 그린다.
+ * 값은 전부 `plans`·`free_messaging_grants` 파생이라 프론트에 수량을 적지 않는다.
+ * DDL 미실행이면 `available:false`로 조용히 비활성 — 요금제 안내 화면 전체가 막히면 안 된다.
+ */
+router.get('/my-free-messaging', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+    const { readFreeMessagingStatus, readPlanFreeQuotas } = await import('../utils/free-messaging');
+    const [status, planQuotas] = await Promise.all([
+      readFreeMessagingStatus(companyId),
+      readPlanFreeQuotas(),
+    ]);
+    return res.json({ success: true, ...status, planQuotas });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    // ★ 2026-08-05 (Codex 2R) CT가 스키마 부재를 typed 오류로 올려 주므로 이 분기가 실제로 도달한다.
+    //   그 전에는 CT가 삼켜서 200 "무료 없음"으로 위장됐다(db_alter_safety_net 위반).
+    if (err?.code === 'DB_MIGRATION_PENDING' || (msg.includes('does not exist') && /column|relation/.test(msg))) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — plans·free_messaging_grants·billing_items DDL 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('무료 메시징 조회 에러:', err);
+    return res.status(500).json({ success: false, error: '조회 중 오류가 발생했습니다' });
+  }
+});
+
 router.get('/my-credit', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;

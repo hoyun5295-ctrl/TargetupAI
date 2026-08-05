@@ -15,7 +15,7 @@
  */
 
 import { shiftDayKey } from './plan-proration';
-import { BILLING_TYPES } from './billing-types';
+import { BILLING_TYPES, billableQuantity } from './billing-types';
 import { floorWon } from './money';
 
 /** 청구서 항목 한 줄 */
@@ -27,9 +27,15 @@ export interface InvoiceLine {
   /** 사람이 읽는 항목명 — 채널을 접두로 붙여 웹/에이전트가 구분된다 */
   label: string;
   unitPrice: number;
-  /** 청구 수량 = 성공 건수. 요금제 줄은 0(수량 축이 없다) */
+  /** 청구 수량 = 성공 건수 − 무료 제공 공제분. 요금제 줄은 0(수량 축이 없다) */
   count: number;
   amount: number;
+  /**
+   * ★ 2026-08-05 이 줄에서 요금제 무료 제공으로 뺀 건수. 0이면 화면·인쇄물에 아무 것도 추가되지 않는다.
+   * 조용한 제외를 만들지 않으려고 남긴다 — 고객이 발송결과 건수와 청구 수량을 대조할 때
+   * 차이가 설명돼야 한다(설계 §6).
+   */
+  freeCount?: number;
   /**
    * 수량 칸에 대신 쓸 문구. 요금제는 `9일 / 31일` 형태다 —
    * 없으면 청구서가 `0건 × ₩350,000 = ₩101,613`이라는 거짓 산식을 인쇄한다.
@@ -95,9 +101,15 @@ export function buildInvoiceLines(items: any[]): InvoiceLine[] {
     const channel = String(it?.channel || 'web');
     const typeKey = String(it?.message_type || '');
     const unitPrice = Number(it?.unit_price) || 0;
-    const count = Number(it?.success_count) || 0;
+    // ★ 2026-08-05 청구 수량은 **성공 − 무료 공제**다. `success_count`는 실제 성공 건수 그대로 저장돼
+    //   2페이지 상세가 발송결과와 대조되고, 여기서만 청구분으로 좁힌다.
+    //   `amount`도 이미 같은 수량으로 계산돼 있어(priceBillingRows) `수량 × 단가 = 금액`이 참으로 유지된다.
+    const freeCount = Math.max(0, Number(it?.free_count) || 0);
+    // ★ 2026-08-05 청구 수량 정의는 CT 하나(`billableQuantity`)가 소유한다 — 하한·부호 규약 포함.
+    const count = billableQuantity(it);
     const amount = Number(it?.amount) || 0;
-    if (count <= 0 && amount === 0) continue;
+    // 건너뛰기 조건은 종전 계약 그대로 둔다(수량 0 이하 **그리고** 금액 0). 무료만 있는 줄은 남긴다.
+    if (count <= 0 && amount === 0 && freeCount <= 0) continue;
 
     // ★ 2026-07-26 요금제 줄은 **구간마다 한 줄**이다(Codex 3차 MEDIUM 수용).
     //   그 전에는 (채널·유형·단가)만으로 묶어서, 같은 플랜의 6월분 22일치와 7월분 9일치가 한 줄로 합쳐졌고
@@ -124,6 +136,7 @@ export function buildInvoiceLines(items: any[]): InvoiceLine[] {
       acc.set(key, seed);
     }
     const line = acc.get(key)!;
+    if (freeCount > 0) line.freeCount = (line.freeCount || 0) + freeCount;
     // ★ 2026-07-30 extra(080 등 월별 항목)는 발송 수량 축이 없어 success_count가 0이다(2페이지 오염 차단 —
     //   요금제와 같은 이유). 항목줄 수량은 **합쳐진 항목 수**로 센다 — 같은 단가 그룹만 합쳐지므로
     //   "2건 × ₩9,000 = ₩18,000"이 참 산식이 된다. 0으로 두면 "0건 × ₩9,000 = ₩18,000" 거짓 산식이 인쇄된다.
@@ -173,6 +186,8 @@ export function invoiceRowFromPricedItem(it: {
   amount: number;
   planDays?: number | null;
   planMonthDays?: number | null;
+  /** ★ 2026-08-05 무료 제공 공제분 — 발행 시점 계산과 저장 후 표시가 같은 수량을 보게 한다 */
+  freeCount?: number;
 }): any {
   return {
     channel: it.channel,
@@ -183,6 +198,7 @@ export function invoiceRowFromPricedItem(it: {
     amount: it.amount,
     plan_days: it.planDays ?? null,
     plan_month_days: it.planMonthDays ?? null,
+    free_count: Number(it.freeCount) || 0,
   };
 }
 

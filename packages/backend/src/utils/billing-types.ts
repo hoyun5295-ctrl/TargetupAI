@@ -67,6 +67,24 @@ export function resolveRefundAxes(sendChannel: any, messageType: any): RefundAxi
   return [{ type: String(messageType || 'SMS'), scope: 'all' }];
 }
 
+/**
+ * ★ CT: **청구 수량**의 단일 정의 (2026-08-05 신설)
+ *
+ * `성공 건수 − 요금제 무료 제공 공제분`. 이 한 줄이 네 곳에 흩어져 있었고 **네 번 다 갈렸다** —
+ * 장 헤더 수량·청구서 항목줄·수량 조정 음수 판정·정산 미리보기가 각자 계산하다가
+ * 표시가 청구와 어긋났다(0805 Codex 3R·4R + 자체 발견). 판정 축은 언제나 **인쇄되는 줄의 축**이어야 한다.
+ *
+ * ⛔ **0 하한을 걸지 않는다.** 조정 행은 `success`가 음수이고, 행마다 잘라내면 그 행이 통째로 사라져
+ *   수량에서만 조정이 빠지고 금액에는 남는다(`수량 × 단가 = 금액`이 깨진다). 그룹 합이 음수인 발행은
+ *   `findNegativeAdjustedTypes`가 422로 막으므로 통과한 발행의 합은 언제나 0 이상이다.
+ *   (절사를 항목줄에서 1회만 하는 것과 같은 원칙 — 0730 Harold 정정)
+ */
+export function billableQuantity(row: { success?: any; freeCount?: any; success_count?: any; free_count?: any }): number {
+  const success = Number(row?.success ?? row?.success_count) || 0;
+  const free = Math.max(0, Number(row?.freeCount ?? row?.free_count) || 0);
+  return success - free;
+}
+
 /** `company_agent_ids` 단가 행 — 발송ID별 단가는 회사 단가와 별개 축이다 */
 export interface AgentUnitPriceRow {
   id: string;

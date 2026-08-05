@@ -83,6 +83,7 @@ import { startCopyLabelSweeperWorker } from './utils/copy-label-sweeper';
 import { startPayIngestMonitor } from './utils/pay-ingest-monitor';
 // ★ CT-17: 30일 PRO 무료체험 자동 강등 Cron (2026-04-22)
 import { startTrialDowngradeWorker } from './utils/trial-downgrade-worker';
+import { startFreeMessagingGrantWorker } from './utils/free-messaging-grant-worker';
 // ★ 2026-07-28 세금계산서 상태 전이 워커 (pending→due, confirmed·due→ready. 팝빌 연동 전 = ready 정지)
 import { startTaxbillWorker } from './utils/taxbill-worker';
 // ★ 2026-07-30: 팝빌 세금계산서 웹훅 (공개 — 팝빌 서버 POST 수신)
@@ -437,6 +438,9 @@ app.listen(PORT, () => {
 
   // ★ CT-17: 30일 PRO 무료체험 자동 강등 (매일 04:00 KST)
   startTrialDowngradeWorker();
+
+  // ★ 2026-08-05 요금제 무료 메시징 월 지급 (기동 즉시 1회 + 10분 주기 — 지급이 멱등이라 주기가 곧 복구 경로)
+  startFreeMessagingGrantWorker();
 
   // ★ 2026-07-28 세금계산서 상태 전이 (5분 주기 — 팝빌 연동 전에는 ready에서 정지)
   startTaxbillWorker();

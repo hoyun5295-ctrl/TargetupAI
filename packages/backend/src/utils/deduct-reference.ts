@@ -29,10 +29,26 @@ export function deductReferenceLabel(refType: string | null | undefined): string
 /**
  * prepaidDeduct 차감 설명. campaign은 기존 문구 그대로(하위호환), 그 외 유형만 `[라벨] ` 접두사로 구분.
  * 예) spam → "[스팸필터 테스트] LMS 3건 발송 차감 (건당 26.4원)"
+ *
+ * ★ 2026-08-05 요금제 무료 메시징 — `freeCount`(요금제 제공분으로 덮인 건수)를 함께 싣는다.
+ *   무료가 0이면 **문구가 종전과 한 글자도 다르지 않다**(기존 행·기존 테스트 무손상).
+ *
+ *   왜 여기에 싣는가: 정산 축이 `차감 건수`에서 `부담 건수(= 차감 + 무료)`로 넓어지는데,
+ *   그 값을 두 번째 저장소에 두면 원장과 갈릴 수 있다. 이 파일은 이미 "만드는 함수와 되읽는 함수를
+ *   같은 곳에 둔다"는 계약을 갖고 있으므로(아래 parseDeductDescription) 무료도 같은 자리에 둔다.
+ *
+ *   형식 두 가지 — 되읽기 규칙은 parseDeductDescription 주석 참조.
+ *   · 부분 무료: `SMS 100건 중 무료 40건 · 과금 60건 발송 차감 (건당 7.92원)`
+ *   · 전량 무료: `SMS 무료 제공 100건 발송 (과금 없음)`  ← 차감액 0이라 단가 축이 없다
  */
-export function buildDeductDescription(refType: string, messageType: string, count: number, unitPrice: number): string {
+export function buildDeductDescription(
+  refType: string, messageType: string, count: number, unitPrice: number, freeCount: number = 0,
+): string {
   const prefix = refType && refType !== 'campaign' ? `[${deductReferenceLabel(refType)}] ` : '';
-  return `${prefix}${messageType} ${count}건 발송 차감 (건당 ${unitPrice}원)`;
+  const free = Math.max(0, Math.floor(Number(freeCount) || 0));
+  if (free <= 0) return `${prefix}${messageType} ${count}건 발송 차감 (건당 ${unitPrice}원)`;
+  if (count <= 0) return `${prefix}${messageType} 무료 제공 ${free}건 발송 (과금 없음)`;
+  return `${prefix}${messageType} ${count + free}건 중 무료 ${free}건 · 과금 ${count}건 발송 차감 (건당 ${unitPrice}원)`;
 }
 
 /**
@@ -48,6 +64,13 @@ export function buildDeductDescription(refType: string, messageType: string, cou
  *
  * 형식: `[라벨] SMS 1,000건 발송 차감 (건당 7.92원)` — 라벨 접두·천단위 콤마 모두 허용.
  * 되읽을 수 없으면 `null`(옛 형식·수기 조정 등) — 호출부는 그때만 현재 단가로 폴백한다.
+ *
+ * ★ 2026-08-05 무료 메시징 — 이 함수의 계약은 **바뀌지 않는다**.
+ *   부분 무료 문구(`SMS 100건 중 무료 40건 · 과금 60건 발송 차감 (건당 7.92원)`)에서도
+ *   정규식이 잡는 것은 `과금 60건` 조각이라 **`count`는 언제나 실제 차감 건수**다(단가 역산 그대로 성립).
+ *   전량 무료 문구에는 `발송 차감` 자체가 없어 `null`이고, 그 행은 차감액이 0이라 단가 축에 기여할 것도 없다
+ *   (`prepaid.ts loadDeductLedger`가 금액 0 행을 단가 역산에서 제외한다).
+ *   무료 건수는 아래 `parseFreeCount`가 따로 읽는다 — 한 문자열, 두 물음.
  */
 export function parseDeductDescription(description: string | null | undefined): { count: number; unitPrice: number } | null {
   const s = String(description || '');
@@ -58,4 +81,21 @@ export function parseDeductDescription(description: string | null | undefined): 
   if (!Number.isFinite(count) || count <= 0) return null;
   if (!Number.isFinite(unitPrice) || unitPrice <= 0) return null;
   return { count, unitPrice };
+}
+
+/**
+ * (순수) 차감 설명에서 **요금제 무료 제공으로 덮인 건수**를 되읽는다. (★ 2026-08-05)
+ *
+ * 정산이 쓰는 축은 `차감 건수`가 아니라 **`부담 건수 = 차감 + 무료`**다.
+ * 무료분만큼 차감이 줄어드는데 성공 건수는 줄지 않으므로, 차감만 보면
+ * "성공 > 차감"이 되어 정당 환불 한도가 0으로 계산되고 **정상 환불을 초과로 오인해 회수한다**
+ * (`mysql-refund-sweeper` maxLegitRefund / `refundInvariantGap`).
+ *
+ * 무료가 없던 옛 행·다른 유형 문구는 `0` — 부담 = 차감이 되어 종전 계산과 완전히 같다.
+ */
+export function parseFreeCount(description: string | null | undefined): number {
+  const m = String(description || '').match(/무료(?:\s*제공)?\s*([\d,]+)\s*건/);
+  if (!m) return 0;
+  const free = Number(m[1].replace(/,/g, ''));
+  return Number.isFinite(free) && free > 0 ? free : 0;
 }

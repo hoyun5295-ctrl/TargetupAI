@@ -33,6 +33,28 @@ interface CompanyInfo {
   subscription_status?: string | null; // 'trial' | 'trial_expired' | 'paid' | 'expired' | 'suspended' (※ 'active'는 네이밍 충돌로 2026-04-22 폐지, 'paid'로 통일)
 }
 
+/** ★ 2026-08-05 요금제 무료 메시징 — `GET /api/companies/my-free-messaging` 응답 */
+interface FreeMessagingLine {
+  type: string;
+  label: string;
+  granted: number;
+  used: number;
+  remaining: number;
+}
+interface FreeMessagingInfo {
+  available: boolean;
+  periodMonth: string | null;
+  lines: FreeMessagingLine[];
+  /** 요금제코드 → 유형별 제공 수량 */
+  planQuotas: Record<string, Record<string, number>>;
+}
+
+/** 유형 표시 순서·이름은 서버 축(`FREE_MESSAGING_TYPES`)이 정한다 — 여기서 다시 정의하지 않는다. */
+const FREE_TYPE_LABEL: Record<string, string> = { SMS: 'SMS', LMS: 'LMS', MMS: 'MMS', KAKAO: '알림톡' };
+
+/** 미사용분 소멸·차감 시점을 한 줄로 알린다(설계 §5-1-A 정직성 요구) — 두 화면이 같은 문구를 쓴다. */
+const FREE_MESSAGING_NOTE = '매월 제공 · 발송 시도 시점에 차감되며 미사용분은 이월되지 않습니다';
+
 export default function PricingPage() {
   const navigate = useNavigate();
   const toast = useToast();
@@ -57,6 +79,8 @@ export default function PricingPage() {
   const [pendingPlanName, setPendingPlanName] = useState('');
   const [unconfirmedResult, setUnconfirmedResult] = useState<any>(null);
   const [showResultModal, setShowResultModal] = useState(false);
+  // ★ 2026-08-05 요금제 무료 메시징 — 당월 제공·사용 현황 + 요금제별 제공량(서버 파생, 화면 하드코딩 금지)
+  const [freeMessaging, setFreeMessaging] = useState<FreeMessagingInfo | null>(null);
 
   useEffect(() => {
     loadData();
@@ -83,6 +107,15 @@ export default function PricingPage() {
         const creditRes = await fetch('/api/companies/my-credit', { headers: { Authorization: `Bearer ${token}` } });
         if (creditRes.ok) { const cd = await creditRes.json(); if (cd && cd.success !== false) setMyCredit(cd); }
       } catch { /* 조회 실패 시 게이지 숨김 */ }
+
+      // ★ 2026-08-05 요금제 무료 메시징 — 실패해도 화면 전체가 막히지 않게 조용히 숨긴다(DDL 대기 상태 포함).
+      try {
+        const freeRes = await fetch('/api/companies/my-free-messaging', { headers: { Authorization: `Bearer ${token}` } });
+        if (freeRes.ok) {
+          const fd = await freeRes.json();
+          if (fd && fd.success !== false) setFreeMessaging(fd);
+        }
+      } catch { /* 조회 실패 시 무료 제공 표시 숨김 */ }
 
       const companyRes = await fetch('/api/companies/my-plan', {
         headers: { Authorization: `Bearer ${token}` },
@@ -371,6 +404,40 @@ export default function PricingPage() {
                   </div>
                 </div>
 
+                {/* ★ 2026-08-05 요금제 포함 무료 메시지 — 제공량·사용량·잔여. 제공이 없는 요금제면 통째로 숨긴다. */}
+                {freeMessaging?.available && (
+                  <div className="mt-5 pt-5 border-t border-gray-100">
+                    <div className="flex items-baseline justify-between mb-3">
+                      <h3 className="text-sm font-semibold text-gray-900">요금제 포함 무료 메시지</h3>
+                      <span className="text-[11px] text-gray-500">{FREE_MESSAGING_NOTE}</span>
+                    </div>
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                      {freeMessaging.lines.filter((l) => l.granted > 0).map((l) => {
+                        const pct = l.granted > 0 ? Math.min(100, (l.used / l.granted) * 100) : 0;
+                        return (
+                          <div key={l.type} className="rounded-xl border border-gray-200 bg-gray-50/60 px-3 py-2.5">
+                            <div className="flex items-baseline justify-between">
+                              <span className="text-xs font-medium text-gray-600">{FREE_TYPE_LABEL[l.type] || l.label}</span>
+                              <span className="text-[11px] text-gray-400">{formatNumber(l.granted)}건</span>
+                            </div>
+                            <div className="mt-1 flex items-baseline gap-1">
+                              <span className="text-lg font-bold text-gray-900">{formatNumber(l.remaining)}</span>
+                              <span className="text-[11px] text-gray-500">건 남음</span>
+                            </div>
+                            <div className="mt-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full transition-all ${pct >= 100 ? 'bg-gray-400' : 'bg-violet-500'}`}
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                            <div className="mt-1 text-[11px] text-gray-500">{formatNumber(l.used)}건 사용</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {isTrialExpired && (
                   <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
                     <p className="text-sm text-red-700">
@@ -550,6 +617,27 @@ export default function PricingPage() {
                         다운그레이드 신청
                       </button>
                     )}
+
+                    {/* ★ 2026-08-05 요금제 가입 메리트 — 이 요금제에 포함된 무료 메시지. `plans` 파생이라 화면에 수량을 적지 않는다. */}
+                    {(() => {
+                      const quota = freeMessaging?.planQuotas?.[plan.plan_code];
+                      const entries = Object.entries(quota || {}).filter(([, v]) => Number(v) > 0);
+                      if (entries.length === 0) return null;
+                      return (
+                        <div className="mt-3 pt-3 border-t border-gray-100">
+                          <div className="text-[11px] font-medium text-gray-700 mb-1.5">포함된 무료 메시지</div>
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                            {entries.map(([type, qty]) => (
+                              <div key={type} className="flex items-baseline justify-between">
+                                <span className="text-[11px] text-gray-500">{FREE_TYPE_LABEL[type] || type}</span>
+                                <span className="text-xs font-semibold text-gray-900">{formatNumber(Number(qty))}건</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="mt-1.5 text-[10px] text-gray-400 leading-snug">{FREE_MESSAGING_NOTE}</div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>

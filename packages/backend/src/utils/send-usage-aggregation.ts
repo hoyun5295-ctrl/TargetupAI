@@ -22,9 +22,11 @@ import { loadBillingLedger, hasAgentMapping, type BillingLedger } from './billin
 import { floorWon } from './money';
 import { mapWithConcurrency } from './concurrency';
 import { normalizeUnitPriceBasis, toSupplyPrice, type UnitPriceBasis } from './unit-price';
+// ★ 2026-08-05 요금제 무료 제공 배분 — 순수 CT(DB 접근 없음)
+import { allocateFreeToRows } from './free-messaging';
 import type { PlanSegment } from './plan-proration';
 import {
-  BILLING_TYPES,
+  BILLING_TYPES, billableQuantity,
   type BillingTypeDef, type AgentPriceColumn, type AgentUnitPriceRow,
 } from './billing-types';
 
@@ -1077,6 +1079,13 @@ export interface PricedBillingItem extends BillingUsageRow {
    */
   planDays: number | null;
   planMonthDays: number | null;
+  /**
+   * ★ 2026-08-05 요금제 무료 제공으로 **청구에서 뺀** 건수(`billing_items.free_count`).
+   * `success`는 실제 성공 건수 그대로다 — 2페이지 상세가 발송결과와 대조돼야 하기 때문이다.
+   * 청구 수량은 `success − freeCount`이고 `amount`도 그 수량으로 계산된다(설계 §6).
+   * 이 칸이 곧 **소비 마커**다: 발행을 지우면 함께 사라져 그 달 무료가 자동으로 미반영으로 돌아온다.
+   */
+  freeCount: number;
 }
 
 /**
@@ -1096,6 +1105,8 @@ export interface PricedBillingItem extends BillingUsageRow {
  */
 export function buildPlanBillingItems(segments: PlanSegment[]): PricedBillingItem[] {
   return (segments || []).map((s) => ({
+    // ★ 2026-08-05 요금제 줄은 구독료라 발송 수량 축이 없다 — 무료 공제도 없다.
+    freeCount: 0,
     channel: 'plan' as const,
     itemDate: s.from,
     typeKey: `PLAN_${String(s.planCode || '').slice(0, 15)}`,
@@ -1260,6 +1271,8 @@ export function buildExtraBillingItems(rows: ExtraItemSourceRow[]): PricedBillin
     const push = (typeKey: string, amount: number) => {
       if (!(amount > 0)) return;
       out.push({
+        // ★ 2026-08-05 080·부가서비스는 월별 정액 항목이라 발송 수량 축이 없다 — 무료 공제 대상이 아니다.
+        freeCount: 0,
         channel: 'extra' as const,
         itemDate,
         typeKey,
@@ -1342,7 +1355,13 @@ export function priceBillingRows(
   //   (`webPrices`는 `resolveBillingUnitPricesDetailed`가 이미 공급가로 바꿔 넘겨준다.)
   //   기본값은 전환 전 — 인자를 빠뜨린 호출부가 조용히 ÷1.1을 하는 쪽으로 기울지 않게 한다.
   agentPriceBasis: UnitPriceBasis = 'vat_included',
+  /**
+   * ★ 2026-08-05 유형별 무료 공제량(설계 §6). 미전달·빈 객체면 공제 0 = 이 기능 도입 전과 완전히 같다.
+   * 배분은 순수 CT(`allocateFreeToRows`)가 하고 여기서는 그 결과를 금액에 반영만 한다.
+   */
+  freeDeductibleByType: Record<string, number> = {},
 ): PricedBillingResult {
+  const freeAlloc = allocateFreeToRows(rows || [], freeDeductibleByType);
   const bySendId = new Map<string, AgentUnitPriceRow>();
   for (const p of agentPriceRows || []) {
     const key = String(p?.agent_send_id || '').trim().toUpperCase();
@@ -1385,12 +1404,17 @@ export function priceBillingRows(
     //   고객이 검산할 때마다 걸린다. 일자 행은 **정확값(소수 유지)** 그대로 두고,
     //   절사는 `buildInvoiceLines`의 **항목줄에서 1회**만 한다(같은 단가 그룹은 Σ(일자×단가)=총수량×단가라
     //   항목줄 절사값이 정확히 floor(수량×단가)가 된다). 헤더 공급가액은 그 절사된 항목줄들의 정수 합.
-    const amountExact = success * unitPrice;
+    // ★ 2026-08-05 요금제 무료 제공분은 **금액 계산에 들어가기 전에** 수량에서 뺀다(설계 §1-7).
+    //   무료 N건에 고객 단가를 곱하는 계산 자체가 없어야 절사·부가세 축이 오염되지 않는다.
+    const freeCount = Math.max(0, Math.min(freeAlloc.get(r as any) || 0, success));
+    const billable = billableQuantity({ success, freeCount });
+
+    const amountExact = billable * unitPrice;
     const amount = amountExact;
     amountByChannel[r.channel] += amount;
     amountExactByChannel[r.channel] += amountExact;
     // 발송 행은 요금제 일수 축이 없다 — null이 그 사실이다(0은 "0일"과 구분이 안 된다).
-    items.push({ ...r, agentId, unitPrice, amount, amountExact, planDays: null, planMonthDays: null });
+    items.push({ ...r, agentId, unitPrice, amount, amountExact, planDays: null, planMonthDays: null, freeCount });
   }
 
   const unbillableTypes = findUnbillableBillingRows(items.filter((i) => (Number(i.success) || 0) > 0));
@@ -1478,7 +1502,19 @@ export interface BillingSheet {
 
 function sheetTotals(items: PricedBillingItem[]): Record<string, number> {
   const t: Record<string, number> = { ...EMPTY_BILLING_TOTALS };
-  for (const i of items) if (i.typeKey in t) t[i.typeKey] += Number(i.success) || 0;
+  // ★ 2026-08-05 장 헤더 수량은 **청구 수량**(성공 − 무료 공제)이다. 성공 그대로 두면 목록 화면·헤더가
+  //   청구서 항목표(성공 − 무료)와 다른 숫자를 보여준다. `billing_items.success_count`는 실제 성공을
+  //   그대로 보존하므로 2페이지 상세와 발송결과 대조는 영향받지 않는다.
+  // ⛔ 행 단위로 0 하한을 걸지 않는다(★ 2026-08-05 Codex 4R high — 3R 정정이 만든 결함).
+  //   조정 행은 `success`에 증감이 들어와 하향이면 음수다. 행마다 `max(0, …)`를 걸면 그 행이 통째로
+  //   0이 되어 **수량에서만 조정이 사라지고 금액에는 남는다** — 성공 100·무료 30·조정 −20이면
+  //   수량 70에 금액 50건분이 되어 고객이 검산하면 틀린다.
+  //   하한 자체가 불필요하다: 그룹 합이 음수면 `findNegativeAdjustedTypes`가 발행을 이미 막으므로
+  //   통과한 발행의 합은 언제나 0 이상이다. (절사를 항목줄에서 1회만 하는 것과 같은 원칙 — 0730 Harold 정정)
+  for (const i of items) {
+    if (!(i.typeKey in t)) continue;
+    t[i.typeKey] += billableQuantity(i);
+  }
   return t;
 }
 

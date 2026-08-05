@@ -49,6 +49,7 @@
 | AI Operator·CDP·Provider | [AI_OPERATOR_기능정의서.md](../docs/AI_OPERATOR_기능정의서.md) + [ai_operator_progress.md](ai_operator_progress.md) | 해당 절 |
 | AI 영업 아웃리치(슈퍼관리자·ceo 전용) | [2026-07-31-ai-sales-outreach-design.md](../docs/2026-07-31-ai-sales-outreach-design.md) | 전체 — 착수 전 확정 = §13, 재사용 맵 = §6-1 |
 | CRM 캠페인 대행(설계 대행) | [2026-07-09-crm-campaign-agency-implementation.md](../docs/2026-07-09-crm-campaign-agency-implementation.md) | 전체 |
+| 요금제 무료 메시징(월 제공량·소진·정산 제외) | [2026-08-05-plan-free-messaging-design.md](../docs/2026-08-05-plan-free-messaging-design.md) | 전체 — 확정 대기 = §9 (Harold 확정 전 착수 금지) |
 | DM 편집기 AI 퍼스트 재개편 | [2026-07-16-dm-editor-ai-first-redesign.md](../docs/2026-07-16-dm-editor-ai-first-redesign.md) | 전체 (Harold 검토 대기) |
 | 인앱메시지 | [인앱메세지전용.md](../docs/인앱메세지전용.md) | 해당 절 |
 | AI 규제 대응(고영향 판단·생성물 표시) | [compliance/](../docs/compliance/) | 해당 문서 (고영향AI 사전검토서 = 법 제31조 이행 기록) |

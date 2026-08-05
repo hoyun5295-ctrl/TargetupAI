@@ -39,19 +39,29 @@ export function calcRefundDue(p: {
  */
 export function calcRefundParts(p: {
   deductedCount: number;
+  /**
+   * ★ 2026-08-05 요금제 무료 제공으로 덮인 건수(설계 §5-1-B). 기본 0 = 종전 계산과 완전히 같다.
+   *
+   * 미적재 판정은 **부담 건수(차감 + 무료)** 기준이어야 한다 — 무료로 덮인 건도 큐에 올라갔어야 할
+   * 발송이기 때문이다. 반대로 **환불 상한은 차감 건수 그대로**다: 무료분은 돈이 나간 적이 없어
+   * 돌려줄 것이 없고, 소진은 복원하지 않는다(§5-1-A). 아래 두 cap이 그 경계를 지킨다.
+   */
+  freeCount?: number;
   sentCount: number;
   mysqlSuccess: number;
   mysqlFail: number;
   mysqlPending: number;
 }): { fail: number; notLoaded: number } {
   const deducted = Math.max(0, Math.floor(p.deductedCount));
+  const free = Math.max(0, Math.floor(Number(p.freeCount) || 0));
+  const covered = deducted + free;
   const sent = Math.max(0, Math.floor(p.sentCount));
   const success = Math.max(0, Math.floor(p.mysqlSuccess));
   const fail = Math.max(0, Math.floor(p.mysqlFail));
   const pending = Math.max(0, Math.floor(p.mysqlPending));
   // 실제 큐에 올라간(처리된) 수 = max(워커 기록 적재, MySQL 실측 성공+실패+대기)
   const processed = Math.max(sent, success + fail + pending);
-  const notLoaded = processed > 0 ? Math.max(0, deducted - processed) : 0;
+  const notLoaded = processed > 0 ? Math.max(0, covered - processed) : 0;
   // 상한 — 누적 환불이 차감 총액을 넘지 않도록 (prepaidRefund에도 한도 가드 있으나 산식 자체로도 보장).
   //   상한에 걸리면 실패분을 먼저 채우고 남은 만큼만 미적재분에 배분한다(실패는 실측, 미적재는 파생값).
   const cappedFail = Math.min(deducted, fail);
@@ -68,9 +78,22 @@ export function calcRefundParts(p: {
  *   - |gap| 작으면(반올림 여유) 정상. 호출측이 임계값으로 노이즈 차단.
  * 순수 함수(DB import 0). 호출 전제: 정산 끝난 캠페인(대기 0) + MySQL 집계 유효(성공+실패>0).
  */
-export function refundInvariantGap(p: { deductedCount: number; successCount: number; netRefundedCount: number }): number {
+export function refundInvariantGap(p: {
+  deductedCount: number;
+  successCount: number;
+  netRefundedCount: number;
+  /** ★ 2026-08-05 요금제 무료 제공으로 덮인 건수. 기본 0 = 종전 식과 완전히 같다. */
+  freeCount?: number;
+}): number {
   const deducted = Math.max(0, Math.floor(p.deductedCount));
+  const free = Math.max(0, Math.floor(Number(p.freeCount) || 0));
   const success = Math.max(0, Math.floor(p.successCount));
   const netRefunded = Math.max(0, Math.floor(p.netRefundedCount));
-  return deducted - (success + netRefunded);
+  // ★ 2026-08-05 무료 제공이 끼면 식이 한 항 늘어난다 — `부담 = 성공 + 순환불 + 무료실패소멸`.
+  //   무료로 덮였는데 전달되지 못한 몫은 돈이 나간 적이 없어 환불 대상이 아니고,
+  //   소진도 복원하지 않으므로(설계 §5-1-A) 어느 항에도 안 잡힌다. 그 자리를 이 항이 메운다.
+  //   무료를 성공 건에 우선 배정하므로 소멸분은 `max(0, 무료 − 성공)`이다.
+  //   무료 0이면 이 항도 0이라 옛 캠페인의 판정은 한 건도 달라지지 않는다.
+  const freeLost = Math.max(0, free - success);
+  return (deducted + free) - (success + netRefunded + freeLost);
 }
