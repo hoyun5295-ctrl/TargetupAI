@@ -44,6 +44,14 @@ export interface DeductResult {
   fromPurchased: number;
   baseAfter: number;
   purchasedAfter: number;
+  /**
+   * ★ 2026-08-05 — `deducted: false`의 사유. 종전엔 세 상황이 똑같은 empty로 나와
+   * 호출부가 "돈이 빠졌는가"를 판정할 수 없었다(발송 경로가 무과금을 성공으로 마감한 원인).
+   *  - `duplicate`      = 같은 멱등키로 **이미 차감됨** → 차감 의무 없음
+   *  - `not_applicable` = 크레딧제 미적용 회사(요금제 크레딧 미설정 + 구매분 0) → 차감 대상 아님
+   *  - `no_credit_row`  = 회사 크레딧 행 자체가 없음 → **미해결**(정상 상태가 아니다)
+   */
+  skipReason?: 'duplicate' | 'not_applicable' | 'no_credit_row';
 }
 
 export interface DeductOpts {
@@ -117,14 +125,14 @@ export async function _deductWithClient(client: any, opts: DeductOpts, now: Date
   const locked = await loadCreditRow(client, opts.companyId, true);
   if (!locked) {
     await client.query('ROLLBACK');
-    return empty;
+    return { ...empty, skipReason: 'no_credit_row' };
   }
 
   // ★ D227+ 크레딧제 미적용(요금제 크레딧 미설정 + 구매분 0) → 차감 skip(차단 X).
   //   plans.ai_credits_per_month에 값을 넣는 순간 자동으로 차감이 활성화된다.
   if (locked.plan_credits == null && (Number(locked.purchased) || 0) === 0) {
     await client.query('ROLLBACK');
-    return empty;
+    return { ...empty, skipReason: 'not_applicable' };
   }
 
   // 잠금 획득 후 idempotent 재확인 — 동시 재시도 이중 차감 차단 (잠금 전 확인은 race 위험)
@@ -135,7 +143,8 @@ export async function _deductWithClient(client: any, opts: DeductOpts, now: Date
     );
     if (dup.rows.length > 0) {
       await client.query('ROLLBACK');
-      return empty;
+      // 이미 그 키로 차감됐다 = 돈은 빠졌다. 실패와 섞으면 호출부가 재시도·보류로 오판한다.
+      return { ...empty, skipReason: 'duplicate' };
     }
   }
 

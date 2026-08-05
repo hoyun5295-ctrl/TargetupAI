@@ -118,6 +118,13 @@ export async function deductCredit(opts: {
  *  - idempotencyKey를 직접 주면(예: journey-activate:${journeyId}) 그 키로 고정 → 재개·재요청 중복 차감 0(ai_call_log_id FK 무관).
  *  - 최종 실패 = stdout 명시 로그([CREDIT][MISS])로 추적 + 그 키로 수동 재차감. AI 응답은 막지 않는다(throw 안 함).
  *  - _deps = 단위검증 주입용(prod 미사용).
+ *
+ * ★ 2026-08-05 — **차감 확정 여부를 반환한다**(`true` = 차감 의무가 남아 있지 않다).
+ *   이 함수는 잔액 부족·영구 실패에도 throw하지 않으므로, 호출부의 `try/catch`는 실패를 절대 잡지 못한다.
+ *   자동마케팅 발송이 그 죽은 catch에 기대어 무과금 발송을 'sent'로 마감하고 있었다(재차감 경로 소실).
+ *   `true` = 차감됨 · 이미 차감됨(멱등 중복) · 차감 대상 아님(크레딧제 미적용·cost 0·companyId 없음).
+ *   `false` = 잔액 부족 · 3회 영구 실패 · 크레딧 행 없음. **돈이 안 빠졌다는 뜻이므로 상태를 전진시키면 안 된다.**
+ *   기존 소비처는 반환값을 쓰지 않아 동작이 그대로다(void → boolean은 하위 호환).
  */
 export async function deductCreditSafe(
   opts: {
@@ -130,8 +137,9 @@ export async function deductCreditSafe(
     idempotencyKey?: string;
   },
   _deps?: { deductFn?: typeof deductCredit; sleep?: (ms: number) => Promise<void> }
-): Promise<void> {
-  if (!opts.companyId || !opts.cost || opts.cost <= 0) return;
+): Promise<boolean> {
+  // 차감 대상이 아니다 = 남은 의무가 없다. false로 답하면 호출부가 정상 흐름을 보류로 오판한다.
+  if (!opts.companyId || !opts.cost || opts.cost <= 0) return true;
   const deduct = _deps?.deductFn ?? deductCredit;
   const sleep = _deps?.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   // 호출측이 멱등키를 직접 주면 그걸 우선(고정). 아니면 aiCallLogId 있을 때 deductCredit이 source+aiCallLogId로,
@@ -154,13 +162,17 @@ export async function deductCreditSafe(
       // 사후 토스트용 — 차감 성공 시 요청 컨텍스트에 기록(응답 미들웨어가 _credit 첨부). worker는 no-op.
       if (result?.deducted) {
         setCreditEvent({ used: opts.cost, balance: (result.baseAfter || 0) + (result.purchasedAfter || 0), source: opts.source });
+        return true;
       }
-      return;
+      // 차감이 안 일어났다 — 사유를 봐야 "돈이 빠졌는가"가 갈린다(재시도해도 바뀌지 않는 결말들이다).
+      if (result?.skipReason === 'duplicate' || result?.skipReason === 'not_applicable') return true;
+      console.log(`[CREDIT][MISS] company=${opts.companyId} source=${opts.source} cost=${opts.cost} aiCallLogId=${opts.aiCallLogId || 'none'} reason=${result?.skipReason || 'unknown'}`);
+      return false;
     } catch (err: any) {
       // 잔액 부족 = 정상 차단(사전 checkCredit 통과 후 동시 소진). 재시도 무의미.
       if (err instanceof InsufficientCreditError) {
         console.log(`[CREDIT][SKIP] insufficient company=${opts.companyId} source=${opts.source} cost=${opts.cost} aiCallLogId=${opts.aiCallLogId || 'none'}`);
-        return;
+        return false;
       }
       if (attempt < MAX_ATTEMPTS) {
         await sleep(attempt * 200);
@@ -168,8 +180,10 @@ export async function deductCreditSafe(
       }
       // 영구 실패 — stdout 추적(LESSONS_BACKEND: console.log 의무). aiCallLogId로 수동 재차감 가능.
       console.log(`[CREDIT][MISS] company=${opts.companyId} source=${opts.source} cost=${opts.cost} aiCallLogId=${opts.aiCallLogId || 'none'} attempts=${MAX_ATTEMPTS} err=${err?.message}`);
+      return false;
     }
   }
+  return false;
 }
 
 /** 명시적 월 리셋(워커/관리자용). 리셋했으면 true. */

@@ -46,6 +46,14 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
   const [countError, setCountError] = useState<string | null>(null);
   /** 서버가 "기준선 대기"로 답했는가 — 변화 축의 첫 회차 판정은 서버만 안다(2026-08-04). */
   const [serverAwaiting, setServerAwaiting] = useState(false);
+  /**
+   * ★ 2026-08-05 — 서버가 "셀 수 없다"고 답한 사유(매장 미배정 등).
+   * ⛔ 이것은 0명이 아니다. 종전엔 서버가 준 사유를 버리고 total 0만 받아
+   *   "지금 기준 0명 · 수신거부·발송 피로도까지 걸러낸 실제 발송 대상"이라고 썼다 — 걸러낸 결과가 아닌데
+   *   걸렀다고 말하는 조용한 0건이다(§2 불변 원칙 3).
+   * 문장은 서버가 소유한다. 화면이 사유를 지어 붙이면 서버가 사유를 늘릴 때 화면만 거짓이 된다.
+   */
+  const [blockedReason, setBlockedReason] = useState<string | null>(null);
   /** 늦게 온 응답이 최신 선택을 덮지 않도록 — 축을 빠르게 바꿀 때 수가 뒤섞이면 그 화면은 거짓이 된다. */
   const reqSeq = useRef(0);
 
@@ -72,6 +80,7 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
     const seq = ++reqSeq.current;
     setCounting(true);
     setCountError(null);
+    setBlockedReason(null);
     try {
       const token = localStorage.getItem('token');
       const res = await fetch('/api/ai/operator/target-recipients', {
@@ -83,7 +92,13 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
       });
       const data = await res.json();
       if (seq !== reqSeq.current) return;
-      if (data?.success && data.awaitingBaseline === true) {
+      const blocked = typeof data?.blockedReason === 'string' ? data.blockedReason.trim() : '';
+      if (data?.success && blocked) {
+        // 서버가 매장 판정을 기준선 판정보다 먼저 한다(routes/ai.ts) — 화면 분기 순서도 같아야 한다.
+        setBlockedReason(blocked);
+        setServerAwaiting(false);
+        setCount(null);
+      } else if (data?.success && data.awaitingBaseline === true) {
         // 변화 축인데 기준선이 아직 — 오류도 0명도 아니다. 첫 회차 안내로 바꾼다.
         setServerAwaiting(true);
         setCount(null);
@@ -114,6 +129,7 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
   // 변화 축 + 오퍼레이터 없음만 호출 생략(기준선이 없다는 게 확정) — 오퍼레이터가 있으면 서버가 판정한다.
   useEffect(() => {
     setServerAwaiting(false);
+    setBlockedReason(null);
     if (!value || (selected?.needsCycleBaseline && !operatorId)) { setCount(null); setCountError(null); reqSeq.current++; return; }
     const t = setTimeout(() => { void measure(value, params); }, 350);
     return () => clearTimeout(t);
@@ -248,7 +264,15 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
         </div>
       )}
 
-      {value && !awaitingBaseline && (
+      {/* 셀 수 없는 상태 — 수를 그리지 않는다. 0명으로 보이면 담당자는 조건을 넓히려 든다(원인이 조건이 아닌데). */}
+      {value && !awaitingBaseline && blockedReason && (
+        <div className="flex items-start gap-2 px-3 py-2.5 bg-amber-500/10 border border-amber-400/30 rounded-lg">
+          <Lock className="w-3.5 h-3.5 text-amber-300 shrink-0 mt-0.5" />
+          <span className="text-[11px] text-amber-100/90 leading-relaxed">{blockedReason}</span>
+        </div>
+      )}
+
+      {value && !awaitingBaseline && !blockedReason && (
         <div className="flex items-center gap-2 px-3 py-2 bg-white/5 border border-white/10 rounded-lg">
           <Users className="w-3.5 h-3.5 text-white/40 shrink-0" />
           {counting ? (

@@ -962,10 +962,24 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
     `INSERT INTO operator_proposals (
       id, operator_id, company_id, proposal_json, recipient_count, cost_estimate,
       status, auto_executed, auto_execute_reason, scheduled_send_at, expires_at, created_at
-    ) VALUES (
-      gen_random_uuid(), $1::uuid, $2::uuid, $3::jsonb, $4, $5,
-      $6, $7, $8, $9, NOW() + INTERVAL '7 days', NOW()
-    ) RETURNING *`,
+    )
+    -- ★ 2026-08-05: "리마인드가 아닌 scheduled는 오퍼레이터당 1건" 계약을 **문장 안에서** 지킨다.
+    --   종전엔 위 openProps 확인(잠금 없음)과 이 INSERT 사이에 수십 초짜리 AI 호출이 있어, 동시 run-now
+    --   두 건이 둘 다 "예약 없음"을 읽고 둘 다 INSERT → 같은 회차 2회 발송·2회 과금이 가능했다.
+    --   VALUES를 SELECT ... WHERE NOT EXISTS로 바꿔 확인과 삽입을 한 문장으로 묶는다(창이 수십 초 → 문장 내부).
+    --   ⛔ 부분 UNIQUE 인덱스는 최종 방어로 남는다 — 완전 동시 실행은 스냅샷이 갈려 이 WHERE를 둘 다 통과할 수 있다.
+    --   Codex 1R high 반영: 인덱스가 아직 없는 창(배포~DDL)에서도 이 WHERE가 실질 방어를 한다.
+    --   캐스팅은 information_schema 실측 타입(2026-08-05 확인)으로만 — 짐작 캐스팅 금지.
+    SELECT gen_random_uuid(), $1::uuid, $2::uuid, $3::jsonb, $4::integer, $5::integer,
+           $6::varchar, $7::boolean, $8::text, $9::timestamptz, NOW() + INTERVAL '7 days', NOW()
+     WHERE $6::varchar <> 'scheduled'
+        OR NOT EXISTS (
+             SELECT 1 FROM operator_proposals
+              WHERE operator_id = $1::uuid AND status = 'scheduled'
+                AND COALESCE(proposal_json->'meta'->>'is_reminder', 'false') <> 'true'
+           )
+    ON CONFLICT DO NOTHING
+    RETURNING *`,
     [
       operator.id,
       operator.companyId,
@@ -978,6 +992,15 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
       scheduledSendAt,
     ]
   );
+
+  // 0행 = 위 WHERE(또는 부분 UNIQUE 인덱스)가 막았다 = 이 오퍼레이터에 이미 예약된 회차가 있다(동시 실행).
+  //   발송·과금 중복보다 이번 회차 제안 하나를 포기하는 쪽이 싸다(AI 비용 1회 손실 < 2회 발송·2회 과금).
+  //   run-now는 라우트가 "0건 매칭"과 구분해 안내한다(routes/ai.ts — 기준선 안내보다 먼저 판정).
+  if (proposalRes.rows.length === 0) {
+    console.log(`[ContinuousOperator] ${operator.name} 동시 생성 감지 — 이미 예약된 회차가 있어 신규 제안 미생성`);
+    await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0);
+    return null;
+  }
 
   // ★ 2026-06-30: operator당 미처리 추천 1건 원칙 — 방금 만든 것 외 직전 미처리(pending/admin_review)는
   //   만료시켜 "오늘의 추천" 중복 누적을 차단(테스트계정2 = 한 operator에 제안 다수 쌓임 정정).
@@ -1292,11 +1315,32 @@ export async function approveProposal(
   const nowApprove = new Date();
   if (!isSendableHourKst(nowApprove, SEND_HOURS.start, SEND_HOURS.end)) {
     const sendAt = shiftToSendableHour(nowApprove);
-    await query(
-      `UPDATE operator_proposals SET status = 'scheduled', scheduled_send_at = $2
-       WHERE id = $1::uuid AND status = 'sending'`,
-      [proposalId, sendAt],
-    );
+    try {
+      await query(
+        `UPDATE operator_proposals SET status = 'scheduled', scheduled_send_at = $2
+         WHERE id = $1::uuid AND status = 'sending'`,
+        [proposalId, sendAt],
+      );
+    } catch (e: any) {
+      // ★ 2026-08-05: "리마인드 아닌 scheduled는 오퍼레이터당 1건" 부분 UNIQUE 인덱스 위반(23505).
+      //   INSERT만 막으면 이 경로가 남는다 — 야간 승인은 sending을 scheduled로 되돌리므로 같은 계약에 걸린다.
+      //   이미 예약된 회차가 있는데 두 번째를 만들면 같은 회차에 두 번 나간다 → 승인을 거절한다.
+      //   claim으로 이미 'sending'이 됐으므로 담당자 검토로 되돌린다(발송은 아직 없었다).
+      const dup = e?.code === '23505' || String(e?.message || '').includes('ux_operator_proposals_one_scheduled');
+      if (!dup) throw e;
+      await query(
+        `UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL,
+           auto_execute_reason = '이미 예약된 발송이 있어 승인하지 않았습니다 — 기존 예약 처리 후 다시 승인해 주세요'
+         WHERE id = $1::uuid AND status = 'sending'`,
+        [proposalId],
+      ).catch((err: any) => console.warn('[ContinuousOperator] 승인 되돌리기 경고:', err?.message));
+      // 위에서 올린 승인 카운트를 되돌린다 — 승인되지 않았으므로 통계가 그대로면 거짓이다.
+      await query(
+        `UPDATE continuous_operators SET total_approved = GREATEST(total_approved - 1, 0) WHERE id = $1::uuid`,
+        [claim.rows[0].operator_id],
+      ).catch(() => {});
+      return { ok: false, reason: '이미 이번 회차 발송이 예약되어 있습니다. 기존 예약이 끝나거나 취소된 뒤 승인해 주세요.' };
+    }
     const label = sendAt.toLocaleString('ko-KR', {
       timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
     });
@@ -1413,6 +1457,9 @@ export async function runAutoSendPass(limit: number = 20): Promise<{ sent: numbe
   // ★ 2026-08-04(R4): 변화 축 회차 마감 대조 — 캠페인 종결을 확인한 뒤에만 스냅샷을 전진시킨다.
   //   크래시로 마커만 남아도 이 패스가 매번 다시 본다(마커가 durable이라 수렴).
   await settlePendingCycleSnapshots().catch((e: any) => console.error('[ContinuousOperator Settle] 마감 대조 예외:', e?.message || e));
+  // ★ 2026-08-05: 정산 대조 — 발송은 나갔는데 차감이 확정되지 않은 제안을 상태와 무관하게 다시 본다.
+  //   마커가 durable이라 크래시로도 잃지 않는다(회차 스냅샷 대조와 같은 형태).
+  await settlePendingCharges().catch((e: any) => console.error('[ContinuousOperator Charge] 정산 대조 예외:', e?.message || e));
   // ★ 2026-08-04 2R(#3·c): 크래시로 '스팸 검증 중'에 잔존한 리마인드 대조 — 자동 발송으로는 못 넘어가지만
   //   (admin_review = due 밖) 사유가 영원히 "검증 중"이면 화면이 거짓말이다. 10분 넘은 행을 확인 요청으로 전환+통지.
   await sweepStaleSpamPendingReminders().catch((e: any) => console.error('[ContinuousOperator Sequence] 검증 잔존 대조 예외:', e?.message || e));
@@ -1529,6 +1576,91 @@ async function settlePendingCycleSnapshots(): Promise<void> {
   }
 }
 
+/**
+ * ★ 2026-08-05 — 정산 대기 마커 해제. **차감이 확정된 순간에만** 부른다(해제 지점은 이 함수 하나뿐).
+ * 회차 스냅샷 마커 해제와 같은 idiom(#- 경로 삭제).
+ */
+async function clearChargePendingMarker(proposalId: string): Promise<void> {
+  await query(
+    `UPDATE operator_proposals
+        SET proposal_json = (proposal_json #- '{meta,chargePending}') #- '{meta,chargeAttemptAt}'
+      WHERE id = $1::uuid`,
+    [proposalId],
+  );
+}
+
+/**
+ * ★ 2026-08-05(Codex 2R high) — 정산 시도 시각 기록. **시도 직전에** 남긴다.
+ * 대조 패스가 정렬 없이 LIMIT만 걸면, 영구 실패한 행 20건이 앞자리를 계속 차지해 뒤에 쌓인
+ * 미정산 발송은 한 번도 시도되지 않는다(기아). 시도한 행을 뒤로 밀어 차례가 돌게 한다.
+ * 실패·크래시로 갱신이 끊겨도 마커 자체는 남아 의무가 사라지지 않는다.
+ * ⛔ UTC로 고정해 저장한다 — 세션 시간대에 따라 오프셋이 달라지면 문자열 정렬이 시간순과 어긋난다.
+ */
+async function stampChargeAttempt(proposalId: string): Promise<void> {
+  await query(
+    `UPDATE operator_proposals
+        SET proposal_json = jsonb_set(
+              jsonb_set(COALESCE(proposal_json, '{}'::jsonb), '{meta}', COALESCE(proposal_json->'meta', '{}'::jsonb)),
+              '{meta,chargeAttemptAt}', to_jsonb(NOW() AT TIME ZONE 'UTC'))
+      WHERE id = $1::uuid`,
+    [proposalId],
+  );
+}
+
+/**
+ * ★ 2026-08-05 — 정산 대조 패스(Codex 1R high). 발송은 나갔는데 차감이 확정되지 않은 제안을
+ * **상태와 무관하게** 다시 본다. 종전 구조는 정산을 발송 상태에 얹어, 복구 패스가 상태를 먼저
+ * 바꾸는 순간(sending → sent) 회수 근거가 사라졌다 — 그 사이 실패·중단이면 무과금이 영구 확정됐다.
+ *
+ * 마커 = proposal_json.meta.chargePending (발송 커밋 마커 campaign_id와 같은 UPDATE에서 심는다).
+ * 같은 멱등키로 재시도하므로 이미 빠진 건은 duplicate로 즉시 확정되고 **중복 차감은 0**이다.
+ * 확정되면 마커를 지우고, 확정되지 않으면 마커가 남아 다음 패스가 또 본다(수렴 — 조용히 잃지 않는다).
+ */
+async function settlePendingCharges(): Promise<void> {
+  let rows: any[] = [];
+  try {
+    const r = await query(
+      `SELECT p.id, p.company_id, o.created_by
+         FROM operator_proposals p
+         LEFT JOIN continuous_operators o ON o.id = p.operator_id
+        WHERE p.campaign_id IS NOT NULL
+          AND COALESCE(p.proposal_json->'meta'->>'chargePending', 'false') = 'true'
+        -- ⛔ 정렬 없이 LIMIT만 걸면 영구 실패 20건이 앞자리를 계속 차지해 뒤에 쌓인 미정산 발송이
+        --   한 번도 시도되지 않는다(Codex 2R high · 기아). 미시도 우선 → 오래 안 해본 순.
+        --   UTC ISO 고정 문자열이라 사전순 = 시간순이고, 캐스팅이 없어 형식 오류로 패스가 죽지 않는다.
+        ORDER BY p.proposal_json->'meta'->>'chargeAttemptAt' ASC NULLS FIRST
+        LIMIT 20`,
+    );
+    rows = r.rows;
+  } catch (e: any) {
+    console.warn('[ContinuousOperator Charge] 정산 대기 조회 경고:', e?.message);
+    return;
+  }
+  for (const row of rows) {
+    // 시도 시각을 **먼저** 남긴다 — 실패하든 이 자리에서 프로세스가 죽든 그 행은 뒤로 밀리고
+    //   다음 행이 차례를 얻는다. 마커 자체는 그대로라 의무는 사라지지 않는다.
+    await stampChargeAttempt(row.id).catch((e: any) =>
+      console.warn(`[ContinuousOperator Charge] ${row.id} 시도 시각 기록 경고:`, e?.message));
+    try {
+      const settled = await deductCreditSafe({
+        companyId: row.company_id,
+        cost: getCreditCost('continuous-operator-send'),
+        source: 'continuous-operator-send',
+        createdBy: row.created_by || row.company_id,
+        idempotencyKey: `continuous-operator-send:${row.id}`,
+      });
+      if (settled) {
+        await clearChargePendingMarker(row.id);
+        console.log(`[ContinuousOperator Charge] ${row.id} 정산 확정 — 마커 해제`);
+      } else {
+        console.warn(`[ContinuousOperator Charge] ${row.id} 정산 미확정 — 마커 유지·다음 패스 재시도([CREDIT] 로그 확인)`);
+      }
+    } catch (e: any) {
+      console.warn(`[ContinuousOperator Charge] ${row.id} 정산 경고(다음 패스 재시도):`, e?.message);
+    }
+  }
+}
+
 /** 'sending'에 정지된 제안 복구(decideStuckSendingRecovery 순수 정책). campaign 'sending' 자동정리 패턴 미러. */
 async function reconcileStuckSending(staleMinutes: number = 30): Promise<void> {
   const stuck = await query(
@@ -1548,22 +1680,9 @@ async function reconcileStuckSending(staleMinutes: number = 30): Promise<void> {
          WHERE id = $1::uuid AND status = 'sending' AND campaign_id IS NOT NULL RETURNING id`,
         [row.id],
       ).catch(() => ({ rows: [] as any[] }));
-      if (upd.rows.length > 0) {
-        // 발송 직후(campaign_id 마커)~차감 사이 중단으로 차감이 빠졌을 수 있어 1회 보강.
-        // 멱등키 proposalId = dispatchProposalSend의 정상 차감과 동일 키 → 정상분은 skip(중복 0).
-        const opRes = await query(
-          `SELECT created_by FROM continuous_operators WHERE id = $1::uuid`,
-          [row.operator_id],
-        ).catch(() => ({ rows: [] as any[] }));
-        const createdBy = opRes.rows[0]?.created_by || row.company_id;
-        await deductCreditSafe({
-          companyId: row.company_id,
-          cost: getCreditCost('continuous-operator-send'),
-          source: 'continuous-operator-send',
-          createdBy,
-          idempotencyKey: `continuous-operator-send:${row.id}`,
-        }).catch((e: any) => console.warn('[ContinuousOperator AutoSend] 정지복구 크레딧 보강 경고:', e?.message));
-      }
+      // ★ 2026-08-05: 여기서 크레딧을 보강하지 않는다. 상태를 먼저 바꾼 뒤 차감을 시도하는 구조가
+      //   바로 회수 근거를 지우는 원인이었다(Codex 1R high). 정산은 chargePending 마커와
+      //   settlePendingCharges가 상태와 무관하게 소유한다 — 이 함수는 상태 마감만 한다.
     } else if (action === 'demote_admin_review') {
       // 커밋 전 중단(마커 없음) + 노후 → 담당자 검토(절대 자동 재발송 X).
       const upd = await query(
@@ -2090,17 +2209,23 @@ async function dispatchProposalSend(
   //   meta가 없으면 조용히 무시되므로 meta부터 세운다(read-modify-write 아님 — 단문 원자).
   // ⛔ 리마인드는 마커를 심지 않는다 — 리마인드는 같은 코호트 재접촉이지 새 회차가 아니다.
   //   전진시키면 1차와 리마인드 사이에 생긴 새 변화가 안 알려진 채 소진된다(다음 회차에서 사라진다).
+  // ★ 2026-08-05: **정산 대기 마커도 같은 UPDATE에서** 심는다. 발송은 나갔는데 차감이 확정되지 않는 경우가
+  //   있고(잔액 부족·DB 장애), 그것을 발송 상태(sent/sending)로 표현하면 상태와 정산이 한 축에 묶여
+  //   "복구 패스가 상태를 먼저 바꾸는 순간 회수 근거가 사라지는" 구조가 된다(Codex 1R high).
+  //   회차 스냅샷과 같은 형태로 정산 축을 분리한다 — 상태는 정상 마감하고, 정산은 이 마커가 들고 있다가
+  //   settlePendingCharges가 같은 멱등키로 확정될 때 푼다(중복 차감은 멱등키가 막는다).
   const needsSnapshotSettle = segmentNeedsCycleBaseline(pj.target?.segmentKey || null) && pj.meta?.is_reminder !== true;
   // ⛔ 2026-08-04 2R(F2): 이 UPDATE 실패를 조용히 넘기면 변화 축은 settle 근거가 없어져 다음 회차에
   //   같은 사람들에게 다시 나간다. 발송은 이미 커밋됐으니 되돌릴 수 없다 — 1회 재시도하고, 그래도
   //   실패면 담당자에게 중복 가능성을 알린다(두 시스템 사이라 완전 원자화는 불가, 최소한 조용하지 않게).
+  const metaBase = `jsonb_set(COALESCE(proposal_json, '{}'::jsonb), '{meta}', COALESCE(proposal_json->'meta', '{}'::jsonb))`;
+  const withCharge = `jsonb_set(${metaBase}, '{meta,chargePending}', 'true'::jsonb)`;
   const markerSql = needsSnapshotSettle
     ? `UPDATE operator_proposals SET campaign_id = $2::uuid,
-         proposal_json = jsonb_set(
-           jsonb_set(COALESCE(proposal_json, '{}'::jsonb), '{meta}', COALESCE(proposal_json->'meta', '{}'::jsonb)),
-           '{meta,cycleSnapshotPending}', 'true'::jsonb)
+         proposal_json = jsonb_set(${withCharge}, '{meta,cycleSnapshotPending}', 'true'::jsonb)
        WHERE id = $1::uuid`
-    : `UPDATE operator_proposals SET campaign_id = $2::uuid WHERE id = $1::uuid`;
+    : `UPDATE operator_proposals SET campaign_id = $2::uuid, proposal_json = ${withCharge}
+       WHERE id = $1::uuid`;
   let markerOk = false;
   for (let attempt = 0; attempt < 2 && !markerOk; attempt++) {
     try {
@@ -2110,10 +2235,11 @@ async function dispatchProposalSend(
       console.warn(`[ContinuousOperator AutoSend] campaign_id 기록 ${attempt + 1}차 실패:`, e?.message);
     }
   }
-  if (!markerOk && needsSnapshotSettle) {
+  if (!markerOk) {
+    // 마커가 못 심겼다 = 회차 마감·정산 대조의 근거가 없다. 발송은 이미 커밋돼 되돌릴 수 없으니 알린다.
     await notify(
       '[AI 자동마케팅] 확인 필요',
-      `'${op.name || ''}' 발송은 나갔지만 회차 마감 기록이 실패했습니다. 다음 회차에 같은 분들이 다시 잡힐 수 있으니 담당자 확인이 필요합니다.`,
+      `'${op.name || ''}' 발송은 나갔지만 마감 기록이 실패했습니다. ${needsSnapshotSettle ? '다음 회차에 같은 분들이 다시 잡힐 수 있고, ' : ''}크레딧 정산이 자동으로 확인되지 않을 수 있어 담당자 확인이 필요합니다.`,
     );
   }
 
@@ -2130,26 +2256,26 @@ async function dispatchProposalSend(
   });
 
   // 기능 크레딧 1회 차감 (멱등키 proposalId) — 발송 성공 시점에만.
-  //   ★ 'sent' 전환을 차감 성공에 종속: 차감 실패면 status='sending' 유지(campaign_id 마커 있음) →
-  //     다음 워커 패스 reconcileStuckSending이 mark_sent + 동일 멱등키로 재차감(유실 0). 발송 자체는 이미 커밋됨.
-  let creditDeducted = true;
-  try {
-    await deductCreditSafe({
-      companyId, cost: getCreditCost('continuous-operator-send'), source: 'continuous-operator-send',
-      createdBy: userId, idempotencyKey: `continuous-operator-send:${proposalId}`,
-    });
-  } catch (e: any) {
-    creditDeducted = false;
-    console.warn('[ContinuousOperator AutoSend] 크레딧 차감 실패 — sending 유지(정지복구가 재차감):', e?.message);
+  //   ⛔ 2026-08-05: 종전엔 이 자리에 try/catch가 있었는데 **발화할 수 없는 분기**였다.
+  //     deductCreditSafe는 잔액 부족(SKIP)·영구 실패(MISS)에도 throw하지 않고 정상 반환하므로
+  //     결과 판정은 반환값으로만 한다 — true = 차감됨·이미 차감됨·차감 대상 아님 / false = 돈이 안 빠졌다.
+  //   ★ 미확정이어도 **상태는 정상 마감한다.** 정산은 위 chargePending 마커가 들고 있고
+  //     settlePendingCharges가 확정될 때까지 같은 멱등키로 재시도한다(상태 축과 정산 축 분리).
+  const creditSettled = await deductCreditSafe({
+    companyId, cost: getCreditCost('continuous-operator-send'), source: 'continuous-operator-send',
+    createdBy: userId, idempotencyKey: `continuous-operator-send:${proposalId}`,
+  });
+  if (creditSettled) {
+    await clearChargePendingMarker(proposalId);
+  } else {
+    console.warn(`[ContinuousOperator AutoSend] ${proposalId} 크레딧 차감 미확정 — chargePending 유지(정산 대조 패스가 재시도 · [CREDIT] 로그 확인)`);
   }
 
-  // 완료 표시(차감 성공 시에만 'sent' 마감) + 통지 — 발송은 커밋됐으므로 통지는 진행.
-  if (creditDeducted) {
-    await query(
-      `UPDATE operator_proposals SET status = 'sent', auto_sent_at = NOW() WHERE id = $1::uuid AND status = 'sending'`,
-      [proposalId],
-    );
-  }
+  // 완료 표시 + 통지 — 발송은 커밋됐으므로 상태는 마감한다(정산 여부는 마커가 소유).
+  await query(
+    `UPDATE operator_proposals SET status = 'sent', auto_sent_at = NOW() WHERE id = $1::uuid AND status = 'sending'`,
+    [proposalId],
+  );
   await notify('[AI 자동마케팅] 발송 완료', `'${op.name || ''}' ${recipientTotal}명에게 발송을 완료했습니다.`);
 
   // ★ 2026-07-12 C-2: 예산 사용 임계 알림 — 이번 발송으로 임계 비율 선을 처음 넘는 순간 1회(교차 판정 = 멱등).

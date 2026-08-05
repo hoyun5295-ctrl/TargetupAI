@@ -347,6 +347,10 @@ export default function AiOperatorPage() {
         .then((r) => r.json())
         .then((d) => {
           if (!d || d.success === false) throw new Error(d?.error || '추출 대상 조회에 실패했습니다.');
+          // ★ 2026-08-05: 매장 미배정이면 서버가 사유(blockedReason)와 함께 빈 목록을 준다. 종전엔 그 사유를
+          //   버리고 빈 배열만 넘겨 공용 모달이 "조건에 맞는 대상이 0명입니다 · 조건을 넓히거나"를 그렸다 —
+          //   원인이 조건이 아닌데 조건 완화를 유도한다. 공용 모달은 손대지 않고 호출부에서 사유를 그대로 올린다.
+          if (typeof d.blockedReason === 'string' && d.blockedReason.trim()) throw new Error(d.blockedReason.trim());
           setTargetListCols(Array.isArray(d.conditionColumns) ? d.conditionColumns : []);
           return (d.recipients || []) as TargetRecipient[];
         })

@@ -2701,6 +2701,25 @@ router.post('/operator/continuous/:id/run-now', async (req: Request, res: Respon
     }
     const proposal = await generateProposalForOperator(req.params.id);
     if (!proposal) {
+      // ★ 2026-08-05(Codex 1R): 예약 확인이 **기준선 안내보다 먼저**다. 변화 축은 첫 회차 뒤 기준선이 계속
+      //   존재하므로, 순서가 반대면 이미 예약된 회차가 있어도 "비교 기준을 잡았습니다"가 나가 담당자가
+      //   실제 예약을 못 본다. 생성 skip(shouldSkipProposalGeneration)과 동시 실행 차단이 이 안내로 모인다.
+      //   ⛔ 조용한 0건 금지(자동마케팅 §2 불변 원칙 3) — "0건 매칭"과 "이미 예약됨"은 다른 사실이다.
+      try {
+        const openRes = await query(
+          `SELECT 1 FROM operator_proposals
+            WHERE operator_id = $1::uuid AND company_id = $2::uuid AND status = 'scheduled'
+              AND COALESCE(proposal_json->'meta'->>'is_reminder', 'false') <> 'true'
+            LIMIT 1`,
+          [req.params.id, companyId],
+        );
+        if (openRes.rows.length > 0) {
+          return res.json({
+            success: true, proposal: null,
+            message: '이미 이번 회차 발송이 예약되어 있습니다. 예약을 취소하거나 발송이 끝난 뒤 다시 실행해 주세요.',
+          });
+        }
+      } catch { /* 안내 실패 = 아래 판정으로 */ }
       // ★ 2026-08-04: 변화 축 첫 회차는 실패가 아니라 기준을 잡은 정상 동작 — 일반 0건과 섞으면 고장으로 읽힌다.
       try {
         // 2R(#12): 회사 결합 — 소유 검증은 위에서 끝났지만 조회 축은 항상 테넌트 경계를 함께 진다.
