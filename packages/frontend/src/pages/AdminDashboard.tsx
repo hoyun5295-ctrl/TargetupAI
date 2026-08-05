@@ -1369,6 +1369,11 @@ const [confirmLoading, setConfirmLoading] = useState(false);
 const [confirmStatusFilter, setConfirmStatusFilter] = useState('');
 const [confirmTruncated, setConfirmTruncated] = useState(false);
 const [manualDateDraft, setManualDateDraft] = useState<Record<string, string>>({});
+// ★ 2026-08-05 (서수란 접수) 업체 확인을 관리자가 대신 기록 — 컨펌 링크를 안 누르고 메일·전화로
+//   발행일자를 통보하는 회사(시세이도류)가 있다. 이 창구가 없으면 컨펌 관문이 그 회사를 영영 막는다.
+const [adminConfirmTarget, setAdminConfirmTarget] = useState<any | null>(null);
+const [adminConfirmNote, setAdminConfirmNote] = useState('');
+const [adminConfirmBusy, setAdminConfirmBusy] = useState(false);
 // ★ 2026-07-30 세금계산서 장부(taxbill_issues — 원본+수정 축) + 수정발행 모달
 const [taxbillRows, setTaxbillRows] = useState<any[]>([]);
 const [taxbillLoading, setTaxbillLoading] = useState(false);
@@ -1383,6 +1388,11 @@ const [modifyDeltaTax, setModifyDeltaTax] = useState('');
 const [modifyCorrectedSupply, setModifyCorrectedSupply] = useState('');
 const [modifyCorrectedTax, setModifyCorrectedTax] = useState('');
 const [modifySubmitting, setModifySubmitting] = useState(false);
+// ★ 2026-08-05 (서수란 접수) 발행 완료분 **메일 재발송** — 문서를 만들지 않고 같은 문서번호로 다시 보낸다.
+//   미수신 대응을 수정발행으로 하면 국세청에 문서가 한 장 더 생긴다. 그 오인을 막으려고 축을 갈랐다.
+const [taxbillResendTarget, setTaxbillResendTarget] = useState<any | null>(null);
+const [taxbillResendEmail, setTaxbillResendEmail] = useState('');
+const [taxbillResendBusy, setTaxbillResendBusy] = useState(false);
 // ★ 2026-07-29 수동 정산완료 — 우리 정산으로 발행할 수 없어 사람이 따로 처리한 회사의 그 달 기록.
 //   담긴 좌/우 목록의 다중 선택(빼기)도 여기에 둔다 — 91개사를 한 줄씩 빼는 것은 쓸 수 없다.
 const [bulkManualRows, setBulkManualRows] = useState<any[]>([]);
@@ -1665,6 +1675,32 @@ const handleManualIssueDate = async (confirmationId: string) => {
   }
 };
 
+// 업체 확인 대리 기록 — 성공하면 컨펌 시각이 남아 작성일자 지정이 열린다.
+const handleAdminConfirm = async () => {
+  if (!adminConfirmTarget) return;
+  const note = adminConfirmNote.trim();
+  if (!note) { setBillingToast({ msg: '어떻게 확인받았는지 적어주세요', type: 'error' }); return; }
+  setAdminConfirmBusy(true);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/admin/billing/confirmations/${adminConfirmTarget.id}/admin-confirm`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ note }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || '업체 확인 기록 실패');
+    setBillingToast({ msg: data?.message || '업체 확인을 기록했습니다', type: 'success' });
+    setAdminConfirmTarget(null);
+    setAdminConfirmNote('');
+    loadConfirmBoard();
+  } catch (e: any) {
+    setBillingToast({ msg: e?.message || '업체 확인 기록 실패', type: 'error' });
+  } finally {
+    setAdminConfirmBusy(false);
+  }
+};
+
 const CONFIRM_STATUS_LABELS: Record<string, string> = {
   pending: '컨펌 대기', confirmed: '컨펌됨', due: '기한 경과', objected: '이의신청',
   manual_wait: '날짜 지정 대기', ready: '계산서 발급 대기', issued: '발급 완료',
@@ -1768,6 +1804,30 @@ const handleTaxbillRetry = async (issueId: string) => {
   }
 };
 
+// ★ 2026-08-05 (서수란 접수) 발행 완료분 메일 재발송 — 발행이 아니라 **메일만** 다시 나간다.
+//   상태를 바꾸지 않으므로 목록을 다시 부르지 않는다(바뀔 값이 없다).
+const handleTaxbillResend = async () => {
+  if (!taxbillResendTarget) return;
+  setTaxbillResendBusy(true);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/admin/billing/taxbill-issues/${taxbillResendTarget.id}/resend-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ email: taxbillResendEmail.trim() || undefined }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || '계산서 메일 재발송 실패');
+    setBillingToast({ msg: data?.message || '계산서 메일을 다시 보냈습니다', type: 'success' });
+    setTaxbillResendTarget(null);
+    setTaxbillResendEmail('');
+  } catch (e: any) {
+    setBillingToast({ msg: e?.message || '계산서 메일 재발송 실패', type: 'error' });
+  } finally {
+    setTaxbillResendBusy(false);
+  }
+};
+
 // ★ 2026-08-04 발행 확인 모달을 열면서 미리보기를 함께 부른다.
 //   금액과 "발행이 막힐 이유"(billing_guard)를 발행 **전에** 같은 화면에서 본다 —
 //   서버는 미리보기와 발행을 같은 함수로 판정하므로 여기 통과하면 발행도 통과한다.
@@ -1820,6 +1880,87 @@ const openBillingDetail = async (id: string) => {
   catch (e) { setBillingToast({ msg: '상세 조회 실패', type: 'error' }); setShowBillingDetail(false); }
   finally { setDetailLoading(false); }
 };
+// ★ 2026-08-05 (서수란 접수) 정산 목록 선택 축 — "한 건씩 확정하고 메일도 한 건씩 눌러야 한다"
+const [billingSel, setBillingSel] = useState<string[]>([]);
+const [billingBulk, setBillingBulk] = useState<{ label: string; done: number; total: number } | null>(null);
+// 목록이 바뀌면(연도·미발송 필터·재조회) 화면에 없는 선택은 버린다 — 안 보이는 건이 선택에 남아 있으면
+// 버튼의 건수와 실제 실행 대상이 갈라지고, 담당자는 그 차이를 볼 방법이 없다.
+useEffect(() => {
+  setBillingSel((prev) => {
+    const next = prev.filter((id) => billings.some((b: any) => b.id === id));
+    return next.length === prev.length ? prev : next;
+  });
+}, [billings]);
+
+/**
+ * 선택 건 일괄 실행. **새 일괄 엔드포인트를 만들지 않는다** — 확정은 `PUT /:id/status`,
+ * 발송은 컨펌 경로(`bulk/retry-confirmations`)를 건별로 그대로 부른다. 서버에 벌크 문을 하나 더 두면
+ * 발행 코어와 중복 발송 확인(409)을 우회하는 두 번째 길이 생기고, 그 둘은 반드시 갈라진다.
+ *
+ * 순차 실행이라 앞 건 실패가 뒤 건을 막지 않는다. 결과는 건별로 모아 그대로 보여준다(조용한 누락 금지).
+ * **이미 발송된 장은 일괄 발송에 넣지 않는다** — 재발송은 "언제·누구에게 나갔는지"를 확인받는 개별 축이다.
+ */
+const runBillingBulk = async (kind: 'confirm' | 'send') => {
+  const rows = billings.filter((b: any) => billingSel.includes(b.id));
+  const eligible = kind === 'confirm'
+    ? rows.filter((b: any) => b.status === 'draft')
+    : rows.filter((b: any) => !b.emailed_at);
+  const skipped = rows.length - eligible.length;
+  if (eligible.length === 0) {
+    showAlert('확인', kind === 'confirm'
+      ? '선택한 건 중 확정할 수 있는 초안이 없습니다.'
+      : '선택한 건 중 아직 발송되지 않은 청구서가 없습니다. 이미 나간 건은 행의 [재발송]으로 하나씩 확인 후 보냅니다.', 'info');
+    return;
+  }
+  const label = kind === 'confirm' ? '청구 확정' : '발송';
+  setBillingBulk({ label, done: 0, total: eligible.length });
+  const ok: string[] = [];
+  const fail: string[] = [];
+  const partial: string[] = [];
+  const token = localStorage.getItem('token');
+  for (const b of eligible) {
+    try {
+      if (kind === 'confirm') {
+        await billingApi.updateBillingStatus(b.id, 'confirmed');
+        ok.push(b.company_name);
+      } else {
+        const res = await fetch('/api/admin/billing/bulk/retry-confirmations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ billing_id: b.id }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || '발송 실패');
+        // ⚠ 이 엔드포인트는 **한 통도 못 나가도 success: true**를 돌려준다(금액 불일치·PDF 장애·이메일 미등록).
+        //   HTTP 상태로만 판정하면 막힌 장이 "발송 완료"로 세어져 그 회사는 아무도 다시 보지 않는다.
+        //   실제로 나간 통 수(summary.sent)로 가른다.
+        const s: any = data?.summary || {};
+        const sentCount = Number(s.sent) || 0;
+        const blocked = Number(s.mismatchBlocked || 0) + Number(s.renderFailed || 0)
+          + Number(s.skippedNoEmail || 0) + Number(s.mailFailed || 0);
+        if (Number(data?.targeted) === 0) fail.push(`${b.company_name} — 보낼 미발송 장이 없습니다`);
+        else if (sentCount === 0) fail.push(`${b.company_name} — ${data?.message || '한 통도 나가지 않았습니다'}`);
+        else {
+          ok.push(b.company_name);
+          if (blocked > 0) partial.push(`${b.company_name} — ${data?.message || `일부 ${blocked}장이 나가지 않았습니다`}`);
+        }
+      }
+    } catch (e: any) {
+      fail.push(`${b.company_name} — ${e?.response?.data?.error || e?.message || '실패'}`);
+    }
+    setBillingBulk((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
+  }
+  setBillingBulk(null);
+  setBillingSel([]);
+  await loadBillings();
+  const lines = [`${label} 성공 ${ok.length}건`];
+  if (skipped > 0) lines.push(`대상 아님 ${skipped}건(선택에서 제외)`);
+  if (partial.length > 0) lines.push('', '일부만 나감:', ...partial);
+  if (fail.length > 0) lines.push('', '실패:', ...fail);
+  const bad = fail.length + partial.length;
+  showAlert(bad > 0 ? '확인 필요' : '완료', lines.join('\n'), bad > 0 ? 'error' : 'success');
+};
+
 const handleBillingStatusChange = async (id: string, newStatus: string) => {
   try {
     await billingApi.updateBillingStatus(id, newStatus);
@@ -9644,9 +9785,12 @@ const handleApproveRequest = async (id: string) => {
                     setBulkPickedSel([]); setBulkManualRows([]); setBulkManualOpen(false); setBulkManualAsk(null);
                   }}
                   className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
-                <button onClick={loadBulkList} disabled={bulkListLoading}
-                  className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 disabled:opacity-50">
-                  {bulkListLoading ? '조회 중...' : '미발급 대상 불러오기'}
+                {/* ★ 2026-08-05 (서수란 접수) 재클릭이 닫히지 않던 것 — 옆 [세금계산서·컨펌 현황]만 토글이었다.
+                    닫을 때는 목록만 감춘다(담아 둔 회사는 그대로 두고, 다시 열 때 `refreshBulkList`가 살린다).
+                    `loadBulkList`는 keepPicked=false라 재클릭이 담긴 목록까지 지웠다 — 그래서 여기서 쓰지 않는다. */}
+                <button onClick={() => { if (bulkList !== null) { setBulkList(null); return; } refreshBulkList(); }} disabled={bulkListLoading}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 ${bulkList !== null ? 'bg-slate-700 text-white hover:bg-slate-800' : 'bg-violet-600 text-white hover:bg-violet-700'}`}>
+                  {bulkListLoading ? '조회 중...' : bulkList !== null ? '미발급 대상 닫기' : '미발급 대상 불러오기'}
                 </button>
                 <button onClick={() => { const next = !confirmBoardOpen; setConfirmBoardOpen(next); if (next) loadConfirmBoard(); }}
                   className={`px-4 py-2 rounded-lg text-sm font-medium border ${confirmBoardOpen ? 'bg-slate-700 text-white border-slate-700' : 'text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
@@ -9973,17 +10117,35 @@ const handleApproveRequest = async (id: string) => {
                         </div>
                         <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-400">
                           <span>발송 {r.sent_at ? new Date(r.sent_at).toLocaleString('ko-KR') : '-'}</span>
-                          {r.confirmed_at && <span className="text-sky-600">컨펌 {new Date(r.confirmed_at).toLocaleString('ko-KR')}</span>}
+                          {r.confirmed_at && (
+                            <span className="text-sky-600" title={r.confirm_note || undefined}>
+                              컨펌 {new Date(r.confirmed_at).toLocaleString('ko-KR')}
+                              {r.confirmed_by_admin && ` · 업체 확인 기록${r.confirm_note ? ` (${r.confirm_note})` : ''}`}
+                            </span>
+                          )}
                           {r.taxbill_issue_date && <span>작성일자 {String(r.taxbill_issue_date).slice(0, 10)}</span>}
                           {r.superseded_at && <span className="text-gray-400">재발급으로 무효</span>}
+                          {/* ★ 2026-08-05 (서수란 접수) 작성일자 지정은 **컨펌 뒤에만** 연다.
+                              지정하는 순간 발급 큐(ready)로 올라가 워커가 국세청 문서를 만든다 —
+                              그전에는 컨펌 여부와 무관하게 열려 있어 업체 확인 없이 계산서가 나갔다.
+                              업체가 메일·전화로 확인해 준 경우는 [업체 확인 기록]으로 컨펌을 남긴 뒤 지정한다. */}
                           {r.taxbill_status === 'manual_wait' && !r.superseded_at && (
-                            <span className="flex items-center gap-1 ml-auto">
-                              <input type="date" value={manualDateDraft[r.id] || ''}
-                                onChange={(e) => setManualDateDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                                className="px-1.5 py-0.5 border rounded text-[10px]" />
-                              <button onClick={() => handleManualIssueDate(r.id)}
-                                className="px-2 py-0.5 bg-amber-500 text-white rounded text-[10px] font-semibold">작성일자 지정</button>
-                            </span>
+                            r.confirmed_at ? (
+                              <span className="flex items-center gap-1 ml-auto">
+                                <input type="date" value={manualDateDraft[r.id] || ''}
+                                  onChange={(e) => setManualDateDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                                  className="px-1.5 py-0.5 border rounded text-[10px]" />
+                                <button onClick={() => handleManualIssueDate(r.id)}
+                                  className="px-2 py-0.5 bg-amber-500 text-white rounded text-[10px] font-semibold">작성일자 지정</button>
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1 ml-auto">
+                                <span className="text-[10px] text-gray-400">컨펌 전 — 작성일자를 지정할 수 없습니다</span>
+                                <button onClick={() => { setAdminConfirmTarget(r); setAdminConfirmNote(''); }}
+                                  title="업체가 메일·전화로 확인해 준 경우, 근거를 적고 컨펌을 대신 기록합니다."
+                                  className="px-2 py-0.5 border border-sky-300 bg-sky-50 text-sky-700 rounded text-[10px] font-semibold hover:bg-sky-100">업체 확인 기록</button>
+                              </span>
+                            )
                           )}
                         </div>
                         {r.objection_text && (
@@ -10040,6 +10202,13 @@ const handleApproveRequest = async (id: string) => {
                                 <span className={`ml-auto shrink-0 font-semibold ${Number(t.total_amount) < 0 ? 'text-rose-600' : 'text-gray-700'}`}>
                                   {(Number(t.total_amount) || 0).toLocaleString()}원
                                 </span>
+                                {/* ★ 2026-08-05 (서수란 접수) 미수신 재발송 — 문서를 만들지 않고 같은 번호로 메일만 다시 보낸다.
+                                    이 버튼이 없어서 담당자가 쓸 수 있는 것이 [수정발행]뿐이었고, 그건 국세청에 한 장을 더 만든다. */}
+                                {t.status === 'issued' && (
+                                  <button onClick={() => { setTaxbillResendTarget(t); setTaxbillResendEmail(''); }}
+                                    title="발행된 계산서 메일을 다시 보냅니다. 계산서를 새로 만들지 않습니다."
+                                    className="shrink-0 px-2 py-0.5 border border-emerald-300 bg-emerald-50 text-emerald-700 rounded text-[10px] font-semibold hover:bg-emerald-100">메일 재발송</button>
+                                )}
                                 {t.status === 'issued' && t.nts_confirm_num && (
                                   <button onClick={() => openModifyModal(t)}
                                     className="shrink-0 px-2 py-0.5 bg-orange-500 text-white rounded text-[10px] font-semibold hover:bg-orange-600">수정발행</button>
@@ -10063,6 +10232,75 @@ const handleApproveRequest = async (id: string) => {
                       </>
                     )
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* ── 업체 확인 대리 기록 모달 (★2026-08-05 서수란 접수) ── */}
+            {adminConfirmTarget && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+                  <div className="p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-1">업체 확인 기록</h3>
+                    <p className="text-sm text-gray-600 mb-1">
+                      <strong>{adminConfirmTarget.company_name}</strong>
+                      {adminConfirmTarget.account_name && ` (${adminConfirmTarget.account_name})`}
+                      {' · '}{(Number(adminConfirmTarget.total_amount) || 0).toLocaleString()}원
+                    </p>
+                    <p className="text-xs text-gray-500 mb-4">{adminConfirmTarget.billing_start} ~ {adminConfirmTarget.billing_end}</p>
+
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">어떻게 확인받았습니까</label>
+                    <textarea value={adminConfirmNote} onChange={(e) => setAdminConfirmNote(e.target.value)} rows={3} maxLength={200}
+                      placeholder="예) 8/5 구매팀 김OO 과장 메일로 8월 3일자 발행 요청 (PO 첨부)"
+                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-sky-500 outline-none resize-none" />
+
+                    <div className="mt-3 px-3 py-2 bg-sky-50 rounded-lg text-[11px] text-sky-800">
+                      업체가 컨펌 링크를 누르지 않고 메일·전화로 확인해 준 경우에만 씁니다. 기록하면 컨펌 시각이 남아
+                      <strong> 작성일자를 지정할 수 있게</strong> 되고, 지정하는 순간 계산서가 발행됩니다. 적은 내용은 나중에 근거가 됩니다.
+                    </div>
+                  </div>
+                  <div className="flex border-t">
+                    <button onClick={() => { setAdminConfirmTarget(null); setAdminConfirmNote(''); }} disabled={adminConfirmBusy}
+                      className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
+                    <button onClick={handleAdminConfirm} disabled={adminConfirmBusy || !adminConfirmNote.trim()}
+                      className="flex-1 px-4 py-3 bg-sky-600 text-white font-semibold hover:bg-sky-700 transition-colors disabled:opacity-50">
+                      {adminConfirmBusy ? '기록 중...' : '확인 기록'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── 계산서 메일 재발송 모달 (★2026-08-05 서수란 접수) ── */}
+            {taxbillResendTarget && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+                  <div className="p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-1">계산서 메일 재발송</h3>
+                    <p className="text-sm text-gray-600 mb-1">
+                      <strong>{taxbillResendTarget.company_name}</strong> · 작성일자 {taxbillResendTarget.issue_date}
+                      {' · '}{(Number(taxbillResendTarget.total_amount) || 0).toLocaleString()}원
+                    </p>
+                    <p className="text-xs text-gray-500 mb-4">승인번호 {taxbillResendTarget.nts_confirm_num || '대기'}</p>
+
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">받는 사람 (선택)</label>
+                    <input type="email" value={taxbillResendEmail} onChange={(e) => setTaxbillResendEmail(e.target.value)}
+                      placeholder="비우면 등록된 계산서 수신자 전원에게 보냅니다"
+                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none" />
+
+                    <div className="mt-3 px-3 py-2 bg-emerald-50 rounded-lg text-[11px] text-emerald-800">
+                      이미 발행된 <strong>그 계산서를 그대로 다시 메일링</strong>합니다. 계산서를 새로 만들지 않으므로
+                      국세청에 문서가 한 장 더 나가지 않습니다. 금액이 틀린 건은 [수정발행]으로 정정합니다.
+                    </div>
+                  </div>
+                  <div className="flex border-t">
+                    <button onClick={() => { setTaxbillResendTarget(null); setTaxbillResendEmail(''); }} disabled={taxbillResendBusy}
+                      className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
+                    <button onClick={handleTaxbillResend} disabled={taxbillResendBusy}
+                      className="flex-1 px-4 py-3 bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50">
+                      {taxbillResendBusy ? '보내는 중...' : '메일 다시 보내기'}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -10154,6 +10392,28 @@ const handleApproveRequest = async (id: string) => {
                 정산 목록
               </h3>
               <div className="flex items-center gap-2">
+                {/* ★ 2026-08-05 (서수란 접수) 선택 건 일괄 처리 — 한 건씩 확정하고 메일도 한 건씩 누르던 것.
+                    진행 중에는 진행률만 남기고 버튼을 감춘다(중복 클릭 = 중복 발송). */}
+                {billingBulk ? (
+                  <span className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-indigo-200 bg-indigo-50 text-indigo-700">
+                    {billingBulk.label} {billingBulk.done}/{billingBulk.total} 진행 중...
+                  </span>
+                ) : billingSel.length > 0 && (
+                  <>
+                    <button type="button" onClick={() => runBillingBulk('confirm')}
+                      title="선택한 초안을 한 번에 청구 확정합니다. 수금 관리 표시이며 발송·세금계산서와 무관합니다."
+                      className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors">
+                      선택 청구 확정 ({billingSel.length})
+                    </button>
+                    <button type="button" onClick={() => runBillingBulk('send')}
+                      title="선택한 건 중 아직 발송되지 않은 청구서를 한 번에 보냅니다. 이미 나간 건은 행의 [재발송]으로 확인 후 보냅니다."
+                      className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors">
+                      선택 발송 ({billingSel.length})
+                    </button>
+                    <button type="button" onClick={() => setBillingSel([])}
+                      className="px-2 py-1.5 rounded-lg text-sm text-gray-500 hover:bg-gray-50 transition-colors">선택 해제</button>
+                  </>
+                )}
                 {/* ★ 2026-08-05 총 정산표 — 소유자(ceo) 전용. 전 고객사 총 청구금·수금·미납을 한 화면에.
                     권한이 없는 계정에는 버튼 자체가 안 그려지고, 서버가 403으로 최종 판정한다. */}
                 {canViewSettlementOverview && (
@@ -10184,6 +10444,16 @@ const handleApproveRequest = async (id: string) => {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
+                      {/* ★ 2026-08-05 (서수란 접수) 전체 선택 — 지금 화면에 보이는 목록 전부가 기준이다
+                          (연도·미발송 필터를 건 상태 그대로). 안 보이는 건까지 선택되면 그게 사고다. */}
+                      <th className="px-3 py-2.5 text-center w-10">
+                        <input type="checkbox" aria-label="전체 선택"
+                          checked={billings.length > 0 && billingSel.length === billings.length}
+                          onChange={() => setBillingSel(
+                            billingSel.length === billings.length ? [] : billings.map((b: any) => b.id),
+                          )}
+                          className="w-4 h-4 accent-indigo-600 cursor-pointer" />
+                      </th>
                       <th className="px-4 py-2.5 text-left text-gray-600 font-medium">고객사</th>
                       <th className="px-4 py-2.5 text-center text-gray-600 font-medium">구분</th>
                       <th className="px-4 py-2.5 text-center text-gray-600 font-medium">정산월</th>
@@ -10199,7 +10469,13 @@ const handleApproveRequest = async (id: string) => {
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {billings.map((b: any) => (
-                      <tr key={b.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => openBillingDetail(b.id)}>
+                      <tr key={b.id} className={`hover:bg-gray-50 cursor-pointer ${billingSel.includes(b.id) ? 'bg-indigo-50/60' : ''}`} onClick={() => openBillingDetail(b.id)}>
+                        <td className="px-3 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                          <input type="checkbox" aria-label={`${b.company_name} 선택`}
+                            checked={billingSel.includes(b.id)}
+                            onChange={() => setBillingSel((prev) => prev.includes(b.id) ? prev.filter((x) => x !== b.id) : [...prev, b.id])}
+                            className="w-4 h-4 accent-indigo-600 cursor-pointer" />
+                        </td>
                         <td className="px-4 py-2.5 font-medium text-gray-900">{b.company_name}</td>
                         {/* ★ 2026-07-26 '구분' — 계정별 발행은 한 회사·한 기간에 여러 행이 생긴다.
                             계정 이름만 보이면 공통 장(계정 없음)이 '전체'로 보여 합산 발행과 구분되지 않는다. */}
@@ -10247,6 +10523,19 @@ const handleApproveRequest = async (id: string) => {
                                 title="거래내역서 PDF와 컨펌 링크를 등록된 정산 수신자에게 보냅니다"
                                 className="px-2 py-1 text-xs bg-amber-100 text-amber-700 rounded hover:bg-amber-200 disabled:opacity-50 transition-colors">
                                 {retryingBillingId === b.id ? '발송 중...' : '발송'}
+                              </button>
+                            )}
+                            {/* ★ 2026-08-05 (서수란 접수) 발송이 끝난 장의 **재발송**. 0804에 옛 [발송]을 걷어내면서
+                                "이미 나간 청구서를 다시 보내는" 경로가 화면에서 통째로 사라졌다(업체 미수신 시 처리 방법 0).
+                                걷어낸 이유였던 결함은 그 뒤 서버에서 닫혔다 — `POST /:id/send-email`이 같은 트랜잭션에서
+                                컨펌 토큰을 확보하고(ensureConfirmationToken) 발송 후 승격까지 한다(markConfirmationDelivered).
+                                이제 이 경로로 보내도 컨펌·이의신청·세금계산서 흐름에서 빠지지 않는다.
+                                중복 발송은 서버가 409로 한 번 되돌려 "언제·누구에게 나갔는지"를 확인받는다. */}
+                            {b.emailed_at && (
+                              <button onClick={() => openEmailModal(b)}
+                                title="이미 발송된 거래내역서를 다시 보냅니다. 언제·누구에게 나갔는지 확인한 뒤에만 재발송됩니다."
+                                className="px-2 py-1 text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded hover:bg-amber-100 transition-colors">
+                                재발송
                               </button>
                             )}
                             <button onClick={() => downloadBillingPdf(b.id, `${b.company_name}_${b.billing_year}_${b.billing_month}`)}
@@ -10635,6 +10924,17 @@ const handleApproveRequest = async (id: string) => {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                           </svg>
                           {retryingBillingId === detailBilling.id ? '발송 중...' : '정산서 발송'}
+                        </button>
+                      )}
+                      {/* ★ 2026-08-05 (서수란 접수) 목록과 같은 재발송 경로 — 상세에만 없으면 같은 접수가 다시 온다. */}
+                      {detailBilling.emailed_at && (
+                        <button onClick={() => openEmailModal(detailBilling)}
+                          title="이미 발송된 거래내역서를 다시 보냅니다. 언제·누구에게 나갔는지 확인한 뒤에만 재발송됩니다."
+                          className="px-4 py-1.5 text-sm border border-amber-300 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition-colors flex items-center gap-1.5">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          거래내역서 재발송
                         </button>
                       )}
                       <button onClick={() => downloadBillingPdf(detailBilling.id, `${detailBilling.company_name}_${detailBilling.billing_year}_${detailBilling.billing_month}`)}

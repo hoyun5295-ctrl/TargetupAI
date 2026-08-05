@@ -877,7 +877,8 @@ ${EXTRA_ITEM_SOURCE_JOIN}
  *     넘으면 발행 거부(일반 발행 안내). 정액 5만을 끊으면 회사 손해가 나는 달을 막는다.
  *  2. **단가 미설정 = 판정 불가 = 거부** — "5만 미만"인지 계산할 수 없으면 발행하지 않는다.
  *  3. **미소비 추가 항목(080 등) 존재 = 거부** — 정액과 extra가 섞이면 이중청구/누락 어느 쪽이든 난다
- *     (벨루티류 080+최소과금 겹침의 규칙은 서 팀장 확인 후 별도). 요금제(plan_id) 회사도 부적격.
+ *     (벨루티류 080+최소과금 겹침의 규칙은 서 팀장 확인 후 별도).
+ *     **요금제 요금이 그 달에 청구되는 회사**도 부적격(★2026-08-05 축 정정 — `plan_id` 존재가 아니다).
  *
  * 발행 불변식은 issueBilling과 동일 — 회사 advisory lock·겹침 409·수동완료 409·단일 트랜잭션.
  */
@@ -904,7 +905,7 @@ export async function issueMinimumChargeBilling(input: {
   }
 
   const coRes = await pool.query(
-    `SELECT c.company_name, c.billing_type, s.min_charge_supply
+    `SELECT c.company_name, c.billing_type, c.created_at, s.min_charge_supply
        FROM companies c LEFT JOIN company_billing_settings s ON s.company_id = c.id
       WHERE c.id = $1`,
     [company_id],
@@ -920,9 +921,6 @@ export async function issueMinimumChargeBilling(input: {
   }
 
   const ledger = await loadBillingLedger(company_id);
-  if (ledger.companyPriceRow?.plan_id) {
-    throw new BillingIssueError(422, { error: `${co.company_name}은(는) 요금제(구독) 회사라 최소과금 정액 발행 대상이 아닙니다.`, code: 'MIN_CHARGE_PLAN_COMPANY' });
-  }
 
   const client = await pool.connect();
   try {
@@ -935,6 +933,56 @@ export async function issueMinimumChargeBilling(input: {
     assertNoBillingPeriodConflict(
       await readBillingPeriodConflicts(company_id, billing_start, billing_end, client),
     );
+
+    // ★ 2026-08-05 (서수란 접수) 판정 축을 `plan_id`가 있는가에서 **요금제 요금이 실제로 청구되는가**로 옮긴다.
+    //   체험이 끝난 회사는 Cron이 `plan_id`를 FREE(월정액 0)로 강등하므로 `plan_id`는 그대로 남는다 —
+    //   그 축으로 막으면 화면에 "요금제 미가입"으로 보이는 회사가 정액 발행에서 거부된다
+    //   (씨티케이이비전 실측: plan_code=FREE · monthly_price=0 · subscription_status=trial_expired).
+    //   막아야 하는 것은 구독료와 정액이 같은 달에 겹치는 이중청구 하나뿐이고, 월정액 0원은 겹칠 것이 없다.
+    //
+    //   두 축을 함께 본다 — 어느 하나만으로는 사각이 남는다.
+    //     · 기간 축 = 그 달엔 유료였다가 지금 FREE로 강등된 회사의 그 달 구독료를 잡는다.
+    //     · 현재 축 = 유료인데 요금제 이력이 유실돼 기간 축이 0으로 나오는 회사를 잡는다.
+    //   기간 축 계산은 발행 코어와 **같은 함수**(loadPlanChanges → buildPlanSegments → sumPlanSegments)다.
+    //
+    //   **잠금 안에서 읽는다** — 밖에서 판정하면 소급(backdated) 요금제 변경이 그 사이에 들어올 때
+    //   구독료가 있는 달에 정액이 발행된다. 발행 코어가 요금제 이력을 트랜잭션 안에서 재검증하는 것과 같은 이유다.
+    //   현재 축(`plan_monthly_price`)은 아래 원장 지문 재검증이 이미 감시한다(billing-ledger 지문 항목).
+    const minChargePlanChanges = await loadPlanChanges(company_id, billing_end, client);
+    const minChargePlanSegments = buildPlanSegments(minChargePlanChanges, billing_start, billing_end);
+    const minChargePlanAmount = sumPlanSegments(minChargePlanSegments);
+    const minChargePlanMonthly = Number(ledger.companyPriceRow?.plan_monthly_price) || 0;
+    if (minChargePlanAmount > 0 || minChargePlanMonthly > 0) {
+      throw new BillingIssueError(422, {
+        error: `${co.company_name}은(는) 요금제(구독) 회사라 최소과금 정액 발행 대상이 아닙니다.`,
+        code: 'MIN_CHARGE_PLAN_COMPANY',
+        plan_amount: minChargePlanAmount,
+        plan_monthly_price: minChargePlanMonthly,
+      });
+    }
+    // ★ Codex 1R high 수용 — **두 축이 0이어도 이력이 손상됐으면 그 0을 믿을 수 없다.**
+    //   그 달엔 유료였는데 이력이 끊겨 기간 축이 0으로 나오고 지금은 FREE인 회사가 그대로 통과한다
+    //   (구독료가 조용히 빠진 채 정액만 청구된다). 판정을 새로 만들지 않고 **발행 코어가 쓰는 게이트를 그대로 지난다** —
+    //   앞 공백(첫 배정 이전)은 사실이라 통과하고, 끊긴 이력·"플랜은 있는데 이력 0건"만 막는다.
+    const minChargePlanGate = evaluatePlanHistoryGate({
+      segments: minChargePlanSegments,
+      billingStart: billing_start,
+      billingEnd: billing_end,
+      companyCreatedDay: co.created_at ? toDayKey(co.created_at) : null,
+      monthlyPrice: minChargePlanMonthly,
+      planAssigned: Boolean(ledger.companyPriceRow?.plan_id),
+      historyTotal: await countPlanChanges(company_id, client),
+    });
+    if (!minChargePlanGate.ok) {
+      throw new BillingIssueError(422, {
+        error: `${co.company_name}은(는) 요금제 변경 이력이 온전하지 않아 정액 발행을 중단했습니다. 이대로 발행하면 그 기간 구독료가 청구서에서 빠진 채 정액만 나갑니다 — 이력을 먼저 확인해 주세요.`,
+        code: 'MIN_CHARGE_PLAN_HISTORY_MISSING',
+        block_reason: minChargePlanGate.blockReason,
+        plan_gap: minChargePlanGate.gap,
+      });
+    }
+    // 커밋 직전에 다시 만들어 대조한다 — 사용량 집계가 도는 동안 요금제 이력이 바뀔 수 있다(발행 코어와 같은 계약).
+    const minChargePlanFingerprint = planChangesFingerprint(minChargePlanChanges);
     // 안전핀 3 — 그 기간에 걸리는 미소비 추가 항목(080·부가서비스)이 있으면 정액과 섞지 않는다.
     //   ★ 2026-08-04 판정을 **발행과 같은 파생 함수**로 바꿨다(Codex 적대검증 medium 수용).
     //   그전에는 행이 있기만 하면 거부했는데, 전액 무료 080 번호는 파생 금액이 0줄이라 청구할 것이 없다.
@@ -1041,6 +1089,14 @@ ${EXTRA_ITEM_SOURCE_JOIN}
       throw new BillingIssueError(422, {
         error: '발행 중에 단가 또는 선불 설정이 변경되어 중단했습니다. 방금 단가를 저장하셨다면 그대로 다시 발행해 주세요.',
         code: 'BILLING_LEDGER_CHANGED',
+      });
+    }
+    // ★ Codex 1R high 수용 — 요금제 이력도 같은 자리에서 대조한다. 원장 지문은 이력을 감시하지 않아,
+    //   소급(backdated) 변경이 집계가 도는 사이에 들어오면 "구독료 0"이라는 전제가 무너진 채 정액이 나간다.
+    if (planChangesFingerprint(await loadPlanChanges(company_id, billing_end, client)) !== minChargePlanFingerprint) {
+      throw new BillingIssueError(422, {
+        error: '발행 중에 요금제 변경 이력이 바뀌어 중단했습니다. 방금 요금제를 변경하셨다면 그대로 다시 발행해 주세요.',
+        code: 'PLAN_HISTORY_CHANGED',
       });
     }
 

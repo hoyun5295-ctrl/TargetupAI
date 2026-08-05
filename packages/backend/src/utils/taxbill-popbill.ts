@@ -1008,3 +1008,122 @@ export async function processTaxbillEmailResends(limit = 20): Promise<ResendPass
     lockClient.release();
   }
 }
+
+// ════════════════════════════════════════════════════════════
+// ★ 2026-08-05 발행 완료분 메일 재발송 (서수란 접수 — "미수신으로 재발송 요청 시 처리 방법이 없다")
+// ════════════════════════════════════════════════════════════
+
+/**
+ * 재발송 실패의 **성격**을 담는다(Codex 3R medium 수용).
+ * 전부 422로 내리면 팝빌 게이트가 닫힌 것도, SDK가 죽은 것도 "입력 오류"로 기록되어
+ * 5xx 알림과 재시도 판단이 막힌다 — 유일한 재발송 창구라 그 누락이 오래간다.
+ */
+export class TaxbillResendError extends Error {
+  constructor(public status: number, public code: string, message: string) {
+    super(message);
+    this.name = 'TaxbillResendError';
+  }
+}
+
+/**
+ * 이미 발행된 세금계산서의 **메일만** 다시 보낸다.
+ *
+ * 재발행이 아니다 — 팝빌에 있는 그 문서를 **같은 문서번호로 다시 메일링**한다. 국세청에 문서가
+ * 두 번 나가지 않으므로 "ready 이상 재발행 금지"와 충돌하지 않는다. 금액이 틀린 건은 여전히
+ * 수정세금계산서 경로이고, 이 함수는 어떤 상태도 바꾸지 않는다(부수효과 = 메일 하나).
+ *
+ * 수신자는 원장(`billing_recipients` · `doc_type='taxbill'`) 하나에서 나온다 — 대표 + 참조 전부.
+ * 주소를 넘기면 그 한 곳에만 보낸다("이 주소로 다시 주세요"가 실제 요청 형태다).
+ *
+ * 한 통이라도 나가면 성공으로 돌려주고 실패한 주소를 함께 알린다 — 전부 실패면 던진다.
+ * 발행 패스와 달리 락을 잡지 않는다: 상태를 쓰지 않으므로 겹쳐 돌아도 어긋날 값이 없다.
+ */
+export async function resendIssuedTaxbillEmail(opts: {
+  issueId: string;
+  /** 지정하면 이 주소 한 곳에만. 비우면 원장의 대표 + 참조 전부. */
+  email?: string | null;
+  /** 누가 눌렀는가 — 국세청 문서 관련 행위라 로그에 남긴다(Codex 1R high 부분 수용). */
+  adminId?: string | null;
+}): Promise<{ mgtKey: string; sent: string[]; failed: { email: string; error: string }[] }> {
+  const cfg = getPopbillConfig();
+  if (!cfg) {
+    throw new TaxbillResendError(503, 'TAXBILL_POPBILL_GATE_OFF', '팝빌 연동이 꺼져 있어 계산서 메일을 보낼 수 없습니다.');
+  }
+
+  // 계정 축은 **발행 때 쓴 것과 같아야 한다** — 발행 패스는 `billings.user_id`(ISSUE_ROW_SQL의 billing_user_id)로
+  // 수신자를 해석하고, 거기서 **NULL은 "회사 단위 장"이라는 유효한 값**이다(계정 미상이 아니다).
+  // ★ Codex 2R high 수용 — 그래서 COALESCE로 다른 축을 끌어오면 안 된다. 회사 단위로 발행한 계산서가
+  //   추적행의 계정 담당자에게 재발송된다. 정산 행의 유무와 `user_id`가 NULL인 것은 다른 사실이라 나눠 읽는다.
+  const r = await pool.query(
+    `SELECT t.status, t.invoicer_mgt_key, t.company_id,
+            (b.id IS NOT NULL) AS billing_exists, b.user_id AS billing_user_id
+       FROM taxbill_issues t
+       LEFT JOIN billings b ON b.id = t.billing_id
+      WHERE t.id = $1::uuid`,
+    [opts.issueId],
+  );
+  if (r.rows.length === 0) {
+    throw new TaxbillResendError(404, 'TAXBILL_ISSUE_NOT_FOUND', '세금계산서 내역을 찾을 수 없습니다.');
+  }
+  const row = r.rows[0];
+  if (String(row.status) !== 'issued') {
+    throw new TaxbillResendError(422, 'TAXBILL_NOT_ISSUED',
+      `발행이 끝난 계산서만 메일을 다시 보낼 수 있습니다. (현재 상태: ${String(row.status)})`);
+  }
+  const mgtKey = String(row.invoicer_mgt_key || '').trim();
+  if (!mgtKey) {
+    throw new TaxbillResendError(422, 'TAXBILL_NO_MGT_KEY', '팝빌 문서번호가 없어 메일을 보낼 수 없습니다.');
+  }
+
+  const override = String(opts.email || '').trim();
+  let targets: string[];
+  if (override) {
+    // 임의 주소로 재무 문서가 나가는 자리라 형식을 느슨하게 보지 않는다(Codex 1R high 부분 수용).
+    if (!/^[^\s@,;]+@[^\s@,;]+\.[A-Za-z]{2,}$/.test(override)) {
+      throw new TaxbillResendError(400, 'TAXBILL_RESEND_BAD_EMAIL', '받는 사람 이메일 형식이 올바르지 않습니다.');
+    }
+    targets = [override];
+  } else {
+    // ★ Codex 2R high 수용 — 정산 행이 사라진 계산서(FK SET NULL)는 **발행 당시 계정 축을 알 방법이 없다.**
+    //   추적행도 `billing_id` CASCADE로 함께 지워지므로 물러설 축 자체가 없다. 아무 축이나 골라 보내는 대신
+    //   받는 사람을 직접 지정하게 한다 — 국세청 문서 통지를 추측으로 보내지 않는다.
+    if (!row.billing_exists) {
+      throw new TaxbillResendError(422, 'TAXBILL_RESEND_BILLING_GONE',
+        '이 계산서의 정산 내역이 삭제돼 받는 사람을 확정할 수 없습니다. 받는 사람 이메일을 직접 지정해 주세요.');
+    }
+    // 대표 + 참조. 참조 선별은 발행 직후 재전송과 **같은 순수 함수**를 쓴다(대표 중복·형식 불량 제거).
+    const to = await resolveBillingRecipients(
+      String(row.company_id),
+      row.billing_user_id ? String(row.billing_user_id) : null,
+      'taxbill',
+    );
+    const primary = String(to.primary?.email || '').trim();
+    targets = [...(primary.includes('@') ? [primary] : []), ...selectTaxbillResendTargets(to)]
+      .slice(0, TAXBILL_RESEND_MAX_TARGETS);
+  }
+  if (targets.length === 0) {
+    throw new TaxbillResendError(422, 'TAXBILL_RESEND_NO_RECIPIENT',
+      '세금계산서 수신자가 등록돼 있지 않습니다. 고객사 정산 설정에서 수신자를 먼저 등록해 주세요.');
+  }
+
+  const svc = getService(cfg);
+  const sent: string[] = [];
+  const failed: { email: string; error: string }[] = [];
+  for (const t of targets) {
+    try {
+      await sendEmailAsync(svc, cfg.corpNum, mgtKey, t, cfg.userId);
+      sent.push(t);
+    } catch (err: any) {
+      failed.push({ email: t, error: String(err?.message || err).slice(0, 300) });
+    }
+  }
+  // 누가·어디로 보냈는지 남긴다 — 국세청 문서 관련 행위이고, 임의 주소 override가 가능한 경로다.
+  log(`발행분 메일 재발송 — key=${mgtKey} by=${opts.adminId || '미상'} to=${targets.join(',')}`
+    + `${override ? ' (직접 지정)' : ' (등록 수신자)'} 성공 ${sent.length} / 실패 ${failed.length}`);
+  if (sent.length === 0) {
+    // 전 주소 실패 = 우리 입력이 아니라 **바깥**이 문제다(팝빌 SDK·네트워크). 502로 올려 알림·재시도 판단에 걸리게 한다.
+    throw new TaxbillResendError(502, 'TAXBILL_RESEND_ALL_FAILED',
+      `계산서 메일 재발송에 실패했습니다: ${failed.map((f) => `${f.email}(${f.error})`).join(', ')}`);
+  }
+  return { mgtKey, sent, failed };
+}

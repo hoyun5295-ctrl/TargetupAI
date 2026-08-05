@@ -290,4 +290,43 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
     expect(adminSrc).not.toMatch(/pool\.query\(\s*['"`]BEGIN/);
     expect(issueSrc, '발행 코어도 같은 규칙 — client 고정 트랜잭션만').not.toMatch(/pool\.query\(\s*['"`]BEGIN/);
   });
+
+  // ★ 2026-08-05 서수란 접수 2건 — 축을 되돌리면 그날의 사고가 그대로 돌아온다.
+  it('최소과금 정액 발행은 plan_id 존재로 막지 않는다 — 체험 만료 회사는 FREE(월정액 0)로 강등돼도 plan_id가 남는다', () => {
+    // 그 축으로 막으면 화면에 "요금제 미가입"으로 보이는 회사가 정액 발행에서 거부된다(씨티케이이비전 실측).
+    expect(issueSrc).not.toMatch(/if\s*\(\s*ledger\.companyPriceRow\?\.plan_id\s*\)/);
+    // 판정은 **그 기간에 요금제 요금이 청구되는가** — 발행 코어와 같은 함수로 구한다.
+    const guard = issueSrc.slice(issueSrc.indexOf('MIN_CHARGE_NOT_POSTPAID'), issueSrc.indexOf('MIN_CHARGE_PLAN_COMPANY'));
+    expect(guard, '최소과금 가드가 기간 축 요금제 금액을 구하지 않는다').toContain('sumPlanSegments');
+    expect(guard, '현재 축(월정액)이 빠지면 이력이 유실된 유료 회사를 놓친다').toContain('plan_monthly_price');
+  });
+
+  it('작성일자 지정은 컨펌 없이 발급 큐에 올리지 않는다 — ready는 팝빌 발행 큐다', () => {
+    const at = billingSrc.indexOf("/confirmations/:id/issue-date");
+    expect(at, '작성일자 지정 라우트를 찾지 못했다').toBeGreaterThan(-1);
+    const route = billingSrc.slice(at, at + 3000);
+    expect(route, "manual_wait → ready 승격에 confirmed_at 조건이 없다").toContain('confirmed_at IS NOT NULL');
+    expect(route, '컨펌 전이라는 사유를 운영자에게 알려야 한다').toContain('TAXBILL_CONFIRM_REQUIRED');
+  });
+
+  it('발행 완료분은 재발행이 아니라 메일만 다시 보낸다 — 미수신 대응을 수정발행으로 하면 국세청에 한 장 더 나간다', () => {
+    expect(billingSrc).toContain('/taxbill-issues/:id/resend-email');
+    const popbillSrc = read('./taxbill-popbill.ts');
+    const at = popbillSrc.indexOf('export async function resendIssuedTaxbillEmail');
+    expect(at, '재발송 CT가 없다').toBeGreaterThan(-1);
+    const fn = popbillSrc.slice(at, at + 3000);
+    expect(fn, "발행이 끝난 장만 대상이다").toContain("!== 'issued'");
+    expect(fn, '이 경로는 상태를 쓰지 않는다 — 쓰는 순간 발행 축과 겹친다').not.toMatch(/UPDATE\s+taxbill_issues/);
+  });
+
+  it('재발송 실패를 전부 422로 내리지 않는다 — 팝빌 게이트·SDK 장애가 입력 오류로 기록되면 알림·재시도가 막힌다', () => {
+    const at = billingSrc.indexOf("/taxbill-issues/:id/resend-email");
+    const route = billingSrc.slice(at, at + 2500);
+    expect(route, '분류된 실패만 그 상태로 돌려줘야 한다').toContain('TaxbillResendError');
+    expect(route, '미분류 장애는 500으로 올린다').toContain("code: 'TAXBILL_RESEND_FAILED'");
+    // 게이트 닫힘은 503, 전 주소 실패는 502 — 운영자가 고칠 수 없는 것을 422로 위장하지 않는다.
+    const popbillSrc = read('./taxbill-popbill.ts');
+    expect(popbillSrc).toContain("TaxbillResendError(503, 'TAXBILL_POPBILL_GATE_OFF'");
+    expect(popbillSrc).toContain("TaxbillResendError(502, 'TAXBILL_RESEND_ALL_FAILED'");
+  });
 });

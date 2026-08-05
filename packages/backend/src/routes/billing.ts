@@ -52,7 +52,8 @@ import { readFreeDeductibleForBilling } from '../utils/free-messaging';
 // ★ 2026-08-05 청구 수량 정의 CT — 미리보기가 발행·인쇄와 같은 식을 쓰게 한다
 import { billableQuantity } from '../utils/billing-types';
 // ★ 2026-07-30 수정세금계산서 — 사유별 장 구성 계약(순수). 라우트는 이 계획을 트랜잭션 INSERT만 한다.
-import { planModifyIssue, ModifyPlanError } from '../utils/taxbill-popbill';
+// ★ 2026-08-05 발행 완료분 메일 재발송(서수란 접수) — 재발행이 아니라 같은 문서번호로 메일만 다시 보낸다.
+import { planModifyIssue, ModifyPlanError, resendIssuedTaxbillEmail, TaxbillResendError } from '../utils/taxbill-popbill';
 // ★ 2026-07-28 정산 설정·담당자 CT — 고객사 상세 "정산" 탭 + 일괄발급·발송·계산서 워커가 공유.
 import {
   getCompanyBillingSettings, upsertCompanyBillingSettings,
@@ -597,8 +598,13 @@ router.get('/confirmations', async (req: Request, res: Response) => {
     // ★ Codex 1R 수용 — date는 to_char로 못 박고(파서가 Date 객체로 줘 표시가 깨진다),
     //   501건을 읽어 500 초과 여부(truncated)를 화면에 알린다(조용한 절단 차단).
     const r = await pool.query(
+      // ★ 2026-08-05 대리 컨펌 2컬럼은 `to_jsonb`로 읽는다 — ALTER 실행 전에도 이 현황판이 깨지지 않는다
+      //   (컬럼이 없으면 키가 없어 NULL. plan-guard의 advanced_access_enabled와 같은 규약).
+      //   현황판이 통째로 죽으면 그 달 컨펌·발급 상태를 볼 방법이 사라진다 — 표시 하나 때문에 그걸 걸지 않는다.
       `SELECT ic.id, ic.billing_id, ic.recipient_email, ic.recipient_user_id, ic.sent_at,
               ic.confirmed_at, ic.objection_at, ic.objection_text,
+              (to_jsonb(ic) ->> 'confirmed_by_admin') AS confirmed_by_admin,
+              (to_jsonb(ic) ->> 'confirm_note')       AS confirm_note,
               ic.taxbill_status, to_char(ic.taxbill_issue_date, 'YYYY-MM-DD') AS taxbill_issue_date,
               ic.taxbill_due_at, ic.issued_at, ic.superseded_at,
               to_char(b.billing_start, 'YYYY-MM-DD') AS billing_start,
@@ -795,6 +801,89 @@ router.post('/taxbill-issues/:id/retry', async (req: Request, res: Response) => 
   }
 });
 
+// POST /taxbill-issues/:id/resend-email — 발행 완료분 메일 재발송 (★2026-08-05 서수란 접수)
+//   업체가 "계산서를 못 받았다"고 할 때 쓰는 유일한 창구다. 그전에는 목록·수정발급·실패 재시도뿐이라
+//   담당자가 할 수 있는 것이 수정세금계산서밖에 없었다(그건 국세청에 문서를 한 장 더 만든다).
+//   여기서는 **문서를 만들지 않는다** — 팝빌에 있는 그 문서를 같은 번호로 다시 메일링할 뿐이다.
+router.post('/taxbill-issues/:id/resend-email', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: '장부 id 형식 오류' });
+    const email = String((req.body as any)?.email || '').trim();
+    const r = await resendIssuedTaxbillEmail({
+      issueId: id, email: email || null, adminId: (req as any).user?.userId || null,
+    });
+    return res.json({
+      success: true,
+      sent: r.sent,
+      failed: r.failed,
+      message: r.failed.length > 0
+        ? `${r.sent.length}곳으로 다시 보냈습니다. 실패 ${r.failed.length}곳 — ${r.failed.map((f) => f.email).join(', ')}`
+        : `${r.sent.join(', ')}로 계산서 메일을 다시 보냈습니다.`,
+    });
+  } catch (error: any) {
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('세금계산서 메일 재발송 오류:', emsg || error);
+    // ★ Codex 3R medium 수용 — **분류된 실패만 그 상태로 돌려준다.**
+    //   전부 422로 내리면 팝빌 게이트가 닫힌 것도 SDK가 죽은 것도 "입력 오류"로 기록되어
+    //   5xx 알림과 재시도 판단이 막힌다. 유일한 재발송 창구라 그 누락이 오래간다.
+    if (error instanceof TaxbillResendError) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
+    }
+    // 미분류 = 우리가 모르는 장애다. 원인 문구는 로그에만 남기고 500으로 올린다.
+    return res.status(500).json({ error: '계산서 메일 재발송에 실패했습니다.', code: 'TAXBILL_RESEND_FAILED' });
+  }
+});
+
+// PUT /confirmations/:id/admin-confirm — 업체 확인을 관리자가 대신 기록 (★2026-08-05 서수란 접수)
+//
+//   컨펌 링크를 누르지 않고 메일·전화로 "이 날짜로 발행해 달라"고 알려오는 회사가 있다
+//   (시세이도 = 각 부서가 거래내역서를 보고 PO 때문에 발행일자를 통보). 작성일자 지정에 컨펌 관문을
+//   세우면서 이 창구를 함께 열지 않으면 그 회사들은 **어느 경로로도 계산서를 낼 수 없게 된다** —
+//   차단 기준은 "틀린 금액이 나가는가" 하나이고, 확인을 받은 건을 막는 것은 그 기준이 아니다.
+//
+//   고객이 직접 누른 컨펌과 구분되도록 누가·무엇을 근거로 기록했는지 함께 남긴다(NULL = 고객 직접).
+router.put('/confirmations/:id/admin-confirm', async (req: Request, res: Response) => {
+  try {
+    const note = String((req.body as any)?.note || '').trim().slice(0, 200);
+    if (!note) {
+      return res.status(400).json({ error: '어떻게 확인받았는지(메일·전화·담당자)를 적어주세요. 나중에 근거가 됩니다.' });
+    }
+    const adminId = (req as any).user?.userId || null;
+    // 효과 검증 — 바뀐 행이 없으면 성공이라고 말하지 않는다(6원칙 ②).
+    //   ⛔ **날짜 직접선택(`manual_wait`) 건에만 연다.** 자동 정책 건은 고객 컨펌 또는 기한 도래가
+    //   이미 큐를 움직이므로 여기서 손댈 이유가 없고, 열어 두면 기한 전 발행을 사람이 앞당기는 길이 된다.
+    const r = await pool.query(
+      `UPDATE invoice_confirmations
+          SET confirmed_at = NOW(), confirmed_by_admin = $2::uuid, confirm_note = $3
+        WHERE id = $1::uuid AND taxbill_status = 'manual_wait'
+          AND confirmed_at IS NULL AND objection_at IS NULL
+          AND superseded_at IS NULL AND issued_at IS NULL
+        RETURNING id`,
+      [String(req.params.id), adminId, note],
+    );
+    if (r.rows.length === 0) {
+      return res.status(409).json({
+        error: '날짜 지정 대기 건 중 아직 컨펌되지 않은 것만 기록할 수 있습니다. (이미 컨펌·이의신청·발행됐거나 자동 발급 대상일 수 있습니다) 목록을 새로고침해 주세요.',
+      });
+    }
+    return res.json({ success: true, message: '업체 확인을 기록했습니다. 이제 작성일자를 지정할 수 있습니다.' });
+  } catch (error: any) {
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({
+        error: 'DB 마이그레이션 필요 — invoice_confirmations.confirmed_by_admin·confirm_note 컬럼 ALTER 실행 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    console.error('업체 확인 기록 오류:', emsg || error);
+    return res.status(500).json({ error: '업체 확인 기록에 실패했습니다.' });
+  }
+});
+
 // PUT /confirmations/:id/issue-date — 직접선택(중간정산) 건의 작성일자 지정 → 발급 큐 진입
 router.put('/confirmations/:id/issue-date', async (req: Request, res: Response) => {
   try {
@@ -807,10 +896,34 @@ router.put('/confirmations/:id/issue-date', async (req: Request, res: Response) 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      // ★ 2026-08-05 (서수란 접수) **컨펌 없이는 발급 큐에 올리지 않는다.**
+      //   `ready`는 팝빌 발행 큐라 5분 워커가 그대로 국세청 문서를 만든다. 그전에는 이 UPDATE가
+      //   `manual_wait`이기만 하면 통과시켜, 날짜를 지정하는 순간 업체 확인 없이 계산서가 발행됐다
+      //   (한국고용노동교육원 08-03 실측 — 컨펌 기록이 없는데 발급 완료).
+      //   자동 정책(pending→due→ready)은 컨펌 또는 기한 도래를 지나는데 **직접선택만 관문이 없었다.**
+      //   업체가 메일·전화로 확인해 준 경우는 [업체 확인 기록](/admin-confirm)으로 `confirmed_at`을 남긴 뒤 지정한다 —
+      //   막기만 하면 부서가 발행일자를 통보하는 회사(시세이도류)가 영영 발행 불가가 된다.
+      const cur = await client.query(
+        `SELECT taxbill_status, confirmed_at FROM invoice_confirmations
+          WHERE id = $1::uuid AND superseded_at IS NULL FOR UPDATE`,
+        [String(req.params.id)],
+      );
+      if (cur.rows.length === 0 || String(cur.rows[0].taxbill_status) !== 'manual_wait') {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: '날짜 지정 대기 상태인 건을 찾을 수 없습니다. (이미 처리됐거나 재발급된 건일 수 있습니다)' });
+      }
+      if (!cur.rows[0].confirmed_at) {
+        await client.query('ROLLBACK');
+        return res.status(422).json({
+          error: '업체 컨펌 전에는 계산서를 발급할 수 없습니다. 업체가 컨펌 링크를 누르거나, 메일·전화로 확인받았다면 [업체 확인 기록]을 남긴 뒤 작성일자를 지정해 주세요.',
+          code: 'TAXBILL_CONFIRM_REQUIRED',
+        });
+      }
       const r = await client.query(
         `UPDATE invoice_confirmations
             SET taxbill_issue_date = $2::date, taxbill_status = 'ready'
           WHERE id = $1::uuid AND taxbill_status = 'manual_wait' AND superseded_at IS NULL
+            AND confirmed_at IS NOT NULL
         RETURNING id, billing_id, company_id, taxbill_issue_date`,
         [String(req.params.id), issueDate],
       );
