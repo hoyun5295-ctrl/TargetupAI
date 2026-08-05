@@ -15,7 +15,7 @@
  * ⚠ DDL 미실행이면 CT가 무료 0으로 폴백하고 이 워커는 조용히 skip한다(발송·과금 무영향).
  */
 
-import { grantFreeMessagingForCurrentMonth } from './free-messaging';
+import { grantFreeMessagingForCurrentMonth, revokeFreeMessagingForTrials } from './free-messaging';
 
 const PASS_INTERVAL_MS = 10 * 60 * 1000;
 
@@ -29,6 +29,11 @@ export async function runFreeMessagingGrantPass(): Promise<{ granted: number; sk
   if (_running) return { granted: 0, skipped: true };
   _running = true;
   try {
+    // ★ 2026-08-05 회수를 **먼저** 한다 — 지급 뒤에 하면 방금 만든 행을 곧바로 지우는 모양이 되어
+    //   로그가 오해를 부른다. 지급 조건이 이미 체험을 거르므로 순서가 결과를 바꾸지는 않는다.
+    const revoked = await revokeFreeMessagingForTrials();
+    if (revoked > 0) console.log(`[무료메시징][회수] 체험 전환 회사 미사용 지급분 ${revoked}행 회수`);
+
     const res = await grantFreeMessagingForCurrentMonth();
     // 신규 지급이 있을 때만 남긴다 — 10분마다 "0건"을 찍으면 로그가 의미를 잃는다.
     if (res.granted > 0) {

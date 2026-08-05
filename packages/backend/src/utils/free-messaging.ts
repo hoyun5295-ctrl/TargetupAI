@@ -457,6 +457,12 @@ export async function readPlanFreeQuotas(): Promise<Record<string, Record<string
  *
  * 해지·정지 회사가 섞여도 무해하다 — 발송이 막힌 상태면 소진도 없고, 이월이 없어 월말에 사라진다.
  */
+// ⛔ 아래 SQL 안 주석에 백틱을 넣지 않는다 — 템플릿 리터럴이 그 자리에서 끊긴다(0805 실측 tsc 3에러).
+//
+// ★ 2026-08-05 체험 제외 판정 축은 subscription_status다(설계 §9-5 — 체험 0건, Harold 두 번 확정).
+//   plan_code로 거르면 샌다: 이 저장소에는 체험인데 plan_code가 유료인 회사가 있고
+//   (무료체험을 BASIC으로 주던 경로 — trial-downgrade-worker 주석이 그 사실을 명시한다),
+//   실제로 (주)한국시세이도가 BASIC 수량을 받았다.
 export async function grantFreeMessagingForCurrentMonth(): Promise<{ granted: number; skipped: boolean }> {
   let inserted = 0;
   for (const t of FREE_MESSAGING_TYPES) {
@@ -468,6 +474,7 @@ export async function grantFreeMessagingForCurrentMonth(): Promise<{ granted: nu
            FROM companies c
            JOIN plans p ON p.id = c.plan_id
           WHERE COALESCE(p.${t.planColumn}, 0) > 0
+            AND c.subscription_status IS DISTINCT FROM 'trial'
          ON CONFLICT (company_id, period_month, msg_type) DO NOTHING`,
         [t.key, t.unitValue],
       );
@@ -481,6 +488,35 @@ export async function grantFreeMessagingForCurrentMonth(): Promise<{ granted: nu
     }
   }
   return { granted: inserted, skipped: false };
+}
+
+/**
+ * 체험으로 바뀐 회사의 **당월 미사용 지급분을 회수**한다. (★ 2026-08-05 Harold 실측)
+ *
+ * 지급 조건에 체험 제외를 넣어도 **이미 나간 행은 안 지워진다.** 유료로 받은 뒤 체험으로 내려간 회사가
+ * 그대로 무료 수량을 들고 있게 되고(실측: (주)한국시세이도가 BASIC 수량 보유), 사람이 매번 SQL로
+ * 지워야 한다. 워커가 매 패스에서 정리하면 손이 안 든다.
+ *
+ * ⛔ **한 건이라도 쓴 행은 건드리지 않는다**(`used_qty`·`attempted_qty` 둘 다 0인 것만).
+ *   설계 §1-3 "월 중 요금제 변경 = 당월 지급분 불변"이 지키는 것이 그것이다 — 이미 소진한 몫을
+ *   뒤늦게 없애면 그 발송의 과금 근거가 사라진다.
+ */
+export async function revokeFreeMessagingForTrials(): Promise<number> {
+  try {
+    const res = await query(
+      `DELETE FROM free_messaging_grants g
+         USING companies c
+        WHERE c.id = g.company_id
+          AND c.subscription_status = 'trial'
+          AND g.used_qty = 0 AND g.attempted_qty = 0
+          AND g.period_month = ${KST_PERIOD_MONTH_SQL}`,
+    );
+    return res.rowCount || 0;
+  } catch (err: any) {
+    if (isSchemaMissing(err)) { warnSchemaMissing('revokeFreeMessagingForTrials', err); return 0; }
+    console.error('[무료메시징][체험 회수 실패]', err?.message || err);
+    return 0;
+  }
 }
 
 /**
@@ -501,6 +537,7 @@ export async function grantFreeMessagingForCompany(companyId: string): Promise<n
            FROM companies c
            JOIN plans p ON p.id = c.plan_id
           WHERE c.id = $1 AND COALESCE(p.${t.planColumn}, 0) > 0
+            AND c.subscription_status IS DISTINCT FROM 'trial'   -- 체험은 0건(위와 같은 판정 축)
          ON CONFLICT (company_id, period_month, msg_type) DO NOTHING`,
         [companyId, t.key, t.unitValue],
       );
