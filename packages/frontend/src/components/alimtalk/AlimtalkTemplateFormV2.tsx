@@ -208,6 +208,9 @@ export default function AlimtalkTemplateFormV2({
     if (contentOver) return '본문은 최대 1,000자';
     if (form.emphasizeType === 'TEXT' && !form.templateTitle.trim())
       return '강조표기 타이틀을 입력하세요';
+    // 2026-08-05 접수(박성용): 보조문구는 카카오 규격상 필수 — 화면 표기가 "선택"이었던 것 정정
+    if (form.emphasizeType === 'TEXT' && !form.templateSubtitle.trim())
+      return '강조표기 보조문구를 입력하세요';
     if (form.emphasizeType === 'IMAGE' && !form.imageName)
       return '이미지를 업로드하세요';
     if (form.emphasizeType === 'ITEM_LIST') {
@@ -291,7 +294,8 @@ export default function AlimtalkTemplateFormV2({
 
       if (form.emphasizeType === 'TEXT') {
         payload.templateTitle = form.templateTitle;
-        if (form.templateSubtitle) payload.templateSubtitle = form.templateSubtitle;
+        // 2026-08-05: 보조문구 필수화 — validate()가 빈 값을 먼저 막으므로 조건부 전송 폐기
+        payload.templateSubtitle = form.templateSubtitle;
       }
 
       if (form.emphasizeType === 'IMAGE') {
@@ -661,24 +665,41 @@ export default function AlimtalkTemplateFormV2({
               </div>
             </div>
 
-            {/* TEXT 강조 */}
+            {/* TEXT 강조 — 2026-08-05 접수(박성용): 보조문구 필수 표기 + 단말별 표시 자수 안내.
+                maxLength 50은 카카오 API 입력 상한이라 유지하고, 안내 숫자는 "표시 잘림" 기준이다. */}
             {form.emphasizeType === 'TEXT' && (
-              <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50/40 p-3">
+              <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/40 p-3">
                 <p className="text-xs font-semibold text-amber-700">강조 텍스트</p>
-                <input
-                  value={form.templateTitle}
-                  onChange={(e) => setForm({ ...form, templateTitle: e.target.value })}
-                  maxLength={50}
-                  placeholder="강조 타이틀 (최대 50자)"
-                  className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
-                />
-                <input
-                  value={form.templateSubtitle}
-                  onChange={(e) => setForm({ ...form, templateSubtitle: e.target.value })}
-                  maxLength={50}
-                  placeholder="보조문구 (최대 50자, 선택)"
-                  className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
-                />
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    강조 타이틀 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    value={form.templateTitle}
+                    onChange={(e) => setForm({ ...form, templateTitle: e.target.value })}
+                    maxLength={50}
+                    placeholder="강조 타이틀 (최대 50자)"
+                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-0.5">
+                    2줄 표시 · 안드로이드 23자 · iOS 21자까지 표시되고 각각 24자·22자부터 말줄임 (띄어쓰기 포함)
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    강조표기 보조문구 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    value={form.templateSubtitle}
+                    onChange={(e) => setForm({ ...form, templateSubtitle: e.target.value })}
+                    maxLength={50}
+                    placeholder="보조문구 (최대 50자)"
+                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-0.5">
+                    안드로이드 18자 · iOS 21자까지 표시되고 각각 19자·22자부터 말줄임 (띄어쓰기 포함) · 변수 사용 불가
+                  </p>
+                </div>
               </div>
             )}
 
