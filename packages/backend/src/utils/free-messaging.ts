@@ -475,6 +475,11 @@ export async function grantFreeMessagingForCurrentMonth(): Promise<{ granted: nu
            JOIN plans p ON p.id = c.plan_id
           WHERE COALESCE(p.${t.planColumn}, 0) > 0
             AND c.subscription_status IS DISTINCT FROM 'trial'
+            AND NOT EXISTS (
+              SELECT 1 FROM company_plan_changes cpc
+               WHERE cpc.company_id = c.id
+                 AND cpc.effective_date > ${KST_PERIOD_MONTH_SQL}
+            )
          ON CONFLICT (company_id, period_month, msg_type) DO NOTHING`,
         [t.key, t.unitValue],
       );
@@ -537,7 +542,12 @@ export async function grantFreeMessagingForCompany(companyId: string): Promise<n
            FROM companies c
            JOIN plans p ON p.id = c.plan_id
           WHERE c.id = $1 AND COALESCE(p.${t.planColumn}, 0) > 0
-            AND c.subscription_status IS DISTINCT FROM 'trial'   -- 체험은 0건(위와 같은 판정 축)
+            AND c.subscription_status IS DISTINCT FROM 'trial'
+            AND NOT EXISTS (
+              SELECT 1 FROM company_plan_changes cpc
+               WHERE cpc.company_id = c.id
+                 AND cpc.effective_date > ${KST_PERIOD_MONTH_SQL}
+            )   -- 체험은 0건(위와 같은 판정 축)
          ON CONFLICT (company_id, period_month, msg_type) DO NOTHING`,
         [companyId, t.key, t.unitValue],
       );
