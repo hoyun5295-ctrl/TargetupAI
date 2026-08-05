@@ -308,7 +308,8 @@ CREATE UNIQUE INDEX ux_operator_proposals_one_scheduled
     AND COALESCE(proposal_json->'meta'->>'is_reminder', 'false') <> 'true';
 ```
 
-⛔ **이 DDL은 배포 뒤에 실행한다**(워커는 트래픽과 무관하게 돈다). 인덱스가 없는 동안에도 위 ①의 `WHERE NOT EXISTS`가 방어한다.
+**2026-08-05 실행완료** — `pg_indexes` 조회로 `ux_operator_proposals_one_scheduled` 설치 확인(Harold 실행). **남은 DDL 0.**
+(인덱스가 없는 동안에도 위 ①의 `WHERE NOT EXISTS`가 방어하므로 배포~DDL 창이 비어 있지 않다.)
 
 착수 전 실측으로 닫은 선행 조건 — 위반 행 0(`GROUP BY operator_id HAVING COUNT(*)>1`) · 조건식 정상 평가(전 행 NULL → `false`) ·
 리마인드가 `meta.is_reminder=true`를 실제로 달고 저장됨(`:2368` 코드) · `operator_proposals`의 UNIQUE는 기본키 `id` 하나뿐
@@ -522,13 +523,13 @@ Codex의 권고는 일관되게 "막아라·끄라·배포하지 마라" 쪽으�
 | 2 | **상품·매장 조건 파라미터** — `purchased` 계열에 상품·매장 선택 | `automarketing-segment.ts` + `Record<string, number>` 타입을 backend 5·frontend 4에서 확장 | ⛔ **상품 데이터 실측 0건** — 데이터가 들어오는 회사가 생긴 뒤. 지금 만들면 검증 표본 0인 코드가 9파일에 퍼진다 |
 | 3 | **backfill 정밀도** — 같은 날·혼합 backfill이 변화로 오인될 수 있다 | `cycleCompare` 구매창 가드 → 구매 원장 창 합산으로 | `recent_purchase_date`가 시각 없는 date라 날짜보다 촘촘한 비교 불가. **리마인드가 판 원장·발송결과 축과 같은 공사** — 그 트랙을 다시 열 때 함께 |
 | 4 | **발송→마감 사이 창** — 분 단위 사이 새 변화가 소진될 수 있다 | 발송 시점 값 보관(2세대 스냅샷) | 기계가 는다. 창이 분 단위라 후순위 |
-| ~~5~~ | ~~동시 `run-now` 제안 중복~~ — **2026-08-05 완료**(§7-7). 조건부 INSERT(한 문장) + 부분 UNIQUE 인덱스 + 야간 승인 `23505` 처리 | `continuous-operator.ts` · `routes/ai.ts` | 코드 배포 대기 · **DDL 1건은 배포 뒤 실행**(§7-7) |
+| ~~5~~ | ~~동시 `run-now` 제안 중복~~ — **2026-08-05 완료**(§7-7). 조건부 INSERT(한 문장) + 부분 UNIQUE 인덱스 + 야간 승인 `23505` 처리 | `continuous-operator.ts` · `routes/ai.ts` | **DDL 실행완료**(설치 확인) · 남은 DDL 0 |
 | ~~6~~ | ~~sending 복구 이중 차감 가능성~~ — **실재하지 않았다**(멱등키 동일 + DB UNIQUE). 대신 정반대인 **무과금 `sent` 마감**을 찾아 고쳤다 | `ai-credit-tx.ts` · `ai-credit.ts` · `continuous-operator.ts` | 2026-08-05 완료(§7-7) · 배포 대기 |
 | 7 | **예산 집계 축** — D+N 리마인드 비용이 생성일에 계상되고 발송일엔 빠진다 | 예산 SUM `created_at` 축 | 전 제안 공통이라 자동마케팅만 못 바꾼다. 정산·예산 트랙과 함께 |
 
 **개발 아님 — 결정만 남은 것**: 기존 운영 오퍼레이터를 새 계약으로 옮길지(기본 = 옮기지 않음, 실사용 0이라 실질 영향 0 — 설계서 §6 미결 2).
 
-**화면 실측 7건**(개발과 별개, 배포분 검증): 변화 축 잠금·사유 / 첫 회차 안내 / 파라미터 프리셋 / 자연어 축 고정 고지 / 리마인드 토글·문안 필수 / 설정 여정 제외 토글 / 0건 통지.
+**화면 실측 9건**(개발과 별개, 배포분 검증): 변화 축 잠금·사유 / 첫 회차 안내 / 파라미터 프리셋 / 자연어 축 고정 고지 / 리마인드 토글·문안 필수 / 설정 여정 제외 토글 / 0건 통지 / **매장 미배정 계정으로 축 선택 시 "0명" 대신 사유 노출**(0805) / **이미 예약된 회차에서 [지금 실행] 시 "이미 예약되어 있습니다"**(0805).
 
 ---
 

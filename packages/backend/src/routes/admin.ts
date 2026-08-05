@@ -43,7 +43,7 @@ import { grantFreeTrial } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
-import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isLineGroupAdmin, diffFields } from '../utils/audit-log';
+import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isLineGroupAdmin, isSettlementOverviewViewer, diffFields } from '../utils/audit-log';
 // ★ 2026-07-01: 예측 일괄 분석·차감 수동 트리거 (9시 대기 없이 검증·복구·시연)
 import { runPredictiveBatchNow } from '../utils/predictive-worker';
 import { sendTypeLabel } from '../utils/send-type-axis';
@@ -3667,6 +3667,89 @@ router.get('/audit-logs/access', authenticate, requireSuperAdmin, async (req: Re
 // ★ 2026-06-13: AI 학습 데이터(인비토AI) 열람 — ceo 전용 (AI_TRAINING_VIEWER_IDS, 기본 'ceo')
 router.get('/ai-training/access', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   res.json({ allowed: await isAiTrainingViewer(req.user?.userId) });
+});
+
+// ★ 2026-08-05: 총 정산표 열람 — ceo 전용 (SETTLEMENT_OVERVIEW_VIEWER_IDS, 기본 'ceo'). 메뉴 노출 게이팅용
+router.get('/billing/overview/access', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  res.json({ allowed: await isSettlementOverviewViewer(req.user?.userId) });
+});
+
+/**
+ * ★ 2026-08-05 총 정산표 (Harold 명시) — 전 고객사의 총 청구금·수금완료·미납을 한 화면에.
+ *
+ * 원천은 `billings` 하나다(장 = 청구서 1건). 미납 = 수금완료가 아닌 장의 합이고,
+ * **기본은 누적**이다 — 월로 끊으면 지난달 못 받은 돈이 화면에서 사라진다.
+ * 삭제된 장은 행이 없어 자동으로 빠지고, 한 회사가 scope 분할로 여러 장이어도 장 단위 합이라 중복이 아니다.
+ * 합계는 회사별 행을 더해 만든다 — 별도 집계 쿼리를 두면 표의 합과 상단 카드가 갈릴 수 있다.
+ */
+router.get('/billing/overview', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    if (!(await isSettlementOverviewViewer(req.user?.userId))) {
+      return res.status(403).json({ error: '총 정산표 열람 권한이 없습니다.' });
+    }
+    // 기간 필터(선택) — YYYY-MM. 미지정이면 누적 전체.
+    const from = String(req.query.from || '').trim();
+    const to = String(req.query.to || '').trim();
+    const cond: string[] = [];
+    const params: any[] = [];
+    if (/^\d{4}-\d{2}$/.test(from)) {
+      params.push(`${from}-01`);
+      cond.push(`make_date(b.billing_year, b.billing_month, 1) >= $${params.length}::date`);
+    }
+    if (/^\d{4}-\d{2}$/.test(to)) {
+      params.push(`${to}-01`);
+      cond.push(`make_date(b.billing_year, b.billing_month, 1) <= $${params.length}::date`);
+    }
+    const where = cond.length > 0 ? `WHERE ${cond.join(' AND ')}` : '';
+    const r = await pool.query(
+      `SELECT b.company_id,
+              c.company_name,
+              COUNT(*)::int                                                   AS sheet_count,
+              COALESCE(SUM(b.total_amount), 0)                                AS total_amount,
+              COALESCE(SUM(b.total_amount) FILTER (WHERE b.status = 'paid'), 0)   AS paid_amount,
+              COALESCE(SUM(b.total_amount) FILTER (WHERE b.status <> 'paid'), 0)  AS unpaid_amount,
+              COALESCE(SUM(b.subtotal), 0)                                    AS subtotal,
+              COALESCE(SUM(b.vat), 0)                                         AS vat,
+              MAX(b.billing_year * 100 + b.billing_month)::int                AS last_period,
+              COUNT(*) FILTER (WHERE b.status <> 'paid')::int                 AS unpaid_sheets
+         FROM billings b
+         JOIN companies c ON c.id = b.company_id
+        ${where}
+        GROUP BY b.company_id, c.company_name
+        ORDER BY unpaid_amount DESC, c.company_name`,
+      params,
+    );
+    const rows = r.rows.map((x: any) => ({
+      company_id: x.company_id,
+      company_name: x.company_name,
+      sheet_count: Number(x.sheet_count) || 0,
+      unpaid_sheets: Number(x.unpaid_sheets) || 0,
+      total_amount: Number(x.total_amount) || 0,
+      paid_amount: Number(x.paid_amount) || 0,
+      unpaid_amount: Number(x.unpaid_amount) || 0,
+      subtotal: Number(x.subtotal) || 0,
+      vat: Number(x.vat) || 0,
+      last_period: x.last_period ? String(x.last_period) : null,
+    }));
+    // 상단 카드 = 아래 표의 합. 다른 쿼리로 따로 세면 둘이 갈린다.
+    const sum = (k: 'total_amount' | 'paid_amount' | 'unpaid_amount') => rows.reduce((s, x) => s + x[k], 0);
+    return res.json({
+      success: true,
+      range: { from: /^\d{4}-\d{2}$/.test(from) ? from : null, to: /^\d{4}-\d{2}$/.test(to) ? to : null },
+      summary: {
+        company_count: rows.length,
+        sheet_count: rows.reduce((s, x) => s + x.sheet_count, 0),
+        total_amount: sum('total_amount'),
+        paid_amount: sum('paid_amount'),
+        unpaid_amount: sum('unpaid_amount'),
+        unpaid_company_count: rows.filter((x) => x.unpaid_amount > 0).length,
+      },
+      rows,
+    });
+  } catch (error: any) {
+    console.error('총 정산표 조회 오류:', error?.message || error);
+    return res.status(500).json({ error: error?.message || '총 정산표 조회 실패' });
+  }
 });
 
 // ===== 베스트 문안(업종 큐레이션 시드) — 슈퍼관리자 공용(직원 큐레이션) =====

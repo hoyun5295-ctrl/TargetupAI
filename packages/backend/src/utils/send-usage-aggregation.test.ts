@@ -405,6 +405,26 @@ describe('추가 항목 파생 — 매핑 원장이 진실 (2026-08-04)', () => 
     expect(buildExtraBillingItems([{ ...legacy('080_fee', 9000, false), map_is_active: false }])).toEqual([]);
   });
 
+  it('★재오픈(리스킨) — 매핑을 다른 회사로 옮기면 옛 행도 그 회사에서 청구되지 않는다', () => {
+    // 접수: 080 번호의 청구 회사를 리스킨 → 인비토로 바꿨는데 리스킨에 9,000+4,000이 계속 실렸다.
+    // 원인: 옛 종류 행이 매핑을 아예 보지 않았다(비활성만 막고 타사 이전은 안 봤다).
+    const moved = (kind: string, amount: number): ExtraItemSourceRow => ({
+      kind, supply_amount: amount, period_month: '2026-07-01', source_ref: '0805663330',
+      map_found: false,        // 이 회사에는 매핑이 없다
+      map_exists_any: true,    // 그런데 그 번호의 매핑은 (다른 회사에) 있다 = 사람이 옮겼다
+      has_call_snapshot: false,
+    });
+    expect(buildExtraBillingItems([moved('080_fee', 9000), moved('080_svc', 4000)])).toEqual([]);
+  });
+
+  it('★매핑이 아예 없는 옛 행은 종전대로 청구한다 — 원장 도입 전 행까지 막으면 과소청구다', () => {
+    const orphan: ExtraItemSourceRow = {
+      kind: '080_fee', supply_amount: 9000, period_month: '2026-07-01', source_ref: '0809999999',
+      map_found: false, map_exists_any: false, has_call_snapshot: false,
+    };
+    expect(byType([orphan])).toEqual({ EXTRA_080_FEE: 9000 });
+  });
+
   it('항목줄은 같은 단가끼리 합쳐 참 산식으로 인쇄된다 — 시세이도 3개 부서 10만원', () => {
     const rows = ['0805647710', '0805647720', '0805647730'].map((n) => snap({
       source_ref: n, map_monthly_fee_supply: 100000, map_kt_fee_supply: 0, map_charge_call_fee: false,

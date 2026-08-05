@@ -78,6 +78,16 @@ export function isAiTrainingViewer(superAdminId?: string | null): Promise<boolea
 }
 
 /**
+ * ★ 2026-08-05 총 정산표 열람 권한 — SETTLEMENT_OVERVIEW_VIEWER_IDS(기본 'ceo').
+ * 전 고객사의 총 청구금·수금·미납을 한 화면에 모으는 소유자용 집계라 감사 로그와 같은 급으로 잠근다.
+ * 직원 계정은 자기 담당 정산만 보고, 회사 전체 미납 총액은 보지 않는다(Harold 명시 2026-08-05).
+ * 감사 로그·AI 학습과 **별도 env** — 한 계정을 열어줄 때 다른 축까지 함께 열리면 안 된다.
+ */
+export function isSettlementOverviewViewer(superAdminId?: string | null): Promise<boolean> {
+  return isSuperAdminAllowed(superAdminId, 'SETTLEMENT_OVERVIEW_VIEWER_IDS', 'ceo', 'settlement-overview');
+}
+
+/**
  * ★ 2026-07-17 발송 라인그룹 쓰기(생성/수정/삭제) 권한 — LINE_GROUP_ADMIN_USERS(기본 'ceo,admin').
  * Harold 명시: 라인 설정은 ceo·admin 두 계정만.
  * 라인그룹은 발송 라우팅 축이라 잘못 건드리면 적재·취소·집계·정산이 한꺼번에 어긋난다

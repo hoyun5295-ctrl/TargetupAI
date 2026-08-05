@@ -22,6 +22,7 @@ import { taxbillIssueDatePreviewText, type TaxbillDayPolicy } from '../utils/tax
 import ImcProfileImportModal from '../components/alimtalk/ImcProfileImportModal';
 import Billing080Modal from '../components/Billing080Modal'; // ★ 2026-07-30 추가 청구 관리 (서수란 접수 — 080 KT 명세서 분할 + 부가서비스 수기)
 import MinimumChargeModal from '../components/MinimumChargeModal'; // ★ 2026-07-30 최소과금 정액 발행 (Harold 확정)
+import SettlementOverviewModal from '../components/SettlementOverviewModal'; // ★ 2026-08-05 총 정산표 (ceo 전용)
 import QtyAdjustModal, { type QtyAdjustTarget } from '../components/QtyAdjustModal'; // ★ 2026-08-04 수량 수정 발행 (서수란 접수)
 import { creditTxLabel } from '../constants/credit'; // 크레딧 사용 이력 작업명 라벨
 import { resolveChannelLabel, resolveSendTypeChipClass, resolveSendTypeLabel } from '../utils/campaign-axis';
@@ -387,6 +388,9 @@ const [billingsLoading, setBillingsLoading] = useState(false);
 const [filterYear, setFilterYear] = useState(new Date().getFullYear());
 // ★ 2026-07-28 발행됨·미발송만 보기 토글 (emailed_at IS NULL)
 const [billingUnsentOnly, setBillingUnsentOnly] = useState(false);
+// ★ 2026-08-05 총 정산표(ceo 전용) — 권한이 확인된 계정에만 진입점을 그린다.
+const [canViewSettlementOverview, setCanViewSettlementOverview] = useState(false);
+const [showSettlementOverview, setShowSettlementOverview] = useState(false);
 // 컨펌 메일 재시도 중인 장 — 같은 행을 연타해 중복 요청이 겹치지 않게 한다.
 const [retryingBillingId, setRetryingBillingId] = useState<string | null>(null);
 const [showBillingDetail, setShowBillingDetail] = useState(false);
@@ -717,6 +721,16 @@ const [emailResendAt, setEmailResendAt] = useState<string | null>(null);
 // ★ 2026-08-04 loadInvoices 제거 — 그 데이터를 그리던 "거래내역서 목록" 섹션이 죽은 목록이라 사라졌다.
 useEffect(() => { if (activeTab === 'billing') { loadBillings(); } }, [activeTab]);
 useEffect(() => { if (activeTab === 'billing') loadBillings(); }, [filterYear, billingUnsentOnly]);
+// ★ 2026-08-05 총 정산표 — 소유자(ceo) 전용이라 **진입점 자체를 권한 응답으로 가린다**(감사 로그와 같은 방식).
+//   서버가 최종 판정이고(403), 이 값은 안 보이게 하는 용도다. 실패는 false로 두어 조용히 숨긴다.
+useEffect(() => {
+  if (activeTab !== 'billing') return;
+  const token = localStorage.getItem('token');
+  fetch('/api/admin/billing/overview/access', { headers: { Authorization: `Bearer ${token}` } })
+    .then((r) => r.json())
+    .then((d) => setCanViewSettlementOverview(!!d?.allowed))
+    .catch(() => setCanViewSettlementOverview(false));
+}, [activeTab]);
 useEffect(() => { if (activeTab === 'deposits') loadChargeManagement(1); }, [activeTab, chargeTxCompanyFilter, chargeTxTypeFilter, chargeTxMethodFilter, chargeTxStartDate, chargeTxEndDate]);
 useEffect(() => { if (activeTab === 'deposits' || activeTab === 'credits') loadCreditRequests(); if (activeTab === 'credits') { loadAllCreditTx(1); loadCreditRisk(); } }, [activeTab]);
 useEffect(() => { loadCreditRequests(); }, []);  // 크레딧 관리 알람 badge 상시 표시용 mount 로드
@@ -9661,6 +9675,8 @@ const handleApproveRequest = async (id: string) => {
             <QtyAdjustModal open={qtyAdjustTarget !== null} target={qtyAdjustTarget}
               onClose={() => setQtyAdjustTarget(null)}
               onReissued={() => { setQtyAdjustTarget(null); loadBillings(); }} />
+            {/* ★ 2026-08-05 총 정산표 — 읽기 전용 집계. 진입점은 위 [총 정산표](ceo 전용) */}
+            <SettlementOverviewModal show={showSettlementOverview} onClose={() => setShowSettlementOverview(false)} />
 
             {bulkList !== null && (() => {
               const picked = bulkPickedIds();
@@ -10138,6 +10154,15 @@ const handleApproveRequest = async (id: string) => {
                 정산 목록
               </h3>
               <div className="flex items-center gap-2">
+                {/* ★ 2026-08-05 총 정산표 — 소유자(ceo) 전용. 전 고객사 총 청구금·수금·미납을 한 화면에.
+                    권한이 없는 계정에는 버튼 자체가 안 그려지고, 서버가 403으로 최종 판정한다. */}
+                {canViewSettlementOverview && (
+                  <button type="button" onClick={() => setShowSettlementOverview(true)}
+                    title="전 고객사의 총 청구금·수금완료·미납을 한 화면에서 봅니다"
+                    className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors">
+                    총 정산표
+                  </button>
+                )}
                 {/* ★ 2026-07-28 발행됐는데 고객에게 안 나간 장. 금액 불일치로 발송이 막힌 장은 컨펌 추적 목록에 안 뜬다 */}
                 <button type="button" onClick={() => setBillingUnsentOnly(!billingUnsentOnly)}
                   className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${billingUnsentOnly ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
@@ -10224,16 +10249,24 @@ const handleApproveRequest = async (id: string) => {
                                 {retryingBillingId === b.id ? '발송 중...' : '발송'}
                               </button>
                             )}
-                          {b.status === 'draft' && (
+                            <button onClick={() => downloadBillingPdf(b.id, `${b.company_name}_${b.billing_year}_${b.billing_month}`)}
+                              className="px-2 py-1 text-xs bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200 transition-colors">PDF</button>
+                            {/* ★ 2026-08-05 (서수란 질의 "확정 버튼의 의미가 뭔가요?") — 축을 눈에 보이게 갈랐다.
+                                발송·PDF는 **발행 축**이고, 아래 둘은 **수금 축**(draft → confirmed → paid)이다.
+                                확정은 발행의 관문이 아니다 — 발송은 status를 보지 않고, 세금계산서는 고객 컨펌
+                                (또는 기한 도래)이 큐를 움직인다. 같은 줄에 같은 크기로 붙어 있어서 담당자가
+                                "이걸 눌러야 다음이 되나"로 읽었다. 구분선 + 문구로 뜻을 드러낸다. */}
+                            <span className="mx-0.5 h-4 w-px bg-gray-200" aria-hidden="true" />
+                            {b.status === 'draft' && (
                               <button onClick={() => handleBillingStatusChange(b.id, 'confirmed')}
-                                className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors">확정</button>
+                                title="수금 관리용 표시입니다. 이 금액으로 굳혔다는 뜻이고, 발송·세금계산서 발행과는 무관합니다. 확정 뒤에는 삭제할 때 사유가 필요합니다."
+                                className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors">청구 확정</button>
                             )}
                             {b.status === 'confirmed' && (
                               <button onClick={() => handleBillingStatusChange(b.id, 'paid')}
+                                title="입금을 받았다는 표시입니다. 총 정산표의 미납 집계에서 빠집니다."
                                 className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors">수금완료</button>
                             )}
-                            <button onClick={() => downloadBillingPdf(b.id, `${b.company_name}_${b.billing_year}_${b.billing_month}`)}
-                              className="px-2 py-1 text-xs bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200 transition-colors">PDF</button>
                             {/* ★ 2026-08-04 옛 [발송](openEmailModal → POST /:id/send-email)을 여기서 뺐다.
                                 그 경로는 emailed_at만 찍고 컨펌 추적행을 만들지 않아, 누르는 순간 그 청구서가
                                 컨펌·이의신청·세금계산서 흐름에서 통째로 빠졌다(서수란 0804 접수의 원인).
@@ -10575,14 +10608,18 @@ const handleApproveRequest = async (id: string) => {
                   <div className="px-6 py-3 border-t bg-gray-50 flex items-center justify-between flex-shrink-0">
                     <div className="flex items-center gap-2">
                       {billingStatusBadge(detailBilling.status)}
+                      {/* ★ 2026-08-05 목록과 같은 문구 — 이 줄은 **수금 축**이다(발행 액션은 오른쪽). */}
                       {detailBilling.status === 'draft' && (
                         <button onClick={() => handleBillingStatusChange(detailBilling.id, 'confirmed')}
-                          className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">확정</button>
+                          title="수금 관리용 표시입니다. 이 금액으로 굳혔다는 뜻이고, 발송·세금계산서 발행과는 무관합니다. 확정 뒤에는 삭제할 때 사유가 필요합니다."
+                          className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">청구 확정</button>
                       )}
                       {detailBilling.status === 'confirmed' && (
                         <button onClick={() => handleBillingStatusChange(detailBilling.id, 'paid')}
+                          title="입금을 받았다는 표시입니다. 총 정산표의 미납 집계에서 빠집니다."
                           className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">수금완료</button>
                       )}
+                      <span className="text-[11px] text-gray-400">수금 관리 · 발행과 무관</span>
                     </div>
                     <div className="flex items-center gap-2">
                       {/* ★ 2026-08-04 (서수란 접수) 상세 모달의 [정산서 발송]도 옛 경로(openEmailModal →

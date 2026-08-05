@@ -558,9 +558,11 @@ ${EXTRA_ITEM_SOURCE_JOIN}
     const sheets = splitBillingSheets(allBillingItems, scope as BillingScope);
 
     // ★ 2026-08-04 조정 후 수량 음수 판정은 **장을 나눈 뒤 장별로** 한다(Codex 재검증 high).
-    //   계정 축은 장이 이미 갈랐으므로, 여기서 장 안의 항목줄(채널·유형·발송ID·단가)만 본다.
+    //   계정 축은 장이 이미 갈랐으므로, 여기서 장 안의 항목줄(채널·유형·단가)만 본다.
     //   회사 전체 합으로 보면 계정 A가 -1인데 B가 100건이라 통과해 과청구가 되고,
-    //   반대로 계정을 키에 넣으면 합산 발행의 정상 조정이 거부된다. 둘 다 여기서 닫힌다.
+    //   반대로 귀속 축(계정·발송ID)을 키에 넣으면 정상 조정이 거부된다. 둘 다 여기서 닫힌다.
+    //   ★ 2026-08-05 재오픈 정정 — 판정 축에서 발송ID를 뺐다. 인쇄 줄(`buildInvoiceLines`)이 쓰는
+    //   축과 정확히 같아야 한다(상세 = `billing-qty-adjust.ts` 함수 주석).
     for (const sh of sheets) {
       const negatives = findNegativeAdjustedTypes(sh.items as PricedBillingItem[]);
       if (negatives.length > 0) {

@@ -1130,6 +1130,9 @@ ${EXTRA_ITEM_SOURCE_JOIN}
         blocks_issue: kind === '080_call' && !row.map_found,
         // 비활성 = 사람이 명시한 청구 중단. 매핑 없음과 다른 상태다.
         inactive: !!row.map_found && row.map_is_active === false,
+        // ★ 2026-08-05 매핑이 다른 회사로 옮겨졌다 = 이 회사 청구가 아니다(옛 종류 행 포함).
+        //   조용히 빼면 담당자는 "왜 안 청구되지"를 알 수 없다 — 상태로 드러낸다.
+        moved_to_other_company: kind !== 'manual' && !!row.map_exists_any && !row.map_found,
         // 옛 `080_fee`·`080_svc` 행 중 현행 스냅샷과 겹쳐 청구되지 않는 것(정리 대상).
         legacy_superseded: kind !== 'manual' && kind !== '080_call' && !!row.has_call_snapshot,
       };

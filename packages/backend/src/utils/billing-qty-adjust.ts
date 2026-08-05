@@ -121,6 +121,12 @@ export function buildAdjustmentBillingItems(
  *
  *   ⚠ 그래서 **호출은 반드시 `splitBillingSheets` 이후 장별로** 한다. 계정 축은 장이 이미 가르므로
  *   키에 넣지 않는다(넣으면 합산 발행의 정상 조정이 거부된다 — Codex 재검증 high).
+ *
+ * ★ 2026-08-05 재오픈 정정(서수란) — **귀속 축은 어느 것도 키에 넣지 않는다.**
+ *   0804에 계정(userId)만 빼고 발송ID(agentId)를 남겨, 발송ID를 지정하지 않은 조정(agent_id NULL)이
+ *   원본 행(agentId 있음)과 다른 버킷에 홀로 떨어져 **9,438 → 9,435 하향 조정이 -3으로 거부**됐다.
+ *   같은 뿌리가 축만 바꿔 두 번 났다. 판정 키는 `buildInvoiceLines`가 쓰는 축(채널·유형·단가)과 **정확히 같다**.
+ *   판정이 인쇄 줄보다 좁으면 가려진 음수를 더 잡는 게 아니라 정상 조정을 오거부할 뿐이다.
  */
 export function findNegativeAdjustedTypes(
   items: PricedBillingItem[],
@@ -130,10 +136,12 @@ export function findNegativeAdjustedTypes(
     const channel = String(it.channel);
     // 요금제·추가 항목은 수량 축이 없다(전부 0) — 조정 대상이 아니므로 판정에서 뺀다.
     if (channel === 'plan' || channel === 'extra') continue;
-    // ★ 계정은 키에 넣지 않는다 — **장이 이미 계정으로 나뉜 뒤** 장별로 부르기 때문이다.
-    //   여기 계정을 넣으면 합산 발행에서 조정(user_id NULL)이 원본 행(userId 있음)과 다른 버킷이 되어
-    //   9,438 → 9,435 같은 **정상 하향 조정이 -3으로 거부된다**(Codex 재검증 high — 직전 수정의 회귀).
-    const key = `${channel} ${it.typeKey} ${it.agentId || ''} ${it.unitPrice}`;
+    // ★ 키 = 청구서에 인쇄되는 줄과 **같은 축**(채널·유형·단가). `buildInvoiceLines`가 그 셋으로만 묶는다.
+    //   ⛔ 귀속 축(계정 userId·발송ID agentId)은 넣지 않는다 — 장이 계정을 이미 가르고, 조정 행은
+    //   그 축이 비어 있을 수 있다(발송ID 미지정). 넣으면 조정이 원본과 다른 버킷에 홀로 떨어져
+    //   **정상 하향 조정이 거부**된다(0804 계정 축 · 0805 발송ID 축 — 같은 뿌리로 두 번).
+    //   과청구 방향은 단가(다른 줄 = 다른 버킷)와 장 분할(계정)이 이미 막는다.
+    const key = `${channel} ${it.typeKey} ${it.unitPrice}`;
     if (!acc.has(key)) acc.set(key, { channel, typeKey: String(it.typeKey), total: 0 });
     acc.get(key)!.total += Number(it.success) || 0;
   }

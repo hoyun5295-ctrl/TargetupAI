@@ -1134,6 +1134,12 @@ export interface ExtraItemSourceRow {
   user_id?: string | null;
   /** 매핑 원장이 그 회사에 실재하는가 — false면 계약값(이용료·부가서비스)의 근거가 없다 */
   map_found?: boolean | null;
+  /**
+   * 그 번호의 매핑이 **어느 회사에든** 있는가 (★2026-08-05 신설).
+   * `map_found`는 회사로 조인해서 "타사로 옮겨졌다"와 "매핑이 아예 없다"를 구분하지 못하는데,
+   * 그 둘은 처분이 반대다 — 옮겨졌으면 이 회사 청구가 아니고, 없으면 옛 값이 유일한 근거다.
+   */
+  map_exists_any?: boolean | null;
   /** 원장 활성 — false면 그 번호는 **청구하지 않는다**(신성통상 0803 접수: 무료 전환을 비활성으로 표현했다) */
   map_is_active?: boolean | null;
   map_monthly_fee_supply?: any;
@@ -1197,7 +1203,11 @@ export const EXTRA_ITEM_SOURCE_SELECT = `
                        WHERE c080.company_id = e.company_id
                          AND c080.period_month = e.period_month
                          AND c080.kind = '080_call'
-                         AND c080.source_ref = e.source_ref) AS has_call_snapshot`;
+                         AND c080.source_ref = e.source_ref) AS has_call_snapshot,
+              -- ★ 2026-08-05 그 번호의 매핑이 **어느 회사에든** 있는가. 위 map_found는 회사로 조인해서
+              --   "타사로 옮겨졌다"와 "매핑이 아예 없다"를 구분하지 못한다 — 그 둘은 처분이 반대다.
+              EXISTS (SELECT 1 FROM billing_080_numbers a080
+                       WHERE a080.number = e.source_ref) AS map_exists_any`;
 
 export const EXTRA_ITEM_SOURCE_JOIN = `
          LEFT JOIN users eu ON eu.id = e.user_id AND eu.company_id = e.company_id
@@ -1278,7 +1288,17 @@ export function buildExtraBillingItems(rows: ExtraItemSourceRow[]): PricedBillin
       continue;
     }
     const legacyType = LEGACY_080_KIND_TO_TYPE[kind];
-    if (legacyType && !r?.has_call_snapshot) push(legacyType, won(r?.supply_amount));
+    if (!legacyType) continue;
+    // ★ 2026-08-05 재오픈 정정(서수란) — 옛 행도 매핑 원장의 통제 안에 둔다.
+    //   그 번호의 매핑이 **다른 회사로 옮겨졌으면 이 회사 청구가 아니다.** 종전엔 옛 행이 매핑을
+    //   아예 보지 않아, 청구 회사를 옮겨도 옛 회사에 이용료+부가서비스가 계속 실렸다(리스킨 실측).
+    //   비활성은 위에서 이미 막고 있었는데 이 축만 빠져 있었다 — 0804에 현행 종류만 원장 파생으로
+    //   바꾸고 옛 종류를 예외로 남긴 것이 뿌리다.
+    //   ⛔ 매핑이 **아예 없는** 옛 행은 종전대로 자기 값으로 싣는다. 원장 도입 전 행까지 막으면
+    //   정상 청구가 조용히 사라진다(과소청구). 0805 실측 = 미청구 옛 행 24건 전부 매핑 존재,
+    //   그중 타사 이전은 리스킨 2행뿐이라 이 규칙이 바꾸는 것은 그 2행이다.
+    if (r?.map_exists_any && !r?.map_found) continue;
+    if (!r?.has_call_snapshot) push(legacyType, won(r?.supply_amount));
   }
   return out;
 }
