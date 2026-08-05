@@ -319,6 +319,49 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
     expect(fn, '이 경로는 상태를 쓰지 않는다 — 쓰는 순간 발행 축과 겹친다').not.toMatch(/UPDATE\s+taxbill_issues/);
   });
 
+  it('정산 회사 잠금은 CT 하나뿐이다 — 인라인으로 복사하면 그 복제본이 갈라져 한쪽만 막는다 (B-0805-1)', () => {
+    // 기원: 같은 잠금이 7벌로 복제돼 있어 발행에만 회사 행을 더했더니 수동완료·080은 옛 축에 남았다.
+    for (const [name, src] of [
+      ['billing-issue', issueSrc], ['billing-bulk', bulkSrc], ['billing.ts', billingSrc],
+      ['billing-080', read('./billing-080.ts')],
+    ] as const) {
+      expect(src.includes("hashtext('billing')"), `${name}에 인라인 정산 잠금이 남아 있다`).toBe(false);
+    }
+    const lockSrc = read('./billing-lock.ts');
+    // 두 겹 — advisory(옛 축, 배포 호환)와 회사 행(정규 축, 표기 무관·요금제 변경과 직렬화).
+    expect(lockSrc).toContain("hashtext('billing')");
+    expect(lockSrc, '회사 행 잠금이 빠지면 표기가 갈린 두 요청이 나란히 통과한다').toContain('FOR NO KEY UPDATE');
+    // FOR UPDATE면 자식 INSERT의 KEY SHARE까지 막는다 — 집계를 트랜잭션 안에서 도는 경로가 있어 그 몇 초가 전파된다.
+    expect(lockSrc).not.toMatch(/companies WHERE id = \$1::uuid FOR UPDATE/);
+    // 다건 정렬은 **DB가 만든다.** JS에서 정규화해 정렬하면 표기가 하나 늘 때마다 순서가 다시 뒤집힌다
+    // (대소문자 → 중괄호 → 하이픈 생략으로 같은 부류가 세 번 났다). billing-lock.test.ts가 이 계약을 못 박는다.
+    expect(lockSrc, '다건 순서를 DB에 묻지 않는다').toContain('ORDER BY c.id');
+    expect(lockSrc, 'JS에서 다시 정렬하면 그 정렬이 다시 축이 된다').not.toContain('.sort()');
+  });
+
+  it('취소된 장부는 멱등 판정에서 빠진다 — 안 빼면 취소 뒤 다시 발행하려 해도 조용히 멈춘다', () => {
+    const workerSrc = read('./taxbill-worker.ts');
+    expect(workerSrc, '워커의 NOT EXISTS가 cancelled를 세고 있다').toMatch(/t\.kind = 'original' AND t\.status <> 'cancelled'/);
+    expect(billingSrc, '작성일자 지정의 NOT EXISTS가 cancelled를 세고 있다').toMatch(/t\.kind = 'original' AND t\.status <> 'cancelled'/);
+    // 취소 창구 자체 — ready만 받는다(submitted는 팝빌에 올라갔을 수 있다).
+    const at = billingSrc.indexOf("/taxbill-issues/:id/cancel");
+    expect(at, '발급 대기 취소 라우트가 없다').toBeGreaterThan(-1);
+    const route = billingSrc.slice(at, at + 2500);
+    expect(route).toContain("status = 'ready'");
+    expect(route, '취소 뒤 추적행을 ready에 두면 어느 쪽으로도 못 간다').toContain("taxbill_status = 'manual_wait'");
+  });
+
+  it('발행된 세금계산서가 붙은 정산은 재발행만이 아니라 **일반 삭제도** 막는다 — 지우면 고아 계산서가 남고 원본이 한 장 더 나간다', () => {
+    const at = billingSrc.indexOf('BILLING_TAXBILL_ALREADY_ISSUED');
+    expect(at, '세금계산서 가드를 찾지 못했다').toBeGreaterThan(-1);
+    // 가드가 `if (reissue) {` 안에 있으면 사유를 적은 일반 삭제가 그대로 통과한다(B-0805-2 기원).
+    const before = billingSrc.slice(0, at);
+    const lastReissueOpen = before.lastIndexOf('if (reissue) {');
+    const lastTargetIds = before.lastIndexOf('const targetIds =');
+    expect(lastTargetIds, '가드는 삭제 대상 확정 뒤에 있어야 한다').toBeGreaterThan(-1);
+    expect(lastReissueOpen, '가드가 재발행 분기 안에 갇혀 있다').toBeLessThan(lastTargetIds);
+  });
+
   it('재발송 실패를 전부 422로 내리지 않는다 — 팝빌 게이트·SDK 장애가 입력 오류로 기록되면 알림·재시도가 막힌다', () => {
     const at = billingSrc.indexOf("/taxbill-issues/:id/resend-email");
     const route = billingSrc.slice(at, at + 2500);

@@ -44,6 +44,8 @@ import {
   loadPlanChanges, buildPlanSegments, sumPlanSegments, evaluatePlanHistoryGate,
   countPlanChanges, planChangesFingerprint,
 } from './plan-proration';
+// ★ 2026-08-05 회사 단위 정산 잠금 CT — 7벌 복제를 하나로. 인라인 복사 금지(그 순간 8번째 복제본이다).
+import { lockCompanyForBilling } from './billing-lock';
 
 /** 발행 차단·검증 실패. status = HTTP 상태, body = 그대로 응답으로 나갈 JSON(코드·문구 계약 유지). */
 export class BillingIssueError extends Error {
@@ -430,8 +432,8 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
     await client.query('BEGIN');
 
     // 같은 회사 정산을 동시에 생성하면 위 1번 중복검사를 양쪽 다 통과할 수 있다 — 직렬화한다.
-    // ★ 2026-07-26 잠금 축은 **회사 단위**다.
-    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext('billing'))`, [String(company_id)]);
+    // ★ 2026-07-26 잠금 축은 **회사 단위**다. ★ 2026-08-05 두 겹(advisory + 회사 행)을 CT 하나가 소유한다.
+    await lockCompanyForBilling(client, company_id);
 
     // 잠금을 기다리는 동안 다른 요청이 먼저 만들었을 수 있다 — 잠금 획득 후 재검사.
     // ★ 2026-07-29 수동 정산완료도 **같은 잠금 아래에서** 본다. 사람이 따로 청구한 구간을 자동 청구서가
@@ -926,7 +928,10 @@ export async function issueMinimumChargeBilling(input: {
   try {
     await client.query('BEGIN');
     // 발행·반영·취소와 같은 회사 잠금 — 한 회사·한 기간 = 발행 1건 불변식을 같은 축에서 지킨다.
-    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext('billing'))`, [String(company_id)]);
+    // ★ 2026-08-05 회사 행 잠금이 **요금제 이력을 읽기 전으로** 올라왔다(CT가 두 겹을 함께 잡는다).
+    //   아래에서 잡으면 그 사이에 소급 요금제 변경이 커밋될 수 있고, 표기가 갈린 두 발행도 못 막는다.
+    //   ★ Codex 2R 수용분(크레딧 승인·차감 경로 직렬화)은 그대로다 — 같은 행, 더 이른 시점일 뿐이다.
+    await lockCompanyForBilling(client, company_id);
 
     // ★ 2026-08-04 일반 발행과 **같은 판정 문**(readBillingPeriodConflicts) — 정액 경로만 문구·필드가
     //   달라 운영자가 같은 사유를 다른 말로 받던 것을 함께 통일했다.
@@ -1018,11 +1023,8 @@ ${EXTRA_ITEM_SOURCE_JOIN}
     // 남은 것은 청구액 0인 스냅샷뿐이다(전액 무료 번호·비활성 번호). 이 발행이 소비해 교착을 끊는다.
     const zeroExtraIds: string[] = extras.rows.map((r: any) => String(r.id));
 
-    // ★ Codex 2R 수용 — 회사 행 잠금으로 크레딧 승인·차감 경로(companies FOR UPDATE 직렬화)와 줄을 세운다.
-    //   KST 자정 경계에서 전월 타임스탬프를 가진 미커밋 크레딧 트랜잭션이 READ COMMITTED 조회에 안 보이는
-    //   창을 닫는다 — 잠금 대기 후 조회하므로 커밋된 뒤의 상태를 본다.
-    await client.query(`SELECT 1 FROM companies WHERE id = $1::uuid FOR UPDATE`, [company_id]);
-
+    // 회사 행 잠금은 트랜잭션 초입으로 올라갔다(★2026-08-05 B-0805-1). 크레딧 승인·차감 경로와 줄을 세우는
+    // Codex 2R 수용분은 그대로 성립한다 — KST 자정 경계의 미커밋 크레딧 트랜잭션은 그 잠금 뒤에 보인다.
     // ★ Codex 1R 수용 — 미청구 AI 크레딧(승인 충전·초과사용)이 있으면 정액 발행 거부(fail-closed).
     //   정액 청구서가 그 기간을 덮으면 겹침 차단 때문에 일반 발행이 막혀 크레딧이 영구 미청구가 된다.
     const unbilledCredit = await client.query(

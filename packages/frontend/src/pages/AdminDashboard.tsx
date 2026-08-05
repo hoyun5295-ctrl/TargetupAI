@@ -1393,6 +1393,11 @@ const [modifySubmitting, setModifySubmitting] = useState(false);
 const [taxbillResendTarget, setTaxbillResendTarget] = useState<any | null>(null);
 const [taxbillResendEmail, setTaxbillResendEmail] = useState('');
 const [taxbillResendBusy, setTaxbillResendBusy] = useState(false);
+// ★ 2026-08-05 발급 대기 취소 — 되돌리는 경로가 고객 이의신청 하나뿐이라, 발행 직전에 금액 오류를
+//   발견해도 5분 뒤 워커가 그대로 국세청에 보냈다.
+const [taxbillCancelTarget, setTaxbillCancelTarget] = useState<any | null>(null);
+const [taxbillCancelReason, setTaxbillCancelReason] = useState('');
+const [taxbillCancelBusy, setTaxbillCancelBusy] = useState(false);
 // ★ 2026-07-29 수동 정산완료 — 우리 정산으로 발행할 수 없어 사람이 따로 처리한 회사의 그 달 기록.
 //   담긴 좌/우 목록의 다중 선택(빼기)도 여기에 둔다 — 91개사를 한 줄씩 빼는 것은 쓸 수 없다.
 const [bulkManualRows, setBulkManualRows] = useState<any[]>([]);
@@ -1801,6 +1806,33 @@ const handleTaxbillRetry = async (issueId: string) => {
     loadTaxbillIssues();
   } catch (e: any) {
     setBillingToast({ msg: e?.message || '재시도 요청 실패', type: 'error' });
+  }
+};
+
+// ★ 2026-08-05 발급 대기 취소 — 워커가 국세청으로 보내기 전에 큐에서 내린다.
+const handleTaxbillCancel = async () => {
+  if (!taxbillCancelTarget) return;
+  const reason = taxbillCancelReason.trim();
+  if (!reason) { setBillingToast({ msg: '취소 사유를 적어주세요', type: 'error' }); return; }
+  setTaxbillCancelBusy(true);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/admin/billing/taxbill-issues/${taxbillCancelTarget.id}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ reason }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || '발급 대기 취소 실패');
+    setBillingToast({ msg: data?.message || '발급 대기에서 내렸습니다', type: 'success' });
+    setTaxbillCancelTarget(null);
+    setTaxbillCancelReason('');
+    loadTaxbillIssues();
+    loadConfirmBoard();
+  } catch (e: any) {
+    setBillingToast({ msg: e?.message || '발급 대기 취소 실패', type: 'error' });
+  } finally {
+    setTaxbillCancelBusy(false);
   }
 };
 
@@ -10217,6 +10249,13 @@ const handleApproveRequest = async (id: string) => {
                                   <button onClick={() => handleTaxbillRetry(t.id)}
                                     className="shrink-0 px-2 py-0.5 bg-slate-500 text-white rounded text-[10px] font-semibold hover:bg-slate-600">재시도</button>
                                 )}
+                                {/* ★ 2026-08-05 발급 대기 취소 — 워커가 국세청으로 보내기 전 유일한 제동 장치다.
+                                    그전에는 되돌리는 경로가 고객 이의신청뿐이라 담당자가 손댈 곳이 없었다. */}
+                                {t.status === 'ready' && (
+                                  <button onClick={() => { setTaxbillCancelTarget(t); setTaxbillCancelReason(''); }}
+                                    title="아직 발행 전입니다. 큐에서 내려 워커가 보내지 않게 합니다."
+                                    className="shrink-0 px-2 py-0.5 border border-rose-300 bg-rose-50 text-rose-700 rounded text-[10px] font-semibold hover:bg-rose-100">발급 대기 취소</button>
+                                )}
                               </div>
                               <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-400">
                                 {t.nts_confirm_num ? <span>승인번호 {t.nts_confirm_num}</span> : <span>승인번호 대기</span>}
@@ -10232,6 +10271,40 @@ const handleApproveRequest = async (id: string) => {
                       </>
                     )
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* ── 발급 대기 취소 모달 (★2026-08-05) ── */}
+            {taxbillCancelTarget && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+                  <div className="p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-1">발급 대기 취소</h3>
+                    <p className="text-sm text-gray-600 mb-1">
+                      <strong>{taxbillCancelTarget.company_name}</strong> · 작성일자 {taxbillCancelTarget.issue_date}
+                      {' · '}{(Number(taxbillCancelTarget.total_amount) || 0).toLocaleString()}원
+                    </p>
+                    <p className="text-xs text-gray-500 mb-4">아직 발행 전입니다. 5분 주기 워커가 곧 국세청으로 보냅니다.</p>
+
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">취소 사유</label>
+                    <textarea value={taxbillCancelReason} onChange={(e) => setTaxbillCancelReason(e.target.value)} rows={3} maxLength={200}
+                      placeholder="예) 업체 확인 결과 8월 LMS 수량이 달라 재발행 예정"
+                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-rose-500 outline-none resize-none" />
+
+                    <div className="mt-3 px-3 py-2 bg-rose-50 rounded-lg text-[11px] text-rose-800">
+                      큐에서 내리면 이 계산서는 발행되지 않습니다. 금액을 고치려면 그 뒤 <strong>수량 조정 재발행</strong> 또는
+                      <strong> 삭제 후 재발행</strong>으로 진행합니다. 이미 발행에 들어간 건은 취소되지 않고 수정세금계산서 축입니다.
+                    </div>
+                  </div>
+                  <div className="flex border-t">
+                    <button onClick={() => { setTaxbillCancelTarget(null); setTaxbillCancelReason(''); }} disabled={taxbillCancelBusy}
+                      className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">닫기</button>
+                    <button onClick={handleTaxbillCancel} disabled={taxbillCancelBusy || !taxbillCancelReason.trim()}
+                      className="flex-1 px-4 py-3 bg-rose-600 text-white font-semibold hover:bg-rose-700 transition-colors disabled:opacity-50">
+                      {taxbillCancelBusy ? '취소 중...' : '발급 대기에서 내리기'}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

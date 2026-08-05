@@ -50,7 +50,11 @@ async function tick(): Promise<void> {
          FROM moved m
          JOIN billings b ON b.id = m.billing_id
         WHERE NOT EXISTS (
-          SELECT 1 FROM taxbill_issues t WHERE t.confirmation_id = m.id AND t.kind = 'original'
+          -- ★ 2026-08-05 취소된 장은 멱등 판정에서 뺀다. 그러지 않으면 [발급 대기 취소]나 이의신청으로
+          --   한 번 cancelled가 된 추적행은 영원히 새 장부를 못 만들어, 다시 발행하려 해도 조용히 멈춘다.
+          --   진행 중(ready, submitted)과 완료(issued) 행은 그대로 막으므로 이중 발행은 여전히 없다.
+          SELECT 1 FROM taxbill_issues t
+           WHERE t.confirmation_id = m.id AND t.kind = 'original' AND t.status <> 'cancelled'
         )`,
     );
     if ((due.rowCount || 0) > 0 || (ready.rowCount || 0) > 0) {

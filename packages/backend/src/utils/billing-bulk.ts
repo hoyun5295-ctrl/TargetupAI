@@ -15,6 +15,8 @@
 import pool from '../config/database';
 import { issueBilling, BillingIssueError } from './billing-issue';
 import { createAndSendConfirmations } from './invoice-confirm';
+// ★ 2026-08-05 회사 단위 정산 잠금 CT — 발행·반영·취소·수동완료가 **같은 두 겹**을 잡아야 서로를 막는다.
+import { lockCompaniesForBilling } from './billing-lock';
 
 export interface UnbilledCompanyRow {
   id: string;
@@ -203,10 +205,8 @@ export async function addManualCompletions(
     await client.query('BEGIN');
     // ★ 2026-07-29 발급 코어(billing-issue.ts)와 **같은 회사 단위 잠금 축**을 쓴다.
     //   축이 다르면 두 쓰기가 서로를 못 막아 청구서와 수동완료가 함께 남는다(1·2R 같은 부류 반복의 원인).
-    //   다건은 company_id 정렬 순서로 잡아 교착을 막는다.
-    for (const id of [...companyIds].sort()) {
-      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext('billing'))`, [id]);
-    }
+    //   다건은 company_id 정렬 순서로 잡아 교착을 막는다(정렬은 CT가 소유한다).
+    await lockCompaniesForBilling(client, companyIds);
     const open = await listUnbilledPostpaid(periodStart, periodEnd, { companyIds, db: client });
     const openIds = new Set(open.map((r) => String(r.id)));
     const targets = companyIds.filter((id) => openIds.has(id));

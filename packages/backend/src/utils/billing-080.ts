@@ -18,6 +18,8 @@
 
 import { createHmac, timingSafeEqual } from 'crypto';
 import pool from '../config/database';
+// ★ 2026-08-05 회사 단위 정산 잠금 CT — 발행과 **같은 두 겹**을 잡아야 반영·취소가 발행을 막는다.
+import { lockCompanyForBilling } from './billing-lock';
 import { callAIWithFallback } from '../services/ai';
 import type { EventImageInput } from './event-image-extract';
 
@@ -363,7 +365,7 @@ export async function addManualExtraItems(params: {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext('billing'))`, [String(params.companyId)]);
+    await lockCompanyForBilling(client, String(params.companyId));
     const billed = await client.query(
       `SELECT id FROM billings WHERE company_id = $1
          AND billing_start <= ($2::date + INTERVAL '1 month' - INTERVAL '1 day')::date
@@ -483,8 +485,8 @@ export async function applyKtStatement(params: {
     try {
       await client.query('BEGIN');
 
-      // ★ 발행 코어와 **같은 회사 잠금**(billing-issue.ts와 동일 키) — 발행·반영·취소가 한 축으로 직렬화된다.
-      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext('billing'))`, [String(companyId)]);
+      // ★ 발행 코어와 **같은 회사 잠금**(CT 하나) — 발행·반영·취소가 한 축으로 직렬화된다.
+      await lockCompanyForBilling(client, String(companyId));
 
       // 그 달과 겹치는 발행이 이미 있으면 이 회사는 반영하지 않는다 — 굳은 청구서에 안 실리는 항목을 만들지 않는다.
       //   겹침 판정은 billings와 같은 식(월 = [1일, 말일]). 잠금 획득 후 재검사라 발행과 엇갈리지 않는다.

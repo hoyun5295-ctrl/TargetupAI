@@ -32,6 +32,8 @@ import { renderBillingStatementPdf, renderInvoicePdf, loadBillingStatementData, 
 // ★ 2026-08-04 컨펌 토큰·안내 문구는 일괄발급과 **같은 CT**를 쓴다 — 개별 발송 메일에만 컨펌 버튼이
 //   없어서 업체가 이의를 낼 창구가 없었다(서수란 0803·0804 접수).
 import { retryUnsentConfirmations, ensureConfirmationToken, renderConfirmBlockHtml, markConfirmationDelivered } from '../utils/invoice-confirm';
+// ★ 2026-08-05 회사 단위 정산 잠금 CT — 발행·반영·취소·수동완료가 **같은 두 겹**을 잡아야 서로를 막는다.
+import { lockCompanyForBilling, lockCompaniesForBilling } from '../utils/billing-lock';
 import { normalizeUnitPriceBasis } from '../utils/unit-price';
 import { buildInvoiceLines, checkInvoiceLinesAgainstHeader, sumFlooredInvoiceLines, invoiceLineLabel } from '../utils/billing-invoice-lines';
 import { resolveBillingScopeLabel } from '../utils/billing-scope-label';
@@ -801,6 +803,69 @@ router.post('/taxbill-issues/:id/retry', async (req: Request, res: Response) => 
   }
 });
 
+// POST /taxbill-issues/:id/cancel — 발급 대기 취소 (★2026-08-05)
+//
+//   그전에는 `ready` 장을 되돌리는 경로가 **고객 이의신청 하나뿐**이었다. 담당자가 발행 직전에 금액 오류를
+//   발견해도 5분 뒤 워커가 그대로 국세청에 보냈다. 정산 삭제는 취소 수단이 아니었다 — `billing_id`만
+//   SET NULL로 끊기고 장부는 `ready` 그대로라 그대로 발행됐다.
+//
+//   `ready`만 받는다. `submitted`는 팝빌에 이미 올라갔을 수 있어 되돌리면 거짓 취소가 되고,
+//   `issued`는 수정세금계산서 축이다(§2-8).
+router.post('/taxbill-issues/:id/cancel', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: '장부 id 형식 오류' });
+    const reason = String((req.body as any)?.reason || '').trim().slice(0, 200);
+    if (!reason) return res.status(400).json({ error: '취소 사유를 입력해 주세요. 나중에 근거가 됩니다.' });
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // 조건부 UPDATE 하나로 발행 패스와 줄을 세운다 — 워커가 먼저 `submitted`로 집어갔으면 0행이다.
+      const r = await client.query(
+        `UPDATE taxbill_issues SET status = 'cancelled', error = $2
+          WHERE id = $1::uuid AND status = 'ready'
+        RETURNING confirmation_id`,
+        [id, `발급 대기 취소 — ${reason}`],
+      );
+      if (r.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: '발급 대기 상태인 장만 취소할 수 있습니다. 이미 발행에 들어갔거나 발행됐다면 수정세금계산서로 정정해주세요.',
+          code: 'TAXBILL_NOT_CANCELLABLE',
+        });
+      }
+      const confirmationId = r.rows[0].confirmation_id;
+      if (confirmationId) {
+        // 추적행을 `ready`로 두면 어느 쪽으로도 못 간다 — 워커는 `confirmed`·`due`만 집으므로 다시 발행되지 않고,
+        // §2-8 삭제 가드는 `ready`를 막아 고쳐서 다시 낼 수도 없다. 사람이 다시 정하는 축으로 내린다.
+        await client.query(
+          `UPDATE invoice_confirmations SET taxbill_status = 'manual_wait'
+            WHERE id = $1::uuid AND taxbill_status = 'ready'`,
+          [confirmationId],
+        );
+      }
+      await client.query('COMMIT');
+    } catch (txErr) {
+      try { await client.query('ROLLBACK'); } catch { /* 응답이 사실을 전달한다 */ }
+      throw txErr;
+    } finally {
+      client.release();
+    }
+    return res.json({
+      success: true,
+      message: '발급 대기에서 내렸습니다. 금액을 고치려면 수량 조정 재발행 또는 삭제 후 재발행으로 진행해 주세요.',
+    });
+  } catch (error: any) {
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('세금계산서 발급 대기 취소 오류:', emsg || error);
+    return res.status(500).json({ error: '발급 대기 취소에 실패했습니다.' });
+  }
+});
+
 // POST /taxbill-issues/:id/resend-email — 발행 완료분 메일 재발송 (★2026-08-05 서수란 접수)
 //   업체가 "계산서를 못 받았다"고 할 때 쓰는 유일한 창구다. 그전에는 목록·수정발급·실패 재시도뿐이라
 //   담당자가 할 수 있는 것이 수정세금계산서밖에 없었다(그건 국세청에 문서를 한 장 더 만든다).
@@ -939,7 +1004,12 @@ router.put('/confirmations/:id/issue-date', async (req: Request, res: Response) 
          )
          SELECT $1::uuid, b.id, $2::uuid, 'original', $3::date, b.subtotal, b.vat, b.total_amount, 'ready'
            FROM billings b WHERE b.id = $4::uuid
-            AND NOT EXISTS (SELECT 1 FROM taxbill_issues t WHERE t.confirmation_id = $1::uuid AND t.kind = 'original')`,
+            -- ★ 2026-08-05 취소된 장은 멱등 판정에서 뺀다(워커와 같은 규약) — 취소 뒤 날짜를 다시 지정해도
+            --   장부가 안 생겨 조용히 멈추던 것을 닫는다. 진행 중·완료 행은 그대로 막는다.
+            AND NOT EXISTS (
+              SELECT 1 FROM taxbill_issues t
+               WHERE t.confirmation_id = $1::uuid AND t.kind = 'original' AND t.status <> 'cancelled'
+            )`,
         [m.id, m.company_id, m.taxbill_issue_date, m.billing_id],
       );
       await client.query('COMMIT');
@@ -1063,10 +1133,8 @@ router.post('/080-numbers', async (req: Request, res: Response) => {
         // 번호 표기를 고친 경우에도 같이 옮긴다 — `source_ref`가 옛 번호로 남으면 그 반영분은 매핑을
         // 잃어버려(고아) 그 회사 발행이 통째로 막힌다.
         const relinked = fromCompany !== String(company_id) || fromNumber !== digits;
-        // 잠금은 항상 같은 순서로 잡는다 — 두 요청이 서로를 기다리는 교착을 만들지 않는다.
-        for (const cid of Array.from(new Set([fromCompany, String(company_id)])).sort()) {
-          await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext('billing'))`, [cid]);
-        }
+        // 잠금은 항상 같은 순서로 잡는다 — 두 요청이 서로를 기다리는 교착을 만들지 않는다(정렬은 CT가 소유).
+        await lockCompaniesForBilling(client, [fromCompany, String(company_id)]);
         let moved = 0;
         if (relinked) {
           // ★ 소비 여부를 가리지 않는다(Codex 2R high 수용) — 미소비 행만 보면 **이미 청구서에 실린**
@@ -1282,7 +1350,7 @@ router.delete('/extra-items', async (req: Request, res: Response) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext('billing'))`, [companyId]);
+    await lockCompanyForBilling(client, companyId);
     const billed = await client.query(
       `SELECT id FROM billings WHERE company_id = $1
          AND billing_start <= (($2 || '-01')::date + INTERVAL '1 month' - INTERVAL '1 day')::date
@@ -1887,30 +1955,39 @@ const handleBillingDelete = async (req: Request, res: Response) => {
     // ★ 2026-08-04 수정 재발행 가드 — **세금계산서가 이미 국세청에 나간 건은 지우고 다시 만들 수 없다.**
     //   지우면 `taxbill_issues.billing_id`가 SET NULL로 끊기고, 새 정산에서 원본이 한 장 더 발행된다.
     //   되돌릴 수 없는 문서라 fail-closed. 정정은 수정세금계산서 경로다(Codex 적대검증 critical).
-    if (reissue) {
-      // ★ `ready`도 막는다(Codex 재검증 critical) — 발급 큐에 들어간 상태다. 워커가 그 행을 집어
-      //   외부로 발행하는 동안 여기서 장을 지우면, 발행은 옛 내용으로 나가고 새 장이 다시 원본 발행
-      //   대상이 되어 **국세청에 같은 건이 두 장** 나간다. `FOR UPDATE`로 워커와 줄을 세운다.
-      const issuedBill = await client.query(
-        `SELECT 1 FROM taxbill_issues
-          WHERE billing_id = ANY($1::uuid[]) AND status IN ('ready', 'submitted', 'issued')
-          FOR UPDATE`,
-        [targetIds],
-      );
-      const issuedConfirm = issuedBill.rows.length > 0 ? null : await client.query(
-        `SELECT 1 FROM invoice_confirmations
-          WHERE billing_id = ANY($1::uuid[]) AND taxbill_status IN ('ready', 'issued')
-            AND superseded_at IS NULL LIMIT 1`,
-        [targetIds],
-      );
-      if (issuedBill.rows.length > 0 || (issuedConfirm && issuedConfirm.rows.length > 0)) {
-        await client.query('ROLLBACK');
-        return res.status(409).json({
-          error: '이 정산은 세금계산서가 발급 대기 이상 단계에 있어 수량 수정 재발행을 할 수 없습니다. 이미 발행됐다면 수정세금계산서로 정정해주세요.',
-          code: 'BILLING_TAXBILL_ALREADY_ISSUED',
-        });
-      }
+    //
+    // ★ 2026-08-05 (B-0805-2) **재발행만이 아니라 모든 삭제에 건다.** 그전에는 이 가드가 `if (reissue)`
+    //   안에만 있어 사유를 적은 일반 삭제가 그대로 통과했다 — 계산서가 정산과 끊긴 채 남고(고아),
+    //   같은 기간을 다시 발행하면 원본이 한 장 더 나간다. 재발행에서 막으려던 바로 그 사고 모양이다.
+    //   삭제에 사유를 받는 규칙("틀린 금액이 나갔으면 지우고 다시 보낸다")은 **계산서가 나가기 전**의
+    //   이야기다. 나간 뒤의 정정 수단은 수정세금계산서 하나다(§2-8).
+    //
+    //   ★ `ready`도 막는다(Codex 재검증 critical) — 발급 큐에 들어간 상태다. 워커가 그 행을 집어
+    //   외부로 발행하는 동안 여기서 장을 지우면, 발행은 옛 내용으로 나가고 새 장이 다시 원본 발행
+    //   대상이 되어 **국세청에 같은 건이 두 장** 나간다. `FOR UPDATE`로 워커와 줄을 세운다.
+    const issuedBill = await client.query(
+      `SELECT 1 FROM taxbill_issues
+        WHERE billing_id = ANY($1::uuid[]) AND status IN ('ready', 'submitted', 'issued')
+        FOR UPDATE`,
+      [targetIds],
+    );
+    const issuedConfirm = issuedBill.rows.length > 0 ? null : await client.query(
+      `SELECT 1 FROM invoice_confirmations
+        WHERE billing_id = ANY($1::uuid[]) AND taxbill_status IN ('ready', 'issued')
+          AND superseded_at IS NULL LIMIT 1`,
+      [targetIds],
+    );
+    if (issuedBill.rows.length > 0 || (issuedConfirm && issuedConfirm.rows.length > 0)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: reissue
+          ? '이 정산은 세금계산서가 발급 대기 이상 단계에 있어 수량 수정 재발행을 할 수 없습니다. 이미 발행됐다면 수정세금계산서로 정정해주세요.'
+          : '이 정산은 세금계산서가 발급 대기 이상 단계에 있어 삭제할 수 없습니다. 지우면 계산서가 정산과 끊긴 채 남고, 같은 기간을 다시 발행하면 국세청에 같은 건이 두 장 나갑니다. 금액을 고쳐야 한다면 수정세금계산서로 정정해주세요.',
+        code: 'BILLING_TAXBILL_ALREADY_ISSUED',
+      });
+    }
 
+    if (reissue) {
       // ★ 2026-08-04 **삭제하기 전에** 조정이 적용 가능한지 본다(Codex 재검증 high 완화).
       //   삭제와 재발행은 트랜잭션이 둘이라, 재발행이 422로 막히면 정산만 사라진 채 남는다.
       //   재발행 실패의 실질 원인 둘(조정 대상 줄 없음·조정 후 음수)을 여기서 미리 걸러낸다.
