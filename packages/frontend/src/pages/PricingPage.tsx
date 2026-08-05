@@ -404,40 +404,7 @@ export default function PricingPage() {
                   </div>
                 </div>
 
-                {/* ★ 2026-08-05 요금제 포함 무료 메시지 — 제공량·사용량·잔여. 제공이 없는 요금제면 통째로 숨긴다. */}
-                {freeMessaging?.available && (
-                  <div className="mt-5 pt-5 border-t border-gray-100">
-                    <div className="flex items-baseline justify-between mb-3">
-                      <h3 className="text-sm font-semibold text-gray-900">요금제 포함 무료 메시지</h3>
-                      <span className="text-[11px] text-gray-500">{FREE_MESSAGING_NOTE}</span>
-                    </div>
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                      {freeMessaging.lines.filter((l) => l.granted > 0).map((l) => {
-                        const pct = l.granted > 0 ? Math.min(100, (l.used / l.granted) * 100) : 0;
-                        return (
-                          <div key={l.type} className="rounded-xl border border-gray-200 bg-gray-50/60 px-3 py-2.5">
-                            <div className="flex items-baseline justify-between">
-                              <span className="text-xs font-medium text-gray-600">{FREE_TYPE_LABEL[l.type] || l.label}</span>
-                              <span className="text-[11px] text-gray-400">{formatNumber(l.granted)}건</span>
-                            </div>
-                            <div className="mt-1 flex items-baseline gap-1">
-                              <span className="text-lg font-bold text-gray-900">{formatNumber(l.remaining)}</span>
-                              <span className="text-[11px] text-gray-500">건 남음</span>
-                            </div>
-                            <div className="mt-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                              <div
-                                className={`h-full transition-all ${pct >= 100 ? 'bg-gray-400' : 'bg-violet-500'}`}
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                            <div className="mt-1 text-[11px] text-gray-500">{formatNumber(l.used)}건 사용</div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
+                {/* 무료 메시지 현황은 위 요약 카드(CreditSummaryBar)가 소유한다 — 두 곳에 그리면 갈린다 */}
                 {isTrialExpired && (
                   <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
                     <p className="text-sm text-red-700">
@@ -484,6 +451,8 @@ export default function PricingPage() {
               billingType={myCredit.billingType}
               overageLimit={myCredit.overageLimit}
               onRecharge={() => setShowRecharge(true)}
+              freeMessaging={freeMessaging}
+              freeMessagingNote={FREE_MESSAGING_NOTE}
             />
           </div>
         )}

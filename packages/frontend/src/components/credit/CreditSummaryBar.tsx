@@ -22,6 +22,16 @@ export interface CreditSummaryBarProps {
   billingType?: string;
   overageLimit?: number;
   onRecharge?: () => void;
+  /**
+   * ★ 2026-08-05 요금제 포함 무료 메시지 — 좌측 카드 하단에 사용량·잔여량을 좌우로 보여준다.
+   * **선택 prop이다.** 넘기지 않는 호출부는 이 블록이 아예 렌더되지 않아 종전과 한 화소도 다르지 않다.
+   */
+  freeMessaging?: {
+    available: boolean;
+    lines: Array<{ type: string; label: string; granted: number; used: number; remaining: number }>;
+  } | null;
+  /** 무료 메시지 블록 하단 안내 문구(소멸·차감 시점). 문구 소유는 호출부다. */
+  freeMessagingNote?: string;
 }
 
 const fmt = (n: number) => Number(n || 0).toLocaleString();
@@ -30,7 +40,10 @@ export default function CreditSummaryBar({
   planName, currentCustomers, maxCustomers, usagePercent,
   total, baseRemaining, purchased, planCredits, monthlyUsed,
   billingType, overageLimit = 0, onRecharge,
+  freeMessaging = null, freeMessagingNote,
 }: CreditSummaryBarProps) {
+  // 제공량이 0인 유형은 줄에서 뺀다 — 안 주는 유형을 0으로 늘어놓으면 표가 거짓말을 한다.
+  const freeLines = (freeMessaging?.available ? freeMessaging.lines : []).filter((l) => l.granted > 0);
   const isLow = total <= 5;
   const isPostpaid = billingType === 'postpaid';
   const gaugeMax = Math.max(planCredits, total, 1);
@@ -57,6 +70,55 @@ export default function CreditSummaryBar({
             </div>
             <div className="mt-1 text-[11px] leading-snug text-slate-400">싱크에이전트·SDK 연동 시 DB 규모 기준 자동 차감 · 미연동은 0</div>
           </div>
+
+          {/* ★ 2026-08-05 요금제 포함 무료 메시지 — 좌 사용량 / 가운데 구분선 / 우 잔여량.
+              제공이 없는 요금제·DDL 미실행이면 통째로 숨는다(freeLines 0). */}
+          {freeLines.length > 0 && (
+            <div className="mt-5">
+              <div className="flex items-end justify-between gap-2">
+                <span className="text-base font-medium text-slate-500">요금제 포함 무료 메시지</span>
+                <span className="text-[11px] text-slate-400">이번 달</span>
+              </div>
+              <div className="mt-3 rounded-xl border border-violet-100 bg-violet-50/40">
+                <div className="grid grid-cols-[1fr_auto_1fr] items-stretch">
+                  {/* 좌 — 사용량 */}
+                  <div className="px-3.5 py-3">
+                    <div className="text-[11px] font-medium text-slate-400">사용</div>
+                    <ul className="mt-2 space-y-1.5">
+                      {freeLines.map((l) => (
+                        <li key={`u-${l.type}`} className="flex items-baseline justify-between gap-2">
+                          <span className="text-xs text-slate-500">{l.label}</span>
+                          <span className="text-sm font-semibold tabular-nums text-slate-700">{fmt(l.used)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  {/* 가운데 구분선 */}
+                  <div className="w-px bg-violet-100" aria-hidden="true" />
+                  {/* 우 — 잔여량 */}
+                  <div className="px-3.5 py-3">
+                    <div className="text-[11px] font-medium text-violet-500">잔여</div>
+                    <ul className="mt-2 space-y-1.5">
+                      {freeLines.map((l) => (
+                        <li key={`r-${l.type}`} className="flex items-baseline justify-between gap-2">
+                          <span className="text-xs text-slate-500">{l.label}</span>
+                          <span className="text-sm font-bold tabular-nums text-violet-700">
+                            {fmt(l.remaining)}
+                            <span className="ml-0.5 text-[11px] font-medium text-slate-400">/ {fmt(l.granted)}</span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+                {freeMessagingNote && (
+                  <div className="border-t border-violet-100 px-3.5 py-2 text-[11px] leading-snug text-slate-400">
+                    {freeMessagingNote}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 우: AI 크레딧 잔여 + 작업당 6칩 */}
