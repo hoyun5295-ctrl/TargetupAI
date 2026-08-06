@@ -94,6 +94,10 @@ export async function listUnbilledPostpaid(
           LIMIT 1
        ) br ON true
       WHERE c.billing_type = 'postpaid'
+        -- ★ 2026-08-06 해지 회사는 **목록에서 아예 뺀다**(Harold 지시). 0804에는 "담기에서만 빼고 목록엔
+        --   남긴다"였는데, 41개사 중 28개가 담기지 않는 회사라 화면이 그 회사들로 덮였다.
+        --   ⚠ 해지 회사의 미청구분은 이 목록에 안 뜬다 — 남았다면 단건 발행으로 처리한다.
+        AND c.status <> 'terminated'
         AND ($3::uuid[] IS NULL OR c.id = ANY($3::uuid[]))
         AND NOT EXISTS (
           SELECT 1 FROM billings b

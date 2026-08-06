@@ -55,7 +55,11 @@ import { readFreeDeductibleForBilling } from '../utils/free-messaging';
 import { billableQuantity } from '../utils/billing-types';
 // ★ 2026-07-30 수정세금계산서 — 사유별 장 구성 계약(순수). 라우트는 이 계획을 트랜잭션 INSERT만 한다.
 // ★ 2026-08-05 발행 완료분 메일 재발송(서수란 접수) — 재발행이 아니라 같은 문서번호로 메일만 다시 보낸다.
-import { planModifyIssue, ModifyPlanError, resendIssuedTaxbillEmail, TaxbillResendError } from '../utils/taxbill-popbill';
+import {
+  planModifyIssue, ModifyPlanError, resendIssuedTaxbillEmail, TaxbillResendError,
+  // ★ 2026-08-06 운영 재발행은 **지금 환경이 운영일 때만** 연다(Codex high 부분 수용).
+  getPopbillConfig,
+} from '../utils/taxbill-popbill';
 // ★ 2026-07-28 정산 설정·담당자 CT — 고객사 상세 "정산" 탭 + 일괄발급·발송·계산서 워커가 공유.
 import {
   getCompanyBillingSettings, upsertCompanyBillingSettings,
@@ -648,6 +652,9 @@ router.get('/taxbill-issues', async (req: Request, res: Response) => {
               to_char(t.issue_date, 'YYYY-MM-DD') AS issue_date,
               t.supply_amount, t.tax_amount, t.total_amount, t.status, t.error,
               t.created_at, t.issued_at,
+              -- ★ 2026-08-05 발행 환경. to_jsonb로 읽어 ALTER 전에도 이 목록이 깨지지 않는다
+              --   (컬럼이 없으면 NULL — 화면은 미상으로 두고 되돌리기 버튼을 열지 않는다).
+              (to_jsonb(t) ->> 'is_test')::boolean AS is_test,
               to_char(b.billing_start, 'YYYY-MM-DD') AS billing_start,
               to_char(b.billing_end, 'YYYY-MM-DD')   AS billing_end,
               c.company_name
@@ -800,6 +807,134 @@ router.post('/taxbill-issues/:id/retry', async (req: Request, res: Response) => 
     }
     console.error('세금계산서 재시도 오류:', error);
     return res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /taxbill-issues/:id/reissue-production — 테스트베드 발행분을 운영으로 다시 발행 (★2026-08-05)
+//
+//   2026-08-05 운영 전환(KST 12:30) 전에 발행된 12장이 **국세청에 안 나갔는데** 우리 장부는 `issued`,
+//   화면은 `발행 완료`로 보여줬다(합계 20,066,393원). 팝빌은 테스트와 운영이 완전 분리 환경이라
+//   그 문서번호가 운영에는 없다 ⇒ **같은 행을 그대로 다시 태우면 같은 번호로 운영에 나간다**(중복 없음).
+//
+//   판정 축은 **행에 적힌 환경 표식**이다. 승인번호 모양으로 가르지 않는다 — 팝빌 규칙에 기대는 판정이라
+//   그쪽이 바뀌면 조용히 틀린다.
+router.post('/taxbill-issues/:id/reissue-production', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: '장부 id 형식 오류' });
+
+    // ★ Codex 1R high 부분 수용 — **지금 환경이 운영인지 먼저 본다.** 워커는 프로세스의 설정으로 발행하므로,
+    //   환경이 테스트인 상태에서 되돌리면 같은 문서가 테스트베드로 또 나가고 화면만 "운영으로 재발행"이라 말한다.
+    //   (목표 환경을 큐에 적고 워커가 대조하는 처방은 불수용 — pm2 단일 프로세스라 서로 다른 환경의 워커가
+    //    동시에 도는 구조가 아니다. 컬럼을 늘리는 대신 그 자리에서 막는다.)
+    const popbillCfg = getPopbillConfig();
+    if (!popbillCfg) {
+      return res.status(503).json({ error: '팝빌 연동이 꺼져 있어 재발행할 수 없습니다.', code: 'TAXBILL_POPBILL_GATE_OFF' });
+    }
+    if (popbillCfg.isTest) {
+      return res.status(409).json({
+        error: '지금 발행 환경이 테스트베드입니다. 이대로 되돌리면 국세청이 아니라 테스트베드로 다시 나갑니다.',
+        code: 'TAXBILL_ENV_IS_TEST',
+      });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // ★ 컬럼이 없으면 is_test가 NULL로 와서 아래에서 막힌다 — 백필 전에 되돌리는 사고를 구조로 차단한다.
+      // ★ Codex 1R high 수용 — `kind`도 읽는다. 수정 장은 `org_nts_confirm_num`이 테스트베드 승인번호라
+      //   운영에는 그 원본이 없다. 그대로 태우면 존재하지 않는 원본을 참조하는 정정 요청이 된다.
+      const cur = await client.query(
+        `SELECT t.status, t.billing_id, t.kind, (to_jsonb(t) ->> 'is_test')::boolean AS is_test
+           FROM taxbill_issues t WHERE t.id = $1::uuid FOR UPDATE`,
+        [id],
+      );
+      if (cur.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: '세금계산서 내역을 찾을 수 없습니다.' });
+      }
+      const row = cur.rows[0];
+      if (row.is_test === null || row.is_test === undefined) {
+        await client.query('ROLLBACK');
+        return res.status(503).json({
+          error: 'DB 마이그레이션 필요 — taxbill_issues.is_test 컬럼 추가와 백필 실행 요청',
+          code: 'DB_MIGRATION_PENDING',
+        });
+      }
+      if (row.is_test !== true) {
+        await client.query('ROLLBACK');
+        return res.status(422).json({
+          error: '운영으로 발행된 장입니다. 다시 태우면 국세청에 같은 건이 두 장 나갑니다.',
+          code: 'TAXBILL_NOT_TESTBED',
+        });
+      }
+      if (String(row.status) !== 'issued') {
+        await client.query('ROLLBACK');
+        return res.status(422).json({
+          error: `테스트베드에서 발행이 끝난 장만 다시 태울 수 있습니다. (현재 상태: ${String(row.status)})`,
+          code: 'TAXBILL_NOT_ISSUED',
+        });
+      }
+      if (String(row.kind) !== 'original') {
+        await client.query('ROLLBACK');
+        return res.status(422).json({
+          error: '수정세금계산서는 이 경로로 되돌리지 않습니다. 당초 원본이 참조하는 승인번호가 테스트베드 것이라 운영에는 그 원본이 없습니다 — 원본을 먼저 운영으로 발행한 뒤 그 승인번호로 다시 정정해야 합니다.',
+          code: 'TAXBILL_NOT_ORIGINAL',
+        });
+      }
+      // 같은 장(billing)에 **운영 발행 행이 이미 있으면** 거부 — 지금 걸릴 건은 없지만, 두 번 눌러도
+      //   국세청에 두 장이 안 나가게 하는 자물쇠는 축에 박아 둔다.
+      if (row.billing_id) {
+        const dup = await client.query(
+          `SELECT 1 FROM taxbill_issues
+            WHERE billing_id = $1::uuid AND id <> $2::uuid AND kind = 'original'
+              AND COALESCE((to_jsonb(taxbill_issues) ->> 'is_test')::boolean, false) = false
+              AND status IN ('ready', 'submitted', 'issued')
+            LIMIT 1`,
+          [row.billing_id, id],
+        );
+        if (dup.rows.length > 0) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({
+            error: '이 정산은 이미 운영으로 발행됐거나 발행 대기 중입니다. 다시 태우지 않습니다.',
+            code: 'TAXBILL_PRODUCTION_EXISTS',
+          });
+        }
+      }
+      // 발급 큐로 되돌린다. 문서번호(invoicer_mgt_key)는 **그대로 둔다** — 행마다 결정적인 값이고,
+      //   운영에는 그 번호가 없으므로 같은 번호로 나가는 것이 정상이다(재시도와 같은 계약).
+      // ★ Codex 2R high 수용 — **목표 환경을 행에 적는다.** `is_test = false`가 곧 "이 장은 운영으로 나간다"이고,
+      //   워커는 자기 환경과 같은 행만 집는다. 요청 시점 확인만으로는 enqueue와 소비 사이(재기동·설정 변경)가
+      //   열려 있었다 — 그 구간이 뿌리라 컬럼을 새로 만들지 않고 이 축을 목표로도 쓴다.
+      await client.query(
+        `UPDATE taxbill_issues
+            SET status = 'ready', nts_confirm_num = NULL, issued_at = NULL, is_test = false,
+                error = '테스트베드 발행분 — 운영으로 재발행'
+          WHERE id = $1::uuid AND kind = 'original'`,
+        [id],
+      );
+      const r2 = await client.query(
+        `UPDATE invoice_confirmations SET taxbill_status = 'ready', issued_at = NULL
+          WHERE id = (SELECT confirmation_id FROM taxbill_issues WHERE id = $1::uuid)
+            AND taxbill_status = 'issued'`,
+        [id],
+      );
+      await client.query('COMMIT');
+      console.log(`[정산][테스트베드재발행] taxbill=${id} by=${(req as any).user?.userId || '미상'} 추적행 동기화=${r2.rowCount || 0}`);
+    } catch (txErr) {
+      try { await client.query('ROLLBACK'); } catch { /* 응답이 사실을 전달한다 */ }
+      throw txErr;
+    } finally {
+      client.release();
+    }
+    return res.json({ success: true, message: '발급 대기에 올렸습니다. 5분 주기 워커가 국세청으로 발행합니다.' });
+  } catch (error: any) {
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — taxbill_issues.is_test 컬럼 추가 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('테스트베드 재발행 오류:', emsg || error);
+    return res.status(500).json({ error: '운영 재발행 요청에 실패했습니다.' });
   }
 });
 

@@ -199,8 +199,12 @@ export function buildTaxinvoicePayload(input: TaxinvoiceBuildInput): any {
 
   const s = (v: string | null | undefined) => String(v ?? '').trim();
 
+  // ★ 2026-08-05 작성일자는 **한 번만 만든다.** 아래 품목 줄의 거래일자(purchaseDT)가 이 값에서
+  //   파생돼야 문서 상단과 품목의 날짜가 갈리지 않는다 — 따로 계산하는 순간 그 둘이 어긋난다.
+  const writeDate = toWriteDate(input.issueDate);
+
   const payload: any = {
-    writeDate: toWriteDate(input.issueDate),
+    writeDate,
     issueType: '정발행',
     taxType: '과세',
     chargeDirection: '정과금',
@@ -237,6 +241,11 @@ export function buildTaxinvoicePayload(input: TaxinvoiceBuildInput): any {
     detailList: [
       {
         serialNum: 1,
+        // ★ 2026-08-05 품목 줄 거래일자. 그전에는 이 필드를 안 보내 **문서 품목 줄의 월·일이 빈 칸으로**
+        //   나갔다(금강제화 발행분 실물 확인). 작성일자와 **같은 변수**를 쓴다 — 따로 만들면 그 둘이 갈리고,
+        //   두 날짜가 어긋난 세금계산서는 바로잡기가 수정발행뿐이라 비용이 크다(Harold 확정: 일치해야 한다).
+        //   필드명·형식은 팝빌 문서 확정 — `purchaseDT`, `yyyyMMdd`(`toWriteDate` 출력과 같은 형식).
+        purchaseDT: writeDate,
         itemName: s(input.itemName),
         supplyCost: String(supplyAmount),
         tax: String(taxAmount),
@@ -518,6 +527,32 @@ export const TAXBILL_RESEND_MAX_TARGETS = 10;
 /** 행당 재시도 상한 — 초과 시 failed 확정(수동 재전송 몫). */
 export const TAXBILL_RESEND_MAX_ATTEMPTS = 5;
 
+/**
+ * ★ 2026-08-05 `taxbill_issues.is_test` 실존 확인 — 양성만 캐시(선례: 재전송 테이블).
+ *
+ * 신설 사유: 2026-08-05 운영 전환(KST 12:30) **전에 발행된 12장이 국세청에 안 나갔는데**
+ * 우리 장부는 `issued`, 화면은 `발행 완료`로 보여줬다. 어느 환경으로 나갔는지가 **어디에도 안 남아**
+ * 승인번호 모양이나 시각으로 추측해야 했다. 그 추측을 영구히 없앤다 — 발행 시점의 `IsTest`를 행에 적는다.
+ *
+ * 컬럼이 없으면(배포 직후~DDL 전) 표식만 건너뛰고 발행은 그대로 진행한다. 그 창의 행은 백필이 덮는다.
+ */
+let isTestColumnKnown: boolean | null = null;
+let isTestColumnWarned = false;
+/** 컬럼이 없으면 환경 격리가 없는 상태로 도는 것이다 — 조용히 넘기지 않고 한 번 남긴다. */
+function warnIsTestColumnMissingOnce(): void {
+  if (isTestColumnWarned) return;
+  isTestColumnWarned = true;
+  log('taxbill_issues.is_test 미생성 — 발행 환경 격리 없이 진행합니다(DDL 실행 필요). 표식 기록도 건너뜁니다');
+}
+async function taxbillIsTestColumnExists(): Promise<boolean> {
+  if (isTestColumnKnown === true) return true;
+  const r = await pool.query(
+    `SELECT 1 FROM information_schema.columns WHERE table_name = 'taxbill_issues' AND column_name = 'is_test'`,
+  );
+  if (r.rows.length > 0) { isTestColumnKnown = true; return true; }
+  return false;
+}
+
 // 재전송 테이블 실존 확인 — 양성만 캐시(생성 후 자가 치유). 미생성 = 발행은 진행·기록만 건너뜀.
 // ★ Codex 2R — 조회 예외를 '없음'으로 강등하지 않는다: 일시 오류 한 번이 pending 미기록인 채 issued 커밋
 //   = 참조 재전송 영구 유실이 된다. 예외는 전파 — 호출부(issued 분기 = submitted 유지 재시도 /
@@ -768,12 +803,16 @@ async function processOne(id: string, cfg: PopbillConfig): Promise<'issued' | 's
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
+        // ★ 2026-08-05 **발행 시점의 환경을 행에 적는다.** 이게 없어서 전환 전 12장이 국세청에 안 나갔는데도
+        //   `issued`로 남아 있었고, 어느 환경이었는지를 승인번호 모양과 시각으로 추측해야 했다.
+        //   컬럼이 없으면(DDL 전) 표식만 건너뛰고 발행은 그대로 진행한다 — 발행이 죽는 쪽이 더 나쁘다.
+        const markIsTest = await taxbillIsTestColumnExists();
         await client.query(
           `UPDATE taxbill_issues
               SET status = 'issued', issued_at = NOW(), error = NULL,
-                  nts_confirm_num = COALESCE($2, nts_confirm_num)
+                  nts_confirm_num = COALESCE($2, nts_confirm_num)${markIsTest ? ', is_test = $3' : ''}
             WHERE id = $1`,
-          [id, ntsNum],
+          markIsTest ? [id, ntsNum, cfg.isTest] : [id, ntsNum],
         );
         // ★ 3R·4R — issued 승격 계약: 참조 pending 기록과 같은 트랜잭션. 승격 소유자는 이 패스 하나뿐
         //   (웹훅 304는 관측·failed 재큐잉만 — 여기가 유일한 기록 지점이라 수신자 집합도 한 벌만 커밋된다).
@@ -870,17 +909,30 @@ export async function issueReadyTaxbills(limit = 10): Promise<IssuePassResult> {
     }
 
     // claim — ready를 submitted로 전환해 이 패스의 소유로 만든다. SKIP LOCKED로 겹침 무해.
+    //
+    // ★ 2026-08-06 (Codex 2R high) **행에 적힌 환경과 내 환경이 같을 때만 집는다.**
+    //   그전에는 "어느 환경으로 나가야 하는가"가 행에 없어서, 되돌려 놓은 운영 재발행 건을
+    //   그 사이 재기동으로 테스트 설정이 된 워커가 집어 **테스트베드로 또 보낼 수 있었다**.
+    //   요청 시점에 환경을 확인하는 것만으로는 enqueue와 소비 사이가 닫히지 않는다 — 그 구간이 뿌리다.
+    //   `is_test`가 그 축이다: 발행 전에는 **목표**, 발행 후에는 **결과**.
+    //   ★ Codex 3R high 수용 — NULL 관용(`COALESCE`)을 뺐다. 그 관용은 표식 없는 행을 **양쪽 환경 모두**에
+    //   열어 격리를 되돌린다. 컬럼이 `NOT NULL DEFAULT false`라 NULL 행이 생기지 않으므로 잃는 것도 없다.
+    //   컬럼이 아직 없는 환경에서는 조건을 빼되(발행을 통째로 멈추는 쪽이 더 나쁘다) **조용히 넘기지 않는다.**
+    const hasIsTestColumn = await taxbillIsTestColumnExists();
+    if (!hasIsTestColumn) warnIsTestColumnMissingOnce();
+    const claimEnvClause = hasIsTestColumn ? 'AND is_test = $2' : '';
     const claimed = await pool.query(
       `UPDATE taxbill_issues SET status = 'submitted'
         WHERE id IN (
           SELECT id FROM taxbill_issues
            WHERE status IN ('ready', 'submitted')
+             ${claimEnvClause}
            ORDER BY created_at
            LIMIT $1
            FOR UPDATE SKIP LOCKED
         )
         RETURNING id, kind, modify_code, org_nts_confirm_num, total_amount`,
-      [limit],
+      claimEnvClause ? [limit, cfg.isTest] : [limit],
     );
 
     // ★ 사유 1(부+정 2장)은 순서·짝 게이트로 처리한다(0730 Codex 3R ① 수용).

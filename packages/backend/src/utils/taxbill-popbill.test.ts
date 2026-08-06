@@ -113,6 +113,20 @@ describe('buildTaxinvoicePayload — RegistIssue 계약', () => {
     expect(p.modifyCode).toBeUndefined();
   });
 
+  // ★ 2026-08-05 품목 줄 거래일자를 안 보내 문서의 월·일이 빈 칸으로 나갔다(금강제화 발행분 실물 확인).
+  //   두 날짜가 어긋난 계산서는 바로잡는 길이 수정발행뿐이라 비용이 크다 — 일치를 계약으로 못 박는다.
+  it('품목 줄 거래일자는 작성일자와 **같은 값**이다 — 따로 계산하면 문서 상단과 품목이 갈린다', () => {
+    const p = buildTaxinvoicePayload(baseInput);
+    expect(p.detailList[0].purchaseDT, '품목 거래일자가 비어 있다').toBe(p.writeDate);
+    expect(p.detailList[0].purchaseDT).toBe('20260731');
+  });
+
+  it('작성일자를 바꾸면 품목 거래일자도 따라 바뀐다 — 한 변수에서 파생돼야 성립한다', () => {
+    const p = buildTaxinvoicePayload({ ...baseInput, issueDate: '2026-08-31' });
+    expect(p.writeDate).toBe('20260831');
+    expect(p.detailList[0].purchaseDT).toBe('20260831');
+  });
+
   it('공급자 = 인비토 고정 (사업자번호 10자리 정규화)', () => {
     const p = buildTaxinvoicePayload(baseInput);
     expect(p.invoicerCorpNum).toBe('6678600578');

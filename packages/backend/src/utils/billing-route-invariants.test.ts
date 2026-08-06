@@ -339,6 +339,31 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
     expect(lockSrc, 'JS에서 다시 정렬하면 그 정렬이 다시 축이 된다').not.toContain('.sort()');
   });
 
+  it('테스트베드 발행분 판정은 **행에 적힌 환경 표식**이다 — 승인번호 모양으로 가르면 팝빌 규칙이 바뀔 때 조용히 틀린다', () => {
+    const at = billingSrc.indexOf('/taxbill-issues/:id/reissue-production');
+    expect(at, '운영 재발행 라우트가 없다').toBeGreaterThan(-1);
+    const route = billingSrc.slice(at, at + 4500);
+    expect(route, '환경 표식으로 판정하지 않는다').toContain("'is_test'");
+    expect(route, '승인번호 모양으로 가르고 있다').not.toMatch(/8888|nts_confirm_num\s*(LIKE|~)/);
+    expect(route, '표식이 없을 때(백필 전) 되돌리면 사고다').toContain('DB_MIGRATION_PENDING');
+    expect(route, '운영 발행 행이 이미 있으면 막아야 한다').toContain('TAXBILL_PRODUCTION_EXISTS');
+    // 문서번호는 그대로 둔다 — 행마다 결정적이라 같은 번호로 나가는 것이 중복 방지 계약이다.
+    expect(route, '문서번호를 지우면 다른 번호로 나가 중복 방지가 깨진다').not.toMatch(/invoicer_mgt_key\s*=\s*NULL/);
+    // ★ Codex 수용 3종 — 되돌리기가 열리는 조건을 코드에 못 박는다.
+    expect(route, '지금 환경이 테스트면 되돌려도 테스트베드로 또 나간다').toContain('TAXBILL_ENV_IS_TEST');
+    expect(route, '수정 장은 당초 승인번호가 테스트베드 것이라 운영에 원본이 없다').toContain('TAXBILL_NOT_ORIGINAL');
+    expect(route, "되돌리기 UPDATE도 원본으로 한정해야 한다").toMatch(/kind = 'original'/);
+    // ★ 뿌리 — 되돌린 뒤 워커가 집기까지 사이에 환경이 바뀌면 테스트로 또 나간다. 목표를 행에 적고,
+    //   워커는 자기 환경과 같은 행만 집는다. 요청 시점 확인만으로는 그 구간이 닫히지 않는다.
+    expect(route, '목표 환경을 행에 적지 않으면 소비 시점에 보장이 없다').toMatch(/is_test = false/);
+    // 발행 패스가 환경을 기록해야 다음부터 추측이 필요 없다.
+    const popbillSrc = read('./taxbill-popbill.ts');
+    expect(popbillSrc, '발행 시 환경을 행에 남기지 않는다').toContain('is_test = $3');
+    expect(popbillSrc, '워커가 자기 환경과 다른 행을 집으면 안 된다').toContain("'AND is_test = $2'");
+    // NULL 관용은 표식 없는 행을 양쪽 환경에 열어 격리를 되돌린다 — 컬럼이 NOT NULL이라 관용할 이유도 없다.
+    expect(popbillSrc, 'claim에서 환경 판정을 COALESCE로 관용하면 격리가 무너진다').not.toContain('COALESCE(is_test');
+  });
+
   it('취소된 장부는 멱등 판정에서 빠진다 — 안 빼면 취소 뒤 다시 발행하려 해도 조용히 멈춘다', () => {
     const workerSrc = read('./taxbill-worker.ts');
     expect(workerSrc, '워커의 NOT EXISTS가 cancelled를 세고 있다').toMatch(/t\.kind = 'original' AND t\.status <> 'cancelled'/);

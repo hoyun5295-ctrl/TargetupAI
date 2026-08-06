@@ -1398,6 +1398,10 @@ const [taxbillResendBusy, setTaxbillResendBusy] = useState(false);
 const [taxbillCancelTarget, setTaxbillCancelTarget] = useState<any | null>(null);
 const [taxbillCancelReason, setTaxbillCancelReason] = useState('');
 const [taxbillCancelBusy, setTaxbillCancelBusy] = useState(false);
+// ★ 2026-08-05 테스트베드 발행분을 운영으로 다시 태우기 — 전환 전 12장이 국세청에 안 나갔는데
+//   화면은 `발행 완료`로 보여줬다. 그 거짓말을 뱃지로 걷어내고 되돌릴 창구를 연다.
+const [taxbillProdTarget, setTaxbillProdTarget] = useState<any | null>(null);
+const [taxbillProdBusy, setTaxbillProdBusy] = useState(false);
 // ★ 2026-07-29 수동 정산완료 — 우리 정산으로 발행할 수 없어 사람이 따로 처리한 회사의 그 달 기록.
 //   담긴 좌/우 목록의 다중 선택(빼기)도 여기에 둔다 — 91개사를 한 줄씩 빼는 것은 쓸 수 없다.
 const [bulkManualRows, setBulkManualRows] = useState<any[]>([]);
@@ -1809,6 +1813,28 @@ const handleTaxbillRetry = async (issueId: string) => {
   }
 };
 
+// ★ 2026-08-05 테스트베드 발행분을 운영으로 다시 태운다 — 문서번호가 그대로라 같은 번호로 나간다.
+const handleTaxbillReissueProduction = async () => {
+  if (!taxbillProdTarget) return;
+  setTaxbillProdBusy(true);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/admin/billing/taxbill-issues/${taxbillProdTarget.id}/reissue-production`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || '운영 재발행 요청 실패');
+    setBillingToast({ msg: data?.message || '발급 대기에 올렸습니다', type: 'success' });
+    setTaxbillProdTarget(null);
+    loadTaxbillIssues();
+    loadConfirmBoard();
+  } catch (e: any) {
+    setBillingToast({ msg: e?.message || '운영 재발행 요청 실패', type: 'error' });
+  } finally {
+    setTaxbillProdBusy(false);
+  }
+};
+
 // ★ 2026-08-05 발급 대기 취소 — 워커가 국세청으로 보내기 전에 큐에서 내린다.
 const handleTaxbillCancel = async () => {
   if (!taxbillCancelTarget) return;
@@ -1923,6 +1949,24 @@ useEffect(() => {
     return next.length === prev.length ? prev : next;
   });
 }, [billings]);
+
+// ★ 2026-08-06 정산 목록 검색 + 15개씩 페이징 (Harold 지시) — 목록이 길어 원하는 회사를 찾기 어려웠다.
+//   검색은 **화면 안에서만** 좁힌다(서버 재조회 없음) — 선택은 페이지를 넘겨도, 검색어를 바꿔도 유지된다.
+//   일괄 실행은 `billings` 전체에서 선택된 것을 대상으로 하므로 지금 안 보이는 선택도 함께 실행된다.
+const BILLING_PAGE_SIZE = 15;
+const [billingSearch, setBillingSearch] = useState('');
+const [billingPage, setBillingPage] = useState(1);
+const billingRows = useMemo(() => {
+  const q = billingSearch.trim().toLowerCase();
+  if (!q) return billings;
+  return billings.filter((b: any) =>
+    String(b.company_name || '').toLowerCase().includes(q)
+    || String(b.user_name || '').toLowerCase().includes(q));
+}, [billings, billingSearch]);
+const billingTotalPages = Math.max(1, Math.ceil(billingRows.length / BILLING_PAGE_SIZE));
+const billingPageNow = Math.min(billingPage, billingTotalPages);
+const billingVisible = billingRows.slice((billingPageNow - 1) * BILLING_PAGE_SIZE, billingPageNow * BILLING_PAGE_SIZE);
+useEffect(() => { setBillingPage(1); }, [billingSearch, billings]);
 
 /**
  * 선택 건 일괄 실행. **새 일괄 엔드포인트를 만들지 않는다** — 확정은 `PUT /:id/status`,
@@ -9863,8 +9907,8 @@ const handleApproveRequest = async (id: string) => {
               const totalPages = Math.max(1, Math.ceil(avail.length / PAGE));
               const page = Math.min(bulkPage, totalPages);
               const visible = avail.slice((page - 1) * PAGE, page * PAGE);
-              // 전체 담기에 실제로 담기는 것 — 수동 정산 + ★2026-07-30 최소과금 회사 제외(정액 발행 모달이 청구 경로)
-              //   + ★2026-08-04 해지 회사 제외(서수란 접수). 목록에는 남고 담기에서만 빠진다.
+              // 전체 담기에 실제로 담기는 것 — 수동 정산 + ★2026-07-30 최소과금 회사 제외(정액 발행 모달이 청구 경로).
+              //   ★2026-08-06 해지는 **서버 목록에서 이미 빠진다**(Harold 지시) — 이 필터는 방어로만 남긴다.
               const availAuto = avail.filter((c) => c.manual_billing !== true && c.min_charge_supply == null && c.status !== 'terminated');
               const availManual = avail.length - availAuto.length;
               const pageIds = visible.map((c) => c.id);
@@ -9898,7 +9942,7 @@ const handleApproveRequest = async (id: string) => {
                         </button>
                         <button onClick={bulkAddAll} disabled={availAuto.length === 0}
                           className="px-3 py-1.5 bg-violet-600 text-white rounded text-xs font-semibold hover:bg-violet-700 disabled:opacity-40">
-                          전체 {availAuto.length}개사 담기{availManual > 0 ? ` (수동·최소과금·해지 ${availManual} 제외)` : ''}
+                          전체 {availAuto.length}개사 담기{availManual > 0 ? ` (수동·최소과금 ${availManual} 제외)` : ''}
                         </button>
                       </div>
                     </div>
@@ -10234,16 +10278,37 @@ const handleApproveRequest = async (id: string) => {
                                 <span className={`ml-auto shrink-0 font-semibold ${Number(t.total_amount) < 0 ? 'text-rose-600' : 'text-gray-700'}`}>
                                   {(Number(t.total_amount) || 0).toLocaleString()}원
                                 </span>
+                                {/* ★ 2026-08-05 테스트베드 발행분은 **국세청에 나가지 않았다.** `발행 완료`만 보여주면
+                                    화면이 거짓말을 한다 — 뱃지로 드러내고, 운영에서 못 찾는 동작(재발송·수정발행)은 잠근다. */}
+                                {t.is_test === true && (
+                                  <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-100 text-rose-700"
+                                    title="팝빌 테스트베드로 나간 문서입니다. 국세청에는 없습니다.">테스트베드</span>
+                                )}
+                                {/* ★ 2026-08-06 (Codex medium 수용) **모르는 것을 안다고 다루지 않는다.**
+                                    표식이 없는 행(컬럼 부재·미백필)을 운영으로 취급하면 국세청에 없는 문서에
+                                    재발송·수정발행이 열린다. 확정된 것만 연다 — 미확인은 전부 잠근다. */}
+                                {t.status === 'issued' && t.is_test !== true && t.is_test !== false && (
+                                  <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700"
+                                    title="발행 환경 표식이 없습니다. DB 마이그레이션·백필 실행 전이라 어느 환경으로 나갔는지 확정할 수 없습니다.">환경 미확인</span>
+                                )}
                                 {/* ★ 2026-08-05 (서수란 접수) 미수신 재발송 — 문서를 만들지 않고 같은 번호로 메일만 다시 보낸다.
                                     이 버튼이 없어서 담당자가 쓸 수 있는 것이 [수정발행]뿐이었고, 그건 국세청에 한 장을 더 만든다. */}
-                                {t.status === 'issued' && (
+                                {t.status === 'issued' && t.is_test === false && (
                                   <button onClick={() => { setTaxbillResendTarget(t); setTaxbillResendEmail(''); }}
                                     title="발행된 계산서 메일을 다시 보냅니다. 계산서를 새로 만들지 않습니다."
                                     className="shrink-0 px-2 py-0.5 border border-emerald-300 bg-emerald-50 text-emerald-700 rounded text-[10px] font-semibold hover:bg-emerald-100">메일 재발송</button>
                                 )}
-                                {t.status === 'issued' && t.nts_confirm_num && (
+                                {t.status === 'issued' && t.nts_confirm_num && t.is_test === false && (
                                   <button onClick={() => openModifyModal(t)}
                                     className="shrink-0 px-2 py-0.5 bg-orange-500 text-white rounded text-[10px] font-semibold hover:bg-orange-600">수정발행</button>
+                                )}
+                                {/* 수정 장은 열지 않는다 — 당초 승인번호가 테스트베드 것이라 운영에는 그 원본이 없다(서버도 거부한다).
+                                    ★ 2026-08-06 (Codex medium) **화이트리스트로 판정한다.** `!== 'modify'`는 NULL·미지의 종류까지
+                                    열어, 서버가 422로 막을 동작을 화면이 "가능하다"고 안내하게 된다. 두 계약이 같아야 한다. */}
+                                {t.status === 'issued' && t.is_test === true && t.kind === 'original' && (
+                                  <button onClick={() => setTaxbillProdTarget(t)}
+                                    title="이 문서는 국세청에 없습니다. 같은 문서번호로 운영에 다시 발행합니다."
+                                    className="shrink-0 px-2 py-0.5 bg-rose-600 text-white rounded text-[10px] font-semibold hover:bg-rose-700">운영으로 재발행</button>
                                 )}
                                 {t.status === 'failed' && (
                                   <button onClick={() => handleTaxbillRetry(t.id)}
@@ -10271,6 +10336,36 @@ const handleApproveRequest = async (id: string) => {
                       </>
                     )
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* ── 테스트베드 발행분 운영 재발행 모달 (★2026-08-05) ── */}
+            {taxbillProdTarget && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+                  <div className="p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-1">운영으로 재발행</h3>
+                    <p className="text-sm text-gray-600 mb-1">
+                      <strong>{taxbillProdTarget.company_name}</strong> · 작성일자 {taxbillProdTarget.issue_date}
+                      {' · '}{(Number(taxbillProdTarget.total_amount) || 0).toLocaleString()}원
+                    </p>
+                    <p className="text-xs text-gray-500 mb-4">테스트베드 승인번호 {taxbillProdTarget.nts_confirm_num || '없음'}</p>
+
+                    <div className="px-3 py-2 bg-rose-50 rounded-lg text-[11px] text-rose-800">
+                      이 문서는 <strong>국세청에 나가지 않았습니다.</strong> 팝빌 테스트베드에만 있습니다.
+                      같은 문서번호로 운영에 다시 발행합니다 — 테스트와 운영은 분리된 환경이라 중복이 되지 않습니다.
+                      <span className="block mt-1">발급 대기에 오르면 5분 주기 워커가 국세청으로 보냅니다. 작성일자는 그대로입니다.</span>
+                    </div>
+                  </div>
+                  <div className="flex border-t">
+                    <button onClick={() => setTaxbillProdTarget(null)} disabled={taxbillProdBusy}
+                      className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">취소</button>
+                    <button onClick={handleTaxbillReissueProduction} disabled={taxbillProdBusy}
+                      className="flex-1 px-4 py-3 bg-rose-600 text-white font-semibold hover:bg-rose-700 transition-colors disabled:opacity-50">
+                      {taxbillProdBusy ? '올리는 중...' : '국세청으로 발행'}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -10501,6 +10596,17 @@ const handleApproveRequest = async (id: string) => {
                   className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${billingUnsentOnly ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
                   발행됨 · 미발송만
                 </button>
+                {/* ★ 2026-08-06 검색 (Harold 지시) — 목록이 길어 원하는 회사를 찾기 어려웠다. 화면 안에서만 좁힌다. */}
+                <div className="relative">
+                  <input type="text" value={billingSearch} onChange={(e) => setBillingSearch(e.target.value)}
+                    placeholder="고객사·계정 검색"
+                    className="w-44 pl-3 pr-7 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                  {billingSearch && (
+                    <button type="button" onClick={() => setBillingSearch('')}
+                      aria-label="검색어 지우기"
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm">×</button>
+                  )}
+                </div>
                 <select value={filterYear} onChange={e => setFilterYear(Number(e.target.value))}
                   className="px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
                   {billingYearOptions.map(y => <option key={y} value={y}>{y}년</option>)}
@@ -10517,15 +10623,22 @@ const handleApproveRequest = async (id: string) => {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
-                      {/* ★ 2026-08-05 (서수란 접수) 전체 선택 — 지금 화면에 보이는 목록 전부가 기준이다
-                          (연도·미발송 필터를 건 상태 그대로). 안 보이는 건까지 선택되면 그게 사고다. */}
+                      {/* ★ 2026-08-05 (서수란 접수) 전체 선택. ★2026-08-06 페이징이 생기면서 기준을 **이 페이지**로
+                          한다(일괄발급 목록과 같은 규약) — 안 보이는 건까지 한 번에 선택되면 그게 사고다.
+                          선택 자체는 페이지를 넘겨도 유지되므로 여러 페이지에 걸쳐 고를 수 있다. */}
                       <th className="px-3 py-2.5 text-center w-10">
-                        <input type="checkbox" aria-label="전체 선택"
-                          checked={billings.length > 0 && billingSel.length === billings.length}
-                          onChange={() => setBillingSel(
-                            billingSel.length === billings.length ? [] : billings.map((b: any) => b.id),
-                          )}
-                          className="w-4 h-4 accent-indigo-600 cursor-pointer" />
+                        {(() => {
+                          const pageIds = billingVisible.map((b: any) => b.id);
+                          const pageAll = pageIds.length > 0 && pageIds.every((id: string) => billingSel.includes(id));
+                          return (
+                            <input type="checkbox" aria-label="이 페이지 전체 선택" title="이 페이지 전체 선택"
+                              checked={pageAll} disabled={pageIds.length === 0}
+                              onChange={() => setBillingSel((prev) => pageAll
+                                ? prev.filter((x) => !pageIds.includes(x))
+                                : Array.from(new Set([...prev, ...pageIds])))}
+                              className="w-4 h-4 accent-indigo-600 cursor-pointer" />
+                          );
+                        })()}
                       </th>
                       <th className="px-4 py-2.5 text-left text-gray-600 font-medium">고객사</th>
                       <th className="px-4 py-2.5 text-center text-gray-600 font-medium">구분</th>
@@ -10541,7 +10654,7 @@ const handleApproveRequest = async (id: string) => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {billings.map((b: any) => (
+                    {billingVisible.map((b: any) => (
                       <tr key={b.id} className={`hover:bg-gray-50 cursor-pointer ${billingSel.includes(b.id) ? 'bg-indigo-50/60' : ''}`} onClick={() => openBillingDetail(b.id)}>
                         <td className="px-3 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
                           <input type="checkbox" aria-label={`${b.company_name} 선택`}
@@ -10645,6 +10758,25 @@ const handleApproveRequest = async (id: string) => {
                     ))}
                   </tbody>
                 </table>
+                {/* ★ 2026-08-06 페이징 (Harold 지시) — 15개씩. 검색으로 0건이 되면 그 사실을 그대로 말한다. */}
+                {billingRows.length === 0 ? (
+                  <p className="text-center py-6 text-sm text-gray-400">
+                    "{billingSearch.trim()}"에 해당하는 정산이 없습니다.
+                  </p>
+                ) : billingTotalPages > 1 && (
+                  <div className="flex items-center justify-center gap-3 py-3 border-t">
+                    <button type="button" onClick={() => setBillingPage(Math.max(1, billingPageNow - 1))}
+                      disabled={billingPageNow <= 1}
+                      className="px-2 py-1 text-xs text-gray-500 disabled:opacity-30 hover:text-gray-800">이전</button>
+                    <span className="text-xs text-gray-500 tabular-nums">
+                      {billingPageNow} / {billingTotalPages}
+                      <span className="ml-2 text-gray-400">({billingRows.length}건)</span>
+                    </span>
+                    <button type="button" onClick={() => setBillingPage(Math.min(billingTotalPages, billingPageNow + 1))}
+                      disabled={billingPageNow >= billingTotalPages}
+                      className="px-2 py-1 text-xs text-gray-500 disabled:opacity-30 hover:text-gray-800">다음</button>
+                  </div>
+                )}
               </div>
             )}
           </div>
