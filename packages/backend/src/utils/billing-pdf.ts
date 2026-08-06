@@ -126,39 +126,78 @@ export function buildDisplayFilename(companyName: any, periodLabel: string): str
   return `거래내역서_${sanitizeForFilename(companyName)}_${periodLabel}.pdf`;
 }
 
-/** 디스크 파일명 — 장 ID + 렌더 시각 + 난수. 덮어쓰기·동시 쓰기가 구조적으로 불가능하다. */
+/** 상세 표 한 행의 기본 높이 — 한 줄로 끝나는 행은 예전 그대로 이 값을 쓴다. */
+export const DETAIL_ROW_MIN_H = 18;
+/** 행 안쪽 위·아래 여백. 글자를 그리는 y 오프셋과 **같은 값**이어야 칸 가운데를 벗어나지 않는다. */
+export const DETAIL_ROW_PAD_Y = 5;
+
 /**
- * ★ 2026-07-31 (Codex 적대검증) 칸 폭에 맞춰 **실측 폭 기준으로 자른다**.
+ * 표 칸에 들어갈 문자열의 **개행·제어문자를 없앤다** (★ 2026-08-06 · Codex 5R medium).
  *
- * 이 프로젝트는 같은 사고를 이미 겪었다 — 요금제 행의 적용 구간(11자)이 55pt 칸을 넘겨
- * `lineBreak: false`로도 안 막히고 두 줄로 흘러 다음 행과 겹쳤다(Harold 스크린샷 실측, 아래 주석).
- * 구분 칸에 길이 제한 없는 계정명·`발송ID / 발급명`이 들어오면서 같은 부류가 다시 열렸다.
- * 행 높이가 고정(18pt)이라 두 번째 줄은 곧바로 다음 행을 침범한다.
+ * 행 높이를 내용에서 만들기 때문에, 값 안에 줄바꿈이 들어 있으면 글자 수와 무관하게 줄이 늘어난다.
+ * `users.name`은 `varchar(100)`이지만 그것은 **글자 수 제한이지 줄 수 제한이 아니다** —
+ * 개행 62개가 든 64자 값이면 63줄이 되어 한 행이 페이지의 표 영역(663pt)을 넘는다.
+ * 여기서 한 줄로 만들면 **줄 수가 칸 폭으로만 결정되므로** 그 상한이 코드로 성립한다.
+ * 게이트웨이 원장에서 오는 발급명(`cust_name`)처럼 우리가 형식을 통제하지 못하는 값이 이 칸에 들어온다.
  *
- * 폭 측정은 **현재 설정된 폰트·크기 기준**이므로 반드시 setFont·fontSize 뒤에 부른다.
+ * ⛔ **`\s`로 지우면 안 된다**(0806 실측 · Codex 6R high). 두 방향으로 틀린다 —
+ *   ① JS `\s`는 **U+0085(NEL)를 포함하지 않는데** pdfkit은 그것을 강제 개행으로 처리한다.
+ *      `A + U+0085×62 + B`는 `varchar(100)` 안의 64자이면서 63줄이 되어 상세표 영역(663pt)을 넘는다.
+ *   ② 반대로 `\s`는 NBSP·전각 공백을 포함해서, 그것들을 ASCII 공백으로 바꾸면 **발급명 표시가 변형된다**
+ *      (`더화이트 커뮤니케이션　본점`의 전각 공백이 사라진다).
+ * ⇒ **강제 개행을 만드는 문자만** 골라 공백으로 바꾸고 정상 공백은 건드리지 않는다.
+ *   실측으로 LF·CR·VT·FF·NEL·LS·PS가 전부 강제 개행이고, 아래 범위(C0·DEL·C1·LS·PS)가 그 일곱을 덮는다.
  */
-function fitToWidth(doc: any, text: any, maxWidth: number): string {
-  const s = String(text ?? '');
-  if (!s) return '';
-  try {
-    if (doc.widthOfString(s) <= maxWidth) return s;
-    const ell = '…';
-    const ellW = doc.widthOfString(ell);
-    let lo = 0;
-    let hi = s.length;
-    // 이진 탐색 — 문자 단위로 줄이며 말줄임표까지 포함해 칸 안에 들어가는 최대 길이를 찾는다.
-    while (lo < hi) {
-      const mid = Math.ceil((lo + hi) / 2);
-      if (doc.widthOfString(s.slice(0, mid)) + ellW <= maxWidth) lo = mid;
-      else hi = mid - 1;
+export function toSingleLine(value: any): string {
+  // 정규식 리터럴에 제어문자를 적지 않는다 — 소스에 그대로 실려 파일이 바이너리로 잡힌다.
+  //   판정은 코드포인트로 한다: C0(0x00~0x1F) · DEL(0x7F) · C1(0x80~0x9F, U+0085 NEL 포함) · LS · PS.
+  let out = '';
+  let gap = false;
+  for (const ch of String(value ?? '')) {
+    const c = ch.codePointAt(0) ?? 0;
+    if (c <= 0x1f || (c >= 0x7f && c <= 0x9f) || c === 0x2028 || c === 0x2029) {
+      gap = out.length > 0;   // 연속된 강제 개행은 공백 하나로 접는다
+      continue;
     }
-    return lo > 0 ? s.slice(0, lo) + ell : ell;
-  } catch {
-    // 폭 측정 실패(폰트 미로드 등) — 자르지 않고 원문을 돌려준다. 렌더가 죽는 것보다 낫다.
-    return s;
+    if (gap) { out += ' '; gap = false; }
+    out += ch;
   }
+  return out.trim();
 }
 
+/**
+ * 표 한 행의 높이를 **내용에서 만든다** (★ 2026-08-06 · 서수란 접수 "PDF 구분값 데이터 검증 이슈").
+ *
+ * 무엇이 문제였나: 구분 칸이 `B0093 / 더화이…`로 잘려 나가 업체가 내역을 대조할 수 없었다(더화이트 클레임).
+ *   0731에 넣은 말줄임(`fitToWidth`)이 그 원인인데, 그 말줄임은 **행 높이가 고정**이라
+ *   두 줄이 되는 순간 다음 행을 침범하기 때문에 넣은 응급 처치였다. 뿌리는 폭이 아니라 고정 높이다.
+ *
+ * 폭으로는 닫히지 않는다 (8pt 맑은고딕 실측):
+ *   `B0093 / 더화이트커뮤니케이션` = 111.1pt인데, 표 495pt 안에서 나머지 8열을 실제 필요폭까지
+ *   깎아도 구분 칸에 줄 수 있는 최대가 약 105pt다. 넓히는 방향은 임계값만 옮기고 다음 회사에서 재발한다.
+ * ⇒ 넘치면 줄바꿈하고 행이 그만큼 높아진다. **잘리지 않고 다음 행과 겹치지도 않는다.**
+ *   ⚠ 보장은 **그 행이 새 페이지의 표 영역에 들어갈 때까지**다 — 경계를 넘으면 페이지를 한 번 더할 뿐
+ *   행 자체를 쪼개지는 않는다(상세표 663pt · 항목표 520pt). 강제 개행은 `toSingleLine`이 지우므로
+ *   줄 수는 칸 폭으로만 결정되고, 한글 100자가 10줄(약 114pt)이라 663pt를 채우려면 62줄이 필요하다.
+ *
+ * 늘어나는 것은 실제로 두 줄 이상이 된 행뿐이다 — 한 줄 행은 예전 높이 그대로라 대부분 문서의 쪽수가 안 바뀐다.
+ * 1페이지 항목표와 2페이지 상세표가 **같은 함수**를 쓴다(최소 높이만 다르다) — 둘이 갈리면 한쪽만 또 굳는다.
+ * 높이 측정(`heightOfString`)은 현재 폰트·크기 기준이므로 반드시 setFont·fontSize 뒤에서 부른다.
+ */
+export function contentRowHeight(minHeight: number, lineHeight: any, ...textHeights: any[]): number {
+  const floor = Number(minHeight) > 0 ? Number(minHeight) : DETAIL_ROW_MIN_H;
+  const oneLine = Number(lineHeight) || 0;
+  // 측정 실패(폰트 미로드 등)면 옛 고정 높이로 돌아간다 — 렌더가 죽거나 0높이 행이 나오는 것보다 낫다.
+  if (oneLine <= 0) return floor;
+  let lines = 1;
+  for (const h of textHeights) {
+    const n = Math.max(1, Math.round((Number(h) || 0) / oneLine));
+    if (n > lines) lines = n;
+  }
+  return floor + Math.ceil((lines - 1) * oneLine);
+}
+
+/** 디스크 파일명 — 장 ID + 렌더 시각 + 난수. 덮어쓰기·동시 쓰기가 구조적으로 불가능하다. */
 function buildDiskFilename(prefix: string, id: any): string {
   const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15); // YYYYMMDDHHmmss
   return `${prefix}_${String(id ?? '').slice(0, 8)}_${stamp}_${randomBytes(3).toString('hex')}.pdf`;
@@ -225,7 +264,8 @@ export async function renderBillingStatementPdf(bil: any, items: any[]): Promise
       setFont(false);
       doc.fontSize(9).fillColor(gray);
       doc.text('사용자:', rightX, 98, { continued: true });
-      doc.fillColor(dark).text(`  ${bil.user_name}`);
+      // ★ 2026-08-06 표 밖 표기도 같은 값이 들어온다 — 개행이 살아 있으면 아래 구분선(고정 y)과 겹친다.
+      doc.fillColor(dark).text(`  ${toSingleLine(bil.user_name)}`);
     }
 
     doc.moveTo(50, bil.user_name ? 118 : 115).lineTo(545, bil.user_name ? 118 : 115).strokeColor('#e5e7eb').stroke();
@@ -285,9 +325,27 @@ export async function renderBillingStatementPdf(bil: any, items: any[]): Promise
 
     // ★ 2026-07-26 `quantityText`가 있으면 수량 칸을 그 문구로 쓴다 — 요금제는 `9일 / 31일`이다.
     //   없으면 `0건 × ₩350,000 = ₩101,613`이라는 거짓 산식이 인쇄된다.
+    // ★ 2026-08-06 이 표도 2페이지 상세와 **같은 규약**이다 — 칸을 목록으로 먼저 만들고,
+    //   같은 옵션으로 재고, 같은 목록으로 그린다. `lineBreak: false`는 `width`가 있으면 줄바꿈을
+    //   막지 못한다는 것이 실측으로 확인됐다(0806). 그 옵션을 믿고 행 높이를 22pt로 굳혀 두면
+    //   긴 항목명·큰 금액에서 다음 행과 겹친다 — 여기는 폭 여유가 커서 아직 안 터졌을 뿐 전제는 같다.
     const drawRow = (label: string, count: number, price: number, amount: number, bg = 'white', quantityText?: string) => {
       if (count <= 0 && !quantityText) return;
-      if (y + ITEM_ROW_H > ITEM_TABLE_BOTTOM) {
+      const cells: { x: number; text: string; opts: any; bold?: boolean }[] = [
+        { x: 60, text: toSingleLine(label), opts: { width: 185 } },
+        { x: 250, text: toSingleLine(quantityText || count.toLocaleString()), opts: { width: 80, align: 'right' } },
+        { x: 340, text: `₩${price.toLocaleString()}`, opts: { width: 80, align: 'right' } },
+        { x: 430, text: `₩${amount.toLocaleString()}`, opts: { width: 105, align: 'right' }, bold: true },
+      ];
+      const cellHeights = cells.map((c) => {
+        setFont(!!c.bold);
+        doc.fontSize(9);
+        return doc.heightOfString(c.text, c.opts);
+      });
+      setFont(false);
+      doc.fontSize(9);
+      const rowH = contentRowHeight(ITEM_ROW_H, doc.currentLineHeight(true), ...cellHeights);
+      if (y + rowH > ITEM_TABLE_BOTTOM) {
         doc.addPage();
         y = 50;
         setFont(true);
@@ -295,15 +353,13 @@ export async function renderBillingStatementPdf(bil: any, items: any[]): Promise
         y += 25;
         drawItemHeader();
       }
-      if (bg !== 'white') doc.rect(50, y, 495, ITEM_ROW_H).fill(bg);
-      setFont(false);
-      doc.fontSize(9).fillColor(dark);
-      doc.text(label, 60, y + 6, { width: 185, lineBreak: false });
-      doc.text(quantityText || count.toLocaleString(), 250, y + 6, { width: 80, align: 'right', lineBreak: false });
-      doc.text(`₩${price.toLocaleString()}`, 340, y + 6, { width: 80, align: 'right', lineBreak: false });
-      setFont(true);
-      doc.text(`₩${amount.toLocaleString()}`, 430, y + 6, { width: 105, align: 'right', lineBreak: false });
-      y += ITEM_ROW_H;
+      if (bg !== 'white') doc.rect(50, y, 495, rowH).fill(bg);
+      for (const c of cells) {
+        setFont(!!c.bold);
+        doc.fontSize(9).fillColor(dark);
+        doc.text(c.text, c.x, y + 6, c.opts);
+      }
+      y += rowH;
       doc.moveTo(50, y).lineTo(545, y).strokeColor('#e5e7eb').stroke();
     };
 
@@ -373,7 +429,7 @@ export async function renderBillingStatementPdf(bil: any, items: any[]): Promise
       doc.fontSize(14).fillColor(primary).text('일자별 상세 내역', 50, 50);
       setFont(false);
       doc.fontSize(9).fillColor(gray).text(
-        `${bil.company_name} | ${bil.billing_year}년 ${bil.billing_month}월${bil.user_name ? ' | ' + bil.user_name : ''}`,
+        toSingleLine(`${bil.company_name} | ${bil.billing_year}년 ${bil.billing_month}월${bil.user_name ? ' | ' + bil.user_name : ''}`),
         50, 72
       );
 
@@ -383,9 +439,15 @@ export async function renderBillingStatementPdf(bil: any, items: any[]): Promise
       // ★ 2026-07-26 '구분' 열 추가. 축이 채널·계정·발송ID로 쪼개지면서 같은 날 같은 유형 행이
       //   여러 줄 생기는데, 구분이 없으면 고객 눈에 중복 오류로 보인다.
       //   에이전트 행은 발송ID를 그대로 적는다 — 고객이 게이트웨이 쪽 통계와 대조하는 근거다.
+      // ★ 2026-08-06 일자 칸의 남는 폭을 구분 칸으로 옮긴다(서수란 접수 — 더화이트 클레임).
+      //   일자는 언제나 `MM-DD` 5자(8pt 실측 20.9pt)인데 칸 안쪽이 47pt로 26pt를 놀리고 있었다.
+      //   일자 55→34 · 구분 70→91 — **합이 125로 같아** 유형(x=175) 이후 7열의 좌표는 그대로다.
+      //   이 이동만으로 `B0228 / 제이씨패밀리`(79.1pt)·`B0082 / 금강제화`(63.1pt)·
+      //   `스팸필터 · 관리자`(63.4pt)가 한 줄에 들어간다 — 그전에는 셋 다 잘렸다.
+      //   더 긴 라벨은 줄바꿈으로 처리한다(`contentRowHeight`) — 폭을 계속 넓히는 방향으로 가지 않는다.
       const cols = [
-        { label: '일자', x: 50, w: 55, align: 'left' as const },
-        { label: '구분', x: 105, w: 70, align: 'left' as const },
+        { label: '일자', x: 50, w: 34, align: 'left' as const },
+        { label: '구분', x: 84, w: 91, align: 'left' as const },
         { label: '유형', x: 175, w: 55, align: 'left' as const },
         { label: '전송', x: 230, w: 48, align: 'right' as const },
         { label: '성공', x: 278, w: 48, align: 'right' as const },
@@ -396,7 +458,6 @@ export async function renderBillingStatementPdf(bil: any, items: any[]): Promise
       ];
 
       let iy = 95;
-      const rowH = 18;
       const pageBottom = 760;
 
       const drawDetailHeader = () => {
@@ -420,6 +481,62 @@ export async function renderBillingStatementPdf(bil: any, items: any[]): Promise
 
       let detailSubtotal = 0;
       items.forEach((item: any, idx: number) => {
+        // ★ 2026-07-26 판정을 유형키 접두가 아니라 `channel`로. 접두 판정은 새 유형이 생기면 조용히 어긋난다.
+        const ch = String(item.channel || 'web');
+        // ★ 2026-07-26 일자 칸은 **모든 행이 시작일만**이다. 요금제 행에만 적용 구간(`07-01~07-26`, 11자)을
+        //   넣었더니 칸 폭을 넘겨 두 줄로 흘러 다음 행과 겹쳤다(Harold 스크린샷 실측). 적용 구간은
+        //   1페이지 항목표가 `요금제 FREE (07-01~07-26)` + `26일 / 31일`로 이미 담고 있어 정보 손실이 없다.
+        const dateStr = toDayKey(item.item_date).slice(5, 10);
+        // ★ 2026-07-31 구분 칸 판정을 CT 하나로 (PDF·상세 모달·화면 3면 동일).
+        //   그 전에는 여기와 AdminDashboard에 인라인 두 벌이라 이미 갈려 있었다 —
+        //   에이전트 발급명이 화면에만 있었고, `extra` 행은 화면에서 원문 'extra'로 노출됐다.
+        const scopeLabel = resolveBillingScopeLabel(item);
+        // 요금제 행의 '유형' 칸은 플랜 코드다 — `PLAN_` 접두는 내부 키라 고객에게 보일 값이 아니다.
+        const typeText = ch === 'plan'
+          ? String(item.message_type || '').replace(/^PLAN_/, '')
+          : (typeLabel[item.message_type] || item.message_type);
+
+        // ★ 2026-08-06 한 행의 칸을 **먼저 목록으로 만들고, 같은 목록으로 재고 같은 목록으로 그린다.**
+        //   재는 옵션과 그리는 옵션이 다르면 행 높이가 실제 그림과 어긋난다(Codex 적대검증 high).
+        //   ⚠ `lineBreak: false`는 **줄바꿈을 막지 못한다** — `width`가 있으면 그대로 흐른다
+        //     (0806 실측: width 37pt에 긴 숫자를 넣으면 옵션 유무와 무관하게 `doc.y`가 21.28pt = 두 줄 이동).
+        //     0726에 금액 칸을 지킨다고 넣은 그 옵션은 동작한 적이 없고 값이 칸보다 짧아서 안 터졌을 뿐이다.
+        //     그래서 "이 칸은 안 흐른다"는 전제를 두지 않는다 — 전부 재서 행 높이에 넣는다.
+        const cells: { col: number; text: string; opts: any; bold?: boolean; color?: string }[] = [
+          { col: 0, text: toSingleLine(dateStr), opts: { width: cols[0].w - 8 } },
+          // 구분·유형은 길이 제한이 없는 값(계정명·`발송ID / 발급명`·플랜코드)이라 폭으로는 못 덮는다.
+          //   줄바꿈을 허용하고 행이 그만큼 커진다 — 말줄임 폐기(서수란 접수 "구분값 전체 출력").
+          //   값 안의 개행은 `toSingleLine`이 지운다 — 남겨 두면 줄 수가 글자 수와 무관해져 상한이 사라진다.
+          { col: 1, text: toSingleLine(scopeLabel), opts: { width: cols[1].w - 8 } },
+          { col: 2, text: toSingleLine(typeText), opts: { width: cols[2].w - 8 } },
+        ];
+        if (ch === 'plan' || ch === 'extra') {
+          // 수량 4칸 = '-'. 요금제 일수는 1페이지 `9일 / 31일`, 추가 항목(080 등)은 발송이 아니라 수량 축이 없다.
+          [3, 4, 5, 6].forEach((c) => cells.push({ col: c, text: '-', opts: { width: cols[c].w - 8, align: 'right' } }));
+        } else {
+          cells.push({ col: 3, text: n(item.total_count).toLocaleString(), opts: { width: cols[3].w - 8, align: 'right' } });
+          cells.push({ col: 4, text: n(item.success_count).toLocaleString(), opts: { width: cols[4].w - 8, align: 'right' } });
+          cells.push({
+            col: 5, text: n(item.fail_count).toLocaleString(), opts: { width: cols[5].w - 8, align: 'right' },
+            color: n(item.fail_count) > 0 ? '#dc2626' : undefined,
+          });
+          cells.push({ col: 6, text: n(item.pending_count).toLocaleString(), opts: { width: cols[6].w - 8, align: 'right' } });
+        }
+        cells.push({ col: 7, text: `₩${n(item.unit_price).toLocaleString()}`, opts: { width: cols[7].w - 8, align: 'right' } });
+        cells.push({ col: 8, text: `₩${n(item.amount).toLocaleString()}`, opts: { width: cols[8].w - 8, align: 'right' }, bold: true });
+
+        // 행 높이를 **먼저** 만든다 — 페이지 넘김·배경 사각형·구분선·다음 행 시작이 전부 이 값을 쓴다.
+        //   측정은 현재 폰트·크기 기준이라 칸마다 그릴 때와 같은 폰트로 맞춘 뒤 잰다
+        //   (볼드 금액이 레귤러보다 넓어 한쪽만 흐르는 경우가 있다. 줄 높이는 두 폰트가 10.640625로 같다 — 0806 실측).
+        const cellHeights = cells.map((c) => {
+          setFont(!!c.bold);
+          doc.fontSize(8);
+          return doc.heightOfString(c.text, c.opts);
+        });
+        setFont(false);
+        doc.fontSize(8);
+        const rowH = contentRowHeight(DETAIL_ROW_MIN_H, doc.currentLineHeight(true), ...cellHeights);
+
         // 페이지 넘김 체크
         if (iy + rowH > pageBottom) {
           setFont(false);
@@ -432,56 +549,19 @@ export async function renderBillingStatementPdf(bil: any, items: any[]): Promise
           drawDetailHeader();
         }
 
-        // ★ 2026-07-26 판정을 유형키 접두가 아니라 `channel`로. 접두 판정은 새 유형이 생기면 조용히 어긋난다.
-        const ch = String(item.channel || 'web');
         if (ch === 'plan') doc.rect(50, iy, 495, rowH).fill('#f5f3ff');
         else if (ch === 'spam') doc.rect(50, iy, 495, rowH).fill('#fef3c7');
         else if (ch === 'test') doc.rect(50, iy, 495, rowH).fill('#fefce8');
         else if (ch === 'agent') doc.rect(50, iy, 495, rowH).fill('#eff6ff');
         else if (idx % 2 === 0) doc.rect(50, iy, 495, rowH).fill('#fafafa');
 
-        setFont(false);
-        doc.fontSize(8).fillColor(dark);
-        // ★ 2026-07-26 요금제 행은 발송 수량 축이 없다(plan_days 전용 컬럼으로 분리).
-        //   수량 4칸에는 '-'를 찍는다 — 0을 찍으면 "전송 0건인데 35만원"으로 읽힌다.
-        // ★ 2026-07-26 일자 칸은 **모든 행이 시작일만**이다. 요금제 행에만 적용 구간(`07-01~07-26`, 11자)을
-        //   넣었더니 칸 폭(55pt, 안쪽 47pt)을 넘겨 `lineBreak: false`로도 안 막히고 두 줄로 흘러
-        //   다음 행과 겹쳤다(Harold 스크린샷 실측). 적용 구간은 1페이지 항목표가
-        //   `요금제 FREE (07-01~07-26)` + `26일 / 31일`로 이미 담고 있어 정보 손실이 없고,
-        //   2페이지는 다른 행과 같은 폭·형식을 유지하는 게 표로서 맞다.
-        const dateStr = toDayKey(item.item_date).slice(5, 10);
-        // ★ 2026-07-31 구분 칸 판정을 CT 하나로 (PDF·상세 모달·화면 3면 동일).
-        //   그 전에는 여기와 AdminDashboard에 인라인 두 벌이라 이미 갈려 있었다 —
-        //   에이전트 발급명이 화면에만 있었고, `extra` 행은 화면에서 원문 'extra'로 노출됐다.
-        const scopeLabel = resolveBillingScopeLabel(item);
-        // 요금제 행의 '유형' 칸은 플랜 코드다 — `PLAN_` 접두는 내부 키라 고객에게 보일 값이 아니다.
-        const typeText = ch === 'plan'
-          ? String(item.message_type || '').replace(/^PLAN_/, '')
-          : (typeLabel[item.message_type] || item.message_type);
-        doc.text(dateStr, cols[0].x + 4, iy + 5, { width: cols[0].w - 8, lineBreak: false });
-        // ★ 2026-07-31 구분·유형은 길이 제한이 없는 값(계정명·발급명·플랜코드)이라 실측 폭으로 자른다.
-        //   자르지 않으면 두 줄로 흘러 다음 행과 겹친다(요금제 일자 칸에서 이미 겪은 사고).
-        doc.text(fitToWidth(doc, scopeLabel, cols[1].w - 8), cols[1].x + 4, iy + 5, { width: cols[1].w - 8, lineBreak: false });
-        doc.text(fitToWidth(doc, typeText, cols[2].w - 8), cols[2].x + 4, iy + 5, { width: cols[2].w - 8, lineBreak: false });
-
-        if (ch === 'plan' || ch === 'extra') {
-          // 수량 4칸 = '-'. 요금제 일수는 1페이지 `9일 / 31일`, 추가 항목(080 등)은 발송이 아니라 수량 축이 없다.
-          [3, 4, 5, 6].forEach((c) => doc.text('-', cols[c].x + 4, iy + 5, { width: cols[c].w - 8, align: 'right' }));
-        } else {
-          doc.text(n(item.total_count).toLocaleString(), cols[3].x + 4, iy + 5, { width: cols[3].w - 8, align: 'right' });
-          doc.text(n(item.success_count).toLocaleString(), cols[4].x + 4, iy + 5, { width: cols[4].w - 8, align: 'right' });
-
-          if (n(item.fail_count) > 0) doc.fillColor('#dc2626');
-          doc.text(n(item.fail_count).toLocaleString(), cols[5].x + 4, iy + 5, { width: cols[5].w - 8, align: 'right' });
-          doc.fillColor(dark);
-
-          doc.text(n(item.pending_count).toLocaleString(), cols[6].x + 4, iy + 5, { width: cols[6].w - 8, align: 'right' });
+        // 그리기는 위에서 잰 **그 목록·그 옵션 그대로**다. 여기서 옵션을 바꾸면 행 높이가 다시 어긋난다.
+        const y0 = iy + DETAIL_ROW_PAD_Y;
+        for (const c of cells) {
+          setFont(!!c.bold);
+          doc.fontSize(8).fillColor(c.color || dark);
+          doc.text(c.text, cols[c.col].x + 4, y0, c.opts);
         }
-        // ★ 2026-07-26 금액 칸은 `lineBreak: false`다. 원 단위 절사로 소수는 사라졌지만,
-        //   자릿수가 큰 회사에서 다시 두 줄로 흘러 아래 행과 겹치는 사고를 구조적으로 막는다.
-        doc.text(`₩${n(item.unit_price).toLocaleString()}`, cols[7].x + 4, iy + 5, { width: cols[7].w - 8, align: 'right', lineBreak: false });
-        setFont(true);
-        doc.text(`₩${n(item.amount).toLocaleString()}`, cols[8].x + 4, iy + 5, { width: cols[8].w - 8, align: 'right', lineBreak: false });
 
         detailSubtotal += n(item.amount);
         iy += rowH;
@@ -489,17 +569,28 @@ export async function renderBillingStatementPdf(bil: any, items: any[]): Promise
       });
 
       // 합계 행 — Harold 실측(2026-07-26): `₩13,397,454.84`가 칸 폭을 넘겨 두 줄로 흘렀다.
-      iy += 4;
-      doc.rect(50, iy, 495, 22).fill('#eef2ff');
-      setFont(true);
-      doc.fontSize(9).fillColor(primary);
-      doc.text('합계 (원 미만 절사)', cols[0].x + 4, iy + 6);
+      // ★ 2026-08-06 이 행도 **재서** 높이를 잡는다(일자행과 같은 규약). 자리가 모자라면 그리기 전에
+      //   페이지를 넘긴다 — 그러지 않으면 배경 막대만 앞 페이지에 남고 금액 뒷자리가 다음 장에 찍힌다.
       // ★ 2026-07-30 합계 = 헤더 공급가액 − AI 크레딧(상세에 없는 축) — 1페이지 항목표와 정의상 일치.
       //   일자행이 정확값(소수)이 되면서 세로합(detailSubtotal)에 소수가 생길 수 있는데,
       //   Σ소수를 그대로 찍으면 0726 `₩13,397,454.84` 사고가 재현되고, floor(Σ)는 1페이지와 1원 갈릴 수 있다.
       //   최종 표시 금액은 항상 절사된 항목줄 합 하나에서 나온다(Harold 0730 — 절사는 최종 금액에서 1회).
       const detailTotalShown = floorWon(n(bil.subtotal) - n(bil.ai_credit_supply));
-      doc.text(`₩${detailTotalShown.toLocaleString()}`, cols[8].x + 4, iy + 6, { width: cols[8].w - 8, align: 'right', lineBreak: false });
+      const totalText = `₩${detailTotalShown.toLocaleString()}`;
+      const totalOpts = { width: cols[8].w - 8, align: 'right' as const };
+      iy += 4;
+      setFont(true);
+      doc.fontSize(9);
+      const totalH = Math.max(22, Math.ceil(doc.heightOfString(totalText, totalOpts)) + 12);
+      if (iy + totalH > doc.page.maxY()) {
+        doc.addPage();
+        iy = 50;
+      }
+      doc.rect(50, iy, 495, totalH).fill('#eef2ff');
+      setFont(true);
+      doc.fontSize(9).fillColor(primary);
+      doc.text('합계 (원 미만 절사)', cols[0].x + 4, iy + 6);
+      doc.text(totalText, cols[8].x + 4, iy + 6, totalOpts);
     }
 
     doc.end();
