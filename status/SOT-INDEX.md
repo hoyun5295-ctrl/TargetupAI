@@ -32,6 +32,7 @@
 | 거래내역서 일괄발급·컨펌·세금계산서(팝빌) | [2026-07-28-bulk-invoice-confirm-taxbill-design.md](../docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md) | §9(종결 상태·이월) · §7-0(팝빌 API 요지) · §8(구현 순서) | — |
 | 브랜드메시지 청구·발송 개방 + 청구 유형 축 CT | [2026-07-29-brand-message-billing-design.md](../docs/2026-07-29-brand-message-billing-design.md) | §7(오픈 전 남은 것) · 구조 이유는 §1~§5 | — |
 | 정산 특례 — 추가 청구(080·부가서비스·최소과금)·발행 그룹 | [2026-07-30-billing-extras-and-groups-design.md](../docs/2026-07-30-billing-extras-and-groups-design.md) | §9(남은 것) → §7(확인 5건) · 착수 시 §6(발행 그룹) · 구조 근거 = §2-3·§3 | — |
+| **0807 세션 인계 — 접수 4건 + 정산 점검(미완 착수 원장)** | [2026-08-07-session-handoff.md](../docs/2026-08-07-session-handoff.md) | §0 배포 상태 → §1 첫 작업 4건(순서 고정) → §2 서버 실측 사실. 별건 = §3, 재발 방지 = §4 | **0807 인계 이어가자** |
 | 거래내역서 상세 구분 칸(웹 계정명·에이전트 발송ID) — 처리 완료 + 다음 세션 별건 5 | [2026-07-31-billing-detail-storeid-handoff.md](../docs/2026-07-31-billing-detail-storeid-handoff.md) | 전체(짧다). 결론 → 다음 세션 과제 5건(아이디룩 미발송 7,701건이 1순위) | **거래내역서 구분 칸** |
 | 브랜드메시지 발송 경로 재구축(QTmsg Agent) | [2026-07-29-brand-message-qtmsg-agent-design.md](../docs/2026-07-29-brand-message-qtmsg-agent-design.md) | §5(착수 전 확정 4건) → §7(순서). 스펙 = §1·§2 | **브랜드메시지 발송경로 재구축** |
 | 레거시 서버(27.102.203.143) 폐기 | [레거시서버_폐기_플랜.md](../docs/레거시서버_폐기_플랜.md) | 전체 (진행 시 갱신) | — |

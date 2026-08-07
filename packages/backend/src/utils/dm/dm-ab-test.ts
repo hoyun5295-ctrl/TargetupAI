@@ -261,12 +261,14 @@ export async function startAbTest(id: string, companyId: string): Promise<AbTest
   //   발행 과금을 우회하던 경로 차단(test-send 무과금 발행 결함과 동일 계열, Codex 적대검토 발견).
   const pageIds = [current.variant_a_page_id, current.variant_b_page_id, current.variant_c_page_id].filter(Boolean) as string[];
   if (pageIds.length > 0) {
+    // ★ 2026-08-06 중지분도 여기서 걸린다(Codex 적대검증 high) — `short_code`는 중지돼도 남아 있어
+    //   그것만 보면 이미 내린 DM으로 새 A/B를 시작할 수 있었다. 발행 상태를 함께 본다.
     const published = await query(
-      `SELECT id FROM dm_pages WHERE company_id = $1 AND id = ANY($2::uuid[]) AND short_code IS NOT NULL`,
+      `SELECT id FROM dm_pages WHERE company_id = $1 AND id = ANY($2::uuid[]) AND short_code IS NOT NULL AND status = 'published'`,
       [companyId, pageIds],
     );
     if (published.rows.length !== pageIds.length) {
-      throw new Error('발행된 DM만 A/B 테스트를 시작할 수 있어요. 포함된 DM을 먼저 발행해주세요.');
+      throw new Error('발행 중인 DM만 A/B 테스트를 시작할 수 있어요. 포함된 DM이 미발행이거나 중지 상태인지 확인해주세요.');
     }
   }
 

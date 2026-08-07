@@ -1396,6 +1396,9 @@ const [taxbillResendBusy, setTaxbillResendBusy] = useState(false);
 // ★ 2026-08-05 발급 대기 취소 — 되돌리는 경로가 고객 이의신청 하나뿐이라, 발행 직전에 금액 오류를
 //   발견해도 5분 뒤 워커가 그대로 국세청에 보냈다.
 const [taxbillCancelTarget, setTaxbillCancelTarget] = useState<any | null>(null);
+// ★ 2026-08-07 수정(취소·정정) 장 재시도 확인 — 국세청에 있는 원본을 건드리는 문서라 사유를 남긴다.
+const [taxbillRetryTarget, setTaxbillRetryTarget] = useState<any | null>(null);
+const [taxbillRetryReason, setTaxbillRetryReason] = useState('');
 const [taxbillCancelReason, setTaxbillCancelReason] = useState('');
 const [taxbillCancelBusy, setTaxbillCancelBusy] = useState(false);
 // ★ 2026-08-05 테스트베드 발행분을 운영으로 다시 태우기 — 전환 전 12장이 국세청에 안 나갔는데
@@ -1798,15 +1801,21 @@ const handleModifySubmit = async () => {
 };
 
 // 실패 장 재시도 — failed → ready (문서번호가 결정적이라 같은 번호로 재발행 = 중복 없음)
-const handleTaxbillRetry = async (issueId: string) => {
+//   ★ 2026-08-07 수정(취소·정정) 장은 사유와 명시 확인을 함께 보낸다. 그 문서는 이미 국세청에 있는
+//   원본을 취소·정정하므로, 눌린 김에 나가면 정상 문서가 사라진다(크로커다일 −3,903,325 실측).
+const handleTaxbillRetry = async (issueId: string, opts?: { reason: string }) => {
   try {
     const token = localStorage.getItem('token');
     const res = await fetch(`/api/admin/billing/taxbill-issues/${issueId}/retry`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}` },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(opts ? { confirm: true, reason: opts.reason } : {}),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || '재시도 요청 실패');
     setBillingToast({ msg: data?.message || '발급 대기에 다시 올렸습니다', type: 'success' });
+    setTaxbillRetryTarget(null);
+    setTaxbillRetryReason('');
     loadTaxbillIssues();
   } catch (e: any) {
     setBillingToast({ msg: e?.message || '재시도 요청 실패', type: 'error' });
@@ -1846,7 +1855,9 @@ const handleTaxbillCancel = async () => {
     const res = await fetch(`/api/admin/billing/taxbill-issues/${taxbillCancelTarget.id}/cancel`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ reason }),
+      // ★ 2026-08-07 모달을 연 시점의 상태를 함께 보낸다(CAS) — 그 사이 [재시도]가 failed를 ready로
+      //   올렸다면 담당자가 본 것과 다른 장을 내리게 된다. 서버가 불일치면 409로 되돌린다.
+      body: JSON.stringify({ reason, expected_status: taxbillCancelTarget.status }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || '발급 대기 취소 실패');
@@ -10310,11 +10321,19 @@ const handleApproveRequest = async (id: string) => {
                                     title="이 문서는 국세청에 없습니다. 같은 문서번호로 운영에 다시 발행합니다."
                                     className="shrink-0 px-2 py-0.5 bg-rose-600 text-white rounded text-[10px] font-semibold hover:bg-rose-700">운영으로 재발행</button>
                                 )}
+                                {/* ★ 2026-08-07 수정(취소·정정) 장 재시도는 확인 모달을 지난다 — 그 문서는 이미 국세청에 있는
+                                    원본을 건드린다. 원본 장 재시도는 안 나간 청구서를 같은 번호로 다시 보내는 것이라 그대로. */}
                                 {t.status === 'failed' && (
-                                  <button onClick={() => handleTaxbillRetry(t.id)}
+                                  <button onClick={() => {
+                                    if (t.kind === 'modify') { setTaxbillRetryTarget(t); setTaxbillRetryReason(''); }
+                                    else handleTaxbillRetry(t.id);
+                                  }}
+                                    title={t.kind === 'modify'
+                                      ? '수정(취소·정정) 장입니다. 확인 후 재시도합니다.'
+                                      : '같은 문서번호로 다시 발행합니다.'}
                                     className="shrink-0 px-2 py-0.5 bg-slate-500 text-white rounded text-[10px] font-semibold hover:bg-slate-600">재시도</button>
                                 )}
-                                {/* ★ 2026-08-05 발급 대기 취소 — 워커가 국세청으로 보내기 전 유일한 제동 장치다.
+                                                {/* ★ 2026-08-05 발급 대기 취소 — 워커가 국세청으로 보내기 전 유일한 제동 장치다.
                                     그전에는 되돌리는 경로가 고객 이의신청뿐이라 담당자가 손댈 곳이 없었다. */}
                                 {t.status === 'ready' && (
                                   <button onClick={() => { setTaxbillCancelTarget(t); setTaxbillCancelReason(''); }}
@@ -10397,7 +10416,49 @@ const handleApproveRequest = async (id: string) => {
                       className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">닫기</button>
                     <button onClick={handleTaxbillCancel} disabled={taxbillCancelBusy || !taxbillCancelReason.trim()}
                       className="flex-1 px-4 py-3 bg-rose-600 text-white font-semibold hover:bg-rose-700 transition-colors disabled:opacity-50">
-                      {taxbillCancelBusy ? '취소 중...' : '발급 대기에서 내리기'}
+                      {taxbillCancelBusy ? '처리 중...' : '발급 대기에서 내리기'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ★ 2026-08-07 수정(취소·정정) 장 재시도 확인 (Harold 승인 · Codex 적대검증 2R로 방향 확정)
+                원본 재시도는 안 나간 청구서를 같은 문서번호로 다시 보내는 것이라 그대로 두고,
+                수정 장만 이 관문을 지난다 — 그 문서는 **이미 국세청에 있는 원본을 취소·정정한다.** */}
+            {taxbillRetryTarget && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+                  <div className="p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-1">수정 계산서 재발행 확인</h3>
+                    <p className="text-sm text-gray-600 mb-1">
+                      <strong>{taxbillRetryTarget.company_name}</strong> · 작성일자 {taxbillRetryTarget.issue_date}
+                      {' · '}{(Number(taxbillRetryTarget.total_amount) || 0).toLocaleString()}원
+                    </p>
+                    <p className="text-xs text-gray-500 mb-4">
+                      사유 {taxbillRetryTarget.modify_code} 수정 장입니다.
+                      {taxbillRetryTarget.org_nts_confirm_num
+                        ? ` 당초 승인번호 ${taxbillRetryTarget.org_nts_confirm_num} 문서를 대상으로 합니다.`
+                        : ''}
+                    </p>
+
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">재발행 사유</label>
+                    <textarea value={taxbillRetryReason} onChange={(e) => setTaxbillRetryReason(e.target.value)} rows={3} maxLength={200}
+                      placeholder="예) 업체 확인 결과 8월 LMS 수량이 달라 정정이 필요함"
+                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none resize-none" />
+
+                    <div className="mt-3 px-3 py-2 bg-amber-50 rounded-lg text-[11px] text-amber-900">
+                      이 재시도가 성공하면 <strong>국세청에 있는 당초 문서가 실제로 취소·정정됩니다.</strong>
+                      전에 실패했던 이유가 해소돼 지금은 나갈 수 있습니다. 그 정정이 지금도 필요한지 확인해 주세요.
+                    </div>
+                  </div>
+                  <div className="flex border-t">
+                    <button onClick={() => { setTaxbillRetryTarget(null); setTaxbillRetryReason(''); }}
+                      className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">닫기</button>
+                    <button onClick={() => handleTaxbillRetry(taxbillRetryTarget.id, { reason: taxbillRetryReason.trim() })}
+                      disabled={!taxbillRetryReason.trim()}
+                      className="flex-1 px-4 py-3 bg-amber-600 text-white font-semibold hover:bg-amber-700 transition-colors disabled:opacity-50">
+                      확인하고 재발행
                     </button>
                   </div>
                 </div>

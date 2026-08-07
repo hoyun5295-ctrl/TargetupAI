@@ -67,6 +67,12 @@ type DmListItem = {
   store_name?: string;
   layout_mode?: string;
   approval_status?: string;
+  /**
+   * ★ 2026-08-06 발행 축(`dm_pages.status`) — `draft` / `published` / `stopped`.
+   * 목록 API는 예전부터 내려주고 있었는데 이 타입이 안 받아 화면이 검수 축(`approval_status`)만 보고 있었다.
+   * 뷰어가 여는 기준이 이 축이라, 중지 여부는 반드시 여기로 판정한다.
+   */
+  status?: string;
   short_code?: string | null;
   view_count?: number;
   page_count?: number;
@@ -460,6 +466,55 @@ export default function DmBuilderPage() {
         }
       },
     });
+  };
+
+  // ★ 2026-08-06 발행 중지 / 재개 (서수란 접수)
+  //   업체 사정(행사 종료 등)으로 발행한 DM에 고객이 접속하지 못하게 막는다.
+  //   삭제와 다른 점 = **이력이 남는다.** 삭제는 열람·발송 이력까지 함께 지운다(접수 그대로).
+  //   중지 상태에서는 [발행 주소 복사]가 잠긴다 — 그 버튼이 발행 API를 부르기 때문에
+  //   열어 두면 주소를 복사하는 순간 중지가 풀린다(서버도 409로 함께 막는다).
+  const handleStop = async (id: string) => {
+    setConfirm({
+      mode: 'warning',
+      title: 'DM 중지',
+      // ★ 2026-08-06 보장하는 것과 보장하지 않는 것을 같은 폭으로 적는다.
+      //   Codex 3R high — 첫 판에서 "언제든 재개"라고 썼는데 추첨이 끝난 행사는 서버가 409로 막는다.
+      //   중지 직전에 이미 처리에 들어간 즉시·테스트 발송도 완료될 수 있다(예약 발송과 다른 경우다).
+      //   **화면이 코드보다 넓게 약속하면 담당자가 그걸 믿고 손을 뗀다.**
+      description:
+        '이 DM을 중지할까요?\n\n'
+        + '• 지금부터 고객이 이 주소로 들어올 수 없어요 (한글 주소·A/B 주소 포함)\n'
+        + '• 중지 상태에서는 발송·테스트 발송·재발행이 막혀요\n'
+        + '• 열람·발송·응모 이력은 그대로 남아요\n'
+        + '• [재개]로 다시 열 수 있고 주소도 그대로예요 (추첨이 끝난 행사는 재개할 수 없어요)\n\n'
+        + '다만 이미 나간 문자와 예약된 발송은 취소되지 않고,\n'
+        + '중지 직전에 눌러 둔 발송 요청은 그대로 끝날 수 있어요.\n'
+        // ★ Codex 4R medium — 중지해도 추첨 워커는 그 DM을 계속 후보로 본다(응모는 이미 받아 뒀으니
+        //   당첨자는 뽑혀야 한다). 그런데 추첨이 끝나면 재개가 막힌다 — 되돌릴 수 없는 결과라 미리 알린다.
+        + '\n추첨 예정 행사는 중지 중에도 예정 시각에 추첨되고,\n'
+        + '추첨이 끝나면 다시 열 수 없어요.',
+      confirmLabel: '중지',
+      cancelLabel: '취소',
+      onConfirm: async () => {
+        try {
+          await api.post(`/dm/${id}/stop`);
+          setToast({ type: 'success', message: '중지했어요. 이제 고객이 접속할 수 없어요.' });
+          refreshList();
+        } catch (err: any) {
+          setToast({ type: 'error', message: err?.response?.data?.error || '중지 실패' });
+        }
+      },
+    });
+  };
+
+  const handleResume = async (id: string) => {
+    try {
+      await api.post(`/dm/${id}/resume`);
+      setToast({ type: 'success', message: '다시 열었어요. 주소는 그대로예요. (추가 과금 없음)' });
+      refreshList();
+    } catch (err: any) {
+      setToast({ type: 'error', message: err?.response?.data?.error || '재개 실패' });
+    }
   };
 
   // ★ 2026-06-13: DM 복제 (AI 호출 0 = 크레딧 차감 없음)
@@ -1167,6 +1222,8 @@ export default function DmBuilderPage() {
                     onCopyUrl={handleCopyUrl}
                     onTrack={(id, title) => setTrackTarget({ id, title })}
                     onKoreanAlias={(id, title) => setAliasTarget({ id, title })}
+                    onStop={handleStop}
+                    onResume={handleResume}
                     cloning={cloningId === dm.id}
                   />
                 ))}
@@ -1511,7 +1568,7 @@ function EditorModals() {
 
 // EmptyList 영역 영구 폐기 (D216+ 정합 — 자연어 입력 + 빠른 시작 + 자유롭게 DM 생성 영역 흐름 정합)
 
-function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, onTrack, onKoreanAlias, cloning }: {
+function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, onTrack, onKoreanAlias, onStop, onResume, cloning }: {
   dm: DmListItem;
   onEdit: (id: string, mode?: string) => void;
   onDelete: (id: string) => void;
@@ -1520,12 +1577,21 @@ function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, onTrack, onKoreanAli
   onKoreanAlias?: (id: string, title?: string) => void;
   /** ★ 2026-07-02(3) 발송 이력 카드 → 발송 추적(열람·깊이·클릭·응모) 바로 진입 */
   onTrack?: (id: string, title?: string) => void;
+  /** ★ 2026-08-06 발행 중지 / 재개 (서수란 접수) */
+  onStop?: (id: string) => void;
+  onResume?: (id: string) => void;
   cloning?: boolean;
 }) {
   // ★ 2026-06-23: 섹션 콘텐츠가 있으면 새 섹션형 슬라이드(편집 가능) — 콘텐츠 없는 진짜 D119만 레거시 뱃지.
   const isLegacy = dm.layout_mode === 'slides' && ((dm.section_summary?.types?.length ?? 0) === 0);
   const summary = dm.section_summary;
-  const statusLabel = (() => {
+  // ★ 2026-08-06 중지는 **발행 축**(status)이다. 검수 축(approval_status) 라벨보다 먼저 본다 —
+  //   고객이 못 들어오는 상태를 "발행됨"으로 보여주면 담당자가 중지된 줄 모른다.
+  //   나머지 라벨 로직은 건드리지 않는다(기존 표시 무변경).
+  const isStopped = dm.status === 'stopped';
+  const statusLabel = isStopped
+    ? { label: '중지됨', bg: 'rgba(148, 163, 184, 0.18)', border: 'rgba(148, 163, 184, 0.45)', text: '#cbd5e1' }
+    : (() => {
     switch (dm.approval_status) {
       case 'published': return { label: '발행됨',   bg: 'rgba(16, 185, 129, 0.2)',  border: 'rgba(16, 185, 129, 0.4)',  text: '#6ee7b7' };
       case 'approved':  return { label: '승인됨',   bg: 'rgba(59, 130, 246, 0.2)',  border: 'rgba(59, 130, 246, 0.4)',  text: '#93c5fd' };
@@ -1594,22 +1660,27 @@ function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, onTrack, onKoreanAli
       </div>
       <div style={{ flex: 1 }} />
       {dm.short_code && (
+        // ★ 2026-08-06 중지 상태에서는 주소 버튼을 잠근다.
+        //   [발행 주소 복사]는 `POST /dm/:id/publish`를 부르므로 열어 두면 **복사가 곧 재개**가 된다.
+        //   서버도 409로 막지만, 눌리는 버튼을 남겨 두면 담당자가 실패 토스트로 배우게 된다.
         <div style={{ display: 'flex', gap: 6 }}>
           <button
-            onClick={(e) => { e.stopPropagation(); onCopyUrl(dm.id); }}
-            title="발행 주소 복사 (추가 과금 없음)"
-            style={{ flex: 1, height: 32, background: 'rgba(16,185,129,0.12)', color: '#6ee7b7', border: '1px solid rgba(16,185,129,0.35)', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(16,185,129,0.2)'; }}
+            onClick={(e) => { e.stopPropagation(); if (!isStopped) onCopyUrl(dm.id); }}
+            disabled={isStopped}
+            title={isStopped ? '중지된 DM입니다. [재개] 후 복사할 수 있어요.' : '발행 주소 복사 (추가 과금 없음)'}
+            style={{ flex: 1, height: 32, background: 'rgba(16,185,129,0.12)', color: '#6ee7b7', border: '1px solid rgba(16,185,129,0.35)', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: isStopped ? 'not-allowed' : 'pointer', transition: 'all 0.2s', opacity: isStopped ? 0.35 : 1 }}
+            onMouseEnter={(e) => { if (!isStopped) e.currentTarget.style.background = 'rgba(16,185,129,0.2)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(16,185,129,0.12)'; }}
           >
             발행 주소 복사
           </button>
           {onKoreanAlias && (
             <button
-              onClick={(e) => { e.stopPropagation(); onKoreanAlias(dm.id, dm.title); }}
-              title="한글 주소 — hlj.kr/반짝세일_07처럼 기억하기 쉬운 공용 주소 (무료)"
-              style={{ height: 32, padding: '0 10px', background: 'rgba(56,189,248,0.12)', color: '#7dd3fc', border: '1px solid rgba(56,189,248,0.35)', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap' }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(56,189,248,0.2)'; }}
+              onClick={(e) => { e.stopPropagation(); if (!isStopped) onKoreanAlias(dm.id, dm.title); }}
+              disabled={isStopped}
+              title={isStopped ? '중지된 DM입니다. [재개] 후 사용할 수 있어요.' : '한글 주소 — hlj.kr/반짝세일_07처럼 기억하기 쉬운 공용 주소 (무료)'}
+              style={{ height: 32, padding: '0 10px', background: 'rgba(56,189,248,0.12)', color: '#7dd3fc', border: '1px solid rgba(56,189,248,0.35)', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: isStopped ? 'not-allowed' : 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap', opacity: isStopped ? 0.35 : 1 }}
+              onMouseEnter={(e) => { if (!isStopped) e.currentTarget.style.background = 'rgba(56,189,248,0.2)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(56,189,248,0.12)'; }}
             >
               한글 주소
@@ -1659,6 +1730,40 @@ function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, onTrack, onKoreanAli
         >
           {cloning ? '복제 중' : '복제'}
         </button>
+        {/* ★ 2026-08-06 중지 / 재개 — 접수 그대로 삭제 버튼 옆.
+            발행된 DM에만 [중지]가, 중지된 DM에만 [재개]가 보인다(임시저장에는 둘 다 없다 — 막을 주소가 없다). */}
+        {isStopped && onResume && (
+          <button
+            onClick={() => onResume(dm.id)}
+            title="재개 — 같은 주소로 다시 열어요 (추가 과금 없음)"
+            style={{
+              height: 32, padding: '0 10px',
+              background: 'rgba(16, 185, 129, 0.12)', color: '#6ee7b7',
+              border: '1px solid rgba(16, 185, 129, 0.35)', borderRadius: 8,
+              fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(16, 185, 129, 0.22)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(16, 185, 129, 0.12)'; }}
+          >
+            재개
+          </button>
+        )}
+        {!isStopped && dm.status === 'published' && onStop && (
+          <button
+            onClick={() => onStop(dm.id)}
+            title="중지 — 고객 접속을 막아요. 이력은 그대로 남아요."
+            style={{
+              height: 32, padding: '0 10px',
+              background: 'rgba(245, 158, 11, 0.12)', color: '#fcd34d',
+              border: '1px solid rgba(245, 158, 11, 0.35)', borderRadius: 8,
+              fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(245, 158, 11, 0.22)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(245, 158, 11, 0.12)'; }}
+          >
+            중지
+          </button>
+        )}
         <button
           onClick={() => onDelete(dm.id)}
           title="삭제"

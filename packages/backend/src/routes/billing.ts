@@ -790,14 +790,41 @@ router.post('/taxbill-issues/:id/retry', async (req: Request, res: Response) => 
   try {
     const id = String(req.params.id || '');
     if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: '장부 id 형식 오류' });
+    // ★ 2026-08-07 **수정(취소·정정) 장 재시도에는 관문을 둔다**(Harold 승인 · Codex 적대검증 2R로 방향 확정).
+    //   원본 재시도는 "안 나간 청구서를 같은 문서번호로 다시 보내는 것"이라 안전하다.
+    //   수정 장은 다르다 — 그 문서는 **이미 국세청에 있는 원본을 취소하거나 정정한다.**
+    //   실측 사례(크로커다일 −3,903,325): 이중발행으로 오인해 취소 장을 만들었다가 당초 문서의 국세청
+    //   전송이 안 끝나 실패했는데, 전송이 끝난 지금 누르면 **성공해서 정상 문서가 취소된다.**
+    //   그래서 사유와 명시 확인을 받는다. 판정은 UPDATE 안에서 한다 — 밖에서 읽고 쓰면 그 사이 상태가 바뀐다.
+    const confirmed = (req.body as any)?.confirm === true;
+    const reason = String((req.body as any)?.reason || '').trim().slice(0, 200);
     const r = await pool.query(
       `UPDATE taxbill_issues SET status = 'ready', error = NULL
         WHERE id = $1::uuid AND status = 'failed'
-        RETURNING id`,
-      [id],
+          AND (kind <> 'modify' OR ($2::boolean = true AND $3::text IS NOT NULL))
+        RETURNING id, kind, org_nts_confirm_num`,
+      [id, confirmed, reason || null],
     );
     if (r.rows.length === 0) {
+      // 사유는 실패 뒤에만 읽는다 — 무엇이 막았는지 알려주지 않으면 담당자가 다음 행동을 못 정한다.
+      const cur = await pool.query(
+        `SELECT status, kind, org_nts_confirm_num FROM taxbill_issues WHERE id = $1::uuid`,
+        [id],
+      );
+      const row = cur.rows[0];
+      if (row && String(row.status) === 'failed' && String(row.kind) === 'modify') {
+        return res.status(409).json({
+          error: '수정(취소·정정) 장입니다. 이 문서는 이미 국세청에 있는 원본을 건드리므로,'
+            + ' 지금도 그 정정이 필요한지 확인하고 사유를 남겨야 재시도할 수 있습니다.'
+            + (row.org_nts_confirm_num ? ` (당초 승인번호 ${row.org_nts_confirm_num})` : ''),
+          code: 'TAXBILL_MODIFY_RETRY_CONFIRM_REQUIRED',
+        });
+      }
       return res.status(409).json({ error: '실패 상태의 장만 재시도할 수 있습니다. (이미 처리 중이거나 발행된 장일 수 있습니다)' });
+    }
+    if (String(r.rows[0].kind) === 'modify') {
+      // 재시도 사유를 남길 컬럼이 없다(`error`는 워커가 발행하며 지운다) — 감사행은 별건이고, 지금은 로그가 유일한 기록이다.
+      console.log(`[세금계산서재시도][수정장] id=${id} 당초승인번호=${r.rows[0].org_nts_confirm_num || '-'} 사유=${reason}`);
     }
     return res.json({ success: true, message: '발급 대기에 다시 올렸습니다. 5분 주기 워커가 재발행합니다.' });
   } catch (error: any) {
@@ -946,29 +973,74 @@ router.post('/taxbill-issues/:id/reissue-production', async (req: Request, res: 
 //
 //   `ready`만 받는다. `submitted`는 팝빌에 이미 올라갔을 수 있어 되돌리면 거짓 취소가 되고,
 //   `issued`는 수정세금계산서 축이다(§2-8).
+//
+// ★ 2026-08-07 `failed` 폐기는 **넣지 않는다**(Codex 적대검증 2R로 방향 확정 · Harold 승인).
+//   `failed`에는 "팝빌에 문서가 아예 없다"와 "발행은 됐는데 국세청 전송만 실패(305)했다"가 섞여 있다.
+//   우리 로컬 데이터로는 그 둘을 못 가른다 — 승인번호는 그 사실의 그림자일 뿐이라 305는 승인번호가 없다.
+//   증명 없이 내리면 **실제 문서를 숨긴 채 다른 관리키로 중복 발행**할 길이 열린다.
+//   권위 있는 판정은 팝빌 `getInfo` 대사뿐이고 그건 취소 경로에 외부 호출을 들이는 별건이다(§7).
+//   원래 목적(실패한 수정 장이 [재시도]로 잘못 나가는 것)은 **재시도 관문**으로 닫았다 — 아래 retry 라우트.
+//
+// ★ 2026-08-07 다만 이 경로에서 드러난 **기존 결함 셋**은 함께 닫는다.
+//   ① 승인번호가 있는 `ready`가 취소 대상이었다 — 웹훅이 304를 관측하면 `failed`를 `ready`로 되돌리며
+//      승인번호를 적는다. 그 `ready`는 이미 국세청에 나간 문서의 재확인 큐라 취소하면 안 된다.
+//      정상 `ready`(워커가 confirmed→ready로 만든 것)는 승인번호가 없어 영향이 없다.
+//   ② 사유 1(기재사항 착오정정)은 부(-)·정(+) 두 장이 한 쌍인데 한쪽만 취소할 수 있었다.
+//   ③ 화면이 본 상태와 서버가 바꾸는 상태가 다를 수 있었다 — `expected_status` CAS로 맞춘다.
 router.post('/taxbill-issues/:id/cancel', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id || '');
     if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: '장부 id 형식 오류' });
     const reason = String((req.body as any)?.reason || '').trim().slice(0, 200);
     if (!reason) return res.status(400).json({ error: '취소 사유를 입력해 주세요. 나중에 근거가 됩니다.' });
+    // ★ 2026-08-07 CAS — 화면이 모달을 연 시점의 상태. 그 사이 [재시도]가 `failed`를 `ready`로 올렸다면
+    //   담당자가 본 것과 다른 장을 내리게 된다. 미전송이면 종전대로 동작한다(하위호환).
+    const expectedStatus = String((req.body as any)?.expected_status || '').trim();
+    if (expectedStatus && expectedStatus !== 'ready') {
+      return res.status(409).json({
+        error: `발급 대기 상태인 장만 취소할 수 있습니다(화면 기준 상태: ${expectedStatus}). 새로고침한 뒤 다시 확인해주세요.`,
+        code: 'TAXBILL_NOT_CANCELLABLE',
+      });
+    }
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       // 조건부 UPDATE 하나로 발행 패스와 줄을 세운다 — 워커가 먼저 `submitted`로 집어갔으면 0행이다.
+      //   ⛔ 승인번호가 있는 `ready`는 제외한다 — 웹훅이 304를 관측하면 `failed`를 `ready`로 되돌리며
+      //     승인번호를 적는다. 그 행은 이미 국세청에 나간 문서의 재확인 큐다(정상 `ready`는 승인번호가 없다).
+      //   ⛔ 사유 1(기재사항 착오정정)은 부(-)·정(+) 두 장이 한 쌍이라 한쪽만 내리면 원본은 상쇄됐는데
+      //     대체 계산서가 사라진다. 묶음 단위 취소는 별건(§7).
       const r = await client.query(
-        `UPDATE taxbill_issues SET status = 'cancelled', error = $2
-          WHERE id = $1::uuid AND status = 'ready'
+        `UPDATE taxbill_issues
+            SET status = 'cancelled', error = $2
+          WHERE id = $1::uuid
+            AND status = 'ready'
+            AND nts_confirm_num IS NULL
+            AND modify_code IS DISTINCT FROM 1
         RETURNING confirmation_id`,
         [id, `발급 대기 취소 — ${reason}`],
       );
       if (r.rows.length === 0) {
+        // 판정은 위 UPDATE가 끝냈다. 여기서는 **사유만** 읽어 담당자가 다음 행동을 알게 한다.
+        //   조건이 넷이라 "안 됩니다"만 돌려주면 무엇을 고쳐야 하는지 알 수 없다.
+        const cur = await client.query(
+          `SELECT status, nts_confirm_num, kind, modify_code FROM taxbill_issues WHERE id = $1::uuid`,
+          [id],
+        );
         await client.query('ROLLBACK');
-        return res.status(409).json({
-          error: '발급 대기 상태인 장만 취소할 수 있습니다. 이미 발행에 들어갔거나 발행됐다면 수정세금계산서로 정정해주세요.',
-          code: 'TAXBILL_NOT_CANCELLABLE',
-        });
+        const row = cur.rows[0];
+        let why = '발급 대기(ready)인 장만 취소할 수 있습니다. 이미 발행에 들어갔거나 발행됐다면 수정세금계산서로 정정해주세요.';
+        if (!row) {
+          why = '장부를 찾지 못했습니다.';
+        } else if (String(row.status) !== 'ready') {
+          why = `발급 대기 상태가 아닙니다(지금 상태: ${row.status}). 새로고침한 뒤 다시 확인해주세요.`;
+        } else if (row.nts_confirm_num) {
+          why = '국세청 승인번호가 있는 장입니다. 이미 발행된 문서라 내릴 수 없고, 정정은 수정세금계산서 축입니다.';
+        } else if (Number(row.modify_code) === 1) {
+          why = '사유 1(기재사항 착오정정)은 부(-)·정(+) 두 장이 한 쌍이라 한쪽만 내릴 수 없습니다.';
+        }
+        return res.status(409).json({ error: why, code: 'TAXBILL_NOT_CANCELLABLE' });
       }
       const confirmationId = r.rows[0].confirmation_id;
       if (confirmationId) {

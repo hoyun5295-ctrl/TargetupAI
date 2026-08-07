@@ -381,11 +381,19 @@ export async function syncPrizesFromSections(companyId: string, dmId: string): P
 
 export type DrawableCampaign = { campaignId: string; companyId: string; sectionId: string; drawAt: string };
 
-/** published + lucky_draw 섹션 + 아직 미추첨(dm_draw_runs 없음) 중 draw_at 도래 후보. */
+/**
+ * 발행 중이거나 중지된 lucky_draw + 아직 미추첨(dm_draw_runs 없음) 중 draw_at 도래 후보.
+ *
+ * ★ 2026-08-06 **중지분을 뺐다가 다시 넣었다**(Codex 적대검증 high). 중지는 "새 접속을 막는 것"이지
+ *   "이미 받은 응모의 추첨을 취소하는 것"이 아니다. 그런데 중지의 대표 용도가 **행사 종료**라서,
+ *   후보에서 빼면 마감 직전에 내린 행사의 당첨자가 조용히 선정되지 않는다 —
+ *   응모는 이미 받아 두고 추첨만 사라지는 것이라 고객 약속을 어긴다.
+ *   공개 상태와 추첨 생명주기는 다른 축이다. 추첨을 취소하는 기능이 필요하면 그건 별도 축으로 만든다.
+ */
 export async function loadDrawableLuckyDraws(): Promise<DrawableCampaign[]> {
   const r = await query(
     `SELECT id, company_id, sections, pages FROM dm_pages
-     WHERE status = 'published'
+     WHERE status IN ('published', 'stopped')
        AND (event_type = 'lucky_draw' OR sections::text LIKE '%"lucky_draw"%' OR pages::text LIKE '%"lucky_draw"%')
        AND NOT EXISTS (SELECT 1 FROM dm_draw_runs dr WHERE dr.campaign_id = dm_pages.id)`,
   );

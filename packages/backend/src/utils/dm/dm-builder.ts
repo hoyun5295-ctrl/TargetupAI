@@ -397,6 +397,137 @@ export async function getDmByCode(code: string) {
   return result.rows[0] || null;
 }
 
+// ────────────────── 발행 중지 / 재개 (★ 2026-08-06 서수란 접수) ──────────────────
+//
+// 왜 상태 한 칸인가: 뷰어(`getDmByCode`)가 이미 `status = 'published'`만 연다.
+//   그래서 상태를 옮기는 것만으로 접속이 막히고 **뷰어 코드는 손대지 않는다.**
+//   삭제는 답이 아니다 — 접수 그대로 "이력 자체가 사라지기 때문에 이력은 남기고 중지"다
+//   (열람 수·발송 이력·추적 행이 `dm_pages` 삭제에 CASCADE로 함께 사라진다).
+//
+// 전이는 **조건부 UPDATE 한 문장**이다. 대상 상태가 아니면 0행이 돌아오고 호출부가 그대로 거절한다 —
+//   먼저 SELECT해서 판정하면 그 사이에 다른 요청이 상태를 바꿀 수 있고(TOCTOU),
+//   무엇보다 "바뀌지 않았는데 성공"이라 답하게 된다(6원칙 ② 효과 검증 후 성공 표시).
+
+/**
+ * 중지·재개를 **거절해야 하는 충돌 상태**를 찾는다 (★ 2026-08-06 Codex 적대검증 2R).
+ *
+ * 왜 거절인가: 중지 상태를 하나 만들었더니 그것을 소비해야 하는 축이 넷(공개 노출·발송·A/B 실행·이벤트 수명주기)이었고,
+ *   축마다 가드를 덧대는 방식은 라운드마다 새 구멍을 냈다. **충돌하는 상태에서는 전이 자체를 막는 쪽이
+ *   가드를 늘리지 않고 약속도 지킨다.**
+ *  - 진행 중 A/B가 참조하는 DM을 중지하면 테스트는 `running`인 채 그 variant 방문자에게만 종료 페이지가 간다
+ *    (실험 분포까지 왜곡된다). ⇒ A/B를 먼저 끝내게 한다.
+ *  - 이미 추첨이 끝난 행사를 재개하면 응모 폼이 다시 열리는데 그 응모는 **당첨될 수 없다**(추첨은 1회뿐).
+ *    ⇒ 재개를 막는다. 다시 받으려면 새 회차를 만들어야 한다.
+ */
+export async function findDmTransitionBlock(
+  id: string,
+  companyId: string,
+  to: 'stopped' | 'published',
+): Promise<string | null> {
+  if (to === 'stopped') {
+    const ab = await query(
+      `SELECT 1 FROM dm_ab_tests
+        WHERE company_id = $2::uuid AND status = 'running'
+          AND $1::uuid IN (variant_a_page_id, variant_b_page_id, variant_c_page_id)
+        LIMIT 1`,
+      [id, companyId]
+    );
+    if (ab.rows.length > 0) {
+      return '진행 중인 A/B 테스트에 포함된 DM이에요. A/B 테스트를 먼저 종료해주세요.';
+    }
+    return null;
+  }
+  const drawn = await query(
+    `SELECT 1 FROM dm_draw_runs WHERE campaign_id = $1::uuid LIMIT 1`,
+    [id]
+  );
+  if (drawn.rows.length > 0) {
+    return '이미 추첨이 끝난 행사예요. 다시 열면 당첨될 수 없는 응모를 받게 됩니다.';
+  }
+  return null;
+}
+
+/**
+ * 발행 중지 — `published` 행만 `stopped`로. 대상이 아니거나 충돌 상태면 null.
+ *
+ * ⛔ **충돌 판정을 별도 SELECT로 하지 않는다**(Codex 3R high). 판정과 UPDATE가 두 문장이면 그 사이에
+ *   A/B가 시작돼 `running` 테스트가 중지된 DM을 참조하게 된다 — 이 설계가 막으려던 상태가 그대로 생긴다.
+ *   조건을 UPDATE 안으로 넣으면 한 문장이라 창이 없다. 실패 사유는 0행일 때 호출부가 따로 묻는다
+ *   (판정은 DB가, 안내 문구는 조회가 — 순서를 뒤집으면 안내가 판정을 대신하게 된다).
+ */
+export async function stopDm(id: string, companyId: string) {
+  const result = await query(
+    `UPDATE dm_pages SET status = 'stopped', updated_at = NOW()
+      WHERE id = $1 AND company_id = $2 AND status = 'published'
+        AND NOT EXISTS (
+          SELECT 1 FROM dm_ab_tests t
+           WHERE t.company_id = $2::uuid AND t.status = 'running'
+             AND $1::uuid IN (t.variant_a_page_id, t.variant_b_page_id, t.variant_c_page_id)
+        )
+      RETURNING id, short_code, status`,
+    [id, companyId]
+  );
+  return result.rows[0] || null;
+}
+
+/**
+ * 재개 — `stopped` 행만 `published`로.
+ *
+ * `publishDm`을 재사용하지 않는다. 그쪽은 **단축코드 발급 경로**(없으면 새로 만들고 중복을 피해 재시도)이고,
+ * 재개는 이미 있는 문서의 상태를 되돌리는 것뿐이다. 축이 다른 두 일을 한 함수에 묶으면
+ * 재개가 코드 발급 실패에 끌려 들어간다.
+ */
+export async function resumeDm(id: string, companyId: string) {
+  const result = await query(
+    // 추첨 완료 판정도 같은 문장 안에 둔다 — 밖에 두면 조회와 UPDATE 사이에 5분 워커가 추첨을 claim해
+    // "이미 추첨된 행사가 다시 열린" 상태가 그대로 생긴다(Codex 3R high).
+    `UPDATE dm_pages SET status = 'published', updated_at = NOW()
+      WHERE id = $1 AND company_id = $2 AND status = 'stopped'
+        AND NOT EXISTS (SELECT 1 FROM dm_draw_runs dr WHERE dr.campaign_id = $1::uuid)
+      RETURNING id, short_code, status`,
+    [id, companyId]
+  );
+  return result.rows[0] || null;
+}
+
+/**
+ * 뷰어 404 분기용 — 그 코드가 **중지된 DM**인가.
+ *
+ * 고객이 보는 문구를 가르기 위해서만 쓴다. "존재하지 않는 DM입니다"는 행사가 끝나 내린 페이지에 맞지 않는다
+ * (접수: "행사 종료나 기타 사유로 더 이상 보이지 않길 원하는 경우"). 없는 코드와 내린 코드는 다른 말을 해야 한다.
+ */
+/**
+ * **중지 판정의 단일 진입점** — 고객에게 문서나 링크가 나가는 길목이 공통으로 묻는 것.
+ *
+ * ⛔ 중지를 뷰어 한 곳에만 걸면 나머지 문이 그대로 열려 있다(Codex 적대검증 high 3건이 전부 이 부류였다) —
+ *   실발송·테스트발송은 DM을 **id로 읽어** `short_code`만 쓰고 상태를 안 봤고, A/B 공개 뷰어도 마찬가지였다.
+ *   중지한 DM으로 선불 잔액이 나가고 고객에게 **죽은 링크가 실제로 전송된다.**
+ *   그래서 판정을 함수 하나로 두고 길목마다 그것을 지나게 한다. 인라인으로 복사하면 다음 길목에서 또 빠진다.
+ *
+ * `companyId`는 있으면 회사 격리까지 함께 본다(인증 경로). 공개 경로는 회사를 모르므로 생략한다 —
+ * 그 경우 판정은 "이 문서가 중지됐는가"까지이고, 노출 차단은 호출부의 `status='published'` 조회가 맡는다.
+ */
+export async function isDmStopped(id: string, companyId?: string | null): Promise<boolean> {
+  const result = companyId
+    ? await query(
+        `SELECT 1 FROM dm_pages WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'stopped' LIMIT 1`,
+        [id, companyId]
+      )
+    : await query(
+        `SELECT 1 FROM dm_pages WHERE id = $1::uuid AND status = 'stopped' LIMIT 1`,
+        [id]
+      );
+  return result.rows.length > 0;
+}
+
+export async function isDmStoppedByCode(code: string): Promise<boolean> {
+  const result = await query(
+    `SELECT 1 FROM dm_pages WHERE short_code = $1 AND status = 'stopped' LIMIT 1`,
+    [normalizeDmShortCode(code)]
+  );
+  return result.rows.length > 0;
+}
+
 // ────────────────── 단축URL 발행 ──────────────────
 
 function generateShortCode(length = 7): string {

@@ -20,6 +20,7 @@ import {
   publishDm, trackDmView, getDmStats, getDmRecipientEngagementRows,
   saveDmVersion, listDmVersions, restoreDmVersion, setApprovalStatus,
   extractFlatSectionsFromDm, extractPagesFromDm, extractDmCopyText,
+  stopDm, resumeDm, isDmStopped, isDmStoppedByCode, findDmTransitionBlock,
 } from '../utils/dm/dm-builder';
 // ★ 2026-07-03 DM 문안 학습 코퍼스 적재 (전 채널 학습 통합 Phase 1)
 import { logCampaignTraining } from '../utils/training-logger';
@@ -203,7 +204,16 @@ dmPublicRouter.get('/s/:code', async (req: Request, res: Response) => {
 dmPublicRouter.get('/:code', async (req: Request, res: Response) => {
   try {
     const dm = await getDmByCode(req.params.code);
-    if (!dm) return res.status(404).send(renderDmErrorHtml('존재하지 않는 DM입니다.'));
+    if (!dm) {
+      // ★ 2026-08-06 없는 코드와 **내린 코드**는 고객에게 다른 말을 해야 한다(서수란 접수 — 행사 종료).
+      //   이 조회는 404 경로에서만 돈다(정상 열람에는 쿼리가 늘지 않는다).
+      //   조회가 실패하면 기존 문구로 떨어진다 — 문구 하나 때문에 뷰어를 죽이지 않는다.
+      let stopped = false;
+      try { stopped = await isDmStoppedByCode(req.params.code); } catch { /* 기존 문구로 폴백 */ }
+      return res
+        .status(404)
+        .send(renderDmErrorHtml(stopped ? '종료된 페이지입니다.' : '존재하지 않는 DM입니다.'));
+    }
 
     // ★ 2026-07-02 서버측 이중 기록 제거 — 열람 기록은 뷰어 진입 비콘(init) 1곳으로 통일.
     //   (구: 익명 1행 + 토큰 phone 1행 + 클라 비콘 1행 = 열람 1회에 3행·view_count 3배 부풀림)
@@ -743,6 +753,15 @@ dmRouter.post('/:id/publish', async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    // ★ 2026-08-06 중지된 DM은 이 경로로 되살아나지 않는다(서수란 접수).
+    //   화면의 [발행 주소 복사]가 이 엔드포인트를 부르므로, 막지 않으면 **주소를 복사하는 순간 중지가 풀린다.**
+    //   되살리는 문은 [재개] 하나여야 한다 — 그래야 "왜 다시 열렸는지"가 기록으로 남는다.
+    if (await isDmStopped(req.params.id, companyId)) {
+      return res.status(409).json({
+        error: '중지된 DM입니다. 다시 열려면 [재개]를 눌러주세요.',
+        code: 'DM_STOPPED',
+      });
+    }
     // ★ 종량제: 발행(단축URL 확정) 최초 1회만(멱등키 dm-publish:dmId). 인터랙션 캠페인=50(F 안1), 일반 DM=30. test-send 자동발행(publishDm 직접 호출)은 라우트 미경유=미과금. 재발행은 멱등 0.
     const isInteraction = await isInteractionCampaign(companyId, req.params.id);
     const costSource = isInteraction ? 'dm-interaction-publish' : 'dm-builder';
@@ -811,6 +830,68 @@ dmRouter.post('/:id/publish', async (req: any, res: any) => {
       return res.status(402).json({ error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
     console.error('[DM발행] 오류:', err.message);
+    return res.status(500).json({ error: '서버 오류' });
+  }
+});
+
+// ============================================================
+// ★ 2026-08-06 발행 중지 / 재개 (서수란 접수 "모바일DM 관리에 대한 정지 버튼 생성 요청")
+//   업체 사정(행사 종료 등)으로 발행한 DM에 고객이 접속하지 못하게 막는다.
+//   **삭제가 아닌 이유는 접수 그대로다** — 삭제하면 열람·발송 이력이 CASCADE로 함께 사라진다.
+//   뷰어는 손대지 않는다: `getDmByCode`가 이미 `status='published'`만 열기 때문에
+//   상태를 옮기는 것만으로 즉시 차단된다. 전이 자체는 `dm-builder` CT의 조건부 UPDATE 한 문장.
+// ============================================================
+
+// POST /api/dm/:id/stop — 발행 중지
+dmRouter.post('/:id/stop', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    if (!(await canAccessDm(req.params.id, companyId, req.user?.userType, req.user?.userId))) {
+      return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
+    }
+    // ★ 2026-08-06 판정은 UPDATE 한 문장이 한다(Codex 3R high) — 사전 SELECT로 막으면 그 사이에
+    //   A/B가 시작돼 running 테스트가 중지된 DM을 참조한다. 여기서는 결과를 받아 **사유만** 조회한다.
+    const row = await stopDm(req.params.id, companyId);
+    // 0행 = 발행 상태가 아니었거나(임시저장·이미 중지) 진행 중 A/B에 묶여 있다. 바뀐 것이 없으면 성공이라 답하지 않는다.
+    if (!row) {
+      const why = await findDmTransitionBlock(req.params.id, companyId, 'stopped');
+      return res.status(409).json({
+        error: why || '발행 중인 DM만 중지할 수 있습니다.',
+        code: why ? 'DM_STOP_BLOCKED' : 'DM_NOT_PUBLISHED',
+      });
+    }
+    return res.json({ success: true, status: row.status, short_code: row.short_code });
+  } catch (err: any) {
+    console.error('[DM중지] 오류:', err.message);
+    return res.status(500).json({ error: '서버 오류' });
+  }
+});
+
+// POST /api/dm/:id/resume — 재개
+dmRouter.post('/:id/resume', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    if (!(await canAccessDm(req.params.id, companyId, req.user?.userType, req.user?.userId))) {
+      return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
+    }
+    // ★ 2026-08-06 이미 추첨이 끝난 행사는 재개하지 않는다(Codex 2R high) — 응모 폼이 다시 열리는데
+    //   그 응모는 **당첨될 수 없다**(추첨은 1회뿐이고 `dm_draw_runs`가 있으면 재추첨 대상에서 영구 제외된다).
+    //   판정은 UPDATE 안에 있다(3R high — 밖에 두면 조회와 UPDATE 사이에 워커가 추첨을 claim한다).
+    const row = await resumeDm(req.params.id, companyId);
+    if (!row) {
+      const why = await findDmTransitionBlock(req.params.id, companyId, 'published');
+      return res.status(409).json({
+        error: why || '중지된 DM만 재개할 수 있습니다.',
+        code: why ? 'DM_RESUME_BLOCKED' : 'DM_NOT_STOPPED',
+      });
+    }
+    // 재개는 발행비를 다시 받지 않는다 — 이미 발행된 문서의 상태를 되돌리는 것이라
+    //   `publishDm`(단축코드 발급·과금 멱등)을 지나지 않는다. 주소도 그대로다.
+    return res.json({ success: true, status: row.status, short_code: row.short_code });
+  } catch (err: any) {
+    console.error('[DM재개] 오류:', err.message);
     return res.status(500).json({ error: '서버 오류' });
   }
 });
@@ -1073,6 +1154,18 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
 
     const dm = await getDmDetail(req.params.id, companyId);
     if (!dm) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
+
+    // ★ 2026-08-06 중지된 DM은 실발송하지 않는다(Codex 적대검증 high).
+    //   **발행비 처리·수신자 적재보다 앞이다** — 뒤에 두면 잔액이 먼저 나가고,
+    //   고객에게는 종료된 404 링크가 실제로 전송된다. 중지의 목적과 정면으로 어긋난다.
+    //   여기서는 방금 읽은 행(`getDmDetail` = SELECT *)의 상태를 그대로 본다 — 같은 축이라 재조회가 낭비다.
+    //   행이 손에 없는 길목(publish·test-send)은 CT `isDmStopped`를 부른다.
+    if (dm.status === 'stopped') {
+      return res.status(409).json({
+        error: '중지된 DM입니다. 발송하려면 먼저 [재개]를 눌러주세요.',
+        code: 'DM_STOPPED',
+      });
+    }
 
     // ★ 2026-07-12 D-1 발행비 정합 — 발행비(멱등키 dm-publish:dmId) 미납 + 실고객 발송 이력 없음이면
     //   402 PUBLISH_FEE_REQUIRED → 프론트 발행 확인 모달 → confirmPublishFee=true 재요청 시 이 자리에서
@@ -1734,6 +1827,12 @@ dmRouter.post('/:id/test-send', async (req: any, res: any) => {
     if (!dm.short_code) {
       return res.status(400).json({ error: '발행 후 테스트 발송이 가능해요. 발행 전에는 편집기 미리보기로 확인해주세요.', code: 'DM_NOT_PUBLISHED' });
     }
+    // ★ 2026-08-06 중지분은 테스트 발송도 막는다(Codex 적대검증 high).
+    //   `short_code`는 중지돼도 남아 있으므로 위 가드를 그대로 통과한다 —
+    //   담당자 번호로 종료된 404 링크가 나가 "중지가 안 먹었다"는 오진으로 이어진다.
+    if (dm.status === 'stopped') {
+      return res.status(409).json({ error: '중지된 DM입니다. 먼저 [재개]를 눌러주세요.', code: 'DM_STOPPED' });
+    }
 
     const baseUrl = process.env.HANJUL_BASE_URL || 'https://hanjul.ai';
     const url = `${baseUrl}/api/dm/v/dm-${dm.short_code}?p=test&s=${sampleKey}`;
@@ -2237,9 +2336,22 @@ dmPublicRouter.get('/ab/:code', async (req: Request, res: Response) => {
     const pageId = variantToPageId(test, variant);
     if (!pageId) return res.status(404).send(renderDmErrorHtml('선택된 variant DM이 없습니다.'));
 
-    const dmRes = await query(`SELECT * FROM dm_pages WHERE id = $1`, [pageId]);
+    // ★ 2026-08-06 A/B 공개 URL도 발행 상태를 본다(Codex 적대검증 high).
+    //   그 전에는 id로만 읽어, 중지한 variant가 이 주소로 계속 노출됐다 — 일반 뷰어만 막고 옆문을 열어 둔 셈이다.
+    //   fail-closed: `published`가 아니면 렌더하지 않고, 중지분에만 종료 문구를 준다(없는 문서와 다른 말).
+    // ★ 2026-08-06 **회사 조건도 함께 건다**(Codex 2R critical) — 테스트 행의 회사는 이미 손에 있는데
+    //   page를 id로만 읽고 있었다. variant에 타사 UUID가 들어가면 이 공개 주소가 그 회사 DM을 그대로 렌더한다.
+    //   UUID를 알아야 한다는 조건은 권한 경계가 아니다.
+    const dmRes = await query(
+      `SELECT * FROM dm_pages WHERE id = $1 AND company_id = $2 AND status = 'published'`,
+      [pageId, test.company_id],
+    );
     const dm = dmRes.rows[0];
-    if (!dm) return res.status(404).send(renderDmErrorHtml('DM을 찾을 수 없어요.'));
+    if (!dm) {
+      let stopped = false;
+      try { stopped = await isDmStopped(pageId, test.company_id); } catch { /* 기존 문구로 폴백 */ }
+      return res.status(404).send(renderDmErrorHtml(stopped ? '종료된 페이지입니다.' : 'DM을 찾을 수 없어요.'));
+    }
 
     // 첫 진입 추적 (variant 정보 함께)
     const phone = (req.query.p as string) || null;

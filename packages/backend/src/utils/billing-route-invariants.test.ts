@@ -368,12 +368,60 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
     const workerSrc = read('./taxbill-worker.ts');
     expect(workerSrc, '워커의 NOT EXISTS가 cancelled를 세고 있다').toMatch(/t\.kind = 'original' AND t\.status <> 'cancelled'/);
     expect(billingSrc, '작성일자 지정의 NOT EXISTS가 cancelled를 세고 있다').toMatch(/t\.kind = 'original' AND t\.status <> 'cancelled'/);
-    // 취소 창구 자체 — ready만 받는다(submitted는 팝빌에 올라갔을 수 있다).
+    // 취소 창구 자체 — ★2026-08-07 `ready`(발급 대기 취소) + `failed`(실패 장 폐기)만 받는다.
+    //   `submitted`는 팝빌에 올라갔을 수 있어 되돌리면 거짓 취소이고, `issued`는 수정세금계산서 축이다(§2-8).
+    //   `failed`를 넣은 이유 = 실패 장을 없애는 길이 [재시도]뿐이라 목록에 영원히 남아 잘못 눌리게 유혹했다
+    //   (크로커다일 수정 장 −3,903,325 — 국세청 전송이 끝난 뒤 재시도하면 정상 원본이 취소된다).
     const at = billingSrc.indexOf("/taxbill-issues/:id/cancel");
     expect(at, '발급 대기 취소 라우트가 없다').toBeGreaterThan(-1);
-    const route = billingSrc.slice(at, at + 2500);
-    expect(route).toContain("status = 'ready'");
+    // 경계는 **다음 라우트 선언**까지다. 고정 길이 슬라이스는 주석이 늘면 검사 대상 앞에서 잘려
+    // "조건이 사라졌다"는 거짓 실패를 내고, 반대로 짧으면 남의 코드를 검사한다(0801 교훈).
+    //   `at`은 주석 줄이라 바로 뒤 `router.post(`는 **이 라우트 자신의 선언**이다. 그것을 건너뛰고 다음 것을 경계로 삼는다.
+    const ownDecl = billingSrc.indexOf('router.post(', at);
+    const nextRoute = billingSrc.indexOf('router.post(', ownDecl + 10);
+    const route = billingSrc.slice(at, nextRoute > ownDecl ? nextRoute : undefined);
+    expect(route, '취소 대상은 ready 하나다').toContain("status = 'ready'");
+    expect(route, 'submitted·issued가 취소 대상에 들어가면 거짓 취소·이중 문서가 된다').not.toContain("'submitted'");
     expect(route, '취소 뒤 추적행을 ready에 두면 어느 쪽으로도 못 간다').toContain("taxbill_status = 'manual_wait'");
+    // ★ 2026-08-07 이 경로에서 드러난 기존 결함 둘. `failed` 폐기는 **넣지 않았다** —
+    //   로컬 데이터로는 "국세청에 문서가 없다"를 증명할 수 없다(305는 발행됐는데 승인번호가 없다).
+    expect(
+      route,
+      '웹훅이 304를 관측하면 failed를 ready로 되돌리며 승인번호를 적는다 — 그 행은 이미 나간 문서의 재확인 큐다',
+    ).toContain('nts_confirm_num IS NULL');
+    expect(
+      route,
+      '사유 1의 한쪽만 내리면 원본은 상쇄됐는데 대체 계산서가 사라진다',
+    ).toContain('modify_code IS DISTINCT FROM 1');
+    expect(route, 'failed 폐기는 이 경로에 없다').not.toContain("status IN ('ready', 'failed')");
+  });
+
+  it('수정(취소·정정) 장 재시도는 관문을 지난다 — 국세청에 있는 원본을 건드리는 문서다', () => {
+    const at = billingSrc.indexOf("/taxbill-issues/:id/retry");
+    expect(at, '재시도 라우트가 없다').toBeGreaterThan(-1);
+    const ownDecl = billingSrc.indexOf('router.post(', at);
+    const nextRoute = billingSrc.indexOf('router.post(', ownDecl + 10);
+    const route = billingSrc.slice(at, nextRoute > ownDecl ? nextRoute : undefined);
+    // 판정은 UPDATE 안에서 한다 — 밖에서 읽고 쓰면 그 사이 상태가 바뀐다.
+    expect(
+      route,
+      '수정 장이 무가드로 재시도되면 국세청에 정상으로 올라가 있는 원본이 취소된다(크로커다일 −3,903,325)',
+    ).toContain("kind <> 'modify' OR (");
+    expect(route, '확인과 사유가 함께 있어야 통과한다').toContain('$2::boolean = true AND $3::text IS NOT NULL');
+    expect(route, '원본 장 재시도는 그대로 — 안 나간 청구서를 같은 번호로 다시 보내는 것이라 안전하다').toContain("status = 'failed'");
+  });
+
+  it('폐기(cancelled)는 종단 상태다 — 늦게 온 웹훅이 되살리면 사유가 지워지고 재시도가 열린다', () => {
+    const hookSrc = read('../routes/popbill-webhook.ts');
+    const at = hookSrc.indexOf('UPDATE taxbill_issues');
+    expect(at, '웹훅 갱신문을 찾지 못했다').toBeGreaterThan(-1);
+    const stmt = hookSrc.slice(at, hookSrc.indexOf('RETURNING status', at));
+    expect(
+      stmt,
+      '웹훅이 cancelled를 덮으면 사람이 내린 판단이 외부 신호로 뒤집힌다',
+    ).toContain("status <> 'cancelled'");
+    // 상태를 덮지 않는 대신 사실은 남겨야 한다 — 조용히 지나가면 아무도 모른다.
+    expect(hookSrc, '폐기된 장에 외부 신호가 와도 기록이 없으면 대사할 수 없다').toContain('[팝빌웹훅][대사필요]');
   });
 
   it('발행된 세금계산서가 붙은 정산은 재발행만이 아니라 **일반 삭제도** 막는다 — 지우면 고아 계산서가 남고 원본이 한 장 더 나간다', () => {

@@ -69,12 +69,32 @@ router.post('/webhook', async (req: Request, res: Response) => {
                            WHEN $4::text IS NOT NULL THEN $4::text
                            ELSE error END
         WHERE invoicer_mgt_key = $1
+          -- 주석에 백틱을 쓰지 않는다 — 이 SQL은 템플릿 리터럴 안이라 문자열이 끊긴다.
+          -- 2026-08-07 cancelled 는 종단 상태다(Codex 적대검증 high). 사람이 사유를 적고 내린 장을
+          --   늦게 도착한 웹훅이 failed 로 되돌리면 사유가 지워지고 재시도 버튼이 되살아난다.
+          --   외부와 어긋나는 신호는 상태를 덮는 대신 로그로 남겨 대사 대상으로 만든다.
+          AND status <> 'cancelled'
         RETURNING status`,
       [decision.mgtKey, decision.set.status ?? null, decision.set.ntsConfirmNum ?? null, decision.set.error ?? null],
     );
     if ((r.rowCount || 0) === 0) {
-      // 우리 행이 없다 — 그래도 200 (재전송 폭주 방지). 사후 대사는 팝빌 사이트 목록과 대조.
-      log(`매칭 실패 — key=${decision.mgtKey} 행 없음 (사후 대사 대상)`);
+      // ★ 2026-08-07 0행의 뜻이 둘이다 — 행이 없거나, **폐기된 장이라 덮지 않은 것**.
+      //   뒤쪽은 "사람이 없다고 내린 문서에 대해 팝빌이 소식을 보냈다"는 뜻이라 성질이 완전히 다르다.
+      //   상태는 그대로 두되(종단 상태 보호) 사실은 크게 남긴다 — 조용히 지나가면 아무도 모른다.
+      const cancelled = await pool.query(
+        `SELECT id, status, nts_confirm_num FROM taxbill_issues WHERE invoicer_mgt_key = $1 AND status = 'cancelled'`,
+        [decision.mgtKey],
+      );
+      if (cancelled.rows.length > 0) {
+        console.error(
+          `[팝빌웹훅][대사필요] key=${decision.mgtKey} — 폐기된 장에 외부 신호가 도착했습니다. `
+          + `상태는 cancelled로 유지합니다. 수신 내용=${JSON.stringify(decision.set)} `
+          + `행=${JSON.stringify(cancelled.rows[0])}`,
+        );
+      } else {
+        // 우리 행이 없다 — 그래도 200 (재전송 폭주 방지). 사후 대사는 팝빌 사이트 목록과 대조.
+        log(`매칭 실패 — key=${decision.mgtKey} 행 없음 (사후 대사 대상)`);
+      }
     } else if (decision.set.status === 'issued') {
       log(`304 관측 — key=${decision.mgtKey} 행 상태=${r.rows[0]?.status} (승격은 발행 패스 소유 — submitted/failed였다면 ready 재확인 큐잉됨)`);
     } else {

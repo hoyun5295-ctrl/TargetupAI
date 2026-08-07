@@ -44,6 +44,8 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
   const canPublish = validationResult?.can_publish !== false;
   // ★ 2026-07-02(3) 발행(100크레딧) 완료 = 버튼 [발송] 전환 (재발행 크레딧 모달 오해 차단)
   const isPublished = useDmBuilderStore((s) => s.isPublished);
+  // ★ 2026-08-06 중지분은 short_code가 남아 isPublished가 참이다 — 발송 계열 버튼은 이 축으로 잠근다.
+  const isStopped = useDmBuilderStore((s) => s.isStopped);
 
   const savedLabel = isSaving
     ? '저장 중...'
@@ -167,22 +169,27 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
           💾 저장
         </button>
       )}
-      {/* ★ 2026-07-24 발행 후에만 테스트 발송 — 미발행 시 흐리게+안내(클릭 시 사유 토스트). 발행 전 확인은 캔버스 미리보기. */}
+      {/* ★ 2026-07-24 발행 후에만 테스트 발송 — 미발행 시 흐리게+안내(클릭 시 사유 토스트). 발행 전 확인은 캔버스 미리보기.
+          ★ 2026-08-06 중지분도 잠근다 — 서버가 409로 막지만, 눌리는 버튼을 두면 담당자가 실패로 배운다. */}
       <button
-        onClick={() => onTestSendClick?.()}
-        style={{ ...btnStyle('secondary'), ...(isPublished ? {} : { opacity: 0.5 }) }}
-        title={isPublished ? '내 폰으로 테스트 발송' : '발행 후 테스트 발송이 가능해요'}
+        onClick={() => { if (!isStopped) onTestSendClick?.(); }}
+        disabled={isStopped}
+        style={{ ...btnStyle('secondary'), ...(isPublished && !isStopped ? {} : { opacity: 0.5 }), ...(isStopped ? { cursor: 'not-allowed' } : {}) }}
+        title={isStopped ? '중지된 DM이에요. 목록에서 [재개] 후 발송할 수 있어요.' : isPublished ? '내 폰으로 테스트 발송' : '발행 후 테스트 발송이 가능해요'}
       >
         📤 테스트
       </button>
       {/* ★ Codex 1R — 검수가 발행 클릭에 내장되면서 버튼 잠금 해제 (옛 canPublish 잠금은 "문제 고친 뒤 재검수 불가" 교착 유발).
           클릭 흐름 자체가 게이트: 저장 배리어 → 자동 검수 → 실패 시 검수 모달. */}
       <button
-        onClick={onPublishClick}
-        style={btnStyle('primary')}
-        title={isPublished ? '타겟 고객에게 발송 (발행 완료 — 추가 과금 없음)' : canPublish ? '발행 — 자동 검수 후 진행 (100크레딧, DM당 1회)' : '발행 — 자동 검수를 다시 실행합니다'}
+        onClick={() => { if (!isStopped) onPublishClick?.(); }}
+        disabled={isStopped}
+        style={{ ...btnStyle('primary'), ...(isStopped ? { opacity: 0.5, cursor: 'not-allowed' } : {}) }}
+        title={isStopped
+          ? '중지된 DM이에요. 목록에서 [재개] 후 발송할 수 있어요.'
+          : isPublished ? '타겟 고객에게 발송 (발행 완료 — 추가 과금 없음)' : canPublish ? '발행 — 자동 검수 후 진행 (100크레딧, DM당 1회)' : '발행 — 자동 검수를 다시 실행합니다'}
       >
-        {isPublished ? '📨 발송' : '🚀 발행'}
+        {isStopped ? '⏸ 중지됨' : isPublished ? '📨 발송' : '🚀 발행'}
       </button>
     </div>
   );

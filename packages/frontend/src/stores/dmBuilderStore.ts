@@ -113,6 +113,12 @@ export type DmBuilderState = {
   approvalStatus: ApprovalStatus;
   /** ★ 2026-07-02(3) 실제 발행 여부(dm.status='published'/short_code 축) — 발행(100크레딧) 완료 = 버튼 [발송] 전환·크레딧 모달 미노출 */
   isPublished: boolean;
+  /**
+   * ★ 2026-08-06 발행 중지 여부(서수란 접수).
+   * `isPublished`는 `short_code`가 있으면 참이라 **중지분도 발행 중으로 보인다** — 그 축만으로는 못 가른다.
+   * 중지 상태에서 발송·테스트 발송은 서버가 409로 막지만, 눌리는 버튼을 남기면 담당자가 실패로 배우게 된다.
+   */
+  isStopped: boolean;
   templateId: string | null;
   aiPrompt: string;
 
@@ -226,7 +232,7 @@ function emptyPage(name?: string): DmPage {
 const INITIAL_STATE: Pick<
   DmBuilderState,
   | 'dmId' | 'title' | 'storeName' | 'pages' | 'currentPageIndex' | 'sections' | 'brandKit' | 'layoutMode'
-  | 'approvalStatus' | 'isPublished' | 'templateId' | 'aiPrompt'
+  | 'approvalStatus' | 'isPublished' | 'isStopped' | 'templateId' | 'aiPrompt'
   | 'selectedSectionId' | 'hoveredSectionId' | 'isDirty' | 'lastSavedAt'
   | 'isSaving' | 'loadError' | 'aiGenerating' | 'validationResult'
   | 'validationRunning' | 'validationOverride' | 'openModal' | 'toast'
@@ -242,6 +248,7 @@ const INITIAL_STATE: Pick<
   layoutMode: 'scroll',
   approvalStatus: 'draft',
   isPublished: false,
+  isStopped: false,
   templateId: null,
   aiPrompt: '',
   selectedSectionId: null,
@@ -846,6 +853,8 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
         approvalStatus: dm.approval_status || 'draft',
         // ★ 발행 여부 = 발행 축(status/short_code)으로 판정 — approval_status(검수 축)와 별개
         isPublished: dm.status === 'published' || !!dm.short_code,
+        // ★ 2026-08-06 중지분은 short_code가 남아 위 판정을 그대로 통과한다 — 별도 축으로 함께 읽는다.
+        isStopped: dm.status === 'stopped',
         templateId: dm.template_id || null,
         aiPrompt: dm.ai_prompt || '',
         isDirty: false,
