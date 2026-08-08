@@ -136,6 +136,25 @@ export default function JourneyStepStudio({
   const [customDelayOpen, setCustomDelayOpen] = useState(false);
   useEffect(() => { setCustomDelayOpen(false); }, [index]);   // 스텝을 옮기면 그 스텝 값 기준으로 다시 판단한다
 
+  /**
+   * ★ 2026-08-08 (Harold 지시) — **이미 문안에 쓰인 컬럼은 처음부터 선택돼 있다.**
+   *   AI Operator가 그렇게 하고 있었는데(변형이 실제로 쓴 %변수%만 자동 체크) 여기만 빈 채로 시작했다.
+   *   ⛔ 매 타이핑마다 다시 계산하지 않는다 — 그러면 사용자가 체크를 풀어도 즉시 되살아난다.
+   *     스텝을 열 때와 컬럼 목록이 도착할 때만 맞춘다(그 뒤로는 사용자 선택이 진실).
+   */
+  useEffect(() => {
+    const s = steps[index];
+    if (!s) return;
+    const valid = new Set(decorateVars.map((v) => v.token));
+    const used = new Set<string>();
+    const text = `${s.messageTemplate || ''}\n${s.subject || ''}`;
+    // 본문은 %고객명%인데 칩 토큰은 % 없는 이름이다 — 캡처그룹으로 맞춘다(Operator와 같은 규약).
+    for (const m of Array.from(text.matchAll(/%([^%\n]+)%/g))) {
+      if (valid.has(m[1])) used.add(m[1]);
+    }
+    setSelectedVars(used);
+  }, [index, decorateVars]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   const channel = (step?.channel === 'sms' || step?.channel === 'mms' ? step.channel : 'lms') as StudioChannel;
   const maxBytes = channel === 'sms' ? 90 : 2000;
   const msgType = channel.toUpperCase();
@@ -178,8 +197,13 @@ export default function JourneyStepStudio({
   /** 프리셋에 없는 값이면 직접 입력이 진실이다 — 저장된 여정을 열었을 때 5일(120시간)이 아무 데도 안 걸리면 안 된다. */
   const delayHoursNow = Math.max(0, Number(step?.delayHours) || 0);
   const customDelay = customDelayOpen || !DELAY_PRESETS.some((p) => p.hours === delayHoursNow);
-  const delayUnit: 'hour' | 'day' = delayHoursNow >= 24 && delayHoursNow % 24 === 0 ? 'day' : 'hour';
-  const delayAmount = delayUnit === 'day' ? delayHoursNow / 24 : delayHoursNow;
+  /**
+   * ★ 2026-08-08 정정 — 직접 입력은 **며칠 뒤** 하나다(Harold 지시).
+   *   옛 시간·일 셀렉트는 값이 0일 때 `0 × 24 = 0`이라 단위를 바꿔도 아무것도 안 바뀌었다(내 결함).
+   *   단위가 하나면 그 계산 자체가 사라진다 — 시간 단위가 필요한 자리는 프리셋(1·3시간)이 갖는다.
+   */
+  const delayDays = Math.floor(delayHoursNow / 24);
+  const delayHasOddHours = delayHoursNow % 24 !== 0;
 
   const hourFixed = step?.delayMode === 'specific_hour' || step?.delayMode === 'relative_at_hour';
   const nightHit = hourFixed && step?.targetHourKst != null && isNightHour(Number(step.targetHourKst));
@@ -554,33 +578,28 @@ export default function JourneyStepStudio({
             </div>
 
             {customDelay && (
-              <div className="mt-2 flex items-center gap-2">
-                <input
-                  type="number"
-                  min={0}
-                  max={delayUnit === 'day' ? Math.floor(MAX_DELAY_HOURS / 24) : MAX_DELAY_HOURS}
-                  value={delayAmount}
-                  onChange={(e) => {
-                    const raw = Math.max(0, Math.floor(Number(e.target.value) || 0));
-                    const hours = delayUnit === 'day' ? raw * 24 : raw;
-                    onPatch(index, { delayHours: Math.min(MAX_DELAY_HOURS, hours) });
-                  }}
-                  className="w-20 rounded-lg border border-white/10 bg-slate-950/60 px-2.5 py-1.5 text-xs text-white focus:border-violet-400/50 focus:outline-none"
-                />
-                <select
-                  value={delayUnit}
-                  onChange={(e) => {
-                    const unit = e.target.value as 'hour' | 'day';
-                    // 단위를 바꿔도 **보이는 숫자**가 그대로이게 — 값이 24배로 튀면 사용자가 의도한 시점이 아니다.
-                    const hours = unit === 'day' ? delayAmount * 24 : delayAmount;
-                    onPatch(index, { delayHours: Math.min(MAX_DELAY_HOURS, hours) });
-                  }}
-                  className="rounded-lg border border-white/10 bg-slate-950/60 px-2.5 py-1.5 text-xs text-white focus:border-violet-400/50 focus:outline-none"
-                >
-                  <option value="hour">시간 뒤</option>
-                  <option value="day">일 뒤</option>
-                </select>
-                <span className="text-[11px] text-white/35">최대 365일</span>
+              <div className="mt-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    max={Math.floor(MAX_DELAY_HOURS / 24)}
+                    value={delayDays}
+                    onChange={(e) => {
+                      const days = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                      onPatch(index, { delayHours: Math.min(MAX_DELAY_HOURS, days * 24) });
+                    }}
+                    className="w-20 rounded-lg border border-white/10 bg-slate-950/60 px-2.5 py-1.5 text-xs text-white focus:border-violet-400/50 focus:outline-none"
+                  />
+                  <span className="text-xs text-white/70">일 뒤</span>
+                  <span className="text-[11px] text-white/35">최대 365일</span>
+                </div>
+                {delayHasOddHours && (
+                  // 지금 값이 시간 단위라 일수로 딱 떨어지지 않는다 — 조용히 바꾸지 않고 사실을 알린다.
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-amber-200/80">
+                    지금은 {delayHoursNow}시간 뒤로 설정돼 있습니다. 위 일수를 입력하면 그 값으로 바뀝니다.
+                  </p>
+                )}
               </div>
             )}
 

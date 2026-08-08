@@ -80,6 +80,36 @@ describe('발송 시점 — 직접 입력', () => {
     expect(studio()).toMatch(/MAX_DELAY_HOURS = 8760/);
     expect(backend('utils/journey-builder.ts')).toMatch(/MAX_STEP_DELAY_HOURS = 8760/);
   });
+
+  // ★ 2026-08-08 정정 (Harold 지시) — 시간·일 셀렉트는 값이 0일 때 `0 × 24 = 0`이라 단위를 바꿔도
+  //   아무것도 안 바뀌었다. 단위를 하나(일)로 두면 그 계산 자체가 사라진다.
+  it('직접 입력은 일 단위 하나다 — 단위 셀렉트가 없다', () => {
+    const src = studio();
+    expect(src).toMatch(/days \* 24/);
+    expect(src, '단위 셀렉트가 남아 있으면 0에서 안 바뀌는 결함이 되살아난다').not.toMatch(/<option value="hour">/);
+  });
+
+  it('일수로 딱 떨어지지 않는 값은 조용히 바꾸지 않고 알린다', () => {
+    expect(studio()).toMatch(/delayHasOddHours/);
+  });
+});
+
+describe('꾸미기 칩 — 이미 쓰인 컬럼은 선택돼 있다 (AI Operator와 같은 규약)', () => {
+  const studio = () => front('components/journey/JourneyStepStudio.tsx');
+
+  it('본문·제목의 %변수%를 칩 선택으로 되살린다', () => {
+    const src = studio();
+    expect(src).toMatch(/matchAll\(\/%\(\[\^%\\n\]\+\)%\/g\)/);
+    expect(src).toMatch(/setSelectedVars\(used\)/);
+  });
+
+  it('타이핑마다 다시 계산하지 않는다 (체크를 풀어도 되살아나면 못 쓴다)', () => {
+    const src = studio();
+    const block = src.slice(src.indexOf('setSelectedVars(used)'));
+    const deps = block.slice(0, block.indexOf('\n\n'));
+    expect(deps).toMatch(/\[index, decorateVars\]/);
+    expect(deps, '본문을 의존성에 넣으면 사용자가 푼 선택이 즉시 되살아난다').not.toMatch(/messageTemplate\]/);
+  });
 });
 
 describe('빈 상태를 화면이 말한다', () => {
