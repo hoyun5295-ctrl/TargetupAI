@@ -1510,6 +1510,113 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
     defaultTexts: { label: 'CAMPING', title: '캠핑 나이트', subtitle: '자연 속 하룻밤' },
     sample: { title: '캠핑 나이트', subtitle: '불멍과 함께하는 밤' },
   },
+
+  // ══ ★ 2026-08-09(3) v9 제품 트랙 빈 축 보강 (+12 = 185종·제품 121) — 뷰티·패션 집중, 기존 109종에 없는 장면 축만 (Harold 지시) ══
+  // ── 뷰티 (+4) ──
+  {
+    id: 'beauty-mens-grooming', name: '맨즈 그루밍', category: '뷰티',
+    desc: '딥네이비·면도 소품·돌 트레이의 남성 그루밍 무드', accent: '#2f3e52',
+    scaffold: 'A men grooming scene: deep navy backdrop with dark slate and smoked glass surfaces, a classic razor and badger brush resting on a stone tray, a rolled charcoal towel, one strip of cool window light. Confident masculine ritual, composed and refined.',
+    textStyle: 'Masculine typography — strong clean headline in steel white with tight tracking, small engraved label. Firm placement in the upper area.',
+    defaultTexts: { label: 'FOR MEN', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '단정함이 무기가 된다', subtitle: '맨즈 그루밍 라인' },
+  },
+  {
+    id: 'beauty-derma-clinic', name: '더마 클리닉', category: '뷰티',
+    desc: '순수 화이트 랩·페트리·앰플의 클리니컬 무드', accent: '#aebfc9',
+    scaffold: 'A dermatology lab scene: a pure white clinical counter with glass petri dishes and clear ampoules arranged with precision, a stainless spatula, soft even shadowless lighting, no plants and no decoration — only clean science. Trustworthy laboratory calm, sterile and precise.',
+    textStyle: 'Clinical typography — exact thin headline in cool graphite, tiny formula-note label. Precise placement in the upper area.',
+    defaultTexts: { label: 'DERMA', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '피부 과학의 기준', subtitle: '더마 케어 라인' },
+  },
+  {
+    id: 'beauty-iridescent-holo', name: '이리데슨트 홀로', category: '뷰티',
+    desc: '오팔빛·홀로그램 필름의 미래적 시머 무드', accent: '#b8a0d9',
+    scaffold: 'An iridescent holographic scene: opal-like light gradients shifting between lavender, mint and pearl pink, a glossy holographic film texture rippling in the backdrop, soft prism flares crossing the frame. Dreamy futuristic shimmer, ethereal and trendy.',
+    textStyle: 'Holographic typography — pearl-white headline with a subtle rainbow sheen, futuristic small label. Floating placement in the upper area.',
+    defaultTexts: { label: 'HOLO EDITION', title: '{productName}', subtitle: '' },
+    sample: { title: '빛의 결을 바르다', subtitle: '홀로 에디션' },
+  },
+  {
+    id: 'beauty-terracotta-clay', name: '테라코타 클레이', category: '뷰티',
+    desc: '도자·토분 질감의 어시 아르티장 무드', accent: '#b57856',
+    scaffold: 'A terracotta clay scene: hand-thrown ceramic vessels and unglazed clay plates in warm earthen tones, dried clay texture cracks as a subtle backdrop, soft directional sunlight over an adobe-like surface. Grounded artisanal warmth, organic and calm.',
+    textStyle: 'Earthen typography — warm umber headline with a hand-formed feeling, small kiln-stamp label. Grounded placement in the upper area.',
+    defaultTexts: { label: 'CLAY', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '흙의 온도를 담다', subtitle: '클레이 케어 라인' },
+  },
+
+  // ── 패션 (+4) ──
+  {
+    id: 'fashion-jewelry-velvet', name: '주얼리 벨벳', category: '패션',
+    desc: '플럼 벨벳 트레이·스포트라이트의 주얼리 무드', accent: '#5c4a63',
+    scaffold: 'A jewelry display scene: a deep plum velvet tray with soft ring cushions in close-up, a single focused spotlight making tiny facets sparkle, dark surroundings with a faint glass vitrine reflection. Precious-object intimacy, opulent and hushed.',
+    textStyle: 'Jewel typography — fine champagne headline with delicate serif feeling, tiny hallmark label. Refined placement in the upper area.',
+    defaultTexts: { label: 'JEWELRY', title: '{productName}', subtitle: '' },
+    sample: { title: '작지만 가장 빛나는', subtitle: '주얼리 컬렉션' },
+  },
+  {
+    id: 'fashion-knit-texture', name: '니트 텍스처', category: '패션',
+    desc: '청키 니트 짜임·울 섬유의 포근한 무드', accent: '#b09a7a',
+    scaffold: 'A knit texture scene: chunky cable-knit fabric filling the frame in oat and camel tones, visible soft wool fibers backlit by warm light, a wooden button and yarn ball detail at the edge. Warm tactile comfort, soft and inviting.',
+    textStyle: 'Soft typography — cozy medium headline in deep camel, small yarn-tag label. Comfortable placement in the upper area.',
+    defaultTexts: { label: 'KNIT', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '포근함을 입다', subtitle: '니트 컬렉션' },
+  },
+  {
+    id: 'fashion-shoes-step', name: '슈즈 스텝', category: '패션',
+    desc: '돌계단·단상의 건축적 슈즈 연출 무드', accent: '#8a7263',
+    scaffold: 'A shoes display scene: wide stone steps ascending in warm beige tones, each step catching a clean diagonal shadow, a minimalist pedestal at the top under soft museum light. Elevated footwear stage, architectural and poised.',
+    textStyle: 'Stately typography — modern headline in deep taupe with confident weight, small minimal label. Ascending placement in the upper area.',
+    defaultTexts: { label: 'FOOTWEAR', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '한 걸음의 완성', subtitle: '슈즈 컬렉션' },
+  },
+  {
+    id: 'fashion-lounge-morning', name: '라운지웨어 모닝', category: '패션',
+    desc: '침대 모서리·아침빛·커피의 홈웨어 무드', accent: '#c9b3a0',
+    scaffold: 'A loungewear morning scene: the soft corner of an unmade bed with cream waffle blankets, morning sun stripes across the linen, a cup of coffee on a wooden tray and an open paperback nearby. Slow-morning-at-home ease, gentle and personal.',
+    textStyle: 'Relaxed typography — light warm-gray headline with an unhurried feeling, lowercase-mood small label. Easy placement in the upper area.',
+    defaultTexts: { label: 'HOME WEAR', title: '{productName}', subtitle: '' },
+    sample: { title: '집에서의 온전한 휴식', subtitle: '라운지웨어 라인' },
+  },
+
+  // ── 카페·음료 (+2) ──
+  {
+    id: 'cafe-gelato-pastel', name: '젤라토 파스텔', category: '카페·음료',
+    desc: '파스텔 젤라토 콘·프로스트의 스윗 무드', accent: '#e8a8b8',
+    scaffold: 'A gelato scene: scoops of pastel gelato in waffle cones standing in a chilled display row, tiny frost sparkle on the surface, mint leaves and fruit garnish, bright cheerful parlor light in pink and cream. Sweet frozen delight, fresh and adorable.',
+    textStyle: 'Scoop typography — rounded headline in deep berry with a creamy outline, small cone-shaped label. Sweet placement in the upper area.',
+    defaultTexts: { label: 'GELATO', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '한 스쿱의 행복', subtitle: '시즌 젤라토' },
+  },
+  {
+    id: 'cafe-green-smoothie', name: '그린 스무디', category: '카페·음료',
+    desc: '그린 스무디·과일 볼의 헬시 모닝 무드', accent: '#7aa85f',
+    scaffold: 'A healthy smoothie scene: a tall glass of vibrant green smoothie with a paper straw, a bowl of fresh spinach, kiwi and banana slices beside it, light wooden counter with morning freshness, water droplets on the glass. Clean-eating vitality, crisp and energizing.',
+    textStyle: 'Healthy typography — fresh bold headline in deep leaf green, small leaf-dot label. Energizing placement in the upper area.',
+    defaultTexts: { label: 'HEALTHY', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '오늘의 초록 한 잔', subtitle: '헬시 스무디' },
+  },
+
+  // ── 신메뉴·팝 (+1) ──
+  {
+    id: 'pop-riso-print', name: '리소 프린트', category: '신메뉴·팝',
+    desc: '형광 2도 리소그래프·인디 진의 인쇄 무드', accent: '#e85f8a',
+    scaffold: 'A risograph print promotional scene: grainy two-color riso print texture in fluorescent pink and deep blue with intentional slight misregistration, halftone grain, simple bold shapes like an indie zine poster, cream paper base. Indie print-studio cool, raw and stylish.',
+    textStyle: 'Riso typography — bold headline printed in fluorescent pink with grainy edges and slight offset, small zine-stamp label. Poster placement in the upper area.',
+    defaultTexts: { label: 'NEW', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '신상, 찍어냈습니다', subtitle: '리소 에디션' },
+  },
+
+  // ── 미니멀 (+1) ──
+  {
+    id: 'minimal-dune-sand', name: '듄 샌드', category: '미니멀',
+    desc: '모래 결·사막 빛의 웜 미니멀', accent: '#d9c0a0',
+    scaffold: 'A dune sand minimal scene: smooth wind-carved sand ripples stretching across the frame in warm ivory tones, one crisp shadow line along a dune crest, vast empty sky band above, late-day desert light. Silent warm expanse, meditative and endless.',
+    textStyle: 'Desert typography — small quiet headline in deep sand brown, hairline label. Horizon placement in the upper area.',
+    defaultTexts: { label: '', title: '{productName}', subtitle: '' },
+    sample: { title: '고요한 모래의 결' },
+  },
 ];
 
 export function getTemplate(id: string): StudioTemplate | undefined {
