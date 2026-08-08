@@ -765,7 +765,12 @@ export default function JourneysPage() {
     ]).then(async ([sndRes, tplRes, fldRes, cdpRes, dpRes]) => {
       if (dpRes?.ok) {
         const data = await dpRes.json();
-        const vars = (data.fields || []).map((f: any) => ({
+        // ★ 2026-08-08 (Harold 접수) — 서버는 `safeFields`·`conditionalFields`·`blockedFields`로 나눠 준다.
+        //   `data.fields`를 읽고 있어 **항상 0**이었고(0630 배선 이래), 그래서 꾸미기 칩·변수 넣기 카드가
+        //   화면에서 통째로 사라졌다. 날짜축 빌더의 꾸미기도 같은 값을 써서 함께 죽어 있었다.
+        //   ⛔ `conditionalFields`는 채우지 않는다 — 채움률이 중간이라 빈 값 고객에게 어색한 문장이 나간다
+        //     (0630 주석의 원래 의도도 "안전 %변수% 토큰"이다). `blockedFields`는 당연히 제외.
+        const vars = (data.safeFields || []).map((f: any) => ({
           token: String(f.percentVar || f.label || '').trim(),
           label: String(f.label || f.percentVar || '').trim(),
         })).filter((v: { token: string }) => v.token);

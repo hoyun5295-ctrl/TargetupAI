@@ -9,7 +9,7 @@
  * 1클릭 원칙(CLAUDE.md marketing_user_ux_priority)
  *   빈 스텝에서도 [AI 문안생성]이 눌린다. 사람이 먼저 열 글자를 쓰게 하지 않는다.
  */
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Sparkles, Wand2, Beaker, Plus, Trash2, ChevronLeft, ChevronRight, Clock, AlertTriangle, Save, Loader2,
   Image as ImageIcon, Gift,
@@ -107,6 +107,12 @@ const DELAY_PRESETS: Array<{ label: string; hours: number }> = [
   { label: '7일 뒤', hours: 168 },
 ];
 
+/**
+ * ★ 2026-08-08 (Harold 접수) — 프리셋 6개만 두면 5일 뒤·2주 뒤를 만들 길이 없다.
+ *   상한은 백엔드 `MAX_STEP_DELAY_HOURS`와 같은 값이어야 한다 — 화면이 더 크게 받으면 저장에서 조용히 깎인다.
+ */
+const MAX_DELAY_HOURS = 8760;   // 365일
+
 export default function JourneyStepStudio({
   steps, index, onIndex, onPatch, onAdd, onDelete, onSave,
   onAi, onDecorate, onSpamTest, onFillBenefit, onFillUrl,
@@ -126,6 +132,9 @@ export default function JourneyStepStudio({
   const urlSlots = useMemo(() => anyStepHas(hasUrlPlaceholder), [steps]);           // eslint-disable-line react-hooks/exhaustive-deps
   // ★ 2026-08-08 — AI 꾸미기에 넣을 컬럼. 고른 것만 넘긴다(날짜축 빌더·Operator와 같은 규약).
   const [selectedVars, setSelectedVars] = useState<Set<string>>(new Set());
+  // ★ 2026-08-08 — 발송 시점 직접 입력. 저장된 값이 프리셋에 없으면(예: 5일) 자동으로 열린다.
+  const [customDelayOpen, setCustomDelayOpen] = useState(false);
+  useEffect(() => { setCustomDelayOpen(false); }, [index]);   // 스텝을 옮기면 그 스텝 값 기준으로 다시 판단한다
 
   const channel = (step?.channel === 'sms' || step?.channel === 'mms' ? step.channel : 'lms') as StudioChannel;
   const maxBytes = channel === 'sms' ? 90 : 2000;
@@ -165,6 +174,12 @@ export default function JourneyStepStudio({
     () => steps.slice(0, index + 1).reduce((sum, s) => sum + (Number(s.delayHours) || 0), 0),
     [steps, index]
   );
+
+  /** 프리셋에 없는 값이면 직접 입력이 진실이다 — 저장된 여정을 열었을 때 5일(120시간)이 아무 데도 안 걸리면 안 된다. */
+  const delayHoursNow = Math.max(0, Number(step?.delayHours) || 0);
+  const customDelay = customDelayOpen || !DELAY_PRESETS.some((p) => p.hours === delayHoursNow);
+  const delayUnit: 'hour' | 'day' = delayHoursNow >= 24 && delayHoursNow % 24 === 0 ? 'day' : 'hour';
+  const delayAmount = delayUnit === 'day' ? delayHoursNow / 24 : delayHoursNow;
 
   const hourFixed = step?.delayMode === 'specific_hour' || step?.delayMode === 'relative_at_hour';
   const nightHit = hourFixed && step?.targetHourKst != null && isNightHour(Number(step.targetHourKst));
@@ -406,14 +421,21 @@ export default function JourneyStepStudio({
 
           {/* ★ 2026-08-08 (Harold 접수) — AI 꾸미기는 **고른 컬럼만** 녹인다.
               전체를 넘기면 AI가 아무 컬럼이나 골라 넣는다. 0개면 잠금(날짜축·Operator와 같은 규약). */}
-          {decorateVars.length > 0 && (
-            <div className="rounded-xl border border-violet-400/20 bg-white/[0.04] p-3">
-              <div className="mb-1.5 flex items-center gap-1.5">
-                <Wand2 className="h-3.5 w-3.5 text-violet-300" />
-                <span className="text-xs font-semibold text-white/85">
-                  AI 꾸미기 <span className="font-normal text-white/40">{selectedVars.size > 0 ? `${selectedVars.size}개 선택` : '컬럼 선택'}</span>
-                </span>
-              </div>
+          {/* ⛔ 컬럼이 0이어도 카드를 숨기지 않는다 — 숨기면 "왜 안 나오지"가 화면에서 안 보인다
+              (2026-08-08: 데이터가 안 실려 카드가 통째로 사라졌는데 원인을 화면에서 알 수 없었다). */}
+          <div className="rounded-xl border border-violet-400/20 bg-white/[0.04] p-3">
+            <div className="mb-1.5 flex items-center gap-1.5">
+              <Wand2 className="h-3.5 w-3.5 text-violet-300" />
+              <span className="text-xs font-semibold text-white/85">
+                AI 꾸미기 <span className="font-normal text-white/40">{selectedVars.size > 0 ? `${selectedVars.size}개 선택` : '컬럼 선택'}</span>
+              </span>
+            </div>
+            {decorateVars.length === 0 ? (
+              <p className="text-[11px] leading-relaxed text-amber-200/80">
+                문안에 넣을 수 있는 고객 데이터 항목이 아직 없습니다. 고객 정보를 올리면 여기에 컬럼이 나타납니다.
+              </p>
+            ) : (
+              <>
               <p className="mb-2 text-[11px] leading-relaxed text-white/50">넣고 싶은 데이터를 골라 주세요. AI가 문안에 자연스럽게 녹입니다.</p>
               <div className="flex flex-wrap gap-1.5">
                 {decorateVars.map((v) => {
@@ -437,8 +459,9 @@ export default function JourneyStepStudio({
                 })}
               </div>
               <p className="mt-1.5 text-[10px] italic text-white/30">Data source — 회사 고객 데이터에 실제로 있는 컬럼만 표시됩니다.</p>
-            </div>
-          )}
+              </>
+            )}
+          </div>
 
           {/* 액션 3 — 오퍼레이터 화면과 같은 정렬 */}
           <div className="flex flex-wrap gap-2">
@@ -506,9 +529,9 @@ export default function JourneyStepStudio({
                 <button
                   key={p.hours}
                   type="button"
-                  onClick={() => onPatch(index, { delayHours: p.hours })}
+                  onClick={() => { setCustomDelayOpen(false); onPatch(index, { delayHours: p.hours }); }}
                   className={`rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
-                    Number(step.delayHours) === p.hours
+                    !customDelay && Number(step.delayHours) === p.hours
                       ? 'bg-violet-500/25 text-violet-100 ring-1 ring-violet-400/40'
                       : 'bg-white/5 text-white/55 hover:bg-white/10'
                   }`}
@@ -516,7 +539,50 @@ export default function JourneyStepStudio({
                   {p.label}
                 </button>
               ))}
+              {/* ★ 2026-08-08 (Harold 접수) — 프리셋만 두면 5일 뒤·2주 뒤를 만들 길이 없다. */}
+              <button
+                type="button"
+                onClick={() => setCustomDelayOpen(true)}
+                className={`rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
+                  customDelay
+                    ? 'bg-violet-500/25 text-violet-100 ring-1 ring-violet-400/40'
+                    : 'bg-white/5 text-white/55 hover:bg-white/10'
+                }`}
+              >
+                직접 입력
+              </button>
             </div>
+
+            {customDelay && (
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  max={delayUnit === 'day' ? Math.floor(MAX_DELAY_HOURS / 24) : MAX_DELAY_HOURS}
+                  value={delayAmount}
+                  onChange={(e) => {
+                    const raw = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                    const hours = delayUnit === 'day' ? raw * 24 : raw;
+                    onPatch(index, { delayHours: Math.min(MAX_DELAY_HOURS, hours) });
+                  }}
+                  className="w-20 rounded-lg border border-white/10 bg-slate-950/60 px-2.5 py-1.5 text-xs text-white focus:border-violet-400/50 focus:outline-none"
+                />
+                <select
+                  value={delayUnit}
+                  onChange={(e) => {
+                    const unit = e.target.value as 'hour' | 'day';
+                    // 단위를 바꿔도 **보이는 숫자**가 그대로이게 — 값이 24배로 튀면 사용자가 의도한 시점이 아니다.
+                    const hours = unit === 'day' ? delayAmount * 24 : delayAmount;
+                    onPatch(index, { delayHours: Math.min(MAX_DELAY_HOURS, hours) });
+                  }}
+                  className="rounded-lg border border-white/10 bg-slate-950/60 px-2.5 py-1.5 text-xs text-white focus:border-violet-400/50 focus:outline-none"
+                >
+                  <option value="hour">시간 뒤</option>
+                  <option value="day">일 뒤</option>
+                </select>
+                <span className="text-[11px] text-white/35">최대 365일</span>
+              </div>
+            )}
 
             <label className="mt-3 flex items-center gap-2 text-[11px] text-white/55">
               <input

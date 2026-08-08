@@ -47,7 +47,7 @@
 ### 여정 — 0802 재설계 배포완료 + **0808 이어달리기 구현 완료·배포 대기**
 > 기능 상설 = **[여정](docs/FEATURE-JOURNEY.md)**(호출어 "여정" — 구조·불변 원칙·이력 색인 전부) · 트랙 SoT [재설계 설계서](docs/2026-08-01-journey-redesign-design.md) · [이어달리기 설계서](docs/2026-08-08-journey-succession-design.md)(구현 결과 §9-A) · 기억 [[project_2026_0801_journey_redesign]] · 다음 = 배포 → 실측
 > ⛔ 불변 원칙·판정 계약은 여정 문서와 설계서가 소유 — 착수 전 [여정 문서 §2·§3](docs/FEATURE-JOURNEY.md)부터 읽는다. 이어달리기 = **DDL 0·발송 무변경** · dedup 축은 `trigger_event`(`template_code`로 되돌리면 repeat 3종이 서로를 오차단) · 프리셋은 서버가 계약값으로 덮어쓰고 저장에도 그 표식이 있을 때만 트리거를 싣는다
-> 잔여 = **배포 전 확인 1건**(§9-A 남은 것 — 혜택 입력이 보완) · 이어달리기 실측 1건(§9-6) · 스튜디오 실측 4건([여정 문서 §6-1 08-08(2)~(5)](docs/FEATURE-JOURNEY.md)) · 화면 실측 8종 · 자동 종료 기본화 · 별건 5(§9-A 2 + 기존 3 — 편집기 혜택 차단은 0808(2) Codex 2R로 닫힘)
+> 잔여 = **배포 전 확인 1건**(§9-A 남은 것 — 혜택 입력이 보완) · 이어달리기 실측 1건(§9-6) · 스튜디오 실측 5건([여정 문서 §6-1 08-08(2)~(6)](docs/FEATURE-JOURNEY.md)) · 화면 실측 8종 · 자동 종료 기본화 · 별건 5(§9-A 2 + 기존 3 — 편집기 혜택 차단은 0808(2) Codex 2R로 닫힘)
 
 ### 레거시 PAY 흡수 (Track D) — 충전·잔액 축 배포완료, 컷오버 전
 > SoT [통계·인프라](docs/2026-07-07-pay-absorption-track-d-design.md) · [충전·잔액](docs/2026-07-24-agent-prepaid-charge-design.md)(단독 재개용) · 기억 [[project_2026_0724_agent_prepaid_charge]] · 다음 = 7월 실충전 4개(`B0082`·`D0078`·`D0079`·`C0112`)에 `billing_type='prepaid'` 지정(283행 전부 postpaid라 지금은 충전 등록도 요청 탭도 열리지 않는다)
