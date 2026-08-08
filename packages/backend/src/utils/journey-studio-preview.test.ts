@@ -66,6 +66,32 @@ describe('스튜디오가 그 축을 쓴다', () => {
   });
 });
 
+/**
+ * ★ 2026-08-08 (Harold 접수) — AI 꾸미기에 컬럼 선택권이 없었다.
+ *   선택권이 없는 정도가 아니라 **보유 컬럼 전체**를 넘겨 AI가 아무거나 골라 넣고 있었다.
+ *   날짜축 빌더·AI Operator는 이미 "고른 것만 · 0개면 잠금" 규약을 쓴다.
+ */
+describe('AI 꾸미기 — 고른 컬럼만 넘긴다', () => {
+  it('전체 컬럼을 통째로 넘기던 형태가 남아 있지 않다', () => {
+    const page = readFileSync(resolve(process.cwd(), '../frontend/src/pages/JourneysPage.tsx'), 'utf8');
+    expect(
+      page,
+      '전체를 넘기면 사용자가 고르지 않은 컬럼이 문안에 들어간다',
+    ).not.toMatch(/handleAnchorDecorate\(body, dataProfileVars\.map/);
+    expect(page).toMatch(/handleAnchorDecorate\(body, selectedTokens\)/);
+  });
+
+  it('선택 0개면 꾸미기가 잠긴다 (다른 두 화면과 같은 규약)', () => {
+    expect(studioSrc()).toMatch(/disabled=\{aiBusy \|\| selectedVars\.size === 0\}/);
+  });
+
+  it('칩은 토큰을 들고 라벨을 보여 준다 (꾸미기 API가 받는 값이 토큰이다)', () => {
+    const src = studioSrc();
+    expect(src).toMatch(/selectedVars\.has\(v\.token\)/);
+    expect(src).toMatch(/onDecorate\(index, Array\.from\(selectedVars\)\)/);
+  });
+});
+
 describe('저장 본문은 순수 상태 그대로', () => {
   it('합성 결과를 messageTemplate에 되쓰지 않는다 (이중 부착 차단)', () => {
     const src = studioSrc();

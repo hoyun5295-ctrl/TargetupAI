@@ -21,70 +21,8 @@
 
 import { useState, useMemo } from 'react';
 import { X, Sparkles, ArrowRight, Loader2, RotateCcw } from 'lucide-react';
-
-/**
- * Before/After 하이라이트 — D152-6 (2026-05-12) Harold 명시:
- *   "지금은 뭐가 바꼈는지 올라갔다 내려갔다 확인해야하잖아"
- *   결과 카드에 원본 대비 추가된 부분 violet 강조 → 사용자가 한 화면에서 즉시 체감.
- *   외부 의존성 없이 글자 단위 LCS(Longest Common Subsequence)로 자체 구현.
- *
- * D152-6 정정3 (2026-05-12): "20분전" vs "20분 전" 같이 어절 자체가 공백으로 분리되는 케이스
- *   기존 어절 단위 LCS는 매칭 X → 전체가 added로 잘못 강조.
- *   글자 단위 LCS로 변경 — 정확도 100%.
- */
-function highlightAdditions(
-  original: string,
-  modified: string,
-): Array<{ text: string; added: boolean }> {
-  const m = original.length;
-  const n = modified.length;
-
-  const width = n + 1;
-  const dp = new Int32Array((m + 1) * width);
-  for (let i = 1; i <= m; i += 1) {
-    for (let j = 1; j <= n; j += 1) {
-      const cur = i * width + j;
-      if (original.charCodeAt(i - 1) === modified.charCodeAt(j - 1)) {
-        dp[cur] = dp[cur - width - 1] + 1;
-      } else {
-        const a = dp[cur - width];
-        const b = dp[cur - 1];
-        dp[cur] = a > b ? a : b;
-      }
-    }
-  }
-
-  const result: Array<{ text: string; added: boolean }> = [];
-  let i = m;
-  let j = n;
-  while (j > 0) {
-    const isSame =
-      i > 0 && original.charCodeAt(i - 1) === modified.charCodeAt(j - 1);
-    const isAdded =
-      !isSame &&
-      (i === 0 || dp[i * width + j - 1] >= dp[(i - 1) * width + j]);
-
-    if (isSame) {
-      if (result.length > 0 && !result[0].added) {
-        result[0].text = modified[j - 1] + result[0].text;
-      } else {
-        result.unshift({ text: modified[j - 1], added: false });
-      }
-      i -= 1;
-      j -= 1;
-    } else if (isAdded) {
-      if (result.length > 0 && result[0].added) {
-        result[0].text = modified[j - 1] + result[0].text;
-      } else {
-        result.unshift({ text: modified[j - 1], added: true });
-      }
-      j -= 1;
-    } else {
-      i -= 1;
-    }
-  }
-  return result;
-}
+// ★ 2026-08-08 — Before/After 하이라이트(글자 단위 LCS)는 CT가 소유한다. 여정 다듬기도 같은 것을 쓴다.
+import { highlightAdditions } from '../utils/text-diff';
 
 // 톤 분류 — D152+ Harold 명시 8→2 컨셉 축소 (풍성화 본질이 핵심)
 //   ① seasonal — 시즌/월별 감성 자연 반영

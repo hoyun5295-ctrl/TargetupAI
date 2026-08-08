@@ -127,6 +127,11 @@ export interface StepRefineInput {
   isAd: boolean;
   stepIntent?: string;
   journey?: JourneyStepAiContext;
+  /**
+   * ★ 2026-08-08 — 후보를 몇 개 만들 것인가(1 또는 3, 기본 3).
+   *   화면이 비포/애프터 한 쌍으로 보여 주면 안은 하나면 된다 — 나머지는 버려지는 비용이다.
+   */
+  variants?: 1 | 3;
 }
 
 export interface StepRefineCandidate {
@@ -745,8 +750,13 @@ export async function refineStepMessage(input: StepRefineInput): Promise<{ candi
 
   const maxBytes = input.channel === 'sms' ? 90 : 2000;
 
+  // ★ 2026-08-08 (Harold 접수) — 후보 3개를 늘어놓고 고르게 하는 것은 선택 피로다.
+  //   화면이 한 안만 쓰면 나머지 둘은 시간·토큰만 쓰고 버려진다. 몇 개를 만들지는 호출부가 정한다.
+  const wantCount = input.variants === 1 ? 1 : 3;
+  const single = wantCount === 1;
+
   let system = `당신은 한국 마케팅 메시지 다듬기 전문가입니다.
-회사 admin이 작성한 step 메시지를 받아 3가지 톤의 후보로 다듬어 JSON으로 응답합니다.
+회사 admin이 작성한 step 메시지를 받아 ${single ? '가장 알맞은 안 하나로' : '3가지 톤의 후보로'} 다듬어 JSON으로 응답합니다.
 
 [회사 컨텍스트]
 - 회사명: ${ctx.companyName}
@@ -775,23 +785,30 @@ ${buildJourneyContextBlock(jc, hasBody)}
   - SMS 호환 특수문자 화이트리스트 (EUC-KR 통신사 검증 정합): ★ ☆ ♥ ♡ ◆ ◇ ■ □ ▲ △ ▶ ◀ ● ○ ◎ ♨ ※ ☞ ☎ ① ② ③ ④ ⑤ ↑ ↓ ← → ㈜ ㎝ ㎏ ㎡
   - 자유 영역 (수식어 / 감성 / 1:1 대화감 / 호기심 갭) 적극 활용, 사실 영역 (숫자 / 장소 / 약속 / 혜택) 절대 보존
 
-[3 후보 톤 매트릭스]
+${single
+  ? `[한 안으로 쓴다]
+회사 톤과 이 스텝의 의도에 가장 알맞은 **하나**를 쓴다. 톤 이름은 "감성적"·"실용적"·"캐주얼" 중 실제로 택한 것을 적는다.
+reasoning은 **무엇을 왜 바꿨는지** 한 줄 — 사용자가 원본과 비교해 볼 때 읽는 설명이다.`
+  : `[3 후보 톤 매트릭스]
 1. 감성적: 따뜻함 / 정서적 공감 / 호기심 유발 / 진심 어린 안부 (계절 단어 없이)
 2. 실용적: 명확 / 정보 중심 / CTA 강조 / 구체적 안내
-3. 캐주얼: 친근 / 가벼움 / 일상적 / 부담 X 톤
+3. 캐주얼: 친근 / 가벼움 / 일상적 / 부담 X 톤`}
 
 [출력 JSON — 다른 텍스트 금지]
 {
   "candidates": [
-    { "message": "...", "tone": "감성적", "reasoning": "..." },
+${single
+  ? `    { "message": "...", "tone": "감성적|실용적|캐주얼", "reasoning": "무엇을 왜 바꿨는지 한 줄" }`
+  : `    { "message": "...", "tone": "감성적", "reasoning": "..." },
     { "message": "...", "tone": "실용적", "reasoning": "..." },
-    { "message": "...", "tone": "캐주얼", "reasoning": "..." }
+    { "message": "...", "tone": "캐주얼", "reasoning": "..." }`}
   ]
 }`;
 
+  const countPhrase = single ? '가장 알맞은 안 하나로' : '3가지 톤 후보로';
   const userMessage = hasBody
-    ? `원본 메시지:\n${input.currentMessage}\n\n위 메시지를 3가지 톤 후보로 다듬어 JSON으로 응답하세요. 혜택 placeholder + 변수는 그대로 유지하고 안내문/감성 텍스트만 정련하세요.`
-    : `이 스텝의 문안을 처음부터 3가지 톤 후보로 써서 JSON으로 응답하세요. 위 [여정 맥락]의 트리거·목적·순번·발송 시점에 맞추고, [앞 스텝 문안]과 내용이 겹치지 않게 하세요. 구체 혜택은 지어내지 말고 placeholder로 두세요.`;
+    ? `원본 메시지:\n${input.currentMessage}\n\n위 메시지를 ${countPhrase} 다듬어 JSON으로 응답하세요. 혜택 placeholder + 변수는 그대로 유지하고 안내문/감성 텍스트만 정련하세요.`
+    : `이 스텝의 문안을 처음부터 ${countPhrase} 써서 JSON으로 응답하세요. 위 [여정 맥락]의 트리거·목적·순번·발송 시점에 맞추고, [앞 스텝 문안]과 내용이 겹치지 않게 하세요. 구체 혜택은 지어내지 말고 placeholder로 두세요.`;
 
   // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입 (회사 등록 미존재 시 옛 흐름 그대로)
   system = await buildSystemPromptWithBrandVoice(input.companyId, system);
@@ -816,14 +833,15 @@ ${buildJourneyContextBlock(jc, hasBody)}
     return { candidates: [] };
   }
 
-  const raw: any[] = Array.isArray(parsed.candidates) ? parsed.candidates : [];
+  const raw: any[] = (Array.isArray(parsed.candidates) ? parsed.candidates : []).slice(0, wantCount);
   const validTones: Array<'감성적' | '실용적' | '캐주얼'> = ['감성적', '실용적', '캐주얼'];
 
   // ★ 2026-08-02 (Codex 1R·4R) — 지어낸 혜택은 기계로 막는다. 프롬프트는 경계가 아니다.
   //   ⛔ 근거는 **사람이 쓴 원본 본문 하나뿐**이다. 목적 문장·앞 스텝은 근거가 아니다 —
   //     "30% 행사를 알리고 싶다"는 말이 AI에게 그 숫자를 문안에 렌더링할 면허는 아니다(혜택은 사용자가 편집기에서 쓴다).
   //     생성 모드는 원본이 없으므로 구체 혜택이 전부 placeholder가 된다 = 의도한 동작.
-  const candidates: StepRefineCandidate[] = raw.slice(0, 3).map((c: any) => {
+  // 절단은 위(raw)에서 요청한 수만큼 이미 끝났다 — 여기서 다시 3으로 자르면 그 계약이 무의미해진다.
+  const candidates: StepRefineCandidate[] = raw.map((c: any) => {
     const rawMsg = String(c.message || '').slice(0, maxBytes * 2);
     // ★ D187-fix5: refine 응답도 sanitize 자동 적용
     const san = sanitizeForSms(rawMsg);

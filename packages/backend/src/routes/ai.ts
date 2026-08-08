@@ -4360,8 +4360,9 @@ router.get('/operator/journeys-callback-numbers', async (req: Request, res: Resp
   }
 });
 
-// POST /api/ai/operator/journeys-refine-step — AI 문안 다듬기 (3 톤 후보 — 감성/실용/캐주얼)
-//   D187-fix3: refineDirectMessage → refineStepMessage (시즌 + 회사 메모리 + 3 톤 다양성)
+// POST /api/ai/operator/journeys-refine-step — AI 문안 다듬기
+//   D187-fix3: refineDirectMessage → refineStepMessage (시즌 + 회사 메모리 + 톤 다양성)
+//   ★ 2026-08-08: 후보 수는 호출부가 정한다 — `variants: 1`(스튜디오 = 비포/애프터 한 쌍) / 미지정 = 3안(날짜축 등 옛 흐름)
 router.post('/operator/journeys-refine-step', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -4374,7 +4375,7 @@ router.post('/operator/journeys-refine-step', async (req: Request, res: Response
     // ★ 2026-08-02 §13-3: 본문이 비어도 **여정 맥락이 있으면** 생성 모드로 간다.
     //   옛 흐름은 사람이 먼저 열 글자를 써야 AI를 부를 수 있었다(추가 입력 요구 = 1클릭 원칙 위반).
     //   맥락도 본문도 없을 때만 거절한다 — 지어낼 근거가 없기 때문이다.
-    const { message, channel, isAd, stepIntent, journey } = req.body || {};
+    const { message, channel, isAd, stepIntent, journey, variants } = req.body || {};
     const body = message != null ? String(message) : '';
     const jc = journey && typeof journey === 'object' ? journey : undefined;
     const hasContext = !!jc && (!!jc.triggerLabel || !!jc.objective || (Array.isArray(jc.previousMessages) && jc.previousMessages.length > 0));
@@ -4388,6 +4389,8 @@ router.post('/operator/journeys-refine-step', async (req: Request, res: Response
       channel: ch,
       isAd: isAd !== false,
       stepIntent: stepIntent ? String(stepIntent) : undefined,
+      // ★ 2026-08-08 — 화면이 비포/애프터 한 쌍으로 보여 주면 안은 하나면 된다. 미지정이면 옛 흐름(3안).
+      variants: Number(variants) === 1 ? 1 : 3,
       journey: jc
         ? {
             triggerLabel: jc.triggerLabel ? String(jc.triggerLabel).slice(0, 100) : undefined,

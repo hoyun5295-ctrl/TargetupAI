@@ -31,7 +31,10 @@ import { generateJourneyPackage } from './journey-ai-generator';
 import { editJourneyPackage } from './journey-ai-editor';
 import { BENEFIT_PLACEHOLDER } from './copy-benefit-detector';
 // 프론트 규약을 **실제 import**로 대조한다 — 문자열 grep은 형태가 조금만 달라도 통과한다.
-import { hasBenefitPlaceholder, fillBenefitPlaceholders } from '../../../frontend/src/utils/benefit-placeholder';
+import {
+  hasBenefitPlaceholder, fillBenefitPlaceholders,
+  hasUrlPlaceholder, fillUrlPlaceholders, isSendableUrl,
+} from '../../../frontend/src/utils/message-placeholders';
 
 const ai = callAIWithFallback as unknown as ReturnType<typeof vi.fn>;
 const COMPANY_ID = '11111111-1111-1111-1111-111111111111';
@@ -222,5 +225,37 @@ describe('프론트 치환 규약 ↔ 백엔드 차단기 (실값 대조)', () =
   it('치환된 본문은 활성화 게이트를 통과할 형태다 (placeholder 잔존 0)', () => {
     const out = fillBenefitPlaceholders(`본문 ${BENEFIT_PLACEHOLDER} 끝`, '5,000원 적립');
     expect(hasBenefitPlaceholder(out)).toBe(false);
+  });
+});
+
+/**
+ * ★ 2026-08-08 (Harold 접수) — 혜택만 값으로 받고 링크는 손으로 고치게 두면 반쪽이다.
+ *   `[URL 입력]`은 생성기 프롬프트가 심는 고정 표기다(같은 축·같은 처방).
+ */
+describe('링크 placeholder — 혜택과 같은 규약', () => {
+  it('생성기가 심는 표기를 알아본다', () => {
+    expect(hasUrlPlaceholder('자세히 → [URL 입력]')).toBe(true);
+    expect(hasUrlPlaceholder('자세히 → [ url 입력 ]'), '공백·대소문자만 관용').toBe(true);
+  });
+
+  it('혜택 placeholder와 서로를 건드리지 않는다', () => {
+    expect(hasUrlPlaceholder(BENEFIT_PLACEHOLDER)).toBe(false);
+    expect(hasBenefitPlaceholder('[URL 입력]')).toBe(false);
+    expect(fillUrlPlaceholders(BENEFIT_PLACEHOLDER, 'https://a.com')).toBe(BENEFIT_PLACEHOLDER);
+    expect(fillBenefitPlaceholders('[URL 입력]', '10% 쿠폰')).toBe('[URL 입력]');
+  });
+
+  it('치환은 전 자리·원문 보존이다', () => {
+    const out = fillUrlPlaceholders('첫 링크 [URL 입력]\n두 번째 [URL 입력]', 'https://hanjul.ai/e/1');
+    expect(out).toBe('첫 링크 https://hanjul.ai/e/1\n두 번째 https://hanjul.ai/e/1');
+    expect(hasUrlPlaceholder(out)).toBe(false);
+  });
+
+  it('발송 가능한 주소만 받는다 — 스킴을 우리가 붙이지 않는다', () => {
+    expect(isSendableUrl('https://hanjul.ai/event')).toBe(true);
+    expect(isSendableUrl('http://hanjul.ai')).toBe(true);
+    expect(isSendableUrl('hanjul.ai'), '스킴 없는 값을 우리가 보정하면 의도와 다른 주소가 나갈 수 있다').toBe(false);
+    expect(isSendableUrl('https://주소 띄어쓰기')).toBe(false);
+    expect(isSendableUrl('')).toBe(false);
   });
 });

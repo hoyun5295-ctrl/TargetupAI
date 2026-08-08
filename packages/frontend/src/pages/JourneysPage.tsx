@@ -47,8 +47,11 @@ import SpamFilterTestModal from '../components/SpamFilterTestModal';
 import InfoAlertJourneyBuilder, { type InfoAlertBuildResult } from '../components/journey/InfoAlertJourneyBuilder';
 import DateAnchorJourneyBuilder, { type DateAnchorBuildResult } from '../components/journey/DateAnchorJourneyBuilder';
 import { TRIGGER_EVENTS } from '../utils/journey-trigger-catalog';
-// ★ 2026-08-08 — 혜택 placeholder 판정·치환 단일 정의(스튜디오 카드와 같은 규약).
-import { fillBenefitPlaceholders } from '../utils/benefit-placeholder';
+// ★ 2026-08-08 — 문안 placeholder(혜택·링크) 판정·치환 단일 정의(스튜디오 카드와 같은 규약).
+import { fillBenefitPlaceholders, fillUrlPlaceholders, isSendableUrl } from '../utils/message-placeholders';
+// ★ 2026-08-08 — 다듬기 결과는 비포/애프터로 본다. 하이라이트는 직접발송 모달과 같은 CT.
+import { highlightAdditions } from '../utils/text-diff';
+import { calculateSmsBytes } from '../utils/formatDate';
 import { buildAdMessageFront, buildAdSubjectFront } from '../utils/formatDate';
 import { detectLiquidSyntax, renderLiquid, flattenCustomerForLiquid, SAMPLE_CUSTOMERS } from '../utils/liquid-templating';
 // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 미리보기 컨트롤타워.
@@ -1333,6 +1336,9 @@ export default function JourneysPage() {
           isAd: step.isAd,
           stepIntent: step.stepIntent,
           journey: buildStepAiContext(idx),
+          // ★ 2026-08-08 (Harold 접수) — 화면이 비포/애프터 한 쌍이라 안은 하나면 된다.
+          //   3안을 만들어 둘을 버리는 것은 시간·토큰만 쓴다.
+          variants: 1,
         }),
       });
       const data = await res.json();
@@ -1382,6 +1388,35 @@ export default function JourneysPage() {
       })),
     });
     toast.success('혜택을 모든 스텝 문안에 넣었습니다.');
+  };
+
+  /**
+   * ★ 2026-08-08 (Harold 접수) — 링크도 값으로 받는다. `[URL 입력]`을 본문에서 손으로 고치게 하지 않는다.
+   *   ⛔ 스킴을 우리가 붙여 주지 않는다 — 틀린 주소는 발송 뒤에 되돌릴 수 없다. 형식이 아니면 넣지 않고 알린다.
+   */
+  const handleFillUrl = (url: string) => {
+    if (!aiPkg) return;
+    const value = url.trim();
+    if (!value) return;
+    if (!isSendableUrl(value)) {
+      toast.warning('링크는 https:// 로 시작하는 주소로 넣어 주세요.');
+      return;
+    }
+    // 제목 50자 상한 — 혜택과 같은 규약(넘치면 아무것도 바꾸지 않고 알린다).
+    const overStep = aiPkg.steps.find((s) => s.subject && fillUrlPlaceholders(s.subject, value).length > 50);
+    if (overStep) {
+      toast.warning(`스텝 ${overStep.stepOrder} 제목이 50자를 넘게 됩니다. 그 제목을 먼저 줄여 주세요.`);
+      return;
+    }
+    setAiPkg({
+      ...aiPkg,
+      steps: aiPkg.steps.map((s) => ({
+        ...s,
+        messageTemplate: fillUrlPlaceholders(s.messageTemplate || '', value),
+        subject: s.subject ? fillUrlPlaceholders(s.subject, value) : s.subject,
+      })),
+    });
+    toast.success('링크를 모든 스텝 문안에 넣었습니다.');
   };
 
   // ════════ 저장 + 활성화 ════════
@@ -1521,15 +1556,17 @@ export default function JourneysPage() {
    *   변수는 회사 보유 컬럼(dataProfileVars)만 넘긴다 — 없는 컬럼을 넣으면 발송에서 빈칸이 된다.
    */
   const [studioDecorating, setStudioDecorating] = useState(false);
-  const handleStudioDecorate = async (idx: number) => {
+  // ★ 2026-08-08 (Harold 접수) — 사용자가 고른 컬럼만 넘긴다. 전체를 넘기면 AI가 아무 컬럼이나 골라 넣는다.
+  const handleStudioDecorate = async (idx: number, selectedTokens: string[]) => {
     if (!aiPkg) return;
     const step = aiPkg.steps[idx];
     const body = String(step.messageTemplate || '').trim();
     if (body.length < 5) { toast.warning('꾸밀 문안을 먼저 만들어 주세요. [AI 문안생성]을 눌러도 됩니다.'); return; }
     if (dataProfileVars.length === 0) { toast.warning('고객 데이터에 넣을 수 있는 항목이 아직 없어요.'); return; }
+    if (selectedTokens.length === 0) { toast.warning('넣을 컬럼을 1개 이상 골라 주세요.'); return; }
     setStudioDecorating(true);
     try {
-      const decorated = await handleAnchorDecorate(body, dataProfileVars.map((v) => v.token));
+      const decorated = await handleAnchorDecorate(body, selectedTokens);
       if (decorated) {
         updateStep(idx, { messageTemplate: decorated });
         toast.success('고객 정보를 문안에 녹였습니다.');
@@ -2671,6 +2708,7 @@ export default function JourneysPage() {
               index={Math.min(studioIdx, aiPkg.steps.length - 1)}
               maxSteps={7}
               variables={dataProfileVars.map((v) => v.token.replace(/%/g, ''))}
+              decorateVars={dataProfileVars}
               triggerLabel={triggerLabelOf(aiPkg.triggerEvent, aiPkg.templateCode)}
               objective={genObjective.trim() || undefined}
               aiBusy={refineLoading || studioDecorating}
@@ -2680,8 +2718,9 @@ export default function JourneysPage() {
               onAdd={() => { addStep(); setStudioIdx(aiPkg.steps.length); }}
               onDelete={(i) => deleteStep(i)}
               onAi={(i) => { void handleRefineOpen(i); }}
-              onDecorate={(i) => { void handleStudioDecorate(i); }}
+              onDecorate={(i, tokens) => { void handleStudioDecorate(i, tokens); }}
               onFillBenefit={handleFillBenefit}
+              onFillUrl={handleFillUrl}
               sampleCustomer={sampleCustomer}
               sampleCustomerFields={sampleCustomerFields}
               opt080Number={opt080Number}
@@ -3509,37 +3548,80 @@ export default function JourneysPage() {
       <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
 
       {/* AI 다듬기 modal */}
-      {refining && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border border-white/10 rounded-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="p-4 border-b border-white/10 flex items-center justify-between sticky top-0 bg-slate-900">
-              <h3 className="text-base font-semibold flex items-center gap-2"><Wand2 className="w-4 h-4 text-violet-400" />AI 다듬기 — 3 톤 후보</h3>
-              <button onClick={() => setRefining(null)} className="text-white/40 hover:text-white"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="p-4 space-y-3">
-              {refining.candidates.length === 0 ? (
-                <p className="text-sm text-white/60">생성된 후보가 없습니다.</p>
+      {/* ★ 2026-08-08 (Harold 접수) — 후보 나열을 없애고 **비포/애프터 한 쌍**으로 본다.
+          "3종은 의미가 없다 · 뭐가 바뀌었는지 보이게" — 직접발송 모달과 같은 규약(하이라이트 CT 공용). */}
+      {refining && (() => {
+        const cand = refining.candidates[0];
+        const before = String(aiPkg?.steps[refining.stepIdx]?.messageTemplate || '');
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+            <div className="max-h-[85vh] w-full max-w-4xl overflow-y-auto rounded-xl border border-white/10 bg-slate-900" onClick={(e) => e.stopPropagation()}>
+              <div className="sticky top-0 flex items-center justify-between border-b border-white/10 bg-slate-900 p-4">
+                <h3 className="flex items-center gap-2 text-base font-semibold">
+                  <Wand2 className="h-4 w-4 text-violet-400" />AI 다듬기
+                  {cand && <span className="text-[11px] font-normal text-white/40">바뀐 부분만 표시됩니다</span>}
+                </h3>
+                <button onClick={() => setRefining(null)} className="text-white/40 hover:text-white"><X className="h-5 w-5" /></button>
+              </div>
+
+              {!cand ? (
+                <div className="p-4"><p className="text-sm text-white/60">다듬은 결과가 없습니다. 다시 시도해 주세요.</p></div>
               ) : (
-                refining.candidates.map((c, i) => (
-                  <div key={i} className="p-3 bg-white/5 border border-white/10 rounded-lg">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
-                        c.tone === '감성적' ? 'bg-pink-500/20 text-pink-300' :
-                        c.tone === '실용적' ? 'bg-cyan-500/20 text-cyan-300' :
-                        'bg-emerald-500/20 text-emerald-300'
-                      }`}>{c.tone}</span>
-                      <span className="text-[10px] text-white/40">{c.bytes} bytes</span>
+                <div className="space-y-3 p-4">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {/* 비포 — 지금 문안 */}
+                    <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                      <div className="mb-2 flex items-center gap-2">
+                        <span className="rounded bg-white/10 px-2 py-0.5 text-[10px] font-medium text-white/60">지금 문안</span>
+                        <span className="text-[10px] text-white/35">{calculateSmsBytes(buildAdMessageFront(before, String(aiPkg?.steps[refining.stepIdx]?.channel || 'lms').toUpperCase(), aiPkg?.steps[refining.stepIdx]?.isAd !== false, opt080Number))} bytes</span>
+                      </div>
+                      <div className="whitespace-pre-wrap break-words font-mono text-[13px] leading-relaxed text-white/55">{before || '(비어 있음)'}</div>
                     </div>
-                    <div className="text-sm text-white/90 whitespace-pre-wrap mb-2 font-mono">{c.message}</div>
-                    {c.reasoning && <div className="text-[11px] text-white/40 mb-2">{c.reasoning}</div>}
-                    <button onClick={() => handleAcceptRefine(c)} className="px-3 py-1.5 bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 rounded text-xs">이 후보 적용</button>
+
+                    {/* 애프터 — 바뀐 부분 강조 */}
+                    <div className="rounded-lg border border-violet-400/40 bg-violet-500/10 p-3">
+                      <div className="mb-2 flex items-center gap-2">
+                        <span className="rounded bg-violet-500/30 px-2 py-0.5 text-[10px] font-medium text-violet-100">다듬은 문안</span>
+                        <span className="text-[10px] text-white/40">{cand.bytes} bytes</span>
+                        {cand.tone && <span className="text-[10px] text-white/35">{cand.tone} 톤</span>}
+                      </div>
+                      <div className="whitespace-pre-wrap break-words font-mono text-[13px] leading-relaxed text-white/90">
+                        {highlightAdditions(before, cand.message).map((chunk, i) => (
+                          chunk.added
+                            ? <mark key={i} className="rounded bg-violet-500/35 text-violet-50">{chunk.text}</mark>
+                            : <span key={i}>{chunk.text}</span>
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                ))
+
+                  {cand.reasoning && (
+                    <p className="rounded-lg border border-white/10 bg-slate-950/40 p-2.5 text-[11.5px] leading-relaxed text-white/55">{cand.reasoning}</p>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => handleAcceptRefine(cand)}
+                      className="rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 px-4 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+                    >
+                      이걸로 바꾸기
+                    </button>
+                    <button
+                      onClick={() => { const i = refining.stepIdx; setRefining(null); void handleRefineOpen(i); }}
+                      disabled={refineLoading}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-white/70 transition-colors hover:bg-white/5 disabled:opacity-50"
+                    >
+                      {refineLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} 다시 다듬기
+                    </button>
+                    <button onClick={() => setRefining(null)} className="px-3 py-2 text-xs text-white/45 hover:text-white/70">그대로 두기</button>
+                  </div>
+                  <p className="text-[10px] italic text-white/30">Data source — 지금 스텝 본문과 AI가 다듬은 안. 바이트는 (광고) 표기 포함 기준입니다.</p>
+                </div>
               )}
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* AI 생성 중 오버레이 */}
       {/* ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 6 sub-agent 진행 카드 매트릭스 (옛 단순 로딩 → AiOperatorPage 매트릭스 미러) */}
