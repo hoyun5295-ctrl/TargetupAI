@@ -91,6 +91,8 @@ export default function ImageStudioPage() {
   const [template, setTemplate] = useState<StudioTemplatePublic | null>(null);
   // ★ 2026-07-31 트랙 축 — 제품 포스터(누끼) / 행사 포스터(멤버십데이·오픈·시즌 행사, 제품 없이 성립)
   const [trackKind, setTrackKind] = useState<'product' | 'event'>('product');
+  // ★ 2026-08-09 행사 포스터 문구 위치(위/중앙/아래) — 기본 중앙(Harold 확정). 제품 포스터는 템플릿 기본 배치 유지라 미전달.
+  const [textPosition, setTextPosition] = useState<'top' | 'center' | 'bottom'>('center');
 
   // 내 라이브러리(저장 소재) — 갤러리 상단 폴더. 소재 클릭 = 채널 발사대(인앱/DM/이메일/MMS 변환).
   const [assetAction, setAssetAction] = useState<{ id: string; url: string; filename: string | null; bytes: number; channelSpec?: string | null } | null>(null);
@@ -229,6 +231,7 @@ export default function ImageStudioPage() {
       const { r, d } = await postJson('/api/image-studio/generate', {
         templateId: template.id, presetKey: useKey,
         texts, userHint: hint || null, cutoutTempId,
+        textPosition: (template.kind || 'product') === 'event' ? textPosition : null,
       });
       if (r.status === 402) { toast.error('크레딧이 부족합니다 — 충전 후 다시 시도해주세요'); return; }
       if (r.status === 409) { toast.error(d?.error || '다른 생성이 진행 중입니다'); return; }
@@ -492,6 +495,14 @@ export default function ImageStudioPage() {
                 <input value={texts.label} onChange={(e) => setTexts({ ...texts, label: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '작은 라벨 (예: MEMBERSHIP DAY)' : '작은 라벨 (예: ONLINE EXCLUSIVE)'} className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
                 <input value={texts.title} onChange={(e) => setTexts({ ...texts, title: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '행사명 (예: 멤버십 데이)' : '헤드라인 (예: 제품명 30% 할인 · 2+1 이벤트)'} className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-sm font-semibold text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
                 <input value={texts.subtitle} onChange={(e) => setTexts({ ...texts, subtitle: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '안내 문구 (예: 행사 기간·안내를 적어주세요)' : '부제 (예: 한정 수량 특별 혜택)'} className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
+                {(template.kind || 'product') === 'event' && (
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <span className="text-[11px] text-white/45">문구 위치</span>
+                    {([['top', '위'], ['center', '중앙'], ['bottom', '아래']] as const).map(([k, lbl]) => (
+                      <button key={k} onClick={() => setTextPosition(k)} className={`px-3 py-1.5 rounded-full border text-[11px] transition ${textPosition === k ? 'border-fuchsia-400/60 bg-fuchsia-500/15 text-fuchsia-200 font-semibold' : 'border-white/10 bg-white/5 text-white/50 hover:border-white/25'}`}>{lbl}</button>
+                    ))}
+                  </div>
+                )}
                 <p className="text-[10px] text-white/35 italic">입력한 문구 그대로 이미지 안에 고급 타이포로 새겨집니다. 혜택·수치는 직접 입력해주세요.</p>
               </div>
 

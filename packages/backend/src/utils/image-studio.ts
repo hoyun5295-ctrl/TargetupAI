@@ -178,6 +178,8 @@ export function buildPosterPrompt(input: {
   texts: PosterTexts;
   userHint?: string | null;
   hasProduct: boolean;
+  /** ★ 2026-08-09 문구 위치(위/중앙/아래) — 지정 시 템플릿 textStyle의 배치 문구보다 우선. 미지정 = 템플릿 기본(예시 배치도 미지정). */
+  textPosition?: 'top' | 'center' | 'bottom' | null;
   now?: Date;
 }): string {
   const { template, preset, texts } = input;
@@ -213,6 +215,13 @@ export function buildPosterPrompt(input: {
     lines.push('Render the following marketing copy INTO the image as part of the design, in polished native-quality Korean typography (correct spelling, exact characters):');
     lines.push(given.join('\n'));
     lines.push(`Typography direction: ${template.textStyle}`);
+    // ★ 2026-08-09 문구 위치 오버라이드 — 행사 포스터 위/중앙/아래 선택(라우트가 화이트리스트 검증 후 전달)
+    if (input.textPosition) {
+      const pos = input.textPosition === 'top' ? 'in the upper third of the poster'
+        : input.textPosition === 'center' ? 'at the vertical center of the poster, as a fully centered composition'
+        : 'in the lower third of the poster';
+      lines.push(`Text block placement: place the entire text block ${pos} — this placement overrides any placement mentioned in the typography direction above.${input.hasProduct ? ' Keep the text block clear of the attached product.' : ''}`);
+    }
   } else {
     lines.push('This poster has no text — pure visual composition with space that could hold a headline.');
   }

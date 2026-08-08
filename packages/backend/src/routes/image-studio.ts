@@ -164,7 +164,7 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
   if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
   if (!isStudioReady()) return respondStudioError(res, new StudioError('STUDIO_NOT_READY', 503));
 
-  const { templateId, presetKey, userHint, texts, cutoutTempId } = req.body || {};
+  const { templateId, presetKey, userHint, texts, cutoutTempId, textPosition } = req.body || {};
   const template = getTemplate(String(templateId || ''));
   if (!template) return res.status(400).json({ success: false, error: '템플릿을 선택해주세요.' });
   const preset = resolvePreset(presetKey);
@@ -193,11 +193,14 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
     }
 
     const benefitInHint = hasBenefitPattern(userHint);
+    // ★ 2026-08-09 문구 위치(행사 포스터 위/중앙/아래) — 화이트리스트 밖 값은 무시(템플릿 기본 배치)
+    const textPos = textPosition === 'top' || textPosition === 'center' || textPosition === 'bottom' ? textPosition : null;
     const prompt = buildPosterPrompt({
       template, preset,
       texts: { label: texts?.label, title: texts?.title, subtitle: texts?.subtitle },
       userHint: benefitInHint ? null : userHint,
       hasProduct: !!cutout,
+      textPosition: textPos,
     });
 
     // ★ 2026-07-30 1장 생성 (Harold 확정) — 옛 후보 2장은 같은 prompt·preset 무작위 2회 호출이라 레시피 차이가 없었다.
