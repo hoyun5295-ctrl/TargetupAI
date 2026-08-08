@@ -17,7 +17,9 @@
 //   kind='event' 카테고리 4종 신설. 기존 7종 = 제품 트랙(kind 생략 = 'product').
 export type TemplateCategory =
   | '뷰티' | '카페·음료' | '신메뉴·팝' | '세일·이벤트' | '패션' | '미니멀' | '시즌'
-  | '멤버십·고객감사' | '오픈·기념일' | '시즌·명절 행사' | '팝업·페스티벌';
+  | '멤버십·고객감사' | '오픈·기념일' | '시즌·명절 행사' | '팝업·페스티벌'
+  // ★ 2026-08-09 행사 트랙 카테고리 2종 신설(Harold) — 연중 데이 마케팅 + 참여형 클래스 행사
+  | '데이·기념일' | '클래스·체험';
 
 export interface StudioTemplate {
   id: string;
@@ -1254,6 +1256,259 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
     textStyle: 'Show-bill typography — slim uppercase headline in cool white with wide tracking, tiny seat-number label. Credits-style placement in the upper area.',
     defaultTexts: { label: 'RUNWAY', title: '런웨이 나이트', subtitle: '단 하루의 쇼에 초대합니다' },
     sample: { title: '런웨이 나이트', subtitle: '단 하루의 쇼' },
+  },
+
+  // ══ ★ 2026-08-09(2) v8 행사 트랙 확장 (+30 = 173종·행사 64종) — 신설 데이·기념일 8 + 클래스·체험 8 + 기존 4 카테고리 보강 14 (Harold 지시) ══
+  // ── 데이·기념일 (신설 8) ──
+  {
+    id: 'event-day-valentine', name: '발렌타인 쇼콜라', category: '데이·기념일', kind: 'event',
+    desc: '딥초콜릿 드리즐·캔들라이트의 발렌타인 무드', accent: '#5c3a2e',
+    scaffold: 'A valentine chocolate event scene: dark couverture chocolate drizzle ribbons frozen mid-pour, heart-shaped bonbons dusted with cocoa on a slate board, deep brown backdrop with warm candlelight glow, a satin ribbon curl at the edge. Rich romantic indulgence, intimate and tempting.',
+    textStyle: 'Romantic typography — warm cream serif-feeling headline with a cocoa shadow, small heart-dot label. Intimate placement in the upper area.',
+    defaultTexts: { label: 'VALENTINE', title: '발렌타인 데이', subtitle: '달콤한 마음을 전하세요' },
+    sample: { title: '발렌타인 데이', subtitle: '달콤한 하루' },
+  },
+  {
+    id: 'event-day-whiteday', name: '화이트데이 캔디', category: '데이·기념일', kind: 'event',
+    desc: '파스텔 캔디 유리병·화이트 리본의 스윗 무드', accent: '#e8c9d4',
+    scaffold: 'A white day candy event scene: clear glass jars filled with pastel candies and lollipops, white satin ribbons, a bright airy sweet-shop counter in cream and blush tones, soft high-key daylight with a gentle sparkle. Light sugary cheerfulness, pure and sweet.',
+    textStyle: 'Sweet typography — soft rose headline with a candy-gloss feel, small ribbon label. Bright placement in the upper area.',
+    defaultTexts: { label: 'WHITE DAY', title: '화이트데이', subtitle: '설레는 답례를 준비했어요' },
+    sample: { title: '화이트데이', subtitle: '마음을 돌려드리는 날' },
+  },
+  {
+    id: 'event-day-carnation', name: '카네이션 데이', category: '데이·기념일', kind: 'event',
+    desc: '카네이션·크라프트 카드의 가정의 달 무드', accent: '#c94f5f',
+    scaffold: 'A family month carnation scene: fresh red and pink carnations wrapped in kraft paper, a handwritten-style blank card and twine on a warm wooden table, gentle afternoon sunlight, a folded ribbon. Grateful heartfelt family-month mood, sincere and warm.',
+    textStyle: 'Sincere typography — deep rose serif-feeling headline, handwritten-warmth small label. Calm placement in the upper area.',
+    defaultTexts: { label: '가정의 달', title: '가정의 달 이벤트', subtitle: '감사한 마음을 전해요' },
+    sample: { title: '가정의 달', subtitle: '고마운 마음을 꽃에 담아' },
+  },
+  {
+    id: 'event-day-children', name: '어린이날 파티', category: '데이·기념일', kind: 'event',
+    desc: '동물 풍선·원색 블록의 어린이날 무드', accent: '#f2a93c',
+    scaffold: 'A children day party scene: cheerful balloon animals in primary colors, wooden toy blocks and a spinning pinwheel on a bright playful table, polka-dot garlands, sunny daylight with bouncy energy. Innocent joyful festivity, playful and bright.',
+    textStyle: 'Playful typography — chunky rounded headline in primary blue with a yellow shadow, crayon-feeling small label. Bouncy placement in the upper area.',
+    defaultTexts: { label: '어린이날', title: '어린이날 이벤트', subtitle: '아이들과 함께하는 하루' },
+    sample: { title: '어린이날 파티', subtitle: '신나는 하루 선물' },
+  },
+  {
+    id: 'event-day-newsemester', name: '신학기 스타트', category: '데이·기념일', kind: 'event',
+    desc: '노트·연필 플랫레이의 새 학기 무드', accent: '#e8b23c',
+    scaffold: 'A new semester scene: crisp notebooks, sharpened pencils and paper clips arranged in a tidy flat-lay on a fresh mint-cream desk, a yellow accent ruler, bright clean morning light. Fresh-start stationery energy, organized and hopeful.',
+    textStyle: 'Fresh typography — clean bold headline in deep navy, small notebook-tab label. Tidy placement in the upper area.',
+    defaultTexts: { label: '신학기', title: '신학기 준비', subtitle: '새 학기, 새 마음으로' },
+    sample: { title: '신학기 스타트', subtitle: '새 학기 준비 완료' },
+  },
+  {
+    id: 'event-day-suneung', name: '수능 응원', category: '데이·기념일', kind: 'event',
+    desc: '새벽 책상·찹쌀떡 선물의 수험생 응원 무드', accent: '#4a5a8a',
+    scaffold: 'An exam cheering scene: a quiet desk at dawn blue-hour with a warm study lamp glow, neatly stacked books, a small wrapped rice-cake good-luck gift with a ribbon, gentle steam from a warm tea cup. Heartfelt encouragement before the big day, calm and supportive.',
+    textStyle: 'Encouraging typography — warm ivory headline glowing against the dawn blue, small cheering-flag label. Steady placement in the upper area.',
+    defaultTexts: { label: '수능 응원', title: '수험생 응원 이벤트', subtitle: '그동안의 노력을 응원합니다' },
+    sample: { title: '수험생 응원', subtitle: '마지막까지 함께합니다' },
+  },
+  {
+    id: 'event-day-halloween', name: '핼러윈 파티', category: '데이·기념일', kind: 'event',
+    desc: '보라 밤 실내·호박 랜턴·캔들의 파티 무드', accent: '#7a4fc9',
+    scaffold: 'A halloween party interior scene: a moody violet-lit room with carved pumpkin lanterns glowing warm, dripping candles in vintage holders, gauzy cobweb decor and dark autumn foliage on a table, cinematic purple-orange contrast. Spooky-chic party atmosphere, stylish rather than scary.',
+    textStyle: 'Halloween typography — pumpkin-orange headline with a wavering candlelight feel, small bat-wing label. Dramatic placement in the upper area.',
+    defaultTexts: { label: 'HALLOWEEN', title: '핼러윈 파티', subtitle: '으스스한 밤을 함께' },
+    sample: { title: '핼러윈 나이트', subtitle: '한 해 가장 짜릿한 밤' },
+  },
+  {
+    id: 'event-day-roseday', name: '로즈 데이', category: '데이·기념일', kind: 'event',
+    desc: '딥레드 장미·다크 로맨틱의 로즈 데이 무드', accent: '#a8324a',
+    scaffold: 'A rose day scene: a lush bouquet of deep crimson roses in close-up, velvet-dark backdrop with a single warm rim light tracing the petals, scattered petals and a thin gold thread ribbon. Intense romantic elegance, passionate and luxurious.',
+    textStyle: 'Passionate typography — champagne-white serif-feeling headline over the dark field, petal-small label. Elegant placement in the upper area.',
+    defaultTexts: { label: 'ROSE DAY', title: '로즈 데이', subtitle: '마음을 꽃으로 전하는 날' },
+    sample: { title: '로즈 데이', subtitle: '오늘, 장미처럼' },
+  },
+
+  // ── 클래스·체험 (신설 8) ──
+  {
+    id: 'event-class-craft', name: '원데이 공방', category: '클래스·체험', kind: 'event',
+    desc: '가죽·목공 도구 작업대의 공방 클래스 무드', accent: '#8a6f52',
+    scaffold: 'A one-day craft workshop scene: a warm wooden workbench with leatherworking and woodworking hand tools neatly laid out, curled wood shavings and leather swatches, an apron hanging at the edge, honest window daylight. Hands-on maker atmosphere, focused and inviting.',
+    textStyle: 'Workshop typography — sturdy medium headline in dark walnut, stamped-tag small label. Grounded placement in the upper area.',
+    defaultTexts: { label: 'ONE-DAY CLASS', title: '원데이 클래스', subtitle: '나만의 것을 만드는 시간' },
+    sample: { title: '원데이 클래스', subtitle: '손끝에서 완성되는 하루' },
+  },
+  {
+    id: 'event-class-baking', name: '베이킹 클래스', category: '클래스·체험', kind: 'event',
+    desc: '밀가루·반죽·오븐 온기의 베이킹 무드', accent: '#d9a97a',
+    scaffold: 'A baking class scene: a marble counter dusted with flour, dough being rolled with a wooden pin, whisks and measuring cups nearby, warm oven glow in the soft background, a linen apron. Warm floury hands-on joy, delicious anticipation.',
+    textStyle: 'Cozy typography — warm brown rounded headline like a bakery sign, flour-dust small label. Homey placement in the upper area.',
+    defaultTexts: { label: 'BAKING CLASS', title: '베이킹 클래스', subtitle: '갓 구운 행복을 만들어요' },
+    sample: { title: '베이킹 클래스', subtitle: '오늘은 내가 파티시에' },
+  },
+  {
+    id: 'event-class-coffee', name: '커피 브루잉 클래스', category: '클래스·체험', kind: 'event',
+    desc: '핸드드립 기구·저울·김의 브루잉 무드', accent: '#6f4a35',
+    scaffold: 'A coffee brewing class scene: a hand-drip station with a gooseneck kettle mid-pour, glass dripper blooming with fresh grounds, a precision scale and cupping spoons, rising aroma steam in warm cafe light. Craft barista focus, aromatic and precise.',
+    textStyle: 'Barista typography — confident medium headline in espresso brown, small tasting-note label. Precise placement in the upper area.',
+    defaultTexts: { label: 'BREWING CLASS', title: '커피 클래스', subtitle: '한 잔의 깊이를 배워요' },
+    sample: { title: '커피 브루잉 클래스', subtitle: '내 손으로 내리는 한 잔' },
+  },
+  {
+    id: 'event-class-wine', name: '와인 테이스팅', category: '클래스·체험', kind: 'event',
+    desc: '보틀·코르크·테이블 세팅의 테이스팅 무드', accent: '#6e2f3f',
+    scaffold: 'A wine tasting scene: an elegant table setting with several wine bottles and corks, a tasting placemat with empty glasses arranged in a row, grapes and cheese board accents, low warm evening light in deep burgundy tones. Refined social tasting night, cultured and convivial.',
+    textStyle: 'Sommelier typography — refined serif-feeling headline in cream, small cork-stamp label. Composed placement in the upper area.',
+    defaultTexts: { label: 'TASTING', title: '와인 테이스팅', subtitle: '취향을 찾아가는 저녁' },
+    sample: { title: '와인 테이스팅 나이트', subtitle: '한 모금의 여행' },
+  },
+  {
+    id: 'event-class-beauty', name: '뷰티 클래스', category: '클래스·체험', kind: 'event',
+    desc: '데모 테이블·브러시 세팅의 뷰티 클래스 무드', accent: '#c97a8f',
+    scaffold: 'A beauty class scene: a clean demo table set with brush rolls, palettes and small mirrors at each seat, soft ring-light glow, blush-toned backdrop, a tidy row of cotton pads and swatch cards. Learn-together beauty session, polished and welcoming.',
+    textStyle: 'Chic typography — rose-brown modern headline, small lesson-card label. Neat placement in the upper area.',
+    defaultTexts: { label: 'BEAUTY CLASS', title: '뷰티 클래스', subtitle: '나에게 맞는 메이크업 찾기' },
+    sample: { title: '뷰티 클래스', subtitle: '오늘부터 셀프 메이크업' },
+  },
+  {
+    id: 'event-class-flower', name: '플라워 클래스', category: '클래스·체험', kind: 'event',
+    desc: '꽃 재료·크라프트지·가위의 플라워 무드', accent: '#b06a7a',
+    scaffold: 'A flower arrangement class scene: fresh seasonal stems spread across kraft paper, floral scissors and twine, a half-finished hand-tied bouquet, petals and leaf trimmings scattered naturally, soft greenhouse daylight. Creative floral immersion, fragrant and serene.',
+    textStyle: 'Botanical typography — deep moss-rose headline with organic softness, small stem-tag label. Natural placement in the upper area.',
+    defaultTexts: { label: 'FLOWER CLASS', title: '플라워 클래스', subtitle: '꽃과 보내는 특별한 시간' },
+    sample: { title: '플라워 클래스', subtitle: '꽃으로 완성하는 오후' },
+  },
+  {
+    id: 'event-class-wellness', name: '웰니스 클래스', category: '클래스·체험', kind: 'event',
+    desc: '요가매트·아침빛·세이지의 웰니스 무드', accent: '#8a9a7a',
+    scaffold: 'A wellness class scene: rolled yoga mats in calm sage tones on a warm wooden floor, morning sunlight streaming through sheer curtains, a small singing bowl and folded towels, one leafy plant. Mindful breathing space, serene and restorative.',
+    textStyle: 'Mindful typography — light sage-gray headline with generous spacing, breath-soft small label. Tranquil placement in the upper area.',
+    defaultTexts: { label: 'WELLNESS', title: '웰니스 클래스', subtitle: '몸과 마음의 균형 찾기' },
+    sample: { title: '웰니스 클래스', subtitle: '숨 고르는 시간' },
+  },
+  {
+    id: 'event-class-kids', name: '키즈 클래스', category: '클래스·체험', kind: 'event',
+    desc: '원색 크래프트·크레용의 키즈 클래스 무드', accent: '#e8853c',
+    scaffold: 'A kids class scene: a bright craft table scattered with crayons, colored paper shapes and safety scissors, small paint-dipped hands artwork drying on a line, cheerful primary-color stools, sunny classroom light. Creative little-hands energy, joyful and safe.',
+    textStyle: 'Crayon typography — friendly rounded headline in bright blue with hand-drawn charm, small doodle-star label. Cheerful placement in the upper area.',
+    defaultTexts: { label: 'KIDS CLASS', title: '키즈 클래스', subtitle: '아이의 상상력이 자라는 시간' },
+    sample: { title: '키즈 클래스', subtitle: '우리 아이 첫 작품' },
+  },
+
+  // ── 멤버십·고객감사 (+3) ──
+  {
+    id: 'event-mem-thankletter', name: '땡큐 레터', category: '멤버십·고객감사', kind: 'event',
+    desc: '손편지·실링왁스·만년필의 감사 무드', accent: '#a5794f',
+    scaffold: 'A thank-you letter scene: an elegant handwritten-style blank letter sheet on a warm desk, a fountain pen resting beside a wax seal stamp and melted sealing wax, dried flower sprigs and soft lamp light. Personal gratitude mood, intimate and timeless.',
+    textStyle: 'Letter typography — ink-brown serif-feeling headline with a handwritten warmth, small wax-seal label. Personal placement in the upper area.',
+    defaultTexts: { label: 'THANK YOU', title: '감사의 편지', subtitle: '진심을 담아 전합니다' },
+    sample: { title: '땡큐 레터', subtitle: '고객님께 드리는 진심' },
+  },
+  {
+    id: 'event-mem-award', name: '리뷰어 어워드', category: '멤버십·고객감사', kind: 'event',
+    desc: '골드 트로피·별 스파클의 시상 무드', accent: '#c9a53c',
+    scaffold: 'A customer award scene: a gleaming golden trophy on a dark stage pedestal, star-shaped light sparkles drifting around, a soft spotlight beam from above, deep charcoal backdrop with subtle curtain texture. Honoring-our-best celebration, prestigious and proud.',
+    textStyle: 'Award typography — gold headline with engraved elegance, small star label. Ceremonial placement in the upper area.',
+    defaultTexts: { label: 'AWARDS', title: '베스트 리뷰어 어워드', subtitle: '소중한 후기를 기념합니다' },
+    sample: { title: '리뷰어 어워드', subtitle: '당신의 한마디를 기념해요' },
+  },
+  {
+    id: 'event-mem-welcomekit', name: '웰컴 키트', category: '멤버십·고객감사', kind: 'event',
+    desc: '열린 박스·티슈페이퍼 언박싱의 환영 무드', accent: '#7a9a8a',
+    scaffold: 'A welcome kit unboxing scene: an open gift box with soft tissue paper unfolding, a neatly arranged starter kit of small unmarked pouches and cards inside, a thin ribbon just untied, clean bright tabletop with gentle shadows. First-meeting delight, fresh and thoughtful.',
+    textStyle: 'Welcoming typography — friendly medium headline in deep teal, small tag label. Open placement in the upper area.',
+    defaultTexts: { label: 'WELCOME', title: '웰컴 키트', subtitle: '첫 만남을 환영합니다' },
+    sample: { title: '웰컴 키트', subtitle: '만나서 반가워요' },
+  },
+
+  // ── 오픈·기념일 (+3) ──
+  {
+    id: 'event-open-comingsoon', name: '커밍순 티저', category: '오픈·기념일', kind: 'event',
+    desc: '종이로 가린 쇼윈도·새어 나오는 빛의 티저 무드', accent: '#8a8578',
+    scaffold: 'A coming-soon teaser scene: a storefront window covered with clean kraft paper from inside, a single warm light glowing through the seams, subtle silhouettes of shapes behind the paper, dusk street reflections on the glass. Curiosity-building anticipation, understated and intriguing.',
+    textStyle: 'Teaser typography — stencil-feeling headline in warm charcoal, small masking-tape label. Mysterious placement in the upper area.',
+    defaultTexts: { label: 'COMING SOON', title: '커밍순', subtitle: '곧 공개됩니다' },
+    sample: { title: '커밍순', subtitle: '곧, 만나요' },
+  },
+  {
+    id: 'event-open-moving', name: '무빙 데이', category: '오픈·기념일', kind: 'event',
+    desc: '이사 박스·새 열쇠의 확장 이전 무드', accent: '#b08a5f',
+    scaffold: 'A moving day scene: neatly stacked kraft moving boxes tied with twine, a shiny new key with a tag resting on top, a sunlit empty new space with fresh white walls behind, one potted plant ready to be placed. New-chapter relocation mood, hopeful and fresh.',
+    textStyle: 'Fresh-start typography — clean warm headline in deep brown, small key-tag label. Optimistic placement in the upper area.',
+    defaultTexts: { label: 'MOVING', title: '확장 이전 오픈', subtitle: '더 넓은 공간에서 만나요' },
+    sample: { title: '무빙 데이', subtitle: '새 보금자리로 이사했어요' },
+  },
+  {
+    id: 'event-open-branch', name: '뉴 브랜치', category: '오픈·기념일', kind: 'event',
+    desc: '지도·핀·깃발의 신규 지점 오픈 무드', accent: '#4f7ab0',
+    scaffold: 'A new branch opening scene: a stylized paper map spread on a desk with a bold location pin standing tall, a small celebratory flag beside it, compass and route-line motifs, bright optimistic daylight. Expanding-territory excitement, adventurous and proud.',
+    textStyle: 'Map typography — confident bold headline in deep blue, small pin-shaped label. Expedition placement in the upper area.',
+    defaultTexts: { label: 'NEW BRANCH', title: '신규 지점 오픈', subtitle: '가까운 곳에서 만나요' },
+    sample: { title: '뉴 브랜치 오픈', subtitle: '우리 동네에 생겼어요' },
+  },
+
+  // ── 시즌·명절 행사 (+4) ──
+  {
+    id: 'event-season-chuseok', name: '추석 보름달', category: '시즌·명절 행사', kind: 'event',
+    desc: '보름달·한옥 지붕선·송편의 한가위 무드', accent: '#c9973c',
+    scaffold: 'A chuseok full moon scene: a large golden harvest moon rising over the graceful curve of a hanok tiled roofline, half-moon rice cakes on a small wooden tray, a soft paper lantern glow, deep indigo night sky. Abundant harvest-night serenity, warm and reverent.',
+    textStyle: 'Moonlit typography — warm gold headline with a gentle glow, small lantern label. Placed in the night sky of the upper area.',
+    defaultTexts: { label: '한가위', title: '추석 인사', subtitle: '풍요로운 한가위 보내세요' },
+    sample: { title: '추석 인사', subtitle: '보름달처럼 넉넉하게' },
+  },
+  {
+    id: 'event-season-sunrise', name: '새해 해맞이', category: '시즌·명절 행사', kind: 'event',
+    desc: '첫 일출 바다·붉은 태양의 새해 무드', accent: '#d96a3f',
+    scaffold: 'A new year sunrise scene: the first sun rising over a calm sea horizon, vivid orange-red glow spreading across gentle waves, silhouetted gulls in the brightening sky, a long golden light path on the water. First-sunrise hope, powerful and serene.',
+    textStyle: 'Sunrise typography — radiant white headline against the glowing sky, small sun-disc label. Horizon placement in the upper area.',
+    defaultTexts: { label: 'NEW YEAR', title: '새해 인사', subtitle: '새해 복 많이 받으세요' },
+    sample: { title: '새해 해맞이', subtitle: '첫 해처럼 빛나는 한 해' },
+  },
+  {
+    id: 'event-season-xmaseve', name: '크리스마스 이브', category: '시즌·명절 행사', kind: 'event',
+    desc: '벽난로·트리 아래 선물의 이브 무드', accent: '#8a3f3f',
+    scaffold: 'A christmas eve scene: a warm fireplace glow with knitted stockings hanging from the mantel, wrapped gifts tucked beneath the lower branches of a tree, a mug of cocoa with marshmallows on a side table, deep cozy shadows. Silent-night warmth, homey and magical.',
+    textStyle: 'Holiday typography — cream headline with a fireplace warmth, small stocking label. Cozy placement in the upper area.',
+    defaultTexts: { label: 'CHRISTMAS EVE', title: '크리스마스 이브', subtitle: '따뜻한 밤을 함께 보내요' },
+    sample: { title: '크리스마스 이브', subtitle: '고요한 밤의 온기' },
+  },
+  {
+    id: 'event-season-boknal', name: '복날 위크', category: '시즌·명절 행사', kind: 'event',
+    desc: '뚝배기 김·부채의 한여름 보양 무드', accent: '#b0713f',
+    scaffold: 'A boknal vitality scene: a rustic earthenware pot with rich steam rising on a wooden table, a traditional round fan and a cool ramie cloth beside it, bright midsummer light through a bamboo blind. Midsummer-nourishment tradition, hearty and restorative.',
+    textStyle: 'Hearty typography — deep umber brush-feeling headline, small fan-shaped label. Robust placement in the upper area.',
+    defaultTexts: { label: '복날', title: '복날 보양 위크', subtitle: '더위에 지친 몸을 채워요' },
+    sample: { title: '복날 위크', subtitle: '올여름 든든하게' },
+  },
+
+  // ── 팝업·페스티벌 (+4) ──
+  {
+    id: 'event-pop-foodtruck', name: '푸드트럭 나이트', category: '팝업·페스티벌', kind: 'event',
+    desc: '푸드트럭·야시장 조명의 스트리트 푸드 무드', accent: '#d97a3c',
+    scaffold: 'A food truck night scene: a charming vintage food truck with warm serving-window glow, festoon lights strung to nearby posts, rising grill smoke catching the light, wooden crates and stools in a twilight lot. Street-food evening buzz, casual and mouthwatering.',
+    textStyle: 'Street-food typography — bold chalk-feeling headline in warm cream, small truck-badge label. Lively placement in the upper area.',
+    defaultTexts: { label: 'FOOD TRUCK', title: '푸드트럭 나이트', subtitle: '오늘 저녁, 야외에서 만나요' },
+    sample: { title: '푸드트럭 나이트', subtitle: '맛있는 밤이 열려요' },
+  },
+  {
+    id: 'event-pop-stamprally', name: '스탬프 랠리', category: '팝업·페스티벌', kind: 'event',
+    desc: '지도·스탬프 카드의 미션 참여 무드', accent: '#4f8ab0',
+    scaffold: 'A stamp rally scene: an illustrated adventure map unrolled on a table with dotted route lines connecting landmark icons, wooden stamps and a red ink pad, a blank passport-style booklet, playful daylight. Mission-quest excitement, interactive and fun.',
+    textStyle: 'Quest typography — adventurous bold headline in deep blue, small stamp-circle label. Treasure-map placement in the upper area.',
+    defaultTexts: { label: 'STAMP RALLY', title: '스탬프 랠리', subtitle: '모으는 재미가 있어요' },
+    sample: { title: '스탬프 랠리', subtitle: '미션을 완성해 보세요' },
+  },
+  {
+    id: 'event-pop-cinema', name: '오픈에어 시네마', category: '팝업·페스티벌', kind: 'event',
+    desc: '야외 스크린·빈백·별빛의 상영회 무드', accent: '#3f4f6e',
+    scaffold: 'An open-air cinema scene: a large white screen glowing softly at dusk in a grassy yard, rows of bean bags and low folding chairs, a vintage projector beam cutting through the evening air, string lights framing the space. Movie-night-under-the-stars romance, relaxed and dreamy.',
+    textStyle: 'Cinema typography — marquee-feeling headline in warm white, small ticket label. Screen-glow placement in the upper area.',
+    defaultTexts: { label: 'OPEN-AIR CINEMA', title: '야외 시네마', subtitle: '별빛 아래 영화 한 편' },
+    sample: { title: '오픈에어 시네마', subtitle: '오늘 밤, 야외 상영회' },
+  },
+  {
+    id: 'event-pop-camping', name: '캠핑 나이트', category: '팝업·페스티벌', kind: 'event',
+    desc: '텐트·랜턴·모닥불의 캠핑 무드', accent: '#5f7a52',
+    scaffold: 'A camping night scene: a glowing canvas tent among pine trees, a crackling campfire with drifting sparks, enamel mugs and a lantern on a log table, deep starry sky above. Firelight-gathering warmth, rustic and adventurous.',
+    textStyle: 'Campfire typography — warm amber headline with a rustic hand-carved feel, small lantern label. Woodsy placement in the upper area.',
+    defaultTexts: { label: 'CAMPING', title: '캠핑 나이트', subtitle: '자연 속 하룻밤' },
+    sample: { title: '캠핑 나이트', subtitle: '불멍과 함께하는 밤' },
   },
 ];
 
