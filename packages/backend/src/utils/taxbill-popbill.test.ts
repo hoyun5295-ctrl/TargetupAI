@@ -18,6 +18,8 @@ import {
   getPopbillConfig,
   isPopbillEnabled,
   selectTaxbillResendTargets,
+  selectTaxbillArchiveTargets,
+  enqueueTaxbillArchiveCopies,
   sendEmailAsync,
   enqueueTaxbillResendsForIssue,
   TAXBILL_SENDMAIL_TIMEOUT_MS,
@@ -500,5 +502,111 @@ describe('enqueueTaxbillResendsForIssue — issued 승격 계약', () => {
     expect(c.calls[0].sql).toContain('ON CONFLICT (taxbill_issue_id, lower(email)) DO NOTHING');
     expect(c.calls[0].params).toEqual(['issue-1', 'TU-1', 'a@x.co']);
     expect(c.calls[1].params).toEqual(['issue-1', 'TU-1', 'b@x.co']);
+  });
+});
+
+// ★ 2026-08-08 발행 메일 아카이브 참조(ENV TAXBILL_ARCHIVE_BCC) — 두 갈래 계약(§2-1):
+//   고객 참조 기록 실패 = 발행 확정 미룸(기존) / 아카이브 때문에는 절대 미루지 않는다.
+describe('selectTaxbillArchiveTargets — 아카이브 참조 대상(순수)', () => {
+  it('ENV 미설정·빈 값 = 빈 배열', () => {
+    expect(selectTaxbillArchiveTargets(undefined, [])).toEqual([]);
+    expect(selectTaxbillArchiveTargets(null, [])).toEqual([]);
+    expect(selectTaxbillArchiveTargets('  ', [])).toEqual([]);
+  });
+
+  it('쉼표·세미콜론·공백 구분 + 형식 무효 제외 + 제외 목록(대소문자 무시) 중복 제거', () => {
+    expect(
+      selectTaxbillArchiveTargets('Mobile@invitocorp.com, tax@invitocorp.com; not-an-email mobile@invitocorp.com', [
+        'MOBILE@invitocorp.com',
+      ]),
+    ).toEqual(['tax@invitocorp.com']);
+  });
+
+  it('대표·고객 참조와 겹치지 않으면 그대로 — 순서 보존', () => {
+    expect(selectTaxbillArchiveTargets('a@x.co,b@x.co', ['p@x.co', 'c@x.co'])).toEqual(['a@x.co', 'b@x.co']);
+  });
+});
+
+describe('enqueueTaxbillArchiveCopies — 확정 트랜잭션 밖 best-effort 계약', () => {
+  // ★ Codex 1R로 형태 확정 — 아카이브를 확정 트랜잭션 안(SAVEPOINT 격리)에 두면 복구 실패가 트랜잭션을
+  //   오염시키고(25P02), 아카이브 전용 카탈로그 조회 거절만으로 확정이 롤백된다. 그래서 COMMIT 뒤
+  //   자기 연결로 기록하고 **어떤 실패도 던지지 않는다**(로그가 복구 근거).
+  const fakeExec = () => {
+    const calls: { sql: string; params: any[] }[] = [];
+    return {
+      calls,
+      exec: async (sql: string, params?: any[]) => { calls.push({ sql, params: params || [] }); return { rows: [] }; },
+    };
+  };
+  const to = { primary: { email: 'p@x.co' }, cc: ['a@x.co'] };
+
+  it('ENV 미설정 = 0 — 카탈로그 조회도 INSERT도 없다(기존 동작과 1:1)', async () => {
+    const f = fakeExec();
+    let existsCalled = 0;
+    const n = await enqueueTaxbillArchiveCopies('issue-1', 'TU-1', to, {
+      archiveBcc: null, tableExists: async () => { existsCalled += 1; return true; }, exec: f.exec,
+    });
+    expect(n).toBe(0);
+    expect(existsCalled).toBe(0);
+    expect(f.calls).toHaveLength(0);
+  });
+
+  it('대상 있음 + 테이블 실존 = 멱등 INSERT + 대상 수 반환', async () => {
+    const f = fakeExec();
+    const n = await enqueueTaxbillArchiveCopies('issue-1', 'TU-1', to, {
+      archiveBcc: 'mobile@invitocorp.com', tableExists: async () => true, exec: f.exec,
+    });
+    expect(n).toBe(1);
+    expect(f.calls[0].sql).toContain('ON CONFLICT (taxbill_issue_id, lower(email)) DO NOTHING');
+    expect(f.calls[0].params).toEqual(['issue-1', 'TU-1', 'mobile@invitocorp.com']);
+  });
+
+  it('테이블 미생성 = throw 없이 0 — 발행 확정(이미 COMMIT)에 아무 영향이 없다', async () => {
+    const f = fakeExec();
+    const n = await enqueueTaxbillArchiveCopies('issue-1', 'TU-1', to, {
+      archiveBcc: 'mobile@invitocorp.com', tableExists: async () => false, exec: f.exec,
+    });
+    expect(n).toBe(0);
+    expect(f.calls).toHaveLength(0);
+  });
+
+  it('카탈로그 조회 거절(rejection) = throw 없이 0 — 아카이브 전용 조회가 발행 결과를 못 바꾼다', async () => {
+    const n = await enqueueTaxbillArchiveCopies('issue-1', 'TU-1', to, {
+      archiveBcc: 'mobile@invitocorp.com', tableExists: async () => { throw new Error('pool timeout'); },
+    });
+    expect(n).toBe(0);
+  });
+
+  it('INSERT 실패 = throw 없이 0(로그가 복구 근거) — best-effort', async () => {
+    const n = await enqueueTaxbillArchiveCopies('issue-1', 'TU-1', to, {
+      archiveBcc: 'mobile@invitocorp.com', tableExists: async () => true,
+      exec: async () => { throw new Error('varchar 초과 등 임의 실패'); },
+    });
+    expect(n).toBe(0);
+  });
+
+  it('부분 실패는 수신자별 격리 — 한 주소가 막혀도 뒤 주소는 계속 시도하고 성공 수를 돌려준다(Codex 2R medium)', async () => {
+    const tried: string[] = [];
+    const n = await enqueueTaxbillArchiveCopies('issue-1', 'TU-1', to, {
+      archiveBcc: 'x1@invitocorp.com, x2@invitocorp.com, x3@invitocorp.com',
+      tableExists: async () => true,
+      exec: async (_sql: string, params?: any[]) => {
+        const rcpt = (params || [])[2] as string;
+        tried.push(rcpt);
+        if (rcpt === 'x2@invitocorp.com') throw new Error('중간 실패');
+        return { rows: [] };
+      },
+    });
+    expect(tried).toEqual(['x1@invitocorp.com', 'x2@invitocorp.com', 'x3@invitocorp.com']);
+    expect(n).toBe(2);
+  });
+
+  it('대표·고객 참조와 겹치는 주소는 아카이브 축에서 제외 — 이중 발송 없음', async () => {
+    const f = fakeExec();
+    const n = await enqueueTaxbillArchiveCopies('issue-1', 'TU-1', to, {
+      archiveBcc: 'A@x.co, p@x.co, mobile@invitocorp.com', tableExists: async () => true, exec: f.exec,
+    });
+    expect(n).toBe(1);
+    expect(f.calls.map((q) => q.params[2])).toEqual(['mobile@invitocorp.com']);
   });
 });

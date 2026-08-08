@@ -20,7 +20,7 @@ import {
   publishDm, trackDmView, getDmStats, getDmRecipientEngagementRows,
   saveDmVersion, listDmVersions, restoreDmVersion, setApprovalStatus,
   extractFlatSectionsFromDm, extractPagesFromDm, extractDmCopyText,
-  stopDm, resumeDm, isDmStopped, isDmStoppedByCode, findDmTransitionBlock,
+  stopDm, resumeDm, isDmStopped, isDmStoppedByCode, DM_TRANSITION_BLOCK_MESSAGES,
 } from '../utils/dm/dm-builder';
 // ★ 2026-07-03 DM 문안 학습 코퍼스 적재 (전 채널 학습 통합 Phase 1)
 import { logCampaignTraining } from '../utils/training-logger';
@@ -850,15 +850,14 @@ dmRouter.post('/:id/stop', async (req: any, res: any) => {
     if (!(await canAccessDm(req.params.id, companyId, req.user?.userType, req.user?.userId))) {
       return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
     }
-    // ★ 2026-08-06 판정은 UPDATE 한 문장이 한다(Codex 3R high) — 사전 SELECT로 막으면 그 사이에
-    //   A/B가 시작돼 running 테스트가 중지된 DM을 참조한다. 여기서는 결과를 받아 **사유만** 조회한다.
-    const row = await stopDm(req.params.id, companyId);
-    // 0행 = 발행 상태가 아니었거나(임시저장·이미 중지) 진행 중 A/B에 묶여 있다. 바뀐 것이 없으면 성공이라 답하지 않는다.
+    // ★ 2026-08-06 판정은 UPDATE 한 문장이 한다(Codex 3R high). ★ 2026-08-08 사유도 그 문장의
+    //   같은 스냅샷이 돌려준다(4R medium) — 따로 조회하면 경합 시 엉뚱한 원인을 지목한다.
+    const { row, block } = await stopDm(req.params.id, companyId);
+    // 0행 = 바뀐 것이 없다 — 성공이라 답하지 않고, 전이 문장이 판정한 사유를 그대로 알린다.
     if (!row) {
-      const why = await findDmTransitionBlock(req.params.id, companyId, 'stopped');
-      return res.status(409).json({
-        error: why || '발행 중인 DM만 중지할 수 있습니다.',
-        code: why ? 'DM_STOP_BLOCKED' : 'DM_NOT_PUBLISHED',
+      return res.status(block === 'not_found' ? 404 : 409).json({
+        error: DM_TRANSITION_BLOCK_MESSAGES[block || 'race'],
+        code: block === 'ab_running' ? 'DM_STOP_BLOCKED' : 'DM_NOT_PUBLISHED',
       });
     }
     return res.json({ success: true, status: row.status, short_code: row.short_code });
@@ -879,12 +878,12 @@ dmRouter.post('/:id/resume', async (req: any, res: any) => {
     // ★ 2026-08-06 이미 추첨이 끝난 행사는 재개하지 않는다(Codex 2R high) — 응모 폼이 다시 열리는데
     //   그 응모는 **당첨될 수 없다**(추첨은 1회뿐이고 `dm_draw_runs`가 있으면 재추첨 대상에서 영구 제외된다).
     //   판정은 UPDATE 안에 있다(3R high — 밖에 두면 조회와 UPDATE 사이에 워커가 추첨을 claim한다).
-    const row = await resumeDm(req.params.id, companyId);
+    const { row, block } = await resumeDm(req.params.id, companyId);
     if (!row) {
-      const why = await findDmTransitionBlock(req.params.id, companyId, 'published');
-      return res.status(409).json({
-        error: why || '중지된 DM만 재개할 수 있습니다.',
-        code: why ? 'DM_RESUME_BLOCKED' : 'DM_NOT_STOPPED',
+      // 사유는 전이 문장의 같은 스냅샷이 판정했다(2026-08-08, 4R medium) — 별도 조회 없음.
+      return res.status(block === 'not_found' ? 404 : 409).json({
+        error: DM_TRANSITION_BLOCK_MESSAGES[block || 'race'],
+        code: block === 'drawn' ? 'DM_RESUME_BLOCKED' : 'DM_NOT_STOPPED',
       });
     }
     // 재개는 발행비를 다시 받지 않는다 — 이미 발행된 문서의 상태를 되돌리는 것이라

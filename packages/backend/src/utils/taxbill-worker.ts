@@ -39,6 +39,14 @@ async function tick(): Promise<void> {
             SET taxbill_status = 'ready'
           WHERE taxbill_status IN ('confirmed', 'due')
             AND superseded_at IS NULL
+            -- ★ 2026-08-07(2) 취소된 원본 장에 승인번호가 남아 있으면(웹훅 대사 기록 — 외부에 문서 실존)
+            --   집지 않는다. 아래 NOT EXISTS는 cancelled를 멱등에서 빼므로, 여기서 안 막으면 외부에
+            --   실존하는 문서와 같은 건의 새 원본이 나간다. 해소는 팝빌 대사 뒤 사람 몫(fail-closed).
+            AND NOT EXISTS (
+              SELECT 1 FROM taxbill_issues t
+               WHERE t.confirmation_id = invoice_confirmations.id AND t.kind = 'original'
+                 AND t.status = 'cancelled' AND t.nts_confirm_num IS NOT NULL
+            )
         RETURNING id, billing_id, company_id, taxbill_issue_date
        )
        INSERT INTO taxbill_issues (

@@ -16,7 +16,7 @@ import { resolve } from 'node:path';
 
 vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })) }));
 import { query } from '../../config/database';
-import { stopDm, resumeDm, isDmStoppedByCode, getDmByCode, findDmTransitionBlock } from './dm-builder';
+import { stopDm, resumeDm, isDmStoppedByCode, getDmByCode, DM_TRANSITION_BLOCK_MESSAGES } from './dm-builder';
 
 const qmock = query as unknown as ReturnType<typeof vi.fn>;
 const norm = (s: string) => s.replace(/\s+/g, ' ');
@@ -40,8 +40,8 @@ describe('DM 발행 중지 / 재개 (2026-08-06)', () => {
 
   describe('② 전이는 조건부 UPDATE — 대상이 아니면 바꾸지 않고 null', () => {
     it('stopDm은 published 행만 stopped로 바꾸고, 충돌 판정까지 한 문장에 담는다', async () => {
-      qmock.mockResolvedValue({ rows: [{ id: 'd1', short_code: 'abc1234', status: 'stopped' }] });
-      const row = await stopDm('d1', 'c1');
+      qmock.mockResolvedValue({ rows: [{ updated: { id: 'd1', short_code: 'abc1234', status: 'stopped' }, cur_status: 'stopped', ab_running: false }] });
+      const { row, block } = await stopDm('d1', 'c1');
       const [sql, params] = qmock.mock.calls[0] as [string, any[]];
       expect(norm(sql)).toContain("SET status = 'stopped'");
       expect(norm(sql), '발행분만 중지 대상이다(임시저장·이미 중지분 제외)').toContain("AND status = 'published'");
@@ -49,19 +49,20 @@ describe('DM 발행 중지 / 재개 (2026-08-06)', () => {
       // ★ Codex 3R high — 판정을 별도 SELECT로 빼면 그 사이 A/B가 시작돼 running 테스트가 중지분을 참조한다.
       expect(norm(sql), '충돌 판정이 UPDATE 밖에 있으면 TOCTOU 창이 생긴다').toContain('NOT EXISTS');
       expect(norm(sql)).toContain('FROM dm_ab_tests');
-      expect(qmock.mock.calls.length, '전이는 문장 하나로 끝난다 — 사전 판정 쿼리가 있으면 안 된다').toBe(1);
+      expect(qmock.mock.calls.length, '전이·사유 판정은 문장 하나로 끝난다 — 별도 쿼리가 있으면 안 된다').toBe(1);
       expect(params).toEqual(['d1', 'c1']);
       expect(row?.status).toBe('stopped');
+      expect(block).toBeNull();
     });
 
-    it('stopDm은 바뀐 행이 없으면 null — 호출부가 성공이라 답하지 않는다', async () => {
-      qmock.mockResolvedValue({ rows: [] });
-      expect(await stopDm('d1', 'c1')).toBeNull();
+    it('stopDm은 바뀐 행이 없으면 row=null + 같은 스냅샷의 사유 태그 — 호출부가 성공이라 답하지 않는다', async () => {
+      qmock.mockResolvedValue({ rows: [{ updated: null, cur_status: 'draft', ab_running: false }] });
+      expect(await stopDm('d1', 'c1')).toEqual({ row: null, block: 'not_published' });
     });
 
     it('resumeDm은 stopped 행만 published로 되돌리고, 추첨 완료 판정을 한 문장에 담는다', async () => {
-      qmock.mockResolvedValue({ rows: [{ id: 'd1', short_code: 'abc1234', status: 'published' }] });
-      const row = await resumeDm('d1', 'c1');
+      qmock.mockResolvedValue({ rows: [{ updated: { id: 'd1', short_code: 'abc1234', status: 'published' }, cur_status: 'published', drawn: false }] });
+      const { row, block } = await resumeDm('d1', 'c1');
       const [sql, params] = qmock.mock.calls[0] as [string, any[]];
       expect(norm(sql)).toContain("SET status = 'published'");
       expect(norm(sql), '중지분만 재개 대상이다').toContain("AND status = 'stopped'");
@@ -70,15 +71,16 @@ describe('DM 발행 중지 / 재개 (2026-08-06)', () => {
       expect(qmock.mock.calls.length, '전이는 문장 하나로 끝난다').toBe(1);
       expect(params).toEqual(['d1', 'c1']);
       expect(row?.status).toBe('published');
+      expect(block).toBeNull();
     });
 
-    it('resumeDm은 바뀐 행이 없으면 null', async () => {
-      qmock.mockResolvedValue({ rows: [] });
-      expect(await resumeDm('d1', 'c1')).toBeNull();
+    it('resumeDm은 바뀐 행이 없으면 row=null + 사유 태그', async () => {
+      qmock.mockResolvedValue({ rows: [{ updated: null, cur_status: 'published', drawn: false }] });
+      expect(await resumeDm('d1', 'c1')).toEqual({ row: null, block: 'not_stopped' });
     });
 
     it('재개는 단축코드를 새로 발급하지 않는다 — 주소가 바뀌면 이미 나간 문자가 죽는다', async () => {
-      qmock.mockResolvedValue({ rows: [{ id: 'd1', short_code: 'abc1234', status: 'published' }] });
+      qmock.mockResolvedValue({ rows: [{ updated: { id: 'd1', short_code: 'abc1234', status: 'published' }, cur_status: 'published', drawn: false }] });
       await resumeDm('d1', 'c1');
       const sqls = qmock.mock.calls.map((c: any[]) => norm(String(c[0])));
       expect(sqls.some((s) => s.includes('short_code = $')), '재개가 short_code를 쓰면 안 된다').toBe(false);
@@ -150,17 +152,15 @@ describe('DM 발행 중지 / 재개 (2026-08-06)', () => {
       ).toContain('company_id = $2');
     });
 
-    it('중지·재개 라우트는 전이를 **먼저** 시도하고 사유는 실패 뒤에 묻는다', () => {
+    it('중지·재개 라우트는 전이 문장이 돌려준 사유 태그만 쓴다 — 별도 사유 조회가 없다', () => {
+      // ★ Codex 4R medium — 0행 뒤 별도 SELECT로 원인을 다시 물으면 경합 시 엉뚱한 사유를 지목한다.
+      //   사유는 전이 문장의 같은 스냅샷이 판정한다(dm-builder). 조회 함수가 되살아나면 회귀다.
+      expect(routeSrc, '별도 사유 조회가 되살아났다').not.toContain('findDmTransitionBlock');
       for (const marker of ["dmRouter.post('/:id/stop'", "dmRouter.post('/:id/resume'"]) {
         const body = handlerBody(marker);
         const transitionAt = Math.max(body.indexOf('await stopDm('), body.indexOf('await resumeDm('));
-        const whyAt = body.indexOf('findDmTransitionBlock');
         expect(transitionAt, `${marker}: 전이 호출을 못 찾았다`).toBeGreaterThan(0);
-        expect(whyAt, `${marker}: 사유 조회를 못 찾았다`).toBeGreaterThan(0);
-        expect(
-          whyAt,
-          `${marker}: 사유 조회가 전이보다 앞이면 판정이 UPDATE 밖으로 나가 TOCTOU 창이 생긴다(Codex 3R high)`,
-        ).toBeGreaterThan(transitionAt);
+        expect(body, `${marker}: 문구는 CT 메시지 표에서 나온다`).toContain('DM_TRANSITION_BLOCK_MESSAGES');
       }
     });
 
@@ -189,33 +189,37 @@ describe('DM 발행 중지 / 재개 (2026-08-06)', () => {
    *   (공개 노출·발송·A/B 실행·이벤트 수명주기). 축마다 가드를 덧대면 라운드마다 새 구멍이 난다.
    *   **충돌하는 상태에서는 전이 자체를 거절**하는 쪽이 가드를 늘리지 않고 약속도 지킨다.
    */
-  describe('⑥ 충돌 상태에서는 전이를 거절한다', () => {
+  describe('⑥ 충돌 상태에서는 전이를 거절한다 — 사유는 전이 문장의 같은 스냅샷이 판정한다(4R medium)', () => {
     it('진행 중 A/B에 포함된 DM은 중지를 막는다', async () => {
-      qmock.mockResolvedValue({ rows: [{ '?column?': 1 }] });
-      const msg = await findDmTransitionBlock('d1', 'c1', 'stopped');
-      expect(msg, 'running A/B variant를 중지하면 그 비율의 방문자만 종료 페이지를 받는다').toContain('A/B');
+      qmock.mockResolvedValue({ rows: [{ updated: null, cur_status: 'published', ab_running: true }] });
+      const r = await stopDm('d1', 'c1');
+      expect(r.block, 'running A/B variant를 중지하면 그 비율의 방문자만 종료 페이지를 받는다').toBe('ab_running');
+      expect(DM_TRANSITION_BLOCK_MESSAGES[r.block!]).toContain('A/B');
       const [sql, params] = qmock.mock.calls[0] as [string, any[]];
       expect(norm(sql)).toContain("status = 'running'");
-      expect(norm(sql), 'variant 3칸을 모두 봐야 한다').toContain('variant_a_page_id, variant_b_page_id, variant_c_page_id');
+      expect(norm(sql), 'variant 3칸을 모두 봐야 한다').toContain('t.variant_a_page_id, t.variant_b_page_id, t.variant_c_page_id');
       expect(params).toEqual(['d1', 'c1']);
-    });
-
-    it('진행 중 A/B가 없으면 중지를 막지 않는다', async () => {
-      qmock.mockResolvedValue({ rows: [] });
-      expect(await findDmTransitionBlock('d1', 'c1', 'stopped')).toBeNull();
+      expect(qmock.mock.calls.length, '사유 판정에 두 번째 쿼리를 쓰면 스냅샷이 갈려 엉뚱한 사유를 지목한다').toBe(1);
     });
 
     it('이미 추첨이 끝난 행사는 재개를 막는다 — 당첨될 수 없는 응모를 받게 된다', async () => {
-      qmock.mockResolvedValue({ rows: [{ '?column?': 1 }] });
-      const msg = await findDmTransitionBlock('d1', 'c1', 'published');
-      expect(msg).toContain('추첨');
+      qmock.mockResolvedValue({ rows: [{ updated: null, cur_status: 'stopped', drawn: true }] });
+      const r = await resumeDm('d1', 'c1');
+      expect(r.block).toBe('drawn');
+      expect(DM_TRANSITION_BLOCK_MESSAGES[r.block!]).toContain('추첨');
       const [sql] = qmock.mock.calls[0] as [string, any[]];
       expect(norm(sql)).toContain('FROM dm_draw_runs');
+      expect(qmock.mock.calls.length).toBe(1);
     });
 
-    it('추첨 이력이 없으면 재개를 막지 않는다', async () => {
-      qmock.mockResolvedValue({ rows: [] });
-      expect(await findDmTransitionBlock('d1', 'c1', 'published')).toBeNull();
+    it('스냅샷상 막을 것이 없는데 0행이면 원인을 단정하지 않는다(race)', async () => {
+      qmock.mockResolvedValue({ rows: [{ updated: null, cur_status: 'published', ab_running: false }] });
+      expect((await stopDm('d1', 'c1')).block).toBe('race');
+    });
+
+    it('행이 없으면 not_found', async () => {
+      qmock.mockResolvedValue({ rows: [{ updated: null, cur_status: null, ab_running: false }] });
+      expect((await stopDm('d1', 'c1')).block).toBe('not_found');
     });
   });
 
@@ -234,6 +238,61 @@ describe('DM 발행 중지 / 재개 (2026-08-06)', () => {
         norm(sql),
         '중지분을 후보에서 빼면 마감 직전에 내린 행사의 당첨자가 조용히 선정되지 않는다',
       ).toContain("status IN ('published', 'stopped')");
+    });
+  });
+
+  /**
+   * ★ Codex 4R high (0806 트랙 잔여 · 2026-08-08 반영) — stop·resume·A/B 시작·추첨 claim의 교차 테이블
+   *   경쟁을 NOT EXISTS가 원자화하지 못한다는 지적. per-DM 잠금 공사 대신 **실제 피해가 생기는 길목
+   *   하나(응모 제출)를 막는다** — 추첨은 1회뿐이라 claim 이후의 응모는 당첨될 수 없다.
+   *   판정은 INSERT와 같은 문장 안이다(밖이면 5분 워커 claim과 TOCTOU).
+   */
+  describe('⑦ 추첨이 끝난 lucky_draw는 응모를 받지 않는다 — 판정은 INSERT와 같은 문장', () => {
+    const submitLuckyDraw = async () => {
+      const { submitEventResponse } = await import('./dm-interaction');
+      return submitEventResponse({
+        code: 'dm-abc1234', sectionId: 's1', sectionType: 'lucky_draw',
+        data: { consent: true }, anonymousId: 'anon-1', token: null, phone: null, ip: null, ua: null,
+      });
+    };
+    const dispatch = (insertRows: any[]) => {
+      qmock.mockImplementation(async (sql: string) => {
+        if (sql.includes('FROM dm_pages')) return { rows: [{ id: 'dm1', company_id: 'c1' }] };
+        if (sql.includes('INSERT INTO dm_event_responses')) return { rows: insertRows };
+        return { rows: [] };
+      });
+    };
+
+    it('추첨(claim) 이후의 응모는 409 — 받은 척하지 않는다', async () => {
+      dispatch([]);
+      const r = await submitLuckyDraw();
+      expect(r.ok).toBe(false);
+      expect(r.status).toBe(409);
+      expect(r.error, '고객에게 사실대로 알린다').toContain('추첨');
+      const insCall = qmock.mock.calls.find((c: any[]) => String(c[0]).includes('INSERT INTO dm_event_responses'));
+      expect(insCall, '제출 INSERT를 못 찾았다').toBeTruthy();
+      const [sql, params] = insCall as [string, any[]];
+      expect(norm(sql), '판정이 INSERT 밖이면 5분 워커 claim과 TOCTOU').toContain('FROM dm_draw_runs');
+      expect(norm(sql), '가드 축은 별도 boolean 파라미터다(한 파라미터 이중 문맥 = 42P08 부류)').toContain('$10::boolean = false');
+      expect(params[9], 'lucky_draw는 가드가 켜진다').toBe(true);
+    });
+
+    it('추첨 전 응모는 그대로 접수된다', async () => {
+      dispatch([{ id: 'r1' }]);
+      const r = await submitLuckyDraw();
+      expect(r.ok).toBe(true);
+    });
+
+    it('lucky_draw가 아니면 가드가 꺼진다 — 같은 캠페인의 다른 섹션 응답이 막히면 안 된다', async () => {
+      dispatch([{ id: 'r2' }]);
+      const { submitEventResponse } = await import('./dm-interaction');
+      const r = await submitEventResponse({
+        code: 'dm-abc1234', sectionId: 's2', sectionType: 'survey',
+        data: {}, anonymousId: 'anon-1', token: null, phone: null, ip: null, ua: null,
+      });
+      expect(r.ok).toBe(true);
+      const insCall = qmock.mock.calls.find((c: any[]) => String(c[0]).includes('INSERT INTO dm_event_responses'));
+      expect((insCall as [string, any[]])[1][9], '다른 섹션 유형은 가드 파라미터가 꺼져 있어야 한다').toBe(false);
     });
   });
 });

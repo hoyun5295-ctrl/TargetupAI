@@ -57,7 +57,9 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
     filter: any;
     explanation: string;
     matchCount: number;
-    samples: Array<{ id: string; phone: string; name: string | null; gender: string | null; region: string | null; last_purchase_date: string | null; total_purchase_amount: number | null }>;
+    samples: Array<{ id: string; phone: string; name: string | null; gender: string | null; region: string | null; last_purchase_date: string | null; total_purchase_amount: number | null; [extra: string]: unknown }>;
+    /** ★ 2026-08-08 (임은지 접수) filter가 참조한 조건 필드 — 샘플 추가 열·추출 meta의 축(서버 FIELD_MAP 파생) */
+    sampleFields: Array<{ field_key: string; display_name: string; data_type: string; category: string }>;
   } | null>(null);
   const [aiNlError, setAiNlError] = useState<string | null>(null);
   const [aiNlExtracting, setAiNlExtracting] = useState(false);
@@ -94,6 +96,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
         explanation: data.explanation,
         matchCount: data.matchCount,
         samples: data.samples || [],
+        sampleFields: data.sampleFields || [],
       });
     } catch (e: any) {
       setAiNlError(e?.message || 'AI 변환 실패');
@@ -119,8 +122,24 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
       }
       const data = await res.json();
       if (data.success && data.recipients) {
-        // AI 자연어 모드 = fieldsMeta 단순 (phone만 필수 — 향후 확장 가능)
-        onExtracted(data.recipients, data.count, [], undefined, extractedPhoneFields);
+        // ★ 2026-08-08 (임은지 접수 08-05) AI 자연어 모드도 필드 meta를 전달한다 — 축은 filter의 키 하나다
+        //   ({ field: { operator, value } } 구조라 그 키가 곧 조건 필드고, extract 응답 행에 같은 키로 값이
+        //   실려 온다). 라벨은 회사 스키마(enabledFields — FIELD_MAP displayName 파생) 우선, 없으면
+        //   서버가 준 FIELD_MAP 라벨(sampleFields). phone은 항상 포함(수동 모드와 같은 규약).
+        const filterKeys = Object.keys(aiNlResult.filter || {}).filter((k) => k !== 'sms_opt_in' && k !== 'phone');
+        const meta: FieldMeta[] = ['phone', ...filterKeys].map((key) => {
+          const ef = enabledFields.find((f: any) => f.field_key === key);
+          const sf = (aiNlResult.sampleFields || []).find((f) => f.field_key === key);
+          const displayName = ef?.display_name || sf?.display_name || key;
+          return {
+            field_key: key,
+            display_name: displayName,
+            variable: `%${displayName}%`,
+            data_type: ef?.data_type || sf?.data_type || 'string',
+            category: ef?.category || sf?.category || 'basic',
+          };
+        });
+        onExtracted(data.recipients, data.count, meta, undefined, extractedPhoneFields);
       } else {
         showAlert('타겟 추출 실패', data.error || '데이터 추출 실패', 'warning');
       }
@@ -136,6 +155,11 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
     setAiNlResult(null);
     setAiNlError(null);
   };
+
+  // ★ 2026-08-08 조건 필드 라벨 — 회사 스키마(enabledFields, FIELD_MAP displayName 파생) 우선,
+  //   없으면 서버가 준 FIELD_MAP 라벨. 별도 라벨 표를 두지 않는다(단일소스 규약).
+  const aiNlFieldLabel = (f: { field_key: string; display_name: string }) =>
+    enabledFields.find((e: any) => e.field_key === f.field_key)?.display_name || f.display_name || f.field_key;
 
   // 카테고리 아이콘
   const CAT_ICONS: Record<string, string> = {
@@ -834,23 +858,42 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
                   </div>
                 </div>
 
-                {/* 샘플 5건 */}
+                {/* 샘플 5건 — ★ 2026-08-08 조건 필드(sampleFields) 열을 함께 보여 조건이 맞았는지 눈으로 검증한다 */}
                 {aiNlResult.samples.length > 0 && (
                   <div className="rounded-xl border border-gray-200 bg-white p-3">
                     <div className="flex items-center gap-1.5 mb-2">
                       <Eye className="w-3.5 h-3.5 text-gray-500" />
                       <p className="text-[11px] text-gray-600 font-medium">샘플 5건 미리보기</p>
                     </div>
-                    <div className="space-y-1">
-                      {aiNlResult.samples.map((s) => (
-                        <div key={s.id} className="flex items-center gap-2 text-[10px] py-1 border-b border-gray-100">
-                          <span className="text-gray-800 font-mono w-28">{s.phone}</span>
-                          <span className="text-gray-600 w-16 truncate">{s.name || '-'}</span>
-                          <span className="text-gray-400 w-10">{s.gender || '-'}</span>
-                          <span className="text-gray-400 w-16 truncate">{s.region || '-'}</span>
-                          <span className="text-gray-400 ml-auto truncate">{s.total_purchase_amount?.toLocaleString() || '-'}</span>
-                        </div>
-                      ))}
+                    <div className="overflow-x-auto">
+                      <div className="space-y-1 min-w-max">
+                        {aiNlResult.sampleFields.length > 0 && (
+                          <div className="flex items-center gap-2 text-[9px] text-gray-400 pb-0.5">
+                            <span className="w-28">전화번호</span>
+                            <span className="w-16">이름</span>
+                            <span className="w-10">성별</span>
+                            <span className="w-16">지역</span>
+                            {aiNlResult.sampleFields.map((f) => (
+                              <span key={f.field_key} className="w-20 truncate font-medium text-emerald-600">{aiNlFieldLabel(f)}</span>
+                            ))}
+                            <span className="ml-auto pl-2">누적구매</span>
+                          </div>
+                        )}
+                        {aiNlResult.samples.map((s) => (
+                          <div key={s.id} className="flex items-center gap-2 text-[10px] py-1 border-b border-gray-100">
+                            <span className="text-gray-800 font-mono w-28">{s.phone}</span>
+                            <span className="text-gray-600 w-16 truncate">{s.name || '-'}</span>
+                            <span className="text-gray-400 w-10">{s.gender || '-'}</span>
+                            <span className="text-gray-400 w-16 truncate">{s.region || '-'}</span>
+                            {aiNlResult.sampleFields.map((f) => (
+                              <span key={f.field_key} className="text-gray-700 w-20 truncate">
+                                {s[f.field_key] != null && s[f.field_key] !== '' ? String(s[f.field_key]) : '-'}
+                              </span>
+                            ))}
+                            <span className="text-gray-400 ml-auto pl-2 truncate">{s.total_purchase_amount?.toLocaleString() || '-'}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}

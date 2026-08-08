@@ -389,10 +389,13 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
       route,
       '웹훅이 304를 관측하면 failed를 ready로 되돌리며 승인번호를 적는다 — 그 행은 이미 나간 문서의 재확인 큐다',
     ).toContain('nts_confirm_num IS NULL');
+    // ★ 2026-08-07(2) 양수 화이트리스트 — 음수 조건(IS DISTINCT FROM 1)은 사유 1만 막고
+    //   미지·손상 코드를 단독 장으로 간주해 통과시킨다. 사유 1 쌍 차단은 화이트리스트가 흡수한다.
     expect(
       route,
-      '사유 1의 한쪽만 내리면 원본은 상쇄됐는데 대체 계산서가 사라진다',
-    ).toContain('modify_code IS DISTINCT FROM 1');
+      '내릴 수 있는 것은 원본과 단독 수정 장(2·4·6)뿐 — 미지 코드가 통과하면 쌍·손상 장이 한쪽만 내려간다',
+    ).toContain("(kind = 'original' OR (kind = 'modify' AND modify_code IN (2, 4, 6)))");
+    expect(route, '음수 조건이 되살아나면 미지 코드가 다시 통과한다').not.toContain('modify_code IS DISTINCT FROM 1');
     expect(route, 'failed 폐기는 이 경로에 없다').not.toContain("status IN ('ready', 'failed')");
   });
 
@@ -403,10 +406,13 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
     const nextRoute = billingSrc.indexOf('router.post(', ownDecl + 10);
     const route = billingSrc.slice(at, nextRoute > ownDecl ? nextRoute : undefined);
     // 판정은 UPDATE 안에서 한다 — 밖에서 읽고 쓰면 그 사이 상태가 바뀐다.
+    // ★ 2026-08-07(2) 양수 화이트리스트 — 무관문 재시도는 kind = original 뿐이다. 음수 조건(kind <> modify)은
+    //   미지·손상 값을 무관문으로 통과시킨다.
     expect(
       route,
       '수정 장이 무가드로 재시도되면 국세청에 정상으로 올라가 있는 원본이 취소된다(크로커다일 −3,903,325)',
-    ).toContain("kind <> 'modify' OR (");
+    ).toContain("kind = 'original' OR (kind = 'modify' AND ");
+    expect(route, '음수 조건이 되살아나면 미지 종류가 무관문으로 통과한다').not.toContain("kind <> 'modify'");
     expect(route, '확인과 사유가 함께 있어야 통과한다').toContain('$2::boolean = true AND $3::text IS NOT NULL');
     expect(route, '원본 장 재시도는 그대로 — 안 나간 청구서를 같은 번호로 다시 보내는 것이라 안전하다').toContain("status = 'failed'");
   });
@@ -416,12 +422,52 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
     const at = hookSrc.indexOf('UPDATE taxbill_issues');
     expect(at, '웹훅 갱신문을 찾지 못했다').toBeGreaterThan(-1);
     const stmt = hookSrc.slice(at, hookSrc.indexOf('RETURNING status', at));
+    // ★ 2026-08-07(2) 상태·사유는 CASE 첫 분기가 지킨다(WHERE 제외가 아니다) — WHERE에서 빼면
+    //   승인번호(외부 발행 증거)까지 함께 버려져, 취소가 먼저 커밋된 경합에서 증거가 로그에만 남는다.
     expect(
       stmt,
-      '웹훅이 cancelled를 덮으면 사람이 내린 판단이 외부 신호로 뒤집힌다',
-    ).toContain("status <> 'cancelled'");
+      '웹훅이 cancelled의 상태를 덮으면 사람이 내린 판단이 외부 신호로 뒤집힌다',
+    ).toContain("WHEN status = 'cancelled' THEN status");
+    expect(
+      stmt,
+      '웹훅이 cancelled의 사유(error)를 덮으면 취소 근거가 지워진다',
+    ).toContain("WHEN status = 'cancelled' THEN error");
+    expect(
+      stmt,
+      'cancelled 행에도 승인번호는 적어야 한다 — 이 증거가 없으면 재발행 길목이 막을 근거가 없다',
+    ).toContain('nts_confirm_num = COALESCE($3, nts_confirm_num)');
+    expect(stmt, 'WHERE에서 cancelled를 통째로 빼면 증거 기록까지 사라진다').not.toContain("status <> 'cancelled'");
     // 상태를 덮지 않는 대신 사실은 남겨야 한다 — 조용히 지나가면 아무도 모른다.
     expect(hookSrc, '폐기된 장에 외부 신호가 와도 기록이 없으면 대사할 수 없다').toContain('[팝빌웹훅][대사필요]');
+  });
+
+  it('취소된 장의 승인번호(대사 필요 증거)가 있으면 재발행 길목 전부가 막는다 — 외부에 실존하는 문서와 같은 건이 두 장 나간다', () => {
+    // 증거 조건은 네 길목이 같은 모양이어야 한다 — 워커 CTE·작성일자 지정·삭제 가드·운영 재발행.
+    const EVIDENCE_T = "t.status = 'cancelled' AND t.nts_confirm_num IS NOT NULL";
+    const EVIDENCE_OR = "OR (status = 'cancelled' AND nts_confirm_num IS NOT NULL)";
+    const workerSrc = read('./taxbill-worker.ts');
+    expect(
+      workerSrc,
+      '워커가 대사 필요 건의 컨펌을 ready로 옮기면 새 원본이 나간다',
+    ).toContain(EVIDENCE_T);
+    expect(
+      billingSrc,
+      '작성일자 지정이 대사 필요 건을 재발행하면 이중 발행이다',
+    ).toContain("code: 'TAXBILL_RECONCILE_REQUIRED'");
+    expect(
+      billingSrc,
+      '작성일자 지정 관문의 증거 조건이 워커와 다르면 한쪽이 샌다',
+    ).toContain(EVIDENCE_T);
+    // 삭제 가드·운영 재발행 dup 체크 — 같은 OR 절이 두 곳에 있어야 한다.
+    const count = billingSrc.split(EVIDENCE_OR).length - 1;
+    expect(count, `삭제 가드·운영 재발행 dup 체크 두 곳에 증거 조건이 있어야 한다(현재 ${count}곳)`).toBeGreaterThanOrEqual(2);
+    // ★ 운영 재발행 dup 체크는 failed 운영 원본도 막는다(Codex 2R) — 305는 팝빌에 문서가 실존할 수
+    //   있고(승인번호 없음), failed의 올바른 처치는 그 행의 [재시도]다. 삭제 가드의 failed 확대는
+    //   §7 getInfo 대사 별건과 묶인다(대사 없이 막으면 정정 경로가 전면 불능이 된다).
+    expect(
+      billingSrc,
+      '운영 재발행 dup 체크가 failed 운영 원본을 통과시키면 서로 다른 관리키의 실제 문서가 중복된다',
+    ).toContain("status IN ('ready', 'submitted', 'issued', 'failed')");
   });
 
   it('발행된 세금계산서가 붙은 정산은 재발행만이 아니라 **일반 삭제도** 막는다 — 지우면 고아 계산서가 남고 원본이 한 장 더 나간다', () => {

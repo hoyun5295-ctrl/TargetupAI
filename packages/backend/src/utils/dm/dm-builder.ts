@@ -409,7 +409,7 @@ export async function getDmByCode(code: string) {
 //   무엇보다 "바뀌지 않았는데 성공"이라 답하게 된다(6원칙 ② 효과 검증 후 성공 표시).
 
 /**
- * 중지·재개를 **거절해야 하는 충돌 상태**를 찾는다 (★ 2026-08-06 Codex 적대검증 2R).
+ * 중지·재개를 **거절해야 하는 충돌 상태** (★ 2026-08-06 Codex 적대검증 2R).
  *
  * 왜 거절인가: 중지 상태를 하나 만들었더니 그것을 소비해야 하는 축이 넷(공개 노출·발송·A/B 실행·이벤트 수명주기)이었고,
  *   축마다 가드를 덧대는 방식은 라운드마다 새 구멍을 냈다. **충돌하는 상태에서는 전이 자체를 막는 쪽이
@@ -418,56 +418,65 @@ export async function getDmByCode(code: string) {
  *    (실험 분포까지 왜곡된다). ⇒ A/B를 먼저 끝내게 한다.
  *  - 이미 추첨이 끝난 행사를 재개하면 응모 폼이 다시 열리는데 그 응모는 **당첨될 수 없다**(추첨은 1회뿐).
  *    ⇒ 재개를 막는다. 다시 받으려면 새 회차를 만들어야 한다.
+ *
+ * ★ 2026-08-08 (0806 트랙 Codex 4R medium) 사유는 **전이와 같은 문장·같은 스냅샷**에서 나온다.
+ *   전이 UPDATE가 0행일 때 별도 SELECT로 원인을 다시 물으면, 그 사이 상태가 바뀌어 엉뚱한 사유를
+ *   지목할 수 있다(예: 중지가 "발행 상태 아님"으로 막혔는데 그 직후 A/B가 시작되면 A/B를 사유로 답한다).
+ *   전이 문장이 사유 판정까지 돌려주므로 별도 사유 조회 함수(findDmTransitionBlock)는 삭제됐다.
+ *   유일한 예외 = `race`(스냅샷상 조건 충족인데 0행 — 동시 갱신에 진 경우): 원인을 단정하지 않고
+ *   새로고침만 안내한다.
  */
-export async function findDmTransitionBlock(
-  id: string,
-  companyId: string,
-  to: 'stopped' | 'published',
-): Promise<string | null> {
-  if (to === 'stopped') {
-    const ab = await query(
-      `SELECT 1 FROM dm_ab_tests
-        WHERE company_id = $2::uuid AND status = 'running'
-          AND $1::uuid IN (variant_a_page_id, variant_b_page_id, variant_c_page_id)
-        LIMIT 1`,
-      [id, companyId]
-    );
-    if (ab.rows.length > 0) {
-      return '진행 중인 A/B 테스트에 포함된 DM이에요. A/B 테스트를 먼저 종료해주세요.';
-    }
-    return null;
-  }
-  const drawn = await query(
-    `SELECT 1 FROM dm_draw_runs WHERE campaign_id = $1::uuid LIMIT 1`,
-    [id]
-  );
-  if (drawn.rows.length > 0) {
-    return '이미 추첨이 끝난 행사예요. 다시 열면 당첨될 수 없는 응모를 받게 됩니다.';
-  }
-  return null;
-}
+export const DM_TRANSITION_BLOCK_MESSAGES = {
+  ab_running: '진행 중인 A/B 테스트에 포함된 DM이에요. A/B 테스트를 먼저 종료해주세요.',
+  drawn: '이미 추첨이 끝난 행사예요. 다시 열면 당첨될 수 없는 응모를 받게 됩니다.',
+  not_published: '발행 중인 DM만 중지할 수 있어요. 화면을 새로고침한 뒤 다시 확인해주세요.',
+  not_stopped: '중지된 DM만 재개할 수 있어요. 화면을 새로고침한 뒤 다시 확인해주세요.',
+  not_found: 'DM을 찾을 수 없습니다.',
+  race: '상태가 방금 바뀌었어요. 화면을 새로고침한 뒤 다시 확인해주세요.',
+} as const;
+export type DmTransitionBlock = keyof typeof DM_TRANSITION_BLOCK_MESSAGES;
+export type DmTransitionResult = {
+  row: { id: string; short_code: string | null; status: string } | null;
+  /** row가 null일 때만 — 전이 문장과 같은 스냅샷에서 판정한 사유 태그 */
+  block: DmTransitionBlock | null;
+};
 
 /**
- * 발행 중지 — `published` 행만 `stopped`로. 대상이 아니거나 충돌 상태면 null.
+ * 발행 중지 — `published` 행만 `stopped`로. 대상이 아니거나 충돌 상태면 row=null + 사유 태그.
  *
  * ⛔ **충돌 판정을 별도 SELECT로 하지 않는다**(Codex 3R high). 판정과 UPDATE가 두 문장이면 그 사이에
  *   A/B가 시작돼 `running` 테스트가 중지된 DM을 참조하게 된다 — 이 설계가 막으려던 상태가 그대로 생긴다.
- *   조건을 UPDATE 안으로 넣으면 한 문장이라 창이 없다. 실패 사유는 0행일 때 호출부가 따로 묻는다
- *   (판정은 DB가, 안내 문구는 조회가 — 순서를 뒤집으면 안내가 판정을 대신하게 된다).
+ *   조건을 UPDATE 안으로 넣으면 한 문장이라 창이 없고, **사유 판정도 그 문장의 같은 스냅샷**이 돌려준다
+ *   (4R medium — 사유를 따로 조회하면 경합 시 엉뚱한 원인을 지목한다).
  */
-export async function stopDm(id: string, companyId: string) {
+export async function stopDm(id: string, companyId: string): Promise<DmTransitionResult> {
   const result = await query(
-    `UPDATE dm_pages SET status = 'stopped', updated_at = NOW()
-      WHERE id = $1 AND company_id = $2 AND status = 'published'
-        AND NOT EXISTS (
-          SELECT 1 FROM dm_ab_tests t
-           WHERE t.company_id = $2::uuid AND t.status = 'running'
-             AND $1::uuid IN (t.variant_a_page_id, t.variant_b_page_id, t.variant_c_page_id)
-        )
-      RETURNING id, short_code, status`,
+    `WITH upd AS (
+       UPDATE dm_pages SET status = 'stopped', updated_at = NOW()
+        WHERE id = $1 AND company_id = $2 AND status = 'published'
+          AND NOT EXISTS (
+            SELECT 1 FROM dm_ab_tests t
+             WHERE t.company_id = $2::uuid AND t.status = 'running'
+               AND $1::uuid IN (t.variant_a_page_id, t.variant_b_page_id, t.variant_c_page_id)
+          )
+        RETURNING id, short_code, status
+     )
+     SELECT (SELECT to_jsonb(u) FROM upd u) AS updated,
+            (SELECT p.status FROM dm_pages p WHERE p.id = $1::uuid AND p.company_id = $2::uuid) AS cur_status,
+            EXISTS (
+              SELECT 1 FROM dm_ab_tests t
+               WHERE t.company_id = $2::uuid AND t.status = 'running'
+                 AND $1::uuid IN (t.variant_a_page_id, t.variant_b_page_id, t.variant_c_page_id)
+            ) AS ab_running`,
     [id, companyId]
   );
-  return result.rows[0] || null;
+  const rec = result.rows[0] || {};
+  if (rec.updated) return { row: rec.updated, block: null };
+  const cur = rec.cur_status == null ? null : String(rec.cur_status);
+  if (cur === null) return { row: null, block: 'not_found' };
+  if (cur !== 'published') return { row: null, block: 'not_published' };
+  if (rec.ab_running === true) return { row: null, block: 'ab_running' };
+  return { row: null, block: 'race' };
 }
 
 /**
@@ -477,17 +486,28 @@ export async function stopDm(id: string, companyId: string) {
  * 재개는 이미 있는 문서의 상태를 되돌리는 것뿐이다. 축이 다른 두 일을 한 함수에 묶으면
  * 재개가 코드 발급 실패에 끌려 들어간다.
  */
-export async function resumeDm(id: string, companyId: string) {
+export async function resumeDm(id: string, companyId: string): Promise<DmTransitionResult> {
   const result = await query(
     // 추첨 완료 판정도 같은 문장 안에 둔다 — 밖에 두면 조회와 UPDATE 사이에 5분 워커가 추첨을 claim해
     // "이미 추첨된 행사가 다시 열린" 상태가 그대로 생긴다(Codex 3R high).
-    `UPDATE dm_pages SET status = 'published', updated_at = NOW()
-      WHERE id = $1 AND company_id = $2 AND status = 'stopped'
-        AND NOT EXISTS (SELECT 1 FROM dm_draw_runs dr WHERE dr.campaign_id = $1::uuid)
-      RETURNING id, short_code, status`,
+    `WITH upd AS (
+       UPDATE dm_pages SET status = 'published', updated_at = NOW()
+        WHERE id = $1 AND company_id = $2 AND status = 'stopped'
+          AND NOT EXISTS (SELECT 1 FROM dm_draw_runs dr WHERE dr.campaign_id = $1::uuid)
+        RETURNING id, short_code, status
+     )
+     SELECT (SELECT to_jsonb(u) FROM upd u) AS updated,
+            (SELECT p.status FROM dm_pages p WHERE p.id = $1::uuid AND p.company_id = $2::uuid) AS cur_status,
+            EXISTS (SELECT 1 FROM dm_draw_runs dr WHERE dr.campaign_id = $1::uuid) AS drawn`,
     [id, companyId]
   );
-  return result.rows[0] || null;
+  const rec = result.rows[0] || {};
+  if (rec.updated) return { row: rec.updated, block: null };
+  const cur = rec.cur_status == null ? null : String(rec.cur_status);
+  if (cur === null) return { row: null, block: 'not_found' };
+  if (cur !== 'stopped') return { row: null, block: 'not_stopped' };
+  if (rec.drawn === true) return { row: null, block: 'drawn' };
+  return { row: null, block: 'race' };
 }
 
 /**

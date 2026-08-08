@@ -94,10 +94,17 @@ export async function submitEventResponse(input: SubmitInput): Promise<SubmitRes
   if (input.phone) responseData.phone = String(input.phone).replace(/[^0-9]/g, '');
 
   // 1인1회 부분 UNIQUE 충돌 시 INSERT 무시 → 기존 결과 반환
+  // ★ 2026-08-08 (0806 트랙 Codex 4R high) **추첨이 이미 실행된 lucky_draw는 응모를 받지 않는다 — 같은 문장 안에서.**
+  //   stop·resume·A/B 시작·추첨 claim을 잇는 per-DM 잠금 공사 대신, 실제 피해("당첨될 수 없는 응모")가
+  //   생기는 길목 하나를 막는다. 판정이 문장 밖이면 그 사이에 5분 워커가 claim해 같은 상태가 생긴다(TOCTOU).
+  //   `draw_at`은 축이 아니다 — claim 전 응모는 추첨 모수에 들어가므로 막을 이유가 없다.
+  //   가드 축은 별도 boolean 파라미터로 — 한 파라미터를 컬럼 대입과 비교 두 문맥에 쓰면 42P08 부류다.
   const ins = await query(
     `INSERT INTO dm_event_responses
        (company_id, campaign_id, section_id, section_type, customer_id, anonymous_id, response_data, ip_address, user_agent)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
+      WHERE $10::boolean = false
+         OR NOT EXISTS (SELECT 1 FROM dm_draw_runs dr WHERE dr.campaign_id = $2::uuid)
      ON CONFLICT (campaign_id, section_id, COALESCE(customer_id::text, anonymous_id))
        WHERE COALESCE(customer_id::text, anonymous_id) IS NOT NULL
        DO NOTHING
@@ -106,6 +113,7 @@ export async function submitEventResponse(input: SubmitInput): Promise<SubmitRes
       companyId, campaignId, input.sectionId, input.sectionType,
       customerId, anonymousId, JSON.stringify(responseData),
       input.ip, input.ua,
+      input.sectionType === 'lucky_draw',
     ],
   );
 
@@ -117,10 +125,15 @@ export async function submitEventResponse(input: SubmitInput): Promise<SubmitRes
        ORDER BY occurred_at ASC LIMIT 1`,
       [campaignId, input.sectionId, dedupeKey],
     );
-    if (input.sectionType === 'roulette') {
-      return { ok: true, already: true, result: ex.rows[0]?.response_data?.spin_result || null };
+    if (ex.rows.length > 0) {
+      if (input.sectionType === 'roulette') {
+        return { ok: true, already: true, result: ex.rows[0]?.response_data?.spin_result || null };
+      }
+      return { ok: true, already: true };
     }
-    return { ok: true, already: true };
+    // 기존 응답도 없는데 0행 = 위 추첨 마감 가드가 걸렀다. 추첨은 1회뿐이라 이 응모는 당첨될 수 없다 —
+    // 받은 척하지 않고 사실대로 알린다(바뀐 것이 없으면 성공이라 답하지 않는다).
+    return { ok: false, status: 409, error: '이미 추첨이 끝난 이벤트예요. 다음 행사를 기다려 주세요.' };
   }
 
   const responseId: string = ins.rows[0].id;

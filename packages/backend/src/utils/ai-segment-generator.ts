@@ -26,6 +26,7 @@
 
 import { callAIWithFallback } from '../services/ai';
 import { buildCustomerFilter } from './customer-filter';
+import { getFieldByKey, StandardFieldMapping } from './standard-field-map';
 import { query } from '../config/database';
 
 // ════════════════════════════════════════════════════════════════════
@@ -52,7 +53,15 @@ export interface GenerateSegmentResult {
     region: string | null;
     last_purchase_date: string | null;
     total_purchase_amount: number | null;
+    /** ★ 2026-08-08 filter가 참조한 필드 값(키 = fieldKey) — sampleFields가 목록을 소유 */
+    [extra: string]: unknown;
   }>;
+  /**
+   * ★ 2026-08-08 (임은지 접수) filter가 참조한 필드 — 샘플 추가 열·추출 후 수신자 meta의 축.
+   * 라벨은 FIELD_MAP displayName 파생(별도 라벨 테이블 금지 — LESSONS_BACKEND). 회사별 커스텀 라벨은
+   * 프론트가 자기 스키마(enabledFields)로 덮는다.
+   */
+  sampleFields: Array<{ field_key: string; display_name: string; data_type: string; category: string }>;
 }
 
 export class SegmentGenerationError extends Error {
@@ -266,7 +275,7 @@ export async function generateSegmentFromNaturalLanguage(
   const { filter, explanation } = await convertNaturalLanguageToFilter(input);
 
   // 매칭 수 + 샘플 5건 (CT-01 buildCustomerFilter + COUNT + LIMIT, 문자 발송 가능 기준)
-  const { matchCount, samples } = await previewMatching(input.companyId, filter);
+  const { matchCount, samples, sampleFields } = await previewMatching(input.companyId, filter);
 
   // 0건 결과 = 자동 완화 X (D171 영구 룰)
   if (matchCount === 0) {
@@ -276,7 +285,7 @@ export async function generateSegmentFromNaturalLanguage(
     );
   }
 
-  return { filter, explanation, matchCount, samples };
+  return { filter, explanation, matchCount, samples, sampleFields };
 }
 
 /**
@@ -284,11 +293,29 @@ export async function generateSegmentFromNaturalLanguage(
  *
  * 발송 가능 강제 = is_active=true + sms_opt_in=true + !is_opt_out + !is_invalid.
  */
+/** 샘플 고정 열 — filter 참조 필드 추가 열은 여기 없는 키만 더한다(별칭 충돌 차단). */
+const BASE_SAMPLE_KEYS = new Set(['id', 'phone', 'name', 'gender', 'region', 'last_purchase_date', 'total_purchase_amount']);
+
+/**
+ * ★ 2026-08-08 (임은지 접수 08-05) filter가 참조한 필드를 샘플 열로 함께 싣는다.
+ * 조건 필드가 안 보이면 미리보기로 "조건이 맞았는지"를 검증할 수 없고, 추출 뒤 발송 화면의
+ * 열·%변수% 축(meta)도 이 목록에서 나온다. 축은 filter의 키 하나다 — { field: { operator, value } }
+ * 구조라 그 키가 곧 조건 필드고, 매핑은 FIELD_MAP(단일 기준)으로만 푼다.
+ * FIELD_MAP 밖 키는 조용히 제외(fail-safe — 컬럼명을 추측해 SQL을 만들지 않는다).
+ * sms_opt_in은 발송 가능 강제로 항상 true라 싣지 않는다.
+ */
+function resolveFilterSampleFields(filter: Record<string, unknown> | null | undefined): StandardFieldMapping[] {
+  return Object.keys(filter || {})
+    .filter((k) => !BASE_SAMPLE_KEYS.has(k) && k !== 'sms_opt_in')
+    .map((k) => getFieldByKey(k))
+    .filter((f): f is StandardFieldMapping => !!f);
+}
+
 export async function previewMatching(
   companyId: string,
   filter: Record<string, { operator: string; value: any }>,
   sampleSize = 5,
-): Promise<{ matchCount: number; samples: GenerateSegmentResult['samples'] }> {
+): Promise<{ matchCount: number; samples: GenerateSegmentResult['samples']; sampleFields: GenerateSegmentResult['sampleFields'] }> {
   // CT-01 호환 SQL 빌드 ($1 = companyId, $2~ = filter values)
   const { sql: filterSql, params } = buildCustomerFilter(filter, {
     tableAlias: 'c',
@@ -307,11 +334,19 @@ export async function previewMatching(
     ${filterSql}
   `;
 
+  // filter 참조 필드 추가 열 — 식별자는 사용자 입력이 아니라 FIELD_MAP 상수(columnName)에서만 나온다.
+  const extraFields = resolveFilterSampleFields(filter);
+  const extraSelect = extraFields
+    .map((f) => (f.storageType === 'custom_fields'
+      ? `, c.custom_fields ->> '${f.columnName}' AS "${f.fieldKey}"`
+      : `, c.${f.columnName} AS "${f.fieldKey}"`))
+    .join('');
+
   const countSql = `SELECT COUNT(*)::int AS cnt FROM customers c WHERE ${baseWhere}`;
   const safeSampleSize = Math.max(1, Math.min(sampleSize, 50));
   const sampleSql = `
     SELECT c.id, c.phone, c.name, c.gender, c.region,
-           c.last_purchase_date, c.total_purchase_amount
+           c.last_purchase_date, c.total_purchase_amount${extraSelect}
       FROM customers c
      WHERE ${baseWhere}
      ORDER BY c.id ASC
@@ -326,14 +361,21 @@ export async function previewMatching(
 
   return {
     matchCount: Number(countRes.rows[0]?.cnt ?? 0),
-    samples: sampleRes.rows.map((r: any) => ({
-      id: r.id,
-      phone: r.phone,
-      name: r.name,
-      gender: r.gender,
-      region: r.region,
-      last_purchase_date: r.last_purchase_date,
-      total_purchase_amount: r.total_purchase_amount != null ? Number(r.total_purchase_amount) : null,
+    samples: sampleRes.rows.map((r: any) => {
+      const row: GenerateSegmentResult['samples'][number] = {
+        id: r.id,
+        phone: r.phone,
+        name: r.name,
+        gender: r.gender,
+        region: r.region,
+        last_purchase_date: r.last_purchase_date,
+        total_purchase_amount: r.total_purchase_amount != null ? Number(r.total_purchase_amount) : null,
+      };
+      for (const f of extraFields) row[f.fieldKey] = r[f.fieldKey] ?? null;
+      return row;
+    }),
+    sampleFields: extraFields.map((f) => ({
+      field_key: f.fieldKey, display_name: f.displayName, data_type: f.dataType, category: f.category,
     })),
   };
 }

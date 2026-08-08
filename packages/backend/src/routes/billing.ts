@@ -798,10 +798,12 @@ router.post('/taxbill-issues/:id/retry', async (req: Request, res: Response) => 
     //   그래서 사유와 명시 확인을 받는다. 판정은 UPDATE 안에서 한다 — 밖에서 읽고 쓰면 그 사이 상태가 바뀐다.
     const confirmed = (req.body as any)?.confirm === true;
     const reason = String((req.body as any)?.reason || '').trim().slice(0, 200);
+    // ★ 2026-08-07(2) 양수 화이트리스트(Codex 수용) — 무관문 재시도는 kind = original 뿐이다.
+    //   음수 조건(kind <> modify)은 미지·손상 값(kind CHECK 밖·NULL)을 무관문으로 통과시킨다 — fail-closed.
     const r = await pool.query(
       `UPDATE taxbill_issues SET status = 'ready', error = NULL
         WHERE id = $1::uuid AND status = 'failed'
-          AND (kind <> 'modify' OR ($2::boolean = true AND $3::text IS NOT NULL))
+          AND (kind = 'original' OR (kind = 'modify' AND $2::boolean = true AND $3::text IS NOT NULL))
         RETURNING id, kind, org_nts_confirm_num`,
       [id, confirmed, reason || null],
     );
@@ -818,6 +820,14 @@ router.post('/taxbill-issues/:id/retry', async (req: Request, res: Response) => 
             + ' 지금도 그 정정이 필요한지 확인하고 사유를 남겨야 재시도할 수 있습니다.'
             + (row.org_nts_confirm_num ? ` (당초 승인번호 ${row.org_nts_confirm_num})` : ''),
           code: 'TAXBILL_MODIFY_RETRY_CONFIRM_REQUIRED',
+        });
+      }
+      if (row && String(row.status) === 'failed' && String(row.kind) !== 'original') {
+        // 화이트리스트 밖(kind가 original·modify 어느 쪽도 아님 — 손상·미지 값) = 무엇을 다시 보내는지
+        // 모르는 문서라 재시도하지 않는다. 원본 장이 여기 오면 경합(재실패)이라 아래 일반 안내가 맞다.
+        return res.status(409).json({
+          error: '문서 종류를 확인할 수 없는 장이라 재시도를 막았습니다. 데이터 확인(대사)이 필요합니다.',
+          code: 'TAXBILL_KIND_UNKNOWN',
         });
       }
       return res.status(409).json({ error: '실패 상태의 장만 재시도할 수 있습니다. (이미 처리 중이거나 발행된 장일 수 있습니다)' });
@@ -912,11 +922,15 @@ router.post('/taxbill-issues/:id/reissue-production', async (req: Request, res: 
       // 같은 장(billing)에 **운영 발행 행이 이미 있으면** 거부 — 지금 걸릴 건은 없지만, 두 번 눌러도
       //   국세청에 두 장이 안 나가게 하는 자물쇠는 축에 박아 둔다.
       if (row.billing_id) {
+        //   ★ 2026-08-07(2) cancelled+승인번호 = 외부에 실존하는 운영 문서(웹훅 대사 기록)도 막는다.
+        //   ★ failed도 막는다(Codex 2R high 수용) — 305는 팝빌에 문서가 실존할 수 있고(승인번호 없음),
+        //     failed 운영 원본의 올바른 처치는 그 행의 [재시도]지 테스트베드 행 되돌리기가 아니다.
         const dup = await client.query(
           `SELECT 1 FROM taxbill_issues
             WHERE billing_id = $1::uuid AND id <> $2::uuid AND kind = 'original'
               AND COALESCE((to_jsonb(taxbill_issues) ->> 'is_test')::boolean, false) = false
-              AND status IN ('ready', 'submitted', 'issued')
+              AND (status IN ('ready', 'submitted', 'issued', 'failed')
+                   OR (status = 'cancelled' AND nts_confirm_num IS NOT NULL))
             LIMIT 1`,
           [row.billing_id, id],
         );
@@ -1011,13 +1025,16 @@ router.post('/taxbill-issues/:id/cancel', async (req: Request, res: Response) =>
       //     승인번호를 적는다. 그 행은 이미 국세청에 나간 문서의 재확인 큐다(정상 `ready`는 승인번호가 없다).
       //   ⛔ 사유 1(기재사항 착오정정)은 부(-)·정(+) 두 장이 한 쌍이라 한쪽만 내리면 원본은 상쇄됐는데
       //     대체 계산서가 사라진다. 묶음 단위 취소는 별건(§7).
+      //   ★ 2026-08-07(2) 양수 화이트리스트(Codex 수용) — 내릴 수 있는 것은 원본과 **단독 수정 장**
+      //     (우리가 만드는 사유 1·2·4·6 중 2·4·6)뿐이다. 음수 조건(IS DISTINCT FROM 1)은 미지·손상
+      //     코드를 단독 장으로 간주해 통과시킨다 — fail-closed.
       const r = await client.query(
         `UPDATE taxbill_issues
             SET status = 'cancelled', error = $2
           WHERE id = $1::uuid
             AND status = 'ready'
             AND nts_confirm_num IS NULL
-            AND modify_code IS DISTINCT FROM 1
+            AND (kind = 'original' OR (kind = 'modify' AND modify_code IN (2, 4, 6)))
         RETURNING confirmation_id`,
         [id, `발급 대기 취소 — ${reason}`],
       );
@@ -1039,6 +1056,8 @@ router.post('/taxbill-issues/:id/cancel', async (req: Request, res: Response) =>
           why = '국세청 승인번호가 있는 장입니다. 이미 발행된 문서라 내릴 수 없고, 정정은 수정세금계산서 축입니다.';
         } else if (Number(row.modify_code) === 1) {
           why = '사유 1(기재사항 착오정정)은 부(-)·정(+) 두 장이 한 쌍이라 한쪽만 내릴 수 없습니다.';
+        } else if (!(String(row.kind) === 'original' || (String(row.kind) === 'modify' && [2, 4, 6].includes(Number(row.modify_code))))) {
+          why = '문서 종류·사유 코드를 확인할 수 없는 장이라 내릴 수 없습니다. 데이터 확인(대사)이 필요합니다.';
         }
         return res.status(409).json({ error: why, code: 'TAXBILL_NOT_CANCELLABLE' });
       }
@@ -1189,6 +1208,23 @@ router.put('/confirmations/:id/issue-date', async (req: Request, res: Response) 
         return res.status(422).json({
           error: '업체 컨펌 전에는 계산서를 발급할 수 없습니다. 업체가 컨펌 링크를 누르거나, 메일·전화로 확인받았다면 [업체 확인 기록]을 남긴 뒤 작성일자를 지정해 주세요.',
           code: 'TAXBILL_CONFIRM_REQUIRED',
+        });
+      }
+      // ★ 2026-08-07(2) 취소된 장에 국세청 승인번호가 남아 있으면(웹훅 대사 기록 — 외부에 문서 실존)
+      //   재발행하지 않는다. 아래 NOT EXISTS 멱등은 cancelled를 빼므로 이 관문이 없으면 실존 문서와
+      //   같은 건이 한 장 더 나간다. 해소는 팝빌 대사 뒤 사람 몫(fail-closed).
+      const reconcile = await client.query(
+        `SELECT 1 FROM taxbill_issues t
+          WHERE t.confirmation_id = $1::uuid AND t.kind = 'original'
+            AND t.status = 'cancelled' AND t.nts_confirm_num IS NOT NULL
+          LIMIT 1`,
+        [String(req.params.id)],
+      );
+      if (reconcile.rows.length > 0) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: '취소된 장에 국세청 승인번호가 확인됩니다 — 그 문서가 실제로 발행돼 있다는 뜻이라, 다시 발행하면 같은 건이 두 장 나갑니다. 팝빌 대사 후 처리해 주세요.',
+          code: 'TAXBILL_RECONCILE_REQUIRED',
         });
       }
       const r = await client.query(
@@ -2172,9 +2208,13 @@ const handleBillingDelete = async (req: Request, res: Response) => {
     //   ★ `ready`도 막는다(Codex 재검증 critical) — 발급 큐에 들어간 상태다. 워커가 그 행을 집어
     //   외부로 발행하는 동안 여기서 장을 지우면, 발행은 옛 내용으로 나가고 새 장이 다시 원본 발행
     //   대상이 되어 **국세청에 같은 건이 두 장** 나간다. `FOR UPDATE`로 워커와 줄을 세운다.
+    //   ★ 2026-08-07(2) cancelled인데 승인번호가 있는 행 = 외부에 실존하는 문서(웹훅 대사 기록) —
+    //   같은 기간을 다시 발행하면 이중 발행이라 삭제도 막는다(재발행 길목 4곳과 같은 조건).
     const issuedBill = await client.query(
       `SELECT 1 FROM taxbill_issues
-        WHERE billing_id = ANY($1::uuid[]) AND status IN ('ready', 'submitted', 'issued')
+        WHERE billing_id = ANY($1::uuid[])
+          AND (status IN ('ready', 'submitted', 'issued')
+               OR (status = 'cancelled' AND nts_confirm_num IS NOT NULL))
         FOR UPDATE`,
       [targetIds],
     );

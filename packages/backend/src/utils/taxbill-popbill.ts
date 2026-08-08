@@ -610,6 +610,94 @@ export async function enqueueTaxbillResendsForIssue(
   return targets.length;
 }
 
+/**
+ * ★ 2026-08-08 발행 메일 아카이브 참조(Harold 지시 0807 · ENV TAXBILL_ARCHIVE_BCC) — **확정 트랜잭션 밖 best-effort.**
+ *
+ * 원칙(§2-1) = "우리 아카이브 주소 때문에 고객 계산서 발행 확정을 미루지 않는다."
+ * 처음 구현은 확정 트랜잭션 안에 SAVEPOINT로 격리하는 형태였는데 Codex 1R이 그 형태 자체를 깼다 —
+ * SAVEPOINT 복구 실패가 트랜잭션을 오염시켜(25P02) issued 갱신·고객 참조 기록까지 조용히 되돌리고,
+ * 아카이브 전용 tableExists 조회 거절만으로도 확정이 롤백된다. **격리 장치를 덧대는 대신 트랜잭션 밖으로
+ * 뺐다** — COMMIT 뒤 자기 연결(pool)로 기록하고, 어떤 실패도 던지지 않고 [아카이브미기록] 로그로만 남긴다
+ * (issueId·mgtKey·대상 수 — 복구는 수동 재발송 창구 몫이고, 고객에게는 아무 영향이 없다).
+ * 멱등 UNIQUE(taxbill_issue_id, lower(email))라 재시도가 겹쳐도 중복 발송 없음.
+ * opts(archiveBcc·tableExists·exec) 주입은 테스트 전용 — 기본은 ENV·카탈로그·pool.
+ */
+let archiveEnvWarned = false;
+export async function enqueueTaxbillArchiveCopies(
+  issueId: string,
+  mgtKey: string,
+  to: { primary: { email: string; name?: string | null } | null; cc: string[] },
+  opts?: {
+    archiveBcc?: string | null;
+    tableExists?: () => Promise<boolean>;
+    exec?: (sql: string, params?: any[]) => Promise<any>;
+  },
+): Promise<number> {
+  const raw = opts?.archiveBcc !== undefined ? opts.archiveBcc : (process.env.TAXBILL_ARCHIVE_BCC ?? null);
+  const archives = selectTaxbillArchiveTargets(raw, [to.primary?.email || '', ...selectTaxbillResendTargets(to)]);
+  // 비어 있지 않은 ENV에서 형식 무효 토큰이 버려지면 아카이브가 무음으로 꺼진 셈이다 — 1회 경고(Codex 1R medium).
+  const invalid = String(raw || '').split(/[,;\s]+/).filter((t) => t.trim() && !t.includes('@'));
+  if (invalid.length > 0 && !archiveEnvWarned) {
+    archiveEnvWarned = true;
+    console.error(`[팝빌][아카이브설정오류] TAXBILL_ARCHIVE_BCC 형식 무효 토큰 ${invalid.length}건 — ${invalid.join(', ')} (발행은 막지 않는다)`);
+  }
+  if (archives.length === 0) return 0;
+  try {
+    const exists = await (opts?.tableExists ?? taxbillResendTableExists)();
+    if (!exists) {
+      console.error(
+        `[팝빌][아카이브미기록] issue=${issueId} key=${mgtKey} 대상=${archives.length} — 재전송 테이블 미생성(DDL 필요). 발행 확정은 이미 끝났고 아카이브 메일만 안 나간다`,
+      );
+      return 0;
+    }
+    const exec = opts?.exec ?? ((sql: string, params?: any[]) => pool.query(sql, params));
+    // ★ Codex 2R medium 수용 — 실패는 수신자별로 격리한다. 한 주소가 막혀 뒤 주소까지 누락되면
+    //   로그의 "대상 수"만으로는 누가 빠졌는지 재구성할 수 없다. 실패 주소를 그대로 남긴다.
+    let ok = 0;
+    for (const rcpt of archives) {
+      try {
+        await exec(
+          `INSERT INTO taxbill_email_resends (taxbill_issue_id, invoicer_mgt_key, email)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (taxbill_issue_id, lower(email)) DO NOTHING`,
+          [issueId, mgtKey, rcpt],
+        );
+        ok += 1;
+      } catch (insErr: any) {
+        console.error(
+          `[팝빌][아카이브미기록] issue=${issueId} key=${mgtKey} 주소=${rcpt} — ${String(insErr?.message ?? insErr).slice(0, 200)} (발행 확정은 이미 끝났다)`,
+        );
+      }
+    }
+    return ok;
+  } catch (err: any) {
+    console.error(
+      `[팝빌][아카이브미기록] issue=${issueId} key=${mgtKey} 대상=${archives.length} — ${String(err?.message ?? err).slice(0, 200)} (발행 확정은 이미 끝났다)`,
+    );
+    return 0;
+  }
+}
+
+/**
+ * ★ 2026-08-08 발행 메일 아카이브 참조 대상(순수) — ENV TAXBILL_ARCHIVE_BCC(쉼표·세미콜론·공백 구분)를
+ * 참조 재전송 큐에 합칠 주소로 고른다. 팝빌 발행 payload에 BCC 필드가 없어(invoiceeEmail1 대표 1명뿐)
+ * 재전송 축이 유일한 통로다. 대표·고객 참조와 중복(대소문자 무시)이면 제외 — 그쪽으로 이미 간다.
+ * 상한을 두지 않는 이유 — ENV는 우리가 통제하는 값이라 폭주 축이 아니다(고객 참조 상한 10과 축이 다르다).
+ */
+export function selectTaxbillArchiveTargets(raw: string | null | undefined, exclude: string[]): string[] {
+  const seen = new Set(exclude.map((e) => String(e || '').trim().toLowerCase()).filter(Boolean));
+  const out: string[] = [];
+  for (const part of String(raw || '').split(/[,;\s]+/)) {
+    const e = part.trim();
+    if (!e || !e.includes('@')) continue;
+    const key = e.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(e);
+  }
+  return out;
+}
+
 export function selectTaxbillResendTargets(to: {
   primary: { email: string; name?: string | null } | null;
   cc: string[];
@@ -845,6 +933,10 @@ async function processOne(id: string, cfg: PopbillConfig): Promise<'issued' | 's
         } catch { /* best-effort — 로그가 진실 */ }
         return 'submitted';
       }
+      // ★ 2026-08-08 아카이브 참조는 확정 트랜잭션 **밖** best-effort — 여기 도달 = COMMIT 완료.
+      //   함수가 어떤 실패도 던지지 않으므로(로그만) 발행 결과에 영향이 없고, 워커 tick의 재전송 패스가
+      //   발행 패스 직후 돌므로 같은 tick에 아카이브 메일까지 나간다.
+      await enqueueTaxbillArchiveCopies(id, mgtKey, taxbillTo);
       return 'issued';
     }
 
