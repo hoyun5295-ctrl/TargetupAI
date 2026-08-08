@@ -755,7 +755,28 @@ useEffect(() => {
   })();
 }, []);
 useEffect(() => { if (activeTab === 'templates') { loadAdminTemplates(); loadAdminRcsTemplates(); } }, [activeTab, templateFilter]);
-useEffect(() => { if (activeTab === 'callbacks') { loadSenderRegPendingCount(); } }, [activeTab]);
+// ★ 2026-08-08 (임은지 접수 1·2 + 남지현 댓글) **알림 카운트의 수명을 화면에서 떼어낸다.**
+//   그전에는 `activeTab === 'callbacks'`일 때만 불렀다 — 뱃지는 상단 메뉴에 있는데 그 값을 채우는 호출이
+//   그 화면 진입에 묶여 있어, "발신번호 관리 탭을 눌러야 그제서야 알림이 뜨는" 상태였다(뱃지의 목적과 정반대).
+//   새로고침으로도 안 뜬 이유도 같다 — 새로고침 직후 activeTab이 callbacks가 아니면 호출 자체가 없다.
+//   진입 시 1회 + 60초 주기. 백그라운드 탭에서는 건너뛴다(하루 종일 열어 두는 화면이라 빈 호출을 만들지 않는다).
+//   승인·반려 직후 재조회는 각 핸들러가 이미 부른다 — 그건 그대로 둔다(즉시 반영).
+useEffect(() => {
+  let alive = true;
+  let inFlight = false;
+  const tick = async () => {
+    if (!alive || inFlight) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    inFlight = true;
+    try { await loadSenderRegPendingCount(); } finally { inFlight = false; }
+  };
+  tick();
+  const timer = setInterval(tick, 60000);
+  // 건너뛴 동안 값이 낡는다 — 화면으로 돌아오는 순간 맞춘다(가드와 한 쌍이다).
+  document.addEventListener('visibilitychange', tick);
+  return () => { alive = false; clearInterval(timer); document.removeEventListener('visibilitychange', tick); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
 useEffect(() => { if (activeTab === 'callbacks' && callbackSubTab === 'registrations') { loadSenderRegistrations(senderRegFilter); } }, [activeTab, callbackSubTab, senderRegFilter]);
 useEffect(() => { if (activeTab === 'callbacks' && callbackSubTab === 'managers') { loadAllManagers(); } }, [activeTab, callbackSubTab, mgrFilter]);
 useEffect(() => { loadLineGroups(); }, []);
@@ -2471,6 +2492,12 @@ const handleSendBillingEmail = async (resend = false) => {
     }
   };
 
+  // ★ 2026-08-08 (임은지 접수) **알림은 축마다 따로 센다.**
+  //   서버는 이미 나눠서 준다 — { managers(위임장), registrations(발신번호 신청), total }.
+  //   그전에는 합계(count) 하나만 받아 `senderRegPendingCount`에 담고 그것을 **등록 신청 관리** 탭에 붙였다.
+  //   그래서 위임장 대기 1건이 발신번호 신청 탭 뱃지로 뜨고, 그 탭 목록은 신청만 보니 0건이었다
+  //   (실측: sender_registrations pending 0 · approved 2인데 뱃지 1).
+  //   필드가 없으면 0으로 둔다 — 못 세는 쪽이 **틀린 탭에 띄우는 쪽보다** 낫다(이 접수가 그 사고다).
   const loadSenderRegPendingCount = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -2479,7 +2506,8 @@ const handleSendBillingEmail = async (resend = false) => {
       });
       if (res.ok) {
         const data = await res.json();
-        setSenderRegPendingCount(data.count || 0);
+        setSenderRegPendingCount(Number(data.registrations ?? 0));
+        setPendingManagerCount(Number(data.managers ?? 0));
       }
     } catch (error) {
       console.error('대기 건수 로드 실패:', error);
@@ -3994,7 +4022,9 @@ const handleApproveRequest = async (id: string) => {
                 label: '발송 관리', color: 'emerald',
                 tabs: ['callbacks', 'stats', 'scheduled', 'allCampaigns', 'templates'] as const,
                 items: [
-                  { key: 'callbacks', label: '발신번호 관리', badge: senderRegPendingCount > 0 ? senderRegPendingCount : 0 },
+                  // ★ 2026-08-08 상단 메뉴는 **두 축의 합** — "발신번호 관리에 볼 일 N건"이 여기선 맞는 말이다.
+                  //   화면에 보이는 두 탭 뱃지의 합으로 만든다(서버 total을 따로 받으면 뱃지끼리 어긋날 수 있다).
+                  { key: 'callbacks', label: '발신번호 관리', badge: senderRegPendingCount + pendingManagerCount },
                   { key: 'stats', label: '발송 통계', onClick: () => loadSendStats() },
                   { key: 'scheduled', label: '예약 관리' },
                   { key: 'allCampaigns', label: '캠페인 관리', onClick: () => loadAllCampaigns() },
@@ -4591,6 +4621,13 @@ const handleApproveRequest = async (id: string) => {
                 }`}
               >
                 등록현황 관리
+                {/* ★ 2026-08-08 (임은지 접수 3) 위임장 대기는 **이 탭**의 일이다 — 그전에는 옆 탭(등록 신청 관리)
+                    뱃지로 떠서, 알림을 보고 간 담당자가 빈 목록을 보고 되돌아왔다. */}
+                {pendingManagerCount > 0 && (
+                  <span className="ml-1.5 inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-red-500 rounded-full">
+                    {pendingManagerCount}
+                  </span>
+                )}
               </button>
             </div>
 

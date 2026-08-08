@@ -7,6 +7,7 @@
  */
 import { useEffect, useState } from 'react';
 import { CalendarClock, ChevronRight } from 'lucide-react';
+import { CHANNELS } from './EventCampaignModal';
 
 interface DraftRow {
   id: string;
@@ -14,8 +15,6 @@ interface DraftRow {
   channels: Record<string, any>;
   updated_at: string;
 }
-
-const CH_KEYS = ['dm', 'email', 'inapp'];
 
 export default function EventCampaignResumeBar({ refreshKey, onResume }: {
   refreshKey?: number;
@@ -37,7 +36,10 @@ export default function EventCampaignResumeBar({ refreshKey, onResume }: {
 
   if (loading || drafts.length === 0) return null;
 
-  const channelCount = (ch: any) => CH_KEYS.filter((k) => ch?.[k]?.payload).length;
+  // ★ 2026-08-08 (임은지 접수) **어느 채널인지를 목록에서 보여준다.**
+  //   그전에는 같은 판정으로 개수만 세어(`N채널`) 버려서, DM인지 이메일인지 알려면 하나씩 열어봐야 했다.
+  //   라벨은 EventCampaignModal의 CHANNELS 하나에서만 나온다(순서도 그 배열이 정한다 — 모달과 같은 차례로 읽힌다).
+  const savedChannels = (ch: any) => CHANNELS.filter((c) => ch?.[c.key]?.payload);
 
   return (
     <div className="rounded-xl border border-white/10 bg-slate-900/60 p-3 mb-4">
@@ -55,7 +57,15 @@ export default function EventCampaignResumeBar({ refreshKey, onResume }: {
             className="inline-flex items-center gap-1.5 text-[11px] text-violet-100 border border-violet-400/40 bg-violet-500/10 hover:bg-violet-500/20 rounded-lg px-2.5 py-1.5 transition-colors max-w-full"
           >
             <span className="truncate max-w-[220px]">{d.title || '행사 캠페인'}</span>
-            <span className="text-white/40 shrink-0">· {channelCount(d.channels)}채널</span>
+            {savedChannels(d.channels).map((c) => (
+              <span
+                key={c.key}
+                className="shrink-0 inline-flex items-center gap-1 text-[10px] font-medium text-white/70 bg-white/10 border border-white/10 rounded px-1.5 py-0.5"
+              >
+                <c.icon className="w-2.5 h-2.5" />
+                {c.label}
+              </span>
+            ))}
             <ChevronRight className="w-3 h-3 shrink-0" />
           </button>
         ))}

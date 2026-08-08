@@ -61,7 +61,9 @@ interface ChannelMeta {
   icon: any;
 }
 
-const CHANNELS: ChannelMeta[] = [
+// ★ 2026-08-08 export — 임시 보관 목록(EventCampaignResumeBar)이 같은 라벨을 쓴다.
+//   별도 라벨 표를 만들면 그것이 또 하나의 죽은 사본이 된다(발송 사전 라벨 단일소스 규약과 같은 이유).
+export const CHANNELS: ChannelMeta[] = [
   { key: 'dm', label: '모바일 DM', desc: '카드형 미디어 페이지 + 문자 발송', icon: Smartphone },
   { key: 'email', label: '이메일', desc: '비주얼 블록 이메일', icon: Mail },
   { key: 'inapp', label: '인앱 메시지', desc: '자사몰 팝업·슬라이드', icon: Layers },
