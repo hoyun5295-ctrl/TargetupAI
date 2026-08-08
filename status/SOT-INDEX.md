@@ -28,11 +28,12 @@
 |---|---|---|---|
 | **자동마케팅 타겟팅 재설계** — 세그먼트 계약·결정성·행동 축 확장 (기능 상설 = §0 **자동마케팅**) | [2026-08-03-automarketing-targeting-redesign-design.md](../docs/2026-08-03-automarketing-targeting-redesign-design.md) | 구조·불변 원칙·이력은 **기능 문서**가 소유 — 여기는 시점 설계 근거만(진단 §2 · 목표 구조 §4 · 착수 순서 §5) | **자동마케팅** |
 | **여정 재설계 — 트리거 재정의·데이터 게이트·커서 축·연동 배선** (기능 상설 = §0) | [2026-08-01-journey-redesign-design.md](../docs/2026-08-01-journey-redesign-design.md) | 구현 결과 = §11-A~§11-D-7·§13-A·§14 · 트리거 정의 = §3 · 접은 예약 설계 = §12 | 여정 재설계 이어가자 |
+| **여정 이어달리기(다음 수 추천)** — 구현 완료·배포 대기 (기능 상설 = §0 여정) | [2026-08-08-journey-succession-design.md](../docs/2026-08-08-journey-succession-design.md) | 확정 사실(실측) §1 → 구조 결정 §2 → **구현 결과 §9-A**. 간선 계약 = §3, 함정 = §11 | **여정 이어달리기** |
 | 정산 — 청구서 5항목·발행 단위·요금제 일할·에이전트 축 | [2026-07-26-billing-scope-and-corrections-design.md](../docs/2026-07-26-billing-scope-and-corrections-design.md) | §0-A(현재 상태·실측 확정값) → §9(이월) · 속도 결론 = **§9-9**. 0725 착수 기록 = [2026-07-25-billing-restructure-handoff.md](../docs/2026-07-25-billing-restructure-handoff.md) | — |
 | 거래내역서 일괄발급·컨펌·세금계산서(팝빌) | [2026-07-28-bulk-invoice-confirm-taxbill-design.md](../docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md) | §9(종결 상태·이월) · §7-0(팝빌 API 요지) · §8(구현 순서) | — |
 | 브랜드메시지 청구·발송 개방 + 청구 유형 축 CT | [2026-07-29-brand-message-billing-design.md](../docs/2026-07-29-brand-message-billing-design.md) | §7(오픈 전 남은 것) · 구조 이유는 §1~§5 | — |
 | 정산 특례 — 추가 청구(080·부가서비스·최소과금)·발행 그룹 | [2026-07-30-billing-extras-and-groups-design.md](../docs/2026-07-30-billing-extras-and-groups-design.md) | §9(남은 것) → §7(확인 5건) · 착수 시 §6(발행 그룹) · 구조 근거 = §2-3·§3 | — |
-| **0807 세션 인계 — 접수 4건 + 정산 점검(미완 착수 원장)** | [2026-08-07-session-handoff.md](../docs/2026-08-07-session-handoff.md) | §0 배포 상태 → §1 첫 작업 4건(순서 고정) → §2 서버 실측 사실. 별건 = §3, 재발 방지 = §4 | **0807 인계 이어가자** |
+| **0807 세션 인계 — 접수 4건 + 정산 점검** ✔**2026-08-08 종결**(착수 항목 소진·전량 배포) | [2026-08-07-session-handoff.md](../docs/2026-08-07-session-handoff.md) | 남은 것만 = **실측 3건**(§0 하단) · **별건 §3**(착수 판단 = Harold). §1 착수 항목은 전부 닫혔다 — 다시 진입하지 않는다 | (종결 — 재진입 없음) |
 | 거래내역서 상세 구분 칸(웹 계정명·에이전트 발송ID) — 처리 완료 + 다음 세션 별건 5 | [2026-07-31-billing-detail-storeid-handoff.md](../docs/2026-07-31-billing-detail-storeid-handoff.md) | 전체(짧다). 결론 → 다음 세션 과제 5건(아이디룩 미발송 7,701건이 1순위) | **거래내역서 구분 칸** |
 | 브랜드메시지 발송 경로 재구축(QTmsg Agent) | [2026-07-29-brand-message-qtmsg-agent-design.md](../docs/2026-07-29-brand-message-qtmsg-agent-design.md) | §5(착수 전 확정 4건) → §7(순서). 스펙 = §1·§2 | **브랜드메시지 발송경로 재구축** |
 | 레거시 서버(27.102.203.143) 폐기 | [레거시서버_폐기_플랜.md](../docs/레거시서버_폐기_플랜.md) | 전체 (진행 시 갱신) | — |

@@ -47,6 +47,8 @@ import SpamFilterTestModal from '../components/SpamFilterTestModal';
 import InfoAlertJourneyBuilder, { type InfoAlertBuildResult } from '../components/journey/InfoAlertJourneyBuilder';
 import DateAnchorJourneyBuilder, { type DateAnchorBuildResult } from '../components/journey/DateAnchorJourneyBuilder';
 import { TRIGGER_EVENTS } from '../utils/journey-trigger-catalog';
+// ★ 2026-08-08 — 혜택 placeholder 판정·치환 단일 정의(스튜디오 카드와 같은 규약).
+import { fillBenefitPlaceholders } from '../utils/benefit-placeholder';
 import { buildAdMessageFront, buildAdSubjectFront } from '../utils/formatDate';
 import { detectLiquidSyntax, renderLiquid, flattenCustomerForLiquid, SAMPLE_CUSTOMERS } from '../utils/liquid-templating';
 // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 미리보기 컨트롤타워.
@@ -238,6 +240,10 @@ interface JourneyOpportunity {
   valueAtStake?: number;
   priority?: 'high' | 'medium';
   suggestedObjective: string;
+  /** ★ 2026-08-08 이어달리기 — 이 카드가 약속한 트리거. 생성 요청에 실어야 약속대로 만들어진다. */
+  preferTriggerEvent?: string;
+  /** ★ 2026-08-08 — 카드에 함께 나가는 고지(소급 금지·겹침). 서버가 정한 문장을 그대로 보여준다. */
+  notices?: string[];
 }
 
 // ★ D188 Phase 2-B-1 (2026-05-21): step_type 3종 확장 — message/wait/condition.
@@ -323,6 +329,13 @@ interface AIJourneyPackage {
   budgetMonthlyHint: number | null;
   thresholdCostHint: number | null;
   reasoning: string;
+  /**
+   * ★ 2026-08-08 이어달리기 — 서버가 계약값으로 고정한 트리거. 값이 있을 때만 저장에 트리거를 싣는다.
+   *   (마케팅 여정은 원래 트리거를 안 보내고 템플릿 기본값을 쓴다 — 그대로 두면 추천이 약속한 여정이 안 만들어진다)
+   */
+  presetTriggerEvent?: string | null;
+  /** ★ 2026-08-08 혜택 입력 — 이 패키지 생성에 실제로 쓰인 혜택. 재생성이 다시 싣는다. */
+  benefitText?: string | null;
   // ★ 2026-06-30 여정 일반화 — 시작 방식(start_kind) + 날짜축/one_shot. 미설정(기존 마케팅 여정)이면 저장 시 미전송 = 옛 동작 그대로.
   startKind?: 'event' | 'standing' | 'date_anchor' | 'one_shot';
   anchorDate?: string | null;
@@ -540,6 +553,12 @@ export default function JourneysPage() {
   // ★ 2026-06-29: "오늘의 여정 기회" 카드 (실데이터 집계) + 페이징
   const [opportunities, setOpportunities] = useState<JourneyOpportunity[]>([]);
   const [oppPage, setOppPage] = useState(0);
+  /**
+   * ★ 2026-08-08 이어달리기 — 방금 저장한 여정의 **실제 시작 신호**(저장 응답에서 읽는다).
+   *   여기서 패키지 값을 믿으면 안 된다: 마케팅 여정은 저장 때 트리거를 안 보내고 템플릿 기본값을 쓴다.
+   *   세션 한정이라 닫으면 끝이다(운영 중 추천은 기회 카드가 상시 담당한다).
+   */
+  const [successionFrom, setSuccessionFrom] = useState<string | null>(null);
   const [callbackOptions, setCallbackOptions] = useState<CallbackOption[]>([]);
   const [opt080Number, setOpt080Number] = useState('');
   const [loading, setLoading] = useState(true);
@@ -559,6 +578,12 @@ export default function JourneysPage() {
   const [nextStepLoading, setNextStepLoading] = useState<Record<string, boolean>>({});
   // ★ D211+ Phase 3 (2026-05-23 Harold 명시): status 필터 토글 (보관함 영역 분리)
   const [statusFilter, setStatusFilter] = useState<JourneyStatusFilter>('all');
+  /**
+   * ★ 2026-08-08 — 지금 손에 있는 목록이 **어느 필터의 응답인가.**
+   *   필터는 조회보다 먼저 바뀌고, 겹친 옛 요청이 늦게 도착해 목록을 덮을 수도 있다.
+   *   "활성 후속 여정이 없다"를 이 목록으로 증명하려면 목록의 출처가 지금 필터와 같아야 한다.
+   */
+  const [loadedStatus, setLoadedStatus] = useState<JourneyStatusFilter | null>(null);
   // ★ D211+ Phase 3-fix (2026-05-23 Harold 명시): archive/unarchive/delete 영역 커스텀 다크 톤 모달 (native confirm/prompt 폐기)
   const [actionModal, setActionModal] = useState<{ mode: JourneyActionMode; journeyId: string; journeyName: string } | null>(null);
   // ★ D218+ (2026-05-26): 활성화 자동 검증 모달 + 정지 이력 모달
@@ -601,6 +626,9 @@ export default function JourneysPage() {
 
   // One-shot AI 생성 흐름
   const [objective, setObjective] = useState('');
+  // ★ 2026-08-08 혜택 입력(선택) — 모달의 자연어·빠른 시작 두 경로가 같은 값을 쓴다.
+  //   1클릭 카드(이어달리기·기회)는 이 상자를 읽지 않는다 — 옛 입력이 엉뚱한 여정에 끼면 안 된다.
+  const [benefitText, setBenefitText] = useState('');
   const [generating, setGenerating] = useState(false);
   // ★ 2026-08-01 설계서 §2-3 — 이 회사가 지금 만들 수 있는 여정. 못 만드는 것은 사유와 함께 잠근다.
   //   조회 실패면 잠그지 않는다(화면 편의 게이트). 실제 발송 차단은 백엔드가 담당한다.
@@ -670,7 +698,11 @@ export default function JourneysPage() {
       const cd = await cr.json();
       const od = await opr.json().catch(() => ({ success: false }));
       if (od?.success) setOpportunities(Array.isArray(od.opportunities) ? od.opportunities : []);
-      if (jd.success) setJourneys(jd.journeys || []);
+      if (jd.success) {
+        setJourneys(jd.journeys || []);
+        // 이 목록이 어느 필터의 성공 응답인지 함께 적는다(요청 시점 값 — 늦게 온 옛 응답이면 지금 필터와 어긋난다).
+        setLoadedStatus(statusFilter);
+      }
       else if (jd.code === 'AI_OPERATOR_GATED') setError('AI Operator 진입 권한이 없습니다. 관리자에게 문의해주세요.');
       else setError(jd.error || '여정 조회 실패');
       if (cd.success) {
@@ -1022,23 +1054,31 @@ export default function JourneysPage() {
   };
 
   // ════════ One-shot AI 생성 ════════
-  const handleAIGenerate = async (templateHint?: TemplateCode, objectiveOverride?: string) => {
+  // ★ 2026-08-08 이어달리기 — 3번째 인자 preferTriggerEvent: 추천이 약속한 트리거를 서버가 고정한다.
+  //   미지정 호출(자연어·빠른 시작·기존 기회 카드)은 옛 흐름 그대로다.
+  // ★ 2026-08-08 혜택 입력 — 4번째 인자 benefit: 호출부가 명시로 줄 때만 싣는다.
+  //   state를 직접 읽지 않는 이유 = 1클릭 카드가 모달에 남은 옛 입력을 끌고 가면 안 된다.
+  const handleAIGenerate = async (templateHint?: TemplateCode, objectiveOverride?: string, preferTriggerEvent?: string, benefit?: string) => {
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
-    const effectiveObjective = (objectiveOverride ?? objective).trim();
-    if (!templateHint && effectiveObjective.length < 3) {
+    // 프리셋만 온 경로(다음 수 카드)는 목표 골격을 서버가 채운다 — 입력창에 남은 옛 문장을 끌고 가지 않는다.
+    const effectiveObjective = (objectiveOverride ?? (preferTriggerEvent ? '' : objective)).trim();
+    if (!templateHint && !preferTriggerEvent && effectiveObjective.length < 3) {
       toast.warning('여정 목표를 자연어로 입력하거나 빠른 시작 카드를 선택해주세요.');
       return;
     }
     setGenerating(true);
     setProgressStep(0);
     setError(null);
+    setSuccessionFrom(null);   // 새 생성이 시작되면 이전 "다음 수" 안내는 사라진다
     try {
       const res = await fetch('/api/ai/operator/journeys-ai-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
         body: JSON.stringify({
-          objective: templateHint ? undefined : effectiveObjective,
+          objective: templateHint ? undefined : (effectiveObjective || undefined),
           templateHint,
+          preferTriggerEvent,
+          benefitText: benefit?.trim() || undefined,
         }),
       });
       const data = await res.json();
@@ -1115,6 +1155,23 @@ export default function JourneysPage() {
     return () => clearTimeout(timer);
   }, [generating, progressStep]);
 
+  /**
+   * ★ 2026-08-08 — **패키지를 다시 만드는 요청은 한 곳에서 조립한다.**
+   *   자리마다 인자를 손으로 맞추다가 프리셋 트리거를 세 번 떨어뜨렸다(검토 화면 · 추천 모달 · 대화형 수정).
+   *   프리셋이 있으면 그 축이 최우선이다 — 다시 만들기 한 번에 추천이 약속한 대상이 바뀌면 안 된다.
+   *   목적은 **생성에 실제로 쓴 문장**(genObjective)에서 온다. 입력창 값은 그 뒤에 바뀌었을 수 있다.
+   */
+  const regenerateFromPackage = (pkg: AIJourneyPackage) => {
+    const obj = genObjective.trim();
+    // 혜택도 프리셋과 같은 축이다 — 다시 만들기 한 번에 혜택이 placeholder로 되돌아가면 안 된다.
+    const benefit = pkg.benefitText || undefined;
+    if (pkg.presetTriggerEvent) {
+      void handleAIGenerate(undefined, obj || undefined, pkg.presetTriggerEvent, benefit);
+      return;
+    }
+    void handleAIGenerate(obj ? undefined : pkg.templateCode, obj || undefined, undefined, benefit);
+  };
+
   const handleRegenerate = () => {
     if (!aiPkg) return;
     setConfirm({
@@ -1124,7 +1181,7 @@ export default function JourneysPage() {
       confirmLabel: '다시 생성',
       onConfirm: () => {
         setEditingStepIdx(null);
-        void handleAIGenerate(aiPkg.templateCode === 'custom' && objective ? undefined : aiPkg.templateCode);
+        regenerateFromPackage(aiPkg);
       },
     });
   };
@@ -1295,6 +1352,36 @@ export default function JourneysPage() {
     if (!aiPkg || !refining) return;
     updateStep(refining.stepIdx, { messageTemplate: candidate.message });
     setRefining(null);
+  };
+
+  /**
+   * ★ 2026-08-08 혜택 입력 — 전 스텝의 placeholder를 입력한 혜택으로 일괄 치환한다.
+   *   문자열 치환이라 즉시·크레딧 0. 치환된 혜택은 본문에 있으므로 이후 [AI 다듬기]에서도 살아남는다
+   *   (다듬기의 차단 근거 = 현재 본문). 패키지에도 적어 재생성이 같은 혜택을 다시 싣는다.
+   */
+  const handleFillBenefit = (benefit: string) => {
+    if (!aiPkg) return;
+    const value = benefit.trim();
+    if (!value) return;
+    // ⛔ 제목은 50자 상한이 있다(저장 시 서버가 자른다). 치환으로 넘치면 **아무것도 바꾸지 않고** 알린다 —
+    //   조용히 잘리면 검토한 제목과 발송 제목이 달라진다(Codex 1R). 부분 적용도 하지 않는다(상태가 갈린다).
+    const overStep = aiPkg.steps.find(
+      (s) => s.subject && fillBenefitPlaceholders(s.subject, value).length > 50,
+    );
+    if (overStep) {
+      toast.warning(`스텝 ${overStep.stepOrder} 제목이 50자를 넘게 됩니다. 혜택을 짧게 쓰거나 그 제목을 먼저 줄여 주세요.`);
+      return;
+    }
+    setAiPkg({
+      ...aiPkg,
+      benefitText: value,
+      steps: aiPkg.steps.map((s) => ({
+        ...s,
+        messageTemplate: fillBenefitPlaceholders(s.messageTemplate || '', value),
+        subject: s.subject ? fillBenefitPlaceholders(s.subject, value) : s.subject,
+      })),
+    });
+    toast.success('혜택을 모든 스텝 문안에 넣었습니다.');
   };
 
   // ════════ 저장 + 활성화 ════════
@@ -1486,6 +1573,13 @@ export default function JourneysPage() {
         body.anchorRecurrenceDay = aiPkg.anchorRecurrenceDay ?? null;
         body.anchorHourKst = aiPkg.anchorHourKst ?? null;
         body.oneShotScheduledAt = aiPkg.oneShotScheduledAt ?? null;
+      } else if (aiPkg.presetTriggerEvent) {
+        // ★ 2026-08-08 이어달리기 — 추천이 약속한 트리거로 저장한다.
+        //   마케팅 여정은 원래 트리거를 안 보내고 templateCode의 템플릿 기본값을 쓴다(repeat → 주문 완료).
+        //   여기서 안 실으면 "휴면 복귀를 권했는데 재구매 여정이 저장되는" 어긋남이 그대로 남는다.
+        //   조건은 서버가 비워 보낸 값을 그대로 — 기본값은 추출기·워커가 소유한다.
+        body.triggerEvent = aiPkg.presetTriggerEvent;
+        body.triggerFilters = aiPkg.triggerFilters || {};
       }
       const res = await fetch('/api/ai/operator/journeys', {
         method: 'POST',
@@ -1496,7 +1590,11 @@ export default function JourneysPage() {
       if (data.success) {
         setAiPkg(null);
         setObjective('');
+        setBenefitText('');
         setView('main');
+        // ★ 2026-08-08 이어달리기 — 다음 수 안내의 근거는 **저장된 여정의 실제 시작 신호**다.
+        //   응답에 상세가 없으면 안내하지 않는다(무엇을 만들었는지 모르는 채로 다음 수를 권하지 않는다).
+        setSuccessionFrom(String(data?.detail?.journey?.trigger_event || '') || null);
         await loadAll();
         toast.success('초안 여정이 저장되었습니다. 활성 여정 목록에서 활성화 가능합니다.');
       } else {
@@ -1609,7 +1707,7 @@ export default function JourneysPage() {
       <div className="border-b border-violet-400/30 bg-violet-800/50 backdrop-blur-md sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-3 md:px-6 py-3 md:py-4 flex items-center gap-2 md:gap-4">
           <button
-            onClick={() => view !== 'main' ? setConfirm({ mode: 'warning', title: '메인으로 돌아가기', description: '생성한 여정이 사라집니다. 메인으로 돌아가시겠습니까?', confirmLabel: '나가기', onConfirm: () => { setView('main'); setAiPkg(null); setStudioIdx(0); } }) : goBackOr(navigate, '/ai-operator')}
+            onClick={() => view !== 'main' ? setConfirm({ mode: 'warning', title: '메인으로 돌아가기', description: '생성한 여정이 사라집니다. 메인으로 돌아가시겠습니까?', confirmLabel: '나가기', onConfirm: () => { setView('main'); setAiPkg(null); setStudioIdx(0); setBenefitText(''); } }) : goBackOr(navigate, '/ai-operator')}
             className="p-2 rounded-lg hover:bg-white/15 transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -1649,6 +1747,82 @@ export default function JourneysPage() {
             ════════════════════════════════════════ */}
         {view === 'main' && (
           <>
+            {/* ★ 2026-08-08 이어달리기 — 방금 만든 여정의 다음 수. 세션 한정(닫으면 끝),
+                근거는 저장 응답이 알려 준 실제 시작 신호다. 운영 중 추천은 아래 기회 카드가 상시 담당한다. */}
+            {(() => {
+              if (!successionFrom) return null;
+              const fromDef = TRIGGER_EVENTS.find((t) => t.triggerEvent === successionFrom);
+              const nextKey = (fromDef?.nextKeys || [])[0];
+              const nextDef = nextKey ? TRIGGER_EVENTS.find((t) => t.key === nextKey) : undefined;
+              if (!fromDef || !nextDef) return null;
+              // 게이트 ① 이 회사 데이터로 그 여정을 만들 수 있는가 — 모르면 권하지 않는다(fail-closed).
+              if (dataCap?.[nextDef.key]?.available !== true) return null;
+              // 게이트 ② 이미 그 신호로 도는 여정이 있으면 권하지 않는다(축은 trigger_event).
+              //   ⛔ 목록은 상태 필터로 걸러져 오고, 필터를 바꾼 직후·조회 실패 때는 **직전 목록이 남아 있다.**
+              //   활성 여정이 안 실린 화면에서는 "없다"를 증명할 수 없다 — 증명할 수 없으면 권하지 않는다
+              //   (이미 도는 여정을 또 만들라고 하는 쪽이 더 나쁘다).
+              if (statusFilter !== 'all' && statusFilter !== 'active') return null;
+              if (loading || error) return null;
+              if (loadedStatus !== statusFilter) return null;   // 손에 든 목록이 지금 필터의 응답이 아니다
+              const activeTriggers = new Set(
+                journeys.filter((j) => j.status === 'active' && !j.archived_at).map((j) => j.trigger_event),
+              );
+              if (activeTriggers.has(nextDef.triggerEvent)) return null;
+              const overlapLabels = (nextDef.overlapKeys || [])
+                .map((k) => TRIGGER_EVENTS.find((t) => t.key === k))
+                .filter((t) => !!t && activeTriggers.has(t.triggerEvent))
+                .map((t) => t!.label);
+              const v = TEMPLATE_VISUAL[nextDef.templateCode] || TEMPLATE_VISUAL.custom;
+              const NextIcon = v.icon;
+              return (
+                <div className="mb-4 md:mb-5 rounded-2xl border border-violet-400/40 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-transparent p-4 md:p-5">
+                  <div className="flex items-start gap-3">
+                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${v.gradient}`}>
+                      <NextIcon className="h-5 w-5 text-white" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-sm font-bold text-white md:text-base">다음 수 — {nextDef.label} 여정</h2>
+                        <span className="shrink-0 rounded border border-violet-400/30 bg-violet-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-violet-100">NEW</span>
+                      </div>
+                      <p className="mt-1 text-xs leading-relaxed text-white/75">
+                        방금 만든 <span className="font-semibold text-white">{fromDef.label}</span> 여정에서 목표를 이룬 고객은{' '}
+                        <span className="font-semibold text-white">{nextDef.label}</span> 여정이 이어받습니다.
+                      </p>
+                      <div className="mt-2 space-y-1">
+                        <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-200/90">
+                          <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+                          <span>여정은 켠 뒤에 생기는 일부터 받습니다 — 지금 만들면 앞으로 해당하는 고객부터 나갑니다.</span>
+                        </div>
+                        {overlapLabels.length > 0 && (
+                          <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-200/90">
+                            <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+                            <span>{overlapLabels.join('·')} 여정과 같은 구매 한 번에 둘 다 발송될 수 있어요.</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => handleAIGenerate(undefined, undefined, nextDef.triggerEvent)}
+                          disabled={generating}
+                          className="flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 px-3 py-2 text-xs font-semibold hover:opacity-90 disabled:opacity-50"
+                        >
+                          <Sparkles className="h-3.5 w-3.5" /> 이어서 만들기
+                        </button>
+                        <button
+                          onClick={() => setSuccessionFrom(null)}
+                          className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/60 hover:bg-white/5"
+                        >
+                          나중에
+                        </button>
+                      </div>
+                      <div className="mt-2 text-[10px] italic text-white/30">Data source — 방금 저장한 여정 · 활성 여정 목록</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* ★ 2026-06-29: 오늘의 여정 기회 — 회사 데이터에서 찾은 비어 있는 여정 (1클릭 생성) + 3개 초과 시 페이징 */}
             {opportunities.length > 0 && (() => {
               const perPage = 3;
@@ -1682,7 +1856,8 @@ export default function JourneysPage() {
                       const v = TEMPLATE_VISUAL[op.templateCode] || TEMPLATE_VISUAL.custom;
                       const OpIcon = v.icon;
                       return (
-                        <div key={op.type} className="flex-1 md:min-w-[240px] md:max-w-[420px] bg-slate-900/50 border border-white/10 rounded-xl p-4 flex flex-col">
+                        // ★ 2026-08-08 — 같은 유형이 여럿일 수 있다(이어달리기는 후속 트리거마다 한 장) — 키에 트리거를 함께 쓴다.
+                        <div key={`${op.type}:${op.preferTriggerEvent || ''}`} className="flex-1 md:min-w-[240px] md:max-w-[420px] bg-slate-900/50 border border-white/10 rounded-xl p-4 flex flex-col">
                           <div className="flex items-center gap-3 mb-2.5">
                             <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${v.gradient} flex items-center justify-center shrink-0`}>
                               <OpIcon className="w-5 h-5 text-white" />
@@ -1700,8 +1875,19 @@ export default function JourneysPage() {
                             </div>
                           </div>
                           <p className="text-xs text-white/70 leading-relaxed flex-1 mb-3">{op.description}</p>
+                          {/* ★ 2026-08-08 — 고지는 카드가 지우지 않는다. 소급 금지·겹침은 만들기 전에 알아야 한다. */}
+                          {(op.notices || []).length > 0 && (
+                            <div className="mb-3 space-y-1">
+                              {(op.notices || []).map((n) => (
+                                <div key={n} className="flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-200/90">
+                                  <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+                                  <span>{n}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                           <button
-                            onClick={() => handleAIGenerate(undefined, op.suggestedObjective)}
+                            onClick={() => handleAIGenerate(undefined, op.suggestedObjective, op.preferTriggerEvent)}
                             disabled={generating}
                             className="px-3 py-2 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-xs font-semibold hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5"
                           >
@@ -2495,6 +2681,7 @@ export default function JourneysPage() {
               onDelete={(i) => deleteStep(i)}
               onAi={(i) => { void handleRefineOpen(i); }}
               onDecorate={(i) => { void handleStudioDecorate(i); }}
+              onFillBenefit={handleFillBenefit}
               onSpamTest={(i) => {
                 // 스팸필터 테스트는 실제로 발송해 통신사 판정을 본다 — 문안과 회신번호가 없으면 열지 않는다.
                 if (!String(aiPkg.steps[i]?.messageTemplate || '').trim()) { toast.warning('테스트할 문안을 먼저 만들어 주세요.'); return; }
@@ -3580,6 +3767,8 @@ export default function JourneysPage() {
         onClose={() => setPurpose('marketing')}
         objective={objective}
         onObjectiveChange={setObjective}
+        benefit={benefitText}
+        onBenefitChange={setBenefitText}
         generating={generating}
         quickStarts={quickStartItems}
         availableCount={journeyScope.availableCount}
@@ -3587,7 +3776,7 @@ export default function JourneysPage() {
         lockedHints={journeyScope.lockedHints}
         onGenerate={(templateCode) => {
           setPurpose('marketing');
-          void handleAIGenerate(templateCode as TemplateCode | undefined);
+          void handleAIGenerate(templateCode as TemplateCode | undefined, undefined, undefined, benefitText);
         }}
       />
 
@@ -3604,8 +3793,8 @@ export default function JourneysPage() {
             open={planOpen}
             onClose={() => setPlanOpen(false)}
             onNext={() => { setPlanOpen(false); setStudioIdx(0); setView('studio'); }}
-            // 처음 생성에 실린 것과 같은 요청으로 다시 만든다(빠른 시작이었으면 그 템플릿으로).
-            onRegenerate={() => { setPlanOpen(false); void handleAIGenerate(genObjective.trim() ? undefined : aiPkg.templateCode, genObjective.trim() || undefined); }}
+            // 처음 생성에 실린 것과 같은 요청으로 다시 만든다 — 조립은 regenerateFromPackage 한 곳이 소유한다.
+            onRegenerate={() => { setPlanOpen(false); regenerateFromPackage(aiPkg); }}
             regenerating={generating}
             name={aiPkg.name}
             triggerLabel={triggerLabelOf(aiPkg.triggerEvent, aiPkg.templateCode)}

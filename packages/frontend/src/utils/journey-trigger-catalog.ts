@@ -48,6 +48,16 @@ export interface TriggerDef {
   gated?: boolean;
   /** 사용자가 값을 넣어야 대상이 정해지는 트리거(기본값을 지어내지 않는다). */
   requiresConfig?: 'points_min';
+  /**
+   * ★ 2026-08-08 이어달리기 — 이 여정의 목표가 이뤄진 고객을 받는 다음 트리거(key 축).
+   * 백엔드 계약 `TriggerContract.nextEvents`의 미러다. parity 테스트가 둘의 1:1을 고정한다.
+   */
+  nextKeys?: string[];
+  /**
+   * ★ 2026-08-08 — 같은 사건 하나로 함께 발화하는 트리거(key 축). 백엔드 `overlapEvents` 미러.
+   * 막지 않고 화면이 알린다 — 한 번의 구매에 두 통이 나가는 것을 사용자가 알고 켜야 한다.
+   */
+  overlapKeys?: string[];
 }
 
 /**
@@ -61,6 +71,7 @@ export const TRIGGER_EVENTS: TriggerDef[] = [
     label: '주문 완료', desc: '구매가 일어나면',
     eventFields: [{ key: 'order_no', label: '주문번호' }, { key: 'product_name', label: '상품명' }, { key: 'total_amount', label: '결제금액' }],
     filters: {},
+    overlapKeys: ['dormant_return'],   // 같은 구매 한 번에 둘 다 발화한다
   },
   // ★ §13-5 (2026-08-02) — 배열 순서 = 화면 표시 순서다(소비처가 group으로 거르고 그대로 그린다).
   //   신규 5종이 뒤에 붙어 묻히던 것을 자주 쓰는 순서로 다시 놓았다. 구매 계열끼리 이웃하게 둔다.
@@ -70,12 +81,14 @@ export const TRIGGER_EVENTS: TriggerDef[] = [
     label: '첫 구매', desc: '생애 첫 구매가 일어나면',
     eventFields: [{ key: 'product_name', label: '상품명' }, { key: 'total_amount', label: '결제금액' }, { key: 'store_name', label: '매장명' }],
     filters: {},
+    nextKeys: ['purchase'],   // 두 번째 구매 = 재구매
   },
   {
     key: 'dormant_return', triggerEvent: 'customer.dormant_return', templateCode: 'repeat', group: 'tx',
     label: '휴면 복귀', desc: '오래 쉬었다가 다시 구매하면',
     eventFields: [{ key: 'product_name', label: '상품명' }, { key: 'total_amount', label: '결제금액' }, { key: 'store_name', label: '매장명' }],
     filters: { dormant_days: 30 },   // 복귀 판정 기준(직전 구매와의 간격) — 백엔드 기본값과 동일
+    overlapKeys: ['purchase'],       // 같은 구매 한 번에 둘 다 발화한다
   },
   {
     key: 'cart', triggerEvent: 'cdp.cart_abandon', templateCode: 'cart', group: 'tx',
@@ -108,6 +121,7 @@ export const TRIGGER_EVENTS: TriggerDef[] = [
     label: '신규 가입', desc: '회원이 가입하면',
     eventFields: [],
     filters: {},
+    nextKeys: ['first_purchase'],   // 신규 고객의 구매 = 생애 첫 구매
   },
   {
     key: 'birthday', triggerEvent: 'customer.birthday_approaching', templateCode: 'custom', group: 'lifecycle',
@@ -120,6 +134,7 @@ export const TRIGGER_EVENTS: TriggerDef[] = [
     label: '휴면 전환', desc: '한동안 구매가 없으면',
     eventFields: [],
     filters: { dormant_days: 30 },   // 백엔드 기본값과 동일(journey-target-extractor)
+    nextKeys: ['dormant_return'],    // 휴면 중 구매 = 복귀
   },
   {
     key: 'cycle_lapsed', triggerEvent: 'customer.cycle_lapsed', templateCode: 'custom', group: 'lifecycle',

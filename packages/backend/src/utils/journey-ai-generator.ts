@@ -29,7 +29,11 @@ import { stripAdParts } from './messageUtils';
 //   본질 = AI가 어설픈 변수 임의 작성 차단 (Harold 명시: "개인화 어설프게 실수로 들어가는게 더 안좋다").
 import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';
 // ★ 2026-08-02 §13-3: 발송 시점 문구는 화면·브리핑과 같은 단일 출처를 쓴다(AI에게 다른 말로 설명하지 않는다).
-import { formatStepTiming } from './journey-step-format';
+import { formatStepTiming, describeJourneyTrigger } from './journey-step-format';
+// ★ 2026-08-08 이어달리기 — 트리거는 계약이 정한다(AI 출력에 약속을 걸지 않는다). 설계서 §6.
+import { isImplementedTriggerEvent, triggerTemplateCode } from './journey-trigger-capability';
+// 추천 문구의 단일 출처 — "이어서 만들기"와 기회 카드가 같은 목표 골격을 쓴다.
+import { successionObjectiveFor } from './journey-opportunities';
 // ★ 2026-08-02 (Codex 1R): AI가 지어낸 혜택 기계 차단 — 프롬프트는 경계가 아니다.
 import { stripUnauthorizedBenefits } from './copy-benefit-detector';
 
@@ -42,6 +46,19 @@ export interface JourneyAIGenerateInput {
   createdBy: string;
   objective?: string;
   templateHint?: 'onboarding' | 'repeat' | 'dormant' | 'cart' | 'birthday' | 'reservation' | 'custom';
+  /**
+   * ★ 2026-08-08 이어달리기 — 추천이 약속한 트리거(journeys.trigger_event 저장값).
+   *   값이 오면 **결과 트리거는 계약이 정한다** — AI는 스텝·문안만 설계한다.
+   *   프롬프트 지시만으로는 보장이 아니다(AI가 다른 트리거를 내면 추천과 어긋난 여정이 만들어진다).
+   */
+  preferTriggerEvent?: string;
+  /**
+   * ★ 2026-08-08 혜택 입력 — 사용자가 준 혜택 하나(예: "신규 가입 10% 쿠폰").
+   *   혜택은 AI가 못 지어내는 유일한 값이라 사용자 입력이 정당한 자리다.
+   *   값이 오면 ①AI는 placeholder 대신 이것을 문안에 녹이고 ②차단기의 허용 근거에 합류한다 —
+   *   입력한 혜택은 살고, AI가 덧붙인 다른 혜택은 여전히 placeholder로 되돌아간다.
+   */
+  benefitText?: string;
 }
 
 export interface GeneratedStep {
@@ -67,6 +84,18 @@ export interface JourneyAIPackage {
   budgetMonthlyHint: number | null;
   thresholdCostHint: number | null;
   reasoning: string;
+  /**
+   * ★ 2026-08-08 이어달리기 — 이 패키지의 트리거가 **계약이 고정한 값**인가.
+   *   null이면 옛 흐름(트리거는 템플릿 기본값이 정한다) 그대로다. 화면은 이 값이 있을 때만
+   *   저장 요청에 트리거를 실어 보낸다 — 그래야 추천이 약속한 여정이 실제로 만들어진다.
+   */
+  presetTriggerEvent: string | null;
+  /**
+   * ★ 2026-08-08 혜택 입력 — 이 패키지 생성에 실제로 쓰인 혜택(정규화 후). null = 미입력.
+   *   재생성이 이 값을 다시 실어야 다시 만들기 한 번에 혜택이 placeholder로 되돌아가지 않는다
+   *   (프리셋 유실과 같은 뿌리 — 패키지를 다시 만드는 자리가 축을 떨어뜨린다).
+   */
+  benefitText: string | null;
 }
 
 /**
@@ -174,9 +203,24 @@ function extractJSON(text: string): string {
 // ════════════════════════════════════════════════════════════════════
 
 export async function generateJourneyPackage(input: JourneyAIGenerateInput): Promise<JourneyAIPackage> {
-  if (!input.objective && !input.templateHint) {
+  // ★ 2026-08-08 이어달리기 — 프리셋은 등록·구현된 트리거만 인정한다. 모르는 값이면 만들지 않는다(fail-closed).
+  //   라우트가 앞에서 400으로 거르지만, 발송 대상을 정하는 축이라 생성기도 그냥 넘기지 않는다.
+  const presetTrigger = input.preferTriggerEvent ? String(input.preferTriggerEvent) : null;
+  if (presetTrigger && !isImplementedTriggerEvent(presetTrigger)) {
+    throw new Error('지원하지 않는 발송 조건입니다. 트리거를 다시 선택해 주세요.');
+  }
+  // 프리셋만 온 경로(다음 수 카드 = 클릭 한 번)는 목표 골격을 추천 문구에서 파생한다 —
+  // 화면이 자기 문장을 지어내면 같은 추천이 경로마다 다른 여정을 만든다.
+  const objectiveText = (input.objective || '').trim() || (presetTrigger ? successionObjectiveFor(presetTrigger) || '' : '');
+  if (!objectiveText && !input.templateHint) {
     throw new Error('objective (자연어) 또는 templateHint (7 표준 단축) 중 하나는 필수입니다.');
   }
+  // ★ 2026-08-08 혜택 입력 — 사용자가 준 혜택 하나. 상한은 화면 입력 한 줄 분량이다.
+  const benefitText = String(input.benefitText || '').trim().slice(0, 200);
+  // 차단기의 허용 근거 — **전용 입력이 있으면 그것 하나다**(Codex 1R). 목표문까지 합치면
+  // 목표에 "20% 쿠폰 행사"라 쓰고 혜택 칸에 "10% 쿠폰"을 쓴 모순 입력에서 20%도 살아남아
+  // 프롬프트의 "이것 하나뿐"이 경계가 아니게 된다. 전용 입력이 비었을 때만 목표문이 하위호환 근거다.
+  const benefitBasis = benefitText || objectiveText;
 
   const ctx = await loadCompanyContext(input.companyId);
   const memoryContext = await buildMemoryPromptContext(input.companyId, 30).catch(() => '');
@@ -510,11 +554,42 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
   "reasoning": "AI가 결정한 흐름의 한 줄 근거 (회사 admin 검토용)"
 }`;
 
+  // ★ 2026-08-08 (Codex 1R·2R) — 예외는 규칙이 사는 곳에 적고, **프롬프트의 허용 범위는 차단기 근거와 같아야 한다.**
+  //   strip은 지우기만 할 수 있다 — AI가 더 엄격한 프롬프트를 따라 placeholder를 내면 승인된 혜택을 복원할 길이 없다.
+  //   그래서 분기마다 basis와 같은 집합을 프롬프트에 선언한다: 전용 입력이 있으면 그것 하나 / 없으면 목표문의 혜택.
+  if (benefitText) {
+    system += `
+
+[★ 예외 — 회사가 승인한 혜택 (위 placeholder 규칙보다 우선)]
+이번 생성에서는 "${benefitText}" 이 혜택 하나만 구체적으로 쓸 수 있습니다.
+[혜택 안내 — 직접 수정해주세요] placeholder를 쓰지 말고 이 혜택을 본문에 자연스럽게 녹이세요.
+이 혜택 외의 다른 구체 혜택(%·원·쿠폰·무료 등)은 여전히 절대 금지입니다.`;
+  } else {
+    system += `
+
+[혜택 규칙의 근거 — 위 placeholder 규칙과 함께 적용]
+사용자가 목표문에 직접 적은 구체 혜택은 창작이 아닙니다 — placeholder로 바꾸지 말고 그대로 사용하세요.
+사용자가 주지 않은 혜택만 placeholder 대상입니다.`;
+  }
+
   let userMessage: string;
-  if (input.objective && input.objective.trim().length >= 3) {
-    userMessage = `여정 목표: ${input.objective.trim()}\n\n위 회사 컨텍스트 + 메모리를 종합하여 완전한 여정 패키지 JSON을 응답하세요. 계절·월·날씨 언급 없이 시간 불문 감성으로 풍성하게 작성하고, 혜택 영역은 placeholder로 처리하세요.`;
+  if (objectiveText.length >= 3) {
+    userMessage = `여정 목표: ${objectiveText}\n\n위 회사 컨텍스트 + 메모리를 종합하여 완전한 여정 패키지 JSON을 응답하세요. 계절·월·날씨 언급 없이 시간 불문 감성으로 풍성하게 작성하고, 혜택 영역은 placeholder로 처리하세요.`;
   } else {
     userMessage = `7 표준 시리즈 단축 진입: ${input.templateHint}\n\n위 회사 컨텍스트 + 메모리에 맞춰 ${input.templateHint} 시리즈의 표준 흐름을 계절 언급 없이 풍성하게 작성한 JSON 응답하세요.`;
+  }
+
+  // ★ 2026-08-08 이어달리기 — 시작 신호가 정해진 생성. AI는 그 전제 위에서 스텝·문안만 설계한다.
+  //   (트리거 값 자체는 아래에서 계약값으로 덮어쓴다 — 이 지시는 문안이 신호와 맞게 하려는 것뿐이다)
+  if (presetTrigger) {
+    userMessage += `\n\n[시작 신호 고정] 이 여정은 "${describeJourneyTrigger(presetTrigger, {})}"에게 나갑니다. 스텝 수·발송 간격·문안을 그 상황에 맞춰 설계하세요.`;
+  }
+
+  // ★ 2026-08-08 혜택 입력 — placeholder 대신 사용자가 준 혜택을 처음부터 녹인다.
+  //   이 지시는 문장을 자연스럽게 하려는 것이고, 경계는 아래 stripUnauthorizedBenefits가 잡는다
+  //   (이 혜택 밖의 %·원·쿠폰·무료는 근거가 없어 여전히 placeholder로 되돌아간다).
+  if (benefitText) {
+    userMessage += `\n\n[사용 가능한 혜택 — 이것 하나뿐] "${benefitText}"\n[혜택 안내 — 직접 수정해주세요] placeholder를 쓰지 말고 이 혜택을 본문에 자연스럽게 녹이세요. 이 혜택 외의 다른 구체 혜택은 절대 쓰지 마세요.`;
   }
 
   // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입 (회사 등록 미존재 시 옛 흐름 그대로)
@@ -562,8 +637,11 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
       channel,
       // ★ 본문/제목은 순수 상태로 저장 — (광고)/무료수신거부는 발송·미리보기 시 buildAdMessage가 합성.
       //   AI가 본문에 (광고)를 넣어도 여기서 제거해야 이중부착(미리보기·발송)이 안 남.
-      messageTemplate: stripAdParts(messageSan.sanitized),
-      subject: stripAdParts(subjectSan.sanitized),
+      // ★ 2026-08-08 — 지어낸 혜택은 기계로 되돌린다. 프롬프트는 경계가 아니다(0802 다듬기와 같은 규약인데
+      //   **생성 경로에는 빠져 있었다**). 근거로 인정하는 것은 사용자가 준 목표 하나뿐 —
+      //   프리셋 1클릭 경로는 목표에 혜택이 없으므로 숫자가 나오면 전부 창작이다.
+      messageTemplate: stripUnauthorizedBenefits(stripAdParts(messageSan.sanitized), benefitBasis),
+      subject: stripUnauthorizedBenefits(stripAdParts(subjectSan.sanitized), benefitBasis),
       isAd: resolveJourneyAdFlag(channel, s.isAd),
       stepIntent: String(s.stepIntent || '').slice(0, 100),
     };
@@ -582,13 +660,29 @@ VIP 회원님만을 위해 마련한 이번 특별 안내,
   const callbackHint = cbRes.rows[0]?.phone || null;
 
   const validTemplates = ['onboarding','repeat','dormant','cart','birthday','reservation','custom'];
-  const templateCode = validTemplates.includes(parsed.templateCode) ? parsed.templateCode : 'custom';
+  let templateCode = validTemplates.includes(parsed.templateCode) ? parsed.templateCode : 'custom';
+  let triggerEvent = String(parsed.triggerEvent || 'custom').slice(0, 50);
+  let triggerFilters: Record<string, any> =
+    typeof parsed.triggerFilters === 'object' && parsed.triggerFilters !== null ? parsed.triggerFilters : {};
+
+  // ★ 2026-08-08 이어달리기(설계서 §6) — 프리셋이 오면 트리거 축은 **AI 출력과 무관하게** 계약값으로 고정한다.
+  //   프롬프트에 "이 트리거로 만들라"고 적는 것은 보장이 아니다. 추천이 휴면 복귀를 권했는데
+  //   AI가 재구매 여정을 만들어 놓는 어긋남을 여기서 닫는다.
+  //   조건(triggerFilters)은 비운다 — 기본값은 추출기·워커가 소유한다(휴면 복귀 30일 등 카탈로그 값과 같다).
+  //   AI가 지어낸 조건을 실으면 추천이 약속한 대상과 달라진다.
+  if (presetTrigger) {
+    triggerEvent = presetTrigger;
+    templateCode = triggerTemplateCode(presetTrigger) || 'custom';
+    triggerFilters = {};
+  }
 
   return {
     name: String(parsed.name || '여정').slice(0, 100),
     templateCode,
-    triggerEvent: String(parsed.triggerEvent || 'custom').slice(0, 50),
-    triggerFilters: typeof parsed.triggerFilters === 'object' && parsed.triggerFilters !== null ? parsed.triggerFilters : {},
+    triggerEvent,
+    triggerFilters,
+    presetTriggerEvent: presetTrigger,
+    benefitText: benefitText || null,
     steps,
     allowReentry: !!parsed.allowReentry,
     reentryCooldownDays: parsed.reentryCooldownDays != null ? Math.max(0, Math.min(3650, Number(parsed.reentryCooldownDays))) : null,

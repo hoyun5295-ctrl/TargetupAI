@@ -17,9 +17,23 @@
  */
 
 import { query } from '../config/database';
+// ★ 2026-08-08 이어달리기 — 후속 간선·겹침·카드 모양은 계약이 소유한다(여기서 다시 적지 않는다).
+import {
+  TRIGGER_CONTRACTS,
+  nextTriggerEvents,
+  overlapTriggerEvents,
+  triggerTemplateCode,
+  triggerKeyForEvent,
+  resolveTriggerAvailability,
+  toAvailabilityMap,
+} from './journey-trigger-capability';
+// ★ 정답표를 갖지 않는다 — 이 회사가 그 트리거를 판정할 수 있는지는 회사 데이터가 정한다.
+import { getCompanyJourneyFacts } from './company-data-profile';
 
 export type JourneyOpportunityType =
-  | 'cart_recovery' | 'onboarding' | 'dormant' | 'birthday' | 'repurchase_due' | 'wishlist';
+  | 'cart_recovery' | 'onboarding' | 'dormant' | 'birthday' | 'repurchase_due' | 'wishlist'
+  // ★ 2026-08-08 이어달리기 — 앞 여정에서 실제로 전환한 고객을 받아줄 여정이 없다.
+  | 'succession';
 
 export interface JourneyOpportunity {
   type: JourneyOpportunityType;
@@ -34,6 +48,13 @@ export interface JourneyOpportunity {
   priority: 'high' | 'medium';
   /** 1클릭 생성 시 자연어 입력에 프리필할 목표 (구체 혜택 미포함 — 골격만) */
   suggestedObjective: string;
+  /**
+   * ★ 2026-08-08 이어달리기 — 이 카드가 약속한 트리거. 생성 요청에 그대로 실어 보내면
+   * 서버가 계약값으로 고정한다(AI가 다른 트리거를 골라 어긋나는 일이 없다).
+   */
+  preferTriggerEvent?: string;
+  /** ★ 2026-08-08 — 카드에 반드시 함께 나가는 고지(소급 금지·겹침). 화면이 지우지 않는다. */
+  notices?: string[];
 }
 
 function won(v: number): string {
@@ -49,12 +70,15 @@ function perHead(total: number, cnt: number): string {
  */
 export async function buildJourneyOpportunities(companyId: string): Promise<JourneyOpportunity[]> {
   // 1) 활성(미보관) 여정 유형 — 이미 커버 중인 기회는 제안하지 않는다.
+  //    ★ 2026-08-08 이어달리기 — trigger_event도 함께 읽는다. 후속 트리거 3종이 전부 template_code='repeat'을
+  //      공유해, 이어달리기 dedup을 template_code로 하면 서로를 오차단한다(설계서 사실 10).
   const activeRes = await query(
-    `SELECT DISTINCT template_code FROM journeys
+    `SELECT DISTINCT template_code, trigger_event FROM journeys
       WHERE company_id = $1 AND status = 'active' AND archived_at IS NULL`,
     [companyId],
   );
   const active = new Set<string>(activeRes.rows.map((r: any) => String(r.template_code)));
+  const activeTriggers = new Set<string>(activeRes.rows.map((r: any) => String(r.trigger_event)));
 
   // 2) 회사 구매 분포 — 데이터 기반 임계값 (하드코딩 대신 분포에서 도출)
   const statRes = await query(
@@ -159,10 +183,144 @@ export async function buildJourneyOpportunities(companyId: string): Promise<Jour
     });
   }
 
+  // ★ 2026-08-08 이어달리기 — 앞 여정에서 실제로 전환한 고객을 받아줄 여정이 없을 때만.
+  //   실패해도 나머지 카드는 그대로 나간다(추천 하나가 화면 전체를 비우지 않는다).
+  try {
+    out.push(...(await buildSuccessionOpportunities(companyId, activeTriggers)));
+  } catch (e: any) {
+    console.log('[journey-opportunities] 이어달리기 신호 생략:', e?.message || e);
+  }
+
   // 4) 관련 매출 규모(실데이터)로 우선순위 — 큰 것부터, 동률은 인원수.
   out.sort((x, y) => (y.valueAtStake - x.valueAtStake) || (y.count - x.count));
   const maxVal = out.length ? Math.max(...out.map((c) => c.valueAtStake)) : 0;
   for (const c of out) c.priority = (maxVal > 0 && c.valueAtStake >= maxVal * 0.5) ? 'high' : 'medium';
 
+  return out;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-08-08 이어달리기(다음 수 추천) — 설계서 2026-08-08-journey-succession-design.md §5
+//
+//   여정 하나를 점이 아니라 고객 생애의 한 구간으로 본다. 앞 구간에서 **실제로 전환한** 고객이
+//   있는데 그들을 받아줄 여정이 없으면, 그 사실을 근거로 다음 구간을 권한다.
+//
+//   근거는 지어내지 않는다 — `journey_executions.status='goal_met'`(2026-07-10 자동 종료가 남긴 원장)이
+//   유일한 관측이다. 자동 종료가 꺼진 여정은 goal_met이 안 쌓여 이 추천이 뜨지 않는다. 그게 맞다.
+// ════════════════════════════════════════════════════════════════════
+
+/** 카드 문구 — 후속 트리거별. 내부 용어(trigger_event·goal_met) 노출 금지, 구체 혜택 미포함. */
+const SUCCESSION_COPY: Record<string, {
+  title: string;
+  describe: (n: number) => string;
+  objective: string;
+  /** ⛔ 완화 금지 — 이 문장이 빠지면 "켜 뒀는데 0건" 오해가 추천 경로로 재발한다(설계서 §7-1). */
+  futureNotice: string;
+}> = {
+  'purchase.first': {
+    title: '첫 구매 고객 미대응',
+    describe: (n) => `신규 가입 여정에서 ${n.toLocaleString()}명이 첫 구매를 했어요 — 받아줄 여정이 없습니다.`,
+    objective: '첫 구매 고객 정착 — 감사 + 두 번째 구매 유도',
+    futureNotice: '지금 만들면 앞으로 첫 구매하는 고객부터 받습니다.',
+  },
+  'cdp.purchase': {
+    title: '재구매 고객 미대응',
+    describe: (n) => `첫 구매 여정에서 ${n.toLocaleString()}명이 다시 구매했어요 — 받아줄 여정이 없습니다.`,
+    objective: '재구매 고객 관리 — 구매 감사 + 다음 구매 제안',
+    futureNotice: '지금 만들면 앞으로 구매하는 고객부터 받습니다.',
+  },
+  'customer.dormant_return': {
+    title: '휴면 복귀 고객 미대응',
+    describe: (n) => `휴면 회수 여정에서 ${n.toLocaleString()}명이 복귀했어요 — 받아줄 여정이 없습니다.`,
+    objective: '휴면에서 복귀한 고객 정착 — 복귀 감사 + 재구매 유도',
+    futureNotice: '지금 만들면 앞으로 복귀하는 고객부터 받습니다.',
+  },
+};
+
+/**
+ * 후속 여정의 목표 골격 — 추천 카드와 "이어서 만들기" 버튼이 **같은 문장**을 쓴다.
+ * (화면이 자기 문장을 따로 지어내면 같은 추천이 경로에 따라 다른 여정을 만든다)
+ */
+export function successionObjectiveFor(nextTriggerEvent: string): string | null {
+  return SUCCESSION_COPY[nextTriggerEvent]?.objective ?? null;
+}
+
+/** 겹침 안내 — 어느 쪽에서 추천하든 같은 문장 하나(여정 문서 §4의 의무를 추천 카드가 승계). */
+const OVERLAP_NOTICE = '재구매 여정과 휴면 복귀 여정은 같은 구매 한 번에 둘 다 발송될 수 있어요.';
+
+/** 카드 시각 코드로 쓸 수 있는 값인가 — 계약의 카탈로그 코드 중 카드가 모르는 값은 custom으로 둔다. */
+function toCardTemplateCode(code: string | null): JourneyOpportunity['templateCode'] {
+  return code === 'repeat' || code === 'cart' || code === 'custom' ? code : 'custom';
+}
+
+async function buildSuccessionOpportunities(
+  companyId: string,
+  activeTriggers: Set<string>,
+): Promise<JourneyOpportunity[]> {
+  const sourceEvents = TRIGGER_CONTRACTS.filter((c) => (c.nextEvents || []).length > 0).map((c) => c.event);
+  if (sourceEvents.length === 0) return [];
+
+  // 전환 관측 — 이 회사의 여정 중 간선이 달린 트리거에서 목표를 이룬 고객 수와 그 고객들의 실측 구매단가 합.
+  //   ⛔ 임의 상수 금지: valueAtStake는 avg_order_value 실값 합이다(추정 전환율·앵커 없음).
+  //   ⛔ 세는 단위는 **사람**이다. 실행 행으로 세면 재진입한 고객과 같은 신호의 여정 여러 개가 한 사람을
+  //     여러 명으로 부풀리고 구매단가도 반복 합산된다("3명이 복귀했어요"가 사실이 아니게 된다).
+  //   ⛔ 회사 격리는 여정을 지난다 — journey_executions에는 company_id 컬럼이 없다(SCHEMA 실측).
+  //     실행 행은 자기 여정의 소유이고, 그 여정에 회사 조건이 걸려 있다.
+  const conv = await query(
+    `WITH converted AS (
+       SELECT DISTINCT j.trigger_event AS trigger_event, e.customer_id AS customer_id
+         FROM journey_executions e
+         JOIN journeys j ON j.id = e.journey_id AND j.company_id = $1::uuid
+        WHERE e.status = 'goal_met'
+          AND j.trigger_event = ANY($2::text[])
+     )
+     SELECT cv.trigger_event AS trigger_event,
+            COUNT(*)::int AS goal_met_count,
+            COALESCE(SUM(COALESCE(c.avg_order_value, 0)), 0) AS value_at_stake
+       FROM converted cv
+       LEFT JOIN customers c ON c.id = cv.customer_id AND c.company_id = $1::uuid
+      GROUP BY cv.trigger_event`,
+    [companyId, sourceEvents],
+  );
+  const rows = conv.rows.filter((r: any) => Number(r.goal_met_count || 0) > 0);
+  if (rows.length === 0) return [];
+
+  // capability — 구매 데이터가 없는 회사에 구매 여정을 권하지 않는다(fail-closed).
+  const availability = toAvailabilityMap(resolveTriggerAvailability(await getCompanyJourneyFacts(companyId)));
+
+  // 같은 후속 트리거를 두 출발점이 가리키면 근거가 큰 쪽 하나만 남긴다.
+  rows.sort((a: any, b: any) => Number(b.goal_met_count) - Number(a.goal_met_count));
+
+  const out: JourneyOpportunity[] = [];
+  const taken = new Set<string>();
+  for (const row of rows) {
+    const count = Number(row.goal_met_count || 0);
+    for (const nextEvent of nextTriggerEvents(String(row.trigger_event))) {
+      if (taken.has(nextEvent)) continue;
+      // ⛔ dedup 축은 trigger_event다 — template_code로 하면 repeat 3종이 서로를 오차단한다.
+      if (activeTriggers.has(nextEvent)) continue;
+      const key = triggerKeyForEvent(nextEvent);
+      if (!key || availability[key]?.available !== true) continue;
+      const copy = SUCCESSION_COPY[nextEvent];
+      if (!copy) continue;   // 문구 없는 간선은 권하지 않는다(모르는 것을 지어내지 않는다)
+
+      const notices = [copy.futureNotice];
+      if (overlapTriggerEvents(nextEvent).some((e) => activeTriggers.has(e))) notices.push(OVERLAP_NOTICE);
+
+      taken.add(nextEvent);
+      out.push({
+        type: 'succession',
+        templateCode: toCardTemplateCode(triggerTemplateCode(nextEvent)),
+        title: copy.title,
+        description: copy.describe(count),
+        count,
+        valueAtStake: Math.round(Number(row.value_at_stake || 0)),
+        priority: 'medium',
+        suggestedObjective: copy.objective,
+        preferTriggerEvent: nextEvent,
+        notices,
+      });
+    }
+  }
   return out;
 }

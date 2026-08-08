@@ -137,11 +137,33 @@ export function resolveTriggerAvailability(facts: CompanyJourneyFacts): TriggerA
 //   새 트리거 = 이 표에 한 줄 추가가 유일한 등록 경로다(호출부 분기 금지).
 // ═══════════════════════════════════════════════════════════
 
+/**
+ * 화면 카탈로그 템플릿 코드 — 프론트 `journey-trigger-catalog.ts`의 `TriggerDef.templateCode`와 같은 집합.
+ * (여정 저장 템플릿 7종과는 다른 축이다 — 이건 "이 트리거의 카드가 어느 모양인가"이고 parity가 프론트와 1:1을 고정한다)
+ */
+export type CatalogTemplateCode = 'repeat' | 'reservation' | 'cart' | 'custom';
+
 export interface TriggerContract {
   /** journeys.trigger_event 저장값. */
   event: string;
   /** 화면 카탈로그 key. null = 화면 비노출(custom·미구현 전이형). */
   key: TriggerKey | null;
+  /**
+   * ★ 2026-08-08 이어달리기 — 화면 카탈로그 템플릿 코드(프론트 카탈로그 미러, parity 고정).
+   * key가 있는 트리거만 갖는다. 추천 카드의 모양과 프리셋 생성의 저장값이 여기서 나온다.
+   */
+  templateCode?: CatalogTemplateCode;
+  /**
+   * ★ 2026-08-08 이어달리기 — 이 여정의 목표(exit)가 이뤄진 고객을 받는 다음 트리거.
+   * 후속 관계를 새 테이블로 만들지 않는다. exit가 이미 목표 사건을 선언하고 있어 간선은 그 위에 얹힌다.
+   * ⛔ exit가 'steps_done'인 트리거에는 달지 않는다 — 전환 사건이 없는데 "전환했어요" 추천은 성립하지 않는다(parity 고정).
+   */
+  nextEvents?: string[];
+  /**
+   * ★ 2026-08-08 — 같은 사건 하나로 함께 발화하는 트리거. 여정끼리 밀어내지 않는 것이 설계 결정이므로
+   * 막지 않고 화면이 알린다(여정 문서 §4의 겹침 안내 의무). 대칭으로 적는다.
+   */
+  overlapEvents?: string[];
   /** §3 분류 — transition(상태 전이) / event(사건) / reservation(예약) / standing(상시). */
   cls: 'transition' | 'event' | 'reservation' | 'standing';
   /**
@@ -157,23 +179,27 @@ export interface TriggerContract {
 
 export const TRIGGER_CONTRACTS: TriggerContract[] = [
   // §3-1 상태 전이형
-  { event: 'customer.created',              key: 'signup',   cls: 'transition', implemented: true,  exit: 'purchase' },
-  { event: 'purchase.first',                key: 'first_purchase', cls: 'transition', implemented: true, exit: 'second_purchase' }, // #2 — 구매 스트림 분기(이전 구매 0건)
-  { event: 'cdp.purchase',                  key: 'purchase', cls: 'event',      implemented: true,  exit: 'next_purchase' },     // #3 재구매(현행 구매)
-  { event: 'customer.dormant',              key: 'dormant',  cls: 'transition', implemented: true,  exit: 'purchase' },
-  { event: 'customer.dormant_return',       key: 'dormant_return', cls: 'transition', implemented: true, exit: 'steps_done' },   // #5 — 구매 스트림 분기(직전 구매가 휴면 기준일 이상 과거)
-  { event: 'customer.cycle_lapsed',         key: 'cycle_lapsed', cls: 'transition', implemented: true, exit: 'purchase', cooldownMinDays: 1 }, // #6
+  // ★ 2026-08-08 이어달리기 v1 간선 3 — exit 신호와 의미가 일치하는 것만 잇는다(설계서 §3).
+  //   신규가입(exit=purchase, 신규 고객의 구매 = 생애 첫 구매) → 첫 구매
+  { event: 'customer.created',              key: 'signup',   cls: 'transition', implemented: true,  exit: 'purchase', templateCode: 'custom', nextEvents: ['purchase.first'] },
+  //   첫 구매(exit=second_purchase, 두 번째 구매 = 재구매) → 재구매
+  { event: 'purchase.first',                key: 'first_purchase', cls: 'transition', implemented: true, exit: 'second_purchase', templateCode: 'repeat', nextEvents: ['cdp.purchase'] }, // #2 — 구매 스트림 분기(이전 구매 0건)
+  { event: 'cdp.purchase',                  key: 'purchase', cls: 'event',      implemented: true,  exit: 'next_purchase', templateCode: 'repeat', overlapEvents: ['customer.dormant_return'] },     // #3 재구매(현행 구매)
+  //   휴면(exit=purchase, 휴면 중 구매 = 복귀) → 휴면 복귀
+  { event: 'customer.dormant',              key: 'dormant',  cls: 'transition', implemented: true,  exit: 'purchase', templateCode: 'custom', nextEvents: ['customer.dormant_return'] },
+  { event: 'customer.dormant_return',       key: 'dormant_return', cls: 'transition', implemented: true, exit: 'steps_done', templateCode: 'repeat', overlapEvents: ['cdp.purchase'] },   // #5 — 구매 스트림 분기(직전 구매가 휴면 기준일 이상 과거)
+  { event: 'customer.cycle_lapsed',         key: 'cycle_lapsed', cls: 'transition', implemented: true, exit: 'purchase', cooldownMinDays: 1, templateCode: 'custom' }, // #6
   // #7 — 원장 state와 **서열 비교**(상승만). 쿨다운은 오르내리락 왕복에서 축하가 연달아 나가는 것을 막는 바닥값이고,
   //   진짜 방어는 "상승만 + 같은 급 제외"다(2026-08-02).
-  { event: 'customer.grade_changed',        key: 'grade',    cls: 'transition', implemented: true,  exit: 'steps_done', cooldownMinDays: 1 },
-  { event: 'customer.birthday_approaching', key: 'birthday', cls: 'transition', implemented: true,  exit: 'steps_done' },
-  { event: 'customer.points_expiring',      key: 'points',   cls: 'transition', implemented: true,  exit: 'points_used' },
+  { event: 'customer.grade_changed',        key: 'grade',    cls: 'transition', implemented: true,  exit: 'steps_done', cooldownMinDays: 1, templateCode: 'custom' },
+  { event: 'customer.birthday_approaching', key: 'birthday', cls: 'transition', implemented: true,  exit: 'steps_done', templateCode: 'custom' },
+  { event: 'customer.points_expiring',      key: 'points',   cls: 'transition', implemented: true,  exit: 'points_used', templateCode: 'custom' },
   // §3-2 사건 발생형
-  { event: 'cdp.cart_abandon',              key: 'cart',     cls: 'event',      implemented: true,  exit: 'purchase', cooldownMinDays: 1 },  // §9-N1
-  { event: 'custom_order_shipped',          key: 'shipped',  cls: 'event',      implemented: true,  exit: 'steps_done' },
-  { event: 'cdp.browse_no_purchase',        key: 'browse',   cls: 'event',      implemented: true,  exit: 'purchase', cooldownMinDays: 1 }, // #12
+  { event: 'cdp.cart_abandon',              key: 'cart',     cls: 'event',      implemented: true,  exit: 'purchase', cooldownMinDays: 1, templateCode: 'cart' },  // §9-N1
+  { event: 'custom_order_shipped',          key: 'shipped',  cls: 'event',      implemented: true,  exit: 'steps_done', templateCode: 'cart' },
+  { event: 'cdp.browse_no_purchase',        key: 'browse',   cls: 'event',      implemented: true,  exit: 'purchase', cooldownMinDays: 1, templateCode: 'cart' }, // #12
   // §3-3 예약 (원장 §8 선행 — 착수 6번. 커서 경로는 있으나 데이터 문이 없어 capability가 잠근다)
-  { event: 'cdp.reservation_created',       key: 'reservation', cls: 'reservation', implemented: true,  exit: 'reservation_closed' },
+  { event: 'cdp.reservation_created',       key: 'reservation', cls: 'reservation', implemented: true,  exit: 'reservation_closed', templateCode: 'reservation' },
   { event: 'reservation.visit_dn',          key: null,       cls: 'reservation', implemented: false, exit: 'reservation_closed' }, // #14 — 착수 6번
   { event: 'reservation.visit_done',        key: null,       cls: 'reservation', implemented: false, exit: 'steps_done' },         // #15 — 착수 6번
   // 상시(자유 세그먼트) — §3-5: §5-4 게이트 뒤로
@@ -203,6 +229,24 @@ export function getTriggerContract(triggerEvent: string): TriggerContract | null
  */
 export function triggerKeyForEvent(triggerEvent: string): TriggerKey | null {
   return CONTRACT_BY_EVENT.get(triggerEvent)?.key ?? null;
+}
+
+/**
+ * ★ 2026-08-08 이어달리기 — 이 트리거의 목표가 이뤄진 고객을 받는 다음 트리거들.
+ * 모르는 트리거·간선 없는 트리거는 빈 배열(추천이 없을 뿐이다).
+ */
+export function nextTriggerEvents(triggerEvent: string): string[] {
+  return CONTRACT_BY_EVENT.get(triggerEvent)?.nextEvents ?? [];
+}
+
+/** ★ 2026-08-08 — 같은 사건 하나로 함께 발화하는 트리거들(겹침 안내의 유일한 근거). */
+export function overlapTriggerEvents(triggerEvent: string): string[] {
+  return CONTRACT_BY_EVENT.get(triggerEvent)?.overlapEvents ?? [];
+}
+
+/** ★ 2026-08-08 — 화면 카탈로그 템플릿 코드. 없으면 null(화면 비노출 트리거). */
+export function triggerTemplateCode(triggerEvent: string): CatalogTemplateCode | null {
+  return CONTRACT_BY_EVENT.get(triggerEvent)?.templateCode ?? null;
 }
 
 /**

@@ -144,7 +144,7 @@ import { normalizeStartKind } from '../utils/journey-start-kind';
 //   /operator/data-profile endpoint = 마케팅 담당자 검토 UI 안내 카드 data source.
 import { getCompanyDataProfile, getCompanyJourneyFacts } from '../utils/company-data-profile';
 // ★ 2026-08-01 여정 재설계 §2-3 — 회사가 준 데이터로 만들 수 있는 여정만 연다(못 여는 것은 사유와 함께 잠근다).
-import { resolveTriggerAvailability, toAvailabilityMap, hasAnyAvailableTrigger } from '../utils/journey-trigger-capability';
+import { resolveTriggerAvailability, toAvailabilityMap, hasAnyAvailableTrigger, isImplementedTriggerEvent } from '../utils/journey-trigger-capability';
 // ★ D192 (2026-05-22): CT-51 Journey 통계 통합 진입점 — 옛 단순 통계(getJourneyStats/listExecutions)를 완전 진화 — buildJourneyStats (overview + steps + segments + hourly + weekday + variants) + listJourneyEnteredCustomers (회사 격리 + 페이지네이션)
 import { buildJourneyStats, listJourneyEnteredCustomers } from '../utils/journey-stats';
 // ★ D197 (2026-05-22) Phase B-2: Predictive Suite — 회사 예측 점수 분포 + Top 위험/구매 가능성 + 모델 정확도
@@ -4489,15 +4489,23 @@ router.post('/operator/journeys-ai-generate', async (req: Request, res: Response
     if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
-    const { objective, templateHint } = req.body || {};
-    if ((!objective || !String(objective).trim()) && !templateHint) {
+    const { objective, templateHint, preferTriggerEvent, benefitText } = req.body || {};
+    // ★ 2026-08-08 이어달리기 — 프리셋만 온 경로(다음 수 카드)는 목표 골격을 서버가 파생한다(클릭 1회).
+    if ((!objective || !String(objective).trim()) && !templateHint && !preferTriggerEvent) {
       return res.status(400).json({ success: false, error: '자연어 목표 또는 템플릿 단축 진입 중 하나는 필수입니다.' });
+    }
+    // ★ 2026-08-08 이어달리기 — 추천 카드가 약속한 트리거. 등록·구현된 값만 받는다(fail-closed).
+    //   여기서 거르지 않으면 만들 수 없는 트리거로 초안이 만들어지고 저장·활성화에서야 막힌다.
+    if (preferTriggerEvent && !isImplementedTriggerEvent(String(preferTriggerEvent))) {
+      return res.status(400).json({ success: false, error: '지원하지 않는 발송 조건입니다. 트리거를 다시 선택해 주세요.' });
     }
     const pkg = await generateJourneyPackage({
       companyId,
       createdBy: userId,
       objective: objective ? String(objective) : undefined,
       templateHint: templateHint || undefined,
+      preferTriggerEvent: preferTriggerEvent ? String(preferTriggerEvent) : undefined,
+      benefitText: benefitText ? String(benefitText) : undefined,   // 상한·정규화는 생성기가 한다
     });
     return res.json({ success: true, package: pkg });
   } catch (err: any) {

@@ -12,12 +12,14 @@
 import { useMemo, useRef, useState } from 'react';
 import {
   Sparkles, Wand2, Beaker, Plus, Trash2, ChevronLeft, ChevronRight, Clock, AlertTriangle, Save, Loader2,
-  Image as ImageIcon,
+  Image as ImageIcon, Gift,
 } from 'lucide-react';
 import { calculateSmsBytes } from '../../utils/formatDate';
 import { highlightVars } from '../../utils/highlightVars';
 // MMS는 이미지가 본체다 — 채널만 바꿔 두고 붙일 자리가 없으면 그 스텝은 만들다 만 것이 된다.
 import JourneyMmsUploader from './JourneyMmsUploader';
+// ★ 2026-08-08 — 혜택 placeholder는 텍스트 수술이 아니라 값 입력으로 채운다(판정·치환 단일 정의).
+import { hasBenefitPlaceholder } from '../../utils/benefit-placeholder';
 
 export type StudioChannel = 'sms' | 'lms' | 'mms';
 export type StudioDelayMode = 'relative' | 'relative_at_hour' | 'specific_hour' | 'next_business_day';
@@ -49,6 +51,11 @@ interface Props {
   /** AI 꾸미기 — 회사 보유 컬럼을 %변수%로 녹인다. */
   onDecorate: (i: number) => void;
   onSpamTest: (i: number) => void;
+  /**
+   * ★ 2026-08-08 — 혜택 입력 카드. placeholder가 남은 스텝이 있을 때만 보인다.
+   *   값을 받으면 **전 스텝의 placeholder를 일괄 치환**한다(치환은 페이지가 소유 — 스텝마다 다시 묻지 않는다).
+   */
+  onFillBenefit?: (benefit: string) => void;
   /** 화면에 넣을 수 있는 변수(회사 보유 컬럼에서 온다 — 우리가 지어내지 않는다). */
   variables?: string[];
   triggerLabel?: string;
@@ -79,12 +86,18 @@ const DELAY_PRESETS: Array<{ label: string; hours: number }> = [
 
 export default function JourneyStepStudio({
   steps, index, onIndex, onPatch, onAdd, onDelete, onSave,
-  onAi, onDecorate, onSpamTest, variables = [], triggerLabel, objective,
+  onAi, onDecorate, onSpamTest, onFillBenefit, variables = [], triggerLabel, objective,
   aiBusy = false, saving = false, maxSteps,
 }: Props) {
   const step = steps[index];
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const [showVars, setShowVars] = useState(false);
+  // ★ 2026-08-08 — 혜택 입력값(치환 전까지만 유지). 어느 스텝에든 placeholder가 남아 있으면 카드가 뜬다.
+  const [benefitInput, setBenefitInput] = useState('');
+  const benefitSlots = useMemo(
+    () => steps.some((s) => hasBenefitPlaceholder(s.messageTemplate) || hasBenefitPlaceholder(s.subject || '')),
+    [steps]
+  );
 
   const channel = (step?.channel === 'sms' || step?.channel === 'mms' ? step.channel : 'lms') as StudioChannel;
   const maxBytes = channel === 'sms' ? 90 : 2000;
@@ -229,6 +242,43 @@ export default function JourneyStepStudio({
                   아직 이미지가 없습니다. 이대로 두면 글자만 나가니, 이미지를 넣거나 채널을 LMS로 되돌려 주세요.
                 </p>
               )}
+            </div>
+          )}
+
+          {/* ★ 2026-08-08 — 혜택은 값으로 받는다. 문안 속 placeholder를 손으로 고치게 하지 않는다.
+              어느 스텝에든 placeholder가 남아 있으면 뜨고, 입력 한 번이 전 스텝을 채운다. */}
+          {benefitSlots && onFillBenefit && (
+            <div className="rounded-xl border border-fuchsia-400/30 bg-fuchsia-500/10 p-3">
+              <div className="mb-1.5 flex items-center gap-1.5">
+                <Gift className="h-3.5 w-3.5 text-fuchsia-300" />
+                <span className="text-xs font-semibold text-white/85">혜택만 알려 주세요 — 문장은 그대로 잇습니다</span>
+              </div>
+              <p className="mb-2 text-[11px] leading-relaxed text-white/50">
+                문안의 혜택 자리에 들어갈 실제 혜택입니다. 입력하면 모든 스텝에 한 번에 채워 드려요.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  value={benefitInput}
+                  onChange={(e) => setBenefitInput(e.target.value.slice(0, 200))}
+                  placeholder="예: 신규 가입 10% 쿠폰 · 5,000원 적립"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && benefitInput.trim()) {
+                      e.preventDefault();
+                      onFillBenefit(benefitInput);
+                      setBenefitInput('');
+                    }
+                  }}
+                  className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950/60 px-3 py-2 text-xs text-white placeholder:text-white/25 focus:border-fuchsia-400/50 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  disabled={!benefitInput.trim()}
+                  onClick={() => { onFillBenefit(benefitInput); setBenefitInput(''); }}
+                  className="shrink-0 rounded-lg bg-gradient-to-r from-fuchsia-500 to-purple-500 px-3 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                >
+                  혜택 넣기
+                </button>
+              </div>
             </div>
           )}
 

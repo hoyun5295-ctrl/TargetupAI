@@ -14,6 +14,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+// ★ 2026-08-08 이어달리기 — 간선·템플릿 코드는 문자열 대조가 아니라 **실제 값**으로 맞춘다.
+//   (정규식은 형태가 조금만 달라도 통과한다 — 2026-07-31 표시 축 교훈)
+import { TRIGGER_CONTRACTS, getTriggerContract, isRegisteredTriggerEvent } from './journey-trigger-capability';
+import { TRIGGER_EVENTS } from '../../../frontend/src/utils/journey-trigger-catalog';
 
 const CATALOG = resolve(process.cwd(), '../frontend/src/utils/journey-trigger-catalog.ts');
 const EXTRACTOR = resolve(process.cwd(), 'src/utils/journey-target-extractor.ts');
@@ -103,5 +107,76 @@ describe('여정 트리거 카탈로그 ↔ 백엔드 실동작', () => {
     const extractor = readFileSync(EXTRACTOR, 'utf8');
     const tail = extractor.slice(extractor.indexOf('    default:'));
     expect(tail.startsWith('    default:\n      return [];')).toBe(true);
+  });
+});
+
+/**
+ * ★ 2026-08-08 이어달리기 — 후속 간선은 계약(백엔드)이 소유하고 카탈로그(프론트)가 미러한다.
+ *   둘이 어긋나면 화면은 "다음 수"를 권하는데 서버는 그 트리거를 모르는 상태가 된다.
+ *   간선·템플릿 코드를 세 번째 자리에 복사하지 않기 위해 여기서 두 자리를 못 박는다.
+ */
+describe('이어달리기 간선 — 계약 ↔ 카탈로그', () => {
+  /** 카탈로그 key → trigger_event (카탈로그가 소유한 유일한 매핑). */
+  const eventOfKey = new Map(TRIGGER_EVENTS.map((t) => [t.key, t.triggerEvent]));
+
+  it('nextEvents 값은 전부 등록된 트리거다 (없는 값이면 추천이 만들 수 없는 여정을 권한다)', () => {
+    const unknown = TRIGGER_CONTRACTS.flatMap((c) => (c.nextEvents || []))
+      .filter((e) => !isRegisteredTriggerEvent(e));
+    expect(unknown, `등록되지 않은 후속 트리거: ${unknown.join(', ')}`).toEqual([]);
+  });
+
+  it('후속 트리거는 구현된 것만이다 (implemented=false면 저장이 거부된다)', () => {
+    const notImplemented = TRIGGER_CONTRACTS.flatMap((c) => (c.nextEvents || []))
+      .filter((e) => getTriggerContract(e)?.implemented !== true);
+    expect(notImplemented, `구현되지 않은 후속 트리거를 권하고 있다: ${notImplemented.join(', ')}`).toEqual([]);
+  });
+
+  it('간선의 출발 트리거는 exit가 steps_done이 아니다 (전환 사건이 없으면 "전환했어요" 추천이 성립하지 않는다)', () => {
+    const bad = TRIGGER_CONTRACTS.filter((c) => (c.nextEvents || []).length > 0 && c.exit === 'steps_done')
+      .map((c) => c.event);
+    expect(bad, `전환 신호가 없는 트리거에 간선이 달렸다: ${bad.join(', ')}`).toEqual([]);
+  });
+
+  it('프론트 nextKeys ↔ 백엔드 nextEvents 가 1:1이다', () => {
+    const fromCatalog = TRIGGER_EVENTS
+      .filter((t) => (t.nextKeys || []).length > 0)
+      .map((t) => `${t.triggerEvent} → ${(t.nextKeys || []).map((k) => eventOfKey.get(k) || `(미등록 key: ${k})`).sort().join(',')}`)
+      .sort();
+    const fromContract = TRIGGER_CONTRACTS
+      .filter((c) => (c.nextEvents || []).length > 0)
+      .map((c) => `${c.event} → ${[...(c.nextEvents || [])].sort().join(',')}`)
+      .sort();
+    expect(fromCatalog, '카탈로그와 계약의 간선이 어긋나면 화면이 권한 트리거로 만들어지지 않는다').toEqual(fromContract);
+  });
+
+  it('프론트 overlapKeys ↔ 백엔드 overlapEvents 가 1:1이고 대칭이다', () => {
+    const fromCatalog = TRIGGER_EVENTS
+      .filter((t) => (t.overlapKeys || []).length > 0)
+      .map((t) => `${t.triggerEvent} ↔ ${(t.overlapKeys || []).map((k) => eventOfKey.get(k) || `(미등록 key: ${k})`).sort().join(',')}`)
+      .sort();
+    const fromContract = TRIGGER_CONTRACTS
+      .filter((c) => (c.overlapEvents || []).length > 0)
+      .map((c) => `${c.event} ↔ ${[...(c.overlapEvents || [])].sort().join(',')}`)
+      .sort();
+    expect(fromCatalog).toEqual(fromContract);
+
+    // 겹침은 한쪽만 적으면 반대편 화면에서 안내가 사라진다.
+    for (const c of TRIGGER_CONTRACTS) {
+      for (const other of c.overlapEvents || []) {
+        expect(
+          getTriggerContract(other)?.overlapEvents || [],
+          `${other} 쪽에 ${c.event} 겹침이 안 적혀 있다 — 안내가 한 방향에서만 뜬다`,
+        ).toContain(c.event);
+      }
+    }
+  });
+
+  it('templateCode는 카탈로그와 계약이 같다 (추천 카드 모양·프리셋 저장값의 단일 출처)', () => {
+    const fromCatalog = TRIGGER_EVENTS.map((t) => `${t.triggerEvent}=${t.templateCode}`).sort();
+    const fromContract = TRIGGER_CONTRACTS
+      .filter((c) => c.key !== null)
+      .map((c) => `${c.event}=${c.templateCode}`)
+      .sort();
+    expect(fromCatalog, '화면에 보이는 트리거는 전부 계약에 templateCode가 있어야 한다').toEqual(fromContract);
   });
 });

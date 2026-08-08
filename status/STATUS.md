@@ -34,7 +34,7 @@
 > **경위·수치·근본원인·함정은 SoT 문서와 memory가 소유한다.** 여기 재서술 = doc_ownership 위반. 지우기 전 소유 문서에 그 사실이 실존하는지 grep으로 확인하고, 없으면 소유 문서에 먼저 옮긴 뒤 지운다.
 > **회전 룰:** 잔여가 0이면 카드를 지운다(원문 = archive/TASKS_YYYY-MM.md + memory). 남은 일만 아래 "완료분 잔여"에 한 줄. 30KB 초과 = 회전 미이행.
 
-### 자동마케팅 — 재설계 배포완료(0804) · **0805 §12-1·5·6 코드 완료·배포 대기**
+### 자동마케팅 — 재설계 배포완료(0804) · **0805 §12-1·5·6도 배포완료**(커밋 `08605ab9` · 남은 DDL 0)
 > 호출어 **"자동마케팅"** → **[FEATURE-AUTOMARKETING.md](../docs/FEATURE-AUTOMARKETING.md)가 전부 소유** — 착수 전 필독 §1(정체성 §0 → 불변 원칙 §2 → 계약 §4). 실측 사실 §10 · 범위 밖 별건 §11 · 기억 [[project_2026_0803_automarketing_targeting_redesign]]
 > ⛔ 새 축 판정 기준은 §0이 소유(사건 = 여정 / 상태·변화 = 자동마케팅) — 여기 재서술 금지. **DDL 전량 실행완료(0804 2건 + 0805 1건) · 남은 DDL 0**
 > 잔여 = **남은 개발 4건 = [문서 §12](../docs/FEATURE-AUTOMARKETING.md)가 착수 원장**(조건부 대기 = 상품 데이터 · 나머지는 다른 트랙과 함께) + 화면 실측 9건(§12 하단 7 + 0805분 2). 운영을 막는 건 0
@@ -44,10 +44,10 @@
 > ⛔ 총 한도 = 월정액 **10% 하나**를 4유형 분할 · 선불 소진은 되돌리지 않고(§5-1-A) 정산 축은 **`부담 = 차감 + 무료`**(§5-1-B) · 후불은 소진 없이 성공 행에 한도 배분(§5-2) · 잔량 식 하나(`REMAINING_EXPR`) · **DDL은 배포 직후** — 그 전까지 후불 발행·미리보기·요금제 화면은 `DB_MIGRATION_PENDING`으로 막힌다 · TRIAL 0건 / STAFF는 ENTERPRISE 동일
 > 잔여 = **실측 2건 = ①월 중 가입 시 그 달 미지급(Harold 예정) ②무료 소진 후 초과분 정상 과금** · 이월 2건(청구서 2페이지 수량 분리 · billing_type 전환 TOCTOU = [정산 문서](../docs/FEATURE-BILLING.md) §7). Codex 4R + 헤더 소비처 전수 확인 완료(critical 2·high 10·medium 2 + 자체발견 2 전량 정정 · 청구 수량 정의는 `billableQuantity` CT 하나)
 
-### 0801 여정 재설계 — **0802 전량 배포완료**(착수 1~5 + 화면 + 등급 상승, DDL 포함)
-> 기능 상설 = **[여정](docs/FEATURE-JOURNEY.md)**(호출어 "여정" — 구조·불변 원칙·이력 색인 전부) · 트랙 SoT [재설계 설계서](docs/2026-08-01-journey-redesign-design.md) · 기억 [[project_2026_0801_journey_redesign]] · 다음 = 화면 실측
-> ⛔ 불변 원칙·판정 계약은 여정 문서와 설계서가 소유 — 착수 전 [여정 문서 §2·§3](docs/FEATURE-JOURNEY.md)부터 읽는다
-> 잔여 = 화면 실측 8종 · 자동 종료 기본화(상품 결정) · 별건 3(활성화 snapshot 실패 시 active 잔존 · journey-stats 'order' 축 · schema template TIMESTAMPTZ)
+### 여정 — 0802 재설계 배포완료 + **0808 이어달리기 구현 완료·배포 대기**
+> 기능 상설 = **[여정](docs/FEATURE-JOURNEY.md)**(호출어 "여정" — 구조·불변 원칙·이력 색인 전부) · 트랙 SoT [재설계 설계서](docs/2026-08-01-journey-redesign-design.md) · [이어달리기 설계서](docs/2026-08-08-journey-succession-design.md)(구현 결과 §9-A) · 기억 [[project_2026_0801_journey_redesign]] · 다음 = 배포 → 실측
+> ⛔ 불변 원칙·판정 계약은 여정 문서와 설계서가 소유 — 착수 전 [여정 문서 §2·§3](docs/FEATURE-JOURNEY.md)부터 읽는다. 이어달리기 = **DDL 0·발송 무변경** · dedup 축은 `trigger_event`(`template_code`로 되돌리면 repeat 3종이 서로를 오차단) · 프리셋은 서버가 계약값으로 덮어쓰고 저장에도 그 표식이 있을 때만 트리거를 싣는다
+> 잔여 = **배포 전 확인 1건**(§9-A 남은 것 — 혜택 입력이 보완) · 이어달리기 실측 1건(§9-6) · 혜택 입력 실측 2건(모달 입력 생성·스튜디오 치환 — [여정 문서 §6-1 08-08(2)](docs/FEATURE-JOURNEY.md)) · 화면 실측 8종 · 자동 종료 기본화 · 별건 5(§9-A 2 + 기존 3 — 편집기 혜택 차단은 0808(2) Codex 2R로 닫힘)
 
 ### 레거시 PAY 흡수 (Track D) — 충전·잔액 축 배포완료, 컷오버 전
 > SoT [통계·인프라](docs/2026-07-07-pay-absorption-track-d-design.md) · [충전·잔액](docs/2026-07-24-agent-prepaid-charge-design.md)(단독 재개용) · 기억 [[project_2026_0724_agent_prepaid_charge]] · 다음 = 7월 실충전 4개(`B0082`·`D0078`·`D0079`·`C0112`)에 `billing_type='prepaid'` 지정(283행 전부 postpaid라 지금은 충전 등록도 요청 탭도 열리지 않는다)
@@ -102,7 +102,7 @@
 | 0731 레거시 143 폐기 — 이관·파기 완료 | 다우클라우드 반납 확인 3건(인스턴스+**볼륨** 삭제 / 스냅샷·백업 이미지 잔존 없음 / 과금 종료일) · 사무실 망에서 `pay.invitobiz.com:8080` 확인(66 경계는 통과 실측) | [[project_2026_0703_legacy_server_decommission]] · [폐기플랜](docs/레거시서버_폐기_플랜.md) §6·§7 0731행 |
 | 0730 이미지 스튜디오 단일 생성 + 접수 4건 | **배포완료** — ⚠SDK 변경 포함이라 이후 배포에도 `build:all` 필수. 실측 6건(생성 1장·2크레딧 / 인앱 삽입 크롭 0 / 헤더 D-Day·쿠폰강조 끝색 / 슬라이드 크기 4종 / 발신프로필 채널ID 검색 / 자동마케팅 MMS 첨부·미첨부 보류 통지) | [[project_2026_0730_studio_single_gen_and_tickets]] |
 | 0725 정산 결함·서수란 6건 (커밋 `d19f48fd`) | 화면 실측(웹 유형 NULL · 발신번호 페이징). 7월 청구 금액을 바꾸는 미해결 항목은 없다 | [[project_2026_0725_settlement_mms_gap_and_seo_tickets]] |
-| **0808 직원 접수 2건(임은지)** — 슈퍼관리자 알림 축 · 원클릭 임시보관 채널 표시 | **코드 완료·배포 대기**. 실측 2 = ①위임장 대기가 **등록현황 관리** 탭 뱃지로 뜨고 새로고침·탭 이동 없이 60초 안에 갱신되는지 ②임시 보관 칩에 채널 라벨이 뜨는지. 추가 과제 2 = 화면별 `CHANNEL_LABEL` 4벌 통합 · `pendingManagers` 죽은 state 정리(선언만·소비 0) | 경위·처방 = [LESSONS_FRONTEND](lessons/LESSONS_FRONTEND.md) 핵심원칙 상단 2항 · 계약 = `sender-alert-axis.test.ts`·`event-campaign-channel-label.test.ts` |
+| **0808 직원 접수 2건(임은지)** — 슈퍼관리자 알림 축 · 원클릭 임시보관 채널 표시 | **배포완료**(2026-08-08). 실측 2 = ①위임장 대기가 **등록현황 관리** 탭 뱃지로 뜨고 새로고침·탭 이동 없이 60초 안에 갱신되는지 ②임시 보관 칩에 채널 라벨이 뜨는지. 추가 과제 2 = 화면별 `CHANNEL_LABEL` 4벌 통합 · `pendingManagers` 죽은 state 정리(선언만·소비 0) | 경위·처방 = [LESSONS_FRONTEND](lessons/LESSONS_FRONTEND.md) 핵심원칙 상단 2항 · 계약 = `sender-alert-axis.test.ts`·`event-campaign-channel-label.test.ts` |
 | 0725 PAY 통계 발급명·대상ID | **배포완료** — 서수란 실측 | [[project_2026_0725_pay_stats_custnm_storeid]] |
 | 0724 DM 테스트 무과금 차단 | 서수란 실측 · 기존 running A/B 미발행 variant 점검 SQL | [[project_2026_0724_dm_test_no_charge_bypass]] |
 | 0723~24 PAY 에이전트 통계(발송ID·엑셀) | 서수란 실측 · 54/57 전환갭 확인 · billing 정산 반영 | [[project_2026_0723_pay_agent_stats_tabs]] |

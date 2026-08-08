@@ -34,6 +34,13 @@ interface Props {
   onClose: () => void;
   objective: string;
   onObjectiveChange: (v: string) => void;
+  /**
+   * ★ 2026-08-08 혜택 입력(선택) — 혜택은 AI가 못 지어내는 유일한 값이라 여기서만 받는다.
+   *   입력하면 AI가 placeholder 대신 처음부터 문안에 녹인다. 비워도 지금처럼 동작(1클릭 유지).
+   *   자연어·빠른 시작 두 경로가 같은 값을 쓴다.
+   */
+  benefit: string;
+  onBenefitChange: (v: string) => void;
   /** templateCode를 주면 빠른 시작, 없으면 자연어 생성. */
   onGenerate: (templateCode?: string) => void;
   generating: boolean;
@@ -44,7 +51,7 @@ interface Props {
 }
 
 export default function MarketingJourneyModal({
-  open, onClose, objective, onObjectiveChange, onGenerate, generating,
+  open, onClose, objective, onObjectiveChange, benefit, onBenefitChange, onGenerate, generating,
   quickStarts, availableCount, lockedCount, lockedHints,
 }: Props) {
   return (
@@ -86,6 +93,23 @@ export default function MarketingJourneyModal({
               }}
               className="w-full resize-none rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-3 text-sm leading-relaxed text-white placeholder:text-white/25 focus:border-fuchsia-400/60 focus:outline-none disabled:opacity-60"
             />
+            {/* ★ 2026-08-08 — 혜택은 값으로 받는다. 문안 속 placeholder를 손으로 고치게 하지 않는다. */}
+            <div className="mt-2.5">
+              <label htmlFor="marketing-journey-benefit" className="mb-1.5 block text-xs font-semibold text-white/80">
+                고객에게 줄 혜택 <span className="font-normal text-white/40">(선택)</span>
+              </label>
+              <input
+                id="marketing-journey-benefit"
+                value={benefit}
+                onChange={(e) => onBenefitChange(e.target.value.slice(0, 200))}
+                placeholder="예: 신규 가입 10% 쿠폰 · 5,000원 적립"
+                disabled={generating}
+                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-sm text-white placeholder:text-white/25 focus:border-fuchsia-400/60 focus:outline-none disabled:opacity-60"
+              />
+              <p className="mt-1 text-[11px] leading-relaxed text-white/35">
+                적어 주시면 문안에 바로 녹여 드려요. 비워 두면 문안에 혜택 자리만 표시됩니다.
+              </p>
+            </div>
             <div className="mt-2 flex items-center justify-between gap-2">
               <span className="text-[11px] text-white/35">Ctrl(⌘) + Enter로도 만들 수 있어요</span>
               <button

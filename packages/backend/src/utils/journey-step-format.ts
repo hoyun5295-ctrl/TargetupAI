@@ -92,6 +92,13 @@ const TRIGGER_KO: Record<string, string> = {
   'cdp.cart_abandon': '장바구니 이탈 고객',
   'customer.birthday_approaching': '생일 임박 고객',
   'customer.points_expiring': '포인트 소멸 임박 고객',
+  // ★ 2026-08-08 — §11-5(2026-08-02)로 늘어난 트리거 5종이 이 표에 없어 화면·프롬프트에
+  //   `트리거: purchase.first` 같은 저장값이 그대로 나가고 있었다. 라벨 표는 여기 하나다.
+  'purchase.first': '첫 구매 고객',
+  'customer.dormant_return': '휴면 복귀 고객',
+  'customer.cycle_lapsed': '구매 주기를 넘긴 고객',
+  'customer.grade_changed': '등급이 올라간 고객',
+  'cdp.browse_no_purchase': '상품을 보고 구매하지 않은 고객',
   'custom': '지정 조건 매칭 고객',
 };
 
