@@ -2682,6 +2682,9 @@ export default function JourneysPage() {
               onAi={(i) => { void handleRefineOpen(i); }}
               onDecorate={(i) => { void handleStudioDecorate(i); }}
               onFillBenefit={handleFillBenefit}
+              sampleCustomer={sampleCustomer}
+              sampleCustomerFields={sampleCustomerFields}
+              opt080Number={opt080Number}
               onSpamTest={(i) => {
                 // 스팸필터 테스트는 실제로 발송해 통신사 판정을 본다 — 문안과 회신번호가 없으면 열지 않는다.
                 if (!String(aiPkg.steps[i]?.messageTemplate || '').trim()) { toast.warning('테스트할 문안을 먼저 만들어 주세요.'); return; }

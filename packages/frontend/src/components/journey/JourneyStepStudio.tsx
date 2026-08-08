@@ -14,8 +14,11 @@ import {
   Sparkles, Wand2, Beaker, Plus, Trash2, ChevronLeft, ChevronRight, Clock, AlertTriangle, Save, Loader2,
   Image as ImageIcon, Gift,
 } from 'lucide-react';
-import { calculateSmsBytes } from '../../utils/formatDate';
-import { highlightVars } from '../../utils/highlightVars';
+// ★ 2026-08-08 — 미리보기·바이트는 **실제 나가는 형태**로 잰다. 합성 규칙은 기존 CT 하나가 소유한다
+//   (백엔드 buildAdMessage의 프론트 미러 — 직접발송 화면이 쓰는 것과 같은 함수).
+import { calculateSmsBytes, buildAdMessageFront, buildAdSubjectFront } from '../../utils/formatDate';
+import { highlightVars, mergeVarsPlain } from '../../utils/highlightVars';
+import { renderLiquid, flattenCustomerForLiquid } from '../../utils/liquid-templating';
 // MMS는 이미지가 본체다 — 채널만 바꿔 두고 붙일 자리가 없으면 그 스텝은 만들다 만 것이 된다.
 import JourneyMmsUploader from './JourneyMmsUploader';
 // ★ 2026-08-08 — 혜택 placeholder는 텍스트 수술이 아니라 값 입력으로 채운다(판정·치환 단일 정의).
@@ -56,6 +59,14 @@ interface Props {
    *   값을 받으면 **전 스텝의 placeholder를 일괄 치환**한다(치환은 페이지가 소유 — 스텝마다 다시 묻지 않는다).
    */
   onFillBenefit?: (benefit: string) => void;
+  /**
+   * ★ 2026-08-08 — 미리보기 치환용 타겟 최상위 고객 1명(페이지가 이미 들고 있다).
+   *   없으면 원문으로 보여주고 그 사실을 알린다 — 지어낸 값으로 채우지 않는다.
+   */
+  sampleCustomer?: Record<string, string | number | null> | null;
+  sampleCustomerFields?: Record<string, any> | null;
+  /** 회사 080 수신거부 번호 — 무료수신거부 문구에 붙는다. */
+  opt080Number?: string;
   /** 화면에 넣을 수 있는 변수(회사 보유 컬럼에서 온다 — 우리가 지어내지 않는다). */
   variables?: string[];
   triggerLabel?: string;
@@ -86,7 +97,9 @@ const DELAY_PRESETS: Array<{ label: string; hours: number }> = [
 
 export default function JourneyStepStudio({
   steps, index, onIndex, onPatch, onAdd, onDelete, onSave,
-  onAi, onDecorate, onSpamTest, onFillBenefit, variables = [], triggerLabel, objective,
+  onAi, onDecorate, onSpamTest, onFillBenefit,
+  sampleCustomer = null, sampleCustomerFields = null, opt080Number = '',
+  variables = [], triggerLabel, objective,
   aiBusy = false, saving = false, maxSteps,
 }: Props) {
   const step = steps[index];
@@ -101,8 +114,36 @@ export default function JourneyStepStudio({
 
   const channel = (step?.channel === 'sms' || step?.channel === 'mms' ? step.channel : 'lms') as StudioChannel;
   const maxBytes = channel === 'sms' ? 90 : 2000;
-  const bytes = useMemo(() => calculateSmsBytes(step?.messageTemplate || ''), [step?.messageTemplate]);
+  const msgType = channel.toUpperCase();
+  const isAdStep = step?.isAd !== false;
+
+  /**
+   * ★ 2026-08-08 (Harold 접수) — 세는 것도 보이는 것도 **실제 나가는 형태**여야 한다.
+   *   옛 검토 화면은 (광고)·무료수신거부를 합성해 보여 줬는데 스튜디오는 순수 본문만 보여 주고 재고 있었다.
+   *   `(광고)` + 개행 + `무료거부0801234567`이 약 27바이트라, SMS에서 "88 / 90"이 실제로는 초과다.
+   *   ⛔ 저장 본문(`messageTemplate`)은 순수 상태 그대로 둔다 — 합성은 표시·계산에서만(이중 부착 차단 규약).
+   */
+  const adComposed = useMemo(
+    () => buildAdMessageFront(step?.messageTemplate || '', msgType, isAdStep, opt080Number),
+    [step?.messageTemplate, msgType, isAdStep, opt080Number]
+  );
+  // 바이트는 **변수 치환 전** 원문 기준으로 잰다 — 치환값은 고객마다 달라 숫자가 흔들린다(토큰 길이가 통제 가능한 값).
+  const bytes = useMemo(() => calculateSmsBytes(adComposed), [adComposed]);
   const over = bytes > maxBytes;
+
+  /** 보이는 모습 = 샘플 고객 치환 → 광고 합성. 샘플이 없으면 치환 없이 원문 그대로(지어내지 않는다). */
+  const previewBody = useMemo(() => {
+    const raw = step?.messageTemplate || '';
+    if (!raw) return '';
+    const merged = sampleCustomer
+      ? mergeVarsPlain(
+          renderLiquid(raw, { customer: flattenCustomerForLiquid(sampleCustomerFields || {}) }).rendered,
+          sampleCustomer,
+          sampleCustomerFields || undefined
+        )
+      : raw;
+    return buildAdMessageFront(merged, msgType, isAdStep, opt080Number);
+  }, [step?.messageTemplate, sampleCustomer, sampleCustomerFields, msgType, isAdStep, opt080Number]);
 
   /** 트리거로부터 누적 몇 시간인가 — AI 맥락과 화면 표기가 같은 값을 쓴다. */
   const hoursFromTrigger = useMemo(
@@ -201,6 +242,7 @@ export default function JourneyStepStudio({
             ))}
             <span className={`ml-auto text-[11px] tabular-nums ${over ? 'text-rose-300' : 'text-white/35'}`}>
               {bytes} / {maxBytes} byte
+              {isAdStep && <span className="ml-1 font-sans text-[10px] text-white/30">(광고 표기 포함)</span>}
             </span>
           </div>
 
@@ -340,11 +382,25 @@ export default function JourneyStepStudio({
 
           {(step.messageTemplate || '').trim() && (
             <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
-              <div className="mb-1.5 text-[11px] font-medium text-white/45">보이는 모습</div>
-              <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-white/85">
-                {highlightVars(step.messageTemplate || '')}
+              <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-medium text-white/45">보이는 모습</span>
+                {sampleCustomer
+                  ? <span className="text-[10px] text-emerald-300/70">타겟 최상위 고객 기준 · 실제 발송 형태</span>
+                  : <span className="text-[10px] text-amber-300/70">아직 이 조건의 타겟 고객이 없어 원본으로 표시됩니다</span>}
               </div>
-              <p className="mt-2 text-[10px] italic text-white/30">Data source — 저장된 스텝 본문. (광고) 표기와 무료수신거부는 발송할 때 자동으로 붙습니다.</p>
+              {/* 제목도 발송 형태로 — 광고 문자는 제목에 (광고)가 붙는다. */}
+              {channel !== 'sms' && step.subject && (
+                <div className="mb-2 border-b border-white/10 pb-2 text-[12px]">
+                  <span className="text-white/45">제목 </span>
+                  <span className="text-white/85">{buildAdSubjectFront(step.subject, msgType, isAdStep)}</span>
+                </div>
+              )}
+              <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-white/85">
+                {sampleCustomer ? previewBody : highlightVars(previewBody)}
+              </div>
+              <p className="mt-2 text-[10px] italic text-white/30">
+                Data source — 저장된 스텝 본문{sampleCustomer ? ' + 추출된 타겟 최상위 고객 1명' : ''}. (광고) 표기와 무료수신거부는 발송할 때 자동으로 붙고, 위 미리보기·바이트에 이미 반영돼 있습니다.
+              </p>
             </div>
           )}
         </div>
