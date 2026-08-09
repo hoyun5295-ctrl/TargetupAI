@@ -34,6 +34,11 @@
 > **경위·수치·근본원인·함정은 SoT 문서와 memory가 소유한다.** 여기 재서술 = doc_ownership 위반. 지우기 전 소유 문서에 그 사실이 실존하는지 grep으로 확인하고, 없으면 소유 문서에 먼저 옮긴 뒤 지운다.
 > **회전 룰:** 잔여가 0이면 카드를 지운다(원문 = archive/TASKS_YYYY-MM.md + memory). 남은 일만 아래 "완료분 잔여"에 한 줄. 30KB 초과 = 회전 미이행.
 
+### 보안 체계 — 설계 확정·착수 대기 (0809 신설)
+> 호출어 **"보안"** → **[설계서](../docs/2026-08-09-security-architecture-design.md)가 전부 소유**(위협 모델 §2 · 실측 현황 §3 · 원칙 §4 · 단계 §5 · 미확인 §6). 여기 재서술 금지. 경위 = 0809 .65 UFW 락아웃 + Harold 지시
+> ⛔ **잠그기 전에 두 번째 문(콘솔·예비 허용)을 실측 확인** — Phase 1 전 잠금 작업 금지 / **노출 판정은 패널이 아니라 외부 측정으로**(0809 실증) / 방화벽이 유일 방어인 자산은 결함으로 본다
+> 잔여 = Phase 0 즉시 조치 4건(호스팅 비밀번호·이메일 2FA·`.env.bak` 추적 제거·`.gitignore` 키 패턴) → Phase 1 자산·콘솔 경로 측정 → Phase 2 WireGuard. **.65 락아웃은 하나로호스팅 지원 요청 대기 중**
+
 ### 자동마케팅 — 재설계 배포완료(0804) · **0805 §12-1·5·6도 배포완료**(커밋 `08605ab9` · 남은 DDL 0)
 > 호출어 **"자동마케팅"** → **[FEATURE-AUTOMARKETING.md](../docs/FEATURE-AUTOMARKETING.md)가 전부 소유** — 착수 전 필독 §1(정체성 §0 → 불변 원칙 §2 → 계약 §4). 실측 사실 §10 · 범위 밖 별건 §11 · 기억 [[project_2026_0803_automarketing_targeting_redesign]]
 > ⛔ 새 축 판정 기준은 §0이 소유(사건 = 여정 / 상태·변화 = 자동마케팅) — 여기 재서술 금지. **DDL 전량 실행완료(0804 2건 + 0805 1건) · 남은 DDL 0**
@@ -83,7 +88,7 @@
 > ① **템플릿** — 호출어 **"템플릿"** → **[FEATURE-ALIMTALK-TEMPLATE.md](../docs/FEATURE-ALIMTALK-TEMPLATE.md)가 전부 소유**(구조·불변 원칙·이관 절차·이력·남은 것). 여기 다시 쓰지 않는다. 0804 = IMC 이관 실행 화면 신설·게이트 테넌트 격리·메트로시티 이관.
 > ② **0718 성능 후속** — 관측 사이클 1회전: 1순위 campaigns 발송 폴러 인덱스(EXPLAIN 후 처방) · 2순위 `balance_transactions` 잔액 SUM N+1(호출처 추적) · 그 후 M3/롤업. [핸드오프](docs/2026-07-18-frontend-splitting-incident-handoff.md) · [[project_2026_0717_dashboard_performance]]
 > ③ **아임웹·아이디룩 시연** — 스토어 등록 확인 → 테스트 몰 OAuth 리허설(pm2 로그+회원가입 1건 webhook) → 시연. INTEGRATIONS.md 아임웹 카드 · [[project_2026_0719_imweb_appstore_idlook]]
-> ④ **이미지 스튜디오** — 호출어 **"이미지 스튜디오"** → **[FEATURE-IMAGE-STUDIO.md](../docs/FEATURE-IMAGE-STUDIO.md)가 전부 소유**(구조·불변 원칙·카탈로그 규약·이력·남은 것 §8). 여기 다시 쓰지 않는다. 0809 = 템플릿 185종 + 행사 문구 위치 축.
+> ④ **이미지 스튜디오** — 호출어 **"이미지 스튜디오"** → **[FEATURE-IMAGE-STUDIO.md](../docs/FEATURE-IMAGE-STUDIO.md)가 전부 소유**(구조·불변 원칙·카탈로그 규약·이력·남은 것 §8). 여기 다시 쓰지 않는다. 0809 = 템플릿 185종 + 행사 문구 위치 축 **전량 배포완료·실측 통과**(잔여는 문서 §8).
 > ⑤ **비토 라인 14·15 미결 4건** — ①배정 화면 게이팅 범위(Harold 미확인) ②라인그룹 DELETE가 `users.line_group_id` 미체크 ③sweeper 2종 bulk-only 사각 ④Codex 결과 미수령. [[project_2026_0717_bito_line14_15_lineadmin]]
 > ⑥ **인앱 잔여** — 웹 실측(쿠폰·CTA 정렬·허용표·AI 생성 1건) · 0717 직원 디버깅분 코드완료·미검증 · M3 네이버 env 키 등록 시 활성 · M6 이메일·인앱 이식(별도 설계). [[project_2026_0717_inapp_debug_session_incomplete]]
 > ⑦ **Local AI Ops Hub** — 설계 3부작 완료·Harold 결정(H-2 M0 착수) 대기. 실무보다 후순위. [[project_2026_0715_local_ai_ops_hub]]
