@@ -187,6 +187,12 @@ export function buildPosterPrompt(input: {
 
   // 1. 장면 스캐폴드(은닉 — 템플릿이 품은 정교한 지시)
   lines.push(template.scaffold);
+  // 1-1. ★ 2026-08-09(2) 문구 위치 지정 시 — 장면 단계에서 그 자리를 비워 구도가 텍스트와 싸우지 않게 한다.
+  //      (실측: 최후미 규칙만으로는 textStyle 상단 문구 + 장면 구도에 밀려 미준수 — 모순 제거가 뿌리 수정)
+  if (input.textPosition) {
+    const zone = input.textPosition === 'top' ? 'upper third' : input.textPosition === 'center' ? 'vertical center' : 'lower third';
+    lines.push(`Scene composition requirement: reserve a calm, visually quiet zone at the ${zone} of the frame for the marketing copy — keep props, busy textures and strong highlights away from that zone.`);
+  }
   // 2. 포스터 형식·비율
   lines.push(`This is a complete marketing poster design, aspect ratio ${preset.aspectRatio}.`);
   // 3. 제품 보존(누끼 첨부 시) — 픽셀 충실 지시
@@ -214,7 +220,12 @@ export function buildPosterPrompt(input: {
   if (given.length) {
     lines.push('Render the following marketing copy INTO the image as part of the design, in polished native-quality Korean typography (correct spelling, exact characters):');
     lines.push(given.join('\n'));
-    lines.push(`Typography direction: ${template.textStyle}`);
+    // 위치 지정 시 textStyle의 위치 발언권을 박탈(서체·무드만) — 위치 권한자는 최후미 규칙 하나뿐.
+    if (input.textPosition) {
+      lines.push(`Typography direction (font mood and styling reference ONLY — any position wording inside it is void; the text position is defined solely by the FINAL LAYOUT RULE at the end): ${template.textStyle}`);
+    } else {
+      lines.push(`Typography direction: ${template.textStyle}`);
+    }
   } else {
     lines.push('This poster has no text — pure visual composition with space that could hold a headline.');
   }
