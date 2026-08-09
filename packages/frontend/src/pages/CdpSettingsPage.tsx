@@ -38,6 +38,13 @@ import {
   Eye, EyeOff, ExternalLink, ChevronDown, ChevronUp, Smartphone,
 } from 'lucide-react';
 import { APP_INAPP_CONTRACT_SECTIONS } from '../components/inapp/AppIntegrationContract';
+// ★ 2026-08-10 Phase 2 — 연동 현황판(1층). 판정은 훅, 매핑은 CT, 화면은 그리기만.
+import CdpIntegrationDashboard from '../components/cdp/CdpIntegrationDashboard';
+import { useCdpIntegrationStatus, type CdpInstallStatusBySource } from '../hooks/useCdpIntegrationStatus';
+import type { CdpProviderKey } from '../utils/cdp-provider-keys';
+
+// ★ Phase 2 병존 플래그 — false로 되돌리면 옛 카드 그리드만 남는다(설계서 §7 롤백).
+const CDP_DASHBOARD_V2 = true;
 import { useAuthStore } from '../stores/authStore';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import { useToast } from '../components/ToastProvider';
@@ -63,6 +70,8 @@ interface InstallStatus {
   total: number;
   count24h: number;
   signals: { pageview: boolean; identify: boolean; consent: boolean; click: boolean };
+  /** ★2026-08-10 Phase 0 — 자사몰(source)별 분리 집계. 옛 배포 응답엔 없으므로 optional. */
+  bySource?: Record<string, CdpInstallStatusBySource>;
 }
 
 interface IssueKeyResponse {
@@ -426,6 +435,22 @@ export default function CdpSettingsPage() {
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
   // ★ 2026-06-25 (gap 3): 렌더 카드 = 백엔드 registry 단일 출처. 로드 성공 시 available/스켈레톤 반영, 실패 시 하드코딩 5종 폴백.
+  // ★ 2026-08-10 Phase 2 — 몰별 상태 판정. 여기서 다시 계산하지 않고 훅 하나에 맡긴다(설계서 §6).
+  //   needsAction(인증 만료)은 판정 근거 컬럼이 미확정이라 아직 넘기지 않는다(§9-6) — 넘기지 않으면 훅이 그 축을 켜지 않는다.
+  const dashboardConnected = useMemo(() => ({
+    cafe24: !!cafe24Status?.connected,
+    naver: !!naverStatus?.connected,
+    godo: !!godoStatus?.connected,
+    imweb: !!imwebStatus?.connected,
+    makeshop: !!makeshopStatus?.connected,
+    custom: !!customInfo?.hasSecret,
+  }), [cafe24Status?.connected, naverStatus?.connected, godoStatus?.connected, imwebStatus?.connected, makeshopStatus?.connected, customInfo?.hasSecret]);
+
+  const integrationStatus = useCdpIntegrationStatus({
+    connected: dashboardConnected,
+    bySource: installStatus?.bySource,
+  });
+
   const providerCards = useMemo<RenderProviderCard[]>(() => {
     const core: RenderProviderCard[] = PROVIDER_CARDS.map((p) => ({
       key: p.key, name: p.name, desc: p.desc, full: p.full, available: true, modalKey: p.key,
@@ -1130,8 +1155,24 @@ export default function CdpSettingsPage() {
           </div>
         )}
 
+        {/* ★ 2026-08-10 Phase 2 — 연동 현황판(1층). 실측 상태 배지 + 요약 3지표.
+            판정 근거 = install-status bySource(Phase 0) + 몰별 connected. 플래그 off면 아래 옛 그리드가 그대로 뜬다. */}
+        {!cdpLocked && CDP_DASHBOARD_V2 && (
+          <CdpIntegrationDashboard
+            providers={providerCards
+              .filter((p) => p.modalKey)
+              .map((p) => ({ key: p.modalKey as CdpProviderKey, name: p.name, desc: p.desc }))}
+            statuses={integrationStatus.byKey}
+            summary={integrationStatus.summary}
+            brand={providerBrand}
+            onOpen={(key) => setConnectProvider(key)}
+            onRefresh={loadAll}
+            loading={loading}
+          />
+        )}
+
         {/* 자사몰 선택 — 좌측 대형 자체 호스팅(그 외 모든 몰 webhook 흡수) + 우측 2×3 그리드 */}
-        {!cdpLocked && (
+        {!cdpLocked && !CDP_DASHBOARD_V2 && (
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
             {/* 좌측 대형 — 자체 호스팅: Shopify·WooCommerce·식스샵 등 목록에 없는 모든 몰 흡수 */}
             <button

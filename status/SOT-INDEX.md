@@ -28,6 +28,7 @@
 | 트랙 | SoT 문서 | 읽는 범위 | 호출어 |
 |---|---|---|---|
 | **보안 체계 — 방어 아키텍처·노출면 축소·WireGuard** | [2026-08-09-security-architecture-design.md](../docs/2026-08-09-security-architecture-design.md) | 착수 전 §4 설계 원칙(필독) → §5 단계별 순서(롤백 포함). 실측 현황 = §3 · 확인 과제 = §6. **추측 기재 금지 — 각 항목은 측정/문서/미확인 표기** | **보안** |
+| **자사몰 연동 화면 재설계 — 상태 대시보드·3단계 흐름·개발자 전달** | [2026-08-09-cdp-integration-redesign-design.md](../docs/2026-08-09-cdp-integration-redesign-design.md) | 착수 전 §3 원칙 → §5 화면 흐름 → §7 단계별 순서(롤백). 현황 실측 = §2 · 착수 전 확인 4건 = §9. `install-status` 실측 신호 재사용이 핵심 | **자사몰 연동 재설계** |
 | **자동마케팅 타겟팅 재설계** — 세그먼트 계약·결정성·행동 축 확장 (기능 상설 = §0 **자동마케팅**) | [2026-08-03-automarketing-targeting-redesign-design.md](../docs/2026-08-03-automarketing-targeting-redesign-design.md) | 구조·불변 원칙·이력은 **기능 문서**가 소유 — 여기는 시점 설계 근거만(진단 §2 · 목표 구조 §4 · 착수 순서 §5) | **자동마케팅** |
 | **여정 재설계 — 트리거 재정의·데이터 게이트·커서 축·연동 배선** (기능 상설 = §0) | [2026-08-01-journey-redesign-design.md](../docs/2026-08-01-journey-redesign-design.md) | 구현 결과 = §11-A~§11-D-7·§13-A·§14 · 트리거 정의 = §3 · 접은 예약 설계 = §12 | 여정 재설계 이어가자 |
 | **여정 이어달리기(다음 수 추천)** — 배포완료·실측 대기 (기능 상설 = §0 여정) | [2026-08-08-journey-succession-design.md](../docs/2026-08-08-journey-succession-design.md) | 확정 사실(실측) §1 → 구조 결정 §2 → **구현 결과 §9-A**. 간선 계약 = §3, 함정 = §11 | **여정 이어달리기** |

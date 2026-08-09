@@ -886,6 +886,47 @@ router.get('/install-status', async (req: Request, res: Response) => {
       [companyId],
     );
     const row = ev.rows[0] || {};
+
+    // ★ 2026-08-10 Phase 0 — 자사몰(source)별 분리 집계 추가.
+    //   기존 쿼리·응답 키는 그대로 둔다(additive) — 회사 단위 값을 보는 기존 소비처 무파손.
+    //   연동 현황판이 몰 카드별 배지를 그리려면 회사 합계가 아니라 source별 실적이 필요하다(설계서 §2-3-1·§6).
+    //   source는 trackEvent 필수 인자라 정상 적재분에는 항상 있다. 옛 행 대비 NULL은 'unknown'으로 묶는다.
+    const bySourceRows = await query(
+      `SELECT
+         COALESCE(source, 'unknown') AS source,
+         MIN(received_at) AS first_event_at,
+         COUNT(*) AS total,
+         COUNT(*) FILTER (WHERE received_at >= NOW() - INTERVAL '24 hours') AS count_24h,
+         MAX(received_at) AS last_event_at,
+         BOOL_OR(event_name = 'page_view') AS has_pageview,
+         BOOL_OR(event_name = 'identify')  AS has_identify,
+         BOOL_OR(event_name = 'consent')   AS has_consent,
+         BOOL_OR(event_name = 'click')     AS has_click
+       FROM cdp_events
+       WHERE company_id = $1::uuid
+       GROUP BY COALESCE(source, 'unknown')`,
+      [companyId],
+    );
+    const bySource: Record<string, {
+      firstEventAt: string | null; lastEventAt: string | null;
+      total: number; count24h: number;
+      signals: { pageview: boolean; identify: boolean; consent: boolean; click: boolean };
+    }> = {};
+    for (const r of bySourceRows.rows) {
+      bySource[String(r.source)] = {
+        firstEventAt: r.first_event_at || null,
+        lastEventAt: r.last_event_at || null,
+        total: parseInt(r.total || '0'),
+        count24h: parseInt(r.count_24h || '0'),
+        signals: {
+          pageview: !!r.has_pageview,
+          identify: !!r.has_identify,
+          consent: !!r.has_consent,
+          click: !!r.has_click,
+        },
+      };
+    }
+
     return res.json({
       success: true,
       keyIssuedAt,
@@ -898,6 +939,7 @@ router.get('/install-status', async (req: Request, res: Response) => {
         consent: !!row.has_consent,
         click: !!row.has_click,
       },
+      bySource,
     });
   } catch (err: any) {
     // db_alter_safety_net — cdp_events 신규 컬럼 미마이그레이션 시 503
