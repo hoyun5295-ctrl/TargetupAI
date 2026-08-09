@@ -14,7 +14,7 @@
 | 도메인 작업 착수 전 사고 이력 (룰 원천=CLAUDE.md `read_lessons_first`) | lessons/LESSONS_{DB,FRONTEND,BACKEND,DEPLOY,ARCHITECTURE,META}.md | 해당 도메인 전체. DB·돈·환불=DB / UI·모달=FRONTEND / API·발송·AI=BACKEND / 배포·빌드·SSH=DEPLOY+OPS.md 해당 절 / 컨트롤타워=ARCHITECTURE / **매 답변 직전=META** |
 | **Harold님이 "브레인스토밍"이라고 말했을 때** · superpowers 스킬 선택 · Codex 라운드 운영·수용 판단 | **COLLAB.md** | 브레인스토밍 = §1 전체 정독 후 그대로 진행(의무) / 그 외 = 해당 절만 |
 | **Codex 리뷰를 돌릴 때** — 실행 절차·요청문 규격·멈춤 판정·복구 | **[CODEX-RUNBOOK.md](CODEX-RUNBOOK.md)** | 착수 전 §1·§2(의무) / 20분 무응답이면 §3·§4. 리뷰를 띄우기 전에 반드시 읽는다 — 같은 멈춤을 다섯 번 반복했다 |
-| **기능 이름을 부를 때** — 그 기능의 구조·불변 원칙·이력 | **[SOT-INDEX.md §0 기능 상설 SoT](SOT-INDEX.md)** | 해당 기능 행 → 그 기능 문서. **"여정"** · **"싱크에이전트"** · **"자동마케팅"** · **"템플릿"** · **"정산"** — 5개 기능이 각자 `docs/FEATURE-*.md`를 갖는다. 기능마다 자기 .md가 이력을 소유하고 STATUS는 참조만 한다(신규 기능도 이 형태로 등재) |
+| **기능 이름을 부를 때** — 그 기능의 구조·불변 원칙·이력 | **[SOT-INDEX.md §0 기능 상설 SoT](SOT-INDEX.md)** | 해당 기능 행 → 그 기능 문서. **"여정"** · **"싱크에이전트"** · **"자동마케팅"** · **"템플릿"** · **"정산"** · **"이미지 스튜디오"** — 6개 기능이 각자 `docs/FEATURE-*.md`를 갖는다. 기능마다 자기 .md가 이력을 소유하고 STATUS는 참조만 한다(신규 기능도 이 형태로 등재) |
 | **프로젝트·트랙 SoT 문서·호출어를 찾을 때** | **[SOT-INDEX.md](SOT-INDEX.md)** | 해당 트랙 행만. **신규 프로젝트 SoT는 이 라우팅 표가 아니라 SOT-INDEX.md에 등재한다**(이 표는 도메인 문서 전용 상설) |
 | 시스템 구조 파악 | ARCHITECTURE.md | 해당 절만 |
 | 자사몰 연동·CDP·커넥터 작업 | INTEGRATIONS.md | 해당 provider 카드 / CDP 공통 절 |
@@ -73,17 +73,17 @@
 > ⛔ 대체문안 선택이 `대체문안 작성(B)`인데 문안이 비면 저장·활성화·발송 세 지점에서 차단 — `원문 그대로(L)`는 게이트웨이가 우리 `msg_contents`를 그대로 내보낸다
 > 잔여 = 운영 확인만 (에이전트 축은 0803 1.7.0에 흡수 — [싱크에이전트 문서](../docs/FEATURE-SYNC-AGENT.md))
 
-### 0731 인앱 이미지 클릭 랜딩 + 스튜디오 행사 트랙 — 배포완료(Codex 4R approve), 실측 대기
-> SoT = 기억 [[project_2026_0731_inapp_image_link_studio_event_track]] · 다음 = 실측 5건(포스터 링크 클릭·캐러셀 슬라이드별·인라인 카드 몰 DOM 무손상·행사 트랙 생성·샘플 배치 curl) — 0721 캐러셀 실측 이 왕복에 흡수. ⚠몰 반영은 SDK 서빙 캐시·브라우저 캐시라 Ctrl+Shift+R 후 확인
+### 0731 인앱 이미지 클릭 랜딩 — 배포완료(Codex 4R approve), 실측 대기
+> SoT = 기억 [[project_2026_0731_inapp_image_link_studio_event_track]] · 다음 = 실측 3건(포스터 링크 클릭·캐러셀 슬라이드별·인라인 카드 몰 DOM 무손상) — 0721 캐러셀 실측 이 왕복에 흡수. ⚠몰 반영은 SDK 서빙 캐시·브라우저 캐시라 Ctrl+Shift+R 후 확인
 > ⛔ `image_link_url` ALTER는 운영 실행 확인됨(SCHEMA 41컬럼) / 블록이 진실인 메시지는 flat 링크를 저장·판독 양층에서 비운다(legacy 폴백 계약 — 완화 금지) / 메시지 DOM 제거는 `data-hanjullo-wrap` 마커 단일 길목(parentElement 추론 복원 금지)
-> 잔여 = 실측 5건 · 팝폰 네이티브 이미지 클릭(계약서 절 기준·OTA 별건) · 샘플 일괄 생성 실행 여부(내부 원가 ~2.4만원, Harold 결정)
+> 잔여 = 실측 3건 · 팝폰 네이티브 이미지 클릭(계약서 절 기준·OTA 별건). 같은 세션의 스튜디오 행사 트랙분(행사 생성·예시 배치)은 0809에 닫혔다 — [이미지 스튜디오 문서](../docs/FEATURE-IMAGE-STUDIO.md) §7
 
 ### 다음 세션 (예정)
 > 경위·범위·확정 사실은 링크가 소유한다. 여기엔 제목·다음 한 수·호출어만.
 > ① **템플릿** — 호출어 **"템플릿"** → **[FEATURE-ALIMTALK-TEMPLATE.md](../docs/FEATURE-ALIMTALK-TEMPLATE.md)가 전부 소유**(구조·불변 원칙·이관 절차·이력·남은 것). 여기 다시 쓰지 않는다. 0804 = IMC 이관 실행 화면 신설·게이트 테넌트 격리·메트로시티 이관.
 > ② **0718 성능 후속** — 관측 사이클 1회전: 1순위 campaigns 발송 폴러 인덱스(EXPLAIN 후 처방) · 2순위 `balance_transactions` 잔액 SUM N+1(호출처 추적) · 그 후 M3/롤업. [핸드오프](docs/2026-07-18-frontend-splitting-incident-handoff.md) · [[project_2026_0717_dashboard_performance]]
 > ③ **아임웹·아이디룩 시연** — 스토어 등록 확인 → 테스트 몰 OAuth 리허설(pm2 로그+회원가입 1건 webhook) → 시연. INTEGRATIONS.md 아임웹 카드 · [[project_2026_0719_imweb_appstore_idlook]]
-> ④ **이미지 스튜디오 잔여** — 인앱 웹 디자인 탭 단순화 · 원샷 이식(인앱·이메일) · 판독 3축 확장 · 템플릿 `exampleUrl` 실샘플 · 미해결 = DM 상품 링크 입력 시 멈춤(재현 정보 대기). [[project_2026_0719_p4_image_studio]]
+> ④ **이미지 스튜디오** — 호출어 **"이미지 스튜디오"** → **[FEATURE-IMAGE-STUDIO.md](../docs/FEATURE-IMAGE-STUDIO.md)가 전부 소유**(구조·불변 원칙·카탈로그 규약·이력·남은 것 §8). 여기 다시 쓰지 않는다. 0809 = 템플릿 185종 + 행사 문구 위치 축.
 > ⑤ **비토 라인 14·15 미결 4건** — ①배정 화면 게이팅 범위(Harold 미확인) ②라인그룹 DELETE가 `users.line_group_id` 미체크 ③sweeper 2종 bulk-only 사각 ④Codex 결과 미수령. [[project_2026_0717_bito_line14_15_lineadmin]]
 > ⑥ **인앱 잔여** — 웹 실측(쿠폰·CTA 정렬·허용표·AI 생성 1건) · 0717 직원 디버깅분 코드완료·미검증 · M3 네이버 env 키 등록 시 활성 · M6 이메일·인앱 이식(별도 설계). [[project_2026_0717_inapp_debug_session_incomplete]]
 > ⑦ **Local AI Ops Hub** — 설계 3부작 완료·Harold 결정(H-2 M0 착수) 대기. 실무보다 후순위. [[project_2026_0715_local_ai_ops_hub]]
@@ -100,7 +100,7 @@
 | 건 | 남은 것 | 상세 |
 |---|---|---|
 | 0731 레거시 143 폐기 — 이관·파기 완료 | 다우클라우드 반납 확인 3건(인스턴스+**볼륨** 삭제 / 스냅샷·백업 이미지 잔존 없음 / 과금 종료일) · 사무실 망에서 `pay.invitobiz.com:8080` 확인(66 경계는 통과 실측) | [[project_2026_0703_legacy_server_decommission]] · [폐기플랜](docs/레거시서버_폐기_플랜.md) §6·§7 0731행 |
-| 0730 이미지 스튜디오 단일 생성 + 접수 4건 | **배포완료** — ⚠SDK 변경 포함이라 이후 배포에도 `build:all` 필수. 실측 6건(생성 1장·2크레딧 / 인앱 삽입 크롭 0 / 헤더 D-Day·쿠폰강조 끝색 / 슬라이드 크기 4종 / 발신프로필 채널ID 검색 / 자동마케팅 MMS 첨부·미첨부 보류 통지) | [[project_2026_0730_studio_single_gen_and_tickets]] |
+| 0730 접수 4건(스튜디오 단일 생성 동반) | **배포완료** — ⚠SDK 변경 포함이라 이후 배포에도 `build:all` 필수. 실측 4건(헤더 D-Day·쿠폰강조 끝색 / 슬라이드 크기 4종 / 발신프로필 채널ID 검색 / 자동마케팅 MMS 첨부·미첨부 보류 통지). 스튜디오분(생성 1장·2크레딧 / 인앱 삽입 크롭 0)은 [이미지 스튜디오 문서](../docs/FEATURE-IMAGE-STUDIO.md) §7 | [[project_2026_0730_studio_single_gen_and_tickets]] |
 | 0725 정산 결함·서수란 6건 (커밋 `d19f48fd`) | 화면 실측(웹 유형 NULL · 발신번호 페이징). 7월 청구 금액을 바꾸는 미해결 항목은 없다 | [[project_2026_0725_settlement_mms_gap_and_seo_tickets]] |
 | **0808 직원 접수 2건(임은지)** — 슈퍼관리자 알림 축 · 원클릭 임시보관 채널 표시 | **배포완료**(2026-08-08). 실측 2 = ①위임장 대기가 **등록현황 관리** 탭 뱃지로 뜨고 새로고침·탭 이동 없이 60초 안에 갱신되는지 ②임시 보관 칩에 채널 라벨이 뜨는지. 추가 과제 2 = 화면별 `CHANNEL_LABEL` 4벌 통합 · `pendingManagers` 죽은 state 정리(선언만·소비 0) | 경위·처방 = [LESSONS_FRONTEND](lessons/LESSONS_FRONTEND.md) 핵심원칙 상단 2항 · 계약 = `sender-alert-axis.test.ts`·`event-campaign-channel-label.test.ts` |
 | 0725 PAY 통계 발급명·대상ID | **배포완료** — 서수란 실측 | [[project_2026_0725_pay_stats_custnm_storeid]] |

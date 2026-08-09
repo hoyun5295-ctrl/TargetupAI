@@ -215,18 +215,21 @@ export function buildPosterPrompt(input: {
     lines.push('Render the following marketing copy INTO the image as part of the design, in polished native-quality Korean typography (correct spelling, exact characters):');
     lines.push(given.join('\n'));
     lines.push(`Typography direction: ${template.textStyle}`);
-    // ★ 2026-08-09 문구 위치 오버라이드 — 행사 포스터 위/중앙/아래 선택(라우트가 화이트리스트 검증 후 전달)
-    if (input.textPosition) {
-      const pos = input.textPosition === 'top' ? 'in the upper third of the poster'
-        : input.textPosition === 'center' ? 'at the vertical center of the poster, as a fully centered composition'
-        : 'in the lower third of the poster';
-      lines.push(`Text block placement: place the entire text block ${pos} — this placement overrides any placement mentioned in the typography direction above.${input.hasProduct ? ' Keep the text block clear of the attached product.' : ''}`);
-    }
   } else {
     lines.push('This poster has no text — pure visual composition with space that could hold a headline.');
   }
   // 7. (마지막) 제한 — 지정 문구 외 일체 금지.
   lines.push('Use ONLY the text given above, exactly as written — do not add, translate, paraphrase, or modify any wording or numbers. Do not render any other text, prices, logos, QR codes, or watermarks.');
+  // 8. (최후미) 문구 위치 강제 — 2026-08-09 보강: 모델이 마지막 지시에 가장 강하게 반응하므로 최종 제약 뒤에 둔다.
+  //    템플릿 textStyle의 상단 배치 문구·장면 구도(하단 소품·상단 여백)에 밀리지 않도록 부정형 + 배경 정돈 지시 동반.
+  if (given.length && input.textPosition) {
+    const pos = input.textPosition === 'top'
+      ? 'in the upper third of the poster. Do NOT place it in the middle or lower part'
+      : input.textPosition === 'center'
+        ? 'at the exact vertical center of the poster — the headline must sit at the middle of the image height. Do NOT place the text block in the upper third'
+        : 'in the lower third of the poster. Do NOT place it in the upper or middle part';
+    lines.push(`FINAL LAYOUT RULE — this single rule overrides every placement direction mentioned anywhere above, including the typography direction: place the entire text block (label, headline and sub-headline together as one group) ${pos}.${input.hasProduct ? ' Keep the text block clear of the attached product.' : ''} Compose the scene so the area behind the text block stays visually calm and uncluttered for readability.`);
+  }
 
   return lines.join('\n');
 }
