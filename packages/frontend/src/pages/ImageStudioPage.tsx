@@ -91,8 +91,8 @@ export default function ImageStudioPage() {
   const [template, setTemplate] = useState<StudioTemplatePublic | null>(null);
   // ★ 2026-07-31 트랙 축 — 제품 포스터(누끼) / 행사 포스터(멤버십데이·오픈·시즌 행사, 제품 없이 성립)
   const [trackKind, setTrackKind] = useState<'product' | 'event'>('product');
-  // ★ 2026-08-09 행사 포스터 문구 위치(위/중앙/아래) — 기본 중앙(Harold 확정). 제품 포스터는 템플릿 기본 배치 유지라 미전달.
-  const [textPosition, setTextPosition] = useState<'top' | 'center' | 'bottom'>('center');
+  // ★ 2026-08-09 행사 포스터 문구 위치(위/중앙/아래) — 기본 위(Harold 재확정: 갤러리 예시와 같은 구도로 시작, 중앙·아래는 선택). 제품 포스터는 템플릿 기본 배치 유지라 미전달.
+  const [textPosition, setTextPosition] = useState<'top' | 'center' | 'bottom'>('top');
 
   // 내 라이브러리(저장 소재) — 갤러리 상단 폴더. 소재 클릭 = 채널 발사대(인앱/DM/이메일/MMS 변환).
   const [assetAction, setAssetAction] = useState<{ id: string; url: string; filename: string | null; bytes: number; channelSpec?: string | null } | null>(null);
