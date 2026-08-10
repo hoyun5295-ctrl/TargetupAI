@@ -183,6 +183,51 @@ describe('개발자 전달 안내 (Phase 4 · 설계서 §5-3)', () => {
   });
 });
 
+describe('개발자 자료 3층 표시 (설계서 §5-0·§5-5)', () => {
+  const doc = () => read(path.join(FRONTEND_SRC, 'components/cdp/CdpDeveloperDoc.tsx'));
+
+  it('상세는 기본 접힘이다 — 개발자 계약 문서를 담당자 화면에 통째로 쏟지 않는다', () => {
+    const src = doc();
+    expect(src).toMatch(/useState<string \| null>\(null\)/);
+    // 펼쳐진 상세는 하나뿐 — 아코디언이 단일 열림이어야 한다
+    expect(src).toMatch(/setOpenKey\(open \? null : sec\.key\)/);
+  });
+
+  it('주 액션은 "읽기"가 아니라 "개발자에게 전달"이다', () => {
+    expect(doc()).toContain('개발자에게 보낼 내용 복사');
+  });
+
+  it('앱 탭이 계약 문서를 펼친 채로 그리지 않는다 — 3층 컴포넌트에 위임한다', () => {
+    const page = read(path.join(FRONTEND_SRC, 'pages/CdpSettingsPage.tsx'));
+    // 페이지가 계약 항목을 직접 순회해 그리면 옛 벽이 돌아온다
+    expect(page).not.toMatch(/APP_INAPP_CONTRACT_SECTIONS\.map/);
+    expect(page).toMatch(/<CdpDeveloperDoc/);
+  });
+});
+
+describe('웹 탭 정리 (설계서 §5-4·§5-5)', () => {
+  const page = () => read(path.join(FRONTEND_SRC, 'pages/CdpSettingsPage.tsx'));
+
+  it('거의 같은 스크립트를 두 개 쌓지 않는다 — 토글 하나로 전환한다', () => {
+    const src = page();
+    expect(src).toMatch(/<CdpSnippetBox/);
+    // 옛 방식: 웹/앱 스니펫을 각각 pre로 나란히 그리던 코드가 돌아오면 안 된다
+    expect(src).not.toMatch(/앱 웹뷰\) — 앱 웹뷰 페이지에 붙여넣기/);
+  });
+
+  it('코드 블록 동시 노출은 1개다', () => {
+    const box = read(path.join(FRONTEND_SRC, 'components/cdp/CdpSnippetBox.tsx'));
+    // 활성 변형 하나만 그린다 — pre가 목록 순회 안에 있으면 여러 개가 동시에 뜬다
+    expect(box).not.toMatch(/variants\.map[\s\S]{0,400}<pre/);
+    expect(box).toMatch(/\{active\.code\}/);
+  });
+
+  it('설치 진단이 중복으로 남아 있지 않다 — 스테퍼 ③이 그 몫을 한다', () => {
+    const src = page();
+    expect(src).not.toMatch(/installStatus && customTab === 'web'/);
+  });
+});
+
 describe('install-status source 분리 (Phase 0)', () => {
   it('회사 합계와 별개로 source별 집계를 함께 돌려준다 — 기존 응답 키는 유지', () => {
     const src = read(path.join(BACKEND_SRC, 'routes/cdp.ts'));

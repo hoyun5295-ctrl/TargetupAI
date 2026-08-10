@@ -42,6 +42,8 @@ import { APP_INAPP_CONTRACT_SECTIONS } from '../components/inapp/AppIntegrationC
 import CdpIntegrationDashboard from '../components/cdp/CdpIntegrationDashboard';
 import CdpIntegrationStepper from '../components/cdp/CdpIntegrationStepper';
 import { buildInstallGuideText } from '../utils/cdp-install-guide';
+import CdpDeveloperDoc, { developerDocToText } from '../components/cdp/CdpDeveloperDoc';
+import CdpSnippetBox from '../components/cdp/CdpSnippetBox';
 import { useCdpIntegrationStatus, type CdpInstallStatusBySource } from '../hooks/useCdpIntegrationStatus';
 import type { CdpProviderKey } from '../utils/cdp-provider-keys';
 
@@ -1808,37 +1810,16 @@ client.newCall(req).execute()`}</pre>
         {/* ★ 2026-07-17 인앱 메시지 앱(네이티브) 통합 계약 (앱 탭) — 앱이 구현해야 편집기 설정이 그대로 동작.
             단일 소스 = components/inapp/AppIntegrationContract.tsx (편집기 앱 채널 모달과 동일 내용) */}
         {webhookProviderOpen && customInfo?.hasSecret && customTab === 'app' && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-6">
-            <div className="flex items-center gap-2 mb-3">
-              <Smartphone className="w-5 h-5 text-cyan-300" />
-              <h2 className="text-base font-bold text-white">인앱 메시지 — 앱이 구현해야 하는 계약</h2>
-            </div>
-            <div className="text-xs text-white/60 leading-relaxed mb-4">
-              네이티브 앱은 인앱 메시지를 앱이 직접 그립니다. 아래 계약(조회·렌더 필드·닫기/빈도 동작·트래킹)을 앱 개발에 그대로 전달하세요 —
-              이 계약을 구현하면 이후 편집기에서 만드는 모든 인앱 메시지가 앱 수정 없이 동작합니다.
-            </div>
-            <div className="space-y-4">
-              {APP_INAPP_CONTRACT_SECTIONS.map((sec) => (
-                <div key={sec.key}>
-                  <div className="text-xs font-bold text-white/90 mb-1.5">{sec.heading}</div>
-                  <div className="space-y-2 text-xs text-white/70">
-                    {sec.items.map((it, i) => (
-                      <div key={i} className="bg-slate-900/40 border border-white/10 rounded-lg p-2.5">
-                        <div className="font-semibold text-white/85">{it.title}</div>
-                        <div className="text-white/55 leading-relaxed mt-0.5">{it.desc}</div>
-                        {it.code && (
-                          <pre className="mt-2 bg-slate-950 border border-white/10 rounded-lg p-2.5 text-[11px] text-cyan-200 overflow-x-auto whitespace-pre">{it.code}</pre>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="text-[10px] text-white/30 italic mt-3">Data source — /api/cdp/inapp/active · /api/cdp/inapp/track (앱 채널 보장 계약)</div>
-          </div>
+          <CdpDeveloperDoc
+            title="인앱 메시지 — 앱이 구현해야 하는 계약"
+            summary="네이티브 앱은 인앱 메시지를 앱이 직접 그립니다. 아래 내용을 앱 개발자에게 전달하면, 이후 편집기에서 만드는 메시지가 앱 수정 없이 동작합니다."
+            sections={APP_INAPP_CONTRACT_SECTIONS}
+            onCopyAll={() => copyText(
+              developerDocToText('인앱 메시지 — 앱이 구현해야 하는 계약', APP_INAPP_CONTRACT_SECTIONS),
+              '앱 인앱 메시지 계약',
+            )}
+          />
         )}
-
         {/* 카페24 — OAuth */}
         {/* ★ 2026-08-10 Phase 3 잔여 — 몰별 연결 폼 = 스테퍼 ①단계의 내용물.
             JSX를 물리적으로 옮기지 않고 **표시 조건만 스테퍼가 통제**한다(500줄 이동 = 회귀 위험).
@@ -2515,80 +2496,31 @@ client.newCall(req).execute()`}</pre>
               </div>
               <div>
                 <h2 className="text-base font-bold text-white">SDK 설치 스크립트</h2>
-                <div className="text-xs text-white/50">자사몰 &lt;head&gt;에 붙여넣으면 고객 행동 수집이 시작됩니다. (페이지뷰·클릭 + GA4 dataLayer 이커머스 자동 수집)</div>
+                <div className="text-xs text-white/50">자사몰 &lt;head&gt;에 붙여넣으면 고객 행동 수집이 시작됩니다.</div>
               </div>
             </div>
-            {(() => {
-              const snippet = `<script src="https://app.hanjul.ai/api/cdp/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage.public_key}" async></script>`;
-              const appSnippet = `<script src="https://app.hanjul.ai/api/cdp/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage.public_key}" data-hjl-platform="app" async></script>`;
-              return (
-                <>
-                  <div className="text-xs font-medium text-white/70 mb-1.5">웹 자사몰 — &lt;head&gt;에 붙여넣기</div>
-                  <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre-wrap break-all">{snippet}</pre>
-                  <button
-                    onClick={() => copyText(snippet, '웹 설치 스크립트')}
-                    className="mt-2 px-3 py-2 bg-violet-500/40 hover:bg-violet-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5"
-                  >
-                    <Copy className="w-3.5 h-3.5" />복사
-                  </button>
-                  <div className="text-xs font-medium text-white/70 mb-1.5 mt-5">모바일 앱(웹뷰) — 앱 웹뷰 페이지에 붙여넣기 <span className="text-sky-300">(data-hjl-platform="app" 한 줄 추가)</span></div>
-                  <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-sky-200 overflow-x-auto whitespace-pre-wrap break-all">{appSnippet}</pre>
-                  <button
-                    onClick={() => copyText(appSnippet, '앱 설치 스크립트')}
-                    className="mt-2 px-3 py-2 bg-sky-500/40 hover:bg-sky-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5"
-                  >
-                    <Copy className="w-3.5 h-3.5" />복사
-                  </button>
-                </>
-              );
-            })()}
-            <div className="text-[10px] text-white/30 italic mt-2">Data source — app.hanjul.ai/sdk/v0.3.9</div>
+            {/* ★ 2026-08-10 §5-4 — 거의 같은 스크립트 2개를 나란히 쌓지 않는다. 토글 하나로 전환(코드 블록 동시 노출 1개). */}
+            <CdpSnippetBox
+              variants={[
+                {
+                  key: 'web',
+                  label: '웹',
+                  note: '쇼핑몰 모든 페이지의 <head> 안에 넣어주세요.',
+                  code: `<script src="https://app.hanjul.ai/api/cdp/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage.public_key}" async></script>`,
+                },
+                {
+                  key: 'app',
+                  label: '앱 웹뷰',
+                  note: '앱 웹뷰 페이지에는 data-hjl-platform="app" 한 줄이 더 붙습니다.',
+                  code: `<script src="https://app.hanjul.ai/api/cdp/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage.public_key}" data-hjl-platform="app" async></script>`,
+                },
+              ]}
+              onCopy={copyText}
+            />
+            <div className="text-[10px] text-white/30 italic mt-3">Data source — app.hanjul.ai/sdk/v0.3.9</div>
           </div>
         )}
 
-        {/* 12-2. 설치 검증 — 첫 이벤트 진단 (웹 탭) */}
-        {webhookProviderOpen && usage?.public_key && installStatus && customTab === 'web' && (() => {
-          const issued = installStatus.keyIssuedAt ? new Date(installStatus.keyIssuedAt).getTime() : null;
-          const mins = issued ? Math.floor((Date.now() - issued) / 60000) : 0;
-          const received = !!installStatus.firstEventAt;
-          const guide = received
-            ? '첫 이벤트 수신 완료 — 설치가 정상 동작합니다.'
-            : mins < 5 ? '설치 후 첫 이벤트 대기 중 — 자사몰 페이지를 한 번 열어보세요.'
-            : mins < 10 ? '5분 경과 — 스크립트가 <head>에 들어갔는지, 자사몰을 방문했는지 확인하세요.'
-            : mins < 30 ? '10분 경과 — 스크립트 경로/키 값과 광고/보안 차단을 점검하세요.'
-            : '30분 경과 — 설치 점검이 필요합니다. 스크립트 로드 여부와 키 발급 상태를 확인하세요.';
-          const steps = [
-            { label: '첫 이벤트 수신', done: received },
-            { label: '페이지뷰', done: installStatus.signals.pageview },
-            { label: '회원 식별(data-hjl-user-id)', done: installStatus.signals.identify },
-            { label: '마케팅 동의', done: installStatus.signals.consent },
-          ];
-          return (
-            <div className={`border rounded-2xl p-6 ${received ? 'bg-emerald-500/10 border-emerald-400/30' : 'bg-white/5 border-white/10'}`}>
-              <div className="flex items-center gap-2 mb-3 flex-wrap">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${received ? 'bg-emerald-500/30' : 'bg-gradient-to-br from-violet-500 to-fuchsia-600'}`}>
-                  {received ? <Check className="w-5 h-5 text-emerald-200" /> : <Activity className="w-5 h-5 text-white" />}
-                </div>
-                <div className="min-w-0">
-                  <h2 className="text-base font-bold text-white">설치 검증 — 첫 이벤트</h2>
-                  <div className="text-xs text-white/50">{guide}</div>
-                </div>
-                {received && (
-                  <span className="ml-auto text-xs text-emerald-200 shrink-0">총 {installStatus.total.toLocaleString()}건 · 24h {installStatus.count24h.toLocaleString()}건</span>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {steps.map((s) => (
-                  <div key={s.label} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs ${s.done ? 'bg-emerald-500/10 text-emerald-200' : 'bg-white/5 text-white/50'}`}>
-                    {s.done ? <Check className="w-3.5 h-3.5 shrink-0" /> : <div className="w-3.5 h-3.5 rounded-full border border-white/30 shrink-0" />}
-                    {s.label}
-                  </div>
-                ))}
-              </div>
-              <div className="text-[10px] text-white/30 italic mt-2">Data source — cdp_events 수신 신호(서버 관측)</div>
-            </div>
-          );
-        })()}
           </div>
         </CdpModal>
       </div>
