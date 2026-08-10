@@ -35,10 +35,16 @@ const SYNC_INTERVAL_MS = 30 * 60 * 1000;
 const MIN_WINDOW_DAYS = 2;
 
 /**
- * 한 회차 상한(일). 공백이 이보다 길면 이 워커로는 다 못 메운다 —
- * 그건 재연결(90일 백필)이 복구 경로이고, 여기서는 경고만 남긴다(조용히 지나가면 누락을 아무도 모른다).
+ * 한 회차 상한(일) = 연결 시 백필과 **같은 깊이**(godo-client.DEFAULT_BACKFILL_DAYS).
+ *
+ * ★ 2026-08-10 정정 — 처음엔 30일로 뒀는데 그 숫자에 근거가 없었고, 더 나쁜 성질이 딸려 왔다.
+ *   공백이 상한보다 길면 최근 30일만 메우는데 **성공하면 `last_synced_at`이 지금으로 갱신돼
+ *   다음 회차부터 공백이 작아진다** — 경고는 사라지고 그 이전 구간은 영영 안 들어온다.
+ *   로그 한 줄로 알리고 스스로 지워지는 구조라 "다 가져왔다"로 읽힌다.
+ *   깊이를 연결 시 백필과 맞추면 공백이 **한 회차에 수렴**하고, 경고와 "재연결로 복구" 안내가 함께 사라진다.
+ *   같은 깊이를 `/connect`가 이미 걷고 있으므로 새로운 위험이 아니고, 소급분은 여정 발생 시각 창이 막는다.
  */
-const MAX_WINDOW_DAYS = 30;
+const MAX_WINDOW_DAYS = 90;
 
 /** 회사 간 간격 — 외부 API에 몰아치지 않는다. */
 const COMPANY_GAP_MS = 1000;
@@ -137,8 +143,10 @@ export async function runGodoSyncPass(): Promise<GodoSyncPassResult> {
       if (!(await isCdpEnabledForPlan(row.company_id))) continue;
 
       if (isGapBeyondWindow(row.last_synced_at, row.connected_at, now)) {
+        // 여기까지 오면 재연결도 답이 아니다 — `/connect` 백필이 같은 깊이라 더 과거는 어느 경로로도 안 들어온다.
+        // 조용히 지나가지 않게 남기되, 복구 방법을 아는 척하지 않는다.
         console.warn(
-          `[Godo Sync] 공백이 ${MAX_WINDOW_DAYS}일을 넘음 — 이번 회차로는 다 못 메운다(company=${row.company_id}). 전체 복구는 재연결 백필.`,
+          `[Godo Sync] 공백이 ${MAX_WINDOW_DAYS}일을 넘음 — 그보다 과거 주문은 이 연동으로 가져오지 않는다(company=${row.company_id}).`,
         );
       }
 

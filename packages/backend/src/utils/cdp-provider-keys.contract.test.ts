@@ -292,6 +292,20 @@ describe('고도몰 주기 수집 (★2026-08-10 — collect:auto 선언의 근�
     expect(src).toMatch(/godo_sync_error/);
   });
 
+  it('한 회차 상한이 연결 시 백필과 같은 깊이다 — 얕으면 공백이 조용히 잊힌다', () => {
+    const worker = read(path.join(BACKEND_SRC, 'utils/godo-sync-worker.ts'));
+    const client = read(path.join(BACKEND_SRC, 'utils/godo-client.ts'));
+    const workerCap = worker.match(/const MAX_WINDOW_DAYS = (\d+)/)?.[1];
+    const connectDepth = client.match(/const DEFAULT_BACKFILL_DAYS = (\d+)/)?.[1];
+    // 둘 다 못 찾으면 undefined === undefined로 조용히 통과한다 — 그 길을 먼저 막는다
+    expect(workerCap, '워커 상한 상수를 못 찾았다').toBeDefined();
+    expect(connectDepth, '연결 백필 깊이 상수를 못 찾았다').toBeDefined();
+    expect(
+      workerCap,
+      '워커 상한이 연결 백필보다 얕으면 그 차이만큼이 영영 안 들어온다 — 성공 시 last_synced_at이 갱신돼 경고까지 사라진다',
+    ).toBe(connectDepth);
+  });
+
   it('실패한 회차는 커서를 전진시키지 않는다 — 올리면 그 구간이 창 밖으로 밀려 영영 안 들어온다', () => {
     const src = read(path.join(BACKEND_SRC, 'utils/godo-sync-worker.ts'));
     // last_synced_at 갱신은 성공 경로 하나뿐
