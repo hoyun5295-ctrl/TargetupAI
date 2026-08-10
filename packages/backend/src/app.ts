@@ -127,6 +127,8 @@ import { startDmDrawWorker } from './utils/dm/dm-draw-worker';
 // ★ 2026-06-10: CDP webhook 실패 재처리 + unified profile 자동 재계산
 import { startCdpWebhookRetryWorker } from './utils/cdp-webhook-retry-worker';
 import { startCdpProfileRecomputeWorker } from './utils/cdp-profile-recompute-worker';
+// ★ 2026-08-10: 고도몰 주기 수집 (30분) — 웹훅이 없는 몰이라 당겨오지 않으면 연결 후 신규 주문이 영영 안 들어온다
+import { startGodoSyncWorker } from './utils/godo-sync-worker';
 // ★ 2026-06-13: 시스템 크리티컬 감지 워커 (발송 큐 지연 정체 + 싱크에이전트 중단 → 운영자 문자 통지)
 import { startSystemMonitorWorker } from './utils/system-monitor-worker';
 // ★ 2026-07-05: 발송 피로도 보호 — send_fatigue_daily 45일 초과 버킷 프루닝 (6시간 주기)
@@ -524,6 +526,10 @@ app.listen(PORT, () => {
 
   // ★ 2026-06-10: CDP unified profile 자동 재계산 (5분 증분 + 매일 04시 30일 카운터)
   startCdpProfileRecomputeWorker();
+
+  // ★ 2026-08-10: 고도몰 주기 수집 (30분) — 연결 시 백필 1회가 전부였던 것을 정정.
+  //   소급분이 발송이 되지 않는 근거 = 여정 발생 시각 창(journey-target-extractor).
+  startGodoSyncWorker();
 
   // ★ 2026-06-13: 시스템 크리티컬 감지 (5분 주기) — 발송 큐 지연 정체 + 싱크에이전트 중단을
   //   운영자 문자(SYSTEM_ALERT_PHONES)로 직접 통지. 톤28 지연 실발송·인비토 동기화 중단 실측 후속.

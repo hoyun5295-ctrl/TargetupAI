@@ -44,7 +44,7 @@ import CdpIntegrationStepper from '../components/cdp/CdpIntegrationStepper';
 import { buildInstallGuideText } from '../utils/cdp-install-guide';
 import CdpDeveloperDoc, { developerDocToText } from '../components/cdp/CdpDeveloperDoc';
 import CdpSnippetBox from '../components/cdp/CdpSnippetBox';
-import { useCdpIntegrationStatus, type CdpInstallStatusBySource } from '../hooks/useCdpIntegrationStatus';
+import { useCdpIntegrationStatus, isIntegrationAuthBroken, type CdpInstallStatusBySource } from '../hooks/useCdpIntegrationStatus';
 import type { CdpProviderKey } from '../utils/cdp-provider-keys';
 
 // ★ Phase 2 병존 플래그 — false로 되돌리면 옛 카드 그리드만 남는다(설계서 §7 롤백).
@@ -114,6 +114,9 @@ interface GodoStatus {
   connected: boolean;
   status?: string;
   connectedAt?: string | null;
+  /** ★2026-08-10 주기 수집 관측값 — 마지막 성공 시각 / 마지막 실패 사유(있으면 조치 필요). */
+  lastSyncedAt?: string | null;
+  syncError?: { message: string; code: string; at: string | null } | null;
 }
 
 interface MakeshopStatus {
@@ -453,8 +456,20 @@ export default function CdpSettingsPage() {
     custom: !!customInfo?.hasSecret,
   }), [cafe24Status?.connected, naverStatus?.connected, godoStatus?.connected, imwebStatus?.connected, makeshopStatus?.connected, customInfo?.hasSecret]);
 
+  // ★ 2026-08-10 — 조치 필요(인증 끊김) 축. 판정 문자열은 훅의 CT가 소유하고 여기선 몰별로 모으기만 한다.
+  //   고도몰은 토큰이 없는 키 방식이라 만료 개념이 없다 — 대신 주기 수집이 남긴 실패 사유가 그 신호다.
+  const dashboardNeedsAction = useMemo(() => ({
+    cafe24: isIntegrationAuthBroken(cafe24Status?.status),
+    naver: isIntegrationAuthBroken(naverStatus?.status),
+    godo: !!godoStatus?.syncError,
+    imweb: isIntegrationAuthBroken(imwebStatus?.status),
+    makeshop: isIntegrationAuthBroken(makeshopStatus?.status),
+    custom: false,   // 자체 호스팅은 시크릿 방식이라 만료가 없다(재발급은 담당자 의사)
+  }), [cafe24Status?.status, naverStatus?.status, godoStatus?.syncError, imwebStatus?.status, makeshopStatus?.status]);
+
   const integrationStatus = useCdpIntegrationStatus({
     connected: dashboardConnected,
+    needsAction: dashboardNeedsAction,
     bySource: installStatus?.bySource,
   });
 
@@ -614,7 +629,9 @@ export default function CdpSettingsPage() {
         fetch('/api/cdp/diagnostics', { headers }),
         fetch('/api/cdp/funnel?days=30', { headers }),
         fetch('/api/cdp/timeline', { headers }),
-        fetch('/api/cdp/active-customers?limit=10', { headers }),
+        // ★ 2026-08-10 권한 점검 — 활성 고객은 이름·전화가 담긴 응답이라 관리자만 부른다(서버도 403으로 막는다).
+        //   담당자일 때 호출 자체를 하지 않아야 화면에 403 오류가 뜨지 않는다.
+        isAdmin ? fetch('/api/cdp/active-customers?limit=10', { headers }) : Promise.resolve(null),
         fetch('/api/cdp/channel-distribution', { headers }),
         fetch('/api/cafe24/status', { headers }),
         fetch('/api/naver-commerce/status', { headers }),
@@ -628,7 +645,7 @@ export default function CdpSettingsPage() {
       const diagData = await diagRes.json();
       const funnelData = await funnelRes.json();
       const timelineData = await timelineRes.json();
-      const activeData = await activeRes.json();
+      const activeData = activeRes ? await activeRes.json() : null;
       const chDistData = await chDistRes.json();
       const cafe24Data = await cafe24Res.json();
       const naverData = await naverRes.json();
@@ -642,7 +659,7 @@ export default function CdpSettingsPage() {
       if (diagData.success) setDiagnostics(diagData.diagnostics);
       if (funnelData.success) setFunnel(funnelData.funnel);
       if (timelineData.success) setTimeline(timelineData.timeline || []);
-      if (activeData.success) setActiveCustomers(activeData.activeCustomers);
+      if (activeData?.success) setActiveCustomers(activeData.activeCustomers);
       if (chDistData.success) {
         setChannelDist(chDistData.distribution);
         setChannelCaps(chDistData.capabilities);
@@ -668,7 +685,7 @@ export default function CdpSettingsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
@@ -1264,9 +1281,12 @@ export default function CdpSettingsPage() {
             <button onClick={() => setActiveModal('analytics')} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[12px] text-white/80 transition-colors">
               <Activity className="w-3.5 h-3.5 text-cyan-300" /> 데이터 분석 · AI 진단
             </button>
-            <button onClick={() => setActiveModal('customers')} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[12px] text-white/80 transition-colors">
-              <Users className="w-3.5 h-3.5 text-violet-300" /> 활성 고객
-            </button>
+            {/* 활성 고객 = 이름·전화가 보이는 목록이라 관리자에게만 진입점을 둔다(서버도 403). 담당자는 연동 상태까지만 본다. */}
+            {isAdmin && (
+              <button onClick={() => setActiveModal('customers')} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[12px] text-white/80 transition-colors">
+                <Users className="w-3.5 h-3.5 text-violet-300" /> 활성 고객
+              </button>
+            )}
           </div>
         )}
 

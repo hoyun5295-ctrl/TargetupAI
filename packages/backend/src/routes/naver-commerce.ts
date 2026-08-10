@@ -29,6 +29,8 @@ import {
   fetchRecentNaverOrdersPreview,
 } from '../utils/naver-commerce-client';
 import { isCdpEnabledForPlan } from '../utils/cdp-auth';
+// ★ 2026-08-10: 스키마 실측 로그는 값이 아니라 구조로 남긴다(개인정보 미기록)
+import { describeJsonShape } from '../utils/json-shape';
 
 const router = Router();
 
@@ -215,8 +217,10 @@ router.get('/orders/preview', async (req: Request, res: Response) => {
     const hours = Number(req.query.hours) || 24;
     const preview = await fetchRecentNaverOrdersPreview(integration, hours);
     console.log(`[NaverCommerce preview] company=${companyId} store=${integration.storeId} from=${preview.from} ids=${preview.idCount}`);
-    // 스키마 실측용 raw 샘플 — PM2 로그로 구조 확인 후 CDP 매핑을 후속으로 확정 (F12 진단 금지 룰 정합)
-    console.log('[NaverCommerce preview] detailsRaw sample:', JSON.stringify(preview.detailsRaw).slice(0, 2000));
+    // ★ 2026-08-10 — 스키마 실측용 출력을 raw에서 **구조**로 바꿨다.
+    //   옛 로그는 응답을 그대로 찍어 구매자 성명·휴대폰이 PM2 로그에 쌓였고, 그 줄을 옮겨 적으면 개인정보가 함께 따라갔다.
+    //   매핑에 필요한 것은 키 이름과 형식뿐이라 값은 마스킹한다(json-shape CT).
+    console.log('[NaverCommerce preview] detailsRaw shape:', describeJsonShape(preview.detailsRaw));
     return res.json({ success: true, ...preview });
   } catch (err: any) {
     console.error('[NaverCommerce /orders/preview] 오류:', err?.message || err);

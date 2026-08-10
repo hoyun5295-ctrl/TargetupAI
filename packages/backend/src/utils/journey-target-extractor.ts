@@ -487,6 +487,14 @@ export async function selectCdpEvent(
 // ★ 2026-08-01 §11-3: 커서 축을 occurred_at(발생) → created_at(도착)으로 전환.
 //   배치로 늦게 도착한 데이터, 익명→회원 소급으로 나중에 연결된 데이터가 커서 뒤에 떨어져 영영 안 잡히던 구멍을 닫는다.
 //   cursorEventId가 오면 (created_at, id) 행 비교로 동시각 타이까지 가른다 — 없으면 시각만(컬럼 미마이그레이션 환경).
+// ★ 2026-08-10: 발생 시각 창(maxAgeHours)을 원장 문과 **같은 규약**으로 건다.
+//   커서는 도착 축이라 소급 적재는 전부 커서 앞에 선다 — 막는 것은 발생 시각뿐이다(원장 문 주석과 같은 이유).
+//   그동안 이벤트 문에만 창이 없었던 근거는 "자사몰 주문은 즉시 들어온다"였는데, 그 전제는 이미 깨져 있다:
+//     고도몰 `/connect`가 90일 백필을 돌려 과거 주문을 통째로 지금 적재한다(godo-client.backfillGodoOrders).
+//     그 회사에 활성 구매 여정이 있으면 90일 치가 "방금 구매"로 진입한다 — 실연동 고객사가 0이라 미발화였을 뿐이다.
+//   실시간 웹훅(카페24·자체호스팅)은 발생 시각이 곧 지금이라 이 창에 걸리지 않는다(회귀 0).
+//   NULL·미래 값 처리는 여기서 하지 않는다 — `cdp_events.occurred_at`은 NOT NULL이고 적재 시점에
+//   미래 클램프를 이미 거친다(cdp-events.clampOccurredAt). 여기서 다시 자르면 판정이 두 벌이 된다.
 export interface CdpCursorQuery {
   /** 커서 시각. */
   at: Date | string;
@@ -506,11 +514,12 @@ export async function selectCdpEventRowsForCursor(
   filters: Record<string, any>,
   cursor: CdpCursorQuery,
   windowEnd: Date | string,
+  maxAgeHours: number,
   chunkLimit: number,
 ): Promise<CdpEventRow[]> {
   // 축은 화이트리스트 두 값뿐 — 문자열이 그대로 SQL에 들어가므로 여기서 닫는다(주입 표면 0).
   const axis = cursor.axis === 'created_at' ? 'created_at' : 'occurred_at';
-  const params: any[] = [companyId, eventName, cursor.at, windowEnd];
+  const params: any[] = [companyId, eventName, cursor.at, windowEnd, String(maxAgeHours)];
   let cursorClause: string;
   if (axis === 'created_at' && cursor.eventId) {
     params.push(cursor.eventId);
@@ -530,6 +539,7 @@ export async function selectCdpEventRowsForCursor(
        AND e.customer_id IS NOT NULL
        AND ${cursorClause}
        AND e.${axis} <= $4::timestamptz
+       AND e.occurred_at >= NOW() - ($5 || ' hours')::interval
        AND ${buildJourneySafetyFilter('c')}
        ${cond ? ` AND ${cond}` : ''}
      ORDER BY e.${axis} ASC, e.id ASC

@@ -2030,10 +2030,19 @@ router.get('/timeline', async (req: Request, res: Response) => {
 });
 
 // 4) GET /cdp/active-customers
+//   ★ 2026-08-10 권한 점검 — 관리자 전용. 이 응답은 회사 전체 상위 고객의 **이름·전화번호**를 담는다
+//   (cdp-active-customers: c.name / c.phone). 같은 데이터를 주는 `/api/customers`는 담당자에게
+//   브랜드(store_code) 격리를 걸므로(getStoreScope), 여기만 무필터로 열려 있으면 브랜드 격리를 쓰는 회사에서
+//   담당자가 자기 브랜드 밖 고객의 이름·전화를 이 경로로 본다. 0721 교훈(aux 엔드포인트 IDOR)과 같은 부류다.
+//   격리를 여기 복제하지 않고 관리자 전용으로 닫는다 — 회사 전체 집계는 관리자 몫이라는 기존 기준 그대로.
 router.get('/active-customers', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const userType = req.user?.userType;
+    if (userType !== 'company_admin' && userType !== 'super_admin') {
+      return res.status(403).json({ success: false, error: '자사몰 활성 고객 목록은 회사 관리자만 조회할 수 있습니다.' });
+    }
     const limit = Math.max(1, Math.min(50, parseInt(String(req.query.limit || '10'), 10) || 10));
     const result = await buildCdpActiveCustomers(companyId, limit);
     return res.json({ success: true, activeCustomers: result });

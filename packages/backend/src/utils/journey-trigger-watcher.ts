@@ -511,6 +511,8 @@ async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Pro
     // 커서 원문이 있으면 그것으로 비교한다 — Date는 밀리초 절사라 마지막 밀리초 묶음이 다시 잡힌다.
     { at: cursorRaw ?? cursorStart, eventId: cursorEventId, axis },
     windowEnd,
+    // ★ 2026-08-10: 원장 문과 같은 상수 — 소급 적재(고도몰 백필·주기 수집)가 "방금 사건"으로 진입하는 것을 막는다.
+    PURCHASE_TRIGGER_MAX_AGE_HOURS,
     CDP_EVENT_CHUNK + 1,
   );
   const batch = planCdpCursorBatch(rows, CDP_EVENT_CHUNK, windowEnd, axis);

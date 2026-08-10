@@ -23,6 +23,24 @@ export type CdpProviderKey = 'cafe24' | 'naver' | 'godo' | 'imweb' | 'makeshop' 
 /** 이벤트 적재 상태(설계서 §2-3). 'pending_mapping' = 인증·조회는 되나 CDP 매핑이 아직(의도된 보류). */
 export type CdpIngestKind = 'events' | 'pending_mapping';
 
+/**
+ * 데이터가 들어오게 하려면 **누가 무엇을 해야 하는가** (★2026-08-10 신설 — 0810 실측 발견).
+ *
+ *   'auto'      = 우리가 가져온다. 고객사가 설치할 것이 없다.
+ *                 카페24·아임웹은 웹훅 수신, 고도몰은 주기 수집(backend godo-sync-worker, 30분).
+ *   'developer' = 고객사 개발자가 스크립트·웹훅을 넣어야 들어온다(자체 호스팅).
+ *   null        = 수집 경로가 아직 없다(매핑 보류 몰). 이 축으로 문구를 만들지 않는다 — 배지가 '준비 중'이다.
+ *
+ * 왜 필요한가 — 이 축이 없어서 화면이 몰마다 반대로 거짓말을 했다:
+ *   ① 훅은 전 몰을 'developer'로 가정해 고도몰에도 "설치만 남았어요"를 띄웠고,
+ *   ② 스테퍼는 전 몰을 'auto'로 가정해 자체 호스팅에도 "따로 설치할 것은 없습니다"를 띄웠다.
+ * 판정은 한 곳에서만 한다 — 화면이 각자 가정하면 그 가정이 서로 어긋난다.
+ *
+ * 백엔드 어댑터 `connectMethod`와 1:1로 맞물린다(webhook=developer / oauth·polling=auto).
+ * 계약 테스트가 그 대응과 고도몰 수집 호출부를 함께 고정한다.
+ */
+export type CdpCollectKind = 'auto' | 'developer';
+
 export interface CdpProviderKeyEntry {
   /** 화면 카드 키 */
   key: CdpProviderKey;
@@ -32,15 +50,17 @@ export interface CdpProviderKeyEntry {
   eventSources: string[];
   /** 이벤트 축으로 상태를 판정할 수 있는가 */
   ingest: CdpIngestKind;
+  /** 데이터가 들어오게 하려면 누가 무엇을 해야 하는가 — 화면 문구·버튼 노출이 전부 이 값에서 나온다 */
+  collect: CdpCollectKind | null;
 }
 
 export const CDP_PROVIDER_KEYS: readonly CdpProviderKeyEntry[] = [
-  { key: 'cafe24',   dbProvider: 'cafe24',            eventSources: ['cafe24'],            ingest: 'events' },
-  { key: 'naver',    dbProvider: 'naver_smart_store', eventSources: ['naver_smart_store'], ingest: 'pending_mapping' },
-  { key: 'godo',     dbProvider: 'godo',              eventSources: ['godo'],              ingest: 'events' },
-  { key: 'imweb',    dbProvider: 'imweb',             eventSources: ['imweb'],             ingest: 'events' },
-  { key: 'makeshop', dbProvider: 'makeshop',          eventSources: [],                    ingest: 'pending_mapping' },
-  { key: 'custom',   dbProvider: 'custom',            eventSources: ['custom', 'sdk'],     ingest: 'events' },
+  { key: 'cafe24',   dbProvider: 'cafe24',            eventSources: ['cafe24'],            ingest: 'events',          collect: 'auto' },
+  { key: 'naver',    dbProvider: 'naver_smart_store', eventSources: ['naver_smart_store'], ingest: 'pending_mapping', collect: null },
+  { key: 'godo',     dbProvider: 'godo',              eventSources: ['godo'],              ingest: 'events',          collect: 'auto' },
+  { key: 'imweb',    dbProvider: 'imweb',             eventSources: ['imweb'],             ingest: 'events',          collect: 'auto' },
+  { key: 'makeshop', dbProvider: 'makeshop',          eventSources: [],                    ingest: 'pending_mapping', collect: null },
+  { key: 'custom',   dbProvider: 'custom',            eventSources: ['custom', 'sdk'],     ingest: 'events',          collect: 'developer' },
 ] as const;
 
 const BY_KEY = new Map<CdpProviderKey, CdpProviderKeyEntry>(CDP_PROVIDER_KEYS.map((e) => [e.key, e]));

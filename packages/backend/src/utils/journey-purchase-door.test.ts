@@ -251,8 +251,22 @@ describe('커서 정밀도 — DB 밖을 다녀오면 안 된다 (2026-08-02 F1)
   });
 
   it('이벤트 조회도 원문 컬럼을 함께 싣는다 (같은 뿌리 — §11-3 배포분에 잠복해 있었다)', async () => {
-    await selectCdpEventRowsForCursor(COMPANY_ID, 'purchase', {}, { at: new Date(), eventId: null, axis: 'created_at' }, new Date(), 1000);
+    await selectCdpEventRowsForCursor(COMPANY_ID, 'purchase', {}, { at: new Date(), eventId: null, axis: 'created_at' }, new Date(), 72, 1000);
     expect(String(q.mock.calls[0][0])).toMatch(/e\.created_at::text AS created_at_raw/);
+  });
+
+  it('이벤트 문에도 발생 시각 창이 걸린다 (2026-08-10 — 소급 적재가 "방금 사건"으로 진입하던 구멍)', async () => {
+    await selectCdpEventRowsForCursor(COMPANY_ID, 'purchase', {}, { at: new Date(), eventId: null, axis: 'created_at' }, new Date(), 72, 1000);
+    expect(
+      String(q.mock.calls[0][0]),
+      '커서는 도착 축이라 소급분이 전부 커서 앞에 선다 — 막는 것은 발생 시각뿐이다(고도몰 백필 90일이 그대로 발송됐다)',
+    ).toMatch(/e\.occurred_at >= NOW\(\) - \(\$5 \|\| ' hours'\)::interval/);
+  });
+
+  it('워커가 두 문에 같은 상수를 넘긴다 (한쪽만 막으면 자사몰 소급분이 그대로 나간다)', () => {
+    const watcher = src('src/utils/journey-trigger-watcher.ts');
+    const passes = watcher.match(/PURCHASE_TRIGGER_MAX_AGE_HOURS,/g) || [];
+    expect(passes.length, '이벤트 문·원장 문 두 곳 모두').toBeGreaterThanOrEqual(2);
   });
 
   it('커서 읽기도 원문으로 한다 (쓸 때만 원문이면 읽기에서 다시 절사된다)', () => {

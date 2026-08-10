@@ -242,23 +242,33 @@ export interface GodoStatus {
   connected: boolean;
   status?: string;
   connectedAt?: string | null;
+  /** ★2026-08-10 마지막 주기 수집 성공 시각(godo-sync-worker). 한 번도 안 돌았으면 null. */
+  lastSyncedAt?: string | null;
+  /** ★2026-08-10 마지막 수집 실패 사유. 있으면 화면이 '조치 필요'로 말한다(키 무효·IP 미등록·호출 한도). */
+  syncError?: { message: string; code: string; at: string | null } | null;
 }
 
 /** 연동센터 표시용 상태. */
 export async function getGodoStatus(companyId: string): Promise<GodoStatus> {
   const r = await query(
-    `SELECT status, connected_at, meta FROM company_integrations
+    `SELECT status, connected_at, last_synced_at, meta FROM company_integrations
      WHERE company_id = $1::uuid AND provider = 'godo' AND mall_id = $2 LIMIT 1`,
     [companyId, GODO_INTEGRATION_MALL_ID],
   );
   if (r.rows.length === 0) return { connected: false };
   const row = r.rows[0];
+  const meta = (row.meta || {}) as { godo_sync_error?: string; godo_sync_error_code?: string; godo_sync_error_at?: string };
   // ★ 2026-07-03 검증된 연동만 connected — status='active' AND connected_at 존재(verify/backfill 성공 시에만 기록).
   //   저장만 하고 검증 안 된 key(가짜 active·connected_at NULL)는 미연동으로 판정.
   return {
     connected: row.status === 'active' && !!row.connected_at,
     status: row.status,
     connectedAt: row.connected_at ? new Date(row.connected_at).toISOString() : null,
+    lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at).toISOString() : null,
+    // 워커는 실패해도 status를 안 내린다(연동은 살아 있다) — 그래서 사유가 여기 남고, 성공하면 지워진다.
+    syncError: meta.godo_sync_error
+      ? { message: meta.godo_sync_error, code: meta.godo_sync_error_code || 'unknown', at: meta.godo_sync_error_at || null }
+      : null,
   };
 }
 

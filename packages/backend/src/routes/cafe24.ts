@@ -286,7 +286,11 @@ router.get('/status', async (req: Request, res: Response) => {
     // ★ 2026-07-03 fix: getCafe24Integration은 status 무관 반환 → 해제(revoked)·미완료(pending_oauth) 행도 있었다.
     //   active만 connected로 응답해야 연동 해제가 화면에 반영되고 재연동 흐름이 복구된다.
     if (!integration || integration.status !== 'active') {
-      return res.json({ success: true, connected: false });
+      // ★ 2026-08-10 — 사유를 함께 돌려준다. 옛 응답은 `connected:false` 하나뿐이라
+      //   **토큰이 만료된 연동과 아예 연결한 적 없는 상태가 화면에서 같아 보였다**(둘 다 "아직 연결 전").
+      //   `status='token_expired'`는 refresh 실패 시 cafe24-client가 기록하는 실값이다 — 재연결이 필요한 상태이므로
+      //   화면이 그것을 '조치 필요'로 말할 수 있어야 한다. `connected`는 그대로 false(기존 소비처 무영향).
+      return res.json({ success: true, connected: false, status: integration?.status ?? null });
     }
     return res.json({
       success: true,

@@ -26,14 +26,11 @@ const BADGE_VIEW: Record<CdpIntegrationBadge, { chip: string; Icon: typeof Check
   disconnected: { chip: 'bg-white/[0.06] text-white/45 border-white/12', Icon: Circle },
 };
 
-/** 카드 버튼 문구 — 상태가 정한다. 무엇을 눌러야 할지 고민할 순간을 만들지 않는다(§5-1). */
-const ACTION_LABEL: Record<CdpIntegrationBadge, string> = {
-  receiving: '상태 보기',
-  awaiting: '이어서 설정',
-  preparing: '상태 보기',
-  action: '조치하기',
-  disconnected: '연결하기',
-};
+/**
+ * 카드 버튼 문구는 여기서 만들지 않는다 — 훅의 `status.actionLabel`을 그대로 그린다(★2026-08-10).
+ * 배지로 표를 만들면 같은 `awaiting`이 두 상황(설치 대기 / 첫 주문 대기)을 한 문구로 덮어
+ * 자동 수집 몰에 "이어서 설정"이라는 없는 할 일을 만든다. 판정도 문구도 훅 하나가 소유한다(§5-1-1).
+ */
 
 export interface CdpDashboardProvider {
   key: CdpProviderKey;
@@ -98,7 +95,7 @@ export default function CdpIntegrationDashboard({
               key={p.key}
               type="button"
               onClick={() => onOpen(p.key)}
-              aria-label={`${p.name} — ${st.label}. ${ACTION_LABEL[st.badge]}`}
+              aria-label={`${p.name} — ${st.label}. ${st.actionLabel}`}
               className="group flex flex-col gap-3 p-4 rounded-2xl border border-white/10 bg-white/[0.03] text-left transition-all duration-200 hover:border-violet-400/40 hover:bg-white/[0.06] hover:-translate-y-0.5"
             >
               {/* 1줄 — 아이콘 + 이름 */}
@@ -120,7 +117,7 @@ export default function CdpIntegrationDashboard({
 
               {/* 4줄 — 액션 1개 */}
               <div className="mt-auto inline-flex items-center gap-1 text-[12px] font-medium text-violet-200 group-hover:text-violet-100">
-                {ACTION_LABEL[st.badge]}
+                {st.actionLabel}
                 <ChevronRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
               </div>
             </button>

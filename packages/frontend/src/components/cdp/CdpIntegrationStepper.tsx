@@ -74,6 +74,10 @@ export default function CdpIntegrationStepper({
   providerName, status, connectSlot, installSlot, signals, stalled, onDeveloperSend, onRetryCheck,
   connectExpanded, onToggleConnect,
 }: CdpIntegrationStepperProps) {
+  // ★ 2026-08-10 — "설치가 필요한 몰인가"는 여기서 추측하지 않는다. 훅이 CT에서 실어 준 값을 읽는다.
+  //   이 컴포넌트는 전 몰이 자동 수집인 것처럼 "따로 설치할 것은 없습니다"를 띄우고 있었다 — 자체 호스팅에는 거짓이다.
+  const needsInstall = status.collect === 'developer';
+
   // 완료 판정은 실측값으로만 한다(규칙 3). 사용자가 넘기는 단계가 없다.
   const steps = useMemo(() => {
     const connected = status.connected;
@@ -137,11 +141,18 @@ export default function CdpIntegrationStepper({
         {steps.s2 === 'active' && (
           <div className="pl-[2.15rem] space-y-3">
             {installSlot ?? (
-              <p className="text-[12px] text-white/55 leading-relaxed">
-                따로 설치할 것은 없습니다. 한줄로가 {providerName}에서 데이터를 가져옵니다 — 첫 데이터가 들어오면 다음 단계가 켜집니다.
-              </p>
+              needsInstall ? (
+                <p className="text-[12px] text-white/55 leading-relaxed">
+                  설치 코드를 고객사 개발자에게 전달해야 데이터가 들어옵니다. 아래에서 안내를 한 번에 복사할 수 있습니다.
+                </p>
+              ) : (
+                <p className="text-[12px] text-white/55 leading-relaxed">
+                  따로 설치할 것은 없습니다. 한줄로가 {providerName}에서 데이터를 가져옵니다 — 첫 주문·회원 활동이 생기면 다음 단계가 켜집니다.
+                </p>
+              )
             )}
-            {onDeveloperSend && (
+            {/* 설치가 필요 없는 몰에는 이 버튼을 두지 않는다 — 없는 할 일을 만드는 죽은 컨트롤이 된다. */}
+            {needsInstall && onDeveloperSend && (
               <button
                 type="button"
                 onClick={onDeveloperSend}
@@ -192,18 +203,26 @@ export default function CdpIntegrationStepper({
                   <div className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-amber-200">
                     <HelpCircle className="w-3.5 h-3.5" /> 데이터가 안 들어오나요?
                   </div>
-                  <ul className="text-[11.5px] text-white/55 leading-relaxed list-disc pl-4 space-y-0.5">
-                    <li>설치한 페이지를 한 번 열어보셨나요 — 방문이 있어야 첫 데이터가 만들어집니다.</li>
-                    <li>설치 코드가 모든 페이지에 들어갔는지 개발자에게 확인해 주세요.</li>
-                    <li>쇼핑몰 도메인이 수집 허용 목록에 등록됐는지 확인해 주세요.</li>
-                  </ul>
+                  {/* 확인 항목도 몰 유형을 따른다 — 폴링·웹훅 몰에 "설치 코드가 모든 페이지에"는 물어볼 수 없는 것이다. */}
+                  {needsInstall ? (
+                    <ul className="text-[11.5px] text-white/55 leading-relaxed list-disc pl-4 space-y-0.5">
+                      <li>설치한 페이지를 한 번 열어보셨나요 — 방문이 있어야 첫 데이터가 만들어집니다.</li>
+                      <li>설치 코드가 모든 페이지에 들어갔는지 개발자에게 확인해 주세요.</li>
+                      <li>쇼핑몰 도메인이 수집 허용 목록에 등록됐는지 확인해 주세요.</li>
+                    </ul>
+                  ) : (
+                    <ul className="text-[11.5px] text-white/55 leading-relaxed list-disc pl-4 space-y-0.5">
+                      <li>연결한 뒤에 새 주문·가입이 있었는지 확인해 주세요 — 활동이 있어야 첫 데이터가 만들어집니다.</li>
+                      <li>쇼핑몰 관리자에서 연동 계정의 조회 권한이 그대로인지 확인해 주세요.</li>
+                    </ul>
+                  )}
                   <div className="flex flex-wrap gap-3 pt-0.5">
                     {onRetryCheck && (
                       <button type="button" onClick={onRetryCheck} className="text-[12px] text-violet-200 hover:text-violet-100">
                         다시 확인하기
                       </button>
                     )}
-                    {onDeveloperSend && (
+                    {needsInstall && onDeveloperSend && (
                       <button type="button" onClick={onDeveloperSend} className="text-[12px] text-white/55 hover:text-white/85">
                         개발자에게 다시 보내기
                       </button>

@@ -20,6 +20,8 @@ import {
   fetchMakeshopPreview,
 } from '../utils/makeshop-client';
 import { isCdpEnabledForPlan } from '../utils/cdp-auth';
+// ★ 2026-08-10: 스키마 실측 로그는 값이 아니라 구조로 남긴다(개인정보 미기록)
+import { describeJsonShape } from '../utils/json-shape';
 
 const router = Router();
 
@@ -99,8 +101,10 @@ router.get('/preview', async (req: Request, res: Response) => {
     const preview = await fetchMakeshopPreview(integration, days);
     // 스키마 실측용 raw 샘플 — PM2 로그로 구조 확인 후 CDP 매핑 확정 (F12 진단 금지 룰 정합)
     console.log(`[Makeshop preview] company=${companyId} shop=${integration.shopUid} from=${preview.from}`);
-    console.log('[Makeshop preview] membersRaw:', JSON.stringify(preview.membersRaw).slice(0, 1500));
-    console.log('[Makeshop preview] ordersRaw:', JSON.stringify(preview.ordersRaw).slice(0, 1500));
+    // ★ 2026-08-10 — raw → 구조. 회원 응답에는 이름·휴대폰·수신동의가 그대로 들어 있어 로그에 남길 값이 아니다.
+    //   매핑 확정에 필요한 키·형식만 남긴다(json-shape CT).
+    console.log('[Makeshop preview] membersRaw shape:', describeJsonShape(preview.membersRaw));
+    console.log('[Makeshop preview] ordersRaw shape:', describeJsonShape(preview.ordersRaw));
     return res.json({ success: true, ...preview });
   } catch (err: any) {
     console.error('[Makeshop /preview] 오류:', err?.message || err);
