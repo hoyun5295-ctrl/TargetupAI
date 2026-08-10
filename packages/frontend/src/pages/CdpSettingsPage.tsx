@@ -45,6 +45,16 @@ import CdpSnippetBox from '../components/cdp/CdpSnippetBox';
 import CdpAnalyticsPanels from '../components/cdp/CdpAnalyticsPanels';
 import CdpActiveCustomersTable from '../components/cdp/CdpActiveCustomersTable';
 import { formatPct } from '../utils/cdp-display';
+// ★ 2026-08-10 Phase 5-2 — SDK 설치 스크립트는 버전·경로 단일 출처에서 만든다(옛날엔 여섯 곳에 손으로 적혀 있었다).
+import { buildSdkScriptTag, CDP_SDK_VERSION } from '../utils/cdp-sdk-script';
+import { GuideStep } from '../components/cdp/CdpFormPrimitives';
+// ★ 2026-08-10 Phase 5-5 — 자체 호스팅 개발자 안내·수신 검증(표시 전용). 시크릿 발급은 페이지 잔류.
+import { CdpCustomWebhookGuide, CdpCustomDeliveries, CdpCustomAppGuide } from '../components/cdp/CdpCustomHostingDocs';
+// ★ 2026-08-10 Phase 5-3 — 몰별 연결 폼 마크업 분리(상태·핸들러는 페이지 잔류 = 동작 무변경).
+import {
+  CdpCafe24ConnectForm, CdpNaverConnectForm, CdpMakeshopConnectForm, CdpImwebConnectForm, CdpGodoConnectForm,
+  type Cafe24Status, type NaverCommerceStatus, type MakeshopStatus, type ImwebStatus, type GodoStatus,
+} from '../components/cdp/CdpConnectForms';
 import type {
   CdpDiagnostics, CdpFunnel, CdpTimelineBucket, CdpActiveCustomers,
   ChannelDistribution, ChannelCapabilities, CdpExplanation,
@@ -91,45 +101,8 @@ interface IssueKeyResponse {
   message: string;
 }
 
-interface Cafe24Status {
-  connected: boolean;
-  mall_id?: string;
-  status?: string;
-  token_expires_at?: string;
-  scope?: string;
-}
-
-interface NaverCommerceStatus {
-  connected: boolean;
-  store_id?: string;
-  status?: string;
-  token_expires_at?: string;
-  scope?: string;
-}
-
-interface ImwebStatus {
-  connected: boolean;
-  site_code?: string;
-  status?: string;
-  token_expires_at?: string;
-  scope?: string;
-}
-
-interface GodoStatus {
-  connected: boolean;
-  status?: string;
-  connectedAt?: string | null;
-  /** ★2026-08-10 주기 수집 관측값 — 마지막 성공 시각 / 마지막 실패 사유(있으면 조치 필요). */
-  lastSyncedAt?: string | null;
-  syncError?: { message: string; code: string; at: string | null } | null;
-}
-
-interface MakeshopStatus {
-  connected: boolean;
-  shop_uid?: string;
-  status?: string;
-}
-
+// 몰별 status 타입 5종과 카페24 콜백 URL·scope, 네이버 API 그룹, 메이크샵 권한 목록은
+// 그 폼을 그리는 components/cdp/CdpConnectForms가 소유한다(★2026-08-10 Phase 5-3·5-4).
 interface CustomWebhookInfo {
   hasSecret: boolean;
   webhookUrl: string;
@@ -160,15 +133,7 @@ const PROVIDER_CARDS: Array<{ key: ProviderKey; name: string; desc: string; full
   { key: 'custom', name: '자체 호스팅 / 그 외 자사몰', desc: '직접 개발했거나 목록에 없는 자사몰 — webhook 방식', full: true },
 ];
 
-// 고객 self-app에 등록하는 한줄로 고정 콜백 (백엔드 CAFE24_CALLBACK_REDIRECT / NAVER_CALLBACK_REDIRECT 기본값과 동일)
-const CAFE24_CALLBACK_URL = 'https://app.hanjul.ai/api/cafe24/oauth/callback';
-// 고객 self-app에 필요한 권한 (백엔드 DEFAULT_SCOPE와 동일)
-const CAFE24_REQUIRED_SCOPES = ['mall.read_customer', 'mall.read_order', 'mall.read_product', 'mall.read_application'];
-// ★ 2026-07-06 네이버 커머스 = client_credentials — scope/Redirect URI 개념 없음. 앱에 서버 IP 등록 + "주문 판매자" API 그룹 필요.
-//   ★ 보안: 서버 egress IP는 코드/화면 비노출 — 실제 연동 업체만 담당자에게 개별 안내(공개 시 전 고객사가 우리 IP 인지 = 공격 표면).
-const NAVER_REQUIRED_API_GROUPS = ['주문 판매자'];
-// ★ 2026-07-06 메이크샵 = client_credentials(자격 입력) — 파트너센터 App에 회원·주문 Read 권한 필요. IP 등록 불요(실측).
-const MAKESHOP_REQUIRED_PERMISSIONS = ['회원 (Read)', '주문 (Read)'];
+// 네이버 API 그룹·메이크샵 권한 목록은 그 폼과 함께 CdpConnectForms로 옮겼다(★2026-08-10 Phase 5-3).
 
 const PROVIDER_META: Record<ProviderKey, { title: string; note: string }> = {
   cafe24: { title: '카페24 연동', note: '쇼핑몰 ID만 입력하면 한줄로 공식 카페24 앱으로 연결됩니다. OAuth 동의 후 회원·주문이 자동 동기화됩니다.' },
@@ -1256,144 +1221,17 @@ export default function CdpSettingsPage() {
 
         {/* 자체 호스팅 webhook 개발자 안내 — 이벤트 계약 + 서명 예제 (검증 탭) */}
         {webhookProviderOpen && customInfo?.hasSecret && customTab === 'verify' && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-6">
-            <div className="flex items-center gap-2 mb-3">
-              <Code2 className="w-5 h-5 text-indigo-300" />
-              <h2 className="text-base font-bold text-white">Webhook 개발 안내 (자사몰 개발자 전달용)</h2>
-            </div>
-            <div className="space-y-4 text-xs text-white/70 leading-relaxed">
-              <div>
-                <div className="font-semibold text-white/90 mb-1">1. 요청 형식</div>
-                <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre">{`POST ${customInfo.webhookUrl}
-Content-Type: application/json
-X-Hanjullo-Company-Id: (이 화면의 Company ID)
-X-Hanjullo-Event: order.created          ← 아래 이벤트명 중 하나
-X-Hanjullo-Signature: (HMAC-SHA256 서명 — hex 또는 base64)
-
-{"event":"order.created","resource":{ ...아래 필드 }}`}</pre>
-              </div>
-              <div>
-                <div className="font-semibold text-white/90 mb-1">2. 이벤트와 resource 필드</div>
-                <table className="w-full text-[11px]">
-                  <thead><tr className="text-left text-white/50 border-b border-white/10"><th className="py-1 pr-2">이벤트</th><th className="py-1 pr-2">시점</th><th className="py-1">resource 필드</th></tr></thead>
-                  <tbody className="text-white/70">
-                    <tr className="border-b border-white/5"><td className="py-1 pr-2 font-mono">customer.created / customer.updated</td><td className="py-1 pr-2">회원 가입·정보 변경</td><td className="py-1">external_id(필수), phone(신규 필수), name, email, birth_date, gender, grade, address, sms_opt_in(수신동의 true/false)</td></tr>
-                    <tr className="border-b border-white/5"><td className="py-1 pr-2 font-mono">order.created / order.updated</td><td className="py-1 pr-2">주문 생성·상태 변경</td><td className="py-1">order_id(필수), external_id(필수), status(pending/paid/completed/shipping), total_amount, ordered_at, items, phone, name</td></tr>
-                    <tr><td className="py-1 pr-2 font-mono">order.cancelled / order.refunded</td><td className="py-1 pr-2">취소·환불</td><td className="py-1">order_id(필수), external_id(필수), total_amount, cancelled_at</td></tr>
-                  </tbody>
-                </table>
-                <div className="text-[11px] text-amber-200/80 mt-1.5">★ 수신동의(sms_opt_in)를 보내지 않으면 신규 고객은 발송 제외로 저장됩니다. 동의받은 회원은 반드시 true로 보내주세요.</div>
-              </div>
-              <div>
-                <div className="font-semibold text-white/90 mb-1">3. 서명 생성 — 전송하는 JSON 문자열 그대로(바이트 동일) 계산</div>
-                <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre">{`// Node.js
-const body = JSON.stringify({ event, resource });
-const signature = require('crypto')
-  .createHmac('sha256', WEBHOOK_SECRET).update(body).digest('hex');
-// body 변수를 그대로 전송하세요 (다시 직렬화하면 서명이 어긋납니다)
-
-// PHP
-$body = json_encode(['event' => $event, 'resource' => $resource]);
-$signature = hash_hmac('sha256', $body, $webhook_secret);
-// $body를 그대로 전송하세요
-
-# Python
-import json, hmac, hashlib
-body = json.dumps({"event": event, "resource": resource})
-signature = hmac.new(WEBHOOK_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
-# body 변수를 그대로 전송하세요`}</pre>
-              </div>
-              <div>
-                <div className="font-semibold text-white/90 mb-1">4. 응답 규칙</div>
-                <ul className="list-disc pl-4 space-y-0.5 text-[11px]">
-                  <li>200 + success true (duplicate true 포함) = 정상 — 재전송 불필요</li>
-                  <li>401 = 서명 또는 secret 불일치 — secret·서명 문자열 점검</li>
-                  <li>429 = 이번 달 호출 한도 초과</li>
-                  <li>5xx 또는 네트워크 오류 = 잠시 후 재전송 권장 (중복 전송은 자동 차단됩니다)</li>
-                </ul>
-              </div>
-            </div>
-            <div className="text-[10px] text-white/30 italic mt-3">Data source — POST /api/cdp/webhook/custom 계약</div>
-          </div>
+          <CdpCustomWebhookGuide webhookUrl={customInfo.webhookUrl} />
         )}
 
         {/* 연결 검증 — 최근 webhook 수신 확인 (검증 탭) */}
         {webhookProviderOpen && customInfo?.hasSecret && customTab === 'verify' && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-6">
-            <div className="flex items-center justify-between gap-2 mb-3">
-              <div className="flex items-center gap-2">
-                <Activity className="w-5 h-5 text-emerald-300" />
-                <h2 className="text-base font-bold text-white">연결 검증 — 최근 수신</h2>
-              </div>
-              <button onClick={handleLoadDeliveries} disabled={loadingDeliveries} className="px-3.5 py-2 rounded-lg bg-emerald-500/20 border border-emerald-400/30 hover:bg-emerald-500/30 text-emerald-100 text-[12px] font-medium disabled:opacity-40 flex items-center gap-1.5">
-                {loadingDeliveries ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} 최근 수신 확인
-              </button>
-            </div>
-            <div className="text-xs text-white/50 mb-3">자사몰에서 webhook을 보낸 뒤 눌러 도착·처리 결과를 확인하세요.</div>
-            {customDeliveries === null ? (
-              <div className="text-xs text-white/40">"최근 수신 확인"을 눌러 도착한 이벤트를 조회합니다.</div>
-            ) : customDeliveries.length === 0 ? (
-              <div className="text-xs text-amber-200/80 bg-amber-500/10 border border-amber-400/30 rounded p-3">아직 수신된 webhook이 없습니다. 자사몰 서버에서 테스트 이벤트를 보내보세요 (401이면 secret·서명 문자열 점검).</div>
-            ) : (
-              <div className="space-y-1.5">
-                {customDeliveries.map((d, i) => (
-                  <div key={i} className="flex items-center gap-2 text-xs bg-slate-950 border border-white/10 rounded-lg px-3 py-2">
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${d.status === 'processed' ? 'bg-emerald-500/20 text-emerald-300' : d.status === 'duplicate' ? 'bg-white/10 text-white/50' : d.status === 'failed' ? 'bg-rose-500/20 text-rose-300' : 'bg-amber-500/20 text-amber-300'}`}>{d.status}</span>
-                    <span className="font-mono text-white/80">{d.event}</span>
-                    <span className="ml-auto text-white/40">{d.receivedAt ? new Date(d.receivedAt).toLocaleString('ko-KR') : '-'}</span>
-                  </div>
-                ))}
-                {customDeliveries.some((d) => d.errorMessage) && (
-                  <div className="text-[10px] text-rose-300/80 mt-1">failed 항목은 처리 오류 — 이벤트·resource 필드 점검</div>
-                )}
-              </div>
-            )}
-            <div className="text-[10px] text-white/30 italic mt-3">Data source — GET /api/cdp/custom/deliveries</div>
-          </div>
+          <CdpCustomDeliveries deliveries={customDeliveries} loading={loadingDeliveries} onLoad={handleLoadDeliveries} />
         )}
 
         {/* 네이티브 앱(REST 직접 호출) 안내 (앱 탭) */}
         {webhookProviderOpen && customInfo?.hasSecret && customTab === 'app' && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-6">
-            <div className="flex items-center gap-2 mb-3">
-              <Code2 className="w-5 h-5 text-cyan-300" />
-              <h2 className="text-base font-bold text-white">네이티브 앱 (REST 직접 호출)</h2>
-            </div>
-            <div className="text-xs text-white/60 leading-relaxed mb-3">
-              웹뷰가 아닌 순수 네이티브 앱(iOS/Android)은 공개키(<span className="font-mono">hjl_</span>)로 이벤트·인앱을 직접 호출합니다. <strong className="text-white/90">secret(<span className="font-mono">sk_</span>)은 앱에 넣지 마세요</strong> — 회원/주문 적재는 고객사 서버에서 호출합니다(브라우저와 동일 원칙).
-            </div>
-            <div className="space-y-3 text-xs text-white/70">
-              <div>
-                <div className="font-semibold text-white/90 mb-1">이벤트 수집 (공개키)</div>
-                <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-cyan-200 overflow-x-auto whitespace-pre">{`curl -X POST https://app.hanjul.ai/api/cdp/ingest \\
-  -H "Content-Type: application/json" -H "X-Hanjullo-Key: hjl_..." \\
-  -d '{"schema_version":"v1","anonymous_id":"DEVICE_UUID","events":[
-        {"type":"track","event":"cart_add","properties":{"product_id":"P1","price":19000}}]}'`}</pre>
-              </div>
-              <div>
-                <div className="font-semibold text-white/90 mb-1">인앱 메시지 조회 (공개키, 앱 채널)</div>
-                <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-cyan-200 overflow-x-auto whitespace-pre">{`GET https://app.hanjul.ai/api/cdp/inapp/active?channel=app&anonymous_id=DEVICE_UUID
-Header: X-Hanjullo-Key: hjl_...`}</pre>
-              </div>
-              <div>
-                <div className="font-semibold text-white/90 mb-1">Swift / Kotlin</div>
-                <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-cyan-200 overflow-x-auto whitespace-pre">{`// Swift (URLSession)
-var req = URLRequest(url: URL(string: "https://app.hanjul.ai/api/cdp/ingest")!)
-req.httpMethod = "POST"
-req.setValue("hjl_...", forHTTPHeaderField: "X-Hanjullo-Key")
-req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-req.httpBody = bodyData   // {"schema_version":"v1","anonymous_id":..,"events":[..]}
-URLSession.shared.dataTask(with: req).resume()
-
-// Kotlin (OkHttp)
-val req = Request.Builder().url("https://app.hanjul.ai/api/cdp/ingest")
-  .addHeader("X-Hanjullo-Key", "hjl_...")
-  .post(bodyJson.toRequestBody("application/json".toMediaType())).build()
-client.newCall(req).execute()`}</pre>
-              </div>
-            </div>
-            <div className="text-[10px] text-white/30 italic mt-3">Data source — /api/cdp/ingest · /api/cdp/inapp/active (공개키)</div>
-          </div>
+          <CdpCustomAppGuide />
         )}
 
         {/* ★ 2026-07-17 인앱 메시지 앱(네이티브) 통합 계약 (앱 탭) — 앱이 구현해야 편집기 설정이 그대로 동작.
@@ -1409,529 +1247,108 @@ client.newCall(req).execute()`}</pre>
             )}
           />
         )}
-        {/* 카페24 — OAuth */}
-        {/* ★ 2026-08-10 Phase 3 잔여 — 몰별 연결 폼 = 스테퍼 ①단계의 내용물.
-            JSX를 물리적으로 옮기지 않고 **표시 조건만 스테퍼가 통제**한다(500줄 이동 = 회귀 위험).
-            연결 전에는 항상 펼치고, 연결된 뒤에는 ①을 눌러 펼쳤을 때만 보여준다(해제·재설정은 여기 있다). */}
+        {/* 몰별 연결 폼 = 스테퍼 ①단계의 내용물. **표시 조건은 여기가 통제**한다 —
+            연결 전에는 항상 펼치고, 연결된 뒤에는 ①을 눌러 펼쳤을 때만 보여준다(해제·재설정이 거기 있다).
+            ★ 2026-08-10 Phase 5-4: 폼 마크업은 components/cdp/CdpConnectForms로 옮겼고, 이 조건과 상태·핸들러는 페이지에 남는다. */}
         <div className={CDP_DASHBOARD_V2 && connectProvider
           && integrationStatus.byKey[connectProvider as CdpProviderKey]?.connected
           && !connectStepOpen ? 'hidden' : ''}>
         {connectProvider === 'cafe24' && (
-          <div id="section-cafe24" className="bg-white/5 border border-white/10 rounded-xl p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <Store className="w-5 h-5 text-amber-300" />
-              <h2 className="text-base font-bold text-white">카페24 연동</h2>
-              <span className="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-medium">OAuth — 코딩 0건</span>
-            </div>
-
-            {cafe24Status?.connected ? (
-              <div className="space-y-3">
-                <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-4 flex items-start gap-3">
-                  <Check className="w-5 h-5 text-emerald-300 mt-0.5 shrink-0" />
-                  <div className="flex-1">
-                    <div className="text-sm font-medium text-emerald-100">{cafe24Status.mall_id} 카페24 연동됨</div>
-                    <div className="text-xs text-emerald-300 mt-1">
-                      status: {cafe24Status.status} · 토큰 만료: {cafe24Status.token_expires_at ? new Date(cafe24Status.token_expires_at).toLocaleString('ko-KR') : '-'}
-                    </div>
-                  </div>
-                </div>
-                {isAdmin && (
-                  <button onClick={handleCafe24Disconnect} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
-                    <Unlink className="w-4 h-4" /> 연동 해제
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {/* 기본 흐름 — 한줄로 공식 앱 (mall_id만 입력, 2026-07-03) */}
-                <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4">
-                  <div className="text-xs font-semibold text-violet-100 mb-1">쇼핑몰 ID만 입력하면 연결됩니다</div>
-                  <div className="text-[11px] text-white/50">한줄로 공식 카페24 앱으로 연결되어 회원·주문·장바구니가 자동 동기화됩니다. 새 창에서 카페24 로그인 + 권한 동의만 하면 끝.</div>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] text-white/50 mb-1">쇼핑몰 ID (mall_id)</label>
-                  <input
-                    type="text"
-                    value={cafe24MallId}
-                    onChange={(e) => setCafe24MallId(e.target.value)}
-                    placeholder="예: hanjullo-test"
-                    className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50"
-                  />
-                  <div className="text-[11px] text-white/40 mt-1">쇼핑몰 주소가 <span className="font-mono">hanjullo-test.cafe24.com</span>이면 → <span className="font-mono">hanjullo-test</span></div>
-                </div>
-
-                <button onClick={handleCafe24ConnectOfficial} disabled={cafe24Connecting || !isAdmin || !cafe24MallId.trim()} className="w-full px-4 py-2.5 bg-amber-500/30 hover:bg-amber-500/50 text-amber-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
-                  {cafe24Connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 준비 중...</> : <><Link2 className="w-4 h-4" /> 카페24 연결</>}
-                </button>
-                {!isAdmin && <div className="text-[11px] text-white/50 text-center">연동은 회사 관리자만 가능합니다.</div>}
-
-                {/* 고급 — 자체앱(직접 발급 키)으로 연결 (접이식) */}
-                <div className="border border-white/10 rounded-xl overflow-hidden">
-                  <button onClick={() => setCafe24ShowByo((v) => !v)} className="w-full px-4 py-2.5 flex items-center justify-between text-[11px] text-white/50 hover:bg-white/5">
-                    <span>자체앱(직접 발급한 키)으로 연결 — 고급</span>
-                    {cafe24ShowByo ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                  </button>
-                  {cafe24ShowByo && (
-                    <div className="p-4 pt-2 space-y-4 border-t border-white/10">
-                      <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
-                        <div className="text-xs font-semibold text-violet-100">자체앱 연결 — 4단계</div>
-                        <GuideStep n={1}>
-                          <a href="https://developers.cafe24.com" target="_blank" rel="noreferrer" className="text-violet-200 underline inline-flex items-center gap-1">카페24 개발자센터<ExternalLink className="w-3 h-3" /></a>에서 "앱 만들기"(자체앱)를 생성합니다.
-                        </GuideStep>
-                        <GuideStep n={2}>
-                          앱의 <strong className="text-white/90">Redirect URI</strong>에 아래 주소를 그대로 등록합니다.
-                          <div className="flex items-center gap-2 bg-slate-950 border border-white/10 rounded-lg px-3 py-2 mt-1.5">
-                            <code className="flex-1 text-[11px] text-emerald-200 font-mono break-all">{CAFE24_CALLBACK_URL}</code>
-                            <button onClick={() => copyText(CAFE24_CALLBACK_URL, 'Redirect URI')} className="shrink-0 p-1.5 rounded-md bg-white/5 hover:bg-white/10 text-white/60" title="복사"><Copy className="w-3.5 h-3.5" /></button>
-                          </div>
-                        </GuideStep>
-                        <GuideStep n={3}>
-                          다음 권한(scope)을 모두 선택합니다.
-                          <div className="flex flex-wrap gap-1.5 mt-1.5">
-                            {CAFE24_REQUIRED_SCOPES.map((s) => <span key={s} className="text-[10px] font-mono bg-white/5 border border-white/10 text-white/60 px-2 py-0.5 rounded-full">{s}</span>)}
-                          </div>
-                        </GuideStep>
-                        <GuideStep n={4}>
-                          발급된 <strong className="text-white/90">Client ID·Secret</strong>을 아래에 입력합니다.
-                        </GuideStep>
-                      </div>
-
-                      <div className="space-y-2.5">
-                        <div>
-                          <label className="block text-[11px] text-white/50 mb-1">Client ID</label>
-                          <input
-                            type="text"
-                            value={cafe24ClientId}
-                            onChange={(e) => setCafe24ClientId(e.target.value)}
-                            placeholder="자체앱 Client ID"
-                            className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50 font-mono"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] text-white/50 mb-1">Client Secret</label>
-                          <div className="relative">
-                            <input
-                              type={showCafe24Secret ? 'text' : 'password'}
-                              value={cafe24ClientSecret}
-                              onChange={(e) => setCafe24ClientSecret(e.target.value)}
-                              placeholder="자체앱 Client Secret"
-                              className="w-full px-3 py-2 pr-10 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50 font-mono"
-                            />
-                            <button type="button" onClick={() => setShowCafe24Secret((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white/70" title={showCafe24Secret ? '숨기기' : '보기'}>
-                              {showCafe24Secret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      <button onClick={handleCafe24Connect} disabled={cafe24Connecting || !isAdmin || !cafe24MallId.trim() || !cafe24ClientId.trim() || !cafe24ClientSecret.trim()} className="w-full px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
-                        {cafe24Connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 준비 중...</> : <><Link2 className="w-4 h-4" /> 자체앱 키 저장하고 연결</>}
-                      </button>
-                      <div className="text-[10px] text-white/30 italic">Client Secret은 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다. 쇼핑몰 ID는 위 입력칸을 함께 사용합니다.</div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+          <CdpCafe24ConnectForm
+            status={cafe24Status}
+            isAdmin={isAdmin}
+            connecting={cafe24Connecting}
+            mallId={cafe24MallId}
+            onMallIdChange={setCafe24MallId}
+            showByo={cafe24ShowByo}
+            onToggleByo={() => setCafe24ShowByo((v) => !v)}
+            clientId={cafe24ClientId}
+            onClientIdChange={setCafe24ClientId}
+            clientSecret={cafe24ClientSecret}
+            onClientSecretChange={setCafe24ClientSecret}
+            showSecret={showCafe24Secret}
+            onToggleSecret={() => setShowCafe24Secret((v) => !v)}
+            onConnectOfficial={handleCafe24ConnectOfficial}
+            onConnectByo={handleCafe24Connect}
+            onDisconnect={handleCafe24Disconnect}
+            onCopy={copyText}
+          />
         )}
 
         {/* 네이버 스마트스토어 — 커머스 API 자격 입력형 (★ 2026-07-06 OAuth 폐기, client_credentials) */}
         {connectProvider === 'naver' && (
-          <div id="section-naver" className="bg-white/5 border border-white/10 rounded-xl p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <ShoppingCart className="w-5 h-5 text-emerald-300" />
-              <h2 className="text-base font-bold text-white">네이버 스마트스토어 연동</h2>
-              <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-medium">커머스 API</span>
-            </div>
-
-            {/* ★ 2026-07-06 인앱 미지원 명확 안내 — 스마트스토어는 스토어 페이지에 스크립트 설치 불가(폐쇄형) */}
-            <div className="mb-4 bg-amber-500/10 border border-amber-400/25 rounded-lg p-3 text-[11px] text-amber-200/90 leading-relaxed">
-              네이버 스마트스토어는 <strong className="text-white/90">주문·구매고객 데이터 동기화만</strong> 지원됩니다. 스마트스토어 페이지에는 스크립트를 설치할 수 없어 <strong className="text-white/90">인앱 메시지(웹 팝업) 표시는 지원되지 않습니다.</strong> 인앱 메시지는 카페24·고도몰·메이크샵·아임웹·자체 쇼핑몰에서 이용할 수 있습니다.
-            </div>
-
-            {naverStatus?.connected ? (
-              <div className="space-y-3">
-                <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-4 flex items-start gap-3">
-                  <Check className="w-5 h-5 text-emerald-300 mt-0.5 shrink-0" />
-                  <div className="flex-1">
-                    <div className="text-sm font-medium text-emerald-100">{naverStatus.store_id} 네이버 스마트스토어 연동됨</div>
-                    {/* ★ 2026-07-06 토큰 만료 시각 노출 제거 — client_credentials는 자동 재발급이라 만료 시각이 불안만 유발(Harold 지적) */}
-                    <div className="text-xs text-emerald-300 mt-1">연동 유지 중 · 토큰 자동 갱신</div>
-                  </div>
-                </div>
-                {isAdmin && (
-                  <div className="flex gap-2">
-                    <button onClick={handleNaverPreview} disabled={naverPreviewing} className="px-4 py-2 bg-emerald-500/15 border border-emerald-400/40 hover:bg-emerald-500/25 text-emerald-200 text-sm font-medium rounded-lg flex items-center gap-2 disabled:opacity-40">
-                      {naverPreviewing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingCart className="w-4 h-4" />} 주문 데이터 확인 (24h)
-                    </button>
-                    <button onClick={handleNaverDisconnect} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
-                      <Unlink className="w-4 h-4" /> 연동 해제
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="text-xs text-amber-200/80 bg-amber-500/10 border border-amber-400/30 rounded p-2">
-                  ★ 네이버 정책상 휴대폰·이메일 등 개인정보 제공이 제한될 수 있어, 기존 고객과의 매칭률이 낮을 수 있습니다.
-                </div>
-                {/* 안내 — 애플리케이션 등록 4단계 (client_credentials — Redirect URI/scope 없음) */}
-                <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
-                  <div className="text-xs font-semibold text-violet-100">애플리케이션 연결 — 4단계</div>
-                  <GuideStep n={1}>네이버 커머스 API센터에서 애플리케이션을 등록합니다.</GuideStep>
-                  <GuideStep n={2}>
-                    애플리케이션의 <strong className="text-white/90">API 호출 IP</strong>에 한줄로 서버 IP를 등록합니다. (미등록 시 연동이 거부됩니다)
-                    <div className="bg-slate-950 border border-white/10 rounded-lg px-3 py-2 mt-1.5 text-[11px] text-white/70 leading-relaxed">
-                      보안을 위해 등록할 IP는 <strong className="text-emerald-200">한줄로 AI · SDK 연동 담당자</strong>에게 문의해 개별 안내받으세요.
-                    </div>
-                  </GuideStep>
-                  <GuideStep n={3}>
-                    API 그룹에서 다음 그룹을 추가합니다.
-                    <div className="flex flex-wrap gap-1.5 mt-1.5">
-                      {NAVER_REQUIRED_API_GROUPS.map((s) => <span key={s} className="text-[10px] bg-white/5 border border-white/10 text-white/60 px-2 py-0.5 rounded-full">{s}</span>)}
-                    </div>
-                  </GuideStep>
-                  <GuideStep n={4}>
-                    발급된 <strong className="text-white/90">애플리케이션 ID·시크릿</strong>을 아래에 입력하고 연동하기를 누릅니다.
-                  </GuideStep>
-                </div>
-
-                {/* 입력 — store_id + Client ID + Secret */}
-                <div className="space-y-2.5">
-                  <div>
-                    <label className="block text-[11px] text-white/50 mb-1">store_id</label>
-                    <input
-                      type="text"
-                      value={naverStoreId}
-                      onChange={(e) => setNaverStoreId(e.target.value)}
-                      placeholder="네이버 스마트스토어 store_id"
-                      className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-white/50 mb-1">Client ID</label>
-                    <input
-                      type="text"
-                      value={naverClientId}
-                      onChange={(e) => setNaverClientId(e.target.value)}
-                      placeholder="애플리케이션 Client ID"
-                      className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-white/50 mb-1">Client Secret</label>
-                    <div className="relative">
-                      <input
-                        type={showNaverSecret ? 'text' : 'password'}
-                        value={naverClientSecret}
-                        onChange={(e) => setNaverClientSecret(e.target.value)}
-                        placeholder="애플리케이션 Client Secret"
-                        className="w-full px-3 py-2 pr-10 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 font-mono"
-                      />
-                      <button type="button" onClick={() => setShowNaverSecret((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white/70" title={showNaverSecret ? '숨기기' : '보기'}>
-                        {showNaverSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <button onClick={handleNaverConnect} disabled={naverConnecting || !isAdmin || !naverStoreId.trim() || !naverClientId.trim() || !naverClientSecret.trim()} className="w-full px-4 py-2.5 bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
-                  {naverConnecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연동 확인 중...</> : <><Link2 className="w-4 h-4" /> 연동하기</>}
-                </button>
-                {!isAdmin && <div className="text-[11px] text-white/50 text-center">연동은 회사 관리자만 가능합니다.</div>}
-                <div className="text-[10px] text-white/30 italic">Client Secret은 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>
-              </div>
-            )}
-          </div>
+          <CdpNaverConnectForm
+            status={naverStatus}
+            isAdmin={isAdmin}
+            connecting={naverConnecting}
+            previewing={naverPreviewing}
+            storeId={naverStoreId}
+            onStoreIdChange={setNaverStoreId}
+            clientId={naverClientId}
+            onClientIdChange={setNaverClientId}
+            clientSecret={naverClientSecret}
+            onClientSecretChange={setNaverClientSecret}
+            showSecret={showNaverSecret}
+            onToggleSecret={() => setShowNaverSecret((v) => !v)}
+            onConnect={handleNaverConnect}
+            onPreview={handleNaverPreview}
+            onDisconnect={handleNaverDisconnect}
+          />
         )}
 
         {/* 메이크샵 — 커머스 API 자격 입력형 (★ 2026-07-06 client_credentials, polling) */}
         {connectProvider === 'makeshop' && (
-          <div id="section-makeshop" className="bg-white/5 border border-white/10 rounded-xl p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <Palette className="w-5 h-5 text-rose-300" />
-              <h2 className="text-base font-bold text-white">메이크샵 연동</h2>
-              <span className="text-xs bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded-full font-medium">커머스 API</span>
-            </div>
-
-            {makeshopStatus?.connected ? (
-              <div className="space-y-3">
-                <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-4 flex items-start gap-3">
-                  <Check className="w-5 h-5 text-emerald-300 mt-0.5 shrink-0" />
-                  <div className="flex-1">
-                    <div className="text-sm font-medium text-emerald-100">{makeshopStatus.shop_uid} 메이크샵 연동됨</div>
-                    <div className="text-xs text-emerald-300 mt-1">연동 유지 중 · 토큰 자동 갱신</div>
-                  </div>
-                </div>
-                {isAdmin && (
-                  <div className="flex gap-2">
-                    <button onClick={handleMakeshopPreview} disabled={makeshopPreviewing} className="px-4 py-2 bg-emerald-500/15 border border-emerald-400/40 hover:bg-emerald-500/25 text-emerald-200 text-sm font-medium rounded-lg flex items-center gap-2 disabled:opacity-40">
-                      {makeshopPreviewing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Boxes className="w-4 h-4" />} 회원·주문 데이터 확인
-                    </button>
-                    <button onClick={handleMakeshopDisconnect} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
-                      <Unlink className="w-4 h-4" /> 연동 해제
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {/* 안내 — App 등록 3단계 */}
-                <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
-                  <div className="text-xs font-semibold text-violet-100">App 연결 — 3단계</div>
-                  <GuideStep n={1}>메이크샵 파트너센터(partner.makeshop.co.kr)에서 App을 등록합니다.</GuideStep>
-                  <GuideStep n={2}>
-                    App에 다음 권한(Read)을 추가합니다.
-                    <div className="flex flex-wrap gap-1.5 mt-1.5">
-                      {MAKESHOP_REQUIRED_PERMISSIONS.map((s) => <span key={s} className="text-[10px] bg-white/5 border border-white/10 text-white/60 px-2 py-0.5 rounded-full">{s}</span>)}
-                    </div>
-                  </GuideStep>
-                  <GuideStep n={3}>
-                    App의 <strong className="text-white/90">Client ID·Secret</strong>과 <strong className="text-white/90">상점 ID(shop_uid)</strong>를 아래에 입력하고 연동하기를 누릅니다.
-                  </GuideStep>
-                </div>
-
-                {/* 입력 — shop_uid + Client ID + Secret */}
-                <div className="space-y-2.5">
-                  <div>
-                    <label className="block text-[11px] text-white/50 mb-1">상점 ID (shop_uid)</label>
-                    <input
-                      type="text"
-                      value={makeshopShopUid}
-                      onChange={(e) => setMakeshopShopUid(e.target.value)}
-                      placeholder="메이크샵 상점 ID"
-                      className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-white/50 mb-1">Client ID</label>
-                    <input
-                      type="text"
-                      value={makeshopClientId}
-                      onChange={(e) => setMakeshopClientId(e.target.value)}
-                      placeholder="App Client ID"
-                      className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-white/50 mb-1">Client Secret</label>
-                    <div className="relative">
-                      <input
-                        type={showMakeshopSecret ? 'text' : 'password'}
-                        value={makeshopClientSecret}
-                        onChange={(e) => setMakeshopClientSecret(e.target.value)}
-                        placeholder="App Client Secret"
-                        className="w-full px-3 py-2 pr-10 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 font-mono"
-                      />
-                      <button type="button" onClick={() => setShowMakeshopSecret((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white/70" title={showMakeshopSecret ? '숨기기' : '보기'}>
-                        {showMakeshopSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <button onClick={handleMakeshopConnect} disabled={makeshopConnecting || !isAdmin || !makeshopShopUid.trim() || !makeshopClientId.trim() || !makeshopClientSecret.trim()} className="w-full px-4 py-2.5 bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
-                  {makeshopConnecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연동 확인 중...</> : <><Link2 className="w-4 h-4" /> 연동하기</>}
-                </button>
-                {!isAdmin && <div className="text-[11px] text-white/50 text-center">연동은 회사 관리자만 가능합니다.</div>}
-                <div className="text-[10px] text-white/30 italic">Client Secret은 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>
-              </div>
-            )}
-
-            {/* ★ 2026-07-06 메이크샵 SDK 설치 (방문·장바구니 수집 + 인앱 메시지 표시) — 주문 API와 별개. 메이크샵은 자동삽입 불가라 디자인 편집 복붙. */}
-            <div className="mt-5 pt-5 border-t border-white/10 space-y-4">
-              <div className="flex items-center gap-2">
-                <Code2 className="w-4 h-4 text-violet-300" />
-                <h3 className="text-sm font-bold text-white">SDK 설치 — 방문·장바구니 수집 + 인앱 메시지 표시</h3>
-              </div>
-              <div className="text-[11px] text-white/50 -mt-2">회원·주문 동기화(위)와 별개입니다. 방문·장바구니 수집과 <strong className="text-white/80">인앱 메시지 표시</strong>는 쇼핑몰 페이지에 아래 스크립트가 설치돼야 작동합니다. 메이크샵 관리자 &gt; 개별디자인(디자인 편집)에서 모든 페이지에 공통 적용되는 상단 HTML(&lt;head&gt;)에 붙여넣으세요. PC·모바일 디자인 양쪽 모두 필요합니다.</div>
-              {(() => {
-                const makeshopHead = `<script src="https://app.hanjul.ai/api/cdp/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage?.public_key || 'hjl_발급받은_공개키'}" async></script>`;
-                return (
-                  <div className="space-y-3">
-                    <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre-wrap break-all">{makeshopHead}</pre>
-                    <button type="button" onClick={() => copyText(makeshopHead, '메이크샵 설치 스크립트')} className="px-3 py-2 bg-indigo-500/40 hover:bg-indigo-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5">
-                      <Copy className="w-3.5 h-3.5" />복사
-                    </button>
-                    <div className="text-[10px] text-amber-300/70 italic">설치 후 "수집 허용 도메인"에 쇼핑몰 도메인을 등록해야 수집·인앱 표시가 시작됩니다.</div>
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
+          <CdpMakeshopConnectForm
+            status={makeshopStatus}
+            isAdmin={isAdmin}
+            connecting={makeshopConnecting}
+            previewing={makeshopPreviewing}
+            shopUid={makeshopShopUid}
+            onShopUidChange={setMakeshopShopUid}
+            clientId={makeshopClientId}
+            onClientIdChange={setMakeshopClientId}
+            clientSecret={makeshopClientSecret}
+            onClientSecretChange={setMakeshopClientSecret}
+            showSecret={showMakeshopSecret}
+            onToggleSecret={() => setShowMakeshopSecret((v) => !v)}
+            onConnect={handleMakeshopConnect}
+            onPreview={handleMakeshopPreview}
+            onDisconnect={handleMakeshopDisconnect}
+            publicKey={usage?.public_key}
+            onCopy={copyText}
+          />
         )}
 
         {/* 아임웹 — OAuth (siteCode) */}
         {connectProvider === 'imweb' && (
-          <div id="section-imweb" className="bg-white/5 border border-white/10 rounded-xl p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <LayoutTemplate className="w-5 h-5 text-indigo-300" />
-              <h2 className="text-base font-bold text-white">아임웹 연동</h2>
-              <span className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full font-medium">imweb OAuth</span>
-            </div>
-
-            {imwebStatus?.connected ? (
-              <div className="space-y-3">
-                <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-4 flex items-start gap-3">
-                  <Check className="w-5 h-5 text-emerald-300 mt-0.5 shrink-0" />
-                  <div className="flex-1">
-                    <div className="text-sm font-medium text-emerald-100">{imwebStatus.site_code} 아임웹 연동됨</div>
-                    <div className="text-xs text-emerald-300 mt-1">status: {imwebStatus.status} · 토큰 만료: {imwebStatus.token_expires_at ? new Date(imwebStatus.token_expires_at).toLocaleString('ko-KR') : '-'}</div>
-                  </div>
-                </div>
-                {isAdmin && (
-                  <button onClick={handleImwebDisconnect} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
-                    <Unlink className="w-4 h-4" /> 연동 해제
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
-                  <div className="text-xs font-semibold text-violet-100">아임웹 연결 — 2단계</div>
-                  <GuideStep n={1}>
-                    아임웹 앱스토어에서 <strong className="text-white/90">한줄로</strong> 앱을 추가하면 전달되는 <strong className="text-white/90">사이트 코드(siteCode)</strong>를 확인합니다.
-                  </GuideStep>
-                  <GuideStep n={2}>
-                    사이트 코드를 아래에 입력하고 연결하면, 새 창에서 아임웹 동의 후 회원·주문·수신동의·장바구니가 자동 동기화됩니다.
-                  </GuideStep>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] text-white/50 mb-1">사이트 코드(siteCode)</label>
-                  <input
-                    type="text"
-                    value={imwebSiteCode}
-                    onChange={(e) => setImwebSiteCode(e.target.value)}
-                    placeholder="예: S2025012450f7813d2ddau"
-                    className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
-                  />
-                </div>
-
-                <button onClick={handleImwebConnect} disabled={imwebConnecting || !isAdmin || !imwebSiteCode.trim()} className="w-full px-4 py-2.5 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
-                  {imwebConnecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 준비 중...</> : <><Link2 className="w-4 h-4" /> 아임웹 연결</>}
-                </button>
-                {!isAdmin && <div className="text-[11px] text-white/50 text-center">연동은 회사 관리자만 가능합니다.</div>}
-                <div className="text-[10px] text-white/30 italic">Data source — 아임웹 Open API (openapi.imweb.me). 회원·주문·수신동의 읽기 전용.</div>
-              </div>
-            )}
-
-            {/* ★ 2026-07-06 아임웹 SDK 설치 (방문·장바구니 수집 + 인앱 메시지 표시) — 주문 API와 별개. 아임웹은 자동삽입 불가라 코드 삽입 복붙. */}
-            <div className="mt-5 pt-5 border-t border-white/10 space-y-4">
-              <div className="flex items-center gap-2">
-                <Code2 className="w-4 h-4 text-violet-300" />
-                <h3 className="text-sm font-bold text-white">SDK 설치 — 방문·장바구니 수집 + 인앱 메시지 표시</h3>
-              </div>
-              <div className="text-[11px] text-white/50 -mt-2">회원·주문 동기화(위)와 별개입니다. 방문·장바구니 수집과 <strong className="text-white/80">인앱 메시지 표시</strong>는 사이트에 아래 스크립트가 설치돼야 작동합니다. 아임웹 관리자 화면의 코드 삽입(HEAD 영역)에 붙여넣으세요.</div>
-              {(() => {
-                const imwebHead = `<script src="https://app.hanjul.ai/api/cdp/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage?.public_key || 'hjl_발급받은_공개키'}" async></script>`;
-                return (
-                  <div className="space-y-3">
-                    <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre-wrap break-all">{imwebHead}</pre>
-                    <button type="button" onClick={() => copyText(imwebHead, '아임웹 설치 스크립트')} className="px-3 py-2 bg-indigo-500/40 hover:bg-indigo-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5">
-                      <Copy className="w-3.5 h-3.5" />복사
-                    </button>
-                    <div className="text-[10px] text-amber-300/70 italic">설치 후 "수집 허용 도메인"에 사이트 도메인을 등록해야 수집·인앱 표시가 시작됩니다.</div>
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
+          <CdpImwebConnectForm
+            status={imwebStatus}
+            isAdmin={isAdmin}
+            connecting={imwebConnecting}
+            siteCode={imwebSiteCode}
+            onSiteCodeChange={setImwebSiteCode}
+            onConnect={handleImwebConnect}
+            onDisconnect={handleImwebDisconnect}
+            publicKey={usage?.public_key}
+            onCopy={copyText}
+          />
         )}
 
         {/* 고도몰 — BYO 쇼핑몰 인증키(key) */}
         {connectProvider === 'godo' && (
-          <div id="section-godo" className="bg-white/5 border border-white/10 rounded-xl p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <Server className="w-5 h-5 text-indigo-300" />
-              <h2 className="text-base font-bold text-white">고도몰 연동</h2>
-              <span className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full font-medium">쇼핑몰 인증키</span>
-            </div>
-
-            {godoStatus?.connected ? (
-              <div className="space-y-3">
-                <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-4 flex items-start gap-3">
-                  <Check className="w-5 h-5 text-emerald-300 mt-0.5 shrink-0" />
-                  <div className="flex-1">
-                    <div className="text-sm font-medium text-emerald-100">고도몰 연동됨</div>
-                    <div className="text-xs text-emerald-300 mt-1">
-                      status: {godoStatus.status} · 연결: {godoStatus.connectedAt ? new Date(godoStatus.connectedAt).toLocaleString('ko-KR') : '-'}
-                    </div>
-                  </div>
-                </div>
-                {isAdmin && (
-                  <button onClick={handleGodoDisconnect} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
-                    <Unlink className="w-4 h-4" /> 연동 해제
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
-                  <div className="text-xs font-semibold text-violet-100">쇼핑몰 인증키 연결 — 2단계</div>
-                  <GuideStep n={1}>고도몰 쇼핑몰 관리자에서 한줄로 API 사용을 신청하고 <strong className="text-white/90">쇼핑몰 인증키(key)</strong>를 발급받습니다.</GuideStep>
-                  <GuideStep n={2}>발급된 인증키를 아래에 입력하면, 최근 주문이 자동으로 들어옵니다.</GuideStep>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] text-white/50 mb-1">쇼핑몰 인증키(key)</label>
-                  <div className="relative">
-                    <input
-                      type={showGodoKey ? 'text' : 'password'}
-                      value={godoKey}
-                      onChange={(e) => setGodoKey(e.target.value)}
-                      placeholder="고도몰에서 발급받은 인증키"
-                      className="w-full px-3 py-2 pr-10 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
-                    />
-                    <button type="button" onClick={() => setShowGodoKey((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white/70" title={showGodoKey ? '숨기기' : '보기'}>
-                      {showGodoKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                <button onClick={handleGodoConnect} disabled={godoConnecting || !isAdmin || !godoKey.trim()} className="w-full px-4 py-2.5 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
-                  {godoConnecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 확인 중...</> : <><Link2 className="w-4 h-4" /> 저장하고 고도몰 연동</>}
-                </button>
-                {!isAdmin && <div className="text-[11px] text-white/50 text-center">연동은 회사 관리자만 가능합니다.</div>}
-                <div className="text-[10px] text-white/30 italic">인증키는 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>
-              </div>
-            )}
-
-            {/* ★ 2026-07-03 고도몰 SDK 설치 (행동·회원 수집) — 주문 API 키와 별개. 고도몰은 자동삽입 불가라 스킨 복붙. */}
-            <div className="mt-5 pt-5 border-t border-white/10 space-y-4">
-              <div className="flex items-center gap-2">
-                <Code2 className="w-4 h-4 text-violet-300" />
-                <h3 className="text-sm font-bold text-white">SDK 설치 — 방문·회원·장바구니 수집</h3>
-              </div>
-              <div className="text-[11px] text-white/50 -mt-2">주문(위)과 별개입니다. 방문·회원·장바구니까지 수집하려면 고도몰 스킨(PC·모바일 각각)에 아래를 붙여넣으세요. 고도몰5 표준 치환코드라 수정 없이 동작합니다.</div>
-              {(() => {
-                const godoHead = `<script src="https://app.hanjul.ai/api/cdp/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage?.public_key || 'hjl_발급받은_공개키'}" async></script>`;
-                const godoBody = `<body data-hjl-user-id="{=gSess.memNo}" data-hjl-phone="{=gSess.cellPhone}" data-hjl-name="{=gSess.memNm}">`;
-                const godoCart = `<script>\n  // 장바구니 담기 성공 시점(담기 버튼/AJAX 성공)에 호출\n  window.hjl && window.hjl.track('cart_add', {\n    product_name: "{=goodsView['goodsNm']}",\n    price: Number("{=gd_isset(goodsView['goodsPrice'],0)}"),\n    product_url: location.href,\n    quantity: 1\n  });\n</script>`;
-                const godoPurchase = `<script>\n  window.hjl && window.hjl.track('purchase', { order_id: '{=orderInfo.orderNo}' });\n</script>`;
-                const blk = (label: string, code: string, copyLabel: string) => (
-                  <div key={copyLabel}>
-                    <div className="text-xs font-medium text-white/70 mb-1.5">{label}</div>
-                    <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre-wrap break-all">{code}</pre>
-                    <button type="button" onClick={() => copyText(code, copyLabel)} className="mt-2 px-3 py-2 bg-indigo-500/40 hover:bg-indigo-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5">
-                      <Copy className="w-3.5 h-3.5" />복사
-                    </button>
-                  </div>
-                );
-                return (
-                  <div className="space-y-4">
-                    {blk('① 설치 스크립트 — 모든 페이지 스킨 <head>', godoHead, '고도몰 설치 스크립트')}
-                    {blk('② 회원 식별 — 로그인 스킨 <body> 태그', godoBody, '고도몰 회원 식별 코드')}
-                    {blk('③ 장바구니 담기 — 상품상세(goods_view) 스킨', godoCart, '고도몰 장바구니 코드')}
-                    {blk('④ 구매 완료 — 주문완료(order_end) 스킨', godoPurchase, '고도몰 구매 완료 코드')}
-                    <div className="text-[10px] text-amber-300/70 italic">PC·모바일 스킨 양쪽에 넣어야 합니다. 그리고 "수집 허용 도메인"에 몰 도메인을 등록해야 수집이 시작됩니다.</div>
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
+          <CdpGodoConnectForm
+            status={godoStatus}
+            isAdmin={isAdmin}
+            connecting={godoConnecting}
+            apiKey={godoKey}
+            onApiKeyChange={setGodoKey}
+            showKey={showGodoKey}
+            onToggleKey={() => setShowGodoKey((v) => !v)}
+            onConnect={handleGodoConnect}
+            onDisconnect={handleGodoDisconnect}
+            publicKey={usage?.public_key}
+            onCopy={copyText}
+          />
         )}
 
 
@@ -2095,18 +1512,18 @@ client.newCall(req).execute()`}</pre>
                   key: 'web',
                   label: '웹',
                   note: '쇼핑몰 모든 페이지의 <head> 안에 넣어주세요.',
-                  code: `<script src="https://app.hanjul.ai/api/cdp/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage.public_key}" async></script>`,
+                  code: buildSdkScriptTag(usage.public_key),
                 },
                 {
                   key: 'app',
                   label: '앱 웹뷰',
                   note: '앱 웹뷰 페이지에는 data-hjl-platform="app" 한 줄이 더 붙습니다.',
-                  code: `<script src="https://app.hanjul.ai/api/cdp/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage.public_key}" data-hjl-platform="app" async></script>`,
+                  code: buildSdkScriptTag(usage.public_key, { platformApp: true }),
                 },
               ]}
               onCopy={copyText}
             />
-            <div className="text-[10px] text-white/30 italic mt-3">Data source — app.hanjul.ai/sdk/v0.3.9</div>
+            <div className="text-[10px] text-white/30 italic mt-3">Data source — app.hanjul.ai/sdk/{CDP_SDK_VERSION}</div>
           </div>
         )}
 
@@ -2150,14 +1567,7 @@ function CdpModal({ open, onClose, title, icon, children }: { open: boolean; onC
 
 // ChartCard·FunnelBar·StatBox·CapBadge = 분석 패널 전용이라 CdpAnalyticsPanels로 함께 옮겼다(★2026-08-10 Phase 5).
 
-function GuideStep({ n, children }: { n: number; children: React.ReactNode }) {
-  return (
-    <div className="flex gap-2">
-      <span className="shrink-0 w-4 h-4 mt-0.5 rounded-full bg-violet-500/30 text-violet-100 text-[10px] flex items-center justify-center font-bold">{n}</span>
-      <div className="flex-1 text-xs text-white/70 leading-relaxed">{children}</div>
-    </div>
-  );
-}
+// GuideStep = 몰별 연결 폼과 공용이라 components/cdp/CdpFormPrimitives로 옮겼다(★2026-08-10 Phase 5-3).
 
 function SecretRow({ label, value, copied, onCopy, danger }: { label: string; value: string; copied: boolean; onCopy: () => void; danger?: boolean }) {
   return (

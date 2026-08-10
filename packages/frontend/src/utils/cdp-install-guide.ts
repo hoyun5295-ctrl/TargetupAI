@@ -30,7 +30,8 @@ export interface BuildInstallGuideInput {
   includeSecretNotice?: boolean;
 }
 
-const SDK_BASE = 'https://app.hanjul.ai/api/cdp/sdk';
+// ★ 2026-08-10 Phase 5-2 — 스크립트 경로·버전은 `cdp-sdk-script` CT가 소유한다(여섯 곳에 흩어져 있던 것).
+import { CDP_SDK_VERSION, buildSdkScriptUrl } from './cdp-sdk-script';
 
 /**
  * 개발자에게 그대로 보낼 수 있는 설치 안내(평문). 마크다운 기호를 최소로 써서
@@ -40,7 +41,7 @@ export function buildInstallGuideText(input: BuildInstallGuideInput): string {
   const {
     providerName, sdkKey, sdkVersion, webhookUrl, allowedOrigins, includeSecretNotice,
   } = input;
-  const ver = sdkVersion || 'v0.3.9';
+  const ver = sdkVersion || CDP_SDK_VERSION;
   const lines: string[] = [];
 
   lines.push(`[한줄로 연동 설치 안내 — ${providerName}]`);
@@ -52,7 +53,7 @@ export function buildInstallGuideText(input: BuildInstallGuideInput): string {
     lines.push('1) 수집 스크립트 설치');
     lines.push('   쇼핑몰 모든 페이지의 <head> 안에 아래 한 줄을 넣어주세요.');
     lines.push('');
-    lines.push(`   <script src="${SDK_BASE}/${ver}/hanjul.min.js" data-hjl-key="${sdkKey}" async></script>`);
+    lines.push(`   <script src="${buildSdkScriptUrl(ver)}" data-hjl-key="${sdkKey}" async></script>`);
     lines.push('');
     lines.push('   앱 웹뷰 페이지에는 data-hjl-platform="app" 를 한 줄 더 붙여주세요.');
     lines.push('');

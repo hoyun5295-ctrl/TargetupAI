@@ -410,8 +410,41 @@ describe('페이지 분해 (Phase 5 · ★2026-08-10)', () => {
     expect(src).not.toMatch(/const formatWon =/);
   });
 
+  it('SDK 설치 스크립트 경로·버전이 한 곳에만 있다 — 여섯 곳에 손으로 적혀 있어 버전을 올리면 하나가 남는다', () => {
+    // 남으면 그 몰만 옛 SDK를 설치한다. 설치는 되고 동작만 옛것이라 화면으로는 알 수 없다.
+    for (const f of ['pages/CdpSettingsPage.tsx', 'utils/cdp-install-guide.ts', 'components/cdp/CdpSnippetBox.tsx']) {
+      const code = read(path.join(FRONTEND_SRC, f)).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+      expect(code, `${f}에 SDK 경로가 다시 적혀 있다`).not.toMatch(/hanjul\.min\.js/);
+    }
+    expect(read(path.join(FRONTEND_SRC, 'utils/cdp-sdk-script.ts'))).toMatch(/CDP_SDK_VERSION = 'v\d+\.\d+\.\d+'/);
+  });
+
+  it('몰별 연결 폼 5종이 분리돼 있다 — 페이지는 표시 조건과 상태만 통제한다', () => {
+    const src = page();
+    for (const c of ['CdpCafe24ConnectForm', 'CdpNaverConnectForm', 'CdpMakeshopConnectForm', 'CdpImwebConnectForm', 'CdpGodoConnectForm']) {
+      expect(src, `${c}를 쓰지 않는다`).toContain(`<${c}`);
+    }
+    // 스테퍼 ① 표시 조건은 페이지에 남아야 한다(계약 대상)
+    expect(src).toMatch(/\?\.connected[\s\S]{0,60}!connectStepOpen \? 'hidden' : ''/);
+  });
+
+  it('자체 호스팅 개발자 안내가 페이지로 돌아오지 않는다 — 계약 문서를 담당자 화면에 쏟지 않는다', () => {
+    const src = page();
+    expect(src).toMatch(/<CdpCustomWebhookGuide/);
+    expect(src).toMatch(/<CdpCustomAppGuide/);
+    // 옛 인라인 서명 예제가 페이지에 다시 적히면 3층 규약이 무너진다.
+    // `X-Hanjullo-Signature`는 시크릿 발급 패널 라벨에도 쓰여 표식이 못 된다 — 안내에만 있는 것으로 고른다.
+    expect(src).not.toMatch(/hash_hmac/);
+    expect(src).not.toMatch(/hashlib\.sha256/);
+  });
+
   it('분리한 컴포넌트는 상태를 갖지 않는다 — 조회·권한 판정은 페이지 몫이다', () => {
-    for (const f of ['components/cdp/CdpAnalyticsPanels.tsx', 'components/cdp/CdpActiveCustomersTable.tsx']) {
+    for (const f of [
+      'components/cdp/CdpAnalyticsPanels.tsx',
+      'components/cdp/CdpActiveCustomersTable.tsx',
+      'components/cdp/CdpConnectForms.tsx',
+      'components/cdp/CdpCustomHostingDocs.tsx',
+    ]) {
       const src = read(path.join(FRONTEND_SRC, f));
       expect(src, `${f}가 상태를 들고 있다`).not.toMatch(/useState[<(]/);
       expect(src, `${f}가 직접 조회한다`).not.toMatch(/fetch\(/);
