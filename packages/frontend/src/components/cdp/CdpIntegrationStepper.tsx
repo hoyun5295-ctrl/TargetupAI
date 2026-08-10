@@ -38,6 +38,12 @@ export interface CdpIntegrationStepperProps {
   stalled?: boolean;
   onDeveloperSend?: () => void;
   onRetryCheck?: () => void;
+  /**
+   * ① 완료 후 펼침 여부. 연결이 끝나도 **해제·재설정은 여기 있어야 하므로** 접기만 하고 없애지 않는다.
+   * 내용물(몰별 폼)은 페이지가 그리므로 열림 상태를 페이지와 공유한다.
+   */
+  connectExpanded?: boolean;
+  onToggleConnect?: () => void;
 }
 
 type StepState = 'done' | 'active' | 'locked';
@@ -66,6 +72,7 @@ const SIGNAL_LABEL: Array<{ key: keyof CdpStepSignals; label: string }> = [
 
 export default function CdpIntegrationStepper({
   providerName, status, connectSlot, installSlot, signals, stalled, onDeveloperSend, onRetryCheck,
+  connectExpanded, onToggleConnect,
 }: CdpIntegrationStepperProps) {
   // 완료 판정은 실측값으로만 한다(규칙 3). 사용자가 넘기는 단계가 없다.
   const steps = useMemo(() => {
@@ -104,9 +111,24 @@ export default function CdpIntegrationStepper({
       {/* ① 연결 */}
       <section aria-current={steps.s1 === 'active' ? 'step' : undefined} className="space-y-3">
         <StepHead n={1} title="연결" state={steps.s1} />
-        {steps.s1 === 'active'
-          ? <div className="pl-[2.15rem]">{connectSlot}</div>
-          : <div className="pl-[2.15rem] text-[12px] text-emerald-300/80">연결 완료</div>}
+        {steps.s1 === 'active' ? (
+          <div className="pl-[2.15rem]">{connectSlot}</div>
+        ) : (
+          <div className="pl-[2.15rem] flex items-center gap-2.5">
+            <span className="text-[12px] text-emerald-300/80">연결 완료</span>
+            {onToggleConnect && (
+              <button
+                type="button"
+                onClick={onToggleConnect}
+                aria-expanded={!!connectExpanded}
+                className="text-[11.5px] text-white/45 hover:text-white/80 transition-colors"
+              >
+                {connectExpanded ? '접기' : '연결 정보 보기'}
+              </button>
+            )}
+          </div>
+        )}
+        {steps.s1 === 'done' && connectExpanded && <div className="pl-[2.15rem]">{connectSlot}</div>}
       </section>
 
       {/* ② 설치 */}

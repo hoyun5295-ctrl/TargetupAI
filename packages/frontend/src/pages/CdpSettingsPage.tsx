@@ -429,10 +429,13 @@ export default function CdpSettingsPage() {
   type CdpModalKey = null | 'analytics' | 'customers';
   const [activeModal, setActiveModal] = useState<CdpModalKey>(null);
   const [connectProvider, setConnectProvider] = useState<ProviderKey | null>(null);
+  // ★ 2026-08-10 Phase 3 — 스테퍼 ①(연결) 펼침 상태. 연결이 끝나면 접히지만 해제·재설정을 위해 다시 펼 수 있다.
+  //   내용물(몰별 폼)은 페이지가 그리므로 상태를 여기서 들고 스테퍼와 공유한다.
+  const [connectStepOpen, setConnectStepOpen] = useState(false);
   // ★ 2026-06-25 (gap 3): 백엔드 provider 목록(동적). null = 미로드(폴백).
   const [providerList, setProviderList] = useState<ProviderApiEntry[] | null>(null);
   const [customTab, setCustomTab] = useState<'connect' | 'web' | 'app' | 'verify'>('connect');
-  const closeModal = () => { setActiveModal(null); setConnectProvider(null); setCustomTab('connect'); };
+  const closeModal = () => { setActiveModal(null); setConnectProvider(null); setCustomTab('connect'); setConnectStepOpen(false); };
   const webhookProviderOpen = connectProvider === 'custom';
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
@@ -1573,6 +1576,8 @@ export default function CdpSettingsPage() {
             stalled={!!installStatus && installStatus.total === 0 && !!installStatus.keyIssuedAt
               && Date.now() - new Date(installStatus.keyIssuedAt).getTime() > 10 * 60 * 1000}
             onRetryCheck={loadAll}
+            connectExpanded={connectStepOpen}
+            onToggleConnect={() => setConnectStepOpen((v) => !v)}
           />
         )}
 
@@ -1835,6 +1840,12 @@ client.newCall(req).execute()`}</pre>
         )}
 
         {/* 카페24 — OAuth */}
+        {/* ★ 2026-08-10 Phase 3 잔여 — 몰별 연결 폼 = 스테퍼 ①단계의 내용물.
+            JSX를 물리적으로 옮기지 않고 **표시 조건만 스테퍼가 통제**한다(500줄 이동 = 회귀 위험).
+            연결 전에는 항상 펼치고, 연결된 뒤에는 ①을 눌러 펼쳤을 때만 보여준다(해제·재설정은 여기 있다). */}
+        <div className={CDP_DASHBOARD_V2 && connectProvider
+          && integrationStatus.byKey[connectProvider as CdpProviderKey]?.connected
+          && !connectStepOpen ? 'hidden' : ''}>
         {connectProvider === 'cafe24' && (
           <div id="section-cafe24" className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
@@ -2353,6 +2364,8 @@ client.newCall(req).execute()`}</pre>
           </div>
         )}
 
+
+        </div>{/* ← 몰별 연결 폼 구간 끝(스테퍼 ① 내용물) */}
 
         {/* 12. CDP 키 발급 + 사용량 — SDK 설치(public key)와 서버 API 공용
             2026-06-10 정정: webhook secret 발급 후에도 표시 (이전에는 숨겨져 public key를 발급할 수 없어

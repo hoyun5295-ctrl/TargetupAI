@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 
 const BACKEND_SRC = path.resolve(__dirname, '..');
@@ -129,9 +129,57 @@ describe('3단계 진행 패널 (Phase 3 · 설계서 §5-2)', () => {
     expect(src).toMatch(/stalled/);
   });
 
+  it('연결 후에도 몰별 폼에 다시 닿을 수 있다 — 접기만 하고 없애지 않는다(해제·재설정이 거기 있다)', () => {
+    const src = step();
+    // ① 완료 상태에서 펼치기 버튼이 있어야 한다
+    expect(src).toMatch(/onToggleConnect/);
+    expect(src).toContain('연결 정보 보기');
+    // 펼쳤을 때 실제로 내용물을 그린다
+    expect(src).toMatch(/steps\.s1 === 'done' && connectExpanded/);
+  });
+
+  it('몰별 폼은 스테퍼 ①의 내용물로 통제된다 — 연결 전에는 항상 보인다', () => {
+    const page = read(path.join(FRONTEND_SRC, 'pages/CdpSettingsPage.tsx'));
+    // 연결됨 + 접힘일 때만 숨긴다. connected가 아니면 조건이 거짓이라 항상 보인다.
+    expect(page).toMatch(/\?\.connected[\s\S]{0,60}!connectStepOpen \? 'hidden' : ''/);
+    // 모달을 닫으면 펼침 상태도 초기화된다(다음에 열 때 접힌 상태로 시작)
+    expect(page).toMatch(/closeModal[\s\S]{0,200}setConnectStepOpen\(false\)/);
+  });
+
   it('검증 탭은 플래그 on일 때 화면에서 사라진다 — 스테퍼 ③이 대신한다', () => {
     const page = read(path.join(FRONTEND_SRC, 'pages/CdpSettingsPage.tsx'));
     expect(page).toMatch(/CDP_DASHBOARD_V2[\s\S]{0,220}\['app', '앱'\]\] as const\)/);
+  });
+});
+
+describe('개발자 전달 안내 (Phase 4 · 설계서 §5-3)', () => {
+  const guide = () => read(path.join(FRONTEND_SRC, 'utils/cdp-install-guide.ts'));
+
+  it('공개 링크를 만들지 않는다 — 토큰 CT도, 공개 엔드포인트도 없다', () => {
+    // 0810 방향 정정: 링크는 시크릿을 못 담아 문제를 반만 풀면서 웹훅 규격만 새로 공개한다.
+    expect(existsSync(path.join(BACKEND_SRC, 'utils/cdp-install-guide-token.ts'))).toBe(false);
+    const cdpRoutes = read(path.join(BACKEND_SRC, 'routes/cdp.ts'));
+    expect(cdpRoutes).not.toMatch(/install-guide/);
+  });
+
+  it('안내 본문에 시크릿 값을 담지 않는다 — 자리만 알리고 값은 담당자가 사적 경로로 전달한다', () => {
+    const src = guide();
+    // 시크릿을 인자로 받는 순간 담을 수 있게 된다 — 애초에 받지 않는다
+    expect(src).not.toMatch(/webhookSecret|secretValue|issuedSecret/);
+    expect(src).toContain('이 안내에 포함하지 않았습니다');
+  });
+
+  it('서버 IP를 담지 않는다 — 공개 시 전 고객사가 우리 IP를 알게 된다', () => {
+    // 주석에는 이 규칙을 설명하는 문구가 있으므로 주석을 걷어내고 실제 출력만 본다
+    // (선례 = journey-entry-invariants.test.ts — 주석이 검사 결과를 뒤집지 않게 한다)
+    const code = guide().replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    expect(code).not.toMatch(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/);
+    expect(code).not.toMatch(/egress|serverIp|server_ip/i);
+  });
+
+  it('값이 없으면 가짜로 채우지 않는다 — SDK 키가 없으면 스크립트 절 자체를 넣지 않는다', () => {
+    const src = guide();
+    expect(src).toMatch(/if \(sdkKey\) \{/);
   });
 });
 
