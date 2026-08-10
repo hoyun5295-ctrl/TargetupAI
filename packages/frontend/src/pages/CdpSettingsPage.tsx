@@ -40,6 +40,8 @@ import {
 import { APP_INAPP_CONTRACT_SECTIONS } from '../components/inapp/AppIntegrationContract';
 // ★ 2026-08-10 Phase 2 — 연동 현황판(1층). 판정은 훅, 매핑은 CT, 화면은 그리기만.
 import CdpIntegrationDashboard from '../components/cdp/CdpIntegrationDashboard';
+import CdpIntegrationStepper from '../components/cdp/CdpIntegrationStepper';
+import { buildInstallGuideText } from '../utils/cdp-install-guide';
 import { useCdpIntegrationStatus, type CdpInstallStatusBySource } from '../hooks/useCdpIntegrationStatus';
 import type { CdpProviderKey } from '../utils/cdp-provider-keys';
 
@@ -1550,10 +1552,37 @@ export default function CdpSettingsPage() {
                 {PROVIDER_META[connectProvider].note}
               </div>
             )}
-        {/* webhook 자사몰 — 탭 (연결 / 웹 / 앱 / 검증) */}
+        {/* ★ 2026-08-10 Phase 3 — 3단계 진행 패널. 옛 '검증' 탭이 ③단계로 흡수된다(설계서 §5-2).
+            완료 판정은 실측값이 한다 — 사용자가 '다음'으로 자기 진도를 신고하지 않는다. */}
+        {connectProvider && CDP_DASHBOARD_V2 && integrationStatus.byKey[connectProvider as CdpProviderKey] && (
+          <CdpIntegrationStepper
+            providerName={PROVIDER_META[connectProvider]?.title || connectProvider}
+            status={integrationStatus.byKey[connectProvider as CdpProviderKey]}
+            connectSlot={null}
+            signals={installStatus?.signals ?? null}
+            onDeveloperSend={() => copyText(
+              buildInstallGuideText({
+                providerName: PROVIDER_META[connectProvider]?.title || connectProvider,
+                sdkKey: usage?.public_key || null,
+                webhookUrl: connectProvider === 'custom' ? (customInfo?.webhookUrl || null) : null,
+                allowedOrigins,
+                includeSecretNotice: connectProvider === 'custom',
+              }),
+              '개발자 전달용 설치 안내',
+            )}
+            stalled={!!installStatus && installStatus.total === 0 && !!installStatus.keyIssuedAt
+              && Date.now() - new Date(installStatus.keyIssuedAt).getTime() > 10 * 60 * 1000}
+            onRetryCheck={loadAll}
+          />
+        )}
+
+        {/* webhook 자사몰 — 탭. ★Phase 3: 검증 탭은 스테퍼 ③이 대신한다(플래그 on일 때 제외) */}
         {webhookProviderOpen && (
           <div className="flex gap-1 bg-white/5 border border-white/10 rounded-xl p-1">
-            {([['connect', '연결'], ['web', '웹'], ['app', '앱'], ['verify', '검증']] as const).map(([key, label]) => (
+            {(CDP_DASHBOARD_V2
+              ? ([['connect', '연결'], ['web', '웹'], ['app', '앱']] as const)
+              : ([['connect', '연결'], ['web', '웹'], ['app', '앱'], ['verify', '검증']] as const)
+            ).map(([key, label]) => (
               <button
                 key={key}
                 onClick={() => setCustomTab(key)}

@@ -196,7 +196,7 @@
 | 0 | ✔**구현완료(0810)** — `/install-status`에 `bySource` 추가(`GROUP BY COALESCE(source,'unknown')` + `lastEventAt`). **기존 쿼리·응답 키 무접촉**(별도 쿼리 = 진짜 additive). `received_at`·`source` 실존은 `information_schema`로 사전 확인 | 응답 키 추가분 미사용 |
 | 1 | ✔**구현완료(0810)** — 식별자 정규화 CT `frontend/utils/cdp-provider-keys.ts` + 판정 훅 `frontend/hooks/useCdpIntegrationStatus.ts`(배지 5종·요약 3지표·§6 분기). 계약 고정 = `backend/utils/cdp-provider-keys.contract.test.ts` 6건(결함 주입으로 실제 검출 확인 후 원복) | 훅·CT 삭제 |
 | 2 | ✔**구현완료(0810)** — `frontend/components/cdp/CdpIntegrationDashboard.tsx`(요약 3지표 + 몰 카드 4줄·버튼 1개 + 배지 5종). `CdpSettingsPage`에 `CDP_DASHBOARD_V2` 플래그로 배선, 옛 그리드는 코드에 그대로. 시인성 규격 5건 테스트 고정(화면 재계산 금지·1층 코드블록 0·색 단독 구분 금지 — 결함 주입 검출 확인) | **`CDP_DASHBOARD_V2 = false`** |
-| 3 | **3단계 진행 패널** — 검증 탭 흡수. 몰별 폼을 패널 안으로 | 이전 탭 복원 |
+| 3 | ✔**구현완료(0810·부분)** — `frontend/components/cdp/CdpIntegrationStepper.tsx`(3단계·시스템 판정·신호 4종·탈출구·매핑 보류 안내). 모달 상단에 배선, **옛 '검증' 탭 제거**(③이 흡수). 계약 테스트 5건(규칙 3·4·5 결함 주입 검출 확인). **잔여 = 몰별 연결 폼을 ①의 `connectSlot`으로 넣는 작업**(현재 `null` — 기존 폼이 스테퍼 아래 그대로 뜬다) | `CDP_DASHBOARD_V2=false` |
 | 4 | **개발자에게 보내기** — 공개 안내 페이지 + 전달(링크/메일). 메일은 발송 경로라 승인 필요 | 버튼 숨김 |
 | 5 | **파일 분해** — 몰별 컴포넌트 분리. 청크 실존 기계 검증 후 배포 | 단일 파일 복원 |
 | 6 | **수신 끊김 감지** — 임계값 확정 후 배지 추가 | 배지 숨김 |

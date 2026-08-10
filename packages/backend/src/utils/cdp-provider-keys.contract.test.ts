@@ -99,6 +99,42 @@ describe('연동 현황판 시인성 규격 (Phase 2 · 설계서 §5-1·§5-5)'
   });
 });
 
+describe('3단계 진행 패널 (Phase 3 · 설계서 §5-2)', () => {
+  const step = () => read(path.join(FRONTEND_SRC, 'components/cdp/CdpIntegrationStepper.tsx'));
+
+  it('단계 완료를 시스템이 판정한다 — 사용자가 "다음"으로 자기 진도를 신고하지 않는다(규칙 3)', () => {
+    const src = step();
+    expect(src).not.toMatch(/>\s*다음\s*</);
+    expect(src).not.toMatch(/setStep\(|goNext|nextStep/);
+    // 판정 근거는 실측값(connected · total)뿐이어야 한다
+    expect(src).toMatch(/status\.connected/);
+    expect(src).toMatch(/status\.total > 0/);
+  });
+
+  it('매핑 보류 몰은 거짓 진행바 대신 안내 한 장을 보여준다', () => {
+    const src = step();
+    expect(src).toMatch(/eventsUnavailable && status\.connected/);
+    expect(src).toContain('데이터 연동을 준비 중이에요');
+  });
+
+  it('③이 기다림과 신호 4종을 보여준다 — 옛 검증 탭의 몫을 흡수한다(규칙 4)', () => {
+    const src = step();
+    expect(src).toContain('첫 데이터를 기다리는 중입니다');
+    for (const s of ['pageview', 'identify', 'consent', 'click']) expect(src).toContain(s);
+  });
+
+  it('막힌 단계에 탈출구를 준다(규칙 5)', () => {
+    const src = step();
+    expect(src).toContain('데이터가 안 들어오나요?');
+    expect(src).toMatch(/stalled/);
+  });
+
+  it('검증 탭은 플래그 on일 때 화면에서 사라진다 — 스테퍼 ③이 대신한다', () => {
+    const page = read(path.join(FRONTEND_SRC, 'pages/CdpSettingsPage.tsx'));
+    expect(page).toMatch(/CDP_DASHBOARD_V2[\s\S]{0,220}\['app', '앱'\]\] as const\)/);
+  });
+});
+
 describe('install-status source 분리 (Phase 0)', () => {
   it('회사 합계와 별개로 source별 집계를 함께 돌려준다 — 기존 응답 키는 유지', () => {
     const src = read(path.join(BACKEND_SRC, 'routes/cdp.ts'));
