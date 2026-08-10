@@ -383,6 +383,42 @@ describe('접근 권한 격리 (★2026-08-10 — 화면이 담당자에게 열�
   });
 });
 
+describe('페이지 분해 (Phase 5 · ★2026-08-10)', () => {
+  const page = () => read(path.join(FRONTEND_SRC, 'pages/CdpSettingsPage.tsx'));
+
+  it('새 동적 import를 만들지 않는다 — 0718 사고 축은 라우트 동적 import 경로였다', () => {
+    // 이 페이지 자체가 이미 lazy 대상이라, 안에서 또 가르면 난독화가 깨뜨릴 경로 문자열이 늘어난다.
+    expect(page()).not.toMatch(/\bimport\s*\(/);
+  });
+
+  it('분리한 표시 블록을 정적으로 가져온다', () => {
+    const src = page();
+    expect(src).toMatch(/^import CdpAnalyticsPanels from/m);
+    expect(src).toMatch(/^import CdpActiveCustomersTable from/m);
+  });
+
+  it('차트 라이브러리가 페이지로 돌아오지 않는다 — 돌아오면 분리가 무의미해진다', () => {
+    expect(page()).not.toMatch(/from 'recharts'/);
+  });
+
+  it('라벨·포맷 표가 두 벌이 되지 않는다 — 한쪽만 고쳐지는 죽은 사본을 막는다', () => {
+    const src = page();
+    for (const table of ['SOURCE_LABEL', 'CHANNEL_LABEL', 'CHANNEL_COLOR']) {
+      expect(src, `${table}이 페이지에 다시 선언됐다`).not.toMatch(new RegExp(`const ${table}\\s*:`));
+    }
+    expect(src).not.toMatch(/const formatPct =/);
+    expect(src).not.toMatch(/const formatWon =/);
+  });
+
+  it('분리한 컴포넌트는 상태를 갖지 않는다 — 조회·권한 판정은 페이지 몫이다', () => {
+    for (const f of ['components/cdp/CdpAnalyticsPanels.tsx', 'components/cdp/CdpActiveCustomersTable.tsx']) {
+      const src = read(path.join(FRONTEND_SRC, f));
+      expect(src, `${f}가 상태를 들고 있다`).not.toMatch(/useState[<(]/);
+      expect(src, `${f}가 직접 조회한다`).not.toMatch(/fetch\(/);
+    }
+  });
+});
+
 describe('install-status source 분리 (Phase 0)', () => {
   it('회사 합계와 별개로 source별 집계를 함께 돌려준다 — 기존 응답 키는 유지', () => {
     const src = read(path.join(BACKEND_SRC, 'routes/cdp.ts'));

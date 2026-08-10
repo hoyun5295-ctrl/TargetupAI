@@ -27,14 +27,11 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
 import { createPortal } from 'react-dom';
+// ★ 2026-08-10 Phase 5 — recharts는 차트를 그리는 CdpAnalyticsPanels로 함께 이동(정적 import라 청크 경계 무변경).
 import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
-  PieChart, Pie, Cell,
-} from 'recharts';
-import {
-  ArrowLeft, Database, Brain, Loader2, RefreshCw, Sparkles, Users, AlertTriangle,
+  ArrowLeft, Database, Loader2, RefreshCw, Sparkles, Users,
   Activity, Info, Link2, Store, Server, ShoppingBag, Boxes, Cloud, Palette, LayoutTemplate, Package, Blocks,
-  KeyRound, Copy, Check, Unlink, MousePointerClick, AlertCircle, ShoppingCart, Code2, X,
+  KeyRound, Copy, Check, Unlink, AlertCircle, ShoppingCart, Code2, X,
   Eye, EyeOff, ExternalLink, ChevronDown, ChevronUp, Smartphone,
 } from 'lucide-react';
 import { APP_INAPP_CONTRACT_SECTIONS } from '../components/inapp/AppIntegrationContract';
@@ -44,6 +41,14 @@ import CdpIntegrationStepper from '../components/cdp/CdpIntegrationStepper';
 import { buildInstallGuideText } from '../utils/cdp-install-guide';
 import CdpDeveloperDoc, { developerDocToText } from '../components/cdp/CdpDeveloperDoc';
 import CdpSnippetBox from '../components/cdp/CdpSnippetBox';
+// ★ 2026-08-10 Phase 5 — 표시 전용 블록 분리(상태 없음·정적 import). 라벨·포맷·타입은 각자 CT가 소유한다.
+import CdpAnalyticsPanels from '../components/cdp/CdpAnalyticsPanels';
+import CdpActiveCustomersTable from '../components/cdp/CdpActiveCustomersTable';
+import { formatPct } from '../utils/cdp-display';
+import type {
+  CdpDiagnostics, CdpFunnel, CdpTimelineBucket, CdpActiveCustomers,
+  ChannelDistribution, ChannelCapabilities, CdpExplanation,
+} from '../components/cdp/cdp-analytics-types';
 import { useCdpIntegrationStatus, isIntegrationAuthBroken, type CdpInstallStatusBySource } from '../hooks/useCdpIntegrationStatus';
 import type { CdpProviderKey } from '../utils/cdp-provider-keys';
 
@@ -140,160 +145,8 @@ interface CustomIssuedSecret {
   message: string;
 }
 
-interface CdpProviderStats {
-  source: string;
-  totalLinks: number;
-  mappedLinks: number;
-  mappingRate: number;
-  events30d: number;
-}
-
-interface WebhookReliability {
-  source: string;
-  totalDeliveries: number;
-  successCount: number;
-  failedCount: number;
-  duplicateCount: number;
-  successRate: number;
-}
-
-interface SourceConflictBucket {
-  activeSourceCount: number;
-  customerCount: number;
-}
-
-interface CdpDiagnostics {
-  totalCustomers: number;
-  totalIdentityLinks: number;
-  mappedLinks: number;
-  overallMappingRate: number;
-  events24h: number;
-  events7d: number;
-  events30d: number;
-  posOnlyCustomers: number;
-  cdpOnlyCustomers: number;
-  fusedCustomers: number;
-  byProvider: CdpProviderStats[];
-  webhookReliability: WebhookReliability[];
-  sourceConflicts: SourceConflictBucket[];
-  computedAt: string;
-  source: string;
-}
-
-interface CdpFunnel {
-  pageViewCount: number;
-  cartAddCount: number;
-  checkoutStartCount: number;
-  purchaseCount: number;
-  cartConversionRate: number;
-  checkoutConversionRate: number;
-  purchaseConversionRate: number;
-  cartToPurchaseRate: number;
-  computedAt: string;
-  source: string;
-}
-
-interface CdpTimelineBucket {
-  hour: number;
-  count: number;
-  byEvent: Record<string, number>;
-}
-
-interface CdpActiveCustomer {
-  customerId: string;
-  customerName: string | null;
-  customerPhone: string | null;
-  customerGrade: string | null;
-  events30d: number;
-  eventsByName: Record<string, number>;
-  revenue30d: number;
-  activeSources: string[];
-  primarySource: string | null;
-  preferredChannel: string | null;
-  lastActivityAt: string | null;
-}
-
-interface CdpActiveCustomers {
-  topCustomers: CdpActiveCustomer[];
-  totalActiveCustomers: number;
-  anonymousEventCount: number;
-  computedAt: string;
-  source: string;
-}
-
-interface ChannelGroup {
-  channel: string;
-  customerIds: string[];
-  count: number;
-}
-
-interface ChannelDistribution {
-  total: number;
-  groups: ChannelGroup[];
-  unreachable: number;
-  computedAt: string;
-}
-
-interface ChannelCapabilities {
-  smsLms: boolean;
-  kakao: boolean;
-  email: boolean;
-  webPush: boolean;
-  inApp: boolean;
-  computedAt: string;
-}
-
-interface CdpExplainFactor {
-  category: string;
-  label: string;
-  impactScore: number;
-  direction: 'positive' | 'negative' | 'neutral';
-  detail: string;
-  sourceField: string;
-}
-
-interface CdpExplanation {
-  overallHealthScore: number;
-  topInsight: string;
-  factors: CdpExplainFactor[];
-  recommendations: string[];
-  explainedAt: string;
-}
-
-const SOURCE_LABEL: Record<string, string> = {
-  custom_sdk: '자체 SDK',
-  cdp_self_hosted: '자체 호스팅',
-  cafe24: '카페24',
-  shopify: 'Shopify',
-  makeshop: '메이크샵',
-  imweb: 'imweb',
-  sixshop: '식스샵',
-  woocommerce: 'WooCommerce',
-  naver: '네이버 스마트스토어',
-  sync: '싱크에이전트',
-  upload: '파일 업로드',
-  manual: '수동 입력',
-};
-
-const CHANNEL_LABEL: Record<string, string> = {
-  KAKAO: '알림톡',
-  LMS: '장문 SMS',
-  SMS: '단문 SMS',
-  EMAIL: '이메일',
-  WEB_PUSH: '웹 푸시',
-  IN_APP: '인앱',
-  NONE: '발송 불가',
-};
-
-const CHANNEL_COLOR: Record<string, string> = {
-  KAKAO: '#fbbf24',
-  LMS: '#a78bfa',
-  SMS: '#60a5fa',
-  EMAIL: '#34d399',
-  WEB_PUSH: '#fb7185',
-  IN_APP: '#22d3ee',
-  NONE: '#64748b',
-};
+// ★ 2026-08-10 Phase 5 — 진단·분석 응답 타입은 `components/cdp/cdp-analytics-types.ts`,
+//   표시 라벨·포맷은 `utils/cdp-display.ts`가 소유한다. 여기 다시 선언하면 곧 한쪽만 고쳐진다.
 
 // 자사몰 선택 카드 — 카드 클릭 시 해당 업체 전용 연동 모달 (가로 2열 그리드)
 type ProviderKey = 'cafe24' | 'naver' | 'godo' | 'imweb' | 'makeshop' | 'custom';
@@ -1071,39 +924,8 @@ export default function CdpSettingsPage() {
     catch { toast.error('복사 실패'); }
   };
 
-  const formatPct = (n: number) => `${(n * 100).toFixed(1)}%`;
-  const formatWon = (n: number) => `${Math.round(n).toLocaleString()}원`;
-
-  // POS ↔ CDP 격차 도넛 데이터
-  const fusionPieData = useMemo(() => {
-    if (!diagnostics) return [];
-    return [
-      { name: 'POS only (싱크/업로드/수동)', value: diagnostics.posOnlyCustomers, color: '#64748b' },
-      { name: 'CDP only (자사몰만)', value: diagnostics.cdpOnlyCustomers, color: '#06b6d4' },
-      { name: '융합 (양쪽 source)', value: diagnostics.fusedCustomers, color: '#10b981' },
-    ].filter((d) => d.value > 0);
-  }, [diagnostics]);
-
-  // 24h timeline 차트 데이터
-  const timelineChartData = useMemo(() => {
-    return timeline.map((b) => ({
-      hour: `${b.hour}시`,
-      total: b.count,
-      purchase: b.byEvent['purchase'] || 0,
-      cart: b.byEvent['cart_add'] || 0,
-      view: b.byEvent['page_view'] || 0,
-    }));
-  }, [timeline]);
-
-  // 채널 분포 PieChart
-  const channelPieData = useMemo(() => {
-    if (!channelDist) return [];
-    return channelDist.groups.map((g) => ({
-      name: CHANNEL_LABEL[g.channel] || g.channel,
-      value: g.count,
-      color: CHANNEL_COLOR[g.channel] || '#64748b',
-    }));
-  }, [channelDist]);
+  // ★ 2026-08-10 Phase 5 — 차트 파생 데이터(fusionPie·timelineChart·channelPie)는
+  //   그것을 그리는 `CdpAnalyticsPanels`가 자기 안에서 계산한다. 페이지가 들고 있을 이유가 없다.
 
   // ════════════════════════════════════════════════════════════════════
   // JSX
@@ -1292,276 +1114,23 @@ export default function CdpSettingsPage() {
 
         {/* 데이터 분석 · AI 진단 모달 (createPortal) */}
         <CdpModal open={activeModal === 'analytics'} onClose={closeModal} title="데이터 분석 · AI 진단" icon={<Sparkles className="w-4 h-4 text-violet-300" />}>
-          <div className="space-y-4">
-            {/* AI 자율 진단 — 모달 open 시 자동 로드 */}
-            <div className="p-4 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-indigo-500/15 border border-violet-400/30 rounded-xl">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
-                  <Sparkles className="w-5 h-5 text-white" />
-                </div>
-                <div className="flex-1">
-                  <div className="text-sm font-medium text-violet-100 mb-1">AI 자율 진단</div>
-                  {explanation ? (
-                    <div className="text-xs text-white/80 leading-relaxed">{explanation.topInsight}</div>
-                  ) : explainLoading ? (
-                    <div className="text-xs text-white/60 flex items-center gap-1.5">
-                      <Loader2 className="w-3 h-3 animate-spin" /> AI 분석 중 (10~20초)
-                    </div>
-                  ) : isAdmin ? (
-                    <button onClick={loadExplanation} className="text-xs text-violet-200 hover:text-violet-100 underline-offset-2 hover:underline">
-                      AI 자율 진단 시작 →
-                    </button>
-                  ) : (
-                    <div className="text-xs text-white/50">AI 진단은 회사 관리자만 가능합니다.</div>
-                  )}
-                </div>
-              </div>
-            </div>
-            {/* 자사몰 funnel */}
-            {funnel && funnel.pageViewCount > 0 ? (
-              <ChartCard title="자사몰 이벤트 Funnel (30일)" source={funnel.source} icon={<Activity className="w-4 h-4 text-emerald-300" />}>
-                <div className="space-y-2">
-                  <FunnelBar label="page_view" count={funnel.pageViewCount} max={funnel.pageViewCount} color="#6366f1" />
-                  <FunnelBar label="cart_add" count={funnel.cartAddCount} max={funnel.pageViewCount} color="#06b6d4" />
-                  <FunnelBar label="checkout_start" count={funnel.checkoutStartCount} max={funnel.pageViewCount} color="#a78bfa" />
-                  <FunnelBar label="purchase" count={funnel.purchaseCount} max={funnel.pageViewCount} color="#10b981" />
-                </div>
-                <div className="mt-3 grid grid-cols-3 gap-2 text-[10px]">
-                  <StatBox label="cart 전환율" value={formatPct(funnel.cartConversionRate)} color="text-cyan-300" />
-                  <StatBox label="구매 전환율" value={formatPct(funnel.purchaseConversionRate)} color="text-emerald-300" />
-                  <StatBox label="cart → 구매" value={formatPct(funnel.cartToPurchaseRate)} color="text-fuchsia-300" />
-                </div>
-              </ChartCard>
-            ) : (
-              <div className="p-4 bg-white/5 border border-white/10 rounded-xl text-xs text-white/50">
-                자사몰 이벤트 영역 0건 — SDK 설치 또는 webhook 영역 확인 의무.
-              </div>
-            )}
-
-            {/* 24h timeline */}
-            {timeline.length > 0 && timelineChartData.some((d) => d.total > 0) && (
-              <ChartCard title="24시간 이벤트 timeline (KST)" source="cdp_events 24h hourly bucket" icon={<Activity className="w-4 h-4 text-cyan-300" />}>
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={timelineChartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                    <XAxis dataKey="hour" stroke="rgba(255,255,255,0.5)" fontSize={10} />
-                    <YAxis stroke="rgba(255,255,255,0.5)" fontSize={10} />
-                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 }} />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                    <Bar dataKey="view" stackId="a" fill="#6366f1" name="page_view" />
-                    <Bar dataKey="cart" stackId="a" fill="#06b6d4" name="cart_add" />
-                    <Bar dataKey="purchase" stackId="a" fill="#10b981" name="purchase" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </ChartCard>
-            )}
-
-            {/* Provider별 매핑률 */}
-            {diagnostics && diagnostics.byProvider.length > 0 && (
-              <ChartCard title="자사몰별 고객 연결률" source="cdp_identity_links group by source" icon={<Database className="w-4 h-4 text-violet-300" />}>
-                <div className="space-y-2">
-                  {diagnostics.byProvider.map((p) => (
-                    <div key={p.source} className="space-y-1">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="text-white/80 font-medium">{SOURCE_LABEL[p.source] || p.source}</span>
-                        <span className="text-white/60 font-mono">
-                          {p.mappedLinks.toLocaleString()} / {p.totalLinks.toLocaleString()} ({formatPct(p.mappingRate)}) · 30일 이벤트 {p.events30d.toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full ${p.mappingRate > 0.7 ? 'bg-emerald-400' : p.mappingRate > 0.4 ? 'bg-amber-400' : 'bg-rose-400'}`}
-                          style={{ width: `${Math.max(2, p.mappingRate * 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </ChartCard>
-            )}
-
-            {/* POS ↔ CDP 격차 도넛 */}
-            {fusionPieData.length > 0 && (
-              <ChartCard title="POS ↔ CDP 융합 격차 (Source overlap)" source="customers.active_sources jsonb 분류" icon={<Users className="w-4 h-4 text-amber-300" />}>
-                <ResponsiveContainer width="100%" height={220}>
-                  <PieChart>
-                    <Pie data={fusionPieData} dataKey="value" nameKey="name" innerRadius={40} outerRadius={80} paddingAngle={2}>
-                      {fusionPieData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                    </Pie>
-                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 }} />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </ChartCard>
-            )}
-
-            {/* Webhook 신뢰성 */}
-            {diagnostics && diagnostics.webhookReliability.length > 0 && (
-              <ChartCard title="Webhook 수신 신뢰성 (30일)" source="cdp_webhook_deliveries status" icon={<AlertTriangle className="w-4 h-4 text-rose-300" />}>
-                <div className="space-y-1.5">
-                  {diagnostics.webhookReliability.map((w) => (
-                    <div key={w.source} className="grid grid-cols-12 gap-2 items-center text-[11px]">
-                      <div className="col-span-3 text-white/80 font-medium">{SOURCE_LABEL[w.source] || w.source}</div>
-                      <div className="col-span-2 text-white/60 font-mono text-right">{w.totalDeliveries.toLocaleString()}건</div>
-                      <div className="col-span-2 text-emerald-300 font-mono text-right">성공 {w.successCount}</div>
-                      <div className="col-span-2 text-rose-300 font-mono text-right">실패 {w.failedCount}</div>
-                      <div className="col-span-3 text-right font-mono">
-                        <span className={w.successRate > 0.9 ? 'text-emerald-300' : w.successRate > 0.7 ? 'text-amber-300' : 'text-rose-300'}>
-                          {formatPct(w.successRate)}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </ChartCard>
-            )}
-
-            {/* 채널 분포 */}
-            {channelDist && channelPieData.length > 0 && (
-              <ChartCard title="발송 채널 자동 분배" source="customers.preferred_channel (CT-71 unified profile)" icon={<MousePointerClick className="w-4 h-4 text-fuchsia-300" />}>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                  <ResponsiveContainer width="100%" height={200}>
-                    <PieChart>
-                      <Pie data={channelPieData} dataKey="value" nameKey="name" innerRadius={30} outerRadius={70} paddingAngle={2}>
-                        {channelPieData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                      </Pie>
-                      <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 }} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="space-y-1.5">
-                    {channelDist.groups.map((g) => (
-                      <div key={g.channel} className="flex items-center justify-between text-[11px]">
-                        <span className="text-white/80 font-medium flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: CHANNEL_COLOR[g.channel] || '#64748b' }} />
-                          {CHANNEL_LABEL[g.channel] || g.channel}
-                        </span>
-                        <span className="text-white/60 font-mono">{g.count.toLocaleString()}명</span>
-                      </div>
-                    ))}
-                    {channelDist.unreachable > 0 && (
-                      <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-white/10">
-                        <span className="text-rose-300 font-medium">발송 불가</span>
-                        <span className="text-rose-300 font-mono">{channelDist.unreachable.toLocaleString()}명</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                {channelCaps && (
-                  <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap gap-2 text-[10px]">
-                    <CapBadge label="SMS/LMS" active={channelCaps.smsLms} />
-                    <CapBadge label="알림톡" active={channelCaps.kakao} />
-                    <CapBadge label="이메일" active={channelCaps.email} />
-                    <CapBadge label="웹 푸시" active={channelCaps.webPush} />
-                    <CapBadge label="인앱" active={channelCaps.inApp} />
-                  </div>
-                )}
-              </ChartCard>
-            )}
-
-        {/* 9. AI 영향 요인 매트릭스 */}
-        {explanation && explanation.factors.length > 0 && (
-          <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
-            <div className="flex items-center gap-2 mb-3">
-              <Brain className="w-4 h-4 text-violet-300" />
-              <h2 className="text-sm font-semibold">AI 자사몰 영향 요인 분석</h2>
-              <span className="ml-auto text-[10px] text-white/40">건강도 스코어 <span className="text-violet-300 font-mono font-bold">{explanation.overallHealthScore}</span>/100</span>
-            </div>
-            <div className="space-y-1.5">
-              {explanation.factors.map((f, i) => {
-                const dirColor = f.direction === 'positive' ? 'bg-emerald-400' : f.direction === 'negative' ? 'bg-rose-400' : 'bg-amber-400';
-                const dirTextColor = f.direction === 'positive' ? 'text-emerald-300' : f.direction === 'negative' ? 'text-rose-300' : 'text-amber-300';
-                return (
-                  <div key={i} className="grid grid-cols-12 gap-2 items-center text-[11px]">
-                    <div className="col-span-3 text-white/70 font-medium">{f.label}</div>
-                    <div className="col-span-5">
-                      <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                        <div className={`h-full ${dirColor}`} style={{ width: `${f.impactScore * 100}%` }} />
-                      </div>
-                    </div>
-                    <div className={`col-span-1 text-right font-mono ${dirTextColor}`}>{(f.impactScore * 100).toFixed(0)}%</div>
-                    <div className="col-span-3 text-[10px] text-white/50 truncate" title={f.detail}>{f.detail}</div>
-                  </div>
-                );
-              })}
-            </div>
-            {explanation.recommendations.length > 0 && (
-              <div className="mt-3 space-y-1.5">
-                {explanation.recommendations.map((r, i) => (
-                  <div key={i} className="p-2 bg-violet-500/10 border border-violet-400/30 rounded text-[11px] text-violet-100">
-                    <strong>{i + 1}.</strong> {r}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-            {/* 컴퓨팅 시점 */}
-            {diagnostics && (
-              <div className="text-center text-[11px] text-white/40 pt-2">
-                마지막 진단: {new Date(diagnostics.computedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}
-                <br />
-                고객 통합 프로필은 5분 주기로 자동 재계산되고, 주문·식별 이벤트는 수신 즉시 반영됩니다
-              </div>
-            )}
-          </div>
+          {/* ★ 2026-08-10 Phase 5 — 차트·AI 진단 본문은 표시 전용이라 컴포넌트로 분리(상태는 props로만). */}
+          <CdpAnalyticsPanels
+            explanation={explanation}
+            explainLoading={explainLoading}
+            isAdmin={isAdmin}
+            onStartExplain={loadExplanation}
+            diagnostics={diagnostics}
+            funnel={funnel}
+            timeline={timeline}
+            channelDist={channelDist}
+            channelCaps={channelCaps}
+          />
         </CdpModal>
 
         {/* 활성 고객 모달 (createPortal) */}
         <CdpModal open={activeModal === 'customers'} onClose={closeModal} title="자사몰 활성 고객" icon={<Users className="w-4 h-4 text-cyan-300" />}>
-          {activeCustomers && activeCustomers.topCustomers.length > 0 ? (
-          <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
-              <Users className="w-4 h-4 text-cyan-300" />
-              <h2 className="text-sm font-semibold">자사몰 활성 Customer Top {activeCustomers.topCustomers.length}</h2>
-              <span className="ml-auto text-[10px] text-white/40">
-                30일 활성 전체 {activeCustomers.totalActiveCustomers.toLocaleString()}명 · 비회원 이벤트 {activeCustomers.anonymousEventCount.toLocaleString()}건
-              </span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead className="bg-white/5 border-b border-white/10">
-                  <tr className="text-left text-white/60">
-                    <th className="px-3 py-2 font-medium">Customer</th>
-                    <th className="px-3 py-2 font-medium text-center">primary source</th>
-                    <th className="px-3 py-2 font-medium text-center">채널</th>
-                    <th className="px-3 py-2 font-medium text-right">30일 이벤트</th>
-                    <th className="px-3 py-2 font-medium text-right">30일 매출</th>
-                    <th className="px-3 py-2 font-medium text-right">최근 활동</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {activeCustomers.topCustomers.map((c) => (
-                    <tr key={c.customerId} className="border-b border-white/5 hover:bg-white/5">
-                      <td className="px-3 py-2">
-                        <div className="text-white/80">{c.customerName || '-'}</div>
-                        <div className="text-[10px] text-white/40 font-mono">{c.customerPhone || ''} · {c.customerGrade || ''}</div>
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        {c.primarySource ? (
-                          <span className="text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-300 rounded">
-                            {SOURCE_LABEL[c.primarySource] || c.primarySource}
-                          </span>
-                        ) : '-'}
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        {c.preferredChannel ? (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: `${CHANNEL_COLOR[c.preferredChannel]}30`, color: CHANNEL_COLOR[c.preferredChannel] }}>
-                            {CHANNEL_LABEL[c.preferredChannel] || c.preferredChannel}
-                          </span>
-                        ) : '-'}
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono text-cyan-300">{c.events30d.toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right font-mono text-amber-300">{c.revenue30d > 0 ? formatWon(c.revenue30d) : '-'}</td>
-                      <td className="px-3 py-2 text-right text-[10px] text-white/50">{c.lastActivityAt ? new Date(c.lastActivityAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '-'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          ) : (
-            <div className="text-sm text-white/50 py-10 text-center">아직 자사몰 활성 고객 데이터가 없습니다.</div>
-          )}
+          <CdpActiveCustomersTable data={activeCustomers} />
         </CdpModal>
 
         {/* 연동 모달 (createPortal) — 자사몰 카드 선택 시 해당 업체 전용 모달 */}
@@ -2579,52 +2148,7 @@ function CdpModal({ open, onClose, title, icon, children }: { open: boolean; onC
   );
 }
 
-function ChartCard({ title, source, icon, children }: { title: string; source?: string; icon: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-white/10 flex items-center gap-1.5">
-        {icon}
-        <span className="text-sm font-semibold">{title}</span>
-      </div>
-      <div className="p-4">
-        {children}
-        {source && (<div className="text-[10px] text-white/30 italic mt-2 truncate" title={source}>Data source — {source}</div>)}
-      </div>
-    </div>
-  );
-}
-
-function FunnelBar({ label, count, max, color }: { label: string; count: number; max: number; color: string }) {
-  const pct = max > 0 ? (count / max) * 100 : 0;
-  return (
-    <div>
-      <div className="flex items-center justify-between text-[11px] mb-0.5">
-        <span className="text-white/70 font-medium">{label}</span>
-        <span className="text-white/60 font-mono">{count.toLocaleString()} ({pct.toFixed(1)}%)</span>
-      </div>
-      <div className="h-3 bg-white/10 rounded overflow-hidden">
-        <div className="h-full transition-all" style={{ width: `${Math.max(2, pct)}%`, backgroundColor: color }} />
-      </div>
-    </div>
-  );
-}
-
-function StatBox({ label, value, color }: { label: string; value: string; color: string }) {
-  return (
-    <div className="p-2 bg-white/5 rounded text-center">
-      <div className="text-white/40">{label}</div>
-      <div className={`font-mono font-bold ${color}`}>{value}</div>
-    </div>
-  );
-}
-
-function CapBadge({ label, active }: { label: string; active: boolean }) {
-  return (
-    <span className={`px-2 py-0.5 rounded font-medium ${active ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/5 text-white/40'}`}>
-      {label} {active ? '✓' : '·'}
-    </span>
-  );
-}
+// ChartCard·FunnelBar·StatBox·CapBadge = 분석 패널 전용이라 CdpAnalyticsPanels로 함께 옮겼다(★2026-08-10 Phase 5).
 
 function GuideStep({ n, children }: { n: number; children: React.ReactNode }) {
   return (
