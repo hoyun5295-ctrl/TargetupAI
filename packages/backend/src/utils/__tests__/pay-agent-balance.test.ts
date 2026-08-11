@@ -13,9 +13,55 @@
  *  - 입력 행 순서와 무관하게 같은 결과 / custIds 순서 보존 + 전 ID 반환(조용한 누락 방지)
  */
 import { describe, it, expect } from 'vitest';
-import { pickLedgerBalances, PayLedgerRow, parseAgentLedgerFields, parseAgentLedgerPatch, parseAgentCharges, toChargeRow, matchHealWindow } from '../pay-stats';
+import { pickLedgerBalances, PayLedgerRow, parseAgentLedgerFields, parseAgentLedgerPatch, parseAgentCharges, toChargeRow, matchHealWindow, buildChargeFilterSql } from '../pay-stats';
 
 const row = (o: Partial<PayLedgerRow>): PayLedgerRow => o;
+
+/**
+ * ★ 2026-08-11 충전 내역 열람 범위 계약 (고객사 화면 신설분)
+ *
+ * 고객사가 자기 발송ID의 충전 원장을 직접 보게 되면서, 범위 조건이 빠지는 순간
+ * **전 고객사 충전 내역이 노출**된다. 그 한 지점을 계약으로 고정한다.
+ */
+describe('buildChargeFilterSql — 열람 범위', () => {
+  it('agentSendIds 미지정 = 범위 제한 없음 (슈퍼관리자 이력 경로)', () => {
+    const { where, params } = buildChargeFilterSql({});
+    expect(where).toBe('');
+    expect(params).toEqual([]);
+  });
+
+  it('⛔ 빈 배열 = 조건 없음이 아니라 1 = 0 — 소유 ID 0건일 때 원장 전체가 열리면 안 된다', () => {
+    const { where, params } = buildChargeFilterSql({ agentSendIds: [] });
+    expect(where).toBe('WHERE 1 = 0');
+    expect(params).toEqual([]);
+  });
+
+  it('공백·빈 문자열만 든 배열도 1 = 0 (걸러내고 나면 0건)', () => {
+    const { where } = buildChargeFilterSql({ agentSendIds: ['', '   '] });
+    expect(where).toBe('WHERE 1 = 0');
+  });
+
+  it('소유 ID 목록 = StoreId IN (…) + 값 바인딩(문자열 삽입 금지)', () => {
+    const { where, params } = buildChargeFilterSql({ agentSendIds: ['C0130', ' D0078 ', 'D0079'] });
+    expect(where).toBe('WHERE StoreId IN (?,?,?)');
+    expect(params).toEqual(['C0130', 'D0078', 'D0079']);
+  });
+
+  it('단일 agentSendId와 범위는 함께 걸린다(AND) — 둘 다 좁히는 조건', () => {
+    const { where, params } = buildChargeFilterSql({ agentSendId: 'D0078', agentSendIds: ['C0130', 'D0078'] });
+    expect(where).toBe('WHERE StoreId = ? AND StoreId IN (?,?)');
+    expect(params).toEqual(['D0078', 'C0130', 'D0078']);
+  });
+
+  it('기간 필터와 함께 써도 범위 조건이 유지된다 — 목록·건수가 같은 WHERE를 쓴다', () => {
+    const f = { agentSendIds: ['C0130'], startDate: '2026-08-01', endDate: '2026-08-11' };
+    const { where, params } = buildChargeFilterSql(f);
+    expect(where).toBe('WHERE StoreId IN (?) AND FillDtTm >= ? AND FillDtTm <= ?');
+    expect(params).toEqual(['C0130', '2026-08-01 00:00:00', '2026-08-11 23:59:59']);
+    // 건수 쿼리도 같은 함수를 쓰므로 결과가 동일해야 한다(페이징 어긋남 방지)
+    expect(buildChargeFilterSql(f)).toEqual({ where, params });
+  });
+});
 
 describe('pickLedgerBalances', () => {
   it('원장에 계정이 없으면 rem_amt null(no_row) — 0원 합성 금지', () => {

@@ -27,7 +27,7 @@ import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsChannel
 import {
   queryPayAgentStatsAllCompanies, queryPayAgentStoreBreakdown, validateStatsDateRange, isPayStatsConfigured,
   parseAgentCharges, insertAgentCharges, getAgentChargeStatus, listAgentCharges, countAgentCharges, latestAgentChargeAt, findGatewayCharges, matchHealWindow,
-  getAgentCustNameMap,
+  getAgentCustNameMap, queryLedgerBalancesByIds,
 } from '../utils/pay-stats';
 // ★ 2026-07-27 §5-4: 고객사 충전 요청 접수 원장 (요청 → 직원 1클릭 실행 → 반영 확인 후 완료)
 import { parseRejectReason } from '../utils/agent-charge-orders';
@@ -3012,6 +3012,43 @@ router.get('/agent-charges/targets', authenticate, requireSuperAdmin, async (req
     console.error('에이전트 충전 대상 조회 실패:', error);
     if (handleDbMigrationError(error, res, 'company_agent_ids')) return;
     res.status(500).json({ error: '충전 대상 조회 실패' });
+  }
+});
+
+/**
+ * 발송ID별 현재 잔액 — 충전 폼 표시용. (★ 2026-08-11 접수: 서수란)
+ *
+ * "충전 시 발송ID를 고르면 그 계정의 현재 잔액을 보고 충전·차감할 수 있으면 좋겠다.
+ *  엔진에 반영된 잔액을 볼 수 없어 080 사전 차감·환불 때마다 엔진을 따로 확인해야 한다."
+ *
+ * 소스는 계정 원장 `RSRM_SalesMst.RemAmt` 실값(저장 없음 — 6원칙 ③ 이중 진실 금지).
+ * 폼에서 고른 ID만 그때그때 읽는다 — 잔액은 발송이 나가는 대로 깎이므로 화면 진입 시점 값을
+ * 들고 있으면 차감 판단 근거로 낡는다.
+ */
+router.get('/agent-charges/balances', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const raw = String(req.query.ids || '');
+    // 중복 제거 후 상한 — 폼 최대 50행과 같은 수. pickLedgerBalances는 받은 순서·건수를 그대로 돌려주므로
+    // 중복을 넘기면 같은 ID가 여러 줄로 돌아온다.
+    const ids = Array.from(new Set(raw.split(',').map((v) => v.trim()).filter(Boolean))).slice(0, 50);
+    if (ids.length === 0) return res.json({ balances: [] });
+
+    // ⛔ 못 읽은 것을 빈 배열로 내리지 않는다(★ 2026-08-11 Codex 1R-1) — 화면이 "잔액 없음"처럼 읽는다.
+    if (!isPayStatsConfigured()) {
+      return res.status(503).json({ error: '잔액을 불러오지 못했습니다.', code: 'PAY_LEDGER_UNAVAILABLE' });
+    }
+    const rows = await queryLedgerBalancesByIds(ids);
+    return res.json({
+      balances: rows.map((b) => ({
+        agentSendId: b.agent_send_id,
+        // null = 미확정. 0원으로 합성하면 있는 돈을 없다고 보여줘 불필요한 충전을 부른다(0727 C0130 전례).
+        remAmt: b.rem_amt,
+        unknownReason: b.unknown_reason,
+      })),
+    });
+  } catch (error: any) {
+    console.error('에이전트 잔액 조회 실패:', error);
+    return res.status(503).json({ error: '잔액을 불러오지 못했습니다.', code: 'PAY_LEDGER_UNAVAILABLE' });
   }
 });
 

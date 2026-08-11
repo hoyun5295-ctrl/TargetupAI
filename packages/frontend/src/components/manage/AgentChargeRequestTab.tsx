@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { formatAgentIdLabel, formatAgentBalance } from '../../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스
+import { formatAgentIdLabel, formatAgentBalance, formatAgentChargeAmount } from '../../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스
 
 /**
  * ★ 2026-07-27 §5-4 — 에이전트 충전 요청 (고객사 화면)
@@ -22,6 +22,20 @@ interface OrderRow {
   status: string;
   rejectReason: string | null;
   createdAt: string;
+}
+
+/**
+ * ★ 2026-08-11 충전 내역(게이트웨이 원장) 행 — 신청 여부와 무관한 **실제 지갑 변동**이다.
+ * 담당자가 계좌이체 확인 후 직접 넣은 충전과 상계 차감(음수)이 여기에 들어온다.
+ */
+interface LedgerRow {
+  seqNo: number;
+  agentSendId: string;
+  custName?: string | null;
+  amount: number;
+  filledAt: string;
+  applied: boolean;
+  appliedAt: string | null;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -65,6 +79,14 @@ export default function AgentChargeRequestTab() {
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
 
+  // ★ 2026-08-11 충전 내역 — 요청 이력과 별개 원장이라 페이징 상태도 따로 둔다.
+  const [ledger, setLedger] = useState<LedgerRow[]>([]);
+  const [ledgerPage, setLedgerPage] = useState(1);
+  const [ledgerTotalPages, setLedgerTotalPages] = useState(1);
+  const [ledgerTotal, setLedgerTotal] = useState(0);
+  const [ledgerLoading, setLedgerLoading] = useState(true);
+  const [ledgerError, setLedgerError] = useState('');
+
   const token = () => localStorage.getItem('token');
   const auth = () => ({ Authorization: `Bearer ${token()}` });
 
@@ -96,9 +118,41 @@ export default function AgentChargeRequestTab() {
     } catch { /* 이력 로드 실패 시 기존 유지 */ }
   };
 
+  /**
+   * ⛔ 조회 실패를 "내역 없음"으로 보여주지 않는다(★ 2026-08-11 Codex 1R-1).
+   * 충전을 했는데 화면이 "아직 충전 내역이 없습니다"를 띄우면 고객사는 충전이 안 된 것으로 읽는다.
+   */
+  const loadLedger = async (p = ledgerPage) => {
+    setLedgerLoading(true);
+    try {
+      const res = await fetch(`/api/agent-charge-orders/ledger?page=${p}&limit=${PAGE_SIZE}`, { headers: auth() });
+      if (!res.ok) {
+        setLedger([]);
+        setLedgerTotal(0);
+        setLedgerTotalPages(1);
+        setLedgerError('충전 내역을 불러오지 못했습니다. 잠시 후 새로고침해 주세요.');
+        return;
+      }
+      const d = await res.json();
+      setLedger(Array.isArray(d.rows) ? d.rows : []);
+      setLedgerTotal(Number(d.total) || 0);
+      setLedgerTotalPages(Math.max(1, Number(d.totalPages) || 1));
+      setLedgerPage(p);
+      setLedgerError('');
+    } catch {
+      setLedger([]);
+      setLedgerTotal(0);
+      setLedgerTotalPages(1);
+      setLedgerError('충전 내역을 불러오지 못했습니다. 잠시 후 새로고침해 주세요.');
+    } finally {
+      setLedgerLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadTargets();
     loadOrders(1);
+    loadLedger(1);
   }, []);
 
   const balanceOf = useMemo(() => {
@@ -155,21 +209,24 @@ export default function AgentChargeRequestTab() {
     );
   }
 
-  if (sendIds.length === 0) {
-    return (
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-10 text-center">
-        <p className="text-sm font-medium text-slate-700">선불로 지정된 발송ID가 없습니다.</p>
-        <p className="mt-1.5 text-xs text-slate-400">
-          선불 충전을 이용하시려면 담당자에게 발송ID 선불 지정을 요청해 주세요.
-        </p>
-      </div>
-    );
-  }
+  // ★ 2026-08-11 Codex 1R-3 — **선불 지정 여부로 화면 전체를 막지 않는다.**
+  //   지금 선불로 지정된 발송ID가 없어도 과거에 담당자가 넣은 충전·차감 기록은 남아 있고,
+  //   그것을 보여주는 것이 이번 접수의 요구다. 잠그는 것은 요청 폼과 잔액 카드까지다.
+  const canRequest = sendIds.length > 0;
 
   return (
     <div className="space-y-4">
+      {!canRequest && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 text-center">
+          <p className="text-sm font-medium text-slate-700">선불로 지정된 발송ID가 없습니다.</p>
+          <p className="mt-1.5 text-xs text-slate-400">
+            선불 충전을 이용하시려면 담당자에게 발송ID 선불 지정을 요청해 주세요. 지난 충전 내역은 아래에서 보실 수 있습니다.
+          </p>
+        </div>
+      )}
+
       {/* 잔액 — 게이트웨이 실값. 기준일을 반드시 함께 보여준다(오래된 값을 현재 잔액으로 읽지 않도록) */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+      <div className={`bg-white rounded-2xl border border-slate-200 shadow-sm p-5 ${canRequest ? '' : 'hidden'}`}>
         <h3 className="text-sm font-semibold text-slate-800">발송ID 잔액</h3>
         <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {sendIds.map((id) => {
@@ -191,8 +248,8 @@ export default function AgentChargeRequestTab() {
         </p>
       </div>
 
-      {/* 요청 폼 */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+      {/* 요청 폼 — 선불 지정된 발송ID가 있을 때만 (충전 내역·요청 이력은 아래에 그대로 남는다) */}
+      <div className={`bg-white rounded-2xl border border-slate-200 shadow-sm ${canRequest ? '' : 'hidden'}`}>
         <div className="px-5 py-4 border-b border-slate-100">
           <h3 className="text-sm font-semibold text-slate-800">충전 요청</h3>
           <p className="mt-0.5 text-xs text-slate-400">
@@ -275,6 +332,100 @@ export default function AgentChargeRequestTab() {
             {submitting ? '접수 중...' : '충전 요청'}
           </button>
         </div>
+      </div>
+
+      {/* ★ 2026-08-11 충전 내역 — 신청을 거치지 않은 담당자 직접 충전·차감까지 들어오는 실제 지갑 원장.
+          아래 "요청 이력"(신청 원장)과 다른 표다. 접수 = "관리자가 충전·차감한 내역이 남아야 한다". */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800">
+              충전 내역
+              {ledgerTotal > 0 && <span className="ml-1.5 text-xs font-normal text-slate-400">총 {ledgerTotal.toLocaleString()}건</span>}
+            </h3>
+            <p className="mt-0.5 text-xs text-slate-400">
+              담당자가 처리한 충전과 차감이 모두 표시됩니다. 요청을 거치지 않은 입금 확인 충전도 여기에 남습니다.
+            </p>
+          </div>
+          <button type="button" onClick={() => loadLedger(ledgerPage)} className="text-xs text-slate-400 hover:text-slate-600 shrink-0">
+            새로고침
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
+                <th className="px-5 py-2.5 font-medium">일시</th>
+                <th className="px-3 py-2.5 font-medium">발송ID</th>
+                <th className="px-3 py-2.5 font-medium">구분</th>
+                <th className="px-3 py-2.5 font-medium text-right">금액</th>
+                <th className="px-5 py-2.5 font-medium">반영</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ledger.map((l) => {
+                const isDeduct = l.amount < 0;
+                return (
+                  <tr key={l.seqNo} className="border-b border-slate-50">
+                    <td className="px-5 py-2.5 text-xs text-slate-400 whitespace-nowrap">{String(l.filledAt).slice(0, 16)}</td>
+                    <td className="px-3 py-2.5 font-mono text-xs text-slate-600">{idLabel(l.agentSendId, l.custName)}</td>
+                    <td className="px-3 py-2.5">
+                      <span className={`inline-flex px-2 py-0.5 rounded-md text-xs font-medium ring-1 ${
+                        isDeduct ? 'bg-rose-50 text-rose-600 ring-rose-100' : 'bg-emerald-50 text-emerald-700 ring-emerald-100'
+                      }`}>
+                        {isDeduct ? '차감' : '충전'}
+                      </span>
+                    </td>
+                    <td className={`px-3 py-2.5 text-right tabular-nums font-medium ${isDeduct ? 'text-rose-600' : 'text-slate-800'}`}>
+                      {formatAgentChargeAmount(l.amount)}
+                    </td>
+                    <td className="px-5 py-2.5 text-xs whitespace-nowrap">
+                      {/* 반영 완료(게이트웨이가 잔액에 실제로 더한 상태)만 완료로 본다 — 등록 자체는 완료가 아니다. */}
+                      {l.applied
+                        ? <span className="text-slate-500">반영 완료{l.appliedAt ? ` · ${String(l.appliedAt).slice(5, 16)}` : ''}</span>
+                        : <span className="text-amber-600">반영 대기</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+              {/* ⛔ "없음"과 "못 읽음"을 같은 문구로 내리지 않는다 — 충전했는데 "내역 없음"이 뜨면 안 된 것으로 읽는다. */}
+              {ledger.length === 0 && (
+                <tr>
+                  <td colSpan={5} className={`px-5 py-8 text-center text-xs ${ledgerError ? 'text-rose-500' : 'text-slate-300'}`}>
+                    {ledgerError || (ledgerLoading ? '불러오는 중...' : '아직 충전 내역이 없습니다.')}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {ledgerTotalPages > 1 && (
+          <div className="px-5 py-3 flex items-center justify-center gap-2 border-t border-slate-50">
+            <button
+              type="button"
+              disabled={ledgerPage <= 1}
+              onClick={() => loadLedger(ledgerPage - 1)}
+              className="px-3 py-1 rounded-lg border border-slate-200 text-xs disabled:opacity-30"
+            >
+              이전
+            </button>
+            <span className="text-xs text-slate-500 tabular-nums">{ledgerPage} / {ledgerTotalPages}</span>
+            <button
+              type="button"
+              disabled={ledgerPage >= ledgerTotalPages}
+              onClick={() => loadLedger(ledgerPage + 1)}
+              className="px-3 py-1 rounded-lg border border-slate-200 text-xs disabled:opacity-30"
+            >
+              다음
+            </button>
+          </div>
+        )}
+
+        <p className="px-5 pb-4 text-[11px] italic text-slate-300">
+          Data source — 발송 게이트웨이 충전 원장 실시간 조회 (저장 없음)
+        </p>
       </div>
 
       {/* 요청 이력 */}

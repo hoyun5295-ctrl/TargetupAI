@@ -1351,18 +1351,38 @@ export interface AgentChargeListFilter {
   offset?: number;
   /** 발송ID 정확 일치 (화면 검색은 프론트 셀렉트에서 고른 값이라 정확 일치로 충분) */
   agentSendId?: string;
+  /**
+   * ★ 2026-08-11 열람 범위 제한 — 이 목록에 든 발송ID만 본다(고객사 화면용).
+   *
+   * ⛔ **빈 배열은 조건 없음이 아니라 "볼 수 있는 것이 없음"이다.** 조건을 빼고 넘기면
+   * 원장 전체(전 고객사 충전 내역)가 열린다. 그래서 빈 배열은 `1 = 0`으로 고정한다.
+   * 지정하지 않을 때만(undefined) 범위 제한이 없다 — 슈퍼관리자 이력이 그 경로다.
+   */
+  agentSendIds?: string[];
   /** YYYY-MM-DD (그날 00:00:00부터) */
   startDate?: string;
   /** YYYY-MM-DD (그날 23:59:59까지) */
   endDate?: string;
 }
 
-/** (순수) 필터 → WHERE 조각. 목록·건수가 **같은 조건**을 쓰도록 한 곳에서 만든다. */
-function buildChargeFilterSql(f: AgentChargeListFilter): { where: string; params: any[] } {
+/**
+ * (순수) 필터 → WHERE 조각. 목록·건수가 **같은 조건**을 쓰도록 한 곳에서 만든다.
+ * 열람 범위(`agentSendIds`)도 여기 한 곳에서만 걸린다 — 목록과 건수가 갈리면 페이징이 어긋난다.
+ */
+export function buildChargeFilterSql(f: AgentChargeListFilter): { where: string; params: any[] } {
   const conds: string[] = [];
   const params: any[] = [];
   const sendId = String(f.agentSendId || '').trim();
   if (sendId) { conds.push('StoreId = ?'); params.push(sendId); }
+  if (Array.isArray(f.agentSendIds)) {
+    const ids = f.agentSendIds.map((v) => String(v ?? '').trim()).filter(Boolean);
+    if (ids.length === 0) {
+      conds.push('1 = 0'); // 볼 수 있는 발송ID 0건 = 빈 목록. 조건 생략 시 원장 전체 노출.
+    } else {
+      conds.push(`StoreId IN (${ids.map(() => '?').join(',')})`);
+      params.push(...ids);
+    }
+  }
   if (f.startDate && DATE_ONLY.test(String(f.startDate))) { conds.push('FillDtTm >= ?'); params.push(`${f.startDate} 00:00:00`); }
   if (f.endDate && DATE_ONLY.test(String(f.endDate))) { conds.push('FillDtTm <= ?'); params.push(`${f.endDate} 23:59:59`); }
   return { where: conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '', params };
@@ -1417,6 +1437,47 @@ export async function listAgentCharges(filter: number | AgentChargeListFilter = 
   return (rows as any[]).map(toChargeRow);
 }
 
+/**
+ * 발송ID 목록의 게이트웨이 잔액 — 조회 코어. (★ 2026-08-11 `queryPayAgentBalances`에서 분리, 동작 무변경)
+ *
+ * 분리 이유: 슈퍼관리자 충전 폼은 "지금 고른 발송ID의 잔액"이 필요한데, 회사 축·선불 한정으로 묶인
+ * `queryPayAgentBalances`로는 그 질문에 답할 수 없다. 회사 판정과 원장 조회를 갈라 둔다 —
+ * 잔액 선택 규칙(대표 행·미확정 처리)은 여전히 `pickLedgerBalances` 한 곳이 소유한다.
+ */
+export async function queryLedgerBalancesByIds(agentSendIds: string[]): Promise<PayAgentBalance[]> {
+  const pool = getPool();
+  // ⛔ 미설정·조회 실패를 빈 배열로 삼키지 않는다(★ 2026-08-11 Codex 1R-1). 빈 배열은 "그 계정에 잔액 행이
+  //    없다"는 뜻이고, 못 읽은 것과 뜻이 다르다. 못 읽은 것을 "없다"로 내리면 화면이 정상처럼 보이면서
+  //    충전·차감 판단 근거가 된다(§11 "멈춘 데이터를 화면이 숨겼다"와 같은 계열). 삼키는 것은 호출부의 선택이다.
+  if (!pool) throw new Error('PAY_STATS_DB_NOT_CONFIGURED');
+  const custIds = (agentSendIds || []).map((v) => String(v ?? '').trim()).filter(Boolean);
+  if (custIds.length === 0) return [];
+
+  // 계정 원장 전 행을 가져와 대표 행 판정은 순수 함수(pickLedgerBalances)가 한다 —
+  // SQL에서 StoreId=CustId로 걸러버리면 "대표 행이 없는 계정"과 "계정 자체가 없는 경우"를 구분할 수 없다.
+  const ph = custIds.map(() => '?').join(',');
+  const [rows] = await pool.query(
+    `SELECT CustId, StoreId, RemAmt, SeqNo FROM RSRM_SalesMst WHERE CustId IN (${ph})`,
+    custIds,
+  );
+  const picked = pickLedgerBalances(custIds, rows as PayLedgerRow[]);
+  // 미확정은 조용히 넘기지 않는다 — 원장 구조가 예상과 다른 계정(대표 행 없음 등)을 운영이 알아야 한다.
+  const unknown = picked.filter((p) => p.unknown_reason);
+  if (unknown.length > 0) {
+    console.log(
+      `[pay-stats] 잔액 미확정 ${unknown.length}건: ${unknown.map((u) => `${u.agent_send_id}(${u.unknown_reason})`).join(', ')}`,
+    );
+  }
+  return picked;
+}
+
+/**
+ * 회사의 **선불 지정** 발송ID 잔액 — 고객사 대시보드·충전 요청 탭이 쓰는 회사 축 판(시그니처·동작 무변경).
+ *
+ * 실패를 삼켜 빈 배열을 내는 것은 **이 래퍼의 계약**이다. 소비처 두 곳(대시보드 잔액 블록·요청 탭 잔액 카드)이
+ * "빈 배열 = 블록 미노출"로 동작하고, 잔액을 못 읽었다고 대시보드나 충전 요청 접수를 막지 않기로 이미 정해져 있다.
+ * 새 소비처는 이 래퍼가 아니라 위 코어를 직접 불러 실패를 받아야 한다.
+ */
 export async function queryPayAgentBalances(companyId: string): Promise<PayAgentBalance[]> {
   const pool = getPool();
   if (!pool) return [];
@@ -1429,22 +1490,7 @@ export async function queryPayAgentBalances(companyId: string): Promise<PayAgent
   if (custIds.length === 0) return [];
 
   try {
-    // 계정 원장 전 행을 가져와 대표 행 판정은 순수 함수(pickLedgerBalances)가 한다 —
-    // SQL에서 StoreId=CustId로 걸러버리면 "대표 행이 없는 계정"과 "계정 자체가 없는 경우"를 구분할 수 없다.
-    const ph = custIds.map(() => '?').join(',');
-    const [rows] = await pool.query(
-      `SELECT CustId, StoreId, RemAmt, SeqNo FROM RSRM_SalesMst WHERE CustId IN (${ph})`,
-      custIds,
-    );
-    const picked = pickLedgerBalances(custIds, rows as PayLedgerRow[]);
-    // 미확정은 조용히 넘기지 않는다 — 원장 구조가 예상과 다른 계정(대표 행 없음 등)을 운영이 알아야 한다.
-    const unknown = picked.filter((p) => p.unknown_reason);
-    if (unknown.length > 0) {
-      console.log(
-        `[pay-stats] 잔액 미확정 ${unknown.length}건: ${unknown.map((u) => `${u.agent_send_id}(${u.unknown_reason})`).join(', ')}`,
-      );
-    }
-    return picked;
+    return await queryLedgerBalancesByIds(custIds);
   } catch (err: any) {
     console.log('[pay-stats] 잔액 조회 실패(미노출 폴백):', err?.message || err);
     return [];

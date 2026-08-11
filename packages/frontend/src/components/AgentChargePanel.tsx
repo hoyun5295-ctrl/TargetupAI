@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import SearchableSelect from './SearchableSelect'; // ★ 2026-07-26 발송ID 검색(목록이 283개라 셀렉트만으론 못 찾는다)
-import { formatAgentIdLabel } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스
+import { formatAgentIdLabel, formatAgentBalance, formatAgentChargeAmount } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스
 
 /**
  * ★ 2026-07-24 §5-3 — 에이전트 충전 실행 패널 (슈퍼관리자 · 충전 관리 탭)
@@ -75,6 +75,16 @@ export default function AgentChargePanel() {
   const [linkedOrderIds, setLinkedOrderIds] = useState<string[]>([]);
   const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  // ★ 2026-08-11 접수(서수란) — 발송ID별 현재 잔액. 폼에서 고른 ID와 방금 등록한 ID만 그때그때 읽는다.
+  //   저장하지 않는다(6원칙 ③ 이중 진실 금지). 잔액은 발송이 나가는 대로 깎이므로
+  //   화면 진입 시점 값을 들고 있으면 차감 판단 근거로 낡는다.
+  //   status = loading(조회 중) / ok(읽은 값) / error(못 읽음). ★ 2026-08-11 Codex 1R-2 —
+  //   **못 읽었을 때 옛 값을 그대로 두지 않는다.** 충전 직후 갱신이 실패하면 반영 전 잔액이
+  //   "반영 완료" 옆에 붙어 증액된 잔액처럼 읽힌다. 갱신 시작 시점에 먼저 비운다.
+  const [balances, setBalances] = useState<Record<string, { status: 'loading' | 'ok' | 'error'; remAmt: number | null; unknownReason: string | null }>>({});
+  // 발송ID별 최신 요청 번호 — 늦게 도착한 응답이 새 값을 덮지 않게(요청 순서 역전 차단).
+  const balanceGenRef = useRef<Record<string, number>>({});
+  const balanceSeqRef = useRef(0);
 
   const token = () => localStorage.getItem('token');
 
@@ -111,6 +121,54 @@ export default function AgentChargePanel() {
       }
     } catch { /* 이력 로드 실패 시 기존 유지 */ }
     finally { setHistLoading(false); }
+  };
+
+  /**
+   * ★ 2026-08-11 지정한 발송ID들의 현재 잔액을 읽는다. 실패해도 충전 흐름은 막지 않되,
+   * **실패를 숫자로 감추지 않는다** — 못 읽은 ID는 error로 두고 화면이 그렇게 말한다.
+   */
+  const loadBalances = async (ids: string[]) => {
+    const uniq = Array.from(new Set(ids.map((v) => String(v || '').trim()).filter(Boolean)));
+    if (uniq.length === 0) return;
+    const seq = ++balanceSeqRef.current;
+    uniq.forEach((id) => { balanceGenRef.current[id] = seq; });
+    /** 이 ID에 대해 내가 아직 최신 요청인가 — 늦은 응답이 새 값을 덮는 것을 막는다. */
+    const mine = (id: string) => balanceGenRef.current[id] === seq;
+    // 조회 시작 = 옛 값 무효화. 갱신 중에 이전 잔액이 보이면 그것이 현재 값으로 읽힌다.
+    setBalances((prev) => {
+      const next = { ...prev };
+      uniq.forEach((id) => { next[id] = { status: 'loading', remAmt: null, unknownReason: null }; });
+      return next;
+    });
+    const markError = () => setBalances((prev) => {
+      const next = { ...prev };
+      uniq.filter(mine).forEach((id) => { next[id] = { status: 'error', remAmt: null, unknownReason: null }; });
+      return next;
+    });
+    try {
+      const res = await fetch(`/api/admin/agent-charges/balances?ids=${encodeURIComponent(uniq.join(','))}`, { headers: { Authorization: `Bearer ${token()}` } });
+      if (!res.ok) { markError(); return; }
+      const d = await res.json();
+      const got = new Map<string, any>();
+      (Array.isArray(d.balances) ? d.balances : []).forEach((b: any) => {
+        const id = String(b?.agentSendId || '').trim();
+        if (id) got.set(id, b);
+      });
+      setBalances((prev) => {
+        const next = { ...prev };
+        uniq.filter(mine).forEach((id) => {
+          const b = got.get(id);
+          // 응답에 빠진 ID = 못 읽은 것. 조회 성공으로 치면 '-'로 조용히 사라진다.
+          if (!b) { next[id] = { status: 'error', remAmt: null, unknownReason: null }; return; }
+          // remAmt null = 미확정. 0으로 합성하지 않는다 — 있는 돈을 없다고 보여주면 불필요한 충전을 부른다.
+          const v = b?.remAmt;
+          next[id] = { status: 'ok', remAmt: v === null || v === undefined ? null : Number(v), unknownReason: b?.unknownReason ?? null };
+        });
+        return next;
+      });
+    } catch {
+      markError();
+    }
   };
 
   // ★ 2026-07-27 §5-4 — 접수 대기 요청 목록
@@ -166,6 +224,16 @@ export default function AgentChargePanel() {
     return () => { if (pollTimer.current) clearInterval(pollTimer.current); };
   }, []);
 
+  // ★ 2026-08-11 폼에서 고른 발송ID가 바뀔 때만 잔액을 다시 읽는다.
+  //   금액 타이핑마다 조회하지 않도록 의존값을 ID 문자열로 좁힌다.
+  const selectedIdsKey = useMemo(
+    () => Array.from(new Set(rows.map((r) => r.agentSendId).filter(Boolean))).join(','),
+    [rows]
+  );
+  useEffect(() => {
+    if (selectedIdsKey) loadBalances(selectedIdsKey.split(','));
+  }, [selectedIdsKey]);
+
   const companies = useMemo(() => {
     const m = new Map<string, string>();
     targets.forEach((t) => m.set(t.company_id, t.company_name));
@@ -197,11 +265,30 @@ export default function AgentChargePanel() {
   const idLabel = (sendId: string, custName?: string | null) =>
     formatAgentIdLabel(sendId, custName || custNameById.get(sendId) || null);
 
+  /**
+   * ★ 2026-08-11 표시용 잔액 문자열 — 미조회 = null(자리 비움).
+   * 숫자가 나오는 경우는 **방금 읽어 온 값 하나뿐**이다. 조회 중·조회 실패·미확정은 전부 글자로 말한다.
+   */
+  const balanceText = (sendId: string): string | null => {
+    const b = balances[sendId];
+    if (!b) return null;
+    if (b.status === 'loading') return '조회 중...';
+    if (b.status === 'error') return '조회 실패';
+    return b.remAmt === null ? '잔액 확인 불가' : `${formatAgentBalance(b.remAmt)}원`;
+  };
+
+  /** 잔액이 실제 숫자로 확정된 상태인가 — "반영 완료" 옆에 붙일 값은 이것만이다. */
+  const hasConfirmedBalance = (sendId: string) => {
+    const b = balances[sendId];
+    return !!b && b.status === 'ok' && b.remAmt !== null;
+  };
+
   const stopPolling = () => {
     if (pollTimer.current) { clearInterval(pollTimer.current); pollTimer.current = null; }
   };
 
-  const startPolling = (requestId: string, seqNos: number[]) => {
+  // sendIds = 반영 완료 시 잔액을 다시 읽을 대상(★ 2026-08-11). 등록 후 폼은 비워지므로 여기서 들고 간다.
+  const startPolling = (requestId: string, seqNos: number[], sendIds: string[] = []) => {
     stopPolling();
     const myBatch = ++pollBatchRef.current;
     currentPollReqRef.current = requestId;
@@ -225,6 +312,8 @@ export default function AgentChargePanel() {
             stopPolling();
             setPollNote('전건 반영 완료.');
             loadHistory();
+            // 반영이 끝난 뒤의 잔액 — "충전완료 후 잔액도 확인하고 싶다"(접수)에 해당. 반영 전 값은 아직 증액 전이라 의미가 없다.
+            loadBalances(sendIds);
             return;
           }
         }
@@ -314,7 +403,7 @@ export default function AgentChargePanel() {
               setPollNote('다른 배치의 반영 확인이 진행 중 — 이 요청은 중복 충전이 차단됐고, 상태는 아래 이력에서 확인하세요.');
             } else {
               setRegistered(reg);
-              startPolling(String(d.requestId), reg.map((r) => r.seqNo));
+              startPolling(String(d.requestId), reg.map((r) => r.seqNo), reg.map((r) => r.agentSendId));
               setPollNote('이미 접수된 요청 — 중복 충전은 차단됐고, 반영 상태를 이어서 확인합니다.');
             }
           } else {
@@ -322,7 +411,7 @@ export default function AgentChargePanel() {
           }
         } else if (d.requestId && reg.length > 0) {
           setRegistered(reg);
-          startPolling(String(d.requestId), reg.map((r) => r.seqNo));
+          startPolling(String(d.requestId), reg.map((r) => r.seqNo), reg.map((r) => r.agentSendId));
         }
         loadHistory();
       }
@@ -377,6 +466,8 @@ export default function AgentChargePanel() {
             <h2 className="text-lg font-semibold">에이전트 충전 실행</h2>
             <p className="text-xs text-gray-400 mt-0.5">
               발송ID(게이트웨이) 지갑 충전 — 음수 입력 = 상계 차감. 반영 완료 표시 전까지는 성공이 아닙니다.
+              {/* ★ 2026-08-11 잔액은 발송이 나가는 동안 계속 깎인다. 정산 근거가 아니라 판단 참고값임을 밝힌다. */}
+              {' '}잔액은 발송이 나가는 대로 바뀌는 표시 시점 값입니다.
             </p>
           </div>
           <select
@@ -464,7 +555,7 @@ export default function AgentChargePanel() {
 
       <div className="px-6 py-4 space-y-2">
         {rows.map((r, idx) => (
-          <div key={idx} className="flex gap-2">
+          <div key={idx} className="flex gap-2 items-center">
             {/* ★ 2026-07-26 발송ID가 283개라 기본 셀렉트로는 못 찾는다 — 검색 가능한 셀렉트로 교체 */}
             <div className="flex-1 min-w-0">
               <SearchableSelect
@@ -475,6 +566,26 @@ export default function AgentChargePanel() {
                 emptyLabel="발송ID 선택"
                 className="w-full"
               />
+            </div>
+            {/* ★ 2026-08-11 접수 — 고른 계정의 현재 잔액을 금액 입력칸 바로 왼쪽에.
+                차감(음수)을 넣기 전에 남은 돈을 여기서 확인한다(엔진 별도 조회 불필요). */}
+            <div className="w-36 shrink-0 text-right leading-tight">
+              {r.agentSendId && (
+                <>
+                  <div className="text-[10px] text-gray-400">현재 잔액</div>
+                  {balanceText(r.agentSendId) ? (
+                    <div className={`tabular-nums ${
+                      hasConfirmedBalance(r.agentSendId)
+                        ? 'text-sm font-semibold text-gray-800'
+                        : balances[r.agentSendId]?.status === 'error' ? 'text-xs text-rose-500' : 'text-xs text-gray-400'
+                    }`}>
+                      {balanceText(r.agentSendId)}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-300">-</div>
+                  )}
+                </>
+              )}
             </div>
             <input
               type="text"
@@ -570,9 +681,18 @@ export default function AgentChargePanel() {
             <div className="space-y-1">
               {registered.map((r) => (
                 <div key={r.seqNo} className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600 tabular-nums">#{r.seqNo} {idLabel(r.agentSendId)} · {r.amount.toLocaleString()}원</span>
+                  <span className="text-gray-600 tabular-nums">#{r.seqNo} {idLabel(r.agentSendId)} · {formatAgentChargeAmount(r.amount)}원</span>
                   {r.applied ? (
-                    <span className="text-emerald-600 font-medium text-xs">반영 완료 {r.appliedAt || ''}</span>
+                    <span className="text-emerald-600 font-medium text-xs">
+                      반영 완료 {r.appliedAt || ''}
+                      {/* ★ 2026-08-11 반영 뒤 잔액 — 접수의 "충전완료 후 잔액도 확인".
+                          ⛔ 확정된 값일 때만 붙인다. 조회 중·실패에 숫자를 붙이면 반영 전 잔액이 반영 후로 읽힌다. */}
+                      {hasConfirmedBalance(r.agentSendId)
+                        ? <span className="ml-1.5 font-normal text-gray-500">· 잔액 {balanceText(r.agentSendId)}</span>
+                        : balances[r.agentSendId]?.status === 'error'
+                          ? <span className="ml-1.5 font-normal text-rose-500">· 잔액 조회 실패</span>
+                          : null}
+                    </span>
                   ) : (
                     <span className="text-amber-600 text-xs">반영 대기</span>
                   )}
@@ -663,7 +783,7 @@ export default function AgentChargePanel() {
                   <td className="py-1.5 pr-3 tabular-nums text-gray-400">{h.seqNo}</td>
                   <td className="py-1.5 pr-3 font-mono text-gray-700">{idLabel(h.agentSendId, h.custName)}</td>
                   <td className="py-1.5 pr-3 text-gray-600">{h.companyName || <span className="text-amber-600">매핑 없음</span>}</td>
-                  <td className={`py-1.5 pr-3 text-right tabular-nums font-medium ${h.amount < 0 ? 'text-rose-500' : 'text-gray-800'}`}>{h.amount.toLocaleString()}</td>
+                  <td className={`py-1.5 pr-3 text-right tabular-nums font-medium ${h.amount < 0 ? 'text-rose-500' : 'text-gray-800'}`}>{formatAgentChargeAmount(h.amount)}</td>
                   <td className="py-1.5 pr-3 text-xs text-gray-400">{h.filledAt}</td>
                   <td className="py-1.5 text-xs">
                     {h.applied ? <span className="text-emerald-600">반영 {h.appliedAt || ''}</span> : <span className="text-amber-600">대기</span>}

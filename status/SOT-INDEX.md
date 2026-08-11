@@ -17,7 +17,7 @@
 | **알림톡 템플릿** — 템플릿·발신프로필 관리와 IMC 이관 | **템플릿** | [FEATURE-ALIMTALK-TEMPLATE.md](../docs/FEATURE-ALIMTALK-TEMPLATE.md) | §2 불변 원칙(필독) → §3 구조 → 이관이면 §4 절차. 이력 = §6·§8, 뒤집힌 판단 = §7 |
 | **정산** — 청구서 발행·컨펌·세금계산서·특례 | **정산** | [FEATURE-BILLING.md](../docs/FEATURE-BILLING.md) | §2 불변 원칙(필독·13개) → §3 구조 → 작업 축별 §4~§6. 남은 것 = §7, 이력 = §8, **시점별 설계서 6종 = §9** |
 | **이미지 스튜디오** — 템플릿 포스터 생성·소재 라이브러리 | **이미지 스튜디오** | [FEATURE-IMAGE-STUDIO.md](../docs/FEATURE-IMAGE-STUDIO.md) | §2 불변 원칙(필독) → 템플릿 추가면 **§4만** · 생성 흐름이면 §3 · 예시 배치면 §5. 남은 것 = §8, 뒤집힌 판단 = §9 |
-| **자사몰 연동** — 6종 provider·CDP 적재·연동 화면 | **자사몰 연동** | [FEATURE-CDP-INTEGRATION.md](../docs/FEATURE-CDP-INTEGRATION.md) | §2 불변 원칙(필독·7개) → §4 provider 현황 → §3 구조. 화면이면 §5, 남은 것 = §7, 뒤집힌 판단 = §6-2. API 스펙은 `INTEGRATIONS.md`가 소유 |
+| **자사몰 연동** — 6종 provider·CDP 적재·연동 화면 | **자사몰 연동** | [FEATURE-CDP-INTEGRATION.md](../docs/FEATURE-CDP-INTEGRATION.md) | §2 불변 원칙(필독·8개 — **§2-8 "자동 수집"은 도는 워커가 있을 때만·소급 적재 발송 금지**) → §4 provider 현황 → §3 구조. 화면이면 §5, 남은 것 = §7, 뒤집힌 판단 = §6-2, 권한 격리 = §6-4. API 스펙은 `INTEGRATIONS.md`, 화면 분해는 §8 링크가 소유 |
 
 **등재 규칙** (★2026-08-03 Harold 확정 — 앞으로 모든 기능이 이 형태)
 - **기능 하나 = .md 하나.** 그 문서가 자기 **이력**(§이력 색인)과 구조·불변 원칙·계약을 소유하고, STATUS는 **참조만** 한다. 트랙이 archive로 가도 기능 문서는 남는다.
@@ -30,6 +30,7 @@
 |---|---|---|---|
 | **보안 체계 — 방어 아키텍처·노출면 축소·WireGuard** | [2026-08-09-security-architecture-design.md](../docs/2026-08-09-security-architecture-design.md) | 착수 전 §4 설계 원칙(필독) → §5 단계별 순서(롤백 포함). 실측 현황 = §3 · 확인 과제 = §6. **추측 기재 금지 — 각 항목은 측정/문서/미확인 표기** | **보안** |
 | **자사몰 연동 화면 재설계 — 상태 대시보드·3단계 흐름·개발자 전달** | [2026-08-09-cdp-integration-redesign-design.md](../docs/2026-08-09-cdp-integration-redesign-design.md) | 착수 전 §3 원칙 → §5 화면 흐름 → §7 단계별 순서(롤백). 현황 실측 = §2 · 착수 전 확인 4건 = §9. `install-status` 실측 신호 재사용이 핵심 | **자사몰 연동 재설계** |
+| **자사몰 연동 화면 파일 분해(Phase 5)** — 2,499→1,491줄(40%↓) (기능 상설 = §0 **자사몰 연동**) | [2026-08-10-cdp-page-decomposition.md](../docs/2026-08-10-cdp-page-decomposition.md) | 또 가르기 전 **§2 분해 규약(필독 6개)** → 차수별 결과 §3 · **이 작업이 만든 사고 §4**(헬퍼 재작성 2회·죽은 코드·부재 단정 오선정) · 계약 9건 §5 | **자사몰 화면 분해** |
 | **자동마케팅 타겟팅 재설계** — 세그먼트 계약·결정성·행동 축 확장 (기능 상설 = §0 **자동마케팅**) | [2026-08-03-automarketing-targeting-redesign-design.md](../docs/2026-08-03-automarketing-targeting-redesign-design.md) | 구조·불변 원칙·이력은 **기능 문서**가 소유 — 여기는 시점 설계 근거만(진단 §2 · 목표 구조 §4 · 착수 순서 §5) | **자동마케팅** |
 | **여정 재설계 — 트리거 재정의·데이터 게이트·커서 축·연동 배선** (기능 상설 = §0) | [2026-08-01-journey-redesign-design.md](../docs/2026-08-01-journey-redesign-design.md) | 구현 결과 = §11-A~§11-D-7·§13-A·§14 · 트리거 정의 = §3 · 접은 예약 설계 = §12 | 여정 재설계 이어가자 |
 | **여정 이어달리기(다음 수 추천)** — 배포완료·실측 대기 (기능 상설 = §0 여정) | [2026-08-08-journey-succession-design.md](../docs/2026-08-08-journey-succession-design.md) | 확정 사실(실측) §1 → 구조 결정 §2 → **구현 결과 §9-A**. 간선 계약 = §3, 함정 = §11 | **여정 이어달리기** |

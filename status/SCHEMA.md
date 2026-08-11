@@ -74,7 +74,7 @@
 | 57 | customer_send_stats | 고객별 발송 누적 카운터 (2026-07-03 신설 — 예측 분모 전용. customer_id PK(FK customers CASCADE), company_id(idx), total_sent, last_sent_at. 고객당 1행) |
 | 58 | customer_send_stats_marks | 발송 카운터 캠페인 멱등 마커 (2026-07-03 신설 — campaign_ref varchar(120) PK, 재시도 중복 카운트 차단) |
 | 59 | agent_charge_requests | 에이전트 충전 **실행** 요청 원장 (2026-07-24 §5-3 신설·DDL 적용완료 — 멱등키 UNIQUE·감사. 게이트웨이 잔액/반영의 진실은 여전히 62 `RSRM_FillAmtHist`) |
-| 60 | agent_charge_orders **(2026-07-27 CREATE 대기)** | 에이전트 충전 **요청**(고객사 접수) — §5-4. 웹 `deposit_requests`와 축이 달라 별도 테이블(승인 시 올라가는 지갑이 다르다) |
+| 60 | agent_charge_orders | 에이전트 충전 **요청**(고객사 접수) — §5-4. 웹 `deposit_requests`와 축이 달라 별도 테이블(승인 시 올라가는 지갑이 다르다). **2026-08-11 운영 실존 확인** — 신청 원장일 뿐 지갑 원장이 아니다(직원 직접 충전은 여기 안 남는다) |
 | - | ai_training_logs | 문안 학습 로그 (회사별 tenant_ref HMAC 격리). ★ 2026-07-03 실측: `ck_training_message_type` CHECK = message_type IN ('SMS','LMS','MMS','KAKAO','EMAIL','DM') — DM 추가(전 채널 학습 통합 Phase 1). 적재=fire-and-forget 격리(발송 무영향), source_ref 멱등 |
 | - | ai_training_logs **(2026-07-04 ADD 대기)** | `click_count int` · `conversion_count int` — Tier1 반응 신호(DM·이메일 클릭 환류, 랭커/검색기 클릭 우선 정렬). 코드 42703 폴백이라 미실행 무영향. `ALTER TABLE ai_training_logs ADD COLUMN click_count integer; ADD COLUMN conversion_count integer;` |
 | - | best_copy_seed_usage **(2026-07-04 CREATE 대기)** | 시드 사용 기록(성과 환류). `id bigserial PK, seed_id uuid, tenant_ref varchar(64)=getTenantRef, channel varchar(10), used_at timestamptz`. INDEX(seed_id),(tenant_ref,used_at). 코드 42P01 폴백(미생성 무영향) |
@@ -1795,8 +1795,9 @@
 | resolved_by / resolved_at / resolve_note | varchar(80) / timestamptz / varchar(200) | 불확실 해소 감사 |
 | created_at | timestamptz NOT NULL DEFAULT now() | INDEX(created_at DESC) |
 
-### agent_charge_orders (에이전트 충전 **요청** — 고객사 접수) **(2026-07-27 CREATE 대기)**
+### agent_charge_orders (에이전트 충전 **요청** — 고객사 접수) **(2026-08-11 운영 실존 확인)**
 > ★ 2026-07-27 §5-4 신설. 고객사가 "입금했으니 충전해 달라"를 올리는 접수 원장. **이 테이블은 어떤 잔액도 움직이지 않는다** — 증액은 §5-3 실행 경로 하나뿐이고, 여기 행은 직원이 그 화면을 1클릭으로 채우게 해주는 대기열이다.
+> ⚠ **이 테이블은 신청 원장일 뿐 지갑 원장이 아니다.** 직원이 계좌이체 확인 후 직접 넣은 충전·차감은 여기 행을 만들지 않고 게이트웨이 `RSRM_FillAmtHist`에만 들어간다 — 고객사 "충전 내역"을 이 테이블로 그리면 그 건들이 통째로 사라진다(2026-08-11 런소프트 접수 기원 — [설계서 §15](../docs/2026-07-24-agent-prepaid-charge-design.md)).
 > 상태 전이: `pending` → `processing`(실행 접수·`charge_request_id` 연결) → `fulfilled`(게이트웨이 `RsApplyFlag='Y'` 확인 후에만) / `pending` → `rejected`(사유 필수).
 
 | 컬럼 | 타입 | 설명 |

@@ -14,7 +14,7 @@
 | 카페24 | OAuth authorization_code | oauth | 2h / refresh 14d | 불요 | webhook + admin API | ★ active (gyunoo83, 실주문 수신) |
 | 네이버 스마트스토어 | client_credentials + **bcrypt 서명** | polling | 3h / refresh 없음 | **필수(화이트리스트)** | 주문 조회(polling) | ★ active (한줄로AI, 토큰 실측) |
 | 메이크샵 | client_credentials + **Basic 헤더** | polling | **5분** / refresh 없음 | 불요(실측) | 회원·주문 조회(polling) | ★ active (gyunoo83, 토큰+회원 실측) |
-| 고도몰 | 폴링 키 (partner_key + 몰별 key) | polling | 없음(키) | 불요 | 주문 조회(polling) | ★ active (godo, 키 검증) |
+| 고도몰 | 폴링 키 (partner_key + 몰별 key) | polling | 없음(키) | 불요 | 주문 조회(**30분 주기 수집** — 0810 신설) | ★ active (godo, 키 검증 — 연동 테스트용, 실주문 없음) |
 | 아임웹 | OAuth authorization_code | oauth | 2h / refresh 90d | 불요 | webhook + admin API | 코드완료 · **앱 승인(0719)** · 스토어 등록·실측 잔여 |
 | 자체 호스팅(custom) | webhook (HMAC-SHA256) | webhook | 없음 | 불요 | webhook 수신 | ★ active (self, 2개 회사) |
 | ~~가비아(퍼스트몰)~~ | — | — | — | — | — | **2026-07-06 제거 — 자체호스팅 흡수(§5)** |
@@ -83,8 +83,10 @@ polling/webhook 전용 provider는 OAuth 메서드를 throw, webhook 없는 prov
 ### 고도몰 (폴링 키)
 - **코드**: `utils/godo-client.ts`, `utils/godo-parse.ts`(XML 순수 파서), `utils/godo-adapter.ts`, `routes/godo.ts`
 - **인증**: partner_key(env `GODO_PARTNER_KEY`, 제휴사=팝폰) + key(몰별 사용자키, 입력값 meta 저장). API `POST https://openhub.godo.co.kr/godomall5/order/Order_Search.php`(form). 토큰 개념 없음.
-- **엔드포인트**: POST `/api/godo/credentials`(키 저장) · POST `/api/godo/connect`(1콜 검증 → 30일 백필) · status · disconnect. webhook 없음(polling).
+- **엔드포인트**: POST `/api/godo/credentials`(키 저장) · POST `/api/godo/connect`(1콜 검증 → 90일 백필) · status · disconnect. webhook 없음(polling).
 - **CDP 매핑**(backfillGodoOrders): 각 주문 → identify(수신동의 시)+syncOrder. 멱등 = order_id.
+- **★2026-08-10 주기 수집 신설**(`utils/godo-sync-worker.ts`, 30분): 연결 뒤에도 새 주문이 들어오게 하는 유일한 경로다 — 그전에는 `/connect` 백필 1회가 전부였고 이후 주문은 재연결 전까지 안 들어왔다. 창은 `last_synced_at`(없으면 `connected_at`) 기준 최소 2일·**최대 90일 = 연결 백필과 같은 깊이**(얕으면 공백이 조용히 잊힌다). 실패는 `status`를 안 바꾸고 `meta.godo_sync_error`에만 남긴다. `/status`가 `lastSyncedAt`·`syncError`를 함께 준다. 경위 = [FEATURE-CDP-INTEGRATION.md](../docs/FEATURE-CDP-INTEGRATION.md) §2-8·§6-3
+- **⛔ 소급 적재 가드**: 늦게 들어온 과거 주문이 여정 구매 트리거로 발화하지 않도록 자사몰 이벤트 문에도 발생 시각 창(3일)이 걸려 있다(`journey-target-extractor`). 수집 주기를 바꾸거나 백필 깊이를 늘릴 때 이 창을 함께 본다.
 
 ### 아임웹 (OAuth)
 - **★2026-07-19 앱 심사 승인 완료** (파트너센터 "한줄로AI" = 승인 됨). **승인 ≠ 앱스토어 출시** — 출시는 콘텐츠를 integration_squad@imweb.me로 제출하는 별도 단계(0719 제출 완료·회신 대기). 몰의 앱 추가 진입점 = **결제·앱스토어 페이지**(동의 시 서비스 URL로 `?siteCode=S...` 리다이렉트). 사이트 관리자 "외부 서비스 연동(API) = Rest API V2"는 사방넷·플레이오토용 **구형 별개 계열** — 우리 앱이 거기 없는 것이 정상.
@@ -127,3 +129,5 @@ polling/webhook 전용 provider는 OAuth 메서드를 throw, webhook 없는 prov
 | 메이크샵 | 문서 스키마 확인(hname·mobile·sms_receive 등) — preview 매핑 후속 | 문서 스키마 확인 — 후속 | ⛔ 실고객사 데이터로 최종 검증 후 매핑 |
 
 > 네이버·메이크샵은 인증·조회까지 실측 완료. CDP 적재(identify/syncOrder) 매핑은 실고객사 데이터(preview raw)로 스키마 확정 후 붙인다 — 응답 스키마 추측 금지 룰(테스트몰 비어 있으면 list 내부 필드 미확인).
+>
+> **★2026-08-10 스키마 확인 절차** — 연결은 둘 다 있다(각 1건·검증됨). preview 버튼을 누른 뒤 `pm2 logs targetup-backend --nostream | grep "shape:"`로 **구조 로그**를 본다. 옛 로그는 raw를 그대로 찍어 구매자 성명·휴대폰이 남았는데, 지금은 키·중첩·형식만 남기고 값은 마스킹한다(`utils/json-shape.ts`). 몰이 비어 있으면 `[0×…]`로 나오고 거기서 멈춘다.

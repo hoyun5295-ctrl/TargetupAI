@@ -39,3 +39,16 @@ export function formatAgentBalance(v: number): string {
   const floored = Math.floor(Math.round(v * 1e4) / 100) / 100;
   return floored.toLocaleString('ko-KR', { maximumFractionDigits: 2 });
 }
+
+/**
+ * 충전 원장(`RSRM_FillAmtHist.FillAmt`) 금액 표시 — **부호 유지**. (★ 2026-08-11)
+ *
+ * 잔액(`formatAgentBalance`)과 달리 버리지 않는다. 원장 금액은 우리가 넣은 값 그대로 보여야
+ * 통장·게이트웨이 원본과 대조가 되고, 음수는 담당자 상계 **차감**이라 부호를 지우면
+ * 차감이 충전처럼 보인다(접수가 요구한 것이 바로 그 차감 내역이다).
+ */
+export function formatAgentChargeAmount(v: number): string {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '-';
+  return `${n < 0 ? '-' : ''}${Math.abs(n).toLocaleString('ko-KR', { maximumFractionDigits: 2 })}`;
+}
