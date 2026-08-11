@@ -349,6 +349,14 @@ const [messageDetailContent, setMessageDetailContent] = useState<{ name: string;
   const [chargeTxEndDate, setChargeTxEndDate] = useState('');
   const [chargeTxLoading, setChargeTxLoading] = useState(false);
   const [pendingDeposits, setPendingDeposits] = useState<any[]>([]);
+  // ★ 2026-08-11 (서수란 접수) 요금/정산 뱃지의 **단일 진실**.
+  //   목록 길이(`pendingDeposits.length`)를 뱃지로 쓰던 옛 방식은 두 곳(목록·뱃지)이 갈릴 수 있고,
+  //   크레딧처럼 목록이 페이지 단위로 잘리는 축에서는 대기 25건이 20으로 보인다.
+  //   여기 값은 60초 주기 카운트 조회 + 목록 로드가 함께 채운다. 못 센 축은 서버가 null을 주고 직전 값을 지킨다.
+  const [planReqPendingCount, setPlanReqPendingCount] = useState(0);
+  const [depositPendingCount, setDepositPendingCount] = useState(0);
+  const [agentOrderPendingCount, setAgentOrderPendingCount] = useState(0);
+  const [creditPendingCount, setCreditPendingCount] = useState(0);
   const [showDepositApproveModal, setShowDepositApproveModal] = useState(false);
   const [showDepositRejectModal, setShowDepositRejectModal] = useState(false);
   const [depositTarget, setDepositTarget] = useState<any>(null);
@@ -733,7 +741,8 @@ useEffect(() => {
 }, [activeTab]);
 useEffect(() => { if (activeTab === 'deposits') loadChargeManagement(1); }, [activeTab, chargeTxCompanyFilter, chargeTxTypeFilter, chargeTxMethodFilter, chargeTxStartDate, chargeTxEndDate]);
 useEffect(() => { if (activeTab === 'deposits' || activeTab === 'credits') loadCreditRequests(); if (activeTab === 'credits') { loadAllCreditTx(1); loadCreditRisk(); } }, [activeTab]);
-useEffect(() => { loadCreditRequests(); }, []);  // 크레딧 관리 알람 badge 상시 표시용 mount 로드
+// ★ 2026-08-11 뱃지는 이제 loadPendingBadges(카운트)가 담당한다 — 이 mount 로드는 크레딧 모달 목록용으로만 남는다.
+useEffect(() => { loadCreditRequests(); }, []);
 useEffect(() => { if (activeTab === 'stats') loadSendStats(1); }, [activeTab]);
 useEffect(() => { if (activeTab === 'syncAgents') loadSyncAgents(); }, [activeTab]);
 useEffect(() => { if (activeTab === 'auditLogs' && auditAccessAllowed) loadAuditLogs(1); }, [activeTab, auditAccessAllowed]);
@@ -768,7 +777,9 @@ useEffect(() => {
     if (!alive || inFlight) return;
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     inFlight = true;
-    try { await loadSenderRegPendingCount(); } finally { inFlight = false; }
+    // ★ 2026-08-11 (서수란 접수) 요금/정산 뱃지도 같은 주기에 태운다 — 새 타이머를 만들지 않는다.
+    //   0808에 만든 가드(백그라운드 건너뜀·중복 호출 차단·언마운트 정리)를 그대로 쓴다.
+    try { await Promise.allSettled([loadSenderRegPendingCount(), loadPendingBadges()]); } finally { inFlight = false; }
   };
   tick();
   const timer = setInterval(tick, 60000);
@@ -2695,11 +2706,34 @@ const handleSendBillingEmail = async (resend = false) => {
       });
       if (res.ok) {
         const data = await res.json();
-        setPlanRequests(data.requests || []);
+        const list = data.requests || [];
+        setPlanRequests(list);
+        // 이 목록도 상한 없이 전건이라 pending 수가 곧 뱃지다(승인·반려 직후 즉시 반영).
+        setPlanReqPendingCount(list.filter((r: any) => r.status === 'pending').length);
       }
     } catch (error) {
       console.error('플랜 신청 로드 실패:', error);
     }
+  };
+
+  /**
+   * ★ 2026-08-11 (서수란 접수) 요금/정산 대기 뱃지 카운트 — 60초 주기 경량 조회.
+   *
+   * 목록을 부르지 않는다. 충전 관리 목록 로더는 거래 이력 페이지까지 함께 끌어오므로
+   * 뱃지 하나 때문에 그 쿼리를 주기로 돌리면 안 된다.
+   * ⛔ **null인 축은 덮지 않는다** — 서버가 못 센 것이라, 0으로 쓰면 대기 중인 신청이 뱃지에서 사라진다.
+   */
+  const loadPendingBadges = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/admin/pending-badges', { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return;
+      const d = await res.json();
+      if (d.planRequests != null) setPlanReqPendingCount(Number(d.planRequests) || 0);
+      if (d.deposits != null) setDepositPendingCount(Number(d.deposits) || 0);
+      if (d.agentChargeOrders != null) setAgentOrderPendingCount(Number(d.agentChargeOrders) || 0);
+      if (d.credits != null) setCreditPendingCount(Number(d.credits) || 0);
+    } catch { /* 일시 오류 — 직전 값 유지, 다음 주기 재시도 */ }
   };
 
   const loadChargeManagement = async (page = 1) => {
@@ -2720,7 +2754,10 @@ const handleSendBillingEmail = async (resend = false) => {
         setChargeTxList(data.transactions || []);
         setChargeTxTotal(data.total || 0);
         setChargeTxPage(page);
-        setPendingDeposits(data.pendingRequests || []);
+        const pending = data.pendingRequests || [];
+        setPendingDeposits(pending);
+        // 이 목록은 상한 없이 pending 전건이라 길이가 곧 카운트다 — 승인·반려 직후 뱃지가 60초를 안 기다린다.
+        setDepositPendingCount(pending.length);
       }
     } catch (error) {
       console.error('충전 관리 로드 실패:', error);
@@ -2846,7 +2883,8 @@ const handleSendBillingEmail = async (resend = false) => {
           const token = localStorage.getItem('token');
           const res = await fetch(`/api/admin/credit-requests/${cr.id}/approve`, { method: 'PUT', headers: { Authorization: `Bearer ${token}` } });
           const d = await res.json().catch(() => ({}));
-          if (res.ok) { setModal({ type: 'alert', title: '승인 완료', message: d.message || '지급되었습니다.', variant: 'success' }); loadCreditRequests(); }
+          // 크레딧 목록은 페이지 단위(20)라 길이로 뱃지를 세면 안 된다 — 카운트를 따로 다시 부른다(즉시 반영).
+          if (res.ok) { setModal({ type: 'alert', title: '승인 완료', message: d.message || '지급되었습니다.', variant: 'success' }); loadCreditRequests(); loadPendingBadges(); }
           else setModal({ type: 'alert', title: '승인 실패', message: d.error || '오류', variant: 'error' });
         } catch { setModal({ type: 'alert', title: '오류', message: '네트워크 오류', variant: 'error' }); }
       },
@@ -2865,7 +2903,7 @@ const handleSendBillingEmail = async (resend = false) => {
             body: JSON.stringify({ adminNote: '슈퍼관리자 거절' }),
           });
           const d = await res.json().catch(() => ({}));
-          if (res.ok) { setModal({ type: 'alert', title: '거절 완료', message: d.message || '거절되었습니다.', variant: 'success' }); loadCreditRequests(); }
+          if (res.ok) { setModal({ type: 'alert', title: '거절 완료', message: d.message || '거절되었습니다.', variant: 'success' }); loadCreditRequests(); loadPendingBadges(); }
           else setModal({ type: 'alert', title: '거절 실패', message: d.error || '오류', variant: 'error' });
         } catch { setModal({ type: 'alert', title: '오류', message: '네트워크 오류', variant: 'error' }); }
       },
@@ -4038,9 +4076,14 @@ const handleApproveRequest = async (id: string) => {
                 tabs: ['plans', 'requests', 'deposits', 'credits', 'billing'] as const,
                 items: [
                   { key: 'plans', label: '요금제 관리' },
-                  { key: 'requests', label: '플랜 신청', badge: planRequests.filter(r => r.status === 'pending').length },
-                  { key: 'deposits', label: '충전 관리', badge: pendingDeposits.length },
-                  { key: 'credits', label: '크레딧 관리', badge: creditRequests.length },
+                  // ★ 2026-08-11 (서수란 접수) 뱃지 = 목록 길이가 아니라 **카운트 state**.
+                  //   목록은 화면에 들어가야 채워지고 크레딧은 페이지 단위로 잘린다 —
+                  //   둘 다 "대기가 있는데 뱃지가 0"을 만든다. 카운트는 60초 주기로 따로 돈다.
+                  { key: 'requests', label: '플랜 신청', badge: planReqPendingCount },
+                  // 충전 관리 = 웹 무통장입금 + 에이전트(발송ID) 충전 요청. 둘 다 "고객이 올린 신청"이라
+                  // 한 탭에서 처리한다 — 한 축만 세면 다른 축의 대기가 뱃지에서 사라진다.
+                  { key: 'deposits', label: '충전 관리', badge: depositPendingCount + agentOrderPendingCount },
+                  { key: 'credits', label: '크레딧 관리', badge: creditPendingCount },
                   { key: 'billing', label: '정산 관리' },
                 ],
               },
@@ -5550,7 +5593,8 @@ const handleApproveRequest = async (id: string) => {
             )}
 
             {/* ★ 2026-07-24 §5-3 에이전트 충전 실행 — 웹 잔액과 별개 지갑(게이트웨이 원장 직결) */}
-            {chargeScope === 'agent' && <AgentChargePanel />}
+            {/* ★ 2026-08-11 접수함 건수를 상위 뱃지로 올린다 — 반려·충전 등록 직후 60초를 기다리지 않게. */}
+            {chargeScope === 'agent' && <AgentChargePanel onPendingOrdersChange={setAgentOrderPendingCount} />}
 
             {/* 전체 잔액 변동 이력 — 한줄로(웹) 지갑 */}
             <div className={`bg-white rounded-2xl border border-gray-200/70 shadow-sm ${chargeScope === 'web' ? '' : 'hidden'}`}>

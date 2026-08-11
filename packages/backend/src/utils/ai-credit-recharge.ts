@@ -198,6 +198,21 @@ export async function rejectRechargeRequest(opts: { requestId: string; adminId: 
   return { rejected: true };
 }
 
+/**
+ * 상태별 충전 요청 **건수만** — 뱃지용. (★ 2026-08-11)
+ *
+ * `getRechargeRequests`의 total을 쓰면 목록 쿼리가 함께 도는데, 60초 주기 뱃지에는 그게 낭비다.
+ * ⚠ 뱃지를 목록 길이(`rows.length`)로 세면 안 된다 — 목록은 pageSize(20)에 잘려서
+ * 대기가 25건이어도 20으로 보인다. 뱃지의 진실은 이 카운트다.
+ */
+export async function countRechargeRequests(status?: string): Promise<number> {
+  const params: any[] = [];
+  let where = '';
+  if (status) { params.push(status); where = `WHERE status = $${params.length}`; }
+  const r = await pool.query(`SELECT COUNT(*)::int AS n FROM ai_credit_requests ${where}`, params);
+  return Number(r.rows[0]?.n) || 0;
+}
+
 /** 충전 요청 목록 (companyId 지정=사용자 / 미지정=슈퍼관리자 전체). */
 export async function getRechargeRequests(opts: { companyId?: string; status?: string; page?: number; pageSize?: number }) {
   const page = Math.max(1, opts.page || 1);

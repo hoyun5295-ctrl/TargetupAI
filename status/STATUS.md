@@ -97,7 +97,7 @@
 > ⑤ **비토 라인 14·15 미결 4건** — ①배정 화면 게이팅 범위(Harold 미확인) ②라인그룹 DELETE가 `users.line_group_id` 미체크 ③sweeper 2종 bulk-only 사각 ④Codex 결과 미수령. [[project_2026_0717_bito_line14_15_lineadmin]]
 > ⑥ **인앱 잔여** — 웹 실측(쿠폰·CTA 정렬·허용표·AI 생성 1건) · 0717 직원 디버깅분 코드완료·미검증 · M3 네이버 env 키 등록 시 활성 · M6 이메일·인앱 이식(별도 설계). [[project_2026_0717_inapp_debug_session_incomplete]]
 > ⑦ **Local AI Ops Hub** — 설계 3부작 완료·Harold 결정(H-2 M0 착수) 대기. 실무보다 후순위. [[project_2026_0715_local_ai_ops_hub]]
-> ⑧ **선불 자동충전(기업은행 입금 감지)** — IBK 오픈API 승인 후 착수. 호출어 "자동충전 개발재개". 착수 전 확인 2건(`oapiUserSrn` 경로 · 웹 잔액이 사용자 단위인지) · 선행 = `billing_type='prepaid'` 지정(현재 0건). [SoT](docs/2026-07-28-auto-charge-ibk-design.md)
+> ⑧ **선불 자동충전(입금 감지)** — ★0811 **보류**(월 입금 20건 미만 — 재개 조건은 기술이 아니라 건수). 축 조사 4종·구조적 사실·재개 첫 한 수 전부 [SoT §8](docs/2026-07-28-auto-charge-ibk-design.md). 호출어 "자동충전 개발재개"
 > (지속) 비토 API 발송 경로 전환 검토 [[project_2026_0710_bito_api_direct_test]] · (보류) 팝폰 SDK 검증
 
 ---
@@ -112,7 +112,7 @@
 | 0731 레거시 143 폐기 — 이관·파기 완료 | 다우클라우드 반납 확인 3건(인스턴스+**볼륨** 삭제 / 스냅샷·백업 이미지 잔존 없음 / 과금 종료일) · 사무실 망에서 `pay.invitobiz.com:8080` 확인(66 경계는 통과 실측) | [[project_2026_0703_legacy_server_decommission]] · [폐기플랜](docs/레거시서버_폐기_플랜.md) §6·§7 0731행 |
 | 0730 접수 4건(스튜디오 단일 생성 동반) | **배포완료** — ⚠SDK 변경 포함이라 이후 배포에도 `build:all` 필수. 실측 4건(헤더 D-Day·쿠폰강조 끝색 / 슬라이드 크기 4종 / 발신프로필 채널ID 검색 / 자동마케팅 MMS 첨부·미첨부 보류 통지). 스튜디오분(생성 1장·2크레딧 / 인앱 삽입 크롭 0)은 [이미지 스튜디오 문서](../docs/FEATURE-IMAGE-STUDIO.md) §7 | [[project_2026_0730_studio_single_gen_and_tickets]] |
 | 0725 정산 결함·서수란 6건 (커밋 `d19f48fd`) | 화면 실측(웹 유형 NULL · 발신번호 페이징). 7월 청구 금액을 바꾸는 미해결 항목은 없다 | [[project_2026_0725_settlement_mms_gap_and_seo_tickets]] |
-| **0808 직원 접수 2건(임은지)** — 슈퍼관리자 알림 축 · 원클릭 임시보관 채널 표시 | **배포완료**(2026-08-08). 실측 2 = ①위임장 대기가 **등록현황 관리** 탭 뱃지로 뜨고 새로고침·탭 이동 없이 60초 안에 갱신되는지 ②임시 보관 칩에 채널 라벨이 뜨는지. 추가 과제 2 = 화면별 `CHANNEL_LABEL` 4벌 통합 · `pendingManagers` 죽은 state 정리(선언만·소비 0) | 경위·처방 = [LESSONS_FRONTEND](lessons/LESSONS_FRONTEND.md) 핵심원칙 상단 2항 · 계약 = `sender-alert-axis.test.ts`·`event-campaign-channel-label.test.ts` |
+| **0808 직원 접수 2건(임은지) + 0811 서수란 접수(충전관리)** — 슈퍼관리자 대기 뱃지 축 · 원클릭 임시보관 채널 표시 | 0808분 **배포완료**. **0811분 코드완료**(요금/정산 뱃지 3종 60초 주기 + 카운트 전용 조회 + 에이전트 충전 요청 뱃지 편입 · DDL 0). 실측 4 = ①위임장 대기가 **등록현황 관리** 탭 뱃지로 뜨는지 ②임시 보관 칩 채널 라벨 ③**고객사 신청 후 새로고침 없이 60초 안에 충전 관리 뱃지가 오르는지** ④에이전트 충전 요청도 그 뱃지에 잡히는지. 추가 과제 2 = `CHANNEL_LABEL` 4벌 통합 · `pendingManagers` 죽은 state 정리 | 경위·처방 = [LESSONS_FRONTEND](lessons/LESSONS_FRONTEND.md) 핵심원칙 상단 2항 · 계약 = `sender-alert-axis.test.ts`·`charge-alert-axis.test.ts`·`event-campaign-channel-label.test.ts` |
 | 0725 PAY 통계 발급명·대상ID | **배포완료** — 서수란 실측 | [[project_2026_0725_pay_stats_custnm_storeid]] |
 | 0724 DM 테스트 무과금 차단 | 서수란 실측 · 기존 running A/B 미발행 variant 점검 SQL | [[project_2026_0724_dm_test_no_charge_bypass]] |
 | 0723~24 PAY 에이전트 통계(발송ID·엑셀) | 서수란 실측 · 54/57 전환갭 확인 · billing 정산 반영 | [[project_2026_0723_pay_agent_stats_tabs]] |
@@ -137,7 +137,7 @@
 - [ ] **직원 버그리포트 실동작 검증**: 8차 B8-01~B8-13(app.hanjul.ai) · 9차 S9-04/S9-08(발송결과 성능 + sent_at 정확성) · D39 세션2(필터 UI + AI 보유필드)
 - [ ] **AI 맞춤한줄 Phase 2**: 실서비스 통합 테스트(실제 발송) — Harold 검증 대기
 - [ ] **카카오 알림톡 템플릿 관리(Humuson API v2.1.1)**: 고객사 CRUD+검수+발신프로필 UI · 슈퍼 고객사별 연동 설정(humuson_user_id·uuid) · 발송 시 APR 상태만 선택 · 백엔드 프록시 `/api/kakao-templates/*`+kakao_templates 확장+상태 전이 규칙 · Phase 2(이미지 업로드·알림 수신자·발신프로필 그룹)
-- [ ] **선불 요금제**: Phase 1-B KCP PG 연동(카드결제만) → Phase 2 입금감지 API 자동화
+- [ ] **선불 요금제**: 카드결제 = **이니시스 계속 사용**(★2026-08-11 Harold 결정 — KCP PG 연동 계획 전면 철회) → 입금감지 자동화 = 금융결제원 오픈뱅킹 축([자동충전 설계서 §8](../docs/2026-07-28-auto-charge-ibk-design.md) — IBK 예금조회 API 미제공으로 축 전환)
 - [ ] **보안**: 슈퍼관리자 IP 화이트리스트 · SSH 키 인증 전용 전환(선택)
 - [ ] **인비토AI**: 데이터 축적 후 모델 학습 파이프라인 설계 · 이용약관 제14조 배포 후 서비스 공지(조항 신설 2026-07-03 완료)
 

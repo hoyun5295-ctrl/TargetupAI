@@ -32,7 +32,16 @@ const sanitizeAmountInput = (v: string) => {
 
 const MAX_POLLS = 36; // 5초 × 36 = 3분
 
-export default function AgentChargePanel() {
+interface AgentChargePanelProps {
+  /**
+   * ★ 2026-08-11 (서수란 접수) 접수 대기 건수를 상위 뱃지로 올린다.
+   * 이 값이 없으면 고객사가 올린 에이전트 충전 요청은 이 패널을 연 사람에게만 보이고
+   * 상단 "충전 관리" 뱃지에는 영영 뜨지 않는다.
+   */
+  onPendingOrdersChange?: (count: number) => void;
+}
+
+export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargePanelProps = {}) {
   const [targets, setTargets] = useState<Target[]>([]);
   const [companyFilter, setCompanyFilter] = useState('');
   const [rows, setRows] = useState<ChargeFormRow[]>([{ agentSendId: '', amount: '' }]);
@@ -177,9 +186,12 @@ export default function AgentChargePanel() {
       const res = await fetch('/api/admin/agent-charge-orders?status=pending&limit=50', { headers: { Authorization: `Bearer ${token()}` } });
       if (res.ok) {
         const d = await res.json();
-        setOrders(Array.isArray(d.rows) ? d.rows : []);
+        const rows = Array.isArray(d.rows) ? d.rows : [];
+        setOrders(rows);
+        // 상위 뱃지에 즉시 반영(담기·반려 직후). 주기 조회와 같은 값을 보게 된다.
+        onPendingOrdersChange?.(rows.length);
       }
-    } catch { /* 요청 목록 로드 실패 시 기존 유지 */ }
+    } catch { /* 요청 목록 로드 실패 시 기존 유지 — 실패를 0으로 올려 뱃지를 지우지 않는다 */ }
   };
 
   /** 요청 1건을 충전 폼에 담는다 — 직원이 발송ID·금액을 다시 타이핑하지 않게. */

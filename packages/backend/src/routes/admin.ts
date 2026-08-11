@@ -32,6 +32,8 @@ import {
 // ★ 2026-07-27 §5-4: 고객사 충전 요청 접수 원장 (요청 → 직원 1클릭 실행 → 반영 확인 후 완료)
 import { parseRejectReason } from '../utils/agent-charge-orders';
 import { handleDbMigrationError } from '../utils/db-migration-error';
+// ★ 2026-08-11 (서수란 접수): 요금/정산 대기 뱃지 카운트 — 세는 방법은 CT 하나가 소유한다.
+import { getPendingBadgeCounts } from '../utils/pending-badges';
 import { sendSystemAlert } from '../utils/system-alert';
 // ★ 2026-07-24 슈퍼 에이전트 통계 엑셀(CSV) — 기간×고객사×발송ID×유형 (정산 대조)
 import { buildAdminAgentStatsXlsx } from '../utils/manage-stats-export';
@@ -3607,6 +3609,23 @@ router.post('/agent-charge-orders/:id/reject', authenticate, requireSuperAdmin, 
 });
 
 // ===== 충전 관리 통합 API =====
+/**
+ * GET /api/admin/pending-badges — 요금/정산 대기 뱃지 카운트 (★ 2026-08-11 서수란 접수)
+ *
+ * 화면이 60초마다 부른다. **목록을 주지 않는다** — 충전 관리 목록 로더는 거래 이력 페이지까지
+ * 함께 끌어오므로 뱃지 때문에 그 쿼리를 주기로 돌리면 안 된다.
+ * 못 센 축은 `null`로 내려간다(0이 아니다 — 0은 "볼 일 없음"이라 뱃지가 조용히 사라진다).
+ */
+router.get('/pending-badges', authenticate, requireSuperAdmin, async (_req: Request, res: Response) => {
+  try {
+    return res.json(await getPendingBadgeCounts());
+  } catch (error: any) {
+    // CT가 축별로 이미 격리하므로 여기까지 오면 예상 밖이다 — 전 축 null로 내려 화면이 직전 값을 지킨다.
+    console.error('대기 뱃지 카운트 실패:', error);
+    return res.json({ planRequests: null, deposits: null, agentChargeOrders: null, credits: null });
+  }
+});
+
 router.get('/charge-management', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
