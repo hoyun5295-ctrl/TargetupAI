@@ -460,6 +460,11 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 
 **1) 토큰 발급** — 슈퍼관리자 로그인은 2FA(TOTP) 통과해야 JWT가 나온다 (routes/auth.ts).
 
+> ★2026-08-11 보강 — `loginId`는 **`ceo`**(Harold 확인). 호출은 **도메인이 아니라 서버 안 `127.0.0.1:3000`** 이다.
+> 페이로드 4필드는 아래 그대로이며 이름이 하나라도 틀리면 400/401이 난다(`userType`·`loginId`·`password`·`totpCode`).
+> `<비밀번호>`·`<OTP 6자리>` 두 자리만 지우고 실제 값을 넣는다 — **큰따옴표는 그대로 둔다**(예: `"totpCode":"123456"`).
+> OTP는 30초마다 바뀌므로 코드를 확인한 직후 실행한다. `ceo`로 받으면 열어둔 관리자 화면은 로그아웃된다(단일 세션).
+
 ```bash
 TOKEN=$(curl -s -X POST http://127.0.0.1:3000/api/auth/login \
   -H 'Content-Type: application/json' \

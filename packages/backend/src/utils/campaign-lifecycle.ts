@@ -15,6 +15,8 @@ import { resolveRefundAxes } from './billing-types';
 import { prepaidRefund, REFUND_KEYS } from './prepaid';
 import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
 import { getSourceRef, updateTrainingMetrics } from './training-logger';
+// ★ 2026-08-11 자기 개선 루프 Phase 0 — 문자 클릭을 문안 학습 원장에 환류(CT가 합계를 소유).
+import { getCampaignClickTotal } from './short-url';
 // ★ 2026-08-04: sweep 대상 캠페인 상태 CT — mysql-refund-sweeper와 같은 집합을 본다
 import { SWEEPABLE_CAMPAIGN_STATUS_SQL } from './campaign-sweep-scope';
 
@@ -482,11 +484,18 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
         }
 
         // AI 학습 성과 데이터 업데이트
+        // ★ 2026-08-11 Phase 0 — 클릭 동반. source_ref 축은 적재와 같은 run.id다(campaigns.ts:1088).
+        //   클릭 합계는 그 run이 속한 campaign_id 기준이라 runInfo에서 얻는다. 링크가 없으면 null(0 아님).
+        const aiCampaignId = runInfo.rows[0]?.campaign_id as string | undefined;
+        const aiClicks = aiCampaignId
+          ? await getCampaignClickTotal(String(aiCampaignId)).catch(() => null)
+          : null;
         updateTrainingMetrics({
           sourceRef: getSourceRef(run.id),
           sentCount: successCount + failCount,
           successCount,
           failCount,
+          clickCount: aiClicks,
         });
 
         syncCount++;
@@ -586,11 +595,15 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
         }
 
         // AI 학습 성과 데이터 업데이트 (직접발송)
+        // ★ 2026-08-11 Phase 0 — 클릭 동반. 직접발송은 run이 없어 적재 때 campaign.id를 그 자리에 넣었으므로
+        //   source_ref 축도 campaign.id다(campaigns.ts:2460). 클릭 합계도 같은 id 기준이라 축이 하나다.
+        const directClicks = await getCampaignClickTotal(String(campaign.id)).catch(() => null);
         updateTrainingMetrics({
           sourceRef: getSourceRef(campaign.id),
           sentCount: successCount + failCount,
           successCount,
           failCount,
+          clickCount: directClicks,
         });
 
         syncCount++;

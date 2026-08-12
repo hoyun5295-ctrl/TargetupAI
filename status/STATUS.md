@@ -14,7 +14,7 @@
 | 도메인 작업 착수 전 사고 이력 (룰 원천=CLAUDE.md `read_lessons_first`) | lessons/LESSONS_{DB,FRONTEND,BACKEND,DEPLOY,ARCHITECTURE,META}.md | 해당 도메인 전체. DB·돈·환불=DB / UI·모달=FRONTEND / API·발송·AI=BACKEND / 배포·빌드·SSH=DEPLOY+OPS.md 해당 절 / 컨트롤타워=ARCHITECTURE / **매 답변 직전=META** |
 | **Harold님이 "브레인스토밍"이라고 말했을 때** · superpowers 스킬 선택 · Codex 라운드 운영·수용 판단 | **COLLAB.md** | 브레인스토밍 = §1 전체 정독 후 그대로 진행(의무) / 그 외 = 해당 절만 |
 | **Codex 리뷰를 돌릴 때** — 실행 절차·요청문 규격·멈춤 판정·복구 | **[CODEX-RUNBOOK.md](CODEX-RUNBOOK.md)** | 착수 전 §1·§2(의무) / 20분 무응답이면 §3·§4. 리뷰를 띄우기 전에 반드시 읽는다 — 같은 멈춤을 다섯 번 반복했다 |
-| **기능 이름을 부를 때** — 그 기능의 구조·불변 원칙·이력 | **[SOT-INDEX.md §0 기능 상설 SoT](SOT-INDEX.md)** | 해당 기능 행 → 그 기능 문서. **"여정"** · **"싱크에이전트"** · **"자동마케팅"** · **"템플릿"** · **"정산"** · **"이미지 스튜디오"** · **"자사몰 연동"** — 7개 기능이 각자 `docs/FEATURE-*.md`를 갖는다. 기능마다 자기 .md가 이력을 소유하고 STATUS는 참조만 한다(신규 기능도 이 형태로 등재) |
+| **기능 이름을 부를 때** — 그 기능의 구조·불변 원칙·이력 | **[SOT-INDEX.md §0 기능 상설 SoT](SOT-INDEX.md)** | 해당 기능 행 → 그 기능 문서. **"여정"** · **"싱크에이전트"** · **"자동마케팅"** · **"템플릿"** · **"정산"** · **"이미지 스튜디오"** · **"자사몰 연동"** · **"자기 개선 루프"** — 8개 기능이 각자 `docs/FEATURE-*.md`를 갖는다. 기능마다 자기 .md가 이력을 소유하고 STATUS는 참조만 한다(신규 기능도 이 형태로 등재) |
 | **프로젝트·트랙 SoT 문서·호출어를 찾을 때** | **[SOT-INDEX.md](SOT-INDEX.md)** | 해당 트랙 행만. **신규 프로젝트 SoT는 이 라우팅 표가 아니라 SOT-INDEX.md에 등재한다**(이 표는 도메인 문서 전용 상설) |
 | 시스템 구조 파악 | ARCHITECTURE.md | 해당 절만 |
 | 자사몰 연동·CDP·커넥터 작업 | INTEGRATIONS.md | 해당 provider 카드 / CDP 공통 절 |
@@ -59,7 +59,7 @@
 > ⛔ 불변 원칙·판정 계약은 여정 문서와 설계서가 소유 — 착수 전 [여정 문서 §2·§3](docs/FEATURE-JOURNEY.md)부터 읽는다. 이어달리기 = **DDL 0·발송 무변경** · dedup 축은 `trigger_event`(`template_code`로 되돌리면 repeat 3종이 서로를 오차단) · 프리셋은 서버가 계약값으로 덮어쓰고 저장에도 그 표식이 있을 때만 트리거를 싣는다
 > 잔여 = 실측만 — 이어달리기 1건(§9-6) · 스튜디오 6건·동작 변경 1건([여정 문서 §6-1 08-08(2)~(7)](docs/FEATURE-JOURNEY.md)) · 화면 실측 8종 · 자동 종료 기본화 · 별건 5(§9-A 2 + 기존 3)
 
-### 레거시 PAY 흡수 (Track D) — 충전·잔액 축 배포완료 + **0811 접수 2건 코드완료**(§15), 컷오버 전
+### 레거시 PAY 흡수 (Track D) — 충전·잔액 축 배포완료 + **0811 접수 2건 배포완료**(§15), 컷오버 전
 > SoT [통계·인프라](docs/2026-07-07-pay-absorption-track-d-design.md) · [충전·잔액](docs/2026-07-24-agent-prepaid-charge-design.md)(단독 재개용) · 기억 [[project_2026_0724_agent_prepaid_charge]] · 다음 = 7월 실충전 4개(`B0082`·`D0078`·`D0079`·`C0112`)에 `billing_type='prepaid'` 지정(283행 전부 postpaid라 지금은 충전 등록도 요청 탭도 열리지 않는다)
 > ⛔ 백필 경계 = 143 `SeqNo 7052`(07-23 14:38) — 컷오버 시 143 MAX가 그보다 크면 초과분 1회 더 / 잔액 권위 행 = `StoreId=CustId`, 대표 행 없는 계정(`B0046` 등) 합산 금지 / §5-4 요청·§5-3 실행·신청 원장 ≠ 지갑 원장 — 혼동 금지(§15) / `deposit_requests` 재사용 폐기 / 고객사 원장 조회는 소유 0건 = `1 = 0`(§15)
 > 잔여 = 한줄로 실측 1건 → 직원 143 PAY 입력 중단 → 서수란 선불·단가 자료 · §5-5 고아 대조 워커 · 강문희 143 종료 통지 · §8-8 런소프트 통장 대조 · 표시명·잔액 배포(SoT §13·§14) · **0811 접수 2건 실측 2**(고객사 충전 내역에 직원 충전·차감 표시 / 슈퍼 충전 폼 잔액 표시·충전 후 갱신 — §15. DDL 0) · 별건 피케이포유 인코딩 손상(§2-4)
@@ -93,11 +93,12 @@
 > ① **템플릿** — 호출어 **"템플릿"** → **[FEATURE-ALIMTALK-TEMPLATE.md](../docs/FEATURE-ALIMTALK-TEMPLATE.md)가 전부 소유**(구조·불변 원칙·이관 절차·이력·남은 것). 여기 다시 쓰지 않는다. 0804 = IMC 이관 실행 화면 신설·게이트 테넌트 격리·메트로시티 이관.
 > ② **0718 성능 후속** — 관측 사이클 1회전: 1순위 campaigns 발송 폴러 인덱스(EXPLAIN 후 처방) · 2순위 `balance_transactions` 잔액 SUM N+1(호출처 추적) · 그 후 M3/롤업. [핸드오프](docs/2026-07-18-frontend-splitting-incident-handoff.md) · [[project_2026_0717_dashboard_performance]]
 > ③ **아임웹·아이디룩 시연** — 스토어 등록 확인 → 테스트 몰 OAuth 리허설(pm2 로그+회원가입 1건 webhook) → 시연. INTEGRATIONS.md 아임웹 카드 · [[project_2026_0719_imweb_appstore_idlook]]
-> ④ **이미지 스튜디오** — 호출어 **"이미지 스튜디오"** → **[FEATURE-IMAGE-STUDIO.md](../docs/FEATURE-IMAGE-STUDIO.md)가 전부 소유**(구조·불변 원칙·카탈로그 규약·이력·남은 것 §8). 여기 다시 쓰지 않는다. 0809 = 185종·문구 위치 축 배포완료. **0811 = 249종·추천 용도 축·갤러리 페이징 코드완료**(문서 §7 0811행 · 배포 후 §5 예시 배치 재실행).
-> ⑤ **비토 라인 14·15 미결 4건** — ①배정 화면 게이팅 범위(Harold 미확인) ②라인그룹 DELETE가 `users.line_group_id` 미체크 ③sweeper 2종 bulk-only 사각 ④Codex 결과 미수령. [[project_2026_0717_bito_line14_15_lineadmin]]
-> ⑥ **인앱 잔여** — 웹 실측(쿠폰·CTA 정렬·허용표·AI 생성 1건) · 0717 직원 디버깅분 코드완료·미검증 · M3 네이버 env 키 등록 시 활성 · M6 이메일·인앱 이식(별도 설계). [[project_2026_0717_inapp_debug_session_incomplete]]
-> ⑦ **Local AI Ops Hub** — 설계 3부작 완료·Harold 결정(H-2 M0 착수) 대기. 실무보다 후순위. [[project_2026_0715_local_ai_ops_hub]]
-> ⑧ **선불 자동충전(입금 감지)** — ★0811 **보류**(월 입금 20건 미만 — 재개 조건은 기술이 아니라 건수). 축 조사 4종·구조적 사실·재개 첫 한 수 전부 [SoT §8](docs/2026-07-28-auto-charge-ibk-design.md). 호출어 "자동충전 개발재개"
+> ④ **이미지 스튜디오** — 호출어 **"이미지 스튜디오"** → **[FEATURE-IMAGE-STUDIO.md](../docs/FEATURE-IMAGE-STUDIO.md)가 전부 소유**(구조·불변 원칙·카탈로그 규약·이력·남은 것 §8). 여기 다시 쓰지 않는다. 0809 = 185종·문구 위치 축 배포완료. **0811 = 249종·추천 용도 축·갤러리 페이징 배포완료 + 예시 배치 완주**(문서 §7 0811행). 잔여 = 문서 §8.
+> ⑤ **자기 개선 루프** — 호출어 **"자기 개선 루프"** → **[FEATURE-AI-LEARNING.md](../docs/FEATURE-AI-LEARNING.md)가 전부 소유**(정체성 §2 · 불변 원칙 §3 · 단계 §6). 0811 = **Phase 0 코드완료**(문자 클릭 → 문안 학습 원장 배선 · DDL 0). 다음 = Phase 1 승자 환류.
+> ⑥ **비토 라인 14·15 미결 4건** — ①배정 화면 게이팅 범위(Harold 미확인) ②라인그룹 DELETE가 `users.line_group_id` 미체크 ③sweeper 2종 bulk-only 사각 ④Codex 결과 미수령. [[project_2026_0717_bito_line14_15_lineadmin]]
+> ⑦ **인앱 잔여** — 웹 실측(쿠폰·CTA 정렬·허용표·AI 생성 1건) · 0717 직원 디버깅분 코드완료·미검증 · M3 네이버 env 키 등록 시 활성 · M6 이메일·인앱 이식(별도 설계). [[project_2026_0717_inapp_debug_session_incomplete]]
+> ⑧ **Local AI Ops Hub** — 설계 3부작 완료·Harold 결정(H-2 M0 착수) 대기. 실무보다 후순위. [[project_2026_0715_local_ai_ops_hub]]
+> ⑨ **선불 자동충전(입금 감지)** — ★0811 **보류**(월 입금 20건 미만 — 재개 조건은 기술이 아니라 건수). 축 조사 4종·구조적 사실·재개 첫 한 수 전부 [SoT §8](docs/2026-07-28-auto-charge-ibk-design.md). 호출어 "자동충전 개발재개"
 > (지속) 비토 API 발송 경로 전환 검토 [[project_2026_0710_bito_api_direct_test]] · (보류) 팝폰 SDK 검증
 
 ---
@@ -112,7 +113,7 @@
 | 0731 레거시 143 폐기 — 이관·파기 완료 | 다우클라우드 반납 확인 3건(인스턴스+**볼륨** 삭제 / 스냅샷·백업 이미지 잔존 없음 / 과금 종료일) · 사무실 망에서 `pay.invitobiz.com:8080` 확인(66 경계는 통과 실측) | [[project_2026_0703_legacy_server_decommission]] · [폐기플랜](docs/레거시서버_폐기_플랜.md) §6·§7 0731행 |
 | 0730 접수 4건(스튜디오 단일 생성 동반) | **배포완료** — ⚠SDK 변경 포함이라 이후 배포에도 `build:all` 필수. 실측 4건(헤더 D-Day·쿠폰강조 끝색 / 슬라이드 크기 4종 / 발신프로필 채널ID 검색 / 자동마케팅 MMS 첨부·미첨부 보류 통지). 스튜디오분(생성 1장·2크레딧 / 인앱 삽입 크롭 0)은 [이미지 스튜디오 문서](../docs/FEATURE-IMAGE-STUDIO.md) §7 | [[project_2026_0730_studio_single_gen_and_tickets]] |
 | 0725 정산 결함·서수란 6건 (커밋 `d19f48fd`) | 화면 실측(웹 유형 NULL · 발신번호 페이징). 7월 청구 금액을 바꾸는 미해결 항목은 없다 | [[project_2026_0725_settlement_mms_gap_and_seo_tickets]] |
-| **0808 직원 접수 2건(임은지) + 0811 서수란 접수(충전관리)** — 슈퍼관리자 대기 뱃지 축 · 원클릭 임시보관 채널 표시 | 0808분 **배포완료**. **0811분 코드완료**(요금/정산 뱃지 3종 60초 주기 + 카운트 전용 조회 + 에이전트 충전 요청 뱃지 편입 · DDL 0). 실측 4 = ①위임장 대기가 **등록현황 관리** 탭 뱃지로 뜨는지 ②임시 보관 칩 채널 라벨 ③**고객사 신청 후 새로고침 없이 60초 안에 충전 관리 뱃지가 오르는지** ④에이전트 충전 요청도 그 뱃지에 잡히는지. 추가 과제 2 = `CHANNEL_LABEL` 4벌 통합 · `pendingManagers` 죽은 state 정리 | 경위·처방 = [LESSONS_FRONTEND](lessons/LESSONS_FRONTEND.md) 핵심원칙 상단 2항 · 계약 = `sender-alert-axis.test.ts`·`charge-alert-axis.test.ts`·`event-campaign-channel-label.test.ts` |
+| **0808 직원 접수 2건(임은지) + 0811 서수란 접수(충전관리)** — 슈퍼관리자 대기 뱃지 축 · 원클릭 임시보관 채널 표시 | 0808분·**0811분 전량 배포완료**(요금/정산 뱃지 3종 60초 주기 + 카운트 전용 조회 + 에이전트 충전 요청 뱃지 편입 · DDL 0). 실측 4 = ①위임장 대기가 **등록현황 관리** 탭 뱃지로 뜨는지 ②임시 보관 칩 채널 라벨 ③**고객사 신청 후 새로고침 없이 60초 안에 충전 관리 뱃지가 오르는지** ④에이전트 충전 요청도 그 뱃지에 잡히는지. 추가 과제 2 = `CHANNEL_LABEL` 4벌 통합 · `pendingManagers` 죽은 state 정리 | 경위·처방 = [LESSONS_FRONTEND](lessons/LESSONS_FRONTEND.md) 핵심원칙 상단 2항 · 계약 = `sender-alert-axis.test.ts`·`charge-alert-axis.test.ts`·`event-campaign-channel-label.test.ts` |
 | 0725 PAY 통계 발급명·대상ID | **배포완료** — 서수란 실측 | [[project_2026_0725_pay_stats_custnm_storeid]] |
 | 0724 DM 테스트 무과금 차단 | 서수란 실측 · 기존 running A/B 미발행 variant 점검 SQL | [[project_2026_0724_dm_test_no_charge_bypass]] |
 | 0723~24 PAY 에이전트 통계(발송ID·엑셀) | 서수란 실측 · 54/57 전환갭 확인 · billing 정산 반영 | [[project_2026_0723_pay_agent_stats_tabs]] |

@@ -199,4 +199,29 @@ export async function shortenUrlsInText(
   return result;
 }
 
+/**
+ * 캠페인 1건의 문자 클릭 합계 — 문안 학습 원장(`ai_training_logs.click_count`)에 넣을 반응 신호. (★ 2026-08-11)
+ *
+ * 자기 개선 루프 Phase 0: 그동안 문자 클릭은 `message_short_urls.click_count`와 변이 테이블에만 쌓이고
+ * **문안 학습 원장에는 안 들어갔다.** 받는 쪽(`copy-rag-retriever`)은 `click_count`가 있으면 클릭률로
+ * 정렬하게 이미 만들어져 있었는데 값이 없어 최신순으로 떨어지고 있었다 — 즉 "쓸수록 문안이 좋아진다"가
+ * 문자 채널에서만 멈춰 있었다(DM·이메일은 이미 환류 중).
+ *
+ * 한 캠페인이 링크를 여럿 담을 수 있어 **합계**다. 캠페인에 단축 URL이 없으면 0이 아니라 `null`을 돌려준다 —
+ * 0은 "클릭이 없었다"는 뜻이고, 링크가 없어 셀 수 없는 것과 다르다. 링크 없는 문안을 클릭률 0으로 학습하면
+ * 그 문안이 영원히 하위로 밀린다.
+ */
+export async function getCampaignClickTotal(campaignId: string): Promise<number | null> {
+  if (!campaignId) return null;
+  const r = await query(
+    `SELECT COUNT(*)::int AS links, COALESCE(SUM(click_count), 0)::int AS clicks
+       FROM message_short_urls
+      WHERE campaign_id = $1::uuid`,
+    [campaignId],
+  );
+  const links = Number(r.rows[0]?.links) || 0;
+  if (links === 0) return null; // 셀 수 없음 — 0으로 합성하지 않는다
+  return Number(r.rows[0]?.clicks) || 0;
+}
+
 export { SHORT_URL_BASE };

@@ -655,7 +655,7 @@ CT = `pay-stats.ts` `getAgentCustNameMap()`(원장 전량·60초 캐시·실패 
 
 ---
 
-## 15. 접수 2건 — 고객사 충전 내역 · 슈퍼 충전 폼 잔액 ★구현 완료 (2026-08-11)
+## 15. 접수 2건 — 고객사 충전 내역 · 슈퍼 충전 폼 잔액 ★배포 완료 (2026-08-11)
 
 ### 15-1. 충전내역 요청 (박성용 접수 · 런소프트 요청 · P3)
 
@@ -695,4 +695,15 @@ CT = `pay-stats.ts` `getAgentCustNameMap()`(원장 전량·60초 캐시·실패 
 - `agent_charge_orders`·`agent_charge_requests` 운영 실존을 `information_schema`로 확인(2026-08-11) — SCHEMA.md의 "CREATE 대기" 표기가 낡은 기록이어서 함께 정정.
 - 변경 파일 6: `utils/pay-stats.ts` · `routes/agent-charge-orders.ts` · `routes/admin.ts` · `utils/agentLabel.ts`(프론트 CT) · `components/manage/AgentChargeRequestTab.tsx` · `components/AgentChargePanel.tsx`.
 - **검증**: BE·FE tsc 0 · vitest **2,282 통과**(152 파일 — `buildChargeFilterSql` 열람 범위 계약 6건 신설). 자가 grep = 신규 프론트 파일 모델명 0·native dialog 0.
+- **2026-08-11 배포완료**(Harold 확인).
 - **실측 대기 2건**: ①고객사 계정으로 충전 내역에 직원 직접 충전·차감이 뜨는지 ②슈퍼 충전 폼에서 발송ID 선택 시 잔액이 뜨고, 충전 반영 후 갱신되는지.
+
+### 15-4. Codex 리뷰 범위 — 이 건은 대상이 아니었다 (2026-08-11 Harold 지적)
+
+작업 종결 직전 이 변경에 Codex 적대 검토를 걸었다가 **2라운드 중 중단**했다. CLAUDE.md `codex_review_after_code_change`의
+0804 확정 범위는 **돈·국세청 문서·DB 마이그레이션 경로**인데, 이 건은 **읽기 전용 조회와 화면**이다(DDL 0 · 금액을 움직이는
+쓰기 경로 무변경). "돈이 걸린 화면"이라는 이유로 범위를 넓혀 잡은 것이 잘못이었고, 1라운드 지적 3건 중 2건이 React 상태
+관리였다 — 0804에 "UI·React 상호작용은 대상 제외"로 이미 잘라 둔 바로 그 부류다.
+
+**판정 기준**: 금액을 움직이는 **쓰기 경로**나 **DDL**이 없으면 대상이 아니다. 조회·표시만 바뀌면 tsc·계약 테스트·자가 grep으로 끝낸다.
+(1라운드 지적 3건 자체는 실제 결함이라 수용해 정정했다 — §15-1·§15-2에 반영된 내용이 그것이다.)

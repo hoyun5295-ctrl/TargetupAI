@@ -101,8 +101,11 @@ interface TrainingMetricsParams {
   failCount: number;
   spamBlocked?: number;
   // ★ 2026-07-04 Tier 1 반응 신호(클릭·전환) — 컬럼 미생성(42703) 시 자동 폴백(배포 순서 자유)
-  clickCount?: number;
-  conversionCount?: number;
+  // ★ 2026-08-11 `null` 허용 — "클릭을 셀 수 없었다"(단축 URL이 없는 캠페인)를 0과 구분한다.
+  //   null이면 아래 wantsEngagement가 false가 되어 **클릭 열을 아예 안 건드린다**(기존 값 보존).
+  //   0으로 넘기면 "클릭 0회"로 학습돼 링크 없는 문안이 영원히 하위로 밀린다.
+  clickCount?: number | null;
+  conversionCount?: number | null;
 }
 
 // ============================================================
