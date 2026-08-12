@@ -29,6 +29,14 @@ export interface StudioTemplate {
   kind?: 'product' | 'event';
   /** 갤러리 카드 한 줄 설명(고객 노출). */
   desc: string;
+  /**
+   * ★ 2026-08-11 추천 용도(고객 노출) — "어떤 제품라인·행사에 쓰면 좋은가" 한 줄. (Harold 지시)
+   *
+   * `desc`가 **어떤 그림인지**를 말한다면 이 값은 **언제 고르면 되는지**를 말한다.
+   * 갤러리 카드와 제작 화면 양쪽에 뜬다 — 마케팅 담당자가 185종을 하나씩 열어 보지 않고 고르게 하는 축이다.
+   * ⛔ 브랜드 실명·혜택 수치(%·원·쿠폰·무료) 금지(§2-2). 제품군·행사 성격만 적는다.
+   */
+  useCase: string;
   /** 갤러리 카드 대표색(고객 노출). */
   accent: string;
   /** 예시 이미지 URL(운영 중 실제 생성 샘플로 채움 — 없으면 카드 스타일 목업 표시). */
@@ -50,6 +58,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-lux-dark', name: '프리미엄 다크 럭셔리', category: '뷰티',
     desc: '어두운 우드·대리석 위 고급 브랜드 무드', accent: '#3d2b22',
+    useCase: '고가 안티에이징·시그니처 스킨케어. 브랜드 대표 제품을 격 있게 보일 때',
     scaffold: 'A luxurious premium cosmetics campaign scene: dark wood paneled interior, polished black marble vanity counter, warm ambient lamp glow, tasteful props at the edges (a silk scarf, a slim flower vase with a single lily, art books, a small perfume bottle). High-end department store campaign atmosphere, sophisticated and calm, cinematic warm lighting.',
     textStyle: 'Elegant refined typography in warm cream/champagne tone, generous letter spacing for the small label, a large serif-feeling headline, understated sub-headline. Text placed in the upper area with luxury-brand restraint.',
     defaultTexts: { label: 'ONLINE EXCLUSIVE', title: '{productName}', subtitle: '' },
@@ -58,6 +67,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-clean-bright', name: '클린 브라이트 뷰티', category: '뷰티',
     desc: '밝은 베이지·드라이플라워 에디토리얼', accent: '#cbb9a7',
+    useCase: '데일리 기초·수분 크림 신제품 런칭. 깔끔한 첫인상이 필요할 때',
     scaffold: 'A bright high-end cosmetics editorial scene: soft beige seamless backdrop, warm diffuse daylight, delicate dried florals and small ceramic vases at the edges, a clean fabric-textured pedestal surface. Airy, minimal, magazine-quality styling.',
     textStyle: 'Minimal editorial typography in deep warm brown, small uppercase label, medium-weight headline, light sub-headline. Clean placement in the upper third.',
     defaultTexts: { label: 'SIGNATURE', title: '{productName}', subtitle: '{salePrice}' },
@@ -66,6 +76,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-aqua-fresh', name: '워터 프레시', category: '뷰티',
     desc: '물결·이슬의 수분 세럼 무드', accent: '#7fb8c9',
+    useCase: '수분 세럼·토너·미스트 등 촉촉함이 핵심인 제품',
     scaffold: 'A hydration-focused skincare scene: crystal clear water surface with gentle ripples, dewy droplets on glass, soft aqua and pale blue tones, fresh morning light refracting through water, a wet stone or glass platform for the product. Clean, dewy, ultra-fresh moisture feeling.',
     textStyle: 'Light airy typography in white with a subtle watery glow, thin elegant headline, small tracking-wide label. Fresh and clean placement in the upper area.',
     defaultTexts: { label: 'HYDRATION', title: '{productName}', subtitle: '{salePrice}' },
@@ -74,6 +85,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-spa-natural', name: '스파 내추럴', category: '뷰티',
     desc: '돌·타월·그린의 스파 릴랙스 무드', accent: '#8a9a83',
+    useCase: '바디·아로마·홈스파 세트. 휴식과 케어를 함께 말할 때',
     scaffold: 'A serene spa scene: smooth river stones, a rolled cream towel, eucalyptus branches, warm neutral tones with sage green accents, soft steam in the air, natural bamboo or stone surface. Calm wellness sanctuary atmosphere, gentle diffused light.',
     textStyle: 'Calm organic typography in deep sage or warm gray, lowercase-feeling softness, generous breathing room. Quiet spa-menu elegance in the upper area.',
     defaultTexts: { label: 'RELAX & CARE', title: '{productName}', subtitle: '' },
@@ -82,6 +94,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-glow-gold', name: '글로우 골드', category: '뷰티',
     desc: '골드 시머·보케의 홀리데이 럭스', accent: '#b98d4f',
+    useCase: '홀리데이 기획세트·선물용 한정판. 연말 선물 시즌',
     scaffold: 'A glamorous holiday luxury scene: shimmering gold bokeh lights in the background, champagne-gold silk fabric draped on the surface, subtle sparkle particles in the air, warm golden hour glow. Festive premium gift-season atmosphere, opulent but tasteful.',
     textStyle: 'Glamorous typography in bright gold with subtle shine, refined serif-feeling headline, delicate letter-spaced label. Festive luxury placement in the upper area.',
     defaultTexts: { label: 'HOLIDAY EDITION', title: '{productName}', subtitle: '' },
@@ -90,6 +103,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-pastel-makeup', name: '파우더 파스텔', category: '뷰티',
     desc: '파우더 번짐의 색조 메이크업 팝', accent: '#e3aab8',
+    useCase: '색조 신컬러·블러셔·아이섀도 출시',
     scaffold: 'A playful color cosmetics scene: soft pastel powder bursts frozen mid-air (blush pink, peach, lavender), a clean pastel seamless backdrop, subtle shimmer dust, smooth acrylic platform for the product. Fresh makeup-brand energy, bright and feminine.',
     textStyle: 'Chic modern typography in deep rose, playful but polished, medium headline with a cute small label. Placed in the upper area with balanced whitespace.',
     defaultTexts: { label: 'NEW COLOR', title: '{productName}', subtitle: '{salePrice}' },
@@ -99,6 +113,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-spring-garden', name: '스프링 가든', category: '뷰티',
     desc: '새싹·튤립 정원의 봄 생기 무드', accent: '#9fc98c',
+    useCase: '봄 시즌 기초 라인·가벼운 수분 제품',
     scaffold: 'A fresh spring garden skincare scene: young green sprouts and tulip stems around the edges, morning dew on leaves, soft pale-green and butter-yellow light, a clean stone or glass platform among the greenery. Vitamin-fresh new-season vitality, airy and hopeful.',
     textStyle: 'Fresh spring typography in deep leaf green, light clean headline, small uppercase label with wide tracking. Lively but calm placement in the upper area.',
     defaultTexts: { label: 'SPRING CARE', title: '{productName}', subtitle: '{salePrice}' },
@@ -107,6 +122,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-summer-cooling', name: '아이스 쿨링', category: '뷰티',
     desc: '얼음 결정·쿨민트의 여름 쿨링 무드', accent: '#6fc6d9',
+    useCase: '여름 진정·쿨링 제품, 자외선 후 케어',
     scaffold: 'A summer cooling skincare scene: crushed ice and frosted ice cubes scattered on a chilled surface, cool mint and icy blue tones, bright hard summer sunlight with crisp highlights, a frozen acrylic pedestal for the product, tiny frost vapor in the air. Instant-cooling suncare energy, crisp and invigorating.',
     textStyle: 'Crisp cool typography in icy white with a subtle frost edge, bold clean headline, small chilled-blue label. High-summer freshness in the upper area.',
     defaultTexts: { label: 'SUMMER COOLING', title: '{productName}', subtitle: '{salePrice}' },
@@ -115,6 +131,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-autumn-amber', name: '어텀 앰버', category: '뷰티',
     desc: '앰버·팜파스의 포근한 가을 보습 무드', accent: '#a9683b',
+    useCase: '가을 보습 오일·리치 크림 등 유분 케어',
     scaffold: 'A warm autumn skincare scene: amber and terracotta tones, dried pampas grass and cinnamon-toned leaves at the edges, soft knit fabric draped on the surface, low golden dusk light with long gentle shadows. Deep-moisture comfort of the season, cozy and mature.',
     textStyle: 'Warm autumn typography in deep amber brown, serif-feeling medium headline, small letter-spaced label. Calm seasonal warmth in the upper area.',
     defaultTexts: { label: 'AUTUMN CARE', title: '{productName}', subtitle: '{salePrice}' },
@@ -123,6 +140,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-winter-frost', name: '윈터 프로스트', category: '뷰티',
     desc: '성에·설원 실버블루의 겨울 리페어 무드', accent: '#9db4c9',
+    useCase: '겨울 고보습·장벽 리페어 라인',
     scaffold: 'A winter repair skincare scene: frosted glass panel with delicate ice crystal patterns, fine snow dust on a pale surface, cool silver-blue and soft white tones, quiet overcast winter light, a single frozen branch at the edge. Protective calm against the cold, serene and pristine.',
     textStyle: 'Serene winter typography in cool deep slate blue, thin elegant headline, tiny frost-white label. Quiet pristine placement in the upper area.',
     defaultTexts: { label: 'WINTER REPAIR', title: '{productName}', subtitle: '' },
@@ -133,6 +151,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'cafe-wood-natural', name: '우드 내추럴 카페', category: '카페·음료',
     desc: '원목·자연광의 따뜻한 카페 무드', accent: '#8a6d52',
+    useCase: '원두·드립백 등 매장 시그니처 메뉴',
     scaffold: 'A cozy specialty cafe scene: warm wooden table, soft natural window light from the front, subtle green plant and linen napkin at the edges, gentle steam or freshness in the air. Inviting artisan coffee shop atmosphere.',
     textStyle: 'Warm friendly typography in cream white with a soft shadow for readability, hand-crafted cafe menu feel, headline prominent in the upper area.',
     defaultTexts: { label: 'NEW DRINK', title: '{productName}', subtitle: '{salePrice}' },
@@ -141,6 +160,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'cafe-summer-pool', name: '시원한 섬머 블루', category: '카페·음료',
     desc: '물결·청량감의 여름 음료 포스터', accent: '#3aa7d9',
+    useCase: '여름 시즌 음료·아이스 메뉴',
     scaffold: 'A refreshing summer beverage scene: sparkling clear water surface with sunlight caustics, bright sky blue tones, ice cubes and a splash of freshness, maybe watermelon or citrus slices floating at the edges. Cool, thirst-quenching, vibrant summer energy.',
     textStyle: 'Playful bold typography in white and deep blue with strong contrast, energetic summer-sale poster feel, headline large in the upper area.',
     defaultTexts: { label: '여름 한정', title: '{productName}', subtitle: '{salePrice}' },
@@ -149,6 +169,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'cafe-deep-roast', name: '딥 로스트', category: '카페·음료',
     desc: '에스프레소·원두의 진한 다크 무드', accent: '#4a3227',
+    useCase: '에스프레소·다크 로스트 원두',
     scaffold: 'A rich dark coffee scene: scattered roasted coffee beans, deep espresso brown tones, dramatic side lighting with warm highlights, slow steam rising, dark slate or walnut surface. Intense artisan roastery atmosphere, moody and premium.',
     textStyle: 'Strong confident typography in warm cream on the dark background, bold headline with tight kerning, small caps label. Roastery craft-brand feel in the upper area.',
     defaultTexts: { label: 'DEEP ROAST', title: '{productName}', subtitle: '{salePrice}' },
@@ -157,6 +178,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'cafe-brunch-morning', name: '브런치 모닝', category: '카페·음료',
     desc: '아침광 테이블의 밝은 브런치 무드', accent: '#d9b98a',
+    useCase: '브런치·모닝 세트 메뉴',
     scaffold: 'A bright weekend brunch scene: white marble or light oak table, morning sunlight with soft long shadows, fresh flowers in a small vase, croissant and linen at the edges, airy and cheerful. Fresh morning-cafe lifestyle atmosphere.',
     textStyle: 'Light cheerful typography in soft charcoal, friendly rounded feel, medium headline with a small welcoming label. Bright morning-menu placement in the upper area.',
     defaultTexts: { label: 'MORNING SET', title: '{productName}', subtitle: '{salePrice}' },
@@ -165,6 +187,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'cafe-dessert-sweet', name: '디저트 스위트', category: '카페·음료',
     desc: '베이커리 쇼케이스의 달콤한 무드', accent: '#c98a6d',
+    useCase: '케이크·베이커리 디저트',
     scaffold: 'A sweet bakery dessert scene: warm caramel and cream tones, soft powdered sugar dust in the air, elegant cake stand or wooden board, blurred bakery showcase lights in the background. Tempting patisserie atmosphere, warm and indulgent.',
     textStyle: 'Sweet inviting typography in chocolate brown and cream, slightly rounded headline, dainty small label. Patisserie-menu charm in the upper area.',
     defaultTexts: { label: 'SWEET PICK', title: '{productName}', subtitle: '{salePrice}' },
@@ -173,6 +196,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'cafe-winter-cozy', name: '윈터 코지', category: '카페·음료',
     desc: '니트·온기의 겨울 시즌 음료', accent: '#8c5a4f',
+    useCase: '겨울 따뜻한 음료·시즌 라떼',
     scaffold: 'A cozy winter cafe scene: chunky knit fabric and warm plaid at the edges, gentle snowfall visible through a window behind, warm string lights bokeh, rising steam, cinnamon sticks and pine sprigs as subtle props. Heartwarming winter-holiday cafe atmosphere.',
     textStyle: 'Warm cozy typography in cream with a soft glow, gentle rounded headline, festive small label. Comforting winter-menu placement in the upper area.',
     defaultTexts: { label: '겨울 한정', title: '{productName}', subtitle: '{salePrice}' },
@@ -182,6 +206,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'cafe-spring-blossom-terrace', name: '벚꽃 테라스', category: '카페·음료',
     desc: '벚꽃 가지 아래 봄 테라스 무드', accent: '#dfa8b6',
+    useCase: '봄 시즌 음료·벚꽃 한정 메뉴',
     scaffold: 'A spring cafe terrace scene: an outdoor pastel table under blooming cherry-blossom branches, a few petals resting on the table, soft spring breeze feeling, warm afternoon light through the blossoms, blurred park greenery behind. First-warm-day terrace atmosphere, romantic and light.',
     textStyle: 'Light spring typography in soft rose-brown, gentle rounded headline, petal-delicate small label. Airy placement in the upper area.',
     defaultTexts: { label: '봄 시즌', title: '{productName}', subtitle: '{salePrice}' },
@@ -190,6 +215,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'cafe-autumn-maple', name: '단풍 어텀 카페', category: '카페·음료',
     desc: '단풍·담요·라떼 스팀의 가을 카페 무드', accent: '#c07840',
+    useCase: '가을 시즌 라떼·따뜻한 디저트',
     scaffold: 'An autumn cafe scene: maple and ginkgo leaves in deep red and gold scattered at the edges, a plaid wool blanket folded on a wooden bench-table, warm latte steam rising, golden late-afternoon sunlight, crisp autumn-air clarity. Sweater-weather cafe comfort, rich and nostalgic.',
     textStyle: 'Cozy autumn typography in warm chestnut brown on cream, medium friendly headline, small leaf-toned label. Comforting seasonal-menu placement in the upper area.',
     defaultTexts: { label: '가을 한정', title: '{productName}', subtitle: '{salePrice}' },
@@ -200,6 +226,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'pop-retro-block', name: '레트로 팝 색블록', category: '신메뉴·팝',
     desc: '체커보드·원색 대비의 임팩트 팝', accent: '#2b2f77',
+    useCase: '신메뉴 출시를 강하게 알릴 때',
     scaffold: 'A bold retro pop-art promotional scene: strong flat color blocks (deep blue, warm red, yellow), checkerboard pattern accents at the edges, diagonal banner energy, playful vintage Korean street poster vibe. High contrast, fun, eye-catching.',
     textStyle: 'Thick bold display typography with strong outlines, mixed scale composition like a retro Korean poster, badge-like small label. Text is a main design element.',
     defaultTexts: { label: '신메뉴 등장!', title: '{productName}', subtitle: '' },
@@ -208,6 +235,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'pop-cute-pastel', name: '파스텔 큐트 팝', category: '신메뉴·팝',
     desc: '파스텔 톤의 귀엽고 산뜻한 팝', accent: '#f5a8c0',
+    useCase: '디저트·간식류 신제품',
     scaffold: 'A cute pastel promotional scene: soft pink and cream color background with simple rounded shapes, small confetti or sticker-like accents, sweet dessert-shop energy, clean and adorable.',
     textStyle: 'Rounded friendly typography in deep rose and white, cute badge label, cheerful and approachable feel.',
     defaultTexts: { label: 'NEW', title: '{productName}', subtitle: '{salePrice}' },
@@ -216,6 +244,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'pop-neon-night', name: '네온 나이트', category: '신메뉴·팝',
     desc: '네온사인·야간의 야식·배달 무드', accent: '#c33fa0',
+    useCase: '야식·배달 메뉴·심야 영업',
     scaffold: 'A vibrant neon night scene: dark urban background with glowing neon sign shapes (pink, cyan, purple), wet street light reflections, late-night delivery-food energy, electric and appetizing. Bold nightlife promotional atmosphere.',
     textStyle: 'Neon-glow typography — bright pink or cyan with luminous edges on the dark background, energetic bold headline, small glowing label. Night-market sign energy.',
     defaultTexts: { label: '야식 추천', title: '{productName}', subtitle: '' },
@@ -224,6 +253,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'pop-comic-burst', name: '코믹 팝', category: '신메뉴·팝',
     desc: '만화 효과·하프톤의 유쾌한 팝', accent: '#e8b23a',
+    useCase: '유쾌한 톤의 신메뉴·이벤트 메뉴',
     scaffold: 'A comic-book style promotional scene: halftone dot patterns, dynamic burst and starburst shapes, bold primary colors (yellow, red, blue), speech-bubble energy, playful cartoon action feel. Fun and loud pop-art composition.',
     textStyle: 'Comic display typography — chunky headline with thick outline like a cartoon sound effect, tilted for energy, badge label in a burst shape. Loud and playful.',
     defaultTexts: { label: 'WOW!', title: '{productName}', subtitle: '' },
@@ -232,6 +262,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'pop-vintage-print', name: '빈티지 인쇄 광고', category: '신메뉴·팝',
     desc: '옛 신문·전단 감성의 레트로 인쇄', accent: '#c9b78a',
+    useCase: '레트로 콘셉트 메뉴·복고 마케팅',
     scaffold: 'A vintage Korean print-advertisement scene: aged cream paper texture, retro ornamental border frames, muted ink tones (faded red, navy, sepia), old-fashioned promotional flyer layout energy, nostalgic charm of decades-old newspaper ads.',
     textStyle: 'Vintage print typography — classic serif-feeling headline like old letterpress, decorative small label inside a simple ornament frame, slightly imperfect ink texture.',
     defaultTexts: { label: '오늘의 추천', title: '{productName}', subtitle: '{salePrice}' },
@@ -241,6 +272,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'pop-strawberry-season', name: '딸기 시즌 팝', category: '신메뉴·팝',
     desc: '딸기 레드·크림의 상큼한 시즌 팝', accent: '#e25864',
+    useCase: '딸기 시즌 한정 메뉴',
     scaffold: 'A strawberry-season promotional scene: fresh strawberry red and soft cream color blocks, playful strawberry and cream-swirl graphic shapes bouncing around the edges, tiny seed-dot pattern accents, juicy and adorable dessert-season energy. Bright, sweet, irresistible.',
     textStyle: 'Juicy playful typography — bold rounded headline in cream white with a strawberry-red outline, cute fruit-badge label. Sweet and punchy composition.',
     defaultTexts: { label: '딸기 시즌', title: '{productName}', subtitle: '{salePrice}' },
@@ -249,6 +281,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'pop-tropical-sunset', name: '트로피컬 썸머 팝', category: '신메뉴·팝',
     desc: '야자수·선셋 그라디언트의 여름 팝', accent: '#f08a3c',
+    useCase: '여름 한정 음료·트로피컬 메뉴',
     scaffold: 'A retro tropical summer promotional scene: bold sunset gradient background (coral orange to pink to violet), black palm-leaf silhouettes framing the corners, retro sun rays and tiny pineapple or citrus graphic accents, 80s beach-resort poster energy. Vibrant vacation excitement.',
     textStyle: 'Retro summer typography — thick display headline in warm white with a sunset-pink shadow, wave-shaped small label. Holiday-poster boldness.',
     defaultTexts: { label: '여름 한정', title: '{productName}', subtitle: '' },
@@ -257,6 +290,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'pop-halloween-night', name: '핼러윈 팝', category: '신메뉴·팝',
     desc: '펌킨 오렌지·바이올렛의 유쾌한 핼러윈 팝', accent: '#8a4fc9',
+    useCase: '핼러윈 한정 메뉴·시즌 팝업',
     scaffold: 'A playful halloween promotional scene: deep violet night background with pumpkin-orange accents, cute sticker-style bats, pumpkins and candy shapes floating around the edges, a mischievous crescent moon glow, spooky-cute trick-or-treat energy — fun, never scary.',
     textStyle: 'Spooky-fun typography — chunky headline in pumpkin orange with a wobbly hand-drawn feel, small bat-badge label in violet. Mischievous party energy.',
     defaultTexts: { label: 'HALLOWEEN', title: '{productName}', subtitle: '' },
@@ -265,6 +299,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'pop-christmas-toy', name: '크리스마스 토이 팝', category: '신메뉴·팝',
     desc: '캔디케인·진저브레드의 신나는 성탄 팝', accent: '#cf4436',
+    useCase: '크리스마스 한정 메뉴·홀리데이 세트',
     scaffold: 'A cheerful christmas toy-shop promotional scene: bright flat red and pine green color blocks, playful candy canes, gingerbread and gift-box sticker graphics tumbling around the edges, white snow-dot confetti, jolly cartoon holiday-market energy. Loud, warm and merry.',
     textStyle: 'Merry bouncy typography — bold headline in snow white with a christmas-red outline, ribbon-tag small label in green. Festive toy-package fun.',
     defaultTexts: { label: '크리스마스', title: '{productName}', subtitle: '' },
@@ -275,6 +310,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'sale-bold-impact', name: '볼드 세일 임팩트', category: '세일·이벤트',
     desc: '큰 숫자·강한 대비의 세일 포스터', accent: '#e2483d',
+    useCase: '큰 폭 할인을 한눈에 알릴 때',
     scaffold: 'A high-impact sale campaign scene: bold red and deep blue color energy, dynamic diagonal composition, celebratory confetti or percent-tag graphic accents around the edges, urgent shopping-festival atmosphere.',
     textStyle: 'Very large ultra-bold sale typography as the hero element, white with red accents and strong outline, the discount headline dominates the composition.',
     defaultTexts: { label: '기간 한정', title: '[혜택은 직접 입력해주세요]', subtitle: '' },
@@ -283,6 +319,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'sale-elegant-event', name: '엘레강트 이벤트', category: '세일·이벤트',
     desc: '고급스러운 절제된 프로모션', accent: '#b9a06b',
+    useCase: '프리미엄 브랜드의 절제된 프로모션',
     scaffold: 'An elegant premium promotion scene: deep charcoal background with subtle gold light streaks, refined celebratory mood without clutter, luxury gift atmosphere, soft spotlight on the product area.',
     textStyle: 'Refined gold-tone typography, generous spacing, understated luxury promotion feel — quiet confidence rather than loud sale energy.',
     defaultTexts: { label: 'SPECIAL OFFER', title: '{productName}', subtitle: '[혜택은 직접 입력해주세요]' },
@@ -291,6 +328,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'sale-black-gold', name: '블랙 & 골드 특가', category: '세일·이벤트',
     desc: '블랙 배경·골드 대형 숫자의 특가', accent: '#1a1a1a',
+    useCase: '연중 최대 세일·특가 기획전',
     scaffold: 'A premium black-sale campaign scene: deep matte black background, dramatic gold light rays and fine gold particle dust, sleek reflective black surface for the product, high-tension shopping event atmosphere like a year-end mega sale.',
     textStyle: 'Massive metallic-gold typography on black — the offer headline is the hero, tight bold letters with a subtle metallic sheen, small white label above. Maximum contrast and prestige.',
     defaultTexts: { label: 'BLACK SALE', title: '[혜택은 직접 입력해주세요]', subtitle: '' },
@@ -299,6 +337,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'sale-festa-gift', name: '쇼핑 페스타', category: '세일·이벤트',
     desc: '선물상자·풍선·콘페티의 축제 무드', accent: '#d94f7e',
+    useCase: '기념일 쇼핑 페스타·사은품 이벤트',
     scaffold: 'A festive shopping-festival scene: colorful gift boxes with ribbons stacked at the edges, floating balloons, falling confetti, bright celebratory pastel-vivid palette, joyful department-store event energy.',
     textStyle: 'Festive bouncy typography — bright white headline with a colorful drop shadow, ribbon-like label banner, celebratory and generous. Joyful event-poster placement.',
     defaultTexts: { label: 'SHOPPING FESTA', title: '{productName}', subtitle: '[혜택은 직접 입력해주세요]' },
@@ -307,6 +346,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'sale-time-urgent', name: '타임 세일', category: '세일·이벤트',
     desc: '시계·사선 스트라이프의 긴박한 특가', accent: '#e8842e',
+    useCase: '타임세일·오늘만 특가',
     scaffold: 'An urgent flash-sale scene: bold diagonal warning stripes (orange and black) at the edges, a subtle large clock face motif in the background, spotlight beam on the product area, high-urgency limited-time energy.',
     textStyle: 'Urgent condensed typography — tall bold headline slightly italicized for speed, stopwatch-feeling small label, strong white-on-orange contrast. Countdown tension.',
     defaultTexts: { label: '오늘만', title: '[혜택은 직접 입력해주세요]', subtitle: '' },
@@ -315,6 +355,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'sale-thanks-warm', name: '단골 감사제', category: '세일·이벤트',
     desc: '리본·따뜻한 톤의 고객 감사 이벤트', accent: '#b0714f',
+    useCase: '단골 고객 감사 이벤트',
     scaffold: 'A warm customer-appreciation scene: soft terracotta and cream tones, a gentle satin ribbon across the lower edge, warm side light like late afternoon, small heartfelt props (a handwritten-style card, dried flowers). Sincere thank-you event atmosphere.',
     textStyle: 'Warm sincere typography in deep brown, gentle serif-feeling headline, handwritten-warmth small label. Grateful and personal, placed with calm balance.',
     defaultTexts: { label: '고객 감사제', title: '{productName}', subtitle: '[혜택은 직접 입력해주세요]' },
@@ -324,6 +365,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'sale-spring-renewal', name: '봄맞이 세일', category: '세일·이벤트',
     desc: '꽃잎 콘페티·파스텔의 새단장 세일', accent: '#8fbf6f',
+    useCase: '봄맞이 시즌 세일·새단장',
     scaffold: 'A spring renewal sale scene: fresh pastel green and blossom-pink palette, flower-petal confetti drifting down, light ribbon streamers at the top corners, bright clean daylight, new-beginning shopping energy. Cheerful seasonal refresh atmosphere.',
     textStyle: 'Bright spring sale typography — bold friendly headline in deep green with white highlights, petal-badge small label. Energetic but fresh, dominating the upper area.',
     defaultTexts: { label: '봄맞이 특가', title: '[혜택은 직접 입력해주세요]', subtitle: '' },
@@ -332,6 +374,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'sale-summer-splash', name: '썸머 스플래시 세일', category: '세일·이벤트',
     desc: '물보라·파라솔 그래픽의 시원한 특가', accent: '#1f86c9',
+    useCase: '여름 시즌 세일·바캉스 기획전',
     scaffold: 'A splashy summer sale scene: dynamic clear-water splash frozen mid-air, bold cool blue with coral accents, playful parasol and watermelon-slice graphic elements at the edges, strong beach-festival sale energy, bright high-noon light. Refreshing and loud.',
     textStyle: 'Splash-bold typography — very large tilted headline in white with a deep blue outline and water-drop accents, sunburst small label. Maximum summer impact.',
     defaultTexts: { label: '여름 특가', title: '[혜택은 직접 입력해주세요]', subtitle: '' },
@@ -340,6 +383,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'sale-season-off', name: '시즌 오프', category: '세일·이벤트',
     desc: '행잉랙·택 모티프의 시즌오프 클리어런스', accent: '#8c7a5f',
+    useCase: '시즌오프·재고 정리 세일',
     scaffold: 'A season-off clearance scene: warm neutral studio backdrop with a minimalist clothing rack silhouette and kraft-paper hang tags as graphic motifs, soft editorial light, calm sophisticated end-of-season mood with a clear promotional focus. Understated but urgent.',
     textStyle: 'Editorial sale typography — large refined headline in deep charcoal, a kraft-tag shaped small label, generous spacing. Fashion-outlet elegance with clear sale intent.',
     defaultTexts: { label: 'SEASON OFF', title: '[혜택은 직접 입력해주세요]', subtitle: '' },
@@ -348,6 +392,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'sale-winter-ice', name: '윈터 아이스 세일', category: '세일·이벤트',
     desc: '얼음 결정·아이스블루의 겨울 파이널 세일', accent: '#5b8fc9',
+    useCase: '겨울 파이널 세일·연말 정리',
     scaffold: 'A winter clearance sale scene: crisp ice-blue palette with frost crystal patterns creeping from the corners, a frozen-glass price-tag motif, cool white spotlight on the product area, sharp wintry sparkle in the air. Cold colors, hot deal tension.',
     textStyle: 'Frozen-bold typography — massive headline in icy white with a frosted blue edge, snowflake-accent small label. Strong winter-sale contrast in the upper area.',
     defaultTexts: { label: '겨울 특가', title: '[혜택은 직접 입력해주세요]', subtitle: '' },
@@ -358,6 +403,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-studio-clean', name: '스튜디오 클린', category: '패션',
     desc: '뉴트럴 배경의 미니멀 스튜디오컷', accent: '#9a9a9a',
+    useCase: '베이직 아이템 신상 입고. 옷 자체를 정확히 보여줄 때',
     scaffold: 'A clean fashion campaign scene: neutral gray seamless studio backdrop, soft directional light with gentle shadow, minimal modern styling, premium lookbook atmosphere.',
     textStyle: 'Modern sans-serif typography in white or black depending on contrast, small tracking-wide label, confident medium headline. Fashion lookbook restraint.',
     defaultTexts: { label: 'COLLECTION', title: '{productName}', subtitle: '' },
@@ -366,6 +412,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-street-urban', name: '스트리트 어반', category: '패션',
     desc: '콘크리트·도시 그림자의 스트리트 무드', accent: '#6b6f75',
+    useCase: '스트리트·유니섹스 캐주얼',
     scaffold: 'An urban streetwear scene: raw concrete wall with hard sunlight and sharp diagonal shadows, asphalt texture below, city atmosphere with a hint of chain-link or metal edge, cool tones with one warm light accent. Bold street-culture energy.',
     textStyle: 'Street-style typography — heavy condensed headline like stencil or poster paste-up, small tag-like label, high contrast white or black. Raw and confident.',
     defaultTexts: { label: 'STREET', title: '{productName}', subtitle: '' },
@@ -374,6 +421,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-magazine-serif', name: '매거진 에디토리얼', category: '패션',
     desc: '화이트 지면·대형 세리프의 잡지 표지', accent: '#e8e6e1',
+    useCase: '시즌 컬렉션 대표 룩·브랜드 캠페인',
     scaffold: 'A high-fashion magazine editorial scene: clean off-white studio space like a magazine page, one dramatic soft shadow, minimal styling with a single elegant prop (a chair edge or fabric drape), sophisticated whitespace-driven composition.',
     textStyle: 'Editorial masthead typography — very large elegant serif headline like a fashion magazine cover, tiny caption-style label and subtitle, black ink on white. The type IS the design.',
     defaultTexts: { label: 'EDITION', title: '{productName}', subtitle: '' },
@@ -382,6 +430,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-season-lookbook', name: '시즌 룩북', category: '패션',
     desc: '계절 소재·텍스처 배경의 룩북 컷', accent: '#a8917a',
+    useCase: '시즌 신상 룩북 전체 소개',
     scaffold: 'A seasonal fashion lookbook scene: natural seasonal textures as the backdrop (linen and rattan for warm seasons, wool and knit for cold seasons), soft natural light, styled flat-lay props at the edges, warm organic fashion-catalog atmosphere.',
     textStyle: 'Lookbook typography — medium refined headline with wide letter-spaced season label, warm neutral ink tones, catalog-page balance in the upper area.',
     defaultTexts: { label: 'SEASON LOOK', title: '{productName}', subtitle: '{salePrice}' },
@@ -390,6 +439,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-boutique-spot', name: '부티크 스포트라이트', category: '패션',
     desc: '벨벳·스포트라이트의 럭셔리 부티크', accent: '#5a3a4a',
+    useCase: '하이엔드 드레스·프리미엄 라인',
     scaffold: 'A luxury boutique display scene: deep burgundy velvet drapery, a single dramatic spotlight from above creating a circle of light, dark surroundings, museum-display prestige, subtle dust particles in the light beam.',
     textStyle: 'Prestige typography — slim elegant headline in champagne white, wide-spaced uppercase label, placed inside the calm dark area. Quiet couture confidence.',
     defaultTexts: { label: 'BOUTIQUE', title: '{productName}', subtitle: '' },
@@ -399,6 +449,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-spring-outing', name: '스프링 아우팅', category: '패션',
     desc: '꽃핀 정원길·봄 햇살의 야외 화보 무드', accent: '#c5d3a0',
+    useCase: '봄 원피스·가벼운 아우터',
     scaffold: 'A spring outdoor fashion editorial scene: a garden path with blooming shrubs and soft green haze, gentle warm sunlight with a light lens glow, fresh air feeling, natural depth of field like an outdoor lookbook shoot. Light, breezy new-season romance.',
     textStyle: 'Breezy editorial typography — light serif-feeling headline in deep moss green, small airy label with wide tracking. Natural catalog placement in the upper area.',
     defaultTexts: { label: 'S/S', title: '{productName}', subtitle: '' },
@@ -407,6 +458,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-summer-resort', name: '썸머 리조트', category: '패션',
     desc: '백사장·터쿼이즈 바다의 바캉스 화보 무드', accent: '#4fb8c4',
+    useCase: '여름 리조트룩·수영복·린넨 의류',
     scaffold: 'A summer resort fashion scene: white sand beach with a turquoise sea horizon, sharp midday sun and clean shadows, a hint of palm shade at one edge, minimal resort-hotel elegance like a vacation campaign shoot. Sun-soaked freedom, premium vacance mood.',
     textStyle: 'Resort typography — clean white headline with strong legibility against the bright scene, tiny nautical-spaced label. Effortless luxury in the upper area.',
     defaultTexts: { label: 'VACANCE', title: '{productName}', subtitle: '' },
@@ -415,6 +467,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-autumn-city', name: '어텀 시티', category: '패션',
     desc: '은행나무 가로수길·트렌치 무드의 가을 화보', accent: '#b8863f',
+    useCase: '트렌치·자켓 등 가을 아우터',
     scaffold: 'An autumn city fashion scene: a tree-lined avenue with golden ginkgo leaves, fallen leaves on the pavement, warm low afternoon sun flaring softly between buildings, trench-coat-weather atmosphere like a street-style editorial. Cinematic urban autumn.',
     textStyle: 'City editorial typography — confident medium serif headline in dark espresso, small classic label. Timeless autumn-campaign placement in the upper area.',
     defaultTexts: { label: 'F/W', title: '{productName}', subtitle: '' },
@@ -423,6 +476,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-winter-snow', name: '윈터 스노우 시티', category: '패션',
     desc: '눈 내리는 저녁 거리·가로등 불빛의 겨울 화보', accent: '#7d8ba0',
+    useCase: '패딩·코트 등 겨울 아우터',
     scaffold: 'A winter city fashion scene: softly falling snow on a quiet evening street, warm streetlamp glow against cool blue dusk, faint breath-fog in the cold air, wool-coat season atmosphere like a winter campaign film still. Elegant, cinematic warmth in the cold.',
     textStyle: 'Winter campaign typography — slim elegant headline in warm ivory glowing gently against the dusk, small refined label. Quiet cinematic placement in the upper area.',
     defaultTexts: { label: 'WINTER', title: '{productName}', subtitle: '' },
@@ -433,6 +487,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'minimal-stone', name: '스톤 미니멀', category: '미니멀',
     desc: '돌 단상·여백의 정제된 미니멀', accent: '#d8d2c8',
+    useCase: '제품 하나를 조용히 강조할 때',
     scaffold: 'A minimal product scene: a single travertine stone pedestal on a soft warm gradient backdrop, generous negative space, subtle glow behind the pedestal, gallery-like stillness.',
     textStyle: 'Quiet minimal typography in warm dark gray, small headline, lots of breathing room — the emptiness is the design.',
     defaultTexts: { label: '', title: '{productName}', subtitle: '{salePrice}' },
@@ -441,6 +496,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'email-wide-hero', name: '와이드 히어로', category: '미니멀',
     desc: '이메일 상단용 가로 히어로 (16:9 추천)', accent: '#6b7d8a',
+    useCase: '이메일 상단 배너·가로형 히어로가 필요할 때',
     scaffold: 'A wide premium hero banner scene: product placed on one side on an elegant surface, warm ambient interior softly blurred behind, generous empty space on the other side reserved for the headline. Sophisticated e-commerce hero banner.',
     textStyle: 'Left-aligned editorial typography in the empty side: small label, strong headline, light sub-headline. Balanced against the product.',
     defaultTexts: { label: 'ONLINE STORE', title: '{productName}', subtitle: '{salePrice}' },
@@ -449,6 +505,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'minimal-mono-shadow', name: '모노크롬 롱섀도', category: '미니멀',
     desc: '단색 배경·긴 그림자의 조형적 미니멀', accent: '#c9c3b8',
+    useCase: '단품 신상·디자인 제품',
     scaffold: 'A sculptural minimal scene: one single muted color filling the entire background and floor seamlessly, hard low-angle sunlight casting one long dramatic shadow from the product, nothing else. Architectural stillness, bold emptiness.',
     textStyle: 'Ultra-minimal typography — small precise headline in a darker shade of the background color, tiny label, positioned off-center with deliberate asymmetry.',
     defaultTexts: { label: '', title: '{productName}', subtitle: '' },
@@ -457,6 +514,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'minimal-paper-geo', name: '페이퍼 지오메트리', category: '미니멀',
     desc: '종이 질감·기하 도형의 아트 미니멀', accent: '#d9cdbf',
+    useCase: '문구·라이프스타일 소품',
     scaffold: 'A paper-art minimal scene: layered paper textures in soft neutral tones, simple geometric shapes (an arch, a circle, a folded plane) composing the backdrop, delicate paper shadows, craft-gallery sophistication.',
     textStyle: 'Graphic minimal typography — clean geometric sans headline, small label aligned to a shape edge, muted ink tone. Design-studio poise.',
     defaultTexts: { label: 'OBJECT', title: '{productName}', subtitle: '{salePrice}' },
@@ -466,6 +524,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'minimal-spring-branch', name: '블로썸 브랜치', category: '미니멀',
     desc: '여백 속 벚꽃 가지 하나의 봄 미니멀', accent: '#e3c3cb',
+    useCase: '봄 시즌 단품 소개',
     scaffold: 'A minimal spring scene: one single cherry-blossom branch entering the frame from a corner, vast warm-white negative space, a few petals resting near the product, soft even daylight. Serene spring stillness — the emptiness holds the season.',
     textStyle: 'Delicate minimal typography — small precise headline in muted rose-gray, generous emptiness around the text. Whisper-quiet spring elegance.',
     defaultTexts: { label: '', title: '{productName}', subtitle: '{salePrice}' },
@@ -474,6 +533,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'minimal-summer-pool', name: '풀사이드 미니멀', category: '미니멀',
     desc: '풀 타일·물그림자의 정적인 여름 미니멀', accent: '#8fc4cf',
+    useCase: '여름 시즌 단품 소개',
     scaffold: 'A minimal summer poolside scene: pale aqua pool tiles with rippling water-light caustics dancing across the surface, one clean shadow edge, nothing else but sun and stillness. Silent summer noon, architectural calm.',
     textStyle: 'Still minimal typography — small clean headline in deep teal, positioned in a calm corner of light. Quiet as a summer noon.',
     defaultTexts: { label: '', title: '{productName}', subtitle: '{salePrice}' },
@@ -482,6 +542,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'minimal-autumn-leaf', name: '어텀 리프', category: '미니멀',
     desc: '낙엽 한 장·긴 그림자의 가을 미니멀', accent: '#c9a06b',
+    useCase: '가을 시즌 단품 소개',
     scaffold: 'A minimal autumn scene: a single perfect dry leaf resting on a warm beige paper-textured surface, one long low-sun shadow, faint kraft warmth in the light, everything else empty. The whole season in one leaf.',
     textStyle: 'Warm minimal typography — small serif-feeling headline in deep umber, asymmetric quiet placement. Contemplative autumn restraint.',
     defaultTexts: { label: '', title: '{productName}', subtitle: '' },
@@ -490,6 +551,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'minimal-winter-still', name: '스노우 스틸니스', category: '미니멀',
     desc: '눈 입자·프로스트의 고요한 겨울 미니멀', accent: '#c3ccd6',
+    useCase: '겨울 시즌 단품 소개',
     scaffold: 'A minimal winter scene: a field of fine untouched snow grain in pale gray-blue, one delicate frost crystal detail near the product, hushed overcast light, absolute stillness. Winter reduced to its quietest essence.',
     textStyle: 'Hushed minimal typography — tiny precise headline in cool graphite, floating in the pale emptiness. Snow-silence elegance.',
     defaultTexts: { label: '', title: '{productName}', subtitle: '' },
@@ -500,6 +562,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'season-auto', name: '이번 시즌 무드', category: '시즌',
     desc: '지금 계절 감성을 자동 반영', accent: '#7ba05b',
+    useCase: '어떤 제품이든 지금 계절 무드로 빠르게 만들 때',
     scaffold: 'A seasonal marketing scene that matches the current Korean season, with tasteful seasonal props and atmosphere at the edges, warm commercial styling, product area kept clean.',
     textStyle: 'Seasonal friendly typography with good readability, headline in the upper area, colors harmonized with the seasonal palette.',
     defaultTexts: { label: '', title: '{productName}', subtitle: '{salePrice}' },
@@ -509,6 +572,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'season-korean-holiday', name: '명절 선물세트', category: '시즌',
     desc: '보자기·전통 문양의 명절 선물 무드', accent: '#a5433d',
+    useCase: '명절 선물세트·귀성 선물',
     scaffold: 'A Korean traditional holiday gift scene: elegant silk bojagi wrapping cloth in deep red and jade tones, subtle traditional Korean patterns (norigae tassel, dancheong-inspired accents) at the edges, warm hanok wood surface, refined and respectful gift-set atmosphere for Seollal or Chuseok.',
     textStyle: 'Graceful typography with a calligraphic-brush feeling for the headline, deep charcoal or gold ink, small refined label. Traditional yet premium placement in the upper area.',
     defaultTexts: { label: '명절 선물', title: '{productName}', subtitle: '' },
@@ -517,6 +581,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'season-yearend-festive', name: '연말 페스티브', category: '시즌',
     desc: '트리 라이트·레드&골드의 연말 무드', accent: '#7a2e35',
+    useCase: '연말 선물·홀리데이 기획전',
     scaffold: 'A year-end festive scene: warm bokeh of tree lights in deep green and red, gold ornament accents and pine branches at the edges, soft falling snow hints, cozy celebratory glow, elegant holiday-season retail atmosphere.',
     textStyle: 'Festive elegant typography — warm gold headline with a soft glow, classic small label, celebratory but refined. Holiday-card warmth in the upper area.',
     defaultTexts: { label: 'YEAR END', title: '{productName}', subtitle: '' },
@@ -525,6 +590,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'season-spring-blossom', name: '벚꽃 스프링', category: '시즌',
     desc: '벚꽃잎·봄빛의 화사한 시즌 무드', accent: '#e6b7c6',
+    useCase: '봄 신상·벚꽃 시즌 상품',
     scaffold: 'A spring cherry-blossom scene: soft pink petals drifting in the air, blurred blossom branches framing the edges, gentle warm spring sunlight, fresh pastel sky tones, light and hopeful new-season atmosphere.',
     textStyle: 'Fresh spring typography — soft deep-rose headline, delicate small label, airy spacing. Light romantic placement in the upper area.',
     defaultTexts: { label: '봄 시즌', title: '{productName}', subtitle: '{salePrice}' },
@@ -536,6 +602,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-mem-blackgold', name: '미드나잇 멤버스', category: '멤버십·고객감사', kind: 'event',
     desc: '블랙 벨벳·골드 컨페티의 멤버 전용 나이트', accent: '#b98a3c',
+    useCase: '최상위 등급 회원 전용 초대 행사',
     scaffold: 'A premium members-only event scene: deep black velvet backdrop with fine gold light streaks, a single soft spotlight beam from above, golden confetti particles frozen mid-air, dark polished marble floor with faint reflections. Exclusive VIP night atmosphere, restrained and luxurious, cinematic contrast.',
     textStyle: 'Refined gold serif-feeling headline with generous letter spacing, small uppercase tracking-wide label, understated sub-line. Centered luxury-invitation placement in the upper area.',
     defaultTexts: { label: 'MEMBERSHIP DAY', title: '멤버십 데이', subtitle: '멤버 전용 스페셜' },
@@ -544,6 +611,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-mem-velvet', name: 'VIP 벨벳 라운지', category: '멤버십·고객감사', kind: 'event',
     desc: '버건디 벨벳·샴페인의 프라이빗 라운지', accent: '#7a2f3d',
+    useCase: 'VIP 라운지·프라이빗 초대',
     scaffold: 'A private VIP lounge scene: burgundy velvet drapes and a tufted velvet sofa corner, two champagne coupe glasses with fine bubbles on a low brass table, warm amber lamp glow, soft haze in the air. Intimate after-hours salon atmosphere, rich and inviting.',
     textStyle: 'Elegant cream typography with a serif-feeling headline, delicate small label, soft letter spacing. Placed in the upper area like a private invitation card.',
     defaultTexts: { label: 'VIP ONLY', title: 'VIP 위크', subtitle: '초대장을 확인해주세요' },
@@ -552,6 +620,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-mem-thanks', name: '고객 감사제', category: '멤버십·고객감사', kind: 'event',
     desc: '크림빛 리본·선물상자의 따뜻한 감사 무드', accent: '#c9a468',
+    useCase: '전체 고객 감사제',
     scaffold: 'A warm customer-appreciation scene: cream and beige backdrop with soft window daylight, neatly stacked gift boxes wrapped in kraft and ivory paper with satin ribbons, a few dried flowers, gentle shadows. Heartfelt thank-you atmosphere, cozy and sincere.',
     textStyle: 'Warm brown friendly typography — rounded-feeling headline, handwritten-mood small label, gentle spacing. Upper-third placement with soft breathing room.',
     defaultTexts: { label: 'THANK YOU', title: '고객 감사제', subtitle: '늘 함께해주셔서 감사합니다' },
@@ -560,6 +629,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-mem-chrome', name: '등급 업그레이드', category: '멤버십·고객감사', kind: 'event',
     desc: '실버→골드 메탈 그라데이션의 상승 무드', accent: '#9aa3b5',
+    useCase: '등급 승급 안내·혜택 상향',
     scaffold: 'An abstract tier-upgrade scene: sweeping metallic gradient bands flowing from cool silver to warm gold, glossy chrome ribbon shapes rising diagonally upward, subtle lens flare highlights, dark studio backdrop. Futuristic premium ascension mood, sleek and aspirational.',
     textStyle: 'Modern metallic-feeling sans headline with tight tracking, thin uppercase label, ascending diagonal energy. Upper placement with bold contrast.',
     defaultTexts: { label: 'LEVEL UP', title: '등급 업그레이드', subtitle: '한 단계 높아진 혜택' },
@@ -568,6 +638,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-mem-secret', name: '시크릿 나이트', category: '멤버십·고객감사', kind: 'event',
     desc: '딥네이비·달빛 커튼의 비밀 행사', accent: '#2c3a5c',
+    useCase: '초대받은 사람만 아는 비공개 행사',
     scaffold: 'A secret midnight event scene: deep navy backdrop with a heavy velvet curtain slightly parted revealing a soft moonlit glow, scattered tiny star-like sparkles, a mysterious keyhole of warm light on the floor. Hush-hush exclusive reveal atmosphere, quiet drama.',
     textStyle: 'Moonlight silver typography — thin elegant headline with wide spacing, whisper-small label. Centered upper placement, mysterious and calm.',
     defaultTexts: { label: 'SECRET', title: '시크릿 나이트', subtitle: '단 하루, 조용히 열립니다' },
@@ -576,6 +647,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-mem-weekend', name: '위켄드 멤버스', category: '멤버십·고객감사', kind: 'event',
     desc: '주말 오후 카페 코너의 여유로운 멤버 무드', accent: '#a4805a',
+    useCase: '주말 한정 회원 혜택',
     scaffold: 'A relaxed weekend members scene: sunlit cafe corner with a rattan chair and small round wooden table, latte cup with soft steam, an open magazine, leafy plant shadows on a warm white wall. Slow weekend afternoon atmosphere, effortless and warm.',
     textStyle: 'Casual editorial typography in deep coffee brown — medium friendly headline, lowercase-feeling small label. Airy upper placement like a lifestyle magazine.',
     defaultTexts: { label: 'WEEKEND', title: '위켄드 멤버스', subtitle: '주말이 더 특별해지도록' },
@@ -586,6 +658,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-open-grand', name: '그랜드 오픈', category: '오픈·기념일', kind: 'event',
     desc: '리본 아치·컨페티의 축하 오픈 무드', accent: '#d04a4a',
+    useCase: '신규 매장 그랜드 오픈',
     scaffold: 'A grand opening celebration scene: an arch of ivory and red balloons, a wide satin ribbon stretched across ready to be cut, colorful confetti falling through bright daylight, clean storefront glass reflecting the sky. Festive ceremonial atmosphere, joyful and bright.',
     textStyle: 'Bold celebratory typography — strong headline with confident weight, small festive label, clean sub-line. Centered upper placement with ceremonial symmetry.',
     defaultTexts: { label: 'GRAND OPEN', title: '그랜드 오픈', subtitle: '드디어 문을 엽니다' },
@@ -594,6 +667,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-open-renewal', name: '리뉴얼 오픈', category: '오픈·기념일', kind: 'event',
     desc: '민트·화이트의 새 단장 프레시 무드', accent: '#5fb3a1',
+    useCase: '매장 리뉴얼 재오픈',
     scaffold: 'A fresh renewal scene: bright white interior flooded with morning sunlight, fresh mint-green accents, young potted plants on clean shelving, a light linen curtain moving in a soft breeze, dust-free pristine surfaces. New-beginning atmosphere, airy and optimistic.',
     textStyle: 'Clean modern typography in deep teal — light headline with fresh spacing, small uppercase label. Upper-left editorial placement with plenty of white space.',
     defaultTexts: { label: 'RENEWAL', title: '리뉴얼 오픈', subtitle: '새로워진 공간에서 만나요' },
@@ -602,6 +676,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-open-anniv', name: '애니버서리 클래식', category: '오픈·기념일', kind: 'event',
     desc: '샴페인 골드 보케·케이크의 기념일 무드', accent: '#c2a35c',
+    useCase: '창립·개점 기념일',
     scaffold: 'An elegant anniversary scene: warm champagne-gold bokeh lights, a small classic cream cake with delicate piping and thin lit candles, gold-rimmed plates, soft glowing atmosphere. Milestone celebration mood, graceful and warm.',
     textStyle: 'Classic serif-feeling typography in warm gold — refined headline, delicate small label with wide tracking. Centered upper placement like an anniversary card.',
     defaultTexts: { label: 'ANNIVERSARY', title: '주년 기념전', subtitle: '함께한 시간을 기념합니다' },
@@ -610,6 +685,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-open-gallery', name: '모던 오프닝', category: '오픈·기념일', kind: 'event',
     desc: '콘크리트 갤러리·단일 스포트라이트의 미니멀 오픈', accent: '#6e6e78',
+    useCase: '미니멀 브랜드의 조용한 오픈',
     scaffold: 'A minimal modern opening scene: raw concrete gallery walls, a single dramatic spotlight illuminating an empty sculptural pedestal, long soft shadows, one architectural arch doorway glowing at the far end. Quiet contemporary art-space atmosphere, austere and confident.',
     textStyle: 'Architectural sans typography in off-white — thin large headline, tiny precise label, generous negative space. Asymmetric upper placement, museum caption energy.',
     defaultTexts: { label: 'NOW OPEN', title: '뉴 스페이스 오픈', subtitle: '새로운 공간이 열렸습니다' },
@@ -618,6 +694,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-open-night', name: '오픈 나이트', category: '오픈·기념일', kind: 'event',
     desc: '해질녘 네온 글로우의 오픈 전야 무드', accent: '#d96a9b',
+    useCase: '오픈 전야·나이트 프리뷰',
     scaffold: 'An opening night scene: a storefront silhouette at dusk with warm glowing windows, soft pink and violet neon glow reflecting on wet pavement, string lights being lit, deep blue evening sky. Anticipation-of-opening atmosphere, cinematic and inviting.',
     textStyle: 'Neon-glow typography — warm pink headline with subtle luminescence, small glowing label. Upper placement against the dusk sky, city-night romance.',
     defaultTexts: { label: 'OPENING NIGHT', title: '오픈 나이트', subtitle: '저녁, 특별하게 시작합니다' },
@@ -626,6 +703,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-open-bloom', name: '플라워 오프닝', category: '오픈·기념일', kind: 'event',
     desc: '꽃 아치·파스텔 꽃잎의 화사한 오픈', accent: '#dd8fa4',
+    useCase: '플라워·뷰티 매장 오픈',
     scaffold: 'A floral opening scene: a lush arch of fresh pastel flowers (peonies, roses, baby breath) framing a bright doorway, petals scattered on a clean stone step, soft diffused daylight. Romantic garden-party opening atmosphere, fresh and delightful.',
     textStyle: 'Romantic typography in deep rose — graceful headline with gentle curves, dainty small label. Centered upper placement framed by the floral arch.',
     defaultTexts: { label: 'OPEN', title: '플라워 오픈', subtitle: '꽃과 함께 시작합니다' },
@@ -636,6 +714,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-season-gift', name: '명절 선물전', category: '시즌·명절 행사', kind: 'event',
     desc: '보자기 매듭·한지 결의 명절 무드', accent: '#a4494f',
+    useCase: '명절 선물전·귀성 기획전',
     scaffold: 'A Korean holiday gift scene: elegant silk bojagi wrapping cloths in deep red and jade tied with graceful knots, warm hanji paper texture backdrop with soft lantern light, a subtle traditional pattern shadow. Respectful seasonal gifting atmosphere, warm and dignified.',
     textStyle: 'Dignified typography with brush-inspired weight in deep charcoal, small seal-stamp-feeling red label accent. Vertical-rhythm-inspired upper placement, calm and honorable.',
     defaultTexts: { label: '명절 선물전', title: '마음을 전하는 선물', subtitle: '감사의 마음을 담았습니다' },
@@ -644,6 +723,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-season-summer', name: '썸머 페스타', category: '시즌·명절 행사', kind: 'event',
     desc: '풀사이드·물빛 반짝임의 한여름 축제', accent: '#3fa8c9',
+    useCase: '한여름 시즌 행사',
     scaffold: 'A summer festival scene: sparkling turquoise pool water with sun reflections, a striped float tube drifting, tropical palm leaf shadows on the pool edge, bright cloudless sky. High-summer vacation festival atmosphere, splashy and energetic.',
     textStyle: 'Playful bold typography in white with an aqua shadow, fun rounded headline, small sunny label. Upper placement with tilted vacation energy.',
     defaultTexts: { label: 'SUMMER FESTA', title: '썸머 페스타', subtitle: '한여름의 축제가 시작됩니다' },
@@ -652,6 +732,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-season-winter', name: '윈터 홀리데이', category: '시즌·명절 행사', kind: 'event',
     desc: '눈 보케·전구빛·솔가지의 겨울 축제', accent: '#4a6b8a',
+    useCase: '겨울 홀리데이 행사',
     scaffold: 'A winter holiday scene: soft falling snow bokeh against a twilight blue backdrop, warm string light bulbs glowing, fresh pine branches with a light dusting of snow, a knitted texture at the edge. Cozy festive winter atmosphere, twinkling and warm-hearted.',
     textStyle: 'Festive typography in warm ivory — cheerful serif-feeling headline, twinkling small label. Centered upper placement like a holiday greeting card.',
     defaultTexts: { label: 'WINTER HOLIDAY', title: '윈터 홀리데이', subtitle: '따뜻한 겨울을 보내세요' },
@@ -660,6 +741,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-season-autumn', name: '어텀 위크', category: '시즌·명절 행사', kind: 'event',
     desc: '단풍·앰버빛·체크 담요의 가을 무드', accent: '#b06a35',
+    useCase: '가을 시즌 위크',
     scaffold: 'An autumn week scene: golden maple and ginkgo leaves drifting in warm amber afternoon light, a plaid wool blanket draped over a wooden bench, steam rising from a ceramic mug, soft forest bokeh. Crisp cozy autumn atmosphere, nostalgic and comforting.',
     textStyle: 'Warm editorial typography in deep chestnut — serif-feeling headline, cozy small label. Upper placement with falling-leaf rhythm.',
     defaultTexts: { label: 'AUTUMN WEEK', title: '어텀 위크', subtitle: '깊어가는 가을과 함께' },
@@ -668,6 +750,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-season-picnic', name: '스프링 피크닉', category: '시즌·명절 행사', kind: 'event',
     desc: '벚꽃 아래 피크닉·바구니의 봄 나들이', accent: '#e2a0b2',
+    useCase: '봄 나들이·피크닉 시즌 행사',
     scaffold: 'A spring picnic scene: a gingham blanket under blossoming cherry trees, a woven picnic basket with a linen napkin, petals drifting in gentle sunlight, fresh green grass. Light-hearted spring outing atmosphere, breezy and joyful.',
     textStyle: 'Light joyful typography in soft rose-brown — friendly headline, petal-light small label. Airy upper placement with picnic-day ease.',
     defaultTexts: { label: 'SPRING PICNIC', title: '스프링 피크닉', subtitle: '봄나들이 함께 떠나요' },
@@ -676,6 +759,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-season-yearend', name: '이어엔드 파티', category: '시즌·명절 행사', kind: 'event',
     desc: '미드나잇 블루·불꽃·샴페인의 연말 무드', accent: '#3b4a7a',
+    useCase: '연말 파티·송년 행사',
     scaffold: 'A year-end party scene: midnight blue sky with distant golden fireworks bursting, champagne glasses catching sparkling light, silver and gold streamers, city skyline silhouette below. Glamorous countdown celebration atmosphere, dazzling and hopeful.',
     textStyle: 'Glamorous typography in champagne gold — sparkling headline with elegant weight, celebratory small label. Upper placement against the night sky.',
     defaultTexts: { label: 'YEAR END', title: '이어엔드 파티', subtitle: '한 해의 마지막을 함께' },
@@ -686,6 +770,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-pop-store', name: '팝업 스토어', category: '팝업·페스티벌', kind: 'event',
     desc: '컬러블록·지오메트릭의 대담한 팝업 무드', accent: '#e8563f',
+    useCase: '기간 한정 팝업 스토어',
     scaffold: 'A bold pop-up store scene: vivid color-blocked walls in tangerine, cobalt and cream, oversized geometric shapes (arches, spheres, columns) arranged like an installation, hard directional light casting graphic shadows. Hype pop-up launch atmosphere, loud and art-directed.',
     textStyle: 'Oversized graphic typography — chunky headline with poster-like impact, stacked small label. Off-center placement integrated with the geometry.',
     defaultTexts: { label: 'POP-UP', title: '팝업 스토어', subtitle: '한정 기간, 지금 만나요' },
@@ -694,6 +779,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-pop-festa', name: '브랜드 페스타', category: '팝업·페스티벌', kind: 'event',
     desc: '가랜드·무대 조명의 축제 한마당', accent: '#d9903f',
+    useCase: '브랜드 자체 페스타·한마당',
     scaffold: 'A brand festival scene: colorful triangle bunting garlands strung across a sunny outdoor plaza, warm stage spotlights and a subtle haze, confetti in the air, festival crowd silhouettes far in the background blurred. Open-air celebration atmosphere, communal and vibrant.',
     textStyle: 'Festival poster typography — energetic bold headline, ticket-stub-feeling small label. Centered upper placement with celebratory scale.',
     defaultTexts: { label: 'FESTA', title: '브랜드 페스타', subtitle: '모두를 위한 축제' },
@@ -702,6 +788,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-pop-collab', name: '컬래버 스페셜', category: '팝업·페스티벌', kind: 'event',
     desc: '투톤 대비·글로시 오브제의 만남 무드', accent: '#7b52c9',
+    useCase: '타 브랜드 컬래버 행사',
     scaffold: 'A collaboration reveal scene: a striking split background of two contrasting color fields (deep violet meeting warm cream) joined by a glossy liquid ribbon flowing across the seam, two glossy abstract orbs facing each other. Two-worlds-meeting atmosphere, sleek and intriguing.',
     textStyle: 'Dual-tone typography — headline straddling the split with alternating colors, precise small label. Balanced center placement expressing the encounter.',
     defaultTexts: { label: 'COLLABORATION', title: '컬래버 스페셜', subtitle: '특별한 만남이 시작됩니다' },
@@ -710,6 +797,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-pop-market', name: '위켄드 마켓', category: '팝업·페스티벌', kind: 'event',
     desc: '스트링 라이트·크라프트의 주말 장터 무드', accent: '#8a6d47',
+    useCase: '주말 마켓·플리마켓',
     scaffold: 'A weekend market scene: cozy wooden market stalls with striped canvas awnings, warm string lights zigzagging overhead at golden hour, kraft paper bags and wicker baskets, chalkboard easel standing blank. Friendly artisanal market atmosphere, warm and bustling.',
     textStyle: 'Hand-crafted typography in warm charcoal — friendly medium headline with a hand-painted feeling, stamp-like small label. Upper placement like a market signboard.',
     defaultTexts: { label: 'WEEKEND MARKET', title: '위켄드 마켓', subtitle: '주말, 장터가 열립니다' },
@@ -718,6 +806,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-pop-neon', name: '나이트 팝업', category: '팝업·페스티벌', kind: 'event',
     desc: '네온 글로우·도시 밤의 심야 팝업', accent: '#38c2b8',
+    useCase: '심야 영업 팝업·나이트 마켓',
     scaffold: 'A late-night pop-up scene: abstract neon light tubes glowing in teal and magenta (pure light shapes, no readable signs), dark urban alley with wet asphalt reflections, soft fog catching the glow. Underground midnight pop-up atmosphere, electric and cool.',
     textStyle: 'Neon typography — luminous teal headline with a soft glow halo, minimal dark label chip. Upper placement floating in the night.',
     defaultTexts: { label: 'NIGHT POP-UP', title: '나이트 팝업', subtitle: '밤에만 열리는 공간' },
@@ -726,6 +815,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-pop-art', name: '아트 팝업', category: '팝업·페스티벌', kind: 'event',
     desc: '추상 페인팅·미술관 벽의 아트 무드', accent: '#4d5a4e',
+    useCase: '전시·아트 콜라보 팝업',
     scaffold: 'An art pop-up scene: a gallery-white wall with one large abstract painting of bold expressive brush strokes in sage, ochre and ink, a polished concrete floor, a single bench, precise track lighting. Contemporary exhibition atmosphere, cultured and quiet.',
     textStyle: 'Museum caption typography — small precise label, refined medium headline in ink black, generous margins. Lower-third placement like an exhibition title wall.',
     defaultTexts: { label: 'ART POP-UP', title: '아트 팝업', subtitle: '일상 속 전시가 열립니다' },
@@ -737,6 +827,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-glass-refract', name: '글래스 리프랙션', category: '뷰티',
     desc: '유리 프리즘·굴절광의 투명 무드', accent: '#9fb6c9',
+    useCase: '톤업 앰플·광채 에센스, 투명 용기 제품',
     scaffold: 'A crystal refraction scene: clear glass prisms and acrylic blocks scattering soft rainbow-edged light bands across a pale grey surface, transparent layered panes creating depth, cool studio daylight. Ultra-clean optical clarity mood, modern and pure.',
     textStyle: 'Precise thin typography in cool slate — light headline with crisp tracking, minimal small label. Upper placement among the light bands.',
     defaultTexts: { label: 'CRYSTAL CLEAR', title: '{productName}', subtitle: '' },
@@ -745,6 +836,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-silk-drape', name: '실크 드레이프', category: '뷰티',
     desc: '흐르는 실크 물결의 부드러운 무드', accent: '#d3b3a3',
+    useCase: '텍스처가 강점인 크림·바디로션',
     scaffold: 'A flowing silk scene: waves of blush and champagne silk fabric draped in soft sculptural folds filling the frame, gentle side light tracing the curves, a smooth satin platform emerging from the fabric. Sensuous softness mood, tactile and serene.',
     textStyle: 'Soft elegant typography in deep mauve — graceful headline that follows the fabric flow, whisper-small label. Upper placement resting on a silk fold.',
     defaultTexts: { label: 'SILKY', title: '{productName}', subtitle: '{salePrice}' },
@@ -753,6 +845,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-botanical-lab', name: '보태니컬 랩', category: '뷰티',
     desc: '유리 비커·식물 줄기의 클린 랩 무드', accent: '#7f9b7a',
+    useCase: '성분을 앞세운 비건·더모 코스메틱',
     scaffold: 'A botanical laboratory scene: clear glass beakers and slim test tubes holding fresh green stems and leaves, water droplets on glass, clean white tile backdrop with a hint of chrome, bright even light. Science-meets-nature clean formulation mood, trustworthy and fresh.',
     textStyle: 'Clinical yet warm typography in deep green — clean sans headline, small formula-note label. Orderly upper placement like a lab specification.',
     defaultTexts: { label: 'BOTANICAL', title: '{productName}', subtitle: '' },
@@ -763,6 +856,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'cafe-milk-pour', name: '밀크 푸어', category: '카페·음료',
     desc: '우유가 쏟아지는 순간의 크림 무드', accent: '#e0d4c3',
+    useCase: '라떼·밀크티 등 우유 베이스 음료',
     scaffold: 'A frozen milk-pour scene: creamy milk mid-pour with a silky splash crown suspended in air, warm ivory backdrop, soft golden light catching the liquid, a smooth ceramic saucer below. Deliciously creamy dynamic moment, appetizing and warm.',
     textStyle: 'Rounded cozy typography in mocha brown — smooth headline with soft edges, cute small label. Upper placement above the splash.',
     defaultTexts: { label: 'CREAMY', title: '{productName}', subtitle: '{salePrice}' },
@@ -771,6 +865,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'cafe-terrazzo-morning', name: '테라조 브라이트', category: '카페·음료',
     desc: '테라조·시트러스·강한 아침 그림자', accent: '#e0a44f',
+    useCase: '아이스 아메리카노·모닝 세트',
     scaffold: 'A bright terrazzo counter scene: speckled terrazzo surface in cream and terracotta, hard morning sunlight casting one long clean diagonal shadow, fresh citrus slices and a sprig of mint at the edges. Crisp mediterranean morning mood, zesty and modern.',
     textStyle: 'Sunny modern typography in burnt orange — confident medium headline, fresh small label. Upper placement aligned to the diagonal light.',
     defaultTexts: { label: 'MORNING FRESH', title: '{productName}', subtitle: '' },
@@ -779,6 +874,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'cafe-matcha-zen', name: '말차 그린 젠', category: '카페·음료',
     desc: '말차 가루·돌그릇·대나무 그림자의 젠 무드', accent: '#6f8f5a',
+    useCase: '말차·녹차 등 티 베이스 메뉴',
     scaffold: 'A matcha zen scene: fine matcha powder dusted across a dark stone plate, a rustic ceramic bowl with whisked green foam, bamboo leaf shadows on a warm plaster wall, quiet natural light. Meditative tea-house calm, earthy and refined.',
     textStyle: 'Quiet typography in deep moss — restrained headline with generous space, small vertical-feeling label. Calm upper placement, tea-ceremony stillness.',
     defaultTexts: { label: 'MATCHA', title: '{productName}', subtitle: '{salePrice}' },
@@ -787,6 +883,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'cafe-night-jazz', name: '나이트 카페', category: '카페·음료',
     desc: '캔들·다크우드의 심야 재즈바 무드', accent: '#8a5a33',
+    useCase: '심야 영업·와인/칵테일 메뉴',
     scaffold: 'A late-night cafe scene: dark walnut bar counter with a single flickering candle, amber pendant light glow, a soft-focus shelf of glassware behind, wisps of warm smoke in the air. Jazz-bar intimacy mood, mellow and grown-up.',
     textStyle: 'Smoky elegant typography in warm amber — jazz-poster headline with vintage weight, understated small label. Upper placement glowing against the dark.',
     defaultTexts: { label: 'NIGHT MENU', title: '{productName}', subtitle: '' },
@@ -797,6 +894,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'pop-y2k-chrome', name: 'Y2K 크롬 팝', category: '신메뉴·팝',
     desc: '리퀴드 메탈·홀로그램의 Y2K 무드', accent: '#b48ad9',
+    useCase: 'Z세대 타깃 신제품·트렌디 굿즈',
     scaffold: 'A Y2K chrome scene: liquid-metal chrome blobs floating over a holographic gradient backdrop (silver, lilac, aqua), glossy reflective floor, subtle lens flares. Futuristic retro-tech pop mood, shiny and playful.',
     textStyle: 'Chrome-effect typography — bubbly metallic headline with liquid curves, pixel-hint small label. Tilted upper placement with Y2K attitude.',
     defaultTexts: { label: 'NEW DROP', title: '{productName}', subtitle: '{salePrice}' },
@@ -805,6 +903,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'pop-picnic-checker', name: '체커보드 팝', category: '신메뉴·팝',
     desc: '체커보드 플랫레이의 키치 무드', accent: '#3f6bd9',
+    useCase: '피크닉 세트·나들이 도시락',
     scaffold: 'A checkerboard flat-lay scene: bold cobalt-and-cream checkerboard surface shot from above, playful props at the corners (a daisy, a rolled ribbon, a tiny flag), crisp even light. Kitschy picnic-pop mood, graphic and fun.',
     textStyle: 'Retro-diner typography — chunky headline with a bounce, badge-like small label. Centered placement over the checker pattern.',
     defaultTexts: { label: 'NEW', title: '{productName}', subtitle: '' },
@@ -813,6 +912,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'pop-sticker-collage', name: '스티커 콜라주', category: '신메뉴·팝',
     desc: '스티커·찢은 종이의 콜라주 무드', accent: '#e0567b',
+    useCase: '굿즈·콜라보 상품',
     scaffold: 'A sticker collage scene: layered torn-paper scraps in candy colors, die-cut sticker shapes (stars, hearts, wavy circles) with white borders scattered around, a zine-like pastel backdrop. DIY scrapbook pop mood, spontaneous and youthful.',
     textStyle: 'Cut-out sticker typography — headline styled like layered die-cut letters with white outlines, doodle-feeling small label. Playfully off-grid upper placement.',
     defaultTexts: { label: 'PICK!', title: '{productName}', subtitle: '{salePrice}' },
@@ -823,6 +923,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'sale-neon-wire', name: '네온 와이어', category: '세일·이벤트',
     desc: '네온 아웃라인·다크의 전자 특가 무드', accent: '#35d0c0',
+    useCase: '가전·디지털 등 전자 제품 특가',
     scaffold: 'A neon wireframe scene: glowing teal and magenta neon outline shapes (arrows, starbursts, frames) floating on a near-black backdrop, soft reflections on a dark glossy floor, faint grid perspective lines. Electric flash-deal energy, sharp and modern.',
     textStyle: 'Neon-sign typography — high-impact glowing headline, small electric label chip. Centered placement radiating from the dark.',
     defaultTexts: { label: 'SPECIAL', title: '{productName}', subtitle: '[혜택은 직접 입력해주세요]' },
@@ -831,6 +932,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'sale-paper-tear', name: '페이퍼 테어', category: '세일·이벤트',
     desc: '찢린 크라프트 너머 비비드가 드러나는 무드', accent: '#d97b2f',
+    useCase: '깜짝 공개형 프로모션·시크릿 세일',
     scaffold: 'A torn-paper reveal scene: a kraft paper layer torn open across the middle revealing a vivid tangerine field underneath, curled ripped edges with realistic fiber texture, hard top light. Surprise-reveal sale mood, tactile and bold.',
     textStyle: 'Stencil-strength typography in off-white on the vivid field — bold headline bursting through the tear, stamped small label on the kraft. Split placement following the tear line.',
     defaultTexts: { label: 'OPEN EVENT', title: '{productName}', subtitle: '[혜택은 직접 입력해주세요]' },
@@ -839,6 +941,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'sale-balloon-pop', name: '벌룬 팝 세일', category: '세일·이벤트',
     desc: '글로시 3D 벌룬이 떠오르는 축제 특가', accent: '#e05a8c',
+    useCase: '오픈 기념·축제형 할인',
     scaffold: 'A glossy balloon scene: oversized shiny 3D balloon shapes in coral, cream and gold rising through a soft pink sky, delicate strings trailing, one balloon catching a bright highlight. Buoyant celebration-sale mood, cheerful and dimensional.',
     textStyle: 'Inflated rounded typography — puffy balloon-like headline with glossy feeling, ribbon-tag small label. Upper placement floating among balloons.',
     defaultTexts: { label: 'EVENT', title: '{productName}', subtitle: '[혜택은 직접 입력해주세요]' },
@@ -849,6 +952,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-archive-film', name: '아카이브 필름', category: '패션',
     desc: '필름 그레인·플래시의 아카이브 무드', accent: '#8f8578',
+    useCase: '빈티지·아카이브 리에디션 제품',
     scaffold: 'An archive film scene: warm-toned photo studio with visible film grain, a direct on-camera flash look creating soft vignetting, a plain seamless backdrop with tape marks on the floor, a metal stool to the side. 90s fashion-archive documentary mood, raw and authentic.',
     textStyle: 'Typewriter-meets-editorial typography in faded black — matter-of-fact headline, date-stamp-feeling small label. Corner placement like a contact-sheet annotation.',
     defaultTexts: { label: 'ARCHIVE', title: '{productName}', subtitle: '' },
@@ -857,6 +961,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-mono-sculpt', name: '모노 스컬프트', category: '패션',
     desc: '단색 공간·조각적 드레이프의 무드', accent: '#5a5f8f',
+    useCase: '미니멀·구조적 실루엣 컬렉션',
     scaffold: 'A monochrome sculptural scene: an entire room drenched in one deep periwinkle tone — walls, floor, and a sweeping drape of matching fabric frozen in a sculptural arc, single soft key light modelling the folds. High-fashion color-drench mood, artistic and intense.',
     textStyle: 'Sculptural typography in a lighter tint of the same hue — tall condensed headline, tiny label. Vertical-feeling placement along the drape.',
     defaultTexts: { label: 'COLLECTION', title: '{productName}', subtitle: '{salePrice}' },
@@ -865,6 +970,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-after-runway', name: '애프터 런웨이', category: '패션',
     desc: '백스테이지 조명·글로시 런웨이의 무드', accent: '#3a3a44',
+    useCase: '컬렉션 공개·런웨이 직후 신상',
     scaffold: 'An after-runway scene: a glossy dark runway floor reflecting rows of dimmed spotlights, haze drifting in the empty venue, a single chair with a garment bag at the runway edge. Backstage-after-the-show mood, cinematic and exclusive.',
     textStyle: 'Runway-credits typography in cool white — slim uppercase headline with wide tracking, tiny show-note label. Lower-third placement like closing credits.',
     defaultTexts: { label: 'BACKSTAGE', title: '{productName}', subtitle: '' },
@@ -875,6 +981,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'minimal-linen-light', name: '리넨 라이트', category: '미니멀',
     desc: '리넨 결·창가 빛줄기의 잔잔한 무드', accent: '#c9bda9',
+    useCase: '홈·패브릭·리빙 제품',
     scaffold: 'A linen light scene: natural flax linen fabric softly rumpled across the frame, one warm bar of window light falling diagonally, fine fabric weave texture visible, muted oat tones. Quiet slow-living mood, breathable and honest.',
     textStyle: 'Honest typography in warm taupe — light headline with natural spacing, lowercase-feeling label. Placed inside the light bar.',
     defaultTexts: { label: 'ESSENTIAL', title: '{productName}', subtitle: '' },
@@ -883,6 +990,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'minimal-arch-shadow', name: '아치 섀도', category: '미니멀',
     desc: '회벽 아치·깊은 그림자의 건축 무드', accent: '#b09a85',
+    useCase: '건축적 무드의 프리미엄 제품',
     scaffold: 'An arch shadow scene: warm plaster walls with a series of receding arches, deep soft shadows pooling inside each arch, late-afternoon Mediterranean light raking across the texture. Architectural serenity mood, timeless and grounded.',
     textStyle: 'Classical-modern typography in umber — balanced headline, engraved-feeling small label. Placed in the lit wall plane beside the arches.',
     defaultTexts: { label: 'STILL', title: '{productName}', subtitle: '{salePrice}' },
@@ -891,6 +999,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'minimal-water-ripple', name: '워터 리플', category: '미니멀',
     desc: '얕은 물결·페일 스톤의 파동 무드', accent: '#a3b8bd',
+    useCase: '수분·클린 콘셉트 제품',
     scaffold: 'A water ripple scene: a shallow sheet of clear water over pale stone, delicate concentric ripples catching silver light, caustic light patterns dancing on the stone below, misty neutral backdrop. Meditative fluid stillness mood, cool and poetic.',
     textStyle: 'Fluid typography in deep sea-grey — thin headline with ripple-like rhythm, minimal label. Upper placement above the waterline.',
     defaultTexts: { label: 'PURE', title: '{productName}', subtitle: '' },
@@ -899,6 +1008,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'minimal-ink-line', name: '잉크 라인', category: '미니멀',
     desc: '한 획의 잉크 라인·웜 페이퍼 무드', accent: '#4a4a48',
+    useCase: '문구·필기구·아트 상품',
     scaffold: 'An ink line scene: one continuous elegant sumi-ink brush line sweeping across warm off-white paper with subtle fiber texture, a single small ink dot as punctuation, vast intentional emptiness. Calligraphic restraint mood, artistic and composed.',
     textStyle: 'Gallery typography in ink black — poised headline, hairline small label. Asymmetric placement balancing the brush stroke.',
     defaultTexts: { label: 'SIGNATURE', title: '{productName}', subtitle: '' },
@@ -909,6 +1019,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'season-rainy-mood', name: '레이니 무드', category: '시즌',
     desc: '빗방울 창가·실내 온기의 장마 무드', accent: '#5c7186',
+    useCase: '장마철 실내 상품·우천 대비 용품',
     scaffold: 'A rainy season scene: raindrops beading and streaking down a window pane, blurred cool blue city beyond, warm cozy lamp glow from inside reflected on the sill, a folded knit throw nearby. Rainy-day comfort mood, contemplative and snug.',
     textStyle: 'Soft moody typography in slate blue — gentle headline, rain-light small label. Placed on the window glass area.',
     defaultTexts: { label: 'RAINY DAYS', title: '{productName}', subtitle: '' },
@@ -917,6 +1028,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'season-first-snow', name: '첫눈 모먼트', category: '시즌',
     desc: '첫눈 내리는 저녁·가로등 헤일로', accent: '#7d8ba8',
+    useCase: '첫눈·초겨울 시즌 상품',
     scaffold: 'A first snow scene: fine snowflakes drifting through the warm halo of a vintage street lamp at blue-hour dusk, a quiet cobblestone path lightly dusted white, breath-fog softness in the air. First-snow romance mood, tender and magical.',
     textStyle: 'Tender typography in lamplight cream — softly glowing headline, small snowy label. Placed inside the lamp halo.',
     defaultTexts: { label: 'FIRST SNOW', title: '{productName}', subtitle: '{salePrice}' },
@@ -925,6 +1037,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'season-golden-hour', name: '골든 아워', category: '시즌',
     desc: '늦여름 들녘·금빛 역광의 무드', accent: '#cf9440',
+    useCase: '늦여름·초가을 전환기 상품',
     scaffold: 'A golden hour scene: tall late-summer grass backlit by low golden sun, floating seed fluff glowing in the warm haze, long soft shadows across a field path. End-of-summer nostalgia mood, radiant and wistful.',
     textStyle: 'Sun-warmed typography in deep honey — glowing headline with soft edges, small heartfelt label. Placed against the bright sky band.',
     defaultTexts: { label: 'GOLDEN HOUR', title: '{productName}', subtitle: '' },
@@ -933,6 +1046,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'season-fresh-green', name: '초여름 그린', category: '시즌',
     desc: '신록·바람의 초여름 산뜻 무드', accent: '#79a05b',
+    useCase: '초여름 신상·산뜻한 라인',
     scaffold: 'An early summer scene: fresh young green leaves fluttering in a bright breeze, dappled sunlight through the canopy onto a white cotton cloth, a glass of clear water catching sparkle. New-green vitality mood, clean and breezy.',
     textStyle: 'Breezy typography in leaf green — fresh light headline, small sprout-like label. Airy upper placement among the dappled light.',
     defaultTexts: { label: 'FRESH GREEN', title: '{productName}', subtitle: '{salePrice}' },
@@ -944,6 +1058,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-marble-goldfoil', name: '마블 & 골드포일', category: '뷰티',
     desc: '화이트 대리석·금박 라인의 밝은 럭셔리', accent: '#c9a96a',
+    useCase: '프리미엄 기초 라인·백화점 입점 제품',
     scaffold: 'A bright luxury cosmetics scene: polished white marble surface with delicate gold veining, thin gold foil leaf accents catching the light at the edges, soft high-key daylight with gentle reflections, a low white stone dish as a prop. Airy jewelry-boutique elegance — the light counterpart to dark luxury.',
     textStyle: 'Refined typography in muted gold on the bright backdrop, slim serif-feeling headline, tiny letter-spaced uppercase label. Poised placement in the upper area with generous whitespace.',
     defaultTexts: { label: 'GOLD EDITION', title: '{productName}', subtitle: '{salePrice}' },
@@ -952,6 +1067,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-citrus-vitamin', name: '시트러스 비타민', category: '뷰티',
     desc: '과일 단면·주스 스플래시의 상큼 비타민 무드', accent: '#e8a53c',
+    useCase: '비타민·브라이트닝·각질 케어 제품',
     scaffold: 'A vitamin-fresh skincare scene: juicy orange and lemon slices scattered on a bright surface, a dynamic splash of clear citrus juice frozen mid-air, sparkling droplets, warm sunny light with high freshness. Energetic vitamin-serum vibrance, zesty and clean.',
     textStyle: 'Juicy bright typography — bold rounded headline in deep tangerine, small zesty uppercase label. Fresh energetic placement in the upper area.',
     defaultTexts: { label: 'VITAMIN SHOT', title: '{productName}', subtitle: '{salePrice}' },
@@ -960,6 +1076,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-cotton-cloud', name: '코튼 클라우드', category: '뷰티',
     desc: '솜구름·파우더 스카이의 순한 저자극 무드', accent: '#c7d4e4',
+    useCase: '저자극·민감성·유아용 라인',
     scaffold: 'A gentle sensitive-care scene: soft cotton puffs and cloud-like shapes floating on a pale powder-blue sky backdrop, feather-light diffuse light, a smooth white pedestal nestled among the clouds. Weightless purity, calming and hypoallergenic softness.',
     textStyle: 'Soft airy typography in calm gray-blue, light rounded headline, whisper-small label. Floating placement in the upper area among the clouds.',
     defaultTexts: { label: 'MILD CARE', title: '{productName}', subtitle: '' },
@@ -968,6 +1085,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-backstage-mirror', name: '백스테이지 미러', category: '뷰티',
     desc: '전구 거울·브러시의 메이크업 백스테이지', accent: '#8a5a6b',
+    useCase: '메이크업 브러시·툴·프로용 제품',
     scaffold: 'A makeup artist backstage scene: a vanity mirror framed with warm glowing bulbs, professional brushes and palettes arranged on the counter, a hint of garment rack blur behind, moody dark room lit only by the mirror lights. Show-day anticipation, professional and glamorous.',
     textStyle: 'Marquee-glow typography — warm white headline with a subtle bulb-light glow, small uppercase label like a dressing-room sign. Placed in the upper area against the dark backdrop.',
     defaultTexts: { label: 'PRO PICK', title: '{productName}', subtitle: '' },
@@ -976,6 +1094,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-midnight-ritual', name: '미드나잇 리추얼', category: '뷰티',
     desc: '침실 무드등·달빛의 나이트 케어 무드', accent: '#4a5578',
+    useCase: '나이트 크림·수면팩 등 자기 전 쓰는 제품',
     scaffold: 'A calm night-care scene: a bedside table with a warm dim lamp, soft moonlight entering through sheer curtains, rumpled linen bedding in deep blue-gray tones, a small candle flame. Quiet end-of-day ritual, intimate and restful.',
     textStyle: 'Hushed typography in warm cream glowing softly against the night tones, thin elegant headline, tiny label. Calm placement in the moonlit upper area.',
     defaultTexts: { label: 'NIGHT CARE', title: '{productName}', subtitle: '' },
@@ -984,6 +1103,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-ocean-mineral', name: '오션 미네랄', category: '뷰티',
     desc: '딥블루 심해·미네랄 결정의 수분 무드', accent: '#2f6d8f',
+    useCase: '해양 성분·미네랄 수분 라인',
     scaffold: 'A deep-sea mineral skincare scene: dark ocean-blue depths with rays of light filtering down from the surface, translucent mineral crystals and smooth sea stones on the seabed, fine bubbles rising, serene underwater stillness. Deep hydration from the ocean, mysterious and pure.',
     textStyle: 'Deep aqua typography — clean white headline with a faint watery shimmer, small spaced label. Composed placement in the light rays of the upper area.',
     defaultTexts: { label: 'DEEP MOISTURE', title: '{productName}', subtitle: '{salePrice}' },
@@ -994,6 +1114,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-denim-texture', name: '데님 텍스처', category: '패션',
     desc: '데님 원단·스티치 클로즈업의 캐주얼 무드', accent: '#3f5a78',
+    useCase: '데님·청바지·워시 제품',
     scaffold: 'A denim craft scene: layered indigo denim fabrics filling the frame, visible weave texture, contrast stitching and copper rivets as details, folded jeans stacked at one edge, honest workwear-studio light. Timeless casual authenticity.',
     textStyle: 'Sturdy typography — bold headline in warm off-white like a woven label patch, small stitched-tag feeling label. Grounded placement in the upper area.',
     defaultTexts: { label: 'DENIM', title: '{productName}', subtitle: '' },
@@ -1002,6 +1123,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-atelier-craft', name: '아뜰리에 공방', category: '패션',
     desc: '재봉틀·패턴지·토르소의 테일러 공방 무드', accent: '#8a7a63',
+    useCase: '수제·맞춤 제작·테일러드 제품',
     scaffold: 'A tailor atelier scene: a vintage sewing machine, pattern paper with chalk markings, a dress form torso draped with fabric, spools of thread and measuring tape scattered on a wooden worktable, warm afternoon workshop light. Handcraft dedication, intimate and artisanal.',
     textStyle: 'Craft typography — classic serif-feeling headline in deep sepia ink, small hand-stamped label. Considered placement in the upper area like an atelier nameplate.',
     defaultTexts: { label: 'ATELIER', title: '{productName}', subtitle: '' },
@@ -1010,6 +1132,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-neon-window', name: '네온 쇼윈도', category: '패션',
     desc: '밤거리 쇼윈도·네온 반사의 유리창 무드', accent: '#b04fd9',
+    useCase: '나이트 아웃·파티 웨어',
     scaffold: 'A night shop-window scene: a boutique display window on a dark street, neon signs from across the road reflecting on the glass in pink and violet, a sleek mannequin silhouette inside, faint rain droplets on the window. Urban night-shopping allure, sleek and electric.',
     textStyle: 'Glass-glow typography — slim modern headline in neon-tinted white as if lit on the window, small glowing label. Placed on the glass plane of the upper area.',
     defaultTexts: { label: 'NIGHT DROP', title: '{productName}', subtitle: '' },
@@ -1018,6 +1141,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-parisian-alley', name: '파리지앵 골목', category: '패션',
     desc: '파스텔 유럽 골목·카페 체어의 시티 무드', accent: '#c9a08a',
+    useCase: '페미닌 데일리·블라우스·스커트',
     scaffold: 'A european alley fashion scene: a narrow cobblestone street with pastel-toned old buildings, a wrought-iron cafe chair and small round table at the corner, morning light washing the facades, a bicycle leaning in the soft blur. Effortless city-break romance.',
     textStyle: 'Charming editorial typography — medium serif-feeling headline in warm chestnut, small postcard-like label. Relaxed placement in the upper sky area.',
     defaultTexts: { label: 'CITY BREAK', title: '{productName}', subtitle: '' },
@@ -1026,6 +1150,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-gold-evening', name: '골드 이브닝', category: '패션',
     desc: '샹들리에 보케·파티룩의 이브닝 무드', accent: '#a8863f',
+    useCase: '연말 파티 드레스·이브닝 룩',
     scaffold: 'An evening party fashion scene: warm chandelier bokeh glittering in a deep black ballroom, champagne-gold light spilling over a velvet surface, a subtle sparkle of sequins at the edges. Dress-up night glamour, festive and luxurious.',
     textStyle: 'Glamour typography — elegant serif-feeling headline in champagne gold with a soft sheen, delicate spaced label. Refined placement in the upper area.',
     defaultTexts: { label: 'EVENING', title: '{productName}', subtitle: '' },
@@ -1034,6 +1159,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-athleisure-track', name: '애슬레저 트랙', category: '패션',
     desc: '러닝트랙 컬러 라인의 스포티 무드', accent: '#d96a3c',
+    useCase: '애슬레저·트레이닝 웨어',
     scaffold: 'An athleisure sport scene: bold terracotta running-track lanes with crisp white lines shot from a low angle, hard morning sunlight and long shadows, a water bottle and towel as minimal props. Dynamic start-line energy, healthy and modern.',
     textStyle: 'Sport typography — condensed bold italic headline in white for speed, small number-bib style label. High-energy placement in the upper area.',
     defaultTexts: { label: 'ACTIVE', title: '{productName}', subtitle: '{salePrice}' },
@@ -1044,6 +1170,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'cafe-fruit-ade', name: '프루티 에이드', category: '카페·음료',
     desc: '컬러 시럽 층·탄산 기포의 과즙 에이드 무드', accent: '#e07a5f',
+    useCase: '에이드·스무디 등 과일 음료',
     scaffold: 'A fruity sparkling ade scene: tall glasses with vivid layered syrup gradients, rising soda bubbles catching backlight, fresh fruit slices and mint garnish on a bright counter, clean sunny daylight. Juicy fizzy refreshment, colorful and playful.',
     textStyle: 'Fizzy typography — bouncy bold headline in deep coral with white highlights, bubble-dot small label. Refreshing placement in the upper area.',
     defaultTexts: { label: '시즌 에이드', title: '{productName}', subtitle: '{salePrice}' },
@@ -1052,6 +1179,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'cafe-tea-salon', name: '티 살롱', category: '카페·음료',
     desc: '티팟·포슬린의 클래식 티 살롱 무드', accent: '#9a7b5f',
+    useCase: '차·티세트·애프터눈 티',
     scaffold: 'A classic tea salon scene: a porcelain teapot pouring amber tea into a fine cup, gentle steam curling up, lace doily and antique silver spoon on a walnut table, soft curtained window light. Quiet afternoon-tea refinement, warm and timeless.',
     textStyle: 'Salon typography — graceful serif-feeling headline in deep tea brown, small monogram-like label. Composed placement in the upper area.',
     defaultTexts: { label: 'TEA TIME', title: '{productName}', subtitle: '{salePrice}' },
@@ -1060,6 +1188,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'cafe-rooftop-sunset', name: '루프탑 선셋', category: '카페·음료',
     desc: '노을 하늘·스트링 라이트의 루프탑 무드', accent: '#d98a5f',
+    useCase: '루프탑·야외석 시즌 메뉴',
     scaffold: 'A rooftop cafe sunset scene: a warm gradient dusk sky from peach to violet over a city skyline silhouette, string lights beginning to glow overhead, a drink on a wooden rail table catching the last light. Golden-hour rooftop leisure, romantic and open.',
     textStyle: 'Sunset typography — warm cream headline glowing against the dusk sky, small string-light dotted label. Placed in the open sky of the upper area.',
     defaultTexts: { label: 'ROOFTOP', title: '{productName}', subtitle: '{salePrice}' },
@@ -1070,6 +1199,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'pop-graffiti-street', name: '그래피티 스트리트', category: '신메뉴·팝',
     desc: '스프레이 벽화·드리핑의 스트리트 팝', accent: '#3fa06b',
+    useCase: '스트리트 브랜드 신상·한정 드롭',
     scaffold: 'A graffiti street-art promotional scene: a concrete wall covered in vibrant spray-paint strokes (green, magenta, yellow), paint drips and splatter accents, bold abstract shapes with urban energy, hard daylight. Raw street-culture appetite, loud and fearless.',
     textStyle: 'Spray-paint typography — thick headline like a hand-sprayed tag with drip details, sticker-slap small label. Rebellious tilt in the upper area.',
     defaultTexts: { label: 'HOT DROP', title: '{productName}', subtitle: '' },
@@ -1078,6 +1208,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'pop-pixel-arcade', name: '픽셀 아케이드', category: '신메뉴·팝',
     desc: '8비트 픽셀·아케이드 감성의 게임 팝', accent: '#5560d9',
+    useCase: '게임 콜라보·이벤트 응모 상품',
     scaffold: 'A retro arcade pixel-art promotional scene: chunky 8-bit pixel clouds, stars and coin shapes on a deep indigo game background, scanline texture hints, pixel-heart and joystick motifs at the edges. Nostalgic game-start excitement, fun and geeky.',
     textStyle: 'Pixel typography — blocky 8-bit style headline in bright yellow with a hard shadow, small press-start label. Game-screen placement in the upper area.',
     defaultTexts: { label: 'LEVEL UP', title: '{productName}', subtitle: '' },
@@ -1086,6 +1217,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'pop-bubble-3d', name: '버블 3D', category: '신메뉴·팝',
     desc: '말랑한 3D 벌룬 오브젝트의 글로시 팝', accent: '#e88ab8',
+    useCase: '말랑한 콘셉트의 디저트·굿즈',
     scaffold: 'A glossy 3D balloon promotional scene: soft inflatable 3D shapes in bubblegum pink, lilac and cream floating on a pastel backdrop, squishy rounded forms with smooth plastic shine, gentle studio reflections. Cute tactile fun, trendy and light.',
     textStyle: 'Inflated typography — puffy rounded 3D-feeling headline in glossy white with a pink rim, chubby badge label. Bouncy placement in the upper area.',
     defaultTexts: { label: 'NEW', title: '{productName}', subtitle: '{salePrice}' },
@@ -1096,14 +1228,18 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'sale-coupon-ticket', name: '쿠폰 티켓', category: '세일·이벤트',
     desc: '티켓·절취선 모티프의 쿠폰 이벤트', accent: '#c9853f',
+    useCase: '할인권 배포 이벤트, 앱 전용 프로모션',
     scaffold: 'A coupon ticket promotional scene: a large kraft-paper ticket stub motif with a perforated tear line and scissor-dash details, warm honey and cream tones, subtle stamp marks and a ribbon corner, flat-lay composition on a clean desk. Friendly redeemable-deal warmth.',
     textStyle: 'Ticket typography — bold condensed headline inside the ticket frame in deep brown, small serial-number style label. Centered on the ticket in the upper area.',
-    defaultTexts: { label: '쿠폰 이벤트', title: '[혜택은 직접 입력해주세요]', subtitle: '' },
-    sample: { title: '지갑 속 반가운 소식', subtitle: '쿠폰 이벤트' },
+    // ★ 2026-08-11 §2-2 정정 — 포스터에 새겨질 문구가 혜택 종류를 약속하고 있었다("쿠폰 이벤트").
+    //   무엇을 주는지는 고객사가 직접 쓰는 칸(title 자리표시)의 몫이다. 여기는 중립 표기로 둔다.
+    defaultTexts: { label: 'TICKET', title: '[혜택은 직접 입력해주세요]', subtitle: '' },
+    sample: { title: '지갑 속 반가운 소식', subtitle: '티켓 이벤트' },
   },
   {
     id: 'sale-megaphone-announce', name: '메가폰 어나운스', category: '세일·이벤트',
     desc: '메가폰·방사 그래픽의 공지형 포스터', accent: '#2f6dd9',
+    useCase: '공지형 안내·정책 변경 고지',
     scaffold: 'An announcement promotional scene: a bold retro megaphone motif with radiating sound rings and small star bursts, flat cobalt blue and warm yellow color blocks, clean poster-graphic composition with strong diagonal energy. Attention-grabbing public-notice punch.',
     textStyle: 'Announcement typography — very bold headline in white with a cobalt outline like a public poster, small radio-wave label. Loud placement in the upper area.',
     defaultTexts: { label: 'NOTICE', title: '[혜택은 직접 입력해주세요]', subtitle: '' },
@@ -1112,6 +1248,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'sale-lucky-draw', name: '럭키 드로우', category: '세일·이벤트',
     desc: '캡슐 뽑기·응모볼의 행운 이벤트', accent: '#d94f9e',
+    useCase: '응모·추첨 참여 이벤트',
     scaffold: 'A lucky draw event scene: a playful capsule-toy machine filled with colorful gacha capsules, raffle balls tumbling out, confetti sprinkles and a four-leaf clover accent, bright candy-toned studio backdrop. Winning-moment thrill, lighthearted and lucky.',
     textStyle: 'Lucky typography — bouncy bold headline in white with a pink shadow, capsule-shaped small label. Festive placement in the upper area.',
     defaultTexts: { label: 'EVENT', title: '[혜택은 직접 입력해주세요]', subtitle: '' },
@@ -1122,6 +1259,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'minimal-clear-acrylic', name: '클리어 아크릴', category: '미니멀',
     desc: '투명 아크릴·굴절 그림자의 무색 미니멀', accent: '#b8c2c9',
+    useCase: '투명 용기·글라스 제품',
     scaffold: 'A clear acrylic minimal scene: transparent acrylic blocks and a floating clear shelf on a pale neutral backdrop, light refracting through the edges into subtle prismatic shadows, nothing colored — only clarity and glass-like geometry. Weightless transparency, ultra-modern stillness.',
     textStyle: 'Transparent-feeling typography — thin precise headline in cool graphite, hairline label. Exact placement aligned to an acrylic edge in the upper area.',
     defaultTexts: { label: 'CLEAR', title: '{productName}', subtitle: '' },
@@ -1130,6 +1268,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'minimal-floating-gradient', name: '플로팅 그라디언트', category: '미니멀',
     desc: '단색 그라데이션·부유 연출의 무중력 미니멀', accent: '#9a8fc9',
+    useCase: '테크·가전·디지털 기기',
     scaffold: 'A floating gradient minimal scene: one smooth vertical gradient filling the entire backdrop from dusk lavender to pale cream, the product area appearing to hover with a soft shadow far below, no props at all. Zero-gravity serenity, pure color and air.',
     textStyle: 'Weightless typography — small light headline in a deeper shade of the gradient, floating off-center with vast emptiness. Silence as design.',
     defaultTexts: { label: '', title: '{productName}', subtitle: '{salePrice}' },
@@ -1138,6 +1277,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'minimal-concrete-niche', name: '콘크리트 니치', category: '미니멀',
     desc: '콘크리트 벽감·스포트라이트의 뮤지엄 미니멀', accent: '#8f8a83',
+    useCase: '한정판·소장 가치를 말하는 제품',
     scaffold: 'A concrete niche minimal scene: a smooth raw-concrete wall with a single rectangular alcove carved in, one focused museum spotlight illuminating the niche interior, fine cement texture and deep shadow gradients. Gallery-vault stillness, monumental and quiet.',
     textStyle: 'Museum typography — small engraved-feeling headline in warm stone gray, tiny caption label. Placed beside the niche like an exhibit plate.',
     defaultTexts: { label: 'OBJET', title: '{productName}', subtitle: '' },
@@ -1148,6 +1288,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'season-summer-night', name: '썸머 나이트', category: '시즌',
     desc: '여름밤 강변·랜턴 불빛의 축제 무드', accent: '#3f4f8a',
+    useCase: '여름밤 축제·야외 활동 상품',
     scaffold: 'A summer night festival scene: a riverside evening in deep blue dusk, warm paper lanterns glowing along the water, tiny firefly lights drifting in the air, distant city lights reflecting on the river. Midsummer-night magic, festive yet calm.',
     textStyle: 'Lantern-glow typography — warm amber headline softly glowing against the night blue, small firefly-dot label. Placed in the dark sky of the upper area.',
     defaultTexts: { label: '한여름 밤', title: '{productName}', subtitle: '' },
@@ -1156,6 +1297,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'season-cozy-reading', name: '코지 리딩', category: '시즌',
     desc: '담요·책·티 스팀의 가을 실내 무드', accent: '#a07a4f',
+    useCase: '가을 실내용 상품·홈 카페 용품',
     scaffold: 'A cozy reading season scene: an open book resting on a chunky knit blanket, a steaming cup of tea beside it, warm floor-lamp glow and a rainy-gray window in the soft background, wooden floor textures. Slow indoor afternoon, thoughtful and warm.',
     textStyle: 'Bookish typography — medium serif-feeling headline in deep coffee brown, small chapter-note label. Quiet placement in the upper area.',
     defaultTexts: { label: 'COZY', title: '{productName}', subtitle: '{salePrice}' },
@@ -1164,6 +1306,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'season-winter-healing', name: '윈터 힐링', category: '시즌',
     desc: '눈 내린 노천·온천 김의 겨울 온기 무드', accent: '#7a99a8',
+    useCase: '겨울 온열·힐링 상품',
     scaffold: 'A winter healing scene: a snow-covered outdoor stone bath with warm steam rising into the cold air, smooth wet stones and a folded white towel, muted blue-gray dusk with one warm lantern glow. Hot-spring warmth against the snow, restorative and serene.',
     textStyle: 'Steam-soft typography — warm ivory headline with a gentle haze, small mist-like label. Tranquil placement in the upper area.',
     defaultTexts: { label: '겨울 온기', title: '{productName}', subtitle: '' },
@@ -1174,6 +1317,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-mem-pinkcarpet', name: '핑크 카펫 나이트', category: '멤버십·고객감사', kind: 'event',
     desc: '핑크 카펫·포토월의 멤버 초대 나이트', accent: '#d9679e',
+    useCase: '포토존이 있는 회원 초대 파티',
     scaffold: 'A members-only pink carpet event scene: a plush pink carpet leading to a glowing photo wall, velvet ropes with brass stanchions on both sides, camera-flash bokeh sparkling in the dark, rose-gold balloons at the edges. Celebrity-for-a-night welcome, playful glamour.',
     textStyle: 'Marquee typography — glossy white headline with a pink neon rim, small star-studded label. Spotlight placement in the upper area.',
     defaultTexts: { label: 'MEMBERS NIGHT', title: '핑크 카펫 나이트', subtitle: '멤버 단독 초대' },
@@ -1182,6 +1326,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-mem-firstlook', name: '퍼스트 룩 프리뷰', category: '멤버십·고객감사', kind: 'event',
     desc: '가림천 행거·티저 커튼의 신상 선공개', accent: '#5f8a8a',
+    useCase: '신상 선공개·회원 우선 구매',
     scaffold: 'A first-look preview event scene: a garment rack draped with an elegant cloth hiding the new collection, a teal velvet curtain half-open behind, one anticipation spotlight, scattered invitation cards on the floor edge. Unveiling-moment suspense, exclusive and intriguing.',
     textStyle: 'Teaser typography — slim elegant headline in soft white, small confidential-stamp label. Understated placement beside the curtain in the upper area.',
     defaultTexts: { label: 'PREVIEW', title: '퍼스트 룩 프리뷰', subtitle: '가장 먼저 만나는 신상' },
@@ -1190,6 +1335,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-mem-birthday', name: '버스데이 클럽', category: '멤버십·고객감사', kind: 'event',
     desc: '케이크·촛불·컨페티의 생일 달 스페셜', accent: '#d9a03c',
+    useCase: '생일 축하 이벤트·생일 달 스페셜',
     scaffold: 'A birthday celebration event scene: a cream layer cake with lit candles glowing warmly, gold and pastel confetti falling, wrapped gift boxes with satin ribbons around, soft festive bokeh in a warm-toned room. Heartfelt birthday-month cheer, sweet and celebratory.',
     textStyle: 'Celebration typography — warm golden headline with a candle-light glow, small party-flag label. Joyful placement in the upper area.',
     defaultTexts: { label: 'BIRTHDAY', title: '버스데이 클럽', subtitle: '생일 달 스페셜' },
@@ -1200,6 +1346,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-open-mirror-showroom', name: '미러 쇼룸', category: '오픈·기념일', kind: 'event',
     desc: '거울 벽·미니멀 행거의 쇼룸 오픈', accent: '#9aa0a8',
+    useCase: '쇼룸·편집숍 오픈',
     scaffold: 'A mirror showroom opening scene: floor-to-ceiling mirror panels multiplying the space, sleek chrome garment rails, one sculptural stool, cool daylight bouncing between reflections with a single warm accent light. New-space freshness, sharp and modern.',
     textStyle: 'Showroom typography — clean modern headline in charcoal on the bright reflection, tiny architectural label. Precise placement in the upper area.',
     defaultTexts: { label: 'SHOWROOM', title: '쇼룸 오픈', subtitle: '새로운 공간에서 만나요' },
@@ -1208,6 +1355,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-open-gold-anniv', name: '골드 애니버서리', category: '오픈·기념일', kind: 'event',
     desc: '골드 포일 벌룬·샴페인의 감사 기념제', accent: '#b0893c',
+    useCase: '주년 기념 감사제',
     scaffold: 'A golden anniversary event scene: metallic gold foil balloons and streamers floating against a deep charcoal backdrop, champagne glasses raised in a toast at the edge, fine gold confetti drifting down, warm celebratory spotlight. Milestone gratitude, rich and jubilant.',
     textStyle: 'Anniversary typography — gleaming gold serif-feeling headline, small ribbon-banner label. Toast-moment placement in the upper area.',
     defaultTexts: { label: 'ANNIVERSARY', title: '감사 기념제', subtitle: '함께한 시간을 기념합니다' },
@@ -1218,6 +1366,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-season-blackweek', name: '블랙 위크', category: '시즌·명절 행사', kind: 'event',
     desc: '매트 블랙·네온 태그의 연중 최대 행사', accent: '#1f1f24',
+    useCase: '연중 최대 규모 행사 주간',
     scaffold: 'A black week mega-event scene: a matte black backdrop with dramatic low fog, glowing neon price-tag outline motifs in electric violet and lime hovering in the dark, sharp spotlight beams crossing. Once-a-year shopping-night tension, bold and electric.',
     textStyle: 'Mega-sale typography — massive ultra-bold headline in stark white with a neon violet edge, small countdown-style label. Dominant placement in the upper area.',
     defaultTexts: { label: 'BLACK WEEK', title: '블랙 위크', subtitle: '[혜택은 직접 입력해주세요]' },
@@ -1226,6 +1375,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-season-wedding', name: '웨딩 시즌', category: '시즌·명절 행사', kind: 'event',
     desc: '부케·튤·파스텔 리본의 웨딩 시즌 무드', accent: '#d9b8c4',
+    useCase: '웨딩 시즌 기획전',
     scaffold: 'A wedding season event scene: a soft bouquet of white and blush flowers resting on flowing tulle fabric, pastel satin ribbons and a calligraphy-style invitation card, airy morning light with a dreamy glow. The most radiant season, romantic and graceful.',
     textStyle: 'Invitation typography — graceful serif-feeling headline in dusty rose, small calligraphic label. Delicate placement in the upper area.',
     defaultTexts: { label: 'WEDDING SEASON', title: '웨딩 시즌', subtitle: '가장 빛나는 날을 위해' },
@@ -1234,6 +1384,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-season-carechange', name: '환절기 케어 위크', category: '시즌·명절 행사', kind: 'event',
     desc: '계절 전환 그라데이션의 케어 행사 무드', accent: '#8fa06b',
+    useCase: '환절기 케어 위크',
     scaffold: 'A season-change care event scene: a split-tone backdrop transitioning from warm autumn amber on one side to cool misty blue on the other, a drifting leaf and a frost crystal meeting in the middle, soft gradient light. The turning point of seasons, caring and transitional.',
     textStyle: 'Transitional typography — clean medium headline in deep neutral bridging both tones, small season-arrow label. Balanced placement across the upper area.',
     defaultTexts: { label: 'CARE WEEK', title: '환절기 케어 위크', subtitle: '계절이 바뀌는 시간' },
@@ -1244,6 +1395,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-pop-photobooth', name: '포토부스 팝업', category: '팝업·페스티벌', kind: 'event',
     desc: '네컷 프레임·필름 스트립의 참여형 팝업', accent: '#6b7dd9',
+    useCase: '포토부스 등 참여형 부스 운영',
     scaffold: 'A photo booth pop-up event scene: a cute booth with a striped curtain, hanging four-cut photo strips and film rolls as garlands, a burst of camera flash frozen in the air, playful periwinkle and cream tones. Snap-your-moment fun, interactive and youthful.',
     textStyle: 'Photo-strip typography — friendly bold headline in deep indigo, small frame-shaped label. Snapshot placement in the upper area.',
     defaultTexts: { label: 'PHOTO POP-UP', title: '포토부스 팝업', subtitle: '순간을 남기는 시간' },
@@ -1252,6 +1404,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-pop-runway', name: '런웨이 나이트', category: '팝업·페스티벌', kind: 'event',
     desc: '런웨이 조명·프런트로 시트의 쇼 초대', accent: '#3a3a4f',
+    useCase: '패션쇼·룩 공개 행사',
     scaffold: 'A runway show event scene: a long glossy runway stretching into darkness, rows of empty front-row seats along both sides, dramatic spotlight beams cutting through light haze, a hint of backstage glow at the far end. Opening-night anticipation, cinematic and prestigious.',
     textStyle: 'Show-bill typography — slim uppercase headline in cool white with wide tracking, tiny seat-number label. Credits-style placement in the upper area.',
     defaultTexts: { label: 'RUNWAY', title: '런웨이 나이트', subtitle: '단 하루의 쇼에 초대합니다' },
@@ -1263,6 +1416,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-day-valentine', name: '발렌타인 쇼콜라', category: '데이·기념일', kind: 'event',
     desc: '딥초콜릿 드리즐·캔들라이트의 발렌타인 무드', accent: '#5c3a2e',
+    useCase: '발렌타인데이 기획전',
     scaffold: 'A valentine chocolate event scene: dark couverture chocolate drizzle ribbons frozen mid-pour, heart-shaped bonbons dusted with cocoa on a slate board, deep brown backdrop with warm candlelight glow, a satin ribbon curl at the edge. Rich romantic indulgence, intimate and tempting.',
     textStyle: 'Romantic typography — warm cream serif-feeling headline with a cocoa shadow, small heart-dot label. Intimate placement in the upper area.',
     defaultTexts: { label: 'VALENTINE', title: '발렌타인 데이', subtitle: '달콤한 마음을 전하세요' },
@@ -1271,6 +1425,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-day-whiteday', name: '화이트데이 캔디', category: '데이·기념일', kind: 'event',
     desc: '파스텔 캔디 유리병·화이트 리본의 스윗 무드', accent: '#e8c9d4',
+    useCase: '화이트데이 기획전',
     scaffold: 'A white day candy event scene: clear glass jars filled with pastel candies and lollipops, white satin ribbons, a bright airy sweet-shop counter in cream and blush tones, soft high-key daylight with a gentle sparkle. Light sugary cheerfulness, pure and sweet.',
     textStyle: 'Sweet typography — soft rose headline with a candy-gloss feel, small ribbon label. Bright placement in the upper area.',
     defaultTexts: { label: 'WHITE DAY', title: '화이트데이', subtitle: '설레는 답례를 준비했어요' },
@@ -1279,6 +1434,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-day-carnation', name: '카네이션 데이', category: '데이·기념일', kind: 'event',
     desc: '카네이션·크라프트 카드의 가정의 달 무드', accent: '#c94f5f',
+    useCase: '어버이날·가정의 달 행사',
     scaffold: 'A family month carnation scene: fresh red and pink carnations wrapped in kraft paper, a handwritten-style blank card and twine on a warm wooden table, gentle afternoon sunlight, a folded ribbon. Grateful heartfelt family-month mood, sincere and warm.',
     textStyle: 'Sincere typography — deep rose serif-feeling headline, handwritten-warmth small label. Calm placement in the upper area.',
     defaultTexts: { label: '가정의 달', title: '가정의 달 이벤트', subtitle: '감사한 마음을 전해요' },
@@ -1287,6 +1443,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-day-children', name: '어린이날 파티', category: '데이·기념일', kind: 'event',
     desc: '동물 풍선·원색 블록의 어린이날 무드', accent: '#f2a93c',
+    useCase: '어린이날 행사·키즈 이벤트',
     scaffold: 'A children day party scene: cheerful balloon animals in primary colors, wooden toy blocks and a spinning pinwheel on a bright playful table, polka-dot garlands, sunny daylight with bouncy energy. Innocent joyful festivity, playful and bright.',
     textStyle: 'Playful typography — chunky rounded headline in primary blue with a yellow shadow, crayon-feeling small label. Bouncy placement in the upper area.',
     defaultTexts: { label: '어린이날', title: '어린이날 이벤트', subtitle: '아이들과 함께하는 하루' },
@@ -1295,6 +1452,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-day-newsemester', name: '신학기 스타트', category: '데이·기념일', kind: 'event',
     desc: '노트·연필 플랫레이의 새 학기 무드', accent: '#e8b23c',
+    useCase: '신학기·개학 시즌 행사',
     scaffold: 'A new semester scene: crisp notebooks, sharpened pencils and paper clips arranged in a tidy flat-lay on a fresh mint-cream desk, a yellow accent ruler, bright clean morning light. Fresh-start stationery energy, organized and hopeful.',
     textStyle: 'Fresh typography — clean bold headline in deep navy, small notebook-tab label. Tidy placement in the upper area.',
     defaultTexts: { label: '신학기', title: '신학기 준비', subtitle: '새 학기, 새 마음으로' },
@@ -1303,6 +1461,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-day-suneung', name: '수능 응원', category: '데이·기념일', kind: 'event',
     desc: '새벽 책상·찹쌀떡 선물의 수험생 응원 무드', accent: '#4a5a8a',
+    useCase: '수능 응원·수험생 이벤트',
     scaffold: 'An exam cheering scene: a quiet desk at dawn blue-hour with a warm study lamp glow, neatly stacked books, a small wrapped rice-cake good-luck gift with a ribbon, gentle steam from a warm tea cup. Heartfelt encouragement before the big day, calm and supportive.',
     textStyle: 'Encouraging typography — warm ivory headline glowing against the dawn blue, small cheering-flag label. Steady placement in the upper area.',
     defaultTexts: { label: '수능 응원', title: '수험생 응원 이벤트', subtitle: '그동안의 노력을 응원합니다' },
@@ -1311,6 +1470,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-day-halloween', name: '핼러윈 파티', category: '데이·기념일', kind: 'event',
     desc: '보라 밤 실내·호박 랜턴·캔들의 파티 무드', accent: '#7a4fc9',
+    useCase: '핼러윈 파티·코스튬 행사',
     scaffold: 'A halloween party interior scene: a moody violet-lit room with carved pumpkin lanterns glowing warm, dripping candles in vintage holders, gauzy cobweb decor and dark autumn foliage on a table, cinematic purple-orange contrast. Spooky-chic party atmosphere, stylish rather than scary.',
     textStyle: 'Halloween typography — pumpkin-orange headline with a wavering candlelight feel, small bat-wing label. Dramatic placement in the upper area.',
     defaultTexts: { label: 'HALLOWEEN', title: '핼러윈 파티', subtitle: '으스스한 밤을 함께' },
@@ -1319,6 +1479,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-day-roseday', name: '로즈 데이', category: '데이·기념일', kind: 'event',
     desc: '딥레드 장미·다크 로맨틱의 로즈 데이 무드', accent: '#a8324a',
+    useCase: '로즈데이·커플 기념일 행사',
     scaffold: 'A rose day scene: a lush bouquet of deep crimson roses in close-up, velvet-dark backdrop with a single warm rim light tracing the petals, scattered petals and a thin gold thread ribbon. Intense romantic elegance, passionate and luxurious.',
     textStyle: 'Passionate typography — champagne-white serif-feeling headline over the dark field, petal-small label. Elegant placement in the upper area.',
     defaultTexts: { label: 'ROSE DAY', title: '로즈 데이', subtitle: '마음을 꽃으로 전하는 날' },
@@ -1329,6 +1490,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-class-craft', name: '원데이 공방', category: '클래스·체험', kind: 'event',
     desc: '가죽·목공 도구 작업대의 공방 클래스 무드', accent: '#8a6f52',
+    useCase: '가죽·목공 등 원데이 공방 클래스',
     scaffold: 'A one-day craft workshop scene: a warm wooden workbench with leatherworking and woodworking hand tools neatly laid out, curled wood shavings and leather swatches, an apron hanging at the edge, honest window daylight. Hands-on maker atmosphere, focused and inviting.',
     textStyle: 'Workshop typography — sturdy medium headline in dark walnut, stamped-tag small label. Grounded placement in the upper area.',
     defaultTexts: { label: 'ONE-DAY CLASS', title: '원데이 클래스', subtitle: '나만의 것을 만드는 시간' },
@@ -1337,6 +1499,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-class-baking', name: '베이킹 클래스', category: '클래스·체험', kind: 'event',
     desc: '밀가루·반죽·오븐 온기의 베이킹 무드', accent: '#d9a97a',
+    useCase: '베이킹·제과 클래스',
     scaffold: 'A baking class scene: a marble counter dusted with flour, dough being rolled with a wooden pin, whisks and measuring cups nearby, warm oven glow in the soft background, a linen apron. Warm floury hands-on joy, delicious anticipation.',
     textStyle: 'Cozy typography — warm brown rounded headline like a bakery sign, flour-dust small label. Homey placement in the upper area.',
     defaultTexts: { label: 'BAKING CLASS', title: '베이킹 클래스', subtitle: '갓 구운 행복을 만들어요' },
@@ -1345,6 +1508,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-class-coffee', name: '커피 브루잉 클래스', category: '클래스·체험', kind: 'event',
     desc: '핸드드립 기구·저울·김의 브루잉 무드', accent: '#6f4a35',
+    useCase: '핸드드립·브루잉 클래스',
     scaffold: 'A coffee brewing class scene: a hand-drip station with a gooseneck kettle mid-pour, glass dripper blooming with fresh grounds, a precision scale and cupping spoons, rising aroma steam in warm cafe light. Craft barista focus, aromatic and precise.',
     textStyle: 'Barista typography — confident medium headline in espresso brown, small tasting-note label. Precise placement in the upper area.',
     defaultTexts: { label: 'BREWING CLASS', title: '커피 클래스', subtitle: '한 잔의 깊이를 배워요' },
@@ -1353,6 +1517,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-class-wine', name: '와인 테이스팅', category: '클래스·체험', kind: 'event',
     desc: '보틀·코르크·테이블 세팅의 테이스팅 무드', accent: '#6e2f3f',
+    useCase: '와인·주류 테이스팅 모임',
     scaffold: 'A wine tasting scene: an elegant table setting with several wine bottles and corks, a tasting placemat with empty glasses arranged in a row, grapes and cheese board accents, low warm evening light in deep burgundy tones. Refined social tasting night, cultured and convivial.',
     textStyle: 'Sommelier typography — refined serif-feeling headline in cream, small cork-stamp label. Composed placement in the upper area.',
     defaultTexts: { label: 'TASTING', title: '와인 테이스팅', subtitle: '취향을 찾아가는 저녁' },
@@ -1361,6 +1526,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-class-beauty', name: '뷰티 클래스', category: '클래스·체험', kind: 'event',
     desc: '데모 테이블·브러시 세팅의 뷰티 클래스 무드', accent: '#c97a8f',
+    useCase: '메이크업·스킨케어 클래스',
     scaffold: 'A beauty class scene: a clean demo table set with brush rolls, palettes and small mirrors at each seat, soft ring-light glow, blush-toned backdrop, a tidy row of cotton pads and swatch cards. Learn-together beauty session, polished and welcoming.',
     textStyle: 'Chic typography — rose-brown modern headline, small lesson-card label. Neat placement in the upper area.',
     defaultTexts: { label: 'BEAUTY CLASS', title: '뷰티 클래스', subtitle: '나에게 맞는 메이크업 찾기' },
@@ -1369,6 +1535,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-class-flower', name: '플라워 클래스', category: '클래스·체험', kind: 'event',
     desc: '꽃 재료·크라프트지·가위의 플라워 무드', accent: '#b06a7a',
+    useCase: '플라워 클래스·원데이 부케',
     scaffold: 'A flower arrangement class scene: fresh seasonal stems spread across kraft paper, floral scissors and twine, a half-finished hand-tied bouquet, petals and leaf trimmings scattered naturally, soft greenhouse daylight. Creative floral immersion, fragrant and serene.',
     textStyle: 'Botanical typography — deep moss-rose headline with organic softness, small stem-tag label. Natural placement in the upper area.',
     defaultTexts: { label: 'FLOWER CLASS', title: '플라워 클래스', subtitle: '꽃과 보내는 특별한 시간' },
@@ -1377,6 +1544,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-class-wellness', name: '웰니스 클래스', category: '클래스·체험', kind: 'event',
     desc: '요가매트·아침빛·세이지의 웰니스 무드', accent: '#8a9a7a',
+    useCase: '요가·명상 등 웰니스 프로그램',
     scaffold: 'A wellness class scene: rolled yoga mats in calm sage tones on a warm wooden floor, morning sunlight streaming through sheer curtains, a small singing bowl and folded towels, one leafy plant. Mindful breathing space, serene and restorative.',
     textStyle: 'Mindful typography — light sage-gray headline with generous spacing, breath-soft small label. Tranquil placement in the upper area.',
     defaultTexts: { label: 'WELLNESS', title: '웰니스 클래스', subtitle: '몸과 마음의 균형 찾기' },
@@ -1385,6 +1553,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-class-kids', name: '키즈 클래스', category: '클래스·체험', kind: 'event',
     desc: '원색 크래프트·크레용의 키즈 클래스 무드', accent: '#e8853c',
+    useCase: '어린이 대상 체험 클래스',
     scaffold: 'A kids class scene: a bright craft table scattered with crayons, colored paper shapes and safety scissors, small paint-dipped hands artwork drying on a line, cheerful primary-color stools, sunny classroom light. Creative little-hands energy, joyful and safe.',
     textStyle: 'Crayon typography — friendly rounded headline in bright blue with hand-drawn charm, small doodle-star label. Cheerful placement in the upper area.',
     defaultTexts: { label: 'KIDS CLASS', title: '키즈 클래스', subtitle: '아이의 상상력이 자라는 시간' },
@@ -1395,6 +1564,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-mem-thankletter', name: '땡큐 레터', category: '멤버십·고객감사', kind: 'event',
     desc: '손편지·실링왁스·만년필의 감사 무드', accent: '#a5794f',
+    useCase: '손편지 톤의 감사 인사',
     scaffold: 'A thank-you letter scene: an elegant handwritten-style blank letter sheet on a warm desk, a fountain pen resting beside a wax seal stamp and melted sealing wax, dried flower sprigs and soft lamp light. Personal gratitude mood, intimate and timeless.',
     textStyle: 'Letter typography — ink-brown serif-feeling headline with a handwritten warmth, small wax-seal label. Personal placement in the upper area.',
     defaultTexts: { label: 'THANK YOU', title: '감사의 편지', subtitle: '진심을 담아 전합니다' },
@@ -1403,6 +1573,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-mem-award', name: '리뷰어 어워드', category: '멤버십·고객감사', kind: 'event',
     desc: '골드 트로피·별 스파클의 시상 무드', accent: '#c9a53c',
+    useCase: '리뷰·후기 우수 고객 시상',
     scaffold: 'A customer award scene: a gleaming golden trophy on a dark stage pedestal, star-shaped light sparkles drifting around, a soft spotlight beam from above, deep charcoal backdrop with subtle curtain texture. Honoring-our-best celebration, prestigious and proud.',
     textStyle: 'Award typography — gold headline with engraved elegance, small star label. Ceremonial placement in the upper area.',
     defaultTexts: { label: 'AWARDS', title: '베스트 리뷰어 어워드', subtitle: '소중한 후기를 기념합니다' },
@@ -1411,6 +1582,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-mem-welcomekit', name: '웰컴 키트', category: '멤버십·고객감사', kind: 'event',
     desc: '열린 박스·티슈페이퍼 언박싱의 환영 무드', accent: '#7a9a8a',
+    useCase: '신규 가입 환영·웰컴 혜택',
     scaffold: 'A welcome kit unboxing scene: an open gift box with soft tissue paper unfolding, a neatly arranged starter kit of small unmarked pouches and cards inside, a thin ribbon just untied, clean bright tabletop with gentle shadows. First-meeting delight, fresh and thoughtful.',
     textStyle: 'Welcoming typography — friendly medium headline in deep teal, small tag label. Open placement in the upper area.',
     defaultTexts: { label: 'WELCOME', title: '웰컴 키트', subtitle: '첫 만남을 환영합니다' },
@@ -1421,6 +1593,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-open-comingsoon', name: '커밍순 티저', category: '오픈·기념일', kind: 'event',
     desc: '종이로 가린 쇼윈도·새어 나오는 빛의 티저 무드', accent: '#8a8578',
+    useCase: '오픈 전 티저 예고',
     scaffold: 'A coming-soon teaser scene: a storefront window covered with clean kraft paper from inside, a single warm light glowing through the seams, subtle silhouettes of shapes behind the paper, dusk street reflections on the glass. Curiosity-building anticipation, understated and intriguing.',
     textStyle: 'Teaser typography — stencil-feeling headline in warm charcoal, small masking-tape label. Mysterious placement in the upper area.',
     defaultTexts: { label: 'COMING SOON', title: '커밍순', subtitle: '곧 공개됩니다' },
@@ -1429,6 +1602,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-open-moving', name: '무빙 데이', category: '오픈·기념일', kind: 'event',
     desc: '이사 박스·새 열쇠의 확장 이전 무드', accent: '#b08a5f',
+    useCase: '매장 이전·확장 이전 안내',
     scaffold: 'A moving day scene: neatly stacked kraft moving boxes tied with twine, a shiny new key with a tag resting on top, a sunlit empty new space with fresh white walls behind, one potted plant ready to be placed. New-chapter relocation mood, hopeful and fresh.',
     textStyle: 'Fresh-start typography — clean warm headline in deep brown, small key-tag label. Optimistic placement in the upper area.',
     defaultTexts: { label: 'MOVING', title: '확장 이전 오픈', subtitle: '더 넓은 공간에서 만나요' },
@@ -1437,6 +1611,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-open-branch', name: '뉴 브랜치', category: '오픈·기념일', kind: 'event',
     desc: '지도·핀·깃발의 신규 지점 오픈 무드', accent: '#4f7ab0',
+    useCase: '신규 지점 오픈 안내',
     scaffold: 'A new branch opening scene: a stylized paper map spread on a desk with a bold location pin standing tall, a small celebratory flag beside it, compass and route-line motifs, bright optimistic daylight. Expanding-territory excitement, adventurous and proud.',
     textStyle: 'Map typography — confident bold headline in deep blue, small pin-shaped label. Expedition placement in the upper area.',
     defaultTexts: { label: 'NEW BRANCH', title: '신규 지점 오픈', subtitle: '가까운 곳에서 만나요' },
@@ -1447,6 +1622,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-season-chuseok', name: '추석 보름달', category: '시즌·명절 행사', kind: 'event',
     desc: '보름달·한옥 지붕선·송편의 한가위 무드', accent: '#c9973c',
+    useCase: '추석 한가위 행사',
     scaffold: 'A chuseok full moon scene: a large golden harvest moon rising over the graceful curve of a hanok tiled roofline, half-moon rice cakes on a small wooden tray, a soft paper lantern glow, deep indigo night sky. Abundant harvest-night serenity, warm and reverent.',
     textStyle: 'Moonlit typography — warm gold headline with a gentle glow, small lantern label. Placed in the night sky of the upper area.',
     defaultTexts: { label: '한가위', title: '추석 인사', subtitle: '풍요로운 한가위 보내세요' },
@@ -1455,6 +1631,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-season-sunrise', name: '새해 해맞이', category: '시즌·명절 행사', kind: 'event',
     desc: '첫 일출 바다·붉은 태양의 새해 무드', accent: '#d96a3f',
+    useCase: '새해 첫날·해맞이 행사',
     scaffold: 'A new year sunrise scene: the first sun rising over a calm sea horizon, vivid orange-red glow spreading across gentle waves, silhouetted gulls in the brightening sky, a long golden light path on the water. First-sunrise hope, powerful and serene.',
     textStyle: 'Sunrise typography — radiant white headline against the glowing sky, small sun-disc label. Horizon placement in the upper area.',
     defaultTexts: { label: 'NEW YEAR', title: '새해 인사', subtitle: '새해 복 많이 받으세요' },
@@ -1463,6 +1640,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-season-xmaseve', name: '크리스마스 이브', category: '시즌·명절 행사', kind: 'event',
     desc: '벽난로·트리 아래 선물의 이브 무드', accent: '#8a3f3f',
+    useCase: '크리스마스 이브 행사',
     scaffold: 'A christmas eve scene: a warm fireplace glow with knitted stockings hanging from the mantel, wrapped gifts tucked beneath the lower branches of a tree, a mug of cocoa with marshmallows on a side table, deep cozy shadows. Silent-night warmth, homey and magical.',
     textStyle: 'Holiday typography — cream headline with a fireplace warmth, small stocking label. Cozy placement in the upper area.',
     defaultTexts: { label: 'CHRISTMAS EVE', title: '크리스마스 이브', subtitle: '따뜻한 밤을 함께 보내요' },
@@ -1471,6 +1649,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-season-boknal', name: '복날 위크', category: '시즌·명절 행사', kind: 'event',
     desc: '뚝배기 김·부채의 한여름 보양 무드', accent: '#b0713f',
+    useCase: '복날 보양 시즌 행사',
     scaffold: 'A boknal vitality scene: a rustic earthenware pot with rich steam rising on a wooden table, a traditional round fan and a cool ramie cloth beside it, bright midsummer light through a bamboo blind. Midsummer-nourishment tradition, hearty and restorative.',
     textStyle: 'Hearty typography — deep umber brush-feeling headline, small fan-shaped label. Robust placement in the upper area.',
     defaultTexts: { label: '복날', title: '복날 보양 위크', subtitle: '더위에 지친 몸을 채워요' },
@@ -1481,6 +1660,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-pop-foodtruck', name: '푸드트럭 나이트', category: '팝업·페스티벌', kind: 'event',
     desc: '푸드트럭·야시장 조명의 스트리트 푸드 무드', accent: '#d97a3c',
+    useCase: '푸드트럭·야시장 행사',
     scaffold: 'A food truck night scene: a charming vintage food truck with warm serving-window glow, festoon lights strung to nearby posts, rising grill smoke catching the light, wooden crates and stools in a twilight lot. Street-food evening buzz, casual and mouthwatering.',
     textStyle: 'Street-food typography — bold chalk-feeling headline in warm cream, small truck-badge label. Lively placement in the upper area.',
     defaultTexts: { label: 'FOOD TRUCK', title: '푸드트럭 나이트', subtitle: '오늘 저녁, 야외에서 만나요' },
@@ -1489,6 +1669,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-pop-stamprally', name: '스탬프 랠리', category: '팝업·페스티벌', kind: 'event',
     desc: '지도·스탬프 카드의 미션 참여 무드', accent: '#4f8ab0',
+    useCase: '스탬프 미션 등 회유형 이벤트',
     scaffold: 'A stamp rally scene: an illustrated adventure map unrolled on a table with dotted route lines connecting landmark icons, wooden stamps and a red ink pad, a blank passport-style booklet, playful daylight. Mission-quest excitement, interactive and fun.',
     textStyle: 'Quest typography — adventurous bold headline in deep blue, small stamp-circle label. Treasure-map placement in the upper area.',
     defaultTexts: { label: 'STAMP RALLY', title: '스탬프 랠리', subtitle: '모으는 재미가 있어요' },
@@ -1497,6 +1678,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-pop-cinema', name: '오픈에어 시네마', category: '팝업·페스티벌', kind: 'event',
     desc: '야외 스크린·빈백·별빛의 상영회 무드', accent: '#3f4f6e',
+    useCase: '야외 상영회·시네마 나이트',
     scaffold: 'An open-air cinema scene: a large white screen glowing softly at dusk in a grassy yard, rows of bean bags and low folding chairs, a vintage projector beam cutting through the evening air, string lights framing the space. Movie-night-under-the-stars romance, relaxed and dreamy.',
     textStyle: 'Cinema typography — marquee-feeling headline in warm white, small ticket label. Screen-glow placement in the upper area.',
     defaultTexts: { label: 'OPEN-AIR CINEMA', title: '야외 시네마', subtitle: '별빛 아래 영화 한 편' },
@@ -1505,6 +1687,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'event-pop-camping', name: '캠핑 나이트', category: '팝업·페스티벌', kind: 'event',
     desc: '텐트·랜턴·모닥불의 캠핑 무드', accent: '#5f7a52',
+    useCase: '캠핑·아웃도어 체험 행사',
     scaffold: 'A camping night scene: a glowing canvas tent among pine trees, a crackling campfire with drifting sparks, enamel mugs and a lantern on a log table, deep starry sky above. Firelight-gathering warmth, rustic and adventurous.',
     textStyle: 'Campfire typography — warm amber headline with a rustic hand-carved feel, small lantern label. Woodsy placement in the upper area.',
     defaultTexts: { label: 'CAMPING', title: '캠핑 나이트', subtitle: '자연 속 하룻밤' },
@@ -1516,6 +1699,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-mens-grooming', name: '맨즈 그루밍', category: '뷰티',
     desc: '딥네이비·면도 소품·돌 트레이의 남성 그루밍 무드', accent: '#2f3e52',
+    useCase: '남성 스킨케어·쉐이빙·그루밍 제품',
     scaffold: 'A men grooming scene: deep navy backdrop with dark slate and smoked glass surfaces, a classic razor and badger brush resting on a stone tray, a rolled charcoal towel, one strip of cool window light. Confident masculine ritual, composed and refined.',
     textStyle: 'Masculine typography — strong clean headline in steel white with tight tracking, small engraved label. Firm placement in the upper area.',
     defaultTexts: { label: 'FOR MEN', title: '{productName}', subtitle: '{salePrice}' },
@@ -1524,6 +1708,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-derma-clinic', name: '더마 클리닉', category: '뷰티',
     desc: '순수 화이트 랩·페트리·앰플의 클리니컬 무드', accent: '#aebfc9',
+    useCase: '더마·병원 화장품·고농축 앰플',
     scaffold: 'A dermatology lab scene: a pure white clinical counter with glass petri dishes and clear ampoules arranged with precision, a stainless spatula, soft even shadowless lighting, no plants and no decoration — only clean science. Trustworthy laboratory calm, sterile and precise.',
     textStyle: 'Clinical typography — exact thin headline in cool graphite, tiny formula-note label. Precise placement in the upper area.',
     defaultTexts: { label: 'DERMA', title: '{productName}', subtitle: '{salePrice}' },
@@ -1532,6 +1717,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-iridescent-holo', name: '이리데슨트 홀로', category: '뷰티',
     desc: '오팔빛·홀로그램 필름의 미래적 시머 무드', accent: '#b8a0d9',
+    useCase: '글리터·하이라이터 등 트렌디한 색조',
     scaffold: 'An iridescent holographic scene: opal-like light gradients shifting between lavender, mint and pearl pink, a glossy holographic film texture rippling in the backdrop, soft prism flares crossing the frame. Dreamy futuristic shimmer, ethereal and trendy.',
     textStyle: 'Holographic typography — pearl-white headline with a subtle rainbow sheen, futuristic small label. Floating placement in the upper area.',
     defaultTexts: { label: 'HOLO EDITION', title: '{productName}', subtitle: '' },
@@ -1540,6 +1726,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'beauty-terracotta-clay', name: '테라코타 클레이', category: '뷰티',
     desc: '도자·토분 질감의 어시 아르티장 무드', accent: '#b57856',
+    useCase: '클레이 마스크·스크럽 등 어시 톤 제품',
     scaffold: 'A terracotta clay scene: hand-thrown ceramic vessels and unglazed clay plates in warm earthen tones, dried clay texture cracks as a subtle backdrop, soft directional sunlight over an adobe-like surface. Grounded artisanal warmth, organic and calm.',
     textStyle: 'Earthen typography — warm umber headline with a hand-formed feeling, small kiln-stamp label. Grounded placement in the upper area.',
     defaultTexts: { label: 'CLAY', title: '{productName}', subtitle: '{salePrice}' },
@@ -1550,6 +1737,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-jewelry-velvet', name: '주얼리 벨벳', category: '패션',
     desc: '플럼 벨벳 트레이·스포트라이트의 주얼리 무드', accent: '#5c4a63',
+    useCase: '주얼리·시계·액세서리',
     scaffold: 'A jewelry display scene: a deep plum velvet tray with soft ring cushions in close-up, a single focused spotlight making tiny facets sparkle, dark surroundings with a faint glass vitrine reflection. Precious-object intimacy, opulent and hushed.',
     textStyle: 'Jewel typography — fine champagne headline with delicate serif feeling, tiny hallmark label. Refined placement in the upper area.',
     defaultTexts: { label: 'JEWELRY', title: '{productName}', subtitle: '' },
@@ -1558,6 +1746,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-knit-texture', name: '니트 텍스처', category: '패션',
     desc: '청키 니트 짜임·울 섬유의 포근한 무드', accent: '#b09a7a',
+    useCase: '니트·스웨터·가디건',
     scaffold: 'A knit texture scene: chunky cable-knit fabric filling the frame in oat and camel tones, visible soft wool fibers backlit by warm light, a wooden button and yarn ball detail at the edge. Warm tactile comfort, soft and inviting.',
     textStyle: 'Soft typography — cozy medium headline in deep camel, small yarn-tag label. Comfortable placement in the upper area.',
     defaultTexts: { label: 'KNIT', title: '{productName}', subtitle: '{salePrice}' },
@@ -1566,6 +1755,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-shoes-step', name: '슈즈 스텝', category: '패션',
     desc: '돌계단·단상의 건축적 슈즈 연출 무드', accent: '#8a7263',
+    useCase: '슈즈·스니커즈·부츠',
     scaffold: 'A shoes display scene: wide stone steps ascending in warm beige tones, each step catching a clean diagonal shadow, a minimalist pedestal at the top under soft museum light. Elevated footwear stage, architectural and poised.',
     textStyle: 'Stately typography — modern headline in deep taupe with confident weight, small minimal label. Ascending placement in the upper area.',
     defaultTexts: { label: 'FOOTWEAR', title: '{productName}', subtitle: '{salePrice}' },
@@ -1574,6 +1764,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'fashion-lounge-morning', name: '라운지웨어 모닝', category: '패션',
     desc: '침대 모서리·아침빛·커피의 홈웨어 무드', accent: '#c9b3a0',
+    useCase: '홈웨어·파자마·라운지웨어',
     scaffold: 'A loungewear morning scene: the soft corner of an unmade bed with cream waffle blankets, morning sun stripes across the linen, a cup of coffee on a wooden tray and an open paperback nearby. Slow-morning-at-home ease, gentle and personal.',
     textStyle: 'Relaxed typography — light warm-gray headline with an unhurried feeling, lowercase-mood small label. Easy placement in the upper area.',
     defaultTexts: { label: 'HOME WEAR', title: '{productName}', subtitle: '' },
@@ -1584,6 +1775,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'cafe-gelato-pastel', name: '젤라토 파스텔', category: '카페·음료',
     desc: '파스텔 젤라토 콘·프로스트의 스윗 무드', accent: '#e8a8b8',
+    useCase: '젤라토·아이스크림·빙수',
     scaffold: 'A gelato scene: scoops of pastel gelato in waffle cones standing in a chilled display row, tiny frost sparkle on the surface, mint leaves and fruit garnish, bright cheerful parlor light in pink and cream. Sweet frozen delight, fresh and adorable.',
     textStyle: 'Scoop typography — rounded headline in deep berry with a creamy outline, small cone-shaped label. Sweet placement in the upper area.',
     defaultTexts: { label: 'GELATO', title: '{productName}', subtitle: '{salePrice}' },
@@ -1592,6 +1784,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'cafe-green-smoothie', name: '그린 스무디', category: '카페·음료',
     desc: '그린 스무디·과일 볼의 헬시 모닝 무드', accent: '#7aa85f',
+    useCase: '헬시 스무디·샐러드·주스',
     scaffold: 'A healthy smoothie scene: a tall glass of vibrant green smoothie with a paper straw, a bowl of fresh spinach, kiwi and banana slices beside it, light wooden counter with morning freshness, water droplets on the glass. Clean-eating vitality, crisp and energizing.',
     textStyle: 'Healthy typography — fresh bold headline in deep leaf green, small leaf-dot label. Energizing placement in the upper area.',
     defaultTexts: { label: 'HEALTHY', title: '{productName}', subtitle: '{salePrice}' },
@@ -1602,6 +1795,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'pop-riso-print', name: '리소 프린트', category: '신메뉴·팝',
     desc: '형광 2도 리소그래프·인디 진의 인쇄 무드', accent: '#e85f8a',
+    useCase: '인디 브랜드·소량 제작 상품',
     scaffold: 'A risograph print promotional scene: grainy two-color riso print texture in fluorescent pink and deep blue with intentional slight misregistration, halftone grain, simple bold shapes like an indie zine poster, cream paper base. Indie print-studio cool, raw and stylish.',
     textStyle: 'Riso typography — bold headline printed in fluorescent pink with grainy edges and slight offset, small zine-stamp label. Poster placement in the upper area.',
     defaultTexts: { label: 'NEW', title: '{productName}', subtitle: '{salePrice}' },
@@ -1612,10 +1806,611 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'minimal-dune-sand', name: '듄 샌드', category: '미니멀',
     desc: '모래 결·사막 빛의 웜 미니멀', accent: '#d9c0a0',
+    useCase: '어시 톤 패키지·내추럴 브랜드',
     scaffold: 'A dune sand minimal scene: smooth wind-carved sand ripples stretching across the frame in warm ivory tones, one crisp shadow line along a dune crest, vast empty sky band above, late-day desert light. Silent warm expanse, meditative and endless.',
     textStyle: 'Desert typography — small quiet headline in deep sand brown, hairline label. Horizon placement in the upper area.',
     defaultTexts: { label: '', title: '{productName}', subtitle: '' },
     sample: { title: '고요한 모래의 결' },
+  },
+
+  // ══════════════════════════════════════════════════════════════════
+  // ★ 2026-08-11 확장 (+64종 · Harold 지시 "뷰티·패션·행사·이벤트 치중")
+  //   기존 카테고리를 전수 대조해 **빈 축만** 잡았다(§4-2 숫자 채우기 금지).
+  //   겹치는 무드는 넣지 않았다 — 유사 변형은 고르는 사람의 시간만 쓴다.
+  // ══════════════════════════════════════════════════════════════════
+
+  // ── 뷰티 (+10) ──
+  {
+    id: 'beauty-hanbang-tradition', name: '한방 전통', category: '뷰티',
+    desc: '자개함·한지·약재의 전통 한방 무드', accent: '#7a4f3a',
+    useCase: '한방·발효 스킨케어, 전통 성분을 앞세운 라인',
+    scaffold: 'A Korean traditional herbal beauty scene: mother-of-pearl inlaid lacquer box, layered hanji paper texture, dried medicinal roots and herbs arranged sparsely, a small brass bowl, deep persimmon and walnut tones, warm low lantern light. Heritage apothecary calm, refined and grounded.',
+    textStyle: 'Traditional-modern typography in deep ink brown with generous vertical breathing room, a calm serif-feeling headline, small hairline label. Quiet placement in the upper area.',
+    defaultTexts: { label: 'HERITAGE', title: '{productName}', subtitle: '' },
+    sample: { title: '오래 이어온 방식으로', subtitle: '발효 한방 라인' },
+  },
+  {
+    id: 'beauty-vegan-refill', name: '비건 리필', category: '뷰티',
+    desc: '재생지·리필 파우치·새싹의 지속가능 무드', accent: '#8f9c6f',
+    useCase: '비건·클린뷰티, 리필 용기·친환경 패키지 제품',
+    scaffold: 'A sustainable beauty scene: recycled kraft paper surface with visible fiber, a soft refill pouch laid flat, small green sprouts in a clay dish, unbleached cotton cloth, natural daylight from a side window. Honest eco-conscious styling, matte and unglossy.',
+    textStyle: 'Grounded typography in deep forest green, medium-weight lowercase-feeling headline, small kraft-stamp label. Simple upper-area placement with plenty of paper showing.',
+    defaultTexts: { label: 'REFILL', title: '{productName}', subtitle: '' },
+    sample: { title: '다시 채워 쓰는 습관', subtitle: '리필 스테이션' },
+  },
+  {
+    id: 'beauty-perfume-flacon', name: '퍼퓸 플라콘', category: '뷰티',
+    desc: '프리즘 빛·실크 잔향의 향수 무드', accent: '#9b7ba6',
+    useCase: '향수·바디미스트·룸프레그런스',
+    scaffold: 'A fine fragrance scene: a prism-refracted light beam spilling violet and amber across a polished stone slab, sheer silk ribbon drifting as if carrying scent, tiny suspended dust motes catching light, deep plum backdrop fading to shadow. Perfumery mystique, sensual and quiet.',
+    textStyle: 'Perfume-house typography in pale lilac, wide-tracked small capital label, an elegant thin serif headline. Centered restraint in the upper area.',
+    defaultTexts: { label: 'EAU DE PARFUM', title: '{productName}', subtitle: '' },
+    sample: { title: '머무는 잔향', subtitle: '시그니처 퍼퓸' },
+  },
+  {
+    id: 'beauty-hair-shine', name: '헤어 샤인', category: '뷰티',
+    desc: '윤기 흐르는 머릿결 웨이브의 헤어 무드', accent: '#5c4433',
+    useCase: '샴푸·트리트먼트·헤어오일 등 헤어케어',
+    scaffold: 'A hair care campaign scene: a glossy cascade of healthy dark hair waves filling the background in soft focus, light gliding along each strand, a smooth wet-look ceramic ledge in front, warm chestnut and amber tones. Salon-grade shine, silky and fluid.',
+    textStyle: 'Salon typography in warm cream, flowing medium headline with soft weight, small tracked label. Upper placement clear of the hair fall.',
+    defaultTexts: { label: 'HAIR CARE', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '결이 달라지는 순간', subtitle: '데일리 헤어 케어' },
+  },
+  {
+    id: 'beauty-bath-bubble', name: '배스 버블', category: '뷰티',
+    desc: '욕조 거품·타일·수증기의 배스 타임 무드', accent: '#a9c4cd',
+    useCase: '바디워시·배스밤·입욕제 등 목욕 용품',
+    scaffold: 'A bath time scene: a white porcelain tub edge crowned with airy foam bubbles, pale blue subway tiles behind with gentle steam haze, a folded linen towel and a small brass tray on the rim, soft bathroom daylight. Relaxed home-bath comfort, clean and steamy.',
+    textStyle: 'Soft typography in deep teal, rounded friendly headline, small lowercase label. Placed in the upper area above the foam line.',
+    defaultTexts: { label: 'BATH TIME', title: '{productName}', subtitle: '' },
+    sample: { title: '하루를 씻어내는 시간', subtitle: '배스 컬렉션' },
+  },
+  {
+    id: 'beauty-sun-shadow', name: '선 섀도', category: '뷰티',
+    desc: '강한 햇빛·야자잎 그림자의 선케어 무드', accent: '#e0a860',
+    useCase: '선크림·선스틱 등 자외선 차단 제품',
+    scaffold: 'A sun protection scene: hard midday sunlight casting crisp palm frond shadows across a warm sand-toned stucco wall, fine sand grains on a pale ledge, high-contrast light and shade, clear cloudless blue strip at the top. Bright outdoor heat, graphic and sharp.',
+    textStyle: 'Bold sunny typography in bright white with a hard shadow edge, strong compact headline, small uppercase label. Upper placement in the lit area, not the shadow.',
+    defaultTexts: { label: 'SUN CARE', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '햇빛 아래에서도', subtitle: '데일리 선케어' },
+  },
+  {
+    id: 'beauty-lip-swatch', name: '립 스와치', category: '뷰티',
+    desc: '컬러 스와치 띠·크림 텍스처의 발색 무드', accent: '#c0455c',
+    useCase: '립스틱·틴트·블러셔 등 발색이 핵심인 색조',
+    scaffold: 'A color cosmetics swatch scene: thick creamy pigment swatches smeared in parallel bands across a smooth white acrylic surface, rich reds, corals and berry tones with visible buttery texture, crisp studio lighting raking across to reveal the cream ridges. Pure color showcase, tactile and saturated.',
+    textStyle: 'Fashion-beauty typography in deep berry, tight modern headline, small tracked label. Upper placement above the swatch bands.',
+    defaultTexts: { label: 'SHADE', title: '{productName}', subtitle: '' },
+    sample: { title: '바르는 순간 결정된다', subtitle: '풀 컬러 라인업' },
+  },
+  {
+    id: 'beauty-neon-pop', name: '네온 팝 뷰티', category: '뷰티',
+    desc: '네온 튜브·비비드 대비의 Z세대 팝 뷰티', accent: '#d63aa0',
+    useCase: '10~20대 타깃 색조·트렌디 신제품',
+    scaffold: 'A youth beauty scene: glowing magenta and cyan neon tubes bending across a glossy black backdrop, vivid reflections pooling on a wet-look acrylic platform, subtle haze catching the neon glow. Club-poster energy, loud and modern, unapologetically bright.',
+    textStyle: 'Punchy typography in electric white with a neon glow edge, heavy compact headline, tiny bracketed label. Upper placement inside the neon frame.',
+    defaultTexts: { label: 'NEW DROP', title: '{productName}', subtitle: '' },
+    sample: { title: '오늘 밤의 컬러', subtitle: '네온 컬렉션' },
+  },
+  {
+    id: 'beauty-antique-vanity', name: '앤티크 바니티', category: '뷰티',
+    desc: '빈티지 거울·레이스·황동의 고전 화장대', accent: '#8d7256',
+    useCase: '클래식 무드 브랜드, 한정판·기념 에디션',
+    scaffold: 'An antique vanity scene: an ornate gilt-framed mirror with softly aged silvering, a lace runner over dark walnut, small brass trinket dishes and a cut-glass bottle, dusty warm light from a curtained window. Old-world dressing room nostalgia, romantic and lived-in.',
+    textStyle: 'Classic typography in aged gold, delicate high-contrast serif headline, small italic-feeling label. Upper placement with generous margins.',
+    defaultTexts: { label: 'LIMITED', title: '{productName}', subtitle: '' },
+    sample: { title: '오래된 화장대의 기억', subtitle: '헤리티지 에디션' },
+  },
+  {
+    id: 'beauty-foam-cloud', name: '폼 클라우드', category: '뷰티',
+    desc: '조밀한 클렌징 거품·물방울의 세정 무드', accent: '#b7ccd8',
+    useCase: '클렌징폼·클렌징 오일 등 세안 제품',
+    scaffold: 'A cleansing foam scene: a dense mound of fine white lather with countless tiny bubbles catching light, scattered clear water droplets on a pale wet ceramic surface, cool white and soft blue tones, crisp overhead light showing every bubble. Squeaky-clean freshness, tactile and pure.',
+    textStyle: 'Clean typography in cool slate blue, light airy headline, small wide-tracked label. Upper placement above the foam mound.',
+    defaultTexts: { label: 'CLEANSING', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '부드럽게 감싸 씻다', subtitle: '데일리 클렌징' },
+  },
+
+  // ── 패션 (+10) ──
+  {
+    id: 'fashion-leather-goods', name: '레더 굿즈', category: '패션',
+    desc: '가죽 결·스티치·왁스의 레더 공예 무드', accent: '#6b4a33',
+    useCase: '가방·지갑·벨트 등 가죽 제품',
+    scaffold: 'A fine leather goods scene: rich full-grain leather hide draped across a dark walnut bench, visible pore texture and hand-stitched saddle stitching, a block of beeswax and a bone folder set aside, warm directional light raking the grain. Heritage craftsmanship, deep and tactile.',
+    textStyle: 'Heritage typography in warm tan, sturdy medium serif headline, small embossed-feeling label. Upper placement on the plain leather area.',
+    defaultTexts: { label: 'LEATHER', title: '{productName}', subtitle: '' },
+    sample: { title: '쓸수록 깊어지는', subtitle: '레더 컬렉션' },
+  },
+  {
+    id: 'fashion-eyewear-light', name: '아이웨어 라이트', category: '패션',
+    desc: '렌즈 굴절·스펙트럼 광선의 아이웨어 무드', accent: '#5d7f96',
+    useCase: '선글라스·안경테 등 아이웨어',
+    scaffold: 'An eyewear scene: a clean pale gray sweep backdrop with a single sharp light beam refracting into a thin rainbow spectrum across a glass shelf, crisp reflections and a hard shadow beneath, cool minimal palette. Optical precision, clean and technical.',
+    textStyle: 'Optical typography in graphite, precise geometric headline, tiny spaced label. Upper placement aligned to the beam.',
+    defaultTexts: { label: 'EYEWEAR', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '시선이 머무는 각도', subtitle: '아이웨어 컬렉션' },
+  },
+  {
+    id: 'fashion-workwear-utility', name: '워크웨어 유틸리티', category: '패션',
+    desc: '작업대·캔버스·금속 부속의 워크웨어 무드', accent: '#5a5f4e',
+    useCase: '워크웨어·카고·유틸리티 캐주얼',
+    scaffold: 'A workwear scene: a scuffed steel workbench with raw canvas duck fabric folded at the edge, metal rivets, a coil of rope and a worn measuring tape, olive and oxidized-steel palette, hard industrial light from above. Honest utility, rugged and unpolished.',
+    textStyle: 'Utility typography in bleached bone white, condensed stencil-feeling headline, small stamped label. Upper placement over the bench surface.',
+    defaultTexts: { label: 'UTILITY', title: '{productName}', subtitle: '' },
+    sample: { title: '오래 견디는 옷', subtitle: '워크웨어 라인' },
+  },
+  {
+    id: 'fashion-kids-family', name: '키즈 패밀리', category: '패션',
+    desc: '밝은 놀이방·원목 블록의 키즈 무드', accent: '#eeb07e',
+    useCase: '아동복·패밀리룩·키즈 잡화',
+    scaffold: 'A children\'s clothing scene: a sunny playroom corner with a soft cream rug, wooden toy blocks stacked loosely, a small woven basket, pastel apricot and sky tones, gentle window light with soft shadows. Warm family cheer, safe and unfussy.',
+    textStyle: 'Friendly rounded typography in warm coral, cheerful medium headline, small playful label. Upper placement with airy spacing.',
+    defaultTexts: { label: 'KIDS', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '뛰어놀기 좋은 하루', subtitle: '키즈 라인' },
+  },
+  {
+    id: 'fashion-modern-hanbok', name: '모던 한복', category: '패션',
+    desc: '한옥 마루·창호지 빛·모시 결의 한복 무드', accent: '#9a6b6b',
+    useCase: '생활한복·모시·전통 소재 의류, 명절 시즌',
+    scaffold: 'A modern hanbok scene: a polished dark wood maru floor beside a hanji paper sliding door glowing with diffused daylight, a length of sheer ramie fabric draped over a low stool, muted rose and celadon accents, quiet architectural shadows. Contemporary Korean serenity, spare and graceful.',
+    textStyle: 'Refined typography in deep ink, calm generous-spaced headline, small hairline label. Upper placement in the paper-door light.',
+    defaultTexts: { label: '', title: '{productName}', subtitle: '' },
+    sample: { title: '단정하게, 매일', subtitle: '모던 한복 라인' },
+  },
+  {
+    id: 'fashion-outdoor-gear', name: '아웃도어 기어', category: '패션',
+    desc: '바위·안개·산 능선의 아웃도어 무드', accent: '#4e6b6a',
+    useCase: '등산·캠핑 의류, 기능성 아우터',
+    scaffold: 'An outdoor gear scene: a weathered granite boulder in the foreground with lichen texture, layered mountain ridges fading into cool morning mist behind, damp moss and a coil of climbing rope, muted slate and pine palette, flat overcast light. Real mountain air, cold and capable.',
+    textStyle: 'Technical typography in bright white, condensed sturdy headline, small coordinate-style label. Upper placement against the mist band.',
+    defaultTexts: { label: 'OUTDOOR', title: '{productName}', subtitle: '' },
+    sample: { title: '더 멀리 가는 장비', subtitle: '아웃도어 라인' },
+  },
+  {
+    id: 'fashion-office-suit', name: '오피스 수트', category: '패션',
+    desc: '유리벽·블라인드 그림자의 오피스 무드', accent: '#3f4756',
+    useCase: '수트·오피스룩·비즈니스 캐주얼',
+    scaffold: 'A modern office scene: floor-to-ceiling glass with slatted blind shadows striping a charcoal concrete floor, a minimal steel-and-leather chair edge, cool daylight from a city window, navy and graphite palette. Composed professionalism, sharp and quiet.',
+    textStyle: 'Corporate-modern typography in cool white, precise medium sans headline, small tracked label. Upper placement between the blind stripes.',
+    defaultTexts: { label: 'BUSINESS', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '갖춰 입는 하루', subtitle: '오피스 컬렉션' },
+  },
+  {
+    id: 'fashion-linen-texture', name: '린넨 텍스처', category: '패션',
+    desc: '린넨 결·자연광 주름의 여름 소재 무드', accent: '#cbbfa6',
+    useCase: '린넨·면 등 소재를 강조하는 여름 의류',
+    scaffold: 'A linen fabric scene: crumpled natural linen filling the frame with visible slubby weave and soft creases, warm side daylight raking across to reveal the fiber texture, a few loose threads at one edge, undyed oatmeal tones. Breathable summer material, honest and soft.',
+    textStyle: 'Natural typography in warm taupe, light airy headline, small lowercase label. Upper placement on the flattest fabric area.',
+    defaultTexts: { label: 'LINEN', title: '{productName}', subtitle: '' },
+    sample: { title: '바람이 지나가는 소재', subtitle: '린넨 컬렉션' },
+  },
+  {
+    id: 'fashion-accessory-flatlay', name: '액세서리 플랫레이', category: '패션',
+    desc: '탑다운 배열·여백 정렬의 소품 플랫레이', accent: '#a89b8c',
+    useCase: '모자·스카프·벨트 등 잡화 여러 점을 함께 보일 때',
+    scaffold: 'A styled flat lay scene viewed straight from above: a warm sand paper backdrop with accessories arranged in a calm asymmetric grid — a folded silk scarf, a slim belt coiled, a pair of sunglasses, a small pouch — generous negative space between each, soft even overhead light with gentle shadows. Editorial styling board, orderly and considered.',
+    textStyle: 'Editorial typography in deep espresso, clean medium headline, small index-style label. Placed in the empty upper corner of the layout.',
+    defaultTexts: { label: 'ACCESSORY', title: '{productName}', subtitle: '{salePrice}' },
+    sample: { title: '하나만 더하면 달라져요', subtitle: '액세서리 모음' },
+  },
+  {
+    id: 'fashion-sport-motion', name: '스포츠 퍼포먼스', category: '패션',
+    desc: '역광·물방울·역동 조명의 퍼포먼스 무드', accent: '#2f6f8f',
+    useCase: '러닝·트레이닝 등 퍼포먼스 스포츠웨어',
+    scaffold: 'A sports performance scene: a dark gym-floor backdrop cut by a hard rim light from behind, airborne sweat-like water droplets frozen mid-flight catching the beam, faint motion-blur streaks along the edges, cold blue and steel tones. Athletic intensity, kinetic and charged.',
+    textStyle: 'Athletic typography in stark white, heavy italic-leaning condensed headline, small tracked label. Upper placement inside the rim light.',
+    defaultTexts: { label: 'PERFORMANCE', title: '{productName}', subtitle: '' },
+    sample: { title: '한계는 매번 갱신된다', subtitle: '퍼포먼스 라인' },
+  },
+
+  // ── 세일·이벤트 (+8) ──
+  {
+    id: 'sale-swiss-grid', name: '스위스 그리드', category: '세일·이벤트',
+    desc: '격자 레이아웃·굵은 타이포의 정제된 고지', accent: '#c8342f',
+    useCase: '정보량이 많은 기획전, 여러 조건을 정확히 알릴 때',
+    scaffold: 'A Swiss-style graphic poster scene: a clean off-white paper field with a faint modular grid, two bold flat color blocks (deep red and black) anchoring opposite corners, one thick horizontal rule, no illustration at all. Rigorous international-style design, structural and confident.',
+    textStyle: 'Swiss typography — heavy grotesque headline aligned hard left to the grid, small tightly tracked label above, strict left alignment throughout. Placed in the upper grid module.',
+    defaultTexts: { label: 'NOTICE', title: '{productName}', subtitle: '[혜택은 직접 입력해주세요]' },
+    sample: { title: '기획전 안내', subtitle: '기간·대상 확인' },
+  },
+  {
+    id: 'sale-scratch-card', name: '스크래치 카드', category: '세일·이벤트',
+    desc: '은박 긁힘·드러나는 컬러의 복권 무드', accent: '#9aa3ad',
+    useCase: '스크래치·즉석 당첨형 참여 이벤트',
+    scaffold: 'A scratch card scene: a metallic silver foil panel partially scratched away in curling flakes, revealing a vivid coral surface beneath, scattered foil dust catching light, a matte navy backdrop. Instant-win anticipation, tactile and playful.',
+    textStyle: 'Bold playful typography in bright white on the navy area, chunky rounded headline, small ticket-style label. Upper placement clear of the foil panel.',
+    defaultTexts: { label: 'SCRATCH', title: '{productName}', subtitle: '[혜택은 직접 입력해주세요]' },
+    sample: { title: '긁어서 확인하세요', subtitle: '즉석 당첨 이벤트' },
+  },
+  {
+    id: 'sale-countdown-flip', name: '카운트다운 플립', category: '세일·이벤트',
+    desc: '플립 숫자판·초읽기 무드의 마감 임박', accent: '#1f2937',
+    useCase: '마감 임박 안내, 종료일이 정해진 프로모션',
+    scaffold: 'A countdown scene: mechanical split-flap display panels in charcoal with crisp white number cards mid-flip, motion blur on one flipping card, a dim amber indicator glow along the panel edge, deep black backdrop. Ticking urgency, mechanical and tense.',
+    textStyle: 'Urgent typography in bright amber, condensed heavy headline, small monospace-feeling label. Upper placement above the flip panels.',
+    defaultTexts: { label: 'ENDING SOON', title: '{productName}', subtitle: '[혜택은 직접 입력해주세요]' },
+    sample: { title: '마감이 다가옵니다', subtitle: '종료일 확인' },
+  },
+  {
+    id: 'sale-liquid-jelly', name: '리퀴드 젤리', category: '세일·이벤트',
+    desc: '말랑한 젤리 덩어리·글로시 반사의 3D 무드', accent: '#ff5f9e',
+    useCase: '젊은 층 타깃 앱 전용 혜택·굿즈 이벤트',
+    scaffold: 'A glossy 3D jelly scene: soft translucent pink and lime jelly blobs wobbling on a pastel lilac plane, each catching a bright specular highlight and casting a colored shadow, subtle subsurface glow. Squishy digital playfulness, bouncy and bright.',
+    textStyle: 'Chunky rounded typography in white with a soft drop shadow, bubbly heavy headline, small pill-shaped label. Upper placement above the blobs.',
+    defaultTexts: { label: 'APP ONLY', title: '{productName}', subtitle: '[혜택은 직접 입력해주세요]' },
+    sample: { title: '앱에서만 열리는 혜택', subtitle: '앱 전용 이벤트' },
+  },
+  {
+    id: 'sale-stamp-press', name: '스탬프 프레스', category: '세일·이벤트',
+    desc: '고무도장·잉크 번짐의 승인 도장 무드', accent: '#8c2f39',
+    useCase: '확정·승인 톤의 공지, 회원 전용 확정 혜택',
+    scaffold: 'A rubber stamp scene: heavy cream cardstock with a deep red ink stamp impression pressed off-center, ink bleeding slightly into the paper fiber, a wooden stamp handle resting beside, faint previous impressions ghosted at the edge. Bureaucratic authority made warm, analog and definitive.',
+    textStyle: 'Stamped typography in oxidized red with slightly uneven ink density, blocky uppercase headline, small serial-number-style label. Upper placement on the clean paper area.',
+    defaultTexts: { label: 'CONFIRMED', title: '{productName}', subtitle: '[혜택은 직접 입력해주세요]' },
+    sample: { title: '확정되었습니다', subtitle: '회원 확인 안내' },
+  },
+  {
+    id: 'sale-pixel-retro', name: '픽셀 레트로', category: '세일·이벤트',
+    desc: '8비트 픽셀·CRT 스캔라인의 레트로 게임 무드', accent: '#3ad17a',
+    useCase: '게임형 참여 이벤트, 레트로 콘셉트 프로모션',
+    scaffold: 'A retro arcade scene: a deep indigo pixel-grid field with chunky 8-bit blocks and a scattering of pixel stars, faint CRT scanlines and a subtle screen curvature glow at the corners, neon green and magenta accents. Nostalgic game-screen energy, blocky and vivid.',
+    textStyle: 'Pixel-font typography in neon green with a hard magenta offset shadow, blocky headline, tiny pixel label. Upper placement on the grid.',
+    defaultTexts: { label: 'PLAY', title: '{productName}', subtitle: '[혜택은 직접 입력해주세요]' },
+    sample: { title: '지금 도전하세요', subtitle: '참여형 이벤트' },
+  },
+  {
+    id: 'sale-roulette-wheel', name: '룰렛 휠', category: '세일·이벤트',
+    desc: '회전 룰렛·포인터의 돌림판 무드', accent: '#e0912f',
+    useCase: '룰렛·돌림판 등 확률형 참여 이벤트',
+    scaffold: 'A prize wheel scene: a large segmented roulette wheel angled into frame with alternating warm amber and cream wedges, a brass pointer at the top edge, slight spin blur on the far segments, deep plum backdrop with a soft vignette. Fairground anticipation, festive and inviting.',
+    textStyle: 'Festive typography in cream with a thin gold outline, rounded bold headline, small ticket label. Upper placement above the wheel arc.',
+    defaultTexts: { label: 'SPIN', title: '{productName}', subtitle: '[혜택은 직접 입력해주세요]' },
+    sample: { title: '돌리면 무엇이 나올까요', subtitle: '룰렛 이벤트' },
+  },
+  {
+    id: 'sale-secret-envelope', name: '시크릿 봉투', category: '세일·이벤트',
+    desc: '밀랍 봉인 봉투·새어나오는 빛의 비밀 오퍼', accent: '#4b3b63',
+    useCase: '비공개 특별 오퍼, 초대받은 고객 전용 혜택',
+    scaffold: 'A secret offer scene: a deep aubergine envelope with a wax seal being lifted at one corner, warm golden light spilling out from inside, dark velvet surface beneath, a few gold flecks in the air. Privileged invitation mystery, intimate and premium.',
+    textStyle: 'Discreet typography in warm gold, elegant thin serif headline, small wide-tracked label. Upper placement in the darker area away from the light spill.',
+    defaultTexts: { label: 'PRIVATE OFFER', title: '{productName}', subtitle: '[혜택은 직접 입력해주세요]' },
+    sample: { title: '초대받은 분께만', subtitle: '비공개 안내' },
+  },
+
+  // ── 팝업·페스티벌 (+8) ──
+  {
+    id: 'event-pop-flea', name: '빈티지 플리마켓', category: '팝업·페스티벌', kind: 'event',
+    desc: '낡은 나무 매대·빈티지 소품의 벼룩시장 무드', accent: '#8a6f52',
+    useCase: '중고·빈티지 마켓, 리세일 팝업',
+    scaffold: 'A vintage flea market scene: weathered wooden trestle tables under a striped canvas awning, old brass trinkets and stacked leather-bound books, a hand-lettered chalk sign leaning at the side, dusty afternoon sunlight through the awning gaps. Treasure-hunting warmth, worn and characterful.',
+    textStyle: 'Hand-lettered typography in chalk white with slight irregularity, friendly bold headline, small ticket-stub label. Upper placement against the awning.',
+    defaultTexts: { label: 'FLEA MARKET', title: '빈티지 마켓', subtitle: '' },
+    sample: { title: '빈티지 마켓', subtitle: '이번 주말, 오래된 것들' },
+  },
+  {
+    id: 'event-pop-water', name: '워터 페스티벌', category: '팝업·페스티벌', kind: 'event',
+    desc: '물보라·튜브·햇빛 반사의 물놀이 축제', accent: '#2fa4d6',
+    useCase: '여름 물놀이 축제, 워터 파크 행사',
+    scaffold: 'A water festival scene: a burst of backlit water spray frozen mid-air with sunlight refracting through every droplet, colorful inflatable rings floating on turquoise water below, a wet deck edge in the foreground, brilliant summer sky. Drenched summer joy, splashing and radiant.',
+    textStyle: 'Splashy typography in bright white with a soft aqua glow, energetic rounded headline, small wave-shaped label. Upper placement above the spray.',
+    defaultTexts: { label: 'WATER FESTA', title: '워터 페스티벌', subtitle: '' },
+    sample: { title: '워터 페스티벌', subtitle: '한여름 물놀이' },
+  },
+  {
+    id: 'event-pop-livemusic', name: '라이브 뮤직 나이트', category: '팝업·페스티벌', kind: 'event',
+    desc: '무대 조명·마이크·관객 실루엣의 공연 무드', accent: '#7b3fa0',
+    useCase: '라이브 공연·버스킹·뮤직 나이트',
+    scaffold: 'A live music night scene: a small stage bathed in violet and amber spotlights cutting through haze, a vintage microphone stand center, blurred audience silhouettes with raised hands in the foreground darkness, warm bokeh from string lights behind. Intimate gig atmosphere, electric and close.',
+    textStyle: 'Gig-poster typography in warm amber, bold condensed headline, small lineup-style label. Upper placement in the haze above the stage.',
+    defaultTexts: { label: 'LIVE', title: '라이브 나이트', subtitle: '' },
+    sample: { title: '라이브 나이트', subtitle: '오늘 밤의 무대' },
+  },
+  {
+    id: 'event-pop-bookfair', name: '북페어', category: '팝업·페스티벌', kind: 'event',
+    desc: '쌓인 책·독서등·나무 선반의 책 축제', accent: '#6b5240',
+    useCase: '독립출판 북페어, 서점 행사·작가 사인회',
+    scaffold: 'A book fair scene: stacks of books arranged in uneven towers on a long oak table, an open volume mid-page with a ribbon marker, a warm reading lamp casting a pool of light, tall shelves fading into soft shadow behind. Quiet literary gathering, warm and studious.',
+    textStyle: 'Editorial typography in deep ink brown, classic serif headline, small colophon-style label. Upper placement in the lamp light.',
+    defaultTexts: { label: 'BOOK FAIR', title: '북페어', subtitle: '' },
+    sample: { title: '북페어', subtitle: '읽는 사람들의 하루' },
+  },
+  {
+    id: 'event-pop-pet', name: '펫 페스티벌', category: '팝업·페스티벌', kind: 'event',
+    desc: '잔디밭·발자국·리드줄의 반려동물 행사', accent: '#79a86b',
+    useCase: '반려동물 동반 행사, 펫 페어·산책 모임',
+    scaffold: 'A pet festival scene: a sunny lawn with a checkered picnic blanket, scattered paw prints on a dirt path, a coiled leash and a wooden water bowl, small pennant flags strung between two poles, bright afternoon light. Friendly outdoor gathering, cheerful and warm.',
+    textStyle: 'Friendly rounded typography in deep grass green, cheerful medium headline, small paw-dot label. Upper placement in the open sky area.',
+    defaultTexts: { label: 'PET DAY', title: '펫 페스티벌', subtitle: '' },
+    sample: { title: '펫 페스티벌', subtitle: '함께 걷는 하루' },
+  },
+  {
+    id: 'event-pop-craftlocal', name: '로컬 크래프트', category: '팝업·페스티벌', kind: 'event',
+    desc: '수공예 도구·소창 천의 로컬 장인 마켓', accent: '#a1795a',
+    useCase: '지역 장인·수공예 브랜드 합동 마켓',
+    scaffold: 'A local craft market scene: a linen-draped display table with hand-thrown ceramics and woven baskets, artisan tools laid neatly beside — a wooden mallet, twine spool, carving knife — natural fibers everywhere, soft daylight from a warehouse window. Maker-community honesty, textured and unhurried.',
+    textStyle: 'Artisan typography in warm clay brown, sturdy medium headline, small hand-stamped label. Upper placement on the linen backdrop.',
+    defaultTexts: { label: 'LOCAL CRAFT', title: '로컬 크래프트 마켓', subtitle: '' },
+    sample: { title: '로컬 크래프트 마켓', subtitle: '손으로 만든 것들' },
+  },
+  {
+    id: 'event-pop-sportsview', name: '스포츠 뷰잉', category: '팝업·페스티벌', kind: 'event',
+    desc: '대형 스크린·응원 조명의 단체 관람 무드', accent: '#1e5f8a',
+    useCase: '경기 단체 관람·응원전, 스포츠 시즌 행사',
+    scaffold: 'A sports viewing party scene: a large bright screen glow washing over a dim room, rows of empty chairs facing it with a few scattered pennants, cold blue screen light mixed with warm bar lamps at the sides, faint haze. Collective anticipation before kickoff, charged and communal.',
+    textStyle: 'Sporty typography in bright white with a hard edge, heavy condensed headline, small scoreboard-style label. Upper placement against the screen glow.',
+    defaultTexts: { label: 'VIEWING', title: '단체 관람전', subtitle: '' },
+    sample: { title: '단체 관람전', subtitle: '함께 응원해요' },
+  },
+  {
+    id: 'event-pop-countdown', name: '카운트다운 나이트', category: '팝업·페스티벌', kind: 'event',
+    desc: '자정 불꽃·컨페티 낙하의 카운트다운 무드', accent: '#2b2f6b',
+    useCase: '자정 카운트다운·심야 오픈 행사',
+    scaffold: 'A countdown night scene: a midnight-blue sky with golden fireworks bursting high above a city skyline silhouette, streams of confetti falling through the frame, a warm glow rising from below. Collective midnight excitement, celebratory and vast.',
+    textStyle: 'Celebratory typography in bright gold, tall elegant headline, small wide-tracked label. Upper placement in the clear sky band.',
+    defaultTexts: { label: 'COUNTDOWN', title: '카운트다운 나이트', subtitle: '' },
+    sample: { title: '카운트다운 나이트', subtitle: '자정에 만나요' },
+  },
+
+  // ── 데이·기념일 (+8) ──
+  {
+    id: 'event-day-pepero', name: '빼빼로 데이', category: '데이·기념일', kind: 'event',
+    desc: '길쭉한 스틱 과자·리본 포장의 나눔 무드', accent: '#c4553f',
+    useCase: '11월 11일 빼빼로데이 기획전',
+    scaffold: 'A stick-snack gifting scene: slender chocolate-dipped sticks bundled upright in a kraft paper sleeve tied with a thin ribbon, a few sticks laid in a parallel row beside, cocoa dust on a cream surface, warm afternoon light. Small-gift sweetness, cheerful and shareable.',
+    textStyle: 'Playful typography in deep cocoa, friendly rounded headline, small ribbon-tag label. Upper placement above the bundle.',
+    defaultTexts: { label: '11.11', title: '빼빼로 데이', subtitle: '' },
+    sample: { title: '빼빼로 데이', subtitle: '마음을 나누는 날' },
+  },
+  {
+    id: 'event-day-teacher', name: '스승의 날', category: '데이·기념일', kind: 'event',
+    desc: '칠판·분필·감사 카드의 스승의 날 무드', accent: '#3f6b5a',
+    useCase: '5월 스승의 날 감사 행사·선물 기획전',
+    scaffold: 'A teacher appreciation scene: a dark green chalkboard with faint chalk dust and a wiped arc, a wooden desk edge below holding a small carnation, a folded handwritten card and a chalk stub, soft classroom daylight. Sincere gratitude, nostalgic and warm.',
+    textStyle: 'Chalk-lettering typography in soft white with slight grain, warm handwritten-feeling headline, small chalk label. Upper placement on the clean board area.',
+    defaultTexts: { label: 'THANK YOU', title: '스승의 날', subtitle: '' },
+    sample: { title: '스승의 날', subtitle: '감사의 마음을 전해요' },
+  },
+  {
+    id: 'event-day-adult', name: '성년의 날', category: '데이·기념일', kind: 'event',
+    desc: '장미 한 송이·향수·리본의 성년의 날 무드', accent: '#a34f6b',
+    useCase: '5월 성년의 날 기획전, 20대 타깃 선물',
+    scaffold: 'A coming-of-age day scene: a single long-stemmed rose laid diagonally across a soft blush satin surface, a small perfume bottle and a silk ribbon coiled beside, gentle backlight creating a warm halo, deep rose and champagne tones. First-adulthood tenderness, romantic and hopeful.',
+    textStyle: 'Elegant typography in deep rose, graceful serif headline, small tracked label. Upper placement above the rose.',
+    defaultTexts: { label: 'COMING OF AGE', title: '성년의 날', subtitle: '' },
+    sample: { title: '성년의 날', subtitle: '어른이 되는 하루' },
+  },
+  {
+    id: 'event-day-black', name: '블랙 데이', category: '데이·기념일', kind: 'event',
+    desc: '검은 그릇·짜장 톤·젓가락의 블랙데이 무드', accent: '#2c2621',
+    useCase: '4월 14일 블랙데이·싱글 타깃 이벤트',
+    scaffold: 'A black day scene: a matte black ceramic bowl on a dark slate table, glossy dark sauce noodles coiled inside catching a single overhead highlight, wooden chopsticks resting across the rim, deep charcoal backdrop with one warm rim light. Moody comfort food, dramatic and appetizing.',
+    textStyle: 'Bold typography in warm off-white, heavy condensed headline, small bracket label. Upper placement in the dark backdrop area.',
+    defaultTexts: { label: '4.14', title: '블랙 데이', subtitle: '' },
+    sample: { title: '블랙 데이', subtitle: '오늘은 검은 날' },
+  },
+  {
+    id: 'event-day-advent', name: '어드벤트 캘린더', category: '데이·기념일', kind: 'event',
+    desc: '숫자 창문·작은 선물칸의 어드벤트 무드', accent: '#3f5f4a',
+    useCase: '12월 어드벤트 캘린더·매일 열리는 혜택',
+    scaffold: 'An advent calendar scene: a deep pine-green paper grid with small numbered doors, a few doors ajar revealing warm gold light and tiny wrapped parcels inside, a sprig of fir and a red thread at the corner, soft candlelight. Daily-surprise anticipation, cozy and orderly.',
+    textStyle: 'Storybook typography in warm gold, charming serif headline, small numbered label. Upper placement above the door grid.',
+    defaultTexts: { label: 'ADVENT', title: '어드벤트 캘린더', subtitle: '' },
+    sample: { title: '어드벤트 캘린더', subtitle: '하루에 하나씩' },
+  },
+  {
+    id: 'event-day-petday', name: '반려동물의 날', category: '데이·기념일', kind: 'event',
+    desc: '발바닥 도장·간식 그릇·담요의 반려 기념일', accent: '#c88a5e',
+    useCase: '반려동물의 날, 펫 고객 감사 이벤트',
+    scaffold: 'A pet appreciation day scene: a soft knitted blanket bunched on a warm wood floor, a small ceramic treat bowl and a chewed rope toy beside, faint paw print marks on the wood, low golden window light. Everyday companionship warmth, gentle and homey.',
+    textStyle: 'Warm rounded typography in deep caramel, friendly medium headline, small paw-dot label. Upper placement in the empty floor area.',
+    defaultTexts: { label: 'PET DAY', title: '반려동물의 날', subtitle: '' },
+    sample: { title: '반려동물의 날', subtitle: '고마운 가족에게' },
+  },
+  {
+    id: 'event-day-samgyeop', name: '삼겹살 데이', category: '데이·기념일', kind: 'event',
+    desc: '불판 연기·집게·상추의 고깃집 무드', accent: '#a63f30',
+    useCase: '3월 3일 삼겹살데이 등 먹는 날 기획전',
+    scaffold: 'A grilled pork day scene: a cast-iron grill plate with rising smoke wisps and glowing charcoal beneath, metal tongs resting on the edge, a bowl of fresh lettuce leaves and sliced garlic beside, warm restaurant lamp light, dark wood table. Sizzling appetite, smoky and lively.',
+    textStyle: 'Hearty typography in warm cream with a soft smoke haze behind, bold rounded headline, small date label. Upper placement in the smoke area.',
+    defaultTexts: { label: '3.3', title: '삼겹살 데이', subtitle: '' },
+    sample: { title: '삼겹살 데이', subtitle: '오늘은 고기 먹는 날' },
+  },
+  {
+    id: 'event-day-earth', name: '지구의 날', category: '데이·기념일', kind: 'event',
+    desc: '새싹·재생지·흙의 환경 캠페인 무드', accent: '#4f7d52',
+    useCase: '지구의 날·환경의 날 캠페인, 친환경 실천 행사',
+    scaffold: 'An earth day scene: a small green seedling pushing through dark moist soil in a recycled paper pot, a folded kraft leaflet and a few scattered seeds beside, soft natural daylight, muted earth and leaf tones. Quiet environmental sincerity, humble and hopeful.',
+    textStyle: 'Grounded typography in deep leaf green, calm medium headline, small recycled-stamp label. Upper placement in the plain background area.',
+    defaultTexts: { label: 'EARTH DAY', title: '지구의 날', subtitle: '' },
+    sample: { title: '지구의 날', subtitle: '오늘 할 수 있는 일' },
+  },
+
+  // ── 시즌·명절 행사 (+6) ──
+  {
+    id: 'event-season-seollal', name: '설날 복주머니', category: '시즌·명절 행사', kind: 'event',
+    desc: '복주머니·오방색 매듭의 새해 명절 무드', accent: '#b13a3a',
+    useCase: '설 명절 행사·세뱃돈 이벤트',
+    scaffold: 'A lunar new year scene: embroidered silk fortune pouches in red and navy with gold thread, traditional five-color knot tassels draped beside, a folded hanji sheet underneath, warm lantern light on a dark wood surface. Festive Korean new year, auspicious and rich.',
+    textStyle: 'Traditional festive typography in bright gold, bold calligraphic-feeling headline, small vermilion label. Upper placement above the pouches.',
+    defaultTexts: { label: 'NEW YEAR', title: '설 맞이 행사', subtitle: '' },
+    sample: { title: '설 맞이 행사', subtitle: '복 많이 받으세요' },
+  },
+  {
+    id: 'event-season-daeboreum', name: '정월대보름', category: '시즌·명절 행사', kind: 'event',
+    desc: '들불·달집·보름달의 정월대보름 무드', accent: '#c07b35',
+    useCase: '정월대보름 행사·전통 세시풍속 이벤트',
+    scaffold: 'A first full moon festival scene: a huge amber moon low over a dark winter field, a distant bonfire glow with drifting embers rising, bare tree branches silhouetted at one edge, deep indigo night sky. Folk-festival awe, ancient and warm.',
+    textStyle: 'Folk typography in warm ivory, calm brushed-feeling headline, small hanja-style label. Upper placement in the sky beside the moon.',
+    defaultTexts: { label: '', title: '정월대보름', subtitle: '' },
+    sample: { title: '정월대보름', subtitle: '달빛 아래 한 해를 빌다' },
+  },
+  {
+    id: 'event-season-cherryfest', name: '벚꽃 축제', category: '시즌·명절 행사', kind: 'event',
+    desc: '벚꽃 터널·꽃잎 바람의 봄 축제 무드', accent: '#e59ab4',
+    useCase: '봄 벚꽃 축제·시즌 나들이 행사',
+    scaffold: 'A cherry blossom festival scene: a tunnel of blooming cherry branches arching overhead with petals swirling on a breeze, a paved walkway receding into soft pink haze, small paper lanterns strung between trunks, bright spring daylight. Peak-bloom festivity, airy and pink.',
+    textStyle: 'Spring typography in deep plum, graceful medium headline, small petal-dot label. Upper placement in the blossom canopy gap.',
+    defaultTexts: { label: 'SPRING', title: '벚꽃 축제', subtitle: '' },
+    sample: { title: '벚꽃 축제', subtitle: '봄이 가장 짧은 날들' },
+  },
+  {
+    id: 'event-season-monsoon', name: '장마 위크', category: '시즌·명절 행사', kind: 'event',
+    desc: '빗줄기·우산·젖은 노면의 장마철 무드', accent: '#4a6b78',
+    useCase: '장마철 실내 행사·우천 시즌 기획전',
+    scaffold: 'A monsoon week scene: heavy rain streaks lit by a streetlamp, a clear vinyl umbrella dome catching droplets, wet asphalt reflecting warm shop lights in long smears, cool teal and amber contrast. Rainy-season atmosphere, glossy and moody.',
+    textStyle: 'Rain typography in bright white with a soft wet glow, clean medium headline, small droplet label. Upper placement above the umbrella.',
+    defaultTexts: { label: 'RAINY', title: '장마 위크', subtitle: '' },
+    sample: { title: '장마 위크', subtitle: '비 오는 날의 준비' },
+  },
+  {
+    id: 'event-season-foliage', name: '단풍 여행', category: '시즌·명절 행사', kind: 'event',
+    desc: '단풍 산길·낙엽 융단의 가을 여행 무드', accent: '#b5642c',
+    useCase: '가을 단풍 시즌 여행·나들이 기획전',
+    scaffold: 'An autumn foliage trip scene: a winding mountain trail carpeted with crimson and gold fallen leaves, layered maple canopy glowing in low afternoon sun, distant ridgelines in warm haze, a wooden trail marker at the edge. Peak-autumn wanderlust, saturated and crisp.',
+    textStyle: 'Seasonal typography in deep burgundy, warm medium serif headline, small trail-marker label. Upper placement in the canopy light.',
+    defaultTexts: { label: 'AUTUMN', title: '단풍 여행 위크', subtitle: '' },
+    sample: { title: '단풍 여행 위크', subtitle: '가장 붉은 계절' },
+  },
+  {
+    id: 'event-season-kimjang', name: '김장철', category: '시즌·명절 행사', kind: 'event',
+    desc: '배추·고춧가루·항아리의 김장철 무드', accent: '#a83b2c',
+    useCase: '김장철 식재료 행사·겨울 준비 기획전',
+    scaffold: 'A kimjang season scene: halved napa cabbages stacked on a straw mat, a wide steel basin of vivid red chili paste, coarse chili flakes in a wooden bowl, traditional earthen jars lined against a wall, cold clear winter daylight. Communal winter preparation, hearty and vivid.',
+    textStyle: 'Hearty typography in warm cream, bold rounded headline, small handwritten-feeling label. Upper placement above the cabbage stack.',
+    defaultTexts: { label: 'KIMJANG', title: '김장철 준비', subtitle: '' },
+    sample: { title: '김장철 준비', subtitle: '겨울을 담그는 계절' },
+  },
+
+  // ── 오픈·기념일 (+5) ──
+  {
+    id: 'event-open-milestone', name: '마일스톤 넘버', category: '오픈·기념일', kind: 'event',
+    desc: '대형 숫자 조형·라이트의 주년 강조 무드', accent: '#2f4f7a',
+    useCase: 'N주년·100일 등 숫자 자체를 앞세우는 기념일',
+    scaffold: 'A milestone anniversary scene: a large sculptural numeral form standing in a dim studio, edge-lit with cool blue and warm gold from opposite sides, a polished floor reflecting it, subtle atmospheric haze. Monumental celebration, bold and architectural. Leave the numeral surface plain so the given text reads clearly.',
+    textStyle: 'Monumental typography in bright white, tall confident headline, small tracked label. Upper placement beside the numeral, never overlapping it.',
+    defaultTexts: { label: 'ANNIVERSARY', title: '주년 기념', subtitle: '' },
+    sample: { title: '주년 기념', subtitle: '함께한 시간에 감사드립니다' },
+  },
+  {
+    id: 'event-open-preopen', name: '프리오픈 초대', category: '오픈·기념일', kind: 'event',
+    desc: '초대장·벨벳 로프의 사전 초대 무드', accent: '#6b4a6b',
+    useCase: '정식 오픈 전 소수 초대 프리오픈',
+    scaffold: 'A pre-opening invitation scene: a brass stanchion with a deep plum velvet rope closing off a softly lit entrance, a letterpress invitation card resting on a small pedestal, warm spill light from the doorway beyond, dark quiet surroundings. Exclusive first-access anticipation, restrained and premium.',
+    textStyle: 'Invitation typography in champagne gold, refined serif headline, small wide-tracked label. Upper placement in the dark area.',
+    defaultTexts: { label: 'PRE-OPEN', title: '프리오픈 초대', subtitle: '' },
+    sample: { title: '프리오픈 초대', subtitle: '먼저 보실 분들께' },
+  },
+  {
+    id: 'event-open-online', name: '온라인몰 오픈', category: '오픈·기념일', kind: 'event',
+    desc: '기기 화면 발광·커서의 온라인 오픈 무드', accent: '#3b5bdb',
+    useCase: '자사몰·온라인 스토어 신규 오픈',
+    scaffold: 'An online store launch scene: a clean pale gradient field with a softly glowing rectangular screen shape floating at a slight angle, a subtle cursor arrow and a delicate shopping-bag line icon drifting nearby, cool blue light spill and a soft ground shadow. Digital storefront launch, crisp and modern. Keep the screen surface empty.',
+    textStyle: 'Digital typography in deep indigo, clean geometric headline, small tag label. Upper placement above the screen shape.',
+    defaultTexts: { label: 'ONLINE OPEN', title: '온라인몰 오픈', subtitle: '' },
+    sample: { title: '온라인몰 오픈', subtitle: '이제 온라인에서도' },
+  },
+  {
+    id: 'event-open-remodel', name: '리모델링 클로즈', category: '오픈·기념일', kind: 'event',
+    desc: '가림막·사다리·페인트의 공사 안내 무드', accent: '#7a7264',
+    useCase: '리모델링 휴점 안내, 공사 기간 고지',
+    scaffold: 'A remodeling notice scene: a canvas drop cloth draped over a doorway, a wooden step ladder and a paint roller tray beside, protective tape lines on a bare concrete floor, dust motes in a shaft of work light. Honest under-construction pause, plain and matter-of-fact.',
+    textStyle: 'Notice typography in charcoal on the pale canvas, clear sturdy headline, small tape-label. Upper placement on the drop cloth.',
+    defaultTexts: { label: 'NOTICE', title: '리모델링 휴점 안내', subtitle: '' },
+    sample: { title: '리모델링 휴점 안내', subtitle: '더 좋은 모습으로 돌아옵니다' },
+  },
+  {
+    id: 'event-open-farewell', name: '이전 감사 인사', category: '오픈·기념일', kind: 'event',
+    desc: '빈 매장·마지막 빛의 이전 인사 무드', accent: '#8a7a6a',
+    useCase: '매장 이전·폐점 전 감사 인사',
+    scaffold: 'A farewell scene: an emptied shop interior with bare shelves and a single wooden chair left behind, late golden light stretching long across the floor through a front window, a few taped boxes stacked by the door. Grateful closing chapter, quiet and warm rather than sad.',
+    textStyle: 'Heartfelt typography in warm sepia, gentle medium serif headline, small handwritten-feeling label. Upper placement in the light shaft.',
+    defaultTexts: { label: 'THANK YOU', title: '그동안 감사했습니다', subtitle: '' },
+    sample: { title: '그동안 감사했습니다', subtitle: '새로운 곳에서 다시 뵙겠습니다' },
+  },
+
+  // ── 멤버십·고객감사 (+6) ──
+  {
+    id: 'event-mem-pointexpire', name: '포인트 소멸 안내', category: '멤버십·고객감사', kind: 'event',
+    desc: '모래시계·흩어지는 입자의 소멸 임박 무드', accent: '#b5793a',
+    useCase: '포인트·적립금 소멸 예정 안내',
+    scaffold: 'A point expiry scene: an elegant hourglass on a dark walnut surface with fine golden sand nearly run through, loose grains scattering and dissolving into light at the edge, warm amber rim light, deep shadow behind. Gentle urgency, refined rather than alarming.',
+    textStyle: 'Clear typography in warm amber, medium serif-feeling headline, small tracked label. Upper placement beside the hourglass.',
+    defaultTexts: { label: 'EXPIRING', title: '포인트 소멸 안내', subtitle: '' },
+    sample: { title: '포인트 소멸 안내', subtitle: '사용 기한을 확인해주세요' },
+  },
+  {
+    id: 'event-mem-tierchart', name: '등급 혜택 안내', category: '멤버십·고객감사', kind: 'event',
+    desc: '층계형 단상·금속 등급판의 혜택 구조 무드', accent: '#4a5a6b',
+    useCase: '등급별 혜택 구조를 정리해 알릴 때',
+    scaffold: 'A membership tier scene: three ascending pedestal steps in brushed metal — bronze, silver, gold — arranged left to right on a dark seamless floor, each catching its own soft spotlight, faint reflections beneath. Structured hierarchy made elegant, clear and calm. Keep the pedestal faces plain.',
+    textStyle: 'Structured typography in cool platinum, clean medium headline, small tier label. Upper placement above the pedestals.',
+    defaultTexts: { label: 'MEMBERSHIP', title: '등급 혜택 안내', subtitle: '' },
+    sample: { title: '등급 혜택 안내', subtitle: '나의 등급을 확인하세요' },
+  },
+  {
+    id: 'event-mem-referral', name: '친구 초대', category: '멤버십·고객감사', kind: 'event',
+    desc: '두 개의 컵·맞닿은 리본의 초대 무드', accent: '#d3705f',
+    useCase: '친구 초대·추천인 리퍼럴 이벤트',
+    scaffold: 'A referral invitation scene: two matching ceramic cups placed side by side on a warm terracotta surface, a single ribbon looping from one to the other, soft afternoon light, coral and cream palette with generous empty space. Sharing-with-a-friend warmth, simple and inviting.',
+    textStyle: 'Warm typography in deep coral, friendly rounded headline, small tag label. Upper placement in the open space above the cups.',
+    defaultTexts: { label: 'INVITE', title: '친구 초대 이벤트', subtitle: '' },
+    sample: { title: '친구 초대 이벤트', subtitle: '함께하면 더 좋아요' },
+  },
+  {
+    id: 'event-mem-review', name: '리뷰 이벤트', category: '멤버십·고객감사', kind: 'event',
+    desc: '별점·손글씨 노트·펜의 후기 작성 무드', accent: '#c9a227',
+    useCase: '구매 후기·리뷰 작성 참여 이벤트',
+    scaffold: 'A review event scene: an open notebook with a fountain pen resting in the crease, five small brass star charms arranged in a row above it, a warm desk lamp pooling light, soft cream and gold tones on dark wood. Sincere feedback moment, personal and warm.',
+    textStyle: 'Handwritten-feeling typography in deep gold, warm medium headline, small star-dot label. Upper placement above the notebook.',
+    defaultTexts: { label: 'REVIEW', title: '리뷰 이벤트', subtitle: '' },
+    sample: { title: '리뷰 이벤트', subtitle: '후기를 남겨주세요' },
+  },
+  {
+    id: 'event-mem-comeback', name: '컴백 웰컴', category: '멤버십·고객감사', kind: 'event',
+    desc: '반쯤 열린 문·새어드는 빛의 재방문 환영', accent: '#7a6b8f',
+    useCase: '휴면 고객 재방문 유도·컴백 혜택',
+    scaffold: 'A welcome-back scene: a warmly lit doorway ajar with soft golden light spilling into a dim entry hall, a small woven mat on the floor and a potted plant beside the frame, dust motes drifting in the light. Quiet homecoming warmth, gentle and unpressured.',
+    textStyle: 'Warm typography in soft gold, gentle medium headline, small lowercase label. Upper placement in the dim area beside the doorway.',
+    defaultTexts: { label: 'WELCOME BACK', title: '다시 만나 반가워요', subtitle: '' },
+    sample: { title: '다시 만나 반가워요', subtitle: '오랜만에 오신 분께' },
+  },
+  {
+    id: 'event-mem-earlybird', name: '얼리버드 사전예약', category: '멤버십·고객감사', kind: 'event',
+    desc: '새벽빛·시계 바늘의 이른 예약 무드', accent: '#3f6b8a',
+    useCase: '사전예약·얼리버드 선착순 접수',
+    scaffold: 'An early bird booking scene: a pale dawn sky gradient from deep blue to soft apricot over a calm horizon, a minimal clock face silhouette at one edge showing an early hour, a single bird in flight far off, cool morning air. First-light opportunity, calm and hopeful.',
+    textStyle: 'Crisp typography in soft ivory, clean medium headline, small tracked label. Upper placement in the dawn gradient.',
+    defaultTexts: { label: 'EARLY BIRD', title: '사전예약 오픈', subtitle: '' },
+    sample: { title: '사전예약 오픈', subtitle: '먼저 신청하시는 분께' },
+  },
+
+  // ── 클래스·체험 (+3) ──
+  {
+    id: 'event-class-perfume', name: '조향 클래스', category: '클래스·체험', kind: 'event',
+    desc: '시향지·스포이트·향료병의 조향 무드', accent: '#8a6b9a',
+    useCase: '향수 조향·디퓨저 만들기 원데이 클래스',
+    scaffold: 'A perfumery class scene: a row of small amber essence vials with glass droppers, blotter strips fanned out on a marble slab, a brass funnel and a notebook of scent notes, soft lavender-tinted light. Focused blending workshop, precise and aromatic.',
+    textStyle: 'Refined typography in deep plum, elegant medium headline, small tracked label. Upper placement above the vials.',
+    defaultTexts: { label: 'CLASS', title: '조향 클래스', subtitle: '' },
+    sample: { title: '조향 클래스', subtitle: '나만의 향을 만드는 시간' },
+  },
+  {
+    id: 'event-class-calligraphy', name: '캘리그라피 클래스', category: '클래스·체험', kind: 'event',
+    desc: '먹물·붓·한지 연습지의 손글씨 무드', accent: '#3a3a3a',
+    useCase: '캘리그라피·드로잉 등 손으로 쓰고 그리는 클래스',
+    scaffold: 'A calligraphy class scene: a sheet of textured hanji paper with practice strokes in black ink, a brush resting on a ceramic rest, an ink stone with fresh ink pooled, a warm desk lamp from the side, muted paper and charcoal tones. Meditative practice, quiet and deliberate.',
+    textStyle: 'Brush-feeling typography in deep ink black, calm medium headline, small vermilion seal-style label. Upper placement on the clean paper area.',
+    defaultTexts: { label: 'CLASS', title: '캘리그라피 클래스', subtitle: '' },
+    sample: { title: '캘리그라피 클래스', subtitle: '한 획씩 천천히' },
+  },
+  {
+    id: 'event-class-cooking', name: '쿠킹 클래스', category: '클래스·체험', kind: 'event',
+    desc: '도마·허브·조리대의 요리 수업 무드', accent: '#6b8a4a',
+    useCase: '요리·홈쿠킹 클래스 (베이킹 외 조리 수업)',
+    scaffold: 'A cooking class scene: a wide wooden cutting board with fresh herbs, halved lemons and a chef knife laid ready, a clean stainless prep counter behind with a stack of white bowls, bright kitchen daylight, fresh green and cream tones. Hands-on kitchen readiness, fresh and organized.',
+    textStyle: 'Friendly typography in deep herb green, sturdy medium headline, small recipe-card label. Upper placement on the counter area.',
+    defaultTexts: { label: 'CLASS', title: '쿠킹 클래스', subtitle: '' },
+    sample: { title: '쿠킹 클래스', subtitle: '직접 만들어 보는 한 끼' },
   },
 ];
 
@@ -1626,7 +2421,7 @@ export function getTemplate(id: string): StudioTemplate | undefined {
 /** 갤러리용 공개 목록 — ★scaffold·textStyle(은닉 프롬프트) 절대 미포함. */
 export function listTemplatesPublic() {
   return STUDIO_TEMPLATES.map((t) => ({
-    id: t.id, name: t.name, category: t.category, kind: t.kind || 'product', desc: t.desc, accent: t.accent,
+    id: t.id, name: t.name, category: t.category, kind: t.kind || 'product', desc: t.desc, useCase: t.useCase, accent: t.accent,
     exampleUrl: t.exampleUrl || null, defaultTexts: t.defaultTexts, sample: t.sample,
   }));
 }

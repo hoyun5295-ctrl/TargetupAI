@@ -34,6 +34,8 @@ const won = (n: number) => `${Math.round(Number(n) || 0).toLocaleString()}원`;
 
 interface StudioTemplatePublic {
   id: string; name: string; category: string; desc: string; accent: string;
+  /** ★ 2026-08-11 추천 용도 — "어떤 제품라인·행사에 쓰면 좋은가". desc가 그림이면 이쪽은 고르는 기준이다. */
+  useCase?: string;
   /** ★ 2026-07-31 트랙 축 — 'product'(제품 포스터) / 'event'(행사 포스터·제품 없이 성립). 서버 미제공 시 product */
   kind?: 'product' | 'event';
   exampleUrl: string | null;
@@ -158,6 +160,22 @@ export default function ImageStudioPage() {
     () => (category ? templates.filter((t) => (t.kind || 'product') === trackKind && t.category === category) : []),
     [templates, category, trackKind],
   );
+
+  // ★ 2026-08-11 갤러리 페이징 (Harold 지시) — 한 페이지 10개, 카드를 키워 예시가 실제로 보이게 한다.
+  //   카탈로그가 249종이라 한 카테고리가 30종을 넘는다. 나열하면 카드를 줄여야 하고, 줄이면 예시를 못 본다.
+  const TPL_PAGE_SIZE = 10;
+  const [tplPage, setTplPage] = useState(1);
+  const tplTotalPages = Math.max(1, Math.ceil(visibleTemplates.length / TPL_PAGE_SIZE));
+  const pagedTemplates = useMemo(
+    () => visibleTemplates.slice((tplPage - 1) * TPL_PAGE_SIZE, tplPage * TPL_PAGE_SIZE),
+    [visibleTemplates, tplPage],
+  );
+  // ⛔ 페이지 초기화는 **카테고리·트랙을 바꿀 때만**이다(Harold 지시).
+  //   템플릿을 골랐다가 돌아올 때 1페이지로 되돌리면, 3페이지에서 고른 사람은 매번 그 페이지를 다시 찾아가야 한다.
+  //   stage 전환은 이 의존성에 없으므로 갤러리로 돌아와도 보던 페이지가 그대로 남는다.
+  useEffect(() => { setTplPage(1); }, [category, trackKind]);
+  // 목록이 줄어 현재 페이지가 비면(예: 검색·데이터 갱신) 마지막 페이지로 당긴다 — 빈 화면 방지.
+  useEffect(() => { if (tplPage > tplTotalPages) setTplPage(tplTotalPages); }, [tplPage, tplTotalPages]);
 
   // 템플릿·상품 변경 시 문구 자동 채움 ({productName}/{salePrice} = 몰 실데이터 — 사용자 수정 가능)
   const fillTokens = useCallback((s?: string) => (s || '')
@@ -410,34 +428,64 @@ export default function ImageStudioPage() {
                 <ChevronLeft className="w-3.5 h-3.5" /> 카테고리
               </button>
               <h2 className="text-sm font-bold text-white/90">{category}</h2>
+              <span className="text-[11px] text-white/35">총 {visibleTemplates.length}종</span>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-              {visibleTemplates.map((t) => (
+            {/* ★ 2026-08-11 5열 × 2행 = 한 페이지 10개. 열을 줄여 카드가 커지고 예시가 실제로 읽힌다. */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              {pagedTemplates.map((t) => (
                 <button
                   key={t.id}
                   onClick={() => { setTemplate(t); setStage('setup'); }}
-                  className="group rounded-xl border border-white/10 overflow-hidden text-left hover:border-violet-400/50 transition bg-slate-950/50"
+                  className="group rounded-2xl border border-white/10 overflow-hidden text-left hover:border-violet-400/60 hover:bg-white/[0.03] transition bg-slate-950/50"
                 >
                   {t.exampleUrl ? (
                     <img src={t.exampleUrl} alt={t.name} loading="lazy" className="w-full aspect-[3/4] object-cover" />
                   ) : (
-                    <div className="w-full aspect-[3/4] relative flex flex-col items-center justify-end p-2" style={{ background: `linear-gradient(160deg, ${t.accent}cc, ${t.accent}55 60%, #0f172a)` }}>
-                      <div className="absolute top-2.5 left-0 right-0 text-center space-y-0.5 px-2">
-                        {t.defaultTexts.label ? <div className="text-[7px] tracking-[0.18em] text-white/70 truncate">{t.defaultTexts.label.slice(0, 16)}</div> : null}
-                        <div className="text-[11px] font-bold text-white leading-tight">{t.sample?.title || t.name}</div>
-                        {t.sample?.subtitle ? <div className="text-[8px] text-white/60 truncate">{t.sample.subtitle}</div> : null}
+                    <div className="w-full aspect-[3/4] relative flex flex-col items-center justify-end p-3" style={{ background: `linear-gradient(160deg, ${t.accent}cc, ${t.accent}55 60%, #0f172a)` }}>
+                      <div className="absolute top-4 left-0 right-0 text-center space-y-1 px-3">
+                        {t.defaultTexts.label ? <div className="text-[8px] tracking-[0.2em] text-white/70 truncate">{t.defaultTexts.label.slice(0, 18)}</div> : null}
+                        <div className="text-[13px] font-bold text-white leading-tight">{t.sample?.title || t.name}</div>
+                        {t.sample?.subtitle ? <div className="text-[10px] text-white/60 truncate">{t.sample.subtitle}</div> : null}
                       </div>
-                      {(t.kind || 'product') === 'product' && <div className="w-7 h-10 rounded bg-white/15 border border-white/25 mb-3" title="상품 자리" />}
+                      {(t.kind || 'product') === 'product' && <div className="w-9 h-12 rounded bg-white/15 border border-white/25 mb-4" title="상품 자리" />}
                     </div>
                   )}
-                  <div className="p-2">
-                    <div className="text-[11px] font-semibold truncate">{t.name}</div>
-                    <div className="text-[9px] text-white/40 truncate">{t.desc}</div>
+                  <div className="p-3">
+                    <div className="text-[13px] font-semibold truncate">{t.name}</div>
+                    <div className="text-[10px] text-white/40 truncate mt-0.5">{t.desc}</div>
+                    {/* 추천 용도 — 185종을 하나씩 열어 보지 않고 고르게 하는 축(2줄까지 보여준다). */}
+                    {t.useCase && (
+                      <div className="mt-2 pt-2 border-t border-white/5 text-[10px] leading-snug text-violet-200/70 line-clamp-2">
+                        {t.useCase}
+                      </div>
+                    )}
                   </div>
                 </button>
               ))}
             </div>
-            <p className="text-[10px] text-white/30 italic mt-3">Data source — 템플릿을 고르면 상품과 문구를 넣는 단계로 이동합니다.</p>
+
+            {tplTotalPages > 1 && (
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  disabled={tplPage <= 1}
+                  onClick={() => setTplPage((p) => Math.max(1, p - 1))}
+                  className="px-3 py-1.5 rounded-lg border border-white/10 text-xs text-white/70 hover:bg-white/10 disabled:opacity-25 disabled:hover:bg-transparent"
+                >
+                  이전
+                </button>
+                <span className="text-xs text-white/50 tabular-nums px-1">{tplPage} / {tplTotalPages}</span>
+                <button
+                  type="button"
+                  disabled={tplPage >= tplTotalPages}
+                  onClick={() => setTplPage((p) => Math.min(tplTotalPages, p + 1))}
+                  className="px-3 py-1.5 rounded-lg border border-white/10 text-xs text-white/70 hover:bg-white/10 disabled:opacity-25 disabled:hover:bg-transparent"
+                >
+                  다음
+                </button>
+              </div>
+            )}
+            <p className="text-[10px] text-white/30 italic mt-3">Data source — 템플릿을 고르면 상품과 문구를 넣는 단계로 이동합니다. 돌아오면 보던 페이지가 유지됩니다.</p>
           </section>
         )}
 
@@ -446,14 +494,36 @@ export default function ImageStudioPage() {
           <section className="grid grid-cols-1 lg:grid-cols-5 gap-5">
             {/* 좌: 템플릿 요약 + 상품 */}
             <div className="lg:col-span-2 space-y-4">
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-14 rounded-md shrink-0" style={{ background: `linear-gradient(160deg, ${template.accent}, #0f172a)` }} />
-                  <div className="min-w-0">
+              {/* ★ 2026-08-11 (Harold 지시) 갤러리에서 예시를 보고 골랐는데 이 화면에서 사라지면 안 된다 —
+                  같은 예시 이미지를 크게 그대로 보여주고, 추천 용도도 함께 남긴다. */}
+              <div className="rounded-2xl border border-white/10 bg-white/5 overflow-hidden">
+                <div className="flex gap-3 p-3">
+                  <div className="w-24 shrink-0 rounded-xl overflow-hidden border border-white/10">
+                    {template.exampleUrl ? (
+                      <img src={template.exampleUrl} alt={`${template.name} 예시`} className="w-full aspect-[3/4] object-cover" />
+                    ) : (
+                      <div className="w-full aspect-[3/4] relative flex flex-col items-center justify-end p-1.5" style={{ background: `linear-gradient(160deg, ${template.accent}cc, ${template.accent}55 60%, #0f172a)` }}>
+                        <div className="absolute top-2 left-0 right-0 text-center px-1.5">
+                          <div className="text-[9px] font-bold text-white leading-tight">{template.sample?.title || template.name}</div>
+                        </div>
+                        {(template.kind || 'product') === 'product' && <div className="w-5 h-7 rounded bg-white/15 border border-white/25 mb-2" />}
+                      </div>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1 py-0.5">
                     <div className="text-sm font-bold truncate">{template.name}</div>
-                    <div className="text-[11px] text-white/45">{template.desc}</div>
+                    <div className="text-[11px] text-white/45 mt-0.5">{template.desc}</div>
+                    {template.useCase && (
+                      <div className="mt-2 rounded-lg bg-violet-500/10 border border-violet-400/20 px-2.5 py-2">
+                        <div className="text-[9px] tracking-wider text-violet-300/70 mb-0.5">이럴 때 좋아요</div>
+                        <div className="text-[11px] leading-snug text-violet-100/85">{template.useCase}</div>
+                      </div>
+                    )}
                   </div>
                 </div>
+                <p className="px-3 pb-3 text-[10px] text-white/25 italic">
+                  {template.exampleUrl ? '갤러리에서 보신 예시 그대로입니다 — 문구와 상품만 바뀝니다.' : '예시 이미지 준비 중 — 카드 스타일로 표시됩니다.'}
+                </p>
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
