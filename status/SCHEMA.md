@@ -75,6 +75,8 @@
 | 58 | customer_send_stats_marks | 발송 카운터 캠페인 멱등 마커 (2026-07-03 신설 — campaign_ref varchar(120) PK, 재시도 중복 카운트 차단) |
 | 59 | agent_charge_requests | 에이전트 충전 **실행** 요청 원장 (2026-07-24 §5-3 신설·DDL 적용완료 — 멱등키 UNIQUE·감사. 게이트웨이 잔액/반영의 진실은 여전히 62 `RSRM_FillAmtHist`) |
 | 60 | agent_charge_orders | 에이전트 충전 **요청**(고객사 접수) — §5-4. 웹 `deposit_requests`와 축이 달라 별도 테이블(승인 시 올라가는 지갑이 다르다). **2026-08-11 운영 실존 확인** — 신청 원장일 뿐 지갑 원장이 아니다(직원 직접 충전은 여기 안 남는다) |
+| 61 | planner_events **(2026-08-12 CREATE 대기 — 배포 후 DDL)** | 마케팅 플래너 행사 원장(월간 계획·혜택은 고객사 기입). 설계서 = `docs/2026-08-12-ax-marketing-planner-design.md` §5-1. 미생성 시 전 endpoint 503 DB_MIGRATION_PENDING |
+| 62 | planner_touchpoints **(2026-08-12 CREATE 대기 — 배포 후 DDL)** | 플래너 터치포인트(행사×채널×시점). 발송 예정일은 저장하지 않고 조회 시 계산(행사 기간 수정 시 자동 추종 — 이중 진실 금지) |
 | - | ai_training_logs | 문안 학습 로그 (회사별 tenant_ref HMAC 격리). ★ 2026-07-03 실측: `ck_training_message_type` CHECK = message_type IN ('SMS','LMS','MMS','KAKAO','EMAIL','DM') — DM 추가(전 채널 학습 통합 Phase 1). 적재=fire-and-forget 격리(발송 무영향), source_ref 멱등 |
 | - | ai_training_logs (클릭·전환 컬럼) | `click_count int` · `conversion_count int` — Tier1 반응 신호(DM·이메일 클릭 환류, 랭커/검색기 클릭 우선 정렬). **★2026-08-11 information_schema 실측 = 둘 다 실존**(0704 "ADD 대기" 표기는 낡은 기록 — `operator_proposals.conversion_attributed_at`·`operator_proposal_variants.sent/click/conversion_count`도 같은 실측으로 실존 확인). ⚠값 유입은 DM·이메일 클릭뿐 — SMS/LMS 클릭(short-url→변이 테이블)은 이 원장에 미배선(자기 개선 루프 설계의 Phase 0) |
 | - | best_copy_seed_usage **(2026-07-04 CREATE 대기)** | 시드 사용 기록(성과 환류). `id bigserial PK, seed_id uuid, tenant_ref varchar(64)=getTenantRef, channel varchar(10), used_at timestamptz`. INDEX(seed_id),(tenant_ref,used_at). 코드 42P01 폴백(미생성 무영향) |

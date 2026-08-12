@@ -30,6 +30,8 @@ import addressBooksRoutes from './routes/address-books';
 import balanceRoutes from './routes/balance';
 // ★ 2026-07-27 §5-4: 에이전트 충전 요청(고객사 창구) — 잔액 증액은 §5-3 슈퍼관리자 경로에서만
 import agentChargeOrdersRoutes from './routes/agent-charge-orders';
+// ★ 2026-08-12 마케팅 플래너 Phase 1 (설계서 = docs/2026-08-12-ax-marketing-planner-design.md)
+import marketingPlannerRoutes from './routes/marketing-planner';
 // ★ D184 (2026-05-20): 이니시스 표준결제 라우트 (레거시 invitobiz.com → 한줄로 이전)
 import paymentsRoutes from './routes/payments';
 import testContactsRoutes from './routes/test-contacts';
@@ -332,6 +334,8 @@ app.use('/api/address-books', addressBooksRoutes);
 app.use('/api/balance', balanceRoutes);
 // ★ 2026-07-27 §5-4: 에이전트 충전 요청 (고객사 접수 — 요청만, 잔액 무접촉)
 app.use('/api/agent-charge-orders', agentChargeOrdersRoutes);
+// ★ 2026-08-12 마케팅 플래너 Phase 1 — CRUD·가용성만(승인·차감·발송 없음). 테이블 미생성 시 503 DB_MIGRATION_PENDING
+app.use('/api/marketing-planner', marketingPlannerRoutes);
 // ★ D184: 이니시스 표준결제 (prepare/return/close/list/detail)
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/admin/billing', billingRoutes);

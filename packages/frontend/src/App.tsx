@@ -46,6 +46,8 @@ const InAppMessagesPage = lazyPage(() => import('./pages/InAppMessagesPage'));
 const ContinuousOperatorPage = lazyPage(() => import('./pages/ContinuousOperatorPage'));
 // ★ 2026-07-02 4차: 마케팅 캘린더 — 1년 시즌 캠페인 AI 설계
 const MarketingCalendarPage = lazyPage(() => import('./pages/MarketingCalendarPage'));
+// ★ 2026-08-12 마케팅 플래너 Phase 1 (달력 축 — 설계서 docs/2026-08-12-ax-marketing-planner-design.md)
+const MarketingPlannerPage = lazyPage(() => import('./pages/MarketingPlannerPage'));
 const ImageStudioPage = lazyPage(() => import('./pages/ImageStudioPage')); // ★ 2026-07-19 P4 AI 이미지 스튜디오
 // ★ D178 (2026-05-19): 인바운드 AI 음성 응답 (Naver Clova STT/TTS)
 const VoiceInboundPage = lazyPage(() => import('./pages/VoiceInboundPage'));
@@ -437,6 +439,15 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <ContinuousOperatorPage />
+            </PrivateRoute>
+          }
+        />
+        {/* ★ 2026-08-12 마케팅 플래너 Phase 1 — 월간 행사 계획(달력 축). 설계서 = docs/2026-08-12-ax-marketing-planner-design.md */}
+        <Route
+          path="/marketing-planner"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <MarketingPlannerPage />
             </PrivateRoute>
           }
         />
