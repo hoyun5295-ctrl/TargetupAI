@@ -491,9 +491,9 @@ export default function ImageStudioPage() {
 
         {/* 2단계 — 상품 + 문구 + 채널 */}
         {stage === 'setup' && template && (
-          <section className="grid grid-cols-1 lg:grid-cols-5 gap-5">
-            {/* 좌: 라이브 예시 프리뷰 + 상품 */}
-            <div className="lg:col-span-2 space-y-4">
+          <section className="grid grid-cols-1 lg:grid-cols-9 gap-5">
+            {/* 좌: 예시 프리뷰(깨끗한 대형 이미지 하나) — 상품·문구·힌트는 전부 우측이 든다 */}
+            <div className="lg:col-span-3 space-y-4">
               {/* ★ 2026-08-13 (Harold 지시 2차 확정) 예시는 크게, 이미지는 깨끗하게 — 오버레이·슬롯은 예시의
                   실제 타이포를 가리고 위치도 실물과 어긋나서 접었다. "문구가 바뀐다·누끼 자동" 안내는
                   우측 문구 입력칸 위 Tip 한 덩어리가 담당한다. */}
@@ -526,6 +526,45 @@ export default function ImageStudioPage() {
                 </div>
               </div>
 
+            </div>
+
+            {/* 우: 문구 + 상품 + 힌트 + 생성 (★2026-07-30 채널 사이즈 픽커 폐기 — 단일 포스터가 전 채널 통짜 삽입) */}
+            <div className="lg:col-span-6 space-y-4">
+              <div className="rounded-2xl border border-fuchsia-400/20 bg-gradient-to-br from-fuchsia-500/10 to-indigo-500/5 p-4 space-y-2.5">
+                <h3 className="text-sm font-bold flex items-center gap-2"><PenLine className="w-4 h-4 text-fuchsia-300" /> 포스터에 들어갈 문구</h3>
+                {/* ★ 2026-08-13 Tip — 문구·상품 두 줄로 갈라 키워드만 강조(한 문단 뭉침은 줄바꿈이 흉하게 갈라진다).
+                    break-keep = 한국어 어절 단위 줄바꿈. */}
+                <div className="rounded-xl bg-fuchsia-500/[0.08] border border-fuchsia-400/25 px-3.5 py-3 space-y-2">
+                  <div className="flex items-start gap-2.5">
+                    <PenLine className="w-3.5 h-3.5 text-fuchsia-300 shrink-0 mt-0.5" />
+                    <p className="text-[12px] leading-relaxed text-white/75 break-keep">
+                      예시 속 글자 자리에 <b className="text-fuchsia-200 font-semibold">아래 입력값이 그대로</b> 새겨져요 — 배경·분위기는 예시 그대로.
+                    </p>
+                  </div>
+                  {(template.kind || 'product') === 'product' && (
+                    <div className="flex items-start gap-2.5">
+                      <ShoppingBag className="w-3.5 h-3.5 text-emerald-300 shrink-0 mt-0.5" />
+                      <p className="text-[12px] leading-relaxed text-white/75 break-keep">
+                        상품 사진은 <b className="text-emerald-200 font-semibold">배경이 자동으로 제거</b>되어 장면에 자연스럽게 들어가요.
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <input value={texts.label} onChange={(e) => setTexts({ ...texts, label: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '작은 라벨 (예: MEMBERSHIP DAY)' : '작은 라벨 (예: ONLINE EXCLUSIVE)'} className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
+                <input value={texts.title} onChange={(e) => setTexts({ ...texts, title: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '행사명 (예: 멤버십 데이)' : '헤드라인 (예: 제품명 30% 할인 · 2+1 이벤트)'} className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-sm font-semibold text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
+                <input value={texts.subtitle} onChange={(e) => setTexts({ ...texts, subtitle: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '안내 문구 (예: 행사 기간·안내를 적어주세요)' : '부제 (예: 한정 수량 특별 혜택)'} className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
+                {(template.kind || 'product') === 'event' && (
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <span className="text-[11px] text-white/45">문구 위치</span>
+                    {([['top', '위'], ['center', '중앙'], ['bottom', '아래']] as const).map(([k, lbl]) => (
+                      <button key={k} onClick={() => setTextPosition(k)} className={`px-3 py-1.5 rounded-full border text-[11px] transition ${textPosition === k ? 'border-fuchsia-400/60 bg-fuchsia-500/15 text-fuchsia-200 font-semibold' : 'border-white/10 bg-white/5 text-white/50 hover:border-white/25'}`}>{lbl}</button>
+                    ))}
+                  </div>
+                )}
+                <p className="text-[10px] text-white/35 italic">혜택·수치는 AI가 만들지 않아요 — 직접 입력해주세요.</p>
+              </div>
+
+              {/* ★ 2026-08-13 상품 이미지 — 좌측에서 우측으로 이동(Harold 지시 — 좌측은 예시 하나로 고정, 우측 높이로 균형) */}
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                 <h3 className="text-sm font-bold mb-1 flex items-center gap-2"><ShoppingBag className="w-4 h-4 text-violet-300" /> {(template.kind || 'product') === 'event' ? '제품 이미지 (선택)' : '상품 이미지'}</h3>
                 <p className="text-[11px] text-white/40 mb-3">
@@ -545,7 +584,7 @@ export default function ImageStudioPage() {
                 {cutoutBlob && (
                   <div className="mt-3 flex items-center gap-3">
                     <img src={cutoutBlob} alt="누끼" className="w-20 h-20 object-contain rounded-lg border border-emerald-400/30 bg-slate-800/40" />
-                    <div className="text-[11px] text-emerald-300/80 flex items-center gap-1"><Check className="w-3.5 h-3.5" /> 누끼 완료 — 원본 그대로 들어갑니다</div>
+                    <div className="text-[11px] text-emerald-300/80 flex items-center gap-1"><Check className="w-3.5 h-3.5" /> 배경 제거 완료 — 원본 그대로 들어갑니다</div>
                   </div>
                 )}
                 {product && <div className="mt-2 text-[11px] text-white/50 truncate">{product.name}{product.salePrice ? ` · ${won(product.salePrice)}` : ''}</div>}
@@ -555,33 +594,6 @@ export default function ImageStudioPage() {
                     <p className="text-[10px] text-amber-300/60 italic mt-1">의류는 모델 착용컷 대신 옷 단독컷을 권장해요 — 착용컷은 배경과 합성한 티가 나기 쉬워요.</p>
                   </>
                 )}
-              </div>
-            </div>
-
-            {/* 우: 문구 + 생성 (★2026-07-30 채널 사이즈 픽커 폐기 — 단일 포스터가 전 채널 통짜 삽입) */}
-            <div className="lg:col-span-3 space-y-4">
-              <div className="rounded-2xl border border-fuchsia-400/20 bg-gradient-to-br from-fuchsia-500/10 to-indigo-500/5 p-4 space-y-2.5">
-                <h3 className="text-sm font-bold flex items-center gap-2"><PenLine className="w-4 h-4 text-fuchsia-300" /> 포스터에 들어갈 문구</h3>
-                {/* ★ 2026-08-13 Tip — "예시 문구가 내 입력으로 바뀐다·상품은 누끼 자동"을 입력칸 바로 위에서 말한다(Harold 확정) */}
-                <div className="rounded-xl bg-fuchsia-500/10 border border-fuchsia-400/25 px-3 py-2.5 flex items-start gap-2">
-                  <Sparkles className="w-3.5 h-3.5 text-fuchsia-300 shrink-0 mt-0.5" />
-                  <p className="text-[11px] leading-relaxed text-fuchsia-100/85">
-                    <b>예시 속 문구 자리에 아래 입력값이 그대로 새겨집니다.</b> 배경·분위기는 예시 그대로예요.
-                    {(template.kind || 'product') === 'product' && <> 상품 사진은 <b>배경이 자동으로 제거</b>되어 장면에 자연스럽게 들어갑니다.</>}
-                  </p>
-                </div>
-                <input value={texts.label} onChange={(e) => setTexts({ ...texts, label: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '작은 라벨 (예: MEMBERSHIP DAY)' : '작은 라벨 (예: ONLINE EXCLUSIVE)'} className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
-                <input value={texts.title} onChange={(e) => setTexts({ ...texts, title: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '행사명 (예: 멤버십 데이)' : '헤드라인 (예: 제품명 30% 할인 · 2+1 이벤트)'} className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-sm font-semibold text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
-                <input value={texts.subtitle} onChange={(e) => setTexts({ ...texts, subtitle: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '안내 문구 (예: 행사 기간·안내를 적어주세요)' : '부제 (예: 한정 수량 특별 혜택)'} className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
-                {(template.kind || 'product') === 'event' && (
-                  <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <span className="text-[11px] text-white/45">문구 위치</span>
-                    {([['top', '위'], ['center', '중앙'], ['bottom', '아래']] as const).map(([k, lbl]) => (
-                      <button key={k} onClick={() => setTextPosition(k)} className={`px-3 py-1.5 rounded-full border text-[11px] transition ${textPosition === k ? 'border-fuchsia-400/60 bg-fuchsia-500/15 text-fuchsia-200 font-semibold' : 'border-white/10 bg-white/5 text-white/50 hover:border-white/25'}`}>{lbl}</button>
-                    ))}
-                  </div>
-                )}
-                <p className="text-[10px] text-white/35 italic">입력한 문구 그대로 이미지 안에 고급 타이포로 새겨집니다. 혜택·수치는 직접 입력해주세요.</p>
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
