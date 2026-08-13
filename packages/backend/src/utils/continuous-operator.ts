@@ -2601,6 +2601,9 @@ export async function notifyOperatorAdmins(
   body: string,
   // ⛔ 2026-08-03 1R 정정: 실제로 적재했는지 돌려준다. 호출부가 "보냈다"를 기록하려면 그 사실을 알아야 한다
   //   (수신 번호 0건도 실패다 — 종전엔 조용히 아무것도 안 보내고 성공처럼 끝났다). 기존 호출부는 반환값을 안 봐도 무해하다.
+  // ★ 2026-08-13: noticeHeader 옵셔널 — 미지정이면 자동마케팅 머리말 그대로(기존 호출부 전부 무변경).
+  //   마케팅 플래너처럼 축이 다른 담당자 통지가 자기 머리말을 준다. 발송 경로(무과금 인증 라인·대표 발신번호·폴백)는 이 함수 하나로 유지한다.
+  opts?: { noticeHeader?: string },
 ): Promise<boolean> {
   const phones = [...(operator.adminPhoneNumbers || []), operator.backupAdminPhone || '']
     .map((p) => String(p || '').replace(/\D/g, ''))
@@ -2634,7 +2637,7 @@ export async function notifyOperatorAdmins(
 
   // TODO(알림톡 템플릿 등록 후): 1순위 알림톡(insertAlimtalkQueue) → 실패 시 아래 문자(2순위)로 fallback.
   // ★ Harold 2026-07-02: 모든 담당자 안내 문자 첫 줄 = [한줄로 AI 자동마케팅 안내문자] (중앙 1곳 부착)
-  const wrappedBody = wrapOperatorNoticeBody(body);
+  const wrappedBody = wrapOperatorNoticeBody(body, opts?.noticeHeader);
   const authTable = await getAuthSmsTable();
   // ★ 2026-07-09 발신번호 = 한줄로 대표번호. 옛: call_back에 수신자 본인 번호 → 발신=수신 → 번호도용차단 가입 담당자 미수신.
   const noticeCallback = getPlatformNoticeCallback();

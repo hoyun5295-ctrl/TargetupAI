@@ -723,6 +723,20 @@ export async function resolveCustomerRecipientsByFilter(
   return result.rows.map(mapEmailRecipientRow);
 }
 
+/**
+ * ★ 2026-08-13 (마케팅 플래너 Phase 2) 이메일 수신 가능 고객 수만 — 안전 필터는 위 발송 경로와 같은 단일 소스.
+ *   previewCustomerRecipients는 등급 분포·표본까지 3쿼리를 도는데, 브리핑은 수 하나만 쓴다.
+ *   그래서 같은 WHERE로 COUNT 1쿼리만 돌리는 문을 이 파일(이메일 수신자 축의 주인)에 둔다 — 호출부 인라인 복제 금지.
+ */
+export async function countCustomerEmailRecipients(companyId: string): Promise<number> {
+  const r = await query(
+    `SELECT COUNT(DISTINCT lower(email))::int AS total
+     FROM customers WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}`,
+    [companyId],
+  );
+  return Number(r.rows[0]?.total) || 0;
+}
+
 /** 발송 전 미리보기 — 대상 인원 + 등급 분포 + 표본 (RecipientsModal 고객DB 탭). */
 export async function previewCustomerRecipients(
   companyId: string,

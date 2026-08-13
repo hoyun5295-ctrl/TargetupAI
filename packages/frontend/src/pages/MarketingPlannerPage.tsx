@@ -11,9 +11,10 @@
  *          혜택은 고객사 기입 칸(AI가 채우지 않는다) · Source caption 의무 · goBackOr 복귀.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft, CalendarDays, ChevronLeft, ChevronRight, Loader2, Lock, Plus, Sparkles, Trash2, Wand2, X,
+  ArrowLeft, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck,
+  Loader2, Lock, Plus, Sparkles, Trash2, Wand2, X,
 } from 'lucide-react';
 import { goBackOr } from '../lib/scroll-restoration';
 import { useToast } from '../components/ToastProvider';
@@ -29,6 +30,8 @@ interface PlannerEvent {
   id: string; title: string; startsOn: string; endsOn: string; benefitText: string | null;
   products: Array<{ name: string }>; status: string; touchpoints: Touchpoint[]; estCreditsTotal: number;
 }
+/** ★ Phase 2 — 그 달 결재 상태(승인 원장 표가 아직 없으면 서버가 null을 준다) */
+interface MonthApproval { status: 'pending' | 'approving' | 'approved' | 'cancelled'; approvedAt: string | null; agencyCredits: number }
 
 const ANCHOR_LABEL: Record<Anchor, string> = { start: '행사 시작일', end: '행사 종료일', before_start: '시작 전 사전 안내' };
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
@@ -61,11 +64,13 @@ const shiftMonth = (month: string, delta: number) => {
 export default function MarketingPlannerPage() {
   const navigate = useNavigate();
   const toast = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
   const token = () => localStorage.getItem('token');
   const auth = () => ({ Authorization: `Bearer ${token()}` });
 
   const [month, setMonth] = useState(todayMonth());
   const [events, setEvents] = useState<PlannerEvent[]>([]);
+  const [approval, setApproval] = useState<MonthApproval | null>(null);
   const [availability, setAvailability] = useState<Availability[]>([]);
   const [loading, setLoading] = useState(true);
   const [migrationPending, setMigrationPending] = useState(false);
@@ -101,6 +106,7 @@ export default function MarketingPlannerPage() {
         const d = await r.json();
         setMigrationPending(false);
         setEvents(Array.isArray(d.events) ? d.events : []);
+        setApproval(d.approval || null);
       }
     } catch { /* 일시 오류 — 직전 목록 유지 */ }
     finally { setLoading(false); }
@@ -108,6 +114,17 @@ export default function MarketingPlannerPage() {
 
   useEffect(() => { loadAvailability(); }, [loadAvailability]);
   useEffect(() => { loadEvents(month); }, [month, loadEvents]);
+
+  // 결재 링크 착지 — 만료·오류를 조용히 넘기지 않는다(문자 링크의 도착점이 여기 하나다).
+  useEffect(() => {
+    const link = searchParams.get('link');
+    if (!link) return;
+    toast.error(link === 'expired'
+      ? '결재 링크가 만료됐습니다 — 아래 브리핑에서 확인해 주세요'
+      : '결재 링크를 여는 중 문제가 있었습니다 — 아래 브리핑에서 확인해 주세요');
+    searchParams.delete('link');
+    setSearchParams(searchParams, { replace: true });
+  }, [searchParams, setSearchParams, toast]);
 
   const cells = useMemo(() => buildMonthCells(month), [month]);
   const eventsByDate = useMemo(() => {
@@ -289,6 +306,41 @@ export default function MarketingPlannerPage() {
           </button>
         </div>
 
+        {/* ── 결재 배너 (★ Phase 2) — 문자 링크 말고도 화면에서 결재로 갈 수 있는 두 번째 경로 ── */}
+        {events.length > 0 && !migrationPending && (
+          <div className={`rounded-2xl border px-4 md:px-5 py-3.5 flex flex-wrap items-center gap-3 ${
+            approval?.status === 'approved'
+              ? 'border-emerald-400/25 bg-emerald-500/[0.08]'
+              : approval
+                ? 'border-amber-400/25 bg-amber-500/[0.08]'
+                : 'border-violet-400/25 bg-gradient-to-r from-violet-500/[0.12] to-fuchsia-500/[0.08]'
+          }`}>
+            {approval?.status === 'approved'
+              ? <CheckCircle2 className="w-5 h-5 text-emerald-300 flex-shrink-0" />
+              : <ClipboardCheck className="w-5 h-5 text-violet-300 flex-shrink-0" />}
+            <div className="flex-1 min-w-[12rem]">
+              <p className="text-sm font-semibold">
+                {approval?.status === 'approved'
+                  ? '이번 달 대행이 시작되었습니다'
+                  : approval
+                    ? '결재 대기 — 승인만 하면 대행이 시작됩니다'
+                    : '이번 달 계획을 결재에 올리세요'}
+              </p>
+              <p className="text-xs text-white/55 mt-0.5">
+                {approval?.status === 'approved'
+                  ? '계획대로 제작과 발송이 이어집니다. 소재 제작분은 각 제작 시점에 차감됩니다.'
+                  : '승인 전에는 제작·발송·차감이 일어나지 않습니다.'}
+              </p>
+            </div>
+            <button
+              onClick={() => navigate(`/marketing-planner/brief/${month}`)}
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-sm font-semibold hover:opacity-90 transition-opacity"
+            >
+              {approval?.status === 'approved' ? '브리핑 보기' : approval ? '승인하러 가기' : '브리핑 열기'}
+            </button>
+          </div>
+        )}
+
         {/* ── 캘린더 그리드 ────────────────────────────────────────── */}
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
           <div className="grid grid-cols-7 border-b border-white/10 text-center text-[11px] text-white/40">
@@ -378,7 +430,7 @@ export default function MarketingPlannerPage() {
         )}
 
         <p className="text-[10px] text-white/30 italic">
-          Data source — 행사·채널 구성은 저장 즉시 반영, 예상 크레딧은 소재 제작 기준이며 문자·알림톡은 실행 시 별도 과금됩니다. 월간 결재는 다음 업데이트에서 열립니다.
+          Data source — 행사·채널 구성은 저장 즉시 반영, 예상 크레딧은 소재 제작 기준이며 문자·알림톡은 실행 시 별도 과금됩니다. 월간 결재는 브리핑 화면에서 진행합니다.
         </p>
       </div>
 

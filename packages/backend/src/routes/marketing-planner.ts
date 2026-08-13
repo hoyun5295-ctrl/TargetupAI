@@ -1,14 +1,15 @@
 /**
- * routes/marketing-planner.ts — 마케팅 플래너 API (★ 2026-08-12 Phase 1)
+ * routes/marketing-planner.ts — 마케팅 플래너 API (★ 2026-08-12 Phase 1 · 2026-08-13 Phase 2 결재)
  *
- * 설계서 = docs/2026-08-12-ax-marketing-planner-design.md (확정 원장 §1 · 상태 기계 §5-2)
- * 판정 규칙은 전부 CT가 소유한다 — `utils/marketing-planner.ts`(검증·시점·크레딧) · `utils/planner-channel-gate.ts`(가용성).
+ * 설계서 = docs/2026-08-12-ax-marketing-planner-design.md (확정 원장 §1 · 상태 기계 §5-2 · 승인 흐름 §5-3)
+ * 판정 규칙은 전부 CT가 소유한다 — `utils/marketing-planner.ts`(검증·시점·크레딧) ·
+ * `utils/planner-channel-gate.ts`(가용성) · `utils/planner-approval.ts`(브리핑·게이트·차감·토큰·전이).
  *
- * Phase 1 범위 = 행사·터치포인트 CRUD + 가용성 + 예상 크레딧. **승인·차감·제작·발송은 없다**(Phase 2·3).
- * 따라서 이 파일에는 돈·발송을 움직이는 쓰기 경로가 없다.
+ * 범위 = 행사·터치포인트 CRUD + 가용성 + 예상 크레딧 + **월간 브리핑·결재**(제작·발송은 Phase 3).
+ * ⚠ 승인은 **돈을 움직이는 쓰기 경로**다 — 그 순서와 멱등은 CT가 소유하고 이 파일은 부르기만 한다.
  *
- * ⛔ 테이블(planner_events·planner_touchpoints)은 배포 후 DDL — 그 전에는 전 endpoint가
- *    `DB_MIGRATION_PENDING`(503)으로 답한다(500 노출 금지, db_alter_safety_net).
+ * ⛔ 테이블(planner_events·planner_touchpoints·planner_monthly_approvals)은 배포 후 DDL —
+ *    그 전에는 전 endpoint가 `DB_MIGRATION_PENDING`(503)으로 답한다(500 노출 금지, db_alter_safety_net).
  */
 import { Router, Request, Response } from 'express';
 import { pool, query } from '../config/database';
@@ -23,8 +24,41 @@ import {
   PlannerChannel,
 } from '../utils/marketing-planner';
 import { getPlannerChannelAvailability } from '../utils/planner-channel-gate';
+// ★ 2026-08-13 Phase 2 — 브리핑·결재. 판정·전이·차감은 전부 이 CT가 소유한다.
+import {
+  loadMonthlyBrief,
+  submitMonthlyBrief,
+  approveMonthlyBrief,
+  resolveApprovalToken,
+  PlannerApprovalError,
+} from '../utils/planner-approval';
 
 const router = Router();
+
+// ────────────────────────────────────────────────────────────────────
+// GET /api/marketing-planner/approval/:token — 결재 링크 착지 (인증 전 · 문자 링크가 여기로 온다)
+//
+// ⛔ 토큰은 **어느 달의 결재 화면인지**만 정한다. 승인은 아래 인증 구간에서 로그인한 사용자가 한다 —
+//    링크만으로 승인되면 URL 유출이 곧 결재 위조가 된다.
+// 이 라우트는 authenticate 위에 둔다(아래 router.use(authenticate)는 이 지점 이후만 적용).
+// ────────────────────────────────────────────────────────────────────
+router.get('/approval/:token', async (req: Request, res: Response) => {
+  try {
+    const resolved = await resolveApprovalToken(String(req.params.token || ''));
+    if (!resolved) return res.redirect('/marketing-planner?link=expired');
+    return res.redirect(`/marketing-planner/brief/${resolved.planMonth}`);
+  } catch (error: any) {
+    // 문자 링크를 눌러 브라우저로 도착한 담당자에게 503 JSON을 보여줄 수는 없다 — 화면으로 보낸다.
+    // 다만 배포 불일치(테이블 미생성)는 로그에서 구분되게 남긴다(모니터링이 정상 응답으로 착각하지 않도록).
+    const migrationPending = String(error?.code || '') === '42P01' || String(error?.code || '') === '42703';
+    console.error(
+      `플래너 결재 링크 처리 실패${migrationPending ? ' [DB_MIGRATION_PENDING — planner_monthly_approvals CREATE 필요]' : ''}:`,
+      error?.message || error,
+    );
+    return res.redirect('/marketing-planner?link=error');
+  }
+});
+
 router.use(authenticate);
 
 /** 수정 가능한 상태 — 승인 이후(producing~)는 Phase 2 결재 흐름(re_brief)을 거쳐야 한다. */
@@ -71,12 +105,13 @@ router.get('/events', async (req: Request, res: Response) => {
     const eventIds = ev.rows.map((r: any) => r.id);
     const tpByEvent = new Map<string, any[]>();
     if (eventIds.length > 0) {
+      // 회사 조건을 자식 조회에도 직접 건다 — 부모로만 격리하면 회사가 섞인 자식 행이 목록·합계에 들어온다.
       const tp = await query(
         `SELECT id, event_id, channel, timing_rule, format, est_credits, status, lock_reason
            FROM planner_touchpoints
-          WHERE event_id = ANY($1)
+          WHERE event_id = ANY($1) AND company_id = $2::uuid
           ORDER BY created_at ASC`,
-        [eventIds],
+        [eventIds, companyId],
       );
       for (const r of tp.rows as any[]) {
         const arr = tpByEvent.get(String(r.event_id)) || [];
@@ -109,7 +144,28 @@ router.get('/events', async (req: Request, res: Response) => {
         estCreditsTotal: touchpoints.reduce((s: number, t: any) => s + (Number(t.estCredits) || 0), 0),
       };
     });
-    return res.json({ month: planMonth, events });
+    // ★ 2026-08-13 Phase 2 — 캘린더 상단 결재 배너의 축. 승인 원장 표가 아직 없으면(배포 직후 DDL 전)
+    //   배너만 접고 캘린더는 그대로 연다 — 새 표 하나 때문에 Phase 1 화면이 통째로 막히면 안 된다.
+    let approval = null;
+    try {
+      const ap = await query(
+        `SELECT status, submitted_at, approved_at, agency_credits
+           FROM planner_monthly_approvals
+          WHERE company_id = $1::uuid AND plan_month = $2`,
+        [companyId, planMonth],
+      );
+      approval = ap.rows[0]
+        ? {
+            status: ap.rows[0].status,
+            submittedAt: ap.rows[0].submitted_at,
+            approvedAt: ap.rows[0].approved_at,
+            agencyCredits: Number(ap.rows[0].agency_credits) || 0,
+          }
+        : null;
+    } catch (e: any) {
+      if (e?.code !== '42P01') console.warn('[marketing-planner] 승인 원장 조회 경고:', e?.message || e);
+    }
+    return res.json({ month: planMonth, events, approval });
   } catch (error: any) {
     if (handleDbMigrationError(error, res, 'planner_events')) return;
     console.error('플래너 행사 조회 실패:', error);
@@ -142,7 +198,8 @@ async function writeEventWithTouchpoints(
       );
       if (up.rows.length === 0) throw Object.assign(new Error('NOT_EDITABLE'), { code: 'NOT_EDITABLE' });
       // 터치포인트는 교체 — 수정 화면이 전체 구성을 다시 보내는 계약이라 부분 병합의 어긋남이 없다.
-      await client.query(`DELETE FROM planner_touchpoints WHERE event_id = $1`, [eventId]);
+      // 쓰기 경로에도 회사 조건을 건다(6원칙 ① — 같은 부류를 읽기에서만 닫지 않는다).
+      await client.query(`DELETE FROM planner_touchpoints WHERE event_id = $1 AND company_id = $2::uuid`, [eventId, companyId]);
     } else {
       const ins = await client.query(
         `INSERT INTO planner_events (company_id, plan_month, title, starts_on, ends_on, benefit_text, products, status, created_by)
@@ -242,6 +299,70 @@ router.delete('/events/:id', async (req: Request, res: Response) => {
     if (handleDbMigrationError(error, res, 'planner_events')) return;
     console.error('플래너 행사 삭제 실패:', error);
     return res.status(500).json({ error: '행사 삭제 실패' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Phase 2 — 월간 브리핑·결재 (설계서 §5-3 · 요금 §3-4)
+// ⛔ 미승인 = 미발송 = 미차감. 승인만이 그 달 대행 계약이고, 차감은 승인 시 1회다.
+// ════════════════════════════════════════════════════════════════════
+
+/** CT 오류 → HTTP. 코드가 화면 분기(충전 유도 등)의 축이 된다. */
+function sendApprovalError(err: any, res: Response): boolean {
+  if (err instanceof PlannerApprovalError) {
+    res.status(err.status).json({ error: err.message, code: err.code });
+    return true;
+  }
+  return false;
+}
+
+// GET /api/marketing-planner/brief?month=YYYY-MM — 월간 브리핑(결재 서류)
+router.get('/brief', async (req: Request, res: Response) => {
+  const companyId = requireCompany(req, res);
+  if (!companyId) return;
+  const planMonth = parsePlanMonth(req.query.month);
+  if (!planMonth) return res.status(400).json({ error: '조회할 달을 지정해 주세요. (YYYY-MM)' });
+  try {
+    const brief = await loadMonthlyBrief(companyId, planMonth);
+    return res.json(brief);
+  } catch (error: any) {
+    if (handleDbMigrationError(error, res, 'planner_monthly_approvals')) return;
+    console.error('플래너 브리핑 조회 실패:', error);
+    return res.status(500).json({ error: '브리핑 조회 실패' });
+  }
+});
+
+// POST /api/marketing-planner/brief/:month/submit — 결재 올리기(pending + 행사 briefed + 결재 문자)
+router.post('/brief/:month/submit', async (req: Request, res: Response) => {
+  const companyId = requireCompany(req, res);
+  if (!companyId) return;
+  const planMonth = parsePlanMonth(req.params.month);
+  if (!planMonth) return res.status(400).json({ error: '대상 달을 지정해 주세요. (YYYY-MM)' });
+  try {
+    const result = await submitMonthlyBrief(companyId, planMonth, req.user?.userId || null);
+    return res.json(result);
+  } catch (error: any) {
+    if (sendApprovalError(error, res)) return;
+    if (handleDbMigrationError(error, res, 'planner_monthly_approvals')) return;
+    console.error('플래너 브리핑 제출 실패:', error);
+    return res.status(500).json({ error: '결재 요청 실패' });
+  }
+});
+
+// POST /api/marketing-planner/brief/:month/approve — 월간 승인(대행 크레딧 1회 차감·멱등)
+router.post('/brief/:month/approve', async (req: Request, res: Response) => {
+  const companyId = requireCompany(req, res);
+  if (!companyId) return;
+  const planMonth = parsePlanMonth(req.params.month);
+  if (!planMonth) return res.status(400).json({ error: '대상 달을 지정해 주세요. (YYYY-MM)' });
+  try {
+    const result = await approveMonthlyBrief(companyId, planMonth, req.user?.userId || null);
+    return res.json(result);
+  } catch (error: any) {
+    if (sendApprovalError(error, res)) return;
+    if (handleDbMigrationError(error, res, 'planner_monthly_approvals')) return;
+    console.error('플래너 월간 승인 실패:', error);
+    return res.status(500).json({ error: '승인 처리 실패' });
   }
 });
 

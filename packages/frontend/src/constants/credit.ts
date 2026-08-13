@@ -93,6 +93,7 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'journey-activate': '여정 활성화', 'journey-operation': '여정 운영',
   'continuous-operator': '자동 마케팅', 'continuous-operator-send': '자동 마케팅 발송',
   'marketing-calendar': '마케팅 캘린더 설계', 'marketing-calendar-month': '마케팅 캘린더 한 달 재설계',
+  'planner-monthly-agency': '마케팅 플래너 월간 대행',
   'predictive-daily': '예측 분석',
   'dm-ai-generate': '모바일 DM 생성', 'dm-builder': '모바일 DM 발행', 'dm-interaction-publish': '인터랙션 DM 발행',
   'inapp-ai-generator': '인앱 생성', 'inapp-publish': '인앱 게시', 'inapp-quick-action': '인앱 다듬기',
@@ -133,6 +134,8 @@ export const CONFIRM_CREDIT_COSTS: Record<string, number> = {
   'continuous-operator': 200,    // 자동 마케팅 저장
   'marketing-calendar': 50,      // ★ 2026-07-02 (Harold 명시): 캘린더 1년 설계 — 생성·재생성 매회
   'orchestrate': 300,            // 풀분석
+  // ★ 2026-08-13 마케팅 플래너 월간 대행 — 승인 버튼이 그 달 계약을 확정한다(승인 화면이 확인 모달을 띄운다).
+  'planner-monthly-agency': 1000,
 };
 
 /** ai_credit_transactions.type → 한글. deduct는 source 라벨 우선. */

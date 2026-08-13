@@ -99,7 +99,7 @@ Bandit이 이긴 변이를 고르고 루프가 다음 문안을 제안해도, **
 
 ## §6 단계 (Phase) — 착수 원장
 
-### Phase 0 — 문자 클릭을 학습 원장에 배선 ★2026-08-11 코드완료
+### Phase 0 — 문자 클릭을 학습 원장에 배선 ★2026-08-11 배포완료
 
 **문제**: 문자 클릭이 `message_short_urls`와 변이 테이블에만 쌓이고 **문안 학습 원장에는 안 들어갔다.**
 받는 쪽(`copy-rag-retriever`)은 `click_count`가 있으면 클릭률로 정렬하게 **이미 만들어져 있었는데** 값이 없어
@@ -152,7 +152,7 @@ send-time은 예측 허용 축이다(타겟 선정만 금지 — §3-1).
 | 2026-06-26 | **보상 누적 구조 정정** — 증분 α/β 갱신이 학습을 정지시키고 있었다(§3-4). 실측 count 단일 진실로 전환 | `utils/bandit-arm.ts` 헤더 |
 | 2026-07-03~04 | DM·이메일 클릭 환류 배선 + RAG 클릭률 정렬 구현(값은 아직 안 들어옴) | `ai-memory-accumulator-worker.ts` · `copy-rag-retriever.ts` |
 | 2026-07-12 | 구매 전환 자동 귀속(발송 +7일 창) | `operator-conversion-attribution.ts` |
-| **2026-08-11** | **Phase 0 — 문자 클릭 배선**(CT `getCampaignClickTotal` 신설 · 동기화 2경로 `clickCount` 동반 · `null` 계약). DDL 0 · BE tsc 0 · vitest 154파일 2,294건 통과 | 이 문서 §6 Phase 0 |
+| **2026-08-11** | **Phase 0 — 문자 클릭 배선 배포완료**(CT `getCampaignClickTotal` 신설 · 동기화 2경로 `clickCount` 동반 · `null` 계약). DDL 0 · BE tsc 0 · vitest 154파일 2,294건 통과. **실측 대기** = 링크 포함 문자 발송·클릭 후 동기화 시 `ai_training_logs.click_count`가 SMS/LMS 행에 차는지(채널별 집계 SQL) | 이 문서 §6 Phase 0 |
 
 ---
 

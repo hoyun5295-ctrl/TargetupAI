@@ -488,10 +488,17 @@ export function buildPrepReminderBody(input: PrepReminderInput): string {
  */
 const OPERATOR_NOTICE_HEADER = '[한줄로 AI 자동마케팅 안내문자]';
 
-export function wrapOperatorNoticeBody(body: string): string {
+/**
+ * ★ 2026-08-13 (마케팅 플래너 Phase 2): 머리말을 인자로 받는다. 기본값은 자동마케팅 문구 그대로라
+ *   기존 호출부(continuous-operator.ts 1곳) 동작은 변하지 않는다.
+ *   플래너 결재 통지에 "AI 자동마케팅" 머리말이 붙으면 담당자가 다른 기능의 문자로 읽는다 —
+ *   축이 다른 통지가 생겼으므로 문구를 하드코딩에서 인자로 옮긴다(호출부마다 새 발송 경로를 만들지 않는다).
+ */
+export function wrapOperatorNoticeBody(body: string, header: string = OPERATOR_NOTICE_HEADER): string {
   const b = String(body || '');
-  if (b.startsWith(OPERATOR_NOTICE_HEADER)) return b;
-  return `${OPERATOR_NOTICE_HEADER}\n${b}`;
+  const head = String(header || '').trim() || OPERATOR_NOTICE_HEADER;
+  if (b.startsWith(head)) return b;
+  return `${head}\n${b}`;
 }
 
 /**
