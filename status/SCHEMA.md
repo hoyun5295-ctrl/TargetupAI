@@ -1135,6 +1135,7 @@
 | last_used_at | timestamp | 최근 사용 시각 |
 | created_at | timestamp | |
 | updated_at | timestamp | |
+| filter_jsonb | jsonb NULL | ★2026-08-13 실측 등재(이 표에 없던 실존 컬럼 — 플래너 Phase 3·4 착수 실측에서 발견). 구조화 필터. **소비처 grep이 선행**이다 — 참여자 세그먼트(플래너 Phase 4)를 여기에 스냅샷으로 굳히면 진실 복사가 된다(원본 = `cdp_events`) |
 
 ### plan_requests (요금제 변경 요청)
 | 컬럼 | 타입 |
@@ -2427,9 +2428,9 @@ cd /home/administrator/targetup-app/packages/backend && npm install web-push @ty
 | 컬럼 | 타입 | 비고 |
 |------|------|------|
 | id | uuid PK | |
-| operator_id | uuid FK → continuous_operators | |
+| operator_id | uuid **NOT NULL** FK → continuous_operators | ★2026-08-13 실측 — **NULL 불가**. 오퍼레이터 없는 발송(마케팅 플래너)을 이 표에 실을 수 없다는 뜻이라, 플래너 실행은 **전용 워커 + 공용 CT 재사용**으로 확정됐다(가짜 오퍼레이터 편입 = 자동마케팅 화면·통계·만료 워커 오염이라 기각). 판단 근거 = [플래너 3·4 인계](../docs/2026-08-13-planner-phase34-handoff.md) §1-1 |
 | company_id | uuid FK | |
-| proposal_json | jsonb | OrchestratorResult 통째로 박힘 (target/messages/channel/schedule/compliance/cost/performance/meta) |
+| proposal_json | jsonb | OrchestratorResult 통째로 저장 (target/messages/channel/schedule/compliance/cost/performance/meta) |
 | recipient_count | integer | |
 | cost_estimate | integer | 원화 |
 | status | varchar(20) DEFAULT 'pending' | pending / approved / rejected / auto_executed / expired |
