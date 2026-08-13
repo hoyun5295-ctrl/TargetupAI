@@ -196,7 +196,7 @@ tsc 0 · 계약 테스트(질문표↔파라미터↔정규화 후 체인 1:1 ·
 | **1 순수 CT + 계약** | ~~신설~~ **★2026-08-13 완료** — `content-interview.ts`(질문표 v1·분기·검증·파생 기본값·원문 직렬화) + `dm/dm-interview-contract.ts`(결정값→최종 체인·죽은 질문 감시표) + 계약 테스트 33건. BE tsc 0 · vitest 159파일 2,420건 | 완료 |
 | **2 생성기 결합** | ~~신설~~ **★2026-08-13 완료** — `oneShotGenerate({structure})` 1급 파라미터. `structure`가 오면 `parsePrompt`·`designSectionLayout` 둘 다 건너뛰고 정규화만 태운다. 목적→톤·목표 매핑은 **계약 파일이 소유**(dm-ai가 인터뷰 타입을 모른다). 기존 두 호출부 무변경. 계약 테스트 4건 추가 | 완료 · vitest 2,424건 |
 | **3 세션·요금** | ~~신설~~ **★2026-08-13 코드완료 · DDL 실행 대기** — `routes/content-interview.ts`(세션 열기·이어하기·답 원자 병합·견적·생성 확정) + `utils/one-step-cost.ts`(견적 = 표시·차감 공유 산식) + `utils/content-interview-fill.ts`(프리필) + `utils/request-scope.ts`(스코프 CT) + 델타 50 `CREDIT_COST_MAP` 등재 + `app.ts` `/api/one-step` 등재. 계약 테스트 10건 추가 | Codex 적대 검토(쓰기·차감 경로) — **DDL 실행 후** |
-| **4 화면** | 인터뷰 셸(아코디언 사본·미래 잠금 없음) · [이대로 만들기] 상시 · 결과 화면 검산 칩 + 인라인 채움 · 재개 바 | LESSONS_FRONTEND 디자인 최소 기준 자가 검증 |
+| **4 화면** | ~~신설~~ **★2026-08-13 완료** — `components/dm/OneStepInterviewModal.tsx`(아코디언 7문·프리필 출처 칩·[이대로 만들기] 상시·생성 중 5단계 오버레이) + DM 허브 좌측 카드에 진입 버튼 + `CreditConfirmModal`에 `costOverride`(서버 견적 = 실차감) + 크레딧 상수·라벨 등재. DDL은 2026-08-13 실행 완료(SCHEMA.md 등재) | FE tsc 0 · 모델명·native dialog·박-단어 grep 0건 |
 | **5 계측** | coverage 적재를 인터뷰·기존 one-shot **양쪽에** · 최종 체인 기록 · 문항 이탈 계측 | 실측 1건(§7) |
 
 ⛔ Phase 2가 이 설계의 뼈대다 — 여기가 빠지면 인터뷰 답이 요약 병목을 그대로 통과해 **기능 전체가 의미를 잃는다**(§0-2·§0-5).

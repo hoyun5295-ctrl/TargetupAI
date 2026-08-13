@@ -16,6 +16,12 @@ interface Props {
   // ★ 2026-07-05: N건 일괄 작업(마케팅 캘린더 선택 등록 등) — 표시 금액 = 단가×N = 실차감 일치 의무.
   //   미지정 = 1(기존 호출부 전부 무영향).
   quantity?: number;
+  /**
+   * ★ 2026-08-13 원스텝 생성 — **서버 견적 금액**. 항목이 여럿이라 정적 단가 맵으로는 총액을 만들 수 없다.
+   * 지정하면 표시 금액이 이 값이 되고, 실제 차감도 같은 견적 함수에서 나온다(표시 ≠ 차감 방지).
+   * 미지정 = 기존 호출부 전부 무영향(단가 맵 × quantity 그대로).
+   */
+  costOverride?: number;
   description?: string;     // 작업 맥락 1줄 (예: 빠른시작 시나리오 설명) — 있으면 차감 안내 위에 표시
   // ★ 2026-07-07: 확인과 함께 받을 부가 입력 슬롯(마케팅 캘린더 담당자 연락처 등) — 미지정 = 기존 호출부 전부 무영향.
   extraContent?: ReactNode;
@@ -23,10 +29,11 @@ interface Props {
   onCancel: () => void;
 }
 
-export default function CreditConfirmModal({ open, source, quantity, description, extraContent, onConfirm, onCancel }: Props) {
+export default function CreditConfirmModal({ open, source, quantity, costOverride, description, extraContent, onConfirm, onCancel }: Props) {
   const unitCost = CONFIRM_CREDIT_COSTS[source] ?? 0;
   const qty = Math.max(1, Math.floor(Number(quantity)) || 1);
-  const cost = unitCost * qty;
+  const cost = Number.isFinite(Number(costOverride)) ? Number(costOverride) : unitCost * qty;
+  const showUnitBreakdown = costOverride == null && qty > 1;
   const label = CREDIT_SOURCE_LABELS[source] ?? 'AI 작업';
   const [balance, setBalance] = useState<number | null>(null);
   const [enabled, setEnabled] = useState(true);
@@ -98,9 +105,9 @@ export default function CreditConfirmModal({ open, source, quantity, description
         {extraContent && <div className="mb-3">{extraContent}</div>}
         <div className="text-[13px] text-white/80 leading-relaxed mb-4">
           <span className="font-semibold text-white">{label}</span>
-          {qty > 1 ? ` ${qty}건` : ''} 사용으로{' '}
+          {showUnitBreakdown ? ` ${qty}건` : ''} 사용으로{' '}
           <span className="font-semibold text-violet-300">
-            {qty > 1 ? `${unitCost.toLocaleString()} × ${qty} = ` : ''}{cost.toLocaleString()} 크레딧
+            {showUnitBreakdown ? `${unitCost.toLocaleString()} × ${qty} = ` : ''}{cost.toLocaleString()} 크레딧
           </span>이 차감됩니다.
         </div>
 

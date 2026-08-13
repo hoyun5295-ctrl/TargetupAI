@@ -2488,6 +2488,33 @@ cd /home/administrator/targetup-app/packages/backend && npm install web-push @ty
 | updated_at | timestamptz NOT NULL DEFAULT NOW() | |
 - 생성/소비 = utils/marketing-calendar-store.ts CT 단일 진입점 (routes/ai.ts generate 저장·GET 조회·POST /operator/continuous calendar_month 등록 기록).
 
+### one_step_sessions (원스텝 AI 컨텐츠 생성 — 인터뷰 세션) — ★ 2026-08-13 CREATE 실행 완료(Harold 실행 · 15컬럼)
+
+> 설계 = [원스텝 설계서](../docs/2026-08-13-one-step-content-interview-design.md) §6-1. 소비처 = `routes/content-interview.ts` 단일.
+> ⛔ `attempt`·`interview_paid_at`이 **요금 멱등의 근거**다 — 생성 키는 회차를 포함하고(재생성은 생성비를 다시 걷는다),
+> 대행 델타 키는 세션 고정이라 `interview_paid_at`이 찍힌 뒤에는 다시 걷히지 않는다.
+> ⛔ `section_types`는 **정규화 이후 최종 체인**이다 — 결정축 반영은 커버리지로 못 재므로 이것이 계측 축이다.
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK DEFAULT gen_random_uuid() | |
+| company_id | uuid NOT NULL FK → companies ON DELETE CASCADE | |
+| created_by | uuid FK → users ON DELETE SET NULL | |
+| channel | varchar(20) NOT NULL DEFAULT 'dm' | 1차 = DM 단독 |
+| answers | jsonb NOT NULL DEFAULT '{}' | 질문 답(원자 병합 저장) |
+| prefill | jsonb NOT NULL DEFAULT '{}' | 프리필 맥락 + 출처 라벨 |
+| decisions | jsonb NOT NULL DEFAULT '{}' | 생성 시점 결정값 |
+| section_types | jsonb NOT NULL DEFAULT '[]' | **정규화 후** 최종 섹션 체인(계측 축) |
+| coverage | jsonb | 반영 커버리지(미반영 항목) |
+| result_ref | uuid | 생성 결과 참조 |
+| attempt | integer NOT NULL DEFAULT 0 | 생성 회차(생성비 멱등키) |
+| interview_paid_at | timestamptz | 대행 델타 차감 표식(재차감 차단) |
+| status | varchar(20) NOT NULL DEFAULT 'draft' | draft / generated |
+| created_at | timestamptz NOT NULL DEFAULT NOW() | |
+| updated_at | timestamptz NOT NULL DEFAULT NOW() | |
+
+인덱스 = `idx_one_step_sessions_company (company_id, created_at DESC)`
+
 ### event_campaign_drafts (행사 캠페인 3채널 초안 보관) — ★ 2026-08-13 information_schema 실측 등재(10컬럼)
 
 > 코드는 쓰는데 이 문서에 없던 표. 소비처 = `routes/event-campaigns.ts` 단일(드래프트 CRUD) + 화면 `EventCampaignModal`·`EventCampaignResumeBar`(재개 바 — `MarketingCalendarPage`·`QuickCampaignPage` 두 곳에 붙는다).

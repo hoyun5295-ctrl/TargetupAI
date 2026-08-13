@@ -93,6 +93,7 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'journey-activate': '여정 활성화', 'journey-operation': '여정 운영',
   'continuous-operator': '자동 마케팅', 'continuous-operator-send': '자동 마케팅 발송',
   'marketing-calendar': '마케팅 캘린더 설계', 'marketing-calendar-month': '마케팅 캘린더 한 달 재설계',
+  'one-step-interview': '원스텝 오토설계',
   'planner-monthly-agency': '마케팅 플래너 월간 대행',
   'planner-touchpoint-send': '마케팅 플래너 발송 문안',
   'predictive-daily': '예측 분석',
@@ -137,6 +138,9 @@ export const CONFIRM_CREDIT_COSTS: Record<string, number> = {
   'orchestrate': 300,            // 풀분석
   // ★ 2026-08-13 마케팅 플래너 월간 대행 — 승인 버튼이 그 달 계약을 확정한다(승인 화면이 확인 모달을 띄운다).
   'planner-monthly-agency': 1000,
+  // ★ 2026-08-13 원스텝 오토설계 50 — 총액은 생성비가 더해져 달라지므로 **서버 견적이 진실**이다.
+  //   호출부는 `costOverride`로 그 값을 넘긴다(이 숫자는 견적을 못 받았을 때의 하한 표시용).
+  'one-step-interview': 50,
 };
 
 /** ai_credit_transactions.type → 한글. deduct는 source 라벨 우선. */

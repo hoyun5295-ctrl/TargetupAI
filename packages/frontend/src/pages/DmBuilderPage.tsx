@@ -41,6 +41,9 @@ import DesignThemeModal from '../components/dm/modals/DesignThemeModal';
 import FontApplyModal from '../components/dm/modals/FontApplyModal';
 // ★ 2026-07-14 디자인 4.0 — 정예 템플릿(목적×스토리 구조, 서버 design-core 컴파일)
 // ★ 2026-07-16 M4 — 정예 템플릿 진입 폐기 (Harold 명시 — 설계서 §1-2. EliteTemplateModal 미사용)
+import { Wand2 } from 'lucide-react';
+// ★ 2026-08-13 원스텝 AI 컨텐츠 생성 (설계서 = docs/2026-08-13-one-step-content-interview-design.md)
+import OneStepInterviewModal from '../components/dm/OneStepInterviewModal';
 import DmQuickBar from '../components/dm/DmQuickBar';
 import AbTestModal from '../components/dm/modals/AbTestModal';
 import ModalBase, { ModalButton } from '../components/dm/modals/ModalBase';
@@ -153,6 +156,8 @@ export default function DmBuilderPage() {
   const [currentPage, setCurrentPage] = useState(1);
   // 빠른시작·자연어 생성 전 5크레딧 차감 확인 (Harold 명시 — 즉시 차감 X)
   const [pendingGen, setPendingGen] = useState<{ prompt?: string; scenario?: string; desc: string } | null>(null);
+  // ★ 2026-08-13 원스텝 — 질문에 답하면 그 답이 마스터프롬프트가 되어 생성으로 이어진다.
+  const [oneStepOpen, setOneStepOpen] = useState(false);
   // ★ 2026-07-02(5) Harold 지시 — 빠른 시작 12 시나리오는 모달로 분리 (프롬프트 입력이 묻히지 않게)
   const [quickStartOpen, setQuickStartOpen] = useState(false);
 
@@ -805,6 +810,17 @@ export default function DmBuilderPage() {
                   resize: 'none', opacity: generating ? 0.6 : 1,
                 }}
               />
+              {/* ★ 2026-08-13 원스텝 — 자유 입력이 어려운 담당자를 위한 별도 경로(설계서 §5).
+                  기존 [자동 생성] 1클릭 흐름은 손대지 않는다 — 형제 버튼으로만 선다. */}
+              <button
+                onClick={() => { if (!generating) setOneStepOpen(true); }}
+                disabled={generating}
+                className="w-full inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-fuchsia-400/40 bg-fuchsia-500/10 text-fuchsia-100 text-sm font-medium py-2.5 hover:bg-fuchsia-500/20 disabled:opacity-40 transition-colors"
+              >
+                <Wand2 className="w-4 h-4" />
+                질문 몇 개로 정확하게 만들기
+                <span className="text-[11px] text-fuchsia-200/70">생성 5 + 오토설계 50</span>
+              </button>
               <ImageToCopyButton
                 label="이미지로 불러오기"
                 onExtracted={(t) => setNaturalLanguage((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
@@ -1328,6 +1344,30 @@ export default function DmBuilderPage() {
 
       {/* 고객 데이터 없음 — 생성 차단 안내 */}
       <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
+
+      {/* ★ 2026-08-13 원스텝 — 결과는 기존 적용 경로를 그대로 탄다(신규 DM에만 적용 · 사용자 콘텐츠 비파괴) */}
+      <OneStepInterviewModal
+        open={oneStepOpen}
+        onClose={() => setOneStepOpen(false)}
+        onGenerated={(payload) => {
+          setOneStepOpen(false);
+          const sections = (payload.sections || []) as any[];
+          createNew({ title: '원스텝 생성 DM' });
+          applyAiGenerated(sections, payload.brand_kit as any, '원스텝 생성', {
+            pages: payload.pages as any,
+            layoutMode: payload.layout_mode as any,
+          });
+          void save({ silent: true }).catch(() => {});
+          setMode('edit');
+          const missing = payload.coverage?.missing?.length || 0;
+          setToast({
+            type: 'success',
+            message: missing > 0
+              ? `${sections.length}개 섹션으로 만들었어요 — 반영되지 않은 항목 ${missing}건은 편집기에서 확인해 주세요`
+              : `${sections.length}개 섹션으로 만들었어요 — 문구와 이미지만 다듬으면 됩니다`,
+          });
+        }}
+      />
 
       <CreditConfirmModal
         open={!!pendingGen}
