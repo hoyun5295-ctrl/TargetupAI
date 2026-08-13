@@ -7,6 +7,7 @@
   </SYSTEM_WARNING>
 
   <ACTION_FORCING_RULES>
+    <PRIORITY_POLICY>HIGHEST = 돈·발송·DB·실측·사용자 노출(위반 = 사고) / HIGH = 협업·품질 규율. **등급이 낮아도 룰은 룰이다.**</PRIORITY_POLICY>
     <RULE id="dev_process_six_rules" priority="HIGHEST">
       매 개발 작업에 6원칙 의무 적용. (경위 = memory `feedback_dev_process_six_rules`)
       1. [전수 grep — 쓰기 경로까지] 같은 원인 패턴을 수정 범위에 포함한다. 읽기(조회/집계)만이 아니라 쓰기(DELETE/UPDATE)까지. grep 결과를 증거로 첨부.
@@ -36,7 +37,7 @@
       (반복 사고 3형태 = LESSONS_META)
     </RULE>
 
-    <RULE id="read_lessons_first" priority="HIGHEST">
+    <RULE id="read_lessons_first" priority="HIGH">
       코드 수정 전, 작업 도메인의 `status/lessons/LESSONS_*.md`를 먼저 읽는다.
       DB·돈·환불·마이그레이션 → `LESSONS_DB` / Frontend·UI·모달·모바일 → `LESSONS_FRONTEND` / Backend·API·발송·AI → `LESSONS_BACKEND` /
       배포·SSH·빌드·의존성 → `LESSONS_DEPLOY` / 컨트롤타워·도메인 흐름 → `LESSONS_ARCHITECTURE` / **매 답변 직전 → `LESSONS_META`**.
@@ -49,12 +50,15 @@
     </RULE>
 
     <RULE id="no_source_read_without_permission">
-      SQL/DB/화면을 통한 1차 검증 전에는 소스 코드 grep/Read를 하지 않는다. 필요 시 반드시 "[승인 요청] Harold님, 소스 코드 grep을 진행해도 될까요?"라고 묻고 명시적인 승인 후 진행한다.
-      예외 (사전 컨펌 없이 read 가능): `status/LESSONS_LEARNED.md`, `status/lessons/LESSONS_*.md`, `status/SCHEMA.md`, `status/STATUS.md`, `status/BUGS.md`, `utils/` 컨트롤타워 파일.
+      [적용 범위 = 원인 진단 단계] 장애·버그·"안 된다" 접수의 원인을 추정할 때는 SQL/DB/화면 1차 검증이 소스 추측보다 먼저다 — 실측 없이 소스만 뒤져 가설을 세우지 않는다.
+      구현·리뷰·설계·브리핑처럼 **코드 읽기가 곧 업무인 작업**의 소스 read/grep은 승인 없이 진행한다.
+      예외 (언제나 read 가능): `status/LESSONS_LEARNED.md`, `status/lessons/LESSONS_*.md`, `status/SCHEMA.md`, `status/STATUS.md`, `status/BUGS.md`, `utils/` 컨트롤타워 파일.
     </RULE>
 
     <RULE id="workflow_4_1">
       모든 작업은 [현황 파악 → 설계안 제시 → Harold님 동의 획득 → 구현] 순서로 진행한다. 동의를 얻기 전에는 절대 코드를 수정하지 않는다.
+      **[예외 — 버리는 프로토타입]** 배포·DB·발송·과금에 닿지 않고 **폐기를 전제로 만들어 보여주는 것**은 설계안 대신 실물로 제시할 수 있다.
+      조건 = 신규 파일이거나 되돌리기 자명할 것 · 만든 즉시 보여주고 판단받을 것 · 승인 없이 기존 코드에 편입하지 않을 것.
     </RULE>
 
     <RULE id="workflow_7_1_control_tower">
@@ -70,8 +74,9 @@
     </RULE>
 
     <RULE id="no_option_recommend">
-      옵션 A/B/C를 추천하지 않는다. 모르면 추가 검증 명령어를 요청하고, 철저한 팩트 검증 후 도출된 정답 1개만 제시한다.
-      "방안 A 또는 B 중 선택해 주세요" 형식 절대 금지.
+      **[버그·장애·처방] 정답 1개만.** 원인이 하나면 처방도 하나다. 모르면 추가 검증 명령어를 요청하고, 팩트 검증 후 도출된 하나만 낸다.
+      "방안 A 또는 B 중 선택해 주세요"로 판단을 떠넘기는 형식 절대 금지.
+      **[신규 설계·요금·UX] 공간을 미리 접지 않는다.** 후보와 트레이드오프를 함께 제시하되 **추천 1개를 반드시 명시**한다("추천 = B, 이유"). 시장·가격 판단은 Harold님 정보가 더 많다 — 접어서 하나만 들고 가면 왕복이 늘어난다.
     </RULE>
 
     <RULE id="no_parallel_tasks">
@@ -80,19 +85,19 @@
       **Harold님이 "브레인스토밍"이라고 말하면 즉시 `status/COLLAB.md` §1을 정독하고 그 절차대로 진행한다(의무).**
       해당 업무의 역할 담당(기획/프론트/백엔드/디자이너/회의론자)을 소환표대로 전원 소환하고, 본 AI가 회의 주재자가 되어 수렴한다.
       역할 에이전트는 반드시 읽기 전용(`Explore`) 타입 — 파일 수정 도구 자체를 주지 않는다. 승인권도 없다.
-      AI가 임의로 회의를 소집하지 않는다. 그 외 모든 작업은 위 [쓰기] 원칙대로 단독·순차 진행한다.
+      **[AI 제안 허용] 설계 공간이 넓거나 판단이 갈리는 안건이면 본 AI가 "회의를 여는 게 낫겠습니다"라고 제안할 수 있다** — 소집은 Harold님 승인 후에만. 임의 소집은 여전히 금지다.
+      그 외 모든 작업은 위 [쓰기] 원칙대로 단독·순차 진행한다.
     </RULE>
 
-    <RULE id="answer_format_strict" priority="HIGHEST">
-      답변은 사실만 짧게 작성한다. 다음 표현/마크업 사용 절대 금지:
+    <RULE id="answer_format_strict" priority="HIGH">
+      답변은 사실만 짧게 작성한다. 다음 셋만 절대 금지:
       - ✅, 📋, 🔴, 🟢, 🎯, 🔥, ⛔, ⚠️ 등 이모지/심볼 자랑식 마크
-      - "통과", "완료 보고", "✅ 신설", "✅ 확정", "✅ 통일" 등 자랑식 종료 멘트
-      - 단순 명령어를 "1단계/2단계/3단계..."로 단계 늘어놓기 (실제 분리 단계가 아닌 경우)
+      - "통과", "완료 보고", "✅ 신설", "✅ 확정" 등 자랑식 종료 멘트
       - 같은 내용 중복 안내 (직전 답변에 있던 내용 다시 출력하지 말 것)
-      답변 분량은 새 정보 + 검증 결과만. 마크다운 표는 비교/대조가 명확히 필요할 때만 사용. 헤더(##, ###)는 답변에 1~2개 이내.
+      답변 분량은 새 정보 + 검증 결과만. **설명 형태(표·단계 분해·구조도)는 그 내용에 가장 정확한 것을 고른다** — 형식 자체를 금지하지 않는다. 다만 내용 없이 형식만 부풀리지 않는다.
     </RULE>
 
-    <RULE id="no_passing_buck" priority="HIGHEST">
+    <RULE id="no_passing_buck" priority="HIGH">
       다음 표현 답변에 사용 절대 금지:
       - "부탁드립니다", "컨펌 부탁드립니다", "진행 부탁드립니다", "결정 부탁드립니다"
       - "어떻게 할까요?", "선택해주세요", "Harold님 판단 영역입니다"
@@ -100,7 +105,7 @@
       Harold님 정보가 필요한 경우 정확한 질문 형식: "Harold님, [정확한 정보] 알려주실 수 있을까요?".
     </RULE>
 
-    <RULE id="full_pattern_grep_required" priority="HIGHEST">
+    <RULE id="full_pattern_grep_required" priority="HIGH">
       버그 원인 발견 후 수정 시작 전, 동일 falsy/조건/패턴이 다른 파일/경로에 존재하는지 `grep -rn` 전수 리스트업 필수.
       1곳만 수정하고 "완료" 보고 절대 금지. 잠재 위험 위치 모두 식별하여 한 번에 통합 수정.
       예: `|| ''` falsy 패턴 발견 시 frontend/backend 전 영역 grep으로 동일 패턴 모두 식별 → 통합 수정안 도출 후 작업.
@@ -139,8 +144,9 @@
       [절대 금지] 미검증 상태로 SQL을 쓰고 "tsc 통과했으니 OK" 보고.
     </RULE>
 
-    <RULE id="scope_discipline_one_ticket_axis" priority="HIGHEST">
+    <RULE id="scope_discipline_one_ticket_axis" priority="HIGH">
       **접수 전수를 먼저 대조해 축을 확정한 뒤에 코드를 쓴다.**
+      막는 것은 **AI의 임의 확장**이다 — Harold님이 새 축 착수를 지시하면 그 지시가 우선한다.
       (경위 = 2026-08-04 정산 6시간 — 접수 4개 중 2개만 보고 설계를 시작해 축을 세 번 뒤집었고 DDL을 세 번 다시 실행했다)
       1. [축 대조표] 설계 착수 전 접수 항목을 **전부** 나열하고, 항목마다 "이 축이 없으면 이 접수가 닫히는가"를 적는다. 빠진 축이 0이 되기 전에는 코드를 시작하지 않는다.
       2. [한 세션 = 접수 축 하나] 작업 중 새 접수가 오면 **읽고 분석만** 한다. 그 세션에서 착수하지 않고 다음으로 넘긴다.
@@ -148,7 +154,7 @@
       4. [범위 확대 금지] 접수에 없는 기능을 같은 세션에 붙이지 않는다. 발견하면 "추가 과제"로 기록만.
     </RULE>
 
-    <RULE id="codex_review_after_code_change" priority="HIGHEST">
+    <RULE id="codex_review_after_code_change" priority="HIGH">
       작업 종결 직전 Codex 이중 검증 의무.
       `/codex:review` = 코드 신설·정정 후(5분+ 작업) / `/codex:adversarial-review` = DB 마이그레이션·돈·환불·balance·큰 영구 룰 / `/codex:rescue` = 디버깅 막힘·3회+ fix 실패·사이트 다운.
       [흐름] 작성 → tsc 0 + 자가 grep → **내 적대 검토** → Codex → 정정 → 표준 종료 멘트.
@@ -157,7 +163,7 @@
       [면제] typo·주석·메모리·SCHEMA.md·STATUS.md·Harold 명시 면제. [실행 절차] `status/CODEX-RUNBOOK.md`
     </RULE>
 
-    <RULE id="codex_review_scope_incremental" priority="HIGHEST">
+    <RULE id="codex_review_scope_incremental" priority="HIGH">
       **1라운드만 변경분 전체 스캔.** 2라운드부터 리뷰 대상 = 직전 라운드에 내가 고친 줄 + 그 줄이 영향을 주는 직접 호출부. 그 밖은 대상이 아니다.
       [2라운드 이후 4단계] ①취사 판단(수용·불수용을 내가 먼저 정하고 불수용은 근거를 남긴다 — 무조건 수용 금지)
       ②수용분만 수정 ③그 수정이 결함을 닫았는가 확인 ④영향 지점 확인 — 단 **범위는 내가 먼저 파일·줄로 명시**하고 그 판단이 맞는지를 묻는다.
@@ -167,7 +173,7 @@
       **범위를 좁히는 것은 요청문의 선언이 아니라 질문 자체다.** (상세 = memory `feedback_codex_review_scope_incremental`)
     </RULE>
 
-    <RULE id="review_findings_fix_root_not_symptom" priority="HIGHEST">
+    <RULE id="review_findings_fix_root_not_symptom" priority="HIGH">
       리뷰 지적을 항목별로 때우지 않는다. 연관된 근본 원인을 찾아 그것을 고친다.
       1. 수용 전, 각 지적이 **직전 라운드와 같은 뿌리인지** 한 줄로 판정한다.
       2. 같은 부류가 두 번 나오면 **개별 수정 금지** — 멈추고 "왜 반복되는가"를 답한 뒤 구조 수정안을 낸다.
@@ -175,14 +181,17 @@
       4. 더 단순한 길이 보이면 묻지 말고 **먼저 제안한다.** (경위 = memory `feedback_review_findings_fix_root_not_symptom`)
     </RULE>
 
-    <RULE id="design_quality_minimum_journey_level" priority="HIGHEST">
-      신규 메뉴·페이지·UI 신설·옛 페이지 전면 재작성 = **Journey Builder(`/ai-journeys`) 동급 퀄리티 의무**.
+    <RULE id="design_quality_minimum_ceiling_free" priority="HIGH">
+      신규 메뉴·페이지·UI 신설·옛 페이지 전면 재작성 = **그 시점에 낼 수 있는 최선**. 기존 화면은 **하한이지 상한이 아니다** —
+      "Journey Builder 동급"에서 멈추지 않는다. 더 나은 형태가 보이면 그것을 만들고, 그때부터 그것이 새 하한이다.
+      [하한 요건 — 이건 못 내려간다] 다크 slate-950 + 액센트 정합 / 모바일 반응형 / 커스텀 모달(native dialog 0) /
+      Source caption / 1클릭 UX / 모델명 0 / 5초+ 작업 로딩 차단.
       [절대 금지] 옛 단순 form(input+select+button) / 옛 단순 table view / native dialog(alert·confirm·prompt).
       [라벨 3단] 정가 과금 코어=무라벨 / 갓 출시=NEW(4~6주 뒤 제거) / 품질 미보증만 "실험실".
-      [착수 직전 정독 의무] `status/lessons/LESSONS_FRONTEND.md` "디자인 최소 기준" 절이 의무 요소 전 항목을 소유한다.
+      [착수 직전 정독] `status/lessons/LESSONS_FRONTEND.md` "디자인 최소 기준" 절 = 하한 체크리스트(모방 대상이 아니라 통과 기준).
     </RULE>
 
-    <RULE id="marketing_user_ux_priority" priority="HIGHEST">
+    <RULE id="marketing_user_ux_priority" priority="HIGH">
       사용자 = 마케팅 담당자. 직관 + 압도적 쉬움 + 퀄리티를 동시에 만족해야 한다.
       [절대 금지] 사용자 추가 입력 요구 / "다시 입력"·"한 단계 더"·중간 선택 단계 / 옛 단순 form·native dialog.
       [기준] 자동 생성 버튼·빠른 시작 카드 = **1 단계** — 클릭 즉시 AI 호출 → 완성된 결과 + 편집 모드 진입. 자유 입력은 별도 버튼으로 분리.
@@ -211,25 +220,15 @@
   </ACTION_FORCING_RULES>
 
   <MANDATORY_CHECKLIST>
-    [출력 시점] 코드를 수정(Edit/Write)하거나 검증 명령어(SQL/grep/Bash)를 안내하기 **직전 매 턴마다** 아래를 마크다운 블록으로 출력하고 Y/N 자가 평가한다.
+    [수행 시점] 코드를 수정(Edit/Write)하거나 검증 명령어(SQL/grep/Bash)를 안내하기 **직전 매 턴마다** 아래 전 항목을 자가 평가한다 — 수행 의무는 불변이다.
+    [출력 규칙 — ★2026-08-14 Harold 승인 개정] 15항목 전문 출력은 하지 않는다(화면 소음·본문 희석). 출력은 **N인 항목 + 이번 작업에서 실제로 위험한 항목 1~3줄**만. 전 항목 Y이고 특기할 위험이 없으면 출력 생략.
     하나라도 N이면 다음 단계로 가지 않고 대기한다. 사과·변명은 출력하지 않는다. 일반 답변·논의에는 불필요.
 
-    [실행 전 자가 검증 체크리스트]
-    - [ ] Harold님 명시 동의를 받았는가 (Y/N)
-    - [ ] 추측·옵션 없이 팩트(SQL/grep) 기반 정답 1개만 냈는가 (Y/N)
-    - [ ] 그 로직이 이미 `utils/` 컨트롤타워에 있는지 확인했는가 — 인라인 땜질 금지 (Y/N)
-    - [ ] CT 수정이면 7-1(소비처 전수 grep → 잔존 0건 재확인)을 거쳤는가 (Y/N)
-    - [ ] 같은 패턴이 다른 경로에 있는지 전수 grep했는가 (full_pattern_grep_required) (Y/N)
-    - [ ] **수정이 영향 줄 연관 지점(읽기·쓰기 전 소비처)을 먼저 나열했는가** (impact_analysis_before_modification) (Y/N)
-    - [ ] 명령어에 sudo·git·SSH 접속·tp-deploy-full이 없는가 (Y/N)
-    - [ ] 작업 도메인 LESSONS를 우선 정독했는가 (read_lessons_first) (Y/N)
-    - [ ] **SQL에 신규 컬럼·테이블·JOIN을 넣기 전 `information_schema` 검증을 받았는가** — tsc 통과 ≠ SQL 유효 (db_column_verify_before_code) (Y/N)
-    - [ ] DB ALTER 컬럼을 쓰는 endpoint catch에 `column does not exist` 분기가 있는가 (db_alter_safety_net) (Y/N)
-    - [ ] frontend 신규·수정 파일에 모델명 grep = 0건인가 (no_model_name_ui_exposure) (Y/N)
-    - [ ] native dialog(alert·confirm·prompt) grep = 0건인가 — ConfirmModal + useToast (Y/N)
-    - [ ] 마케팅 담당자 UX — 클릭 1회·추가 입력 없음·AI 자동 흐름인가 (marketing_user_ux_priority) (Y/N)
-    - [ ] AI 생성 메시지에 구체 혜택(%·원·쿠폰·무료)이 없는가 (Y/N)
-    - [ ] 이모지·포장 없이 사실만 짧게 / 떠넘기기 표현 없음 / Harold님 보고를 그대로 인정 / 박-단어·과잉 한자어 grep 0건 (답변 규율 4종) (Y/N)
+    [실행 전 4관문] — 각 관문은 위 RULE 본문이 판정 기준을 소유한다(여기 재서술하지 않는다).
+    - [ ] **승인** — Harold님 명시 동의(`workflow_4_1`. 프로토타입 예외면 그 조건 충족)
+    - [ ] **사실** — 추측 0(`no_guess_strict`) · 신규 컬럼·테이블·JOIN은 `information_schema` 확인 완료(`db_column_verify_before_code`) · 도메인 LESSONS 정독(`read_lessons_first`)
+    - [ ] **파급** — 전 소비처 영향표(`impact_analysis_before_modification`) · 동일 패턴 전수 grep(`full_pattern_grep_required`) · CT 재사용·인라인 0(`no_inline_duplication`, CT 수정이면 `workflow_7_1_control_tower`)
+    - [ ] **출고** — 사용자 노출(모델명 0 · native dialog 0 · AI 임의 혜택 0 · 1클릭 UX) · DB ALTER endpoint catch 분기(`db_alter_safety_net`) · 명령에 sudo·git·SSH·tp-deploy-full 없음(`no_system_modification`) · 답변 규율(`answer_format_strict`·`no_passing_buck`·`user_truth_acceptance`)
   </MANDATORY_CHECKLIST>
 
   <STANDARD_RESPONSES>
@@ -269,11 +268,8 @@
 
 ## 작업 시작 체크리스트
 
-1. CLAUDE.md + `status/STATUS.md` 정독 (상시 로드는 이 둘뿐 — CURRENT_TASK + 라우팅 표)
-2. 작업 도메인 식별 → 라우팅 표가 지시하는 문서의 **해당 범위만** 읽기 (도메인 LESSONS 포함, 매 답변 직전 LESSONS_META)
-3. 관련 버그는 `status/BUGS.md`, DB는 `status/SCHEMA.md` 대상 테이블 절
-4. 수정 대상 파일의 현재 코드를 먼저 read
-5. Harold님께 수정 방향 보고 → 컨펌 → 구현 (`packages/` 메인코드 직접 수정, worktree 금지)
+절차는 룰이 소유한다 — `doc_routing`(무엇을 읽나) → `read_lessons_first`(도메인 LESSONS) → `workflow_4_1`(보고→컨펌→구현).
+여기서만 더하는 것: **관련 버그 = `status/BUGS.md` · DB = `status/SCHEMA.md` 대상 테이블 절 · 수정은 `packages/` 메인코드 직접(worktree 금지).**
 
 ---
 

@@ -216,15 +216,5 @@
       "Bash(xargs -I{} grep -l \"Agent\\\\|발송 가능\\\\|CHAT_BUBBLE\\\\|TARGETING\" {})",
       "Bash(awk '/^router\\\\.\\(post|put|delete\\)\\\\\\(/{getline; print NR\": \"$0}' \"C:/Users/ceo/projects/targetup/packages/backend/src/routes/alimtalk.ts\")"
     ]
-  },
-  "skillOverrides": {
-    "design-taste-frontend": "off",
-    "design-taste-frontend-v1": "off",
-    "gpt-taste": "off",
-    "high-end-visual-design": "off",
-    "imagegen-frontend-web": "off",
-    "imagegen-frontend-mobile": "off",
-    "redesign-existing-projects": "off",
-    "stitch-design-taste": "off"
   }
 }

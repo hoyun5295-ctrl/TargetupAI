@@ -188,10 +188,10 @@
 
 ---
 
-## 디자인 최소 기준 — 신규 화면 착수 직전 정독 (CLAUDE.md `design_quality_minimum_journey_level` 상세)
+## 디자인 최소 기준 — 신규 화면 착수 직전 정독 (CLAUDE.md `design_quality_minimum_ceiling_free` 상세)
 
 > 룰(의무·절대금지·라벨 정책)의 원천은 CLAUDE.md다. 여기는 **그 화면을 만들 때 펼쳐 보는 체크리스트**만 담는다.
-> 기준 화면 = Journey Builder(`/ai-journeys`). 신규 메뉴·페이지·UI 신설·옛 페이지 전면 재작성은 이 목록을 만족해야 한다.
+> **이 목록은 하한(통과 기준)이지 상한이 아니다** — Journey Builder(`/ai-journeys`)는 참고 구현일 뿐 베낄 대상이 아니다. 더 나은 형태가 보이면 그것을 만들고, 그때부터 그것이 새 하한이다(CLAUDE.md `design_quality_minimum_ceiling_free`).
 
 | 요소 | 적용 범위 |
 |------|-----------|
@@ -209,7 +209,7 @@
 | ConfirmModal + useToast (native dialog 0건) | 모든 페이지 |
 | 모달 (`bg-slate-900` + `border-white/10` + `rounded-2xl` + `shadow-2xl`) | 모든 모달 |
 
-> 라벨 3단 정책·1클릭 UX 정합·절대금지 항목은 **CLAUDE.md가 소유**한다(`design_quality_minimum_journey_level` / `marketing_user_ux_priority`). 여기 복사하지 않는다.
+> 라벨 3단 정책·1클릭 UX 정합·절대금지 항목은 **CLAUDE.md가 소유**한다(`design_quality_minimum_ceiling_free` / `marketing_user_ux_priority`). 여기 복사하지 않는다.
 
 ---
 
