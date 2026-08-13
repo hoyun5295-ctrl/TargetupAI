@@ -2488,6 +2488,24 @@ cd /home/administrator/targetup-app/packages/backend && npm install web-push @ty
 | updated_at | timestamptz NOT NULL DEFAULT NOW() | |
 - 생성/소비 = utils/marketing-calendar-store.ts CT 단일 진입점 (routes/ai.ts generate 저장·GET 조회·POST /operator/continuous calendar_month 등록 기록).
 
+### event_campaign_drafts (행사 캠페인 3채널 초안 보관) — ★ 2026-08-13 information_schema 실측 등재(10컬럼)
+
+> 코드는 쓰는데 이 문서에 없던 표. 소비처 = `routes/event-campaigns.ts` 단일(드래프트 CRUD) + 화면 `EventCampaignModal`·`EventCampaignResumeBar`(재개 바 — `MarketingCalendarPage`·`QuickCampaignPage` 두 곳에 붙는다).
+> ⛔ **이 표에 다른 축의 초안을 얹지 않는다** — 재개 바가 목록을 그대로 읽어 라벨 없는 칩으로 띄우고 3채널 모달을 연다. 원스텝 인터뷰 세션이 별도 표로 간 이유(설계서 §6-1).
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK DEFAULT gen_random_uuid() | |
+| company_id | uuid NOT NULL | |
+| created_by | uuid NULL | |
+| title | varchar NOT NULL DEFAULT '' | |
+| event_text | text NOT NULL DEFAULT '' | 행사 원문(생성 입력) |
+| source_kind | varchar NOT NULL DEFAULT 'text' | 초안 출처 구분 축 |
+| channels | jsonb NOT NULL DEFAULT '{}' | 채널별 payload {dm,email,inapp} |
+| status | varchar NOT NULL DEFAULT 'active' | |
+| created_at | timestamptz NOT NULL DEFAULT NOW() | |
+| updated_at | timestamptz NOT NULL DEFAULT NOW() | |
+
 ### campaign_agency_requests (CRM 캠페인 대행 접수·제안서) — 2026-07-09 신규 + 웹 폼 전환 ALTER 2건 (전부 Harold 실행·information_schema 실측 2026-07-09)
 
 | 컬럼 | 타입 | 비고 |

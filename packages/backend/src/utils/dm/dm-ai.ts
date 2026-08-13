@@ -800,9 +800,26 @@ export async function oneShotGenerate(opts: {
   brandName?: string;
   companyId?: string; // ★ D227+ 종량제: 묶음 집계용 — 내부 parse/copy에 전파
   eventText?: string; // ★ 2026-07-08 행사 원문 — product_carousel 상품 구조 추출 근거(없으면 prompt로 폴백)
+  /**
+   * ★ 2026-08-13 원스텝 생성 — **사람이 고른 구성**. 오면 AI 구조 설계를 하지 않는다.
+   *
+   * 설계 근거(docs/2026-08-13-one-step-content-interview-design.md §0-2·§0-5):
+   * 카피는 원문·브리프 직투입으로 요약 병목이 걷혔지만 **구성 설계는 아직 spec 요약만 보고 있었다**
+   * (`designSectionLayout(spec)`). 사람이 후킹·긴급성·증거·큐레이션을 고르는 기능에서 그 경로가 살아 있으면
+   * 고른 값이 AI 재설계에 덮인다. 그래서 이 파라미터가 오면 **parsePrompt·designSectionLayout 둘 다 건너뛴다.**
+   * ⛔ 기존 두 호출부(routes/dm.ts · planner-production.ts)는 이 값을 넘기지 않으므로 동작이 바뀌지 않는다.
+   */
+  structure?: {
+    sectionTypes: SectionType[];
+    toneHint?: CampaignTone;
+    objective?: CampaignObjective;
+  };
 }): Promise<OneShotResult> {
   const prompt = (opts.prompt || '').trim();
-  if (!prompt && !opts.scenario) {
+  const structure = opts.structure && Array.isArray(opts.structure.sectionTypes) && opts.structure.sectionTypes.length > 0
+    ? opts.structure
+    : undefined;
+  if (!prompt && !opts.scenario && !structure) {
     throw new Error('prompt 또는 scenario 영역 필요');
   }
 
@@ -816,7 +833,19 @@ export async function oneShotGenerate(opts: {
   let spec: CampaignSpec;
   let scenarioMeta = opts.scenario ? SCENARIO_MAP[opts.scenario] : undefined;
 
-  if (prompt) {
+  if (structure) {
+    // ⛔ 사람이 고른 구성이 있으면 프롬프트 요약을 만들지 않는다 — 검증되지 않은 `spec.benefit`이
+    //   검증된 브리프 옆에 나란히 실리는 자리를 없앤다(원스텝 설계 §0-5).
+    spec = {
+      brand: { name: opts.brandName || '', tone: structure.toneHint || 'friendly' },
+      objective: structure.objective || 'sale',
+      target: {},
+      personalization: [],
+      tone: structure.toneHint || 'friendly',
+      industry: 'general',
+      recommended_sections: structure.sectionTypes,
+    };
+  } else if (prompt) {
     spec = await parsePrompt(prompt, opts.companyId);
   } else {
     // scenario 영역만 지정 시 = 옛 CampaignSpec 타입 정합 default spec
@@ -838,7 +867,11 @@ export async function oneShotGenerate(opts: {
 
   // 2. sections chain 결정 — 빠른 시작 시나리오는 고정, 자유 프롬프트는 AI 설계 + 안전 정규화(Phase 3).
   let sectionTypes: SectionType[];
-  if (scenarioMeta?.sections) {
+  if (structure) {
+    // ⛔ AI 구조 설계를 부르지 않는다 — 사람이 고른 구성을 AI가 다시 설계하면 그 답이 덮인다.
+    //   정규화는 그대로 태운다(header·footer 강제·maxCount 준수는 발송 가능성의 최소 조건이다).
+    sectionTypes = normalizeSectionChain(structure.sectionTypes, spec.objective);
+  } else if (scenarioMeta?.sections) {
     sectionTypes = scenarioMeta.sections;
   } else if (prompt) {
     const aiChain = await designSectionLayout(spec, opts.companyId);

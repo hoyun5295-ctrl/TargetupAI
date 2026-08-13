@@ -32,6 +32,8 @@ import balanceRoutes from './routes/balance';
 import agentChargeOrdersRoutes from './routes/agent-charge-orders';
 // ★ 2026-08-12 마케팅 플래너 Phase 1 (설계서 = docs/2026-08-12-ax-marketing-planner-design.md)
 import marketingPlannerRoutes from './routes/marketing-planner';
+// ★ 2026-08-13 원스텝 AI 컨텐츠 생성 (설계서 = docs/2026-08-13-one-step-content-interview-design.md)
+import contentInterviewRoutes from './routes/content-interview';
 // ★ D184 (2026-05-20): 이니시스 표준결제 라우트 (레거시 invitobiz.com → 한줄로 이전)
 import paymentsRoutes from './routes/payments';
 import testContactsRoutes from './routes/test-contacts';
@@ -339,6 +341,8 @@ app.use('/api/balance', balanceRoutes);
 app.use('/api/agent-charge-orders', agentChargeOrdersRoutes);
 // ★ 2026-08-12 마케팅 플래너 Phase 1 — CRUD·가용성만(승인·차감·발송 없음). 테이블 미생성 시 503 DB_MIGRATION_PENDING
 app.use('/api/marketing-planner', marketingPlannerRoutes);
+// ★ 2026-08-13 원스텝 AI 컨텐츠 생성(인터뷰형) — 세션·견적·생성 확정. 테이블 미생성 시 503 DB_MIGRATION_PENDING
+app.use('/api/one-step', contentInterviewRoutes);
 // ★ D184: 이니시스 표준결제 (prepare/return/close/list/detail)
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/admin/billing', billingRoutes);
