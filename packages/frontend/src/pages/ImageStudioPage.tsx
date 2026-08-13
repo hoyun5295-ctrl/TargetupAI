@@ -494,58 +494,21 @@ export default function ImageStudioPage() {
           <section className="grid grid-cols-1 lg:grid-cols-5 gap-5">
             {/* 좌: 라이브 예시 프리뷰 + 상품 */}
             <div className="lg:col-span-2 space-y-4">
-              {/* ★ 2026-08-13 (Harold 지시) 예시를 실물 크기로 — 썸네일+캡션으로는 "문구·상품만 바뀐다"는
-                  판매점이 안 보인다. 예시 위에 문구 오버레이(우측 입력값 실시간 반영)와 제품 누끼 슬롯을 얹어
-                  무엇이 바뀌는지를 문장이 아니라 눈으로 보여준다.
-                  ⛔ 오버레이는 실입력값·실계약만 그린다(고정 목업 = 거짓 표시 금지) — 행사형 위치 밴드는
-                  textPosition(생성 계약값)을 그대로 따르고, 제품형은 위치를 약속하지 않는 문구를 쓴다. */}
+              {/* ★ 2026-08-13 (Harold 지시 2차 확정) 예시는 크게, 이미지는 깨끗하게 — 오버레이·슬롯은 예시의
+                  실제 타이포를 가리고 위치도 실물과 어긋나서 접었다. "문구가 바뀐다·누끼 자동" 안내는
+                  우측 문구 입력칸 위 Tip 한 덩어리가 담당한다. */}
               <div className="rounded-2xl border border-white/10 bg-white/5 overflow-hidden">
-                <div className="relative">
-                  {template.exampleUrl ? (
-                    <img src={template.exampleUrl} alt={`${template.name} 예시`} className="w-full aspect-[3/4] object-cover" />
-                  ) : (
-                    <div className="w-full aspect-[3/4]" style={{ background: `linear-gradient(160deg, ${template.accent}cc, ${template.accent}55 60%, #0f172a)` }} />
-                  )}
-                  {/* 문구 라이브 오버레이 — 우측 입력칸 ①②③과 1:1. 입력 전 = 템플릿 기본 문구(회색), 입력하면 즉시 교체 */}
-                  <div className={`absolute inset-x-3 flex ${
-                    (template.kind || 'product') === 'event'
-                      ? textPosition === 'center' ? 'top-1/2 -translate-y-1/2' : textPosition === 'bottom' ? 'bottom-3' : 'top-3'
-                      : 'top-3'
-                  }`}>
-                    <div className="w-full rounded-xl bg-slate-950/60 backdrop-blur-[2px] border border-fuchsia-400/25 px-3.5 py-3 space-y-1.5">
-                      {([
-                        ['1', texts.label, template.defaultTexts?.label, 'text-[10px] tracking-[0.2em] font-semibold'],
-                        ['2', texts.title, template.defaultTexts?.title || template.sample?.title, 'text-lg leading-tight font-extrabold'],
-                        ['3', texts.subtitle, template.defaultTexts?.subtitle || template.sample?.subtitle, 'text-[11px]'],
-                      ] as const).map(([no, typed, fallback, cls]) => (
-                        <div key={no} className="flex items-start gap-2">
-                          <span className="mt-0.5 w-4 h-4 shrink-0 rounded-full bg-fuchsia-500/90 text-white text-[9px] font-bold flex items-center justify-center">{no}</span>
-                          <span className={`min-w-0 break-keep ${cls} ${typed ? 'text-white' : 'text-white/40'}`}>
-                            {typed || fallback || '오른쪽 칸에 입력하면 이 줄이 바뀝니다'}
-                          </span>
-                        </div>
-                      ))}
+                {template.exampleUrl ? (
+                  <img src={template.exampleUrl} alt={`${template.name} 예시`} className="w-full aspect-[3/4] object-cover" />
+                ) : (
+                  <div className="w-full aspect-[3/4] relative flex flex-col items-center justify-end p-4" style={{ background: `linear-gradient(160deg, ${template.accent}cc, ${template.accent}55 60%, #0f172a)` }}>
+                    <div className="absolute top-6 left-0 right-0 text-center px-4">
+                      <div className="text-lg font-bold text-white leading-tight">{template.sample?.title || template.name}</div>
+                      {template.sample?.subtitle && <div className="text-xs text-white/70 mt-1">{template.sample.subtitle}</div>}
                     </div>
+                    {(template.kind || 'product') === 'product' && <div className="w-16 h-24 rounded bg-white/15 border border-white/25 mb-6" />}
                   </div>
-                  {/* 제품 누끼 슬롯 — 제품 포스터형만. "자동으로 배경이 제거되어 들어간다"를 자리로 보여준다 */}
-                  {(template.kind || 'product') === 'product' && (
-                    <div className="absolute bottom-3 left-1/2 -translate-x-1/2 w-28">
-                      <div className={`aspect-square rounded-xl backdrop-blur-[1px] flex flex-col items-center justify-center gap-1 px-2 ${
-                        cutoutBlob ? 'border-2 border-emerald-400/60 bg-slate-950/35' : 'border-2 border-dashed border-white/45 bg-slate-950/45'
-                      }`}>
-                        {cutoutBlob ? (
-                          <img src={cutoutBlob} alt="누끼 상품" className="w-full h-full object-contain p-1" />
-                        ) : (
-                          <>
-                            <ShoppingBag className="w-4 h-4 text-white/60" />
-                            <span className="text-[9px] leading-tight text-white/60 text-center">내 상품이 여기에<br />배경은 자동 제거</span>
-                          </>
-                        )}
-                      </div>
-                      {cutoutBlob && <div className="mt-1 text-center text-[9px] text-emerald-300/90 font-semibold">배경 제거 완료</div>}
-                    </div>
-                  )}
-                </div>
+                )}
                 <div className="p-3">
                   <div className="flex items-baseline gap-2 min-w-0">
                     <div className="text-sm font-bold truncate">{template.name}</div>
@@ -558,9 +521,7 @@ export default function ImageStudioPage() {
                     </div>
                   )}
                   <p className="mt-2 text-[10px] text-white/30 italic">
-                    {(template.kind || 'product') === 'event'
-                      ? '배경·분위기는 이 예시 그대로, 문구가 선택한 위치에 새겨집니다 — 서체·장식은 AI가 완성해요.'
-                      : '배경·분위기는 이 예시 그대로, 문구와 상품만 내 것으로 바뀝니다 — 배치·서체는 템플릿 구도를 따라요.'}
+                    {template.exampleUrl ? '갤러리에서 보신 예시 그대로입니다 — 문구와 상품만 바뀝니다.' : '예시 이미지 준비 중 — 카드 스타일로 표시됩니다.'}
                   </p>
                 </div>
               </div>
@@ -601,20 +562,17 @@ export default function ImageStudioPage() {
             <div className="lg:col-span-3 space-y-4">
               <div className="rounded-2xl border border-fuchsia-400/20 bg-gradient-to-br from-fuchsia-500/10 to-indigo-500/5 p-4 space-y-2.5">
                 <h3 className="text-sm font-bold flex items-center gap-2"><PenLine className="w-4 h-4 text-fuchsia-300" /> 포스터에 들어갈 문구</h3>
-                <p className="text-[11px] text-white/45 -mt-1">번호가 예시 이미지의 같은 번호 자리와 연결돼 있어요 — 입력하는 대로 바뀝니다.</p>
-                {/* ①②③ = 좌측 프리뷰 오버레이의 줄 번호와 1:1 (라벨·헤드라인·부제) */}
-                <div className="relative">
-                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-fuchsia-500/90 text-white text-[9px] font-bold flex items-center justify-center">1</span>
-                  <input value={texts.label} onChange={(e) => setTexts({ ...texts, label: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '작은 라벨 (예: MEMBERSHIP DAY)' : '작은 라벨 (예: ONLINE EXCLUSIVE)'} className="w-full pl-9 pr-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
+                {/* ★ 2026-08-13 Tip — "예시 문구가 내 입력으로 바뀐다·상품은 누끼 자동"을 입력칸 바로 위에서 말한다(Harold 확정) */}
+                <div className="rounded-xl bg-fuchsia-500/10 border border-fuchsia-400/25 px-3 py-2.5 flex items-start gap-2">
+                  <Sparkles className="w-3.5 h-3.5 text-fuchsia-300 shrink-0 mt-0.5" />
+                  <p className="text-[11px] leading-relaxed text-fuchsia-100/85">
+                    <b>예시 속 문구 자리에 아래 입력값이 그대로 새겨집니다.</b> 배경·분위기는 예시 그대로예요.
+                    {(template.kind || 'product') === 'product' && <> 상품 사진은 <b>배경이 자동으로 제거</b>되어 장면에 자연스럽게 들어갑니다.</>}
+                  </p>
                 </div>
-                <div className="relative">
-                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-fuchsia-500/90 text-white text-[9px] font-bold flex items-center justify-center">2</span>
-                  <input value={texts.title} onChange={(e) => setTexts({ ...texts, title: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '행사명 (예: 멤버십 데이)' : '헤드라인 (예: 제품명 30% 할인 · 2+1 이벤트)'} className="w-full pl-9 pr-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-sm font-semibold text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
-                </div>
-                <div className="relative">
-                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-fuchsia-500/90 text-white text-[9px] font-bold flex items-center justify-center">3</span>
-                  <input value={texts.subtitle} onChange={(e) => setTexts({ ...texts, subtitle: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '안내 문구 (예: 행사 기간·안내를 적어주세요)' : '부제 (예: 한정 수량 특별 혜택)'} className="w-full pl-9 pr-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
-                </div>
+                <input value={texts.label} onChange={(e) => setTexts({ ...texts, label: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '작은 라벨 (예: MEMBERSHIP DAY)' : '작은 라벨 (예: ONLINE EXCLUSIVE)'} className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
+                <input value={texts.title} onChange={(e) => setTexts({ ...texts, title: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '행사명 (예: 멤버십 데이)' : '헤드라인 (예: 제품명 30% 할인 · 2+1 이벤트)'} className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-sm font-semibold text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
+                <input value={texts.subtitle} onChange={(e) => setTexts({ ...texts, subtitle: e.target.value })} placeholder={(template.kind || 'product') === 'event' ? '안내 문구 (예: 행사 기간·안내를 적어주세요)' : '부제 (예: 한정 수량 특별 혜택)'} className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50" />
                 {(template.kind || 'product') === 'event' && (
                   <div className="flex flex-wrap items-center gap-2 pt-1">
                     <span className="text-[11px] text-white/45">문구 위치</span>
