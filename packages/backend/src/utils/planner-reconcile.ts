@@ -11,6 +11,10 @@
  *   ③ **취소됐는데 실행 잔존** — 취소된 달에 발송·제작 참조가 남아 있으면 **사람에게 알린다**(자동 되돌림 금지).
  *   ④ **참여 클릭 미수집** — 이메일 참여 버튼 클릭을 참여 이벤트로 투영(누락 보충).
  *
+ * 그리고 **패스 셋을 구동한다** — 소재 제작 그물 · 알림톡 검수 대행 · 결과 브리핑 통지.
+ *   별도 타이머를 만들지 않는다(어느 주기가 그 일을 하는지 흐려진다). 승인 직후 호출이 끊긴 건은
+ *   전부 이 패스가 다시 집는다 — **호출부가 하나뿐인 패스는 그물이 없는 것과 같다.**
+ *
  * ⛔ best-effort 경보 원칙 — 행 단위 정확 1회 보장을 쌓지 않는다(LESSONS 0731).
  *    같은 사실을 매 주기 다시 알리지 않으려고 exec_meta에 통지 표식만 남긴다.
  */
@@ -28,6 +32,7 @@ import { classifyExecutionWindow, kstDateString } from './planner-execution';
 import { ingestJoinClicksForCampaign } from './planner-participation';
 import { runPlannerResultNotifyPass } from './planner-report';
 import { runPlannerAlimtalkPass } from './planner-alimtalk';
+import { runPlannerProductionPass } from './planner-production';
 
 /** 지난 달까지 되돌아본다 — 그 이전은 브리핑·정산이 이미 닫힌 구간이다. */
 function reconcileMonthFrom(now: Date): string {
@@ -181,6 +186,13 @@ async function reconcilePass(): Promise<{ missed: number; recovered: number; lef
   const joins = await sweepJoinClicks(monthFrom).catch((e: any) => {
     console.error('[planner-reconcile] 참여 수집 실패:', e?.message || e); return 0;
   });
+  // ⛔ **소재 제작 그물** (★ 2026-08-13 정정 — 선언만 있고 실체가 없던 자리).
+  //   승인 직후 제작은 라우트의 best-effort 한 번뿐이라, 그 호출이 일시 실패로 planned에 되돌아오거나
+  //   그 사이 프로세스가 재기동되면 소재가 **예정일 당일에야** 만들어지고 그날 실패하면 그 행사는 못 나간다.
+  //   ⛔ 반드시 closeMissed **뒤**에 둔다 — 예정일이 지난 터치포인트를 먼저 닫아야
+  //   지나간 계획의 소재를 제작해 크레딧이 나가지 않는다.
+  await runPlannerProductionPass().catch((e: any) =>
+    console.error('[planner-reconcile] 소재 제작 그물 실패:', e?.message || e));
   // ⛔ 알림톡 검수 대행도 여기서 돈다 — 별도 타이머를 두지 않는다(검수는 하루 단위 절차라 시간당 1회로 충분하고,
   //   타이머가 늘면 "어느 주기가 그 일을 하는지"가 흐려진다). 상태 추적의 원천은 30분 동기화 워커다.
   await runPlannerAlimtalkPass().catch((e: any) =>
@@ -195,12 +207,25 @@ async function reconcilePass(): Promise<{ missed: number; recovered: number; lef
 }
 
 let reconcileTimer: NodeJS.Timeout | null = null;
+let reconcileBoot: NodeJS.Timeout | null = null;
 
+/**
+ * 대조 스케줄러 — 부팅 후 2분에 첫 실행, 이후 1시간 주기.
+ * ⛔ 첫 실행이 없으면 재기동할 때마다 **한 시간 동안** 놓친 실행·고아·제작 그물이 전부 멈춘다
+ *   (배포가 잦은 날 그 공백이 곧 미발송이다). 지연을 두는 이유는 startup 안정화 —
+ *   실행 워커(1분)보다 늦게 두어 부팅 직후 DB·외부 호출이 한꺼번에 몰리지 않게 한다.
+ */
 export function startPlannerReconcileWorker(): void {
-  if (reconcileTimer) return;
+  if (reconcileTimer || reconcileBoot) return;
   const INTERVAL_MS = 60 * 60 * 1000;
-  reconcileTimer = setInterval(() => {
+  const BOOT_DELAY_MS = 2 * 60 * 1000;
+  const tick = () => {
     void runPlannerReconcilePass().catch((e: any) => console.error('[planner-reconcile] 주기 실행 실패:', e?.message || e));
-  }, INTERVAL_MS);
-  console.log('[planner-reconcile] 마케팅 플래너 대조 워커 시작 (1시간 주기)');
+  };
+  reconcileBoot = setTimeout(() => {
+    reconcileBoot = null;
+    tick();
+    reconcileTimer = setInterval(tick, INTERVAL_MS);
+  }, BOOT_DELAY_MS);
+  console.log('[planner-reconcile] 마케팅 플래너 대조 워커 시작 (부팅 2분 뒤 첫 실행 · 이후 1시간 주기)');
 }

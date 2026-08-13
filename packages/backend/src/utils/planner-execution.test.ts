@@ -379,4 +379,51 @@ describe('워커 등재 — 선언이 아니라 부팅 호출이 가동의 근�
     expect(src).toContain("sendChannel: 'alimtalk'");
     expect(src).not.toMatch(/msgType:\s*'KAKAO'/);
   });
+
+  it('소재 제작 그물이 실재한다 — 호출부가 승인 라우트 하나뿐이면 그물이 아니다', () => {
+    const rec = readFileSync(path.join(__dirname, 'planner-reconcile.ts'), 'utf8');
+    expect(rec).toContain('runPlannerProductionPass()');
+    // ⛔ 놓친 실행 정리 뒤여야 한다 — 예정일이 지난 계획의 소재를 제작해 크레딧이 나가면 안 된다
+    const missedIdx = rec.indexOf('const missed = await closeMissed(');
+    const produceIdx = rec.indexOf('await runPlannerProductionPass()');
+    expect(missedIdx).toBeGreaterThan(0);
+    expect(missedIdx).toBeLessThan(produceIdx);
+  });
+
+  it('재개는 상태 복원이다 — locked도 되살리고, 효과가 없으면 성공으로 답하지 않는다', () => {
+    const src = readFileSync(path.join(__dirname, 'planner-production.ts'), 'utf8');
+    const fn = src.slice(src.indexOf('export async function resumeHeldTouchpoint'));
+    expect(fn).toContain("const RESUMABLE_FROM = ['hold_credit', 'locked']");
+    // 전이 결과를 버리는 자리가 없다 — 효과(RETURNING)로만 성공을 판정한다(6원칙 ②)
+    const calls = fn.match(/(\w+\s*=\s*)?await setTouchpointState\(\{/g) || [];
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.every((c) => c.includes('='))).toBe(true);
+    // 비소재 채널(문자·알림톡)을 제작 경로에 넣지 않는다 — 인앱 분기로 떨어져 엉뚱한 소재가 생기던 자리
+    expect(fn).toContain('if (!isMaterialChannel(tp.channel))');
+    // 라우트는 효과 없음을 200으로 답하지 않는다
+    const route = readFileSync(path.join(__dirname, '../routes/marketing-planner.ts'), 'utf8');
+    expect(route).toContain("code: 'NOT_RESUMABLE'");
+    expect(route).toContain("code: 'STILL_LOCKED'");
+  });
+
+  it('참여 토큰 서명 키에 기본값 폴백이 없다 — 코드에 적힌 문자열이 도장이면 위조가 성립한다', () => {
+    const src = readFileSync(path.join(__dirname, 'planner-participation.ts'), 'utf8');
+    expect(src).not.toContain('planner_join_default_secret');
+    expect(src).toContain('function requireTokenSecret()');
+    // 착지 검증은 던지지 않고 무효로 답한다 — 고객이 브라우저로 도착하는 자리다
+    const verify = src.slice(src.indexOf('export function verifyJoinToken'));
+    expect(verify).toContain('secret = requireTokenSecret();');
+    expect(verify).toContain('return null;');
+  });
+
+  it('두 워커가 부팅 직후 한 번 돈다 — 재기동 공백이 곧 미발송이다', () => {
+    for (const file of ['planner-executor.ts', 'planner-reconcile.ts']) {
+      const src = readFileSync(path.join(__dirname, file), 'utf8');
+      const fn = src.slice(src.indexOf('export function startPlanner'));
+      const bootIdx = fn.indexOf('setTimeout(');
+      const intervalIdx = fn.indexOf('setInterval(');
+      expect(bootIdx).toBeGreaterThan(0);
+      expect(bootIdx).toBeLessThan(intervalIdx);
+    }
+  });
 });

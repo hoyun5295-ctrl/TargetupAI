@@ -27,7 +27,21 @@ export const PLANNER_JOIN_EVENT = 'custom_planner_join';
  */
 export const PLANNER_JOIN_SOURCE = 'planner';
 
-const TOKEN_SECRET = process.env.PLANNER_JOIN_TOKEN_SECRET || process.env.JOURNEY_PAUSE_TOKEN_SECRET || 'planner_join_default_secret';
+/**
+ * 참여 토큰 서명 키 (★ 2026-08-13(2) 정정 — 기본값 폴백 제거).
+ * ⛔ **코드에 적힌 기본 문자열로 서명하지 않는다.** 그 문자열을 아는 사람은 다른 회사·다른 행사의 참여 토큰을
+ *   직접 만들 수 있고, 참여자 명단이 오염되면 참여자 대상 알림톡·문자가 엉뚱한 사람에게 나간다.
+ *   키가 없으면 링크를 만들지 않고 제작 단계에서 사유와 함께 잠근다(기능 문서 §3-5 — 재료가 없으면 정직하게 잠근다).
+ * ⛔ 설정 이름은 서버 로그에만 남긴다 — 담당자 화면 문구에 내부 설정 이름을 쓰지 않는다.
+ */
+function requireTokenSecret(): string {
+  const secret = String(process.env.PLANNER_JOIN_TOKEN_SECRET || process.env.JOURNEY_PAUSE_TOKEN_SECRET || '').trim();
+  if (!secret) {
+    console.error('[planner-participation] PLANNER_JOIN_TOKEN_SECRET 미설정 — 참여 링크를 만들지 않는다');
+    throw new Error('참여 링크 설정이 완료되지 않았습니다 — 관리자 확인이 필요합니다.');
+  }
+  return secret;
+}
 
 export interface JoinTokenPayload {
   c: string;   // companyId
@@ -39,7 +53,7 @@ export interface JoinTokenPayload {
 export function buildJoinToken(companyId: string, eventId: string, expiresAt: Date): string {
   const payload: JoinTokenPayload = { c: companyId, e: eventId, exp: expiresAt.getTime() };
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const sig = crypto.createHmac('sha256', TOKEN_SECRET).update(body).digest('base64url');
+  const sig = crypto.createHmac('sha256', requireTokenSecret()).update(body).digest('base64url');
   return `${body}.${sig}`;
 }
 
@@ -47,7 +61,15 @@ export function verifyJoinToken(token: string): JoinTokenPayload | null {
   const parts = String(token || '').split('.');
   if (parts.length !== 2) return null;
   const [body, sig] = parts;
-  const expected = crypto.createHmac('sha256', TOKEN_SECRET).update(body).digest('base64url');
+  // ⛔ 키가 없으면 던지지 않고 무효로 답한다 — 착지 라우트는 고객이 브라우저로 도착하는 자리라
+  //   500이 아니라 안내 화면이 맞다(검증 실패와 같은 취급).
+  let secret: string;
+  try {
+    secret = requireTokenSecret();
+  } catch {
+    return null;
+  }
+  const expected = crypto.createHmac('sha256', secret).update(body).digest('base64url');
   if (sig !== expected) return null;
   try {
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as JoinTokenPayload;

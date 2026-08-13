@@ -38,13 +38,17 @@ import {
   PLANNER_MATERIAL_CHANNELS,
   buildPlannerEventText,
   insertParticipationSection,
+  isMaterialChannel,
   kstMonthString,
   plannerProduceGenKey,
 } from './planner-execution';
 import { buildJoinToken, buildJoinUrl, joinTokenExpiry } from './planner-participation';
 
-/** 제작 결과 — 상태와 통지 문구를 호출부가 판단할 수 있게 사유를 함께 돌려준다. */
-export type ProduceOutcome = 'ready' | 'hold_credit' | 'locked' | 'retry' | 'already';
+/**
+ * 제작 결과 — 상태와 통지 문구를 호출부가 판단할 수 있게 사유를 함께 돌려준다.
+ * `unresumable` = 재개가 아무 효과도 내지 못했다(전이 0행·되살릴 수 없는 단계). **성공으로 답하지 않기 위한 값**이다.
+ */
+export type ProduceOutcome = 'ready' | 'hold_credit' | 'locked' | 'retry' | 'already' | 'unresumable';
 
 interface ProducedAsset {
   assetRef: string;
@@ -345,17 +349,49 @@ export async function runPlannerProductionPass(opts?: { companyId?: string; limi
   return { produced, held, locked };
 }
 
-/** 보류(크레딧) 재개 — 화면 [재개] 1클릭. 같은 멱등키라 이미 낸 돈이 다시 빠지지 않는다. */
+/**
+ * 보류 재개 — 화면 [다시 시작] 1클릭. 같은 멱등키라 이미 낸 돈이 다시 빠지지 않는다.
+ *
+ * ★ 2026-08-13(2) 정정 — 결함 둘이 한 뿌리였다: **재개를 제작 경로 재진입으로 만든 것.**
+ *   ① 전이 대상이 `hold_credit`뿐이라 `locked`(080 미등록·스팸 미통과·발송 접수 실패·고아 회수)는
+ *      한 줄도 움직이지 않는데 **반환값을 보지 않아 성공을 돌려줬다** — 화면은 "다시 시작했습니다"를 띄우고
+ *      행은 잠긴 채 남는다(6원칙 ② 위반).
+ *   ② 채널을 보지 않고 `produceTouchpoint`를 불러, 소재 채널이 아닌 문자·알림톡이 **인앱 제작 분기로** 떨어졌다.
+ *      엉뚱한 인앱 메시지가 생기고 그 `asset_ref`가 취소 환불 판정에서 "제작 있음"이 되어 환불까지 막는다.
+ *
+ * 그래서 재개는 **상태 복원**이다 — 전이 효과(RETURNING)로만 성공을 판정하고, 제작은 소재 채널에만 태운다.
+ */
 export async function resumeHeldTouchpoint(tp: PlannerTouchpointRow): Promise<ProduceOutcome> {
-  if (!tp.assetRef) {
-    // 제작 전에 멈춴 건 — planned로 되돌려 제작 경로를 다시 탄다.
-    await setTouchpointState({ companyId: tp.companyId, touchpointId: tp.id, status: 'planned', fromStatuses: ['hold_credit'], lockReason: null });
-    return produceTouchpoint({ ...tp, status: 'planned' });
+  const RESUMABLE_FROM = ['hold_credit', 'locked'];
+
+  // ⛔ 알림톡 2회 반려(검수 상한)는 되살릴 수 없다 — 상태만 돌려놓으면 검수 패스도 실행 패스도 집지 않아
+  //   또 조용한 무효과가 된다. 되살릴 수 없다고 답하고 화면의 사유를 읽게 한다.
+  if (tp.channel === 'alimtalk' && String(tp.execMeta?.alimtalk_stage || '') === 'blocked') return 'unresumable';
+
+  // 문자·알림톡 — 실행 축이 예정일에 다시 집도록 planned로만 되돌린다(제작 경로에 넣지 않는다).
+  if (!isMaterialChannel(tp.channel)) {
+    const ok = await setTouchpointState({
+      companyId: tp.companyId, touchpointId: tp.id, status: 'planned', fromStatuses: RESUMABLE_FROM, lockReason: null,
+    });
+    return ok ? 'retry' : 'unresumable';
   }
-  const paid = await settleProductionCharges(tp, tp.createdBy, tp.assetRef);
-  if (!paid) return 'hold_credit';
-  await setTouchpointState({ companyId: tp.companyId, touchpointId: tp.id, status: 'ready', fromStatuses: ['hold_credit'], lockReason: null });
-  return 'ready';
+
+  // 소재가 이미 있으면 미결 제작비만 정산하고 실행 대기로 올린다(같은 멱등키 = 재차감 0).
+  if (tp.assetRef) {
+    const paid = await settleProductionCharges(tp, tp.createdBy, tp.assetRef);
+    if (!paid) return 'hold_credit';
+    const ok = await setTouchpointState({
+      companyId: tp.companyId, touchpointId: tp.id, status: 'ready', fromStatuses: RESUMABLE_FROM, lockReason: null,
+    });
+    return ok ? 'ready' : 'unresumable';
+  }
+
+  // 제작 전에 멈춘 건 — planned로 되돌린 뒤 제작 경로를 다시 탄다(선점은 그 안에서 잠금·CAS로).
+  const restored = await setTouchpointState({
+    companyId: tp.companyId, touchpointId: tp.id, status: 'planned', fromStatuses: RESUMABLE_FROM, lockReason: null,
+  });
+  if (!restored) return 'unresumable';
+  return produceTouchpoint({ ...tp, status: 'planned' });
 }
 
 // 그 달 제작·실행 실적(취소 환불 자격의 근거)은 원장 접근 CT가 소유한다 — `planner-touchpoint.countMonthWork`.

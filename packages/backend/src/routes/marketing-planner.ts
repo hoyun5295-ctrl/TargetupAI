@@ -37,8 +37,12 @@ import {
 import { runPlannerProductionPass, resumeHeldTouchpoint } from '../utils/planner-production';
 import { runPlannerAlimtalkPass } from '../utils/planner-alimtalk';
 import { loadTouchpointById } from '../utils/planner-touchpoint';
+// 대상 축 판정은 실행부와 같은 순수 CT를 쓴다 — 화면에 보여주는 축과 나가는 축이 갈리지 않게.
+import { resolveAudienceMode } from '../utils/planner-execution';
 import { loadMonthlyResult } from '../utils/planner-report';
 import { renderJoinLandingHtml, verifyJoinToken } from '../utils/planner-participation';
+// ★ 2026-08-13(2) 캘린더 공휴일 — 표 CT 하나가 진실이다.
+import { getMonthHolidays } from '../utils/kr-holidays';
 
 const router = Router();
 
@@ -201,7 +205,13 @@ router.get('/events', async (req: Request, res: Response) => {
     } catch (e: any) {
       if (e?.code !== '42P01') console.warn('[marketing-planner] 승인 원장 조회 경고:', e?.message || e);
     }
-    return res.json({ month: planMonth, events, approval });
+    // ★ 2026-08-13(2) 공휴일 — 표의 진실은 `utils/kr-holidays.ts` 하나다(화면에 같은 표를 복사하지 않는다).
+    //   표가 없는 해는 빈 배열이 아니라 `holidaysReady=false`로 알린다 — 화면이 "준비 중"이라 말한다.
+    const holidayInfo = getMonthHolidays(planMonth);
+    return res.json({
+      month: planMonth, events, approval,
+      holidays: holidayInfo.holidays, holidaysReady: holidayInfo.ready,
+    });
   } catch (error: any) {
     if (handleDbMigrationError(error, res, 'planner_events')) return;
     console.error('플래너 행사 조회 실패:', error);
@@ -442,6 +452,113 @@ router.get('/brief/:month/result', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /api/marketing-planner/touchpoints/:id/detail — 도래한 터치포인트의 **실제 실행 내역** (★ 2026-08-13(2))
+ *
+ * 화면은 도래 전 계획을 이미 갖고 있어 부르지 않는다 — 여기서 돌려주는 것은 **실측뿐**이다:
+ * 실제로 나간 문안, 발송 수, 발행된 소재. 목업·추정을 섞지 않는다(없으면 null).
+ * ⛔ 모든 조회에 회사 조건을 직접 건다(참조 uuid 하나로 남의 회사 소재를 열지 않는다).
+ * ⛔ 컬럼은 2026-08-13(2) information_schema 실측분만 쓴다(campaigns·email_campaigns·cdp_inapp_messages·kakao_templates 20컬럼).
+ */
+router.get('/touchpoints/:id/detail', async (req: Request, res: Response) => {
+  const companyId = requireCompany(req, res);
+  if (!companyId) return;
+  try {
+    const tp = await loadTouchpointById(companyId, String(req.params.id));
+    if (!tp) return res.status(404).json({ error: '해당 항목을 찾을 수 없습니다.' });
+
+    let message: { subject: string | null; body: string } | null = null;
+    let asset: Record<string, any> | null = null;
+    let sentAt: string | null = tp.execMeta?.sent_at || null;
+    let sentCount: number | null = Number.isFinite(Number(tp.execMeta?.sent_count)) ? Number(tp.execMeta.sent_count) : null;
+    let audienceNote: string | null = null;
+
+    // 문자·DM·알림톡 = 공용 발송 표에 실린다(채널 축은 send_channel이라 message_type으로 가르지 않는다).
+    if (tp.execRef && tp.channel !== 'email' && tp.channel !== 'inapp') {
+      const c = await query(
+        `SELECT message_content, message_subject, sent_count, success_count, sent_at, target_count, status
+           FROM campaigns WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [tp.execRef, companyId],
+      );
+      const row = c.rows[0];
+      if (row) {
+        if (row.message_content) message = { subject: row.message_subject || null, body: String(row.message_content) };
+        sentAt = row.sent_at || sentAt;
+        if (Number.isFinite(Number(row.sent_count))) sentCount = Number(row.sent_count);
+        if (Number.isFinite(Number(row.success_count))) {
+          audienceNote = `접수 ${Number(row.target_count || row.sent_count || 0).toLocaleString()}명 · 성공 ${Number(row.success_count).toLocaleString()}명`;
+        }
+      }
+    }
+
+    const assetRef = tp.assetRef || null;
+    if (tp.channel === 'email') {
+      const id = assetRef || tp.execMeta?.email_campaign_id || null;
+      if (id) {
+        const e = await query(
+          `SELECT subject, html_body, sent_count, sent_at, status
+             FROM email_campaigns WHERE id = $1::uuid AND company_id = $2::uuid`,
+          [id, companyId],
+        );
+        const row = e.rows[0];
+        if (row) {
+          asset = { kind: 'email', title: row.subject, html: row.html_body };
+          sentAt = row.sent_at || sentAt;
+          if (Number.isFinite(Number(row.sent_count))) sentCount = Number(row.sent_count);
+        }
+      }
+    } else if (tp.channel === 'dm') {
+      const url = tp.execMeta?.dm_url ? String(tp.execMeta.dm_url) : null;
+      if (url) asset = { kind: 'dm', url };
+    } else if (tp.channel === 'inapp') {
+      const id = assetRef || tp.execMeta?.inapp_message_id || null;
+      if (id) {
+        const m = await query(
+          `SELECT title, body, image_url, status, start_at, end_at
+             FROM cdp_inapp_messages WHERE id = $1::uuid AND company_id = $2::uuid`,
+          [id, companyId],
+        );
+        const row = m.rows[0];
+        if (row) {
+          asset = { kind: 'inapp', title: row.title, body: row.body, imageUrl: row.image_url };
+          if (row.status === 'active' && row.end_at) audienceNote = `행사 종료일까지 노출됩니다`;
+        }
+      }
+    } else if (tp.channel === 'alimtalk') {
+      const rowId = tp.execMeta?.alimtalk_template_row ? String(tp.execMeta.alimtalk_template_row) : null;
+      if (rowId) {
+        const t = await query(
+          `SELECT content, status FROM kakao_templates WHERE id = $1::uuid AND company_id = $2::uuid`,
+          [rowId, companyId],
+        );
+        const row = t.rows[0];
+        if (row) {
+          asset = { kind: 'alimtalk', body: row.content, inspection: String(row.status).toUpperCase() === 'APPROVED' ? '승인' : '검수 중' };
+        }
+      }
+    }
+
+    return res.json({
+      status: tp.status,
+      scheduledOn: tp.scheduledOn,
+      channel: tp.channel,
+      label: tp.channelLabel,
+      audience: resolveAudienceMode(tp.channel, tp.timing),
+      audienceCount: null,
+      audienceNote,
+      // 보류 사유는 목록 조회(`/events`)가 이미 주고 화면이 그 값을 쓴다 — 같은 사실을 두 응답으로 내보내지 않는다.
+      sentAt,
+      sentCount,
+      message,
+      asset,
+    });
+  } catch (error: any) {
+    if (handleDbMigrationError(error, res, 'planner_touchpoints')) return;
+    console.error('플래너 터치포인트 상세 조회 실패:', error);
+    return res.status(500).json({ error: '상세 조회 실패' });
+  }
+});
+
 // POST /api/marketing-planner/touchpoints/:id/resume — 보류(크레딧) 재개 1클릭
 //   같은 멱등키라 이미 낸 제작비가 다시 빠지지 않는다. 발송 자체는 예정일에 실행 워커가 한다.
 router.post('/touchpoints/:id/resume', async (req: Request, res: Response) => {
@@ -456,6 +573,14 @@ router.post('/touchpoints/:id/resume', async (req: Request, res: Response) => {
     const outcome = await resumeHeldTouchpoint(tp);
     if (outcome === 'hold_credit') {
       return res.status(402).json({ error: '크레딧이 아직 부족합니다. 충전 후 다시 시도해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    }
+    // ⛔ 효과가 없었으면 성공으로 답하지 않는다(★ 2026-08-13(2)) — 화면은 "다시 시작했습니다"를 띄우는데
+    //   행은 잠긴 채로 남아, 담당자는 고쳤다고 믿고 그 발송은 영영 나가지 않는다(6원칙 ②).
+    if (outcome === 'unresumable') {
+      return res.status(409).json({ error: '지금 상태에서는 다시 시작할 수 없습니다. 표시된 사유를 확인해 주세요.', code: 'NOT_RESUMABLE' });
+    }
+    if (outcome === 'locked') {
+      return res.status(409).json({ error: '다시 시작했지만 진행하지 못했습니다. 표시된 사유를 확인해 주세요.', code: 'STILL_LOCKED' });
     }
     return res.json({ status: outcome });
   } catch (error: any) {

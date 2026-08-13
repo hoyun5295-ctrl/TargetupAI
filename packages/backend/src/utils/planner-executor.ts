@@ -604,16 +604,25 @@ async function executePass(): Promise<{ sent: number; skipped: number; held: num
 }
 
 let executorTimer: NodeJS.Timeout | null = null;
+let executorBoot: NodeJS.Timeout | null = null;
 
 /**
- * 실행 스케줄러 — 10분 주기. 선언이 아니라 **이 함수가 app 부팅에서 불리는 것**이 가동의 근거다
- * (계약 테스트가 app.ts 등재를 고정한다).
+ * 실행 스케줄러 — 부팅 후 1분에 첫 실행, 이후 10분 주기. 선언이 아니라 **이 함수가 app 부팅에서 불리는 것**이
+ * 가동의 근거다(계약 테스트가 app.ts 등재를 고정한다).
+ * ⛔ 첫 실행이 없으면 재기동 직후 10분은 오늘 예정분이 아무것도 나가지 않는다 — 배포가 겹친 날 그 공백이 곧 미발송이다.
+ *   지연 1분은 startup 안정화용이고, 창 밖(08~21시 KST 밖)이면 그 실행은 아무것도 하지 않고 돌아온다.
  */
 export function startPlannerExecutor(): void {
-  if (executorTimer) return;
+  if (executorTimer || executorBoot) return;
   const INTERVAL_MS = 10 * 60 * 1000;
-  executorTimer = setInterval(() => {
+  const BOOT_DELAY_MS = 60 * 1000;
+  const tick = () => {
     void runPlannerExecutionPass().catch((e: any) => console.error('[planner-executor] 주기 실행 실패:', e?.message || e));
-  }, INTERVAL_MS);
-  console.log('[planner-executor] 마케팅 플래너 실행 워커 시작 (10분 주기)');
+  };
+  executorBoot = setTimeout(() => {
+    executorBoot = null;
+    tick();
+    executorTimer = setInterval(tick, INTERVAL_MS);
+  }, BOOT_DELAY_MS);
+  console.log('[planner-executor] 마케팅 플래너 실행 워커 시작 (부팅 1분 뒤 첫 실행 · 이후 10분 주기)');
 }
