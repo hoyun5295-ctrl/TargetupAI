@@ -50,6 +50,12 @@ export interface SyncEngineConfig {
   customerMapping: ColumnMapping;
   /** 구매 컬럼 매핑 */
   purchaseMapping: ColumnMapping;
+  /**
+   * ★ 2026-08-13 (아난티 — 뷰 소스) 지정 키 컬럼 — 메타에 PK가 없을 때만 이 값을 PK처럼 쓴다.
+   * 설치 마법사가 유일성을 실쿼리로 검사해 통과한 것만 저장한다(무검증 값을 넣는 자리가 아니다).
+   */
+  customerKeyColumns?: string[];
+  purchaseKeyColumns?: string[];
   /** dry run 모드 (API 전송 안 하고 로그만) */
   dryRun?: boolean;
 }
@@ -392,8 +398,15 @@ export class SyncEngine {
     return JSON.stringify([this.db.dbType, sourceId, tableName, timestampCol, pkCols]);
   }
 
-  /** PK 컬럼 해석 — getColumns 메타(isPrimaryKey, 복합 포함) 기반. 시노님 해석은 어댑터 getColumns가 이미 소유. */
-  private async resolvePkColumns(tableName: string): Promise<
+  /**
+   * PK 컬럼 해석 — getColumns 메타(isPrimaryKey, 복합 포함) 기반. 시노님 해석은 어댑터 getColumns가 이미 소유.
+   *
+   * ★ 2026-08-13 (아난티 — 뷰 소스): 메타에 PK가 없으면 **지정 키**(설치 마법사가 유일성 실측 후 저장)를 쓴다.
+   *   메타 PK가 있으면 메타가 우선 — 지정 키는 메타가 비는 소스(뷰)의 보충이지 대체가 아니다.
+   *   지정 키 컬럼이 소스에 실존하지 않으면(뷰 재정의 등) 잠근다 — 없는 컬럼으로 커서를 만들면 조용히 깨진다.
+   *   지정 키는 fingerprint(pkCols)에 그대로 들어가므로, 키를 바꾸면 커서가 폐기되고 전량 재기준된다(§4 계약 그대로).
+   */
+  private async resolvePkColumns(target: SyncTarget, tableName: string): Promise<
     | { ok: true; columns: string[]; nonScalarPk: string | null }
     | { ok: false; error: string }
   > {
@@ -403,10 +416,27 @@ export class SyncEngine {
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
+    const nonScalarOf = (cols: ColumnInfo[]) =>
+      cols.find((c) => ['datetime', 'date', 'timestamp', 'binary'].includes((c.dataType || '').toLowerCase()));
+
     const pks = columns.filter((c) => c.isPrimaryKey);
-    // 날짜형 PK는 결정적 직렬화가 불가(드라이버 변환이 프로세스 TZ 의존) — 정직하게 잠근다.
-    const nonScalar = pks.find((c) => ['datetime', 'date', 'timestamp', 'binary'].includes((c.dataType || '').toLowerCase()));
-    return { ok: true, columns: pks.map((c) => c.name), nonScalarPk: nonScalar ? nonScalar.name : null };
+    if (pks.length > 0) {
+      const nonScalar = nonScalarOf(pks);
+      return { ok: true, columns: pks.map((c) => c.name), nonScalarPk: nonScalar ? nonScalar.name : null };
+    }
+
+    const designated = target === 'customers' ? this.config.customerKeyColumns : this.config.purchaseKeyColumns;
+    if (!designated || designated.length === 0) {
+      return { ok: true, columns: [], nonScalarPk: null };  // 종전 동작 — 호출부가 NO_PK로 잠근다
+    }
+    const byName = new Map(columns.map((c) => [c.name, c]));
+    const missing = designated.filter((name) => !byName.has(name));
+    if (missing.length > 0) {
+      return { ok: false, error: `지정 키 컬럼이 소스에 없습니다: ${missing.join(', ')} — 소스(뷰) 정의가 바뀌었으면 재설정이 필요합니다.` };
+    }
+    const designatedCols = designated.map((name) => byName.get(name)!);
+    const nonScalar = nonScalarOf(designatedCols);
+    return { ok: true, columns: designated, nonScalarPk: nonScalar ? nonScalar.name : null };
   }
 
   private async runIncrementalKeyset(
@@ -450,7 +480,7 @@ export class SyncEngine {
     if (hold) {
       let probe: import('../db/keyset').IncrementalCursor | null = null;
       if (this.db.fetchMaxCursor) {
-        const probePk = await this.resolvePkColumns(tableName);
+        const probePk = await this.resolvePkColumns(target, tableName);
         if (probePk.ok && probePk.columns.length > 0 && !probePk.nonScalarPk) {
           try {
             probe = await this.db.fetchMaxCursor(tableName, timestampCol, probePk.columns);
@@ -467,7 +497,7 @@ export class SyncEngine {
       return finish({ total: 0, success: 0, fail: 0 });
     }
 
-    const pkResult = await this.resolvePkColumns(tableName);
+    const pkResult = await this.resolvePkColumns(target, tableName);
     if (!pkResult.ok) {
       // 메타 조회 실패(권한 등) — 커서를 움직이지 않고 이번 주기는 실패 보고(다음 주기 재시도).
       errors.push({ code: 'PK_META_FAILED', message: `PK 메타 조회 실패: ${pkResult.error}` });
@@ -652,7 +682,7 @@ export class SyncEngine {
     };
     if (this.db.fetchIncrementalKeyset && this.db.fetchMaxCursor && this.db.getSourceId) {
       const tsCol = this.getTimestampForTarget(target);
-      const pkResult = await this.resolvePkColumns(tableName);
+      const pkResult = await this.resolvePkColumns(target, tableName);
       const tsOk = (await this.checkTimestampColumn(tableName, tsCol)) === 'ok';
       if (pkResult.ok && pkResult.columns.length > 0 && !pkResult.nonScalarPk) {
         fullPkCols = pkResult.columns;

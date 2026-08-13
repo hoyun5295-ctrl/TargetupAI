@@ -31,6 +31,8 @@ import {
 } from '../config';
 import { initLogger, getLogger } from '../logger';
 import { AGENT_VERSION } from '../version';
+// ★ 2026-08-13 아난티 — 마법사가 어떤 콘솔에서 뜨든 한글이 깨지지 않게 exe가 스스로 코드페이지를 맞춘다.
+import { ensureUtf8Console } from './console-encoding';
 
 const DEV_MODE = process.env.DEV_MODE === 'true';
 
@@ -62,7 +64,21 @@ function askPassword(question: string): Promise<string> {
   });
 }
 
+/**
+ * 고를 항목이 하나도 없는데 선택을 물었을 때. (★ 2026-08-13 아난티)
+ * 종전에는 `번호 선택 (1-0):`을 띄우고 무슨 값을 넣어도 "1~0 사이 번호를 입력해주세요"만 반복했다 —
+ * 사용자는 빠져나갈 방법이 없었다. 0건은 입력으로 풀 문제가 아니라 **앞 단계의 사유를 말해야 하는 자리**다.
+ */
+export class EmptyChoiceError extends Error {
+  constructor(question: string) {
+    super(`선택할 항목이 없습니다: ${question}`);
+    this.name = 'EmptyChoiceError';
+  }
+}
+
 function askSelect(question: string, choices: { name: string; value: any }[]): Promise<any> {
+  // ⛔ 무한 재질문 차단 — 호출부 5곳을 각각 막지 않고 이 문 하나에서 닫는다.
+  if (choices.length === 0) throw new EmptyChoiceError(question);
   return new Promise((resolve) => {
     console.log('');
     console.log(`  ${question}`);
@@ -314,6 +330,9 @@ async function stepTableSelection(dbConfig: DbConnectionConfig): Promise<{
   purchaseColumns: string[];
   customerTimestampColumn: string;
   purchaseTimestampColumn: string;
+  /** ★ 2026-08-13 뷰 소스 지정 키 — 유일성 실측을 통과한 것만 담긴다. 빈 배열 = 지정 없음(종전 동작). */
+  customerKeyColumns: string[];
+  purchaseKeyColumns: string[];
 }> {
   printStep(3, 5, '테이블 선택');
 
@@ -324,6 +343,20 @@ async function stepTableSelection(dbConfig: DbConnectionConfig): Promise<{
   const tables = await connector.getTables();
 
   console.log(`  📋 ${tables.length}개 테이블 감지됨`);
+
+  // ★ 2026-08-13 (아난티) 0건이면 여기서 멈춘다 — 종전에는 "번호 선택 (1-0)" 무한 재질문에 갇혔다.
+  //   0건은 입력으로 풀 문제가 아니다: 접속 계정이 이 DB에서 읽을 수 있는 테이블·뷰가 하나도 없다는 뜻이다.
+  if (tables.length === 0) {
+    console.log('');
+    console.log('  ❌ 이 DB에서 접속 계정이 읽을 수 있는 테이블·뷰가 없습니다.');
+    console.log('     다음 두 가지를 확인해 주세요:');
+    console.log(`     1) DB 이름이 맞는지 — 지금 접속한 DB는 "${dbConfig.database}" 입니다. 데이터가 다른 DB(스키마)에 있으면 그 이름으로 다시 실행해 주세요.`);
+    console.log(`     2) 계정 권한 — "${dbConfig.username}" 계정에 동기화 대상 테이블(또는 뷰)의 SELECT 권한이 있어야 목록에 나타납니다.`);
+    console.log('     조치 후 설치 마법사를 다시 실행하면 이 지점부터 진행됩니다.');
+    await connector.disconnect().catch(() => { /* 종료 경로 */ });
+    rl.close();
+    process.exit(1);
+  }
 
   const tableChoices = tables.map((t) => ({ name: t, value: t }));
 
@@ -336,6 +369,12 @@ async function stepTableSelection(dbConfig: DbConnectionConfig): Promise<{
 
   const customerCols = await connector.getColumns(customerTable);
   const purchaseCols = await connector.getColumns(purchaseTable);
+
+  // ★ 2026-08-13 (아난티) 뷰 소스 지정 키 — 메타에 PK가 없으면 여기서 키를 정하고 유일성을 실측한다.
+  //   이 단계를 건너뛰면 설치는 끝나도 증분이 영구 잠겨(INCREMENTAL_LOCKED_NO_PK) 최초 전량 이후 갱신이 0건이 된다.
+  const customerKeyColumns = await designateKeyIfNoPk(connector, customerTable, customerCols, '고객');
+  const purchaseKeyColumns = await designateKeyIfNoPk(connector, purchaseTable, purchaseCols, '구매');
+
   await connector.disconnect();
 
   const customerColumns = customerCols.map((c) => c.name);
@@ -374,7 +413,79 @@ async function stepTableSelection(dbConfig: DbConnectionConfig): Promise<{
     purchaseColumns,
     customerTimestampColumn,
     purchaseTimestampColumn,
+    customerKeyColumns,
+    purchaseKeyColumns,
   };
+}
+
+/**
+ * ★ 2026-08-13 (아난티 — 뷰 소스) 키 지정 + 유일성 실측.
+ *
+ * 뷰는 DB 메타에 PK가 없다. PK가 없으면 엔진이 증분을 정직하게 잠그므로(자연키를 지어내지 않는다 — 불변 원칙),
+ * 최초 전량 이후 갱신이 영구 0건이 된다. 그래서 메타에 PK가 없는 소스는 설치 시점에
+ * "행을 고유하게 식별하는 컬럼"을 담당자가 고르게 하고, **그 자리에서 DB에 세어 유일성을 확인한다.**
+ * 통과한 키만 저장한다 — 무검증 키는 같은 날 같은 상품 두 건을 한 건으로 만든다.
+ *
+ * 어댑터가 유일성 검사(countKeyUniqueness)를 제공하지 않으면 지정을 열지 않는다(종전 동작 유지).
+ */
+async function designateKeyIfNoPk(
+  connector: { countKeyUniqueness?(tableName: string, keyColumns: string[]): Promise<{ total: number; distinct: number; nulls: number }> },
+  tableName: string,
+  columns: { name: string; isPrimaryKey?: boolean }[],
+  label: string,
+): Promise<string[]> {
+  const hasPk = columns.some((c) => c.isPrimaryKey);
+  if (hasPk) return [];                       // 메타 PK가 있으면 그게 진실 — 지정 불필요
+  if (!connector.countKeyUniqueness) return []; // 검사 수단이 없는 어댑터 — 지정을 열지 않는다(fail-closed)
+
+  console.log('');
+  console.log(`  ⚠  ${label} 테이블 (${tableName})에 기본키 정보가 없습니다. (뷰는 원래 없습니다)`);
+  console.log('     변경분만 주기적으로 가져오고(증분) 같은 행이 두 번 저장되지 않으려면,');
+  console.log('     행 하나를 고유하게 식별하는 컬럼(예: 회원번호·주문번호)이 필요합니다.');
+
+  const colNames = columns.map((c) => c.name);
+  while (true) {
+    const first = await askSelect(`${label} 고유 식별 컬럼을 선택하세요:`, [
+      ...colNames.map((c) => ({ name: c, value: c })),
+      { name: '⏭  지정 안 함 (전체 동기화만 — 이후 변경분 자동 반영 안 됨)', value: '__none__' },
+    ]);
+    if (first === '__none__') {
+      console.log('  ⚠  키 미지정 — 최초 전체 동기화 이후 변경분이 자동 반영되지 않습니다.');
+      return [];
+    }
+
+    const keys: string[] = [first];
+    // 복합 키 — 한 컬럼으로 유일하지 않은 소스(예: 주문번호+품목순번)를 위해 추가 선택을 연다.
+    while (true) {
+      const addMore = await askConfirm('키 컬럼을 더 추가할까요? (한 컬럼으로 행이 특정되지 않는 경우)', false);
+      if (!addMore) break;
+      const remaining = colNames.filter((c) => !keys.includes(c));
+      const next = await askSelect('추가 키 컬럼:', remaining.map((c) => ({ name: c, value: c })));
+      keys.push(next);
+    }
+
+    console.log(`  🔄 키 유일성 확인 중... (${keys.join(' + ')})`);
+    try {
+      const r = await connector.countKeyUniqueness(tableName, keys);
+      if (r.total === 0) {
+        console.log('  ⚠  데이터가 0행이라 유일성을 확인할 수 없습니다. 이 키를 그대로 사용합니다 (데이터 적재 후 문제 시 재설정).');
+        return keys;
+      }
+      if (r.nulls > 0) {
+        console.log(`  ❌ 이 키에 빈 값(NULL)인 행이 ${r.nulls.toLocaleString()}건 있습니다 — 키로 쓸 수 없습니다. 다른 컬럼을 선택해 주세요.`);
+        continue;
+      }
+      if (r.distinct !== r.total) {
+        console.log(`  ❌ 이 키가 중복됩니다 — 전체 ${r.total.toLocaleString()}행 중 서로 다른 키 ${r.distinct.toLocaleString()}개. 다른 컬럼(또는 추가 컬럼 조합)을 선택해 주세요.`);
+        continue;
+      }
+      console.log(`  ✅ 키 확인 완료 — ${r.total.toLocaleString()}행 전부 고유합니다.`);
+      return keys;
+    } catch (e: any) {
+      console.log(`  ⚠  유일성 확인 쿼리 실패 (${e?.message || e}) — 다시 선택해 주세요.`);
+      continue;
+    }
+  }
 }
 
 /**
@@ -721,6 +832,10 @@ export async function startSetupCli(
 ): Promise<void> {
   const { autoLaunchAgent = true } = options;
 
+  // 출력을 한 글자라도 내보내기 전에 콘솔 코드페이지부터 맞춘다 — 설치 배치가 `start`로 띄운 새 창은
+  // chcp 65001을 물려받지 않아 CP949로 뜨고, 그 창에서는 우리 UTF-8 한글이 전부 깨진다(2026-08-13 아난티 실측).
+  ensureUtf8Console();
+
   initLogger({ level: 'info', maxFiles: 30, maxSize: '20m' });
   const logger = getLogger('setup-cli');
 
@@ -734,7 +849,7 @@ export async function startSetupCli(
     // Step 2: DB 접속
     const { dbConfig } = await stepDbConnection();
 
-    // Step 3: 테이블 선택 + 테이블별 timestamp
+    // Step 3: 테이블 선택 + 테이블별 timestamp (+ 뷰 소스 지정 키 — 2026-08-13)
     const {
       customerTable,
       purchaseTable,
@@ -742,6 +857,8 @@ export async function startSetupCli(
       purchaseColumns,
       customerTimestampColumn,
       purchaseTimestampColumn,
+      customerKeyColumns,
+      purchaseKeyColumns,
     } = await stepTableSelection(dbConfig);
 
     // Step 4: 컬럼 매핑 (v1.5.0: AI 매핑 ctx 전달)
@@ -771,6 +888,8 @@ export async function startSetupCli(
     }
     console.log(`  고객 timestamp: ${customerTimestampColumn || '없음 (전체 동기화만)'}`);
     console.log(`  구매 timestamp: ${purchaseTimestampColumn || '없음 (전체 동기화만)'}`);
+    if (customerKeyColumns.length > 0) console.log(`  고객 지정 키: ${customerKeyColumns.join(' + ')} (유일성 확인됨)`);
+    if (purchaseKeyColumns.length > 0) console.log(`  구매 지정 키: ${purchaseKeyColumns.join(' + ')} (유일성 확인됨)`);
     console.log(`  동기화 주기: 고객 ${customerInterval}분 / 구매 ${purchaseInterval}분`);
     console.log(`  Agent 이름: ${agentName}`);
     console.log('');
@@ -816,6 +935,9 @@ export async function startSetupCli(
         timestampColumn: customerTimestampColumn || 'updated_at',
         customerTimestampColumn: customerTimestampColumn || undefined,
         purchaseTimestampColumn: purchaseTimestampColumn || undefined,
+        // ★ 2026-08-13 뷰 소스 지정 키 — 유일성 실측 통과분만 저장(빈 배열은 저장하지 않는다 = 종전 동작)
+        customerKeyColumns: customerKeyColumns.length > 0 ? customerKeyColumns : undefined,
+        purchaseKeyColumns: purchaseKeyColumns.length > 0 ? purchaseKeyColumns : undefined,
         fallbackToFullSync: true,
       },
       mapping: {

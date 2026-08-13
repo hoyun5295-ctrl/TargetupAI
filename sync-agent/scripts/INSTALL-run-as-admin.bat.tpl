@@ -65,7 +65,10 @@ if "!EC!"=="0" if "!SVC!"=="0" (
   if errorlevel 1 (
     echo  No configuration found - starting the setup wizard...
     echo.
-    start "Sync Agent Setup" cmd /c ""%~dp0sync-agent.exe" --setup & pause"
+    REM chcp inside the child console too: `start` opens a NEW console that does NOT
+    REM inherit this script's code page, so Korean text was garbled there (2026-08-13 Ananti).
+    REM The exe also sets it by itself now - this line is the belt to that suspender.
+    start "Sync Agent Setup" cmd /c "chcp 65001 >nul & "%~dp0sync-agent.exe" --setup & pause"
     goto :done
   )
 )

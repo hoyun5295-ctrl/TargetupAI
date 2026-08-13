@@ -256,13 +256,41 @@ export class MysqlConnector implements IDbConnector {
 
   async getTables(): Promise<string[]> {
     this.ensureConnected();
+    // ★ 2026-08-13 뷰 포함 (아난티 실측) — 종전에는 BASE TABLE만 봐서 뷰가 목록에 0개로 나왔다.
+    //   고객사는 다른 DB에 나뉜 고객·주문을 한 스키마에 뷰로 모아 읽기 권한을 주는 구성이 흔하다.
+    //   조회는 뷰든 테이블이든 같은 SELECT라 이름만 노출하면 그대로 읽힌다(오라클 어댑터가 이미 같은 형태).
     const [rows] = await this.pool!.query(`
-      SELECT TABLE_NAME 
-      FROM INFORMATION_SCHEMA.TABLES 
-      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'
+      SELECT TABLE_NAME
+      FROM INFORMATION_SCHEMA.TABLES
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE IN ('BASE TABLE', 'VIEW')
       ORDER BY TABLE_NAME
     `);
     return (rows as Record<string, unknown>[]).map((r) => r.TABLE_NAME as string);
+  }
+
+  /**
+   * ★ 2026-08-13 지정 키의 유일성 실측 — 뷰처럼 PK 메타가 없는 소스에서 증분·멱등을 열기 위한 근거.
+   * 고객사에 "키를 넣어 달라"고 요구하지 않고, 설치 시점에 우리가 직접 세어 확인한다.
+   * 반환 = 전체 행 수 · 키 조합의 서로 다른 값 수 · 키에 NULL이 있는 행 수.
+   * 셋이 만족해야(total === distinct && nulls === 0) 그 키로 행이 하나로 특정된다.
+   */
+  async countKeyUniqueness(tableName: string, keyColumns: string[]): Promise<{ total: number; distinct: number; nulls: number }> {
+    this.ensureConnected();
+    const cols = keyColumns.map((c) => `\`${c.replace(/`/g, '``')}\``);
+    const table = `\`${tableName.replace(/`/g, '``')}\``;
+    const nullCond = cols.map((c) => `${c} IS NULL`).join(' OR ');
+    const [rows] = await this.pool!.query(
+      `SELECT COUNT(*) AS total,
+              COUNT(DISTINCT ${cols.join(', ')}) AS distinct_keys,
+              SUM(CASE WHEN ${nullCond} THEN 1 ELSE 0 END) AS null_keys
+         FROM ${table}`,
+    );
+    const r = (rows as Record<string, unknown>[])[0] || {};
+    return {
+      total: Number(r.total) || 0,
+      distinct: Number(r.distinct_keys) || 0,
+      nulls: Number(r.null_keys) || 0,
+    };
   }
 
   async getColumns(tableName: string): Promise<ColumnInfo[]> {

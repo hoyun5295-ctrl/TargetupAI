@@ -92,7 +92,7 @@
 |---|---|---|
 | `planner_events` | 행사 원장 | `plan_month`(YYYY-MM) · 기간 · `benefit_text`(고객사 기입) · `products` jsonb · `status` 9종 |
 | `planner_touchpoints` | 터치포인트(행사×채널×시점) | `channel` 5종 · `timing_rule` jsonb · `est_credits` · `status` 8종 · `lock_reason` |
-| **`planner_monthly_approvals`** (2026-08-13 신설 · **배포 후 CREATE**) | 월간 승인 원장 | `UNIQUE(company_id, plan_month)` · `status` 4종(pending·approving·approved·cancelled) · `agency_credits` · `est_snapshot` jsonb · **`event_ids` uuid[](제출 스냅샷 = 승인 대상)** · **`approve_attempt` uuid(시도 소유권)** · `deduct_idempotency_key` · `token`·`token_expires_at` |
+| **`planner_monthly_approvals`** (2026-08-13 **운영 CREATE 완료 · 19컬럼 실측**) | 월간 승인 원장 | `UNIQUE(company_id, plan_month)` · `status` 4종(pending·approving·approved·cancelled) · `agency_credits` · `est_snapshot` jsonb · **`event_ids` uuid[](제출 스냅샷 = 승인 대상)** · **`approve_attempt` uuid(시도 소유권)** · `deduct_idempotency_key` · `token`·`token_expires_at` |
 
 **승인 순서 = 게이트 → 선점(서류 동봉) → 지문 재확인 → 차감 → 확정.**
 ①**선점이 서류를 함께 돌려준다**(`event_ids`·`agency_credits`·`plan_hash`). 승인은 그 값으로만 한다 —
@@ -177,7 +177,7 @@
 |---|---|---|
 | 0 선행 확인 | 요금제 실값 · 상품 데이터 축 · 검수 소요일 · 소진 정책 · 메뉴명 · 검수 API 범위 | **★2026-08-12 전량 종결** |
 | **1 플래너 코어** | 행사 CRUD 캘린더 · 터치포인트 · 가용성 잠금 · 예상 크레딧 · 메뉴 개편 | **★2026-08-12 배포완료 + DDL 실행완료** · 화면 실측 3건 대기 |
-| **2 브리핑·결재** | 월간 브리핑 화면 · 결재 링크 토큰 · 1000크레딧 차감(멱등) | **★2026-08-13 코드완료** — 배포 후 DDL 1건(§4-2) · 실측 대기 |
+| **2 브리핑·결재** | 월간 브리핑 화면 · 결재 링크 토큰 · 1000크레딧 차감(멱등) | **★2026-08-13 배포완료 + DDL 실행완료**(19컬럼 실측) · 화면 실측 4건 대기 |
 | 3 실행 배선 | 자동마케팅 엔진 훅(영향표 선행) · 소재 대행 제작 · 알림톡 검수 대행 · **대조 워커** | 미착수 |
 | 4 깔때기·브리핑 | 참여 동의 체인 · 결과 브리핑(자기 개선 루프 Phase 3와 겸용) | 미착수 |
 
@@ -201,7 +201,7 @@ Phase 1은 읽기·CRUD뿐이라 대상이 아니었다.
 ## §8 남은 것
 
 - **화면 실측 3건**(Phase 1) — ①타일 진입 → 행사 기입 → 캘린더 바 표시 ②잠긴 채널 사유 표시 ③채널 체크에 따른 합계 변동
-- **DDL 1건**(Phase 2) — `planner_monthly_approvals` CREATE. **배포 후 실행**, 그 전까지 브리핑은 503으로 막힌다
+- ~~DDL 1건(Phase 2)~~ **★2026-08-13 실행완료** — `planner_monthly_approvals` 19컬럼 실측(SCHEMA.md 63행). 남은 DDL 0
 - **실측 4건**(Phase 2) — ①결재 올리기 → 결재 문자 수신 → 링크로 브리핑 착지 ②승인 → 대행 1000 차감이 크레딧 이력에 **1건**(더블클릭해도 1건) ③승인 뒤 행사 추가 → "계획이 바뀌었습니다" 안내 → 다시 올려 승인 → **추가 차감 0** ④만료된 링크 → 캘린더로 착지 + 만료 안내
 - **Phase 3 착수** — 실행 배선(자동마케팅 훅 영향표 · 소재 대행 제작 · 알림톡 검수 대행 · 대조 워커) + **월 중 취소·환불**(크레딧 환불 축 신설이 선행 — 지금은 슈퍼관리자 수동 조정뿐)
 - **알림톡·이메일 결재 통지** — 알림톡 통지 템플릿 등록 후 문자와 병행(자동마케팅 `notifyOperatorAdmins` TODO seam과 같은 축) · 이메일은 플랫폼 발송 경로가 생겨야 한다

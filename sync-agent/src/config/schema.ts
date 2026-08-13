@@ -77,6 +77,15 @@ const SyncConfigSchema = z.object({
   /** 구매 테이블 전용 수정일시 컬럼 (미지정 시 timestampColumn 사용) */
   purchaseTimestampColumn: z.string().optional(),
 
+  /**
+   * ★ 2026-08-13 (아난티 — 뷰 소스): 지정 키 컬럼.
+   * 뷰는 DB 메타에 PK가 없어 증분·멱등키가 영구 잠긴다. 설치 마법사가 행을 고유하게 식별하는
+   * 컬럼을 고르게 하고 **유일성을 실쿼리로 검사해 통과한 것만** 여기 저장한다(자연키를 지어내지 않는다 — §2).
+   * 미지정 = 기존 동작 그대로(메타 PK만 사용). 메타에 PK가 있으면 메타가 우선이다.
+   */
+  customerKeyColumns: z.array(z.string()).optional(),
+  purchaseKeyColumns: z.array(z.string()).optional(),
+
   /** updated_at 컬럼이 없을 때 전체 동기화 폴백 여부 */
   fallbackToFullSync: z.boolean().default(true),
 });

@@ -108,10 +108,11 @@ export class PostgresConnector implements IDbConnector {
 
   async getTables(): Promise<string[]> {
     this.ensureConnected();
+    // ★ 2026-08-13 뷰 포함 (아난티 실측 — MySQL과 같은 결함) — 오라클 어댑터가 원형.
     const result = await this.pool.query(
       `SELECT table_name
        FROM information_schema.tables
-       WHERE table_schema = $1 AND table_type = 'BASE TABLE'
+       WHERE table_schema = $1 AND table_type IN ('BASE TABLE', 'VIEW')
        ORDER BY table_name`,
       [this.schema],
     );

@@ -276,6 +276,9 @@ async function main(): Promise<void> {
     timestampColumn: config.sync.timestampColumn,
     customerTimestampColumn: config.sync.customerTimestampColumn,
     purchaseTimestampColumn: config.sync.purchaseTimestampColumn,
+    // ★ 2026-08-13 뷰 소스 지정 키(마법사가 유일성 실측 후 저장) — 메타 PK 없는 소스의 증분·멱등을 연다
+    customerKeyColumns: config.sync.customerKeyColumns,
+    purchaseKeyColumns: config.sync.purchaseKeyColumns,
     fallbackToFullSync: config.sync.fallbackToFullSync,
     customerMapping,
     purchaseMapping,

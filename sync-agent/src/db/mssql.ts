@@ -88,10 +88,12 @@ export class MssqlConnector implements IDbConnector {
 
   async getTables(): Promise<string[]> {
     this.ensureConnected();
+    // ★ 2026-08-13 뷰 포함 (아난티 실측 — MySQL과 같은 결함) — 고객사가 원본을 뷰로만 노출하는 구성이 흔하다.
+    //   조회는 뷰든 테이블이든 같은 SELECT라 이름만 노출하면 그대로 읽힌다(오라클 어댑터가 원형).
     const result = await this.pool!.request().query(`
-      SELECT TABLE_NAME 
-      FROM INFORMATION_SCHEMA.TABLES 
-      WHERE TABLE_TYPE = 'BASE TABLE'
+      SELECT TABLE_NAME
+      FROM INFORMATION_SCHEMA.TABLES
+      WHERE TABLE_TYPE IN ('BASE TABLE', 'VIEW')
       ORDER BY TABLE_NAME
     `);
     return result.recordset.map((r: Record<string, unknown>) => r.TABLE_NAME as string);

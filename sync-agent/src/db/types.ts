@@ -72,6 +72,14 @@ export interface IDbConnector {
   getTables(): Promise<string[]>;
 
   /**
+   * ★ 2026-08-13 (아난티 — 뷰 소스) 지정 키 유일성 실측.
+   * 뷰처럼 PK 메타가 없는 소스에서, 사용자가 고른 키 컬럼이 실제로 행을 하나로 특정하는지
+   * 설치 시점에 DB에서 직접 센다. total === distinct && nulls === 0 이어야 통과.
+   * 미구현 어댑터는 키 지정 자체를 열지 않는다(검사 없이 키를 받으면 자연키 지어내기와 같다 — optional).
+   */
+  countKeyUniqueness?(tableName: string, keyColumns: string[]): Promise<{ total: number; distinct: number; nulls: number }>;
+
+  /**
    * 증분 데이터 조회: timestampColumn > since 인 레코드
    */
   fetchIncremental(
