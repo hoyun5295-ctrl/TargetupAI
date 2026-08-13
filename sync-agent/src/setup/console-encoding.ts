@@ -29,7 +29,10 @@ export function ensureUtf8Console(platform: string = process.platform): void {
   if (!needsConsoleCodepageFix(platform)) return;
   try {
     // System32의 실제 실행 파일이라 shell 없이 부른다(셸 경유 시 인자 해석이 환경마다 달라진다).
-    spawnSync('chcp.com', ['65001'], { stdio: 'ignore', windowsHide: true });
+    // ⛔ windowsHide 금지 — CREATE_NO_WINDOW로 자식이 콘솔 없이 떠서 chcp가 허공에 적용된다
+    //    (2026-08-13 실측: 플래그가 있으면 exit 0인데 코드페이지는 949 그대로였다. 부모가 콘솔 앱이라
+    //     창 깜빡임도 없다 — 같은 콘솔을 그대로 물려받는다).
+    spawnSync('chcp.com', ['65001'], { stdio: 'ignore' });
   } catch {
     /* 콘솔 없음·실행 실패 — 종전 동작 유지 */
   }

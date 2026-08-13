@@ -28,6 +28,10 @@
 
 **검증된 조합만 내보낸다. 고객 환경이 정해지면 그 조합을 검증하고 등재한다.**
 
+★2026-08-13 — "고객 환경이 정해지면"의 도구 = **사전 질의서**(SoT: [`sync-agent/PREINSTALL-QUESTIONNAIRE.md`](../sync-agent/PREINSTALL-QUESTIONNAIRE.md)).
+회신 없이 출고하지 않고, 회신 구성 그대로 픽스처를 재현해(뷰·계정 권한·로케일 포함) 마법사 자동 주행까지 밟은 뒤 나간다.
+절차 전문은 [기능 문서 §8 출고](FEATURE-SYNC-AGENT.md)가 소유한다 — 여기 재서술하지 않는다.
+
 싱크에이전트 고객은 앞으로 늘어난다. 그래서 20조합을 미리 다 검증하는 것도, 미검증을 검증된 것처럼 화면에 내보이는 것도 답이 아니다. 검증을 **싸게** 만들어 조합이 생길 때마다 붙이는 쪽으로 간다.
 
 - 검증 상태의 단일 진실원 = `packages/backend/src/utils/agent-build-tiers.ts` 의 `VERIFIED_COMBOS`. **키 = `<osTierId>__<dbId>__<version>`(2026-08-03 버전 스코프 전환)** — 검증은 버전 세대에 귀속되고, `CURRENT_AGENT_VERSION`과 일치하는 등재만 verified다. 비어 있으면 전부 `candidate` — fail-closed다. 에이전트 버전을 올리면 여기 상수도 함께 올린다(= 전 조합 자연 폐쇄 → 조합별 재검증 개방).
