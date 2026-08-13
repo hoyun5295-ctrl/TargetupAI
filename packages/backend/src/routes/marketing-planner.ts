@@ -29,11 +29,47 @@ import {
   loadMonthlyBrief,
   submitMonthlyBrief,
   approveMonthlyBrief,
+  cancelMonthlyApproval,
   resolveApprovalToken,
   PlannerApprovalError,
 } from '../utils/planner-approval';
+// ★ 2026-08-13 Phase 3·4 — 제작 착수(승인 직후 best-effort) · 보류 재개 · 결과 브리핑 · 참여 착지.
+import { runPlannerProductionPass, resumeHeldTouchpoint } from '../utils/planner-production';
+import { runPlannerAlimtalkPass } from '../utils/planner-alimtalk';
+import { loadTouchpointById } from '../utils/planner-touchpoint';
+import { loadMonthlyResult } from '../utils/planner-report';
+import { renderJoinLandingHtml, verifyJoinToken } from '../utils/planner-participation';
 
 const router = Router();
+
+// ────────────────────────────────────────────────────────────────────
+// GET /api/marketing-planner/participate/:token — 참여 신청 착지 (인증 전 · 고객이 이메일에서 온다)
+//
+// ⛔ 여기서 참여를 적재하지 않는다. 수신자 식별은 **이메일 클릭 실측**(email_events: 캠페인+주소)이 하고,
+//    참여 이벤트 투영은 그 실측을 읽는 스위퍼가 한다(planner-participation). 이 화면은 확인만 한다 —
+//    링크 주소만으로는 누가 눌렀는지 알 수 없고, 고객에게 정보를 더 묻는 것은 이 서비스의 UX 원칙이 아니다.
+// ⛔ 고객용 화면이라 JSON·503을 보여주지 않는다. 실패도 안내 화면으로 답한다.
+// ────────────────────────────────────────────────────────────────────
+router.get('/participate/:token', async (req: Request, res: Response) => {
+  const payload = verifyJoinToken(String(req.params.token || ''));
+  if (!payload) {
+    res.status(200).type('html').send(renderJoinLandingHtml({ ok: false }));
+    return;
+  }
+  let title: string | null = null;
+  try {
+    const r = await query(
+      `SELECT title FROM planner_events WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [payload.e, payload.c],
+    );
+    title = r.rows[0]?.title ? String(r.rows[0].title) : null;
+  } catch (error: any) {
+    // 표·컬럼 미생성(배포 불일치)도 고객에게는 안내 화면이다. 모니터링이 구분할 표식만 로그에 남긴다.
+    const migrationPending = String(error?.code || '') === '42P01' || String(error?.code || '') === '42703';
+    console.error(`플래너 참여 착지 조회 실패${migrationPending ? ' [DB_MIGRATION_PENDING]' : ''}:`, error?.message || error);
+  }
+  res.status(200).type('html').send(renderJoinLandingHtml({ ok: true, eventTitle: title }));
+});
 
 // ────────────────────────────────────────────────────────────────────
 // GET /api/marketing-planner/approval/:token — 결재 링크 착지 (인증 전 · 문자 링크가 여기로 온다)
@@ -357,12 +393,75 @@ router.post('/brief/:month/approve', async (req: Request, res: Response) => {
   if (!planMonth) return res.status(400).json({ error: '대상 달을 지정해 주세요. (YYYY-MM)' });
   try {
     const result = await approveMonthlyBrief(companyId, planMonth, req.user?.userId || null);
+    // ★ 2026-08-13 Phase 3 — 승인 직후 소재 제작 착수. **승인 트랜잭션 밖 best-effort**다:
+    //   고객 확정 경로(승인)에 부가 작업을 얹지 않는다(0808 교훈). 놓친 건은 제작 워커(그물)가 집는다.
+    void runPlannerProductionPass({ companyId }).catch((e: any) =>
+      console.warn('[marketing-planner] 승인 직후 제작 착수 경고:', e?.message || e));
+    // 알림톡은 검수 리드타임(영업일 5일)이 있어 승인 직후 제출이 늦으면 그 터치포인트가 제외된다.
+    void runPlannerAlimtalkPass({ companyId }).catch((e: any) =>
+      console.warn('[marketing-planner] 승인 직후 알림톡 검수 착수 경고:', e?.message || e));
     return res.json(result);
   } catch (error: any) {
     if (sendApprovalError(error, res)) return;
     if (handleDbMigrationError(error, res, 'planner_monthly_approvals')) return;
     console.error('플래너 월간 승인 실패:', error);
     return res.status(500).json({ error: '승인 처리 실패' });
+  }
+});
+
+// POST /api/marketing-planner/brief/:month/cancel — 월간 대행 취소(제작·발송 0건이면 대행료 전액 환불)
+router.post('/brief/:month/cancel', async (req: Request, res: Response) => {
+  const companyId = requireCompany(req, res);
+  if (!companyId) return;
+  const planMonth = parsePlanMonth(req.params.month);
+  if (!planMonth) return res.status(400).json({ error: '대상 달을 지정해 주세요. (YYYY-MM)' });
+  try {
+    const result = await cancelMonthlyApproval(companyId, planMonth, req.user?.userId || null);
+    return res.json(result);
+  } catch (error: any) {
+    if (sendApprovalError(error, res)) return;
+    if (handleDbMigrationError(error, res, 'planner_monthly_approvals')) return;
+    console.error('플래너 월간 취소 실패:', error);
+    return res.status(500).json({ error: '취소 처리 실패' });
+  }
+});
+
+// GET /api/marketing-planner/brief/:month/result — 결과 브리핑(실측 집계 · Phase 4)
+router.get('/brief/:month/result', async (req: Request, res: Response) => {
+  const companyId = requireCompany(req, res);
+  if (!companyId) return;
+  const planMonth = parsePlanMonth(req.params.month);
+  if (!planMonth) return res.status(400).json({ error: '조회할 달을 지정해 주세요. (YYYY-MM)' });
+  try {
+    const result = await loadMonthlyResult(companyId, planMonth);
+    return res.json(result);
+  } catch (error: any) {
+    if (handleDbMigrationError(error, res, 'planner_touchpoints')) return;
+    console.error('플래너 결과 조회 실패:', error);
+    return res.status(500).json({ error: '결과 조회 실패' });
+  }
+});
+
+// POST /api/marketing-planner/touchpoints/:id/resume — 보류(크레딧) 재개 1클릭
+//   같은 멱등키라 이미 낸 제작비가 다시 빠지지 않는다. 발송 자체는 예정일에 실행 워커가 한다.
+router.post('/touchpoints/:id/resume', async (req: Request, res: Response) => {
+  const companyId = requireCompany(req, res);
+  if (!companyId) return;
+  try {
+    const tp = await loadTouchpointById(companyId, String(req.params.id));
+    if (!tp) return res.status(404).json({ error: '해당 항목을 찾을 수 없습니다.' });
+    if (tp.status !== 'hold_credit' && tp.status !== 'locked') {
+      return res.status(400).json({ error: '보류 상태인 항목만 다시 시작할 수 있습니다.' });
+    }
+    const outcome = await resumeHeldTouchpoint(tp);
+    if (outcome === 'hold_credit') {
+      return res.status(402).json({ error: '크레딧이 아직 부족합니다. 충전 후 다시 시도해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    }
+    return res.json({ status: outcome });
+  } catch (error: any) {
+    if (handleDbMigrationError(error, res, 'planner_touchpoints')) return;
+    console.error('플래너 보류 재개 실패:', error);
+    return res.status(500).json({ error: '재개 처리 실패' });
   }
 });
 

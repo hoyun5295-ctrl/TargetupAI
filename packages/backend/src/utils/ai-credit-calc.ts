@@ -111,6 +111,11 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   //   제작물 크레딧(이메일 완성·DM 발행·인앱 게시)은 각 제작 시점에 기존 단가로 별도 차감된다 — 축을 섞지 않는다.
   //   ⛔ OPERATION_SOURCES에 넣지 않는다: 마이너스 허용 금지가 이 축의 확정 정책이다(설계서 §3-4).
   'planner-monthly-agency': 1000,
+  // ★ 2026-08-13 마케팅 플래너 당일 문안 10 (Phase 3) — 자동마케팅 발송 문안(10)과 같은 원가 축.
+  //   행사 당일 문자·DM 안내 문안을 생성해 실제로 발송을 접수한 뒤 1회(멱등키 planner-send:{터치포인트}).
+  //   ⛔ OPERATION_SOURCES에 넣지 않는다 — 플래너는 마이너스·자동충전 금지가 확정 정책이라
+  //   잔액이 없으면 그 터치포인트만 보류되고 통지가 나가야 한다(조용한 증발 금지).
+  'planner-touchpoint-send': 10,
   // 예측 자동 분석 (3) — 연동 회사(싱크에이전트/SDK) 매일 1회 예측 점수 갱신. 회사+날짜 멱등.
   'predictive-daily': 3,
   // 모바일 DM 생성(돌려보기) 5 — 자연어→sections + 슬라이드 분할 + 전 섹션 카피까지 생성(범위 넓음). 호출마다 5. 발행은 'dm-builder' 30 별도.
@@ -217,7 +222,14 @@ export function calcRechargeAmount(credits: number): { credits: number; supply: 
   return { credits: c, supply, vat, total: supply + vat };
 }
 
-/** 이번달 사용량 = type 'deduct' 행의 amount 합 (순수). reset/grant/admin_deduct는 제외. */
+/**
+ * 이번달 순사용량 = deduct 합 − refund 합 (순수). reset/grant/admin_deduct는 제외.
+ * ★ 2026-08-13: 환불 축(대행 취소) 신설에 맞춰 순액으로. DB판(getMonthlyUsage)과 같은 정의다.
+ */
 export function sumDeductRows(rows: Array<{ type: string; amount: number | string }>): number {
-  return rows.reduce((sum, r) => sum + (r.type === 'deduct' ? (Number(r.amount) || 0) : 0), 0);
+  return rows.reduce((sum, r) => {
+    if (r.type === 'deduct') return sum + (Number(r.amount) || 0);
+    if (r.type === 'refund') return sum - (Number(r.amount) || 0);
+    return sum;
+  }, 0);
 }

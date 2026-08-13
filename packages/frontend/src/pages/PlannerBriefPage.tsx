@@ -15,8 +15,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowLeft, CalendarDays, CheckCircle2, ClipboardCheck, Clock,
-  Coins, Loader2, Send, Sparkles, Users, Wallet,
+  AlertTriangle, ArrowLeft, BarChart3, CalendarDays, CheckCircle2, ClipboardCheck, Clock,
+  Coins, Loader2, PauseCircle, RotateCcw, Send, Sparkles, Users, Wallet, XCircle,
 } from 'lucide-react';
 import { goBackOr } from '../lib/scroll-restoration';
 import { useToast } from '../components/ToastProvider';
@@ -27,8 +27,10 @@ import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 interface ChannelAudience { count: number | null; state: 'known' | 'deferred' | 'error'; note: string }
 interface BriefTouchpoint {
   id: string; channel: string; label: string;
-  timing: { anchor: string; offsetDays?: number };
+  timing: { anchor: string; offsetDays?: number; audience?: 'all' | 'participants' };
   scheduledOn: string; estCredits: number | null; audience: ChannelAudience;
+  /** ★ Phase 3 — 실행 상태·사유. 보류면 [다시 시작]을 띄운다(조용한 증발 금지). */
+  status: string; lockReason: string | null;
 }
 interface BriefEvent {
   id: string; title: string; startsOn: string; endsOn: string;
@@ -58,7 +60,33 @@ interface MonthlyBrief {
   pastMonth: boolean;
 }
 
+// ── 결과 브리핑 (★ Phase 4) — 수치는 서버 실측 그대로 쓴다 ───────────
+interface ResultMetric { label: string; value: string }
+interface ResultTouchpoint {
+  id: string; channel: string; channelLabel: string; scheduledOn: string;
+  status: string; lockReason: string | null; metrics: ResultMetric[];
+}
+interface ResultEvent {
+  id: string; title: string; startsOn: string; endsOn: string;
+  status: string; participants: number; touchpoints: ResultTouchpoint[];
+}
+interface MonthlyResult {
+  month: string; events: ResultEvent[];
+  totals: { touchpointCount: number; sentCount: number; successCount: number; participants: number };
+  notifiedAt: string | null;
+}
+
 const MONTH_RE = /^\d{4}-\d{2}$/;
+
+/** 터치포인트 실행 상태 — 담당자 언어로. 미기재 상태는 표시하지 않는다(내부 값 노출 금지). */
+const TP_STATE: Record<string, { label: string; cls: string }> = {
+  ready: { label: '준비 완료', cls: 'bg-sky-500/15 text-sky-200 border-sky-400/25' },
+  producing: { label: '제작 중', cls: 'bg-violet-500/15 text-violet-200 border-violet-400/25' },
+  sent: { label: '발송 완료', cls: 'bg-emerald-500/15 text-emerald-200 border-emerald-400/25' },
+  skipped: { label: '생략', cls: 'bg-white/10 text-white/55 border-white/15' },
+  hold_credit: { label: '보류 — 크레딧', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/25' },
+  locked: { label: '보류', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/25' },
+};
 
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   pending: { label: '결재 대기', cls: 'bg-amber-500/20 text-amber-200 border-amber-400/30' },
@@ -88,9 +116,13 @@ export default function PlannerBriefPage() {
 
   const [brief, setBrief] = useState<MonthlyBrief | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<'submit' | 'approve' | null>(null);
+  const [busy, setBusy] = useState<'submit' | 'approve' | 'cancel' | 'resume' | null>(null);
   const [migrationPending, setMigrationPending] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  // ★ Phase 4 — 계획/결과 두 탭. 결과는 실측이라 승인 뒤에만 의미가 있다.
+  const [tab, setTab] = useState<'plan' | 'result'>('plan');
+  const [result, setResult] = useState<MonthlyResult | null>(null);
+  const [resultLoading, setResultLoading] = useState(false);
 
   const load = useCallback(async () => {
     if (!month) return;
@@ -113,7 +145,25 @@ export default function PlannerBriefPage() {
     load();
   }, [month, load, navigate]);
 
-  const call = async (path: string, kind: 'submit' | 'approve') => {
+  const loadResult = useCallback(async () => {
+    if (!month) return;
+    setResultLoading(true);
+    try {
+      const r = await fetch(`/api/marketing-planner/brief/${month}/result`, { headers: auth() });
+      if (!r.ok) { toast.error('결과를 불러오지 못했습니다'); return; }
+      setResult(await r.json());
+    } catch {
+      toast.error('네트워크 오류 — 다시 시도해 주세요');
+    } finally {
+      setResultLoading(false);
+    }
+  }, [month, toast]);
+
+  useEffect(() => {
+    if (tab === 'result' && !result && !resultLoading) void loadResult();
+  }, [tab, result, resultLoading, loadResult]);
+
+  const call = async (path: string, kind: 'submit' | 'approve' | 'cancel' | 'resume') => {
     setBusy(kind);
     try {
       const r = await fetch(path, { method: 'POST', headers: auth() });
@@ -122,10 +172,17 @@ export default function PlannerBriefPage() {
       if (!r.ok) { toast.error(d.error || '처리하지 못했습니다'); return; }
       if (kind === 'submit') {
         toast.success(d.notified ? '결재 요청을 올렸습니다 — 담당자에게 안내 문자를 보냈습니다' : '결재 요청을 올렸습니다');
-      } else {
+      } else if (kind === 'approve') {
         toast.success(d.deducted ? '이번 달 계획을 승인했습니다' : '이번 달 계획을 승인했습니다 (차감 대상 아님)');
+      } else if (kind === 'cancel') {
+        toast.success(d.refunded
+          ? `이번 달 대행을 취소하고 ${Number(d.refundAmount || 0).toLocaleString()}크레딧을 환불했습니다`
+          : `이번 달 대행을 취소했습니다 — ${d.reason || '환불 대상이 아닙니다'}`);
+      } else {
+        toast.success('다시 시작했습니다');
       }
       await load();
+      setResult(null);
     } catch {
       toast.error('네트워크 오류 — 다시 시도해 주세요');
     } finally {
@@ -149,6 +206,23 @@ export default function PlannerBriefPage() {
       onConfirm: async () => {
         setConfirm(null);
         await call(`/api/marketing-planner/brief/${month}/approve`, 'approve');
+      },
+    });
+  };
+
+  const askCancel = () => {
+    if (!brief) return;
+    const worked = (brief.events || []).some((e) => e.touchpoints.some((t) => ['sent', 'ready', 'producing'].includes(t.status)));
+    setConfirm({
+      mode: 'danger',
+      title: '이번 달 대행 취소',
+      description: worked
+        ? '이미 제작이나 발송이 시작돼 대행료는 환불되지 않습니다. 남은 발송 계획은 모두 중지됩니다. 그래도 취소하시겠습니까?'
+        : `이번 달은 아직 제작·발송이 없어 대행료 ${brief.totals.agencyCredits.toLocaleString()}크레딧을 전액 환불합니다. 남은 발송 계획은 모두 중지됩니다.`,
+      confirmLabel: '대행 취소',
+      onConfirm: async () => {
+        setConfirm(null);
+        await call(`/api/marketing-planner/brief/${month}/cancel`, 'cancel');
       },
     });
   };
@@ -212,6 +286,100 @@ export default function PlannerBriefPage() {
           )
         ) : (
           <>
+            {/* ── 탭 (계획 / 결과) ─────────────────────────────────── */}
+            <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/[0.03] p-1 w-fit">
+              {([['plan', '계획', ClipboardCheck], ['result', '결과', BarChart3]] as const).map(([key, label, Icon]) => (
+                <button
+                  key={key}
+                  onClick={() => setTab(key)}
+                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    tab === key ? 'bg-white/10 text-white' : 'text-white/45 hover:text-white/70'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" /> {label}
+                </button>
+              ))}
+            </div>
+
+            {tab === 'result' ? (
+              /* ── 결과 브리핑 — 실측 집계(목업 없음) ─────────────── */
+              resultLoading ? (
+                <div className="py-20 flex items-center justify-center text-white/40 text-sm">
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" /> 결과를 불러오는 중...
+                </div>
+              ) : !result || result.events.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-white/10 py-14 text-center text-sm text-white/50">
+                  아직 집계할 결과가 없습니다. 발송이 시작되면 여기에 실제 수치가 쌓입니다.
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                      <div className="text-[11px] text-white/45">행사</div>
+                      <div className="mt-1 text-2xl font-semibold tabular-nums">{result.events.length}</div>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                      <div className="text-[11px] text-white/45">채널 접점</div>
+                      <div className="mt-1 text-2xl font-semibold tabular-nums">{result.totals.touchpointCount}</div>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                      <div className="text-[11px] text-white/45">발송</div>
+                      <div className="mt-1 text-2xl font-semibold tabular-nums">{result.totals.sentCount.toLocaleString()}</div>
+                      <div className="mt-0.5 text-[10px] text-white/40 tabular-nums">성공 {result.totals.successCount.toLocaleString()}</div>
+                    </div>
+                    <div className="rounded-2xl border border-emerald-400/25 bg-emerald-500/[0.08] px-4 py-3">
+                      <div className="text-[11px] text-emerald-200/70">행사 참여 신청</div>
+                      <div className="mt-1 text-2xl font-semibold tabular-nums text-emerald-100">{result.totals.participants.toLocaleString()}</div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    {result.events.map((ev) => (
+                      <div key={ev.id} className="rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
+                        <div className="px-4 md:px-5 py-3 border-b border-white/5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <span className="text-sm font-semibold">{ev.title}</span>
+                          <span className="text-xs text-white/40 tabular-nums">{ev.startsOn} ~ {ev.endsOn}</span>
+                          {ev.participants > 0 && (
+                            <span className="ml-auto text-[11px] text-emerald-200/80 tabular-nums">참여 신청 {ev.participants.toLocaleString()}명</span>
+                          )}
+                        </div>
+                        <div className="divide-y divide-white/5">
+                          {ev.touchpoints.map((t) => (
+                            <div key={t.id} className="px-4 md:px-5 py-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                              <div className="min-w-[9rem]">
+                                <div className="text-sm">{t.channelLabel}</div>
+                                <div className="text-[11px] text-white/40 tabular-nums">{t.scheduledOn}</div>
+                              </div>
+                              {TP_STATE[t.status] && (
+                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${TP_STATE[t.status].cls}`}>
+                                  {TP_STATE[t.status].label}
+                                </span>
+                              )}
+                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 ml-auto">
+                                {t.metrics.map((m, i) => (
+                                  <div key={i} className="text-right">
+                                    <div className="text-[10px] text-white/40">{m.label}</div>
+                                    <div className="text-sm font-semibold tabular-nums">{m.value}</div>
+                                  </div>
+                                ))}
+                              </div>
+                              {t.lockReason && (
+                                <div className="w-full text-[11px] text-amber-200/70">{t.lockReason}</div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-white/30 italic">
+                    Data source — 문자·알림톡은 발송 결과 집계, 이메일은 발송·열어봄·클릭 실측,
+                    참여 신청은 안내 메일의 참여 버튼 클릭 실측입니다. 추정값은 쓰지 않습니다.
+                  </p>
+                </>
+              )
+            ) : (
+            <>
             {/* ── 요약 4카드 ──────────────────────────────────────── */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
@@ -298,6 +466,21 @@ export default function PlannerBriefPage() {
                   </button>
                 )}
               </div>
+              {/* 대행 취소 — 제작·발송이 없는 달은 대행료를 전액 환불한다(설계 확정 규칙) */}
+              {(approved || submitted) && !brief.pastMonth && (
+                <div className="mt-3 pt-3 border-t border-white/10 flex items-center justify-between gap-3">
+                  <p className="text-[11px] text-white/45">
+                    대행을 그만두면 남은 발송 계획이 모두 중지됩니다. 그 달에 제작·발송이 없었다면 대행료는 전액 환불됩니다.
+                  </p>
+                  <button
+                    onClick={askCancel}
+                    disabled={busy !== null}
+                    className="flex-shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-white/15 text-white/60 hover:text-rose-200 hover:border-rose-400/30 hover:bg-rose-500/10 disabled:opacity-40 transition-colors"
+                  >
+                    <XCircle className="w-3.5 h-3.5" /> 대행 취소
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* 문자 문안은 결재 대상이 아니다 — 그 사실을 화면이 말한다 */}
@@ -353,7 +536,12 @@ export default function PlannerBriefPage() {
                       {ev.touchpoints.map((t) => (
                         <div key={t.id} className="px-4 md:px-5 py-3 flex flex-wrap items-start gap-x-4 gap-y-1.5">
                           <div className="min-w-[9rem]">
-                            <div className="text-sm">{t.label}</div>
+                            <div className="text-sm flex items-center gap-1.5">
+                              {t.label}
+                              {t.timing.audience === 'participants' && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-200 border border-emerald-400/25">행사 참여자</span>
+                              )}
+                            </div>
                             <div className="text-[11px] text-white/40">{timingLabel(t.timing)} · {t.scheduledOn}</div>
                           </div>
                           <div className="flex-1 min-w-[12rem]">
@@ -367,9 +555,28 @@ export default function PlannerBriefPage() {
                             </div>
                             <div className={`text-[11px] mt-0.5 ${t.audience.state === 'error' ? 'text-amber-200/70' : 'text-white/35'}`}>{t.audience.note}</div>
                           </div>
+                          {TP_STATE[t.status] && (
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${TP_STATE[t.status].cls}`}>
+                              {TP_STATE[t.status].label}
+                            </span>
+                          )}
                           <div className="text-[11px] tabular-nums text-white/50 ml-auto">
                             {t.estCredits != null ? `제작 ${t.estCredits.toLocaleString()}크레딧` : '실행 시 과금'}
                           </div>
+                          {/* 보류는 사유와 [다시 시작]을 그 자리에서 준다 — 클릭 1회로 이어서 진행한다 */}
+                          {(t.status === 'hold_credit' || t.status === 'locked') && (
+                            <div className="w-full flex flex-wrap items-center gap-2 pt-1">
+                              <PauseCircle className="w-3.5 h-3.5 text-amber-300/70 flex-shrink-0" />
+                              <span className="text-[11px] text-amber-200/80 flex-1 min-w-[10rem]">{t.lockReason || '진행이 멈춰 있습니다.'}</span>
+                              <button
+                                onClick={() => call(`/api/marketing-planner/touchpoints/${t.id}/resume`, 'resume')}
+                                disabled={busy !== null}
+                                className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg border border-amber-400/30 text-amber-100 hover:bg-amber-500/15 disabled:opacity-40 transition-colors"
+                              >
+                                <RotateCcw className="w-3 h-3" /> 다시 시작
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -382,6 +589,8 @@ export default function PlannerBriefPage() {
               Data source — 행사·채널은 플래너 계획 원장, 대상 수는 발송 게이트를 적용한 고객 데이터 실조회,
               크레딧은 소재 제작 단가와 월간 대행 요금 기준입니다. 문자·알림톡은 실행 시 별도 과금됩니다.
             </p>
+            </>
+            )}
           </>
         )}
       </div>

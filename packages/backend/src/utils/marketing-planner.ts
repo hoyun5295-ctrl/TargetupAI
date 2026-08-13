@@ -33,6 +33,12 @@ export interface TimingRule {
   anchor: TimingAnchor;
   /** before_start일 때만 의미. 1~30. */
   offsetDays?: number;
+  /**
+   * ★ 2026-08-13 Phase 4 — 대상 축. 'participants' = 그 행사 참여를 신청한 고객만(깔때기).
+   * 미지정 = 전체 수신 가능 고객. 알림톡은 서버가 언제나 participants로 고정한다(정보성 안내의 관계 근거).
+   * ⛔ 컬럼을 새로 만들지 않는다 — timing_rule jsonb 안에 둔다. 결재 지문(plan_hash)에도 포함된다.
+   */
+  audience?: 'all' | 'participants';
 }
 
 /**
@@ -133,19 +139,35 @@ export function parsePlannerEventInput(body: any): ParseResult {
         return { ok: false, error: '사전 안내는 시작 1~30일 전 사이로 선택해 주세요.' };
       }
     }
+    // ★ 2026-08-13 대상 축 — 서버가 채널별로 확정한다(프론트 값 그대로 믿지 않는다).
+    //   알림톡 = 언제나 참여 신청자(정보성 안내 전용) / 문자·DM = 선택 가능 /
+    //   이메일·인앱 = 전체(이메일은 깔때기의 입구이고, 인앱 노출은 방문 시점에 정해진다).
+    const wantParticipants = String(t?.timing?.audience ?? t?.audience ?? '') === 'participants';
+    const audience: 'all' | 'participants' =
+      channel === 'alimtalk' ? 'participants'
+      : (wantParticipants && (channel === 'sms' || channel === 'dm')) ? 'participants'
+      : 'all';
     touchpoints.push({
       channel,
-      timing: { anchor, ...(offsetDays ? { offsetDays } : {}) },
+      timing: { anchor, ...(offsetDays ? { offsetDays } : {}), ...(audience === 'participants' ? { audience } : {}) },
       format: t?.format ? String(t.format).trim().slice(0, 30) : null,
     });
   }
 
   // 같은 채널·같은 시점 중복 = 이중 발송 예약 — 기입 단계에서 막는다.
+  //   대상 축이 다르면 다른 발송이다(전체 안내 + 참여자 안내는 겹치지 않는다).
   const seen = new Set<string>();
   for (const t of touchpoints) {
-    const key = `${t.channel}:${t.timing.anchor}:${t.timing.offsetDays || 0}`;
+    const key = `${t.channel}:${t.timing.anchor}:${t.timing.offsetDays || 0}:${t.timing.audience || 'all'}`;
     if (seen.has(key)) return { ok: false, error: '같은 채널의 같은 시점이 중복 선택됐습니다.' };
     seen.add(key);
+  }
+
+  // 참여자 축을 고르려면 그 행사에 참여 접수 경로(이메일 안내)가 있어야 한다 — 없으면 대상이 영원히 0이다.
+  const hasEmailEntry = touchpoints.some((t) => t.channel === 'email');
+  const needsEntry = touchpoints.some((t) => t.timing.audience === 'participants');
+  if (needsEntry && !hasEmailEntry) {
+    return { ok: false, error: '행사 참여자에게 보내려면 참여 신청을 받을 이메일 안내를 함께 선택해 주세요.' };
   }
 
   return {

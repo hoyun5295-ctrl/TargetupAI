@@ -25,7 +25,7 @@ type Channel = 'sms' | 'alimtalk' | 'email' | 'dm' | 'inapp';
 type Anchor = 'start' | 'end' | 'before_start';
 
 interface Availability { channel: Channel; label: string; available: boolean; reason: string | null; estCredits: number | null }
-interface Touchpoint { id?: string; channel: Channel; label?: string; timing: { anchor: Anchor; offsetDays?: number }; estCredits?: number | null; scheduledOn?: string; lockReason?: string | null }
+interface Touchpoint { id?: string; channel: Channel; label?: string; timing: { anchor: Anchor; offsetDays?: number; audience?: 'all' | 'participants' }; estCredits?: number | null; scheduledOn?: string; lockReason?: string | null }
 interface PlannerEvent {
   id: string; title: string; startsOn: string; endsOn: string; benefitText: string | null;
   products: Array<{ name: string }>; status: string; touchpoints: Touchpoint[]; estCreditsTotal: number;
@@ -184,7 +184,19 @@ export default function MarketingPlannerPage() {
 
   const setTiming = (channel: Channel, anchor: Anchor, offsetDays?: number) => {
     setFTouchpoints((prev) => prev.map((t) => (
-      t.channel === channel ? { ...t, timing: { anchor, ...(anchor === 'before_start' ? { offsetDays: offsetDays || 5 } : {}) } } : t
+      t.channel === channel
+        // 대상 축(audience)은 시점 변경에 휩쓸리지 않게 보존한다.
+        ? { ...t, timing: { anchor, ...(anchor === 'before_start' ? { offsetDays: offsetDays || 5 } : {}), ...(t.timing.audience ? { audience: t.timing.audience } : {}) } }
+        : t
+    )));
+  };
+
+  /** ★ 2026-08-13 대상 축 — 전체 / 행사 참여 신청자. 서버가 채널별로 다시 확정한다(프론트 값 그대로 믿지 않는다). */
+  const setAudience = (channel: Channel, audience: 'all' | 'participants') => {
+    setFTouchpoints((prev) => prev.map((t) => (
+      t.channel === channel
+        ? { ...t, timing: { ...t.timing, ...(audience === 'participants' ? { audience } : { audience: undefined }) } }
+        : t
     )));
   };
 
@@ -544,6 +556,24 @@ export default function MarketingPlannerPage() {
                               </span>
                             )}
                           </div>
+                        )}
+                        {/* ★ 2026-08-13 대상 축 — 문자·DM만 고를 수 있다.
+                            알림톡은 언제나 참여 신청자(정보성 안내)라 선택지가 없고, 이메일은 참여 접수의 입구다. */}
+                        {selected && (a.channel === 'sms' || a.channel === 'dm') && (
+                          <label className="mt-2 ml-[28px] flex items-center gap-2 text-[11px] text-white/60 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={selected.timing.audience === 'participants'}
+                              onChange={(e) => setAudience(a.channel, e.target.checked ? 'participants' : 'all')}
+                              className="accent-violet-500"
+                            />
+                            행사 참여를 신청한 고객에게만 보내기
+                          </label>
+                        )}
+                        {selected && a.channel === 'alimtalk' && (
+                          <p className="mt-2 ml-[28px] text-[11px] text-white/45">
+                            알림톡은 행사 참여를 신청한 고객에게 보내는 안내입니다. 템플릿 검수는 대행해 드립니다.
+                          </p>
                         )}
                       </div>
                     );

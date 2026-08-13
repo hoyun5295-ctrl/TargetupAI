@@ -94,6 +94,7 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'continuous-operator': '자동 마케팅', 'continuous-operator-send': '자동 마케팅 발송',
   'marketing-calendar': '마케팅 캘린더 설계', 'marketing-calendar-month': '마케팅 캘린더 한 달 재설계',
   'planner-monthly-agency': '마케팅 플래너 월간 대행',
+  'planner-touchpoint-send': '마케팅 플래너 발송 문안',
   'predictive-daily': '예측 분석',
   'dm-ai-generate': '모바일 DM 생성', 'dm-builder': '모바일 DM 발행', 'dm-interaction-publish': '인터랙션 DM 발행',
   'inapp-ai-generator': '인앱 생성', 'inapp-publish': '인앱 게시', 'inapp-quick-action': '인앱 다듬기',
@@ -142,11 +143,15 @@ export const CONFIRM_CREDIT_COSTS: Record<string, number> = {
 export const CREDIT_TYPE_LABELS: Record<string, string> = {
   deduct: 'AI 작업', grant: '관리자 지급', admin_deduct: '관리자 차감',
   purchase: '크레딧 충전', reset: '월 기본분 리셋', postpaid_grant: '후불 지급',
+  // ★ 2026-08-13 환불 축 — 마케팅 플래너 월간 대행 취소(그 달 제작·발송 0건일 때 전액).
+  refund: '환불',
 };
 
-/** 크레딧 거래 1건 → 표시 라벨 (deduct=작업명, 그 외=type 라벨). */
+/** 크레딧 거래 1건 → 표시 라벨 (deduct·refund=작업명, 그 외=type 라벨). */
 export function creditTxLabel(type: string, source?: string | null): string {
   if (type === 'deduct') return (source && CREDIT_SOURCE_LABELS[source]) || 'AI 작업';
+  // 환불도 무엇을 되돌렸는지가 중요하다 — source 라벨 + '환불'.
+  if (type === 'refund') return source && CREDIT_SOURCE_LABELS[source] ? `${CREDIT_SOURCE_LABELS[source]} 환불` : '환불';
   return CREDIT_TYPE_LABELS[type] || type;
 }
 

@@ -76,8 +76,8 @@
 | 59 | agent_charge_requests | 에이전트 충전 **실행** 요청 원장 (2026-07-24 §5-3 신설·DDL 적용완료 — 멱등키 UNIQUE·감사. 게이트웨이 잔액/반영의 진실은 여전히 62 `RSRM_FillAmtHist`) |
 | 60 | agent_charge_orders | 에이전트 충전 **요청**(고객사 접수) — §5-4. 웹 `deposit_requests`와 축이 달라 별도 테이블(승인 시 올라가는 지갑이 다르다). **2026-08-11 운영 실존 확인** — 신청 원장일 뿐 지갑 원장이 아니다(직원 직접 충전은 여기 안 남는다) |
 | 61 | planner_events | 마케팅 플래너 행사 원장(월간 계획·혜택은 고객사 기입). **2026-08-12 운영 CREATE 완료 — 12컬럼 실측 확인.** 설계서 = `docs/2026-08-12-ax-marketing-planner-design.md` §5-1 |
-| 62 | planner_touchpoints | 플래너 터치포인트(행사×채널×시점). **2026-08-12 운영 CREATE 완료 — 12컬럼 실측 확인.** 발송 예정일은 저장하지 않고 조회 시 계산(행사 기간 수정 시 자동 추종 — 이중 진실 금지) |
-| 63 | planner_monthly_approvals **(2026-08-13 운영 CREATE 완료 — 19컬럼 실측 확인)** | 플래너 **월간 승인 원장**(Phase 2). `id uuid PK DEFAULT gen_random_uuid(), company_id uuid NOT NULL REFERENCES companies(id), plan_month varchar(7) NOT NULL, status varchar(20) NOT NULL DEFAULT 'pending' CHECK IN (pending·approving·approved·cancelled), agency_credits integer NOT NULL DEFAULT 0, est_snapshot jsonb NOT NULL DEFAULT '{}', event_ids uuid[] NOT NULL DEFAULT '{}', plan_hash varchar(64), approve_attempt uuid, deduct_idempotency_key varchar(120), deducted_at timestamptz, token varchar(64), token_expires_at timestamptz, submitted_by uuid, submitted_at timestamptz, approved_by uuid, approved_at timestamptz, created_at·updated_at timestamptz NOT NULL DEFAULT now(), UNIQUE(company_id, plan_month)`. `event_ids` = **제출 스냅샷**(승인 대상은 그 목록뿐 — 서류에 없던 행사는 승인되지 않는다) · `plan_hash` = **결재 서류 지문**(행사 ID가 같아도 혜택·기간·상품·채널·시점·단가가 바뀌면 다른 서류 → 재결재) · `approve_attempt` = 승인 시도 소유권(선점이 서류를 함께 돌려주고, 복구·확정을 같은 시도에 묶는다. 10분 lease로 회수). 차감 멱등키는 `ai_credit_transactions.idempotency_key`와 같은 값(`planner:{회사}:{YYYY-MM}`)이라 두 원장이 그 키로 대조된다. 코드 42P01 폴백(브리핑 503 · 캘린더 배너 생략) |
+| 62 | planner_touchpoints | 플래너 터치포인트(행사×채널×시점). **2026-08-12 운영 CREATE 완료 — 12컬럼 실측 확인**(`id·event_id·company_id·channel·timing_rule·format·est_credits·status·lock_reason·asset_ref·exec_ref·created_at` — **updated_at 없음, 쓰기 SQL에 넣지 말 것**). 발송 예정일은 저장하지 않고 조회 시 계산(행사 기간 수정 시 자동 추종 — 이중 진실 금지). **★2026-08-13 Phase 3 ADD 대기 = `exec_meta jsonb NOT NULL DEFAULT '{}'`**(채널별 실행 참조 — 알림톡 template_key·선점 시각·보류 사유·재제출 카운트. uuid 컬럼으로는 못 담는다). 대상 축(전체/참여자)은 `timing_rule.audience`가 갖는다(컬럼 신설 0). 코드 폴백 = 워커 4종이 `exec_meta` 실재를 단일 게이트로 확인하고 없으면 통째로 쉰다(부분 실행 금지) |
+| 63 | planner_monthly_approvals **(2026-08-13 운영 CREATE 완료 — 19컬럼 실측 확인)** | 플래너 **월간 승인 원장**(Phase 2). `id uuid PK DEFAULT gen_random_uuid(), company_id uuid NOT NULL REFERENCES companies(id), plan_month varchar(7) NOT NULL, status varchar(20) NOT NULL DEFAULT 'pending' CHECK IN (pending·approving·approved·cancelled), agency_credits integer NOT NULL DEFAULT 0, est_snapshot jsonb NOT NULL DEFAULT '{}', event_ids uuid[] NOT NULL DEFAULT '{}', plan_hash varchar(64), approve_attempt uuid, deduct_idempotency_key varchar(120), deducted_at timestamptz, token varchar(64), token_expires_at timestamptz, submitted_by uuid, submitted_at timestamptz, approved_by uuid, approved_at timestamptz, created_at·updated_at timestamptz NOT NULL DEFAULT now(), UNIQUE(company_id, plan_month)`. `event_ids` = **제출 스냅샷**(승인 대상은 그 목록뿐 — 서류에 없던 행사는 승인되지 않는다) · `plan_hash` = **결재 서류 지문**(행사 ID가 같아도 혜택·기간·상품·채널·시점·단가가 바뀌면 다른 서류 → 재결재) · `approve_attempt` = 승인 시도 소유권(선점이 서류를 함께 돌려주고, 복구·확정을 같은 시도에 묶는다. 10분 lease로 회수). 차감 멱등키는 `ai_credit_transactions.idempotency_key`와 같은 값(`planner:{회사}:{YYYY-MM}`)이라 두 원장이 그 키로 대조된다. 코드 42P01 폴백(브리핑 503 · 캘린더 배너 생략). **★2026-08-13 Phase 4 ADD 대기 = `result_notified_at timestamptz`**(월말 결과 통지 멱등 — 없으면 통지 패스만 쉰다. 결과 화면은 이 컬럼과 무관하게 동작) |
 | - | ai_training_logs | 문안 학습 로그 (회사별 tenant_ref HMAC 격리). ★ 2026-07-03 실측: `ck_training_message_type` CHECK = message_type IN ('SMS','LMS','MMS','KAKAO','EMAIL','DM') — DM 추가(전 채널 학습 통합 Phase 1). 적재=fire-and-forget 격리(발송 무영향), source_ref 멱등 |
 | - | ai_training_logs (클릭·전환 컬럼) | `click_count int` · `conversion_count int` — Tier1 반응 신호(DM·이메일 클릭 환류, 랭커/검색기 클릭 우선 정렬). **★2026-08-11 information_schema 실측 = 둘 다 실존**(0704 "ADD 대기" 표기는 낡은 기록 — `operator_proposals.conversion_attributed_at`·`operator_proposal_variants.sent/click/conversion_count`도 같은 실측으로 실존 확인). ⚠값 유입은 DM·이메일 클릭뿐 — SMS/LMS 클릭(short-url→변이 테이블)은 이 원장에 미배선(자기 개선 루프 설계의 Phase 0) |
 | - | best_copy_seed_usage **(2026-07-04 CREATE 대기)** | 시드 사용 기록(성과 환류). `id bigserial PK, seed_id uuid, tenant_ref varchar(64)=getTenantRef, channel varchar(10), used_at timestamptz`. INDEX(seed_id),(tenant_ref,used_at). 코드 42P01 폴백(미생성 무영향) |
@@ -1693,7 +1693,7 @@
 |------|------|------|
 | id | uuid PK | gen_random_uuid() |
 | company_id | uuid FK | companies(id) |
-| type | varchar(20) | deduct / grant / purchase / reset / postpaid_grant |
+| type | varchar(20) | deduct / grant / purchase / reset / postpaid_grant / **refund**(★2026-08-13 신설 — 마케팅 플래너 월간 대행 취소 환불) |
 | amount | integer | 크레딧 양 (항상 양수, 방향은 type) |
 | bucket | varchar(10) | base / purchased / mixed (reset=base) |
 | source | varchar(60) | AI 작업 source (orchestrate / dm-ai / generate-messages 등) |
@@ -1708,7 +1708,20 @@
 | billed_billing_id | uuid NULL **FK → billings(id) ON DELETE SET NULL** | ★2026-07-26 ALTER 신설. 초과사용분 **청구 완료 마커**. 없던 동안은 기간으로만 합산해서, 기간 경계를 UTC→KST로 옮기면 KST 00~09시 9시간 구간이 두 청구서에 두 번 들어갈 수 있었다(기간 중복검사는 날짜만 본다). `ai_credit_requests.billed_invoice_id`가 FK가 아니라 돈이 샌 전례가 있어 이쪽은 **FK로** 걸었다 — 청구서를 지우면 자동으로 NULL이 되어 다시 청구 대상이 된다. INDEX `idx_ai_credit_tx_billed_billing (billed_billing_id) WHERE billed_billing_id IS NOT NULL` |
 
 - **CHECK 제약 없음** (2026-07-26 `pg_constraint` 실측 — FK 2·PK 1·UNIQUE(idempotency_key) 1뿐. 같은 날 `billed_billing_id` FK 신설로 FK 3). `type`·`bucket`은 문자열이라 새 값을 넣어도 DB가 막지 않는다. 막아주는 게 없으니 **오타가 조용히 새 종류로 적재된다** — 값 추가 시 소비처(집계·화면) 전수 확인 의무.
-- `type` 실사용값: `deduct` · `reset` · `grant` · `admin_deduct`. `bucket` 실사용값: `base` · `purchased` · `mixed` · `overage`.
+- `type` 실사용값: `deduct` · `reset` · `grant` · `admin_deduct` · **`refund`**. `bucket` 실사용값: `base` · `purchased` · `mixed` · `overage`.
+- **★2026-08-13 `refund` 신설 시 전수 확인한 소비처 4곳**(CHECK가 없으니 코드가 유일한 방어다):
+  ①`getMonthlyUsage`·`sumDeductRows` → **차감 − 환불 순액**으로 정정(안 고치면 돌려준 것도 사용량으로 보인다)
+  ②정산 초과사용 집계 3문(`billing.ts`·`billing-issue.ts`×2 — `type='deduct' AND overage_credits>0`)은 **그대로 둔다.**
+    대신 환불이 **원 deduct 행의 `overage_credits`를 환불분만큼 줄인다**(미청구 행만 — `billed_billing_id IS NULL`).
+    집계 쪽을 고치지 않고 원장에서 상계하는 이유 = 발행된 청구서는 뒤에서 바꾸지 않는다는 계약을 지키면서,
+    "돈은 돌려줬는데 쓰지 않은 초과사용이 청구서에 남는" 구멍을 닫는 유일한 길이다.
+  ③크레딧 이력 화면 2곳(`CreditHistoryModal` `isPlus` · `AdminDashboard` 인라인 판정) → `refund`를 **증가 축**으로.
+  ④버킷 복원(★Codex 1R 정정) = `purchased`면 구매분 / `base`면 base / **`mixed`·`overage`면 음수 base를 먼저 0까지 메우고 나머지를 구매분으로.**
+    전액을 base로 넣으면 **월 리셋에서 양수 base가 소멸해 고객이 돈으로 산 구매분이 사라진다**(mixed 1000 환불 → purchased 900 소멸).
+    그리고 환불도 **월 리셋을 먼저 적용**한 뒤 얹는다(차감과 같은 순서 계약 — 월 경계 직후 환불이 다음 리셋에 덮이는 것을 막는다).
+    환불액은 **원 차감액을 넘지 못한다**(넘으면 없던 크레딧이 생긴다).
+  ⑤멱등키에 **결제 회차**를 넣는다 — `planner:{회사}:{월}`(회차 0) → 환불 뒤 재승인은 `#1`. 월 고정 키만 쓰면
+    "승인 → 무작업 취소·환불 → 재승인"이 duplicate로 끝나 **무료 대행**이 된다(Codex 1R high).
 
 > CT `utils/ai-credit.ts` (checkCredit/deductCredit/resetMonthlyCreditsIfNeeded) 단일 진입점. 2버킷(base→purchased) 트랜잭션 차감 + SELECT FOR UPDATE 음수 방지 + idempotency_key 중복 차단. 순수 계산은 `utils/ai-credit-calc.ts`(node:assert 검증). 차감=호출 성공 후(실패 시 미차감). 인덱스 `idx_ai_credit_tx_company_created (company_id, created_at DESC)`.
 

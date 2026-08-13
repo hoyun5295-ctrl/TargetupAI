@@ -5500,7 +5500,8 @@ const handleApproveRequest = async (id: string) => {
                       <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">사용 이력이 없습니다.</td></tr>
                     ) : (
                       creditTxAll.map((tx) => {
-                        const plus = tx.type === 'grant' || tx.type === 'purchase' || tx.type === 'postpaid_grant';
+                        // ★ 2026-08-13 환불(refund)도 잔액이 늘어나는 축 — CreditHistoryModal isPlus와 같은 기준.
+                        const plus = tx.type === 'grant' || tx.type === 'purchase' || tx.type === 'postpaid_grant' || tx.type === 'refund';
                         const after = Number(tx.balance_base_after || 0) + Number(tx.balance_purchased_after || 0);
                         return (
                           <tr key={tx.id} className="border-b last:border-0 hover:bg-gray-50">

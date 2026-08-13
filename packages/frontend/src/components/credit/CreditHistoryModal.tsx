@@ -42,7 +42,8 @@ const fmtDate = (s: string) => {
   return `${d.getMonth() + 1}.${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
-const isPlus = (t: string) => t === 'grant' || t === 'purchase' || t === 'postpaid_grant';
+// ★ 2026-08-13 환불(refund) = 잔액이 늘어나는 축 — 마이너스로 표시하면 이력이 거짓말이 된다.
+const isPlus = (t: string) => t === 'grant' || t === 'purchase' || t === 'postpaid_grant' || t === 'refund';
 const isReset = (t: string) => t === 'reset';
 
 export default function CreditHistoryModal({ onClose, onGoPricing, creditInfo }: Props) {

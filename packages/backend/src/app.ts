@@ -135,6 +135,9 @@ import { startGodoSyncWorker } from './utils/godo-sync-worker';
 import { startSystemMonitorWorker } from './utils/system-monitor-worker';
 // ★ 2026-07-05: 발송 피로도 보호 — send_fatigue_daily 45일 초과 버킷 프루닝 (6시간 주기)
 import { startFatiguePruneWorker } from './utils/fatigue-guard';
+// ★ 2026-08-13 마케팅 플래너 실행·대조 워커 (Phase 3·4)
+import { startPlannerExecutor } from './utils/planner-executor';
+import { startPlannerReconcileWorker } from './utils/planner-reconcile';
 // ★ 2026-07-19: P4 이미지 스튜디오 temp 산출물 7일 스윕 (1일 주기)
 import { startStudioTempSweeper } from './utils/studio-temp-sweeper';
 
@@ -550,6 +553,14 @@ app.listen(PORT, () => {
 
   // ★ 2026-07-19: P4 이미지 스튜디오 temp 산출물 7일 스윕 (1일 주기)
   startStudioTempSweeper();
+
+  // ★ 2026-08-13 마케팅 플래너 Phase 3·4 (docs/FEATURE-MARKETING-PLANNER.md)
+  //   실행(10분) = 오늘 예정 터치포인트를 당일 문안 생성 → 스팸 게이트 → 발송/게시.
+  //   대조(1시간) = 놓친 실행·producing 고아·취소 잔존·참여 클릭 수집 + 월말 결과 통지.
+  //   ⛔ 선언이 아니라 이 호출이 가동의 근거다(계약 테스트가 이 등재를 고정한다).
+  //   ⛔ planner_touchpoints.exec_meta ALTER 전에는 두 워커가 통째로 쉰다(부분 실행 금지).
+  startPlannerExecutor();
+  startPlannerReconcileWorker();
 });
 
 export default app;

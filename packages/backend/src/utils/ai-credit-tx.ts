@@ -190,6 +190,200 @@ export async function _deductWithClient(client: any, opts: DeductOpts, now: Date
   return { deducted: true, fromBase, fromPurchased, baseAfter, purchasedAfter };
 }
 
+// ════════════════════════════════════════════════════════════════════
+// 환불 (★ 2026-08-13 마케팅 플래너 Phase 3 — 인계 §4-⑤)
+//   고객이 자기 차감을 되돌리는 첫 축이다. 종전에는 슈퍼관리자 수동 조정(adjustCredit)뿐이었다.
+// ════════════════════════════════════════════════════════════════════
+
+export interface RefundOpts {
+  companyId: string;
+  amount: number;
+  /** 무엇을 되돌리는가 — 원 차감의 source를 그대로 쓴다(원장에서 짝이 보인다). */
+  source: string;
+  reason: string;
+  createdBy?: string | null;
+  /** 환불 멱등키 — 같은 키 재요청은 두 번 돌려주지 않는다. */
+  idempotencyKey: string;
+  /** 원 차감의 멱등키 — 버킷 복원 판정과 초과사용 상계의 근거. */
+  originalIdempotencyKey?: string | null;
+  /**
+   * ★ 2026-08-13 Codex 2R — false면 **BEGIN/COMMIT을 호출부가 관리한다.**
+   * 취소처럼 "원장 전이와 환불이 같은 트랜잭션이어야 하는" 경로가 쓴다 —
+   * 나뉘면 취소만 커밋되고 환불이 유실되는 창이 남는다(재시도 근거가 원장에 없다).
+   */
+  manageTx?: boolean;
+}
+
+export interface RefundResult {
+  refunded: boolean;
+  amount: number;
+  skipReason?: 'duplicate' | 'no_credit_row' | 'no_original' | 'partial_not_supported' | 'already_refunded';
+}
+
+/**
+ * 크레딧 환불 (트랜잭션 · 멱등).
+ *
+ * **버킷 복원 규칙** — 원 차감 행의 bucket을 보고 되돌린다:
+ *   base → base / purchased → purchased / mixed·overage → base.
+ *   섞인 차감의 분할 비율은 원장에 남지 않으므로(bucket 하나만 남는다) base로 되돌린다 —
+ *   base는 월 리셋에서 상계되는 항아리라 과다 환급이 이월되지 않는 쪽이다.
+ *
+ * ⛔ **초과사용(overage) 상계** — 후불 회사에서 그 차감이 초과사용으로 잡혔고 아직 청구되지 않았다면
+ *    그 행의 overage_credits를 환불분만큼 줄인다. 줄이지 않으면 돈은 돌려줬는데 월말 청구서에는
+ *    쓰지 않은 초과사용이 남는다(정산 집계는 `type='deduct' AND overage_credits > 0`을 읽는다).
+ *    이미 청구된 행(billed_billing_id NOT NULL)은 건드리지 않는다 — 발행된 문서를 뒤에서 바꾸지 않는다.
+ */
+/** 환불 행에 남기는 원 차감 키 표식 — 누적 상한 판정의 결속 축(원장 컬럼 추가 없이). */
+const ORIG_TAG_PREFIX = '[orig:';
+
+export async function refundCreditWithClient(client: any, opts: RefundOpts, now: Date): Promise<RefundResult> {
+  const amount = Math.max(0, Math.floor(Number(opts.amount) || 0));
+  if (amount <= 0) return { refunded: false, amount: 0 };
+  const manageTx = opts.manageTx !== false;
+  const rollback = async () => { if (manageTx) await client.query('ROLLBACK'); };
+
+  if (manageTx) await client.query('BEGIN');
+  const locked = await loadCreditRow(client, opts.companyId, true);
+  if (!locked) {
+    await rollback();
+    return { refunded: false, amount: 0, skipReason: 'no_credit_row' };
+  }
+  // 잠금 획득 후 멱등 확인 — 동시 재요청 이중 환불 차단(차감과 같은 순서 계약).
+  const dup = await client.query(
+    `SELECT 1 FROM ai_credit_transactions WHERE idempotency_key = $1 LIMIT 1`,
+    [opts.idempotencyKey],
+  );
+  if (dup.rows.length > 0) {
+    await rollback();
+    return { refunded: false, amount: 0, skipReason: 'duplicate' };
+  }
+
+  // ⛔ **월 리셋을 먼저 적용한다**(차감과 같은 순서 계약). 월 경계 직후에 환불을 얹으면
+  //   그 다음 차감·조회가 lazy 리셋을 돌려 방금 넣은 금액을 통째로 덮어쓴다.
+  const row0 = await applyResetIfNeeded(client, opts.companyId, locked, now);
+
+  let bucket = 'base';
+  let originalAmount = 0;
+  let origRow: any = null;
+  if (opts.originalIdempotencyKey) {
+    const orig = await client.query(
+      `SELECT id, amount, bucket, overage_credits, billed_billing_id, created_at,
+              balance_base_after, balance_purchased_after
+         FROM ai_credit_transactions
+        WHERE idempotency_key = $1 AND company_id = $2::uuid AND type = 'deduct'
+        LIMIT 1`,
+      [opts.originalIdempotencyKey, opts.companyId],
+    );
+    const row = orig.rows[0];
+    if (!row) {
+      await rollback();
+      return { refunded: false, amount: 0, skipReason: 'no_original' };
+    }
+    origRow = row;
+    originalAmount = Number(row.amount) || 0;
+    bucket = String(row.bucket || 'base');
+    const overage = Number(row.overage_credits) || 0;
+    if (overage > 0 && !row.billed_billing_id) {
+      const remain = Math.max(0, overage - amount);
+      await client.query(
+        `UPDATE ai_credit_transactions SET overage_credits = $2 WHERE id = $1 AND billed_billing_id IS NULL`,
+        [row.id, remain],
+      );
+    }
+  }
+  // ⛔ **전액 환불만 지원한다.** 부분 환불을 허용하면 (a)구성분 반올림이 누적되어 항아리가 뒤바뀌고
+  //   (b)서로 다른 멱등키로 나눠 환불해 원 차감액을 넘길 수 있다. 우리 환불 축(월간 대행 취소)은
+  //   언제나 전액이므로, 지원하지 않는 것을 지원하는 척하지 않는다.
+  if (originalAmount > 0 && amount !== originalAmount) {
+    await rollback();
+    return { refunded: false, amount: 0, skipReason: 'partial_not_supported' };
+  }
+  // ⛔ **같은 원 차감에 대한 누적 환불 상한** — 멱등키가 달라도 두 번 돌려주지 않는다.
+  //   환불 행에 원 차감 키 표식을 남겨(reason) 그 합으로 판정한다(원장 컬럼 추가 없이 결속).
+  if (opts.originalIdempotencyKey) {
+    const already = await client.query(
+      `SELECT COALESCE(SUM(amount), 0)::int AS sum FROM ai_credit_transactions
+        WHERE company_id = $1::uuid AND type = 'refund' AND reason LIKE $2`,
+      [opts.companyId, `%${ORIG_TAG_PREFIX}${opts.originalIdempotencyKey}]%`],
+    );
+    if ((Number(already.rows[0]?.sum) || 0) + amount > originalAmount) {
+      await rollback();
+      return { refunded: false, amount: 0, skipReason: 'already_refunded' };
+    }
+  }
+
+  const base = Number(row0.base) || 0;
+  const purchased = Number(row0.purchased) || 0;
+  /**
+   * 버킷 복원 —
+   *  - 원 차감이 base만/purchased만이면 그 항아리로 그대로 되돌린다(정확).
+   *  - mixed·overage는 분할 비율이 원장에 남지 않는다. 그때는 **음수 base를 먼저 0까지 메우고
+   *    나머지를 purchased로** 되돌린다. 전액을 base로 넣으면 월 리셋에서 양수 base가 소멸해
+   *    고객이 돈으로 산 구매분이 사라진다(mixed 1000 환불 → purchased 900 소멸).
+   */
+  let toBase = 0;
+  let toPurchased = 0;
+  /**
+   * ★ 2026-08-13 Codex 2R — **원 차감의 실제 구성분을 복원한다.**
+   * 원장에 from_base/from_purchased 컬럼은 없지만, 차감 행의 `balance_*_after`와
+   * **그 직전 거래 행의 after**가 있으면 차이로 정확히 계산된다(before − after).
+   * 그것을 못 구할 때만 coarse bucket 규칙으로 내려간다.
+   */
+  let split: { fromBase: number; fromPurchased: number } | null = null;
+  if (origRow) {
+    const prev = await client.query(
+      `SELECT balance_base_after, balance_purchased_after
+         FROM ai_credit_transactions
+        WHERE company_id = $1::uuid AND (created_at, id) < ($2, $3)
+        ORDER BY created_at DESC, id DESC LIMIT 1`,
+      [opts.companyId, origRow.created_at, origRow.id],
+    );
+    const p0 = prev.rows[0];
+    if (p0) {
+      const fromBase = Math.max(0, Number(p0.balance_base_after) - Number(origRow.balance_base_after));
+      const fromPurchased = Math.max(0, Number(p0.balance_purchased_after) - Number(origRow.balance_purchased_after));
+      // ⛔ **자가 검증** — 구성분 합이 (차감액 − 초과사용분)과 정확히 맞을 때만 신뢰한다.
+      //   같은 트랜잭션에 월 리셋 행이 함께 들어간 경우처럼 "직전 행"이 애매할 수 있어,
+      //   맞지 않으면 코스한 bucket 규칙으로 내려간다(틀린 정밀도보다 안전한 근사가 낫다).
+      const expected = originalAmount - (Number(origRow.overage_credits) || 0);
+      if (fromBase + fromPurchased === expected && expected > 0) split = { fromBase, fromPurchased };
+    }
+  }
+  if (split) {
+    // 전액 환불이라 구성분을 그대로 되돌린다(반올림 없음).
+    toBase = Math.min(amount, split.fromBase);
+    toPurchased = amount - toBase;
+  } else if (bucket === 'purchased') {
+    toPurchased = amount;
+  } else if (bucket === 'base') {
+    toBase = amount;
+  } else {
+    toBase = base < 0 ? Math.min(amount, -base) : 0;
+    toPurchased = amount - toBase;
+  }
+  const baseAfter = base + toBase;
+  const purchasedAfter = purchased + toPurchased;
+  const recordBucket = toBase > 0 && toPurchased > 0 ? 'mixed' : (toPurchased > 0 ? 'purchased' : 'base');
+  await client.query(
+    `UPDATE companies SET ai_credits_base_remaining = $2, ai_credits_purchased = $3 WHERE id = $1::uuid`,
+    [opts.companyId, baseAfter, purchasedAfter],
+  );
+  await client.query(
+    `INSERT INTO ai_credit_transactions
+       (company_id, type, amount, bucket, source, idempotency_key,
+        balance_base_after, balance_purchased_after, created_by, reason)
+     VALUES ($1::uuid, 'refund', $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (idempotency_key) DO NOTHING`,
+    [
+      opts.companyId, amount, recordBucket, opts.source.slice(0, 60), opts.idempotencyKey,
+      baseAfter, purchasedAfter, opts.createdBy || null,
+      `${(opts.reason || '').slice(0, 420)}${opts.originalIdempotencyKey ? ` ${ORIG_TAG_PREFIX}${opts.originalIdempotencyKey}]` : ''}`.slice(0, 500),
+    ],
+  );
+  if (manageTx) await client.query('COMMIT');
+  return { refunded: true, amount };
+}
+
 export interface AdjustOpts {
   companyId: string;
   amount: number;

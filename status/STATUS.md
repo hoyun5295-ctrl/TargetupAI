@@ -34,10 +34,10 @@
 > **경위·수치·근본원인·함정은 SoT 문서와 memory가 소유한다.** 여기 재서술 = doc_ownership 위반. 지우기 전 소유 문서에 그 사실이 실존하는지 grep으로 확인하고, 없으면 소유 문서에 먼저 옮긴 뒤 지운다.
 > **회전 룰:** 잔여가 0이면 카드를 지운다(원문 = archive/TASKS_YYYY-MM.md + memory). 남은 일만 아래 "완료분 잔여"에 한 줄. 30KB 초과 = 회전 미이행.
 
-### 마케팅 플래너 (AX 월간 대행) — Phase 0·1·**2 전량 배포완료 + DDL 실행완료**(0813 · 남은 DDL 0)
-> 호출어 **"마케팅 플래너"** → **[FEATURE-MARKETING-PLANNER.md](../docs/FEATURE-MARKETING-PLANNER.md)가 전부 소유**(정체성 §2 · 불변 원칙 §3 · 구조 §4 · 요금 §5 · 단계 §6 · 남은 것 §8). 근거·실측 원장 = [시점 설계서](../docs/2026-08-12-ax-marketing-planner-design.md)
-> ⛔ 불변 원칙 8개는 기능 문서 §3이 소유 — 여기 재서술 금지. 핵심 = **미승인 = 미발송 = 미차감** · 문안은 당일·소재는 승인 후 · 가용성 판정 실패 = fail-closed · 승인은 **선점 → 차감 → 확정** 순서
-> 잔여 = Phase 1 화면 실측 3건 · Phase 2 실측 4건 · 다음 = **Phase 3·4 한번에**(Harold 확정) — 착수 원장 = [0813 인계 문서](../docs/2026-08-13-planner-phase34-handoff.md)(호출어 "마케팅 플래너 3,4" · 스키마 실측 완료·전용 워커 판단 확정·코드 변경 0)
+### 마케팅 플래너 (AX 월간 대행) — Phase 0~2 배포완료 + **Phase 3·4 코드완료**(0813 · DDL 2건은 배포 후)
+> 호출어 **"마케팅 플래너"** → **[FEATURE-MARKETING-PLANNER.md](../docs/FEATURE-MARKETING-PLANNER.md)가 전부 소유**(정체성 §2 · 불변 원칙 §3 11개 · 구조 §4 · 요금 §5 · 단계 §6 · 이력 §7 · 남은 것 §8). 근거·실측 원장 = [시점 설계서](../docs/2026-08-12-ax-marketing-planner-design.md) · Phase 3·4 근거 = [0813 인계 문서](../docs/2026-08-13-planner-phase34-handoff.md)
+> ⛔ 불변 원칙은 기능 문서 §3이 소유 — 여기 재서술 금지. 핵심 = **미승인 = 미발송 = 미차감** · 문안은 당일·소재는 승인 후 · **실행은 예정일 당일만**(놓친 날은 생략) · **남의 제작물 과금 키는 그 기능의 키** · **선점 표식 없는 producing은 고아가 아니다**
+> 잔여 = **배포 후 DDL 2문**(`planner_touchpoints.exec_meta` · `planner_monthly_approvals.result_notified_at` — 그전까지 워커 4종은 통째로 쉰다) · **Phase 3·4 실측 5건 + Phase 1·2 화면 실측 7건 = [기능 문서 §8](../docs/FEATURE-MARKETING-PLANNER.md)이 착수 원장**
 
 ### 자사몰 연동 — Phase 0~4 + **고도몰 주기 수집·여정 소급 가드·권한 점검·조치 필요 배지**(0810(2)~(4)) 코드완료
 > 호출어 **"자사몰 연동"** → **[FEATURE-CDP-INTEGRATION.md](../docs/FEATURE-CDP-INTEGRATION.md)가 전부 소유**(불변 원칙 §2 · provider 현황 §4 · 구조 §3 · 이력 §6·§6-3~§6-5 · 남은 것 §7·§7-1). 시점 설계 = [0809 설계서](../docs/2026-08-09-cdp-integration-redesign-design.md), API 스펙 = INTEGRATIONS.md

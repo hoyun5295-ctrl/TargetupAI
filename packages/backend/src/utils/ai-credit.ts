@@ -21,15 +21,18 @@ import {
   applyResetIfNeeded,
   _deductWithClient,
   adjustCreditWithClient,
+  refundCreditWithClient,
   InsufficientCreditError,
   type CreditState,
   type DeductResult,
   type DeductOpts,
   type AdjustOpts,
+  type RefundOpts,
+  type RefundResult,
 } from './ai-credit-tx';
 
 export { InsufficientCreditError };
-export type { CreditState, DeductResult, DeductOpts };
+export type { CreditState, DeductResult, DeductOpts, RefundOpts, RefundResult };
 
 /** 현재 크레딧 상태 조회(읽기 전용). 리셋 필요 시 base를 요금제 기본분으로 환산해 표시. */
 export async function getCreditState(companyId: string): Promise<CreditState> {
@@ -186,6 +189,23 @@ export async function deductCreditSafe(
   return false;
 }
 
+/**
+ * 크레딧 환불 (★ 2026-08-13 마케팅 플래너) — 멱등키 필수. 트랜잭션·버킷 복원은 ai-credit-tx가 소유한다.
+ * 되돌릴 차감이 없으면(no_original) 환불하지 않는다 — 근거 없는 지급을 만들지 않는다.
+ */
+export async function refundCredit(opts: RefundOpts): Promise<RefundResult> {
+  if (!opts.companyId || !opts.amount || opts.amount <= 0) return { refunded: false, amount: 0 };
+  const client = await pool.connect();
+  try {
+    return await refundCreditWithClient(client, opts, new Date());
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* 이미 종료된 트랜잭션 */ }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 /** 명시적 월 리셋(워커/관리자용). 리셋했으면 true. */
 export async function resetMonthlyCreditsIfNeeded(companyId: string): Promise<boolean> {
   if (!companyId) return false;
@@ -211,14 +231,18 @@ export async function resetMonthlyCreditsIfNeeded(companyId: string): Promise<bo
   }
 }
 
-/** 이번 달(KST) 크레딧 차감 합 = "이번달 사용량". */
+/**
+ * 이번 달(KST) 크레딧 순사용량 = 차감 − 환불.
+ * ★ 2026-08-13: 환불 축이 생겨(마케팅 플래너 대행 취소) deduct만 세면 되돌려준 것까지 사용량으로 보인다.
+ *   화면이 "쓴 만큼"을 말해야 하므로 순액으로 센다(reset·grant·admin_deduct는 여전히 제외).
+ */
 export async function getMonthlyUsage(companyId: string): Promise<number> {
   if (!companyId) return 0;
   try {
     const r = await pool.query(
-      `SELECT COALESCE(SUM(amount), 0) AS used
+      `SELECT COALESCE(SUM(CASE WHEN type = 'deduct' THEN amount WHEN type = 'refund' THEN -amount ELSE 0 END), 0) AS used
          FROM ai_credit_transactions
-        WHERE company_id = $1::uuid AND type = 'deduct'
+        WHERE company_id = $1::uuid AND type IN ('deduct', 'refund')
           AND created_at >= date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul'`,
       [companyId]
     );
