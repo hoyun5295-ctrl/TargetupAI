@@ -383,7 +383,10 @@
 | cost_per_lms | numeric NULL — ★2026-07-24 |
 | cost_per_mms | numeric NULL — ★2026-07-24 |
 | cost_per_kakao | numeric NULL — ★2026-07-24 |
+| cost_per_brand | numeric NULL — ★2026-07-29 브랜드메시지(게이트웨이 MsgType `G`). **2026-08-14 information_schema 실측 확인** — 0729 트랙에서 DDL까지 끝나 있었는데 이 표가 0724 시점에 멈춰 있어 "미신설"로 오독됐다 |
 - INDEX idx_company_agent_ids_company (company_id)
+- 2026-08-14 실측: **11컬럼**. 단가 5종(sms·lms·mms·kakao·brand) 전부 nullable(NULL=미설정 — 명시 0원과 구분).
+  단가 컬럼 목록은 코드에서 `BILLING_TYPES.agentPriceColumn` 파생이라(billing-ledger.ts) 유형을 늘려도 SELECT·지문·미설정 가드가 자동 확장된다 — 목록을 손으로 두 벌 두지 않는다.
 - 2026-07-24 ALTER 적용 실측: 10컬럼·기존 283행 전부 postpaid. 잔액은 컬럼 없음(이중 진실 금지 — 게이트웨이 RSRM_SalesStts.RemAmt 최신 DestDt 행을 조회만). SoT=docs/2026-07-24-agent-prepaid-charge-design.md
 
 ### [외부 MySQL] sales.RSRM_SalesStts — 에이전트(PAY 엔진) 발송 통계 ★2026-07-25 등재

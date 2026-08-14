@@ -248,6 +248,55 @@ export function resolveRelayOwnerCustId(storeId: string | null | undefined): str
   return m ? m[1].toUpperCase() : null;
 }
 
+/**
+ * ★ 2026-08-14 발송ID × MsgType **실적**(성공 > 0, 전 기간) — 단가 공백 목록을 실제 발송분으로 좁히는 축.
+ *
+ * 왜 필요한가 — `GET /billing/agent-price-gaps`가 "단가 NULL"만 보고 목록을 만들어서, 유형이 하나 늘 때마다
+ * (0729 브랜드 `G`) 그 유형을 **쓰지도 않는** 발송ID까지 전부 목록에 올라왔다. 2026-08-14 실측 190행 중
+ * 대부분이 그 소음이었고, 정작 급한 "전 유형 미설정" 20행이 묻혔다.
+ * 발행 게이트(`priceBillingRows`)는 이미 `success > 0`일 때만 막는다 — **목록도 같은 기준이어야** 한다.
+ *
+ * 기간을 자르지 않는 이유: 과거 기간을 재발행할 때도 그 단가가 필요하다. 한 번이라도 보냈으면 대상이다.
+ * 부달 재전송(중계 계정) 행은 원 발송ID로 귀속한다 — 안 그러면 그 계정으로만 보낸 유형이 목록에서 빠져
+ * "채울 것 없음"으로 보이는데 발행은 막힌다(가장 위험한 방향).
+ *
+ * @returns null = 수집 DB 미설정. 호출부는 **fail-open**(실적을 모르면 전부 보여준다) — 실재하는 공백을
+ *   숨기면 마감일에 이유 없이 막힌 발행을 찾아다니게 된다.
+ */
+export interface AgentUsedType { custId: string; msgType: string; success: number }
+
+export async function queryAgentUsedTypes(): Promise<AgentUsedType[] | null> {
+  const pool = getPool();
+  if (!pool) return null;
+  try {
+    const [rows] = await pool.query(
+      `SELECT CustId, StoreId, MsgType, SUM(OkCnt) AS ok
+         FROM RSRM_SalesStts
+        GROUP BY CustId, StoreId, MsgType
+       HAVING SUM(OkCnt) > 0`,
+    );
+    const acc = new Map<string, AgentUsedType>();
+    for (const r of rows as any[]) {
+      const rawCust = String(r.CustId || '').trim().toUpperCase();
+      if (!rawCust) continue;
+      // 중계 계정 행은 원 발송ID로 귀속(못 뽑으면 미귀속 — 어느 회사 몫인지 모르므로 버린다)
+      const custId = isRelayCustId(rawCust) ? resolveRelayOwnerCustId(r.StoreId) : rawCust;
+      if (!custId) continue;
+      const msgType = String(r.MsgType || '').trim().toUpperCase();
+      if (!msgType) continue;
+      const k = `${custId}|${msgType}`;
+      const cur = acc.get(k);
+      const ok = Number(r.ok) || 0;
+      if (cur) cur.success += ok;
+      else acc.set(k, { custId, msgType, success: ok });
+    }
+    return Array.from(acc.values());
+  } catch (err: any) {
+    console.log('[pay-stats] 발송ID 실적 조회 실패:', err?.message || err);
+    return null;   // 조회 실패도 fail-open — 호출부가 "실적 미확인"으로 표시한다
+  }
+}
+
 /** 중계 계정 원본 행 + 해석된 원 발송ID (ownerCustId=null 이면 미귀속) */
 export interface RelayResolvedRow {
   period_dt: string; // DestDt(YYYYMMDD)

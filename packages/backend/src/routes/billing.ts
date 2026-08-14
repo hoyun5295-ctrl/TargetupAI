@@ -43,6 +43,9 @@ import {
 } from '../utils/plan-proration';
 // ★ 2026-07-27 발송ID 표시명(발급명) 단일 소스 — 청구서 상세·미리보기도 화면과 같은 이름을 쓴다.
 import { getAgentCustNameMap } from '../utils/pay-stats';
+// ★ 2026-08-14 단가 공백 목록을 실제 발송 실적으로 좁힌다(발행 게이트와 같은 기준)
+import { queryAgentUsedTypes } from '../utils/pay-stats';
+import { agentUsageKey } from '../utils/send-usage-aggregation';
 // ★ 2026-07-28 발행 코어 CT — /generate와 거래내역서 일괄발급 배치가 같은 함수를 쓴다(동작 무변경 추출).
 import {
   issueBilling, issueMinimumChargeBilling, BillingIssueError,
@@ -52,7 +55,15 @@ import {
 // ★ 2026-08-05 요금제 무료 제공 — 미리보기가 발행과 같은 공제를 적용하게 한다(§2-4 규약)
 import { readFreeDeductibleForBilling } from '../utils/free-messaging';
 // ★ 2026-08-05 청구 수량 정의 CT — 미리보기가 발행·인쇄와 같은 식을 쓰게 한다
-import { billableQuantity } from '../utils/billing-types';
+import { billableQuantity, BILLING_TYPES } from '../utils/billing-types';
+
+/**
+ * ★ 2026-08-14 발송ID 단가를 **입력할 수 있는** 유형키. 축 정의에서 파생한다(목록 두 벌 금지).
+ * 여기 없는 유형키는 실적이 있어도 단가 입력으로 못 고친다 — 축에 유형을 추가해야 풀린다.
+ */
+const PRICEABLE_AGENT_TYPE_KEYS = new Set(
+  BILLING_TYPES.filter((t) => t.agentPriceColumn).map((t) => t.key),
+);
 // ★ 2026-07-30 수정세금계산서 — 사유별 장 구성 계약(순수). 라우트는 이 계획을 트랜잭션 INSERT만 한다.
 // ★ 2026-08-05 발행 완료분 메일 재발송(서수란 접수) — 재발행이 아니라 같은 문서번호로 메일만 다시 보낸다.
 import {
@@ -1964,8 +1975,39 @@ router.get('/agent-price-gaps', async (_req: Request, res: Response) => {
         ORDER BY c.company_name, cai.agent_send_id`,
     );
 
+    // ★ 2026-08-14 실적으로 좁힌다 — 발행 게이트(priceBillingRows)가 `success > 0`일 때만 막으므로
+    //   목록도 같은 기준이어야 한다. 안 그러면 유형이 하나 늘 때마다(0729 브랜드 G) 그 유형을 쓰지도
+    //   않는 발송ID까지 전부 올라와, 정작 급한 "전 유형 미설정" 행이 소음에 묻힌다(0814 실측 190행).
+    //   실적을 못 읽으면(수집 DB 미설정·조회 실패) **fail-open** — 전부 보여주고 그 사실을 함께 돌려준다.
+    //   공백을 숨기는 쪽이 훨씬 위험하다(마감일에 이유 없이 막힌 발행을 찾아다니게 된다).
+    const usedTypes = await queryAgentUsedTypes();
+    const usageKnown = usedTypes !== null;
+    const usedByCustId = new Map<string, Set<string>>();
+    for (const u of usedTypes || []) {
+      const set = usedByCustId.get(u.custId) || new Set<string>();
+      set.add(agentUsageKey(u.msgType));   // MsgType → 청구 유형키 (CT 재사용 — 매핑 두 벌 금지)
+      usedByCustId.set(u.custId, set);
+    }
+
     const byCompany = new Map<string, any>();
     for (const r of result.rows as any[]) {
+      const sendId = String(r.agent_send_id || '').trim().toUpperCase();
+      const used = usedByCustId.get(sendId);
+      const allUnset = [
+        r.sms_unset ? 'SMS' : '', r.lms_unset ? 'LMS' : '',
+        r.mms_unset ? 'MMS' : '', r.kakao_unset ? 'KAKAO' : '',
+        r.brand_unset ? 'BRAND' : '',
+      ].filter(Boolean);
+      // 실적을 아는 경우에만 좁힌다. 실적 0인 발송ID는 행 자체를 뺀다(발행을 막지 않으므로).
+      const unset = usageKnown ? allUnset.filter((k) => used?.has(k)) : allUnset;
+      if (unset.length === 0) continue;
+
+      // 실적은 있는데 단가 컬럼 자체가 없는 유형 — 단가 입력으로 못 고치고, 발행은 똑같이 막힌다.
+      //   (에이전트 `KS`·`KL` 대체발송 등. 축 정의에 유형을 추가해야 풀린다)
+      const unpriceable = usageKnown
+        ? Array.from(used || []).filter((k) => !PRICEABLE_AGENT_TYPE_KEYS.has(k)).sort()
+        : [];
+
       const key = String(r.company_id);
       if (!byCompany.has(key)) {
         byCompany.set(key, {
@@ -1974,18 +2016,17 @@ router.get('/agent-price-gaps', async (_req: Request, res: Response) => {
       }
       byCompany.get(key).send_ids.push({
         agent_send_id: r.agent_send_id,
-        unset: [
-          r.sms_unset ? 'SMS' : '', r.lms_unset ? 'LMS' : '',
-          r.mms_unset ? 'MMS' : '', r.kakao_unset ? 'KAKAO' : '',
-          r.brand_unset ? 'BRAND' : '',
-        ].filter(Boolean),
+        unset,
+        ...(unpriceable.length > 0 ? { unpriceable } : {}),
       });
     }
     const companies = Array.from(byCompany.values());
     return res.json({
       companies,
       company_count: companies.length,
-      send_id_count: result.rows.length,
+      send_id_count: companies.reduce((a, c) => a + c.send_ids.length, 0),
+      /** false = 발송 실적을 못 읽어 좁히지 못했다(전부 표시 중) */
+      usage_known: usageKnown,
     });
   } catch (error: any) {
     const emsg = error?.message || '';
