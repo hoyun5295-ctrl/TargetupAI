@@ -491,35 +491,9 @@ router.post('/', blockIfSyncActive, async (req: Request, res: Response) => {
       return res.status(400).json({ error: '전화번호는 필수입니다' });
     }
 
-    // 요금제 제한 체크
-    const limitCheck = await query(`
-      SELECT
-        c.id,
-        p.max_customers,
-        p.plan_name,
-        p.customer_db_enabled,
-        (SELECT COUNT(*) FROM customers WHERE company_id = c.id AND is_active = true) as current_count
-      FROM companies c
-      LEFT JOIN plans p ON c.plan_id = p.id
-      WHERE c.id = $1
-    `, [companyId]);
-
-    if (limitCheck.rows.length > 0) {
-      const { max_customers, current_count, plan_name, customer_db_enabled } = limitCheck.rows[0];
-      // ★ 2026-06-08: 고객 DB 업로드는 유료 요금제만 (FREE/미가입 customer_db_enabled=false → 차단)
-      if (!customer_db_enabled) {
-        return res.status(403).json({ error: '고객 DB 업로드는 유료 요금제에서 이용 가능합니다.', code: 'CUSTOMER_DB_LOCKED', planName: plan_name });
-      }
-      if (max_customers && current_count >= max_customers) {
-        return res.status(403).json({ 
-          error: '요금제 고객 수 제한을 초과했습니다.',
-          code: 'PLAN_LIMIT_EXCEEDED',
-          planName: plan_name,
-          maxCustomers: max_customers,
-          currentCount: current_count
-        });
-      }
-    }
+    // ★ 2026-08-14: 요금제 제한 체크 제거 (건수 상한 max_customers + 미가입 잠금 customer_db_enabled).
+    //   2026-06-30 크레딧 모델 v2 = "DB 저장 상한 폐지", Harold님 2026-08-14 명시 = "미가입이라도 DB 제한 전부 없앤다".
+    //   고객 DB 적재는 요금제로 막지 않는다 — 규모 통제는 DB 일일 분석 크레딧이 담당한다.
 
     // ★ customer-upsert.ts 컨트롤타워 사용 (upload/sync와 동일 진입점, 인라인 INSERT 제거)
     const manualUpsertBuilder = createCustomerUpsertBuilder({
@@ -583,39 +557,8 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
       return res.status(400).json({ error: '고객 데이터가 필요합니다' });
     }
 
-    // 요금제 제한 체크
-    const limitCheck = await query(`
-      SELECT
-        c.id,
-        p.max_customers,
-        p.plan_name,
-        p.customer_db_enabled,
-        (SELECT COUNT(*) FROM customers WHERE company_id = c.id AND is_active = true) as current_count
-      FROM companies c
-      LEFT JOIN plans p ON c.plan_id = p.id
-      WHERE c.id = $1
-    `, [companyId]);
-
-    if (limitCheck.rows.length > 0) {
-      const { max_customers, current_count, plan_name, customer_db_enabled } = limitCheck.rows[0];
-      // ★ 2026-06-08: 고객 DB 업로드는 유료 요금제만 (FREE/미가입 customer_db_enabled=false → 차단)
-      if (!customer_db_enabled) {
-        return res.status(403).json({ error: '고객 DB 업로드는 유료 요금제에서 이용 가능합니다.', code: 'CUSTOMER_DB_LOCKED', planName: plan_name });
-      }
-      const newTotal = Number(current_count) + customers.length;
-      if (max_customers && newTotal > max_customers) {
-        const available = max_customers - current_count;
-        return res.status(403).json({ 
-          error: '요금제 고객 수 제한을 초과합니다.',
-          code: 'PLAN_LIMIT_EXCEEDED',
-          planName: plan_name,
-          maxCustomers: max_customers,
-          currentCount: current_count,
-          requestedCount: customers.length,
-          availableCount: available > 0 ? available : 0
-        });
-      }
-    }
+    // ★ 2026-08-14: 요금제 제한 체크 제거 (건수 상한 + 미가입 잠금). 단건 등록 경로와 동일 근거 —
+    //   2026-06-30 "DB 저장 상한 폐지" + Harold님 2026-08-14 "미가입이라도 DB 제한 전부 없앤다".
 
     let successCount = 0;
     let failCount = 0;

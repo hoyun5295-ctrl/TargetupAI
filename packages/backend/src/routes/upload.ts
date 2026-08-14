@@ -493,33 +493,9 @@ router.post('/save', authenticate, blockIfSyncActive, async (req: Request, res: 
       totalRows = Math.max(0, data.length - 1);
     }
 
-    // 플랜 초과 사전 체크
-    const limitCheck = await query(`
-      SELECT 
-        p.max_customers,
-        p.plan_name,
-        (SELECT COUNT(*) FROM customers WHERE company_id = c.id AND is_active = true) as current_count
-      FROM companies c
-      LEFT JOIN plans p ON c.plan_id = p.id
-      WHERE c.id = $1
-    `, [companyId]);
-
-    if (limitCheck.rows.length > 0) {
-      const { max_customers, current_count, plan_name } = limitCheck.rows[0];
-      const newTotal = Number(current_count) + totalRows;
-      if (max_customers && newTotal > max_customers) {
-        const available = Number(max_customers) - Number(current_count);
-        return res.status(403).json({ 
-          error: '최대 고객 관리 DB를 초과합니다. 플랜을 업그레이드하세요.',
-          code: 'PLAN_LIMIT_EXCEEDED',
-          planName: plan_name,
-          maxCustomers: max_customers,
-          currentCount: Number(current_count),
-          requestedCount: totalRows,
-          availableCount: available > 0 ? available : 0
-        });
-      }
-    }
+    // ★ 2026-08-14: 플랜 초과 사전 체크(max_customers) 제거 — 2026-06-30 크레딧 모델 v2
+    //   "DB 저장 상한 폐지" 확정분의 적재 경로 반영. 저장 건수로 막지 않는다(규모 통제 = 일일 분석 크레딧).
+    //   sync.ts·customers.ts 동일 패턴과 같은 세션에 일괄 제거했다.
 
     const startedAt = new Date().toISOString();
 

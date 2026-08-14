@@ -1391,24 +1391,30 @@
 | last_login_at | timestamp |
 
 ### sync_agents (Sync Agent 등록 정보)
+> 2026-08-14 information_schema 실덤프 19컬럼 대조 — `config`·`sync_interval_customers`·`sync_interval_purchases` 3컬럼이 미등재였다. **자기 보고(에이전트 self-report) 전용 컬럼은 이 테이블에 없다** — 별도 테이블이거나 `config` jsonb 안이다(미확인).
+> 기본값 주의: `status` DEFAULT `'inactive'` · `uptime`/`queued_items`/`total_*_synced` DEFAULT `0` · `last_heartbeat_at`은 기본값 없음(NULL). 이 조합이 그대로면 **heartbeat 경로가 그 행을 한 번도 쓴 적이 없다는 뜻**이지 "꺼졌다"가 아니다.
+
 | 컬럼 | 타입 |
 |------|------|
-| id | uuid PK |
+| id | uuid PK — DEFAULT gen_random_uuid() |
 | company_id | uuid FK |
 | agent_name | varchar(100) |
 | agent_version | varchar(20) |
 | os_info | varchar(100) |
 | db_type | varchar(20) |
-| status | varchar(20) — active/inactive/error |
-| last_heartbeat_at | timestamptz |
+| status | varchar(20) — active/inactive/error · DEFAULT 'inactive' |
+| last_heartbeat_at | timestamptz — 기본값 없음(NULL) |
 | last_sync_at | timestamptz |
-| total_customers_synced | integer |
-| total_purchases_synced | integer |
-| queued_items | integer |
-| uptime | integer |
+| total_customers_synced | integer — DEFAULT 0 |
+| total_purchases_synced | integer — DEFAULT 0 |
+| queued_items | integer — DEFAULT 0 |
+| uptime | integer — DEFAULT 0 |
 | ip_address | varchar(50) |
-| created_at | timestamptz |
-| updated_at | timestamptz |
+| created_at | timestamptz — DEFAULT now() |
+| updated_at | timestamptz — DEFAULT now() |
+| config | jsonb — DEFAULT '{}' |
+| sync_interval_customers | integer — DEFAULT 60 |
+| sync_interval_purchases | integer — DEFAULT 30 |
 
 ### system_alert_state (시스템 알림 쿨다운 영속 — 2026-06-25 실측 생성)
 | 컬럼 | 타입 |

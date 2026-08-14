@@ -23,7 +23,12 @@
  *     요금제로 잠그지 않고 전 유료 플랜 개방 + AI 크레딧으로만 통제(checkCredit이 차단).
  *     plan-guard는 FREE(미가입)만 차단. 실제 사용량 차단은 callAIWithFallback.
  *   ※ 스팸(spam_filter/auto_spam_test) = 크레딧 무관(현금/후불) → 플래그 기반 그대로 유지.
- *   ※ 규모 제약(max_customers·max_auto_campaigns)·비-AI 게이트(customer_db 등) = 유지.
+ *   ※ 고객 DB 저장 = 상한·잠금 전부 폐지 (2026-06-30 크레딧 모델 v2 확정 + Harold님 2026-08-14 명시).
+ *     `max_customers`로도 `customer_db_enabled`로도 적재를 막지 않는다 — 규모 통제는 DB 일일 분석 크레딧뿐이다.
+ *     ⚠ 되살리지 말 것. 이 줄이 "규모 제약 = 유지"로 적혀 있던 탓에 종량제 전환 때 화면 게이트만 걷히고
+ *       적재 4경로(sync / upload / customers 단건·일괄)에 차단이 남았고, 2026-08-14 아난티 최초 전량
+ *       동기화가 96,903건에서 403으로 끊겨 에이전트가 종료됐다(heartbeat 0 · 적재분 전량 유실).
+ *   ※ max_auto_campaigns(자동발송 건수)·direct_recipient_limit(발송 주소록)은 별개 축 — 이번 폐지 대상 아님.
  *   ※ 판정은 plans 플래그가 진실의 원천. plan_code 하드코딩 금지(예외: isUnsubscribed=FREE).
  */
 
@@ -332,9 +337,9 @@ export function canUseFeature(ctx: PlanContext, key: FeatureKey): FeatureCheckRe
       return { allowed: true };
 
     case 'customer_db':
-      return ctx.features.customer_db_enabled
-        ? { allowed: true }
-        : { allowed: false, errorMsg: '고객DB는 스타터 요금제부터 이용 가능합니다.', errorCode: 'PLAN_FEATURE_LOCKED' };
+      // ★ 2026-08-14: 고객 DB 잠금 폐지 — 미가입(FREE) 포함 전 플랜 허용. 근거·재발 경위 = 파일 상단 주석.
+      //   헤더의 허용 표는 처음부터 "FREE : ... 고객DB"였는데 이 분기만 플래그를 보고 있어 서로 어긋나 있었다.
+      return { allowed: true };
 
     case 'target_send':
       return ctx.features.target_send_enabled

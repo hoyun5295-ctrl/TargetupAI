@@ -569,34 +569,12 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
       });
     }
 
-    // 요금제 고객 수 제한 체크
-    const limitCheck = await query(`
-      SELECT
-        p.max_customers,
-        p.plan_name,
-        (SELECT COUNT(*) FROM customers WHERE company_id = c.id AND is_active = true) as current_count
-      FROM companies c
-      LEFT JOIN plans p ON c.plan_id = p.id
-      WHERE c.id = $1
-    `, [companyId]);
-
-    if (limitCheck.rows.length > 0) {
-      const { max_customers, current_count, plan_name } = limitCheck.rows[0];
-      const newTotal = Number(current_count) + customers.length;
-      if (max_customers && newTotal > max_customers) {
-        const available = Number(max_customers) - Number(current_count);
-        return res.status(403).json({
-          success: false,
-          error: '최대 고객 관리 DB를 초과합니다. 플랜을 업그레이드하세요.',
-          code: 'PLAN_LIMIT_EXCEEDED',
-          planName: plan_name,
-          maxCustomers: max_customers,
-          currentCount: Number(current_count),
-          requestedCount: customers.length,
-          availableCount: available > 0 ? available : 0
-        });
-      }
-    }
+    // ★ 2026-08-14: 요금제 고객 수 제한(max_customers) 차단 제거.
+    //   2026-06-30 크레딧 모델 v2에서 "DB 저장 상한 폐지(무제한 — 규모 통제는 DB 일일 분석 크레딧)"으로
+    //   확정된 정책이 적재 경로에는 반영되지 않은 채 남아 있었다(화면 게이트만 제거됨).
+    //   그 잔존이 아난티 최초 전량 동기화를 96,903건 시점에 403으로 끊었고, 에이전트는 재시도 소진 후
+    //   종료되어 첫 heartbeat조차 보내지 못했다. 저장은 막지 않는다 — 규모 과금이 통제 수단이다.
+    //   ※ 매 배치마다 회사 전 고객을 COUNT(*)로 세던 전량 스캔도 함께 사라진다.
 
     // agentId 조회 (heartbeat 기록용)
     const agentResult = await query(

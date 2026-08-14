@@ -125,12 +125,14 @@ ok('auto_spam_test 플래그 true → 허용', () =>
 console.log('[plan-guard] canUseFeature — 비-AI 게이트 유지');
 ok('basic_send 항상 허용', () =>
   assert.strictEqual(canUseFeature(mkCtx('FREE'), 'basic_send').allowed, true));
-ok('customer_db 플래그 false → 차단', () =>
-  assert.strictEqual(canUseFeature(mkCtx('FREE'), 'customer_db').allowed, false));
+// ★ 2026-08-14 고객 DB 잠금 폐지 — 미가입이어도, 플래그가 false여도 허용한다.
+//   아래 두 줄이 깨지면 누군가 고객 DB 게이트를 되살린 것이다(경위 = plan-guard.ts 상단 주석).
+ok('customer_db — FREE(미가입) 허용', () =>
+  assert.strictEqual(canUseFeature(mkCtx('FREE'), 'customer_db').allowed, true));
+ok('customer_db — 플래그 false여도 허용', () =>
+  assert.strictEqual(canUseFeature(mkCtx('STARTER', { customer_db_enabled: false }), 'customer_db').allowed, true));
 ok('ai_mapping 플래그 false → 차단 (STARTER+ 유지)', () =>
   assert.strictEqual(canUseFeature(mkCtx('FREE'), 'ai_mapping').allowed, false));
-ok('customer_db 플래그 true → 허용', () =>
-  assert.strictEqual(canUseFeature(mkCtx('STARTER', { customer_db_enabled: true }), 'customer_db').allowed, true));
 
 console.log('[plan-guard] isAiOperatorAllowed — 전 유료 플랜 개방 (ENTERPRISE 전용 폐지)');
 ok('super_admin → 허용 (FREE라도)', () =>
