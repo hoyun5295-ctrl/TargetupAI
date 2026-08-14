@@ -17,7 +17,7 @@ import {
   upsertCustomFieldDefinitions,
 } from '../utils/standard-field-map';
 import { callAiMapping, AiMappingQuotaExceeded, AiMappingUnavailable, SupportedDbType, MappingTarget } from '../utils/ai-mapping';
-import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
+import { createCustomerUpsertBuilder, buildSmsOptInBackfill, isRowLevelDbError } from '../utils/customer-upsert';
 import { registerBulkCompanyUserUnsubscribes } from '../utils/unsubscribe-helper';
 import { resolveBuildTierFromOsInfo } from '../utils/agent-build-tiers';
 // ★ 2026-07-10 원격 관리 P1: 명령 큐 정책 CT — ACK 반영·At-Least-Once 전달·버전 분기(구버전=기존 동작 불변)
@@ -683,8 +683,10 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
         } else if (field.fieldKey === 'age') {
           row.age = finalAge;
         } else if (field.fieldKey === 'sms_opt_in') {
+          // ★ 2026-08-14 (Codex 1R): 미제공 = null — true로 채우면 UPDATE COALESCE가 기존 false(수신거부)를
+          //   true로 되돌린다. 신규 행 기본 true는 업서트 직후 buildSmsOptInBackfill이 채운다.
           const val = c[field.fieldKey];
-          row.sms_opt_in = val !== null && val !== undefined ? val : true;
+          row.sms_opt_in = val !== null && val !== undefined ? val : null;
         } else if (field.dataType === 'date') {
           // ★ 2026-08-14: date 컬럼(recent_purchase_date)이 정규화를 못 거치고 원본 그대로 PG로 가던 자리.
           //   FIELD_MAP은 normalizeFunction='normalizeDate'를 지정하는데 이 루프가 birth_date만 특수 처리하고
@@ -756,6 +758,12 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
         //   "정제되지 않으면 동기화가 안 되는 것 같다"는 직원 신고 핵심 원인.
         //   해결: 일괄 실패 시 단건씩 재시도 → 실패 행만 정확히 식별 + 정상 행은 정상 처리.
         //   느리지만(최대 500회 SQL) 정확. chunk 일괄 실패는 흔한 케이스 아니라 성능 영향 미미.
+        // ★ 2026-08-14 (Codex 2R): 단 계통 오류(연결·구문·자원)는 폴백 금지 — 부하 증폭(customer-upsert.ts 참조).
+        if (!isRowLevelDbError(chunkError)) {
+          failedCount += chunk.length;
+          failures.push({ phone: `chunk#${Math.floor(i / CHUNK_SIZE) + 1}`, reason: `계통 오류 — 폴백 생략: ${chunkError.message || chunkError}` });
+          continue;
+        }
         console.warn(`[Sync] Chunk ${Math.floor(i / CHUNK_SIZE) + 1} 일괄 UPSERT 실패 → 단건 재시도 모드: ${chunkError.message || chunkError}`);
         for (const row of chunk) {
           try {
@@ -781,6 +789,13 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
           }
         }
       }
+    }
+
+    // ★ 2026-08-14 (Codex 1R): 신규 행 수신동의 기본 true 백필 — 미제공은 null로 들어가므로
+    //   업서트가 끝난 뒤 null인 행만 정책 기본으로 채운다(기존 false는 COALESCE 보존이라 불변).
+    if (upsertedCount > 0 && validRows.length > 0) {
+      const backfill = buildSmsOptInBackfill(companyId, validRows.map((r) => r.phone));
+      await query(backfill.sql, backfill.values);
     }
 
     // sync_logs 기록

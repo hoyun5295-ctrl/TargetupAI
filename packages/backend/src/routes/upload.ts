@@ -9,7 +9,7 @@ import { redis, AI_MODELS, AI_MAX_TOKENS, CACHE_TTL, TIMEOUTS, BATCH_SIZES, isAd
 import { normalizeByFieldKey, normalizeRegion, normalizeDate, normalizeCustomFieldValue, salvageBirthParts } from '../utils/normalize';
 import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
 import { validateUploadMapping } from '../utils/upload-mapping-validator';
-import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
+import { createCustomerUpsertBuilder, buildSmsOptInBackfill, isRowLevelDbError } from '../utils/customer-upsert';
 // ★ 2026-06-25: 고객 업로드 완료 시 회사 데이터 프로필 캐시 무효화(게이트 "고객 없음" 오표시 차단)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { clearEnabledFieldsCache } from '../utils/enabled-fields';
@@ -102,24 +102,8 @@ const upload = multer({
 // ================================================================
 router.post('/parse', authenticate, upload.single('file'), async (req: Request, res: Response) => {
   try {
-    // ★ D53: 요금제 게이팅 — customer_db_enabled 체크
-    // 직접발송용 파싱(includeData=true)은 게이팅 제외 — 만료 후에도 직접발송 파일등록 허용
-    const companyIdForGating = req.user?.companyId;
-    const isDirectSendParse = req.query.includeData === 'true';
-    if (companyIdForGating && !isDirectSendParse) {
-      const planCheck = await query(
-        `SELECT p.customer_db_enabled FROM companies c
-         LEFT JOIN plans p ON c.plan_id = p.id
-         WHERE c.id = $1`,
-        [companyIdForGating]
-      );
-      if (!planCheck.rows[0]?.customer_db_enabled) {
-        return res.status(403).json({
-          error: '고객 DB 관리는 스타터 이상 요금제에서 이용 가능합니다.',
-          code: 'PLAN_FEATURE_LOCKED'
-        });
-      }
-    }
+    // ★ 2026-08-14: D53 customer_db_enabled 게이팅 제거 — 고객 DB 잠금 폐지(plan-guard.ts 상단 주석).
+    //   canUseFeature('customer_db')는 항상 허용으로 바꿨는데 이 인라인 조회가 남아 미가입 업로드를 계속 막았다(Codex 1R).
 
     if (!req.file) {
       return res.status(400).json({ error: '파일이 없습니다.' });
@@ -447,21 +431,7 @@ router.post('/save', authenticate, blockIfSyncActive, async (req: Request, res: 
     const companyId = req.user?.companyId;
     const userId = (req as any).user?.userId;
 
-    // ★ D53: 요금제 게이팅 — customer_db_enabled 체크
-    if (companyId) {
-      const planCheck = await query(
-        `SELECT p.customer_db_enabled FROM companies c
-         LEFT JOIN plans p ON c.plan_id = p.id
-         WHERE c.id = $1`,
-        [companyId]
-      );
-      if (!planCheck.rows[0]?.customer_db_enabled) {
-        return res.status(403).json({
-          error: '고객 DB 관리는 스타터 이상 요금제에서 이용 가능합니다.',
-          code: 'PLAN_FEATURE_LOCKED'
-        });
-      }
-    }
+    // ★ 2026-08-14: D53 customer_db_enabled 게이팅 제거 — 고객 DB 잠금 폐지(plan-guard.ts 상단 주석).
 
     if (!fileId || !mapping || !companyId) {
       return res.status(400).json({ 
@@ -581,11 +551,19 @@ async function processUploadInBackground(
       includeUploadedBy: true,
     });
 
+    // ★ 2026-08-14 (Codex 2R): 매장 소속 매핑 실패 배치 수 — 0이 아니면 완료 메시지에 표면화
+    let storeMappingErrorBatches = 0;
+
     for (let i = 0; i < rows.length; i += BATCH_SIZE) {
       const batch = rows.slice(i, i + BATCH_SIZE);
       const batchRows: Record<string, any>[] = []; // 컨트롤타워 buildBatch 입력
       const batchPhones: string[] = [];
       const seenInBatch = new Set<string>();
+      // ★ 2026-08-14 (Codex 1R): 다매장 소속 쌍 — phone dedupe로 버려지는 후속 행의 매장 코드도
+      //   customer_stores에는 적재해야 한다(다매장 진실 = customer_stores). dedupe 전에 전 행에서 수집.
+      const storePairs: Array<{ phone: string; store: string }> = [];
+      // ★ 2026-08-14 (Codex 2R): 업서트 실패 phone — 매장 소속 적재 제외 대상
+      const failedPhones = new Set<string>();
 
       for (const row of batch) {
         const record: any = {};
@@ -620,10 +598,14 @@ async function processUploadInBackground(
           record.store_code = userStoreCodes[0];
         }
 
+        // ★ 2026-08-14 (Codex 1R): dedupe로 행이 버려져도 매장 소속은 잃지 않는다 — 쌍 먼저 수집.
+        if (record.store_code) {
+          storePairs.push({ phone: record.phone, store: String(record.store_code) });
+        }
+
         // 배치 내 중복: phone 기준 dedupe
         // ★ 2026-08-14: store_code 포함 키 → phone 단독. upsert 충돌 축이 (company_id, phone)이므로
-        //   같은 폰이 두 매장으로 한 배치에 오면 같은 행을 2회 갱신하게 되어 배치 전체가 죽는다
-        //   (upload 경로는 sync와 달리 단건 폴백이 없다 — errorCount += batch.length).
+        //   같은 폰이 두 매장으로 한 배치에 오면 같은 행을 2회 갱신하게 되어 배치 전체가 죽는다.
         //   구 arbiter에서도 이 조합은 phone 키 위반으로 배치가 통째 실패했다. 첫 행만 남긴다.
         const dedupeKey = record.phone;
         if (seenInBatch.has(dedupeKey)) {
@@ -707,9 +689,10 @@ async function processUploadInBackground(
 
         for (const field of columnFieldDefs) {
           if (field.fieldKey === 'sms_opt_in') {
-            // 수신동의: 미제공 시 기본 true
+            // ★ 2026-08-14 (Codex 1R): 미제공 = null — true로 채우면 UPDATE가 기존 수신거부를 되돌린다.
+            //   신규 행 기본 true는 업서트 직후 buildSmsOptInBackfill이 채운다.
             const val = record[field.fieldKey];
-            batchRow[field.columnName] = val !== null && val !== undefined ? val : true;
+            batchRow[field.columnName] = val !== null && val !== undefined ? val : null;
           } else if (field.fieldKey === 'region') {
             // region: 파생값(normalizeRegion 적용) 우선 사용
             batchRow[field.columnName] = derivedRegion ?? record[field.fieldKey] ?? null;
@@ -748,39 +731,86 @@ async function processUploadInBackground(
             if (r.is_insert) insertCount++;
             else duplicateCount++;
           });
+        } catch (err: any) {
+          // ★ 2026-08-14 (Codex 1R): 배치 통사 → 단건 폴백 — sync.ts와 동일 구조.
+          //   한 행의 충돌(customer_code 유니크 등)이 정상 499행까지 실패로 만들던 자리.
+          // ★ 2026-08-14 (Codex 2R): 계통 오류는 폴백 금지(부하 증폭 — customer-upsert.ts 참조) +
+          //   실패 phone을 추적해 매장 소속 적재에서 제외한다(실패 행에 소속만 붙는 것 차단).
+          if (!isRowLevelDbError(err)) {
+            errorCount += batchRows.length;
+            batchRows.forEach((row) => failedPhones.add(row.phone));
+            console.error(`[업로드 백그라운드] 배치 실패(계통 오류 — 폴백 생략): ${err?.message || err}`);
+          } else {
+            console.warn(`[업로드 백그라운드] 배치 UPSERT 실패 → 단건 재시도: ${err?.message || err}`);
+            for (const row of batchRows) {
+              try {
+                const { sql: rowSql, values: rowValues } = uploadUpsertBuilder.buildBatch(
+                  companyId, [row], userId || null,
+                );
+                const rowResult = await query(rowSql, rowValues);
+                rowResult.rows.forEach((r: any) => {
+                  if (r.is_insert) insertCount++;
+                  else duplicateCount++;
+                });
+              } catch (rowErr: any) {
+                errorCount++;
+                failedPhones.add(row.phone);
+                console.warn(`[업로드 백그라운드] 단건 실패 phone=${row.phone}: ${rowErr?.message || rowErr}`);
+              }
+            }
+          }
+        }
 
-          // customer_stores N:N 매핑
-          if (hasFileStoreCode && batchPhones.length > 0) {
+        // ★ 2026-08-14 (Codex 1R): 신규 행 수신동의 기본 true 백필 — sync.ts와 동일 구조
+        if (batchPhones.length > 0) {
+          try {
+            const backfill = buildSmsOptInBackfill(companyId, batchPhones);
+            await query(backfill.sql, backfill.values);
+          } catch (bfErr: any) {
+            console.error('[업로드 백그라운드] 수신동의 백필 오류:', bfErr?.message || bfErr);
+          }
+        }
+
+        // ── customer_stores N:N 매핑 (★2026-08-14 폴백 경로도 타도록 try 밖으로) ──
+        try {
+          // ★ 2026-08-14 (Codex 2R): 업서트 성공 phone만 — 실패 행에 새 매장 소속만 붙는 것 차단.
+          const okPairs = storePairs.filter(p => !failedPhones.has(p.phone));
+          const okPhones = batchPhones.filter(p => !failedPhones.has(p));
+          // ★ 2026-08-14 (Codex 1R): 파일이 매장 코드를 준 경우 = dedupe 전에 수집한 (phone, store) 쌍 전부.
+          //   업서트 후 customers.store_code를 되읽는 옛 방식은 UPDATE에서 보존되는 기존 매장만 남겨
+          //   새 매장 소속이 영영 안 생겼다.
+          if (okPairs.length > 0) {
             await query(`
               INSERT INTO customer_stores (company_id, customer_id, store_code)
-              SELECT c.company_id, c.id, c.store_code
-              FROM customers c
-              WHERE c.company_id = $1 AND c.phone = ANY($2::text[]) AND c.store_code IS NOT NULL AND c.store_code != ''
+              SELECT $1, c.id, s.store_code
+              FROM unnest($2::text[], $3::text[]) AS s(phone, store_code)
+              JOIN customers c ON c.company_id = $1 AND c.phone = s.phone
               ON CONFLICT (customer_id, store_code) DO NOTHING
-            `, [companyId, batchPhones]);
+            `, [companyId, okPairs.map(p => p.phone), okPairs.map(p => p.store)]);
           }
-          if (!hasFileStoreCode && userStoreCodes.length > 0 && batchPhones.length > 0) {
+          if (!hasFileStoreCode && userStoreCodes.length > 0 && okPhones.length > 0) {
             await query(`
               INSERT INTO customer_stores (company_id, customer_id, store_code)
               SELECT $1, c.id, unnest($2::text[])
               FROM customers c
               WHERE c.company_id = $1 AND c.phone = ANY($3::text[])
               ON CONFLICT (customer_id, store_code) DO NOTHING
-            `, [companyId, userStoreCodes, batchPhones]);
+            `, [companyId, userStoreCodes, okPhones]);
           }
           // B10-03: 파일에 store_code 없고 userStoreCodes도 없지만 DB에 기존 store_code가 있는 경우 보존
-          if (!hasFileStoreCode && userStoreCodes.length === 0 && batchPhones.length > 0) {
+          if (!hasFileStoreCode && userStoreCodes.length === 0 && okPhones.length > 0) {
             await query(`
               INSERT INTO customer_stores (company_id, customer_id, store_code)
               SELECT c.company_id, c.id, c.store_code
               FROM customers c
               WHERE c.company_id = $1 AND c.phone = ANY($2::text[]) AND c.store_code IS NOT NULL AND c.store_code != ''
               ON CONFLICT (customer_id, store_code) DO NOTHING
-            `, [companyId, batchPhones]);
+            `, [companyId, okPhones]);
           }
-        } catch (err) {
-          console.error('[업로드 백그라운드] Batch insert error:', err);
-          errorCount += batch.length;
+        } catch (storeErr: any) {
+          // ★ 2026-08-14 (Codex 2R): 조용한 완료 금지 — 소속 매핑 실패는 배치 단위로 표면화
+          storeMappingErrorBatches++;
+          console.error('[업로드 백그라운드] customer_stores 매핑 오류:', storeErr?.message || storeErr);
         }
       }
 
@@ -811,7 +841,7 @@ async function processUploadInBackground(
       errorCount,
       startedAt,
       completedAt,
-      message: `총 ${totalRows.toLocaleString()}건 중 신규 ${insertCount.toLocaleString()}건, 업데이트 ${duplicateCount.toLocaleString()}건${errorCount > 0 ? `, 오류 ${errorCount.toLocaleString()}건` : ''}`
+      message: `총 ${totalRows.toLocaleString()}건 중 신규 ${insertCount.toLocaleString()}건, 업데이트 ${duplicateCount.toLocaleString()}건${errorCount > 0 ? `, 오류 ${errorCount.toLocaleString()}건` : ''}${storeMappingErrorBatches > 0 ? ` · 매장 소속 매핑 실패 ${storeMappingErrorBatches}배치 — 같은 파일 재업로드로 복구 가능` : ''}`
     }), 'EX', CACHE_TTL.uploadProgress);
 
     // ★ 2026-06-25: 고객 수/필드 채워짐이 바뀌었으므로 데이터 프로필 캐시 무효화 → 게이트·AI 프롬프트 즉시 반영

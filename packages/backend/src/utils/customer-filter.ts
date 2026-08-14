@@ -257,29 +257,46 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
             }
           } else if (fieldDef.dataType === 'date') {
             // ★ D83: safeDateValue 방어 — 비정상 날짜 입력 시 쿼리 에러 방지
+            // ★ 2026-08-14 (Codex 2R): parseInt는 '2junk'도 2로 읽는다 — 엄격 숫자만 통과, 무효 비어있지 않은 값 = AND FALSE
             if (operator === 'days_within') {
-              const days = parseInt(value);
+              const days = /^\d{1,4}$/.test(String(value).trim()) ? parseInt(value) : NaN;
               if (!isNaN(days)) {
                 const daysAgo = new Date(); daysAgo.setDate(daysAgo.getDate() - days);
                 sql += ` AND ${columnRef} >= $${paramIndex++}`; params.push(daysAgo.toISOString().split('T')[0]);
-              }
+              } else if (value != null && value !== '') { sql += ' AND FALSE'; }
             } else if (operator === 'birth_month') {
-              const month = parseInt(value);
-              if (!isNaN(month) && month >= 1 && month <= 12) {
-                sql += ` AND EXTRACT(MONTH FROM ${columnRef}) = $${paramIndex++}`; params.push(month);
+              const month = /^\d{1,2}$/.test(String(value).trim()) ? parseInt(value) : NaN;
+              if (isNaN(month) || month < 1 || month > 12) {
+                if (value != null && value !== '') sql += ' AND FALSE';
+              } else if (month >= 1 && month <= 12) {
+                // ★ 2026-08-14 (Codex 1R): 음력 생일 구제 행은 birth_date=null·birth_month_day만 있다 —
+                //   birth_date에서만 월을 뽑으면 그 고객이 생일 타겟에서 영구 누락된다. 월-일 폴백.
+                const monthExpr = columnRef.endsWith('birth_date')
+                  ? `COALESCE(EXTRACT(MONTH FROM ${columnRef})::int, NULLIF(split_part(${columnRef.replace(/birth_date$/, 'birth_month_day')}, '-', 1), '')::int)`
+                  : `EXTRACT(MONTH FROM ${columnRef})`;
+                sql += ` AND ${monthExpr} = $${paramIndex++}`; params.push(month);
               }
             } else if (operator === 'gte') {
+              // ★ 2026-08-14 (Codex 1R): 무효 날짜 = 조건 생략(대상 확대) 금지 — fail-closed 0건.
+              //   값이 있는데 달력에 없으면 발송 대상이 넓어지는 쪽이 아니라 0으로 좁아져야 한다(0건=발송 차단 정책).
               const safe = safeDateValue(value);
               if (safe) { sql += ` AND ${columnRef} >= $${paramIndex++}`; params.push(safe); }
+              else if (value != null && value !== '') { sql += ' AND FALSE'; }
             } else if (operator === 'lte') {
               const safe = safeDateValue(value);
               if (safe) { sql += ` AND ${columnRef} <= $${paramIndex++}`; params.push(safe); }
+              else if (value != null && value !== '') { sql += ' AND FALSE'; }
             } else if (operator === 'between' && Array.isArray(value)) {
               const safe0 = safeDateValue(value[0]); const safe1 = safeDateValue(value[1]);
               if (safe0 && safe1) {
                 sql += ` AND ${columnRef} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
                 params.push(safe0, safe1);
+              } else if ((value[0] != null && value[0] !== '') || (value[1] != null && value[1] !== '')) {
+                sql += ' AND FALSE'; // ★ 2026-08-14: 무효 날짜 fail-closed
               }
+            } else if (operator === 'between') {
+              // ★ 2026-08-14 (Codex 2R): 배열이 아닌 between 값 — 검증 자체를 건너뛰던 fail-open
+              if (value != null && value !== '') sql += ' AND FALSE';
             }
           } else {
             // 문자열 필드: contains 기본, eq/in도 지원
@@ -460,33 +477,46 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
       }
     } else if (field.dataType === 'date') {
       // ★ D83: 날짜 필드 — safeDateValue로 비정상 입력 방어
+      // ★ 2026-08-14 (Codex 2R): 엄격 숫자 검증 + 무효 비어있지 않은 값 = AND FALSE — 구조 경로와 동일
       if (operator === 'days_within') {
-        const days = parseInt(value);
+        const days = /^\d{1,4}$/.test(String(value).trim()) ? parseInt(value) : NaN;
         if (!isNaN(days)) {
           const daysAgo = new Date();
           daysAgo.setDate(daysAgo.getDate() - days);
           sql += ` AND ${columnRef} >= $${paramIndex++}`;
           params.push(daysAgo.toISOString().split('T')[0]);
-        }
+        } else if (value != null && value !== '') { sql += ' AND FALSE'; }
       } else if (operator === 'birth_month') {
-        const month = parseInt(value);
+        const month = /^\d{1,2}$/.test(String(value).trim()) ? parseInt(value) : NaN;
         if (!isNaN(month) && month >= 1 && month <= 12) {
-          sql += ` AND EXTRACT(MONTH FROM ${columnRef}) = $${paramIndex++}`;
+          // ★ 2026-08-14 (Codex 1R): 음력 생일 구제 행 폴백 — 구조 경로와 동일
+          const monthExpr = columnRef.endsWith('birth_date')
+            ? `COALESCE(EXTRACT(MONTH FROM ${columnRef})::int, NULLIF(split_part(${columnRef.replace(/birth_date$/, 'birth_month_day')}, '-', 1), '')::int)`
+            : `EXTRACT(MONTH FROM ${columnRef})`;
+          sql += ` AND ${monthExpr} = $${paramIndex++}`;
           params.push(month);
-        }
+        } else if (value != null && value !== '') { sql += ' AND FALSE'; }
       } else if (operator === 'gte') {
+        // ★ 2026-08-14 (Codex 1R): 무효 날짜 fail-closed — 구조 경로와 동일
         const safe = safeDateValue(value);
         if (safe) { sql += ` AND ${columnRef} >= $${paramIndex++}`; params.push(safe); }
+        else if (value != null && value !== '') { sql += ' AND FALSE'; }
       } else if (operator === 'lte') {
         const safe = safeDateValue(value);
         if (safe) { sql += ` AND ${columnRef} <= $${paramIndex++}`; params.push(safe); }
+        else if (value != null && value !== '') { sql += ' AND FALSE'; }
       } else if (operator === 'between' && Array.isArray(value)) {
         const safe0 = safeDateValue(value[0]);
         const safe1 = safeDateValue(value[1]);
         if (safe0 && safe1) {
           sql += ` AND ${columnRef} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
           params.push(safe0, safe1);
+        } else if ((value[0] != null && value[0] !== '') || (value[1] != null && value[1] !== '')) {
+          sql += ' AND FALSE'; // ★ 2026-08-14: 무효 날짜 fail-closed
         }
+      } else if (operator === 'between') {
+        // ★ 2026-08-14 (Codex 2R): 배열이 아닌 between 값 — 검증을 건너뛰던 fail-open
+        if (value != null && value !== '') sql += ' AND FALSE';
       }
     } else {
       // 문자열 필드: eq / in / contains

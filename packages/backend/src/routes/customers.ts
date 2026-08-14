@@ -6,14 +6,14 @@ import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVarian
 // ★ 2026-06-25: 고객 전체 삭제 시 데이터 프로필 캐시 무효화(게이트 즉시 반영)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { getColumnFields, FIELD_DISPLAY_MAP, reverseDisplayValue, renderFieldValue } from '../utils/standard-field-map';
-import { DEFAULT_COSTS, getCompanyCosts, CACHE_TTL } from '../config/defaults';
+import { DEFAULT_COSTS, getCompanyCosts, CACHE_TTL, BATCH_SIZES } from '../config/defaults';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildDynamicFilterCompat } from '../utils/customer-filter';
 import { getTestSmsTables } from '../utils/sms-queue';
 import { getCampaignResultCounts } from '../utils/stats-aggregation';
 import { blockIfSyncActive } from '../middlewares/sync-active-check';
-import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
+import { createCustomerUpsertBuilder, buildSmsOptInBackfill, isRowLevelDbError } from '../utils/customer-upsert';
 import { detectEnabledFields, buildDynamicSelectExpr, buildEnabledFieldsPayload, clearEnabledFieldsCache, enabledFieldsGenKey, ENABLED_FIELDS_HARD_TTL_SEC } from '../utils/enabled-fields';
 import { swrCache } from '../utils/swr-cache';
 
@@ -512,11 +512,18 @@ router.post('/', blockIfSyncActive, async (req: Request, res: Response) => {
       points,
       store_code: storeCode,
       store_name: storeName,
-      sms_opt_in: smsOptIn ?? true,
+      // ★ 2026-08-14 (Codex 1R): 미제공 = null — true로 채우면 재등록 시 기존 수신거부를 되돌린다.
+      sms_opt_in: smsOptIn ?? null,
       custom_fields: customFields ? JSON.stringify(customFields) : null,
     };
     const { sql: manualSql, values: manualValues } = manualUpsertBuilder.buildBatch(companyId, [manualRow]);
     const result = await query(manualSql, manualValues);
+    // 신규 행 기본 true 백필 (기존 행은 COALESCE 보존이라 null이 될 수 없음)
+    if (smsOptIn == null) {
+      const backfill = buildSmsOptInBackfill(companyId, [phone]);
+      await query(backfill.sql, backfill.values);
+      if (result.rows[0] && result.rows[0].sms_opt_in == null) result.rows[0].sms_opt_in = true;
+    }
 
     // customer_stores N:N 매핑 (store_code가 있을 때)
     const customerId = result.rows[0]?.id;
@@ -559,9 +566,15 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
 
     // ★ 2026-08-14: 요금제 제한 체크 제거 (건수 상한 + 미가입 잠금). 단건 등록 경로와 동일 근거 —
     //   2026-06-30 "DB 저장 상한 폐지" + Harold님 2026-08-14 "미가입이라도 DB 제한 전부 없앤다".
+    // ★ 2026-08-14 (Codex 1R): 요금제와 무관한 요청당 상한 — sync 배치 상한과 같은 축.
+    //   상한 없는 배열은 단일 SQL 파라미터 한도(row당 약 25개 × PG 65,535)와 서버 자원을 뚫는다.
+    if (customers.length > BATCH_SIZES.syncCustomer) {
+      return res.status(400).json({ error: `한 번에 최대 ${BATCH_SIZES.syncCustomer.toLocaleString()}건까지 등록할 수 있습니다. 나눠서 요청해주세요.` });
+    }
 
     let successCount = 0;
     let failCount = 0;
+    let duplicateInRequest = 0;
     const errors: string[] = [];
 
     // ★ customer-upsert.ts 컨트롤타워로 벌크 INSERT 통합 (upload/sync와 동일 진입점)
@@ -570,12 +583,20 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
       includeUploadedBy: false,
     });
     const bulkRows: Record<string, any>[] = [];
+    // ★ 2026-08-14 (Codex 1R): 요청 내 같은 폰 dedupe — 충돌 축 (company_id, phone)에서 같은 폰 2행은
+    //   "cannot affect row a second time"으로 배치를 통째 죽인다. 첫 행만 남긴다(upload와 동일 규칙).
+    const seenPhones = new Set<string>();
     for (const customer of customers) {
       if (!customer.phone) {
         failCount++;
         errors.push(`전화번호 없음: ${JSON.stringify(customer)}`);
         continue;
       }
+      if (seenPhones.has(customer.phone)) {
+        duplicateInRequest++;
+        continue;
+      }
+      seenPhones.add(customer.phone);
       bulkRows.push({
         phone: customer.phone,
         name: customer.name,
@@ -584,19 +605,44 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
         email: customer.email,
         grade: customer.grade,
         points: customer.points,
-        sms_opt_in: customer.smsOptIn ?? true,
+        // ★ 2026-08-14 (Codex 1R): 미제공 = null — 신규 기본 true는 청크 처리 후 백필
+        sms_opt_in: customer.smsOptIn ?? null,
         custom_fields: customer.customFields ? JSON.stringify(customer.customFields) : null,
       });
     }
-    if (bulkRows.length > 0) {
+    // ★ 2026-08-14 (Codex 1R): 500건 청크 + 청크 실패 시 단건 폴백 — 한 행의 충돌(customer_code 유니크 등)이
+    //   정상 행 전체를 실패로 만들던 구조 제거. sync.ts·upload.ts와 동일 패턴.
+    const BULK_CHUNK = 500;
+    for (let ci = 0; ci < bulkRows.length; ci += BULK_CHUNK) {
+      const chunk = bulkRows.slice(ci, ci + BULK_CHUNK);
       try {
-        const { sql: bulkSql, values: bulkValues } = bulkUpsertBuilder.buildBatch(companyId, bulkRows);
+        const { sql: bulkSql, values: bulkValues } = bulkUpsertBuilder.buildBatch(companyId, chunk);
         await query(bulkSql, bulkValues);
-        successCount = bulkRows.length;
-      } catch (err: any) {
-        failCount += bulkRows.length;
-        errors.push(`벌크 INSERT 오류: ${err?.message || 'unknown'}`);
+        successCount += chunk.length;
+      } catch (chunkErr: any) {
+        // ★ 2026-08-14 (Codex 2R): 계통 오류(연결·구문·자원)는 단건 폴백 금지 — 같은 실패를
+        //   최대 500회 반복하며 장애 중 DB에 부하를 증폭한다. 행 데이터 오류(22xxx·23xxx)만 격리.
+        if (!isRowLevelDbError(chunkErr)) {
+          failCount += chunk.length;
+          errors.push(`청크 실패(계통 오류 — 폴백 생략): ${chunkErr?.message || 'unknown'}`);
+          continue;
+        }
+        for (const row of chunk) {
+          try {
+            const { sql: rowSql, values: rowValues } = bulkUpsertBuilder.buildBatch(companyId, [row]);
+            await query(rowSql, rowValues);
+            successCount++;
+          } catch (rowErr: any) {
+            failCount++;
+            errors.push(`등록 실패 ${row.phone}: ${rowErr?.message || 'unknown'}`);
+          }
+        }
       }
+    }
+    // ★ 2026-08-14 (Codex 1R): 신규 행 수신동의 기본 true 백필 — sync.ts와 동일 구조
+    if (successCount > 0 && bulkRows.length > 0) {
+      const backfill = buildSmsOptInBackfill(companyId, bulkRows.map((r) => r.phone));
+      await query(backfill.sql, backfill.values);
     }
 
     // 엑셀 업로드 완료 후 스키마 자동 갱신
@@ -615,9 +661,10 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
     clearEnabledFieldsCache(companyId);
 
     return res.json({
-      message: `${successCount}건 성공, ${failCount}건 실패`,
+      message: `${successCount}건 성공, ${failCount}건 실패${duplicateInRequest > 0 ? `, 요청 내 중복 ${duplicateInRequest}건 제외` : ''}`,
       successCount,
       failCount,
+      duplicateInRequest,
       errors: errors.slice(0, 10),
     });
   } catch (error) {
@@ -1000,19 +1047,7 @@ router.post('/extract', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
 
-    // ★ D53: 요금제 게이팅 — customer_db_enabled 체크
-    const planCheck = await query(
-      `SELECT p.customer_db_enabled FROM companies c
-       LEFT JOIN plans p ON c.plan_id = p.id
-       WHERE c.id = $1`,
-      [companyId]
-    );
-    if (!planCheck.rows[0]?.customer_db_enabled) {
-      return res.status(403).json({
-        error: '고객 DB 관리는 스타터 이상 요금제에서 이용 가능합니다.',
-        code: 'PLAN_FEATURE_LOCKED'
-      });
-    }
+    // ★ 2026-08-14: D53 customer_db_enabled 게이팅 제거 — 고객 DB 잠금 폐지(plan-guard.ts 상단 주석).
 
     const { gender, ageRange, grade, region, minPurchase, recentDays, smsOptIn, phoneField, dynamicFilters } = req.body;
 
@@ -1079,13 +1114,26 @@ router.post('/extract', async (req: Request, res: Response) => {
     }
 
     // 데이터 추출 (FIELD_MAP 기반 동적 SELECT — D43-3 동적화)
-    const phoneColumn = phoneField || 'phone';
-    
-    // FIELD_MAP에서 직접 컬럼 동적 생성
+    // ★ 2026-08-14 (Codex 2R critical): phoneField를 요청 문자열 그대로 SELECT에 삽입하던 자리 —
+    //   스칼라 서브쿼리를 넣으면 회사 WHERE 밖의 타사 PII까지 뽑히는 교차 테넌트 주입이었다.
+    //   서버가 아는 식별자만 허용: FIELD_MAP 실컬럼 또는 custom_1~15(jsonb 접근식). 그 외 = 400.
+    const requestedPhoneField = String(phoneField || 'phone');
     const columnFields = getColumnFields();
+    let phoneExpr: string;
+    if (requestedPhoneField === 'phone') {
+      phoneExpr = 'phone';
+    } else if (columnFields.some(f => f.columnName === requestedPhoneField)) {
+      phoneExpr = requestedPhoneField;
+    } else if (/^custom_([1-9]|1[0-5])$/.test(requestedPhoneField)) {
+      phoneExpr = `custom_fields->>'${requestedPhoneField}'`;
+    } else {
+      return res.status(400).json({ error: '유효하지 않은 전화번호 필드입니다.' });
+    }
+
+    // FIELD_MAP에서 직접 컬럼 동적 생성
     const selectParts = columnFields.map(f => {
-      // phone은 phoneField 파라미터에 따라 별칭 처리
-      if (f.columnName === 'phone') return `${phoneColumn} as phone`;
+      // phone은 phoneField 파라미터에 따라 별칭 처리 (허용 목록 통과분만)
+      if (f.columnName === 'phone') return `${phoneExpr} as phone`;
       return f.columnName;
     });
     // 시스템/파생/레거시 필드 추가 (FIELD_MAP 외, 기존 흐름 호환)

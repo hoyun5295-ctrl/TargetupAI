@@ -201,3 +201,40 @@ export function createCustomerUpsertBuilder(
     buildBatch,
   };
 }
+
+/**
+ * ★ 2026-08-14 수신동의 신규 기본값 백필 (Codex 1R 정정의 나머지 반쪽)
+ *
+ * 결함: 호출부(sync/upload/manual)가 sms_opt_in 미제공을 true로 채워 보내면, ON CONFLICT UPDATE의
+ *   COALESCE(EXCLUDED.sms_opt_in, ...)가 **기존 false(수신거부)를 true로 되돌린다** — arbiter가
+ *   (company_id, phone)이 된 뒤로는 다른 매장 행도 흡수하므로 노출 폭이 넓다.
+ * 구조: 호출부는 명시값 없으면 null을 보낸다 → UPDATE는 COALESCE가 기존 값을 보존(false 불변).
+ *   INSERT는 명시 null이 컬럼 DEFAULT(true)를 타지 않아 null로 남으므로(2026-08-14 information_schema
+ *   실측: is_nullable=YES, default=true), 업서트 직후 이 백필로 **null인 행만** 정책 기본 true로 채운다.
+ *   기존 행은 COALESCE 보존 탓에 null이 될 수 없어 이 UPDATE는 신규(및 원래 null이던) 행만 만진다.
+ * VALUES에 COALESCE($n,true)를 넣는 방식은 EXCLUDED가 표현식 **결과**를 봐서 UPDATE까지 true가
+ *   전파되므로 답이 아니다(같은 세션 자가 반증). 되살리지 말 것.
+ */
+export function buildSmsOptInBackfill(
+  companyId: string,
+  phones: string[],
+): { sql: string; values: any[] } {
+  return {
+    sql: `UPDATE customers SET sms_opt_in = true
+          WHERE company_id = $1 AND phone = ANY($2::text[]) AND sms_opt_in IS NULL`,
+    values: [companyId, phones],
+  };
+}
+
+/**
+ * ★ 2026-08-14 (Codex 2R): 배치 실패 → 단건 폴백을 허용할 오류인지 분류.
+ *
+ * 행 데이터에 국한된 오류(무결성 위반 23xxx · 데이터 형식 22xxx)만 행 격리의 의미가 있다.
+ * 연결(08xxx)·구문(42xxx)·자원(53xxx)·운영자 개입(57xxx) 같은 계통 오류에 단건 폴백을 돌리면
+ * 같은 실패를 최대 청크 크기만큼 반복해 **장애 중인 DB에 부하를 증폭**한다(5,000건 요청 = 최대 5,010회).
+ * 계통 오류면 그 청크를 통째 실패로 계상하고 폴백 없이 넘어간다.
+ */
+export function isRowLevelDbError(err: any): boolean {
+  const code = String(err?.code || '');
+  return code.startsWith('22') || code.startsWith('23');
+}
