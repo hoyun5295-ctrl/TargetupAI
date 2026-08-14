@@ -21,7 +21,9 @@
  */
 
 import { query } from '../config/database';
-import { normalizePhone } from './normalize';
+// ★ 2026-08-14: normalizeDate 추가 — 자사몰(카페24 등)이 준 생일 문자열이 정규화 없이 SQL 파라미터로
+//   들어가 달력에 없는 값이면 PG가 행을 거절하던 자리(sync·upload와 동일 결함).
+import { normalizePhone, normalizeDate } from './normalize';
 // ★ D214+ (2026-05-24) Unified Customer Profile 정합 — link 변경 시 active_sources 재계산 fire-and-forget
 import { recomputeProfile } from './unified-customer-profile';
 // ★ 2026-06-25 (A1·A4) phone 자동 갱신 + identity 충돌 판정 순수 함수 + 검수 플래그 recorder
@@ -201,7 +203,7 @@ export async function identifyCustomer(
         input.name || null,
         email,
         input.gender || null,
-        input.birthDate || null,
+        normalizeDate(input.birthDate) || null,
         input.grade || null,
         input.address || null,
         JSON.stringify(input.customFields || {}),
@@ -353,7 +355,7 @@ async function syncCustomerFields(
       input.name || null,
       email,
       input.gender || null,
-      input.birthDate || null,
+      normalizeDate(input.birthDate) || null,
       input.grade || null,
       input.address || null,
       JSON.stringify(input.customFields || {}),

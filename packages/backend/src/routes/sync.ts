@@ -630,9 +630,12 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
           derivedAge = currentYear - derivedBirthYear;
           birthDateValue = null; // date 타입에 연도만 넣으면 에러
         } else {
+          // ★ 2026-08-14: 정규화 실패 = 값 없음. 예전엔 조건부 대입이라 실패해도 위 초기값(원본)이
+          //   그대로 남아 PG로 흘러갔고, 달력에 없는 값이면 행 전체가 거절됐다
+          //   (아난티 — date/time field value out of range). 원본을 남기지 않는다.
           const normalized = normalizeDate(bd);
+          birthDateValue = normalized;
           if (normalized) {
-            birthDateValue = normalized;
             derivedBirthYear = parseInt(normalized.substring(0, 4));
             derivedBirthMonthDay = normalized.substring(5, 10);
             derivedAge = currentYear - derivedBirthYear;
@@ -673,6 +676,11 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
         } else if (field.fieldKey === 'sms_opt_in') {
           const val = c[field.fieldKey];
           row.sms_opt_in = val !== null && val !== undefined ? val : true;
+        } else if (field.dataType === 'date') {
+          // ★ 2026-08-14: date 컬럼(recent_purchase_date)이 정규화를 못 거치고 원본 그대로 PG로 가던 자리.
+          //   FIELD_MAP은 normalizeFunction='normalizeDate'를 지정하는데 이 루프가 birth_date만 특수 처리하고
+          //   나머지는 아래 else로 흘려보냈다(upload.ts는 normalizeByFieldKey로 이미 태우고 있었다).
+          row[field.columnName] = normalizeDate(c[field.fieldKey] ?? c[field.columnName] ?? null);
         } else {
           row[field.columnName] = c[field.fieldKey] ?? c[field.columnName] ?? null;
         }

@@ -65,7 +65,12 @@ function getValue(field: any): any {
 function isDateLikeValue(value: any): boolean {
   if (typeof value !== 'string' && typeof value !== 'number') return false;
   const s = String(value);
-  return /^\d{4}-\d{2}-\d{2}$/.test(s) || /^\d{8}$/.test(s);
+  // 모양 게이트는 이 둘로 고정한다 — normalizeDate에 통째로 맡기면 6자리 숫자(250103)까지
+  // 날짜로 잡혀 숫자형 커스텀 필드 비교가 ::date로 넘어간다.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) && !/^\d{8}$/.test(s)) return false;
+  // ★ 2026-08-14: 모양만 맞고 달력에 없는 값("2014-48-50"·"20144850")을 날짜로 판정하면
+  //   ::date 캐스팅이 붙어 쿼리 자체가 터진다. 실재 여부까지 확인한 것만 날짜로 본다.
+  return normalizeDate(s) !== null;
 }
 
 /** 컬럼명에 테이블 alias 접두사 적용 */
@@ -81,9 +86,9 @@ function col(alias: string, column: string): string {
 function safeDateValue(value: any): string | null {
   if (value == null || value === '') return null;
   const s = String(value).trim();
-  // 이미 ISO 형식이면 바로 반환
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  // normalize.ts 컨트롤타워의 normalizeDate로 정규화 시도
+  // ★ 2026-08-14: ISO 형식 조기 반환 제거 — 모양만 맞고 달력에 없는 값("2014-48-50")을 무검사로
+  //   통과시켜 SQL에 그대로 넣던 자리다. 이 함수의 목적이 "쿼리가 터지지 않게 방어"인데 그 방어에
+  //   구멍이 있었다. normalizeDate가 ISO도 처리하므로 전부 컨트롤타워에 맡긴다.
   const normalized = normalizeDate(s);
   if (normalized) return normalized;
   // 정규화 실패 — 쿼리 에러 방지를 위해 null 반환

@@ -649,9 +649,11 @@ async function processUploadInBackground(
             derivedAge = currentYear - derivedBirthYear;
             record.birth_date = null; // date 타입에 연도만 넣으면 에러
           } else {
+            // ★ 2026-08-14: 정규화 실패 = 값 없음. 조건부 대입이라 실패 시 원본이 그대로 남아
+            //   PG로 흘러가던 자리(sync.ts 동일 패턴 — 아난티 date/time field value out of range).
             const normalized = normalizeDate(bd);
+            record.birth_date = normalized;
             if (normalized) {
-              record.birth_date = normalized;
               derivedBirthYear = parseInt(normalized.substring(0, 4));
               derivedBirthMonthDay = normalized.substring(5, 10);
               // ★ D102: 생일 지남 여부 반영 (단순 연도 뺄셈 → 올해 생일 안 지났으면 -1)

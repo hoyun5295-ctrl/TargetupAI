@@ -393,6 +393,33 @@ export function normalizeAmount(value: any): number | null {
 // 날짜 정규화
 // 표준값: 'YYYY-MM-DD' (ISO 형식)
 // ============================================================
+
+/**
+ * ★ 2026-08-14: 조립된 (연·월·일)의 **달력 실재까지** 검사하는 normalizeDate의 단일 출구.
+ *
+ * 이전 구조는 분기마다 범위 검사를 복붙했고, 7개 분기 중 한국식·YYMMDD **둘만** 검사가 있었다.
+ * 나머지(ISO 접두·YYYYMMDD·`/`·`.`·미국식)는 무검사라 8자리 쓰레기값 `20144850`이
+ * `2014-48-50`으로 통과했고, PostgreSQL이 `date/time field value out of range`로
+ * 그 행을 거절했다(2026-08-14 아난티 전량 동기화 — 13행 유실).
+ *
+ * 새 형식을 추가해도 이 함수를 지나면 검사를 빠뜨릴 수 없다. 개별 분기에 검사를 되살리지 말 것.
+ * 범위(1~12월·1~31일)만이 아니라 2월 30일·4월 31일 같은 값도 PG가 거절하므로 왕복 대조로 판정한다.
+ */
+function toValidDate(y: unknown, m: unknown, d: unknown): string | null {
+  const yyyy = Number(y);
+  const mm = Number(m);
+  const dd = Number(d);
+  if (!Number.isInteger(yyyy) || !Number.isInteger(mm) || !Number.isInteger(dd)) return null;
+  if (yyyy < 1900 || yyyy > 2099) return null;
+  const probe = new Date(Date.UTC(yyyy, mm - 1, dd));
+  if (
+    probe.getUTCFullYear() !== yyyy ||
+    probe.getUTCMonth() !== mm - 1 ||
+    probe.getUTCDate() !== dd
+  ) return null;
+  return `${String(yyyy).padStart(4, '0')}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+}
+
 export function normalizeDate(value: any): string | null {
   if (value == null || value === '') return null;
 
@@ -430,39 +457,30 @@ export function normalizeDate(value: any): string | null {
 
   const v = String(value).trim();
 
-  // 이미 ISO 형식
-  if (/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
+  // ↓ 아래 분기는 전부 toValidDate 단일 출구를 지난다. 분기 안에 검사를 되살리지 말 것.
+  // 이미 ISO 형식 (뒤에 시각이 붙어 있어도 앞 10자리만)
+  const iso = v.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return toValidDate(iso[1], iso[2], iso[3]);
   // YYYYMMDD
-  if (/^\d{8}$/.test(v)) return `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6, 8)}`;
+  const compact = v.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compact) return toValidDate(compact[1], compact[2], compact[3]);
   // YYYY/MM/DD
-  if (/^\d{4}\/\d{2}\/\d{2}$/.test(v)) return v.replace(/\//g, '-');
-  // YYYY.MM.DD
-  if (/^\d{4}\.\d{2}\.\d{2}$/.test(v)) return v.replace(/\./g, '-');
-  // ★ D83: 한국식 날짜 형식 — "2025. 12. 17." "2025. 1. 3." "2025.12.17." (공백+점 조합)
-  const koMatch = v.replace(/\.$/, '').match(/^(\d{4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})$/);
-  if (koMatch) {
-    const yyyy = koMatch[1];
-    const mm = String(parseInt(koMatch[2])).padStart(2, '0');
-    const dd = String(parseInt(koMatch[3])).padStart(2, '0');
-    if (parseInt(mm) >= 1 && parseInt(mm) <= 12 && parseInt(dd) >= 1 && parseInt(dd) <= 31) {
-      return `${yyyy}-${mm}-${dd}`;
-    }
-  }
+  const slash = v.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+  if (slash) return toValidDate(slash[1], slash[2], slash[3]);
+  // ★ D83: YYYY.MM.DD + 한국식 "2025. 12. 17." "2025. 1. 3." "2025.12.17." (공백+점 조합)
+  const ko = v.replace(/\.$/, '').match(/^(\d{4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})$/);
+  if (ko) return toValidDate(ko[1], ko[2], ko[3]);
   // ★ D79: YYMMDD 6자리 형식 (250103 → 2025-01-03)
-  if (/^\d{6}$/.test(v)) {
-    const yy = parseInt(v.substring(0, 2));
-    const mm = v.substring(2, 4);
-    const dd = v.substring(4, 6);
-    const yyyy = yy >= 0 && yy <= 50 ? 2000 + yy : 1900 + yy;
-    if (parseInt(mm) >= 1 && parseInt(mm) <= 12 && parseInt(dd) >= 1 && parseInt(dd) <= 31) {
-      return `${yyyy}-${mm}-${dd}`;
-    }
+  const short = v.match(/^(\d{2})(\d{2})(\d{2})$/);
+  if (short) {
+    const yy = parseInt(short[1], 10);
+    return toValidDate(yy <= 50 ? 2000 + yy : 1900 + yy, short[2], short[3]);
   }
   // MM/DD/YYYY (미국식)
-  const usMatch = v.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (usMatch) return `${usMatch[3]}-${usMatch[1]}-${usMatch[2]}`;
+  const us = v.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (us) return toValidDate(us[3], us[1], us[2]);
 
-  // Date 파싱 시도
+  // Date 파싱 시도 (엔진이 실제 달력으로 파싱한 결과라 추가 검사 불요)
   try {
     const d = new Date(v);
     if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
