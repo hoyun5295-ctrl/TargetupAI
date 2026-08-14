@@ -1,0 +1,304 @@
+# 비토 게이트웨이 (ViTO Messaging Gateway) — 한줄로 측 피더 문서
+
+> **호출어 = "비토 게이트웨이"**
+> 이 문서는 **한줄로 저장소가 소유**한다. 게이트웨이 저장소(`bito-gateway`)의 `status/`·`CLAUDE.md`·`CODEX.md`·`AGENTS.md`는
+> 자비스와 공유하는 작업 공간이라 **우리가 편집하지 않는다**(★2026-08-14 Harold 지시). 그쪽은 읽기만 하고,
+> 우리 판단·확정 사실·잔여는 전부 여기에 쌓는다.
+
+## 1. 정체성
+
+한줄로가 발송한 메시지가 통신사로 나가는 **마지막 구간**. 자비스가 개발했고, 2026-08-14 기준 **실사용 트래픽 0**(완성 후 발송량 적은 고객사부터 이관 예정 — Harold 확정).
+
+```
+한줄로 INSERT → MySQL SMSQ_SEND_13/14/15 → Bito Agent 폴링 → 게이트웨이 → 중계/통신사 → REPORT → 고객 DB 반영
+        (우리 통제권)                      (경계)        (자비스 개발)
+```
+
+게이트웨이 측 canonical 흐름(그쪽 `CODEX.md` 기재):
+`고객 DB row/API 요청 → Canonical Message → message_request.id/ngs_serial → provider attempt → report_queue.id → 고객 DB/Webhook 반영 → ACK → DONE/FAILED`
+
+## 2. 소스 위치와 읽기 규약
+
+| 항목 | 값 |
+|---|---|
+| 소스 | `C:\Users\ceo\OneDrive\바탕 화면\bito-gateway` |
+| git | 로컬 사본에 `.git` **없음** — 되돌릴 이력이 없다. **편집 전 반드시 파일 백업** |
+
+⚠ **★★ 장비가 둘인데 호스트명이 둘 다 `invito`다** (2026-08-14 실측 — 프롬프트만 보고 구분 불가, 사고 유발 지점)
+
+| | 게이트웨이 | 에이전트 |
+|---|---|---|
+| IP | **58.227.193.65** | **58.227.193.62** |
+| 로그인 계정 | `invito` | `administrator` (→ root) |
+| 가진 것 | PostgreSQL 컨테이너 `bito-bench-postgres`(DB `bito_gateway`/계정 `bito`, **127.0.0.1:5432 정상 바인딩**) · Admin API **127.0.0.1:4000**(localhost 전용) · nginx `0.0.0.0:443` · `/opt/bito-agent-release-source` | Agent 3대(`/opt/bito-agent`·`/opt/bito-agent-hanjul02`·`/var/lib/bito-agent-bootstrap/hanjul03`) · `/var/lib/bito-agent-control` · MySQL `smsdb` |
+| 여기서 하는 일 | nonce 발급·릴리즈 원장 조회 | `install.sh` 실행·config·ACL |
+
+- Agent → GW gRPC `:9090` (에이전트가 .62에서 .65로 접속)
+- ⛔ 저장소의 `docker-compose.yml`은 **개발용**이다(postgres `0.0.0.0:5432`·비번 `bito1234`). 운영은 `127.0.0.1` 바인딩으로 확인됨 — 이 파일을 운영 근거로 읽지 말 것
+
+**읽기 규약 (Harold 지시)**
+- 그쪽 `status/`·`CLAUDE.md`·`CODEX.md`·`AGENTS.md`·`docs/` **편집 금지.** 자비스와 왕복하는 공간이다.
+- 소스 읽기·분석은 자유. 우리 결론은 **이 문서**에 적는다.
+- 코드 수정이 필요하다고 판단되면 착수 전 Harold 승인 — 소유권이 아직 갈려 있다.
+
+## 3. 구조 지도 (2026-08-14 실측)
+
+**규모** — 실소스 Go 391개(빌드 캐시 제외) · 마이그레이션 49개 · 상태 문서 139개 · deploy 패키지 163개 · 현재 v249대
+
+```
+cmd/            gateway · agent · agent-bootstrap · agent-canary · agent-installer
+                agent-reinstaller · agent-release · bench-ingress · mock-gw · test-client
+internal/
+  gateway/      clientapi(server.go) · connector · db · engine · opsai · queue · redis · session · tps
+  agent/        installer · installerconfig · installerruntime · bootstrap · update · canary · config
+  common/ buildinfo/
+web/api/        Node.js Admin/Control API — routes/ · services/
+migrations/     001~049 (PostgreSQL)
+proto/ gen/     gRPC 계약
+```
+
+**우리가 소비하는 축** (경계에서 우리에게 영향이 오는 지점)
+| 축 | 게이트웨이 측 위치 |
+|---|---|
+| Agent 등록·자격증명 | `web/api/routes/agent-control-enrollment.js` · `web/api/services/agent-credential-service.js` · `migrations/041,043,045` |
+| Agent 원격 업데이트 | `internal/agent/update/` · `internal/agent/bootstrap/` · `cmd/agent-release` |
+| 라우팅·중계사 | `internal/gateway/connector/` · `status/domains/ROUTING_AND_PROVIDERS.md`(그쪽) |
+| 결과코드 표준 | `status/MESSAGE_RESULT_CODE_STANDARD.md`(그쪽) — ViTO 표준코드 ↔ 고객값 매핑 |
+| 브랜드메시지 F | `migrations/047_friendtalk_retirement_brand_pricing_split.sql` · 048·049 식별코드 |
+
+## 4. 확정 사실 — Agent 전환의 진짜 관문 (★2026-08-14 소스 실독)
+
+v1.0.21 `install.sh`는 203줄 중 170줄이 시스템 계정 생성·검증이고, 실제 전환은 마지막 6줄:
+
+```
+bito-agent-installer migrate --config installer.yaml --manifest package-manifest.json --nonce-stdin
+```
+
+**필요한 두 값은 모두 게이트웨이가 쥐고 있다. 서명물이 아니다.**
+
+**(1) `installer.yaml` = 평문 YAML. 우리가 직접 작성 가능.**
+스키마 = `internal/agent/installerconfig/config.go` `Schema = "vito-agent-installer-config/v1"`
+
+| 필드 | 비고 |
+|---|---|
+| `schema` `agent_id` `service_id` `service_name` `bootstrap_service_name` | service_name ≠ bootstrap_service_name (검증됨) |
+| `os` `arch` `base_root` `package_root` `version` | arch는 `amd64`만 |
+| `release_id` (int64, **> 0**) | 게이트웨이 릴리즈 원장에 등록된 값이어야 함 |
+| `child_identity` `child_uid` `child_gid` `child_sid` | 설치 스크립트가 이 계정을 `--system --shell /usr/sbin/nologin`으로 생성. home은 `/home/<identity>` 고정 |
+| `legacy.{config_path, token_path, tls_paths, state_path, journal_path, cursor_path, log_path}` | 기존 설치 절대경로 — doctor로 확인된 값 |
+| `control.{base_url, channel, tls_ca_file, tls_server_name, request_timeout, artifact_timeout}` | 컨트롤 플레인 접속 |
+
+**(2) `enrollment nonce` = Admin API 호출 한 번.**
+
+```
+POST /api/agent/control/agents/{agentId}/enrollment-nonces
+body: { service_id, os, arch, release_id, child_digest }
+201 : { ..., enrollment_nonce, expires_in_seconds }
+```
+
+- 구현 = `web/api/routes/agent-control-enrollment.js:289` → `createEnrollmentNonce()` (`agent-credential-service.js:437`)
+- 저장 = `agent_account.enrollment_nonce_digest` CHAR(64) + `enrollment_nonce_expires_at` (`migrations/041:252-253`) — 원문은 저장 안 하고 digest만
+- `child_digest` = 패키지 `package-manifest.json`의 `payload/bito-agent` sha256
+- 감사 = `AGENT_ENROLLMENT_NONCE_ISSUE`로 audit-log 적재
+
+**결론 — 자비스 의존은 구조가 아니라 창구 문제다.** 게이트웨이가 우리 것이면 릴리즈 등록·nonce 발급 둘 다 우리가 한다. 지금까지 매 설치마다 사람을 거친 이유가 이 두 호출뿐이었다.
+
+## 4-1. ★ 전환 실패 근본 원인 확정 (2026-08-14 실측)
+
+**hanjul02 전환은 인증·credential·release 문제가 아니었다. `agent-config.yaml`의 상대 경로 한 줄이었다.**
+
+오늘 두 번의 시도(14:26 · 19:53) 모두 동일 지점에서 실패:
+```
+Enrollment nonce:                                     ← nonce는 통과
+installer migrate failed: systemctl failed: exit status 3 ()
+```
+- `exit status 3` + 빈 stderr = `systemctl is-active --quiet` (linux.go:222 `Health`). `start` 실패면 stderr가 차고 코드도 1.
+- journald 실체: `Poller 초기화 실패: state journal 초기화 실패: journal 디렉터리 생성 실패: mkdir data: permission denied`
+- 이유 = `SwitchService`(linux.go:200)가 drop-in으로 ExecStart를 bootstrap으로 바꾸며 **실행 계정을 root → 비특권 child(2102)로 낮춘다.** `journal_path`가 상대 경로(`data/...`)라 옛 root 소유 위치를 계속 가리켜 쓰기 실패 → child 즉사 → 61초 후 `bootstrap active child recovery failed: context deadline exceeded` → exit 1 → 롤백.
+- 결과는 `rolled_back` / `failed_rolled_back` — **롤백은 정상 동작.** hanjul02는 legacy로 깨끗이 복귀(계정 `bito-hanjul02` 2102:2102만 잔존, 재사용 가능).
+
+**hanjul03이 통과한 조치 = 두 가지뿐**
+1. `state_policy.journal_path`(config.go:220) 상대 → **절대**
+   - 실패기(Jul 17·Aug 4 14:11·15:10) = `data/agent-journal-hanjul03.jsonl`
+   - 성공기(Aug 5 07:06~현재) = `/opt/bito-agent-hanjul03/data/agent-journal-hanjul03.jsonl`
+2. child 계정 **POSIX ACL** 부여 (소유자는 root:root 유지)
+   ```
+   /opt/bito-agent-hanjul03       user:bito-hanjul03:--x   (통과만)
+   /opt/bito-agent-hanjul03/data  user:bito-hanjul03:rwx   (쓰기)
+   ```
+
+**hanjul01·02는 둘 다 미적용.** doctor 출력이 증거 — 01 `path=data/agent-journal-hanjul01.jsonl` · 02 `path=data/agent-journal-hanjul02.jsonl`. `/opt/bito-agent`·`/opt/bito-agent-hanjul02`에 ACL(`+`) 없음. **01을 그대로 전환하면 같은 지점에서 같은 실패를 한다.**
+
+⛔ 교훈 — 이 결함은 **서명 패키지 밖**에 있다. `agent-config.yaml`은 설치 시 덮어쓰지 않는 고객 서버 전용 파일이라, 고치는 데 빌드·manifest·배포 패키지가 필요 없다. 그런데 실제로는 owner 키트 재작성과 릴리즈 재발행(release 5→7→9→15)으로 대응했다. **작업 단위를 결함이 아니라 산출물로 잡으면 1글자와 1000줄이 같은 비용이 된다.**
+
+## 4-2. ★★ 차단 결함 — 신규 등록 경로가 닫혀 있다 (2026-08-14 실측 확인)
+
+**상태 = 현재 어떤 Agent도 신규 등록(enrollment)이 불가능하다. hanjul01·02 전환도, 향후 고객사 이관도 여기서 막힌다.**
+
+실측: 대시보드 원격배포 → hanjul02 → "Bootstrap 전환 안내" → 본인확인 → `nonce 발급` →
+**"요청을 완료하지 못했습니다. 상태를 새로고침해 주세요."** 모달의 `버전` 표시 = **1.0.22**.
+
+두 코드가 서로 어긋나 있다:
+
+| 위치 | 동작 |
+|---|---|
+| `web/api/services/agent-credential-service.js:459` | `release.version !== '1.0.20'` → **409 `ENROLLMENT_RELEASE_NOT_APPROVED`**. 등록은 **오직 v1.0.20**만 수용 |
+| `web/dashboard/src/pages/RemoteDeployPage.jsx:152` | `currentRelease = releases.find(r => r.status === 'approved')` — **승인된 첫 릴리즈를 그대로 사용. 릴리즈 선택 UI 없음** |
+
+→ 릴리즈 원장에 1.0.21·1.0.22가 올라온 순간부터 화면은 최신을 보내고 서버는 1.0.20만 받는다. **hanjul03은 1.0.20이 최신이던 시기(0805)에 통과했고, 그 뒤 등록 경로는 아무도 지나갈 수 없다.**
+모달 안내문("공개 v1.0.20 설치 패키지는…")만 1.0.20을 말하고 실제 전달 값은 최신이라, 화면 문구와 동작도 어긋나 있다.
+
+**수정 위치 = Node(`web/api/…`) — Go 게이트웨이 재빌드 불필요.** 파일 교체 + 재시작.
+
+⛔ **수정 방향은 미확정이다.** 버전 문자열을 `1.0.22`로 바꾸면 다음 릴리즈에 같은 함정을 다시 놓는다(= 증상 수정). 능력 축으로 판정하는 것이 맞으나, **`agent_release` 테이블에 `payload_profile` 같은 능력 컬럼이 없다**(`migrations/041` 실측 — store_key·descriptor_digest·manifest_digest·child_digest·signing_key_id·verified_at뿐). `payload_profile`(`agent-child-v1`)은 패키지 manifest와 `internal/agent/release/types.go`에만 존재한다. 따라서 ①핀 제거(approved+os+arch+child_digest 검증은 유지) ②능력 컬럼 신설(DDL 동반) 중 선택이 필요하고, **착수는 Harold 승인 후.**
+
+## 4-3. ★★★ 신규 등록 SQL이 100% 실패한다 — `$9` 미참조 (2026-08-14 확정·수정완료)
+
+**증상** = 에이전트가 `enrollment HTTP 500`. 서버 로그 없음, 에이전트도 본문을 버려(`enroller.go:240` `fmt.Errorf("enrollment HTTP %d", ...)`) **원인이 어디에도 안 남았다.**
+
+**실제 오류**(로그 추가 후 포착):
+```
+42P18  could not determine data type of parameter $9
+   at agent-credential-service.js:675   ← enrollment UPDATE
+```
+
+`enrollControlCredentials`는 `mutationParams` 14개를 항상 넘기는데, `$9`(`legacy_bootstrap_generation`)를 참조하는 fence는 두 개뿐이었다:
+
+| 분기 | `$9` |
+|---|---|
+| `legacyRecoveryAttempt` (614행) | `AND legacy_bootstrap_generation=$9` ✓ |
+| `authActor==='bootstrap'` (631행) | `AND legacy_bootstrap_generation=$9` ✓ |
+| **일반 등록 (642행)** | **없음 → 타입 추론 불가 → 쿼리 전체 실패** |
+
+→ **일반 등록 경로는 구조적으로 100% 실패.** hanjul03이 0805에 이 경로로 성공했으므로, 그 뒤 legacy bootstrap 기능(v246·v247 `legacy_bootstrap_initial_fence` 계열)이 들어오며 깨졌고 **신규 등록을 한 번도 안 해봐서 아무도 몰랐다.**
+
+**적용한 수정** (Harold 승인, `.bak-20260814` 백업 보유):
+```js
+   AND bind_pw_hash=$8
+   AND COALESCE(legacy_bootstrap_generation,0)=$9        // ← 추가
+   AND legacy_control_grace_expires_at>clock_timestamp()`;
+```
+같은 트랜잭션에서 읽은 값이라 항상 일치하며, 다른 두 분기와 같은 낙관적 동시성 fence다. DDL 0 · 응답 형식 변경 0.
+
+**같이 넣은 것** — `agent-control-enrollment.js` `sendError()`에 `console.error` 1줄. 이 경로는 **모든 예외를 로그 없이 500으로 삼키고 있었다.** 임시가 아니라 영구 코드로 둔다.
+
+⛔ **교훈** — 트래픽 0은 안전의 증거가 아니다. 이 결함은 "고객사 200곳" 계획의 첫 관문에 있었고, 버전 핀(§4-2)과 함께 **신규 등록을 막는 두 겹**이었다.
+
+## 4-4. hanjul01 전용 차단 — 옛 토큰이 12자 (2026-08-14 확정)
+
+`install.sh` → `installer migrate setup failed: **invalid protected legacy token**`
+
+`loadLegacyToken`(`installerruntime/runtime.go:188`)이 `agent-config.yaml`의 `gateway.token`을 꺼내 `validLegacyToken`(239행)으로 검사하는데 **최소 32자**를 요구한다. hanjul01은 **12자**(doctor `GatewayToken length=12`), hanjul02·03은 64자라 통과했다.
+
+**제품이 준비한 우회로는 쓰지 않는다.** `legacy-bootstrap-credential`(migration 043 · `2026-07-30_..._TOO_SHORT_BOOTSTRAP_RECOVERY_*`)이 이 문제를 위해 만들어졌지만, 요청 본문에 `prepared_gate_sha256`·`prepared_state_sha256`이 **필수**(`normalizedBootstrapInput:151-152`)이고 이 값을 만드는 서브커맨드가 설치기에 없다(`account-profile`·`migrate`·`recover`뿐). 즉 **폐기된 owner 키트에 묶인 경로**다.
+
+**처방 = 토큰 자체를 정상 길이로 바꾼다.** `POST /api/admin/agents/{agentId}/token/rotate`(`routes/agents.js:730`, 본문 `token` 직접 지정 가능)로 hanjul01의 토큰을 ≥32자로 회전 → `/opt/bito-agent/agent-config.yaml`의 `gateway.token` 갱신 → 재시작·GW 연결 확인 → 그다음은 §5 일반 절차 그대로. 우회로 자체가 불필요해진다.
+
+⛔ 회전과 config 갱신 사이에는 인증이 끊긴다. 라인 13은 트래픽이 없어 위험이 낮지만 **연속 작업으로 처리**할 것.
+
+## 4-5. 공유 부모 디렉터리에 통과 ACL이 없다 (2026-08-15 확정)
+
+hanjul01 전환 시 `installer migrate failed: systemctl failed: exit status 3 ()` → journald 실체:
+```
+bootstrap active child recovery failed:
+fork/exec /var/lib/bito-agent-bootstrap/hanjul01/instances/<hash>/versions/<digest>/payload/bito-agent: permission denied
+```
+
+원인 = 공유 부모 `/var/lib/bito-agent-bootstrap`의 ACL:
+```
+user:bito-hanjul02:--x
+user:bito-hanjul03:--x     ← bito-hanjul01 없음
+```
+
+**설치기는 에이전트별 하위 디렉터리는 만들지만 공유 부모의 통과 ACL은 추가하지 않는다.** 부모에서 끊기면 하위 권한이 아무리 맞아도 exec이 거부된다. 02·03 것은 과거 키트가 넣어준 값이었다.
+
+**처방** = `setfacl -m u:bito-<agent>:--x /var/lib/bito-agent-bootstrap` (신규 설치마다 필요)
+
+⛔ **고객사 신규 설치에 매번 걸린다.** 에러 문구(`fork/exec … permission denied`)만으로는 부모 ACL이 원인임을 알 수 없어 진단이 오래 걸린다. §5-0에 상시 절차로 편입했다.
+
+## 5. 전환 실행 절차 (확정본 — 2026-08-14)
+
+⚠ **최초 등록은 v1.0.20만 가능**(§4-1 하드코딩). v1.0.21은 전환 완료 후 **원격 업그레이드**로 올린다. v1.0.21 패키지는 1단계에 쓰는 물건이 아니다.
+
+**0. 사전 수정** (§4-1 상대경로·ACL + §4-4 토큰 길이 + §4-5 부모 ACL — 셋 다 안 하면 반드시 실패한다)
+```bash
+# 토큰이 32자 미만이면 먼저 회전 (§4-4) — POST /api/admin/agents/<AGENT>/token/rotate {token:"<64자>"}
+sed -i 's|journal_path: "data/agent-journal-<AGENT>.jsonl"|journal_path: "<INSTALL_DIR>/data/agent-journal-<AGENT>.jsonl"|' <INSTALL_DIR>/agent-config.yaml
+setfacl -m u:bito-<AGENT>:--x <INSTALL_DIR>
+setfacl -m u:bito-<AGENT>:rwx <INSTALL_DIR>/data
+setfacl -m u:bito-<AGENT>:rw- <INSTALL_DIR>/data/agent-journal-<AGENT>.jsonl
+setfacl -m u:bito-<AGENT>:--x /var/lib/bito-agent-bootstrap          # ★ 공유 부모 (§4-5)
+# control 디렉터리도 동일 (installer-config·CA를 child가 읽어야 함)
+setfacl -m u:bito-<AGENT>:--x /var/lib/bito-agent-control/<AGENT>
+setfacl -m u:bito-<AGENT>:r-- /var/lib/bito-agent-control/<AGENT>/control-ca.pem
+```
+→ `systemctl restart` 후 journald에 절대 경로 + `GW 연결 완료` + ERROR 0 확인. **여기서 걸러야 설치를 낭비하지 않는다.**
+
+**1. nonce 발급 — 슈퍼관리자 대시보드** (`ops.hanjulgw.com`)
+좌측 메뉴 **원격배포**(`remote-deploy` · App.jsx:71) → Agent 선택 → 액션 **"Bootstrap 전환 안내"**(RemoteDeployPage.jsx:75) → **본인 확인(비밀번호 재입력 = `remoteDeployMutation` CSRF 발급)** → 모달의 `버전`이 **1.0.20**인지 확인 → **"nonce 발급"**. 15분 유효.
+- API 실체 = `POST /admin/agent-upgrades/agents/{agentId}/enrollment-nonces` → 내부적으로 `createEnrollmentNonce`
+- 재인증 없이 호출 시 `REMOTE_DEPLOY_REAUTH_REQUIRED`(428)
+
+**2. 설치 — 서버 root, 15분 안에**
+```bash
+cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --config /var/lib/bito-agent-control/<AGENT>/installer-config.yaml
+```
+`Enrollment nonce:` 프롬프트에 붙여넣기(비표시). **프롬프트 상태에서 Ctrl+C는 안전** — nonce를 읽은 뒤에야 `installer migrate`가 시작된다. 실패 시 `rollback.sh`(2회 실측 검증됨).
+
+**3. 실측 → 확정** — 발송 1건 결과 반영 확인 후 대시보드 **"Bootstrap 전환 확정"**(finalize_bootstrap). 화면 경고 그대로 **실번호 smoke 전에는 확정 금지.**
+
+**4. 원격 업그레이드** — 확정 후 v1.0.21은 SSH 없이 원격 교체.
+
+⛔ **owner 키트(`/var/lib/vito-owner-kits/…`)는 쓰지 않는다** — `install` 단계가 SSH `authorized_keys` forced-command 라인을 교체한다. 우리가 필요한 건 nonce와 `install.sh`뿐이다. (키트 규모 = host.sh 49KB + owner.ps1 62KB + README 16KB)
+
+## 6. 한줄로 측 현황 (Agent 3대)
+
+| agentID | 라인 | 테이블 | systemd 유닛 | 버전 | 상태 (2026-08-14 23:30 기준) |
+|---|---|---|---|---|---|
+| hanjul01 | 13 | SMSQ_SEND_13 | **`bito-agent.service`**(hanjul01 안 붙음) | **1.0.20** | ✅ **전환 완료**(2026-08-15 00:03) — bootstrap 관리형 · credential `active`(gen 2) · 실측 수신 정상(Harold 확인) |
+| hanjul02 | 14 | SMSQ_SEND_14 | `bito-agent-hanjul02.service` | **1.0.20** | ✅ **전환 완료** — bootstrap 관리형 · credential `active`(gen 3) · smoke 확정 · 발송/결과반영 실측 완료 |
+| hanjul03 | 15 | SMSQ_SEND_15 | `bito-agent-hanjul03.service` | 1.0.22 | 전환 완료형(목표 상태) · bootstrap **1.0.27** |
+
+- 전환 사유 = 01·02가 구형이라 **원격 업그레이드 미지원**. 주소·연결·인증은 전부 정상이었다.
+- 전환은 기존 config·토큰·서비스 정체성을 보존한다 → **잊어버린 ID·비번 재입력 불필요**(이 세션의 출발 질문).
+- ⚠ **bootstrap 버전 격차** — hanjul02 `1.0.22` vs hanjul03 `1.0.27`. hanjul02를 1.0.22 child로 올리려 하면 rollout이 `CANARY_LANE_MISSING`으로 거부된다(실체는 적격 판정 실패가 그 이름으로 튀어나오는 것 — `agent-rollout-service.js:127-137`은 **`eligible===true`인 canary만** 세므로 진짜 사유가 가려진다). 유력 원인 = `minimum_bootstrap_version` 미달(`:97-98`). 임계값은 `agent_release` 컬럼이 아니라 **아티팩트 descriptor**에 있어 한 겹 더 들어가야 확인된다. `state_schema`는 01·02·03 모두 `1`로 동일 — 그 축은 아니다.
+
+## 7. 관측된 개발 방식 (판단 근거 — 비난 아님)
+
+| 사실 | 수치 |
+|---|---|
+| 상태 문서 | 139개 (DESIGN 48 + PLAN 63 = 111개가 설계/계획 쌍) |
+| deploy 패키지 디렉터리 | 163개 |
+| 버전 | 3주 만에 v230 → v249 |
+
+변경 하나당 `_DESIGN.md` + `_IMPLEMENTATION_PLAN.md` 한 쌍과 버전 디렉터리 하나가 생기는 구조다. SSH 타임아웃 하나에도 설계서가 붙었다(`2026-07-24_AGENT_V120_PREPARE_SSH_TIMEOUT_DESIGN.md`).
+
+**진단 = 규칙이 나쁜 게 아니라 "크기 다이얼"이 없다.** 그쪽 `CODEX.md`의 안전 경계(멱등성 계약·ACK 규약·credential 상태 기계)는 이 도메인에 타당하다. 문제는 작은 변경에 싼 경로가 없어서 비밀번호 재설정 하나가 프로토콜 변경과 같은 의식을 치른다는 것. 우리 `CLAUDE.md`의 `HOTFIX` 조항에 해당하는 장치가 없다.
+
+## 8. 남은 것 (착수 순서 — ★2026-08-14 Harold 지시로 비토가 컨트롤)
+
+**전제: 자비스 세션 정지 확인 후 착수.** 게이트웨이 저장소의 `status/`·`CLAUDE.md`·`CODEX.md`·`AGENTS.md`는 계속 편집 금지(§2).
+
+1. [x] ~~**hanjul02 전환**~~ — **2026-08-14 완료.** 사전 수정 → nonce(release 15) → `install.sh` → `BITO_AGENT_MIGRATION_OK` → smoke 1건(결과반영 1.24초·실패 0) → `bootstrap-finalize` → credential `active`
+2. [x] ~~**hanjul01 전환**~~ — **2026-08-15 00:03 완료.** 토큰 회전(12→64자) → 사전 수정 → **부모 ACL 추가**(§4-5) → nonce → `install.sh` → `MIGRATION_OK` → finalize → `active`(gen 2)
+2-1. [x] ~~hanjul01 실측~~ — 라인 13 수신 정상 확인(Harold, 2026-08-15). ⚠ finalize를 smoke 전에 눌렀으므로 `reportDBFailures` 카운터 자체는 미확인 — 다음 세션에서 `journalctl … grep "Poller 상태" | tail -1`로 한 번 볼 것
+2-2. [ ] **★게이트웨이 서버 수정분을 소스 사본에 반영** — `$9` fix(`agent-credential-service.js`)와 로그 2줄(`agent-control-enrollment.js`·`agent-upgrade-rollouts.js`)은 **`.65` 서버에만 적용돼 있고 `bito-gateway` 소스 사본에는 없다.** 그 저장소엔 `.git`이 없어 이력도 없다. **자비스가 소스에서 다시 빌드·배포하면 세 수정이 전부 사라진다.** 서버 백업 = `*.bak-20260814`
+3. [ ] **버전 핀 정리** (§4-2) — 오늘은 release 15(v1.0.20)가 approved라 우회했지만, **1.0.20 세트가 은퇴하는 순간 신규 등록이 전면 불가**가 된다. 고객사 이관 전 필수. 화면의 릴리즈 선택 부재(`RemoteDeployPage.jsx:152`)도 같은 축
+4. [ ] **finalize 경로 불일치** — 프론트 `/bootstrap/finalize` ↔ 서버 `/bootstrap-finalize`. 화면 버튼 조건도 실제 판정 코드(`자격증명 활성화 대기`)와 불일치(`FleetRolloutPanel.jsx:68`은 `BOOTSTRAP_VALIDATION_PENDING`만 처리). **이 기능은 화면에서 한 번도 성공한 적이 없다**
+5. [ ] **bootstrap 버전 격차** — 01·02를 1.0.27로. child 원격 교체와 **별도 게이트**. 패키지의 `upgrade.sh`는 `/opt/vito-agent` 레이아웃 전제라 이 설치에 그대로 못 쓴다
+6. [ ] **원격 업그레이드 실측** — 5번 해소 후 SSH 없이 왕복 1회
+7. [ ] **재시도 불가 구조** — 롤백 성공(`rolled_back`) 후에도 `Migrate()`가 journal 존재만으로 거부(`migrate.go:31`), `Recover()`는 아무 것도 안 함(`recovery.go:22`). 인스턴스를 밖에서 치워야만 재시도된다. 그 도구(owner 키트)는 `gen1` 하드코딩. **고객사 설치가 한 번 실패하면 매번 사람이 들어가야 한다**
+8. [ ] **에러가 로그에 안 남는 구조** — `sendError`가 예외를 삼킨다(오늘 `agent-control-enrollment.js`·`agent-upgrade-rollouts.js` 2곳에만 `console.error` 추가). 에이전트도 응답 본문을 버린다(`enroller.go:240`). **전 라우터 점검 필요**
+5. [ ] **고객사 이관 전 검증 4종** (§7 판단 근거) — 라인 14에서: ①결과 반영률(보낸 건수 = 최종 status_code 반영 건수) ②`batch_size 200` 초과 물량 ③실패 코드 혼합 ④발송 중 에이전트 재시작 시 중복·유실 0
+6. [ ] **`reportDBFailures` 경로 확인** — 7월 hanjul01에서 2502회 실패 이력. 수정 여부 미확인. 고객사에서 터지면 "발송됐는데 영원히 대기"
+7. [ ] **문서 정제** — 게이트웨이 저장소 규칙·문서를 한줄로 양식으로. **Harold 확정 순서 = 에이전트 전환 완료 → 자비스 작업 종료·빌드 → 전 작업 정지 → 자비스가 그 시점까지 문서 현행화 → 그다음 착수.** 핵심은 형식이 아니라 강제력(§7 진단): ①HOTFIX 등가 조항(위험 등급별 절차 분기) ②"명령 하나씩 주고 결과 보고 받기"를 명시 — 현행 규칙이 (가)/(나) 중 어느 쪽인지 안 정해놔서 112KB 자가복구 절차가 나왔다 ③"배포 산출물 자동복원 검증" 조항에 적용 조건 부여 ④변경당 DESIGN+PLAN 쌍 금지, 버전당 전용 빌드 스크립트 금지
+8. [ ] 미수령 자료 2건 확보 — `ViTO-Agent-API-DB-Handoff-v1.2.zip` · `ViTO-Gateway-API-Integration-Manual-v1.13.docx` (checksums.sha256 등재분)
+9. [ ] 능력 기반 라우팅 — 브랜드메시지 F 지원 라인 전용(한줄로 측 `brand-message.ts:618·743` 회사 라인그룹 맹목 추종 결함과 짝)
+10. [ ] pay-ingest `sales` 계정 허용 IP에 `58.227.193.65` 추가 여부 확인 (`status/OPS.md:58`·`SCHEMA.md:399`에 옛 주소만 등재)
+
+## 9. 관련 문서
+
+- 한줄로 측 라인·Agent 운영 = [status/OPS.md](../status/OPS.md) §6-3
+- 브랜드메시지 F 트랙 = [2026-07-29-brand-message-qtmsg-agent-design.md](2026-07-29-brand-message-qtmsg-agent-design.md)
+- 게이트웨이 연동 명세(구버전) = [bito-gateway-integration-spec.md](bito-gateway-integration-spec.md) — ⚠ 주소가 옛 값
+- 세션 기록 = memory `project_2026_0814_bito_agent_v1021_conversion`
