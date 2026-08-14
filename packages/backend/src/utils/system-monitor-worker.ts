@@ -1,7 +1,7 @@
 /**
  * system-monitor-worker.ts — 시스템 크리티컬 감지 워커 (2026-06-13, 5분 주기)
  *
- * 감지 2종 (둘 다 system-alert CT로 운영자 문자 통지):
+ * 감지 3종 (전부 system-alert CT로 운영자 문자 통지):
  *
  * 1) 발송 큐 지연 잔존 행
  *    배경 — 톤28 6/11(19:46 등록분 일부가 6/12 10:32~17:07 실발송)·시세이도(예약 +24h 처리)·
@@ -18,6 +18,15 @@
  *    - SYNC_STALLED: 하트비트는 살아 있는데 마지막 동기화가 주기의 3배(최소 3시간) 초과
  *    - 7일 이상 하트비트가 없는 에이전트는 방치/폐기로 보고 반복 통지하지 않는다.
  *
+ * 3) 싱크 적재 실패 누적 (★2026-08-14 신설 — Harold 지시 "실패 임계 알림")
+ *    배경 — 이새 sync_logs에 실패 209건이 몇 달간 쌓이는 동안 아무 신호도 없었다(실패는 로그에
+ *    조용히 적히고 끝 — 화면을 연 사람이 없으면 존재하지 않는 것과 같았다). 같은 날 아난티는
+ *    요금제 한도 403으로 한 번에 66건 실패 후 에이전트가 죽었는데 그것도 화면을 열어야 보였다.
+ *    두 모양이 달라 임계도 두 겹이다 (수치는 실측 기반 — 임의 상수 아님):
+ *    - 급성: 24시간 실패 합 ≥ 10 (아난티형 — 한 번의 사고를 당일 잡는다) · 쿨다운 12시간
+ *    - 만성: 7일 실패 합 ≥ 30 (이새형 — 하루 약 5건씩 새는 출혈. 5×7=35가 걸린다) · 쿨다운 72시간
+ *    대표 실패 사유 top2를 본문에 실어 열어보기 전에 방향을 잡게 한다. 감지·통지만, 자동 조치 없음.
+ *
  * 패턴 기준: utils/cancelled-queue-sweeper.ts setInterval + 중복 진입 방지 플래그 미러.
  */
 
@@ -32,6 +41,11 @@ const SNAPSHOT_MIN_AGE_MS = 12 * 60 * 1000;    // 정체 판정용 직전 스냅
 const AGENT_HEARTBEAT_STALE_MS = 60 * 60 * 1000;        // 하트비트 60분 끊김 = 중단 의심
 const AGENT_ABANDONED_MS = 7 * 24 * 60 * 60 * 1000;     // 7일+ 무신호 = 방치(통지 제외)
 const SYNC_STALL_MIN_MS = 3 * 60 * 60 * 1000;           // 동기화 정체 최소 임계 3시간
+// 3) 싱크 적재 실패 누적 임계 (★2026-08-14 — 근거는 파일 헤더)
+const SYNC_FAIL_ACUTE_THRESHOLD = 10;                   // 급성: 24시간 실패 합
+const SYNC_FAIL_CHRONIC_THRESHOLD = 30;                 // 만성: 7일 실패 합
+const SYNC_FAIL_ACUTE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+const SYNC_FAIL_CHRONIC_COOLDOWN_MS = 72 * 60 * 60 * 1000;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -195,11 +209,72 @@ async function checkSyncAgents(): Promise<void> {
   }
 }
 
+/** 3) 싱크 적재 실패 누적 감지 (★2026-08-14) — 급성(24h)·만성(7d) 두 겹, 에이전트 단위 */
+async function checkSyncFailures(): Promise<void> {
+  const tiers = [
+    { name: '급성', interval: '24 hours', threshold: SYNC_FAIL_ACUTE_THRESHOLD, cooldownMs: SYNC_FAIL_ACUTE_COOLDOWN_MS, keyPrefix: 'sync-failures-acute' },
+    { name: '만성', interval: '7 days', threshold: SYNC_FAIL_CHRONIC_THRESHOLD, cooldownMs: SYNC_FAIL_CHRONIC_COOLDOWN_MS, keyPrefix: 'sync-failures-chronic' },
+  ] as const;
+
+  for (const tier of tiers) {
+    let rows: any[] = [];
+    try {
+      const res = await query(
+        `SELECT a.id, a.agent_name, co.company_name,
+                SUM(l.fail_count)::int AS fails, COUNT(*)::int AS batches
+           FROM sync_logs l
+           JOIN sync_agents a ON a.id = l.agent_id
+           LEFT JOIN companies co ON co.id = a.company_id
+          WHERE l.created_at > NOW() - INTERVAL '${tier.interval}'
+          GROUP BY a.id, a.agent_name, co.company_name
+         HAVING SUM(l.fail_count) >= $1`,
+        [tier.threshold],
+      );
+      rows = res.rows;
+    } catch (err: any) {
+      console.error(`[system-monitor] 싱크 실패 누적 조회 오류(${tier.name}):`, err?.message || err);
+      continue;
+    }
+
+    for (const r of rows) {
+      // 대표 실패 사유 top2 — 열어보기 전에 방향을 잡게 본문에 싣는다
+      let reasonTxt = '';
+      try {
+        const reasons = await query(
+          `SELECT f->>'reason' AS reason, COUNT(*)::int AS cnt
+             FROM sync_logs l, jsonb_array_elements(l.failures) f
+            WHERE l.agent_id = $1 AND l.fail_count > 0
+              AND l.created_at > NOW() - INTERVAL '${tier.interval}'
+            GROUP BY 1 ORDER BY 2 DESC LIMIT 2`,
+          [r.id],
+        );
+        reasonTxt = reasons.rows
+          .map((x: any) => `${String(x.reason || '(사유 없음)').slice(0, 70)} ${x.cnt}건`)
+          .join(' / ');
+      } catch (err: any) {
+        console.error('[system-monitor] 실패 사유 조회 오류:', err?.message || err);
+      }
+
+      const label = `${r.company_name || '(회사 미상)'} ${r.agent_name || ''}`.trim();
+      const windowLabel = tier.name === '급성' ? '최근 24시간' : '최근 7일';
+      await sendSystemAlert({
+        dedupKey: `${tier.keyPrefix}:${r.id}`,
+        cooldownMs: tier.cooldownMs,
+        message:
+          `싱크 적재 실패 누적(${tier.name}) — ${label}: ${windowLabel} 실패 ${Number(r.fails).toLocaleString()}건` +
+          `(배치 ${Number(r.batches).toLocaleString()}개).${reasonTxt ? ` 주요 사유: ${reasonTxt}` : ''}`,
+      });
+      log(`싱크 실패 누적 통지(${tier.name}) — ${label}: ${r.fails}건`);
+    }
+  }
+}
+
 let running = false;
 
 async function runPass(): Promise<void> {
   await checkDelayedQueueRows();
   await checkSyncAgents();
+  await checkSyncFailures();
 }
 
 export function startSystemMonitorWorker(): void {
@@ -215,5 +290,5 @@ export function startSystemMonitorWorker(): void {
       .finally(() => { running = false; });
   }, PASS_INTERVAL_MS);
 
-  log('시작 — 5분 주기 (발송 큐 지연 정체 + 싱크에이전트 중단 감지, SYSTEM_ALERT_PHONES 문자 통지)');
+  log('시작 — 5분 주기 (발송 큐 지연 정체 + 싱크에이전트 중단 + 싱크 적재 실패 누적 감지, SYSTEM_ALERT_PHONES 문자 통지)');
 }
