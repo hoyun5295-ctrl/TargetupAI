@@ -1349,7 +1349,7 @@ export default function DmBuilderPage() {
       <OneStepInterviewModal
         open={oneStepOpen}
         onClose={() => setOneStepOpen(false)}
-        onGenerated={(payload) => {
+        onGenerated={(payload, _sessionId, sessionDetached) => {
           setOneStepOpen(false);
           const sections = (payload.sections || []) as any[];
           createNew({ title: '원스텝 생성 DM' });
@@ -1362,9 +1362,13 @@ export default function DmBuilderPage() {
           const missing = payload.coverage?.missing?.length || 0;
           setToast({
             type: 'success',
-            message: missing > 0
-              ? `${sections.length}개 섹션으로 만들었어요 — 반영되지 않은 항목 ${missing}건은 편집기에서 확인해 주세요`
-              : `${sections.length}개 섹션으로 만들었어요 — 문구와 이미지만 다듬으면 됩니다`,
+            // 결과물은 여기 그대로 들어왔다. 다만 질문 답이 저장된 자리와 끊겼으면 그 사실을 알린다 —
+            // 안 알리면 사용자가 "다시 열면 이어서 나오겠지"라고 믿고 되돌아갔다가 빈 화면을 본다.
+            message: sessionDetached
+              ? `${sections.length}개 섹션으로 만들었어요 — 이 결과는 지금 화면에서 이어서 편집해 주세요(질문 답으로는 다시 불러올 수 없습니다)`
+              : missing > 0
+                ? `${sections.length}개 섹션으로 만들었어요 — 반영되지 않은 항목 ${missing}건은 편집기에서 확인해 주세요`
+                : `${sections.length}개 섹션으로 만들었어요 — 문구와 이미지만 다듬으면 됩니다`,
           });
         }}
       />

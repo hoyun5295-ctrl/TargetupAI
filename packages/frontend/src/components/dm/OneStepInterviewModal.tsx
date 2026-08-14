@@ -100,7 +100,8 @@ const isAnswered = (key: QKey, a: Answers): boolean => {
 export default function OneStepInterviewModal({ open, onClose, onGenerated }: {
   open: boolean;
   onClose: () => void;
-  onGenerated: (payload: GeneratedPayload, sessionId: string) => void;
+  /** `sessionDetached` = 결과물은 정상이지만 세션에 저장되지 않았다(이 세션을 다시 열어도 안 나온다). */
+  onGenerated: (payload: GeneratedPayload, sessionId: string, sessionDetached: boolean) => void;
 }) {
   const auth = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
@@ -118,6 +119,7 @@ export default function OneStepInterviewModal({ open, onClose, onGenerated }: {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [generating, setGenerating] = useState(false);
   const [genStep, setGenStep] = useState(0);
+  const [resumed, setResumed] = useState(false);
 
   // 임시 입력값(저장 전) — 텍스트 계열은 타이핑마다 서버에 쓰지 않는다.
   const [draftBenefit, setDraftBenefit] = useState('');
@@ -135,34 +137,37 @@ export default function OneStepInterviewModal({ open, onClose, onGenerated }: {
     else if (d && 'next' in d) setOpenKey(null);
   }, []);
 
-  // 세션 열기 — 답은 서버에 남으므로 닫아도 이어할 수 있다.
-  useEffect(() => {
-    if (!open) return;
-    let alive = true;
+  // 세션 열기 — 진행 중인 내 세션이 있으면 서버가 그것을 돌려준다(답 그대로 이어하기).
+  //   답을 버리고 새로 열면 대행비를 다시 내게 되므로, 응답의 answers를 반드시 그대로 싣는다.
+  //   `fresh` = 사용자가 [새로 시작]을 눌렀다 — 지난 행사의 답을 물려받지 않는 유일한 경로다.
+  const openSession = useCallback(async (fresh: boolean) => {
     setLoading(true);
     setError(null);
-    (async () => {
-      try {
-        const r = await fetch('/api/one-step/sessions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...auth() },
-          body: JSON.stringify({}),
-        });
-        const d = await r.json().catch(() => ({}));
-        if (!alive) return;
-        if (r.status === 503) { setError('준비 중입니다. 잠시 후 다시 시도해 주세요.'); return; }
-        if (!r.ok) { setError(d.error || '시작하지 못했습니다.'); return; }
-        setSessionId(d.id);
-        setSources(d.prefill?.sources || {});
-        applyProgress({ ...d, answers: {} });
-      } catch {
-        if (alive) setError('네트워크 오류 — 다시 시도해 주세요.');
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
-    return () => { alive = false; };
-  }, [open, applyProgress]);
+    setResumed(false);   // 앞선 회차의 안내가 새로 열린 화면에 잠깐 남지 않게 먼저 내린다
+    try {
+      const r = await fetch('/api/one-step/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...auth() },
+        body: JSON.stringify(fresh ? { fresh: true } : {}),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 503) { setError('준비 중입니다. 잠시 후 다시 시도해 주세요.'); return; }
+      if (!r.ok) { setError(d.error || '시작하지 못했습니다.'); return; }
+      setSessionId(d.id);
+      setSources(d.prefill?.sources || {});
+      setResumed(!!d.resumed);
+      applyProgress(d);
+    } catch {
+      setError('네트워크 오류 — 다시 시도해 주세요.');
+    } finally {
+      setLoading(false);
+    }
+  }, [applyProgress]);
+
+  useEffect(() => {
+    if (!open) return;
+    void openSession(false);
+  }, [open, openSession]);
 
   // 생성 중 단계 표시 — 실제 파이프라인 이름만 쓴다(빌려온 라벨은 죽은 표시가 된다).
   const GEN_STEPS = useMemo(() => ['답변 정리', '구성 설계', '문안 작성', '상품·이미지 연결', '미리보기 조립'], []);
@@ -206,20 +211,40 @@ export default function OneStepInterviewModal({ open, onClose, onGenerated }: {
 
   const runGenerate = useCallback(async () => {
     if (!sessionId) return;
+    // 확인 모달에 띄운 총액을 그대로 보낸다 — 서버가 지금 금액과 다르면 걷지 않고 되돌린다.
+    //   총액이 없으면 승인 근거가 없다는 뜻이라 **보내지 않고 다시 견적을 받는다**(서버도 400으로 막는다).
+    const approvedTotal = quote?.total;
+    if (typeof approvedTotal !== 'number') {
+      setError('요금을 확인하지 못했습니다. 금액을 다시 확인해 주세요.');
+      void askQuote();
+      return;
+    }
     setQuote(null);
     setGenerating(true);
     setError(null);
     try {
-      const r = await fetch(`/api/one-step/sessions/${sessionId}/generate`, { method: 'POST', headers: auth() });
+      const r = await fetch(`/api/one-step/sessions/${sessionId}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...auth() },
+        body: JSON.stringify({ expectedTotal: approvedTotal }),
+      });
       const d = await r.json().catch(() => ({}));
+      // 요금이 바뀌었으면 걷지 않고 되돌아온다 — 새 금액으로 다시 확인받는다(임의로 진행하지 않는다).
+      if (d?.code === 'QUOTE_CHANGED' || d?.code === 'QUOTE_REQUIRED') {
+        setError(d.error || '요금이 변경되었습니다. 금액을 다시 확인해 주세요.');
+        void askQuote();
+        return;
+      }
       if (!r.ok) { setError(d.error || '생성에 실패했습니다.'); return; }
-      onGenerated(d.data as GeneratedPayload, sessionId);
+      // 서버가 "이 결과는 세션에 저장되지 않았다"고 알리면 그대로 전달한다 —
+      //   결과물은 정상이지만 이 세션을 다시 열어도 이 결과가 나오지 않는다(편집기에서 이어서 쓰면 된다).
+      onGenerated(d.data as GeneratedPayload, sessionId, !!d.sessionDetached);
     } catch {
       setError('네트워크 오류 — 다시 시도해 주세요.');
     } finally {
       setGenerating(false);
     }
-  }, [sessionId, onGenerated]);
+  }, [sessionId, onGenerated, quote, askQuote]);
 
   const onPickProducts = useCallback((picked: PickedMallProduct[]) => {
     setPickerOpen(false);
@@ -542,7 +567,20 @@ export default function OneStepInterviewModal({ open, onClose, onGenerated }: {
             <p className="text-[12px] text-white/70">
               {remaining > 0 ? <>직접 확인할 것 <b className="text-white">{remaining}개</b></> : '모두 확인했어요'}
             </p>
-            <p className="text-[10px] text-white/35 mt-0.5">답하지 않은 항목은 알아서 채워 만듭니다</p>
+            <p className="text-[10px] text-white/35 mt-0.5">
+              {resumed ? (
+                <>
+                  앞서 답한 내용을 이어서 불러왔어요 ·{' '}
+                  <button
+                    onClick={() => { void openSession(true); }}
+                    disabled={loading || generating}
+                    className="underline underline-offset-2 text-violet-300 hover:text-violet-200 disabled:opacity-40"
+                  >
+                    새로 시작
+                  </button>
+                </>
+              ) : '답하지 않은 항목은 알아서 채워 만듭니다'}
+            </p>
           </div>
           <button
             onClick={askQuote}

@@ -287,7 +287,7 @@ describe('Phase 3 — 요금은 한 산식에서 나오고, 발행분을 미리 
     expect(route).toContain("prompt: ''");
     expect(route).toContain('structure,');
     // 생성 성공 뒤에 걷는다 — 차감이 생성 호출보다 뒤에 있다
-    expect(route.indexOf('await oneShotGenerate(')).toBeLessThan(route.indexOf('deductCreditSafe('));
+    expect(route.indexOf('oneShotGenerate({')).toBeLessThan(route.indexOf('deductCreditOutcome('));
     // 테이블 미생성 구간은 503으로 답한다
     expect(route).toContain('handleDbMigrationError');
   });
@@ -297,6 +297,258 @@ describe('Phase 3 — 요금은 한 산식에서 나오고, 발행분을 미리 
     const companyGuards = route.match(/company_id = \$\d::uuid/g) || [];
     expect(companyGuards.length).toBeGreaterThanOrEqual(5);
     expect(route).toContain('requireCompany');
+  });
+});
+
+// ★ 2026-08-14 적대 검토 정정 — 세션은 "돈을 낸 단위"다. 그 단위가 1회용이 되면 안전장치가 전부 실효 0이 된다.
+//    Codex 1R(high 4) 뒤 뿌리 둘로 재정리: ①과금 진실은 원장 하나 ②생성은 상태를 선점한다.
+describe('0814 정정 — 과금 진실은 원장 하나다(표식 사본 금지)', () => {
+  it('견적·생성 모두 원장에 묻는다 — 세션 표식을 읽지 않는다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    const asked = route.match(/await isChargedByKey\(companyId, oneStepInterviewKey\(/g) || [];
+    expect(asked.length).toBeGreaterThanOrEqual(2);   // 견적 · 생성
+    // 표식을 진실로 쓰던 옛 형태가 남아 있지 않다(사본을 다시 만들면 두 진실이 갈린다)
+    expect(route).not.toContain('interview_paid_at = NOW()');
+    expect(route).not.toContain('shouldMarkInterviewPaid');
+    expect(route).not.toMatch(/AS paid/);
+  });
+
+  it('걷지 못한 항목은 키·세션·회차와 함께 남긴다 — 수동 재차감이 정책이라 대상을 특정할 수 있어야 한다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    expect(route).toMatch(/const outcome = await deductCreditOutcome\(/);
+    expect(route).toContain('collected.push(c)');
+    expect(route).toMatch(/CREDIT\]\[MISS\][\s\S]{0,120}key=\$\{c\.idempotencyKey\}/);
+    expect(route).toMatch(/session=\$\{s\.id\} attempt=\$\{attempt\}/);
+  });
+
+  it('요금 CT는 원장을 진실로 삼는다고 명시한다 — 다음 사람이 표식을 다시 만들지 않게', () => {
+    const src = readFileSync(path.join(__dirname, 'one-step-cost.ts'), 'utf8');
+    expect(src).toContain('isChargedByKey');
+    expect(src).not.toContain('shouldMarkInterviewPaid');
+  });
+});
+
+// ★ Codex 2R·3R·4R이 같은 축(선점·차감 원자성)을 세 번 지적했다. 5R에서 잠금 방식이
+//    **공용 DB 풀을 고갈시켜 백엔드 전체를 멈춘다**는 것이 드러나, 잠금을 걷고 lease + CAS로 돌아왔다.
+//    남는 창(차감 하나가 10분 초과)은 계통 장애 상황이라 **명시적으로 수용**한다 — 라우트 주석이 근거를 갖는다.
+describe('0814 정정 — 생성은 상태를 선점하고, 돈은 그 안에서 쓴다', () => {
+  it('선점은 generating 원자 전이다 — 동시 요청 둘째는 0행이라 409', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    expect(route).toContain("SET status = 'generating', attempt = attempt + 1");
+    expect(route).toContain("AND (status IN ('draft', 'generated')");
+    expect(route).toContain('ONE_STEP_GENERATING');
+    expect(route).toContain('409');
+  });
+
+  it('DB 커넥션을 쥐고 AI를 호출하지 않는다 — 풀(max 20)이 마르면 백엔드 전체가 선다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    expect(route).not.toContain('pool.connect()');
+    expect(route).not.toContain('pg_try_advisory_lock');
+  });
+
+  it('끊긴 선점은 10분 lease로 회수한다 — 없으면 그 세션이 영구히 잠긴다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    const leases = route.match(/status = 'generating' AND updated_at < NOW\(\) - INTERVAL '10 minutes'/g) || [];
+    expect(leases.length).toBeGreaterThanOrEqual(2);   // 재선점 · 이어받기
+  });
+
+  it('실패하면 선점을 푼다 — 내가 잡은 회차일 때만(남의 선점을 풀지 않는다)', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    expect(route).toContain('let claimedAttempt = 0');
+    expect(route).toMatch(/if \(claimedAttempt > 0\) \{[\s\S]{0,400}SET status = 'draft'[\s\S]{0,300}AND attempt = \$\d/);
+  });
+
+  it('돈을 쓰기 전에 소유권을 재확인하고 lease를 새로 시작한다 — 남는 창을 차감 하나로 좁힌다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    expect(route).toContain('const stillOurs = await holdClaim();');
+    expect(route).toContain('stillOurs.rows.length !== 1');
+    expect(route).toContain('ONE_STEP_CLAIM_LOST');
+    // 재확인이 lease를 갱신한다(갱신이 없으면 생성 시간이 창에 계속 포함된다)
+    expect(route).toMatch(/const holdClaim = \(\) => query\(\s*`UPDATE \$\{TABLE\} SET updated_at = NOW\(\)/);
+    // 순서 = 생성 → 재확인 → 차감 → 최종화
+    expect(route.indexOf('oneShotGenerate({')).toBeLessThan(route.indexOf('const stillOurs = await holdClaim();'));
+    expect(route.indexOf('const stillOurs = await holdClaim();')).toBeLessThan(route.indexOf('deductCreditOutcome('));
+    expect(route.indexOf('deductCreditOutcome(')).toBeLessThan(route.indexOf('const finalize = await query('));
+    // 재확인은 삼키지 않는다 — 오류면 던져서 선점 해제·500으로 간다(그 경로엔 차감이 없다)
+    expect(route).not.toMatch(/const holdClaim = \(\) => query\([\s\S]{0,400}\)\.catch\(/);
+  });
+
+  // ★ Codex 7R — 제외법(견적 − 실패분)은 "시도조차 안 한 항목"을 걷힌 것으로 센다.
+  it('걷힌 금액은 양수로 모아서 싣는다 — 견적에서 빼면 미시도 항목이 청구된 것처럼 보인다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    expect(route).toContain('collected.push(c)');
+    expect(route).toContain('charges: collected, total: sumOneStepCharges(collected)');
+    // 옛 제외법 형태로 되돌아가지 않는다
+    expect(route).not.toContain('unpaidKeys');
+    expect(route).not.toMatch(/quote\.charges\.filter\(/);
+  });
+
+  // ★ Codex 8R — "세션이 이 결과를 가리키는가"는 원인이 셋(선점 상실·확인 실패·최종화 미확정)이지만
+  //    사용자에게는 한 사실이다. 따로 판정해 일부만 실으면 화면이 정상 완료로 오인한다.
+  it('세션 불일치는 판정 하나로 모아 한 번만 내보낸다 — 세 원인이 모두 같은 표식을 세운다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    const marks = route.match(/sessionDetached = true;/g) || [];
+    expect(marks.length).toBeGreaterThanOrEqual(3);   // 확인 실패 · 선점 상실 · 최종화 미확정
+    expect(route).toContain('sessionDetached: sessionDetached || undefined');
+    // 선점을 잃었으면 최종화를 아예 시도하지 않는다(남의 회차를 건드리지 않는다)
+    expect(route).toMatch(/if \(!sessionDetached\) \{[\s\S]{0,200}const finalize = await query\(/);
+    // 옛 이름으로 되돌아가지 않는다
+    expect(route).not.toContain('claimLost');
+  });
+
+  it('차감 중 소유권 확인이 던져도 500으로 흘리지 않는다 — 걷힌 돈과 결과를 잃고 재시도에서 또 걷힌다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    expect(route).toMatch(/try \{\s*own = await holdClaim\(\);\s*\} catch \(e: any\) \{[\s\S]{0,300}break;/);
+  });
+
+  it('클라이언트가 세션 불일치를 받아서 구분한다 — 서버 필드에 소비처가 없으면 없는 것과 같다', () => {
+    const modal = readFileSync(path.join(__dirname, '../../../frontend/src/components/dm/OneStepInterviewModal.tsx'), 'utf8');
+    expect(modal).toContain('onGenerated(d.data as GeneratedPayload, sessionId, !!d.sessionDetached)');
+    const page = readFileSync(path.join(__dirname, '../../../frontend/src/pages/DmBuilderPage.tsx'), 'utf8');
+    expect(page).toMatch(/onGenerated=\{\(payload, _sessionId, sessionDetached\)/);
+    expect(page).toContain('sessionDetached');
+  });
+
+  it('크레딧제 미적용 회사는 견적도 0이다 — 화면 금액과 실차감(0)이 갈리지 않게', () => {
+    expect(estimateOneStep({ sessionId: 'x', attempt: 1, interviewPaid: false, creditEnabled: false }).total).toBe(0);
+    expect(estimateOneStep({ sessionId: 'x', attempt: 1, interviewPaid: false, creditEnabled: true }).total).toBeGreaterThan(0);
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    const passed = route.match(/estimateOneStep\(\{[^}]*creditEnabled[^}]*\}\)/g) || [];
+    expect(passed.length).toBeGreaterThanOrEqual(2);   // 견적 · 생성
+  });
+
+  // ★ Codex 9R — 가격을 정하는 자리에서 fail-open 조회를 쓰면 견적만 0원이 되고 생성은 양수를 걷는다.
+  it('가격 판정 상태는 엄격 조회로 읽는다 — 실패를 미적용으로 접으면 승인 안 한 금액이 나간다', () => {
+    const credit = readFileSync(path.join(__dirname, 'ai-credit.ts'), 'utf8');
+    expect(credit).toContain('export async function isCreditEnabledStrict');
+    // 엄격 함수는 조회 실패를 삼키지 않는다(관대한 getCreditState는 그대로 둔다)
+    expect(credit).not.toMatch(/isCreditEnabledStrict[\s\S]{0,500}catch[\s\S]{0,120}return false/);
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    const strict = route.match(/await isCreditEnabledStrict\(companyId\)/g) || [];
+    expect(strict.length).toBeGreaterThanOrEqual(2);   // 견적 · 생성
+    // 관대한 조회를 가격에 쓰지 않는다
+    expect(route).not.toContain('getCreditState');
+  });
+
+  // ★ Codex 10R — 차감 뒤 원장을 다시 조회하면, 그 조회가 한 번 실패했을 때
+  //    **실제로 걷힌 돈을 미수로 단정**해 거짓 미수 로그와 과소 청구를 만든다.
+  //    `not_applicable`의 조건은 엄격 조회가 이미 걸러 0원이 되므로 사후 조회는 덧댄 장치였다.
+  it('차감 뒤 원장을 다시 조회하지 않는다 — 조회 실패가 실제 수금을 미수로 뒤집는다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    expect(route).not.toContain('inLedger');
+    // 사후 재조회로 되돌아가지 않는다(멱등키로 원장을 다시 묻는 형태)
+    expect(route).not.toMatch(/isChargedByKey\(companyId, c\.idempotencyKey\)/);
+  });
+
+  // ★ Codex 11R — true/false로는 "돈이 실제로 빠졌는가"를 못 가른다.
+  //    생성 중 크레딧제가 꺼지면 not_applicable이 true로 접혀 무과금이 청구로 보고된다.
+  it('수금 판정은 결말로 가른다 — deducted·duplicate만 걷힌 것이다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    expect(route).toMatch(/const outcome = await deductCreditOutcome\(/);
+    expect(route).toMatch(/if \(outcome === 'deducted' \|\| outcome === 'duplicate'\) \{[\s\S]{0,60}collected\.push\(c\);/);
+    // 미수(재차감 큐)는 `failed` 하나뿐 — 무과금 결말을 큐에 넣으면 잘못 걷힌다
+    expect(route).toMatch(/else if \(outcome === 'failed'\) \{[\s\S]{0,120}unpaid\.push\(c\);/);
+    expect(route).toContain('재차감 대상 아님');
+    expect(route).not.toMatch(/outcome === 'not_applicable'[\s\S]{0,200}unpaid\.push/);
+    // 불리언 래퍼로 되돌아가지 않는다
+    expect(route).not.toContain('deductCreditSafe');
+    // CT는 판정을 한 벌만 갖는다(불리언은 결말을 접기만 한다)
+    const credit = readFileSync(path.join(__dirname, 'ai-credit.ts'), 'utf8');
+    expect(credit).toContain("export type DeductOutcome");
+    expect(credit).toMatch(/deductCreditSafe[\s\S]{0,400}await deductCreditOutcome\(opts, _deps\)\) !== 'failed'/);
+  });
+
+  it('승인한 금액과 지금 금액이 다르면 걷지 않는다 — 견적·생성 사이 상태 변화가 미승인 과금이 된다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    expect(route).toContain('QUOTE_CHANGED');
+    expect(route).toContain("const expectedTotal = req.body?.expectedTotal");
+    // 누락·비정상 타입은 선점 전에 막는다 — 선택이면 결박이 계약이 아니라 권고가 된다
+    expect(route).toContain('QUOTE_REQUIRED');
+    expect(route).toMatch(/typeof expectedTotal !== 'number' \|\| !Number\.isFinite\(expectedTotal\) \|\| expectedTotal < 0/);
+    // 검사가 선점보다 앞이다 — 뒤면 409로 되돌아가며 세션이 generating에 갇힌다
+    expect(route.indexOf('QUOTE_CHANGED')).toBeLessThan(route.indexOf("SET status = 'generating'"));
+    // 검사가 AI 호출·차감보다 앞이다
+    expect(route.indexOf('QUOTE_CHANGED')).toBeLessThan(route.indexOf('oneShotGenerate({'));
+    // 화면이 승인 총액을 실어 보내고, 변경 응답을 구분해 재확인한다
+    const modal = readFileSync(path.join(__dirname, '../../../frontend/src/components/dm/OneStepInterviewModal.tsx'), 'utf8');
+    expect(modal).toContain('expectedTotal: approvedTotal');
+    expect(modal).toContain("d?.code === 'QUOTE_CHANGED'");
+  });
+
+  // ★ Codex 6R — 항목이 둘이라 한 번만 갱신하면 두 차감의 **합산** 시간이 lease를 넘는다.
+  it('lease는 차감 항목마다 갱신하고, 잃으면 다음 차감을 시작하지 않는다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    // 루프 안에서 매 항목 직전에 소유권을 확인한다
+    expect(route).toMatch(/for \(const c of quote\.charges\)[\s\S]{0,900}own = await holdClaim\(\);/);
+    // 0행이면 break — 남은 항목을 걷지 않는다
+    expect(route).toMatch(/if \(own\.rows\.length !== 1\) \{[\s\S]{0,300}break;/);
+    // 확인이 차감보다 앞이다
+    expect(route.indexOf('const own = await holdClaim()')).toBeLessThan(route.indexOf('const outcome = await deductCreditOutcome('));
+  });
+
+  it('완료도 내가 잡은 회차일 때만 쓴다 — 진행 중인 남의 선점을 덮지 않는다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    expect(route).toMatch(/status = 'generated'[\s\S]{0,400}AND status = 'generating' AND attempt = \$\d/);
+    expect(route).toContain('finalize.rows.length !== 1');
+  });
+
+  it('생성 입력은 선점이 돌려준 답으로만 만든다 — 먼저 읽고 나중에 선점하면 옛 답으로 과금한다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    expect(route).toContain('RETURNING attempt, answers, prefill');
+    expect(route).toMatch(/buildMasterBrief\(claimed\.answers/);
+    // 선점 전에 읽어 둔 s.answers로 생성 입력을 만들지 않는다
+    expect(route).not.toMatch(/buildMasterBrief\(s\.answers/);
+  });
+
+  it('과금 조회가 안 되면 금액을 짓지 않는다 — 모르는 것을 미차감으로 접으면 이미 낸 고객이 막힌다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    const guards = route.match(/CREDIT_LOOKUP_UNAVAILABLE/g) || [];
+    expect(guards.length).toBeGreaterThanOrEqual(2);   // 견적 · 생성
+    expect(route).toContain('503');
+    const credit = readFileSync(path.join(__dirname, 'ai-credit.ts'), 'utf8');
+    // CT는 조회 실패를 false로 접지 않는다(던진다)
+    expect(credit).not.toMatch(/isChargedByKey[\s\S]{0,600}catch[\s\S]{0,120}return false/);
+  });
+
+  it('생성 중에는 답을 못 고친다 — PATCH 허용 상태에 generating이 없다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    const patchAllow = route.match(/AND status IN \('draft', 'generated'\)/g) || [];
+    expect(patchAllow.length).toBeGreaterThanOrEqual(1);
+    expect(route).not.toMatch(/status IN \('draft', 'generated', 'generating'\)/);
+  });
+
+  it('이어받기와 새로 시작을 사용자가 고른다 — 시간 창은 같은 행사임을 증명하지 못한다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    expect(route).toContain('!req.body?.fresh');
+  });
+});
+
+describe('0814 정정 — 세션은 이어지고, 담당자별로 격리된다', () => {
+  it('세션 열기는 진행 중인 내 draft를 먼저 찾는다 — 새로 만들면 대행비를 다시 걷는다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    const resume = route.indexOf("AND updated_at > NOW() - INTERVAL '30 days'");
+    expect(resume).toBeGreaterThan(-1);
+    expect(route).toContain('ORDER BY updated_at DESC LIMIT 1');
+    expect(route).toContain('resumed: true');
+    // 이어받기 조회가 INSERT보다 먼저 온다(뒤에 있으면 매번 새 세션이 만들어진다)
+    expect(resume).toBeLessThan(route.indexOf(`INSERT INTO`));
+  });
+
+  it('답을 고치면 생성 완료 세션도 다시 진행 중이 된다 — 막으면 새 세션으로 밀려 또 낸다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    expect(route).toContain("AND status IN ('draft', 'generated')");
+    expect(route).toMatch(/SET answers = [\s\S]{0,120}status = 'draft'/);
+  });
+
+  it('전 엔드포인트에 소유 조건이 걸려 있다 — 회사 조건만으로는 옆 담당자 세션이 열린다', () => {
+    const route = readFileSync(path.join(__dirname, '../routes/content-interview.ts'), 'utf8');
+    const ownerGuards = route.match(/IS NULL OR created_by = \$\d::uuid/g) || [];
+    // 조회 · 답 저장 · 회차 올리기 · 최종화 네 경로
+    //   (표식 경로는 원장 판정으로, 소유권 재확인·선점 해제는 잠금으로 대체돼 사라졌다)
+    expect(ownerGuards.length).toBeGreaterThanOrEqual(4);
+    expect(route).toContain("from '../utils/owner-scope'");
+    // 격리 CT를 쓴다 — 라우트 안에 같은 판정을 다시 쓰지 않는다
+    expect(route).not.toMatch(/userType === 'company_admin'/);
   });
 });
 

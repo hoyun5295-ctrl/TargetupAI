@@ -1,6 +1,7 @@
 # 아카이브 INDEX — grep 진입점
 > 과거 작업·종결 버그·옛 설계서는 반드시 이 인덱스 grep으로 진입한다 (doc_routing). 원문은 링크 파일에 무손실 보존.
 > 생성: 2026-07-03 관제탑 재설계 v2 (원본 STATUS.md §4 179건 중 157건 + 최근 완료 20건 = 177건 이동)
+> 재설계 전 STATUS 전체 원본 = git 이력 보존 — `git log --all -- 'status/_backup-20260703-*'` (폴더 자체는 2026-07-07 삭제 · 0814 STATUS 헤더에서 이관)
 
 ## 1) 과거 CURRENT_TASK (원문 = TASKS_YYYY-MM.md)
 
@@ -8,6 +9,7 @@
 
 | 날짜 | 제목 | 검색 키워드 | 파일 |
 |------|------|-------------|------|
+| 2026-08-14 | 🟢 STATUS §2 카드 회전 8장 + 완료분 잔여 표 폐지 (상시 로드 감축) | 마케팅 플래너 무료 메시징 REMAINING_EXPR billableQuantity 여정 trigger_event 프리셋 정산 크로커다일 failed 305 싱크에이전트 PREINSTALL-QUESTIONNAIRE 브랜드메시지 resolveRefundAxes B0227 mysql-refund-sweeper 대체문안 alimtalk-fallback refund_key image_link_url data-hanjullo-wrap 팝폰 완료분 잔여 뱃지 | [TASKS_2026-08.md](TASKS_2026-08.md) |
 | 2026-07-19~20 | 🟢 이미지 스튜디오 계절 템플릿 22종 + 의류 단독컷 원칙 + 팝폰 포스터형 가로줄 종결 + 아임웹 앱스토어 제출 (회전 2026-07-20) | image-studio-templates STUDIO_TEMPLATES 계절 템플릿 58종 시즌 오프 스프링 가든 아이스 쿨링 어텀 앰버 윈터 프로스트 트로피컬 썸머 리조트 의류 착용컷 단독컷 rembg 누끼 합성티 광원 불일치 고스트 마네킹 InAppBottomSheet 포스터형 스크림 가로줄 dp 반올림 이음새 base64 PNG 알파 램프 expo-image contentFit eas update platform 분리 아임웹 imweb 앱스토어 siteCode 결제·앱스토어 Rest API V2 integration_squad 아이디룩 idlookmall | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-17 | 🟢 (3) 대시보드 성능 1~7차 + 0718 M1 스플리팅 사고·재발 방지 게이트 ①② (회전 2026-07-18) | sendTimes 커버링 인덱스 mysqlUnion SWR swr-cache enabled-fields 워밍 getCampaignResultCounts pg_stat_statements slow_query_log 버퍼풀 2GB M1 스플리팅 lazy 난독화 stringArray 동적 import 비결정 빌드 B-0718-1 dist-old safe-build 게이트 verify-live-chunks 비literal import(W f8ac12f6 d6958238 | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-17 | 🟢 (2) 비토 라인 14·15 + 발송 라인 설정 탭 (회전 2026-07-18) | SMSQ_SEND_14 SMSQ_SEND_15 hanjul02 hanjul03 발송 라인 설정 탭 라인그룹 배정 정산 bito E2E 왕복 리포트 SMSQ_SEND_12 폐기 expired-pending-sweeper system-monitor-worker getAllBulkSmsTables | [TASKS_2026-07.md](TASKS_2026-07.md) |

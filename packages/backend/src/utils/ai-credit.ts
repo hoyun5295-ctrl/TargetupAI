@@ -66,6 +66,21 @@ export async function getCreditState(companyId: string): Promise<CreditState> {
   }
 }
 
+/**
+ * 크레딧제 적용 여부 — **과금 판정 전용. 조회 실패를 삼키지 않는다.**
+ *
+ * `getCreditState`는 실패를 `creditEnabled:false`로 접어 준다(표시·조회용으로는 그게 안전하다).
+ * 그런데 그 값으로 **금액을 지으면** 조회가 한 번 실패한 견적은 0원을 보여주고, 뒤이은 생성은
+ * 조회에 성공해 양수를 걷는다 — 사용자가 승인하지 않은 금액이 나간다. 반대 방향도 같다.
+ * 그래서 가격을 정하는 자리에서는 "모른다"를 false로 접지 않고 던진다(호출부가 503으로 답한다).
+ */
+export async function isCreditEnabledStrict(companyId: string): Promise<boolean> {
+  if (!companyId) return false;
+  const row = await loadCreditRow(pool, companyId, false);
+  if (!row) return false;                                   // 행 부재 = 크레딧제 미적용(오류가 아니다)
+  return row.plan_credits != null || (Number(row.purchased) || 0) > 0;
+}
+
 /** 호출 전 사전 차단 — 보유 크레딧이 작업 비용보다 적으면 throw InsufficientCreditError. */
 export async function checkCredit(companyId: string, cost: number): Promise<void> {
   if (!companyId || !cost || cost <= 0) return;
@@ -76,6 +91,27 @@ export async function checkCredit(companyId: string, cost: number): Promise<void
   if (st.total + overageAllowed < cost) {
     throw new InsufficientCreditError(cost, st.total);
   }
+}
+
+/**
+ * 이 멱등키로 이미 차감된 적이 있는가 — **과금 여부의 진실은 원장 하나다.**
+ *
+ * "냈다"를 다른 표에 표식으로 복사해 두고 그걸 읽으면, 차감은 성공했는데 표식만 실패한 순간부터
+ * 두 진실이 갈린다(견적이 이미 낸 금액을 다시 청구하고 잔액 게이트가 부당하게 막는다).
+ * 그래서 사본을 만들지 않고 원장에 직접 묻는다.
+ *
+ * ⛔ **조회 실패를 "안 냈다"로 접지 않는다 — 던진다.** 모르는 것을 미차감으로 답하면 이미 낸 대행비가
+ * 견적에 다시 들어가고 그 합계로 잔액을 검사해, 신규 생성비만 있는 고객이 부당하게 막힌다.
+ * 호출부는 이 예외를 **503(잠시 후 재시도)** 으로 돌려준다 — 확인 못 한 금액을 청구도 검사도 하지 않는다.
+ */
+export async function isChargedByKey(companyId: string, idempotencyKey: string): Promise<boolean> {
+  if (!companyId || !idempotencyKey) return false;
+  const r = await pool.query(
+    `SELECT 1 FROM ai_credit_transactions
+      WHERE company_id = $1::uuid AND idempotency_key = $2 LIMIT 1`,
+    [companyId, idempotencyKey],
+  );
+  return r.rows.length > 0;
 }
 
 /** 호출 성공 후 차감 (트랜잭션 + idempotent + 2버킷). 보유 부족 시 throw InsufficientCreditError. */
@@ -114,6 +150,14 @@ export async function deductCredit(opts: {
 }
 
 /**
+ * 차감 결말 — **`true/false` 둘로는 "돈이 실제로 빠졌는가"를 못 가른다.**
+ *  - `deducted` = 원장이 움직였다 / `duplicate` = 같은 키로 이미 원장에 있다(둘 다 "수금됨")
+ *  - `not_applicable` = 크레딧제 미적용이라 원장이 안 움직인다(수금 아님 — 금액을 표시하면 안 된다)
+ *  - `not_required` = 걷을 것이 없다(cost 0·회사 없음) / `failed` = 잔액 부족·영구 실패(차감 의무 남음)
+ */
+export type DeductOutcome = 'deducted' | 'duplicate' | 'not_applicable' | 'not_required' | 'failed';
+
+/**
  * 차감 안전 실행 래퍼 — AI 호출 성공 후 차감을 끝까지 보장한다.
  *  - 캐시·통계 기록과 분리해 호출(통계 실패가 차감을 막지 않음).
  *  - 일시 오류(deadlock·연결·잠금 경합) 시 최대 3회 재시도(차감은 원자·멱등이라 재호출해도 중복 0).
@@ -129,7 +173,7 @@ export async function deductCredit(opts: {
  *   `false` = 잔액 부족 · 3회 영구 실패 · 크레딧 행 없음. **돈이 안 빠졌다는 뜻이므로 상태를 전진시키면 안 된다.**
  *   기존 소비처는 반환값을 쓰지 않아 동작이 그대로다(void → boolean은 하위 호환).
  */
-export async function deductCreditSafe(
+export async function deductCreditOutcome(
   opts: {
     companyId: string | null;
     cost: number;
@@ -140,9 +184,9 @@ export async function deductCreditSafe(
     idempotencyKey?: string;
   },
   _deps?: { deductFn?: typeof deductCredit; sleep?: (ms: number) => Promise<void> }
-): Promise<boolean> {
-  // 차감 대상이 아니다 = 남은 의무가 없다. false로 답하면 호출부가 정상 흐름을 보류로 오판한다.
-  if (!opts.companyId || !opts.cost || opts.cost <= 0) return true;
+): Promise<DeductOutcome> {
+  // 차감 대상이 아니다 = 남은 의무가 없다.
+  if (!opts.companyId || !opts.cost || opts.cost <= 0) return 'not_required';
   const deduct = _deps?.deductFn ?? deductCredit;
   const sleep = _deps?.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   // 호출측이 멱등키를 직접 주면 그걸 우선(고정). 아니면 aiCallLogId 있을 때 deductCredit이 source+aiCallLogId로,
@@ -165,17 +209,18 @@ export async function deductCreditSafe(
       // 사후 토스트용 — 차감 성공 시 요청 컨텍스트에 기록(응답 미들웨어가 _credit 첨부). worker는 no-op.
       if (result?.deducted) {
         setCreditEvent({ used: opts.cost, balance: (result.baseAfter || 0) + (result.purchasedAfter || 0), source: opts.source });
-        return true;
+        return 'deducted';
       }
       // 차감이 안 일어났다 — 사유를 봐야 "돈이 빠졌는가"가 갈린다(재시도해도 바뀌지 않는 결말들이다).
-      if (result?.skipReason === 'duplicate' || result?.skipReason === 'not_applicable') return true;
+      if (result?.skipReason === 'duplicate') return 'duplicate';
+      if (result?.skipReason === 'not_applicable') return 'not_applicable';
       console.log(`[CREDIT][MISS] company=${opts.companyId} source=${opts.source} cost=${opts.cost} aiCallLogId=${opts.aiCallLogId || 'none'} reason=${result?.skipReason || 'unknown'}`);
-      return false;
+      return 'failed';
     } catch (err: any) {
       // 잔액 부족 = 정상 차단(사전 checkCredit 통과 후 동시 소진). 재시도 무의미.
       if (err instanceof InsufficientCreditError) {
         console.log(`[CREDIT][SKIP] insufficient company=${opts.companyId} source=${opts.source} cost=${opts.cost} aiCallLogId=${opts.aiCallLogId || 'none'}`);
-        return false;
+        return 'failed';
       }
       if (attempt < MAX_ATTEMPTS) {
         await sleep(attempt * 200);
@@ -183,10 +228,22 @@ export async function deductCreditSafe(
       }
       // 영구 실패 — stdout 추적(LESSONS_BACKEND: console.log 의무). aiCallLogId로 수동 재차감 가능.
       console.log(`[CREDIT][MISS] company=${opts.companyId} source=${opts.source} cost=${opts.cost} aiCallLogId=${opts.aiCallLogId || 'none'} attempts=${MAX_ATTEMPTS} err=${err?.message}`);
-      return false;
+      return 'failed';
     }
   }
-  return false;
+  return 'failed';
+}
+
+/**
+ * 차감 확정 여부(하위 호환) — `false`만이 "돈이 안 빠졌고 의무가 남았다"는 뜻이다.
+ * 기존 소비처 전부가 이 불리언을 쓰므로 **판정은 `deductCreditOutcome` 하나가 소유하고 여기서는 접기만 한다**
+ * (두 벌로 쓰면 한쪽만 고쳐져 갈라진다). 수금 여부까지 구분해야 하는 호출부는 outcome을 직접 쓴다.
+ */
+export async function deductCreditSafe(
+  opts: Parameters<typeof deductCreditOutcome>[0],
+  _deps?: Parameters<typeof deductCreditOutcome>[1],
+): Promise<boolean> {
+  return (await deductCreditOutcome(opts, _deps)) !== 'failed';
 }
 
 /**

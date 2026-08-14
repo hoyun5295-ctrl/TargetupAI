@@ -11,6 +11,8 @@
  *   - **제작물 과금 키를 새로 만들지 않는다** — 발행·완성은 그 채널 라우트가 자기 키로 걷는다
  *     (`dm-publish:{dmId}` 등). 여기서 선차감하면 같은 제작물에 두 번 과금된다.
  *   - **대행 델타는 세션당 1회다.** 재생성해도 다시 걷지 않는다 — 다시 나가는 것은 생성비뿐이다.
+ *   - **"이미 냈는가"의 진실은 원장이다**(`isChargedByKey`). 세션 표식 같은 사본을 두고 그걸 읽으면,
+ *     차감은 됐는데 표식만 실패한 순간 견적이 이미 낸 돈을 다시 청구하고 잔액 게이트가 부당하게 막는다.
  */
 import { getCreditCost } from './ai-credit-calc';
 
@@ -45,18 +47,21 @@ export function buildOneStepCharges(input: {
   sessionId: string;
   attempt: number;
   interviewPaid: boolean;
+  /** 크레딧제 미적용 회사 = 원장이 전혀 움직이지 않는다. 그런 회사에 금액을 표시하면 화면과 실차감이 갈린다. */
+  creditEnabled?: boolean;
 }): OneStepCharge[] {
+  const priced = input.creditEnabled !== false;
   const charges: OneStepCharge[] = [{
     source: ONE_STEP_DM_GEN_SOURCE,
     label: '모바일 DM 생성',
-    cost: getCreditCost(ONE_STEP_DM_GEN_SOURCE),
+    cost: priced ? getCreditCost(ONE_STEP_DM_GEN_SOURCE) : 0,
     idempotencyKey: oneStepGenKey(input.sessionId, input.attempt),
   }];
   if (!input.interviewPaid) {
     charges.push({
       source: ONE_STEP_INTERVIEW_SOURCE,
       label: '오토설계 대행',
-      cost: getCreditCost(ONE_STEP_INTERVIEW_SOURCE),
+      cost: priced ? getCreditCost(ONE_STEP_INTERVIEW_SOURCE) : 0,
       idempotencyKey: oneStepInterviewKey(input.sessionId),
     });
   }
@@ -73,15 +78,20 @@ export function sumOneStepCharges(charges: OneStepCharge[]): number {
  * `publishNotice`는 화면이 그대로 띄운다: 발행분은 여기서 걷지 않고 발행 시점에 걷힌다는 사실을
  * 미리 말하지 않으면 "냈는데 또 낸다"는 접수가 뜬다.
  */
-export function estimateOneStep(input: { sessionId: string; attempt: number; interviewPaid: boolean }): {
+export function estimateOneStep(input: {
+  sessionId: string; attempt: number; interviewPaid: boolean; creditEnabled?: boolean;
+}): {
   charges: OneStepCharge[];
   total: number;
   publishNotice: string;
 } {
   const charges = buildOneStepCharges(input);
+  const priced = input.creditEnabled !== false;
   return {
     charges,
     total: sumOneStepCharges(charges),
-    publishNotice: `발행 크레딧은 이 금액에 포함되지 않고, 만든 DM을 발행할 때 따로 차감됩니다(${getCreditCost('dm-builder').toLocaleString()}크레딧).`,
+    publishNotice: priced
+      ? `발행 크레딧은 이 금액에 포함되지 않고, 만든 DM을 발행할 때 따로 차감됩니다(${getCreditCost('dm-builder').toLocaleString()}크레딧).`
+      : '이 계정은 크레딧이 차감되지 않습니다.',
   };
 }
