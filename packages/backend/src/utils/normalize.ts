@@ -420,6 +420,53 @@ function toValidDate(y: unknown, m: unknown, d: unknown): string | null {
   return `${String(yyyy).padStart(4, '0')}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
 }
 
+/**
+ * ★ 2026-08-14: 문자열에서 (연, 월, 일) 후보를 추출하는 단일 파서.
+ * normalizeDate의 문자열 분기와 salvageBirthParts가 공유한다 — 형식 추가는 여기 한 곳에만.
+ */
+function extractDateParts(v: string): { y: number; m: number; d: number } | null {
+  const iso = v.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return { y: +iso[1], m: +iso[2], d: +iso[3] };
+  const compact = v.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compact) return { y: +compact[1], m: +compact[2], d: +compact[3] };
+  const slash = v.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+  if (slash) return { y: +slash[1], m: +slash[2], d: +slash[3] };
+  // ★ D83: YYYY.MM.DD + 한국식 "2025. 12. 17." "2025. 1. 3." (공백+점 조합)
+  const ko = v.replace(/\.$/, '').match(/^(\d{4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})$/);
+  if (ko) return { y: +ko[1], m: +ko[2], d: +ko[3] };
+  // ★ D79: YYMMDD 6자리 (250103 → 2025-01-03)
+  const short = v.match(/^(\d{2})(\d{2})(\d{2})$/);
+  if (short) {
+    const yy = parseInt(short[1], 10);
+    return { y: yy <= 50 ? 2000 + yy : 1900 + yy, m: +short[2], d: +short[3] };
+  }
+  // MM/DD/YYYY (미국식)
+  const us = v.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (us) return { y: +us[3], m: +us[1], d: +us[2] };
+  return null;
+}
+
+/**
+ * ★ 2026-08-14: 생일 구제 — 양력 달력에 없지만 버리면 안 되는 값의 연도·월-일 회수.
+ *
+ * 이새 실측(sync_logs.failures): `1967-02-29` 같은 비윤년 2/29가 반복 거절됐다.
+ * 이건 쓰레기가 아니라 **음력 생일**이다(음력엔 2/29·2/30이 실재). date 컬럼에는 못 넣지만
+ * 생일 마케팅은 birth_year·birth_month_day면 동작하므로, 월 1~12·일 1~31 범위가 맞으면
+ * 연도와 월-일을 살린다. `1900-19-65`(월 19) 같은 진짜 쓰레기는 범위에서 걸려 null.
+ *
+ * 호출 규약: normalizeDate가 null을 준 뒤에만 부른다(성공 값은 normalizeDate가 정답).
+ */
+export function salvageBirthParts(value: any): { year: number; monthDay: string } | null {
+  if (value == null || value === '') return null;
+  if (value instanceof Date) return null; // Date 객체는 달력 유효값만 담는다 — 구제 대상 아님
+  const parts = extractDateParts(String(value).trim());
+  if (!parts) return null;
+  const { y, m, d } = parts;
+  if (y < 1900 || y > 2099) return null;
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  return { year: y, monthDay: `${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}` };
+}
+
 export function normalizeDate(value: any): string | null {
   if (value == null || value === '') return null;
 
@@ -457,28 +504,9 @@ export function normalizeDate(value: any): string | null {
 
   const v = String(value).trim();
 
-  // ↓ 아래 분기는 전부 toValidDate 단일 출구를 지난다. 분기 안에 검사를 되살리지 말 것.
-  // 이미 ISO 형식 (뒤에 시각이 붙어 있어도 앞 10자리만)
-  const iso = v.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return toValidDate(iso[1], iso[2], iso[3]);
-  // YYYYMMDD
-  const compact = v.match(/^(\d{4})(\d{2})(\d{2})$/);
-  if (compact) return toValidDate(compact[1], compact[2], compact[3]);
-  // YYYY/MM/DD
-  const slash = v.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
-  if (slash) return toValidDate(slash[1], slash[2], slash[3]);
-  // ★ D83: YYYY.MM.DD + 한국식 "2025. 12. 17." "2025. 1. 3." "2025.12.17." (공백+점 조합)
-  const ko = v.replace(/\.$/, '').match(/^(\d{4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})$/);
-  if (ko) return toValidDate(ko[1], ko[2], ko[3]);
-  // ★ D79: YYMMDD 6자리 형식 (250103 → 2025-01-03)
-  const short = v.match(/^(\d{2})(\d{2})(\d{2})$/);
-  if (short) {
-    const yy = parseInt(short[1], 10);
-    return toValidDate(yy <= 50 ? 2000 + yy : 1900 + yy, short[2], short[3]);
-  }
-  // MM/DD/YYYY (미국식)
-  const us = v.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (us) return toValidDate(us[3], us[1], us[2]);
+  // 형식별 조립은 extractDateParts 한 곳, 달력 검증은 toValidDate 한 곳 — 분기에 검사를 되살리지 말 것.
+  const parts = extractDateParts(v);
+  if (parts) return toValidDate(parts.y, parts.m, parts.d);
 
   // Date 파싱 시도 (엔진이 실제 달력으로 파싱한 결과라 추가 검사 불요)
   try {

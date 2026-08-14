@@ -93,7 +93,8 @@ export function createCustomerUpsertBuilder(
   // ★ D214+ active_sources 리터럴 (sourceLiteral 활용 — '["sync"]'::jsonb 영역)
   const activeSourcesLiteral = `('["' || ${sourceLiteral} || '"]')::jsonb`;
 
-  // ON CONFLICT UPDATE 절 — phone/store_code는 UNIQUE 키 구성요소이므로 UPDATE에서 제외
+  // ON CONFLICT UPDATE 절 — phone은 UNIQUE 키(company_id, phone) 구성요소라 제외.
+  // store_code는 키가 아니지만 제외 유지(★2026-08-14) — 첫 등록 매장을 보존하고 다매장은 customer_stores가 소유.
   // ★ D214+ (2026-05-24) Unified Customer Profile 정합:
   //   RFM 컬럼 영역 = GREATEST 강제 의무 (자사몰 영역 cdp-orders.ts 영역 안 최신 영역 덮어쓰기 사고 차단)
   //   - recent_purchase_date / purchase_count / last_purchase_date = GREATEST (옛 = COALESCE 덮어쓰기 영역 사고)
@@ -174,10 +175,20 @@ export function createCustomerUpsertBuilder(
       options.returning === 'all'
         ? 'RETURNING *, (xmax = 0) as is_insert'
         : 'RETURNING (xmax = 0) as is_insert, phone';
+    // ★ 2026-08-14 충돌 축 정정 — (company_id, phone). 이새 실측 164건 영구 실패의 뿌리.
+    //   customers에는 유니크가 두 벌 있었다: customers_company_id_phone_key(company_id, phone)와
+    //   idx_customers_company_store_phone(company_id, COALESCE(store_code,'__NONE__'), phone).
+    //   arbiter가 후자(느슨한 쪽)를 보고 있어서, 같은 폰이 다른 매장으로 오면 "충돌 아님" 판정
+    //   → 신규 INSERT 시도 → 전자(엄격한 쪽)가 거절 = duplicate key. 그 고객은 매 동기화마다 영구 실패.
+    //   설계 진실은 "폰당 고객 1행"(다매장은 customer_stores가 소유)이므로 arbiter를 phone 키에 맞춘다.
+    //   store_code는 updateExclusions라 기존 매장이 보존되고, 새 매장은 customer_stores에 쌓인다.
+    //   ⚠ 배포 후 idx_customers_company_store_phone은 죽은 인덱스다(phone 키가 항상 먼저 잡는다) — DDL로 제거.
+    //   ⚠ idx_customers_code(company_id, customer_code)는 여전히 arbiter 밖 — 같은 코드·다른 폰이 오면
+    //     그 행은 실패 로그로 남는다(자동 병합은 사람 판정 없이 하지 않는다).
     const sql = `
       INSERT INTO customers (${insertCols.join(', ')})
       VALUES ${placeholders.join(', ')}
-      ON CONFLICT (company_id, COALESCE(store_code, '__NONE__'), phone) DO UPDATE SET
+      ON CONFLICT (company_id, phone) DO UPDATE SET
               ${updateClauses}
       ${returningClause}
     `;

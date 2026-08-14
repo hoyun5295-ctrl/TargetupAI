@@ -8,7 +8,7 @@ import path from 'path';
 import { query } from '../config/database';
 import { ensureSystemSyncUser } from '../utils/system-sync-user';
 import { TIMEOUTS, RATE_LIMITS, BATCH_SIZES } from '../config/defaults';
-import { normalizePhone, normalizeRegion, normalizeDate, normalizeCustomFieldValue } from '../utils/normalize';
+import { normalizePhone, normalizeRegion, normalizeDate, normalizeCustomFieldValue, salvageBirthParts } from '../utils/normalize';
 import {
   FIELD_MAP,
   CATEGORY_LABELS,
@@ -639,6 +639,15 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
             derivedBirthYear = parseInt(normalized.substring(0, 4));
             derivedBirthMonthDay = normalized.substring(5, 10);
             derivedAge = currentYear - derivedBirthYear;
+          } else {
+            // ★ 2026-08-14: 음력 생일 구제 — 비윤년 2/29 등은 date로는 못 넣지만(이새 실측 반복 거절)
+            //   생일 마케팅의 실축인 연도·월-일은 birth_year·birth_month_day로 살린다.
+            const salvaged = salvageBirthParts(bd);
+            if (salvaged) {
+              derivedBirthYear = salvaged.year;
+              derivedBirthMonthDay = salvaged.monthDay;
+              derivedAge = currentYear - salvaged.year;
+            }
           }
         }
       }

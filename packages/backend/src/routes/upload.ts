@@ -6,7 +6,7 @@ import * as XLSX from 'xlsx';
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
 import { redis, AI_MODELS, AI_MAX_TOKENS, CACHE_TTL, TIMEOUTS, BATCH_SIZES, isAdaptiveOnlyModel, resolveMaxTokens } from '../config/defaults';
-import { normalizeByFieldKey, normalizeRegion, normalizeDate, normalizeCustomFieldValue } from '../utils/normalize';
+import { normalizeByFieldKey, normalizeRegion, normalizeDate, normalizeCustomFieldValue, salvageBirthParts } from '../utils/normalize';
 import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
 import { validateUploadMapping } from '../utils/upload-mapping-validator';
 import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
@@ -612,14 +612,20 @@ async function processUploadInBackground(
           continue;
         }
 
-        // ★ 브랜드 격리: 파일에 store_code 컬럼이 없으면 업로드 사용자의 store_codes[0] 자동 할당
-        // → UNIQUE(company_id, store_code, phone) 제약에 의해 브랜드별 별개 레코드로 분리됨
+        // ★ 브랜드 소속: 파일에 store_code 컬럼이 없으면 업로드 사용자의 store_codes[0] 자동 할당.
+        //   (매장 소속의 진실은 customer_stores N:N — customers 행은 폰당 1행이다.
+        //    옛 주석의 "UNIQUE(company_id, store_code, phone)로 별개 레코드 분리"는 사실이 아니었다 —
+        //    customers_company_id_phone_key가 항상 먼저 막았다. 2026-08-14 arbiter 정정에서 확인.)
         if (!hasFileStoreCode && !record.store_code && userStoreCodes.length > 0) {
           record.store_code = userStoreCodes[0];
         }
 
-        // 배치 내 중복: store_code 포함 dedupe
-        const dedupeKey = `${record.phone}__${record.store_code || '__NONE__'}`;
+        // 배치 내 중복: phone 기준 dedupe
+        // ★ 2026-08-14: store_code 포함 키 → phone 단독. upsert 충돌 축이 (company_id, phone)이므로
+        //   같은 폰이 두 매장으로 한 배치에 오면 같은 행을 2회 갱신하게 되어 배치 전체가 죽는다
+        //   (upload 경로는 sync와 달리 단건 폴백이 없다 — errorCount += batch.length).
+        //   구 arbiter에서도 이 조합은 phone 키 위반으로 배치가 통째 실패했다. 첫 행만 남긴다.
+        const dedupeKey = record.phone;
         if (seenInBatch.has(dedupeKey)) {
           duplicateCount++;
           continue;
@@ -653,6 +659,15 @@ async function processUploadInBackground(
             //   PG로 흘러가던 자리(sync.ts 동일 패턴 — 아난티 date/time field value out of range).
             const normalized = normalizeDate(bd);
             record.birth_date = normalized;
+            if (!normalized) {
+              // ★ 2026-08-14: 음력 생일 구제(sync.ts 동일) — 비윤년 2/29 등은 연도·월-일만 살린다.
+              const salvaged = salvageBirthParts(bd);
+              if (salvaged) {
+                derivedBirthYear = salvaged.year;
+                derivedBirthMonthDay = salvaged.monthDay;
+                derivedAge = currentYear - salvaged.year;
+              }
+            }
             if (normalized) {
               derivedBirthYear = parseInt(normalized.substring(0, 4));
               derivedBirthMonthDay = normalized.substring(5, 10);

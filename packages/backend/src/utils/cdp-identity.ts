@@ -186,7 +186,7 @@ export async function identifyCustomer(
         $9::jsonb, $10, true, COALESCE($11::boolean, false),
         NOW(), NOW()
       )
-      ON CONFLICT (company_id, COALESCE(store_code, '__NONE__'::varchar), phone)
+      ON CONFLICT (company_id, phone)
       DO UPDATE SET
         name = COALESCE(EXCLUDED.name, customers.name),
         email = COALESCE(EXCLUDED.email, customers.email),

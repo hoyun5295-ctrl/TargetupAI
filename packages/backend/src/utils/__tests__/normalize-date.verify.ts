@@ -12,7 +12,7 @@
  * 아래 "사고 실측값" 블록이 깨지면 toValidDate 단일 출구를 우회하는 분기가 생긴 것이다.
  */
 import assert from 'node:assert';
-import { normalizeDate } from '../normalize';
+import { normalizeDate, salvageBirthParts } from '../normalize';
 
 let passed = 0;
 function ok(name: string, fn: () => void) {
@@ -64,5 +64,17 @@ ok('undefined', () => eq(undefined, null));
 ok('빈 문자열', () => eq('', null));
 ok('공백만', () => eq('   ', null));
 ok('날짜가 아닌 문자열', () => eq('생년월일없음', null));
+
+console.log('[salvageBirthParts] 음력 생일 구제 — 달력엔 없지만 범위가 맞으면 연도·월-일 회수 (이새 실측)');
+const sv = (input: any, expected: { year: number; monthDay: string } | null) =>
+  assert.deepStrictEqual(salvageBirthParts(input), expected, `salvageBirthParts(${JSON.stringify(input)})`);
+ok('1967-02-29 (비윤년 2/29 = 음력) → {1967, 02-29}', () => sv('1967-02-29', { year: 1967, monthDay: '02-29' }));
+ok('19650229 8자리도 동일', () => sv('19650229', { year: 1965, monthDay: '02-29' }));
+ok('2/30도 음력에 실재 → 회수', () => sv('1970-02-30', { year: 1970, monthDay: '02-30' }));
+ok('1900-19-65 (월 19) → null (진짜 쓰레기)', () => sv('1900-19-65', null));
+ok('20144850 (48월) → null', () => sv('20144850', null));
+ok('연도 범위 밖 1899 → null', () => sv('18990229', null));
+ok('일 32 → null', () => sv('19670132', null));
+ok('빈 값 → null', () => sv('', null));
 
 console.log(`\n${passed} assertions passed`);

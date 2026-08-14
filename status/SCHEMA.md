@@ -480,6 +480,13 @@
 - UNIQUE: (company_id, field_key)
 
 ### customers (고객)
+> **유니크 인덱스 (2026-08-14 pg_indexes 실덤프)**: `customers_company_id_phone_key`(company_id, phone) ·
+> `idx_customers_company_store_phone`(company_id, COALESCE(store_code,'__NONE__'), phone) ·
+> `idx_customers_code`(company_id, customer_code) WHERE customer_code IS NOT NULL.
+> **폰 키가 진실이다 — 폰당 고객 1행, 다매장은 customer_stores가 소유.** upsert ON CONFLICT는 (company_id, phone)
+> (2026-08-14 정정 — 옛 arbiter가 store 표현식 인덱스를 보고 있어 매장 바뀐 고객이 영구 실패했다. 이새 164건).
+> store 표현식 인덱스는 정정 배포 후 죽은 인덱스 — DROP 예정. customer_code 키는 arbiter 밖(같은 코드·다른 폰 = 실패 로그).
+
 | 컬럼 | 타입 |
 |------|------|
 | id | uuid PK |
