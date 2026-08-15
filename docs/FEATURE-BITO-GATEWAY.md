@@ -340,6 +340,44 @@ cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --conf
 
 **관찰 (처방 아님, 영향 미측정)** — ①발신번호 허용 캐시가 전역 뮤텍스를 DB 조회 동안 유지(`sender.go:1177-1182`), 대량 발송 시 직렬화 지점 가능 ②CORS가 모든 origin을 credentials와 함께 반사하나 SameSite=Strict가 실질 방어 중 ③web/api 테스트는 로컬 사본에서 의존성 미설치로 실행 불가(MODULE_NOT_FOUND) — Node 쪽은 Go와 달리 계약 테스트 규율이 얇다.
 
+## 7-2. 2차 전수점검 — 결함 5종 확정·수정 (2026-08-15(2) 실측 · Harold 승인 후 수정)
+
+§7-1이 표면을 훑은 뒤 돈·발송 경로를 깊이 읽은 회차다. **찾은 5건 전부 수정·커밋 완료**(`139a6c9`·`a9db8ad`·`6b8fd1b`·`95f4a0b` + 리뷰 정정 `d8723d6`·`f44e36e`). 서버 미반영 — Go 바이너리 재빌드 필요(그쪽 STATUS 「미배포 수정」이 배포 원장).
+
+| # | 결함 | 근거 | 처리 |
+|---|---|---|---|
+| A | **빈 결과코드를 성공으로 판정**(fail-open) | `report.go:302`·`sender.go:1549`·`poller.go:820` 3곳 복제. 유입 = `humuson_imc/protocol.go:159-166`(키 부재 시 `""`) · `gemtek/packet/report.go:66`(4바이트 RESULT 공백) | 판정을 `internal/common/resultcode` 하나로 모으고 빈 코드 제외. ACK 집합(`0`,`0000`)과 REPORT 집합(8종)은 계약이 달라 분리 유지 |
+| B | **PAY 통계에서 단가 키 없는 msg_type이 DB 안에서 소멸** | `paystats/reporter.go` `CASE ELSE NULL` + 같은 CASE를 반복한 `HAVING` | 매핑을 Go(`payMsgType`)로 이관, `HAVING` 제거. 미적재는 유지하되 Error 로그로 노출. 같은 보고 키로 접히는 유형은 Go에서 합산 |
+| C | 공용 오류 헬퍼가 내부 예외 메시지를 응답 본문에 노출 | `web/api/middleware/route-error.js:11` — 8개 라우터 전부 사용 | `statusCode`를 단 오류만 코드 유지, 그 외는 기본 코드로 덮음 |
+| D | 죽은 과금 코드 **6개**(§7-1이 2건으로 본 것보다 많다) | `inbound_billing.go` 전체 + `billing_finalizer.go` SQL 빌더 4개. 참조 0 실측 | 삭제(839줄). `applyInboundBilling`은 잔액 읽기·차감이 트랜잭션 밖이라 재배선 시 동시 차감 경합 |
+| E | Bind TPS 토큰을 쓰고 버림 | `router.go:211·255` | 후보 판정을 `Ready`(부작용 0)/`Claim`(HALF_OPEN probe 예약)로 분리. `bind_health.go`에 `CanProbe` 신설 |
+
+**E는 원안을 폐기하고 다시 설계했다.** 처음엔 `eligible`을 `Acquire` 앞으로 옮기려 했는데, 그 함수가 `AllowProbe`로 probe를 **예약하는 부작용**을 갖고 있었다(`engine.go:496`). 순서만 뒤집으면 자가 회복되는 초당 토큰 대신 그 bind를 복구 불가로 묶는 probe가 샌다. `router_test.go:100`이 원래 순서를 고정하고 있던 이유가 그것이다. ⛔ **부작용이 있는 판정 함수를 "그냥 앞으로 옮기는" 처방은 트레이드오프를 옮길 뿐이다 — 순수 부분과 자원 확보 부분을 나눠야 둘 다 안 샌다.**
+
+### Codex 적대 리뷰 2라운드 (돈·환불 경로라 `adversarial-review`)
+
+**1R = `needs-attention` · high 3 · critical 0.** 셋 다 코드로 사실 확인 후 수용했다.
+
+1. **빈 REPORT가 자동 재발송을 촉발**(`report.go:414`가 `success==false`만 봄 · `poller.go:565` 동일) — A 수정으로 빈 코드가 "실패"가 되면서, 원문이 실제로 전달됐는데 코드만 빠진 건까지 kakao fallback이 열렸다. **내가 만든 회귀다.**
+2. **빈 ACK 격리가 미전송 확정 건까지 삼킴** — 격리는 REPORT를 기다리는 상태인데 미전송 건엔 REPORT가 오지 않아 그대로 미발송으로 끝난다.
+3. **paystats 유형 비교를 `EqualFold`·`TrimSpace`로 넓힘** — 키가 옮겨가면 UPSERT가 이전 키를 안 지워 옛 행과 새 행이 함께 남아 이중 청구.
+
+1·2는 **같은 뿌리** — 3상태(성공/실패/불명)를 재발송 판정 지점에서 2상태로 접은 것. 항목별로 때우지 않고 원칙 하나로 고쳤다: **상태·과금은 실패로 종결하되, 새 메시지를 보내는 동작만 명시적 실패 증거를 요구한다.** `shouldStartKakaoFallback`이 `bool` 대신 `resultcode.Verdict`를 받는다.
+
+3은 수용하되 처방을 축소했다. Codex는 "기존 스냅샷 재조정 절차"를 권했지만, 넓힌 것을 되돌리면 키 이동 자체가 없어 절차가 불필요하다. **더 작은 수정이 결함을 닫는다.**
+
+부수로 하나 더 닫혔다 — 빈 `ack_code`가 NULL로 적재되면 `durable_ack_accepted` 판정(`sender.go` loadMessage)이 그 건을 성공으로 되살린다. 합성 코드 `EMPTY_ACK`가 그 경로도 막는다.
+
+**2R = `approve` · material findings 0.** 지목한 5개 판단(호출부 3곳의 판정값 · `SendWriteUnknown` 선반환 · 합성 코드의 하류 영향 · poller에서 빠지는 것이 `Indeterminate`뿐인지 · paystats가 원래 SQL과 동일한지)을 모두 확인. 종료 조건 충족.
+
+### 잔여 (처방 아님 — 미검증)
+
+- **PAY 통계 대상 테이블 UNIQUE 실존 미확인** — `RSRM_SalesStts`에 (DestDt,CustId,StoreId,MsgType) UNIQUE가 없으면 스냅샷 UPSERT가 성립하지 않고 매 주기 INSERT가 쌓인다. **우리 DB가 아니라 코드로 못 막는다.** 첫 적재 실측(§10 잔여)에서만 확정된다
+- **성공 판정이 계열을 구분하지 않는다** — `MESSAGE_RESULT_CODE_STANDARD.md`는 SMS/LMS·MMS/카카오를 별도 코드북으로 규정하고 카카오 `1000`을 "접수 성공, 최종 성공 아님"으로 둔다. 현재는 계열 무관 8종 단일 집합. 카카오 REPORT에 `1000`이 실제로 오는지 표본이 없어 고치지 않았다
+- admin API 키 인증 캐시에 무효화 훅 없음(`auth.js:96-114`) — 계정 비활성·키 회전이 최대 5분 지연. 평문 저장 축(그쪽 STATUS #10)과 함께 처리
+
+⛔ **교훈** — ①"빈 값"은 성공도 실패도 아니다. 2상태로 접는 순간 어느 쪽으로 접든 사고가 난다 ②**돈 방향을 fail-safe로 바꾸는 것만으로는 부족하다** — 같은 판정을 먹는 다른 동작(재발송)이 있으면 그쪽은 반대 방향으로 위험해진다 ③리팩터에 의미 확장을 끼워 넣지 않는다(paystats `EqualFold`)
+
 ## 8. 남은 것 (착수 순서 — ★2026-08-14 Harold 지시로 비토가 컨트롤)
 
 **전제: 자비스 세션 정지 확인 후 착수.** 게이트웨이 저장소의 `status/`·`CLAUDE.md`·`CODEX.md`·`AGENTS.md`는 계속 편집 금지(§2).
