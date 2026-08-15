@@ -14,7 +14,7 @@
 | **Codex 리뷰를 돌릴 때** — 실행 절차·요청문 규격·멈춤 판정·복구 | **[CODEX-RUNBOOK.md](CODEX-RUNBOOK.md)** | 착수 전 §1·§2(의무) / 20분 무응답이면 §3·§4. 리뷰를 띄우기 전에 반드시 읽는다 — 같은 멈춤을 다섯 번 반복했다 |
 | **기능 이름을 부를 때** — 그 기능의 구조·불변 원칙·이력 | **[SOT-INDEX.md §0 기능 상설 SoT](SOT-INDEX.md)** | 해당 기능 행 → 그 기능 문서(9종 — 목록은 §0이 소유). 기능 문서가 이력을 소유하고 STATUS는 참조만(신규 기능도 이 형태로 등재) |
 | **프로젝트·트랙 SoT 문서·호출어를 찾을 때** | **[SOT-INDEX.md](SOT-INDEX.md)** | 해당 트랙 행만. **신규 프로젝트 SoT는 이 라우팅 표가 아니라 SOT-INDEX.md에 등재한다**(이 표는 도메인 문서 전용 상설) |
-| 시스템 구조 파악 | ARCHITECTURE.md | 해당 절만 |
+| 시스템 구조 파악 · **서버 사양·용도·리스크**(어느 서버에서 실행하나 / 자원 여유 / 무재부팅·노출 위험) | ARCHITECTURE.md · **[SERVERS.md](SERVERS.md)** | 구조 = 해당 절만 / 서버 = 해당 서버 절 + §3 리스크. **접속 절차·운영 명령은 OPS.md가 소유**(중복 금지) |
 | 자사몰 연동·CDP·커넥터 작업 | INTEGRATIONS.md | 해당 provider 카드 / CDP 공통 절 |
 | 버그 수정 | BUGS.md | 해당 버그 항목 (해결분은 archive/BUGS_RESOLVED.md) |
 | 과거 작업 조회·회귀 의심 | archive/INDEX.md → TASKS_YYYY-MM.md | grep 적중 항목만 |
