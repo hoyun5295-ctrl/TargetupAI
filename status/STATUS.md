@@ -69,7 +69,7 @@
 > ⑭ **싱크·유입 견고화(0814(3)) — 전량 배포완료** — 호출어 **"아난티 싱크"** / **"DB 제한"** → [[project_2026_0814_db_limit_removal_ananti_sync]]가 전부 소유(6축 · DDL 실행완료). 잔여 = **실측만**(단가 목록 축소 확인 · 실패 알림 첫 발화) · 다음 = 아난티 재기동 회신
 > ⑮ **브랜드메시지 — ★0815 원인 최종 확정(우리 코드 문제 아님)** — 호출어 **"브랜드메시지"** → [FEATURE-GW-BRAND-MESSAGE.md](../docs/bito-gateway/FEATURE-GW-BRAND-MESSAGE.md) §3이 소유. 다음 = 휴머스온 권한 개방 요청(문의문 §6-2)
 > ⑯ **게이트웨이 PAY 통계 적재 — 구현 완료(미배포)** — [허브 §10](../docs/FEATURE-BITO-GATEWAY.md)이 소유. `.54` 이관 전제 · SysId `65` · 배포 = 마이그레이션 050 선적용 → 바이너리. 다음 = 첫 적재 실측(§10)
-> ⑰ **게이트웨이 2차 전수점검 — 0815(2) 결함 5종 수정 완료(미반영)** — 호출어 **비토 게이트웨이** → [허브 §7-2](../docs/FEATURE-BITO-GATEWAY.md)가 전부 소유. Codex 2R `approve` · `GW_CHECK_OK`. 다음 = 서버 반영(Go 재빌드 · 런북 §3-1)
+> ⑰ **게이트웨이 2차 전수점검 — 0815(2) 결함 5종 수정·배포 완료** — 호출어 **비토 게이트웨이** → [허브 §7-2](../docs/FEATURE-BITO-GATEWAY.md)가 전부 소유. Codex 2R `approve` · 3단위 `GW_DEPLOY_OK`. 다음 = 운영 실측(발송 1건 · finalize 버튼 · PAY 첫 적재)
 > (지속) 비토 API 발송 경로 전환 검토 [[project_2026_0710_bito_api_direct_test]] · (보류) 팝폰 SDK 검증
 
 ---
