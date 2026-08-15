@@ -20,9 +20,10 @@
  */
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Megaphone, PencilLine, Upload, Sparkles, Lock, Loader2, Trash2, Users } from 'lucide-react';
+import { Megaphone, PencilLine, Upload, Sparkles, Lock, Loader2, Trash2, Users, UserPlus, X } from 'lucide-react';
 import BrandMessageEditor from './BrandMessageEditor';
 import SendWorkspaceShell, { WorkspaceNotice, FIELD_CLASS } from './shared/SendWorkspaceShell';
+import ConfirmDialogShell, { DialogHeadline, DialogRow, DialogCaution } from './shared/ConfirmDialogShell';
 
 type RecipientMode = 'manual' | 'file' | 'ai';
 
@@ -62,8 +63,16 @@ export default function BrandSendModal({
   show, onClose, profiles, initialRecipients, isAiTargetLocked, onLockedFeature, onSend, sending,
 }: BrandSendModalProps) {
   const [mode, setMode] = useState<RecipientMode>('manual');
-  const [manualText, setManualText] = useState('');
+  /** 입력 중인 번호 — [수신자로 추가]를 눌러야 확정 목록(phones)에 들어간다(알림톡과 같은 축) */
+  const [draft, setDraft] = useState('');
+  const [addNotice, setAddNotice] = useState('');
   const [phones, setPhones] = useState<string[]>([]);
+  /**
+   * ★ 2026-08-15 발송 확인 — 이 화면만 확인 없이 바로 나갔다(Harold 지적).
+   *   문자·알림톡은 건수를 보여주는 확인 단계를 거치는데 브랜드만 버튼 한 번에 발송돼,
+   *   광고성 메시지가 몇 명에게 나가는지 못 보고 누르는 구조였다. payload를 잡아 두고 확인 후 넘긴다.
+   */
+  const [pending, setPending] = useState<any | null>(null);
 
   // AI 타겟추출
   const [aiPrompt, setAiPrompt] = useState('');
@@ -83,12 +92,13 @@ export default function BrandSendModal({
   useEffect(() => {
     if (!show) return;
     reqSeqRef.current++;
-    const seeded = (initialRecipients || [])
-      .map((p) => String(p).replace(/[^0-9]/g, ''))
-      .filter(Boolean);
+    const seeded = Array.from(new Set(
+      (initialRecipients || []).map((p) => String(p).replace(/[^0-9]/g, '')).filter(Boolean),
+    ));
     setPhones(seeded);
-    setManualText(seeded.join('\n'));
+    setDraft(''); setAddNotice('');
     setMode('manual');
+    setPending(null);
     setAiPrompt(''); setAiError(''); setAiResult(null);
     setAiLoading(false); setAiApplying(false);
   }, [show]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -103,19 +113,45 @@ export default function BrandSendModal({
    * 빠져서, AI 추출 중에 목록을 비워도 늦게 온 응답이 지운 수신자를 되살렸다(적대검증 실측).
    * 그건 오발송이다. 그래서 변경 경로를 하나로 좁힌다.
    */
-  const setRecipients = (list: string[], text?: string) => {
+  const setRecipients = (list: string[]) => {
     reqSeqRef.current++;          // 진행 중인 추출 응답을 무효화한다
     setAiApplying(false);
     setPhones(list);
-    setManualText(text ?? list.join('\n'));
   };
 
-  const applyManual = (v: string) => setRecipients(normalizePhones(v), v);
+  /**
+   * 입력창의 번호를 확정 목록에 **더한다**(덮어쓰지 않는다).
+   * 여러 곳에서 모은 번호를 이어 붙일 수 있어야 해서 병합이 기본이고, 이미 담긴 번호는 조용히 버리지 않고
+   * 몇 건이 중복이었는지 알린다 — 넣었는데 수가 안 늘면 사용자는 버튼이 고장난 줄로 읽는다.
+   */
+  const addFromDraft = () => {
+    const parsed = normalizePhones(draft);
+    if (parsed.length === 0) {
+      setAddNotice(draft.trim() ? '유효한 번호를 찾지 못했습니다 (9~11자리 숫자).' : '번호를 입력해 주세요.');
+      return;
+    }
+    const existing = new Set(phones);
+    const added = Array.from(new Set(parsed)).filter((p) => !existing.has(p));
+    const dupes = parsed.length - added.length;
+    setRecipients([...phones, ...added]);
+    setDraft('');
+    setAddNotice(
+      added.length === 0
+        ? `이미 담긴 번호입니다 (중복 ${dupes.toLocaleString()}건).`
+        : `${added.length.toLocaleString()}명 추가${dupes > 0 ? ` · 중복 ${dupes.toLocaleString()}건 제외` : ''}`,
+    );
+  };
+
+  const removeAt = (idx: number) => setRecipients(phones.filter((_, i) => i !== idx));
 
   const handleFile = async (file: File | null) => {
     if (!file) return;
     const text = await file.text();
-    setRecipients(normalizePhones(text));
+    const parsed = normalizePhones(text);
+    const existing = new Set(phones);
+    const added = Array.from(new Set(parsed)).filter((p) => !existing.has(p));
+    setRecipients([...phones, ...added]);
+    setAddNotice(`파일에서 ${added.length.toLocaleString()}명 추가${parsed.length - added.length > 0 ? ` · 중복 ${(parsed.length - added.length).toLocaleString()}건 제외` : ''}`);
     setMode('manual');   // 결과를 눈으로 확인하고 고칠 수 있게 직접입력으로 되돌린다
   };
 
@@ -168,7 +204,9 @@ export default function BrandSendModal({
       if (list.length === 0) throw new Error('조건에 맞는 수신자가 없습니다.');
       // 검증을 통과한 응답도 **같은 통로**로 넣는다 — 여기만 예외로 두면 다음 사람이 직접 set을 또 만든다.
       //   (세대가 함께 올라가 그 뒤 남아 있던 다른 요청도 무효가 된다)
-      setRecipients(list);
+      //   추출은 조건으로 뽑은 **대상 집합**이라 기존 목록에 더하지 않고 그것으로 바꾼다(조건 = 대상).
+      setRecipients(Array.from(new Set(list)));
+      setAddNotice(`조건에 맞는 ${list.length.toLocaleString()}명을 담았습니다.`);
       setMode('manual');   // 리스트를 눈으로 보고 지우거나 더할 수 있게 직접입력으로 넘긴다
     } catch (e: any) {
       if (seq === reqSeqRef.current) setAiError(e?.message || '대상을 불러오지 못했습니다.');
@@ -208,43 +246,59 @@ export default function BrandSendModal({
 
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">
         {mode === 'manual' && (
-          phones.length > RECIPIENT_EDIT_LIMIT ? (
-            /* 상한 초과 — 편집을 열면 타이핑마다 전량 재파싱이라 화면이 멈춘다. 확인용 목록으로 바꾼다. */
-            <div className="space-y-2">
-              <div className="rounded-xl bg-violet-50 ring-1 ring-violet-100 px-3 py-2.5">
-                <p className="text-[12px] font-semibold text-violet-700">
-                  수신자 {phones.length.toLocaleString()}명이 담겼습니다
-                </p>
-                {aiResult?.explanation && (
-                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">{aiResult.explanation}</p>
-                )}
-                <p className="text-[11px] text-slate-400 mt-1">
-                  목록이 커서 직접 편집은 잠겼습니다. 아래는 앞 {RECIPIENT_EDIT_LIMIT.toLocaleString()}건입니다 — 발송은 담긴 {phones.length.toLocaleString()}명 전원에게 나갑니다.
-                </p>
+          <>
+            {/* 입력 → [수신자로 추가] → 목록. 실시간 파싱이 아니라 명시적으로 담는다(알림톡과 같은 축) */}
+            <textarea
+              value={draft}
+              onChange={(e) => { setDraft(e.target.value); if (addNotice) setAddNotice(''); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); addFromDraft(); } }}
+              rows={5}
+              placeholder={'번호를 줄바꿈·쉼표로 구분해 입력하세요\n01012345678\n010-8765-4321'}
+              className={`${FIELD_CLASS} resize-none leading-relaxed font-mono text-[12.5px]`}
+            />
+            <button
+              type="button"
+              onClick={addFromDraft}
+              disabled={!draft.trim()}
+              className="w-full py-2.5 rounded-xl text-[13px] font-semibold text-violet-700 bg-violet-50 ring-1 ring-violet-100 hover:bg-violet-100 disabled:opacity-40 disabled:hover:bg-violet-50 inline-flex items-center justify-center gap-1.5 transition"
+            >
+              <UserPlus size={14} strokeWidth={2} /> 수신자로 추가
+            </button>
+            {addNotice && <p className="text-[11px] text-violet-600">{addNotice}</p>}
+            {aiResult?.explanation && phones.length > 0 && (
+              <p className="text-[11px] text-slate-500 bg-slate-50/80 ring-1 ring-slate-900/5 rounded-lg px-2.5 py-1.5 leading-relaxed">
+                {aiResult.explanation}
+              </p>
+            )}
+
+            {phones.length > 0 && (
+              <div className="rounded-2xl bg-white ring-1 ring-slate-900/5 shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between gap-2 px-3.5 py-2 bg-slate-50/70 border-b border-slate-100">
+                  <span className="text-[11px] text-slate-400">
+                    수신번호 {phones.length > RECIPIENT_EDIT_LIMIT
+                      ? `(앞 ${RECIPIENT_EDIT_LIMIT.toLocaleString()}건 표시 · 전체 ${phones.length.toLocaleString()}명 발송)`
+                      : `${phones.length.toLocaleString()}건`}
+                  </span>
+                  <button type="button" onClick={() => { setRecipients([]); setAddNotice(''); }}
+                    className="text-[11px] text-slate-400 hover:text-rose-500 transition shrink-0">
+                    전체삭제
+                  </button>
+                </div>
+                <div className="max-h-[240px] overflow-y-auto divide-y divide-slate-50">
+                  {phones.slice(0, RECIPIENT_EDIT_LIMIT).map((p, i) => (
+                    <div key={`${p}-${i}`} className="flex items-center justify-between gap-2 px-3.5 py-1.5 group">
+                      <span className="font-mono text-[12px] text-slate-600">{p}</span>
+                      <button type="button" onClick={() => removeAt(i)}
+                        className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-slate-300 hover:text-rose-500 transition shrink-0"
+                        aria-label={`${p} 삭제`}>
+                        <X size={13} strokeWidth={2.2} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="max-h-[260px] overflow-y-auto rounded-xl bg-white ring-1 ring-slate-200 px-3 py-2 font-mono text-[11px] text-slate-500 leading-relaxed">
-                {phones.slice(0, RECIPIENT_EDIT_LIMIT).map((p, i) => (
-                  <div key={`${p}-${i}`}>{p}</div>
-                ))}
-              </div>
-              <button type="button" onClick={() => setRecipients([])}
-                className="w-full px-3 py-2 rounded-xl text-[12px] font-medium text-slate-600 bg-white ring-1 ring-slate-200 hover:bg-slate-50 transition">
-                비우고 다시 담기
-              </button>
-            </div>
-          ) : (
-            <>
-              <p className="text-[11px] text-slate-400">번호를 줄바꿈·쉼표로 구분해 붙여넣으세요.</p>
-              {aiResult?.explanation && phones.length > 0 && (
-                <p className="text-[11px] text-violet-600 bg-violet-50 ring-1 ring-violet-100 rounded-lg px-2.5 py-1.5 leading-relaxed">
-                  {aiResult.explanation}
-                </p>
-              )}
-              <textarea value={manualText} onChange={(e) => applyManual(e.target.value)} rows={14}
-                placeholder={'01012345678\n01087654321'}
-                className={`${FIELD_CLASS} resize-none leading-relaxed`} />
-            </>
-          )
+            )}
+          </>
         )}
 
         {mode === 'file' && (
@@ -293,7 +347,7 @@ export default function BrandSendModal({
           수신자 <span className="font-bold text-violet-600 tabular-nums">{phones.length.toLocaleString()}</span>명
         </p>
         {phones.length > 0 && (
-          <button type="button" onClick={() => setRecipients([])}
+          <button type="button" onClick={() => { setRecipients([]); setAddNotice(''); }}
             className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-rose-500 transition">
             <Trash2 size={12} strokeWidth={1.9} /> 비우기
           </button>
@@ -301,6 +355,11 @@ export default function BrandSendModal({
       </div>
     </>
   );
+
+  // 확인 다이얼로그에 적을 유형 — payload가 화면 선택값을 그대로 갖고 있다
+  const pendingTypeLabel = pending
+    ? `브랜드메시지 ${pending.mode === 'template' ? '기본형' : String(pending.bubbleType || 'TEXT')}`
+    : '';
 
   return (
     <SendWorkspaceShell
@@ -325,10 +384,47 @@ export default function BrandSendModal({
           sending={!!sending}
           onSend={(payload: any) => {
             if (!canSend) return;
-            return onSend({ ...payload, phones });
+            // 바로 보내지 않는다 — 건수를 보여주고 확인을 받는다(문자·알림톡과 같은 계약)
+            setPending(payload);
           }}
         />
       </div>
+
+      <ConfirmDialogShell
+        show={!!pending}
+        tone="violet"
+        icon={<Megaphone size={18} strokeWidth={1.9} className="text-white" />}
+        title="지금 바로 발송합니다"
+        subtitle="광고성 메시지입니다. 누르는 즉시 나가며 회수할 수 없습니다."
+        cancelLabel="취소"
+        onCancel={() => setPending(null)}
+        confirmLabel="즉시 발송"
+        onConfirm={async () => {
+          const payload = pending;
+          if (!payload) return;
+          setPending(null);
+          await onSend({ ...payload, phones });
+        }}
+        busy={!!sending}
+        busyLabel="접수 중..."
+        confirmDisabled={phones.length === 0}
+      >
+        <DialogHeadline label="발송 대상" value={phones.length} unit="명" tone="violet" />
+        <div className="mt-3">
+          <DialogRow label="메시지 유형" value={pendingTypeLabel} />
+          <DialogRow
+            label="광고 표기"
+            value={pending?.isAd === false ? '표기 안 함' : '(광고) 표기'}
+            accent={pending?.isAd === false ? 'amber' : 'slate'}
+          />
+          {pending?.resendType && pending.resendType !== 'NO' && (
+            <DialogRow label="실패 시 대체발송" value={pending.resendType === 'LM' ? 'LMS' : 'SMS'} />
+          )}
+        </div>
+        <DialogCaution tone="rose">
+          발송이 시작되면 중간에 멈추거나 되돌릴 수 없습니다. 문구와 수신자를 다시 한번 확인해 주세요.
+        </DialogCaution>
+      </ConfirmDialogShell>
     </SendWorkspaceShell>
   );
 }

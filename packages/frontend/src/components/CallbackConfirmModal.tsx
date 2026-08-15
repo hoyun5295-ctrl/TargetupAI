@@ -1,13 +1,17 @@
 /**
- * CallbackConfirmModal — 미등록 회신번호 제외 확인 모달
+ * CallbackConfirmModal — 미등록 회신번호 제외 확인
  *
- * 개별회신번호 사용 시 미등록 회신번호가 있으면 발송 전에 이 모달을 띄워
+ * 개별회신번호 사용 시 미등록 회신번호가 있으면 발송 전에 이 창을 띄워
  * 어떤 번호가 몇 명 제외되는지 보여주고 사용자 확인을 받는다.
+ * CT-08(callback-filter.ts) → campaigns.ts → 프론트엔드 확인 흐름의 마지막 단계.
  *
- * CT-08(callback-filter.ts) → campaigns.ts → 프론트엔드 확인 흐름의 마지막 단계
+ * ★ 2026-08-15 셸을 `shared/ConfirmDialogShell`로 교체(화이트 고급형 정합).
+ *   판정·흐름은 무변경 — 바뀐 것은 표현뿐이다.
  */
 
+import { PhoneOff } from 'lucide-react';
 import { formatPhoneNumber } from '../utils/formatDate';
+import ConfirmDialogShell, { DialogHeadline, DialogRow, DialogCaution } from './shared/ConfirmDialogShell';
 
 interface UnregisteredDetail {
   phone: string;
@@ -32,114 +36,73 @@ interface CallbackConfirmModalProps {
   isSending: boolean;
 }
 
-
 export type { CallbackConfirmData };
 
 export default function CallbackConfirmModal({
-  data, onClose, onConfirm, isSending
+  data, onClose, onConfirm, isSending,
 }: CallbackConfirmModalProps) {
   if (!data.show) return null;
 
   const totalExcluded = data.callbackMissingCount + data.callbackUnregisteredCount;
+  const blocked = data.remainingCount === 0;
+  const isAuto = data.sendType === 'auto';
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70]">
-      <div className="bg-white rounded-xl shadow-2xl w-[480px] max-h-[80vh] flex flex-col overflow-hidden">
-        {/* 헤더 */}
-        <div className="px-6 py-4 border-b bg-amber-50">
-          <h3 className="text-lg font-bold text-amber-700">
-            ⚠️ 미등록 회신번호 제외 안내
-          </h3>
-        </div>
+    <ConfirmDialogShell
+      show
+      tone={blocked ? 'rose' : 'amber'}
+      icon={<PhoneOff size={18} strokeWidth={1.9} className="text-white" />}
+      title={blocked ? '발송할 수 있는 대상이 없습니다' : '일부 수신자가 제외됩니다'}
+      subtitle="회신번호가 발신번호로 등록되지 않은 고객은 발송 대상에서 빠집니다."
+      z="z-[2200]"
+      maxW="max-w-[500px]"
+      cancelLabel={blocked ? '확인' : '취소'}
+      onCancel={onClose}
+      confirmLabel={blocked ? undefined : (isAuto
+        ? `제외하고 생성 (${data.remainingCount.toLocaleString()}명)`
+        : `제외하고 발송 (${data.remainingCount.toLocaleString()}명)`)}
+      onConfirm={blocked ? undefined : onConfirm}
+      busy={isSending}
+      busyLabel={isAuto ? '생성 중...' : '접수 중...'}
+    >
+      <DialogHeadline
+        label={isAuto ? '생성 대상' : '실제 발송 대상'}
+        value={data.remainingCount}
+        unit="명"
+        tone={blocked ? 'rose' : 'emerald'}
+      />
 
-        {/* 본문 */}
-        <div className="p-6 overflow-y-auto flex-1">
-          <p className="text-gray-700 mb-4">
-            아래 회신번호가 발신번호로 등록되지 않아 해당 고객이 발송 대상에서 제외됩니다.
-          </p>
-
-          {/* 미등록 회신번호 목록 */}
-          {data.unregisteredDetails.length > 0 && (
-            <div className="bg-rose-50 rounded-lg p-4 mb-4">
-              <p className="text-sm font-semibold text-rose-700 mb-3">미등록 회신번호 목록</p>
-              <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                {data.unregisteredDetails.map((detail, idx) => (
-                  <div key={idx} className="flex justify-between items-center bg-white rounded-lg px-3 py-2 border border-rose-200">
-                    <span className="text-gray-700 font-mono text-sm">{formatPhoneNumber(detail.phone)}</span>
-                    <span className="text-rose-600 font-bold text-sm">{detail.excludedCount.toLocaleString()}명 제외</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* 회신번호 미보유 안내 */}
-          {data.callbackMissingCount > 0 && (
-            <div className="bg-gray-50 rounded-lg p-4 mb-4">
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600 text-sm">회신번호 미보유 고객</span>
-                <span className="text-gray-700 font-bold text-sm">{data.callbackMissingCount.toLocaleString()}명 제외</span>
-              </div>
-            </div>
-          )}
-
-          {/* 요약 */}
-          <div className="bg-gray-50 rounded-lg p-4 space-y-2">
-            <div className="flex justify-between">
-              <span className="text-gray-500">총 제외 인원</span>
-              <span className="font-bold text-rose-600">{totalExcluded.toLocaleString()}명</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">실제 발송 대상</span>
-              <span className="font-bold text-emerald-600">{data.remainingCount.toLocaleString()}명</span>
-            </div>
-          </div>
-
-          <p className="text-xs text-gray-400 mt-3">
-            * 미등록 회신번호를 사용하려면 먼저 발신번호 관리에서 등록해주세요.
-          </p>
-
-          {/* 전원 제외 시 발송 불가 안내 */}
-          {data.remainingCount === 0 && (
-            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-sm font-semibold text-red-700">
-                발송 대상이 없습니다. 전체 수신자가 미등록 회신번호로 인해 제외되었습니다.
-              </p>
-              <p className="text-xs text-red-500 mt-1">
-                발신번호 관리에서 해당 회신번호를 등록한 후 다시 시도해주세요.
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* 하단 버튼 */}
-        <div className="flex border-t">
-          <button
-            onClick={onClose}
-            disabled={isSending}
-            className="flex-1 py-3 text-gray-600 hover:bg-gray-50 font-medium disabled:opacity-50"
-          >
-            {data.remainingCount === 0 ? '확인' : '취소'}
-          </button>
-          {data.remainingCount > 0 && (
-            <button
-              onClick={onConfirm}
-              disabled={isSending}
-              className="flex-1 py-3 text-white font-medium bg-amber-500 hover:bg-amber-600 disabled:opacity-50"
-            >
-              {isSending ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="animate-spin">⏳</span> 처리중...
-                </span>
-              ) : (
-                data.sendType === 'auto'
-                  ? `제외하고 생성 (${data.remainingCount.toLocaleString()}명)`
-                  : `제외하고 발송 (${data.remainingCount.toLocaleString()}명)`
-              )}
-            </button>
-          )}
-        </div>
+      <div className="mt-3">
+        <DialogRow label="총 제외 인원" value={`${totalExcluded.toLocaleString()}명`} accent="rose" />
+        {data.callbackMissingCount > 0 && (
+          <DialogRow label="회신번호 미보유" value={`${data.callbackMissingCount.toLocaleString()}명`} />
+        )}
+        {data.callbackUnregisteredCount > 0 && (
+          <DialogRow label="미등록 번호 사용" value={`${data.callbackUnregisteredCount.toLocaleString()}명`} />
+        )}
       </div>
-    </div>
+
+      {data.unregisteredDetails.length > 0 && (
+        <div className="mt-4">
+          <p className="text-[11.5px] text-slate-400 mb-2">미등록 회신번호</p>
+          <div className="rounded-2xl bg-slate-50/70 ring-1 ring-slate-900/5 divide-y divide-slate-100 max-h-[200px] overflow-y-auto">
+            {data.unregisteredDetails.map((detail, idx) => (
+              <div key={idx} className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+                <span className="font-mono text-[12.5px] text-slate-700">{formatPhoneNumber(detail.phone)}</span>
+                <span className="text-[12px] font-semibold text-rose-500 tabular-nums shrink-0">
+                  {detail.excludedCount.toLocaleString()}명 제외
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <DialogCaution tone={blocked ? 'rose' : 'amber'}>
+        {blocked
+          ? '전체 수신자가 미등록 회신번호로 제외됐습니다. 발신번호 관리에서 해당 번호를 등록한 뒤 다시 시도해 주세요.'
+          : '이 번호들을 계속 쓰려면 발신번호 관리에서 먼저 등록해 주세요.'}
+      </DialogCaution>
+    </ConfirmDialogShell>
   );
 }

@@ -1,14 +1,34 @@
+/**
+ * SendConfirmModal — 발송 직전 확인 (직접발송 · 직접타겟 · 알림톡 · 브랜드메시지 공용)
+ *
+ * ★ 2026-08-15 전면 재작성. 옛 화면은 흰 카드에 이모지 제목(⚡📅)과 회색 박스를 쌓은 옛 규격이라,
+ *   화이트 고급형으로 정돈된 발송 워크스페이스 위에 뜨면 확인 단계에서만 품질이 꺾였다.
+ *   셸은 `shared/ConfirmDialogShell`이 소유하고 여기는 **무엇을 보여줄지**만 정한다.
+ *
+ * 이 화면이 답해야 하는 것은 하나다 — "지금 누르면 몇 명에게 무엇이 나가는가."
+ *   · 발송 건수를 주인공으로 크게(오발송의 대부분은 건수를 안 보고 누른 것이다)
+ *   · 제외 내역(수신거부·중복)은 부수 정보로 아래에
+ *   · 되돌릴 수 없다는 사실은 즉시 발송에서만, 예약은 취소 가능 기한을 적는다
+ */
+
+import { Zap, CalendarClock } from 'lucide-react';
+import ConfirmDialogShell, { DialogHeadline, DialogRow, DialogCaution } from './shared/ConfirmDialogShell';
+
+export interface SendConfirmState {
+  show: boolean;
+  type: 'immediate' | 'scheduled';
+  count: number;
+  unsubscribeCount: number;
+  /** ★ D137 D4: 중복 제외 건수 (0이거나 undefined면 UI 숨김) */
+  duplicateCount?: number;
+  dateTime?: string;
+  /** 발송 경로 — 어느 실행 함수로 보낼지 판정한다 */
+  from?: 'direct' | 'target' | 'alimtalk' | 'brand';
+  msgType?: string;
+}
+
 interface SendConfirmModalProps {
-  sendConfirm: {
-    show: boolean;
-    type: 'immediate' | 'scheduled';
-    count: number;
-    unsubscribeCount: number;
-    duplicateCount?: number;  // ★ D137 D4: 중복 제외 건수 (0이거나 undefined면 UI 숨김)
-    dateTime?: string;
-    from?: 'direct' | 'target';
-    msgType?: string;
-  };
+  sendConfirm: SendConfirmState;
   setSendConfirm: (v: any) => void;
   directSending: boolean;
   executeDirectSend: () => void;
@@ -22,89 +42,78 @@ export default function SendConfirmModal({
 }: SendConfirmModalProps) {
   if (!sendConfirm.show) return null;
 
+  const immediate = sendConfirm.type === 'immediate';
+  const tone = immediate ? 'emerald' : 'blue';
+  const excluded = (sendConfirm.unsubscribeCount || 0) + (sendConfirm.duplicateCount || 0);
+
+  const scheduledAt = sendConfirm.dateTime
+    ? new Date(sendConfirm.dateTime).toLocaleString('ko-KR', {
+        timeZone: 'Asia/Seoul', year: 'numeric', month: 'long', day: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+      })
+    : '';
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
-      <div className="bg-white rounded-xl shadow-2xl w-[420px] overflow-hidden">
-        <div className={`px-6 py-4 border-b ${sendConfirm.type === 'immediate' ? 'bg-emerald-50' : 'bg-blue-50'}`}>
-          <h3 className={`text-lg font-bold ${sendConfirm.type === 'immediate' ? 'text-emerald-700' : 'text-blue-700'}`}>
-            {sendConfirm.type === 'immediate' ? '⚡ 즉시 발송' : '📅 예약 발송'}
-          </h3>
-        </div>
-        <div className="p-6">
-          <p className="text-gray-700 mb-4">
-            {sendConfirm.type === 'immediate' 
-              ? '메시지를 즉시 발송하시겠습니까?' 
-              : '메시지를 예약 발송하시겠습니까?'}
+    <ConfirmDialogShell
+      show
+      tone={tone}
+      icon={immediate
+        ? <Zap size={18} strokeWidth={2} className="text-white" />
+        : <CalendarClock size={18} strokeWidth={1.9} className="text-white" />}
+      title={immediate ? '지금 바로 발송합니다' : '예약 발송으로 등록합니다'}
+      subtitle={immediate
+        ? '누르는 즉시 발송 큐에 들어갑니다 — 발송 후에는 회수할 수 없습니다.'
+        : '지정한 시각에 자동으로 나갑니다.'}
+      cancelLabel="취소"
+      onCancel={() => setSendConfirm({ show: false, type: 'immediate', count: 0, unsubscribeCount: 0 })}
+      confirmLabel={immediate ? '즉시 발송' : '예약 등록'}
+      onConfirm={() => (sendConfirm.from === 'target' ? executeTargetSend() : executeDirectSend())}
+      busy={directSending}
+      busyLabel="접수 중..."
+      confirmDisabled={sendConfirm.count <= 0}
+    >
+      <DialogHeadline
+        label="발송 대상"
+        value={sendConfirm.count}
+        unit="명"
+        tone={tone}
+      />
+
+      <div className="mt-3">
+        <DialogRow label="메시지 유형" value={sendConfirm.msgType || 'SMS'} />
+        {!immediate && scheduledAt && (
+          <DialogRow label="예약 시각" value={scheduledAt} accent="blue" />
+        )}
+        {(sendConfirm.unsubscribeCount || 0) > 0 && (
+          <DialogRow
+            label="수신거부 제외"
+            value={`${sendConfirm.unsubscribeCount.toLocaleString()}명`}
+            accent="rose"
+          />
+        )}
+        {(sendConfirm.duplicateCount || 0) > 0 && (
+          <DialogRow
+            label="중복 제외"
+            value={`${(sendConfirm.duplicateCount || 0).toLocaleString()}명`}
+            accent="amber"
+          />
+        )}
+        {excluded > 0 && (
+          <p className="pt-2.5 text-[11px] text-slate-400 leading-relaxed">
+            제외된 {excluded.toLocaleString()}명은 발송·과금 대상이 아닙니다.
           </p>
-          <div className="bg-gray-50 rounded-lg p-4 space-y-2">
-            <div className="flex justify-between">
-              <span className="text-gray-500">발송 건수</span>
-              <span className="font-bold text-emerald-600">{sendConfirm.count.toLocaleString()}건</span>
-            </div>
-            {sendConfirm.unsubscribeCount > 0 && (
-              <div className="flex justify-between">
-                <span className="text-gray-500">수신거부 제외</span>
-                <span className="font-bold text-rose-500">{sendConfirm.unsubscribeCount.toLocaleString()}건</span>
-              </div>
-            )}
-            {/* ★ D137 D4: 중복 제외 건수 미리 표시 (0이면 숨김) */}
-            {sendConfirm.duplicateCount !== undefined && sendConfirm.duplicateCount > 0 && (
-              <div className="flex justify-between">
-                <span className="text-gray-500">중복 제외</span>
-                <span className="font-bold text-amber-500">{sendConfirm.duplicateCount.toLocaleString()}건</span>
-              </div>
-            )}
-            {sendConfirm.type === 'scheduled' && sendConfirm.dateTime && (
-              <div className="flex justify-between">
-                <span className="text-gray-500">예약 시간</span>
-                <span className="font-bold text-blue-600">
-                  {new Date(sendConfirm.dateTime).toLocaleString('ko-KR', {
-                    timeZone: 'Asia/Seoul',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}
-                </span>
-              </div>
-            )}
-            <div className="flex justify-between">
-              <span className="text-gray-500">메시지 타입</span>
-              <span className="font-medium">{sendConfirm.msgType || 'SMS'}</span>
-            </div>
-            {sendConfirm.type === 'scheduled' && (
-              <div className="mt-3 pt-3 border-t border-gray-200">
-                <p className="text-xs text-amber-600 flex items-center gap-1">
-                  <span>⚠️</span> 예약 취소는 발송 15분 전까지 가능합니다
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="flex border-t">
-          <button
-            onClick={() => setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0})}
-            disabled={directSending}
-            className="flex-1 py-3 text-gray-600 hover:bg-gray-50 font-medium disabled:opacity-50"
-          >
-            취소
-          </button>
-          <button
-            onClick={() => sendConfirm.from === 'target' ? executeTargetSend() : executeDirectSend()}
-            disabled={directSending}
-            className={`flex-1 py-3 text-white font-medium ${sendConfirm.type === 'immediate' ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-blue-500 hover:bg-blue-600'} disabled:opacity-50`}
-          >
-            {directSending ? (
-              <span className="flex items-center justify-center gap-2">
-                <span className="animate-spin">⏳</span> 처리중...
-              </span>
-            ) : (
-              sendConfirm.type === 'immediate' ? '즉시 발송' : '예약 발송'
-            )}
-          </button>
-        </div>
+        )}
       </div>
-    </div>
+
+      {immediate ? (
+        <DialogCaution tone="rose">
+          발송이 시작되면 중간에 멈추거나 되돌릴 수 없습니다. 문구와 수신자를 다시 한번 확인해 주세요.
+        </DialogCaution>
+      ) : (
+        <DialogCaution>
+          예약 취소·문안 수정은 발송 <strong className="font-semibold">15분 전</strong>까지 가능합니다.
+        </DialogCaution>
+      )}
+    </ConfirmDialogShell>
   );
 }

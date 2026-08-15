@@ -35,6 +35,16 @@
 
 ## 사고 이력
 
+### 2026-08-15 — 발송 확인 모달이 옛 규격으로 남아 화면 품질이 확인 단계에서만 꺾였다 + 브랜드는 확인 자체가 없었다
+- **드러난 형태**: 워크스페이스(`SendWorkspaceShell`)는 0731에 화이트 고급형으로 정돈됐는데, 그 위에 뜨는 **확인 모달들은 손대지 않아** 옛 규격 그대로였다 — `bg-black bg-opacity-50` 백드롭, 이모지 제목(⚡📅⚠️), `border-b` 회색선, 꽉 찬 분할 버튼 바. 사용자가 보는 마지막 화면이 제일 낡아 있었다.
+- **더 나쁜 것 둘** — ①**브랜드메시지는 확인 단계가 아예 없었다**(버튼 한 번에 광고성 발송. 문자·알림톡은 건수를 보여주고 확인을 받는데 이 경로만 계약이 달랐다) ②`ScheduleTimeModal`이 검증 실패 안내를 **`document.createElement`+`innerHTML` 문자열**로 body에 직접 붙이고 있었다(React 밖 DOM 조작·인라인 `onclick` 속성).
+- **함께 드러난 것 — 애니메이션 108곳이 전부 죽어 있었다**: `animate-in fade-in zoom-in duration-200` 문법이 코드 108곳에 있는데 그 문법의 출처인 `tailwindcss-animate`가 **설치돼 있지 않았다**(package.json·config 실측). 클래스는 붙어 있고 CSS는 생성되지 않아 무효 — "적어 뒀으니 동작한다"고 믿는 상태가 오래 유지됐다.
+- **그 처방에서 갈린 판단**: 플러그인을 devDependency로 추가하면 **서버에서 설치되지 않는다** — `scripts/safe-build.sh`는 `node_modules/typescript`가 있으면 `npm install`을 건너뛴다. config의 require가 깨져 빌드 전체가 실패한다(atomic 패턴이라 사이트는 살지만 배포가 막힌다). ⇒ **의존성 0으로 `tailwind.config.js`에 직접 구현**(이미 있는 `tailwindcss/plugin` 사용). 계약은 원본과 동일하게 — `animate-in`이 keyframe(enter)을 걸고 `fade-in`·`zoom-in`·`slide-in-from-*`가 그 keyframe이 읽는 CSS 변수를 세팅한다. **기존 코드 108곳을 한 줄도 고치지 않고 살아났다.**
+- **함정 하나**: `duration-*`·`ease-*`는 Tailwind 기본이 transition 축만 세팅하므로 애니메이션에도 먹이려면 같은 이름으로 `animationDuration`을 더해야 한다. 이때 **core를 덮어쓰면 기존 전환이 전부 깨진다** — 산출물에서 `.duration-200{transition-duration:.2s}`와 `.duration-200{animation-duration:.2s}`가 **둘 다** 생성되는지 확인해야 한다(실측 확인함).
+- **처방** = 확인 계열 셸을 `shared/ConfirmDialogShell`로 통일(화이트 고급형·모션·ESC·처리 중 잠금·포털). 소비처 4곳(즉시/예약 확인·회신번호 제외·이름 누락·예약 시각) 전환 + 브랜드에 확인 다이얼로그 신설 + 수신자 [추가] 방식(알림톡과 같은 축)으로 교체.
+- **교훈**: **셸을 새로 만들면 그 위에 뜨는 것들까지가 한 작업이다.** 워크스페이스만 고급형으로 바꾸고 확인 모달을 남기면, 사용자는 "제일 중요한 순간에 싼 화면"을 본다. 그리고 **같은 계열 화면은 계약도 같아야 한다** — 한 경로만 확인 없이 바로 나가면 그건 디자인 문제가 아니라 안전장치 결손이다.
+- ⛔ **클래스를 적은 것과 스타일이 도는 것은 다르다** — 외부 문법(플러그인 유틸리티)을 쓸 때는 그 플러그인이 실제 설치·등록돼 있는지, 그리고 **빌드 산출물에 그 CSS가 들어 있는지**까지가 한 작업이다(0718 "프론트 빌드=산출물 검증"의 CSS 판).
+
 ### 2026-07-09 — 뒤로가기 navigate 하드코딩 루프 재발 + DM 편집 캔버스↔발행 SSR 미러 부재
 - **뒤로가기 navigate 하드코딩 = 루프+스크롤 미복원 재발점**: 여정 통계분석 뒤로가기가 `navigate('/ai-journeys/:id')`(여정상세) 하드코딩 → 여정상세 back(goBackOr -1)이 다시 통계로 → stats↔상세 무한 루프(대시보드 못 감). 전수 감사로 동일 패턴 9곳(JourneyStats+마케팅캘린더·성과·예측·푸시·음성·원클릭·여정목록·자동마케팅) → 전부 `goBackOr(navigate, fallback)`. **교훈: 새 ←/뒤로가기 버튼은 무조건 `goBackOr(navigate, fallback)`. navigate('/x') 직접=PUSH라 루프+스크롤 미복원. 대시보드/메인 '종료' 라벨·정방향 이동만 navigate 허용.** [[feedback_scroll_restoration_convention]]
 - **DM 구도(treatment) 캔버스 미반영 = 편집≠단말**: 공통 '구도(분할 등)' 선택이 발행 SSR(renderHeroSplit 등)에만 적용되고 편집 캔버스는 classic만 렌더 → 구도·버튼색 바꿔도 편집 화면 변화 0(사용자 혼선). SectionRenderer가 treatment 미계산·미전달이 근본. fix=프론트 selectTreatment 미러(`utils/dm-treatment.ts`)+SectionRenderer 전달+hero/coupon/text_card/cta 캔버스가 SSR treatment를 JSX 1:1 미러(classic 골든보존). **교훈: 공통 속성(구도·색·정렬)은 캔버스+발행 SSR 둘 다 소비해야 편집=발행. 한쪽만=불일치 신고. TextArea 입력 렌더는 캔버스(InlineEditable는 이미 pre-wrap)+SSR 둘 다 `white-space:pre-wrap` 필수(즉시쿠폰 조건 개행 소실).**

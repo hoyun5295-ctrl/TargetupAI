@@ -55,7 +55,9 @@
 
 ## 2) 활성 버그
 
-### 🟢 B-0805-2 발행된 세금계산서 가드가 재발행 경로에만 있었다 (🟢 배포완료) — 2026-08-05 (0805(2) 작업 중 발견 · 같은 세션 정정)
+### 🟠 B-0815-1 AI·직접발송 미적재 환불이 실패해도 durable 의무로 안 남는다 (🔵 Open) — 2026-08-15 (브랜드 계약 정정 Codex 리뷰가 범위 인접에서 발견 · 기존 부채)
+> **한 줄**: [campaigns.ts](../packages/backend/src/routes/campaigns.ts) AI both 브랜드 미적재 환불(1040행대)과 직접발송 SMS/카카오 미적재 환불(2240행대)이 `prepaidRefund` 반환 `ok`를 확인하지 않고 catch도 로그만 남긴다. 같은 API를 쓰는 brand-message.ts는 `ok=false`면 `markRefundPending`으로 durable 의무를 남기는데, 이 경로들은 환불 실패가 조용히 지나가 미환불이 남을 수 있다.
+> **관련**: B-0727-2가 만든 항아리·의무 체계의 배선 누락 지점. 착수 시 그 규약(`markRefundPending` + refund_key)으로 통일하면 된다. 브랜드 계약 정정(0815)과는 인과 없음 — 기존 코드. (🟢 배포완료) — 2026-08-05 (0805(2) 작업 중 발견 · 같은 세션 정정)
 > **원인**: "세금계산서가 이미 국세청에 나간 건은 지우고 다시 만들 수 없다"는 가드가 `if (reissue)` **블록 안에만** 있었다. 사유를 적은 **일반 삭제는 통과**했고, 그때 `taxbill_issues.billing_id`가 SET NULL로 끊겨 **고아 계산서**가 남았다(`invoice_confirmations`는 `billing_id` CASCADE라 추적행은 함께 사라진다). 그 상태에서 같은 기간을 다시 발행하면 원본이 한 장 더 나간다 — `reissue`에서 막으려던 바로 그 사고 모양이다.
 > **수정**: 가드를 `if (reissue)` 밖으로 꺼내 **모든 삭제**에 건다([billing.ts](../packages/backend/src/routes/billing.ts) `BILLING_TAXBILL_ALREADY_ISSUED`). 문구만 경로별로 가른다. 삭제에 사유를 받는 규칙("틀린 금액이 나갔으면 지우고 다시 보낸다")은 **계산서가 나가기 전**의 이야기이고, 나간 뒤의 정정 수단은 수정세금계산서 하나다([정산 문서 §2-8](../docs/FEATURE-BILLING.md)). `ai_credit_requests.billed` 되돌림 교착 우려는 대상이 "계산서가 발급 대기 이상인 정산"으로 좁아 실효가 없다 — 그 장은 애초에 지우면 안 되는 장이다.
 > **영향 범위**: 소비처 2곳 전수 — 화면 [삭제](`reissue=false`)와 `POST /:id/reissue`(`reissue=true`). 워커·배치 소비처 0. 새 차단은 앞엣것에만 생긴다.

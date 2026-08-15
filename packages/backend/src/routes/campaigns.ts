@@ -2845,10 +2845,21 @@ router.put('/:id/message', async (req: Request, res: Response) => {
     // 1. MySQL 라인 테이블(발송 당시 기록 1순위 + 전 라인 합집합)에서 수신자 목록 조회 — 2026-06-11 라인 불일치 fix
     const msgTables = await getCampaignQueueTables(companyId, campaign.rows[0].created_by || undefined, campaign.rows[0].send_config);
     const recipients = await smsSelectAll(msgTables,
-      'seqno, dest_no',
+      'seqno, dest_no, msg_type',
       'app_etc1 = ? AND status_code = 100',
       [campaignId]
     );
+
+    // ★ 2026-08-15 브랜드 행(msg_type='F') 포함 캠페인은 수정 자체를 거부 — 이 경로의 문안 갱신은
+    //   문자(SMS/LMS) 규약(광고 문구·080·제목)이라 브랜드 행 본문·제어 규약을 오염시키고,
+    //   F행만 건너뛰면 캠페인 원장·문자 행은 새 문안, 브랜드 행은 옛 문안으로 갈라진 채 성공 표시가 된다(적대 검증 지적).
+    //   원장 변경 전 전체 거부가 원자적이다. 아래 UPDATE의 F 제외 조건은 경합 대비 이중 방어로 유지.
+    if (recipients.some((r: any) => r.msg_type === 'F')) {
+      return res.status(400).json({
+        success: false,
+        error: '브랜드메시지가 포함된 예약 캠페인은 문안 수정을 지원하지 않습니다. 예약을 취소한 뒤 다시 발송해주세요.',
+      });
+    }
 
     // MySQL에 데이터 없으면 PostgreSQL만 업데이트 (예약 상태)
     if (recipients.length === 0) {
