@@ -860,10 +860,10 @@ export interface BrandQueueRow {
   phone: string;
   /** 대체발송(SMS/LMS) 발신번호 — call_back */
   callback: string;
-  /** CT-12 buildBrandMsgContents 산출물(JSON 문자열) */
+  /** CT-12 buildBrandQueuePayload 산출물 msgContents — 자유형=순수 본문 / 기본형=TYPE_DEF+변수 JSON (★2026-08-15 규약 정정) */
   msgContents: string;
-  /** 발신프로필 키 — k_etc_json {"senderkey":...}. 브랜드는 템플릿 도출이 없어 항상 필수 */
-  senderKey: string;
+  /** CT-12 buildBrandQueuePayload 산출물 etcJson — senderkey+제어·부가 필드 JSON. 브랜드는 항상 필수 */
+  etcJson: string;
   /** 기본형만 — k_template_code */
   templateCode?: string;
   /** 'S'/'L'(원문 그대로)은 본문이 JSON이라 불가 — 게이트웨이가 오류 로그 없이 버린다 */
@@ -895,11 +895,12 @@ export async function insertBrandQueue(
 
   // 첫 INSERT 전 전 행 검증 — 형식 결함이 배치 중간에 터져 부분 발송이 되지 않게(fail-closed).
   for (const r of rows) {
-    if (!String(r.senderKey || '').trim()) {
-      throw new BrandQueueInsertError('브랜드메시지 발신프로필 키(senderKey)가 없습니다', 0);
+    // 조립은 CT-12 buildBrandQueuePayload가 보장한다 — 여기는 빈 값 방어만(이중 조립 금지).
+    if (!String(r.etcJson || '').trim()) {
+      throw new BrandQueueInsertError('브랜드메시지 발신 설정 정보가 비어 있습니다', 0);
     }
     if (!String(r.msgContents || '').trim()) {
-      throw new BrandQueueInsertError('브랜드메시지 msg_contents가 비어 있습니다', 0);
+      throw new BrandQueueInsertError('브랜드메시지 본문이 비어 있습니다', 0);
     }
     if (!['N', 'A', 'B'].includes(r.nextType)) {
       throw new BrandQueueInsertError(`브랜드메시지 대체발송 코드가 올바르지 않습니다: ${r.nextType}`, 0);
@@ -934,7 +935,7 @@ export async function insertBrandQueue(
       );
       if (r.reservedDate) params.push(r.reservedDate); // sendreq_time
       params.push(
-        JSON.stringify({ senderkey: r.senderKey }),   // k_etc_json — 브랜드는 항상 필수
+        r.etcJson,                                    // k_etc_json — senderkey+제어·부가 필드(CT-12 조립본)
         appEtc1 || null,                              // app_etc1 (캠페인/추적 식별자)
         r.companyId || null,                          // app_etc2 (companyId 추적)
       );

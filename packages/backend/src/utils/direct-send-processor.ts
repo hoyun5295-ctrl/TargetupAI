@@ -15,7 +15,7 @@ import { fillAlimtalkVarMap } from './alimtalk-vars';
 import { resolveAlimtalkFallback } from './alimtalk-fallback';
 import { bulkInsertSmsQueue, insertBrandQueue, BrandQueueInsertError, type BrandQueueRow, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType } from './sms-queue';
 // ★ 2026-07-30 브랜드 msg_contents 조립·대체발송 매핑 — CT-12 단일 진입점
-import { buildBrandMsgContents, resolveBrandFallback } from './brand-message';
+import { buildBrandQueuePayload, resolveBrandFallback } from './brand-message';
 import { normalizeMmsImagePaths } from './mms-image-util';
 import { resolveCustomerCallback } from './callback-filter';
 // ★ 2026-07-05: 발송 피로도 카운터 (광고성 발송 기록 — 발송 무영향 fire-and-forget)
@@ -161,18 +161,21 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
           resendType: p.sendChannel === 'both' ? 'NO' : (p.kakaoResendType || 'SM'),
           originalMessage: finalMessage,
         });
+        const brandPayload = buildBrandQueuePayload({
+          typeDef: 'FREE',
+          senderKey: p.kakaoSenderKey || '',
+          targeting: p.kakaoTargeting || 'I',
+          bubbleType: p.kakaoBubbleType || 'TEXT',
+          isAd: p.finalIsAd,
+          message: finalMessage,
+          attachmentJson: p.kakaoAttachmentJson || undefined,
+          carouselJson: p.kakaoCarouselJson || undefined,
+        });
         return {
           phone: cleanPhone,
           callback: recipientCallback,
-          senderKey: p.kakaoSenderKey || '',
-          msgContents: buildBrandMsgContents({
-            typeDef: 'FREE',
-            targeting: p.kakaoTargeting || 'I',
-            bubbleType: p.kakaoBubbleType || 'TEXT',
-            message: finalMessage,
-            attachmentJson: p.kakaoAttachmentJson || undefined,
-            carouselJson: p.kakaoCarouselJson || undefined,
-          }),
+          msgContents: brandPayload.msgContents,
+          etcJson: brandPayload.etcJson,
           nextType: brandFallback.nextType,
           nextContents: brandFallback.nextContents,
           titleStr: brandFallback.titleStr,

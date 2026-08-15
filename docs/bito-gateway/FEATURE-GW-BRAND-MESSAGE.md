@@ -1,0 +1,95 @@
+# 비토 게이트웨이 — 브랜드메시지 축 (GW-BRAND-MESSAGE)
+
+> 허브 = [FEATURE-BITO-GATEWAY.md](../FEATURE-BITO-GATEWAY.md) · 수정 시 허브 §2-1 작업 규율 적용.
+> **이 문서가 브랜드메시지 축의 확정 사실·결함·이력을 소유한다**(★2026-08-15 Harold 지시로 분리 — 허브 §4-6은 요약·포인터만).
+> 호출어 **브랜드메시지**. 진행 중 작업 지시서 = [2026-08-15-brand-contract-fix.md](../2026-08-15-brand-contract-fix.md)(완료 후 삭제되는 임시 문서).
+
+## 1. 정체성
+
+한줄로 → 게이트웨이 → 휴머스온(IMC) → 카카오로 나가는 **광고성 브랜드메시지**. 알림톡과 완전히 다른 축이다(알림톡 = 정보성·템플릿 검수 / 브랜드 = 광고성·발신프로필 기반). 2026-08-15 기준 **성공 발송 0건**.
+
+```
+한줄로 buildBrandMsgContents → MySQL SMSQ_SEND_1x(msg_type='F') → Bito Agent
+  → 게이트웨이 kakao_brand_free/basic → humuson_imc BM_FREE_REQ/BM_BASIC_REQ → 카카오
+```
+
+**지원 범위** — 자유형(FREE) TEXT·IMAGE·WIDE만. 기본형(BASIC)은 게이트웨이·에이전트 준비 완료, 한줄로 적재 경로 미구현. 캐러셀류는 입구 차단.
+
+## 2. 현재 상태 (2026-08-15)
+
+| 구간 | 상태 |
+|---|---|
+| 한줄로 → SMSQ 적재 | 동작(단, §4 결함 4건) |
+| Agent F/FB 매핑 | **0815 개통 완료**(3대 config `msg_type_values`에 `kakao_brand_free: "F"` · `kakao_brand_basic: "FB"`) |
+| 게이트웨이 프레임 조립 | 동작 — BM_FREE_REQ_LIST 전송, 휴머스온 **접수 성공**(`RETURN_CODE 1000`) |
+| 휴머스온 → 카카오 | **실패 — REPORT 4101 고정** |
+| 발신프로필 | 브랜드 사용 신청 **완료 상태**(check API `509 이미 신청 완료`) |
+| 과금 | postpaid + 브랜드 단가 15.00 해석 확인(발송 차단 게이트 통과) |
+
+## 3. 4101 — 확정된 것과 미확정인 것
+
+**코드 의미(확정)** — IMC Developer Portal 응답코드 레퍼런스: **`4101 = SERIAL_NUMBER_PREFIX_DATE_EXCEPTION`**. 인접 = `4100 SERIAL_NUMBER_EXCEPTION` · `2006 시리얼넘버 형식 불일치` · `4103 허브파트너 없음` · `4104 발신프로필 없음`. 4100·4103·4104가 우리 결과코드표(`alimtalk-result-map.ts` IMC_REPORT_CODE_MAP)와 일치 — **브랜드 결과코드표가 맞음**을 교차 확인.
+
+**배제 완료 6축**(각각 실측) — ①Agent 매핑(관통 확인) ②중계 프로토콜(접수 ACK) ③단가 ④채널 친구(I 타겟팅·본인 채널 친구) ⑤**발송 시간창**(08:37 주간 재발송도 4101) ⑥**계정·프로필**(같은 bind5/invito12·같은 프로필로 알림톡 `0000` 성공, 브랜드만 4101).
+
+**시도했으나 실패한 형식 2종** — MSG_UID `00001707050`(순번 11자리) · `26081507051`(YYMMDD+순번). **인증 응답에도 시리얼 규칙 없음**(AUTH_KEY·ENC_METHOD·RS_LIST뿐, 전문 로그 확인).
+
+⛔ **NGS 규격서를 근거로 쓰지 마라** — NGS는 GemTek 규격이고 휴머스온 IMC와 다른 프로토콜이다(0815 Harold 지적 — 그 근거로 만든 커밋 `9d1cda3`은 `64fc838`로 되돌림).
+⛔ **형식을 추정해 넣지 마라** — 0815에 두 번 시도해 두 번 같은 코드였다. IMC 소켓 규격서를 받은 뒤에만 고친다.
+
+**미확정** — MSG_UID/시리얼 형식 규격. IMC 소켓 규격서 미보유(포털은 REST 전용 — `messageKey` 자유형식 128자).
+
+## 4. 한줄로 측 확정 결함 4건 (★0815 — Harold 지시로 포괄 점검)
+
+**"우리 문제"가 맞았다.** 매뉴얼이 요구하는 값이 게이트웨이까지 가지 못한다.
+
+| # | 결함 | 위치 | 매뉴얼 근거 |
+|---|---|---|---|
+| 1 | **`AD_FLAG` 미전송** — 화면이 `isAd`를 받아 캠페인 행에 저장하나 `buildBrandMsgContents`에 안 넘어감. 사용자가 "광고 아님"을 골라도 반영 안 됨 | `campaigns.ts:3147` ↔ `brand-message.ts:124` | §6.2 `AD_FLAG` NOT NULL |
+| 2 | **`HEADER`·`ADDITIONAL_CONTENT` 미전송** — `baseParams`에 있으나 호출부 3곳(431·991·2186) 전부 미전달 | `campaigns.ts` 3곳 | §6.2.2 — WIDE_ITEM_LIST는 HEADER 필수, COMMERCE는 ADDITIONAL_CONTENT |
+| 3 | **`PUSH_ALARM`·`UNSUBSCRIBE_PHONE_NUMBER`·`UNSUBSCRIBE_AUTH_NUMBER` 전달 경로 없음** | `brand-message.ts` 조립 함수 | §2.2.2 M/N 타겟팅은 무료수신거부 필수 |
+| 4 | **★뿌리 — 본문 컬럼에 제어 필드를 섞는 구조** | `buildBrandMsgContents` → `msg_contents` | — |
+
+**4번 상세** — 알림톡은 `msg_contents`=순수 본문 / `k_etc_json`=부가정보인데, 브랜드만 본문 컬럼에 `TYPE_DEF`·`TARGETING`·`CHAT_BUBBLE_TYPE`까지 JSON으로 넣는다. 결과: ①게이트웨이가 되풀어야 함(0815 `absorbBrandContentsMessage` 땜질) ②관리 화면 본문에 JSON 원문 노출 ③1~3 누락이 여기서 파생. **경계마다 규약이 다른 것이 결함의 뿌리.**
+
+⚠ **4101과의 인과는 미확인** — 이 4건이 4101을 없앤다는 근거는 없다. 매뉴얼 정합 결함으로 확정된 것들이다.
+
+## 4-1. 계약 정정 구현 (★0815(10) — 코드 완료 · 배포+실측 대기)
+
+**신규약** — `msg_contents` = 내용물(자유형: 순수 본문 / 기본형: `TYPE_DEF`+변수 JSON — TYPE_DEF는 게이트웨이 absorb 하위호환 경계의 전문 식별 마커라 유지) / `k_etc_json` = 제어·부가 전부(`senderkey`·`CHAT_BUBBLE_TYPE`·`TARGETING`·`AD_FLAG`·`PUSH_ALARM`·`HEADER`·`ADDITIONAL_CONTENT`·`UNSUBSCRIBE_*`·`ATTACHMENT`). 알림톡과 같은 경계.
+
+- **단일 조립기 `buildBrandQueuePayload`**(brand-message.ts)가 두 컬럼을 한 쌍으로만 산출 — 옛 `buildBrandMsgContents` 삭제. 두 컬럼을 따로 조립하는 구조 자체를 타입으로 봉쇄.
+- **호출부는 지시서의 3곳이 아니라 실측 6곳** — campaigns 3(테스트 431·AI 991·직접 2186) + brand-message 내부 2(/brand-send 자유형·기본형) + **direct-send-processor 1(예약 직접발송 청크 워커 — 지시서 누락분)**. 전부 전환.
+- 결함 1~3 배선: `AD_FLAG`=사용자 `isAd` 그대로(경로별 `is_ad`/`finalIsAd`) / `PUSH_ALARM` 기본 Y 명시 / `HEADER`·`ADDITIONAL_CONTENT`·`UNSUBSCRIBE_*` 전달 경로 개통(전용 화면 unsub 입력 → 큐까지 연결. header 입력 UI는 지원 3종이 안 써서 기존대로 없음).
+- **신설 가드 3종**: ①M/N 타겟팅 + 무료수신거부 번호 없음 = 조립 시 throw(매뉴얼 §2.2.2 fail-closed) ②`k_etc_json` 1024자(컬럼 실측 varchar) 초과 = throw ③예약 문안 수정(campaigns PUT /:id/message)이 F 행 UPDATE 제외 — 문자 규약(광고 문구·제목)이 브랜드 행을 덮던 잠복 파괴 차단.
+- **에이전트 실측(0815)** — `/opt/bito-agent/agent-config.yaml`: `message: msg_contents` / `kakao_payload: k_etc_json` — **config 변경 불필요 확정**(k_etc_json 원문이 gRPC로 무변환 통과, 게이트웨이 payload.go가 case-insensitive로 읽음).
+- **혼재 하위호환** — 기존 적재분(JSON 전문)은 게이트웨이 `absorbBrandContentsMessage`가 처리(제거는 전량 전환 후 = §5 3294c1f 항), 화면은 `getDisplayContents`가 구행 unwrap·신행 평문 통과 양쪽 처리. 정산·집계는 `msg_contents` 미소비(전수 grep) — 영향 0.
+- **검증** — backend tsc 0 / vitest 계약 테스트 25건 통과 + AD_FLAG 결함 주입 시 1건 실패 확인 후 원복(검증 장치 실효 확인). 롤백 = 커밋 1개 revert(DDL 0, 게이트웨이가 양쪽 규약 처리라 안전).
+- **잔여** = 배포 → 실측 1건(게이트웨이 브랜드 전송 프레임에 AD_FLAG·PUSH_ALARM 실림 확인) → 조회·집계 화면 회귀 → 지시서 삭제.
+
+## 5. 게이트웨이 측 0815 수정 (배포 완료)
+
+| 커밋 | 내용 |
+|---|---|
+| `3294c1f` | Agent 경로 전문(msg_contents) 흡수 — 전문 JSON이 카톡 본문으로 나가던 결함(§4-4의 땜질, 구조 정정 시 제거 대상) |
+| `8c2e80a` | `AD_FLAG` 기본값 N→Y(매뉴얼 정합) |
+| `26b61b7` | `RESERVED_DATE`(NOT NULL·기본값 없음 — 전 유형 0회 전송이었다) · `RESEND_MT_TYPE` 추가 |
+| `cd85005`·`f8b2dee` | 진단 로그(전송·응답·REPORT 프레임 + 인증 응답 전문) — **원인 확정 후 Debug 강등 또는 제거** |
+| `9d1cda3` → `64fc838` | NGS 근거 시리얼 변경 → **되돌림**(§3 ⛔) |
+
+## 6. 착수 원장
+
+1. [ ] **한줄로 브랜드 계약 정정** — §4 결함 4건. **0815(10) 코드 완료(§4-1) — 남은 것 = 배포+실측 1건+화면 회귀 후 지시서 [2026-08-15-brand-contract-fix.md](../2026-08-15-brand-contract-fix.md) 삭제·이 항목 종결**
+2. [ ] **4101 형식 규격** — 휴머스온 회신 대기(문의 발송됨). 받으면 1줄 수정 + 배포 3분
+3. [ ] 능력 기반 라우팅 — F/FB는 게이트웨이 라인 전용(`brand-message.ts:618·743`. 0815 psy5868이 강문희 라인으로 가 7421 재현)
+4. [ ] 발송 시간 가드 — 08:00~20:50 밖 차단 또는 예약 전환(매뉴얼 §1)
+5. [ ] 기본형(FB) 적재 경로 — 게이트웨이·에이전트는 준비 완료, 한줄로만 미구현. ★0815 확인: 현행 `sendBrandMessageTemplate`은 msg_type='F'로 적재해 게이트웨이 라인에서 기본형이 자유형(BM_FREE)으로 오조립된다 — FB 전환이 이 축의 정답
+6. [ ] 대체발송 코드축 정합 — 매뉴얼 `RESEND_MT_TYPE`(NO/SM/LM/MM) ↔ 한줄로 `k_next_type`(N/A/B)
+7. [ ] 진단 로그 정리(§5) — 4101 종결 후
+
+## 7. 이 축의 교훈
+
+- ⛔ **성공 사례부터 확보하라** — 0815 하루 종일 실패 행만 변형하며 열 번 찔렀다(LESSONS_META 26 위반). 0731 12가설 헛돎과 같은 뿌리.
+- ⛔ **다른 프로토콜 규격서로 메우지 마라** — IMC 규격이 없다고 NGS(GemTek)를 근거로 쓴 것이 0815의 오판.
+- ⛔ **경계마다 규약이 다르면 그 자체가 결함이다** — 한쪽에서 싸매고 다른 쪽에서 푸는 구조는 반드시 누락을 만든다(§4-4).
+- **접수 성공 ≠ 발송 성공** — `RETURN_CODE 1000`은 프레임 수락일 뿐, 판정은 REPORT다.

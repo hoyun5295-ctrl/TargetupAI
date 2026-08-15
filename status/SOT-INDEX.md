@@ -21,7 +21,7 @@
 
 | **AI 학습 · 자기 개선 루프** — 성과 환류로 문안·시각이 스스로 나아지는 축 | **자기 개선 루프** / **AI 학습** | [FEATURE-AI-LEARNING.md](../docs/FEATURE-AI-LEARNING.md) | **§2 정체성(필독 — 우리는 아직 모델을 학습시키지 않는다)** → §3 불변 원칙 → §4 구조(**§4-1 `source_ref` 축은 경로마다 다르다**). 단계·착수 원장 = §6, 뒤집힌 판단 = §8 |
 | **마케팅 플래너(AX 월간 대행)** — 월간 행사 계획 → 결재 → 무인 제작·실행 | **마케팅 플래너** | [FEATURE-MARKETING-PLANNER.md](../docs/FEATURE-MARKETING-PLANNER.md) | **§2 정체성(세 번째 시계 = 달력)** → §3 불변 원칙 8개 → §4 구조. 요금 = §5 · 단계 = §6 · 남은 것 = §8 · 뒤집힌 판단 = §9. **근거·실측 원장은 시점 설계서**(§10 링크)가 소유 |
-| **비토 게이트웨이** — 발송 마지막 구간(자비스 개발·실사용 0) · Agent 3대 전환 | **비토 게이트웨이** | [FEATURE-BITO-GATEWAY.md](../docs/FEATURE-BITO-GATEWAY.md) | **§2 읽기 규약(필독 — 그쪽 status·CLAUDE·CODEX 편집 금지)** → §3 구조 지도 → §4 전환 관문(installer.yaml 스키마·nonce API). 자립 경로 = §5 · 우리 Agent 현황 = §6 · 남은 것 = §8. **소스 = `C:\Users\ceo\OneDrive\바탕 화면\bito-gateway` (읽기 전용)** |
+| **비토 게이트웨이** — 발송 마지막 구간(자비스 개발·실사용 0) · Agent 3대 전환 완료 | **비토 게이트웨이** | [FEATURE-BITO-GATEWAY.md](../docs/FEATURE-BITO-GATEWAY.md) | **§2 읽기 규약(필독 — ★0815 개정: 그쪽 CODEX·STATUS는 우리 관리, 나머지 편집 금지)** → §2-1 작업 규율 → §9 스포크 6종(`docs/bito-gateway/` — 0815 전수점검 축별 피더). 결함 관문 = §4 · Agent 현황 = §6 · 남은 것 = §8. **소스 = `C:\Users\ceo\projects\bito-gateway` (★0815 git 도입 — 수정은 Harold 승인 + 커밋 단위)** |
 
 **등재 규칙** (★2026-08-03 Harold 확정 — 앞으로 모든 기능이 이 형태)
 - **기능 하나 = .md 하나.** 그 문서가 자기 **이력**(§이력 색인)과 구조·불변 원칙·계약을 소유하고, STATUS는 **참조만** 한다. 트랙이 archive로 가도 기능 문서는 남는다.

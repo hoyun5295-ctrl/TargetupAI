@@ -29,7 +29,7 @@ import {
   bulkInsertSmsQueue, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType, insertTestSmsQueue
 } from '../utils/sms-queue';
 // ★ 2026-07-30 브랜드 msg_contents 조립·대체발송 매핑은 CT-12에서만 — 라우트 인라인 금지
-import { buildBrandMsgContents, resolveBrandFallback, resolveBrandCallback } from '../utils/brand-message';
+import { buildBrandQueuePayload, resolveBrandFallback, resolveBrandCallback } from '../utils/brand-message';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 // ★ 2026-07-29 브랜드메시지 판정은 CT 하나에서만 한다 — 채널 리터럴을 라우트에 다시 적으면
 //   집계(일자·상세)와 차감·환불이 서로 다른 기준을 갖게 되고, 그 차이가 곧 미청구나 발행 차단이다.
@@ -423,14 +423,16 @@ router.post('/test-send', async (req: Request, res: Response) => {
 
         if (testChannel === 'kakao' || testChannel === 'both') {
           try {
-            // 브랜드메시지 테스트 발송 — SMSQ msg_type='F' (2026-07-30 재구축)
+            // 브랜드메시지 테스트 발송 — SMSQ msg_type='F' (★2026-08-15 규약 정정: 본문/제어 필드 분리 조립)
+            const testBrandPayload = buildBrandQueuePayload({
+              typeDef: 'FREE', senderKey: testKakaoSenderKey, targeting: 'I',
+              bubbleType: testKakaoBubbleType, isAd: isAd || false, message: testMsg,
+            });
             await insertBrandQueue(testTables, [{
               phone: cleanPhone,
               callback: callbackNumber,
-              senderKey: testKakaoSenderKey,
-              msgContents: buildBrandMsgContents({
-                typeDef: 'FREE', targeting: 'I', bubbleType: testKakaoBubbleType, message: testMsg,
-              }),
+              msgContents: testBrandPayload.msgContents,
+              etcJson: testBrandPayload.etcJson,
               nextType: 'N',  // 테스트는 대체발송 안함
               companyId,
             }], testBillId);
@@ -977,25 +979,28 @@ for (const customer of filteredCustomers) {
     ]);
   }
 
-  // ★ 브랜드메시지 — SMSQ 배치 행 축적 (2026-07-30 재구축: 알림톡과 같은 라인·msg_type='F')
+  // ★ 브랜드메시지 — SMSQ 배치 행 축적 (★2026-08-15 규약 정정: 본문=msg_contents / 제어·부가=k_etc_json)
   //   조립·대체발송 결함은 여기서 throw → 아래 전체 catch가 미적재 기준으로 환불한다(fail-closed).
   if (sendChannel === 'kakao' || sendChannel === 'both') {
     const brandFallback = resolveBrandFallback({
       resendType: sendChannel === 'both' ? 'NO' : kakaoResendType,
       originalMessage: personalizedMessage,
     });
+    const aiBrandPayload = buildBrandQueuePayload({
+      typeDef: 'FREE',
+      senderKey: kakaoSenderKey,
+      targeting: kakaoTargeting,
+      bubbleType: kakaoBubbleType,
+      isAd: campaign.is_ad === true,
+      message: personalizedMessage,
+      attachmentJson: kakaoAttachmentJson,
+      carouselJson: kakaoCarouselJson,
+    });
     aiBrandRows.push({
       phone: cleanPhone,
       callback: customerCallback,
-      senderKey: kakaoSenderKey,
-      msgContents: buildBrandMsgContents({
-        typeDef: 'FREE',
-        targeting: kakaoTargeting,
-        bubbleType: kakaoBubbleType,
-        message: personalizedMessage,
-        attachmentJson: kakaoAttachmentJson,
-        carouselJson: kakaoCarouselJson,
-      }),
+      msgContents: aiBrandPayload.msgContents,
+      etcJson: aiBrandPayload.etcJson,
       nextType: brandFallback.nextType,
       nextContents: brandFallback.nextContents,
       titleStr: brandFallback.titleStr,
@@ -2179,18 +2184,21 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           resendType: directChannel === 'both' ? 'NO' : (kakaoResendType || 'SM'),
           originalMessage: finalMessage,
         });
+        const directBrandPayload = buildBrandQueuePayload({
+          typeDef: 'FREE',
+          senderKey: kakaoSenderKey || '',
+          targeting: kakaoTargeting || 'I',
+          bubbleType: kakaoBubbleType || 'TEXT',
+          isAd: finalIsAd,
+          message: finalMessage,
+          attachmentJson: kakaoAttachmentJson || undefined,
+          carouselJson: kakaoCarouselJson || undefined,
+        });
         directBrandRows.push({
           phone: cleanKakaoPhone,
           callback: recipientCallback,
-          senderKey: kakaoSenderKey || '',
-          msgContents: buildBrandMsgContents({
-            typeDef: 'FREE',
-            targeting: kakaoTargeting || 'I',
-            bubbleType: kakaoBubbleType || 'TEXT',
-            message: finalMessage,
-            attachmentJson: kakaoAttachmentJson || undefined,
-            carouselJson: kakaoCarouselJson || undefined,
-          }),
+          msgContents: directBrandPayload.msgContents,
+          etcJson: directBrandPayload.etcJson,
           nextType: brandFallback.nextType,
           nextContents: brandFallback.nextContents,
           titleStr: brandFallback.titleStr,
@@ -2940,7 +2948,10 @@ router.put('/:id/message', async (req: Request, res: Response) => {
           updateQuery += `, title_str = CASE ${titleCases.join(' ')} END`;
         }
 
-        updateQuery += ` WHERE seqno IN (${seqnos.join(',')}) AND status_code = 100`;
+        // ★ 2026-08-15 브랜드 행(msg_type='F') 제외 — 이 경로는 문자(SMS/LMS) 문안 수정이라
+        //   (광고)·080 부착과 제목 갱신이 문자 규약 기준이다. F 행에 닿으면 본문·제어 규약이 오염된다
+        //   (규약 정정 전에는 JSON 전문을 평문으로 덮어 무로그 폐기까지 갔다). 브랜드 예약 문안 수정은 미지원.
+        updateQuery += ` WHERE seqno IN (${seqnos.join(',')}) AND status_code = 100 AND msg_type <> 'F'`;
 
         await mysqlQuery(updateQuery, []);
 
@@ -3150,7 +3161,7 @@ router.post('/brand-send', async (req: Request, res: Response) => {
         resolvedCallback || null,
         Array.isArray(phones) ? phones.length : 0,
         isAd ?? true,
-        // 길이 가드 — 값 검증은 CT(buildBrandMsgContents·resolveBrandFallback)가 바로 뒤에서 하고
+        // 길이 가드 — 값 검증은 CT(buildBrandQueuePayload·resolveBrandFallback)가 바로 뒤에서 하고
         // 실패 시 이 캠페인은 status='failed'로 남는다. 여기서 22001로 깨지면 그 안내가 안 나간다.
         String(bubbleType || 'TEXT').trim().toUpperCase().slice(0, 20),
         senderKey || null,

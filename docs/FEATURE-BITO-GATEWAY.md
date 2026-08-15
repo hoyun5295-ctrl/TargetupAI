@@ -1,9 +1,9 @@
 # 비토 게이트웨이 (ViTO Messaging Gateway) — 한줄로 측 피더 문서
 
 > **호출어 = "비토 게이트웨이"**
-> 이 문서는 **한줄로 저장소가 소유**한다. 게이트웨이 저장소(`bito-gateway`)의 `status/`·`CLAUDE.md`·`CODEX.md`·`AGENTS.md`는
-> 자비스와 공유하는 작업 공간이라 **우리가 편집하지 않는다**(★2026-08-14 Harold 지시). 그쪽은 읽기만 하고,
-> 우리 판단·확정 사실·잔여는 전부 여기에 쌓는다.
+> 이 문서는 **한줄로 저장소가 소유**한다. 게이트웨이 저장소의 `CODEX.md`·`status/STATUS.md`·`status/DEPLOY-RUNBOOK.md`는
+> **우리가 관리**하고(★2026-08-15 개정 — 상세 = §2 읽기 규약), 나머지(`AGENTS.md`·`CLAUDE.md`·`docs/`·`status/` 나머지)는 편집하지 않는다.
+> 우리 판단·확정 사실·잔여는 이 허브와 `docs/bito-gateway/` 스포크 6종에 쌓는다.
 
 ## 1. 정체성
 
@@ -21,8 +21,8 @@
 
 | 항목 | 값 |
 |---|---|
-| 소스 | `C:\Users\ceo\OneDrive\바탕 화면\bito-gateway` |
-| git | 로컬 사본에 `.git` **없음** — 되돌릴 이력이 없다. **편집 전 반드시 파일 백업** |
+| 소스 | **`C:\Users\ceo\projects\bito-gateway`** (★0815 이동 — 캐시·산출물 제외 복사, 수량 대조 검증). OneDrive 바탕 화면 옛 폴더 = **보존 사본**(대형 산출물·릴리즈 아카이브 원본, `MOVED-2026-08-15.md` 안내 있음, 수정 금지) |
+| git | **있음(★0815 도입)** — 이력은 커밋이 소유(결함 하나 = 커밋 하나), `.bak`은 서버 직접 반영분만. **원격 = `ssh://invito@58.227.193.65/home/invito/repos/bito-gateway.git`(0815 push 완료)** — 커밋 후 `git push`(Harold)가 백업. 옛 폴더는 대형 산출물 원본으로 계속 보존 |
 
 ⚠ **★★ 장비가 둘인데 호스트명이 둘 다 `invito`다** (2026-08-14 실측 — 프롬프트만 보고 구분 불가, 사고 유발 지점)
 
@@ -36,10 +36,37 @@
 - Agent → GW gRPC `:9090` (에이전트가 .62에서 .65로 접속)
 - ⛔ 저장소의 `docker-compose.yml`은 **개발용**이다(postgres `0.0.0.0:5432`·비번 `bito1234`). 운영은 `127.0.0.1` 바인딩으로 확인됨 — 이 파일을 운영 근거로 읽지 말 것
 
-**읽기 규약 (Harold 지시)**
-- 그쪽 `status/`·`CLAUDE.md`·`CODEX.md`·`AGENTS.md`·`docs/` **편집 금지.** 자비스와 왕복하는 공간이다.
-- 소스 읽기·분석은 자유. 우리 결론은 **이 문서**에 적는다.
+**읽기 규약 (Harold 지시 — ★2026-08-15 개정)**
+- **`CODEX.md`·`status/STATUS.md`는 우리가 재편·관리한다**(0815 Harold 지시 — 한줄로 규율 이식판으로 교체 완료, 원본 = `.bak-20260815`). 수정 시 백업 의무.
+- 그 외(`AGENTS.md`·`CLAUDE.md`·`docs/`·`status/` 나머지 문서)는 **계속 편집 금지.** 자비스와 왕복하는 공간이다.
+- 소스 읽기·분석은 자유. 우리 결론은 이 허브와 `docs/bito-gateway/` 스포크에 적는다.
 - 코드 수정이 필요하다고 판단되면 착수 전 Harold 승인 — 소유권이 아직 갈려 있다.
+
+## 2-2. 배포 체계 — gw check/build/deploy (★2026-08-15 신설 · 한줄로 tp-push+build:safe 이식판)
+
+**명령·절차의 소유 문서 = 게이트웨이 저장소 `status/DEPLOY-RUNBOOK.md`**(여기 재서술 금지). 스크립트 = `scripts/gw/{check,build,deploy}.sh`.
+
+**원칙 = 변경 종류가 검증·배포 단위를 결정한다.** git diff가 판정 → 해당 게이트만 실행 → 최소 단위만 교체.
+- api(Node)·문서 = **빌드 0** / dashboard = 프론트만 / Go = 로컬 크로스컴파일(**서버에 Go 없음 — 0815 실측**, 지금까지도 "서버 빌드"가 아니라 로컬 빌드물 전달이었다)
+- 버전 = **git SHA**(버전 디렉터리·전용 스크립트·재포장 폐지) · 배포 실패 시 **자동 복원**(`GW_DEPLOY_ROLLBACK`) + `/opt/bito-gateway/deploy-backups/<TS>/`
+- Agent 서명 릴리즈는 **대상 제외**(서명키 경계 — 기존 release authority 절차 유지)
+
+**풀 리패키징 4중 차단** (Harold 지시 — "결함 하나에 버전 올려 통째 재빌드"가 한 건에 1.5~2시간을 태우던 병리)
+①진입점(`AGENTS.md`·`CLAUDE.md`)에 금지 명시 — 어느 세션이 열려도 첫 화면에서 만난다 ②CODEX 규율에 정지 조항("재포장이 필요해 보이면 멈추고 보고") ③런북이 유일 배포 경로 ④`.gitignore`가 패키지 산출물 커밋 자체를 거부. **옛 OneDrive 폴더 진입 파일에도 같은 금지 + 작업 금지 안내**(`.bak-20260815`).
+
+**첫 리허설이 잡은 것**(체계가 첫날부터 일함) — 이동 때 빠진 테스트 픽스처 2건(릴리즈 서술자·레인 payload) 복원 · Windows 환경 전용 실패 5건을 테스트 단위 `-skip`으로 명시(패키지 커버리지는 유지, Linux는 전체 실행). 최종 `GW_CHECK_OK` exit 0 실측.
+
+**옛 폴더 청소**(0815) — 재생성 가능물만 삭제해 **10.5GB → 2.05GB**(8.5GB 회수, 파일 118,957→2,754). 지운 것 = Go 캐시 9종·모듈 캐시·node_modules 2벌·자비스 임시 사본(`.codex_tmp`)·`{cmd` 쓰레기·중단된 `.git` 잔재(커밋 0). **남긴 것 = 릴리즈 서명 아카이브·"Bito Agent" 원본 자료·invitoMsg**(서버 사본 실측 전 삭제 금지). ACL 잠긴 빈 껍데기 2개는 0MB라 존치.
+
+## 2-1. 작업 규율 (★2026-08-15 Harold 승인 — 자비스식 "빌드 재포장" 병리 차단)
+
+게이트웨이 관련 모든 작업(비토 수행분)에 적용한다. 근거 = §7 진단·§4-1 교훈.
+
+1. **작업 단위 = 결함 하나.** 산출물·버전이 단위가 아니다. 오류를 고치는 게 목적이지 빌드를 다시 포장하는 게 목적이 아니다("1글자와 1000줄이 같은 비용"이 되면 잘못된 것).
+2. **빌드는 Go 바이너리가 바뀔 때만.** config·Node·문서·ACL·SQL은 백업 후 직접 수정한다 (0815 `$9` 소스 동기화가 실증 — 빌드 0회).
+3. **에러는 먼저 로그를 넣고 진단한다.** 예외를 삼키는 경로에 가설 세우기 금지.
+4. **변경당 DESIGN+PLAN 문서 쌍 금지, 버전당 전용 빌드 스크립트 금지** (현행 scripts 121개 중 30개가 이 병리).
+5. **이력 = git 커밋**(★0815 도입 — 결함 하나 = 커밋 하나). 서버 직접 반영분만 `.bak-YYYYMMDD` 유지 + 당일 소스 커밋. 최소 diff + 실측 1건 검증은 불변.
 
 ## 3. 구조 지도 (2026-08-14 실측)
 
@@ -150,6 +177,10 @@ installer migrate failed: systemctl failed: exit status 3 ()
 
 **수정 위치 = Node(`web/api/…`) — Go 게이트웨이 재빌드 불필요.** 파일 교체 + 재시작.
 
+★2026-08-15 전수점검 — **핀은 459 한 곳이 아니라 3곳**: `agent-credential-service.js:210`(legacy bootstrap 발급) · `:459`(nonce 발급) · `:566`(enrollment). 정리 시 세 곳을 한 번에 같은 축으로 고쳐야 한다.
+
+**★2026-08-15 해소 — 핀 3곳 제거 완료**(Harold 승인 "핀 제거 방식" · 커밋 `8a6cfc1` · npm test 8종 exit=0). 수용 기준 = 릴리즈 원장의 `approved` + os/arch/child_digest 일치. **1.0.20 세트가 은퇴해도 등록 경로가 유지된다.** 잔여(별건) = 화면 릴리즈 선택 UI 부재(`RemoteDeployPage.jsx:152` — 첫 approved 자동 선택).
+
 ⛔ **수정 방향은 미확정이다.** 버전 문자열을 `1.0.22`로 바꾸면 다음 릴리즈에 같은 함정을 다시 놓는다(= 증상 수정). 능력 축으로 판정하는 것이 맞으나, **`agent_release` 테이블에 `payload_profile` 같은 능력 컬럼이 없다**(`migrations/041` 실측 — store_key·descriptor_digest·manifest_digest·child_digest·signing_key_id·verified_at뿐). `payload_profile`(`agent-child-v1`)은 패키지 manifest와 `internal/agent/release/types.go`에만 존재한다. 따라서 ①핀 제거(approved+os+arch+child_digest 검증은 유지) ②능력 컬럼 신설(DDL 동반) 중 선택이 필요하고, **착수는 Harold 승인 후.**
 
 ## 4-3. ★★★ 신규 등록 SQL이 100% 실패한다 — `$9` 미참조 (2026-08-14 확정·수정완료)
@@ -184,6 +215,8 @@ installer migrate failed: systemctl failed: exit status 3 ()
 
 ⛔ **교훈** — 트래픽 0은 안전의 증거가 아니다. 이 결함은 "고객사 200곳" 계획의 첫 관문에 있었고, 버전 핀(§4-2)과 함께 **신규 등록을 막는 두 겹**이었다.
 
+**★2026-08-15 소스 사본 동기화 완료** — 서버(.65)에만 있던 세 수정을 소스 사본에 반영했다: ①`agent-credential-service.js` 일반 등록 분기에 `AND COALESCE(legacy_bootstrap_generation,0)=$9` 추가(3분기 전부 `$9` 참조 확인) ②`agent-control-enrollment.js` `sendError()`에 `console.error` ③`agent-upgrade-rollouts.js` `sendError()`에 `console.error`. 백업 = 각 파일 `.bak-20260815`, `node --check` 3파일 통과. 로그 줄 문구는 서버판과 다를 수 있으나 **소스판이 정본** — 다음 배포 때 소스가 서버를 덮는다.
+
 ## 4-4. hanjul01 전용 차단 — 옛 토큰이 12자 (2026-08-14 확정)
 
 `install.sh` → `installer migrate setup failed: **invalid protected legacy token**`
@@ -215,6 +248,12 @@ user:bito-hanjul03:--x     ← bito-hanjul01 없음
 **처방** = `setfacl -m u:bito-<agent>:--x /var/lib/bito-agent-bootstrap` (신규 설치마다 필요)
 
 ⛔ **고객사 신규 설치에 매번 걸린다.** 에러 문구(`fork/exec … permission denied`)만으로는 부모 ACL이 원인임을 알 수 없어 진단이 오래 걸린다. §5-0에 상시 절차로 편입했다.
+
+## 4-6. 브랜드메시지 — **전용 피더로 분리**(★2026-08-15 Harold 지시)
+
+**이 축의 확정 사실·결함·이력은 [bito-gateway/FEATURE-GW-BRAND-MESSAGE.md](bito-gateway/FEATURE-GW-BRAND-MESSAGE.md)가 소유한다**(호출어 **브랜드메시지**). 여기 재서술 금지.
+
+요지만 — 0815에 **파이프 관통 확인**(한줄로→Agent→게이트웨이→휴머스온 접수 `RETURN_CODE 1000`)하고 Agent F/FB 매핑을 개통했으나, 카카오 발송은 **REPORT 4101 고정**(= `SERIAL_NUMBER_PREFIX_DATE_EXCEPTION`, 형식 규격 미보유로 휴머스온 회신 대기). 같은 날 **한줄로 측 결함 4건 확정**(AD_FLAG·HEADER/ADDITIONAL_CONTENT·수신거부 필드 미전송 + 본문 컬럼에 제어 필드를 섞는 구조) — 작업 지시서 = `docs/2026-08-15-brand-contract-fix.md`(완료 후 삭제).
 
 ## 5. 전환 실행 절차 (확정본 — 2026-08-14)
 
@@ -275,6 +314,32 @@ cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --conf
 
 **진단 = 규칙이 나쁜 게 아니라 "크기 다이얼"이 없다.** 그쪽 `CODEX.md`의 안전 경계(멱등성 계약·ACK 규약·credential 상태 기계)는 이 도메인에 타당하다. 문제는 작은 변경에 싼 경로가 없어서 비밀번호 재설정 하나가 프로토콜 변경과 같은 의식을 치른다는 것. 우리 `CLAUDE.md`의 `HOTFIX` 조항에 해당하는 장치가 없다.
 
+## 7-1. 소스 전수점검 결과 (2026-08-15 실측 — 비토 직접 실행)
+
+**총평 = Go 코어는 상급, 결함은 Node 관리 플레인(web/api)과 저장소 위생에 집중.** 우리가 겪은 결함 6종(§4)이 전부 Node·config·ACL에서 나온 이유가 코드 구조와 일치한다.
+
+**규모** — Go 실소스 394파일 101,248줄(테스트 파일 159개) / web/api JS 109파일 44,599줄 / 마이그레이션 49개.
+
+**테스트 실행 증거** (로컬 go1.26.0, 격리 캐시)
+- `internal/gateway/...`+`internal/common/...` 전 패키지 ok
+- `internal/agent/...`+`cmd/...` 30개 ok, 2건 실패:
+  - `internal/agent/reinstaller` **테스트 빌드 실패** — `reinstall_test.go:29`가 리팩터로 사라진 `Plan.StagedRoot` 참조. 프로덕션 코드는 컴파일됨. 전체 스위트가 green이 아닌 채 방치돼 있었다는 신호
+  - `cmd/agent-bootstrap` 3건 — Windows DACL "Access is denied". 실행 환경 요인 유력, 코드 결함 여부 미검증
+
+**Go 코어에서 확인한 견고함** — provider write 3분류(미기록/거절/불명)와 불명 시도 격리(`sender.go` quarantine, REPORT/운영자 해소 전 재클레임 차단) / 내구 ACK 복구 / 발신자 식별코드 FOR SHARE 잠금(TOCTOU 차단) / `ON CONFLICT` 멱등 + 동일 키 상이 본문 충돌 검출(`writer.go`) / report_queue 내구 적재 + Agent ACK 후에만 DONE + 재연결 replay / 3-tier TPS 전부 Redis 장애 fail-closed / 마이그레이션 041은 실행 전 기존 데이터 위반 검증까지 수행. 위생: panic 1곳·TODO 2곳, 인증 sha256+timingSafeEqual, 세션 쿠키 SameSite=Strict.
+
+**신규 확정 결함·위험** (§4 기존 6종 외)
+| # | 내용 | 위치 |
+|---|---|---|
+| 1 | 1.0.20 버전 핀 3곳 (§4-2에 반영) | `agent-credential-service.js:210·459·566` |
+| 2 | `sendError` 에러 삼킴은 **8개 라우터 전부** — 인라인 중복 8벌, 로그는 enrollment·rollouts 2곳만 넣은 상태. 잔여 6곳 = agent-control-commands · agent-control-heartbeats · agent-control-releases · agent-upgrade-commands · agent-upgrade-fleet · agent-upgrade-releases | `web/api/routes/` |
+| 3 | **결과 반영 poison 처리 부재** — 고객 DB에 영구 반영 불가한 결과(row 소멸 등)는 ReportAck 보류 → 재연결마다 무한 재전달. dead-letter 경로 없음. 7월 hanjul01 반영 실패 2,502회 누적과 형태 일치. 다른 결과 처리는 막지 않음(head-of-line 아님) | `poller.go` HandleReport·`recordReportDBFailure` |
+| 4 | finalize 경로 불일치 소스 확정 — 프론트 `bootstrap/finalize` vs 서버 `bootstrap-finalize` (§8 잔여) | `api.js:160` vs `agent-control-enrollment.js:321` |
+| 5 | CANARY_LANE_MISSING 가림 구조 확정 — 부적격 사유 14종을 계산해 놓고 밖으로는 한 마디로 던짐 (§6 기재와 일치) | `agent-rollout-service.js:90-137` |
+| 6 | 저장소 위생 — `.git` 빈 껍데기(이력 0) · 30MB 바이너리 3개 방치 · `{cmd` 셸 확장 실패 쓰레기 디렉터리 · scripts 121개 중 버전·사고당 전용 빌드 스크립트 30개 | 최상위 |
+
+**관찰 (처방 아님, 영향 미측정)** — ①발신번호 허용 캐시가 전역 뮤텍스를 DB 조회 동안 유지(`sender.go:1177-1182`), 대량 발송 시 직렬화 지점 가능 ②CORS가 모든 origin을 credentials와 함께 반사하나 SameSite=Strict가 실질 방어 중 ③web/api 테스트는 로컬 사본에서 의존성 미설치로 실행 불가(MODULE_NOT_FOUND) — Node 쪽은 Go와 달리 계약 테스트 규율이 얇다.
+
 ## 8. 남은 것 (착수 순서 — ★2026-08-14 Harold 지시로 비토가 컨트롤)
 
 **전제: 자비스 세션 정지 확인 후 착수.** 게이트웨이 저장소의 `status/`·`CLAUDE.md`·`CODEX.md`·`AGENTS.md`는 계속 편집 금지(§2).
@@ -282,21 +347,33 @@ cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --conf
 1. [x] ~~**hanjul02 전환**~~ — **2026-08-14 완료.** 사전 수정 → nonce(release 15) → `install.sh` → `BITO_AGENT_MIGRATION_OK` → smoke 1건(결과반영 1.24초·실패 0) → `bootstrap-finalize` → credential `active`
 2. [x] ~~**hanjul01 전환**~~ — **2026-08-15 00:03 완료.** 토큰 회전(12→64자) → 사전 수정 → **부모 ACL 추가**(§4-5) → nonce → `install.sh` → `MIGRATION_OK` → finalize → `active`(gen 2)
 2-1. [x] ~~hanjul01 실측~~ — 라인 13 수신 정상 확인(Harold, 2026-08-15). ⚠ finalize를 smoke 전에 눌렀으므로 `reportDBFailures` 카운터 자체는 미확인 — 다음 세션에서 `journalctl … grep "Poller 상태" | tail -1`로 한 번 볼 것
-2-2. [ ] **★게이트웨이 서버 수정분을 소스 사본에 반영** — `$9` fix(`agent-credential-service.js`)와 로그 2줄(`agent-control-enrollment.js`·`agent-upgrade-rollouts.js`)은 **`.65` 서버에만 적용돼 있고 `bito-gateway` 소스 사본에는 없다.** 그 저장소엔 `.git`이 없어 이력도 없다. **자비스가 소스에서 다시 빌드·배포하면 세 수정이 전부 사라진다.** 서버 백업 = `*.bak-20260814`
-3. [ ] **버전 핀 정리** (§4-2) — 오늘은 release 15(v1.0.20)가 approved라 우회했지만, **1.0.20 세트가 은퇴하는 순간 신규 등록이 전면 불가**가 된다. 고객사 이관 전 필수. 화면의 릴리즈 선택 부재(`RemoteDeployPage.jsx:152`)도 같은 축
+2-2. [x] ~~★게이트웨이 서버 수정분을 소스 사본에 반영~~ — **2026-08-15 완료.** `$9` fix + 로그 2줄을 소스 사본에 반영(§4-3 동기화 기록 참조, 백업 `*.bak-20260815`, `node --check` 통과). 서버 백업 = `*.bak-20260814`
+3. [ ] **버전 핀 정리** (§4-2) — 오늘은 release 15(v1.0.20)가 approved라 우회했지만, **1.0.20 세트가 은퇴하는 순간 신규 등록이 전면 불가**가 된다. 고객사 이관 전 필수. **핀은 3곳**(§4-2 ★0815). 화면의 릴리즈 선택 부재(`RemoteDeployPage.jsx:152`)도 같은 축
 4. [ ] **finalize 경로 불일치** — 프론트 `/bootstrap/finalize` ↔ 서버 `/bootstrap-finalize`. 화면 버튼 조건도 실제 판정 코드(`자격증명 활성화 대기`)와 불일치(`FleetRolloutPanel.jsx:68`은 `BOOTSTRAP_VALIDATION_PENDING`만 처리). **이 기능은 화면에서 한 번도 성공한 적이 없다**
 5. [ ] **bootstrap 버전 격차** — 01·02를 1.0.27로. child 원격 교체와 **별도 게이트**. 패키지의 `upgrade.sh`는 `/opt/vito-agent` 레이아웃 전제라 이 설치에 그대로 못 쓴다
 6. [ ] **원격 업그레이드 실측** — 5번 해소 후 SSH 없이 왕복 1회
 7. [ ] **재시도 불가 구조** — 롤백 성공(`rolled_back`) 후에도 `Migrate()`가 journal 존재만으로 거부(`migrate.go:31`), `Recover()`는 아무 것도 안 함(`recovery.go:22`). 인스턴스를 밖에서 치워야만 재시도된다. 그 도구(owner 키트)는 `gen1` 하드코딩. **고객사 설치가 한 번 실패하면 매번 사람이 들어가야 한다**
-8. [ ] **에러가 로그에 안 남는 구조** — `sendError`가 예외를 삼킨다(오늘 `agent-control-enrollment.js`·`agent-upgrade-rollouts.js` 2곳에만 `console.error` 추가). 에이전트도 응답 본문을 버린다(`enroller.go:240`). **전 라우터 점검 필요**
-5. [ ] **고객사 이관 전 검증 4종** (§7 판단 근거) — 라인 14에서: ①결과 반영률(보낸 건수 = 최종 status_code 반영 건수) ②`batch_size 200` 초과 물량 ③실패 코드 혼합 ④발송 중 에이전트 재시작 시 중복·유실 0
-6. [ ] **`reportDBFailures` 경로 확인** — 7월 hanjul01에서 2502회 실패 이력. 수정 여부 미확인. 고객사에서 터지면 "발송됐는데 영원히 대기"
-7. [ ] **문서 정제** — 게이트웨이 저장소 규칙·문서를 한줄로 양식으로. **Harold 확정 순서 = 에이전트 전환 완료 → 자비스 작업 종료·빌드 → 전 작업 정지 → 자비스가 그 시점까지 문서 현행화 → 그다음 착수.** 핵심은 형식이 아니라 강제력(§7 진단): ①HOTFIX 등가 조항(위험 등급별 절차 분기) ②"명령 하나씩 주고 결과 보고 받기"를 명시 — 현행 규칙이 (가)/(나) 중 어느 쪽인지 안 정해놔서 112KB 자가복구 절차가 나왔다 ③"배포 산출물 자동복원 검증" 조항에 적용 조건 부여 ④변경당 DESIGN+PLAN 쌍 금지, 버전당 전용 빌드 스크립트 금지
-8. [ ] 미수령 자료 2건 확보 — `ViTO-Agent-API-DB-Handoff-v1.2.zip` · `ViTO-Gateway-API-Integration-Manual-v1.13.docx` (checksums.sha256 등재분)
-9. [ ] 능력 기반 라우팅 — 브랜드메시지 F 지원 라인 전용(한줄로 측 `brand-message.ts:618·743` 회사 라인그룹 맹목 추종 결함과 짝)
-10. [ ] pay-ingest `sales` 계정 허용 IP에 `58.227.193.65` 추가 여부 확인 (`status/OPS.md:58`·`SCHEMA.md:399`에 옛 주소만 등재)
+8. [ ] **에러가 로그에 안 남는 구조** — `sendError`가 예외를 삼킨다. **★0815 전수 실측 = 인라인 중복 8벌**(§7-1 표 2번), 로그는 enrollment·rollouts 2곳만 반영됨. 잔여 6곳 + 에이전트도 응답 본문을 버린다(`enroller.go:240`)
+9. [ ] **고객사 이관 전 검증 4종** (§7 판단 근거) — 라인 14에서: ①결과 반영률(보낸 건수 = 최종 status_code 반영 건수) ②`batch_size 200` 초과 물량 ③실패 코드 혼합 ④발송 중 에이전트 재시작 시 중복·유실 0
+10. [ ] **`reportDBFailures` 경로 확인** — 7월 hanjul01에서 2502회 실패 이력. **★0815 소스 확정 = poison 결과 dead-letter 부재**(§7-1 표 3번): 영구 반영 불가 결과는 재연결마다 무한 재전달. 고객사에서 터지면 "발송됐는데 영원히 대기"
+11. [~] **문서 정제** — ★0815 (1)스포크 6축 전부 점검·문서화 완료(§9 표) (2)작업 규율 성문화(§2-1) (3)**게이트웨이 `CODEX.md`·`status/STATUS.md` 한줄로 규율판으로 재편 완료**(Harold 지시 · 백업 `.bak-20260815` · CODEX = 승인 게이트·결함 단위·빌드 규율·백업·로그 먼저·정답 1개 + 기존 안전 경계·라우터 보존 / STATUS = snapshot·index 전용, 3대 실측 기준점·미해결 12건 표). (4)status/ 루트 날짜형 문서 **114개** → `archive/root-design-plan-20260815/` + 무날짜 일회성 **15개** → `archive/root-standing-oneoffs-20260815/`(참조 5곳 경로 정정 동반) — 루트 상설 11개만 잔존 (5)**domain 8개 현행화 완료**(0815(5) — 스포크 상호 참조 헤더 + 낡은 서술 2곳 정정: hanjul01·02 전환 완료 반영·0814 운영 반영 구분) (6)STATUS 미해결 표를 「항목→코드 근거→소유 문서」 구조로(한줄로는 모티브만 — 호출어·카드 스키마 등 한줄로 고유 장치는 이식하지 않음, 게이트웨이 정체성 보존 = ★0815 Harold 지시). ⚠hanjul03 버전 상충 발견(자비스 기록 1.0.21 vs 우리 0814 기록 1.0.22) — STATUS에 실측 1회 필요로 표기. 잔여 = 재편 사실 자비스 공유(Harold 몫)뿐. **Harold 확정 순서 = 에이전트 전환 완료 → 자비스 작업 종료·빌드 → 전 작업 정지 → 자비스가 그 시점까지 문서 현행화 → 그다음 착수.** 핵심은 형식이 아니라 강제력(§7 진단): ①HOTFIX 등가 조항(위험 등급별 절차 분기) ②"명령 하나씩 주고 결과 보고 받기"를 명시 — 현행 규칙이 (가)/(나) 중 어느 쪽인지 안 정해놔서 112KB 자가복구 절차가 나왔다 ③"배포 산출물 자동복원 검증" 조항에 적용 조건 부여 ④변경당 DESIGN+PLAN 쌍 금지, 버전당 전용 빌드 스크립트 금지 ⑤**reinstaller 테스트 빌드 실패 수선 + 전체 스위트 green 상시화**(§7-1)
+12. [ ] 미수령 자료 2건 확보 — `ViTO-Agent-API-DB-Handoff-v1.2.zip` · `ViTO-Gateway-API-Integration-Manual-v1.13.docx` (checksums.sha256 등재분)
+13. [ ] **한줄로 측 브랜드 3종 (★0815 우선순위 상승 — §4-6이 원장)** — ①능력 기반 라우팅(F는 게이트웨이 라인 전용 · `brand-message.ts:618·743`. 오늘 psy5868 7421로 재현) ②발송 시간 가드(08:00~20:50) ③기본형 FB 적재. 게이트웨이 측 준비는 완료 상태
+14. [ ] pay-ingest `sales` 계정 허용 IP에 `58.227.193.65` 추가 여부 확인 (`status/OPS.md:58`·`SCHEMA.md:399`에 옛 주소만 등재)
 
 ## 9. 관련 문서
+
+**기능별 피더(스포크) — ★2026-08-15 Harold 승인 체계.** 이 허브가 총괄·전환 운영·착수 원장을, 스포크가 축별 확정 사실·결함·잔여를 소유한다. 진행 순서 = 5→1→6→2→3→4 (Harold 확정).
+
+| # | 축 | 문서 | 상태 |
+|---|---|---|---|
+| 1 | 관리 플레인(web/api) | [bito-gateway/FEATURE-GW-WEB-API.md](bito-gateway/FEATURE-GW-WEB-API.md) | **0815 점검·문서화 완료** |
+| 2 | 설치·전환·업데이트 | [bito-gateway/FEATURE-GW-AGENT-DEPLOY.md](bito-gateway/FEATURE-GW-AGENT-DEPLOY.md) | **0815 완료** (결함 6종은 이 허브 §4가 계속 소유) |
+| 3 | 에이전트 코어(poller·journal) | [bito-gateway/FEATURE-GW-AGENT-CORE.md](bito-gateway/FEATURE-GW-AGENT-CORE.md) | **0815 완료** |
+| 4 | 발송·결과 엔진 | [bito-gateway/FEATURE-GW-ENGINE.md](bito-gateway/FEATURE-GW-ENGINE.md) | **0815 완료** |
+| 5 | 과금 | [bito-gateway/FEATURE-GW-BILLING.md](bito-gateway/FEATURE-GW-BILLING.md) | **0815 완료** |
+| 6 | 커넥터·라우팅 | [bito-gateway/FEATURE-GW-CONNECTOR-ROUTING.md](bito-gateway/FEATURE-GW-CONNECTOR-ROUTING.md) | **0815 완료** (능력 라우팅 부재 소스 확정) |
+| 7 | **브랜드메시지** | [bito-gateway/FEATURE-GW-BRAND-MESSAGE.md](bito-gateway/FEATURE-GW-BRAND-MESSAGE.md) | **0815 신설**(허브 §4-6에서 분리) · 호출어 **브랜드메시지** |
 
 - 한줄로 측 라인·Agent 운영 = [status/OPS.md](../status/OPS.md) §6-3
 - 브랜드메시지 F 트랙 = [2026-07-29-brand-message-qtmsg-agent-design.md](2026-07-29-brand-message-qtmsg-agent-design.md)

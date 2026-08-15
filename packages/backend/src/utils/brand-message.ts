@@ -5,10 +5,17 @@
  * 적용 파일: campaigns.ts (POST /brand-send·테스트·AI·직접발송) · direct-send-processor.ts
  *
  * ★ 2026-07-30 발송 경로 재구축 — 운영 실체는 QTmsg Agent 방식이다.
- *   알림톡과 같은 라인그룹 `SMSQ_SEND` 테이블에 `msg_type='F'`로 적재하고,
- *   내용은 `msg_contents`에 JSON 문자열(필수 3키 대문자)로 싣는다. 옛 IMC REST 스펙 기반의
+ *   알림톡과 같은 라인그룹 `SMSQ_SEND` 테이블에 `msg_type='F'`로 적재한다. 옛 IMC REST 스펙 기반의
  *   `IMC_BM_FREE_BIZ_MSG`/`IMC_BM_BASIC_BIZ_MSG` 적재는 테이블 자체가 실재하지 않아 폐기.
  *   (SoT: docs/2026-07-29-brand-message-qtmsg-agent-design.md)
+ *
+ * ★ 2026-08-15 경계 규약 정정 — 알림톡과 동일 경계로 통일 (docs/bito-gateway/FEATURE-GW-BRAND-MESSAGE.md §4).
+ *   `msg_contents` = 내용물(자유형: 순수 본문 / 기본형: TYPE_DEF+변수 JSON — TYPE_DEF는 게이트웨이
+ *   하위호환 경계(absorb)의 전문 식별 마커라 유지) / `k_etc_json` = 제어·부가 필드(senderkey·
+ *   CHAT_BUBBLE_TYPE·TARGETING·AD_FLAG·PUSH_ALARM·HEADER·ADDITIONAL_CONTENT·UNSUBSCRIBE_*·ATTACHMENT).
+ *   게이트웨이는 이 필드들을 전부 payload(k_etc_json)에서 case-insensitive로 읽는다(payload.go
+ *   brandBaseItem·copyPayloadFields 실측). 본문 컬럼에 제어 필드를 섞던 옛 규약은 AD_FLAG 등
+ *   누락 결함 4건의 뿌리였다. 기존 적재분(JSON 전문)은 게이트웨이 absorb가 당분간 하위호환 처리.
  *
  * ⛔ 지원 유형 = TEXT·IMAGE·WIDE + ATTACHMENT(버튼·이미지·쿠폰·아이템리스트)뿐.
  *   캐러셀 2종·커머스·비디오·와이드리스트는 msg_contents 상위 조립 예시가 미확보라 입구 차단 —
@@ -85,20 +92,41 @@ const UNSUPPORTED_BUBBLE_MSG = (t: string) =>
   `브랜드메시지 '${t}' 유형은 아직 지원하지 않습니다 (TEXT·IMAGE·WIDE만 발송 가능)`;
 
 // ============================================================
-// SMSQ msg_contents 조립 + 대체발송 매핑 (2026-07-30 재구축)
+// SMSQ 적재 규약 조립 + 대체발송 매핑 (2026-08-15 경계 규약 정정)
+// msg_contents = 내용물 / k_etc_json = 제어·부가 필드 — 파일 머리 주석이 규약을 소유
 // ============================================================
 
-export interface BrandMsgContentsParams {
+export interface BrandQueuePayloadParams {
   typeDef: 'FREE' | 'BASIC_TCD' | 'BASIC_VAR';
+  /** 발신프로필 키 — k_etc_json senderkey(알림톡과 동일 키). 브랜드는 템플릿 도출이 없어 항상 필수 */
+  senderKey: string;
   targeting: string;                    // M | N | I
   bubbleType: string;                   // TEXT | IMAGE | WIDE
+  /** 광고 여부 — 사용자 선택값 그대로 AD_FLAG로 싣는다(게이트웨이 기본값에 맡기지 않는다) */
+  isAd: boolean;
+  /** 발송 시 푸시 알림 — 입력 축이 아직 없어 전 경로 기본 true(Y 명시 전송) */
+  pushAlarm?: boolean;
   header?: string | null;
+  additionalContent?: string | null;
   message?: string | null;              // FREE 필수 (BASIC_xxx에는 넣지 않는다 — 매뉴얼)
   attachmentJson?: string | null;       // 조립된 ATTACHMENT JSON 문자열 (buildAttachmentJson 산출물)
   carouselJson?: string | null;         // ⛔ 값이 있으면 즉시 거부 (캐러셀 미지원)
   messageVariableJson?: string | null;  // BASIC_VAR 전용
   couponVariableJson?: string | null;   // BASIC_VAR 전용
+  /** 무료수신거부 — 매뉴얼 §2.2.2: M/N 타겟팅은 필수 */
+  unsubscribePhone?: string | null;
+  unsubscribeAuth?: string | null;
 }
+
+export interface BrandQueuePayload {
+  /** SMSQ msg_contents — 자유형은 순수 본문, 기본형은 TYPE_DEF+변수 JSON */
+  msgContents: string;
+  /** SMSQ k_etc_json — 제어·부가 필드 JSON */
+  etcJson: string;
+}
+
+/** k_etc_json 컬럼 실측 한도 — SMSQ_SEND_1x varchar(1024). 초과분은 적재가 깨지므로 적재 전에 막는다. */
+const K_ETC_JSON_MAX = 1024;
 
 export class BrandMessageBuildError extends Error {
   constructor(message: string) {
@@ -119,10 +147,15 @@ function parseJsonOrThrow(raw: string, label: string): any {
 }
 
 /**
- * SMSQ `msg_contents` JSON 문자열 조립 — 필수 3키(TYPE_DEF/TARGETING/CHAT_BUBBLE_TYPE)는 전부 대문자.
+ * SMSQ 적재 규약 단일 조립기 — msg_contents(내용물)와 k_etc_json(제어·부가)을 반드시 한 쌍으로 만든다.
+ * 두 컬럼을 따로 조립하면 경계마다 규약이 갈라지는 결함(§4-4)이 재발하므로 출구를 하나로 고정한다.
  * 형식 위반은 발송 단계에서 오류 로그도 없이 버려지므로, 여기서 전부 throw로 막는다.
  */
-export function buildBrandMsgContents(p: BrandMsgContentsParams): string {
+export function buildBrandQueuePayload(p: BrandQueuePayloadParams): BrandQueuePayload {
+  const senderKey = String(p.senderKey || '').trim();
+  if (!senderKey) {
+    throw new BrandMessageBuildError('브랜드메시지 발신프로필 키(senderKey)가 없습니다');
+  }
   const bubble = String(p.bubbleType || '').trim().toUpperCase();
   if (!isSupportedBubbleType(bubble)) {
     throw new BrandMessageBuildError(UNSUPPORTED_BUBBLE_MSG(bubble || '(없음)'));
@@ -135,21 +168,23 @@ export function buildBrandMsgContents(p: BrandMsgContentsParams): string {
     throw new BrandMessageBuildError(`브랜드메시지 대상 범위(TARGETING)가 올바르지 않습니다: ${p.targeting}`);
   }
 
-  const contents: Record<string, any> = {
-    TYPE_DEF: p.typeDef,
-    TARGETING: targeting,
-    CHAT_BUBBLE_TYPE: bubble,
-  };
+  // 매뉴얼 §2.2.2 — M/N 타겟팅은 무료수신거부 번호 필수. 없으면 발송 단계에서 무로그 거절되므로 적재 전에 막는다.
+  const unsubPhone = String(p.unsubscribePhone || '').trim();
+  const unsubAuth = String(p.unsubscribeAuth || '').trim();
+  if ((targeting === 'M' || targeting === 'N') && !unsubPhone) {
+    throw new BrandMessageBuildError('마수동(M/N) 대상 발송은 무료수신거부 번호가 필요합니다 — 수신거부 번호를 입력하거나 대상 범위를 채널 친구로 바꿔주세요');
+  }
 
-  const header = String(p.header || '').trim();
-  if (header) contents.HEADER = header;
-
+  // ── msg_contents = 내용물 ──
+  let msgContents: string;
   if (p.typeDef === 'FREE') {
     const message = String(p.message || '').trim();
     if (!message) throw new BrandMessageBuildError('브랜드메시지 본문이 비어 있습니다');
-    contents.MESSAGE = message;
+    msgContents = message;   // 순수 본문 — 게이트웨이 CONTENTS/MESSAGE로 그대로 실린다
   } else {
     // 기본형: 내용은 템플릿(k_template_code)이 담당 — MESSAGE 키를 넣지 않는다(매뉴얼).
+    // TYPE_DEF는 게이트웨이 하위호환 경계(absorb)의 전문 식별 마커라 유지한다.
+    const contents: Record<string, any> = { TYPE_DEF: p.typeDef };
     if (p.typeDef === 'BASIC_VAR') {
       if (p.messageVariableJson) contents.MESSAGE_VARIABLE = parseJsonOrThrow(p.messageVariableJson, '변수(MESSAGE_VARIABLE)');
       if (p.couponVariableJson) contents.COUPON_VARIABLE = parseJsonOrThrow(p.couponVariableJson, '쿠폰 변수(COUPON_VARIABLE)');
@@ -157,13 +192,33 @@ export function buildBrandMsgContents(p: BrandMsgContentsParams): string {
         throw new BrandMessageBuildError('기본형 변수세팅(BASIC_VAR)인데 변수 값이 없습니다');
       }
     }
+    msgContents = JSON.stringify(contents);
   }
 
+  // ── k_etc_json = 제어·부가 필드 (필수 키는 게이트웨이 기본값에 맡기지 않고 전부 명시) ──
+  const etc: Record<string, any> = {
+    senderkey: senderKey,
+    CHAT_BUBBLE_TYPE: bubble,
+    TARGETING: targeting,
+    AD_FLAG: p.isAd ? 'Y' : 'N',
+    PUSH_ALARM: p.pushAlarm === false ? 'N' : 'Y',
+  };
+  const header = String(p.header || '').trim();
+  if (header) etc.HEADER = header;
+  const additional = String(p.additionalContent || '').trim();
+  if (additional) etc.ADDITIONAL_CONTENT = additional;
+  if (unsubPhone) etc.UNSUBSCRIBE_PHONE_NUMBER = unsubPhone;
+  if (unsubAuth) etc.UNSUBSCRIBE_AUTH_NUMBER = unsubAuth;
   if (p.attachmentJson && String(p.attachmentJson).trim() !== '') {
-    contents.ATTACHMENT = parseJsonOrThrow(p.attachmentJson, '첨부(ATTACHMENT)');
+    etc.ATTACHMENT = parseJsonOrThrow(p.attachmentJson, '첨부(ATTACHMENT)');
   }
 
-  return JSON.stringify(contents);
+  const etcJson = JSON.stringify(etc);
+  if (etcJson.length > K_ETC_JSON_MAX) {
+    throw new BrandMessageBuildError(`브랜드메시지 부가 정보가 너무 깁니다 (${etcJson.length}자 — 최대 ${K_ETC_JSON_MAX}자). 버튼·링크 길이를 줄여주세요`);
+  }
+
+  return { msgContents, etcJson };
 }
 
 /** 브랜드 큐 전환재발송 코드 — 'S'/'L'(원문 그대로)은 본문이 JSON이라 불가. N/A/B만. */
@@ -484,8 +539,8 @@ export function buildAttachmentJson(params: {
   return Object.keys(attachment).length > 0 ? JSON.stringify(attachment) : null;
 }
 
-// (2026-07-30) 옛 buildCarouselJson 삭제 — 캐러셀은 msg_contents 조립 예시 미확보로 입구 차단 유형.
-// 확장 시 buildBrandMsgContents에 상위 키 실예시 확보 후 되살린다(추측 조립 금지).
+// (2026-07-30) 옛 buildCarouselJson 삭제 — 캐러셀은 상위 조립 예시 미확보로 입구 차단 유형.
+// 확장 시 buildBrandQueuePayload에 상위 키 실예시 확보 후 되살린다(추측 조립 금지).
 
 // ============================================================
 // 발송 함수
@@ -578,16 +633,21 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
     return { success: false, sentCount: 0, failCount: 0, error: validation.error };
   }
 
-  // 2. msg_contents·대체발송 확정 — 차감 전에 조립해 형식 결함을 선차단(fail-closed)
-  let msgContents: string;
+  // 2. 적재 규약(msg_contents+k_etc_json)·대체발송 확정 — 차감 전에 조립해 형식 결함을 선차단(fail-closed)
+  let queuePayload: BrandQueuePayload;
   let fallback: ResolvedBrandFallback;
   try {
-    msgContents = buildBrandMsgContents({
+    queuePayload = buildBrandQueuePayload({
       typeDef: 'FREE',
+      senderKey: params.senderKey,
       targeting: params.targeting,
       bubbleType: params.bubbleType,
+      isAd: params.isAd === true,
       header: params.header,
+      additionalContent: params.additionalContent,
       message: params.message,
+      unsubscribePhone: params.unsubscribePhone,
+      unsubscribeAuth: params.unsubscribeAuth,
       attachmentJson: buildAttachmentJson({
         buttons: params.buttons,
         image: params.image,
@@ -635,8 +695,8 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
   const rows: BrandQueueRow[] = filteredPhones.map((phone) => ({
     phone,
     callback,
-    msgContents,
-    senderKey: params.senderKey,
+    msgContents: queuePayload.msgContents,
+    etcJson: queuePayload.etcJson,
     nextType: fallback.nextType,
     nextContents: fallback.nextContents,
     titleStr: fallback.titleStr,
@@ -701,16 +761,21 @@ export async function sendBrandMessageTemplate(params: BrandTemplateParams): Pro
     };
   }
 
-  // msg_contents·대체발송 확정 — 차감 전 선차단
+  // 적재 규약(msg_contents+k_etc_json)·대체발송 확정 — 차감 전 선차단
   const hasVars = !!(params.messageVariableJson || params.couponVariableJson);
-  let msgContents: string;
+  let queuePayload: BrandQueuePayload;
   let fallback: ResolvedBrandFallback;
   try {
-    msgContents = buildBrandMsgContents({
+    queuePayload = buildBrandQueuePayload({
       typeDef: hasVars ? 'BASIC_VAR' : 'BASIC_TCD',
+      senderKey: params.senderKey,
       targeting: params.targeting,
       bubbleType: params.bubbleType,
+      isAd: params.isAd === true,
       header: params.header,
+      additionalContent: params.additionalContent,
+      unsubscribePhone: params.unsubscribePhone,
+      unsubscribeAuth: params.unsubscribeAuth,
       attachmentJson: buildAttachmentJson({
         buttons: params.buttons,
         image: params.image,
@@ -759,8 +824,8 @@ export async function sendBrandMessageTemplate(params: BrandTemplateParams): Pro
   const rows: BrandQueueRow[] = filteredPhones.map((phone) => ({
     phone,
     callback,
-    msgContents,
-    senderKey: params.senderKey,
+    msgContents: queuePayload.msgContents,
+    etcJson: queuePayload.etcJson,
     templateCode: params.templateCode,
     nextType: fallback.nextType,
     nextContents: fallback.nextContents,
