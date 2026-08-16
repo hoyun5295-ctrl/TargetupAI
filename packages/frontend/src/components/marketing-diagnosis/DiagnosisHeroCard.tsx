@@ -75,7 +75,7 @@ export default function DiagnosisHeroCard({ variant, companyName, trialExpiresAt
               <span className="rounded-md bg-sky-400/20 px-1.5 py-0.5 text-[10px] font-bold text-sky-300">NEW</span>
             </span>
             <span className="mt-0.5 block text-xs text-white/65 sm:text-[13px]">
-              8문항 · 약 2분 — AI가 우리 회사 데이터 기준으로 리포트를 만들어 드려요
+              8문항 약 2분이면 AI가 우리 회사 기준 리포트를 만들어 드려요
             </span>
           </span>
         </div>

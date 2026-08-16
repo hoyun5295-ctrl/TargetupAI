@@ -32,7 +32,7 @@
 1. **화면은 게이트가 아니다.** 노출·지급·제출 전부 서버가 `plan_code='FREE'` 재검사. 프론트는 요금제를 해석하지 않는다(state 필드만 소비).
 2. **진단 계산은 크레딧을 차감하지 않는다** — AI 호출 0(A·B 공통, 순수 룰만). `ai_credits_purchased` 불변. ⚠ TRIAL **지급**이 `ai_credits_base_*`를 TRIAL 월값으로 리셋하는 것은 기존 지급 계약의 정상 동작이다(`basic-trial.ts:84-85`) — "차감 0"과 혼동 금지(§9-7).
 3. **1회 한정 = DB 제약**: `diagnosis_trial_grants UNIQUE(company_id)` + funnel A 부분 UNIQUE(§3). 예외 재지급 경로 없음 — 예외는 기존 슈퍼관리자 수동 부여(`grant-basic-trial`)가 담당.
-4. **답변→요금제 직접 매핑 금지.** 선택지→요구조건→plans 컬럼 2단. **요구조건은 실효 게이트 실측(§7 검증 C)을 통과한 축만 쓴다.**
+4. **답변→요금제 직접 매핑 금지.** 선택지→요구조건→plans 컬럼 2단. **요구조건은 ①실효 게이트 실측(§7 검증 C)을 통과한 축, 또는 ②정가표 용량 기준 축(Harold 확정)만 쓴다.** ②의 근거(★2026-08-16 v2): `max_customers`는 런타임 적재를 막지 않지만 요금제의 공표 용량 기준이라 "귀사 규모에 맞는 플랜" 추천은 거짓이 아니다 — 거짓은 "이미 열린 기능을 잠긴 것처럼 파는 것"뿐. 시장 실측(관리 10만+·월 발송 10만+ 업체가 흔함)으로 Harold가 직접 지시.
 5. **추천 후보 = `is_active AND monthly_price > 0` 서버 파생.** 기존 `/api/plans`(비인증 SELECT *) 사용 금지.
 6. **크레딧 환산 진실 = `ai-credit-calc.ts`.** 서버 계산 → result 스냅샷. 프론트 `credit.ts` 무접촉.
 7. **진단 데이터를 companies 컬럼에 붙이지 않는다**(SELECT c.* 노출).
@@ -143,6 +143,47 @@ INSERT INTO diagnosis_question_sets (version, definition, is_active) VALUES ('v1
              {"key":"agency","label":"외주/대행"},{"key":"want_hanjul","label":"한줄로로 하고 싶어요"}]}
 ]}
 $$::jsonb, true);
+
+-- seed v2 (★2026-08-16 개통 직후 Harold 확정 — 규모 축 재도입·구간 상향. 진행 원장 참조.
+--  실행 = v1 비활성 + v2 활성 한 트랜잭션. 문항 표시는 즉시 v2로 바뀐다·v1 제출분 무영향)
+BEGIN;
+UPDATE diagnosis_question_sets SET is_active = false WHERE is_active;
+INSERT INTO diagnosis_question_sets (version, definition, is_active) VALUES ('v2', $$
+{"version":"v2","rule_version":"r2","questions":[
+ {"key":"industry","text":"어떤 분야이신가요?","type":"industry_grid","tags":["example_filter","asset"],
+  "options":[{"key":"fashion","label":"의류/패션"},{"key":"beauty","label":"뷰티/화장품"},
+             {"key":"fnb","label":"식음료/카페"},{"key":"ecommerce","label":"쇼핑몰/이커머스"},
+             {"key":"medical","label":"병원/의료"},{"key":"education","label":"학원/교육"},
+             {"key":"travel","label":"여행/레저"},{"key":"fitness","label":"피트니스"}]},
+ {"key":"monthly_send","text":"한 달 메시지 발송량은 어느 정도인가요?","type":"single","tags":["asset"],
+  "options":[{"key":"u10k","label":"1만 건 이하"},{"key":"k10_100k","label":"1만~10만 건"},
+             {"key":"k100_500k","label":"10만~50만 건"},{"key":"o500k","label":"50만 건 이상"}]},
+ {"key":"customer_db","text":"관리할 고객 데이터 규모는 어느 정도인가요?","type":"single","tags":["recommend"],
+  "options":[{"key":"none","label":"아직 없어요"},
+             {"key":"u100k","label":"10만 명 이하","requires":[{"column":"max_customers","op":"gte_or_null","value":100000}]},
+             {"key":"k100_300k","label":"10만~30만 명","requires":[{"column":"max_customers","op":"gte_or_null","value":300000}]},
+             {"key":"k300_1m","label":"30만~100만 명","requires":[{"column":"max_customers","op":"gte_or_null","value":1000000}]},
+             {"key":"o1m","label":"100만 명 이상","requires":[{"column":"max_customers","op":"gte_or_null","value":3000000}]}]},
+ {"key":"mobile_dm","text":"모바일 DM(랜딩형 메시지)이 필요하신가요?","type":"single","tags":["asset"],
+  "options":[{"key":"no","label":"필요 없어요"},{"key":"interest","label":"관심 있어요"},
+             {"key":"m1_2","label":"월 1~2회 쓸 것 같아요"},{"key":"m3p","label":"월 3회 이상"}]},
+ {"key":"ai_usage","text":"AI 제작(문안·이미지)은 얼마나 쓰실 것 같나요?","type":"single","tags":["recommend"],
+  "options":[{"key":"none","label":"안 쓸 것 같아요"},
+             {"key":"u10","label":"월 10회 이하","requires":[{"column":"ai_credits_per_month","op":"gte","value":50}]},
+             {"key":"m10_50","label":"월 10~50회","requires":[{"column":"ai_credits_per_month","op":"gte","value":250}]},
+             {"key":"o50","label":"월 50회 이상","requires":[{"column":"ai_credits_per_month","op":"gte","value":500}]}]},
+ {"key":"auto_campaign","text":"자동 발송(생일·재방문 등)을 몇 개나 돌리고 싶으신가요?","type":"single","tags":["asset"],
+  "options":[{"key":"none","label":"필요 없어요"},{"key":"q1_5","label":"1~5개"},
+             {"key":"q6_10","label":"6~10개"},{"key":"q11p","label":"10개 초과"}]},
+ {"key":"cdp","text":"자사몰(쇼핑몰) 연동이 필요하신가요? 필요하다면 월 고객 행동 데이터 규모는?","type":"single","tags":["asset"],
+  "options":[{"key":"no","label":"필요 없어요"},{"key":"u10k","label":"월 1만 건 이하"},
+             {"key":"k10_100k","label":"월 1만~10만 건"},{"key":"o100k","label":"월 10만 건 이상"}]},
+ {"key":"email_mkt","text":"이메일 마케팅은 어떻게 하고 계신가요?","type":"single","tags":["asset"],
+  "options":[{"key":"none","label":"안 하고 있어요"},{"key":"own_tool","label":"자체 도구로"},
+             {"key":"agency","label":"외주/대행"},{"key":"want_hanjul","label":"한줄로로 하고 싶어요"}]}
+]}
+$$::jsonb, true);
+COMMIT;
 ```
 
 **착수 전 검증 SQL·grep (커밋 0 — 결과가 §7 requires를 확정한다)**
@@ -422,6 +463,7 @@ Codex `adversarial-review` 의무 = 커밋 1·2(돈·DB). 배포 = tp-push + bui
 - **커밋 2~4 Codex 적대 2R(high 1·medium 1) — 전부 수용·반영, 라운드 상한 소진**: high(병합 중 동시 지급이 결합 차단을 우회) = 이동 직후 in-tx 재검사(잔존=롤백) + postCommit 재검사(verified=false로 표면화) — 동시성 순서 재현 테스트는 단일 프로세스로 불가라 §9 시나리오 13(배포 후 실측)으로 등재. medium(감사 내구성) = `granted_by`를 지급 트랜잭션 안에 행위자 스냅샷으로 영속화(DDL varchar 30→64 · 수동 = admin:{super_admins.id}) + 사후 감사 로그는 client 반환 뒤 best-effort 유지.
 - **프론트 커밋 5~8 코드 완성(같은 세션)**: §5-1 청소 전량(옛 무료체험 팝업·배너·AI 다듬기 안내 — 파일 2 삭제·잔존 grep 0) · §5-2 노출(서버 state 독립 useEffect·초대 모달·히어로 카드 2형·BrandVoiceNudgeCard suppress) · §5-1 C AI Operator 분기 2곳 · §5-3 위저드(문항 서버 수신·220ms 전환·답 칩 복귀·JourneyModalShell `disableDismiss` 신설 — 기존 소비처 4곳 무변경) · §5-4 리포트(outcome별 히어로·Source caption·목업 iframe 캡션) · §5-6 퍼널 B 페이지+`/diagnosis` 공개 라우트(정적 import)+로그인 버튼 2곳 · §5-7 관리 메뉴(신규마케팅진단 — access 게이팅·뱃지·목록·상세·전이·수동 부여) · Pretendard+OFL 배치. **검증 = backend 테스트 90/90·양쪽 tsc 0·frontend 빌드 통과(산출물에 목업 24·PNG 40·폰트 실림 확인)·금칙어 4축 grep 0.**
 - **배포 게이트 ①~④ 완료(2026-08-16 저녁 — 개통)**: ①코드 배포(0816(3)) ②DDL §3(4테이블 실측 확인) ③**이미지 40종 실렌더 교체 완료** — 스튜디오 UI가 아니라 같은 엔진(Gemini) 직접 호출 일회성 스크립트로 일괄 생성(로컬 실행 — 서버 트리 오염 회피·키는 Harold 터미널만 경유), 시각 검수 표본 5종 합격, 웹 최적화 57MB→4.8MB(1200px·JPEG 재인코딩 — **.png 파일명에 JPEG 바이트: 브라우저 내용 판독 전제, 의도된 것**) — 스크립트·프롬프트 지시서는 규정대로 삭제(git 이력에 잔존) ④seed v1 INSERT(`v1 | t | 8` 실측). ⚠빌드 중 1회 Segmentation fault — atomic 안전망이 dist 보존, 재확인 결과 dist=소스 40장 동일로 판정(md5 대조). **잔여 = ⑤§9 실측 13종(운영 검증 — Harold)**.
+- **★문항 세트 v2(2026-08-16 개통 직후 — Harold 지시·코드 무변경)**: ①Q3 고객 규모 축을 추천 근거로 재도입 — `max_customers gte_or_null`(실값 사다리 무결: STARTER 10만/BASIC 30만/PRO 100만/BUSINESS 300만·NULL 없음 — Q6·Q7을 뺀 역전 문제가 이 축엔 없다). 구간 = 없음/10만 이하/10만~30만/30만~100만/100만 이상(각 10만·30만·100만·300만 요구) ②Q2 발송량 구간 상향(1만 이하/1만~10만/10만~50만/50만 이상 — 자산 축) ③나머지 문항·Q5 크레딧 축 동일(rule_version r2). **효과 = 규모 큰 곳(A·B 공통)에 PRO·BUSINESS가 정직하게 나간다**(v1은 소규모 전제의 과소 추천). 원칙 4 개정 동반(정가표 용량 기준 축 허용). v1 제출분은 행이 `question_set_version='v1'` 스냅샷을 소유해 무영향.
 
 ## 9. 검증 (배포 후 실측 — 불변 원칙 10 전부)
 

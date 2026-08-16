@@ -167,21 +167,27 @@ export default function DiagnosisPage() {
               8개 질문에 답하면 AI가 답변 기준으로 진단 리포트를 만들어 드려요. 분야별 실물 예시까지 함께 보여드립니다.
             </p>
             <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-5">
-              <p className="text-base font-bold">먼저 하나만 여쭤볼게요 — 기존 한줄로 고객사이신가요?</p>
+              <p className="text-base font-bold leading-relaxed">
+                먼저 하나만 여쭤볼게요.
+                <br />
+                기존 한줄로 고객사이신가요?
+              </p>
               <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                 <button
                   type="button"
                   onClick={() => navigate('/login')}
-                  className="min-h-[56px] flex-1 rounded-xl border border-white/10 bg-white/5 px-4 text-[15px] font-medium text-white/85 transition-all hover:border-sky-400/40 hover:bg-white/10"
+                  className="min-h-[60px] flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-center transition-all hover:border-sky-400/40 hover:bg-white/10"
                 >
-                  네, 이용 중이에요 — 로그인해서 진단받기
+                  <span className="block text-[15px] font-semibold text-white/90">네, 이용 중이에요</span>
+                  <span className="mt-0.5 block text-[12px] text-white/50">로그인해서 진단받기</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setPhase('wizard')}
-                  className="min-h-[56px] flex-1 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-500 px-4 text-[15px] font-bold text-white shadow-lg shadow-sky-500/25 transition-all hover:shadow-xl"
+                  className="min-h-[60px] flex-1 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-500 px-4 py-2.5 text-center shadow-lg shadow-sky-500/25 transition-all hover:shadow-xl"
                 >
-                  아니요, 처음이에요 — 바로 시작
+                  <span className="block text-[15px] font-bold text-white">아니요, 처음이에요</span>
+                  <span className="mt-0.5 block text-[12px] text-white/80">바로 시작하기</span>
                 </button>
               </div>
             </div>
