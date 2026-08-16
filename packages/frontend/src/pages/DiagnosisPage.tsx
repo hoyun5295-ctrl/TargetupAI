@@ -157,7 +157,7 @@ export default function DiagnosisPage() {
         {phase === 'gate' && (
           <div className="mx-auto max-w-xl">
             <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
-              우리 매장 마케팅,
+              우리 브랜드 마케팅,
               <br />
               <span className="bg-gradient-to-r from-sky-400 to-indigo-400 bg-clip-text text-transparent">
                 지금 어느 단계일까요?

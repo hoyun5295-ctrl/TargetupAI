@@ -167,11 +167,13 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
       if (exists.rows.length === 0) return res.status(400).json({ success: false, error: '연결할 회사를 찾을 수 없습니다.' });
     }
 
+    // ★2026-08-16 `$2`는 세 자리 전부 `::text`로 캐스팅을 통일한다 — 대입(varchar)과 비교(text)를
+    //   한 문장에서 섞으면 PG가 파라미터 타입을 하나로 못 정해 42P08로 죽는다(운영 실측·상태 변경 전건 실패).
     const upd = await query(
       `UPDATE marketing_diagnoses
-          SET lead_status = $2,
-              contact_attempts = contact_attempts + CASE WHEN $2 = 'attempted' THEN 1 ELSE 0 END,
-              disqualify_reason = CASE WHEN $2 = 'disqualified' THEN $3 ELSE disqualify_reason END,
+          SET lead_status = $2::text,
+              contact_attempts = contact_attempts + CASE WHEN $2::text = 'attempted' THEN 1 ELSE 0 END,
+              disqualify_reason = CASE WHEN $2::text = 'disqualified' THEN $3 ELSE disqualify_reason END,
               linked_company_id = COALESCE($4::uuid, linked_company_id),
               updated_at = NOW()
         WHERE id = $1::uuid AND lead_status = $5

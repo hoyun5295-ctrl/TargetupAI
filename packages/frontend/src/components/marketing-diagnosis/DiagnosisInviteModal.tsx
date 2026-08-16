@@ -30,7 +30,7 @@ export default function DiagnosisInviteModal({ open, onClose, onStart, showTrial
           <Stethoscope className="h-6 w-6 text-white" aria-hidden />
         </span>
         <h2 id="diagnosis-invite-title" className="mt-4 text-lg font-bold tracking-tight text-white">
-          우리 매장 마케팅, 지금 어느 단계일까요?
+          우리 브랜드 마케팅, 지금 어느 단계일까요?
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-white/70">
           8개 질문에 답하면 AI가 우리 회사 기준으로 진단 리포트를 만들어 드려요.
