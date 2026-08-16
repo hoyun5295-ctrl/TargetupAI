@@ -6,7 +6,7 @@
  * 제출 중에는 닫기 차단 오버레이(5초+ 작업 차단 원칙).
  */
 import { useEffect, useState } from 'react';
-import { Loader2, X } from 'lucide-react';
+import { Gift, Loader2, X } from 'lucide-react';
 import JourneyModalShell from '../journey/JourneyModalShell';
 import DiagnosisWizard from './DiagnosisWizard';
 import DiagnosisReportView from './DiagnosisReportView';
@@ -24,9 +24,11 @@ interface Props {
   /** 「다른 요금제 보기」 */
   onSeePlans: () => void;
   toast: (msg: string, type?: 'success' | 'error') => void;
+  /** ★2026-08-16 Harold 지시 — 지급 자격 회사에만 문진 상단 7일 보상 문구(거짓 약속 차단) */
+  showTrialReward?: boolean;
 }
 
-export default function DiagnosisModal({ open, onClose, onCompleted, onFirstSend, onSeePlans, toast }: Props) {
+export default function DiagnosisModal({ open, onClose, onCompleted, onFirstSend, onSeePlans, toast, showTrialReward = false }: Props) {
   const [phase, setPhase] = useState<Phase>('loading');
   const [questions, setQuestions] = useState<DiagnosisQuestionDto[]>([]);
   const [result, setResult] = useState<DiagnosisResultDto | null>(null);
@@ -131,7 +133,17 @@ export default function DiagnosisModal({ open, onClose, onCompleted, onFirstSend
           </div>
         )}
 
-        {phase === 'wizard' && <DiagnosisWizard questions={questions} onFinished={submit} />}
+        {phase === 'wizard' && (
+          <>
+            {showTrialReward && (
+              <div className="mb-4 flex items-center gap-1.5 rounded-xl border border-sky-400/30 bg-sky-500/15 px-3.5 py-2 text-[13px] font-semibold text-sky-200">
+                <Gift className="h-4 w-4 shrink-0" aria-hidden />
+                진단을 끝내면 7일 무료체험이 바로 시작돼요
+              </div>
+            )}
+            <DiagnosisWizard questions={questions} onFinished={submit} />
+          </>
+        )}
 
         {phase === 'submitting' && (
           <div className="flex flex-col items-center justify-center gap-3 py-16">

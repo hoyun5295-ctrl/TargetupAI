@@ -281,14 +281,24 @@ export default function DiagnosisAdminPanel({ onBadgeRefresh, toast }: Props) {
               </div>
 
               <div className="rounded-xl border border-gray-200 p-4">
-                <p className="text-sm font-bold text-gray-800">답변 원본</p>
-                <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
-                  {detail.answers && Object.entries(detail.answers as Record<string, string>).map(([k, v]) => (
-                    <div key={k} className="contents">
-                      <span className="text-gray-400">{k}</span>
-                      <span className="font-medium text-gray-800">{v}</span>
-                    </div>
-                  ))}
+                <p className="text-sm font-bold text-gray-800">문진 답변</p>
+                <div className="mt-2 flex flex-col gap-2.5">
+                  {Array.isArray(detail.answers_labeled) && detail.answers_labeled.length > 0 ? (
+                    detail.answers_labeled.map((a: { question: string; answer: string }, i: number) => (
+                      <div key={i} className="border-b border-gray-50 pb-2 last:border-0 last:pb-0">
+                        <p className="text-xs text-gray-400">{a.question}</p>
+                        <p className="mt-0.5 text-sm font-medium text-gray-800">{a.answer}</p>
+                      </div>
+                    ))
+                  ) : (
+                    // 정의 유실 등 예외 시에만 원값 폴백
+                    detail.answers && Object.entries(detail.answers as Record<string, string>).map(([k, v]) => (
+                      <div key={k} className="flex justify-between text-sm">
+                        <span className="text-gray-400">{k}</span>
+                        <span className="font-medium text-gray-800">{v}</span>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </div>

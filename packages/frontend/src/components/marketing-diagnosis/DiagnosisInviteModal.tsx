@@ -4,16 +4,18 @@
  * 표시 즉시 서버 기록(POST /invited — localStorage 판정 금지)은 부모가 담당.
  * 초대 형식 계약: 3줄 + 시작 버튼 · 백드롭/Esc 허용 · 「나중에 하기」 · 요금제·가격·무료 단어 0.
  */
-import { Stethoscope } from 'lucide-react';
+import { Gift, Stethoscope } from 'lucide-react';
 import JourneyModalShell from '../journey/JourneyModalShell';
 
 interface Props {
   open: boolean;
   onClose: () => void;
   onStart: () => void;
+  /** ★2026-08-16 Harold 지시 — 지급 자격(grantable='available') 회사에만 7일 보상 문구 노출(거짓 약속 차단) */
+  showTrialReward?: boolean;
 }
 
-export default function DiagnosisInviteModal({ open, onClose, onStart }: Props) {
+export default function DiagnosisInviteModal({ open, onClose, onStart, showTrialReward = false }: Props) {
   return (
     <JourneyModalShell
       open={open}
@@ -35,6 +37,12 @@ export default function DiagnosisInviteModal({ open, onClose, onStart }: Props) 
           <br />
           약 2분이면 충분해요.
         </p>
+        {showTrialReward && (
+          <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-sky-400/30 bg-sky-500/15 px-3.5 py-1.5 text-[13px] font-semibold text-sky-200">
+            <Gift className="h-4 w-4" aria-hidden />
+            진단을 끝내면 7일 무료체험이 바로 시작돼요
+          </div>
+        )}
         <div className="mt-5 flex flex-col gap-2">
           <button
             type="button"

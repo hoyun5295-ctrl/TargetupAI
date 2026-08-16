@@ -2308,7 +2308,11 @@ const campaignData = {
       <main className="max-w-7xl mx-auto px-3 md:px-4 py-4 md:py-8">
         {/* ★ 2026-08-16 AI 마케팅 진단 히어로(설계서 §5-2) — dismiss 없음·판정은 서버 state */}
         {diagnosisHero === 'invite' && (
-          <DiagnosisHeroCard variant="invite" onStart={() => setShowDiagnosisWizard(true)} />
+          <DiagnosisHeroCard
+            variant="invite"
+            showTrialReward={diagnosisState?.grantable === 'available'}
+            onStart={() => setShowDiagnosisWizard(true)}
+          />
         )}
         {diagnosisHero === 'trial' && (
           <DiagnosisHeroCard
@@ -4008,10 +4012,12 @@ const campaignData = {
         open={showDiagnosisInvite}
         onClose={() => setShowDiagnosisInvite(false)}
         onStart={() => { setShowDiagnosisInvite(false); setShowDiagnosisWizard(true); }}
+        showTrialReward={diagnosisState?.grantable === 'available'}
       />
       <DiagnosisModal
         open={showDiagnosisWizard}
         onClose={() => setShowDiagnosisWizard(false)}
+        showTrialReward={diagnosisState?.grantable === 'available'}
         onCompleted={refreshDiagnosisState}
         onFirstSend={() => { setShowDirectSend(true); setDirectSendChannel('sms'); }}
         onSeePlans={() => navigate('/pricing')}

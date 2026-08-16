@@ -13,6 +13,8 @@ interface Props {
   trialExpiresAt?: string | null;
   onStart?: () => void;
   onFirstSend?: () => void;
+  /** ★2026-08-16 Harold 지시 — 지급 자격 회사에만 7일 보상 문구(거짓 약속 차단) */
+  showTrialReward?: boolean;
 }
 
 function dDay(trialExpiresAt?: string | null): number | null {
@@ -22,7 +24,7 @@ function dDay(trialExpiresAt?: string | null): number | null {
   return Math.ceil(diff / (24 * 60 * 60 * 1000));
 }
 
-export default function DiagnosisHeroCard({ variant, companyName, trialExpiresAt, onStart, onFirstSend }: Props) {
+export default function DiagnosisHeroCard({ variant, companyName, trialExpiresAt, onStart, onFirstSend, showTrialReward = false }: Props) {
   if (variant === 'trial') {
     const d = dDay(trialExpiresAt);
     if (d == null) return null;
@@ -77,6 +79,11 @@ export default function DiagnosisHeroCard({ variant, companyName, trialExpiresAt
             <span className="mt-0.5 block text-xs text-white/65 sm:text-[13px]">
               8문항 약 2분이면 AI가 우리 회사 기준 리포트를 만들어 드려요
             </span>
+            {showTrialReward && (
+              <span className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-sky-400/30 bg-sky-500/15 px-2.5 py-1 text-[11px] font-bold text-sky-200">
+                완료하면 7일 무료체험이 바로 시작돼요
+              </span>
+            )}
           </span>
         </div>
         <span className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-xl bg-white px-4 py-2 text-[13px] font-bold text-indigo-700 shadow-sm sm:self-auto">

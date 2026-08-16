@@ -105,15 +105,29 @@ router.get('/', async (req: Request, res: Response) => {
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const r = await query(
-      `SELECT md.*, c.company_name, lc.company_name AS linked_company_name
+      `SELECT md.*, c.company_name, lc.company_name AS linked_company_name,
+              qs.definition AS question_definition
          FROM marketing_diagnoses md
          LEFT JOIN companies c  ON c.id  = md.company_id
          LEFT JOIN companies lc ON lc.id = md.linked_company_id
+         LEFT JOIN diagnosis_question_sets qs ON qs.version = md.question_set_version
         WHERE md.id = $1::uuid`,
       [req.params.id],
     );
     if (r.rows.length === 0) return res.status(404).json({ success: false, error: '진단을 찾을 수 없습니다.' });
-    return res.json({ success: true, diagnosis: r.rows[0] });
+    const { question_definition: def, ...row } = r.rows[0];
+    // ★ 답변 라벨링 = 그 행이 제출된 버전의 definition으로(활성 세트 아님 — v1 제출은 v1 문구가 진실).
+    //   화면에 raw key(u10k 등)를 노출하지 않는다(Harold 지적 2026-08-16). 정의에 없는 키는 원값 표기.
+    const answers = (row.answers ?? {}) as Record<string, string>;
+    const answersLabeled = Array.isArray(def?.questions)
+      ? def.questions
+          .filter((q: any) => answers[q.key] !== undefined)
+          .map((q: any) => ({
+            question: String(q.text ?? q.key),
+            answer: String(q.options?.find((o: any) => o.key === answers[q.key])?.label ?? answers[q.key]),
+          }))
+      : Object.entries(answers).map(([k, v]) => ({ question: k, answer: String(v) }));
+    return res.json({ success: true, diagnosis: { ...row, answers_labeled: answersLabeled } });
   } catch (err) {
     if (handleDbMigrationError(err, res, 'marketing_diagnoses')) return;
     console.error('[diagnosis-admin] 상세 실패:', err);

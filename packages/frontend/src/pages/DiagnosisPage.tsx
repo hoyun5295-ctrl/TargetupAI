@@ -166,6 +166,9 @@ export default function DiagnosisPage() {
             <p className="mt-3 text-sm leading-relaxed text-white/65">
               8개 질문에 답하면 AI가 답변 기준으로 진단 리포트를 만들어 드려요. 분야별 실물 예시까지 함께 보여드립니다.
             </p>
+            <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-sky-400/30 bg-sky-500/15 px-3.5 py-1.5 text-[13px] font-semibold text-sky-200">
+              진단을 완료하고 가입하시면 7일 무료체험을 드려요
+            </div>
             <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-5">
               <p className="text-base font-bold leading-relaxed">
                 먼저 하나만 여쭤볼게요.
