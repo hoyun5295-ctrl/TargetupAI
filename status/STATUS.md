@@ -70,7 +70,7 @@
 > ⑮ **브랜드메시지 — ★0815 원인 최종 확정(우리 코드 문제 아님)** — 호출어 **"브랜드메시지"** → [FEATURE-GW-BRAND-MESSAGE.md](../docs/bito-gateway/FEATURE-GW-BRAND-MESSAGE.md) §3이 소유. 다음 = 휴머스온 권한 개방 요청(문의문 §6-2)
 > ⑯ **게이트웨이 PAY 통계 적재 — 구현 완료(미배포)** — [허브 §10](../docs/FEATURE-BITO-GATEWAY.md)이 소유. `.54` 이관 전제 · SysId `65` · 배포 = 마이그레이션 050 선적용 → 바이너리. 다음 = 첫 적재 실측(§10)
 > ⑰ **게이트웨이 2차 전수점검 — 0815(2) 결함 5종 수정·배포 완료** — 호출어 **비토 게이트웨이** → [허브 §7-2](../docs/FEATURE-BITO-GATEWAY.md)가 전부 소유. Codex 2R `approve` · 3단위 `GW_DEPLOY_OK`. 다음 = 운영 실측(발송 1건 · finalize 버튼 · PAY 첫 적재)
-> ⑱ **게이트웨이 대시보드 구성 개편 — 다음 세션 착수** — [0816 지시서](../docs/2026-08-16-gw-dashboard-redesign-design.md)가 전부 소유(결함 3건 좌표 실측 + 구성 패턴 + 커밋 단위 · 완료 후 삭제). ⚠결함 1-2 = **미종결 발송이 "전송 성공"으로 표시**(0815(2) A 결함의 4번째 복제본, web/api SQL) — 최우선
+> ⑱ **게이트웨이 대시보드 — 0816(2) 결함 3종 전량 + 구성 패턴·발송 이력 완료** — 호출어 **비토 게이트웨이** → [허브 §7-4](../docs/FEATURE-BITO-GATEWAY.md)가 전부 소유. 잔여 = 패턴 이식 나머지 페이지([지시서](../docs/2026-08-16-gw-dashboard-redesign-design.md) §2-6 ③④⑤) + 실측 1건
 > (지속) 비토 API 발송 경로 전환 검토 [[project_2026_0710_bito_api_direct_test]] · (보류) 팝폰 SDK 검증
 
 ---
