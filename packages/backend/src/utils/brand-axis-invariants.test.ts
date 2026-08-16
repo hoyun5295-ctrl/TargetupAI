@@ -11,8 +11,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
+// ★2026-08-17 소스 전수 스캔은 공용 헬퍼가 루트별 1회만 한다(테스트마다 다시 읽던 것이 pre-push 타임아웃의 뿌리).
+import { scanSources, SCAN_TIMEOUT_MS } from './__tests__/source-scan';
 import { BRAND_CAMPAIGN_CHANNELS, BRAND_CHANNEL_SQL_IN, isBrandOnlyChannel, resolveRefundAxes, BILLING_TYPES } from './billing-types';
 import { MSG_TYPE_TO_USAGE_KEY } from './send-usage-aggregation';
 import { SEND_TYPE_LABEL, SEND_TYPES, isSendTypeFilter } from './send-type-axis';
@@ -72,19 +74,15 @@ export function findRawCampaignChannelRenders(rawSrc: string): string[] {
   return hits;
 }
 
-/** 소스 트리 순회 — 테스트 파일·빌드 산출물 제외. 여러 describe가 공유한다. */
-function walkSrc(dir: string, out: string[] = []): string[] {
-  for (const name of readdirSync(dir)) {
-    const p = join(dir, name);
-    if (statSync(p).isDirectory()) {
-      if (name === 'node_modules' || name === 'dist') continue;
-      walkSrc(p, out);
-    } else if (/\.tsx?$/.test(name) && !name.endsWith('.test.ts')) {
-      out.push(p);
-    }
-  }
-  return out;
-}
+/**
+ * 소스 트리 순회 — 테스트 파일·빌드 산출물 제외. 여러 describe가 공유한다.
+ * ★2026-08-17 자체 walker를 공용 스캐너로 교체했다. 테스트 5개가 각각 트리를 다시 순회하며
+ * 읽고 있었고(항목마다 statSync까지), 같은 형태가 ai-call-invariants에서 실제로 pre-push를 막았다.
+ * 이제 루트별 1회만 읽고 캐시한다 — 판정 로직은 그대로다(대상 확장자·제외 규칙 동일).
+ */
+const walkSrc = (dir: string) => scanSources(dir).map((f) => f.path);
+/** 같은 스캔의 내용까지 쓰는 곳 — 파일을 다시 열지 않는다. */
+const srcOf = (dir: string) => scanSources(dir);
 
 describe('브랜드 채널 판정 — 단일 기준', () => {
   it('전용 발송 채널(kakao_brand)이 집계 대상에 들어 있다', () => {
@@ -147,13 +145,12 @@ describe('유령 테이블 참조 0건 (소스 스캔) — 재구축 회귀 차�
   it('backend src 전체에 IMC_BM 테이블을 읽고 쓰는 SQL이 없다', () => {
     const srcRoot = join(__dirname, '..');
     const offenders: string[] = [];
-    for (const file of walkSrc(srcRoot)) {
-      const text = readFileSync(file, 'utf8');
+    for (const { path: file, src: text } of srcOf(srcRoot)) {
       // 주석 언급(폐기 기록)은 허용 — FROM/INSERT INTO/DELETE FROM/UPDATE 등 SQL 문맥만 잡는다.
       if (/(FROM|INTO|UPDATE|JOIN)\s+IMC_BM/i.test(text)) offenders.push(file);
     }
     expect(offenders).toEqual([]);
-  });
+  }, SCAN_TIMEOUT_MS);
 });
 
 describe('화면 표시 축 — 채널·발송유형 판정이 한 곳이다 (2026-07-31)', () => {
@@ -198,9 +195,9 @@ describe('화면 표시 축 — 채널·발송유형 판정이 한 곳이다 (20
     // 판정이 화면으로 새면 CT를 고쳐도 그 화면만 옛 기준으로 남는다 — 이번 결함이 정확히 그것이다.
     const frontRoot = join(__dirname, '../../../frontend/src');
     const offenders: string[] = [];
-    for (const file of walkSrc(frontRoot)) {
+    for (const { path: file, src } of srcOf(frontRoot)) {
       if (file.replace(/\\/g, '/').endsWith('/utils/campaign-axis.ts')) continue; // CT 자신은 예외
-      const code = stripComments(readFileSync(file, 'utf8'));
+      const code = stripComments(src);
       // 작은따옴표·큰따옴표·백틱 전부 — 따옴표만 바꿔도 통과하던 구멍을 막는다.
       if (/send_channel\s*===\s*['"`]/.test(code)) offenders.push(`${file} (send_channel 리터럴)`);
       if (/send_type\s*===\s*['"`](direct|ai|auto|journey|manual)['"`]/.test(code)) {
@@ -208,7 +205,9 @@ describe('화면 표시 축 — 채널·발송유형 판정이 한 곳이다 (20
       }
     }
     expect(offenders).toEqual([]);
-  }, 60_000); // frontend 전체 파일 스캔 — 트리가 자라며 기본 5초를 넘겨 pre-push를 간헐 차단(2026-08-03 실측 9.2초)
+    // 2026-08-03에 여기만 60초로 늘려 뒀었다(실측 9.2초). 그건 증상 처치였고, 뿌리는 테스트마다
+    // 트리를 다시 읽던 것 — 2026-08-17에 공용 스캐너(루트별 1회)로 바꿔 IO 자체를 없앴다.
+  }, SCAN_TIMEOUT_MS);
 
   it('검출기가 원값 렌더 변형을 잡고 정당한 용도는 통과시킨다 (fixture)', () => {
     // 검출기 자신을 먼저 고정한다 — 스캐너가 아무것도 못 잡으면 아래 전수 스캔은 항상 녹색이다.
@@ -274,8 +273,8 @@ describe('화면 표시 축 — 채널·발송유형 판정이 한 곳이다 (20
     //   이분법이 send_type 전수 grep에 안 잡혔다. 축 이름은 SQL에서 화면까지 그대로 간다.
     const srcRoot = join(__dirname, '..');
     const offenders: string[] = [];
-    for (const file of walkSrc(srcRoot)) {
-      const code = stripComments(readFileSync(file, 'utf8'));
+    for (const { path: file, src } of srcOf(srcRoot)) {
+      const code = stripComments(src);
       // `message_type AS channel`도 대상이다 — 알림톡·브랜드가 전부 'LMS'라 그건 채널이 아니고,
       // 그 이름 때문에 세 채널이 LMS 한 줄로 합쳐져 AI에 들어가고 있었다(0731 3R 발견 → 4R 정정).
       for (const m of code.matchAll(/\b(send_type|send_channel|message_type)\s+as\s+(\w+)/gi)) {
@@ -283,18 +282,18 @@ describe('화면 표시 축 — 채널·발송유형 판정이 한 곳이다 (20
       }
     }
     expect(offenders).toEqual([]);
-  });
+  }, SCAN_TIMEOUT_MS);
 
   it('화면이 캠페인 채널을 message_type 원값으로 찍지 않는다', () => {
     const frontRoot = join(__dirname, '../../../frontend/src');
     const offenders: string[] = [];
-    for (const file of walkSrc(frontRoot)) {
-      for (const hit of findRawCampaignChannelRenders(readFileSync(file, 'utf8'))) {
+    for (const { path: file, src } of srcOf(frontRoot)) {
+      for (const hit of findRawCampaignChannelRenders(src)) {
         offenders.push(`${file} (${hit})`);
       }
     }
     expect(offenders).toEqual([]);
-  });
+  }, SCAN_TIMEOUT_MS);
 
   it('브랜드 전용 발송 INSERT가 축 컬럼을 전부 남긴다 — 빠진 컬럼은 DEFAULT가 거짓값으로 채운다', () => {
     // 주석을 걷어내고 INSERT 문 자체만 본다(주석에 컬럼명을 적어두면 통과하던 구멍).
