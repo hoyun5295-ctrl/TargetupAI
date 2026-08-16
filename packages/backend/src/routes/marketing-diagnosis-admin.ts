@@ -148,23 +148,30 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
       ? String((req.body as any).linked_company_id)
       : null;
 
+    // ★2026-08-16 거절 사유를 전부 로그에 남긴다 — 4xx로 돌려보내면서 서버에 흔적이 없으면
+    //   "눌러도 안 바뀐다"의 원인을 화면 문구로만 추측하게 된다(운영에서 실제로 그렇게 헤맸다).
+    const reject = (status: number, error: string) => {
+      console.warn(`[diagnosis-admin] 상태 변경 거절 ${status} id=${req.params.id} to=${to} :: ${error}`);
+      return res.status(status).json({ success: false, error });
+    };
+
     const cur = await query(`SELECT id, funnel, lead_status FROM marketing_diagnoses WHERE id = $1::uuid`, [req.params.id]);
-    if (cur.rows.length === 0) return res.status(404).json({ success: false, error: '진단을 찾을 수 없습니다.' });
+    if (cur.rows.length === 0) return reject(404, '진단을 찾을 수 없습니다.');
     const row = cur.rows[0];
 
     const allowed = LEAD_TRANSITIONS[row.lead_status] ?? [];
     if (!allowed.includes(to)) {
-      return res.status(400).json({ success: false, error: `허용되지 않는 상태 전이입니다: ${row.lead_status} → ${to}` });
+      return reject(400, `허용되지 않는 상태 전이입니다: ${row.lead_status} → ${to}`);
     }
     if (to === 'account_created' && row.funnel !== 'B') {
-      return res.status(400).json({ success: false, error: '계정 생성 상태는 잠재고객(퍼널 B)에만 적용됩니다.' });
+      return reject(400, '계정 생성 상태는 잠재고객(퍼널 B)에만 적용됩니다.');
     }
     if (to === 'disqualified' && !disqualifyReason) {
-      return res.status(400).json({ success: false, error: '실격 사유가 필요합니다.' });
+      return reject(400, '실격 사유가 필요합니다.');
     }
     if (linkedCompanyId) {
       const exists = await query(`SELECT 1 FROM companies WHERE id = $1::uuid`, [linkedCompanyId]);
-      if (exists.rows.length === 0) return res.status(400).json({ success: false, error: '연결할 회사를 찾을 수 없습니다.' });
+      if (exists.rows.length === 0) return reject(400, '연결할 회사를 찾을 수 없습니다.');
     }
 
     // ★2026-08-16 `$2`는 세 자리 전부 `::text`로 캐스팅을 통일한다 — 대입(varchar)과 비교(text)를
@@ -181,7 +188,7 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
       [req.params.id, to, disqualifyReason, linkedCompanyId, row.lead_status],
     );
     if (upd.rows.length === 0) {
-      return res.status(409).json({ success: false, error: '다른 곳에서 상태가 먼저 바뀌었습니다. 새로고침 후 다시 시도해 주세요.' });
+      return reject(409, '다른 곳에서 상태가 먼저 바뀌었습니다. 새로고침 후 다시 시도해 주세요.');
     }
 
     // 감사 details = 허용 키만(§4-6 — 키 허용목록 테스트 대상)
@@ -193,6 +200,7 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
       details: { diagnosis_id: req.params.id, company_id: upd.rows[0].linked_company_id ?? null, outcome: to },
       req,
     });
+    console.log(`[diagnosis-admin] 상태 변경 성공 id=${req.params.id} ${row.lead_status} → ${to}`);
     return res.json({ success: true, diagnosis: upd.rows[0] });
   } catch (err) {
     if (handleDbMigrationError(err, res, 'marketing_diagnoses')) return;
