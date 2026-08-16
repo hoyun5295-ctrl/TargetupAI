@@ -158,6 +158,12 @@ const V3DEF: DiagnosisDefinition = {
         { key: 'yes', label: '있어요, 채널마다 다시 만들어요' }, { key: 'rare', label: '크기만 살짝 고치는 정도예요' },
         { key: 'no', label: '한 번 만들면 그대로 써요' },
       ] },
+    { key: 'copy_how', text: '그럼 문구는 어떻게 준비하세요?', type: 'single', section: 's4',
+      show_when: { q: 'production', in: ['none'] },
+      options: [
+        { key: 'reuse', label: '예전에 보낸 것을 고쳐 써요' }, { key: 'new', label: '매번 새로 써요' },
+        { key: 'given', label: '본사나 거래처가 준 것을 써요' }, { key: 'no_copy', label: '문구 없이 보낼 때도 있어요' },
+      ] },
     { key: 'measure', text: '가장 최근 발송의 결과를 어디까지 보셨나요?', type: 'single', section: 's4', axis: 'measure',
       options: [
         { key: 'none', label: '결과를 보지 않았어요', level: 0 }, { key: 'counts', label: '보낸 건수와 실패 건수요', level: 1 },
@@ -360,18 +366,68 @@ describe('buildDiagnosisResult — v2 스토리형', () => {
     expect(b.gaps.map((g) => g.axis)).not.toContain('targeting');
   });
 
-  it('홍보 위치 계약(V-6) — 자사명은 plan30 각주 ≤2에만, 다른 블록엔 0', () => {
+  it('킥 위치 계약(v6) — 자사명은 병목 카드의 fill(≤3)에만, 다른 블록엔 0', () => {
     const r = buildV2(baseAnswers());
     const brand = '한줄로';
     const clean = {
       cover: r.cover, observation: r.observation, praises: r.praises,
-      axes: r.axes, insights: r.insights, gaps: r.gaps, stage: r.stage, summary: r.summary,
+      axes: r.axes, insights: r.insights, stage: r.stage, summary: r.summary,
+      plan30: r.plan30, pitch_note: r.pitch_note ?? '',
+      // 병목 카드에서 킥을 뺀 나머지(관찰~처방 4박자)에도 0
+      gapBody: r.gaps.map(({ heard, cause, effect, direction }) => ({ heard, cause, effect, direction })),
     };
     expect(JSON.stringify(clean)).not.toContain(brand);
-    const footnoteCount = r.plan30.filter((s) => s.footnote?.includes(brand)).length;
-    expect(footnoteCount).toBeLessThanOrEqual(2);
-    const actionsText = r.plan30.map((s) => s.action).join(' ');
-    expect(actionsText).not.toContain(brand); // 본문 처방 문장에도 0 — 각주에만
+    const kicks = r.gaps.filter((g) => g.fill.includes(brand));
+    expect(kicks.length).toBeGreaterThan(0);
+    expect(kicks.length).toBeLessThanOrEqual(3);
+  });
+
+  it('킥 — 전 병목에 fill이 붙고(전 축 default 보유) 30일 실행 각주는 폐지됐다', () => {
+    const r = buildV2(baseAnswers());
+    expect(r.gaps.length).toBeGreaterThan(0);
+    for (const g of r.gaps) expect(g.fill, `${g.axis} fill 누락`).toBeTruthy();
+    expect(r.plan30.every((s) => (s as Record<string, unknown>).footnote === undefined)).toBe(true);
+  });
+
+  it('킥 변형 — 같은 축이라도 답변이 다르면 킥이 갈린다', () => {
+    const fillOf = (r: DiagnosisResultV2, axis: string) => r.gaps.find((g) => g.axis === axis)?.fill ?? '';
+    // 플랫폼에 갇힌 명단 — 플랫폼 종속 전용 킥
+    expect(fillOf(buildV2(baseAnswers({ list: 'locked', locked_tool: 'platform' })), 'list'))
+      .toContain('플랫폼에 기대지 않는');
+    // 문안을 몰라서 발송 0 — AI 문안 킥
+    expect(fillOf(buildV2(baseAnswers({ sending: 'zero', no_send_reason: 'no_copy' })), 'sending'))
+      .toContain('AI가 문안을');
+    // 발송 도구 파편화 — 한곳 통합 킥(sending이 병목 3위 안에 들도록 상위 축을 올린다)
+    expect(fillOf(buildV2(baseAnswers({
+      targeting: 'behavior', production: 'self', sending: 's1_2', send_tool: 'mixed',
+    })), 'sending')).toContain('한곳에서');
+    // 제작 병목의 유일한 분기 = 문구 준비 방식
+    expect(fillOf(buildV2(baseAnswers({ production: 'none', copy_how: 'no_copy' })), 'production'))
+      .toContain('문구와 이미지를 함께');
+  });
+
+  it('고도화 경로(병목 0) — plan30에 자사명 0(팔 병목이 없는 회사에는 킥을 넣지 않는다)', () => {
+    const r = buildV2(baseAnswers({
+      targeting: 'behavior', repeat: 'auto', auto_count: 'a_unknown',
+      measure: 'revenue', measure_compare: 'feel',
+      production: 'self', prod_refit: 'no', sending: 's6p', manual_ratio: 'all_manual',
+    }));
+    expect(r.gaps.length).toBe(0);
+    expect(r.plan30.length).toBeGreaterThan(0);   // 고도화 제안은 나간다
+    expect(JSON.stringify(r.plan30)).not.toContain('한줄로');
+  });
+
+  it('삭제 테스트 — 킥·견적 한 줄을 지워도 병목 4박자로 진단이 성립한다', () => {
+    const r = buildV2(baseAnswers({ unified_tool: 'crm' }));
+    expect(r.pitch_note).toBeTruthy();
+    for (const g of r.gaps) {
+      const { fill: _fill, ...rest } = g;
+      expect(rest.heard).toBeTruthy();
+      expect(rest.cause).toBeTruthy();
+      expect(rest.effect).toBeTruthy();
+      expect(rest.direction).toBeTruthy();
+      expect(JSON.stringify(rest)).not.toContain('한줄로');
+    }
   });
 
   it('unknown 3개 이상 = 단계 미발행(M4) · 병목은 그대로 발행', () => {

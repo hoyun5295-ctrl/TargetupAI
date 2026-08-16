@@ -6,7 +6,7 @@
  *
  * 집필 규약 (회의 수렴 — 어기면 그 문장은 반려 대상)
  *   - 문장 속 대시(—) 금지 · break-keep 전제 · 원인/결과 각 행 45자 내외.
- *   - 관찰·칭찬·아쉬움 구간에 자사명 0. 자사명은 FOOTNOTES(각주 전용)에서만 — 개수 테스트로 고정.
+ *   - 관찰·칭찬·아쉬움 구간에 자사명 0. 자사명은 HANJUL_FILLS(병목 킥 전용 · v6)에서만 — 개수 테스트로 고정.
  *   - 수치는 응답자가 말한 것·서버 실측만. 시간 절감 %·매출·응답률 추정 금지.
  *   - 접점 슬롯 {t} = TOUCH_WORD(주문·방문·예약 — 전부 닫힌 음절이라 을/이/과 조사 안전).
  *     슬롯이 비면 문장을 빼는 게 아니라 기본값 '방문'을 쓴다(이 슬롯은 항상 채워지는 축).
@@ -205,10 +205,39 @@ export const DIRECTIONS: Record<DiagnosisAxis, string> = {
 };
 
 /**
+ * 변형 표의 공통 모양 — 30일 실행 처방(PRESCRIPTIONS)과 병목 킥(HANJUL_FILLS)이 같은 규약을 쓴다.
+ * variant key = `${질문key}:${답key}` · **표에 적은 순서가 곧 우선순위**(구체적인 판정을 위에 둔다).
+ */
+export interface VariantTable {
+  default: string;
+  variants?: Record<string, string>;
+}
+
+/**
+ * 변형 선택 — 첫 매칭에서 멈춘다. 선택 로직은 이 한 벌뿐이다(표마다 복사하면 규약이 갈린다).
+ * variantKey는 호출부가 특수 처리(NO_PRESCRIPTION_VARIANTS 등)를 판정하는 데 쓴다.
+ */
+export function pickVariant(
+  table: VariantTable,
+  answers: Record<string, string>,
+): { variantKey: string | null; text: string } {
+  for (const [variantKey, text] of Object.entries(table.variants ?? {})) {
+    const [qKey, aKey] = variantKey.split(':');
+    if (answers[qKey] === aKey) return { variantKey, text };
+  }
+  return { variantKey: null, text: table.default };
+}
+
+/**
  * 30일 실행(plan30)의 축별 실행 문장 — 분기 심화 답이 변형을 고른다(variant key = `${질문key}:${답key}`).
  * 매칭 없으면 'default'(= DIRECTIONS 재사용이 아니라 실행형 문장).
+ *
+ * ⚠ 변형은 **그 축이 병목(level ≤ 1)일 때만** 선택된다 — 축이 상위 등급일 때만 열리는 분기에 변형을 걸면
+ *   영원히 안 나간다. 현행 seed v5 기준 도달 불가 잔존 = list의 `unified_tool:*`(unified는 level 3) ·
+ *   production의 `prod_*`(self·outsource는 level 2). 판정 축을 바꿀지가 결정 사항이라 그대로 둔다.
+ *   신규 원장(HANJUL_FILLS)은 seed 계약 테스트가 도달 가능성을 강제한다.
  */
-export const PRESCRIPTIONS: Record<DiagnosisAxis, { default: string; variants?: Record<string, string> }> = {
+export const PRESCRIPTIONS: Record<DiagnosisAxis, VariantTable> = {
   list: {
     default: '포스기·쇼핑몰·엑셀에 흩어진 연락처를 한곳으로 모으는 것부터 시작하세요. 이번 주는 모으기만 해도 됩니다.',
     variants: {
@@ -271,16 +300,62 @@ export const PRESCRIPTIONS: Record<DiagnosisAxis, { default: string; variants?: 
 export const NO_PRESCRIPTION_VARIANTS = new Set(['measure_reason:no_need']);
 
 /**
- * 각주(자사 연결) — 처방 카드 하단 작은 활자 전용. 리포트 전체 노출 상한 = 2(개수 테스트로 고정).
- * 문장 규약: 행동이 주어("~가 됩니다")·기능명 나열 금지·브랜드색 0(렌더 계약).
+ * v6 — 병목 채움 킥("이 부족함을 한줄로는 이렇게 채워드립니다" · Harold 확정 2026-08-16).
+ * 병목 카드 인과 4박자째로 붙는다(heard → cause → effect → direction → **fill**).
+ * 30일 실행 각주(v5 FOOTNOTES)는 이 킥으로 대체돼 폐지됐다 — 같은 말을 두 곳에서 하지 않는다.
+ *
+ * 집필 규약
+ *   - 문장은 "한줄로는"으로 시작해 **실존 기능이 실제로 하는 동작**만 말한다
+ *     (고객 통합·세그먼트·AI 문안/이미지·자동 발송·발송 결과·자사몰 연동·수신거부 관리).
+ *   - 수치 약속 금지(원·%·회 0) · 문장 속 대시 금지 · {t} 접점 슬롯 허용.
+ *   - 변형 키는 **그 축이 병목일 때 열리는 분기**만 쓴다(도달 가능성 = seed 계약 테스트가 강제).
  */
-export const FOOTNOTES: Record<DiagnosisAxis, string> = {
-  list: '한줄로에서는 포스기·쇼핑몰·자체 시스템의 고객이 자동으로 한 명단이 됩니다.',
-  targeting: '한줄로에서는 구매 이력으로 받을 사람을 클릭 몇 번에 고릅니다.',
-  sending: '한줄로에서는 문구 작성부터 발송까지 한 화면에서 끝납니다.',
-  production: '한줄로에서는 보낼 이미지와 안내 화면을 AI가 대신 만들어 줍니다.',
-  repeat: '한줄로에서는 생일·재방문 발송이 조건만 정하면 자동으로 나갑니다.',
-  measure: '한줄로에서는 클릭과 방문까지 발송 결과에 함께 잡힙니다.',
+export const HANJUL_FILLS: Record<DiagnosisAxis, VariantTable> = {
+  list: {
+    default: '한줄로는 포스기·쇼핑몰·엑셀의 고객을 자동으로 한 명단에 모아, 모으는 손이 멈춰도 명단이 계속 자랍니다.',
+    variants: {
+      'locked_tool:platform': '한줄로는 매장에서 남긴 연락처가 바로 발송 가능한 내 명단이 되게 합니다. 플랫폼에 기대지 않는 재{t} 통로가 생겨요.',
+      'locked_tool:erp': '한줄로는 자체 시스템의 고객 명단을 자동으로 동기화해, 내보내기 없이 바로 발송 대상으로 씁니다.',
+      'inflow_capture:no_capture': '한줄로는 자사몰과 예약 화면에서 남긴 연락처가 그대로 명단에 담기게 이어 줍니다.',
+    },
+  },
+  targeting: {
+    default: '한줄로는 구매 이력과 방문일로 받을 사람을 클릭 몇 번에 고르고, 그 조건을 저장해 다음에도 그대로 씁니다.',
+    variants: {
+      'unified_tool:crm': '한줄로는 CRM에서 하던 고객 구분을 발송까지 한 번에 잇습니다. 고른 대상이 그대로 발송 명단이 돼요.',
+      'optout_check:not_checked': '한줄로는 수신거부한 고객을 자동으로 빼고 보내서, 따로 확인하지 않아도 안 나갈 곳에는 안 나갑니다.',
+    },
+  },
+  sending: {
+    default: '한줄로는 문안 작성부터 발송과 결과 확인까지 한 화면에서 끝납니다. 문안이 막히면 AI가 대신 써 드려요.',
+    variants: {
+      'no_send_reason:no_copy': '한줄로는 무엇을 팔지와 혜택만 고르면 AI가 문안을 대신 써 드립니다. 백지에서 시작하지 않아도 돼요.',
+      'no_send_reason:no_time': '한줄로는 만들고 보내는 과정을 한 화면으로 줄여, 한 번의 발송이 훨씬 짧은 시간에 끝납니다.',
+      'send_tool:mixed': '한줄로는 문자·알림톡·이메일·모바일 DM을 한곳에서 보내고 결과도 한곳에 모읍니다.',
+    },
+  },
+  production: {
+    default: '한줄로는 보낼 이미지와 안내 화면을 AI가 만들어 줍니다. 상품과 문구만 고르면 완성돼요.',
+    variants: {
+      'copy_how:no_copy': '한줄로는 무엇을 파는지만 고르면 문구와 이미지를 함께 만들어 줍니다. 빈손으로 보내지 않아도 돼요.',
+      'copy_how:new': '한줄로는 매번 새로 쓰던 문구를 AI가 먼저 써 주고, 어울리는 이미지까지 같이 만들어 줍니다.',
+      'copy_how:reuse': '한줄로는 예전 문구를 고쳐 쓰는 대신, 지금 파는 상품에 맞는 문구와 이미지를 새로 만들어 줍니다.',
+    },
+  },
+  repeat: {
+    default: '한줄로는 생일이나 재{t} 안내를 조건만 정하면 자동으로 보냅니다. 사람 기억이 아니라 시스템이 챙겨요.',
+    variants: {
+      'manual_count:c6_10': '한줄로는 매달 손으로 챙기던 그 발송들을 조건 한 번 설정으로 자동으로 돌립니다.',
+      'manual_count:c10p': '한줄로는 매달 손으로 챙기던 그 발송들을 조건 한 번 설정으로 자동으로 돌립니다.',
+    },
+  },
+  measure: {
+    default: '한줄로는 보낸 뒤 클릭과 방문까지 발송 결과에 자동으로 담아, 다음 발송을 바꿀 근거가 쌓입니다.',
+    variants: {
+      'measure_reason:dont_know': '한줄로는 발송이 끝나면 결과가 같은 화면에 바로 떠서, 어디서 보는지 찾아다닐 필요가 없습니다.',
+      'measure_reason:no_time': '한줄로는 결과를 찾아보는 게 아니라 보이는 곳에 두어, 스치듯 봐도 흐름이 잡힙니다.',
+    },
+  },
 };
 
 /** 모순 조합 관찰문 — 강등이 아니라 소견 승격(회의 확정). 전용 집필만. */

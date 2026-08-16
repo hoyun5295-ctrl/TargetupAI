@@ -56,8 +56,10 @@ export interface DiagnosisGapDto {
   cause: string;
   effect: string;
   direction: string;
+  /** v6 채움 킥 — 구 스냅샷(v5 이하)에는 없다. 없으면 렌더 생략(백필 없음). */
+  fill?: string;
 }
-export interface DiagnosisPlanStepDto { week: string; title: string; action: string; footnote?: string }
+export interface DiagnosisPlanStepDto { week: string; title: string; action: string }
 
 /**
  * 결과 스냅샷 DTO — v1·v2 공용(v2는 v1의 상위집합). v2 전용 필드는 전부 옵셔널로 두고

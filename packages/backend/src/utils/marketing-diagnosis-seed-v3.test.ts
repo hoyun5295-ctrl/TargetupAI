@@ -14,7 +14,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { validateDefinition, visibleQuestions, type DiagnosisDefinition } from './plan-recommend';
+import { validateDefinition, visibleQuestions, type DiagnosisDefinition, type DiagnosisAxis } from './plan-recommend';
+import { HANJUL_FILLS } from './marketing-diagnosis-copy';
 
 const SEED_SQL = resolve(__dirname, '../../../../scripts/sql/2026-08-16-diagnosis-seed-v5.sql');
 
@@ -61,6 +62,43 @@ describe('seed v5 (현행 활성 seed 원문 — scripts/sql)', () => {
     expect(sending).toBeDefined();
     const keys = new Set(sending!.options.map((o) => o.key));
     for (const k of ['s1_2', 's3_5', 's6p']) expect(keys.has(k)).toBe(true);
+  });
+
+  /**
+   * v6 — 킥 원장의 변형 키가 현행 seed에서 실제로 선택될 수 있는가.
+   * 킥은 병목(축 level ≤ 1)에만 붙으므로, 그 축이 상위 등급일 때만 열리는 분기에 변형을 걸면
+   * 영원히 안 나가는 죽은 문장이 된다(v5 원장에 그 부류가 이미 있다 — 별도 과제).
+   * 분기의 분기가 금지돼 있어(validateDefinition) 분기 가시성은 참조 문항 답 하나로 결정된다.
+   */
+  function variantReachable(d: DiagnosisDefinition, axis: DiagnosisAxis, variantKey: string): boolean {
+    const [qKey, aKey] = variantKey.split(':');
+    const q = d.questions.find((x) => x.key === qKey);
+    if (!q || !q.options.some((o) => o.key === aKey)) return false;   // 없는 문항·보기
+    const gate = d.questions.find((x) => x.axis === axis);
+    if (!gate) return false;
+    const lowKeys = new Set(
+      gate.options.filter((o, i) => (o.level ?? i) <= 1).map((o) => o.key),
+    );
+    if (lowKeys.size === 0) return false;                              // 병목이 될 수 없는 축
+    if (!q.show_when) return true;                                     // 항상 보이는 문항
+    if (q.show_when.q !== gate.key) return true;                       // 다른 축의 분기 — 독립 조합 가능
+    return q.show_when.in.some((k) => lowKeys.has(k));                 // 같은 축이면 하위 등급에서 열려야 한다
+  }
+
+  it('킥 원장(v6) — 모든 변형 키가 이 seed에서 도달 가능하다(죽은 문장 0)', () => {
+    const dead: string[] = [];
+    for (const [axis, table] of Object.entries(HANJUL_FILLS)) {
+      for (const variantKey of Object.keys(table.variants ?? {})) {
+        if (!variantReachable(def, axis as DiagnosisAxis, variantKey)) dead.push(`${axis} / ${variantKey}`);
+      }
+    }
+    expect(dead).toEqual([]);
+  });
+
+  it('킥 원장(v6) — 6축 전부 default 문장을 갖는다(병목인데 킥이 비는 카드 0)', () => {
+    const axes = def.questions.filter((q) => q.axis).map((q) => q.axis as DiagnosisAxis);
+    expect(axes.length).toBe(6);
+    for (const axis of axes) expect(HANJUL_FILLS[axis]?.default, `${axis} default 누락`).toBeTruthy();
   });
 
   it('경로 길이 — 최소·최대 경로가 13~22문항 안에 있다(완주율 계약 · v4 도구 축 +2)', () => {

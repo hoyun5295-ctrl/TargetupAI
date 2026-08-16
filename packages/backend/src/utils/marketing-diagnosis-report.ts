@@ -12,7 +12,8 @@
  *   - 판정: 총점·백분율 없음. 축 등급 = 게이트 level 하나. 단계 = 관문 사다리(선행 축이 결정).
  *   - 문장 전부 marketing-diagnosis-copy.ts 원장 — 여기는 조립만.
  *   - 수치는 계산 가능한 것만: 실측 usage(A) · manual_count 연환산(답변 하한 × 12) · 크레딧 환산.
- *   - 자사명은 plan30 각주(≤2)와 추천 카드에만 — 관찰·칭찬·병목·표지 0(개수 테스트 고정).
+ *   - (v6) 자사명은 병목 카드의 채움 킥(gaps[].fill ≤3)과 추천 카드에만 — 관찰·칭찬·표지·30일 실행 0
+ *     (개수 테스트 고정). v5의 plan30 각주는 킥으로 대체돼 폐지됐다.
  */
 import { CREDIT_COST_MAP } from './ai-credit-calc';
 import type { DiagnosisDefinition, DiagnosisQuestion, DiagnosisAxis } from './plan-recommend';
@@ -21,7 +22,7 @@ import type { MonthlyUsage } from './monthly-usage';
 import {
   AXIS_META, LEVEL_LABELS, STAGES, COVER_STRENGTH, COVER_GAP, OBSERVE_LEAD,
   PRAISES, ASSET_PRAISE, GAPS, DIRECTIONS, PRESCRIPTIONS, NO_PRESCRIPTION_VARIANTS,
-  FOOTNOTES, COMBO_OBSERVATIONS, UPGRADE_SUGGESTIONS, MANUAL_COUNT_MIN,
+  HANJUL_FILLS, pickVariant, COMBO_OBSERVATIONS, UPGRADE_SUGGESTIONS, MANUAL_COUNT_MIN,
   TOUCH_SUBJECT, fillTouch, TOOL_OBSERVE, EXTERNAL_SEND_TOOLS, DATA_SIDE_SYSTEMS,
   UNIFIED_DISCONNECT_TOOLS, LIST_TOOL_PRAISES, PITCH_NOTE_TOOL_USER,
 } from './marketing-diagnosis-copy';
@@ -99,14 +100,17 @@ export interface DiagnosisGapV2 {
   cause: string;
   effect: string;
   direction: string;
+  /**
+   * v6 채움 킥 — 인과 4박자째("이 부족함을 한줄로는 이렇게 채워드립니다").
+   * 리포트에서 자사명이 등장하는 **유일한 본문 자리**다(견적 구간 제외 · 위치 계약 테스트가 고정).
+   */
+  fill: string;
 }
 
 export interface DiagnosisPlanStep {
   week: string;
   title: string;
   action: string;
-  /** 자사 연결 각주 — 처방 카드 하단 작은 활자 전용. 리포트 전체 ≤2. */
-  footnote?: string;
 }
 
 export interface DiagnosisResultV2 extends DiagnosisResultBase {
@@ -335,6 +339,7 @@ export function buildDiagnosisResult(inp: ReportInputs): DiagnosisResult {
       cause: entry.cause,
       effect: fillTouch(entry.effect, touch),
       direction: fillTouch(DIRECTIONS[axis], touch),
+      fill: fillTouch(pickVariant(HANJUL_FILLS[axis], answers).text, touch),
     });
   }
 
@@ -411,32 +416,16 @@ export function buildDiagnosisResult(inp: ReportInputs): DiagnosisResult {
   // ── 30일 실행 — 병목별 처방(심화 답이 변형 선택). 병목 0 = 고도화 제안 경로 ──
   const weekLabels = ['1주차', '2주차', '한 달 안에'];
   const plan30: DiagnosisPlanStep[] = [];
-  let footnotesUsed = 0;
   for (const gap of gaps) {
-    const pres = PRESCRIPTIONS[gap.axis];
-    let action = pres.default;
-    let skipped = false;
-    for (const [variantKey, text] of Object.entries(pres.variants ?? {})) {
-      const [qKey, aKey] = variantKey.split(':');
-      if (answers[qKey] === aKey) {
-        if (NO_PRESCRIPTION_VARIANTS.has(variantKey)) { skipped = true; break; }
-        action = text;
-        break;
-      }
-    }
-    // "지금은 필요 없어서요"에는 처방하지 않는다(억지 처방 금지)
-    if (!skipped && answers['measure_reason'] === 'no_need' && gap.axis === 'measure') skipped = true;
-    if (skipped) continue;
-    const step: DiagnosisPlanStep = {
+    const picked = pickVariant(PRESCRIPTIONS[gap.axis], answers);
+    // 처방하지 않는 답(억지 처방 금지 §3-6) — 변형 원장 지정 + "지금은 필요 없어서요"
+    if (picked.variantKey && NO_PRESCRIPTION_VARIANTS.has(picked.variantKey)) continue;
+    if (answers['measure_reason'] === 'no_need' && gap.axis === 'measure') continue;
+    plan30.push({
       week: weekLabels[Math.min(plan30.length, weekLabels.length - 1)],
       title: AXIS_META[gap.axis].label,
-      action: fillTouch(action, touch),
-    };
-    if (footnotesUsed < 2) {
-      step.footnote = FOOTNOTES[gap.axis];
-      footnotesUsed++;
-    }
-    plan30.push(step);
+      action: fillTouch(picked.text, touch),
+    });
   }
   if (plan30.length === 0) {
     // 전 축 상위 — 요금제를 밀지 않고 심화 답에서 파생한 고도화 제안(자사명 0)

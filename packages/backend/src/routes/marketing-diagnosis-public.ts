@@ -123,8 +123,9 @@ router.post('/preview', previewLimiter, async (req: Request, res: Response) => {
     });
     // 서버가 가린다 — spread가 아니라 **허용 필드만 조립**한다(★Codex 적대 수용: 전체를 펼치고
     // 일부만 덮으면 effects의 크레딧 환산 횟수 × 공개 /credit-costs 제수로 숨긴 요금제가 역산된다).
-    // v3 회의 확정 — 진단(표지·관찰·칭찬·판정·병목 인과 3단)은 전부 무료 공개하고,
-    // 실행 순서(plan30)·업종 예시·요금제·수치(effects)만 신청 뒤로 남긴다. 흐림·자물쇠 없음(부재가 정직).
+    // v3 회의 확정 — 진단(표지·관찰·칭찬·판정·병목 인과)은 전부 무료 공개하고,
+    // 실행 순서(plan30)·요금제·수치(effects)만 신청 뒤로 남긴다. 흐림·자물쇠 없음(부재가 정직).
+    // v6 — 업종 예시는 공개로 되돌렸다(가입 이유를 폼 앞에서 보여 주는 자산).
     if (full.v === 2) {
       return res.json({
         success: true,
@@ -138,7 +139,10 @@ router.post('/preview', previewLimiter, async (req: Request, res: Response) => {
           axes: full.axes,
           insights: full.insights,
           gaps: full.gaps,
-          plan_note: '30일 실행 순서와 분야별 예시는 신청 후 담당자가 함께 정리해 드려요.',
+          // 업종 예시(★v6) — 업종 코드 문자열뿐이라 요금제 역산·개인정보 재료가 아니다.
+          // 폼 직전의 확신 재료로 되돌린다(v3에서 폼 뒤로 옮겼다가 B 미리보기에서 사라졌던 자산).
+          examples: full.examples,
+          plan_note: '30일 실행 순서는 신청 후 담당자가 함께 정리해 드려요.',
         },
       });
     }

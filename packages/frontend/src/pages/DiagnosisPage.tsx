@@ -237,86 +237,89 @@ export default function DiagnosisPage() {
             {phase === 'done' && result && (
               <DiagnosisReportView result={result} coverTitle={companyName.trim() || null} />
             )}
+            {/* 리드 폼은 리포트의 마지막 장 안에 실린다 — 장 넘김의 종착지가 곧 신청 자리 */}
             {phase === 'preview' && preview && (
-              <DiagnosisReportView result={preview as DiagnosisResultDto} previewMode />
-            )}
-
-            {phase === 'preview' && (
-              <div className="rounded-2xl border border-sky-400/25 bg-gradient-to-br from-sky-500/10 to-indigo-500/10 p-5">
-                <p className="text-base font-bold">30일 실행 순서까지 받아 보세요</p>
-                <p className="mt-1 text-[13px] text-white/60">
-                  진단은 위에서 전부 보셨어요. 연락처를 남겨 주시면 실행 순서와 분야별 예시가 담긴 전체 리포트가 바로 열려요.
-                </p>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <input
-                    value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
-                    maxLength={200}
-                    placeholder="회사명"
-                    className="min-h-[48px] rounded-xl border border-white/15 bg-slate-900/80 px-3.5 text-sm text-white placeholder:text-white/35 outline-none transition-colors focus:border-sky-400/60"
-                  />
-                  <input
-                    value={contactName}
-                    onChange={(e) => setContactName(e.target.value)}
-                    maxLength={100}
-                    placeholder="담당자명"
-                    className="min-h-[48px] rounded-xl border border-white/15 bg-slate-900/80 px-3.5 text-sm text-white placeholder:text-white/35 outline-none transition-colors focus:border-sky-400/60"
-                  />
-                  <input
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    maxLength={200}
-                    type="email"
-                    placeholder="이메일"
-                    className="min-h-[48px] rounded-xl border border-white/15 bg-slate-900/80 px-3.5 text-sm text-white placeholder:text-white/35 outline-none transition-colors focus:border-sky-400/60"
-                  />
-                  <div className="flex flex-col gap-1">
+              <DiagnosisReportView
+                result={preview as DiagnosisResultDto}
+                previewMode
+                previewFooter={
+                  <div className="rounded-2xl border border-sky-400/25 bg-gradient-to-br from-sky-500/10 to-indigo-500/10 p-5">
+                    <p className="text-base font-bold">30일 실행 순서까지 받아 보세요</p>
+                    <p className="mt-1 text-[13px] text-white/60">
+                      진단은 위에서 전부 보셨어요. 연락처를 남겨 주시면 30일 실행 순서가 담긴 전체 리포트가 바로 열려요.
+                    </p>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <input
+                        value={companyName}
+                        onChange={(e) => setCompanyName(e.target.value)}
+                        maxLength={200}
+                        placeholder="회사명"
+                        className="min-h-[48px] rounded-xl border border-white/15 bg-slate-900/80 px-3.5 text-sm text-white placeholder:text-white/35 outline-none transition-colors focus:border-sky-400/60"
+                      />
+                      <input
+                        value={contactName}
+                        onChange={(e) => setContactName(e.target.value)}
+                        maxLength={100}
+                        placeholder="담당자명"
+                        className="min-h-[48px] rounded-xl border border-white/15 bg-slate-900/80 px-3.5 text-sm text-white placeholder:text-white/35 outline-none transition-colors focus:border-sky-400/60"
+                      />
+                      <input
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        maxLength={200}
+                        type="email"
+                        placeholder="이메일"
+                        className="min-h-[48px] rounded-xl border border-white/15 bg-slate-900/80 px-3.5 text-sm text-white placeholder:text-white/35 outline-none transition-colors focus:border-sky-400/60"
+                      />
+                      <div className="flex flex-col gap-1">
+                        <input
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
+                          maxLength={30}
+                          type="tel"
+                          placeholder="연락처"
+                          className="min-h-[48px] rounded-xl border border-white/15 bg-slate-900/80 px-3.5 text-sm text-white placeholder:text-white/35 outline-none transition-colors focus:border-sky-400/60"
+                        />
+                        <p className="text-[11px] text-white/40">리포트 안내와 1회 상담 연락에만 써요. 광고 수신 동의와는 별개예요.</p>
+                      </div>
+                    </div>
+                    {/* 허니팟 — 화면·스크린리더 밖(봇만 채운다) */}
                     <input
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      maxLength={30}
-                      type="tel"
-                      placeholder="연락처"
-                      className="min-h-[48px] rounded-xl border border-white/15 bg-slate-900/80 px-3.5 text-sm text-white placeholder:text-white/35 outline-none transition-colors focus:border-sky-400/60"
+                      value={honeypot}
+                      onChange={(e) => setHoneypot(e.target.value)}
+                      tabIndex={-1}
+                      autoComplete="off"
+                      aria-hidden="true"
+                      name="website"
+                      className="absolute -left-[9999px] top-0 h-0 w-0 opacity-0"
                     />
-                    <p className="text-[11px] text-white/40">리포트 안내와 1회 상담 연락에만 써요. 광고 수신 동의와는 별개예요.</p>
+                    <label className="mt-3 flex cursor-pointer items-start gap-2.5 text-[13px] text-white/70">
+                      <input
+                        type="checkbox"
+                        checked={consent}
+                        onChange={(e) => setConsent(e.target.checked)}
+                        className="mt-0.5 h-4 w-4 accent-sky-500"
+                      />
+                      <span>
+                        개인정보 수집·이용에 동의합니다. 상담 안내 목적으로만 사용해요.{' '}
+                        <a href="/privacy" target="_blank" rel="noreferrer" className="underline decoration-white/30 underline-offset-2 hover:text-white">
+                          자세히 보기
+                        </a>
+                      </span>
+                    </label>
+                    {formError && <p className="mt-3 text-[13px] font-semibold text-rose-300">{formError}</p>}
+                    <button
+                      type="button"
+                      onClick={submitLead}
+                      disabled={!consent || submitting}
+                      className="mt-4 inline-flex min-h-[52px] w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-500 px-4 text-[15px] font-bold text-white shadow-lg shadow-sky-500/25 transition-all hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+                      전체 리포트 열어보기 <ArrowRight className="h-4 w-4" aria-hidden />
+                    </button>
                   </div>
-                </div>
-                {/* 허니팟 — 화면·스크린리더 밖(봇만 채운다) */}
-                <input
-                  value={honeypot}
-                  onChange={(e) => setHoneypot(e.target.value)}
-                  tabIndex={-1}
-                  autoComplete="off"
-                  aria-hidden="true"
-                  name="website"
-                  className="absolute -left-[9999px] top-0 h-0 w-0 opacity-0"
-                />
-                <label className="mt-3 flex cursor-pointer items-start gap-2.5 text-[13px] text-white/70">
-                  <input
-                    type="checkbox"
-                    checked={consent}
-                    onChange={(e) => setConsent(e.target.checked)}
-                    className="mt-0.5 h-4 w-4 accent-sky-500"
-                  />
-                  <span>
-                    개인정보 수집·이용에 동의합니다. 상담 안내 목적으로만 사용해요.{' '}
-                    <a href="/privacy" target="_blank" rel="noreferrer" className="underline decoration-white/30 underline-offset-2 hover:text-white">
-                      자세히 보기
-                    </a>
-                  </span>
-                </label>
-                {formError && <p className="mt-3 text-[13px] font-semibold text-rose-300">{formError}</p>}
-                <button
-                  type="button"
-                  onClick={submitLead}
-                  disabled={!consent || submitting}
-                  className="mt-4 inline-flex min-h-[52px] w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-500 px-4 text-[15px] font-bold text-white shadow-lg shadow-sky-500/25 transition-all hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
-                  전체 리포트 열어보기 <ArrowRight className="h-4 w-4" aria-hidden />
-                </button>
-              </div>
+                }
+              />
             )}
 
             {phase === 'done' && (

@@ -5,6 +5,7 @@
  * 그래서 렌더는 스냅샷 버전이 고른다 — v2(스토리형) = ReportV2View / v1 = ReportV1View(현행 동결).
  * 모르는 버전 = 요약·추천만 그리는 최소 뷰(fail-soft — 재열람 계약은 어떤 스냅샷에서도 깨지지 않는다).
  */
+import type { ReactNode } from 'react';
 import ReportV1View from './ReportV1View';
 import ReportV2View from './ReportV2View';
 import type { DiagnosisResultDto } from './diagnosisApi';
@@ -15,8 +16,13 @@ interface Props {
   trialExpiresAt?: string | null;
   /** v2 표지 1층 — A는 회사명, B는 폼 뒤 재렌더에서 회사명(없으면 서버 접점 구절). */
   coverTitle?: string | null;
-  /** 퍼널 B 폼 앞 미리보기(v2) — 실행 순서·예시·견적 대신 부재 안내. */
+  /** 퍼널 B 폼 앞 미리보기(v2) — 실행 순서·견적 대신 부재 안내. */
   previewMode?: boolean;
+  /**
+   * 퍼널 B 리드 폼 — v2는 마지막 장 안에 싣고, 그 밖의 스냅샷은 리포트 아래에 그대로 붙인다.
+   * **어느 경로에서도 정확히 한 번 렌더된다**(호출부가 분기하면 구 스냅샷에서 폼이 사라진다).
+   */
+  previewFooter?: ReactNode;
   onFirstSend?: () => void;
   onConsult?: () => void;
   onSeePlans?: () => void;
@@ -24,13 +30,18 @@ interface Props {
 }
 
 export default function DiagnosisReportView(props: Props) {
-  const { result } = props;
+  const { result, previewFooter } = props;
   if (result?.v === 2 && result.stage !== undefined) {
     return <ReportV2View {...props} />;
   }
   if (result?.v === 1 || (result && result.v === undefined)) {
-    const { coverTitle: _coverTitle, previewMode: _previewMode, ...v1Props } = props;
-    return <ReportV1View {...v1Props} />;
+    const { coverTitle: _coverTitle, previewMode: _previewMode, previewFooter: _footer, ...v1Props } = props;
+    return (
+      <>
+        <ReportV1View {...v1Props} />
+        {previewFooter}
+      </>
+    );
   }
   // 모르는 버전 — 최소 표시(백지 금지)
   return (
@@ -47,6 +58,7 @@ export default function DiagnosisReportView(props: Props) {
           </p>
         </div>
       )}
+      {previewFooter}
     </div>
   );
 }
