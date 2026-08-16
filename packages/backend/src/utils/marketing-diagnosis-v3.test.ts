@@ -37,6 +37,7 @@ const V3DEF: DiagnosisDefinition = {
       options: [
         { key: 'online', label: '온라인 몰에서만 만나요' }, { key: 'offline', label: '매장이나 현장에서 만나요' },
         { key: 'both', label: '온라인과 매장 둘 다예요' }, { key: 'booking', label: '예약이나 상담을 받아서 만나요' },
+        { key: 'platform', label: '배달앱이나 예약 플랫폼 중심이에요' },
       ] },
     { key: 'owner', text: '마케팅은 지금 누가 하고 계신가요?', type: 'single', section: 's1',
       options: [
@@ -68,6 +69,20 @@ const V3DEF: DiagnosisDefinition = {
       options: [
         { key: 'no_capture', label: '남지 않아요' }, { key: 'event_only', label: '이벤트 때만요' },
         { key: 'mostly', label: '대부분 남아요' }, { key: 'unknown', label: '확인해 본 적 없어요', unknown: true },
+      ] },
+    { key: 'locked_tool', text: '어떤 시스템 안에 있나요?', type: 'single', section: 's2',
+      show_when: { q: 'list', in: ['locked'] },
+      options: [
+        { key: 'pos', label: '포스기예요' }, { key: 'mall', label: '쇼핑몰이에요' },
+        { key: 'erp', label: 'ERP나 자체 회원 시스템이에요' }, { key: 'booking_sys', label: '예약 관리 프로그램이에요' },
+        { key: 'platform', label: '배달앱이나 예약 플랫폼 안에요' },
+      ] },
+    { key: 'unified_tool', text: '어디에 모아 두셨나요?', type: 'single', section: 's2',
+      show_when: { q: 'list', in: ['unified'] },
+      options: [
+        { key: 'excel', label: '엑셀 하나로요' }, { key: 'crm', label: 'CRM이에요' },
+        { key: 'marketing_tool', label: '다른 마케팅 툴이에요' }, { key: 'erp', label: 'ERP나 자체 시스템이에요' },
+        { key: 'chat_tool', label: '채널톡 같은 상담 툴이에요' },
       ] },
 
     { key: 'targeting', text: '가장 최근 발송은 누구에게 보내셨나요?', type: 'single', section: 's3', axis: 'targeting',
@@ -106,6 +121,13 @@ const V3DEF: DiagnosisDefinition = {
       options: [
         { key: 'all_manual', label: '전부 직접 골랐어요' }, { key: 'half', label: '절반쯤이요' },
         { key: 'few', label: '한두 번이요' }, { key: 'mostly_auto', label: '대부분 자동이에요' },
+      ] },
+    { key: 'send_tool', text: '보낼 때는 주로 무엇을 쓰세요?', type: 'single', section: 's3',
+      show_when: { q: 'sending', in: ['s1_2', 's3_5', 's6p'] },
+      options: [
+        { key: 'sms_site', label: '문자 발송 사이트요' }, { key: 'builtin', label: '내장 발송 기능이요' },
+        { key: 'kakao_agency', label: '카카오 채널이나 대행사요' }, { key: 'email_tool', label: '이메일 마케팅 툴이요' },
+        { key: 'mixed', label: '여러 개를 섞어 써요' },
       ] },
     { key: 'repeat', text: '반복해서 나가는 메시지가 있나요?', type: 'single', section: 's3', axis: 'repeat',
       options: [
@@ -276,7 +298,7 @@ describe('validateAnswers — 가시성 기반(고아 답 거부·선치환 완�
   });
 
   it('optionalKeys(실측 선치환 게이트+분기)는 누락·가시성 어긋남을 흡수한다', () => {
-    const optional = new Set(['sending', 'no_send_reason', 'manual_ratio']);
+    const optional = new Set(['sending', 'no_send_reason', 'manual_ratio', 'send_tool']);
     const a = baseAnswers();
     delete a.sending;
     delete a.manual_ratio;
@@ -390,6 +412,43 @@ describe('buildDiagnosisResult — v2 스토리형', () => {
     expect(r.findings.some((f) => f.key === 'locked_features')).toBe(false);
     expect(r.findings.some((f) => f.key === 'stage')).toBe(true);
     expect(r.summary).not.toContain('요금제');
+  });
+
+  it('v4 도구 스택 — 데이터·발송 분리와 도구 파편화가 짚임으로, 도구 답이 들은 것에 실린다', () => {
+    // 데이터는 ERP에, 발송은 문자 사이트로 — 디스커넥트 짚임
+    const a = buildV2(baseAnswers({ list: 'locked', locked_tool: 'erp', send_tool: 'sms_site' }));
+    expect(a.insights.join(' ')).toContain('데이터가 있는 곳과 발송하는 곳');
+    expect(a.observation.items.map((i) => i.text).join(' ')).toContain('발송에 쓰는 도구는');
+    // 여러 도구 파편화
+    const b = buildV2(baseAnswers({ send_tool: 'mixed' }));
+    expect(b.insights.join(' ')).toContain('여러 갈래');
+    // 한곳이지만 엑셀 — 자동 갱신 없음
+    const c = buildV2(baseAnswers({ list: 'unified', unified_tool: 'excel', list_fields: 'purchase' }));
+    expect(c.insights.join(' ')).toContain('엑셀');
+    // ERP 명단이 병목이면 처방이 ERP 통로로 갈린다(유입 유실 변형이 앞서지 않는 조합으로)
+    const d = buildV2(baseAnswers({ list: 'locked', locked_tool: 'erp', inflow_capture: 'mostly' }));
+    const listStep = d.plan30.find((s) => s.title === '고객 명단');
+    expect(listStep?.action).toContain('ERP');
+  });
+
+  it('v5 — 플랫폼 종속 짚임·전문 툴 칭찬 분화·견적 한 줄이 답에 반응한다', () => {
+    // 플랫폼에 갇힘 — 전용 짚임이 나가고 일반 디스커넥트는 중복 발화하지 않는다
+    const p = buildV2(baseAnswers({ list: 'locked', locked_tool: 'platform' }));
+    expect(p.insights.join(' ')).toContain('플랫폼이 갖고');
+    expect(p.insights.join(' ')).not.toContain('데이터가 있는 곳과 발송하는 곳');
+    const listStep = p.plan30.find((s) => s.title === '고객 명단');
+    expect(listStep?.action).toContain('연락처를 남길 이유');
+    // 접점이 플랫폼 중심 + 명단 하위 — 묻지 않아도 같은 짚임
+    const p2 = buildV2(baseAnswers({ touchpoint: 'platform', list: 'none' }));
+    expect(p2.insights.join(' ')).toContain('플랫폼이 갖고');
+    // CRM 사용자 — 명단 칭찬이 전용 문장으로 갈리고 견적 한 줄이 붙는다(자사명 0)
+    const c = buildV2(baseAnswers({ unified_tool: 'crm' }));
+    expect(c.praises.join(' ')).toContain('CRM으로 고객을 관리');
+    expect(c.pitch_note).toBeTruthy();
+    expect(c.pitch_note).not.toContain('한줄로');
+    // 포스기 갇힘은 전문 툴 사용자가 아니다 — 견적 한 줄 없음
+    const np = buildV2(baseAnswers({ list: 'locked', locked_tool: 'pos' }));
+    expect(np.pitch_note).toBeUndefined();
   });
 
   it('퍼널 B(usage null) — 원화 effect 0(manual_count 연환산은 횟수만)', () => {

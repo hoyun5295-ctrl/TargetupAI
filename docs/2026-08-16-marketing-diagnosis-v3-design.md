@@ -120,14 +120,16 @@
 | m6 판정 표 정렬 | 유지(회사별 강한 축 위) — 재열람은 스냅샷이라 안전 |
 | m7 재실측 목록 | §8 검증 시나리오로 확정 |
 
-## §7 seed v3 SQL — 원문 소유 = [scripts/sql/2026-08-16-diagnosis-seed-v3.sql](../scripts/sql/2026-08-16-diagnosis-seed-v3.sql)
+## §7 seed SQL — 현행 원문 소유 = [scripts/sql/2026-08-16-diagnosis-seed-v5.sql](../scripts/sql/2026-08-16-diagnosis-seed-v5.sql)
+
+**v4(2026-08-16 밤 · Harold 지적)** — 기존 도구 스택 축 신설: list.locked 라벨에 ERP 포함 + locked_tool(어떤 시스템)·unified_tool(어디에 모았나)·send_tool(발송 도구) 3문항. 리포트 반응 = 도구 관찰 3줄 + 짚임 3종(데이터·발송 분리 / 도구 파편화 / 엑셀 단일 저장소) + ERP 처방 변형. 풀 30문항·체감 13~22. **v5(전수점검 보강)** = 보기 3 확장(플랫폼 접점·플랫폼 갇힘·상담 툴) + 문구 원장 분화(플랫폼 종속 짚임 · 전문 툴 칭찬 4종 · 툴 사용자 처방 변형 5종 · 견적 한 줄). v3·v4 파일은 이력 보존.
 
 터미널 붙여넣기 사고(0816 실측 — 긴 SQL이 잘려 들어감)로 seed 원문을 문서에서 실행 파일로 옮겼다.
 여기 복사하지 않는다(계약 테스트 `marketing-diagnosis-seed-v3.test.ts`가 그 파일을 직접 파싱해 잠근다).
 스크립트는 멱등 — 기존 v3 행을 지우고 다시 넣는다(불완전 행 정리 포함). 실행:
 
 ```bash
-docker exec -i targetup-postgres psql -U targetup targetup < ~/targetup-app/scripts/sql/2026-08-16-diagnosis-seed-v3.sql
+docker exec -i targetup-postgres psql -U targetup targetup < ~/targetup-app/scripts/sql/2026-08-16-diagnosis-seed-v5.sql
 ```
 
 ## §8 검증 시나리오 (v3)

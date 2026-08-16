@@ -89,6 +89,8 @@ export interface DiagnosisResultDto {
   no_match_kind?: 'over_range' | 'other' | null;
   /** preview 전용 — 실행 순서·예시가 신청 뒤에 온다는 안내(서버 문구). */
   plan_note?: string;
+  /** v5 — 전문 툴 사용자 전용 견적 구간 한 줄(견적 카드 밖 렌더 금지). */
+  pitch_note?: string;
 }
 
 const authHeaders = (): Record<string, string> => ({

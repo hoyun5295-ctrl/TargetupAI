@@ -16,23 +16,23 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { validateDefinition, visibleQuestions, type DiagnosisDefinition } from './plan-recommend';
 
-const SEED_SQL = resolve(__dirname, '../../../../scripts/sql/2026-08-16-diagnosis-seed-v3.sql');
+const SEED_SQL = resolve(__dirname, '../../../../scripts/sql/2026-08-16-diagnosis-seed-v5.sql');
 
 function loadSeedV3(): DiagnosisDefinition {
   const text = readFileSync(SEED_SQL, 'utf-8');
-  const m = text.match(/VALUES \('v3', \$\$\s*([\s\S]*?)\$\$::jsonb/);
-  if (!m) throw new Error('seed SQL 파일에서 v3 블록을 찾지 못함');
+  const m = text.match(/VALUES \('v5', \$\$\s*([\s\S]*?)\$\$::jsonb/);
+  if (!m) throw new Error('seed SQL 파일에서 v5 블록을 찾지 못함');
   return JSON.parse(m[1]) as DiagnosisDefinition;
 }
 
-describe('seed v3 (설계서 §7 원문)', () => {
+describe('seed v5 (현행 활성 seed 원문 — scripts/sql)', () => {
   const def = loadSeedV3();
 
   it('validateDefinition(로더 검증기)을 통과한다 — 활성화 즉시 503 사고 차단', () => {
     const r = validateDefinition(def);
     expect(r.errors).toEqual([]);
     expect(r.ok).toBe(true);
-    expect(def.version).toBe('v3');
+    expect(def.version).toBe('v5');
   });
 
   it('문진 안 광고 0 — 문항·선택지·힌트·섹션 문구에 자사명 금지', () => {
@@ -63,7 +63,7 @@ describe('seed v3 (설계서 §7 원문)', () => {
     for (const k of ['s1_2', 's3_5', 's6p']) expect(keys.has(k)).toBe(true);
   });
 
-  it('경로 길이 — 최소·최대 경로가 13~20문항 안에 있다(완주율 계약)', () => {
+  it('경로 길이 — 최소·최대 경로가 13~22문항 안에 있다(완주율 계약 · v4 도구 축 +2)', () => {
     // 최소 경로: 전 게이트 하위 + 분기 최소 조합
     const minAnswers: Record<string, string> = {
       industry: 'etc', touchpoint: 'offline', owner: 'self',
@@ -79,13 +79,13 @@ describe('seed v3 (설계서 §7 원문)', () => {
 
     const maxAnswers: Record<string, string> = {
       industry: 'fitness', touchpoint: 'both', owner: 'agency',
-      list: 'scattered', targeting: 'all', sending: 's6p', repeat: 'manual',
+      list: 'locked', targeting: 'all', sending: 's6p', repeat: 'manual',
       production: 'self', measure: 'revenue',
       scale_customers: 'u100k', scale_send: 'k10_100k', scale_ai: 'u10',
     };
     let vis2 = visibleQuestions(def, maxAnswers);
     for (const q of vis2) if (maxAnswers[q.key] === undefined) maxAnswers[q.key] = q.options[0].key;
     vis2 = visibleQuestions(def, maxAnswers);
-    expect(vis2.length).toBeLessThanOrEqual(20);
+    expect(vis2.length).toBeLessThanOrEqual(22);
   });
 });

@@ -299,6 +299,9 @@ export default function ReportV2View({
                   ))}
                 </ul>
               )}
+              {result.pitch_note && (
+                <p className="mt-2.5 text-[12px] text-white/50">{result.pitch_note}</p>
+              )}
               <p className="mt-3 text-[10px] italic text-white/30">Data source — 답변 × 요금제 실데이터(요금제 표가 진실)</p>
             </div>
           ) : (

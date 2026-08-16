@@ -19,6 +19,7 @@ export const TOUCH_WORD: Record<string, string> = {
   offline: '방문',
   both: '방문',
   booking: '예약',
+  platform: '주문',
 };
 
 /** 표지 subject(퍼널 B — 회사명이 폼 뒤에나 생기므로 접점 구절로 연다. 회의론자 C3). */
@@ -27,6 +28,7 @@ export const TOUCH_SUBJECT: Record<string, string> = {
   offline: '매장 브랜드',
   both: '온·오프라인 브랜드',
   booking: '예약제 브랜드',
+  platform: '플랫폼 기반 브랜드',
 };
 
 export const AXIS_META: Record<DiagnosisAxis, { label: string; priority: number }> = {
@@ -115,6 +117,18 @@ export const ASSET_PRAISE: Record<string, string> = {
   offline: '매일 얼굴을 보는 매장 접점은 온라인이 갖지 못한 자산이에요. 연락처만 남기면 바로 힘이 됩니다.',
   both: '온라인과 매장 양쪽 접점을 갖고 계세요. 한쪽에서 만난 고객을 다른 쪽으로 부를 수 있는 구조예요.',
   booking: '예약을 받는 업종이라 고객 연락처가 자연스럽게 남아요. 시작 조건이 좋은 편이에요.',
+  platform: '플랫폼에서 꾸준히 주문이 나온다는 건 상품력이 검증됐다는 뜻이에요. 이제 그 고객을 내 명단으로 옮길 차례예요.',
+};
+
+/**
+ * v5 — 전문 툴 사용자의 명단 칭찬 분화(unified_tool 답이 고른다). 엑셀 초심자용 일반 칭찬이
+ * CRM 운영사에 나가면 "우리 수준을 모르네"가 된다(Harold 지적). 재기술 + 다음 한 수 프레임.
+ */
+export const LIST_TOOL_PRAISES: Record<string, string> = {
+  crm: '이미 CRM으로 고객을 관리하고 계세요. 데이터 기반은 갖춰진 회사라, 남은 건 그 명단이 발송과 이어지는 것뿐이에요.',
+  marketing_tool: '마케팅 툴을 쓰실 만큼 데이터 관리가 자리 잡았어요. 이제 그 데이터가 실제 발송 성과로 이어지는지가 관건이에요.',
+  erp: '자체 시스템에 고객이 정리돼 있다는 건 데이터 자산이 이미 있다는 뜻이에요. 꺼내 쓰는 통로만 놓이면 바로 힘이 됩니다.',
+  chat_tool: '상담 툴에 고객 접점이 차곡차곡 쌓이고 있어요. 문의로 만난 고객을 다시 부를 수 있는 재료가 이미 있는 거예요.',
 };
 
 /**
@@ -128,7 +142,7 @@ export const GAPS: Partial<Record<DiagnosisAxis, Partial<Record<0 | 1, { cause: 
       effect: '다시 {t}을 만들 방법이 광고나 우연뿐이라, 올 때마다 새로 데려와야 해요.',
     },
     1: {
-      cause: '명단이 있긴 한데 엑셀이나 포스기 안에 흩어져 있어요.',
+      cause: '명단이 있긴 한데 엑셀이나 포스기, ERP 같은 곳에 나뉘어 있어요.',
       effect: '보내야 할 순간에 바로 꺼낼 수 없어서, 있는 명단이 없는 것처럼 놀아요.',
     },
   },
@@ -198,6 +212,11 @@ export const PRESCRIPTIONS: Record<DiagnosisAxis, { default: string; variants?: 
   list: {
     default: '포스기·쇼핑몰·엑셀에 흩어진 연락처를 한곳으로 모으는 것부터 시작하세요. 이번 주는 모으기만 해도 됩니다.',
     variants: {
+      // 순서 = 매칭 우선순위(더 구체적인 판정 먼저): 플랫폼 종속은 유입 캡처 처방까지 흡수한다
+      'locked_tool:platform': '다녀간 고객이 연락처를 남길 이유를 하나 만드세요. 멤버십 적립이나 리뷰 혜택 한 줄이면, 플랫폼 고객이 내 고객이 되기 시작해요.',
+      'locked_tool:erp': 'ERP 명단을 발송할 수 있는 곳으로 옮기는 정기 통로부터 만드세요. 내보내기 한 번이면 시작이에요.',
+      'unified_tool:erp': 'ERP 명단을 발송할 수 있는 곳으로 옮기는 정기 통로부터 만드세요. 내보내기 한 번이면 시작이에요.',
+      'unified_tool:excel': '엑셀 명단에 새 고객이 자동으로 들어오는 통로를 만드세요. 손 정리가 멈춰도 명단이 크도록요.',
       'inflow_capture:no_capture': '광고로 온 고객이 연락처를 남길 자리부터 만드세요. 적립이나 예약 확인 한 줄이면 됩니다.',
       'inflow_capture:event_only': '이벤트 때만 남는 연락처를 평소에도 남게 하세요. 새는 문은 대개 한 곳이에요.',
     },
@@ -206,6 +225,9 @@ export const PRESCRIPTIONS: Record<DiagnosisAxis, { default: string; variants?: 
     default: '다음 발송에서 최근 석 달 {t} 고객만 골라 보내고, 그 반응을 전체 발송과 비교해 보세요.',
     variants: {
       'optout_check:not_checked': '먼저 지난 발송의 수신거부부터 확인해 보세요. 그 숫자가 나눠 보낼 이유를 말해 줍니다.',
+      'unified_tool:crm': 'CRM에 이미 있는 방문·구매 기록으로 다음 발송 대상을 골라 보세요. 새로 모을 것 없이 지금 데이터로 됩니다.',
+      'unified_tool:marketing_tool': '쓰시는 툴에 쌓인 고객 기록으로 대상을 나눠 보세요. 데이터는 이미 있고, 거는 조건 하나가 없을 뿐이에요.',
+      'unified_tool:erp': '자체 시스템의 구매 기록으로 받을 사람을 골라 보세요. 데이터는 이미 충분하고, 꺼내 쓰는 길만 놓이면 됩니다.',
     },
   },
   sending: {
@@ -232,6 +254,7 @@ export const PRESCRIPTIONS: Record<DiagnosisAxis, { default: string; variants?: 
     variants: {
       'manual_count:c6_10': '손으로 챙기는 발송이 월 6번을 넘으면 이미 자동화가 남는 장사예요. 제일 잦은 것부터 바꾸세요.',
       'manual_count:c10p': '월 10번 넘게 손으로 보내고 계세요. 이 반복부터 자동으로 돌리면 시간이 가장 크게 돌아와요.',
+      'unified_tool:crm': 'CRM의 방문·구매 기록에 조건 하나를 걸어 생일이나 재방문 안내부터 자동으로 돌려 보세요. 재료는 이미 다 있어요.',
     },
   },
   measure: {
@@ -252,7 +275,7 @@ export const NO_PRESCRIPTION_VARIANTS = new Set(['measure_reason:no_need']);
  * 문장 규약: 행동이 주어("~가 됩니다")·기능명 나열 금지·브랜드색 0(렌더 계약).
  */
 export const FOOTNOTES: Record<DiagnosisAxis, string> = {
-  list: '한줄로에서는 포스기·쇼핑몰의 고객이 자동으로 한 명단이 됩니다.',
+  list: '한줄로에서는 포스기·쇼핑몰·자체 시스템의 고객이 자동으로 한 명단이 됩니다.',
   targeting: '한줄로에서는 구매 이력으로 받을 사람을 클릭 몇 번에 고릅니다.',
   sending: '한줄로에서는 문구 작성부터 발송까지 한 화면에서 끝납니다.',
   production: '한줄로에서는 보낼 이미지와 안내 화면을 AI가 대신 만들어 줍니다.',
@@ -260,13 +283,46 @@ export const FOOTNOTES: Record<DiagnosisAxis, string> = {
   measure: '한줄로에서는 클릭과 방문까지 발송 결과에 함께 잡힙니다.',
 };
 
-/** 모순 조합 관찰문 — 강등이 아니라 소견 승격(회의 확정). 전용 집필 2종만. */
+/** 모순 조합 관찰문 — 강등이 아니라 소견 승격(회의 확정). 전용 집필만. */
 export const COMBO_OBSERVATIONS = {
   headless_criteria:
     '관심사까지 보고 고르시는데, 그 기준이 명단에는 남아 있지 않아요. 지금은 담당자 머릿속에 있는 상태라, 자리를 비우면 같은 발송을 다시 만들 수 없어요.',
   paid_inflow_leak:
     '광고로 오신 고객의 연락처가 남지 않고 있어요. 비용을 들여 데려온 고객이 한 번의 {t}으로 끝나는 구조예요.',
+  /** v4 도구 스택 축 — 데이터가 사는 곳과 발송하는 곳이 다르다(ERP·POS ↔ 별도 발송 도구). */
+  tool_disconnect:
+    '고객 데이터가 있는 곳과 발송하는 곳이 서로 달라요. 보낼 때마다 명단을 꺼내 옮겨야 해서, 골라 보내는 일이 구조적으로 번거로운 상태예요.',
+  /** v4 — 발송 도구가 여러 갈래라 기록·결과가 흩어진다. */
+  tool_mixed:
+    '발송 도구가 여러 갈래로 나뉘어 있어요. 보낸 기록과 결과도 흩어져서, 무엇이 통했는지 한곳에서 보기 어려운 구조예요.',
+  /** v4 — 한곳에 모았지만 엑셀이라 자동 갱신이 없다. */
+  unified_but_excel:
+    '명단을 한곳에 모으신 건 좋은 출발이에요. 다만 엑셀이라 새 고객이 자동으로 들어오지는 않아서, 정리하는 손이 멈추면 명단도 멈춰요.',
+  /** v5 — 플랫폼 종속: 고객은 오는데 연락처는 플랫폼 소유(한국 자영업 최대 병목 축). */
+  platform_lock:
+    '고객은 꾸준히 오는데 연락처는 플랫폼이 갖고 있어요. 매출이 나도 내 명단은 늘지 않아서, 광고비나 수수료 없이는 같은 고객을 다시 부를 수 없는 구조예요.',
 } as const;
+
+/** v4 — 도구 스택 답의 관찰 앞말(뒤에 「선택지 라벨」 인용이 붙는다). */
+export const TOOL_OBSERVE: Record<string, string> = {
+  locked_tool: '고객 데이터가 있는 곳은',
+  unified_tool: '명단을 모아 둔 곳은',
+  send_tool: '발송에 쓰는 도구는',
+};
+
+/** v4 — 발송 도구 중 "데이터가 사는 곳과 분리된 외부 도구" 판정(디스커넥트 조합 입력). */
+export const EXTERNAL_SEND_TOOLS = new Set(['sms_site', 'kakao_agency', 'email_tool', 'mixed']);
+/** v4 — 데이터 측 시스템 답 중 "발송 기능이 없는 저장소" 판정(platform은 전용 짚임이 우선한다). */
+export const DATA_SIDE_SYSTEMS = new Set(['pos', 'mall', 'erp', 'booking_sys']);
+/** v5 — 한곳 저장소 중 "발송과 분리돼 있기 쉬운" 판정(디스커넥트 조합의 unified 측). */
+export const UNIFIED_DISCONNECT_TOOLS = new Set(['erp', 'crm', 'chat_tool']);
+
+/**
+ * v5 — 견적 구간 전용 한 줄(전문 툴·자체 시스템 사용자에게만). 홍보 위치 계약 안의 문장이다 —
+ * 본문(표지~병목) 노출 금지, 렌더는 견적 카드 하단 작은 활자.
+ */
+export const PITCH_NOTE_TOOL_USER =
+  '지금 쓰시는 도구를 바꾸는 이야기가 아니라, 그 데이터에 발송과 자동화가 이어지는 구성이에요.';
 
 /** 병목 0(전 축 상위)의 고도화 제안 — 심화 답에서만 파생(자기 문장을 가진 답만). */
 export const UPGRADE_SUGGESTIONS: Array<{ q: string; a: string; text: string }> = [

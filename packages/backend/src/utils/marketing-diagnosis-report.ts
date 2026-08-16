@@ -22,7 +22,8 @@ import {
   AXIS_META, LEVEL_LABELS, STAGES, COVER_STRENGTH, COVER_GAP, OBSERVE_LEAD,
   PRAISES, ASSET_PRAISE, GAPS, DIRECTIONS, PRESCRIPTIONS, NO_PRESCRIPTION_VARIANTS,
   FOOTNOTES, COMBO_OBSERVATIONS, UPGRADE_SUGGESTIONS, MANUAL_COUNT_MIN,
-  TOUCH_SUBJECT, fillTouch,
+  TOUCH_SUBJECT, fillTouch, TOOL_OBSERVE, EXTERNAL_SEND_TOOLS, DATA_SIDE_SYSTEMS,
+  UNIFIED_DISCONNECT_TOOLS, LIST_TOOL_PRAISES, PITCH_NOTE_TOOL_USER,
 } from './marketing-diagnosis-copy';
 
 export type GrantOutcome = 'granted' | 'already_granted' | 'not_eligible' | 'not_applicable' | null;
@@ -120,6 +121,8 @@ export interface DiagnosisResultV2 extends DiagnosisResultBase {
   gaps: DiagnosisGapV2[];
   plan30: DiagnosisPlanStep[];
   no_match_kind: 'over_range' | 'other' | null;
+  /** v5 — 전문 툴·자체 시스템 사용자 전용 견적 구간 한 줄(홍보 위치 계약 안 — 본문 렌더 금지). */
+  pitch_note?: string;
 }
 
 export type DiagnosisResult = DiagnosisResultV1 | DiagnosisResultV2;
@@ -335,7 +338,7 @@ export function buildDiagnosisResult(inp: ReportInputs): DiagnosisResult {
     });
   }
 
-  // ── 모순 조합 관찰문(강등 아님 — 소견 승격 · 전용 집필 2종) ──
+  // ── 모순 조합 관찰문(강등 아님 — 소견 승격 · 전용 집필) ──
   const insights: string[] = [];
   if (lv('targeting') === 3 && answers['list_fields'] === 'contact_only') {
     insights.push(COMBO_OBSERVATIONS.headless_criteria);
@@ -343,13 +346,36 @@ export function buildDiagnosisResult(inp: ReportInputs): DiagnosisResult {
   if (answers['inflow_capture'] === 'no_capture' && lv('list') <= 1) {
     insights.push(fillTouch(COMBO_OBSERVATIONS.paid_inflow_leak, touch));
   }
+  // v5 플랫폼 종속 — 연락처를 플랫폼이 소유(전용 짚임이 일반 디스커넥트보다 우선한다)
+  const platformLocked =
+    answers['locked_tool'] === 'platform' || (touch === 'platform' && lv('list') <= 1);
+  if (platformLocked) {
+    insights.push(COMBO_OBSERVATIONS.platform_lock);
+  }
+  // v4 도구 스택 축 — 데이터가 사는 곳 ↔ 발송 도구가 분리된 구조·도구 파편화·엑셀 단일 저장소
+  const dataSideLocked =
+    DATA_SIDE_SYSTEMS.has(answers['locked_tool'] ?? '') ||
+    UNIFIED_DISCONNECT_TOOLS.has(answers['unified_tool'] ?? '');
+  if (!platformLocked && dataSideLocked && EXTERNAL_SEND_TOOLS.has(answers['send_tool'] ?? '')) {
+    insights.push(COMBO_OBSERVATIONS.tool_disconnect);
+  }
+  if (answers['send_tool'] === 'mixed') {
+    insights.push(COMBO_OBSERVATIONS.tool_mixed);
+  }
+  if (answers['unified_tool'] === 'excel') {
+    insights.push(COMBO_OBSERVATIONS.unified_but_excel);
+  }
 
   // ── 칭찬(level 2+ 상위 2 · 근거 없으면 접점 자산 문장 1개 보장 — 억지 칭찬 금지 M6) ──
   const praiseAxes = [...levels.entries()]
     .filter(([, v]) => v.level >= 2)
     .sort((a, b) => b[1].level - a[1].level || AXIS_META[a[0]].priority - AXIS_META[b[0]].priority)
     .slice(0, 2);
-  const praises: string[] = praiseAxes.map(([axis]) => PRAISES[axis]);
+  // v5 — 전문 툴 사용자의 명단 칭찬 분화(엑셀 초심자용 일반 칭찬이 CRM 운영사에 나가지 않게)
+  const listPraiseOverride = LIST_TOOL_PRAISES[answers['unified_tool'] ?? ''];
+  const praises: string[] = praiseAxes.map(([axis]) =>
+    axis === 'list' && listPraiseOverride ? listPraiseOverride : PRAISES[axis],
+  );
   if (praises.length === 0 && touch && ASSET_PRAISE[touch]) praises.push(ASSET_PRAISE[touch]);
 
   // ── 관찰(들은 것) — 판단 0 · 라벨 인용. prefill 축은 실측 서술(인용형은 거짓 — 회의 확정) ──
@@ -366,6 +392,14 @@ export function buildDiagnosisResult(inp: ReportInputs): DiagnosisResult {
     } else {
       obsItems.push({ text: `${OBSERVE_LEAD[axis]} 「${v.optionLabel}」${obsItems.length === 0 ? '라고 답해 주셨어요' : ''}.` });
     }
+  }
+  // v4 — 도구 스택 답도 들은 것에 되돌려준다(ERP·CRM·발송 도구가 리포트에 무흔적이면 묻지 말았어야 할 문항)
+  for (const toolKey of Object.keys(TOOL_OBSERVE)) {
+    const a = answers[toolKey];
+    if (!a) continue;
+    const q = definition.questions.find((x) => x.key === toolKey);
+    const opt = q?.options.find((o) => o.key === a);
+    if (opt) obsItems.push({ text: `${TOOL_OBSERVE[toolKey]} 「${opt.label}」.` });
   }
   const observation = {
     items: obsItems,
@@ -442,6 +476,12 @@ export function buildDiagnosisResult(inp: ReportInputs): DiagnosisResult {
     });
   }
 
+  // v5 — 전문 툴·자체 시스템 사용자에게만 견적 구간 한 줄("도구를 바꾸는 이야기가 아니다")
+  const toolUser =
+    UNIFIED_DISCONNECT_TOOLS.has(answers['unified_tool'] ?? '') ||
+    answers['unified_tool'] === 'marketing_tool' ||
+    answers['locked_tool'] === 'erp';
+
   return {
     v: 2,
     summary: headline,
@@ -460,5 +500,6 @@ export function buildDiagnosisResult(inp: ReportInputs): DiagnosisResult {
     insights,
     gaps,
     plan30,
+    ...(toolUser ? { pitch_note: PITCH_NOTE_TOOL_USER } : {}),
   };
 }
