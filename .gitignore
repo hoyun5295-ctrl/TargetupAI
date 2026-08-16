@@ -24,6 +24,9 @@ serviceAccount*.json
 
 # 데이터·산출물
 *.sql
+# ★2026-08-16 예외 — 배포용 seed·마이그레이션 스크립트는 레포가 소유한다(마케팅 진단 seed v3에서
+#   *.sql 전역 무시 탓에 tp-push에 조용히 빠져 서버에 파일이 없던 사고. 예외는 이 폴더 하나만)
+!scripts/sql/*.sql
 backups/
 targetup-app/
 _archive/
