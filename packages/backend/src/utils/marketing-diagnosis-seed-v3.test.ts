@@ -1,5 +1,6 @@
 /**
- * seed v3 계약 테스트 — 설계서의 seed SQL 원문을 그대로 파싱해 잠근다 (2026-08-16 · v3 설계서 §7)
+ * seed v3 계약 테스트 — 실행 SQL 파일(scripts/sql)의 원문을 그대로 파싱해 잠근다 (2026-08-16 · v3 설계서 §7)
+ * seed 원문 소유 = scripts/sql/2026-08-16-diagnosis-seed-v3.sql (설계서 §7은 포인터 — 사본 금지)
  *
  * 잠그는 것
  *   1. JSON이 실제로 파싱되고 validateDefinition(로더와 같은 검증기)을 통과한다 —
@@ -15,12 +16,12 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { validateDefinition, visibleQuestions, type DiagnosisDefinition } from './plan-recommend';
 
-const DOC = resolve(__dirname, '../../../../docs/2026-08-16-marketing-diagnosis-v3-design.md');
+const SEED_SQL = resolve(__dirname, '../../../../scripts/sql/2026-08-16-diagnosis-seed-v3.sql');
 
 function loadSeedV3(): DiagnosisDefinition {
-  const text = readFileSync(DOC, 'utf-8');
+  const text = readFileSync(SEED_SQL, 'utf-8');
   const m = text.match(/VALUES \('v3', \$\$\s*([\s\S]*?)\$\$::jsonb/);
-  if (!m) throw new Error('설계서에서 seed v3 블록을 찾지 못함');
+  if (!m) throw new Error('seed SQL 파일에서 v3 블록을 찾지 못함');
   return JSON.parse(m[1]) as DiagnosisDefinition;
 }
 
