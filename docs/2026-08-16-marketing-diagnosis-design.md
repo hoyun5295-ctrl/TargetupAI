@@ -1,5 +1,9 @@
 # AI 마케팅 진단 — 설계서 (착수 원장) v3
 
+> ★2026-08-16 개통 완료. **상설 소유는 [FEATURE-MARKETING-DIAGNOSIS.md](FEATURE-MARKETING-DIAGNOSIS.md)로 승격**됐다 —
+> 정체성·불변 원칙·구조·운영·이력은 그 문서가 소유하고, **이 문서는 시점 근거만 소유한다**:
+> DDL·seed 원문(§3) · 문항 정의 원본(§7) · 결과 스키마(§7-2) · 검증 시나리오 13종(§9) · 진행 원장·적대 취사 내역(§8).
+
 > 2026-08-16 브레인스토밍(5역할·교차 반박·회의론자 검증) 수렴 → **적대 검토 3중 반영**(자가 4 · 회의론자 D1~D17 · Codex critical 2/high 15/medium 1). Harold 승인 완료.
 > **다음 세션은 이 문서만 읽고 구현한다.** 목업 24종은 끌로드디자인이 [마스터 프롬프트](2026-08-16-diagnosis-example-mockups-master-prompt.md)(개정판 — 이미지 슬롯·Pretendard·비비드 톤)로 재제작 중.
 > 완료 후 `docs/FEATURE-MARKETING-DIAGNOSIS.md`로 승격, STATUS 카드 회전. 호출어 **"마케팅 진단"**.
@@ -490,6 +494,7 @@ Codex `adversarial-review` 의무 = 커밋 1·2(돈·DB). 배포 = tp-push + bui
 - **별건 개선 4**: ⑤`credit.ts` 숫자 사본 ⑥`/pricing` 라이트 톤 단절 ⑦`basic-trial.ts:32-38` vs `companies.ts:1700` TRIAL 동급 설명 불일치(BASIC vs PRO — 주석 정정) ⑧**plans 한도 사다리 역전(2026-08-16 실측)** — STARTER·BASIC `max_auto_campaigns` NULL(런타임 무제한)이 PRO 5·BUSINESS 10보다 넓고, STARTER `cdp_events_per_month` NULL(무제한)이 BASIC 1만보다 넓다. 값 부여 = 운영 중 고객사 실행 한도를 새로 만드는 요금 정책 판단(Harold) — 정정 후 문항 세트 v2로 Q6·Q7 requires 재도입
 - **잔여 위험 5**: 공개 리밋 pm2 배수 / 0원 요금제 신설 시 추천 재유입(컬럼별 op 표가 1차 방어) / soft delete 재가입(외부 실행 불가·재활성 회사는 수동 부여 구제) / state 실패 fail-quiet 노출 손실 / **⑤ seed에 한도 축(gte_or_null) requires를 사람이 넣으면 validator가 rule_version 무관 통과**(Codex 커밋 2~4 1R medium — 불수용 근거는 §8 진행 원장. seed 갱신은 §7-1 확정 JSON대로만, plans 정정(⑧) 전 한도 축 재도입 금지)
 
-## 11. 완료 후
+## 11. 완료 후 ✔2026-08-16 이행 완료
 
-`docs/FEATURE-MARKETING-DIAGNOSIS.md` 승격 → `status/SOT-INDEX.md` §0 등재 → STATUS 카드 회전.
+`docs/FEATURE-MARKETING-DIAGNOSIS.md` 승격 · `status/SOT-INDEX.md` §0 등재 · STATUS 갱신 완료.
+이후 이 기능을 다룰 때는 **기능 문서부터** 읽는다(이 설계서는 근거 조회용).

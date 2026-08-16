@@ -12,7 +12,7 @@
 | 도메인 작업 착수 전 사고 이력 | lessons/LESSONS_{DB,FRONTEND,BACKEND,DEPLOY,ARCHITECTURE,META}.md | **도메인↔파일 매핑은 CLAUDE.md `read_lessons_first`가 소유**(여기 재서술 금지). 읽는 범위 = 해당 도메인 전체 · 배포는 OPS.md 해당 절 동반 |
 | **Harold님이 "브레인스토밍"이라고 말했을 때** · superpowers 스킬 선택 · Codex 라운드 운영·수용 판단 | **COLLAB.md** | 브레인스토밍 = §1 전체 정독 후 그대로 진행(의무) / 그 외 = 해당 절만 |
 | **Codex 리뷰를 돌릴 때** — 실행 절차·요청문 규격·멈춤 판정·복구 | **[CODEX-RUNBOOK.md](CODEX-RUNBOOK.md)** | 착수 전 §1·§2(의무) / 20분 무응답이면 §3·§4. 리뷰를 띄우기 전에 반드시 읽는다 — 같은 멈춤을 다섯 번 반복했다 |
-| **기능 이름을 부를 때** — 그 기능의 구조·불변 원칙·이력 | **[SOT-INDEX.md §0 기능 상설 SoT](SOT-INDEX.md)** | 해당 기능 행 → 그 기능 문서(9종 — 목록은 §0이 소유). 기능 문서가 이력을 소유하고 STATUS는 참조만(신규 기능도 이 형태로 등재) |
+| **기능 이름을 부를 때** — 그 기능의 구조·불변 원칙·이력 | **[SOT-INDEX.md §0 기능 상설 SoT](SOT-INDEX.md)** | 해당 기능 행 → 그 기능 문서(10종 — 목록은 §0이 소유). 기능 문서가 이력을 소유하고 STATUS는 참조만(신규 기능도 이 형태로 등재) |
 | **프로젝트·트랙 SoT 문서·호출어를 찾을 때** | **[SOT-INDEX.md](SOT-INDEX.md)** | 해당 트랙 행만. **신규 프로젝트 SoT는 이 라우팅 표가 아니라 SOT-INDEX.md에 등재한다**(이 표는 도메인 문서 전용 상설) |
 | 시스템 구조 파악 · **서버 사양·용도·리스크**(어느 서버에서 실행하나 / 자원 여유 / 무재부팅·노출 위험) | ARCHITECTURE.md · **[SERVERS.md](SERVERS.md)** | 구조 = 해당 절만 / 서버 = 해당 서버 절 + §3 리스크. **접속 절차·운영 명령은 OPS.md가 소유**(중복 금지) |
 | 자사몰 연동·CDP·커넥터 작업 | INTEGRATIONS.md | 해당 provider 카드 / CDP 공통 절 |
@@ -53,7 +53,7 @@
 
 ### 다음 세션 (예정)
 > 경위·범위·확정 사실은 링크가 소유한다. 여기엔 제목·다음 한 수·호출어만.
-> ⓪ **★AI 마케팅 진단 — 설계 확정(적대 3중)·목업 24 선배치·다음 세션 구현** — 호출어 **"마케팅 진단"** → **[설계서 v3](../docs/2026-08-16-marketing-diagnosis-design.md)가 전부 소유**. 첫 한 수 = §3 검증 SQL·§7 검증 C
+> ⓪ **★AI 마케팅 진단 — 0816 설계→구현→개통 완료**(Codex 적대 4R · 테스트 90/90 · DDL·이미지 40종·seed v2) — 호출어 **"마케팅 진단"** → **[FEATURE-MARKETING-DIAGNOSIS.md](../docs/FEATURE-MARKETING-DIAGNOSIS.md)가 전부 소유**(문항·추천 변경은 §5 seed 버저닝 — 코드 수정 아님). 잔여 = **실측만**(설계서 §9 13종 · 첫 수 = FREE 계정 완주 → TRIAL 7일 지급 확인)
 > ① **템플릿** — 호출어 **"템플릿"** → **[FEATURE-ALIMTALK-TEMPLATE.md](../docs/FEATURE-ALIMTALK-TEMPLATE.md)가 전부 소유**(구조·불변 원칙·이관 절차·이력·남은 것). 여기 다시 쓰지 않는다. 0804 = IMC 이관 실행 화면 신설·게이트 테넌트 격리·메트로시티 이관.
 > ② **0718 성능 후속** — 관측 사이클 1회전: 1순위 campaigns 발송 폴러 인덱스(EXPLAIN 후 처방) · 2순위 `balance_transactions` 잔액 SUM N+1(호출처 추적) · 그 후 M3/롤업. [핸드오프](docs/2026-07-18-frontend-splitting-incident-handoff.md) · [[project_2026_0717_dashboard_performance]]
 > ③ **아임웹·아이디룩 시연** — 스토어 등록 확인 → 테스트 몰 OAuth 리허설(pm2 로그+회원가입 1건 webhook) → 시연. INTEGRATIONS.md 아임웹 카드 · [[project_2026_0719_imweb_appstore_idlook]]

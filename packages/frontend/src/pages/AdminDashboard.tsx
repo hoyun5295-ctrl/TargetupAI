@@ -9882,17 +9882,17 @@ const handleApproveRequest = async (id: string) => {
           </div>
         </div>
       )}
+      {/* ★2026-08-16 토스트를 정산 탭 밖으로 올린다 — 탭 안에 있으면 다른 탭(신규마케팅진단 등)에서
+          성공·실패 메시지가 통째로 안 보인다(눌러도 아무 반응 없는 것처럼 보이던 원인). fixed 배치라 위치 무변경. */}
+      {billingToast && (
+        <div className={`fixed top-6 right-6 z-[10000] px-5 py-3 rounded-xl shadow-lg text-white text-sm font-medium transition-all ${
+          billingToast.type === 'success' ? 'bg-green-500' : 'bg-red-500'
+        }`}>
+          {billingToast.msg}
+        </div>
+      )}
       {activeTab === 'billing' && (
         <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
-          {/* 빌링 토스트 */}
-          {billingToast && (
-            <div className={`fixed top-6 right-6 z-[10000] px-5 py-3 rounded-xl shadow-lg text-white text-sm font-medium transition-all ${
-              billingToast.type === 'success' ? 'bg-green-500' : 'bg-red-500'
-            }`}>
-              {billingToast.msg}
-            </div>
-          )}
-
           {/* ===== 1. 정산 생성 ===== */}
           <div className="px-6 py-5 border-b">
             <h3 className="text-base font-semibold text-gray-800 mb-4 flex items-center gap-2">

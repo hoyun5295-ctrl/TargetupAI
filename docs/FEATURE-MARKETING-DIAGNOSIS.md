@@ -1,0 +1,173 @@
+# AI 마케팅 진단 — 기능 상설 SoT
+
+> **호출어 = "마케팅 진단"**. 이 문서가 이 기능의 **정체성·불변 원칙·구조·운영·이력**을 소유한다.
+> 상태·잔여는 STATUS §2가, 시점 설계 근거(DDL 원문·seed 원문·적대 리뷰 취사 내역·검증 시나리오 13종)는
+> [2026-08-16 설계서](2026-08-16-marketing-diagnosis-design.md)가 소유한다 — 여기 복사하지 않는다.
+>
+> 2026-08-16 하루에 설계(브레인스토밍 5역할·적대 3중) → 구현(백엔드·프론트) → 개통까지 끝났다.
+
+---
+
+## §1 착수 전 필독 순서
+
+1. **§2 정체성** — 이 기능이 무엇을 뒤집으려고 만들어졌는지 모르면 문구·흐름을 반드시 망친다.
+2. **§3 불변 원칙** — 특히 3-1(화면은 게이트가 아니다)·3-3(1회 한정은 DB가 강제).
+3. 문항·추천을 만지면 **§5 버저닝 운영**(코드 수정이 아니라 seed로 바꾼다).
+4. 화면·문구를 만지면 **§6 운영 계약**(보상 문구 조건부 노출 = 거짓 약속 차단).
+5. DDL·seed 원문이 필요하면 설계서 §3, 검증 시나리오는 설계서 §9.
+
+---
+
+## §2 정체성 — 리포트가 본체, 설문은 문진
+
+기존 AI 안내(AI Operation 모달·AI 꾸미기·무료체험 팝업)는 전부 **우리 얘기**였고 전환이 0이었다.
+진단은 순서를 뒤집는다: **고객이 먼저 자기 얘기를 하고(답변), 우리가 그 회사 얘기로 돌려준다(리포트).**
+
+- 설문은 문진일 뿐이고 **본체는 리포트다** — 왜 이 요금제인지, 크레딧으로 뭘 할 수 있는지, 그 분야 실물 예시까지 전부 답변·실적에서 파생된다.
+- 퍼널 두 개가 같은 문진을 공유한다: **A = 기존 FREE 고객사**(완주 = TRIAL 7일 자동 지급) / **B = 미인증 잠재고객**(완주 = 리드 수집).
+- 유료 요금제 사용자에게는 **기능 자체가 존재하지 않는다**(노출·제출·지급 3중 차단).
+
+---
+
+## §3 불변 원칙 (어길 수 없는 것)
+
+### 3-1. 화면은 게이트가 아니다
+노출·제출·지급 **전부 서버가 `plan_code='FREE'` 정확 일치를 재검사**한다. 프론트는 요금제를 해석하지 않고 `GET /state` 응답의 `eligible`·`grantable`만 소비한다. 화면을 숨기는 것은 UX이고, 막는 것은 서버다.
+
+### 3-2. 진단 계산은 AI 호출 0 · 크레딧 차감 0
+문항·추천·리포트 전부 순수 룰(`plan-recommend` + `marketing-diagnosis-report`)이다. `ai_credits_purchased` 불변.
+⚠ TRIAL **지급**이 `ai_credits_base_*`를 TRIAL 월값으로 리셋하는 것은 기존 지급 계약의 정상 동작이다 — "차감 0"과 혼동 금지.
+
+### 3-3. 1회 한정의 실효 장치는 DB 제약뿐이다
+`diagnosis_trial_grants UNIQUE(company_id)` + funnel A 부분 UNIQUE(회사당 진단 1행). 조건문·화면은 보조다.
+**예외 재지급 경로를 만들지 않는다** — 구제는 기존 슈퍼관리자 수동 부여(`grant-basic-trial`)가 담당한다.
+
+### 3-4. 제출과 지급은 한 트랜잭션이다
+`POST /submit`이 client 하나로 전 과정을 소유한다(회사 행 `FOR UPDATE` → 자격 판정 → 진단 INSERT → 지급 → grants INSERT).
+쪼개면 ①먼저 커밋 시 완료 기록이 재시도를 영구 차단하거나 ②안 커밋 시 grants FK가 진단을 못 본다.
+실패 = 전체 ROLLBACK = 진단도 미저장 = **재시도가 곧 복구 경로**.
+
+### 3-5. 추천 근거로 쓸 수 있는 축은 두 부류뿐
+① **실효 게이트 실측을 통과한 축** — 이미 열려 있는 기능을 잠긴 것처럼 팔면 거짓 리포트다.
+② **정가표 용량 기준 축**(`max_customers` — ★2026-08-16 Harold 확정) — 적재를 막지는 않지만 요금제의 공표 규모 기준이라 "귀사 규모에 맞는 플랜" 안내는 사실이다. 리포트 문구는 **제한·상한 단어 없이 규모 권장 프레임**으로만 쓴다.
+⛔ 2026-06-02 종량제 전환 이후 **boolean 기능 플래그는 런타임 게이트가 아니다**(FREE만 차단) — requires에 넣으면 오추천이 된다.
+
+### 3-6. 만족하는 요금제가 없으면 추천하지 않는다
+`no_match` = 추천 카드 대신 「상담으로 확인해 드립니다」. 억지 추천 금지.
+
+### 3-7. 진단 데이터를 `companies` 컬럼에 붙이지 않는다
+`SELECT c.*` 응답들이 전부 오염된다. 진단은 자기 테이블 4개로 산다.
+
+### 3-8. 테이블·문항이 없으면 500이 아니라 503이다
+신규 테이블 미생성(42P01/42703)·활성 문항 세트 0개·definition 구조 위반 = `503 DB_MIGRATION_PENDING`(fail-closed), 화면은 "준비 중" 안내. 검증은 **로더 한 곳**(`loadActiveQuestionSet`)이 소유한다.
+
+---
+
+## §4 구조 — 무엇이 어디에 있나
+
+### 4-1. 백엔드
+
+| 축 | 파일 | 소유 |
+|---|---|---|
+| 인증(퍼널 A) | `routes/marketing-diagnosis.ts` | `/state` `/report` `/invited` `/submit` `/consult` |
+| 공개(퍼널 B) | `routes/marketing-diagnosis-public.ts` | `/questions` `/preview` `/submit` `/credit-costs` · IP 10분 5회 리밋 · 허니팟 · 32kb 파서(app.ts 전역 파서 앞) |
+| 관리(ceo) | `routes/marketing-diagnosis-admin.ts` | `/access` `/badge` 목록·상세·상태 전이·수동 부여 |
+| 추천 룰 CT | `utils/plan-recommend.ts` | 컬럼별 허용 op 표 · answers 완전 검증 · `no_match` · 동률 2차 정렬 |
+| 결과 조립 CT | `utils/marketing-diagnosis-report.ts` | `DiagnosisResultV1` 조립(AI 0) · 크레딧 환산 · Source caption |
+| 지급 CT | `utils/marketing-diagnosis-grant.ts` | 자격 판정·지급 실행 — **submit과 수동 부여가 공유**(원자성 한 벌) |
+| 데이터 접근 | `utils/marketing-diagnosis-store.ts` | 활성 세트 로더(+검증) · plans 조회 SQL |
+| 사용 실적 | `utils/monthly-usage.ts` | 월 발송·사용금액 — **대시보드 `/stats`와 산식 단일 소스**(route-local 복사 금지) |
+| 체험 지급 | `utils/basic-trial.ts` | `grantFreeTrial(companyId, days, { client })` — client 주입 시 **내부 전 SQL이 그 client**(풀 고갈 차단) |
+| 만료 강등 | `utils/trial-downgrade-worker.ts` | 술어 상수 공유 + 유료 플랜 강등 금지 가드 + 관찰 plan_id 원자 결합 |
+| 권한 | `utils/audit-log.ts` `isDiagnosisViewer` | ENV `MARKETING_DIAGNOSIS_VIEWER_IDS`(기본 `ceo`) · 인자 = `super_admins.id` |
+| 병합 연동 | `utils/company-merge.ts` | 진단 3테이블 축 + 지급 결합 차단 SQL + `linked_company_id` 승계·잔존 검증 |
+
+### 4-2. 프론트
+
+`components/marketing-diagnosis/` — `DiagnosisWizard`(문진 1소스: A 모달·B 페이지 공용) · `DiagnosisModal`(A 셸) · `DiagnosisInviteModal`(최초 1회 초대) · `DiagnosisHeroCard`(대시보드 상시 진입 2형) · `DiagnosisReportView`(리포트 본체) · `diagnosisApi.ts`
+`pages/DiagnosisPage.tsx`(공개 `/diagnosis`) · `components/admin/DiagnosisAdminPanel.tsx`(신규마케팅진단)
+
+### 4-3. DB
+
+`diagnosis_question_sets`(문항 세트·활성 1개) · `marketing_diagnoses`(A+B 원장·result 스냅샷) · `diagnosis_trial_grants`(1회 한정 원장) · `diagnosis_invites`(초대 표시 기록). DDL 원문 = 설계서 §3.
+
+---
+
+## §5 문항·추천 버저닝 운영 — 코드가 아니라 seed로 바꾼다
+
+문항 문장·선택지·추천 요구조건은 전부 `diagnosis_question_sets.definition`(jsonb)이 소유한다.
+**바꾸려면 새 version을 INSERT하고 활성을 옮긴다** — 코드 배포 없이 즉시 반영되고, 기존 제출 행은 `question_set_version` 스냅샷을 물고 있어 영향이 없다(관리 화면의 답변 라벨도 그 행의 버전 문구로 표시된다).
+
+- 활성 세트는 **정확히 1개**(부분 UNIQUE). 0개면 전 endpoint가 503.
+- `requires`는 **컬럼별 허용 op 표**(CT 소유)를 통과해야 한다: `ai_credits_per_month`는 `gte`만(NULL=0 컬럼 — `gte_or_null`을 허용하면 값 안 채운 요금제가 최저가로 추천되는 사고), 한도 축은 `gte_or_null`만(NULL=무제한).
+- 추천 후보 = `is_active AND monthly_price > 0`(FREE·TRIAL·STAFF 자동 제외) → 조건 만족 행 중 `monthly_price ASC, plan_code ASC`.
+
+**현재 활성 = v2**(2026-08-16). v1 대비: 고객 규모 축을 추천 근거로 재도입(`max_customers` — 10만/30만/100만/300만), 발송량 구간 상향(1만/10만/50만), AI 크레딧 축 유지. v1은 소규모 전제라 STARTER·BASIC으로만 수렴했고, 실제 시장(관리 10만+·월 발송 10만+ 업체가 흔함)에서 과소 추천이었다.
+
+⚠ **plans 한도 실값 역전이 남아 있다** — `max_auto_campaigns`·`cdp_events_per_month`가 STARTER·BASIC에서 NULL(=런타임 무제한)이라 PRO(5·10만)보다 넓다. 그래서 이 두 축은 requires에서 뺐다. plans 값이 정정되면 v3로 재도입한다(코드 무변경).
+
+---
+
+## §6 운영 계약
+
+### 6-1. 노출 규칙 (퍼널 A)
+`GET /state` 한 응답이 화면 판정을 전부 소유한다. 초대 모달 = `eligible && !completedAt && !invitedAt`(표시 즉시 서버 기록 — localStorage 판정 금지), 히어로 = 진단 유도(`eligible && !completedAt`) 또는 체험 D-N(`completedAt && trialExpiresAt > now`), 진단 카드 노출 중에는 BrandVoiceNudgeCard를 `suppress`(소견이 리포트로 흡수된다).
+
+### 6-2. 7일 보상 문구는 조건부다
+"진단을 끝내면 7일 무료체험이 바로 시작돼요"는 **`grantable === 'available'`일 때만** 노출한다(초대·히어로·문진 상단 3곳). 체험 이력이 있는 회사에 보이면 **거짓 약속**이 된다 — 그 회사는 완주해도 리포트만 저장되고 지급은 없다(상담 CTA로 이어진다).
+
+### 6-3. 퍼널 B는 자동 지급이 없다 — 그래서 운영 의무가 생긴다
+공개 페이지는 "완료하고 가입하시면 7일 무료체험을 드려요"라고 약속한다. 그 이행은 **관리 메뉴 파이프라인**이 담당한다:
+`new → attempted(n) → contacted → account_created(B만) → [수동 부여] → trial_granted → converted / disqualified / on_hold`
+수동 부여는 **`account_created` 상태 + 회사 연결 완료**일 때만 열린다(잠긴 진단 행에서 대상을 파생 — 임의 회사 ID 입력 금지). 지급 행위자는 `granted_by`에 스냅샷으로 남는다.
+
+### 6-4. 관리 메뉴는 ceo 전용이고, 비허용 계정에는 존재하지 않는다
+`/access`만 게이트 앞에 두고 나머지는 전부 404(존재 은닉). 감사 로그 details는 `{diagnosis_id, company_id, outcome}` 허용 키만.
+
+---
+
+## §7 예시 목업 자산
+
+`packages/frontend/public/diagnosis-examples/` — 업종 8종 × 채널 3종 = **HTML 24개** + `assets/` **이미지 40장** + Pretendard(+OFL 고지).
+리포트는 답변한 업종의 3장을 `<iframe sandbox="" loading="lazy">`로 띄운다(JS 0·클릭 확대만). **캡션 「예시 목업 · 가상 브랜드 · 실제 고객 사례 아님」은 의무**다.
+
+- 이미지는 이미지 스튜디오 **UI가 아니라 같은 엔진(Gemini generateContent)을 직접 호출하는 일회성 스크립트**로 일괄 생성했다(로컬 실행 — 서버 작업 트리 오염 회피). 슬롯·비율 원장 = `assets/README.md`.
+- 생성 규칙: **이미지 안에 글자·로고 0**(카피는 HTML이 얹는다), `dm-hero` 9:16과 `travel/fitness-email-hero`는 **하단 40%가 어둡고 단순**해야 한다(흰 카피 오버레이 자리).
+- 웹 서빙용으로 1200px·JPEG 재인코딩했다(57MB→4.8MB). **파일명은 `.png`인데 내용은 JPEG** — 브라우저는 내용으로 판독하므로 의도된 상태다.
+- 다시 만들 때는 같은 방식(슬롯명 그대로 저장 → 최적화 → 배치). 자리표시(10~25KB 회색 PNG) 상태로 노출 금지.
+
+---
+
+## §8 이력 색인
+
+| 시점 | 내용 |
+|---|---|
+| 2026-08-16 설계 | 브레인스토밍 5역할 수렴 → 적대 검토 3중(자가 4 · 회의론자 D1~D17 · Codex critical 2/high 15/medium 1) 반영해 설계서 v3 확정. 목업 24종 선배치 |
+| 2026-08-16 커밋 0 | plans 실값·실효 게이트 실측 → **B안 확정**(추천 축을 AI 크레딧 단일로) · 설계서 §3-1 |
+| 2026-08-16 커밋 1~4 | 강등 워커 술어 통일·유료 가드 / 지급 트랜잭션(client 주입) / 추천·리포트·지급 CT / 라우트 3종 / 병합 축. **Codex 적대 4라운드**(커밋1 2R·커밋2~4 2R — high 6·medium 5 수용, medium 1 불수용) |
+| 2026-08-16 커밋 5~8 | 옛 무료체험 팝업·배너·AI 다듬기 안내 제거 · 노출·위저드·리포트·퍼널 B 페이지·관리 메뉴 · `JourneyModalShell` dismiss opt-out 신설 |
+| 2026-08-16 개통 | DDL 4테이블 → 이미지 40종 실렌더 교체 → seed v1 → **v2 전환**(규모 축 재도입) → 7일 보상 문구·줄바꿈·대시 제거·관리 답변 라벨 표기 |
+
+상세 근거·취사 내역은 설계서 §8 진행 원장이 소유한다.
+
+---
+
+## §9 뒤집힌 판단 · 함정 (다시 꺼내지 않기)
+
+- ⛔ **문서가 인용한 플래그가 런타임 게이트가 아닐 수 있다** — 실측 결과 `auto_campaign_enabled`는 ENTERPRISE·STAFF만 true였다. 그걸 requires로 썼다면 "자동발송 1~5개" 답변에 550만원 플랜이 추천됐다.
+- ⛔ **정가표 스펙과 런타임 제한은 다른 축이다** — `max_customers`는 적재를 막지 않는다(2026-08-14 아난티 사고로 전 경로 폐지). 추천에 쓰는 것은 "권장 규모" 안내이지 제한 부활이 아니다. 되살리지 마라.
+- ⛔ **지급 판정 순서: 기지급 검사가 plan 검사보다 먼저다** — 지급에 성공하면 회사가 TRIAL로 바뀌므로, plan을 먼저 보면 "지급 직후 재시도"가 `already_granted`가 아니라 400으로 떨어진다(Codex 적대 지적).
+- ⛔ **mock 테스트는 SQL 의미 반전을 못 잡는다** — 강등 술어는 `pg-mem`(실 SQL 엔진)으로 집합 논리를 실행 검증하고, 변이(OR→AND·NOT IN→IN)가 결과를 실제로 바꾸는지까지 스위트 안에서 단정한다.
+- ⛔ **preview는 전체를 만든 뒤 일부만 덮으면 샌다** — 크레딧 환산 수치 × 공개 `/credit-costs` 제수로 숨긴 요금제를 역산할 수 있었다. **허용 필드만 조립한 DTO**로 내보낸다.
+- ⛔ **문장 속 대시(—)를 쓰지 마라**(사용자 노출 문구) — AI가 쓴 티가 난다는 Harold 지적. 두 줄 구성이나 제목+보조설명으로 푼다. 한국어 화면은 `break-keep`(어절 단위 줄바꿈)이 기본.
+- ⛔ **관리 화면에 raw key를 노출하지 마라** — `u10k`·`q1_5` 같은 내부 키가 아니라 그 제출 버전의 문진 문장·선택지 라벨로 보여준다.
+
+---
+
+## §10 관련 문서
+
+- 시점 설계서(DDL·seed 원문·검증 13종·적대 취사) = [2026-08-16-marketing-diagnosis-design.md](2026-08-16-marketing-diagnosis-design.md)
+- 목업 마스터 프롬프트(셸 제작 근거) = [2026-08-16-diagnosis-example-mockups-master-prompt.md](2026-08-16-diagnosis-example-mockups-master-prompt.md)
+- 이미지 슬롯·비율 원장 = `packages/frontend/public/diagnosis-examples/assets/README.md`
+- 요금제 게이팅 CT = `utils/plan-guard.ts` 상단 주석(고객 DB 상한 폐지 경위 포함)
+- 기억 진입 = `memory/project_2026_0816_marketing_diagnosis.md`
