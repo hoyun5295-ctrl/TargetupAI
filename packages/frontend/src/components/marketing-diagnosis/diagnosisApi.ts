@@ -45,10 +45,13 @@ export interface DiagnosisCoverDto {
   headline: string;
 }
 export interface DiagnosisObservationDto {
-  items: Array<{ text: string; measured?: boolean }>;
+  /** key·value = v8(표 렌더). text = 구 스냅샷·폴백. */
+  items: Array<{ text: string; key?: string; value?: string; measured?: boolean }>;
   source: string;
 }
 export interface DiagnosisAxisRowDto { axis: string; label: string; level: number; level_label: string }
+/** v8 킥 — 구 스냅샷(v6 배포분)은 문자열 한 줄이라 렌더가 둘 다 흡수한다. */
+export type DiagnosisFillDto = string | { gone: string; how: string };
 export interface DiagnosisGapDto {
   axis: string;
   label: string;
@@ -56,8 +59,8 @@ export interface DiagnosisGapDto {
   cause: string;
   effect: string;
   direction: string;
-  /** v6 채움 킥 — 구 스냅샷(v5 이하)에는 없다. 없으면 렌더 생략(백필 없음). */
-  fill?: string;
+  /** 채움 킥 — v5 이하 스냅샷에는 없다. 없으면 렌더 생략(백필 없음). */
+  fill?: DiagnosisFillDto;
 }
 export interface DiagnosisPlanStepDto { week: string; title: string; action: string }
 
@@ -88,6 +91,8 @@ export interface DiagnosisResultDto {
   insights?: string[];
   gaps?: DiagnosisGapDto[];
   plan30?: DiagnosisPlanStepDto[];
+  /** v8 표지 요약 수치 — 축 등급 판정은 서버가 소유한다(화면이 axes로 다시 세지 않는다). */
+  tally?: { good: number; gap: number; total: number };
   no_match_kind?: 'over_range' | 'other' | null;
   /** preview 전용 — 실행 순서·예시가 신청 뒤에 온다는 안내(서버 문구). */
   plan_note?: string;

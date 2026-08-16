@@ -15,7 +15,9 @@ import {
   type DiagnosisDefinition, type PlanRowLike,
 } from './plan-recommend';
 import { buildDiagnosisResult, type DiagnosisResultV2 } from './marketing-diagnosis-report';
-import { GAPS, COVER_GAP } from './marketing-diagnosis-copy';
+import {
+  GAPS, COVER_GAP, PRAISES, LIST_TOOL_PRAISES, ASSET_PRAISE, COMBO_OBSERVATIONS,
+} from './marketing-diagnosis-copy';
 
 /** seed v3와 같은 축·키 구조의 시험용 definition(라벨은 판정에 안 쓰는 곳만 축약). */
 const V3DEF: DiagnosisDefinition = {
@@ -366,44 +368,76 @@ describe('buildDiagnosisResult — v2 스토리형', () => {
     expect(b.gaps.map((g) => g.axis)).not.toContain('targeting');
   });
 
-  it('킥 위치 계약(v6) — 자사명은 병목 카드의 fill(≤3)에만, 다른 블록엔 0', () => {
+  it('위치 계약(v8) — 서버가 만드는 리포트 문장 전체에 자사명 0(라벨은 화면이 소유)', () => {
     const r = buildV2(baseAnswers());
-    const brand = '한줄로';
-    const clean = {
-      cover: r.cover, observation: r.observation, praises: r.praises,
-      axes: r.axes, insights: r.insights, stage: r.stage, summary: r.summary,
-      plan30: r.plan30, pitch_note: r.pitch_note ?? '',
-      // 병목 카드에서 킥을 뺀 나머지(관찰~처방 4박자)에도 0
-      gapBody: r.gaps.map(({ heard, cause, effect, direction }) => ({ heard, cause, effect, direction })),
-    };
-    expect(JSON.stringify(clean)).not.toContain(brand);
-    const kicks = r.gaps.filter((g) => g.fill.includes(brand));
+    // 킥 본문에서도 주어를 뺐다 — 「한줄로에서는」은 렌더 라벨 한 곳에만 있다.
+    // 그래서 삭제 테스트(자사 문장을 지워도 문서가 성립)가 구조로 보장된다.
+    expect(JSON.stringify(r)).not.toContain('한줄로');
+    const kicks = r.gaps.filter((g) => g.fill?.gone);
     expect(kicks.length).toBeGreaterThan(0);
     expect(kicks.length).toBeLessThanOrEqual(3);
   });
 
-  it('킥 — 전 병목에 fill이 붙고(전 축 default 보유) 30일 실행 각주는 폐지됐다', () => {
+  it('킥 — 전 병목에 gone·how 두 줄이 붙고 30일 실행 각주는 폐지됐다', () => {
     const r = buildV2(baseAnswers());
     expect(r.gaps.length).toBeGreaterThan(0);
-    for (const g of r.gaps) expect(g.fill, `${g.axis} fill 누락`).toBeTruthy();
+    for (const g of r.gaps) {
+      expect(g.fill?.gone, `${g.axis} gone 누락`).toBeTruthy();
+      expect(g.fill?.how, `${g.axis} how 누락`).toBeTruthy();
+      // 첫 줄은 없어지는 수고를 지목한다(기능 나열 금지 — 이 문장이 카드의 결론 다음으로 강조된다)
+      expect(g.fill.gone, `${g.axis} gone은 수고가 사라진다고 말해야 한다`).toMatch(/없어집니다|사라집니다|줄어듭니다|풀립니다/);
+    }
     expect(r.plan30.every((s) => (s as Record<string, unknown>).footnote === undefined)).toBe(true);
   });
 
   it('킥 변형 — 같은 축이라도 답변이 다르면 킥이 갈린다', () => {
-    const fillOf = (r: DiagnosisResultV2, axis: string) => r.gaps.find((g) => g.axis === axis)?.fill ?? '';
+    const fillOf = (r: DiagnosisResultV2, axis: string) => {
+      const f = r.gaps.find((g) => g.axis === axis)?.fill;
+      return f ? `${f.gone} ${f.how}` : '';
+    };
     // 플랫폼에 갇힌 명단 — 플랫폼 종속 전용 킥
     expect(fillOf(buildV2(baseAnswers({ list: 'locked', locked_tool: 'platform' })), 'list'))
-      .toContain('플랫폼에 기대지 않는');
+      .toContain('플랫폼');
     // 문안을 몰라서 발송 0 — AI 문안 킥
     expect(fillOf(buildV2(baseAnswers({ sending: 'zero', no_send_reason: 'no_copy' })), 'sending'))
-      .toContain('AI가 문안을');
+      .toContain('문안');
     // 발송 도구 파편화 — 한곳 통합 킥(sending이 병목 3위 안에 들도록 상위 축을 올린다)
     expect(fillOf(buildV2(baseAnswers({
       targeting: 'behavior', production: 'self', sending: 's1_2', send_tool: 'mixed',
-    })), 'sending')).toContain('한곳에서');
+    })), 'sending')).toContain('한곳에');
     // 제작 병목의 유일한 분기 = 문구 준비 방식
     expect(fillOf(buildV2(baseAnswers({ production: 'none', copy_how: 'no_copy' })), 'production'))
-      .toContain('문구와 이미지를 함께');
+      .toContain('문구와 이미지');
+  });
+
+  it('관찰(답해 주신 것) — 키·값으로 갈라 나온다(화면이 표로 훑게)', () => {
+    const r = buildV2(baseAnswers());
+    const byKey = new Map(r.observation.items.map((it) => [it.key, it.value]));
+    expect(byKey.get('고객 연락처')).toBe('한곳에 모아 관리하고 있어요');
+    expect(byKey.get('가장 최근 발송')).toBe('명단 전체에게 보냈어요');
+    expect(byKey.get('명단을 모아 둔 곳')).toBeTruthy();     // 도구 축도 같은 표에 실린다
+    // 키에 조사가 붙어 있으면 표의 왼쪽 칸이 문장처럼 읽힌다
+    for (const it of r.observation.items) {
+      expect(it.key, '관찰 키 누락').toBeTruthy();
+      expect(it.value, '관찰 값 누락').toBeTruthy();
+      expect(it.key!.endsWith('는') || it.key!.endsWith('은')).toBe(false);
+      expect(it.text, '구 렌더러용 text 유지').toBeTruthy();
+    }
+  });
+
+  it('관찰 — 실측 선치환 항목도 키·값이고 실측 표식을 단다', () => {
+    const r = buildV2(baseAnswers(), { prefill: { sending: { optionKey: 's3_5', sentCount: 4 } } });
+    const measured = r.observation.items.find((it) => it.measured);
+    expect(measured?.key).toBe('지난 30일 발송');
+    expect(measured?.value).toContain('4');
+  });
+
+  it('표지 요약 수치 — 잘 되는 축과 걸리는 축을 서버가 센다(화면 재판정 금지)', () => {
+    const r = buildV2(baseAnswers());
+    const good = r.axes.filter((a) => a.level >= 2).length;
+    const gap = r.axes.filter((a) => a.level <= 1).length;
+    expect(r.tally).toEqual({ good, gap, total: r.axes.length });
+    expect(r.tally.good + r.tally.gap).toBe(r.tally.total);
   });
 
   it('고도화 경로(병목 0) — plan30에 자사명 0(팔 병목이 없는 회사에는 킥을 넣지 않는다)', () => {
@@ -512,5 +546,25 @@ describe('buildDiagnosisResult — v2 스토리형', () => {
     expect(JSON.stringify(r.effects)).not.toContain('원');
     const anchor = r.effects.find((e) => e.label.includes('반복'));
     expect(anchor?.value).toContain('72번'); // c6_10 하한 6 × 12
+  });
+});
+
+/**
+ * v8 읽힘 재설계 — 화면이 칭찬·짚임의 **첫 문장을 제목으로, 나머지를 설명으로** 가른다.
+ * 그 분리가 성립하려면 원장 문장이 항상 2문장 이상이어야 한다. 한 문장짜리가 섞이면
+ * 제목만 있고 설명이 빈 칸이 되어 목록의 리듬이 깨진다 — 그래서 원장 성질을 여기서 잠근다.
+ */
+describe('문구 원장 — 제목·설명 2단 분리 계약', () => {
+  const sentences = (t: string) => t.split(/(?<=[.!?])\s+/).filter(Boolean);
+
+  it('칭찬·조합 관찰문은 전부 2문장 이상이다', () => {
+    const ledger: Array<[string, string]> = [
+      ...Object.entries(PRAISES).map(([k, v]) => [`PRAISES.${k}`, v] as [string, string]),
+      ...Object.entries(LIST_TOOL_PRAISES).map(([k, v]) => [`LIST_TOOL_PRAISES.${k}`, v] as [string, string]),
+      ...Object.entries(ASSET_PRAISE).map(([k, v]) => [`ASSET_PRAISE.${k}`, v] as [string, string]),
+      ...Object.entries(COMBO_OBSERVATIONS).map(([k, v]) => [`COMBO_OBSERVATIONS.${k}`, v] as [string, string]),
+    ];
+    const single = ledger.filter(([, text]) => sentences(text).length < 2).map(([name]) => name);
+    expect(single).toEqual([]);
   });
 });

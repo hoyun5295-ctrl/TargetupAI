@@ -25,6 +25,7 @@ import {
   HANJUL_FILLS, pickVariant, COMBO_OBSERVATIONS, UPGRADE_SUGGESTIONS, MANUAL_COUNT_MIN,
   TOUCH_SUBJECT, fillTouch, TOOL_OBSERVE, EXTERNAL_SEND_TOOLS, DATA_SIDE_SYSTEMS,
   UNIFIED_DISCONNECT_TOOLS, LIST_TOOL_PRAISES, PITCH_NOTE_TOOL_USER,
+  OBSERVE_KEY, OBSERVE_KEY_MEASURED_SENDING, TOOL_OBSERVE_KEY, type HanjulFill,
 } from './marketing-diagnosis-copy';
 
 export type GrantOutcome = 'granted' | 'already_granted' | 'not_eligible' | 'not_applicable' | null;
@@ -80,9 +81,23 @@ export interface DiagnosisCover {
 }
 
 export interface DiagnosisObservationItem {
+  /** 구 렌더러·구 스냅샷용 한 문장(유지). 신규 화면은 key·value를 쓴다. */
   text: string;
+  /** v8 — 표 왼쪽 칸(조사 없는 항목명). 구 스냅샷에는 없다. */
+  key?: string;
+  /** v8 — 표 오른쪽 칸(그 사람이 고른 답 그대로). */
+  value?: string;
   /** true = 답변이 아니라 서버 실측(퍼널 A prefill — 인용형으로 쓰면 거짓이라 서술을 가른다). */
   measured?: boolean;
+}
+
+/** v8 — 표지 요약 수치. 축 등급 판정은 서버 한 곳이 소유한다(화면이 다시 세면 이중 진실). */
+export interface DiagnosisTally {
+  /** level 2 이상 = 자리 잡은 축 */
+  good: number;
+  /** level 1 이하 = 걸리는 축 */
+  gap: number;
+  total: number;
 }
 
 export interface DiagnosisAxisRow {
@@ -101,10 +116,10 @@ export interface DiagnosisGapV2 {
   effect: string;
   direction: string;
   /**
-   * v6 채움 킥 — 인과 4박자째("이 부족함을 한줄로는 이렇게 채워드립니다").
-   * 리포트에서 자사명이 등장하는 **유일한 본문 자리**다(견적 구간 제외 · 위치 계약 테스트가 고정).
+   * v6·v8 채움 킥 — 인과 4박자째. 두 줄(없어지는 수고 · 어떻게 되는가)로 갈라 나온다.
+   * 주어 「한줄로」는 화면 라벨이 소유한다 — 그래서 이 문장들에도 자사명이 없다(위치 계약 테스트가 고정).
    */
-  fill: string;
+  fill: HanjulFill;
 }
 
 export interface DiagnosisPlanStep {
@@ -124,6 +139,8 @@ export interface DiagnosisResultV2 extends DiagnosisResultBase {
   insights: string[];
   gaps: DiagnosisGapV2[];
   plan30: DiagnosisPlanStep[];
+  /** v8 — 표지 요약 수치(잘 되는 축 · 걸리는 축). 구 스냅샷에는 없다. */
+  tally: DiagnosisTally;
   no_match_kind: 'over_range' | 'other' | null;
   /** v5 — 전문 툴·자체 시스템 사용자 전용 견적 구간 한 줄(홍보 위치 계약 안 — 본문 렌더 금지). */
   pitch_note?: string;
@@ -339,7 +356,10 @@ export function buildDiagnosisResult(inp: ReportInputs): DiagnosisResult {
       cause: entry.cause,
       effect: fillTouch(entry.effect, touch),
       direction: fillTouch(DIRECTIONS[axis], touch),
-      fill: fillTouch(pickVariant(HANJUL_FILLS[axis], answers).text, touch),
+      fill: ((f: HanjulFill) => ({
+        gone: fillTouch(f.gone, touch),
+        how: fillTouch(f.how, touch),
+      }))(pickVariant(HANJUL_FILLS[axis], answers).value),
     });
   }
 
@@ -392,10 +412,16 @@ export function buildDiagnosisResult(inp: ReportInputs): DiagnosisResult {
     if (axis === 'sending' && prefill?.sending) {
       obsItems.push({
         text: `지난 30일 동안 실제로 ${prefill.sending.sentCount.toLocaleString()}번의 발송이 나갔어요.`,
+        key: OBSERVE_KEY_MEASURED_SENDING,
+        value: `${prefill.sending.sentCount.toLocaleString()}번`,
         measured: true,
       });
     } else {
-      obsItems.push({ text: `${OBSERVE_LEAD[axis]} 「${v.optionLabel}」${obsItems.length === 0 ? '라고 답해 주셨어요' : ''}.` });
+      obsItems.push({
+        text: `${OBSERVE_LEAD[axis]} 「${v.optionLabel}」${obsItems.length === 0 ? '라고 답해 주셨어요' : ''}.`,
+        key: OBSERVE_KEY[axis],
+        value: v.optionLabel,
+      });
     }
   }
   // v4 — 도구 스택 답도 들은 것에 되돌려준다(ERP·CRM·발송 도구가 리포트에 무흔적이면 묻지 말았어야 할 문항)
@@ -404,7 +430,13 @@ export function buildDiagnosisResult(inp: ReportInputs): DiagnosisResult {
     if (!a) continue;
     const q = definition.questions.find((x) => x.key === toolKey);
     const opt = q?.options.find((o) => o.key === a);
-    if (opt) obsItems.push({ text: `${TOOL_OBSERVE[toolKey]} 「${opt.label}」.` });
+    if (opt) {
+      obsItems.push({
+        text: `${TOOL_OBSERVE[toolKey]} 「${opt.label}」.`,
+        key: TOOL_OBSERVE_KEY[toolKey],
+        value: opt.label,
+      });
+    }
   }
   const observation = {
     items: obsItems,
@@ -424,7 +456,7 @@ export function buildDiagnosisResult(inp: ReportInputs): DiagnosisResult {
     plan30.push({
       week: weekLabels[Math.min(plan30.length, weekLabels.length - 1)],
       title: AXIS_META[gap.axis].label,
-      action: fillTouch(picked.text, touch),
+      action: fillTouch(picked.value, touch),
     });
   }
   if (plan30.length === 0) {
@@ -489,6 +521,12 @@ export function buildDiagnosisResult(inp: ReportInputs): DiagnosisResult {
     insights,
     gaps,
     plan30,
+    // 표지 요약 수치 — 판정은 여기 한 곳뿐이다(화면이 axes로 다시 세면 기준이 갈린다)
+    tally: {
+      good: axes.filter((a) => a.level >= 2).length,
+      gap: axes.filter((a) => a.level <= 1).length,
+      total: axes.length,
+    },
     ...(toolUser ? { pitch_note: PITCH_NOTE_TOOL_USER } : {}),
   };
 }

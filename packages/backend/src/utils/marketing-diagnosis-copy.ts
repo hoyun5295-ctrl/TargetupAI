@@ -91,6 +91,23 @@ export const COVER_GAP: Partial<Record<DiagnosisAxis, Partial<Record<0 | 1, stri
   },
 };
 
+/**
+ * v8 — 관찰 표의 왼쪽 칸(키). OBSERVE_LEAD에서 조사(은/는)를 뺀 형태다.
+ * 화면이 문장 나열이 아니라 `키 : 값` 표로 그리므로 조사가 붙으면 왼쪽 칸이 문장처럼 읽힌다.
+ * 앞말에서 기계적으로 잘라내지 않는다 — 조사 규칙은 예외가 많아 원장을 따로 갖는 편이 안전하다.
+ */
+export const OBSERVE_KEY: Record<DiagnosisAxis, string> = {
+  list: '고객 연락처',
+  targeting: '가장 최근 발송',
+  sending: '지난 한 달 발송',
+  production: '콘텐츠 제작',
+  repeat: '반복 발송',
+  measure: '결과 확인',
+};
+
+/** v8 — 실측 선치환(퍼널 A) 관찰의 키. 값은 조립 시점에 건수로 채운다. */
+export const OBSERVE_KEY_MEASURED_SENDING = '지난 30일 발송';
+
 /** 관찰 블록의 축별 앞말 — 뒤에 「선택지 라벨」 인용이 붙는다(라벨이 문장형이라 조사 불필요). */
 export const OBSERVE_LEAD: Record<DiagnosisAxis, string> = {
   list: '고객 연락처는',
@@ -208,24 +225,24 @@ export const DIRECTIONS: Record<DiagnosisAxis, string> = {
  * 변형 표의 공통 모양 — 30일 실행 처방(PRESCRIPTIONS)과 병목 킥(HANJUL_FILLS)이 같은 규약을 쓴다.
  * variant key = `${질문key}:${답key}` · **표에 적은 순서가 곧 우선순위**(구체적인 판정을 위에 둔다).
  */
-export interface VariantTable {
-  default: string;
-  variants?: Record<string, string>;
+export interface VariantTable<T = string> {
+  default: T;
+  variants?: Record<string, T>;
 }
 
 /**
  * 변형 선택 — 첫 매칭에서 멈춘다. 선택 로직은 이 한 벌뿐이다(표마다 복사하면 규약이 갈린다).
  * variantKey는 호출부가 특수 처리(NO_PRESCRIPTION_VARIANTS 등)를 판정하는 데 쓴다.
  */
-export function pickVariant(
-  table: VariantTable,
+export function pickVariant<T>(
+  table: VariantTable<T>,
   answers: Record<string, string>,
-): { variantKey: string | null; text: string } {
-  for (const [variantKey, text] of Object.entries(table.variants ?? {})) {
+): { variantKey: string | null; value: T } {
+  for (const [variantKey, value] of Object.entries(table.variants ?? {}) as Array<[string, T]>) {
     const [qKey, aKey] = variantKey.split(':');
-    if (answers[qKey] === aKey) return { variantKey, text };
+    if (answers[qKey] === aKey) return { variantKey, value };
   }
-  return { variantKey: null, text: table.default };
+  return { variantKey: null, value: table.default };
 }
 
 /**
@@ -299,61 +316,135 @@ export const PRESCRIPTIONS: Record<DiagnosisAxis, VariantTable> = {
 /** measure_reason:no_need — 처방하지 않는다(억지 처방 금지 §3-6). 이 키가 오면 measure 처방을 생략한다. */
 export const NO_PRESCRIPTION_VARIANTS = new Set(['measure_reason:no_need']);
 
+/** 병목 카드 채움 킥 — 두 줄로 갈라 쓴다(첫 줄이 카드의 두 번째 강조, 둘째 줄이 방법). */
+export interface HanjulFill {
+  /** 없어지는 수고 — 기능 이름이 아니라 **그 사람이 안 해도 되는 일**을 지목한다. */
+  gone: string;
+  /** 그래서 어떻게 되는가 — 한 줄. */
+  how: string;
+}
+
 /**
- * v6 — 병목 채움 킥("이 부족함을 한줄로는 이렇게 채워드립니다" · Harold 확정 2026-08-16).
+ * v6·v8 — 병목 채움 킥("이 부족함을 한줄로는 이렇게 채워드립니다" · Harold 확정 2026-08-16).
  * 병목 카드 인과 4박자째로 붙는다(heard → cause → effect → direction → **fill**).
  * 30일 실행 각주(v5 FOOTNOTES)는 이 킥으로 대체돼 폐지됐다 — 같은 말을 두 곳에서 하지 않는다.
  *
- * 집필 규약
- *   - 문장은 "한줄로는"으로 시작해 **실존 기능이 실제로 하는 동작**만 말한다
- *     (고객 통합·세그먼트·AI 문안/이미지·자동 발송·발송 결과·자사몰 연동·수신거부 관리).
- *   - 수치 약속 금지(원·%·회 0) · 문장 속 대시 금지 · {t} 접점 슬롯 허용.
+ * 집필 규약 (★v8 개정 — "기능 소개"에서 "없어지는 수고"로)
+ *   - **주어 「한줄로」를 쓰지 않는다.** 화면 라벨(「한줄로에서는」)이 주어를 소유한다 —
+ *     그래서 서버가 만드는 리포트 문장 전체에 자사명이 0이 되고, 삭제 테스트가 구조로 보장된다.
+ *   - `gone` = "~하는 일이 없어집니다/사라집니다/줄어듭니다/풀립니다"(계약 테스트가 어미를 강제).
+ *     effect가 말한 손실과 짝이 맞아야 한다 — 기능 나열은 반려 대상이다.
+ *   - `how` = 실존 기능이 실제로 하는 동작 한 줄(고객 통합·세그먼트·AI 문안/이미지·자동 발송·
+ *     발송 결과·자사몰 연동·수신거부 관리). 수치·기간 약속 0 · 문장 속 대시 0 · {t} 슬롯 허용.
  *   - 변형 키는 **그 축이 병목일 때 열리는 분기**만 쓴다(도달 가능성 = seed 계약 테스트가 강제).
  */
-export const HANJUL_FILLS: Record<DiagnosisAxis, VariantTable> = {
+export const HANJUL_FILLS: Record<DiagnosisAxis, VariantTable<HanjulFill>> = {
   list: {
-    default: '한줄로는 포스기·쇼핑몰·엑셀의 고객을 자동으로 한 명단에 모아, 모으는 손이 멈춰도 명단이 계속 자랍니다.',
+    default: {
+      gone: '흩어진 연락처를 모으고 정리하는 일이 없어집니다.',
+      how: '포스기와 쇼핑몰, 엑셀의 고객이 자동으로 한 명단에 쌓입니다.',
+    },
     variants: {
-      'locked_tool:platform': '한줄로는 매장에서 남긴 연락처가 바로 발송 가능한 내 명단이 되게 합니다. 플랫폼에 기대지 않는 재{t} 통로가 생겨요.',
-      'locked_tool:erp': '한줄로는 자체 시스템의 고객 명단을 자동으로 동기화해, 내보내기 없이 바로 발송 대상으로 씁니다.',
-      'inflow_capture:no_capture': '한줄로는 자사몰과 예약 화면에서 남긴 연락처가 그대로 명단에 담기게 이어 줍니다.',
+      'locked_tool:platform': {
+        gone: '플랫폼 밖으로 고객을 부르지 못하는 상태가 풀립니다.',
+        how: '매장에서 남긴 연락처가 바로 발송할 수 있는 내 명단이 됩니다.',
+      },
+      'locked_tool:erp': {
+        gone: '명단을 내보내고 옮기는 일이 없어집니다.',
+        how: '자체 시스템의 고객이 자동으로 동기화돼 그대로 발송 대상이 됩니다.',
+      },
+      'inflow_capture:no_capture': {
+        gone: '광고로 온 고객이 그냥 지나가는 일이 줄어듭니다.',
+        how: '자사몰과 예약 화면에서 남긴 연락처가 그대로 명단에 담깁니다.',
+      },
     },
   },
   targeting: {
-    default: '한줄로는 구매 이력과 방문일로 받을 사람을 클릭 몇 번에 고르고, 그 조건을 저장해 다음에도 그대로 씁니다.',
+    default: {
+      gone: '받을 사람을 매번 새로 추리는 일이 없어집니다.',
+      how: '구매 이력으로 한 번 고르면 그 조건이 저장돼, 다음엔 눌러서 바로 보냅니다.',
+    },
     variants: {
-      'unified_tool:crm': '한줄로는 CRM에서 하던 고객 구분을 발송까지 한 번에 잇습니다. 고른 대상이 그대로 발송 명단이 돼요.',
-      'optout_check:not_checked': '한줄로는 수신거부한 고객을 자동으로 빼고 보내서, 따로 확인하지 않아도 안 나갈 곳에는 안 나갑니다.',
+      'unified_tool:crm': {
+        gone: 'CRM에서 고른 고객을 발송 쪽으로 옮기는 일이 없어집니다.',
+        how: '고른 대상이 그대로 발송 명단이 됩니다.',
+      },
+      'optout_check:not_checked': {
+        gone: '수신거부를 따로 확인하는 일이 없어집니다.',
+        how: '거부한 고객은 자동으로 빠진 채 발송됩니다.',
+      },
     },
   },
   sending: {
-    default: '한줄로는 문안 작성부터 발송과 결과 확인까지 한 화면에서 끝납니다. 문안이 막히면 AI가 대신 써 드려요.',
+    default: {
+      gone: '보내기까지 화면을 옮겨 다니는 일이 없어집니다.',
+      how: '문안 작성부터 발송과 결과 확인까지 한곳에서 끝납니다.',
+    },
     variants: {
-      'no_send_reason:no_copy': '한줄로는 무엇을 팔지와 혜택만 고르면 AI가 문안을 대신 써 드립니다. 백지에서 시작하지 않아도 돼요.',
-      'no_send_reason:no_time': '한줄로는 만들고 보내는 과정을 한 화면으로 줄여, 한 번의 발송이 훨씬 짧은 시간에 끝납니다.',
-      'send_tool:mixed': '한줄로는 문자·알림톡·이메일·모바일 DM을 한곳에서 보내고 결과도 한곳에 모읍니다.',
+      'no_send_reason:no_copy': {
+        gone: '무엇을 써야 할지 막히는 일이 없어집니다.',
+        how: '팔 것과 혜택만 고르면 AI가 문안을 대신 써 드립니다.',
+      },
+      'no_send_reason:no_time': {
+        gone: '한 번 보내려고 손이 여러 번 가는 일이 없어집니다.',
+        how: '만들고 보내는 과정이 한 화면으로 줄어듭니다.',
+      },
+      'send_tool:mixed': {
+        gone: '보낼 곳을 옮겨 다니는 일이 없어집니다.',
+        how: '문자·알림톡·이메일·모바일 DM을 한곳에서 보내고 결과도 한곳에 모입니다.',
+      },
     },
   },
   production: {
-    default: '한줄로는 보낼 이미지와 안내 화면을 AI가 만들어 줍니다. 상품과 문구만 고르면 완성돼요.',
+    default: {
+      gone: '이미지를 만들 사람을 따로 찾는 일이 없어집니다.',
+      how: '상품과 문구만 고르면 보낼 이미지와 안내 화면이 완성됩니다.',
+    },
     variants: {
-      'copy_how:no_copy': '한줄로는 무엇을 파는지만 고르면 문구와 이미지를 함께 만들어 줍니다. 빈손으로 보내지 않아도 돼요.',
-      'copy_how:new': '한줄로는 매번 새로 쓰던 문구를 AI가 먼저 써 주고, 어울리는 이미지까지 같이 만들어 줍니다.',
-      'copy_how:reuse': '한줄로는 예전 문구를 고쳐 쓰는 대신, 지금 파는 상품에 맞는 문구와 이미지를 새로 만들어 줍니다.',
+      'copy_how:no_copy': {
+        gone: '문구 없이 그냥 보내는 일이 없어집니다.',
+        how: '무엇을 파는지만 고르면 문구와 이미지가 함께 만들어집니다.',
+      },
+      'copy_how:new': {
+        gone: '매번 문구를 새로 쓰는 일이 없어집니다.',
+        how: 'AI가 먼저 써 주고, 어울리는 이미지까지 같이 만들어집니다.',
+      },
+      'copy_how:reuse': {
+        gone: '예전 문구를 찾아 고쳐 쓰는 일이 없어집니다.',
+        how: '지금 파는 상품에 맞는 문구와 이미지가 새로 만들어집니다.',
+      },
     },
   },
   repeat: {
-    default: '한줄로는 생일이나 재{t} 안내를 조건만 정하면 자동으로 보냅니다. 사람 기억이 아니라 시스템이 챙겨요.',
+    default: {
+      gone: '보낼 때를 기억하고 챙기는 일이 없어집니다.',
+      how: '생일이나 재{t} 안내가 조건만 정해 두면 자동으로 나갑니다.',
+    },
     variants: {
-      'manual_count:c6_10': '한줄로는 매달 손으로 챙기던 그 발송들을 조건 한 번 설정으로 자동으로 돌립니다.',
-      'manual_count:c10p': '한줄로는 매달 손으로 챙기던 그 발송들을 조건 한 번 설정으로 자동으로 돌립니다.',
+      'manual_count:c6_10': {
+        gone: '매달 손으로 챙기던 발송이 없어집니다.',
+        how: '조건을 한 번 정해 두면 그다음부터는 자동으로 나갑니다.',
+      },
+      'manual_count:c10p': {
+        gone: '매달 손으로 챙기던 발송이 없어집니다.',
+        how: '조건을 한 번 정해 두면 그다음부터는 자동으로 나갑니다.',
+      },
     },
   },
   measure: {
-    default: '한줄로는 보낸 뒤 클릭과 방문까지 발송 결과에 자동으로 담아, 다음 발송을 바꿀 근거가 쌓입니다.',
+    default: {
+      gone: '결과를 찾아다니는 일이 없어집니다.',
+      how: '보낸 뒤 클릭과 방문까지 발송 결과에 자동으로 담깁니다.',
+    },
     variants: {
-      'measure_reason:dont_know': '한줄로는 발송이 끝나면 결과가 같은 화면에 바로 떠서, 어디서 보는지 찾아다닐 필요가 없습니다.',
-      'measure_reason:no_time': '한줄로는 결과를 찾아보는 게 아니라 보이는 곳에 두어, 스치듯 봐도 흐름이 잡힙니다.',
+      'measure_reason:dont_know': {
+        gone: '어디서 보는지 헤매는 일이 없어집니다.',
+        how: '발송이 끝나면 결과가 같은 화면에 바로 뜹니다.',
+      },
+      'measure_reason:no_time': {
+        gone: '결과를 보려고 따로 시간을 내는 일이 없어집니다.',
+        how: '보이는 곳에 두어 스치듯 봐도 흐름이 잡힙니다.',
+      },
     },
   },
 };
@@ -383,6 +474,13 @@ export const TOOL_OBSERVE: Record<string, string> = {
   locked_tool: '고객 데이터가 있는 곳은',
   unified_tool: '명단을 모아 둔 곳은',
   send_tool: '발송에 쓰는 도구는',
+};
+
+/** v8 — 도구 축의 관찰 표 키(조사 없음 · OBSERVE_KEY와 같은 이유). */
+export const TOOL_OBSERVE_KEY: Record<string, string> = {
+  locked_tool: '고객 데이터가 있는 곳',
+  unified_tool: '명단을 모아 둔 곳',
+  send_tool: '발송에 쓰는 도구',
 };
 
 /** v4 — 발송 도구 중 "데이터가 사는 곳과 분리된 외부 도구" 판정(디스커넥트 조합 입력). */

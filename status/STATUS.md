@@ -53,7 +53,7 @@
 
 ### 다음 세션 (예정)
 > 경위·범위·확정 사실은 링크가 소유한다. 여기엔 제목·다음 한 수·호출어만.
-> ⓪ **★AI 마케팅 진단 — 0816 v6(병목 채움 킥)·v7(장 넘김 리포트) 코드 완료·배포 대기** — 호출어 **"마케팅 진단"** → **[FEATURE-MARKETING-DIAGNOSIS.md](../docs/FEATURE-MARKETING-DIAGNOSIS.md)가 전부 소유**(§12 v6·v7 절). seed·SQL·DDL 0 — 코드 배포만. **다음 한 수 = 실측**(v6 K-1~K-7 · v7 P-1~P-6)
+> ⓪ **★AI 마케팅 진단 — 0816 v6(병목 채움 킥)·v7(장 넘김)·v8(읽힘 재설계) 코드 완료·배포 대기** — 호출어 **"마케팅 진단"** → **[FEATURE-MARKETING-DIAGNOSIS.md](../docs/FEATURE-MARKETING-DIAGNOSIS.md)가 전부 소유**(§12 v6·v7 절). seed·SQL·DDL 0 — 코드 배포만. **다음 한 수 = 실측**(v6 K-1~K-7 · v7 P-1~P-6)
 > ① **템플릿** — 호출어 **"템플릿"** → **[FEATURE-ALIMTALK-TEMPLATE.md](../docs/FEATURE-ALIMTALK-TEMPLATE.md)가 전부 소유**(구조·불변 원칙·이관 절차·이력·남은 것). 여기 다시 쓰지 않는다. 0804 = IMC 이관 실행 화면 신설·게이트 테넌트 격리·메트로시티 이관.
 > ② **0718 성능 후속** — 관측 사이클 1회전: 1순위 campaigns 발송 폴러 인덱스(EXPLAIN 후 처방) · 2순위 `balance_transactions` 잔액 SUM N+1(호출처 추적) · 그 후 M3/롤업. [핸드오프](docs/2026-07-18-frontend-splitting-incident-handoff.md) · [[project_2026_0717_dashboard_performance]]
 > ③ **아임웹·아이디룩 시연** — 스토어 등록 확인 → 테스트 몰 OAuth 리허설(pm2 로그+회원가입 1건 webhook) → 시연. INTEGRATIONS.md 아임웹 카드 · [[project_2026_0719_imweb_appstore_idlook]]
