@@ -17,17 +17,19 @@ import pool, { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { handleDbMigrationError } from '../utils/db-migration-error';
 import { computeMonthlyUsage } from '../utils/monthly-usage';
-import { validateAnswers, recommendPlan, visibleQuestions, type DiagnosisDefinition } from '../utils/plan-recommend';
-import { buildDiagnosisResult, type ReportInputs } from '../utils/marketing-diagnosis-report';
+import { validateAnswers, recommendPlan, type DiagnosisDefinition } from '../utils/plan-recommend';
+import { buildDiagnosisResult } from '../utils/marketing-diagnosis-report';
 import {
   loadActiveQuestionSet, handleDefinitionInvalid, DIAGNOSIS_PLAN_ROWS_SQL,
-  projectQuestions, computeSendingPrefill,
+  projectQuestions,
 } from '../utils/marketing-diagnosis-store';
 import {
   judgeGrantEligibility,
   executeGrant,
   hasTrialHistory,
   GrantConflictError,
+  isDiagnosisRunner,
+  judgeDiagnosisEligible,
 } from '../utils/marketing-diagnosis-grant';
 
 const router = Router();
@@ -39,6 +41,24 @@ function activeSetMissing(res: Response) {
     code: 'DB_MIGRATION_PENDING',
     error: 'DB 마이그레이션 필요 — diagnosis_question_sets 활성 문항 세트(seed) 실행 요청',
   });
+}
+
+/**
+ * 진단 진입·제출 게이트 — 고객사 관리자 전용(판정 = grant CT 한 벌).
+ * 화면은 /state의 eligible만 소비하지만, 막는 것은 언제나 서버다(§3-1).
+ * 열람(/report)·상담(/consult)은 막지 않는다 — 회사 상태를 바꾸지 않는 읽기 축이다.
+ * 반환 true = 이미 403을 보냈다(호출부는 즉시 return).
+ */
+function blockedForNonAdmin(req: Request, res: Response): boolean {
+  if (isDiagnosisRunner(req.user?.userType)) return false;
+  // 4xx 무흔적 금지(기능 문서 §9)
+  console.warn(`[marketing-diagnosis] 403 ADMIN_ONLY (company=${req.user?.companyId}, user=${req.user?.userId}, type=${req.user?.userType})`);
+  res.status(403).json({
+    success: false,
+    code: 'ADMIN_ONLY',
+    error: '진단은 고객사 관리자 계정에서 진행할 수 있어요.',
+  });
+  return true;
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -69,7 +89,8 @@ router.get('/state', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     }
     const comp = compRes.rows[0];
-    const eligible = comp.plan_code === 'FREE';
+    // 요금제 × 역할 — 담당자에게는 진단 자체가 존재하지 않는다(히어로·초대·모달 전부 이 값이 판정)
+    const eligible = judgeDiagnosisEligible({ planCode: comp.plan_code, userType: req.user?.userType });
 
     let grantable: 'available' | 'already_granted' | 'not_eligible' | 'not_applicable';
     if (!eligible) grantable = 'not_applicable';
@@ -94,26 +115,23 @@ router.get('/state', async (req: Request, res: Response) => {
 });
 
 // ────────────────────────────────────────────────────────────────────
-// GET /questions — 퍼널 A 문항(공개와 같은 투영 함수 — 단일 진실) + sending 실측 선치환(v3)
-//   선치환 값은 화면 안내용일 뿐 — 제출 시 서버가 재계산해 쓴다(프론트 값 불신 · 화면은 게이트가 아니다).
+// GET /questions — 퍼널 A 문항(공개와 같은 투영 함수 — 단일 진실)
+//
+// ★2026-08-17 sending 실측 선치환 폐지(Harold 확정). 세던 것은 30일 내 `campaigns` **행 수**라
+//   수신자 1명짜리 테스트 발송 6건도 「6번 이상」이 됐고, 그게 발송 실행 축을 상위 등급으로 만든 뒤
+//   리포트에 「실측」 배지까지 달았다. 게다가 사용자는 그 문항을 보지 못해 정정할 수도 없었다.
+//   문항이 묻는 것(고객에게 실제로 몇 번 닿았나)을 우리 데이터로 정확히 못 잡는다 — 그래서 묻는다.
+//   위저드·판정 CT의 prefilled 배관은 남긴다(범용 장치 — 계약 테스트가 가시성 판정을 잠근다).
 // ────────────────────────────────────────────────────────────────────
 router.get('/questions', async (req: Request, res: Response) => {
   const companyId = req.user?.companyId;
   if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+  if (blockedForNonAdmin(req, res)) return;
   try {
     const activeSet = await loadActiveQuestionSet();
     if (!activeSet) return activeSetMissing(res);
     const projected = projectQuestions(activeSet.definition);
-    const prefilled: Record<string, string> = {};
-    const sendingGate = activeSet.definition.questions.find((q) => q.axis === 'sending');
-    if (sendingGate) {
-      const prefill = await computeSendingPrefill(companyId);
-      // 문항 세트가 바뀌어 매핑 키가 실존하지 않으면 선치환을 조용히 끈다(fail-safe — 콘텐츠 결합 가드)
-      if (prefill && sendingGate.options.some((o) => o.key === prefill.optionKey)) {
-        prefilled[sendingGate.key] = prefill.optionKey;
-      }
-    }
-    return res.json({ success: true, version: activeSet.version, ...projected, prefilled });
+    return res.json({ success: true, version: activeSet.version, ...projected });
   } catch (err) {
     if (handleDefinitionInvalid(err, res)) return;
     if (handleDbMigrationError(err, res, 'diagnosis_question_sets')) return;
@@ -151,6 +169,7 @@ router.get('/report', async (req: Request, res: Response) => {
 router.post('/invited', async (req: Request, res: Response) => {
   const companyId = req.user?.companyId;
   if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+  if (blockedForNonAdmin(req, res)) return;
   try {
     await query(
       `INSERT INTO diagnosis_invites (company_id) VALUES ($1) ON CONFLICT (company_id) DO NOTHING`,
@@ -171,6 +190,8 @@ router.post('/submit', async (req: Request, res: Response) => {
   const companyId = req.user?.companyId;
   const userId = req.user?.userId;
   if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+  // 지급이 회사 계약 상태를 바꾼다 — 화면을 우회해 직접 호출해도 여기서 막힌다
+  if (blockedForNonAdmin(req, res)) return;
   try {
     // 읽기 준비는 전부 트랜잭션 밖(전역 query) — tx 안에서 풀 커넥션을 추가 요구하지 않는다(§4-1).
     // definition 구조 검증은 로더가 소유한다(위반 = catch의 handleDefinitionInvalid → 503).
@@ -200,38 +221,12 @@ router.post('/submit', async (req: Request, res: Response) => {
       });
     }
 
-    // v3 — sending 축 실측 선치환: 실측이 있으면 **서버값이 진실**이다(★Codex 1R — 클라이언트가
-    // 보낸 값은 항상 덮어쓴다. 화면은 게이트가 아니다). 선치환 값은 answers에 저장하지 않는다(M1).
-    const clientAnswers: Record<string, string> = { ...(answers as Record<string, string>) };
-    const merged: Record<string, string> = { ...clientAnswers };
-    let optionalKeys: Set<string> | undefined;
-    let prefillInfo: ReportInputs['prefill'];
+    // ★2026-08-17 선치환 폐지 — 답은 전부 사용자가 답한 것이다. 저장분과 계산분이 같으므로
+    //   한 벌만 둔다(둘로 나뉘어 있던 이유가 실측 축을 저장에서 빼는 것뿐이었다).
+    const submitted: Record<string, string> = { ...(answers as Record<string, string>) };
     const def: DiagnosisDefinition = activeSet.definition;
-    const sendingGate = def.questions.find((q) => q.axis === 'sending');
-    if (sendingGate) {
-      const prefill = await computeSendingPrefill(companyId);
-      if (prefill && sendingGate.options.some((o) => o.key === prefill.optionKey)) {
-        merged[sendingGate.key] = prefill.optionKey;
-        delete clientAnswers[sendingGate.key];   // 실측 축은 저장하지 않는다(둔갑 차단)
-        prefillInfo = { sending: { optionKey: prefill.optionKey, sentCount: prefill.sentCount } };
-        // 게이트를 참조하는 분기 = 필수 완화 키(로드·제출 시점 실측 차로 경로가 어긋나는 창 흡수)
-        optionalKeys = new Set([sendingGate.key]);
-        for (const q of def.questions) {
-          if (q.show_when?.q === sendingGate.key) optionalKeys.add(q.key);
-        }
-        // 서버 게이트 기준으로 비가시가 된 잔재 분기 답은 서버가 정리한다(★Codex 1R —
-        // 비가시 답이 처방 변형 입력으로 흘러드는 통로 차단. 그 밖의 비가시 답은 여전히 400)
-        const visibleNow = new Set(visibleQuestions(def, merged).map((q) => q.key));
-        for (const k of optionalKeys) {
-          if (k !== sendingGate.key && merged[k] !== undefined && !visibleNow.has(k)) {
-            delete merged[k];
-            delete clientAnswers[k];
-          }
-        }
-      }
-    }
 
-    const ansCheck = validateAnswers(def, merged, { optionalKeys });
+    const ansCheck = validateAnswers(def, submitted);
     if (!ansCheck.ok) {
       // 4xx 무흔적 금지(기능 문서 §9) — 거절 사유를 서버에도 남긴다
       console.warn(`[marketing-diagnosis] submit 400 (company=${companyId}): ${ansCheck.error}`);
@@ -243,7 +238,7 @@ router.post('/submit', async (req: Request, res: Response) => {
       computeMonthlyUsage(companyId),
       query(`SELECT brand_description, brand_tone FROM companies WHERE id = $1`, [companyId]),
     ]);
-    const recommend = recommendPlan(def, merged, planRes.rows, { optionalKeys });
+    const recommend = recommendPlan(def, submitted, planRes.rows);
     const brandVoiceMissing = !(brandRes.rows[0]?.brand_description || brandRes.rows[0]?.brand_tone);
 
     const client = await pool.connect();
@@ -281,12 +276,11 @@ router.post('/submit', async (req: Request, res: Response) => {
 
       const result = buildDiagnosisResult({
         definition: def,
-        answers: merged,
+        answers: submitted,
         recommend,
         usage,
         brandVoiceMissing,
         grantOutcome: outcome,
-        prefill: prefillInfo,
       });
 
       // ⓑ·ⓒ 저장 — funnel A 부분 UNIQUE가 동시 제출 경쟁의 최후 방어(충돌 = 409)
@@ -302,7 +296,7 @@ router.post('/submit', async (req: Request, res: Response) => {
             companyId,
             userId ?? null,
             activeSet.version,
-            JSON.stringify(clientAnswers),   // 실측 선치환 축·잔재 분기 제거분(효과 답변 원장 — M1·Codex 1R)
+            JSON.stringify(submitted),   // 사용자가 답한 그대로가 원장이다(선치환 폐지 — 서버가 덮어쓰는 축 0)
             JSON.stringify(result),
             recommend.plan?.id ?? null,
             recommend.plan ? String(recommend.plan.plan_code) : null,

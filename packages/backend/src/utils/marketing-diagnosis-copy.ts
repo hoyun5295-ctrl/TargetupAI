@@ -105,9 +105,6 @@ export const OBSERVE_KEY: Record<DiagnosisAxis, string> = {
   measure: '결과 확인',
 };
 
-/** v8 — 실측 선치환(퍼널 A) 관찰의 키. 값은 조립 시점에 건수로 채운다. */
-export const OBSERVE_KEY_MEASURED_SENDING = '지난 30일 발송';
-
 /** 관찰 블록의 축별 앞말 — 뒤에 「선택지 라벨」 인용이 붙는다(라벨이 문장형이라 조사 불필요). */
 export const OBSERVE_LEAD: Record<DiagnosisAxis, string> = {
   list: '고객 연락처는',

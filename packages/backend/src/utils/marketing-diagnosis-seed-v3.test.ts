@@ -7,7 +7,6 @@
  *      Harold가 실행할 SQL이 활성화 즉시 503이 되는 사고를 배포 전에 잡는다(V-11의 역방향).
  *   2. 문진 안 광고 0 — 문항·선택지·힌트에 자사명 금지(v2 want_hanjul 같은 "문진 속 배너" 재발 방지).
  *   3. 사용자 노출 문구에 문장 속 대시(—) 0 · est_label에 문항 수 표기 금지(m5 — 분기형에서 숫자는 거짓).
- *   4. 실측 선치환 매핑(s1_2/s3_5/s6p)이 sending 게이트에 실존한다(computeSendingPrefill 결합).
  *
  * 설계서 경로가 바뀌면 이 테스트를 함께 옮긴다(계약: 백엔드 러너가 문서를 읽는 선례 — LESSONS_FRONTEND 11행).
  */
@@ -55,13 +54,6 @@ describe('seed v5 (현행 활성 seed 원문 — scripts/sql)', () => {
     }
     expect(surfaces.join(' ')).not.toContain('—');
     expect(def.meta?.est_label ?? '').not.toMatch(/\d+\s*문항/);
-  });
-
-  it('실측 선치환 매핑 키(s1_2·s3_5·s6p)가 sending 게이트에 실존한다', () => {
-    const sending = def.questions.find((q) => q.axis === 'sending');
-    expect(sending).toBeDefined();
-    const keys = new Set(sending!.options.map((o) => o.key));
-    for (const k of ['s1_2', 's3_5', 's6p']) expect(keys.has(k)).toBe(true);
   });
 
   /**

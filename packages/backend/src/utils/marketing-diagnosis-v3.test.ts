@@ -3,10 +3,10 @@
  *
  * 못 박는 것
  *   1. 분기 스키마 검증(로더 fail-closed): 전방 참조·타 섹션·분기의 분기·게이트 show_when·분기 requires 전부 거절.
- *   2. answers 검증 = 가시 문항 전부 + 비가시 답 거부(고아 답 400) + optionalKeys(실측 선치환) 완화.
+ *   2. answers 검증 = 가시 문항 전부 + 비가시 답 거부(고아 답 400) + optionalKeys 완화 경로.
  *   3. 판정 = 관문 사다리(선행 축이 결정 — 총점 없음) · unknown 3개 = 단계 미발행.
  *   4. 쌍둥이 테스트 — 답 1개 차이 = 리포트 문장 실차이(V-4).
- *   5. 홍보 위치 계약 — 자사명은 plan30 각주(≤2)에만. 표지·관찰·칭찬·병목·판정·짚임에 0(V-6).
+ *   5. 홍보 위치 계약 — 서버 문장 전체에 자사명 0(주어는 화면 라벨이 소유 · v8).
  *   6. no_match_kind — 최고가 후보도 수치 미달 = over_range(V-9).
  */
 import { describe, it, expect } from 'vitest';
@@ -425,13 +425,6 @@ describe('buildDiagnosisResult — v2 스토리형', () => {
     }
   });
 
-  it('관찰 — 실측 선치환 항목도 키·값이고 실측 표식을 단다', () => {
-    const r = buildV2(baseAnswers(), { prefill: { sending: { optionKey: 's3_5', sentCount: 4 } } });
-    const measured = r.observation.items.find((it) => it.measured);
-    expect(measured?.key).toBe('지난 30일 발송');
-    expect(measured?.value).toContain('4');
-  });
-
   it('표지 요약 수치 — 잘 되는 축과 걸리는 축을 서버가 센다(화면 재판정 금지)', () => {
     const r = buildV2(baseAnswers());
     const good = r.axes.filter((a) => a.level >= 2).length;
@@ -483,13 +476,6 @@ describe('buildDiagnosisResult — v2 스토리형', () => {
   it('"굳이 필요 없어서요"에는 measure 처방을 내지 않는다(억지 처방 금지)', () => {
     const r = buildV2(baseAnswers({ measure: 'counts', measure_reason: 'no_need' }));
     expect(r.plan30.some((s) => s.title === '성과 확인')).toBe(false);
-  });
-
-  it('실측 선치환 — 관찰이 인용형이 아니라 실측 서술 + 실측 표식', () => {
-    const r = buildV2(baseAnswers(), { prefill: { sending: { optionKey: 's3_5', sentCount: 4 } } });
-    const measured = r.observation.items.find((it) => it.measured);
-    expect(measured?.text).toContain('4번');
-    expect(r.observation.source).toContain('실측');
   });
 
   it('「그 외」 업종 = 예시 목업 생략(m2 — 404 iframe 차단)', () => {

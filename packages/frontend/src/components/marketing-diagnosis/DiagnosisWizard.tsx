@@ -18,6 +18,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, ArrowRight, Check, RotateCcw } from 'lucide-react';
 import type { DiagnosisQuestionDto, DiagnosisSectionDto } from './diagnosisApi';
+// 분기 판정 CT — 서버 visibleQuestions와 같은 규칙. 계약 테스트가 실 seed로 두 판정을 대조한다.
+import { visiblePath, pruneAnswers } from '../../utils/diagnosis-branch';
 
 interface Props {
   questions: DiagnosisQuestionDto[];
@@ -34,49 +36,6 @@ interface Props {
 type View =
   | { kind: 'question' }
   | { kind: 'interstitial'; doneSectionKey: string; nextKey: string };
-
-/** 가시 문항 — 서버 visibleQuestions와 같은 판정(show_when 단일 참조·in 포함). */
-function visiblePath(
-  questions: DiagnosisQuestionDto[],
-  answers: Record<string, string>,
-): DiagnosisQuestionDto[] {
-  return questions.filter((q) => {
-    if (!q.show_when) return true;
-    const v = answers[q.show_when.q];
-    return typeof v === 'string' && q.show_when.in.includes(v);
-  });
-}
-
-/** 고아 답 제거 — 비가시 문항의 답을 지우고, 지운 것이 또 다른 분기를 닫을 수 있어 고정점까지 반복. */
-function pruneAnswers(
-  questions: DiagnosisQuestionDto[],
-  answers: Record<string, string>,
-  stash: Record<string, string>,
-): Record<string, string> {
-  let cur = { ...answers };
-  for (let i = 0; i < questions.length; i++) {
-    const visible = new Set(visiblePath(questions, cur).map((q) => q.key));
-    const orphan = Object.keys(cur).filter((k) => !visible.has(k));
-    if (orphan.length === 0) break;
-    for (const k of orphan) {
-      stash[k] = cur[k];
-      delete cur[k];
-    }
-  }
-  // 다시 열린 분기는 stash에서 복원(같은 답으로 돌아온 경우 재질문 생략)
-  for (let i = 0; i < questions.length; i++) {
-    const visible = visiblePath(questions, cur);
-    let restored = false;
-    for (const q of visible) {
-      if (cur[q.key] === undefined && stash[q.key] !== undefined && q.options.some((o) => o.key === stash[q.key])) {
-        cur = { ...cur, [q.key]: stash[q.key] };
-        restored = true;
-      }
-    }
-    if (!restored) break;
-  }
-  return cur;
-}
 
 export default function DiagnosisWizard({
   questions, sections = null, prefilled = {}, draftKey = null, onFinished, busy = false,
@@ -172,7 +131,8 @@ export default function DiagnosisWizard({
   const pick = (optionKey: string) => {
     if (busy || leaving || !current) return;
     const merged = { ...answers, [current.key]: optionKey };
-    const pruned = pruneAnswers(questions, { ...merged }, stashRef.current);
+    // prefilled를 함께 넘긴다 — 빠뜨리면 선치환 게이트가 연 분기의 답이 고아로 지워져 커서가 제자리를 돈다
+    const pruned = pruneAnswers(questions, { ...merged }, stashRef.current, prefilled);
     setAnswers(pruned);
 
     const go = () => { setLeaving(false); advanceFrom(pruned, current.key); };

@@ -12,7 +12,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('./basic-trial', () => ({ grantFreeTrial: vi.fn() }));
 
 import { grantFreeTrial } from './basic-trial';
-import { judgeGrantEligibility, executeGrant, GrantConflictError } from './marketing-diagnosis-grant';
+import {
+  judgeGrantEligibility, executeGrant, GrantConflictError,
+  isDiagnosisRunner, judgeDiagnosisEligible,
+} from './marketing-diagnosis-grant';
 
 const grant = grantFreeTrial as unknown as ReturnType<typeof vi.fn>;
 const COMPANY = 'cccccccc-0000-0000-0000-000000000000';
@@ -56,6 +59,31 @@ function makeClient(opts: ClientOpts = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   grant.mockResolvedValue({ trial_expires_at: '2026-08-23T00:00:00Z' });
+});
+
+/**
+ * ★2026-08-17 Harold 확정 — 진단 진입·제출은 고객사 관리자 전용.
+ * 완주는 회사당 1회이고 되돌릴 수 없으며(§3-3), 7일 체험 지급이 회사 계약 상태를 바꾼다.
+ * 담당자가 답한 진단이 회사의 유일한 기록으로 굳고 체험 1회가 소진되는 것을 막는다.
+ * 문자열 값이 판정의 전부라 여기서 못 박는다(로그인이 `user_type='admin'` → JWT `company_admin`).
+ */
+describe('진단 실행 자격 — 고객사 관리자 전용', () => {
+  it('company_admin만 실행자다', () => {
+    expect(isDiagnosisRunner('company_admin')).toBe(true);
+    expect(isDiagnosisRunner('company_user')).toBe(false);
+    expect(isDiagnosisRunner('super_admin')).toBe(false);
+    expect(isDiagnosisRunner(undefined)).toBe(false);
+    expect(isDiagnosisRunner(null)).toBe(false);
+    expect(isDiagnosisRunner('admin')).toBe(false);   // DB 원값은 JWT 값이 아니다
+  });
+
+  it('eligible = FREE 정확 일치 × 관리자 — 둘 다여야 한다', () => {
+    expect(judgeDiagnosisEligible({ planCode: 'FREE', userType: 'company_admin' })).toBe(true);
+    expect(judgeDiagnosisEligible({ planCode: 'FREE', userType: 'company_user' })).toBe(false);
+    expect(judgeDiagnosisEligible({ planCode: 'STARTER', userType: 'company_admin' })).toBe(false);
+    expect(judgeDiagnosisEligible({ planCode: 'free', userType: 'company_admin' })).toBe(false); // 대문자 정확 일치
+    expect(judgeDiagnosisEligible({ planCode: '', userType: 'company_admin' })).toBe(false);
+  });
 });
 
 describe('judgeGrantEligibility — 판정 순서·4항', () => {

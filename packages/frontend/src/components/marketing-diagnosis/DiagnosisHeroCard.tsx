@@ -2,6 +2,12 @@
  * DiagnosisHeroCard — 대시보드 상시 진입 카드 (2026-08-16 신설 · 설계서 §5-2)
  *
  * 노출은 부모(Dashboard)가 서버 state로 판정한다 — 이 카드는 표시 전용(dismiss 없음·실물 크기).
+ *
+ * ⚠ 이 카드가 놓이는 **대시보드는 라이트 톤**이다(앱 모달은 다크 — 톤이 다른 두 곳을 오간다).
+ *   그래서 배경은 **불투명 색**으로만 칠한다. 알파(`/30` 같은 반투명)는 흰 배경에서 연해져
+ *   흰 글씨가 사라진다 — 2026-08-17 Harold 지적("저게 보이냐")의 원인이 정확히 그것이었다
+ *   (`from-sky-600/30 via-indigo-600/25 to-slate-900`: 앞 두 정거장만 반투명이라 왼쪽은 글씨가
+ *   안 보이고, 불투명한 끝 정거장만 검은 덩어리로 남았다).
  *   variant 'invite' = eligible && !completedAt — 진단 유도(회사명 1인칭 · 가격 단어 0 · NEW 뱃지만.
  *     문항 수 표기 금지 — v3 분기형은 경로마다 문항 수가 달라 숫자 카피가 거짓이 된다)
  *   variant 'trial'  = completedAt && trialExpiresAt > now — 「체험 D-N · 첫 발송 해보기」(D-N = state.trialExpiresAt)
@@ -33,19 +39,19 @@ export default function DiagnosisHeroCard({ variant, companyName, trialExpiresAt
       <button
         type="button"
         onClick={onFirstSend}
-        className="group relative mb-4 w-full overflow-hidden rounded-2xl border border-sky-400/25 bg-gradient-to-r from-sky-600/25 via-indigo-600/20 to-slate-900 px-5 py-4 text-left shadow-sm transition-all hover:border-sky-400/50 hover:shadow-lg sm:px-6 break-keep"
+        className="group relative mb-4 w-full overflow-hidden rounded-2xl bg-gradient-to-r from-indigo-700 via-indigo-600 to-sky-600 px-5 py-4 text-left shadow-lg shadow-indigo-600/20 transition-all hover:shadow-xl hover:shadow-indigo-600/30 sm:px-6 break-keep"
       >
-        <div className="pointer-events-none absolute -right-10 -top-16 h-44 w-44 rounded-full bg-sky-400/10 blur-2xl" aria-hidden />
+        <div className="pointer-events-none absolute -right-10 -top-16 h-44 w-44 rounded-full bg-white/10 blur-2xl" aria-hidden />
         <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-sky-400 to-indigo-500">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/20">
               <Zap className="h-5 w-5 text-white" aria-hidden />
             </span>
             <span>
               <span className="block text-[15px] font-bold tracking-tight text-white sm:text-base">
                 체험이 진행 중이에요 · D-{d}
               </span>
-              <span className="mt-0.5 block text-xs text-white/65 sm:text-[13px]">
+              <span className="mt-0.5 block text-xs text-white/85 sm:text-[13px]">
                 진단 리포트에서 추천받은 기능을 지금 바로 써보세요
               </span>
             </span>
@@ -62,26 +68,26 @@ export default function DiagnosisHeroCard({ variant, companyName, trialExpiresAt
     <button
       type="button"
       onClick={onStart}
-      className="group relative mb-4 w-full overflow-hidden rounded-2xl border border-sky-400/25 bg-gradient-to-r from-sky-600/30 via-indigo-600/25 to-slate-900 px-5 py-4 text-left shadow-sm transition-all hover:border-sky-400/50 hover:shadow-lg sm:px-6 break-keep"
+      className="group relative mb-4 w-full overflow-hidden rounded-2xl bg-gradient-to-r from-indigo-700 via-indigo-600 to-sky-600 px-5 py-4 text-left shadow-lg shadow-indigo-600/20 transition-all hover:shadow-xl hover:shadow-indigo-600/30 sm:px-6 break-keep"
     >
-      <div className="pointer-events-none absolute -right-10 -top-16 h-44 w-44 rounded-full bg-sky-400/10 blur-2xl" aria-hidden />
+      <div className="pointer-events-none absolute -right-10 -top-16 h-44 w-44 rounded-full bg-white/10 blur-2xl" aria-hidden />
       <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          <span className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-sky-400 to-indigo-500">
+          <span className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/20">
             <Stethoscope className="h-5 w-5 text-white" aria-hidden />
-            <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-sky-300 motion-safe:animate-ping" aria-hidden />
-            <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-sky-300" aria-hidden />
+            <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-sky-200 motion-safe:animate-ping" aria-hidden />
+            <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-sky-200" aria-hidden />
           </span>
           <span>
             <span className="flex items-center gap-2 text-[15px] font-bold tracking-tight text-white sm:text-base">
               {companyName ? `${companyName}의 마케팅, 지금 진단받아 보세요` : '우리 마케팅, 지금 진단받아 보세요'}
-              <span className="rounded-md bg-sky-400/20 px-1.5 py-0.5 text-[10px] font-bold text-sky-300">NEW</span>
+              <span className="rounded-md bg-white/25 px-1.5 py-0.5 text-[10px] font-bold text-white">NEW</span>
             </span>
-            <span className="mt-0.5 block text-xs text-white/65 sm:text-[13px]">
+            <span className="mt-0.5 block text-xs text-white/85 sm:text-[13px]">
               약 3분이면 AI가 잘하는 것과 아쉬운 것을 짚은 진단서를 드려요
             </span>
             {showTrialReward && (
-              <span className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-sky-400/30 bg-sky-500/15 px-2.5 py-1 text-[11px] font-bold text-sky-200">
+              <span className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-white/35 bg-white/15 px-2.5 py-1 text-[11px] font-bold text-white">
                 완료하면 7일 무료체험이 바로 시작돼요
               </span>
             )}

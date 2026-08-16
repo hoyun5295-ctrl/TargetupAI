@@ -25,7 +25,7 @@ import {
   HANJUL_FILLS, pickVariant, COMBO_OBSERVATIONS, UPGRADE_SUGGESTIONS, MANUAL_COUNT_MIN,
   TOUCH_SUBJECT, fillTouch, TOOL_OBSERVE, EXTERNAL_SEND_TOOLS, DATA_SIDE_SYSTEMS,
   UNIFIED_DISCONNECT_TOOLS, LIST_TOOL_PRAISES, PITCH_NOTE_TOOL_USER,
-  OBSERVE_KEY, OBSERVE_KEY_MEASURED_SENDING, TOOL_OBSERVE_KEY, type HanjulFill,
+  OBSERVE_KEY, TOOL_OBSERVE_KEY, type HanjulFill,
 } from './marketing-diagnosis-copy';
 
 export type GrantOutcome = 'granted' | 'already_granted' | 'not_eligible' | 'not_applicable' | null;
@@ -87,7 +87,7 @@ export interface DiagnosisObservationItem {
   key?: string;
   /** v8 — 표 오른쪽 칸(그 사람이 고른 답 그대로). */
   value?: string;
-  /** true = 답변이 아니라 서버 실측(퍼널 A prefill — 인용형으로 쓰면 거짓이라 서술을 가른다). */
+  /** 구 스냅샷 잔존 — 서버 실측 선치환(2026-08-17 폐지) 시절의 표식. 신규 조립은 만들지 않는다. */
   measured?: boolean;
 }
 
@@ -150,15 +150,13 @@ export type DiagnosisResult = DiagnosisResultV1 | DiagnosisResultV2;
 
 export interface ReportInputs {
   definition: DiagnosisDefinition;
-  /** 검증 통과 answers — 퍼널 A prefill은 라우트가 실측 값을 병합해 넘긴다(저장은 병합 전 원본). */
+  /** 검증 통과 answers — 전부 사용자가 답한 것이다(서버가 덮어쓰는 축 0 · 선치환 폐지).*/
   answers: Record<string, string>;
   recommend: RecommendResult;
   /** 퍼널 A = 이번 달 실측 사용(monthly-usage CT). 퍼널 B = null(금액 0 원칙 — §2-8). */
   usage: MonthlyUsage | null;
   brandVoiceMissing: boolean;
   grantOutcome: GrantOutcome;
-  /** 퍼널 A — sending 축이 서버 실측으로 채워졌을 때(관찰 서술을 실측형으로 가른다 · M1). */
-  prefill?: { sending?: { optionKey: string; sentCount: number } };
 }
 
 /** 크레딧 환산 표 — 마케터 언어 작업 3종만(CREDIT_COST_MAP 파생 · 원 단가 비노출). 공개 /credit-costs도 이 표를 쓴다. */
@@ -280,7 +278,7 @@ function buildLegacyV1(inp: ReportInputs, industry: string | null): DiagnosisRes
 }
 
 export function buildDiagnosisResult(inp: ReportInputs): DiagnosisResult {
-  const { definition, answers, recommend, brandVoiceMissing, grantOutcome, prefill } = inp;
+  const { definition, answers, recommend, brandVoiceMissing, grantOutcome } = inp;
 
   const industryQ = definition.questions.find((q) => q.type === 'industry_grid');
   const industryRaw = industryQ ? answers[industryQ.key] ?? null : null;
@@ -403,26 +401,17 @@ export function buildDiagnosisResult(inp: ReportInputs): DiagnosisResult {
   );
   if (praises.length === 0 && touch && ASSET_PRAISE[touch]) praises.push(ASSET_PRAISE[touch]);
 
-  // ── 관찰(들은 것) — 판단 0 · 라벨 인용. prefill 축은 실측 서술(인용형은 거짓 — 회의 확정) ──
+  // ── 관찰(들은 것) — 판단 0 · 라벨 인용(화면은 키·값 표로 그린다) ──
   const obsOrder: DiagnosisAxis[] = ['list', 'targeting', 'sending', 'repeat', 'measure'];
   const obsItems: DiagnosisObservationItem[] = [];
   for (const axis of obsOrder) {
     const v = levels.get(axis);
     if (!v) continue;
-    if (axis === 'sending' && prefill?.sending) {
-      obsItems.push({
-        text: `지난 30일 동안 실제로 ${prefill.sending.sentCount.toLocaleString()}번의 발송이 나갔어요.`,
-        key: OBSERVE_KEY_MEASURED_SENDING,
-        value: `${prefill.sending.sentCount.toLocaleString()}번`,
-        measured: true,
-      });
-    } else {
-      obsItems.push({
-        text: `${OBSERVE_LEAD[axis]} 「${v.optionLabel}」${obsItems.length === 0 ? '라고 답해 주셨어요' : ''}.`,
-        key: OBSERVE_KEY[axis],
-        value: v.optionLabel,
-      });
-    }
+    obsItems.push({
+      text: `${OBSERVE_LEAD[axis]} 「${v.optionLabel}」${obsItems.length === 0 ? '라고 답해 주셨어요' : ''}.`,
+      key: OBSERVE_KEY[axis],
+      value: v.optionLabel,
+    });
   }
   // v4 — 도구 스택 답도 들은 것에 되돌려준다(ERP·CRM·발송 도구가 리포트에 무흔적이면 묻지 말았어야 할 문항)
   for (const toolKey of Object.keys(TOOL_OBSERVE)) {
@@ -440,9 +429,7 @@ export function buildDiagnosisResult(inp: ReportInputs): DiagnosisResult {
   }
   const observation = {
     items: obsItems,
-    source: prefill?.sending
-      ? '답변해 주신 내용과 이번 달 발송 실측만으로 계산했어요. 외부 추정 없음'
-      : '답변해 주신 내용만으로 계산했어요. 외부 추정 없음',
+    source: '답변해 주신 내용만으로 계산했어요. 외부 추정 없음',
   };
 
   // ── 30일 실행 — 병목별 처방(심화 답이 변형 선택). 병목 0 = 고도화 제안 경로 ──

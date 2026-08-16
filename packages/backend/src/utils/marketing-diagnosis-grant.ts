@@ -17,6 +17,27 @@ import { grantFreeTrial } from './basic-trial';
 
 export const DIAGNOSIS_TRIAL_DAYS = 7;
 
+/**
+ * ★2026-08-17 Harold 확정 — 진단 진입·제출은 **고객사 관리자 전용**이다.
+ * 이유: 완주가 회사당 1회이고 되돌릴 수 없으며(§3-3 예외 재지급 경로 없음), 7일 체험 지급이
+ * 회사 계약 상태를 바꾼다. 담당자가 답한 진단이 회사의 유일한 기록으로 굳고 체험 1회를 소진하는
+ * 것을 막는다. 값은 JWT `userType`이고 로그인이 `users.user_type='admin'`을 이 값으로 바꾼다.
+ */
+export const DIAGNOSIS_RUNNER_USER_TYPE = 'company_admin';
+
+/** 이 계정이 진단을 실행할 수 있는가(역할 축만). */
+export function isDiagnosisRunner(userType?: string | null): boolean {
+  return userType === DIAGNOSIS_RUNNER_USER_TYPE;
+}
+
+/**
+ * 진단 대상 여부 = 요금제 × 역할. `/state`의 `eligible`이 이 한 벌을 쓰고 화면은 그것만 소비한다
+ * (§3-1 화면은 게이트가 아니다). 라우트 게이트는 isDiagnosisRunner로 같은 축을 재검사한다.
+ */
+export function judgeDiagnosisEligible(params: { planCode: string; userType?: string | null }): boolean {
+  return params.planCode === 'FREE' && isDiagnosisRunner(params.userType);
+}
+
 export type GrantJudgement =
   | { outcome: 'granted' }                    // 지급 가능(아직 실행 전 — 이름은 §7-2 result 값과 맞춘다)
   | { outcome: 'not_applicable' }             // plan_code ≠ FREE (유료·STAFF·TRIAL활성·미배정)
