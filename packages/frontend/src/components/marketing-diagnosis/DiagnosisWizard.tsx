@@ -68,7 +68,7 @@ export default function DiagnosisWizard({ questions, onFinished, busy = false }:
   const isGrid = current.type === 'industry_grid';
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5 break-keep">
       {/* 진행바 + 남은 문항 */}
       <div>
         <div className="flex items-center justify-between text-xs text-white/50">

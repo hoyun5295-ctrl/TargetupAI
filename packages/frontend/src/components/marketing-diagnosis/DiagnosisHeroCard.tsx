@@ -30,7 +30,7 @@ export default function DiagnosisHeroCard({ variant, companyName, trialExpiresAt
       <button
         type="button"
         onClick={onFirstSend}
-        className="group relative mb-4 w-full overflow-hidden rounded-2xl border border-sky-400/25 bg-gradient-to-r from-sky-600/25 via-indigo-600/20 to-slate-900 px-5 py-4 text-left shadow-sm transition-all hover:border-sky-400/50 hover:shadow-lg sm:px-6"
+        className="group relative mb-4 w-full overflow-hidden rounded-2xl border border-sky-400/25 bg-gradient-to-r from-sky-600/25 via-indigo-600/20 to-slate-900 px-5 py-4 text-left shadow-sm transition-all hover:border-sky-400/50 hover:shadow-lg sm:px-6 break-keep"
       >
         <div className="pointer-events-none absolute -right-10 -top-16 h-44 w-44 rounded-full bg-sky-400/10 blur-2xl" aria-hidden />
         <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -59,7 +59,7 @@ export default function DiagnosisHeroCard({ variant, companyName, trialExpiresAt
     <button
       type="button"
       onClick={onStart}
-      className="group relative mb-4 w-full overflow-hidden rounded-2xl border border-sky-400/25 bg-gradient-to-r from-sky-600/30 via-indigo-600/25 to-slate-900 px-5 py-4 text-left shadow-sm transition-all hover:border-sky-400/50 hover:shadow-lg sm:px-6"
+      className="group relative mb-4 w-full overflow-hidden rounded-2xl border border-sky-400/25 bg-gradient-to-r from-sky-600/30 via-indigo-600/25 to-slate-900 px-5 py-4 text-left shadow-sm transition-all hover:border-sky-400/50 hover:shadow-lg sm:px-6 break-keep"
     >
       <div className="pointer-events-none absolute -right-10 -top-16 h-44 w-44 rounded-full bg-sky-400/10 blur-2xl" aria-hidden />
       <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

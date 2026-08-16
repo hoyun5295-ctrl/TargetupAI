@@ -176,7 +176,7 @@ export default function DiagnosisAdminPanel({ onBadgeRefresh, toast }: Props) {
   if (detailLoading || detail) {
     const result = detail?.result;
     return (
-      <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
+      <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm break-keep">
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
           <button
             type="button"
@@ -334,7 +334,7 @@ export default function DiagnosisAdminPanel({ onBadgeRefresh, toast }: Props) {
 
   // ── 목록 화면 ──
   return (
-    <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
+    <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm break-keep">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-3.5">
         <div>
           <h3 className="text-base font-bold text-gray-900">신규마케팅진단</h3>

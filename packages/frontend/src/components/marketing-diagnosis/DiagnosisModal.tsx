@@ -124,7 +124,7 @@ export default function DiagnosisModal({ open, onClose, onCompleted, onFirstSend
         </button>
       </div>
 
-      <div className="overflow-y-auto px-5 py-5">
+      <div className="overflow-y-auto px-5 py-5 break-keep">
         {phase === 'loading' && (
           <div className="flex items-center justify-center gap-2 py-16 text-sm text-white/60">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> 진단을 준비하고 있어요

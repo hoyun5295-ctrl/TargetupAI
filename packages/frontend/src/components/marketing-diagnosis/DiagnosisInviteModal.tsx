@@ -22,7 +22,7 @@ export default function DiagnosisInviteModal({ open, onClose, onStart }: Props) 
       zIndexClassName="z-[1900]"
       panelClassName="w-full max-w-md"
     >
-      <div className="relative overflow-hidden px-6 pb-6 pt-7 text-center">
+      <div className="relative overflow-hidden px-6 pb-6 pt-7 text-center break-keep">
         <div className="pointer-events-none absolute -top-20 left-1/2 h-48 w-48 -translate-x-1/2 rounded-full bg-sky-400/15 blur-3xl" aria-hidden />
         <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-sky-400 to-indigo-500 shadow-lg shadow-sky-500/25">
           <Stethoscope className="h-6 w-6 text-white" aria-hidden />

@@ -113,7 +113,7 @@ export default function DiagnosisPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
+    <div className="min-h-screen bg-slate-950 text-white break-keep">
       {/* 배경 세계관 — 미인증 랜딩 전례(다크 + violet 보조광), 진단 정체성은 sky→indigo */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden>
         <div className="absolute -top-32 left-1/4 h-96 w-96 rounded-full bg-violet-600/10 blur-3xl" />

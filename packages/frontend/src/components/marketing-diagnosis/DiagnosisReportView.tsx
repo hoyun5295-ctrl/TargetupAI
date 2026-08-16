@@ -48,7 +48,7 @@ export default function DiagnosisReportView({
   const industry = result.examples?.industry ?? null;
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5 break-keep">
       {/* ── 히어로 ── */}
       <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-sky-600/30 via-indigo-600/25 to-slate-900 p-5 md:p-6">
         <div className="pointer-events-none absolute -right-14 -top-16 h-44 w-44 rounded-full bg-sky-400/15 blur-3xl" aria-hidden />
