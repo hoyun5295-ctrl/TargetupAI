@@ -30,6 +30,7 @@ const RECOMMEND: RecommendResult = {
   plan: STARTER,
   reasons: [{ question: 'AI 사용량은?', option: '월 10회 이하', column: 'ai_credits_per_month' }],
   no_match: false,
+  no_match_kind: null,
 };
 
 const USAGE: MonthlyUsage = {
@@ -90,7 +91,7 @@ describe('buildDiagnosisResult', () => {
   it('no_match — 추천 null + 상담 summary(억지 추천 금지)', () => {
     const r = buildDiagnosisResult({
       definition: DEF, answers: ANSWERS,
-      recommend: { plan: null, reasons: [], no_match: true },
+      recommend: { plan: null, reasons: [], no_match: true, no_match_kind: 'other' },
       usage: null, brandVoiceMissing: false, grantOutcome: null,
     });
     expect(r.recommendation).toBeNull();

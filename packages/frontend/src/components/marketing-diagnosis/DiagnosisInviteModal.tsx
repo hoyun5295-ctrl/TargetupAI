@@ -33,9 +33,9 @@ export default function DiagnosisInviteModal({ open, onClose, onStart, showTrial
           우리 브랜드 마케팅, 지금 어느 단계일까요?
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-white/70">
-          8개 질문에 답하면 AI가 우리 회사 기준으로 진단 리포트를 만들어 드려요.
+          지금 어떻게 하고 계신지 답하시면, AI가 잘하는 것과 아쉬운 것을 짚은 진단서를 드려요.
           <br />
-          약 2분이면 충분해요.
+          약 3분이면 충분해요.
         </p>
         {showTrialReward && (
           <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-sky-400/30 bg-sky-500/15 px-3.5 py-1.5 text-[13px] font-semibold text-sky-200">

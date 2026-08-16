@@ -16,6 +16,7 @@ import {
   diagnosisPublicApi,
   type DiagnosisQuestionDto,
   type DiagnosisResultDto,
+  type DiagnosisSectionDto,
 } from '../components/marketing-diagnosis/diagnosisApi';
 
 type Phase = 'loading' | 'gate' | 'wizard' | 'preview' | 'done' | 'unavailable';
@@ -27,6 +28,9 @@ export default function DiagnosisPage() {
 
   const [phase, setPhase] = useState<Phase>('loading');
   const [questions, setQuestions] = useState<DiagnosisQuestionDto[]>([]);
+  const [sections, setSections] = useState<DiagnosisSectionDto[] | null>(null);
+  const [estLabel, setEstLabel] = useState<string>('약 3분');
+  const [version, setVersion] = useState<string>('');
   const [answers, setAnswers] = useState<Record<string, string> | null>(null);
   const [preview, setPreview] = useState<Partial<DiagnosisResultDto> | null>(null);
   const [result, setResult] = useState<DiagnosisResultDto | null>(null);
@@ -48,6 +52,9 @@ export default function DiagnosisPage() {
         const q = await diagnosisPublicApi.questions();
         if (q.ok && q.data?.success && Array.isArray(q.data.questions) && q.data.questions.length > 0) {
           setQuestions(q.data.questions);
+          setSections(Array.isArray(q.data.meta?.sections) && q.data.meta.sections.length > 0 ? q.data.meta.sections : null);
+          if (q.data.meta?.est_label) setEstLabel(String(q.data.meta.est_label));
+          setVersion(String(q.data.version ?? ''));
           setPhase('gate');
         } else {
           setPhase('unavailable');
@@ -62,7 +69,7 @@ export default function DiagnosisPage() {
     setAnswers(a);
     setPreviewLoading(true);
     try {
-      const r = await diagnosisPublicApi.preview(a);
+      const r = await diagnosisPublicApi.preview(a, version || undefined);
       if (r.ok && r.data?.success) {
         setPreview(r.data.preview);
         setPhase('preview');
@@ -91,6 +98,7 @@ export default function DiagnosisPage() {
     try {
       const r = await diagnosisPublicApi.submit({
         answers,
+        question_set_version: version || undefined,
         company_name: companyName.trim(),
         contact_name: contactName.trim(),
         email: email.trim(),
@@ -128,7 +136,7 @@ export default function DiagnosisPage() {
             </span>
             <div>
               <p className="text-sm font-bold tracking-tight">AI 마케팅 진단</p>
-              <p className="text-[11px] text-white/50">한줄로 · 8문항 약 2분</p>
+              <p className="text-[11px] text-white/50">한줄로 · {estLabel}</p>
             </div>
           </div>
           <button
@@ -164,7 +172,7 @@ export default function DiagnosisPage() {
               </span>
             </h1>
             <p className="mt-3 text-sm leading-relaxed text-white/65">
-              8개 질문에 답하면 AI가 답변 기준으로 진단 리포트를 만들어 드려요. 분야별 실물 예시까지 함께 보여드립니다.
+              지금 어떻게 하고 계신지 답하시면, 잘하는 것과 아쉬운 것을 짚은 진단 리포트를 AI가 만들어 드려요. 분야별 실물 예시까지 함께 보여드립니다.
             </p>
             <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-sky-400/30 bg-sky-500/15 px-3.5 py-1.5 text-[13px] font-semibold text-sky-200">
               진단을 완료하고 가입하시면 7일 무료체험을 드려요
@@ -205,7 +213,12 @@ export default function DiagnosisPage() {
                 <p className="text-sm text-white/70">답변을 분석하고 있어요</p>
               </div>
             ) : (
-              <DiagnosisWizard questions={questions} onFinished={finishWizard} />
+              <DiagnosisWizard
+                questions={questions}
+                sections={sections}
+                draftKey={version ? `diagnosis-draft-B-${version}` : null}
+                onFinished={finishWizard}
+              />
             )}
           </div>
         )}
@@ -221,15 +234,18 @@ export default function DiagnosisPage() {
               </div>
             )}
 
-            {(phase === 'done' ? result : preview) && (
-              <DiagnosisReportView result={(phase === 'done' ? result : preview) as DiagnosisResultDto} />
+            {phase === 'done' && result && (
+              <DiagnosisReportView result={result} coverTitle={companyName.trim() || null} />
+            )}
+            {phase === 'preview' && preview && (
+              <DiagnosisReportView result={preview as DiagnosisResultDto} previewMode />
             )}
 
             {phase === 'preview' && (
               <div className="rounded-2xl border border-sky-400/25 bg-gradient-to-br from-sky-500/10 to-indigo-500/10 p-5">
-                <p className="text-base font-bold">요금제 추천은 담당자가 함께 확인드립니다</p>
+                <p className="text-base font-bold">30일 실행 순서까지 받아 보세요</p>
                 <p className="mt-1 text-[13px] text-white/60">
-                  연락처를 남겨 주시면 전체 리포트가 바로 열리고, 담당자가 우리 회사에 맞춰 안내드려요.
+                  진단은 위에서 전부 보셨어요. 연락처를 남겨 주시면 실행 순서와 분야별 예시가 담긴 전체 리포트가 바로 열려요.
                 </p>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <input
@@ -254,14 +270,17 @@ export default function DiagnosisPage() {
                     placeholder="이메일"
                     className="min-h-[48px] rounded-xl border border-white/15 bg-slate-900/80 px-3.5 text-sm text-white placeholder:text-white/35 outline-none transition-colors focus:border-sky-400/60"
                   />
-                  <input
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    maxLength={30}
-                    type="tel"
-                    placeholder="연락처"
-                    className="min-h-[48px] rounded-xl border border-white/15 bg-slate-900/80 px-3.5 text-sm text-white placeholder:text-white/35 outline-none transition-colors focus:border-sky-400/60"
-                  />
+                  <div className="flex flex-col gap-1">
+                    <input
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      maxLength={30}
+                      type="tel"
+                      placeholder="연락처"
+                      className="min-h-[48px] rounded-xl border border-white/15 bg-slate-900/80 px-3.5 text-sm text-white placeholder:text-white/35 outline-none transition-colors focus:border-sky-400/60"
+                    />
+                    <p className="text-[11px] text-white/40">리포트 안내와 1회 상담 연락에만 써요. 광고 수신 동의와는 별개예요.</p>
+                  </div>
                 </div>
                 {/* 허니팟 — 화면·스크린리더 밖(봇만 채운다) */}
                 <input

@@ -2,7 +2,8 @@
  * DiagnosisHeroCard — 대시보드 상시 진입 카드 (2026-08-16 신설 · 설계서 §5-2)
  *
  * 노출은 부모(Dashboard)가 서버 state로 판정한다 — 이 카드는 표시 전용(dismiss 없음·실물 크기).
- *   variant 'invite' = eligible && !completedAt — 진단 유도(회사명 1인칭 · "8문항 약 2분" · 가격 단어 0 · NEW 뱃지만)
+ *   variant 'invite' = eligible && !completedAt — 진단 유도(회사명 1인칭 · 가격 단어 0 · NEW 뱃지만.
+ *     문항 수 표기 금지 — v3 분기형은 경로마다 문항 수가 달라 숫자 카피가 거짓이 된다)
  *   variant 'trial'  = completedAt && trialExpiresAt > now — 「체험 D-N · 첫 발송 해보기」(D-N = state.trialExpiresAt)
  */
 import { ArrowRight, Stethoscope, Zap } from 'lucide-react';
@@ -77,7 +78,7 @@ export default function DiagnosisHeroCard({ variant, companyName, trialExpiresAt
               <span className="rounded-md bg-sky-400/20 px-1.5 py-0.5 text-[10px] font-bold text-sky-300">NEW</span>
             </span>
             <span className="mt-0.5 block text-xs text-white/65 sm:text-[13px]">
-              8문항 약 2분이면 AI가 우리 회사 기준 리포트를 만들어 드려요
+              약 3분이면 AI가 잘하는 것과 아쉬운 것을 짚은 진단서를 드려요
             </span>
             {showTrialReward && (
               <span className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-sky-400/30 bg-sky-500/15 px-2.5 py-1 text-[11px] font-bold text-sky-200">

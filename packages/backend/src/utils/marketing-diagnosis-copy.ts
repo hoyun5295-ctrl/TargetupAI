@@ -1,0 +1,312 @@
+/**
+ * CT: 마케팅 진단 v3 — 문구 원장 (2026-08-16 신설 · v3 설계서 §4)
+ *
+ * 진단 리포트의 모든 한국어 문장이 여기 있다(관찰 틀·단계·칭찬·병목 인과·처방·고도화·각주·표지 절).
+ * 조립 로직은 marketing-diagnosis-report.ts가, 문장은 이 파일이 소유한다 — 문장 수정 = 이 파일만.
+ *
+ * 집필 규약 (회의 수렴 — 어기면 그 문장은 반려 대상)
+ *   - 문장 속 대시(—) 금지 · break-keep 전제 · 원인/결과 각 행 45자 내외.
+ *   - 관찰·칭찬·아쉬움 구간에 자사명 0. 자사명은 FOOTNOTES(각주 전용)에서만 — 개수 테스트로 고정.
+ *   - 수치는 응답자가 말한 것·서버 실측만. 시간 절감 %·매출·응답률 추정 금지.
+ *   - 접점 슬롯 {t} = TOUCH_WORD(주문·방문·예약 — 전부 닫힌 음절이라 을/이/과 조사 안전).
+ *     슬롯이 비면 문장을 빼는 게 아니라 기본값 '방문'을 쓴다(이 슬롯은 항상 채워지는 축).
+ */
+import type { DiagnosisAxis } from './plan-recommend';
+
+/** 접점(touchpoint) 답 → 어절 슬롯. 미답·미지정 = '방문'. */
+export const TOUCH_WORD: Record<string, string> = {
+  online: '주문',
+  offline: '방문',
+  both: '방문',
+  booking: '예약',
+};
+
+/** 표지 subject(퍼널 B — 회사명이 폼 뒤에나 생기므로 접점 구절로 연다. 회의론자 C3). */
+export const TOUCH_SUBJECT: Record<string, string> = {
+  online: '온라인 브랜드',
+  offline: '매장 브랜드',
+  both: '온·오프라인 브랜드',
+  booking: '예약제 브랜드',
+};
+
+export const AXIS_META: Record<DiagnosisAxis, { label: string; priority: number }> = {
+  list: { label: '고객 명단', priority: 0 },
+  targeting: { label: '보내는 대상', priority: 1 },
+  measure: { label: '성과 확인', priority: 2 },
+  repeat: { label: '단골 관리', priority: 3 },
+  production: { label: '콘텐츠 제작', priority: 4 },
+  sending: { label: '발송 실행', priority: 5 },
+};
+
+/** 축별 판정 표의 단계 라벨(숫자 점수 비노출 — 회의 확정). */
+export const LEVEL_LABELS = ['아직 없어요', '이제 시작', '자리 잡는 중', '잘하고 있어요'] as const;
+
+/** 단계 관문 사다리 결과물 — 등급이 아니라 경로상의 위치로 쓴다. */
+export const STAGES = [
+  { key: 'before', label: '모으기 전', line: '오신 고객이 다시 올 수 있게, 남기는 것부터가 시작이에요.' },
+  { key: 'collect', label: '모으는 중', line: '명단이 생기고 있으니, 이제 나눠서 보낼 차례예요.' },
+  { key: 'divide', label: '나누는 중', line: '대상을 나누기 시작하셨으니, 반복과 측정을 붙일 차례예요.' },
+  { key: 'run', label: '굴러가는 중', line: '기본기가 갖춰졌어요. 이제 다듬는 단계예요.' },
+] as const;
+
+/** 표지 강점절 — 강점 축(level 2+ 최고 축) 1개가 고른다. */
+export const COVER_STRENGTH: Record<DiagnosisAxis, string> = {
+  list: '명단은 갖춰 두셨는데',
+  targeting: '고르는 눈은 있으신데',
+  sending: '꾸준히 보내고 계신데',
+  production: '만드는 손은 빠른데',
+  repeat: '단골은 챙기고 계신데',
+  measure: '결과는 챙겨 보시는데',
+};
+
+/**
+ * 표지 약점절 — 1순위 병목의 축 × level이 고른다(★Codex 1R — 축만 보면 level 1의 정상 답변에
+ * 정반대 표지가 나간다: 건수는 본다고 답했는데 "결과를 안 보고" 류). GAPS와 같은 조합만 존재한다.
+ */
+export const COVER_GAP: Partial<Record<DiagnosisAxis, Partial<Record<0 | 1, string>>>> = {
+  list: {
+    0: '고객이 남지 않는 단계예요',
+    1: '명단이 흩어져 있는 단계예요',
+  },
+  targeting: {
+    0: '아직 대상을 고르지 않는 단계예요',
+    1: '행동 기준까지는 못 나누는 단계예요',
+  },
+  sending: {
+    0: '발송이 멈춰 있는 단계예요',
+    1: '발송이 뜸한 단계예요',
+  },
+  production: {
+    0: '글자만으로 보내는 단계예요',
+  },
+  repeat: {
+    0: '단골 챙김은 아직인 단계예요',
+    1: '단골 챙김이 손에 의존하는 단계예요',
+  },
+  measure: {
+    0: '결과를 안 보고 보내는 단계예요',
+    1: '반응까지는 못 보는 단계예요',
+  },
+};
+
+/** 관찰 블록의 축별 앞말 — 뒤에 「선택지 라벨」 인용이 붙는다(라벨이 문장형이라 조사 불필요). */
+export const OBSERVE_LEAD: Record<DiagnosisAxis, string> = {
+  list: '고객 연락처는',
+  targeting: '가장 최근 발송은',
+  sending: '지난 한 달 발송은',
+  production: '콘텐츠 제작은',
+  repeat: '반복 발송은',
+  measure: '결과 확인은',
+};
+
+/** 칭찬 — 그 축 level 2+ 일 때만. 재기술 + 그것이 왜 자산인지 한 문장(조용한 톤 — 화려하면 아부). */
+export const PRAISES: Record<DiagnosisAxis, string> = {
+  list: '고객 명단을 한곳에 모아 두셨어요. 이 명단이 앞으로 하는 모든 마케팅의 출발점이 됩니다.',
+  targeting: '받을 사람을 골라서 보내고 계세요. 같은 발송비로 더 높은 반응을 만드는 습관이에요.',
+  sending: '발송을 꾸준히 하고 계세요. 고객이 브랜드를 잊기 전에 다시 만나는 리듬이 있다는 뜻이에요.',
+  production: '보내는 메시지에 볼거리를 갖추고 계세요. 같은 안내도 눈에 담기는 형태로 나가고 있어요.',
+  repeat: '생일이나 재방문 같은 순간을 챙기고 계세요. 고객 입장에서 가장 반가운 메시지들이에요.',
+  measure: '보낸 결과를 확인하고 계세요. 다음 발송을 더 낫게 만들 재료를 이미 모으고 계신 거예요.',
+};
+
+/** 강점 근거가 0(전 축 level 1 이하)일 때의 자산 문장 — 접점(P2)에서 파생. 억지 칭찬 대신 사실(M6). */
+export const ASSET_PRAISE: Record<string, string> = {
+  online: '온라인 접점이라 고객의 행동이 기록으로 남는 환경이에요. 모으기 시작하면 빠르게 쌓입니다.',
+  offline: '매일 얼굴을 보는 매장 접점은 온라인이 갖지 못한 자산이에요. 연락처만 남기면 바로 힘이 됩니다.',
+  both: '온라인과 매장 양쪽 접점을 갖고 계세요. 한쪽에서 만난 고객을 다른 쪽으로 부를 수 있는 구조예요.',
+  booking: '예약을 받는 업종이라 고객 연락처가 자연스럽게 남아요. 시작 조건이 좋은 편이에요.',
+};
+
+/**
+ * 병목 인과 2단(그래서 생기는 일) — 축 × 발생 가능 level(0·1)만. 없는 조합 = 그 축은 병목이 아니다.
+ * {t} = 접점 어절 슬롯.
+ */
+export const GAPS: Partial<Record<DiagnosisAxis, Partial<Record<0 | 1, { cause: string; effect: string }>>>> = {
+  list: {
+    0: {
+      cause: '오신 고객이 누구인지 아직 남지 않고 있어요.',
+      effect: '다시 {t}을 만들 방법이 광고나 우연뿐이라, 올 때마다 새로 데려와야 해요.',
+    },
+    1: {
+      cause: '명단이 있긴 한데 엑셀이나 포스기 안에 흩어져 있어요.',
+      effect: '보내야 할 순간에 바로 꺼낼 수 없어서, 있는 명단이 없는 것처럼 놀아요.',
+    },
+  },
+  targeting: {
+    0: {
+      cause: '가장 최근 발송이 명단 전체에게 나갔거나, 아직 발송 전이에요.',
+      effect: '관심 없는 고객에게도 같은 메시지가 가면 수신거부가 조용히 쌓이고, 다음에 닿을 사람이 줄어요.',
+    },
+    1: {
+      cause: '성별과 나이까지는 나누고 계신데, 행동 기준은 아직이에요.',
+      effect: '같은 연령대라도 산 사람과 안 산 사람은 반응이 완전히 달라서, 발송의 절반이 허공에 가요.',
+    },
+  },
+  sending: {
+    0: {
+      cause: '지난 한 달 동안 고객에게 나간 메시지가 없어요.',
+      effect: '고객은 마지막 {t} 이후 브랜드를 잊어가고, 그 자리를 다른 곳이 채워요.',
+    },
+    1: {
+      cause: '발송이 월 한두 번에 그치고 있어요.',
+      effect: '간격이 벌어질수록 다음 메시지가 낯설어져서, 보낼 때마다 처음부터 다시 시작하는 셈이 돼요.',
+    },
+  },
+  production: {
+    0: {
+      cause: '메시지가 글자만으로 나가고 있어요.',
+      effect: '같은 혜택도 보여주지 못하면 스치듯 지워져요. 신제품이나 행사 안내에서 차이가 커요.',
+    },
+  },
+  repeat: {
+    0: {
+      cause: '생일이나 재방문 안내처럼 반복해서 나가는 메시지가 아직 없어요.',
+      effect: '다시 올 이유를 브랜드가 만들지 않으면, 재{t}은 전적으로 고객 기억에 달려 있게 돼요.',
+    },
+    1: {
+      cause: '챙기고는 계신데, 생각날 때 손으로 보내고 계세요.',
+      effect: '사람 기억에 의존하는 발송은 바쁜 달에 제일 먼저 끊겨요. 정작 효과는 제일 좋은데요.',
+    },
+  },
+  measure: {
+    0: {
+      cause: '보낸 뒤에 결과를 보지 않고 계세요.',
+      effect: '무엇이 통했는지 모른 채 다음 발송을 만들게 되어, 같은 비용으로 나아질 기회가 사라져요.',
+    },
+    1: {
+      cause: '발송 성공 건수까지만 확인하고 계세요.',
+      effect: '도착했는지는 알아도 반응했는지는 몰라서, 문구와 대상을 바꿀 근거가 안 쌓여요.',
+    },
+  },
+};
+
+/** 병목 인과 3단(바꾸는 방법) — 축당 1문장·도구 중립(자사명 0). */
+export const DIRECTIONS: Record<DiagnosisAxis, string> = {
+  list: '이번 주에 오는 고객부터 연락처를 한곳에 남겨 보세요. 열 명이면 충분한 시작이에요.',
+  targeting: '다음 발송은 최근 석 달 안에 {t}이 있던 고객에게만 보내 보세요. 같은 문구여도 반응 차이가 보여요.',
+  sending: '이번 달에 알릴 것 하나를 정해 한 번만 보내 보세요. 잘 만든 한 번이 리듬의 시작이에요.',
+  production: '다음 안내부터 이미지 한 장을 붙여 보세요. 글자만일 때와 반응을 비교해 보시고요.',
+  repeat: '가장 효과 좋은 것 하나만 자동으로 바꿔 보세요. 생일 축하가 대개 첫 후보예요.',
+  measure: '다음 발송에서 링크 클릭 하나만 세어 보세요. 숫자 하나가 다음 문구를 정해 줍니다.',
+};
+
+/**
+ * 30일 실행(plan30)의 축별 실행 문장 — 분기 심화 답이 변형을 고른다(variant key = `${질문key}:${답key}`).
+ * 매칭 없으면 'default'(= DIRECTIONS 재사용이 아니라 실행형 문장).
+ */
+export const PRESCRIPTIONS: Record<DiagnosisAxis, { default: string; variants?: Record<string, string> }> = {
+  list: {
+    default: '포스기·쇼핑몰·엑셀에 흩어진 연락처를 한곳으로 모으는 것부터 시작하세요. 이번 주는 모으기만 해도 됩니다.',
+    variants: {
+      'inflow_capture:no_capture': '광고로 온 고객이 연락처를 남길 자리부터 만드세요. 적립이나 예약 확인 한 줄이면 됩니다.',
+      'inflow_capture:event_only': '이벤트 때만 남는 연락처를 평소에도 남게 하세요. 새는 문은 대개 한 곳이에요.',
+    },
+  },
+  targeting: {
+    default: '다음 발송에서 최근 석 달 {t} 고객만 골라 보내고, 그 반응을 전체 발송과 비교해 보세요.',
+    variants: {
+      'optout_check:not_checked': '먼저 지난 발송의 수신거부부터 확인해 보세요. 그 숫자가 나눠 보낼 이유를 말해 줍니다.',
+    },
+  },
+  sending: {
+    default: '이번 달 알릴 것 하나를 정해 한 번 보내세요. 문구는 한 문장, 대상은 최근 고객이면 충분해요.',
+    variants: {
+      'no_send_reason:no_list': '발송보다 명단이 먼저예요. 명단 열 명이 모이면 그때 첫 발송을 하세요.',
+      'no_send_reason:no_copy': '문구는 지금 파는 것 하나와 혜택 하나만 적으면 됩니다. 길게 쓸수록 안 읽혀요.',
+      'no_send_reason:no_time': '한 달에 한 번, 30분만 달력에 정해 두세요. 그 시간에만 만들고 보내는 겁니다.',
+      'no_send_reason:no_effect': '효과가 없던 건 전체 발송이었을 가능성이 커요. 최근 고객 소수에게만 다시 시험해 보세요.',
+    },
+  },
+  production: {
+    default: '다음 안내에 이미지 한 장을 붙여 보내 보세요. 만드는 부담이 크면 한 장짜리부터요.',
+    variants: {
+      'prod_refit:yes': '채널마다 다시 만드는 일부터 없애 보세요. 한 번 만든 것을 크기별로 트는 방식으로요.',
+      'prod_leadtime:week': '받는 데 일주일이 넘으면 즉흥 행사를 못 해요. 당일 제작 경로를 하나 확보해 두세요.',
+      'prod_leadtime:varies': '받는 날짜를 못 정하면 발송 달력을 못 짜요. 당일 제작 경로를 하나 확보해 두세요.',
+      'prod_time:fullday': '한 건에 하루가 넘게 들면 발송 자체가 미뤄져요. 제작 시간을 줄일 방법부터 찾으세요.',
+      'prod_time:gaveup': '만들다 그만둔 적이 있다면 도구가 아니라 과정이 무거운 거예요. 더 가벼운 제작 방식으로 바꿔 보세요.',
+    },
+  },
+  repeat: {
+    default: '반복 발송 하나를 정해 조건과 문구를 고정하세요. 그다음부터는 사람이 아니라 달력이 보냅니다.',
+    variants: {
+      'manual_count:c6_10': '손으로 챙기는 발송이 월 6번을 넘으면 이미 자동화가 남는 장사예요. 제일 잦은 것부터 바꾸세요.',
+      'manual_count:c10p': '월 10번 넘게 손으로 보내고 계세요. 이 반복부터 자동으로 돌리면 시간이 가장 크게 돌아와요.',
+    },
+  },
+  measure: {
+    default: '다음 발송에서 클릭 수 하나만 기록해 보세요. 두 번째 발송부터 비교가 시작됩니다.',
+    variants: {
+      'measure_reason:dont_know': '발송 결과 화면을 여는 것부터가 시작이에요. 성공과 실패 숫자만 봐도 절반은 온 거예요.',
+      'measure_reason:no_time': '결과를 찾아보는 대신 요약으로 받아 보는 방식으로 바꿔 보세요. 보는 시간이 거의 사라져요.',
+      'measure_reason:what_next': '기준을 숫자 하나(클릭)로 정하세요. 오르면 유지, 내리면 문구를 바꾸는 룰이면 충분해요.',
+    },
+  },
+};
+
+/** measure_reason:no_need — 처방하지 않는다(억지 처방 금지 §3-6). 이 키가 오면 measure 처방을 생략한다. */
+export const NO_PRESCRIPTION_VARIANTS = new Set(['measure_reason:no_need']);
+
+/**
+ * 각주(자사 연결) — 처방 카드 하단 작은 활자 전용. 리포트 전체 노출 상한 = 2(개수 테스트로 고정).
+ * 문장 규약: 행동이 주어("~가 됩니다")·기능명 나열 금지·브랜드색 0(렌더 계약).
+ */
+export const FOOTNOTES: Record<DiagnosisAxis, string> = {
+  list: '한줄로에서는 포스기·쇼핑몰의 고객이 자동으로 한 명단이 됩니다.',
+  targeting: '한줄로에서는 구매 이력으로 받을 사람을 클릭 몇 번에 고릅니다.',
+  sending: '한줄로에서는 문구 작성부터 발송까지 한 화면에서 끝납니다.',
+  production: '한줄로에서는 보낼 이미지와 안내 화면을 AI가 대신 만들어 줍니다.',
+  repeat: '한줄로에서는 생일·재방문 발송이 조건만 정하면 자동으로 나갑니다.',
+  measure: '한줄로에서는 클릭과 방문까지 발송 결과에 함께 잡힙니다.',
+};
+
+/** 모순 조합 관찰문 — 강등이 아니라 소견 승격(회의 확정). 전용 집필 2종만. */
+export const COMBO_OBSERVATIONS = {
+  headless_criteria:
+    '관심사까지 보고 고르시는데, 그 기준이 명단에는 남아 있지 않아요. 지금은 담당자 머릿속에 있는 상태라, 자리를 비우면 같은 발송을 다시 만들 수 없어요.',
+  paid_inflow_leak:
+    '광고로 오신 고객의 연락처가 남지 않고 있어요. 비용을 들여 데려온 고객이 한 번의 {t}으로 끝나는 구조예요.',
+} as const;
+
+/** 병목 0(전 축 상위)의 고도화 제안 — 심화 답에서만 파생(자기 문장을 가진 답만). */
+export const UPGRADE_SUGGESTIONS: Array<{ q: string; a: string; text: string }> = [
+  {
+    q: 'segment_reuse',
+    a: 'fresh',
+    text: '고르는 조건을 매번 새로 만들고 계세요. 잘 쓰는 조건 두세 개만 저장해 두면 발송 준비가 몇 분으로 줄어요.',
+  },
+  {
+    q: 'measure_compare',
+    a: 'none',
+    text: '구매까지 보시는데 달끼리 비교는 안 하고 계세요. 숫자 두 개만 적어 두면 잘한 달의 이유를 찾을 수 있어요.',
+  },
+  {
+    q: 'measure_compare',
+    a: 'feel',
+    text: '비교를 느낌으로 하고 계세요. 숫자 두 개만 적어 두면 잘한 달의 이유가 손에 잡혀요.',
+  },
+  {
+    q: 'auto_count',
+    a: 'a_unknown',
+    text: '자동 발송이 몇 개 도는지 세어 보지 않으셨어요. 목록을 한 번 정리하면 겹치거나 빠진 구멍이 보여요.',
+  },
+  {
+    q: 'manual_ratio',
+    a: 'all_manual',
+    text: '매번 직접 골라 보내고 계세요. 반복되는 발송 하나만 예약으로 바꿔도 손이 크게 줄어요.',
+  },
+];
+
+/** manual_count 답 → 월 최소 횟수(연환산 앵커 — 답변 하한만 쓴다: 부풀리지 않는 방향). */
+export const MANUAL_COUNT_MIN: Record<string, number> = {
+  c1_2: 1,
+  c3_5: 3,
+  c6_10: 6,
+  c10p: 10,
+};
+
+/** 접점 슬롯 치환 — 2단(생기는 일)·조합 관찰문에만 쓴다(회의 확정: 1단은 인용, 3단 곱셈 금지). */
+export function fillTouch(text: string, touchKey: string | null | undefined): string {
+  const word = (touchKey && TOUCH_WORD[touchKey]) || '방문';
+  return text.split('{t}').join(word);
+}

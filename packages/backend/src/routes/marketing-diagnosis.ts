@@ -17,9 +17,12 @@ import pool, { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { handleDbMigrationError } from '../utils/db-migration-error';
 import { computeMonthlyUsage } from '../utils/monthly-usage';
-import { validateAnswers, recommendPlan } from '../utils/plan-recommend';
-import { buildDiagnosisResult } from '../utils/marketing-diagnosis-report';
-import { loadActiveQuestionSet, handleDefinitionInvalid, DIAGNOSIS_PLAN_ROWS_SQL } from '../utils/marketing-diagnosis-store';
+import { validateAnswers, recommendPlan, visibleQuestions, type DiagnosisDefinition } from '../utils/plan-recommend';
+import { buildDiagnosisResult, type ReportInputs } from '../utils/marketing-diagnosis-report';
+import {
+  loadActiveQuestionSet, handleDefinitionInvalid, DIAGNOSIS_PLAN_ROWS_SQL,
+  projectQuestions, computeSendingPrefill,
+} from '../utils/marketing-diagnosis-store';
 import {
   judgeGrantEligibility,
   executeGrant,
@@ -91,6 +94,35 @@ router.get('/state', async (req: Request, res: Response) => {
 });
 
 // ────────────────────────────────────────────────────────────────────
+// GET /questions — 퍼널 A 문항(공개와 같은 투영 함수 — 단일 진실) + sending 실측 선치환(v3)
+//   선치환 값은 화면 안내용일 뿐 — 제출 시 서버가 재계산해 쓴다(프론트 값 불신 · 화면은 게이트가 아니다).
+// ────────────────────────────────────────────────────────────────────
+router.get('/questions', async (req: Request, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+  try {
+    const activeSet = await loadActiveQuestionSet();
+    if (!activeSet) return activeSetMissing(res);
+    const projected = projectQuestions(activeSet.definition);
+    const prefilled: Record<string, string> = {};
+    const sendingGate = activeSet.definition.questions.find((q) => q.axis === 'sending');
+    if (sendingGate) {
+      const prefill = await computeSendingPrefill(companyId);
+      // 문항 세트가 바뀌어 매핑 키가 실존하지 않으면 선치환을 조용히 끈다(fail-safe — 콘텐츠 결합 가드)
+      if (prefill && sendingGate.options.some((o) => o.key === prefill.optionKey)) {
+        prefilled[sendingGate.key] = prefill.optionKey;
+      }
+    }
+    return res.json({ success: true, version: activeSet.version, ...projected, prefilled });
+  } catch (err) {
+    if (handleDefinitionInvalid(err, res)) return;
+    if (handleDbMigrationError(err, res, 'diagnosis_question_sets')) return;
+    console.error('[marketing-diagnosis] questions 실패:', err);
+    return res.status(500).json({ success: false, error: '문항 조회에 실패했습니다.' });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────
 // GET /report — 최신 funnel A 행 재열람 계약(§4-3 — submit 400·409와 무관하게 항상 열람 가능)
 // ────────────────────────────────────────────────────────────────────
 router.get('/report', async (req: Request, res: Response) => {
@@ -145,8 +177,64 @@ router.post('/submit', async (req: Request, res: Response) => {
     const activeSet = await loadActiveQuestionSet();
     if (!activeSet) return activeSetMissing(res);
     const answers = (req.body as any)?.answers;
-    const ansCheck = validateAnswers(activeSet.definition, answers);
+    if (!answers || typeof answers !== 'object' || Array.isArray(answers)) {
+      return res.status(400).json({ success: false, error: '답변 형식이 올바르지 않습니다.' });
+    }
+    // 문항 버전 결속(★Codex 1R) — 사용자가 본 세트와 계산할 세트가 다르면 조용한 재해석 대신 409.
+    // 구 클라이언트(버전 미전송)는 기존 동작 유지.
+    const requestedVersion = (req.body as any)?.question_set_version;
+    if (typeof requestedVersion === 'string' && requestedVersion !== activeSet.version) {
+      // 재시도 복구 우선(★Codex 2R) — 제출 커밋 후 응답 유실 + 버전 전환이 겹친 재시도는
+      // "처음부터"가 아니라 저장된 결과를 돌려준다(완료 사용자를 초기화하지 않는다).
+      const prev = await query(
+        `SELECT result FROM marketing_diagnoses WHERE company_id = $1 AND funnel = 'A' LIMIT 1`,
+        [companyId],
+      );
+      if (prev.rows.length > 0) {
+        return res.json({ success: true, outcome: 'already_granted', result: prev.rows[0].result });
+      }
+      console.warn(`[marketing-diagnosis] submit 409 VERSION_CHANGED (company=${companyId}): ${requestedVersion} → ${activeSet.version}`);
+      return res.status(409).json({
+        success: false, code: 'VERSION_CHANGED',
+        error: '진단 문항이 갱신되었어요. 처음부터 다시 진행해 주세요.',
+      });
+    }
+
+    // v3 — sending 축 실측 선치환: 실측이 있으면 **서버값이 진실**이다(★Codex 1R — 클라이언트가
+    // 보낸 값은 항상 덮어쓴다. 화면은 게이트가 아니다). 선치환 값은 answers에 저장하지 않는다(M1).
+    const clientAnswers: Record<string, string> = { ...(answers as Record<string, string>) };
+    const merged: Record<string, string> = { ...clientAnswers };
+    let optionalKeys: Set<string> | undefined;
+    let prefillInfo: ReportInputs['prefill'];
+    const def: DiagnosisDefinition = activeSet.definition;
+    const sendingGate = def.questions.find((q) => q.axis === 'sending');
+    if (sendingGate) {
+      const prefill = await computeSendingPrefill(companyId);
+      if (prefill && sendingGate.options.some((o) => o.key === prefill.optionKey)) {
+        merged[sendingGate.key] = prefill.optionKey;
+        delete clientAnswers[sendingGate.key];   // 실측 축은 저장하지 않는다(둔갑 차단)
+        prefillInfo = { sending: { optionKey: prefill.optionKey, sentCount: prefill.sentCount } };
+        // 게이트를 참조하는 분기 = 필수 완화 키(로드·제출 시점 실측 차로 경로가 어긋나는 창 흡수)
+        optionalKeys = new Set([sendingGate.key]);
+        for (const q of def.questions) {
+          if (q.show_when?.q === sendingGate.key) optionalKeys.add(q.key);
+        }
+        // 서버 게이트 기준으로 비가시가 된 잔재 분기 답은 서버가 정리한다(★Codex 1R —
+        // 비가시 답이 처방 변형 입력으로 흘러드는 통로 차단. 그 밖의 비가시 답은 여전히 400)
+        const visibleNow = new Set(visibleQuestions(def, merged).map((q) => q.key));
+        for (const k of optionalKeys) {
+          if (k !== sendingGate.key && merged[k] !== undefined && !visibleNow.has(k)) {
+            delete merged[k];
+            delete clientAnswers[k];
+          }
+        }
+      }
+    }
+
+    const ansCheck = validateAnswers(def, merged, { optionalKeys });
     if (!ansCheck.ok) {
+      // 4xx 무흔적 금지(기능 문서 §9) — 거절 사유를 서버에도 남긴다
+      console.warn(`[marketing-diagnosis] submit 400 (company=${companyId}): ${ansCheck.error}`);
       return res.status(400).json({ success: false, error: ansCheck.error || '답변이 유효하지 않습니다.' });
     }
 
@@ -155,7 +243,7 @@ router.post('/submit', async (req: Request, res: Response) => {
       computeMonthlyUsage(companyId),
       query(`SELECT brand_description, brand_tone FROM companies WHERE id = $1`, [companyId]),
     ]);
-    const recommend = recommendPlan(activeSet.definition, answers, planRes.rows);
+    const recommend = recommendPlan(def, merged, planRes.rows, { optionalKeys });
     const brandVoiceMissing = !(brandRes.rows[0]?.brand_description || brandRes.rows[0]?.brand_tone);
 
     const client = await pool.connect();
@@ -192,12 +280,13 @@ router.post('/submit', async (req: Request, res: Response) => {
         : 'not_eligible';
 
       const result = buildDiagnosisResult({
-        definition: activeSet.definition,
-        answers,
+        definition: def,
+        answers: merged,
         recommend,
         usage,
         brandVoiceMissing,
         grantOutcome: outcome,
+        prefill: prefillInfo,
       });
 
       // ⓑ·ⓒ 저장 — funnel A 부분 UNIQUE가 동시 제출 경쟁의 최후 방어(충돌 = 409)
@@ -213,7 +302,7 @@ router.post('/submit', async (req: Request, res: Response) => {
             companyId,
             userId ?? null,
             activeSet.version,
-            JSON.stringify(answers),
+            JSON.stringify(clientAnswers),   // 실측 선치환 축·잔재 분기 제거분(효과 답변 원장 — M1·Codex 1R)
             JSON.stringify(result),
             recommend.plan?.id ?? null,
             recommend.plan ? String(recommend.plan.plan_code) : null,

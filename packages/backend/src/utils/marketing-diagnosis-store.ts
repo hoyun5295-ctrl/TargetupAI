@@ -8,6 +8,54 @@ import { Response } from 'express';
 import { query } from '../config/database';
 import { validateDefinition, type DiagnosisDefinition } from './plan-recommend';
 
+/**
+ * 문항 투영 — 공개·인증 questions 라우트가 **같은 함수**를 쓴다(문항 2경로 드리프트 차단 — v3 M3).
+ * requires(내부 룰)·level(배점)·unknown(판정 표식)은 벗기고, 위저드가 쓰는 축(section·show_when·hint)만 내보낸다.
+ */
+export function projectQuestions(definition: DiagnosisDefinition) {
+  return {
+    meta: definition.meta
+      ? {
+          est_label: definition.meta.est_label ?? null,
+          sections: (definition.meta.sections ?? []).map((s) => ({
+            key: s.key,
+            label: s.label,
+            intro: s.intro ?? null,
+          })),
+        }
+      : null,
+    questions: definition.questions.map((q) => ({
+      key: q.key,
+      text: q.text,
+      type: q.type,
+      tags: q.tags ?? [],
+      section: q.section ?? null,
+      show_when: q.show_when ?? null,
+      options: q.options.map((o) => ({ key: o.key, label: o.label, hint: o.hint ?? null })),
+    })),
+  };
+}
+
+/**
+ * 퍼널 A — sending 축 실측 선치환(v3 M1·M2). 최근 30일 발송 캠페인 수(월 경계 아님 — 월초 공백 차단).
+ * 0건 = null(묻는다 — 신규 FREE는 실적이 없다). 값은 answers에 저장하지 않는다(라우트 계약).
+ */
+export async function computeSendingPrefill(
+  companyId: string,
+): Promise<{ optionKey: string; sentCount: number } | null> {
+  const r = await query(
+    `SELECT COUNT(*)::int AS cnt FROM campaigns
+      WHERE company_id = $1
+        AND status NOT IN ('cancelled', 'draft', 'scheduled')
+        AND created_at >= NOW() - interval '30 days'`,
+    [companyId],
+  );
+  const cnt = Number(r.rows[0]?.cnt ?? 0) || 0;
+  if (cnt <= 0) return null;
+  const optionKey = cnt <= 2 ? 's1_2' : cnt <= 5 ? 's3_5' : 's6p';
+  return { optionKey, sentCount: cnt };
+}
+
 /** 추천 CT 입력용 plans 로드 — op 표 전 축 컬럼(§4-5. 전부 2026-08-16 실측 실존 컬럼). */
 export const DIAGNOSIS_PLAN_ROWS_SQL = `
   SELECT id, plan_code, plan_name, monthly_price, is_active,

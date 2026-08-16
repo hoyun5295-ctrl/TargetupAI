@@ -4018,6 +4018,7 @@ const campaignData = {
         open={showDiagnosisWizard}
         onClose={() => setShowDiagnosisWizard(false)}
         showTrialReward={diagnosisState?.grantable === 'available'}
+        companyName={companyNameFromDB || user?.company?.name || null}
         onCompleted={refreshDiagnosisState}
         onFirstSend={() => { setShowDirectSend(true); setDirectSendChannel('sms'); }}
         onSeePlans={() => navigate('/pricing')}

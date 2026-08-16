@@ -72,8 +72,9 @@
 | 인증(퍼널 A) | `routes/marketing-diagnosis.ts` | `/state` `/report` `/invited` `/submit` `/consult` |
 | 공개(퍼널 B) | `routes/marketing-diagnosis-public.ts` | `/questions` `/preview` `/submit` `/credit-costs` · IP 10분 5회 리밋 · 허니팟 · 32kb 파서(app.ts 전역 파서 앞) |
 | 관리(ceo) | `routes/marketing-diagnosis-admin.ts` | `/access` `/badge` 목록·상세·상태 전이·수동 부여 |
-| 추천 룰 CT | `utils/plan-recommend.ts` | 컬럼별 허용 op 표 · answers 완전 검증 · `no_match` · 동률 2차 정렬 |
-| 결과 조립 CT | `utils/marketing-diagnosis-report.ts` | `DiagnosisResultV1` 조립(AI 0) · 크레딧 환산 · Source caption |
+| 추천 룰 CT | `utils/plan-recommend.ts` | 컬럼별 허용 op 표 · **v3 분기 스키마 검증(show_when·axis·level·section)** · answers 가시성 검증(비가시 답 거부·선치환 optionalKeys) · `no_match`+`no_match_kind` · 동률 2차 정렬 |
+| 결과 조립 CT | `utils/marketing-diagnosis-report.ts` | V1·V2 조립(definition 축 게이트 유무로 분기 · AI 0) — V2 = 단계 관문·병목 인과 3단·30일 실행·각주 상한 |
+| 문구 원장 CT | `utils/marketing-diagnosis-copy.ts` | **v3 리포트 전 문장 소유**(관찰 틀·단계·칭찬·병목·처방·각주·표지 절) — 문장 수정 = 이 파일만 |
 | 지급 CT | `utils/marketing-diagnosis-grant.ts` | 자격 판정·지급 실행 — **submit과 수동 부여가 공유**(원자성 한 벌) |
 | 데이터 접근 | `utils/marketing-diagnosis-store.ts` | 활성 세트 로더(+검증) · plans 조회 SQL |
 | 사용 실적 | `utils/monthly-usage.ts` | 월 발송·사용금액 — **대시보드 `/stats`와 산식 단일 소스**(route-local 복사 금지) |
@@ -84,8 +85,8 @@
 
 ### 4-2. 프론트
 
-`components/marketing-diagnosis/` — `DiagnosisWizard`(문진 1소스: A 모달·B 페이지 공용) · `DiagnosisModal`(A 셸) · `DiagnosisInviteModal`(최초 1회 초대) · `DiagnosisHeroCard`(대시보드 상시 진입 2형) · `DiagnosisReportView`(리포트 본체) · `diagnosisApi.ts`
-`pages/DiagnosisPage.tsx`(공개 `/diagnosis`) · `components/admin/DiagnosisAdminPanel.tsx`(신규마케팅진단)
+`components/marketing-diagnosis/` — `DiagnosisWizard`(문진 1소스 · **v3 분기형**: 커서=문항 key·prune 고정점·섹션 도트+래칫·경계 화면·2단 보기·드래프트) · `DiagnosisModal`(A 셸 · 인증 questions·닫기 확인) · `DiagnosisInviteModal` · `DiagnosisHeroCard` · `DiagnosisReportView`(**라우터** — 스냅샷 v로 분기) · `ReportV1View`(v1 동결) · `ReportV2View`(스토리형) · `diagnosisApi.ts`
+`pages/DiagnosisPage.tsx`(공개 `/diagnosis`) · `components/admin/DiagnosisAdminPanel.tsx`(신규마케팅진단 — v3 무수정: V2 result가 V1 상위집합)
 
 ### 4-3. DB
 
@@ -147,6 +148,8 @@
 | 2026-08-16 커밋 1~4 | 강등 워커 술어 통일·유료 가드 / 지급 트랜잭션(client 주입) / 추천·리포트·지급 CT / 라우트 3종 / 병합 축. **Codex 적대 4라운드**(커밋1 2R·커밋2~4 2R — high 6·medium 5 수용, medium 1 불수용) |
 | 2026-08-16 커밋 5~8 | 옛 무료체험 팝업·배너·AI 다듬기 안내 제거 · 노출·위저드·리포트·퍼널 B 페이지·관리 메뉴 · `JourneyModalShell` dismiss opt-out 신설 |
 | 2026-08-16 개통 | DDL 4테이블 → 이미지 40종 실렌더 교체 → seed v1 → **v2 전환**(규모 축 재도입) → 7일 보상 문구·줄바꿈·대시 제거·관리 답변 라벨 표기 |
+| 2026-08-16 개통 후 정정 | ①관리 상태 전이 `42P08`(파라미터 캐스팅 불일치)로 **전건 실패 → 정정·실측 통과**(new→attempted 확인) ②관리자 토스트가 정산 탭 안에서만 그려져 **다른 탭에서 성공·실패가 안 보이던 것** → 탭 밖으로 이동 ③문구 B2B 정정("우리 매장"→"우리 브랜드") ④상태 전이 4xx 거절 사유를 서버 로그에 남기도록 보강 |
+| **2026-08-16 v3 전면 개편(코드 완료)** | Harold 지적("한줄로 이용 진단이지 마케팅 진단이 아니다") → **브레인스토밍 5역할 + 교차 반박 + 회의론자 최종 검증 24건**으로 수렴 → 분기형 문진(6축 게이트+심화 · 풀 25문항·체감 13~20 · 의향 문항 4종 폐기) · 스토리형 리포트 V2(표지 2행·들은 것·칭찬·판정 표·병목 인과 3단·30일 실행·견적 강등) · 홍보 위치 계약(각주 ≤2+견적 1·삭제 테스트) · A 실측 선치환 · 계약 테스트 21종. **시점 근거·seed 원문·검증 시나리오 = [v3 설계서](2026-08-16-marketing-diagnosis-v3-design.md)** |
 
 상세 근거·취사 내역은 설계서 §8 진행 원장이 소유한다.
 
@@ -160,14 +163,40 @@
 - ⛔ **mock 테스트는 SQL 의미 반전을 못 잡는다** — 강등 술어는 `pg-mem`(실 SQL 엔진)으로 집합 논리를 실행 검증하고, 변이(OR→AND·NOT IN→IN)가 결과를 실제로 바꾸는지까지 스위트 안에서 단정한다.
 - ⛔ **preview는 전체를 만든 뒤 일부만 덮으면 샌다** — 크레딧 환산 수치 × 공개 `/credit-costs` 제수로 숨긴 요금제를 역산할 수 있었다. **허용 필드만 조립한 DTO**로 내보낸다.
 - ⛔ **문장 속 대시(—)를 쓰지 마라**(사용자 노출 문구) — AI가 쓴 티가 난다는 Harold 지적. 두 줄 구성이나 제목+보조설명으로 푼다. 한국어 화면은 `break-keep`(어절 단위 줄바꿈)이 기본.
+- ⛔ **4xx로 돌려보내면서 서버에 흔적을 안 남기지 마라** — 거절 사유가 로그에 없으면 "눌러도 안 바뀐다"의 원인을 화면 문구로만 추측하게 된다(실제로 그 구간에서 헤맸다). 상태 전이는 성공·거절 양쪽을 다 찍는다.
+- ⛔ **알림(토스트)은 탭 조건 밖에 그려라** — 다른 탭에서 재사용하면 메시지가 통째로 사라져 "아무 반응 없음"으로 보인다.
 - ⛔ **한 SQL 문장에서 같은 `$n`을 두 문맥(대입·비교)으로 쓰지 마라** — 상태 전이 UPDATE가 `42P08`로 전건 실패했다(tsc·테스트 전부 통과한 채 운영에서만 드러남). 캐스팅을 `$2::text`로 통일해 닫았다. 경위·처방 = LESSONS_BACKEND 핵심 원칙 첫 항목.
 - ⛔ **관리 화면에 raw key를 노출하지 마라** — `u10k`·`q1_5` 같은 내부 키가 아니라 그 제출 버전의 문진 문장·선택지 라벨로 보여준다.
+- ⛔ **(v3) 상표 스테레오타입을 관찰로 쓰지 마라** — "캔바니까 재작업이 잦을 것"은 우리가 얹은 가정이다. 스테레오타입은 **선택지로 내려서 응답자가 직접 말하게** 한다("채널마다 다시 맞추는 일이 있나요"). 틀린 단정 한 줄이 리포트 전체 신뢰를 죽인다.
+- ⛔ **(v3) 정렬된 병목 리스트의 부분 공개는 어느 쪽으로 잘라도 진다** — 1번을 주면 잠긴 건 덜 중요한 것이라 유인이 없고, 1번을 잠그면 인질이다. 가림 장치(흐림·자물쇠)는 앞 블록까지 미끼로 소급 오염시킨다. 분할선은 "무엇이 문제인가(공개) vs 어떻게 고치는가(폼 뒤)".
+- ⛔ **(v3) 문항 수를 카피에 적지 마라** — 분기형은 경로마다 문항 수가 달라 "8문항"류 숫자는 거짓이 된다. 소요 안내는 seed(meta.est_label)가 소유하고 시간·마디만 말한다(계약 테스트 고정).
+- ⛔ **(v3) 총점은 개념이 틀렸다** — 합산은 보상적이라 제작 3점이 명단 0점을 가린다(명단 없는 회사가 "나누는 중"이 되는 거짓). 분기 점수 가산·캡은 경로 의존 왜곡. 단계는 선행 축 관문 하나로만.
+- ⛔ **(v3) 접힘 홍보는 숨긴 티 나는 광고다** — 접어도 토글 라벨이 노출 횟수를 만들고, 재열람마다 다시 접힌다. 자사 연결은 각주(작은 활자·브랜드색 0·개수 테스트 고정)로만.
 
 ---
 
+## §12 v3 — 진단다움 강화 (★2026-08-16 구현 완료 · 배포·seed 실행 대기)
+
+Harold 지시("진단다운 진단 + 스며드는 홍보")로 같은 날 브레인스토밍 회의를 거쳐 **전면 개편 구현 완료**.
+방향·뼈대·회의 취사 내역·seed v3 원문·검증 시나리오는 전부 **[v3 설계서](2026-08-16-marketing-diagnosis-v3-design.md)가 소유**한다.
+
+**v3에서 확정된 원칙(불변 — §3에 준한다)**
+- 문진 = 분기형(축 게이트 6 + 같은 섹션 심화 0~2 · 심화는 등급 불개입). 의향 문항은 견적 축(AI 사용량) 하나만.
+- 판정 = 관문 사다리(선행 축이 단계 결정). **총점·백분율·점수 캡·가산 전부 금지.**
+- 리포트 = 관찰→칭찬→병목(인과 3단)→처방→견적 순. 견적은 구분선 뒤 "이 처방을 실행하려면".
+- 홍보 = 위치 계약: 표지~병목 자사명 0 · 30일 실행 각주 ≤2 · 견적 1. **삭제 테스트**(자사 문장 전부 지워도 문서 성립)가 판정 기준.
+- 원장 선행: 자기 문장을 못 만드는 문항은 seed에 넣지 않는다(쌍둥이 테스트 — 계약 테스트로 고정).
+- B 미리보기 = 진단 전부 공개(병목 포함)·실행 순서와 예시만 폼 뒤. **흐림·자물쇠·부분 공개 금지**(부재가 정직).
+
+**남은 것**
+1. 배포(tp-push + build:safe) → **seed v3 실행**(v3 설계서 §7 SQL — v2 비활성+v3 활성 한 트랜잭션. 실행 전까지 운영은 v2로 정상 동작).
+2. 실측 = v3 설계서 §8 시나리오 12종.
+3. 이연 과제 = 문항 단위 이탈 계측(DDL 필요 — v3 설계서 §9) · plans 실값 정정 시 축 재도입(seed v4).
+
 ## §10 관련 문서
 
-- 시점 설계서(DDL·seed 원문·검증 13종·적대 취사) = [2026-08-16-marketing-diagnosis-design.md](2026-08-16-marketing-diagnosis-design.md)
+- 시점 설계서(DDL·seed v1·v2 원문·검증 13종·적대 취사) = [2026-08-16-marketing-diagnosis-design.md](2026-08-16-marketing-diagnosis-design.md)
+- **v3 설계서(브레인스토밍 수렴·분기 스키마·seed v3 원문·검증 12종·회의론자 24건 처리)** = [2026-08-16-marketing-diagnosis-v3-design.md](2026-08-16-marketing-diagnosis-v3-design.md)
 - 목업 마스터 프롬프트(셸 제작 근거) = [2026-08-16-diagnosis-example-mockups-master-prompt.md](2026-08-16-diagnosis-example-mockups-master-prompt.md)
 - 이미지 슬롯·비율 원장 = `packages/frontend/public/diagnosis-examples/assets/README.md`
 - 요금제 게이팅 CT = `utils/plan-guard.ts` 상단 주석(고객 DB 상한 폐지 경위 포함)

@@ -18,7 +18,9 @@ import { query } from '../config/database';
 import { handleDbMigrationError } from '../utils/db-migration-error';
 import { validateAnswers, recommendPlan } from '../utils/plan-recommend';
 import { buildDiagnosisResult, CONVERSION_TASKS } from '../utils/marketing-diagnosis-report';
-import { loadActiveQuestionSet, handleDefinitionInvalid, DIAGNOSIS_PLAN_ROWS_SQL } from '../utils/marketing-diagnosis-store';
+import {
+  loadActiveQuestionSet, handleDefinitionInvalid, DIAGNOSIS_PLAN_ROWS_SQL, projectQuestions,
+} from '../utils/marketing-diagnosis-store';
 import { CREDIT_COST_MAP } from '../utils/ai-credit-calc';
 
 const router = Router();
@@ -29,10 +31,19 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 /** 동의문 버전 — 문구 개정 시 여기만 올린다(행에 스냅샷). */
 const CONSENT_VERSION = 'v1-2026-08';
 
-/** 공개 POST 리밋 — IP 10분 5회(§4-4). GET(questions·credit-costs)은 조회라 비대상. */
+/** 공개 POST 리밋 — submit = IP 10분 5회(§4-4). GET(questions·credit-costs)은 조회라 비대상. */
 const publicPostLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: '요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.', code: 'RATE_LIMITED' },
+});
+
+/** preview 전용 리밋 — 저장이 없는 계산 조회라 창을 분리한다(v3 M10 — submit 재시도 소진 차단). */
+const previewLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: '요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.', code: 'RATE_LIMITED' },
@@ -53,17 +64,8 @@ router.get('/questions', async (_req: Request, res: Response) => {
   try {
     const activeSet = await loadActiveQuestionSet();
     if (!activeSet) return activeSetMissing(res);
-    return res.json({
-      success: true,
-      version: activeSet.version,
-      questions: activeSet.definition.questions.map((q) => ({
-        key: q.key,
-        text: q.text,
-        type: q.type,
-        tags: q.tags ?? [],
-        options: q.options.map((o) => ({ key: o.key, label: o.label })),
-      })),
-    });
+    // 인증 라우트와 같은 투영 함수(단일 진실 — v3 M3). requires·level·unknown은 벗겨 내보낸다.
+    return res.json({ success: true, version: activeSet.version, ...projectQuestions(activeSet.definition) });
   } catch (err) {
     if (handleDefinitionInvalid(err, res)) return;
     if (handleDbMigrationError(err, res, 'diagnosis_question_sets')) return;
@@ -89,13 +91,25 @@ router.get('/credit-costs', (_req: Request, res: Response) => {
 // ────────────────────────────────────────────────────────────────────
 // POST /preview — answers만 → 완전 검증 → 룰 계산 → 추천을 가린 부분 결과(저장 없음)
 // ────────────────────────────────────────────────────────────────────
-router.post('/preview', publicPostLimiter, async (req: Request, res: Response) => {
+router.post('/preview', previewLimiter, async (req: Request, res: Response) => {
   try {
     const activeSet = await loadActiveQuestionSet();
     if (!activeSet) return activeSetMissing(res);
+    // 문항 버전 결속(★Codex 1R) — 구 클라이언트(버전 미전송)는 기존 동작 유지
+    const requestedVersion = (req.body as any)?.question_set_version;
+    if (typeof requestedVersion === 'string' && requestedVersion !== activeSet.version) {
+      console.warn(`[marketing-diagnosis-public] preview 409 VERSION_CHANGED: ${requestedVersion} → ${activeSet.version}`);
+      return res.status(409).json({
+        success: false, code: 'VERSION_CHANGED',
+        error: '진단 문항이 갱신되었어요. 처음부터 다시 진행해 주세요.',
+      });
+    }
     const answers = (req.body as any)?.answers;
     const check = validateAnswers(activeSet.definition, answers);
-    if (!check.ok) return res.status(400).json({ success: false, error: check.error || '답변이 유효하지 않습니다.' });
+    if (!check.ok) {
+      console.warn(`[marketing-diagnosis-public] preview 400: ${check.error}`);
+      return res.status(400).json({ success: false, error: check.error || '답변이 유효하지 않습니다.' });
+    }
 
     const planRes = await query(DIAGNOSIS_PLAN_ROWS_SQL);
     const recommend = recommendPlan(activeSet.definition, answers, planRes.rows);
@@ -109,6 +123,25 @@ router.post('/preview', publicPostLimiter, async (req: Request, res: Response) =
     });
     // 서버가 가린다 — spread가 아니라 **허용 필드만 조립**한다(★Codex 적대 수용: 전체를 펼치고
     // 일부만 덮으면 effects의 크레딧 환산 횟수 × 공개 /credit-costs 제수로 숨긴 요금제가 역산된다).
+    // v3 회의 확정 — 진단(표지·관찰·칭찬·판정·병목 인과 3단)은 전부 무료 공개하고,
+    // 실행 순서(plan30)·업종 예시·요금제·수치(effects)만 신청 뒤로 남긴다. 흐림·자물쇠 없음(부재가 정직).
+    if (full.v === 2) {
+      return res.json({
+        success: true,
+        preview: {
+          v: 2,
+          summary: full.summary,
+          stage: full.stage,
+          cover: full.cover,
+          observation: full.observation,
+          praises: full.praises,
+          axes: full.axes,
+          insights: full.insights,
+          gaps: full.gaps,
+          plan_note: '30일 실행 순서와 분야별 예시는 신청 후 담당자가 함께 정리해 드려요.',
+        },
+      });
+    }
     return res.json({
       success: true,
       preview: {
@@ -142,9 +175,22 @@ router.post('/submit', publicPostLimiter, async (req: Request, res: Response) =>
     const activeSet = await loadActiveQuestionSet();
     if (!activeSet) return activeSetMissing(res);
 
+    // 문항 버전 결속(★Codex 1R) — 구 클라이언트(버전 미전송)는 기존 동작 유지
+    const requestedVersion = body.question_set_version;
+    if (typeof requestedVersion === 'string' && requestedVersion !== activeSet.version) {
+      console.warn(`[marketing-diagnosis-public] submit 409 VERSION_CHANGED: ${requestedVersion} → ${activeSet.version}`);
+      return res.status(409).json({
+        success: false, code: 'VERSION_CHANGED',
+        error: '진단 문항이 갱신되었어요. 처음부터 다시 진행해 주세요.',
+      });
+    }
+
     const answers = body.answers;
     const check = validateAnswers(activeSet.definition, answers);
-    if (!check.ok) return res.status(400).json({ success: false, error: check.error || '답변이 유효하지 않습니다.' });
+    if (!check.ok) {
+      console.warn(`[marketing-diagnosis-public] submit 400: ${check.error}`);
+      return res.status(400).json({ success: false, error: check.error || '답변이 유효하지 않습니다.' });
+    }
 
     // 리드 필드 서버 형식 검증(§4-4 — 프론트 검증은 참고일 뿐)
     const companyName = String(body.company_name ?? '').trim();
