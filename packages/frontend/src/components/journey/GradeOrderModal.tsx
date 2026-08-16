@@ -243,7 +243,7 @@ export default function GradeOrderModal({ open, onClose, onSaved, token }: Props
                         onClick={() => move(i, -1)}
                         disabled={i === 0}
                         aria-label={`${r.gradeValue} 한 칸 위로`}
-                        className="rounded border border-white/10 p-1 text-white/50 transition-colors hover:bg-white/10 disabled:opacity-20"
+                        className="rounded border border-white/10 p-1 text-white/50 transition-colors hover:bg-white/10 disabled:opacity-30"
                       >
                         <ChevronUp className="h-3 w-3" />
                       </button>
@@ -252,7 +252,7 @@ export default function GradeOrderModal({ open, onClose, onSaved, token }: Props
                         onClick={() => move(i, 1)}
                         disabled={i === rows.length - 1}
                         aria-label={`${r.gradeValue} 한 칸 아래로`}
-                        className="rounded border border-white/10 p-1 text-white/50 transition-colors hover:bg-white/10 disabled:opacity-20"
+                        className="rounded border border-white/10 p-1 text-white/50 transition-colors hover:bg-white/10 disabled:opacity-30"
                       >
                         <ChevronDown className="h-3 w-3" />
                       </button>

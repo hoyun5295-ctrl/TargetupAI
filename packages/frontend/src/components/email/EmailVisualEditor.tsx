@@ -823,8 +823,8 @@ function SortableBlockRow({
       </span>
       <span className="text-sm shrink-0">{SECTION_META[section.type]?.icon || '▫️'}</span>
       <span className="flex-1 text-xs text-white/80 truncate">{SECTION_META[section.type]?.label || section.type}</span>
-      <button onClick={(e) => { e.stopPropagation(); onUp(); }} disabled={isFirst} className="text-white/30 hover:text-white disabled:opacity-20 p-0.5" aria-label="위로"><ArrowUp className="w-3 h-3" /></button>
-      <button onClick={(e) => { e.stopPropagation(); onDown(); }} disabled={isLast} className="text-white/30 hover:text-white disabled:opacity-20 p-0.5" aria-label="아래로"><ArrowDown className="w-3 h-3" /></button>
+      <button onClick={(e) => { e.stopPropagation(); onUp(); }} disabled={isFirst} className="text-white/30 hover:text-white disabled:opacity-30 p-0.5" aria-label="위로"><ArrowUp className="w-3 h-3" /></button>
+      <button onClick={(e) => { e.stopPropagation(); onDown(); }} disabled={isLast} className="text-white/30 hover:text-white disabled:opacity-30 p-0.5" aria-label="아래로"><ArrowDown className="w-3 h-3" /></button>
       <button onClick={(e) => { e.stopPropagation(); onDuplicate(); }} className="text-white/30 hover:text-violet-300 p-0.5" aria-label="복제"><Copy className="w-3 h-3" /></button>
       <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="text-white/30 hover:text-rose-400 p-0.5" aria-label="삭제"><Trash2 className="w-3 h-3" /></button>
     </div>

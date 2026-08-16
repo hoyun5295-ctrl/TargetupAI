@@ -1017,7 +1017,7 @@ function Card({
       </div>
       <div className="text-lg md:text-xl font-semibold font-mono">{value}</div>
       {source && (
-        <div className="text-[10px] text-white/40 mt-1 truncate" title={source}>Data source — {source}</div>
+        <div className="text-[10px] text-white/30 mt-1 truncate" title={source}>Data source — {source}</div>
       )}
     </div>
   );

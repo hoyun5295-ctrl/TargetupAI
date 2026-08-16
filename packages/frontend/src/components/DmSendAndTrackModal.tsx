@@ -824,7 +824,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                             <span key={h.hour} className="text-[10.5px] px-2 py-1 rounded-lg bg-violet-500/15 text-violet-200 border border-violet-400/25">{h.hour}시 <strong>{h.cnt}</strong>건</span>
                           ))}
                         </div>
-                        <p className="text-[9.5px] text-white/35 mt-1.5">다음 발송은 {tracking.hourDistribution![0].hour}시 전후를 권장합니다 · Data source — dm_views 열람 시각(KST)</p>
+                        <p className="text-[10px] text-white/30 mt-1.5">다음 발송은 {tracking.hourDistribution![0].hour}시 전후를 권장합니다 · Data source — dm_views 열람 시각(KST)</p>
                       </div>
                     )}
                     {(tracking.sectionExits?.length || 0) > 0 && (
@@ -838,7 +838,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                             </div>
                           ))}
                         </div>
-                        <p className="text-[9.5px] text-white/35 mt-1.5">이 섹션 다음 내용을 다듬으면 완독률이 오릅니다 · Data source — section_interactions</p>
+                        <p className="text-[10px] text-white/30 mt-1.5">이 섹션 다음 내용을 다듬으면 완독률이 오릅니다 · Data source — section_interactions</p>
                       </div>
                     )}
                   </div>

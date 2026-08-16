@@ -250,7 +250,7 @@ export default function JourneyStepStudio({
             type="button"
             onClick={() => onIndex(Math.max(0, index - 1))}
             disabled={index === 0}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-white/60 transition-colors hover:bg-white/5 disabled:opacity-25"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-white/60 transition-colors hover:bg-white/5 disabled:opacity-30"
             aria-label="이전 스텝"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -270,7 +270,7 @@ export default function JourneyStepStudio({
             type="button"
             onClick={() => onIndex(Math.min(steps.length - 1, index + 1))}
             disabled={index >= steps.length - 1}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-white/60 transition-colors hover:bg-white/5 disabled:opacity-25"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-white/60 transition-colors hover:bg-white/5 disabled:opacity-30"
             aria-label="다음 스텝"
           >
             <ChevronRight className="h-4 w-4" />

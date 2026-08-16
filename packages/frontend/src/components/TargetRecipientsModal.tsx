@@ -272,7 +272,7 @@ export default function TargetRecipientsModal({
                   type="button"
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={page <= 1}
-                  className="p-1.5 rounded-lg text-white/70 hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed"
+                  className="p-1.5 rounded-lg text-white/70 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
                   aria-label="이전 페이지"
                 >
                   <ChevronLeft className="w-4 h-4" />
@@ -282,7 +282,7 @@ export default function TargetRecipientsModal({
                   type="button"
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={page >= totalPages}
-                  className="p-1.5 rounded-lg text-white/70 hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed"
+                  className="p-1.5 rounded-lg text-white/70 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
                   aria-label="다음 페이지"
                 >
                   <ChevronRight className="w-4 h-4" />

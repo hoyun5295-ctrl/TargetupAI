@@ -470,7 +470,7 @@ export default function ImageStudioPage() {
                   type="button"
                   disabled={tplPage <= 1}
                   onClick={() => setTplPage((p) => Math.max(1, p - 1))}
-                  className="px-3 py-1.5 rounded-lg border border-white/10 text-xs text-white/70 hover:bg-white/10 disabled:opacity-25 disabled:hover:bg-transparent"
+                  className="px-3 py-1.5 rounded-lg border border-white/10 text-xs text-white/70 hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent"
                 >
                   이전
                 </button>
@@ -479,7 +479,7 @@ export default function ImageStudioPage() {
                   type="button"
                   disabled={tplPage >= tplTotalPages}
                   onClick={() => setTplPage((p) => Math.min(tplTotalPages, p + 1))}
-                  className="px-3 py-1.5 rounded-lg border border-white/10 text-xs text-white/70 hover:bg-white/10 disabled:opacity-25 disabled:hover:bg-transparent"
+                  className="px-3 py-1.5 rounded-lg border border-white/10 text-xs text-white/70 hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent"
                 >
                   다음
                 </button>

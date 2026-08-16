@@ -221,7 +221,7 @@ export default function ReportV2View({
                 >
                   {it.key ? (
                     <>
-                      <p className="pt-px text-[13px] text-white/42">{it.key}</p>
+                      <p className="pt-px text-[13px] text-white/55">{it.key}</p>
                       <p className="text-[14.5px] font-semibold leading-snug text-white/90">
                         {it.value}
                         {it.measured && (
@@ -239,7 +239,7 @@ export default function ReportV2View({
               ))}
             </div>
             {result.observation?.source && (
-              <p className="mt-3.5 text-[10.5px] italic text-white/28">Data source — {result.observation.source}</p>
+              <p className="mt-3.5 text-[10px] italic text-white/30">Data source — {result.observation.source}</p>
             )}
           </section>
         )}
@@ -282,7 +282,7 @@ export default function ReportV2View({
                   return (
                     <div key={i} className="rounded-2xl border border-amber-400/20 bg-amber-500/[0.06] p-4">
                       <p className="text-[15.5px] font-bold leading-snug text-white">{title}</p>
-                      {detail && <p className="mt-1.5 text-sm leading-[1.7] text-white/62">{detail}</p>}
+                      {detail && <p className="mt-1.5 text-sm leading-[1.7] text-white/60">{detail}</p>}
                     </div>
                   );
                 })}
@@ -321,7 +321,7 @@ export default function ReportV2View({
                   );
                 })}
               </div>
-              <p className="mt-3 text-[10.5px] italic text-white/28">Data source — 답변 기준 자가 진단</p>
+              <p className="mt-3 text-[10px] italic text-white/30">Data source — 답변 기준 자가 진단</p>
             </section>
           )}
         </>
@@ -362,7 +362,7 @@ export default function ReportV2View({
                 <p className={`${MEASURE} mt-3.5 text-[18px] font-extrabold leading-[1.45] tracking-[-0.025em] text-white`}>
                   {g.cause}
                 </p>
-                <p className={`${MEASURE} mt-2 text-[14.5px] leading-[1.75] text-white/66`}>{g.effect}</p>
+                <p className={`${MEASURE} mt-2 text-[14.5px] leading-[1.75] text-white/65`}>{g.effect}</p>
 
                 {/* 두 갈래 — 직접 하는 길 / 한줄로로 가는 길. 왼쪽을 없애면 진단서가 판매 문서가 된다 */}
                 <div className="mt-4 grid gap-2.5 md:grid-cols-2">
@@ -432,7 +432,7 @@ export default function ReportV2View({
               <div key={`${e.kind}-${i}`} className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                 <p className="text-[11px] font-semibold text-white/40">{e.label}</p>
                 <p className="mt-1.5 text-[15px] font-bold leading-snug text-white">{e.value}</p>
-                <p className="mt-2.5 text-[10.5px] italic text-white/28">Data source — {e.source}</p>
+                <p className="mt-2.5 text-[10px] italic text-white/30">Data source — {e.source}</p>
               </div>
             ))}
           </div>
@@ -466,7 +466,7 @@ export default function ReportV2View({
                 );
               })}
             </div>
-            <p className="mt-2.5 text-[10.5px] italic text-white/28">예시 목업 · 가상 브랜드 · 실제 고객 사례 아님</p>
+            <p className="mt-2.5 text-[10px] italic text-white/30">예시 목업 · 가상 브랜드 · 실제 고객 사례 아님</p>
           </section>
         )}
 
@@ -508,7 +508,7 @@ export default function ReportV2View({
                 {result.pitch_note && (
                   <p className="mt-2.5 text-[12px] text-white/50">{result.pitch_note}</p>
                 )}
-                <p className="mt-3 text-[10.5px] italic text-white/28">Data source — 답변 × 요금제 실데이터(요금제 표가 진실)</p>
+                <p className="mt-3 text-[10px] italic text-white/30">Data source — 답변 × 요금제 실데이터(요금제 표가 진실)</p>
               </div>
             ) : (
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 md:p-5">
@@ -615,7 +615,7 @@ export default function ReportV2View({
       {total > 1 && (
         <div className="flex items-end justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[11px] font-bold tracking-[0.22em] text-white/30">
+            <p className="text-[11px] font-bold tracking-[0.22em] text-white/45">
               {String(idx + 1).padStart(2, '0')} / {String(total).padStart(2, '0')}
             </p>
             <h2 className="mt-1.5 truncate text-[21px] font-extrabold tracking-[-0.03em] text-white md:text-[23px]">
@@ -662,15 +662,17 @@ export default function ReportV2View({
       {total > 1 && (
         <div className="sticky bottom-0 z-10 pb-1 pt-2">
           <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-2 shadow-2xl backdrop-blur-md">
-            <button
-              type="button"
-              onClick={() => goTo(idx - 1)}
-              disabled={idx === 0}
-              className="inline-flex min-h-[44px] items-center gap-1 rounded-xl px-3 text-sm font-semibold text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-25"
-            >
-              <ArrowLeft className="h-4 w-4" aria-hidden />
-              <span className="hidden sm:inline">이전</span>
-            </button>
+            {/* 첫 장에는 아예 그리지 않는다 — 누를 수 없는 버튼을 흐리게 남기면 "안 보이는 글씨"가 된다 */}
+            {idx > 0 && (
+              <button
+                type="button"
+                onClick={() => goTo(idx - 1)}
+                className="inline-flex min-h-[44px] items-center gap-1 rounded-xl px-3 text-sm font-semibold text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                <ArrowLeft className="h-4 w-4" aria-hidden />
+                <span className="hidden sm:inline">이전</span>
+              </button>
+            )}
 
             {/* 미리보기 — 어느 장에서 멈춰도 신청으로 갈 길을 남긴다(이탈 지점 = 전환 지점) */}
             {previewMode && !isLast && (

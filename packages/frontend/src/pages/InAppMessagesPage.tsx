@@ -3470,7 +3470,7 @@ function DrillDownModal({ loading, stats, explain, viewers, messageTitle, onClos
                         style={{ width: `${f.impact * 100}%` }}
                       />
                     </div>
-                    <div className="text-[9px] text-white/30 italic">Data source — {f.dataSource}</div>
+                    <div className="text-[10px] text-white/30 italic">Data source — {f.dataSource}</div>
                   </div>
                 ))}
               </div>
@@ -3605,8 +3605,8 @@ function SortableInAppBlock({
           </span>
         </span>
         <div className="flex items-center gap-0.5">
-          <button onClick={onUp} disabled={isFirst} className="p-1 text-white/40 hover:text-white disabled:opacity-20" aria-label="위로"><ChevronUp className="w-3.5 h-3.5" /></button>
-          <button onClick={onDown} disabled={isLast} className="p-1 text-white/40 hover:text-white disabled:opacity-20" aria-label="아래로"><ChevronDown className="w-3.5 h-3.5" /></button>
+          <button onClick={onUp} disabled={isFirst} className="p-1 text-white/40 hover:text-white disabled:opacity-30" aria-label="위로"><ChevronUp className="w-3.5 h-3.5" /></button>
+          <button onClick={onDown} disabled={isLast} className="p-1 text-white/40 hover:text-white disabled:opacity-30" aria-label="아래로"><ChevronDown className="w-3.5 h-3.5" /></button>
           <button onClick={onDuplicate} className="p-1 text-white/40 hover:text-violet-300" aria-label="복제"><Copy className="w-3.5 h-3.5" /></button>
           <button onClick={onRemove} className="p-1 text-rose-300/70 hover:text-rose-300" aria-label="삭제"><Trash2 className="w-3.5 h-3.5" /></button>
         </div>
@@ -3678,9 +3678,9 @@ function PosterSlidesEditor({ slides, onChange, uploadImage }: { slides: any[]; 
             <span className="text-[11px] font-bold text-white/70">{i + 2}번째 장</span>
             <div className="flex items-center gap-1">
               {/* ★ 2026-07-21 업로드 중(busy)엔 순서·삭제 잠금 — in-flight 업로드가 stale 인덱스로 덮어쓰는 race 차단(Codex ③) */}
-              <button onClick={() => move(i, -1)} disabled={i === 0 || busy !== null} className="p-1 rounded text-white/40 hover:text-white hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed" title="위로"><ChevronUp className="w-3.5 h-3.5" /></button>
-              <button onClick={() => move(i, 1)} disabled={i === list.length - 1 || busy !== null} className="p-1 rounded text-white/40 hover:text-white hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed" title="아래로"><ChevronDown className="w-3.5 h-3.5" /></button>
-              <button onClick={() => remove(i)} disabled={busy !== null} className="p-1 rounded text-rose-300/70 hover:text-rose-200 hover:bg-rose-500/10 disabled:opacity-25 disabled:cursor-not-allowed" title="삭제"><Trash2 className="w-3.5 h-3.5" /></button>
+              <button onClick={() => move(i, -1)} disabled={i === 0 || busy !== null} className="p-1 rounded text-white/40 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed" title="위로"><ChevronUp className="w-3.5 h-3.5" /></button>
+              <button onClick={() => move(i, 1)} disabled={i === list.length - 1 || busy !== null} className="p-1 rounded text-white/40 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed" title="아래로"><ChevronDown className="w-3.5 h-3.5" /></button>
+              <button onClick={() => remove(i)} disabled={busy !== null} className="p-1 rounded text-rose-300/70 hover:text-rose-200 hover:bg-rose-500/10 disabled:opacity-30 disabled:cursor-not-allowed" title="삭제"><Trash2 className="w-3.5 h-3.5" /></button>
             </div>
           </div>
           <div className="flex gap-3">

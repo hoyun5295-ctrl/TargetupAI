@@ -205,7 +205,7 @@ export function DateTimeField({
                     type="button"
                     onClick={() => setViewYM(({ y, m }) => (m === 0 ? { y: y - 1, m: 11 } : { y, m: m - 1 }))}
                     disabled={!canPrevMonth}
-                    className="p-1.5 rounded-lg text-white/70 hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed"
+                    className="p-1.5 rounded-lg text-white/70 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
                     aria-label="이전 달"
                   >
                     <ChevronLeft className="w-4 h-4" />
