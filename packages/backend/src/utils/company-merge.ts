@@ -58,6 +58,11 @@ export const COMPANY_MERGE_AXES: readonly MergeAxis[] = [
   { table: 'gateway_template_mappings', action: 'move', reason: '게이트웨이 매핑 — company_id가 채워진 행만(시드 행은 bill_id 축이라 NULL)' },
   { table: 'company_agent_ids', action: 'move', reason: 'PAY 발송ID — 발송결과·정산이 이 축을 읽는다' },
 
+  // ★ 2026-08-16 마케팅 진단(설계서 §4-7) — 미등재면 진단 행 있는 회사의 병합이 통째로 차단된다.
+  { table: 'marketing_diagnoses', action: 'move', reason: '진단·리드 원장 — 관리 파이프라인 연속성. funnel A 부분 UNIQUE가 겹치면(양쪽 다 진단 완료) 충돌 차단 = 사람 판단' },
+  { table: 'diagnosis_trial_grants', action: 'keep', reason: '진단 체험 지급 이력(1회 한정 원장) — 병합 대상 자신의 지급 상태를 유지한다(선행 행 유지 §4-7). 옛 회사에 진단 행이 함께 있으면 간접 축이 차단한다' },
+  { table: 'diagnosis_invites', action: 'keep', reason: '초대 표시 기록 — UX 상태이지 자산이 아니다. 병합 대상 상태 유지(모달 1회 재노출은 무해)' },
+
   { table: 'users', action: 'keep', reason: '계정 — 실사용 계정은 병합 대상에 이미 있고 옛 계정은 status로 로그인 차단된다' },
   { table: 'company_plan_changes', action: 'keep', reason: '요금제 이력 — 옮기면 병합 대상이 겪지 않은 변경이 이력에 생긴다' },
   { table: 'company_settings', action: 'keep', reason: '회사 설정 — 옮기면 병합 대상의 현재 설정을 옛 값으로 덮는다' },
@@ -123,6 +128,14 @@ export const COMPANY_MERGE_INDIRECT_AXES: readonly IndirectAxis[] = [
     parentTable: 'kakao_templates',
     action: 'block',
     reason: '캠페인은 자기 회사에 남는데 템플릿이 옮겨간다 — 지난 발송이 다른 회사 템플릿을 가리킨다',
+  },
+  // ★ 2026-08-16 마케팅 진단(설계서 §4-7)
+  {
+    childTable: 'diagnosis_trial_grants',
+    childColumns: ['diagnosis_id'],
+    parentTable: 'marketing_diagnoses',
+    action: 'block',
+    reason: '지급 이력(keep)이 진단 행(move)을 가리킨다 — 함께 있으면 회사가 엇갈린 연결이 된다. 옛 회사 지급·진단을 정리한 뒤 진행한다',
   },
 ];
 
@@ -219,6 +232,19 @@ export class CompanyMergeResidueError extends Error {
     this.name = 'CompanyMergeResidueError';
   }
 }
+
+/**
+ * ★2026-08-16 마케팅 진단 지급 결합 카운트(§4-7 보강 — Codex 적대 수용).
+ * 지급(keep) 행이 옛 회사의 진단(소유 move 또는 연결 relink 대상)을 가리키면 병합 후 귀속이 갈라진다.
+ * pg-mem 픽스처 테스트가 이 SQL 자체를 실행해 의미를 고정한다.
+ */
+export const DIAGNOSIS_GRANT_SPLIT_SQL = `
+  SELECT count(*)::int AS cnt
+    FROM diagnosis_trial_grants g
+    JOIN marketing_diagnoses d ON d.id = g.diagnosis_id
+   WHERE g.company_id = $1::uuid
+      OR d.company_id = $1::uuid
+      OR d.linked_company_id = $1::uuid`;
 
 // ===== 순수 함수 (계약 테스트 대상) =====
 
@@ -665,6 +691,21 @@ async function buildMergePlan(
     }
   }
 
+  // ── ★2026-08-16 마케팅 진단 지급 결합 차단 (Codex 적대 수용 — §4-7 보강) ──
+  // 퍼널 B 진단은 company_id가 NULL이고 linked_company_id가 회사다. 공용 간접 축 카운트는
+  // parent를 company_id로만 세어 이 결합을 0건으로 오판한다. 지급(keep)이 소유(company_id)·
+  // 연결(linked_company_id) 어느 축으로든 옛 회사의 진단을 가리키면 병합 후 귀속이 갈라지므로 차단한다.
+  if (existing.has('diagnosis_trial_grants') && existing.has('marketing_diagnoses')) {
+    const r = await client.query(DIAGNOSIS_GRANT_SPLIT_SQL, [fromId]);
+    const rows = Number(r.rows[0]?.cnt ?? 0);
+    if (rows > 0) {
+      blockers.push({
+        kind: 'indirect_axis_rows',
+        detail: `diagnosis_trial_grants→marketing_diagnoses ${rows}건 — 옛 회사의 진단 체험 지급 결합입니다. 지급·진단을 정리한 뒤 진행합니다.`,
+      });
+    }
+  }
+
   // ── 실행 확인 대조 (dryRun은 확인 없이 볼 수 있다) ──
   if (confirm) {
     const norm = (v: string | null | undefined) => String(v ?? '').trim().toLowerCase();
@@ -719,12 +760,46 @@ export async function executeCompanyMerge(
       moved.push({ table: axis.table, action: 'move', rows: r.rowCount ?? 0 });
     }
 
+    // ★ 2026-08-16 마케팅 진단(설계서 §4-7) — linked_company_id는 회사 축인데 컬럼명이 달라
+    //   company_id 축 열거·이동에 안 잡힌다. 옛 회사를 가리키던 리드 연결을 병합 대상으로 승계한다.
+    //   (옛 회사 행은 terminated로 남으므로 방치해도 깨진 FK는 아니지만, 관리 화면이 죽은 회사를
+    //    가리키게 된다 — 승계가 §4-7 확정 정책이다. 테이블 미생성 배포 구간이면 건너뛴다.)
+    if (!skipped.has('marketing_diagnoses')) {
+      const relink = await client.query(
+        `UPDATE marketing_diagnoses SET linked_company_id = $2::uuid, updated_at = NOW()
+          WHERE linked_company_id = $1::uuid`,
+        [fromId, toId],
+      );
+      if ((relink.rowCount ?? 0) > 0) {
+        moved.push({ table: 'marketing_diagnoses(linked_company_id)', action: 'move', rows: relink.rowCount ?? 0 });
+      }
+    }
+
     // 효과 검증 — move 축 잔존 0을 재카운트하고 나서야 커밋한다(6원칙 ②).
     const residue: AxisCount[] = [];
     for (const axis of COMPANY_MERGE_AXES) {
       if (axis.action !== 'move' || skipped.has(axis.table)) continue;
       const rows = await countRows(client, axis.table, fromId);
       if (rows > 0) residue.push({ table: axis.table, action: 'move', rows });
+    }
+    // ★2026-08-16 linked_company_id 승계도 잔존 0을 검증한다(Codex 적대 수용 — 특수 UPDATE만
+    //   있고 재카운트가 없으면 경쟁 재연결이 남아도 verified=true가 된다).
+    if (!skipped.has('marketing_diagnoses')) {
+      const linkedLeft = await client.query(
+        `SELECT count(*)::int AS cnt FROM marketing_diagnoses WHERE linked_company_id = $1::uuid`,
+        [fromId],
+      );
+      const cnt = Number(linkedLeft.rows[0]?.cnt ?? 0);
+      if (cnt > 0) residue.push({ table: 'marketing_diagnoses(linked_company_id)', action: 'move', rows: cnt });
+    }
+    // ★2026-08-16 지급 결합 재검사(Codex 적대 2R 수용) — 계획 단계 검사와 이동 사이에 수동 지급이
+    //   끼어들 수 있다(지급 tx가 진단 행을 잠근 채 커밋하면, 위 relink가 그 잠금 뒤에 실행되며
+    //   결합이 계획 검사 이후에 생긴다). 이동이 끝난 시점에 같은 SQL로 다시 세서 결합이 보이면
+    //   커밋하지 않는다. g.company_id 축은 relink 후에도 옛 회사를 가리키므로 재검사에 걸린다.
+    if (!skipped.has('diagnosis_trial_grants') && !skipped.has('marketing_diagnoses')) {
+      const split = await client.query(DIAGNOSIS_GRANT_SPLIT_SQL, [fromId]);
+      const cnt = Number(split.rows[0]?.cnt ?? 0);
+      if (cnt > 0) residue.push({ table: 'diagnosis_trial_grants→marketing_diagnoses(결합)', action: 'keep', rows: cnt });
     }
     if (residue.length > 0) throw new CompanyMergeResidueError(residue);
 
@@ -748,6 +823,22 @@ export async function executeCompanyMerge(
     if (axis.action !== 'move' || skippedAfter.has(axis.table)) continue;
     const rows = await countRows({ query: (text, params) => query(text, params) }, axis.table, fromId);
     if (rows > 0) postCommitResidue.push({ table: axis.table, action: 'move', rows });
+  }
+  // linked_company_id 승계 잔존도 커밋 후 재검증에 포함(늦게 들어온 재연결 행 = 재실행으로 흡수)
+  if (!skippedAfter.has('marketing_diagnoses')) {
+    const r = await query(
+      `SELECT count(*)::int AS cnt FROM marketing_diagnoses WHERE linked_company_id = $1::uuid`,
+      [fromId],
+    );
+    const cnt = Number(r.rows[0]?.cnt ?? 0);
+    if (cnt > 0) postCommitResidue.push({ table: 'marketing_diagnoses(linked_company_id)', action: 'move', rows: cnt });
+  }
+  // 지급 결합도 커밋 후 한 번 더 — 병합 커밋 직후 끼어든 지급은 재실행으로 흡수되지 않으므로
+  // verified=false로 드러내 사람이 처리하게 한다(조용히 지나가지 않는다).
+  if (!skippedAfter.has('diagnosis_trial_grants') && !skippedAfter.has('marketing_diagnoses')) {
+    const split = await query(DIAGNOSIS_GRANT_SPLIT_SQL, [fromId]);
+    const splitCnt = Number(split.rows[0]?.cnt ?? 0);
+    if (splitCnt > 0) postCommitResidue.push({ table: 'diagnosis_trial_grants→marketing_diagnoses(결합)', action: 'keep', rows: splitCnt });
   }
 
   return {

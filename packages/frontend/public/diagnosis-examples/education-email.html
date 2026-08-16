@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>스텝업클래스 — 겨울학기 신규 개강</title>
+<style>
+@font-face{font-family:'Pretendard Variable';src:url('./assets/fonts/PretendardVariable.woff2') format('woff2-variations');font-weight:45 920;font-display:swap}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{display:block;width:100%;height:100%;object-fit:cover}
+a{text-decoration:none;color:inherit}
+.slot{background:#eee;overflow:hidden}
+body{background:#f4f5f7;padding:32px 16px}
+.mail{width:600px;max-width:100%;margin:0 auto;background:#fff;color:#151235}
+.bar{background:#3D2BEA;color:#fff;padding:19px 30px;display:flex;align-items:center;justify-content:space-between}
+.wm{font-size:20px;font-weight:800;letter-spacing:-0.04em}
+.bar span{font-size:13px;font-weight:600;color:#C3BBFF}
+/* 이미지 슬롯: email hero 4:3 */
+.hero{aspect-ratio:4/3}
+.pad{padding:38px 32px}
+.chip{display:inline-block;background:#FFE500;color:#151235;font-size:13px;font-weight:800;padding:8px 13px;border-radius:8px}
+h1{font-size:37px;line-height:1.28;font-weight:800;letter-spacing:-0.036em;margin:19px 0 0;text-wrap:pretty}
+.lead{font-size:16px;line-height:1.7;color:#565080;margin:15px 0 0;text-wrap:pretty}
+.tbl{border:2px solid #151235;border-radius:14px;overflow:hidden}
+.th{background:#151235;color:#fff;padding:14px 20px;font-size:14.5px;font-weight:700}
+.tr{display:grid;grid-template-columns:1.5fr 0.9fr 1.2fr 0.7fr;align-items:center;border-top:1px solid #EBE9F5}
+.tr.hd{background:#F5F4FC;border-top:0}
+.tr.hd div{font-size:12.5px;font-weight:800;color:#7E799F;padding:11px 8px}
+.tr.hd div:first-child{padding-left:20px}
+.tr div{padding:16px 8px;font-size:14px}
+.tr div:first-child{padding-left:20px;font-weight:700;letter-spacing:-0.02em}
+.tr .mut{color:#6E6892}
+.tr .few{color:#FF2D55;font-weight:800}
+.tr .ok{font-weight:700;color:#565080}
+.h3{font-size:16px;font-weight:800;letter-spacing:-0.025em;margin:0 0 14px}
+.wk{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.wk div{background:#F5F4FC;border-radius:12px;padding:16px 13px}
+.wk i{display:block;font-style:normal;font-size:12px;font-weight:800;color:#3D2BEA}
+.wk b{display:block;font-size:14px;font-weight:700;margin-top:9px;line-height:1.45;letter-spacing:-0.02em}
+.early{background:#FFE500;border-radius:18px;padding:28px 30px}
+.early .k{font-size:13px;font-weight:800;color:#7A6B00}
+.early h2{font-size:26px;font-weight:800;letter-spacing:-0.032em;margin:12px 0 0}
+.eg{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px}
+.eg div{background:#fff;border-radius:12px;padding:18px 16px}
+.eg b{display:block;font-size:21px;font-weight:800;letter-spacing:-0.035em}
+.eg span{display:block;font-size:13px;color:#6E6892;margin-top:7px}
+.cta{display:block;background:#3D2BEA;color:#fff;text-align:center;font-size:17px;font-weight:800;padding:22px 12px;border-radius:14px;letter-spacing:-0.015em}
+.note{text-align:center;font-size:13px;color:#8781A8;margin-top:14px}
+.foot{background:#F5F4FC;padding:28px 32px 34px;color:#8781A8;border-top:1px solid #EBE9F5}
+.foot b{display:block;font-size:14px;font-weight:800;color:#565080}
+.foot p{font-size:12.5px;line-height:1.75;margin:10px 0 0}
+.lk{display:flex;gap:14px;margin-top:14px;font-size:12.5px}
+.lk a{color:#565080;text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="mail">
+  <div class="bar"><div class="wm">스텝업클래스</div><span>2026 겨울학기</span></div>
+
+  <div class="slot hero"><img src="./assets/education-email-hero.png" alt=""></div>
+
+  <div class="pad">
+    <span class="chip">신규 개강</span>
+    <h1>겨울방학이<br>3주 남았습니다</h1>
+    <p class="lead">중2·중3 수학 심화반이 12월 22일 개강합니다. 학기 중 넘어간 단원을 4주에 정리하는 과정이에요.</p>
+  </div>
+
+  <div class="pad" style="padding-top:0">
+    <div class="tbl">
+      <div class="th">겨울학기 개강 시간표</div>
+      <div class="tr hd"><div>강좌</div><div>대상</div><div>요일·시간</div><div>정원</div></div>
+      <div class="tr"><div>수학 심화 A</div><div class="mut">중2</div><div class="mut">월·수 19:00</div><div class="few">3석</div></div>
+      <div class="tr"><div>수학 심화 B</div><div class="mut">중3</div><div class="mut">화·목 19:00</div><div class="ok">6석</div></div>
+      <div class="tr"><div>서술형 대비</div><div class="mut">중2·중3</div><div class="mut">토 10:00</div><div class="ok">8석</div></div>
+    </div>
+  </div>
+
+  <div class="pad" style="padding-top:32px">
+    <h3 class="h3">4주 커리큘럼</h3>
+    <div class="wk">
+      <div><i>1주차</i><b>함수 기초 재정리</b></div>
+      <div><i>2주차</i><b>이차함수 활용</b></div>
+      <div><i>3주차</i><b>도형의 성질</b></div>
+      <div><i>4주차</i><b>서술형 실전 연습</b></div>
+    </div>
+  </div>
+
+  <div class="pad" style="padding-top:0">
+    <div class="early">
+      <div class="k">조기등록 혜택</div>
+      <h2>12월 5일까지 등록하시면</h2>
+      <div class="eg">
+        <div><b>수강료 15%</b><span>겨울학기 4주 과정</span></div>
+        <div><b>교재비 면제</b><span>자체 제작 문제집 포함</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="pad" style="padding-top:8px">
+    <a class="cta" href="#">상담 신청하기</a>
+    <div class="note">전화 상담 02-000-0000 (평일 14–21시)</div>
+  </div>
+
+  <div class="foot">
+    <b>스텝업클래스</b>
+    <p>경기도 성남시 분당구 정자일로 000, 5층<br>
+    대표번호 02-000-0000 · <a href="#" style="color:#8781A8;text-decoration:underline">hello@example.com</a><br>
+    본 메일은 상담·수강 시 광고성 정보 수신에 동의하신 분께 발송되는 광고 메일입니다.</p>
+    <div class="lk"><a href="#">수신거부</a><a href="#">수신정보 변경</a><a href="#">개인정보처리방침</a></div>
+  </div>
+</div>
+</body>
+</html>

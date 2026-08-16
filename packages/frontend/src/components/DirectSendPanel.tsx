@@ -232,20 +232,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   //   STARTER 이상 + TRIAL 자동. CT-17 ai_messaging_enabled 게이팅은 백엔드에서.
   const [showAiRefineModal, setShowAiRefineModal] = useState(false);
 
-  // ★ D152+ 진입 안내 팝업의 "지금 써볼게요" → CustomEvent 'focus-ai-refine-btn' → 버튼 3초 glow + focus.
-  //   Dashboard.tsx closeAiRefinePopup('now') 핸들러에서 dispatch.
-  const aiRefineBtnRef = useRef<HTMLButtonElement>(null);
-  const [aiBtnGlowing, setAiBtnGlowing] = useState(false);
-  useEffect(() => {
-    const handler = () => {
-      setAiBtnGlowing(true);
-      aiRefineBtnRef.current?.focus();
-      const t = setTimeout(() => setAiBtnGlowing(false), 3000);
-      return () => clearTimeout(t);
-    };
-    document.addEventListener('focus-ai-refine-btn', handler);
-    return () => document.removeEventListener('focus-ai-refine-btn', handler);
-  }, []);
+  // ★ 2026-08-16 옛 진입 안내 팝업의 glow 리스너 쌍 제거(설계서 §5-1 B) — dispatch 측(Dashboard)과 함께 폐기.
 
   // ★ D224+ (2026-05-27) 영업팀장 박성용 신고 #2 fix: DirectSendPanel unmount 시 body.style.overflow='' reset 영구 안전망.
   //   옛 D218+ = AlimtalkSendModal:427~438 useEffect 안전망만 추가됨 + DirectSendPanel 대칭 안전망 누락 사고.
@@ -951,10 +938,9 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     <span>스팸필터테스트</span>
                   </button>
                   <button
-                    ref={aiRefineBtnRef}
                     type="button"
                     data-ai-refine-btn
-                    className={`ds-btn-sec ds-t flex items-center justify-center gap-1.5 rounded-lg border-2 border-violet-200 bg-gradient-to-r from-violet-50 to-fuchsia-50 hover:from-violet-100 hover:to-fuchsia-100 hover:border-violet-300 text-violet-700 font-semibold transition-all ${aiBtnGlowing ? 'animate-pulse ring-4 ring-violet-400/60 shadow-lg shadow-violet-300/50' : ''}`}
+                    className="ds-btn-sec ds-t flex items-center justify-center gap-1.5 rounded-lg border-2 border-violet-200 bg-gradient-to-r from-violet-50 to-fuchsia-50 hover:from-violet-100 hover:to-fuchsia-100 hover:border-violet-300 text-violet-700 font-semibold transition-all"
                     onClick={() => {
                       // ★ 2026-07-04 미가입 잠금 시 — 요금제 업그레이드 모달(PlanUpgradeModal) 통일
                       if (isAiMessagingLocked) {

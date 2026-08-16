@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>스텝업클래스 — 모바일DM</title>
+<style>
+@font-face{font-family:'Pretendard Variable';src:url('./assets/fonts/PretendardVariable.woff2') format('woff2-variations');font-weight:45 920;font-display:swap}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{display:block;width:100%;height:100%;object-fit:cover}
+a{text-decoration:none;color:inherit}
+.slot{background:#eee;overflow:hidden}
+body{background:#E4E3EC;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+.phone{width:395px;height:832px;background:#111;border-radius:46px;padding:10px;box-shadow:0 24px 56px rgba(21,18,53,.28)}
+.scr{position:relative;display:flex;flex-direction:column;width:375px;height:812px;border-radius:37px;overflow:hidden;background:#fff;color:#151235}
+.sb{position:absolute;top:0;left:0;right:0;height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 26px;z-index:5;color:#fff;font-size:14px;font-weight:600}
+.sb .ic{display:flex;gap:6px;align-items:center}
+.top{background:#3D2BEA;color:#fff;padding:54px 24px 20px}
+.wm{font-size:16px;font-weight:800;letter-spacing:-0.04em}
+.chip{display:inline-block;background:#FFE500;color:#151235;font-size:12.5px;font-weight:800;padding:7px 12px;border-radius:7px;margin-top:16px}
+h1{font-size:30px;line-height:1.3;font-weight:800;letter-spacing:-0.038em;margin:12px 0 0;text-wrap:pretty}
+.sub{font-size:15px;line-height:1.6;color:#C3BBFF;margin:8px 0 0}
+/* 이미지 슬롯: dm hero 9:16 상단 60% (16:9 밴드) */
+.band{height:82px;background:#c9c6e0}
+.body{padding:14px 22px 0}
+.cl{display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border:1.5px solid #E7E5F3;border-radius:12px;margin-bottom:7px}
+.cl b{display:block;font-size:15.5px;font-weight:700;letter-spacing:-0.022em}
+.cl span{display:block;font-size:13px;color:#7E799F;margin-top:4px}
+.cl i{font-style:normal;font-size:13.5px;font-weight:800;color:#565080}
+.cl i.few{color:#FF2D55}
+.early{background:#FFE500;border-radius:14px;padding:15px 20px;margin-top:9px}
+.early .k{font-size:12px;font-weight:800;color:#7A6B00}
+.early b{display:block;font-size:19px;font-weight:800;letter-spacing:-0.03em;margin-top:9px}
+.early p{margin:8px 0 0;font-size:14.5px;font-weight:600;color:#4A4020}
+.scr>*{flex:0 0 auto}
+.fix{margin-top:auto;background:#fff;border-top:1px solid #EFEDF7;padding:16px 20px 20px}
+.cta{display:block;background:#3D2BEA;color:#fff;text-align:center;font-size:17px;font-weight:800;padding:20px 12px;border-radius:14px}
+.optout{text-align:center;font-size:12px;color:#9C97B8;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="phone"><div class="scr">
+  <div class="sb"><span>9:41</span><span class="ic"><svg width="17" height="11" viewBox="0 0 17 11" aria-hidden="true"><rect y="7" width="3" height="4" rx="1" fill="#fff"/><rect x="4.6" y="5" width="3" height="6" rx="1" fill="#fff"/><rect x="9.2" y="2.6" width="3" height="8.4" rx="1" fill="#fff"/><rect x="13.8" width="3" height="11" rx="1" fill="#fff"/></svg>
+    <svg width="24" height="11" viewBox="0 0 24 11" aria-hidden="true"><rect x=".6" y=".6" width="20" height="9.8" rx="3" fill="none" stroke="#fff" stroke-opacity=".65"/><rect x="2.3" y="2.3" width="14" height="6.4" rx="1.6" fill="#fff"/></svg></span></div>
+
+  <div class="top">
+    <div class="wm">스텝업클래스</div>
+    <span class="chip">2026 겨울학기 신규 개강</span>
+    <h1>겨울방학이<br>3주 남았습니다</h1>
+    <p class="sub">중2·중3 수학 심화반 · 12월 22일 개강</p>
+  </div>
+  <div class="slot band"><img src="./assets/education-dm-hero.png" alt=""></div>
+
+  <div class="body">
+    <div class="cl"><div><b>수학 심화 A · 중2</b><span>월·수 19:00–21:00</span></div><i class="few">3석</i></div>
+    <div class="cl"><div><b>수학 심화 B · 중3</b><span>화·목 19:00–21:00</span></div><i>6석</i></div>
+    <div class="cl"><div><b>서술형 대비 · 중2·3</b><span>토 10:00–12:00</span></div><i>8석</i></div>
+    <div class="early">
+      <div class="k">조기등록 혜택</div>
+      <b>12월 5일까지 등록 시</b>
+      <p>수강료 15% · 교재비 면제</p>
+    </div>
+  </div>
+
+  <div class="fix">
+    <a class="cta" href="#">상담 신청하기</a>
+    <div class="optout">(광고) 스텝업클래스 · 무료수신거부 080-000-0000</div>
+  </div>
+</div></div>
+</body>
+</html>

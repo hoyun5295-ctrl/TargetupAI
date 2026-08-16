@@ -543,6 +543,12 @@ export default function LoginPage() {
                 서비스 이용신청 문의
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
               </button>
+              {/* ★ 2026-08-16 AI 마케팅 진단(퍼널 B) 진입 — 영업 링크 없이도 방문자가 닿는 상시 문 */}
+              <Link to="/diagnosis"
+                className="inline-flex items-center gap-1.5 text-sm font-semibold text-white bg-gradient-to-r from-sky-500 to-indigo-500 hover:from-sky-400 hover:to-indigo-400 rounded-full px-4 py-2 shadow-sm transition">
+                무료 마케팅 진단 받아보기
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
+              </Link>
             </div>
           )}
         </div>
@@ -638,6 +644,14 @@ export default function LoginPage() {
                     서비스 이용신청 문의
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
                   </button>
+                </div>
+                {/* ★ 2026-08-16 AI 마케팅 진단(퍼널 B) — 모바일 진입(좌측 패널은 hidden lg:flex) */}
+                <div>
+                  <Link to="/diagnosis"
+                    className="inline-flex items-center justify-center gap-1.5 w-full text-sm font-semibold text-white bg-gradient-to-r from-sky-500 to-indigo-500 hover:from-sky-400 hover:to-indigo-400 rounded-xl px-4 py-2.5 transition">
+                    무료 마케팅 진단 받아보기
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
+                  </Link>
                 </div>
               </div>
             )}

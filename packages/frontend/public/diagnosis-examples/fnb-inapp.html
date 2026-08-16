@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>브루어리715 — 인앱메시지</title>
+<style>
+@font-face{font-family:'Pretendard Variable';src:url('./assets/fonts/PretendardVariable.woff2') format('woff2-variations');font-weight:45 920;font-display:swap}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{display:block;width:100%;height:100%;object-fit:cover}
+a{text-decoration:none;color:inherit}
+.slot{background:#eee;overflow:hidden}
+body{background:#E8E4DF;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+.phone{width:395px;height:832px;background:#111;border-radius:46px;padding:10px;box-shadow:0 24px 56px rgba(30,20,16,.3)}
+.scr{position:relative;width:375px;height:812px;border-radius:37px;overflow:hidden;background:#FFF6EC;color:#1E1410}
+.app{position:absolute;inset:0;filter:blur(7px);transform:scale(1.06)}
+.sb{height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 26px;font-size:14px;font-weight:600}
+.ah{padding:4px 20px 12px;font-size:17px;font-weight:800;letter-spacing:-0.015em}
+.promo{margin:0 20px 16px;height:150px;background:#E8452A;border-radius:16px}
+.chips{display:flex;gap:9px;padding:0 20px 16px}
+.chips span{font-size:13px;padding:9px 15px;background:#F3E5D5;border-radius:18px}
+.chips span:first-child{background:#1E1410;color:#FFF6EC}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:13px;padding:0 20px}
+.g .t{aspect-ratio:1/1;background:#F0E1CF;border-radius:12px}
+.g .l1{height:11px;width:66%;background:#F3E8DA;margin-top:10px;border-radius:2px}
+.tabbar{position:absolute;left:0;right:0;bottom:0;height:78px;background:#FFF6EC;border-top:1px solid #EFE0D0;display:flex;align-items:center;justify-content:space-around;padding-bottom:14px}
+.tabbar i{display:block;width:22px;height:22px;border:2px solid #D7C3AF;border-radius:5px}
+.tabbar i:first-child{border-color:#1E1410}
+.dim{position:absolute;inset:0;background:rgba(30,20,16,.55)}
+.card{position:absolute;left:24px;right:24px;top:196px;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 26px 58px rgba(30,20,16,.48)}
+/* 이미지 슬롯: inapp 1:1 */
+.pic{position:relative;aspect-ratio:1/1;background:#eee}
+.x{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:50%;background:rgba(30,20,16,.42);display:flex;align-items:center;justify-content:center}
+.tx{padding:24px 24px 22px}
+.chip{display:inline-block;background:#FFB020;color:#1E1410;font-size:12px;font-weight:800;padding:6px 11px;border-radius:6px}
+h1{font-size:26px;line-height:1.36;font-weight:800;letter-spacing:-0.032em;margin:14px 0 0;text-wrap:pretty}
+.sub{font-size:15px;line-height:1.6;color:#7A6155;margin:9px 0 0}
+.cta{display:block;background:#E8452A;color:#fff;text-align:center;font-size:16.5px;font-weight:800;padding:18px 12px;border-radius:100px;margin-top:20px}
+.later{display:block;text-align:center;font-size:13.5px;color:#9A8272;padding:13px 0 0}
+</style>
+</head>
+<body>
+<div class="phone"><div class="scr">
+  <div class="app">
+    <div class="sb"><span>9:41</span><span>
+      <svg width="24" height="11" viewBox="0 0 24 11" aria-hidden="true"><rect x=".6" y=".6" width="20" height="9.8" rx="3" fill="none" stroke="#1E1410" stroke-opacity=".5"/><rect x="2.3" y="2.3" width="13" height="6.4" rx="1.6" fill="#1E1410"/></svg>
+    </span></div>
+    <div class="ah">브루어리715</div>
+    <div class="promo"></div>
+    <div class="chips"><span>전체</span><span>커피</span><span>티</span><span>베이커리</span></div>
+    <div class="g">
+      <div><div class="t"></div><div class="l1"></div></div>
+      <div><div class="t"></div><div class="l1"></div></div>
+      <div><div class="t"></div><div class="l1"></div></div>
+      <div><div class="t"></div><div class="l1"></div></div>
+    </div>
+    <div class="tabbar"><i></i><i style="border-radius:50%"></i><i></i><i style="border-radius:11px"></i></div>
+  </div>
+  <div class="dim"></div>
+
+  <div class="card">
+    <div class="pic slot">
+      <img src="./assets/fnb-inapp.png" alt="">
+      <a class="x" href="#"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 1 11 11M11 1 1 11" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg></a>
+    </div>
+    <div class="tx">
+      <span class="chip">오전 방문 쿠폰</span>
+      <h1>아침에 오시면 20%</h1>
+      <p class="sub">구운 밤 라떼, 오늘부터 만나요</p>
+      <a class="cta" href="#">쿠폰 받기</a>
+      <a class="later" href="#">다음에 볼게요</a>
+    </div>
+  </div>
+</div></div>
+</body>
+</html>

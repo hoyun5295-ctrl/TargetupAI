@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>어반셀 — 모바일DM</title>
+<style>
+@font-face{font-family:'Pretendard Variable';src:url('./assets/fonts/PretendardVariable.woff2') format('woff2-variations');font-weight:45 920;font-display:swap}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{display:block;width:100%;height:100%;object-fit:cover}
+a{text-decoration:none;color:inherit}
+.slot{background:#eee;overflow:hidden}
+body{background:#E4E4E7;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+.phone{width:395px;height:832px;background:#111;border-radius:46px;padding:10px;box-shadow:0 24px 56px rgba(0,0,0,.28)}
+.scr{position:relative;display:flex;flex-direction:column;width:375px;height:812px;border-radius:37px;overflow:hidden;background:#fff;color:#0B0B0F}
+.sb{position:absolute;top:0;left:0;right:0;height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 26px;z-index:5;color:#fff;font-size:14px;font-weight:600}
+.sb .ic{display:flex;gap:6px;align-items:center}
+/* 이미지 슬롯: dm hero 9:16 상단 60% */
+.hero{position:relative;height:486px}
+.hero .slot{position:absolute;inset:0;background:#3a3a3a}
+.scrim{position:absolute;inset:0;background:linear-gradient(180deg,rgba(11,11,15,.55) 0%,rgba(11,11,15,0) 32%,rgba(11,11,15,.06) 52%,rgba(11,11,15,.86) 100%)}
+.wm{position:absolute;top:60px;left:24px;font-size:17px;font-weight:800;color:#fff;letter-spacing:-0.01em}
+.htx{position:absolute;left:24px;right:24px;bottom:28px}
+.chip{display:inline-block;background:#FF3B1F;color:#fff;font-size:12.5px;font-weight:800;padding:7px 11px;border-radius:4px;margin-bottom:14px}
+h1{font-size:34px;line-height:1.26;font-weight:800;color:#fff;letter-spacing:-0.032em;margin:0;text-wrap:pretty}
+.sub{font-size:15px;line-height:1.6;color:#D6D6DB;margin-top:12px}
+.body{padding:22px 24px 0}
+.b2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.card{border:1.5px solid #E4E4E9;border-radius:12px;padding:16px}
+.card b{display:block;font-size:22px;font-weight:800;letter-spacing:-0.03em}
+.card span{display:block;font-size:13px;color:#77777F;margin-top:6px}
+.line{display:flex;align-items:center;gap:11px;margin-top:16px;padding-top:15px;border-top:1px solid #EDEDF1;font-size:15px;line-height:1.6;color:#3A3A42}
+.dot{width:7px;height:7px;border-radius:50%;background:#FF3B1F;flex:0 0 7px}
+.scr>*{flex:0 0 auto}
+.fix{margin-top:auto;background:#fff;border-top:1px solid #EDEDF1;padding:16px 20px 20px}
+.cta{display:block;background:#0B0B0F;color:#fff;text-align:center;font-size:17px;font-weight:700;padding:20px 12px;border-radius:12px;letter-spacing:-0.015em}
+.optout{text-align:center;font-size:12px;color:#9A9AA2;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="phone"><div class="scr">
+  <div class="sb"><span>9:41</span><span class="ic">
+    <svg width="17" height="11" viewBox="0 0 17 11" aria-hidden="true"><rect y="7" width="3" height="4" rx="1" fill="#fff"/><rect x="4.6" y="5" width="3" height="6" rx="1" fill="#fff"/><rect x="9.2" y="2.6" width="3" height="8.4" rx="1" fill="#fff"/><rect x="13.8" width="3" height="11" rx="1" fill="#fff"/></svg>
+    <svg width="24" height="11" viewBox="0 0 24 11" aria-hidden="true"><rect x=".6" y=".6" width="20" height="9.8" rx="3" fill="none" stroke="#fff" stroke-opacity=".65"/><rect x="2.3" y="2.3" width="14" height="6.4" rx="1.6" fill="#fff"/></svg>
+  </span></div>
+
+  <div class="hero">
+    <div class="slot"><img src="./assets/fashion-dm-hero.png" alt=""></div>
+    <div class="scrim"></div>
+    <div class="wm">URBANCELLE</div>
+    <div class="htx">
+      <span class="chip">26 가을 신상 입고</span>
+      <h1>아침 공기가<br>달라졌습니다</h1>
+      <p class="sub">가벼운 겉옷이 필요해지는 계절</p>
+    </div>
+  </div>
+
+  <div class="body">
+    <div class="b2">
+      <div class="card"><b>32종</b><span>가을 신상 입고</span></div>
+      <div class="card" style="border-color:#FF3B1F"><b style="color:#FF3B1F">5종</b><span>품절 상품 재입고</span></div>
+    </div>
+    <div class="line"><span class="dot"></span>첫 주문 배송비 무료 · 14일 이내 교환·반품</div>
+    <div class="line" style="border-top:0;margin-top:2px;padding-top:0"><span class="dot" style="background:#0B0B0F"></span>재입고 알림 신청 시 입고 즉시 문자 안내</div>
+  </div>
+
+  <div class="fix">
+    <a class="cta" href="#">가을 신상 보러 가기</a>
+    <div class="optout">(광고) 어반셀 · 무료수신거부 080-000-0000</div>
+  </div>
+</div></div>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>무브짐 — 모바일DM</title>
+<style>
+@font-face{font-family:'Pretendard Variable';src:url('./assets/fonts/PretendardVariable.woff2') format('woff2-variations');font-weight:45 920;font-display:swap}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{display:block;width:100%;height:100%;object-fit:cover}
+a{text-decoration:none;color:inherit}
+.slot{background:#eee;overflow:hidden}
+body{background:#DEDEE0;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+.phone{width:395px;height:832px;background:#111;border-radius:46px;padding:10px;box-shadow:0 24px 56px rgba(0,0,0,.32)}
+.scr{position:relative;display:flex;flex-direction:column;width:375px;height:812px;border-radius:37px;overflow:hidden;background:#0C0C0D;color:#fff}
+.sb{position:absolute;top:0;left:0;right:0;height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 26px;z-index:5;color:#fff;font-size:14px;font-weight:600}
+.sb .ic{display:flex;gap:6px;align-items:center}
+/* 이미지 슬롯: dm hero 9:16 상단 60% */
+.hero{position:relative;height:362px}
+.hero .slot{position:absolute;inset:0;background:#222}
+.scrim{position:absolute;inset:0;background:linear-gradient(180deg,rgba(12,12,13,.55) 0%,rgba(12,12,13,.05) 34%,rgba(12,12,13,.5) 66%,#0C0C0D 100%)}
+.wm{position:absolute;top:60px;left:24px;font-size:17px;font-weight:800;letter-spacing:-0.02em}
+.htx{position:absolute;left:24px;right:24px;bottom:22px}
+.chip{display:inline-block;background:#D8FF00;color:#0C0C0D;font-size:12.5px;font-weight:800;padding:7px 12px;border-radius:6px;margin-bottom:14px}
+h1{font-size:38px;line-height:1.18;font-weight:800;letter-spacing:-0.048em;margin:0;text-wrap:pretty}
+.sub{font-size:14.5px;line-height:1.6;color:#A5A5AC;margin-top:12px}
+.body{padding:14px 22px 0}
+.opt{background:#17171A;border-radius:12px;padding:13px 18px;display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.opt.best{border:1.5px solid #D8FF00}
+.opt b{display:block;font-size:16px;font-weight:800;letter-spacing:-0.025em}
+.opt span{display:block;font-size:12.5px;color:#8A8A90;margin-top:4px}
+.tagb{font-size:10px;font-weight:800;color:#0C0C0D;background:#D8FF00;padding:3px 6px;border-radius:3px;margin-left:6px;vertical-align:2px}
+.opt i{font-style:normal;font-size:15px;font-weight:800;color:#D8FF00}
+.pt{display:flex;align-items:center;gap:11px;background:#D8FF00;color:#0C0C0D;border-radius:12px;padding:14px 16px;margin-top:12px;font-size:14.5px;font-weight:800;letter-spacing:-0.02em}
+.scr>*{flex:0 0 auto}
+.fix{margin-top:auto;background:#0C0C0D;border-top:1px solid #232326;padding:14px 20px 18px}
+.cta{display:block;background:#D8FF00;color:#0C0C0D;text-align:center;font-size:17.5px;font-weight:800;padding:19px 12px;border-radius:12px;letter-spacing:-0.02em}
+.optout{text-align:center;font-size:12px;color:#6E6E74;margin-top:11px}
+</style>
+</head>
+<body>
+<div class="phone"><div class="scr">
+  <div class="sb"><span>9:41</span><span class="ic"><svg width="17" height="11" viewBox="0 0 17 11" aria-hidden="true"><rect y="7" width="3" height="4" rx="1" fill="#fff"/><rect x="4.6" y="5" width="3" height="6" rx="1" fill="#fff"/><rect x="9.2" y="2.6" width="3" height="8.4" rx="1" fill="#fff"/><rect x="13.8" width="3" height="11" rx="1" fill="#fff"/></svg>
+    <svg width="24" height="11" viewBox="0 0 24 11" aria-hidden="true"><rect x=".6" y=".6" width="20" height="9.8" rx="3" fill="none" stroke="#fff" stroke-opacity=".65"/><rect x="2.3" y="2.3" width="14" height="6.4" rx="1.6" fill="#fff"/></svg></span></div>
+
+  <div class="hero">
+    <div class="slot"><img src="./assets/fitness-dm-hero.png" alt=""></div>
+    <div class="scrim"></div>
+    <div class="wm">MOVEGYM</div>
+    <div class="htx">
+      <span class="chip">D-7 · 만료 임박</span>
+      <h1>회원권이<br>7일 뒤에 끝납니다</h1>
+      <p class="sub">만료일 8월 23일 · 쉬는 기간 없이 이어가세요</p>
+    </div>
+  </div>
+
+  <div class="body">
+    <div class="opt"><div><b>3개월</b><span>237,000원</span></div><i>+2주</i></div>
+    <div class="opt best"><div><b>6개월<span class="tagb">BEST</span></b><span>414,000원</span></div><i>+4주</i></div>
+    <div class="opt"><div><b>12개월</b><span>708,000원</span></div><i>+8주</i></div>
+    <div class="pt">
+      <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 10v4M19 10v4M8 7v10M16 7v10M8 12h8" stroke="#0C0C0D" stroke-width="2.4" stroke-linecap="round"/></svg>
+      연장 회원 PT 1회 체험 포함
+    </div>
+  </div>
+
+  <div class="fix">
+    <a class="cta" href="#">회원권 연장하기</a>
+    <div class="optout">(광고) 무브짐 · 무료수신거부 080-000-0000</div>
+  </div>
+</div></div>
+</body>
+</html>

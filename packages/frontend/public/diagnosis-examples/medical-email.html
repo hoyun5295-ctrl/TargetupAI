@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>라온재활의학과 — 내일 예약 안내</title>
+<style>
+@font-face{font-family:'Pretendard Variable';src:url('./assets/fonts/PretendardVariable.woff2') format('woff2-variations');font-weight:45 920;font-display:swap}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{display:block;width:100%;height:100%;object-fit:cover}
+a{text-decoration:none;color:inherit}
+.slot{background:#eee;overflow:hidden}
+body{background:#f4f5f7;padding:32px 16px}
+.mail{width:600px;max-width:100%;margin:0 auto;background:#fff;color:#0C2A2E}
+.bar{background:#00857C;color:#fff;padding:20px 30px;display:flex;align-items:center;justify-content:space-between}
+.wm{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:800;letter-spacing:-0.025em}
+.bar span{font-size:13px;color:#A7DCD7}
+.pad{padding:36px 32px}
+.chip{display:inline-block;background:#E3F4F2;color:#00756D;font-size:13px;font-weight:800;padding:8px 13px;border-radius:8px}
+h1{font-size:34px;line-height:1.32;font-weight:800;letter-spacing:-0.032em;margin:18px 0 0;text-wrap:pretty}
+.lead{font-size:16px;line-height:1.7;color:#4C6B6E;margin:14px 0 0}
+.appt{border:2px solid #00857C;border-radius:16px;overflow:hidden}
+.ah{background:#00857C;color:#fff;padding:15px 22px;display:flex;align-items:center;justify-content:space-between}
+.ah b{font-size:14.5px;font-weight:700}
+.ah span{font-size:12.5px;color:#A7DCD7}
+.ar{display:flex;padding:15px 22px;border-bottom:1px solid #EEF4F4}
+.ar:last-child{border-bottom:0}
+.ar dt{flex:0 0 92px;font-size:14px;color:#6B8A8D;margin:0}
+.ar dd{margin:0;font-size:15.5px;font-weight:700;letter-spacing:-0.02em;line-height:1.6}
+.ar dd small{display:block;font-size:13.5px;font-weight:500;color:#6B8A8D;margin-top:5px}
+.h3{font-size:17px;font-weight:800;letter-spacing:-0.025em;margin:0 0 14px}
+.step{display:flex;gap:13px;align-items:flex-start;background:#F2F8F8;border-radius:12px;padding:16px 18px;margin-bottom:9px}
+.step i{flex:0 0 24px;height:24px;border-radius:50%;background:#00857C;color:#fff;font-size:12.5px;font-weight:800;display:flex;align-items:center;justify-content:center;font-style:normal}
+.step p{margin:0;font-size:15px;line-height:1.65;color:#365356}
+/* 이미지 슬롯: 건강정보 4:3 */
+.note-img{aspect-ratio:4/3;border-radius:14px}
+.hn{border-top:1px solid #EEF4F4;padding-top:28px}
+.hn .k{font-size:13px;font-weight:800;color:#00A896}
+.hn h2{font-size:22px;font-weight:800;letter-spacing:-0.028em;margin:11px 0 0}
+.hn p{font-size:15px;line-height:1.7;color:#4C6B6E;margin:10px 0 0}
+.tips{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}
+.tips div{background:#F2F8F8;border-radius:12px;padding:15px 12px;font-size:13.5px;font-weight:700;line-height:1.5;letter-spacing:-0.015em}
+.tips span{display:block;font-size:12.5px;font-weight:500;color:#6B8A8D;margin-top:6px}
+.cta{display:block;background:#00857C;color:#fff;text-align:center;font-size:17px;font-weight:800;padding:21px 12px;border-radius:12px;letter-spacing:-0.015em}
+.cta2{display:block;border:1.5px solid #C7E0DE;color:#00756D;text-align:center;font-size:16px;font-weight:700;padding:18px 12px;border-radius:12px;margin-top:10px}
+.foot{background:#F2F8F8;padding:28px 32px 34px;color:#7C9799;border-top:1px solid #E3EFEE}
+.foot b{display:block;font-size:14px;font-weight:800;color:#4C6B6E}
+.foot p{font-size:12.5px;line-height:1.75;margin:10px 0 0}
+.lk{display:flex;gap:14px;margin-top:14px;font-size:12.5px}
+.lk a{color:#4C6B6E;text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="mail">
+  <div class="bar">
+    <div class="wm">
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5c5.6 4.8 8.5 8 8.5 11a4.4 4.4 0 0 1-8.5 1.6A4.4 4.4 0 0 1 3.5 14.5c0-3 2.9-6.2 8.5-11Z" fill="none" stroke="#fff" stroke-width="1.7"/><path d="M12 10.5v5M9.5 13h5" stroke="#7FE3D6" stroke-width="1.7" stroke-linecap="round"/></svg>
+      라온재활의학과의원
+    </div>
+    <span>진료 09:00–18:00</span>
+  </div>
+
+  <div class="pad" style="padding-bottom:24px">
+    <span class="chip">예약 안내</span>
+    <h1>내일 오후 3시,<br>예약이 있습니다</h1>
+    <p class="lead">방문 전 확인하실 내용을 함께 보내드립니다.</p>
+  </div>
+
+  <div class="pad" style="padding-top:0;padding-bottom:0">
+    <div class="appt">
+      <div class="ah"><b>예약 정보</b><span>예약번호 R-2608-0142</span></div>
+      <dl class="ar"><dt>일시</dt><dd>2026년 8월 17일 (월) 오후 3:00</dd></dl>
+      <dl class="ar"><dt>진료</dt><dd>도수치료 · 50분</dd></dl>
+      <dl class="ar"><dt>담당</dt><dd>김하늘 물리치료사<small>3치료실</small></dd></dl>
+      <dl class="ar"><dt>장소</dt><dd>서울특별시 노원구 동일로 000, 3층<small>지하철 7호선 000역 2번 출구에서 도보 5분</small></dd></dl>
+    </div>
+  </div>
+
+  <div class="pad" style="padding-bottom:0">
+    <h3 class="h3">방문 전 확인해 주세요</h3>
+    <div class="step"><i>1</i><p>움직이기 편한 복장으로 오시면 치료 시간이 줄어듭니다.</p></div>
+    <div class="step"><i>2</i><p>접수는 예약 시간 10분 전부터 가능합니다.</p></div>
+    <div class="step"><i>3</i><p>일정 변경은 방문 하루 전까지 전화 또는 예약 페이지에서 가능합니다.</p></div>
+  </div>
+
+  <div class="pad" style="padding-bottom:0">
+    <div class="hn">
+      <div class="k">건강 정보</div>
+      <h2>책상 앞에서 하는 목·어깨 스트레칭</h2>
+      <p>한 동작을 15초씩, 통증이 없는 범위에서만 진행하세요.</p>
+      <div class="slot note-img" style="margin-top:16px"><img src="./assets/medical-email-hero.png" alt=""></div>
+      <div class="tips">
+        <div>목 옆으로 기울이기<span>좌우 각 15초</span></div>
+        <div>어깨 으쓱 올리기<span>10회 반복</span></div>
+        <div>등 뒤로 손 모으기<span>15초 유지</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="pad">
+    <a class="cta" href="#">예약 확인·변경하기</a>
+    <a class="cta2" href="#">전화 문의 02-000-0000</a>
+  </div>
+
+  <div class="foot">
+    <b>라온재활의학과의원</b>
+    <p>서울특별시 노원구 동일로 000, 3층 · 대표번호 02-000-0000<br>
+    <a href="#" style="color:#7C9799;text-decoration:underline">hello@example.com</a> · 진료시간 평일 09:00–18:00 / 토 09:00–13:00<br>
+    본 메일은 예약 안내 목적으로 발송되며, 건강 정보는 수신 동의하신 분께 함께 제공됩니다.</p>
+    <div class="lk"><a href="#">수신거부</a><a href="#">수신정보 변경</a><a href="#">개인정보처리방침</a></div>
+  </div>
+</div>
+</body>
+</html>

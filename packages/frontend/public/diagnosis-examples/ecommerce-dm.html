@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>데일리박스 — 모바일DM</title>
+<style>
+@font-face{font-family:'Pretendard Variable';src:url('./assets/fonts/PretendardVariable.woff2') format('woff2-variations');font-weight:45 920;font-display:swap}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{display:block;width:100%;height:100%;object-fit:cover}
+a{text-decoration:none;color:inherit}
+.slot{background:#eee;overflow:hidden}
+body{background:#E3E6EA;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+.phone{width:395px;height:832px;background:#111;border-radius:46px;padding:10px;box-shadow:0 24px 56px rgba(16,20,24,.28)}
+.scr{position:relative;display:flex;flex-direction:column;width:375px;height:812px;border-radius:37px;overflow:hidden;background:#fff;color:#101418}
+.sb{position:absolute;top:0;left:0;right:0;height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 26px;z-index:5;color:#fff;font-size:14px;font-weight:600}
+.sb .ic{display:flex;gap:6px;align-items:center}
+.top{position:relative;background:#2563FF;padding:56px 24px 20px;color:#fff}
+.wm{font-size:16px;font-weight:800;letter-spacing:-0.035em}
+h1{font-size:31px;line-height:1.3;font-weight:800;letter-spacing:-0.036em;margin:16px 0 0;text-wrap:pretty}
+.sub{font-size:15px;line-height:1.6;color:#C4D4FF;margin:11px 0 0}
+/* 이미지 슬롯: dm hero 9:16 상단 60% (16:9 밴드) */
+.band{height:112px;background:#c9d4e6}
+.sum{margin:-40px 20px 0;position:relative;background:#fff;border-radius:18px;padding:17px 22px;box-shadow:0 12px 30px rgba(16,32,80,.16)}
+.sr{display:flex;align-items:baseline;justify-content:space-between}
+.sr span{font-size:14px;color:#5A646F}
+.sr b{font-size:26px;font-weight:800;letter-spacing:-0.04em}
+.track{height:10px;background:#E4E9EF;border-radius:5px;margin-top:16px;overflow:hidden}
+.track i{display:block;width:89%;height:10px;background:#2563FF;border-radius:5px}
+.tr{font-size:15px;font-weight:600;margin-top:12px}
+.tr em{font-style:normal;color:#2563FF;font-weight:800}
+.list{padding:12px 24px 0}
+.lh{font-size:13px;font-weight:800;color:#8A939E;letter-spacing:-0.01em}
+.ci{display:flex;align-items:center;gap:13px;padding:10px 0;border-bottom:1px solid #F0F3F6}
+.ci:last-child{border-bottom:0}
+.cth{width:52px;height:52px;flex:0 0 52px;border-radius:9px}
+.cn{flex:1}
+.cn b{display:block;font-size:15px;font-weight:700;letter-spacing:-0.02em}
+.cn span{display:block;font-size:12.5px;color:#FF3B30;font-weight:700;margin-top:4px}
+.cn span.ok{color:#8A939E;font-weight:500}
+.cp{font-size:15px;font-weight:800;letter-spacing:-0.02em}
+.scr>*{flex:0 0 auto}
+.fix{margin-top:auto;background:#fff;border-top:1px solid #F0F3F6;padding:16px 20px 20px}
+.cta{display:block;background:#2563FF;color:#fff;text-align:center;font-size:17px;font-weight:800;padding:20px 12px;border-radius:14px}
+.optout{text-align:center;font-size:12px;color:#A2AAB4;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="phone"><div class="scr">
+  <div class="sb"><span>9:41</span><span class="ic"><svg width="17" height="11" viewBox="0 0 17 11" aria-hidden="true"><rect y="7" width="3" height="4" rx="1" fill="#fff"/><rect x="4.6" y="5" width="3" height="6" rx="1" fill="#fff"/><rect x="9.2" y="2.6" width="3" height="8.4" rx="1" fill="#fff"/><rect x="13.8" width="3" height="11" rx="1" fill="#fff"/></svg>
+    <svg width="24" height="11" viewBox="0 0 24 11" aria-hidden="true"><rect x=".6" y=".6" width="20" height="9.8" rx="3" fill="none" stroke="#fff" stroke-opacity=".65"/><rect x="2.3" y="2.3" width="14" height="6.4" rx="1.6" fill="#fff"/></svg></span></div>
+
+  <div class="top">
+    <div class="wm">데일리박스</div>
+    <h1>장바구니에 3개,<br>아직 담긴 채예요</h1>
+    <p class="sub">2개는 재고가 얼마 남지 않았어요</p>
+  </div>
+  <div class="slot band"><img src="./assets/ecommerce-dm-hero.png" alt=""></div>
+
+  <div class="sum">
+    <div class="sr"><span>장바구니 합계</span><b>26,800원</b></div>
+    <div class="track"><i></i></div>
+    <div class="tr"><em>3,200원</em>만 더 담으면 무료배송</div>
+  </div>
+
+  <div class="list">
+    <div class="lh">담아두신 상품</div>
+    <div class="ci">
+      <div class="slot cth"><img src="./assets/ecommerce-p1.png" alt=""></div>
+      <div class="cn"><b>유기농 압착 오트밀 1kg</b><span>재고 4개</span></div>
+      <span class="cp">12,900원</span>
+    </div>
+    <div class="ci">
+      <div class="slot cth"><img src="./assets/ecommerce-p2.png" alt=""></div>
+      <div class="cn"><b>대나무 칫솔 4입 세트</b><span class="ok">재고 충분</span></div>
+      <span class="cp">7,400원</span>
+    </div>
+    <div class="ci">
+      <div class="slot cth"><img src="./assets/ecommerce-p3.png" alt=""></div>
+      <div class="cn"><b>스테인리스 텀블러 500ml</b><span>재고 2개</span></div>
+      <span class="cp">6,500원</span>
+    </div>
+  </div>
+
+  <div class="fix">
+    <a class="cta" href="#">장바구니로 돌아가기</a>
+    <div class="optout">(광고) 데일리박스 · 무료수신거부 080-000-0000</div>
+  </div>
+</div></div>
+</body>
+</html>

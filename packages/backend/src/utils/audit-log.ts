@@ -78,6 +78,16 @@ export function isAiTrainingViewer(superAdminId?: string | null): Promise<boolea
 }
 
 /**
+ * ★ 2026-08-16 마케팅 진단 관리(신규마케팅진단) 열람 권한 — MARKETING_DIAGNOSIS_VIEWER_IDS(기본 'ceo').
+ * 신규 리드·진단 파이프라인은 영업 자산이라 소유자(ceo) 전용. 다른 축과 별도 env(한 계정을 열어줄 때
+ * 다른 축까지 함께 열리면 안 된다). ⚠ 인자 = req.user.userId(super_admins.id uuid) — loginId 문자열을
+ * 넘기면 uuid 비교 예외를 코어 catch가 삼켜 전원 차단된다(설계서 §4-6 D1).
+ */
+export function isDiagnosisViewer(superAdminId?: string | null): Promise<boolean> {
+  return isSuperAdminAllowed(superAdminId, 'MARKETING_DIAGNOSIS_VIEWER_IDS', 'ceo', 'marketing-diagnosis');
+}
+
+/**
  * ★ 2026-08-05 총 정산표 열람 권한 — SETTLEMENT_OVERVIEW_VIEWER_IDS(기본 'ceo').
  * 전 고객사의 총 청구금·수금·미납을 한 화면에 모으는 소유자용 집계라 감사 로그와 같은 급으로 잠근다.
  * 직원 계정은 자기 담당 정산만 보고, 회사 전체 미납 총액은 보지 않는다(Harold 명시 2026-08-05).

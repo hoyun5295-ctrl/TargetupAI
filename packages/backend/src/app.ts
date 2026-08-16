@@ -34,6 +34,9 @@ import agentChargeOrdersRoutes from './routes/agent-charge-orders';
 import marketingPlannerRoutes from './routes/marketing-planner';
 // ★ 2026-08-13 원스텝 AI 컨텐츠 생성 (설계서 = docs/2026-08-13-one-step-content-interview-design.md)
 import contentInterviewRoutes from './routes/content-interview';
+import marketingDiagnosisRoutes from './routes/marketing-diagnosis';
+import marketingDiagnosisPublicRoutes from './routes/marketing-diagnosis-public';
+import marketingDiagnosisAdminRoutes from './routes/marketing-diagnosis-admin';
 // ★ D184 (2026-05-20): 이니시스 표준결제 라우트 (레거시 invitobiz.com → 한줄로 이전)
 import paymentsRoutes from './routes/payments';
 import testContactsRoutes from './routes/test-contacts';
@@ -251,6 +254,15 @@ app.use(
   ['/api/cdp/webhook/custom', '/api/cafe24/webhook', '/api/naver-commerce/webhook'],
   express.json({ limit: '1mb', verify: (req: any, _res, buf) => { req.rawBody = buf; } })
 );
+// ★ 2026-08-16 마케팅 진단 공개 축 — 미인증 입력이라 본문 상한 32kb(전역 상한보다 좁게). 라우터 자체는
+//   아래 정상 mount 블록에 있다(여기 두면 공통 미들웨어를 건너뛴다 — 설계서 §4-4). 413은 400으로 변환.
+app.use('/api/public/marketing-diagnosis', express.json({ limit: '32kb' }));
+app.use('/api/public/marketing-diagnosis', (err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err && (err.type === 'entity.too.large' || err.status === 413)) {
+    return res.status(400).json({ success: false, error: '요청이 너무 큽니다.' });
+  }
+  return next(err);
+});
 app.use(express.json({ limit: LIMITS.requestBodySize }));
 
 // ★ 2026-07-17 느린 요청 상시 계측 — 500ms 초과 API 요청을 로깅(경로·소요·회사·상태).
@@ -343,12 +355,18 @@ app.use('/api/agent-charge-orders', agentChargeOrdersRoutes);
 app.use('/api/marketing-planner', marketingPlannerRoutes);
 // ★ 2026-08-13 원스텝 AI 컨텐츠 생성(인터뷰형) — 세션·견적·생성 확정. 테이블 미생성 시 503 DB_MIGRATION_PENDING
 app.use('/api/one-step', contentInterviewRoutes);
+// ★ 2026-08-16 AI 마케팅 진단(퍼널 A — 인증) — FREE 진단→TRIAL 7일 자동 지급. 테이블 미생성 시 503 DB_MIGRATION_PENDING
+app.use('/api/marketing-diagnosis', marketingDiagnosisRoutes);
+// ★ 2026-08-16 AI 마케팅 진단(퍼널 B — 미인증 리드). 본문 파서 32kb 한정은 전역 파서 앞에 선배치됨
+app.use('/api/public/marketing-diagnosis', marketingDiagnosisPublicRoutes);
 // ★ D184: 이니시스 표준결제 (prepare/return/close/list/detail)
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/admin/billing', billingRoutes);
 app.use('/api/admin/sync', adminSyncRoutes);
 // ★ D145 P0: 더 구체적 경로 먼저 등록 (/api/admin 와일드카드 위에)
 app.use('/api/admin/login-blocks', loginBlocksRoutes);
+// ★ 2026-08-16 신규마케팅진단(ceo 전용 — MARKETING_DIAGNOSIS_VIEWER_IDS) — /api/admin 와일드카드 위
+app.use('/api/admin/marketing-diagnosis', marketingDiagnosisAdminRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/test-contacts', testContactsRoutes);
 app.use('/api/sms-templates', smsTemplatesRoutes);

@@ -18,6 +18,8 @@ import Cafe24LaunchPage from './pages/Cafe24LaunchPage';
 // ★ D184 (2026-05-20): 이니시스 결제 결과 fallback 페이지 (새 창 자동 close 차단 시 fallback 표시)
 import PaymentResultPage from './pages/PaymentResultPage';
 import JourneyPausePage from './pages/JourneyPausePage'; // ★ D218+ Public 정지 페이지 (인증 X)
+// ★ 2026-08-16 AI 마케팅 진단 공개 페이지(퍼널 B — 영업 링크 착지) — 공개 동선이라 정적 import(0718 사고 전례)
+import DiagnosisPage from './pages/DiagnosisPage';
 
 const AdminDashboard = lazyPage(() => import('./pages/AdminDashboard'));
 const AiTrainingDataPage = lazyPage(() => import('./pages/AiTrainingDataPage'));
@@ -656,6 +658,9 @@ function App() {
 
         {/* ★ D218+ (2026-05-26): 여정 발송 2시간 전 담당자 알림 안 단축 URL 진입 페이지 (인증 X) */}
         <Route path="/journey-pause/:token" element={<JourneyPausePage />} />
+
+        {/* ★ 2026-08-16 AI 마케팅 진단(퍼널 B — 잠재고객 · 인증 X) — ?src= 영업 링크 식별 */}
+        <Route path="/diagnosis" element={<DiagnosisPage />} />
 
         {/* 404 */}
         <Route path="*" element={<Navigate to="/" replace />} />

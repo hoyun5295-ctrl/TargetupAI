@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>데일리박스 — 장바구니에 3개가 남아 있어요</title>
+<style>
+@font-face{font-family:'Pretendard Variable';src:url('./assets/fonts/PretendardVariable.woff2') format('woff2-variations');font-weight:45 920;font-display:swap}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{display:block;width:100%;height:100%;object-fit:cover}
+a{text-decoration:none;color:inherit}
+.slot{background:#eee;overflow:hidden}
+body{background:#f4f5f7;padding:32px 16px}
+.mail{width:600px;max-width:100%;margin:0 auto;background:#fff;color:#101418}
+.bar{padding:20px 30px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #EBEEF2}
+.wm{font-size:20px;font-weight:800;letter-spacing:-0.035em;color:#2563FF}
+.bar span{font-size:13px;color:#8A939E}
+.pad{padding:36px 32px}
+.chip{display:inline-block;background:#EEF3FF;color:#2563FF;font-size:13px;font-weight:800;padding:8px 13px;border-radius:8px}
+h1{font-size:34px;line-height:1.32;font-weight:800;letter-spacing:-0.034em;margin:18px 0 0;text-wrap:pretty}
+.lead{font-size:16px;line-height:1.7;color:#5A646F;margin:14px 0 0}
+/* 이미지 슬롯: email hero 4:3 */
+.hero{aspect-ratio:4/3}
+.cart{border:1px solid #E4E9EF;border-radius:16px;overflow:hidden}
+.ci{display:flex;align-items:center;gap:16px;padding:18px;border-bottom:1px solid #F0F3F6}
+.ci:last-child{border-bottom:0}
+.cth{width:68px;height:68px;flex:0 0 68px;border-radius:10px}
+.cn{flex:1}
+.cn b{display:block;font-size:15.5px;font-weight:700;letter-spacing:-0.02em}
+.cn span{display:block;font-size:13px;color:#8A939E;margin-top:5px}
+.cp{text-align:right}
+.cp b{display:block;font-size:15.5px;font-weight:800;letter-spacing:-0.02em}
+.cp span{display:block;font-size:12.5px;margin-top:5px;color:#8A939E}
+.cp .hot{color:#FF3B30;font-weight:700}
+.sum{background:#F4F6F9;border-radius:16px;padding:24px}
+.sr{display:flex;align-items:baseline;justify-content:space-between}
+.sr span{font-size:14.5px;color:#5A646F}
+.sr b{font-size:24px;font-weight:800;letter-spacing:-0.035em}
+.track{height:10px;background:#DEE4EB;border-radius:5px;margin-top:18px;overflow:hidden}
+.track i{display:block;width:89%;height:10px;background:#2563FF;border-radius:5px}
+.tr{display:flex;align-items:center;justify-content:space-between;margin-top:12px}
+.tr p{margin:0;font-size:14.5px;font-weight:600}
+.tr p em{font-style:normal;color:#2563FF;font-weight:800}
+.tr span{font-size:12.5px;color:#8A939E}
+.h3{font-size:15px;font-weight:800;letter-spacing:-0.02em;margin:0 0 14px}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.g3 .b{border:1px solid #E4E9EF;border-radius:12px;padding:12px}
+.g3 .t{aspect-ratio:1/1;border-radius:8px}
+.g3 b{display:block;font-size:13px;font-weight:700;margin-top:10px;line-height:1.45;letter-spacing:-0.015em}
+.g3 span{display:block;font-size:13px;font-weight:800;color:#2563FF;margin-top:5px}
+.cta{display:block;background:#2563FF;color:#fff;text-align:center;font-size:17px;font-weight:800;padding:22px 12px;border-radius:14px;letter-spacing:-0.015em}
+.note{text-align:center;font-size:13px;color:#8A939E;margin-top:14px}
+.foot{background:#F4F6F9;padding:28px 32px 34px;color:#8A939E;border-top:1px solid #E4E9EF}
+.foot b{display:block;font-size:14px;font-weight:800;color:#5A646F}
+.foot p{font-size:12.5px;line-height:1.75;margin:10px 0 0}
+.lk{display:flex;gap:14px;margin-top:14px;font-size:12.5px}
+.lk a{color:#5A646F;text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="mail">
+  <div class="bar"><div class="wm">데일리박스</div><span>2026.08.16 발송</span></div>
+
+  <div class="pad" style="padding-bottom:26px">
+    <span class="chip">장바구니 알림</span>
+    <h1>장바구니에 3개,<br>아직 담긴 채예요</h1>
+    <p class="lead">담아두신 상품 중 2개는 재고가 얼마 남지 않았어요.</p>
+  </div>
+
+  <div class="slot hero"><img src="./assets/ecommerce-email-hero.png" alt=""></div>
+
+  <div class="pad" style="padding-bottom:0">
+    <div class="cart">
+      <div class="ci">
+        <div class="slot cth"><img src="./assets/ecommerce-p1.png" alt=""></div>
+        <div class="cn"><b>유기농 압착 오트밀 1kg</b><span>1개 · 정기배송 미적용</span></div>
+        <div class="cp"><b>12,900원</b><span class="hot">재고 4개</span></div>
+      </div>
+      <div class="ci">
+        <div class="slot cth"><img src="./assets/ecommerce-p2.png" alt=""></div>
+        <div class="cn"><b>대나무 칫솔 4입 세트</b><span>1세트 · 미디엄</span></div>
+        <div class="cp"><b>7,400원</b><span>재고 충분</span></div>
+      </div>
+      <div class="ci">
+        <div class="slot cth"><img src="./assets/ecommerce-p3.png" alt=""></div>
+        <div class="cn"><b>스테인리스 텀블러 500ml</b><span>1개 · 실버</span></div>
+        <div class="cp"><b>6,500원</b><span class="hot">재고 2개</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="pad" style="padding-bottom:0">
+    <div class="sum">
+      <div class="sr"><span>장바구니 합계</span><b>26,800원</b></div>
+      <div class="track"><i></i></div>
+      <div class="tr"><p><em>3,200원</em>만 더 담으면 무료배송</p><span>기준 30,000원</span></div>
+    </div>
+  </div>
+
+  <div class="pad" style="padding-bottom:0">
+    <h3 class="h3">3,200원 이하로 채우기 좋은 상품</h3>
+    <div class="g3">
+      <div class="b"><div class="slot t"><img src="./assets/ecommerce-p4.png" alt=""></div><b>천연 수세미 2입</b><span>2,900원</span></div>
+      <div class="b"><div class="slot t"><img src="./assets/ecommerce-p5.png" alt=""></div><b>종이 빨대 50입</b><span>3,200원</span></div>
+      <div class="b"><div class="slot t"><img src="./assets/ecommerce-p6.png" alt=""></div><b>면 행주 3매</b><span>3,000원</span></div>
+    </div>
+  </div>
+
+  <div class="pad">
+    <a class="cta" href="#">장바구니로 돌아가기</a>
+    <div class="note">장바구니 상품은 담은 날부터 7일간 보관됩니다</div>
+  </div>
+
+  <div class="foot">
+    <b>데일리박스</b>
+    <p>서울특별시 강서구 마곡중앙로 000, 7층<br>
+    고객센터 02-000-0000 (평일 10–17시) · <a href="#" style="color:#8A939E;text-decoration:underline">hello@example.com</a><br>
+    본 메일은 회원님의 광고성 정보 수신 동의에 따라 발송된 광고 메일입니다.</p>
+    <div class="lk"><a href="#">수신거부</a><a href="#">수신정보 변경</a><a href="#">개인정보처리방침</a></div>
+  </div>
+</div>
+</body>
+</html>

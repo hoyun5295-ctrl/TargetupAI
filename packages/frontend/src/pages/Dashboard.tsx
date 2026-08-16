@@ -7,7 +7,6 @@ import AddressBookModal from '../components/AddressBookModal';
 import AiCampaignResultPopup from '../components/AiCampaignResultPopup';
 import AiCampaignSendModal from '../components/AiCampaignSendModal';
 import AiCustomSendFlow from '../components/AiCustomSendFlow';
-import OpenTrialPopup, { isTrialApplyOpen } from '../components/OpenTrialPopup';
 import PlanChangeModal from '../components/PlanChangeModal';
 import AiMessageSuggestModal from '../components/AiMessageSuggestModal';
 import AiPreviewModal from '../components/AiPreviewModal';
@@ -61,9 +60,13 @@ import DirectSendPanel from '../components/DirectSendPanel';
 import AlimtalkSendModal from '../components/AlimtalkSendModal';
 // ★ 2026-07-29 브랜드메시지 발송 풀 화면 — 알림톡과 같은 진입 패턴, 성격은 다르다(템플릿 검수 불필요)
 import BrandSendModal from '../components/BrandSendModal';
-import DirectSendAiRefinePopup from '../components/DirectSendAiRefinePopup';
 // ★ D209+ (Harold 명시 2026-05-23): BetaFeatureModal → AiOperatorWalkthroughModal 정합 (AI Operator 메뉴 클릭 시 walkthrough + 특별혜택 안내 본질).
 import AiOperatorWalkthroughModal from '../components/AiOperatorWalkthroughModal';
+// ★ 2026-08-16 AI 마케팅 진단(퍼널 A — 설계서 §5-2·§5-3): FREE 진단 → TRIAL 7일 자동 지급
+import DiagnosisModal from '../components/marketing-diagnosis/DiagnosisModal';
+import DiagnosisInviteModal from '../components/marketing-diagnosis/DiagnosisInviteModal';
+import DiagnosisHeroCard from '../components/marketing-diagnosis/DiagnosisHeroCard';
+import { diagnosisApi, type DiagnosisStateDto } from '../components/marketing-diagnosis/diagnosisApi';
 
 interface Stats {
   total: string;
@@ -173,16 +176,35 @@ export default function Dashboard() {
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null);
-  // ★ 2026-06-11 Harold 확정: 무료체험 상시 진입점(발송현황 아래 와이드 배너) — 팝업 24h dismiss 보완.
-  //   trialPending = plan-request/status 응답의 pending 여부 (기존 호출 재사용).
-  //   trialPopupForceOpen = 배너 클릭으로 기존 OpenTrialPopup을 즉시 여는 플래그.
-  const [trialPending, setTrialPending] = useState(false);
-  const [trialPopupForceOpen, setTrialPopupForceOpen] = useState(false);
-  // 노출 조건: FREE + 신청 기간 내(~2026-06-30 KST). 대기 신청 있으면 '검토 중' 표시.
-  const trialCta: 'apply' | 'pending' | undefined =
-    planInfo?.plan_code === 'FREE' && isTrialApplyOpen()
-      ? (trialPending ? 'pending' : 'apply')
-      : undefined;
+  // ★ 2026-08-16 옛 무료체험 팝업·배너 축 제거(마감 2026-06-30 경과로 무동작) — 마케팅 진단이 대체(설계서 §5-1 A).
+  // ★ 2026-08-16 AI 마케팅 진단 노출(설계서 §5-2) — 판정 전부 서버 state 한 응답.
+  //   null = 로딩 중 또는 실패(fail-quiet: 이번 세션 미노출·무기록). 독립 useEffect — loadStats 직렬에 안 담는다.
+  const [diagnosisState, setDiagnosisState] = useState<DiagnosisStateDto | null>(null);
+  const [showDiagnosisInvite, setShowDiagnosisInvite] = useState(false);
+  const [showDiagnosisWizard, setShowDiagnosisWizard] = useState(false);
+  const refreshDiagnosisState = async () => {
+    try {
+      const r = await diagnosisApi.state();
+      if (r.ok && r.data?.success) setDiagnosisState(r.data);
+    } catch { /* fail-quiet */ }
+  };
+  useEffect(() => { refreshDiagnosisState(); }, []);
+  // 초대 모달 — eligible && 미완료 && 미초대 = 최초 1회. 표시 즉시 서버 기록(localStorage 판정 금지).
+  useEffect(() => {
+    if (!diagnosisState) return;
+    if (diagnosisState.eligible && !diagnosisState.completedAt && !diagnosisState.invitedAt) {
+      setShowDiagnosisInvite(true);
+      diagnosisApi.invited().catch(() => { /* 기록 실패 = 다음 세션 재노출(무해) */ });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diagnosisState?.eligible, diagnosisState?.completedAt, diagnosisState?.invitedAt]);
+  const diagnosisHero: 'invite' | 'trial' | null = !diagnosisState
+    ? null
+    : diagnosisState.eligible && !diagnosisState.completedAt
+      ? 'invite'
+      : diagnosisState.completedAt && diagnosisState.trialExpiresAt && new Date(diagnosisState.trialExpiresAt).getTime() > Date.now()
+        ? 'trial'
+        : null;
   // ★ 2026-06-08: 요금제 변경(무료체험 활성/종료 포함) 최초 1회 알림 모달 (localStorage 비교)
   const [planChange, setPlanChange] = useState<{ from: string; to: string; toStatus?: string } | null>(null);
   // ★ 2026-07-06 요금제 변경 안내 = 서버 판정(my-plan의 plan_change)만 신뢰. localStorage 비교 폐기(브라우저 stale 값 반복 노출 근본 차단).
@@ -351,9 +373,7 @@ export default function Dashboard() {
   const [brandSending, setBrandSending] = useState(false);
   const [alimtalkResetSignal, setAlimtalkResetSignal] = useState(0);  // ★ #2 (2026-06-01): 알림톡 발송 성공 → 모달 수신자 리스트 초기화 신호
   const [showTargetSend, setShowTargetSend] = useState(false);
-  // ★ D152+ (PDF 0511 funnel fix): 직접발송 진입 시 24h 1회 AI 다듬기 안내 팝업.
-  //   67사 무료체험 funnel(고객DB 업로드 3%) 절대 병목 해소 — AI 가치 DB 없이 즉시 체감 동선.
-  const [showAiRefinePopup, setShowAiRefinePopup] = useState(false);
+  // ★ 2026-08-16 직접발송 AI 다듬기 안내 팝업 축 제거(설계서 §5-1 B) — 마케팅 진단이 안내 동선을 대체.
   // ★ D43-3c: 타겟 필드 메타 (동적 변수/테이블용)
   const [targetFieldsMeta, setTargetFieldsMeta] = useState<FieldMeta[]>([]);
   const [phoneFields, setPhoneFields] = useState<string[]>([]);  // ★ D103: 전화번호 형태 필드
@@ -1033,35 +1053,6 @@ export default function Dashboard() {
     loadCompanySettings();
   }, []);
 
-  // ★ D152+ (PDF 0511 funnel fix): 직접발송 진입 시 24h 1회 AI 다듬기 안내 팝업.
-  //   요금제 잠금(FREE/STARTER) 시 노출 안 함. TRIAL/BASIC+ 만 노출.
-  //   "지금 써볼게요" 클릭 시 CustomEvent 발생 → DirectSendPanel의 AI 다듬기 버튼 3초 glow.
-  useEffect(() => {
-    if (!showDirectSend) return;
-    if (isAiMessagingLocked) return; // 요금제 잠금 시 노출 X
-    const STORAGE_KEY = 'directSendAiRefinePopupSeen';
-    const seen = localStorage.getItem(STORAGE_KEY);
-    if (seen) {
-      const seenAt = Number(seen);
-      if (!Number.isNaN(seenAt) && Date.now() - seenAt < 24 * 60 * 60 * 1000) return;
-    }
-    const t = setTimeout(() => setShowAiRefinePopup(true), 150);
-    return () => clearTimeout(t);
-  }, [showDirectSend, isAiMessagingLocked]);
-
-  const closeAiRefinePopup = (action: 'now' | 'later' | 'backdrop' = 'later') => {
-    try {
-      localStorage.setItem('directSendAiRefinePopupSeen', String(Date.now()));
-    } catch { /* noop */ }
-    setShowAiRefinePopup(false);
-    if (action === 'now') {
-      // DirectSendPanel의 AI 다듬기 버튼에 glow 트리거
-      setTimeout(() => {
-        document.dispatchEvent(new CustomEvent('focus-ai-refine-btn'));
-      }, 220);
-    }
-  };
-
   // 업로드 프로그레스 폴링 cleanup (컴포넌트 언마운트 시 interval 정리)
   useEffect(() => {
     return () => {
@@ -1178,8 +1169,6 @@ export default function Dashboard() {
           setPlanApproval({ requestId: approvalData.unconfirmed.id, planName: approvalData.unconfirmed.requested_plan_name });
           setShowPlanApproval(true);
         }
-        // ★ 2026-06-11: 처리 대기 신청 여부 — 헤더 무료체험 버튼을 "검토 중" 표시로 전환 (같은 응답 재사용, 추가 API 0건)
-        setTrialPending(!!approvalData.pending);
       }
     } catch (error) {
       console.error('통계 로드 실패:', error);
@@ -2254,6 +2243,9 @@ const campaignData = {
             const data = await res.json();
             if (data.success && data.allowed) {
               navigate('/ai-operator');
+            } else if (diagnosisState?.eligible) {
+              // ★ 2026-08-16 진단 분기(설계서 §5-1 C): 미개방 + FREE 진단 대상 = 진단이 안내를 대체
+              setShowDiagnosisWizard(true);
             } else {
               setShowWalkthroughModal(true);
             }
@@ -2314,8 +2306,19 @@ const campaignData = {
 
       {/* 메인 */}
       <main className="max-w-7xl mx-auto px-3 md:px-4 py-4 md:py-8">
-        {/* ★ D225+ Brand Voice 미등록 회사 강력 push 카드 — 등록 완료 시 자동 사라짐 (24h cooldown 지원) */}
-        <BrandVoiceNudgeCard />
+        {/* ★ 2026-08-16 AI 마케팅 진단 히어로(설계서 §5-2) — dismiss 없음·판정은 서버 state */}
+        {diagnosisHero === 'invite' && (
+          <DiagnosisHeroCard variant="invite" onStart={() => setShowDiagnosisWizard(true)} />
+        )}
+        {diagnosisHero === 'trial' && (
+          <DiagnosisHeroCard
+            variant="trial"
+            trialExpiresAt={diagnosisState?.trialExpiresAt}
+            onFirstSend={() => { setShowDirectSend(true); setDirectSendChannel('sms'); }}
+          />
+        )}
+        {/* ★ D225+ Brand Voice 미등록 회사 강력 push 카드 — 진단 카드 노출 중에는 suppress(소견이 흡수) */}
+        <BrandVoiceNudgeCard suppress={diagnosisHero === 'invite'} />
 
         {/* ===== 상단: 좌(60%) + 우(40%) 통합 — D186: 모바일 stacked + 데스크탑 좌우 ===== */}
         <div className="flex flex-col lg:flex-row gap-4 mb-4">
@@ -2472,47 +2475,6 @@ const campaignData = {
               </div>
             </div>
 
-            {/* ★ 2026-06-11 Harold 확정: 무료체험 상시 진입 배너 — 발송현황 아래 가로 와이드.
-                팝업 24h dismiss 보완 (헤더는 메뉴 과밀로 제외). FREE + ~6/30 기간 내만 노출,
-                대기 신청 있으면 "검토 중" 상태. 클릭 = 기존 OpenTrialPopup 강제 오픈. */}
-            {trialCta && (
-              <button
-                type="button"
-                onClick={() => trialCta === 'apply' && setTrialPopupForceOpen(true)}
-                disabled={trialCta === 'pending'}
-                className="relative w-full overflow-hidden rounded-2xl bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 px-5 py-4 text-left shadow-sm transition-all hover:shadow-lg hover:from-violet-500 hover:via-purple-500 hover:to-fuchsia-500 disabled:cursor-default disabled:hover:shadow-sm sm:px-6"
-              >
-                <div className="pointer-events-none absolute -right-10 -top-16 h-48 w-48 rounded-full bg-white/10 blur-2xl" />
-                <div className="pointer-events-none absolute -bottom-20 left-1/3 h-40 w-40 rounded-full bg-fuchsia-300/10 blur-2xl" />
-                <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15">
-                      <Sparkles className="h-5 w-5 text-white" />
-                    </span>
-                    <span>
-                      <span className="block text-[15px] font-bold tracking-tight text-white sm:text-base">
-                        AI Operator 무료체험 신청
-                      </span>
-                      <span className="mt-0.5 block text-xs text-white/75 sm:text-[13px]">
-                        베이직 기능 30일 무료 · 약정 없음 · <span className="font-semibold text-amber-200">6월 30일 신청 마감</span>
-                      </span>
-                    </span>
-                  </div>
-                  {trialCta === 'apply' ? (
-                    <span className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-xl bg-white px-4 py-2 text-[13px] font-bold text-violet-700 shadow-sm sm:self-auto">
-                      지금 신청하기
-                      <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden>
-                        <path d="M5 12h13M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </span>
-                  ) : (
-                    <span className="inline-flex shrink-0 items-center self-start rounded-xl border border-white/25 bg-white/15 px-4 py-2 text-[13px] font-semibold text-white sm:self-auto">
-                      체험 신청 검토 중
-                    </span>
-                  )}
-                </div>
-              </button>
-            )}
 
             {/* 2행: DB 현황 — 모던 본격 디자인 (D224+ Harold 명시 본격 재정정 — Linear/Stripe/Vercel 동급) */}
             <div className="relative bg-white rounded-3xl border border-gray-200/60 shadow-sm hover:shadow-md transition-all flex-1 overflow-hidden">
@@ -2828,6 +2790,9 @@ const campaignData = {
                       const data = await res.json();
                       if (data.success && data.allowed) {
                         navigate('/ai-operator');
+                      } else if (diagnosisState?.eligible) {
+                        // ★ 2026-08-16 진단 분기(설계서 §5-1 C)
+                        setShowDiagnosisWizard(true);
                       } else {
                         setShowWalkthroughModal(true);
                       }
@@ -3702,14 +3667,6 @@ const campaignData = {
         setToast={setToast}
       />
 
-      {/* ★ D152+ (PDF 0511 funnel fix): 직접발송 진입 시 AI 다듬기 안내 팝업 (24h 1회). */}
-      <DirectSendAiRefinePopup
-        isOpen={showAiRefinePopup}
-        isTrialActive={planInfo?.plan_code === 'TRIAL'}
-        onClose={() => closeAiRefinePopup('later')}
-        onNow={() => closeAiRefinePopup('now')}
-      />
-
       {/* 특수문자 모달 (직접발송 + 직접타겟발송 공용) */}
       {showSpecialChars && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4">
@@ -4046,21 +4003,23 @@ const campaignData = {
         }}
       />
 
-      {/* 무료체험 신청 팝업 — 로그인 직후 1회 노출 (FREE/미가입 + 24h localStorage 차단 + ~6/30 기간 내) */}
-      {planInfo?.plan_code === 'FREE' && (
-        <OpenTrialPopup onClose={(reason) => reason === 'done' && setTrialPending(true)} />
-      )}
-
-      {/* ★ 2026-06-11: 헤더 "30일 무료체험" 버튼 진입 — 24h dismiss 무시하고 즉시 오픈 */}
-      {trialPopupForceOpen && (
-        <OpenTrialPopup
-          forceOpen
-          onClose={(reason) => {
-            if (reason === 'done') setTrialPending(true);
-            setTrialPopupForceOpen(false);
-          }}
-        />
-      )}
+      {/* ★ 2026-08-16 AI 마케팅 진단 — 초대(최초 1회) + 문진·리포트 모달(설계서 §5-2·§5-3) */}
+      <DiagnosisInviteModal
+        open={showDiagnosisInvite}
+        onClose={() => setShowDiagnosisInvite(false)}
+        onStart={() => { setShowDiagnosisInvite(false); setShowDiagnosisWizard(true); }}
+      />
+      <DiagnosisModal
+        open={showDiagnosisWizard}
+        onClose={() => setShowDiagnosisWizard(false)}
+        onCompleted={refreshDiagnosisState}
+        onFirstSend={() => { setShowDirectSend(true); setDirectSendChannel('sms'); }}
+        onSeePlans={() => navigate('/pricing')}
+        toast={(msg, type = 'success') => {
+          setToast({ show: true, type, message: msg });
+          setTimeout(() => setToast({ show: false, type, message: '' }), 3000);
+        }}
+      />
 
       {/* 요금제 변경(무료체험 활성/종료) 최초 1회 알림 */}
       {planChange && (

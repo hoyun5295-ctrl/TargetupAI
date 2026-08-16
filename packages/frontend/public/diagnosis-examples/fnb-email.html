@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>브루어리715 — 10월 신메뉴와 오전 쿠폰</title>
+<style>
+@font-face{font-family:'Pretendard Variable';src:url('./assets/fonts/PretendardVariable.woff2') format('woff2-variations');font-weight:45 920;font-display:swap}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{display:block;width:100%;height:100%;object-fit:cover}
+a{text-decoration:none;color:inherit}
+.slot{background:#eee;overflow:hidden}
+body{background:#f4f5f7;padding:32px 16px}
+.mail{width:600px;max-width:100%;margin:0 auto;background:#FFF6EC;color:#1E1410}
+.bar{background:#E8452A;color:#fff;padding:18px 30px;display:flex;align-items:center;justify-content:space-between}
+.wm{font-size:20px;font-weight:800;letter-spacing:-0.015em}
+.bar span{font-size:13px;font-weight:600;color:#FFD9CF}
+/* 이미지 슬롯: email hero 4:3 */
+.hero{aspect-ratio:4/3}
+.pad{padding:38px 34px}
+.chip{display:inline-block;background:#1E1410;color:#FFD08A;font-size:13px;font-weight:800;padding:8px 13px;border-radius:6px}
+h1{font-size:38px;line-height:1.26;font-weight:800;letter-spacing:-0.032em;margin:20px 0 0;text-wrap:pretty}
+.lead{font-size:16px;line-height:1.7;color:#6B554A;margin:15px 0 0}
+.menu{display:flex;gap:16px;align-items:center;background:#fff;border-radius:16px;padding:16px;margin-top:14px}
+/* 이미지 슬롯: 메뉴 1:1 */
+.mi{width:104px;height:104px;flex:0 0 104px;border-radius:12px}
+.mt{flex:1}
+.mt b{display:block;font-size:19px;font-weight:800;letter-spacing:-0.025em}
+.mt p{margin:8px 0 0;font-size:14.5px;line-height:1.65;color:#7A6155}
+.mp{flex:0 0 auto;font-size:16px;font-weight:800;letter-spacing:-0.02em}
+.coupon{background:#1E1410;border-radius:18px;padding:28px 30px;display:flex;align-items:center;gap:22px;color:#fff}
+.coupon .ct{flex:1}
+.coupon .k{font-size:13px;font-weight:700;color:#FFB020}
+.coupon h2{font-size:26px;font-weight:800;letter-spacing:-0.03em;margin:12px 0 0;line-height:1.35}
+.coupon p{margin:10px 0 0;font-size:14px;line-height:1.65;color:#B79E92}
+.big{flex:0 0 108px;text-align:center;background:#E8452A;border-radius:14px;padding:18px 8px}
+.big b{display:block;font-size:34px;font-weight:800;letter-spacing:-0.04em}
+.big span{display:block;font-size:12.5px;font-weight:600;color:#FFD9CF;margin-top:6px}
+.cta{display:block;background:#E8452A;color:#fff;text-align:center;font-size:17px;font-weight:800;padding:22px 12px;border-radius:100px;letter-spacing:-0.015em}
+.note{text-align:center;font-size:13px;color:#8C7466;margin-top:14px}
+.foot{background:#F2E6D7;padding:28px 34px 34px;color:#8C7466}
+.foot b{display:block;font-size:14px;font-weight:800;color:#6B554A}
+.foot p{font-size:12.5px;line-height:1.75;margin:10px 0 0}
+.lk{display:flex;gap:14px;margin-top:14px;font-size:12.5px}
+.lk a{color:#6B554A;text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="mail">
+  <div class="bar"><div class="wm">브루어리715</div><span>10월 시즌 메뉴</span></div>
+
+  <div class="slot hero"><img src="./assets/fnb-email-hero.png" alt=""></div>
+
+  <div class="pad">
+    <span class="chip">10월의 새 메뉴</span>
+    <h1>출근길에 잠깐<br>앉았다 가세요</h1>
+    <p class="lead">아침 공기가 차가워지면 뜨거운 게 당깁니다. 구운 밤을 졸여 만든 시즌 메뉴가 나왔어요.</p>
+  </div>
+
+  <div class="pad" style="padding-top:0">
+    <div class="menu">
+      <div class="slot mi"><img src="./assets/fnb-p1.png" alt=""></div>
+      <div class="mt"><b>구운 밤 라떼</b><p>졸인 밤 시럽에 에스프레소와 우유. 단맛은 절반으로 줄였습니다.</p></div>
+      <div class="mp">6,200원</div>
+    </div>
+    <div class="menu">
+      <div class="slot mi"><img src="./assets/fnb-p2.png" alt=""></div>
+      <div class="mt"><b>대추 생강 티</b><p>카페인 없이 따뜻하게. 아침 공기가 찰 때 마시기 좋습니다.</p></div>
+      <div class="mp">5,800원</div>
+    </div>
+  </div>
+
+  <div class="pad" style="padding-top:8px">
+    <div class="coupon">
+      <div class="ct">
+        <div class="k">오전 방문 쿠폰</div>
+        <h2>11시 전에 오시면<br>전 음료 20%</h2>
+        <p>10월 한 달 · 매장 주문 시 이 화면을 보여주세요</p>
+      </div>
+      <div class="big"><b>20%</b><span>07–11시</span></div>
+    </div>
+  </div>
+
+  <div class="pad" style="padding-top:8px">
+    <a class="cta" href="#">쿠폰 받고 매장 찾기</a>
+    <div class="note">성수 · 연희 · 광교점 07:30–21:00</div>
+  </div>
+
+  <div class="foot">
+    <b>브루어리715</b>
+    <p>서울특별시 성동구 연무장길 000<br>
+    매장문의 02-000-0000 · <a href="#" style="color:#8C7466;text-decoration:underline">hello@example.com</a><br>
+    본 메일은 멤버십 가입 시 광고성 정보 수신에 동의하신 분께 발송되는 광고 메일입니다.</p>
+    <div class="lk"><a href="#">수신거부</a><a href="#">수신정보 변경</a><a href="#">개인정보처리방침</a></div>
+  </div>
+</div>
+</body>
+</html>

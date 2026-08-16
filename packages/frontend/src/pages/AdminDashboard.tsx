@@ -14,6 +14,7 @@ import BillingRecipientsEditor, { type BillingRecipient } from '../components/Bi
 import LoginBlocksManagement from '../components/admin/LoginBlocksManagement'; // ★ D145 P0 (2026-05-07): 로그인 차단 관리 (B안: IP+loginId 쌍)
 import AgentChargePanel from '../components/AgentChargePanel'; // ★ 2026-07-24 §5-3 에이전트 충전 실행 (게이트웨이 지갑)
 import AgentDeployWizard from '../components/admin/AgentDeployWizard'; // 싱크에이전트 OS별 배포 위저드
+import DiagnosisAdminPanel from '../components/admin/DiagnosisAdminPanel'; // ★ 2026-08-16 신규마케팅진단(ceo 전용)
 import { COMPANY_EMAIL } from '../constants/company';
 import { formatAgentIdLabel } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스(발급명 병기)
 import { formatPlanOptionLabel } from '../utils/planLabel'; // ★ 2026-07-28 요금제 라벨 = 월정액(고객 수 축 폐기)
@@ -82,7 +83,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis'>('companies');
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
   // ★ 2026-06-13: AI 학습 데이터 열람 권한 (AI_TRAINING_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 진입 버튼 노출
@@ -90,6 +91,18 @@ export default function AdminDashboard() {
   // ★ 2026-07-17: 발송 라인 설정 권한 (LINE_GROUP_ADMIN_USERS — 기본 ceo,admin) — 허용 계정에만 메뉴/탭 노출.
   //   판정은 백엔드 GET /line-groups 응답의 canManage가 유일한 소스 — 프론트 자체 판정 금지.
   const [lineGroupCanManage, setLineGroupCanManage] = useState(false);
+  // ★ 2026-08-16: 신규마케팅진단 열람 권한 (MARKETING_DIAGNOSIS_VIEWER_IDS — 기본 ceo 전용) + 신규 리드 뱃지
+  const [diagnosisAllowed, setDiagnosisAllowed] = useState(false);
+  const [diagnosisBadge, setDiagnosisBadge] = useState(0);
+  const loadDiagnosisBadge = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const r = await fetch('/api/admin/marketing-diagnosis/badge', { headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) return;                        // 404(비허용·게이트 은닉) = 미렌더 유지
+      const d = await r.json();
+      if (d?.success) setDiagnosisBadge(Number(d.count) || 0);
+    } catch { /* 뱃지 실패 = 0 유지 */ }
+  };
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   // 드롭다운: 단일 클릭 열림 고정 + 바깥 클릭·ESC 닫힘 (두 번 클릭 경합 제거)
@@ -755,6 +768,16 @@ useEffect(() => {
       const d = await r.json();
       setAuditAccessAllowed(d.allowed === true);
     } catch { setAuditAccessAllowed(false); }
+    try {
+      const token = localStorage.getItem('token');
+      // ★ 2026-08-16: 신규마케팅진단 접근(mount 1회) — 허용이면 신규 리드 뱃지도 함께
+      const r = await fetch('/api/admin/marketing-diagnosis/access', { headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json();
+      if (d.allowed === true) {
+        setDiagnosisAllowed(true);
+        loadDiagnosisBadge();
+      }
+    } catch { setDiagnosisAllowed(false); }
     try {
       const token = localStorage.getItem('token');
       const r = await fetch('/api/admin/ai-training/access', { headers: { Authorization: `Bearer ${token}` } });
@@ -4050,10 +4073,12 @@ const handleApproveRequest = async (id: string) => {
             {[
               {
                 label: '고객 관리', color: 'blue',
-                tabs: ['companies', 'users'] as const,
+                tabs: ['companies', 'users', 'marketingDiagnosis'] as const,
                 items: [
                   { key: 'companies', label: '고객사 관리' },
                   { key: 'users', label: '사용자 관리' },
+                  // ★ 2026-08-16: 신규마케팅진단 = 허용 계정(기본 ceo)에만 노출 · 뱃지 = 신규 리드 수
+                  ...(diagnosisAllowed ? [{ key: 'marketingDiagnosis', label: '신규마케팅진단', badge: diagnosisBadge }] : []),
                 ],
               },
               {
@@ -11731,6 +11756,14 @@ const handleApproveRequest = async (id: string) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ★ 2026-08-16 신규마케팅진단 탭 — ceo 전용(서버 게이트 404 은닉과 이중) */}
+      {activeTab === 'marketingDiagnosis' && diagnosisAllowed && (
+        <DiagnosisAdminPanel
+          onBadgeRefresh={loadDiagnosisBadge}
+          toast={(msg, type) => setBillingToast({ msg, type })}
+        />
       )}
 
       {/* 감사 로그 탭 */}

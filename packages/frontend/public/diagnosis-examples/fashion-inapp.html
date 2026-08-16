@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>어반셀 — 인앱메시지</title>
+<style>
+@font-face{font-family:'Pretendard Variable';src:url('./assets/fonts/PretendardVariable.woff2') format('woff2-variations');font-weight:45 920;font-display:swap}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{display:block;width:100%;height:100%;object-fit:cover}
+a{text-decoration:none;color:inherit}
+.slot{background:#eee;overflow:hidden}
+body{background:#E4E4E7;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+.phone{width:395px;height:832px;background:#111;border-radius:46px;padding:10px;box-shadow:0 24px 56px rgba(0,0,0,.28)}
+.scr{position:relative;width:375px;height:812px;border-radius:37px;overflow:hidden;background:#fff;color:#0B0B0F}
+.app{position:absolute;inset:0;filter:blur(7px);transform:scale(1.06)}
+.sb{height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 26px;font-size:14px;font-weight:600}
+.ah{padding:4px 20px 14px;display:flex;align-items:center;justify-content:space-between}
+.ah b{font-size:17px;font-weight:800;letter-spacing:-0.01em}
+.ah i{display:block;width:20px;height:20px;border:2px solid #0B0B0F;border-radius:50%}
+.tabs{display:flex;gap:20px;padding:0 20px 13px;font-size:14px;font-weight:600;color:#9A9AA2;border-bottom:1px solid #EDEDF1}
+.tabs b{color:#0B0B0F;border-bottom:2px solid #0B0B0F;padding-bottom:11px}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:16px 20px 0}
+.g .t{aspect-ratio:3/4;background:#E7E7EA;border-radius:6px}
+.g .l1{height:11px;width:72%;background:#EDEDF1;margin-top:10px;border-radius:2px}
+.g .l2{height:11px;width:44%;background:#F3F3F6;margin-top:7px;border-radius:2px}
+.tabbar{position:absolute;left:0;right:0;bottom:0;height:78px;background:#fff;border-top:1px solid #EDEDF1;display:flex;align-items:center;justify-content:space-around;padding-bottom:14px}
+.tabbar i{display:block;width:22px;height:22px;border:2px solid #C9C9D0;border-radius:5px}
+.tabbar i:first-child{border-color:#0B0B0F}
+.dim{position:absolute;inset:0;background:rgba(11,11,15,.34)}
+.banner{position:absolute;left:14px;right:14px;bottom:94px;background:#0B0B0F;color:#fff;border-radius:14px;padding:13px;display:flex;align-items:center;gap:13px;box-shadow:0 20px 44px rgba(0,0,0,.45)}
+/* 이미지 슬롯: inapp 1:1 */
+.thumb{width:58px;height:58px;flex:0 0 58px;border-radius:9px;background:#2A2A2E}
+.btx{flex:1;min-width:0}
+.btx b{display:block;font-size:16px;font-weight:700;letter-spacing:-0.022em;line-height:1.35}
+.btx span{display:block;font-size:13px;color:#A0A0A8;margin-top:4px}
+.go{flex:0 0 auto;background:#FF3B1F;color:#fff;font-size:14px;font-weight:800;padding:13px 16px;border-radius:9px}
+.x{flex:0 0 auto;width:22px;height:22px;display:flex;align-items:center;justify-content:center}
+</style>
+</head>
+<body>
+<div class="phone"><div class="scr">
+  <div class="app">
+    <div class="sb"><span>9:41</span><span>
+      <svg width="24" height="11" viewBox="0 0 24 11" aria-hidden="true"><rect x=".6" y=".6" width="20" height="9.8" rx="3" fill="none" stroke="#0B0B0F" stroke-opacity=".5"/><rect x="2.3" y="2.3" width="13" height="6.4" rx="1.6" fill="#0B0B0F"/></svg>
+    </span></div>
+    <div class="ah"><b>URBANCELLE</b><i></i></div>
+    <div class="tabs"><b>NEW</b><span>아우터</span><span>니트</span><span>가방</span></div>
+    <div class="g">
+      <div><div class="t"></div><div class="l1"></div><div class="l2"></div></div>
+      <div><div class="t"></div><div class="l1"></div><div class="l2"></div></div>
+      <div><div class="t"></div><div class="l1"></div><div class="l2"></div></div>
+      <div><div class="t"></div><div class="l1"></div><div class="l2"></div></div>
+    </div>
+    <div class="tabbar"><i></i><i style="border-radius:50%"></i><i></i><i style="border-radius:11px"></i></div>
+  </div>
+  <div class="dim"></div>
+
+  <div class="banner">
+    <div class="slot thumb"><img src="./assets/fashion-inapp.png" alt=""></div>
+    <div class="btx"><b>품절됐던 코트, 다시 들어왔어요</b><span>재입고 5종 · 수량 한정</span></div>
+    <a class="go" href="#">보기</a>
+    <a class="x" href="#"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 1 11 11M11 1 1 11" stroke="#7E7E86" stroke-width="1.8" stroke-linecap="round"/></svg></a>
+  </div>
+</div></div>
+</body>
+</html>

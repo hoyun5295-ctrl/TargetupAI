@@ -45,7 +45,7 @@ describe('COMPANY_MERGE_AXES — 표 자체의 불변식', () => {
 });
 
 describe('이동/잔류 판정 — 리터럴로 고정', () => {
-  it('이동 축 = 그 회사가 보유한 자산 6종', () => {
+  it('이동 축 = 그 회사가 보유한 자산 7종 (★2026-08-16 마케팅 진단 원장 합류 — §4-7)', () => {
     expect(moveTables().sort()).toEqual(
       [
         'brand_message_templates',
@@ -54,13 +54,22 @@ describe('이동/잔류 판정 — 리터럴로 고정', () => {
         'gateway_template_mappings',
         'kakao_sender_profiles',
         'kakao_templates',
+        'marketing_diagnoses',
       ].sort(),
     );
   });
 
-  it('잔류 축 = 이력·설정·채번·계정 4종 — 옮기면 병합 목적지의 사실이 오염된다', () => {
+  it('잔류 축 = 이력·설정·채번·계정 + 진단 지급·초대 6종 — 옮기면 병합 목적지의 사실이 오염된다', () => {
     expect(keepTables().sort()).toEqual(
-      ['company_plan_changes', 'company_settings', 'customer_code_sequences', 'users'].sort(),
+      [
+        'company_plan_changes',
+        'company_settings',
+        'customer_code_sequences',
+        'users',
+        // ★2026-08-16 마케팅 진단(§4-7) — 지급(1회 한정)·초대 상태는 병합 대상 자신의 것을 유지(선행 행 유지)
+        'diagnosis_trial_grants',
+        'diagnosis_invites',
+      ].sort(),
     );
   });
 
@@ -98,13 +107,15 @@ describe('간접 참조 축 — company_id 없는 관계까지 잡는 게이트'
     parentColumns: ['id'],
   };
 
-  it('0729 실측 4개 서명이 전부 등재돼 있다 — 등재 전엔 dryRun이 3건으로 차단됐다', () => {
+  it('간접 서명 전수 등재 — 0729 실측 4개 + 2026-08-16 진단 지급 1개', () => {
     expect(COMPANY_MERGE_INDIRECT_AXES.map((a) => indirectSignature(a)).sort()).toEqual(
       [
         'billing_items(agent_id)->company_agent_ids',
         'campaigns(kakao_profile_id)->kakao_sender_profiles',
         'campaigns(kakao_template_id)->kakao_templates',
         'user_sender_profiles(profile_id)->kakao_sender_profiles',
+        // ★2026-08-16 마케팅 진단(§4-7) — 지급 이력(keep)이 진단 행(move)을 가리킨다
+        'diagnosis_trial_grants(diagnosis_id)->marketing_diagnoses',
       ].sort(),
     );
     expect(findUnregisteredIndirect([uspProfile])).toEqual([]);

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>무브짐 — 회원권 만료 7일 전</title>
+<style>
+@font-face{font-family:'Pretendard Variable';src:url('./assets/fonts/PretendardVariable.woff2') format('woff2-variations');font-weight:45 920;font-display:swap}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{display:block;width:100%;height:100%;object-fit:cover}
+a{text-decoration:none;color:inherit}
+.slot{background:#eee;overflow:hidden}
+body{background:#f4f5f7;padding:32px 16px}
+.mail{width:600px;max-width:100%;margin:0 auto;background:#0C0C0D;color:#fff}
+.bar{padding:19px 30px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #232326}
+.wm{font-size:21px;font-weight:800;letter-spacing:-0.02em}
+.bar span{font-size:13px;font-weight:600;color:#8A8A90}
+/* 이미지 슬롯: email hero 4:3 */
+.hero{position:relative;aspect-ratio:4/3}
+.hs{position:absolute;inset:0;background:linear-gradient(180deg,rgba(12,12,13,.2) 38%,rgba(12,12,13,.94) 100%)}
+.ht{position:absolute;left:32px;right:32px;bottom:26px}
+.chip{display:inline-block;background:#D8FF00;color:#0C0C0D;font-size:13px;font-weight:800;padding:8px 13px;border-radius:6px;margin-bottom:16px}
+h1{font-size:44px;line-height:1.16;font-weight:800;letter-spacing:-0.046em;margin:0;text-wrap:pretty}
+.pad{padding:34px 32px}
+.lead{font-size:16px;line-height:1.7;color:#A5A5AC;margin:0}
+.k{font-size:13px;font-weight:800;color:#D8FF00;letter-spacing:-0.01em}
+.opt{background:#17171A;border-radius:14px;padding:20px 22px;display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.opt.best{border:1.5px solid #D8FF00}
+.opt b{display:block;font-size:19px;font-weight:800;letter-spacing:-0.028em}
+.opt span{display:block;font-size:13.5px;color:#8A8A90;margin-top:6px}
+.tagb{font-size:11px;font-weight:800;color:#0C0C0D;background:#D8FF00;padding:4px 8px;border-radius:4px;margin-left:8px;vertical-align:2px}
+.opt .r{text-align:right}
+.opt .r i{display:block;font-style:normal;font-size:17px;font-weight:800;color:#D8FF00;letter-spacing:-0.02em}
+.opt .r span{margin-top:6px}
+.pt{background:#D8FF00;color:#0C0C0D;border-radius:16px;padding:24px 26px;display:flex;align-items:center;gap:20px}
+.pt .pi{width:88px;height:88px;flex:0 0 88px;border-radius:12px}
+.pt b{display:block;font-size:21px;font-weight:800;letter-spacing:-0.03em}
+.pt p{margin:9px 0 0;font-size:14.5px;line-height:1.6;color:#33420A}
+.cta{display:block;background:#D8FF00;color:#0C0C0D;text-align:center;font-size:18px;font-weight:800;padding:22px 12px;border-radius:12px;letter-spacing:-0.02em}
+.note{text-align:center;font-size:13px;color:#8A8A90;margin-top:14px}
+.foot{background:#050506;padding:28px 32px 34px;color:#77777D;border-top:1px solid #232326}
+.foot b{display:block;font-size:14px;font-weight:800;color:#9A9AA0}
+.foot p{font-size:12.5px;line-height:1.75;margin:10px 0 0}
+.lk{display:flex;gap:14px;margin-top:14px;font-size:12.5px}
+.lk a{color:#A5A5AC;text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="mail">
+  <div class="bar"><div class="wm">MOVEGYM</div><span>회원권 안내</span></div>
+
+  <div class="hero">
+    <div class="slot" style="position:absolute;inset:0"><img src="./assets/fitness-email-hero.png" alt=""></div>
+    <div class="hs"></div>
+    <div class="ht">
+      <span class="chip">D-7 · 만료 임박</span>
+      <h1>회원권이<br>7일 뒤에 끝납니다</h1>
+    </div>
+  </div>
+
+  <div class="pad" style="padding-bottom:26px">
+    <p class="lead">만료일은 8월 23일. 지금 연장하면 쉬는 기간 없이 이어서 운동할 수 있습니다.</p>
+  </div>
+
+  <div class="pad" style="padding-top:0;padding-bottom:0">
+    <div class="k" style="margin-bottom:16px">연장 옵션</div>
+    <div class="opt">
+      <div><b>3개월 연장</b><span>월 79,000원</span></div>
+      <div class="r"><i>+2주 추가</i><span>237,000원</span></div>
+    </div>
+    <div class="opt best">
+      <div><b>6개월 연장<span class="tagb" style="display:inline-block">BEST</span></b><span>월 69,000원</span></div>
+      <div class="r"><i>+4주 추가</i><span>414,000원</span></div>
+    </div>
+    <div class="opt">
+      <div><b>12개월 연장</b><span>월 59,000원</span></div>
+      <div class="r"><i>+8주 추가</i><span>708,000원</span></div>
+    </div>
+  </div>
+
+  <div class="pad" style="padding-bottom:0">
+    <div class="pt">
+      <div class="slot pi"><img src="./assets/fitness-p1.png" alt=""></div>
+      <div>
+        <b>연장 회원 PT 1회 체험</b>
+        <p>자세 점검과 3개월 루틴 설계까지. 연장 등록 시 자동 신청됩니다.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="pad">
+    <a class="cta" href="#">회원권 연장하기</a>
+    <div class="note">연장 문의 02-000-0000 · 데스크 06:00–23:00</div>
+  </div>
+
+  <div class="foot">
+    <b>무브짐 MOVEGYM</b>
+    <p>서울특별시 광진구 아차산로 000, 지하 1층<br>
+    데스크 02-000-0000 · <a href="#" style="color:#77777D;text-decoration:underline">hello@example.com</a><br>
+    본 메일은 회원 등록 시 광고성 정보 수신에 동의하신 분께 발송되는 광고 메일입니다.</p>
+    <div class="lk"><a href="#">수신거부</a><a href="#">수신정보 변경</a><a href="#">개인정보처리방침</a></div>
+  </div>
+</div>
+</body>
+</html>

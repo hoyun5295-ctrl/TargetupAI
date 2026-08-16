@@ -1939,7 +1939,7 @@ router.post(
 // ============================================================
 // ★ 2026-06-08: BASIC 1개월 무료체험 부여/취소 (슈퍼관리자 전용)
 //   - 부여 = grantBasicTrial CT (plan=BASIC + status='trial' + 30일 + base 크레딧=BASIC, purchased 보존).
-//   - 만료 자동 강등 = trial-downgrade-worker (subscription_status='trial' 기준).
+//   - 만료 자동 강등 = trial-downgrade-worker (status='trial' 또는 TRIAL plan + 만료일 · 유료 플랜 강등 금지 가드).
 //   - 기존 grant-trial(PRO)/grant-ai-operator-trial(overlay) 대체.
 // ============================================================
 router.post('/:id/grant-basic-trial', requireUuidId, requireSuperAdmin, async (req: Request, res: Response) => {

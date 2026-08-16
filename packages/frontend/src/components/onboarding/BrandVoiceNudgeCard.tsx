@@ -38,7 +38,8 @@ function dismissForToday(): void {
   }
 }
 
-export default function BrandVoiceNudgeCard() {
+// ★2026-08-16 suppress — 마케팅 진단 카드 노출 중에는 미렌더(설계서 §5-2. 미등록 소견은 진단 리포트가 흡수).
+export default function BrandVoiceNudgeCard({ suppress = false }: { suppress?: boolean }) {
   const navigate = useNavigate();
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -81,7 +82,7 @@ export default function BrandVoiceNudgeCard() {
     setShow(false);
   }
 
-  if (loading || !show) return null;
+  if (suppress || loading || !show) return null;
 
   return (
     <div className="mb-6 rounded-2xl border border-violet-500/40 bg-gradient-to-br from-violet-950/60 via-fuchsia-950/40 to-slate-900/80 backdrop-blur-md shadow-2xl overflow-hidden">

@@ -6,12 +6,12 @@ import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVarian
 // ★ 2026-06-25: 고객 전체 삭제 시 데이터 프로필 캐시 무효화(게이트 즉시 반영)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { getColumnFields, FIELD_DISPLAY_MAP, reverseDisplayValue, renderFieldValue } from '../utils/standard-field-map';
-import { DEFAULT_COSTS, getCompanyCosts, CACHE_TTL, BATCH_SIZES } from '../config/defaults';
+import { DEFAULT_COSTS, CACHE_TTL, BATCH_SIZES } from '../config/defaults';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildDynamicFilterCompat } from '../utils/customer-filter';
 import { getTestSmsTables } from '../utils/sms-queue';
-import { getCampaignResultCounts } from '../utils/stats-aggregation';
+import { computeMonthlyUsage } from '../utils/monthly-usage';
 import { blockIfSyncActive } from '../middlewares/sync-active-check';
 import { createCustomerUpsertBuilder, buildSmsOptInBackfill, isRowLevelDbError } from '../utils/customer-upsert';
 import { detectEnabledFields, buildDynamicSelectExpr, buildEnabledFieldsPayload, clearEnabledFieldsCache, enabledFieldsGenKey, ENABLED_FIELDS_HARD_TTL_SEC } from '../utils/enabled-fields';
@@ -720,9 +720,7 @@ router.get('/stats', async (req: Request, res: Response) => {
     // ★ 2026-07-17 성능(SLOW 1,441ms 실측) — ①행별 상관 EXISTS 프로브(고객 13.7만 행 × 수신거부 조회 2회,
     //   unsubscribes idx_scan 1.5억의 정체)를 해시 안티조인(LEFT JOIN + IS [NOT] NULL — 동치)으로 교체
     //   ②서로 독립인 3쿼리(고객 집계·회사 요금·이번달 캠페인 메타)를 병렬로. 산식·응답 의미 무변경.
-    const monthlySendFilterClause = userType === 'company_user' && userId ? ' AND c.created_by = $2' : '';
-    const monthlySendFilterParams: any[] = userType === 'company_user' && userId ? [companyId, userId] : [companyId];
-    const [result, companyResult, monthlyMetaResult] = await Promise.all([
+    const [result, companyResult, usage] = await Promise.all([
       query(
       `SELECT
         COUNT(*) as total,
@@ -742,120 +740,20 @@ router.get('/stats', async (req: Request, res: Response) => {
        WHERE c.company_id = $1 AND c.is_active = true${storeFilter}`,
       [...params, getGenderVariants('M'), getGenderVariants('F')]
       ),
-      // 회사 요금 정보 조회
+      // 회사 예산·기능 플래그 (응답 전용 — 단가·발송 집계·테스트 비용은 monthly-usage CT가 담당)
       query(
-        `SELECT monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, unit_price_basis, use_db_sync, use_file_upload
+        `SELECT monthly_budget, use_db_sync, use_file_upload
          FROM companies WHERE id = $1`,
         [companyId]
       ),
-      // 이번 달 채널별 발송 통계 메타 (취소/초안/예약 제외, 성공 건수 기준)
-      // ★ 사용자(company_user)는 본인 발송만, 관리자(company_admin)는 전체
-      // ★ D144: PG cr.sent_count/success_count + c.sent_count/success_count 캐시 의존 제거.
-      //   PG는 캠페인 메타만 SELECT → MySQL 큐 + 카카오 직접 카운트 → JS에서 message_type별 합산.
-      // ★ 2026-07-17: send_config(sentTables)·발송시각 동봉 — 집계가 실적재 테이블만 훑도록(응답 미노출, 집계 전용)
-      query(
-        `SELECT c.id, c.company_id, c.created_by, c.message_type,
-                c.result_final, c.sent_count, c.success_count, c.fail_count,
-                c.send_config, c.sent_at, c.scheduled_at, c.created_at
-         FROM campaigns c
-         WHERE c.company_id = $1
-           AND c.status NOT IN ('cancelled', 'draft', 'scheduled')
-           AND c.created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'${monthlySendFilterClause}`,
-        monthlySendFilterParams
-      ),
+      // ★ 2026-08-16 월 발송·사용금액 집계 = utils/monthly-usage CT로 이동(원형 그대로 —
+      //   마케팅 진단 리포트와 산식 단일 소스 공유. route-local 복사 금지).
+      computeMonthlyUsage(companyId, { userId: userId || undefined, userType: userType || undefined }),
     ]);
     const company = companyResult.rows[0] || {};
 
-    // ★ 2026-07-17(2) — 카운트 단일 진입점 합류: 확정(result_final) 캠페인 = PG 캐시, 진행 중만 MySQL 실시간.
-    //   getCampaignResultCounts = 발송결과·발송통계·관리자 화면과 동일 소스(SMS+카카오 합산 완료값이라
-    //   카카오를 따로 더하지 않는다 — 이중 합산 금지 계약). 진행 중 잔여분은 CT 내부 집계가
-    //   send_config(sentTables) 라인 축 축소를 그대로 탄다.
-    const monthlyCountMap = await getCampaignResultCounts(monthlyMetaResult.rows);
-
-    // 채널별 집계 (성공 건수 기준으로 비용 계산)
-    let smsSent = 0, lmsSent = 0, mmsSent = 0, kakaoSent = 0;
-    let totalSent = 0, totalSuccess = 0, totalFail = 0;
-
-    for (const c of monthlyMetaResult.rows) {
-      const counts = monthlyCountMap.get(c.id) || { sent: 0, success: 0, fail: 0, pending: 0 };
-      const success = counts.success;
-      totalSent += counts.sent;
-      totalSuccess += success;
-      totalFail += counts.fail;
-
-      switch (c.message_type) {
-        case 'SMS': smsSent += success; break;
-        case 'LMS': lmsSent += success; break;
-        case 'MMS': mmsSent += success; break;
-        case 'KAKAO': kakaoSent += success; break;
-      }
-    }
-
-    // 월 사용금액 계산 (고객사 DB 단가 우선, 없으면 환경변수 기본단가)
-    // ★ 2026-07-26 화면에 보이는 사용금액은 고객이 실제로 낼 금액(부가세 포함) — CT가 기준을 해석한다.
-    const { sms: costSms, lms: costLms, mms: costMms, kakao: costKakao } = getCompanyCosts(company);
-
-    let monthlyCost =
-      smsSent * costSms +
-      lmsSent * costLms +
-      mmsSent * costMms +
-      kakaoSent * costKakao;
-
-    // ★ D79: 테스트발송 + 스팸필터 — 발송건수/성공률에서 제외, 사용금액만 요금제별 차등 포함
-    // - 발송건수/성공률: 테스트/스팸필터 절대 미포함 (실제 발송 실적만)
-    // - 사용금액: 무료/스타터/베이직 → 포함 (유료), 프로 이상 → 미포함 (무료 제공)
-    let testCost = 0;
-    try {
-      // 요금제 확인 — 프로 이상이면 테스트 비용 무료
-      const planResult = await query(
-        `SELECT p.plan_code FROM companies c JOIN plans p ON c.plan_id = p.id WHERE c.id = $1`,
-        [companyId]
-      );
-      const planCode = (planResult.rows[0]?.plan_code || 'FREE').toUpperCase();
-      const isProOrAbove = ['PRO', 'BUSINESS', 'ENTERPRISE'].includes(planCode);
-
-      if (!isProOrAbove) {
-        // 무료/스타터/베이직: 테스트 비용을 사용금액에 포함
-        // ★ D100: balance_transactions 기반으로 테스트 비용 조회 (근본 해결)
-        //   prepaidDeduct()가 모든 차감(테스트/스팸/발송)에서 created_by=userId를 저장하므로
-        //   balance_transactions 한 곳에서 정확한 사용자별 비용 조회 가능.
-        //   기존 방식(MySQL 테스트 테이블 직접 조회)은 userId 저장 불일치 문제가 있었음.
-        //   → 테스트발송 차감 참조ID = '00000000-0000-0000-0000-000000000000' (더미 UUID)
-        const testCostFilter = userType === 'company_user' && userId ? ' AND created_by = $2' : '';
-        const testCostParams: any[] = userType === 'company_user' && userId ? [companyId, userId] : [companyId];
-        const testCostResult = await query(
-          `SELECT COALESCE(SUM(amount), 0)::numeric as total
-           FROM balance_transactions
-           WHERE company_id = $1
-             AND type = 'deduct'
-             AND reference_id = '00000000-0000-0000-0000-000000000000'
-             AND created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'${testCostFilter}`,
-          testCostParams
-        );
-        testCost += parseFloat(testCostResult.rows[0]?.total ?? 0);
-
-        // 스팸필터 비용도 balance_transactions에서 조회
-        //   스팸필터 차감의 reference_id = spam_filter_tests.id (UUID)
-        //   reference_type = 'campaign' (prepaidDeduct 기본값)
-        //   description에 '스팸' 포함되지 않으므로 spam_filter_tests JOIN으로 식별
-        const sfCostFilter = userType === 'company_user' && userId ? ' AND bt.created_by = $2' : '';
-        const sfCostParams: any[] = userType === 'company_user' && userId ? [companyId, userId] : [companyId];
-        const sfCostResult = await query(
-          `SELECT COALESCE(SUM(bt.amount), 0)::numeric as total
-           FROM balance_transactions bt
-           WHERE bt.company_id = $1
-             AND bt.type = 'deduct'
-             AND bt.reference_id IN (SELECT id FROM spam_filter_tests WHERE company_id = $1)
-             AND bt.created_at >= date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul'))::date::timestamp AT TIME ZONE 'Asia/Seoul'${sfCostFilter}`,
-          sfCostParams
-        );
-        testCost += parseFloat(sfCostResult.rows[0]?.total ?? 0);
-      }
-      // 프로 이상: testCost = 0 (무료 제공, 사용금액 미포함)
-    } catch (testCostErr) {
-      console.warn('[대시보드] 테스트/스팸필터 비용 조회 실패 (무시):', testCostErr);
-    }
-    monthlyCost += testCost;
+    const { totalSent, totalSuccess, totalFail, smsSent, lmsSent, mmsSent, kakaoSent, monthlyCost } = usage;
+    const { sms: costSms, lms: costLms, mms: costMms, kakao: costKakao } = usage.costs;
 
     const successRate = totalSent > 0 ? ((totalSuccess / totalSent) * 100).toFixed(1) : '0';
 

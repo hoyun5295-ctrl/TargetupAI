@@ -28,12 +28,19 @@ interface Props {
   panelClassName?: string;
   /** 겹침 순서. 다른 모달 위에 뜰 때만 올린다. */
   zIndexClassName?: string;
+  /**
+   * ★2026-08-16 진행 중 답이 있는 위저드(마케팅 진단)용 — 백드롭 클릭·Escape 두 축을 함께 끈다.
+   * 하나만 끄면 남은 축 한 번에 답이 통째로 사라진다(설계서 §5-3). 닫기는 명시 버튼(onClose 직접 호출)만.
+   * 기본 false = 기존 소비처 4곳 동작 불변.
+   */
+  disableDismiss?: boolean;
 }
 
 export default function JourneyModalShell({
   open, onClose, labelledBy, children,
   panelClassName = 'w-full max-w-2xl',
   zIndexClassName = 'z-[60]',
+  disableDismiss = false,
 }: Props) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
@@ -54,7 +61,7 @@ export default function JourneyModalShell({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose();
+        if (!disableDismiss) onClose();   // opt-out 시 Esc 무동작(전파만 막는다 — 배경 단축키 오발동 차단)
         return;
       }
       if (e.key !== 'Tab') return;
@@ -85,14 +92,14 @@ export default function JourneyModalShell({
       // 닫은 뒤 열었던 자리로 돌아간다 — 안 하면 포커스가 문서 처음으로 튄다.
       restoreRef.current?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open, onClose, disableDismiss]);
 
   if (!open) return null;
 
   return createPortal(
     <div
       className={`fixed inset-0 ${zIndexClassName} flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm md:items-center md:p-6`}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !disableDismiss) onClose(); }}
     >
       <div
         ref={panelRef}

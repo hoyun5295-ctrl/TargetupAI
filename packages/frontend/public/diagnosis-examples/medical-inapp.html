@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>라온재활의학과 — 인앱메시지</title>
+<style>
+@font-face{font-family:'Pretendard Variable';src:url('./assets/fonts/PretendardVariable.woff2') format('woff2-variations');font-weight:45 920;font-display:swap}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{display:block;width:100%;height:100%;object-fit:cover}
+a{text-decoration:none;color:inherit}
+.slot{background:#eee;overflow:hidden}
+body{background:#E2E7E7;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+.phone{width:395px;height:832px;background:#111;border-radius:46px;padding:10px;box-shadow:0 24px 56px rgba(12,42,46,.28)}
+.scr{position:relative;width:375px;height:812px;border-radius:37px;overflow:hidden;background:#F5FAFA;color:#0C2A2E}
+.app{position:absolute;inset:0;filter:blur(7px);transform:scale(1.06)}
+.sb{height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 26px;font-size:14px;font-weight:600}
+.ah{padding:4px 20px 14px;font-size:17px;font-weight:800;letter-spacing:-0.03em}
+.hero{margin:0 20px 14px;height:132px;background:#00857C;border-radius:16px}
+.row{margin:0 20px 11px;background:#fff;border:1px solid #E3EFEE;border-radius:13px;padding:18px}
+.row .l1{height:11px;width:46%;background:#E6F1F0;border-radius:3px}
+.row .l2{height:11px;width:70%;background:#F0F6F5;border-radius:3px;margin-top:11px}
+.tabbar{position:absolute;left:0;right:0;bottom:0;height:78px;background:#fff;border-top:1px solid #E3EFEE;display:flex;align-items:center;justify-content:space-around;padding-bottom:14px}
+.tabbar i{display:block;width:22px;height:22px;border:2px solid #BFD5D3;border-radius:5px}
+.tabbar i:first-child{border-color:#00857C}
+.dim{position:absolute;inset:0;background:rgba(8,32,35,.52)}
+.card{position:absolute;left:24px;right:24px;top:150px;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 26px 58px rgba(8,32,35,.44)}
+/* 이미지 슬롯: inapp 1:1 */
+.pic{position:relative;aspect-ratio:1/1;background:#eee}
+.x{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:50%;background:rgba(12,42,46,.42);display:flex;align-items:center;justify-content:center}
+.tx{padding:24px 24px 22px}
+.chip{display:inline-block;background:#E3F4F2;color:#00756D;font-size:12px;font-weight:800;padding:7px 12px;border-radius:8px}
+h1{font-size:25px;line-height:1.4;font-weight:800;letter-spacing:-0.03em;margin:14px 0 0;text-wrap:pretty}
+.sub{font-size:15px;line-height:1.6;color:#4C6B6E;margin:9px 0 0}
+.cta{display:block;background:#00857C;color:#fff;text-align:center;font-size:16.5px;font-weight:800;padding:18px 12px;border-radius:13px;margin-top:20px}
+.later{display:block;text-align:center;font-size:13.5px;color:#8AA5A7;padding:13px 0 0}
+</style>
+</head>
+<body>
+<div class="phone"><div class="scr">
+  <div class="app">
+    <div class="sb"><span>9:41</span><span>
+      <svg width="24" height="11" viewBox="0 0 24 11" aria-hidden="true"><rect x=".6" y=".6" width="20" height="9.8" rx="3" fill="none" stroke="#0C2A2E" stroke-opacity=".5"/><rect x="2.3" y="2.3" width="13" height="6.4" rx="1.6" fill="#0C2A2E"/></svg>
+    </span></div>
+    <div class="ah">진료 예약</div>
+    <div class="hero"></div>
+    <div class="row"><div class="l1"></div><div class="l2"></div></div>
+    <div class="row"><div class="l1"></div><div class="l2"></div></div>
+    <div class="row"><div class="l1"></div><div class="l2"></div></div>
+    <div class="tabbar"><i></i><i style="border-radius:50%"></i><i></i><i style="border-radius:11px"></i></div>
+  </div>
+  <div class="dim"></div>
+
+  <div class="card">
+    <div class="pic slot">
+      <img src="./assets/medical-inapp.png" alt="">
+      <a class="x" href="#"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 1 11 11M11 1 1 11" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg></a>
+    </div>
+    <div class="tx">
+      <span class="chip">예약 안내</span>
+      <h1>내일 오후 3시,<br>예약이 있습니다</h1>
+      <p class="sub">도수치료 50분 · 3치료실</p>
+      <a class="cta" href="#">예약 확인하기</a>
+      <a class="later" href="#">닫기</a>
+    </div>
+  </div>
+</div></div>
+</body>
+</html>

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>톤메이트 — 모바일DM</title>
+<style>
+@font-face{font-family:'Pretendard Variable';src:url('./assets/fonts/PretendardVariable.woff2') format('woff2-variations');font-weight:45 920;font-display:swap}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{display:block;width:100%;height:100%;object-fit:cover}
+a{text-decoration:none;color:inherit}
+.slot{background:#eee;overflow:hidden}
+body{background:#E7E5EA;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+.phone{width:395px;height:832px;background:#111;border-radius:46px;padding:10px;box-shadow:0 24px 56px rgba(23,18,31,.28)}
+.scr{position:relative;display:flex;flex-direction:column;width:375px;height:812px;border-radius:37px;overflow:hidden;background:#fff;color:#17121F}
+.sb{position:absolute;top:0;left:0;right:0;height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 26px;z-index:5;color:#fff;font-size:14px;font-weight:600}
+.sb .ic{display:flex;gap:6px;align-items:center}
+/* 이미지 슬롯: dm hero 9:16 상단 60% */
+.hero{position:relative;height:432px}
+.hero .slot{position:absolute;inset:0;background:#5a4a63}
+.scrim{position:absolute;inset:0;background:linear-gradient(180deg,rgba(23,18,31,.5) 0%,rgba(23,18,31,0) 30%,rgba(23,18,31,.1) 48%,rgba(23,18,31,.88) 100%)}
+.wm{position:absolute;top:60px;left:24px;font-family:Georgia,'Times New Roman',serif;font-size:18px;color:#fff;letter-spacing:.16em;padding-left:.16em}
+.htx{position:absolute;left:24px;right:24px;bottom:28px}
+.chip{display:inline-block;background:#FF3E6C;color:#fff;font-size:12.5px;font-weight:800;padding:7px 12px;border-radius:100px;margin-bottom:14px}
+h1{font-size:33px;line-height:1.3;font-weight:800;color:#fff;letter-spacing:-0.034em;margin:0;text-wrap:pretty}
+.sub{font-size:15px;line-height:1.6;color:#D8D2E0;margin-top:12px}
+.body{padding:20px 24px 0}
+.b{display:flex;align-items:center;gap:16px;padding:16px 0;border-bottom:1px solid #F0EDF4}
+.b:last-child{border-bottom:0}
+.n{flex:0 0 58px;font-size:24px;font-weight:800;letter-spacing:-0.035em;color:#FF3E6C}
+.b div{flex:1}
+.b b{display:block;font-size:16px;font-weight:700;letter-spacing:-0.02em}
+.b span{display:block;font-size:13px;color:#867E96;margin-top:5px}
+.scr>*{flex:0 0 auto}
+.fix{margin-top:auto;background:#fff;border-top:1px solid #F0EDF4;padding:16px 20px 20px}
+.cta{display:block;background:#17121F;color:#fff;text-align:center;font-size:17px;font-weight:700;padding:20px 12px;border-radius:100px;letter-spacing:-0.015em}
+.optout{text-align:center;font-size:12px;color:#9A93A8;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="phone"><div class="scr">
+  <div class="sb"><span>9:41</span><span class="ic"><svg width="17" height="11" viewBox="0 0 17 11" aria-hidden="true"><rect y="7" width="3" height="4" rx="1" fill="#fff"/><rect x="4.6" y="5" width="3" height="6" rx="1" fill="#fff"/><rect x="9.2" y="2.6" width="3" height="8.4" rx="1" fill="#fff"/><rect x="13.8" width="3" height="11" rx="1" fill="#fff"/></svg>
+    <svg width="24" height="11" viewBox="0 0 24 11" aria-hidden="true"><rect x=".6" y=".6" width="20" height="9.8" rx="3" fill="none" stroke="#fff" stroke-opacity=".65"/><rect x="2.3" y="2.3" width="14" height="6.4" rx="1.6" fill="#fff"/></svg></span></div>
+
+  <div class="hero">
+    <div class="slot"><img src="./assets/beauty-dm-hero.png" alt=""></div>
+    <div class="scrim"></div>
+    <div class="wm">TONEMATE</div>
+    <div class="htx">
+      <span class="chip">골드 회원 선공개</span>
+      <h1>세안 후 30초,<br>당기기 시작했다면</h1>
+      <p class="sub">리커버 앰플 · 30ml</p>
+    </div>
+  </div>
+
+  <div class="body">
+    <div class="b"><span class="n">15%</span><div><b>골드 회원 앰플 할인</b><span>실버 회원 10% · 정식 오픈일부터</span></div></div>
+    <div class="b"><span class="n">3일</span><div><b>미니 앰플 증정</b><span>여행용 5ml · 수량 소진 시 종료</span></div></div>
+    <div class="b"><span class="n">8/20</span><div><b>선공개 마감</b><span>밤 12시 이후 정가로 전환</span></div></div>
+  </div>
+
+  <div class="fix">
+    <a class="cta" href="#">선공개 혜택 받기</a>
+    <div class="optout">(광고) 톤메이트 · 무료수신거부 080-000-0000</div>
+  </div>
+</div></div>
+</body>
+</html>

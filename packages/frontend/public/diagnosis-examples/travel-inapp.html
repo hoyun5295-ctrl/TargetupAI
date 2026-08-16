@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>트립로그 — 인앱메시지</title>
+<style>
+@font-face{font-family:'Pretendard Variable';src:url('./assets/fonts/PretendardVariable.woff2') format('woff2-variations');font-weight:45 920;font-display:swap}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{display:block;width:100%;height:100%;object-fit:cover}
+a{text-decoration:none;color:inherit}
+.slot{background:#eee;overflow:hidden}
+body{background:#E3E6EA;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+.phone{width:395px;height:832px;background:#111;border-radius:46px;padding:10px;box-shadow:0 24px 56px rgba(16,35,63,.3)}
+.scr{position:relative;width:375px;height:812px;border-radius:37px;overflow:hidden;background:#fff;color:#10233F}
+.app{position:absolute;inset:0;filter:blur(7px);transform:scale(1.06)}
+.sb{height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 26px;font-size:14px;font-weight:600}
+.ah{padding:4px 20px 12px;font-size:18px;font-weight:800;letter-spacing:-0.035em}
+.srch{margin:0 20px 16px;height:42px;background:#EEF1F5;border-radius:21px}
+.chips{display:flex;gap:9px;padding:0 20px 16px}
+.chips span{font-size:13px;padding:9px 15px;background:#EEF1F5;border-radius:18px}
+.chips span:first-child{background:#10233F;color:#fff}
+.cards{padding:0 20px;display:flex;flex-direction:column;gap:14px}
+.cards .c{background:#fff;border:1px solid #E7EBF0;border-radius:14px;overflow:hidden}
+.cards .t{height:132px;background:#DCE3EB}
+.cards .l1{height:11px;width:56%;background:#EEF1F5;border-radius:3px;margin:14px 14px 0}
+.cards .l2{height:14px;width:38%;background:#E3E8EE;border-radius:3px;margin:10px 14px 14px}
+.tabbar{position:absolute;left:0;right:0;bottom:0;height:78px;background:#fff;border-top:1px solid #EDF1F5;display:flex;align-items:center;justify-content:space-around;padding-bottom:14px}
+.tabbar i{display:block;width:22px;height:22px;border:2px solid #C4CDD8;border-radius:5px}
+.tabbar i:first-child{border-color:#10233F}
+.dim{position:absolute;inset:0;background:rgba(10,24,44,.58)}
+.sheet{position:absolute;left:16px;right:16px;top:78px;bottom:34px;background:#fff;border-radius:24px;overflow:hidden;box-shadow:0 28px 64px rgba(10,24,44,.5);display:flex;flex-direction:column}
+/* 이미지 슬롯: inapp 1:1 */
+.pic{position:relative;aspect-ratio:1/1;flex:0 0 auto;background:#eee}
+.x{position:absolute;top:14px;right:14px;width:34px;height:34px;border-radius:50%;background:rgba(16,35,63,.42);display:flex;align-items:center;justify-content:center}
+.tx{flex:1;padding:26px 26px 24px;display:flex;flex-direction:column}
+.chip{align-self:flex-start;background:#FF5A36;color:#fff;font-size:12px;font-weight:800;padding:7px 12px;border-radius:100px}
+h1{font-size:27px;line-height:1.36;font-weight:800;letter-spacing:-0.034em;margin:15px 0 0;text-wrap:pretty}
+.sub{font-size:15px;line-height:1.6;color:#5C718B;margin:10px 0 0}
+.sp{flex:1;min-height:10px}
+.cta{display:block;background:#10233F;color:#fff;text-align:center;font-size:17px;font-weight:800;padding:19px 12px;border-radius:14px}
+.later{display:block;text-align:center;font-size:14px;color:#8496AC;padding:14px 0 0}
+</style>
+</head>
+<body>
+<div class="phone"><div class="scr">
+  <div class="app">
+    <div class="sb"><span>9:41</span><span>
+      <svg width="24" height="11" viewBox="0 0 24 11" aria-hidden="true"><rect x=".6" y=".6" width="20" height="9.8" rx="3" fill="none" stroke="#10233F" stroke-opacity=".5"/><rect x="2.3" y="2.3" width="13" height="6.4" rx="1.6" fill="#10233F"/></svg>
+    </span></div>
+    <div class="ah">어디로 갈까요?</div>
+    <div class="srch"></div>
+    <div class="chips"><span>특가</span><span>동남아</span><span>국내</span><span>일본</span></div>
+    <div class="cards">
+      <div class="c"><div class="t"></div><div class="l1"></div><div class="l2"></div></div>
+      <div class="c"><div class="t"></div><div class="l1"></div><div class="l2"></div></div>
+    </div>
+    <div class="tabbar"><i></i><i style="border-radius:50%"></i><i></i><i style="border-radius:11px"></i></div>
+  </div>
+  <div class="dim"></div>
+
+  <div class="sheet">
+    <div class="pic slot">
+      <img src="./assets/travel-inapp.png" alt="">
+      <a class="x" href="#"><svg width="13" height="13" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 1 11 11M11 1 1 11" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg></a>
+    </div>
+    <div class="tx">
+      <span class="chip">D-3 마감</span>
+      <h1>추석 연휴,<br>아직 자리 있어요</h1>
+      <p class="sub">다낭 3박 5일 599,000원 · 잔여 12석</p>
+      <div class="sp"></div>
+      <a class="cta" href="#">남은 좌석 보기</a>
+      <a class="later" href="#">다음에 볼게요</a>
+    </div>
+  </div>
+</div></div>
+</body>
+</html>

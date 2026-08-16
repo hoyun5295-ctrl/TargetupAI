@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>라온재활의학과 — 모바일DM</title>
+<style>
+@font-face{font-family:'Pretendard Variable';src:url('./assets/fonts/PretendardVariable.woff2') format('woff2-variations');font-weight:45 920;font-display:swap}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{display:block;width:100%;height:100%;object-fit:cover}
+a{text-decoration:none;color:inherit}
+.slot{background:#eee;overflow:hidden}
+body{background:#E2E7E7;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+.phone{width:395px;height:832px;background:#111;border-radius:46px;padding:10px;box-shadow:0 24px 56px rgba(12,42,46,.28)}
+.scr{position:relative;display:flex;flex-direction:column;width:375px;height:812px;border-radius:37px;overflow:hidden;background:#F5FAFA;color:#0C2A2E}
+.sb{position:absolute;top:0;left:0;right:0;height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 26px;z-index:5;color:#fff;font-size:14px;font-weight:600}
+.sb .ic{display:flex;gap:6px;align-items:center}
+.top{background:#00857C;color:#fff;padding:54px 24px 20px}
+.wm{display:flex;align-items:center;gap:9px;font-size:15px;font-weight:800;letter-spacing:-0.025em}
+h1{font-size:28px;line-height:1.32;font-weight:800;letter-spacing:-0.034em;margin:18px 0 0;text-wrap:pretty}
+.sub{font-size:15px;line-height:1.6;color:#A7DCD7;margin:11px 0 0}
+/* 이미지 슬롯: dm hero 9:16 상단 60% (16:9 밴드) */
+.band{height:92px;background:#c3d8d6}
+.card{margin:12px 20px 0;background:#fff;border-radius:16px;padding:4px 18px;box-shadow:0 2px 10px rgba(12,42,46,.06)}
+.ar{display:flex;padding:10px 0;border-bottom:1px solid #EEF4F4;margin:0}
+.ar:last-child{border-bottom:0}
+.ar dt{flex:0 0 62px;font-size:13.5px;color:#6B8A8D;margin:0}
+.ar dd{margin:0;font-size:15px;font-weight:700;letter-spacing:-0.02em;line-height:1.55}
+.ar dd small{display:block;font-size:12.5px;font-weight:500;color:#6B8A8D;margin-top:4px}
+.steps{padding:10px 24px 0}
+.step{display:flex;gap:11px;align-items:flex-start;margin-bottom:6px}
+.step i{flex:0 0 20px;height:20px;border-radius:50%;background:#DDF0EE;color:#00756D;font-size:11.5px;font-weight:800;display:flex;align-items:center;justify-content:center;font-style:normal;margin-top:1px}
+.step p{margin:0;font-size:14.5px;line-height:1.6;color:#365356}
+.scr>*{flex:0 0 auto}
+.fix{margin-top:auto;background:#F5FAFA;border-top:1px solid #E3EFEE;padding:14px 20px 18px}
+.cta{display:block;background:#00857C;color:#fff;text-align:center;font-size:17px;font-weight:800;padding:19px 12px;border-radius:13px}
+.cta2{display:block;background:#fff;border:1.5px solid #C7E0DE;color:#00756D;text-align:center;font-size:14.5px;font-weight:700;padding:13px 12px;border-radius:13px;margin-top:9px}
+.optout{text-align:center;font-size:12px;color:#93AFB1;margin-top:9px}
+</style>
+</head>
+<body>
+<div class="phone"><div class="scr">
+  <div class="sb"><span>9:41</span><span class="ic"><svg width="17" height="11" viewBox="0 0 17 11" aria-hidden="true"><rect y="7" width="3" height="4" rx="1" fill="#fff"/><rect x="4.6" y="5" width="3" height="6" rx="1" fill="#fff"/><rect x="9.2" y="2.6" width="3" height="8.4" rx="1" fill="#fff"/><rect x="13.8" width="3" height="11" rx="1" fill="#fff"/></svg>
+    <svg width="24" height="11" viewBox="0 0 24 11" aria-hidden="true"><rect x=".6" y=".6" width="20" height="9.8" rx="3" fill="none" stroke="#fff" stroke-opacity=".65"/><rect x="2.3" y="2.3" width="14" height="6.4" rx="1.6" fill="#fff"/></svg></span></div>
+
+  <div class="top">
+    <div class="wm">
+      <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5c5.6 4.8 8.5 8 8.5 11a4.4 4.4 0 0 1-8.5 1.6A4.4 4.4 0 0 1 3.5 14.5c0-3 2.9-6.2 8.5-11Z" fill="none" stroke="#fff" stroke-width="1.8"/><path d="M12 10.5v5M9.5 13h5" stroke="#7FE3D6" stroke-width="1.8" stroke-linecap="round"/></svg>
+      라온재활의학과의원
+    </div>
+    <h1>내일 오후 3시,<br>예약이 있습니다</h1>
+    <p class="sub">방문 전 안내를 확인해 주세요</p>
+  </div>
+  <div class="slot band"><img src="./assets/medical-dm-hero.png" alt=""></div>
+
+  <div class="card">
+    <dl class="ar"><dt>일시</dt><dd>8월 17일 (월) 오후 3:00</dd></dl>
+    <dl class="ar"><dt>진료</dt><dd>도수치료 · 50분</dd></dl>
+    <dl class="ar"><dt>담당</dt><dd>김하늘 물리치료사 · 3치료실</dd></dl>
+    <dl class="ar"><dt>장소</dt><dd>노원구 동일로 000, 3층<small>7호선 000역 2번 출구 도보 5분</small></dd></dl>
+  </div>
+
+  <div class="steps">
+    <div class="step"><i>1</i><p>움직이기 편한 복장으로 오세요.</p></div>
+    <div class="step"><i>2</i><p>접수는 예약 10분 전부터 가능합니다.</p></div>
+    <div class="step"><i>3</i><p>변경은 방문 하루 전까지 가능합니다.</p></div>
+  </div>
+
+  <div class="fix">
+    <a class="cta" href="#">예약 확인하기</a>
+    <a class="cta2" href="#">전화 02-000-0000</a>
+    <div class="optout">(광고) 라온재활의학과 · 무료수신거부 080-000-0000</div>
+  </div>
+</div></div>
+</body>
+</html>
