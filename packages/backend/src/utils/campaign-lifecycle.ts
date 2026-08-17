@@ -107,6 +107,42 @@ export async function cleanupScheduledCampaigns(filter: CleanupScheduledFilter =
   return { cleaned };
 }
 
+// ===== 실행 행 종결 =====
+
+/**
+ * ★ CT: 시작만 하고 못 나간 실행 행을 **실패로 종결**한다 (2026-08-17 신설)
+ *
+ * 발송 라우트는 `campaign_runs` 행(= 실행 선점 표시)을 먼저 만들고 그 뒤에 실패할 수 있는 일을 한다.
+ * 그 실패 경로가 행을 그대로 두면 `status='sending'`이 남고, 발송 라우트 앞머리의 중복 발송 방지 검사
+ * (`status IN ('sending','scheduled')`)가 그 행을 보고 **그 캠페인의 이후 발송을 영구히 막는다.**
+ * 자동 청소도 없다 — `syncCampaignResults`는 실적(성공·실패·대기)이 하나라도 있어야 상태를 옮기는데
+ * 적재가 0건이라 조건에 안 걸리고, 7일이 지나면 조회 창에서도 빠진다.
+ * 실측 사고 형태: **잔액이 부족해 한 번 막힌 캠페인은 충전한 뒤에도 발송할 수 없다.**
+ *
+ * 왜 DELETE가 아니라 상태 전이인가 — 시도한 이력은 남아야 한다(같은 이유로 취소도 `cancelled`로 남긴다).
+ * `'failed'`는 신설 값이 아니라 이 테이블이 이미 쓰는 값이고, 중복 검사·결과 동기화 대상 어디에도
+ * 걸리지 않으며 청구는 `'completed'`만 센다.
+ *
+ * ⛔ 호출부에서 UPDATE를 직접 쓰지 마라 — 실패 경로가 하나 늘 때마다 같은 SQL이 복제되고,
+ *   그중 하나를 빠뜨리는 순간 그 경로가 다시 캠페인을 잠근다.
+ */
+export async function failCampaignRun(runId: string, reason: string): Promise<void> {
+  if (!runId) return;
+  try {
+    await query(
+      `UPDATE campaign_runs
+          SET status = 'failed',
+              completed_at = COALESCE(completed_at, NOW())
+        WHERE id = $1
+          AND status IN ('sending', 'scheduled')`,
+      [runId]
+    );
+  } catch (err: any) {
+    // 종결 실패가 원래의 거절 응답을 덮으면 사용자는 다른 이유를 보게 된다 — 삼키되 흔적은 남긴다.
+    console.error(`[campaign-run] 실행 행 종결 실패 run=${runId} (${reason}):`, err?.message || err);
+  }
+}
+
 // ===== 캠페인 취소 =====
 
 export interface CancelCampaignResult {

@@ -4621,62 +4621,13 @@ router.get('/rcs-templates', authenticate, requireSuperAdmin, async (req: Reques
   }
 });
 
-// PUT /api/admin/rcs-templates/:id/approve — RCS 템플릿 승인
-router.put('/rcs-templates/:id/approve', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const adminId = (req as any).user?.id;
-
-    const result = await query(
-      `UPDATE rcs_templates SET
-        status = 'approved', approved_at = NOW(), reviewed_at = NOW(),
-        reviewed_by = $2, updated_at = NOW()
-      WHERE id = $1 AND status = 'pending'
-      RETURNING *`,
-      [id, adminId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(400).json({ success: false, error: '승인대기 상태의 템플릿만 승인 가능합니다' });
-    }
-
-    res.json({ success: true, template: result.rows[0] });
-  } catch (error) {
-    console.error('[Admin] RCS 템플릿 승인 실패:', error);
-    res.status(500).json({ success: false, error: '승인 실패' });
-  }
-});
-
-// PUT /api/admin/rcs-templates/:id/reject — RCS 템플릿 반려
-router.put('/rcs-templates/:id/reject', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const adminId = (req as any).user?.id;
-    const { rejectReason } = req.body;
-
-    if (!rejectReason) {
-      return res.status(400).json({ success: false, error: '반려 사유는 필수입니다' });
-    }
-
-    const result = await query(
-      `UPDATE rcs_templates SET
-        status = 'rejected', reject_reason = $2, reviewed_at = NOW(),
-        reviewed_by = $3, updated_at = NOW()
-      WHERE id = $1 AND status = 'pending'
-      RETURNING *`,
-      [id, rejectReason, adminId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(400).json({ success: false, error: '승인대기 상태의 템플릿만 반려 가능합니다' });
-    }
-
-    res.json({ success: true, template: result.rows[0] });
-  } catch (error) {
-    console.error('[Admin] RCS 템플릿 반려 실패:', error);
-    res.status(500).json({ success: false, error: '반려 실패' });
-  }
-});
+// ★ 2026-08-17 RCS 템플릿 수기 승인·반려 endpoint 폐기.
+//   이 두 endpoint는 `rcs_templates.status`를 슈퍼관리자 손으로 바꿨을 뿐,
+//   실제 검수 주체(RCS Biz Center)와 아무 연결이 없었다. 그래서 화면에 "승인"이 떠도
+//   발송 가능을 뜻하지 않았고, 그 표시를 믿고 예약하면 발송 시점에 통신사가 전건 거절한다.
+//   검수 상태는 연동 동기화(RBC)로만 채운다 — 그때까지 우리가 아는 상태는 '검수중'뿐이다(fail-closed).
+//   설계 = docs/2026-08-17-rcs-integration-design.md §2-2
+//   조회(GET /rcs-templates)는 유지 — 무엇이 등록돼 있는지 보는 것은 상태를 지어내지 않는다.
 
 // ============================================================
 // ★ D114 P10: 발송통계 엑셀(CSV) 다운로드

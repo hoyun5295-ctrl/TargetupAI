@@ -67,6 +67,8 @@ import DiagnosisModal from '../components/marketing-diagnosis/DiagnosisModal';
 import DiagnosisInviteModal from '../components/marketing-diagnosis/DiagnosisInviteModal';
 import DiagnosisHeroCard from '../components/marketing-diagnosis/DiagnosisHeroCard';
 import { diagnosisApi, type DiagnosisStateDto } from '../components/marketing-diagnosis/diagnosisApi';
+// ★ 2026-08-17 AI 추천 유형은 그대로 차감 축이 되므로 CT가 좁혀 준 값만 쓴다(campaign-axis).
+import { normalizeAiMessageChannel, type AiMessageChannel } from '../utils/campaign-axis';
 
 interface Stats {
   total: string;
@@ -256,7 +258,9 @@ export default function Dashboard() {
   const [showAiResult, setShowAiResult] = useState(false);
   const [aiResult, setAiResult] = useState<any>(null);
   const [aiStep, setAiStep] = useState(1);
-  const [selectedChannel, setSelectedChannel] = useState('SMS');
+  // ★ 2026-08-17 유형을 문자열이 아니라 유니온으로 좁혔다. 이 값이 그대로 캠페인의 `messageType`이 되고
+  //   백엔드 차감 축이 되므로, 목록 밖 값이 들어오면 단가표에 없어 **0원으로 통과**한다(무료 발송).
+  const [selectedChannel, setSelectedChannel] = useState<AiMessageChannel>('SMS');
   const [showLmsConfirm, setShowLmsConfirm] = useState(false);
   const [pendingBytes, setPendingBytes] = useState(0);
   const [smsOverrideAccepted, setSmsOverrideAccepted] = useState(false);
@@ -378,7 +382,10 @@ export default function Dashboard() {
   const [targetFieldsMeta, setTargetFieldsMeta] = useState<FieldMeta[]>([]);
   const [phoneFields, setPhoneFields] = useState<string[]>([]);  // ★ D103: 전화번호 형태 필드
   // 직접타겟발송 관련 state
-  const [targetSendChannel, setTargetSendChannel] = useState<'sms' | 'rcs' | 'kakao_alimtalk'>('sms');
+  // ★ 2026-08-17 유니온에서 'rcs' 제거 — 아래 죽은 분기와 함께 정리했다.
+  //   값만 지우고 타입에 리터럴을 남기면 tsc가 재유입을 못 잡는다(RCS 채널은 게이트웨이 적재 경로가
+  //   열릴 때 설계서 순서대로 되살린다 — docs/2026-08-17-rcs-integration-design.md).
+  const [targetSendChannel, setTargetSendChannel] = useState<'sms' | 'kakao_alimtalk'>('sms');
   const [targetMsgType, setTargetMsgType] = useState<'SMS' | 'LMS' | 'MMS'>('SMS');
   const [targetSubject, setTargetSubject] = useState('');
   const [targetMessage, setTargetMessage] = useState('');
@@ -388,7 +395,7 @@ export default function Dashboard() {
   const [targetListSearch, setTargetListSearch] = useState('');
   const [showTargetPreview, setShowTargetPreview] = useState(false);
   // 직접발송 관련 state
-  const [directSendChannel, setDirectSendChannel] = useState<'sms' | 'rcs' | 'kakao_alimtalk'>('sms');
+  const [directSendChannel, setDirectSendChannel] = useState<'sms' | 'kakao_alimtalk'>('sms');
   const [directMsgType, setDirectMsgType] = useState<'SMS' | 'LMS' | 'MMS'>('SMS');
   const [directSubject, setDirectSubject] = useState('');
   const [directMessage, setDirectMessage] = useState('');
@@ -436,19 +443,9 @@ export default function Dashboard() {
       }
     } catch {}
   };
-  // RCS 승인 템플릿 로드
-  const [rcsTemplates, setRcsTemplates] = useState<any[]>([]);
-  const [rcsSelectedTemplate, setRcsSelectedTemplate] = useState<any>(null);
-  const loadRcsTemplates = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/companies/rcs-templates?status=approved', { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) {
-        const data = await res.json();
-        setRcsTemplates(data.templates || []);
-      }
-    } catch {}
-  };
+  // ★ 2026-08-17 RCS 승인 템플릿 로드·선택 state 제거.
+  //   승인 상태(`status=approved`)가 우리 DB 수기 값이라 실제 검수 결과와 무관했고, 그 목록으로 고른
+  //   템플릿이 발송으로 이어지는 경로도 없었다. RCS는 개통·검수 동기화까지 함께 열린다(설계서 §2-2).
   // AI 문구 추천 (직접타겟발송) — 버튼 클릭 핸들러
   const handleAiMsgHelper = () => {
     // D53: DB 플래그 기반 게이팅
@@ -515,7 +512,7 @@ export default function Dashboard() {
     // ★ D111 P2: %이름%/%고객명%/%성함% 변수가 있는데 이름 비어있는 수신자 경고
     if (!confirmNameEmpty) {
       const isAlimtalk = directSendChannel === 'kakao_alimtalk';
-      const msgForCheck = isAlimtalk || directSendChannel === 'rcs' ? kakaoMessage : directMessage;
+      const msgForCheck = isAlimtalk ? kakaoMessage : directMessage;
       const hasNameVar = /%(이름|고객명|성함)%/.test(msgForCheck || '');
       if (hasNameVar && directRecipients && directRecipients.length > 0) {
         const emptyCount = directRecipients.filter((r: any) => !r.name || String(r.name).trim() === '').length;
@@ -556,11 +553,11 @@ export default function Dashboard() {
       };
       const commitBody = {
         stagingId,
-        msgType: directSendChannel === 'rcs' ? 'LMS' : isAlimtalk ? 'LMS' : directMsgType,
-        sendChannel: directSendChannel === 'sms' ? 'sms' : directSendChannel === 'rcs' ? 'rcs' : 'alimtalk',
+        msgType: isAlimtalk ? 'LMS' : directMsgType,
+        sendChannel: isAlimtalk ? 'alimtalk' : 'sms',
         subject: directSubject,
-        // ★ 알림톡 빈 본문 fix (2026-06-01): 모달은 kakaoMessage를 채우지 않음 → 템플릿 본문(content)으로 발송(타겟 경로 678행과 동일). 빈 본문→카카오 반려→불필요 대체 차단.
-        message: isAlimtalk ? (kakaoSelectedTemplate?.content || '') : (directSendChannel === 'rcs' ? kakaoMessage : directMessage),
+        // ★ 알림톡 빈 본문 fix (2026-06-01): 모달은 kakaoMessage를 채우지 않음 → 템플릿 본문(content)으로 발송(타겟 경로와 동일). 빈 본문→카카오 반려→불필요 대체 차단.
+        message: isAlimtalk ? (kakaoSelectedTemplate?.content || '') : directMessage,
         callback: isAlimtalk ? (callbackNumbers[0]?.phone || '') : (useIndividualCallback ? null : selectedCallback),
         useIndividualCallback: isAlimtalk ? false : useIndividualCallback,
         individualCallbackColumn: (!isAlimtalk && useIndividualCallback) ? individualCallbackColumn : undefined,
@@ -667,7 +664,7 @@ export default function Dashboard() {
     }
     // ★ D111 P2: %이름%/%고객명%/%성함% 변수가 있는데 이름 비어있는 수신자 경고
     if (!confirmNameEmpty) {
-      const msgForCheck = targetSendChannel === 'rcs' ? kakaoMessage : targetMessage;
+      const msgForCheck = targetMessage;
       const hasNameVar = /%(이름|고객명|성함)%/.test(msgForCheck || '');
       if (hasNameVar && targetRecipients && targetRecipients.length > 0) {
         const emptyCount = targetRecipients.filter((r: any) => !r.name || String(r.name).trim() === '').length;
@@ -681,9 +678,6 @@ export default function Dashboard() {
     setTargetSending(true);
     try {
       const token = localStorage.getItem('token');
-      // 변수 치환 처리
-      const isRcs = targetSendChannel === 'rcs';
-      const baseMsg = isRcs ? kakaoMessage : targetMessage;
       // ★ D102: 프론트 변수 치환 제거 — 백엔드 replaceVariables 컨트롤타워 하나로 통일
       // customMessages를 보내지 않으므로 백엔드에서 DB 고객 데이터 기반으로 치환 + 포맷팅
       const recipientsForSend = targetRecipients.map((r: any) => ({
@@ -717,11 +711,11 @@ export default function Dashboard() {
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          msgType: targetSendChannel === 'rcs' ? 'LMS' : isTargetAlimtalk ? 'LMS' : targetMsgType,
+          msgType: isTargetAlimtalk ? 'LMS' : targetMsgType,
           // ★ D130: 알림톡 매핑 버그 수정 — 'kakao' → 'alimtalk' (백엔드 directChannel === 'alimtalk' 체크와 정합)
-          sendChannel: targetSendChannel === 'sms' ? 'sms' : targetSendChannel === 'rcs' ? 'rcs' : 'alimtalk',
+          sendChannel: isTargetAlimtalk ? 'alimtalk' : 'sms',
           subject: targetSubject,
-          message: isTargetAlimtalk ? (kakaoSelectedTemplate?.content || '') : targetSendChannel === 'rcs' ? kakaoMessage : targetMessage,
+          message: isTargetAlimtalk ? (kakaoSelectedTemplate?.content || '') : targetMessage,
           callback: isTargetAlimtalk ? (callbackNumbers[0]?.phone || '') : (useIndividualCallback ? null : selectedCallback),
           useIndividualCallback: isTargetAlimtalk ? false : useIndividualCallback,
           individualCallbackColumn: (!isTargetAlimtalk && useIndividualCallback) ? individualCallbackColumn : undefined,
@@ -1252,9 +1246,8 @@ export default function Dashboard() {
           if (fieldsData.phoneFields) setPhoneFields(fieldsData.phoneFields);
         }
       } catch (e) { /* 실패 시 빈 배열 유지 */ }
-      // ★ D94: 알림톡/RCS 승인 템플릿 로드
+      // ★ D94: 알림톡 승인 템플릿 로드
       loadKakaoTemplates();
-      loadRcsTemplates();
     } catch (err) {
       console.error('회사 설정 로드 실패:', err);
     }
@@ -1456,11 +1449,10 @@ const handleAiCampaignGenerate = async (promptOverride?: string) => {
     setSampleCustomerRaw(result.sample_customer_raw || {});
     
     // 추천 채널로 기본 설정
-    let recommendedCh = result.recommended_channel || 'SMS';
-    // AI가 카카오 추천해도 SMS/LMS/MMS만 허용
-    if (recommendedCh === '카카오' || recommendedCh === 'KAKAO') {
-      recommendedCh = 'LMS';
-    }
+    // ★ 2026-08-17 값마다 분기를 더하지 않는다 — CT가 SMS/LMS/MMS로 좁혀 준 값만 받는다.
+    //   전에는 '카카오'만 걸러서, 모델이 그 밖의 값을 돌려주면 그대로 캠페인 유형이 되고
+    //   백엔드 단가표에 없어 0원으로 통과했다(무료 발송).
+    const recommendedCh = normalizeAiMessageChannel(result.recommended_channel);
     setSelectedChannel(recommendedCh);
     if ((recommendedCh) !== 'MMS') setMmsUploadedImages([]);
     setIsAd(result.is_ad !== false);
@@ -3548,8 +3540,6 @@ const campaignData = {
           alimtalkProfileId={alimtalkProfileId} setAlimtalkProfileId={setAlimtalkProfileId}
           alimtalkNextContents={alimtalkNextContents} setAlimtalkNextContents={setAlimtalkNextContents}
           alimtalkNextSubject={alimtalkNextSubject} setAlimtalkNextSubject={setAlimtalkNextSubject}
-          rcsTemplates={rcsTemplates}
-          rcsSelectedTemplate={rcsSelectedTemplate} setRcsSelectedTemplate={setRcsSelectedTemplate}
           setShowDirectPreview={setShowDirectPreview}
           setShowSpecialChars={setShowSpecialChars}
           setShowTemplateBox={setShowTemplateBox}

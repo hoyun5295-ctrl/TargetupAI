@@ -569,7 +569,8 @@ const [emailResendAt, setEmailResendAt] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   // ★ D96: 반려 사유 입력 모달
-  const [rejectModal, setRejectModal] = useState<{ show: boolean; type: 'kakao' | 'rcs'; id: string; reason: string }>({ show: false, type: 'kakao', id: '', reason: '' });
+  // ★ 2026-08-17 반려 모달의 채널 축 제거 — RCS 수기 반려를 걷어내며 알림톡 전용이 됐다.
+  const [rejectModal, setRejectModal] = useState<{ show: boolean; id: string; reason: string }>({ show: false, id: '', reason: '' });
 
   // 신규 고객사 폼
   const [newCompany, setNewCompany] = useState({
@@ -842,11 +843,13 @@ const loadAdminRcsTemplates = async () => {
   } catch { /* ignore */ }
 };
 
-const handleTemplateApprove = async (type: 'kakao' | 'rcs', id: string) => {
+// ★ 2026-08-17 RCS 분기 제거 — 알림톡 전용으로 좁혔다.
+//   RCS 검수 주체는 외부(RCS Biz Center)라 우리 DB status를 손으로 바꾸는 것은 승인이 아니었다.
+//   그 상태로 "승인"이 보이면 발송 가능으로 읽히는데 실제로는 아니다(설계서 §2-2 fail-closed).
+const handleTemplateApprove = async (id: string) => {
   try {
     const tk = localStorage.getItem('token');
-    const endpoint = type === 'kakao' ? `/api/admin/kakao-templates/${id}/approve` : `/api/admin/rcs-templates/${id}/approve`;
-    const res = await fetch(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tk}` }, body: JSON.stringify({}) });
+    const res = await fetch(`/api/admin/kakao-templates/${id}/approve`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tk}` }, body: JSON.stringify({}) });
     const data = await res.json();
     if (data.success) { loadAdminTemplates(); loadAdminRcsTemplates(); setModal({ type: 'alert', title: '승인 완료', message: '템플릿이 승인되었습니다', variant: 'success' }); }
     else setModal({ type: 'alert', title: '승인 실패', message: data.error, variant: 'error' });
@@ -854,8 +857,8 @@ const handleTemplateApprove = async (type: 'kakao' | 'rcs', id: string) => {
 };
 
 // ★ D96: prompt() → 커스텀 모달로 변경
-const handleTemplateReject = (type: 'kakao' | 'rcs', id: string) => {
-  setRejectModal({ show: true, type, id, reason: '' });
+const handleTemplateReject = (id: string) => {
+  setRejectModal({ show: true, id, reason: '' });
 };
 
 const handleTemplateRejectConfirm = async () => {
@@ -865,10 +868,9 @@ const handleTemplateRejectConfirm = async () => {
   }
   try {
     const tk = localStorage.getItem('token');
-    const endpoint = rejectModal.type === 'kakao' ? `/api/admin/kakao-templates/${rejectModal.id}/reject` : `/api/admin/rcs-templates/${rejectModal.id}/reject`;
-    const res = await fetch(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tk}` }, body: JSON.stringify({ rejectReason: rejectModal.reason.trim() }) });
+    const res = await fetch(`/api/admin/kakao-templates/${rejectModal.id}/reject`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tk}` }, body: JSON.stringify({ rejectReason: rejectModal.reason.trim() }) });
     const data = await res.json();
-    setRejectModal({ show: false, type: 'kakao', id: '', reason: '' });
+    setRejectModal({ show: false, id: '', reason: '' });
     if (data.success) { loadAdminTemplates(); loadAdminRcsTemplates(); setModal({ type: 'alert', title: '반려 완료', message: '템플릿이 반려되었습니다', variant: 'success' }); }
     else setModal({ type: 'alert', title: '반려 실패', message: data.error, variant: 'error' });
   } catch { setModal({ type: 'alert', title: '오류', message: '서버 오류', variant: 'error' }); }
@@ -6289,9 +6291,9 @@ const handleApproveRequest = async (id: string) => {
                               className="text-xs px-2 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100">상세</button>
                             {getAlimtalkTemplateStatus(t.status).label === '검수중' && (
                               <>
-                                <button onClick={() => handleTemplateApprove('kakao', t.id)}
+                                <button onClick={() => handleTemplateApprove(t.id)}
                                   className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100">승인</button>
-                                <button onClick={() => handleTemplateReject('kakao', t.id)}
+                                <button onClick={() => handleTemplateReject(t.id)}
                                   className="text-xs px-2 py-1 bg-red-50 text-red-700 rounded hover:bg-red-100">반려</button>
                               </>
                             )}
@@ -6346,17 +6348,13 @@ const handleApproveRequest = async (id: string) => {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center">
+                          {/* ★ 2026-08-17 RCS 승인·반려 버튼 제거 — 이 버튼은 우리 DB의 status만 바꿨고
+                              실제 검수 주체(RCS Biz Center)와 아무 관계가 없었다. 그 상태로 "승인"을 보면
+                              발송 가능으로 읽히지만 실제로는 그렇지 않다. 검수 상태는 연동 동기화로만 채운다
+                              (설계 = docs/2026-08-17-rcs-integration-design.md §2-2). 상세 보기는 유지. */}
                           <div className="flex gap-1 justify-center items-center">
                             <button onClick={() => setTemplateDetail(t)}
                               className="text-xs px-2 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100">상세</button>
-                            {getAlimtalkTemplateStatus(t.status).label === '검수중' && (
-                              <>
-                                <button onClick={() => handleTemplateApprove('rcs', t.id)}
-                                  className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100">승인</button>
-                                <button onClick={() => handleTemplateReject('rcs', t.id)}
-                                  className="text-xs px-2 py-1 bg-red-50 text-red-700 rounded hover:bg-red-100">반려</button>
-                              </>
-                            )}
                           </div>
                         </td>
                       </tr>
@@ -6618,7 +6616,7 @@ const handleApproveRequest = async (id: string) => {
             </div>
             <div className="px-6 pb-6 pt-2 flex gap-3">
               <button
-                onClick={() => setRejectModal({ show: false, type: 'kakao', id: '', reason: '' })}
+                onClick={() => setRejectModal({ show: false, id: '', reason: '' })}
                 className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2.5 rounded-xl text-sm transition"
               >
                 취소

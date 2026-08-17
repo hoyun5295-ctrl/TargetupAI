@@ -24,6 +24,34 @@ export const BRAND_CAMPAIGN_CHANNELS = ['kakao', 'kakao_brand', 'both'] as const
 export const ALIMTALK_CAMPAIGN_CHANNEL = 'alimtalk';
 
 /**
+ * ★ AI 캠페인이 고를 수 있는 메시지 유형 (2026-08-17 신설 — Codex 적대검토 high)
+ *
+ * 이 값은 화면 표시용이 아니라 **캠페인의 `messageType`이 되어 백엔드 차감 축으로 쓰인다.**
+ * 그런데 AI 응답(`recommended_channel`)을 그대로 받아 넣고 있었고 거르는 값은 '카카오' 하나였다.
+ * 모델이 `RCS` 같은 값을 돌려주면 그대로 캠페인에 저장되고, 백엔드 단가표에 없는 유형이라
+ * `unknownType`으로 **막히지 않고 0원 통과**한다(무료 발송). 큐에는 알 수 없는 값이라 LMS로 바뀌어 들어간다.
+ *
+ * ⚠ 백엔드 `utils/billing-types.ts`의 `CHARGEABLE_MESSAGE_TYPES`와 **같은 값이어야 한다.**
+ *   (미러 이유·기계 검증 방식은 이 파일 헤더 주석과 같다)
+ */
+export const AI_MESSAGE_CHANNELS = ['SMS', 'LMS', 'MMS'] as const;
+
+export type AiMessageChannel = (typeof AI_MESSAGE_CHANNELS)[number];
+
+/**
+ * AI가 준 채널 추천을 **반드시 유효한 유형으로 좁혀서** 돌려준다.
+ *
+ * 목록 밖 값(카카오·RCS·오타·빈값)은 전부 `'LMS'`로 떨어뜨린다 — 이미지가 필요 없고 길이 제한이
+ * 넉넉해 어떤 문안이 와도 잘리지 않는 쪽이다(백엔드 `toQtmsgType`의 미지값 처리와 같은 판단).
+ * 기존에 '카카오'만 LMS로 바꾸던 분기를 이 함수가 흡수한다 — 값마다 분기를 더하면 또 빠뜨린다.
+ */
+export function normalizeAiMessageChannel(raw: unknown): AiMessageChannel {
+  if (typeof raw !== 'string') return 'LMS';
+  const v = raw.trim().toUpperCase();
+  return (AI_MESSAGE_CHANNELS as readonly string[]).includes(v) ? (v as AiMessageChannel) : 'LMS';
+}
+
+/**
  * 메시지 유형 코드 → 표시명.
  * `F`는 옛 이름이 '친구톡'이었으나 그 상품은 폐지됐고 지금 실체는 브랜드메시지다.
  */

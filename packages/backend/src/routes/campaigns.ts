@@ -33,14 +33,14 @@ import { buildBrandQueuePayload, resolveBrandFallback, resolveBrandCallback } fr
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 // ★ 2026-07-29 브랜드메시지 판정은 CT 하나에서만 한다 — 채널 리터럴을 라우트에 다시 적으면
 //   집계(일자·상세)와 차감·환불이 서로 다른 기준을 갖게 되고, 그 차이가 곧 미청구나 발행 차단이다.
-import { isBrandOnlyChannel, resolveRefundAxes } from '../utils/billing-types';
+import { isBrandOnlyChannel, resolveRefundAxes, resolveSendChannel, resolveChargeMessageType } from '../utils/billing-types';
 import { markRefundPending } from '../utils/refund-pending';
 // ★ 2026-07-30 (2R): 테스트 경로 환불 미완 경보 — 캠페인 레코드가 없어 durable 의무 대신 사람 호출
 import { sendSystemAlert } from '../utils/system-alert';
 import { normalizeMmsImagePaths, type MmsImageItem } from '../utils/mms-image-util';
 import { validateMmsPayload } from '../utils/mms-validator';
 import { buildDateRangeFilter, getCampaignResultCounts, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
-import { cancelCampaign, syncCampaignResults, cleanupScheduledCampaigns } from '../utils/campaign-lifecycle';
+import { cancelCampaign, syncCampaignResults, cleanupScheduledCampaigns, failCampaignRun } from '../utils/campaign-lifecycle';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { findUnfilledAlimtalkVars, fillAlimtalkVarMap } from '../utils/alimtalk-vars';
 import { resolveAlimtalkFallback, validateAlimtalkFallback } from '../utils/alimtalk-fallback';
@@ -546,6 +546,23 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '필수 항목을 입력하세요.' });
     }
 
+    // ★ 2026-08-17 발송 채널·메시지 유형 확정 — 여기서 저장한 값을 `/campaigns/:id/send`가 그대로
+    //   읽어 차감한다. 생성 시점에 안 막으면 미지원 값이 DB에 남아 발송 시점에 차감만 되고 적재는 0건이 된다.
+    //   파이프라인은 `campaign`(적재 분기 sms·both / kakao·both) — 이 캠페인이 나갈 문이다.
+    //   ⚠ 아래에서 **resolver가 돌려준 값만** 쓴다. 원본을 다시 쓰면 배열·공백이 그대로 흘러간다.
+    const createChannel = resolveSendChannel('campaign', sendChannel);
+    if (!createChannel.ok) {
+      console.warn(`[캠페인 생성] 발송 채널 거절 — company=${companyId} raw=${JSON.stringify(sendChannel)} reason=${createChannel.reason}`);
+      return res.status(400).json({ error: createChannel.reason, code: 'UNSUPPORTED_SEND_CHANNEL' });
+    }
+    // 메시지 유형은 채널과 **별개 축**이라 채널 게이트로는 안 걸린다. 목록 밖 유형은 단가표에 없어
+    // `unknownType`으로 0원 통과(=무료 발송)가 되므로 저장 전에 확정한다.
+    const createMsgType = resolveChargeMessageType(messageType);
+    if (!createMsgType.ok) {
+      console.warn(`[캠페인 생성] 메시지 유형 거절 — company=${companyId} raw=${JSON.stringify(messageType)} reason=${createMsgType.reason}`);
+      return res.status(400).json({ error: createMsgType.reason, code: 'UNSUPPORTED_MESSAGE_TYPE' });
+    }
+
     // ★ 2026-07-02 링크 placeholder 발송 가드 — 미완성 링크 자리 잔존 시 실발송 차단 (AI 캠페인/타겟 발송 경로)
     if (hasUneditedLinkPlaceholder(String(messageContent || ''))) {
       return res.status(400).json({
@@ -599,12 +616,12 @@ router.post('/', async (req: Request, res: Response) => {
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
       RETURNING *`,
       [
-        companyId, campaignName, messageType, JSON.stringify(targetFilter),
+        companyId, campaignName, createMsgType.messageType, JSON.stringify(targetFilter),
         // ★ D142+ B1: sanitizedContent(D103 순수본문) + finalIsAdAi(자동 승격) 사용
         sanitizedContent, subject || null, subject || null, sanitizedContent, scheduledAt, finalIsAdAi, targetCount, userId,
         eventStartDate || null, eventEndDate || null,
         mmsImagePaths && mmsImagePaths.length > 0 ? JSON.stringify(mmsImagePaths) : null,
-        sendChannel || 'sms',
+        createChannel.channel,
         kakaoBubbleType || null,
         kakaoSenderKey || null,
         kakaoTargeting || 'I',
@@ -628,6 +645,11 @@ router.post('/', async (req: Request, res: Response) => {
 
 // POST /api/campaigns/:id/send - 캠페인 발송
 router.post('/:id/send', async (req: Request, res: Response) => {
+  // ★ 2026-08-17 (Codex 2R critical) 실행 행 id를 **최상위 catch에서도 볼 수 있게** 밖에 둔다.
+  //   안쪽 `catch (sendError)`를 빠져나오는 오류(차감 함수 자체가 던지는 경우, 미수 등재 실패 등)는
+  //   최상위 catch로 가는데 거기서 실행 행을 손대지 않으면 `status='sending'`이 남아
+  //   그 캠페인의 이후 발송이 영구히 막힌다. 조기 return·안쪽 catch만 막으면 이 경로가 남는다.
+  let campaignRunId: string | null = null;
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
@@ -677,11 +699,41 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 
     const campaign = campaignResult.rows[0];
 
+    // ★ 2026-08-17 **채널·유형 확정을 이 라우트의 첫 검사로 둔다.**
+    //   이 문(AI 캠페인 발송)의 적재는 `bulkInsertSmsQueue`(sms·both)와 `insertBrandQueue`(kakao·both)
+    //   둘뿐이다 — **알림톡 적재 경로가 없다**(`insertAlimtalkQueue` 호출 0건, 실측).
+    //   그런데 차감은 채널을 안 보고 먼저 일어나서, 이 문으로 들어온 알림톡 캠페인은
+    //   차감만 되고 한 건도 안 나갔다. 그래서 목록(`campaign` 파이프라인)에서 제외하고 여기서 막는다.
+    //   유형도 함께 확정한다 — 목록 밖 유형은 단가표에 없어 `unknownType`으로 **0원 통과**(무료 발송)한다.
+    //   ⚠ 위치가 곧 안전성이다. 아래 `campaign_runs` INSERT는 실행 선점 표시라, 그 뒤에서 거절하면
+    //     `status='sending'` 행이 남아 중복 발송 방지 검사가 이후 발송을 **영구히** 막는다
+    //     (자동 청소 경로도 없다 — 적재 0건이라 결과 동기화 조건에 안 걸린다).
+    const sendResolved = resolveSendChannel('campaign', campaign.send_channel);
+    if (!sendResolved.ok) {
+      console.warn(`[캠페인 발송] 발송 채널 거절 — campaign=${id} raw=${JSON.stringify(campaign.send_channel)} reason=${sendResolved.reason}`);
+      return res.status(400).json({ error: sendResolved.reason, code: 'UNSUPPORTED_SEND_CHANNEL' });
+    }
+    const sendChannel = sendResolved.channel;
+
+    const sendMsgTypeResolved = resolveChargeMessageType(campaign.message_type);
+    if (!sendMsgTypeResolved.ok) {
+      console.warn(`[캠페인 발송] 메시지 유형 거절 — campaign=${id} raw=${JSON.stringify(campaign.message_type)} reason=${sendMsgTypeResolved.reason}`);
+      return res.status(400).json({ error: sendMsgTypeResolved.reason, code: 'UNSUPPORTED_MESSAGE_TYPE' });
+    }
+
+    // ★ 카카오 활성화 체크 (프론트 우회 방지) — 2026-08-17 run INSERT 앞으로 이동.
+    //   여기서 걸리면 되돌릴 것 자체가 생기지 않는다.
+    if (sendChannel === 'kakao' || sendChannel === 'both') {
+      const kakaoCheck = await query('SELECT kakao_enabled FROM companies WHERE id = $1', [companyId]);
+      if (!kakaoCheck.rows[0]?.kakao_enabled) {
+        return res.status(403).json({ error: '카카오 브랜드메시지가 활성화되지 않은 고객사입니다.', code: 'KAKAO_NOT_ENABLED' });
+      }
+    }
+
     // ★ D91: LMS/MMS 제목 필수 검증
-    // ★ D224+ (2026-05-27) 영업팀장 박성용 신고 fix: 알림톡 캠페인(send_channel='alimtalk') 흐름 시 = LMS 제목 검증 skip.
-    //   알림톡 자체는 제목 무관, LMS 대체 발송(L/B 타입) 시점만 alimtalk_next_subject 사용 (직접발송 endpoint와 정합).
-    const isAlimtalkCampaign = campaign.send_channel === 'alimtalk';
-    if (!isAlimtalkCampaign && (campaign.message_type === 'LMS' || campaign.message_type === 'MMS') && !campaign.message_subject?.trim() && !campaign.subject?.trim()) {
+    //   (D224+ 2026-05-27의 알림톡 예외 분기는 2026-08-17 제거 — 위 게이트가 알림톡을 이미 막아
+    //    이 지점에 도달할 수 없다. 도달 못 하는 분기를 남기면 다음 사람이 그 경로가 산다고 믿는다.)
+    if ((campaign.message_type === 'LMS' || campaign.message_type === 'MMS') && !campaign.message_subject?.trim() && !campaign.subject?.trim()) {
       return res.status(400).json({ error: 'LMS/MMS 발송 시 제목을 입력해주세요.' });
     }
 
@@ -750,6 +802,9 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     if (campaign.status === 'sending') {
       return res.status(400).json({ error: '이미 발송 중입니다.' });
     }
+
+    // (채널·유형·카카오 활성 확정은 이 라우트 앞머리에서 이미 끝났다 — 2026-08-17.
+    //  실패할 수 있는 검사를 `campaign_runs` INSERT보다 앞에 모아 두는 것이 이 라우트의 규약이다.)
 
     // 타겟 고객 조회
     const targetFilter = campaign.target_filter;
@@ -871,22 +926,16 @@ if (campaign.is_ad) {
       ]
     );
     const campaignRun = runResult.rows[0];
+    campaignRunId = campaignRun.id;  // 최상위 catch가 종결할 수 있게 밖으로 올린다(위 선언 주석 참조)
 
 // ★ 선불 잔액 체크 + 차감 (MySQL INSERT 전에 atomic 차감)
-// 카카오 채널이면 KAKAO 타입으로 차감
-const sendChannel = campaign.send_channel || 'sms';
-
-// ★ 카카오 활성화 체크 (프론트 우회 방지)
-if (sendChannel === 'kakao' || sendChannel === 'both') {
-  const kakaoCheck = await query('SELECT kakao_enabled FROM companies WHERE id = $1', [companyId]);
-  if (!kakaoCheck.rows[0]?.kakao_enabled) {
-    return res.status(403).json({ error: '카카오 브랜드메시지가 활성화되지 않은 고객사입니다.', code: 'KAKAO_NOT_ENABLED' });
-  }
-}
-
-const deductType = isBrandOnlyChannel(sendChannel) ? 'BRAND' : campaign.message_type;
+// 채널·유형·카카오 활성 여부는 전부 run INSERT **앞**에서 확정됐다(2026-08-17) —
+// 여기서 실패할 수 있는 것은 차감 하나뿐이고, 그 실패는 실행 행을 종결시켜 캠페인을 풀어 준다.
+const deductType = isBrandOnlyChannel(sendChannel) ? 'BRAND' : sendMsgTypeResolved.messageType;
 const sendDeduct = await prepaidDeduct(companyId, filteredCustomers.length, deductType, id, userId);
 if (!sendDeduct.ok) {
+  // 실행 행을 남겨 두면 위쪽 중복 발송 방지 검사가 이후 발송을 영구히 막는다(충전해도 못 보낸다).
+  await failCampaignRun(campaignRun.id, '선불 잔액 부족으로 발송 중단');
   return res.status(402).json({
     error: sendDeduct.error,
     insufficientBalance: true,
@@ -903,15 +952,27 @@ if (!sendDeduct.ok) {
 if (sendChannel === 'both') {
   const brandDeduct = await prepaidDeduct(companyId, filteredCustomers.length, 'BRAND', id, userId);
   if (!brandDeduct.ok) {
+    // ★ 2026-08-17 (Codex 2R high) 회수 **결과**를 봐야 한다. `prepaidRefund`는 실패를 던지지 않고
+    //   `ok:false`로 돌려주기도 해서, 예외만 잡으면 "회수 실패"가 성공으로 지나간다.
+    //   그 상태에서 아래 `failCampaignRun`이 잠금을 풀어 주므로 **재시도가 가능해지고, 첫 차감이 남아 있으면
+    //   그대로 이중 청구**가 된다(잠금을 푼 것 자체는 맞지만, 그 전에 미수를 원장에 남겨야 한다).
+    //   미수 기록은 이 파일이 이미 쓰는 CT를 그대로 쓴다(`markRefundPending` — 직접발송 경로 선례와 같은 형태).
     try {
-      await prepaidRefund(
+      const revert = await prepaidRefund(
         companyId, filteredCustomers.length, deductType, id,
         '브랜드메시지 차감 실패로 문자 차감분 회수', 'campaign', { refundKey: REFUND_KEYS.CANCEL },
       );
+      if (!revert.ok) {
+        console.error(`[선불][both 보상실패] campaign=${id} ${deductType} ${filteredCustomers.length}건 회수 미완 (실회수 ${revert.refunded}건)`);
+        await markRefundPending(id, filteredCustomers.length, deductType);
+      }
     } catch (revertErr) {
-      // 회수까지 실패하면 잔액이 깎인 채 발송이 멈춘다 — 로그로 드러내 사람이 처리하게 한다.
+      // 회수까지 실패하면 잔액이 깎인 채 발송이 멈춘다 — 미수로 남겨 워커·사람이 이어받게 한다.
       console.error(`[선불][both 보상실패] campaign=${id} ${deductType} ${filteredCustomers.length}건 회수 실패:`, revertErr);
+      await markRefundPending(id, filteredCustomers.length, deductType);
     }
+    // 차감은 되돌렸지만 실행 행은 그대로 남아 캠페인을 잠그던 자리다(2026-08-17).
+    await failCampaignRun(campaignRun.id, '브랜드메시지 차감 실패로 발송 중단');
     return res.status(402).json({
       error: brandDeduct.error,
       insufficientBalance: true,
@@ -1118,19 +1179,42 @@ await query(
     } catch (sendError) {
       // ★ C1: 전체 실패 (루프 진입 전 오류 등) — 전액 환불
       console.error('[AI발송] 큐 처리 전체 실패 — 차감 환불 처리:', sendError);
-      try {
-        // ★ 2026-07-27 (B-0727-2): 후처리 실패로도 이 catch에 온다 — 이미 적재된 건은 빼고 환불한다.
-        const aiNotLoaded = Math.max(0, filteredCustomers.length - aiSentCount);
-        await prepaidRefund(companyId, aiNotLoaded, deductType, id, `발송 실패 미적재 ${aiNotLoaded}건 자동 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
-        await query(`UPDATE campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1`, [id]);
-      } catch (refundErr) {
-        console.error('[AI발송] 환불 처리 중 추가 오류:', refundErr);
+      // ★ 2026-08-17 (Codex 2R critical) 예외 경로도 **조기 return과 같은 계약**으로 맞춘다.
+      //   전에는 여기서 ①`deductType` 축만 환불하고(`both`는 BRAND 축 차감이 그대로 남았다)
+      //   ②`campaign_runs`를 손대지 않아 `status='sending'` 행이 남았다 — 그 행이 중복 발송 방지 검사에 걸려
+      //   **그 캠페인의 재시도가 영구히 막혔다**(조기 return에서 고친 것과 같은 사고가 예외 경로에 남아 있었다).
+      //   환불 축은 차감을 넣은 쪽과 같은 CT로 뽑는다(`resolveRefundAxes`) — 두 벌로 두면 회계가 갈린다.
+      const aiNotLoaded = Math.max(0, filteredCustomers.length - aiSentCount);
+      for (const axis of resolveRefundAxes(sendChannel, sendMsgTypeResolved.messageType)) {
+        try {
+          const r = await prepaidRefund(
+            companyId, aiNotLoaded, axis.type, id,
+            `발송 실패 미적재 ${aiNotLoaded}건 자동 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED },
+          );
+          // 환불은 실패를 던지지 않고 `ok:false`로 돌아오기도 한다 — 미수를 원장에 남겨야 재시도가 이중 청구가 안 된다.
+          if (!r.ok) {
+            console.error(`[AI발송] 미적재 환불 미완 campaign=${id} axis=${axis.type} ${aiNotLoaded}건 (실환불 ${r.refunded}건)`);
+            await markRefundPending(id, aiNotLoaded, axis.type);
+          }
+        } catch (refundErr) {
+          console.error(`[AI발송] 미적재 환불 오류 campaign=${id} axis=${axis.type}:`, refundErr);
+          await markRefundPending(id, aiNotLoaded, axis.type);
+        }
       }
+      try {
+        await query(`UPDATE campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1`, [id]);
+      } catch (statusErr) {
+        console.error('[AI발송] 캠페인 상태 갱신 실패:', statusErr);
+      }
+      // 실행 행 종결이 빠지면 위 환불이 다 성공해도 그 캠페인은 다시 못 보낸다.
+      await failCampaignRun(campaignRun.id, '발송 처리 중 오류로 중단');
       return res.status(500).json({ error: '발송 처리 중 오류가 발생했습니다. 차감된 금액은 자동 환불됩니다.' });
     }
 
   } catch (error) {
     console.error('캠페인 발송 에러:', error);
+    // 실행 행이 이미 만들어진 뒤라면 종결한다 — 안 하면 그 캠페인이 영구히 잠긴다(2026-08-17).
+    if (campaignRunId) await failCampaignRun(campaignRunId, '발송 처리 중 예기치 못한 오류');
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
@@ -1507,6 +1591,23 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
 
     if (!stagingId) return res.status(400).json({ success: false, error: 'stagingId 누락' });
 
+    // ★ 2026-08-17 발송 채널 확정 — `/direct-send`와 **같은 구멍**이 이 경로에도 있었다.
+    //   차감은 direct-send-core가, 적재는 direct-send-processor가 하는데 둘 사이에 채널 검사가 없어
+    //   미지원 값이면 차감만 남고 적재가 0건이 된다. 차감 함수보다 앞인 여기서 막는다.
+    //   ⚠ 아래로는 **resolver가 돌려준 값만** 넘긴다 — 원본을 넘기면 배열·공백이 하위 기본값 처리를
+    //     그대로 통과해(`[] || 'sms'`는 빈 배열이다) 적재 분기에서만 빗나간다.
+    const commitChannel = resolveSendChannel('direct', sendChannel);
+    if (!commitChannel.ok) {
+      console.warn(`[직접발송 commit] 발송 채널 거절 — company=${companyId} raw=${JSON.stringify(sendChannel)} reason=${commitChannel.reason}`);
+      return res.status(400).json({ success: false, error: commitChannel.reason, code: 'UNSUPPORTED_SEND_CHANNEL' });
+    }
+    // ★ 2026-08-17 (Codex 2R high) 유형도 확정한다 — `/direct-send`와 같은 축이고, 이 문도 차감에 그대로 넘긴다.
+    const commitMsgResolved = resolveChargeMessageType(msgType);
+    if (!commitMsgResolved.ok) {
+      console.warn(`[직접발송 commit] 메시지 유형 거절 — company=${companyId} raw=${JSON.stringify(msgType)} reason=${commitMsgResolved.reason}`);
+      return res.status(400).json({ success: false, error: commitMsgResolved.reason, code: 'UNSUPPORTED_MESSAGE_TYPE' });
+    }
+
     const stagedCount = await query(
       `SELECT COUNT(*)::int AS c FROM campaign_send_staging WHERE staging_id = $1 AND company_id = $2`,
       [stagingId, companyId]
@@ -1516,7 +1617,7 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
     }
 
     // 검증 (즉시 피드백) — 제목 / 회신번호 등록 / 알림톡 승인
-    const isAlimtalkSend = sendChannel === 'alimtalk';
+    const isAlimtalkSend = commitChannel.channel === 'alimtalk';
     if (isAlimtalkSend) {
       // ★ 2026-07-27: 전환재발송 검증 CT 단일 기준(alimtalk-fallback) — 제목 + 대체문안 동시.
       const violation = validateAlimtalkFallback({
@@ -1580,7 +1681,7 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
     try {
       const { campaignId, accepted } = await createDirectSendCampaign({
         stagingId, campaignName: `직접발송 ${new Date().toLocaleString('ko-KR')}`,
-        msgType, message, subject, callback, sendChannel, adEnabled, total,
+        msgType: commitMsgResolved.messageType, message, subject, callback, sendChannel: commitChannel.channel, adEnabled, total,
         scheduled, scheduledAt, splitEnabled, splitCount, useIndividualCallback, individualCallbackColumn, mmsImagePaths,
         dedupEnabled, unsubFilterEnabled,
         kakaoBubbleType, kakaoSenderKey, kakaoTargeting, kakaoAttachmentJson, kakaoCarouselJson, kakaoResendType,
@@ -1702,6 +1803,31 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       unsubFilterEnabled = true,
     } = req.body;
 
+    // ★ 2026-08-17 발송 채널 확정 — **이 라우트의 첫 검사**로 둔다.
+    //   이 문의 적재 분기는 sms·both / kakao·both / alimtalk 셋뿐인데 차감은 채널을 안 보고 먼저 일어난다.
+    //   그래서 이 문이 처리하지 못하는 값이 오면 캠페인 생성 + 차감 + **적재 0건**으로 끝나고 응답은 성공이었다
+    //   (실측: 죽은 프론트 분기가 보내던 `'rcs'`뿐 아니라 임의 문자열·배열도 통과했고,
+    //    브랜드 전용 `kakao_brand`는 이 문에 적재 분기가 없는데 BRAND 단가로 차감됐다).
+    //   ⚠ 아래로는 resolver가 돌려준 `directChannel`만 쓴다 — `sendChannel` 원본을 다시 읽지 않는다.
+    //     원본을 읽으면 배열·공백이 하위 기본값 처리를 그대로 통과해(`[] || 'sms'`는 빈 배열이다)
+    //     적재 분기에서만 빗나간다.
+    const directResolved = resolveSendChannel('direct', sendChannel);
+    if (!directResolved.ok) {
+      console.warn(`[직접발송] 발송 채널 거절 — company=${companyId} raw=${JSON.stringify(sendChannel)} reason=${directResolved.reason}`);
+      return res.status(400).json({ success: false, error: directResolved.reason, code: 'UNSUPPORTED_SEND_CHANNEL' });
+    }
+    const directChannel = directResolved.channel;
+
+    // ★ 2026-08-17 (Codex 2R high) 메시지 유형도 여기서 확정한다 — 채널 게이트로는 안 걸리는 **별개 축**이다.
+    //   아래 차감이 `msgType`을 그대로 유형으로 넘기는데, 목록 밖 값은 단가표에 없어 `unknownType`으로
+    //   **0원 통과**하고(= 무료 발송) 큐에는 `toQtmsgType`이 LMS로 바꿔 넣는다. 즉 나가긴 나가는데 요금이 0이다.
+    //   (캠페인 경로에만 게이트를 넣고 이 문을 빠뜨린 것이 1차 정정의 누락이었다)
+    const directMsgResolved = resolveChargeMessageType(msgType);
+    if (!directMsgResolved.ok) {
+      console.warn(`[직접발송] 메시지 유형 거절 — company=${companyId} raw=${JSON.stringify(msgType)} reason=${directMsgResolved.reason}`);
+      return res.status(400).json({ success: false, error: directMsgResolved.reason, code: 'UNSUPPORTED_MESSAGE_TYPE' });
+    }
+
     // ★ D143 (2026-05-04, 정식 오픈 D-Day 1일 전) — D142+ 자동 승격 정책 폐지
     //   정책 변경 사유 (Harold님 명시): 사용자가 광고체크 OFF + 본문에 (광고)/무료거부 복붙한
     //   케이스에서 D142+가 본문 깎고 is_ad 강제 승격 → 사용자 의도 무시 → 정합성 위반
@@ -1771,7 +1897,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     // ★ D224+ (2026-05-27) 영업팀장 박성용 신고 fix: 알림톡 흐름 시 검증 대상 컬럼 정정.
     //   옛 D218+ = subject 검증 → 알림톡 흐름에서 subject는 일반 directSubject (사용자 입력 X) = 항상 빈 값 → L/B 시 alimtalkNextSubject 입력했어도 영구 알럴 발생 사고.
     //   진정 fix = 알림톡 L/B 흐름 시 alimtalkNextSubject 검증 + 일반 LMS/MMS 흐름 시 subject 검증 (분기 분리).
-    const isAlimtalkSend = sendChannel === 'alimtalk';
+    const isAlimtalkSend = directChannel === 'alimtalk';
     if (isAlimtalkSend) {
       // ★ 2026-07-27: 전환재발송 검증을 CT(alimtalk-fallback) 단일 기준으로 통일.
       //   L/B = LMS 제목 필수(기존 규칙 유지) + A/B = 대체문안 필수(신규 — 빈 문안이 큐에 들어가던 구멍).
@@ -1926,7 +2052,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     }
 
     // 2. 캠페인 레코드 생성 (원본 템플릿도 저장)
-    const directChannel = sendChannel || 'sms';
+    // (채널 확정은 이 라우트 앞머리에서 끝났다 — 2026-08-17. `directChannel`이 그 결과다.)
 
     // ★ 카카오 활성화 체크 (프론트 우회 방지)
     if (directChannel === 'kakao' || directChannel === 'both') {
@@ -2017,7 +2143,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     const campaignId = campaignResult.rows[0].id;
 
     // ★ 선불 잔액 체크 + 차감
-    const directDeductType = isBrandOnlyChannel(directChannel) ? 'BRAND' : msgType;
+    // 유형은 위 게이트가 확정한 값을 쓴다 — 원본을 다시 읽으면 게이트를 우회한 값이 과금 축이 된다.
+    const directDeductType = isBrandOnlyChannel(directChannel) ? 'BRAND' : directMsgResolved.messageType;
     const directDeduct = await prepaidDeduct(companyId, filteredRecipients.length, directDeductType, campaignId, userId);
     if (!directDeduct.ok) {
       // 캠페인 레코드 롤백

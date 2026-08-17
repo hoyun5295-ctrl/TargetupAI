@@ -9,6 +9,7 @@ import { buildAdMessageFront, buildAdSubjectFront, replaceVarsBySampleCustomer }
 import { highlightVars } from '../utils/highlightVars';
 import MmsImagePreview from './shared/MmsImagePreview';
 import TargetRecipientsModal, { arrayPager } from './TargetRecipientsModal';
+import { AI_MESSAGE_CHANNELS, type AiMessageChannel } from '../utils/campaign-axis';
 
 interface AiCampaignResultPopupProps {
   show: boolean;
@@ -17,8 +18,10 @@ interface AiCampaignResultPopupProps {
   setAiStep: (step: number) => void;
   aiResult: any;
   setAiResult: (result: any) => void;
-  selectedChannel: string;
-  setSelectedChannel: (ch: string) => void;
+  // ★ 2026-08-17 유형 유니온으로 좁힘 — 이 값이 캠페인 `messageType`이 되어 백엔드 차감 축으로 쓰인다.
+  //   `string`으로 두면 목록 밖 값이 들어와도 tsc가 못 잡고, 그 유형은 단가표에 없어 0원으로 통과한다.
+  selectedChannel: AiMessageChannel;
+  setSelectedChannel: (ch: AiMessageChannel) => void;
   selectedAiMsgIdx: number;
   setSelectedAiMsgIdx: (idx: number) => void;
   editingAiMsg: number | null;
@@ -59,11 +62,13 @@ const SUB_AGENT_STEPS = [
   { id: 'schedule', label: '발송 준비', Icon: Calendar, doneMs: 2800 },
 ] as const;
 
-const CHANNEL_OPTIONS = [
-  { key: 'SMS', label: 'SMS', Icon: MessageSquare },
-  { key: 'LMS', label: 'LMS', Icon: FileText },
-  { key: 'MMS', label: 'MMS', Icon: ImageIcon },
-] as const;
+// ★ 2026-08-17 목록의 진실은 CT(`AI_MESSAGE_CHANNELS`)다 — 여기 리터럴을 따로 두면 한쪽만 늘어난다.
+const CHANNEL_ICONS: Record<AiMessageChannel, typeof MessageSquare> = {
+  SMS: MessageSquare,
+  LMS: FileText,
+  MMS: ImageIcon,
+};
+const CHANNEL_OPTIONS = AI_MESSAGE_CHANNELS.map((key) => ({ key, label: key, Icon: CHANNEL_ICONS[key] }));
 
 const VARIABLE_ALIAS_MAP = {
   '이름': ['고객명', '성함', '고객이름'],

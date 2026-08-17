@@ -41,6 +41,94 @@ export function isBrandOnlyChannel(sendChannel: any): boolean {
 }
 
 /**
+ * ★ 발송 채널 축 — **파이프라인마다 실제로 적재할 수 있는 채널** (2026-08-17 신설)
+ *
+ * 차감은 채널을 안 보고 먼저 일어나는데 적재는 채널로 분기한다. 그래서 그 파이프라인이 처리하지 못하는
+ * 채널값이 들어오면 **캠페인 레코드 생성 + 선불 차감 + 발송 0건**으로 끝나고 응답은 성공이 된다.
+ *
+ * ⚠ **전역 목록 하나로는 못 막는다**(Codex 적대검토 critical — 1차 시도의 결함).
+ *   같은 이름의 채널이라도 문마다 처리 능력이 다르기 때문이다. 실측 —
+ *     · `direct`  = `/direct-send`·`/direct-send/commit` — sms·both / kakao·both / alimtalk 적재
+ *     · `campaign`= AI 캠페인 `/:id/send` — sms·both / kakao·both 적재(**알림톡 분기가 없다**)
+ *     · `brand`   = `/brand-send` 전용 — 자체 적재
+ *   전역 목록을 쓰면 `alimtalk` 캠페인이 `campaign` 문을 통과해 차감만 되고, `kakao_brand`가
+ *   `direct` 문을 통과해 BRAND로 차감된 뒤 한 건도 안 나간다.
+ *
+ * ⚠ RCS는 어느 파이프라인에도 **아직 없다**. 게이트웨이 적재 경로가 열리는 시점에 그 파이프라인에만
+ *   등재한다(설계 = `docs/2026-08-17-rcs-integration-design.md`). 미리 넣으면 그 순간 이 구멍이 되살아난다.
+ */
+export const PIPELINE_SEND_CHANNELS = {
+  direct: ['sms', 'both', 'kakao', 'alimtalk'],
+  campaign: ['sms', 'both', 'kakao'],
+  brand: ['kakao_brand'],
+} as const;
+
+export type SendPipeline = keyof typeof PIPELINE_SEND_CHANNELS;
+
+export type SendChannel = (typeof PIPELINE_SEND_CHANNELS)[SendPipeline][number];
+
+/**
+ * 시스템이 아는 채널 전부 = 파이프라인 목록의 합집합. **별도로 나열하지 않는다** —
+ * 두 벌을 두면 한쪽만 늘어나고, 그 순간 "목록엔 있는데 적재는 없는" 채널이 다시 생긴다.
+ */
+export const SEND_CHANNELS: readonly SendChannel[] = Object.freeze([
+  ...new Set(Object.values(PIPELINE_SEND_CHANNELS).flat()),
+]) as readonly SendChannel[];
+
+export type ChannelResolution =
+  | { ok: true; channel: SendChannel }
+  | { ok: false; reason: string };
+
+/**
+ * 발송 채널을 **판정하고 정규화해서 돌려준다.** 차감·캠페인 INSERT·실행 행 생성보다 **앞**에서 부른다.
+ *
+ * ⛔ **불리언 검사로 만들지 마라 — 그것이 1차 시도의 결함이었다**(Codex 적대검토 high).
+ *   검사만 하고 호출부가 원본을 계속 쓰면, `['sms']` 같은 값이 `String()` 강제변환으로 게이트를 통과한 뒤
+ *   적재 분기의 `=== 'sms'`에는 빗나가 차감만 남는다(`[]`는 빈 문자열로 보여 통과하는데 `[] || 'sms'`는
+ *   빈 배열이 truthy라 그대로 흘러간다). **호출부는 반드시 여기서 돌려준 `channel`을 쓴다.**
+ *
+ * 판정 규칙
+ *   · 미지정(`null`·`undefined`·`''`) = `'sms'`로 확정한다 — 기본값을 호출부의 `|| 'sms'`에 맡기지 않는다.
+ *   · 문자열이 아니면 거절한다(배열·객체·숫자·불리언). 강제변환하지 않는다.
+ *   · 공백이 섞인 값도 거절한다 — 적재 분기가 원문을 비교하므로 다듬어 통과시키면 같은 사고가 난다.
+ */
+export function resolveSendChannel(pipeline: SendPipeline, raw: unknown): ChannelResolution {
+  if (raw === null || raw === undefined || raw === '') return { ok: true, channel: 'sms' };
+  if (typeof raw !== 'string') return { ok: false, reason: '발송 채널 형식이 올바르지 않습니다.' };
+  const allowed = PIPELINE_SEND_CHANNELS[pipeline] as readonly string[];
+  if (!allowed.includes(raw)) return { ok: false, reason: '이 발송 경로가 지원하지 않는 발송 채널입니다.' };
+  return { ok: true, channel: raw as SendChannel };
+}
+
+/**
+ * ★ 과금 메시지 유형 축 (2026-08-17 신설)
+ *
+ * 캠페인 발송이 차감에 넘기는 `message_type`이다. **채널과 별개 축**이라 채널 게이트로는 안 걸린다
+ * (Codex 적대검토 high — AI 추천값이 그대로 `messageType`이 되는 경로가 실재했다).
+ *
+ * 막는 사고: 목록 밖 유형은 `MESSAGE_TYPE_PRICE_COLUMN`에 없어 `unknownType`이 되고,
+ * `unit-price.ts`는 그걸 **막지 않고 0원으로 통과**시킨다(의도된 fail-open — 예상 못 한 유형 하나로
+ * 발송이 전부 서는 편이 더 나쁘다는 판단). 그 결과 **요금 0원으로 나가는 발송**이 만들어진다.
+ * ⇒ fail-open을 뒤집지 않고, **입구에서** 유형을 확정한다.
+ */
+export const CHARGEABLE_MESSAGE_TYPES = ['SMS', 'LMS', 'MMS'] as const;
+
+export type ChargeableMessageType = (typeof CHARGEABLE_MESSAGE_TYPES)[number];
+
+export type MessageTypeResolution =
+  | { ok: true; messageType: ChargeableMessageType }
+  | { ok: false; reason: string };
+
+/** 채널 resolver와 같은 계약 — 판정하고 정규화된 값을 돌려준다. 기본값 없음(유형은 필수 입력이다). */
+export function resolveChargeMessageType(raw: unknown): MessageTypeResolution {
+  if (typeof raw !== 'string') return { ok: false, reason: '메시지 유형 형식이 올바르지 않습니다.' };
+  if (!(CHARGEABLE_MESSAGE_TYPES as readonly string[]).includes(raw)) {
+    return { ok: false, reason: '지원하지 않는 메시지 유형입니다.' };
+  }
+  return { ok: true, messageType: raw as ChargeableMessageType };
+}
+
+/**
  * ★ 2026-07-30 환불·정산 축 — 캠페인 하나의 차감이 어느 유형 축으로 갈라져 있는가.
  * 브랜드가 SMSQ(msg_type='F')로 합류하면서, MySQL 실측(fail·pending)을 환불로 되돌릴 때
  * 그 건수가 **어느 차감 원장**(BRAND vs message_type)의 몫인지를 행 단위로 갈라야 한다.

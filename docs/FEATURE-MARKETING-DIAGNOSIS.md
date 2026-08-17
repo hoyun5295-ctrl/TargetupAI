@@ -32,7 +32,9 @@
 ## §3 불변 원칙 (어길 수 없는 것)
 
 ### 3-1. 화면은 게이트가 아니다
-노출·제출·지급 **전부 서버가 `plan_code='FREE'` 정확 일치를 재검사**한다. 프론트는 요금제를 해석하지 않고 `GET /state` 응답의 `eligible`·`grantable`만 소비한다. 화면을 숨기는 것은 UX이고, 막는 것은 서버다.
+노출·제출·지급 **전부 서버가 재검사**한다 — 판정 축은 둘이다: `plan_code='FREE'` 정확 일치 **× 실행 역할**(★v9 — 고객사 관리자 전용).
+프론트는 어느 축도 해석하지 않고 `GET /state` 응답의 `eligible`·`grantable`만 소비한다. 화면을 숨기는 것은 UX이고, 막는 것은 서버다
+(쓰기 endpoint는 `isDiagnosisRunner`로 한 번 더 — 화면을 우회해 직접 호출해도 403 `ADMIN_ONLY`).
 
 ### 3-2. 진단 계산은 AI 호출 0 · 크레딧 차감 0
 문항·추천·리포트 전부 순수 룰(`plan-recommend` + `marketing-diagnosis-report`)이다. `ai_credits_purchased` 불변.
@@ -75,8 +77,8 @@
 | 추천 룰 CT | `utils/plan-recommend.ts` | 컬럼별 허용 op 표 · **v3 분기 스키마 검증(show_when·axis·level·section)** · answers 가시성 검증(비가시 답 거부·선치환 optionalKeys) · `no_match`+`no_match_kind` · 동률 2차 정렬 |
 | 결과 조립 CT | `utils/marketing-diagnosis-report.ts` | V1·V2 조립(definition 축 게이트 유무로 분기 · AI 0) — V2 = 단계 관문·병목 인과 3단·30일 실행·각주 상한 |
 | 문구 원장 CT | `utils/marketing-diagnosis-copy.ts` | **v3 리포트 전 문장 소유**(관찰 틀·단계·칭찬·병목·처방·각주·표지 절) — 문장 수정 = 이 파일만 |
-| 지급 CT | `utils/marketing-diagnosis-grant.ts` | 자격 판정·지급 실행 — **submit과 수동 부여가 공유**(원자성 한 벌) |
-| 데이터 접근 | `utils/marketing-diagnosis-store.ts` | 활성 세트 로더(+검증) · plans 조회 SQL |
+| 지급 CT | `utils/marketing-diagnosis-grant.ts` | 자격 판정·지급 실행 — **submit과 수동 부여가 공유**(원자성 한 벌) · **실행 역할 판정**(`isDiagnosisRunner`·`judgeDiagnosisEligible` — v9) |
+| 데이터 접근 | `utils/marketing-diagnosis-store.ts` | 활성 세트 로더(+검증) · plans 조회 SQL (v9에서 `computeSendingPrefill` 폐지) |
 | 사용 실적 | `utils/monthly-usage.ts` | 월 발송·사용금액 — **대시보드 `/stats`와 산식 단일 소스**(route-local 복사 금지) |
 | 체험 지급 | `utils/basic-trial.ts` | `grantFreeTrial(companyId, days, { client })` — client 주입 시 **내부 전 SQL이 그 client**(풀 고갈 차단) |
 | 만료 강등 | `utils/trial-downgrade-worker.ts` | 술어 상수 공유 + 유료 플랜 강등 금지 가드 + 관찰 plan_id 원자 결합 |
@@ -86,6 +88,7 @@
 ### 4-2. 프론트
 
 `components/marketing-diagnosis/` — `DiagnosisWizard`(문진 1소스 · **v3 분기형**: 커서=문항 key·prune 고정점·섹션 도트+래칫·경계 화면·2단 보기·드래프트) · `DiagnosisModal`(A 셸 · 인증 questions·닫기 확인) · `DiagnosisInviteModal` · `DiagnosisHeroCard` · `DiagnosisReportView`(**라우터** — 스냅샷 v로 분기) · `ReportV1View`(v1 동결) · `ReportV2View`(스토리형) · `diagnosisApi.ts`
+**`utils/diagnosis-branch.ts`(분기 판정 CT — `visiblePath`·`pruneAnswers`. 서버 `visibleQuestions`와 같은 규칙이고 계약 테스트가 실 seed로 대조한다)**
 `pages/DiagnosisPage.tsx`(공개 `/diagnosis`) · `components/admin/DiagnosisAdminPanel.tsx`(신규마케팅진단 — v3 무수정: V2 result가 V1 상위집합)
 
 ### 4-3. DB
@@ -112,7 +115,7 @@
 ## §6 운영 계약
 
 ### 6-1. 노출 규칙 (퍼널 A)
-`GET /state` 한 응답이 화면 판정을 전부 소유한다. 초대 모달 = `eligible && !completedAt && !invitedAt`(표시 즉시 서버 기록 — localStorage 판정 금지), 히어로 = 진단 유도(`eligible && !completedAt`) 또는 체험 D-N(`completedAt && trialExpiresAt > now`), 진단 카드 노출 중에는 BrandVoiceNudgeCard를 `suppress`(소견이 리포트로 흡수된다).
+`GET /state` 한 응답이 화면 판정을 전부 소유하고, `eligible`은 **요금제 × 역할**이다(v9 — 담당자 계정에는 초대·히어로·모달이 아예 없다). 초대 모달 = `eligible && !completedAt && !invitedAt`(표시 즉시 서버 기록 — localStorage 판정 금지), 히어로 = 진단 유도(`eligible && !completedAt`) 또는 체험 D-N(`completedAt && trialExpiresAt > now`), 진단 카드 노출 중에는 BrandVoiceNudgeCard를 `suppress`(소견이 리포트로 흡수된다).
 
 ### 6-2. 7일 보상 문구는 조건부다
 "진단을 끝내면 7일 무료체험이 바로 시작돼요"는 **`grantable === 'available'`일 때만** 노출한다(초대·히어로·문진 상단 3곳). 체험 이력이 있는 회사에 보이면 **거짓 약속**이 된다 — 그 회사는 완주해도 리포트만 저장되고 지급은 없다(상담 CTA로 이어진다).
@@ -149,6 +152,7 @@
 | 2026-08-16 커밋 5~8 | 옛 무료체험 팝업·배너·AI 다듬기 안내 제거 · 노출·위저드·리포트·퍼널 B 페이지·관리 메뉴 · `JourneyModalShell` dismiss opt-out 신설 |
 | 2026-08-16 개통 | DDL 4테이블 → 이미지 40종 실렌더 교체 → seed v1 → **v2 전환**(규모 축 재도입) → 7일 보상 문구·줄바꿈·대시 제거·관리 답변 라벨 표기 |
 | 2026-08-16 개통 후 정정 | ①관리 상태 전이 `42P08`(파라미터 캐스팅 불일치)로 **전건 실패 → 정정·실측 통과**(new→attempted 확인) ②관리자 토스트가 정산 탭 안에서만 그려져 **다른 탭에서 성공·실패가 안 보이던 것** → 탭 밖으로 이동 ③문구 B2B 정정("우리 매장"→"우리 브랜드") ④상태 전이 4xx 거절 사유를 서버 로그에 남기도록 보강 |
+| **2026-08-17 배포(v6~v9 + 정정 3건)** | 킥·장 넘김·읽힘 재설계·실행 자격/선치환 정정을 **한 배포로 반영**(seed·SQL·DDL 0). 함께 닫은 것 = ①퍼널 A 문진 진행 불가(가시성 판정 두 벌 — §9) ②대시보드 히어로 시인성(라이트 표면에 알파 배경) ③화면 토큰 표준 이탈 전수 정정. 신설 게이트 3종 = 변형 도달 가능성(seed 대조) · 분기 판정 대조(프론트 CT ↔ 서버) · **화면 토큰 불변식 4규칙**(`ui-token-invariants.test.ts` — 경위는 LESSONS_FRONTEND 상단) |
 | **2026-08-16 v3 전면 개편(코드 완료)** | Harold 지적("한줄로 이용 진단이지 마케팅 진단이 아니다") → **브레인스토밍 5역할 + 교차 반박 + 회의론자 최종 검증 24건**으로 수렴 → 분기형 문진(6축 게이트+심화 · 풀 27문항·체감 13~20 · 의향 문항 4종 폐기) · 스토리형 리포트 V2(표지 2행·들은 것·칭찬·판정 표·병목 인과 3단·30일 실행·견적 강등) · 홍보 위치 계약(각주 ≤2+견적 1·삭제 테스트) · A 실측 선치환 · 계약 테스트 21종. **시점 근거·seed 원문·검증 시나리오 = [v3 설계서](2026-08-16-marketing-diagnosis-v3-design.md)** |
 
 상세 근거·취사 내역은 설계서 §8 진행 원장이 소유한다.
@@ -205,7 +209,7 @@ seed 원문 = `scripts/sql/2026-08-16-diagnosis-seed-v4.sql`(계약 테스트가
 ②**전문 툴 사용자 서사 분화**(CRM·마케팅 툴·ERP·상담 툴 칭찬 4종 + "도구가 없어서"가 아니라 "데이터가 발송에 안 이어져서" 프레임 처방 5종 + 견적 한 줄)
 ③**상담 툴 수용**. **배포·seed 활성 완료(2026-08-16 · `v5 | t | 30` 실측 확인).**
 
-**v6 — 병목 채움 킥 (★2026-08-16 구현 완료 · 배포 대기 · seed·SQL·DDL 0)**
+**v6 — 병목 채움 킥 (★2026-08-16 · 배포완료 2026-08-17 · seed·SQL·DDL 0)**
 Harold 지적("한줄로를 쓰면 뭐가 편해지는지가 안 나온다") → 병목 카드에 **인과 4박자째**를 붙였다.
 설계 근거·문구 집필 규약 = [v6 설계서](2026-08-16-marketing-diagnosis-v6-kick-design.md).
 
@@ -224,7 +228,7 @@ Harold 지적("한줄로를 쓰면 뭐가 편해지는지가 안 나온다") →
 - **설계서와 달라진 것** — 설계서가 지정한 변형 5종(`unified_tool:erp`·`unified_tool:excel` / `prod_refit:yes`·`prod_leadtime:week`·`prod_leadtime:varies`)은 **현행 seed에서 도달 불가**라 넣지 않았다. 킥은 병목(level ≤1)에만 붙는데 `unified`(list level 3)·`self`/`outsource`(production level 2)는 병목이 아니다. 도달 가능한 분기(`locked_tool`·`inflow_capture`·`copy_how`)로 대체했다. 같은 이유로 검증 K-3은 성립하지 않는다.
 - 신설 계약 테스트 = **변형 키 도달 가능성**(seed 원문 대조 · `marketing-diagnosis-seed-v3.test.ts`) + 킥 위치 계약·변형 분화·삭제 테스트(`marketing-diagnosis-v3.test.ts`).
 
-**v7 — 장 넘김 리포트 (★2026-08-16 구현 완료 · 배포 대기 · 프론트 전용)**
+**v7 — 장 넘김 리포트 (★2026-08-16 · 배포완료 2026-08-17 · 프론트 전용)**
 Harold 지적(50% 축소 스크린샷에도 미리보기가 다 안 들어감) → 한 화면에 서사가 하나도 안 담기던 문제. 길이가 아니라 **마디가 없는** 문제였다.
 
 - 장 구성 = ①지금 어디에 계신가(표지·단계·들은 것) ②잘하는 것과 걸리는 것(칭찬·짚임·축별 판정) ③아쉬운 곳 셋(병목 4박자) ④다음 30일(실행 순서·실적·예시·견적·CTA).
@@ -234,7 +238,7 @@ Harold 지적(50% 축소 스크린샷에도 미리보기가 다 안 들어감) �
 - **계약** — 장 넘김은 §9의 「부분 공개·가림 장치 금지」에 걸리지 않는다. 그 계약이 막는 것은 *폼을 내야 열리는 게이트*이고, 장 넘김은 클릭만으로 전부 열린다. 흐림·자물쇠·"더 보려면 가입" 0.
 - 리드 폼은 **라우터(`DiagnosisReportView`)가 어느 스냅샷 경로에서도 정확히 한 번** 렌더한다(v2는 마지막 장 안, 그 밖은 리포트 아래). 호출부가 분기하면 구 스냅샷에서 폼이 사라진다.
 
-**v8 — 읽힘 재설계 (★2026-08-16 구현 완료 · 배포 대기)**
+**v8 — 읽힘 재설계 (★2026-08-16 · 배포완료 2026-08-17)**
 Harold 지적("문서가 잘 안 읽힌다 · 임팩트가 없다 — 한줄로가 도와줄 수 있는 걸 빼고도"). 원인은 길이가 아니라 **위계 부재**였다.
 블록 6개가 전부 같은 그릇(같은 테두리·라운드·12px 회색 라벨)이고, 타이포 층이 표지(28px)와 본문(13~14px) 둘뿐이며, 768px 폭에 국문 14px이라 한 줄이 60~70자였다.
 
@@ -249,7 +253,7 @@ Harold 지적("문서가 잘 안 읽힌다 · 임팩트가 없다 — 한줄로�
   **주어 「한줄로」를 문장에서 뺐다** — 화면 라벨이 소유한다. 그 결과 **서버가 만드는 리포트 문장 전체에 자사명이 0**이 되어 삭제 테스트가 구조로 보장된다.
 - 구 스냅샷 호환: v6 배포분의 문자열 `fill`은 화면이 첫 문장/나머지로 갈라 흡수한다. `key`·`value`·`tally` 부재도 각각 폴백한다.
 
-**v9 — 실행 자격·선치환 정정 (★2026-08-17 Harold 확정 · 배포 대기)**
+**v9 — 실행 자격·선치환 정정 (★2026-08-17 Harold 확정 · 배포완료)**
 
 - **진단은 고객사 관리자(`company_admin`) 전용이 됐다.** 판정 = `judgeDiagnosisEligible({ planCode, userType })`(grant CT 한 벌)로 `/state`의 `eligible`이 요금제 × 역할을 함께 본다. `/questions`·`/submit`·`/invited`는 `isDiagnosisRunner`로 재검사해 **403 `ADMIN_ONLY`**(화면을 우회해 직접 호출해도 막힌다). `/report`·`/consult`는 회사 상태를 바꾸지 않는 읽기 축이라 막지 않는다.
   이유 = 완주가 회사당 1회이고 되돌릴 수 없으며(§3-3), 7일 체험 지급이 회사 계약 상태를 바꾼다. 담당자가 답한 진단이 회사의 유일한 기록으로 굳고 체험 1회를 소진하는 것을 막는다.

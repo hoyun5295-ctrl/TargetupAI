@@ -137,7 +137,8 @@ export default function RcsTemplateFormModal({ template, onClose, onSuccess }: P
             <h2 className="text-lg font-bold text-gray-900">
               {isEdit ? 'RCS 템플릿 수정' : 'RCS 템플릿 등록 요청'}
             </h2>
-            <p className="text-xs text-gray-500 mt-0.5">RCS 미지원 단말은 SMS/LMS로 자동 폴백됩니다</p>
+            {/* ★ 2026-08-17 "자동 폴백" 문구 삭제 — 대체 발송은 아직 구현돼 있지 않다. */}
+            <p className="text-xs text-gray-500 mt-0.5">등록 후 검수를 거쳐 사용할 수 있습니다</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
         </div>
@@ -253,11 +254,9 @@ export default function RcsTemplateFormModal({ template, onClose, onSuccess }: P
             ))}
           </div>
 
-          {/* 대체발송 안내 */}
-          <div className="bg-purple-50 rounded-lg p-3">
-            <p className="text-xs font-medium text-purple-700 mb-1">📱 대체발송 안내</p>
-            <p className="text-xs text-purple-600">RCS 미지원 단말(아이폰, 채팅+ 미활성화)에는 SMS/LMS로 자동 대체 발송됩니다.</p>
-          </div>
+          {/* ★ 2026-08-17 대체발송 안내 블록 삭제 — 두 문장 모두 사실이 아니었다.
+              ①대체 발송 기능이 아직 없다 ②아이폰은 통합 RCS(iOS 26+)로 수신 가능해졌다.
+              대체 발송은 게이트웨이 축과 함께 열린다 — docs/2026-08-17-rcs-integration-design.md §3-5 */}
         </div>
 
         {/* Footer */}

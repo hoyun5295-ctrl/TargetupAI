@@ -2,7 +2,7 @@
  * ★ D96: 직접발송 패널 — Dashboard.tsx에서 분리
  * ★ D137 (2026-04-24): 디자인 전면 리프트 (Claude Design 시안 기반)
  *
- *   - 좌측 520px: 메시지 에디터 (SMS/RCS/알림톡 채널 선택)
+ *   - 좌측 520px: 메시지 에디터 (문자/알림톡 채널)
  *   - 우측: 수신자 목록 (직접입력/파일등록/주소록)
  *   - 기능/state/props/유틸 호출은 100% 기존 유지
  *   - 디자인 토큰: packages/frontend/src/styles/direct-send.css (ds-* 클래스)
@@ -58,8 +58,8 @@ import '../styles/direct-send.css';
 
 export interface DirectSendPanelProps {
   // 메시지 state
-  directSendChannel: 'sms' | 'rcs' | 'kakao_alimtalk';
-  setDirectSendChannel: (ch: 'sms' | 'rcs' | 'kakao_alimtalk') => void;
+  directSendChannel: 'sms' | 'kakao_alimtalk';
+  setDirectSendChannel: (ch: 'sms' | 'kakao_alimtalk') => void;
   directMsgType: 'SMS' | 'LMS' | 'MMS';
   setDirectMsgType: (t: 'SMS' | 'LMS' | 'MMS') => void;
   directSubject: string;
@@ -111,7 +111,7 @@ export interface DirectSendPanelProps {
   // ★ 2026-07-04 미가입 보조기능 잠금 통일 — 스팸필터/AI 다듬기 클릭 시 요금제 업그레이드 모달(PlanUpgradeModal)
   onLockedFeature: (feature: string, requiredPlan: string) => void;
 
-  // 카카오 (알림톡 전용 — SMS/RCS는 건드리지 않음)
+  // 카카오 (알림톡 전용 — 문자는 건드리지 않음)
   kakaoTemplates: any[];
   kakaoSelectedTemplate: any;
   setKakaoSelectedTemplate: (t: any) => void;
@@ -130,11 +130,6 @@ export interface DirectSendPanelProps {
   alimtalkNextSubject?: string;
   setAlimtalkNextSubject?: (v: string) => void;
   customerFieldOptions?: { key: string; label: string }[];
-
-  // RCS
-  rcsTemplates: any[];
-  rcsSelectedTemplate: any;
-  setRcsSelectedTemplate: (t: any) => void;
 
   // 미리보기/특수문자/보관함
   setShowDirectPreview: (b: boolean) => void;
@@ -211,7 +206,6 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     alimtalkNextSubject = '',
     setAlimtalkNextSubject,
     customerFieldOptions = [],
-    rcsTemplates, rcsSelectedTemplate, setRcsSelectedTemplate,
     setShowDirectPreview, setShowSpecialChars, setShowTemplateBox,
     setShowTemplateSave, setTemplateSaveName, loadTemplates,
     setShowAddressBook, setAddressGroups,
@@ -627,10 +621,12 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
           {/* ====== 좌측: 메시지 에디터 ====== */}
           <section className="ds-section">
 
-            {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시 — 문자/RCS 채널 탭 자체 제거.
-                직접발송 = 문자(SMS/LMS/MMS) 단일 모드. RCS는 "곧 오픈 예정" 상태라 진입 동선 별도 운영.
+            {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시 — 채널 탭 자체 제거.
+                직접발송 = 문자(SMS/LMS/MMS) 단일 모드.
                 알림톡은 헤더의 카카오 노란색 '알림톡 발송' 버튼으로 진입 → AlimtalkSendModal 풀 화면.
-                directSendChannel state는 'sms' 고정 (mount 시 Dashboard.onDirectSend가 강제 reset). 하위 RCS 분기 코드는 dead. */}
+                directSendChannel state는 'sms' 고정 (mount 시 Dashboard.onDirectSend가 강제 reset).
+                ★ 2026-08-17 죽어 있던 RCS 분기 제거 — 남겨 두면 그 state를 재사용하는 순간
+                  차감만 되고 적재는 0건인 경로가 살아난다(백엔드 화이트리스트로도 함께 막았다). */}
 
             {/* === SMS 채널 === */}
             {directSendChannel === 'sms' && (
@@ -1041,54 +1037,10 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
               </>
             )}
 
-            {/* === RCS 채널 === */}
-            {directSendChannel === 'rcs' && (
-              <>
-                <div className="ds-channel-card ds-channel-card--purple">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Smartphone size={16} strokeWidth={1.75} className="text-purple-700" />
-                    <span className="text-[14px] font-semibold text-purple-900">RCS (템플릿 기반)</span>
-                  </div>
-                  {rcsTemplates.length === 0 ? (
-                    <div className="text-center py-14">
-                      <div className="inline-flex w-12 h-12 rounded-full bg-purple-100 items-center justify-center mb-3">
-                        <Smartphone size={20} strokeWidth={1.75} className="text-purple-500" />
-                      </div>
-                      <p className="text-[13.5px] text-stone-600 font-medium">등록된 RCS 템플릿이 없습니다</p>
-                      <p className="text-[12px] text-stone-400 mt-1">카카오&RCS → RCS 템플릿에서 등록해주세요</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2 max-h-[320px] overflow-y-auto">
-                      {rcsTemplates.map((t: any) => (
-                        <div
-                          key={t.id}
-                          onClick={() => setRcsSelectedTemplate(t)}
-                          className={`p-3 border rounded-[10px] cursor-pointer transition-colors ${rcsSelectedTemplate?.id === t.id ? 'border-purple-500 bg-purple-50' : 'border-stone-200 hover:border-purple-300 bg-white'}`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-[13.5px] font-medium text-stone-800">{t.template_name}</span>
-                            <span className="text-[11px] px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">{t.message_type}</span>
-                          </div>
-                          <p className="text-[12px] text-stone-500 mt-1 line-clamp-2">{t.content}</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="text-[11.5px] text-stone-400 mt-3">RCS 미지원 단말은 SMS/LMS로 자동 폴백됩니다</div>
-                </div>
-
-                <button
-                  type="button"
-                  className="ds-btn-primary ds-btn-primary--purple ds-t"
-                  onClick={() => setToast({ show: true, type: 'error', message: 'RCS 발송 기능은 곧 오픈 예정입니다' })}
-                  disabled={!rcsSelectedTemplate}
-                >
-                  <Send size={17} strokeWidth={2} />
-                  <span>{!rcsSelectedTemplate ? '템플릿을 선택해주세요' : 'RCS 전송하기'}</span>
-                </button>
-                <p className="text-[11.5px] text-center text-purple-400 -mt-1">RCS 발송 기능은 곧 오픈 예정입니다</p>
-              </>
-            )}
+            {/* ★ 2026-08-17 RCS 채널 블록 제거 — 진입 동선이 없는 죽은 분기였고, 그 안의
+                "미지원 단말은 SMS/LMS로 자동 폴백" 안내는 실제로 그렇게 동작한 적이 없다(중계 규격에
+                대체문자 필드 자체가 없다). 채널·개통·대체발송을 함께 여는 설계 =
+                docs/2026-08-17-rcs-integration-design.md */}
 
             {/* === 알림톡 채널 === */}
             {directSendChannel === 'kakao_alimtalk' && (
@@ -1140,7 +1092,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
 
             {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: 알림톡 채널일 때만 변수 매칭 박스 노출.
                 Harold님 명시 "우측에 고객데이터 올렸을때 매칭되는 화면" + ALIMTALK-DESIGN.md §6-3-D 정합.
-                SMS/RCS는 영향 0 — 분기 조건으로 알림톡만 표시. */}
+                문자는 영향 0 — 분기 조건으로 알림톡만 표시. */}
             {directSendChannel === 'kakao_alimtalk' && (
               <AlimtalkVariableMappingPanel
                 selectedTemplate={kakaoSelectedTemplate}
@@ -1501,9 +1453,6 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
                     <p className="text-xs text-amber-700">먼저 알림톡 템플릿을 선택해주세요.</p>
                   </div>
-                )}
-                {directSendChannel === 'rcs' && (
-                  <p className="text-xs text-stone-400 py-2">RCS는 수신번호만 매핑하면 됩니다.</p>
                 )}
                 {Object.values(directColumnMapping).some(v => v) && (
                   <div className="mt-3 flex flex-wrap gap-1">

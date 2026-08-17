@@ -237,7 +237,8 @@ export default function KakaoRcsPage() {
               <div className="text-center py-16">
                 <div className="text-4xl mb-3">📱</div>
                 <p className="text-gray-500">등록된 RCS 템플릿이 없습니다</p>
-                <p className="text-sm text-gray-400 mt-1">RCS 미지원 단말은 SMS로 자동 폴백됩니다</p>
+                {/* ★ 2026-08-17 "미지원 단말 SMS 자동 폴백" 문구 삭제 — 그렇게 동작한 적이 없다. */}
+                <p className="text-sm text-gray-400 mt-1">RCS 발송은 준비 중입니다</p>
               </div>
             ) : (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">

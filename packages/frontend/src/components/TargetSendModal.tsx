@@ -26,8 +26,8 @@ interface TargetSendModalProps {
   setTargetRecipients: (r: any[]) => void;
 
   // 채널/메시지 타입
-  targetSendChannel: 'sms' | 'rcs' | 'kakao_alimtalk';
-  setTargetSendChannel: (ch: 'sms' | 'rcs' | 'kakao_alimtalk') => void;
+  targetSendChannel: 'sms' | 'kakao_alimtalk';
+  setTargetSendChannel: (ch: 'sms' | 'kakao_alimtalk') => void;
   targetMsgType: 'SMS' | 'LMS' | 'MMS';
   setTargetMsgType: (t: 'SMS' | 'LMS' | 'MMS') => void;
 
@@ -37,7 +37,7 @@ interface TargetSendModalProps {
   targetMessage: string;
   setTargetMessage: (m: string) => void;
 
-  // 카카오 (알림톡 전용 — SMS/RCS 무관)
+  // 카카오 (알림톡 전용 — 문자 무관)
   kakaoMessage: string;
   setKakaoMessage: (m: string) => void;
   kakaoEnabled: boolean;
@@ -422,10 +422,11 @@ export default function TargetSendModal({
         <div className="px-4 md:px-6 py-4 md:py-5 flex flex-col md:flex-row gap-4 md:gap-5">
           {/* ========== 좌측: 메시지 작성 ========== */}
           <div className="w-full md:w-[400px] md:shrink-0">
-            {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시 — 문자/RCS 채널 탭 자체 제거.
-                직접타겟발송 = 문자(SMS/LMS/MMS) 단일 모드. RCS는 "곧 오픈 예정" 상태로 채널 탭 비노출.
+            {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시 — 채널 탭 자체 제거.
+                직접타겟발송 = 문자(SMS/LMS/MMS) 단일 모드.
                 알림톡은 수신번호 검색 옆 카카오 노란색 '알림톡 발송' 버튼으로 진입 → AlimtalkSendModal 풀 화면.
-                targetSendChannel state는 'sms' 고정. 하위 RCS 분기 코드는 dead. */}
+                targetSendChannel state는 'sms' 고정.
+                ★ 2026-08-17 죽어 있던 RCS 분기 제거(직접발송과 같은 축). */}
 
             {/* === SMS 채널 === */}
             {targetSendChannel === 'sms' && (<>
@@ -718,31 +719,8 @@ export default function TargetSendModal({
             </div>
             </>)}
 
-            {/* === RCS 채널 (템플릿 기반) === */}
-            {targetSendChannel === 'rcs' && (
-              <div className="border-2 border-purple-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-                <div className="p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="text-lg">📱</span>
-                    <span className="text-sm font-semibold text-purple-800">RCS (템플릿 기반)</span>
-                  </div>
-                  <div className="text-center py-12">
-                    <div className="text-4xl mb-3">📱</div>
-                    <p className="text-sm text-gray-500 font-medium">등록된 RCS 템플릿이 없습니다</p>
-                    <p className="text-xs text-gray-400 mt-1">카카오&RCS → RCS 템플릿에서 등록해주세요</p>
-                  </div>
-                  <div className="text-xs text-gray-400 mt-2">
-                    RCS 미지원 단말은 SMS/LMS로 자동 폴백됩니다
-                  </div>
-                </div>
-                <div className="px-3 py-2 border-t">
-                  <button disabled className="w-full py-2.5 rounded-xl font-bold text-base bg-gray-300 text-gray-500 cursor-not-allowed">
-                    템플릿을 선택해주세요
-                  </button>
-                  <p className="text-xs text-center text-purple-400 mt-1.5">RCS 발송 기능은 곧 오픈 예정입니다</p>
-                </div>
-              </div>
-            )}
+            {/* ★ 2026-08-17 RCS 채널 블록 제거 — 직접발송과 같은 죽은 분기였다.
+                "미지원 단말은 SMS/LMS로 자동 폴백" 안내도 함께 내렸다(그렇게 동작한 적이 없다). */}
 
             {/* === 카카오 알림톡 채널 (D130: AlimtalkChannelPanel 공용) === */}
             {targetSendChannel === 'kakao_alimtalk' && (
@@ -802,7 +780,7 @@ export default function TargetSendModal({
           {/* ========== 우측: 수신자 목록 ========== */}
           <div className="flex-1 flex flex-col">
             {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: 알림톡 채널일 때만 변수 매칭 박스 노출.
-                직접타겟발송도 직접발송과 동일 UX. SMS/RCS 채널 영향 0. */}
+                직접타겟발송도 직접발송과 동일 UX. 문자 채널 영향 0. */}
             {targetSendChannel === 'kakao_alimtalk' && (
               <div className="mb-3">
                 <AlimtalkVariableMappingPanel
