@@ -243,8 +243,14 @@ router.get('/campaigns', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
-    const { from, to, channel, page = 1, limit = 20, fromDate, toDate } = req.query;
+    const { from, to, channel, page = 1, limit = 20, fromDate, toDate, scope } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
+
+    // ★ 2026-08-17 예약내역 조회 축 — `scope=scheduled`면 **기간 필터를 걸지 않는다.**
+    //   예약은 아직 안 나간 건이라 개수가 유한하고, 기간으로 자르면 "예약해 뒀는데 목록에 없는" 상태가 된다
+    //   (실측: 기본 기간이 오늘까지라 내일 예약분이 안 보였고, 사용자는 발송 실패로 읽었다).
+    //   ⚠ 선택 파라미터다 — 안 보내면 아래 기간 필터가 그대로 돌아 기존 호출은 1비트도 안 바뀐다.
+    const scheduledScope = String(scope || '') === 'scheduled';
 
     const userId = req.user?.userId;
     const userType = req.user?.userType;
@@ -271,23 +277,28 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     //   정산이 발송일 기준이므로 4/30 등록 + 5/7 예약 캠페인은 5월 결과에 표시되어야 함
     // ★ D227+-3 (2026-05-28 영업팀장 박성용 신고 fix): from/to/fromDate/toDate 모두 누락 시 default 7일 한정
     //   주인님 명시 = "일주일만 보여주고 결과 제대로" → 7일 default + PG 인덱스 영역 양쪽 적용
-    let effectiveFromDate = fromDate ? String(fromDate) : undefined;
-    let effectiveToDate = toDate ? String(toDate) : undefined;
-    const effectiveYearMonth = from ? String(from) : undefined;
-    if (!effectiveFromDate && !effectiveToDate && !effectiveYearMonth) {
-      const today = new Date();
-      const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-      effectiveFromDate = sevenDaysAgo.toISOString().split('T')[0];
-      effectiveToDate = today.toISOString().split('T')[0];
+    if (scheduledScope) {
+      // 예약 대기분 전량. 기간을 안 걸므로 언제 예약했든·언제 나가든 다 보인다.
+      whereClause += ` AND status = 'scheduled'`;
+    } else {
+      let effectiveFromDate = fromDate ? String(fromDate) : undefined;
+      let effectiveToDate = toDate ? String(toDate) : undefined;
+      const effectiveYearMonth = from ? String(from) : undefined;
+      if (!effectiveFromDate && !effectiveToDate && !effectiveYearMonth) {
+        const today = new Date();
+        const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+        effectiveFromDate = sevenDaysAgo.toISOString().split('T')[0];
+        effectiveToDate = today.toISOString().split('T')[0];
+      }
+      const campDr = buildPeriodFilter('COALESCE(scheduled_at, sent_at)', {
+        fromDate: effectiveFromDate,
+        toDate: effectiveToDate,
+        yearMonth: (!effectiveFromDate || !effectiveToDate) ? effectiveYearMonth : undefined,
+      }, paramIndex);
+      whereClause += campDr.sql;
+      params.push(...campDr.params);
+      paramIndex = campDr.nextIndex;
     }
-    const campDr = buildPeriodFilter('COALESCE(scheduled_at, sent_at)', {
-      fromDate: effectiveFromDate,
-      toDate: effectiveToDate,
-      yearMonth: (!effectiveFromDate || !effectiveToDate) ? effectiveYearMonth : undefined,
-    }, paramIndex);
-    whereClause += campDr.sql;
-    params.push(...campDr.params);
-    paramIndex = campDr.nextIndex;
 
     if (channel && channel !== 'all') {
       whereClause += ` AND message_type = $${paramIndex++}`;

@@ -318,6 +318,10 @@ export default function AiOperatorPage() {
     unsubscribeCount?: number;
     message: string;
     suggestedName: string;
+    // ★ 2026-08-17 예약 여부·예정 시각을 결과에 실는다. 전에는 이 값이 없어서 예약이든 즉시든
+    //   화면이 똑같이 "발송 처리 완료 · 발송 성공 0건"을 띄웠고, 사용자는 **나갔는데 실패했다**고 읽었다
+    //   (실측: 기본 모드가 AI 추천 예약이라 승인만 하면 예약인데 그 사실이 화면 어디에도 없었다).
+    scheduledAt: string | null;
   } | null>(null);
   // ★ D170+ (Harold 명시 2026-05-19): 발송 시점 안전장치 구현
   //   'aiRecommended' = AI 추천 시점 그대로 예약 발송 (미래 시점이면)
@@ -650,6 +654,8 @@ export default function AiOperatorPage() {
         unsubscribeCount: sendData.unsubscribeCount || 0,
         message: sendData.message || '',
         suggestedName,
+        // 예약 여부는 요청 본문이 이미 알고 있다 — 서버 응답을 기다릴 필요가 없다.
+        scheduledAt: sendBody.scheduled ? (sendBody.scheduledAt as string | null) ?? null : null,
       });
     } catch (err) {
       setSendError(err instanceof Error ? err.message : '발송 오류가 발생했습니다.');
@@ -789,7 +795,21 @@ export default function AiOperatorPage() {
         return;
       }
 
-      await performDirectSend(sendBody, suggestedName);
+      // ★ 2026-08-17 예약도 확인을 받는다. 기본 모드가 AI 추천 예약이라 **아무것도 안 고르고 승인하면 예약**인데,
+      //   그 사실이 승인 전에도 후에도 화면에 없어서 사용자는 지금 나간 줄 알았다(실측: 내일 오후 2시로 잡힘).
+      //   즉시 발송은 회수 불가라 경고이고, 예약은 회수 가능하므로 정보 안내다 — 모드를 달리한다.
+      const scheduledLabel = scheduledAt
+        ? new Date(scheduledAt).toLocaleString('ko-KR', {
+            year: 'numeric', month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit',
+          })
+        : '';
+      setConfirm({
+        mode: 'info',
+        title: '예약 발송 — 지금 나가지 않습니다',
+        description: `${recipients.length.toLocaleString()}명에게 ${scheduledLabel}에 발송됩니다.\n지금은 나가지 않으며, 그전까지 예약내역에서 취소할 수 있습니다.`,
+        confirmLabel: '예약하기',
+        onConfirm: () => performDirectSend(sendBody, suggestedName),
+      });
     } catch (err) {
       setSendError(err instanceof Error ? err.message : '발송 오류가 발생했습니다.');
     } finally {
@@ -1774,27 +1794,46 @@ export default function AiOperatorPage() {
                 </div>
               </div>
 
+              {/* ★ 2026-08-17 예약과 즉시를 갈라서 말한다.
+                  예약인데 "발송 처리 완료 · 발송 성공 0건"을 띄우면 사용자는 나갔는데 실패한 것으로 읽는다.
+                  예약은 아직 안 나간 것이므로 성공·실패 지표 자체를 그리지 않고 **언제 나가는지**를 말한다. */}
               <div className="text-center mb-6">
-                <p className="text-[10px] font-semibold tracking-[0.3em] uppercase text-emerald-300 mb-2">Campaign Dispatched</p>
-                <h3 className="text-2xl font-bold text-white mb-1.5">발송 처리 완료</h3>
+                <p className="text-[10px] font-semibold tracking-[0.3em] uppercase text-emerald-300 mb-2">
+                  {sendResult.scheduledAt ? 'Campaign Scheduled' : 'Campaign Dispatched'}
+                </p>
+                <h3 className="text-2xl font-bold text-white mb-1.5">
+                  {sendResult.scheduledAt ? '예약 완료' : '발송 처리 완료'}
+                </h3>
                 <p className="text-sm text-white/70 truncate" title={sendResult.suggestedName}>{sendResult.suggestedName}</p>
               </div>
 
-              {/* 결과 숫자 */}
-              <div className="grid grid-cols-2 gap-3 mb-6">
-                <div className="p-4 rounded-xl bg-white/5 border border-white/10 text-center">
-                  <p className="text-[10px] font-semibold tracking-wider uppercase text-emerald-300 mb-1.5">발송 성공</p>
-                  <p className="text-2xl font-bold text-white tabular-nums">{sendResult.sentCount.toLocaleString()}</p>
-                  <p className="text-[11px] text-white/40 mt-0.5">건</p>
-                </div>
-                <div className="p-4 rounded-xl bg-white/5 border border-white/10 text-center">
-                  <p className="text-[10px] font-semibold tracking-wider uppercase text-white/40 mb-1.5">발송 실패</p>
-                  <p className={`text-2xl font-bold tabular-nums ${sendResult.failCount > 0 ? 'text-rose-300' : 'text-white/30'}`}>
-                    {sendResult.failCount.toLocaleString()}
+              {sendResult.scheduledAt ? (
+                <div className="mb-6 p-4 rounded-xl bg-violet-500/10 border border-violet-400/30 text-center">
+                  <p className="text-[10px] font-semibold tracking-wider uppercase text-violet-300 mb-1.5">발송 예정</p>
+                  <p className="text-xl font-bold text-white">
+                    {new Date(sendResult.scheduledAt).toLocaleString('ko-KR', {
+                      year: 'numeric', month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit',
+                    })}
                   </p>
-                  <p className="text-[11px] text-white/40 mt-0.5">건 {sendResult.failCount > 0 ? '· 자동 환불' : ''}</p>
+                  <p className="text-[11px] text-white/55 mt-1.5">지금은 나가지 않습니다 · 예약내역에서 확인·취소할 수 있습니다</p>
                 </div>
-              </div>
+              ) : (
+                /* 결과 숫자 — 즉시 발송일 때만 */
+                <div className="grid grid-cols-2 gap-3 mb-6">
+                  <div className="p-4 rounded-xl bg-white/5 border border-white/10 text-center">
+                    <p className="text-[10px] font-semibold tracking-wider uppercase text-emerald-300 mb-1.5">발송 성공</p>
+                    <p className="text-2xl font-bold text-white tabular-nums">{sendResult.sentCount.toLocaleString()}</p>
+                    <p className="text-[11px] text-white/40 mt-0.5">건</p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-white/5 border border-white/10 text-center">
+                    <p className="text-[10px] font-semibold tracking-wider uppercase text-white/40 mb-1.5">발송 실패</p>
+                    <p className={`text-2xl font-bold tabular-nums ${sendResult.failCount > 0 ? 'text-rose-300' : 'text-white/30'}`}>
+                      {sendResult.failCount.toLocaleString()}
+                    </p>
+                    <p className="text-[11px] text-white/40 mt-0.5">건 {sendResult.failCount > 0 ? '· 자동 환불' : ''}</p>
+                  </div>
+                </div>
+              )}
 
               {sendResult.message && (
                 <div className="mb-5 p-3 rounded-lg bg-white/[0.03] border border-white/10">

@@ -46,7 +46,13 @@ function MessageCell({ content, maxWidth, onShowDetail }: { content: string; max
 }
 
 export default function ResultsModal({ onClose, token, customerDbEnabled, isSubscriptionLocked, onFeatureLocked, onSubscriptionLocked }: ResultsModalProps) {
-  const [activeTab, setActiveTab] = useState<'summary' | 'test'>('summary');
+  // ★ 2026-08-17 탭 3분할 — 전송결과 / 예약내역 / 테스트발송내역.
+  //   전에는 예약분이 전송결과 목록에 섞여 있었고 그 목록은 **기간 필터**를 타서,
+  //   기본 기간이 오늘까지인 탓에 내일 예약분이 안 보였다(사용자는 발송 실패로 읽었다 — 실측).
+  const [activeTab, setActiveTab] = useState<'summary' | 'scheduled' | 'test'>('summary');
+  // 예약내역은 **기간 없이 전량**이라 목록 상태를 따로 둔다(전송결과 목록과 섞으면 기간 필터를 다시 타게 된다).
+  const [scheduledCampaigns, setScheduledCampaigns] = useState<any[]>([]);
+  const [scheduledLoading, setScheduledLoading] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [testStats, setTestStats] = useState<any>(null);
   const [testList, setTestList] = useState<any[]>([]);
@@ -140,6 +146,21 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
       console.error('결과 조회 에러:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ★ 2026-08-17 예약내역 — `scope=scheduled`는 서버가 기간 필터를 아예 걸지 않는다.
+  //   기간 UI도 이 탭에는 없다: 예약은 "아직 안 나간 것"이라 유한하고, 잘라 보여줄 이유가 없다.
+  const fetchScheduled = async () => {
+    setScheduledLoading(true);
+    try {
+      const res = await fetch('/api/v1/results/campaigns?scope=scheduled&limit=2000', { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      setScheduledCampaigns(data.campaigns || []);
+    } catch (error) {
+      console.error('예약내역 조회 에러:', error);
+    } finally {
+      setScheduledLoading(false);
     }
   };
 
@@ -254,14 +275,16 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
   // ★ D123 P6: 인라인 제거 → formatPhoneNumber 컨트롤타워 사용 (02 지역번호, 대표번호, 050X 전부 정확 처리)
   const formatPhone = (phone: string) => phone ? formatPhoneNumber(phone) : '-';
 
-  // 필터링
-  const filteredCampaigns = campaigns.filter(c => {
+  // 필터링 — 목록 렌더러는 두 탭이 공유한다(행 배지·채널칩·취소·상세·페이징이 전부 같은 계약이다).
+  //   바뀌는 것은 **어느 목록을 먹느냐**뿐이다. 표를 복제하면 한쪽만 고쳐지는 사고가 난다.
+  const listSource = activeTab === 'scheduled' ? scheduledCampaigns : campaigns;
+  const filteredCampaigns = listSource.filter(c => {
     // ★ 2026-07-31 이분법 폐기 — 'direct'가 아니면 전부 AI로 보던 탓에 자동발송·여정이 AI 필터에 섞였다.
     if (!matchesSendTypeFilter(c.send_type, filterType)) return false;
     if (filterSender !== 'all' && c.created_by_name !== filterSender) return false;
     return true;
   });
-  const uniqueSenders = [...new Set(campaigns.map(c => c.created_by_name).filter(Boolean))];
+  const uniqueSenders = [...new Set(listSource.map(c => c.created_by_name).filter(Boolean))];
   const totalFilteredPages = Math.ceil(filteredCampaigns.length / itemsPerPage);
   const messageTotalPages = Math.ceil(messageTotal / messagePerPage);
 
@@ -295,19 +318,24 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors text-lg">&times;</button>
         </div>
 
-        {/* 탭 */}
+        {/* 탭 — ★ 2026-08-17 활성색을 **정적 클래스**로. 전에는 `border-${tab.color}-500`처럼 런타임 조립이라
+            Tailwind가 그 클래스를 생성하지 못해(safelist 부재) 활성 표시가 실제로는 안 그려지고 있었다. */}
         <div className="flex border-b bg-slate-50">
           {[
-            { key: 'summary', label: '요약 및 비용현황', color: 'emerald' },
-            { key: 'test', label: '테스트 발송', color: 'orange' },
+            { key: 'summary', label: '전송결과', active: 'border-b-2 border-emerald-500 text-emerald-600 bg-white' },
+            { key: 'scheduled', label: '예약내역', active: 'border-b-2 border-violet-500 text-violet-600 bg-white' },
+            { key: 'test', label: '테스트발송내역', active: 'border-b-2 border-orange-500 text-orange-600 bg-white' },
           ].map(tab => (
             <button
               key={tab.key}
-              onClick={() => { setActiveTab(tab.key as any); if (tab.key === 'test') fetchTestStats(); }}
+              onClick={() => {
+                setActiveTab(tab.key as any);
+                setCurrentPage(1);
+                if (tab.key === 'test') fetchTestStats();
+                if (tab.key === 'scheduled') fetchScheduled();
+              }}
               className={`flex-1 py-3 text-center text-sm font-medium transition-colors ${
-                activeTab === tab.key
-                  ? `border-b-2 border-${tab.color}-500 text-${tab.color}-600 bg-white`
-                  : 'text-slate-500 hover:text-slate-700'
+                activeTab === tab.key ? tab.active : 'text-slate-500 hover:text-slate-700'
               }`}
             >
               {tab.label}
@@ -335,9 +363,47 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
               {isSubscriptionLocked && <span className="mr-1">🔒</span>}📅 캘린더
             </button>
           )}
-          {activeTab === 'summary' && (
+          {/* ★ 2026-08-17 전송결과·예약내역이 **같은 목록 렌더러**를 공유한다(아래 채널통합조회).
+              다른 것은 위쪽 도구 영역뿐 — 예약내역엔 기간 UI가 없고(전량 조회) 결과 요약 카드도 없다
+              (예약은 결과가 없어 전부 0으로 떠서 "실패한 건가"로 읽힌다). */}
+          {(activeTab === 'summary' || activeTab === 'scheduled') && (
             <div className="space-y-4">
-              {/* 기간 선택 + 필터 */}
+              {activeTab === 'scheduled' && (
+                <div className="flex flex-wrap items-center gap-4 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3">
+                  <div>
+                    <div className="text-[11px] font-semibold tracking-wide text-violet-500">예약 대기</div>
+                    <div className="text-xl font-bold text-violet-700 tabular-nums">{filteredCampaigns.length}건</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold tracking-wide text-violet-500">발송 대상</div>
+                    <div className="text-xl font-bold text-violet-700 tabular-nums">
+                      {filteredCampaigns.reduce((s, c) => s + (Number(c.target_count) || 0), 0).toLocaleString()}명
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold tracking-wide text-violet-500">가장 이른 발송</div>
+                    <div className="text-sm font-semibold text-violet-700">
+                      {(() => {
+                        const times = filteredCampaigns
+                          .map((c) => c.scheduled_at || c.sentAt)
+                          .filter(Boolean)
+                          .map((t: string) => new Date(t).getTime())
+                          .filter((t) => !isNaN(t));
+                        if (times.length === 0) return '-';
+                        return new Date(Math.min(...times)).toLocaleString('ko-KR', {
+                          month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                        });
+                      })()}
+                    </div>
+                  </div>
+                  <p className="ml-auto text-[11px] text-violet-500">기간과 무관하게 예약된 발송을 모두 보여줍니다</p>
+                </div>
+              )}
+              {activeTab === 'scheduled' && scheduledLoading && (
+                <div className="py-10 text-center text-sm text-slate-400">예약내역을 불러오는 중…</div>
+              )}
+              {/* 기간 선택 + 필터 — 전송결과 전용 */}
+              {activeTab === 'summary' && (
               <div className="flex items-center gap-3 flex-wrap">
                 <span className="text-sm text-slate-500 font-medium">기간</span>
                 <input
@@ -385,9 +451,10 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                   {loading ? '조회 중...' : cooldown > 0 ? `${cooldown}초` : '조회'}
                 </button>
               </div>
+              )}
 
-              {/* 요약 카드 */}
-              {(summary || campaigns.length > 0) && (() => {
+              {/* 요약 카드 — 전송결과 전용(예약은 결과가 없어 전부 0으로 뜬다) */}
+              {activeTab === 'summary' && (summary || campaigns.length > 0) && (() => {
                 const totalSuccess = filteredCampaigns.reduce((sum, c) => sum + (c.success_count || 0), 0);
                 const totalFail = filteredCampaigns.reduce((sum, c) => sum + (c.fail_count || 0), 0);
                 // D183: 전송 분모 = sent_count(통신사 발송 누계) 또는 target_count(목표 수) — 대기분 포함
@@ -446,8 +513,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                 );
               })()}
 
-              {/* ★ 2026-07-23 에이전트(엔진) 발송 유형별 — agent·both 회사만 채워짐 */}
-              {summary?.agent?.byType?.length > 0 && (
+              {/* ★ 2026-07-23 에이전트(엔진) 발송 유형별 — agent·both 회사만 채워짐 (전송결과 전용) */}
+              {activeTab === 'summary' && summary?.agent?.byType?.length > 0 && (
                 <div className="rounded-2xl border border-violet-200 bg-violet-50/30 overflow-hidden">
                   <div className="px-4 py-2.5 border-b border-violet-100 flex items-center gap-2 flex-wrap">
                     <span className="px-2 py-0.5 rounded-md bg-violet-100 text-violet-700 text-xs font-semibold">에이전트 발송</span>
