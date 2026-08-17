@@ -6,7 +6,7 @@
  * - chatBubbleType 8종: TEXT / IMAGE / WIDE / WIDE_ITEM_LIST / CAROUSEL_FEED / PREMIUM_VIDEO / COMMERCE / CAROUSEL_COMMERCE
  * - 검수 없음 — 등록 즉시 ACTIVE
  *
- * ★ 2026-08-17 라이트 톤 재작성 — 값은 `utils/kakao-ui.ts`가 소유한다(색·높이를 여기 적지 않는다).
+ * ★ 2026-08-17 라이트 톤 재작성 — 값은 `utils/console-ui.ts`가 소유한다(색·높이를 여기 적지 않는다).
  *   빈 상태의 이모지(📢)를 아이콘 + 시작 버튼으로 교체했고, 관리 열 버튼 4개를 대표 1 + ⋯로 접었다.
  *
  * 백엔드:
@@ -24,40 +24,40 @@ import TemplateHistoryModal from './TemplateHistoryModal';
 import BrandTemplateForm from './BrandTemplateForm';
 import { useAuthStore } from '../../stores/authStore';
 import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
-import EmptyState from '../kakao/EmptyState';
-import RowActions, { type RowAction } from '../kakao/RowActions';
-import StatusPill from '../kakao/StatusPill';
+import EmptyState from '../console/EmptyState';
+import RowActions, { type RowAction } from '../console/RowActions';
+import StatusPill from '../console/StatusPill';
 import {
-  KUI_BTN_PRIMARY,
-  KUI_CARD,
-  KUI_CARDS,
-  KUI_CARD_META,
-  KUI_CARD_TITLE,
-  KUI_CELL_CODE,
-  KUI_CELL_META,
-  KUI_CELL_NAME,
-  KUI_COPY_BTN,
-  KUI_FIELD,
-  KUI_FIELD_INPUT,
-  KUI_LOADING,
-  KUI_ONLY_DESKTOP,
-  KUI_PANEL,
-  KUI_SCROLL_X,
-  KUI_SEC_DESC,
-  KUI_SEC_TITLE,
-  KUI_SELECT,
-  KUI_SPINNER,
-  KUI_TD,
-  KUI_TD_STICKY,
-  KUI_TH,
-  KUI_TH_RIGHT,
-  KUI_TH_STICKY,
-  KUI_THEAD,
-  KUI_TOTAL,
-  KUI_TOTAL_NUM,
-  KUI_TR,
-  type KuiPillTone,
-} from '../../utils/kakao-ui';
+  CUI_BTN_PRIMARY,
+  CUI_CARD,
+  CUI_CARDS,
+  CUI_CARD_META,
+  CUI_CARD_TITLE,
+  CUI_CELL_CODE,
+  CUI_CELL_META,
+  CUI_CELL_NAME,
+  CUI_COPY_BTN,
+  CUI_FIELD,
+  CUI_FIELD_INPUT,
+  CUI_LOADING,
+  CUI_ONLY_DESKTOP,
+  CUI_PANEL,
+  CUI_SCROLL_X,
+  CUI_SEC_DESC,
+  CUI_SEC_TITLE,
+  CUI_SELECT,
+  CUI_SPINNER,
+  CUI_TD,
+  CUI_TD_STICKY,
+  CUI_TH,
+  CUI_TH_RIGHT,
+  CUI_TH_STICKY,
+  CUI_THEAD,
+  CUI_TOTAL,
+  CUI_TOTAL_NUM,
+  CUI_TR,
+  type CuiPillTone,
+} from '../../utils/console-ui';
 
 interface Profile {
   id: string;
@@ -98,7 +98,7 @@ const CHAT_BUBBLE_LABELS: Record<string, string> = {
   CAROUSEL_COMMERCE: '캐러셀 커머스',
 };
 
-const STATUS_LABELS: Record<string, { label: string; tone: KuiPillTone }> = {
+const STATUS_LABELS: Record<string, { label: string; tone: CuiPillTone }> = {
   ACTIVE:   { label: '정상', tone: 'green' },
   INACTIVE: { label: '중지', tone: 'neutral' },
 };
@@ -261,8 +261,8 @@ export default function BrandTemplateManagementSection({ profiles, setToast, onC
       {/* ── 툴바 ─────────────────────────────── */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
         <div>
-          <h2 className={KUI_SEC_TITLE}>브랜드메시지 템플릿</h2>
-          <p className={KUI_SEC_DESC}>8종 유형 · 검수 없이 등록 즉시 사용할 수 있습니다</p>
+          <h2 className={CUI_SEC_TITLE}>브랜드메시지 템플릿</h2>
+          <p className={CUI_SEC_DESC}>8종 유형 · 검수 없이 등록 즉시 사용할 수 있습니다</p>
         </div>
 
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
@@ -270,7 +270,7 @@ export default function BrandTemplateManagementSection({ profiles, setToast, onC
             <select
               value={profileFilter}
               onChange={(e) => setProfileFilter(e.target.value)}
-              className={`${KUI_SELECT} w-auto min-w-[168px]`}
+              className={`${CUI_SELECT} w-auto min-w-[168px]`}
               aria-label="발신프로필 거르기"
             >
               <option value="">전체 발신프로필</option>
@@ -283,18 +283,18 @@ export default function BrandTemplateManagementSection({ profiles, setToast, onC
             <ChevronDown className="w-[13px] h-[13px] text-neutral-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
 
-          <div className={`${KUI_FIELD} w-full sm:w-52`}>
+          <div className={`${CUI_FIELD} w-full sm:w-52`}>
             <Search className="w-[14px] h-[14px] text-neutral-400 shrink-0" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="관리명 · 템플릿키 검색"
-              className={KUI_FIELD_INPUT}
+              className={CUI_FIELD_INPUT}
             />
           </div>
 
           {canManage && (
-            <button type="button" onClick={() => setShowCreate(true)} className={KUI_BTN_PRIMARY}>
+            <button type="button" onClick={() => setShowCreate(true)} className={CUI_BTN_PRIMARY}>
               <Plus className="w-[15px] h-[15px]" />
               템플릿 등록
             </button>
@@ -304,8 +304,8 @@ export default function BrandTemplateManagementSection({ profiles, setToast, onC
 
       {/* ── 목록 ─────────────────────────────── */}
       {loading ? (
-        <div className={`${KUI_LOADING} mt-5`}>
-          <span className={KUI_SPINNER} />
+        <div className={`${CUI_LOADING} mt-5`}>
+          <span className={CUI_SPINNER} />
           불러오는 중
         </div>
       ) : filtered.length === 0 ? (
@@ -325,32 +325,32 @@ export default function BrandTemplateManagementSection({ profiles, setToast, onC
       ) : (
         <>
           {/* 데스크톱 표 */}
-          <div className={`${KUI_PANEL} ${KUI_ONLY_DESKTOP} mt-5`}>
-            <div className={KUI_SCROLL_X}>
+          <div className={`${CUI_PANEL} ${CUI_ONLY_DESKTOP} mt-5`}>
+            <div className={CUI_SCROLL_X}>
               <table className="w-full min-w-[900px]">
-                <thead className={KUI_THEAD}>
+                <thead className={CUI_THEAD}>
                   <tr>
-                    <th className={KUI_TH}>관리명</th>
-                    <th className={KUI_TH}>발신프로필</th>
-                    <th className={KUI_TH}>유형</th>
-                    <th className={KUI_TH}>상태</th>
-                    <th className={KUI_TH_RIGHT}>최종 수정</th>
-                    <th className={KUI_TH_STICKY}>관리</th>
+                    <th className={CUI_TH}>관리명</th>
+                    <th className={CUI_TH}>발신프로필</th>
+                    <th className={CUI_TH}>유형</th>
+                    <th className={CUI_TH}>상태</th>
+                    <th className={CUI_TH_RIGHT}>최종 수정</th>
+                    <th className={CUI_TH_STICKY}>관리</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map((t) => {
-                    const st = STATUS_LABELS[t.status] || { label: t.status, tone: 'neutral' as KuiPillTone };
+                    const st = STATUS_LABELS[t.status] || { label: t.status, tone: 'neutral' as CuiPillTone };
                     return (
-                      <tr key={t.id} className={KUI_TR}>
-                        <td className={KUI_TD}>
-                          <div className={KUI_CELL_NAME}>{t.manage_name}</div>
+                      <tr key={t.id} className={CUI_TR}>
+                        <td className={CUI_TD}>
+                          <div className={CUI_CELL_NAME}>{t.manage_name}</div>
                           <div className="flex items-center gap-1.5 mt-0.5">
-                            <span className={`${KUI_CELL_CODE} truncate max-w-[240px]`}>{t.template_key}</span>
+                            <span className={`${CUI_CELL_CODE} truncate max-w-[240px]`}>{t.template_key}</span>
                             <button
                               type="button"
                               onClick={() => copyKey(t.template_key)}
-                              className={KUI_COPY_BTN}
+                              className={CUI_COPY_BTN}
                               title="템플릿키 복사"
                               aria-label="템플릿키 복사"
                             >
@@ -360,23 +360,23 @@ export default function BrandTemplateManagementSection({ profiles, setToast, onC
                             </button>
                           </div>
                         </td>
-                        <td className={KUI_TD}>
+                        <td className={CUI_TD}>
                           <span className="text-[13.5px] text-neutral-800">{t.profile_name || '-'}</span>
                         </td>
-                        <td className={KUI_TD}>
+                        <td className={CUI_TD}>
                           <span className="text-[13.5px] text-neutral-800">
                             {CHAT_BUBBLE_LABELS[t.chat_bubble_type] || t.chat_bubble_type}
                           </span>
                         </td>
-                        <td className={KUI_TD}>
+                        <td className={CUI_TD}>
                           <StatusPill label={st.label} tone={st.tone} />
                         </td>
-                        <td className={`${KUI_TD} text-right`}>
-                          <span className={KUI_CELL_META}>
+                        <td className={`${CUI_TD} text-right`}>
+                          <span className={CUI_CELL_META}>
                             {t.updated_at ? new Date(t.updated_at).toLocaleString('ko-KR') : '-'}
                           </span>
                         </td>
-                        <td className={KUI_TD_STICKY}>
+                        <td className={CUI_TD_STICKY}>
                           <RowActions actions={actionsFor(t)} />
                         </td>
                       </tr>
@@ -388,19 +388,19 @@ export default function BrandTemplateManagementSection({ profiles, setToast, onC
           </div>
 
           {/* 모바일 카드 */}
-          <div className={`${KUI_CARDS} mt-5`}>
+          <div className={`${CUI_CARDS} mt-5`}>
             {filtered.map((t) => {
-              const st = STATUS_LABELS[t.status] || { label: t.status, tone: 'neutral' as KuiPillTone };
+              const st = STATUS_LABELS[t.status] || { label: t.status, tone: 'neutral' as CuiPillTone };
               return (
-                <div key={t.id} className={KUI_CARD}>
+                <div key={t.id} className={CUI_CARD}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className={KUI_CARD_TITLE}>{t.manage_name}</div>
-                      <div className={`${KUI_CELL_CODE} mt-0.5 truncate`}>{t.template_key}</div>
+                      <div className={CUI_CARD_TITLE}>{t.manage_name}</div>
+                      <div className={`${CUI_CELL_CODE} mt-0.5 truncate`}>{t.template_key}</div>
                     </div>
                     <StatusPill label={st.label} tone={st.tone} />
                   </div>
-                  <div className={KUI_CARD_META}>
+                  <div className={CUI_CARD_META}>
                     <span>{t.profile_name || '-'}</span>
                     <span className="text-neutral-300">·</span>
                     <span>{CHAT_BUBBLE_LABELS[t.chat_bubble_type] || t.chat_bubble_type}</span>
@@ -418,7 +418,7 @@ export default function BrandTemplateManagementSection({ profiles, setToast, onC
           </div>
 
           <div className="mt-4">
-            <span className={KUI_TOTAL}>총 <b className={KUI_TOTAL_NUM}>{filtered.length}</b>건</span>
+            <span className={CUI_TOTAL}>총 <b className={CUI_TOTAL_NUM}>{filtered.length}</b>건</span>
           </div>
         </>
       )}

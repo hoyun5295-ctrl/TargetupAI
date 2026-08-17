@@ -8,19 +8,19 @@
  *
  *   앞에 점을 단다 — 배경색이 옅어도 상태가 읽히고, 색으로만 구분하지 않게 된다.
  */
-import { KUI_PILL_BASE, KUI_PILL_DOT, KUI_PILL_TONE, type KuiPillTone } from '../../utils/kakao-ui';
+import { CUI_PILL_BASE, CUI_PILL_DOT, CUI_PILL_TONE, type CuiPillTone } from '../../utils/console-ui';
 
 interface Props {
   label: string;
-  tone?: KuiPillTone;
+  tone?: CuiPillTone;
   /** 마우스를 올렸을 때 나오는 설명 — 발송 불가 사유처럼 한 줄로 못 담는 것만 */
   title?: string;
 }
 
 export default function StatusPill({ label, tone = 'neutral', title }: Props) {
   return (
-    <span className={`${KUI_PILL_BASE} ${KUI_PILL_TONE[tone]}`} title={title}>
-      <span className={KUI_PILL_DOT} aria-hidden="true" />
+    <span className={`${CUI_PILL_BASE} ${CUI_PILL_TONE[tone]}`} title={title}>
+      <span className={CUI_PILL_DOT} aria-hidden="true" />
       {label}
     </span>
   );

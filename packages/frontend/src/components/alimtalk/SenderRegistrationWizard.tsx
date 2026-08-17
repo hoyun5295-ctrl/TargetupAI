@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
-import { KUI_BTN_OUTLINE, KUI_INPUT, KUI_LABEL, KUI_MODAL, KUI_MODAL_BODY, KUI_MODAL_CLOSE, KUI_MODAL_DESC, KUI_MODAL_FOOT, KUI_MODAL_HEAD, KUI_MODAL_SCRIM, KUI_MODAL_TITLE } from '../../utils/kakao-ui';
+import { CUI_BTN_OUTLINE, CUI_INPUT, CUI_LABEL, CUI_MODAL, CUI_MODAL_BODY, CUI_MODAL_CLOSE, CUI_MODAL_DESC, CUI_MODAL_FOOT, CUI_MODAL_HEAD, CUI_MODAL_SCRIM, CUI_MODAL_TITLE } from '../../utils/console-ui';
 
 interface CategoryNode {
   category_code: string;
@@ -153,26 +153,26 @@ export default function SenderRegistrationWizard({
   };
 
   return (
-    <div className={KUI_MODAL_SCRIM}>
-      <div className={`${KUI_MODAL} max-w-xl`} role="dialog" aria-modal="true">
-        <div className={KUI_MODAL_HEAD}>
+    <div className={CUI_MODAL_SCRIM}>
+      <div className={`${CUI_MODAL} max-w-xl`} role="dialog" aria-modal="true">
+        <div className={CUI_MODAL_HEAD}>
           <div>
-            <h2 className={KUI_MODAL_TITLE}>발신프로필 등록</h2>
-            <p className={KUI_MODAL_DESC}>
+            <h2 className={CUI_MODAL_TITLE}>발신프로필 등록</h2>
+            <p className={CUI_MODAL_DESC}>
               Step {step} / 3 — 카카오 비즈니스채널 인증
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className={KUI_MODAL_CLOSE}
+            className={CUI_MODAL_CLOSE}
             aria-label="닫기"
           >
             <X className="w-[17px] h-[17px]" />
           </button>
         </div>
 
-        <div className={KUI_MODAL_BODY}>
+        <div className={CUI_MODAL_BODY}>
           {/* Step 1 */}
           {step === 1 && (
             <>
@@ -182,7 +182,7 @@ export default function SenderRegistrationWizard({
                   <select
                     value={targetCompanyId}
                     onChange={(e) => setTargetCompanyId(e.target.value)}
-                    className={KUI_INPUT}
+                    className={CUI_INPUT}
                   >
                     <option value="">선택</option>
                     {companies.map((c) => (
@@ -204,7 +204,7 @@ export default function SenderRegistrationWizard({
                   value={profileName}
                   onChange={(e) => setProfileName(e.target.value)}
                   placeholder="내부 관리용 이름"
-                  className={KUI_INPUT}
+                  className={CUI_INPUT}
                 />
               </StepGrid>
 
@@ -215,7 +215,7 @@ export default function SenderRegistrationWizard({
                     setYellowId(e.target.value.startsWith('@') ? e.target.value : `@${e.target.value}`)
                   }
                   placeholder="@채널아이디"
-                  className={KUI_INPUT}
+                  className={CUI_INPUT}
                 />
               </StepGrid>
 
@@ -225,7 +225,7 @@ export default function SenderRegistrationWizard({
                   onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
                   placeholder="01012345678 (11자리)"
                   maxLength={11}
-                  className={KUI_INPUT}
+                  className={CUI_INPUT}
                 />
               </StepGrid>
 
@@ -235,7 +235,7 @@ export default function SenderRegistrationWizard({
                   <select
                     value={level1Code}
                     onChange={(e) => setCategoryCode(e.target.value.padEnd(11, ''))}
-                    className={`${KUI_INPUT} h-8 text-[13px]`}
+                    className={`${CUI_INPUT} h-8 text-[13px]`}
                   >
                     <option value="">대분류</option>
                     {level1.map((c) => (
@@ -250,7 +250,7 @@ export default function SenderRegistrationWizard({
                       setCategoryCode(level1Code + e.target.value + (categoryCode.slice(7) || ''))
                     }
                     disabled={!level1Code}
-                    className={`${KUI_INPUT} h-8 text-[13px]`}
+                    className={`${CUI_INPUT} h-8 text-[13px]`}
                   >
                     <option value="">중분류</option>
                     {level2.map((c) => (
@@ -263,7 +263,7 @@ export default function SenderRegistrationWizard({
                     value={categoryCode.slice(7) || ''}
                     onChange={(e) => setCategoryCode(level2Code + e.target.value)}
                     disabled={!level2Code}
-                    className={`${KUI_INPUT} h-8 text-[13px]`}
+                    className={`${CUI_INPUT} h-8 text-[13px]`}
                   >
                     <option value="">소분류</option>
                     {level3.map((c) => (
@@ -300,7 +300,7 @@ export default function SenderRegistrationWizard({
                   onChange={(e) => setToken(e.target.value.replace(/\D/g, ''))}
                   placeholder="123456"
                   maxLength={6}
-                  className={`${KUI_INPUT} tracking-widest`}
+                  className={`${CUI_INPUT} tracking-widest`}
                 />
               </StepGrid>
               <p className="text-[12.5px] text-neutral-500">
@@ -316,11 +316,11 @@ export default function SenderRegistrationWizard({
           )}
         </div>
 
-        <div className={`${KUI_MODAL_FOOT} justify-between`}>
+        <div className={`${CUI_MODAL_FOOT} justify-between`}>
           <button
             type="button"
             onClick={() => (step === 1 ? onClose() : setStep((step - 1) as 1 | 2 | 3))}
-            className={KUI_BTN_OUTLINE}
+            className={CUI_BTN_OUTLINE}
           >
             {step === 1 ? '취소' : '이전'}
           </button>
@@ -358,7 +358,7 @@ function StepGrid({
 }) {
   return (
     <div>
-      <label className={KUI_LABEL}>{label}</label>
+      <label className={CUI_LABEL}>{label}</label>
       {children}
     </div>
   );

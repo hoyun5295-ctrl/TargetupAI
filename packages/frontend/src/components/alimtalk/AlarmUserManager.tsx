@@ -10,7 +10,7 @@ const MAX_ALARM_USERS = 3;
 import { useEffect, useState } from 'react';
 import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
 import { X } from 'lucide-react';
-import { KUI_BTN_OUTLINE, KUI_BTN_PRIMARY, KUI_INPUT, KUI_LABEL, KUI_MODAL, KUI_MODAL_CLOSE, KUI_MODAL_DESC, KUI_MODAL_FOOT, KUI_MODAL_HEAD, KUI_MODAL_SCRIM, KUI_MODAL_TITLE, KUI_REQUIRED } from '../../utils/kakao-ui';
+import { CUI_BTN_OUTLINE, CUI_BTN_PRIMARY, CUI_INPUT, CUI_LABEL, CUI_MODAL, CUI_MODAL_CLOSE, CUI_MODAL_DESC, CUI_MODAL_FOOT, CUI_MODAL_HEAD, CUI_MODAL_SCRIM, CUI_MODAL_TITLE, CUI_REQUIRED } from '../../utils/console-ui';
 
 interface AlarmUser {
   id: string;
@@ -125,13 +125,13 @@ export default function AlarmUserManager({ onClose }: Props) {
   const activeCount = users.filter((u) => u.active_yn === 'Y').length;
 
   return (
-    <div className={KUI_MODAL_SCRIM}>
+    <div className={CUI_MODAL_SCRIM}>
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
-      <div className={`${KUI_MODAL} max-w-lg`} role="dialog" aria-modal="true">
-        <div className={KUI_MODAL_HEAD}>
+      <div className={`${CUI_MODAL} max-w-lg`} role="dialog" aria-modal="true">
+        <div className={CUI_MODAL_HEAD}>
           <div>
-            <h2 className={KUI_MODAL_TITLE}>검수 알림 수신자</h2>
-            <p className={KUI_MODAL_DESC}>
+            <h2 className={CUI_MODAL_TITLE}>검수 알림 수신자</h2>
+            <p className={CUI_MODAL_DESC}>
               활성 {activeCount}/{MAX_ALARM_USERS}명 · 템플릿 검수 결과 문자 알림 대상
             </p>
             {/* ★ 2026-06-13: 수신자 0명일 때 동작 안내 — "알림이 안 온다" 문의 차단
@@ -145,7 +145,7 @@ export default function AlarmUserManager({ onClose }: Props) {
           <button
             type="button"
             onClick={onClose}
-            className={KUI_MODAL_CLOSE}
+            className={CUI_MODAL_CLOSE}
             aria-label="닫기"
           >
             <X className="w-[17px] h-[17px]" />
@@ -154,19 +154,19 @@ export default function AlarmUserManager({ onClose }: Props) {
 
         <div className="shrink-0 px-6 py-3.5 border-b border-neutral-200 bg-neutral-50 flex gap-2 items-end flex-wrap">
           <div className="flex-1">
-            <label className={KUI_LABEL}>
-              이름 <span className={KUI_REQUIRED}>*</span>
+            <label className={CUI_LABEL}>
+              이름 <span className={CUI_REQUIRED}>*</span>
             </label>
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               maxLength={30}
               placeholder="홍길동"
-              className={KUI_INPUT}
+              className={CUI_INPUT}
             />
           </div>
           <div className="flex-1">
-            <label className={KUI_LABEL}>
+            <label className={CUI_LABEL}>
               휴대폰
             </label>
             <input
@@ -174,14 +174,14 @@ export default function AlarmUserManager({ onClose }: Props) {
               onChange={(e) => setNewPhone(e.target.value.replace(/\D/g, ''))}
               maxLength={11}
               placeholder="01012345678"
-              className={KUI_INPUT}
+              className={CUI_INPUT}
             />
           </div>
           <button
             type="button"
             disabled={adding || activeCount >= MAX_ALARM_USERS}
             onClick={add}
-            className={KUI_BTN_PRIMARY}
+            className={CUI_BTN_PRIMARY}
           >
             추가
           </button>
@@ -242,11 +242,11 @@ export default function AlarmUserManager({ onClose }: Props) {
           )}
         </div>
 
-        <div className={KUI_MODAL_FOOT}>
+        <div className={CUI_MODAL_FOOT}>
           <button
             type="button"
             onClick={onClose}
-            className={KUI_BTN_OUTLINE}
+            className={CUI_BTN_OUTLINE}
           >
             닫기
           </button>

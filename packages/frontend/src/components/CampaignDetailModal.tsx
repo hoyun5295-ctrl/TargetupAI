@@ -94,44 +94,44 @@ export default function CampaignDetailModal({
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-2 md:p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[880px] max-h-[92vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
         {/* 헤더 — 캠페인명 + 채널 chip + 상태 badge + 발송일시 */}
-        <div className="flex justify-between items-start gap-3 px-6 py-4 border-b border-slate-200 bg-white sticky top-0 z-10">
+        <div className="flex justify-between items-start gap-3 px-6 py-4 border-b border-neutral-200 bg-white sticky top-0 z-10">
           <div className="min-w-0">
-            <h3 className="font-bold text-slate-900 truncate">{campaign.campaign_name}</h3>
+            <h3 className="font-bold text-neutral-900 truncate">{campaign.campaign_name}</h3>
             <div className="flex items-center gap-2 mt-1.5 flex-wrap">
               <span className={`px-2 py-0.5 rounded-md text-[11px] font-medium ${channelChipClass}`}>{channelLabel}</span>
               <span className={`px-2 py-0.5 rounded-md text-[11px] font-medium ${statusBadgeClass}`}>{statusLabel}</span>
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-neutral-400">
                 {campaign.scheduled_at
                   ? `${fmtShort(campaign.scheduled_at)}${campaign.status === 'scheduled' ? ' 예약' : campaign.status === 'cancelled' ? ' 예약취소' : ''}`
                   : campaign.sent_at ? fmtShort(campaign.sent_at) : ''}
               </span>
             </div>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors shrink-0" aria-label="닫기"><X className="w-5 h-5" /></button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-neutral-100 text-neutral-400 hover:text-neutral-600 transition-colors shrink-0" aria-label="닫기"><X className="w-5 h-5" /></button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
           {/* 상단 요약 4 카드 */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4">
-              <div className="text-xs text-slate-500 mb-1">성공률</div>
+            <div className="rounded-2xl border border-neutral-200 bg-white shadow-sm p-4">
+              <div className="text-xs text-neutral-500 mb-1">성공률</div>
               <div className={`text-2xl font-bold ${successRate >= 50 ? 'text-emerald-600' : 'text-rose-500'}`}>{successRate}%</div>
-              <div className="mt-2 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+              <div className="mt-2 h-1.5 rounded-full bg-neutral-100 overflow-hidden">
                 <div className={`h-full rounded-full ${successRate >= 50 ? 'bg-emerald-500' : 'bg-rose-400'}`} style={{ width: `${Math.min(100, successRate)}%` }} />
               </div>
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4">
-              <div className="text-xs text-slate-500 mb-1">클릭률</div>
-              <div className="text-2xl font-bold text-violet-600">{clickRate}%</div>
-              <div className="text-[11px] text-slate-400 mt-1">{clicks.toLocaleString()} 클릭</div>
+            <div className="rounded-2xl border border-neutral-200 bg-white shadow-sm p-4">
+              <div className="text-xs text-neutral-500 mb-1">클릭률</div>
+              <div className="text-2xl font-bold text-indigo-600">{clickRate}%</div>
+              <div className="text-[11px] text-neutral-400 mt-1">{clicks.toLocaleString()} 클릭</div>
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4">
-              <div className="text-xs text-slate-500 mb-1">전송 / 성공</div>
-              <div className="text-2xl font-bold text-slate-900">{sent.toLocaleString()}</div>
+            <div className="rounded-2xl border border-neutral-200 bg-white shadow-sm p-4">
+              <div className="text-xs text-neutral-500 mb-1">전송 / 성공</div>
+              <div className="text-2xl font-bold text-neutral-900">{sent.toLocaleString()}</div>
               <div className="text-[11px] text-emerald-600 mt-1">성공 {success.toLocaleString()}</div>
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4">
-              <div className="text-xs text-slate-500 mb-1">실패 / 대기</div>
+            <div className="rounded-2xl border border-neutral-200 bg-white shadow-sm p-4">
+              <div className="text-xs text-neutral-500 mb-1">실패 / 대기</div>
               <div className="text-2xl font-bold text-rose-600">{fail.toLocaleString()}</div>
               <div className="text-[11px] text-amber-500 mt-1">대기 {pending.toLocaleString()}</div>
             </div>
@@ -146,11 +146,11 @@ export default function CampaignDetailModal({
                   <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-sm shrink-0"><FileText className="w-5 h-5 text-white" /></div>
                   <div className="min-w-0 flex-1">
                     <div className="text-[11px] text-emerald-700/70">알림톡 템플릿</div>
-                    <div className="font-bold text-slate-900 truncate">{alimtalkTemplateInfo.name || '(템플릿명 미설정)'}</div>
+                    <div className="font-bold text-neutral-900 truncate">{alimtalkTemplateInfo.name || '(템플릿명 미설정)'}</div>
                   </div>
                   <span className={`px-2.5 py-1 rounded-md text-xs font-medium shrink-0 ${st.badgeClass}`}>{st.label}</span>
                 </div>
-                <div className="text-xs text-slate-500 mt-2">템플릿코드 <span className="font-mono text-slate-700">{alimtalkTemplateInfo.code || '-'}</span></div>
+                <div className="text-xs text-neutral-500 mt-2">템플릿코드 <span className="font-mono text-neutral-700">{alimtalkTemplateInfo.code || '-'}</span></div>
               </div>
             );
           })()}
@@ -159,27 +159,27 @@ export default function CampaignDetailModal({
           <div className="flex flex-col md:flex-row gap-5">
             {/* 폰 미리보기 */}
             <div className="md:flex-shrink-0 mx-auto md:mx-0">
-              <div className="text-xs text-slate-500 mb-2 font-medium">메시지 미리보기</div>
+              <div className="text-xs text-neutral-500 mb-2 font-medium">메시지 미리보기</div>
               <div className="w-[240px] rounded-[1.8rem] p-[3px] bg-gradient-to-b from-emerald-400 to-emerald-600 shadow-lg shadow-emerald-200/50">
                 <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '400px' }}>
-                  <div className="px-4 py-2.5 bg-gradient-to-r from-slate-50 to-slate-100 flex justify-between items-center shrink-0 border-b border-slate-200">
-                    <span className="text-[11px] text-slate-400 font-medium">{previewChannelName}</span>
+                  <div className="px-4 py-2.5 bg-gradient-to-r from-neutral-50 to-neutral-100 flex justify-between items-center shrink-0 border-b border-neutral-200">
+                    <span className="text-[11px] text-neutral-400 font-medium">{previewChannelName}</span>
                     <span className="text-[11px] font-bold text-emerald-600">{previewTypeLabel}</span>
                   </div>
                   <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-emerald-50/30 to-white">
                     <div className="flex gap-2">
                       <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-[10px] font-bold text-emerald-600">T</div>
-                      <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-slate-100 text-[11.5px] leading-[1.7] whitespace-pre-wrap break-all text-slate-700 max-w-[95%]">
+                      <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-neutral-100 text-[11.5px] leading-[1.7] whitespace-pre-wrap break-all text-neutral-700 max-w-[95%]">
                         {isAlimtalk && alimtalkTemplateInfo ? (
                           <>
                             <div className="font-bold text-emerald-700 mb-1 pb-1 border-b border-emerald-100">{alimtalkTemplateInfo.name || '(템플릿명 미설정)'}</div>
-                            <div className="text-[10px] text-slate-400 mb-2">템플릿코드: {alimtalkTemplateInfo.code || '-'}</div>
+                            <div className="text-[10px] text-neutral-400 mb-2">템플릿코드: {alimtalkTemplateInfo.code || '-'}</div>
                             <div>{previewBody}</div>
                           </>
                         ) : (
                           <>
                             {isLmsType && subject && (
-                              <div className="font-bold text-slate-900 mb-1 pb-1 border-b border-slate-200">{buildAdSubjectFront(subject || '', campaign.message_type, campaign.is_ad ?? false)}</div>
+                              <div className="font-bold text-neutral-900 mb-1 pb-1 border-b border-neutral-200">{buildAdSubjectFront(subject || '', campaign.message_type, campaign.is_ad ?? false)}</div>
                             )}
                             {previewBody}
                           </>
@@ -190,8 +190,8 @@ export default function CampaignDetailModal({
                       </div>
                     </div>
                   </div>
-                  <div className="px-3 py-2 border-t border-slate-200 bg-slate-50 text-center shrink-0">
-                    <span className="text-[10px] text-slate-400">{calculateSmsBytes(previewBody)} / {previewMaxBytes} bytes</span>
+                  <div className="px-3 py-2 border-t border-neutral-200 bg-neutral-50 text-center shrink-0">
+                    <span className="text-[10px] text-neutral-400">{calculateSmsBytes(previewBody)} / {previewMaxBytes} bytes</span>
                   </div>
                 </div>
               </div>
@@ -200,61 +200,61 @@ export default function CampaignDetailModal({
             {/* 캠페인 정보 + 분포 */}
             <div className="flex-1 min-w-0 space-y-4">
               <div>
-                <div className="text-xs text-slate-500 mb-2 font-medium">캠페인 정보</div>
-                <div className="rounded-2xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
+                <div className="text-xs text-neutral-500 mb-2 font-medium">캠페인 정보</div>
+                <div className="rounded-2xl border border-neutral-200 divide-y divide-neutral-100 overflow-hidden">
                   {infoRows.map(row => (
                     <div key={row.label} className="flex px-4 py-2.5 text-sm">
-                      <span className="w-24 flex-shrink-0 text-slate-500">{row.label}</span>
-                      <span className="text-slate-800 font-medium break-all">{row.value}</span>
+                      <span className="w-24 flex-shrink-0 text-neutral-500">{row.label}</span>
+                      <span className="text-neutral-800 font-medium break-all">{row.value}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
               {/* 통신사별 분포 (모던 바) */}
-              <div className="rounded-2xl border border-slate-200 p-4">
-                <div className="text-xs text-slate-500 mb-2 font-medium">통신사별 분포</div>
+              <div className="rounded-2xl border border-neutral-200 p-4">
+                <div className="text-xs text-neutral-500 mb-2 font-medium">통신사별 분포</div>
                 {carrierEntries.length > 0 ? (
                   <div className="space-y-2">
                     {carrierEntries.map(([carrier, count]) => (
                       <div key={carrier}>
                         <div className="flex justify-between text-xs mb-0.5">
-                          <span className="font-medium text-slate-600">{carrier}</span>
-                          <span className="font-bold text-slate-700">{Number(count).toLocaleString()}</span>
+                          <span className="font-medium text-neutral-600">{carrier}</span>
+                          <span className="font-bold text-neutral-700">{Number(count).toLocaleString()}</span>
                         </div>
-                        <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-                          <div className="h-full rounded-full bg-gradient-to-r from-violet-400 to-violet-500" style={{ width: `${Math.round((Number(count) / carrierMax) * 100)}%` }} />
+                        <div className="h-2 rounded-full bg-neutral-100 overflow-hidden">
+                          <div className="h-full rounded-full bg-gradient-to-r from-indigo-400 to-indigo-500" style={{ width: `${Math.round((Number(count) / carrierMax) * 100)}%` }} />
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="text-xs text-slate-400 text-center py-2">성공 건 없음</div>
+                  <div className="text-xs text-neutral-400 text-center py-2">성공 건 없음</div>
                 )}
-                <div className="text-[10px] text-slate-400 italic mt-2">Data source — 통신사 발송 결과(MySQL)</div>
+                <div className="text-[10px] text-neutral-400 italic mt-2">Data source — 통신사 발송 결과(MySQL)</div>
               </div>
 
               {/* 실패사유 분포 (모던 바) */}
-              <div className="rounded-2xl border border-slate-200 p-4">
-                <div className="text-xs text-slate-500 mb-2 font-medium">실패사유 분포</div>
+              <div className="rounded-2xl border border-neutral-200 p-4">
+                <div className="text-xs text-neutral-500 mb-2 font-medium">실패사유 분포</div>
                 {errorEntries.length > 0 ? (
                   <div className="space-y-2">
                     {errorEntries.map(([reason, count]) => (
                       <div key={reason}>
                         <div className="flex justify-between text-xs mb-0.5">
                           <span className="font-medium text-rose-600 break-all">{reason}</span>
-                          <span className="font-bold text-slate-700">{Number(count).toLocaleString()}</span>
+                          <span className="font-bold text-neutral-700">{Number(count).toLocaleString()}</span>
                         </div>
-                        <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                        <div className="h-2 rounded-full bg-neutral-100 overflow-hidden">
                           <div className="h-full rounded-full bg-gradient-to-r from-rose-400 to-rose-500" style={{ width: `${Math.round((Number(count) / errorMax) * 100)}%` }} />
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="text-xs text-slate-400 text-center py-2">실패 건 없음</div>
+                  <div className="text-xs text-neutral-400 text-center py-2">실패 건 없음</div>
                 )}
-                <div className="text-[10px] text-slate-400 italic mt-2">Data source — 통신사 실패 코드(MySQL)</div>
+                <div className="text-[10px] text-neutral-400 italic mt-2">Data source — 통신사 실패 코드(MySQL)</div>
               </div>
 
               <button

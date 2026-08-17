@@ -1,7 +1,7 @@
 /**
  * RcsTemplateFormModal.tsx — RCS 템플릿 등록·수정 폼
  *
- * ★ 2026-08-17 라이트 톤 재작성 — 색·높이·라운드는 `utils/kakao-ui.ts`가 소유한다.
+ * ★ 2026-08-17 라이트 톤 재작성 — 색·높이·라운드는 `utils/console-ui.ts`가 소유한다.
  *   함께 정리한 것: 텍스트로 그린 닫기(&times;)·버튼 삭제(✕)를 아이콘으로 교체, 인라인 @keyframes 폐기
  *   (tailwind.config.js가 `animate-in`을 이미 제공한다), Esc 닫기 추가.
  *   저장·검증 로직은 한 줄도 바꾸지 않았다.
@@ -9,30 +9,30 @@
 import { useState, useEffect } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
 import {
-  KUI_BTN_OUTLINE,
-  KUI_BTN_PRIMARY,
-  KUI_FIELDSET_TITLE,
-  KUI_HINT,
-  KUI_INPUT,
-  KUI_LABEL,
-  KUI_MODAL,
-  KUI_MODAL_BODY,
-  KUI_MODAL_CLOSE,
-  KUI_MODAL_DESC,
-  KUI_MODAL_FOOT,
-  KUI_MODAL_HEAD,
-  KUI_MODAL_SCRIM,
-  KUI_MODAL_TITLE,
-  KUI_PICK_DESC,
-  KUI_PICK_OFF,
-  KUI_PICK_ON,
-  KUI_PICK_TITLE,
-  KUI_REQUIRED,
-  KUI_SELECT,
-  KUI_TEXTAREA,
-  KUI_TOAST_ERROR,
-  KUI_TOAST_SUCCESS,
-} from '../utils/kakao-ui';
+  CUI_BTN_OUTLINE,
+  CUI_BTN_PRIMARY,
+  CUI_FIELDSET_TITLE,
+  CUI_HINT,
+  CUI_INPUT,
+  CUI_LABEL,
+  CUI_MODAL,
+  CUI_MODAL_BODY,
+  CUI_MODAL_CLOSE,
+  CUI_MODAL_DESC,
+  CUI_MODAL_FOOT,
+  CUI_MODAL_HEAD,
+  CUI_MODAL_SCRIM,
+  CUI_MODAL_TITLE,
+  CUI_PICK_DESC,
+  CUI_PICK_OFF,
+  CUI_PICK_ON,
+  CUI_PICK_TITLE,
+  CUI_REQUIRED,
+  CUI_SELECT,
+  CUI_TEXTAREA,
+  CUI_TOAST_ERROR,
+  CUI_TOAST_SUCCESS,
+} from '../utils/console-ui';
 
 interface RcsButton {
   buttonType: 'URL' | 'DIAL' | 'MAP' | 'COPY';
@@ -168,62 +168,62 @@ export default function RcsTemplateFormModal({ template, onClose, onSuccess }: P
   };
 
   return (
-    <div className={KUI_MODAL_SCRIM}>
-      <div className={`${KUI_MODAL} max-w-2xl`} role="dialog" aria-modal="true" aria-label={isEdit ? 'RCS 템플릿 수정' : 'RCS 템플릿 등록 요청'}>
+    <div className={CUI_MODAL_SCRIM}>
+      <div className={`${CUI_MODAL} max-w-2xl`} role="dialog" aria-modal="true" aria-label={isEdit ? 'RCS 템플릿 수정' : 'RCS 템플릿 등록 요청'}>
 
         {/* ── 헤더 ─────────────────────────── */}
-        <div className={KUI_MODAL_HEAD}>
+        <div className={CUI_MODAL_HEAD}>
           <div className="min-w-0">
-            <h2 className={KUI_MODAL_TITLE}>
+            <h2 className={CUI_MODAL_TITLE}>
               {isEdit ? 'RCS 템플릿 수정' : 'RCS 템플릿 등록 요청'}
             </h2>
             {/* ★ 2026-08-17 "자동 폴백" 문구 삭제 — 대체 발송은 아직 구현돼 있지 않다. */}
-            <p className={KUI_MODAL_DESC}>등록 후 검수를 거쳐 사용할 수 있습니다</p>
+            <p className={CUI_MODAL_DESC}>등록 후 검수를 거쳐 사용할 수 있습니다</p>
           </div>
-          <button type="button" onClick={onClose} className={KUI_MODAL_CLOSE} aria-label="닫기">
+          <button type="button" onClick={onClose} className={CUI_MODAL_CLOSE} aria-label="닫기">
             <X className="w-[17px] h-[17px]" />
           </button>
         </div>
 
         {/* ── 본문 ─────────────────────────── */}
-        <div className={KUI_MODAL_BODY}>
+        <div className={CUI_MODAL_BODY}>
 
           {/* 브랜드 정보 */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className={KUI_LABEL}>브랜드 ID <span className="text-neutral-400 font-normal">(선택)</span></label>
+              <label className={CUI_LABEL}>브랜드 ID <span className="text-neutral-400 font-normal">(선택)</span></label>
               <input value={brandId} onChange={e => setBrandId(e.target.value)}
                 placeholder="RCS Biz Center에서 발급"
-                className={KUI_INPUT} />
+                className={CUI_INPUT} />
             </div>
             <div>
-              <label className={KUI_LABEL}>브랜드명 <span className="text-neutral-400 font-normal">(선택)</span></label>
+              <label className={CUI_LABEL}>브랜드명 <span className="text-neutral-400 font-normal">(선택)</span></label>
               <input value={brandName} onChange={e => setBrandName(e.target.value)}
                 placeholder="표시될 브랜드 이름"
-                className={KUI_INPUT} />
+                className={CUI_INPUT} />
             </div>
           </div>
 
           {/* 템플릿 이름 */}
           <div>
-            <label className={KUI_LABEL}>템플릿 이름 <span className={KUI_REQUIRED}>*</span></label>
+            <label className={CUI_LABEL}>템플릿 이름 <span className={CUI_REQUIRED}>*</span></label>
             <input value={templateName} onChange={e => setTemplateName(e.target.value)}
               placeholder="최대 200자" maxLength={200}
-              className={KUI_INPUT} />
+              className={CUI_INPUT} />
           </div>
 
           {/* 메시지 유형 */}
           <div>
-            <label className={KUI_LABEL}>메시지 유형</label>
+            <label className={CUI_LABEL}>메시지 유형</label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {RCS_MESSAGE_TYPES.map(t => (
                 <button key={t.value} type="button"
                   onClick={() => setMessageType(t.value)}
                   aria-pressed={messageType === t.value}
-                  className={messageType === t.value ? KUI_PICK_ON : KUI_PICK_OFF}
+                  className={messageType === t.value ? CUI_PICK_ON : CUI_PICK_OFF}
                 >
-                  <div className={KUI_PICK_TITLE}>{t.label}</div>
-                  <div className={KUI_PICK_DESC}>{t.desc}</div>
+                  <div className={CUI_PICK_TITLE}>{t.label}</div>
+                  <div className={CUI_PICK_DESC}>{t.desc}</div>
                 </button>
               ))}
             </div>
@@ -232,29 +232,29 @@ export default function RcsTemplateFormModal({ template, onClose, onSuccess }: P
           {/* 본문 */}
           <div>
             <div className="flex items-baseline justify-between">
-              <label className={KUI_LABEL}>본문 <span className={KUI_REQUIRED}>*</span></label>
+              <label className={CUI_LABEL}>본문 <span className={CUI_REQUIRED}>*</span></label>
               <span className="text-[12px] text-neutral-400 tabular-nums">{content.length}자</span>
             </div>
             <textarea value={content} onChange={e => setContent(e.target.value)}
               rows={6} placeholder="메시지 내용을 입력하세요"
-              className={KUI_TEXTAREA} />
+              className={CUI_TEXTAREA} />
           </div>
 
           {/* 미디어 URL (MMS) */}
           {messageType === 'rcs_mms' && (
             <div>
-              <label className={KUI_LABEL}>미디어 URL</label>
+              <label className={CUI_LABEL}>미디어 URL</label>
               <input value={mediaUrl} onChange={e => setMediaUrl(e.target.value)}
                 placeholder="이미지/동영상 URL (JPG, PNG, MP4)"
-                className={KUI_INPUT} />
-              <p className={KUI_HINT}>권장: 가로 800px 이상, 1MB 이하</p>
+                className={CUI_INPUT} />
+              <p className={CUI_HINT}>권장: 가로 800px 이상, 1MB 이하</p>
             </div>
           )}
 
           {/* 버튼 설정 */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <h3 className={KUI_FIELDSET_TITLE}>
+              <h3 className={CUI_FIELDSET_TITLE}>
                 버튼 <span className="text-neutral-400 font-normal text-[12.5px]">최대 2개</span>
               </h3>
               {buttons.length < 2 && (
@@ -276,13 +276,13 @@ export default function RcsTemplateFormModal({ template, onClose, onSuccess }: P
                   <div key={idx} className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
                     <div className="flex items-center gap-2 mb-2">
                       <select value={btn.buttonType} onChange={e => updateButton(idx, 'buttonType', e.target.value)}
-                        className={`${KUI_SELECT} h-8 w-auto min-w-[120px] text-[13px] bg-white`}
+                        className={`${CUI_SELECT} h-8 w-auto min-w-[120px] text-[13px] bg-white`}
                         aria-label={`${idx + 1}번 버튼 종류`}>
                         {BUTTON_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                       </select>
                       <input value={btn.name} onChange={e => updateButton(idx, 'name', e.target.value)}
                         placeholder="버튼명" maxLength={17}
-                        className={`${KUI_INPUT} h-8 flex-1 text-[13px]`} />
+                        className={`${CUI_INPUT} h-8 flex-1 text-[13px]`} />
                       <button type="button" onClick={() => removeButton(idx)}
                         className="h-8 w-8 grid place-items-center rounded-lg text-neutral-400 shrink-0 transition hover:bg-rose-50 hover:text-rose-600"
                         aria-label={`${idx + 1}번 버튼 삭제`}>
@@ -292,17 +292,17 @@ export default function RcsTemplateFormModal({ template, onClose, onSuccess }: P
                     {btn.buttonType === 'URL' && (
                       <input value={btn.url || ''} onChange={e => updateButton(idx, 'url', e.target.value)}
                         placeholder="https://example.com"
-                        className={`${KUI_INPUT} h-8 text-[13px] bg-white`} />
+                        className={`${CUI_INPUT} h-8 text-[13px] bg-white`} />
                     )}
                     {btn.buttonType === 'DIAL' && (
                       <input value={btn.phoneNumber || ''} onChange={e => updateButton(idx, 'phoneNumber', e.target.value)}
                         placeholder="01012345678"
-                        className={`${KUI_INPUT} h-8 text-[13px] bg-white`} />
+                        className={`${CUI_INPUT} h-8 text-[13px] bg-white`} />
                     )}
                     {btn.buttonType === 'COPY' && (
                       <input value={btn.copyText || ''} onChange={e => updateButton(idx, 'copyText', e.target.value)}
                         placeholder="복사할 텍스트"
-                        className={`${KUI_INPUT} h-8 text-[13px] bg-white`} />
+                        className={`${CUI_INPUT} h-8 text-[13px] bg-white`} />
                     )}
                   </div>
                 ))}
@@ -316,17 +316,17 @@ export default function RcsTemplateFormModal({ template, onClose, onSuccess }: P
         </div>
 
         {/* ── 푸터 ─────────────────────────── */}
-        <div className={KUI_MODAL_FOOT}>
-          <button type="button" onClick={onClose} disabled={saving} className={KUI_BTN_OUTLINE}>
+        <div className={CUI_MODAL_FOOT}>
+          <button type="button" onClick={onClose} disabled={saving} className={CUI_BTN_OUTLINE}>
             취소
           </button>
-          <button type="button" onClick={handleSave} disabled={saving} className={KUI_BTN_PRIMARY}>
+          <button type="button" onClick={handleSave} disabled={saving} className={CUI_BTN_PRIMARY}>
             {saving ? '저장 중' : isEdit ? '수정 요청' : '등록 요청'}
           </button>
         </div>
 
         {toast.show && (
-          <div className={toast.type === 'success' ? KUI_TOAST_SUCCESS : KUI_TOAST_ERROR} role="status">
+          <div className={toast.type === 'success' ? CUI_TOAST_SUCCESS : CUI_TOAST_ERROR} role="status">
             {toast.message}
           </div>
         )}

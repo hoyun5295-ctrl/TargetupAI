@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
-import { KUI_MODAL, KUI_MODAL_CLOSE, KUI_MODAL_HEAD, KUI_MODAL_SCRIM, KUI_MODAL_TITLE } from '../../utils/kakao-ui';
+import { CUI_MODAL, CUI_MODAL_CLOSE, CUI_MODAL_HEAD, CUI_MODAL_SCRIM, CUI_MODAL_TITLE } from '../../utils/console-ui';
 
 type TemplateType = 'alimtalk' | 'brand';
 
@@ -58,7 +58,7 @@ interface Props {
 const CHANGE_TYPE_LABELS: Record<string, { label: string; cls: string }> = {
   CREATE:     { label: '등록',      cls: 'bg-emerald-50 text-emerald-700' },
   UPDATE:     { label: '수정',      cls: 'bg-blue-50 text-blue-700' },
-  STATUS:     { label: '상태 변경', cls: 'bg-violet-50 text-violet-700' },
+  STATUS:     { label: '상태 변경', cls: 'bg-indigo-50 text-indigo-700' },
   INSPECTION: { label: '검수 진행', cls: 'bg-amber-50 text-amber-700' },
   DELETE:     { label: '삭제',      cls: 'bg-rose-50 text-rose-700' },
 };
@@ -171,16 +171,16 @@ export default function TemplateHistoryModal({
 
   return (
     <div
-      className={KUI_MODAL_SCRIM}
+      className={CUI_MODAL_SCRIM}
     >
-      <div className={`${KUI_MODAL} max-w-5xl`} role="dialog" aria-modal="true">
+      <div className={`${CUI_MODAL} max-w-5xl`} role="dialog" aria-modal="true">
         {/* 헤더 */}
-        <div className={KUI_MODAL_HEAD}>
+        <div className={CUI_MODAL_HEAD}>
           <div>
             <div className="text-[12.5px] text-neutral-500">
               {type === 'alimtalk' ? '알림톡 템플릿' : '브랜드메시지 템플릿'} 변경 이력
             </div>
-            <div className={`${KUI_MODAL_TITLE} mt-0.5`}>
+            <div className={`${CUI_MODAL_TITLE} mt-0.5`}>
               {templateName || templateRef}
             </div>
             <div className="text-[11.5px] text-neutral-500 font-mono mt-1">
@@ -190,7 +190,7 @@ export default function TemplateHistoryModal({
           <button
             type="button"
             onClick={onClose}
-            className={KUI_MODAL_CLOSE}
+            className={CUI_MODAL_CLOSE}
             aria-label="닫기"
           >
             <X className="w-[17px] h-[17px]" />
@@ -252,7 +252,7 @@ export default function TemplateHistoryModal({
                               </span>
                             )}
                             {h.changeType === 'STATUS' && (h.templateStatus || h.status) && (
-                              <span className="text-violet-700">
+                              <span className="text-indigo-700">
                                 {TEMPLATE_STATUS_LABELS[(h.templateStatus || h.status) as string] ||
                                   h.templateStatus ||
                                   h.status}

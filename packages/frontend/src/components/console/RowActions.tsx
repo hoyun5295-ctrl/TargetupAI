@@ -16,13 +16,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { MoreHorizontal } from 'lucide-react';
 import {
-  KUI_ACT,
-  KUI_ACTS,
-  KUI_ACT_MORE,
-  KUI_MENU,
-  KUI_MENU_ITEM,
-  KUI_MENU_ITEM_DANGER,
-} from '../../utils/kakao-ui';
+  CUI_ACT,
+  CUI_ACTS,
+  CUI_ACT_MORE,
+  CUI_MENU,
+  CUI_MENU_ITEM,
+  CUI_MENU_ITEM_DANGER,
+} from '../../utils/console-ui';
 
 export interface RowAction {
   label: string;
@@ -61,8 +61,8 @@ export default function RowActions({ actions, align = 'end' }: Props) {
   const [primary, ...rest] = actions;
 
   return (
-    <div className={`${KUI_ACTS} ${align === 'start' ? 'justify-start' : ''}`}>
-      <button type="button" onClick={primary.onClick} className={KUI_ACT}>
+    <div className={`${CUI_ACTS} ${align === 'start' ? 'justify-start' : ''}`}>
+      <button type="button" onClick={primary.onClick} className={CUI_ACT}>
         {primary.label}
       </button>
 
@@ -71,7 +71,7 @@ export default function RowActions({ actions, align = 'end' }: Props) {
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
-            className={KUI_ACT_MORE}
+            className={CUI_ACT_MORE}
             aria-haspopup="menu"
             aria-expanded={open}
             aria-label={`더 보기 — ${rest.map((a) => a.label).join(', ')}`}
@@ -80,7 +80,7 @@ export default function RowActions({ actions, align = 'end' }: Props) {
           </button>
 
           {open && (
-            <div className={KUI_MENU} role="menu">
+            <div className={CUI_MENU} role="menu">
               {rest.map((a) => (
                 <button
                   key={a.label}
@@ -90,7 +90,7 @@ export default function RowActions({ actions, align = 'end' }: Props) {
                     setOpen(false);
                     a.onClick();
                   }}
-                  className={a.danger ? KUI_MENU_ITEM_DANGER : KUI_MENU_ITEM}
+                  className={a.danger ? CUI_MENU_ITEM_DANGER : CUI_MENU_ITEM}
                 >
                   {a.label}
                 </button>

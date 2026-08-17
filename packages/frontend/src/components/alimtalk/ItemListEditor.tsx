@@ -170,7 +170,7 @@ export default function ItemListEditor({
             maxLength={16}
             disabled={disabled}
             placeholder="예: 주문 내역"
-            className={`${KUI_INPUT} h-8 text-[13px]`}
+            className={`${CUI_INPUT} h-8 text-[13px]`}
           />
         )}
       </div>
@@ -202,7 +202,7 @@ export default function ItemListEditor({
                   : '타이틀 (최대 30자)'
               }
               maxLength={highlight.imageUrl ? 21 : 30}
-              className={`${KUI_INPUT} h-8 text-[13px]`}
+              className={`${CUI_INPUT} h-8 text-[13px]`}
             />
             <input
               value={highlight.description}
@@ -216,7 +216,7 @@ export default function ItemListEditor({
                   : '설명 (최대 19자)'
               }
               maxLength={highlight.imageUrl ? 13 : 19}
-              className={`${KUI_INPUT} h-8 text-[13px]`}
+              className={`${CUI_INPUT} h-8 text-[13px]`}
             />
             <label className="flex items-center gap-2">
               <input
@@ -290,7 +290,7 @@ export default function ItemListEditor({
               onChange={(e) => patchRow(i, { title: e.target.value })}
               placeholder="제목 (최대 6자)"
               maxLength={6}
-              className={`${KUI_INPUT} h-8 text-[13px] w-28`}
+              className={`${CUI_INPUT} h-8 text-[13px] w-28`}
             />
             <input
               value={item.description}
@@ -298,16 +298,17 @@ export default function ItemListEditor({
               onChange={(e) => patchRow(i, { description: e.target.value })}
               placeholder="설명 (최대 23자)"
               maxLength={23}
-              className={`${KUI_INPUT} h-8 text-[13px] flex-1`}
+              className={`${CUI_INPUT} h-8 text-[13px] flex-1`}
             />
             <button
               type="button"
               onClick={() => removeRow(i)}
               disabled={disabled || list.length <= 2}
               title={list.length <= 2 ? '최소 2개 필수' : '아이템 삭제'}
-              className="text-[13px] px-1 text-rose-500 hover:text-rose-700 disabled:text-neutral-300"
+              className="h-8 w-8 grid place-items-center rounded-lg shrink-0 transition text-neutral-400 hover:bg-rose-50 hover:text-rose-600 disabled:text-neutral-300 disabled:hover:bg-transparent"
+              aria-label="아이템 삭제"
             >
-              &times;
+              <Trash2 className="w-[15px] h-[15px]" />
             </button>
           </div>
         ))}
@@ -337,7 +338,7 @@ export default function ItemListEditor({
               onChange={(e) => onSummaryChange({ ...summary, title: e.target.value })}
               placeholder="아이템 명 (최대 6자)"
               maxLength={6}
-              className={`${KUI_INPUT} h-8 text-[13px]`}
+              className={`${CUI_INPUT} h-8 text-[13px]`}
             />
             <input
               value={summary.description}
@@ -347,7 +348,7 @@ export default function ItemListEditor({
               }
               placeholder="아이템 내용 (최대 14자, 화폐단위·숫자·쉼표·마침표·변수만)"
               maxLength={14}
-              className={`${KUI_INPUT} h-8 text-[13px]`}
+              className={`${CUI_INPUT} h-8 text-[13px]`}
             />
           </>
         )}
@@ -358,4 +359,5 @@ export default function ItemListEditor({
 
 // React import (체크박스 수동 토글 state용)
 import * as React from 'react';
-import { KUI_INPUT } from '../../utils/kakao-ui';
+import { CUI_INPUT } from '../../utils/console-ui';
+import { Trash2 } from 'lucide-react';

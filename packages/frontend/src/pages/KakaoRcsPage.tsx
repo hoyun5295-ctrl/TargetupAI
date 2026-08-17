@@ -9,56 +9,56 @@ import AlimtalkManagementSection from '../components/alimtalk/AlimtalkManagement
 // 브랜드 템플릿 관리 (기본형 발송용 템플릿 등록·검수)
 import BrandTemplateManagementSection from '../components/alimtalk/BrandTemplateManagementSection';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
-import EmptyState from '../components/kakao/EmptyState';
-import RowActions from '../components/kakao/RowActions';
-import StatusPill from '../components/kakao/StatusPill';
+import EmptyState from '../components/console/EmptyState';
+import RowActions from '../components/console/RowActions';
+import StatusPill from '../components/console/StatusPill';
 import {
   kcx,
-  KUI_BTN_GHOST,
-  KUI_BTN_PRIMARY,
-  KUI_CARD,
-  KUI_CARDS,
-  KUI_CARD_META,
-  KUI_CARD_TITLE,
-  KUI_CELL_META,
-  KUI_CELL_NAME,
-  KUI_CHIPS,
-  KUI_CHIP_COUNT_OFF,
-  KUI_CHIP_COUNT_ON,
-  KUI_CHIP_OFF,
-  KUI_CHIP_ON,
-  KUI_FIELD,
-  KUI_FIELD_INPUT,
-  KUI_HEADER,
-  KUI_LOADING,
-  KUI_ONLY_DESKTOP,
-  KUI_PAGE,
-  KUI_PANEL,
-  KUI_SCROLL_X,
-  KUI_SPINNER,
-  KUI_SUBTITLE,
-  KUI_TAB_BASE,
-  KUI_TAB_COUNT_OFF,
-  KUI_TAB_COUNT_ON,
-  KUI_TAB_INK,
-  KUI_TAB_OFF,
-  KUI_TAB_ON,
-  KUI_TABS,
-  KUI_TD,
-  KUI_TD_STICKY,
-  KUI_TH,
-  KUI_TH_RIGHT,
-  KUI_TH_STICKY,
-  KUI_THEAD,
-  KUI_TITLE,
-  KUI_TOAST_ERROR,
-  KUI_TOAST_SUCCESS,
-  KUI_TOTAL,
-  KUI_TOTAL_NUM,
-  KUI_TR,
-  KUI_WRAP,
-  type KuiPillTone,
-} from '../utils/kakao-ui';
+  CUI_BTN_GHOST,
+  CUI_BTN_PRIMARY,
+  CUI_CARD,
+  CUI_CARDS,
+  CUI_CARD_META,
+  CUI_CARD_TITLE,
+  CUI_CELL_META,
+  CUI_CELL_NAME,
+  CUI_CHIPS,
+  CUI_CHIP_COUNT_OFF,
+  CUI_CHIP_COUNT_ON,
+  CUI_CHIP_OFF,
+  CUI_CHIP_ON,
+  CUI_FIELD,
+  CUI_FIELD_INPUT,
+  CUI_HEADER,
+  CUI_LOADING,
+  CUI_ONLY_DESKTOP,
+  CUI_PAGE,
+  CUI_PANEL,
+  CUI_SCROLL_X,
+  CUI_SPINNER,
+  CUI_SUBTITLE,
+  CUI_TAB_BASE,
+  CUI_TAB_COUNT_OFF,
+  CUI_TAB_COUNT_ON,
+  CUI_TAB_INK,
+  CUI_TAB_OFF,
+  CUI_TAB_ON,
+  CUI_TABS,
+  CUI_TD,
+  CUI_TD_STICKY,
+  CUI_TH,
+  CUI_TH_RIGHT,
+  CUI_TH_STICKY,
+  CUI_THEAD,
+  CUI_TITLE,
+  CUI_TOAST_ERROR,
+  CUI_TOAST_SUCCESS,
+  CUI_TOTAL,
+  CUI_TOTAL_NUM,
+  CUI_TR,
+  CUI_WRAP,
+  type CuiPillTone,
+} from '../utils/console-ui';
 
 function getToken(): string {
   return localStorage.getItem('token') || '';
@@ -66,7 +66,7 @@ function getToken(): string {
 
 type Tab = 'alimtalk' | 'brand' | 'rcs';
 
-const STATUS_BADGE: Record<string, { label: string; tone: KuiPillTone }> = {
+const STATUS_BADGE: Record<string, { label: string; tone: CuiPillTone }> = {
   pending: { label: '승인대기', tone: 'amber' },
   approved: { label: '승인', tone: 'green' },
   rejected: { label: '반려', tone: 'rose' },
@@ -241,14 +241,14 @@ export default function KakaoRcsPage() {
   };
 
   return (
-    <div className={KUI_PAGE}>
+    <div className={CUI_PAGE}>
       {/* ── 헤더 ─────────────────────────────── */}
-      <header className={KUI_HEADER}>
-        <div className={KUI_WRAP}>
+      <header className={CUI_HEADER}>
+        <div className={CUI_WRAP}>
           <div className="h-[62px] flex items-center justify-between gap-4">
             <div className="min-w-0">
-              <h1 className={KUI_TITLE}>{isAgentOnly ? '카카오 템플릿 관리' : '카카오 & RCS'}</h1>
-              <p className={`${KUI_SUBTITLE} truncate`}>
+              <h1 className={CUI_TITLE}>{isAgentOnly ? '카카오 템플릿 관리' : '카카오 & RCS'}</h1>
+              <p className={`${CUI_SUBTITLE} truncate`}>
                 {isAgentOnly ? '알림톡 템플릿을 등록하고 검수 상태를 관리합니다' : '템플릿을 등록하고 검수 상태를 관리합니다'}
               </p>
             </div>
@@ -257,19 +257,19 @@ export default function KakaoRcsPage() {
               // ★ 2026-07-03 에이전트 전용 회사 — 대시보드 진입점 제거
               // ★ 2026-07-20 Harold 확정 3메뉴: 카카오 템플릿(현재)·발송결과·발신번호 등록 — /manage 축소 탭으로 연결
               <div className="flex items-center gap-1 flex-wrap justify-end shrink-0">
-                <button onClick={() => navigate('/manage?tab=stats')} className={KUI_BTN_GHOST}>
+                <button onClick={() => navigate('/manage?tab=stats')} className={CUI_BTN_GHOST}>
                   발송결과
                 </button>
-                <button onClick={() => navigate('/manage?tab=callbacks')} className={KUI_BTN_GHOST}>
+                <button onClick={() => navigate('/manage?tab=callbacks')} className={CUI_BTN_GHOST}>
                   발신번호 등록
                 </button>
-                <button onClick={() => { logout(); navigate('/login'); }} className={kcx(KUI_BTN_GHOST, 'pl-2.5')}>
+                <button onClick={() => { logout(); navigate('/login'); }} className={kcx(CUI_BTN_GHOST, 'pl-2.5')}>
                   <LogOut className="w-[15px] h-[15px]" />
                   로그아웃
                 </button>
               </div>
             ) : (
-              <button onClick={() => navigate('/')} className={kcx(KUI_BTN_GHOST, 'pl-2.5 shrink-0')}>
+              <button onClick={() => navigate('/')} className={kcx(CUI_BTN_GHOST, 'pl-2.5 shrink-0')}>
                 <ArrowLeft className="w-[15px] h-[15px]" />
                 대시보드
               </button>
@@ -277,7 +277,7 @@ export default function KakaoRcsPage() {
           </div>
 
           {/* ── 탭 ─────────────────────────────── */}
-          <nav className={KUI_TABS} role="tablist" aria-label="템플릿 종류">
+          <nav className={CUI_TABS} role="tablist" aria-label="템플릿 종류">
             {tabs.map(tab => {
               const on = activeTab === tab.key;
               return (
@@ -287,22 +287,22 @@ export default function KakaoRcsPage() {
                   role="tab"
                   aria-selected={on}
                   onClick={() => setActiveTab(tab.key)}
-                  className={kcx(KUI_TAB_BASE, on ? KUI_TAB_ON : KUI_TAB_OFF)}
+                  className={kcx(CUI_TAB_BASE, on ? CUI_TAB_ON : CUI_TAB_OFF)}
                 >
                   <span>{tab.label}</span>
                   {tab.count !== null && tab.count !== undefined && (
-                    <span className={on ? KUI_TAB_COUNT_ON : KUI_TAB_COUNT_OFF}>{tab.count}</span>
+                    <span className={on ? CUI_TAB_COUNT_ON : CUI_TAB_COUNT_OFF}>{tab.count}</span>
                   )}
                 </button>
               );
             })}
-            <span className={KUI_TAB_INK} style={{ width: ink.width, transform: `translateX(${ink.left}px)` }} />
+            <span className={CUI_TAB_INK} style={{ width: ink.width, transform: `translateX(${ink.left}px)` }} />
           </nav>
         </div>
       </header>
 
       {/* ── 컨텐츠 ─────────────────────────────── */}
-      <main className={`${KUI_WRAP} pb-24`}>
+      <main className={`${CUI_WRAP} pb-24`}>
 
         {/* ═══ 알림톡 템플릿 탭 (D130 — IMC 연동 통합 섹션) ═══ */}
         {activeTab === 'alimtalk' && <AlimtalkManagementSection onCount={setAlimtalkCount} />}
@@ -319,35 +319,35 @@ export default function KakaoRcsPage() {
           <div className="pt-7">
             {/* 툴바 */}
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-              <div className={KUI_CHIPS}>
+              <div className={CUI_CHIPS}>
                 {RCS_FILTERS.map(f => {
                   const on = rcsFilter === f.value;
                   return (
                     <button
                       key={f.value || 'all'}
                       onClick={() => setRcsFilter(f.value)}
-                      className={on ? KUI_CHIP_ON : KUI_CHIP_OFF}
+                      className={on ? CUI_CHIP_ON : CUI_CHIP_OFF}
                     >
                       {f.label}
-                      <span className={on ? KUI_CHIP_COUNT_ON : KUI_CHIP_COUNT_OFF}>{rcsCounts[f.value] ?? 0}</span>
+                      <span className={on ? CUI_CHIP_COUNT_ON : CUI_CHIP_COUNT_OFF}>{rcsCounts[f.value] ?? 0}</span>
                     </button>
                   );
                 })}
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
-                <div className={`${KUI_FIELD} flex-1 lg:w-56 lg:flex-none`}>
+                <div className={`${CUI_FIELD} flex-1 lg:w-56 lg:flex-none`}>
                   <Search className="w-[14px] h-[14px] text-neutral-400 shrink-0" />
                   <input
                     value={rcsSearch}
                     onChange={e => setRcsSearch(e.target.value)}
                     placeholder="템플릿명 검색"
-                    className={KUI_FIELD_INPUT}
+                    className={CUI_FIELD_INPUT}
                   />
                 </div>
                 <button
                   onClick={() => { setEditingRcs(null); setShowRcsForm(true); }}
-                  className={KUI_BTN_PRIMARY}
+                  className={CUI_BTN_PRIMARY}
                 >
                   <Plus className="w-[15px] h-[15px]" />
                   템플릿 등록 요청
@@ -356,8 +356,8 @@ export default function KakaoRcsPage() {
             </div>
 
             {loading ? (
-              <div className={`${KUI_LOADING} mt-5`}>
-                <span className={KUI_SPINNER} />
+              <div className={`${CUI_LOADING} mt-5`}>
+                <span className={CUI_SPINNER} />
                 불러오는 중
               </div>
             ) : filteredRcs.length === 0 ? (
@@ -377,16 +377,16 @@ export default function KakaoRcsPage() {
             ) : (
               <>
                 {/* 데스크톱 표 */}
-                <div className={`${KUI_PANEL} ${KUI_ONLY_DESKTOP} mt-5`}>
-                  <div className={KUI_SCROLL_X}>
+                <div className={`${CUI_PANEL} ${CUI_ONLY_DESKTOP} mt-5`}>
+                  <div className={CUI_SCROLL_X}>
                     <table className="w-full min-w-[760px]">
-                      <thead className={KUI_THEAD}>
+                      <thead className={CUI_THEAD}>
                         <tr>
-                          <th className={KUI_TH}>템플릿명</th>
-                          <th className={KUI_TH}>메시지 유형</th>
-                          <th className={KUI_TH}>상태</th>
-                          <th className={KUI_TH_RIGHT}>등록일</th>
-                          <th className={KUI_TH_STICKY}>관리</th>
+                          <th className={CUI_TH}>템플릿명</th>
+                          <th className={CUI_TH}>메시지 유형</th>
+                          <th className={CUI_TH}>상태</th>
+                          <th className={CUI_TH_RIGHT}>등록일</th>
+                          <th className={CUI_TH_STICKY}>관리</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -394,12 +394,12 @@ export default function KakaoRcsPage() {
                           const badge = STATUS_BADGE[t.status] || STATUS_BADGE.pending;
                           const actions = rcsActions(t);
                           return (
-                            <tr key={t.id} className={KUI_TR}>
-                              <td className={KUI_TD}><span className={KUI_CELL_NAME}>{t.template_name}</span></td>
-                              <td className={KUI_TD}><span className="text-[13.5px] text-neutral-800">{t.message_type}</span></td>
-                              <td className={KUI_TD}><StatusPill label={badge.label} tone={badge.tone} /></td>
-                              <td className={`${KUI_TD} text-right`}><span className={KUI_CELL_META}>{formatDate(t.created_at)}</span></td>
-                              <td className={KUI_TD_STICKY}>
+                            <tr key={t.id} className={CUI_TR}>
+                              <td className={CUI_TD}><span className={CUI_CELL_NAME}>{t.template_name}</span></td>
+                              <td className={CUI_TD}><span className="text-[13.5px] text-neutral-800">{t.message_type}</span></td>
+                              <td className={CUI_TD}><StatusPill label={badge.label} tone={badge.tone} /></td>
+                              <td className={`${CUI_TD} text-right`}><span className={CUI_CELL_META}>{formatDate(t.created_at)}</span></td>
+                              <td className={CUI_TD_STICKY}>
                                 {actions.length > 0 ? <RowActions actions={actions} /> : <span className="text-[13px] text-neutral-300">-</span>}
                               </td>
                             </tr>
@@ -411,20 +411,20 @@ export default function KakaoRcsPage() {
                 </div>
 
                 {/* 모바일 카드 */}
-                <div className={`${KUI_CARDS} mt-5`}>
+                <div className={`${CUI_CARDS} mt-5`}>
                   {filteredRcs.map(t => {
                     const badge = STATUS_BADGE[t.status] || STATUS_BADGE.pending;
                     const actions = rcsActions(t);
                     return (
-                      <div key={t.id} className={KUI_CARD}>
+                      <div key={t.id} className={CUI_CARD}>
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <div className={KUI_CARD_TITLE}>{t.template_name}</div>
+                            <div className={CUI_CARD_TITLE}>{t.template_name}</div>
                             <div className="mt-0.5 text-[12px] text-neutral-500">{t.message_type}</div>
                           </div>
                           <StatusPill label={badge.label} tone={badge.tone} />
                         </div>
-                        <div className={KUI_CARD_META}>
+                        <div className={CUI_CARD_META}>
                           <span className="tabular-nums">{formatDate(t.created_at)}</span>
                         </div>
                         {actions.length > 0 && (
@@ -438,7 +438,7 @@ export default function KakaoRcsPage() {
                 </div>
 
                 <div className="mt-4">
-                  <span className={KUI_TOTAL}>총 <b className={KUI_TOTAL_NUM}>{filteredRcs.length}</b>건</span>
+                  <span className={CUI_TOTAL}>총 <b className={CUI_TOTAL_NUM}>{filteredRcs.length}</b>건</span>
                 </div>
               </>
             )}
@@ -467,7 +467,7 @@ export default function KakaoRcsPage() {
 
       {/* Toast */}
       {toast.show && (
-        <div className={toast.type === 'success' ? KUI_TOAST_SUCCESS : KUI_TOAST_ERROR} role="status">
+        <div className={toast.type === 'success' ? CUI_TOAST_SUCCESS : CUI_TOAST_ERROR} role="status">
           {toast.message}
         </div>
       )}

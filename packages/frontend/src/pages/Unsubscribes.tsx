@@ -258,17 +258,17 @@ export default function Unsubscribes() {
   const sourceLabel: Record<string, { text: string; color: string }> = {
     '080_ars': { text: '080 ARS', color: 'bg-amber-50 text-amber-700 ring-1 ring-amber-100' },
     api: { text: '080 자동', color: 'bg-sky-50 text-sky-700 ring-1 ring-sky-100' },
-    upload: { text: '파일 업로드', color: 'bg-violet-50 text-violet-700 ring-1 ring-violet-100' },
-    manual: { text: '직접 입력', color: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200' },
+    upload: { text: '파일 업로드', color: 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100' },
+    manual: { text: '직접 입력', color: 'bg-neutral-100 text-neutral-600 ring-1 ring-neutral-200' },
     db_upload: { text: 'DB 업로드', color: 'bg-teal-50 text-teal-700 ring-1 ring-teal-100' },
     sync: { text: 'Sync 연동', color: 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100' },
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-neutral-50">
       {/* 토스트 */}
       {toast.show && (
-        <div className="fixed top-4 right-4 z-[10000] flex items-center gap-3 px-4 py-3 rounded-xl bg-white shadow-lg ring-1 ring-slate-200 max-w-sm animate-in fade-in slide-in-from-top-2 duration-200">
+        <div className="fixed top-4 right-4 z-[10000] flex items-center gap-3 px-4 py-3 rounded-xl bg-white shadow-lg ring-1 ring-neutral-200 max-w-sm animate-in fade-in slide-in-from-top-2 duration-200">
           {toast.type === 'success' ? (
             <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
           ) : toast.type === 'info' ? (
@@ -276,31 +276,31 @@ export default function Unsubscribes() {
           ) : (
             <AlertCircle className="w-5 h-5 text-rose-500 shrink-0" />
           )}
-          <span className="text-sm text-slate-700">{toast.message}</span>
+          <span className="text-sm text-neutral-700">{toast.message}</span>
         </div>
       )}
 
       {/* 삭제 확인 모달 */}
       {deleteModal.show && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" />
-          <div className="relative bg-white rounded-2xl shadow-xl ring-1 ring-slate-200 max-w-sm w-full animate-in fade-in zoom-in duration-200">
+          <div className="absolute inset-0 bg-neutral-900/40 backdrop-blur-sm" />
+          <div className="relative bg-white rounded-2xl shadow-xl ring-1 ring-neutral-200 max-w-sm w-full animate-in fade-in zoom-in duration-200">
             <div className="p-6 text-center">
               <div className="w-14 h-14 mx-auto mb-4 bg-rose-50 rounded-2xl flex items-center justify-center">
                 <Trash2 className="w-6 h-6 text-rose-500" />
               </div>
-              <h3 className="text-lg font-bold text-slate-900 mb-2">수신거부 해제</h3>
+              <h3 className="text-lg font-bold text-neutral-900 mb-2">수신거부 해제</h3>
               <p className="text-sm mb-1">
-                <span className="font-mono font-semibold text-slate-800">{formatPhone(deleteModal.phone)}</span>
+                <span className="font-mono font-semibold text-neutral-800">{formatPhone(deleteModal.phone)}</span>
               </p>
-              <p className="text-sm text-slate-500 mb-6">
+              <p className="text-sm text-neutral-500 mb-6">
                 삭제 시 해당 번호의 수신동의가 복원됩니다.
               </p>
               <div className="flex gap-3">
                 <button
                   onClick={() => setDeleteModal({ show: false, id: '', phone: '' })}
                   disabled={deleting}
-                  className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 font-medium transition-colors disabled:opacity-50"
+                  className="flex-1 px-4 py-2.5 border border-neutral-200 text-neutral-700 rounded-xl hover:bg-neutral-50 font-medium transition-colors disabled:opacity-50"
                 >
                   취소
                 </button>
@@ -321,18 +321,18 @@ export default function Unsubscribes() {
       {columnPicker.show && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
-            className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            className="absolute inset-0 bg-neutral-900/40 backdrop-blur-sm"
             onClick={() => { if (!pickerSubmitting) setColumnPicker({ show: false, fileId: '', columns: [], selected: 0, totalRows: 0 }); }}
           />
-          <div className="relative bg-white rounded-2xl shadow-xl ring-1 ring-slate-200 max-w-md w-full animate-in fade-in zoom-in duration-200">
+          <div className="relative bg-white rounded-2xl shadow-xl ring-1 ring-neutral-200 max-w-md w-full animate-in fade-in zoom-in duration-200">
             <div className="p-6">
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-11 h-11 rounded-xl bg-violet-50 flex items-center justify-center shrink-0">
-                  <Upload className="w-5 h-5 text-violet-500" />
+                <div className="w-11 h-11 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
+                  <Upload className="w-5 h-5 text-indigo-500" />
                 </div>
                 <div className="min-w-0">
-                  <h3 className="text-base font-bold text-slate-900">전화번호 열 선택</h3>
-                  <p className="text-xs text-slate-400">수신거부할 전화번호가 있는 열을 선택하세요 · 총 {columnPicker.totalRows.toLocaleString()}행</p>
+                  <h3 className="text-base font-bold text-neutral-900">전화번호 열 선택</h3>
+                  <p className="text-xs text-neutral-400">수신거부할 전화번호가 있는 열을 선택하세요 · 총 {columnPicker.totalRows.toLocaleString()}행</p>
                 </div>
               </div>
 
@@ -343,15 +343,15 @@ export default function Unsubscribes() {
                     <button
                       key={col.index}
                       onClick={() => setColumnPicker((prev) => ({ ...prev, selected: col.index }))}
-                      className={`w-full text-left px-3.5 py-3 rounded-xl border transition-colors ${active ? 'border-violet-400 bg-violet-50 ring-1 ring-violet-200' : 'border-slate-200 hover:bg-slate-50'}`}
+                      className={`w-full text-left px-3.5 py-3 rounded-xl border transition-colors ${active ? 'border-indigo-400 bg-indigo-50 ring-1 ring-indigo-200' : 'border-neutral-200 hover:bg-neutral-50'}`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-semibold text-slate-800 truncate">{col.header}</span>
+                        <span className="text-sm font-semibold text-neutral-800 truncate">{col.header}</span>
                         {col.phoneCount > 0 && (
                           <span className="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100">전화번호 {col.phoneCount.toLocaleString()}건</span>
                         )}
                       </div>
-                      <div className="mt-1 text-xs text-slate-400 font-mono truncate">
+                      <div className="mt-1 text-[11.5px] text-neutral-500 font-mono truncate">
                         {col.samples.length > 0 ? col.samples.join('  ·  ') : '(빈 값)'}
                       </div>
                     </button>
@@ -363,14 +363,14 @@ export default function Unsubscribes() {
                 <button
                   onClick={() => setColumnPicker({ show: false, fileId: '', columns: [], selected: 0, totalRows: 0 })}
                   disabled={pickerSubmitting}
-                  className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 font-medium transition-colors disabled:opacity-50"
+                  className="flex-1 px-4 py-2.5 border border-neutral-200 text-neutral-700 rounded-xl hover:bg-neutral-50 font-medium transition-colors disabled:opacity-50"
                 >
                   취소
                 </button>
                 <button
                   onClick={() => commitUpload(columnPicker.fileId, columnPicker.selected)}
                   disabled={pickerSubmitting}
-                  className="flex-1 px-4 py-2.5 bg-slate-900 text-white rounded-xl hover:bg-slate-800 font-medium transition-colors disabled:opacity-50"
+                  className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium transition-colors disabled:opacity-50"
                 >
                   {pickerSubmitting ? '등록 중...' : '이 열로 등록'}
                 </button>
@@ -383,21 +383,21 @@ export default function Unsubscribes() {
       {/* D43-4: 080 연동 테스트 안내 모달 — opt_out_auto_sync=true일 때만 열림 */}
       {syncTestModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" />
-          <div className="relative bg-white rounded-2xl shadow-xl ring-1 ring-slate-200 max-w-sm w-full animate-in fade-in zoom-in duration-200">
+          <div className="absolute inset-0 bg-neutral-900/40 backdrop-blur-sm" />
+          <div className="relative bg-white rounded-2xl shadow-xl ring-1 ring-neutral-200 max-w-sm w-full animate-in fade-in zoom-in duration-200">
             <div className="p-6 text-center">
               <div className="w-14 h-14 mx-auto mb-4 bg-sky-50 rounded-2xl flex items-center justify-center">
                 <Phone className="w-6 h-6 text-sky-500" />
               </div>
-              <h3 className="text-lg font-bold text-slate-900 mb-2">080 연동 테스트</h3>
-              <div className="text-sm text-slate-600 mb-4 leading-relaxed">
+              <h3 className="text-lg font-bold text-neutral-900 mb-2">080 연동 테스트</h3>
+              <div className="text-sm text-neutral-600 mb-4 leading-relaxed">
                 <p className="mb-3">아래 번호로 전화하여 수신거부를 등록하세요.</p>
-                <div className="bg-slate-50 rounded-xl py-3 px-4 mb-3 ring-1 ring-slate-100">
-                  <p className="text-2xl font-bold text-slate-900 font-mono tracking-wider">
+                <div className="bg-neutral-50 rounded-xl py-3 px-4 mb-3 ring-1 ring-neutral-100">
+                  <p className="text-2xl font-bold text-neutral-900 font-mono tracking-wider">
                     {format080Number(opt080Number)}
                   </p>
                 </div>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-neutral-400">
                   ARS 안내에 따라 수신거부 등록 후<br />
                   아래 버튼을 눌러 연동 상태를 확인하세요.
                 </p>
@@ -405,7 +405,7 @@ export default function Unsubscribes() {
               <div className="flex gap-3">
                 <button
                   onClick={() => setSyncTestModal(false)}
-                  className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 font-medium transition-colors"
+                  className="flex-1 px-4 py-2.5 border border-neutral-200 text-neutral-700 rounded-xl hover:bg-neutral-50 font-medium transition-colors"
                 >
                   닫기
                 </button>
@@ -415,7 +415,7 @@ export default function Unsubscribes() {
                     handleSyncTest();
                   }}
                   disabled={syncTesting}
-                  className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-slate-900 text-white rounded-xl hover:bg-slate-800 font-medium transition-colors disabled:opacity-50"
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium transition-colors disabled:opacity-50"
                 >
                   <RefreshCw className={`w-4 h-4 ${syncTesting ? 'animate-spin' : ''}`} />
                   {syncTesting ? '확인중...' : '연동 확인'}
@@ -427,20 +427,20 @@ export default function Unsubscribes() {
       )}
 
       {/* 헤더 */}
-      <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200">
+      <header className="sticky top-0 z-30 bg-white border-b border-neutral-200">
         <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-rose-50 flex items-center justify-center">
               <Ban className="w-5 h-5 text-rose-500" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-slate-900">수신거부 관리</h1>
-              <p className="text-xs text-slate-400">차단된 번호 관리 · 080 자동 연동</p>
+              <h1 className="text-[18px] font-bold tracking-[-0.03em] text-neutral-900">수신거부 관리</h1>
+              <p className="text-[13px] text-neutral-500">차단된 번호 관리 · 080 자동 연동</p>
             </div>
           </div>
           <button
             onClick={() => navigate('/')}
-            className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-900 transition-colors"
+            className="inline-flex items-center gap-1.5 text-sm text-neutral-500 hover:text-neutral-900 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" /> 대시보드
           </button>
@@ -449,11 +449,11 @@ export default function Unsubscribes() {
 
       <main className="max-w-6xl mx-auto px-4 py-8">
         {/* 상단 액션 영역 */}
-        <div className="bg-white rounded-2xl ring-1 ring-slate-200 shadow-sm p-6 mb-6">
+        <div className="bg-white rounded-2xl ring-1 ring-neutral-200 shadow-sm p-6 mb-6">
           <div className="flex flex-wrap gap-4 items-end">
             {/* 검색 */}
             <div className="flex-1 min-w-[220px]">
-              <label className="block text-xs font-semibold text-slate-500 mb-1.5">전화번호 검색</label>
+              <label className="block text-[12.5px] font-medium text-neutral-600 mb-1.5">전화번호 검색</label>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -461,11 +461,11 @@ export default function Unsubscribes() {
                   onChange={(e) => setSearch(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                   placeholder="010-1234-5678"
-                  className="flex-1 px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 transition"
+                  className="flex-1 px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-4 focus:ring-indigo-600/15 focus:border-indigo-600 transition"
                 />
                 <button
                   onClick={handleSearch}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-slate-900 text-white text-sm font-medium rounded-xl hover:bg-slate-800 transition-colors"
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors"
                 >
                   <Search className="w-4 h-4" /> 검색
                 </button>
@@ -474,7 +474,7 @@ export default function Unsubscribes() {
 
             {/* 직접 추가 — 격리 ON + 고객사관리자 차단 */}
             <div className="min-w-[200px]">
-              <label className="block text-xs font-semibold text-slate-500 mb-1.5">직접 추가</label>
+              <label className="block text-[12.5px] font-medium text-neutral-600 mb-1.5">직접 추가</label>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -483,12 +483,12 @@ export default function Unsubscribes() {
                   onKeyDown={(e) => e.key === 'Enter' && canManageUnsubscribes && handleAdd()}
                   placeholder="01012345678"
                   disabled={!canManageUnsubscribes}
-                  className={`w-36 px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 transition ${!canManageUnsubscribes ? 'bg-slate-50 cursor-not-allowed' : ''}`}
+                  className={`w-36 px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-4 focus:ring-indigo-600/15 focus:border-indigo-600 transition ${!canManageUnsubscribes ? 'bg-neutral-50 cursor-not-allowed' : ''}`}
                 />
                 <button
                   onClick={handleAdd}
                   disabled={!canManageUnsubscribes}
-                  className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium rounded-xl transition-colors ${canManageUnsubscribes ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+                  className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium rounded-xl transition-colors ${canManageUnsubscribes ? 'bg-neutral-900 text-white hover:bg-neutral-800' : 'bg-neutral-200 text-neutral-400 cursor-not-allowed'}`}
                 >
                   <Plus className="w-4 h-4" /> 추가
                 </button>
@@ -497,8 +497,8 @@ export default function Unsubscribes() {
 
             {/* 파일 업로드 — 격리 ON + 고객사관리자 차단 */}
             <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1.5">파일 업로드</label>
-              <label className={`inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl border transition-colors ${canManageUnsubscribes ? 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer' : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'} ${uploading ? 'opacity-60' : ''}`}>
+              <label className="block text-[12.5px] font-medium text-neutral-600 mb-1.5">파일 업로드</label>
+              <label className={`inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl border transition-colors ${canManageUnsubscribes ? 'bg-white border-neutral-200 text-neutral-700 hover:bg-neutral-50 cursor-pointer' : 'bg-neutral-100 border-neutral-200 text-neutral-400 cursor-not-allowed'} ${uploading ? 'opacity-60' : ''}`}>
                 <Upload className="w-4 h-4" />
                 <span>{uploading ? '처리중...' : '엑셀·CSV'}</span>
                 <input
@@ -514,11 +514,11 @@ export default function Unsubscribes() {
             {/* D43-4: 080 연동 테스트 — opt_out_auto_sync=true일 때만 표시 */}
             {optOutAutoSync && opt080Number && (
               <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">080 연동</label>
+                <label className="block text-[12.5px] font-medium text-neutral-600 mb-1.5">080 연동</label>
                 <button
                   onClick={() => setSyncTestModal(true)}
                   disabled={syncTesting}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium text-slate-700 rounded-xl hover:bg-slate-50 transition-colors disabled:opacity-50"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-neutral-200 text-sm font-medium text-neutral-700 rounded-xl hover:bg-neutral-50 transition-colors disabled:opacity-50"
                 >
                   <RefreshCw className={`w-4 h-4 ${syncTesting ? 'animate-spin' : ''}`} />
                   <span>{syncTesting ? '확인중...' : '연동 테스트'}</span>
@@ -527,7 +527,7 @@ export default function Unsubscribes() {
             )}
           </div>
 
-          <p className="text-xs text-slate-400 mt-3">
+          <p className="text-xs text-neutral-400 mt-3">
             {optOutAutoSync
               ? `※ 080 수신거부(${format080Number(opt080Number)}) 시 자동 등록됩니다. 유료 요금제 업체는 고객 DB의 수신동의 상태도 자동 연동됩니다.`
               : '※ 엑셀(xlsx·xls)·CSV·TXT 업로드를 지원합니다. 열이 여러 개면 전화번호 열을 선택하는 창이 뜹니다.'
@@ -547,16 +547,16 @@ export default function Unsubscribes() {
         </div>
 
         {/* 목록 */}
-        <div className="bg-white rounded-2xl ring-1 ring-slate-200 shadow-sm overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center">
-            <h2 className="text-sm font-bold text-slate-900">수신거부 목록</h2>
+        <div className="bg-white rounded-2xl ring-1 ring-neutral-200 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-neutral-100 flex justify-between items-center">
+            <h2 className="text-sm font-bold text-neutral-900">수신거부 목록</h2>
             <div className="flex items-center gap-3">
-              <span className="text-sm text-slate-400">총 <span className="font-semibold text-slate-700">{pagination.total.toLocaleString()}</span>건</span>
+              <span className="text-sm text-neutral-400">총 <span className="font-semibold text-neutral-700">{pagination.total.toLocaleString()}</span>건</span>
               {/* ★ 2026-06-13: 전체 엑셀 다운로드 (콤비타·던필드 알파 요청) — 현재 검색 조건 그대로 전체 내려받기 */}
               <button
                 onClick={handleExportAll}
                 disabled={exporting || pagination.total === 0}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 text-white rounded-lg text-xs font-medium hover:bg-slate-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Download className={`w-3.5 h-3.5 ${exporting ? 'animate-bounce' : ''}`} />
                 {exporting ? '내려받는 중...' : '전체 엑셀 다운로드'}
@@ -565,42 +565,42 @@ export default function Unsubscribes() {
           </div>
 
           {loading ? (
-            <div className="p-12 flex flex-col items-center justify-center gap-2 text-sm text-slate-400">
-              <RefreshCw className="w-5 h-5 animate-spin text-slate-300" />
+            <div className="p-16 flex flex-col items-center justify-center gap-2 text-[13px] text-neutral-500">
+              <RefreshCw className="w-5 h-5 animate-spin text-neutral-300" />
               로딩 중...
             </div>
           ) : unsubscribes.length === 0 ? (
-            <div className="p-12 text-center text-sm text-slate-400">수신거부 목록이 없습니다</div>
+            <div className="p-16 text-center text-[13px] text-neutral-500">수신거부 목록이 없습니다</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-slate-100">
-                    <th className="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">전화번호</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">등록 경로</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">등록일시</th>
-                    <th className="px-5 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wider">삭제</th>
+                  <tr className="border-b border-neutral-100">
+                    <th className="h-[42px] px-5 text-left text-[12px] font-semibold text-neutral-500 whitespace-nowrap">전화번호</th>
+                    <th className="h-[42px] px-5 text-left text-[12px] font-semibold text-neutral-500 whitespace-nowrap">등록 경로</th>
+                    <th className="h-[42px] px-5 text-left text-[12px] font-semibold text-neutral-500 whitespace-nowrap">등록일시</th>
+                    <th className="h-[42px] px-5 text-center text-[12px] font-semibold text-neutral-500 whitespace-nowrap">삭제</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50">
+                <tbody className="divide-y divide-neutral-50">
                   {unsubscribes.map((item) => {
-                    const src = sourceLabel[item.source] || { text: item.source, color: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200' };
+                    const src = sourceLabel[item.source] || { text: item.source, color: 'bg-neutral-100 text-neutral-600 ring-1 ring-neutral-200' };
                     return (
-                      <tr key={item.id} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="px-5 py-3.5 font-mono text-sm text-slate-900">{formatPhone(item.phone)}</td>
+                      <tr key={item.id} className="hover:bg-indigo-50/50 transition-colors">
+                        <td className="px-5 py-3.5 font-mono text-sm text-neutral-900">{formatPhone(item.phone)}</td>
                         <td className="px-5 py-3.5">
                           <span className={`inline-flex px-2.5 py-1 rounded-lg text-xs font-medium ${src.color}`}>
                             {src.text}
                           </span>
                         </td>
-                        <td className="px-5 py-3.5 text-sm text-slate-500">
+                        <td className="px-5 py-3.5 text-sm text-neutral-500">
                           {formatDateTime(item.created_at)}
                         </td>
                         <td className="px-5 py-3.5 text-center">
                           <button
                             onClick={() => canManageUnsubscribes && setDeleteModal({ show: true, id: item.id, phone: item.phone })}
                             disabled={!canManageUnsubscribes}
-                            className={`inline-flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${canManageUnsubscribes ? 'text-slate-400 hover:text-rose-600 hover:bg-rose-50' : 'text-slate-200 cursor-not-allowed'}`}
+                            className={`inline-flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${canManageUnsubscribes ? 'text-neutral-400 hover:text-rose-600 hover:bg-rose-50' : 'text-neutral-200 cursor-not-allowed'}`}
                             title="수신거부 해제"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -616,21 +616,21 @@ export default function Unsubscribes() {
 
           {/* 페이지네이션 */}
           {pagination.totalPages > 1 && (
-            <div className="px-5 py-4 border-t border-slate-100 flex justify-center items-center gap-2">
+            <div className="px-5 py-4 border-t border-neutral-100 flex justify-center items-center gap-2">
               <button
                 onClick={() => setPagination(prev => ({ ...prev, page: prev.page - 1 }))}
                 disabled={pagination.page === 1}
-                className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-neutral-200 text-neutral-500 hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <span className="px-3 text-sm text-slate-500">
-                {pagination.page} <span className="text-slate-300">/</span> {pagination.totalPages}
+              <span className="px-3 text-sm text-neutral-500">
+                {pagination.page} <span className="text-neutral-300">/</span> {pagination.totalPages}
               </span>
               <button
                 onClick={() => setPagination(prev => ({ ...prev, page: prev.page + 1 }))}
                 disabled={pagination.page === pagination.totalPages}
-                className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-neutral-200 text-neutral-500 hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>

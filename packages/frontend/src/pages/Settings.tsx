@@ -8,10 +8,10 @@ import {
 } from 'lucide-react';
 
 const inputCls =
-  'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition placeholder:text-gray-300 focus:border-violet-400 focus:ring-2 focus:ring-violet-100';
+  'w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-800 outline-none transition placeholder:text-neutral-300 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100';
 const disabledInputCls =
-  'w-full rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm text-gray-400 outline-none cursor-not-allowed';
-const labelCls = 'mb-1.5 block text-xs font-medium text-gray-500';
+  'w-full rounded-lg border border-neutral-100 bg-neutral-50 px-3 py-2 text-sm text-neutral-400 outline-none cursor-not-allowed';
+const labelCls = 'mb-1.5 block text-xs font-medium text-neutral-500';
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -160,7 +160,7 @@ export default function Settings() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 text-sm text-gray-400">
+      <div className="flex min-h-screen items-center justify-center bg-neutral-50 text-[13px] text-neutral-500">
         불러오는 중...
       </div>
     );
@@ -169,24 +169,24 @@ export default function Settings() {
   const totalCbPages = Math.ceil(callbackNumbers.length / callbackPageSize);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-neutral-50">
       {/* sticky 헤더 */}
-      <header className="sticky top-0 z-30 border-b border-gray-100 bg-white/80 backdrop-blur">
+      <header className="sticky top-0 z-30 border-b border-neutral-200 bg-white">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-3.5">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600">
               <Building2 className="h-[18px] w-[18px] text-white" />
             </div>
             <div>
-              <h1 className="text-[15px] font-bold leading-tight text-gray-900">회사 설정</h1>
-              <p className="text-[11px] text-gray-400">브랜드 · 발송 · 요금 환경</p>
+              <h1 className="text-[17px] font-bold leading-tight tracking-[-0.03em] text-neutral-900">회사 설정</h1>
+              <p className="mt-0.5 text-[12.5px] text-neutral-500">브랜드 · 발송 · 요금 환경</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => navigate('/')} className="flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700">
+            <button onClick={() => navigate('/')} className="flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-medium text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-700">
               <ArrowLeft className="h-3.5 w-3.5" /> 대시보드
             </button>
-            <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:opacity-50">
+            <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50">
               <Save className="h-3.5 w-3.5" /> {saving ? '저장 중...' : '저장'}
             </button>
           </div>
@@ -197,12 +197,12 @@ export default function Settings() {
         <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
 
           {/* 기본 정보 */}
-          <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+          <section className="rounded-2xl border border-neutral-200 bg-white p-5">
             <div className="mb-4 flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-50 text-violet-600"><Building2 className="h-[18px] w-[18px]" /></div>
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-neutral-100 text-neutral-500"><Building2 className="h-[18px] w-[18px]" /></div>
               <div>
-                <h2 className="text-sm font-semibold text-gray-900">기본 정보</h2>
-                <p className="text-[11px] text-gray-400">브랜드명 · 업종 · 수신거부번호</p>
+                <h2 className="text-sm font-semibold text-neutral-900">기본 정보</h2>
+                <p className="text-[11px] text-neutral-400">브랜드명 · 업종 · 수신거부번호</p>
               </div>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -230,12 +230,12 @@ export default function Settings() {
           </section>
 
           {/* 담당자 사전수신 */}
-          <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+          <section className="rounded-2xl border border-neutral-200 bg-white p-5">
             <div className="mb-4 flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600"><Users className="h-[18px] w-[18px]" /></div>
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-neutral-100 text-neutral-500"><Users className="h-[18px] w-[18px]" /></div>
               <div>
-                <h2 className="text-sm font-semibold text-gray-900">담당자 사전수신</h2>
-                <p className="text-[11px] text-gray-400">발송 전 담당자 전원에게 테스트 문자 발송</p>
+                <h2 className="text-sm font-semibold text-neutral-900">담당자 사전수신</h2>
+                <p className="text-[11px] text-neutral-400">발송 전 담당자 전원에게 테스트 문자 발송</p>
               </div>
             </div>
 
@@ -243,9 +243,9 @@ export default function Settings() {
               <div className="mb-3 space-y-1.5">
                 {managerContacts.map((contact, idx) => (
                   <div key={contact.id || contact.phone} className="flex items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2">
-                    <span className="flex-1 truncate text-sm text-gray-700">
-                      <b className="font-semibold text-gray-800">{contact.name || `담당자 ${idx + 1}`}</b>
-                      <span className="ml-1.5 tabular-nums text-gray-500">{formatPhone(contact.phone)}</span>
+                    <span className="flex-1 truncate text-sm text-neutral-700">
+                      <b className="font-semibold text-neutral-800">{contact.name || `담당자 ${idx + 1}`}</b>
+                      <span className="ml-1.5 tabular-nums text-neutral-500">{formatPhone(contact.phone)}</span>
                     </span>
                     <button onClick={() => contact.id && handleRemovePhone(contact.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-rose-500 transition hover:bg-rose-50">
                       <Trash2 className="h-3.5 w-3.5" /> 삭제
@@ -254,7 +254,7 @@ export default function Settings() {
                 ))}
               </div>
             ) : (
-              <div className="mb-3 rounded-lg border border-dashed border-gray-200 py-6 text-center text-xs text-gray-400">등록된 담당자가 없습니다</div>
+              <div className="mb-3 rounded-lg border border-dashed border-neutral-300 py-7 text-center text-[12.5px] text-neutral-500">등록된 담당자가 없습니다</div>
             )}
 
             <div className="flex items-end gap-2">
@@ -266,44 +266,44 @@ export default function Settings() {
                 <label className={labelCls}>전화번호</label>
                 <input type="text" value={newPhone} onChange={(e) => setNewPhone(e.target.value.replace(/[^\d-]/g, ''))} onKeyDown={(e) => { if (e.key === 'Enter') handleAddPhone(); }} className={inputCls} placeholder="01012345678" />
               </div>
-              <button onClick={handleAddPhone} disabled={!newPhone.replace(/\D/g, '')} className="flex shrink-0 items-center gap-1 rounded-lg bg-violet-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:opacity-40">
+              <button onClick={handleAddPhone} disabled={!newPhone.replace(/\D/g, '')} className="flex shrink-0 items-center gap-1 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-40">
                 <Plus className="h-3.5 w-3.5" /> 추가
               </button>
             </div>
           </section>
 
           {/* 등록 회신번호 (읽기전용) */}
-          <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+          <section className="rounded-2xl border border-neutral-200 bg-white p-5">
             <div className="mb-4 flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-50 text-sky-600"><PhoneCall className="h-[18px] w-[18px]" /></div>
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-neutral-100 text-neutral-500"><PhoneCall className="h-[18px] w-[18px]" /></div>
               <div>
-                <h2 className="text-sm font-semibold text-gray-900">등록 회신번호</h2>
-                <p className="text-[11px] text-gray-400">승인된 발신번호 · 신규 등록은 '발신번호 관리'</p>
+                <h2 className="text-sm font-semibold text-neutral-900">등록 회신번호</h2>
+                <p className="text-[11px] text-neutral-400">승인된 발신번호 · 신규 등록은 '발신번호 관리'</p>
               </div>
             </div>
 
             {callbackNumbers.length > 0 ? (
               <div className="space-y-1.5">
                 {callbackNumbers.slice(callbackPage * callbackPageSize, (callbackPage + 1) * callbackPageSize).map((cb) => (
-                  <div key={cb.id} className="flex items-center gap-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
-                    <span className="flex-1 truncate text-sm tabular-nums text-gray-700">
+                  <div key={cb.id} className="flex items-center gap-2 rounded-lg border border-neutral-100 bg-neutral-50 px-3 py-2">
+                    <span className="flex-1 truncate text-sm tabular-nums text-neutral-700">
                       {cb.phone}
-                      {cb.store_name && <span className="ml-1.5 text-xs text-gray-400">({cb.store_name})</span>}
-                      {!cb.store_name && cb.label && <span className="ml-1.5 text-xs text-gray-400">({cb.label})</span>}
+                      {cb.store_name && <span className="ml-1.5 text-[12px] text-neutral-500">({cb.store_name})</span>}
+                      {!cb.store_name && cb.label && <span className="ml-1.5 text-[12px] text-neutral-500">({cb.label})</span>}
                     </span>
                     {cb.is_default && <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-white">기본</span>}
                   </div>
                 ))}
                 {totalCbPages > 1 && (
                   <div className="flex items-center justify-center gap-1 pt-2">
-                    <button onClick={() => setCallbackPage(p => Math.max(0, p - 1))} disabled={callbackPage === 0} className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 disabled:opacity-30"><ChevronLeft className="h-4 w-4" /></button>
-                    <span className="px-1 text-[11px] tabular-nums text-gray-400">{callbackPage + 1} / {totalCbPages}</span>
-                    <button onClick={() => setCallbackPage(p => Math.min(totalCbPages - 1, p + 1))} disabled={callbackPage >= totalCbPages - 1} className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
+                    <button onClick={() => setCallbackPage(p => Math.max(0, p - 1))} disabled={callbackPage === 0} className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-100 disabled:opacity-30"><ChevronLeft className="h-4 w-4" /></button>
+                    <span className="px-1 text-[12px] tabular-nums text-neutral-500">{callbackPage + 1} / {totalCbPages}</span>
+                    <button onClick={() => setCallbackPage(p => Math.min(totalCbPages - 1, p + 1))} disabled={callbackPage >= totalCbPages - 1} className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-100 disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
                   </div>
                 )}
               </div>
             ) : (
-              <div className="rounded-lg border border-dashed border-gray-200 py-6 text-center text-xs text-gray-400">
+              <div className="rounded-lg border border-dashed border-neutral-200 py-6 text-center text-xs text-neutral-400">
                 등록된 회신번호가 없습니다<br />
                 <span className="text-[11px]">관리 메뉴에서 발신번호 등록을 신청해주세요</span>
               </div>
@@ -312,48 +312,48 @@ export default function Settings() {
 
           {/* 요금 설정 — 관리자만 */}
           {isAdmin && (
-            <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+            <section className="rounded-2xl border border-neutral-200 bg-white p-5">
               <div className="mb-4 flex items-center gap-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-50 text-amber-600"><Wallet className="h-[18px] w-[18px]" /></div>
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-neutral-100 text-neutral-500"><Wallet className="h-[18px] w-[18px]" /></div>
                 <div>
-                  <h2 className="text-sm font-semibold text-gray-900">요금 설정</h2>
-                  <p className="text-[11px] text-gray-400">월 예산은 직접, 단가는 관리자 설정</p>
+                  <h2 className="text-sm font-semibold text-neutral-900">요금 설정</h2>
+                  <p className="text-[11px] text-neutral-400">월 예산은 직접, 단가는 관리자 설정</p>
                 </div>
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <label className={labelCls}>월 예산 <span className="text-gray-300">(원)</span></label>
+                  <label className={labelCls}>월 예산 <span className="text-neutral-300">(원)</span></label>
                   <input type="number" value={settings.monthly_budget} onChange={(e) => setSettings({ ...settings, monthly_budget: Number(e.target.value) })} className={inputCls} />
                 </div>
                 <div>
-                  <label className={labelCls}>SMS 단가 <span className="text-gray-300">(원)</span></label>
+                  <label className={labelCls}>SMS 단가 <span className="text-neutral-300">(원)</span></label>
                   <input type="number" step="0.1" value={settings.cost_per_sms} disabled className={disabledInputCls} />
                 </div>
                 <div>
-                  <label className={labelCls}>LMS 단가 <span className="text-gray-300">(원)</span></label>
+                  <label className={labelCls}>LMS 단가 <span className="text-neutral-300">(원)</span></label>
                   <input type="number" step="0.1" value={settings.cost_per_lms} disabled className={disabledInputCls} />
                 </div>
                 <div>
-                  <label className={labelCls}>MMS 단가 <span className="text-gray-300">(원)</span></label>
+                  <label className={labelCls}>MMS 단가 <span className="text-neutral-300">(원)</span></label>
                   <input type="number" step="0.1" value={settings.cost_per_mms} disabled className={disabledInputCls} />
                 </div>
                 <div>
-                  <label className={labelCls}>카카오 단가 <span className="text-gray-300">(원)</span></label>
+                  <label className={labelCls}>카카오 단가 <span className="text-neutral-300">(원)</span></label>
                   <input type="number" step="0.1" value={settings.cost_per_kakao} disabled className={disabledInputCls} />
                 </div>
               </div>
-              <p className="mt-2.5 text-[11px] text-gray-400">※ 단가는 관리자가 설정합니다</p>
+              <p className="mt-2.5 text-[12px] text-neutral-500">※ 단가는 관리자가 설정합니다</p>
             </section>
           )}
 
           {/* 발송 정책 — 관리자만 */}
           {isAdmin && (
-            <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm lg:col-span-2">
+            <section className="rounded-2xl border border-neutral-200 bg-white p-5 lg:col-span-2">
               <div className="mb-4 flex items-center gap-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600"><Clock className="h-[18px] w-[18px]" /></div>
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-neutral-100 text-neutral-500"><Clock className="h-[18px] w-[18px]" /></div>
                 <div>
-                  <h2 className="text-sm font-semibold text-gray-900">발송 정책</h2>
-                  <p className="text-[11px] text-gray-400">발송 시간대 · 휴일 · 피로도 보호</p>
+                  <h2 className="text-sm font-semibold text-neutral-900">발송 정책</h2>
+                  <p className="text-[11px] text-neutral-400">발송 시간대 · 휴일 · 피로도 보호</p>
                 </div>
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -372,24 +372,24 @@ export default function Settings() {
                 {/* ★ 2026-07-11 거짓 설정 정리: "고객당 일일 한도"·"중복 방지 기간" 입력 제거 —
                     발송 경로 소비처 0곳(저장만 되던 죽은 설정). 실제 발송 횟수 제한 = 아래 발송 피로도 보호. */}
               </div>
-              <p className="mt-2 text-[11px] text-gray-400">고객별 발송 횟수 제한은 아래 "발송 피로도 보호"가 담당합니다.</p>
-              <label className="mt-3 flex w-fit cursor-pointer items-center gap-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
-                <input type="checkbox" checked={settings.holiday_send_allowed} onChange={(e) => setSettings({ ...settings, holiday_send_allowed: e.target.checked })} className="h-4 w-4 rounded accent-violet-600" />
-                <span className="text-sm text-gray-700">휴일 발송 허용</span>
+              <p className="mt-2 text-[12px] text-neutral-500">고객별 발송 횟수 제한은 아래 "발송 피로도 보호"가 담당합니다.</p>
+              <label className="mt-3 flex w-fit cursor-pointer items-center gap-2 rounded-lg border border-neutral-100 bg-neutral-50 px-3 py-2">
+                <input type="checkbox" checked={settings.holiday_send_allowed} onChange={(e) => setSettings({ ...settings, holiday_send_allowed: e.target.checked })} className="h-4 w-4 rounded accent-indigo-600" />
+                <span className="text-sm text-neutral-700">휴일 발송 허용</span>
               </label>
 
               {/* ★ 2026-07-05 발송 피로도 보호 — opt-in. 끄면(미설정) 제한 없음(현행 그대로) */}
-              <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50 p-3">
+              <div className="mt-3 rounded-xl border border-neutral-100 bg-neutral-50 p-3">
                 <label className="flex w-fit cursor-pointer items-center gap-2">
                   <input
                     type="checkbox"
                     checked={settings.fatigue_cap_days != null && settings.fatigue_cap_max != null}
                     onChange={(e) => setSettings({ ...settings, fatigue_cap_days: e.target.checked ? 7 : null, fatigue_cap_max: e.target.checked ? 3 : null })}
-                    className="h-4 w-4 rounded accent-violet-600"
+                    className="h-4 w-4 rounded accent-indigo-600"
                   />
-                  <span className="text-sm text-gray-700">발송 피로도 보호</span>
+                  <span className="text-sm text-neutral-700">발송 피로도 보호</span>
                 </label>
-                <p className="mt-1 text-[11px] text-gray-400">
+                <p className="mt-1.5 text-[12px] text-neutral-500">
                   최근 N일 안에 광고 메시지(문자·알림톡 합산)를 M건 이상 받은 고객을 모든 자동·타겟 발송에서 자동 제외합니다.
                   정보성 메시지와 직접 입력한 수신자는 제한하지 않습니다.
                 </p>
@@ -400,46 +400,46 @@ export default function Settings() {
                         key={p.label}
                         type="button"
                         onClick={() => setSettings({ ...settings, fatigue_cap_days: p.days, fatigue_cap_max: p.max })}
-                        className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${settings.fatigue_cap_days === p.days && settings.fatigue_cap_max === p.max ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-100'}`}
+                        className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${settings.fatigue_cap_days === p.days && settings.fatigue_cap_max === p.max ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-100'}`}
                       >
                         {p.label}
                       </button>
                     ))}
-                    <span className="ml-1 text-xs text-gray-500">직접 설정: 최근</span>
+                    <span className="ml-1 text-xs text-neutral-500">직접 설정: 최근</span>
                     <input
                       type="number"
                       min={1}
                       max={30}
                       value={settings.fatigue_cap_days}
                       onChange={(e) => setSettings({ ...settings, fatigue_cap_days: Math.max(1, Math.min(30, Number(e.target.value) || 1)) })}
-                      className="w-16 rounded-lg border border-gray-200 px-2 py-1.5 text-center text-xs"
+                      className="w-16 rounded-lg border border-neutral-200 px-2 py-1.5 text-center text-xs"
                     />
-                    <span className="text-xs text-gray-500">일 동안</span>
+                    <span className="text-xs text-neutral-500">일 동안</span>
                     <input
                       type="number"
                       min={1}
                       max={100}
                       value={settings.fatigue_cap_max}
                       onChange={(e) => setSettings({ ...settings, fatigue_cap_max: Math.max(1, Math.min(100, Number(e.target.value) || 1)) })}
-                      className="w-16 rounded-lg border border-gray-200 px-2 py-1.5 text-center text-xs"
+                      className="w-16 rounded-lg border border-neutral-200 px-2 py-1.5 text-center text-xs"
                     />
-                    <span className="text-xs text-gray-500">건까지 허용</span>
+                    <span className="text-xs text-neutral-500">건까지 허용</span>
                   </div>
                 )}
               </div>
 
               {/* ★ 2026-08-04 여정 진행 중 고객 제외(자동마케팅) — opt-in. 끄면(기본) 현행 그대로 겹침 허용 */}
-              <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50 p-3">
+              <div className="mt-3 rounded-xl border border-neutral-100 bg-neutral-50 p-3">
                 <label className="flex w-fit cursor-pointer items-center gap-2">
                   <input
                     type="checkbox"
                     checked={settings.automarketing_exclude_journey === true}
                     onChange={(e) => setSettings({ ...settings, automarketing_exclude_journey: e.target.checked })}
-                    className="h-4 w-4 rounded accent-violet-600"
+                    className="h-4 w-4 rounded accent-indigo-600"
                   />
-                  <span className="text-sm text-gray-700">여정 진행 중인 고객은 자동마케팅에서 제외</span>
+                  <span className="text-sm text-neutral-700">여정 진행 중인 고객은 자동마케팅에서 제외</span>
                 </label>
-                <p className="mt-1 text-[11px] text-gray-400">
+                <p className="mt-1.5 text-[12px] text-neutral-500">
                   켜면 고객 여정이 진행 중인 고객(환영·장바구니 안내 등 대화가 이어지는 중)에게는 자동마케팅 문자가 나가지 않습니다.
                   여정이 끝나면 다시 자동마케팅 대상에 포함됩니다. 끄면 지금처럼 둘 다 발송됩니다.
                 </p>

@@ -7,7 +7,7 @@
  */
 
 import { useRef, useState } from 'react';
-import { KUI_HINT, KUI_LABEL } from '../../utils/kakao-ui';
+import { CUI_HINT, CUI_LABEL } from '../../utils/console-ui';
 
 type UploadType =
   | 'alimtalk_template'
@@ -121,7 +121,7 @@ export default function KakaoChannelImageUpload({
   return (
     <div className="space-y-1">
       {label && (
-        <label className={KUI_LABEL}>{label}</label>
+        <label className={CUI_LABEL}>{label}</label>
       )}
 
       <div className="flex gap-2 items-start">
@@ -154,7 +154,7 @@ export default function KakaoChannelImageUpload({
             }}
           />
 
-          <p className={KUI_HINT}>
+          <p className={CUI_HINT}>
             {hint || HINT_MAP[uploadType]}
           </p>
           {err && <p className="text-[11px] text-red-500 mt-1">{err}</p>}

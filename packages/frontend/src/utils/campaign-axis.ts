@@ -106,14 +106,36 @@ export function resolveChannelLabel(c: CampaignAxisRow | null | undefined): stri
   return MSG_TYPE_LABEL[t] || t || 'SMS';
 }
 
-/** 채널 칩 색상 — 알림톡 emerald / 브랜드 amber / 문자·혼합 violet / 그 외 slate */
+/**
+ * 채널 칩 색상 — 알림톡 emerald / 브랜드 amber / 문자·혼합 indigo / 그 외 neutral
+ *
+ * ★ 2026-08-17: 문자·혼합이 violet이었는데 관리 화면 액센트를 인디고로 통일하면서 함께 옮겼다.
+ *   violet은 이 앱에서 AI 기능 화면이 쓰는 색이다(LESSONS_FRONTEND 톤앤매너).
+ *   알림톡·브랜드는 채널을 구분하는 의미색이라 그대로 둔다.
+ */
 export function resolveChannelChipClass(c: CampaignAxisRow | null | undefined): string {
-  if (isAlimtalkChannel(c)) return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
-  if (isBrandOnlyChannel(c)) return 'bg-amber-50 text-amber-700 border border-amber-200';
+  if (isAlimtalkChannel(c)) return 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/15';
+  if (isBrandOnlyChannel(c)) return 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-600/15';
   const t = String(c?.message_type || '').trim();
   const isLmsMms = t === 'LMS' || t === 'MMS' || t === 'L' || t === 'M';
-  if (isBothChannel(c) || isLmsMms) return 'bg-violet-50 text-violet-700 border border-violet-200';
-  return 'bg-slate-100 text-slate-600 border border-slate-200';
+  if (isBothChannel(c) || isLmsMms) return 'bg-indigo-50 text-indigo-700 ring-1 ring-inset ring-indigo-600/15';
+  return 'bg-neutral-100 text-neutral-600 ring-1 ring-inset ring-neutral-900/[.06]';
+}
+
+/**
+ * 채널 칩 아이콘 — 이름만 돌려준다(컴포넌트를 여기서 import하지 않는다).
+ *
+ * ★ 2026-08-17: 전에는 소비처가 `'📨' / '💬' / '📱'` 이모지 문자를 라벨 앞에 붙였다.
+ *   이모지는 OS·브라우저마다 다르게 그려지고 폰트 크기에 안 맞아 뭉개진다(Harold 지적).
+ *   판정은 여기가 소유하고, 어떤 아이콘 컴포넌트를 그릴지는 화면이 정한다 —
+ *   유틸이 lucide를 import하면 이 파일을 쓰는 모든 곳이 아이콘 번들을 끌고 온다.
+ */
+export type ChannelIconName = 'alimtalk' | 'brand' | 'message';
+
+export function resolveChannelIconName(c: CampaignAxisRow | null | undefined): ChannelIconName {
+  if (isAlimtalkChannel(c)) return 'alimtalk';
+  if (isBrandOnlyChannel(c)) return 'brand';
+  return 'message';
 }
 
 /**

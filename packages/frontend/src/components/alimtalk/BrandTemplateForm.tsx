@@ -21,21 +21,21 @@
 import { useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import {
-  KUI_BTN_OUTLINE,
-  KUI_BTN_PRIMARY,
-  KUI_INPUT,
-  KUI_LABEL,
-  KUI_MODAL,
-  KUI_MODAL_BODY,
-  KUI_MODAL_CLOSE,
-  KUI_MODAL_FOOT,
-  KUI_MODAL_HEAD,
-  KUI_MODAL_SCRIM,
-  KUI_MODAL_TITLE,
-  KUI_REQUIRED,
-  KUI_SELECT,
-  KUI_TEXTAREA,
-} from '../../utils/kakao-ui';
+  CUI_BTN_OUTLINE,
+  CUI_BTN_PRIMARY,
+  CUI_INPUT,
+  CUI_LABEL,
+  CUI_MODAL,
+  CUI_MODAL_BODY,
+  CUI_MODAL_CLOSE,
+  CUI_MODAL_FOOT,
+  CUI_MODAL_HEAD,
+  CUI_MODAL_SCRIM,
+  CUI_MODAL_TITLE,
+  CUI_REQUIRED,
+  CUI_SELECT,
+  CUI_TEXTAREA,
+} from '../../utils/console-ui';
 
 interface Profile {
   id: string;
@@ -377,16 +377,16 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
 
   return (
     <div
-      className={KUI_MODAL_SCRIM}
+      className={CUI_MODAL_SCRIM}
     >
-      <div className={`${KUI_MODAL} max-w-3xl`} role="dialog" aria-modal="true">
+      <div className={`${CUI_MODAL} max-w-3xl`} role="dialog" aria-modal="true">
         {/* 헤더 */}
-        <div className={KUI_MODAL_HEAD}>
-          <div className={KUI_MODAL_TITLE}>{titleText}</div>
+        <div className={CUI_MODAL_HEAD}>
+          <div className={CUI_MODAL_TITLE}>{titleText}</div>
           <button
             type="button"
             onClick={onClose}
-            className={KUI_MODAL_CLOSE}
+            className={CUI_MODAL_CLOSE}
             aria-label="닫기"
           >
             <X className="w-[17px] h-[17px]" />
@@ -394,14 +394,14 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
         </div>
 
         {/* 본문 */}
-        <div className={KUI_MODAL_BODY}>
+        <div className={CUI_MODAL_BODY}>
           {/* 발신프로필 */}
           <Field label="발신프로필" required>
             <select
               value={form.profileId}
               onChange={(e) => set('profileId', e.target.value)}
               disabled={isView || isEdit}
-              className={KUI_SELECT}
+              className={CUI_SELECT}
             >
               <option value="">선택</option>
               {profiles.map((p) => (
@@ -420,7 +420,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
               onChange={(e) => set('manageName', e.target.value)}
               disabled={isView}
               maxLength={30}
-              className={KUI_INPUT}
+              className={CUI_INPUT}
               placeholder="회원가입 발송 템플릿_v1"
             />
           </Field>
@@ -433,7 +433,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
               onChange={(e) => set('customTemplateCode', e.target.value)}
               disabled={isView}
               maxLength={30}
-              className={KUI_INPUT}
+              className={CUI_INPUT}
               placeholder="CUST_JOIN_001"
             />
           </Field>
@@ -477,7 +477,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                 disabled={isView}
                 maxLength={1300}
                 rows={6}
-                className={KUI_TEXTAREA}
+                className={CUI_TEXTAREA}
                 placeholder="홍길동님 회원가입을 축하합니다."
               />
               <div className="text-[12px] text-neutral-500 text-right tabular-nums">
@@ -500,7 +500,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                   disabled={isView}
                   maxLength={form.chatBubbleType === 'IMAGE' ? 400 : 76}
                   rows={form.chatBubbleType === 'IMAGE' ? 4 : 2}
-                  className={KUI_TEXTAREA}
+                  className={CUI_TEXTAREA}
                 />
               </Field>
               <SingleImageField
@@ -525,7 +525,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                   onChange={(e) => set('header', e.target.value)}
                   disabled={isView}
                   maxLength={20}
-                  className={KUI_INPUT}
+                  className={CUI_INPUT}
                 />
               </Field>
               <SingleImageField
@@ -554,7 +554,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                   onChange={(e) => set('header', e.target.value)}
                   disabled={isView}
                   maxLength={20}
-                  className={KUI_INPUT}
+                  className={CUI_INPUT}
                 />
               </Field>
               <Field label="본문 (선택)" hint="최대 76자">
@@ -564,7 +564,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                   disabled={isView}
                   maxLength={76}
                   rows={2}
-                  className={KUI_TEXTAREA}
+                  className={CUI_TEXTAREA}
                 />
               </Field>
               <Field label="동영상 URL" required>
@@ -573,7 +573,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                   value={form.attachmentVideoUrl}
                   onChange={(e) => set('attachmentVideoUrl', e.target.value)}
                   disabled={isView}
-                  className={`${KUI_INPUT} font-mono`}
+                  className={`${CUI_INPUT} font-mono`}
                   placeholder="https://..."
                 />
               </Field>
@@ -603,7 +603,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                     })
                   }
                   disabled={isView}
-                  className={KUI_INPUT}
+                  className={CUI_INPUT}
                 />
               </Field>
               <div className="grid grid-cols-2 gap-3">
@@ -618,7 +618,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                       })
                     }
                     disabled={isView}
-                    className={KUI_INPUT}
+                    className={CUI_INPUT}
                   />
                 </Field>
                 <Field label="할인가">
@@ -632,7 +632,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                       })
                     }
                     disabled={isView}
-                    className={KUI_INPUT}
+                    className={CUI_INPUT}
                   />
                 </Field>
               </div>
@@ -643,7 +643,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                   onChange={(e) => set('additionalContent', e.target.value)}
                   disabled={isView}
                   maxLength={34}
-                  className={KUI_INPUT}
+                  className={CUI_INPUT}
                 />
               </Field>
             </>
@@ -692,11 +692,11 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
         </div>
 
         {/* 푸터 */}
-        <div className={KUI_MODAL_FOOT}>
+        <div className={CUI_MODAL_FOOT}>
           <button
             type="button"
             onClick={onClose}
-            className={KUI_BTN_OUTLINE}
+            className={CUI_BTN_OUTLINE}
           >
             {isView ? '닫기' : '취소'}
           </button>
@@ -705,7 +705,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
               type="button"
               onClick={submit}
               disabled={submitting || uploadingImage}
-              className={KUI_BTN_PRIMARY}
+              className={CUI_BTN_PRIMARY}
             >
               {submitting ? '저장 중' : isEdit ? '수정 완료' : '등록'}
             </button>
@@ -733,9 +733,9 @@ function Field({
 }) {
   return (
     <div>
-      <label className={KUI_LABEL}>
+      <label className={CUI_LABEL}>
         {label}
-        {required && <span className={`${KUI_REQUIRED} ml-0.5`}>*</span>}
+        {required && <span className={`${CUI_REQUIRED} ml-0.5`}>*</span>}
         {hint && <span className="text-neutral-400 ml-2 font-normal">{hint}</span>}
       </label>
       {children}
@@ -839,7 +839,7 @@ function ItemListEditor({
               onChange={(e) => update(idx, { title: e.target.value })}
               disabled={disabled}
               maxLength={25}
-              className={`${KUI_INPUT} h-8 text-[13px]`}
+              className={`${CUI_INPUT} h-8 text-[13px]`}
             />
             <input
               type="text"
@@ -848,7 +848,7 @@ function ItemListEditor({
               onChange={(e) => update(idx, { description: e.target.value })}
               disabled={disabled}
               maxLength={30}
-              className={`${KUI_INPUT} h-8 text-[13px]`}
+              className={`${CUI_INPUT} h-8 text-[13px]`}
             />
             <input
               type="text"
@@ -856,7 +856,7 @@ function ItemListEditor({
               value={it.img_url || ''}
               onChange={(e) => update(idx, { img_url: e.target.value })}
               disabled={disabled}
-              className={`${KUI_INPUT} h-8 text-[13px] font-mono`}
+              className={`${CUI_INPUT} h-8 text-[13px] font-mono`}
             />
           </div>
         ))}
@@ -923,7 +923,7 @@ function CarouselListEditor({
                   value={it.title || ''}
                   onChange={(e) => update(idx, { title: e.target.value })}
                   disabled={disabled}
-                  className={`${KUI_INPUT} h-8 text-[13px]`}
+                  className={`${CUI_INPUT} h-8 text-[13px]`}
                 />
                 <div className="grid grid-cols-2 gap-2">
                   <input
@@ -936,7 +936,7 @@ function CarouselListEditor({
                       })
                     }
                     disabled={disabled}
-                    className={`${KUI_INPUT} h-8 text-[13px]`}
+                    className={`${CUI_INPUT} h-8 text-[13px]`}
                   />
                   <input
                     type="number"
@@ -948,7 +948,7 @@ function CarouselListEditor({
                       })
                     }
                     disabled={disabled}
-                    className={`${KUI_INPUT} h-8 text-[13px]`}
+                    className={`${CUI_INPUT} h-8 text-[13px]`}
                   />
                 </div>
               </>
@@ -961,7 +961,7 @@ function CarouselListEditor({
                   value={it.header || ''}
                   onChange={(e) => update(idx, { header: e.target.value })}
                   disabled={disabled}
-                  className={`${KUI_INPUT} h-8 text-[13px]`}
+                  className={`${CUI_INPUT} h-8 text-[13px]`}
                 />
                 <input
                   type="text"
@@ -969,7 +969,7 @@ function CarouselListEditor({
                   value={it.content || ''}
                   onChange={(e) => update(idx, { content: e.target.value })}
                   disabled={disabled}
-                  className={`${KUI_INPUT} h-8 text-[13px]`}
+                  className={`${CUI_INPUT} h-8 text-[13px]`}
                 />
               </>
             )}
@@ -979,7 +979,7 @@ function CarouselListEditor({
               value={it.url_mobile || ''}
               onChange={(e) => update(idx, { url_mobile: e.target.value, url_pc: e.target.value })}
               disabled={disabled}
-              className={`${KUI_INPUT} h-8 text-[13px] font-mono`}
+              className={`${CUI_INPUT} h-8 text-[13px] font-mono`}
             />
           </div>
         ))}
@@ -1071,7 +1071,7 @@ function ButtonsEditor({
                   });
                 }}
                 disabled={disabled}
-                className={`${KUI_INPUT} h-8 text-[13px]`}
+                className={`${CUI_INPUT} h-8 text-[13px]`}
               >
                 {BUTTON_TYPE_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -1086,7 +1086,7 @@ function ButtonsEditor({
                 onChange={(e) => update(idx, { name: e.target.value })}
                 disabled={disabled || b.type === 'AC'}
                 maxLength={14}
-                className={`${KUI_INPUT} h-8 text-[13px]`}
+                className={`${CUI_INPUT} h-8 text-[13px]`}
               />
             </div>
             {(b.type === 'WL' || b.type === 'AL') && (
@@ -1097,7 +1097,7 @@ function ButtonsEditor({
                   value={b.url_mobile || ''}
                   onChange={(e) => update(idx, { url_mobile: e.target.value })}
                   disabled={disabled}
-                  className={`${KUI_INPUT} h-8 text-[13px] font-mono`}
+                  className={`${CUI_INPUT} h-8 text-[13px] font-mono`}
                 />
                 <input
                   type="text"
@@ -1105,7 +1105,7 @@ function ButtonsEditor({
                   value={b.url_pc || ''}
                   onChange={(e) => update(idx, { url_pc: e.target.value })}
                   disabled={disabled}
-                  className={`${KUI_INPUT} h-8 text-[13px] font-mono`}
+                  className={`${CUI_INPUT} h-8 text-[13px] font-mono`}
                 />
               </>
             )}
@@ -1117,7 +1117,7 @@ function ButtonsEditor({
                   value={b.scheme_android || ''}
                   onChange={(e) => update(idx, { scheme_android: e.target.value })}
                   disabled={disabled}
-                  className={`${KUI_INPUT} h-8 text-[13px] font-mono`}
+                  className={`${CUI_INPUT} h-8 text-[13px] font-mono`}
                 />
                 <input
                   type="text"
@@ -1125,7 +1125,7 @@ function ButtonsEditor({
                   value={b.scheme_ios || ''}
                   onChange={(e) => update(idx, { scheme_ios: e.target.value })}
                   disabled={disabled}
-                  className={`${KUI_INPUT} h-8 text-[13px] font-mono`}
+                  className={`${CUI_INPUT} h-8 text-[13px] font-mono`}
                 />
               </>
             )}
@@ -1140,7 +1140,7 @@ function ButtonsEditor({
                   })
                 }
                 disabled={disabled}
-                className={`${KUI_INPUT} h-8 text-[13px]`}
+                className={`${CUI_INPUT} h-8 text-[13px]`}
               />
             )}
           </div>

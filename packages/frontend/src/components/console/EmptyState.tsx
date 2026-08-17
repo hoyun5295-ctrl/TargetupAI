@@ -10,7 +10,7 @@
  */
 import type { LucideIcon } from 'lucide-react';
 import { Plus } from 'lucide-react';
-import { KUI_BTN_PRIMARY, KUI_EMPTY, KUI_EMPTY_BADGE, KUI_EMPTY_DESC, KUI_EMPTY_TITLE } from '../../utils/kakao-ui';
+import { CUI_BTN_PRIMARY, CUI_EMPTY, CUI_EMPTY_BADGE, CUI_EMPTY_DESC, CUI_EMPTY_TITLE } from '../../utils/console-ui';
 
 interface Props {
   icon: LucideIcon;
@@ -22,14 +22,14 @@ interface Props {
 
 export default function EmptyState({ icon: Icon, title, description, actionLabel, onAction }: Props) {
   return (
-    <div className={KUI_EMPTY}>
-      <div className={KUI_EMPTY_BADGE}>
+    <div className={CUI_EMPTY}>
+      <div className={CUI_EMPTY_BADGE}>
         <Icon className="w-5 h-5" strokeWidth={1.6} />
       </div>
-      <p className={KUI_EMPTY_TITLE}>{title}</p>
-      {description && <p className={KUI_EMPTY_DESC}>{description}</p>}
+      <p className={CUI_EMPTY_TITLE}>{title}</p>
+      {description && <p className={CUI_EMPTY_DESC}>{description}</p>}
       {actionLabel && onAction && (
-        <button type="button" onClick={onAction} className={`${KUI_BTN_PRIMARY} mt-5`}>
+        <button type="button" onClick={onAction} className={`${CUI_BTN_PRIMARY} mt-5`}>
           <Plus className="w-[15px] h-[15px]" />
           {actionLabel}
         </button>

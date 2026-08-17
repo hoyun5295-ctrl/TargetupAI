@@ -9,7 +9,8 @@
  */
 
 import { useMemo } from 'react';
-import { KUI_INPUT } from '../../utils/kakao-ui';
+import { CUI_INPUT } from '../../utils/console-ui';
+import { Trash2 } from 'lucide-react';
 
 export type ButtonLinkType =
   | 'WL' | 'AL' | 'DS' | 'BK' | 'MD' | 'BF' | 'BC' | 'AC' | 'PD';
@@ -201,7 +202,7 @@ function ButtonRow({
           value={btn.type}
           disabled={typeLocked}
           onChange={(e) => onPatch({ type: e.target.value as ButtonLinkType })}
-          className={`${KUI_INPUT} h-8 text-[13px] w-24`}
+          className={`${CUI_INPUT} h-8 text-[13px] w-24`}
         >
           {typesForSelect.map((t) => (
             <option key={t.value} value={t.value}>
@@ -216,15 +217,20 @@ function ButtonRow({
           onChange={(e) => onPatch({ name: e.target.value })}
           placeholder="버튼명 (최대 14자)"
           maxLength={14}
-          className={`${KUI_INPUT} h-8 text-[13px] flex-1`}
+          className={`${CUI_INPUT} h-8 text-[13px] flex-1`}
         />
         <button
           type="button"
           onClick={onRemove}
           disabled={disabled || removeLocked}
-          className={`text-sm px-1 ${disabled || removeLocked ? 'text-gray-300 cursor-not-allowed' : 'text-red-400 hover:text-red-600'}`}
+          className={`h-8 w-8 grid place-items-center rounded-lg shrink-0 transition ${
+            disabled || removeLocked
+              ? 'text-neutral-300 cursor-not-allowed'
+              : 'text-neutral-400 hover:bg-rose-50 hover:text-rose-600'
+          }`}
+          aria-label="버튼 삭제"
         >
-          &times;
+          <Trash2 className="w-[15px] h-[15px]" />
         </button>
       </div>
 
@@ -236,13 +242,13 @@ function ButtonRow({
             value={btn.urlMobile || ''}
             onChange={(e) => onPatch({ urlMobile: e.target.value })}
             placeholder="모바일 URL"
-            className={`${KUI_INPUT} h-8 text-[13px] w-auto`}
+            className={`${CUI_INPUT} h-8 text-[13px] w-auto`}
           />
           <input
             value={btn.urlPc || ''}
             onChange={(e) => onPatch({ urlPc: e.target.value })}
             placeholder="PC URL (선택)"
-            className={`${KUI_INPUT} h-8 text-[13px] w-auto`}
+            className={`${CUI_INPUT} h-8 text-[13px] w-auto`}
           />
         </div>
       )}
@@ -254,13 +260,13 @@ function ButtonRow({
               value={btn.urlMobile || ''}
               onChange={(e) => onPatch({ urlMobile: e.target.value })}
               placeholder="모바일 URL"
-              className={`${KUI_INPUT} h-8 text-[13px] w-auto`}
+              className={`${CUI_INPUT} h-8 text-[13px] w-auto`}
             />
             <input
               value={btn.urlPc || ''}
               onChange={(e) => onPatch({ urlPc: e.target.value })}
               placeholder="PC URL (선택)"
-              className={`${KUI_INPUT} h-8 text-[13px] w-auto`}
+              className={`${CUI_INPUT} h-8 text-[13px] w-auto`}
             />
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -268,13 +274,13 @@ function ButtonRow({
               value={btn.schemeAndroid || ''}
               onChange={(e) => onPatch({ schemeAndroid: e.target.value })}
               placeholder="Android scheme"
-              className={`${KUI_INPUT} h-8 text-[13px] w-auto`}
+              className={`${CUI_INPUT} h-8 text-[13px] w-auto`}
             />
             <input
               value={btn.schemeIos || ''}
               onChange={(e) => onPatch({ schemeIos: e.target.value })}
               placeholder="iOS scheme"
-              className={`${KUI_INPUT} h-8 text-[13px] w-auto`}
+              className={`${CUI_INPUT} h-8 text-[13px] w-auto`}
             />
           </div>
         </div>
@@ -285,7 +291,7 @@ function ButtonRow({
           value={btn.chatExtra || ''}
           onChange={(e) => onPatch({ chatExtra: e.target.value })}
           placeholder="chatExtra (메시지 전달 파라미터)"
-          className={`${KUI_INPUT} h-8 text-[13px]`}
+          className={`${CUI_INPUT} h-8 text-[13px]`}
         />
       )}
 
@@ -294,7 +300,7 @@ function ButtonRow({
           value={btn.chatEvent || ''}
           onChange={(e) => onPatch({ chatEvent: e.target.value })}
           placeholder="chatEvent (봇 이벤트 이름)"
-          className={`${KUI_INPUT} h-8 text-[13px]`}
+          className={`${CUI_INPUT} h-8 text-[13px]`}
         />
       )}
 
@@ -306,7 +312,7 @@ function ButtonRow({
             onPatch({ bizFormId: e.target.value ? Number(e.target.value) : undefined })
           }
           placeholder="bizFormId (비즈폼 ID)"
-          className={`${KUI_INPUT} h-8 text-[13px]`}
+          className={`${CUI_INPUT} h-8 text-[13px]`}
         />
       )}
 
@@ -315,7 +321,7 @@ function ButtonRow({
           value={btn.telNumber || ''}
           onChange={(e) => onPatch({ telNumber: e.target.value })}
           placeholder="전화번호 (예: 021234567)"
-          className={`${KUI_INPUT} h-8 text-[13px]`}
+          className={`${CUI_INPUT} h-8 text-[13px]`}
         />
       )}
 
@@ -324,7 +330,7 @@ function ButtonRow({
           value={btn.productId || ''}
           onChange={(e) => onPatch({ productId: e.target.value })}
           placeholder="productId (상품 ID)"
-          className={`${KUI_INPUT} h-8 text-[13px]`}
+          className={`${CUI_INPUT} h-8 text-[13px]`}
         />
       )}
 
