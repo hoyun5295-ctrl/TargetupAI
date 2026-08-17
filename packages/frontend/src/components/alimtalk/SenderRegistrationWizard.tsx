@@ -10,6 +10,8 @@
  */
 
 import { useEffect, useState } from 'react';
+import { X } from 'lucide-react';
+import { KUI_BTN_OUTLINE, KUI_INPUT, KUI_LABEL, KUI_MODAL, KUI_MODAL_BODY, KUI_MODAL_CLOSE, KUI_MODAL_DESC, KUI_MODAL_FOOT, KUI_MODAL_HEAD, KUI_MODAL_SCRIM, KUI_MODAL_TITLE } from '../../utils/kakao-ui';
 
 interface CategoryNode {
   category_code: string;
@@ -151,25 +153,26 @@ export default function SenderRegistrationWizard({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden flex flex-col">
-        <div className="px-6 py-4 border-b bg-gradient-to-r from-green-50 to-white flex justify-between items-center">
+    <div className={KUI_MODAL_SCRIM}>
+      <div className={`${KUI_MODAL} max-w-xl`} role="dialog" aria-modal="true">
+        <div className={KUI_MODAL_HEAD}>
           <div>
-            <h2 className="text-lg font-bold text-gray-900">발신프로필 등록</h2>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <h2 className={KUI_MODAL_TITLE}>발신프로필 등록</h2>
+            <p className={KUI_MODAL_DESC}>
               Step {step} / 3 — 카카오 비즈니스채널 인증
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-2xl"
+            className={KUI_MODAL_CLOSE}
+            aria-label="닫기"
           >
-            &times;
+            <X className="w-[17px] h-[17px]" />
           </button>
         </div>
 
-        <div className="px-6 py-4 space-y-4 overflow-y-auto">
+        <div className={KUI_MODAL_BODY}>
           {/* Step 1 */}
           {step === 1 && (
             <>
@@ -179,7 +182,7 @@ export default function SenderRegistrationWizard({
                   <select
                     value={targetCompanyId}
                     onChange={(e) => setTargetCompanyId(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
+                    className={KUI_INPUT}
                   >
                     <option value="">선택</option>
                     {companies.map((c) => (
@@ -191,7 +194,7 @@ export default function SenderRegistrationWizard({
                 </StepGrid>
               )}
               {companies.length === 0 && (
-                <p className="text-[11px] text-red-600">
+                <p className="text-[12.5px] text-rose-600">
                   회사 정보를 불러오지 못했습니다. 로그아웃 후 다시 로그인해주세요.
                 </p>
               )}
@@ -201,7 +204,7 @@ export default function SenderRegistrationWizard({
                   value={profileName}
                   onChange={(e) => setProfileName(e.target.value)}
                   placeholder="내부 관리용 이름"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
+                  className={KUI_INPUT}
                 />
               </StepGrid>
 
@@ -212,7 +215,7 @@ export default function SenderRegistrationWizard({
                     setYellowId(e.target.value.startsWith('@') ? e.target.value : `@${e.target.value}`)
                   }
                   placeholder="@채널아이디"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
+                  className={KUI_INPUT}
                 />
               </StepGrid>
 
@@ -222,17 +225,17 @@ export default function SenderRegistrationWizard({
                   onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
                   placeholder="01012345678 (11자리)"
                   maxLength={11}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
+                  className={KUI_INPUT}
                 />
               </StepGrid>
 
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2">
-                <p className="text-xs font-semibold text-gray-600">카테고리 (3단)</p>
+              <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3.5 space-y-2">
+                <p className="text-[13px] font-semibold text-neutral-900">카테고리 (3단)</p>
                 <div className="grid grid-cols-3 gap-2">
                   <select
                     value={level1Code}
                     onChange={(e) => setCategoryCode(e.target.value.padEnd(11, ''))}
-                    className="border border-gray-300 rounded px-2 py-1 text-sm"
+                    className={`${KUI_INPUT} h-8 text-[13px]`}
                   >
                     <option value="">대분류</option>
                     {level1.map((c) => (
@@ -247,7 +250,7 @@ export default function SenderRegistrationWizard({
                       setCategoryCode(level1Code + e.target.value + (categoryCode.slice(7) || ''))
                     }
                     disabled={!level1Code}
-                    className="border border-gray-300 rounded px-2 py-1 text-sm disabled:bg-gray-100"
+                    className={`${KUI_INPUT} h-8 text-[13px]`}
                   >
                     <option value="">중분류</option>
                     {level2.map((c) => (
@@ -260,7 +263,7 @@ export default function SenderRegistrationWizard({
                     value={categoryCode.slice(7) || ''}
                     onChange={(e) => setCategoryCode(level2Code + e.target.value)}
                     disabled={!level2Code}
-                    className="border border-gray-300 rounded px-2 py-1 text-sm disabled:bg-gray-100"
+                    className={`${KUI_INPUT} h-8 text-[13px]`}
                   >
                     <option value="">소분류</option>
                     {level3.map((c) => (
@@ -271,7 +274,7 @@ export default function SenderRegistrationWizard({
                   </select>
                 </div>
                 {categories.length === 0 && (
-                  <p className="text-[11px] text-amber-600">
+                  <p className="text-[12.5px] text-amber-700">
                     {singleCompany
                       ? '카테고리 정보가 준비 중입니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요.'
                       : '카테고리 캐시가 비어 있습니다. 상단 "카테고리 동기화" 버튼을 실행 후 다시 시도하세요.'}
@@ -283,7 +286,7 @@ export default function SenderRegistrationWizard({
           )}
 
           {step === 2 && (
-            <div className="text-center py-10 text-sm text-gray-500">
+            <div className="text-center py-12 text-[13px] text-neutral-500">
               <p>채널 관리자 카톡으로 인증번호가 전송됩니다.</p>
               <p className="mt-1">수신 확인 후 다음 단계로 진행하세요.</p>
             </div>
@@ -297,27 +300,27 @@ export default function SenderRegistrationWizard({
                   onChange={(e) => setToken(e.target.value.replace(/\D/g, ''))}
                   placeholder="123456"
                   maxLength={6}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm tracking-widest"
+                  className={`${KUI_INPUT} tracking-widest`}
                 />
               </StepGrid>
-              <p className="text-xs text-gray-500">
+              <p className="text-[12.5px] text-neutral-500">
                 인증번호 유효시간은 1분입니다. 만료되었으면 Step 1로 돌아가 재요청하세요.
               </p>
             </div>
           )}
 
           {err && (
-            <p className="text-xs text-red-500 border border-red-200 bg-red-50 rounded p-2">
+            <p className="text-[12.5px] text-rose-700 border border-rose-200 bg-rose-50 rounded-lg p-2.5">
               {err}
             </p>
           )}
         </div>
 
-        <div className="px-6 py-3 border-t bg-gray-50 flex justify-between">
+        <div className={`${KUI_MODAL_FOOT} justify-between`}>
           <button
             type="button"
             onClick={() => (step === 1 ? onClose() : setStep((step - 1) as 1 | 2 | 3))}
-            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm"
+            className={KUI_BTN_OUTLINE}
           >
             {step === 1 ? '취소' : '이전'}
           </button>
@@ -355,7 +358,7 @@ function StepGrid({
 }) {
   return (
     <div>
-      <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+      <label className={KUI_LABEL}>{label}</label>
       {children}
     </div>
   );

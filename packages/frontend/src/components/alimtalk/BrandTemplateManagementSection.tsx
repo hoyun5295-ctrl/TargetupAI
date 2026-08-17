@@ -1,10 +1,13 @@
 /**
  * ★ D150-2 (2026-05-09): 브랜드메시지 템플릿 관리 섹션
  *
- * - KakaoRcsPage > 브랜드메시지 탭 > "템플릿 관리" sub-tab에 렌더
+ * - KakaoRcsPage > 브랜드 템플릿 탭에 렌더
  * - 목록 / 등록 / 수정 / 삭제 / 상세보기 / 이력(슈퍼관리자만)
  * - chatBubbleType 8종: TEXT / IMAGE / WIDE / WIDE_ITEM_LIST / CAROUSEL_FEED / PREMIUM_VIDEO / COMMERCE / CAROUSEL_COMMERCE
  * - 검수 없음 — 등록 즉시 ACTIVE
+ *
+ * ★ 2026-08-17 라이트 톤 재작성 — 값은 `utils/kakao-ui.ts`가 소유한다(색·높이를 여기 적지 않는다).
+ *   빈 상태의 이모지(📢)를 아이콘 + 시작 버튼으로 교체했고, 관리 열 버튼 4개를 대표 1 + ⋯로 접었다.
  *
  * 백엔드:
  *   GET    /api/alimtalk/brand-templates                              (목록)
@@ -13,15 +16,48 @@
  *   PUT    /api/alimtalk/brand-templates/:templateKey                 (수정 — company_admin)
  *   DELETE /api/alimtalk/brand-templates/:templateKey                 (삭제 — company_admin)
  *   GET    /api/alimtalk/brand-templates/:templateKey/history         (이력 — super_admin)
- *
- * 등록/수정 폼은 Step 2-B의 BrandTemplateForm.tsx에서 본체 작성 후 stub 모달 교체.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { Check, ChevronDown, Copy, Megaphone, Plus, Search } from 'lucide-react';
 import TemplateHistoryModal from './TemplateHistoryModal';
 import BrandTemplateForm from './BrandTemplateForm';
 import { useAuthStore } from '../../stores/authStore';
 import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
+import EmptyState from '../kakao/EmptyState';
+import RowActions, { type RowAction } from '../kakao/RowActions';
+import StatusPill from '../kakao/StatusPill';
+import {
+  KUI_BTN_PRIMARY,
+  KUI_CARD,
+  KUI_CARDS,
+  KUI_CARD_META,
+  KUI_CARD_TITLE,
+  KUI_CELL_CODE,
+  KUI_CELL_META,
+  KUI_CELL_NAME,
+  KUI_COPY_BTN,
+  KUI_FIELD,
+  KUI_FIELD_INPUT,
+  KUI_LOADING,
+  KUI_ONLY_DESKTOP,
+  KUI_PANEL,
+  KUI_SCROLL_X,
+  KUI_SEC_DESC,
+  KUI_SEC_TITLE,
+  KUI_SELECT,
+  KUI_SPINNER,
+  KUI_TD,
+  KUI_TD_STICKY,
+  KUI_TH,
+  KUI_TH_RIGHT,
+  KUI_TH_STICKY,
+  KUI_THEAD,
+  KUI_TOTAL,
+  KUI_TOTAL_NUM,
+  KUI_TR,
+  type KuiPillTone,
+} from '../../utils/kakao-ui';
 
 interface Profile {
   id: string;
@@ -62,9 +98,9 @@ const CHAT_BUBBLE_LABELS: Record<string, string> = {
   CAROUSEL_COMMERCE: '캐러셀 커머스',
 };
 
-const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
-  ACTIVE:   { label: '정상', cls: 'bg-emerald-100 text-emerald-700' },
-  INACTIVE: { label: '중지', cls: 'bg-gray-100 text-gray-500' },
+const STATUS_LABELS: Record<string, { label: string; tone: KuiPillTone }> = {
+  ACTIVE:   { label: '정상', tone: 'green' },
+  INACTIVE: { label: '중지', tone: 'neutral' },
 };
 
 function getToken(): string {
@@ -74,15 +110,18 @@ function getToken(): string {
 interface Props {
   profiles: Profile[];
   setToast: (t: { show: boolean; type: 'success' | 'error'; message: string }) => void;
+  /** 상위 탭에 건수를 올려준다(표시 전용) */
+  onCount?: (n: number) => void;
 }
 
-export default function BrandTemplateManagementSection({ profiles, setToast }: Props) {
+export default function BrandTemplateManagementSection({ profiles, setToast, onCount }: Props) {
   const authUser = useAuthStore((s) => s.user);
   const [templates, setTemplates] = useState<BrandTemplate[]>([]);
   const [loading, setLoading] = useState(false);
   const [profileFilter, setProfileFilter] = useState<string>(''); // '' = 전체
+  const [search, setSearch] = useState('');
 
-  // 등록/수정/상세보기 모달용 state — Step 2-B에서 BrandTemplateForm 연결
+  // 등록/수정/상세보기 모달용 state
   const [editingTarget, setEditingTarget] = useState<BrandTemplate | null>(null);
   const [viewingTarget, setViewingTarget] = useState<BrandTemplate | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -93,6 +132,7 @@ export default function BrandTemplateManagementSection({ profiles, setToast }: P
     templateName: string;
   } | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const isSuperAdmin = authUser?.userType === 'super_admin';
   const canManage =
@@ -130,9 +170,32 @@ export default function BrandTemplateManagementSection({ profiles, setToast }: P
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const filtered = profileFilter
-    ? templates.filter((t) => t.profile_id === profileFilter)
-    : templates;
+  const filtered = useMemo(() => {
+    const kw = search.trim().toLowerCase();
+    return templates.filter((t) => {
+      if (profileFilter && t.profile_id !== profileFilter) return false;
+      if (kw) {
+        const hay = `${t.manage_name || ''} ${t.template_key || ''}`.toLowerCase();
+        if (!hay.includes(kw)) return false;
+      }
+      return true;
+    });
+  }, [templates, profileFilter, search]);
+
+  // 탭 건수는 **전체**를 올린다(필터 결과가 아니라)
+  useEffect(() => {
+    onCount?.(templates.length);
+  }, [templates.length, onCount]);
+
+  const copyKey = (key: string) => {
+    navigator.clipboard
+      .writeText(key)
+      .then(() => {
+        setCopiedKey(key);
+        setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500);
+      })
+      .catch(() => setToast({ show: true, type: 'error', message: '복사 실패 — 직접 선택 후 복사해주세요' }));
+  };
 
   const remove = (t: BrandTemplate) => {
     setConfirm({
@@ -171,154 +234,193 @@ export default function BrandTemplateManagementSection({ profiles, setToast }: P
     });
   };
 
+  /** 대표(0번)는 모든 사용자가 쓸 수 있는 상세보기 — 파괴적 액션은 ⋯ 안으로 */
+  const actionsFor = (t: BrandTemplate): RowAction[] => {
+    const list: RowAction[] = [{ label: '상세보기', onClick: () => setViewingTarget(t) }];
+    if (canManage) {
+      list.push({ label: '수정', onClick: () => setEditingTarget(t) });
+      list.push({ label: '삭제', onClick: () => remove(t), danger: true });
+    }
+    if (isSuperAdmin) {
+      list.push({
+        label: '변경 이력',
+        onClick: () =>
+          setHistoryTarget({
+            templateKey: t.template_key,
+            templateName: t.manage_name || t.template_key,
+          }),
+      });
+    }
+    return list;
+  };
+
   return (
-    <div className="space-y-4">
+    <div className="pt-7">
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
-      {/* 헤더 */}
-      <div className="flex items-center justify-between">
+
+      {/* ── 툴바 ─────────────────────────────── */}
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
         <div>
-          <h3 className="text-base font-bold text-gray-900">브랜드메시지 템플릿</h3>
-          <p className="text-xs text-gray-500 mt-0.5">
-            카카오 브랜드메시지 8종 유형 — 검수 없이 등록 즉시 사용 가능
-          </p>
+          <h2 className={KUI_SEC_TITLE}>브랜드메시지 템플릿</h2>
+          <p className={KUI_SEC_DESC}>8종 유형 · 검수 없이 등록 즉시 사용할 수 있습니다</p>
         </div>
-        {canManage && (
-          <button
-            type="button"
-            onClick={() => setShowCreate(true)}
-            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg"
-          >
-            + 신규 등록
-          </button>
-        )}
-      </div>
 
-      {/* 필터 */}
-      <div className="flex items-center gap-2">
-        <select
-          value={profileFilter}
-          onChange={(e) => setProfileFilter(e.target.value)}
-          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white"
-        >
-          <option value="">전체 발신프로필</option>
-          {profiles.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.profile_name}
-            </option>
-          ))}
-        </select>
-        <span className="text-xs text-gray-400">총 {filtered.length}건</span>
-      </div>
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          <div className="relative">
+            <select
+              value={profileFilter}
+              onChange={(e) => setProfileFilter(e.target.value)}
+              className={`${KUI_SELECT} w-auto min-w-[168px]`}
+              aria-label="발신프로필 거르기"
+            >
+              <option value="">전체 발신프로필</option>
+              {profiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.profile_name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="w-[13px] h-[13px] text-neutral-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          </div>
 
-      {/* 목록 */}
-      {loading ? (
-        <div className="text-center py-12 text-sm text-gray-400">불러오는 중…</div>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-12">
-          <div className="text-3xl mb-2">📢</div>
-          <p className="text-sm text-gray-500">등록된 브랜드메시지 템플릿이 없습니다</p>
+          <div className={`${KUI_FIELD} w-full sm:w-52`}>
+            <Search className="w-[14px] h-[14px] text-neutral-400 shrink-0" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="관리명 · 템플릿키 검색"
+              className={KUI_FIELD_INPUT}
+            />
+          </div>
+
           {canManage && (
-            <p className="text-xs text-gray-400 mt-1">
-              상단 + 신규 등록 버튼으로 시작하세요
-            </p>
+            <button type="button" onClick={() => setShowCreate(true)} className={KUI_BTN_PRIMARY}>
+              <Plus className="w-[15px] h-[15px]" />
+              템플릿 등록
+            </button>
           )}
         </div>
-      ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>
-                <th className="px-4 py-2 text-left font-medium text-gray-600">관리명</th>
-                <th className="px-4 py-2 text-left font-medium text-gray-600">발신프로필</th>
-                <th className="px-4 py-2 text-center font-medium text-gray-600">유형</th>
-                <th className="px-4 py-2 text-center font-medium text-gray-600">상태</th>
-                <th className="px-4 py-2 text-left font-medium text-gray-600">최종 수정</th>
-                <th className="px-4 py-2 text-right font-medium text-gray-600">관리</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((t) => {
-                const st = STATUS_LABELS[t.status] || {
-                  label: t.status,
-                  cls: 'bg-gray-100 text-gray-500',
-                };
-                return (
-                  <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
-                    <td className="px-4 py-2">
-                      <div className="font-medium text-gray-900">{t.manage_name}</div>
-                      <div className="text-[11px] text-gray-400 font-mono truncate max-w-[240px]">
-                        {t.template_key}
-                      </div>
-                    </td>
-                    <td className="px-4 py-2 text-xs text-gray-600">
-                      {t.profile_name || '-'}
-                    </td>
-                    <td className="text-center px-4 py-2 text-xs text-gray-600">
-                      {CHAT_BUBBLE_LABELS[t.chat_bubble_type] || t.chat_bubble_type}
-                    </td>
-                    <td className="text-center px-4 py-2">
-                      <span
-                        className={`inline-block text-[11px] px-2 py-0.5 rounded ${st.cls}`}
-                      >
-                        {st.label}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 text-xs text-gray-500">
-                      {t.updated_at
-                        ? new Date(t.updated_at).toLocaleString('ko-KR')
-                        : '-'}
-                    </td>
-                    <td className="text-right px-4 py-2 space-x-1">
-                      {/* 상세보기 — 모든 사용자 */}
-                      <button
-                        type="button"
-                        onClick={() => setViewingTarget(t)}
-                        className="text-[11px] px-2 py-0.5 bg-gray-100 hover:bg-gray-200 rounded"
-                      >
-                        상세보기
-                      </button>
-                      {/* 수정 — canManage */}
-                      {canManage && (
-                        <button
-                          type="button"
-                          onClick={() => setEditingTarget(t)}
-                          className="text-[11px] px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded"
-                        >
-                          수정
-                        </button>
-                      )}
-                      {/* 삭제 — canManage */}
-                      {canManage && (
-                        <button
-                          type="button"
-                          onClick={() => remove(t)}
-                          className="text-[11px] px-2 py-0.5 bg-red-50 hover:bg-red-100 text-red-600 rounded"
-                        >
-                          삭제
-                        </button>
-                      )}
-                      {/* 이력 — 슈퍼관리자만 */}
-                      {isSuperAdmin && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setHistoryTarget({
-                              templateKey: t.template_key,
-                              templateName: t.manage_name || t.template_key,
-                            })
-                          }
-                          className="text-[11px] px-2 py-0.5 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded"
-                        >
-                          이력
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      </div>
+
+      {/* ── 목록 ─────────────────────────────── */}
+      {loading ? (
+        <div className={`${KUI_LOADING} mt-5`}>
+          <span className={KUI_SPINNER} />
+          불러오는 중
         </div>
+      ) : filtered.length === 0 ? (
+        <div className="mt-5">
+          <EmptyState
+            icon={Megaphone}
+            title={templates.length === 0 ? '등록된 브랜드메시지 템플릿이 없습니다' : '조건에 맞는 템플릿이 없습니다'}
+            description={
+              templates.length === 0
+                ? '텍스트·이미지·와이드·캐러셀 등 8종 중에서 고르면 검수 없이 바로 쓸 수 있습니다.'
+                : '발신프로필이나 검색어를 바꿔보세요.'
+            }
+            actionLabel={templates.length === 0 && canManage ? '첫 템플릿 등록하기' : undefined}
+            onAction={templates.length === 0 && canManage ? () => setShowCreate(true) : undefined}
+          />
+        </div>
+      ) : (
+        <>
+          {/* 데스크톱 표 */}
+          <div className={`${KUI_PANEL} ${KUI_ONLY_DESKTOP} mt-5`}>
+            <div className={KUI_SCROLL_X}>
+              <table className="w-full min-w-[900px]">
+                <thead className={KUI_THEAD}>
+                  <tr>
+                    <th className={KUI_TH}>관리명</th>
+                    <th className={KUI_TH}>발신프로필</th>
+                    <th className={KUI_TH}>유형</th>
+                    <th className={KUI_TH}>상태</th>
+                    <th className={KUI_TH_RIGHT}>최종 수정</th>
+                    <th className={KUI_TH_STICKY}>관리</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((t) => {
+                    const st = STATUS_LABELS[t.status] || { label: t.status, tone: 'neutral' as KuiPillTone };
+                    return (
+                      <tr key={t.id} className={KUI_TR}>
+                        <td className={KUI_TD}>
+                          <div className={KUI_CELL_NAME}>{t.manage_name}</div>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className={`${KUI_CELL_CODE} truncate max-w-[240px]`}>{t.template_key}</span>
+                            <button
+                              type="button"
+                              onClick={() => copyKey(t.template_key)}
+                              className={KUI_COPY_BTN}
+                              title="템플릿키 복사"
+                              aria-label="템플릿키 복사"
+                            >
+                              {copiedKey === t.template_key
+                                ? <Check className="w-3 h-3 text-emerald-600" />
+                                : <Copy className="w-3 h-3" />}
+                            </button>
+                          </div>
+                        </td>
+                        <td className={KUI_TD}>
+                          <span className="text-[13.5px] text-neutral-800">{t.profile_name || '-'}</span>
+                        </td>
+                        <td className={KUI_TD}>
+                          <span className="text-[13.5px] text-neutral-800">
+                            {CHAT_BUBBLE_LABELS[t.chat_bubble_type] || t.chat_bubble_type}
+                          </span>
+                        </td>
+                        <td className={KUI_TD}>
+                          <StatusPill label={st.label} tone={st.tone} />
+                        </td>
+                        <td className={`${KUI_TD} text-right`}>
+                          <span className={KUI_CELL_META}>
+                            {t.updated_at ? new Date(t.updated_at).toLocaleString('ko-KR') : '-'}
+                          </span>
+                        </td>
+                        <td className={KUI_TD_STICKY}>
+                          <RowActions actions={actionsFor(t)} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* 모바일 카드 */}
+          <div className={`${KUI_CARDS} mt-5`}>
+            {filtered.map((t) => {
+              const st = STATUS_LABELS[t.status] || { label: t.status, tone: 'neutral' as KuiPillTone };
+              return (
+                <div key={t.id} className={KUI_CARD}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className={KUI_CARD_TITLE}>{t.manage_name}</div>
+                      <div className={`${KUI_CELL_CODE} mt-0.5 truncate`}>{t.template_key}</div>
+                    </div>
+                    <StatusPill label={st.label} tone={st.tone} />
+                  </div>
+                  <div className={KUI_CARD_META}>
+                    <span>{t.profile_name || '-'}</span>
+                    <span className="text-neutral-300">·</span>
+                    <span>{CHAT_BUBBLE_LABELS[t.chat_bubble_type] || t.chat_bubble_type}</span>
+                    <span className="text-neutral-300">·</span>
+                    <span className="tabular-nums">
+                      {t.updated_at ? new Date(t.updated_at).toLocaleDateString('ko-KR') : '-'}
+                    </span>
+                  </div>
+                  <div className="mt-3">
+                    <RowActions actions={actionsFor(t)} align="start" />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-4">
+            <span className={KUI_TOTAL}>총 <b className={KUI_TOTAL_NUM}>{filtered.length}</b>건</span>
+          </div>
+        </>
       )}
 
       {/* 등록/수정/상세보기 모달 — D150-2 Step 2-B BrandTemplateForm 통합 */}

@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { Check, ChevronDown, Info, X } from 'lucide-react';
 import ButtonEditor, { type AlimtalkButton } from './ButtonEditor';
 import ItemListEditor, {
   type ItemHighlight,
@@ -24,6 +25,26 @@ import {
   type MsgType,
   type EmphType,
 } from './alimtalk-types';
+import {
+  KUI_BTN_OUTLINE,
+  KUI_BTN_PRIMARY,
+  KUI_FIELDSET_TITLE,
+  KUI_HINT,
+  KUI_INPUT,
+  KUI_LABEL,
+  KUI_MODAL,
+  KUI_MODAL_CLOSE,
+  KUI_MODAL_DESC,
+  KUI_MODAL_FOOT,
+  KUI_MODAL_HEAD,
+  KUI_MODAL_SCRIM,
+  KUI_MODAL_TITLE,
+  KUI_REQUIRED,
+  KUI_SELECT,
+  KUI_TEXTAREA,
+  KUI_TOAST_ERROR,
+  KUI_TOAST_SUCCESS,
+} from '../../utils/kakao-ui';
 
 export interface TemplateFormData {
   id?: string;
@@ -435,22 +456,19 @@ export default function AlimtalkTemplateFormV2({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[92vh] overflow-hidden flex flex-col"
-        style={{ animation: 'zoomIn 0.2s ease-out' }}
-      >
+    <div className={KUI_MODAL_SCRIM}>
+      <div className={`${KUI_MODAL} max-w-5xl h-[92vh]`} role="dialog" aria-modal="true">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-amber-50 to-white flex justify-between items-center">
-          <div>
-            <h2 className="text-lg font-bold text-gray-900">
+        <div className={KUI_MODAL_HEAD}>
+          <div className="min-w-0">
+            <h2 className={KUI_MODAL_TITLE}>
               {readOnly
                 ? '알림톡 템플릿 상세보기'
                 : isEdit
                   ? '알림톡 템플릿 수정'
                   : '알림톡 템플릿 등록'}
             </h2>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <p className={KUI_MODAL_DESC}>
               {readOnly
                 ? '읽기 전용으로 템플릿 내용을 확인할 수 있습니다'
                 : '카카오 검수 승인 후 발송할 수 있습니다'}
@@ -459,9 +477,10 @@ export default function AlimtalkTemplateFormV2({
           <button
             type="button"
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-2xl"
+            className={KUI_MODAL_CLOSE}
+            aria-label="닫기"
           >
-            &times;
+            <X className="w-[17px] h-[17px]" />
           </button>
         </div>
 
@@ -471,12 +490,12 @@ export default function AlimtalkTemplateFormV2({
               max-h-[120px] + overflow-y-auto = 긴 사유 스크롤 / 본문 작성 영역 확대.
               select-text + cursor-text = 사용자 드래그/복사 명시 정합. */}
         {rejectReason && (
-          <div className="px-6 py-2 bg-red-50 border-b border-red-200">
-            <p className="text-xs font-semibold text-red-700 mb-1">
-              반려 사유 (본문 수정 후 저장하면 자동으로 재검수 요청됩니다)
+          <div className="shrink-0 px-6 py-3 bg-rose-50 border-b border-rose-200">
+            <p className="text-[12.5px] font-semibold text-rose-800 mb-1.5">
+              반려 사유 — 본문을 고쳐 저장하면 자동으로 재검수를 요청합니다
             </p>
-            <div className="max-h-[120px] overflow-y-auto rounded border border-red-100 bg-white/40 px-2 py-1.5">
-              <p className="text-sm text-red-700 whitespace-pre-wrap leading-relaxed select-text cursor-text">
+            <div className="max-h-[120px] overflow-y-auto rounded-lg border border-rose-200 bg-white px-3 py-2">
+              <p className="text-[13px] text-rose-900 whitespace-pre-wrap leading-relaxed select-text cursor-text">
                 {rejectReason}
               </p>
             </div>
@@ -498,11 +517,11 @@ export default function AlimtalkTemplateFormV2({
               input/select/button/label은 pointer-events-none 유지 (영역 변경 차단). */}
         <div className={`grid grid-cols-1 md:grid-cols-[1fr_360px] flex-1 overflow-hidden border-0 p-0 m-0 min-w-0 min-h-0 ${readOnly ? 'opacity-70 [&_input]:pointer-events-none [&_select]:pointer-events-none [&_button]:pointer-events-none [&_label]:pointer-events-none' : ''}`}>
           {/* Left: Form */}
-          <div className="px-6 py-4 overflow-y-auto space-y-4 border-r border-gray-100 min-h-0">
+          <div className="px-6 py-4 overflow-y-auto space-y-4 border-r border-neutral-200 min-h-0">
             {/* 발신 프로필 */}
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                발신 프로필 <span className="text-red-500">*</span>
+              <label className={KUI_LABEL}>
+                발신 프로필 <span className={KUI_REQUIRED}>*</span>
               </label>
               {(() => {
                 const approvedProfiles = profiles.filter(
@@ -517,29 +536,29 @@ export default function AlimtalkTemplateFormV2({
                         type="button"
                         disabled={!hasApproved}
                         onClick={() => setProfileOpen((o) => !o)}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-left flex items-center justify-between disabled:bg-gray-100 disabled:text-gray-400"
+                        className={`${KUI_INPUT} text-left flex items-center justify-between disabled:bg-neutral-100 disabled:text-neutral-400`}
                       >
-                        <span className={form.profile_id ? 'text-gray-800 truncate' : 'text-gray-400'}>
+                        <span className={form.profile_id ? 'text-neutral-900 truncate' : 'text-neutral-400'}>
                           {(() => {
                             const sp = approvedProfiles.find((p) => p.id === form.profile_id);
                             return sp ? `${sp.profile_name} (${sp.profile_key.slice(0, 10)}…)` : '선택';
                           })()}
                         </span>
-                        <span className="text-gray-400 ml-2 shrink-0">▾</span>
+                        <ChevronDown className="w-4 h-4 text-neutral-400 ml-2 shrink-0" />
                       </button>
                       {profileOpen && hasApproved && (
                         <>
                           {/* 드롭다운 바깥 클릭 닫기(정상 UX — 모달 백드롭 닫힘 규칙과 별개) */}
                           <div className="fixed inset-0 z-10" onClick={() => setProfileOpen(false)} />
-                          <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
-                            <div className="p-2 border-b border-gray-100 sticky top-0 bg-white">
+                          <div className="absolute z-20 mt-1 w-full bg-white border border-neutral-200 rounded-lg shadow-lg shadow-neutral-900/[.08] max-h-64 overflow-y-auto">
+                            <div className="p-2 border-b border-neutral-100 sticky top-0 bg-white">
                               <input
                                 autoFocus
                                 type="text"
                                 value={profileQuery}
                                 onChange={(e) => setProfileQuery(e.target.value)}
                                 placeholder="프로필명·채널ID 검색"
-                                className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:border-amber-400"
+                                className={`${KUI_INPUT} h-8 text-[13px]`}
                               />
                             </div>
                             {(() => {
@@ -548,7 +567,7 @@ export default function AlimtalkTemplateFormV2({
                                 ? approvedProfiles.filter((p) => `${p.profile_name} ${p.profile_key}`.toLowerCase().includes(q))
                                 : approvedProfiles;
                               if (list.length === 0) {
-                                return <div className="px-3 py-2 text-xs text-gray-400">검색 결과가 없습니다.</div>;
+                                return <div className="px-3 py-2 text-[12.5px] text-neutral-500">검색 결과가 없습니다.</div>;
                               }
                               return list.map((p) => (
                                 <button
@@ -559,10 +578,10 @@ export default function AlimtalkTemplateFormV2({
                                     setProfileOpen(false);
                                     setProfileQuery('');
                                   }}
-                                  className={`w-full text-left px-3 py-2 text-sm hover:bg-amber-50 ${form.profile_id === p.id ? 'bg-amber-50 font-medium' : ''}`}
+                                  className={`w-full text-left px-3 py-2 text-[13.5px] transition hover:bg-indigo-50 ${form.profile_id === p.id ? 'bg-indigo-50 font-semibold text-indigo-700' : 'text-neutral-800'}`}
                                 >
                                   {p.profile_name}{' '}
-                                  <span className="text-[11px] text-gray-400">({p.profile_key.slice(0, 10)}…)</span>
+                                  <span className="text-[11.5px] text-neutral-400">({p.profile_key.slice(0, 10)}…)</span>
                                 </button>
                               ));
                             })()}
@@ -571,13 +590,13 @@ export default function AlimtalkTemplateFormV2({
                       )}
                     </div>
                     {!hasAny && (
-                      <p className="mt-1 text-[11px] text-red-600">
+                      <p className="mt-1.5 text-[12.5px] text-rose-600">
                         등록된 발신프로필이 없습니다. 슈퍼관리자에게 등록을 요청해주세요.
                       </p>
                     )}
                     {hasAny && !hasApproved && (
-                      <p className="mt-1 text-[11px] text-amber-600">
-                        승인된 발신프로필이 없습니다. 슈퍼관리자 승인 후 사용할 수 있습니다.
+                      <p className="mt-1.5 text-[12.5px] text-amber-700">
+                        승인된 발신프로필이 없습니다. 승인이 끝나야 사용할 수 있습니다.
                       </p>
                     )}
                   </>
@@ -588,20 +607,20 @@ export default function AlimtalkTemplateFormV2({
             {/* 템플릿명 + 고객사 코드 */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  템플릿명 <span className="text-red-500">*</span>
+                <label className={KUI_LABEL}>
+                  템플릿명 <span className={KUI_REQUIRED}>*</span>
                 </label>
                 <input
                   value={form.manageName}
                   onChange={(e) => setForm({ ...form, manageName: e.target.value })}
                   maxLength={30}
                   placeholder="템플릿을 구분할 이름 (최대 30자)"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
+                  className={KUI_INPUT}
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  고객사 관리코드 <span className="text-gray-400">(선택)</span>
+                <label className={KUI_LABEL}>
+                  고객사 관리코드 <span className="text-neutral-400 font-normal">(선택)</span>
                 </label>
                 <input
                   value={form.customTemplateCode || ''}
@@ -610,7 +629,7 @@ export default function AlimtalkTemplateFormV2({
                   }
                   maxLength={30}
                   placeholder="임의 지정 (ERP 연동 등)"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
+                  className={KUI_INPUT}
                 />
               </div>
             </div>
@@ -625,7 +644,7 @@ export default function AlimtalkTemplateFormV2({
             {/* 메시지유형 + 강조유형 */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
+                <label className={KUI_LABEL}>
                   메시지 유형
                 </label>
                 <select
@@ -633,7 +652,7 @@ export default function AlimtalkTemplateFormV2({
                   onChange={(e) =>
                     setForm({ ...form, messageType: e.target.value as MsgType })
                   }
-                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
+                  className={KUI_INPUT}
                 >
                   {MSG_TYPES.map((t) => (
                     <option key={t.value} value={t.value}>
@@ -641,12 +660,12 @@ export default function AlimtalkTemplateFormV2({
                     </option>
                   ))}
                 </select>
-                <p className="text-[11px] text-gray-400 mt-0.5">
+                <p className={KUI_HINT}>
                   {MSG_TYPES.find((t) => t.value === form.messageType)?.desc}
                 </p>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
+                <label className={KUI_LABEL}>
                   강조 유형
                 </label>
                 <select
@@ -654,7 +673,7 @@ export default function AlimtalkTemplateFormV2({
                   onChange={(e) =>
                     setForm({ ...form, emphasizeType: e.target.value as EmphType })
                   }
-                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
+                  className={KUI_INPUT}
                 >
                   {EMPH_TYPES.map((t) => (
                     <option key={t.value} value={t.value}>
@@ -668,35 +687,35 @@ export default function AlimtalkTemplateFormV2({
             {/* TEXT 강조 — 2026-08-05 접수(박성용): 보조문구 필수 표기 + 단말별 표시 자수 안내.
                 maxLength 50은 카카오 API 입력 상한이라 유지하고, 안내 숫자는 "표시 잘림" 기준이다. */}
             {form.emphasizeType === 'TEXT' && (
-              <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/40 p-3">
-                <p className="text-xs font-semibold text-amber-700">강조 텍스트</p>
+              <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3.5">
+                <p className={KUI_FIELDSET_TITLE}>강조 텍스트</p>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    강조 타이틀 <span className="text-red-500">*</span>
+                  <label className={KUI_LABEL}>
+                    강조 타이틀 <span className={KUI_REQUIRED}>*</span>
                   </label>
                   <input
                     value={form.templateTitle}
                     onChange={(e) => setForm({ ...form, templateTitle: e.target.value })}
                     maxLength={50}
                     placeholder="강조 타이틀 (최대 50자)"
-                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                    className={KUI_INPUT}
                   />
-                  <p className="text-[11px] text-gray-400 mt-0.5">
+                  <p className={KUI_HINT}>
                     2줄 표시 · 안드로이드 23자 · iOS 21자까지 표시되고 각각 24자·22자부터 말줄임 (띄어쓰기 포함)
                   </p>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    강조표기 보조문구 <span className="text-red-500">*</span>
+                  <label className={KUI_LABEL}>
+                    강조표기 보조문구 <span className={KUI_REQUIRED}>*</span>
                   </label>
                   <input
                     value={form.templateSubtitle}
                     onChange={(e) => setForm({ ...form, templateSubtitle: e.target.value })}
                     maxLength={50}
                     placeholder="보조문구 (최대 50자)"
-                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                    className={KUI_INPUT}
                   />
-                  <p className="text-[11px] text-gray-400 mt-0.5">
+                  <p className={KUI_HINT}>
                     안드로이드 18자 · iOS 21자까지 표시되고 각각 19자·22자부터 말줄임 (띄어쓰기 포함) · 변수 사용 불가
                   </p>
                 </div>
@@ -705,8 +724,8 @@ export default function AlimtalkTemplateFormV2({
 
             {/* IMAGE 강조 */}
             {form.emphasizeType === 'IMAGE' && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3">
-                <p className="text-xs font-semibold text-amber-700 mb-2">강조 이미지</p>
+              <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3.5">
+                <p className={`${KUI_FIELDSET_TITLE} mb-2`}>강조 이미지</p>
                 <KakaoChannelImageUpload
                   uploadType="alimtalk_template"
                   value={form.imageUrl}
@@ -738,9 +757,9 @@ export default function AlimtalkTemplateFormV2({
 
             {/* 본문 */}
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                본문 <span className="text-red-500">*</span>
-                <span className="ml-2 text-gray-400">
+              <label className={KUI_LABEL}>
+                본문 <span className={KUI_REQUIRED}>*</span>
+                <span className="ml-2 text-neutral-400 font-normal">
                   ({form.content.length}/1,000자, {contentBytes} bytes)
                 </span>
               </label>
@@ -751,11 +770,9 @@ export default function AlimtalkTemplateFormV2({
                 maxLength={1000}
                 placeholder="변수는 #{변수명} 형식 (예: #{고객명}님 주문 확인)"
                 readOnly={readOnly}
-                className={`w-full border rounded-lg px-3 py-2 text-sm resize-none ${
-                  contentOver
-                    ? 'border-red-300 focus:ring-red-200'
-                    : 'border-gray-300 focus:ring-amber-200'
-                } ${readOnly ? 'bg-gray-50 cursor-text select-text' : ''}`}
+                className={`${KUI_TEXTAREA} ${
+                  contentOver ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-500/15' : ''
+                } ${readOnly ? 'bg-neutral-50 cursor-text select-text' : ''}`}
               />
               <VariableChips content={form.content} />
             </div>
@@ -773,17 +790,17 @@ export default function AlimtalkTemplateFormV2({
                     setPreviewEnabled(checked);
                     if (!checked) setForm({ ...form, previewMessage: '' });
                   }}
-                  className="w-4 h-4 text-amber-600 border-gray-300 rounded disabled:opacity-50"
+                  className="w-[15px] h-[15px] accent-indigo-600 rounded cursor-pointer disabled:opacity-50"
                 />
-                <label htmlFor="previewMsgToggle" className="text-sm text-gray-700">
+                <label htmlFor="previewMsgToggle" className="text-[13.5px] text-neutral-800 cursor-pointer">
                   미리보기 메시지 설정
-                  <span className="ml-2 text-[11px] text-gray-400">
+                  <span className="ml-2 text-[12px] text-neutral-500">
                     (앱 알림 문구, 변수 사용 불가)
                   </span>
                 </label>
               </div>
               {form.securityFlag && (
-                <p className="mt-1 ml-6 text-[11px] text-gray-500">
+                <p className="mt-1 ml-6 text-[12px] text-neutral-500">
                   보안 템플릿은 미리보기 메시지를 설정할 수 없습니다.
                 </p>
               )}
@@ -793,7 +810,7 @@ export default function AlimtalkTemplateFormV2({
                   onChange={(e) => setForm({ ...form, previewMessage: e.target.value })}
                   maxLength={40}
                   placeholder="최대 40자 (예: 주문이 접수되었습니다)"
-                  className="mt-2 w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
+                  className={`${KUI_INPUT} mt-2`}
                 />
               )}
             </div>
@@ -801,9 +818,9 @@ export default function AlimtalkTemplateFormV2({
             {/* 부가정보 (EX/MI) */}
             {(form.messageType === 'EX' || form.messageType === 'MI') && (
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  부가정보 <span className="text-red-500">*</span>
-                  <span className="ml-2 text-gray-400">
+                <label className={KUI_LABEL}>
+                  부가정보 <span className={KUI_REQUIRED}>*</span>
+                  <span className="ml-2 text-neutral-400 font-normal">
                     (최대 500자, 변수 불가)
                   </span>
                 </label>
@@ -813,7 +830,7 @@ export default function AlimtalkTemplateFormV2({
                   rows={3}
                   maxLength={500}
                   readOnly={readOnly}
-                  className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none ${readOnly ? 'bg-gray-50 cursor-text select-text' : ''}`}
+                  className={`${KUI_TEXTAREA} ${readOnly ? 'bg-neutral-50 cursor-text select-text' : ''}`}
                 />
               </div>
             )}
@@ -837,31 +854,32 @@ export default function AlimtalkTemplateFormV2({
                   id="representLinkToggle"
                   checked={form.representLinkEnabled}
                   onChange={(e) => setForm({ ...form, representLinkEnabled: e.target.checked })}
-                  className="w-4 h-4 text-amber-600 border-gray-300 rounded"
+                  className="w-[15px] h-[15px] accent-indigo-600 rounded cursor-pointer"
                 />
-                <label htmlFor="representLinkToggle" className="text-sm text-gray-700 font-medium">
+                <label htmlFor="representLinkToggle" className="text-[13.5px] font-semibold text-neutral-900 cursor-pointer">
                   대표링크 설정
-                  <span className="ml-2 text-[11px] text-gray-400">
+                  <span className="ml-2 text-[12px] text-neutral-500">
                     (말풍선 전역 클릭, 변수 사용 불가)
                   </span>
                 </label>
                 {/* ★ D146 (2026-05-07) PDF 0506 #5: '체크해야 카카오로 전달됩니다' 가드 안내 제거 (직원 혼선 유발). */}
                 {/* ★ D139 #2 (0425): 체크 ON + Mobile URL 입력 시 녹색 확인 인디케이터 (긍정 피드백은 유지) */}
                 {form.representLinkEnabled && form.representLinkMobile.trim() && (
-                  <span className="text-[11px] text-emerald-600 font-medium">
-                    ✓ 카카오 등록 시 대표링크 포함
+                  <span className="inline-flex items-center gap-1 text-[12px] text-emerald-700 font-semibold">
+                    <Check className="w-3.5 h-3.5" />
+                    카카오 등록 시 대표링크 포함
                   </span>
                 )}
               </div>
               {form.representLinkEnabled && (
-                <div className="mt-2 space-y-2 rounded-xl border border-amber-200 bg-amber-50/40 p-3">
+                <div className="mt-2 space-y-2 rounded-xl border border-neutral-200 bg-neutral-50 p-3.5">
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block text-[11px] text-gray-600 mb-1">
-                        Mobile URL <span className="text-red-500">*</span>
+                      <label className={KUI_LABEL}>
+                        Mobile URL <span className={KUI_REQUIRED}>*</span>
                         {/* ★ D139 #2 (0425): 체크 ON인데 Mobile URL 비어있을 때 빨간 경고 */}
                         {!form.representLinkMobile.trim() && (
-                          <span className="ml-1 text-red-500 text-[10px] font-medium">
+                          <span className="ml-1 text-rose-600 text-[11.5px] font-semibold">
                             (입력하지 않으면 카카오 등록 시 누락됩니다)
                           </span>
                         )}
@@ -880,53 +898,51 @@ export default function AlimtalkTemplateFormV2({
                         }}
                         placeholder="https://"
                         maxLength={500}
-                        className={`w-full border rounded px-2 py-1 text-sm ${
-                          !form.representLinkMobile.trim()
-                            ? 'border-red-300 bg-red-50/30'
-                            : 'border-gray-300'
+                        className={`${KUI_INPUT} ${
+                          !form.representLinkMobile.trim() ? 'border-rose-400 bg-rose-50/40' : ''
                         }`}
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] text-gray-600 mb-1">
-                        PC URL <span className="text-gray-400">(선택)</span>
+                      <label className={KUI_LABEL}>
+                        PC URL <span className="text-neutral-400 font-normal">(선택)</span>
                       </label>
                       <input
                         value={form.representLinkPc}
                         onChange={(e) => setForm({ ...form, representLinkPc: e.target.value })}
                         placeholder="https://"
                         maxLength={500}
-                        className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                        className={KUI_INPUT}
                       />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block text-[11px] text-gray-600 mb-1">
-                        iOS scheme <span className="text-gray-400">(선택)</span>
+                      <label className={KUI_LABEL}>
+                        iOS scheme <span className="text-neutral-400 font-normal">(선택)</span>
                       </label>
                       <input
                         value={form.representLinkIosScheme}
                         onChange={(e) => setForm({ ...form, representLinkIosScheme: e.target.value })}
                         placeholder="예: myapp://path"
                         maxLength={500}
-                        className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                        className={KUI_INPUT}
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] text-gray-600 mb-1">
-                        Android scheme <span className="text-gray-400">(선택)</span>
+                      <label className={KUI_LABEL}>
+                        Android scheme <span className="text-neutral-400 font-normal">(선택)</span>
                       </label>
                       <input
                         value={form.representLinkAndroidScheme}
                         onChange={(e) => setForm({ ...form, representLinkAndroidScheme: e.target.value })}
                         placeholder="예: myapp://path"
                         maxLength={500}
-                        className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                        className={KUI_INPUT}
                       />
                     </div>
                   </div>
-                  <p className="text-[11px] text-gray-500">
+                  <p className="text-[12px] text-neutral-500">
                     https:// 또는 http:// 로 시작해야 하며, 각 항목 최대 500자. 웹링크/앱링크 버튼 가이드와 동일 기준이 적용됩니다.
                   </p>
                   {/* ★ D146 (2026-05-07) PDF 0506 #5: '체크박스 해제 시...' amber 박스 제거 (직원 혼선 유발). */}
@@ -942,13 +958,13 @@ export default function AlimtalkTemplateFormV2({
                   id="secFlag"
                   checked={form.securityFlag}
                   onChange={(e) => setForm({ ...form, securityFlag: e.target.checked })}
-                  className="w-4 h-4 text-amber-600 border-gray-300 rounded"
+                  className="w-[15px] h-[15px] accent-indigo-600 rounded cursor-pointer"
                 />
-                <label htmlFor="secFlag" className="text-sm text-gray-600">
+                <label htmlFor="secFlag" className="text-[13.5px] text-neutral-700 cursor-pointer">
                   보안 템플릿 (개인정보 포함)
                 </label>
               </div>
-              <p className="mt-1 ml-6 text-[11px] text-gray-500 leading-relaxed">
+              <p className="mt-1 ml-6 text-[12px] text-neutral-500 leading-relaxed">
                 보안 템플릿 체크 시, 메인 디바이스 모바일 외 모든 서브 디바이스에서는 메시지 내용이 노출되지 않습니다.
               </p>
             </div>
@@ -956,9 +972,9 @@ export default function AlimtalkTemplateFormV2({
             {/* ★ D143 F (2026-04-30) PDF 0430 알림톡 #3: 코멘트 + 증빙자료 (등록 폼 제일 하단)
                  직원 요청: "코멘트 입력칸에는 '정보성 메시지에 대한 근거 정보(생략가능)' 선 입력".
                  등록 시점에 함께 저장되며, 검수요청 시 IMC에 자동 전달됨. */}
-            <div className="border-t border-gray-200 pt-4">
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                코멘트 <span className="text-gray-400 font-normal">(생략 가능)</span>
+            <div className="border-t border-neutral-200 pt-5">
+              <label className={KUI_LABEL}>
+                코멘트 <span className="text-neutral-400 font-normal">(생략 가능)</span>
               </label>
               <textarea
                 value={form.inspectionComment}
@@ -966,15 +982,15 @@ export default function AlimtalkTemplateFormV2({
                 placeholder="정보성 메시지에 대한 근거 정보(생략가능)"
                 rows={3}
                 disabled={readOnly}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-amber-300 focus:border-amber-400 outline-none disabled:bg-gray-50"
+                className={KUI_TEXTAREA}
               />
 
-              <label className="block text-xs font-medium text-gray-600 mt-3 mb-1">
-                코멘트 증빙자료 <span className="text-gray-400 font-normal">(이미지/PDF, 생략 가능 · 최대 5MB)</span>
+              <label className={`${KUI_LABEL} mt-4`}>
+                코멘트 증빙자료 <span className="text-neutral-400 font-normal">(이미지/PDF, 생략 가능 · 최대 5MB)</span>
               </label>
               {/* 수정 모달에서 기존 첨부파일명 표시 */}
               {form.inspectionEvidenceFilename && !inspectionEvidenceFile && (
-                <p className="text-[11px] text-gray-500 mb-1">
+                <p className="text-[12px] text-neutral-500 mb-1">
                   기존 첨부: {form.inspectionEvidenceFilename}
                 </p>
               )}
@@ -983,23 +999,24 @@ export default function AlimtalkTemplateFormV2({
                   type="file"
                   accept="image/*,.pdf"
                   onChange={(e) => setInspectionEvidenceFile(e.target.files?.[0] || null)}
-                  className="block w-full text-xs text-gray-600 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100"
+                  className="block w-full text-[12.5px] text-neutral-600 file:mr-2.5 file:h-8 file:px-3 file:rounded-lg file:border-0 file:cursor-pointer file:text-[12.5px] file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
                 />
               )}
               {inspectionEvidenceFile && (
-                <p className="text-[11px] text-gray-500 mt-1 truncate">
+                <p className="text-[12px] text-neutral-500 mt-1 truncate">
                   새 첨부: {inspectionEvidenceFile.name} ({Math.ceil(inspectionEvidenceFile.size / 1024)} KB)
                 </p>
               )}
-              <p className="text-[11px] text-gray-400 mt-1 leading-relaxed">
-                ℹ 등록 시점에 저장되며, 검수요청 시 카카오에 함께 전달됩니다.
+              <p className="flex items-start gap-1.5 text-[12px] text-neutral-500 mt-2 leading-relaxed">
+                <Info className="w-3.5 h-3.5 shrink-0 mt-px" />
+                등록 시점에 저장되며, 검수요청 때 카카오에 함께 전달됩니다.
               </p>
             </div>
           </div>
 
           {/* Right: Preview */}
-          <div className="p-4 bg-gray-50 overflow-y-auto min-h-0">
-            <p className="text-xs font-semibold text-gray-500 mb-2">실시간 미리보기</p>
+          <div className="p-4 bg-neutral-50 overflow-y-auto min-h-0">
+            <p className="text-[12px] font-semibold text-neutral-500 tracking-[0.01em] mb-2">실시간 미리보기</p>
             <AlimtalkPreview
               messageType={form.messageType}
               emphasizeType={form.emphasizeType}
@@ -1019,12 +1036,8 @@ export default function AlimtalkTemplateFormV2({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3 border-t border-gray-200 bg-gray-50 flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm"
-          >
+        <div className={KUI_MODAL_FOOT}>
+          <button type="button" onClick={onClose} className={KUI_BTN_OUTLINE}>
             {readOnly ? '닫기' : '취소'}
           </button>
           {!readOnly && (
@@ -1032,13 +1045,13 @@ export default function AlimtalkTemplateFormV2({
               type="button"
               onClick={handleSave}
               disabled={saving}
-              className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+              className={KUI_BTN_PRIMARY}
             >
               {/* ★ D139 #4 (0425): '등록 + 검수요청' → '등록'으로 분리.
                   검수요청은 목록의 '검수요청' 액션 버튼(#4-1)으로 명시 호출.
                   ★ D162-4 (2026-05-15): autoInspectAfterSave=true (반려 상태 재검수 진입)면 라벨 '수정 + 재검수 요청'으로 명시. */}
               {saving
-                ? (autoInspectAfterSave ? '재검수 요청 중...' : '저장 중...')
+                ? (autoInspectAfterSave ? '재검수 요청 중' : '저장 중')
                 : isEdit
                   ? (autoInspectAfterSave ? '수정 + 재검수 요청' : '수정 저장')
                   : '등록'}
@@ -1047,20 +1060,10 @@ export default function AlimtalkTemplateFormV2({
         </div>
 
         {toast && (
-          <div
-            className={`fixed bottom-6 right-6 px-4 py-2 rounded-lg text-sm text-white shadow-lg z-[10000]
-              ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}
-          >
+          <div className={toast.type === 'success' ? KUI_TOAST_SUCCESS : KUI_TOAST_ERROR} role="status">
             {toast.message}
           </div>
         )}
-
-        <style>{`
-          @keyframes zoomIn {
-            from { opacity: 0; transform: scale(0.95); }
-            to { opacity: 1; transform: scale(1); }
-          }
-        `}</style>
       </div>
     </div>
   );
@@ -1074,7 +1077,7 @@ function VariableChips({ content }: { content: string }) {
       {Array.from(new Set(vars)).map((v, i) => (
         <span
           key={i}
-          className="inline-block bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded-full"
+          className="inline-block bg-indigo-50 text-indigo-700 text-[12px] font-medium px-2 py-0.5 rounded-full"
         >
           {v}
         </span>
@@ -1113,13 +1116,13 @@ function CategoryPicker({
   if (!hasGroups) {
     return (
       <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">
-          카테고리 <span className="text-red-500">*</span>
+        <label className={KUI_LABEL}>
+          카테고리 <span className={KUI_REQUIRED}>*</span>
         </label>
         <select
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
+          className={KUI_INPUT}
         >
           <option value="">선택</option>
           {categories.map((c) => (
@@ -1146,8 +1149,8 @@ function CategoryPicker({
 
   return (
     <div>
-      <label className="block text-xs font-medium text-gray-600 mb-1">
-        카테고리 <span className="text-red-500">*</span>
+      <label className={KUI_LABEL}>
+        카테고리 <span className={KUI_REQUIRED}>*</span>
       </label>
       <div className="grid grid-cols-2 gap-2">
         <select
@@ -1158,7 +1161,7 @@ function CategoryPicker({
             const first = categories.find((c) => (c.group_name || '기타') === g);
             onChange(first?.category_code || '');
           }}
-          className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
+          className={KUI_INPUT}
         >
           <option value="">대분류 선택</option>
           {groups.map((g) => (
@@ -1171,7 +1174,7 @@ function CategoryPicker({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           disabled={!currentGroup}
-          className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm disabled:bg-gray-100 disabled:text-gray-400"
+          className={KUI_SELECT}
         >
           <option value="">소분류 선택</option>
           {subItems.map((c) => (
@@ -1182,7 +1185,7 @@ function CategoryPicker({
         </select>
       </div>
       {selected?.inclusion && (
-        <div className="mt-1.5 rounded-md border border-amber-100 bg-amber-50/70 px-2.5 py-1.5 text-[11px] text-amber-800 leading-relaxed">
+        <div className="mt-2 rounded-lg border border-indigo-600/15 bg-indigo-50 px-3 py-2 text-[12.5px] text-indigo-900 leading-relaxed">
           <span className="font-semibold">포함:</span> {selected.inclusion}
           {selected.exclusion && (
             <>

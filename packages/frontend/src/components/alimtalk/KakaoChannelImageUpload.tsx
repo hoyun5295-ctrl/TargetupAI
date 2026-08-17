@@ -7,6 +7,7 @@
  */
 
 import { useRef, useState } from 'react';
+import { KUI_HINT, KUI_LABEL } from '../../utils/kakao-ui';
 
 type UploadType =
   | 'alimtalk_template'
@@ -120,7 +121,7 @@ export default function KakaoChannelImageUpload({
   return (
     <div className="space-y-1">
       {label && (
-        <label className="block text-xs font-medium text-gray-600">{label}</label>
+        <label className={KUI_LABEL}>{label}</label>
       )}
 
       <div className="flex gap-2 items-start">
@@ -128,7 +129,7 @@ export default function KakaoChannelImageUpload({
           <img
             src={value}
             alt="preview"
-            className="w-20 h-20 object-cover rounded-lg border border-gray-200"
+            className="w-20 h-20 object-cover rounded-lg border border-neutral-200"
           />
         )}
 
@@ -137,7 +138,7 @@ export default function KakaoChannelImageUpload({
             type="button"
             onClick={handleClick}
             disabled={disabled || uploading}
-            className="text-xs px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-lg disabled:opacity-50"
+            className="h-8 px-3 rounded-lg text-[12.5px] font-semibold bg-indigo-50 text-indigo-700 transition hover:bg-indigo-100 disabled:opacity-50"
           >
             {uploading ? '업로드 중...' : value ? '이미지 교체' : '이미지 업로드'}
           </button>
@@ -153,7 +154,7 @@ export default function KakaoChannelImageUpload({
             }}
           />
 
-          <p className="text-[11px] text-gray-400 mt-1">
+          <p className={KUI_HINT}>
             {hint || HINT_MAP[uploadType]}
           </p>
           {err && <p className="text-[11px] text-red-500 mt-1">{err}</p>}

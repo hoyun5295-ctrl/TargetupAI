@@ -19,6 +19,23 @@
  */
 
 import { useState, type ReactNode } from 'react';
+import { X } from 'lucide-react';
+import {
+  KUI_BTN_OUTLINE,
+  KUI_BTN_PRIMARY,
+  KUI_INPUT,
+  KUI_LABEL,
+  KUI_MODAL,
+  KUI_MODAL_BODY,
+  KUI_MODAL_CLOSE,
+  KUI_MODAL_FOOT,
+  KUI_MODAL_HEAD,
+  KUI_MODAL_SCRIM,
+  KUI_MODAL_TITLE,
+  KUI_REQUIRED,
+  KUI_SELECT,
+  KUI_TEXTAREA,
+} from '../../utils/kakao-ui';
 
 interface Profile {
   id: string;
@@ -360,31 +377,31 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
 
   return (
     <div
-      className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4 animate-in fade-in duration-150"
+      className={KUI_MODAL_SCRIM}
     >
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[92vh] flex flex-col">
+      <div className={`${KUI_MODAL} max-w-3xl`} role="dialog" aria-modal="true">
         {/* 헤더 */}
-        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
-          <div className="text-base font-semibold text-gray-900">{titleText}</div>
+        <div className={KUI_MODAL_HEAD}>
+          <div className={KUI_MODAL_TITLE}>{titleText}</div>
           <button
             type="button"
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-2xl leading-none px-2"
+            className={KUI_MODAL_CLOSE}
             aria-label="닫기"
           >
-            ×
+            <X className="w-[17px] h-[17px]" />
           </button>
         </div>
 
         {/* 본문 */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+        <div className={KUI_MODAL_BODY}>
           {/* 발신프로필 */}
           <Field label="발신프로필" required>
             <select
               value={form.profileId}
               onChange={(e) => set('profileId', e.target.value)}
               disabled={isView || isEdit}
-              className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white disabled:bg-gray-50"
+              className={KUI_SELECT}
             >
               <option value="">선택</option>
               {profiles.map((p) => (
@@ -403,7 +420,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
               onChange={(e) => set('manageName', e.target.value)}
               disabled={isView}
               maxLength={30}
-              className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm disabled:bg-gray-50"
+              className={KUI_INPUT}
               placeholder="회원가입 발송 템플릿_v1"
             />
           </Field>
@@ -416,7 +433,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
               onChange={(e) => set('customTemplateCode', e.target.value)}
               disabled={isView}
               maxLength={30}
-              className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm disabled:bg-gray-50"
+              className={KUI_INPUT}
               placeholder="CUST_JOIN_001"
             />
           </Field>
@@ -434,12 +451,12 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                     onClick={() => set('chatBubbleType', opt.value)}
                     className={`text-left rounded-lg border p-2.5 transition ${
                       selected
-                        ? 'border-blue-400 bg-blue-50 text-blue-800'
-                        : 'border-gray-200 hover:bg-gray-50 text-gray-700'
+                        ? 'border-indigo-600 bg-indigo-50 text-indigo-800'
+                        : 'border-neutral-200 hover:bg-neutral-50 text-neutral-700'
                     } ${isView || isEdit ? 'opacity-70 cursor-not-allowed' : ''}`}
                   >
                     <div className="text-sm font-medium">{opt.label}</div>
-                    <div className="text-[11px] text-gray-500 mt-0.5">{opt.desc}</div>
+                    <div className="text-[12px] text-neutral-500 mt-0.5">{opt.desc}</div>
                   </button>
                 );
               })}
@@ -460,10 +477,10 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                 disabled={isView}
                 maxLength={1300}
                 rows={6}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm disabled:bg-gray-50"
+                className={KUI_TEXTAREA}
                 placeholder="홍길동님 회원가입을 축하합니다."
               />
-              <div className="text-[11px] text-gray-400 text-right">
+              <div className="text-[12px] text-neutral-500 text-right tabular-nums">
                 {form.content.length}/1300
               </div>
             </Field>
@@ -483,7 +500,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                   disabled={isView}
                   maxLength={form.chatBubbleType === 'IMAGE' ? 400 : 76}
                   rows={form.chatBubbleType === 'IMAGE' ? 4 : 2}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm disabled:bg-gray-50"
+                  className={KUI_TEXTAREA}
                 />
               </Field>
               <SingleImageField
@@ -508,7 +525,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                   onChange={(e) => set('header', e.target.value)}
                   disabled={isView}
                   maxLength={20}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm disabled:bg-gray-50"
+                  className={KUI_INPUT}
                 />
               </Field>
               <SingleImageField
@@ -537,7 +554,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                   onChange={(e) => set('header', e.target.value)}
                   disabled={isView}
                   maxLength={20}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm disabled:bg-gray-50"
+                  className={KUI_INPUT}
                 />
               </Field>
               <Field label="본문 (선택)" hint="최대 76자">
@@ -547,7 +564,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                   disabled={isView}
                   maxLength={76}
                   rows={2}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm disabled:bg-gray-50"
+                  className={KUI_TEXTAREA}
                 />
               </Field>
               <Field label="동영상 URL" required>
@@ -556,7 +573,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                   value={form.attachmentVideoUrl}
                   onChange={(e) => set('attachmentVideoUrl', e.target.value)}
                   disabled={isView}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm disabled:bg-gray-50 font-mono"
+                  className={`${KUI_INPUT} font-mono`}
                   placeholder="https://..."
                 />
               </Field>
@@ -586,7 +603,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                     })
                   }
                   disabled={isView}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm disabled:bg-gray-50"
+                  className={KUI_INPUT}
                 />
               </Field>
               <div className="grid grid-cols-2 gap-3">
@@ -601,7 +618,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                       })
                     }
                     disabled={isView}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm disabled:bg-gray-50"
+                    className={KUI_INPUT}
                   />
                 </Field>
                 <Field label="할인가">
@@ -615,7 +632,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                       })
                     }
                     disabled={isView}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm disabled:bg-gray-50"
+                    className={KUI_INPUT}
                   />
                 </Field>
               </div>
@@ -626,7 +643,7 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
                   onChange={(e) => set('additionalContent', e.target.value)}
                   disabled={isView}
                   maxLength={34}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm disabled:bg-gray-50"
+                  className={KUI_INPUT}
                 />
               </Field>
             </>
@@ -668,18 +685,18 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
 
           {/* 에러 */}
           {error && (
-            <div className="bg-red-50 text-red-700 text-sm rounded-lg p-3 border border-red-200">
+            <div className="bg-rose-50 text-rose-800 text-[13px] rounded-lg p-3.5 border border-rose-200">
               {error}
             </div>
           )}
         </div>
 
         {/* 푸터 */}
-        <div className="border-t border-gray-100 px-6 py-3 flex justify-end gap-2">
+        <div className={KUI_MODAL_FOOT}>
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm"
+            className={KUI_BTN_OUTLINE}
           >
             {isView ? '닫기' : '취소'}
           </button>
@@ -688,9 +705,9 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
               type="button"
               onClick={submit}
               disabled={submitting || uploadingImage}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium"
+              className={KUI_BTN_PRIMARY}
             >
-              {submitting ? '저장 중…' : isEdit ? '수정 완료' : '등록'}
+              {submitting ? '저장 중' : isEdit ? '수정 완료' : '등록'}
             </button>
           )}
         </div>
@@ -716,10 +733,10 @@ function Field({
 }) {
   return (
     <div>
-      <label className="block text-xs font-medium text-gray-700 mb-1">
+      <label className={KUI_LABEL}>
         {label}
-        {required && <span className="text-red-500 ml-0.5">*</span>}
-        {hint && <span className="text-gray-400 ml-2 font-normal">{hint}</span>}
+        {required && <span className={`${KUI_REQUIRED} ml-0.5`}>*</span>}
+        {hint && <span className="text-neutral-400 ml-2 font-normal">{hint}</span>}
       </label>
       {children}
     </div>
@@ -746,15 +763,15 @@ function SingleImageField({
   return (
     <Field label={label} required={required}>
       {value?.img_url ? (
-        <div className="flex items-center gap-3 bg-gray-50 rounded-lg p-3 border border-gray-100">
-          <img src={value.img_url} alt="" className="w-16 h-16 object-cover rounded border border-gray-200" />
+        <div className="flex items-center gap-3 bg-neutral-50 rounded-lg p-3.5 border border-neutral-200">
+          <img src={value.img_url} alt="" className="w-16 h-16 object-cover rounded-lg border border-neutral-200" />
           <div className="flex-1 min-w-0">
-            <div className="text-xs text-gray-500 break-all">{value.img_url}</div>
+            <div className="text-[12px] text-neutral-500 break-all">{value.img_url}</div>
             {!disabled && (
               <button
                 type="button"
                 onClick={() => onChange(null)}
-                className="text-xs text-red-500 hover:text-red-700 mt-1"
+                className="text-[12.5px] font-semibold text-rose-600 hover:text-rose-700 mt-1"
               >
                 제거
               </button>
@@ -773,7 +790,7 @@ function SingleImageField({
             if (img) onChange(img);
             e.currentTarget.value = '';
           }}
-          className="block w-full text-xs text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:opacity-50"
+          className="block w-full text-[12.5px] text-neutral-600 disabled:opacity-50 file:mr-2.5 file:h-8 file:px-3 file:rounded-lg file:border-0 file:cursor-pointer file:text-[12.5px] file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
         />
       )}
     </Field>
@@ -802,14 +819,14 @@ function ItemListEditor({
     <Field label={`아이템 리스트 (${items.length}/4, 3~4개 필수)`}>
       <div className="space-y-2">
         {items.map((it, idx) => (
-          <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-100 space-y-2">
+          <div key={idx} className="bg-neutral-50 rounded-lg p-3.5 border border-neutral-200 space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-gray-600">아이템 #{idx + 1}</span>
+              <span className="text-[12.5px] font-semibold text-neutral-700">아이템 #{idx + 1}</span>
               {!disabled && (
                 <button
                   type="button"
                   onClick={() => remove(idx)}
-                  className="text-xs text-red-500"
+                  className="text-[12.5px] font-semibold text-rose-600 hover:text-rose-700"
                 >
                   제거
                 </button>
@@ -822,7 +839,7 @@ function ItemListEditor({
               onChange={(e) => update(idx, { title: e.target.value })}
               disabled={disabled}
               maxLength={25}
-              className="w-full border border-gray-200 rounded px-2 py-1 text-xs disabled:bg-gray-100"
+              className={`${KUI_INPUT} h-8 text-[13px]`}
             />
             <input
               type="text"
@@ -831,7 +848,7 @@ function ItemListEditor({
               onChange={(e) => update(idx, { description: e.target.value })}
               disabled={disabled}
               maxLength={30}
-              className="w-full border border-gray-200 rounded px-2 py-1 text-xs disabled:bg-gray-100"
+              className={`${KUI_INPUT} h-8 text-[13px]`}
             />
             <input
               type="text"
@@ -839,7 +856,7 @@ function ItemListEditor({
               value={it.img_url || ''}
               onChange={(e) => update(idx, { img_url: e.target.value })}
               disabled={disabled}
-              className="w-full border border-gray-200 rounded px-2 py-1 text-xs font-mono disabled:bg-gray-100"
+              className={`${KUI_INPUT} h-8 text-[13px] font-mono`}
             />
           </div>
         ))}
@@ -847,7 +864,7 @@ function ItemListEditor({
           <button
             type="button"
             onClick={add}
-            className="w-full py-2 border border-dashed border-gray-300 rounded-lg text-xs text-gray-500 hover:bg-gray-50"
+            className="w-full py-2.5 border border-dashed border-neutral-300 rounded-lg text-[12.5px] font-medium text-neutral-600 transition hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700"
           >
             + 아이템 추가 (최소 3개)
           </button>
@@ -882,21 +899,21 @@ function CarouselListEditor({
     <Field label={`캐러셀 카드 (${items.length}/${max}장)`}>
       <div className="space-y-2">
         {items.map((it, idx) => (
-          <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-100 space-y-2">
+          <div key={idx} className="bg-neutral-50 rounded-lg p-3.5 border border-neutral-200 space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-gray-600">카드 #{idx + 1}</span>
+              <span className="text-[12.5px] font-semibold text-neutral-700">카드 #{idx + 1}</span>
               {!disabled && (
                 <button
                   type="button"
                   onClick={() => remove(idx)}
-                  className="text-xs text-red-500"
+                  className="text-[12.5px] font-semibold text-rose-600 hover:text-rose-700"
                 >
                   제거
                 </button>
               )}
             </div>
             {it.img_url && (
-              <img src={it.img_url} alt="" className="w-full h-24 object-cover rounded border border-gray-200" />
+              <img src={it.img_url} alt="" className="w-full h-24 object-cover rounded-lg border border-neutral-200" />
             )}
             {type === 'CAROUSEL_COMMERCE' && (
               <>
@@ -906,7 +923,7 @@ function CarouselListEditor({
                   value={it.title || ''}
                   onChange={(e) => update(idx, { title: e.target.value })}
                   disabled={disabled}
-                  className="w-full border border-gray-200 rounded px-2 py-1 text-xs disabled:bg-gray-100"
+                  className={`${KUI_INPUT} h-8 text-[13px]`}
                 />
                 <div className="grid grid-cols-2 gap-2">
                   <input
@@ -919,7 +936,7 @@ function CarouselListEditor({
                       })
                     }
                     disabled={disabled}
-                    className="border border-gray-200 rounded px-2 py-1 text-xs disabled:bg-gray-100"
+                    className={`${KUI_INPUT} h-8 text-[13px]`}
                   />
                   <input
                     type="number"
@@ -931,7 +948,7 @@ function CarouselListEditor({
                       })
                     }
                     disabled={disabled}
-                    className="border border-gray-200 rounded px-2 py-1 text-xs disabled:bg-gray-100"
+                    className={`${KUI_INPUT} h-8 text-[13px]`}
                   />
                 </div>
               </>
@@ -944,7 +961,7 @@ function CarouselListEditor({
                   value={it.header || ''}
                   onChange={(e) => update(idx, { header: e.target.value })}
                   disabled={disabled}
-                  className="w-full border border-gray-200 rounded px-2 py-1 text-xs disabled:bg-gray-100"
+                  className={`${KUI_INPUT} h-8 text-[13px]`}
                 />
                 <input
                   type="text"
@@ -952,7 +969,7 @@ function CarouselListEditor({
                   value={it.content || ''}
                   onChange={(e) => update(idx, { content: e.target.value })}
                   disabled={disabled}
-                  className="w-full border border-gray-200 rounded px-2 py-1 text-xs disabled:bg-gray-100"
+                  className={`${KUI_INPUT} h-8 text-[13px]`}
                 />
               </>
             )}
@@ -962,7 +979,7 @@ function CarouselListEditor({
               value={it.url_mobile || ''}
               onChange={(e) => update(idx, { url_mobile: e.target.value, url_pc: e.target.value })}
               disabled={disabled}
-              className="w-full border border-gray-200 rounded px-2 py-1 text-xs disabled:bg-gray-100 font-mono"
+              className={`${KUI_INPUT} h-8 text-[13px] font-mono`}
             />
           </div>
         ))}
@@ -980,7 +997,7 @@ function CarouselListEditor({
               onChange([...items, ...newItems]);
               e.currentTarget.value = '';
             }}
-            className="block w-full text-xs text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+            className="block w-full text-[12.5px] text-neutral-600 file:mr-2.5 file:h-8 file:px-3 file:rounded-lg file:border-0 file:cursor-pointer file:text-[12.5px] file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
           />
         )}
       </div>
@@ -1029,14 +1046,14 @@ function ButtonsEditor({
     <Field label={`버튼 (${buttons.length}/${maxBtn}개)`}>
       <div className="space-y-2">
         {buttons.map((b, idx) => (
-          <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-100 space-y-2">
+          <div key={idx} className="bg-neutral-50 rounded-lg p-3.5 border border-neutral-200 space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-medium text-gray-600">버튼 #{idx + 1}</span>
+              <span className="text-[12.5px] font-semibold text-neutral-700">버튼 #{idx + 1}</span>
               {!disabled && (
                 <button
                   type="button"
                   onClick={() => remove(idx)}
-                  className="text-xs text-red-500"
+                  className="text-[12.5px] font-semibold text-rose-600 hover:text-rose-700"
                 >
                   제거
                 </button>
@@ -1054,7 +1071,7 @@ function ButtonsEditor({
                   });
                 }}
                 disabled={disabled}
-                className="border border-gray-200 rounded px-2 py-1 text-xs disabled:bg-gray-100"
+                className={`${KUI_INPUT} h-8 text-[13px]`}
               >
                 {BUTTON_TYPE_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -1069,7 +1086,7 @@ function ButtonsEditor({
                 onChange={(e) => update(idx, { name: e.target.value })}
                 disabled={disabled || b.type === 'AC'}
                 maxLength={14}
-                className="border border-gray-200 rounded px-2 py-1 text-xs disabled:bg-gray-100"
+                className={`${KUI_INPUT} h-8 text-[13px]`}
               />
             </div>
             {(b.type === 'WL' || b.type === 'AL') && (
@@ -1080,7 +1097,7 @@ function ButtonsEditor({
                   value={b.url_mobile || ''}
                   onChange={(e) => update(idx, { url_mobile: e.target.value })}
                   disabled={disabled}
-                  className="w-full border border-gray-200 rounded px-2 py-1 text-xs font-mono disabled:bg-gray-100"
+                  className={`${KUI_INPUT} h-8 text-[13px] font-mono`}
                 />
                 <input
                   type="text"
@@ -1088,7 +1105,7 @@ function ButtonsEditor({
                   value={b.url_pc || ''}
                   onChange={(e) => update(idx, { url_pc: e.target.value })}
                   disabled={disabled}
-                  className="w-full border border-gray-200 rounded px-2 py-1 text-xs font-mono disabled:bg-gray-100"
+                  className={`${KUI_INPUT} h-8 text-[13px] font-mono`}
                 />
               </>
             )}
@@ -1100,7 +1117,7 @@ function ButtonsEditor({
                   value={b.scheme_android || ''}
                   onChange={(e) => update(idx, { scheme_android: e.target.value })}
                   disabled={disabled}
-                  className="w-full border border-gray-200 rounded px-2 py-1 text-xs font-mono disabled:bg-gray-100"
+                  className={`${KUI_INPUT} h-8 text-[13px] font-mono`}
                 />
                 <input
                   type="text"
@@ -1108,7 +1125,7 @@ function ButtonsEditor({
                   value={b.scheme_ios || ''}
                   onChange={(e) => update(idx, { scheme_ios: e.target.value })}
                   disabled={disabled}
-                  className="w-full border border-gray-200 rounded px-2 py-1 text-xs font-mono disabled:bg-gray-100"
+                  className={`${KUI_INPUT} h-8 text-[13px] font-mono`}
                 />
               </>
             )}
@@ -1123,7 +1140,7 @@ function ButtonsEditor({
                   })
                 }
                 disabled={disabled}
-                className="w-full border border-gray-200 rounded px-2 py-1 text-xs disabled:bg-gray-100"
+                className={`${KUI_INPUT} h-8 text-[13px]`}
               />
             )}
           </div>
@@ -1132,7 +1149,7 @@ function ButtonsEditor({
           <button
             type="button"
             onClick={add}
-            className="w-full py-2 border border-dashed border-gray-300 rounded-lg text-xs text-gray-500 hover:bg-gray-50"
+            className="w-full py-2.5 border border-dashed border-neutral-300 rounded-lg text-[12.5px] font-medium text-neutral-600 transition hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700"
           >
             + 버튼 추가
           </button>

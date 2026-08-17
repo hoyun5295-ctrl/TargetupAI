@@ -1,4 +1,38 @@
+/**
+ * RcsTemplateFormModal.tsx — RCS 템플릿 등록·수정 폼
+ *
+ * ★ 2026-08-17 라이트 톤 재작성 — 색·높이·라운드는 `utils/kakao-ui.ts`가 소유한다.
+ *   함께 정리한 것: 텍스트로 그린 닫기(&times;)·버튼 삭제(✕)를 아이콘으로 교체, 인라인 @keyframes 폐기
+ *   (tailwind.config.js가 `animate-in`을 이미 제공한다), Esc 닫기 추가.
+ *   저장·검증 로직은 한 줄도 바꾸지 않았다.
+ */
 import { useState, useEffect } from 'react';
+import { Plus, Trash2, X } from 'lucide-react';
+import {
+  KUI_BTN_OUTLINE,
+  KUI_BTN_PRIMARY,
+  KUI_FIELDSET_TITLE,
+  KUI_HINT,
+  KUI_INPUT,
+  KUI_LABEL,
+  KUI_MODAL,
+  KUI_MODAL_BODY,
+  KUI_MODAL_CLOSE,
+  KUI_MODAL_DESC,
+  KUI_MODAL_FOOT,
+  KUI_MODAL_HEAD,
+  KUI_MODAL_SCRIM,
+  KUI_MODAL_TITLE,
+  KUI_PICK_DESC,
+  KUI_PICK_OFF,
+  KUI_PICK_ON,
+  KUI_PICK_TITLE,
+  KUI_REQUIRED,
+  KUI_SELECT,
+  KUI_TEXTAREA,
+  KUI_TOAST_ERROR,
+  KUI_TOAST_SUCCESS,
+} from '../utils/kakao-ui';
 
 interface RcsButton {
   buttonType: 'URL' | 'DIAL' | 'MAP' | 'COPY';
@@ -67,6 +101,13 @@ export default function RcsTemplateFormModal({ template, onClose, onSuccess }: P
     return () => clearTimeout(t);
   }, [toast.show]);
 
+  // 저장 중에는 Esc로 닫지 않는다 — 요청이 날아간 뒤 화면만 사라지면 결과를 알 수 없다
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape' && !saving) onClose(); };
+    window.addEventListener('keydown', onEsc);
+    return () => window.removeEventListener('keydown', onEsc);
+  }, [onClose, saving]);
+
   const addButton = () => {
     if (buttons.length >= 2) return;
     setButtons([...buttons, { buttonType: 'URL', name: '' }]);
@@ -127,64 +168,62 @@ export default function RcsTemplateFormModal({ template, onClose, onSuccess }: P
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
-           style={{ animation: 'zoomIn 0.2s ease-out' }}>
+    <div className={KUI_MODAL_SCRIM}>
+      <div className={`${KUI_MODAL} max-w-2xl`} role="dialog" aria-modal="true" aria-label={isEdit ? 'RCS 템플릿 수정' : 'RCS 템플릿 등록 요청'}>
 
-        {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-white flex justify-between items-center">
-          <div>
-            <h2 className="text-lg font-bold text-gray-900">
+        {/* ── 헤더 ─────────────────────────── */}
+        <div className={KUI_MODAL_HEAD}>
+          <div className="min-w-0">
+            <h2 className={KUI_MODAL_TITLE}>
               {isEdit ? 'RCS 템플릿 수정' : 'RCS 템플릿 등록 요청'}
             </h2>
             {/* ★ 2026-08-17 "자동 폴백" 문구 삭제 — 대체 발송은 아직 구현돼 있지 않다. */}
-            <p className="text-xs text-gray-500 mt-0.5">등록 후 검수를 거쳐 사용할 수 있습니다</p>
+            <p className={KUI_MODAL_DESC}>등록 후 검수를 거쳐 사용할 수 있습니다</p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+          <button type="button" onClick={onClose} className={KUI_MODAL_CLOSE} aria-label="닫기">
+            <X className="w-[17px] h-[17px]" />
+          </button>
         </div>
 
-        {/* Body */}
-        <div className="px-6 py-4 overflow-y-auto flex-1 space-y-4">
+        {/* ── 본문 ─────────────────────────── */}
+        <div className={KUI_MODAL_BODY}>
 
           {/* 브랜드 정보 */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">브랜드 ID <span className="text-gray-400">(선택)</span></label>
+              <label className={KUI_LABEL}>브랜드 ID <span className="text-neutral-400 font-normal">(선택)</span></label>
               <input value={brandId} onChange={e => setBrandId(e.target.value)}
                 placeholder="RCS Biz Center에서 발급"
-                className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-200" />
+                className={KUI_INPUT} />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">브랜드명 <span className="text-gray-400">(선택)</span></label>
+              <label className={KUI_LABEL}>브랜드명 <span className="text-neutral-400 font-normal">(선택)</span></label>
               <input value={brandName} onChange={e => setBrandName(e.target.value)}
                 placeholder="표시될 브랜드 이름"
-                className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-200" />
+                className={KUI_INPUT} />
             </div>
           </div>
 
           {/* 템플릿 이름 */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">템플릿 이름 <span className="text-red-500">*</span></label>
+            <label className={KUI_LABEL}>템플릿 이름 <span className={KUI_REQUIRED}>*</span></label>
             <input value={templateName} onChange={e => setTemplateName(e.target.value)}
               placeholder="최대 200자" maxLength={200}
-              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-200" />
+              className={KUI_INPUT} />
           </div>
 
           {/* 메시지 유형 */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">메시지 유형</label>
-            <div className="grid grid-cols-2 gap-2">
+            <label className={KUI_LABEL}>메시지 유형</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {RCS_MESSAGE_TYPES.map(t => (
-                <button key={t.value}
+                <button key={t.value} type="button"
                   onClick={() => setMessageType(t.value)}
-                  className={`p-2.5 border rounded-lg text-left transition-colors ${
-                    messageType === t.value
-                      ? 'border-purple-500 bg-purple-50'
-                      : 'border-gray-200 hover:border-purple-300'
-                  }`}
+                  aria-pressed={messageType === t.value}
+                  className={messageType === t.value ? KUI_PICK_ON : KUI_PICK_OFF}
                 >
-                  <div className="text-sm font-medium">{t.label}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">{t.desc}</div>
+                  <div className={KUI_PICK_TITLE}>{t.label}</div>
+                  <div className={KUI_PICK_DESC}>{t.desc}</div>
                 </button>
               ))}
             </div>
@@ -192,66 +231,83 @@ export default function RcsTemplateFormModal({ template, onClose, onSuccess }: P
 
           {/* 본문 */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              본문 <span className="text-red-500">*</span>
-              <span className="ml-2 text-gray-400">({content.length}자)</span>
-            </label>
+            <div className="flex items-baseline justify-between">
+              <label className={KUI_LABEL}>본문 <span className={KUI_REQUIRED}>*</span></label>
+              <span className="text-[12px] text-neutral-400 tabular-nums">{content.length}자</span>
+            </div>
             <textarea value={content} onChange={e => setContent(e.target.value)}
               rows={6} placeholder="메시지 내용을 입력하세요"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-200 resize-none" />
+              className={KUI_TEXTAREA} />
           </div>
 
           {/* 미디어 URL (MMS) */}
           {messageType === 'rcs_mms' && (
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">미디어 URL</label>
+              <label className={KUI_LABEL}>미디어 URL</label>
               <input value={mediaUrl} onChange={e => setMediaUrl(e.target.value)}
                 placeholder="이미지/동영상 URL (JPG, PNG, MP4)"
-                className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-200" />
-              <p className="text-xs text-gray-400 mt-1">권장: 가로 800px 이상, 1MB 이하</p>
+                className={KUI_INPUT} />
+              <p className={KUI_HINT}>권장: 가로 800px 이상, 1MB 이하</p>
             </div>
           )}
 
           {/* 버튼 설정 */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-medium text-gray-600">버튼 <span className="text-gray-400">(최대 2개)</span></label>
+              <h3 className={KUI_FIELDSET_TITLE}>
+                버튼 <span className="text-neutral-400 font-normal text-[12.5px]">최대 2개</span>
+              </h3>
               {buttons.length < 2 && (
-                <button onClick={addButton} className="text-xs text-purple-600 hover:text-purple-800 font-medium">+ 버튼 추가</button>
+                <button type="button" onClick={addButton}
+                  className="h-7 px-2.5 inline-flex items-center gap-1 rounded-md text-[12.5px] font-semibold text-indigo-600 transition hover:bg-indigo-50">
+                  <Plus className="w-[13px] h-[13px]" />
+                  버튼 추가
+                </button>
               )}
             </div>
-            {buttons.length === 0 && (
-              <p className="text-xs text-gray-400 py-2">버튼 없음 (선택사항)</p>
-            )}
-            {buttons.map((btn, idx) => (
-              <div key={idx} className="border border-gray-200 rounded-lg p-3 mb-2 bg-gray-50">
-                <div className="flex items-center gap-2 mb-2">
-                  <select value={btn.buttonType} onChange={e => updateButton(idx, 'buttonType', e.target.value)}
-                    className="border border-gray-300 rounded px-2 py-1 text-xs">
-                    {BUTTON_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                  </select>
-                  <input value={btn.name} onChange={e => updateButton(idx, 'name', e.target.value)}
-                    placeholder="버튼명" maxLength={17}
-                    className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs" />
-                  <button onClick={() => removeButton(idx)} className="text-red-400 hover:text-red-600 text-sm">✕</button>
-                </div>
-                {btn.buttonType === 'URL' && (
-                  <input value={btn.url || ''} onChange={e => updateButton(idx, 'url', e.target.value)}
-                    placeholder="https://example.com"
-                    className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
-                )}
-                {btn.buttonType === 'DIAL' && (
-                  <input value={btn.phoneNumber || ''} onChange={e => updateButton(idx, 'phoneNumber', e.target.value)}
-                    placeholder="01012345678"
-                    className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
-                )}
-                {btn.buttonType === 'COPY' && (
-                  <input value={btn.copyText || ''} onChange={e => updateButton(idx, 'copyText', e.target.value)}
-                    placeholder="복사할 텍스트"
-                    className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
-                )}
+
+            {buttons.length === 0 ? (
+              <p className="text-[12.5px] text-neutral-400 py-3 px-3.5 rounded-lg border border-dashed border-neutral-200 text-center">
+                버튼 없이도 등록할 수 있습니다
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {buttons.map((btn, idx) => (
+                  <div key={idx} className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <select value={btn.buttonType} onChange={e => updateButton(idx, 'buttonType', e.target.value)}
+                        className={`${KUI_SELECT} h-8 w-auto min-w-[120px] text-[13px] bg-white`}
+                        aria-label={`${idx + 1}번 버튼 종류`}>
+                        {BUTTON_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                      </select>
+                      <input value={btn.name} onChange={e => updateButton(idx, 'name', e.target.value)}
+                        placeholder="버튼명" maxLength={17}
+                        className={`${KUI_INPUT} h-8 flex-1 text-[13px]`} />
+                      <button type="button" onClick={() => removeButton(idx)}
+                        className="h-8 w-8 grid place-items-center rounded-lg text-neutral-400 shrink-0 transition hover:bg-rose-50 hover:text-rose-600"
+                        aria-label={`${idx + 1}번 버튼 삭제`}>
+                        <Trash2 className="w-[15px] h-[15px]" />
+                      </button>
+                    </div>
+                    {btn.buttonType === 'URL' && (
+                      <input value={btn.url || ''} onChange={e => updateButton(idx, 'url', e.target.value)}
+                        placeholder="https://example.com"
+                        className={`${KUI_INPUT} h-8 text-[13px] bg-white`} />
+                    )}
+                    {btn.buttonType === 'DIAL' && (
+                      <input value={btn.phoneNumber || ''} onChange={e => updateButton(idx, 'phoneNumber', e.target.value)}
+                        placeholder="01012345678"
+                        className={`${KUI_INPUT} h-8 text-[13px] bg-white`} />
+                    )}
+                    {btn.buttonType === 'COPY' && (
+                      <input value={btn.copyText || ''} onChange={e => updateButton(idx, 'copyText', e.target.value)}
+                        placeholder="복사할 텍스트"
+                        className={`${KUI_INPUT} h-8 text-[13px] bg-white`} />
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
 
           {/* ★ 2026-08-17 대체발송 안내 블록 삭제 — 두 문장 모두 사실이 아니었다.
@@ -259,32 +315,22 @@ export default function RcsTemplateFormModal({ template, onClose, onSuccess }: P
               대체 발송은 게이트웨이 축과 함께 열린다 — docs/2026-08-17-rcs-integration-design.md §3-5 */}
         </div>
 
-        {/* Footer */}
-        <div className="px-6 py-3 border-t border-gray-200 bg-gray-50 flex justify-end gap-3">
-          <button onClick={onClose}
-            className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm transition">
+        {/* ── 푸터 ─────────────────────────── */}
+        <div className={KUI_MODAL_FOOT}>
+          <button type="button" onClick={onClose} disabled={saving} className={KUI_BTN_OUTLINE}>
             취소
           </button>
-          <button onClick={handleSave} disabled={saving}
-            className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition disabled:opacity-50">
-            {saving ? '저장 중...' : isEdit ? '수정 요청' : '등록 요청'}
+          <button type="button" onClick={handleSave} disabled={saving} className={KUI_BTN_PRIMARY}>
+            {saving ? '저장 중' : isEdit ? '수정 요청' : '등록 요청'}
           </button>
         </div>
 
         {toast.show && (
-          <div className={`fixed bottom-6 right-6 px-4 py-2 rounded-lg text-sm text-white shadow-lg z-[10000]
-            ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
+          <div className={toast.type === 'success' ? KUI_TOAST_SUCCESS : KUI_TOAST_ERROR} role="status">
             {toast.message}
           </div>
         )}
       </div>
-
-      <style>{`
-        @keyframes zoomIn {
-          from { opacity: 0; transform: scale(0.92); }
-          to { opacity: 1; transform: scale(1); }
-        }
-      `}</style>
     </div>
   );
 }

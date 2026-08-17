@@ -9,6 +9,7 @@
  */
 
 import { useMemo } from 'react';
+import { KUI_INPUT } from '../../utils/kakao-ui';
 
 export type ButtonLinkType =
   | 'WL' | 'AL' | 'DS' | 'BK' | 'MD' | 'BF' | 'BC' | 'AC' | 'PD';
@@ -121,21 +122,21 @@ export default function ButtonEditor({
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <label className="text-xs font-medium text-gray-600">
-          버튼 <span className="text-gray-400">({buttons.length}/{max})</span>
+        <label className="text-[12.5px] font-semibold text-neutral-700">
+          버튼 <span className="text-neutral-400">({buttons.length}/{max})</span>
         </label>
         <button
           type="button"
           disabled={!canAdd}
           onClick={addBtn}
-          className="text-xs text-amber-600 hover:text-amber-700 disabled:text-gray-300"
+          className="text-[12.5px] font-semibold text-indigo-600 hover:text-indigo-700 disabled:text-neutral-300"
         >
           + 버튼 추가
         </button>
       </div>
 
       {buttons.length === 0 && (
-        <p className="text-xs text-gray-400">추가된 버튼이 없습니다.</p>
+        <p className="text-[12.5px] text-neutral-500">추가된 버튼이 없습니다.</p>
       )}
 
       {buttons.map((btn, idx) => (
@@ -193,14 +194,14 @@ function ButtonRow({
   const typeLocked = disabled || removeLocked;
 
   return (
-    <div className="mb-2 bg-gray-50 p-2 rounded-lg space-y-1.5">
+    <div className="mb-2 bg-neutral-50 border border-neutral-200 p-3 rounded-lg space-y-2">
       <div className="flex gap-2 items-center">
-        <span className="text-[11px] text-gray-400 w-6">{idx + 1}.</span>
+        <span className="text-[12px] text-neutral-500 w-6 tabular-nums">{idx + 1}.</span>
         <select
           value={btn.type}
           disabled={typeLocked}
           onChange={(e) => onPatch({ type: e.target.value as ButtonLinkType })}
-          className="border border-gray-300 rounded px-2 py-1 text-xs w-24 disabled:bg-gray-200"
+          className={`${KUI_INPUT} h-8 text-[13px] w-24`}
         >
           {typesForSelect.map((t) => (
             <option key={t.value} value={t.value}>
@@ -215,7 +216,7 @@ function ButtonRow({
           onChange={(e) => onPatch({ name: e.target.value })}
           placeholder="버튼명 (최대 14자)"
           maxLength={14}
-          className="border border-gray-300 rounded px-2 py-1 text-xs flex-1 disabled:bg-gray-200"
+          className={`${KUI_INPUT} h-8 text-[13px] flex-1`}
         />
         <button
           type="button"
@@ -227,7 +228,7 @@ function ButtonRow({
         </button>
       </div>
 
-      {hint && <p className="text-[11px] text-gray-400 ml-8">{hint}</p>}
+      {hint && <p className="text-[12px] text-neutral-500 ml-8">{hint}</p>}
 
       {btn.type === 'WL' && (
         <div className="grid grid-cols-2 gap-2">
@@ -235,13 +236,13 @@ function ButtonRow({
             value={btn.urlMobile || ''}
             onChange={(e) => onPatch({ urlMobile: e.target.value })}
             placeholder="모바일 URL"
-            className="border border-gray-300 rounded px-2 py-1 text-xs"
+            className={`${KUI_INPUT} h-8 text-[13px] w-auto`}
           />
           <input
             value={btn.urlPc || ''}
             onChange={(e) => onPatch({ urlPc: e.target.value })}
             placeholder="PC URL (선택)"
-            className="border border-gray-300 rounded px-2 py-1 text-xs"
+            className={`${KUI_INPUT} h-8 text-[13px] w-auto`}
           />
         </div>
       )}
@@ -253,13 +254,13 @@ function ButtonRow({
               value={btn.urlMobile || ''}
               onChange={(e) => onPatch({ urlMobile: e.target.value })}
               placeholder="모바일 URL"
-              className="border border-gray-300 rounded px-2 py-1 text-xs"
+              className={`${KUI_INPUT} h-8 text-[13px] w-auto`}
             />
             <input
               value={btn.urlPc || ''}
               onChange={(e) => onPatch({ urlPc: e.target.value })}
               placeholder="PC URL (선택)"
-              className="border border-gray-300 rounded px-2 py-1 text-xs"
+              className={`${KUI_INPUT} h-8 text-[13px] w-auto`}
             />
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -267,13 +268,13 @@ function ButtonRow({
               value={btn.schemeAndroid || ''}
               onChange={(e) => onPatch({ schemeAndroid: e.target.value })}
               placeholder="Android scheme"
-              className="border border-gray-300 rounded px-2 py-1 text-xs"
+              className={`${KUI_INPUT} h-8 text-[13px] w-auto`}
             />
             <input
               value={btn.schemeIos || ''}
               onChange={(e) => onPatch({ schemeIos: e.target.value })}
               placeholder="iOS scheme"
-              className="border border-gray-300 rounded px-2 py-1 text-xs"
+              className={`${KUI_INPUT} h-8 text-[13px] w-auto`}
             />
           </div>
         </div>
@@ -284,7 +285,7 @@ function ButtonRow({
           value={btn.chatExtra || ''}
           onChange={(e) => onPatch({ chatExtra: e.target.value })}
           placeholder="chatExtra (메시지 전달 파라미터)"
-          className="border border-gray-300 rounded px-2 py-1 text-xs w-full"
+          className={`${KUI_INPUT} h-8 text-[13px]`}
         />
       )}
 
@@ -293,7 +294,7 @@ function ButtonRow({
           value={btn.chatEvent || ''}
           onChange={(e) => onPatch({ chatEvent: e.target.value })}
           placeholder="chatEvent (봇 이벤트 이름)"
-          className="border border-gray-300 rounded px-2 py-1 text-xs w-full"
+          className={`${KUI_INPUT} h-8 text-[13px]`}
         />
       )}
 
@@ -305,7 +306,7 @@ function ButtonRow({
             onPatch({ bizFormId: e.target.value ? Number(e.target.value) : undefined })
           }
           placeholder="bizFormId (비즈폼 ID)"
-          className="border border-gray-300 rounded px-2 py-1 text-xs w-full"
+          className={`${KUI_INPUT} h-8 text-[13px]`}
         />
       )}
 
@@ -314,7 +315,7 @@ function ButtonRow({
           value={btn.telNumber || ''}
           onChange={(e) => onPatch({ telNumber: e.target.value })}
           placeholder="전화번호 (예: 021234567)"
-          className="border border-gray-300 rounded px-2 py-1 text-xs w-full"
+          className={`${KUI_INPUT} h-8 text-[13px]`}
         />
       )}
 
@@ -323,12 +324,12 @@ function ButtonRow({
           value={btn.productId || ''}
           onChange={(e) => onPatch({ productId: e.target.value })}
           placeholder="productId (상품 ID)"
-          className="border border-gray-300 rounded px-2 py-1 text-xs w-full"
+          className={`${KUI_INPUT} h-8 text-[13px]`}
         />
       )}
 
       {btn.type === 'AC' && (
-        <p className="text-[11px] text-amber-600 ml-8">
+        <p className="text-[12px] text-amber-700 ml-8">
           {removeLocked
             ? '채널추가형 메시지는 "채널 추가" 버튼이 필수입니다 (삭제 불가)'
             : '카카오 정책상 "채널 추가" 버튼의 버튼명은 수정할 수 없습니다'}

@@ -12,6 +12,8 @@
  */
 
 import { useEffect, useState } from 'react';
+import { X } from 'lucide-react';
+import { KUI_MODAL, KUI_MODAL_CLOSE, KUI_MODAL_HEAD, KUI_MODAL_SCRIM, KUI_MODAL_TITLE } from '../../utils/kakao-ui';
 
 type TemplateType = 'alimtalk' | 'brand';
 
@@ -169,57 +171,57 @@ export default function TemplateHistoryModal({
 
   return (
     <div
-      className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4 animate-in fade-in duration-150"
+      className={KUI_MODAL_SCRIM}
     >
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col">
+      <div className={`${KUI_MODAL} max-w-5xl`} role="dialog" aria-modal="true">
         {/* 헤더 */}
-        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+        <div className={KUI_MODAL_HEAD}>
           <div>
-            <div className="text-sm text-gray-500">
+            <div className="text-[12.5px] text-neutral-500">
               {type === 'alimtalk' ? '알림톡 템플릿' : '브랜드메시지 템플릿'} 변경 이력
             </div>
-            <div className="text-base font-semibold text-gray-900 mt-0.5">
+            <div className={`${KUI_MODAL_TITLE} mt-0.5`}>
               {templateName || templateRef}
             </div>
-            <div className="text-[11px] text-gray-400 font-mono mt-0.5">
+            <div className="text-[11.5px] text-neutral-500 font-mono mt-1">
               {templateRef}
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-2xl leading-none px-2"
+            className={KUI_MODAL_CLOSE}
             aria-label="닫기"
           >
-            ×
+            <X className="w-[17px] h-[17px]" />
           </button>
         </div>
 
         {/* 본문 — 좌측 목록 / 우측 상세 */}
         <div className="flex-1 grid grid-cols-1 md:grid-cols-2 overflow-hidden">
           {/* 좌측 목록 */}
-          <div className="border-r border-gray-100 overflow-y-auto p-4">
+          <div className="border-r border-neutral-200 overflow-y-auto p-4">
             {loading && (
-              <div className="text-sm text-gray-400 text-center py-8">불러오는 중…</div>
+              <div className="text-[13px] text-neutral-500 text-center py-10">불러오는 중…</div>
             )}
             {error && (
-              <div className="text-sm text-red-500 bg-red-50 p-3 rounded">{error}</div>
+              <div className="text-[13px] text-rose-700 bg-rose-50 border border-rose-200 p-3.5 rounded-lg">{error}</div>
             )}
             {!loading && !error && histories.length === 0 && (
-              <div className="text-sm text-gray-400 text-center py-8">
+              <div className="text-[13px] text-neutral-500 text-center py-10">
                 기록된 이력이 없습니다.
               </div>
             )}
             {!loading && !error && histories.length > 0 && (
               <>
-                <div className="text-[11px] text-gray-500 mb-2">
+                <div className="text-[12px] text-neutral-500 mb-2">
                   총 {totalCount}건 (최신순)
                 </div>
                 <ul className="space-y-1">
                   {histories.map((h) => {
                     const ct = CHANGE_TYPE_LABELS[h.changeType] || {
                       label: h.changeType,
-                      cls: 'bg-gray-100 text-gray-600',
+                      cls: 'bg-neutral-100 text-neutral-600',
                     };
                     const isSelected = selectedId === h.histId;
                     return (
@@ -229,8 +231,8 @@ export default function TemplateHistoryModal({
                           onClick={() => setSelectedId(h.histId)}
                           className={`w-full text-left rounded-lg p-3 border transition ${
                             isSelected
-                              ? 'border-emerald-300 bg-emerald-50/50'
-                              : 'border-gray-100 hover:bg-gray-50'
+                              ? 'border-indigo-600 bg-indigo-50'
+                              : 'border-neutral-200 bg-white hover:bg-neutral-50'
                           }`}
                         >
                           <div className="flex items-center justify-between">
@@ -239,13 +241,13 @@ export default function TemplateHistoryModal({
                             >
                               {ct.label}
                             </span>
-                            <span className="text-[11px] text-gray-400">
+                            <span className="text-[12px] text-neutral-500">
                               {h.modifiedAt || '-'}
                             </span>
                           </div>
-                          <div className="mt-1.5 text-xs text-gray-700 flex items-center gap-2 flex-wrap">
+                          <div className="mt-1.5 text-[12.5px] text-neutral-700 flex items-center gap-2 flex-wrap">
                             {h.changeType === 'INSPECTION' && h.inspectionStatus && (
-                              <span className="text-amber-700">
+                              <span className="text-amber-700 font-medium">
                                 {INSPECTION_LABELS[h.inspectionStatus] || h.inspectionStatus}
                               </span>
                             )}
@@ -257,13 +259,13 @@ export default function TemplateHistoryModal({
                               </span>
                             )}
                             {h.changedCount > 0 && (
-                              <span className="text-gray-500">
+                              <span className="text-neutral-500">
                                 · {h.changedCount}개 필드 변경
                               </span>
                             )}
                           </div>
                           {h.modifiedBy && (
-                            <div className="text-[11px] text-gray-400 mt-0.5">
+                            <div className="text-[12px] text-neutral-500 mt-0.5">
                               by {h.modifiedBy}
                             </div>
                           )}
@@ -277,29 +279,29 @@ export default function TemplateHistoryModal({
           </div>
 
           {/* 우측 상세 */}
-          <div className="overflow-y-auto p-4 bg-gray-50/50">
+          <div className="overflow-y-auto p-4 bg-neutral-50">
             {selectedId === null && !loading && (
-              <div className="text-sm text-gray-400 text-center py-8">
+              <div className="text-[13px] text-neutral-500 text-center py-10">
                 좌측 이력 항목을 선택하세요.
               </div>
             )}
             {detailLoading && (
-              <div className="text-sm text-gray-400 text-center py-8">불러오는 중…</div>
+              <div className="text-[13px] text-neutral-500 text-center py-10">불러오는 중…</div>
             )}
             {detailError && (
-              <div className="text-sm text-red-500 bg-red-50 p-3 rounded">
+              <div className="text-[13px] text-rose-700 bg-rose-50 border border-rose-200 p-3.5 rounded-lg">
                 {detailError}
               </div>
             )}
             {!detailLoading && !detailError && detail && (
               <div className="space-y-4">
                 <div>
-                  <div className="text-xs text-gray-500">변경 시점</div>
-                  <div className="text-sm font-medium text-gray-900">
+                  <div className="text-[12.5px] text-neutral-500">변경 시점</div>
+                  <div className="text-[13.5px] font-semibold text-neutral-900">
                     {detail.modifiedAt || '-'}
                   </div>
                   {detail.modifiedBy && (
-                    <div className="text-[11px] text-gray-500 mt-0.5">
+                    <div className="text-[12px] text-neutral-500 mt-0.5">
                       by {detail.modifiedBy}
                     </div>
                   )}
@@ -307,34 +309,34 @@ export default function TemplateHistoryModal({
 
                 {detail.changes && detail.changes.length > 0 ? (
                   <div>
-                    <div className="text-xs font-semibold text-gray-700 mb-2">
+                    <div className="text-[13px] font-semibold text-neutral-900 mb-2">
                       직전 대비 변경된 필드 ({detail.changes.length}개)
                     </div>
                     <ul className="space-y-2">
                       {detail.changes.map((c, idx) => (
                         <li
                           key={`${c.field}_${idx}`}
-                          className="bg-white border border-gray-100 rounded-lg p-3"
+                          className="bg-white border border-neutral-200 rounded-lg p-3.5"
                         >
-                          <div className="text-xs font-semibold text-gray-700">
+                          <div className="text-[13px] font-semibold text-neutral-900">
                             {c.label || c.field}
                           </div>
                           <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
                             <div>
-                              <div className="text-[10px] text-gray-400 mb-0.5">이전</div>
+                              <div className="text-[11.5px] text-neutral-500 mb-0.5">이전</div>
                               <div className="bg-rose-50 text-rose-800 rounded p-2 break-words whitespace-pre-wrap">
                                 {c.before ?? <span className="text-rose-300">(없음)</span>}
                               </div>
                             </div>
                             <div>
-                              <div className="text-[10px] text-gray-400 mb-0.5">변경 후</div>
+                              <div className="text-[11.5px] text-neutral-500 mb-0.5">변경 후</div>
                               <div className="bg-emerald-50 text-emerald-800 rounded p-2 break-words whitespace-pre-wrap">
                                 {c.after ?? <span className="text-emerald-300">(없음)</span>}
                               </div>
                             </div>
                           </div>
                           {c.complex && (
-                            <div className="text-[10px] text-amber-600 mt-1">
+                            <div className="text-[12px] text-amber-700 mt-1">
                               ※ 복합 데이터 (JSON 직렬화 표시)
                             </div>
                           )}
@@ -343,7 +345,7 @@ export default function TemplateHistoryModal({
                     </ul>
                   </div>
                 ) : (
-                  <div className="text-xs text-gray-400">변경된 필드가 없습니다.</div>
+                  <div className="text-[12px] text-neutral-500">변경된 필드가 없습니다.</div>
                 )}
               </div>
             )}

@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, Bell, Check, ChevronDown, Copy, Info, LayoutTemplate, Plus, Search, UserRound, X } from 'lucide-react';
 import AlimtalkTemplateFormV2, { type TemplateFormData } from './AlimtalkTemplateFormV2';
 import AlarmUserManager from './AlarmUserManager';
 import SenderRegistrationWizard from './SenderRegistrationWizard';
@@ -19,6 +20,69 @@ import { formatTemplateType } from './alimtalk-types';
 import { useAuthStore } from '../../stores/authStore';
 import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
 import TablePagination from '../common/TablePagination';
+import EmptyState from '../kakao/EmptyState';
+import RowActions, { type RowAction } from '../kakao/RowActions';
+import StatusPill from '../kakao/StatusPill';
+import {
+  kcx,
+  KUI_BTN_OUTLINE,
+  KUI_BTN_PRIMARY,
+  KUI_BULK,
+  KUI_BULK_TEXT,
+  KUI_CELL_CODE,
+  KUI_CELL_CODE_CHIP,
+  KUI_CELL_META,
+  KUI_CELL_NAME,
+  KUI_CELL_OFF,
+  KUI_CHIPS,
+  KUI_CHIP_COUNT_OFF,
+  KUI_CHIP_COUNT_ON,
+  KUI_CHIP_OFF,
+  KUI_CHIP_ON,
+  KUI_COPY_BTN,
+  KUI_DANGER_BOX,
+  KUI_DANGER_TEXT,
+  KUI_FIELD,
+  KUI_FIELD_INPUT,
+  KUI_HINT,
+  KUI_ICON_BTN,
+  KUI_INFO,
+  KUI_INFO_ICON,
+  KUI_INFO_TEXT,
+  KUI_LABEL,
+  KUI_LOADING,
+  KUI_MODAL,
+  KUI_MODAL_BODY,
+  KUI_MODAL_CLOSE,
+  KUI_MODAL_DESC,
+  KUI_MODAL_FOOT,
+  KUI_MODAL_HEAD,
+  KUI_MODAL_SCRIM,
+  KUI_MODAL_TITLE,
+  KUI_NOTICE,
+  KUI_NOTICE_ICON,
+  KUI_NOTICE_TEXT,
+  KUI_PANEL,
+  KUI_SCROLL_X,
+  KUI_SEC_DESC,
+  KUI_SEC_SPLIT,
+  KUI_SEC_TITLE,
+  KUI_SETUP,
+  KUI_SETUP_BADGE,
+  KUI_SETUP_DESC,
+  KUI_SETUP_TITLE,
+  KUI_SPINNER,
+  KUI_TD,
+  KUI_TD_STICKY,
+  KUI_TEXTAREA,
+  KUI_TH,
+  KUI_TH_RIGHT,
+  KUI_TH_STICKY,
+  KUI_THEAD,
+  KUI_TOAST_SUCCESS,
+  KUI_TR,
+  type KuiPillTone,
+} from '../../utils/kakao-ui';
 
 interface Template {
   id: string;
@@ -107,41 +171,43 @@ function getToken() {
 //   - REVIEWING/REV 폐기 (IMC 정의에 없음 — REQ 다음은 바로 KREQ)
 //   - HREJ(내부 반려) / KREQ(카카오 검수요청) / KREJ(카카오 반려) 신규 추가
 //   - DORMANT 라벨 유지하되 filter 탭에서는 제거(직원 #4 요청)
-const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
+// ★ 2026-08-17 색을 직접 적지 않는다 — 상태 색은 `kakao-ui.ts`의 5개 tone이 소유한다.
+//   전에는 같은 "반려"가 파일마다 red-700 / orange-700으로 갈렸다.
+const STATUS_LABELS: Record<string, { label: string; tone: KuiPillTone }> = {
   // 검수 전
-  DRAFT:     { label: '등록',           cls: 'bg-gray-100 text-gray-600' },
-  REG:       { label: '등록',           cls: 'bg-gray-100 text-gray-600' },
+  DRAFT:     { label: '등록',           tone: 'neutral' },
+  REG:       { label: '등록',           tone: 'neutral' },
   // 검수 진행
-  REQUESTED: { label: '검수요청',       cls: 'bg-amber-100 text-amber-700' },
-  REQ:       { label: '검수요청',       cls: 'bg-amber-100 text-amber-700' },
-  KREQ:      { label: '카카오 검수요청', cls: 'bg-blue-100 text-blue-700' },
+  REQUESTED: { label: '검수요청',       tone: 'amber' },
+  REQ:       { label: '검수요청',       tone: 'amber' },
+  KREQ:      { label: '카카오 검수요청', tone: 'blue' },
   // 종결 (승인)
-  APPROVED:  { label: '승인',           cls: 'bg-emerald-100 text-emerald-700' },
-  APR:       { label: '승인',           cls: 'bg-emerald-100 text-emerald-700' },
+  APPROVED:  { label: '승인',           tone: 'green' },
+  APR:       { label: '승인',           tone: 'green' },
   // 종결 (반려) — IMC 6단계 정확 분리
-  HREJ:      { label: '내부 반려',      cls: 'bg-orange-100 text-orange-700' },
-  KREJ:      { label: '카카오 반려',    cls: 'bg-red-100 text-red-700' },
+  HREJ:      { label: '내부 반려',      tone: 'rose' },
+  KREJ:      { label: '카카오 반려',    tone: 'rose' },
   // 레거시 호환 (D143 풀네임)
-  REJECTED:  { label: '반려',           cls: 'bg-red-100 text-red-700' },
-  REJ:       { label: '반려',           cls: 'bg-red-100 text-red-700' },
-  REVIEWING: { label: '검수중',         cls: 'bg-blue-100 text-blue-700' },  // 레거시 — 신규 row는 KREQ 사용
-  REV:       { label: '검수중',         cls: 'bg-blue-100 text-blue-700' },
+  REJECTED:  { label: '반려',           tone: 'rose' },
+  REJ:       { label: '반려',           tone: 'rose' },
+  REVIEWING: { label: '검수중',         tone: 'blue' },  // 레거시 — 신규 row는 KREQ 사용
+  REV:       { label: '검수중',         tone: 'blue' },
   // 기타
-  DORMANT:   { label: '휴면',           cls: 'bg-amber-100 text-amber-700' },
-  DELETED:   { label: '삭제',           cls: 'bg-gray-200 text-gray-500' },
+  DORMANT:   { label: '휴면',           tone: 'amber' },
+  DELETED:   { label: '삭제',           tone: 'neutral' },
 };
 
-const SENDER_STATUS_LABELS: Record<string, { label: string; cls: string }> = {
-  PENDING: { label: '승인대기', cls: 'bg-gray-100 text-gray-600' },
-  NORMAL:  { label: '정상',     cls: 'bg-emerald-100 text-emerald-700' },
-  DORMANT: { label: '휴면',     cls: 'bg-amber-100 text-amber-700' },
-  BLOCKED: { label: '차단',     cls: 'bg-red-100 text-red-700' },
-  DELETED: { label: '삭제',     cls: 'bg-gray-200 text-gray-500' },
+const SENDER_STATUS_LABELS: Record<string, { label: string; tone: KuiPillTone }> = {
+  PENDING: { label: '승인대기', tone: 'neutral' },
+  NORMAL:  { label: '정상',     tone: 'green' },
+  DORMANT: { label: '휴면',     tone: 'amber' },
+  BLOCKED: { label: '차단',     tone: 'rose' },
+  DELETED: { label: '삭제',     tone: 'neutral' },
 };
 
 // ★ 2026-06-17: IMC 발신프로필 상태 한글 매핑 (status='A' + block_yn/dormant_yn 조합).
 //   휴면/차단은 IMC status만으론 구분 불가 → block/dormant boolean 우선 판정.
-function senderStatusBadge(p: Profile): { label: string; cls: string } {
+function senderStatusBadge(p: Profile): { label: string; tone: KuiPillTone } {
   const key =
     p.status === 'D' || p.status === 'DELETED'
       ? 'DELETED'
@@ -153,13 +219,21 @@ function senderStatusBadge(p: Profile): { label: string; cls: string } {
   return SENDER_STATUS_LABELS[key];
 }
 
-const APPROVAL_LABELS: Record<string, { label: string; cls: string }> = {
-  PENDING_APPROVAL: { label: '슈퍼관리자 승인대기', cls: 'bg-amber-100 text-amber-700' },
-  APPROVED:         { label: '승인 완료',           cls: 'bg-emerald-100 text-emerald-700' },
-  REJECTED:         { label: '반려',                cls: 'bg-red-100 text-red-700' },
+const APPROVAL_LABELS: Record<string, { label: string; tone: KuiPillTone }> = {
+  PENDING_APPROVAL: { label: '승인 대기', tone: 'amber' },
+  APPROVED:         { label: '승인 완료', tone: 'green' },
+  REJECTED:         { label: '반려',      tone: 'rose' },
 };
 
-export default function AlimtalkManagementSection() {
+/** 상태 필터 탭 — 라벨은 STATUS_LABELS가 소유하고 여기는 순서만 갖는다 */
+const FILTER_TABS = ['ALL', 'DRAFT', 'REQUESTED', 'KREQ', 'APPROVED', 'HREJ', 'KREJ'] as const;
+
+interface Props {
+  /** 상위 탭에 건수를 올려준다(표시 전용) */
+  onCount?: (n: number) => void;
+}
+
+export default function AlimtalkManagementSection({ onCount }: Props = {}) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
@@ -186,6 +260,9 @@ export default function AlimtalkManagementSection() {
   const [inspectionSubmitting, setInspectionSubmitting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  // ★ 2026-08-17 복사 버튼 피드백 — 토스트를 띄우면 3초간 화면 아래가 가려져 목록 작업이 끊긴다.
+  //   버튼 자리에서 체크로 잠깐 바뀌는 편이 덜 방해한다.
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // ★ 2026-07-02 (직원 서수란 신고): 여러 템플릿 일괄 검수요청 — 등록(DRAFT/REG) 행 다중 선택 + 한 번에 요청.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -285,15 +362,13 @@ export default function AlimtalkManagementSection() {
     KREJ:      ['KREJ', 'REJECTED', 'REJ'],                // 카카오 반려 (레거시 REJ 흡수)
   };
 
-  const filtered = useMemo(() => {
-    const byStatus =
-      filter === 'ALL'
-        ? templates
-        : templates.filter((t) => (FILTER_MATCH[filter] || [filter]).includes(t.status));
-    // ★ D188 (2026-05-21) 영업팀장 신고 #4: 검색 keyword 합성 — 4 영역 lowercase 부분 일치.
+  // ★ D188 (2026-05-21) 영업팀장 신고 #4: 검색 keyword 합성 — 4 영역 lowercase 부분 일치.
+  // ★ 2026-08-17: 검색 단계와 상태 단계를 분리했다(판정식은 그대로).
+  //   상태 탭에 건수를 띄우려면 "검색은 걸렸고 상태는 안 걸린" 집합이 필요하다.
+  const searched = useMemo(() => {
     const kw = searchKeyword.trim().toLowerCase();
-    if (!kw) return byStatus;
-    return byStatus.filter((t) => {
+    if (!kw) return templates;
+    return templates.filter((t) => {
       const fieldValue =
         searchType === 'templateName'       ? (t.template_name || '') :
         searchType === 'content'            ? (t.content || '') :
@@ -303,7 +378,32 @@ export default function AlimtalkManagementSection() {
         '';
       return String(fieldValue).toLowerCase().includes(kw);
     });
-  }, [templates, filter, searchType, searchKeyword]);
+  }, [templates, searchType, searchKeyword]);
+
+  const filtered = useMemo(
+    () =>
+      filter === 'ALL'
+        ? searched
+        : searched.filter((t) => (FILTER_MATCH[filter] || [filter]).includes(t.status)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searched, filter],
+  );
+
+  /** 상태 탭 옆 건수 — 검색 결과 안에서 센다 */
+  const statusCounts = useMemo(() => {
+    const map: Record<string, number> = { ALL: searched.length };
+    for (const s of FILTER_TABS) {
+      if (s === 'ALL') continue;
+      map[s] = searched.filter((t) => (FILTER_MATCH[s] || [s]).includes(t.status)).length;
+    }
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searched]);
+
+  // 상위 탭 건수는 **전체**를 올린다(검색·필터 결과가 아니라)
+  useEffect(() => {
+    onCount?.(templates.length);
+  }, [templates.length, onCount]);
 
   // ★ 2026-07-22 발신프로필 검색(프로필명·채널ID) + 페이징
   const filteredProfiles = useMemo(() => {
@@ -538,67 +638,77 @@ export default function AlimtalkManagementSection() {
   const canRegisterTemplate = profiles.length > 0;
 
   return (
-    <div className="space-y-5">
+    <div className="pt-7">
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
+
       {/* ── 발신프로필 ───────────────────────────── */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">👤</span>
-            <h3 className="text-sm font-bold text-gray-800">발신프로필</h3>
-            <span className="text-xs text-gray-400">
-              카카오톡 채널을 연결하면 즉시 사용 가능합니다
-            </span>
-          </div>
-          {/* ★ 2026-07-22 발신프로필 검색(좌) + 등록(우) — 재판매사 다량 프로필 대응 */}
-          <div className="flex items-center gap-2">
-            {profiles.length > 0 && (
+      <div className="flex items-end justify-between gap-4 flex-wrap mb-3">
+        <div>
+          <h2 className={KUI_SEC_TITLE}>발신프로필</h2>
+          <p className={KUI_SEC_DESC}>카카오톡 채널을 연결하면 즉시 사용할 수 있습니다</p>
+        </div>
+        {/* ★ 2026-07-22 발신프로필 검색(좌) + 등록(우) — 재판매사 다량 프로필 대응 */}
+        <div className="flex items-center gap-2 shrink-0">
+          {profiles.length > 0 && (
+            <div className={`${KUI_FIELD} w-48`}>
+              <Search className="w-[14px] h-[14px] text-neutral-400 shrink-0" />
               <input
                 type="text"
                 value={profileSearch}
                 onChange={(e) => setProfileSearch(e.target.value)}
-                placeholder="프로필·채널ID 검색"
-                className="px-2.5 py-1.5 text-xs bg-white border border-gray-300 rounded-lg w-40 focus:outline-none focus:border-amber-400 placeholder:text-gray-400"
+                placeholder="프로필 · 채널 ID"
+                className={KUI_FIELD_INPUT}
               />
-            )}
-            {/* ★ 권한: 고객사관리자(company_admin/super_admin)만 발신프로필 등록 가능 */}
-            {canManage && (
-              <button
-                type="button"
-                onClick={() => setShowWizard(true)}
-                className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-lg text-xs font-medium transition whitespace-nowrap"
-              >
-                + 발신프로필 등록
-              </button>
-            )}
-          </div>
+            </div>
+          )}
+          {/* ★ 권한: 고객사관리자(company_admin/super_admin)만 발신프로필 등록 가능 */}
+          {canManage && profiles.length > 0 && (
+            <button type="button" onClick={() => setShowWizard(true)} className={KUI_BTN_OUTLINE}>
+              <Plus className="w-[15px] h-[15px]" />
+              발신프로필 등록
+            </button>
+          )}
         </div>
+      </div>
 
-        {profiles.length === 0 ? (
-          <div className="text-center py-4 text-gray-400 text-sm">
-            {canManage ? (
-              <>
-                등록된 발신프로필이 없습니다. 카카오 채널 ID(@시작)와 관리자 휴대폰을 준비하신 후
-                <strong className="text-amber-600"> "+ 발신프로필 등록"</strong>을 눌러주세요.
-              </>
-            ) : (
-              <>등록된 발신프로필이 없습니다. 고객사관리자에게 발신프로필 등록을 요청해주세요.</>
-            )}
+      {profiles.length === 0 ? (
+        // 시작 안내 — 여기서 막히면 템플릿 등록으로 갈 수 없으므로 다음 행동을 붙여둔다
+        <div className={KUI_SETUP}>
+          <div className={KUI_SETUP_BADGE}>
+            <UserRound className="w-[18px] h-[18px]" strokeWidth={1.75} />
           </div>
-        ) : filteredProfiles.length === 0 ? (
-          <div className="text-center py-4 text-gray-400 text-sm">검색 결과가 없습니다.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="bg-gray-50 text-gray-500">
+          <div className="min-w-0 flex-1">
+            <p className={KUI_SETUP_TITLE}>아직 연결된 발신프로필이 없습니다</p>
+            <p className={KUI_SETUP_DESC}>
+              {canManage
+                ? '카카오 채널 ID(@로 시작)와 관리자 휴대폰만 있으면 등록됩니다. 템플릿 등록은 발신프로필이 있어야 시작할 수 있습니다.'
+                : '고객사관리자에게 발신프로필 등록을 요청해주세요. 발신프로필이 있어야 템플릿을 등록할 수 있습니다.'}
+            </p>
+          </div>
+          {canManage && (
+            <button type="button" onClick={() => setShowWizard(true)} className={`${KUI_BTN_PRIMARY} shrink-0`}>
+              <Plus className="w-[15px] h-[15px]" />
+              발신프로필 등록
+            </button>
+          )}
+        </div>
+      ) : filteredProfiles.length === 0 ? (
+        <div className={`${KUI_PANEL} py-10 text-center text-[13px] text-neutral-500`}>
+          검색 결과가 없습니다
+        </div>
+      ) : (
+        <div className={KUI_PANEL}>
+          <div className={KUI_SCROLL_X}>
+            <table className="w-full min-w-[780px]">
+              <thead className={KUI_THEAD}>
                 <tr>
-                  <th className="text-left px-3 py-2">프로필</th>
-                  <th className="text-left px-3 py-2">채널ID</th>
-                  <th className="text-left px-3 py-2">카테고리</th>
-                  <th className="text-center px-3 py-2">승인</th>
-                  <th className="text-center px-3 py-2">상태</th>
-                  <th className="text-center px-3 py-2">브랜드메시지</th>
-                  <th className="text-center px-3 py-2">등록일</th>
+                  <th className={KUI_TH}>프로필</th>
+                  <th className={KUI_TH}>채널 ID</th>
+                  <th className={KUI_TH}>카테고리</th>
+                  <th className={KUI_TH}>승인</th>
+                  <th className={KUI_TH}>상태</th>
+                  <th className={KUI_TH}>브랜드메시지</th>
+                  <th className={KUI_TH_RIGHT}>등록일</th>
                 </tr>
               </thead>
               <tbody>
@@ -607,86 +717,94 @@ export default function AlimtalkManagementSection() {
                   //   상태 = syncSenderStatusJob이 IMC status+block+dormant를 DB 동기화 → senderStatusBadge로 한글 매핑.
                   const ap = APPROVAL_LABELS[p.approval_status || 'PENDING_APPROVAL'] || {
                     label: p.approval_status || '-',
-                    cls: 'bg-gray-100 text-gray-500',
+                    tone: 'neutral' as KuiPillTone,
                   };
                   const sb = senderStatusBadge(p);
                   return (
-                    <tr key={p.id} className="border-t border-gray-100">
-                      <td className="px-3 py-2">
-                        <div className="font-medium text-gray-800">{p.profile_name}</div>
+                    <tr key={p.id} className={KUI_TR}>
+                      <td className={KUI_TD}>
+                        <div className={KUI_CELL_NAME}>{p.profile_name}</div>
                         {/* ★ D218+ (2026-05-26) PDF 신고 #3: 발신프로필 키값 전체 노출 + 복사 버튼 추가. */}
                         <div className="flex items-center gap-1.5 mt-0.5">
-                          <div className="text-[10px] text-gray-400 font-mono break-all flex-1 min-w-0">
+                          <span className={`${KUI_CELL_CODE} truncate max-w-[220px]`}>
                             {p.profile_key || '-'}
-                          </div>
+                          </span>
                           {p.profile_key && (
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
+                                const key = p.profile_key!;
                                 navigator.clipboard
-                                  .writeText(p.profile_key!)
-                                  .then(() => setToast('발신프로필 키값 복사 완료'))
+                                  .writeText(key)
+                                  .then(() => {
+                                    setCopiedKey(key);
+                                    setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500);
+                                  })
                                   .catch(() => setToast('복사 실패 — 직접 선택 후 복사해주세요'));
                               }}
-                              className="px-1.5 py-0.5 text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600 rounded transition shrink-0"
+                              className={KUI_COPY_BTN}
                               title="발신프로필 키값 복사"
+                              aria-label="발신프로필 키값 복사"
                             >
-                              복사
+                              {copiedKey === p.profile_key
+                                ? <Check className="w-3 h-3 text-emerald-600" />
+                                : <Copy className="w-3 h-3" />}
                             </button>
                           )}
                         </div>
                         {p.approval_status === 'REJECTED' && p.reject_reason && (
-                          <div className="text-[11px] text-red-500 mt-0.5">
+                          <div className="text-[12px] text-rose-600 mt-1 whitespace-normal">
                             반려: {p.reject_reason}
                           </div>
                         )}
                       </td>
-                      <td className="px-3 py-2 font-mono text-gray-600">
-                        {p.yellow_id || '-'}
+                      <td className={KUI_TD}>
+                        <span className="font-mono text-[13px] text-neutral-700">{p.yellow_id || '-'}</span>
                       </td>
-                      <td className="px-3 py-2 text-gray-600">
-                        {p.category_name_cache || '-'}
+                      <td className={KUI_TD}>
+                        <span className="text-[13.5px] text-neutral-800">{p.category_name_cache || '-'}</span>
                       </td>
-                      <td className="text-center px-3 py-2">
-                        <span className={`inline-block px-2 py-0.5 rounded ${ap.cls}`}>
-                          {ap.label}
-                        </span>
+                      <td className={KUI_TD}>
+                        <StatusPill label={ap.label} tone={ap.tone} />
                       </td>
                       {/* 상태 — IMC status + block + dormant */}
-                      <td className="text-center px-3 py-2">
-                        <span className={`inline-block px-2 py-0.5 rounded ${sb.cls}`}>
-                          {sb.label}
-                        </span>
+                      <td className={KUI_TD}>
+                        <StatusPill label={sb.label} tone={sb.tone} />
                       </td>
                       {/* 브랜드메시지 사용 여부 */}
-                      <td className="text-center px-3 py-2">
+                      <td className={KUI_TD}>
                         {p.brand_message_yn === 'Y' ? (
-                          <span className="text-emerald-600">사용</span>
+                          <span className="text-[13.5px] text-neutral-800">사용</span>
                         ) : (
-                          <span className="text-gray-300">미사용</span>
+                          <span className={KUI_CELL_OFF}>미사용</span>
                         )}
                       </td>
                       {/* 등록일 — 카카오 채널 생성일 */}
-                      <td className="text-center px-3 py-2 text-gray-600">
-                        {p.channel_created_at ? p.channel_created_at.slice(0, 10) : '-'}
+                      <td className={`${KUI_TD} text-right`}>
+                        <span className={KUI_CELL_META}>
+                          {p.channel_created_at ? p.channel_created_at.slice(0, 10) : '-'}
+                        </span>
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-            <TablePagination total={filteredProfiles.length} page={profilePage} perPage={PROFILE_PER_PAGE} onChange={setProfilePage} unit="개" />
-
-            {/* 승인 안내 */}
-            {profiles.some((p) => p.approval_status === 'PENDING_APPROVAL') && (
-              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                ℹ️ <strong>슈퍼관리자 승인 대기 중</strong>인 발신프로필은 템플릿 등록·발송에 사용할 수 없습니다. 승인 완료 후 자동으로 활성화됩니다.
-              </div>
-            )}
           </div>
-        )}
-      </div>
+          <TablePagination total={filteredProfiles.length} page={profilePage} perPage={PROFILE_PER_PAGE} onChange={setProfilePage} unit="개" />
+        </div>
+      )}
+
+      {/* 승인 안내 — 프로필이 있든 없든 대기 건이 있으면 보여야 한다 */}
+      {profiles.some((p) => p.approval_status === 'PENDING_APPROVAL') && (
+        <div className={KUI_NOTICE}>
+          <Info className={`w-[15px] h-[15px] ${KUI_NOTICE_ICON}`} />
+          <p className={KUI_NOTICE_TEXT}>
+            <b className="font-semibold">승인 대기 중</b>인 발신프로필은 템플릿 등록·발송에 쓸 수 없습니다. 승인이 끝나면 자동으로 켜집니다.
+          </p>
+        </div>
+      )}
 
       {/* ── 필터 + 버튼 ─────────────────────────── */}
       {/* ★ D152-4 Harold님 지시 (2026-05-12): IMC 6단계 정합 — 직원 5/12 PDF #3/#4/#5 동시 처리.
@@ -694,53 +812,58 @@ export default function AlimtalkManagementSection() {
             #4 "휴면 삭제" — DORMANT 탭 제거 (라벨은 유지)
             #5 "카카오 반려 메뉴 추가" — KREJ 신규 탭 (HREJ '내부 반려'와 분리)
             filter 시 IMC raw + 한줄로 풀네임 양쪽 매칭으로 호환 (filtered useMemo) */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex flex-wrap gap-1 text-xs">
-          {(['ALL', 'DRAFT', 'REQUESTED', 'KREQ', 'APPROVED', 'HREJ', 'KREJ'] as const).map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setFilter(s)}
-              className={`px-3 py-1.5 rounded-full font-medium transition ${
-                filter === s
-                  ? 'bg-amber-600 text-white'
-                  : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              {s === 'ALL' ? '전체' : STATUS_LABELS[s]?.label || s}
-            </button>
-          ))}
+      <div className={kcx(KUI_SEC_SPLIT, 'flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3')}>
+        <div className={KUI_CHIPS}>
+          {FILTER_TABS.map((s) => {
+            const on = filter === s;
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setFilter(s)}
+                className={on ? KUI_CHIP_ON : KUI_CHIP_OFF}
+              >
+                {s === 'ALL' ? '전체' : STATUS_LABELS[s]?.label || s}
+                <span className={on ? KUI_CHIP_COUNT_ON : KUI_CHIP_COUNT_OFF}>{statusCounts[s] ?? 0}</span>
+              </button>
+            );
+          })}
         </div>
-        <div className="flex gap-2 items-center flex-wrap">
+
+        <div className="flex gap-2 items-center flex-wrap shrink-0">
           {/* ★ D188 (2026-05-21) 영업팀장 신고 #4: 검색 UI — 4 영역 select + input. 클라이언트 측 filter. */}
-          <div className="flex items-center gap-1 bg-white border border-gray-300 rounded-lg overflow-hidden text-xs">
-            <select
-              value={searchType}
-              onChange={(e) => setSearchType(e.target.value as SearchType)}
-              className="px-2 py-1.5 text-xs bg-white border-0 focus:outline-none focus:ring-0 text-gray-700"
-            >
-              <option value="templateName">템플릿명</option>
-              <option value="content">템플릿 문구</option>
-              <option value="templateCode">템플릿코드</option>
-              <option value="customTemplateCode">고객사관리코드</option>
-              <option value="profile">프로필</option>
-            </select>
-            <div className="w-px h-4 bg-gray-200" />
+          <div className={`${KUI_FIELD} flex-1 lg:w-[300px] lg:flex-none px-1`}>
+            <div className="relative shrink-0">
+              <select
+                value={searchType}
+                onChange={(e) => setSearchType(e.target.value as SearchType)}
+                className="appearance-none h-7 pl-2 pr-6 bg-transparent border-0 rounded-md text-[13px] text-neutral-700 cursor-pointer outline-none focus:ring-0 hover:bg-neutral-200/50 transition"
+                aria-label="검색 대상"
+              >
+                <option value="templateName">템플릿명</option>
+                <option value="content">템플릿 문구</option>
+                <option value="templateCode">템플릿코드</option>
+                <option value="customTemplateCode">고객사관리코드</option>
+                <option value="profile">프로필</option>
+              </select>
+              <ChevronDown className="w-3 h-3 text-neutral-400 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
+            <span className="w-px h-4 bg-neutral-200 shrink-0" />
             <input
               type="text"
               value={searchKeyword}
               onChange={(e) => setSearchKeyword(e.target.value)}
-              placeholder="검색어"
-              className="px-2 py-1.5 text-xs w-36 border-0 focus:outline-none focus:ring-0 placeholder:text-gray-400"
+              placeholder="검색어를 입력하세요"
+              className={KUI_FIELD_INPUT}
             />
             {searchKeyword && (
               <button
                 type="button"
                 onClick={() => setSearchKeyword('')}
-                className="px-2 py-1.5 text-xs text-gray-400 hover:text-gray-600"
+                className="h-6 w-6 grid place-items-center rounded shrink-0 text-neutral-400 hover:text-neutral-900 hover:bg-neutral-200/60 transition"
                 aria-label="검색 초기화"
               >
-                ×
+                <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
@@ -750,18 +873,21 @@ export default function AlimtalkManagementSection() {
               <button
                 type="button"
                 onClick={() => setShowAlarm(true)}
-                className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg"
+                className={KUI_ICON_BTN}
+                title="검수 알림 수신자"
+                aria-label="검수 알림 수신자"
               >
-                검수 알림 수신자
+                <Bell className="w-4 h-4" />
               </button>
               <button
                 type="button"
                 onClick={() => setEditing(null)}
                 disabled={!canRegisterTemplate}
-                className="px-4 py-1.5 text-sm bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-medium transition disabled:opacity-50"
+                className={KUI_BTN_PRIMARY}
                 title={canRegisterTemplate ? undefined : '발신프로필을 먼저 등록하세요'}
               >
-                + 템플릿 등록
+                <Plus className="w-[15px] h-[15px]" />
+                템플릿 등록
               </button>
             </>
           )}
@@ -770,8 +896,8 @@ export default function AlimtalkManagementSection() {
 
       {/* ★ 2026-07-02 일괄 검수요청 액션 바 — 등록 행을 하나라도 선택하면 노출 */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center justify-between flex-wrap gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-          <span className="text-xs font-medium text-amber-800">
+        <div className={KUI_BULK}>
+          <span className={KUI_BULK_TEXT}>
             {selectedIds.size}개 선택됨
             {bulkProgress && ` · 처리 중 ${bulkProgress.done}/${bulkProgress.total}`}
           </span>
@@ -780,7 +906,7 @@ export default function AlimtalkManagementSection() {
               type="button"
               onClick={() => setSelectedIds(new Set())}
               disabled={bulkSubmitting}
-              className="px-3 py-1.5 text-xs bg-white border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              className={kcx(KUI_BTN_OUTLINE, 'h-8 px-3 text-[13px]')}
             >
               선택 해제
             </button>
@@ -788,9 +914,9 @@ export default function AlimtalkManagementSection() {
               type="button"
               onClick={confirmBulkInspect}
               disabled={bulkSubmitting}
-              className="px-4 py-1.5 text-xs bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-medium disabled:opacity-50"
+              className={kcx(KUI_BTN_PRIMARY, 'h-8 px-3 text-[13px]')}
             >
-              {bulkSubmitting ? '검수요청 중...' : '일괄 검수요청'}
+              {bulkSubmitting ? '검수요청 중' : '일괄 검수요청'}
             </button>
           </div>
         </div>
@@ -798,30 +924,34 @@ export default function AlimtalkManagementSection() {
 
       {/* ── 목록 ───────────────────────────────── */}
       {loading ? (
-        <div className="text-center py-10 text-sm text-gray-400">로딩 중...</div>
+        <div className={`${KUI_LOADING} mt-5`}>
+          <span className={KUI_SPINNER} />
+          불러오는 중
+        </div>
       ) : filtered.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
-          <div className="text-4xl mb-2">💬</div>
-          <p className="text-sm text-gray-500">
-            {filter === 'ALL'
-              ? '등록된 알림톡 템플릿이 없습니다'
-              : '해당 상태의 템플릿이 없습니다'}
-          </p>
-          {filter === 'ALL' && (
-            <p className="text-xs text-gray-400 mt-1">
-              템플릿을 등록하면 카카오 검수 후 발송에 사용할 수 있습니다
-            </p>
-          )}
+        <div className="mt-5">
+          <EmptyState
+            icon={LayoutTemplate}
+            title={filter === 'ALL' && !searchKeyword ? '등록된 알림톡 템플릿이 없습니다' : '조건에 맞는 템플릿이 없습니다'}
+            description={
+              filter === 'ALL' && !searchKeyword
+                ? '템플릿을 등록하면 카카오 검수를 거쳐 발송에 사용할 수 있습니다.'
+                : '상태 필터나 검색어를 바꿔보세요.'
+            }
+            actionLabel={filter === 'ALL' && !searchKeyword && canManage && canRegisterTemplate ? '첫 템플릿 등록하기' : undefined}
+            onAction={filter === 'ALL' && !searchKeyword && canManage && canRegisterTemplate ? () => setEditing(null) : undefined}
+          />
         </div>
       ) : (
         // ★ D188-fix2 (2026-05-21) 영업팀장 추가 신고: 템플릿코드 컬럼 추가로 가로 폭 초과 → 헤더/등록일시/관리 줄바꿈 사고.
         //   영구 fix = overflow-x-auto 가로 스크롤 안전망 + 모든 td/th에 whitespace-nowrap + 작은 폰트 (text-xs 통일).
-        <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead className="bg-gray-50 text-[11px] text-gray-500">
+        <div className={`${KUI_PANEL} mt-5`}>
+          <div className={KUI_SCROLL_X}>
+          <table className="w-full min-w-[1040px]">
+            <thead className={KUI_THEAD}>
               <tr>
                 {/* ★ 2026-07-02 일괄 검수요청: 등록 행 전체 선택 체크박스 */}
-                <th className="px-3 py-2 whitespace-nowrap w-8">
+                <th className={`${KUI_TH} w-11`}>
                   <input
                     type="checkbox"
                     aria-label="등록 상태 템플릿 전체 선택"
@@ -831,20 +961,20 @@ export default function AlimtalkManagementSection() {
                     }}
                     onChange={toggleSelectAll}
                     disabled={bulkEligible.length === 0}
-                    className="cursor-pointer accent-amber-600 disabled:cursor-not-allowed disabled:opacity-30"
+                    className="w-[15px] h-[15px] cursor-pointer accent-indigo-600 disabled:cursor-not-allowed disabled:opacity-30"
                   />
                 </th>
-                <th className="text-left px-3 py-2 whitespace-nowrap">템플릿</th>
+                <th className={KUI_TH}>템플릿</th>
                 {/* ★ D188 (2026-05-21) 영업팀장 신고 #3: 템플릿코드 컬럼 신규 — 사용자가 발송 매칭/디버그용 표시 정합. */}
-                <th className="text-left px-3 py-2 whitespace-nowrap">템플릿코드</th>
-                <th className="text-left px-3 py-2 whitespace-nowrap">프로필</th>
-                <th className="text-left px-3 py-2 whitespace-nowrap">등록자</th>
-                <th className="text-center px-3 py-2 whitespace-nowrap">유형</th>
-                <th className="text-center px-3 py-2 whitespace-nowrap">상태</th>
-                <th className="text-left px-3 py-2 whitespace-nowrap">등록일시</th>
-                <th className="text-left px-3 py-2 whitespace-nowrap">업데이트</th>
+                <th className={KUI_TH}>템플릿코드</th>
+                <th className={KUI_TH}>프로필</th>
+                <th className={KUI_TH}>등록자</th>
+                <th className={KUI_TH}>유형</th>
+                <th className={KUI_TH}>상태</th>
+                <th className={KUI_TH_RIGHT}>등록일시</th>
+                <th className={KUI_TH_RIGHT}>업데이트</th>
                 {/* ★ 2026-07-04: 관리(액션) 열 우측 고정 — 표가 뷰포트보다 넓어도 액션 버튼이 항상 보이게. */}
-                <th className="sticky right-0 z-20 bg-gray-50 border-l border-gray-200 text-right px-3 py-2 whitespace-nowrap">관리</th>
+                <th className={KUI_TH_STICKY}>관리</th>
               </tr>
             </thead>
             <tbody>
@@ -869,189 +999,141 @@ export default function AlimtalkManagementSection() {
                 //   company_user가 남의 템플릿 쓰기 버튼을 눌러 백엔드 403을 만나지 않도록 프론트에서 게이팅.
                 const isOwner = !!authUser?.id && t.created_by === authUser.id;
                 const canEdit = canManage || isOwner;
+
+                // ★ 2026-08-17 액션 묶음 — 대표 하나만 글자로 두고 나머지는 ⋯ 뒤로(RowActions 계약).
+                //   0번 = 그 상태에서 사용자가 다음에 할 일. 파괴적 액션은 절대 0번에 두지 않는다.
+                //   노출 조건은 아래 원래 분기와 한 글자도 다르지 않다.
+                const detailAction: RowAction = { label: '상세보기', onClick: () => setViewing(toFormData(t)) };
+                const rowActions: RowAction[] = [];
+                if (isDraft && canEdit) {
+                  rowActions.push({ label: '검수요청', onClick: () => inspect(t) });
+                  rowActions.push({ label: '수정', onClick: () => setEditing(toFormData(t)) });
+                  rowActions.push(detailAction);
+                  rowActions.push({ label: '삭제', onClick: () => remove(t), danger: true });
+                } else if (isReq && canEdit) {
+                  rowActions.push({ label: '검수요청 취소', onClick: () => cancelInspect(t) });
+                  rowActions.push(detailAction);
+                } else if (isRej) {
+                  // ★ D162-4 (2026-05-15) 2차: 반려사유는 모달로 — 반려 상태 + 사유가 있을 때만.
+                  if (t.reject_reason) {
+                    rowActions.push({
+                      label: '반려사유',
+                      onClick: () =>
+                        setRejectReasonTarget({
+                          templateName: t.template_name || t.template_code,
+                          rejectReason: t.reject_reason || '',
+                          status: t.status,
+                        }),
+                    });
+                  }
+                  // ★ D162-4 PDF 0515 알림톡 #1: 재검수 = 풀 폼 진입 + 반려사유 노출 + 저장 후 자동 검수요청.
+                  if (canEdit) {
+                    rowActions.push({
+                      label: '재검수',
+                      onClick: () => {
+                        setEditing(toFormData(t));
+                        setEditingMeta({ rejectReason: t.reject_reason, autoInspect: true });
+                      },
+                    });
+                  }
+                  rowActions.push(detailAction);
+                } else {
+                  // KREQ(카카오 검수 중) · APPROVED — 상세보기만
+                  rowActions.push(detailAction);
+                }
+                // ★ D150-2 (2026-05-09): 변경 이력 (슈퍼관리자만, 모든 상태 노출)
+                if (authUser?.userType === 'super_admin') {
+                  rowActions.push({
+                    label: '변경 이력',
+                    onClick: () =>
+                      setHistoryTarget({
+                        templateCode: t.template_code,
+                        templateName: t.template_name || t.template_code,
+                      }),
+                  });
+                }
+
                 return (
-                  <tr key={t.id} className="group border-t border-gray-100 hover:bg-gray-50">
+                  <tr key={t.id} className={KUI_TR}>
                     {/* ★ 2026-07-02 일괄 검수요청: 등록(DRAFT/REG) 행만 선택 가능 */}
-                    <td className="px-3 py-2 whitespace-nowrap w-8">
+                    <td className={`${KUI_TD} w-11`}>
                       {isDraft && canEdit && (
                         <input
                           type="checkbox"
                           aria-label={`${t.template_name} 선택`}
                           checked={selectedIds.has(t.id)}
                           onChange={() => toggleSelect(t.id)}
-                          className="cursor-pointer accent-amber-600"
+                          className="w-[15px] h-[15px] cursor-pointer accent-indigo-600"
                         />
                       )}
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      <div className="font-medium text-gray-900 text-xs">{t.template_name}</div>
+                    <td className={KUI_TD}>
+                      <div className={KUI_CELL_NAME}>{t.template_name}</div>
                       {/* ★ 2026-07-22(접수2): 고객사 관리코드는 코드이므로 템플릿코드 열로 이동 — 템플릿명 아래에는 표시 안 함 */}
                     </td>
                     {/* ★ D188 (2026-05-21) 영업팀장 신고 #3: 템플릿코드 컬럼 row. font-mono + 작은 텍스트 + select-text.
                         ★ 2026-07-22(접수2): 고객사 지정 관리코드도 코드이므로 여기(템플릿코드 열)에 함께 표시 */}
-                    <td className="px-3 py-2 font-mono text-[10px] text-gray-500 select-text cursor-text whitespace-nowrap">
-                      {t.template_code || '-'}
+                    <td className={`${KUI_TD} select-text cursor-text`}>
+                      <span className={KUI_CELL_CODE}>{t.template_code || '-'}</span>
                       {t.custom_template_code && (
-                        <div className="text-gray-400 mt-0.5">고객사: {t.custom_template_code}</div>
+                        <div className="mt-1">
+                          <span className={KUI_CELL_CODE_CHIP}>고객사 {t.custom_template_code}</span>
+                        </div>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-[11px] text-gray-600 whitespace-nowrap">
-                      {t.profile_name || '-'}
+                    <td className={KUI_TD}>
+                      <span className="text-[13.5px] text-neutral-800">{t.profile_name || '-'}</span>
                     </td>
-                    <td className="px-3 py-2 text-[11px] text-gray-600 whitespace-nowrap">
+                    <td className={KUI_TD}>
                       {t.created_by_name ? (
                         <>
-                          <div>{t.created_by_name}</div>
+                          <div className="text-[13px] text-neutral-800">{t.created_by_name}</div>
                           {t.created_by_login_id && (
-                            <div className="text-[10px] text-gray-400 font-mono">
-                              {t.created_by_login_id}
-                            </div>
+                            <div className={KUI_CELL_CODE}>{t.created_by_login_id}</div>
                           )}
                         </>
                       ) : (
-                        <span className="text-gray-300">-</span>
+                        <span className={KUI_CELL_OFF}>-</span>
                       )}
                     </td>
-                    <td className="text-center px-3 py-2 text-[11px] text-gray-600 whitespace-nowrap">
-                      {formatTemplateType(t.message_type, t.emphasize_type)}
-                    </td>
-                    <td className="text-center px-3 py-2 whitespace-nowrap">
-                      <span
-                        className={`inline-block text-[10px] px-2 py-0.5 rounded ${st.cls}`}
-                      >
-                        {st.label}
+                    <td className={KUI_TD}>
+                      <span className="text-[13px] text-neutral-700">
+                        {formatTemplateType(t.message_type, t.emphasize_type)}
                       </span>
+                    </td>
+                    <td className={KUI_TD}>
+                      <StatusPill label={st.label} tone={st.tone} />
                       {/* ★ CT-87 (2026-06-10): 검수 승인이어도 카카오 활성상태가 A가 아니면 발송 불가 — 실상태 병기.
                           (검수 승인인데 활성 대기 R이라 발송이 전부 7300으로 실패하던 사례의 화면 안전망) */}
                       {['APPROVED', 'APR'].includes(t.status) && t.imc_template_status && t.imc_template_status !== 'A' && (
-                        <span
-                          className={`inline-block text-[10px] px-2 py-0.5 rounded ml-1 ${
-                            t.imc_template_status === 'R' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'
-                          }`}
-                          title="카카오 측 템플릿 활성상태가 A(정상)가 아니면 발송이 거부됩니다. 카카오 검수팀에 활성 전환을 요청해주세요."
-                        >
-                          {t.imc_template_status === 'R' ? '활성 대기 · 발송불가' : t.imc_template_status === 'S' ? '중단 · 발송불가' : `${t.imc_template_status} · 발송불가`}
+                        <span className="ml-1 inline-flex">
+                          <StatusPill
+                            label={t.imc_template_status === 'R' ? '활성 대기 · 발송불가' : t.imc_template_status === 'S' ? '중단 · 발송불가' : `${t.imc_template_status} · 발송불가`}
+                            tone={t.imc_template_status === 'R' ? 'amber' : 'rose'}
+                            title="카카오 측 템플릿 활성상태가 정상이 아니면 발송이 거부됩니다. 카카오 검수팀에 활성 전환을 요청해주세요."
+                          />
                         </span>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-[11px] text-gray-500 whitespace-nowrap">
-                      {t.created_at
-                        ? new Date(t.created_at).toLocaleString('ko-KR')
-                        : '-'}
+                    <td className={`${KUI_TD} text-right`}>
+                      <span className={KUI_CELL_META}>
+                        {t.created_at ? new Date(t.created_at).toLocaleString('ko-KR') : '-'}
+                      </span>
                     </td>
-                    <td className="px-3 py-2 text-[11px] text-gray-500 whitespace-nowrap">
-                      {t.updated_at
-                        ? new Date(t.updated_at).toLocaleString('ko-KR')
-                        : '-'}
+                    <td className={`${KUI_TD} text-right`}>
+                      <span className={KUI_CELL_META}>
+                        {t.updated_at ? new Date(t.updated_at).toLocaleString('ko-KR') : '-'}
+                      </span>
                     </td>
-                    <td className="sticky right-0 z-10 bg-white group-hover:bg-gray-50 border-l border-gray-200 text-right px-3 py-2 whitespace-nowrap">
-                      <div className="inline-flex flex-nowrap gap-1 items-center">
-                      {/* 상세보기: 모든 상태에서 노출 (read-only 모달) */}
-                      <button
-                        type="button"
-                        onClick={() => setViewing(toFormData(t))}
-                        className="text-[11px] px-2 py-0.5 bg-gray-100 hover:bg-gray-200 rounded"
-                      >
-                        상세보기
-                      </button>
-                      {/* 수정: DRAFT(등록)에서만 */}
-                      {isDraft && canEdit && (
-                        <button
-                          type="button"
-                          onClick={() => setEditing(toFormData(t))}
-                          className="text-[11px] px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded"
-                        >
-                          수정
-                        </button>
-                      )}
-                      {/* 검수요청: DRAFT 전용 */}
-                      {isDraft && canEdit && (
-                        <button
-                          type="button"
-                          onClick={() => inspect(t)}
-                          className="text-[11px] px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded"
-                        >
-                          검수요청
-                        </button>
-                      )}
-                      {/* 검수요청 취소: REQUESTED/REVIEWING */}
-                      {isReq && canEdit && (
-                        <button
-                          type="button"
-                          onClick={() => cancelInspect(t)}
-                          className="text-[11px] px-2 py-0.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded"
-                        >
-                          검수요청 취소
-                        </button>
-                      )}
-                      {/* ★ D162-4 (2026-05-15) 2차: 반려사유 확인 버튼 — Harold님 명시 정합.
-                          반려 상태 + 사유가 있을 때만 노출. 클릭 시 적정 사이즈 모달(스크롤 가능)로 상세 노출. */}
-                      {isRej && t.reject_reason && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setRejectReasonTarget({
-                              templateName: t.template_name || t.template_code,
-                              rejectReason: t.reject_reason || '',
-                              status: t.status,
-                            })
-                          }
-                          className="text-[11px] px-2 py-0.5 bg-red-50 hover:bg-red-100 text-red-600 rounded"
-                        >
-                          반려사유
-                        </button>
-                      )}
-                      {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: 재검수 버튼 = 풀 폼 진입 + 반려사유 노출 + 저장 후 자동 검수요청.
-                          기존엔 inspect(t) → 작은 검수요청 모달(코멘트+증빙자료만)로 본문 수정 동선이 없던 사고.
-                          이제 setEditing + setEditingMeta로 풀 폼(AlimtalkTemplateFormV2 editing mode)에 들어가 본문 수정 후
-                          저장하면 autoInspectAfterSave 분기로 자동 POST /inspect 호출 → 재검수 요청 완료. */}
-                      {isRej && canEdit && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditing(toFormData(t));
-                            setEditingMeta({
-                              rejectReason: t.reject_reason,
-                              autoInspect: true,
-                            });
-                          }}
-                          className="text-[11px] px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded"
-                        >
-                          재검수
-                        </button>
-                      )}
-                      {/* 삭제: DRAFT 전용 (remove 함수 내 이중 가드) */}
-                      {isDraft && canEdit && (
-                        <button
-                          type="button"
-                          onClick={() => remove(t)}
-                          className="text-[11px] px-2 py-0.5 bg-red-50 hover:bg-red-100 text-red-600 rounded"
-                        >
-                          삭제
-                        </button>
-                      )}
-                      {/* ★ D150-2 (2026-05-09): 변경 이력 (슈퍼관리자만, 모든 상태 노출) */}
-                      {authUser?.userType === 'super_admin' && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setHistoryTarget({
-                              templateCode: t.template_code,
-                              templateName: t.template_name || t.template_code,
-                            })
-                          }
-                          className="text-[11px] px-2 py-0.5 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded"
-                        >
-                          이력
-                        </button>
-                      )}
-                      </div>
+                    <td className={KUI_TD_STICKY}>
+                      <RowActions actions={rowActions} />
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+          </div>
           <TablePagination total={filtered.length} page={templatePage} perPage={TEMPLATE_PER_PAGE} onChange={setTemplatePage} unit="건" />
         </div>
       )}
@@ -1103,24 +1185,19 @@ export default function AlimtalkManagementSection() {
       {/* ★ D162-4 (2026-05-15) 2차: 반려사유 상세 모달 — Harold님 명시 정합.
           row에 펼쳐 표시하던 사유를 별도 모달로 분리. max-w-2xl + max-h 80vh + overflow-y-auto로 긴 사유도 스크롤 안정. */}
       {rejectReasonTarget && (
-        <div
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
-        >
-          <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden"
-            style={{ animation: 'zoomIn 0.2s ease-out' }}
-          >
+        <div className={KUI_MODAL_SCRIM}>
+          <div className={`${KUI_MODAL} max-w-2xl`} role="dialog" aria-modal="true">
             {/* 헤더 */}
-            <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-red-50 to-white flex justify-between items-center shrink-0">
+            <div className={KUI_MODAL_HEAD}>
               <div className="flex items-start gap-3 min-w-0">
-                <span className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center text-lg shrink-0">
-                  ⚠
+                <span className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 grid place-items-center shrink-0">
+                  <AlertTriangle className="w-[18px] h-[18px]" strokeWidth={1.75} />
                 </span>
                 <div className="min-w-0">
-                  <h3 className="text-lg font-bold text-gray-900 truncate">
+                  <h3 className={`${KUI_MODAL_TITLE} truncate`}>
                     {STATUS_LABELS[rejectReasonTarget.status]?.label || '반려'} 사유
                   </h3>
-                  <p className="text-xs text-gray-500 mt-0.5 truncate">
+                  <p className={`${KUI_MODAL_DESC} truncate`}>
                     템플릿: {rejectReasonTarget.templateName}
                   </p>
                 </div>
@@ -1128,106 +1205,119 @@ export default function AlimtalkManagementSection() {
               <button
                 type="button"
                 onClick={() => setRejectReasonTarget(null)}
-                className="text-gray-400 hover:text-gray-600 text-2xl shrink-0 ml-2"
+                className={KUI_MODAL_CLOSE}
                 aria-label="닫기"
               >
-                &times;
+                <X className="w-[17px] h-[17px]" />
               </button>
             </div>
 
             {/* 본문 — 스크롤 영역 */}
-            <div className="px-6 py-5 overflow-y-auto flex-1">
-              <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-900 leading-relaxed whitespace-pre-wrap">
-                {rejectReasonTarget.rejectReason}
+            <div className={KUI_MODAL_BODY}>
+              <div className={KUI_DANGER_BOX}>
+                <p className={KUI_DANGER_TEXT}>{rejectReasonTarget.rejectReason}</p>
               </div>
-              <p className="mt-3 text-[11px] text-gray-500 leading-relaxed">
-                ℹ 본 사유는 카카오 검수팀이 전달한 내용입니다. 본문 수정 후 '재검수' 버튼으로 다시 검수 요청할 수 있습니다.
-              </p>
+              <div className={KUI_INFO}>
+                <Info className={`w-[15px] h-[15px] ${KUI_INFO_ICON}`} />
+                <p className={KUI_INFO_TEXT}>
+                  이 사유는 카카오 검수팀이 전달한 내용입니다. 본문을 고친 뒤 '재검수'로 다시 요청할 수 있습니다.
+                </p>
+              </div>
             </div>
 
             {/* 푸터 */}
-            <div className="px-6 py-3 border-t border-gray-200 bg-gray-50 flex justify-end gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => setRejectReasonTarget(null)}
-                className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm"
-              >
+            <div className={KUI_MODAL_FOOT}>
+              <button type="button" onClick={() => setRejectReasonTarget(null)} className={KUI_BTN_OUTLINE}>
                 닫기
               </button>
             </div>
           </div>
-          <style>{`
-            @keyframes zoomIn {
-              from { opacity: 0; transform: scale(0.96); }
-              to { opacity: 1; transform: scale(1); }
-            }
-          `}</style>
         </div>
       )}
 
       {/* ★ D142+ F (2026-04-29): 검수요청 시 코멘트 + 증빙자료 입력 모달 (PDF 0428 알림톡 #3) */}
       {inspectionTarget && (
-        <div
-          className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center animate-in fade-in duration-150"
-        >
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 p-6 animate-in zoom-in-95 duration-200">
-            <h3 className="text-lg font-semibold text-gray-900 mb-1">검수요청</h3>
-            <p className="text-xs text-gray-500 mb-2 truncate">
-              {inspectionTarget.template_name}
-            </p>
-
-            {/* ★ D143 F (2026-04-30) PDF 0430 #3: 등록 폼 하단에서 입력한 정보 자동 사용 안내 */}
-            {(inspectionTarget.inspection_comment || inspectionTarget.inspection_evidence_filename) && (
-              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800 leading-relaxed">
-                💡 등록 시 입력한 정보가 자동으로 카카오에 전달됩니다.
-                {inspectionTarget.inspection_comment && (
-                  <div className="mt-1 truncate">
-                    <span className="font-medium">코멘트:</span> {inspectionTarget.inspection_comment.slice(0, 80)}{inspectionTarget.inspection_comment.length > 80 ? '…' : ''}
-                  </div>
-                )}
-                {inspectionTarget.inspection_evidence_filename && (
-                  <div className="mt-0.5 truncate">
-                    <span className="font-medium">증빙자료:</span> {inspectionTarget.inspection_evidence_filename}
-                  </div>
-                )}
-                <div className="mt-1 text-amber-600">아래에서 추가/수정도 가능합니다.</div>
+        <div className={KUI_MODAL_SCRIM}>
+          <div className={`${KUI_MODAL} max-w-md`} role="dialog" aria-modal="true">
+            <div className={KUI_MODAL_HEAD}>
+              <div className="min-w-0">
+                <h3 className={KUI_MODAL_TITLE}>검수요청</h3>
+                <p className={`${KUI_MODAL_DESC} truncate`}>{inspectionTarget.template_name}</p>
               </div>
-            )}
-
-            <label className="block text-xs font-semibold text-gray-700 mb-1">
-              코멘트 <span className="text-gray-400 font-normal">(생략 가능)</span>
-            </label>
-            <textarea
-              value={inspectionComment}
-              onChange={(e) => setInspectionComment(e.target.value)}
-              placeholder="정보성 메시지에 대한 근거 정보(생략가능)"
-              rows={4}
-              disabled={inspectionSubmitting}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-amber-300 focus:border-amber-400 outline-none disabled:bg-gray-50"
-            />
-
-            <label className="block text-xs font-semibold text-gray-700 mt-3 mb-1">
-              코멘트 증빙자료 <span className="text-gray-400 font-normal">(이미지/PDF, 생략 가능)</span>
-            </label>
-            <input
-              type="file"
-              accept="image/*,.pdf"
-              onChange={(e) => setInspectionFile(e.target.files?.[0] || null)}
-              disabled={inspectionSubmitting}
-              className="block w-full text-xs text-gray-600 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100"
-            />
-            {inspectionFile && (
-              <p className="text-[11px] text-gray-500 mt-1 truncate">
-                선택됨: {inspectionFile.name} ({Math.ceil(inspectionFile.size / 1024)} KB)
-              </p>
-            )}
-
-            <div className="flex gap-2 justify-end mt-5">
               <button
                 type="button"
                 onClick={() => setInspectionTarget(null)}
                 disabled={inspectionSubmitting}
-                className="px-4 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-50"
+                className={KUI_MODAL_CLOSE}
+                aria-label="닫기"
+              >
+                <X className="w-[17px] h-[17px]" />
+              </button>
+            </div>
+
+            <div className={KUI_MODAL_BODY}>
+              {/* ★ D143 F (2026-04-30) PDF 0430 #3: 등록 폼 하단에서 입력한 정보 자동 사용 안내 */}
+              {(inspectionTarget.inspection_comment || inspectionTarget.inspection_evidence_filename) && (
+                <div className={KUI_INFO}>
+                  <Info className={`w-[15px] h-[15px] ${KUI_INFO_ICON}`} />
+                  <div className={`${KUI_INFO_TEXT} min-w-0`}>
+                    등록할 때 입력한 정보가 그대로 카카오에 전달됩니다.
+                    {inspectionTarget.inspection_comment && (
+                      <div className="mt-1 truncate">
+                        <span className="font-semibold">코멘트</span> {inspectionTarget.inspection_comment.slice(0, 80)}{inspectionTarget.inspection_comment.length > 80 ? '…' : ''}
+                      </div>
+                    )}
+                    {inspectionTarget.inspection_evidence_filename && (
+                      <div className="mt-0.5 truncate">
+                        <span className="font-semibold">증빙자료</span> {inspectionTarget.inspection_evidence_filename}
+                      </div>
+                    )}
+                    <div className="mt-1 opacity-70">아래에서 더하거나 고칠 수 있습니다.</div>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className={KUI_LABEL}>
+                  코멘트 <span className="text-neutral-400 font-normal">(생략 가능)</span>
+                </label>
+                <textarea
+                  value={inspectionComment}
+                  onChange={(e) => setInspectionComment(e.target.value)}
+                  placeholder="정보성 메시지에 대한 근거 정보"
+                  rows={4}
+                  disabled={inspectionSubmitting}
+                  className={KUI_TEXTAREA}
+                />
+              </div>
+
+              <div>
+                <label className={KUI_LABEL}>
+                  코멘트 증빙자료 <span className="text-neutral-400 font-normal">(이미지/PDF, 생략 가능)</span>
+                </label>
+                <input
+                  type="file"
+                  accept="image/*,.pdf"
+                  onChange={(e) => setInspectionFile(e.target.files?.[0] || null)}
+                  disabled={inspectionSubmitting}
+                  className="block w-full text-[12.5px] text-neutral-600 disabled:opacity-50
+                             file:mr-2.5 file:h-8 file:px-3 file:rounded-lg file:border-0 file:cursor-pointer
+                             file:text-[12.5px] file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                />
+                {inspectionFile && (
+                  <p className={`${KUI_HINT} truncate`}>
+                    선택됨: {inspectionFile.name} ({Math.ceil(inspectionFile.size / 1024)} KB)
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className={KUI_MODAL_FOOT}>
+              <button
+                type="button"
+                onClick={() => setInspectionTarget(null)}
+                disabled={inspectionSubmitting}
+                className={KUI_BTN_OUTLINE}
               >
                 취소
               </button>
@@ -1235,9 +1325,9 @@ export default function AlimtalkManagementSection() {
                 type="button"
                 onClick={submitInspection}
                 disabled={inspectionSubmitting}
-                className="px-4 py-1.5 text-sm bg-amber-500 hover:bg-amber-600 text-white rounded-lg disabled:opacity-50"
+                className={KUI_BTN_PRIMARY}
               >
-                {inspectionSubmitting ? '요청 중...' : '검수요청'}
+                {inspectionSubmitting ? '요청 중' : '검수요청'}
               </button>
             </div>
           </div>
@@ -1260,10 +1350,7 @@ export default function AlimtalkManagementSection() {
 
 
       {toast && (
-        <div
-          className="fixed bottom-6 right-6 bg-gray-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg z-[10000]"
-          onClick={() => setToast(null)}
-        >
+        <div className={KUI_TOAST_SUCCESS} role="status" onClick={() => setToast(null)}>
           {toast}
         </div>
       )}

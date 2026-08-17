@@ -9,6 +9,8 @@ const MAX_ALARM_USERS = 3;
 
 import { useEffect, useState } from 'react';
 import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
+import { X } from 'lucide-react';
+import { KUI_BTN_OUTLINE, KUI_BTN_PRIMARY, KUI_INPUT, KUI_LABEL, KUI_MODAL, KUI_MODAL_CLOSE, KUI_MODAL_DESC, KUI_MODAL_FOOT, KUI_MODAL_HEAD, KUI_MODAL_SCRIM, KUI_MODAL_TITLE, KUI_REQUIRED } from '../../utils/kakao-ui';
 
 interface AlarmUser {
   id: string;
@@ -123,19 +125,19 @@ export default function AlarmUserManager({ onClose }: Props) {
   const activeCount = users.filter((u) => u.active_yn === 'Y').length;
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+    <div className={KUI_MODAL_SCRIM}>
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh]">
-        <div className="px-6 py-4 border-b bg-gradient-to-r from-amber-50 to-white flex justify-between items-center">
+      <div className={`${KUI_MODAL} max-w-lg`} role="dialog" aria-modal="true">
+        <div className={KUI_MODAL_HEAD}>
           <div>
-            <h2 className="text-lg font-bold text-gray-900">검수 알림 수신자</h2>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <h2 className={KUI_MODAL_TITLE}>검수 알림 수신자</h2>
+            <p className={KUI_MODAL_DESC}>
               활성 {activeCount}/{MAX_ALARM_USERS}명 · 템플릿 검수 결과 문자 알림 대상
             </p>
             {/* ★ 2026-06-13: 수신자 0명일 때 동작 안내 — "알림이 안 온다" 문의 차단
                 (발송 코드 기준: kakao_alarm_users 활성 수신자가 없으면 검수 결과 알림이 발송되지 않는다) */}
             {activeCount === 0 && (
-              <p className="text-[11px] text-amber-600 mt-1">
+              <p className="text-[12.5px] text-amber-700 mt-1.5">
                 활성 수신자가 없으면 검수 결과 알림 문자가 발송되지 않습니다. 받으실 분을 등록해주세요.
               </p>
             )}
@@ -143,27 +145,28 @@ export default function AlarmUserManager({ onClose }: Props) {
           <button
             type="button"
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-2xl"
+            className={KUI_MODAL_CLOSE}
+            aria-label="닫기"
           >
-            &times;
+            <X className="w-[17px] h-[17px]" />
           </button>
         </div>
 
-        <div className="px-6 py-3 border-b bg-gray-50 flex gap-2 items-end">
+        <div className="shrink-0 px-6 py-3.5 border-b border-neutral-200 bg-neutral-50 flex gap-2 items-end flex-wrap">
           <div className="flex-1">
-            <label className="block text-[11px] font-medium text-gray-600 mb-1">
-              이름 <span className="text-red-500">*</span>
+            <label className={KUI_LABEL}>
+              이름 <span className={KUI_REQUIRED}>*</span>
             </label>
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               maxLength={30}
               placeholder="홍길동"
-              className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+              className={KUI_INPUT}
             />
           </div>
           <div className="flex-1">
-            <label className="block text-[11px] font-medium text-gray-600 mb-1">
+            <label className={KUI_LABEL}>
               휴대폰
             </label>
             <input
@@ -171,31 +174,31 @@ export default function AlarmUserManager({ onClose }: Props) {
               onChange={(e) => setNewPhone(e.target.value.replace(/\D/g, ''))}
               maxLength={11}
               placeholder="01012345678"
-              className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+              className={KUI_INPUT}
             />
           </div>
           <button
             type="button"
             disabled={adding || activeCount >= MAX_ALARM_USERS}
             onClick={add}
-            className="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-sm disabled:opacity-50"
+            className={KUI_BTN_PRIMARY}
           >
             추가
           </button>
         </div>
 
-        {err && <p className="px-6 py-2 text-xs text-red-500">{err}</p>}
+        {err && <p className="px-6 py-2 text-[12.5px] text-rose-600">{err}</p>}
 
         <div className="flex-1 overflow-y-auto">
           {loading ? (
-            <p className="p-6 text-center text-sm text-gray-400">로딩 중...</p>
+            <p className="p-8 text-center text-[13px] text-neutral-500">로딩 중...</p>
           ) : users.length === 0 ? (
-            <p className="p-6 text-center text-sm text-gray-400">
+            <p className="p-8 text-center text-[13px] text-neutral-500">
               등록된 수신자가 없습니다.
             </p>
           ) : (
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-xs text-gray-500 sticky top-0">
+              <thead className="bg-neutral-50 text-[12px] font-semibold text-neutral-500 sticky top-0">
                 <tr>
                   <th className="text-left px-4 py-2">이름</th>
                   <th className="text-left px-4 py-2">휴대폰</th>
@@ -205,7 +208,7 @@ export default function AlarmUserManager({ onClose }: Props) {
               </thead>
               <tbody>
                 {users.map((u) => (
-                  <tr key={u.id} className="border-t border-gray-100">
+                  <tr key={u.id} className="border-t border-neutral-100">
                     <td className="px-4 py-2">{u.name || '-'}</td>
                     <td className="px-4 py-2 font-mono text-xs">
                       {u.phone_number}
@@ -214,10 +217,10 @@ export default function AlarmUserManager({ onClose }: Props) {
                       <button
                         type="button"
                         onClick={() => toggle(u)}
-                        className={`px-2 py-0.5 rounded text-xs ${
+                        className={`h-[23px] px-2.5 rounded-full text-[12px] font-semibold transition ${
                           u.active_yn === 'Y'
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-gray-100 text-gray-500'
+                            ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                            : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
                         }`}
                       >
                         {u.active_yn === 'Y' ? '활성' : '비활성'}
@@ -227,7 +230,7 @@ export default function AlarmUserManager({ onClose }: Props) {
                       <button
                         type="button"
                         onClick={() => remove(u)}
-                        className="text-xs text-red-500 hover:text-red-700"
+                        className="text-[12.5px] font-semibold text-rose-600 hover:text-rose-700"
                       >
                         삭제
                       </button>
@@ -239,11 +242,11 @@ export default function AlarmUserManager({ onClose }: Props) {
           )}
         </div>
 
-        <div className="px-6 py-3 border-t bg-gray-50 flex justify-end">
+        <div className={KUI_MODAL_FOOT}>
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm"
+            className={KUI_BTN_OUTLINE}
           >
             닫기
           </button>
