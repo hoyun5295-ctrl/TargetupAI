@@ -59,7 +59,7 @@
 ### 다음 세션 (예정)
 > 경위·범위·확정 사실은 링크가 소유한다. 여기엔 제목·다음 한 수·호출어만.
 > ⓪ **AI 마케팅 진단 — v6~v9 + 정정 3건 배포완료(0817)** — 호출어 **"마케팅 진단"** → **[FEATURE-MARKETING-DIAGNOSIS.md](../docs/FEATURE-MARKETING-DIAGNOSIS.md)가 전부 소유**(§12 v6~v9 · 이력 §8 · 함정 §9). seed·SQL·DDL 0. **잔여 = 실측만**(v3 §8 12종 · v6 K-1·K-2·K-4~K-7 · v7 P-1~P-6) + 추가 과제 = PRESCRIPTIONS 도달 불가 변형 7종(§12 「남은 것」 2)
-> ① **템플릿** — 호출어 **"템플릿"** → **[FEATURE-ALIMTALK-TEMPLATE.md](../docs/FEATURE-ALIMTALK-TEMPLATE.md)가 전부 소유**(구조·불변 원칙·이관 절차·이력·남은 것). 여기 다시 쓰지 않는다. 0804 = IMC 이관 실행 화면 신설·게이트 테넌트 격리·메트로시티 이관.
+> ① **템플릿** — 호출어 **"템플릿"** → **[FEATURE-ALIMTALK-TEMPLATE.md](../docs/FEATURE-ALIMTALK-TEMPLATE.md)가 전부 소유**(구조·불변 원칙·이관 절차·이력 §6·남은 것 §5). 여기 다시 쓰지 않는다.
 > ② **0718 성능 후속** — 관측 사이클 1회전: 1순위 campaigns 발송 폴러 인덱스(EXPLAIN 후 처방) · 2순위 `balance_transactions` 잔액 SUM N+1(호출처 추적) · 그 후 M3/롤업. [핸드오프](docs/2026-07-18-frontend-splitting-incident-handoff.md) · [[project_2026_0717_dashboard_performance]]
 > ③ **아임웹·아이디룩 시연** — 스토어 등록 확인 → 테스트 몰 OAuth 리허설(pm2 로그+회원가입 1건 webhook) → 시연. INTEGRATIONS.md 아임웹 카드 · [[project_2026_0719_imweb_appstore_idlook]]
 > ④ **이미지 스튜디오** — 호출어 **"이미지 스튜디오"** → **[FEATURE-IMAGE-STUDIO.md](../docs/FEATURE-IMAGE-STUDIO.md)가 전부 소유**(구조·불변 원칙·카탈로그 규약·이력·남은 것 §8). 여기 다시 쓰지 않는다. 0811 = 249종·추천 용도 축·갤러리 페이징. **0813 = 제작 화면 재설계**(대형 예시 + 입력칸 위 Tip · 오버레이 시도는 접음 — 문서 §7 0813행). 잔여 = 문서 §8.
@@ -77,6 +77,8 @@
 > ⑯ **게이트웨이 PAY 통계 적재 — 구현 완료(미배포)** — [허브 §10](../docs/FEATURE-BITO-GATEWAY.md)이 소유. `.54` 이관 전제 · SysId `65` · 배포 = 마이그레이션 050 선적용 → 바이너리. 다음 = 첫 적재 실측(§10)
 > ⑰ **게이트웨이 2차 전수점검 — 0815(2) 결함 5종 수정·배포 완료** — 호출어 **비토 게이트웨이** → [허브 §7-2](../docs/FEATURE-BITO-GATEWAY.md)가 전부 소유. Codex 2R `approve` · 3단위 `GW_DEPLOY_OK`. 다음 = 운영 실측(발송 1건 · finalize 버튼 · PAY 첫 적재)
 > ⑱ **게이트웨이 대시보드 — 0816(2) 결함 3종 전량 + 구성 패턴·발송 이력 완료** — 호출어 **비토 게이트웨이** → [허브 §7-4](../docs/FEATURE-BITO-GATEWAY.md)가 전부 소유. 잔여 = 패턴 이식 나머지 페이지([지시서](../docs/2026-08-16-gw-dashboard-redesign-design.md) §2-6 ③④⑤) + 실측 1건
+> ⑲ **콘솔 화면 톤 통일 — 0817~0818 배포완료** — 호출어 **"콘솔 톤"** → [콘솔 톤](../docs/2026-08-18-console-ui-unification.md)가 전부 소유 (잔여 = §5)
+> ⑳ **오퍼레이터 발송 축 — 출처·타겟 정정(미배포)** — 호출어 **"오퍼레이터 발송 축"** → [오퍼레이터 발송 축](../docs/2026-08-18-operator-send-axis.md)가 전부 소유 (잔여 = §5)
 > (지속) 비토 API 발송 경로 전환 검토 [[project_2026_0710_bito_api_direct_test]] · (보류) 팝폰 SDK 검증
 
 ---
