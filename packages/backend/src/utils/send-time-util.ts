@@ -4,7 +4,27 @@
  * 분당 batchIndex 분 증가 + 발송 가능 시간대(SEND_HOURS) 초과 시 다음날 시작 시각으로 이월.
  * direct-send-worker.ts(청크별 globalIndex)와 campaigns.ts가 공유.
  */
-import { SEND_HOURS } from '../config/defaults';
+import { SEND_HOURS, BRAND_SEND_WINDOW } from '../config/defaults';
+
+/**
+ * 브랜드메시지 발송 가능 시간(KST 08:00~20:50) 안인지 판정 — 매뉴얼 v2.3.1 §3.9.1.
+ *
+ * 문자 축(shiftToSendableHour)과 달리 **이월하지 않고 가부만 답한다.**
+ * 브랜드는 사용자가 고른 발송 시각이 곧 계약이라, 조용히 옮기면 "언제 나갔는지 모르는 광고"가 된다.
+ * 호출부가 거절 사유를 사용자 언어로 안내하고 시각을 다시 받는다.
+ */
+export function isWithinBrandSendWindow(at: Date, marginMinutes = 0): boolean {
+  if (Number.isNaN(at.getTime())) return false;
+  // ⛔ 여유를 **시각에 더하면 안 된다** — 07:58이 08:00으로 앞당겨져 오전 금지 창이 그만큼 열린다
+  //   (0818 5R 실측). 여유는 마감을 앞당기는 것이지 시각을 미루는 것이 아니다.
+  const margin = Number.isFinite(marginMinutes) && marginMinutes > 0 ? Math.floor(marginMinutes) : 0;
+  const kst = new Date(at.getTime() + 9 * 60 * 60 * 1000);
+  const minuteOfDay = kst.getUTCHours() * 60 + kst.getUTCMinutes();
+  // 종료는 **exclusive**다 — 매뉴얼 §3.9.1이 "20:50 ~ 08:00 심야 발송 불가"라고 20:50을 금지 구간의
+  // 시작으로 적는다. `<=`로 두면 20:50:00~20:50:59가 통과해 공급자 3022 폐기 + 차감 잔존이 된다.
+  return minuteOfDay >= BRAND_SEND_WINDOW.startMinuteOfDay
+    && minuteOfDay < BRAND_SEND_WINDOW.endMinuteOfDay - margin;
+}
 
 export function calcSplitSendTime(
   baseTime: Date,

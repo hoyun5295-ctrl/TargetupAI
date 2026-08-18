@@ -1,8 +1,11 @@
 /**
  * BrandMessageEditor — 브랜드메시지 작성 에디터
  *
- * 소비처 2곳: 직접발송 헤더의 브랜드메시지 모달(BrandSendModal) · KakaoRcsPage 브랜드 탭.
- * 두 곳이 같은 화면을 봐야 하므로 여기 하나만 고친다.
+ * 소비처 1곳: 직접발송 헤더의 브랜드메시지 모달(BrandSendModal) → `POST /api/campaigns/brand-send`.
+ * (★2026-08-18 실측 정정 — 옛 주석의 "KakaoRcsPage 브랜드 탭"은 이미 없어진 소비처였다)
+ *
+ * 여기 검사는 **입력을 미리 막아주는 거울**이고 최종 판정자는 백엔드 CT-12
+ * (`utils/brand-message.ts` buildBrandQueuePayload)다 — 규격 값을 고칠 땐 양쪽을 같이 고친다.
  *
  * ★ 2026-07-31 재작성 — 화이트 고급형 + 죽은 분기 제거.
  *   ①톤: 회색 테두리(border) 대신 얇은 링·옅은 그림자·서브 서페이스로 층을 만든다.
@@ -22,21 +25,35 @@ import { FIELD_CLASS, PANEL_CLASS, SourceCaption } from './shared/SendWorkspaceS
 // ============================================================
 // ★ 2026-07-30 발송경로 재구축 — 발송 스펙이 확보된 TEXT·IMAGE·WIDE만 노출한다.
 //   나머지 유형은 백엔드 CT-12가 입구에서 거부하므로 화면에도 두지 않는다(실패할 버튼 노출 금지).
+// 값의 원천은 백엔드 CT-12(`utils/brand-message.ts` BUBBLE_TYPES)이고 그쪽이 최종 판정자다.
+// 여기 표는 **입력 단계에서 미리 막아주는 거울**이다 — 두 벌이라 갈릴 수 있으므로 값을 고칠 때는
+// 반드시 양쪽을 같이 고친다(근거 = IMC-Agent 매뉴얼 v2.3.1 §4.4.1 · §6.10.3.3 · §6.10.7.2).
 export const BUBBLE_TYPES = [
-  { code: 'TEXT', label: '텍스트', maxMsg: 1300, maxBtn: 5, needImage: false, needHeader: false, desc: '텍스트 + 버튼' },
-  { code: 'IMAGE', label: '이미지', maxMsg: 1300, maxBtn: 5, needImage: true, needHeader: false, desc: '이미지 + 텍스트 + 버튼' },
-  { code: 'WIDE', label: '와이드', maxMsg: 76, maxBtn: 2, needImage: true, needHeader: false, desc: '가로 배너 + 짧은 텍스트' },
+  { code: 'TEXT', label: '텍스트', maxMsg: 1300, maxNewline: 99, maxBtn: 5, couponMaxBtn: 4, couponDescMax: 12, needImage: false, needHeader: false, desc: '텍스트 + 버튼' },
+  { code: 'IMAGE', label: '이미지', maxMsg: 1300, maxNewline: 29, maxBtn: 5, couponMaxBtn: 4, couponDescMax: 12, needImage: true, needHeader: false, desc: '이미지 + 텍스트 + 버튼' },
+  { code: 'WIDE', label: '와이드', maxMsg: 76, maxNewline: 5, maxBtn: 2, couponMaxBtn: 2, couponDescMax: 18, needImage: true, needHeader: false, desc: '가로 배너 + 짧은 텍스트' },
 ] as const;
 
+/**
+ * 버튼 타입 — 필수 입력과 사용 조건은 매뉴얼 §6.10.3.2가 정한다.
+ * `needUrl` = 화면에 URL 칸을 띄울지 / `targetingOnly` = 그 대상 범위에서만 고를 수 있는 버튼.
+ */
+/**
+ * ⛔ **여기 없는 유형은 화면에 내지 않는다** — 실패할 버튼을 노출하지 않는다는 이 파일의 원칙 그대로다.
+ *   ★2026-08-18 제외분:
+ *   - `AL`(앱링크) = 매뉴얼 §6.10.3.2가 스킴·URL 중 **2개 이상**을 요구하는데 입력칸이 URL 하나뿐이라
+ *     무엇을 넣어도 서버가 거절한다. iOS·Android 스킴 입력칸이 생기면 되살린다.
+ *   - `BF`(비즈니스폼) = `biz_form_key` 입력칸이 없어 항상 거절된다.
+ *   두 유형은 노출해 두면 "발송 버튼은 눌리는데 서버가 막는" 막다른 길이 된다.
+ */
 export const BUTTON_TYPES = [
-  { code: 'WL', label: '웹링크' },
-  { code: 'AL', label: '앱링크' },
-  { code: 'BK', label: '봇키워드' },
-  { code: 'MD', label: '메시지전달' },
-  { code: 'BF', label: '비즈니스폼' },
-  { code: 'BC', label: '상담톡전환' },
-  { code: 'BT', label: '봇전환' },
-  { code: 'AC', label: '채널추가' },
+  { code: 'WL', label: '웹링크', needUrl: true, fixedName: undefined as string | undefined, targetingOnly: undefined as readonly string[] | undefined },
+  { code: 'BK', label: '봇키워드', needUrl: false, fixedName: undefined, targetingOnly: undefined },
+  { code: 'MD', label: '메시지전달', needUrl: false, fixedName: undefined, targetingOnly: undefined },
+  { code: 'BC', label: '상담톡전환', needUrl: false, fixedName: undefined, targetingOnly: undefined },
+  { code: 'BT', label: '봇전환', needUrl: false, fixedName: undefined, targetingOnly: undefined },
+  // 채널추가는 마케팅 수신동의(M·N) 대상에서만 쓸 수 있다 — 채널 친구(I)에는 붙일 수 없다.
+  { code: 'AC', label: '채널추가', needUrl: false, fixedName: '채널 추가', targetingOnly: ['M', 'N'] as readonly string[] },
 ];
 
 export const TARGETING_OPTIONS = [
@@ -104,10 +121,38 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
   const [imageUrl, setImageUrl] = useState('');
   const [imageLink, setImageLink] = useState('');
 
-  // 쿠폰
-  const [couponTitle, setCouponTitle] = useState('');
+  // 쿠폰 — 제목은 카카오가 정한 5형식만 되므로 자유 입력 대신 형식 선택 + 값으로 받는다.
+  //   (근거 = IMC Developer Portal brand/send/free coupon.title "사용 가능한 쿠폰 제목")
+  const [couponForm, setCouponForm] = useState<'' | 'amount' | 'percent' | 'shipping' | 'free' | 'up'>('');
+  const [couponValue, setCouponValue] = useState('');
   const [couponDesc, setCouponDesc] = useState('');
   const [couponUrl, setCouponUrl] = useState('');
+
+  /**
+   * 쿠폰 값 파싱 — **입력을 고쳐 쓰지 않는다.**
+   * 예전에는 숫자 아닌 글자를 전부 지워서 '1만원'이 '1원 할인 쿠폰'이 되고 '1.5'가 '15%'가 됐다.
+   * 사용자가 넣은 혜택값이 다른 값으로 바뀌어 나가는 것이라, 지우지 말고 **거절**해야 한다.
+   * 숫자 서식도 로케일에 맡기지 않는다(toLocaleString은 환경에 따라 1.000·공백 구분자를 만든다).
+   */
+  const couponNumber = (() => {
+    const v = couponValue.trim();
+    if (!/^\d{1,3}(,\d{3})*$|^\d+$/.test(v)) return null;      // 숫자 또는 정확한 천단위 쉼표만
+    const n = Number(v.replace(/,/g, ''));
+    return Number.isSafeInteger(n) ? n : null;
+  })();
+  const groupDigits = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+  const couponTitle = (() => {
+    const v = couponValue.trim();
+    switch (couponForm) {
+      case 'amount': return couponNumber !== null ? `${groupDigits(couponNumber)}원 할인 쿠폰` : '';
+      case 'percent': return couponNumber !== null ? `${couponNumber}% 할인 쿠폰` : '';
+      case 'shipping': return '배송비 할인 쿠폰';
+      case 'free': return v ? `${v} 무료 쿠폰` : '';
+      case 'up': return v ? `${v} UP 쿠폰` : '';
+      default: return '';
+    }
+  })();
 
   // 대체 발송 — SMS/LMS만(브랜드는 MMS 대체 불가). LMS는 제목 필수.
   const [resendType, setResendType] = useState('NO');
@@ -125,9 +170,61 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
   const selectedType = BUBBLE_TYPES.find(t => t.code === bubbleType) || BUBBLE_TYPES[0];
   const selectedProfile = profiles.find(p => p.profile_key === senderKey);
 
+  // 쿠폰을 함께 쓰면 버튼 상한이 줄어든다 (매뉴얼 §6.10.3.3)
+  const hasCoupon = couponForm !== '';
+  const effectiveMaxBtn = hasCoupon ? selectedType.couponMaxBtn : selectedType.maxBtn;
+  // 대상 범위에 따라 고를 수 있는 버튼이 달라진다 (채널추가 = M·N 전용)
+  const availableButtonTypes = BUTTON_TYPES.filter(
+    bt => !bt.targetingOnly || bt.targetingOnly.includes(targeting)
+  );
+
+  /** 보내기 전에 걸리는 것 — 첫 한 줄만 알려주고 버튼을 잠근다 */
+  const blockReason = (() => {
+    if (mode === 'template') return templateCode.trim() ? '' : '';
+    const msg = message.trim();
+    if (msg.length > selectedType.maxMsg) return `본문이 ${selectedType.maxMsg}자를 넘었습니다`;
+    if ((msg.match(/\n/g) || []).length > selectedType.maxNewline) return `줄바꿈은 최대 ${selectedType.maxNewline}개입니다`;
+    if (selectedType.needImage && !imageUrl.trim()) return `${selectedType.label} 유형은 이미지가 필요합니다`;
+    if (buttons.length > effectiveMaxBtn) {
+      return hasCoupon
+        ? `쿠폰을 함께 쓰면 버튼은 최대 ${effectiveMaxBtn}개입니다`
+        : `버튼은 최대 ${effectiveMaxBtn}개입니다`;
+    }
+    for (let i = 0; i < buttons.length; i++) {
+      const b = buttons[i];
+      const spec = BUTTON_TYPES.find(t => t.code === b.type);
+      if (!spec) return `${i + 1}번째 버튼은 지금 사용할 수 없는 종류입니다 — 다시 선택해주세요`;
+      if (!b.name.trim()) return `${i + 1}번째 버튼의 버튼명을 입력해주세요`;
+      if (spec?.needUrl && !(b.url_mobile || '').trim()) return `${i + 1}번째 버튼의 링크를 입력해주세요`;
+      if (spec?.targetingOnly && !spec.targetingOnly.includes(targeting)) {
+        return `${spec.label} 버튼은 지금 선택한 대상 범위에서는 쓸 수 없습니다`;
+      }
+    }
+    if (hasCoupon) {
+      if (couponForm === 'amount' || couponForm === 'percent') {
+        if (couponNumber === null) return '쿠폰 값은 숫자로 입력해주세요';
+        if (couponForm === 'percent' && !(couponNumber >= 1 && couponNumber <= 100)) {
+          return '할인율은 1~100 사이로 입력해주세요';
+        }
+        if (couponForm === 'amount' && !(couponNumber >= 1 && couponNumber <= 99999999)) {
+          return '할인 금액은 1원~99,999,999원 사이로 입력해주세요';
+        }
+      }
+      if (!couponTitle) return '쿠폰 값을 입력해주세요';
+      if ((couponForm === 'free' || couponForm === 'up') && [...couponValue.trim()].length > 7) {
+        return '쿠폰 이름은 7자까지 입력할 수 있습니다';
+      }
+      const desc = couponDesc.trim();
+      if (!desc) return '쿠폰 설명을 입력해주세요';
+      if ([...desc].length > selectedType.couponDescMax) return `쿠폰 설명은 최대 ${selectedType.couponDescMax}자입니다`;
+      if (!couponUrl.trim()) return '쿠폰을 누르면 이동할 주소를 입력해주세요';
+    }
+    return '';
+  })();
+
   // 버튼 추가/삭제
   const addButton = () => {
-    if (buttons.length >= selectedType.maxBtn) return;
+    if (buttons.length >= effectiveMaxBtn) return;
     setButtons([...buttons, { name: '', type: 'WL', url_mobile: '' }]);
   };
   const removeButton = (idx: number) => setButtons(buttons.filter((_, i) => i !== idx));
@@ -155,7 +252,9 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
     };
 
     if (imageUrl) data.image = { img_url: imageUrl, img_link: imageLink || undefined };
-    if (couponTitle) data.coupon = { title: couponTitle, description: couponDesc || undefined, link: couponUrl ? { url_mobile: couponUrl } : undefined };
+    // 쿠폰 클릭 URL은 매뉴얼 §6.10.7의 평면 키(url_mobile)다 — 옛 `link: {url_mobile}` 래핑은
+    // 규격 밖 키라 클릭이 전달되지 않았다(2026-08-18 정정).
+    if (couponTitle) data.coupon = { title: couponTitle, description: couponDesc, url_mobile: couponUrl || undefined };
     if (mode === 'template') data.templateCode = templateCode;
 
     onSend(data);
@@ -173,7 +272,8 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
     profileName: selectedProfile?.profile_name,
   };
 
-  const canSend = !sending && !!senderKey && (mode === 'template' ? !!templateCode : !!message.trim());
+  const canSend = !sending && !!senderKey && !blockReason
+    && (mode === 'template' ? !!templateCode : !!message.trim());
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 lg:gap-8">
@@ -288,8 +388,12 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
         {selectedType.maxBtn > 0 && mode === 'free' && (
           <div>
             <div className="flex justify-between items-center mb-2">
-              <label className="text-[13px] font-semibold text-slate-700">버튼 <span className="text-slate-400 font-normal">최대 {selectedType.maxBtn}개</span></label>
-              {buttons.length < selectedType.maxBtn && (
+              <label className="text-[13px] font-semibold text-slate-700">
+                버튼 <span className="text-slate-400 font-normal">
+                  최대 {effectiveMaxBtn}개{hasCoupon && selectedType.couponMaxBtn < selectedType.maxBtn ? ' (쿠폰 사용 시)' : ''}
+                </span>
+              </label>
+              {buttons.length < effectiveMaxBtn && (
                 <button type="button" onClick={addButton}
                   className="inline-flex items-center gap-1 text-[12px] font-medium px-2.5 py-1.5 rounded-lg text-violet-600 hover:bg-violet-50 transition">
                   <Plus size={13} strokeWidth={2.2} /> 버튼 추가
@@ -299,13 +403,26 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
             <div className="space-y-2">
               {buttons.map((btn, idx) => (
                 <div key={idx} className="flex gap-2 items-center rounded-xl bg-slate-50/70 ring-1 ring-slate-900/5 p-2">
-                  <select value={btn.type} onChange={(e) => updateButton(idx, 'type', e.target.value)}
+                  <select value={btn.type}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      const spec = BUTTON_TYPES.find(t => t.code === next);
+                      // 버튼명이 정해진 유형(채널추가·비즈니스폼)은 고를 때 바로 채워 넣는다 — 다시 묻지 않는다.
+                      setButtons(buttons.map((b, i) => i === idx
+                        ? { ...b, type: next, ...(spec?.fixedName ? { name: spec.fixedName } : {}) }
+                        : b));
+                    }}
                     className={`${FIELD_CLASS} w-28 shrink-0 px-2.5 py-1.5 text-xs`}>
-                    {BUTTON_TYPES.map(bt => <option key={bt.code} value={bt.code}>{bt.label}</option>)}
+                    {/* 대상 범위를 바꿔 지금은 못 쓰는 유형이 남아 있어도 선택칸이 비지 않게 그대로 보여준다
+                        — 무엇이 걸렸는지는 발송 버튼 아래 한 줄이 알려준다 */}
+                    {(availableButtonTypes.some(bt => bt.code === btn.type)
+                      ? availableButtonTypes
+                      : [...availableButtonTypes, BUTTON_TYPES.find(bt => bt.code === btn.type)!].filter(Boolean)
+                    ).map(bt => <option key={bt.code} value={bt.code}>{bt.label}</option>)}
                   </select>
                   <input type="text" value={btn.name} onChange={(e) => updateButton(idx, 'name', e.target.value)}
                     className={`${FIELD_CLASS} flex-1 px-2.5 py-1.5 text-xs`} placeholder="버튼명" />
-                  {(btn.type === 'WL' || btn.type === 'AL') && (
+                  {BUTTON_TYPES.find(t => t.code === btn.type)?.needUrl && (
                     <input type="text" value={btn.url_mobile || ''} onChange={(e) => updateButton(idx, 'url_mobile', e.target.value)}
                       className={`${FIELD_CLASS} flex-1 px-2.5 py-1.5 text-xs`} placeholder="URL" />
                   )}
@@ -326,12 +443,40 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
         <div className="space-y-2.5">
           {mode === 'free' && (
             <Collapsible icon={<Ticket size={14} strokeWidth={1.9} />} title="쿠폰 (선택)">
-              <input type="text" value={couponTitle} onChange={(e) => setCouponTitle(e.target.value)}
-                className={FIELD_CLASS} placeholder="쿠폰 타이틀" />
-              <input type="text" value={couponDesc} onChange={(e) => setCouponDesc(e.target.value)}
-                className={FIELD_CLASS} placeholder="쿠폰 설명 (선택)" />
-              <input type="text" value={couponUrl} onChange={(e) => setCouponUrl(e.target.value)}
-                className={FIELD_CLASS} placeholder="쿠폰 URL (선택)" />
+              {/* 쿠폰 제목은 카카오가 정한 5형식만 통과한다 — 자유 입력으로 받으면 반드시 거절되므로
+                  형식을 고르고 값만 넣게 한다(틀릴 수 없는 입력) */}
+              <select value={couponForm} onChange={(e) => { setCouponForm(e.target.value as any); setCouponValue(''); }}
+                className={FIELD_CLASS}>
+                <option value="">쿠폰 사용 안 함</option>
+                <option value="amount">○○원 할인 쿠폰</option>
+                <option value="percent">○○% 할인 쿠폰</option>
+                <option value="shipping">배송비 할인 쿠폰</option>
+                <option value="free">○○ 무료 쿠폰</option>
+                <option value="up">○○ UP 쿠폰</option>
+              </select>
+              {hasCoupon && couponForm !== 'shipping' && (
+                <input type="text" value={couponValue} onChange={(e) => setCouponValue(e.target.value)}
+                  maxLength={couponForm === 'free' || couponForm === 'up' ? 7 : 11}
+                  inputMode={couponForm === 'amount' || couponForm === 'percent' ? 'numeric' : 'text'}
+                  className={FIELD_CLASS}
+                  placeholder={
+                    couponForm === 'amount' ? '할인 금액 (숫자만)'
+                    : couponForm === 'percent' ? '할인율 1~100'
+                    : '쿠폰 이름 (7자 이내)'
+                  } />
+              )}
+              {hasCoupon && (
+                <>
+                  {!!couponTitle && (
+                    <p className="text-[11px] text-slate-400 px-1">표시될 제목 — {couponTitle}</p>
+                  )}
+                  <input type="text" value={couponDesc} onChange={(e) => setCouponDesc(e.target.value)}
+                    maxLength={selectedType.couponDescMax} className={FIELD_CLASS}
+                    placeholder={`쿠폰 설명 (최대 ${selectedType.couponDescMax}자)`} />
+                  <input type="text" value={couponUrl} onChange={(e) => setCouponUrl(e.target.value)}
+                    className={FIELD_CLASS} placeholder="쿠폰을 누르면 이동할 주소" />
+                </>
+              )}
             </Collapsible>
           )}
 
@@ -376,6 +521,10 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
         </button>
         {!senderKey && (
           <p className="text-[11px] text-slate-400 text-center -mt-2">발신 프로필을 선택하면 발송할 수 있습니다.</p>
+        )}
+        {/* 무엇 때문에 못 보내는지 한 줄로 — 눌러도 반응 없는 버튼을 만들지 않는다 */}
+        {!!senderKey && !!blockReason && (
+          <p className="text-[11px] text-rose-500 text-center -mt-2">{blockReason}</p>
         )}
       </div>
 

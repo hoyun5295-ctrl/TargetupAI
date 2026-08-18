@@ -29,6 +29,9 @@ import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from './prepaid';
 import { markRefundPending } from './refund-pending';
 import { buildUnsubscribeExistsFilter } from './unsubscribe-helper';
 import { normalizePhone } from './normalize-phone';
+// 발송 가능 시간 판정은 시각 CT가 소유한다(브랜드 창 08:00~20:50 — config/defaults BRAND_SEND_WINDOW).
+import { isWithinBrandSendWindow } from './send-time-util';
+import { BRAND_SEND_WINDOW } from '../config/defaults';
 import { query } from '../config/database';
 // ★ 2026-07-03 KAKAO(브랜드메시지) 문안 학습 코퍼스 적재 (전 채널 학습 통합 Phase 2) — fire-and-forget, 발송 무영향
 import { logCampaignTraining } from './training-logger';
@@ -37,33 +40,95 @@ import { logCampaignTraining } from './training-logger';
 // 상수 정의
 // ============================================================
 
-/** 메시지 유형 8종 */
-export const BUBBLE_TYPES = {
-  TEXT: { code: 'TEXT', label: '텍스트', maxMessage: 1300, maxButtons: 5, requireImage: false, requireHeader: false },
-  IMAGE: { code: 'IMAGE', label: '이미지', maxMessage: 1300, maxButtons: 5, requireImage: true, requireHeader: false },
-  WIDE: { code: 'WIDE', label: '와이드 이미지', maxMessage: 76, maxButtons: 2, requireImage: true, requireHeader: false },
-  WIDE_ITEM_LIST: { code: 'WIDE_ITEM_LIST', label: '와이드 리스트', maxMessage: 0, maxButtons: 2, requireImage: false, requireHeader: true, minItems: 3, maxItems: 4 },
-  CAROUSEL_FEED: { code: 'CAROUSEL_FEED', label: '캐러셀 피드', maxMessage: 0, maxButtons: 0, requireImage: false, requireHeader: false, minItems: 2, maxItems: 6 },
-  PREMIUM_VIDEO: { code: 'PREMIUM_VIDEO', label: '프리미엄 동영상', maxMessage: 76, maxButtons: 1, requireImage: false, requireHeader: true, requireVideo: true },
-  COMMERCE: { code: 'COMMERCE', label: '커머스', maxMessage: 0, maxButtons: 2, requireImage: true, requireHeader: false, requireCommerce: true },
-  CAROUSEL_COMMERCE: { code: 'CAROUSEL_COMMERCE', label: '캐러셀 커머스', maxMessage: 0, maxButtons: 0, requireImage: false, requireHeader: false, minItems: 2, maxItems: 6, requireCommerce: true },
-} as const;
+/**
+ * 메시지 유형 8종 — 값의 출처는 **IMC-Agent 매뉴얼 v2.3.1** 하나다.
+ *   본문·헤더·부가정보 = §4.4.1 (자유형 주요 컬럼 세부 가이드)
+ *   버튼 개수         = §6.10.3.3 (attachment.button 개수 제약)
+ *   쿠폰 설명 길이    = §6.10.7.2
+ *   와이드리스트 개수 = §6.10.6 (최소 3, 최대 5)
+ *
+ * ⛔ 이 표를 추측으로 채우지 마라 — 규격을 벗어난 값은 큐에는 들어가고 발송만 무로그 폐기된다
+ *    (차감은 되고 메시지는 안 간다). 값을 바꿀 때는 매뉴얼 절 번호를 함께 남긴다.
+ *
+ * 필드가 유형마다 다르면 소비처가 `as any` 캐스팅을 하게 되므로 **8종 전부 같은 형태**로 채운다.
+ * (해당 없음 = 0 / false)
+ */
+export interface BrandBubbleSpec {
+  code: string;
+  label: string;
+  /** 본문 최대 글자 수 (0 = 본문 미사용 유형) */
+  maxMessage: number;
+  /** 본문 최대 줄바꿈 개수 (0 = 본문 미사용) — §4.4.1 */
+  maxNewline: number;
+  /** 버튼 최대 개수 — §6.10.3.3 */
+  maxButtons: number;
+  /** 버튼 최소 개수 (COMMERCE만 1) */
+  minButtons: number;
+  /** 쿠폰을 함께 붙였을 때의 버튼 최대 개수 — TEXT·IMAGE는 5가 아니라 4 */
+  couponMaxButtons: number;
+  /** 쿠폰 설명 최대 글자 수 — §6.10.7.2 (WIDE 계열 18 / 그 외 12) */
+  couponDescMax: number;
+  /** 헤더 최대 글자 수 (0 = 헤더 미사용 유형) */
+  maxHeader: number;
+  requireImage: boolean;
+  requireHeader: boolean;
+  requireVideo: boolean;
+  requireCommerce: boolean;
+  /** 아이템/캐러셀 개수 (0 = 해당 없음) */
+  minItems: number;
+  maxItems: number;
+}
+
+export const BUBBLE_TYPES: Record<string, BrandBubbleSpec> = {
+  TEXT: { code: 'TEXT', label: '텍스트', maxMessage: 1300, maxNewline: 99, maxButtons: 5, minButtons: 0, couponMaxButtons: 4, couponDescMax: 12, maxHeader: 0, requireImage: false, requireHeader: false, requireVideo: false, requireCommerce: false, minItems: 0, maxItems: 0 },
+  // IMAGE 줄바꿈 29 = 자유형(§4.4.1) 기준. 기본형(§4.3.1)은 같은 자리를 99로 적어 매뉴얼끼리 갈리는데,
+  // 우리가 리치 첨부를 싣는 경로는 자유형뿐이라 좁은 쪽을 택한다(fail-closed).
+  IMAGE: { code: 'IMAGE', label: '이미지', maxMessage: 1300, maxNewline: 29, maxButtons: 5, minButtons: 0, couponMaxButtons: 4, couponDescMax: 12, maxHeader: 0, requireImage: true, requireHeader: false, requireVideo: false, requireCommerce: false, minItems: 0, maxItems: 0 },
+  WIDE: { code: 'WIDE', label: '와이드 이미지', maxMessage: 76, maxNewline: 5, maxButtons: 2, minButtons: 0, couponMaxButtons: 2, couponDescMax: 18, maxHeader: 0, requireImage: true, requireHeader: false, requireVideo: false, requireCommerce: false, minItems: 0, maxItems: 0 },
+  WIDE_ITEM_LIST: { code: 'WIDE_ITEM_LIST', label: '와이드 리스트', maxMessage: 0, maxNewline: 0, maxButtons: 2, minButtons: 0, couponMaxButtons: 2, couponDescMax: 18, maxHeader: 20, requireImage: false, requireHeader: true, requireVideo: false, requireCommerce: false, minItems: 3, maxItems: 5 },
+  CAROUSEL_FEED: { code: 'CAROUSEL_FEED', label: '캐러셀 피드', maxMessage: 0, maxNewline: 0, maxButtons: 0, minButtons: 0, couponMaxButtons: 0, couponDescMax: 12, maxHeader: 0, requireImage: false, requireHeader: false, requireVideo: false, requireCommerce: false, minItems: 2, maxItems: 6 },
+  // PREMIUM_VIDEO의 HEADER·MESSAGE는 §4.4.1에서 둘 다 "선택"이다(옛 표는 헤더를 필수로 잘못 적고 있었다).
+  PREMIUM_VIDEO: { code: 'PREMIUM_VIDEO', label: '프리미엄 동영상', maxMessage: 76, maxNewline: 5, maxButtons: 1, minButtons: 0, couponMaxButtons: 1, couponDescMax: 18, maxHeader: 20, requireImage: false, requireHeader: false, requireVideo: true, requireCommerce: false, minItems: 0, maxItems: 0 },
+  COMMERCE: { code: 'COMMERCE', label: '커머스', maxMessage: 0, maxNewline: 0, maxButtons: 2, minButtons: 1, couponMaxButtons: 2, couponDescMax: 12, maxHeader: 0, requireImage: true, requireHeader: false, requireVideo: false, requireCommerce: true, minItems: 0, maxItems: 0 },
+  CAROUSEL_COMMERCE: { code: 'CAROUSEL_COMMERCE', label: '캐러셀 커머스', maxMessage: 0, maxNewline: 0, maxButtons: 0, minButtons: 0, couponMaxButtons: 0, couponDescMax: 12, maxHeader: 0, requireImage: false, requireHeader: false, requireVideo: false, requireCommerce: true, minItems: 2, maxItems: 6 },
+};
 
 export type BubbleTypeCode = keyof typeof BUBBLE_TYPES;
 
-/** 버튼 타입 */
-export const BUTTON_TYPES = {
-  WL: { code: 'WL', label: '웹링크', requiredFields: ['url_mobile'] },
-  AL: { code: 'AL', label: '앱링크', requiredFields: ['url_mobile'] },
+/**
+ * 버튼 타입 — 필수 파라미터 출처 = 매뉴얼 §6.10.3.2.
+ * `type`은 표의 키 자체라 requiredFields에 다시 적지 않는다.
+ */
+export interface BrandButtonSpec {
+  code: string;
+  label: string;
+  requiredFields: readonly string[];
+  /** "다음 중 N개 이상" 규칙 (AL 전용) */
+  anyOf?: { count: number; fields: readonly string[] };
+  /** 이 버튼을 쓸 수 있는 타겟팅 (AC 전용 — M·N만 가능) */
+  targetingOnly?: readonly string[];
+  /** 버튼명이 고정·선택지로 정해진 유형 */
+  allowedNames?: readonly string[];
+}
+
+export const BUTTON_TYPES: Record<string, BrandButtonSpec> = {
+  WL: { code: 'WL', label: '웹링크', requiredFields: ['name', 'url_mobile'] },
+  AL: { code: 'AL', label: '앱링크', requiredFields: ['name'], anyOf: { count: 2, fields: ['scheme_android', 'scheme_ios', 'url_mobile'] } },
   BK: { code: 'BK', label: '봇키워드', requiredFields: ['name'] },
   MD: { code: 'MD', label: '메시지전달', requiredFields: ['name'] },
-  BF: { code: 'BF', label: '비즈니스폼', requiredFields: ['biz_form_key'] },
+  BF: { code: 'BF', label: '비즈니스폼', requiredFields: ['name', 'biz_form_key'], allowedNames: ['톡에서 예약하기', '톡에서 설문하기', '톡에서 응모하기'] },
   BC: { code: 'BC', label: '상담톡전환', requiredFields: ['name'] },
   BT: { code: 'BT', label: '봇전환', requiredFields: ['name'] },
-  AC: { code: 'AC', label: '채널추가', requiredFields: ['name'] },
-} as const;
+  AC: { code: 'AC', label: '채널추가', requiredFields: ['name'], targetingOnly: ['M', 'N'], allowedNames: ['채널 추가'] },
+};
 
-/** 타겟팅 옵션 */
+/**
+ * 타겟팅 옵션.
+ * ⚠ `N`의 뜻은 매뉴얼 v2.3.1 안에서 서로 반대로 적혀 있다 —
+ *   §4.4.1 "마수동 회원 중 채널 친구 **제외**" ↔ §5.4.6 표 "마수동 유저 중 **채널 친구**".
+ *   아래 라벨은 §4.4.1을 따르고 있으며, 휴머스온 회신으로 확정되면 라벨·설명을 함께 고친다.
+ *   (문의 원장 = docs/bito-gateway/FEATURE-GW-BRAND-MESSAGE.md §6)
+ */
 export const TARGETING_OPTIONS = {
   M: { code: 'M', label: '마수동 전체', description: '마케팅 수신동의 전체' },
   N: { code: 'N', label: '비친구만', description: '마수동 중 채널 친구 제외' },
@@ -116,6 +181,17 @@ export interface BrandQueuePayloadParams {
   /** 무료수신거부 — 매뉴얼 §2.2.2: M/N 타겟팅은 필수 */
   unsubscribePhone?: string | null;
   unsubscribeAuth?: string | null;
+  /**
+   * 이 건이 실제로 나갈 시각 — 발송 가능 시간(08:00~20:50 KST) 판정용.
+   * 미지정 = 즉시 발송(현재 시각). 예약·분할 경로는 계산된 시각을 그대로 넘긴다.
+   */
+  sendAt?: Date | string | null;
+  /**
+   * 이 건이 **지금 나가는가**(예약이 아닌가). 마감 여유 적용 여부를 가른다.
+   * 미지정이면 sendAt이 비었는지로 판단한다 — 다만 즉시발송도 시각을 고정해 넘기는 경로가 있어
+   * (검증 시각 = 적재 시각을 맞추려고) 그 경로는 이 값을 명시해야 한다.
+   */
+  immediate?: boolean;
 }
 
 export interface BrandQueuePayload {
@@ -213,12 +289,96 @@ export function buildBrandQueuePayload(p: BrandQueuePayloadParams): BrandQueuePa
     etc.ATTACHMENT = parseJsonOrThrow(p.attachmentJson, '첨부(ATTACHMENT)');
   }
 
+  // ── 규격 검사 — 조립될 실제 값으로 판정한다(호출부 6곳이 같은 판정을 받는 자리) ──
+  assertBrandContentSpec({
+    bubble,
+    spec: BUBBLE_TYPES[bubble],
+    targeting,
+    isFreeForm: p.typeDef === 'FREE',
+    message: p.typeDef === 'FREE' ? String(p.message || '').trim() : '',
+    header,
+    additionalContent: additional,
+    attachment: etc.ATTACHMENT ?? null,
+  });
+
+  // ── 발송 가능 시간 (KST 08:00~20:50) — 매뉴얼 v2.3.1 §3.9.1 ──
+  //   창 밖은 카카오가 3022로 폐기하는데 그때는 이미 차감된 뒤다. 적재 전에 막는다.
+  //   sendAt 미지정 = 즉시 발송이므로 지금 시각으로 판정한다.
+  //   즉시 발송(sendAt 미지정)은 **마감 여유**를 둔다 — 조립 시점엔 창 안이어도 차감·적재를 지나는
+  //   동안 20:50을 넘기면 문자만 나가고 브랜드는 금지 시각에 적재된다. 예약 시각은 사용자가 고른
+  //   계약이라 여유를 깎지 않는다.
+  const sendAt = toSendAtDate(p.sendAt);
+  //   **지난 시각은 곧 즉시 발송이다** — 큐는 도래한 행을 바로 집는다. 과거 예약값을 그대로 믿고
+  //   'immediate=false'로 두면 새벽 3시에 전날 10시를 넣어 가드를 통과시킬 수 있다(0818 5R).
+  //   **마감 코앞의 예약도 같다** — 20:49:58에 20:49:59를 예약하면 검사는 통과하지만 수신거부 조회·
+  //   차감·적재를 지나는 동안 20:50을 넘긴다. 여유 안에 든 예약은 즉시 건과 똑같이 취급한다(0818 6R).
+  //   여유 값은 설정에서 이미 정규화됐다(유한한 0 이상 정수) — 여기서 다시 손대면 두 판정이 갈린다.
+  const marginMinutes = BRAND_SEND_WINDOW.immediateMarginMinutes;
+  const marginMs = marginMinutes * 60_000;
+  const isPast = sendAt.getTime() <= Date.now();
+  const isNearNow = sendAt.getTime() - Date.now() <= marginMs;
+  const isImmediate = isNearNow
+    || (p.immediate ?? (p.sendAt === undefined || p.sendAt === null || String(p.sendAt).trim() === ''));
+  //   과거 시각이면 판정 기준도 '지금'이어야 한다 — 지난 시각으로 창을 재면 늘 통과한다.
+  const judgeAt = isPast ? new Date() : sendAt;
+  if (!isWithinBrandSendWindow(judgeAt, isImmediate ? marginMinutes : 0)) {
+    throw new BrandMessageBuildError(
+      '브랜드메시지는 오전 8시부터 저녁 8시 50분 사이에만 발송할 수 있습니다 — 발송 시각을 조정해주세요'
+    );
+  }
+
   const etcJson = JSON.stringify(etc);
   if (etcJson.length > K_ETC_JSON_MAX) {
     throw new BrandMessageBuildError(`브랜드메시지 부가 정보가 너무 깁니다 (${etcJson.length}자 — 최대 ${K_ETC_JSON_MAX}자). 버튼·링크 길이를 줄여주세요`);
   }
 
   return { msgContents, etcJson };
+}
+
+/**
+ * sendAt 파라미터 정규화 — 호출부마다 타입이 다르다(Date · KST 문자열 · undefined).
+ * 빈 값 = 즉시 발송이므로 현재 시각. 못 읽는 값은 throw해서 조용히 "지금"으로 흐르지 않게 한다.
+ */
+function toSendAtDate(v: Date | string | null | undefined): Date {
+  // ★ 런타임 타입을 먼저 좁힌다 — 예전에는 `!v`가 false·0을, `String([])`가 빈 배열을 삼켜
+  //   **잘못된 값이 조용히 "지금"으로 강등**됐다. 즉시 발송으로 허용하는 것은 미지정뿐이다.
+  if (v === undefined || v === null) return new Date();
+  if (v instanceof Date) {
+    if (Number.isNaN(v.getTime())) throw new BrandMessageBuildError('발송 예약 시각을 읽을 수 없습니다');
+    return v;
+  }
+  if (typeof v !== 'string') throw new BrandMessageBuildError('발송 예약 시각을 읽을 수 없습니다');
+  const raw = v.trim();
+  if (!raw) return new Date();
+
+  // ① 'YYYY-MM-DD HH:mm(:ss)' = KST 벽시계 문자열(toKoreaTimeStr 산출물). +09:00을 붙여 읽는다.
+  //    구분자는 **공백만** 받는다 — 'T'까지 받으면 오프셋 없는 ISO(2026-08-18T10:00)가
+  //    아래 오프셋 검사를 우회해 KST로 통과한다(같은 값이 서버 표준시에 따라 다르게 해석됨).
+  //    달력 유효성도 본다 — 2026-02-31이 3월로 정규화돼 조용히 통과하면 안 된다.
+  const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})(?::(\d{2}))?$/.exec(raw);
+  if (m) {
+    const [y, mo, d, h, mi, s] = [+m[1], +m[2], +m[3], +m[4], +m[5], +(m[6] ?? 0)];
+    if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || s > 59) {
+      throw new BrandMessageBuildError('발송 예약 시각을 읽을 수 없습니다');
+    }
+    const utc = new Date(Date.UTC(y, mo - 1, d, h - 9, mi, s));
+    // KST로 되돌려 입력과 같은 달력값이 나오는지 본다 — 2026-02-31처럼 없는 날짜가
+    // 3월로 정규화돼 조용히 통과하는 것을 막는다.
+    const back = new Date(utc.getTime() + 9 * 60 * 60 * 1000);
+    const sameDate = back.getUTCFullYear() === y && back.getUTCMonth() === mo - 1 && back.getUTCDate() === d
+      && back.getUTCHours() === h && back.getUTCMinutes() === mi && back.getUTCSeconds() === s;
+    if (!sameDate) throw new BrandMessageBuildError('발송 예약 시각을 읽을 수 없습니다');
+    return utc;
+  }
+
+  // ② 그 외 문자열은 **오프셋이 명시된 ISO만** 받는다. 오프셋 없는 ISO를 new Date에 넘기면
+  //    서버 표준시에 따라 다른 시각으로 해석돼 같은 값이 KST 서버에서는 통과하고 UTC 서버에서는 거절된다.
+  if (!/(?:Z|[+-]\d{2}:?\d{2})$/.test(raw)) {
+    throw new BrandMessageBuildError('발송 예약 시각을 읽을 수 없습니다');
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) throw new BrandMessageBuildError('발송 예약 시각을 읽을 수 없습니다');
+  return parsed;
 }
 
 /** 브랜드 큐 전환재발송 코드 — 'S'/'L'(원문 그대로)은 본문이 JSON이라 불가. N/A/B만. */
@@ -287,18 +447,27 @@ export interface BrandImage {
   img_link?: string;
 }
 
+/**
+ * 쿠폰 — 매뉴얼 §6.10.7. 클릭 URL은 쿠폰 객체 **바로 아래 평면 키**다.
+ * ⛔ `link: { url_mobile }` 래핑은 규격에 없다(0818 정정 — 규격 밖 키라 클릭이 전달되지 않았다).
+ * `description`은 매뉴얼상 필수(O)이며 길이는 유형별로 다르다(BUBBLE_TYPES.couponDescMax).
+ */
 export interface BrandCoupon {
   title: string;
-  description?: string;
-  link?: { url_mobile: string; url_pc?: string };
+  description: string;
+  url_mobile?: string;
+  url_pc?: string;
+  scheme_android?: string;
+  scheme_ios?: string;
 }
 
+/** 커머스 — 매뉴얼 §6.10.8. `currency_unit`은 규격에 없어 제거했고 `discount_fixed`가 규격 키다. */
 export interface BrandCommerce {
   title: string;
   regular_price: number;
   discount_price?: number;
   discount_rate?: number;
-  currency_unit?: string;
+  discount_fixed?: number;
 }
 
 export interface BrandVideo {
@@ -306,12 +475,17 @@ export interface BrandVideo {
   thumbnail_url?: string;
 }
 
+/**
+ * 와이드 리스트 아이템 — 매뉴얼 §6.10.6.
+ * 1번째만 title 선택이고 2~5번째는 필수. `description`·`link`는 규격에 없는 키라 제거했다.
+ */
 export interface BrandItemListItem {
-  title: string;
-  description?: string;
-  img_url?: string;
-  img_link?: string;
-  link?: { url_mobile: string; url_pc?: string };
+  title?: string;
+  img_url: string;
+  url_mobile: string;
+  url_pc?: string;
+  scheme_android?: string;
+  scheme_ios?: string;
 }
 
 export interface CarouselItem {
@@ -383,87 +557,274 @@ export interface BrandTemplateParams extends BrandMessageParams {
 }
 
 // ============================================================
-// Validation
+// 규격 검사 — 매뉴얼 v2.3.1 정합 (조립기 전용 · 외부 노출 없음)
 // ============================================================
+//
+// ★ 2026-08-18 구조 정정. 예전에는 `validateBrandMessage`가 조립기 **밖**에 따로 있었고
+//   6개 호출부 중 `/brand-send` 자유형 1곳만 그것을 불렀다 — 나머지 5곳(테스트발송·AI캠페인·
+//   직접발송·예약청크·기본형)은 길이도 버튼도 검사 없이 큐로 갔다. 경로마다 판정이 갈리는 것이
+//   결함의 뿌리였으므로 **검사를 조립기 안으로 넣어** 조립을 부르는 순간 반드시 통과하게 만든다.
+//   덧댄 게이트는 함께 사라졌다(호출부에 검사를 하나씩 붙이는 방식은 다시 쓰지 않는다).
 
-export function validateBrandMessage(params: BrandMessageParams): { valid: boolean; error?: string } {
-  const typeInfo = BUBBLE_TYPES[params.bubbleType];
-  if (!typeInfo) {
-    return { valid: false, error: `유효하지 않은 메시지 유형: ${params.bubbleType}` };
-  }
-
-  // ★ 2026-07-30 지원 유형 게이트 — 미지원 유형은 차감 전에 입구에서 막는다(조용한 실패 차단).
-  if (!isSupportedBubbleType(params.bubbleType)) {
-    return { valid: false, error: UNSUPPORTED_BUBBLE_MSG(typeInfo.label) };
-  }
-
-  if (!params.senderKey) return { valid: false, error: '발신 프로필 키가 없습니다' };
-  if (!params.phones || params.phones.length === 0) return { valid: false, error: '수신자가 없습니다' };
-  if (!['M', 'N', 'I'].includes(params.targeting)) return { valid: false, error: '유효하지 않은 타겟팅' };
-
-  // 본문 길이 체크
-  if (typeInfo.maxMessage > 0) {
-    if (!params.message || params.message.trim().length === 0) {
-      return { valid: false, error: `${typeInfo.label}: 본문이 필요합니다` };
-    }
-    if (params.message.length > typeInfo.maxMessage) {
-      return { valid: false, error: `${typeInfo.label}: 본문 ${typeInfo.maxMessage}자 초과 (현재 ${params.message.length}자)` };
-    }
-  }
-
-  // 이미지 필수 체크
-  if (typeInfo.requireImage && !params.image?.img_url) {
-    return { valid: false, error: `${typeInfo.label}: 이미지가 필요합니다` };
-  }
-
-  // 헤더 필수 체크
-  if (typeInfo.requireHeader && (!params.header || params.header.length === 0)) {
-    return { valid: false, error: `${typeInfo.label}: 헤더가 필요합니다 (최대 20자)` };
-  }
-  if (params.header && params.header.length > 20) {
-    return { valid: false, error: '헤더는 최대 20자입니다' };
-  }
-
-  // 버튼 개수 체크
-  if (params.buttons && params.buttons.length > typeInfo.maxButtons) {
-    return { valid: false, error: `${typeInfo.label}: 버튼 최대 ${typeInfo.maxButtons}개 (현재 ${params.buttons.length}개)` };
-  }
-
-  // 동영상 필수 체크
-  if ((typeInfo as any).requireVideo && !params.video?.video_url) {
-    return { valid: false, error: '프리미엄 동영상: 카카오TV URL이 필요합니다' };
-  }
-
-  // 커머스 필수 체크
-  if ((typeInfo as any).requireCommerce && !params.commerce?.title) {
-    return { valid: false, error: `${typeInfo.label}: 상품 정보가 필요합니다` };
-  }
-
-  // 아이템 리스트/캐러셀 개수 체크
-  const minItems = (typeInfo as any).minItems;
-  const maxItems = (typeInfo as any).maxItems;
-  if (minItems) {
-    if (params.bubbleType === 'WIDE_ITEM_LIST') {
-      const items = params.itemList || [];
-      if (items.length < minItems || items.length > maxItems) {
-        return { valid: false, error: `${typeInfo.label}: 아이템 ${minItems}~${maxItems}개 필요 (현재 ${items.length}개)` };
-      }
-    } else {
-      // CAROUSEL_FEED, CAROUSEL_COMMERCE
-      const items = params.carouselItems || [];
-      if (items.length < minItems || items.length > maxItems) {
-        return { valid: false, error: `${typeInfo.label}: 캐러셀 아이템 ${minItems}~${maxItems}개 필요 (현재 ${items.length}개)` };
-      }
-    }
-  }
-
-  // ADDITIONAL_CONTENT 길이 체크 (COMMERCE)
-  if (params.additionalContent && params.additionalContent.length > 34) {
-    return { valid: false, error: '부가정보는 최대 34자입니다' };
-  }
-
-  return { valid: true };
+/** 코드포인트 기준 글자 수 — 이모지(서로게이트 쌍)를 2자로 세지 않는다. */
+function charLen(s: string): number {
+  return [...s].length;
 }
+
+function newlineCount(s: string): number {
+  return (s.match(/\n/g) || []).length;
+}
+
+function asArray(v: any): any[] {
+  return Array.isArray(v) ? v : [];
+}
+
+/**
+ * ★ 2026-08-18 타입 fail-open 차단.
+ * 예전에는 첨부를 `typeof === 'object'`로만 보고 필드를 `String(x)`로 강제했다. 그래서
+ *   · `ATTACHMENT: []`  → 배열도 object라 "첨부 없음"으로 면제받고 배열 그대로 전송
+ *   · `img_url: {}`     → `'[object Object]'`가 되어 필수값 검사를 통과
+ *   · `coupon: 'x'`     → 쿠폰 없음으로 간주돼 검증을 피하고 원본에는 남음
+ * 셋 다 "검사는 통과하고 카카오에서 버려지는" 모양이라 여기서 타입부터 못 박는다.
+ */
+function plainObjectOrThrow(v: any, label: string): Record<string, any> | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'object' || Array.isArray(v)) {
+    throw new BrandMessageBuildError(`${label} 형식이 올바르지 않습니다`);
+  }
+  return v as Record<string, any>;
+}
+
+/** 문자열 필드 — 문자열이 아닌 값이 오면 강제 변환하지 않고 거절한다. */
+function strFieldOrThrow(v: any, label: string): string {
+  if (v === undefined || v === null) return '';
+  if (typeof v === 'string') return v.trim();
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  throw new BrandMessageBuildError(`${label} 형식이 올바르지 않습니다`);
+}
+
+/**
+ * 조립 직전 규격 검사 — 위반은 전부 throw(fail-closed).
+ * 검사 대상은 **조립될 실제 값**이다(파싱된 ATTACHMENT 포함) — 타입 파라미터로 들어오든
+ * 이미 만들어진 JSON 문자열로 들어오든 같은 판정을 받게 하려는 것이다.
+ */
+function assertBrandContentSpec(input: {
+  bubble: string;
+  spec: BrandBubbleSpec;
+  targeting: string;
+  isFreeForm: boolean;
+  message: string;
+  header: string;
+  additionalContent: string;
+  attachment: any;
+}): void {
+  const { spec, targeting, isFreeForm, message, header, additionalContent, attachment } = input;
+  const label = spec.label;
+
+  // ── 본문 (자유형만 — 기본형 본문은 템플릿이 담당한다) ─────────────────
+  if (isFreeForm && spec.maxMessage > 0) {
+    if (charLen(message) > spec.maxMessage) {
+      throw new BrandMessageBuildError(`${label}: 본문은 최대 ${spec.maxMessage}자입니다 (현재 ${charLen(message)}자)`);
+    }
+    if (newlineCount(message) > spec.maxNewline) {
+      throw new BrandMessageBuildError(`${label}: 줄바꿈은 최대 ${spec.maxNewline}개입니다 (현재 ${newlineCount(message)}개)`);
+    }
+  }
+
+  // ── 헤더 ─────────────────────────────────────────────────────────────
+  if (spec.requireHeader && !header) {
+    throw new BrandMessageBuildError(`${label}: 상단 제목이 필요합니다 (최대 ${spec.maxHeader}자)`);
+  }
+  if (header) {
+    if (spec.maxHeader === 0) {
+      throw new BrandMessageBuildError(`${label}은 상단 제목을 사용하지 않습니다`);
+    }
+    if (charLen(header) > spec.maxHeader) {
+      throw new BrandMessageBuildError(`${label}: 상단 제목은 최대 ${spec.maxHeader}자입니다 (현재 ${charLen(header)}자)`);
+    }
+    if (newlineCount(header) > 0) {
+      throw new BrandMessageBuildError(`${label}: 상단 제목에는 줄바꿈을 넣을 수 없습니다`);
+    }
+  }
+
+  // ── 부가 정보 (매뉴얼 §4.4.1 — COMMERCE만 사용, 34자·줄바꿈 1개) ──────
+  if (additionalContent) {
+    if (input.bubble !== 'COMMERCE') {
+      throw new BrandMessageBuildError(`${label}은 부가 정보를 사용하지 않습니다`);
+    }
+    if (charLen(additionalContent) > 34) {
+      throw new BrandMessageBuildError(`부가 정보는 최대 34자입니다 (현재 ${charLen(additionalContent)}자)`);
+    }
+    if (newlineCount(additionalContent) > 1) {
+      throw new BrandMessageBuildError('부가 정보의 줄바꿈은 1개까지입니다');
+    }
+  }
+
+  const att = plainObjectOrThrow(attachment, '첨부(ATTACHMENT)') ?? {};
+  if (att.button !== undefined && !Array.isArray(att.button)) {
+    throw new BrandMessageBuildError('버튼 형식이 올바르지 않습니다');
+  }
+  const buttons = asArray(att.button);
+  const coupon = plainObjectOrThrow(att.coupon, '쿠폰') ?? null;
+  const attImage = plainObjectOrThrow(att.image, '이미지');
+  const attVideo = plainObjectOrThrow(att.video, '동영상');
+  const attCommerce = plainObjectOrThrow(att.commerce, '상품 정보');
+  const attItem = plainObjectOrThrow(att.item, '아이템 목록');
+
+  // ── 이미지·동영상·커머스 ─────────────────────────────────────────────
+  //   기본형이 면제받는 것은 **"안 보낸 경우"뿐이다** — 매뉴얼 §5.3.2 "파라미터 미사용 시 템플릿에
+  //   등록된 이미지가 발송됩니다". 그래서 자유형은 값이 있어야 하고, 기본형은 없어도 된다.
+  //   ⛔ 단 기본형이 **객체를 보냈는데 알맹이가 비어 있으면** 그것은 템플릿 생략이 아니라 잘못된 덮어쓰기다.
+  //      통째로 면제하면 그 값이 차감을 거쳐 게이트웨이까지 간다(0818 적대 리뷰 지적 수용).
+  const required = (present: boolean, ok: boolean) => (isFreeForm ? ok : (!present || ok));
+
+  if (spec.requireImage && !required(attImage !== undefined, !!strFieldOrThrow(attImage?.img_url, '이미지 주소'))) {
+    throw new BrandMessageBuildError(`${label}: 이미지가 필요합니다`);
+  }
+  if (spec.requireVideo && !required(attVideo !== undefined, !!strFieldOrThrow(attVideo?.video_url, '동영상 주소'))) {
+    throw new BrandMessageBuildError(`${label}: 동영상 주소가 필요합니다`);
+  }
+  if (spec.requireCommerce) {
+    const present = attCommerce !== undefined;
+    if (!required(present, !!strFieldOrThrow(attCommerce?.title, '상품 제목'))) {
+      throw new BrandMessageBuildError(`${label}: 상품 정보가 필요합니다`);
+    }
+    const priceOk = typeof attCommerce?.regular_price === 'number'
+      || (typeof attCommerce?.regular_price === 'string' && attCommerce.regular_price.trim() !== '');
+    if (!required(present, priceOk)) {
+      throw new BrandMessageBuildError(`${label}: 상품 정상가가 필요합니다`);
+    }
+  }
+  // 버튼 최소 개수는 자유형만 — 기본형은 템플릿이 버튼을 갖는다.
+  if (isFreeForm && buttons.length < spec.minButtons) {
+    throw new BrandMessageBuildError(`${label}: 버튼이 최소 ${spec.minButtons}개 필요합니다`);
+  }
+  // §6.10.8 — 할인가를 넣었으면 할인율·정액할인 중 하나는 있어야 한다.
+  if (attCommerce && attCommerce.discount_price !== undefined
+      && attCommerce.discount_rate === undefined && attCommerce.discount_fixed === undefined) {
+    throw new BrandMessageBuildError('할인가를 넣으면 할인율 또는 할인금액 중 하나를 함께 입력해야 합니다');
+  }
+
+  // ── 버튼 개수 (§6.10.3.3 — 쿠폰을 함께 쓰면 상한이 줄어든다) ──────────
+  const buttonMax = coupon ? spec.couponMaxButtons : spec.maxButtons;
+  if (buttons.length > buttonMax) {
+    throw new BrandMessageBuildError(
+      coupon
+        ? `${label}: 쿠폰을 함께 쓰면 버튼은 최대 ${buttonMax}개입니다 (현재 ${buttons.length}개)`
+        : `${label}: 버튼은 최대 ${buttonMax}개입니다 (현재 ${buttons.length}개)`
+    );
+  }
+  // ── 버튼 타입별 필수값 (§6.10.3.2) — 실린 버튼은 자유형·기본형 모두 형태가 맞아야 한다 ──
+  buttons.forEach((btn: any, i: number) => {
+    const at = `${i + 1}번째 버튼`;
+    plainObjectOrThrow(btn, at);
+    const type = strFieldOrThrow(btn?.type, `${at} 종류`).toUpperCase();
+    const btnSpec = BUTTON_TYPES[type];
+    if (!btnSpec) throw new BrandMessageBuildError(`${at}: 지원하지 않는 버튼 종류입니다 (${type || '미지정'})`);
+
+    for (const field of btnSpec.requiredFields) {
+      if (!strFieldOrThrow(btn?.[field], `${at} ${BUTTON_FIELD_LABEL[field] || field}`)) {
+        throw new BrandMessageBuildError(`${at}(${btnSpec.label}): ${BUTTON_FIELD_LABEL[field] || field}이(가) 필요합니다`);
+      }
+    }
+    if (btnSpec.anyOf) {
+      const filled = btnSpec.anyOf.fields.filter(f => strFieldOrThrow(btn?.[f], `${at} 값`)).length;
+      if (filled < btnSpec.anyOf.count) {
+        const names = btnSpec.anyOf.fields.map(f => BUTTON_FIELD_LABEL[f] || f).join(' · ');
+        throw new BrandMessageBuildError(`${at}(${btnSpec.label}): ${names} 중 ${btnSpec.anyOf.count}개 이상을 입력해야 합니다`);
+      }
+    }
+    if (btnSpec.allowedNames && !btnSpec.allowedNames.includes(strFieldOrThrow(btn?.name, `${at} 버튼명`))) {
+      throw new BrandMessageBuildError(`${at}(${btnSpec.label}): 버튼명은 ${btnSpec.allowedNames.join(' / ')} 중에서만 쓸 수 있습니다`);
+    }
+    if (btnSpec.targetingOnly && !btnSpec.targetingOnly.includes(targeting)) {
+      throw new BrandMessageBuildError(
+        `${btnSpec.label} 버튼은 대상 범위가 ${btnSpec.targetingOnly.map(t => TARGETING_OPTIONS[t as 'M' | 'N' | 'I']?.label || t).join(' 또는 ')}일 때만 사용할 수 있습니다`
+      );
+    }
+  });
+
+  // ── 쿠폰 (§6.10.7) ───────────────────────────────────────────────────
+  if (coupon) {
+    // 옛 `link` 래핑이 먼저다 — 제목·URL 검사보다 앞에 둬야 "형식이 틀렸다"가 아니라
+    // 실제 원인(옛 규약으로 들어왔다)을 알려줄 수 있다.
+    if (coupon.link !== undefined) {
+      throw new BrandMessageBuildError('쿠폰 링크 형식이 올바르지 않습니다 — 쿠폰 URL을 다시 입력해주세요');
+    }
+    const cTitle = strFieldOrThrow(coupon.title, '쿠폰 제목');
+    if (!cTitle) throw new BrandMessageBuildError('쿠폰 제목이 필요합니다');
+    if (!isAllowedCouponTitle(cTitle)) {
+      throw new BrandMessageBuildError(`쿠폰 제목은 정해진 형식만 쓸 수 있습니다 — ${COUPON_TITLE_GUIDE}`);
+    }
+    // 클릭 대상이 없는 쿠폰은 카카오가 받지 않는다(기본 케이스 url_mobile · 채널쿠폰이면 스킴).
+    const hasCouponLink = ['url_mobile', 'scheme_android', 'scheme_ios']
+      .some((k) => strFieldOrThrow(coupon[k], '쿠폰 링크'));
+    if (!hasCouponLink) throw new BrandMessageBuildError('쿠폰을 넣으려면 쿠폰 URL이 필요합니다');
+    const desc = strFieldOrThrow(coupon.description, '쿠폰 설명');
+    if (!desc) throw new BrandMessageBuildError('쿠폰 설명이 필요합니다');
+    if (charLen(desc) > spec.couponDescMax) {
+      throw new BrandMessageBuildError(`${label}: 쿠폰 설명은 최대 ${spec.couponDescMax}자입니다 (현재 ${charLen(desc)}자)`);
+    }
+    if (newlineCount(desc) > 0) throw new BrandMessageBuildError('쿠폰 설명에는 줄바꿈을 넣을 수 없습니다');
+  }
+
+  // ── 와이드 리스트 (§6.10.6) ──────────────────────────────────────────
+  if (spec.maxItems > 0 && input.bubble === 'WIDE_ITEM_LIST') {
+    const list = asArray(attItem?.list);
+    if (list.length < spec.minItems || list.length > spec.maxItems) {
+      throw new BrandMessageBuildError(`${label}: 아이템은 ${spec.minItems}~${spec.maxItems}개여야 합니다 (현재 ${list.length}개)`);
+    }
+    list.forEach((item: any, i: number) => {
+      const at = `${i + 1}번째 아이템`;
+      plainObjectOrThrow(item, at);
+      if (!strFieldOrThrow(item?.img_url, `${at} 이미지`)) throw new BrandMessageBuildError(`${at}: 이미지가 필요합니다`);
+      if (!strFieldOrThrow(item?.url_mobile, `${at} 모바일 링크`)) throw new BrandMessageBuildError(`${at}: 모바일 링크가 필요합니다`);
+      // 1번째만 제목이 선택이다.
+      if (i > 0 && !strFieldOrThrow(item?.title, `${at} 제목`)) throw new BrandMessageBuildError(`${at}: 제목이 필요합니다`);
+    });
+  }
+}
+
+/**
+ * 쿠폰 제목은 자유 문구가 아니라 **정해진 5형식만** 허용된다 — IMC Developer Portal
+ * `/kakao-message/api/v1/brand/send/free` coupon.title "사용 가능한 쿠폰 제목".
+ * 형식을 벗어나면 카카오가 거절하므로 적재 전에 막는다.
+ */
+const COUPON_TITLE_FORMS: { re: RegExp; check?: (m: RegExpExecArray) => boolean }[] = [
+  // ${숫자}원 할인 쿠폰 (1 ~ 99,999,999 — 천단위 쉼표 허용)
+  { re: /^([0-9]{1,3}(?:,[0-9]{3})*|[0-9]+)원 할인 쿠폰$/, check: (m) => {
+    const n = Number(m[1].replace(/,/g, ''));
+    return n >= 1 && n <= 99_999_999;
+  } },
+  // ${숫자}% 할인 쿠폰 (1 ~ 100)
+  { re: /^([0-9]+)% 할인 쿠폰$/, check: (m) => {
+    const n = Number(m[1]);
+    return n >= 1 && n <= 100;
+  } },
+  { re: /^배송비 할인 쿠폰$/ },
+  // ${7자 이내} 무료 쿠폰 / UP 쿠폰
+  { re: /^(.{1,7}) 무료 쿠폰$/ },
+  { re: /^(.{1,7}) UP 쿠폰$/ },
+];
+
+export const COUPON_TITLE_GUIDE = '1000원 할인 쿠폰 / 10% 할인 쿠폰 / 배송비 할인 쿠폰 / OOO 무료 쿠폰 / OOO UP 쿠폰';
+
+function isAllowedCouponTitle(title: string): boolean {
+  return COUPON_TITLE_FORMS.some(({ re, check }) => {
+    const m = re.exec(title);
+    return !!m && (!check || check(m));
+  });
+}
+
+/** 오류 문구용 — 사용자에게 규격 키 이름 대신 우리말로 보여준다. */
+const BUTTON_FIELD_LABEL: Record<string, string> = {
+  name: '버튼명',
+  url_mobile: '모바일 링크',
+  url_pc: 'PC 링크',
+  scheme_android: '안드로이드 앱 실행 주소',
+  scheme_ios: 'iOS 앱 실행 주소',
+  biz_form_key: '비즈니스폼 키',
+};
 
 // ============================================================
 // JSON 빌더
@@ -499,33 +860,48 @@ export function buildAttachmentJson(params: {
     };
   }
 
+  // 쿠폰 — §6.10.7. 클릭 URL은 평면 키(url_mobile/url_pc/scheme_*)다. `link` 래핑 금지.
+  //
+  // ★ 2026-08-18 검사를 **투영 전**에 둔다. 아래에서 평면 키만 골라 담으면 옛 `link`는 그 자리에서
+  //   사라지고, 뒤늦게 조립기가 보는 객체에는 흔적이 없다 — 그래서 "링크 없는 쿠폰"이 조용히 나갔다.
+  //   타입(BrandCoupon)은 `link`를 이미 뺐지만 라우트가 req.body.coupon을 그대로 넘기므로
+  //   런타임에는 여전히 들어올 수 있다(옛 화면 번들 캐시).
+  if (params.coupon && (params.coupon as any).link !== undefined) {
+    throw new BrandMessageBuildError('쿠폰 링크 형식이 올바르지 않습니다 — 쿠폰 URL을 다시 입력해주세요');
+  }
   if (params.coupon) {
     attachment.coupon = {
       title: params.coupon.title,
-      ...(params.coupon.description && { description: params.coupon.description }),
-      ...(params.coupon.link && { link: params.coupon.link }),
+      description: params.coupon.description,
+      ...(params.coupon.url_mobile && { url_mobile: params.coupon.url_mobile }),
+      ...(params.coupon.url_pc && { url_pc: params.coupon.url_pc }),
+      ...(params.coupon.scheme_android && { scheme_android: params.coupon.scheme_android }),
+      ...(params.coupon.scheme_ios && { scheme_ios: params.coupon.scheme_ios }),
     };
   }
 
+  // 와이드 리스트 — §6.10.6. title은 1번째만 선택이라 값이 있을 때만 싣는다.
   if (params.itemList && params.itemList.length > 0) {
     attachment.item = {
       list: params.itemList.map(item => ({
-        title: item.title,
-        ...(item.description && { description: item.description }),
-        ...(item.img_url && { img_url: item.img_url }),
-        ...(item.img_link && { img_link: item.img_link }),
-        ...(item.link && { link: item.link }),
+        ...(item.title && { title: item.title }),
+        img_url: item.img_url,
+        url_mobile: item.url_mobile,
+        ...(item.url_pc && { url_pc: item.url_pc }),
+        ...(item.scheme_android && { scheme_android: item.scheme_android }),
+        ...(item.scheme_ios && { scheme_ios: item.scheme_ios }),
       })),
     };
   }
 
+  // 커머스 — §6.10.8. 0원 할인도 유효한 값이라 falsy 체크 대신 undefined 체크를 쓴다.
   if (params.commerce) {
     attachment.commerce = {
       title: params.commerce.title,
       regular_price: params.commerce.regular_price,
-      ...(params.commerce.discount_price && { discount_price: params.commerce.discount_price }),
-      ...(params.commerce.discount_rate && { discount_rate: params.commerce.discount_rate }),
-      currency_unit: params.commerce.currency_unit || '원',
+      ...(params.commerce.discount_price !== undefined && { discount_price: params.commerce.discount_price }),
+      ...(params.commerce.discount_rate !== undefined && { discount_rate: params.commerce.discount_rate }),
+      ...(params.commerce.discount_fixed !== undefined && { discount_fixed: params.commerce.discount_fixed }),
     };
   }
 
@@ -627,10 +1003,10 @@ function recordSentTables(campaignId: string | undefined, table: string): void {
  * - validation → 수신거부 필터 → 선불 차감 → SMSQ 배치 INSERT(msg_type='F') → 미적재분 환불
  */
 export async function sendBrandMessage(params: BrandMessageParams): Promise<BrandSendResult> {
-  // 1. Validation (지원 유형 게이트 포함 — 차감 전에 막는다)
-  const validation = validateBrandMessage(params);
-  if (!validation.valid) {
-    return { success: false, sentCount: 0, failCount: 0, error: validation.error };
+  // 1. 수신자 — 조립기가 볼 수 없는 유일한 값이라 여기서만 본다.
+  //    (유형·발신키·타겟팅·본문·첨부·발송시각 검사는 전부 buildBrandQueuePayload가 소유한다)
+  if (!params.phones || params.phones.length === 0) {
+    return { success: false, sentCount: 0, failCount: 0, error: '수신자가 없습니다' };
   }
 
   // 2. 적재 규약(msg_contents+k_etc_json)·대체발송 확정 — 차감 전에 조립해 형식 결함을 선차단(fail-closed)
@@ -648,6 +1024,8 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
       message: params.message,
       unsubscribePhone: params.unsubscribePhone,
       unsubscribeAuth: params.unsubscribeAuth,
+      sendAt: params.reservedDate,
+      immediate: !params.reservedDate,
       attachmentJson: buildAttachmentJson({
         buttons: params.buttons,
         image: params.image,
@@ -776,6 +1154,8 @@ export async function sendBrandMessageTemplate(params: BrandTemplateParams): Pro
       additionalContent: params.additionalContent,
       unsubscribePhone: params.unsubscribePhone,
       unsubscribeAuth: params.unsubscribeAuth,
+      sendAt: params.reservedDate,
+      immediate: !params.reservedDate,
       attachmentJson: buildAttachmentJson({
         buttons: params.buttons,
         image: params.image,

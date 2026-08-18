@@ -34,7 +34,7 @@ import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 // ★ 2026-07-29 브랜드메시지 판정은 CT 하나에서만 한다 — 채널 리터럴을 라우트에 다시 적으면
 //   집계(일자·상세)와 차감·환불이 서로 다른 기준을 갖게 되고, 그 차이가 곧 미청구나 발행 차단이다.
 import { isBrandOnlyChannel, resolveRefundAxes, resolveSendChannel, resolveChargeMessageType } from '../utils/billing-types';
-import { markRefundPending } from '../utils/refund-pending';
+import { markRefundPending, markRefundPendingAxes } from '../utils/refund-pending';
 // ★ 2026-07-30 (2R): 테스트 경로 환불 미완 경보 — 캠페인 레코드가 없어 durable 의무 대신 사람 호출
 import { sendSystemAlert } from '../utils/system-alert';
 import { normalizeMmsImagePaths, type MmsImageItem } from '../utils/mms-image-util';
@@ -425,6 +425,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
         if (testChannel === 'kakao' || testChannel === 'both') {
           try {
             // 브랜드메시지 테스트 발송 — SMSQ msg_type='F' (★2026-08-15 규약 정정: 본문/제어 필드 분리 조립)
+            // sendAt 미지정 = 즉시 발송 — 조립기가 현재 시각으로 발송 가능 시간을 판정한다.
             const testBrandPayload = buildBrandQueuePayload({
               typeDef: 'FREE', senderKey: testKakaoSenderKey, targeting: 'I',
               bubbleType: testKakaoBubbleType, isAd: isAd || false, message: testMsg,
@@ -929,59 +930,24 @@ if (campaign.is_ad) {
     const campaignRun = runResult.rows[0];
     campaignRunId = campaignRun.id;  // 최상위 catch가 종결할 수 있게 밖으로 올린다(위 선언 주석 참조)
 
-// ★ 선불 잔액 체크 + 차감 (MySQL INSERT 전에 atomic 차감)
-// 채널·유형·카카오 활성 여부는 전부 run INSERT **앞**에서 확정됐다(2026-08-17) —
-// 여기서 실패할 수 있는 것은 차감 하나뿐이고, 그 실패는 실행 행을 종결시켜 캠페인을 풀어 준다.
+// 차감 유형은 아래 catch(축별 환불)도 봐야 하므로 여기서 확정한다.
 const deductType = isBrandOnlyChannel(sendChannel) ? 'BRAND' : sendMsgTypeResolved.messageType;
-const sendDeduct = await prepaidDeduct(companyId, filteredCustomers.length, deductType, id, userId);
-if (!sendDeduct.ok) {
-  // 실행 행을 남겨 두면 위쪽 중복 발송 방지 검사가 이후 발송을 영구히 막는다(충전해도 못 보낸다).
-  await failCampaignRun(campaignRun.id, '선불 잔액 부족으로 발송 중단');
-  return res.status(402).json({
-    error: sendDeduct.error,
-    insufficientBalance: true,
-    balance: sendDeduct.balance,
-    requiredAmount: sendDeduct.amount
-  });
-}
-
-// ★ 2026-07-29 `both`는 **같은 수신자를 두 축으로 적재한다** — 아래 발송 단계가
-//   bulkInsertSmsQueue(문자)와 insertBrandQueue(브랜드) 양쪽에 넣는다.
-//   그런데 차감은 위 한 번뿐이라 브랜드 발송분이 통째로 무료로 나가고 있었다(적대검증 실측).
-//   두 축 모두 차감하고, 뒤가 실패하면 **앞선 차감을 되돌린다** — 한쪽만 깎인 채로 발송하면
-//   그 캠페인의 회계가 영구히 어긋나고 환불 sweeper도 짝을 못 찾는다.
-if (sendChannel === 'both') {
-  const brandDeduct = await prepaidDeduct(companyId, filteredCustomers.length, 'BRAND', id, userId);
-  if (!brandDeduct.ok) {
-    // ★ 2026-08-17 (Codex 2R high) 회수 **결과**를 봐야 한다. `prepaidRefund`는 실패를 던지지 않고
-    //   `ok:false`로 돌려주기도 해서, 예외만 잡으면 "회수 실패"가 성공으로 지나간다.
-    //   그 상태에서 아래 `failCampaignRun`이 잠금을 풀어 주므로 **재시도가 가능해지고, 첫 차감이 남아 있으면
-    //   그대로 이중 청구**가 된다(잠금을 푼 것 자체는 맞지만, 그 전에 미수를 원장에 남겨야 한다).
-    //   미수 기록은 이 파일이 이미 쓰는 CT를 그대로 쓴다(`markRefundPending` — 직접발송 경로 선례와 같은 형태).
-    try {
-      const revert = await prepaidRefund(
-        companyId, filteredCustomers.length, deductType, id,
-        '브랜드메시지 차감 실패로 문자 차감분 회수', 'campaign', { refundKey: REFUND_KEYS.CANCEL },
-      );
-      if (!revert.ok) {
-        console.error(`[선불][both 보상실패] campaign=${id} ${deductType} ${filteredCustomers.length}건 회수 미완 (실회수 ${revert.refunded}건)`);
-        await markRefundPending(id, filteredCustomers.length, deductType);
-      }
-    } catch (revertErr) {
-      // 회수까지 실패하면 잔액이 깎인 채 발송이 멈춘다 — 미수로 남겨 워커·사람이 이어받게 한다.
-      console.error(`[선불][both 보상실패] campaign=${id} ${deductType} ${filteredCustomers.length}건 회수 실패:`, revertErr);
-      await markRefundPending(id, filteredCustomers.length, deductType);
-    }
-    // 차감은 되돌렸지만 실행 행은 그대로 남아 캠페인을 잠그던 자리다(2026-08-17).
-    await failCampaignRun(campaignRun.id, '브랜드메시지 차감 실패로 발송 중단');
-    return res.status(402).json({
-      error: brandDeduct.error,
-      insufficientBalance: true,
-      balance: brandDeduct.balance,
-      requiredAmount: brandDeduct.amount,
-    });
-  }
-}
+// ★ 2026-08-18 **이번 요청에서 실제로 차감한 축**만 기록한다.
+//   preflight로 조립을 차감 앞에 두면서, 조립 throw가 차감 전에도 catch로 들어오게 됐다.
+//   완료 캠페인은 같은 campaign id로 재발송되므로 원장에 **과거 정상 발송분의 차감**이 남아 있고,
+//   그 상태에서 무조건 환불하면 이번에 안 깎은 돈(과거 발송분)을 돌려주게 된다.
+const aiDeductedAxes = new Set<string>();
+// ⛔ 환불 항아리를 실행 단위로 좁히지 않는다 — 0818 5R 실측: 같은 미적재분을 mysql-refund-sweeper가
+//   평문 `notloaded`로 다시 청구하는데, prepaidRefund의 상한은 `총차감 − 총환불`이라
+//   **정당 실패액이 아니라 차감 전액까지** 열려 있다. 항아리를 나누면 그 둘이 각각 갚아 과환불이 된다.
+//   (재발송 시 뒤 실행 채무가 앞 실행에 삼켜지는 문제는 **덜 갚는** 방향이라 회복 가능하다 —
+//    정규화된 채무 원장이 필요한 별건이다. 여기서 키로 우회하지 않는다.)
+const aiKeyNotLoaded = REFUND_KEYS.NOT_LOADED;
+const aiKeyCancel = REFUND_KEYS.CANCEL;
+// ★ 2026-08-18 축별 적재수를 따로 센다 — 전에는 catch가 문자 적재수로 만든 미적재 건수를
+//   BRAND에도 그대로 적용해, 브랜드가 다 나갔는데도 그만큼을 환불했다(실발송분 무료화).
+let aiSmsInserted = 0;
+let aiBrandInsertedTotal = 0;
 
 // ★ D72 성능개선: 건건이 INSERT → sms-queue.ts 컨트롤타워 bulkInsertSmsQueue 사용
 // ★ 2026-07-27 (B-0727-2): try **밖**에서 선언 — 전체 실패 catch가 실제 적재 건수를 봐야
@@ -1055,6 +1021,8 @@ for (const customer of filteredCustomers) {
       bubbleType: kakaoBubbleType,
       isAd: campaign.is_ad === true,
       message: personalizedMessage,
+      sendAt: sendTime || undefined,   // 예약·분할 시각 그대로 — 발송 가능 시간 판정 기준
+      immediate: !isScheduled,
       attachmentJson: kakaoAttachmentJson,
       carouselJson: kakaoCarouselJson,
     });
@@ -1072,9 +1040,68 @@ for (const customer of filteredCustomers) {
   }
 }
 
+// ── 여기서부터 되돌릴 수 없는 것들(차감·적재) ─────────────────────────
+//   ★ 2026-08-18 preflight — 위 1단계에서 **모든 수신자의 행을 만들어 본 뒤**에 차감한다.
+//   전에는 [차감 → 조립 → 적재] 순서라 규격 위반이 조립에서 throw하면 돈이 이미 움직인 뒤였다.
+// ★ 선불 잔액 체크 + 차감 (MySQL INSERT 전에 atomic 차감)
+// 채널·유형·카카오 활성 여부는 전부 run INSERT **앞**에서 확정됐다(2026-08-17) —
+// 여기서 실패할 수 있는 것은 차감 하나뿐이고, 그 실패는 실행 행을 종결시켜 캠페인을 풀어 준다.
+const sendDeduct = await prepaidDeduct(companyId, filteredCustomers.length, deductType, id, userId);
+if (sendDeduct.ok) aiDeductedAxes.add(deductType);
+if (!sendDeduct.ok) {
+  // 실행 행을 남겨 두면 위쪽 중복 발송 방지 검사가 이후 발송을 영구히 막는다(충전해도 못 보낸다).
+  await failCampaignRun(campaignRun.id, '선불 잔액 부족으로 발송 중단');
+  return res.status(402).json({
+    error: sendDeduct.error,
+    insufficientBalance: true,
+    balance: sendDeduct.balance,
+    requiredAmount: sendDeduct.amount
+  });
+}
+
+// ★ 2026-07-29 `both`는 **같은 수신자를 두 축으로 적재한다** — 아래 발송 단계가
+//   bulkInsertSmsQueue(문자)와 insertBrandQueue(브랜드) 양쪽에 넣는다.
+//   그런데 차감은 위 한 번뿐이라 브랜드 발송분이 통째로 무료로 나가고 있었다(적대검증 실측).
+//   두 축 모두 차감하고, 뒤가 실패하면 **앞선 차감을 되돌린다** — 한쪽만 깎인 채로 발송하면
+//   그 캠페인의 회계가 영구히 어긋나고 환불 sweeper도 짝을 못 찾는다.
+if (sendChannel === 'both') {
+  const brandDeduct = await prepaidDeduct(companyId, filteredCustomers.length, 'BRAND', id, userId);
+  if (brandDeduct.ok) aiDeductedAxes.add('BRAND');
+  if (!brandDeduct.ok) {
+    // ★ 2026-08-17 (Codex 2R high) 회수 **결과**를 봐야 한다. `prepaidRefund`는 실패를 던지지 않고
+    //   `ok:false`로 돌려주기도 해서, 예외만 잡으면 "회수 실패"가 성공으로 지나간다.
+    //   그 상태에서 아래 `failCampaignRun`이 잠금을 풀어 주므로 **재시도가 가능해지고, 첫 차감이 남아 있으면
+    //   그대로 이중 청구**가 된다(잠금을 푼 것 자체는 맞지만, 그 전에 미수를 원장에 남겨야 한다).
+    //   미수 기록은 이 파일이 이미 쓰는 CT를 그대로 쓴다(`markRefundPending` — 직접발송 경로 선례와 같은 형태).
+    try {
+      const revert = await prepaidRefund(
+        companyId, filteredCustomers.length, deductType, id,
+        '브랜드메시지 차감 실패로 문자 차감분 회수', 'campaign', { refundKey: aiKeyCancel },
+      );
+      if (!revert.ok) {
+        console.error(`[선불][both 보상실패] campaign=${id} ${deductType} ${filteredCustomers.length}건 회수 미완 (실회수 ${revert.refunded}건)`);
+        await markRefundPending(id, filteredCustomers.length, deductType, aiKeyCancel);
+      }
+    } catch (revertErr) {
+      // 회수까지 실패하면 잔액이 깎인 채 발송이 멈춘다 — 미수로 남겨 워커·사람이 이어받게 한다.
+      console.error(`[선불][both 보상실패] campaign=${id} ${deductType} ${filteredCustomers.length}건 회수 실패:`, revertErr);
+      await markRefundPending(id, filteredCustomers.length, deductType, aiKeyCancel);
+    }
+    // 차감은 되돌렸지만 실행 행은 그대로 남아 캠페인을 잠그던 자리다(2026-08-17).
+    await failCampaignRun(campaignRun.id, '브랜드메시지 차감 실패로 발송 중단');
+    return res.status(402).json({
+      error: brandDeduct.error,
+      insufficientBalance: true,
+      balance: brandDeduct.balance,
+      requiredAmount: brandDeduct.amount,
+    });
+  }
+}
+
 // 2단계: SMS bulk INSERT — sms-queue.ts 컨트롤타워 사용
 if (sendChannel === 'sms' || sendChannel === 'both') {
-  aiSentCount += await bulkInsertSmsQueue(companyTables, aiSmsRows, !isScheduled);
+  aiSmsInserted = await bulkInsertSmsQueue(companyTables, aiSmsRows, !isScheduled);
+  aiSentCount += aiSmsInserted;
 }
 
 // 3단계: 브랜드메시지 배치 INSERT — CT-04 insertBrandQueue (msg_type='F')
@@ -1090,15 +1117,19 @@ if (aiBrandRows.length > 0) {
       console.error(`[AI발송] 브랜드 큐 INSERT 실패:`, brandErr);
     }
   }
+  aiBrandInsertedTotal = aiBrandInserted;
   if (sendChannel === 'kakao') aiSentCount += aiBrandInserted;
   // ★ both는 차감이 두 축(message_type + BRAND) — 아래 aiFailCount 환불은 문자 축이므로
   //   브랜드 축 미적재분은 여기서 BRAND로 되돌린다(직접발송 경로와 동일 계약).
   if (sendChannel === 'both' && aiBrandInserted < aiBrandRows.length) {
     const aiBrandShort = aiBrandRows.length - aiBrandInserted;
     try {
-      await prepaidRefund(companyId, aiBrandShort, 'BRAND', id, `AI발송 브랜드 미적재 ${aiBrandShort}건 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
+      // 반환값을 본다 — ok:false를 버리면 브랜드 차감이 영구히 남는다(문자축 환불은 aiFailCount가 0이라 안 돈다).
+      const rb = await prepaidRefund(companyId, aiBrandShort, 'BRAND', id, `AI발송 브랜드 미적재 ${aiBrandShort}건 환불`, 'campaign', { refundKey: aiKeyNotLoaded });
+      if (!rb.ok) await markRefundPending(id, aiBrandShort, 'BRAND', aiKeyNotLoaded);
     } catch (brandRefundErr) {
       console.error('[AI발송] 브랜드 미적재 환불 오류:', brandRefundErr);
+      await markRefundPending(id, aiBrandShort, 'BRAND', aiKeyNotLoaded);
     }
   }
 }
@@ -1115,9 +1146,13 @@ if (aiFailCount > 0) {
   try {
     // ★ 2026-07-27 (B-0727-2): 이 건수는 `대상 − 큐 적재 성공`이라 게이트웨이 실패가 아니라 **미적재**다.
     //   fail 항아리에 넣으면 나중에 sweeper가 얹는 실제 실패분이 그 항아리에서 삼켜져 환불이 모자란다.
-    await prepaidRefund(companyId, aiFailCount, deductType, id, `AI발송 미적재 ${aiFailCount}건 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
+    // ★ 2026-08-18 반환값을 본다 — prepaidRefund는 실패를 던지지 않고 ok:false로도 돌려준다.
+    //   버리면 재시도할 주체가 사라져 차감이 그대로 남는다(직접발송·알림톡 경로와 같은 계약).
+    const rp = await prepaidRefund(companyId, aiFailCount, deductType, id, `AI발송 미적재 ${aiFailCount}건 환불`, 'campaign', { refundKey: aiKeyNotLoaded });
+    if (!rp.ok) await markRefundPending(id, aiFailCount, deductType, aiKeyNotLoaded);
   } catch (partialRefundErr) {
     console.error('[AI발송] 부분 실패 환불 오류:', partialRefundErr);
+    await markRefundPending(id, aiFailCount, deductType, aiKeyNotLoaded);
   }
 }
 
@@ -1185,23 +1220,34 @@ await query(
       //   ②`campaign_runs`를 손대지 않아 `status='sending'` 행이 남았다 — 그 행이 중복 발송 방지 검사에 걸려
       //   **그 캠페인의 재시도가 영구히 막혔다**(조기 return에서 고친 것과 같은 사고가 예외 경로에 남아 있었다).
       //   환불 축은 차감을 넣은 쪽과 같은 CT로 뽑는다(`resolveRefundAxes`) — 두 벌로 두면 회계가 갈린다.
-      const aiNotLoaded = Math.max(0, filteredCustomers.length - aiSentCount);
-      for (const axis of resolveRefundAxes(sendChannel, sendMsgTypeResolved.messageType)) {
+      // 축마다 **자기 적재수**로 미적재를 센다 — 한 축의 수를 다른 축에 쓰면 실발송분을 환불한다.
+      //   채널 판정은 CT(isBrandOnlyChannel)에 맡긴다 — 라우트가 채널 리터럴을 직접 비교하면
+      //   축이 늘어날 때 여기만 빠진다(brand-axis-invariants가 막는 패턴).
+      const loadedOf = (axisType: string) => (axisType === 'BRAND' || isBrandOnlyChannel(sendChannel))
+        ? aiBrandInsertedTotal
+        : aiSmsInserted;
+      // 차감하지 않은 축은 되돌릴 것이 없다 — 원장에 남은 과거 발송분을 환불하지 않도록 축을 좁힌다.
+      const aiPending: { count: number; messageType: string; refundKey?: string }[] = [];
+      for (const axis of resolveRefundAxes(sendChannel, sendMsgTypeResolved.messageType).filter((a) => aiDeductedAxes.has(a.type))) {
+        const aiNotLoaded = Math.max(0, filteredCustomers.length - loadedOf(axis.type));
+        if (aiNotLoaded <= 0) continue;
         try {
           const r = await prepaidRefund(
             companyId, aiNotLoaded, axis.type, id,
-            `발송 실패 미적재 ${aiNotLoaded}건 자동 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED },
+            `발송 실패 미적재 ${aiNotLoaded}건 자동 환불`, 'campaign', { refundKey: aiKeyNotLoaded },
           );
           // 환불은 실패를 던지지 않고 `ok:false`로 돌아오기도 한다 — 미수를 원장에 남겨야 재시도가 이중 청구가 안 된다.
           if (!r.ok) {
             console.error(`[AI발송] 미적재 환불 미완 campaign=${id} axis=${axis.type} ${aiNotLoaded}건 (실환불 ${r.refunded}건)`);
-            await markRefundPending(id, aiNotLoaded, axis.type);
+            aiPending.push({ count: aiNotLoaded, messageType: axis.type, refundKey: aiKeyNotLoaded });
           }
         } catch (refundErr) {
           console.error(`[AI발송] 미적재 환불 오류 campaign=${id} axis=${axis.type}:`, refundErr);
-          await markRefundPending(id, aiNotLoaded, axis.type);
+          aiPending.push({ count: aiNotLoaded, messageType: axis.type, refundKey: aiKeyNotLoaded });
         }
       }
+      // 축을 한 번에 기록한다 — 나눠 쓰면 그 사이에 워커가 첫 축만 보고 슬롯을 지운다.
+      await markRefundPendingAxes(id, aiPending);
       try {
         await query(`UPDATE campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1`, [id]);
       } catch (statusErr) {
@@ -2174,52 +2220,15 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     );
     const campaignId = campaignResult.rows[0].id;
 
-    // ★ 선불 잔액 체크 + 차감
-    // 유형은 위 게이트가 확정한 값을 쓴다 — 원본을 다시 읽으면 게이트를 우회한 값이 과금 축이 된다.
-    const directDeductType = isBrandOnlyChannel(directChannel) ? 'BRAND' : directMsgResolved.messageType;
-    const directDeduct = await prepaidDeduct(companyId, filteredRecipients.length, directDeductType, campaignId, userId);
-    if (!directDeduct.ok) {
-      // 캠페인 레코드 롤백
-      await query('DELETE FROM campaigns WHERE id = $1', [campaignId]);
-      return res.status(402).json({
-        success: false,
-        error: directDeduct.error,
-        insufficientBalance: true,
-        balance: directDeduct.balance,
-        requiredAmount: directDeduct.amount
-      });
-    }
-
-    // ★ 2026-07-29 캠페인 발송과 같은 구멍이 직접발송에도 있었다 — `both`는 아래에서
-    //   bulkInsertSmsQueue(문자)와 insertBrandQueue(브랜드) 양쪽에 같은 수신자를 적재하는데
-    //   차감은 위 한 번뿐이라 브랜드 발송분이 무료로 나갔다. 두 축 모두 차감하고, 뒤가 실패하면
-    //   앞선 차감과 캠페인 레코드를 함께 되돌린다(한쪽만 깎인 채로 남기지 않는다).
-    if (directChannel === 'both') {
-      const brandDeduct = await prepaidDeduct(companyId, filteredRecipients.length, 'BRAND', campaignId, userId);
-      if (!brandDeduct.ok) {
-        try {
-          await prepaidRefund(
-            companyId, filteredRecipients.length, directDeductType, campaignId,
-            '브랜드메시지 차감 실패로 문자 차감분 회수', 'campaign', { refundKey: REFUND_KEYS.CANCEL },
-          );
-        } catch (revertErr) {
-          console.error(`[선불][직접발송 both 보상실패] campaign=${campaignId} ${directDeductType} ${filteredRecipients.length}건 회수 실패:`, revertErr);
-        }
-        await query('DELETE FROM campaigns WHERE id = $1', [campaignId]);
-        return res.status(402).json({
-          success: false,
-          error: brandDeduct.error,
-          insufficientBalance: true,
-          balance: brandDeduct.balance,
-          requiredAmount: brandDeduct.amount,
-        });
-      }
-    }
-
     // ★ C1: 채널별 발송 성공 건수 추적 (선별적 환불 계산용)
     // ★ 2026-07-27 (B-0727-2): try **밖**으로 올린다. 전체 실패 catch가 "실제로 큐에 들어간 수"를 봐야
     //   미적재분만 환불한다. 안에서 선언하면 catch가 그 값을 못 봐, 적재는 다 됐는데 뒤 후처리만
     //   실패한 경우에도 전량을 미적재로 환불해 실발송분까지 돌려주게 된다.
+    // 차감 유형은 catch(축별 환불)도 봐야 하므로 try 밖에서 확정한다.
+    // 이번 요청에서 실제로 차감한 축만 되돌린다(AI 경로와 같은 계약 — preflight throw는 차감 전에도 온다).
+    const directDeductedAxes = new Set<string>();
+    const directDeductType = isBrandOnlyChannel(directChannel) ? 'BRAND' : directMsgResolved.messageType;
+
     let directSmsSentCount = 0;
     let directKakaoSentCount = 0;
     let directAlimtalkSentCount = 0;
@@ -2249,10 +2258,16 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       directCustomerMap.set(normalizePhone(c.phone), c);
     });
 
+
+    // ★ 2026-08-18 preflight — **조립·검증을 차감·적재 앞으로** 옮겼다.
+    //   전에는 [차감 → 문자 적재 → 브랜드 조립·검증 → 브랜드 적재] 순서라, 규격 위반이
+    //   3단계에서 throw하면 **돈은 이미 움직였고 문자는 이미 나간** 뒤였다(both에서 BRAND 차감 잔존·
+    //   문자만 발송 후 500). 검증을 아무리 정교하게 만들어도 위치가 그대로면 같은 사고가 반복된다.
+    //   이제 두 채널의 행을 **전량 만들어 본 뒤**에 차감한다 — 규격 위반은 돈이 움직이기 전에 끝난다.
+    const directSmsRows: any[][] = [];
+    const useNow = !isScheduledSend && !(splitEnabled && splitCount > 0);
     // SMS 발송 (sms 또는 both) — ★ D72: sms-queue.ts 컨트롤타워 bulkInsertSmsQueue 사용
     if (directChannel === 'sms' || directChannel === 'both') {
-      const directSmsRows: any[][] = [];
-      const useNow = !isScheduledSend && !(splitEnabled && splitCount > 0);
 
       for (let i = 0; i < filteredRecipients.length; i++) {
         const recipient = filteredRecipients[i];
@@ -2303,12 +2318,13 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         ]);
       }
 
-      directSmsSentCount = await bulkInsertSmsQueue(companyTables, directSmsRows, useNow);
     }
 
+    // 즉시 브랜드 발송의 기준 시각 — 요청 하나에 **한 번만** 정해 검증과 적재가 같은 값을 쓰게 한다.
+    const directBrandSendAt = new Date();
+    const directBrandRows: BrandQueueRow[] = [];
     // 브랜드메시지 발송 (kakao 또는 both) — 2026-07-30 재구축: SMSQ 배치(msg_type='F')
     if (directChannel === 'kakao' || directChannel === 'both') {
-      const directBrandRows: BrandQueueRow[] = [];
       for (let i = 0; i < filteredRecipients.length; i++) {
         const recipient = filteredRecipients[i];
         // ★ D102: 항상 백엔드 replaceVariables 컨트롤타워 사용 (customMessages 분기 제거)
@@ -2333,6 +2349,18 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           } else {
             kakaoSendTime = toKoreaTimeStr(new Date(scheduledAt));
           }
+        } else if (splitEnabled && splitCount > 0) {
+          // ★ 2026-08-18 즉시 분할발송에도 시각을 매긴다 — 문자 축은 예약이 아니어도 분할 시각을
+          //   계산하는데(위 sendTime 블록) 브랜드만 비워 두고 있었다. `both`면 같은 수신자가
+          //   두 채널에서 서로 다른 시각에 나가고, 브랜드는 분할이 사실상 무시됐다.
+          const batchIndex = Math.floor(i / splitCount);
+          kakaoSendTime = toKoreaTimeStr(calcSplitSendTime(new Date(), batchIndex));
+        } else {
+          // ★ 2026-08-18 즉시발송도 **검증한 시각을 그대로 큐에 넣는다.**
+          //   비워 두면 큐가 MySQL NOW()를 쓰는데, 검사는 조립 시점(preflight)이고 적재는 차감·문자
+          //   INSERT를 지난 뒤라 그 사이에 20:50을 넘길 수 있다(검사 통과 → 금지 시각에 적재).
+          //   요청 단위로 고정한 시각을 싣고 그 값으로 검증하면 검사와 적재가 갈리지 않는다.
+          kakaoSendTime = toKoreaTimeStr(directBrandSendAt);
         }
 
         // ★ D103: resolveCustomerCallback 컨트롤타워
@@ -2350,6 +2378,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           bubbleType: kakaoBubbleType || 'TEXT',
           isAd: finalIsAd,
           message: finalMessage,
+          sendAt: kakaoSendTime || undefined,   // 예약·분할 시각 그대로 — 발송 가능 시간 판정 기준
+          immediate: !isScheduledSend,
           attachmentJson: kakaoAttachmentJson || undefined,
           carouselJson: kakaoCarouselJson || undefined,
         });
@@ -2365,6 +2395,69 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           companyId,
         });
       }
+    }
+
+    // ── 여기서부터 되돌릴 수 없는 것들(차감·적재) ─────────────────────────
+    //   위 preflight를 통과했으므로 이 아래에서 규격 위반으로 throw할 일은 없다.
+    // ★ 선불 잔액 체크 + 차감
+    // 유형은 위 게이트가 확정한 값을 쓴다 — 원본을 다시 읽으면 게이트를 우회한 값이 과금 축이 된다.
+    const directDeduct = await prepaidDeduct(companyId, filteredRecipients.length, directDeductType, campaignId, userId);
+    if (directDeduct.ok) directDeductedAxes.add(directDeductType);
+    if (!directDeduct.ok) {
+      // 캠페인 레코드 롤백
+      await query('DELETE FROM campaigns WHERE id = $1', [campaignId]);
+      return res.status(402).json({
+        success: false,
+        error: directDeduct.error,
+        insufficientBalance: true,
+        balance: directDeduct.balance,
+        requiredAmount: directDeduct.amount
+      });
+    }
+
+    // ★ 2026-07-29 캠페인 발송과 같은 구멍이 직접발송에도 있었다 — `both`는 아래에서
+    //   bulkInsertSmsQueue(문자)와 insertBrandQueue(브랜드) 양쪽에 같은 수신자를 적재하는데
+    //   차감은 위 한 번뿐이라 브랜드 발송분이 무료로 나갔다. 두 축 모두 차감하고, 뒤가 실패하면
+    //   앞선 차감과 캠페인 레코드를 함께 되돌린다(한쪽만 깎인 채로 남기지 않는다).
+    if (directChannel === 'both') {
+      const brandDeduct = await prepaidDeduct(companyId, filteredRecipients.length, 'BRAND', campaignId, userId);
+      if (brandDeduct.ok) directDeductedAxes.add('BRAND');
+      if (!brandDeduct.ok) {
+        // ★ 2026-08-18 회수 **결과**를 본다 — prepaidRefund는 실패를 던지지 않고 ok:false로도 돌아온다.
+        //   회수가 안 된 채 캠페인 행을 지우면 미수를 매달 대상이 사라져 문자 차감분이 영구 고립된다.
+        //   회수 실패 시에는 행을 남기고(failed) 채무를 기록한다 — AI 캠페인 경로와 같은 계약.
+        let reverted = false;
+        try {
+          const revert = await prepaidRefund(
+            companyId, filteredRecipients.length, directDeductType, campaignId,
+            '브랜드메시지 차감 실패로 문자 차감분 회수', 'campaign', { refundKey: REFUND_KEYS.CANCEL },
+          );
+          reverted = revert.ok;
+          if (!revert.ok) console.error(`[선불][직접발송 both 보상실패] campaign=${campaignId} ${directDeductType} ${filteredRecipients.length}건 회수 미완 (실회수 ${revert.refunded}건)`);
+        } catch (revertErr) {
+          console.error(`[선불][직접발송 both 보상실패] campaign=${campaignId} ${directDeductType} ${filteredRecipients.length}건 회수 실패:`, revertErr);
+        }
+        if (reverted) {
+          await query('DELETE FROM campaigns WHERE id = $1', [campaignId]);
+        } else {
+          await markRefundPendingAxes(campaignId, [{ count: filteredRecipients.length, messageType: directDeductType, refundKey: REFUND_KEYS.CANCEL }]);
+          await query(`UPDATE campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1`, [campaignId]).catch(() => {});
+        }
+        return res.status(402).json({
+          success: false,
+          error: brandDeduct.error,
+          insufficientBalance: true,
+          balance: brandDeduct.balance,
+          requiredAmount: brandDeduct.amount,
+        });
+      }
+    }
+
+    if (directChannel === 'sms' || directChannel === 'both') {
+      directSmsSentCount = await bulkInsertSmsQueue(companyTables, directSmsRows, useNow);
+    }
+
+    if (directChannel === 'kakao' || directChannel === 'both') {
       try {
         directKakaoSentCount = await insertBrandQueue(companyTables, directBrandRows, campaignId);
       } catch (brandErr) {
@@ -2383,12 +2476,17 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       const smsFailCount = filteredRecipients.length - directSmsSentCount;
       if (smsFailCount > 0) {
         console.warn(`[직접발송] SMS 부분 실패 — 성공: ${directSmsSentCount}, 실패: ${smsFailCount} → 실패분 환불`);
+        // catch에서도 축을 알아야 미수를 남길 수 있다 — try 밖에서 확정한다.
+        const smsDeductType = isBrandOnlyChannel(directChannel) ? 'BRAND' : msgType;
         try {
-          const smsDeductType = isBrandOnlyChannel(directChannel) ? 'BRAND' : msgType;
           // 대상 − 큐 적재 성공 = 미적재(게이트웨이 실패가 아니다) — B-0727-2
-          await prepaidRefund(companyId, smsFailCount, smsDeductType, campaignId, `직접발송 SMS 미적재 ${smsFailCount}건 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
+          // ★ 2026-08-18 반환값을 본다 — prepaidRefund는 실패를 던지지 않고 ok:false로도 돌려준다.
+          //   예외만 잡으면 "환불 못 했다"가 성공으로 지나가 재시도할 주체가 사라진다(알림톡 경로와 동일 계약).
+          const r = await prepaidRefund(companyId, smsFailCount, smsDeductType, campaignId, `직접발송 SMS 미적재 ${smsFailCount}건 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
+          if (!r.ok) await markRefundPending(campaignId, smsFailCount, smsDeductType);
         } catch (refundErr) {
           console.error('[직접발송] SMS 부분 실패 환불 오류:', refundErr);
+          await markRefundPending(campaignId, smsFailCount, smsDeductType);
         }
       }
     }
@@ -2398,9 +2496,11 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       if (kakaoFailCount > 0) {
         console.warn(`[직접발송] 카카오 부분 실패 — 성공: ${directKakaoSentCount}, 실패: ${kakaoFailCount} → 실패분 환불`);
         try {
-          await prepaidRefund(companyId, kakaoFailCount, 'BRAND', campaignId, `직접발송 브랜드메시지 미적재 ${kakaoFailCount}건 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
+          const rk = await prepaidRefund(companyId, kakaoFailCount, 'BRAND', campaignId, `직접발송 브랜드메시지 미적재 ${kakaoFailCount}건 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
+          if (!rk.ok) await markRefundPending(campaignId, kakaoFailCount, 'BRAND');
         } catch (refundErr) {
           console.error('[직접발송] 카카오 부분 실패 환불 오류:', refundErr);
+          await markRefundPending(campaignId, kakaoFailCount, 'BRAND');
         }
       }
     }
@@ -2656,10 +2756,40 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       try {
         // ★ 2026-07-27 (B-0727-2): 이 catch는 큐 적재뿐 아니라 그 뒤 후처리(상태 UPDATE·학습 적재)까지 감싼다.
         //   전량을 미적재로 환불하면, 적재는 다 됐는데 후처리만 실패한 경우 실제로 나갈 발송분까지 돌려준다.
-        //   실제 큐에 들어간 수를 빼고 남은 몫만 환불한다. 채널별 최대값 = 그 캠페인이 적재한 건수.
-        const directLoaded = Math.max(directSmsSentCount, directKakaoSentCount, directAlimtalkSentCount);
-        const directNotLoaded = Math.max(0, filteredRecipients.length - directLoaded);
-        await prepaidRefund(companyId, directNotLoaded, directDeductType, campaignId, `발송 실패 미적재 ${directNotLoaded}건 자동 환불`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
+        //   실제 큐에 들어간 수를 빼고 남은 몫만 환불한다.
+        //
+        // ★ 2026-08-18 채널 축 분리 — **차감이 2축인데 환불이 1축이던 누수를 닫는다.**
+        //   `both`는 위에서 directDeductType(문자)과 'BRAND' **두 번** 차감한다. 그런데 여기서는
+        //   세 카운트의 max 하나로 미적재를 계산하고 directDeductType 한 축만 환불했다.
+        //   문자는 적재되고 브랜드 조립이 throw하면 max=문자수라 미적재가 0으로 계산되어
+        //   **BRAND 차감이 통째로 남았다.** 축마다 자기 적재수로 따로 환불한다(성공 경로의 부분환불과 같은 방식).
+        //   ⚠ 축마다 **독립 try**로 돈다 — 앞 축의 prepaidRefund가 throw하면 뒤 축의 환불까지
+        //     통째로 건너뛰던 구조였다(한 번의 예외로 두 채무가 함께 유실).
+        const primaryLoaded = directDeductType === 'BRAND'
+          ? directKakaoSentCount
+          : Math.max(directSmsSentCount, directAlimtalkSentCount);
+        const refundAxes: { type: string; count: number; label: string }[] = [
+          { type: directDeductType, count: Math.max(0, filteredRecipients.length - primaryLoaded), label: '' },
+        ];
+        // both = 문자축과 별개로 BRAND가 한 번 더 차감돼 있다. 브랜드 적재수 기준으로 따로 되돌린다.
+        if (directChannel === 'both') {
+          refundAxes.push({ type: 'BRAND', count: Math.max(0, filteredRecipients.length - directKakaoSentCount), label: '(브랜드)' });
+        }
+        // 차감하지 않은 축은 되돌릴 것이 없다(preflight throw = 차감 전).
+        const chargedAxes = refundAxes.filter((a) => directDeductedAxes.has(a.type));
+        const pendingAxes: { type: string; count: number }[] = [];
+        for (const axis of chargedAxes) {
+          if (axis.count <= 0) continue;
+          try {
+            const r = await prepaidRefund(companyId, axis.count, axis.type, campaignId, `발송 실패 미적재 ${axis.count}건 자동 환불${axis.label}`, 'campaign', { refundKey: REFUND_KEYS.NOT_LOADED });
+            if (!r.ok) pendingAxes.push({ type: axis.type, count: axis.count });
+          } catch (axisErr) {
+            console.error(`[직접발송] ${axis.type} 미적재 환불 오류:`, axisErr);
+            pendingAxes.push({ type: axis.type, count: axis.count });
+          }
+        }
+        // 축을 **한 번에** 기록한다 — 나눠 쓰면 그 사이에 워커가 첫 축만 담긴 스냅샷을 읽고 슬롯을 지운다.
+        await markRefundPendingAxes(campaignId, pendingAxes.map((p) => ({ count: p.count, messageType: p.type })));
         await query(`UPDATE campaigns SET status = 'failed', updated_at = NOW() WHERE id = $1`, [campaignId]);
       } catch (refundErr) {
         console.error('[직접발송] 환불 처리 중 추가 오류:', refundErr);

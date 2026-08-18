@@ -255,6 +255,7 @@ export const REFUND_KEYS = {
   TEST: 'test',
 } as const;
 
+
 /**
  * 선불 환불 (실패건 또는 취소) — 중복 환불 방지 포함
  * @param referenceType - ★ 2026-07-07: 차감과 같은 유형이어야 매칭됨(차감↔환불 쌍 = reference_type+reference_id).

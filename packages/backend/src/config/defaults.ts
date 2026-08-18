@@ -212,6 +212,56 @@ export const SEND_HOURS = {
   end: Number(process.env.SEND_END_HOUR) || 21,
 };
 
+/**
+ * 브랜드메시지 발송 가능 시간 (KST, 분 단위) — IMC-Agent 매뉴얼 v2.3.1 §3.9.1
+ * "친구톡/브랜드메시지는 20:50 ~ 08:00 심야 발송이 불가합니다."
+ *
+ * 창 밖으로 나간 건은 카카오가 3022(광고 메시지 발송 가능 시간이 아님)로 폐기하는데
+ * 그 시점엔 이미 차감이 끝나 있다 — 그래서 적재 전에 막는다.
+ * SEND_HOURS(문자 축)와 종료가 10분 다르고 분 단위가 필요해 별도 축으로 둔다.
+ */
+const BRAND_WINDOW_START_MIN = 8 * 60;        // 08:00 — 포함
+const BRAND_WINDOW_END_MIN = 20 * 60 + 50;    // 20:50 — 미포함(마지막 발송 가능 분 = 20:49)
+
+export const BRAND_SEND_WINDOW = {
+  /** 08:00 — 포함(이 시각부터 발송 가능) */
+  startMinuteOfDay: BRAND_WINDOW_START_MIN,
+  /** 20:50 — **미포함**(이 시각부터 금지 구간 시작. 마지막 발송 가능 분은 20:49) */
+  endMinuteOfDay: BRAND_WINDOW_END_MIN,
+  /**
+   * 즉시 발송의 마감 여유(분). 조립 시점에 창 안이어도 **차감·큐 적재를 지나는 동안** 20:50을 넘길 수 있다.
+   * 그 사이에 넘기면 문자만 나가고 브랜드는 금지 시각에 적재되므로, 마감 직전 요청은 아예 받지 않는다.
+   * 소비처는 이 값을 그대로 쓴다 — 각자 정리하면 근접 판정과 창 판정이 갈린다(0818 7R).
+   */
+  immediateMarginMinutes: normalizeMarginMinutes(process.env.BRAND_SEND_MARGIN_MIN, 2),
+};
+
+/**
+ * 마감 여유 정규화 — **안전장치가 조용히 꺼지거나, 채널이 조용히 닫히지 않게** 한다(0818 8R).
+ *
+ *  · 정확히 `0`만 해제로 본다. `0.5` 같은 양수 소수를 내림하면 **보호가 사라진다** — 올림한다.
+ *  · 창 길이(770분) 이상은 `start <= x < end - margin`을 영영 만족 못 시켜 **즉시 발송이 전부 거절**된다.
+ *    사용자에게는 "발송 시각을 조정하라"로만 보여 설정이 원인이라는 걸 못 찾는다 → 강등하고 로그로 드러낸다.
+ *  · 그 밖(빈값·문자·음수·Infinity)은 기본값.
+ */
+function normalizeMarginMinutes(raw: string | undefined, fallback: number): number {
+  if (raw === undefined) return fallback;
+  const trimmed = String(raw).trim();
+  if (trimmed === '') return fallback;
+  // 해제 판정은 **문자열 단계**에서만 한다 — 숫자로 바꾼 뒤 0을 보면 `-0`과 `1e-999`(underflow)가
+  // 양수 표기인데도 보호를 꺼 버린다(0818 9R).
+  if (trimmed === '0') return 0;               // 운영자의 명시 해제
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  const minutes = Math.ceil(n);                // 양수는 올림 — 0.5를 0으로 깎으면 보호가 없어진다
+  const windowLength = BRAND_WINDOW_END_MIN - BRAND_WINDOW_START_MIN;
+  if (minutes >= windowLength) {
+    console.error(`[설정] BRAND_SEND_MARGIN_MIN=${raw} — 발송 창(${windowLength}분) 이상이라 즉시 발송이 전부 막힌다. 기본값 ${fallback}분으로 강등한다.`);
+    return fallback;
+  }
+  return minutes;
+}
+
 // ============================================================
 // 기타 제한값
 // ============================================================

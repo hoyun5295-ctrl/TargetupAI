@@ -168,7 +168,8 @@ describe('게이트가 차감·실행 행보다 앞에 있다', () => {
     // prepaidRefund는 실패를 던지지 않고 `ok:false`로 돌려주기도 한다(반환 타입 `{refunded, ok}`).
     // 잠금을 푼 뒤라 재시도가 가능해지므로, 미수를 원장에 남기지 않으면 두 번 걷힌다.
     const refundCalls = (CAMPAIGN_SEND.match(/prepaidRefund\(/g) || []).length;
-    const pendingCalls = (CAMPAIGN_SEND.match(/markRefundPending\(/g) || []).length;
+    // ★ 2026-08-18 배치 판(markRefundPendingAxes)도 센다 — 축을 한 번에 기록하는 형태가 추가됐다.
+    const pendingCalls = (CAMPAIGN_SEND.match(/markRefundPending(?:Axes)?\(/g) || []).length;
     expect(refundCalls, '환불 호출을 못 찾았다').toBeGreaterThan(0);
     expect(
       pendingCalls,

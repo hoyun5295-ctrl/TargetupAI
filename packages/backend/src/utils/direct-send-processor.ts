@@ -54,6 +54,12 @@ export interface SendChunkParams {
   mmsImagePaths: any[];
   /** 즉시발송 여부 — bulkInsertSmsQueue NOW() 사용 분기 */
   useNow: boolean;
+  /**
+   * ★ 2026-08-18 **예약 발송인가**(캠페인 수준 사실). 브랜드 발송 가능 시간의 마감 여유 적용을 가른다.
+   * ⛔ 행의 `sendTime` 유무로 추론하면 안 된다 — 즉시 **분할** 발송도 worker가 시각을 채우므로
+   *    예약으로 오인되어 여유 없이 통과한다(동기 경로 campaigns.ts는 `!isScheduledSend`를 쓴다).
+   */
+  scheduled: boolean;
 
   // 카카오 브랜드메시지
   kakaoBubbleType?: string;
@@ -168,6 +174,9 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
           bubbleType: p.kakaoBubbleType || 'TEXT',
           isAd: p.finalIsAd,
           message: finalMessage,
+          // worker가 계산해 넘긴 발송 시각(즉시면 '') — 발송 가능 시간 판정 기준
+          sendAt: r.sendTime || undefined,
+          immediate: !p.scheduled,
           attachmentJson: p.kakaoAttachmentJson || undefined,
           carouselJson: p.kakaoCarouselJson || undefined,
         });

@@ -4,6 +4,7 @@
 > AI 오퍼레이터가 만든 발송이 **누구 것으로 기록되고 누구에게 나가는가** 두 축을 함께 고친 트랙.
 > 기능 상설(AI Operator 전반)은 [`AI_OPERATOR_기능정의서.md`](AI_OPERATOR_기능정의서.md) §13이 소유 — 여기는 **근거와 함정**만.
 > 값 집합의 코드 소유 = `backend/src/utils/send-type-axis.ts` · `backend/src/utils/billing-send-phase.ts`
+> **상태 = 2026-08-18 배포완료**(backend `pm2 restart` + frontend `build:safe`). 남은 것은 운영 실측뿐 — §5.
 
 ---
 
@@ -83,7 +84,7 @@
 
 - **나머지 3개 호출부의 출처 값** — 자동마케팅(`continuous-operator`) · 마케팅 플래너(2곳) · 모바일 DM. 구조는 열려 있고 값만 `'direct'`다. 값을 정하려면 각각 환불·청구 집합에 넣을지 판단이 필요하다.
 - **`getValue` fail-open** — `{operator:'eq'}`처럼 **value 키가 빠진** 엔트리를 만나면 객체 자체를 값으로 돌려줘 `col = $1`에 객체가 실린다(`customer-filter.ts:60`). 안 고친 이유 = 이 CT를 여러 경로가 공유하고, 조건을 그냥 빼면 남은 필터만으로 **대상이 넓어진다**. 고친다면 무효 날짜와 같은 fail-closed(`AND FALSE`)여야 한다. 좌표는 `customer-filter.name-axis.test.ts` 주석이 보존.
-- **실측** — 배포 후 같은 문장으로 1명이 잡히는지, 조건 불가 문장에서 거절이 뜨는지.
+- **운영 실측(Harold 몫)** — 같은 문장("유호윤 고객에게만 …")으로 1명이 잡히는지 · 조건 불가 문장에서 거절이 뜨는지 · 오퍼레이터 발송이 발송결과에 `AI 오퍼레이터`로 뜨는지 · 예약 승인 시 확인창이 뜨는지.
 
 ---
 

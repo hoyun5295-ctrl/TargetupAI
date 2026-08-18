@@ -132,9 +132,14 @@ async function retryPendingRefunds(): Promise<void> {
       const count = Number(rp.count || 0);
       const messageType = String(rp.messageType || '');
       const attempts = Number(rp.attempts || 0);
+      // ★ 2026-08-18 CAS — 읽은 스냅샷이 그대로일 때만 지운다.
+      //   축이 둘인 채무(주 슬롯 + brand)는 요청 쪽이 한 번에 쓰지만, 이 워커가 읽은 **뒤에**
+      //   같은 캠페인에 축이 더해질 수 있다. 조건 없이 지우면 아직 안 갚은 축이 사라진다.
+      const snapshot = JSON.stringify(rp);
       const clear = () => query(
-        `UPDATE campaigns SET send_config = send_config - 'refundPending', updated_at = NOW() WHERE id = $1`,
-        [row.id],
+        `UPDATE campaigns SET send_config = send_config - 'refundPending', updated_at = NOW()
+          WHERE id = $1 AND send_config->'refundPending' = $2::jsonb`,
+        [row.id, snapshot],
       ).catch(() => {});
       // 다음 시도까지 대기 — 2분에서 시작해 최대 60분. 같은 건이 매 사이클을 잡아먹지 않게 한다.
       const backoffMin = Math.min(60, 2 ** Math.min(attempts, 5));
@@ -142,19 +147,23 @@ async function retryPendingRefunds(): Promise<void> {
         `UPDATE campaigns
             SET send_config = jsonb_set(send_config, '{refundPending}', $2::jsonb),
                 updated_at = NOW()
-          WHERE id = $1`,
+          WHERE id = $1 AND send_config->'refundPending' = $3::jsonb`,
         [row.id, JSON.stringify({
           ...rp,
           attempts: attempts + 1,
           lastAttemptAt: new Date().toISOString(),
           nextAttemptAt: new Date(Date.now() + backoffMin * 60_000).toISOString(),
           ...(err ? { lastError: err.slice(0, 200) } : {}),
-        })],
+        }), snapshot],
       ).catch(() => {});
       // ★ 2026-07-30: both의 두 원장이 모두 실패한 경우 brand 보조 슬롯이 함께 남는다 — 둘 다 소진해야 해제.
-      const parts: Array<{ count: number; messageType: string }> = [
-        { count, messageType },
-        ...(rp.brand && Number(rp.brand.count) > 0 ? [{ count: Number(rp.brand.count), messageType: String(rp.brand.messageType || '') }] : []),
+      // ★ 2026-08-18 원인 키(refundKey)를 기록대로 쓴다 — 없으면 NOT_LOADED로 폴백(옛 기록 호환).
+      //   취소 보상(CANCEL)으로 생긴 채무를 NOT_LOADED 항아리로 갚으면 엉뚱한 항아리에서 멱등 처리돼 사라진다.
+      const parts: Array<{ count: number; messageType: string; refundKey: string }> = [
+        { count, messageType, refundKey: String(rp.refundKey || REFUND_KEYS.NOT_LOADED) },
+        ...(rp.brand && Number(rp.brand.count) > 0
+          ? [{ count: Number(rp.brand.count), messageType: String(rp.brand.messageType || ''), refundKey: String(rp.brand.refundKey || REFUND_KEYS.NOT_LOADED) }]
+          : []),
       ].filter((p) => p.count > 0 && p.messageType);
       if (parts.length === 0) { await clear(); continue; }
       try {
@@ -162,7 +171,7 @@ async function retryPendingRefunds(): Promise<void> {
         for (const part of parts) {
           const res = await prepaidRefund(
             row.company_id, part.count, part.messageType, row.id, `대량 발송 미적재 ${part.count}건 자동 환불(재시도)`,
-            'campaign', { refundKey: REFUND_KEYS.NOT_LOADED },
+            'campaign', { refundKey: part.refundKey },
           );
           if (!res.ok) allOk = false;
           else if (res.refunded > 0) {
@@ -372,6 +381,7 @@ async function processCampaign(campaignId: string): Promise<void> {
       subject: cfg.subject || '', callback: cfg.callback || '',
       useIndividualCallback: cfg.useIndividualCallback || false,
       finalIsAd, opt080, mmsImagePaths: cfg.mmsImagePaths || [], useNow,
+      scheduled: !!cfg.scheduled,
       kakaoBubbleType: cfg.kakaoBubbleType, kakaoSenderKey: cfg.kakaoSenderKey, kakaoTargeting: cfg.kakaoTargeting,
       kakaoAttachmentJson: cfg.kakaoAttachmentJson, kakaoCarouselJson: cfg.kakaoCarouselJson, kakaoResendType: cfg.kakaoResendType,
       alimtalkTemplateCode: cfg.alimtalkTemplateCode, alimtalkVariableMap: cfg.alimtalkVariableMap,
