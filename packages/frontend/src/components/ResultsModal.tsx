@@ -344,17 +344,19 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
   };
 
   const getStatusColor = (c: any) => {
-    if (c.status === 'completed') return 'bg-green-50 text-green-700 border border-green-200';
-    if (c.status === 'scheduled') return 'bg-blue-50 text-blue-700 border border-blue-200';
-    if (c.status === 'sending') return 'bg-yellow-50 text-yellow-700 border border-yellow-200';
-    if (c.status === 'cancelled') return 'bg-neutral-100 text-neutral-600 border border-neutral-200';
-    if (c.status === 'failed' || c.status === 'draft') return 'bg-red-50 text-red-700 border border-red-200';
-    return 'bg-neutral-50 text-neutral-600 border border-neutral-200';
+    if (c.status === 'completed') return 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/15';
+    if (c.status === 'scheduled') return 'bg-indigo-50 text-indigo-700 ring-1 ring-inset ring-indigo-600/15';
+    if (c.status === 'sending') return 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-600/15';
+    if (c.status === 'cancelled') return 'bg-neutral-100 text-neutral-600 ring-1 ring-inset ring-neutral-900/[.06]';
+    if (c.status === 'failed' || c.status === 'draft') return 'bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-600/15';
+    return 'bg-neutral-100 text-neutral-600 ring-1 ring-inset ring-neutral-900/[.06]';
   };
 
   return (
     <div className={CUI_MODAL_SCRIM}>
-      <div className={`${CUI_MODAL} max-w-[1300px] max-h-[95vh]`} role="dialog" aria-modal="true" aria-label="발송 결과">
+      {/* ★ 2026-08-18 max-h를 덧붙이지 않는다 — CUI_MODAL이 이미 max-h-[92vh]를 갖고 있어
+          두 클래스가 같이 붙으면 어느 쪽이 이길지는 생성된 CSS 순서가 정하고 JSX 순서는 무관하다. */}
+      <div className={`${CUI_MODAL} max-w-[1300px]`} role="dialog" aria-modal="true" aria-label="발송 결과">
         {/* 헤더 */}
         <div className={CUI_MODAL_HEAD}>
           <h2 className={CUI_MODAL_TITLE}>발송 결과</h2>
@@ -956,7 +958,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                             />
                             <td className="px-3 py-2 text-center">
                               <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                t.status === 'success' ? 'bg-green-50 text-green-700' : t.status === 'pending' ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'
+                                t.status === 'success' ? 'bg-emerald-50 text-emerald-700' : t.status === 'pending' ? 'bg-amber-50 text-amber-800' : 'bg-rose-50 text-rose-700'
                               }`}>
                                 {t.status === 'success' ? '성공' : t.status === 'pending' ? '대기' : '실패'}
                               </span>
@@ -1016,10 +1018,10 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                             />
                             <td className="px-3 py-2 text-center">
                               <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                (t.result === 'pass' || t.result === 'received') ? 'bg-green-50 text-green-700'
-                                : t.result === 'blocked' ? 'bg-red-50 text-red-700'
-                                : (t.result === 'failed' || t.result === 'timeout') ? 'bg-orange-50 text-orange-700'
-                                : 'bg-yellow-50 text-yellow-700'
+                                (t.result === 'pass' || t.result === 'received') ? 'bg-emerald-50 text-emerald-700'
+                                : t.result === 'blocked' ? 'bg-rose-50 text-rose-700'
+                                : (t.result === 'failed' || t.result === 'timeout') ? 'bg-orange-50 text-orange-800'
+                                : 'bg-amber-50 text-amber-800'
                               }`}>
                                 {(t.result === 'pass' || t.result === 'received') ? '정상'
                                   : t.result === 'blocked' ? '차단'
@@ -1093,7 +1095,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                 <select
                   value={messageSearchType}
                   onChange={(e) => setMessageSearchType(e.target.value)}
-                  className="border border-neutral-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                  className="border border-neutral-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-4 focus:ring-indigo-600/15 focus:border-indigo-600"
                 >
                   <option value="phone">수신번호</option>
                   <option value="callback">회신번호</option>
@@ -1104,11 +1106,11 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                   onChange={(e) => setMessageSearchValue(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') { setMessagePage(1); fetchMessages(selectedCampaign.id, 1); }}}
                   placeholder="번호 입력"
-                  className="border border-neutral-300 rounded-lg px-3 py-1.5 text-sm w-48 focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-emerald-400"
+                  className="border border-neutral-300 rounded-lg px-3 py-1.5 text-sm w-48 focus:outline-none focus:ring-4 focus:ring-indigo-600/15 focus:border-indigo-600"
                 />
                 <button
                   onClick={() => { setMessagePage(1); fetchMessages(selectedCampaign.id, 1); }}
-                  className="px-4 py-1.5 bg-emerald-500 text-white rounded-lg text-sm font-medium hover:bg-emerald-600 transition-colors"
+                  className="h-9 px-3.5 rounded-lg bg-indigo-600 text-white text-[13.5px] font-semibold transition hover:bg-indigo-700 active:scale-[.98]"
                 >
                   검색
                 </button>
@@ -1116,7 +1118,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                 {(['all', 'success', 'fail', 'substitute'] as const).map(st => {
                   const active = messageStatus === st;
                   const label = st === 'all' ? '전체' : st === 'success' ? '성공' : st === 'fail' ? '실패' : '대체';
-                  const activeCls = st === 'success' ? 'bg-green-500 text-white shadow-sm shadow-green-200'
+                  const activeCls = st === 'success' ? 'bg-indigo-600 text-white'
                     : st === 'fail' ? 'bg-rose-500 text-white shadow-sm shadow-rose-200'
                     : st === 'substitute' ? 'bg-amber-400 text-[#3C1E1E] shadow-sm shadow-amber-200'
                     : 'bg-neutral-800 text-white shadow-sm';
@@ -1193,7 +1195,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                             <td className="px-3 py-2.5 text-center whitespace-nowrap">
                               {/* ★ 2026-06-13: 발송 예약(미발송) 행은 파란 칩 — 결과 대기와 구분 */}
                               <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
-                                statusInfo.type === 'success' ? 'bg-green-50 text-green-700' : statusInfo.type === 'scheduled' ? 'bg-blue-50 text-blue-700' : statusInfo.type === 'pending' ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'
+                                statusInfo.type === 'success' ? 'bg-emerald-50 text-emerald-700' : statusInfo.type === 'scheduled' ? 'bg-indigo-50 text-indigo-700' : statusInfo.type === 'pending' ? 'bg-amber-50 text-amber-800' : 'bg-rose-50 text-rose-700'
                               }`}>
                                 {statusInfo.type === 'success' ? '성공' : statusInfo.type === 'scheduled' ? '발송 예약' : statusInfo.type === 'pending' ? '대기' : '실패'}
                               </span>
@@ -1227,7 +1229,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                       key={page}
                       onClick={() => { setMessagePage(page); fetchMessages(selectedCampaign.id, page); }}
                       className={`w-8 h-8 text-sm rounded-md border transition-colors ${
-                        messagePage === page ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white hover:bg-neutral-50'
+                        messagePage === page ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white hover:bg-neutral-50'
                       }`}
                     >
                       {page}

@@ -232,12 +232,25 @@ export const CUI_ONLY_DESKTOP = 'hidden md:block';
 // ────────────── 모달(폼) ──────────────
 // 확인 모달은 공용 ConfirmModal(다크 톤 · 40개 파일 공용)을 그대로 쓴다. 여기는 **폼 모달**만 담당한다.
 
+/**
+ * ⛔ **이 두 토큰에 `backdrop-blur`·`transform`·`filter`·`will-change`를 넣지 마라.**
+ *
+ * 경위 (2026-08-18 P0 접수 "발송 결과 조회창 잘림 현상"):
+ *   처음엔 스크림에 `backdrop-blur-[2px]`, 모달 박스에 `animate-in ... zoom-in-95`를 넣었다.
+ *   CSS에서 `backdrop-filter`와 `transform`은 **`position: fixed` 자손의 기준 박스를 자기 자신으로 바꾼다.**
+ *   그런데 `CUI_MODAL`에는 `overflow-hidden`이 있다 — 그래서 발송결과창 안에서 열리는
+ *   상세보기·미리보기·캘린더처럼 `fixed inset-0`로 뜨는 중첩 오버레이가 뷰포트가 아니라
+ *   **결과창 박스 크기로 잘렸다.** 스크롤도 안 되고 닫기 버튼이 잘린 영역 밖이라 F5 말고는 빠져나올 수 없었다.
+ *
+ *   등장 효과를 되살리고 싶으면 이 토큰에 transform을 다시 넣지 말고, 중첩 오버레이를
+ *   `createPortal(..., document.body)`로 빼라(공용 `ConfirmModal`이 이미 그렇게 한다).
+ *   그때만 이 두 속성이 안전해진다.
+ */
 export const CUI_MODAL_SCRIM =
-  'fixed inset-0 z-50 bg-neutral-900/40 backdrop-blur-[2px] flex items-center justify-center p-4 ' +
-  'animate-in fade-in duration-150';
+  'fixed inset-0 z-50 bg-neutral-900/45 flex items-center justify-center p-4';
 export const CUI_MODAL =
   'w-full bg-white rounded-2xl border border-neutral-200 shadow-2xl shadow-neutral-900/10 ' +
-  'max-h-[92vh] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none';
+  'max-h-[92vh] overflow-hidden flex flex-col';
 export const CUI_MODAL_HEAD = 'shrink-0 px-6 py-4 border-b border-neutral-200 flex items-start justify-between gap-4';
 export const CUI_MODAL_TITLE = 'text-[16px] font-bold tracking-[-0.02em] text-neutral-900';
 export const CUI_MODAL_DESC = 'mt-1 text-[12.5px] text-neutral-500';
