@@ -17,8 +17,20 @@ const base: DirectSendSpec = {
 };
 const ctx = { companyId: 'CID', userId: 'UID' };
 
-console.log('[direct-send-spec] buildDirectSendCampaignParams — INSERT 18 파라미터');
-ok('파라미터 18개', () => assert.strictEqual(buildDirectSendCampaignParams(base, ctx).length, 18));
+console.log('[direct-send-spec] buildDirectSendCampaignParams — INSERT 19 파라미터');
+ok('파라미터 19개', () => assert.strictEqual(buildDirectSendCampaignParams(base, ctx).length, 19));
+// 2026-08-18 send_type($19) — 미지정이면 'direct'(기존 동작), CT가 아는 값만 통과, 모르는 값은 'direct'로 떨어진다
+ok('sendType 미지정 → $19=direct', () => assert.strictEqual(buildDirectSendCampaignParams(base, ctx)[18], 'direct'));
+ok('sendType=operator → $19=operator', () =>
+  assert.strictEqual(buildDirectSendCampaignParams({ ...base, sendType: 'operator' }, ctx)[18], 'operator'));
+ok('sendType 임의 문자열 → $19=direct', () =>
+  assert.strictEqual(buildDirectSendCampaignParams({ ...base, sendType: 'DROP TABLE' }, ctx)[18], 'direct'));
+// 2026-08-18 (Codex high #1) 다른 배관 값(ai/auto/journey)은 화면 필터엔 있어도 이 배관은 만들 수 없다.
+//   통과시키면 campaign_runs 없는 행이 그 유형으로 남아 run 축에도 청구 축에도 안 걸린다.
+for (const alien of ['ai', 'auto', 'journey']) {
+  ok(`sendType=${alien}(다른 배관) → $19=direct로 강등`, () =>
+    assert.strictEqual(buildDirectSendCampaignParams({ ...base, sendType: alien }, ctx)[18], 'direct'));
+}
 ok('$1 company / $2 name / $3 msgType / $7 total / $12 userId / $15 staging', () => {
   const p = buildDirectSendCampaignParams(base, ctx);
   assert.strictEqual(p[0], 'CID');   // company_id

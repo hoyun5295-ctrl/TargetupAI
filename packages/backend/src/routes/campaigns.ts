@@ -54,6 +54,7 @@ import { calcSplitSendTime } from '../utils/send-time-util';
 import { countStagingFiltered, createDirectSendCampaign } from '../utils/direct-send-core';
 import { DirectSendError } from '../utils/direct-send-spec';
 import { hasUneditedLinkPlaceholder, LINK_PLACEHOLDER } from '../utils/brand-link-core';
+import { isDirectPipelineSendType } from '../utils/send-type-axis';
 
 // ★ toKoreaTimeStr → utils/sms-queue.ts로 이동 (import 사용)
 
@@ -1801,7 +1802,32 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       // ★ D102: 중복제거/수신거부제거 사용자 선택 (기본 true)
       dedupEnabled = true,
       unsubFilterEnabled = true,
+      // ★ 2026-08-18 출처 축 — 이 라우트를 부르는 곳이 직접발송 화면만이 아니다(AI 오퍼레이터 승인 발송).
+      //   둘 다 선택이고, 안 보내면 기존 동작과 한 글자도 다르지 않다.
+      campaignName,         // (선택) 호출부가 지은 캠페인명. 없으면 서버가 `직접발송 {일시}`로 짓는다
+      sendType,             // (선택) send_type 값. CT 화이트리스트 밖이면 무시하고 'direct'
     } = req.body;
+
+    // ★ 화이트리스트 밖 값은 **거절이 아니라 강등**한다 — 여기서 400을 내면 옛 프론트가 예상 못 한 값을
+    //   보내던 순간 발송 자체가 막힌다. 축이 틀리는 것보다 발송이 멎는 쪽이 더 크다.
+    //   `campaigns.send_type`에는 CHECK가 없어(send-type-axis 주석의 pg_constraint 실측) 임의 문자열도
+    //   INSERT는 통과한다 — 그래서 이 게이트가 유일한 방어다.
+    //
+    // ★ 2026-08-18 (Codex 적대 검토 high #1) 게이트를 `isSendTypeFilter`에서 `isDirectPipelineSendType`으로.
+    //   전자는 **화면 필터가 아는 값**을 묻는 함수라 `ai`·`auto`·`journey`까지 통과시켰다.
+    //   그 값들은 각자 다른 배관이 만들고 `campaign_runs`를 남기는데, 이 라우트로 들어온 행은 runs가 없다.
+    //   그러면 run 축에도 안 잡히고 청구 선택기(direct·operator)에도 안 걸려 **실발송이 청구에서 사라진다**.
+    //   조용히 떨어뜨리지 않고 로그를 남긴다 — 이 경로로 오는 값은 프론트 버그거나 조작이라 둘 다 봐야 한다.
+    const resolvedSendType: string = isDirectPipelineSendType(sendType) ? sendType : 'direct';
+    if (sendType !== undefined && sendType !== null && sendType !== '' && !isDirectPipelineSendType(sendType)) {
+      console.warn(
+        `[직접발송] 배관 밖 send_type 강등 — company=${companyId} user=${userId} raw=${JSON.stringify(sendType)} → 'direct'`,
+      );
+    }
+    const rawName = typeof campaignName === 'string' ? campaignName.trim() : '';
+    const resolvedCampaignName = rawName
+      ? rawName.slice(0, 200)
+      : `직접발송 ${new Date().toLocaleString('ko-KR')}`;
 
     // ★ 2026-08-17 발송 채널 확정 — **이 라우트의 첫 검사**로 둔다.
     //   이 문의 적재 분기는 sms·both / kakao·both / alimtalk 셋뿐인데 차감은 채널을 안 보고 먼저 일어난다.
@@ -2112,13 +2138,18 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     // ★ B+0407 후속: is_ad 컬럼 INSERT 추가
     //   기존: 컬럼 자체가 누락되어 항상 DEFAULT(false)로 저장 → 광고 ON 발송이 발송결과에서 (광고) 미표시 + 캘린더 잘못 표시 등 연쇄 버그 발생
     const campaignResult = await query(
+      // ★ 2026-08-18 `send_type`이 리터럴 'direct'였다 — 이 라우트를 부르는 곳이 직접발송 화면만이
+      //   아닌데도(AI 오퍼레이터 승인 발송이 같은 배관을 쓴다) 전부 '직접발송'으로 적재됐고,
+      //   캠페인명까지 서버가 `직접발송 {일시}`로 덮어써서 행에 출처 흔적이 하나도 남지 않았다.
+      //   호출부가 밝힌 값을 쓰되 안 밝히면 기존과 똑같이 동작한다(기본 'direct').
+      //   ⚠ 파라미터 번호는 뒤에 덧붙인다($22) — 중간에 끼우면 아래 14개를 전부 밀어야 해서 오적재 위험이 크다.
       `INSERT INTO campaigns (company_id, campaign_name, message_type, message_content, subject, callback_number, target_count, send_type, status, scheduled_at, message_template, message_subject, created_by, mms_image_paths,
         send_channel, kakao_bubble_type, kakao_sender_key, kakao_targeting, kakao_attachment_json, kakao_carousel_json, kakao_resend_type, is_ad, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'direct', $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW())
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $22, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW())
        RETURNING id`,
       [
         companyId,
-        `직접발송 ${new Date().toLocaleString('ko-KR')}`,
+        resolvedCampaignName,
         msgType,
         sanitizedMessage,  // ★ D142+ B1: stripAdParts로 (광고)/무료거부 제거된 순수본문 (D103)
         subject || null,
@@ -2138,6 +2169,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         kakaoCarouselJson || null,
         kakaoResendType || 'SM',
         finalIsAd,  // ★ D142+ B1: 본문에 (광고) 마커 있으면 사용자 의도가 광고라 보고 자동 승격
+        resolvedSendType,  // $22 — 위 주석 참조(호출부가 안 밝히면 'direct')
       ]
     );
     const campaignId = campaignResult.rows[0].id;

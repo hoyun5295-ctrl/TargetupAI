@@ -151,6 +151,9 @@ export const SEND_TYPE_LABEL: Record<string, string> = {
   ai: 'AI 추천',
   auto: '자동발송',
   journey: '여정',
+  // ★ 2026-08-18 AI 오퍼레이터 제안 승인 발송. 'AI 추천'(타겟 조건 캠페인)과 다른 기능이라 값을 나눈다.
+  //   백엔드 CT(`utils/send-type-axis.ts`)와 같은 값이어야 한다 — 한쪽만 늘리면 화면에 원값이 노출된다.
+  operator: 'AI 오퍼레이터',
 };
 
 export function resolveSendTypeLabel(sendType: string | null | undefined): string {
@@ -177,7 +180,7 @@ export function resolveSendTypeChipClass(sendType: string | null | undefined): s
 }
 
 /** 발송결과 유형 필터 값 — `'all'`은 무필터 */
-export const SEND_TYPE_FILTERS = ['all', 'direct', 'ai', 'auto', 'journey'] as const;
+export const SEND_TYPE_FILTERS = ['all', 'direct', 'ai', 'auto', 'journey', 'operator'] as const;
 export type SendTypeFilter = (typeof SEND_TYPE_FILTERS)[number];
 
 /** 필터 일치 판정 — 이분법(`direct`가 아니면 전부 AI)이 자동발송·여정을 AI에 섞던 것을 막는다 */

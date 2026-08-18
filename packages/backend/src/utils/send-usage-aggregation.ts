@@ -29,6 +29,8 @@ import {
   BILLING_TYPES, billableQuantity,
   type BillingTypeDef, type AgentPriceColumn, type AgentUnitPriceRow,
 } from './billing-types';
+import { DIRECT_PIPELINE_SEND_TYPES_SQL } from './send-type-axis';
+import { nonSentPhaseSql, sentPhaseSql } from './billing-send-phase';
 
 // 축 정의는 `billing-types.ts`(순수)로 옮겼다. 소비처가 이 모듈에서 가져다 쓰던 이름은 그대로 둔다.
 export { BILLING_TYPES };
@@ -557,8 +559,11 @@ export async function selectBillingSendIds(opts: {
     `SELECT c2.id AS run_id
        FROM campaigns c2
       WHERE c2.company_id = $1
-        AND c2.send_type = 'direct'
-        AND c2.send_phase = 'sent'
+        -- ★ 2026-08-18 단일값 'direct' 비교에서 CT 집합으로. AI 오퍼레이터 승인 발송이 같은
+        --   /direct-send 배관을 타면서 send_type='operator'로 적재된다.
+        --   여기 빠지면 그 발송이 청구에서 통째로 사라진다.
+        AND c2.send_type IN (${DIRECT_PIPELINE_SEND_TYPES_SQL})
+        AND ${sentPhaseSql('c2')}
         AND c2.status = 'completed'
         AND COALESCE(c2.scheduled_at, c2.sent_at) >= ${kstStart('$2')}
         AND COALESCE(c2.scheduled_at, c2.sent_at) < ${kstEnd('$3')}${userWhereDirect}`,
@@ -569,12 +574,19 @@ export async function selectBillingSendIds(opts: {
   //   여기서 뽑은 campaigns.id는 **periodCampaignIds로만** 보낸다(기간 조건 동반 — 위 주석 ⛔ 참조).
   //   `status = 'completed'`를 요구하므로 예약만 걸고 안 나간 캠페인은 들어오지 않고,
   //   실제 수량은 어차피 큐의 성공 행 수라 큐가 비어 있으면 0원을 더한다(미발송 청구 구조적 불가).
+  //
+  // ★ 2026-08-18 (Codex 적대 검토 high #2) `IS NULL` → `IS DISTINCT FROM 'sent'`(CT 소유).
+  //   두 축이 `= 'sent'` / `IS NULL`이라 **여집합이 아니었다** — 큐 적재 뒤 마지막 phase 갱신 전에
+  //   워커가 멈추면 결과 동기화가 status만 'completed'로 올리고 send_phase는 'queued'로 남는다.
+  //   그 행은 두 축 어디에도 안 걸려 실발송이 청구에서 사라진다. 이제 정의역 전체가 정확히 한 축에 든다
+  //   (성질은 `billing-send-phase.test.ts`가 고정). 후보가 늘어도 위 문단대로 수량은 큐가 정하므로
+  //   미발송 청구는 여전히 구조적으로 불가하다.
   const legacyDirectResult = await pool.query(
     `SELECT c3.id AS campaign_id
        FROM campaigns c3
       WHERE c3.company_id = $1
-        AND c3.send_type = 'direct'
-        AND c3.send_phase IS NULL
+        AND c3.send_type IN (${DIRECT_PIPELINE_SEND_TYPES_SQL})
+        AND ${nonSentPhaseSql('c3')}
         AND c3.status = 'completed'
         AND COALESCE(c3.scheduled_at, c3.sent_at) >= ${kstStart('$2')}
         AND COALESCE(c3.scheduled_at, c3.sent_at) < ${kstEnd('$3')}${userWhereLegacy}`,

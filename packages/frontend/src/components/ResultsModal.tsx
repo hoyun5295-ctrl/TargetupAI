@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import {
   MSG_TYPE_LABEL,
+  SEND_TYPE_FILTERS,
   SEND_TYPE_LABEL,
   isAlimtalkChannel,
   isBrandOnlyChannel,
@@ -484,11 +485,13 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                   onChange={(e) => setFilterType(e.target.value)}
                   className="border border-neutral-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
                 >
-                  <option value="all">전체</option>
-                  <option value="direct">{SEND_TYPE_LABEL.direct}</option>
-                  <option value="ai">{SEND_TYPE_LABEL.ai}</option>
-                  <option value="auto">{SEND_TYPE_LABEL.auto}</option>
-                  <option value="journey">{SEND_TYPE_LABEL.journey}</option>
+                  {/* ★ 2026-08-18 옵션 4개를 손으로 적어 두던 것을 CT 순회로. 백엔드에 발송 유형이 하나 늘었을 때
+                      이 목록만 안 늘어 그 유형이 화면 필터에서 통째로 사라지던 형태다(계약 테스트가 잡았다). */}
+                  {SEND_TYPE_FILTERS.map((v) => (
+                    <option key={v} value={v}>
+                      {v === 'all' ? '전체' : SEND_TYPE_LABEL[v] || v}
+                    </option>
+                  ))}
                 </select>
                 <span className="text-sm text-neutral-500 font-medium">발송자</span>
                 <select

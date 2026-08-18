@@ -763,6 +763,8 @@ export default function AiOperatorPage() {
       }
 
       // 3. 발송 페이로드 구성 (기존 /direct-send 재사용 — 검증된 흐름 + 라인그룹/중복제거/회신번호 가드 자동)
+      const suggestedName = proposal.target.suggestedName || 'AI Operator 캠페인';
+
       const sendBody: Record<string, unknown> = {
         msgType: channel,
         subject,
@@ -776,8 +778,14 @@ export default function AiOperatorPage() {
         dedupEnabled: true,
         unsubFilterEnabled: true,
         mmsImagePaths, // MMS 선택 시 첨부 이미지 경로 (그 외 [])
+        // ★ 2026-08-18 출처를 밝힌다 (Harold 접수 "AI 오퍼레이터로 보냈는데 직접발송으로 뜬다").
+        //   이 화면은 직접발송과 같은 `/direct-send` 배관을 쓰는데, 그 라우트가 유형을 'direct'로 고정하고
+        //   캠페인명도 `직접발송 {일시}`로 덮어써서 행에 오퍼레이터 흔적이 하나도 안 남았다.
+        //   값의 정의는 백엔드 CT(`utils/send-type-axis.ts`)가 소유한다 — 여기서 새 값을 지어내지 않는다.
+        sendType: 'operator',
+        // 오퍼레이터가 제안 때 붙인 이름을 그대로 쓴다. 없으면 필드를 비워 서버 기본명에 맡긴다.
+        ...(proposal.target.suggestedName?.trim() ? { campaignName: suggestedName } : {}),
       };
-      const suggestedName = proposal.target.suggestedName || 'AI Operator 캠페인';
 
       // ★ D170+ (Harold 명시 안전장치): 즉시 발송 시 사용자 확인 — 회수 불가 안내
       if (!scheduled) {

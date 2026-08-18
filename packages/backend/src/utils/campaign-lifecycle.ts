@@ -19,6 +19,7 @@ import { getSourceRef, updateTrainingMetrics } from './training-logger';
 import { getCampaignClickTotal } from './short-url';
 // ★ 2026-08-04: sweep 대상 캠페인 상태 CT — mysql-refund-sweeper와 같은 집합을 본다
 import { SWEEPABLE_CAMPAIGN_STATUS_SQL } from './campaign-sweep-scope';
+import { DIRECT_PIPELINE_SEND_TYPES_SQL } from './send-type-axis';
 
 // ===== 예약 캠페인 자동 정리 (D145 P0) =====
 
@@ -541,11 +542,16 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
     }
   }
 
-  // === 2. 직접발송 캠페인 ===
+  // === 2. 직접발송 배관 캠페인 ===
   // ★ 2026-07-30: send_channel·message_type 동반 조회 — 환불 축 판정에 필요.
+  // ★ 2026-08-18: `= 'direct'` → CT 집합(`DIRECT_PIPELINE_SEND_TYPES`). AI 오퍼레이터 승인 발송이
+  //   같은 `POST /direct-send` 배관을 타면서 `send_type='operator'`로 적재되기 시작했다.
+  //   그 값을 여기 안 넣으면 오퍼레이터 발송은 위 1번(campaign_runs 순회)에도 안 걸리고 여기도 안 걸려
+  //   **결과 동기화와 실패 환불이 통째로 멎는다**. 반대로 'ai'를 넣으면 1번과 겹쳐 이중 환불이 된다 —
+  //   집합의 근거는 CT 주석이 소유한다.
   const directCampaigns = await query(
     `SELECT id, company_id, scheduled_at, created_at, sent_at, created_by, send_channel, message_type FROM campaigns
-     WHERE company_id = $1 AND send_type = 'direct'
+     WHERE company_id = $1 AND send_type IN (${DIRECT_PIPELINE_SEND_TYPES_SQL})
        -- ★ 2026-08-04 대상 상태는 CT(campaign-sweep-scope)가 소유 — 환불 sweeper와 같은 집합.
        --   'failed' 합류로 예외 종결 캠페인의 결과 카운트·환불도 여기서 수렴한다.
        AND (status IN (${SWEEPABLE_CAMPAIGN_STATUS_SQL}) OR (status = 'scheduled' AND scheduled_at <= NOW()))
