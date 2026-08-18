@@ -189,6 +189,47 @@ pm2 restart all
 
 ---
 
+### 2-2-C. 비토 게이트웨이 배포 (.65 — 별도 저장소·별도 서버) ★2026-08-18 신설
+
+> **한줄로(.62)와 완전히 다른 축이다.** 저장소 = `C:\Users\ceo\projects\bito-gateway` · 서버 = `58.227.193.65`(계정 `invito`) · 서버에 Go 없음(로컬 크로스컴파일).
+> **절차 원문 = 그 저장소의 `status/DEPLOY-RUNBOOK.md`가 소유한다**(변경 분류표 · 롤백 · 환경 오버라이드). 여기는 "어디를 봐야 하나"와 실행 위치만 적는다.
+> `tp-push`·`build:safe`·`pm2`는 이 축에 쓰지 않는다 — 한줄로 전용이다.
+
+| 변경 | 빌드 | 배포 단위 |
+|---|---|---|
+| docs·status | 0 | push만 |
+| web/api (Node) | 0 | `deploy.sh api` |
+| web/dashboard | 프론트만 | `deploy.sh dashboard` |
+| Go (gateway) | 로컬 크로스컴파일 | `deploy.sh gateway` |
+
+**노트북 — PowerShell 기준** (Harold님 셸은 PowerShell 5.1이라 **`&&` 체이닝이 파서 오류**다. 한 줄에 이으려면 `;`, 아니면 한 줄씩).
+⚠ PowerShell에서 `bash`를 그냥 부르면 `C:\WINDOWS\system32\bash.exe`(WSL)가 잡힌다 — **Git Bash 경로를 명시**한다.
+
+```powershell
+& "C:\Program Files\Git\bin\bash.exe" scripts/gw/check.sh      # GW_CHECK_OK 떠야 push
+```
+
+```powershell
+& "C:\Program Files\Git\bin\bash.exe" scripts/gw/build.sh gateway
+```
+
+산출물 이름은 `out\bito-gateway-<short sha>`다. **와일드카드 금지**(PowerShell은 네이티브 명령에 글롭을 확장하지 않는다) — 변수로 짓는다.
+
+```powershell
+$sha = git rev-parse --short HEAD; scp "out\bito-gateway-$sha" "out\bito-gateway-$sha.sha256" invito@58.227.193.65:/tmp/
+```
+
+**`.65` 서버에서** (`git pull`은 invito로, `deploy.sh`만 sudo — root로 pull하면 트리 소유권이 깨진다):
+
+```bash
+cd /home/invito/bito-gateway && git pull --ff-only && sudo bash scripts/gw/deploy.sh gateway /tmp/bito-gateway-<sha>
+```
+
+성공 마커 `GW_DEPLOY_OK` / 자동 복원 마커 `GW_DEPLOY_ROLLBACK`. 백업 = `/opt/bito-gateway/deploy-backups/<타임스탬프>/`.
+health = gateway unit active + `:9090` LISTEN · api `{"ok":true,"db":"connected"}`.
+
+---
+
 ### 2-3. QTmsg 발송 엔진 (로컬 - 개발용)
 ```bash
 cd C:\projects\qtmsg\bin

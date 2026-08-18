@@ -52,6 +52,23 @@ export async function invalidateAppSessions(userId: string, appSource: string): 
   return (result as any).rowCount ?? 0;
 }
 
+/**
+ * 한 회사에 속한 전 사용자의 활성 세션 무효화 — 계약 해지·정지 시 호출.
+ * ★ 2026-08-18: 상태만 바꾸고 세션을 두면 **이미 접속해 있는 사람은 그대로 남는다**
+ *   (로그인 게이트는 새 로그인만 막는다). 해지 시점에 접속 중이던 사용자를 끊는 것이 이 함수의 몫이다.
+ * app_source를 가리지 않는다 — 계약이 끝나면 어느 앱이든 끊는다.
+ */
+export async function invalidateCompanySessions(companyId: string): Promise<number> {
+  const result = await query(
+    `UPDATE user_sessions
+     SET is_active = false
+     WHERE is_active = true
+       AND user_id IN (SELECT id FROM users WHERE company_id = $1)`,
+    [companyId]
+  );
+  return (result as any).rowCount ?? 0;
+}
+
 export interface CreateSessionParams {
   sessionId: string;
   userId: string;

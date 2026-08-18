@@ -5,6 +5,7 @@ import { query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 import { authenticate, generateToken, JwtPayload } from '../middlewares/auth';
 import { rotateUserSession, normalizeAppSource, newSessionId } from '../utils/session-manager';
+import { resolveCompanyAccessDenial } from '../utils/company-access';
 import { isBlocked, recordFailureAndMaybeBlock, clearBlocksOnSuccess } from '../utils/login-block';
 import {
   generateTotpSecret,
@@ -226,7 +227,10 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
 
     // ===== 고객사 사용자 로그인 =====
     const result = await query(
-      `SELECT u.*, u.must_change_password, u.hidden_features, c.company_name as company_name, c.id as company_code, c.subscription_status, c.usage_type
+      // ★ 2026-08-18 c.status 추가 — 반드시 별칭 `company_status`.
+      //   `u.*`가 이미 `status`(계정 상태)를 싣고 있어 별칭 없이 넣으면 **계정 상태가 회사 상태로 덮인다**
+      //   (같은 컬럼명이 둘이면 뒤엣것이 이긴다) → 아래 계정 상태 게이트가 통째로 오작동한다.
+      `SELECT u.*, u.must_change_password, u.hidden_features, c.company_name as company_name, c.id as company_code, c.subscription_status, c.usage_type, c.status AS company_status
        FROM users u
        JOIN companies c ON u.company_id = c.id
        WHERE u.login_id = $1`,
@@ -254,6 +258,22 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
         [user.id, JSON.stringify({ loginId, reason: 'system_account' }), req.ip, req.headers['user-agent'] || '']
       );
       return res.status(403).json({ error: '시스템 계정은 로그인할 수 없습니다.' });
+    }
+
+    // ===== ★ 2026-08-18 회사 상태 체크 — 계정 상태보다 먼저 =====
+    //   계약이 끝난 고객사는 계정 상태와 무관하게 못 들어온다.
+    //   [왜 계정 축이 아니라 회사 축인가] 해지 라우트가 소속 계정을 dormant로 바꾸긴 하지만 그 전파는
+    //   경로마다 달라 샌다(실측 0818 — 해지 14곳 중 1곳은 계정이 active, 정지 4곳은 전파 코드 자체가 없다).
+    //   전파에 기대지 않고 회사 상태 하나로 닫는다.
+    //   판정 소유 = utils/company-access.ts (NULL 취급·긍정 비교 근거는 그쪽 주석)
+    const companyDenial = resolveCompanyAccessDenial(user.company_status);
+    if (companyDenial) {
+      await query(
+        `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+         VALUES (gen_random_uuid(), $1, 'login_blocked', 'user', $2, $3, $4, NOW())`,
+        [user.id, JSON.stringify({ loginId, reason: companyDenial.reason, companyName: user.company_name }), req.ip, req.headers['user-agent'] || '']
+      );
+      return res.status(403).json({ error: companyDenial.message });
     }
 
     // ===== 계정 상태 체크 =====

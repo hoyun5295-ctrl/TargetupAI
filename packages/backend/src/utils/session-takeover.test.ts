@@ -22,7 +22,7 @@ vi.mock('../config/database', () => ({ query: vi.fn(), pool: { connect: vi.fn() 
 
 import jwt from 'jsonwebtoken';
 import { query } from '../config/database';
-import { rotateUserSession } from './session-manager';
+import { rotateUserSession, invalidateCompanySessions } from './session-manager';
 import { authenticate } from '../middlewares/auth';
 
 const q = query as unknown as ReturnType<typeof vi.fn>;
@@ -148,6 +148,27 @@ describe('접속 인계 — 동의 없이는 기존 세션을 끊지 않는다',
     expect(outcome.conflict.activeSession.ipMasked).toBe('211.234.***.**');
     expect(outcome.conflict.activeSession.deviceLabel).toBe('Chrome · Windows');
     expect(outcome.conflict.activeSession.loginAtText).toBe('2026-08-18 14:32');
+  });
+});
+
+describe('계약 종료 — 접속 중인 세션까지 끊는다', () => {
+  beforeEach(() => {
+    q.mockReset();
+  });
+
+  it('회사 단위로 활성 세션을 무효화하고 끊은 수를 돌려준다', async () => {
+    q.mockImplementation(async () => ({ rows: [], rowCount: 4 }));
+
+    const killed = await invalidateCompanySessions('company-1');
+
+    expect(killed).toBe(4);
+    const [sql, params] = q.mock.calls[0];
+    expect(String(sql)).toMatch(/UPDATE user_sessions/i);
+    expect(String(sql)).toMatch(/is_active\s*=\s*false/i);
+    // 대상은 그 회사 소속 전원 — app_source를 가리지 않는다(계약이 끝나면 어느 앱이든 끊는다)
+    expect(String(sql)).toMatch(/company_id\s*=\s*\$1/i);
+    expect(String(sql)).not.toMatch(/app_source/i);
+    expect(params).toEqual(['company-1']);
   });
 });
 

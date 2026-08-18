@@ -13,6 +13,7 @@ import { getSeedUsageStats, getIndustryFormula, listStyleExamples } from '../uti
 import { distillIndustryFormula } from '../utils/industry-formula';
 // ★ 2026-06-25: 업로더별 고객 삭제 시 해당 회사 데이터 프로필 캐시 무효화(게이트 즉시 반영)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
+import { invalidateCompanySessions } from '../utils/session-manager';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
 import { detectEnabledFields, clearEnabledFieldsCache } from '../utils/enabled-fields';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus, getDisplayContents } from '../utils/sms-result-map';
@@ -925,11 +926,33 @@ router.delete('/companies/:id', authenticate, requireSuperAdmin, async (req: Req
     }
     
     // 해당 회사 사용자도 비활성화
-    await query(
+    const lockedUsers = await query(
       "UPDATE users SET status = 'dormant', updated_at = NOW() WHERE company_id = $1",
       [id]
     );
-    
+
+    // ★ 2026-08-18: 상태만 바꾸면 **이미 접속해 있는 사람은 그대로 남는다**(로그인 게이트는 새 로그인만 막는다).
+    //   해지 시점의 접속 중 세션을 끊는다. 컨트롤타워 = utils/session-manager.ts
+    const killedSessions = await invalidateCompanySessions(id);
+
+    // ★ 2026-08-18: 회수 이력 — 전송자격인증 3.3(권한 변경·말소의 일시·사유·처리자)의 증빙이 여기서 나온다.
+    //   companies에 해지 시각 컬럼이 없어(SCHEMA.md) 이 감사 로그가 유일한 시점 근거다.
+    await query(
+      `INSERT INTO audit_logs (id, user_id, action, target_type, target_id, details, ip_address, user_agent, created_at)
+       VALUES (gen_random_uuid(), $1, 'company_terminated', 'company', $2, $3, $4, $5, NOW())`,
+      [
+        (req as any).user?.userId || null,
+        id,
+        JSON.stringify({
+          companyName: result.rows[0].company_name,
+          lockedUsers: (lockedUsers as any).rowCount ?? 0,
+          killedSessions,
+        }),
+        req.ip,
+        req.headers['user-agent'] || '',
+      ]
+    );
+
     res.json({ message: `${result.rows[0].company_name}이(가) 해지되었습니다.` });
   } catch (error) {
     console.error('회사 해지 실패:', error);
