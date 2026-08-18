@@ -12,6 +12,8 @@
  *   6. 인계 티켓은 API 인증 토큰이 아니다 — Bearer로 쓰면 통과되지 않는다.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 // import보다 먼저 실행돼야 한다 — middlewares/auth.ts는 로드 시점에 JWT_SECRET이 없으면 프로세스를 죽인다
 vi.hoisted(() => {
@@ -127,7 +129,7 @@ describe('접속 인계 — 동의 없이는 기존 세션을 끊지 않는다',
     expect(writeCalls()).toHaveLength(0);
   });
 
-  it('활성 세션 조회는 만료 행을 제외한다', async () => {
+  it('활성 세션 조회는 만료 행과 유휴 행을 제외한다', async () => {
     mockDb([]);
     await rotateUserSession(params());
 
@@ -135,6 +137,9 @@ describe('접속 인계 — 동의 없이는 기존 세션을 끊지 않는다',
     expect(select).toBeDefined();
     expect(select).toMatch(/expires_at\s*>\s*NOW\(\)/i);
     expect(select).toMatch(/is_active\s*=\s*true/i);
+    // ★ 2026-08-18(2) 유휴 임계 — 브라우저를 그냥 닫아 남은 유령 세션을 접속 중으로 세면
+    //   본인이 자기 세션 때문에 인계 안내를 받는다(실사고).
+    expect(select, '유휴 임계가 빠졌다 — 유령 세션이 접속 중으로 잡힌다').toMatch(/last_activity_at\s*>\s*NOW\(\)\s*-/i);
   });
 
   it('원본 IP·user_agent를 그대로 내보내지 않는다', async () => {
@@ -148,6 +153,21 @@ describe('접속 인계 — 동의 없이는 기존 세션을 끊지 않는다',
     expect(outcome.conflict.activeSession.ipMasked).toBe('211.234.***.**');
     expect(outcome.conflict.activeSession.deviceLabel).toBe('Chrome · Windows');
     expect(outcome.conflict.activeSession.loginAtText).toBe('2026-08-18 14:32');
+  });
+});
+
+describe('로그아웃 — 서버 세션이 실제로 끊긴다', () => {
+  const read = () => readFileSync(resolve(__dirname, '../routes/auth.ts'), 'utf8');
+
+  it('로그아웃 endpoint가 존재하고 세션을 비활성화한다', () => {
+    const src = read();
+    expect(src, '/auth/logout이 없으면 클라이언트가 토큰만 지우고 서버 행은 살아남는다').toMatch(/router\.post\('\/logout'/);
+    expect(src).toMatch(/UPDATE user_sessions SET is_active = false WHERE id = \$1/);
+  });
+
+  it('로그아웃에는 authenticate를 걸지 않는다 — 만료 토큰도 끊을 수 있어야 한다', () => {
+    const src = read();
+    expect(src).not.toMatch(/router\.post\('\/logout',\s*authenticate/);
   });
 });
 

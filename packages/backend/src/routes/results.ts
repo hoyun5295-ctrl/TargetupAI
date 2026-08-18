@@ -1,4 +1,5 @@
 import { Request, Response, Router } from 'express';
+import { logPrivacyExport } from '../utils/privacy-audit';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import {
@@ -513,6 +514,9 @@ router.get('/campaigns/export', async (req: Request, res: Response) => {
       };
     });
 
+    // ★ 2026-08-18 전송자격인증 4.2 — 개인정보 반출 이력
+    await logPrivacyExport({ req, kind: 'send_results', count: csvRows.length, filterKeys: Object.keys(req.query || {}) });
+
     const csv = buildCampaignListCsv(csvRows);
     const filename = `발송결과_${effectiveFromDate || ''}_${effectiveToDate || ''}.csv`;
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -981,6 +985,8 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
     const headers = '수신번호,회신번호,메시지내용,등록일시,발송일시,전송결과,결과코드,통신사,메시지유형';
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    // ★ 2026-08-18 전송자격인증 4.2 — 수신번호가 나가는 경로다
+    await logPrivacyExport({ req, kind: 'send_detail', targetId: id });
     res.setHeader('Content-Disposition', `attachment; filename=send_detail_${id}.csv`);
     res.write(BOM + headers + '\n');
 

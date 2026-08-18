@@ -1,4 +1,5 @@
 import { Request, Response, Router } from 'express';
+import { logPrivacyExport } from '../utils/privacy-audit';
 import * as XLSX from 'xlsx';
 import { query, mysqlQuery } from '../config/database';
 import { authenticate } from '../middlewares/auth';
@@ -372,6 +373,9 @@ router.get('/download', async (req: Request, res: Response) => {
 
     const ts = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '').slice(0, 14);
     const filename = `customers_${ts}.xlsx`;
+
+    // ★ 2026-08-18 전송자격인증 4.2 — 개인정보 반출 이력(누가·언제·몇 건). 원본 값은 남기지 않는다
+    await logPrivacyExport({ req, kind: 'customers', count: rows.length, filterKeys: Object.keys(req.query || {}) });
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { logPrivacyExport, logPrivacyPurge } from '../utils/privacy-audit';
 import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query, pool } from '../config/database';
@@ -318,6 +319,8 @@ router.get('/users/:id/unsubscribes/export', authenticate, requireSuperAdmin, as
     const rows = data.map(r => `${r.phone},${sourceLabel[r.source] || r.source},${new Date(r.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`).join('\n');
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    // ★ 2026-08-18 전송자격인증 4.2 — 개인정보 반출 이력
+    await logPrivacyExport({ req, kind: 'unsubscribes', count: data.length, targetId: id });
     res.setHeader('Content-Disposition', `attachment; filename=unsubscribes_${id}_${new Date().toISOString().slice(0,10)}.csv`);
     res.send('\uFEFF' + header + rows); // BOM for Excel
   } catch (error) {
@@ -2411,6 +2414,9 @@ router.get('/campaigns/:id/sms-detail/export', authenticate, requireSuperAdmin, 
     );
     if (camp.rows.length === 0) return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
     const c = camp.rows[0];
+    // ★ 2026-08-18 전송자격인증 4.2 — 수신번호가 나가는 경로다
+    await logPrivacyExport({ req, kind: 'send_detail', targetId: String(req.params.id || '') });
+
     await streamCampaignSmsCsv(res, {
       campaignId: id,
       companyId: c.company_id,

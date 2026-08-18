@@ -27,6 +27,7 @@ import jwt from 'jsonwebtoken';
 import type { Request } from 'express';
 import { query, mysqlQuery } from '../config/database';
 import { getAuthSmsTable } from './sms-queue';
+import { restrictAccount } from './account-action';
 
 /** 코드 유효시간(분) */
 export const MFA_CODE_TTL_MINUTES = 5;
@@ -267,10 +268,12 @@ export async function verifyMfaChallenge(
 }
 
 /**
- * 인증 실패 한도 초과 — 계정 잠금 + 신뢰 기기 전부 해제.
- * 인증기준 3.4 ④(로그인 실패 횟수 초과 시 계정 잠금 및 경고 안내).
+ * 인증 실패 한도 초과 — 계정 잠금 + 신뢰 기기 전부 해제 + **이용자 고지**.
+ * 인증기준 3.4 ④(실패 초과 시 계정 잠금 및 경고 안내) · 5.1(조치 시 이용자 고지·이력).
+ * ⚠ 잠금·세션·고지·이력은 조치 컨트롤타워(`account-action.ts`)가 한 벌로 처리한다 —
+ *   여기서 직접 UPDATE하면 경로마다 고지가 빠지는 구멍이 다시 생긴다.
  */
-export async function lockAccountForMfaFailure(userId: string): Promise<void> {
-  await query("UPDATE users SET status = 'locked', updated_at = NOW() WHERE id = $1", [userId]);
+export async function lockAccountForMfaFailure(userId: string, req?: Request): Promise<void> {
+  await restrictAccount({ userId, status: 'locked', reason: 'mfa_failure', req });
   await revokeTrustedDevices(userId);
 }

@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { logPrivacyExport } from '../utils/privacy-audit';
 import * as XLSX from 'xlsx';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
@@ -184,6 +185,9 @@ router.get('/:groupName/export', async (req: Request, res: Response) => {
     const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 
     const filename = `${groupName}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    // ★ 2026-08-18 전송자격인증 4.2 — 연락처가 나가는 경로다
+    await logPrivacyExport({ req, kind: 'address_book', count: rows.length, targetId: groupName });
+
     res.setHeader(
       'Content-Disposition',
       `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,

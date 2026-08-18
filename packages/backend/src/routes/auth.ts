@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { Request, Response, Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { query } from '../config/database';
@@ -386,6 +387,42 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
 });
 
 // ============================================================
+// ★ 2026-08-18(2) 로그아웃 — 서버 세션을 실제로 끊는다
+//   [경위] 종전에는 endpoint 자체가 없어 클라이언트가 localStorage만 지웠다. 서버 행은 is_active=true로
+//   남았고, 접속 인계가 그 유령 세션을 "접속 중"으로 읽어 **본인이 자기 세션 때문에 인계 안내를 받았다**.
+//   [설계] 토큰이 만료·무효여도 200으로 끝낸다 — 로그아웃은 실패하면 안 되는 동작이다.
+//   authenticate를 걸면 만료 토큰이 401로 막혀 세션이 영영 안 끊긴다.
+// ============================================================
+router.post('/logout', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : String(req.body?.token || '');
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as any;
+        if (decoded?.sessionId && decoded?.userId) {
+          await query(
+            'UPDATE user_sessions SET is_active = false WHERE id = $1 AND user_id = $2',
+            [decoded.sessionId, decoded.userId]
+          );
+          await query(
+            `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+             VALUES (gen_random_uuid(), $1, 'logout', 'user', $2, $3, $4, NOW())`,
+            [decoded.userId, JSON.stringify({ loginId: decoded.loginId }), req.ip, req.headers['user-agent'] || '']
+          ).catch(() => {});
+        }
+      } catch {
+        // 만료·위조 토큰 — 끊을 세션을 특정할 수 없을 뿐, 로그아웃은 성공으로 끝낸다
+      }
+    }
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('[logout]', error);
+    return res.json({ success: true });
+  }
+});
+
+// ============================================================
 // ★ 2026-08-18 MFA — 인증번호 검증 / 재발송 (전송자격인증 3.4)
 // ============================================================
 
@@ -421,7 +458,7 @@ router.post('/mfa/verify', loginLimiter, async (req: Request, res: Response) => 
     const verdict = await verifyMfaChallenge(challengeId, user.id, req.body.code);
 
     if (verdict.status === 'locked') {
-      await lockAccountForMfaFailure(user.id);
+      await lockAccountForMfaFailure(user.id, req);
       await query(
         `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
          VALUES (gen_random_uuid(), $1, 'mfa_locked', 'user', $2, $3, $4, NOW())`,

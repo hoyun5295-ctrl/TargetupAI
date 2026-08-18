@@ -1,4 +1,5 @@
 import { Request, Response, Router } from 'express';
+import { logPrivacyExport } from '../utils/privacy-audit';
 import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
@@ -282,6 +283,8 @@ router.get('/export', async (req: Request, res: Response) => {
     const BOM = '﻿';
     const today = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    // ★ 2026-08-18 전송자격인증 4.2 — 개인정보 반출 이력
+    await logPrivacyExport({ req, kind: 'unsubscribes', count: rows.length });
     res.setHeader('Content-Disposition', `attachment; filename=unsubscribes_${today}.csv`);
     res.write(BOM + '전화번호,유입경로,등록일시\n');
 

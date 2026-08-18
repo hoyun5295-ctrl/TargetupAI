@@ -42,6 +42,18 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: () => {
+    // ★ 2026-08-18(2) 서버 세션도 끊는다.
+    //   종전에는 localStorage만 지워 서버 행이 is_active=true로 남았고, 다시 로그인할 때
+    //   접속 인계가 그 유령 세션을 "접속 중"으로 읽어 본인에게 인계 안내를 띄웠다(실사고).
+    //   ⚠ await하지 않는다 — 네트워크가 느리거나 실패해도 로그아웃 자체는 즉시 끝나야 한다.
+    const token = localStorage.getItem('token');
+    if (token) {
+      fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        keepalive: true,
+      }).catch(() => {});
+    }
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     set({ user: null, token: null, isAuthenticated: false });

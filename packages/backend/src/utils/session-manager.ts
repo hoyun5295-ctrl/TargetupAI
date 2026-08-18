@@ -69,6 +69,18 @@ export async function invalidateCompanySessions(companyId: string): Promise<numb
   return (result as any).rowCount ?? 0;
 }
 
+/**
+ * 한 사용자의 활성 세션 전부 무효화 — 계정 정지·잠금 시 호출.
+ * `invalidateAppSessions`는 app_source 하나만 끊는다. 제한 조치는 앱을 가리지 않는다.
+ */
+export async function invalidateUserSessions(userId: string): Promise<number> {
+  const result = await query(
+    `UPDATE user_sessions SET is_active = false WHERE user_id = $1 AND is_active = true`,
+    [userId]
+  );
+  return (result as any).rowCount ?? 0;
+}
+
 export interface CreateSessionParams {
   sessionId: string;
   userId: string;
@@ -133,18 +145,29 @@ export type RotateOutcome =
   | { status: 'conflict'; conflict: SessionConflict };
 
 /**
+ * 유휴 임계(분) — 이보다 오래 활동이 없는 세션은 "접속 중"으로 보지 않는다.
+ * 값의 근거 = 기본 세션 타임아웃(30분)과 같다(임의 상수가 아니다).
+ * ★ 2026-08-18(2) 신설 이유: 브라우저를 그냥 닫으면 로그아웃 호출이 가지 않아 행이 남는다.
+ *   그 행을 접속 중으로 세면 **본인이 다시 로그인할 때 자기 유령 세션 때문에 인계 안내를 받는다**(실사고).
+ *   미들웨어가 활동 시 5분 간격으로 last_activity_at을 갱신하므로, 창이 열려 있는 동안은 계속 살아 있다.
+ */
+const IDLE_THRESHOLD_MINUTES = 30;
+
+/**
  * 지금 실제로 살아 있는 세션 1건.
  * ★ `expires_at > NOW()` 필수 — 만료됐는데 is_active=true로 남은 행을 접속 중으로 세면
- *   본인이 자기 죽은 세션에 막힌다(브라우저를 그냥 닫으면 그 행이 남는다).
+ *   본인이 자기 죽은 세션에 막힌다.
+ * ★ 유휴 임계도 함께 본다 — expires_at은 로그인 시 24시간으로 잡히므로 그것만으로는 유령 세션을 못 거른다.
  */
 async function findLiveSession(userId: string, appSource: string): Promise<any | null> {
   const result = await query(
     `SELECT id, ip_address, user_agent, created_at, last_activity_at
        FROM user_sessions
       WHERE user_id = $1 AND app_source = $2 AND is_active = true AND expires_at > NOW()
+        AND last_activity_at > NOW() - INTERVAL '1 minute' * $3
       ORDER BY last_activity_at DESC
       LIMIT 1`,
-    [userId, appSource]
+    [userId, appSource, IDLE_THRESHOLD_MINUTES]
   );
   return result.rows[0] || null;
 }
