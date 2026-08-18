@@ -1377,6 +1377,7 @@
 | created_at | timestamp |
 | last_activity_at | timestamp |
 | expires_at | timestamp |
+| app_source | varchar | ★2026-08-18 실측 덤프로 등재(그동안 누락). 세션 격리 축 — `hanjul`·`flyer`·`super`. 활성 세션 판정은 `is_active=true AND expires_at > NOW()` 둘 다 필요(만료 행이 남는다 = 접속 인계 문서 §2-3) |
 
 ### users (사용자)
 | 컬럼 | 타입 |

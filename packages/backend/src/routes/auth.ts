@@ -28,6 +28,9 @@ const loginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
+  // ★ 2026-08-18: 409(이미 접속 중 안내)는 인증 실패가 아니다 — brute-force 카운트에서 제외.
+  //   제외하지 않으면 모달을 몇 번 보는 것만으로 정상 사용자가 차단된다(사무실 공용 IP는 더 빨리).
+  requestWasSuccessful: (_req: Request, res: Response) => res.statusCode < 400 || res.statusCode === 409,
   message: { error: '로그인 시도가 너무 많습니다. 잠시 후 다시 시도해주세요.' },
 });
 
@@ -166,14 +169,33 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
       const token = generateToken(payload);
 
       // ★ 컨트롤타워 rotateUserSession — invalidate + create 통합. 인라인 세션 SQL 금지.
-      await rotateUserSession({
+      //   ★ 2026-08-18: 기존 접속이 살아 있으면 여기서 세션을 만들지 않고 인계 동의부터 받는다.
+      const superRotate = await rotateUserSession({
         sessionId,
         userId: admin.id,
         token,
         appSource: 'super',
         req,
         expiresInMinutes: sessionTimeoutMinutes,
+        takeoverTicket: req.body.takeoverTicket,
       });
+
+      if (superRotate.status === 'conflict') {
+        await query(
+          `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+           VALUES (gen_random_uuid(), $1, 'login_session_conflict', 'super_admin', $2, $3, $4, NOW())`,
+          [admin.id, JSON.stringify({ loginId }), req.ip, req.headers['user-agent'] || '']
+        );
+        return res.status(409).json(superRotate.conflict);
+      }
+
+      if (superRotate.takeover) {
+        await query(
+          `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+           VALUES (gen_random_uuid(), $1, 'login_takeover', 'super_admin', $2, $3, $4, NOW())`,
+          [admin.id, JSON.stringify({ loginId }), req.ip, req.headers['user-agent'] || '']
+        );
+      }
 
       await query(
         `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
@@ -299,14 +321,33 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
 
     const token = generateToken(payload);
 
-    await rotateUserSession({
+    // ★ 2026-08-18: 기존 접속이 살아 있으면 여기서 세션을 만들지 않고 인계 동의부터 받는다(세션 쓰기 0).
+    const rotate = await rotateUserSession({
       sessionId,
       userId: user.id,
       token,
       appSource,
       req,
       expiresInMinutes: 24 * 60, // 24시간
+      takeoverTicket: req.body.takeoverTicket,
     });
+
+    if (rotate.status === 'conflict') {
+      await query(
+        `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+         VALUES (gen_random_uuid(), $1, 'login_session_conflict', 'user', $2, $3, $4, NOW())`,
+        [user.id, JSON.stringify({ loginId, companyName: user.company_name }), req.ip, req.headers['user-agent'] || '']
+      );
+      return res.status(409).json(rotate.conflict);
+    }
+
+    if (rotate.takeover) {
+      await query(
+        `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+         VALUES (gen_random_uuid(), $1, 'login_takeover', 'user', $2, $3, $4, NOW())`,
+        [user.id, JSON.stringify({ loginId, companyName: user.company_name }), req.ip, req.headers['user-agent'] || '']
+      );
+    }
 
     // 로그인 기록
     await query(
@@ -501,14 +542,35 @@ router.post('/super/confirm-totp', async (req: Request, res: Response) => {
       sessionId,
     };
     const token = generateToken(payload);
-    await rotateUserSession({
+    // ★ 2026-08-18: 등록 확정(totp_enabled)은 이미 끝났고, 남은 건 세션뿐이다.
+    //   기존 접속이 살아 있으면 세션을 만들지 않고 인계 동의부터 받는다.
+    const enrollRotate = await rotateUserSession({
       sessionId,
       userId: admin.id,
       token,
       appSource: 'super',
       req,
       expiresInMinutes: sessionTimeoutMinutes,
+      takeoverTicket: req.body.takeoverTicket,
     });
+
+    if (enrollRotate.status === 'conflict') {
+      await query(
+        `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+         VALUES (gen_random_uuid(), $1, 'login_session_conflict', 'super_admin', $2, $3, $4, NOW())`,
+        [admin.id, JSON.stringify({ loginId: admin.login_id, step: 'totp_enroll' }), req.ip, req.headers['user-agent'] || '']
+      );
+      return res.status(409).json(enrollRotate.conflict);
+    }
+
+    if (enrollRotate.takeover) {
+      await query(
+        `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+         VALUES (gen_random_uuid(), $1, 'login_takeover', 'super_admin', $2, $3, $4, NOW())`,
+        [admin.id, JSON.stringify({ loginId: admin.login_id, step: 'totp_enroll' }), req.ip, req.headers['user-agent'] || '']
+      );
+    }
+
     await query(
       `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
        VALUES (gen_random_uuid(), $1, 'totp_enrolled', 'super_admin', $2, $3, $4, NOW())`,

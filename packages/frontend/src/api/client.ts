@@ -45,7 +45,8 @@ api.interceptors.response.use(
 // Auth API
 // ★ D111 P0: appSource='hanjul' 기본 (한줄로 메인 hanjul.ai). 슈퍼관리자 경로는 백엔드가 userType으로 'super'로 덮어씀
 export const authApi = {
-  login: (data: { loginId: string; password: string; userType?: string; appSource?: string }) =>
+  // takeoverTicket = 이미 접속 중인 세션을 끊고 로그인하겠다는 사용자 동의 (409 SESSION_IN_USE 응답으로 받은 값)
+  login: (data: { loginId: string; password: string; userType?: string; appSource?: string; totpCode?: string; takeoverTicket?: string }) =>
     api.post('/auth/login', { appSource: 'hanjul', ...data }),
 };
 

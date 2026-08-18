@@ -15,13 +15,22 @@
  *   - 'flyer'  : 전단AI 서비스
  *   - 'super'  : 슈퍼관리자 (sys.hanjullo.com)
  *
+ * ★ 2026-08-18 접속 인계(takeover) — Harold님 지시:
+ *   기존 접속자를 말없이 끊지 않는다. 로그인하려는 쪽에 "이미 접속 중"을 알리고 선택을 받는다.
+ *   - 활성 세션이 있는데 인계 동의(티켓)가 없으면 → 세션 테이블을 **한 줄도 건드리지 않고** conflict 반환.
+ *     (취소했을 때 기존 접속이 멀쩡해야 하므로, 이 "쓰기 0"이 기능의 핵심이다)
+ *   - 동의 티켓이 유효하면 → 기존 세션 무효화 + 새 세션 생성 (기존 동작과 동일).
+ *   게이트는 호출부가 아니라 **세션이 실제로 만들어지는 이 함수 안**에 둔다 — 호출부가 늘어도 판정이 갈라지지 않는다.
+ *
  * ⚠️ 호출부:
- *   - routes/auth.ts 로그인 2경로(일반 사용자 + 슈퍼관리자)에서 이 컨트롤타워를 유일한 진입점으로 사용.
+ *   - routes/auth.ts 세션 발급 3경로(일반 사용자 + 슈퍼관리자 OTP + 슈퍼관리자 최초 2FA 등록)에서
+ *     이 컨트롤타워를 유일한 진입점으로 사용.
  *   - 인라인으로 user_sessions INSERT/UPDATE 하지 말 것 (재발 방지).
  */
 
 import type { Request } from 'express';
 import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 import { query } from '../config/database';
 
 /** 한 번에 허용되는 동시 로그인 세션 수 — 항상 1개 (D111 P0: D100의 5개 허용 폐기) */
@@ -76,16 +85,182 @@ export async function createUserSession(params: CreateSessionParams): Promise<vo
   );
 }
 
+/** 접속 인계 티켓 유효시간(초) — 모달을 읽고 누르는 시간만 허용 */
+const TAKEOVER_TICKET_TTL_SECONDS = 120;
+
+/**
+ * 인계 티켓 JWT의 식별 클레임.
+ * ⚠️ authenticate 미들웨어는 이 클레임이 있는 토큰을 API 인증으로 통과시키지 않는다
+ *    (sessionId 없는 토큰을 통과시키는 기존 분기가 있어, 가드가 없으면 인증 우회가 된다).
+ */
+const TAKEOVER_PURPOSE = 'session_takeover';
+
+/** 로그인하려는 사람에게 보여줄 기존 접속 요약 — 원본 IP·UA는 내보내지 않는다 */
+export interface ActiveSessionInfo {
+  deviceLabel: string;
+  ipMasked: string;
+  loginAtText: string;
+  lastActivityText: string;
+}
+
+export interface SessionConflict {
+  code: 'SESSION_IN_USE';
+  error: string;
+  activeSession: ActiveSessionInfo;
+  takeoverTicket: string;
+}
+
+/** 세션 회전 결과 — 불리언으로 접지 않는다(회전됨 / 인계 동의 대기 는 다른 상태다) */
+export type RotateOutcome =
+  | { status: 'rotated'; takeover: boolean }
+  | { status: 'conflict'; conflict: SessionConflict };
+
+/**
+ * 지금 실제로 살아 있는 세션 1건.
+ * ★ `expires_at > NOW()` 필수 — 만료됐는데 is_active=true로 남은 행을 접속 중으로 세면
+ *   본인이 자기 죽은 세션에 막힌다(브라우저를 그냥 닫으면 그 행이 남는다).
+ */
+async function findLiveSession(userId: string, appSource: string): Promise<any | null> {
+  const result = await query(
+    `SELECT id, ip_address, user_agent, created_at, last_activity_at
+       FROM user_sessions
+      WHERE user_id = $1 AND app_source = $2 AND is_active = true AND expires_at > NOW()
+      ORDER BY last_activity_at DESC
+      LIMIT 1`,
+    [userId, appSource]
+  );
+  return result.rows[0] || null;
+}
+
+/** IP 마스킹 — 같은 계정이라도 접속지 전체를 노출하지 않는다 */
+function maskIp(raw: any): string {
+  const ip = String(raw || '').replace(/^::ffff:/, '').trim();
+  if (!ip) return '알 수 없음';
+  const v4 = ip.match(/^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/);
+  if (v4) return `${v4[1]}.${v4[2]}.***.**`;
+  const groups = ip.split(':').filter(Boolean);
+  if (groups.length >= 2) return `${groups[0]}:${groups[1]}:****`;
+  return '알 수 없음';
+}
+
+/** user_agent → 사용자가 자기 기기인지 알아볼 정도의 요약 */
+function describeDevice(raw: any): string {
+  const ua = String(raw || '');
+  if (!ua) return '알 수 없는 기기';
+  // 순서 중요 — Edge/삼성/웨일 UA에도 Chrome 문자열이 들어 있다
+  const browser =
+    /Edg\//.test(ua) ? 'Edge'
+    : /SamsungBrowser/.test(ua) ? '삼성 인터넷'
+    : /Whale/.test(ua) ? '웨일'
+    : /Chrome\//.test(ua) ? 'Chrome'
+    : /Firefox\//.test(ua) ? 'Firefox'
+    : /Safari\//.test(ua) ? 'Safari'
+    : '브라우저';
+  const os =
+    /iPhone/.test(ua) ? 'iPhone'
+    : /iPad/.test(ua) ? 'iPad'
+    : /Android/.test(ua) ? 'Android'
+    : /Windows/.test(ua) ? 'Windows'
+    : /Mac OS X/.test(ua) ? 'Mac'
+    : /Linux/.test(ua) ? 'Linux'
+    : '';
+  return os ? `${browser} · ${os}` : browser;
+}
+
+/**
+ * 표시용 시각 문자열.
+ * user_sessions.created_at/last_activity_at 은 timestamp(무 timezone)라 서버 벽시계 값이다.
+ * 같은 서버의 Node가 그대로 렌더해야 클라이언트 타임존과 어긋나지 않는다.
+ */
+function formatDateTime(raw: any): string {
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return '알 수 없음';
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function formatElapsed(raw: any): string {
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return '알 수 없음';
+  const sec = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+  if (sec < 60) return '방금 전';
+  if (sec < 3600) return `${Math.floor(sec / 60)}분 전`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}시간 전`;
+  return `${Math.floor(sec / 86400)}일 전`;
+}
+
+function ticketSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error('JWT_SECRET missing');
+  return secret;
+}
+
+/**
+ * 인계 동의 티켓 발급.
+ * ★ userId를 표준 클레임명(`userId`)으로 넣지 않는다 — 미들웨어 가드가 뚫려도 req.user가 채워지지 않게.
+ * ★ 그 순간의 활성 세션 id에 묶는다 — 재사용해도 그 사이 바뀐 다른 세션은 밀어내지 못한다.
+ */
+function issueTakeoverTicket(userId: string, appSource: string, targetSessionId: string): string {
+  return jwt.sign(
+    { purpose: TAKEOVER_PURPOSE, tuid: userId, app: appSource, tsid: targetSessionId },
+    ticketSecret(),
+    { expiresIn: TAKEOVER_TICKET_TTL_SECONDS }
+  );
+}
+
+function isTakeoverConsented(
+  ticket: any,
+  userId: string,
+  appSource: string,
+  targetSessionId: string
+): boolean {
+  if (!ticket || typeof ticket !== 'string') return false;
+  try {
+    const decoded = jwt.verify(ticket, ticketSecret()) as any;
+    return (
+      decoded?.purpose === TAKEOVER_PURPOSE &&
+      decoded?.tuid === userId &&
+      decoded?.app === appSource &&
+      decoded?.tsid === targetSessionId
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 한 사용자의 로그인 처리 전체 흐름.
- * - 기존 같은 app_source 세션 무효화
- * - 새 세션 생성 (호출부에서 발급한 sessionId/token 사용)
+ * - 살아 있는 같은 app_source 세션이 있고 인계 동의가 없으면 → conflict (세션 쓰기 0)
+ * - 그 외 → 기존 세션 무효화 + 새 세션 생성
  *
  * 호출부(auth.ts)는 이 함수만 부르고 자체 세션 SQL 작성 금지.
  */
-export async function rotateUserSession(params: CreateSessionParams): Promise<void> {
+export async function rotateUserSession(
+  params: CreateSessionParams & { takeoverTicket?: any }
+): Promise<RotateOutcome> {
+  const live = await findLiveSession(params.userId, params.appSource);
+
+  if (live && !isTakeoverConsented(params.takeoverTicket, params.userId, params.appSource, live.id)) {
+    return {
+      status: 'conflict',
+      conflict: {
+        code: 'SESSION_IN_USE',
+        error: '이 아이디로 지금 다른 곳에서 사용 중입니다.',
+        activeSession: {
+          deviceLabel: describeDevice(live.user_agent),
+          ipMasked: maskIp(live.ip_address),
+          loginAtText: formatDateTime(live.created_at),
+          lastActivityText: formatElapsed(live.last_activity_at),
+        },
+        takeoverTicket: issueTakeoverTicket(params.userId, params.appSource, live.id),
+      },
+    };
+  }
+
+  // 만료된 채 is_active=true로 남은 행도 여기서 함께 정리된다
   await invalidateAppSessions(params.userId, params.appSource);
   await createUserSession(params);
+  return { status: 'rotated', takeover: !!live };
 }
 
 /**

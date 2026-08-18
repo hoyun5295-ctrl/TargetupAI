@@ -45,6 +45,15 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as JwtPayload;
+
+    // ★ 2026-08-18: 같은 비밀키로 서명되지만 API 인증용이 아닌 단명 토큰들(접속 인계 동의 티켓,
+    //   슈퍼관리자 2FA 등록 토큰)이 Bearer로 재사용되는 것을 막는다.
+    //   아래에 "sessionId 없는 토큰은 통과"시키는 분기가 있어, 가드가 없으면 그대로 인증을 통과한다.
+    //   토큰 종류를 하나씩 나열하지 않고, API 인증 토큰이 반드시 갖는 값(userId + userType)으로 판정한다.
+    if (!decoded.userId || !decoded.userType) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
     req.user = decoded;
     // 이후 호출 체인(callAIWithFallback 등)이 현재 사용자 ID를 인자 없이 읽도록 컨텍스트 저장
     requestContext.enterWith({ userId: decoded.userId, companyId: decoded.companyId, userType: decoded.userType });

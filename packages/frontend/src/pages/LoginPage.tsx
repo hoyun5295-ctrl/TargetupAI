@@ -52,6 +52,15 @@ export default function LoginPage() {
   const [showSendingBlockModal, setShowSendingBlockModal] = useState(false);
   const [sendingBlockMessage, setSendingBlockMessage] = useState('');
 
+  // ★ 2026-08-18 접속 인계 — 이미 접속 중인 아이디일 때 끊을지 말지 사용자가 고른다.
+  //   retry = 이 동의를 받은 뒤 다시 실행할 요청(일반/슈퍼 로그인 · 슈퍼관리자 최초 2FA 등록)
+  const [takeover, setTakeover] = useState<{
+    ticket: string;
+    session: { deviceLabel: string; ipMasked: string; loginAtText: string; lastActivityText: string };
+    retry: 'login' | 'enroll';
+  } | null>(null);
+  const [takeoverLoading, setTakeoverLoading] = useState(false);
+
   // 페이지 진입 시 강제 로그아웃 사유 확인
   useEffect(() => {
     const reason = sessionStorage.getItem('forceLogoutReason');
@@ -62,8 +71,8 @@ export default function LoginPage() {
     }
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // takeoverTicket이 있으면 "기존 접속을 끊고 로그인"에 동의한 재시도다 (사용자는 다시 입력하지 않는다)
+  const doLogin = async (takeoverTicket?: string) => {
     setError('');
     setLoading(true);
 
@@ -74,6 +83,7 @@ export default function LoginPage() {
         password,
         userType: isSuperAdminOnly ? 'super_admin' : undefined,
         totpCode: showTotp ? totpCode.trim() : undefined,
+        takeoverTicket,
       } as any);
 
       const data = response.data;
@@ -127,8 +137,11 @@ export default function LoginPage() {
       const status = err.response?.status;
       const data = err.response?.data;
 
-      // 발송 진행 중 — 로그인 차단
-      if (status === 409 && data?.reason === 'sending_in_progress') {
+      // ★ 이미 접속 중인 아이디 — 끊을지 말지 사용자에게 묻는다 (여기서 서버 세션은 아직 그대로다)
+      if (status === 409 && data?.code === 'SESSION_IN_USE') {
+        setTakeover({ ticket: data.takeoverTicket, session: data.activeSession, retry: 'login' });
+      } else if (status === 409 && data?.reason === 'sending_in_progress') {
+        // 발송 진행 중 — 로그인 차단
         setSendingBlockMessage(data.error);
         setShowSendingBlockModal(true);
       } else if (status === 401 && data?.needTotp) {
@@ -144,7 +157,12 @@ export default function LoginPage() {
     }
   };
 
-  const handleConfirmEnrollment = async () => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await doLogin();
+  };
+
+  const handleConfirmEnrollment = async (takeoverTicket?: string) => {
     if (!enrollmentData) return;
     setEnrollError('');
     if (!/^\d{6}$/.test(enrollCode)) {
@@ -156,10 +174,15 @@ export default function LoginPage() {
       const res = await fetch('/api/auth/super/confirm-totp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enrollToken: enrollmentData.enrollToken, code: enrollCode }),
+        body: JSON.stringify({ enrollToken: enrollmentData.enrollToken, code: enrollCode, takeoverTicket }),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
+        // ★ 이미 접속 중인 아이디 — 등록은 끝났고 세션만 남았다. 끊을지 여기서 고른다
+        if (res.status === 409 && errData?.code === 'SESSION_IN_USE') {
+          setTakeover({ ticket: errData.takeoverTicket, session: errData.activeSession, retry: 'enroll' });
+          return;
+        }
         setEnrollError(errData.error || 'OTP 검증에 실패했습니다.');
         return;
       }
@@ -253,6 +276,79 @@ export default function LoginPage() {
       setInquirySubmitting(false);
     }
   };
+
+  // ★ 접속 인계 동의 — 누르면 그 자리에서 다시 요청한다(아이디·비밀번호 재입력 없음)
+  const handleTakeoverConfirm = async () => {
+    if (!takeover) return;
+    const consumed = takeover;
+    setTakeoverLoading(true);
+    try {
+      if (consumed.retry === 'enroll') {
+        await handleConfirmEnrollment(consumed.ticket);
+      } else {
+        await doLogin(consumed.ticket);
+      }
+    } finally {
+      setTakeoverLoading(false);
+      // 재시도 사이에 또 다른 접속이 생겨 새 티켓이 들어왔으면 그것은 남긴다 — 소비한 동의만 지운다
+      setTakeover((prev) => (prev && prev.ticket === consumed.ticket ? null : prev));
+    }
+  };
+
+  // z-[60] — 슈퍼관리자 2FA 등록 모달(z-50) 위에서도 이 선택이 보여야 한다
+  const takeoverModal = takeover && (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-[60] animate-[fadeIn_0.2s_ease-out]">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-[zoomIn_0.25s_ease-out]">
+        <div className="px-6 pt-8 pb-2 text-center">
+          <div className="w-14 h-14 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-7 h-7 text-amber-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
+            </svg>
+          </div>
+          <h3 className="text-lg font-bold text-gray-900">이미 접속 중인 아이디입니다</h3>
+          <p className="text-sm text-gray-500 mt-2 leading-relaxed">
+            이 아이디로 지금 다른 곳에서 사용 중입니다.<br />계속하면 그곳의 접속은 종료됩니다.
+          </p>
+        </div>
+        <div className="px-6 pt-4">
+          <div className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-left space-y-1.5">
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <span className="text-gray-400 shrink-0">기기</span>
+              <span className="text-gray-700 font-medium text-right">{takeover.session.deviceLabel}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <span className="text-gray-400 shrink-0">접속 시각</span>
+              <span className="text-gray-700 font-medium text-right">{takeover.session.loginAtText}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <span className="text-gray-400 shrink-0">마지막 활동</span>
+              <span className="text-gray-700 font-medium text-right">{takeover.session.lastActivityText}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <span className="text-gray-400 shrink-0">IP</span>
+              <span className="text-gray-700 font-medium text-right">{takeover.session.ipMasked}</span>
+            </div>
+          </div>
+        </div>
+        <div className="px-6 pb-6 pt-4 space-y-2">
+          <button
+            onClick={handleTakeoverConfirm}
+            disabled={takeoverLoading}
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-medium py-2.5 rounded-xl text-sm transition-colors"
+          >
+            {takeoverLoading ? '로그인 중…' : '기존 접속 종료하고 로그인'}
+          </button>
+          <button
+            onClick={() => setTakeover(null)}
+            disabled={takeoverLoading}
+            className="w-full bg-white hover:bg-gray-50 disabled:opacity-50 border border-gray-200 text-gray-600 font-medium py-2.5 rounded-xl text-sm transition-colors"
+          >
+            취소
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   const forceLogoutModal = showForceLogoutModal && (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-[fadeIn_0.2s_ease-out]">
@@ -365,7 +461,7 @@ export default function LoginPage() {
                   className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2.5 rounded-xl text-sm transition-colors">
                   이전
                 </button>
-                <button onClick={handleConfirmEnrollment} disabled={enrollLoading || enrollCode.length !== 6}
+                <button onClick={() => handleConfirmEnrollment()} disabled={enrollLoading || enrollCode.length !== 6}
                   className="flex-1 bg-slate-800 hover:bg-slate-900 disabled:bg-gray-300 text-white font-medium py-2.5 rounded-xl text-sm transition-colors">
                   {enrollLoading ? '확인 중...' : '등록 확인'}
                 </button>
@@ -676,6 +772,7 @@ export default function LoginPage() {
       </div>
 
       {/* 모달들 */}
+      {takeoverModal}
       {forceLogoutModal}
       {sendingBlockModalEl}
       {passwordModal}
