@@ -6,6 +6,12 @@ import { TIMEOUTS } from '../config/defaults';
 import { authenticate, generateToken, JwtPayload } from '../middlewares/auth';
 import { rotateUserSession, normalizeAppSource, newSessionId } from '../utils/session-manager';
 import { resolveCompanyAccessDenial } from '../utils/company-access';
+import { issueUserLogin } from '../utils/login-issue';
+import {
+  isMfaEnforced, isMfaSchemaMissing, isTrustedDevice, issueMfaChallenge, issueMfaTicket,
+  verifyMfaTicket, verifyMfaChallenge, registerTrustedDevice, lockAccountForMfaFailure,
+  MFA_CODE_TTL_MINUTES,
+} from '../utils/mfa';
 import { isBlocked, recordFailureAndMaybeBlock, clearBlocksOnSuccess } from '../utils/login-block';
 import {
   generateTotpSecret,
@@ -325,100 +331,194 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
       return res.status(403).json({ error: '에이전트 전용 계정은 이 페이지를 사용할 수 없습니다.' });
     }
 
+    // ===== ★ 2026-08-18 다중 인증(MFA) — 전송자격인증 3.4 =====
+    //   [시행일] `MFA_ENFORCE_FROM` 이전에는 번호가 등록돼 있어도 묻지 않는다 — 사전 고지 기간(Harold 확정: 9/1 시행).
+    //   [전환기] 주 인증번호가 등록된 계정만 태운다. 전면 적용하면 시행 즉시 전 고객이 못 들어온다.
+    //   [면제] 이 기기·IP 대역이 24시간 신뢰 안이면 코드를 묻지 않는다.
+    //   컨트롤타워 = utils/mfa.ts
+    if (user.mfa_phone && isMfaEnforced()) {
+      const trusted = await isTrustedDevice(user.id, req.body.mfaDeviceToken, req);
+      if (!trusted) {
+        const issued = await issueMfaChallenge(user.id, user.mfa_phone, req);
+        await query(
+          `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+           VALUES (gen_random_uuid(), $1, 'mfa_challenge', 'user', $2, $3, $4, NOW())`,
+          [user.id, JSON.stringify({ loginId, delivery: issued.status }), req.ip, req.headers['user-agent'] || '']
+        );
+        // 인증 통과 전에는 로그인 토큰을 주지 않는다 — 티켓만 나간다
+        return res.status(401).json({
+          mfaRequired: true,
+          mfaTicket: issueMfaTicket(user.id, issued.challengeId),
+          maskedPhone: issued.maskedPhone,
+          expiresInMinutes: MFA_CODE_TTL_MINUTES,
+          ...(issued.status === 'reused' ? { resent: false, retryAfterSeconds: issued.retryAfterSeconds } : {}),
+        });
+      }
+    }
+
     // ===== ★ D111 P0: app_source 단위 단일 세션 =====
-    //   D100에서 "5개 허용"으로 풀었던 로직 완전 제거.
-    //   같은 app_source(hanjul/flyer) 내에서는 1세션만 — 2번째 로그인 시 이전 세션 무효화.
-    //   app_source가 다르면 공존 → 한줄로(hanjul) + 전단AI(flyer) 동시 사용 가능.
-    //   컨트롤타워: utils/session-manager.ts (rotateUserSession)
-    const sessionId = newSessionId();
-    const payload: JwtPayload = {
-      userId: user.id,
-      companyId: user.company_id,
-      userType: user.user_type === 'admin' ? 'company_admin' : 'company_user',
-      loginId: user.login_id,
-      sessionId,
-    };
-
-    const token = generateToken(payload);
-
-    // ★ 2026-08-18: 기존 접속이 살아 있으면 여기서 세션을 만들지 않고 인계 동의부터 받는다(세션 쓰기 0).
-    const rotate = await rotateUserSession({
-      sessionId,
-      userId: user.id,
-      token,
+    //   같은 app_source(hanjul/flyer) 내에서는 1세션만 — 2번째 로그인 시 인계 동의를 받는다.
+    //   세션 발급·응답 조립 컨트롤타워 = utils/login-issue.ts (MFA 통과 경로와 같은 것을 쓴다)
+    const issue = await issueUserLogin({
+      user,
+      loginId,
       appSource,
       req,
-      expiresInMinutes: 24 * 60, // 24시간
       takeoverTicket: req.body.takeoverTicket,
+      ipForBlock,
     });
 
-    if (rotate.status === 'conflict') {
-      await query(
-        `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
-         VALUES (gen_random_uuid(), $1, 'login_session_conflict', 'user', $2, $3, $4, NOW())`,
-        [user.id, JSON.stringify({ loginId, companyName: user.company_name }), req.ip, req.headers['user-agent'] || '']
-      );
-      return res.status(409).json(rotate.conflict);
+    if (issue.status === 'conflict') {
+      return res.status(409).json(issue.conflict);
     }
 
-    if (rotate.takeover) {
-      await query(
-        `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
-         VALUES (gen_random_uuid(), $1, 'login_takeover', 'user', $2, $3, $4, NOW())`,
-        [user.id, JSON.stringify({ loginId, companyName: user.company_name }), req.ip, req.headers['user-agent'] || '']
-      );
-    }
-
-    // 로그인 기록
-    await query(
-      `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
-       VALUES (gen_random_uuid(), $1, 'login_success', 'user', $2, $3, $4, NOW())`,
-      [user.id, JSON.stringify({ loginId, companyName: user.company_name, userType: user.user_type }), req.ip, req.headers['user-agent'] || '']
-    );
-
-    // ★ D145: 성공 시 같은 (ip, loginId)의 미만료 차단 자동 해제
-    await clearBlocksOnSuccess(ipForBlock, loginId, user.id);
-
-    // 로그인 시간 갱신
-    await query(
-      'UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1',
-      [user.id]
-    );
-
-    // 세션 타임아웃 조회
-    const timeoutResult = await query(
-      'SELECT session_timeout_minutes, kakao_enabled FROM companies WHERE id = $1',
-      [user.company_id]
-    );
-    const sessionTimeoutMinutes = timeoutResult.rows[0]?.session_timeout_minutes || 30;
-    const kakaoEnabled = timeoutResult.rows[0]?.kakao_enabled || false;
-
-    return res.json({
-      token,
-      user: {
-        id: user.id,
-        loginId: user.login_id,
-        name: user.name,
-        email: user.email,
-        userType: payload.userType,
-        mustChangePassword: user.must_change_password || false,
-        hiddenFeatures: user.hidden_features || [],
-        storeCodes: user.store_codes || [],
-        company: {
-          id: user.company_id,
-          name: user.company_name,
-          code: user.company_code,
-          kakaoEnabled,
-          subscriptionStatus: user.subscription_status || 'trial',
-          // ★ 2026-07-03 사용구분: web(웹발송) / agent(QTmsg 에이전트 전용 — 메뉴 게이팅) / both
-          usageType: user.usage_type || 'web',
-        },
-      },
-      sessionTimeoutMinutes,
-    });
+    return res.json(issue.body);
   } catch (error) {
+    if (isMfaSchemaMissing(error)) {
+      return res.status(503).json({
+        error: 'DB 마이그레이션 필요 — users.mfa_phone · mfa_challenges · mfa_trusted_devices 생성 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
     console.error('Login error:', error);
     return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ============================================================
+// ★ 2026-08-18 MFA — 인증번호 검증 / 재발송 (전송자격인증 3.4)
+// ============================================================
+
+/** 티켓 → 사용자 행. 티켓이 죽었으면 처음부터 다시 로그인시킨다 */
+async function loadMfaUser(ticket: any) {
+  const parsed = verifyMfaTicket(ticket);
+  if (!parsed) return null;
+  const result = await query(
+    `SELECT u.*, u.must_change_password, u.hidden_features, c.company_name as company_name, c.id as company_code, c.subscription_status, c.usage_type, c.status AS company_status
+       FROM users u JOIN companies c ON u.company_id = c.id
+      WHERE u.id = $1`,
+    [parsed.userId]
+  );
+  if (result.rows.length === 0) return null;
+  return { user: result.rows[0], challengeId: parsed.challengeId };
+}
+
+router.post('/mfa/verify', loginLimiter, async (req: Request, res: Response) => {
+  try {
+    const loaded = await loadMfaUser(req.body.mfaTicket);
+    if (!loaded) {
+      return res.status(401).json({ error: '인증 시간이 만료되었습니다. 다시 로그인해주세요.', code: 'MFA_TICKET_INVALID' });
+    }
+    const { user, challengeId } = loaded;
+
+    // 티켓 발급 이후 회사·계정 상태가 바뀌었을 수 있다 — 통과 직전에 다시 본다
+    const denial = resolveCompanyAccessDenial(user.company_status);
+    if (denial) return res.status(403).json({ error: denial.message });
+    if (!user.is_active || user.status !== 'active') {
+      return res.status(403).json({ error: '로그인할 수 없는 계정입니다. 관리자에게 문의해주세요.' });
+    }
+
+    const verdict = await verifyMfaChallenge(challengeId, user.id, req.body.code);
+
+    if (verdict.status === 'locked') {
+      await lockAccountForMfaFailure(user.id);
+      await query(
+        `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+         VALUES (gen_random_uuid(), $1, 'mfa_locked', 'user', $2, $3, $4, NOW())`,
+        [user.id, JSON.stringify({ loginId: user.login_id }), req.ip, req.headers['user-agent'] || '']
+      );
+      return res.status(423).json({
+        error: '인증번호를 여러 번 잘못 입력해 계정이 잠겼습니다. 담당자에게 문의해주세요.',
+        code: 'ACCOUNT_LOCKED',
+      });
+    }
+    if (verdict.status === 'expired') {
+      return res.status(401).json({ error: '인증번호가 만료되었습니다. 다시 받아주세요.', code: 'MFA_EXPIRED' });
+    }
+    if (verdict.status === 'wrong') {
+      await query(
+        `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+         VALUES (gen_random_uuid(), $1, 'mfa_fail', 'user', $2, $3, $4, NOW())`,
+        [user.id, JSON.stringify({ loginId: user.login_id, remainingAttempts: verdict.remainingAttempts }), req.ip, req.headers['user-agent'] || '']
+      );
+      return res.status(401).json({
+        error: `인증번호가 일치하지 않습니다. (남은 횟수 ${verdict.remainingAttempts}회)`,
+        code: 'MFA_WRONG',
+        remainingAttempts: verdict.remainingAttempts,
+      });
+    }
+
+    // 통과 — 이 기기를 24시간 신뢰하고 로그인 세션을 발급한다
+    await query(
+      `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+       VALUES (gen_random_uuid(), $1, 'mfa_success', 'user', $2, $3, $4, NOW())`,
+      [user.id, JSON.stringify({ loginId: user.login_id }), req.ip, req.headers['user-agent'] || '']
+    );
+    const mfaDeviceToken = await registerTrustedDevice(user.id, req);
+
+    const issue = await issueUserLogin({
+      user,
+      loginId: user.login_id,
+      appSource: normalizeAppSource(req.body.appSource),
+      req,
+      takeoverTicket: req.body.takeoverTicket,
+      ipForBlock: req.ip || '',
+      mfaDeviceToken,
+    });
+    if (issue.status === 'conflict') return res.status(409).json(issue.conflict);
+    return res.json(issue.body);
+  } catch (error) {
+    if (isMfaSchemaMissing(error)) {
+      return res.status(503).json({
+        error: 'DB 마이그레이션 필요 — users.mfa_phone · mfa_challenges · mfa_trusted_devices 생성 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    console.error('[mfa/verify]', error);
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+router.post('/mfa/resend', loginLimiter, async (req: Request, res: Response) => {
+  try {
+    const loaded = await loadMfaUser(req.body.mfaTicket);
+    if (!loaded) {
+      return res.status(401).json({ error: '인증 시간이 만료되었습니다. 다시 로그인해주세요.', code: 'MFA_TICKET_INVALID' });
+    }
+    const { user } = loaded;
+    if (!user.mfa_phone) {
+      return res.status(400).json({ error: '등록된 인증번호가 없습니다. 담당자에게 문의해주세요.' });
+    }
+
+    const issued = await issueMfaChallenge(user.id, user.mfa_phone, req);
+    if (issued.status === 'reused') {
+      return res.status(429).json({
+        error: `${issued.retryAfterSeconds}초 후에 다시 받을 수 있습니다.`,
+        code: 'MFA_COOLDOWN',
+        retryAfterSeconds: issued.retryAfterSeconds,
+      });
+    }
+
+    await query(
+      `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+       VALUES (gen_random_uuid(), $1, 'mfa_challenge', 'user', $2, $3, $4, NOW())`,
+      [user.id, JSON.stringify({ loginId: user.login_id, delivery: 'resend' }), req.ip, req.headers['user-agent'] || '']
+    );
+    // 챌린지가 새로 생겼으므로 티켓도 새로 발급한다(옛 티켓은 옛 챌린지를 가리킨다)
+    return res.json({
+      mfaTicket: issueMfaTicket(user.id, issued.challengeId),
+      maskedPhone: issued.maskedPhone,
+      expiresInMinutes: MFA_CODE_TTL_MINUTES,
+    });
+  } catch (error) {
+    if (isMfaSchemaMissing(error)) {
+      return res.status(503).json({
+        error: 'DB 마이그레이션 필요 — users.mfa_phone · mfa_challenges · mfa_trusted_devices 생성 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    console.error('[mfa/resend]', error);
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
 

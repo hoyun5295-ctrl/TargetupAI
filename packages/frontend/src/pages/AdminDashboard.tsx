@@ -3283,6 +3283,20 @@ const handleApproveRequest = async (id: string) => {
 
       if (!res.ok) throw new Error('수정 실패');
 
+      // ★ 2026-08-18 로그인 인증번호는 별도 endpoint — 변경 시 신뢰 기기 해제 + 전용 이력이 남는다
+      const mfaRes = await fetch(`/api/admin/users/${editingUser.id}/mfa-phone`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ mfaPhone: editingUser.mfa_phone || '' }),
+      });
+      if (!mfaRes.ok) {
+        const mfaErr = await mfaRes.json().catch(() => ({} as any));
+        setEditingUser(null);
+        loadUsers();
+        showAlert('일부 저장됨', mfaErr?.error || '로그인 인증번호는 저장하지 못했습니다.', 'error');
+        return;
+      }
+
       setEditingUser(null);
       loadUsers();
       showAlert('성공', '사용자 정보가 수정되었습니다.', 'success');
@@ -7033,6 +7047,23 @@ const handleApproveRequest = async (id: string) => {
                   onChange={(e) => setEditingUser({ ...editingUser, department: e.target.value })}
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                 />
+              </div>
+              {/* ★ 2026-08-18 로그인 인증번호 — 계정당 하나. 계약 담당자 번호를 여기서 등록한다 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  로그인 인증번호 <span className="text-xs font-normal text-gray-400">(휴대폰 · 계정당 1개)</span>
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="01012345678 (비우면 인증 해제)"
+                  value={editingUser.mfa_phone || ''}
+                  onChange={(e) => setEditingUser({ ...editingUser, mfa_phone: e.target.value.replace(/\D/g, '').slice(0, 11) })}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  로그인 시 이 번호로 6자리를 보냅니다. 번호를 바꾸면 기존 기기 인증이 모두 해제됩니다.
+                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">권한</label>

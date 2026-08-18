@@ -61,6 +61,19 @@ export default function LoginPage() {
   } | null>(null);
   const [takeoverLoading, setTakeoverLoading] = useState(false);
 
+  // ★ 2026-08-18 다중 인증(MFA) — 등록된 담당자 번호로 받은 6자리를 입력한다
+  const [mfa, setMfa] = useState<{ ticket: string; maskedPhone: string; expiresInMinutes: number } | null>(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaError, setMfaError] = useState('');
+  const [mfaLoading, setMfaLoading] = useState(false);
+  const [mfaResendMsg, setMfaResendMsg] = useState('');
+
+  // 로그인 보안 강화 사전 고지 — 시행일(9/1) 전까지, 확인 전까지만 노출
+  const [showSecurityNotice, setShowSecurityNotice] = useState(
+    () => Date.now() < new Date('2026-09-01T00:00:00+09:00').getTime()
+      && localStorage.getItem('securityNotice20260901') !== 'seen'
+  );
+
   // 페이지 진입 시 강제 로그아웃 사유 확인
   useEffect(() => {
     const reason = sessionStorage.getItem('forceLogoutReason');
@@ -70,6 +83,44 @@ export default function LoginPage() {
       sessionStorage.removeItem('forceLogoutReason');
     }
   }, []);
+
+  /**
+   * 로그인 성공 처리 — 일반 로그인과 MFA 통과가 같은 것을 쓴다.
+   * 두 벌이 되면 한쪽만 고쳐지는 날이 온다(비밀번호 변경·에이전트 랜딩·카페24 복귀 분기가 조용히 갈린다).
+   */
+  const applyLoginSuccess = (data: any) => {
+    const { token, user, sessionTimeoutMinutes, mfaDeviceToken } = data;
+    localStorage.setItem('sessionTimeoutMinutes', String(sessionTimeoutMinutes || 30));
+    // 이 기기를 24시간 신뢰 — 다음 로그인 때 인증번호를 묻지 않는다
+    if (mfaDeviceToken) localStorage.setItem('mfaDeviceToken', mfaDeviceToken);
+
+    if (user.mustChangePassword) {
+      setTempUser(user);
+      setTempToken(token);
+      setCurrentPw(password);
+      setShowPasswordModal(true);
+      setLoading(false);
+      return;
+    }
+
+    login(user, token);
+
+    if (user.userType === 'super_admin') {
+      navigate('/admin');
+    } else if (user.company?.usageType === 'agent') {
+      // ★ 2026-07-03 에이전트(QTmsg) 전용 회사 — 카카오&RCS 랜딩 (대시보드 차단)
+      navigate('/kakao-rcs');
+    } else {
+      // ★ 2026-07-03 카페24 앱 실행 랜딩 복귀 — 비로그인으로 /cafe24/launch 진입 시 저장한 mall_id로 복귀
+      const cafe24Mall = sessionStorage.getItem('cafe24_return_mall_id');
+      if (cafe24Mall) {
+        sessionStorage.removeItem('cafe24_return_mall_id');
+        navigate(`/cafe24/launch?mall_id=${encodeURIComponent(cafe24Mall)}`);
+      } else {
+        navigate('/dashboard');
+      }
+    }
+  };
 
   // takeoverTicket이 있으면 "기존 접속을 끊고 로그인"에 동의한 재시도다 (사용자는 다시 입력하지 않는다)
   const doLogin = async (takeoverTicket?: string) => {
@@ -84,6 +135,8 @@ export default function LoginPage() {
         userType: isSuperAdminOnly ? 'super_admin' : undefined,
         totpCode: showTotp ? totpCode.trim() : undefined,
         takeoverTicket,
+        // 이 기기가 24시간 신뢰 안이면 서버가 인증번호를 묻지 않는다
+        mfaDeviceToken: localStorage.getItem('mfaDeviceToken') || undefined,
       } as any);
 
       const data = response.data;
@@ -104,35 +157,7 @@ export default function LoginPage() {
         return;
       }
 
-      const { token, user, sessionTimeoutMinutes } = data;
-      localStorage.setItem('sessionTimeoutMinutes', String(sessionTimeoutMinutes || 30));
-
-      if (user.mustChangePassword) {
-        setTempUser(user);
-        setTempToken(token);
-        setCurrentPw(password);
-        setShowPasswordModal(true);
-        setLoading(false);
-        return;
-      }
-
-      login(user, token);
-
-      if (user.userType === 'super_admin') {
-        navigate('/admin');
-      } else if (user.company?.usageType === 'agent') {
-        // ★ 2026-07-03 에이전트(QTmsg) 전용 회사 — 카카오&RCS 랜딩 (대시보드 차단)
-        navigate('/kakao-rcs');
-      } else {
-        // ★ 2026-07-03 카페24 앱 실행 랜딩 복귀 — 비로그인으로 /cafe24/launch 진입 시 저장한 mall_id로 복귀
-        const cafe24Mall = sessionStorage.getItem('cafe24_return_mall_id');
-        if (cafe24Mall) {
-          sessionStorage.removeItem('cafe24_return_mall_id');
-          navigate(`/cafe24/launch?mall_id=${encodeURIComponent(cafe24Mall)}`);
-        } else {
-          navigate('/dashboard');
-        }
-      }
+      applyLoginSuccess(data);
     } catch (err: any) {
       const status = err.response?.status;
       const data = err.response?.data;
@@ -144,6 +169,12 @@ export default function LoginPage() {
         // 발송 진행 중 — 로그인 차단
         setSendingBlockMessage(data.error);
         setShowSendingBlockModal(true);
+      } else if (status === 401 && data?.mfaRequired) {
+        // ★ 다중 인증 — 등록된 담당자 번호로 6자리가 갔다. 아직 로그인 토큰은 받지 않았다
+        setMfa({ ticket: data.mfaTicket, maskedPhone: data.maskedPhone, expiresInMinutes: data.expiresInMinutes || 5 });
+        setMfaCode('');
+        setMfaError('');
+        setMfaResendMsg(data.resent === false ? '이미 보낸 인증번호를 입력해주세요.' : '');
       } else if (status === 401 && data?.needTotp) {
         // ★ 슈퍼관리자 2FA — OTP 코드 입력 단계로 진입
         setShowTotp(true);
@@ -160,6 +191,65 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     await doLogin();
+  };
+
+  const handleMfaVerify = async () => {
+    if (!mfa) return;
+    if (!/^\d{6}$/.test(mfaCode)) { setMfaError('6자리 숫자를 입력해주세요.'); return; }
+    setMfaLoading(true);
+    setMfaError('');
+    try {
+      const res = await fetch('/api/auth/mfa/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mfaTicket: mfa.ticket, code: mfaCode, appSource: 'hanjul' }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        // 티켓이 죽었거나 계정이 잠겼으면 처음부터 다시 — 입력창을 닫고 사유를 로그인 화면에 남긴다
+        if (data?.code === 'MFA_TICKET_INVALID' || data?.code === 'ACCOUNT_LOCKED') {
+          setMfa(null);
+          setError(data?.error || '다시 로그인해주세요.');
+          return;
+        }
+        setMfaError(data?.error || '인증에 실패했습니다.');
+        return;
+      }
+      setMfa(null);
+      applyLoginSuccess(data);
+    } catch {
+      setMfaError('인증 중 오류가 발생했습니다.');
+    } finally {
+      setMfaLoading(false);
+    }
+  };
+
+  const handleMfaResend = async () => {
+    if (!mfa) return;
+    setMfaLoading(true);
+    setMfaError('');
+    setMfaResendMsg('');
+    try {
+      const res = await fetch('/api/auth/mfa/resend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mfaTicket: mfa.ticket }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        if (data?.code === 'MFA_COOLDOWN') { setMfaResendMsg(data.error); return; }
+        setMfaError(data?.error || '재발송에 실패했습니다.');
+        return;
+      }
+      // 새 챌린지가 생겼으므로 티켓을 교체한다(옛 티켓은 옛 인증번호를 가리킨다)
+      setMfa({ ticket: data.mfaTicket, maskedPhone: data.maskedPhone, expiresInMinutes: data.expiresInMinutes || 5 });
+      setMfaCode('');
+      setMfaResendMsg('인증번호를 다시 보냈습니다.');
+    } catch {
+      setMfaError('재발송 중 오류가 발생했습니다.');
+    } finally {
+      setMfaLoading(false);
+    }
   };
 
   const handleConfirmEnrollment = async (takeoverTicket?: string) => {
@@ -294,6 +384,102 @@ export default function LoginPage() {
       setTakeover((prev) => (prev && prev.ticket === consumed.ticket ? null : prev));
     }
   };
+
+  // ★ 2026-08-18 로그인 보안 강화 사전 고지 — 시행 전까지 로그인 화면에서 1회 안내
+  const securityNoticeModal = showSecurityNotice && (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-40 animate-[fadeIn_0.2s_ease-out]">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-[zoomIn_0.25s_ease-out]">
+        <div className="px-6 pt-8 pb-2 text-center">
+          <div className="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-7 h-7 text-blue-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+            </svg>
+          </div>
+          <h3 className="text-lg font-bold text-gray-900">로그인 보안 강화 안내</h3>
+          <p className="text-sm text-blue-600 font-medium mt-1">2026년 9월 1일 시행</p>
+        </div>
+        <div className="px-6 pt-4 text-sm text-gray-600 leading-relaxed space-y-3">
+          <p>
+            방송미디어통신위원회 「전송자격인증 기준 등에 관한 고시」에 따라 문자 발송 서비스는
+            로그인 시 담당자 휴대폰 인증을 적용해야 합니다.
+          </p>
+          <div className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 space-y-2">
+            <p className="text-gray-700"><span className="font-medium">9월 1일부터</span> 로그인 시 담당자 휴대폰으로 발송되는 <span className="font-medium">6자리 인증번호</span> 입력이 추가됩니다.</p>
+            <p className="text-xs text-gray-500">· 인증 후 <span className="font-medium text-gray-700">24시간</span> 동안은 같은 기기에서 다시 묻지 않습니다.</p>
+            <p className="text-xs text-gray-500">· 담당자 휴대폰번호는 계약 담당자 기준으로 등록됩니다. 변경이 필요하시면 담당자에게 연락 주세요.</p>
+          </div>
+        </div>
+        <div className="px-6 pb-6 pt-4">
+          <button
+            onClick={() => { localStorage.setItem('securityNotice20260901', 'seen'); setShowSecurityNotice(false); }}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-xl text-sm transition-colors"
+          >
+            확인했습니다
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ★ 다중 인증 입력 — 등록된 담당자 번호로 받은 6자리
+  const mfaModal = mfa && (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-[fadeIn_0.2s_ease-out]">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-[zoomIn_0.25s_ease-out]">
+        <div className="px-6 pt-8 pb-2 text-center">
+          <div className="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-7 h-7 text-blue-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" />
+            </svg>
+          </div>
+          <h3 className="text-lg font-bold text-gray-900">휴대폰 인증</h3>
+          <p className="text-sm text-gray-500 mt-2 leading-relaxed">
+            <span className="font-medium text-gray-700">{mfa.maskedPhone}</span> 으로 인증번호를 보냈습니다.<br />
+            {mfa.expiresInMinutes}분 안에 6자리를 입력해주세요.
+          </p>
+        </div>
+        <div className="px-6 pt-4">
+          <input
+            type="text"
+            inputMode="numeric"
+            autoFocus
+            maxLength={6}
+            value={mfaCode}
+            onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            onKeyDown={(e) => { if (e.key === 'Enter' && mfaCode.length === 6) handleMfaVerify(); }}
+            placeholder="000000"
+            className="w-full text-center text-2xl tracking-[0.4em] font-semibold border border-gray-200 rounded-xl py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {mfaError && <p className="text-xs text-red-600 mt-2 text-center">{mfaError}</p>}
+          {mfaResendMsg && <p className="text-xs text-gray-500 mt-2 text-center">{mfaResendMsg}</p>}
+        </div>
+        <div className="px-6 pb-6 pt-4 space-y-2">
+          <button
+            onClick={handleMfaVerify}
+            disabled={mfaLoading || mfaCode.length !== 6}
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-medium py-2.5 rounded-xl text-sm transition-colors"
+          >
+            {mfaLoading ? '확인 중…' : '인증하고 로그인'}
+          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleMfaResend}
+              disabled={mfaLoading}
+              className="flex-1 bg-white hover:bg-gray-50 disabled:opacity-50 border border-gray-200 text-gray-600 font-medium py-2.5 rounded-xl text-sm transition-colors"
+            >
+              인증번호 재발송
+            </button>
+            <button
+              onClick={() => { setMfa(null); setMfaCode(''); setMfaError(''); }}
+              disabled={mfaLoading}
+              className="flex-1 bg-white hover:bg-gray-50 disabled:opacity-50 border border-gray-200 text-gray-600 font-medium py-2.5 rounded-xl text-sm transition-colors"
+            >
+              취소
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
   // z-[60] — 슈퍼관리자 2FA 등록 모달(z-50) 위에서도 이 선택이 보여야 한다
   const takeoverModal = takeover && (
@@ -772,6 +958,8 @@ export default function LoginPage() {
       </div>
 
       {/* 모달들 */}
+      {securityNoticeModal}
+      {mfaModal}
       {takeoverModal}
       {forceLogoutModal}
       {sendingBlockModalEl}

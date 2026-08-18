@@ -14,6 +14,7 @@ import { distillIndustryFormula } from '../utils/industry-formula';
 // ★ 2026-06-25: 업로더별 고객 삭제 시 해당 회사 데이터 프로필 캐시 무효화(게이트 즉시 반영)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { invalidateCompanySessions } from '../utils/session-manager';
+import { revokeTrustedDevices, maskPhone, isMfaSchemaMissing } from '../utils/mfa';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
 import { detectEnabledFields, clearEnabledFieldsCache } from '../utils/enabled-fields';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus, getDisplayContents } from '../utils/sms-result-map';
@@ -67,6 +68,7 @@ router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: 
         u.user_type, u.status, u.company_id, u.last_login_at, u.created_at,
         u.store_codes, u.line_group_id,
         u.opt_out_080_number, u.opt_out_auto_sync,
+        u.mfa_phone,
         c.company_name,
         lg.group_name as line_group_name,
         COALESCE(uns.cnt, 0) as unsubscribe_count,
@@ -84,6 +86,13 @@ router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: 
     
     res.json({ users: result.rows });
   } catch (error) {
+    // ★ 2026-08-18 u.mfa_phone을 명시 조회하므로 DDL 미적용이면 여기서 죽는다 — 원인이 보이는 응답으로
+    if (isMfaSchemaMissing(error)) {
+      return res.status(503).json({
+        error: 'DB 마이그레이션 필요 — users.mfa_phone ALTER 실행 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
     console.error('사용자 목록 조회 실패:', error);
     res.status(500).json({ error: '사용자 목록 조회 실패' });
   }
@@ -213,6 +222,61 @@ router.put('/users/:id', authenticate, requireSuperAdmin, async (req: Request, r
 // ================================================================
 
 // 사용자별 수신거부 목록 조회
+// ============================================================
+// ★ 2026-08-18 MFA 주 인증번호 등록·변경 (전송자격인증 3.4 ③)
+//   계정당 **하나**다. 계약서상 담당자 번호를 우리가 등록한다 — 사용자가 스스로 넣으면
+//   "등록·확인된 정보와 연계" 요건이 깨진다. 변경하면 기존 신뢰 기기를 전부 해제한다.
+// ============================================================
+router.put('/users/:id/mfa-phone', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const raw = String(req.body?.mfaPhone ?? '').replace(/\D/g, '');
+
+  try {
+    const beforeRes = await query('SELECT login_id, mfa_phone FROM users WHERE id = $1', [id]);
+    if (beforeRes.rows.length === 0) {
+      return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    }
+    const before = beforeRes.rows[0];
+
+    // 빈 값 = 해제. 값이 있으면 휴대폰 형식만 받는다(인증 문자가 가야 하는 번호다)
+    if (raw && !/^01[016789]\d{7,8}$/.test(raw)) {
+      return res.status(400).json({ error: '휴대폰 번호 형식이 아닙니다.' });
+    }
+
+    await query('UPDATE users SET mfa_phone = $1, updated_at = NOW() WHERE id = $2', [raw || null, id]);
+    // 번호가 바뀌면 옛 번호로 얻은 신뢰는 무효다
+    const revoked = await revokeTrustedDevices(id);
+
+    await query(
+      `INSERT INTO audit_logs (id, user_id, action, target_type, target_id, details, ip_address, user_agent, created_at)
+       VALUES (gen_random_uuid(), $1, 'mfa_phone_changed', 'user', $2, $3, $4, $5, NOW())`,
+      [
+        (req as any).user?.userId || null,
+        id,
+        JSON.stringify({
+          targetLoginId: before.login_id,
+          before: before.mfa_phone ? maskPhone(before.mfa_phone) : null,
+          after: raw ? maskPhone(raw) : null,
+          revokedTrustedDevices: revoked,
+        }),
+        req.ip,
+        req.headers['user-agent'] || '',
+      ]
+    );
+
+    return res.json({ success: true, maskedPhone: raw ? maskPhone(raw) : null, revokedTrustedDevices: revoked });
+  } catch (error: any) {
+    if (isMfaSchemaMissing(error)) {
+      return res.status(503).json({
+        error: 'DB 마이그레이션 필요 — users.mfa_phone · mfa_trusted_devices 생성 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    console.error('MFA 인증번호 저장 실패:', error);
+    return res.status(500).json({ error: 'MFA 인증번호 저장 실패' });
+  }
+});
+
 router.get('/users/:id/unsubscribes', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
