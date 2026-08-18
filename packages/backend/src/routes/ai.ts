@@ -1418,6 +1418,22 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
 
     // ★ CT-01 + 공통 안전필터(buildJourneySafetyFilter) — is_opt_out·is_invalid·수신거부(회사+전화) 통일.
     const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, baseParams.length + 1);
+
+    // ★ 2026-08-18 조건이 하나도 안 만들어졌으면 **전원이 아니라 거절**이다 (Harold 접수:
+    //   "유호윤 고객에게만 30% 할인" → AI가 이름 필터가 없어 못 만들겠다고 답했는데도 전체 6명이 잡혔다).
+    //   빈 필터를 "전체 의도"로 읽던 해석이 원인이다 — 그 둘은 같은 신호로 표현될 수 없다.
+    //   판정은 **만들어진 WHERE가 비었는가**로 한다. 키 개수로 세면 `{grade: null}`처럼
+    //   키는 있는데 조건이 안 붙는 형태가 그대로 통과한다.
+    //   전체 발송이 정말 필요하면 `dm.ts`처럼 명시 플래그를 받는 게 맞다 — 지금 그 신호는 없다.
+    if (!filterWhere.trim()) {
+      console.warn(`[AI Operator] 빈 조건 발송 차단 — company=${companyId} filters=${JSON.stringify(filters).slice(0, 200)}`);
+      return res.status(400).json({
+        success: false,
+        code: 'TARGET_FILTER_EMPTY',
+        error: 'AI가 이 목표를 조건으로 옮기지 못했습니다. 조건을 더 구체적으로 적어주시거나, 특정 고객 몇 명에게만 보낼 때는 직접발송에서 고객을 직접 골라 보내주세요.',
+      });
+    }
+
     const { sql, params } = buildSendableRecipientsSql(filterWhere, filterParams, baseParams, storeFilter);
 
     const result = await query(sql, params);
@@ -1560,6 +1576,17 @@ router.post('/operator/target-recipients', async (req: Request, res: Response) =
       // ★ 2026-08-04 변화 축 — 비교할 지난 회차의 주인(위 기준선 게이트를 지난 뒤라 항상 존재).
       operatorId: opIdForBaseline,
     });
+
+    // ★ 2026-08-18 계약 축이 아닌데 조건이 하나도 안 만들어졌으면 **전원이 아니라 거절**이다.
+    //   preview-recipients(발송 경로)와 같은 판정을 쓴다 — 화면이 6명을 보여주고 발송은 막히는
+    //   어긋남이 생기면 그게 더 나쁘다. 계약 축(segment)은 자기 SQL이 조건을 소유하므로 대상이 아니다.
+    if (compiled.basis !== 'segment' && !compiled.filterWhere.trim()) {
+      return res.status(400).json({
+        success: false,
+        code: 'TARGET_FILTER_EMPTY',
+        error: 'AI가 이 목표를 조건으로 옮기지 못했습니다. 조건을 더 구체적으로 적어주시거나, 특정 고객 몇 명에게만 보낼 때는 직접발송에서 고객을 직접 골라 보내주세요.',
+      });
+    }
     // 조건 필드 동적 컬럼 — FIELD_MAP 화이트리스트 + displayName 라벨 단일 소스.
     //   계약 축은 조건 컬럼을 계약이 정하므로 filters 기반 동적 컬럼을 붙이지 않는다.
     const conditionColumns = compiled.basis === 'segment' ? [] : resolveConditionColumns(filters || {}, FIELD_MAP);

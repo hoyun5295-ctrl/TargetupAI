@@ -1471,12 +1471,32 @@ interface ActiveFieldsResult {
 }
 
 /**
+ * 값 목록을 프롬프트에 싣지 않는 자유 입력 필드.
+ *
+ * 이 셋은 "정해진 값 중 고르는" 필드가 아니라 사용자가 쓴 문자열을 그대로 쓰는 필드다.
+ * DISTINCT 200개를 나열하면 개인정보만 프롬프트로 나가고 AI에게 도움이 되지 않는다.
+ * `detectActiveFields`(값 수집)와 `buildFilterFieldsPrompt`(값 출력)가 **같은 목록을 본다** —
+ * 한쪽만 늘면 그 필드 값이 조용히 프롬프트로 샌다.
+ */
+const FREE_TEXT_FIELDS = new Set(['name', 'address', 'email']);
+
+/**
  * 고객사별 데이터 있는 필드 + 커스텀 필드 라벨 + DISTINCT 값 일괄 조회.
  * recommendTarget, parseBriefing 등 AI 프롬프트 생성 시 공통 사용.
  */
 export async function detectActiveFields(companyId: string): Promise<ActiveFieldsResult> {
   // 1) 직접 컬럼 필드 — 데이터 존재 여부 한 번에 체크
-  const detectableFields = getColumnFields().filter(f => f.fieldKey !== 'name' && f.fieldKey !== 'phone' && f.fieldKey !== 'sms_opt_in');
+  //
+  // ★ 2026-08-18 `name` 제외 해제 (Harold 접수: "유호윤 고객에게만 보낼거야" → AI가
+  //   "사용 가능한 필터 필드에 고객명 항목이 없어 이름 기반 필터링이 불가능합니다"라고 답했다).
+  //   필터 엔진은 진작부터 이름을 처리할 수 있었다 — `standard-field-map`에 name이 string 컬럼으로
+  //   등록돼 있고 `buildCustomerFilter`가 그 목록을 제너릭 루프로 돈다(eq/in/contains).
+  //   막고 있던 건 **AI에게 필드 목록을 넘길 때 잘라내던 이 한 줄**뿐이었다.
+  //
+  //   ⛔ `phone`·`sms_opt_in`은 계속 막는다 — 번호로 타겟을 짜는 건 직접발송이 할 일이고,
+  //      수신동의는 타겟 축이 아니라 안전필터가 이미 강제하는 값이다.
+  //   ⛔ 이름 값 목록은 프롬프트에 싣지 않는다(아래 4단계 FREE_TEXT_FIELDS) — 열되 새어나가지는 않게.
+  const detectableFields = getColumnFields().filter(f => f.fieldKey !== 'phone' && f.fieldKey !== 'sms_opt_in');
   const countFilters = detectableFields.map(f => {
     const c = f.columnName;
     if (f.fieldKey === 'age') return `COUNT(*) FILTER (WHERE ${c} IS NOT NULL AND ${c} > 0 OR birth_date IS NOT NULL) as cnt_${f.fieldKey}`;
@@ -1499,10 +1519,18 @@ export async function detectActiveFields(companyId: string): Promise<ActiveField
   // 3) 데이터 있는 직접 컬럼 필드만 추출
   const activeColumnFields = detectableFields.filter(f => parseInt(dc[`cnt_${f.fieldKey}`] || '0') > 0);
 
-  // 4) 모든 문자열 필드 DISTINCT 조회 — AI가 정확한 DB값만 사용하도록
+  // 4) 문자열 필드 DISTINCT 조회 — AI가 정확한 DB값만 사용하도록
+  //
+  // ★ 2026-08-18 자유 입력 필드는 값을 뽑지 않는다(FREE_TEXT_FIELDS).
+  //   이름·주소·이메일은 값 자체가 개인정보이고, 200개를 나열해 봐야 AI가 고를 목록이 아니다
+  //   (사용자가 "유호윤"이라고 쓰면 그 값을 그대로 쓰는 필드다).
+  //   프롬프트 생성기도 이 셋은 값 없이 `contains 연산자 권장`으로만 안내한다 — 같은 목록을 공유해
+  //   한쪽만 늘어 값이 새는 일이 없게 한다.
   const distinctValues: Record<string, string[]> = {};
   try {
-    const stringFields = activeColumnFields.filter(f => f.dataType === 'string');
+    const stringFields = activeColumnFields.filter(
+      (f) => f.dataType === 'string' && !FREE_TEXT_FIELDS.has(f.fieldKey),
+    );
     if (stringFields.length > 0) {
       const distinctQueries = stringFields.map(f =>
         query(
@@ -1553,7 +1581,12 @@ export function buildFilterFieldsPrompt(fields: ActiveFieldsResult): string {
     if (key === 'store_code') return `- store_code: ${label} (eq/in 연산자)${vals ? ' → 반드시 다음 값 중 하나만 정확히 사용: ' + vals.join(', ') : ''}`;
     if (f.dataType === 'number') return `- ${key}: ${label} (gte, lte, between 연산자)`;
     if (f.dataType === 'date') return `- ${key}: ${label} (days_within, gte, lte 연산자)`;
-    if (['address', 'name', 'email'].includes(key)) {
+    // ★ 2026-08-18 값 목록 없이 연산자만 안내한다 — 목록은 FREE_TEXT_FIELDS가 소유(위 주석).
+    //   `name`은 특히 "특정 고객 한 명" 요청에 쓰인다(Harold 접수) — eq로 정확히 한 명을 집는다.
+    if (FREE_TEXT_FIELDS.has(key)) {
+      if (key === 'name') {
+        return `- name: ${label} (eq = 정확히 일치하는 고객만, contains = 부분일치. 예: 특정 고객 한 명 → {"operator":"eq","value":"홍길동"})`;
+      }
       return `- ${key}: ${label} (contains 연산자 권장 — 부분일치 검색. 예: {"operator":"contains","value":"용산구"})`;
     }
     if (vals && vals.length > 0) {
