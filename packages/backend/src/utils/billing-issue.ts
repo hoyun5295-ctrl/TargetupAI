@@ -141,8 +141,8 @@ export function assertNoBillingPeriodConflict(c: BillingPeriodConflicts): void {
  * - 허용 집합 = 정산 기간에 걸친 역월뿐. 밖이면 422 — 이름이라도 기간 밖 달을 달 수 없다.
  * - 계산은 'YYYY-MM-DD' 문자열 절단으로만 한다. Date 파싱이 없어 서버 TZ와 무관하다
  *   (Date 경유는 음수 오프셋 TZ에서 1일 시작이 전월로 밀리는 잠복 결함이었다).
- * - ⚠ 라벨은 이름일 뿐이다 — 추가 청구 항목(billing_extra_items)이 어느 장에 실리는가는 여전히
- *   발행 기간과의 겹침이 정한다. 라벨에 묶으면 제외된 항목이 다음 발행 기간과 안 겹칠 때 영구 미청구 고아가 된다.
+ * - ★ 2026-08-20(2) 재오픈 정정 — 추가 청구 항목(billing_extra_items)의 귀속 축 = **청구월 = 이 라벨**이다.
+ *   항목은 자기 청구월 라벨의 정산에만 실린다. 라벨 부재 고아의 신규 유입은 monthFullyCovered가 반영 시점에 거부한다.
  */
 export function resolveBillingLabelMonth(
   labelMonth: string | null | undefined,

@@ -16,8 +16,8 @@
  *   - 드래프트: sessionStorage(버전 키) 저장 + 재진입 시 이어하기 배너. 서버 저장 없음(동의 전 개인정보 0).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, ArrowRight, Check, RotateCcw } from 'lucide-react';
-import type { DiagnosisQuestionDto, DiagnosisSectionDto } from './diagnosisApi';
+import { Activity, ArrowRight, Check, RotateCcw, Sparkles } from 'lucide-react';
+import type { DiagnosisEchoesDto, DiagnosisQuestionDto, DiagnosisSectionDto } from './diagnosisApi';
 // 분기 판정 CT — 서버 visibleQuestions와 같은 규칙. 계약 테스트가 실 seed로 두 판정을 대조한다.
 import { visiblePath, pruneAnswers } from '../../utils/diagnosis-branch';
 
@@ -28,6 +28,11 @@ interface Props {
   prefilled?: Record<string, string>;
   /** sessionStorage 드래프트 키(버전 포함). null/미지정 = 드래프트 비활성. */
   draftKey?: string | null;
+  /**
+   * v10 — 섹션 경계 즉석 소견(서버 questions 응답 동봉). 화면은 tone을 고르기만 한다 —
+   * 판정은 서버 원장이 소유(리포트와 같은 문장이라 최종 결과와 어긋나지 않는다).
+   */
+  echoes?: DiagnosisEchoesDto | null;
   /** 완주 — answers = 사용자가 실제 답한 것만(선치환 제외) */
   onFinished: (answers: Record<string, string>) => void;
   busy?: boolean;
@@ -38,7 +43,7 @@ type View =
   | { kind: 'interstitial'; doneSectionKey: string; nextKey: string };
 
 export default function DiagnosisWizard({
-  questions, sections = null, prefilled = {}, draftKey = null, onFinished, busy = false,
+  questions, sections = null, prefilled = {}, draftKey = null, echoes = null, onFinished, busy = false,
 }: Props) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [cursorKey, setCursorKey] = useState<string | null>(null);
@@ -199,6 +204,14 @@ export default function DiagnosisWizard({
       .filter((q) => q.section === view.doneSectionKey && effAnswers[q.key] !== undefined)
       .map((q) => q.options.find((o) => o.key === effAnswers[q.key])?.label)
       .filter(Boolean) as string[];
+    // v10 즉석 소견 — 방금 끝난 섹션의 게이트 답에 걸린 echo 중 gap 우선, 없으면 마지막 good.
+    // tone·문장 전부 서버 원장(리포트와 같은 문장)이다 — 여기서는 고르기만 한다.
+    const doneEchoes = path
+      .filter((q) => q.section === view.doneSectionKey && effAnswers[q.key] !== undefined)
+      .map((q) => echoes?.[q.key]?.[effAnswers[q.key]])
+      .filter(Boolean) as Array<{ tone: 'gap' | 'good'; text: string }>;
+    const echo = doneEchoes.find((e) => e.tone === 'gap') ?? doneEchoes[doneEchoes.length - 1] ?? null;
+    const echoLead = echo ? (/^(.+?[.!?])\s+[\s\S]+$/.exec(echo.text.trim())?.[1] ?? echo.text.trim()) : '';
     return (
       <div className="flex flex-col gap-5 break-keep">
         <SectionDots sections={sectionList} currentIdx={sectionIdxOf(nextQ ?? null)} maxIdx={maxSectionIdxRef.current} />
@@ -214,6 +227,23 @@ export default function DiagnosisWizard({
               </li>
             ))}
           </ul>
+          {echo && (
+            <div
+              className={`mt-3.5 rounded-xl border p-3 ${
+                echo.tone === 'gap'
+                  ? 'border-amber-400/25 bg-amber-500/[0.07]'
+                  : 'border-emerald-400/25 bg-emerald-500/[0.07]'
+              }`}
+            >
+              <p className={`flex items-center gap-1.5 text-[11px] font-bold tracking-wide ${
+                echo.tone === 'gap' ? 'text-amber-300' : 'text-emerald-300'
+              }`}>
+                <Sparkles className="h-3 w-3" aria-hidden />
+                {echo.tone === 'gap' ? '여기까지에서 벌써 보이는 것' : '좋은 신호예요'}
+              </p>
+              <p className="mt-1.5 text-[13.5px] leading-[1.65] text-white/80">{echoLead}</p>
+            </div>
+          )}
           <div className="mt-4 border-t border-white/10 pt-4">
             <p className="text-sm text-white/70">{nextSection?.intro || '이어서 여쭤볼게요.'}</p>
           </div>

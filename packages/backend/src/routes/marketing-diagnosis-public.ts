@@ -17,7 +17,7 @@ import rateLimit from 'express-rate-limit';
 import { query } from '../config/database';
 import { handleDbMigrationError } from '../utils/db-migration-error';
 import { validateAnswers, recommendPlan } from '../utils/plan-recommend';
-import { buildDiagnosisResult, CONVERSION_TASKS } from '../utils/marketing-diagnosis-report';
+import { buildDiagnosisResult, buildSectionEchoes, CONVERSION_TASKS } from '../utils/marketing-diagnosis-report';
 import {
   loadActiveQuestionSet, handleDefinitionInvalid, DIAGNOSIS_PLAN_ROWS_SQL, projectQuestions,
 } from '../utils/marketing-diagnosis-store';
@@ -65,7 +65,13 @@ router.get('/questions', async (_req: Request, res: Response) => {
     const activeSet = await loadActiveQuestionSet();
     if (!activeSet) return activeSetMissing(res);
     // 인증 라우트와 같은 투영 함수(단일 진실 — v3 M3). requires·level·unknown은 벗겨 내보낸다.
-    return res.json({ success: true, version: activeSet.version, ...projectQuestions(activeSet.definition) });
+    // v10 — 섹션 경계 티저(echoes)는 리포트와 같은 원장에서 정적 파생 — level을 새로 노출하지 않는다(tone만).
+    return res.json({
+      success: true,
+      version: activeSet.version,
+      ...projectQuestions(activeSet.definition),
+      echoes: buildSectionEchoes(activeSet.definition),
+    });
   } catch (err) {
     if (handleDefinitionInvalid(err, res)) return;
     if (handleDbMigrationError(err, res, 'diagnosis_question_sets')) return;

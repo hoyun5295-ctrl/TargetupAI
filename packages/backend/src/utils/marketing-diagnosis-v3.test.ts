@@ -14,9 +14,10 @@ import {
   validateDefinition, validateAnswers, visibleQuestions, recommendPlan,
   type DiagnosisDefinition, type PlanRowLike,
 } from './plan-recommend';
-import { buildDiagnosisResult, type DiagnosisResultV2 } from './marketing-diagnosis-report';
+import { buildDiagnosisResult, buildSectionEchoes, type DiagnosisResultV2 } from './marketing-diagnosis-report';
 import {
   GAPS, COVER_GAP, PRAISES, LIST_TOOL_PRAISES, ASSET_PRAISE, COMBO_OBSERVATIONS,
+  TYPE_NAMES, TYPE_NAME_PLATFORM_LOCK, TYPE_NAME_ALL_CLEAR,
 } from './marketing-diagnosis-copy';
 
 /** seed v3와 같은 축·키 구조의 시험용 definition(라벨은 판정에 안 쓰는 곳만 축약). */
@@ -552,5 +553,92 @@ describe('문구 원장 — 제목·설명 2단 분리 계약', () => {
     ];
     const single = ledger.filter(([, text]) => sentences(text).length < 2).map(([name]) => name);
     expect(single).toEqual([]);
+  });
+});
+
+/**
+ * v10 — 진단다움 보강 계약 (2026-08-20 Harold "실제 진단받는 느낌")
+ * ① 진단 유형명: COVER_GAP 전 조합에 이름이 있고 전부 유일 · 자사명 0 · 대시 0 · 1순위 병목에서만 파생.
+ * ② 검사 구간: 라우트가 checkup을 넘긴 A에만 나오고, 답·판정에 개입하지 않는다(값 표기뿐).
+ * ③ 문진 반응(echoes): 전 게이트 선택지에 즉석 소견이 있고 tone이 level과 정합 — 판정 이중화 없음.
+ */
+describe('v10 — 진단 유형명·검사 구간·문진 반응', () => {
+  it('유형명 원장 — COVER_GAP 전 조합 커버 · 전부 유일 · 자사명 0 · 대시 0', () => {
+    const names: string[] = [TYPE_NAME_PLATFORM_LOCK, TYPE_NAME_ALL_CLEAR];
+    for (const [axis, byLevel] of Object.entries(COVER_GAP)) {
+      for (const level of Object.keys(byLevel ?? {})) {
+        const name = (TYPE_NAMES as any)[axis]?.[level];
+        expect(name, `${axis}.${level} 유형명 누락`).toBeTruthy();
+        names.push(name);
+      }
+    }
+    expect(new Set(names).size).toBe(names.length);
+    for (const n of names) {
+      expect(n).not.toContain('한줄로');
+      expect(n).not.toContain('—');
+    }
+  });
+
+  it('유형명 파생 — 1순위 병목 조합이 이름을 고른다(targeting 0 = 전체 발송형)', () => {
+    const r = buildV2(baseAnswers());
+    expect(r.gaps[0]?.axis).toBe('targeting');
+    expect(r.cover.type_name).toBe(TYPE_NAMES.targeting?.[0]);
+  });
+
+  it('유형명 — 플랫폼 종속이 명단 병목을 이길 때는 플랫폼 종속형(짚임과 같은 판정)', () => {
+    const r = buildV2(baseAnswers({
+      list: 'locked', locked_tool: 'platform', targeting: 'behavior', production: 'self',
+    }));
+    expect(r.gaps[0]?.axis).toBe('list');
+    expect(r.cover.type_name).toBe(TYPE_NAME_PLATFORM_LOCK);
+  });
+
+  it('유형명 — 병목 0 + 단계 발행 = 기본기 완성형 · 근거 없으면 이름을 지어내지 않는다', () => {
+    const clear = buildV2(baseAnswers({
+      targeting: 'behavior', repeat: 'auto', auto_count: 'a3_5',
+      measure: 'revenue', measure_compare: 'notes', production: 'self', prod_refit: 'no',
+      sending: 's6p', manual_ratio: 'half',
+    }));
+    expect(clear.gaps.length).toBe(0);
+    expect(clear.cover.type_name).toBe(TYPE_NAME_ALL_CLEAR);
+  });
+
+  it('검사 구간 — checkup을 넘긴 제출(A)에만 4행이 나오고, 없으면(B) 필드 자체가 없다', () => {
+    const a = buildV2(baseAnswers(), { checkup: { customers: 1234, optOuts: 5 }, brandVoiceMissing: true });
+    expect(a.checkup?.items.map((i) => i.value)).toEqual(
+      ['1,234명', '5명', '아직 없어요', '아직 등록 전이에요'],
+    );
+    const on = buildV2(baseAnswers(), { checkup: { customers: 0, optOuts: 0 } });
+    expect(on.checkup?.items[3]?.value).toBe('등록돼 있어요');
+    // 검사 구간이 생겨도 위치 계약은 그대로다(자사명 0)
+    expect(JSON.stringify(a)).not.toContain('한줄로');
+    const b = buildV2(baseAnswers());
+    expect(b.checkup).toBeUndefined();
+  });
+
+  it('검사 구간 — 답·판정에 개입하지 않는다(checkup 유무로 병목·단계·유형명 불변)', () => {
+    const withCheckup = buildV2(baseAnswers(), { checkup: { customers: 999999, optOuts: 0 } });
+    const without = buildV2(baseAnswers());
+    expect(withCheckup.gaps.map((g) => g.axis)).toEqual(without.gaps.map((g) => g.axis));
+    expect(withCheckup.stage?.label).toBe(without.stage?.label);
+    expect(withCheckup.cover.type_name).toBe(without.cover.type_name);
+  });
+
+  it('문진 반응 — 전 게이트 선택지에 echo가 있고 tone이 level과 정합 · {t} 슬롯·자사명 0', () => {
+    const echoes = buildSectionEchoes(V3DEF);
+    for (const q of V3DEF.questions) {
+      if (!q.axis) continue;
+      for (let i = 0; i < q.options.length; i++) {
+        const o = q.options[i];
+        const lv = o.level ?? i;
+        const echo = echoes[q.key]?.[o.key];
+        expect(echo, `${q.key}.${o.key} echo 누락`).toBeTruthy();
+        expect(echo.tone).toBe(lv <= 1 ? 'gap' : 'good');
+        // 리포트와 같은 원장에서 파생 — gap은 그 조합의 병목 1단(cause)과 같은 문장
+        if (lv <= 1) expect(echo.text).toBe((GAPS as any)[q.axis]?.[lv]?.cause);
+        expect(echo.text).not.toContain('{t}');
+        expect(echo.text).not.toContain('한줄로');
+      }
+    }
   });
 });

@@ -110,6 +110,7 @@ export default function ReportV2View({
   const effects = Array.isArray(result.effects) ? result.effects : [];
   const subjectLine = coverTitle || cover?.subject || null;
   const tally = result.tally ?? null;
+  const checkup = result.checkup ?? null;
 
   const axesLine = tally && tally.total > 0
     ? tally.gap === 0
@@ -134,6 +135,14 @@ export default function ReportV2View({
           <p className="text-[12px] text-white/45">
             {subjectLine ? `${subjectLine}의 마케팅 진단` : '마케팅 진단'}
           </p>
+          {/* v10 진단 유형명 — 상태에 이름을 붙인다(서버 원장 · 구 스냅샷은 배지 생략) */}
+          {cover?.type_name && (
+            <p className="mt-2.5">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-400/30 bg-sky-500/10 px-3 py-1 text-[12.5px] font-bold text-sky-200">
+                진단 유형 · {cover.type_name}
+              </span>
+            </p>
+          )}
           <div className="mt-2.5 text-[27px] font-extrabold leading-[1.26] tracking-[-0.035em] md:text-[34px]">
             {cover?.strength_clause && cover?.gap_clause ? (
               <>
@@ -243,6 +252,27 @@ export default function ReportV2View({
             )}
           </section>
         )}
+
+        {/* v10 검사 구간(퍼널 A) — 문진(자기보고) 옆의 두 번째 축 = 계정 실측. 답과 대조·단정하지 않는다 */}
+        {checkup && checkup.items.length > 0 && (
+          <section className={MEASURE}>
+            <SectionHead title="계정에서 확인된 것" accent="rgba(56,189,248,.6)" count={checkup.items.length} />
+            {checkup.note && (
+              <p className="mt-1.5 text-[13.5px] leading-[1.65] text-white/45">{checkup.note}</p>
+            )}
+            <div className="mt-3.5 grid grid-cols-2 gap-2">
+              {checkup.items.map((it, i) => (
+                <div key={i} className="rounded-xl border border-sky-400/[0.14] bg-sky-500/[0.05] p-3">
+                  <p className="text-[11px] font-semibold text-white/40">{it.key}</p>
+                  <p className="mt-1 text-[15px] font-bold leading-snug text-white">{it.value}</p>
+                </div>
+              ))}
+            </div>
+            {checkup.source && (
+              <p className="mt-3 text-[10px] italic text-white/30">Data source — {checkup.source}</p>
+            )}
+          </section>
+        )}
       </>
     ),
   });
@@ -342,6 +372,9 @@ export default function ReportV2View({
           {gaps.map((g, i) => {
             const [dirTitle, dirDetail] = splitLead(g.direction ?? '');
             const fill = normalizeFill(g.fill);
+            // v10 킥 실물화 — 카드마다 그 업종 목업 1장(채널은 순번 회전 · 기존 자산 재사용)
+            const exCh = industry ? EXAMPLE_CHANNELS[i % EXAMPLE_CHANNELS.length] : null;
+            const exSrc = industry && exCh ? `/diagnosis-examples/${industry}-${exCh.key}.html` : null;
             return (
               <div
                 key={g.axis}
@@ -387,6 +420,32 @@ export default function ReportV2View({
                     </div>
                   )}
                 </div>
+
+                {/* v10 킥 실물화 — 병목이 풀린 모습의 실물(그 업종 예시 목업 1장 · 클릭 확대) */}
+                {exSrc && exCh && (
+                  <button
+                    type="button"
+                    onClick={() => setZoom({ src: exSrc, label: exCh.label })}
+                    className="group mt-3 flex w-full items-center gap-3 rounded-[13px] border border-white/10 bg-white/[0.03] p-2.5 text-left transition-all hover:border-sky-400/40 hover:bg-white/[0.06]"
+                  >
+                    <div className="pointer-events-none h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-slate-950">
+                      <iframe
+                        title={`${exCh.label} 예시 미리보기`}
+                        src={exSrc}
+                        sandbox=""
+                        loading="lazy"
+                        className="h-[256px] w-[192px] origin-top-left scale-[0.25] border-0"
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[12.5px] font-bold text-white/85">풀리면 이런 발송이 나갑니다</p>
+                      <p className="mt-0.5 text-[11px] text-white/40">
+                        {exCh.label} 예시 열어 보기 · 예시 목업 · 가상 브랜드
+                      </p>
+                    </div>
+                    <ArrowRight className="ml-auto h-4 w-4 shrink-0 text-white/30 transition-colors group-hover:text-sky-300" aria-hidden />
+                  </button>
+                )}
               </div>
             );
           })}
@@ -401,6 +460,28 @@ export default function ReportV2View({
     title: previewMode ? '전체 리포트 받기' : '다음 30일',
     body: (
       <>
+        {/* v10 첫 과제 — 진단(처방)과 체험(약)을 잇는다. 지급된 회사에만(거짓 약속 금지 §6-2) */}
+        {!previewMode && effectiveOutcome === 'granted' && gaps.length > 0 && (
+          <div className="rounded-2xl border border-emerald-400/25 bg-gradient-to-br from-emerald-500/[0.10] to-sky-500/[0.05] p-4 md:p-5">
+            <p className="text-[11px] font-bold tracking-wide text-emerald-300">무료체험 7일 · 첫 과제</p>
+            <p className={`${MEASURE} mt-2 text-[17px] font-extrabold leading-snug tracking-tight text-white`}>
+              아쉬운 곳 1번, {gaps[0].label}부터 풀어 보세요.
+            </p>
+            <p className={`${MEASURE} mt-1.5 text-[14px] leading-[1.7] text-white/70`}>
+              {splitLead(gaps[0].direction ?? '')[0]}
+            </p>
+            {onFirstSend && (
+              <button
+                type="button"
+                onClick={onFirstSend}
+                className="mt-3.5 inline-flex min-h-[44px] items-center gap-1.5 rounded-xl bg-white px-4 py-2 text-sm font-bold text-emerald-700 shadow-sm transition-all hover:shadow-lg"
+              >
+                지금 시작하기 <ArrowRight className="h-4 w-4" aria-hidden />
+              </button>
+            )}
+          </div>
+        )}
+
         {!previewMode && plan30.length > 0 && (
           <section>
             <div className={MEASURE}><SectionHead title="30일 실행 순서" /></div>

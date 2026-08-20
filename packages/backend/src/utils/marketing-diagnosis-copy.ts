@@ -146,6 +146,48 @@ export const LIST_TOOL_PRAISES: Record<string, string> = {
 };
 
 /**
+ * v10 — 진단 유형명(★2026-08-20 Harold "실제 진단받는 느낌"). 실제 진료가 상태에 이름을 붙이듯
+ * 1순위 병목(축 × level)에 상태명을 단다 — COVER_GAP과 같은 조합만 존재한다(정합 = 계약 테스트).
+ * 이미 존재하는 판정에 이름만 붙인다 — 새 판정 축이 아니다(쌍둥이 테스트 무접촉).
+ * 집필 규약: 자사명 0 · 대시 0 · 비하 없이 상태를 지목 · 전 조합 서로 다른 이름.
+ */
+export const TYPE_NAMES: Partial<Record<DiagnosisAxis, Partial<Record<0 | 1, string>>>> = {
+  list: { 0: '기록 공백형', 1: '명단 분산형' },
+  targeting: { 0: '전체 발송형', 1: '기본 구분 발송형' },
+  sending: { 0: '발송 휴면형', 1: '간헐 발송형' },
+  production: { 0: '텍스트 전용형' },
+  repeat: { 0: '일회성 관계형', 1: '손 발송 의존형' },
+  measure: { 0: '무측정 발송형', 1: '건수만 확인형' },
+};
+
+/** 플랫폼 종속(v5 짚임과 같은 판정)이 1순위 병목 = 명단일 때 이름을 덮는다 — 더 구체적인 진단이 이긴다. */
+export const TYPE_NAME_PLATFORM_LOCK = '플랫폼 종속형';
+
+/** 병목 0(전 축 자리 잡음 · 단계 발행)의 이름 — 칭찬이지 판정 완화가 아니다. */
+export const TYPE_NAME_ALL_CLEAR = '기본기 완성형';
+
+/**
+ * v10 — 검사 구간(퍼널 A 전용) 라벨·값 원장. 문진(자기보고) 옆에 계정 실측을 놓아
+ * 진단의 두 축(문진 + 검사)을 갖춘다. ⚠ 선치환이 아니다 — 답을 덮지도, 판정에 넣지도 않는다
+ * (v9 「6번 이상」 함정: 세는 단위가 문항의 뜻과 다르면 거짓이 된다. 여기는 사실 그 자체만 표기).
+ */
+export const CHECKUP_KEYS = {
+  customers: '등록된 고객',
+  optOuts: '수신거부 등록',
+  monthSend: '이번 달 발송',
+  brandVoice: '브랜드 보이스',
+} as const;
+
+export const CHECKUP_VALUES = {
+  none: '아직 없어요',
+  brandVoiceOn: '등록돼 있어요',
+  brandVoiceOff: '아직 등록 전이에요',
+} as const;
+
+export const CHECKUP_NOTE = '문진과 별개로, 계정 안에서 실측으로 확인한 값이에요.';
+export const CHECKUP_SOURCE = '계정 실측 · 문진 답변과 별개';
+
+/**
  * 병목 인과 2단(그래서 생기는 일) — 축 × 발생 가능 level(0·1)만. 없는 조합 = 그 축은 병목이 아니다.
  * {t} = 접점 어절 슬롯.
  */

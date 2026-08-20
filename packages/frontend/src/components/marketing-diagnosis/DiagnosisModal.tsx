@@ -43,6 +43,7 @@ export default function DiagnosisModal({
   const [questions, setQuestions] = useState<DiagnosisQuestionDto[]>([]);
   const [sections, setSections] = useState<DiagnosisSectionDto[] | null>(null);
   const [prefilled, setPrefilled] = useState<Record<string, string>>({});
+  const [echoes, setEchoes] = useState<Record<string, Record<string, { tone: 'gap' | 'good'; text: string }>> | null>(null);
   const [version, setVersion] = useState<string>('');
   const [result, setResult] = useState<DiagnosisResultDto | null>(null);
   const [outcome, setOutcome] = useState<DiagnosisResultDto['grant_outcome']>(null);
@@ -63,6 +64,7 @@ export default function DiagnosisModal({
           setQuestions(q.data.questions);
           setSections(Array.isArray(q.data.meta?.sections) && q.data.meta.sections.length > 0 ? q.data.meta.sections : null);
           setPrefilled(q.data.prefilled && typeof q.data.prefilled === 'object' ? q.data.prefilled : {});
+          setEchoes(q.data.echoes && typeof q.data.echoes === 'object' ? q.data.echoes : null);
           setVersion(String(q.data.version ?? ''));
           setPhase('wizard');
         } else {
@@ -174,6 +176,7 @@ export default function DiagnosisModal({
               questions={questions}
               sections={sections}
               prefilled={prefilled}
+              echoes={echoes}
               draftKey={version ? `diagnosis-draft-A-${version}` : null}
               onFinished={submit}
             />

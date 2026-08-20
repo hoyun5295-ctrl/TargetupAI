@@ -29,6 +29,7 @@ export default function DiagnosisPage() {
   const [phase, setPhase] = useState<Phase>('loading');
   const [questions, setQuestions] = useState<DiagnosisQuestionDto[]>([]);
   const [sections, setSections] = useState<DiagnosisSectionDto[] | null>(null);
+  const [echoes, setEchoes] = useState<Record<string, Record<string, { tone: 'gap' | 'good'; text: string }>> | null>(null);
   const [estLabel, setEstLabel] = useState<string>('약 3분');
   const [version, setVersion] = useState<string>('');
   const [answers, setAnswers] = useState<Record<string, string> | null>(null);
@@ -53,6 +54,7 @@ export default function DiagnosisPage() {
         if (q.ok && q.data?.success && Array.isArray(q.data.questions) && q.data.questions.length > 0) {
           setQuestions(q.data.questions);
           setSections(Array.isArray(q.data.meta?.sections) && q.data.meta.sections.length > 0 ? q.data.meta.sections : null);
+          setEchoes(q.data.echoes && typeof q.data.echoes === 'object' ? q.data.echoes : null);
           if (q.data.meta?.est_label) setEstLabel(String(q.data.meta.est_label));
           setVersion(String(q.data.version ?? ''));
           setPhase('gate');
@@ -216,6 +218,7 @@ export default function DiagnosisPage() {
               <DiagnosisWizard
                 questions={questions}
                 sections={sections}
+                echoes={echoes}
                 draftKey={version ? `diagnosis-draft-B-${version}` : null}
                 onFinished={finishWizard}
               />

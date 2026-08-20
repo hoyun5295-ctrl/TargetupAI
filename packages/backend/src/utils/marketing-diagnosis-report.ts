@@ -26,6 +26,8 @@ import {
   TOUCH_SUBJECT, fillTouch, TOOL_OBSERVE, EXTERNAL_SEND_TOOLS, DATA_SIDE_SYSTEMS,
   UNIFIED_DISCONNECT_TOOLS, LIST_TOOL_PRAISES, PITCH_NOTE_TOOL_USER,
   OBSERVE_KEY, TOOL_OBSERVE_KEY, type HanjulFill,
+  TYPE_NAMES, TYPE_NAME_PLATFORM_LOCK, TYPE_NAME_ALL_CLEAR,
+  CHECKUP_KEYS, CHECKUP_VALUES, CHECKUP_NOTE, CHECKUP_SOURCE,
 } from './marketing-diagnosis-copy';
 
 export type GrantOutcome = 'granted' | 'already_granted' | 'not_eligible' | 'not_applicable' | null;
@@ -78,6 +80,22 @@ export interface DiagnosisCover {
   strength_clause: string | null;
   gap_clause: string | null;
   headline: string;
+  /**
+   * v10 — 진단 유형명(1순위 병목 축 × level에서 파생 · 원장 = TYPE_NAMES). 병목 0 + 단계 발행 =
+   * ALL_CLEAR. 근거가 없으면 null(이름을 지어내지 않는다). 구 스냅샷에는 없다.
+   */
+  type_name?: string | null;
+}
+
+/** v10 — 검사 구간(퍼널 A 전용): 계정 실측 값. 답을 덮지 않고 판정에도 넣지 않는다(표기 전용). */
+export interface DiagnosisCheckupItem {
+  key: string;
+  value: string;
+}
+export interface DiagnosisCheckup {
+  note: string;
+  items: DiagnosisCheckupItem[];
+  source: string;
 }
 
 export interface DiagnosisObservationItem {
@@ -144,6 +162,8 @@ export interface DiagnosisResultV2 extends DiagnosisResultBase {
   no_match_kind: 'over_range' | 'other' | null;
   /** v5 — 전문 툴·자체 시스템 사용자 전용 견적 구간 한 줄(홍보 위치 계약 안 — 본문 렌더 금지). */
   pitch_note?: string;
+  /** v10 — 검사 구간(퍼널 A만 · 계정 실측). 퍼널 B·구 스냅샷에는 없다. */
+  checkup?: DiagnosisCheckup;
 }
 
 export type DiagnosisResult = DiagnosisResultV1 | DiagnosisResultV2;
@@ -157,6 +177,11 @@ export interface ReportInputs {
   usage: MonthlyUsage | null;
   brandVoiceMissing: boolean;
   grantOutcome: GrantOutcome;
+  /**
+   * v10 — 검사 구간 원값(퍼널 A만 · 라우트가 계정 실측으로 계산해 넘긴다). 퍼널 B = 미전달.
+   * ⚠ 판정·답 병합에 절대 넣지 않는다(v9 선치환 함정) — 표기 전용.
+   */
+  checkup?: { customers: number; optOuts: number } | null;
 }
 
 /** 크레딧 환산 표 — 마케터 언어 작업 3종만(CREDIT_COST_MAP 파생 · 원 단가 비노출). 공개 /credit-costs도 이 표를 쓴다. */
@@ -466,12 +491,46 @@ export function buildDiagnosisResult(inp: ReportInputs): DiagnosisResult {
   const headline = strength_clause && gap_clause
     ? `${strength_clause}, ${gap_clause}`
     : gap_clause ?? (stage.issued ? stageRow.line : '확인된 답변만으로 정리했어요');
+  // ── v10 진단 유형명 — 1순위 병목 조합에서만 파생(이미 있는 판정에 이름을 붙일 뿐이다).
+  //   플랫폼 종속이 명단 병목을 이길 때는 더 구체적인 이름이 이긴다(짚임과 같은 판정 재사용).
+  //   병목 0 = 전 축 자리 잡음(level 2+)이고 단계가 발행됐을 때만 완성형 — 근거 없이 이름을 지어내지 않는다.
+  const allClear =
+    levels.size > 0 && [...levels.values()].every((v) => v.level >= 2);
+  const type_name: string | null = gapAxis
+    ? (platformLocked && gapAxis === 'list'
+        ? TYPE_NAME_PLATFORM_LOCK
+        : TYPE_NAMES[gapAxis]?.[gapLevel as 0 | 1] ?? null)
+    : (allClear && stage.issued ? TYPE_NAME_ALL_CLEAR : null);
   const cover: DiagnosisCover = {
     subject: touch ? TOUCH_SUBJECT[touch] ?? null : null,
     strength_clause,
     gap_clause,
     headline,
+    type_name,
   };
+
+  // ── v10 검사 구간(퍼널 A만) — 문진 옆의 두 번째 축. 값은 사실 그 자체만 적는다(대조·단정 문구 0).
+  let checkup: DiagnosisCheckup | undefined;
+  if (inp.checkup) {
+    checkup = {
+      note: CHECKUP_NOTE,
+      items: [
+        { key: CHECKUP_KEYS.customers, value: `${(Number(inp.checkup.customers) || 0).toLocaleString()}명` },
+        { key: CHECKUP_KEYS.optOuts, value: `${(Number(inp.checkup.optOuts) || 0).toLocaleString()}명` },
+        {
+          key: CHECKUP_KEYS.monthSend,
+          value: inp.usage && inp.usage.totalSuccess > 0
+            ? `성공 ${inp.usage.totalSuccess.toLocaleString()}건`
+            : CHECKUP_VALUES.none,
+        },
+        {
+          key: CHECKUP_KEYS.brandVoice,
+          value: brandVoiceMissing ? CHECKUP_VALUES.brandVoiceOff : CHECKUP_VALUES.brandVoiceOn,
+        },
+      ],
+      source: CHECKUP_SOURCE,
+    };
+  }
 
   // ── V1 호환 필드(관리 화면·구버전 렌더러) — 판매 문구 소견은 폐기(회의 물증 1호) ──
   const findings: DiagnosisFinding[] = [];
@@ -515,5 +574,45 @@ export function buildDiagnosisResult(inp: ReportInputs): DiagnosisResult {
       total: axes.length,
     },
     ...(toolUser ? { pitch_note: PITCH_NOTE_TOOL_USER } : {}),
+    ...(checkup ? { checkup } : {}),
   };
+}
+
+/** v10 — 문진 중간 반응(섹션 경계 티저) 한 항목. tone은 서버가 정한다(화면 판정 0 — 이중 판정 금지). */
+export interface DiagnosisEcho {
+  tone: 'gap' | 'good';
+  text: string;
+}
+
+/**
+ * v10 — 축 게이트 선택지별 즉석 소견 표(★2026-08-20 · 문진 중간 반응).
+ *
+ * 섹션 경계 화면이 "여기까지 답으로 벌써 보이는 것" 한 줄을 내보낸다 — 실제 문진에서 의사가
+ * 중간에 끄덕이고 짚는 것의 미러다. 리포트와 같은 원장(GAPS·PRAISES)에서 파생하므로
+ * 최종 판정과 어긋날 수 없다(축 등급 = 그 게이트 답 하나 — 뒤 답에 영향받지 않는 안정 판정).
+ * definition만으로 정적 산출 — answers를 받지 않아 이중 판정 축이 생기지 않는다.
+ */
+export function buildSectionEchoes(
+  definition: DiagnosisDefinition,
+): Record<string, Record<string, DiagnosisEcho>> {
+  const out: Record<string, Record<string, DiagnosisEcho>> = {};
+  for (const q of definition.questions) {
+    if (!q.axis) continue;
+    const axis = q.axis as DiagnosisAxis;
+    for (let i = 0; i < q.options.length; i++) {
+      const o = q.options[i];
+      const lv = o.level ?? i;
+      let echo: DiagnosisEcho | null = null;
+      if (lv <= 1) {
+        const g = GAPS[axis]?.[lv as 0 | 1];
+        if (g) echo = { tone: 'gap', text: g.cause };
+      } else {
+        echo = { tone: 'good', text: PRAISES[axis] };
+      }
+      if (echo) {
+        (out[q.key] ??= {})[o.key] = echo;
+      }
+    }
+  }
+  return out;
 }

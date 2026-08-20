@@ -20,6 +20,12 @@ export interface DiagnosisQuestionsMetaDto {
   est_label?: string | null;
   sections?: DiagnosisSectionDto[];
 }
+/**
+ * v10 — 섹션 경계 티저(문항 key → 선택지 key → 즉석 소견). tone은 서버가 정한다 —
+ * 화면은 고르기만 하고 판정하지 않는다(리포트와 같은 원장에서 정적 파생 · 이중 판정 금지).
+ */
+export interface DiagnosisEchoDto { tone: 'gap' | 'good'; text: string }
+export type DiagnosisEchoesDto = Record<string, Record<string, DiagnosisEchoDto>>;
 
 export interface DiagnosisStateDto {
   eligible: boolean;
@@ -43,6 +49,8 @@ export interface DiagnosisCoverDto {
   strength_clause: string | null;
   gap_clause: string | null;
   headline: string;
+  /** v10 — 진단 유형명. 구 스냅샷에는 없다(없으면 배지 생략). */
+  type_name?: string | null;
 }
 export interface DiagnosisObservationDto {
   /** key·value = v8(표 렌더). text = 구 스냅샷·폴백. */
@@ -98,6 +106,8 @@ export interface DiagnosisResultDto {
   plan_note?: string;
   /** v5 — 전문 툴 사용자 전용 견적 구간 한 줄(견적 카드 밖 렌더 금지). */
   pitch_note?: string;
+  /** v10 — 검사 구간(퍼널 A 전용 · 계정 실측). B·구 스냅샷에는 없다(없으면 렌더 생략). */
+  checkup?: { note: string; items: Array<{ key: string; value: string }>; source: string };
 }
 
 const authHeaders = (): Record<string, string> => ({

@@ -18,7 +18,7 @@ import { authenticate } from '../middlewares/auth';
 import { handleDbMigrationError } from '../utils/db-migration-error';
 import { computeMonthlyUsage } from '../utils/monthly-usage';
 import { validateAnswers, recommendPlan, type DiagnosisDefinition } from '../utils/plan-recommend';
-import { buildDiagnosisResult } from '../utils/marketing-diagnosis-report';
+import { buildDiagnosisResult, buildSectionEchoes } from '../utils/marketing-diagnosis-report';
 import {
   loadActiveQuestionSet, handleDefinitionInvalid, DIAGNOSIS_PLAN_ROWS_SQL,
   projectQuestions,
@@ -131,7 +131,13 @@ router.get('/questions', async (req: Request, res: Response) => {
     const activeSet = await loadActiveQuestionSet();
     if (!activeSet) return activeSetMissing(res);
     const projected = projectQuestions(activeSet.definition);
-    return res.json({ success: true, version: activeSet.version, ...projected });
+    // v10 — 섹션 경계 티저(게이트 선택지별 즉석 소견). 리포트와 같은 원장에서 정적 파생 — 판정 이중화 없음.
+    return res.json({
+      success: true,
+      version: activeSet.version,
+      ...projected,
+      echoes: buildSectionEchoes(activeSet.definition),
+    });
   } catch (err) {
     if (handleDefinitionInvalid(err, res)) return;
     if (handleDbMigrationError(err, res, 'diagnosis_question_sets')) return;
@@ -233,13 +239,25 @@ router.post('/submit', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: ansCheck.error || '답변이 유효하지 않습니다.' });
     }
 
-    const [planRes, usage, brandRes] = await Promise.all([
+    const [planRes, usage, brandRes, custRes] = await Promise.all([
       query(DIAGNOSIS_PLAN_ROWS_SQL),
       computeMonthlyUsage(companyId),
       query(`SELECT brand_description, brand_tone FROM companies WHERE id = $1`, [companyId]),
+      // v10 검사 구간 — 계정 실측 2값(기존 customers 컬럼만 — SCHEMA.md 등재 실측 컬럼).
+      // ⚠ 답 병합·판정에 넣지 않는다(v9 선치환 함정) — 리포트 표기 전용.
+      query(
+        `SELECT count(*)::int AS customers,
+                count(*) FILTER (WHERE is_opt_out = true)::int AS opt_outs
+           FROM customers WHERE company_id = $1`,
+        [companyId],
+      ),
     ]);
     const recommend = recommendPlan(def, submitted, planRes.rows);
     const brandVoiceMissing = !(brandRes.rows[0]?.brand_description || brandRes.rows[0]?.brand_tone);
+    const checkup = {
+      customers: Number(custRes.rows[0]?.customers) || 0,
+      optOuts: Number(custRes.rows[0]?.opt_outs) || 0,
+    };
 
     const client = await pool.connect();
     try {
@@ -281,6 +299,7 @@ router.post('/submit', async (req: Request, res: Response) => {
         usage,
         brandVoiceMissing,
         grantOutcome: outcome,
+        checkup,
       });
 
       // ⓑ·ⓒ 저장 — funnel A 부분 UNIQUE가 동시 제출 경쟁의 최후 방어(충돌 = 409)
