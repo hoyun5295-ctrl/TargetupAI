@@ -260,12 +260,32 @@ export async function evaluateMachineOrigin(params: {
  * ⛔ 시행 스위치가 사람 경로와 다르다(`ORIGIN_ALLOWLIST_ENFORCE_FROM`).
  *   미설정이면 **기록만** 한다. 사람 로그인과 같은 날 켜면 수집·발송이 함께 멈춘다.
  */
+/**
+ * 미시행(record) 상태의 기록 축약 — 같은 (회사, 범위, IP)는 1시간에 한 번만 남긴다.
+ *
+ * ⛔ 이게 없으면 배포 즉시 감사 로그가 폭주한다 — 예외 테이블이 비어 있는 동안
+ *   CDP 13경로·싱크에이전트 13경로의 **모든 호출**이 `record`로 떨어지고, 하트비트는 주기적이다.
+ *   등록할 대역을 걷어내는 데는 조합당 1건이면 충분하다.
+ */
+const RECORD_DEDUPE_MS = 3_600_000;
+const recordSeen = new Map<string, number>();
+function shouldRecordOnce(key: string): boolean {
+  const now = Date.now();
+  const prev = recordSeen.get(key);
+  if (prev && now - prev < RECORD_DEDUPE_MS) return false;
+  if (recordSeen.size > 5000) recordSeen.clear();   // 무한 증식 방지
+  recordSeen.set(key, now);
+  return true;
+}
+
 export async function guardMachineOrigin(
   req: any, res: any, companyId: string, scope: 'company_api' | 'company_agent',
 ): Promise<boolean> {
   try {
     const v = await evaluateMachineOrigin({ ip: req.ip, companyId, scope });
     if (v.decision === 'allow') return true;
+    // 차단은 매번 남긴다. 기록만 하는 단계는 조합당 1시간에 한 번
+    if (v.decision === 'record' && !shouldRecordOnce(`${companyId}|${scope}|${v.ip}`)) return true;
     await query(
       `INSERT INTO audit_logs (id, user_id, action, target_type, target_id, details, ip_address, user_agent, created_at)
        VALUES (gen_random_uuid(), NULL, $1, 'company', $2::uuid, $3, $4, $5, NOW())`,

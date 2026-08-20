@@ -1575,7 +1575,7 @@
 | company_id | uuid NOT NULL | |
 | user_id | uuid NULL | 사용자 지정 정산(그 사용자 발송분만) |
 | agent_id | uuid NULL | 미사용(항상 NULL) |
-| billing_year · billing_month | integer NOT NULL | |
+| billing_year · billing_month | integer NOT NULL | **★2026-08-20부터 정산월 = 사람이 정하는 라벨**(기본 종료월·허용 = 기간에 걸친 역월 — `resolveBillingLabelMonth` 단일 소유). 그전에는 시작일 역월 자동 파생. 금액·중복검사 축이 아니다(그건 billing_start/end) — [FEATURE-BILLING §2-17](../docs/FEATURE-BILLING.md) |
 | billing_start · billing_end | date NOT NULL | 기간 겹침 중복검사 축 |
 | sms_success · lms_success · mms_success · kakao_success | integer NOT NULL DEFAULT 0 | **성공 수량 = 청구 수량** |
 | sms_unit_price · lms_unit_price · mms_unit_price · kakao_unit_price | numeric NOT NULL DEFAULT 0 | 단가 스냅샷 |

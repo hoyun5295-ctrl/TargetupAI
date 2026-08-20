@@ -531,6 +531,29 @@ const [billingEnd, setBillingEnd] = useState(() => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
 });
 const [billingScope, setBillingScope] = useState<'company' | 'user'>('company');
+// ★ 2026-08-20 정산월(라벨) — 서수란 0819 접수. "몇 월분인가"는 사람이 정한다(기본 = 종료일의 역월).
+//   서버 resolveBillingLabelMonth와 같은 규약: 허용 = 정산 기간에 걸친 역월뿐. 여기 계산은 표시·선택용이고
+//   최종 검증은 서버가 한다(기간 밖 422). 'YYYY-MM' 문자열 산술만 — Date 파싱 없음(TZ 무관).
+const [billingLabelMonth, setBillingLabelMonth] = useState('');
+const billingMonthsBetween = (startDay: string, endDay: string): string[] => {
+  const s = String(startDay).slice(0, 7), e = String(endDay).slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(s) || !/^\d{4}-\d{2}$/.test(e) || s > e) return [];
+  const out: string[] = [];
+  let y = Number(s.slice(0, 4)), m = Number(s.slice(5, 7));
+  while (out.length < 24) { // 24개월 상한 — 잘못된 기간 입력의 무한 루프 차단
+    const cur = `${y}-${String(m).padStart(2, '0')}`;
+    out.push(cur);
+    if (cur === e) break;
+    m++; if (m > 12) { m = 1; y++; }
+  }
+  return out;
+};
+const billingLabelOptions = billingMonthsBetween(billingStart, billingEnd);
+// 기간을 바꾸면 옛 선택이 집합 밖으로 나갈 수 있다 — 그때는 조용히 기본값(종료월)으로 돌아간다.
+const billingLabelEffective = billingLabelOptions.includes(billingLabelMonth)
+  ? billingLabelMonth
+  : (billingLabelOptions[billingLabelOptions.length - 1] || '');
+const billingLabelText = (ym: string) => ym ? `${ym.slice(0, 4)}년 ${Number(ym.slice(5, 7))}월` : '';
 // ※ 옛 billingUserId·billingUsers 상태는 폐기(2026-07-26) — 단일 계정 발행이 서버에서 차단됐다.
 const [generating, setGenerating] = useState(false);
 const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
@@ -541,8 +564,18 @@ const [billingPreview, setBillingPreview] = useState<any>(null);
 const [billings, setBillings] = useState<any[]>([]);
 const [billingsLoading, setBillingsLoading] = useState(false);
 const [filterYear, setFilterYear] = useState(new Date().getFullYear());
+// ★ 2026-08-20 정산월 필터 — 0 = 전체(서수란 0819 접수 "년도 관리가 아닌 월별 관리"). 서버 축(billing_month).
+const [filterMonth, setFilterMonth] = useState(0);
 // ★ 2026-07-28 발행됨·미발송만 보기 토글 (emailed_at IS NULL)
 const [billingUnsentOnly, setBillingUnsentOnly] = useState(false);
+// ★ 2026-08-20 목록의 필터 귀속(Codex 3R 수용) — "이 목록이 어느 필터의 것인가"를 목록 상태가 직접 든다.
+//   요청 순서(seq)만 보면 실패 경로(전환 요청 실패 → 옛 달 목록 잔존)와 옛 클로저 경로(벌크 종료 후
+//   옛 필터로 재조회)가 남는다. 요청은 항상 ref의 **호출 시점 최신 키**로 나가고, 응답은 도착 시점
+//   키와 일치할 때만 반영하며, 최신 키 요청이 실패하면 목록을 비운다(fail-closed — 다른 달을 남기지 않는다).
+const billingFilterKey = `${filterYear}|${filterMonth}|${billingUnsentOnly ? 1 : 0}`;
+const billingFilterKeyRef = useRef(billingFilterKey);
+billingFilterKeyRef.current = billingFilterKey;
+const [billingsKey, setBillingsKey] = useState(''); // 마지막으로 적재 성공한 목록의 키('' = 미적재)
 // ★ 2026-08-05 총 정산표(ceo 전용) — 권한이 확인된 계정에만 진입점을 그린다.
 const [canViewSettlementOverview, setCanViewSettlementOverview] = useState(false);
 const [showSettlementOverview, setShowSettlementOverview] = useState(false);
@@ -876,7 +909,10 @@ const [emailResendAt, setEmailResendAt] = useState<string | null>(null);
 // ===== 정산 useEffect =====
 // ★ 2026-08-04 loadInvoices 제거 — 그 데이터를 그리던 "거래내역서 목록" 섹션이 죽은 목록이라 사라졌다.
 useEffect(() => { if (activeTab === 'billing') { loadBillings(); } }, [activeTab]);
-useEffect(() => { if (activeTab === 'billing') loadBillings(); }, [filterYear, billingUnsentOnly]);
+// ★ 2026-08-20 서버 필터가 바뀌면 선택을 **즉시** 비운다(Codex 2R 수용) — 목록 도착 후의 가지치기만으로는
+//   응답 전 전환 창에서 옛 목록·옛 선택으로 일괄 확정·발송이 가능했다. 선택이 비면 일괄 버튼 자체가 사라진다.
+//   화면 내 검색·페이징은 서버 재조회가 없어 선택이 유지된다(0806 계약 그대로).
+useEffect(() => { if (activeTab === 'billing') { setBillingSel([]); loadBillings(); } }, [filterYear, filterMonth, billingUnsentOnly]);
 // ★ 2026-08-05 총 정산표 — 소유자(ceo) 전용이라 **진입점 자체를 권한 응답으로 가린다**(감사 로그와 같은 방식).
 //   서버가 최종 판정이고(403), 이 값은 안 보이게 하는 용도다. 실패는 false로 두어 조용히 숨긴다.
 useEffect(() => {
@@ -1485,16 +1521,35 @@ const syncTimeAgo = (dateStr: string | null) => {
 };
 
 // ===== 정산 함수 =====
+// ★ 2026-08-20 필터 귀속 재조회(Codex 3R 수용 — 2R의 seq 가드를 대체) — 파라미터를 클로저 상태가 아니라
+//   **ref의 호출 시점 최신 키**에서 만든다. 벌크 종료 재조회처럼 옛 렌더의 클로저를 통해 불려도
+//   항상 지금 화면의 필터로 요청이 나간다. 반영·로딩 해제는 도착 시점 키 일치가 조건이고,
+//   최신 키 요청이 실패하면 목록을 비운다(fail-closed) — 다른 달 목록이 새 필터 아래 남지 않는다.
+// ★ 2026-08-20 Codex 4R 수용 — 귀속(키)과 최신성(세대)은 직교 축이라 둘 다 건다. 키만 보면 같은 키의
+//   두 재조회(행 상태 변경 연타 등)가 직렬화되지 않아 늦게 도착한 옛 스냅샷이 최신 목록을 덮는다.
+//   상태를 쓰는 것은 **마지막에 시작한 요청 하나**뿐이고, 그 요청의 키가 현재 키일 때만이다.
+const billingLoadGen = useRef(0);
 const loadBillings = async () => {
+  const key = billingFilterKeyRef.current;
+  const gen = ++billingLoadGen.current;
+  const [ky, km, kUnsent] = key.split('|');
+  const isCurrent = () => gen === billingLoadGen.current && key === billingFilterKeyRef.current;
   setBillingsLoading(true);
   // ★ 2026-07-28 미발송만 보기 — 일괄발급에서 금액 불일치로 발송이 막힌 장은 컨펌 추적 목록에 안 뜬다.
   //   작업 결과 문구는 화면을 닫으면 사라지므로, 여기서 언제든 다시 찾을 수 있어야 한다.
   try {
-    const res = await billingApi.getBillings({ year: filterYear, ...(billingUnsentOnly ? { unsent: '1' as const } : {}) });
-    setBillings(res.data);
+    const res = await billingApi.getBillings({
+      year: Number(ky),
+      ...(Number(km) >= 1 && Number(km) <= 12 ? { month: Number(km) } : {}),
+      ...(kUnsent === '1' ? { unsent: '1' as const } : {}),
+    });
+    if (isCurrent()) { setBillings(res.data); setBillingsKey(key); }
   }
-  catch (e) { console.error(e); }
-  finally { setBillingsLoading(false); }
+  catch (e) {
+    console.error(e);
+    if (isCurrent()) { setBillings([]); setBillingsKey(''); }
+  }
+  finally { if (isCurrent()) setBillingsLoading(false); }
 };
 // ★ 2026-07-28 발행은 됐고 메일만 안 나간 묶음의 컨펌 단계 재시도.
 //   발행을 다시 하지 않는다(기간 중복에 막힌다). 이미 나간 장은 서버가 대상에서 빼므로 중복 발송이 없다.
@@ -2121,9 +2176,11 @@ const handleBillingGenerate = async () => {
       company_id: billingCompanyId,
       scope: billingScope === 'user' ? 'by_user' : 'combined',
       billing_start: billingStart, billing_end: billingEnd,
+      // ★ 2026-08-20 정산월 라벨 — 화면이 보여준 값을 그대로 보낸다(기본값 유도를 서버에 다시 맡기지 않는다).
+      ...(billingLabelEffective ? { billing_label_month: billingLabelEffective } : {}),
     });
     const sheetCount = Number(res.data?.sheet_count) || 1;
-    setBillingToast({ msg: `${billingStart} ~ ${billingEnd} 정산이 생성되었습니다${sheetCount > 1 ? ` (${sheetCount}장 묶음)` : ''}`, type: 'success' });
+    setBillingToast({ msg: `${billingLabelText(billingLabelEffective)} 정산(${billingStart} ~ ${billingEnd})이 생성되었습니다${sheetCount > 1 ? ` (${sheetCount}장 묶음)` : ''}`, type: 'success' });
     loadBillings();
   } catch (e: any) {
     // ★ 2026-07-26 409를 "삭제 후 재생성해주세요" 고정 문구로 덮지 않는다 — 그 안내대로 지우면
@@ -2181,6 +2238,12 @@ useEffect(() => { setBillingPage(1); }, [billingSearch, billings]);
  * **이미 발송된 장은 일괄 발송에 넣지 않는다** — 재발송은 "언제·누구에게 나갔는지"를 확인받는 개별 축이다.
  */
 const runBillingBulk = async (kind: 'confirm' | 'send') => {
+  // ★ 2026-08-20 실행도 필터 귀속으로 잠근다(Codex 3R 수용 — fail-closed). 지금 화면의 목록이
+  //   현재 필터로 적재 확인된 것이 아니면 어떤 일괄 동작도 하지 않는다.
+  if (billingsKey === '' || billingsKey !== billingFilterKeyRef.current) {
+    showAlert('확인', '목록을 현재 조건으로 불러오는 중이거나 불러오지 못했습니다. 목록이 표시된 뒤 다시 선택해 주세요.', 'info');
+    return;
+  }
   const rows = billings.filter((b: any) => billingSel.includes(b.id));
   const eligible = kind === 'confirm'
     ? rows.filter((b: any) => b.status === 'draft')
@@ -10558,14 +10621,29 @@ const handleApproveRequest = async (id: string) => {
               {/* 시작일 */}
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">시작일</label>
-                <input type="date" value={billingStart} onChange={e => setBillingStart(e.target.value)}
+                {/* ★ 2026-08-20 기간을 바꾸면 정산월 명시 선택을 초기화한다(Codex 1R medium 수용) —
+                    선택은 그 기간에 대한 것이다. 남겨 두면 옛 선택이 나중 기간에서 조용히 되살아난다. */}
+                <input type="date" value={billingStart} onChange={e => { setBillingStart(e.target.value); setBillingLabelMonth(''); }}
                   className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
               </div>
               {/* 종료일 */}
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">종료일</label>
-                <input type="date" value={billingEnd} onChange={e => setBillingEnd(e.target.value)}
+                <input type="date" value={billingEnd} onChange={e => { setBillingEnd(e.target.value); setBillingLabelMonth(''); }}
                   className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+              </div>
+              {/* ★ 2026-08-20 정산월(라벨) — 서수란 0819 접수. 역월 정산은 표시만(입력 없음),
+                  기간이 두 역월에 걸치는 중간정산에서만 선택이 나타난다(기본 종료월). */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">정산월</label>
+                {billingLabelOptions.length > 1 ? (
+                  <select value={billingLabelEffective} onChange={e => setBillingLabelMonth(e.target.value)}
+                    className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+                    {billingLabelOptions.map(ym => <option key={ym} value={ym}>{billingLabelText(ym)}</option>)}
+                  </select>
+                ) : (
+                  <div className="px-3 py-2 text-sm text-gray-600">{billingLabelText(billingLabelEffective) || '—'}</div>
+                )}
               </div>
               {/* 발행 단위 */}
               <div className="flex items-center gap-3 pb-0.5">
@@ -11375,14 +11453,16 @@ const handleApproveRequest = async (id: string) => {
                   </span>
                 ) : billingSel.length > 0 && (
                   <>
-                    <button type="button" onClick={() => runBillingBulk('confirm')}
+                    {/* ★ 2026-08-20 일괄 버튼은 목록이 **현재 필터로 적재 확인**됐을 때만 산다(Codex 2R·3R 수용) —
+                        재조회 중이거나 적재 실패 상태의 billings 위에서는 실행하지 않는다. runBillingBulk 입구도 같은 잠금. */}
+                    <button type="button" onClick={() => runBillingBulk('confirm')} disabled={billingsLoading || billingsKey !== billingFilterKey}
                       title="선택한 초안을 한 번에 청구 확정합니다. 수금 관리 표시이며 발송·세금계산서와 무관합니다."
-                      className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors">
+                      className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                       선택 청구 확정 ({billingSel.length})
                     </button>
-                    <button type="button" onClick={() => runBillingBulk('send')}
+                    <button type="button" onClick={() => runBillingBulk('send')} disabled={billingsLoading || billingsKey !== billingFilterKey}
                       title="선택한 건 중 아직 발송되지 않은 청구서를 한 번에 보냅니다. 이미 나간 건은 행의 [재발송]으로 확인 후 보냅니다."
-                      className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors">
+                      className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                       선택 발송 ({billingSel.length})
                     </button>
                     <button type="button" onClick={() => setBillingSel([])}
@@ -11417,6 +11497,12 @@ const handleApproveRequest = async (id: string) => {
                 <select value={filterYear} onChange={e => setFilterYear(Number(e.target.value))}
                   className="px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
                   {billingYearOptions.map(y => <option key={y} value={y}>{y}년</option>)}
+                </select>
+                {/* ★ 2026-08-20 정산월 필터 (서수란 0819 접수 — 월별 관리) */}
+                <select value={filterMonth} onChange={e => setFilterMonth(Number(e.target.value))}
+                  className="px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                  <option value={0}>전체 월</option>
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{m}월</option>)}
                 </select>
               </div>
             </div>
@@ -11609,8 +11695,9 @@ const handleApproveRequest = async (id: string) => {
                   <p className="text-sm text-center text-gray-600 mb-1">
                     <strong>{companies.find(c => c.id === billingCompanyId)?.company_name}</strong>
                   </p>
+                  {/* ★ 2026-08-20 발행 전 마지막 관문에 정산월을 드러낸다 — 중간정산은 기간과 이름이 다른 달일 수 있다. */}
                   <p className="text-sm text-center text-gray-500 mb-1">
-                    {billingStart} ~ {billingEnd}
+                    <strong className="text-gray-700">{billingLabelText(billingLabelEffective)} 정산</strong> · {billingStart} ~ {billingEnd}
                   </p>
                   <p className="text-xs text-center text-gray-400 mb-4">
                     {billingScope === 'company' ? '고객사 전체 (1장)' : '계정별 — 계정 장 + 공통 장 묶음'}

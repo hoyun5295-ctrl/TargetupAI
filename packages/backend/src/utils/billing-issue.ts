@@ -131,6 +131,40 @@ export function assertNoBillingPeriodConflict(c: BillingPeriodConflicts): void {
   throw new BillingIssueError(409, { error: d.message, code: d.code, ...d.detail });
 }
 
+/**
+ * ★ 2026-08-20 정산월(라벨) 파생 — 서수란 0819 접수 (docs/FEATURE-BILLING.md).
+ *
+ * 정산 한 건이 "몇 월분인가"를 시스템이 추측하지 않는다 — 사람이 정하는 값이고, 기본값은 **종료일의 역월**이다.
+ * 그전에는 `new Date(billing_start).getMonth()`로 시작월을 굳혀서, 중간정산(7/16~8/15)이 "7월 정산"이라
+ * 불리는데 8월 기준으로 입력한 부가서비스가 실렸다(접수 증상 ①②의 같은 뿌리).
+ *
+ * - 허용 집합 = 정산 기간에 걸친 역월뿐. 밖이면 422 — 이름이라도 기간 밖 달을 달 수 없다.
+ * - 계산은 'YYYY-MM-DD' 문자열 절단으로만 한다. Date 파싱이 없어 서버 TZ와 무관하다
+ *   (Date 경유는 음수 오프셋 TZ에서 1일 시작이 전월로 밀리는 잠복 결함이었다).
+ * - ⚠ 라벨은 이름일 뿐이다 — 추가 청구 항목(billing_extra_items)이 어느 장에 실리는가는 여전히
+ *   발행 기간과의 겹침이 정한다. 라벨에 묶으면 제외된 항목이 다음 발행 기간과 안 겹칠 때 영구 미청구 고아가 된다.
+ */
+export function resolveBillingLabelMonth(
+  labelMonth: string | null | undefined,
+  billingStart: string,
+  billingEnd: string,
+): { year: number; month: number } {
+  const startYm = String(billingStart).slice(0, 7);
+  const endYm = String(billingEnd).slice(0, 7);
+  const raw = String(labelMonth || '').trim();
+  const chosen = raw === '' ? endYm : raw;
+  const m = /^(\d{4})-(\d{2})$/.exec(chosen);
+  const month = m ? Number(m[2]) : 0;
+  // 'YYYY-MM'은 사전순 비교가 곧 시간순이다 — 기간에 걸친 달 = startYm ≤ chosen ≤ endYm.
+  if (!m || month < 1 || month > 12 || chosen < startYm || chosen > endYm) {
+    throw new BillingIssueError(422, {
+      error: `정산월은 정산 기간에 걸친 달(${startYm} ~ ${endYm}) 중에서만 지정할 수 있습니다. 받은 값: ${raw || '(없음)'}`,
+      code: 'BILLING_LABEL_MONTH_INVALID',
+    });
+  }
+  return { year: Number(m[1]), month };
+}
+
 export interface IssueBillingInput {
   company_id: string;
   user_id?: string | null;
@@ -140,6 +174,8 @@ export interface IssueBillingInput {
   scope?: string | null;
   /** 발행 실행자(billings.created_by) */
   adminId?: string | null;
+  /** ★ 2026-08-20 정산월 라벨 'YYYY-MM'. 미지정 = 종료일의 역월. 기간에 걸친 달 밖이면 422. */
+  labelMonth?: string | null;
 }
 
 /** 정산 발행 1건 — 성공 시 라우트가 그대로 res.json 하던 응답 객체를 반환한다. 차단은 BillingIssueError로 던진다. */
@@ -155,9 +191,11 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
     throw new BillingIssueError(400, { error: '시작일이 종료일보다 늦을 수 없습니다' });
   }
 
-  const startDate = new Date(billing_start);
-  const billing_year = startDate.getFullYear();
-  const billing_month = startDate.getMonth() + 1;
+  // ★ 2026-08-20 정산월 = 사람이 정하는 라벨(기본 종료월) — 파생 소유자는 resolveBillingLabelMonth 하나.
+  //   옛 파생(시작일 Date 파싱)은 중간정산을 시작월로 굳혔고 TZ 잠복 결함도 있었다(함수 주석 참조).
+  const { year: billing_year, month: billing_month } = resolveBillingLabelMonth(
+    input.labelMonth, billing_start, billing_end,
+  );
 
   // ★ 2026-07-26 발행 단위(scope). 지금은 `combined`(회사 1장)와 `by_user`(계정별)만 구현한다 —
   //   발송ID별(`by_agent`)은 Harold 결정으로 이월. 값만 나중에 추가하면 되도록 축은 지금 잡는다.
@@ -1102,7 +1140,8 @@ ${EXTRA_ITEM_SOURCE_JOIN}
       });
     }
 
-    const startDate = new Date(billing_start);
+    // ★ 2026-08-20 정산월 파생을 발행 코어와 같은 함수로 — 역월 기간이라 값은 그대로다(시작월 = 종료월).
+    const minChargeLabel = resolveBillingLabelMonth(null, billing_start, billing_end);
     const vat = vatOfSupply(minCharge);
     const billingResult = await client.query(
       `INSERT INTO billings (
@@ -1115,7 +1154,7 @@ ${EXTRA_ITEM_SOURCE_JOIN}
       ) VALUES ($1, NULL, $2, $3, $4, $5, 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0, $6, $7, $8, 0, 0, $9, 'combined', NULL)
       RETURNING *`,
       [
-        company_id, startDate.getFullYear(), startDate.getMonth() + 1, billing_start, billing_end,
+        company_id, minChargeLabel.year, minChargeLabel.month, billing_start, billing_end,
         minCharge, vat, minCharge + vat, input.adminId ?? null,
       ],
     );

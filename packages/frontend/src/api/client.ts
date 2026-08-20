@@ -118,10 +118,12 @@ export const billingApi = {
   // ★ 2026-07-26 발행 단위(scope) — 단일 계정 지정(user_id)은 서버가 422로 차단한다
   //   (테스트·스팸·에이전트·크레딧이 빠진 청구서를 만들던 옛 방식). 계정별은 scope='by_user'로
   //   회사 전체가 계정 장 N + 공통 장 1 묶음으로 나온다.
-  generateBilling: (data: { company_id: string; scope?: 'combined' | 'by_user'; billing_start: string; billing_end: string }) =>
+  // billing_label_month: 정산월 라벨 'YYYY-MM'(★2026-08-20) — 미지정 = 종료일의 역월. 기간에 걸친 달 밖이면 서버 422.
+  generateBilling: (data: { company_id: string; scope?: 'combined' | 'by_user'; billing_start: string; billing_end: string; billing_label_month?: string }) =>
     api.post('/admin/billing/generate', data),
   // unsent: '1' = 발행됐지만 고객에게 안 나간 장만(★2026-07-28 — 정합 검사로 발송이 막힌 장을 다시 찾는 경로)
-  getBillings: (params?: { company_id?: string; year?: number; status?: string; unsent?: '1' }) =>
+  // month: 정산월 필터 1~12(★2026-08-20 서수란 0819 접수 — 월별 관리)
+  getBillings: (params?: { company_id?: string; year?: number; month?: number; status?: string; unsent?: '1' }) =>
     api.get('/admin/billing/list', { params }),
   getBillingItems: (id: string) =>
     api.get(`/admin/billing/${id}/items`),

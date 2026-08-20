@@ -51,6 +51,8 @@ import {
   issueBilling, issueMinimumChargeBilling, BillingIssueError,
   // ★ 2026-08-04 미리보기가 발행과 **같은 문**으로 기간 축 차단을 판정한다(별건 5 — 미리보기 통과 후 발행 실패).
   readBillingPeriodConflicts, describeBillingPeriodConflict,
+  // ★ 2026-08-20 정산월 라벨 파생·검증 소유자 — 재발행 라벨 승계의 사전 검증에 쓴다(Codex 1R high 수용).
+  resolveBillingLabelMonth,
 } from '../utils/billing-issue';
 // ★ 2026-08-05 요금제 무료 제공 — 미리보기가 발행과 같은 공제를 적용하게 한다(§2-4 규약)
 import { readFreeDeductibleForBilling } from '../utils/free-messaging';
@@ -144,6 +146,8 @@ router.post('/generate', async (req: Request, res: Response) => {
     const result = await issueBilling({
       company_id, user_id, billing_start, billing_end,
       scope: (req.body || {}).scope ?? null,
+      // ★ 2026-08-20 정산월 라벨 'YYYY-MM'(선택) — 미지정 = 종료일의 역월. 검증은 코어가 한다(기간 밖 422).
+      labelMonth: (req.body || {}).billing_label_month ?? null,
       adminId,
     });
     return res.json(result);
@@ -163,7 +167,7 @@ router.post('/generate', async (req: Request, res: Response) => {
 // GET /list - 정산 목록
 router.get('/list', async (req: Request, res: Response) => {
   try {
-    const { company_id, year, status, unsent } = req.query;
+    const { company_id, year, month, status, unsent } = req.query;
     let sql = `SELECT b.*, c.company_name, u.name as user_name
                FROM billings b
                JOIN companies c ON c.id = b.company_id
@@ -173,6 +177,11 @@ router.get('/list', async (req: Request, res: Response) => {
 
     if (company_id) { params.push(company_id); sql += ` AND b.company_id = $${params.length}`; }
     if (year) { params.push(year); sql += ` AND b.billing_year = $${params.length}`; }
+    // ★ 2026-08-20 정산월 필터(1~12) — 서수란 0819 접수 "년도 관리가 아닌 월별 관리". year와 같은 서버 축.
+    const monthNum = Number(month);
+    if (month && Number.isInteger(monthNum) && monthNum >= 1 && monthNum <= 12) {
+      params.push(monthNum); sql += ` AND b.billing_month = $${params.length}`;
+    }
     if (status) { params.push(status); sql += ` AND b.status = $${params.length}`; }
     // ★ 2026-07-28 발행됐는데 고객에게 안 나간 장 필터. 일괄발급에서 정합 검사에 걸려 발송을 막은 장은
     //   `invoice_confirmations` 행이 없어 컨펌 추적 목록에도 안 뜬다 — 작업 note 한 줄이 사라지면
@@ -2156,7 +2165,8 @@ const handleBillingDelete = async (req: Request, res: Response) => {
     //   동시에 지울 때 A가 1번 장을, B가 2번 장을 쥔 채 서로의 행을 기다려 데드락이 된다(Codex 3차 MEDIUM).
     //   묶음 축(회사·기간·batch_id)만 읽고, 잠금은 아래에서 **한 문장·id 순서로 한 번만** 잡는다.
     const check = await client.query(
-      `SELECT id, status, emailed_at, email_sent_at, batch_id, company_id, billing_start, billing_end, scope
+      `SELECT id, status, emailed_at, email_sent_at, batch_id, company_id, billing_start, billing_end, scope,
+              billing_year, billing_month
          FROM billings WHERE id = $1::uuid`,
       [req.params.id],
     );
@@ -2355,12 +2365,25 @@ const handleBillingDelete = async (req: Request, res: Response) => {
     //   수량 조정은 회사×기간 축이라 이 재발행에 그대로 다시 실린다.
     if (reissue) {
       const issueScope = String(target.scope) === 'combined' ? 'combined' : 'by_user';
+      // ★ 2026-08-20 지운 장의 정산월을 그대로 잇는다 — 안 넘기면 시작월을 골랐던 중간정산 장이
+      //   재발행에서 조용히 종료월(기본값)로 바뀐다.
+      //   ★ Codex 1R high 수용 — 승계 라벨은 **여기서 먼저 검증하고, 기간 밖이면 기본값으로 폴백한다.**
+      //   삭제는 이미 커밋된 뒤라 여기서 422로 죽으면 "지웠는데 재발행 불능"이 된다. 신규 행은 생성 때
+      //   검증을 지나 항상 유효하고, 옛 파생(시작월)도 기간 안이라 폴백은 이론상 경로다 — 그래도 창은 닫는다.
+      let reissueLabel: string | null =
+        `${target.billing_year}-${String(target.billing_month).padStart(2, '0')}`;
+      try {
+        resolveBillingLabelMonth(reissueLabel, toDayKey(target.billing_start), toDayKey(target.billing_end));
+      } catch {
+        reissueLabel = null; // 기본값(종료월)로 발행 — 라벨 때문에 재발행을 막지 않는다
+      }
       try {
         const out = await issueBilling({
           company_id: String(target.company_id),
           scope: issueScope,
           billing_start: toDayKey(target.billing_start),
           billing_end: toDayKey(target.billing_end),
+          labelMonth: reissueLabel,
           adminId: (req as any).user?.userId || null,
         });
         return res.json({ success: true, deleted_ids: targetIds, reissued: true, billing: out.billing, sheet_count: out.sheet_count });
