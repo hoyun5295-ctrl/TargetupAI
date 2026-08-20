@@ -22,6 +22,8 @@ import { renderAgencyProposalPdf } from '../utils/crm-agency-pdf-render';
 import {
   sniffImageMediaType, ALLOWED_IMAGE_MEDIA_TYPES, MAX_EVENT_IMAGES, EventImageInput,
 } from '../utils/event-image-extract';
+// ★ 2026-08-20 상태 전이·고객 제안서 접근 판정 CT — 라우트 인라인 판정 금지(단일 문).
+import { nextStatusAfterDesign, canCustomerDownloadProposal } from '../utils/crm-agency-access';
 import { sendSystemAlert } from '../utils/system-alert';
 
 const router = Router();
@@ -242,7 +244,8 @@ router.get('/requests', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
     const r = await query(
-      `SELECT id, title, memo, status, parsed_json, image_paths, created_at, designed_at
+      `SELECT id, title, memo, status, parsed_json, image_paths, created_at, designed_at,
+              proposal_pdf_path IS NOT NULL AS has_pdf
          FROM campaign_agency_requests
         WHERE company_id = $1::uuid
         ORDER BY created_at DESC LIMIT 100`,
@@ -254,12 +257,44 @@ router.get('/requests', async (req: Request, res: Response) => {
         id: row.id, title: row.title, memo: row.memo, status: row.status,
         parsed_json: row.parsed_json, images: toClientImages(row.image_paths),
         created_at: row.created_at, designed_at: row.designed_at,
+        // ★ 2026-08-20 고객 다운로드 가능 여부 — 다운로드 endpoint와 같은 CT 판정(전달 이후 + PDF 실존).
+        //   설계 중 내부 산출물은 has_proposal도 false — 버튼 자체가 안 그려진다.
+        has_proposal: canCustomerDownloadProposal(String(row.status || ''), !!row.has_pdf),
       })),
     });
   } catch (err: any) {
     if (missingRelationResponse(res, err)) return;
     console.error('[캠페인대행 이력] 오류:', err);
     return res.status(500).json({ success: false, error: '조회 실패' });
+  }
+});
+
+/** 내 제안서 다운로드 — 본 회사 행 + 전달된 상태(delivered/done) + PDF 실존일 때만(CT 단일 판정).
+ *  ★ 2026-08-20 신설 — 그전에는 제안서가 슈퍼관리자 전용이라 고객 전달이 시스템 밖(오프라인)이었다. */
+router.get('/requests/:id/proposal', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId || !(await checkEligibility(companyId, req.user))) {
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
+    }
+    const r = await query(
+      `SELECT status, proposal_pdf_path, title FROM campaign_agency_requests
+        WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [req.params.id, companyId],
+    );
+    const row = r.rows[0];
+    if (!row) return res.status(404).json({ success: false, error: '요청을 찾을 수 없습니다.' });
+    const hasPdf = !!row.proposal_pdf_path && fs.existsSync(row.proposal_pdf_path);
+    if (!canCustomerDownloadProposal(String(row.status || ''), hasPdf)) {
+      // 거절도 로그를 남긴다 — "눌러도 안 된다" 접수가 오면 화면 문구로 추측하지 않게(LESSONS_BACKEND).
+      console.log(`[캠페인대행 고객 제안서] 거절 — request=${req.params.id} status=${row.status} hasPdf=${hasPdf}`);
+      return res.status(404).json({ success: false, error: '전달된 제안서가 없습니다. 제안서가 전달되면 이 자리에서 받을 수 있습니다.' });
+    }
+    return res.download(row.proposal_pdf_path, `한줄로_마케팅제안서_${String(row.title || '').slice(0, 40) || 'proposal'}.pdf`);
+  } catch (err: any) {
+    if (missingRelationResponse(res, err)) return;
+    console.error('[캠페인대행 고객 제안서] 오류:', err?.message || err);
+    return res.status(500).json({ success: false, error: '다운로드 실패' });
   }
 });
 
@@ -286,14 +321,17 @@ router.get('/requests/:id/images/:idx', async (req: Request, res: Response) => {
 // 슈퍼관리자 — 캠페인 대행 설계
 // ════════════════════════════════════════════════════════════
 
-/** 비즈니스+ 업체 목록 (★ 리스트 자체가 비즈니스+ 만 — Harold 불변식. 구독 만료/정지 제외) */
+/** 상위 등급 업체 목록 (★ 리스트 자체가 자격 업체만 — Harold 불변식. 구독 만료/정지 제외)
+ *  ★ 2026-08-20 판정을 접수 게이트(isCompanyEligible)와 같은 축으로 — plans.advanced_access_enabled.
+ *  그전에는 plan_code IN ('BUSINESS','ENTERPRISE') 하드코딩이라, 플래그를 켠 임직원 요금제(STAFF 활성
+ *  4개사 실측)가 접수 API는 통과하는데 이 목록에만 안 떴다. 요금제 코드 비교 금지(plan-guard 0728 원칙). */
 router.get('/admin/companies', requireSuperAdmin, async (_req: Request, res: Response) => {
   try {
     const r = await query(
       `SELECT c.id, c.company_name, UPPER(p.plan_code) AS plan_code
          FROM companies c
          JOIN plans p ON c.plan_id = p.id
-        WHERE UPPER(p.plan_code) IN ('BUSINESS', 'ENTERPRISE')
+        WHERE p.advanced_access_enabled = true
           AND COALESCE(c.subscription_status, '') NOT IN ('expired', 'suspended')
         ORDER BY c.company_name ASC`,
     );
@@ -414,7 +452,7 @@ async function executeDesignForRequest(requestId: string): Promise<
   { ok: true; summary: any } | { ok: false; status: number; error: string }
 > {
   const r = await query(
-    `SELECT id, company_id, title, parsed_json, image_paths FROM campaign_agency_requests WHERE id = $1::uuid`,
+    `SELECT id, company_id, title, parsed_json, image_paths, status FROM campaign_agency_requests WHERE id = $1::uuid`,
     [requestId],
   );
   const row = r.rows[0];
@@ -451,9 +489,13 @@ async function executeDesignForRequest(requestId: string): Promise<
   if (!fs.existsSync(pdfPath) || fs.statSync(pdfPath).size === 0) {
     return { ok: false, status: 500, error: '제안서 PDF 생성이 완료되지 않았습니다. 다시 실행해 주세요.' };
   }
+  // ★ 2026-08-20 분석 성공 = 상태 전이(후퇴 금지 — CT가 판정). received·on_hold → designing,
+  //   delivered·done은 유지(재실행 = PDF 덮어쓰기만). 그전에는 designed_at만 적혀 직원이 매번 손으로 바꿨다.
   await query(
-    `UPDATE campaign_agency_requests SET proposal_pdf_path = $2, designed_at = NOW(), updated_at = NOW() WHERE id = $1::uuid`,
-    [row.id, pdfPath],
+    `UPDATE campaign_agency_requests
+        SET proposal_pdf_path = $2, status = $3, designed_at = NOW(), updated_at = NOW()
+      WHERE id = $1::uuid`,
+    [row.id, pdfPath, nextStatusAfterDesign(String(row.status || ''))],
   );
   return {
     ok: true,

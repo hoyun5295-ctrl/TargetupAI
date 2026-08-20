@@ -14,6 +14,8 @@ import { useToast } from '../components/ToastProvider';
 import AgencyRequestForm, {
   AgencyFormValue, EMPTY_AGENCY_FORM, agencyMissingLabels, buildAgencyPayload, parsedToFormValue, mergeAnalyzedIntoForm,
 } from '../components/agency/AgencyRequestForm';
+// ★ 2026-08-20 로컬 헬퍼를 lib/auth-download.ts로 승격(원본 복사·동작 무변경) — 고객 페이지 제안서 다운로드와 공용.
+import { downloadAuthFile } from '../lib/auth-download';
 
 interface AdminAgencyRow {
   id: string;
@@ -42,21 +44,6 @@ const STATUS_OPTIONS = [
 ];
 
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
-
-async function downloadAuthFile(url: string, fallbackName: string, onError: (m: string) => void) {
-  try {
-    const res = await fetch(url, { headers: auth() });
-    if (!res.ok) { onError('파일을 찾을 수 없습니다.'); return; }
-    const blob = await res.blob();
-    const cd = res.headers.get('Content-Disposition') || '';
-    const m = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)/i);
-    const name = m ? decodeURIComponent(m[1]) : fallbackName;
-    const href = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = href; a.download = name; a.click();
-    URL.revokeObjectURL(href);
-  } catch { onError('다운로드에 실패했습니다.'); }
-}
 
 export default function AdminCampaignAgencyPage() {
   const navigate = useNavigate();

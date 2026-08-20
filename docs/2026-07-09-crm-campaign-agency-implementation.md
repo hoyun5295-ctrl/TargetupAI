@@ -1,8 +1,9 @@
 # CRM 캠페인 대행 (캠페인 설계 대행) — 구현 기록
 
-> 작성일 2026-07-09 · 상태 **웹 폼 전환 코드완료(2차) — 배포 대기** · 설계 SoT = [superpowers/specs/2026-07-09-crm-agency-webform-redesign-design.md](superpowers/specs/2026-07-09-crm-agency-webform-redesign-design.md) (1차 원설계 = [superpowers/specs/2026-07-09-crm-campaign-agency-design.md](superpowers/specs/2026-07-09-crm-campaign-agency-design.md))
+> 작성일 2026-07-09 · 상태 **3차(0820 완결 채우기) 코드완료 — 배포 대기** · 설계 SoT = [superpowers/specs/2026-07-09-crm-agency-webform-redesign-design.md](superpowers/specs/2026-07-09-crm-agency-webform-redesign-design.md) (1차 원설계 = [superpowers/specs/2026-07-09-crm-campaign-agency-design.md](superpowers/specs/2026-07-09-crm-campaign-agency-design.md))
 > 이 문서 = "실제로 무엇을 어떻게 구현했는가"의 단일 참조. 코드와 불일치 시 코드가 진실.
 > ★ 2026-07-09 2차(Harold 지시): 1차의 xlsx 양식 다운로드/업로드 접수를 **웹 폼 + 행사 이미지(≤5장)** 접수로 전면 교체.
+> ★ 2026-08-20 3차(Harold 지시 "완벽하게 채우기") — §14.
 
 ## 1. 개요
 
@@ -138,4 +139,24 @@ backend tsc 0 · frontend tsc 0 · vitest 399/399(template 3 삭제 + request �
 ## 13. 잔여·후속 (설계 밖)
 
 - 컨펌·캠페인 예약 대행 = 오프라인 + 직원 수동(의도)
-- 후속 여지: 고객 화면 제안서 PDF 제공(전달 자동화), 앱 내 컨펌 워크플로우 — 필요 시 별도 과제
+- ~~고객 화면 제안서 PDF 제공~~ → **0820 §14에서 닫음.** 앱 내 컨펌 워크플로우 — 필요 시 별도 과제
+- **추가 과제(0820 점검에서 기록)** — ①RCS·브랜드메시지 채널 확장(제안 화이트리스트 8종에 없음 — RCS 실측 완료와 묶음) ②전달 시 고객 문자·메일 통지(발신 번호·비용 부담 정책 선행) ③고객 통계 평균이 `custom_fields->>'purchase_count'` 경유(`customers.purchase_count` 실컬럼과 별개 축 — continuous-operator 등 4파일 공통 산식이라 공용 별건)
+
+## 14. 2026-08-20 3차 — 완결 채우기 (Harold 지시 "기능 점검하고 완벽하게 채우기")
+
+실측 근거: plans 덤프에서 **STAFF(임직원·advanced_access_enabled=true) 활성 4개사**가 하드코딩(`BUSINESS/ENTERPRISE`)에 막혀 있었고(실질 대상 5개사 중 4개사 입구 차단), 실사용은 접수 1건(0710 delivered)뿐이었다.
+
+① **자격 판정 단일화** — 판정 원천 = `plans.advanced_access_enabled` 하나(plan-guard 0728 원칙. 요금제 코드 비교 금지)
+- `/admin/companies` WHERE를 플래그로 교체(routes/campaign-agency.ts)
+- `/my-plan` 응답에 `advanced_access_enabled` 추가(routes/companies.ts — 컬럼 실존은 Harold 0820 plans 덤프로 확인)
+- 헤더 메뉴 판정 `planCode === 'BUSINESS'/'ENTERPRISE'` → `advancedAccess` prop(서버 플래그 그대로. DashboardHeader·Dashboard). 헤더는 구독 상태를 안 본다 — 옛 하드코딩도 안 봤고(동작 동일), 최종 판정은 페이지 eligibility + 서버 게이트 이중 구조 그대로다.
+
+② **고객 제안서 전달 경로** — 오프라인 반쪽을 시스템 안으로
+- 신설 CT `utils/crm-agency-access.ts`(순수·vitest 10건): `canCustomerDownloadProposal(status, hasPdf)` = **delivered/done AND PDF 실존**만 허용(fail-closed — 모르는 상태 거부. 설계 중 내부 산출물 비노출)
+- 고객 `GET /requests/:id/proposal` 신설(본 회사 행 + CT 판정 + 거절도 로그) · 이력 응답 `has_proposal`(같은 CT 판정 — 버튼과 서버가 같은 문)
+- 고객 화면: 이력 행 "제안서 도착" 뱃지 + 상세 모달 [제안서 다운로드]. 다운로드 헬퍼는 관리자 페이지 로컬 `downloadAuthFile`을 `lib/auth-download.ts`로 승격(원본 복사·동작 무변경) 후 양쪽 공용
+- 문자·메일 통지는 이 축에서 제외(§13 추가 과제 ②)
+
+③ **상태 자동 전환** — `nextStatusAfterDesign`(같은 CT·후퇴 금지): 분석 성공 시 received·on_hold → designing, **delivered·done은 유지**(재실행 = PDF 덮어쓰기만). delivered 전환은 여전히 직원 수동(전달 판단은 사람).
+
+검증 = backend·frontend tsc 0 · 대행 테스트 3파일 27건(신규 access 10건 — TDD RED 확인 후 구현) · planCode/하드코딩/헬퍼 중복 잔존 grep 0(주석만) · 금지 패턴 0 · DDL 0. 돈·DDL 경로가 아니라 Codex 의무 대상 밖 — 접근 제어 축은 위 CT 테스트가 고정.

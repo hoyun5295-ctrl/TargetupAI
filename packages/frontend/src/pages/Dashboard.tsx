@@ -117,6 +117,8 @@ interface PlanInfo {
   spam_filter_enabled?: boolean;
   ai_messaging_enabled?: boolean;
   ai_premium_enabled?: boolean;
+  // ★ 2026-08-20 상위 등급 게이트 플래그(plans.advanced_access_enabled) — 헤더 캠페인 대행 메뉴 판정 원천
+  advanced_access_enabled?: boolean;
 }
 
 // D41 대시보드 동적 카드 아이콘 맵
@@ -2220,7 +2222,7 @@ const campaignData = {
         userName={user?.name || ''}
         department={(user as any)?.department}
         isCompanyAdmin={user?.userType === 'company_admin'}
-        planCode={planInfo?.plan_code}
+        advancedAccess={!!planInfo?.advanced_access_enabled}
         // ★ D220+ Task 8 (2026-05-27): 세그먼트 메뉴 잠금 게이팅 (ai_messaging — BASIC+)
         aiMessagingEnabled={planInfo?.ai_messaging_enabled}
         onAiOperatorClick={async () => {

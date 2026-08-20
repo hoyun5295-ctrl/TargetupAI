@@ -6,9 +6,11 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
 import {
-  ArrowLeft, Handshake, Loader2, Sparkles, ClipboardList, PenSquare, X, Images as ImagesIcon, Send,
+  ArrowLeft, Handshake, Loader2, Sparkles, ClipboardList, PenSquare, X, Images as ImagesIcon, Send, FileDown,
 } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
+// ★ 2026-08-20 제안서 다운로드 — 관리자 페이지와 같은 공용 헬퍼(lib/auth-download.ts).
+import { downloadAuthFile } from '../lib/auth-download';
 import AgencyRequestForm, {
   AgencyFormValue, EMPTY_AGENCY_FORM, agencyMissingLabels, buildAgencyPayload, parsedToFormValue, mergeAnalyzedIntoForm,
 } from '../components/agency/AgencyRequestForm';
@@ -22,6 +24,8 @@ interface AgencyRequestRow {
   images: Array<{ name: string }>;
   created_at: string;
   designed_at: string | null;
+  /** ★ 2026-08-20 전달된 제안서 존재 — 서버가 다운로드 endpoint와 같은 판정(전달 이후 + PDF 실존)으로 내린다 */
+  has_proposal?: boolean;
 }
 
 const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
@@ -233,6 +237,12 @@ export default function CampaignAgencyPage() {
                         <ImagesIcon className="w-3.5 h-3.5" />{r.images.length}장
                       </span>
                     )}
+                    {/* ★ 2026-08-20 전달된 제안서 — 상세 모달에서 바로 받을 수 있다는 신호 */}
+                    {r.has_proposal && (
+                      <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-300 shrink-0">
+                        <FileDown className="w-3 h-3" />제안서 도착
+                      </span>
+                    )}
                     <span className={`text-[11px] px-2 py-1 rounded-full shrink-0 ${st.cls}`}>{st.label}</span>
                     <span className="text-[11px] text-white/35 shrink-0">{new Date(r.created_at).toLocaleDateString('ko-KR')}</span>
                   </button>
@@ -298,6 +308,18 @@ export default function CampaignAgencyPage() {
               <span className={`text-[11px] px-2 py-1 rounded-full shrink-0 ${(STATUS_LABEL[detail.status] || STATUS_LABEL.received).cls}`}>
                 {(STATUS_LABEL[detail.status] || STATUS_LABEL.received).label}
               </span>
+              {/* ★ 2026-08-20 제안서 다운로드 — 서버가 전달 이후에만 has_proposal을 내리고, endpoint도 같은 판정으로 재검증한다 */}
+              {detail.has_proposal && (
+                <button
+                  onClick={() => downloadAuthFile(
+                    `/api/campaign-agency/requests/${detail.id}/proposal`,
+                    `한줄로_마케팅제안서_${detail.title.slice(0, 40)}.pdf`,
+                    (m) => toast.error(m),
+                  )}
+                  className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30 transition-colors shrink-0">
+                  <FileDown className="w-3.5 h-3.5" />제안서 다운로드
+                </button>
+              )}
               <button onClick={() => setDetail(null)} className="text-white/50 hover:text-white p-2 rounded-lg hover:bg-white/5" aria-label="닫기">
                 <X className="w-5 h-5" />
               </button>

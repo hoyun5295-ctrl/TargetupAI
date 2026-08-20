@@ -373,6 +373,7 @@ router.get('/my-plan', async (req: Request, res: Response) => {
         p.ai_messaging_enabled,
         p.auto_spam_test_enabled,
         p.ai_premium_enabled,
+        p.advanced_access_enabled,
         c.subscription_status,
         c.created_at,
         c.trial_expires_at,

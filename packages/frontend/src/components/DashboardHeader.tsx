@@ -23,8 +23,10 @@ interface DashboardHeaderProps {
   // ★ D88: 구독 만료 시 전체 잠금
   isSubscriptionLocked?: boolean;
   onSubscriptionLocked?: () => void;
-  // ★ ENTERPRISE 전용 기능 게이팅 (자동발송, 카카오&RCS)
-  planCode?: string;
+  // ★ 2026-08-20 상위 등급 게이트 — 판정 원천 = 서버 plans.advanced_access_enabled 하나(my-plan 응답).
+  //   그전에는 planCode === 'BUSINESS'/'ENTERPRISE' 하드코딩이라, 플래그를 켠 임직원 요금제(STAFF)가
+  //   서버 API는 통과하는데 메뉴만 안 떴다(plan-guard 0728 전환 사유가 여기서 재현). 코드 비교 금지.
+  advancedAccess?: boolean;
   // ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 베타 메뉴.
   //   클릭 시 Dashboard.tsx에서 isBetaAccessAllowed 게이팅:
   //   ENTERPRISE/BUSINESS = /ai-operator 진입 / 그 외 = BetaFeatureModal 표시.
@@ -73,7 +75,7 @@ export default function DashboardHeader({
   aiMessagingEnabled,
   isSubscriptionLocked,
   onSubscriptionLocked,
-  planCode,
+  advancedAccess,
   onAiOperatorClick,
 }: DashboardHeaderProps) {
   const navigate = useNavigate();
@@ -120,8 +122,9 @@ export default function DashboardHeader({
     // ★ 2026-06-08 (Harold 명시): 고객 세그먼트 메뉴는 AI Operator 서브메뉴(SUB_MODULE_CARDS)로 이동.
     //   AI Operator가 모든 유료 요금제 크레딧 사용으로 전환되어 접근 회귀 없음. aiMessagingEnabled prop은 호환성 위해 유지.
     { label: '발송결과', onClick: onResults, color: 'green', path: '/' },
-    // ★ 2026-07-09 CRM 캠페인 대행 — 비즈니스+ 전용 특별 서비스. 미만 요금제 = 메뉴 자체 비노출 (Harold 명시).
-    ...(planCode === 'BUSINESS' || planCode === 'ENTERPRISE'
+    // ★ 2026-07-09 CRM 캠페인 대행 — 상위 등급 전용 특별 서비스. 미만 요금제 = 메뉴 자체 비노출 (Harold 명시).
+    //   ★ 2026-08-20 판정을 서버 플래그(advanced_access_enabled)로 — 코드 하드코딩이 STAFF 4개사를 막고 있었다.
+    ...(advancedAccess
       ? [{ label: '캠페인 대행', onClick: () => navigate('/campaign-agency'), color: 'new' as MenuColor, path: '/campaign-agency' }]
       : []),
     { label: '수신거부', onClick: () => navigate('/unsubscribes'), color: 'gold', path: '/unsubscribes' },
