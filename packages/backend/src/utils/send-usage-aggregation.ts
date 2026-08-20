@@ -899,6 +899,13 @@ export const AGENT_MSG_TYPE_TO_USAGE_KEY: Record<string, string> = Object.fromEn
   BILLING_TYPES.filter((t) => t.agentCode).map((t) => [t.agentCode as string, t.key]),
 );
 
+/** ★ 2026-08-20 발송ID 표기 정규화 — 저장(등록 endpoint)·비교(집계) 공용. PG UNIQUE가 case-sensitive라
+ *  소문자 표기로 등록되면 같은 CustId가 두 회사에 갈라 등록될 수 있었다(이중 귀속·이중 청구 구조).
+ *  저장 시점에 이 함수를 지나면 UNIQUE가 표기 차이까지 잡는다. */
+export function normalizeAgentSendId(v: any): string {
+  return String(v ?? '').trim().toUpperCase();
+}
+
 export function agentUsageKey(msgType: any): string {
   const k = String(msgType || '').trim().toUpperCase();
   if (!k) return '(유형 미상)';

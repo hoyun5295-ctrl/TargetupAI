@@ -378,7 +378,7 @@ cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --conf
 
 ### 잔여 (처방 아님 — 미검증)
 
-- **PAY 통계 대상 테이블 UNIQUE 실존 미확인** — `RSRM_SalesStts`에 (DestDt,CustId,StoreId,MsgType) UNIQUE가 없으면 스냅샷 UPSERT가 성립하지 않고 매 주기 INSERT가 쌓인다. **우리 DB가 아니라 코드로 못 막는다.** 첫 적재 실측(§10 잔여)에서만 확정된다
+- ~~PAY 통계 대상 테이블 UNIQUE 실존 미확인~~ — **★0820 해소.** `SHOW INDEX FROM RSRM_SalesStts` 실측: **PRIMARY KEY = (DestDt, CustId, StoreId, MsgType)** — UPSERT 키와 정확히 일치, 스냅샷 UPSERT 성립. 같은 날 리포터 가동도 실측 확인(8/18 18:34 기동 로그 `PAY 통계 적재 시작 sysId=65` · 오류 0줄 · `pay_report_enabled` 계정 0이라 rows=0 무로그 대기 = 의도 상태). 남은 것 = §10 착수 절차 3단 + 첫 적재 실측뿐
 - **성공 판정이 계열을 구분하지 않는다** — `MESSAGE_RESULT_CODE_STANDARD.md`는 SMS/LMS·MMS/카카오를 별도 코드북으로 규정하고 카카오 `1000`을 "접수 성공, 최종 성공 아님"으로 둔다. 현재는 계열 무관 8종 단일 집합. 카카오 REPORT에 `1000`이 실제로 오는지 표본이 없어 고치지 않았다
 - admin API 키 인증 캐시에 무효화 훅 없음(`auth.js:96-114`) — 계정 비활성·키 회전이 최대 5분 지연. 평문 저장 축(그쪽 STATUS #10)과 함께 처리
 
@@ -516,7 +516,14 @@ cd /var/lib/bito-agent-control/<AGENT>/package-v1.0.20 && bash install.sh --conf
 ⛔ **누적값 append 금지** — 한줄로가 `SUM()+GROUP BY`로 읽어서, 매 주기 누적 스냅샷을 새 행으로 쌓으면 **청구액이 배수로 부풀어 그대로 고객사에 나간다.** 그래서 스냅샷 UPSERT(한 키 한 행 덮어쓰기)이고, **그 형태를 테스트가 고정한다**(`reporter_test.go` 8건 — 누적으로 바꿔 주입하면 실패하는 것 확인).
 
 **착수 절차(업체 붙일 때)** — ①`pay_cust_id` 발급 + `pay_report_enabled=true` ②한줄로 `company_agent_ids`에 그 값 ↔ 회사 등록 ③유형 단가 설정. **셋 중 하나라도 빠지면 그 업체 발송이 청구에서 통째로 빠진다.**
-**잔여** = 실측(규격서 §10 — 1건 → 5건 추가 후 **행이 여전히 1개인지**. 2개면 즉시 중단).
+**★0820 접두 `V` 확정(Harold) — 1호 발급 = `V0001`(api-rabd-api-01, 수동 UPDATE).** 운영 DB 접속 = `.65` 네이티브 PG(`psql "postgres://…127.0.0.1:5432/bito_gateway"` — compose의 bito-postgres 컨테이너는 로컬 개발용, 운영엔 없다 0820 실측).
+
+**★0820 첫 적재 실측 성공** — `V0001` 행 2개(8/19·8/20 각 `K·OkCnt=1`) `SysId=65`로 적재, 소급 3일(lookback) 동작 확인. 개통 과정에서 걷어낸 막힘 둘(다음 업체 개통 때는 없다):
+- **방화벽** — `.62` `DOCKER-USER` 체인이 23388을 소스 4개(139.150.81.213·.54·.57·.58)만 허용 + 전부 DROP이라 `.65`가 timeout으로 막혔다(문서의 "0815 계정 신설"은 DB 계정 축이고 방화벽 허용은 별개 축이었다). `iptables -I DOCKER-USER 6 -p tcp -s 58.227.193.65 -m conntrack --ctorigdstport 23388 -j ACCEPT`로 DROP 앞에 삽입. **영속화 완료(0820)** — 기존 4규칙도 휘발 상태였음을 실측(4개 영속 후보지 전부 빈 것 확인) → `/etc/ufw/after.rules`에 전 규칙 블록(`*filter`+`:DOCKER-USER - [0:0]`+`COMMIT`) 등재, `ufw reload` 후 중복 없이 한 벌 적용 실측
+- **비밀번호** — `GW_PAY_STATS_DSN`에 root 비번이 들어 있었고 `sales@.65` 계정 비번과 달라 1045. `sales@.65`를 그 값으로 ALTER해 개통(호스트별 행이라 중계 3대 무영향). ⚠**전용 새 비번 로테이션 = 운영 잔여**(root 비번이 계정·env 파일 두 곳에 퍼진 상태 — ①새 비번 ALTER ②DSN 교체 ③`systemctl restart bito-gateway`)
+
+**★0820(2) 발급명(RSRM_SalesMst) 대표 행 적재 — 코드 완료·배포 대기.** 한줄로 화면의 "발송ID / 발급명"·선불 잔액은 `SalesMst` 축인데 리포터가 `SalesStts`만 넣어 V0001이 이름 없이 보였다. `reportNames`(reporter.go — 매 주기, 통계와 독립 best-effort): 켠 계정의 `pay_cust_id`+`name`을 대표 행(`StoreId=CustId`) UPSERT, **CustNm·UpdTm만 쓰고 RemAmt·카운터 불가침**(잔액 오염 차단 — 계약 테스트 고정). **`CustId varchar(5)` 물리 제약 실측(SHOW CREATE TABLE)** ⇒ 발급 규칙 = `V`+4자리(상한 V9999), 5자 초과는 조용한 절단 대신 거절+Error 로그(`filterNameRows` 계약). 검증 = `GW_CHECK_OK`(vet+전체 테스트, 계약 +3).
+**잔여** = 위 배포(런북 §3-3) · 실측 마지막 1건(같은 날 추가 발송 후 **행이 늘지 않고 같은 행 숫자만 커지는지** — 스냅샷 UPSERT 계약) · 한줄로 쪽 `V0001` ↔ 회사 매핑 + 알림톡 단가(서수란 테스트 예정) · `sales@.65` 전용 비번 로테이션(지금은 root 비번 값 — ①새 비번 ALTER ②DSN 교체 ③재시작) · **`pay_cust_id` 자동 채번(V+연번)+적재 토글 관리 화면**(지금은 발급기·화면이 없어 수동 UPDATE — 상용 전 개선 과제).
 
 ## 9. 관련 문서
 

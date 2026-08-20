@@ -11,6 +11,27 @@ import {
 } from './send-usage-aggregation';
 import type { PayAgentStoreRow } from './pay-stats';
 import { sumFlooredInvoiceLines } from './billing-invoice-lines';
+import { normalizeAgentSendId } from './send-usage-aggregation';
+
+/**
+ * ★ 2026-08-20 발송ID 표기 정규화 CT (Harold 승인 — 예방 수정).
+ * 등록 endpoint가 trim만 하고 저장해서, PG UNIQUE(case-sensitive)상 `b0023`과 `B0023`이
+ * 서로 다른 회사에 각각 등록될 수 있었다 — 집계·정산은 양쪽 다 대문자화해 비교하므로 그 순간
+ * 같은 CustId 실적이 두 회사에 이중 귀속된다. 저장 시점에 대문자로 정규화하면 UNIQUE가
+ * 대소문자 표기 차이까지 잡는다(운영 데이터는 0820 실측 전부 대문자·중복 0).
+ */
+describe('normalizeAgentSendId — 발송ID 표기 정규화(저장·비교 공용)', () => {
+  it('trim + 대문자', () => {
+    expect(normalizeAgentSendId(' b0023 ')).toBe('B0023');
+    expect(normalizeAgentSendId('v0001')).toBe('V0001');
+    expect(normalizeAgentSendId('B0023')).toBe('B0023');
+  });
+  it('빈 값·비문자열은 빈 문자열', () => {
+    expect(normalizeAgentSendId('')).toBe('');
+    expect(normalizeAgentSendId(null)).toBe('');
+    expect(normalizeAgentSendId(undefined)).toBe('');
+  });
+});
 
 describe('rollupUsageByPeriod — 청구 사용량 일자 집계 → 기간×유형 롤업 (2026-07-25)', () => {
   const day = (t: number, s: number, f = 0, p = 0) => ({ total: t, success: s, fail: f, pending: p });

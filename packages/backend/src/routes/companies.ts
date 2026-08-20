@@ -12,6 +12,8 @@ import { grantFreeTrial, isTrialApplyOpen } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
 import { parseAgentLedgerFields, parseAgentLedgerPatch, getAgentCustNameMap } from '../utils/pay-stats';
+// ★ 2026-08-20 발송ID 표기 정규화 CT — 저장(여기)·비교(집계)가 같은 규약(대문자)을 쓴다
+import { normalizeAgentSendId } from '../utils/send-usage-aggregation';
 // ★ 2026-07-29 회사 병합 CT — 이관 때 계정명이 달라 회사가 둘로 생긴 업체를 합친다(축 표·차단 게이트·잔존 0 검증)
 import {
   previewCompanyMerge,
@@ -2241,7 +2243,9 @@ router.get('/:id/agent-ids', requireUuidId, requireSuperAdmin, async (req: Reque
 router.post('/:id/agent-ids', requireUuidId, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const agentSendId = String((req.body as any)?.agentSendId || '').trim();
+    // ★ 2026-08-20 표기 정규화(CT) — 대문자 저장이라야 전역 UNIQUE가 표기 차이(b0023 vs B0023)까지 잡는다.
+    //   집계·정산이 대문자 비교라, 표기가 갈리면 같은 CustId 실적이 두 회사에 이중 귀속되는 구조였다.
+    const agentSendId = normalizeAgentSendId((req.body as any)?.agentSendId);
     const memo = String((req.body as any)?.memo || '').trim() || null;
 
     if (!agentSendId) {
@@ -2277,7 +2281,7 @@ router.post('/:id/agent-ids', requireUuidId, requireSuperAdmin, async (req: Requ
           `SELECT c.company_name FROM company_agent_ids a
            JOIN companies c ON c.id = a.company_id
            WHERE a.agent_send_id = $1`,
-          [String((req.body as any)?.agentSendId || '').trim()]
+          [normalizeAgentSendId((req.body as any)?.agentSendId)]
         );
         const owner = dup.rows[0]?.company_name;
         return res.status(400).json({

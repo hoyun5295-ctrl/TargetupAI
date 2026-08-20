@@ -402,7 +402,7 @@
   단가 컬럼 목록은 코드에서 `BILLING_TYPES.agentPriceColumn` 파생이라(billing-ledger.ts) 유형을 늘려도 SELECT·지문·미설정 가드가 자동 확장된다 — 목록을 손으로 두 벌 두지 않는다.
 - 2026-07-24 ALTER 적용 실측: 10컬럼·기존 283행 전부 postpaid. 잔액은 컬럼 없음(이중 진실 금지 — 게이트웨이 RSRM_SalesStts.RemAmt 최신 DestDt 행을 조회만). SoT=docs/2026-07-24-agent-prepaid-charge-design.md
 
-### [외부 MySQL] sales.RSRM_SalesStts — 에이전트(PAY 엔진) 발송 통계 ★2026-07-25 등재
+### [외부 MySQL] sales.RSRM_SalesStts — 에이전트(PAY 엔진) 발송 통계 ★2026-07-25 등재 · ★0820 PK 실측 = (DestDt, CustId, StoreId, MsgType)
 
 > **PG가 아니다. 별도 MySQL 컨테이너 `pay-ingest-db`에 있다.** 강문희 쪽 게이트웨이가 여기로 push하고 우리는 읽기만 한다.
 > 여기 없어서 매번 컬럼을 추측하다 `SuccCnt`(존재하지 않음) 오류가 났다. **성공 컬럼은 `OkCnt`다.**
@@ -422,7 +422,7 @@
 | FailCnt | 실패 |
 | ReadyCnt | 대기. **음수가 관측된다**(게이트웨이 원천값이 완료분을 차감) — 우리 파생 아님 |
 | RemAmt | ⛔ **잔액 소스로 쓰지 말 것**(★2026-07-27 정정). 통계 적재 시점의 스냅샷이고 계정에 따라 **전 기간 0**이다(C0130 실측 — 원장은 640,281.625). 현재 잔액은 `RSRM_SalesMst.RemAmt` |
-| SysId | 수집 서버 구분 |
+| SysId | 수집 서버 구분 — ★0820 실측: `54`·`57`·`58` = QTmsg 중계 3대(실시간 갱신 확인) / **`65` = 비토 게이트웨이**(0815 확정 · 리포터 가동 중이나 `pay_report_enabled` 계정 0으로 적재 대기) |
 
 - 소비 CT = `utils/pay-stats.ts`(집계 SQL 전량). 월 확장은 `utils/stats-period.ts` 공용.
 - 2026-07-25 실측: 청구서(`billing.ts`)는 이 테이블을 **전혀 읽지 않는다** → `usage_type='both'` 회사(금강제화 등)의 에이전트 발송분이 청구서에서 통째로 누락. 재구성 대상.
