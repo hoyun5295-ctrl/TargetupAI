@@ -8,11 +8,70 @@
  * 검산은 AI가 아니라 코드가 한다 — 명세서 자체 합계와 어긋나면 반영 불가(fail-closed).
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   normalize080Number, format080Number,
   parseKtStatementJson, validateKtStatement,
   signKtStatement, verifyKtStatementSignature,
+  monthFullyCovered,
 } from './billing-080';
+
+/**
+ * ★ 2026-08-20 재오픈 정정 Codex 지적(high) — 라벨 건너뜀 고착 차단.
+ * 6/16~7/15를 "6월", 7/16~8/15를 "8월"로 발행하면 7월 전체가 발행 기간에 덮이는데 7월 라벨은 없다.
+ * 그때 7월 반영을 받으면 실릴 정산을 영영 못 만든다(새 7월 라벨 정산은 기간 중복에 걸린다) —
+ * 그 달이 전부 덮였으면 반영 자체를 거부한다(fail-closed·조용한 미청구 금지).
+ */
+describe('monthFullyCovered — 그 달이 발행 기간들로 전부 덮였는가', () => {
+  it('빈 목록 = 안 덮임', () => {
+    expect(monthFullyCovered('2026-07-01', [])).toBe(false);
+  });
+  it('역월 한 장이 그 달을 정확히 덮는다', () => {
+    expect(monthFullyCovered('2026-07-01', [{ start: '2026-07-01', end: '2026-07-31' }])).toBe(true);
+  });
+  it('연속 중간정산 두 장(6/16~7/15 + 7/16~8/15)이 7월을 전부 덮는다 — 지적 시나리오', () => {
+    expect(monthFullyCovered('2026-07-01', [
+      { start: '2026-06-16', end: '2026-07-15' },
+      { start: '2026-07-16', end: '2026-08-15' },
+    ])).toBe(true);
+  });
+  it('한쪽만 있으면 안 덮임 — 남은 구간의 라벨 정산이 아직 가능하다', () => {
+    expect(monthFullyCovered('2026-07-01', [{ start: '2026-07-16', end: '2026-08-15' }])).toBe(false);
+    expect(monthFullyCovered('2026-07-01', [{ start: '2026-06-16', end: '2026-07-15' }])).toBe(false);
+  });
+  it('사이에 하루라도 틈이 있으면 안 덮임', () => {
+    expect(monthFullyCovered('2026-07-01', [
+      { start: '2026-06-16', end: '2026-07-15' },
+      { start: '2026-07-17', end: '2026-08-15' }, // 7/16 하루 빈다
+    ])).toBe(false);
+  });
+  it('겹치는 기간·순서 뒤섞임도 병합해서 판정한다', () => {
+    expect(monthFullyCovered('2026-07-01', [
+      { start: '2026-07-10', end: '2026-07-31' },
+      { start: '2026-06-01', end: '2026-07-12' },
+    ])).toBe(true);
+  });
+  it('2월(말일 28일)·12월(연 경계) 경계가 정확하다', () => {
+    expect(monthFullyCovered('2026-02-01', [{ start: '2026-02-01', end: '2026-02-28' }])).toBe(true);
+    expect(monthFullyCovered('2026-02-01', [{ start: '2026-02-01', end: '2026-02-27' }])).toBe(false);
+    expect(monthFullyCovered('2026-12-01', [{ start: '2026-11-16', end: '2027-01-15' }])).toBe(true);
+  });
+
+  // ★ 2R 수용 — 수동 정산완료(달 전체)도 덮임이다. 커버리지 조회가 두 원장을 합치는 것을 소스 스캔으로 고정한다.
+  it('수동 정산완료 한 건(달 전체)만으로 덮임', () => {
+    expect(monthFullyCovered('2026-07-01', [{ start: '2026-07-01', end: '2026-07-31' }])).toBe(true);
+  });
+  it('[소스 스캔] 두 커버리지 게이트가 billing_manual_completions를 UNION으로 합쳐 판정한다', () => {
+    const src = readFileSync(resolve(__dirname, 'billing-080.ts'), 'utf8');
+    const unions = src.match(/UNION ALL\s+SELECT period_start::text, period_end::text FROM billing_manual_completions/g) || [];
+    expect(unions.length).toBe(2);
+  });
+  it('[소스 스캔] KT 반영의 회사별 catch는 스키마 부재(테이블 42P01·컬럼 42703)를 skipped로 삼키지 않고 던진다 — "0개사 반영 완료" 위장 차단', () => {
+    const src = readFileSync(resolve(__dirname, 'billing-080.ts'), 'utf8');
+    expect(src).toMatch(/err\?\.code === '42P01' \|\| err\?\.code === '42703'\) throw err/);
+  });
+});
 
 describe('080 번호 정규화·표기', () => {
   it('숫자만 저장 — 하이픈·공백 제거', () => {

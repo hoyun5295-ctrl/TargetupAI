@@ -12,6 +12,8 @@
  *      (옛 `new Date(billing_start).getMonth()`는 음수 오프셋 TZ에서 1일 시작이 전월로 밀렸다).
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { resolveBillingLabelMonth, BillingIssueError } from './billing-issue';
 
 describe('resolveBillingLabelMonth — 기본값 = 종료일의 역월', () => {
@@ -83,5 +85,23 @@ describe('resolveBillingLabelMonth — 명시 선택은 기간에 걸친 역월�
         expect(e.body.code).toBe('BILLING_LABEL_MONTH_INVALID');
       }
     }
+  });
+});
+
+/**
+ * ★ 2026-08-20 재오픈 정정(서수란 실측 — 7월분이 "8월 정산"에 합산) — 추가 청구 항목의 귀속 축은
+ * 기간 겹침이 아니라 **청구월 = 정산월**이다. 중간정산(7/16~8/15)은 두 역월과 겹치므로 겹침 선택은
+ * 남의 달 항목까지 쓸어 담는다. 소스 스캔으로 SQL 축 자체를 계약으로 고정한다(라우트 불변식 선례).
+ */
+describe('추가 청구 항목 선택 SQL — 귀속 축 = 청구월 = 정산월 (소스 스캔 계약)', () => {
+  const src = readFileSync(resolve(__dirname, 'billing-issue.ts'), 'utf8');
+
+  it('겹침 판정(period_month + INTERVAL 상한)이 선택 SQL에 남아 있지 않다', () => {
+    expect(src).not.toMatch(/period_month \+ INTERVAL '1 month'/);
+  });
+
+  it('선택 조건은 정산월 1일과의 등치다 — 발행 코어·최소과금 두 곳 모두', () => {
+    const matches = src.match(/e\.period_month = \$\d+::date/g) || [];
+    expect(matches.length).toBeGreaterThanOrEqual(2);
   });
 });

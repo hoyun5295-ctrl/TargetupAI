@@ -556,6 +556,9 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
     //   그전에는 [반영]이 그 값들을 항목 행에 복사해 굳혀서, 매핑을 고쳐도 청구서가 옛 값으로 나갔다
     //   (서수란 0803 접수 2건 — 시세이도 이용료 9,000 고정 / 금강제화 귀속 무시하고 공통 장).
     //   스냅샷은 명세서에서만 나오는 값(그 달 그 번호의 통화료) 하나뿐이다.
+    // ★ 2026-08-20 재오픈 정정(서수란 실측) — 귀속 축 = **청구월 = 정산월**. 그전에는 역월∩발행기간
+    //   겹침이라 중간정산(7/16~8/15 "8월 정산")이 7월분까지 쓸어 담았다. 역월 정산은 겹침과 월일치가
+    //   같은 답이라 동작 무변화. 항목은 자기 청구월 라벨의 정산에만 실린다(차단·표시 5곳도 같은 축).
     const extraRes = await client.query(
       `SELECT e.id, e.kind, e.supply_amount, e.period_month, e.source_ref,
 ${EXTRA_ITEM_SOURCE_SELECT}
@@ -563,11 +566,10 @@ ${EXTRA_ITEM_SOURCE_SELECT}
 ${EXTRA_ITEM_SOURCE_JOIN}
         WHERE e.company_id = $1
           AND e.billed_billing_id IS NULL
-          AND e.period_month <= $3::date
-          AND (e.period_month + INTERVAL '1 month' - INTERVAL '1 day')::date >= $2::date
+          AND e.period_month = $2::date
         ORDER BY e.period_month, e.kind, e.source_ref
         FOR UPDATE OF e`,
-      [company_id, billing_start, billing_end],
+      [company_id, `${billing_year}-${String(billing_month).padStart(2, '0')}-01`],
     );
 
     // ★ 2026-08-04 근거가 사라진 080 스냅샷이 있으면 **발행하지 않는다**(Codex 적대검증 high 수용).
@@ -1032,16 +1034,17 @@ export async function issueMinimumChargeBilling(input: {
     //   그런데 일반 발행은 청구 내용이 없어 `BILLING_NOTHING_TO_ISSUE`로 막히고 소비 마킹도 롤백되므로,
     //   그 회사는 어느 경로로도 그 달 청구서를 만들 수 없는 교착에 빠졌다.
     //   ⇒ **실제로 청구될 금액이 있는 행만** 거부하고, 0줄 스냅샷은 이 정액 발행이 함께 소비한다.
+    //   ★ 2026-08-20 귀속 축 = 청구월 = 정산월(발행 코어와 같은 정정 — 역월 기간이라 겹침과 같은 답·동작 무변화).
+    const minChargeLabel = resolveBillingLabelMonth(null, billing_start, billing_end);
     const extras = await client.query(
       `SELECT e.id, e.kind, e.supply_amount, e.period_month, e.source_ref,
 ${EXTRA_ITEM_SOURCE_SELECT}
          FROM billing_extra_items e
 ${EXTRA_ITEM_SOURCE_JOIN}
         WHERE e.company_id = $1 AND e.billed_billing_id IS NULL
-          AND e.period_month <= $3::date
-          AND (e.period_month + INTERVAL '1 month' - INTERVAL '1 day')::date >= $2::date
+          AND e.period_month = $2::date
         FOR UPDATE OF e`,
-      [company_id, billing_start, billing_end],
+      [company_id, `${minChargeLabel.year}-${String(minChargeLabel.month).padStart(2, '0')}-01`],
     );
     const minChargeBlocking = extraRowsBlockingIssue(extras.rows);
     if (minChargeBlocking.length > 0) {
@@ -1140,8 +1143,7 @@ ${EXTRA_ITEM_SOURCE_JOIN}
       });
     }
 
-    // ★ 2026-08-20 정산월 파생을 발행 코어와 같은 함수로 — 역월 기간이라 값은 그대로다(시작월 = 종료월).
-    const minChargeLabel = resolveBillingLabelMonth(null, billing_start, billing_end);
+    // 정산월 파생은 위 안전핀 3에서 이미 발행 코어와 같은 함수로 계산했다(minChargeLabel).
     const vat = vatOfSupply(minCharge);
     const billingResult = await client.query(
       `INSERT INTO billings (

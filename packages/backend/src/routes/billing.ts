@@ -58,6 +58,8 @@ import {
 import { readFreeDeductibleForBilling } from '../utils/free-messaging';
 // ★ 2026-08-05 청구 수량 정의 CT — 미리보기가 발행·인쇄와 같은 식을 쓰게 한다
 import { billableQuantity, BILLING_TYPES } from '../utils/billing-types';
+// ★ 2026-08-20(2) 스키마 부재 503 판정 CT(SQLSTATE 42P01·42703 + 메시지) — KT 반영 catch가 쓴다
+import { handleDbMigrationError } from '../utils/db-migration-error';
 
 /**
  * ★ 2026-08-14 발송ID 단가를 **입력할 수 있는** 유형키. 축 정의에서 파생한다(목록 두 벌 금지).
@@ -1403,13 +1405,18 @@ router.post('/080-numbers', async (req: Request, res: Response) => {
           // ★ 소비 여부를 가리지 않는다(Codex 2R high 수용) — 미소비 행만 보면 **이미 청구서에 실린**
           //   반영분이 옛 회사에 남는다. 그 청구서를 지우는 순간 FK가 그 행을 미소비로 되돌리는데
           //   매핑은 이미 옮겨져 있어 옛 회사 발행이 영구히 막히고, 새 회사 재반영도 전역 UNIQUE에 걸린다.
+          // ★ 2026-08-20(2) Codex high 수용 — 소비 여부의 진실은 마커다. 이 번호의 반영분 중
+          //   ①이미 청구서에 실린 행(billed_billing_id — **라벨과 무관**, 옛 겹침 선택이 실은 교차월 소비행 포함)
+          //   ②미소비인데 자기 청구월 라벨의 정산이 이미 있는 행(곧 그 장의 근거)
+          //   이 있으면 회사·번호를 옮기지 않는다. 라벨 등치만 보면 교차월로 소비된 행을 놓쳐,
+          //   매핑만 옮겨진 채 소비행이 옛 회사에 남고 발행 삭제 시 매핑 없는 고아가 된다.
           const blocked = await client.query(
-            `SELECT 1 FROM billings b
-               JOIN billing_extra_items e
-                 ON e.company_id = $1::uuid AND e.source_ref = $3
-              WHERE b.company_id IN ($1::uuid, $2::uuid)
-                AND b.billing_start <= (e.period_month + INTERVAL '1 month' - INTERVAL '1 day')::date
-                AND b.billing_end >= e.period_month
+            `SELECT 1 FROM billing_extra_items e
+              WHERE e.company_id = $1::uuid AND e.source_ref = $3
+                AND (e.billed_billing_id IS NOT NULL
+                     OR EXISTS (SELECT 1 FROM billings b
+                                 WHERE b.company_id IN ($1::uuid, $2::uuid)
+                                   AND make_date(b.billing_year, b.billing_month, 1) = e.period_month))
               LIMIT 1`,
             [fromCompany, String(company_id), fromNumber],
           );
@@ -1533,6 +1540,9 @@ router.post('/kt-statement/apply', async (req: Request, res: Response) => {
     return res.json({ success: true, ...result });
   } catch (error: any) {
     console.error('KT 명세서 반영 오류:', error?.message || error);
+    // ★ 2026-08-20(2) Codex 3R·4R 수용 — 스키마 부재(42P01·42703)는 400 사용자 오류로 덮지 않는다.
+    //   판정은 문자열이 아니라 SQLSTATE까지 보는 기존 CT 하나로(db-migration-error.ts — 인라인 복제 금지).
+    if (handleDbMigrationError(error, res, 'billing_manual_completions 등 정산')) return;
     return res.status(400).json({ success: false, error: error?.message || 'KT 명세서 반영 실패' });
   }
 });
@@ -1614,10 +1624,10 @@ router.delete('/extra-items', async (req: Request, res: Response) => {
   try {
     await client.query('BEGIN');
     await lockCompanyForBilling(client, companyId);
+    // ★ 2026-08-20 판정 축 = 청구월 = 정산월(발행 항목 선택과 같은 축)
     const billed = await client.query(
       `SELECT id FROM billings WHERE company_id = $1
-         AND billing_start <= (($2 || '-01')::date + INTERVAL '1 month' - INTERVAL '1 day')::date
-         AND billing_end >= ($2 || '-01')::date LIMIT 1`,
+         AND make_date(billing_year, billing_month, 1) = ($2 || '-01')::date LIMIT 1`,
       [companyId, month],
     );
     if (billed.rows.length > 0) {
@@ -1671,9 +1681,10 @@ router.post('/extra-items', async (req: Request, res: Response) => {
     return res.json({ success: true, ...result });
   } catch (error: any) {
     // ★ 2026-07-31 `user_id` ALTER 미실행 서버에서 사람이 고칠 수 없는 오류를 400으로 흘리지 않는다.
+    //   ★ 2026-08-20(2) 커버리지 판정이 billing_manual_completions도 읽는다 — 안내 대상에 포함.
     const emsgX = error?.message || '';
     if (emsgX.includes('does not exist') && (emsgX.includes('column') || emsgX.includes('relation'))) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — billing_extra_items.user_id 컬럼 추가 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — billing_extra_items.user_id·billing_manual_completions 반영 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('부가서비스 항목 추가 오류:', emsgX || error);
     return res.status(400).json({ success: false, error: emsgX || '항목 추가 실패' });
@@ -1875,8 +1886,7 @@ router.get('/minimum-charge', async (req: Request, res: Response) => {
       `SELECT s.company_id, c.company_name, s.min_charge_supply,
               (SELECT b.id FROM billings b
                 WHERE b.company_id = s.company_id
-                  AND b.billing_start <= (($1 || '-01')::date + INTERVAL '1 month' - INTERVAL '1 day')::date
-                  AND b.billing_end >= ($1 || '-01')::date
+                  AND make_date(b.billing_year, b.billing_month, 1) = ($1 || '-01')::date
                 LIMIT 1) AS billed_id
          FROM company_billing_settings s
          JOIN companies c ON c.id = s.company_id

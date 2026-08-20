@@ -43,6 +43,38 @@ export interface Billing080Number {
 }
 
 /** 번호 표기 정규화 — 숫자만. 080 국번 검증은 화면 몫(수기 특수 케이스 여지). */
+/** 'YYYY-MM-DD' → 일수(정수 달력 산술 — 성분 UTC라 서버 TZ 무관) */
+const dayNum = (d: string): number => {
+  const [y, m, dd] = String(d).slice(0, 10).split('-').map(Number);
+  if (!y || !m || !dd) return NaN;
+  return Date.UTC(y, m - 1, dd) / 86400000;
+};
+
+/** ★ 2026-08-20 재오픈 정정(Codex high 수용) — 그 달이 발행 기간들로 **전부** 덮였는가.
+ *  귀속 축이 청구월=정산월이 되면서, 그 달 라벨 정산 없이 기간만 전부 덮인 달(연속 중간정산이
+ *  6월·8월 라벨로 7월을 덮는 형태)에 항목을 반영하면 실릴 정산을 영영 못 만든다(새 그 달 라벨
+ *  정산은 기간 중복 검사에 걸린다). 그 상태의 반영을 거부하는 판정 — 조용한 미청구 금지. */
+export function monthFullyCovered(
+  monthFirstDay: string,
+  periods: Array<{ start: string; end: string }>,
+): boolean {
+  const [y, m] = String(monthFirstDay).slice(0, 7).split('-').map(Number);
+  if (!y || !m) return false;
+  const monthStart = Date.UTC(y, m - 1, 1) / 86400000;
+  const monthEnd = Date.UTC(y, m, 0) / 86400000; // 그 달 말일
+  const sorted = periods
+    .map((p) => ({ s: dayNum(p.start), e: dayNum(p.end) }))
+    .filter((p) => Number.isFinite(p.s) && Number.isFinite(p.e) && p.e >= p.s)
+    .sort((a, b) => a.s - b.s);
+  let cursor = monthStart; // 아직 안 덮인 첫 날
+  for (const p of sorted) {
+    if (p.s > cursor) return false; // 틈 — 그 구간의 라벨 정산이 아직 가능하다
+    if (p.e + 1 > cursor) cursor = p.e + 1;
+    if (cursor > monthEnd) return true;
+  }
+  return cursor > monthEnd;
+}
+
 export function normalize080Number(v: any): string {
   return String(v ?? '').replace(/\D/g, '');
 }
@@ -366,14 +398,32 @@ export async function addManualExtraItems(params: {
   try {
     await client.query('BEGIN');
     await lockCompanyForBilling(client, String(params.companyId));
+    // ★ 2026-08-20 판정 축 = 청구월 = 정산월(발행 항목 선택과 같은 축 — 겹침이면 중간정산 이웃 달 오탐)
     const billed = await client.query(
       `SELECT id FROM billings WHERE company_id = $1
-         AND billing_start <= ($2::date + INTERVAL '1 month' - INTERVAL '1 day')::date
-         AND billing_end >= $2::date LIMIT 1`,
+         AND make_date(billing_year, billing_month, 1) = $2::date LIMIT 1`,
       [params.companyId, periodMonth],
     );
     if (billed.rows.length > 0) {
       throw new Error('그 달 정산이 이미 발행돼 있어 항목을 추가할 수 없습니다. 다음 달에 청구하거나 발행을 삭제한 뒤 추가해주세요.');
+    }
+    // ★ Codex high 수용 — 그 달 라벨 정산은 없는데 발행 기간이 그 달을 전부 덮은 상태(연속 중간정산이
+    //   이웃 달 라벨로 덮은 형태)면, 지금 반영해도 실릴 정산을 만들 수 없다. 조용한 미청구 대신 거부.
+    //   ★ 2R 수용 — 수동 정산완료 기간도 같은 이유로 합쳐 판정한다(수동완료 겹침은 발행을 409로 막는다).
+    const cover = await client.query(
+      `SELECT billing_start::text AS s, billing_end::text AS e FROM billings
+        WHERE company_id = $1
+          AND billing_start <= ($2::date + INTERVAL '1 month' - INTERVAL '1 day')::date
+          AND billing_end >= $2::date
+       UNION ALL
+       SELECT period_start::text, period_end::text FROM billing_manual_completions
+        WHERE company_id = $1
+          AND period_start <= ($2::date + INTERVAL '1 month' - INTERVAL '1 day')::date
+          AND period_end >= $2::date`,
+      [params.companyId, periodMonth],
+    );
+    if (monthFullyCovered(periodMonth, cover.rows.map((r: any) => ({ start: r.s, end: r.e })))) {
+      throw new Error('그 달 전체가 이미 발행된 정산 기간(또는 수동 정산완료)에 덮여 있어 지금 추가하면 어느 청구서에도 실리지 못합니다. 해당 기간 정산 삭제 또는 수동 정산완료 해제 후 추가해주세요.');
     }
     let inserted = 0;
     for (let i = 0; i < qty; i++) {
@@ -488,17 +538,36 @@ export async function applyKtStatement(params: {
       // ★ 발행 코어와 **같은 회사 잠금**(CT 하나) — 발행·반영·취소가 한 축으로 직렬화된다.
       await lockCompanyForBilling(client, String(companyId));
 
-      // 그 달과 겹치는 발행이 이미 있으면 이 회사는 반영하지 않는다 — 굳은 청구서에 안 실리는 항목을 만들지 않는다.
-      //   겹침 판정은 billings와 같은 식(월 = [1일, 말일]). 잠금 획득 후 재검사라 발행과 엇갈리지 않는다.
+      // 그 달 정산이 이미 있으면 이 회사는 반영하지 않는다 — 굳은 청구서에 안 실리는 항목을 만들지 않는다.
+      //   ★ 2026-08-20 판정 축 = 청구월 = 정산월(발행 항목 선택과 같은 축). 잠금 획득 후 재검사라 발행과 엇갈리지 않는다.
+      //   ★ Codex high 수용 — 라벨 정산은 없어도 그 달 전체가 발행 기간에 덮였으면(연속 중간정산) 같은 이유로 거부.
       const billed = await client.query(
         `SELECT id FROM billings WHERE company_id = $1
-           AND billing_start <= ($2::date + INTERVAL '1 month' - INTERVAL '1 day')::date
-           AND billing_end >= $2::date LIMIT 1`,
+           AND make_date(billing_year, billing_month, 1) = $2::date LIMIT 1`,
         [companyId, periodMonth],
       );
-      if (billed.rows.length > 0) {
+      // ★ 2R 수용 — 수동 정산완료 기간도 같은 이유로 합쳐 판정(수동완료 겹침은 발행을 409로 막는다).
+      const kCover = billed.rows.length > 0 ? null : await client.query(
+        `SELECT billing_start::text AS s, billing_end::text AS e FROM billings
+          WHERE company_id = $1
+            AND billing_start <= ($2::date + INTERVAL '1 month' - INTERVAL '1 day')::date
+            AND billing_end >= $2::date
+         UNION ALL
+         SELECT period_start::text, period_end::text FROM billing_manual_completions
+          WHERE company_id = $1
+            AND period_start <= ($2::date + INTERVAL '1 month' - INTERVAL '1 day')::date
+            AND period_end >= $2::date`,
+        [companyId, periodMonth],
+      );
+      if (billed.rows.length > 0
+        || monthFullyCovered(periodMonth, (kCover?.rows || []).map((r: any) => ({ start: r.s, end: r.e })))) {
         await client.query('ROLLBACK');
-        skipped.push({ company_id: companyId, company_name: companyName, reason: '그 달 정산이 이미 발행됨 — 발행 삭제 후 반영하거나 다음 달에 청구' });
+        skipped.push({
+          company_id: companyId, company_name: companyName,
+          reason: billed.rows.length > 0
+            ? '그 달 정산이 이미 발행됨 — 발행 삭제 후 반영하거나 다음 달에 청구'
+            : '그 달 전체가 발행된 정산 기간(또는 수동 정산완료)에 덮임 — 반영해도 실릴 청구서가 없어 건너뜀',
+        });
         continue;
       }
 
@@ -557,6 +626,9 @@ export async function applyKtStatement(params: {
       }
     } catch (err: any) {
       try { await client.query('ROLLBACK'); } catch { /* release가 파기 */ }
+      // ★ 2026-08-20(2) Codex 3R·4R 수용 — 스키마 부재(테이블 42P01·컬럼 42703)는 회사별 skipped로
+      //   삼키지 않는다. 삼키면 "0개사 반영 완료" 성공 응답으로 위장돼 조용한 미청구가 된다. 라우트가 503으로 올린다.
+      if (err?.code === '42P01' || err?.code === '42703') throw err;
       skipped.push({ company_id: companyId, company_name: companyName, reason: `반영 실패: ${String(err?.message || err).slice(0, 200)}` });
     } finally {
       client.release();
