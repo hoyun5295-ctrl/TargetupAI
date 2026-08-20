@@ -32,6 +32,7 @@ import type { Request } from 'express';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { query } from '../config/database';
+import { evaluateLoginOrigin } from './geo-access';
 
 /** 한 번에 허용되는 동시 로그인 세션 수 — 항상 1개 (D111 P0: D100의 5개 허용 폐기) */
 const MAX_SESSIONS_PER_APP = 1;
@@ -88,6 +89,8 @@ export interface CreateSessionParams {
   appSource: string;
   req: Request;
   expiresInMinutes: number;
+  /** 회사 범위 예외 판정용 — 슈퍼관리자는 없다 */
+  companyId?: string | null;
 }
 
 /**
@@ -142,7 +145,9 @@ export interface SessionConflict {
 /** 세션 회전 결과 — 불리언으로 접지 않는다(회전됨 / 인계 동의 대기 는 다른 상태다) */
 export type RotateOutcome =
   | { status: 'rotated'; takeover: boolean }
-  | { status: 'conflict'; conflict: SessionConflict };
+  | { status: 'conflict'; conflict: SessionConflict }
+  /** 국외 접근 차단 — 세션을 만들지 않았다(전송자격인증 2.2) */
+  | { status: 'geo_blocked'; message: string };
 
 /**
  * 유휴 임계(분) — 이보다 오래 활동이 없는 세션은 "접속 중"으로 보지 않는다.
@@ -278,6 +283,40 @@ function isTakeoverConsented(
 export async function rotateUserSession(
   params: CreateSessionParams & { takeoverTicket?: any }
 ): Promise<RotateOutcome> {
+  // ★ 2026-08-19 국외 접근 통제(전송자격인증 2.2) — **세션을 만드는 유일한 함수가 여기다.**
+  //   ⛔ 라우트나 상위 헬퍼에 두면 그 함수를 타지 않는 경로가 반드시 생긴다.
+  //      실제로 두 번 샜다 — ①`/auth/login`에만 뒀더니 `/auth/mfa/verify`가 지나지 않았고,
+  //      ②그걸 고친 뒤에도 슈퍼관리자 **TOTP 최초 등록 확정** 경로가 또 남아 있었다(0819 Codex 1R·2R).
+  //   세 번째를 만들지 않으려고 판정을 여기로 내렸다. 호출부는 3곳뿐이고,
+  //   반환형의 `geo_blocked`를 안 다루면 tsc가 잡는다.
+  const origin = await evaluateLoginOrigin({
+    ip: params.req.ip,
+    userId: params.userId,
+    companyId: params.companyId ?? null,
+  });
+  if (origin.country === 'foreign') {
+    await query(
+      `INSERT INTO audit_logs (id, user_id, action, target_type, target_id, details, ip_address, user_agent, created_at)
+       VALUES (gen_random_uuid(), $1, $2, 'user', $1, $3, $4, $5, NOW())`,
+      [
+        params.userId,
+        origin.decision === 'block' ? 'foreign_access_blocked' : 'foreign_access_detected',
+        JSON.stringify({
+          appSource: params.appSource,
+          exempted: origin.exempted,
+          exceptionUnknown: origin.exceptionUnknown,
+        }),
+        params.req.ip, params.req.headers['user-agent'] || '',
+      ]
+    ).catch(() => {});
+    if (origin.decision === 'block') {
+      return {
+        status: 'geo_blocked',
+        message: '국내에서만 접속할 수 있습니다. 해외에서 사용해야 한다면 담당자에게 예외 등록을 요청해주세요.',
+      };
+    }
+  }
+
   const live = await findLiveSession(params.userId, params.appSource);
 
   if (live && !isTakeoverConsented(params.takeoverTicket, params.userId, params.appSource, live.id)) {

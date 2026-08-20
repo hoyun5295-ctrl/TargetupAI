@@ -146,7 +146,7 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
         p.campaignId, p.companyId, mms[0] || '', mms[1] || '', mms[2] || '',
       ]);
     }
-    sentCount = await bulkInsertSmsQueue(p.companyTables, smsRows, p.useNow);
+    sentCount = await bulkInsertSmsQueue(p.companyTables, smsRows, p.useNow, { companyId: p.companyId, source: 'direct_scheduled' });
   }
 
   // 3-B. 브랜드메시지 (kakao 또는 both) — 2026-07-30 재구축: SMSQ 배치(msg_type='F')

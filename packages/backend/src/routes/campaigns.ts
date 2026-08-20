@@ -1100,7 +1100,7 @@ if (sendChannel === 'both') {
 
 // 2단계: SMS bulk INSERT — sms-queue.ts 컨트롤타워 사용
 if (sendChannel === 'sms' || sendChannel === 'both') {
-  aiSmsInserted = await bulkInsertSmsQueue(companyTables, aiSmsRows, !isScheduled);
+  aiSmsInserted = await bulkInsertSmsQueue(companyTables, aiSmsRows, !isScheduled, { companyId, userId, source: 'campaign' });
   aiSentCount += aiSmsInserted;
 }
 
@@ -2454,7 +2454,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     }
 
     if (directChannel === 'sms' || directChannel === 'both') {
-      directSmsSentCount = await bulkInsertSmsQueue(companyTables, directSmsRows, useNow);
+      directSmsSentCount = await bulkInsertSmsQueue(companyTables, directSmsRows, useNow, { companyId, userId, source: 'direct' });
     }
 
     if (directChannel === 'kakao' || directChannel === 'both') {

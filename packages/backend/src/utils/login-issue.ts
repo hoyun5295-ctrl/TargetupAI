@@ -17,7 +17,9 @@ import { clearBlocksOnSuccess } from './login-block';
 
 export type LoginIssueResult =
   | { status: 'ok'; body: any }
-  | { status: 'conflict'; conflict: SessionConflict };
+  | { status: 'conflict'; conflict: SessionConflict }
+  /** 국외 접근 차단 — 세션을 만들지 않았다(전송자격인증 2.2) */
+  | { status: 'geo_blocked'; message: string };
 
 /**
  * 세션을 발급하고 로그인 응답 본문을 만든다.
@@ -55,7 +57,12 @@ export async function issueUserLogin(params: {
     req,
     expiresInMinutes: 24 * 60, // 24시간
     takeoverTicket,
+    companyId: user.company_id,   // 회사 범위 예외 판정 입력
   });
+
+  if (rotate.status === 'geo_blocked') {
+    return { status: 'geo_blocked', message: rotate.message };
+  }
 
   if (rotate.status === 'conflict') {
     await query(

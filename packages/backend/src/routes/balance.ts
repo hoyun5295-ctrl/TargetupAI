@@ -3,6 +3,7 @@ import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { queryPayAgentBalances, getAgentCustNameMap } from '../utils/pay-stats';
 import { resolveChargeUnitPrice } from '../utils/unit-price';
+import { judgePayerName } from '../utils/fraud-review';
 
 const router = Router();
 
@@ -198,9 +199,9 @@ router.post('/deposit-request', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '입금자명을 입력해주세요.' });
     }
 
-    // 선불 고객사인지 확인
+    // 선불 고객사인지 확인 + 명의 대조 대상(전송자격인증 2.3 — 2026-08-19 information_schema 실측 컬럼)
     const companyResult = await query(
-      'SELECT billing_type, company_name FROM companies WHERE id = $1',
+      'SELECT billing_type, company_name, name, ceo_name FROM companies WHERE id = $1',
       [companyId]
     );
     if (companyResult.rows.length === 0) {
@@ -221,24 +222,89 @@ router.post('/deposit-request', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '동일 금액의 입금 요청이 이미 접수되어 있습니다. 잠시 후 다시 시도해주세요.' });
     }
 
+    // ★ 2026-08-19 전송자격인증 2.3 — 결제정보↔계정 명의 대조.
+    //   ⛔ 자동 거절하지 않는다. 상태는 'pending' 그대로 두고 **보류 사유만** 단다 —
+    //      상태 축을 늘리면 뱃지·목록·중복판정·승인/반려 게이트 4곳이 함께 깨진다(영향표 실측).
+    //   판정 CT = utils/fraud-review.ts (세 값: match·mismatch·unknown)
+    const holderVerdict = judgePayerName(depositorName, {
+      companyName: companyResult.rows[0].company_name,
+      tradeName: companyResult.rows[0].name,
+      ceoName: companyResult.rows[0].ceo_name,
+    });
+    const heldReason = holderVerdict.result === 'mismatch' ? holderVerdict.holdReason || null : null;
+
     // deposit_requests에 저장
     const result = await query(
-      `INSERT INTO deposit_requests (company_id, amount, depositor_name, status, created_at)
-       VALUES ($1, $2, $3, 'pending', NOW())
-       RETURNING id, amount, depositor_name, status, created_at`,
-      [companyId, amount, depositorName.trim()]
+      `INSERT INTO deposit_requests (company_id, amount, depositor_name, status, held_reason, held_at, created_at)
+       VALUES ($1, $2, $3, 'pending', $4, CASE WHEN $4::text IS NULL THEN NULL ELSE NOW() END, NOW())
+       RETURNING id, amount, depositor_name, status, held_reason, created_at`,
+      [companyId, amount, depositorName.trim(), heldReason]
     );
 
     const companyName = companyResult.rows[0].company_name;
-    console.log(`[무통장입금요청] ${companyName}: ${Number(amount).toLocaleString()}원 / 입금자: ${depositorName.trim()}`);
+    console.log(
+      `[무통장입금요청] ${companyName}: ${Number(amount).toLocaleString()}원 / 입금자: ${depositorName.trim()}` +
+      (heldReason ? ' / 명의 확인 필요' : '')
+    );
 
     res.status(201).json({
-      message: '입금 확인 요청이 접수되었습니다.',
+      // 보류 사유 원문은 내려주지 않는다 — 명의 판정 기준이 그대로 노출되면 우회를 돕는다
+      message: heldReason
+        ? '입금 확인 요청이 접수되었습니다. 입금자명 확인이 필요해 담당자 확인 후 처리됩니다.'
+        : '입금 확인 요청이 접수되었습니다.',
+      reviewRequired: Boolean(heldReason),
       request: result.rows[0],
     });
-  } catch (error) {
+  } catch (error: any) {
+    // ★ DB ALTER 안전망 — 마이그레이션 전이면 500이 아니라 503으로 정확히 알린다
+    const msg = String(error?.message || '');
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        error: 'DB 마이그레이션 필요 — deposit_requests ALTER 실행 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
     console.error('무통장입금 요청 실패:', error);
     res.status(500).json({ error: '무통장입금 요청 실패' });
+  }
+});
+
+/**
+ * POST /api/balance/deposit-request/:id/explanation — 소명 제출 (전송자격인증 2.3)
+ *
+ * 명의 확인이 필요한 건에 고객사가 사유를 적어 낸다. 상태는 바꾸지 않는다 —
+ * 처리(승인·반려)는 사람이 하고, 이 글은 그 판단의 근거로만 남는다.
+ */
+router.post('/deposit-request/:id/explanation', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '고객사 권한이 필요합니다.' });
+
+    const note = String(req.body?.note || '').trim();
+    if (!note) return res.status(400).json({ error: '소명 내용을 입력해주세요.' });
+
+    // 소유·상태 조건을 UPDATE에 직접 건다 — 조회 게이트는 장벽이 아니다
+    const result = await query(
+      `UPDATE deposit_requests
+          SET explanation_note = $1
+        WHERE id = $2 AND company_id = $3 AND status = 'pending' AND held_reason IS NOT NULL
+        RETURNING id`,
+      [note.slice(0, 1000), req.params.id, companyId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '소명할 수 있는 요청이 아닙니다.' });
+    }
+    return res.json({ message: '소명이 접수되었습니다. 담당자 확인 후 처리됩니다.' });
+  } catch (error: any) {
+    const msg = String(error?.message || '');
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        error: 'DB 마이그레이션 필요 — deposit_requests ALTER 실행 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    console.error('소명 접수 실패:', error);
+    return res.status(500).json({ error: '소명 접수 실패' });
   }
 });
 

@@ -1,4 +1,7 @@
 import bcrypt from 'bcryptjs';
+import { validateElements, matchesRule, invalidateSpamBlockCache, maskSample } from '../utils/spam-block';
+import { isGeoBlockEnforced, isGeoSchemaMissing, invalidateGeoCache } from '../utils/geo-access';
+import { checkSenderLineLimit, isLineLimitSchemaMissing, getSenderLinePolicy } from '../utils/sender-line-limit';
 import { logPrivacyExport, logPrivacyPurge } from '../utils/privacy-audit';
 import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
@@ -16,6 +19,7 @@ import { distillIndustryFormula } from '../utils/industry-formula';
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { invalidateCompanySessions } from '../utils/session-manager';
 import { revokeTrustedDevices, maskPhone, isMfaSchemaMissing } from '../utils/mfa';
+import { restrictAccount, isRestrictedStatus, RestrictionOutcome } from '../utils/account-action';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
 import { detectEnabledFields, clearEnabledFieldsCache } from '../utils/enabled-fields';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus, getDisplayContents } from '../utils/sms-result-map';
@@ -211,7 +215,26 @@ router.put('/users/:id', authenticate, requireSuperAdmin, async (req: Request, r
       });
     }
 
-    res.json({ user: result.rows[0], message: '수정되었습니다.' });
+    // ★ 2026-08-18(2) 전송자격인증 5.1 — 제한 상태로 바뀌었으면 조치 한 벌을 함께 실행한다.
+    //   상태만 바꾸면 **접속 중인 사람은 그대로 쓰고 이용자는 아무 안내도 못 받는다.**
+    //   조치 = 상태 변경 · 세션 끊기 · 이용자 고지 · 이력. 컨트롤타워 = utils/account-action.ts
+    let restriction: RestrictionOutcome | null = null;
+    if (d.changed.includes('status') && isRestrictedStatus(result.rows[0].status)) {
+      restriction = await restrictAccount({
+        userId: id,
+        status: result.rows[0].status,
+        reason: 'admin_action',
+        actorUserId: req.user?.userId,
+        note: req.body?.restrictNote,
+        req,
+      });
+    }
+
+    res.json({
+      user: result.rows[0],
+      message: '수정되었습니다.',
+      ...(restriction ? { restriction } : {}),
+    });
   } catch (error) {
     console.error('사용자 수정 실패:', error);
     res.status(500).json({ error: '사용자 수정 실패' });
@@ -679,6 +702,531 @@ router.put('/companies/:id/unit-prices', authenticate, requireSuperAdmin, async 
 });
 
 // 회사 수정
+// ============================================================
+// ★ 2026-08-18 발신번호 회선 정책 (전송자격인증 2.1)
+//   가입자 유형과 회사별 상한을 원자적으로 쓴다. 단가와 같은 이유로 전용 endpoint다 —
+//   위 PUT /companies/:id는 파라미터가 40개 가까워, 거기 끼우면 번호가 밀려 조용한 회귀가 난다.
+//
+//   ⛔ 상한은 신규 등록에만 걸린다(기존 보유분 불변). 미설정 = 제한 없음 = 현행 유지.
+//   ⛔ 개인·외국인은 기준값 고정이라 상한 입력을 받지 않는다(무선 3/2 · 유선 5).
+// ============================================================
+// ============================================================
+// ★ 2026-08-18 금칙어 차단 체계 (전송자격인증 5.2)
+//   ⛔ 단일 키워드 규칙은 만들 수 없다(요소 2~5개 조합만). 정상 문자를 막지 않기 위한 하한이다.
+//   ⛔ ★0819 — 이 체계는 **탐지만 한다.** 모드 승격(hold·block) 경로는 없앴다.
+//      차단 판정이 차감 뒤에 있어 막는 순간 환불 정합이 깨지기 때문이다(근거 = utils/spam-block.ts 머리).
+//      차단은 판정을 차감 앞 preflight로 옮기는 재설계 뒤에 연다.
+//   컨트롤타워 = utils/spam-block.ts
+// ============================================================
+router.get('/spam-block/rules', authenticate, requireSuperAdmin, async (_req: Request, res: Response) => {
+  try {
+    // mode는 내려주지 않는다 — 화면이 의미 없는 값을 승격 가능한 것처럼 보이면 안 된다
+    const result = await query(
+      `SELECT r.id, r.name, r.elements, r.source, r.note, r.is_active,
+              r.exempt_company_ids, r.created_at, r.updated_at,
+              (SELECT COUNT(*) FROM spam_block_hits h WHERE h.rule_id = r.id) AS hit_count
+         FROM spam_block_rules r
+        ORDER BY r.is_active DESC, r.created_at DESC`
+    );
+    return res.json({ rules: result.rows });
+  } catch (error: any) {
+    if (String(error?.message || '').includes('does not exist')) {
+      return res.status(503).json({
+        error: 'DB 마이그레이션 필요 — spam_block_rules · spam_block_hits 생성 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    console.error('금칙어 규칙 조회 실패:', error);
+    return res.status(500).json({ error: '금칙어 규칙 조회 실패' });
+  }
+});
+
+router.post('/spam-block/rules', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const name = String(req.body?.name || '').trim();
+    if (!name) return res.status(400).json({ error: '규칙 이름을 입력해주세요.' });
+
+    const validated = validateElements(req.body?.elements);
+    if (!validated.ok) return res.status(400).json({ error: validated.error });
+
+    const source = String(req.body?.source || 'internal').trim();
+    const exempt = Array.isArray(req.body?.exemptCompanyIds) ? req.body.exemptCompanyIds : [];
+
+    // mode는 컬럼 기본값과 같은 'detect'를 명시해 둔다 — 이 값을 바꾸는 경로는 코드에 없다
+    const result = await query(
+      `INSERT INTO spam_block_rules
+         (id, name, elements, mode, source, note, is_active, exempt_company_ids, created_by, created_at, updated_at)
+       VALUES (gen_random_uuid(), $1, $2::jsonb, 'detect', $3, $4, true, $5::uuid[], $6, NOW(), NOW())
+       RETURNING id, name, elements, source, is_active`,
+      [name, JSON.stringify(validated.elements), source, String(req.body?.note || '').slice(0, 500) || null, exempt, req.user?.userId || null]
+    );
+    invalidateSpamBlockCache();
+
+    await recordAuditLog({
+      actorUserId: req.user?.userId,
+      action: 'spam_block_rule_create',
+      targetType: 'spam_block_rule',
+      targetId: result.rows[0].id,
+      details: { name, elements: validated.elements, source },
+      req,
+    });
+
+    return res.json({ rule: result.rows[0] });
+  } catch (error: any) {
+    if (String(error?.message || '').includes('does not exist')) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — spam_block_rules 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('금칙어 규칙 생성 실패:', error);
+    return res.status(500).json({ error: '금칙어 규칙 생성 실패' });
+  }
+});
+
+router.put('/spam-block/rules/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const beforeRes = await query('SELECT name, elements, is_active FROM spam_block_rules WHERE id = $1', [id]);
+    if (beforeRes.rows.length === 0) return res.status(404).json({ error: '규칙을 찾을 수 없습니다.' });
+    const before = beforeRes.rows[0];
+
+    const has = (k: string) => Object.prototype.hasOwnProperty.call(req.body, k);
+
+    let elements = before.elements;
+    if (has('elements')) {
+      const validated = validateElements(req.body.elements);
+      if (!validated.ok) return res.status(400).json({ error: validated.error });
+      elements = validated.elements;
+    }
+
+    // ⛔ mode는 수정 대상이 아니다 — 승격 경로 자체를 없앴다(위 절 머리). 요청에 실려 와도 무시한다.
+
+    // ★ 0818 Codex F9 — 미전송 필드를 구값으로 되쓰면 동시 수정이 서로를 덮는다(lost update).
+    //   elements도 요청에 있을 때만 바꾼다.
+    await query(
+      `UPDATE spam_block_rules
+          SET name = COALESCE($1, name),
+              elements = COALESCE($2::jsonb, elements),
+              note = COALESCE($3, note),
+              is_active = COALESCE($4, is_active),
+              exempt_company_ids = COALESCE($5::uuid[], exempt_company_ids),
+              updated_at = NOW()
+        WHERE id = $6`,
+      [
+        has('name') ? String(req.body.name).trim() : null,
+        has('elements') ? JSON.stringify(elements) : null,
+        has('note') ? String(req.body.note || '').slice(0, 500) : null,
+        has('isActive') ? (req.body.isActive === true || req.body.isActive === 'true') : null,
+        has('exemptCompanyIds') && Array.isArray(req.body.exemptCompanyIds) ? req.body.exemptCompanyIds : null,
+        id,
+      ]
+    );
+    invalidateSpamBlockCache();
+
+    await recordAuditLog({
+      actorUserId: req.user?.userId,
+      action: 'spam_block_rule_update',
+      targetType: 'spam_block_rule',
+      targetId: id,
+      // 규칙 활성/비활성은 심사에서 "누가 언제 무엇을 켰나"의 근거가 된다
+      details: { before: { isActive: before.is_active }, after: { isActive: has('isActive') ? req.body.isActive : before.is_active } },
+      req,
+    });
+
+    return res.json({ success: true });
+  } catch (error: any) {
+    if (String(error?.message || '').includes('does not exist')) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — spam_block_rules 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('금칙어 규칙 수정 실패:', error);
+    return res.status(500).json({ error: '금칙어 규칙 수정 실패' });
+  }
+});
+
+/**
+ * ★ 오탐 확인 — 규칙을 실제 발송 문안에 돌려본다(차단하지 않는다).
+ *   검증 없이 차단 모드로 올리지 않기 위한 장치다.
+ */
+router.post('/spam-block/simulate', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const validated = validateElements(req.body?.elements);
+    if (!validated.ok) return res.status(400).json({ error: validated.error });
+
+    const days = Math.min(Math.max(Number(req.body?.days) || 7, 1), 30);
+    const sampleLimit = 20;
+
+    // 최근 발송 문안 — 캠페인 본문 기준(고객 개인정보가 아니라 문안이다)
+    const contents = await query(
+      // ★ 0818 Codex F3 — `campaigns.message`는 존재하지 않는다(SCHEMA 실측 = message_content).
+      //   그대로 뒀으면 시뮬레이션이 늘 0건을 돌려주고 "오탐 없음"으로 오독됐다.
+      `SELECT id, company_id, message_content, message_subject, created_at
+         FROM campaigns
+        WHERE created_at > NOW() - INTERVAL '1 day' * $1
+          AND message_content IS NOT NULL AND message_content <> ''
+        ORDER BY created_at DESC
+        LIMIT 5000`,
+      [days]
+    );
+
+    const probe = {
+      id: 'simulation', name: 'simulation', elements: validated.elements,
+      source: 'simulation', exemptCompanyIds: [],
+    };
+    const matched: Array<{ campaignId: string; companyId: string; sample: string }> = [];
+    for (const row of contents.rows) {
+      // 게이트는 `제목 + 개행 + 본문`을 본다 — 시뮬레이션도 같은 입력이어야 한다
+      const probeContent = `${String(row.message_subject ?? '')}\n${String(row.message_content ?? '')}`;
+      if (matchesRule(probe, probeContent)) {
+        if (matched.length < sampleLimit) {
+          matched.push({ campaignId: row.id, companyId: row.company_id, sample: maskSample(probeContent).slice(0, 120) });
+        } else {
+          matched.push({ campaignId: row.id, companyId: row.company_id, sample: '' });
+        }
+      }
+    }
+
+    return res.json({
+      scannedDays: days,
+      scanned: contents.rows.length,
+      matchedCount: matched.length,
+      samples: matched.filter((m) => m.sample).slice(0, sampleLimit),
+      note: '실제 발송 문안에 규칙을 돌려본 결과입니다. 정상 문자가 잡히면 조합을 더 좁혀주세요.',
+    });
+  } catch (error) {
+    console.error('금칙어 시뮬레이션 실패:', error);
+    return res.status(500).json({ error: '금칙어 시뮬레이션 실패' });
+  }
+});
+
+router.get('/spam-block/hits', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+    const result = await query(
+      `SELECT h.id, h.rule_id, r.name AS rule_name, h.company_id, c.company_name,
+              h.send_source, h.mode, h.action_taken, h.affected_rows, h.content_sample, h.created_at
+         FROM spam_block_hits h
+         LEFT JOIN spam_block_rules r ON r.id = h.rule_id
+         LEFT JOIN companies c ON c.id = h.company_id
+        ORDER BY h.created_at DESC
+        LIMIT $1`,
+      [limit]
+    );
+    return res.json({ hits: result.rows });
+  } catch (error: any) {
+    if (String(error?.message || '').includes('does not exist')) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — spam_block_hits 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('금칙어 탐지 이력 조회 실패:', error);
+    return res.status(500).json({ error: '금칙어 탐지 이력 조회 실패' });
+  }
+});
+
+// ============================================================
+// ★ 2026-08-19 국외 접근 통제 (전송자격인증 2.2)
+//   ⛔ 이 화면이 만지는 값은 **전 고객의 로그인**을 막을 수 있다.
+//      시행은 `GEO_BLOCK_ENFORCE_FROM` env로만 열린다 — 화면에는 켜는 스위치를 두지 않는다.
+//   ⛔ 사람만 국가로 판정한다. SDK·싱크에이전트는 회사별 등록 출발지(scope=company_api·company_agent)로만 통제한다.
+//   컨트롤타워 = utils/geo-access.ts
+// ============================================================
+const GEO_MIGRATION_HINT = {
+  error: 'DB 마이그레이션 필요 — geo_allow_cidrs · access_origin_allowlist 생성 요청',
+  code: 'DB_MIGRATION_PENDING',
+};
+// IPv4 · IPv6 CIDR 모양. 실제 유효성은 PG의 ::cidr 캐스팅이 확정한다(트랜잭션 안이라 실패 시 롤백)
+const CIDR_RE = /^(\d{1,3}(\.\d{1,3}){3}|[0-9a-fA-F:]+)\/\d{1,3}$/;
+
+router.get('/geo/status', authenticate, requireSuperAdmin, async (_req: Request, res: Response) => {
+  try {
+    const [cidrs, exceptions] = await Promise.all([
+      query(`SELECT COUNT(*)::int AS n, MAX(updated_at) AS updated_at FROM geo_allow_cidrs`),
+      query(`SELECT COUNT(*)::int AS n FROM access_origin_allowlist WHERE is_active = true`),
+    ]);
+    return res.json({
+      cidrCount: cidrs.rows[0]?.n || 0,
+      cidrUpdatedAt: cidrs.rows[0]?.updated_at || null,
+      exceptionCount: exceptions.rows[0]?.n || 0,
+      // 시행 여부는 env가 소유한다 — 화면은 상태만 보여준다
+      enforced: isGeoBlockEnforced(),
+      enforceFrom: process.env.GEO_BLOCK_ENFORCE_FROM || null,
+    });
+  } catch (error: any) {
+    if (isGeoSchemaMissing(error)) return res.status(503).json(GEO_MIGRATION_HINT);
+    console.error('국외 통제 현황 조회 실패:', error);
+    return res.status(500).json({ error: '국외 통제 현황 조회 실패' });
+  }
+});
+
+/**
+ * 국내 대역 일괄 등록. 기존분을 지우고 새로 넣는다(전체 교체) — 부분 갱신은 누락 대역을 남긴다.
+ * ⛔ 빈 목록으로 교체하지 않는다 — 대역이 0이면 판정이 통째로 unknown이 되어 통제가 사라진다.
+ */
+router.post('/geo/cidrs/bulk', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const raw = String(req.body?.cidrs || '');
+    const source = String(req.body?.source || 'apnic').slice(0, 50);
+    // ⛔ ★0819 Codex 정정 — 잘못된 토큰을 filter로 버리면 **조용히 빠진 채 전체가 교체**된다.
+    //   IPv6를 함께 올렸다가 통째로 누락되면 시행 후 정상 국내 IPv6 사용자를 막고 구제할 방법도 없다.
+    //   하나라도 어긋나면 DELETE 전에 요청 전체를 거부한다.
+    const tokens = raw.split(/[\s,]+/).map((v) => v.trim()).filter((v) => v.length > 0);
+    const invalid = tokens.filter((v) => !CIDR_RE.test(v));
+    if (invalid.length > 0) {
+      return res.status(400).json({
+        error: `CIDR 형식이 아닌 값이 ${invalid.length}건 있습니다. 전체를 반영하지 않았습니다.`,
+        invalid: invalid.slice(0, 20),
+      });
+    }
+    const parsed = Array.from(new Set(tokens));
+    if (parsed.length === 0) {
+      return res.status(400).json({ error: 'CIDR 형식(예: 211.234.0.0/16)이 하나도 없습니다.' });
+    }
+
+    // ⛔ DELETE와 INSERT를 한 트랜잭션에 묶는다 — 사이에서 끊기면 대역이 **0건**이 되고,
+    //   그러면 판정이 통째로 unknown이 되어 국외 통제가 조용히 사라진다.
+    const geoClient = await pool.connect();
+    let before = 0;
+    try {
+      await geoClient.query('BEGIN');
+      // ⛔ 교체끼리 겹치면 서로의 미커밋 INSERT를 못 봐 합집합·충돌이 된다. 교체는 한 번에 하나만
+      await geoClient.query(`SELECT pg_advisory_xact_lock(hashtext('geo_allow_cidrs'))`);
+      const beforeRes = await geoClient.query(`SELECT COUNT(*)::int AS n FROM geo_allow_cidrs`);
+      before = beforeRes.rows[0]?.n || 0;
+      await geoClient.query(`DELETE FROM geo_allow_cidrs`);
+      // 한 문으로 넣는다 — 수천 행을 한 건씩 INSERT하면 커넥션을 오래 잡는다.
+      //   PG 바인딩 상한(65535)을 넘지 않도록 청크로 끊는다(행당 2개 → 청크 2,000행).
+      for (let start = 0; start < parsed.length; start += 2000) {
+        const chunk = parsed.slice(start, start + 2000);
+        const values: string[] = [];
+        const args: any[] = [];
+        let i = 1;
+        for (const cidr of chunk) {
+          values.push(`(gen_random_uuid(), $${i++}::cidr, 'KR', $${i++}, NOW())`);
+          args.push(cidr, source);
+        }
+        await geoClient.query(
+          `INSERT INTO geo_allow_cidrs (id, cidr, country_code, source, updated_at) VALUES ${values.join(', ')}`,
+          args
+        );
+      }
+      await geoClient.query('COMMIT');
+    } catch (txErr) {
+      await geoClient.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      geoClient.release();
+    }
+    invalidateGeoCache();
+
+    await recordAuditLog({
+      actorUserId: req.user?.userId,
+      action: 'geo_cidrs_replaced',
+      targetType: 'geo_allow_cidrs',
+      details: { before, after: parsed.length, source },
+      req,
+    });
+    return res.json({ replaced: parsed.length, before });
+  } catch (error: any) {
+    if (isGeoSchemaMissing(error)) return res.status(503).json(GEO_MIGRATION_HINT);
+    console.error('국내 대역 등록 실패:', error);
+    return res.status(500).json({ error: '국내 대역 등록 실패' });
+  }
+});
+
+router.get('/geo/exceptions', authenticate, requireSuperAdmin, async (_req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `SELECT a.id, a.scope, a.company_id, a.user_id,
+              host(a.cidr) || '/' || masklen(a.cidr) AS cidr,
+              a.reason, a.approved_by, a.approved_at, a.expires_at, a.is_active,
+              c.company_name, u.login_id
+         FROM access_origin_allowlist a
+         LEFT JOIN companies c ON c.id = a.company_id
+         LEFT JOIN users u ON u.id = a.user_id
+        ORDER BY a.is_active DESC, a.approved_at DESC
+        LIMIT 300`
+    );
+    return res.json({ exceptions: result.rows });
+  } catch (error: any) {
+    if (isGeoSchemaMissing(error)) return res.status(503).json(GEO_MIGRATION_HINT);
+    console.error('접근 예외 조회 실패:', error);
+    return res.status(500).json({ error: '접근 예외 조회 실패' });
+  }
+});
+
+/** 예외 승인 — 사유가 없으면 등록되지 않는다. 이 기록이 기준이 요구하는 "예외 승인 이력"이다 */
+router.post('/geo/exceptions', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const scope = String(req.body?.scope || '');
+    if (!['user', 'company_api', 'company_agent', 'global'].includes(scope)) {
+      return res.status(400).json({ error: '범위는 user · company_api · company_agent · global 중 하나여야 합니다.' });
+    }
+    const cidr = String(req.body?.cidr || '').trim();
+    if (!CIDR_RE.test(cidr)) {
+      return res.status(400).json({ error: 'CIDR 형식(예: 203.0.113.0/24)으로 입력해주세요. 단일 IP는 /32입니다.' });
+    }
+    const reason = String(req.body?.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: '승인 사유를 입력해주세요. 사유 없는 예외는 등록할 수 없습니다.' });
+
+    const companyId = req.body?.companyId || null;
+    const userId = req.body?.userId || null;
+    if (scope === 'user' && !userId) return res.status(400).json({ error: '계정 범위는 대상 계정이 필요합니다.' });
+    if ((scope === 'company_api' || scope === 'company_agent') && !companyId) {
+      return res.status(400).json({ error: '회사 범위는 대상 고객사가 필요합니다.' });
+    }
+
+    const result = await query(
+      `INSERT INTO access_origin_allowlist
+         (id, scope, company_id, user_id, cidr, reason, approved_by, approved_at, expires_at, is_active, created_at)
+       VALUES (gen_random_uuid(), $1, $2::uuid, $3::uuid, $4::cidr, $5, $6::uuid, NOW(), $7, true, NOW())
+       RETURNING id`,
+      [scope, companyId, userId, cidr, reason.slice(0, 500), req.user?.userId || null, req.body?.expiresAt || null]
+    );
+
+    await recordAuditLog({
+      actorUserId: req.user?.userId,
+      action: 'access_origin_exception_granted',
+      targetType: 'access_origin_allowlist',
+      targetId: result.rows[0].id,
+      details: { scope, companyId, userId, cidr, reason, expiresAt: req.body?.expiresAt || null },
+      req,
+    });
+    return res.json({ id: result.rows[0].id });
+  } catch (error: any) {
+    if (isGeoSchemaMissing(error)) return res.status(503).json(GEO_MIGRATION_HINT);
+    console.error('접근 예외 등록 실패:', error);
+    return res.status(500).json({ error: '접근 예외 등록 실패' });
+  }
+});
+
+/** 예외 회수 — 지우지 않고 비활성으로 남긴다. 이력이 사라지면 심사에 낼 것이 없다 */
+router.delete('/geo/exceptions/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const r = await query(
+      `UPDATE access_origin_allowlist SET is_active = false WHERE id = $1 AND is_active = true RETURNING id`,
+      [req.params.id]
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: '활성 예외를 찾을 수 없습니다.' });
+    await recordAuditLog({
+      actorUserId: req.user?.userId,
+      action: 'access_origin_exception_revoked',
+      targetType: 'access_origin_allowlist',
+      targetId: req.params.id,
+      details: { reason: String(req.body?.reason || '') || null },
+      req,
+    });
+    return res.json({ success: true });
+  } catch (error: any) {
+    if (isGeoSchemaMissing(error)) return res.status(503).json(GEO_MIGRATION_HINT);
+    console.error('접근 예외 회수 실패:', error);
+    return res.status(500).json({ error: '접근 예외 회수 실패' });
+  }
+});
+
+/** 국외 접근 이력 — 별도 테이블을 만들지 않고 `audit_logs`를 읽는다 */
+router.get('/geo/hits', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 200, 500);
+    const result = await query(
+      `SELECT l.id, l.action, l.details, host(l.ip_address) AS ip_address, l.created_at,
+              u.login_id, c.company_name
+         FROM audit_logs l
+         LEFT JOIN users u ON u.id = l.user_id
+         LEFT JOIN companies c ON c.id = u.company_id
+        WHERE l.action IN ('foreign_access_detected', 'foreign_access_blocked')
+        ORDER BY l.created_at DESC
+        LIMIT $1`,
+      [limit]
+    );
+    return res.json({ hits: result.rows });
+  } catch (error) {
+    console.error('국외 접근 이력 조회 실패:', error);
+    return res.status(500).json({ error: '국외 접근 이력 조회 실패' });
+  }
+});
+
+
+router.get('/companies/:id/sender-line-policy', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    return res.json(await getSenderLinePolicy(req.params.id));
+  } catch (error: any) {
+    if (isLineLimitSchemaMissing(error)) {
+      return res.status(503).json({
+        error: 'DB 마이그레이션 필요 — companies.subscriber_type · mobile_line_limit · landline_line_limit ALTER 실행 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    console.error('발신번호 회선 정책 조회 실패:', error);
+    return res.status(500).json({ error: '발신번호 회선 정책 조회 실패' });
+  }
+});
+
+router.put('/companies/:id/sender-line-policy', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const rawType = String(req.body?.subscriberType ?? '').trim();
+  const ALLOWED_TYPES = ['individual', 'foreigner', 'corporate'];
+
+  try {
+    if (rawType && !ALLOWED_TYPES.includes(rawType)) {
+      return res.status(400).json({ error: '가입자 유형 값이 올바르지 않습니다.' });
+    }
+
+    const toLimit = (v: any): number | null => {
+      if (v === null || v === undefined || String(v).trim() === '') return null;
+      const n = Number(v);
+      if (!Number.isFinite(n) || n <= 0) return null;
+      return Math.floor(n);
+    };
+    const mobileLimit = toLimit(req.body?.mobileLineLimit);
+    const landlineLimit = toLimit(req.body?.landlineLineLimit);
+
+    const beforeRes = await query(
+      'SELECT company_name, subscriber_type, mobile_line_limit, landline_line_limit FROM companies WHERE id = $1',
+      [id]
+    );
+    if (beforeRes.rows.length === 0) {
+      return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
+    }
+    const before = beforeRes.rows[0];
+
+    await query(
+      `UPDATE companies
+          SET subscriber_type = $1, mobile_line_limit = $2, landline_line_limit = $3, updated_at = NOW()
+        WHERE id = $4`,
+      [rawType || null, mobileLimit, landlineLimit, id]
+    );
+
+    await recordAuditLog({
+      actorUserId: req.user?.userId,
+      action: 'sender_line_policy_update',
+      targetType: 'company',
+      targetId: id,
+      details: {
+        companyName: before.company_name,
+        before: {
+          subscriberType: before.subscriber_type,
+          mobileLineLimit: before.mobile_line_limit,
+          landlineLineLimit: before.landline_line_limit,
+        },
+        after: { subscriberType: rawType || null, mobileLineLimit: mobileLimit, landlineLineLimit: landlineLimit },
+      },
+      req,
+    });
+
+    return res.json({
+      success: true,
+      subscriberType: rawType || null,
+      mobileLineLimit: mobileLimit,
+      landlineLineLimit: landlineLimit,
+    });
+  } catch (error: any) {
+    if (isLineLimitSchemaMissing(error)) {
+      return res.status(503).json({
+        error: 'DB 마이그레이션 필요 — companies.subscriber_type · mobile_line_limit · landline_line_limit ALTER 실행 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    console.error('발신번호 회선 정책 저장 실패:', error);
+    return res.status(500).json({ error: '발신번호 회선 정책 저장 실패' });
+  }
+});
+
 router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   const { 
@@ -1392,6 +1940,12 @@ router.post('/callback-numbers', authenticate, requireSuperAdmin, async (req: Re
     // 대표번호로 설정 시 기존 대표번호 해제
     if (isDefault) {
       await query('UPDATE callback_numbers SET is_default = false WHERE company_id = $1', [companyId]);
+    }
+
+    // ★ 2026-08-18 전송자격인증 2.1 — 회선 수 상한(신규 등록에만 적용, 기존 보유분 불변)
+    const lineVerdict = await checkSenderLineLimit(companyId, phone);
+    if (lineVerdict.status === 'exceeded') {
+      return res.status(403).json({ error: lineVerdict.message, code: 'LINE_LIMIT_EXCEEDED', ...lineVerdict });
     }
 
     // ★ D142+ B5: INSERT는 사용자 입력 phone 그대로 저장 (UI 표시 형식 유지 — '02-3145-2186')
@@ -2938,6 +3492,7 @@ router.get('/deposit-requests', authenticate, requireSuperAdmin, async (req: Req
       `SELECT dr.id, dr.company_id, dr.amount, dr.depositor_name, dr.status,
               COALESCE(dr.payment_method, 'deposit') as payment_method,
               dr.admin_note, dr.confirmed_by, dr.confirmed_at, dr.created_at,
+              dr.held_reason, dr.held_at, dr.explanation_note,
               c.company_name, c.billing_type, c.balance,
               sa.name as confirmed_by_name
        FROM deposit_requests dr
@@ -2967,39 +3522,70 @@ router.put('/deposit-requests/:id/approve', authenticate, requireSuperAdmin, asy
   const adminId = (req as any).user?.userId;
   const { adminNote } = req.body;
 
+  // ⛔ ★0819 Codex 2R (critical) — 종전에는 조회·잔액증가·원장·상태변경이 **각각 autocommit**이었다.
+  //   같은 요청을 두 관리자가 동시에 승인하거나 중간에 끊기면 **잔액이 두 번 오르거나**,
+  //   충전은 됐는데 요청은 pending으로 남는 부분 상태가 된다. 돈이 걸린 자리라 한 트랜잭션으로 묶는다.
+  //   행을 FOR UPDATE로 잠가 두 번째 승인이 첫 커밋을 보고 "이미 처리됨"으로 떨어지게 한다.
+  //   ⚠ 이 결함은 오늘 만든 것이 아니라 원래 있던 것이다(오늘은 SELECT 컬럼만 손댔다).
+  const depClient = await pool.connect();
+  let newBalance = 0;
+  let depositReq: any = null;
   try {
-    // 요청 조회
-    const reqResult = await query(
-      `SELECT dr.*, c.company_name, c.billing_type, c.balance
-       FROM deposit_requests dr
-       JOIN companies c ON dr.company_id = c.id
-       WHERE dr.id = $1`,
+    await depClient.query('BEGIN');
+    const reqResult = await depClient.query(
+      // 컬럼을 명시한다 — dr.* 는 신규 컬럼이 없는 스키마에서도 성공해 확인 게이트가 조용히 통과된다
+      `SELECT dr.id, dr.company_id, dr.amount, dr.depositor_name, dr.status,
+              dr.payment_method, dr.admin_note, dr.confirmed_by, dr.confirmed_at, dr.created_at,
+              dr.held_reason, dr.held_at, dr.explanation_note
+         FROM deposit_requests dr
+        WHERE dr.id = $1
+        FOR UPDATE`,
       [id]
     );
 
     if (reqResult.rows.length === 0) {
+      await depClient.query('ROLLBACK');
       return res.status(404).json({ error: '충전 요청을 찾을 수 없습니다.' });
     }
+    depositReq = reqResult.rows[0];
 
-    const depositReq = reqResult.rows[0];
+    const companyRes = await depClient.query(
+      'SELECT company_name, billing_type, balance FROM companies WHERE id = $1 FOR UPDATE',
+      [depositReq.company_id]
+    );
+    Object.assign(depositReq, companyRes.rows[0] || {});
 
     if (depositReq.status !== 'pending') {
+      await depClient.query('ROLLBACK');
       return res.status(400).json({ error: '이미 처리된 요청입니다.' });
     }
 
+    // ★ 2026-08-19 전송자격인증 2.3 — 명의 확인이 걸린 건은 **확인했다는 표시 없이 승인되지 않는다**.
+    //   기준이 요구하는 "처리 결과를 계정별로 기록"이 이 확인에서 나온다. 자동 통과 경로를 만들지 않는다.
+    if (depositReq.held_reason && req.body?.resolveHold !== true) {
+      await depClient.query('ROLLBACK');
+      return res.status(400).json({
+        error: '입금자명 확인이 필요한 요청입니다. 소명을 확인한 뒤 승인해주세요.',
+        code: 'HOLD_CONFIRMATION_REQUIRED',
+        heldReason: depositReq.held_reason,
+        explanationNote: depositReq.explanation_note || null,
+      });
+    }
+
     if (depositReq.billing_type !== 'prepaid') {
+      await depClient.query('ROLLBACK');
       return res.status(400).json({ error: '선불 고객사가 아닙니다.' });
     }
 
     // 1. 잔액 충전
-    const balanceResult = await query(
+    const balanceResult = await depClient.query(
       'UPDATE companies SET balance = balance + $1, updated_at = NOW() WHERE id = $2 RETURNING balance',
       [depositReq.amount, depositReq.company_id]
     );
 
     // 2. balance_transactions 기록
-    const newBalance = Number(balanceResult.rows[0].balance);
-    await query(
+    newBalance = Number(balanceResult.rows[0].balance);
+    await depClient.query(
       `INSERT INTO balance_transactions (company_id, type, amount, balance_before, balance_after, description, reference_type, reference_id, admin_id, payment_method)
        VALUES ($1, 'deposit_charge', $2, $3, $4, $5, 'deposit_request', $6, $7, 'bank_transfer')`,
       [
@@ -3014,10 +3600,44 @@ router.put('/deposit-requests/:id/approve', authenticate, requireSuperAdmin, asy
     );
 
     // 3. deposit_requests 상태 변경
-    await query(
+    await depClient.query(
       `UPDATE deposit_requests SET status = 'confirmed', confirmed_by = $1, confirmed_at = NOW(), admin_note = $2 WHERE id = $3`,
       [adminId, adminNote || null, id]
     );
+
+    await depClient.query('COMMIT');
+  } catch (txErr: any) {
+    await depClient.query('ROLLBACK').catch(() => {});
+    const msg = String(txErr?.message || '');
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — deposit_requests ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('충전 요청 승인 실패:', txErr);
+    return res.status(500).json({ error: '충전 요청 승인 실패' });
+  } finally {
+    depClient.release();
+  }
+
+  try {
+
+    // ★ 2026-08-19 전송자격인증 2.3 — 명의 확인 건의 **처리 결과를 계정별로** 남긴다(기준 요구 문구 그대로)
+    if (depositReq.held_reason) {
+      await recordAuditLog({
+        actorUserId: adminId,
+        action: 'deposit_hold_resolved',
+        targetType: 'deposit_request',
+        targetId: id,
+        details: {
+          companyId: depositReq.company_id,
+          depositorName: depositReq.depositor_name,
+          heldReason: depositReq.held_reason,
+          explanationNote: depositReq.explanation_note || null,
+          resolution: 'approved',
+          adminNote: adminNote || null,
+        },
+        req,
+      });
+    }
 
     console.log(`[입금승인] ${depositReq.company_name}: +${Number(depositReq.amount).toLocaleString()}원 → 잔액 ${newBalance.toLocaleString()}원 (입금자: ${depositReq.depositor_name})`);
 
@@ -3025,7 +3645,11 @@ router.put('/deposit-requests/:id/approve', authenticate, requireSuperAdmin, asy
       message: `${Number(depositReq.amount).toLocaleString()}원이 충전되었습니다.`,
       balance: newBalance,
     });
-  } catch (error) {
+  } catch (error: any) {
+    const msg = String(error?.message || '');
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — deposit_requests ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
     console.error('충전 요청 승인 실패:', error);
     res.status(500).json({ error: '충전 요청 승인 실패' });
   }
@@ -3039,7 +3663,7 @@ router.put('/deposit-requests/:id/reject', authenticate, requireSuperAdmin, asyn
 
   try {
     const reqResult = await query(
-      'SELECT status, amount, depositor_name FROM deposit_requests WHERE id = $1',
+      'SELECT status, amount, depositor_name, company_id, held_reason, explanation_note FROM deposit_requests WHERE id = $1',
       [id]
     );
 
@@ -3056,10 +3680,33 @@ router.put('/deposit-requests/:id/reject', authenticate, requireSuperAdmin, asyn
       [adminId, adminNote || '거절', id]
     );
 
+    // ★ 2026-08-19 전송자격인증 2.3 — 반려도 "처리 결과"다. 명의 확인 건이면 계정별로 남긴다
+    if (reqResult.rows[0].held_reason) {
+      await recordAuditLog({
+        actorUserId: adminId,
+        action: 'deposit_hold_resolved',
+        targetType: 'deposit_request',
+        targetId: id,
+        details: {
+          companyId: reqResult.rows[0].company_id,
+          depositorName: reqResult.rows[0].depositor_name,
+          heldReason: reqResult.rows[0].held_reason,
+          explanationNote: reqResult.rows[0].explanation_note || null,
+          resolution: 'rejected',
+          adminNote: adminNote || null,
+        },
+        req,
+      });
+    }
+
     console.log(`[입금거절] 요청 ${id}: ${Number(reqResult.rows[0].amount).toLocaleString()}원 (입금자: ${reqResult.rows[0].depositor_name})`);
 
     res.json({ message: '충전 요청이 거절되었습니다.' });
-  } catch (error) {
+  } catch (error: any) {
+    const msg = String(error?.message || '');
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — deposit_requests ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
     console.error('충전 요청 거절 실패:', error);
     res.status(500).json({ error: '충전 요청 거절 실패' });
   }

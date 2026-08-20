@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { checkSenderLineLimit } from '../utils/sender-line-limit';
 import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import pool from '../config/database';
 import { getCompanyScope } from '../utils/permission-helper';
@@ -123,6 +124,12 @@ router.post('/', async (req: Request, res: Response) => {
     // 대표번호로 설정 시 기존 대표번호 해제
     if (isDefault) {
       await pool.query('UPDATE callback_numbers SET is_default = false WHERE company_id = $1', [targetCompanyId]);
+    }
+
+    // ★ 2026-08-18 전송자격인증 2.1 — 회선 수 상한(신규 등록에만 적용, 기존 보유분 불변)
+    const lineVerdict = await checkSenderLineLimit(targetCompanyId, phone);
+    if (lineVerdict.status === 'exceeded') {
+      return res.status(403).json({ error: lineVerdict.message, code: 'LINE_LIMIT_EXCEEDED', ...lineVerdict });
     }
 
     // ★ D142+ B5: INSERT는 사용자 입력 phone 그대로 저장 (UI 표시 형식 유지)

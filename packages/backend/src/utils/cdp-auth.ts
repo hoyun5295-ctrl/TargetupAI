@@ -31,6 +31,7 @@ import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import { randomBytes, createHash } from 'crypto';
 import { query } from '../config/database';
+import { guardMachineOrigin } from './geo-access';
 import { loadPlanContext } from './plan-guard';
 import { isAllowedAppId } from './cdp-app-id';
 
@@ -239,6 +240,11 @@ export async function requireCdpApiKey(req: Request, res: Response, next: NextFu
       });
       return;
     }
+
+    // ★ 2026-08-19 전송자격인증 2.2 — 서버 대 서버 연동의 출발지 통제.
+    //   ⛔ 브라우저 SDK 경로(requireCdpBrowserOrigin·requireCdpAppId)에는 걸지 않는다.
+    //      그쪽은 쇼핑객 단말에서 오는 호출이라 회사 출발지 대역으로 막으면 수집이 통째로 죽는다.
+    if (!(await guardMachineOrigin(req, res, company.id, 'company_api'))) return;
 
     req.cdpAuth = {
       companyId: company.id,

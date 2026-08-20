@@ -83,7 +83,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess'>('companies');
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
   // ★ 2026-06-13: AI 학습 데이터 열람 권한 (AI_TRAINING_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 진입 버튼 노출
@@ -191,6 +191,140 @@ export default function AdminDashboard() {
     aiOperatorTrialUntil: '' as string | null | '',
   });
   // ★ 2026-07-28 'fields'(필터항목) → 'billing'(정산) 탭 교체
+  // ★ 2026-08-18 금칙어 차단(전송자격인증 5.2) — 조합 규칙·시뮬레이션·탐지 이력
+  const [spamRules, setSpamRules] = useState<any[]>([]);
+  const [spamHits, setSpamHits] = useState<any[]>([]);
+  const [spamRuleName, setSpamRuleName] = useState('');
+  const [spamElements, setSpamElements] = useState<Array<{ type: string; value: string }>>([
+    { type: 'keyword', value: '' },
+    { type: 'keyword', value: '' },
+  ]);
+  const [spamSim, setSpamSim] = useState<any>(null);
+  const [spamBusy, setSpamBusy] = useState(false);
+
+  // ★ 2026-08-19 국외 접근 통제(전송자격인증 2.2) — 시행 스위치는 서버 env가 소유한다. 화면에 켜는 버튼을 두지 않는다.
+  const [geoStatus, setGeoStatus] = useState<any>(null);
+  const [geoExceptions, setGeoExceptions] = useState<any[]>([]);
+  const [geoHits, setGeoHits] = useState<any[]>([]);
+  const [geoCidrInput, setGeoCidrInput] = useState('');
+  const [geoForm, setGeoForm] = useState({ scope: 'user', target: '', cidr: '', reason: '' });
+  const [geoBusy, setGeoBusy] = useState(false);
+
+  const loadGeoAccess = async () => {
+    const token = localStorage.getItem('token');
+    const headers = { 'Authorization': `Bearer ${token}` };
+    const [statusRes, exRes, hitsRes] = await Promise.all([
+      fetch('/api/admin/geo/status', { headers }),
+      fetch('/api/admin/geo/exceptions', { headers }),
+      fetch('/api/admin/geo/hits?limit=200', { headers }),
+    ]);
+    if (statusRes.ok) setGeoStatus(await statusRes.json());
+    if (exRes.ok) setGeoExceptions((await exRes.json()).exceptions || []);
+    if (hitsRes.ok) setGeoHits((await hitsRes.json()).hits || []);
+  };
+
+  const geoPost = async (url: string, body: any, method: string = 'POST') => {
+    const token = localStorage.getItem('token');
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({} as any));
+    return { ok: res.ok, data };
+  };
+
+  const handleGeoCidrBulk = async () => {
+    setGeoBusy(true);
+    try {
+      const { ok, data } = await geoPost('/api/admin/geo/cidrs/bulk', { cidrs: geoCidrInput });
+      if (!ok) { showAlert('오류', data?.error || '대역 등록에 실패했습니다.', 'error'); return; }
+      setGeoCidrInput('');
+      await loadGeoAccess();
+      showAlert('성공', `${Number(data.replaced).toLocaleString()}개 대역으로 교체되었습니다(이전 ${Number(data.before).toLocaleString()}개).`, 'success');
+    } finally { setGeoBusy(false); }
+  };
+
+  const handleGeoExceptionCreate = async () => {
+    setGeoBusy(true);
+    try {
+      const payload: any = { scope: geoForm.scope, cidr: geoForm.cidr.trim(), reason: geoForm.reason.trim() };
+      if (geoForm.scope === 'user') payload.userId = geoForm.target.trim();
+      else if (geoForm.scope !== 'global') payload.companyId = geoForm.target.trim();
+      const { ok, data } = await geoPost('/api/admin/geo/exceptions', payload);
+      if (!ok) { showAlert('오류', data?.error || '예외 등록에 실패했습니다.', 'error'); return; }
+      setGeoForm({ scope: 'user', target: '', cidr: '', reason: '' });
+      await loadGeoAccess();
+      showAlert('성공', '예외가 승인되었습니다. 승인자와 사유가 이력에 남습니다.', 'success');
+    } finally { setGeoBusy(false); }
+  };
+
+  const handleGeoExceptionRevoke = async (id: string) => {
+    const { ok, data } = await geoPost(`/api/admin/geo/exceptions/${id}`, {}, 'DELETE');
+    if (!ok) { showAlert('오류', data?.error || '회수에 실패했습니다.', 'error'); return; }
+    await loadGeoAccess();
+  };
+
+  const loadSpamBlock = async () => {
+    const token = localStorage.getItem('token');
+    const headers = { 'Authorization': `Bearer ${token}` };
+    const [rulesRes, hitsRes] = await Promise.all([
+      fetch('/api/admin/spam-block/rules', { headers }),
+      fetch('/api/admin/spam-block/hits?limit=100', { headers }),
+    ]);
+    if (rulesRes.ok) setSpamRules((await rulesRes.json()).rules || []);
+    if (hitsRes.ok) setSpamHits((await hitsRes.json()).hits || []);
+  };
+
+  const spamElementsPayload = () => spamElements.filter((e) => e.value.trim()).map((e) => ({ type: e.type, value: e.value.trim() }));
+
+  // ★ 규칙을 등록하기 전에 실제 발송 문안으로 돌려본다 — 정상 문자가 잡히는지 눈으로 본다
+  const handleSpamSimulate = async () => {
+    setSpamBusy(true);
+    setSpamSim(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/admin/spam-block/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ elements: spamElementsPayload(), days: 7 }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) { showAlert('오류', data?.error || '시뮬레이션에 실패했습니다.', 'error'); return; }
+      setSpamSim(data);
+    } finally { setSpamBusy(false); }
+  };
+
+  const handleSpamCreate = async () => {
+    if (!spamRuleName.trim()) { showAlert('확인', '규칙 이름을 입력해주세요.', 'error'); return; }
+    setSpamBusy(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/admin/spam-block/rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ name: spamRuleName.trim(), elements: spamElementsPayload() }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) { showAlert('오류', data?.error || '규칙 생성에 실패했습니다.', 'error'); return; }
+      setSpamRuleName('');
+      setSpamElements([{ type: 'keyword', value: '' }, { type: 'keyword', value: '' }]);
+      setSpamSim(null);
+      await loadSpamBlock();
+      showAlert('성공', '규칙이 등록되었습니다. 탐지 이력에서 무엇이 걸리는지 확인해주세요.', 'success');
+    } finally { setSpamBusy(false); }
+  };
+
+  // ★ 2026-08-18 발신번호 회선 정책(전송자격인증 2.1) — 상한은 신규 등록에만 걸린다(기존 보유분 불변)
+  const [linePolicy, setLinePolicy] = useState<{
+    subscriberType: string | null;
+    mobileLineLimit: number | null;
+    landlineLineLimit: number | null;
+    effective: { mobile: number | null; landline: number | null; source: string };
+    held: { mobile: number; landline: number };
+  } | null>(null);
+  const [linePolicySaving, setLinePolicySaving] = useState(false);
+
   const [editCompanyTab, setEditCompanyTab] = useState<'basic' | 'send' | 'cost' | 'ai' | 'store' | 'billing' | 'cards' | 'customers' | 'sync'>('basic');
   // ★ 2026-07-21 문안 생성 참조 업종 목록 — SSOT=백엔드 industry-codes.ts (프론트 하드코딩 금지, GET /api/admin/industry-codes)
   const [industryOptions, setIndustryOptions] = useState<Array<{ code: string; label: string }>>([]);
@@ -759,6 +893,8 @@ useEffect(() => { if (activeTab === 'deposits' || activeTab === 'credits') loadC
 useEffect(() => { loadCreditRequests(); }, []);
 useEffect(() => { if (activeTab === 'stats') loadSendStats(1); }, [activeTab]);
 useEffect(() => { if (activeTab === 'syncAgents') loadSyncAgents(); }, [activeTab]);
+useEffect(() => { if (activeTab === 'spamBlock') loadSpamBlock(); }, [activeTab]);
+useEffect(() => { if (activeTab === 'geoAccess') loadGeoAccess(); }, [activeTab]);
 useEffect(() => { if (activeTab === 'auditLogs' && auditAccessAllowed) loadAuditLogs(1); }, [activeTab, auditAccessAllowed]);
 // ★ 2026-06-11: 감사 로그 열람 권한 확인 (1회) — 허용 계정에만 감사 로그 메뉴 노출
 useEffect(() => {
@@ -2797,7 +2933,9 @@ const handleSendBillingEmail = async (resend = false) => {
       const res = await fetch(`/api/admin/deposit-requests/${depositTarget.id}/approve`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ adminNote: depositAdminNote || null })
+        // ★ 2026-08-19 전송자격인증 2.3 — 명의 확인 건은 확인 표시 없이 서버가 거절한다.
+        //   모달에서 사유와 소명을 보고 누른 것이므로 여기서 true를 실어 보낸다.
+        body: JSON.stringify({ adminNote: depositAdminNote || null, resolveHold: Boolean(depositTarget.held_reason) })
       });
       if (res.ok) {
         setModal({ type: 'alert', title: '승인 완료', message: `${Number(depositTarget.amount).toLocaleString()}원이 충전되었습니다.`, variant: 'success' });
@@ -3333,9 +3471,47 @@ const handleApproveRequest = async (id: string) => {
     );
   };
 
+  // ★ 2026-08-18 회선 정책 저장 — 회사 수정과 별도 endpoint(파라미터 40개 라우트에 끼우면 번호가 밀린다)
+  const handleSaveLinePolicy = async () => {
+    if (!editCompany.id || !linePolicy) return;
+    setLinePolicySaving(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/admin/companies/${editCompany.id}/sender-line-policy`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          subscriberType: linePolicy.subscriberType || '',
+          mobileLineLimit: linePolicy.mobileLineLimit,
+          landlineLineLimit: linePolicy.landlineLineLimit,
+        }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        showAlert('오류', data?.error || '회선 정책 저장에 실패했습니다.', 'error');
+        return;
+      }
+      const refreshed = await fetch(`/api/admin/companies/${editCompany.id}/sender-line-policy`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (refreshed.ok) setLinePolicy(await refreshed.json());
+      showAlert('성공', '발신번호 회선 정책이 저장되었습니다.', 'success');
+    } catch {
+      showAlert('오류', '회선 정책 저장에 실패했습니다.', 'error');
+    } finally {
+      setLinePolicySaving(false);
+    }
+  };
+
   const handleEditCompany = async (company: Company) => {
     try {
       const token = localStorage.getItem('token');
+      // ★ 2026-08-18 발신번호 회선 정책 — 현재 상한과 보유 수를 함께 읽는다(판정과 같은 수를 본다)
+      setLinePolicy(null);
+      fetch(`/api/admin/companies/${company.id}/sender-line-policy`, { headers: { 'Authorization': `Bearer ${token}` } })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => { if (j) setLinePolicy(j); })
+        .catch(() => {});
       // ★ 2026-07-21 문안 참조 업종 목록 — 정적 SSOT라 최초 1회만 로드(회사와 무관)
       if (industryOptions.length === 0) {
         fetch('/api/admin/industry-codes', { headers: { 'Authorization': `Bearer ${token}` } })
@@ -4138,6 +4314,10 @@ const handleApproveRequest = async (id: string) => {
                   ...(lineGroupCanManage ? [{ key: 'lineGroups', label: '발송 라인 설정' }] : []),
                   // ★ 2026-06-11: 감사 로그 = 허용 계정(기본 ceo)에만 노출
                   ...(auditAccessAllowed ? [{ key: 'auditLogs', label: '감사 로그' }] : []),
+                  // ★ 2026-08-18: 금칙어 차단(전송자격인증 5.2)
+                  { key: 'spamBlock', label: '금칙어 차단' },
+                  // ★ 2026-08-19: 국외 접근 통제(전송자격인증 2.2)
+                  { key: 'geoAccess', label: '국외 접근 통제' },
                   // ★ 2026-07-04: 베스트 문안(업종 큐레이션) = 슈퍼관리자 공용(직원 큐레이션, ceo 게이트 없음)
                   { key: 'bestCopy', label: '베스트 문안', onClick: () => navigate('/admin/best-copy') },
                   // ★ 2026-06-13: AI 학습 데이터 = 허용 계정(기본 ceo)에만 노출 (별도 페이지 navigate)
@@ -5136,7 +5316,355 @@ const handleApproveRequest = async (id: string) => {
             </div>
         )}
 
+        {/* ★ 2026-08-19 국외 접근 통제 (전송자격인증 2.2) */}
+        {activeTab === 'geoAccess' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white rounded-xl border border-gray-200 p-5">
+                <div className="text-xs text-gray-500">등록된 국내 대역</div>
+                <div className="mt-1.5 text-2xl font-bold text-gray-900 tabular-nums">
+                  {Number(geoStatus?.cidrCount || 0).toLocaleString()}<span className="ml-1 text-sm font-semibold text-gray-400">개</span>
+                </div>
+                <div className="mt-1 text-[11px] text-gray-400">
+                  {geoStatus?.cidrUpdatedAt ? `갱신 ${formatDateTime(geoStatus.cidrUpdatedAt)}` : '아직 등록되지 않았습니다'}
+                </div>
+              </div>
+              <div className="bg-white rounded-xl border border-gray-200 p-5">
+                <div className="text-xs text-gray-500">활성 예외 승인</div>
+                <div className="mt-1.5 text-2xl font-bold text-gray-900 tabular-nums">
+                  {Number(geoStatus?.exceptionCount || 0).toLocaleString()}<span className="ml-1 text-sm font-semibold text-gray-400">건</span>
+                </div>
+                <div className="mt-1 text-[11px] text-gray-400">해외 근무자 · 해외 본사 서버</div>
+              </div>
+              <div className={`rounded-xl border p-5 ${geoStatus?.enforced ? 'bg-rose-50 border-rose-200' : 'bg-white border-gray-200'}`}>
+                <div className="text-xs text-gray-500">차단 시행</div>
+                <div className={`mt-1.5 text-2xl font-bold ${geoStatus?.enforced ? 'text-rose-700' : 'text-gray-400'}`}>
+                  {geoStatus?.enforced ? '시행 중' : '미시행'}
+                </div>
+                <div className="mt-1 text-[11px] text-gray-500 leading-relaxed">
+                  {geoStatus?.enforced
+                    ? `${geoStatus.enforceFrom} 부터 국외 로그인이 차단됩니다`
+                    : '지금은 국외 접속을 기록만 합니다. 시행은 서버 환경변수 GEO_BLOCK_ENFORCE_FROM 으로만 열립니다'}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <h3 className="text-base font-semibold text-gray-900">국내 대역 등록</h3>
+              <p className="mt-1 text-xs text-gray-500 leading-relaxed">
+                등록된 대역에 <span className="font-medium">들지 않는 IP</span>를 국외로 봅니다. 대역이 하나도 없으면 판정 자체를 하지 않습니다(전원 통과).
+                줄바꿈·쉼표·공백 어느 것으로 구분해도 됩니다. <span className="font-medium">등록할 때마다 전체가 교체</span>됩니다.
+              </p>
+              <textarea
+                value={geoCidrInput}
+                onChange={(e) => setGeoCidrInput(e.target.value)}
+                rows={5}
+                placeholder={'211.234.0.0/16\n1.201.0.0/16\n14.32.0.0/15'}
+                className="mt-3 w-full rounded-lg border border-gray-200 px-3 py-2 font-mono text-xs outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-600/10"
+              />
+              <div className="mt-3 flex items-center justify-between">
+                <span className="text-[11px] text-gray-400">APNIC delegated 목록의 KR 행에서 뽑습니다.</span>
+                <button
+                  onClick={handleGeoCidrBulk}
+                  disabled={geoBusy || !geoCidrInput.trim()}
+                  className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-40"
+                >
+                  {geoBusy ? '등록 중...' : '전체 교체 등록'}
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <h3 className="text-base font-semibold text-gray-900">예외 승인</h3>
+              <p className="mt-1 text-xs text-gray-500 leading-relaxed">
+                해외에서 들어와야 하는 대상을 등록합니다. <span className="font-medium">사유 없이는 등록되지 않습니다</span> — 이 기록이 심사에 내는 예외 승인 대장입니다.
+                <br />
+                SDK·싱크에이전트는 국가로 막지 않습니다. 해외 본사를 둔 고객사는 <span className="font-medium">회사 API · 회사 에이전트</span> 범위로 그 대역을 등록해주세요.
+              </p>
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-2">
+                <select
+                  value={geoForm.scope}
+                  onChange={(e) => setGeoForm({ ...geoForm, scope: e.target.value })}
+                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500"
+                >
+                  <option value="user">계정 (해외 근무 담당자)</option>
+                  <option value="company_api">회사 API (SDK·자사몰)</option>
+                  <option value="company_agent">회사 에이전트 (사내 서버)</option>
+                  <option value="global">전역</option>
+                </select>
+                <input
+                  value={geoForm.target}
+                  onChange={(e) => setGeoForm({ ...geoForm, target: e.target.value })}
+                  placeholder={geoForm.scope === 'user' ? '대상 계정 UUID' : geoForm.scope === 'global' ? '전역 — 비워둠' : '대상 고객사 UUID'}
+                  disabled={geoForm.scope === 'global'}
+                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 disabled:bg-gray-50"
+                />
+                <input
+                  value={geoForm.cidr}
+                  onChange={(e) => setGeoForm({ ...geoForm, cidr: e.target.value })}
+                  placeholder="203.0.113.0/24 (단일 IP는 /32)"
+                  className="px-3 py-2 border border-gray-200 rounded-lg font-mono text-xs outline-none focus:border-indigo-500"
+                />
+                <input
+                  value={geoForm.reason}
+                  onChange={(e) => setGeoForm({ ...geoForm, reason: e.target.value })}
+                  placeholder="승인 사유 (필수)"
+                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500"
+                />
+              </div>
+              <div className="mt-2 flex justify-end">
+                <button
+                  onClick={handleGeoExceptionCreate}
+                  disabled={geoBusy || !geoForm.cidr.trim() || !geoForm.reason.trim()}
+                  className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-40"
+                >
+                  예외 승인
+                </button>
+              </div>
+
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-xs text-gray-500">
+                    <tr>
+                      <th className="px-3 py-2 text-left">범위</th>
+                      <th className="px-3 py-2 text-left">대상</th>
+                      <th className="px-3 py-2 text-left">대역</th>
+                      <th className="px-3 py-2 text-left">사유</th>
+                      <th className="px-3 py-2 text-left">승인</th>
+                      <th className="px-3 py-2 text-right">회수</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {geoExceptions.length === 0 && (
+                      <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-400 text-xs">등록된 예외가 없습니다.</td></tr>
+                    )}
+                    {geoExceptions.map((x) => (
+                      <tr key={x.id} className={x.is_active ? '' : 'opacity-45'}>
+                        <td className="px-3 py-2 text-xs text-gray-700">
+                          {x.scope === 'user' ? '계정' : x.scope === 'company_api' ? '회사 API' : x.scope === 'company_agent' ? '회사 에이전트' : '전역'}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-gray-900">{x.login_id || x.company_name || '-'}</td>
+                        <td className="px-3 py-2 font-mono text-xs text-gray-700">{x.cidr}</td>
+                        <td className="px-3 py-2 text-xs text-gray-600 max-w-xs truncate">{x.reason}</td>
+                        <td className="px-3 py-2 text-[11px] text-gray-400">{formatDateTime(x.approved_at)}</td>
+                        <td className="px-3 py-2 text-right">
+                          {x.is_active ? (
+                            <button
+                              onClick={() => handleGeoExceptionRevoke(x.id)}
+                              className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50"
+                            >
+                              회수
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-gray-400">회수됨</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-5 py-3 border-b border-gray-100">
+                <h3 className="text-base font-semibold text-gray-900">국외 접근 이력</h3>
+                <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source — 감사 로그 (foreign_access_detected · foreign_access_blocked)</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-xs text-gray-500">
+                    <tr>
+                      <th className="px-4 py-2 text-left">시각</th>
+                      <th className="px-4 py-2 text-left">계정</th>
+                      <th className="px-4 py-2 text-left">고객사</th>
+                      <th className="px-4 py-2 text-left">IP</th>
+                      <th className="px-4 py-2 text-left">처리</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {geoHits.length === 0 && (
+                      <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400 text-xs">국외 접근 기록이 없습니다.</td></tr>
+                    )}
+                    {geoHits.map((h) => (
+                      <tr key={h.id}>
+                        <td className="px-4 py-2 text-xs text-gray-500">{formatDateTime(h.created_at)}</td>
+                        <td className="px-4 py-2 text-xs text-gray-900">{h.login_id || '-'}</td>
+                        <td className="px-4 py-2 text-xs text-gray-700">{h.company_name || '-'}</td>
+                        <td className="px-4 py-2 font-mono text-xs text-gray-700">{h.ip_address || '-'}</td>
+                        <td className="px-4 py-2">
+                          <span className={`px-2 py-0.5 text-[11px] rounded ${h.action === 'foreign_access_blocked' ? 'bg-rose-100 text-rose-700' : 'bg-gray-100 text-gray-600'}`}>
+                            {h.action === 'foreign_access_blocked' ? '차단' : '기록만'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 요금제 관리 탭 */}
+        {activeTab === 'spamBlock' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <h3 className="text-base font-semibold text-gray-900">차단정보 등록</h3>
+              <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                요소 <span className="font-medium">2~5개의 조합</span>으로 만듭니다. 요소가 <span className="font-medium">전부 맞을 때만</span> 걸립니다 —
+                단일 키워드는 정상 문자를 막기 때문에 등록되지 않습니다.
+              </p>
+              <p className="text-xs text-gray-500 mt-2 leading-relaxed">
+                이 체계는 <span className="font-medium text-gray-700">탐지만 합니다 — 발송을 막지 않습니다.</span>
+                걸린 문안은 아래 탐지 이력에 기록되고 문자는 그대로 나갑니다.
+              </p>
+
+              <div className="mt-4 space-y-3">
+                <input type="text" value={spamRuleName} onChange={(e) => setSpamRuleName(e.target.value)}
+                  placeholder="규칙 이름 (예: 무직자 당일대출 스팸)"
+                  className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+
+                {spamElements.map((el, i) => (
+                  <div key={i} className="flex gap-2">
+                    <select value={el.type}
+                      onChange={(e) => setSpamElements(spamElements.map((x, xi) => xi === i ? { ...x, type: e.target.value } : x))}
+                      className="w-32 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                      <option value="keyword">키워드</option>
+                      <option value="url">URL</option>
+                      <option value="phone">전화번호</option>
+                    </select>
+                    <input type="text" value={el.value}
+                      onChange={(e) => setSpamElements(spamElements.map((x, xi) => xi === i ? { ...x, value: e.target.value } : x))}
+                      placeholder={el.type === 'url' ? 'bit.ly' : el.type === 'phone' ? '010-0000-0000' : '무직자'}
+                      className="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+                    {spamElements.length > 2 && (
+                      <button type="button" onClick={() => setSpamElements(spamElements.filter((_, xi) => xi !== i))}
+                        className="px-3 py-2 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">삭제</button>
+                    )}
+                  </div>
+                ))}
+
+                <div className="flex flex-wrap gap-2">
+                  {spamElements.length < 5 && (
+                    <button type="button" onClick={() => setSpamElements([...spamElements, { type: 'keyword', value: '' }])}
+                      className="px-3 py-2 text-xs border border-gray-200 rounded-lg hover:bg-gray-50">요소 추가</button>
+                  )}
+                  <button type="button" onClick={handleSpamSimulate} disabled={spamBusy || spamElementsPayload().length < 2}
+                    className="px-4 py-2 text-xs font-medium border border-blue-200 text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 disabled:opacity-50">
+                    {spamBusy ? '확인 중…' : '최근 발송 문안으로 오탐 확인'}
+                  </button>
+                  <button type="button" onClick={handleSpamCreate} disabled={spamBusy || spamElementsPayload().length < 2}
+                    className="px-4 py-2 text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg">
+                    탐지 전용으로 등록
+                  </button>
+                </div>
+
+                {spamSim && (
+                  <div className={`rounded-lg border px-4 py-3 text-xs ${spamSim.matchedCount > 0 ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+                    <p className="font-medium">
+                      최근 {spamSim.scannedDays}일 발송 문안 {spamSim.scanned}건 중 <span className="font-bold">{spamSim.matchedCount}건</span> 일치
+                    </p>
+                    {spamSim.matchedCount > 0 && (
+                      <>
+                        <p className="mt-1 text-[11px]">아래 문안이 정상이라면 조합을 더 좁혀주세요.</p>
+                        <ul className="mt-2 space-y-1">
+                          {spamSim.samples?.map((sm: any, i: number) => (
+                            <li key={i} className="bg-white/70 rounded px-2 py-1 text-[11px] text-gray-700 truncate">{sm.sample}</li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-5 py-3 border-b border-gray-100">
+                <h3 className="text-base font-semibold text-gray-900">차단정보 목록</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-xs text-gray-500">
+                    <tr>
+                      <th className="px-4 py-2 text-left">이름</th>
+                      <th className="px-4 py-2 text-left">조합</th>
+                      <th className="px-4 py-2 text-left">출처</th>
+                      <th className="px-4 py-2 text-right">탐지</th>
+                      <th className="px-4 py-2 text-left">처리</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {spamRules.length === 0 && (
+                      <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400 text-xs">등록된 차단정보가 없습니다. 규칙이 없으면 발송은 그대로 나갑니다.</td></tr>
+                    )}
+                    {spamRules.map((r) => (
+                      <tr key={r.id}>
+                        <td className="px-4 py-2 font-medium text-gray-900">{r.name}</td>
+                        <td className="px-4 py-2">
+                          <div className="flex flex-wrap gap-1">
+                            {(r.elements || []).map((el: any, i: number) => (
+                              <span key={i} className="px-2 py-0.5 text-[11px] bg-gray-100 text-gray-700 rounded">
+                                {el.type === 'url' ? 'URL' : el.type === 'phone' ? '번호' : '키워드'} · {el.value}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2 text-xs text-gray-500">{r.source}</td>
+                        <td className="px-4 py-2 text-right text-xs text-gray-700">{r.hit_count}</td>
+                        <td className="px-4 py-2">
+                          <span className="px-2 py-0.5 text-[11px] rounded bg-gray-100 text-gray-600">탐지만 (발송됨)</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-5 py-3 border-b border-gray-100">
+                <h3 className="text-base font-semibold text-gray-900">탐지 이력</h3>
+                <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source — 금칙어 탐지 로그</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-xs text-gray-500">
+                    <tr>
+                      <th className="px-4 py-2 text-left">시각</th>
+                      <th className="px-4 py-2 text-left">규칙</th>
+                      <th className="px-4 py-2 text-left">고객사</th>
+                      <th className="px-4 py-2 text-left">경로</th>
+                      <th className="px-4 py-2 text-left">처리</th>
+                      <th className="px-4 py-2 text-right">건수</th>
+                      <th className="px-4 py-2 text-left">문안</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {spamHits.length === 0 && (
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 text-xs">탐지 이력이 없습니다.</td></tr>
+                    )}
+                    {spamHits.map((h) => (
+                      <tr key={h.id}>
+                        <td className="px-4 py-2 text-xs text-gray-500">{new Date(h.created_at).toLocaleString('ko-KR')}</td>
+                        <td className="px-4 py-2 text-xs text-gray-900">{h.rule_name || '-'}</td>
+                        <td className="px-4 py-2 text-xs text-gray-700">{h.company_name || '-'}</td>
+                        <td className="px-4 py-2 text-xs text-gray-500">{h.send_source || '-'}</td>
+                        <td className="px-4 py-2">
+                          <span className="px-2 py-0.5 text-[11px] rounded bg-gray-100 text-gray-600">탐지만</span>
+                        </td>
+                        <td className="px-4 py-2 text-right text-xs text-gray-700">{h.affected_rows}</td>
+                        <td className="px-4 py-2 text-xs text-gray-500 max-w-xs truncate">{h.content_sample}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'plans' && (
           <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
             <div className="px-6 py-4 border-b flex justify-between items-center">
@@ -5612,6 +6140,11 @@ const handleApproveRequest = async (id: string) => {
                         <span className="font-medium text-gray-900">{dr.company_name}</span>
                         <span className="font-bold text-lg text-gray-900">{Number(dr.amount).toLocaleString()}원</span>
                         <span className="text-sm text-gray-500">입금자: {dr.depositor_name}</span>
+                        {dr.held_reason && (
+                          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-rose-100 text-rose-700">
+                            명의 확인 필요{dr.explanation_note ? ' · 소명 도착' : ''}
+                          </span>
+                        )}
                         <span className="text-xs text-gray-400">{formatDateTime(dr.created_at)}</span>
                       </div>
                       <div className="flex gap-2">
@@ -7329,6 +7862,83 @@ const handleApproveRequest = async (id: string) => {
               {/* 기본정보 탭 */}
               {editCompanyTab === 'basic' && (
                 <div className="space-y-4">
+                  {/* ★ 2026-08-18 발신번호 회선 정책 — 전송자격인증 2.1 */}
+                  <div className="border border-gray-200 rounded-xl p-4 bg-gray-50/60">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h4 className="text-sm font-semibold text-gray-800">발신번호 회선 정책</h4>
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                          상한은 <span className="font-medium">신규 등록에만</span> 적용됩니다. 이미 등록된 번호는 그대로 유지됩니다.
+                        </p>
+                      </div>
+                      <button type="button" onClick={handleSaveLinePolicy} disabled={!linePolicy || linePolicySaving}
+                        className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg transition-colors">
+                        {linePolicySaving ? '저장 중…' : '회선 정책 저장'}
+                      </button>
+                    </div>
+
+                    {!linePolicy ? (
+                      <p className="text-xs text-gray-400">불러오는 중…</p>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap gap-3 text-xs">
+                          <span className="px-2 py-1 rounded-md bg-white border border-gray-200 text-gray-600">
+                            현재 보유 · 무선 <span className="font-semibold text-gray-900">{linePolicy.held.mobile}</span>
+                          </span>
+                          <span className="px-2 py-1 rounded-md bg-white border border-gray-200 text-gray-600">
+                            현재 보유 · 유선 <span className="font-semibold text-gray-900">{linePolicy.held.landline}</span>
+                          </span>
+                          <span className="px-2 py-1 rounded-md bg-white border border-gray-200 text-gray-600">
+                            적용 상한 · 무선 <span className="font-semibold text-gray-900">{linePolicy.effective.mobile ?? '제한 없음'}</span>
+                            {' / '}유선 <span className="font-semibold text-gray-900">{linePolicy.effective.landline ?? '제한 없음'}</span>
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">가입자 유형</label>
+                            <select
+                              value={linePolicy.subscriberType || ''}
+                              onChange={(e) => setLinePolicy({ ...linePolicy, subscriberType: e.target.value || null })}
+                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                              <option value="">미설정</option>
+                              <option value="corporate">법인</option>
+                              <option value="individual">개인</option>
+                              <option value="foreigner">외국인</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">무선 상한</label>
+                            <input type="number" min={1} placeholder="비우면 제한 없음"
+                              disabled={linePolicy.subscriberType === 'individual' || linePolicy.subscriberType === 'foreigner'}
+                              value={linePolicy.mobileLineLimit ?? ''}
+                              onChange={(e) => setLinePolicy({ ...linePolicy, mobileLineLimit: e.target.value === '' ? null : Number(e.target.value) })}
+                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:text-gray-400" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">유선 상한</label>
+                            <input type="number" min={1} placeholder="비우면 제한 없음"
+                              disabled={linePolicy.subscriberType === 'individual' || linePolicy.subscriberType === 'foreigner'}
+                              value={linePolicy.landlineLineLimit ?? ''}
+                              onChange={(e) => setLinePolicy({ ...linePolicy, landlineLineLimit: e.target.value === '' ? null : Number(e.target.value) })}
+                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:text-gray-400" />
+                          </div>
+                        </div>
+
+                        {(linePolicy.subscriberType === 'individual' || linePolicy.subscriberType === 'foreigner') && (
+                          <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                            개인·외국인은 고시 기준값이 적용됩니다 — 무선 {linePolicy.subscriberType === 'foreigner' ? 2 : 3}회선 · 유선 5회선. 상한을 따로 지정할 수 없습니다.
+                          </p>
+                        )}
+                        {linePolicy.subscriberType === 'corporate' && linePolicy.landlineLineLimit === null && (
+                          <p className="text-[11px] text-gray-500">
+                            법인 유선 상한은 종사자 수 확인 자료(고용보험 자료 등)를 받아 입력합니다. 비워 두면 제한이 걸리지 않습니다.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">회사명 *</label>
                     <input type="text" value={editCompany.companyName}
@@ -12741,6 +13351,20 @@ const handleApproveRequest = async (id: string) => {
                   <span className="text-gray-400">입금자명</span>
                   <span className="font-medium">{depositTarget.depositor_name}</span>
                 </div>
+                {/* ★ 2026-08-19 전송자격인증 2.3 — 명의 확인 건은 사유와 소명을 보고 판단한다 */}
+                {depositTarget.held_reason && (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 space-y-1.5">
+                    <div className="text-xs font-semibold text-rose-700">명의 확인 필요</div>
+                    <div className="text-xs text-rose-800 leading-relaxed">{depositTarget.held_reason}</div>
+                    <div className="text-[11px] text-gray-600 leading-relaxed border-t border-rose-200 pt-1.5">
+                      <span className="font-medium">고객사 소명</span>
+                      {' · '}
+                      {depositTarget.explanation_note
+                        ? depositTarget.explanation_note
+                        : <span className="text-gray-400">아직 제출되지 않았습니다</span>}
+                    </div>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm border-t pt-2">
                   <span className="text-gray-400">현재 잔액</span>
                   <span className="font-medium">{Number(depositTarget.balance || 0).toLocaleString()}원</span>

@@ -1060,7 +1060,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
         ]);
       }
 
-      sentCount = await bulkInsertSmsQueue(companyTables, autoSmsRows, true);
+      sentCount = await bulkInsertSmsQueue(companyTables, autoSmsRows, true, { companyId: ac.company_id, userId: ac.user_id, source: 'automarketing' });
     }
 
     // ★ 2026-07-05 발송 피로도 카운터 — 광고성만(알림톡/SMS 공통), 큐 커밋 후 fire-and-forget

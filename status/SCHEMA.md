@@ -82,6 +82,12 @@
 | 65 | marketing_diagnoses **(2026-08-16 운영 CREATE 완료)** | 진단 원장(퍼널 A 고객사 + B 리드 통합). `id uuid PK, funnel char(1) CHECK IN (A,B), company_id uuid NULL FK companies CASCADE, submitted_by uuid NULL(FK 미부착), lead_company_name·lead_contact_name·lead_email·lead_phone, consent_agreed·consent_agreed_at·consent_version, source_ip inet, user_agent text, source_utm varchar(100), question_set_version varchar(20) FK diagnosis_question_sets, answers jsonb, result jsonb(DiagnosisResultV1 스냅샷), recommended_plan_id uuid FK plans ON DELETE SET NULL, recommended_plan_code·recommended_monthly_price, rule_version, lead_status varchar(20) CHECK(9종), contact_attempts int, disqualify_reason, linked_company_id uuid FK companies SET NULL, created_at·updated_at`. **funnel별 상호배타 CHECK**(A=company_id 필수·lead_email 금지 / B=반대 + 동의 4필드 필수) · **`uq_md_funnel_a`(company_id) WHERE funnel='A'** = 회사당 A 진단 1행(동시 제출 최후 방어) |
 | 66 | diagnosis_trial_grants **(2026-08-16 운영 CREATE 완료)** | 진단 체험 지급 원장 — **1회 한정의 실효 장치**. `id uuid PK, company_id uuid NOT NULL FK companies CASCADE UNIQUE, diagnosis_id uuid NOT NULL FK marketing_diagnoses UNIQUE, granted_days int CHECK >0, trial_expires_at timestamptz NOT NULL, granted_by varchar(64) NOT NULL DEFAULT 'diagnosis-auto'(수동 = `admin:{super_admins.id}` — 행위자 스냅샷), created_at`. UNIQUE 2개(회사·진단)가 이중·교차 지급을 구조로 막는다 |
 | 67 | diagnosis_invites **(2026-08-16 운영 CREATE 완료)** | 진단 초대 모달 표시 기록(회사당 1행 — localStorage 판정 금지). `company_id uuid PK FK companies CASCADE, invited_at timestamptz` |
+| 68 | mfa_challenges **(2026-08-18 운영 CREATE 완료)** | 다중인증 6자리 코드 원장(전송자격인증 3.4). `id uuid PK, user_id uuid NOT NULL FK users CASCADE, code_hash varchar(255) NOT NULL(bcrypt — **평문 저장 금지**), phone varchar(20), attempts int NOT NULL DEFAULT 0, consumed_at timestamp, expires_at timestamp NOT NULL, ip_address varchar(50), user_agent text, created_at timestamp`. 살아있는 코드는 계정당 1개(발급 시 기존 미소비분 consumed 처리) · 5회 실패면 계정 잠금 |
+| 69 | mfa_trusted_devices **(2026-08-18 운영 CREATE 완료)** | 인증 통과 후 24시간 기기 신뢰. `id uuid PK, user_id uuid NOT NULL FK users CASCADE, device_token_hash varchar(255) NOT NULL UNIQUE(sha256 — 평문 토큰은 클라이언트만), ip_prefix varchar(50) NOT NULL(앞 2옥텟), user_agent_hash varchar(64) NOT NULL, expires_at timestamp NOT NULL, created_at, last_used_at`. **토큰·IP대역·UA가 모두 맞아야 신뢰**(3.5 접속환경 변경 시 재인증). 인증번호 변경·계정 잠금 시 전량 삭제 |
+| 70 | spam_block_rules **(2026-08-18 운영 CREATE 완료)** | 금칙어 탐지 규칙(전송자격인증 5.2). `id uuid PK, name varchar(200) NOT NULL, elements jsonb NOT NULL([{type:keyword|url|phone, value}] **2~5개 조합** — 단일 키워드 금지), mode varchar(10) NOT NULL DEFAULT 'detect', source varchar(50) DEFAULT 'internal', note text, is_active boolean NOT NULL DEFAULT true, exempt_company_ids uuid[] DEFAULT '{}', created_by uuid, created_at·updated_at`. ⛔ **★0819 — `mode`는 코드가 읽지 않는다**(`loadActiveRules` SELECT에 없다 · 계약 테스트가 SQL을 검사). 이 체계는 **탐지만 하고 발송을 막지 않는다** — DB를 직접 `mode='block'`으로 고쳐도 아무 일도 없다. 차단은 판정을 차감 앞 preflight로 옮기는 재설계 뒤에만 열린다(경위 = [전송자격인증 §4-E](../docs/2026-08-18-transmission-qualification-cert.md)) |
+| 71 | spam_block_hits **(2026-08-18 운영 CREATE 완료)** | 금칙어 탐지 이력. `id uuid PK, rule_id uuid FK spam_block_rules CASCADE, company_id uuid, user_id uuid, send_source varchar(50), mode varchar(10), action_taken varchar(10), affected_rows int, content_sample varchar(200)(**4자리+ 숫자열 마스킹 후 저장**), created_at`. INDEX: `(created_at DESC)` · `(rule_id)`. ★0819 — **1행 = 한 발송 요청의 규칙 하나**(개인화 변형별이 아니다). `affected_rows`는 그 규칙에 걸린 건수 **합계**, 표본은 첫 문안 하나. `mode`·`action_taken`은 `'detect'` 고정 |
+| 72 | geo_allow_cidrs **(2026-08-19 운영 CREATE 완료)** | 국내 할당 IP 대역(전송자격인증 2.2). `id uuid PK, cidr cidr NOT NULL, country_code varchar(2) NOT NULL DEFAULT 'KR', source varchar(50) DEFAULT 'apnic', updated_at timestamptz`. UNIQUE(cidr) · **GiST(cidr inet_ops)**. 판정 = `$1::inet <<= cidr`(PG 네이티브 — GeoIP 의존성 0). ⛔ **행이 0이면 판정이 통째로 `unknown`이 되어 통제가 사라진다** — 일괄 등록은 DELETE+INSERT를 한 트랜잭션으로 묶는다 |
+| 73 | access_origin_allowlist **(2026-08-19 운영 CREATE 완료)** | 접근 출발지 예외 승인(2.2). `id uuid PK, scope varchar(20) NOT NULL(user·company_api·company_agent·global), company_id uuid FK CASCADE, user_id uuid FK CASCADE, cidr cidr NOT NULL, reason text NOT NULL(**사유 없이는 등록 불가**), approved_by uuid, approved_at timestamptz, expires_at timestamptz, is_active boolean DEFAULT true, created_at`. **회수는 DELETE가 아니라 `is_active=false`** — 이력이 사라지면 심사에 낼 것이 없다. ⛔ SDK·싱크에이전트는 국가로 막지 않고 이 표의 `company_api`·`company_agent`로만 통제한다(해외 본사 고객사 대응) |
 | - | ai_training_logs | 문안 학습 로그 (회사별 tenant_ref HMAC 격리). ★ 2026-07-03 실측: `ck_training_message_type` CHECK = message_type IN ('SMS','LMS','MMS','KAKAO','EMAIL','DM') — DM 추가(전 채널 학습 통합 Phase 1). 적재=fire-and-forget 격리(발송 무영향), source_ref 멱등 |
 | - | ai_training_logs (클릭·전환 컬럼) | `click_count int` · `conversion_count int` — Tier1 반응 신호(DM·이메일 클릭 환류, 랭커/검색기 클릭 우선 정렬). **★2026-08-11 information_schema 실측 = 둘 다 실존**(0704 "ADD 대기" 표기는 낡은 기록 — `operator_proposals.conversion_attributed_at`·`operator_proposal_variants.sent/click/conversion_count`도 같은 실측으로 실존 확인). ⚠값 유입은 DM·이메일 클릭뿐 — SMS/LMS 클릭(short-url→변이 테이블)은 이 원장에 미배선(자기 개선 루프 설계의 Phase 0) |
 | - | best_copy_seed_usage **(2026-07-04 CREATE 대기)** | 시드 사용 기록(성과 환류). `id bigserial PK, seed_id uuid, tenant_ref varchar(64)=getTenantRef, channel varchar(10), used_at timestamptz`. INDEX(seed_id),(tenant_ref,used_at). 코드 42P01 폴백(미생성 무영향) |
@@ -259,6 +265,9 @@
 | company_code | varchar(20) | |
 | business_number | varchar(20) | 사업자번호 |
 | business_type | varchar(50) | |
+| subscriber_type | varchar(20) | ★2026-08-18 신설(전송자격인증 2.1) — 가입자 유형 `individual`·`foreigner`·`corporate`. **개인·외국인은 고시 기준값이 자동 적용**(무선 3/2 · 유선 5)되고 회사 설정으로 못 올린다. NULL = 미설정 = 제한 없음 |
+| mobile_line_limit | integer | ★2026-08-18 신설 — 법인 **무선** 발신번호 상한. NULL이면 제한 없음(현행 유지) |
+| landline_line_limit | integer | ★2026-08-18 신설 — 법인 **유선** 발신번호 상한(종사자 수 확인 자료 기준으로 슈퍼관리자가 입력). NULL이면 제한 없음. ⚠ **임의 기본값을 넣지 마라** — 0818 실측상 유선 보유 상위가 182·175·159개(매장별 대표번호)라 상한을 박으면 정상 고객사가 막힌다. 상한은 **신규 등록에만** 걸리고 기존 보유분은 불변 |
 | ceo_name | varchar(50) | |
 | brand_name | varchar(100) | |
 | brand_slogan | varchar(200) | |
@@ -1387,6 +1396,7 @@
 | login_id | varchar(50) |
 | password_hash | varchar(255) |
 | user_type | varchar(20) | ★ 2026-08-03 실측 분포 = `admin` 126 · `user` 101(매장 배정 7) · `system` 75. **JWT의 `company_admin`·`company_user`는 토큰 변환값이라 DB에 없다** — 권한 판정을 토큰 어휘로 하면 제한 사용자(`user`)가 전체 권한으로 승격된다(자동마케팅 발송 범위 사고 기원) |
+| mfa_phone | varchar(20) | ★2026-08-18 신설(전송자격인증 3.4) — **로그인 다중인증 주 번호. 계정당 하나**(복수 등록은 기준 위반 — "다수가 공동 사용 가능한 인증수단 부적합"). 슈퍼관리자가 계약 담당자 기준으로 등록(`PUT /api/admin/users/:id/mfa-phone`) · 변경 시 그 계정 신뢰 기기 전량 해제 + `mfa_phone_changed` 감사 로그. **NULL이면 MFA 대상 아님**(전환기 안전장치) |
 | role | varchar(20) |
 | name | varchar(100) |
 | email | varchar(100) |
@@ -1809,11 +1819,17 @@
 | company_id | uuid FK | 고객사 |
 | amount | numeric(15,2) | 요청 금액 |
 | depositor_name | varchar(50) | 입금자명 |
-| status | varchar(20) | pending/confirmed/rejected |
+| payment_method | varchar(20) | ★2026-08-19 실측 등재(기존 컬럼, 미등재였음) — deposit/card/virtual. 조회는 `COALESCE(payment_method,'deposit')` |
+| status | varchar(20) | pending/confirmed/rejected. **CHECK 제약 없음**(2026-08-19 `pg_constraint` 실측 = PK·FK 둘뿐) |
 | confirmed_by | uuid | 승인 관리자 |
 | confirmed_at | timestamptz | |
-| admin_note | text | 관리자 메모 |
+| admin_note | text | 관리자 메모(처리 판단) |
+| held_reason | text | ★2026-08-19 ALTER 실행완료(전송자격인증 2.3) — 명의 확인이 필요한 사유. **NULL이 아니면 보류** |
+| held_at | timestamptz | ★2026-08-19 ALTER 실행완료 — 보류가 걸린 시각 |
+| explanation_note | text | ★2026-08-19 ALTER 실행완료 — **고객사가 낸 소명**(관리자 판단은 `admin_note`와 분리) |
 | created_at | timestamptz | |
+
+> ⛔ **보류는 상태가 아니라 속성이다** — `status`에 `held`를 넣지 않는다. 넣으면 `status='pending'`을 보는 4곳이 조용히 깨진다(0819 영향표 실측): 중복 신청 판정(`balance.ts`) · 승인/반려 게이트(`admin.ts`) · 대기 뱃지(`pending-badges.ts`) · 목록 WHERE. 보류 판정은 `held_reason IS NOT NULL`로만 한다. 소스 불변식 테스트(`utils/fraud-review.test.ts`)가 이 선택을 고정한다.
 
 > **⛔ 이 테이블에 에이전트(발송ID) 충전을 섞지 말 것** — 승인 경로가 `companies.balance`(웹 지갑)를 올린다. 에이전트 지갑은 게이트웨이 `RSRM_FillAmtHist`라 아래 `agent_charge_orders`로 분리돼 있다.
 

@@ -41,6 +41,13 @@ export default function BalanceModals({
   const [depositorName, setDepositorName] = useState('');
   const [depositSubmitting, setDepositSubmitting] = useState(false);
   const [depositSuccess, setDepositSuccess] = useState(false);
+  // ★ 2026-08-19 전송자격인증 2.3 — 입금자명이 계정 명의와 다르면 담당자 확인 대상이 된다.
+  //   이때 그 자리에서 소명을 적을 수 있게 한다(요청 이력 화면을 따로 찾아가게 만들지 않는다).
+  const [depositReviewRequired, setDepositReviewRequired] = useState(false);
+  const [depositRequestId, setDepositRequestId] = useState<string | null>(null);
+  const [explanationNote, setExplanationNote] = useState('');
+  const [explanationSent, setExplanationSent] = useState(false);
+  const [explanationSending, setExplanationSending] = useState(false);
 
   // 카드결제 영역
   const [cardAmount, setCardAmount] = useState('');
@@ -171,6 +178,7 @@ export default function BalanceModals({
                   setShowBalanceModal(false);
                   setChargeStep('select');
                   setDepositSuccess(false);
+                  setDepositReviewRequired(false); setDepositRequestId(null); setExplanationNote(''); setExplanationSent(false);
                   setShowChargeModal(true);
                 }}
                 className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 py-3 text-sm font-semibold text-white transition hover:from-emerald-600 hover:to-teal-600"
@@ -237,6 +245,7 @@ export default function BalanceModals({
                       setDepositAmount('');
                       setDepositorName('');
                       setDepositSuccess(false);
+                  setDepositReviewRequired(false); setDepositRequestId(null); setExplanationNote(''); setExplanationSent(false);
                     }}
                     className="w-full p-4 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 hover:border-gray-300 transition-all text-left"
                   >
@@ -421,6 +430,9 @@ export default function BalanceModals({
                           body: JSON.stringify({ amount: Number(depositAmount), depositorName: depositorName.trim() }),
                         });
                         if (res.ok) {
+                          const data = await res.json().catch(() => ({} as any));
+                          setDepositReviewRequired(Boolean(data?.reviewRequired));
+                          setDepositRequestId(data?.request?.id || null);
                           setDepositSuccess(true);
                         } else {
                           const err = await res.json();
@@ -449,6 +461,49 @@ export default function BalanceModals({
                   <h3 className="text-lg font-bold text-gray-800 mb-2">입금 확인 요청 완료</h3>
                   <p className="text-sm text-gray-500 mb-1">관리자가 입금 확인 후 잔액이 충전됩니다.</p>
                   <p className="text-sm text-gray-500">영업일 기준 1시간 이내 처리됩니다.</p>
+
+                  {depositReviewRequired && depositRequestId && (
+                    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-left">
+                      <div className="text-sm font-semibold text-amber-800">입금자명 확인이 필요합니다</div>
+                      <p className="mt-1 text-xs leading-relaxed text-amber-800">
+                        등록된 회사·대표자 명의와 입금자명이 달라 담당자가 확인한 뒤 처리됩니다.
+                        가족·담당 직원 명의로 입금하셨다면 아래에 알려주시면 확인이 빨라집니다.
+                      </p>
+                      {explanationSent ? (
+                        <div className="mt-3 text-xs font-medium text-emerald-700">소명이 접수되었습니다. 담당자 확인 후 처리됩니다.</div>
+                      ) : (
+                        <>
+                          <textarea
+                            value={explanationNote}
+                            onChange={(e) => setExplanationNote(e.target.value)}
+                            rows={2}
+                            placeholder="예) 대표 배우자 명의 계좌에서 이체했습니다."
+                            className="mt-2.5 w-full rounded-lg border border-amber-200 px-3 py-2 text-xs outline-none focus:border-amber-400"
+                          />
+                          <button
+                            onClick={async () => {
+                              if (!explanationNote.trim()) { toast.error('소명 내용을 입력해주세요.'); return; }
+                              setExplanationSending(true);
+                              try {
+                                const r = await fetch(`/api/balance/deposit-request/${depositRequestId}/explanation`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${useAuthStore.getState().token}` },
+                                  body: JSON.stringify({ note: explanationNote.trim() }),
+                                });
+                                if (r.ok) setExplanationSent(true);
+                                else { const e2 = await r.json().catch(() => ({} as any)); toast.error(e2?.error || '소명 접수 실패'); }
+                              } catch { toast.error('네트워크 오류'); }
+                              setExplanationSending(false);
+                            }}
+                            disabled={explanationSending || !explanationNote.trim()}
+                            className="mt-2 w-full rounded-lg bg-amber-600 py-2 text-xs font-semibold text-white transition-colors hover:bg-amber-700 disabled:opacity-40"
+                          >
+                            {explanationSending ? '접수 중...' : '소명 보내기'}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
                   <div className="mt-4 bg-gray-50 rounded-xl p-3 text-sm">
                     <div className="flex justify-between">
                       <span className="text-gray-400">요청 금액</span>

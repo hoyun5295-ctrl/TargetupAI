@@ -14,6 +14,7 @@ import {
   MFA_CODE_TTL_MINUTES,
 } from '../utils/mfa';
 import { isBlocked, recordFailureAndMaybeBlock, clearBlocksOnSuccess } from '../utils/login-block';
+import { evaluateLoginOrigin } from '../utils/geo-access';
 import {
   generateTotpSecret,
   buildOtpAuthUrl,
@@ -188,6 +189,9 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
         takeoverTicket: req.body.takeoverTicket,
       });
 
+      if (superRotate.status === 'geo_blocked') {
+        return res.status(403).json({ error: superRotate.message });
+      }
       if (superRotate.status === 'conflict') {
         await query(
           `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
@@ -372,6 +376,9 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
     if (issue.status === 'conflict') {
       return res.status(409).json(issue.conflict);
     }
+    if (issue.status === 'geo_blocked') {
+      return res.status(403).json({ error: issue.message });
+    }
 
     return res.json(issue.body);
   } catch (error) {
@@ -503,6 +510,7 @@ router.post('/mfa/verify', loginLimiter, async (req: Request, res: Response) => 
       mfaDeviceToken,
     });
     if (issue.status === 'conflict') return res.status(409).json(issue.conflict);
+    if (issue.status === 'geo_blocked') return res.status(403).json({ error: issue.message });
     return res.json(issue.body);
   } catch (error) {
     if (isMfaSchemaMissing(error)) {
@@ -711,6 +719,10 @@ router.post('/super/confirm-totp', async (req: Request, res: Response) => {
       takeoverTicket: req.body.takeoverTicket,
     });
 
+    // ★ 0819 Codex 2R — TOTP 최초 등록 확정도 슈퍼관리자 세션을 만든다. 여기도 게이트를 지난다
+    if (enrollRotate.status === 'geo_blocked') {
+      return res.status(403).json({ error: enrollRotate.message });
+    }
     if (enrollRotate.status === 'conflict') {
       await query(
         `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)

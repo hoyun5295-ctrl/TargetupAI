@@ -7,6 +7,7 @@
 // ============================================================
 
 import pool from '../config/database';
+import { checkSenderLineLimit } from './sender-line-limit';
 import { normalizePhone } from './normalize-phone';
 
 // ============================================================
@@ -392,6 +393,12 @@ export async function approveRegistration(
     );
     if (existCheck.rows.length > 0) {
       throw new Error('이미 등록된 발신번호입니다. 신청을 반려 처리해주세요.');
+    }
+
+    // ★ 2026-08-18 전송자격인증 2.1 — 승인이 실제 등록 길목이다. 상한 초과면 승인하지 않는다
+    const lineVerdict = await checkSenderLineLimit(reg.company_id, reg.phone);
+    if (lineVerdict.status === 'exceeded') {
+      throw new Error(`${lineVerdict.message} 상한을 조정한 뒤 승인해주세요.`);
     }
 
     // 3. callback_numbers에 INSERT — ★ D142+ B5: 사용자 입력 phone 그대로 저장

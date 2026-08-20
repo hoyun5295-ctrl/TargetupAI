@@ -4,6 +4,7 @@
 // 하드코딩 금지. 환경변수/설정파일 기반.
 
 import { mysqlQuery } from '../config/database';
+import { loadActiveRules, evaluateContent, logSpamBlockHits, SpamBlockLogEntry } from './spam-block';
 import { CACHE_TTL, BATCH_SIZES } from '../config/defaults';
 import { isValidSmsTable } from './sms-table-validator';
 import { query } from '../config/database';
@@ -1126,6 +1127,113 @@ export async function insertAlimtalkQueue(
 // kakaoCountWhere·kakaoSelectWhere·kakaoBatchAggByGroup·kakaoGroupBy)은 삭제됐다.
 // 브랜드 행이 SMSQ(msg_type='F')로 합류해 smsCampaignCountsSafe·smsCountAll·smsExecAll이 그대로 커버한다.
 
+/** 금칙어 탐지에 넘기는 맥락 — 없어도 검사는 돌고, 회사 예외만 적용되지 않는다 */
+export interface SpamBlockContext {
+  companyId?: string | null;
+  userId?: string | null;
+  /** 어느 발송 경로인지(로그용) — 'direct' · 'campaign' · 'journey' · 'automarketing' 등 */
+  source?: string | null;
+}
+
+/** 판정 N건마다 이벤트 루프를 양보한다 — 자르지 않고 늦춘다(임계 경로 밖이라 늦어도 된다) */
+const DETECT_YIELD_EVERY = 200;
+const yieldToLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+/**
+ * 발송 문안 스냅샷 — **동기**. 중복 문안을 접어 건수만 센다.
+ *
+ * 왜 스냅샷이 필요한가: 판정을 비동기로 미루면 그 사이 호출부가 `rows`를 손댈 수 있다.
+ * 판정이 본 문안과 실제 나간 문안이 달라지면 탐지 이력이 증거 노릇을 못 한다.
+ * 여기서는 문자열 조립과 Map 적재만 한다 — 정규식·DB 없음.
+ */
+function snapshotSendContents(rows: any[][]): Map<string, number> {
+  // row[2]=msg_contents, row[4]=title_str — 제목도 검사 대상이다
+  const found = new Map<string, number>();
+  for (const row of rows) {
+    const content = `${String(row[4] ?? '')}
+${String(row[2] ?? '')}`;
+    found.set(content, (found.get(content) ?? 0) + 1);
+  }
+  return found;
+}
+
+/**
+ * 금칙어 **탐지**. ⬛ 발송을 막지 않고, 발송을 기다리게 하지도 않는다.
+ *
+ * ⬛ 왜 막지 않는가 (★2026-08-19 탐지 전용으로 좁힘)
+ *   호출 시점은 크레딧 차감이 **끝난 뒤**다. 행을 버리든 throw하든 정합이 깨진다 —
+ *   버리면 호출부 17곳이 줄어든 건수를 제각각 해석하고(여정은 반환값을 안 본다),
+ *   throw하면 환불 멱등이 캠페인 단위 누적이라 재차단 시 환불 0으로 실차감이 남는다.
+ *   차단은 판정을 차감 **앞** preflight로 옮기는 재설계 뒤에 연다(근거 = spam-block.ts 머리).
+ *
+ * ⬛ 왜 임계 경로 밖인가 (★0819 Codex 2R — 같은 뿌리 두 번째)
+ *   종전에는 로그만 비동기로 빼고 판정은 `Promise.race` 2초 상한 안에 뒀다. 그런데
+ *   **문안 순회와 판정이 전부 동기라 한번 시작하면 타이머가 뜨지 못한다** — 상한이 상한이 아니었다.
+ *   탐지는 발송에 아무 값을 주지 않으므로 **전부 임계 경로 밖으로** 보냈다.
+ *   그러자 상한 상수·race·타임아웃 분기가 함께 사라졌다(덧댄 장치가 사라지면 뿌리를 고친 것이다).
+ *   대신 일정 건수마다 이벤트 루프를 양보해 긴 판정이 프로세스를 붙잡지 않게 한다.
+ *
+ * ⚠ 실패·지연은 전부 삼킨다. 탐지 때문에 발송이 죽거나 늦으면 안 된다(fail-open).
+ */
+async function detectSpamBlock(contents: Map<string, number>, tables: string[], ctx?: SpamBlockContext): Promise<void> {
+  const authTable = await getAuthSmsTable();
+  // 시스템 발송(인증번호·조치 고지·내부 알림)은 검사 대상이 아니다 — 걸리면 로그인 자체가 막힌다
+  if (tables.length > 0 && tables.every((t) => t === authTable)) return;
+
+  const rules = await loadActiveRules();
+  if (rules.length === 0) return;
+
+  const entries: SpamBlockLogEntry[] = [];
+  let detected = 0;
+  let seen = 0;
+  for (const [content, count] of contents) {
+    const verdict = evaluateContent(content, rules, ctx?.companyId ?? null);
+    if (verdict.hits.length > 0) {
+      entries.push({ verdict, affectedRows: count, contentSample: content });
+      detected += count;
+    }
+    if (++seen % DETECT_YIELD_EVERY === 0) await yieldToLoop();
+  }
+  if (entries.length === 0) return;
+
+  console.warn(
+    `[spam-block] 탐지 ${detected}건 — 발송은 그대로 진행 (company=${ctx?.companyId || '-'} source=${ctx?.source || '-'})`
+  );
+  await logSpamBlockHits({ entries, companyId: ctx?.companyId, userId: ctx?.userId, source: ctx?.source });
+}
+
+/** 동시에 도는 탐지 작업 상한 — 넘으면 그 배치는 건너뛴다(조용히 버리지 않고 로그로 남긴다) */
+const DETECT_MAX_CONCURRENT = 2;
+let detectInFlight = 0;
+
+/**
+ * 탐지를 임계 경로 밖으로 던진다.
+ *
+ * ⛔ 상한을 두는 이유 (★0819 Codex 2R) — `void`로 던지기만 하면 호출마다 새 작업이 뜬다.
+ *   대량 발송이 겹치면 작업마다 문안 Map을 든 채 규칙을 스캔하고 PG INSERT를 내므로
+ *   heap·PG 대기열·이벤트 루프가 함께 포화된다. 동시 2건으로 묶고, 넘친 배치는 **건너뛴 사실을 남긴다.**
+ *
+ * ⛔ durable outbox·shutdown drain은 **일부러 만들지 않는다** — 잃는 것을 나란히 적어보면 답이 나온다.
+ *   지금 위험 = 재기동 시 진행 중이던 탐지 **로그 한 건** 유실(발송·돈과 무관).
+ *   덧대면 생기는 위험 = outbox 적체·drain 실패·워커 정지가 새 실패 축이 된다.
+ *   후자가 더 크므로 이 손실은 **명시적으로 수용한다**(LESSONS_BACKEND "덧댄 장치가 새 실패 축이 된다").
+ *   차단으로 승격할 때 증거 요건이 올라가면 그때 다시 판단한다.
+ */
+function dispatchSpamDetection(contents: Map<string, number>, tables: string[], ctx?: SpamBlockContext): void {
+  if (contents.size === 0) return;
+  if (detectInFlight >= DETECT_MAX_CONCURRENT) {
+    console.warn(
+      `[spam-block] 동시 탐지 상한(${DETECT_MAX_CONCURRENT}) 도달 — 이 배치는 탐지를 건너뛴다 ` +
+      `(company=${ctx?.companyId || '-'} source=${ctx?.source || '-'} 문안 ${contents.size}종)`
+    );
+    return;
+  }
+  detectInFlight += 1;
+  void detectSpamBlock(contents, tables, ctx)
+    .catch((err: any) => console.error('[spam-block] 탐지 실패 — 발송에는 영향 없다:', err?.message || err))
+    .finally(() => { detectInFlight -= 1; });
+}
+
 // ===== ★ D72: SMS/LMS/MMS bulk INSERT (성능 컨트롤타워) =====
 
 /**
@@ -1143,8 +1251,18 @@ export async function bulkInsertSmsQueue(
   tables: string[],
   rows: any[][],
   useNow: boolean = false,
+  ctx?: SpamBlockContext,
 ): Promise<number> {
   if (rows.length === 0) return 0;
+
+  // ★ 2026-08-18 전송자격인증 5.2 — 금칙어 **탐지**(0819 탐지 전용 · 임계 경로 밖).
+  //   발송이 실제로 시작되는 길목이 여기다(소비처 17곳이 전부 이 함수를 지난다).
+  //   ⛔ 막지도 않고 기다리지도 않는다 — 여기는 차감이 끝난 자리라 막으면 환불 정합이 깨지고,
+  //      기다리면 탐지 지연이 그대로 발송 지연이 된다.
+  //   여기서는 **스냅샷만** 뜬다(동기·가볍다). 뒤에 오는 적재가 rows를 손대도 판정이 흔들리지 않게 하려면
+  //   문안을 지금 떠 둬야 한다. 판정 자체는 적재가 성공한 뒤에 던진다(아래 dispatchSpamDetection).
+  //   컨트롤타워 = utils/spam-block.ts
+  const spamSnapshot = snapshotSendContents(rows);
 
   // ★ 2026-06-20: MMS/문자 라인 분리. 같은 라인에서 무거운 MMS가 문자를 막지 않도록
   //   회사 라인 안에서 MMS('M')와 문자('L'/'S')를 서로 겹치지 않는 라인으로 가른다.
@@ -1197,6 +1315,10 @@ export async function bulkInsertSmsQueue(
       }
     }
   }
+
+  // ★0819 Codex 2R — **적재가 성공한 뒤에만** 탐지를 던진다.
+  //   앞에서 던지면 큐에 한 건도 못 들어간 배치가 탐지 이력에는 N건으로 남아, 심사 증거와 실제가 어긋난다.
+  if (sentCount > 0) dispatchSpamDetection(spamSnapshot, tables, ctx);
 
   return sentCount;
 }

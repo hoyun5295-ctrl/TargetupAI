@@ -6,6 +6,7 @@ import { Request, Response, Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { query } from '../config/database';
+import { guardMachineOrigin } from '../utils/geo-access';
 import { ensureSystemSyncUser } from '../utils/system-sync-user';
 import { TIMEOUTS, RATE_LIMITS, BATCH_SIZES } from '../config/defaults';
 import { normalizePhone, normalizeRegion, normalizeDate, normalizeCustomFieldValue, salvageBirthParts } from '../utils/normalize';
@@ -176,6 +177,10 @@ async function syncAuth(req: SyncAuthRequest, res: Response, next: Function) {
         error: 'DB sync is not enabled for this company'
       });
     }
+
+    // ★ 2026-08-19 전송자격인증 2.2 — 싱크에이전트 출발지 통제.
+    //   국가가 아니라 회사별 등록 대역으로 본다. 미시행 상태에서는 기록만 한다.
+    if (!(await guardMachineOrigin(req, res, company.id, 'company_agent'))) return;
 
     req.companyId = company.id;
     req.companyName = company.company_name || company.name;

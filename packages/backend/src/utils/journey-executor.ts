@@ -959,7 +959,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
         (msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths[1]) ? extractBasename(step.mms_image_paths[1]) : '',
         (msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths[2]) ? extractBasename(step.mms_image_paths[2]) : '',
       ];
-      await bulkInsertSmsQueue(tables, [row], true);
+      await bulkInsertSmsQueue(tables, [row], true, { companyId: exec.company_id, source: 'journey' });
     }
 
     // ★ 2026-07-05 발송 피로도 카운터 — 광고성만(알림톡 정보성 제외), 큐 커밋 후 fire-and-forget
