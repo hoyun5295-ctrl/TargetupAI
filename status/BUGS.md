@@ -55,6 +55,14 @@
 
 ## 2) 활성 버그
 
+### 🟠 B-0821-4 슈퍼관리자 감사 로그 — 고객사 필터를 걸면 "총 0건"(서버 500이 빈 결과로 표시) (🟡 수정완료-검증대기) — 2026-08-21 (Harold 실측)
+
+- **증상** — 감사 로그에서 고객사 "테스트계정" 선택 후 조회 → 총 0건. "전체"에서는 같은 기간에 테스트계정 hoyun 로그인·로그아웃 행이 보인다.
+- **사실(PM2 에러 로그)** — `감사 로그 조회 실패: error: operator does not exist: text = uuid` (08-21 13:04·13:12·17:00 3회).
+- **원인** — [admin.ts `GET /audit-logs`](../packages/backend/src/routes/admin.ts) 고객사 절 `u.company_id = $N OR al.details->>'companyId' = $N` — 같은 `$N`을 uuid 컬럼과 `->>` text 비교에 공유. PG가 `$N`을 text로 추론한 뒤 `uuid = text`(42883)로 쿼리 거부 → 라우트 500. 화면 `loadAuditLogs`는 `res.ok`를 보지 않고 `data.logs || []`로 받아 0건으로 그렸다(오류가 빈 결과로 가려짐). 2026-07-01 `reconcileSyncUnsubscribes` 42P08과 같은 뿌리(한 파라미터를 두 타입 문맥에 재사용).
+- **조치** — 문맥별 명시 cast(`$N::uuid` / `$N::text`) + 화면은 `!res.ok`면 빈 결과 대신 오류 모달. 동일 패턴 전수 grep: `dm-interaction.ts:302`는 파라미터 분리($4/$5), `inapp-message.ts:1226`은 varchar=text 동타입 — 수정 대상은 admin.ts 1곳뿐. backend·frontend tsc 0.
+- **운영 검증(Harold 몫)** — 배포 후 고객사 "테스트계정" + 기간 08-14~08-21 조회 → hoyun 행이 나오고 총 건수 > 0. 통과하면 ✅ Closed.
+
 ### 🟡 B-0821-3 정산 — [선택 발송]이 묶음 회사에서 "보낼 미발송 장이 없습니다" 실패를 거짓 표시 (🟡 수정완료-검증대기) — 2026-08-21 (접수 `cmt2lh16200ezjnot2dke7nxe` 서수란 P2)
 
 - **증상** — 시세이도 8월 계정별 4장을 선택 발송 → "발송 성공 1건 / 실패 3건 — 보낼 미발송 장이 없습니다". 새로고침하면 4장 모두 [재발송]. 실제 메일이 나갔는지 알 수 없었다.

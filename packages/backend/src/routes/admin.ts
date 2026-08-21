@@ -4832,9 +4832,12 @@ router.get('/audit-logs', authenticate, requireSuperAdmin, async (req: Request, 
     }
 
     // 고객사 필터 (user의 company_id로)
+    // ★ 2026-08-21 같은 $N을 uuid 컬럼 비교와 text(->>) 비교에 함께 쓰면 PG가 $N을 text로 추론한 뒤
+    //   `u.company_id(uuid) = text`에서 42883 "operator does not exist: text = uuid"로 쿼리를 거부한다
+    //   (실측: 고객사 필터만 걸면 500 → 화면은 "총 0건"으로 그렸다). 문맥마다 명시 cast — LESSONS_DB 2026-07-01 같은 뿌리.
     if (companyId && companyId !== 'all') {
-      whereClause += ` AND (u.company_id = $${paramIndex} OR al.details->>'companyId' = $${paramIndex})`;
-      params.push(companyId);
+      whereClause += ` AND (u.company_id = $${paramIndex}::uuid OR al.details->>'companyId' = $${paramIndex}::text)`;
+      params.push(String(companyId));
       paramIndex++;
     }
 

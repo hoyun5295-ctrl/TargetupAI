@@ -1082,6 +1082,12 @@ const loadAuditLogs = async (page: number) => {
     if (auditToDate) params.set('toDate', auditToDate);
     const res = await fetch(`/api/admin/audit-logs?${params}`, { headers: { Authorization: `Bearer ${token}` } });
     const data = await res.json();
+    // ★ 2026-08-21 서버 오류(500)를 빈 결과("총 0건")로 그리지 않는다 — 고객사 필터 SQL 오류가 이 자리에서 가려졌다.
+    if (!res.ok) {
+      setAuditLogs([]); setAuditLogsTotal(0); setAuditLogsTotalPages(0); setAuditLogsPage(page);
+      showAlert('조회 실패', data?.error || '감사 로그를 조회하지 못했습니다. 잠시 후 다시 시도해 주세요.', 'error');
+      return;
+    }
     setAuditLogs(data.logs || []);
     setAuditLogsTotal(data.total || 0);
     setAuditLogsTotalPages(data.totalPages || 0);
