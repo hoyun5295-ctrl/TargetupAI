@@ -898,7 +898,7 @@ export default function CdpSettingsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-violet-950 text-white flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white flex items-center justify-center">
         <div className="text-white/50 flex items-center gap-2">
           <Loader2 className="w-4 h-4 animate-spin text-violet-400" />
           자사몰 진단 데이터를 불러오는 중...
@@ -908,7 +908,7 @@ export default function CdpSettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-violet-950 text-white">
+    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
 
       {/* 1. 상단 헤더 */}

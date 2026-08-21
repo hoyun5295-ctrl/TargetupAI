@@ -1744,7 +1744,7 @@ export default function JourneysPage() {
 
   return (
     // ★ D222+ Phase 1 (2026-05-27): 다크 톤 → 보라 그라데이션 톤 다운 + 시인성 강화 (text-white/50 → /80, /40 → /55)
-    <div className="min-h-screen bg-violet-950 text-white">
+    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
       {/* 헤더 — D222+ Phase 1: 보라 톤 다운 sticky */}
       <div className="border-b border-violet-400/30 bg-violet-800/50 backdrop-blur-md sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-3 md:px-6 py-3 md:py-4 flex items-center gap-2 md:gap-4">

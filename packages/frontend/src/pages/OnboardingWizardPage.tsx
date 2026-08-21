@@ -170,7 +170,7 @@ export default function OnboardingWizardPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-violet-950 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 flex items-center justify-center">
         <div className="text-white/60 text-sm">Wizard 로딩 중...</div>
       </div>
     );
@@ -178,7 +178,7 @@ export default function OnboardingWizardPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-violet-950 flex items-center justify-center px-4">
+      <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 flex items-center justify-center px-4">
         <div className="max-w-md w-full bg-violet-900/40 border border-rose-500/30 rounded-2xl p-6">
           <div className="flex items-center gap-3 mb-3">
             <AlertCircle className="w-6 h-6 text-rose-400" />
@@ -202,7 +202,7 @@ export default function OnboardingWizardPage() {
 
   return (
     // ★ D222+ Phase 3 (2026-05-27): 다크 → 보라 그라데이션 톤 다운
-    <div className="min-h-screen bg-violet-950 text-white">
+    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
       {/* sticky 헤더 — D222+ Phase 3 보라 톤 다운 */}
       <div className="sticky top-0 z-30 bg-violet-800/50 backdrop-blur-md border-b border-violet-400/30">
         <div className="max-w-6xl mx-auto px-4 md:px-6 py-4">

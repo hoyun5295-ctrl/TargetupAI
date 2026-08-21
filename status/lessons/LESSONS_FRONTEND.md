@@ -231,10 +231,10 @@
 
 > 라벨 3단 정책·1클릭 UX 정합·절대금지 항목은 **CLAUDE.md가 소유**한다(`design_quality_minimum_ceiling_free` / `marketing_user_ux_priority`). 여기 복사하지 않는다.
 
-> ⛔ **★2026-08-21 Harold 지시 — "AI가 만든 화면" 표면 신호 금지.** 위 표의 "그라데이션"은 **단색 타일·단색 배경**으로 읽는다.
-> 금지 = 세 방향 그라데이션 루트 배경(AI Operator 계열 지면은 `bg-violet-950` 단색, 작업 화면은 `bg-slate-950`) · 블러 글로우 다발(0~1개) ·
-> 그라데이션 글자(`bg-clip-text`) · 영문 대문자 eyebrow(`tracking-[0.3em] uppercase`) · "Enterprise Beta·검증 중" 류 배지 · 블러 그라데이션 테두리.
-> 제목 크기·컬러 타일·카드 구성·연출은 그대로 — **빼기로 고치지 않는다**(0821 허브 시안 2회 실패 경위 = memory `feedback_ai_tell_is_surface_signal_not_decoration`).
+> ⛔ **★2026-08-21 Harold 판정 — AI Operator 허브의 지면·글로우·유리 카드·그라데이션 글자는 그대로 둔다.** 같은 날 단색(violet-950 + 글로우 1)과
+> 라이트(gray-100) 두 안을 실물·위젯으로 보였는데 **둘 다 "기존이 낫다"**(A > 단색 > 라이트 — 대표 부부 일치). 깊이(세 방향 그라데이션 + 빛 3개 + 유리)가
+> 이 화면의 힘이다. **"퀄리티 상승"은 빼기(색·층·대비 감축)로 하지 않는다 — 네 번 졌다.** 허용된 변경 = 제목 크기 한 단 축소 + ! 호버 팝오버(제목 아래 중앙).
+> 경위·기각 설계서 = [AI Operator 표면 개편](../../docs/2026-08-21-ai-operator-surface-design.md) §13 · memory `feedback_ai_tell_is_surface_signal_not_decoration`.
 
 ---
 

@@ -453,7 +453,7 @@ export default function PredictiveDashboardPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-violet-950 text-white flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-violet-400" />
       </div>
     );
@@ -461,7 +461,7 @@ export default function PredictiveDashboardPage() {
 
   if (error || !distribution || !summary) {
     return (
-      <div className="min-h-screen bg-violet-950 text-white flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white flex items-center justify-center">
         <div className="text-center">
           <div className="text-rose-300 mb-2">{error || '데이터 조회 실패'}</div>
           <button onClick={() => navigate('/ai-operator')} className="px-4 py-2 bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 rounded">
