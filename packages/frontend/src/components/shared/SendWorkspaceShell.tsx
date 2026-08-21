@@ -59,6 +59,11 @@ export interface SendWorkspaceShellProps {
   /** 우측 본문 */
   children: ReactNode;
   /**
+   * ★ 2026-08-21 헤더 우측(창닫기 왼쪽) 행동 슬롯 — 채널 전환 카드(알림톡·브랜드메시지)처럼
+   *   "이 화면을 벗어나는 행동"을 둔다. 본문 도구줄에 섞으면 목록 도구처럼 읽힌다(직접 타겟 발송 접수).
+   */
+  headerActions?: ReactNode;
+  /**
    * 스크림 z-index 티어. 기본 z-[2000](인터럽트 티어).
    * 이 셸 위로 호출부(대시보드)가 z-[60]·z-[70] 모달(미리보기·특수문자·보관함·예약 시각)을 띄워야 하면
    * 옛 모달과 같은 `z-50`을 넘긴다. 포털은 body 끝에 붙어 같은 z면 나중 것이 위다.
@@ -68,7 +73,7 @@ export interface SendWorkspaceShellProps {
 
 export default function SendWorkspaceShell({
   show, onClose, title, subtitle, icon, accent = 'violet',
-  notice, aside, asideWidth = '380px', maxW = 'max-w-6xl', children, zClass = 'z-[2000]',
+  notice, aside, asideWidth = '380px', maxW = 'max-w-6xl', children, zClass = 'z-[2000]', headerActions,
 }: SendWorkspaceShellProps) {
   // ESC 닫기 — 백드롭 클릭은 작업 손실을 만들어 쓰지 않는다(2026-07-04 전면 제거 룰).
   useEffect(() => {
@@ -100,14 +105,17 @@ export default function SendWorkspaceShell({
               {subtitle && <p className="text-[11px] sm:text-xs text-slate-400 truncate mt-0.5">{subtitle}</p>}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="shrink-0 inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-sm text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
-          >
-            <X size={15} strokeWidth={1.75} />
-            <span className="hidden sm:inline">창닫기</span>
-          </button>
+          <div className="shrink-0 flex items-center gap-2">
+            {headerActions}
+            <button
+              type="button"
+              onClick={onClose}
+              className="shrink-0 inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-sm text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+            >
+              <X size={15} strokeWidth={1.75} />
+              <span className="hidden sm:inline">창닫기</span>
+            </button>
+          </div>
         </div>
 
         {notice && <div className="shrink-0 px-5 sm:px-7 pt-4">{notice}</div>}

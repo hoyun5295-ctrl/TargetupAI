@@ -150,7 +150,7 @@ interface TargetSendModalProps {
   // 타겟 재설정
   onResetTarget: () => void;
 
-  // ★ D162-4 (2026-05-15) 2차: 직접타겟발송 → 알림톡 발송 풀 화면 진입 callback. 수신번호 검색 옆 카카오 노란색 버튼.
+  // ★ D162-4 (2026-05-15) 2차: 직접타겟발송 → 알림톡 발송 풀 화면 진입 callback. ★2026-08-21 헤더 카드로 이동(headerActions).
   onAlimtalkOpen?: () => void;
   /** ★ 2026-08-21 직접 타겟 발송 → 브랜드메시지 발송. 추출된 수신자 목록을 그대로 들고 간다(알림톡과 같은 축). */
   onBrandOpen?: () => void;
@@ -466,7 +466,7 @@ export default function TargetSendModal({
   const composer = (
     <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-3">
       {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시. 채널 탭 자체 제거.
-          직접타겟발송 = 문자(SMS/LMS/MMS) 단일 모드. 알림톡은 수신자 목록 위 '알림톡 발송' 버튼으로 진입 → AlimtalkSendModal 풀 화면.
+          직접타겟발송 = 문자(SMS/LMS/MMS) 단일 모드. 알림톡·브랜드메시지는 헤더 카드(headerActions)로 진입 → 각 풀 화면.
           targetSendChannel state는 'sms' 고정. ★ 2026-08-17 죽어 있던 RCS 분기 제거(직접발송과 같은 축). */}
       {targetSendChannel === 'sms' && (<>
         {/* SMS/LMS/MMS 세그먼트 */}
@@ -774,6 +774,45 @@ export default function TargetSendModal({
       aside={composer}
       asideWidth="440px"
       maxW="max-w-[1400px]"
+      headerActions={(onAlimtalkOpen || onBrandOpen) ? (
+        <>
+          {/* ★ 2026-08-21 Harold 지적 — 수신자 표 머리에 끼어 있던 채널 버튼을 직접발송과 같은 헤더 카드로.
+              채널 전환은 "이 화면을 벗어나는 행동"이라 헤더가 제자리다. 색은 면이 아니라 아이콘 타일에만:
+              알림톡 = amber(채널 정체성), 브랜드메시지 = indigo(넘어가는 모달이 인디고 전용 진입). */}
+          {onAlimtalkOpen && (
+            <button
+              type="button"
+              onClick={onAlimtalkOpen}
+              className="group inline-flex items-center gap-2.5 pl-2 pr-2 sm:pr-3.5 py-1.5 rounded-xl bg-white ring-1 ring-slate-200 shadow-sm hover:ring-amber-300 hover:shadow-md transition text-left"
+              title="추출된 수신자에게 알림톡 발송"
+            >
+              <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-sm shadow-amber-500/30 shrink-0">
+                <Bell size={14} strokeWidth={2} className="text-white" />
+              </span>
+              <span className="leading-tight hidden sm:block">
+                <span className="block text-[13px] font-semibold text-slate-800">알림톡 발송</span>
+                <span className="hidden lg:block text-[10px] text-slate-400">검수 템플릿으로 보내기</span>
+              </span>
+            </button>
+          )}
+          {onBrandOpen && (
+            <button
+              type="button"
+              onClick={onBrandOpen}
+              className="group inline-flex items-center gap-2.5 pl-2 pr-2 sm:pr-3.5 py-1.5 rounded-xl bg-white ring-1 ring-slate-200 shadow-sm hover:ring-indigo-300 hover:shadow-md transition text-left"
+              title="추출된 수신자에게 브랜드메시지 발송"
+            >
+              <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center shadow-sm shadow-indigo-500/30 shrink-0">
+                <Megaphone size={14} strokeWidth={2} className="text-white" />
+              </span>
+              <span className="leading-tight hidden sm:block">
+                <span className="block text-[13px] font-semibold text-slate-800">브랜드메시지</span>
+                <span className="hidden lg:block text-[10px] text-slate-400">검수 없이 바로 보내기</span>
+              </span>
+            </button>
+          )}
+        </>
+      ) : undefined}
     >
       <div className="p-4 sm:p-6 flex flex-col min-h-full">
         {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: 알림톡 채널일 때만 변수 매칭 박스 노출. 문자 채널 영향 0. */}
@@ -797,26 +836,9 @@ export default function TargetSendModal({
             <span className={`${CUI_PILL_BASE} bg-indigo-100 text-indigo-700`}>총 {targetRecipients.length.toLocaleString()}건</span>
             {selectedPhones.size > 0 && <span className={`${CUI_PILL_BASE} bg-slate-100 text-slate-600`}>{selectedPhones.size}건 선택</span>}
           </div>
-          <div className="flex items-center gap-2">
-            {/* ★ D162-4 4차: 알림톡 버튼은 채널 정체성(amber) 유지. 추출된 수신자 그대로 알림톡 모달로 인계. */}
-            {onAlimtalkOpen && (
-              <button type="button" onClick={onAlimtalkOpen}
-                className="h-9 px-3 rounded-lg text-[13px] font-semibold text-amber-800 bg-amber-50 ring-1 ring-amber-200 hover:bg-amber-100 inline-flex items-center gap-1.5 transition"
-                title="추출된 수신자에게 알림톡 발송">
-                <Bell className="w-3.5 h-3.5" />
-                알림톡 발송
-              </button>
-            )}
-            {/* ★ 2026-08-21 브랜드메시지: 넘어가는 모달이 인디고(콘솔 톤)라 버튼도 인디고. 수신자 목록 그대로 인계. */}
-            {onBrandOpen && (
-              <button type="button" onClick={onBrandOpen}
-                className="h-9 px-3 rounded-lg text-[13px] font-semibold text-indigo-800 bg-indigo-50 ring-1 ring-indigo-200 hover:bg-indigo-100 inline-flex items-center gap-1.5 transition"
-                title="추출된 수신자에게 브랜드메시지 발송">
-                <Megaphone className="w-3.5 h-3.5" />
-                브랜드메시지 발송
-              </button>
-            )}
-            <div className="h-9 w-52 flex items-center gap-2 px-3 rounded-lg bg-slate-50 ring-1 ring-slate-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-500/50 transition">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            {/* ★ 2026-08-21 채널 전환(알림톡·브랜드메시지)은 헤더 카드로 올렸다(SendWorkspaceShell headerActions). 여기는 검색만. */}
+            <div className="h-9 w-full sm:w-56 flex items-center gap-2 px-3 rounded-lg bg-slate-50 ring-1 ring-slate-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-500/50 transition">
               <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
               <input
                 type="text"
