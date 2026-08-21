@@ -1178,10 +1178,11 @@ export interface ExtraItemSourceRow {
   /** 매핑 원장의 귀속 계정. 호출측 SQL이 그 회사 실재 계정일 때만 살려서 넘긴다 */
   map_user_id?: string | null;
   /**
-   * 같은 (회사·달·번호)에 현행 `080_call` 스냅샷이 있는가.
-   * 있으면 옛 `080_fee`·`080_svc` 행은 파생분과 겹치므로 청구하지 않는다(이중 계상 차단).
+   * 같은 (회사·달·번호)에 고정료 근거 행(`080_base`)이 있는가 (★2026-08-21 축 교체 — 서수란 0821 접수).
+   * 있으면 옛 `080_fee`·`080_svc` 행은 고정료 파생분과 겹치므로 청구하지 않는다(이중 계상 차단).
+   * 그전 축은 `080_call` 존재였다 — 고정료 파생을 `080_call`에서 `080_base`로 옮기면서 스킵 근거도 함께 옮겼다.
    */
-  has_call_snapshot?: boolean | null;
+  has_base_row?: boolean | null;
 }
 
 /** 옛 구조가 만든 고정료 행 — 현행 스냅샷이 없는 달에는 이 행이 그 달의 유일한 근거다. */
@@ -1191,16 +1192,17 @@ const LEGACY_080_KIND_TO_TYPE: Record<string, string> = {
 };
 
 /**
- * (순수) 발행을 막아야 하는 행 — **매핑이 사라진 `080_call` 스냅샷.**
+ * (순수) 발행을 막아야 하는 행 — **매핑이 사라진 `080_call` 스냅샷·`080_base` 고정료 근거 행.**
  *
  * ★ 2026-08-04 Codex 적대검증 수용. 그전에는 매핑이 없으면 통화료만 청구하는 폴백을 뒀는데,
  *   그것이 fail-open이었다 — `charge_call_fee=false`로 등록해 통화료를 안 받던 번호도 매핑을 지우거나
  *   다른 회사로 옮기는 순간 **없던 통화료가 새로 청구된다.** 근거가 사라진 금액은 내보내지 않고 멈춘다.
  *   (옛 `080_fee`·`080_svc` 행은 자기 금액이 그 달의 근거라 여기 해당하지 않는다.)
+ * ★ 2026-08-21 `080_base`도 같은 규칙 — 금액 전부를 원장에서 읽는 행이라 원장이 사라지면 근거가 없다.
  */
 export function extraRowsBlockingIssue(rows: ExtraItemSourceRow[]): Array<{ sourceRef: string; periodMonth: string }> {
   return (rows || [])
-    .filter((r) => String(r?.kind || '') === '080_call' && !r?.map_found)
+    .filter((r) => ['080_call', '080_base'].includes(String(r?.kind || '')) && !r?.map_found)
     .map((r) => ({ sourceRef: String(r?.source_ref || ''), periodMonth: toDayKey(r?.period_month) }));
 }
 
@@ -1229,11 +1231,11 @@ export const EXTRA_ITEM_SOURCE_SELECT = `
               en.charge_call_fee AS map_charge_call_fee,
               en.label AS map_label,
               CASE WHEN enu.id IS NULL THEN NULL ELSE en.user_id END AS map_user_id,
-              EXISTS (SELECT 1 FROM billing_extra_items c080
-                       WHERE c080.company_id = e.company_id
-                         AND c080.period_month = e.period_month
-                         AND c080.kind = '080_call'
-                         AND c080.source_ref = e.source_ref) AS has_call_snapshot,
+              EXISTS (SELECT 1 FROM billing_extra_items b080
+                       WHERE b080.company_id = e.company_id
+                         AND b080.period_month = e.period_month
+                         AND b080.kind = '080_base'
+                         AND b080.source_ref = e.source_ref) AS has_base_row,
               -- ★ 2026-08-05 그 번호의 매핑이 **어느 회사에든** 있는가. 위 map_found는 회사로 조인해서
               --   "타사로 옮겨졌다"와 "매핑이 아예 없다"를 구분하지 못한다 — 그 둘은 처분이 반대다.
               EXISTS (SELECT 1 FROM billing_080_numbers a080
@@ -1255,9 +1257,9 @@ export function extraRowUserId(r: ExtraItemSourceRow): string | null {
   const kind = String(r?.kind || '');
   if (kind === 'manual') return r?.user_id ? String(r.user_id) : null;
   if (r?.map_user_id) return String(r.map_user_id);
-  // 현행 스냅샷은 귀속을 저장하지 않는다 — 원장이 없으면 귀속도 없다(그 행은 발행이 막힌다).
+  // 현행 행(080_call·080_base)은 귀속을 저장하지 않는다 — 원장이 없으면 귀속도 없다(그 행은 발행이 막힌다).
   // 옛 고정료 행만 자기 값으로 폴백한다. 그 행은 금액도 자기 값이 근거다.
-  if (kind === '080_call') return null;
+  if (kind === '080_call' || kind === '080_base') return null;
   return r?.user_id ? String(r.user_id) : null;
 }
 
@@ -1269,7 +1271,11 @@ export function extraRowUserId(r: ExtraItemSourceRow): string | null {
  * 항목줄 수량 표시는 buildInvoiceLines가 extra 채널 전용으로 합친 행 수를 세어 담당한다.
  * 금액은 공급가 정수라 amount === amountExact(절사 멱등).
  *
- * `080_call` 스냅샷 1행에서 **최대 3개**(이용료·KT 부가서비스·통화료)를 파생한다.
+ * ★ 2026-08-21 고정료의 근거를 명세서에서 발행으로 옮겼다(서수란 0821 접수 — "명세서를 안 올리면
+ *   기본 설정이 정산에서 빠진다"는 전 고객사 공통 함정. 고정료는 KT 명세서와 무관한 월정액이다):
+ *  - `080_base`(발행 코어가 정산월마다 활성 매핑에서 자동 생성) 1행 → 이용료·KT 부가서비스 파생
+ *  - `080_call`(KT 명세서 [반영]) 1행 → **통화료만** 파생. 그전에는 이 행이 고정료까지 파생해서,
+ *    명세서가 없는 달은 고정료가 통째로 빠졌다. 고정료를 남기면 `080_base`와 이중 계상이라 뺐다.
  * 금액 0은 줄을 만들지 않는다 — 무료 회사(리스킨)는 그 항목이 아예 없는 것이 맞다.
  *
  * **원장 상태가 곧 청구 상태다**(0803 접수 4건이 이 한 문장으로 닫힌다):
@@ -1277,8 +1283,9 @@ export function extraRowUserId(r: ExtraItemSourceRow): string | null {
  *  - **비활성 → 0줄**(신성통상 — 무료 전환을 비활성으로 표현했는데 이용료가 계속 청구됐다)
  *  - **매핑 없음 → 0줄이면서 발행 차단**(`extraRowsBlockingIssue`). 근거가 사라진 금액은 안 내보낸다
  *
- * 옛 `080_fee`·`080_svc` 행은 자기 금액이 그 달의 근거라 그대로 싣는다. 단 같은 번호에 현행
- * `080_call` 스냅샷이 있으면 파생분과 겹치므로 건너뛴다 — 그 겹침이 이중 계상이다.
+ * 옛 `080_fee`·`080_svc` 행은 자기 금액이 그 달의 근거라 그대로 싣는다. 단 같은 번호에 고정료
+ * 근거 행(`080_base`)이 있으면 파생분과 겹치므로 건너뛴다 — 그 겹침이 이중 계상이다.
+ * (발행 코어의 자동 생성도 옛 행이 있는 달은 양보한다 — 두 규칙이 짝이다.)
  */
 export function buildExtraBillingItems(rows: ExtraItemSourceRow[]): PricedBillingItem[] {
   const won = (v: any) => Math.round(Number(v) || 0);
@@ -1312,10 +1319,15 @@ export function buildExtraBillingItems(rows: ExtraItemSourceRow[]): PricedBillin
     }
     // 비활성 = 그 번호의 청구 중단. 매핑 없음과 달리 사람이 명시한 상태라 차단이 아니라 0줄이다.
     if (r?.map_found && r?.map_is_active === false) continue;
-    if (kind === '080_call') {
+    if (kind === '080_base') {
       if (!r?.map_found) continue; // 근거 소멸 — 금액을 만들지 않는다(발행은 별도로 막힌다)
       push('EXTRA_080_FEE', won(r.map_monthly_fee_supply));
       push('EXTRA_080_SVC', won(r.map_kt_fee_supply));
+      continue;
+    }
+    if (kind === '080_call') {
+      if (!r?.map_found) continue; // 근거 소멸 — 금액을 만들지 않는다(발행은 별도로 막힌다)
+      // ★ 2026-08-21 통화료만 — 고정료 파생은 `080_base`가 소유한다(위 문서 주석).
       if (r.map_charge_call_fee) push('EXTRA_080_CALL', won(r.supply_amount));
       continue;
     }
@@ -1330,7 +1342,7 @@ export function buildExtraBillingItems(rows: ExtraItemSourceRow[]): PricedBillin
     //   정상 청구가 조용히 사라진다(과소청구). 0805 실측 = 미청구 옛 행 24건 전부 매핑 존재,
     //   그중 타사 이전은 리스킨 2행뿐이라 이 규칙이 바꾸는 것은 그 2행이다.
     if (r?.map_exists_any && !r?.map_found) continue;
-    if (!r?.has_call_snapshot) push(legacyType, won(r?.supply_amount));
+    if (!r?.has_base_row) push(legacyType, won(r?.supply_amount));
   }
   return out;
 }

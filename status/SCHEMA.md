@@ -1495,6 +1495,13 @@
 | status | varchar(20) | draft/published |
 | created_at | timestamptz | |
 | updated_at | timestamptz | |
+| **design_variant** | **jsonb** | **★2026-08-20 ALTER 실행완료** — 발행 시점 디자인 변형 스냅샷(팔레트·타입스케일·시드). 시드가 시간 해시라 이 값 없이는 재열람 재현 불가 |
+| **recommended_engine** | **jsonb** | **★2026-08-20** — 엔진 자동 선정 근거 스냅샷 |
+| **render_schema_version** | **integer** | **★2026-08-20** — 렌더 계약 버전 |
+| **media_assets** | **jsonb** | **★2026-08-20** — 산출 이미지 포인터(MMS·알림톡 PNG — 2차 발송 워커 조회용) |
+
+> ⚠ **이 4컴럼은 hanjulDM(한줄전단) 소유**다 — 같은 PG 인스턴스를 쓸 뿐 코드는 완전 별도 레포이다.
+> 사용처·계약 = hanjulDM `status/hanjul-flyer-revamp/13_w3_tool_super_versionup_design.md` §2-1이 소유. 한줄로 코드가 이 컴럼을 읽거나 쓰지 않는다.
 
 ### short_urls (전단AI — 단축URL)
 

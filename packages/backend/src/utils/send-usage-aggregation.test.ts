@@ -353,31 +353,44 @@ describe('장별 절사 계약 — 합산 vs 계정별 (2026-07-30)', () => {
 // ★ 2026-08-04 원장 파생 회귀 차단 — 서수란 0803 접수 2건의 계약.
 //   [반영]이 매핑 원장의 값을 항목 행에 복사해 굳혀서, 매핑을 고쳐도 청구서가 옛 값으로 나갔다.
 //   이제 스냅샷은 통화료 하나뿐이고 나머지는 발행 시점에 원장에서 읽는다 — 그 계약을 여기서 고정한다.
-describe('추가 항목 파생 — 매핑 원장이 진실 (2026-08-04)', () => {
+// ★ 2026-08-21 고정료 축 분리(서수란 0821 접수) — 고정료(이용료·KT 부가서비스)는 발행 코어가
+//   정산월마다 만드는 `080_base` 행이 파생하고, `080_call`은 통화료만 파생한다. 명세서가 없는 달에
+//   고정료가 통째로 빠지던 전 고객사 공통 함정과, 두 행이 겹칠 때의 이중 계상을 함께 고정한다.
+describe('추가 항목 파생 — 매핑 원장이 진실 (2026-08-04 · 2026-08-21 고정료 축 분리)', () => {
   const snap = (over: Partial<ExtraItemSourceRow> = {}): ExtraItemSourceRow => ({
     kind: '080_call', supply_amount: 7096, period_month: '2026-07-01', source_ref: '0805647720',
     user_id: null, map_found: true, map_is_active: true, map_monthly_fee_supply: 9000, map_kt_fee_supply: 4000,
     map_charge_call_fee: true, map_user_id: null, ...over,
   });
+  const base = (over: Partial<ExtraItemSourceRow> = {}): ExtraItemSourceRow =>
+    snap({ kind: '080_base', supply_amount: 0, ...over });
   const byType = (rows: ExtraItemSourceRow[]) =>
     Object.fromEntries(buildExtraBillingItems(rows).map((i) => [i.typeKey, i.amount]));
 
-  it('매핑 기본값 — 이용료·부가서비스·통화료 3줄', () => {
-    expect(byType([snap()])).toEqual({ EXTRA_080_FEE: 9000, EXTRA_080_SVC: 4000, EXTRA_080_CALL: 7096 });
+  it('매핑 기본값 — 고정료 행+통화료 행에서 이용료·부가서비스·통화료 3줄', () => {
+    expect(byType([base(), snap()])).toEqual({ EXTRA_080_FEE: 9000, EXTRA_080_SVC: 4000, EXTRA_080_CALL: 7096 });
+  });
+
+  it('★0821 — 명세서(080_call) 없는 달도 고정료 행만으로 이용료·부가서비스가 실린다', () => {
+    expect(byType([base()])).toEqual({ EXTRA_080_FEE: 9000, EXTRA_080_SVC: 4000 });
+  });
+
+  it('★0821 — 080_call은 고정료를 파생하지 않는다(080_base와의 이중 계상 차단). 통화료 한 줄뿐', () => {
+    expect(byType([snap()])).toEqual({ EXTRA_080_CALL: 7096 });
   });
 
   it('★접수1(시세이도) — 이용료 10만·부가서비스 0·통화료 미청구로 고치면 이용료 한 줄만 나간다', () => {
-    // 스냅샷(supply_amount=7096)은 그대로인데 원장을 고쳤다 = 접수 당시 청구서가 9,000/4,000/7,096으로 나간 상황.
-    const out = byType([snap({ map_monthly_fee_supply: 100000, map_kt_fee_supply: 0, map_charge_call_fee: false })]);
-    expect(out).toEqual({ EXTRA_080_FEE: 100000 });
+    // 행은 그대로인데 원장을 고쳤다 = 접수 당시 청구서가 9,000/4,000/7,096으로 나간 상황.
+    const over = { map_monthly_fee_supply: 100000, map_kt_fee_supply: 0, map_charge_call_fee: false };
+    expect(byType([base(over), snap(over)])).toEqual({ EXTRA_080_FEE: 100000 });
   });
 
-  it('★접수2(금강제화) — 귀속은 매핑 원장이 소유한다. 스냅샷 user_id가 비어 있어도 계정 장으로 간다', () => {
-    const row = snap({ user_id: null, map_user_id: 'u-kumkang' });
-    expect(extraRowUserId(row)).toBe('u-kumkang');
-    expect(buildExtraBillingItems([row]).every((i) => i.userId === 'u-kumkang')).toBe(true);
+  it('★접수2(금강제화) — 귀속은 매핑 원장이 소유한다. 행 user_id가 비어 있어도 계정 장으로 간다', () => {
+    const rows = [base({ user_id: null, map_user_id: 'u-kumkang' }), snap({ user_id: null, map_user_id: 'u-kumkang' })];
+    for (const row of rows) expect(extraRowUserId(row)).toBe('u-kumkang');
+    expect(buildExtraBillingItems(rows).every((i) => i.userId === 'u-kumkang')).toBe(true);
     // 그리고 그 항목들은 실제로 그 계정 장에 실린다(마커가 걸리는 장과 같아야 한다).
-    const sheets = splitBillingSheets(buildExtraBillingItems([row]), 'by_user');
+    const sheets = splitBillingSheets(buildExtraBillingItems(rows), 'by_user');
     expect(sheets.find((s) => s.userId === 'u-kumkang')!.items).toHaveLength(3);
     expect(sheets.find((s) => s.sheetScope === 'common')!.items).toHaveLength(0);
   });
@@ -392,38 +405,46 @@ describe('추가 항목 파생 — 매핑 원장이 진실 (2026-08-04)', () => 
   });
 
   it('★접수4(신성통상) — 비활성으로 바꾸면 이용료가 더는 청구되지 않는다', () => {
-    const row = snap({ map_is_active: false });
-    expect(buildExtraBillingItems([row])).toEqual([]);
+    const rows = [base({ map_is_active: false }), snap({ map_is_active: false })];
+    expect(buildExtraBillingItems(rows)).toEqual([]);
     // 비활성은 사람이 명시한 청구 중단이므로 발행을 막지 않는다 — 매핑 없음과 다른 상태다.
-    expect(extraRowsBlockingIssue([row])).toEqual([]);
+    expect(extraRowsBlockingIssue(rows)).toEqual([]);
   });
 
   it('★매핑이 사라지면 아무것도 청구하지 않고 발행을 막는다 — 없던 통화료가 새로 붙던 fail-open 차단', () => {
-    const row = snap({ map_found: false, map_charge_call_fee: null });
-    expect(buildExtraBillingItems([row])).toEqual([]);
-    expect(extraRowsBlockingIssue([row])).toEqual([{ sourceRef: '0805647720', periodMonth: '2026-07-01' }]);
+    const rows = [base({ map_found: false }), snap({ map_found: false, map_charge_call_fee: null })];
+    expect(buildExtraBillingItems(rows)).toEqual([]);
+    expect(extraRowsBlockingIssue(rows)).toEqual([
+      { sourceRef: '0805647720', periodMonth: '2026-07-01' },
+      { sourceRef: '0805647720', periodMonth: '2026-07-01' },
+    ]);
     // 정상 행·수기 항목은 차단 대상이 아니다.
-    expect(extraRowsBlockingIssue([snap(), { kind: 'manual', supply_amount: 50000, period_month: '2026-07-01' }])).toEqual([]);
+    expect(extraRowsBlockingIssue([base(), snap(), { kind: 'manual', supply_amount: 50000, period_month: '2026-07-01' }])).toEqual([]);
   });
 
   it('전액 무료 번호(리스킨류) — 0원은 줄을 만들지 않는다', () => {
-    expect(buildExtraBillingItems([snap({
-      supply_amount: 0, map_monthly_fee_supply: 0, map_kt_fee_supply: 0, map_charge_call_fee: false,
-    })])).toEqual([]);
+    expect(buildExtraBillingItems([
+      base({ map_monthly_fee_supply: 0, map_kt_fee_supply: 0, map_charge_call_fee: false }),
+      snap({ supply_amount: 0, map_monthly_fee_supply: 0, map_kt_fee_supply: 0, map_charge_call_fee: false }),
+    ])).toEqual([]);
   });
 
-  it('★옛 080_fee·080_svc 행 — 현행 스냅샷이 있으면 건너뛰고(이중 계상 차단), 없으면 그 행이 유일한 근거라 청구한다', () => {
-    const legacy = (kind: string, amount: number, hasCall: boolean): ExtraItemSourceRow => ({
+  it('★옛 080_fee·080_svc 행 — 고정료 근거 행(080_base)이 있으면 건너뛰고(이중 계상 차단), 없으면 그 행이 유일한 근거라 청구한다', () => {
+    const legacy = (kind: string, amount: number, hasBase: boolean): ExtraItemSourceRow => ({
       kind, supply_amount: amount, period_month: '2026-07-01', source_ref: '0805647720',
-      map_found: true, map_is_active: true, has_call_snapshot: hasCall,
+      map_found: true, map_is_active: true, has_base_row: hasBase,
     });
-    // 현행 스냅샷이 대신 파생한다 → 옛 행은 0줄
+    // 고정료 근거 행이 대신 파생한다 → 옛 행은 0줄
     expect(buildExtraBillingItems([legacy('080_fee', 9000, true), legacy('080_svc', 4000, true)])).toEqual([]);
-    // 통화료 미청구 회사는 옛 구조에서 080_call이 아예 안 만들어졌다 — 그 달의 유일한 근거라 청구한다
+    // 옛 행이 있는 달은 발행 코어가 080_base를 만들지 않는다 — 그 달의 유일한 근거라 청구한다
     expect(byType([legacy('080_fee', 9000, false), legacy('080_svc', 4000, false)]))
       .toEqual({ EXTRA_080_FEE: 9000, EXTRA_080_SVC: 4000 });
     // 비활성으로 바꾸면 옛 행도 멈춘다
     expect(buildExtraBillingItems([{ ...legacy('080_fee', 9000, false), map_is_active: false }])).toEqual([]);
+    // ★0821 통화료 스냅샷 존재는 더는 스킵 근거가 아니다 — 080_call은 고정료를 파생하지 않으므로
+    //   옛 행+080_call 조합(0804 이전 반영분)에서 고정료는 옛 행이 내야 한다(빠지면 과소청구).
+    expect(byType([{ ...legacy('080_fee', 9000, false) }, snap()]))
+      .toEqual({ EXTRA_080_FEE: 9000, EXTRA_080_CALL: 7096 });
   });
 
   it('★재오픈(리스킨) — 매핑을 다른 회사로 옮기면 옛 행도 그 회사에서 청구되지 않는다', () => {
@@ -433,7 +454,7 @@ describe('추가 항목 파생 — 매핑 원장이 진실 (2026-08-04)', () => 
       kind, supply_amount: amount, period_month: '2026-07-01', source_ref: '0805663330',
       map_found: false,        // 이 회사에는 매핑이 없다
       map_exists_any: true,    // 그런데 그 번호의 매핑은 (다른 회사에) 있다 = 사람이 옮겼다
-      has_call_snapshot: false,
+      has_base_row: false,
     });
     expect(buildExtraBillingItems([moved('080_fee', 9000), moved('080_svc', 4000)])).toEqual([]);
   });
@@ -441,13 +462,13 @@ describe('추가 항목 파생 — 매핑 원장이 진실 (2026-08-04)', () => 
   it('★매핑이 아예 없는 옛 행은 종전대로 청구한다 — 원장 도입 전 행까지 막으면 과소청구다', () => {
     const orphan: ExtraItemSourceRow = {
       kind: '080_fee', supply_amount: 9000, period_month: '2026-07-01', source_ref: '0809999999',
-      map_found: false, map_exists_any: false, has_call_snapshot: false,
+      map_found: false, map_exists_any: false, has_base_row: false,
     };
     expect(byType([orphan])).toEqual({ EXTRA_080_FEE: 9000 });
   });
 
   it('항목줄은 같은 단가끼리 합쳐 참 산식으로 인쇄된다 — 시세이도 3개 부서 10만원', () => {
-    const rows = ['0805647710', '0805647720', '0805647730'].map((n) => snap({
+    const rows = ['0805647710', '0805647720', '0805647730'].map((n) => base({
       source_ref: n, map_monthly_fee_supply: 100000, map_kt_fee_supply: 0, map_charge_call_fee: false,
     }));
     expect(sumFlooredInvoiceLines(buildExtraBillingItems(rows) as any)).toBe(300000);

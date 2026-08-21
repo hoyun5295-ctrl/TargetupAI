@@ -58,7 +58,7 @@
 
 ### 다음 세션 (예정)
 > 경위·범위·확정 사실은 링크가 소유한다. 여기엔 제목·다음 한 수·호출어만.
-> ⓪ **AI 마케팅 진단 — v6~v9 + 정정 3건 배포완료(0817)** — 호출어 **"마케팅 진단"** → **[FEATURE-MARKETING-DIAGNOSIS.md](../docs/FEATURE-MARKETING-DIAGNOSIS.md)가 전부 소유**(§12 v6~v9 · 이력 §8 · 함정 §9). seed·SQL·DDL 0. **잔여 = 실측만**(v3 §8 12종 · v6 K-1·K-2·K-4~K-7 · v7 P-1~P-6) + 추가 과제 = PRESCRIPTIONS 도달 불가 변형 7종(§12 「남은 것」 2)
+> ⓪ **AI 마케팅 진단 — v10 배포완료(0820)** — 호출어 **"마케팅 진단"** → [FEATURE-MARKETING-DIAGNOSIS.md](../docs/FEATURE-MARKETING-DIAGNOSIS.md) §12 v10이 전부 소유. 잔여 = 실측만
 > ① **템플릿** — 호출어 **"템플릿"** → **[FEATURE-ALIMTALK-TEMPLATE.md](../docs/FEATURE-ALIMTALK-TEMPLATE.md)가 전부 소유**(구조·불변 원칙·이관 절차·이력 §6·남은 것 §5). 여기 다시 쓰지 않는다.
 > ② **0718 성능 후속** — 관측 사이클 1회전: 1순위 campaigns 발송 폴러 인덱스(EXPLAIN 후 처방) · 2순위 `balance_transactions` 잔액 SUM N+1(호출처 추적) · 그 후 M3/롤업. [핸드오프](docs/2026-07-18-frontend-splitting-incident-handoff.md) · [[project_2026_0717_dashboard_performance]]
 > ③ **아임웹·아이디룩 시연** — 스토어 등록 확인 → 테스트 몰 OAuth 리허설(pm2 로그+회원가입 1건 webhook) → 시연. INTEGRATIONS.md 아임웹 카드 · [[project_2026_0719_imweb_appstore_idlook]]
@@ -81,8 +81,9 @@
 > ⑳ **오퍼레이터 발송 축 — 출처·타겟 정정 배포완료** — 호출어 **"오퍼레이터 발송 축"** → [오퍼레이터 발송 축](../docs/2026-08-18-operator-send-axis.md)가 전부 소유 (잔여 = §5)
 > ㉑ **접속 인계 — 배포완료·실측 확인됨(0818)** — 호출어 **"접속 인계"** → [접속 인계](../docs/2026-08-18-session-takeover.md)가 전부 소유. DDL 0 · 계약 10건
 > ㉒ **전송자격인증제 — 개발 축 전량 배포완료(0820 확인)** — 호출어 **"전송자격인증"** → [전송자격인증](../docs/2026-08-18-transmission-qualification-cert.md)가 전부 소유. **다음 세션은 §4-D 원장부터**. 남은 개발 = 5.2 차단 승격 하나 · 시행 스위치 3개 미설정 · 운영 잔여 6건
-> ㉓ **정산월 축 — 라벨 + 재오픈 정정 배포완료(0820)** — 호출어 **"정산"** → [정산 §2-17·§8](../docs/FEATURE-BILLING.md)이 전부 소유. 정산월 = 사람이 정하는 라벨(기본 종료월) + 추가항목 귀속 축 = 청구월 = 정산월(7곳). Codex 5R approve ×2 · DDL 0. 다음 = **시세이도 재테스트**(발행 삭제 → 7/16~8/15 재생성 → 8월분 8건만 실리는지)
+> ㉓ **정산 — 0821 080 고정료 자동 파생·작성일자 정합 코드완료·배포 대기** — 호출어 **"정산"** → [정산 §2-18·§2-19·§8](../docs/FEATURE-BILLING.md)이 전부 소유(서수란 0821 접수 2건 · Codex 6R approve · DDL 0). 다음 = **배포 → 실측 3**(문서 §8 0821행)
 > ㉔ **캠페인 대행 3차 + 발송ID 표기 정규화 — 배포완료(0820)** — 호출어 **"캠페인 대행"** → [구현 기록 §14](../docs/2026-07-09-crm-campaign-agency-implementation.md)가 소유. 자격 판정 플래그 단일화(STAFF 4개사 개방) · 고객 제안서 다운로드 · 상태 자동 전이 · 매핑 대문자 정규화. 다음 = 실측 4(§14) + 추가 과제 3(§13)
+> ㉕ **한줄전단 슈퍼버전업 W3 — 배포완료(0820)** — ★별도 프로젝트(hdm-push). 호출어 **"한줄전단 버전업"** → hanjulDM 그쪽 13번 설계서가 전부 소유. 다음 = DDL + 실측
 > (지속) 비토 API 발송 경로 전환 검토 [[project_2026_0710_bito_api_direct_test]] · (보류) 팝폰 SDK 검증
 
 ---

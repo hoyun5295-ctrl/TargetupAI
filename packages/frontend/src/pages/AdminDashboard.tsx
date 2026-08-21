@@ -1653,6 +1653,11 @@ const [taxbillCancelBusy, setTaxbillCancelBusy] = useState(false);
 //   화면은 `발행 완료`로 보여줬다. 그 거짓말을 뱃지로 걷어내고 되돌릴 창구를 연다.
 const [taxbillProdTarget, setTaxbillProdTarget] = useState<any | null>(null);
 const [taxbillProdBusy, setTaxbillProdBusy] = useState(false);
+// ★ 2026-08-21 작성일자 변경(서수란 접수 — 라프레리) — 자동 정책(익월 1일)이 만든 작성일자를
+//   발행 전(ready/failed 원본 장)에 담당자가 고치는 창구. 문서번호는 그대로 유지된다.
+const [taxbillDateTarget, setTaxbillDateTarget] = useState<any | null>(null);
+const [taxbillDateValue, setTaxbillDateValue] = useState('');
+const [taxbillDateBusy, setTaxbillDateBusy] = useState(false);
 // ★ 2026-07-29 수동 정산완료 — 우리 정산으로 발행할 수 없어 사람이 따로 처리한 회사의 그 달 기록.
 //   담긴 좌/우 목록의 다중 선택(빼기)도 여기에 둔다 — 91개사를 한 줄씩 빼는 것은 쓸 수 없다.
 const [bulkManualRows, setBulkManualRows] = useState<any[]>([]);
@@ -2067,6 +2072,32 @@ const handleTaxbillRetry = async (issueId: string, opts?: { reason: string }) =>
     loadTaxbillIssues();
   } catch (e: any) {
     setBillingToast({ msg: e?.message || '재시도 요청 실패', type: 'error' });
+  }
+};
+
+// ★ 2026-08-21 작성일자 변경 — ready/failed 원본 장만(서버와 같은 화이트리스트). 문서번호는 유지된다.
+//   failed 건은 서버가 ready로 복귀시켜 변경+재시도가 한 번에 끝난다.
+const handleTaxbillIssueDateChange = async () => {
+  if (!taxbillDateTarget) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(taxbillDateValue)) { setBillingToast({ msg: '작성일자를 선택해 주세요', type: 'error' }); return; }
+  setTaxbillDateBusy(true);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/admin/billing/taxbill-issues/${taxbillDateTarget.id}/issue-date`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ issue_date: taxbillDateValue }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || '작성일자 변경 실패');
+    setBillingToast({ msg: data?.message || '작성일자를 변경했습니다', type: 'success' });
+    setTaxbillDateTarget(null);
+    setTaxbillDateValue('');
+    loadTaxbillIssues();
+  } catch (e: any) {
+    setBillingToast({ msg: e?.message || '작성일자 변경 실패', type: 'error' });
+  } finally {
+    setTaxbillDateBusy(false);
   }
 };
 
@@ -11164,13 +11195,22 @@ const handleApproveRequest = async (id: string) => {
                                     title="아직 발행 전입니다. 큐에서 내려 워커가 보내지 않게 합니다."
                                     className="shrink-0 px-2 py-0.5 border border-rose-300 bg-rose-50 text-rose-700 rounded text-[10px] font-semibold hover:bg-rose-100">발급 대기 취소</button>
                                 )}
+                                {/* ★ 2026-08-21 작성일자 변경(서수란 접수 — 라프레리) — 자동 정책(익월 1일)이 만든 작성일자를
+                                    발행 전에 고치는 유일한 창구. 승인번호가 생긴 뒤에는 국세청 사실이라 잠근다(서버와 같은 화이트리스트). */}
+                                {(t.status === 'ready' || t.status === 'failed') && t.kind === 'original' && !t.nts_confirm_num && (
+                                  <button onClick={() => { setTaxbillDateTarget(t); setTaxbillDateValue(String(t.issue_date || '').slice(0, 10)); }}
+                                    title="계산서에 적힐 작성일자를 바꿉니다. 문서번호는 그대로입니다."
+                                    className="shrink-0 px-2 py-0.5 border border-indigo-300 bg-indigo-50 text-indigo-700 rounded text-[10px] font-semibold hover:bg-indigo-100">작성일자 변경</button>
+                                )}
                               </div>
                               <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-400">
                                 {t.nts_confirm_num ? <span>승인번호 {t.nts_confirm_num}</span> : <span>승인번호 대기</span>}
                                 {t.org_nts_confirm_num && <span>당초 {t.org_nts_confirm_num}</span>}
                                 {t.issued_at && <span>발행 {new Date(t.issued_at).toLocaleString('ko-KR')}</span>}
                               </div>
-                              {t.error && (
+                              {/* ★ 2026-08-21 실패 사유는 failed일 때만 보여준다 — [재시도]가 error를 지우지 않게
+                                  바뀌어(작성일자 변경 자격 보존), ready로 올라간 행에도 옛 사유가 남아 있다. */}
+                              {t.error && t.status === 'failed' && (
                                 <p className="mt-1 px-2 py-1.5 bg-rose-50 text-rose-700 rounded text-[11px] whitespace-pre-wrap">{t.error}</p>
                               )}
                             </div>
@@ -11241,6 +11281,39 @@ const handleApproveRequest = async (id: string) => {
                     <button onClick={handleTaxbillCancel} disabled={taxbillCancelBusy || !taxbillCancelReason.trim()}
                       className="flex-1 px-4 py-3 bg-rose-600 text-white font-semibold hover:bg-rose-700 transition-colors disabled:opacity-50">
                       {taxbillCancelBusy ? '처리 중...' : '발급 대기에서 내리기'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── 작성일자 변경 모달 (★2026-08-21 서수란 접수 — 라프레리) ── */}
+            {taxbillDateTarget && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+                  <div className="p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-1">작성일자 변경</h3>
+                    <p className="text-sm text-gray-600 mb-1">
+                      <strong>{taxbillDateTarget.company_name}</strong> · 현재 작성일자 {String(taxbillDateTarget.issue_date || '').slice(0, 10)}
+                      {' · '}{(Number(taxbillDateTarget.total_amount) || 0).toLocaleString()}원
+                    </p>
+                    <p className="text-xs text-gray-500 mb-4">아직 국세청에 발행되지 않은 계산서입니다. 문서번호는 그대로 유지됩니다.</p>
+
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">새 작성일자</label>
+                    <input type="date" value={taxbillDateValue} onChange={(e) => setTaxbillDateValue(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+
+                    <div className="mt-3 px-3 py-2 bg-indigo-50 rounded-lg text-[11px] text-indigo-800">
+                      오늘이거나 지난 날짜면 5분 안에 자동 발행되고, 미래 날짜면 그날 발행됩니다. 발행 실패 상태였던 건은
+                      변경과 동시에 발급 대기로 되돌아갑니다.
+                    </div>
+                  </div>
+                  <div className="flex border-t">
+                    <button onClick={() => { setTaxbillDateTarget(null); setTaxbillDateValue(''); }} disabled={taxbillDateBusy}
+                      className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">닫기</button>
+                    <button onClick={handleTaxbillIssueDateChange} disabled={taxbillDateBusy || !taxbillDateValue}
+                      className="flex-1 px-4 py-3 bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-50">
+                      {taxbillDateBusy ? '처리 중...' : '변경하고 발급 대기에 올리기'}
                     </button>
                   </div>
                 </div>

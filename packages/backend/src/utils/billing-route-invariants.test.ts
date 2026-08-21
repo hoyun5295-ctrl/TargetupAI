@@ -492,3 +492,74 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
     expect(popbillSrc).toContain("TaxbillResendError(502, 'TAXBILL_RESEND_ALL_FAILED'");
   });
 });
+
+// ★ 2026-08-21 080 고정료 자동 파생 + 세금계산서 작성일자 정합 (서수란 접수 · Codex 1R high 3건 수용).
+//   런타임 테스트로는 SQL 조건·라우트 관문의 존재를 못 잡는다 — 소스 계약으로 고정한다.
+describe('080 고정료 자동 파생·작성일자 계약 (2026-08-21)', () => {
+  it('발행 코어의 080_base 생성은 소비된 080_call 검사를 포함한다 — 구 파생이 이미 청구한 달의 고정료 재청구 차단', () => {
+    const at = issueSrc.indexOf("'080_base', '080 고정료(자동)'");
+    expect(at, '080_base 자동 생성 INSERT를 찾지 못했다').toBeGreaterThan(-1);
+    const body = issueSrc.slice(at, at + 1500);
+    expect(body, '옛 고정료 행이 있는 달은 생성하지 않는다').toContain("pe.kind IN ('080_base', '080_fee', '080_svc')");
+    expect(body, '소비된 통화료 스냅샷이 있는 달은 생성하지 않는다').toContain("pc.kind = '080_call'");
+    expect(body, '소비 여부 조건이 빠지면 분할 2차 발행에서 재청구된다').toContain('pc.billed_billing_id IS NOT NULL');
+  });
+
+  it('최소과금 정액 발행은 고정료 있는 활성 080 매핑을 거부한다 — 자동 생성을 지나지 않는 경로라 그대로 두면 고정료가 영구 누락된다', () => {
+    expect(issueSrc).toContain("MIN_CHARGE_080_MAPPING_ACTIVE");
+    // 거부 축은 고정료(이용료·부가서비스 > 0)뿐이다(Codex 2R high 수용) — 통화료 축을 넣으면
+    // 고정료 무료·통화료만 청구인 매핑이 스냅샷 0원·부재인 달에 어느 경로로도 발행 못 하는 교착이 된다.
+    // 통화료 양수는 아래 기존 안전핀(스냅샷 파생 금액 거부)이 소유한다.
+    const at = issueSrc.indexOf("MIN_CHARGE_080_MAPPING_ACTIVE");
+    const before = issueSrc.slice(Math.max(0, at - 1600), at);
+    expect(before).toContain('monthly_fee_supply > 0 OR kt_fee_supply > 0');
+    expect(before).not.toContain('charge_call_fee = TRUE');
+  });
+
+  it('세금계산서 발행 claim은 작성일자 도래 게이트를 지난다 — 미래 작성일자는 그날 발행(KST), NULL은 집어서 드러낸다', () => {
+    const popbillSrc = read('./taxbill-popbill.ts');
+    expect(popbillSrc).toContain("issue_date IS NULL OR issue_date <= (NOW() AT TIME ZONE 'Asia/Seoul')::date");
+  });
+
+  it('작성일자 변경은 "외부 호출 없음이 행으로 증명되는 건"만 허용한다 — 승인번호 부재 ≠ 외부 문서 부재(Codex 1R~4R)', () => {
+    // ★ 4R medium 수용 — 앵커는 설명 주석이 아니라 라우트 선언이다(주석만 남아도 통과하는 함정 제거).
+    const at = billingSrc.indexOf("router.put('/taxbill-issues/:id/issue-date'");
+    expect(at, '작성일자 변경 라우트 선언을 찾지 못했다').toBeGreaterThan(-1);
+    const route = billingSrc.slice(at, at + 5500);
+    // 허용 화이트리스트 2종 — 그 외 전부 거부(TAXBILL_ISSUE_DATE_UNSAFE). 팝빌 조회는 하지 않는다
+    //   (외부로 나간 적 있는 요청의 부재는 로컬에서 완전하게 증명할 수 없다 — 4R 지연 완료·환경·빈 키).
+    // ★ 5R — ①은 엄격 NULL(빈 문자열·공백 fail-open 차단), 수신자 미등록은 허용 근거가 못 된다
+    //   (registIssue 성공 후 submitted 재claim에서 수신자 실패가 error를 덮는 반례).
+    expect(route, '채번 전 판정은 엄격 NULL').toContain('invoicer_mgt_key == null');
+    expect(route, '수신자 실패는 허용 근거가 아니다').not.toContain("rowErr.includes('세금계산서 수신자");
+    expect(route, '-11002009 = 팝빌 검증 거절 완결 응답 = 미등록 확정').toContain('-11002009');
+    expect(route, '화이트리스트 밖은 전부 거부').toContain("TAXBILL_ISSUE_DATE_UNSAFE");
+    expect(route, '외부 조회 관문은 걷어냈다 — 되살리면 4R의 fail-open 부류가 돌아온다').not.toContain('checkPopbillDocExists');
+    // ★ 5R medium — 컨펌 동기화는 superseded 행을 덮지 않는다.
+    expect(route, 'superseded 컨펌 행 보호').toContain('superseded_at IS NULL');
+    // 판정·쓰기는 행 잠금 안 단일 시퀀스 — SELECT의 FOR UPDATE가 UPDATE보다 앞(둘 다 실제 SQL 문자열).
+    const lockAt = route.indexOf('FOR UPDATE`');
+    const writeAt = route.indexOf('UPDATE taxbill_issues SET issue_date');
+    expect(lockAt, '행 잠금 SELECT가 있어야 한다').toBeGreaterThan(-1);
+    expect(lockAt, '쓰기는 잠금 뒤여야 한다').toBeLessThan(writeAt);
+    // 컨펌 행 동기화 — 화면이 invoice_confirmations.taxbill_issue_date를 보여준다(이중 진실 차단).
+    expect(route).toContain('UPDATE invoice_confirmations SET taxbill_issue_date');
+  });
+
+  it('화이트리스트의 근거가 되는 발행 패스 계약이 유지된다 — 채번은 외부 호출 직전·trim 기준 저장, 재시도는 자격을 지우지 않는다', () => {
+    // invoicer_mgt_key 엄격 NULL = "집힌 적 없음"이 성립하려면 채번이 processOne 안(외부 호출 직전)에만
+    // 있어야 하고, 공백 키 행도 저장이 일어나야 한다(5R — 생성 키로 호출하고 공백을 남기면 추적 유실).
+    const popbillSrc = read('./taxbill-popbill.ts');
+    const keyAt = popbillSrc.indexOf('buildInvoicerMgtKey(issueDate, id)');
+    const registAt = popbillSrc.indexOf('await registIssueAsync(');
+    expect(keyAt, '채번 지점을 찾지 못했다').toBeGreaterThan(-1);
+    expect(registAt, '외부 호출 지점을 찾지 못했다').toBeGreaterThan(-1);
+    expect(keyAt, '채번은 외부 호출보다 앞').toBeLessThan(registAt);
+    expect(popbillSrc, '저장 판정도 trim 기준(공백 키 추적 유실 차단)')
+      .toContain("if (!String(row.invoicer_mgt_key || '').trim())");
+    // [재시도]가 error를 지우면 -11002009 행이 날짜 변경 자격을 잃고 복구 불능이 된다(5R medium).
+    const retryAt = billingSrc.indexOf("router.post('/taxbill-issues/:id/retry'");
+    const retryBody = billingSrc.slice(retryAt, retryAt + 2500);
+    expect(retryBody, '재시도는 status만 올린다 — error 소거 금지').not.toContain('error = NULL');
+  });
+});

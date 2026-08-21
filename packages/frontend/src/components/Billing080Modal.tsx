@@ -310,7 +310,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
         <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
           <div>
             <h3 className="text-base font-semibold text-gray-800">추가 청구 관리 (080 · 부가서비스)</h3>
-            <p className="text-xs text-gray-500 mt-0.5">080 매핑을 등록해두면 KT 명세서 업로드만으로 통화료가 자동 귀속되고, 부가서비스는 직접 입력하면 거래내역서 항목으로 실립니다.</p>
+            <p className="text-xs text-gray-500 mt-0.5">080 매핑이 활성이면 이용료·부가서비스는 매달 정산에 자동으로 실립니다. KT 명세서는 통화료 귀속에만 쓰이고, 부가서비스 수기 항목은 직접 입력하면 거래내역서 항목으로 실립니다.</p>
           </div>
           <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400" aria-label="닫기">✕</button>
         </div>

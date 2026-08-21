@@ -822,8 +822,11 @@ router.post('/taxbill-issues/:id/retry', async (req: Request, res: Response) => 
     const reason = String((req.body as any)?.reason || '').trim().slice(0, 200);
     // ★ 2026-08-07(2) 양수 화이트리스트(Codex 수용) — 무관문 재시도는 kind = original 뿐이다.
     //   음수 조건(kind <> modify)은 미지·손상 값(kind CHECK 밖·NULL)을 무관문으로 통과시킨다 — fail-closed.
+    // ★ 2026-08-21 (Codex 5R 수용) error를 여기서 지우지 않는다 — 지우면 -11002009(미래 작성일자 거절)
+    //   행이 [작성일자 변경]의 허용 근거를 잃고, 새 날짜 게이트는 미래 날짜 ready를 집지 않아 다시
+    //   실패하지도 않으므로 그 건이 복구 불능이 된다. error는 워커가 발행 성공 시 지운다(기존 계약).
     const r = await pool.query(
-      `UPDATE taxbill_issues SET status = 'ready', error = NULL
+      `UPDATE taxbill_issues SET status = 'ready'
         WHERE id = $1::uuid AND status = 'failed'
           AND (kind = 'original' OR (kind = 'modify' AND $2::boolean = true AND $3::text IS NOT NULL))
         RETURNING id, kind, org_nts_confirm_num`,
@@ -865,6 +868,101 @@ router.post('/taxbill-issues/:id/retry', async (req: Request, res: Response) => 
       return res.status(503).json({ error: 'DB 마이그레이션 필요 — taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('세금계산서 재시도 오류:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /taxbill-issues/:id/issue-date — 발급 대기·실패 원본 장의 작성일자 변경 (★2026-08-21 서수란 접수)
+//
+//   라프레리 실측: 자동 정책(익월 1일)이 중간정산 종료월 기준 9/1을 만들었고, 발행 패스가 날짜 도래를
+//   기다리지 않아 팝빌 -11002009(미래 작성일자)로 failed에 멈췄다. 날짜를 고칠 창구가 없어 신설한다.
+//   - 대상 = 원본 장 · ready/failed · **승인번호 없음**(국세청 문서가 이미 있으면 작성일자는 사실이라 불변).
+//   - 문서번호(invoicer_mgt_key)는 유지 — 결정적 재시도 계약(같은 번호 = 팝빌 중복 발행 차단)을 지킨다.
+//     번호 안 날짜 조각과 새 작성일자가 어긋나는 것은 식별자 성질이라 무해하다.
+//   - `invoice_confirmations.taxbill_issue_date`를 같은 트랜잭션에서 동기화한다(이중 진실 차단 — 화면이 이 값을 보여준다).
+//   - failed는 ready로 복귀시켜 변경+재시도가 한 번에 끝난다. 발행 시점은 claim의 작성일자 게이트가 소유한다
+//     (당일·과거 날짜면 5분 내 발행, 미래 날짜면 그날 발행).
+//   ★ Codex 1R~4R high 수용 — **승인번호 부재 ≠ 외부 문서 부재**(stateCode 305 = 발행됐고 전송만 실패).
+//   1R~3R은 "실존 계열 차단 + 팝빌 조회"로 막으려 했는데 라운드마다 새 구멍이 나왔다(통신 실패 fail-open →
+//   ABA → 빈 키·환경 불일치·지연 완료). 뿌리는 하나다 — **외부로 나간 적 있는 요청의 부재는 로컬에서
+//   완전하게 증명할 수 없다.** 그래서 정책을 뒤집는다: 외부 호출이 없었음이 **행 자체로 증명되는 건만** 연다.
+//    ①`invoicer_mgt_key`가 **엄격 NULL** — 문서번호는 발행 패스가 **외부 호출 직전에만** 채번한다(processOne).
+//      없다 = 이 행은 한 번도 팝빌로 나가지 않았다(내구 증거. 지우는 코드는 없다 — 생성만 있다).
+//      빈 문자열·공백은 열지 않는다(5R — 공백 키 이상 데이터는 시도 이력이 있을 수 있다).
+//    ②실패 사유 = 팝빌 -11002009(작성일자 미래) — registIssue **검증 거절의 완결 응답**이라 등록이 없다.
+//      거절된 요청이 뒤늦게 등록될 수 없다(응답 유실형 모호 실패와 다르다 — 그런 건 코드가 이 문자열이 아니다).
+//      [재시도]는 이 자격(error)을 지우지 않는다 — 지우면 이 건이 복구 불능이 된다(5R medium 수용, retry 라우트).
+//   수신자 미등록 실패는 허용 근거가 못 된다(5R 반례 — 최신 error가 과거 시도 전무를 증명하지 못한다).
+//   그 외 전부(전송실패·발행취소 관측·모호/통신 실패·재시도 복귀분) = 거부 — 팝빌 대사 후 처리.
+//   판정·쓰기는 행 잠금(FOR UPDATE) 안 단일 시퀀스 — 외부 호출이 없으므로 잠금은 짧다.
+router.put('/taxbill-issues/:id/issue-date', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const issueDate = String((req.body as any)?.issue_date || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(issueDate)) {
+      return res.status(400).json({ error: '작성일자(issue_date)가 올바르지 않습니다. YYYY-MM-DD 형식으로 지정해 주세요.' });
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const cur = await client.query(
+        `SELECT id, confirmation_id, status, kind, nts_confirm_num, error, invoicer_mgt_key
+           FROM taxbill_issues WHERE id = $1::uuid FOR UPDATE`,
+        [id],
+      );
+      const row = cur.rows[0];
+      if (!row || String(row.kind) !== 'original' || !['ready', 'failed'].includes(String(row.status)) || row.nts_confirm_num) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: '작성일자는 발급 대기·실패 상태의 원본 계산서만 바꿀 수 있습니다. (이미 발행됐거나 처리 중인 장일 수 있습니다)',
+          code: 'TAXBILL_ISSUE_DATE_IMMUTABLE',
+        });
+      }
+      const rowErr = String(row.error || '');
+      // ★ Codex 5R high 수용 — 허용은 2종뿐이다.
+      //   ①은 **엄격 NULL**: 빈 문자열·공백을 "시도 없음"으로 읽으면, 공백 키 이상 데이터에서 워커가
+      //   생성 키로 외부 호출하고 DB엔 공백이 남는 조합이 fail-open이 된다.
+      //   수신자 미등록 실패는 허용 근거가 못 된다(5R 반례 — registIssue 성공 후 getInfo만 실패해 submitted로
+      //   남은 행이 재claim에서 수신자 실패로 error가 덮이면, 팝빌에 문서가 실존하는데 최신 error만 보고 연다).
+      const neverAttempted = row.invoicer_mgt_key == null; // 채번 전 = 외부 호출 0 확정(엄격 NULL만)
+      const rejectedByValidation = rowErr.includes('-11002009'); // 팝빌 검증 거절 완결 응답 = 미등록 확정
+      if (!neverAttempted && !rejectedByValidation) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: '이 건은 팝빌 발행 시도 이력이 있어 문서가 외부에 존재할 수 있습니다. 안전이 확정되는 경우(발행 시도 전·미래 작성일자 거절)에만 날짜를 바꿀 수 있습니다 — 팝빌 사이트에서 대사 후 처리해 주세요.',
+          code: 'TAXBILL_ISSUE_DATE_UNSAFE',
+        });
+      }
+      await client.query(
+        `UPDATE taxbill_issues SET issue_date = $2::date, status = 'ready' WHERE id = $1::uuid`,
+        [id, issueDate],
+      );
+      if (row.confirmation_id) {
+        // ★ Codex 5R medium 수용 — superseded(재발급으로 대체된) 컨펌 행은 덮지 않는다. 0건이면 경고만
+        //   남기고 진행한다(taxbill_issues가 진실 축 — 표시 행 부재로 날짜 변경 자체를 되돌리지 않는다).
+        const sync = await client.query(
+          `UPDATE invoice_confirmations SET taxbill_issue_date = $2::date
+            WHERE id = $1::uuid AND superseded_at IS NULL`,
+          [String(row.confirmation_id), issueDate],
+        );
+        if ((sync.rowCount || 0) === 0) {
+          console.warn(`[작성일자변경] 컨펌 행 동기화 0건 — confirmation=${row.confirmation_id} (소실 또는 superseded). 화면 작성일자가 옛 값으로 보일 수 있다.`);
+        }
+      }
+      await client.query('COMMIT');
+    } catch (txErr) {
+      try { await client.query('ROLLBACK'); } catch { /* 응답이 사실을 전달한다 */ }
+      throw txErr;
+    } finally {
+      client.release();
+    }
+    return res.json({ success: true, message: `작성일자를 ${issueDate}로 변경하고 발급 대기에 올렸습니다. 날짜가 오늘 이전이면 5분 내, 미래면 그날 발행됩니다.` });
+  } catch (error: any) {
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('작성일자 변경 오류:', error);
     return res.status(500).json({ error: error.message });
   }
 });
@@ -1584,15 +1682,16 @@ ${EXTRA_ITEM_SOURCE_JOIN}
         //   `billing_items`에 굳어 있는데 원장을 고치면 화면 숫자만 바뀌어 "발행액이 바뀐 것처럼" 읽힌다.
         billable_parts: billed ? [] : parts.map((p) => ({ type_key: p.typeKey, label: invoiceLineLabel('extra', p.typeKey), amount: p.amount })),
         billable_supply: billed ? null : parts.reduce((s, p) => s + p.amount, 0),
-        // 매핑이 사라진 현행 스냅샷 = 그 회사 발행이 막힌다(BILLING_080_MAPPING_MISSING).
-        blocks_issue: kind === '080_call' && !row.map_found,
+        // 매핑이 사라진 현행 행(통화료 스냅샷·고정료 근거) = 그 회사 발행이 막힌다(BILLING_080_MAPPING_MISSING).
+        blocks_issue: (kind === '080_call' || kind === '080_base') && !row.map_found,
         // 비활성 = 사람이 명시한 청구 중단. 매핑 없음과 다른 상태다.
         inactive: !!row.map_found && row.map_is_active === false,
         // ★ 2026-08-05 매핑이 다른 회사로 옮겨졌다 = 이 회사 청구가 아니다(옛 종류 행 포함).
         //   조용히 빼면 담당자는 "왜 안 청구되지"를 알 수 없다 — 상태로 드러낸다.
         moved_to_other_company: kind !== 'manual' && !!row.map_exists_any && !row.map_found,
-        // 옛 `080_fee`·`080_svc` 행 중 현행 스냅샷과 겹쳐 청구되지 않는 것(정리 대상).
-        legacy_superseded: kind !== 'manual' && kind !== '080_call' && !!row.has_call_snapshot,
+        // 옛 `080_fee`·`080_svc` 행 중 고정료 근거 행(080_base)과 겹쳐 청구되지 않는 것(정리 대상).
+        //   ★ 2026-08-21 축 교체 — 고정료 파생이 080_call에서 080_base로 옮겨진 것과 짝(파생 CT 문서 주석).
+        legacy_superseded: kind !== 'manual' && kind !== '080_call' && kind !== '080_base' && !!row.has_base_row,
       };
     });
     return res.json({ success: true, items });

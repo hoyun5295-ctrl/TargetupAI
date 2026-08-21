@@ -810,8 +810,10 @@ async function processOne(id: string, cfg: PopbillConfig): Promise<'issued' | 's
     const party = pickTaxbillParty(row);
 
     // [추적 먼저] 문서번호를 외부 호출 전에 저장 — 이미 있으면 그 번호 재사용(멱등).
+    // ★ 2026-08-21 (Codex 5R 수용) 저장 판정도 trim 기준 — 공백 키 행에서 새 키를 만들어 쓰면서 원본
+    //   truthiness로 저장을 건너뛰면, 외부 호출은 생성 키로 나갔는데 DB엔 공백이 남는다(추적 유실).
     const mgtKey = String(row.invoicer_mgt_key || '').trim() || buildInvoicerMgtKey(issueDate, id);
-    if (!row.invoicer_mgt_key) {
+    if (!String(row.invoicer_mgt_key || '').trim()) {
       await pool.query(`UPDATE taxbill_issues SET invoicer_mgt_key = $2 WHERE id = $1`, [id, mgtKey]);
     }
 
@@ -1013,11 +1015,17 @@ export async function issueReadyTaxbills(limit = 10): Promise<IssuePassResult> {
     const hasIsTestColumn = await taxbillIsTestColumnExists();
     if (!hasIsTestColumn) warnIsTestColumnMissingOnce();
     const claimEnvClause = hasIsTestColumn ? 'AND is_test = $2' : '';
+    // ★ 2026-08-21 작성일자 도래 게이트(서수란 접수 — 라프레리 실측). 자동 정책(익월 1일)은 언제나
+    //   미래 작성일자를 만드는데, claim이 날짜를 보지 않아 컨펌 직후 발행을 시도했고 팝빌이
+    //   -11002009(작성일자가 미래일자)로 거부해 failed에 멈췄다. 작성일자는 한국 세법 개념이라 KST 축.
+    //   issue_date IS NULL은 게이트에서 빼고 집는다 — 기존 processOne의 markFailed('작성일자가 없습니다')로
+    //   드러나야 한다. 게이트에 넣으면 그 행이 조용히 영영 잠긴다(fail-silent 금지).
     const claimed = await pool.query(
       `UPDATE taxbill_issues SET status = 'submitted'
         WHERE id IN (
           SELECT id FROM taxbill_issues
            WHERE status IN ('ready', 'submitted')
+             AND (issue_date IS NULL OR issue_date <= (NOW() AT TIME ZONE 'Asia/Seoul')::date)
              ${claimEnvClause}
            ORDER BY created_at
            LIMIT $1

@@ -547,6 +547,39 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
     aiCreditCount = chargeCount + overageCount;                       // 충전 + 초과사용 크레딧 수량
     aiCreditSupply = chargeSupply + overageCount * CREDIT_UNIT_PRICE; // 공급가(크레딧×단가=공급가 일관)
 
+    // ★ 2026-08-21 080 고정료(이용료·KT 부가서비스) 근거 행 자동 생성(서수란 0821 접수 — 전 고객사 공통).
+    //   고정료는 KT 명세서와 무관한 월정액인데 근거가 명세서 [반영] 행에 묶여 있어서, 명세서를 반영하지
+    //   않은 달은 고정료가 통째로 빠졌다(게스코리아 8월 실측). 활성 매핑이면 정산월마다 근거 행
+    //   (`080_base` · supply_amount=0)을 여기서 만들고 같은 트랜잭션에서 소비한다 — 금액은 행이 아니라
+    //   발행 시점의 매핑 원장에서 읽는다(0804 원칙). 발행 삭제 시 FK SET NULL로 미소비 복귀,
+    //   재발행이 NOT EXISTS로 재사용하므로 행이 늘지 않는다. UNIQUE(period_month, kind, source_ref)가
+    //   경합 이중 생성을 구조로 막는다(ON CONFLICT DO NOTHING).
+    //   옛 `080_fee`·`080_svc` 행이 있는 달은 그 행이 고정료의 근거라 생성하지 않는다(파생 스킵 규칙과 짝 —
+    //   buildExtraBillingItems 문서 주석). 회사 잠금(lockCompanyForBilling) 아래라 반영·취소와 직렬화된다.
+    //   ★ Codex 1R high 수용 — **소비된 `080_call`이 있는 달도 생성하지 않는다.** 이 배포 전의 080_call은
+    //   고정료까지 파생해 그 장에 이미 청구했으므로, 같은 라벨 월의 분할 2차 발행이 base를 만들면 재청구다.
+    //   미소비 080_call만 있는 달은 생성한다(그 통화료 행은 새 파생에서 고정료를 안 내므로 base가 근거).
+    //   발행 삭제로 080_call이 미소비 복귀하면 재발행이 base를 만들어 고정료 1회가 유지된다.
+    await client.query(
+      `INSERT INTO billing_extra_items (company_id, period_month, kind, label, supply_amount, source_ref, created_by)
+       SELECT n.company_id, $2::date, '080_base', '080 고정료(자동)', 0, n.number, $3
+         FROM billing_080_numbers n
+        WHERE n.company_id = $1 AND n.is_active = TRUE
+          AND NOT EXISTS (
+            SELECT 1 FROM billing_extra_items pe
+             WHERE pe.company_id = n.company_id AND pe.period_month = $2::date
+               AND pe.source_ref = n.number AND pe.kind IN ('080_base', '080_fee', '080_svc')
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM billing_extra_items pc
+             WHERE pc.company_id = n.company_id AND pc.period_month = $2::date
+               AND pc.source_ref = n.number AND pc.kind = '080_call'
+               AND pc.billed_billing_id IS NOT NULL
+          )
+       ON CONFLICT DO NOTHING`,
+      [company_id, `${billing_year}-${String(billing_month).padStart(2, '0')}-01`, adminId],
+    );
+
     // ★ 2026-07-30 월별 추가 항목(080 이용료·부가서비스·통화료 — billing_extra_items, 서수란 접수).
     //   발행 기간과 겹치는 달의 **미소비** 항목만 싣는다 — 겹침 판정은 billings와 같은 식(월 = [1일, 말일]).
     //   소비 마커 = billed_billing_id(AI 크레딧 billed_billing_id 선례 미러 — Codex 1R critical 수용):
@@ -1035,6 +1068,28 @@ export async function issueMinimumChargeBilling(input: {
     //   그 회사는 어느 경로로도 그 달 청구서를 만들 수 없는 교착에 빠졌다.
     //   ⇒ **실제로 청구될 금액이 있는 행만** 거부하고, 0줄 스냅샷은 이 정액 발행이 함께 소비한다.
     //   ★ 2026-08-20 귀속 축 = 청구월 = 정산월(발행 코어와 같은 정정 — 역월 기간이라 겹침과 같은 답·동작 무변화).
+    // ★ 2026-08-21 (Codex 1R high 수용) **고정료가 있는 활성 080 매핑 회사는 정액 발행 자체를 거부한다.**
+    //   고정료 자동 파생(080_base)은 일반 발행 코어가 만드는데, 정액 발행은 그 생성을 지나지 않으므로
+    //   행이 하나도 없는 달에 정액이 나가면 그 달 고정료가 영구 누락된다(기간 중복 차단 때문에 일반
+    //   발행으로 회수도 불가). 정액과 추가 항목을 섞지 않는다는 기존 원칙의 매핑 판까지다.
+    //   ★ Codex 2R high 수용 — 차단 축은 **고정료(이용료·부가서비스 > 0)뿐**이다. 통화료 축을 여기에
+    //   넣으면 고정료 무료·통화료만 청구(0/0/true)인 매핑이 스냅샷 0원·부재인 달에 정액도 일반도 못 내는
+    //   교착에 빠진다. 통화료 양수는 아래 기존 안전핀(스냅샷 파생 금액 거부)이 이미 소유하고,
+    //   0원·부재는 청구할 것이 없어 정액 통과가 맞다(0줄 스냅샷 소비 계약 유지).
+    //   080 고정료 회사를 정액으로 처리하려면 매핑을 비활성(청구 중단 명시)으로 바꾸는 것이 통제 경로다.
+    const active080 = await client.query(
+      `SELECT 1 FROM billing_080_numbers
+        WHERE company_id = $1 AND is_active = TRUE
+          AND (monthly_fee_supply > 0 OR kt_fee_supply > 0)
+        LIMIT 1`,
+      [company_id],
+    );
+    if (active080.rows.length > 0) {
+      throw new BillingIssueError(422, {
+        error: `${co.company_name}에 고정료가 설정된 활성 080 번호 매핑이 있습니다. 정액 발행은 080 고정료를 싣지 않아 그 달 이용료·부가서비스가 청구에서 빠집니다 — 일반 발행으로 청구하거나, 080 청구를 중단하려면 매핑을 비활성으로 바꾼 뒤 발행해주세요.`,
+        code: 'MIN_CHARGE_080_MAPPING_ACTIVE',
+      });
+    }
     const minChargeLabel = resolveBillingLabelMonth(null, billing_start, billing_end);
     const extras = await client.query(
       `SELECT e.id, e.kind, e.supply_amount, e.period_month, e.source_ref,
