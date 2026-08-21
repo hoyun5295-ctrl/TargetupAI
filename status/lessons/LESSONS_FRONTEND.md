@@ -231,6 +231,11 @@
 
 > 라벨 3단 정책·1클릭 UX 정합·절대금지 항목은 **CLAUDE.md가 소유**한다(`design_quality_minimum_ceiling_free` / `marketing_user_ux_priority`). 여기 복사하지 않는다.
 
+> ⛔ **★2026-08-21 Harold 지시 — "AI가 만든 화면" 표면 신호 금지.** 위 표의 "그라데이션"은 **단색 타일·단색 배경**으로 읽는다.
+> 금지 = 세 방향 그라데이션 루트 배경(AI Operator 계열 지면은 `bg-violet-950` 단색, 작업 화면은 `bg-slate-950`) · 블러 글로우 다발(0~1개) ·
+> 그라데이션 글자(`bg-clip-text`) · 영문 대문자 eyebrow(`tracking-[0.3em] uppercase`) · "Enterprise Beta·검증 중" 류 배지 · 블러 그라데이션 테두리.
+> 제목 크기·컬러 타일·카드 구성·연출은 그대로 — **빼기로 고치지 않는다**(0821 허브 시안 2회 실패 경위 = memory `feedback_ai_tell_is_surface_signal_not_decoration`).
+
 ---
 
 ## 자가 검증 매트릭스 (Frontend 작업 시)

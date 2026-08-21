@@ -135,6 +135,17 @@ export interface ProposalResponse {
 // 정적 데이터
 // ============================================================
 
+// ★ 2026-08-21 제목 옆 ! 버튼이 여는 설명 — 히어로의 배지·영문 eyebrow·부제 2줄을 걷어내고 그 내용을 여기로 옮겼다.
+//   힌트 문구는 SUB_AGENT_STEPS의 것과 같다(같은 여섯 단계).
+const WHAT_AI_DECIDES: { k: string; v: string }[] = [
+  { k: '타겟팅', v: '고객군 자동 추출' },
+  { k: '메시지', v: 'A/B 문구 + 스팸 검수' },
+  { k: '채널', v: '최적 채널 판단' },
+  { k: '시점', v: '발송 시점 추천' },
+  { k: '비용', v: '회사별 단가 적용' },
+  { k: '성과', v: '클릭 · 전환 추정' },
+];
+
 const EXAMPLE_PROMPTS = [
   '최근 30일 미구매 VIP에게 재구매 쿠폰 보내줘',
   '장바구니 이탈 24시간 고객에게 10% 할인 알림',
@@ -272,6 +283,7 @@ export default function AiOperatorPage() {
   // 종량제: AI 크레딧 잔여 (헤더 칩 — creditEnabled일 때만 표시)
   const [aiCredit, setAiCredit] = useState<any>(null);
   const [showCreditHistory, setShowCreditHistory] = useState(false); // 크레딧 사용 이력 모달
+  const [showWhat, setShowWhat] = useState(false); // ★ 2026-08-21 제목 옆 ! 버튼 — 호버(데스크톱)·탭(모바일)로 설명을 연다
   useEffect(() => {
     (async () => {
       try {
@@ -838,14 +850,13 @@ export default function AiOperatorPage() {
   //   판정 = 문안 개수(백엔드 크레딧 차감 게이트와 동일 신호) — "차감 안 됨" 안내와 실제 차감 정합.
   const isZeroTarget = !!proposal && (proposal.messages?.length ?? 0) === 0;
 
+  // ★ 2026-08-21 Harold 지시 — 배경은 단색 하나(violet-950). 세 방향 그라데이션 + 블러 원 3개는 "AI가 만든 화면"의 표면 신호라
+  //   걷어냈고, 빛은 상단 한 군데만 남긴다. 하위 모듈(여정·이메일·자사몰 연동·자율 예측 등)도 같은 값 — 한 색으로 통일.
   return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
+    <div className="min-h-screen bg-violet-950 text-white">
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
-      {/* 배경 글로우 — D222+ Phase 1 톤 다운 정정 */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full bg-fuchsia-400/15 blur-3xl" />
-        <div className="absolute -bottom-40 -right-40 w-[600px] h-[600px] rounded-full bg-violet-400/15 blur-3xl" />
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[800px] h-[800px] rounded-full bg-purple-400/10 blur-3xl" />
+        <div className="absolute -top-64 left-1/2 -translate-x-1/2 w-[900px] h-[500px] rounded-full bg-violet-500/10 blur-3xl" />
       </div>
 
       {/* 헤더 — D222+ Phase 1: 보라 톤 다운 + 시인성 강화 */}
@@ -876,11 +887,11 @@ export default function AiOperatorPage() {
                 )}
               </button>
             )}
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-300 to-fuchsia-400 flex items-center justify-center shadow-lg shadow-fuchsia-500/30">
-              <Sparkles className="w-5 h-5 text-indigo-950" />
+            <div className="w-9 h-9 rounded-xl bg-violet-500 flex items-center justify-center">
+              <Sparkles className="w-5 h-5 text-white" />
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-lg font-bold bg-gradient-to-r from-amber-200 via-fuchsia-200 to-indigo-200 bg-clip-text text-transparent">
+              <span className="text-lg font-bold text-white tracking-tight">
                 AI Operator
               </span>
             </div>
@@ -901,20 +912,59 @@ export default function AiOperatorPage() {
       {/* 메인 본문 */}
       <main className="relative max-w-5xl mx-auto px-6 py-10 md:py-14">
         {/* ============= Hero + 입력창 (항상 표시 — 결과 모드에서도 상단 유지) ============= */}
+        {/* ★ 2026-08-21 Harold 지시 — 배지·영문 eyebrow·부제 2줄(5단)을 제목 1개 + ! 버튼으로.
+            제목 크기는 그대로, 그라데이션 글자만 흰색 단색으로. 설명은 ! 호버(모바일은 탭)에서 여섯 단계 카드로 펼친다. */}
         {!proposal && (
-          <div className="text-center mb-10">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs text-white/60 mb-5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Enterprise Beta · Production 검증 중
+          <div className="text-center mb-8">
+            <div className="inline-flex items-start justify-center gap-3">
+              <h1 className="text-4xl md:text-5xl font-bold leading-tight text-white tracking-tight">
+                한 줄 명령으로 작동하는<br />차세대 마케팅 오퍼레이션
+              </h1>
+              <div
+                className="relative mt-2 md:mt-3"
+                onMouseEnter={() => setShowWhat(true)}
+                onMouseLeave={() => setShowWhat(false)}
+              >
+                <button
+                  type="button"
+                  aria-label="AI Operator가 하는 일"
+                  aria-expanded={showWhat}
+                  onClick={() => setShowWhat((v) => !v)}
+                  className={`w-8 h-8 rounded-lg border text-base font-bold transition-colors ${
+                    showWhat
+                      ? 'bg-violet-500 border-violet-500 text-white'
+                      : 'bg-white/5 border-white/20 text-violet-200 hover:bg-violet-500 hover:border-violet-500 hover:text-white'
+                  }`}
+                >
+                  !
+                </button>
+                <div
+                  role="tooltip"
+                  className={`absolute right-0 top-full mt-3 w-[min(560px,calc(100vw-48px))] text-left rounded-2xl border border-white/15 bg-[#180a38] p-5 shadow-2xl shadow-black/50 z-20 transition-all duration-200 ${
+                    showWhat ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-1 pointer-events-none'
+                  }`}
+                >
+                  <p className="text-xl font-bold text-white leading-snug">
+                    한 줄이 <span className="text-violet-200">실행 가능한 제안서</span>가 됩니다
+                  </p>
+                  <p className="text-sm text-white/55 mt-1.5">
+                    누구에게 · 무엇을 · 어디로 · 언제 · 얼마에 · 얼마나 — 여섯 가지를 AI가 한 번에 정합니다.
+                  </p>
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 mt-4">
+                    {WHAT_AI_DECIDES.map((s) => (
+                      <div key={s.k} className="rounded-lg bg-white/5 border border-white/10 px-2 py-2.5 text-center">
+                        <div className="text-[13px] font-semibold text-white">{s.k}</div>
+                        <div className="text-[10.5px] text-white/45 mt-0.5 leading-snug">{s.v}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-3.5 pt-3 border-t border-white/10 flex flex-wrap justify-between gap-x-3 gap-y-1 text-[11.5px] text-white/45">
+                    <span>제안서를 보고 <b className="font-medium text-white/80">발송 여부는 직접 결정</b>합니다</span>
+                    <span>수정 요청도 한 줄로</span>
+                  </div>
+                </div>
+              </div>
             </div>
-            <p className="text-xs font-semibold tracking-[0.32em] text-white/40 mb-3 uppercase">AI Marketing Operations</p>
-            <h1 className="text-4xl md:text-5xl font-bold mb-5 leading-tight bg-gradient-to-r from-amber-200 via-fuchsia-200 to-indigo-200 bg-clip-text text-transparent">
-              한 줄 명령으로 작동하는<br />차세대 마케팅 오퍼레이션
-            </h1>
-            <p className="text-white/60 text-base md:text-lg max-w-2xl mx-auto leading-relaxed">
-              마케팅 목표를 한 줄로 입력하시면, AI가 타겟팅 · 메시지 · 채널 · 시점 · 비용 · 성과까지<br className="hidden md:block" />
-              자동 설계한 제안서를 즉시 제공합니다.
-            </p>
           </div>
         )}
 
@@ -922,9 +972,8 @@ export default function AiOperatorPage() {
         {/* 입력 영역 (항상 노출 — 결과 모드에서는 축소된 형태로) */}
         <div className={`mb-${proposal ? '10' : '6'} ${proposal ? 'mt-2' : ''}`}>
           <div className="relative group">
-            {/* 그라데이션 보더 */}
-            <div className="absolute -inset-px rounded-2xl bg-gradient-to-r from-amber-400/40 via-fuchsia-400/40 to-indigo-400/40 opacity-60 group-focus-within:opacity-100 blur-sm transition-opacity" />
-            <div className="relative flex items-end gap-3 p-2 rounded-2xl bg-indigo-950/80 backdrop-blur-xl border border-white/10">
+            {/* ★ 2026-08-21 블러 그라데이션 테두리 → 단단한 한 덩어리. 이 상자가 화면의 주인공이라 테두리가 떠다니면 안 된다. */}
+            <div className="relative flex items-end gap-3 p-2 rounded-2xl bg-black/30 border border-white/15 focus-within:border-violet-300/60 focus-within:ring-4 focus-within:ring-violet-400/15 transition-colors">
               <div className="flex-shrink-0 ml-3 mb-3">
                 <Sparkles className="w-5 h-5 text-amber-300" />
               </div>
@@ -973,7 +1022,7 @@ export default function AiOperatorPage() {
           {/* 예시 프롬프트 칩 (입력 전만) */}
           {!loading && !proposal && objective.length === 0 && (
             <div className="mt-5">
-              <p className="text-[11px] font-semibold tracking-[0.2em] text-white/35 uppercase mb-2.5">Suggested Prompts</p>
+              <p className="text-xs text-white/45 mb-2.5">이렇게 말해보세요</p>
               <div className="flex flex-wrap gap-2">
                 {EXAMPLE_PROMPTS.map((p) => (
                   <button
@@ -997,8 +1046,8 @@ export default function AiOperatorPage() {
         {loading && (
           <div className="mb-14 animate-in fade-in duration-300">
             <div className="text-center mb-8">
-              <p className="text-[11px] font-semibold tracking-[0.28em] text-white/40 uppercase mb-2">AI Operator · Multi-Agent Pipeline</p>
-              <p className="text-white/70 text-sm">6개 sub-agent가 협업하여 제안서를 설계하고 있습니다</p>
+              <p className="text-xs text-white/45 mb-2">AI가 제안서를 설계하는 중</p>
+              <p className="text-white/70 text-sm">타겟팅부터 성과 예측까지 여섯 단계를 차례로 거칩니다</p>
             </div>
             {/* ★ D210+ Phase 2-fix8 (Harold 명시 2026-05-23): Stage 2 — 6단 모두 완료 후 둥근 스피너 + "마지막 다듬는 중" 안내 영역 */}
             {progressStep >= SUB_AGENT_STEPS.length && (
@@ -1068,7 +1117,7 @@ export default function AiOperatorPage() {
           <div className="mb-14">
             <div className="flex items-center justify-between mb-5">
               <div>
-                <p className="text-[11px] font-semibold tracking-[0.28em] text-white/40 uppercase mb-1">AI Proposal · Generated</p>
+                <p className="text-xs text-white/45 mb-1">AI 제안서</p>
                 <h2 className="text-xl font-bold text-white">{proposal.target.suggestedName || 'AI 마케팅 제안서'}</h2>
               </div>
               <span className="text-xs text-white/40">
@@ -1730,7 +1779,6 @@ export default function AiOperatorPage() {
               {/* 우측 — SUB_MODULE_CARDS 2열 세로 나열 */}
               {/* ★ D177-ux2: AI Operator 페이지 안 sub-module 배치 (Harold 명시 — 헤더 dropdown X / 페이지 안 메뉴) */}
               <div>
-                <p className="text-[10px] font-semibold tracking-[0.28em] text-white/40 mb-1.5 uppercase">AI Operator Modules</p>
                 <h2 className="text-xl font-bold mb-1.5 text-white">함께 사용하는 AI 영역</h2>
                 <p className="text-sm text-white/50 mb-6">자연어 한 줄 진입 외에도 AI Operator 안에 내장된 영역 — 클릭 시 진입</p>
                 {/* ★ D209+ (Harold 명시 2026-05-22): 우측 3열 세로 나열 매트릭스 + description \n 줄바꿈 정합 (whitespace-pre-line). */}
@@ -2006,7 +2054,6 @@ function AiSelfDiagnosisCards({ onApply }: { onApply: (objective: string) => voi
     <div className="p-5 bg-gradient-to-br from-violet-900/50 via-purple-900/40 to-fuchsia-900/30 border-2 border-violet-400/40 rounded-2xl h-full shadow-2xl shadow-violet-500/20">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <p className="text-[10px] font-semibold tracking-[0.28em] text-violet-300/70 mb-1 uppercase">AI Self-Diagnosis</p>
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
             <Brain className="w-5 h-5 text-violet-400" />
             AI가 분석한 오늘 추천 캠페인

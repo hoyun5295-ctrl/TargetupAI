@@ -748,7 +748,7 @@ export default function EmailCampaignsPage() {
 
   return (
     // ★ D222+ Phase 3 (2026-05-27): 다크 → 보라 그라데이션 톤 다운
-    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
+    <div className="min-h-screen bg-violet-950 text-white">
       {/* 상단 헤더 — D222+ Phase 3 보라 톤 다운 */}
       <div className="bg-violet-800/50 backdrop-blur-md border-b border-violet-400/30 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3">

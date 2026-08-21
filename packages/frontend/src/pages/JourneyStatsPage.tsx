@@ -130,7 +130,7 @@ export default function JourneyStatsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white flex items-center justify-center">
+      <div className="min-h-screen bg-violet-950 text-white flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-violet-400" />
       </div>
     );
@@ -138,7 +138,7 @@ export default function JourneyStatsPage() {
 
   if (error || !stats) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white flex items-center justify-center">
+      <div className="min-h-screen bg-violet-950 text-white flex items-center justify-center">
         <div className="text-rose-300">{error || '통계 데이터 없음'}</div>
       </div>
     );
@@ -149,7 +149,7 @@ export default function JourneyStatsPage() {
   const segmentData = stats.segments.map((s) => ({ name: s.segment, 진입: s.enteredCount, 완료: s.completedCount, 클릭: s.clickCount, 전환: s.conversionCount }));
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
+    <div className="min-h-screen bg-violet-950 text-white">
       <div className="max-w-7xl mx-auto p-4 md:p-6">
         {/* 헤더 */}
         <div className="flex items-center gap-3 mb-6">

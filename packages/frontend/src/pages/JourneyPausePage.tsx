@@ -107,7 +107,7 @@ export default function JourneyPausePage() {
     : '— 시각 미정 —';
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white px-4 py-8 md:py-16">
+    <div className="min-h-screen bg-violet-950 text-white px-4 py-8 md:py-16">
       <div className="max-w-2xl mx-auto">
         {/* 헤더 */}
         <div className="flex items-center gap-3 mb-6">
