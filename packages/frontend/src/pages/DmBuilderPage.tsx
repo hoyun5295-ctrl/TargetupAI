@@ -785,6 +785,9 @@ export default function DmBuilderPage() {
           <style>{`
             .dm-hub-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 12px; align-items: stretch; }
             .dm-hub-bottom { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+            /* ★ 2026-08-21 한글은 기본 줄바꿈이 글자 단위라 "추 가"·"슬라 이드"·"불러 오기"처럼 낱말이 잘렸다.
+               keep-all = 띄어쓰기에서만 끊는다(줄 위치는 아래 타일이 <br/>로 직접 정한다). */
+            .dm-hub-bottom button { word-break: keep-all; }
             @media (max-width: 767px) { .dm-hub-grid { grid-template-columns: 1fr; } }
           `}</style>
           <div className="dm-hub-grid">
@@ -895,7 +898,7 @@ export default function DmBuilderPage() {
                     <span style={{ fontSize: 15 }}>📄</span>
                     <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>자유 시작</span>
                   </div>
-                  <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>빈 캔버스에서 직접 섹션 추가</div>
+                  <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>빈 캔버스에서<br />직접 섹션 추가</div>
                 </button>
                 <button
                   onClick={() => { uploadModeRef.current = 'slides'; completedImagesInputRef.current?.click(); }}
@@ -910,7 +913,7 @@ export default function DmBuilderPage() {
                     <span style={{ fontSize: 15 }}>🖼️</span>
                     <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{uploadingImages ? '업로드 중...' : '완성 슬라이드'}</span>
                   </div>
-                  <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>완성 이미지 업로드 → 슬라이드 DM</div>
+                  <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>완성 이미지 업로드<br />→ 슬라이드 DM</div>
                 </button>
                 {/* ★ 2026-07-19 P4: 라이브러리 불러오기 — 저장 소재 다중 선택 → 이미지 DM */}
                 <button
@@ -926,7 +929,7 @@ export default function DmBuilderPage() {
                     <span style={{ fontSize: 15 }}>🗂️</span>
                     <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>라이브러리 불러오기</span>
                   </div>
-                  <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>저장 소재 다중 선택 → 이미지 DM</div>
+                  <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>저장 소재 다중선택<br />→ 이미지 DM</div>
                 </button>
               </div>
             </div>
