@@ -402,7 +402,9 @@ export function computePlanHash(events: BriefEvent[]): string {
 export async function loadMonthlyBrief(companyId: string, planMonth: string): Promise<MonthlyBrief> {
   const [evRes, emailCount, creditState, approvalRow, payment] = await Promise.all([
     query(
-      `SELECT id, title, starts_on, ends_on, benefit_text, products, status, created_by
+      // ★ 2026-08-21 date 컬럼은 `::text`로 받는다 — 드라이버가 Date로 주면 String().slice가 "Fri Aug 21"이 된다
+      //   (임은지 접수 · 계약 = planner-date-contract.test.ts). plan_hash도 이 문자열을 쓰므로 형식이 곧 계약이다.
+      `SELECT id, title, starts_on::text AS starts_on, ends_on::text AS ends_on, benefit_text, products, status, created_by
          FROM planner_events
         WHERE company_id = $1::uuid AND plan_month = $2 AND status <> 'cancelled'
         ORDER BY starts_on ASC, created_at ASC`,

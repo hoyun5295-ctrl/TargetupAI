@@ -547,7 +547,7 @@ else concat(concat(concat('{"sendercode":"',sender_code),'",'), replace(k_etc_js
 
 **교훈**:
 - **AI 응답 JSON엔 escape 안 된 raw 제어문자(줄바꿈·탭)가 섞이는 게 상수다.** `JSON.parse` 직호출 금지 — `extractJsonFromAiText`가 문자열 내부 제어문자를 escape 후 파싱하게(컨트롤타워 1곳).
-- **PG timestamptz는 런타임 Date 객체**(TS 타입이 string이어도). 문자열 메서드(`.localeCompare` 등) 호출 전 변환 필수.
+- **PG timestamptz·date는 런타임 Date 객체**(TS 타입이 string이어도). 문자열 메서드(`.localeCompare` 등) 호출 전 변환 필수. **★2026-08-21 date 판 재발**(마케팅 플래너 — `String(row.starts_on).slice(0,10)` = `"Fri Aug 21"` → 화면 RangeError로 페이지 전체 사망 + 워커 예정일 영구 불일치). **처방 = SQL에서 `::text`로 받는다**(정산 관례) + 소스 계약(`planner-date-contract.test.ts`). `String(Date).slice(0,10)`은 날짜 변환이 아니다.
 - **공유 흐름에서 한 sub-agent만 실패하면 그 sub-agent 전용 요소가 범인** — 전역(키·모델·잔액) 배제 후 좁힌다.
 - 간헐 버그도 운영 로그(`console.error`)로 정확 예외 1줄을 확보한 뒤 고친다(추측 fix 금지). 증상이 비슷해도 별개 신고(예: 브랜드보이스)를 같은 원인이라 단정 X — 회사·증상 확인 후 판단.
 

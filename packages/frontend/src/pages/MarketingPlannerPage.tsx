@@ -68,6 +68,9 @@ const CHANNEL_ICON: Record<Channel, typeof MailOpen> = {
   sms: Smartphone, alimtalk: Smartphone, email: MailOpen, dm: Smartphone, inapp: Smartphone,
 };
 
+/** 'YYYY-MM-DD' 형식 — 서버 응답의 날짜 축 계약(이 형식이 아니면 날짜 산술에 넣지 않는다). */
+const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
+
 /** KST 오늘 — 브라우저 타임존과 무관하게 한국 날짜를 쓴다(해외 접속 하루 밀림 차단). */
 const kstToday = () => new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 const todayMonth = () => kstToday().slice(0, 7);
@@ -201,8 +204,13 @@ export default function MarketingPlannerPage() {
   const eventsByDate = useMemo(() => {
     const map = new Map<string, PlannerEvent[]>();
     for (const ev of events) {
+      // ★ 2026-08-21 방어층(임은지 접수) — 날짜가 'YYYY-MM-DD'가 아니면 그 행사만 건너뛴다. 그전에는 서버가
+      //   Date 객체를 잘못 문자열화한 값("Fri Aug 21")이 오자 nextDay의 toISOString이 RangeError로 죽어
+      //   **화면 전체**가 오류 카드가 됐다. 근본 수정은 서버(::text 캐스트)이고, 여기는 한 행사가 화면을
+      //   통째로 죽이지 않게 하는 두 번째 층이다. 상한 400일은 무한 루프 차단(기간 검증은 서버가 한다).
+      if (!DAY_KEY.test(ev.startsOn) || !DAY_KEY.test(ev.endsOn) || ev.endsOn < ev.startsOn) continue;
       // 행사 기간의 각 날짜에 바를 그린다 — 셀 순회보다 행사 순회가 싸다(행사 수 << 날짜 수)
-      for (let d = ev.startsOn; d <= ev.endsOn; d = nextDay(d)) {
+      for (let d = ev.startsOn, guard = 0; d <= ev.endsOn && guard < 400; d = nextDay(d), guard++) {
         const arr = map.get(d) || [];
         arr.push(ev);
         map.set(d, arr);

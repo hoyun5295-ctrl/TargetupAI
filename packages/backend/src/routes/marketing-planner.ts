@@ -135,8 +135,12 @@ router.get('/events', async (req: Request, res: Response) => {
   const planMonth = parsePlanMonth(req.query.month);
   if (!planMonth) return res.status(400).json({ error: '조회할 달을 지정해 주세요. (YYYY-MM)' });
   try {
+    // ★ 2026-08-21 (임은지 접수 — 행사 1건 담은 뒤 "화면을 불러오지 못했습니다") date 컬럼은 드라이버가
+    //   JS Date로 돌려준다(database.ts는 1114만 재정의). `String(Date).slice(0,10)`은 "Fri Aug 21"이 되어
+    //   화면의 날짜 산술(nextDay → toISOString)이 RangeError로 죽었다. 정산 관례대로 SQL에서 `::text`로
+    //   'YYYY-MM-DD'를 받는다 — 계약 = planner-date-contract.test.ts(플래너 SELECT의 날짜 컬럼 캐스트 의무).
     const ev = await query(
-      `SELECT id, title, starts_on, ends_on, benefit_text, products, status, created_at
+      `SELECT id, title, starts_on::text AS starts_on, ends_on::text AS ends_on, benefit_text, products, status, created_at
          FROM planner_events
         WHERE company_id = $1 AND plan_month = $2 AND status <> 'cancelled'
         ORDER BY starts_on ASC, created_at ASC`,

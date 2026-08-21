@@ -62,7 +62,8 @@ function fmt(n: number | null | undefined): string {
 /** 월간 결과 — 결재 화면의 [결과] 탭이 그대로 쓰는 값. */
 export async function loadMonthlyResult(companyId: string, planMonth: string): Promise<MonthlyResult> {
   const evRes = await query(
-    `SELECT id, title, starts_on, ends_on, status
+    // ★ 2026-08-21 date 컬럼은 `::text`로 받는다(임은지 접수 · 계약 = planner-date-contract.test.ts).
+    `SELECT id, title, starts_on::text AS starts_on, ends_on::text AS ends_on, status
        FROM planner_events
       WHERE company_id = $1::uuid AND plan_month = $2 AND status <> 'cancelled'
       ORDER BY starts_on ASC, created_at ASC`,

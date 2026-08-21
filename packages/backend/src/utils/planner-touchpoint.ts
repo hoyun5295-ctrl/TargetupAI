@@ -128,7 +128,7 @@ export async function loadLiveTouchpoints(input: {
   const r = await query(
     `SELECT t.id, t.event_id, t.company_id, t.channel, t.timing_rule, t.status,
             t.asset_ref, t.exec_ref, t.exec_meta,
-            e.plan_month, e.title, e.starts_on, e.ends_on, e.benefit_text, e.products,
+            e.plan_month, e.title, e.starts_on::text AS starts_on, e.ends_on::text AS ends_on, e.benefit_text, e.products,
             e.created_by, e.status AS event_status
        FROM planner_touchpoints t
        JOIN planner_events e ON e.id = t.event_id AND e.company_id = t.company_id
@@ -147,7 +147,7 @@ export async function loadTouchpointById(companyId: string, touchpointId: string
   const r = await query(
     `SELECT t.id, t.event_id, t.company_id, t.channel, t.timing_rule, t.status,
             t.asset_ref, t.exec_ref, t.exec_meta,
-            e.plan_month, e.title, e.starts_on, e.ends_on, e.benefit_text, e.products,
+            e.plan_month, e.title, e.starts_on::text AS starts_on, e.ends_on::text AS ends_on, e.benefit_text, e.products,
             e.created_by, e.status AS event_status
        FROM planner_touchpoints t
        JOIN planner_events e ON e.id = t.event_id AND e.company_id = t.company_id
