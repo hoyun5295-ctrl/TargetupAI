@@ -371,7 +371,8 @@ EXPLAIN 실측 = `type: ALL` · `key: NULL` · `filtered: 49.60`. **IN 값이 5�
 **Harold 결정 대기** — `G` 유형 과금 분류 · 요금제 이력 크레딧 스냅샷 소급 ALTER
 - **기발행분 품목 거래일자 공란**(★2026-08-05) — 아래 정정 **이전에 나간 문서**는 품목 줄의 월·일이 비어 있다. 소급이 아니라 **수정세금계산서 축**이라(§2-8) 손댈지는 Harold 판단이다. 대상 건수는 `taxbill_issues` `status='issued'` 집계로 확인.
 - **해지 회사 목록 제외 · 정산 목록 검색·페이징**(★2026-08-06 Harold 지시 · 코드 완료) — 미발급 목록 41개사 중 28개가 담기지 않는 회사(해지)라 화면이 그것들로 덮였다. 서버 목록 쿼리에서 뺐다. ⚠ **해지 회사의 미청구분은 이제 이 목록에 안 뜬다** — 남았다면 단건 발행으로. 정산 목록은 15개씩 페이징 + 고객사·계정 검색(화면 안에서만 좁힌다). 헤더 체크박스는 **이 페이지** 기준(일괄발급과 같은 규약) — 선택은 페이지·검색을 넘어 유지되고 일괄 실행은 안 보이는 선택까지 포함한다.
-- ~~**계산서 비고(PO) — 시세이도 접수**(★2026-08-05 접수, 임은지).~~ **★2026-08-21 구현 완료 — §2-20**(서수란 재질의로 미착수가 드러남). 아래는 당시 설계 원문. 브랜드(계정)마다 컨펌 후 PO를 통보받아 계산서 비고에 실어야 한다. **비고1 칸은 문서에 실재 확인**(금강제화 발행분). 발행 단위는 이미 `by_user`+`manual`이라 `by_agent` 공사 불필요.
+- ~~**계산서 비고(PO) — 시세이도 접수**(★2026-08-05 접수, 임은지).~~ **★2026-08-21 구현 완료 — §2-20**(서수란 재질의로 미착수가 드러남). 아래는 당시 설계 원문.
+- **★0821 다음 축 — 고객이 컨펌 페이지에서 PO·작성일자를 입력하면 자동 발행**(Harold 발안 · 착수 대기) = [설계서](2026-08-21-taxbill-remark-customer-confirm-design.md). 선행 = 0821(2) 실측 1건. 별건 부채 = [BUGS B-0821-2](../status/BUGS.md)(취소 경로 화이트리스트). 브랜드(계정)마다 컨펌 후 PO를 통보받아 계산서 비고에 실어야 한다. **비고1 칸은 문서에 실재 확인**(금강제화 발행분). 발행 단위는 이미 `by_user`+`manual`이라 `by_agent` 공사 불필요.
   설계 = `invoice_confirmations.taxbill_remark`(장마다 값이 다르다 — 회사 고정값이 아니다) + `company_billing_settings.require_taxbill_remark`(비면 작성일자 지정 차단). 입력은 [작성일자 지정] 한 자리에서 날짜와 함께(같은 통보로 오는 값이라 화면을 나누지 않는다). 발행 패스가 `remark1`로 싣는다.
   ⚠ **완료 조건 = 첫 발행 1건에서 PO가 실제로 찍히는지 확인.** 값이 채워진 문서를 우리가 본 적이 없다(수정발행 실전 기록 0).
 
@@ -400,6 +401,7 @@ EXPLAIN 실측 = `type: ALL` · `key: NULL` · `filtered: 49.60`. **IN 값이 5�
 
 | 시점 | 무엇 | 검증 |
 |---|---|---|
+| **0821(3) 코드완료·배포 대기** | **정산 목록 [선택 발송] 묶음 단위 정정**(서수란 접수 `cmt2lh16200ezjnot2dke7nxe` — 시세이도 4장 선택 발송 시 "보낼 미발송 장이 없습니다" 실패 3건 표시). 원인 = 화면은 행마다 `retry-confirmations`를 불렀는데 그 엔드포인트는 같은 `batch_id`의 미발송 형제 장을 **전부** 보낸다(계정별 발급 = 한 묶음) → 1번째 호출이 4통 발송, 2~4번째는 `targeted 0`을 실패로 집계. **메일은 정상 발송**(DB 실측: `sent_at` 4행 동일 시각 · `emailed_at` 1초 간격 4건 — 불확정 커밋은 60초 뒤에만 일어나므로 배제). 정정 = `runBillingBulk('send')`가 `batch_id ?? id`로 묶어 묶음당 1회 호출 + 결과 문구는 서버 `summary.sent` 실제 통 수("N장 발송"). 서버·행 [재발송]·청구 확정 무변경 | frontend tsc 0 · UI 표시만이라 Codex 대상 밖 · [BUGS B-0821-3](../status/BUGS.md) 운영 검증 = 묶음 회사 2장+ 선택 발송 → "성공 1건 · N장" |
 | **0821 코드완료·배포 대기** | **080 고정료 자동 파생 + 계산서 작성일자 정합**(§2-18·§2-19 신설 — 서수란 0821 접수 2건: 게스코리아 "명세서 없으면 080 기본 설정이 빠진다" + 라프레리 "9/1 계산서를 8/20자로"). ①`080_base` 근거 행 자동 생성·`080_call`은 통화료만·legacy 스킵 축 교체·최소과금 고정료 매핑 거부 ②발행 claim 작성일자 KST 게이트 + 작성일자 변경 창구(허용 = 엄격 NULL·-11002009 2종 화이트리스트 — 팝빌 조회 관문은 시도 후 폐기, §2-19 ⛔) + [재시도] error 보존 + 컨펌 동기화 superseded 보호. 화면 = [작성일자 변경] 모달·실패 사유 failed 한정 표시·080 모달 문구 | backend tsc 0 · frontend tsc 0 · vitest 4파일 296건(신규 계약: 파생 3·소스 스캔 6) · **Codex 적대 6R approve**(1R high 3 → 2R high 4 → 3R high 2 → 4R high 3·medium 2 → 5R high 2·medium 2 전건 수용·불수용 2건 근거 기록 → 6R 지적 0) · DDL 0 |
 | **0821(2) 코드완료·배포 대기** | **계산서 비고(PO번호) — 시세이도 0805 접수 구현**(§2-20 — 서수란 재질의 "업체 확인 기록에 PO를 적으면 들어가나"로 미착수 발견). 컨펌 행 `taxbill_remark` + 회사 `require_taxbill_remark` · 입력 = 작성일자 지정·변경 2창구 · 발행 remark1(수정 장 remark2) · to_jsonb 읽기·503 안전망 · 설정 체크박스 | backend·frontend tsc 0 · vitest 정산 5파일 322건(신규 payload 4·소스 계약 4) · **DDL 2 실행완료(배포 전 선행 — 컬럼 추가뿐이라 옛 코드 무영향)** · **Codex 적대 5R**(1R critical 0·high 3·medium 1 → 게이트를 발행 패스로 이동 / 2R critical 1·high 2 → matched id 전파·게이트 범위 축소 / 3R high 1 → 채번 원본 getInfo 선대사 / 4R high 1 → 비고만 우회 폐기 / 5R high 1 = **기존 취소 경로 부채 → [BUGS B-0821-2](../status/BUGS.md) 별건**, medium 2 수용. 상한 초과로 정지·보고) |
 | **0820(2) 재오픈 정정 · 코드완료** | **추가 청구 항목 귀속 축 = 청구월 = 정산월**(§2-17 개정 — 서수란 재오픈: 시세이도 "8월 정산"에 7월분 131만원 합산 실측). 선택 2곳 + 차단·표시 5곳을 `make_date(billing_year,billing_month,1) = period_month` 한 축으로. 역월 정산 동작 무변화. **Codex 적대 5R approve** — 1R 이관 차단을 마커 진실 축으로(소비행은 라벨 무관 금지) · 1R 라벨 건너뜀 고착 차단(`monthFullyCovered` — 달 전체가 발행 기간에 덮이면 반영 거부) · 2R 수동 정산완료 기간도 덮임에 합산 · 3R·4R 스키마 부재(42P01·42703)를 skipped로 삼키지 않고 503(CT `db-migration-error`) | backend tsc 0 · 정산 12파일 206건(신규 계약 16: 월일치 소스 스캔 2·덮임 8·수동완료 UNION·42P01/42703 스캔 등) · DDL 0 |
@@ -654,6 +656,7 @@ EXPLAIN 실측 = `type: ALL` · `key: NULL` · `filtered: 49.60`. **IN 값이 5�
 |---|---|---|
 | 발행 단위·정정·성능 | [2026-07-26-billing-scope-and-corrections-design.md](2026-07-26-billing-scope-and-corrections-design.md) | §0-A(확정값) → §9(이월) · 절사 = §9-5-A · 속도 = §9-9 |
 | 일괄발급·컨펌·세금계산서 | [2026-07-28-bulk-invoice-confirm-taxbill-design.md](2026-07-28-bulk-invoice-confirm-taxbill-design.md) | §9(종결) · §7-0(팝빌 요지) · §4-2(0804 3종) |
+| **계산서 비고(PO) 고객 입력 자동화(착수 대기)** | [2026-08-21-taxbill-remark-customer-confirm-design.md](2026-08-21-taxbill-remark-customer-confirm-design.md) | 전체(§0~§8) — 확정 사실 §2 · 미확인 §7 |
 | 브랜드메시지 청구 | [2026-07-29-brand-message-billing-design.md](2026-07-29-brand-message-billing-design.md) | §7(남은 것) · 구조 = §1~§5 |
 | 특례·발행 그룹 | [2026-07-30-billing-extras-and-groups-design.md](2026-07-30-billing-extras-and-groups-design.md) | §2-4(원장 파생) → §9 → §7(확인 5건) |
 | 구분 칸(웹 계정명·발송ID) | [2026-07-31-billing-detail-storeid-handoff.md](2026-07-31-billing-detail-storeid-handoff.md) | 전체(짧다) |

@@ -2295,21 +2295,42 @@ const runBillingBulk = async (kind: 'confirm' | 'send') => {
     return;
   }
   const label = kind === 'confirm' ? '청구 확정' : '발송';
-  setBillingBulk({ label, done: 0, total: eligible.length });
+  // ★ 2026-08-21 (서수란 접수 cmt2lh16200ezjnot2dke7nxe) 발송의 실행 단위는 행이 아니라 **묶음**이다.
+  //   `retry-confirmations`는 받은 장과 같은 batch_id의 미발송 형제 장을 **전부** 보낸다(계정별 발급 = 한 묶음).
+  //   행마다 부르면 첫 호출이 묶음 전체를 보내고 나머지 호출은 targeted 0 → "보낼 미발송 장이 없습니다"가
+  //   실패로 집계됐다(시세이도 4장: 화면은 성공 1·실패 3, 실제는 4통 발송 — DB emailed_at 4행 실측).
+  //   묶음당 1회만 부르고, 나간 통 수는 서버 summary.sent를 그대로 적는다(선택이 묶음의 일부여도 서버는
+  //   묶음의 미발송 장 전부를 보내므로 선택 수가 아니라 실제 통 수를 보여준다). 청구 확정은 행 단위 그대로다.
+  type BulkUnit = { company_name: string; ids: string[] };
+  let units: BulkUnit[];
+  if (kind === 'confirm') {
+    units = eligible.map((b: any) => ({ company_name: b.company_name, ids: [b.id] }));
+  } else {
+    const byBatch = new Map<string, BulkUnit>();
+    for (const b of eligible) {
+      const key = String(b.batch_id || b.id);
+      const u = byBatch.get(key);
+      if (u) u.ids.push(b.id);
+      else byBatch.set(key, { company_name: b.company_name, ids: [b.id] });
+    }
+    units = Array.from(byBatch.values());
+  }
+  setBillingBulk({ label, done: 0, total: units.length });
   const ok: string[] = [];
   const fail: string[] = [];
   const partial: string[] = [];
+  let sentTotal = 0;
   const token = localStorage.getItem('token');
-  for (const b of eligible) {
+  for (const u of units) {
     try {
       if (kind === 'confirm') {
-        await billingApi.updateBillingStatus(b.id, 'confirmed');
-        ok.push(b.company_name);
+        await billingApi.updateBillingStatus(u.ids[0], 'confirmed');
+        ok.push(u.company_name);
       } else {
         const res = await fetch('/api/admin/billing/bulk/retry-confirmations', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ billing_id: b.id }),
+          body: JSON.stringify({ billing_id: u.ids[0] }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error || '발송 실패');
@@ -2320,22 +2341,26 @@ const runBillingBulk = async (kind: 'confirm' | 'send') => {
         const sentCount = Number(s.sent) || 0;
         const blocked = Number(s.mismatchBlocked || 0) + Number(s.renderFailed || 0)
           + Number(s.skippedNoEmail || 0) + Number(s.mailFailed || 0);
-        if (Number(data?.targeted) === 0) fail.push(`${b.company_name} — 보낼 미발송 장이 없습니다`);
-        else if (sentCount === 0) fail.push(`${b.company_name} — ${data?.message || '한 통도 나가지 않았습니다'}`);
+        // 묶음당 1회 호출이라 정상 경로에서 targeted 0은 나오지 않는다 — 나오면 그 사이 다른 요청이 보냈거나 장이 사라진 것이다.
+        if (Number(data?.targeted) === 0) fail.push(`${u.company_name} — 보낼 미발송 장이 없습니다(그 사이 발송됐거나 장을 찾지 못했습니다)`);
+        else if (sentCount === 0) fail.push(`${u.company_name} — ${data?.message || '한 통도 나가지 않았습니다'}`);
         else {
-          ok.push(b.company_name);
-          if (blocked > 0) partial.push(`${b.company_name} — ${data?.message || `일부 ${blocked}장이 나가지 않았습니다`}`);
+          sentTotal += sentCount;
+          ok.push(`${u.company_name} — ${sentCount}장 발송`);
+          if (blocked > 0) partial.push(`${u.company_name} — ${data?.message || `일부 ${blocked}장이 나가지 않았습니다`}`);
         }
       }
     } catch (e: any) {
-      fail.push(`${b.company_name} — ${e?.response?.data?.error || e?.message || '실패'}`);
+      fail.push(`${u.company_name} — ${e?.response?.data?.error || e?.message || '실패'}`);
     }
     setBillingBulk((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
   }
   setBillingBulk(null);
   setBillingSel([]);
   await loadBillings();
-  const lines = [`${label} 성공 ${ok.length}건`];
+  const lines = kind === 'send'
+    ? [`발송 성공 ${ok.length}건 · ${sentTotal}장`, ...ok]
+    : [`${label} 성공 ${ok.length}건`];
   if (skipped > 0) lines.push(`대상 아님 ${skipped}건(선택에서 제외)`);
   if (partial.length > 0) lines.push('', '일부만 나감:', ...partial);
   if (fail.length > 0) lines.push('', '실패:', ...fail);
