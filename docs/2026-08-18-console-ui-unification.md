@@ -84,6 +84,12 @@
   - **도구줄 경계**: ghost였던 특수문자·보관함·문자 저장을 흰 칩 + 링으로. 한 줄에 다섯을 두면 440px에서 접혀 위계가 깨져 **윗줄 = AI(추천·꾸미기) + 바이트 / 아랫줄 = 작성 도구**로 나눴다.
   - **AI 꾸미기 배선**: 기존 `POST /api/ai/operator/decorate-message`(3크레딧, Operator·여정·DM 편집기 공용) 재사용, 백엔드 변경 0. **녹일 변수 = 본문에 이미 들어 있는 `%변수%`만 자동 감지**(0808 규약 "쓰인 컬럼 = 고른 컬럼") → 별도 선택 단계 없음, 0개면 비활성 + 도움말. 게이트 = AI 추천과 같은 `isAiMessagingLocked` → `PlanUpgradeModal`(403 `AI_OPERATOR_GATED`도 같은 모달). 적용 직전 원문 보관 → 되돌리기 1회, 본문을 손대면 사라진다. 게이트 = tsc 0 · 줄표·UI 토큰·오퍼레이터 표면 불변식 3종 · 검출기 1회(신규 지적 0 — rose 항목은 hover 짝 오탐).
 
+- **2026-08-21(3) 직접 타겟 발송 → 브랜드메시지 인계(인디고 전용 진입)** — Harold "알림톡처럼 리스트 그대로 가져가면서 발송 + 브랜드 모달도 인디고로 직접타겟발송 전용으로".
+  - `TargetSendModal.onBrandOpen` 신설 → 수신자 헤더의 알림톡(amber) 옆 "브랜드메시지 발송"(indigo). Dashboard 핸들러는 알림톡 인계와 같은 축: `targetRecipients`에서 번호만 뽑아 `brandInitialRecipients` → `brandEntry='target'` → 브랜드 모달 열고 타겟 창을 닫는다.
+  - `BrandSendModal.entry?: 'direct' | 'target'`(기본 direct = 기존 violet·3방식 그대로, DirectSendPanel diff 0). **target = 인디고 + 좌측은 가져온 목록만**(검색 · 개별 제외 · "추출 N명 · M명 제외"). 번호를 더 넣는 길은 일부러 닫았다: 조건으로 뽑은 대상이 곧 수신자라 더하면 "조건 = 대상"이 깨진다. 확인 다이얼로그·헤드라인도 같은 색.
+  - `BrandMessageEditor.accent?: 'violet' | 'indigo'`: 색이 드러나는 8자리(유형 카드·썸네일·체크박스·버튼 추가·발송 버튼·입력 링)를 표 하나(`ACCENT`)로 묶고 JSX는 이름만 부른다. `ConfirmDialogShell`에 `indigo` 톤 추가(기존 5톤 소비처 9곳 무변경).
+  - 게이트 = tsc 0 · 불변식 3종 11건 · 검출기(violet 지적은 전부 direct 진입의 기존 값).
+
 ## §5 남은 것
 - 직접발송 패널(`DirectSendPanel`, 에메랄드 `ds-*` CSS)은 그대로다. 같은 대시보드에서 직접발송 초록 / 타겟 모달 인디고가 공존한다. 직접발송까지 인디고로 맞출지는 Harold 판단(별건).
 

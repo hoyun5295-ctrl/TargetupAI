@@ -20,7 +20,7 @@
  */
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Megaphone, PencilLine, Upload, Sparkles, Lock, Loader2, Trash2, Users, UserPlus, X } from 'lucide-react';
+import { Megaphone, PencilLine, Upload, Sparkles, Lock, Loader2, Trash2, Users, UserPlus, X, Search } from 'lucide-react';
 import BrandMessageEditor from './BrandMessageEditor';
 import SendWorkspaceShell, { WorkspaceNotice, FIELD_CLASS } from './shared/SendWorkspaceShell';
 import ConfirmDialogShell, { DialogHeadline, DialogRow, DialogCaution } from './shared/ConfirmDialogShell';
@@ -41,6 +41,12 @@ export interface BrandSendModalProps {
   /** 실제 발송 — BrandMessageEditor가 만든 payload에 수신자를 얹어 부모가 보낸다 */
   onSend: (payload: any) => Promise<void> | void;
   sending?: boolean;
+  /**
+   * ★ 2026-08-21 진입 출처. 기본 'direct'(직접발송 패널, violet · 수신자 3방식 그대로).
+   *   'target' = 직접 타겟 발송에서 추출된 수신자를 들고 넘어온 경우: 인디고(콘솔 톤) + 수신자 입력 3방식을 숨기고
+   *   **가져온 목록만** 보여준다(빼기만 가능). 알림톡 인계와 같은 "리스트 그대로 가져가기" 축.
+   */
+  entry?: 'direct' | 'target';
 }
 
 /**
@@ -61,8 +67,18 @@ const normalizePhones = (raw: string): string[] =>
 
 export default function BrandSendModal({
   show, onClose, profiles, initialRecipients, isAiTargetLocked, onLockedFeature, onSend, sending,
+  entry = 'direct',
 }: BrandSendModalProps) {
+  const isTarget = entry === 'target';
+  const accent = isTarget ? 'indigo' : 'violet';
+  /** 강조색 표 — 좌측 수신자 패널에서 색이 드러나는 자리만. 값은 여기 하나만 갖는다 */
+  const A = isTarget
+    ? { count: 'text-indigo-600', badge: 'bg-indigo-600', focus: 'focus-within:ring-indigo-500/50' }
+    : { count: 'text-violet-600', badge: 'bg-gradient-to-br from-violet-500 to-fuchsia-500', focus: 'focus-within:ring-violet-500/50' };
   const [mode, setMode] = useState<RecipientMode>('manual');
+  /** target 진입: 넘어온 원래 인원(제외 수 표시용) + 목록 검색어 */
+  const [seededCount, setSeededCount] = useState(0);
+  const [listQuery, setListQuery] = useState('');
   /** 입력 중인 번호 — [수신자로 추가]를 눌러야 확정 목록(phones)에 들어간다(알림톡과 같은 축) */
   const [draft, setDraft] = useState('');
   const [addNotice, setAddNotice] = useState('');
@@ -96,6 +112,8 @@ export default function BrandSendModal({
       (initialRecipients || []).map((p) => String(p).replace(/[^0-9]/g, '')).filter(Boolean),
     ));
     setPhones(seeded);
+    setSeededCount(seeded.length);
+    setListQuery('');
     setDraft(''); setAddNotice('');
     setMode('manual');
     setPending(null);
@@ -221,8 +239,82 @@ export default function BrandSendModal({
     { key: 'ai' as RecipientMode, label: 'AI 타겟추출', icon: Sparkles, locked: isAiTargetLocked },
   ]), [isAiTargetLocked]);
 
-  // ── 좌측 패널(수신자) ─────────────────────────────────────────────
-  const aside = (
+  // ── 좌측 패널(수신자) · target 진입 = 가져온 목록만 ──────────────────────
+  //   직접 타겟 발송에서 조건으로 뽑은 대상이 곧 수신자다. 여기서 번호를 더 넣는 길을 열면
+  //   "조건 = 대상"이 깨져 발송 결과와 추출 조건이 어긋난다 → 빼기만 둔다.
+  const removedCount = Math.max(0, seededCount - phones.length);
+  const visiblePhones = listQuery.trim()
+    ? phones.filter((p) => p.includes(listQuery.replace(/[^0-9]/g, '')))
+    : phones;
+  const targetAside = (
+    <>
+      <div className="shrink-0 px-4 pt-4">
+        <div className="rounded-2xl bg-white ring-1 ring-slate-900/5 shadow-sm px-4 py-3 flex items-center gap-3">
+          <div className={`h-9 w-9 rounded-xl ${A.badge} text-white grid place-items-center shrink-0`}>
+            <Users size={16} strokeWidth={1.9} />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[13px] font-semibold text-slate-900">직접 타겟 발송에서 가져온 수신자</p>
+            <p className="text-[11.5px] text-slate-500 mt-0.5">
+              추출된 {seededCount.toLocaleString()}명{removedCount > 0 ? ` · ${removedCount.toLocaleString()}명 제외` : ''} · 여기서는 빼기만 할 수 있습니다
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">
+        <div className={`h-9 flex items-center gap-2 px-3 rounded-lg bg-white ring-1 ring-slate-200 focus-within:ring-2 ${A.focus} transition`}>
+          <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          <input
+            type="text"
+            value={listQuery}
+            onChange={(e) => setListQuery(e.target.value)}
+            placeholder="수신번호 검색"
+            className="w-full min-w-0 bg-transparent border-0 p-0 text-[12.5px] text-slate-800 placeholder:text-slate-400 outline-none focus:ring-0"
+          />
+        </div>
+
+        {phones.length === 0 ? (
+          <p className="text-[12px] text-slate-500 text-center py-10">수신자가 모두 제외됐습니다. 창을 닫고 타겟을 다시 가져오세요.</p>
+        ) : (
+          <div className="rounded-2xl bg-white ring-1 ring-slate-900/5 shadow-sm overflow-hidden">
+            <div className="px-3.5 py-2 bg-slate-50/70 border-b border-slate-100 text-[11px] text-slate-400">
+              {listQuery.trim()
+                ? `검색 ${visiblePhones.length.toLocaleString()}건`
+                : phones.length > RECIPIENT_EDIT_LIMIT
+                  ? `앞 ${RECIPIENT_EDIT_LIMIT.toLocaleString()}건 표시 · 전체 ${phones.length.toLocaleString()}명 발송`
+                  : `수신번호 ${phones.length.toLocaleString()}건`}
+            </div>
+            <div className="max-h-[52vh] overflow-y-auto divide-y divide-slate-50">
+              {visiblePhones.slice(0, RECIPIENT_EDIT_LIMIT).map((p) => (
+                <div key={p} className="flex items-center justify-between gap-2 px-3.5 py-1.5 group">
+                  <span className="font-mono text-[12px] text-slate-600">{p}</span>
+                  <button type="button" onClick={() => setRecipients(phones.filter((x) => x !== p))}
+                    className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-slate-300 hover:text-rose-500 transition shrink-0"
+                    aria-label={`${p} 제외`} title="이 번호 제외">
+                    <X size={13} strokeWidth={2.2} />
+                  </button>
+                </div>
+              ))}
+              {listQuery.trim() && visiblePhones.length === 0 && (
+                <p className="text-[12px] text-slate-400 text-center py-6">일치하는 번호가 없습니다</p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="shrink-0 border-t border-slate-100 bg-white/70 px-4 py-3">
+        <p className="text-xs text-slate-500 inline-flex items-center gap-1.5">
+          <Users size={13} strokeWidth={1.9} className="text-slate-300" />
+          수신자 <span className={`font-bold ${A.count} tabular-nums`}>{phones.length.toLocaleString()}</span>명
+        </p>
+      </div>
+    </>
+  );
+
+  // ── 좌측 패널(수신자) · direct 진입 = 3방식 입력 ────────────────────────
+  const aside = isTarget ? targetAside : (
     <>
       {/* 세그먼트 탭 — 밑줄 대신 알약형. 회색 선을 줄이면 화면이 정돈돼 보인다 */}
       <div className="shrink-0 px-4 pt-4">
@@ -366,9 +458,11 @@ export default function BrandSendModal({
       show={show}
       onClose={onClose}
       title="브랜드메시지 발송"
-      subtitle="발신프로필이 연동돼 있으면 전화번호로 바로 보냅니다. 템플릿 검수는 필요 없습니다."
+      subtitle={isTarget
+        ? `추출된 ${phones.length.toLocaleString()}명에게 브랜드메시지를 발송합니다`
+        : '발신프로필이 연동돼 있으면 전화번호로 바로 보냅니다. 템플릿 검수는 필요 없습니다.'}
       icon={<Megaphone size={19} strokeWidth={1.9} className="text-white" />}
-      accent="violet"
+      accent={accent}
       notice={!hasProfile ? (
         <WorkspaceNotice>
           카카오 채널 연동(발신프로필 등록)이 필요합니다. 발신프로필이 등록되면 요금제와 무관하게 바로 사용할 수 있습니다.
@@ -382,6 +476,7 @@ export default function BrandSendModal({
         <BrandMessageEditor
           profiles={profiles}
           sending={!!sending}
+          accent={accent}
           onSend={(payload: any) => {
             if (!canSend) return;
             // 바로 보내지 않는다 — 건수를 보여주고 확인을 받는다(문자·알림톡과 같은 계약)
@@ -392,7 +487,7 @@ export default function BrandSendModal({
 
       <ConfirmDialogShell
         show={!!pending}
-        tone="violet"
+        tone={accent}
         icon={<Megaphone size={18} strokeWidth={1.9} className="text-white" />}
         title="지금 바로 발송합니다"
         subtitle="광고성 메시지입니다. 누르는 즉시 나가며 회수할 수 없습니다."
@@ -409,7 +504,7 @@ export default function BrandSendModal({
         busyLabel="접수 중..."
         confirmDisabled={phones.length === 0}
       >
-        <DialogHeadline label="발송 대상" value={phones.length} unit="명" tone="violet" />
+        <DialogHeadline label="발송 대상" value={phones.length} unit="명" tone={accent} />
         <div className="mt-3">
           <DialogRow label="메시지 유형" value={pendingTypeLabel} />
           <DialogRow

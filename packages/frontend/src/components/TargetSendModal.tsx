@@ -1,4 +1,4 @@
-import { Sparkles, Users, Eye, ShieldCheck, Smartphone, Type, Archive, Save, ImagePlus, Bell, Search, ChevronLeft, ChevronRight, RotateCcw, Trash2, Send, Wand2, Loader2 } from 'lucide-react';
+import { Sparkles, Users, Eye, ShieldCheck, Smartphone, Type, Archive, Save, ImagePlus, Bell, Search, ChevronLeft, ChevronRight, RotateCcw, Trash2, Send, Wand2, Loader2, Megaphone } from 'lucide-react';
 import SendWorkspaceShell, { FIELD_CLASS_INDIGO } from './shared/SendWorkspaceShell';
 import { CUI_PILL_BASE, CUI_PANEL, CUI_SCROLL_X, CUI_THEAD, CUI_TH, CUI_TR, CUI_TD, CUI_CELL_DATA, CUI_BTN_GHOST, CUI_BTN_OUTLINE } from '../utils/console-ui';
 import { useRef, useState } from 'react';
@@ -152,6 +152,8 @@ interface TargetSendModalProps {
 
   // ★ D162-4 (2026-05-15) 2차: 직접타겟발송 → 알림톡 발송 풀 화면 진입 callback. 수신번호 검색 옆 카카오 노란색 버튼.
   onAlimtalkOpen?: () => void;
+  /** ★ 2026-08-21 직접 타겟 발송 → 브랜드메시지 발송. 추출된 수신자 목록을 그대로 들고 간다(알림톡과 같은 축). */
+  onBrandOpen?: () => void;
 }
 
 export default function TargetSendModal({
@@ -204,6 +206,7 @@ export default function TargetSendModal({
   targetSending,
   onResetTarget,
   onAlimtalkOpen,
+  onBrandOpen,
 }: TargetSendModalProps) {
 
   // ====== 내부 state ======
@@ -802,6 +805,15 @@ export default function TargetSendModal({
                 title="추출된 수신자에게 알림톡 발송">
                 <Bell className="w-3.5 h-3.5" />
                 알림톡 발송
+              </button>
+            )}
+            {/* ★ 2026-08-21 브랜드메시지: 넘어가는 모달이 인디고(콘솔 톤)라 버튼도 인디고. 수신자 목록 그대로 인계. */}
+            {onBrandOpen && (
+              <button type="button" onClick={onBrandOpen}
+                className="h-9 px-3 rounded-lg text-[13px] font-semibold text-indigo-800 bg-indigo-50 ring-1 ring-indigo-200 hover:bg-indigo-100 inline-flex items-center gap-1.5 transition"
+                title="추출된 수신자에게 브랜드메시지 발송">
+                <Megaphone className="w-3.5 h-3.5" />
+                브랜드메시지 발송
               </button>
             )}
             <div className="h-9 w-52 flex items-center gap-2 px-3 rounded-lg bg-slate-50 ring-1 ring-slate-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-500/50 transition">

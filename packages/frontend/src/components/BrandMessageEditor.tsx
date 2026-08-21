@@ -18,7 +18,33 @@
 import { useState } from 'react';
 import { Image as ImageIcon, PanelTop, Plus, X, Ticket, MessageSquareReply, Ban, Loader2, Send } from 'lucide-react';
 import BrandMessagePreview from './BrandMessagePreview';
-import { FIELD_CLASS, PANEL_CLASS, SourceCaption } from './shared/SendWorkspaceShell';
+import { FIELD_CLASS, FIELD_CLASS_INDIGO, PANEL_CLASS, SourceCaption } from './shared/SendWorkspaceShell';
+
+/**
+ * ★ 2026-08-21 강조색을 호출자가 고른다. 직접발송 진입 = violet(기존 그대로), 직접 타겟 발송 진입 = indigo(콘솔 톤).
+ *   색 값은 이 표 하나만 갖고, 아래 JSX는 이름만 부른다(조립 문자열 0 = Tailwind 스캐너가 읽는다).
+ */
+export type EditorAccent = 'violet' | 'indigo';
+const ACCENT = {
+  violet: {
+    field: FIELD_CLASS,
+    thumbBar: 'bg-violet-200', thumbImg: 'bg-violet-300', thumbBg: 'bg-violet-50',
+    cardOn: 'bg-white ring-2 ring-violet-500 shadow-violet-500/10',
+    cardText: 'text-violet-700',
+    check: 'text-violet-600 focus:ring-violet-500/40',
+    link: 'text-violet-600 hover:bg-violet-50',
+    send: 'bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 shadow-violet-500/25',
+  },
+  indigo: {
+    field: FIELD_CLASS_INDIGO,
+    thumbBar: 'bg-indigo-200', thumbImg: 'bg-indigo-300', thumbBg: 'bg-indigo-50',
+    cardOn: 'bg-white ring-2 ring-indigo-600 shadow-indigo-500/10',
+    cardText: 'text-indigo-700',
+    check: 'text-indigo-600 focus:ring-indigo-500/40',
+    link: 'text-indigo-600 hover:bg-indigo-50',
+    send: 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/25',
+  },
+} as const;
 
 // ============================================================
 // 상수 (프론트 컨트롤타워 — 백엔드 CT-12와 동기)
@@ -71,14 +97,17 @@ interface BrandMessageEditorProps {
   profiles: { id: string; profile_key: string; profile_name: string }[];
   onSend: (data: any) => void;
   sending: boolean;
+  /** 강조색. 기본 violet(직접발송). 직접 타겟 발송 진입은 indigo */
+  accent?: EditorAccent;
 }
 
 /** 유형 카드의 미니 구조도 — 이모지 대신 실제 말풍선 배치를 보여준다 */
-function TypeThumb({ code, active }: { code: string; active: boolean }) {
-  const bar = active ? 'bg-violet-200' : 'bg-slate-200';
-  const img = active ? 'bg-violet-300' : 'bg-slate-300';
+function TypeThumb({ code, active, accent }: { code: string; active: boolean; accent: EditorAccent }) {
+  const a = ACCENT[accent];
+  const bar = active ? a.thumbBar : 'bg-slate-200';
+  const img = active ? a.thumbImg : 'bg-slate-300';
   return (
-    <div className={`w-full h-[38px] rounded-lg p-1.5 flex flex-col gap-1 justify-center ${active ? 'bg-violet-50' : 'bg-slate-50'}`}>
+    <div className={`w-full h-[38px] rounded-lg p-1.5 flex flex-col gap-1 justify-center ${active ? a.thumbBg : 'bg-slate-50'}`}>
       {code === 'IMAGE' && <div className={`h-3 w-full rounded ${img}`} />}
       {code === 'WIDE' && <div className={`h-4 w-full rounded ${img}`} />}
       <div className={`h-1 w-full rounded-full ${bar}`} />
@@ -103,7 +132,9 @@ function Collapsible({ icon, title, children, defaultOpen }: {
   );
 }
 
-export default function BrandMessageEditor({ profiles, onSend, sending }: BrandMessageEditorProps) {
+export default function BrandMessageEditor({ profiles, onSend, sending, accent = 'violet' }: BrandMessageEditorProps) {
+  const a = ACCENT[accent];
+  const FIELD = a.field;
   const [mode, setMode] = useState<'free' | 'template'>('free');
   const [bubbleType, setBubbleType] = useState('TEXT');
   const [senderKey, setSenderKey] = useState('');
@@ -301,11 +332,11 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
                 <button key={t.code} type="button" onClick={() => { setBubbleType(t.code); setButtons([]); }}
                   className={`p-2.5 rounded-2xl text-left transition shadow-sm ${
                     active
-                      ? 'bg-white ring-2 ring-violet-500 shadow-violet-500/10'
+                      ? a.cardOn
                       : 'bg-white ring-1 ring-slate-200/80 hover:ring-slate-300'
                   }`}>
-                  <TypeThumb code={t.code} active={active} />
-                  <div className={`text-[13px] font-semibold mt-2 ${active ? 'text-violet-700' : 'text-slate-700'}`}>{t.label}</div>
+                  <TypeThumb code={t.code} active={active} accent={accent} />
+                  <div className={`text-[13px] font-semibold mt-2 ${active ? a.cardText : 'text-slate-700'}`}>{t.label}</div>
                   <div className="text-[10px] text-slate-400 leading-tight mt-0.5">{t.desc}</div>
                 </button>
               );
@@ -317,7 +348,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="block text-[13px] font-semibold text-slate-700 mb-1.5">발신 프로필</label>
-            <select value={senderKey} onChange={(e) => setSenderKey(e.target.value)} className={FIELD_CLASS}>
+            <select value={senderKey} onChange={(e) => setSenderKey(e.target.value)} className={FIELD}>
               <option value="">선택하세요</option>
               {profiles.map(p => (
                 <option key={p.id} value={p.profile_key}>{p.profile_name}</option>
@@ -326,7 +357,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
           </div>
           <div>
             <label className="block text-[13px] font-semibold text-slate-700 mb-1.5">타겟팅</label>
-            <select value={targeting} onChange={(e) => setTargeting(e.target.value)} className={FIELD_CLASS}>
+            <select value={targeting} onChange={(e) => setTargeting(e.target.value)} className={FIELD}>
               {TARGETING_OPTIONS.map(t => (
                 <option key={t.code} value={t.code}>{t.label}: {t.desc}</option>
               ))}
@@ -337,7 +368,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
         {/* 광고 여부 */}
         <label className="inline-flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer select-none">
           <input type="checkbox" checked={isAd} onChange={(e) => setIsAd(e.target.checked)}
-            className="w-4 h-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500/40" />
+            className={`w-4 h-4 rounded border-slate-300 ${a.check}`} />
           광고 메시지 <span className="text-slate-400 text-[12px]">(수신거부 표시가 필요합니다)</span>
         </label>
 
@@ -346,7 +377,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
           <div>
             <label className="block text-[13px] font-semibold text-slate-700 mb-1.5">템플릿 코드</label>
             <input type="text" value={templateCode} onChange={(e) => setTemplateCode(e.target.value)}
-              className={FIELD_CLASS} placeholder="사전 등록한 템플릿 코드" />
+              className={FIELD} placeholder="사전 등록한 템플릿 코드" />
           </div>
         )}
 
@@ -359,7 +390,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
             </div>
             <textarea value={message} onChange={(e) => setMessage(e.target.value)} maxLength={selectedType.maxMsg}
               rows={selectedType.maxMsg > 100 ? 7 : 3}
-              className={`${FIELD_CLASS} resize-none leading-relaxed`} placeholder="보낼 내용을 입력하세요" />
+              className={`${FIELD} resize-none leading-relaxed`} placeholder="보낼 내용을 입력하세요" />
           </div>
         )}
 
@@ -373,9 +404,9 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
             </div>
             <div className="space-y-2">
               <input type="text" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)}
-                className={FIELD_CLASS} placeholder="이미지 URL (jpg·png · 5MB 이하 · 800x400)" />
+                className={FIELD} placeholder="이미지 URL (jpg·png · 5MB 이하 · 800x400)" />
               <input type="text" value={imageLink} onChange={(e) => setImageLink(e.target.value)}
-                className={FIELD_CLASS} placeholder="클릭 시 이동 URL (선택)" />
+                className={FIELD} placeholder="클릭 시 이동 URL (선택)" />
               {imageUrl && (
                 <img src={imageUrl} alt="" className="w-full max-h-40 object-cover rounded-xl ring-1 ring-slate-200"
                   onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
@@ -395,7 +426,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
               </label>
               {buttons.length < effectiveMaxBtn && (
                 <button type="button" onClick={addButton}
-                  className="inline-flex items-center gap-1 text-[12px] font-medium px-2.5 py-1.5 rounded-lg text-violet-600 hover:bg-violet-50 transition">
+                  className={`inline-flex items-center gap-1 text-[12px] font-medium px-2.5 py-1.5 rounded-lg ${a.link} transition`}>
                   <Plus size={13} strokeWidth={2.2} /> 버튼 추가
                 </button>
               )}
@@ -412,7 +443,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
                         ? { ...b, type: next, ...(spec?.fixedName ? { name: spec.fixedName } : {}) }
                         : b));
                     }}
-                    className={`${FIELD_CLASS} w-28 shrink-0 px-2.5 py-1.5 text-xs`}>
+                    className={`${FIELD} w-28 shrink-0 px-2.5 py-1.5 text-xs`}>
                     {/* 대상 범위를 바꿔 지금은 못 쓰는 유형이 남아 있어도 선택칸이 비지 않게 그대로 보여준다
                         — 무엇이 걸렸는지는 발송 버튼 아래 한 줄이 알려준다 */}
                     {(availableButtonTypes.some(bt => bt.code === btn.type)
@@ -421,10 +452,10 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
                     ).map(bt => <option key={bt.code} value={bt.code}>{bt.label}</option>)}
                   </select>
                   <input type="text" value={btn.name} onChange={(e) => updateButton(idx, 'name', e.target.value)}
-                    className={`${FIELD_CLASS} flex-1 px-2.5 py-1.5 text-xs`} placeholder="버튼명" />
+                    className={`${FIELD} flex-1 px-2.5 py-1.5 text-xs`} placeholder="버튼명" />
                   {BUTTON_TYPES.find(t => t.code === btn.type)?.needUrl && (
                     <input type="text" value={btn.url_mobile || ''} onChange={(e) => updateButton(idx, 'url_mobile', e.target.value)}
-                      className={`${FIELD_CLASS} flex-1 px-2.5 py-1.5 text-xs`} placeholder="URL" />
+                      className={`${FIELD} flex-1 px-2.5 py-1.5 text-xs`} placeholder="URL" />
                   )}
                   <button type="button" onClick={() => removeButton(idx)}
                     className="shrink-0 p-1.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-white transition">
@@ -446,7 +477,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
               {/* 쿠폰 제목은 카카오가 정한 5형식만 통과한다 — 자유 입력으로 받으면 반드시 거절되므로
                   형식을 고르고 값만 넣게 한다(틀릴 수 없는 입력) */}
               <select value={couponForm} onChange={(e) => { setCouponForm(e.target.value as any); setCouponValue(''); }}
-                className={FIELD_CLASS}>
+                className={FIELD}>
                 <option value="">쿠폰 사용 안 함</option>
                 <option value="amount">○○원 할인 쿠폰</option>
                 <option value="percent">○○% 할인 쿠폰</option>
@@ -458,7 +489,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
                 <input type="text" value={couponValue} onChange={(e) => setCouponValue(e.target.value)}
                   maxLength={couponForm === 'free' || couponForm === 'up' ? 7 : 11}
                   inputMode={couponForm === 'amount' || couponForm === 'percent' ? 'numeric' : 'text'}
-                  className={FIELD_CLASS}
+                  className={FIELD}
                   placeholder={
                     couponForm === 'amount' ? '할인 금액 (숫자만)'
                     : couponForm === 'percent' ? '할인율 1~100'
@@ -471,17 +502,17 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
                     <p className="text-[11px] text-slate-400 px-1">표시될 제목: {couponTitle}</p>
                   )}
                   <input type="text" value={couponDesc} onChange={(e) => setCouponDesc(e.target.value)}
-                    maxLength={selectedType.couponDescMax} className={FIELD_CLASS}
+                    maxLength={selectedType.couponDescMax} className={FIELD}
                     placeholder={`쿠폰 설명 (최대 ${selectedType.couponDescMax}자)`} />
                   <input type="text" value={couponUrl} onChange={(e) => setCouponUrl(e.target.value)}
-                    className={FIELD_CLASS} placeholder="쿠폰을 누르면 이동할 주소" />
+                    className={FIELD} placeholder="쿠폰을 누르면 이동할 주소" />
                 </>
               )}
             </Collapsible>
           )}
 
           <Collapsible icon={<MessageSquareReply size={14} strokeWidth={1.9} />} title="대체 발송 (선택)">
-            <select value={resendType} onChange={(e) => setResendType(e.target.value)} className={FIELD_CLASS}>
+            <select value={resendType} onChange={(e) => setResendType(e.target.value)} className={FIELD}>
               <option value="NO">대체발송 없음</option>
               <option value="SM">SMS로 대체</option>
               <option value="LM">LMS로 대체</option>
@@ -489,13 +520,13 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
             {resendType !== 'NO' && (
               <>
                 <input type="text" value={resendFrom} onChange={(e) => setResendFrom(e.target.value)}
-                  className={FIELD_CLASS} placeholder="대체발송 발신번호 (비우면 기본 회신번호)" />
+                  className={FIELD} placeholder="대체발송 발신번호 (비우면 기본 회신번호)" />
                 {resendType === 'LM' && (
                   <input type="text" value={resendTitle} onChange={(e) => setResendTitle(e.target.value)}
-                    className={FIELD_CLASS} placeholder="LMS 제목 (필수)" />
+                    className={FIELD} placeholder="LMS 제목 (필수)" />
                 )}
                 <textarea value={resendMessage} onChange={(e) => setResendMessage(e.target.value)} rows={2}
-                  className={`${FIELD_CLASS} resize-none`} placeholder="대체발송 메시지 (빈칸이면 본문 재사용)" />
+                  className={`${FIELD} resize-none`} placeholder="대체발송 메시지 (빈칸이면 본문 재사용)" />
               </>
             )}
           </Collapsible>
@@ -504,9 +535,9 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
             <Collapsible icon={<Ban size={14} strokeWidth={1.9} />} title="수신거부 080" defaultOpen>
               <div className="grid grid-cols-2 gap-2">
                 <input type="text" value={unsubPhone} onChange={(e) => setUnsubPhone(e.target.value)}
-                  className={FIELD_CLASS} placeholder="080 번호" />
+                  className={FIELD} placeholder="080 번호" />
                 <input type="text" value={unsubAuth} onChange={(e) => setUnsubAuth(e.target.value)}
-                  className={FIELD_CLASS} placeholder="인증번호" />
+                  className={FIELD} placeholder="인증번호" />
               </div>
             </Collapsible>
           )}
@@ -514,7 +545,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
 
         {/* 발송 */}
         <button type="button" onClick={handleSend} disabled={!canSend}
-          className="w-full py-3.5 rounded-2xl text-sm font-bold text-white bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 shadow-lg shadow-violet-500/25 disabled:opacity-40 disabled:shadow-none inline-flex items-center justify-center gap-2 transition">
+          className={`w-full py-3.5 rounded-2xl text-sm font-bold text-white ${a.send} shadow-lg disabled:opacity-40 disabled:shadow-none inline-flex items-center justify-center gap-2 transition`}>
           {sending
             ? <><Loader2 size={16} className="animate-spin" /> 발송 중...</>
             : <><Send size={15} strokeWidth={2} /> 브랜드메시지 발송</>}

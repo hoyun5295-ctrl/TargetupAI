@@ -379,6 +379,8 @@ export default function Dashboard() {
   // ★ 2026-07-29 브랜드메시지 발송 모달
   const [showBrandSend, setShowBrandSend] = useState(false);
   const [brandInitialRecipients, setBrandInitialRecipients] = useState<string[]>([]);
+  // ★ 2026-08-21 브랜드 모달 진입 출처 — 'target'이면 인디고 + 가져온 목록만(BrandSendModal entry prop)
+  const [brandEntry, setBrandEntry] = useState<'direct' | 'target'>('direct');
   const [brandSending, setBrandSending] = useState(false);
   const [alimtalkResetSignal, setAlimtalkResetSignal] = useState(0);  // ★ #2 (2026-06-01): 알림톡 발송 성공 → 모달 수신자 리스트 초기화 신호
   const [showTargetSend, setShowTargetSend] = useState(false);
@@ -3405,6 +3407,13 @@ const campaignData = {
           setShowAlimtalkSend(true);
           setShowTargetSend(false);
         }}
+        onBrandOpen={() => {
+          // ★ 2026-08-21 직접 타겟 발송 → 브랜드메시지. 알림톡과 같은 축: 추출된 수신자(번호만)를 들고 가고 이 창은 닫는다.
+          setBrandInitialRecipients(targetRecipients.map((r: any) => String(r?.phone ?? '')).filter(Boolean));
+          setBrandEntry('target');
+          setShowBrandSend(true);
+          setShowTargetSend(false);
+        }}
         handleTargetTestSend={handleTargetTestSend}
         testSending={testSending}
         testCooldown={testCooldown}
@@ -3606,6 +3615,7 @@ const campaignData = {
           onBrandOpen={() => {
             // ★ 2026-07-29 브랜드메시지 진입. 알림톡과 같이 입력해 둔 수신자를 그대로 인계한다.
             setBrandInitialRecipients(directRecipients.map((r: any) => String(r?.phone ?? r)).filter(Boolean));
+            setBrandEntry('direct');
             setShowBrandSend(true);
           }}
         />
@@ -3618,6 +3628,7 @@ const campaignData = {
         onClose={() => { setShowBrandSend(false); setBrandInitialRecipients([]); }}
         profiles={alimtalkSenders}
         initialRecipients={brandInitialRecipients}
+        entry={brandEntry}
         isAiTargetLocked={isAiMessagingLocked}
         onLockedFeature={(f, p) => { setPlanUpgradeFeature(f); setPlanUpgradeRequired(p); setShowPlanUpgradeModal(true); }}
         sending={brandSending}

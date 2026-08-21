@@ -21,7 +21,8 @@ import { useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Loader2 } from 'lucide-react';
 
-export type DialogTone = 'emerald' | 'blue' | 'amber' | 'violet' | 'rose';
+/** ★ 2026-08-21 indigo 추가: 직접 타겟 발송에서 넘어온 브랜드메시지 확인(콘솔 톤 정합) */
+export type DialogTone = 'emerald' | 'blue' | 'amber' | 'violet' | 'rose' | 'indigo';
 
 const TONE = {
   emerald: {
@@ -58,6 +59,13 @@ const TONE = {
     tint: 'from-rose-50/70 via-white to-white',
     primary: 'bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-400 hover:to-red-400 shadow-rose-500/25',
     value: 'text-rose-600',
+  },
+  indigo: {
+    badge: 'from-indigo-500 to-violet-500',
+    badgeShadow: 'shadow-indigo-500/25',
+    tint: 'from-indigo-50/70 via-white to-white',
+    primary: 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/25',
+    value: 'text-indigo-600',
   },
 } as const;
 
