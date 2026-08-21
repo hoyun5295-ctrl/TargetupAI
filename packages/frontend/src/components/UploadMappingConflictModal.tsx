@@ -14,9 +14,19 @@
  *   overwrite:     기존 라벨/타입 덮어쓰기
  *   move_slot:     다른 비어있는 custom_N 슬롯으로 이동
  *   cancel:        전체 업로드 중단
+ *
+ * ★ 2026-08-21 표면만 콘솔 톤(인디고)으로 교체 — 판정·해결 로직 무변경.
+ *   red→orange 그라데이션 헤더 + 경고·완료 이모지 → lucide + rose 배지, 이 앱에 없던 blue 버튼 → 인디고.
+ *   ⛔ 충돌 문구(TYPE_LABELS·ACTION_LABELS·conflict.message·customKey)는 백엔드 응답과 짝이라 손대지 않았다.
+ *     "슬롯" 같은 내부 용어를 고객 언어로 바꾸려면 백엔드 메시지까지 함께 봐야 한다(별건).
  */
 
 import { useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2 } from 'lucide-react';
+import {
+  CUI_MODAL, CUI_MODAL_HEAD, CUI_MODAL_TITLE, CUI_MODAL_DESC, CUI_MODAL_BODY, CUI_MODAL_FOOT,
+  CUI_BTN_PRIMARY, CUI_BTN_GHOST, CUI_SELECT,
+} from '../utils/console-ui';
 
 export type ConflictType =
   | 'slot_label_conflict'
@@ -102,71 +112,66 @@ export default function UploadMappingConflictModal({
     onResolve(resolutions);
   };
 
+  const unresolvedCount = conflicts.filter(c => c.severity === 'error' && !decisions[c.header]).length;
+
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[80] p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-[80] bg-neutral-900/45 flex items-center justify-center p-4">
+      <div className={`${CUI_MODAL} max-w-[720px]`} role="dialog" aria-modal="true" aria-label="업로드 매핑 충돌">
+
         {/* 헤더 */}
-        <div className="p-5 border-b bg-gradient-to-r from-red-50 to-orange-50 flex items-center gap-3">
-          <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
-            <span className="text-2xl">⚠️</span>
-          </div>
-          <div className="flex-1">
-            <h3 className="font-bold text-gray-800 text-lg">업로드 매핑 충돌 감지</h3>
-            <p className="text-xs text-gray-600 mt-0.5">
-              기존 등록된 필드와 {conflicts.length}건의 충돌이 있습니다.
-              {errorCount > 0 && <span className="ml-1 text-red-600 font-semibold">(에러 {errorCount}건)</span>}
-              {warningCount > 0 && <span className="ml-1 text-amber-600 font-semibold">(경고 {warningCount}건)</span>}
-            </p>
+        <div className={CUI_MODAL_HEAD}>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="h-9 w-9 shrink-0 rounded-xl bg-rose-600 text-white grid place-items-center">
+              <AlertTriangle className="w-4 h-4" strokeWidth={1.9} />
+            </div>
+            <div className="min-w-0">
+              <h3 className={CUI_MODAL_TITLE}>이미 등록된 항목과 부딪힙니다</h3>
+              <p className={CUI_MODAL_DESC}>
+                {conflicts.length}건 중
+                {errorCount > 0 && <span className="ml-1 font-semibold text-rose-600">해결 필요 {errorCount}건</span>}
+                {warningCount > 0 && <span className="ml-1 font-semibold text-amber-700">확인 권장 {warningCount}건</span>}
+              </p>
+            </div>
           </div>
         </div>
 
-        {/* 충돌 리스트 */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        {/* 충돌 목록 */}
+        <div className={CUI_MODAL_BODY}>
           {conflicts.map((c, idx) => {
             const decision = decisions[c.header];
             const isError = c.severity === 'error';
             return (
               <div
                 key={`${c.header}-${idx}`}
-                className={`border-2 rounded-xl p-4 ${isError ? 'border-red-200 bg-red-50/30' : 'border-amber-200 bg-amber-50/30'}`}
+                className={`rounded-xl border bg-white p-4 ${isError ? 'border-rose-200' : 'border-amber-200'}`}
               >
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded ${isError ? 'bg-red-200 text-red-800' : 'bg-amber-200 text-amber-800'}`}
-                      >
-                        {TYPE_LABELS[c.type]}
-                      </span>
-                      <span className="text-sm font-mono font-bold text-gray-700">{c.customKey}</span>
-                      <span className="text-xs text-gray-500">· {c.header}</span>
-                    </div>
-                    <p className="text-sm text-gray-800 leading-relaxed">{c.message}</p>
-                  </div>
+                <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                  <span className={`h-[22px] px-2 inline-flex items-center rounded-md text-[11.5px] font-semibold ${isError ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-800'}`}>
+                    {TYPE_LABELS[c.type]}
+                  </span>
+                  <span className="font-mono text-[12px] font-semibold text-neutral-700">{c.customKey}</span>
+                  <span className="text-[12px] text-neutral-500">{c.header}</span>
                 </div>
+                <p className="text-[13px] text-neutral-800 leading-relaxed">{c.message}</p>
 
-                {/* 비교 카드 */}
-                <div className="grid grid-cols-2 gap-2 mb-3 text-xs">
+                {/* 기존 · 신규 비교 */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
                   {c.existing && (
-                    <div className="bg-white border border-gray-200 rounded p-2">
-                      <div className="text-gray-400 mb-0.5">기존</div>
-                      <div className="font-semibold text-gray-800">{c.existing.label}</div>
-                      <div className="text-gray-500 mt-0.5">
-                        {c.existing.customKey} · {c.existing.fieldType}
-                      </div>
+                    <div className="rounded-lg bg-neutral-50 ring-1 ring-neutral-200 px-3 py-2">
+                      <p className="text-[11.5px] text-neutral-500">지금 등록된 것</p>
+                      <p className="text-[13px] font-semibold text-neutral-900 mt-0.5">{c.existing.label}</p>
+                      <p className="text-[11.5px] text-neutral-500 mt-0.5 font-mono">{c.existing.customKey} · {c.existing.fieldType}</p>
                     </div>
                   )}
-                  <div className="bg-white border border-blue-200 rounded p-2">
-                    <div className="text-blue-500 mb-0.5">신규</div>
-                    <div className="font-semibold text-gray-800">{c.proposed.label}</div>
-                    <div className="text-gray-500 mt-0.5">
-                      {c.customKey} · {c.proposed.fieldType}
-                    </div>
+                  <div className="rounded-lg bg-indigo-50 ring-1 ring-indigo-600/15 px-3 py-2">
+                    <p className="text-[11.5px] text-indigo-700">이번에 올린 것</p>
+                    <p className="text-[13px] font-semibold text-neutral-900 mt-0.5">{c.proposed.label}</p>
+                    <p className="text-[11.5px] text-indigo-700/70 mt-0.5 font-mono">{c.customKey} · {c.proposed.fieldType}</p>
                   </div>
                 </div>
 
                 {/* 해결 옵션 */}
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-1.5 mt-3">
                   {c.resolveOptions
                     .filter(a => a !== 'cancel')
                     .map(action => {
@@ -174,11 +179,12 @@ export default function UploadMappingConflictModal({
                       return (
                         <button
                           key={action}
+                          type="button"
                           onClick={() => setDecision(c.header, action)}
-                          className={`text-xs px-3 py-1.5 rounded border transition-colors ${
+                          className={`h-8 px-3 rounded-lg text-[12.5px] transition focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-600/15 ${
                             selected
-                              ? 'bg-blue-600 text-white border-blue-600'
-                              : 'bg-white text-gray-700 border-gray-300 hover:border-blue-400'
+                              ? 'bg-indigo-600 text-white font-semibold'
+                              : 'bg-white text-neutral-700 ring-1 ring-neutral-200 font-medium hover:ring-indigo-300 hover:text-indigo-700'
                           }`}
                         >
                           {ACTION_LABELS[action]}
@@ -187,24 +193,22 @@ export default function UploadMappingConflictModal({
                     })}
                 </div>
 
-                {/* move_slot 선택 시 드롭다운 */}
+                {/* move_slot 선택 시 슬롯 고르기 */}
                 {decision?.action === 'move_slot' && (
-                  <div className="mt-2">
+                  <div className="mt-2.5">
                     {availableSlots.length > 0 ? (
                       <select
                         value={decision.newSlot || ''}
                         onChange={e => setDecision(c.header, 'move_slot', e.target.value)}
-                        className="text-xs border rounded px-2 py-1"
+                        className={`${CUI_SELECT} max-w-[240px]`}
                       >
                         <option value="">이동할 슬롯 선택</option>
                         {availableSlots.map(s => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
+                          <option key={s} value={s}>{s}</option>
                         ))}
                       </select>
                     ) : (
-                      <p className="text-xs text-red-600">비어있는 custom 슬롯이 없습니다. 다른 옵션을 선택하세요.</p>
+                      <p className="text-[12.5px] text-rose-600">비어 있는 슬롯이 없습니다. 다른 방법을 골라 주세요.</p>
                     )}
                   </div>
                 )}
@@ -214,24 +218,24 @@ export default function UploadMappingConflictModal({
         </div>
 
         {/* 푸터 */}
-        <div className="p-4 border-t bg-gray-50 flex items-center justify-between">
-          <div className="text-xs text-gray-500">
-            {allResolved
-              ? '✅ 모든 충돌이 해결되었습니다.'
-              : `⚠️ ${conflicts.filter(c => c.severity === 'error' && !decisions[c.header]).length}건 미해결`}
-          </div>
-          <div className="flex items-center gap-3">
-            <button onClick={onCancel} className="px-5 py-2.5 text-gray-600 hover:bg-gray-200 rounded-lg">
-              취소하고 수정
-            </button>
-            <button
-              onClick={handleConfirm}
-              disabled={!allResolved}
-              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              해결 후 업로드 진행
-            </button>
-          </div>
+        <div className={CUI_MODAL_FOOT}>
+          <span className="mr-auto inline-flex items-center gap-1.5 text-[12.5px]">
+            {allResolved ? (
+              <>
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" strokeWidth={1.9} />
+                <span className="text-neutral-600">모두 정했습니다</span>
+              </>
+            ) : (
+              <>
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" strokeWidth={1.9} />
+                <span className="text-neutral-600 tabular-nums">{unresolvedCount}건을 아직 정하지 않았습니다</span>
+              </>
+            )}
+          </span>
+          <button type="button" onClick={onCancel} className={CUI_BTN_GHOST}>돌아가서 고치기</button>
+          <button type="button" onClick={handleConfirm} disabled={!allResolved} className={CUI_BTN_PRIMARY}>
+            이대로 업로드
+          </button>
         </div>
       </div>
     </div>

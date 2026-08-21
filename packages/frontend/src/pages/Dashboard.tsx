@@ -48,7 +48,6 @@ import SubscriptionLockModal from '../components/SubscriptionLockModal';
 import SyncActiveBlockModal from '../components/SyncActiveBlockModal';
 import TodayStatsModal from '../components/TodayStatsModal';
 import UploadProgressModal from '../components/UploadProgressModal';
-import UploadResultModal from '../components/UploadResultModal';
 import { useAuthStore } from '../stores/authStore';
 import { formatDate, formatPreviewValue, formatByType, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl, resolveRecipientCallback, buildAdMessageFront, validateMmsBeforeSend, getMaxByteMessage, cellToString } from '../utils/formatDate';
 import { insertAtCursorOrAppend } from '../utils/textInsert';
@@ -341,8 +340,8 @@ export default function Dashboard() {
   const [messageEditProgress, setMessageEditProgress] = useState(0);
   const [messageEditing, setMessageEditing] = useState(false);
   // 파일 업로드 관련
-  const [showUploadResult, setShowUploadResult] = useState(false);
-  const [uploadResult, setUploadResult] = useState({ insertCount: 0, duplicateCount: 0 });
+  // ★ 2026-08-21 showUploadResult·uploadResult state 제거 — 켜는 곳이 없어 UploadResultModal이 한 번도 열리지 않았다.
+  //   업로드 완료 표시는 UploadProgressModal이 `status === 'completed'`로 처리한다(진실이 하나).
   const [showPlanLimitError, setShowPlanLimitError] = useState(false);
   const [planLimitInfo, setPlanLimitInfo] = useState<any>(null);
   const [uploadProgress, setUploadProgress] = useState<any>({ status: 'unknown', total: 0, processed: 0, percent: 0, insertCount: 0, duplicateCount: 0, errorCount: 0, message: '' });
@@ -3314,11 +3313,6 @@ const campaignData = {
           setToast={setToast}
         />
       </main>
-      <UploadResultModal
-        show={showUploadResult}
-        uploadResult={uploadResult}
-        onClose={() => { setShowUploadResult(false); window.location.reload(); }}
-      />
       {/* 직접 타겟 발송 모달 (D43-3c: TargetSendModal 컴포넌트 분리) */}
       <TargetSendModal
         show={showTargetSend}

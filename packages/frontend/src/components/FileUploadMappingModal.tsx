@@ -1,7 +1,36 @@
+/**
+ * FileUploadMappingModal — 고객 DB 업로드 (파일 → 컬럼 맞추기 → 저장)
+ *
+ * ★ 2026-08-21 표면 재작성(콘솔 톤 인디고). Harold "디자인이 올드하고 폰트 크기부터 전체적으로 개선 필요".
+ *   기능·state·핸들러·API 호출은 100% 그대로다(1~404줄 무변경). 바뀐 것은 렌더뿐:
+ *     · 이모지 14곳(업로드·미리보기·카테고리 5종·저장 등) → lucide 아이콘
+ *     · violet→purple 그라데이션 + `border-gray` 옛 규격 → `console-ui.ts` CUI_* 토큰(인디고 · 링 · 헤어라인)
+ *     · 본문 16px·제목 18px → 콘솔 톤 규격(제목 16 · 섹션 15 · 본문 13.5 · 보조 12.5)
+ *     · 고정폭 `w-[900px]`(모바일 넘침) → `max-w-[960px]` + 스크림 패딩 · 매핑 2열은 sm 이하 1열
+ *     · 화면 문구를 고객 언어로("감지된 컬럼"→"찾은 컬럼", "표준 필드 매핑"→"기본 항목")
+ *
+ * 층 구조(바꾸지 않는다): 모달 z-50 · 컬럼 선택 팝업 z-[60]/z-[70] · 충돌 모달 z-[80].
+ */
 import { useEffect, useMemo, useState } from 'react';
+import type { LucideIcon } from 'lucide-react';
+import {
+  Upload, Wand2, X, ChevronRight, ChevronLeft, FileSpreadsheet, Info, AlertTriangle,
+  Plus, Trash2, Save, Loader2, Sparkles, ArrowLeft,
+  User, ShoppingCart, Store, Award, Megaphone, Folder,
+} from 'lucide-react';
 import UploadMappingConflictModal, { type MappingConflict, type ConflictResolution } from './UploadMappingConflictModal';
 import { formatPreviewValue } from '../utils/formatDate';
 import { useToast } from './ToastProvider';
+import {
+  CUI_MODAL_SCRIM, CUI_MODAL, CUI_MODAL_HEAD, CUI_MODAL_TITLE, CUI_MODAL_DESC,
+  CUI_MODAL_BODY, CUI_MODAL_FOOT, CUI_MODAL_CLOSE,
+  CUI_BTN_PRIMARY, CUI_BTN_GHOST,
+  CUI_PANEL, CUI_SCROLL_X, CUI_THEAD, CUI_TH, CUI_TR, CUI_TD, CUI_CELL_DATA,
+  CUI_INFO, CUI_INFO_ICON, CUI_INFO_TEXT,
+  CUI_NOTICE, CUI_NOTICE_ICON, CUI_NOTICE_TEXT,
+  CUI_DANGER_BOX, CUI_DANGER_ICON, CUI_DANGER_TEXT,
+  CUI_SEC_TITLE, CUI_PILL_BASE,
+} from '../utils/console-ui';
 
 // ─── 타입 ───
 
@@ -27,13 +56,14 @@ interface FileUploadMappingModalProps {
 }
 
 // ─── 카테고리 아이콘 (UI 표시 전용) ───
+// ★ 2026-08-21 이모지 → lucide. 이모지는 OS·글꼴마다 다르게 그려져 줄 높이가 흔들린다(콘솔 톤 §4-2와 같은 이유).
 
-const CATEGORY_ICONS: Record<string, string> = {
-  basic: '👤',
-  purchase: '🛒',
-  store: '🏬',
-  membership: '⭐',
-  marketing: '✅',
+const CATEGORY_ICONS: Record<string, LucideIcon> = {
+  basic: User,
+  purchase: ShoppingCart,
+  store: Store,
+  membership: Award,
+  marketing: Megaphone,
 };
 
 const CATEGORY_ORDER = ['basic', 'purchase', 'store', 'membership', 'marketing'];
@@ -402,7 +432,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
     onClose();
   };
 
-  // ── 미배정 컬럼 선택 팝업 렌더링 (fixed 포지션) ──
+  // ── 미배정 컬럼 선택 팝업 (fixed — 부모 overflow에 안 가린다) ──
   const renderColumnPopup = (
     targetKey: string,
     onSelect: (header: string) => void,
@@ -411,22 +441,22 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
     if (activePopup !== targetKey) return null;
     return (
       <>
-        {/* 클릭 외부 오버레이 */}
+        {/* 바깥 클릭 캐처 */}
         <div className="fixed inset-0 z-[60]" onClick={() => setActivePopup(null)} />
-        {/* 팝업 (fixed — overflow에 안 가림) */}
         <div
-          className="fixed bg-white border border-gray-200 rounded-lg shadow-xl p-3 z-[70] min-w-[240px] max-w-[360px]"
+          className="fixed z-[70] min-w-[248px] max-w-[360px] p-3 rounded-xl border border-neutral-200 bg-white shadow-lg shadow-neutral-900/[.08]"
           style={{ top: popupPos.top, left: popupPos.left }}
         >
           {unassignedHeaders.length > 0 ? (
             <>
-              <p className="text-xs text-gray-500 mb-2 font-medium">미배정 엑셀 컬럼</p>
+              <p className="text-[11.5px] font-medium text-neutral-500 mb-2">아직 배정하지 않은 컬럼</p>
               <div className="flex flex-wrap gap-1.5 max-h-[180px] overflow-y-auto">
                 {unassignedHeaders.map(h => (
                   <button
                     key={h}
+                    type="button"
                     onClick={() => onSelect(h)}
-                    className="px-2.5 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-md text-sm hover:bg-blue-100 transition-colors"
+                    className="h-7 px-2.5 rounded-lg bg-neutral-50 ring-1 ring-neutral-200 text-[12.5px] text-neutral-700 transition hover:bg-indigo-50 hover:ring-indigo-300 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600/25"
                   >
                     {h}
                   </button>
@@ -434,14 +464,15 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
               </div>
             </>
           ) : (
-            <p className="text-xs text-gray-400">모든 컬럼이 배정되었습니다</p>
+            <p className="text-[12.5px] text-neutral-400">모든 컬럼이 배정되었습니다</p>
           )}
           {onClear && (
             <button
+              type="button"
               onClick={() => { onClear(); setActivePopup(null); }}
-              className="mt-2 pt-2 border-t border-gray-100 text-xs text-gray-400 hover:text-gray-600 w-full text-left"
+              className="mt-2.5 pt-2.5 w-full text-left border-t border-neutral-100 text-[12px] text-neutral-500 transition hover:text-rose-600"
             >
-              매핑 안함
+              이 필드 매핑 해제
             </button>
           )}
         </div>
@@ -455,25 +486,85 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
   const mappedStandardCount = standardFields.filter(f => fieldKeyToHeader[f.fieldKey]).length;
   const mappedCustomCount = customSlots.filter(s => s.excelColumn).length;
 
+  /** 매핑 칩 — 배정됨(인디고) / 미배정(점선). 표준·커스텀이 같은 모양을 쓴다 */
+  const mappingChip = (
+    value: string | null,
+    onOpen: (e: React.MouseEvent) => void,
+    onRemove: () => void,
+    removeLabel: string,
+  ) => (
+    value ? (
+      <span className="inline-flex items-center gap-1 min-w-0">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="h-7 max-w-[150px] px-2.5 rounded-lg bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200 text-[12.5px] font-medium truncate transition hover:bg-indigo-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600/25"
+        >
+          {value}
+        </button>
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={removeLabel}
+          title={removeLabel}
+          className="h-6 w-6 grid place-items-center rounded-md text-neutral-400 shrink-0 transition hover:bg-rose-50 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-600/25"
+        >
+          <X className="w-3.5 h-3.5" strokeWidth={2} />
+        </button>
+      </span>
+    ) : (
+      <button
+        type="button"
+        onClick={onOpen}
+        className="h-7 px-2.5 rounded-lg border border-dashed border-neutral-300 text-[12.5px] text-neutral-400 transition hover:border-indigo-400 hover:bg-indigo-50 hover:text-indigo-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600/25"
+      >
+        컬럼 선택
+      </button>
+    )
+  );
+
   return (
     <div
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      className={CUI_MODAL_SCRIM}
       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
       onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }}
     >
-      <div className="bg-white rounded-xl shadow-2xl w-[900px] max-h-[90vh] overflow-hidden flex flex-col">
+      <div className={`${CUI_MODAL} max-w-[960px]`} role="dialog" aria-modal="true" aria-label="고객 DB 업로드">
 
-        {/* ===== Step 1: 파일 업로드 ===== */}
+        {/* ===== 헤더 (두 단계 공용) ===== */}
+        <div className={CUI_MODAL_HEAD}>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="h-9 w-9 shrink-0 rounded-xl bg-indigo-600 text-white grid place-items-center">
+              {step === 'upload'
+                ? <Upload className="w-4 h-4" strokeWidth={1.9} />
+                : <Wand2 className="w-4 h-4" strokeWidth={1.9} />}
+            </div>
+            <div className="min-w-0">
+              <h3 className={CUI_MODAL_TITLE}>고객 DB 업로드</h3>
+              <p className={CUI_MODAL_DESC}>
+                {step === 'upload'
+                  ? '엑셀·CSV 파일을 올리면 AI가 컬럼을 맞춰 줍니다'
+                  : 'AI가 맞춘 결과입니다. 다르면 눌러서 바꾸세요'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            {/* 단계 표시 — 지금 어디인지, 다음이 무엇인지 */}
+            <div className="hidden sm:flex items-center gap-1.5 text-[12px]">
+              <span className={step === 'upload' ? 'font-semibold text-indigo-600' : 'text-neutral-400'}>파일</span>
+              <ChevronRight className="w-3.5 h-3.5 text-neutral-300" />
+              <span className={step === 'mapping' ? 'font-semibold text-indigo-600' : 'text-neutral-400'}>컬럼 맞추기</span>
+            </div>
+            <button type="button" onClick={handleClose} className={CUI_MODAL_CLOSE} aria-label="닫기">
+              <X className="w-4 h-4" strokeWidth={1.75} />
+            </button>
+          </div>
+        </div>
+
+        {/* ===== Step 1: 파일 ===== */}
         {step === 'upload' && (
           <>
-            <div className="p-5 border-b bg-gradient-to-r from-violet-50 to-purple-50 flex justify-between items-center shrink-0">
-              <h3 className="font-bold text-lg flex items-center gap-2.5 text-gray-800">
-                <span className="w-8 h-8 rounded-xl bg-violet-100 flex items-center justify-center text-violet-600">📤</span>
-                고객 DB 업로드
-              </h3>
-              <button onClick={handleClose} className="text-gray-400 hover:text-gray-700 text-xl leading-none transition-colors">✕</button>
-            </div>
-            <div className="p-6 space-y-6 overflow-y-auto">
+            <div className={CUI_MODAL_BODY}>
               {!fileHeaders.length ? (
                 <>
                   <input
@@ -497,8 +588,8 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                       const file = e.dataTransfer?.files?.[0];
                       if (file) handleFileSelect(file);
                     }}
-                    className={`relative flex items-center justify-center border-2 border-dashed rounded-2xl text-center transition-colors min-h-[280px] ${
-                      dragActive ? 'border-violet-500 bg-violet-50' : 'border-gray-300 hover:border-violet-400 hover:bg-violet-50/30'
+                    className={`relative flex items-center justify-center rounded-2xl border-2 border-dashed text-center transition min-h-[260px] ${
+                      dragActive ? 'border-indigo-600 bg-indigo-50' : 'border-neutral-300 hover:border-indigo-400 hover:bg-indigo-50/40'
                     } ${loading ? 'cursor-wait' : 'cursor-pointer'}`}
                   >
                     {loading ? (
@@ -507,11 +598,11 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                           <svg className="absolute inset-0 w-full h-full" viewBox="0 0 50 50">
                             <defs>
                               <linearGradient id="fumMappingSpin" x1="0%" y1="0%" x2="100%" y2="100%">
-                                <stop offset="0%" stopColor="#a78bfa" />
-                                <stop offset="100%" stopColor="#7c3aed" />
+                                <stop offset="0%" stopColor="#818cf8" />
+                                <stop offset="100%" stopColor="#4f46e5" />
                               </linearGradient>
                             </defs>
-                            <circle cx="25" cy="25" r="20" fill="none" stroke="#ede9fe" strokeWidth="3" />
+                            <circle cx="25" cy="25" r="20" fill="none" stroke="#eef2ff" strokeWidth="3" />
                             <circle
                               cx="25" cy="25" r="20"
                               fill="none" stroke="url(#fumMappingSpin)" strokeWidth="3" strokeLinecap="round"
@@ -519,47 +610,44 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                               style={{ transformOrigin: '50% 50%', animation: 'fum-spin 1s linear infinite' }}
                             />
                           </svg>
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <div className="text-[11px] font-bold text-violet-600 tracking-wider">AI</div>
+                          <div className="absolute inset-0 grid place-items-center">
+                            <span className="text-[11px] font-bold text-indigo-600 tracking-wider">AI</span>
                           </div>
                         </div>
                         <div className="space-y-1">
-                          <p className="text-sm font-semibold text-gray-800">AI가 엑셀을 분석하고 있습니다</p>
-                          <p className="text-xs text-gray-500">컬럼명을 자동으로 매핑하는 중… 잠시만 기다려주세요.</p>
+                          <p className="text-[13.5px] font-semibold text-neutral-900">파일을 읽고 있습니다</p>
+                          <p className="text-[12px] text-neutral-500">컬럼을 자동으로 맞추는 중입니다. 잠시만 기다려 주세요.</p>
                         </div>
-                        <div className="flex items-center gap-2 mt-1">
-                          <div className="flex items-center gap-1.5 text-[11px] text-violet-600 font-semibold">
-                            <span className="w-1.5 h-1.5 rounded-full bg-violet-500" style={{ animation: 'fum-dot 1.4s ease-in-out infinite' }} />
-                            <span>파일 분석</span>
-                          </div>
-                          <span className="text-gray-300">·</span>
-                          <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
-                            <span className="w-1.5 h-1.5 rounded-full bg-gray-300" style={{ animation: 'fum-dot 1.4s ease-in-out infinite', animationDelay: '0.2s' }} />
-                            <span>AI 매핑</span>
-                          </div>
-                          <span className="text-gray-300">·</span>
-                          <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
-                            <span className="w-1.5 h-1.5 rounded-full bg-gray-300" style={{ animation: 'fum-dot 1.4s ease-in-out infinite', animationDelay: '0.4s' }} />
-                            <span>미리보기 생성</span>
-                          </div>
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-indigo-600">
+                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" style={{ animation: 'fum-dot 1.4s ease-in-out infinite' }} />
+                            파일 분석
+                          </span>
+                          <span className="text-neutral-300">·</span>
+                          <span className="inline-flex items-center gap-1.5 text-[11.5px] text-neutral-500">
+                            <span className="w-1.5 h-1.5 rounded-full bg-neutral-300" style={{ animation: 'fum-dot 1.4s ease-in-out infinite', animationDelay: '0.2s' }} />
+                            컬럼 맞추기
+                          </span>
+                          <span className="text-neutral-300">·</span>
+                          <span className="inline-flex items-center gap-1.5 text-[11.5px] text-neutral-500">
+                            <span className="w-1.5 h-1.5 rounded-full bg-neutral-300" style={{ animation: 'fum-dot 1.4s ease-in-out infinite', animationDelay: '0.4s' }} />
+                            미리보기
+                          </span>
                         </div>
-                        <div className="w-3/4 h-1 bg-violet-100 rounded-full overflow-hidden mt-1">
+                        <div className="w-3/4 h-1 bg-indigo-100 rounded-full overflow-hidden">
                           <div
-                            className="h-full w-1/3 bg-gradient-to-r from-violet-400 to-violet-600 rounded-full"
+                            className="h-full w-1/3 rounded-full bg-indigo-600"
                             style={{ animation: 'fum-bar 1.6s ease-in-out infinite' }}
                           />
                         </div>
                       </div>
                     ) : (
-                      <div className="px-10 py-14 flex flex-col items-center">
-                        <div className="w-16 h-16 mb-5 rounded-2xl bg-violet-50 flex items-center justify-center">
-                          <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 text-violet-500" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M12 3v12m0 0l-4-4m4 4l4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                            <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                          </svg>
+                      <div className="px-8 py-14 flex flex-col items-center">
+                        <div className="h-14 w-14 mb-4 rounded-2xl bg-white ring-1 ring-indigo-600/15 shadow-sm grid place-items-center text-indigo-600">
+                          <Upload className="w-6 h-6" strokeWidth={1.6} />
                         </div>
-                        <p className="text-base font-semibold text-gray-800 mb-1.5">파일을 드래그하거나 클릭하세요</p>
-                        <p className="text-xs text-gray-500">.xlsx, .xls, .csv 지원 · 최대 10MB · AI가 자동으로 컬럼을 매핑합니다</p>
+                        <p className="text-[15px] font-semibold tracking-[-0.02em] text-neutral-900">파일을 여기에 놓거나 눌러서 고르세요</p>
+                        <p className="mt-1.5 text-[12.5px] text-neutral-500">xlsx · xls · csv · 최대 10MB</p>
                       </div>
                     )}
                     <style>{`
@@ -571,166 +659,167 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                       }
                     `}</style>
                   </label>
-                  {/* ★ D131: 안내 카드는 드래그 영역 밖으로 분리 — 중첩으로 세로 눌림 방지 */}
-                  <div className="bg-gray-50 rounded-xl p-4">
-                    <h4 className="font-semibold text-gray-700 mb-2 text-sm flex items-center gap-1.5">
-                      <span>📋</span> 업로드 안내
-                    </h4>
-                    <ul className="text-xs text-gray-600 space-y-1">
-                      <li>• 첫 번째 행은 컬럼명으로 인식됩니다</li>
-                      <li>• 전화번호 컬럼은 필수입니다</li>
-                      <li>• AI가 자동으로 컬럼을 매핑합니다</li>
-                    </ul>
+
+                  {/* 안내 — 드래그 영역 밖(★D131: 중첩하면 세로가 눌린다) */}
+                  <div className={CUI_INFO}>
+                    <Info className={CUI_INFO_ICON} size={15} strokeWidth={1.9} />
+                    <div className={CUI_INFO_TEXT}>
+                      <p className="font-semibold">올리기 전에 확인해 주세요</p>
+                      <ul className="mt-1 space-y-0.5">
+                        <li>첫 번째 줄은 컬럼 이름으로 읽습니다</li>
+                        <li>전화번호 컬럼은 반드시 있어야 합니다</li>
+                        <li>나머지 컬럼은 AI가 알아서 맞춰 줍니다</li>
+                      </ul>
+                    </div>
                   </div>
                 </>
               ) : (
                 <>
-                  <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl">📄</span>
-                      <div>
-                        <div className="font-semibold text-gray-800">{uploadedFile?.name}</div>
-                        <div className="text-sm text-gray-500">총 {fileTotalRows.toLocaleString()}건의 데이터</div>
+                  {/* 고른 파일 */}
+                  <div className="rounded-xl bg-white ring-1 ring-neutral-200 px-4 py-3 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="h-9 w-9 shrink-0 rounded-xl bg-indigo-50 text-indigo-600 grid place-items-center">
+                        <FileSpreadsheet className="w-4 h-4" strokeWidth={1.9} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[13.5px] font-semibold text-neutral-900 truncate">{uploadedFile?.name}</p>
+                        <p className="text-[12px] text-neutral-500 mt-0.5 tabular-nums">
+                          총 {fileTotalRows.toLocaleString()}건 · 컬럼 {fileHeaders.length}개
+                        </p>
                       </div>
                     </div>
-                    <button onClick={() => { setUploadedFile(null); setFileHeaders([]); setFilePreview([]); setFileTotalRows(0); setFileId(''); }} className="text-gray-400 hover:text-red-500 transition-colors">✕ 다시 선택</button>
+                    <button
+                      type="button"
+                      onClick={() => { setUploadedFile(null); setFileHeaders([]); setFilePreview([]); setFileTotalRows(0); setFileId(''); }}
+                      className={`${CUI_BTN_GHOST} shrink-0`}
+                    >
+                      다시 고르기
+                    </button>
                   </div>
+
+                  {/* 감지된 컬럼 */}
                   <div>
-                    <h4 className="font-semibold text-gray-700 mb-3">📋 감지된 컬럼 ({fileHeaders.length}개)</h4>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex items-baseline gap-2 mb-2.5">
+                      <h4 className={CUI_SEC_TITLE}>찾은 컬럼</h4>
+                      <span className="text-[12.5px] text-neutral-500 tabular-nums">{fileHeaders.length}개</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
                       {fileHeaders.map((h, i) => (
-                        <span key={i} className="px-3 py-1 bg-violet-50 text-violet-700 border border-violet-100 rounded-full text-sm">{h}</span>
+                        <span key={i} className="h-7 px-2.5 inline-flex items-center rounded-lg bg-neutral-50 ring-1 ring-neutral-200 text-[12.5px] text-neutral-700">
+                          {h}
+                        </span>
                       ))}
                     </div>
                   </div>
+
+                  {/* 미리보기 */}
                   <div>
-                    <h4 className="font-semibold text-gray-700 mb-3">👀 데이터 미리보기 (상위 5건)</h4>
-                    <div className="overflow-x-auto border border-gray-200 rounded-xl">
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            {fileHeaders.map((h, i) => (
-                              <th key={i} className="px-3 py-2.5 text-left font-medium text-gray-600 border-b border-gray-200 whitespace-nowrap">{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filePreview.map((row: any, rowIdx: number) => (
-                            <tr key={rowIdx} className="hover:bg-violet-50/40 transition-colors">
-                              {fileHeaders.map((h, colIdx) => (
-                                <td key={colIdx} className="px-3 py-2 border-b border-gray-100 text-gray-700 whitespace-nowrap">{row[h] != null ? formatPreviewValue(row[h]) : '-'}</td>
+                    <div className="flex items-baseline gap-2 mb-2.5">
+                      <h4 className={CUI_SEC_TITLE}>미리보기</h4>
+                      <span className="text-[12.5px] text-neutral-500">파일 상위 {filePreview.length}건</span>
+                    </div>
+                    <div className={CUI_PANEL}>
+                      <div className={CUI_SCROLL_X}>
+                        <table className="w-full">
+                          <thead className={CUI_THEAD}>
+                            <tr>
+                              {fileHeaders.map((h, i) => (
+                                <th key={i} className={CUI_TH}>{h}</th>
                               ))}
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {filePreview.map((row: any, rowIdx: number) => (
+                              <tr key={rowIdx} className={CUI_TR}>
+                                {fileHeaders.map((h, colIdx) => (
+                                  <td key={colIdx} className={`${CUI_TD} ${CUI_CELL_DATA}`}>
+                                    {row[h] != null ? formatPreviewValue(row[h]) : '-'}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
-                  <button
-                    onClick={handleAiMapping}
-                    disabled={loading}
-                    className="w-full py-4 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-xl font-semibold hover:from-violet-700 hover:to-purple-700 flex items-center justify-center gap-2 text-base disabled:opacity-50 shadow-sm shadow-violet-200/60 transition-all"
-                  >
-                    {loading ? (<><span className="animate-spin">⏳</span>AI가 컬럼을 분석하고 있습니다...</>) : (<><span>🤖</span>AI 자동 매핑 시작</>)}
-                  </button>
                 </>
               )}
             </div>
+
+            {/* 푸터 — 파일을 고른 뒤에만 다음 단계가 열린다 */}
+            {fileHeaders.length > 0 && (
+              <div className={CUI_MODAL_FOOT}>
+                <span className="mr-auto text-[12.5px] text-neutral-500 tabular-nums">
+                  {fileTotalRows.toLocaleString()}건 · 컬럼 {fileHeaders.length}개
+                </span>
+                <button type="button" onClick={handleAiMapping} disabled={loading} className={CUI_BTN_PRIMARY}>
+                  {loading
+                    ? <><Loader2 className="w-[15px] h-[15px] animate-spin" />컬럼을 맞추는 중</>
+                    : <><Sparkles className="w-[15px] h-[15px]" />AI로 컬럼 맞추기</>}
+                </button>
+              </div>
+            )}
           </>
         )}
 
-        {/* ===== Step 2: AI 매핑 결과 (태그 클릭 방식) ===== */}
+        {/* ===== Step 2: 컬럼 맞추기 ===== */}
         {step === 'mapping' && (
           <>
-            {/* 헤더 */}
-            <div className="p-5 border-b bg-gradient-to-r from-violet-50 to-purple-50 flex justify-between items-center shrink-0">
-              <h3 className="font-bold text-lg flex items-center gap-2.5 text-gray-800">
-                <span className="w-8 h-8 rounded-xl bg-violet-100 flex items-center justify-center text-violet-600">🤖</span>
-                AI 매핑 결과
-              </h3>
-              <button onClick={handleClose} className="text-gray-400 hover:text-gray-700 text-xl leading-none transition-colors">✕</button>
-            </div>
+            <div className={CUI_MODAL_BODY}>
 
-            {/* 스크롤 영역 */}
-            <div className="p-6 space-y-5 overflow-y-auto flex-1">
-
-              {/* 파일 정보 */}
-              <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 flex items-center justify-center gap-3">
-                <span className="text-xl">📄</span>
-                <div className="text-center">
-                  <span className="font-semibold text-gray-800">{uploadedFile?.name}</span>
-                  <span className="text-sm text-gray-500 ml-2">총 {fileTotalRows.toLocaleString()}건</span>
-                </div>
-                <span className="ml-3 text-xs px-2.5 py-0.5 bg-violet-100 text-violet-700 rounded-full font-semibold">
-                  매핑 {mappedStandardCount + mappedCustomCount}/{standardFields.length + customSlots.length}
+              {/* 파일 요약 */}
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <FileSpreadsheet className="w-4 h-4 text-neutral-400 shrink-0" strokeWidth={1.9} />
+                <span className="text-[13px] font-semibold text-neutral-900 truncate max-w-[280px]">{uploadedFile?.name}</span>
+                <span className="text-[12.5px] text-neutral-500 tabular-nums">{fileTotalRows.toLocaleString()}건</span>
+                <span className={`${CUI_PILL_BASE} bg-indigo-50 text-indigo-700 tabular-nums`}>
+                  맞춘 항목 {mappedStandardCount + mappedCustomCount}개
                 </span>
               </div>
 
-              {/* ── 표준 필드 매핑 (카테고리별) ── */}
+              {/* ── 표준 필드 ── */}
               <div>
-                <h4 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                  📋 표준 필드 매핑
-                  <span className="text-xs font-normal text-gray-400">클릭하여 엑셀 컬럼 선택 · ✕로 해제</span>
-                </h4>
+                <div className="flex items-baseline gap-2 mb-2.5 flex-wrap">
+                  <h4 className={CUI_SEC_TITLE}>기본 항목</h4>
+                  <span className="text-[12.5px] text-neutral-500">칸을 눌러 엑셀 컬럼을 고르세요</span>
+                </div>
 
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {CATEGORY_ORDER.map(cat => {
                     const fields = fieldsByCategory[cat];
                     if (!fields || fields.length === 0) return null;
+                    const CatIcon = CATEGORY_ICONS[cat] || Folder;
+                    const catMapped = fields.filter(f => fieldKeyToHeader[f.fieldKey]).length;
                     return (
-                      <div key={cat} className="border border-gray-200 rounded-lg overflow-hidden">
-                        {/* 카테고리 헤더 */}
-                        <div className="bg-gray-50 px-4 py-2 flex items-center gap-2 border-b border-gray-200">
-                          <span>{CATEGORY_ICONS[cat] || '📁'}</span>
-                          <span className="font-medium text-gray-700 text-sm">{catLabels[cat] || cat}</span>
-                          <span className="text-xs text-gray-400">
-                            ({fields.filter(f => fieldKeyToHeader[f.fieldKey]).length}/{fields.length})
-                          </span>
+                      <div key={cat} className={CUI_PANEL}>
+                        <div className="px-4 py-2.5 bg-neutral-50 border-b border-neutral-200 flex items-center gap-2">
+                          <CatIcon className="w-[15px] h-[15px] text-neutral-500 shrink-0" strokeWidth={1.9} />
+                          <span className="text-[13px] font-semibold text-neutral-900">{catLabels[cat] || cat}</span>
+                          <span className="text-[12px] text-neutral-400 tabular-nums">{catMapped}/{fields.length}</span>
                         </div>
-                        {/* 필드 목록 — 2열 그리드 */}
-                        <div className="grid grid-cols-2 divide-x divide-gray-100">
-                          {fields.map((field, idx) => {
-                            const mapped = fieldKeyToHeader[field.fieldKey];
-                            return (
-                              <div key={field.fieldKey} className={`flex items-center gap-2 px-3 py-2 hover:bg-gray-50 transition-colors ${idx >= 2 ? 'border-t border-gray-100' : ''}`}>
-                                {/* 표준 필드명 */}
-                                <span className="text-sm font-medium text-gray-700 w-[80px] shrink-0 truncate">{field.displayName}</span>
-                                {/* 화살표 */}
-                                <span className="text-gray-300 text-xs shrink-0">←</span>
-                                {/* 매핑 영역 */}
-                                <div className="relative flex-1 min-w-0">
-                                  {mapped ? (
-                                    <div className="inline-flex items-center gap-1">
-                                      <button
-                                        onClick={(e) => openPopup(field.fieldKey, e)}
-                                        className="px-2 py-0.5 bg-violet-50 text-violet-700 border border-violet-200 rounded text-xs hover:bg-violet-100 transition-colors truncate max-w-[120px]"
-                                      >
-                                        {mapped}
-                                      </button>
-                                      <button
-                                        onClick={() => unassignStandardField(field.fieldKey)}
-                                        className="text-gray-400 hover:text-red-500 text-xs transition-colors"
-                                      >
-                                        ✕
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <button
-                                      onClick={(e) => openPopup(field.fieldKey, e)}
-                                      className="px-2 py-0.5 bg-gray-50 text-gray-400 border border-dashed border-gray-300 rounded text-xs hover:border-violet-400 hover:text-violet-500 hover:bg-violet-50 transition-colors"
-                                    >
-                                      클릭하여 선택
-                                    </button>
-                                  )}
-                                  {renderColumnPopup(
-                                    field.fieldKey,
-                                    (h) => assignStandardField(field.fieldKey, h),
-                                    mapped ? () => unassignStandardField(field.fieldKey) : undefined
-                                  )}
-                                </div>
+                        {/* 셀 사이 1px 선은 gap으로 만든다(1열·2열 어디서나 같은 모양) */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-px bg-neutral-100">
+                          {fields.map(field => (
+                            <div key={field.fieldKey} className="bg-white flex items-center gap-2.5 px-4 py-2.5">
+                              <span className="text-[13px] font-medium text-neutral-700 w-[88px] shrink-0 truncate">{field.displayName}</span>
+                              <ArrowLeft className="w-3.5 h-3.5 text-neutral-300 shrink-0" strokeWidth={2} />
+                              <div className="relative flex-1 min-w-0">
+                                {mappingChip(
+                                  fieldKeyToHeader[field.fieldKey] || null,
+                                  (e) => openPopup(field.fieldKey, e),
+                                  () => unassignStandardField(field.fieldKey),
+                                  `${field.displayName} 매핑 해제`,
+                                )}
+                                {renderColumnPopup(
+                                  field.fieldKey,
+                                  (h) => assignStandardField(field.fieldKey, h),
+                                  fieldKeyToHeader[field.fieldKey] ? () => unassignStandardField(field.fieldKey) : undefined
+                                )}
                               </div>
-                            );
-                          })}
+                            </div>
+                          ))}
+                          {fields.length % 2 === 1 && <div className="hidden sm:block bg-white" />}
                         </div>
                       </div>
                     );
@@ -738,53 +827,32 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                 </div>
               </div>
 
-              {/* ── 커스텀 필드 (+/- 방식) ── */}
+              {/* ── 커스텀 필드 ── */}
               <div>
-                <h4 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                  📦 커스텀 필드
-                  <span className="text-xs font-normal text-gray-400">표준에 없는 필드를 추가 저장 (최대 15개)</span>
-                </h4>
+                <div className="flex items-baseline gap-2 mb-2.5 flex-wrap">
+                  <h4 className={CUI_SEC_TITLE}>직접 만든 항목</h4>
+                  <span className="text-[12.5px] text-neutral-500">기본 항목에 없는 컬럼을 이름 붙여 저장합니다 (최대 15개)</span>
+                </div>
 
                 {customSlots.length > 0 && (
-                  <div className="space-y-1.5 mb-3">
+                  <div className="space-y-1.5 mb-2">
                     {customSlots.map((slot, index) => (
-                      <div key={slot.fieldKey} className="flex items-center gap-2 p-2 bg-white border border-gray-200 rounded-lg">
-                        {/* 슬롯 번호 */}
-                        <span className="text-xs text-gray-400 w-6 shrink-0 text-center">{slot.fieldKey.replace('custom_', '#')}</span>
-                        {/* 라벨 입력 */}
+                      <div key={slot.fieldKey} className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-white ring-1 ring-neutral-200">
+                        <span className="text-[11.5px] text-neutral-400 w-6 shrink-0 text-center tabular-nums">{slot.fieldKey.replace('custom_', '#')}</span>
                         <input
                           type="text"
                           value={slot.label}
                           onChange={(e) => updateCustomLabel(index, e.target.value)}
-                          placeholder="라벨명 (예: 마일리지)"
-                          className="px-2 py-1 border border-gray-300 rounded text-xs w-[130px] focus:outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-200"
+                          placeholder="항목 이름"
+                          className="h-8 w-[136px] shrink-0 px-2.5 rounded-lg bg-white border border-neutral-200 text-[12.5px] text-neutral-900 transition placeholder:text-neutral-400 hover:border-neutral-300 focus:outline-none focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15"
                         />
-                        {/* 화살표 */}
-                        <span className="text-gray-300 text-xs">←</span>
-                        {/* 엑셀 컬럼 매핑 */}
-                        <div className="relative flex-1">
-                          {slot.excelColumn ? (
-                            <div className="inline-flex items-center gap-1">
-                              <button
-                                onClick={(e) => openPopup(`custom_slot_${index}`, e)}
-                                className="px-2 py-0.5 bg-violet-50 text-violet-700 border border-violet-200 rounded text-xs hover:bg-violet-100 transition-colors truncate max-w-[120px]"
-                              >
-                                {slot.excelColumn}
-                              </button>
-                              <button
-                                onClick={() => unassignCustomSlot(index)}
-                                className="text-gray-400 hover:text-red-500 text-xs transition-colors"
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={(e) => openPopup(`custom_slot_${index}`, e)}
-                              className="px-2 py-0.5 bg-gray-50 text-gray-400 border border-dashed border-gray-300 rounded text-xs hover:border-violet-400 hover:text-violet-500 hover:bg-violet-50 transition-colors"
-                            >
-                              클릭하여 선택
-                            </button>
+                        <ArrowLeft className="w-3.5 h-3.5 text-neutral-300 shrink-0" strokeWidth={2} />
+                        <div className="relative flex-1 min-w-0">
+                          {mappingChip(
+                            slot.excelColumn,
+                            (e) => openPopup(`custom_slot_${index}`, e),
+                            () => unassignCustomSlot(index),
+                            `${slot.label || slot.fieldKey} 매핑 해제`,
                           )}
                           {renderColumnPopup(
                             `custom_slot_${index}`,
@@ -792,13 +860,14 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
                             slot.excelColumn ? () => unassignCustomSlot(index) : undefined
                           )}
                         </div>
-                        {/* 삭제 */}
                         <button
+                          type="button"
                           onClick={() => removeCustomSlot(index)}
-                          className="p-0.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors shrink-0 text-xs"
-                          title="삭제"
+                          aria-label="이 항목 삭제"
+                          title="이 항목 삭제"
+                          className="h-7 w-7 grid place-items-center rounded-md text-neutral-400 shrink-0 transition hover:bg-rose-50 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-600/25"
                         >
-                          🗑️
+                          <Trash2 className="w-[15px] h-[15px]" strokeWidth={1.9} />
                         </button>
                       </div>
                     ))}
@@ -807,53 +876,50 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
 
                 {customSlots.length < 15 && (
                   <button
+                    type="button"
                     onClick={addCustomSlot}
-                    className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-xs text-gray-500 hover:border-violet-400 hover:text-violet-600 hover:bg-violet-50 transition-colors flex items-center justify-center gap-1"
+                    className="w-full h-10 rounded-xl border border-dashed border-neutral-300 text-[12.5px] font-medium text-neutral-500 transition hover:border-indigo-400 hover:bg-indigo-50 hover:text-indigo-600 inline-flex items-center justify-center gap-1.5 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-600/15"
                   >
-                    <span className="text-lg leading-none">+</span> 커스텀 필드 추가
+                    <Plus className="w-4 h-4" strokeWidth={2} />
+                    항목 추가
                   </button>
                 )}
               </div>
 
-              {/* 미배정 컬럼 안내 */}
+              {/* 저장되지 않는 컬럼 */}
               {unassignedHeaders.length > 0 && (
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                  <p className="text-xs text-amber-700 font-medium mb-2">💡 미배정 엑셀 컬럼 ({unassignedHeaders.length}개). 저장되지 않습니다</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {unassignedHeaders.map(h => (
-                      <span key={h} className="px-2 py-0.5 bg-amber-100 text-amber-600 rounded text-xs">{h}</span>
-                    ))}
+                <div className={CUI_NOTICE}>
+                  <AlertTriangle className={CUI_NOTICE_ICON} size={15} strokeWidth={1.9} />
+                  <div className={CUI_NOTICE_TEXT}>
+                    <p className="font-semibold">배정하지 않은 컬럼 {unassignedHeaders.length}개는 저장되지 않습니다</p>
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {unassignedHeaders.map(h => (
+                        <span key={h} className="h-6 px-2 inline-flex items-center rounded-md bg-amber-100 text-amber-800 text-[11.5px]">{h}</span>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* phone 필수 경고 */}
+              {/* 전화번호 필수 */}
               {!hasPhone && (
-                <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-600 flex items-center gap-2">
-                  <span>⚠️</span>
-                  <span>전화번호 컬럼을 매핑해주세요 (필수)</span>
+                <div className={CUI_DANGER_BOX}>
+                  <AlertTriangle className={CUI_DANGER_ICON} size={15} strokeWidth={1.9} />
+                  <p className={CUI_DANGER_TEXT}>전화번호 컬럼을 맞춰야 저장할 수 있습니다.</p>
                 </div>
               )}
             </div>
 
-            {/* 하단 버튼 (고정) */}
-            <div className="p-4 border-t bg-gray-50 flex gap-3 shrink-0">
-              <button
-                onClick={() => setStep('upload')}
-                className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-100 transition-colors"
-              >
-                ← 이전
+            {/* 푸터 */}
+            <div className={CUI_MODAL_FOOT}>
+              <button type="button" onClick={() => setStep('upload')} className={`${CUI_BTN_GHOST} mr-auto`}>
+                <ChevronLeft className="w-[15px] h-[15px]" />
+                파일 다시 고르기
               </button>
-              <button
-                onClick={handleSave}
-                disabled={!hasPhone || loading}
-                className="flex-1 py-3 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-xl font-semibold hover:from-violet-700 hover:to-purple-700 flex items-center justify-center gap-2 text-base disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-violet-200/60 transition-all"
-              >
-                {loading ? (
-                  <><span className="animate-spin">⏳</span>요청 중...</>
-                ) : (
-                  <><span>💾</span>고객 데이터 저장 ({fileTotalRows.toLocaleString()}건)</>
-                )}
+              <button type="button" onClick={handleSave} disabled={!hasPhone || loading} className={CUI_BTN_PRIMARY}>
+                {loading
+                  ? <><Loader2 className="w-[15px] h-[15px] animate-spin" />요청 중</>
+                  : <><Save className="w-[15px] h-[15px]" />{fileTotalRows.toLocaleString()}건 저장</>}
               </button>
             </div>
           </>

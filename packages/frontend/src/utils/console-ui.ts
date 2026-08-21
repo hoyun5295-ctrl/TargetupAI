@@ -17,6 +17,7 @@
  *   - 발송 결과 (ResultsModal · CampaignDetailModal)
  *   - 수신거부 관리 · 회사 설정
  *   - 직접 타겟 설정 모달(DirectTargetFilterModal) · 직접 타겟 발송(TargetSendModal, SendWorkspaceShell indigo 액센트) ★2026-08-21 리프트
+ *   - 고객 DB 업로드 흐름 3종(파일·컬럼 맞추기 = FileUploadMappingModal · 충돌 해결 · 진행) ★2026-08-21(4)
  *   - 작성기 부속 모달 3종(특수문자·보관함·문자 저장 = `components/console/ConsoleDialog` 셸) ★2026-08-21(2).
  *     직접발송과 공용이라 강조색은 호출자가 고른다(타겟=indigo · 직접발송=emerald) — 그 표는 ConsoleDialog가 소유, 여기 토큰은 골격만
  *
