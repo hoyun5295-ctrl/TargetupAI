@@ -1,3 +1,5 @@
+import { OUI_BACK, OUI_HEADER, OUI_ICON_TILE, OUI_PAGE, OUI_SUBTITLE, OUI_TITLE } from '../utils/operator-ui';
+import OperatorAura from '../components/operator/OperatorAura';
 /**
  * QuickCampaignPage — 원클릭 캠페인 (2026-07-08)
  *
@@ -21,23 +23,24 @@ export default function QuickCampaignPage() {
   const startNew = () => { setResumeDraftId(null); setOpen(true); };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
+    <div className={OUI_PAGE}>
+      <OperatorAura />
       {/* 헤더 (sticky) */}
-      <div className="sticky top-0 z-30 bg-slate-950/80 backdrop-blur-sm border-b border-white/10">
+      <div className={OUI_HEADER}>
         <div className="max-w-3xl mx-auto px-4 py-4 flex items-center gap-3">
           <button
             onClick={() => goBackOr(navigate, '/ai-operator')}
-            className="text-white/50 hover:text-white p-1.5 rounded-lg hover:bg-white/10"
+            className={OUI_BACK}
             aria-label="AI Operator로 돌아가기"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/25">
+          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-amber-400 to-fuchsia-500`}>
             <Wand2 className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="text-base font-bold text-white">원클릭 캠페인</h1>
-            <p className="text-[11px] text-white/50">행사 내용·이미지 한 번 입력 → DM·이메일·인앱 초안 한 번에</p>
+            <h1 className={OUI_TITLE}>원클릭 캠페인</h1>
+            <p className={OUI_SUBTITLE}>행사 내용·이미지 한 번 입력 → DM·이메일·인앱 초안 한 번에</p>
           </div>
         </div>
       </div>

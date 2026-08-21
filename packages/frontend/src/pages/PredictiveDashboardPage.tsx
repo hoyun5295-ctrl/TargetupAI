@@ -1,3 +1,5 @@
+import { OUI_BACK, OUI_CHART_TOOLTIP, OUI_HEADER, OUI_HEADER_ROW, OUI_ICON_TILE, OUI_PAGE, OUI_PAGE_CENTER, OUI_SUBTITLE, OUI_TITLE, OUI_WRAP_WIDE } from '../utils/operator-ui';
+import OperatorAura from '../components/operator/OperatorAura';
 /**
  * PredictiveDashboardPage.tsx — AI 자율 예측 (발견·제안 중심 인사이트 엔진)
  *
@@ -453,7 +455,7 @@ export default function PredictiveDashboardPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white flex items-center justify-center">
+      <div className={OUI_PAGE_CENTER}>
         <Loader2 className="w-8 h-8 animate-spin text-violet-400" />
       </div>
     );
@@ -461,7 +463,7 @@ export default function PredictiveDashboardPage() {
 
   if (error || !distribution || !summary) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white flex items-center justify-center">
+      <div className={OUI_PAGE_CENTER}>
         <div className="text-center">
           <div className="text-rose-300 mb-2">{error || '데이터 조회 실패'}</div>
           <button onClick={() => navigate('/ai-operator')} className="px-4 py-2 bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 rounded">
@@ -475,22 +477,23 @@ export default function PredictiveDashboardPage() {
   const segments = summary.discoveredSegments || [];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
-      <div className="max-w-5xl mx-auto p-4 md:p-6">
-        {/* 블록1: 헤더 */}
-        <div className="flex items-center gap-3 mb-5">
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className="p-2 hover:bg-white/5 rounded-lg shrink-0">
+    <div className={OUI_PAGE}>
+      <OperatorAura />
+      {/* 블록1: 헤더(오퍼레이터 표면 단계 OUI 1규격, sticky) */}
+      <div className={OUI_HEADER}>
+        <div className={`${OUI_WRAP_WIDE} ${OUI_HEADER_ROW} flex-wrap`}>
+          <button onClick={() => goBackOr(navigate, '/ai-operator')} className={`${OUI_BACK} shrink-0`} aria-label="AI Operator로 돌아가기">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0">
+          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-violet-500 to-fuchsia-500`}>
             <Brain className="w-5 h-5 text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <h1 className="text-lg md:text-xl font-semibold flex items-center gap-2">
+            <h1 className={`${OUI_TITLE} flex items-center gap-2`}>
               AI 자율 예측
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 font-medium">실험실</span>
             </h1>
-            <p className="text-xs text-white/50 mt-0.5 truncate">위험·기회 고객을 AI가 먼저 찾아 제안합니다</p>
+            <p className={OUI_SUBTITLE}>위험·기회 고객을 AI가 먼저 찾아 제안합니다</p>
           </div>
           <button
             onClick={handleRecompute}
@@ -514,7 +517,9 @@ export default function PredictiveDashboardPage() {
             </div>
           )}
         </div>
+      </div>
 
+      <div className="max-w-5xl mx-auto p-4 md:p-6">
         {/* 블록2: 안내 1줄 — cold start면 추정 안내, 학습 후면 한 줄 요약 */}
         <div className={`mb-5 px-4 py-3 rounded-xl border flex items-start gap-2.5 text-xs leading-relaxed ${summary.isAllColdStart
           ? 'bg-amber-500/10 border-amber-400/25 text-amber-100/90'
@@ -1045,7 +1050,7 @@ function HistogramCard({
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
             <XAxis dataKey="range" stroke="rgba(255,255,255,0.5)" fontSize={10} />
             <YAxis stroke="rgba(255,255,255,0.5)" fontSize={10} />
-            <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 }} />
+            <Tooltip contentStyle={OUI_CHART_TOOLTIP} />
             <Bar dataKey="count" name="고객 수">
               {data.map((entry, idx) => {
                 const intensity = invertColor ? 1 - idx / data.length : idx / data.length;

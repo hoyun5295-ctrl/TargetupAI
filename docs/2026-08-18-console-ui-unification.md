@@ -13,7 +13,7 @@
 | 사실 | 근거 |
 |---|---|
 | 액센트 = **인디고**(`indigo-600` = #4f46e5) | `utils/dm-tokens.ts`의 `DM_COLOR_TOKENS.brand.primary`와 같은 값 — 새로 정한 색이 아니라 이미 있던 브랜드 값 |
-| **바이올렛은 AI 기능 화면 색** — 관리 화면에 쓰지 않는다 | `LESSONS_FRONTEND.md` 톤앤매너(AI 자율 진단 카드·다크 violet 액센트). 이 선이 두 색을 가르는 유일한 기준 |
+| **바이올렛은 AI 기능 화면 색** — 관리 화면에 쓰지 않는다. ★0821 보강: 두 체계를 가르는 1차 축은 **지면(다크 vs 라이트)**이고 액센트는 그 다음이다. AI 작업면도 바닥은 `slate-950`(`operator-ui.ts` OUI_*)이며 바이올렛은 액센트로만 쓴다 | `LESSONS_FRONTEND.md` 톤앤매너(AI 자율 진단 카드·다크 violet 액센트). 이 선이 두 색을 가르는 유일한 기준 | |
 | Pretendard·lucide·Tailwind가 이미 설치돼 있다 | `index.html:35` CDN · `package.json` lucide-react ^0.563 · lucide 사용 파일 175개 |
 | `campaigns` 화면들의 탭 색이 **런타임 조립**이었다 | `border-${tab.color}-500` — Tailwind 스캐너가 못 읽는 형태. 다른 파일에 같은 클래스가 있어 우연히 살아 있었다(`safelist` 없음 실측) |
 | 앱 표준 `disabled:opacity`는 {30,40,50,60} | `backend/src/utils/__tests__/ui-token-invariants.test.ts` 1번 규칙이 강제 |

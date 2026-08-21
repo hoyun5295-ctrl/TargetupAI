@@ -235,6 +235,8 @@
 > ⛔ **★2026-08-21 Harold 판정 — AI Operator 허브의 지면·글로우·유리 카드·그라데이션 글자는 그대로 둔다.** 같은 날 단색(violet-950 + 글로우 1)과
 > 라이트(gray-100) 두 안을 실물·위젯으로 보였는데 **둘 다 "기존이 낫다"**(A > 단색 > 라이트 — 대표 부부 일치). 깊이(세 방향 그라데이션 + 빛 3개 + 유리)가
 > 이 화면의 힘이다. **"퀄리티 상승"은 빼기(색·층·대비 감축)로 하지 않는다 — 네 번 졌다.** 허용된 변경 = 제목 크기 한 단 축소 + ! 호버 팝오버(제목 아래 중앙).
+> ★0821 저녁 Harold 정정: 위 판정은 "대안이 못했다"는 상대 평가이지 **보라 선호가 아니다**. 허브(아이덴티티)와 작업 화면(slate 작업면)을 역할별로 나누는 체계 제안이 요구였다.
+> ★0821 밤 전원 합의·구현완료: **허브는 무접촉, 메뉴 안 작업면 16개는 `bg-slate-950` 단색 + 아우라 1 + 바이올렛 액센트**(`utils/operator-ui.ts` OUI_*). CT 규칙 = 뒤로가기 뿌리가 `/ai-operator`면 OUI_ / 관리·조회면 CUI_ / DM 편집기면 DM_. 불변식 = `backend/src/utils/__tests__/operator-surface-invariants.test.ts`. 체계·⛔·회의록 = [오퍼레이터 표면 단계](../../docs/2026-08-21-operator-surface-tier-design.md).
 > 경위·기각 설계서 = [AI Operator 표면 개편](../../docs/2026-08-21-ai-operator-surface-design.md) §13 · memory `feedback_ai_tell_is_surface_signal_not_decoration`.
 
 ---

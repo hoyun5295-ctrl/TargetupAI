@@ -1,3 +1,5 @@
+import { OUI_BACK, OUI_HEADER, OUI_ICON_TILE, OUI_PAGE, OUI_SUBTITLE, OUI_TITLE } from '../utils/operator-ui';
+import OperatorAura from '../components/operator/OperatorAura';
 /**
  * ImageStudioPage — P4 AI 이미지 스튜디오 (2026-07-19 v2 · 템플릿 갤러리 재정의)
  *
@@ -315,22 +317,23 @@ export default function ImageStudioPage() {
   const busy = !!busyMsg;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
+    <div className={OUI_PAGE}>
+      {stage === 'gallery' && <OperatorAura />}
       {/* 헤더 */}
-      <header className="sticky top-0 z-30 bg-slate-950/80 backdrop-blur-sm border-b border-white/10">
+      <header className={OUI_HEADER}>
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 text-white/60 hover:text-white" aria-label="뒤로">
+          <button onClick={() => goBackOr(navigate, '/ai-operator')} className={OUI_BACK} aria-label="뒤로">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-violet-500/25 shrink-0">
+          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-violet-400 to-fuchsia-500`}>
             <ImagePlus className="w-5 h-5 text-white" />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="text-base md:text-lg font-bold truncate">이미지 스튜디오</h1>
+              <h1 className={`${OUI_TITLE} truncate`}>이미지 스튜디오</h1>
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-400/30">NEW</span>
             </div>
-            <p className="text-[11px] text-white/45 truncate">템플릿 고르고 상품·문구만 넣으면 완성 포스터가 나와요</p>
+            <p className={OUI_SUBTITLE}>템플릿 고르고 상품·문구만 넣으면 완성 포스터가 나와요</p>
           </div>
           {stage !== 'gallery' && (
             <button onClick={() => { setStage('gallery'); }} className="ml-auto flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg border border-white/10 text-white/60 hover:text-white hover:bg-white/10 shrink-0">

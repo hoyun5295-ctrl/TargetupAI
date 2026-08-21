@@ -1,3 +1,5 @@
+import { OUI_BACK, OUI_HEADER, OUI_HEADER_ROW, OUI_ICON_TILE, OUI_PAGE, OUI_TITLE, OUI_WRAP_NARROW } from '../utils/operator-ui';
+import OperatorAura from '../components/operator/OperatorAura';
 // AI 자동 마케팅 (Continuous Operator) — 재설계 (2026-06-27)
 // 메인 = 런처(시작 방법 2×2 + 브리핑). 각 버튼이 화면을 연다.
 //   오늘의 추천(의사결정 카드·버리는 데이터 0) / 자연어 시작 / 시나리오 시작 / 세부설정.
@@ -379,19 +381,20 @@ export default function ContinuousOperatorPage() {
   const headerBack = () => (view === 'launcher' ? goBackOr(navigate, '/ai-operator') : goLauncher());
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
+    <div className={OUI_PAGE}>
+      <OperatorAura />
       {/* 헤더 */}
-      <div className="bg-slate-950/80 backdrop-blur-sm border-b border-white/10 sticky top-0 z-30">
-        <div className="max-w-3xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3">
-          <button onClick={headerBack} className="p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="뒤로">
+      <div className={OUI_HEADER}>
+        <div className={`${OUI_WRAP_NARROW} ${OUI_HEADER_ROW}`}>
+          <button onClick={headerBack} className={OUI_BACK} aria-label="뒤로">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="w-10 h-10 rounded-xl bg-indigo-500 flex items-center justify-center flex-shrink-0">
+          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-indigo-400 to-violet-500`}>
             <Brain className="w-5 h-5 text-white" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="text-lg md:text-xl font-semibold text-white truncate">{VIEW_TITLE[view]}</h1>
+              <h1 className={`${OUI_TITLE} truncate`}>{VIEW_TITLE[view]}</h1>
             </div>
           </div>
           <div className="ml-auto flex items-center gap-1.5 shrink-0">

@@ -1,3 +1,5 @@
+import { OUI_BACK, OUI_HEADER, OUI_ICON_TILE, OUI_PAGE, OUI_SUBTITLE, OUI_TITLE } from '../utils/operator-ui';
+import OperatorAura from '../components/operator/OperatorAura';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
@@ -1743,22 +1745,26 @@ export default function JourneysPage() {
   };
 
   return (
-    // ★ D222+ Phase 1 (2026-05-27): 다크 톤 → 보라 그라데이션 톤 다운 + 시인성 강화 (text-white/50 → /80, /40 → /55)
-    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
+    // ★ 2026-08-21 오퍼레이터 표면 단계(OUI): 작업면 = slate-950 단색 + 상단 아우라 1. 값은 utils/operator-ui.ts가 소유(0527 보라화 → 0627 slate 복귀 이력의 옛 주석 정정)
+    <div className={OUI_PAGE}>
+      {view !== 'studio' && <OperatorAura />}
       {/* 헤더 — D222+ Phase 1: 보라 톤 다운 sticky */}
-      <div className="border-b border-violet-400/30 bg-violet-800/50 backdrop-blur-md sticky top-0 z-30">
+      <div className={OUI_HEADER}>
         <div className="max-w-7xl mx-auto px-3 md:px-6 py-3 md:py-4 flex items-center gap-2 md:gap-4">
           <button
             onClick={() => view !== 'main' ? setConfirm({ mode: 'warning', title: '메인으로 돌아가기', description: '생성한 여정이 사라집니다. 메인으로 돌아가시겠습니까?', confirmLabel: '나가기', onConfirm: () => { setView('main'); setAiPkg(null); setStudioIdx(0); setBenefitText(''); } }) : goBackOr(navigate, '/ai-operator')}
-            className="p-2 rounded-lg hover:bg-white/15 transition-colors"
+            className={OUI_BACK}
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
+          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-fuchsia-400 to-purple-500`}>
+            <Workflow className="w-5 h-5 text-white" />
+          </div>
           <div className="flex-1 min-w-0">
-            <h1 className="text-lg md:text-2xl font-bold truncate text-white">
+            <h1 className={`${OUI_TITLE} truncate`}>
               {view === 'studio' ? `${aiPkg?.name || '여정'}: 스텝 ${studioIdx + 1}` : view === 'review' ? 'AI 생성 여정 검토' : '여정 자동화: AI Operator'}
             </h1>
-            <p className="text-xs md:text-sm text-white/80 mt-0.5">
+            <p className={OUI_SUBTITLE}>
               {view === 'studio'
                 ? '한 화면에서 스텝 하나를 끝내고 [스텝 추가]로 넘어갑니다'
                 : view === 'review' ? 'AI가 설계한 흐름을 검토 + 혜택 부분 수정 후 활성화' : '만들 여정을 고르면 AI가 흐름을 설계합니다. 연동한 데이터가 많을수록 고를 수 있는 여정이 늘어납니다'}

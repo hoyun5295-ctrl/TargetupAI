@@ -1,3 +1,5 @@
+import { OUI_BACK, OUI_HEADER, OUI_HEADER_ROW, OUI_ICON_TILE, OUI_PAGE, OUI_PAGE_CENTER, OUI_SUBTITLE, OUI_TITLE, OUI_WRAP_WIDE } from '../utils/operator-ui';
+import OperatorAura from '../components/operator/OperatorAura';
 /**
  * CdpSettingsPage.tsx — D214+ (2026-05-24) 5번 메뉴 자사몰 연동 전면 재작성
  *
@@ -898,7 +900,7 @@ export default function CdpSettingsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white flex items-center justify-center">
+      <div className={OUI_PAGE_CENTER}>
         <div className="text-white/50 flex items-center gap-2">
           <Loader2 className="w-4 h-4 animate-spin text-violet-400" />
           자사몰 진단 데이터를 불러오는 중...
@@ -908,24 +910,25 @@ export default function CdpSettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
+    <div className={OUI_PAGE}>
+      <OperatorAura />
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
 
       {/* 1. 상단 헤더 */}
       {/* ★ D222+ Phase 2 (2026-05-27): 다크 → 보라 톤 다운 sticky 헤더 */}
-      <div className="bg-violet-800/50 backdrop-blur-md border-b border-violet-400/30 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3 flex-wrap">
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
+      <div className={OUI_HEADER}>
+        <div className={`${OUI_WRAP_WIDE} ${OUI_HEADER_ROW} flex-wrap`}>
+          <button onClick={() => goBackOr(navigate, '/ai-operator')} className={OUI_BACK}>
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20">
+          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-emerald-400 to-cyan-500`}>
             <Database className="w-5 h-5 text-white" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl md:text-2xl font-semibold text-white">자사몰 연동 (CDP)</h1>
+              <h1 className={OUI_TITLE}>자사몰 연동 (CDP)</h1>
             </div>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5">카페24 · 네이버 · 메이크샵 · 고도몰 · 아임웹 · 자체 호스팅 · 싱크에이전트: 고객 데이터를 한 곳으로 모읍니다</p>
+            <p className={OUI_SUBTITLE}>카페24 · 네이버 · 메이크샵 · 고도몰 · 아임웹 · 자체 호스팅 · 싱크에이전트: 고객 데이터를 한 곳으로 모읍니다</p>
           </div>
           <button onClick={loadAll} disabled={loading} className="p-2 rounded-lg hover:bg-white/10 transition-colors" title="새로고침">
             <RefreshCw className={`w-4 h-4 text-white/60 ${loading ? 'animate-spin' : ''}`} />

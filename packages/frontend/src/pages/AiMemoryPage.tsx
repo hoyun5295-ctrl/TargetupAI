@@ -1,3 +1,5 @@
+import { OUI_BACK, OUI_HEADER, OUI_HEADER_ROW, OUI_ICON_TILE, OUI_PAGE, OUI_SUBTITLE, OUI_TITLE, OUI_WRAP_WIDE } from '../utils/operator-ui';
+import OperatorAura from '../components/operator/OperatorAura';
 /**
  * AiMemoryPage.tsx — D217+ AI 학습 메모리 (Journey Builder 동급 8 화면)
  *
@@ -563,22 +565,23 @@ export default function AiMemoryPage() {
   // ════════════════════════════════════════════════════════════════════
 
   return (
-    // ★ D222+ Phase 3 (2026-05-27): 다크 → 보라 그라데이션 톤 다운
-    <div className="min-h-screen bg-slate-950 text-white">
+    // ★ 2026-08-21 오퍼레이터 표면 단계(OUI): 작업면 = slate-950 단색 + 상단 아우라 1. 값은 utils/operator-ui.ts가 소유(0527 보라화 → 0627 slate 복귀 이력의 옛 주석 정정)
+    <div className={OUI_PAGE}>
+      <OperatorAura />
       {/* ───────── 1. sticky 헤더 — D222+ Phase 3 보라 톤 다운 ───────── */}
-      <div className="bg-slate-900/70 backdrop-blur-md border-b border-white/10 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3">
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="AI Operator로 돌아가기">
+      <div className={OUI_HEADER}>
+        <div className={`${OUI_WRAP_WIDE} ${OUI_HEADER_ROW}`}>
+          <button onClick={() => goBackOr(navigate, '/ai-operator')} className={OUI_BACK} aria-label="AI Operator로 돌아가기">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-violet-500/20">
+          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-violet-400 to-fuchsia-500`}>
             <Brain className="w-5 h-5 text-white" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="text-xl md:text-2xl font-semibold text-white">AI 학습 메모리</h1>
+              <h1 className={OUI_TITLE}>AI 학습 메모리</h1>
             </div>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5 hidden md:block">회사별 누적 학습. 시간이 지날수록 AI 추천 정확도가 향상됩니다</p>
+            <p className={OUI_SUBTITLE}>회사별 누적 학습. 시간이 지날수록 AI 추천 정확도가 향상됩니다</p>
           </div>
           <div className="ml-auto flex items-center gap-2">
             {/* ★ 2026-08-12 (Harold 확정 — 플래너 메뉴 개편): 세그먼트 = AI Operator 타일에서 제거 → 여기 서브메뉴로.

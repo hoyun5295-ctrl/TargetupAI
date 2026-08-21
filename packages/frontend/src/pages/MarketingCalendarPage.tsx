@@ -1,3 +1,5 @@
+import { OUI_BACK, OUI_HEADER, OUI_ICON_TILE, OUI_PAGE, OUI_SUBTITLE, OUI_TITLE } from '../utils/operator-ui';
+import OperatorAura from '../components/operator/OperatorAura';
 // 마케팅 캘린더 — 1년 시즌 캠페인 AI 설계 → 선택 등록 (2026-07-02 4차, Harold 확정)
 // 흐름(1클릭 원칙): [AI로 1년 설계] → 12개월 카드 → 원하는 달 선택 → [등록] → 크레딧 확인 → 자동마케팅 일괄 등록.
 // ★ 2026-07-05 재점검: 등록 = 연 1회(yearly + 대상 월) — 옛 monthly는 시즌 캠페인이 매월 반복 발송되는 구조 결함.
@@ -205,20 +207,21 @@ export default function MarketingCalendarPage() {
   const pickedCount = entries.filter((e) => selected.has(e.month) && !registrations[String(e.month)]).length;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
-      <div className="bg-slate-950/80 backdrop-blur-sm border-b border-white/10 sticky top-0 z-30">
+    <div className={OUI_PAGE}>
+      <OperatorAura />
+      <div className={OUI_HEADER}>
         <div className="max-w-6xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3 flex-wrap">
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="뒤로">
+          <button onClick={() => goBackOr(navigate, '/ai-operator')} className={OUI_BACK} aria-label="뒤로">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-400 to-rose-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-rose-500/20">
+          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-orange-400 to-rose-500`}>
             <CalendarDays className="w-5 h-5 text-white" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl md:text-2xl font-semibold">마케팅 캘린더</h1>
+              <h1 className={OUI_TITLE}>마케팅 캘린더</h1>
             </div>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5">업종·시즌·회사 데이터로 1년치 캠페인을 AI가 설계. 고른 달은 그대로 자동마케팅으로</p>
+            <p className={OUI_SUBTITLE}>업종·시즌·회사 데이터로 1년치 캠페인을 AI가 설계. 고른 달은 그대로 자동마케팅으로</p>
           </div>
         </div>
       </div>

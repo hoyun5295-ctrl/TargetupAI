@@ -1,3 +1,5 @@
+import { OUI_BACK, OUI_HEADER, OUI_ICON_TILE, OUI_PAGE, OUI_SUBTITLE, OUI_TITLE } from '../utils/operator-ui';
+import OperatorAura from '../components/operator/OperatorAura';
 /**
  * PlannerBriefPage.tsx — 마케팅 플래너 월간 브리핑·결재 (★ 2026-08-13 Phase 2)
  *
@@ -241,26 +243,27 @@ export default function PlannerBriefPage() {
   const needsResubmit = revisionChanged && !brief?.pastMonth;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
+    <div className={OUI_PAGE}>
+      <OperatorAura />
       {/* ── sticky 헤더 ───────────────────────────────────────────── */}
-      <div className="bg-slate-900/70 backdrop-blur-md border-b border-white/10 sticky top-0 z-30">
+      <div className={OUI_HEADER}>
         <div className="max-w-6xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3">
-          <button onClick={() => goBackOr(navigate, '/marketing-planner')} className="p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="플래너로 돌아가기">
+          <button onClick={() => goBackOr(navigate, '/marketing-planner')} className={OUI_BACK} aria-label="플래너로 돌아가기">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-violet-500/20">
+          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-violet-400 to-fuchsia-500`}>
             <ClipboardCheck className="w-5 h-5 text-white" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl md:text-2xl font-semibold">{monthLabel} 마케팅 브리핑</h1>
+              <h1 className={OUI_TITLE}>{monthLabel} 마케팅 브리핑</h1>
               {approval && (
                 <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${(STATUS_BADGE[approval.status] || STATUS_BADGE.pending).cls}`}>
                   {(STATUS_BADGE[approval.status] || STATUS_BADGE.pending).label}
                 </span>
               )}
             </div>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5 hidden md:block">
+            <p className={OUI_SUBTITLE}>
               한 번 승인하면 제작·발송·결과 보고까지 이어서 진행합니다
             </p>
           </div>

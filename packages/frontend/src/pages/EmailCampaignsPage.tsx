@@ -1,3 +1,5 @@
+import { OUI_BACK, OUI_HEADER, OUI_HEADER_ROW, OUI_ICON_TILE, OUI_PAGE, OUI_SUBTITLE, OUI_TITLE, OUI_WRAP_WIDE } from '../utils/operator-ui';
+import OperatorAura from '../components/operator/OperatorAura';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
@@ -747,22 +749,23 @@ export default function EmailCampaignsPage() {
   // ════════════════════════════════════════════════════════════════
 
   return (
-    // ★ D222+ Phase 3 (2026-05-27): 다크 → 보라 그라데이션 톤 다운
-    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
+    // ★ 2026-08-21 오퍼레이터 표면 단계(OUI): 작업면 = slate-950 단색 + 상단 아우라 1. 값은 utils/operator-ui.ts가 소유(0527 보라화 → 0627 slate 복귀 이력의 옛 주석 정정)
+    <div className={OUI_PAGE}>
+      <OperatorAura />
       {/* 상단 헤더 — D222+ Phase 3 보라 톤 다운 */}
-      <div className="bg-violet-800/50 backdrop-blur-md border-b border-violet-400/30 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3">
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="뒤로가기">
+      <div className={OUI_HEADER}>
+        <div className={`${OUI_WRAP_WIDE} ${OUI_HEADER_ROW}`}>
+          <button onClick={() => goBackOr(navigate, '/ai-operator')} className={OUI_BACK} aria-label="뒤로가기">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-400 to-blue-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-blue-500/20">
+          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-sky-400 to-blue-500`}>
             <Mail className="w-5 h-5 text-white" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="text-xl md:text-2xl font-semibold text-white">Email 캠페인</h1>
+              <h1 className={OUI_TITLE}>Email 캠페인</h1>
             </div>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5">회사 SMTP 직접 등록 → 본인 도메인 발신 + 광고 자동 합성 + 오픈/클릭 트래킹</p>
+            <p className={OUI_SUBTITLE}>회사 SMTP 직접 등록 → 본인 도메인 발신 + 광고 자동 합성 + 오픈/클릭 트래킹</p>
           </div>
           <div className="ml-auto flex items-center gap-2 flex-wrap justify-end">
             {smtpConfigured && smtpConfig?.isConfigured && (

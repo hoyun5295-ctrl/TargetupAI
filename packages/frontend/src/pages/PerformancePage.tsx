@@ -1,3 +1,5 @@
+import { OUI_BACK, OUI_CHART_TOOLTIP, OUI_HEADER, OUI_HEADER_ROW, OUI_ICON_TILE, OUI_PAGE, OUI_SUBTITLE, OUI_TITLE, OUI_WRAP_WIDE } from '../utils/operator-ui';
+import OperatorAura from '../components/operator/OperatorAura';
 /**
  * PerformancePage.tsx — 성과 리포트 전면 재설계 (2026-06-08)
  *
@@ -623,18 +625,19 @@ export default function PerformancePage() {
     : '등급 × 전 채널 성과';
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
-      <div className="bg-slate-950/80 backdrop-blur-sm border-b border-white/10 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3 flex-wrap">
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
+    <div className={OUI_PAGE}>
+      <OperatorAura />
+      <div className={OUI_HEADER}>
+        <div className={`${OUI_WRAP_WIDE} ${OUI_HEADER_ROW} flex-wrap`}>
+          <button onClick={() => goBackOr(navigate, '/ai-operator')} className={OUI_BACK}>
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-violet-500/20">
+          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-violet-500 to-fuchsia-500`}>
             <BarChart3 className="w-5 h-5 text-white" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl md:text-2xl font-semibold text-white">성과 리포트</h1>
+              <h1 className={OUI_TITLE}>성과 리포트</h1>
               {availability && (
                 <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
                   hasCdp
@@ -645,7 +648,7 @@ export default function PerformancePage() {
                 </span>
               )}
             </div>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5">과거~현재 마케팅 성과 분석: 결과 · 원인 · 제안</p>
+            <p className={OUI_SUBTITLE}>과거~현재 마케팅 성과 분석: 결과 · 원인 · 제안</p>
           </div>
           <div className="flex items-center gap-1 flex-wrap">
             {PERIOD_OPTIONS.map((o) => (
@@ -1139,7 +1142,7 @@ export default function PerformancePage() {
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
                     <XAxis dataKey="channel" stroke="rgba(255,255,255,0.5)" fontSize={11} />
                     <YAxis stroke="rgba(255,255,255,0.5)" fontSize={11} />
-                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 }} />
+                    <Tooltip contentStyle={OUI_CHART_TOOLTIP} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
                     <Bar dataKey="current" name={`현재 ${period}`} fill="#a78bfa" />
                     <Bar dataKey="previous" name={`직전 ${period}`} fill="#475569" />
@@ -1244,7 +1247,7 @@ export default function PerformancePage() {
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
                     <XAxis dataKey="month" stroke="rgba(255,255,255,0.5)" fontSize={10} />
                     <YAxis stroke="rgba(255,255,255,0.5)" fontSize={10} unit="%" />
-                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 }} />
+                    <Tooltip contentStyle={OUI_CHART_TOOLTIP} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
                     <Line type="monotone" dataKey="M1" name="가입 후 30일" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3 }} />
                     <Line type="monotone" dataKey="M3" name="가입 후 90일" stroke="#a78bfa" strokeWidth={2} dot={{ r: 3 }} />
@@ -1275,7 +1278,7 @@ export default function PerformancePage() {
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
                     <XAxis dataKey="date" stroke="rgba(255,255,255,0.5)" fontSize={10} />
                     <YAxis stroke="rgba(255,255,255,0.5)" fontSize={10} />
-                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 }} />
+                    <Tooltip contentStyle={OUI_CHART_TOOLTIP} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
                     <Line type="monotone" dataKey="current" name="현재" stroke="#a78bfa" strokeWidth={2} dot={false} />
                     <Line type="monotone" dataKey="previous" name="직전" stroke="#64748b" strokeWidth={2} dot={false} strokeDasharray="4 4" />

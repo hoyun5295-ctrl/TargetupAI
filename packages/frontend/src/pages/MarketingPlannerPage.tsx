@@ -1,3 +1,5 @@
+import { OUI_BACK, OUI_HEADER, OUI_ICON_TILE, OUI_PAGE, OUI_SUBTITLE, OUI_TITLE } from '../utils/operator-ui';
+import OperatorAura from '../components/operator/OperatorAura';
 /**
  * MarketingPlannerPage.tsx — 마케팅 플래너 (★ 2026-08-12 Phase 1 · 설계서 = docs/2026-08-12-ax-marketing-planner-design.md)
  *
@@ -366,22 +368,23 @@ export default function MarketingPlannerPage() {
   const monthEstTotal = events.reduce((s, e) => s + (e.estCreditsTotal || 0), 0);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
+    <div className={OUI_PAGE}>
+      <OperatorAura />
       {/* ── sticky 헤더 ───────────────────────────────────────────── */}
-      <div className="bg-slate-900/70 backdrop-blur-md border-b border-white/10 sticky top-0 z-30">
+      <div className={OUI_HEADER}>
         <div className="max-w-[1600px] mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3">
-          <button onClick={() => goBackOr(navigate, '/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="AI Operator로 돌아가기">
+          <button onClick={() => goBackOr(navigate, '/ai-operator')} className={OUI_BACK} aria-label="AI Operator로 돌아가기">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-violet-500/20">
+          <div className={`${OUI_ICON_TILE} bg-gradient-to-br from-violet-400 to-fuchsia-500`}>
             <CalendarDays className="w-5 h-5 text-white" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="text-xl md:text-2xl font-semibold">마케팅 플래너</h1>
+              <h1 className={OUI_TITLE}>마케팅 플래너</h1>
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-fuchsia-500/25 text-fuchsia-200">NEW</span>
             </div>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5 hidden md:block">한 달 행사를 담아 두면, 채널별 제작과 발송을 AI가 이어받습니다</p>
+            <p className={OUI_SUBTITLE}>한 달 행사를 담아 두면, 채널별 제작과 발송을 AI가 이어받습니다</p>
           </div>
           <button
             onClick={() => navigate('/marketing-calendar')}
