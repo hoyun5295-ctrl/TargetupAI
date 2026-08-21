@@ -38,7 +38,7 @@ function requireTokenSecret(): string {
   const secret = String(process.env.PLANNER_JOIN_TOKEN_SECRET || process.env.JOURNEY_PAUSE_TOKEN_SECRET || '').trim();
   if (!secret) {
     console.error('[planner-participation] PLANNER_JOIN_TOKEN_SECRET 미설정 — 참여 링크를 만들지 않는다');
-    throw new Error('참여 링크 설정이 완료되지 않았습니다 — 관리자 확인이 필요합니다.');
+    throw new Error('참여 링크 설정이 완료되지 않았습니다. 관리자 확인이 필요합니다.');
   }
   return secret;
 }

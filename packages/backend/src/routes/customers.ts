@@ -628,7 +628,7 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
         //   최대 500회 반복하며 장애 중 DB에 부하를 증폭한다. 행 데이터 오류(22xxx·23xxx)만 격리.
         if (!isRowLevelDbError(chunkErr)) {
           failCount += chunk.length;
-          errors.push(`청크 실패(계통 오류 — 폴백 생략): ${chunkErr?.message || 'unknown'}`);
+          errors.push(`청크 실패(계통 오류, 폴백 생략): ${chunkErr?.message || 'unknown'}`);
           continue;
         }
         for (const row of chunk) {

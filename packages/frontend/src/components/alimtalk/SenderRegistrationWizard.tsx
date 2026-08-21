@@ -159,7 +159,7 @@ export default function SenderRegistrationWizard({
           <div>
             <h2 className={CUI_MODAL_TITLE}>발신프로필 등록</h2>
             <p className={CUI_MODAL_DESC}>
-              Step {step} / 3 — 카카오 비즈니스채널 인증
+              Step {step} / 3: 카카오 비즈니스채널 인증
             </p>
           </div>
           <button

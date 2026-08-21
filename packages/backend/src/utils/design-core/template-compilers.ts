@@ -23,7 +23,7 @@ export interface CompileOpts {
   brandName?: string;
 }
 
-const INAPP_CTA_URL = '[URL — 회사 admin 수정]';
+const INAPP_CTA_URL = '[URL: 회사 admin 수정]';
 
 function mk(tplId: string, type: string, i: number, props: Record<string, unknown>, extra: Partial<Section> = {}): Section {
   return { id: `g4-${tplId}-${type}-${i}`, type, order: i, visible: true, props, ...extra } as unknown as Section;

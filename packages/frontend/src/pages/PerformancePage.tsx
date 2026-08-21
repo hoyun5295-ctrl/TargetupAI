@@ -645,7 +645,7 @@ export default function PerformancePage() {
                 </span>
               )}
             </div>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5">과거~현재 마케팅 성과 분석 — 결과 · 원인 · 제안</p>
+            <p className="text-xs md:text-sm text-white/50 mt-0.5">과거~현재 마케팅 성과 분석: 결과 · 원인 · 제안</p>
           </div>
           <div className="flex items-center gap-1 flex-wrap">
             {PERIOD_OPTIONS.map((o) => (
@@ -665,7 +665,7 @@ export default function PerformancePage() {
               onClick={() => setShowSettings(true)}
               disabled={loading || !snapshot || snapshot.totalCampaigns.current === 0}
               className="flex items-center gap-1.5 px-3 py-1 rounded text-[11px] font-semibold bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:opacity-90 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-opacity ml-1 shadow-lg shadow-violet-500/20"
-              title="기간 종합 마케팅 분석보고서 — 300크레딧"
+              title="기간 종합 마케팅 분석보고서 (300크레딧)"
             >
               <Sparkles className="w-3.5 h-3.5" />
               풀분석 보고서
@@ -688,7 +688,7 @@ export default function PerformancePage() {
                     <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0"><FileDown className="w-5 h-5 text-white" /></div>
                     <div className="min-w-0">
                       <div className="text-sm font-semibold text-white flex items-center gap-2">풀분석 보고서 <span className="px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-200 text-[9px] font-bold">300 크레딧</span></div>
-                      <div className="text-[11px] text-white/40">기간 종합 마케팅 분석 — 회사 보고용</div>
+                      <div className="text-[11px] text-white/40">기간 종합 마케팅 분석 (회사 보고용)</div>
                     </div>
                     <button onClick={() => setShowSettings(false)} className="ml-auto p-1 hover:bg-white/10 rounded-lg flex-shrink-0" aria-label="닫기"><X className="w-4 h-4 text-white/40" /></button>
                   </div>
@@ -861,7 +861,7 @@ export default function PerformancePage() {
             {amRoi && amRoi.campaigns > 0 && (
               <div className="bg-gradient-to-br from-emerald-500/10 to-slate-900 border border-emerald-400/25 rounded-2xl p-4">
                 <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div className="text-xs font-semibold text-white/70">자동마케팅 ROI — 최근 {amRoi.analysisPeriodDays}일</div>
+                  <div className="text-xs font-semibold text-white/70">자동마케팅 ROI: 최근 {amRoi.analysisPeriodDays}일</div>
                   {amRoi.hasCdpData && amRoi.spendKrw > 0 && amRoi.revenue7dKrw > 0 && (
                     <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold">
                       지출 대비 {(amRoi.revenue7dKrw / amRoi.spendKrw).toFixed(1)}배
@@ -886,7 +886,7 @@ export default function PerformancePage() {
                     <div className="text-lg font-bold text-emerald-300 mt-0.5">{amRoi.hasCdpData ? `₩${formatNum(amRoi.revenue7dKrw)}` : '연동 필요'}</div>
                   </div>
                 </div>
-                <div className="mt-2 text-[10px] text-white/30 italic">Data source — {amRoi.source}</div>
+                <div className="mt-2 text-[10px] text-white/30 italic">Data source: {amRoi.source}</div>
                 {!amRoi.hasCdpData && (
                   <button onClick={() => navigate('/cdp-settings')} className="mt-2 px-2.5 py-1 bg-white/10 hover:bg-white/20 rounded text-[11px] text-white/80 font-medium transition-colors">
                     자사몰 연동하고 매출 귀속 보기 →
@@ -920,7 +920,7 @@ export default function PerformancePage() {
             {/* ════ Tier 3 — 액션 & 보조 ════ */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
               <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
-                <div className="text-xs font-semibold text-white/70 mb-2.5">추천 액션 — AI 자동 마케팅</div>
+                <div className="text-xs font-semibold text-white/70 mb-2.5">추천 액션: AI 자동 마케팅</div>
                 <div className="space-y-2">
                   <QuickActionRow
                     icon={<AlertTriangle className="w-4 h-4" />} title="채널 ROI 회복" desc="저성과 채널 회복 캠페인 자동 설계" color="rose"
@@ -938,7 +938,7 @@ export default function PerformancePage() {
                     onClick={() => handleQuickAction('top_performer_replication')}
                   />
                 </div>
-                <div className="mt-2 text-[10px] text-white/30 italic">Data source — performance quick-action (AI 자동 설계 · 사용자 검토 후 발송)</div>
+                <div className="mt-2 text-[10px] text-white/30 italic">Data source: performance quick-action (AI 자동 설계 · 사용자 검토 후 발송)</div>
               </div>
 
               <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
@@ -947,7 +947,7 @@ export default function PerformancePage() {
                   <button onClick={() => openModal('campaigns')} className="text-[11px] text-violet-300 hover:text-violet-200">전체 보기 →</button>
                 </div>
                 {snapshot.topCampaigns.length === 0 ? (
-                  <div className="text-xs text-white/40 py-4 text-center">발송 캠페인 없음 — 첫 캠페인 발송 후 활성</div>
+                  <div className="text-xs text-white/40 py-4 text-center">발송 캠페인 없음. 첫 캠페인 발송 후 활성</div>
                 ) : (
                   <div className="space-y-1.5">
                     {snapshot.topCampaigns.slice(0, 3).map((c) => (
@@ -960,7 +960,7 @@ export default function PerformancePage() {
                     ))}
                   </div>
                 )}
-                <div className="mt-2 text-[10px] text-white/30 italic">Data source — campaigns + MySQL 큐 직접 집계</div>
+                <div className="mt-2 text-[10px] text-white/30 italic">Data source: campaigns + MySQL 큐 직접 집계</div>
               </div>
             </div>
 
@@ -995,7 +995,7 @@ export default function PerformancePage() {
                       </div>
                     </div>
                     <p className="mt-2 text-[10px] text-white/30 italic">
-                      Data source — CT-98 daily-insight-mailer (어제 0~24시 sms_send_results + customers is_active)
+                      Data source: CT-98 daily-insight-mailer (어제 0~24시 sms_send_results + customers is_active)
                     </p>
                   </div>
                 )}
@@ -1005,7 +1005,7 @@ export default function PerformancePage() {
             <div className="text-center text-[11px] text-white/40 pt-2">
               마지막 계산: {new Date(snapshot.computedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}
               <br />
-              이 분석은 AI 결과이며 액션은 사용자 검토 + 승인 후 발송됩니다 (AI 단독 발송 X). 0건 자동완화 X — 발송 차단 정책.
+              이 분석은 AI 결과이며 액션은 사용자 검토 + 승인 후 발송됩니다 (AI 단독 발송 X). 0건 자동완화 X, 발송 차단 정책.
             </div>
           </>
         )}
@@ -1057,7 +1057,7 @@ export default function PerformancePage() {
                 )}
                 {/* ★ 2026-07-03 고객 축 — 수신 고객 기준 정밀 기여 (여정·DM customer_id 매칭) */}
                 <div className="pt-2 border-t border-white/10">
-                  <div className="text-[11px] text-white/60 mb-2">수신 고객 기준 기여 <span className="text-emerald-300/80">(여정·DM — 고객 단위 정확 매칭)</span></div>
+                  <div className="text-[11px] text-white/60 mb-2">수신 고객 기준 기여 <span className="text-emerald-300/80">(여정·DM, 고객 단위 정확 매칭)</span></div>
                   {customerAxisLoading ? (
                     <div className="flex items-center gap-2 text-[11px] text-white/40 py-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> 고객 매칭 집계 중…</div>
                   ) : customerAxis?.recipientAttribution && customerAxis.recipientAttribution.totalRecipients > 0 ? (
@@ -1072,7 +1072,7 @@ export default function PerformancePage() {
                           </div>
                         ))}
                       </div>
-                      <div className="text-[10px] text-white/30 italic mt-1.5">Data source — {customerAxis.recipientAttribution.source}</div>
+                      <div className="text-[10px] text-white/30 italic mt-1.5">Data source: {customerAxis.recipientAttribution.source}</div>
                     </>
                   ) : (
                     <div className="text-[11px] text-white/40 py-1">여정·DM 발송이 쌓이면 "발송받은 그 고객의 구매"를 고객 단위로 매칭해 보여드립니다.</div>
@@ -1158,11 +1158,11 @@ export default function PerformancePage() {
                   ))}
                 </div>
                 {snapshot.byChannelROI.some((c) => c.channel === 'EMAIL' || c.channel === 'DM') && (
-                  <div className="text-[10px] text-white/40 mt-2">EMAIL = 발송 무료(열람 기준) / DM = 열람 축(문자 발송분은 SMS·LMS 행에 포함) — 2026-07-03 전 채널 합류</div>
+                  <div className="text-[10px] text-white/40 mt-2">EMAIL = 발송 무료(열람 기준) / DM = 열람 축(문자 발송분은 SMS·LMS 행에 포함), 2026-07-03 전 채널 합류</div>
                 )}
               </>
             ) : (
-              <div className="text-center text-xs text-white/40 py-8">발송 데이터 없음 — 첫 캠페인 발송 후 활성</div>
+              <div className="text-center text-xs text-white/40 py-8">발송 데이터 없음. 첫 캠페인 발송 후 활성</div>
             )}
           </PerfModal>
 
@@ -1515,7 +1515,7 @@ function AiDiagnosisLine({
           {explanation ? '자세히 보기 →' : 'AI 진단 시작 →'}
         </button>
       )}
-      <p className="mt-2 text-[10px] text-white/30 italic">Data source — 최근 30일 campaigns · cdp_events 기반 AI 진단</p>
+      <p className="mt-2 text-[10px] text-white/30 italic">Data source: 최근 30일 campaigns · cdp_events 기반 AI 진단</p>
     </div>
   );
 }
@@ -1599,7 +1599,7 @@ function PerfModal({
           <button onClick={onClose} aria-label="닫기" className="p-1.5 rounded-lg hover:bg-white/10 text-white/60"><X className="w-4 h-4" /></button>
         </div>
         <div className="p-5 overflow-y-auto flex-1">{children}</div>
-        {source && <div className="px-5 py-2.5 border-t border-white/10 text-[10px] text-white/30 italic flex-shrink-0">Data source — {source}</div>}
+        {source && <div className="px-5 py-2.5 border-t border-white/10 text-[10px] text-white/30 italic flex-shrink-0">Data source: {source}</div>}
       </div>
     </div>
   );

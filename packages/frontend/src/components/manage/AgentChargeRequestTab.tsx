@@ -244,7 +244,7 @@ export default function AgentChargeRequestTab() {
           })}
         </div>
         <p className="mt-3 text-[11px] italic text-slate-300">
-          Data source — 발송 게이트웨이 계정 원장 실시간 잔액 (저장 없음). 발송이 나가는 동안 값이 계속 바뀝니다.
+          Data source: 발송 게이트웨이 계정 원장 실시간 잔액 (저장 없음). 발송이 나가는 동안 값이 계속 바뀝니다.
         </p>
       </div>
 
@@ -424,7 +424,7 @@ export default function AgentChargeRequestTab() {
         )}
 
         <p className="px-5 pb-4 text-[11px] italic text-slate-300">
-          Data source — 발송 게이트웨이 충전 원장 실시간 조회 (저장 없음)
+          Data source: 발송 게이트웨이 충전 원장 실시간 조회 (저장 없음)
         </p>
       </div>
 

@@ -174,7 +174,7 @@ export default function AiProposalSummaryModal({ proposal, onClose }: Props) {
                     ))}
                   </ul>
                 )}
-                <p className="text-[10px] text-white/30 italic mt-2">Data source — 회사 실데이터 (등급 구매주기·발송 실측·CDP), 임의 추정치 미사용</p>
+                <p className="text-[10px] text-white/30 italic mt-2">Data source: 회사 실데이터 (등급 구매주기·발송 실측·CDP), 임의 추정치 미사용</p>
               </div>
 
               {insight && (insight.diagnosis || insight.insights.length > 0) && (

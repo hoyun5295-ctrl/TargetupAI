@@ -251,7 +251,7 @@ export async function ensureFreshNaverCommerceToken(
       ?? (await getNaverCommerceCredentials(integration.companyId, integration.storeId))
       ?? envNaverCreds();
     if (!c) {
-      throw new Error('네이버 커머스 자격(client_id/secret)이 없습니다 — 연동 화면에서 다시 연결해주세요.');
+      throw new Error('네이버 커머스 자격(client_id/secret)이 없습니다. 연동 화면에서 다시 연결해주세요.');
     }
     const reissued = await issueNaverCommerceToken(c);
     await saveNaverCommerceIntegration(integration.companyId, integration.storeId, reissued, c);
@@ -329,7 +329,7 @@ export async function naverCommerceApiCall<T = unknown>(
     const res = await fetch(url, fetchOpts);
     if (res.ok) return (await res.json()) as T;
     if (res.status >= 500 && attempt === 0) {
-      lastErr = new Error(`네이버 커머스 API 5xx (${res.status}) — retry`);
+      lastErr = new Error(`네이버 커머스 API 5xx (${res.status}), retry`);
       await new Promise((r) => setTimeout(r, 500));
       continue;
     }
@@ -517,7 +517,7 @@ export const naverSmartStoreAdapter: IProviderAdapter = {
   async refreshToken(integration: ProviderIntegration) {
     // refresh_token 없음 — 저장 자격(meta) → env 순으로 재발급.
     const creds = (await getNaverCommerceCredentials(integration.companyId, integration.mallId)) ?? envNaverCreds();
-    if (!creds) throw new Error('네이버 커머스 자격(client_id/secret)이 없습니다 — 연동 화면에서 다시 연결해주세요.');
+    if (!creds) throw new Error('네이버 커머스 자격(client_id/secret)이 없습니다. 연동 화면에서 다시 연결해주세요.');
     const tokenRes = await issueNaverCommerceToken(creds);
     return toProviderTokenResponse(tokenRes);
   },

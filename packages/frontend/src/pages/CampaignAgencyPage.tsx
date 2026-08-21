@@ -106,7 +106,7 @@ export default function CampaignAgencyPage() {
       const d = await res.json();
       if (d.success && d.form) {
         setForm((cur) => mergeAnalyzedIntoForm(cur, d.form));
-        toast.success('이미지 내용을 자동 입력했습니다 — 확인 후 접수해 주세요.');
+        toast.success('이미지 내용을 자동 입력했습니다. 확인 후 접수해 주세요.');
       } else {
         toast.error(d.error || '이미지 판독에 실패했습니다.');
       }
@@ -175,7 +175,7 @@ export default function CampaignAgencyPage() {
           </div>
           <div className="min-w-0">
             <div className="text-white font-semibold leading-tight">캠페인 설계 대행</div>
-            <div className="text-[11px] text-white/40">비즈니스 요금제 전용 — 한줄로 운영팀이 설계해 드립니다</div>
+            <div className="text-[11px] text-white/40">비즈니스 요금제 전용: 한줄로 운영팀이 설계해 드립니다</div>
           </div>
         </div>
       </div>
@@ -250,7 +250,7 @@ export default function CampaignAgencyPage() {
               })}
             </div>
           )}
-          <div className="text-[10px] text-white/30 italic mt-3">Data source — 캠페인 대행 접수 이력(실시간)</div>
+          <div className="text-[10px] text-white/30 italic mt-3">Data source: 캠페인 대행 접수 이력(실시간)</div>
         </div>
       </div>
 
@@ -261,7 +261,7 @@ export default function CampaignAgencyPage() {
             {submitting && (
               <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm z-20 flex flex-col items-center justify-center gap-2">
                 <Loader2 className="w-7 h-7 text-violet-300 animate-spin" />
-                <div className="text-sm text-white/70">접수 중입니다 — 창을 닫지 마세요</div>
+                <div className="text-sm text-white/70">접수 중입니다 (창을 닫지 마세요)</div>
               </div>
             )}
             {/* 모달 헤더 */}
@@ -357,7 +357,7 @@ export default function CampaignAgencyPage() {
                   <div className="space-y-1">
                     {detailParsed.products.map((p, i) => (
                       <div key={i} className="text-[13px] text-white/80">
-                        · {p.name}{p.price && ` — 정가 ${Number(p.price).toLocaleString()}원`}{p.salePrice && ` → 할인 ${Number(p.salePrice).toLocaleString()}원`}
+                        · {p.name}{p.price && `: 정가 ${Number(p.price).toLocaleString()}원`}{p.salePrice && ` → 할인 ${Number(p.salePrice).toLocaleString()}원`}
                       </div>
                     ))}
                   </div>
@@ -369,7 +369,7 @@ export default function CampaignAgencyPage() {
                   <div className="text-[13px] text-white/80 whitespace-pre-wrap">{detailParsed.note}</div>
                 </div>
               )}
-              <div className="text-[10px] text-white/30 italic">Data source — 접수 원문(실시간) · 상태는 운영팀 진행에 따라 갱신됩니다</div>
+              <div className="text-[10px] text-white/30 italic">Data source: 접수 원문(실시간) · 상태는 운영팀 진행에 따라 갱신됩니다</div>
             </div>
           </div>
         </div>

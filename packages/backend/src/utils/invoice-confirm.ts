@@ -404,7 +404,7 @@ ${renderConfirmBlockHtml(viewUrl)}
           // 참조는 같은 본문을 사본으로 받는다 — 그 안의 컨펌 링크로 참조도 컨펌할 수 있다(의도).
           //   상태는 갈라지지 않는다: 추적행이 장당 하나뿐이라 누가 누르든 한 곳에만 기록된다.
           ...(cc.length > 0 ? { cc } : {}),
-          subject: `[한줄로] ${companyName} 거래내역서 (${billingStart.slice(0, 7)}) — 확인 요청`,
+          subject: `[한줄로] ${companyName} 거래내역서 (${billingStart.slice(0, 7)}) · 확인 요청`,
           html,
           attachments: [attachment],
         }),
@@ -578,7 +578,7 @@ async function runObjectionNotifications(limit: number, to: string[], bcc: strin
         replyTo: INVITO_INFO.email,
         ...(to.length > 0 ? { to } : {}),
         ...(bcc.length > 0 ? { bcc } : {}),
-        subject: `[한줄로] 이의신청 — ${r.company_name} (${String(r.billing_start).slice(0, 7)})`,
+        subject: `[한줄로] 이의신청: ${r.company_name} (${String(r.billing_start).slice(0, 7)})`,
         html,
       });
       await pool.query(

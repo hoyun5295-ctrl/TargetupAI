@@ -108,7 +108,7 @@ export default function JourneyBriefingModal({
                     <div className="mt-0.5 whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-white/80">
                       {blank ? <span className="text-rose-200/70">아직 비어 있습니다. 이 스텝 화면에서 [AI 문안생성]을 누르면 바로 채워집니다.</span> : highlightVars(s.messageTemplate)}
                     </div>
-                    <p className="mt-2 text-[10px] italic text-white/30">Data source — 이 스텝에 저장될 본문. (광고) 표기와 무료수신거부는 발송할 때 자동으로 붙습니다.</p>
+                    <p className="mt-2 text-[10px] italic text-white/30">Data source: 이 스텝에 저장될 본문. (광고) 표기와 무료수신거부는 발송할 때 자동으로 붙습니다.</p>
                   </div>
                 )}
               </div>
@@ -119,7 +119,7 @@ export default function JourneyBriefingModal({
         <div className="space-y-2 border-t border-white/10 bg-slate-900/95 px-5 py-3.5">
           {issues.length > 0 && (
             <p className="text-[11px] text-rose-200/85">
-              고쳐야 저장됩니다 — {issues.map((i) => `스텝 ${i.stepOrder} ${i.message}`).join(' · ')}
+              고쳐야 저장됩니다: {issues.map((i) => `스텝 ${i.stepOrder} ${i.message}`).join(' · ')}
             </p>
           )}
           {footnote && <p className="text-[11px] text-white/40">{footnote}</p>}

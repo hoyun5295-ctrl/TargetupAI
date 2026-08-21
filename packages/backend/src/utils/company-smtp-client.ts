@@ -81,7 +81,7 @@ const IV_LENGTH = 16;
 function getEncryptionKey(): Buffer {
   const keyHex = process.env.SMTP_ENCRYPTION_KEY || '';
   if (!keyHex || keyHex.length !== 64) {
-    throw new Error('SMTP_ENCRYPTION_KEY 미설정 — 운영자에게 .env 등록 요청 의무 (64자 hex)');
+    throw new Error('SMTP_ENCRYPTION_KEY 미설정: 운영자에게 .env 등록 요청 의무 (64자 hex)');
   }
   return Buffer.from(keyHex, 'hex');
 }
@@ -100,7 +100,7 @@ export function decryptPassword(encrypted: string): string {
   if (!encrypted) throw new Error('복호화할 비밀번호 필수');
   const key = getEncryptionKey();
   const parts = encrypted.split(':');
-  if (parts.length !== 3) throw new Error('SMTP 비밀번호 형식 오류 — 회사 admin 재설정 의무');
+  if (parts.length !== 3) throw new Error('SMTP 비밀번호 형식 오류: 회사 admin 재설정 의무');
   const iv = Buffer.from(parts[0], 'base64');
   const ciphertext = Buffer.from(parts[1], 'base64');
   const authTag = Buffer.from(parts[2], 'base64');
@@ -252,7 +252,7 @@ async function getTransporter(companyId: string): Promise<Transporter> {
   const row = r.rows[0];
 
   if (!row.smtp_host || !row.smtp_user || !row.smtp_password_encrypted) {
-    throw new Error('SMTP 설정 미완료 — 회사 admin이 SMTP 정보 등록 후 진입 의무');
+    throw new Error('SMTP 설정 미완료. 회사 admin이 SMTP 정보 등록 후 진입 의무');
   }
 
   // 복호화 → transporter 생성 → 즉시 평문 폐기
@@ -315,7 +315,7 @@ export async function sendTestEmail(companyId: string, toEmail: string): Promise
         <p style="color: #10b981; font-weight: 600;">✓ 본 메일 정상 수신 = SMTP 설정 완료</p>
         <p style="color: #6b7280; font-size: 14px;">Email 마케팅 캠페인 활용 가능합니다.</p>
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
-        <p style="font-size: 12px; color: #9ca3af; text-align: center;">한줄로 (TargetUp) — 마케팅 자동화 SaaS</p>
+        <p style="font-size: 12px; color: #9ca3af; text-align: center;">한줄로 (TargetUp) · 마케팅 자동화 SaaS</p>
       </div>
     `,
   });

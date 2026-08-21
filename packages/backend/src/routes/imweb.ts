@@ -289,7 +289,7 @@ function renderCallbackHtml(status: 'ok' | 'error', message: string): string {
   const title = status === 'ok' ? '아임웹 연동 완료' : '아임웹 연동 실패';
   return `<!DOCTYPE html>
 <html lang="ko">
-<head><meta charset="utf-8"><title>한줄로 — ${title}</title>
+<head><meta charset="utf-8"><title>한줄로 · ${title}</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f9fafb; margin: 0; padding: 60px 20px; }
   .card { max-width: 480px; margin: 0 auto; background: white; border-radius: 16px; padding: 40px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); text-align: center; }

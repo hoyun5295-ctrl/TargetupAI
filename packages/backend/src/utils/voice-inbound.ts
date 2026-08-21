@@ -174,7 +174,7 @@ function buildSystemPrompt(company: any, customer: any, recentOrders: any[]): st
     : '현재 통화 중인 고객은 CDP에 등록된 회원이 아닙니다 (비회원 또는 미식별).';
 
   const ordersLine = recentOrders.length > 0
-    ? recentOrders.map((o, i) => `${i + 1}. ${new Date(o.occurred_at).toLocaleDateString('ko-KR')} — ${JSON.stringify(o.properties).slice(0, 100)}`).join('\n')
+    ? recentOrders.map((o, i) => `${i + 1}. ${new Date(o.occurred_at).toLocaleDateString('ko-KR')}: ${JSON.stringify(o.properties).slice(0, 100)}`).join('\n')
     : '최근 주문 이력 없음';
 
   return `당신은 ${company.company_name || '한줄로 고객사'}의 인바운드 음성 AI 응답 에이전트입니다.
@@ -192,11 +192,11 @@ ${ordersLine}
 
 응답 가이드 (영구 원칙):
 1. 위 정합된 CDP 데이터에 근거한 사실만 응답 (추측/창작 X)
-2. 발송/예약/결제 등 외부 action은 처리 안 함 — "담당자가 처리할 영역" 안내만
+2. 발송/예약/결제 등 외부 action은 처리 안 함. "담당자가 처리할 영역" 안내만
 3. 본 통화는 인바운드 음성 응답이므로 60초 이내 응답 (3~5 문장)
 4. 한국어 존댓말로 자연스럽게 응답 (~입니다 / ~해드리겠습니다)
 5. 모르는 정보는 "정확한 답변은 담당자가 안내드릴 영역입니다" 안내
-6. 광고/할인 정보는 제공 X (영구 원칙 — 음성 응답은 안내 한정)`;
+6. 광고/할인 정보는 제공 X (영구 원칙, 음성 응답은 안내 한정)`;
 }
 
 // ════════════════════════════════════════════════════════════════════

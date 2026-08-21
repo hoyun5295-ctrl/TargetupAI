@@ -159,7 +159,7 @@ export default function JourneyStatsPage() {
           <div className="flex-1">
             <h1 className="text-xl md:text-2xl font-semibold flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-violet-400" />
-              {journeyName || '여정'} — 통계 분석
+              {journeyName || '여정'} · 통계 분석
             </h1>
             <p className="text-sm text-white/50 mt-0.5">전체 효과 + 등급별 + 시간대 + 요일 + Variant Bandit</p>
           </div>
@@ -176,7 +176,7 @@ export default function JourneyStatsPage() {
           <Card icon={<DollarSign className="w-4 h-4" />} label="총 비용" value={formatCost(stats.overview.totalCost)} color="text-fuchsia-300" />
         </div>
         {Number(stats.overview.goalMet || 0) > 0 && (
-          <div className="text-[11px] text-emerald-300/70 -mt-4 mb-6">목표 달성 = 여정 진입 후 목표 달성이 확인되어 남은 발송 없이 종료된 고객 — 이 여정이 만든 성과입니다.</div>
+          <div className="text-[11px] text-emerald-300/70 -mt-4 mb-6">목표 달성 = 여정 진입 후 목표 달성이 확인되어 남은 발송 없이 종료된 고객. 이 여정이 만든 성과입니다.</div>
         )}
 
         {/* ★ 2026-07-11 홀드아웃 증분 비교 — 발송군 vs 미발송 대조군 전환율 */}
@@ -185,7 +185,7 @@ export default function JourneyStatsPage() {
             <div className="flex items-center gap-2 mb-3">
               <Beaker className="w-4 h-4 text-sky-300" />
               <span className="text-sm font-semibold text-sky-100">홀드아웃 증분 비교</span>
-              <span className="text-[10px] text-white/40">이 여정이 실제로 전환을 만드는지 — 발송군 vs 미발송 대조군</span>
+              <span className="text-[10px] text-white/40">이 여정이 실제로 전환을 만드는지: 발송군 vs 미발송 대조군</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="p-3 bg-white/[0.04] border border-white/10 rounded-lg">
@@ -206,7 +206,7 @@ export default function JourneyStatsPage() {
                 <div className="text-[10px] text-white/40 mt-0.5">전환 판정 = 진입 이후 구매(이벤트·프로필)</div>
               </div>
             </div>
-            <div className="text-[10px] text-white/30 italic mt-2">Data source — journey_executions(holdout) × cdp_events·customers 실측</div>
+            <div className="text-[10px] text-white/30 italic mt-2">Data source: journey_executions(holdout) × cdp_events·customers 실측</div>
           </div>
         )}
 
@@ -308,7 +308,7 @@ export default function JourneyStatsPage() {
 
         {/* Variant Bandit 효과 */}
         {stats.variants.length > 0 && (
-          <Section title="A/B Variant Bandit 효과" subtitle="Thompson Sampling posterior 매트릭스 — 자동 최적화 효과">
+          <Section title="A/B Variant Bandit 효과" subtitle="Thompson Sampling posterior 매트릭스: 자동 최적화 효과">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-white/5 border-b border-white/10">
@@ -341,7 +341,7 @@ export default function JourneyStatsPage() {
             </div>
             <div className="mt-3 p-2 bg-violet-500/5 border border-violet-400/20 rounded text-[11px] text-violet-200/80 flex items-start gap-1.5">
               <Beaker className="w-3 h-3 flex-shrink-0 mt-0.5" />
-              <span>Thompson Sampling 자동 최적화 — 효과 높은 variant 자동 가중치 증가. 사후 평균이 높을수록 우수 variant.</span>
+              <span>Thompson Sampling 자동 최적화. 효과 높은 variant 자동 가중치 증가. 사후 평균이 높을수록 우수 variant.</span>
             </div>
           </Section>
         )}

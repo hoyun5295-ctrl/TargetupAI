@@ -238,7 +238,7 @@ router.get('/my-free-messaging', async (req: Request, res: Response) => {
     // ★ 2026-08-05 (Codex 2R) CT가 스키마 부재를 typed 오류로 올려 주므로 이 분기가 실제로 도달한다.
     //   그 전에는 CT가 삼켜서 200 "무료 없음"으로 위장됐다(db_alter_safety_net 위반).
     if (err?.code === 'DB_MIGRATION_PENDING' || (msg.includes('does not exist') && /column|relation/.test(msg))) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — plans·free_messaging_grants·billing_items DDL 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: plans·free_messaging_grants·billing_items DDL 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('무료 메시징 조회 에러:', err);
     return res.status(500).json({ success: false, error: '조회 중 오류가 발생했습니다' });
@@ -302,7 +302,7 @@ router.post('/my-credit/recharge', async (req: Request, res: Response) => {
     }
     const msg = err?.message || '';
     if (msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — ai_credit_requests 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: ai_credit_requests 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('선불 충전 에러:', err);
     return res.status(500).json({ success: false, error: '충전 처리 실패' });
@@ -328,7 +328,7 @@ router.post('/my-credit/recharge-request', async (req: Request, res: Response) =
     }
     const msg = err?.message || '';
     if (msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — ai_credit_requests 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: ai_credit_requests 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('후불 충전 요청 에러:', err);
     return res.status(500).json({ success: false, error: '충전 요청 실패' });
@@ -1663,7 +1663,7 @@ router.post('/', requireSuperAdmin, async (req: Request, res: Response) => {
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 companies.usage_type ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: 운영자에게 companies.usage_type ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -2141,7 +2141,7 @@ router.put('/:id', requireUuidId, requireSuperAdmin, async (req: Request, res: R
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 companies.usage_type ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: 운영자에게 companies.usage_type ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -2193,7 +2193,7 @@ router.post('/:id/merge', requireUuidId, requireSuperAdmin, async (req: Request,
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 해당 테이블 ALTER 실행 요청 의무',
+        error: 'DB 마이그레이션 필요: 운영자에게 해당 테이블 ALTER 실행 요청 의무',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -2231,7 +2231,7 @@ router.get('/:id/agent-ids', requireUuidId, requireSuperAdmin, async (req: Reque
     if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 company_agent_ids CREATE/ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: 운영자에게 company_agent_ids CREATE/ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -2300,7 +2300,7 @@ router.post('/:id/agent-ids', requireUuidId, requireSuperAdmin, async (req: Requ
     if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 company_agent_ids CREATE/ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: 운영자에게 company_agent_ids CREATE/ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -2330,7 +2330,7 @@ router.delete('/:id/agent-ids/:agentIdRowId', requireUuidId, requireSuperAdmin, 
     if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 company_agent_ids CREATE/ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: 운영자에게 company_agent_ids CREATE/ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -2391,7 +2391,7 @@ router.patch('/:id/agent-ids/:agentIdRowId', requireUuidId, requireSuperAdmin, a
     if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 company_agent_ids ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: 운영자에게 company_agent_ids ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }

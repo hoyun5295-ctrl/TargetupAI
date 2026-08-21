@@ -62,7 +62,7 @@ export function buildDiscoveredSegments(input: DiscoveredSegmentInput): Discover
     const days = input.churn.avgInactiveDays;
     const reason = c <= 0 ? INACTIVE_REASON
       : days !== null && days > 0
-        ? `평균 ${days}일째 잠잠한 고객 ${fmt(c)}명을 찾았습니다. 더 두면 이탈로 굳어집니다 — 지금 회복 메시지가 가장 효과적입니다.`
+        ? `평균 ${days}일째 잠잠한 고객 ${fmt(c)}명을 찾았습니다. 더 두면 이탈로 굳어집니다. 지금 회복 메시지가 가장 효과적입니다.`
         : `한동안 반응이 없어 이탈 위험이 높은 고객 ${fmt(c)}명입니다. 지금 회복 메시지를 보낼 시점입니다.`;
     out.push({ key: 'churn_recovery', label: '이탈 위험 고객', count: c, reasonSummary: reason, accent: 'rose' });
   }
@@ -82,7 +82,7 @@ export function buildDiscoveredSegments(input: DiscoveredSegmentInput): Discover
   {
     const c = input.vip.count;
     const reason = c <= 0 ? INACTIVE_REASON
-      : `앞으로 1년간 예상 매출 ${fmt(input.vip.sumLtv365d)}원을 책임지는 핵심 고객 ${fmt(c)}명입니다. 이탈하면 그만큼 매출이 빠집니다 — 지금 관리가 필요합니다.`;
+      : `앞으로 1년간 예상 매출 ${fmt(input.vip.sumLtv365d)}원을 책임지는 핵심 고객 ${fmt(c)}명입니다. 이탈하면 그만큼 매출이 빠집니다. 지금 관리가 필요합니다.`;
     out.push({ key: 'vip_engagement', label: 'VIP 보존 대상', count: c, reasonSummary: reason, accent: 'fuchsia' });
   }
 

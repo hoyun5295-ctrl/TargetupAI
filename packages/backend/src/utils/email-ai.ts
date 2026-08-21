@@ -168,8 +168,8 @@ export function runEmailCodeChecks(input: {
     label: '제목 길이',
     status: sub.warn ? 'warn' : 'pass',
     detail: sub.warn
-      ? `제목 ${sub.length}자 — 모바일 수신함에서 ${SUBJECT_MOBILE_LIMIT}자 이후가 잘릴 수 있습니다.`
-      : `제목 ${sub.length}자 — 모바일 수신함 기준 적정 길이입니다.`,
+      ? `제목 ${sub.length}자: 모바일 수신함에서 ${SUBJECT_MOBILE_LIMIT}자 이후가 잘릴 수 있습니다.`
+      : `제목 ${sub.length}자: 모바일 수신함 기준 적정 길이입니다.`,
   });
 
   const linkCount = countExternalLinks(input.htmlBody);
@@ -178,7 +178,7 @@ export function runEmailCodeChecks(input: {
     label: '클릭 추적 링크',
     status: linkCount > 0 ? 'pass' : 'warn',
     detail: linkCount > 0
-      ? `외부 링크 ${linkCount}건 — 발송 시 클릭 추적이 자동 적용됩니다.`
+      ? `외부 링크 ${linkCount}건: 발송 시 클릭 추적이 자동 적용됩니다.`
       : '외부 링크가 없어 클릭 성과를 측정할 수 없습니다.',
   });
 
@@ -196,8 +196,8 @@ export function runEmailCodeChecks(input: {
     label: '광고 표기',
     status: 'pass',
     detail: input.isAd
-      ? '광고성 캠페인 — 발송 시 "(광고)" 표기와 수신거부 링크가 자동 부착됩니다.'
-      : '비광고 캠페인 — 광고성 내용이라면 캠페인 설정에서 광고성으로 변경해야 합니다.',
+      ? '광고성 캠페인: 발송 시 "(광고)" 표기와 수신거부 링크가 자동 부착됩니다.'
+      : '비광고 캠페인: 광고성 내용이라면 캠페인 설정에서 광고성으로 변경해야 합니다.',
   });
 
   return checks;
@@ -229,7 +229,7 @@ export const SEND_TIME_MIN_SAMPLE = 30;
 // ════════════════════════════════════════════════════════════════════
 
 const EMAIL_HTML_RULES = `
-[HTML 규격 — 이메일 클라이언트 호환 의무]
+[HTML 규격: 이메일 클라이언트 호환 의무]
 - 전체를 <table> 기반 레이아웃으로 작성, 최대 폭 600px 중앙 정렬.
 - 모든 스타일은 인라인 style 속성만 사용 (<style> 태그/외부 CSS 금지, JavaScript 금지).
 - 밝은 배경(바깥 #f4f5f7, 본문 카드 #ffffff), 본문 글자색 #333333 계열, 글꼴 font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif.
@@ -266,9 +266,9 @@ export async function generateEmailOneShot(input: {
 }): Promise<EmailGenResult> {
   const scenarioPreset = input.scenario ? EMAIL_SCENARIO_PRESETS[input.scenario] : null;
   const parts: string[] = [];
-  if (scenarioPreset) parts.push(`[시나리오] ${scenarioPreset.label} — ${scenarioPreset.prompt}`);
+  if (scenarioPreset) parts.push(`[시나리오] ${scenarioPreset.label}: ${scenarioPreset.prompt}`);
   if (input.prompt) parts.push(`[요청 내용] ${input.prompt}`);
-  parts.push(`[캠페인 성격] ${input.isAd ? '광고성 (표기는 발송 시 자동 부착 — 직접 넣지 말 것)' : '정보성'}`);
+  parts.push(`[캠페인 성격] ${input.isAd ? '광고성 (표기는 발송 시 자동 부착, 직접 넣지 말 것)' : '정보성'}`);
 
   const userMessage = `${parts.join('\n')}\n\n위 요청으로 이메일 1통을 JSON으로 완성하세요.`;
   const baseSystem = await buildSystemPromptWithBrandVoice(input.companyId, EMAIL_GEN_SYSTEM);
@@ -340,7 +340,7 @@ export interface EmailSectionsGenResult {
 
 const EMAIL_BLOCKS_SYSTEM = `당신은 한국어 이메일 마케팅 디자이너입니다. 회사 마케팅 담당자의 요청을 바탕으로 발송 가능한 비주얼 이메일의 블록 구성을 설계합니다.
 
-[사용 가능한 블록 — 아래 type만 사용]
+[사용 가능한 블록: 아래 type만 사용]
 - header: { "variant": "logo", "brand_name": "회사명" }
 - hero: { "headline": "큰 제목", "sub_copy": "한 줄 부제", "align": "center", "height": "md" }
 - text_card: { "tag": "라벨", "headline": "소제목", "body": "본문 2~3문장", "align": "left", "image_position": "top" }
@@ -355,7 +355,7 @@ const EMAIL_BLOCKS_SYSTEM = `당신은 한국어 이메일 마케팅 디자이�
 - 위 type만 사용한다. 그 외 type 금지.
 - 모든 이미지(image_url, url)는 빈 문자열로 둔다 (회사가 직접 업로드).
 - 구체 혜택 수치(할인율, 금액, 쿠폰코드, 무료, 사은품)는 임의로 만들지 않는다. 혜택 자리는 "[혜택을 직접 입력해주세요]" 텍스트로 두고, coupon_code는 빈 문자열로 둔다.
-- 단, [행사 내용] 원문에 상품명·가격이 적혀 있으면 그것은 창작이 아니다 — product_carousel 1개에 그 상품들을 원문 수치 그대로 담는다(정가 price, 할인가 discount_price — 원문에 없는 상품·가격 추가 금지).
+- 단, [행사 내용] 원문에 상품명·가격이 적혀 있으면 그것은 창작이 아니다. product_carousel 1개에 그 상품들을 원문 수치 그대로 담는다(정가 price, 할인가 discount_price. 원문에 없는 상품·가격 추가 금지).
 - [행사 내용] 원문에 상품 URL(http/https)이 적혀 있으면 해당 상품의 link_url에 원문 글자 그대로 넣는다(변형·축약·생성 금지). 원문에 URL이 없으면 link_url은 빈 문자열.
 - 모든 버튼 url은 빈 문자열로 둔다.
 - 권장 순서: header → hero → 본문(text_card / product_carousel / gallery) → cta → footer.
@@ -380,9 +380,9 @@ export async function generateEmailSections(input: {
   // ★ 2026-07-14 디자인 4.0 M5 — 행사 성격 → 정예 템플릿 스토리 힌트(결정적 매칭, 빈 행사문 = '' 우회)
   const templateHint = input.eventText ? buildEventTemplateHintBlock(input.eventText) : '';
   if (templateHint) parts.push(templateHint);
-  if (scenarioPreset) parts.push(`[시나리오] ${scenarioPreset.label} — ${scenarioPreset.prompt}`);
+  if (scenarioPreset) parts.push(`[시나리오] ${scenarioPreset.label}: ${scenarioPreset.prompt}`);
   if (input.prompt) parts.push(`[요청 내용] ${input.prompt}`);
-  parts.push(`[캠페인 성격] ${input.isAd ? '광고성 (표기는 발송 시 자동 부착 — 직접 넣지 말 것)' : '정보성'}`);
+  parts.push(`[캠페인 성격] ${input.isAd ? '광고성 (표기는 발송 시 자동 부착, 직접 넣지 말 것)' : '정보성'}`);
 
   const baseSystem = await buildSystemPromptWithBrandVoice(input.companyId, EMAIL_BLOCKS_SYSTEM);
   const brain = await composeCopyBrain({
@@ -498,7 +498,7 @@ export async function refineEmailSections(input: {
   const userInstruction = (input.instruction || '전체 카피를 더 매끄럽고 자연스럽게 다듬어주세요.').trim();
   const text = await callAIWithFallback({
     system,
-    userMessage: `[다듬기 지시]\n${userInstruction}\n\n[텍스트 조각 ${texts.length}개 — 같은 순서·같은 개수로 다듬어 JSON 출력]\n${JSON.stringify(texts)}`,
+    userMessage: `[다듬기 지시]\n${userInstruction}\n\n[텍스트 조각 ${texts.length}개: 같은 순서·같은 개수로 다듬어 JSON 출력]\n${JSON.stringify(texts)}`,
     maxTokens: 3000,
     temperature: 0.5,
     model: 'opus',
@@ -653,7 +653,7 @@ export async function recommendSendTime(input: {
 [절대 금지] 실측에 없는 수치 추정/창작, 업계 평균 단정.
 반드시 아래 JSON 스키마로만 출력합니다 (코드블록/설명 금지):
 { "suggested_hour": 10, "recommendation": "추천 사유 1~2문장 (실측 비중 인용)" }`,
-    userMessage: `[자사 실측 — 최근 90일 오픈 ${input.total}건 (KST)]\n${input.top.map((h) => `- ${h.hour}시: ${h.cnt}건 (${h.pct}%)`).join('\n')}\n\n위 실측만 근거로 다음 발송 시간을 JSON으로 추천하세요.`,
+    userMessage: `[자사 실측: 최근 90일 오픈 ${input.total}건 (KST)]\n${input.top.map((h) => `- ${h.hour}시: ${h.cnt}건 (${h.pct}%)`).join('\n')}\n\n위 실측만 근거로 다음 발송 시간을 JSON으로 추천하세요.`,
     maxTokens: 600,
     temperature: 0.2,
     model: 'opus',

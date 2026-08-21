@@ -58,15 +58,15 @@ export async function generateQuickAction(
   const system = `당신은 CRM 마케팅 전문가입니다. 회사의 성과 데이터를 분석해 1-click 액션 캠페인을 자동 설계합니다.
 
 영구 원칙:
-- 타겟 0건 자동완화 X (조건 완화 X — 0건이면 빈 결과 응답)
+- 타겟 0건 자동완화 X (조건 완화 X, 0건이면 빈 결과 응답)
 - 추천 시점 = KST 08~21시
 - AI 단독 발송 X (사용자 검토 + 승인 후 진행)
-- 구체 혜택(%/원/쿠폰) X — 흐름/안내문/감성 텍스트만 (회사 admin 직접 작성)
+- 구체 혜택(%/원/쿠폰) X. 흐름/안내문/감성 텍스트만 (회사 admin 직접 작성)
 
 JSON 형식으로만 응답하세요.`;
 
   const userMessage = `## 액션 타입
-${actionMeta.label} — ${actionMeta.description}
+${actionMeta.label}: ${actionMeta.description}
 
 ## 회사 정보
 - 회사명: ${brandName}
@@ -83,10 +83,10 @@ ${snapshot.byHour.sort((a, b) => b.sent - a.sent).slice(0, 5).map((h) => `  · $
 
 ## 요청 (${actionMeta.label})
 ${actionType === 'channel_recovery'
-  ? '저성과 채널 회복 캠페인 자동 설계 — 어떤 채널 성과 저하 영역 / 회복 매트릭스 도출'
+  ? '저성과 채널 회복 캠페인 자동 설계: 어떤 채널 성과 저하 영역 / 회복 매트릭스 도출'
   : actionType === 'time_optimization'
-    ? '저성과 시간대 회복 캠페인 자동 설계 — 어떤 시간대 성과 저하 영역 / 최적 시간대 매트릭스 도출'
-    : '30일 안 top 캠페인 복제 + 강화 — 어떤 영역 성과 견인 / 복제 매트릭스 도출'}
+    ? '저성과 시간대 회복 캠페인 자동 설계: 어떤 시간대 성과 저하 영역 / 최적 시간대 매트릭스 도출'
+    : '30일 안 top 캠페인 복제 + 강화: 어떤 영역 성과 견인 / 복제 매트릭스 도출'}
 
 다음 매트릭스 도출:
 1. objective: AI 자동 마케팅 자연어 한 줄 (예: "주말 저녁 8시 VIP 재구매 회복 캠페인")

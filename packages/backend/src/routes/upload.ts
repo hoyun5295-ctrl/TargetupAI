@@ -841,7 +841,7 @@ async function processUploadInBackground(
       errorCount,
       startedAt,
       completedAt,
-      message: `총 ${totalRows.toLocaleString()}건 중 신규 ${insertCount.toLocaleString()}건, 업데이트 ${duplicateCount.toLocaleString()}건${errorCount > 0 ? `, 오류 ${errorCount.toLocaleString()}건` : ''}${storeMappingErrorBatches > 0 ? ` · 매장 소속 매핑 실패 ${storeMappingErrorBatches}배치 — 같은 파일 재업로드로 복구 가능` : ''}`
+      message: `총 ${totalRows.toLocaleString()}건 중 신규 ${insertCount.toLocaleString()}건, 업데이트 ${duplicateCount.toLocaleString()}건${errorCount > 0 ? `, 오류 ${errorCount.toLocaleString()}건` : ''}${storeMappingErrorBatches > 0 ? ` · 매장 소속 매핑 실패 ${storeMappingErrorBatches}배치. 같은 파일 재업로드로 복구 가능` : ''}`
     }), 'EX', CACHE_TTL.uploadProgress);
 
     // ★ 2026-06-25: 고객 수/필드 채워짐이 바뀌었으므로 데이터 프로필 캐시 무효화 → 게이트·AI 프롬프트 즉시 반영

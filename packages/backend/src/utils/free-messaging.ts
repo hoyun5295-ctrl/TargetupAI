@@ -96,7 +96,7 @@ function isSchemaMissing(err: any): boolean {
 export class FreeMessagingSchemaPendingError extends Error {
   readonly code = 'DB_MIGRATION_PENDING';
   constructor() {
-    super('요금제 무료 메시징 DB 마이그레이션 필요 — plans.free_*_qty · free_messaging_grants · billing_items.free_count');
+    super('요금제 무료 메시징 DB 마이그레이션 필요: plans.free_*_qty · free_messaging_grants · billing_items.free_count');
     this.name = 'FreeMessagingSchemaPendingError';
   }
 }

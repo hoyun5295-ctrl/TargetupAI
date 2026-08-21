@@ -207,13 +207,13 @@ export async function buildMemoryPromptContext(companyId: string, maxEntries: nu
   for (const type of LEARNING_MEMORY_TYPES) {
     const arr = byType.get(type) || [];
     if (arr.length === 0) continue;
-    const lines = arr.map((m, i) => `${i + 1}. [중요도 ${m.importance}] ${m.memoryKey} — ${m.memoryValue}`);
+    const lines = arr.map((m, i) => `${i + 1}. [중요도 ${m.importance}] ${m.memoryKey}: ${m.memoryValue}`);
     sections.push(`### ${typeLabels[type]} (${arr.length}건)\n${lines.join('\n')}`);
   }
 
   if (sections.length === 0) return '';
 
-  return `## Company Memory (회사별 누적 학습 — 시간 지날수록 정확도↑)
+  return `## Company Memory (회사별 누적 학습, 시간 지날수록 정확도↑)
 
 ${sections.join('\n\n')}
 

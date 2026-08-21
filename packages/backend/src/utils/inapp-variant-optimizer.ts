@@ -413,7 +413,7 @@ export async function declareWinnerIfReady(
   return {
     declared: true,
     winnerMessageId: top.messageId,
-    reason: `Winner 자동 적용 — CTR ${(top.ctr * 100).toFixed(1)}% (CI ${(top.ciLow * 100).toFixed(1)}~${(top.ciHigh * 100).toFixed(1)}%)`,
+    reason: `Winner 자동 적용: CTR ${(top.ctr * 100).toFixed(1)}% (CI ${(top.ciLow * 100).toFixed(1)}~${(top.ciHigh * 100).toFixed(1)}%)`,
     pausedMessageIds: losersIds,
   };
 }

@@ -381,7 +381,7 @@ export default function EmailEventsModal({ campaignId, campaignName, onClose, to
 
         {/* Source caption */}
         <div className="px-5 py-2 border-t border-white/10 text-[10px] text-white/30 italic">
-          Data source — email_events 누적 (SMTP relay 직접 트래킹)
+          Data source: email_events 누적 (SMTP relay 직접 트래킹)
         </div>
       </div>
     </div>

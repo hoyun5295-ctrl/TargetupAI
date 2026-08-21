@@ -121,7 +121,7 @@ export function buildBrandLinkPromptSection(links: BrandLink[], habit?: LinkHabi
 
   if (safeLinks.length > 0) {
     const labelList = safeLinks
-      .map((l) => `- {{LINK:${l.label}}} — ${l.label} 링크 자리`)
+      .map((l) => `- {{LINK:${l.label}}}: ${l.label} 링크 자리`)
       .join('\n');
     return `
 
@@ -129,7 +129,7 @@ export function buildBrandLinkPromptSection(links: BrandLink[], habit?: LinkHabi
 
 - 이 회사는 아래 브랜드 링크를 등록해 두었습니다. 링크가 필요한 자리에는 반드시 아래 토큰만 그대로 출력하세요. 시스템이 등록된 실제 URL로 자동 치환합니다.
 ${labelList}
-- URL을 직접 작성(https://... 형태)하는 것은 절대 금지 — 토큰만 사용하세요.
+- URL을 직접 작성(https://... 형태)하는 것은 절대 금지. 토큰만 사용하세요.
 - 링크 토큰은 문안당 최대 1개만 사용하세요. ${positionGuide}
 - 링크가 어울리지 않는 문안이면 토큰을 넣지 않아도 됩니다.`;
   }

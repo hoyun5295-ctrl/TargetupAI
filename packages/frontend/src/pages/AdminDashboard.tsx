@@ -1571,7 +1571,7 @@ const handleRetryConfirmations = async (billingId: string, companyName: string) 
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || '재시도에 실패했습니다.');
-    showAlert(data.targeted === 0 ? '확인' : '완료', `${companyName} — ${data.message}`, data.targeted === 0 ? 'info' : 'success');
+    showAlert(data.targeted === 0 ? '확인' : '완료', `${companyName}: ${data.message}`, data.targeted === 0 ? 'info' : 'success');
     await loadBillings();
   } catch (e: any) {
     showAlert('오류', e?.message || '재시도에 실패했습니다.', 'error');
@@ -1807,7 +1807,7 @@ const handleManualComplete = async () => {
     const skipped: string[] = Array.isArray(data.skipped) ? data.skipped : [];
     setBillingToast({
       msg: skipped.length > 0
-        ? `${data.added}개사 수동 정산완료 · ${skipped.length}개사는 제외 — 이미 발행됐거나 이미 수동완료입니다(${skipped.join(', ')})`
+        ? `${data.added}개사 수동 정산완료 · ${skipped.length}개사는 제외. 이미 발행됐거나 이미 수동완료입니다(${skipped.join(', ')})`
         : `${data.added}개사를 수동 정산완료로 표시했습니다`,
       type: skipped.length > 0 ? 'error' : 'success',
     });
@@ -1827,7 +1827,7 @@ const handleManualRelease = async (id: string) => {
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || '해제 실패');
     await refreshBulkList();
-    setBillingToast({ msg: '수동 정산완료를 해제했습니다 — 미발급 목록으로 돌아갑니다', type: 'success' });
+    setBillingToast({ msg: '수동 정산완료를 해제했습니다. 미발급 목록으로 돌아갑니다', type: 'success' });
   } catch (e: any) {
     setBillingToast({ msg: e?.message || '해제 실패', type: 'error' });
   } finally {
@@ -2207,7 +2207,7 @@ const openBillingGenerateConfirm = async () => {
     setBillingPreview(res.data);
   } catch (e: any) {
     // 미리보기 실패가 발행을 막지는 않는다 — 사유만 알리고 모달은 열어 둔다(서버가 최종 판정).
-    setBillingToast({ msg: e.response?.data?.error || '미리보기 집계 실패 — 발행 시 서버가 다시 판정합니다', type: 'error' });
+    setBillingToast({ msg: e.response?.data?.error || '미리보기 집계 실패. 발행 시 서버가 다시 판정합니다', type: 'error' });
   } finally { setBillingPreviewLoading(false); }
 };
 
@@ -2348,16 +2348,16 @@ const runBillingBulk = async (kind: 'confirm' | 'send') => {
         const blocked = Number(s.mismatchBlocked || 0) + Number(s.renderFailed || 0)
           + Number(s.skippedNoEmail || 0) + Number(s.mailFailed || 0);
         // 묶음당 1회 호출이라 정상 경로에서 targeted 0은 나오지 않는다 — 나오면 그 사이 다른 요청이 보냈거나 장이 사라진 것이다.
-        if (Number(data?.targeted) === 0) fail.push(`${u.company_name} — 보낼 미발송 장이 없습니다(그 사이 발송됐거나 장을 찾지 못했습니다)`);
-        else if (sentCount === 0) fail.push(`${u.company_name} — ${data?.message || '한 통도 나가지 않았습니다'}`);
+        if (Number(data?.targeted) === 0) fail.push(`${u.company_name}: 보낼 미발송 장이 없습니다(그 사이 발송됐거나 장을 찾지 못했습니다)`);
+        else if (sentCount === 0) fail.push(`${u.company_name}: ${data?.message || '한 통도 나가지 않았습니다'}`);
         else {
           sentTotal += sentCount;
-          ok.push(`${u.company_name} — ${sentCount}장 발송`);
-          if (blocked > 0) partial.push(`${u.company_name} — ${data?.message || `일부 ${blocked}장이 나가지 않았습니다`}`);
+          ok.push(`${u.company_name}: ${sentCount}장 발송`);
+          if (blocked > 0) partial.push(`${u.company_name}: ${data?.message || `일부 ${blocked}장이 나가지 않았습니다`}`);
         }
       }
     } catch (e: any) {
-      fail.push(`${u.company_name} — ${e?.response?.data?.error || e?.message || '실패'}`);
+      fail.push(`${u.company_name}: ${e?.response?.data?.error || e?.message || '실패'}`);
     }
     setBillingBulk((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
   }
@@ -5512,7 +5512,7 @@ const handleApproveRequest = async (id: string) => {
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <h3 className="text-base font-semibold text-gray-900">예외 승인</h3>
               <p className="mt-1 text-xs text-gray-500 leading-relaxed">
-                해외에서 들어와야 하는 대상을 등록합니다. <span className="font-medium">사유 없이는 등록되지 않습니다</span> — 이 기록이 심사에 내는 예외 승인 대장입니다.
+                해외에서 들어와야 하는 대상을 등록합니다. <span className="font-medium">사유 없이는 등록되지 않습니다</span>. 이 기록이 심사에 내는 예외 승인 대장입니다.
                 <br />
                 SDK·싱크에이전트는 국가로 막지 않습니다. 해외 본사를 둔 고객사는 <span className="font-medium">회사 API · 회사 에이전트</span> 범위로 그 대역을 등록해주세요.
               </p>
@@ -5530,7 +5530,7 @@ const handleApproveRequest = async (id: string) => {
                 <input
                   value={geoForm.target}
                   onChange={(e) => setGeoForm({ ...geoForm, target: e.target.value })}
-                  placeholder={geoForm.scope === 'user' ? '대상 계정 UUID' : geoForm.scope === 'global' ? '전역 — 비워둠' : '대상 고객사 UUID'}
+                  placeholder={geoForm.scope === 'user' ? '대상 계정 UUID' : geoForm.scope === 'global' ? '전역 (비워둠)' : '대상 고객사 UUID'}
                   disabled={geoForm.scope === 'global'}
                   className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 disabled:bg-gray-50"
                 />
@@ -5604,7 +5604,7 @@ const handleApproveRequest = async (id: string) => {
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-5 py-3 border-b border-gray-100">
                 <h3 className="text-base font-semibold text-gray-900">국외 접근 이력</h3>
-                <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source — 감사 로그 (foreign_access_detected · foreign_access_blocked)</p>
+                <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 감사 로그 (foreign_access_detected · foreign_access_blocked)</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -5647,11 +5647,11 @@ const handleApproveRequest = async (id: string) => {
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <h3 className="text-base font-semibold text-gray-900">차단정보 등록</h3>
               <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                요소 <span className="font-medium">2~5개의 조합</span>으로 만듭니다. 요소가 <span className="font-medium">전부 맞을 때만</span> 걸립니다 —
+                요소 <span className="font-medium">2~5개의 조합</span>으로 만듭니다. 요소가 <span className="font-medium">전부 맞을 때만</span> 걸립니다.
                 단일 키워드는 정상 문자를 막기 때문에 등록되지 않습니다.
               </p>
               <p className="text-xs text-gray-500 mt-2 leading-relaxed">
-                이 체계는 <span className="font-medium text-gray-700">탐지만 합니다 — 발송을 막지 않습니다.</span>
+                이 체계는 <span className="font-medium text-gray-700">탐지만 합니다. 발송을 막지 않습니다.</span>
                 걸린 문안은 아래 탐지 이력에 기록되고 문자는 그대로 나갑니다.
               </p>
 
@@ -5761,7 +5761,7 @@ const handleApproveRequest = async (id: string) => {
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-5 py-3 border-b border-gray-100">
                 <h3 className="text-base font-semibold text-gray-900">탐지 이력</h3>
-                <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source — 금칙어 탐지 로그</p>
+                <p className="text-[10px] text-gray-500 mt-0.5 italic">Data source: 금칙어 탐지 로그</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -6112,7 +6112,7 @@ const handleApproveRequest = async (id: string) => {
                   <div className="px-6 py-4 border-b flex items-center justify-between">
                     <div>
                       <h3 className="text-lg font-semibold text-gray-900">크레딧 위험 회사 {creditRiskCompanies.length}건</h3>
-                      <span className="text-[11px] text-gray-400">소진 임박·0·마이너스 — 업셀/해지방어 대상</span>
+                      <span className="text-[11px] text-gray-400">소진 임박·0·마이너스: 업셀/해지방어 대상</span>
                     </div>
                     <button onClick={() => setCreditPanel(null)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
                   </div>
@@ -7184,7 +7184,7 @@ const handleApproveRequest = async (id: string) => {
               })()}
               {templateDetail.security_flag && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
-                  보안 템플릿 — 메인 디바이스(모바일) 외 서브 디바이스에는 메시지 내용이 노출되지 않습니다.
+                  보안 템플릿: 메인 디바이스(모바일) 외 서브 디바이스에는 메시지 내용이 노출되지 않습니다.
                 </div>
               )}
               {templateDetail.extra_content && (
@@ -8062,7 +8062,7 @@ const handleApproveRequest = async (id: string) => {
 
                         {(linePolicy.subscriberType === 'individual' || linePolicy.subscriberType === 'foreigner') && (
                           <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                            개인·외국인은 고시 기준값이 적용됩니다 — 무선 {linePolicy.subscriberType === 'foreigner' ? 2 : 3}회선 · 유선 5회선. 상한을 따로 지정할 수 없습니다.
+                            개인·외국인은 고시 기준값이 적용됩니다. 무선 {linePolicy.subscriberType === 'foreigner' ? 2 : 3}회선 · 유선 5회선. 상한을 따로 지정할 수 없습니다.
                           </p>
                         )}
                         {linePolicy.subscriberType === 'corporate' && linePolicy.landlineLineLimit === null && (
@@ -8279,7 +8279,7 @@ const handleApproveRequest = async (id: string) => {
                                               placeholder="미설정"
                                             />
                                             <div className="mt-0.5 text-[10px] text-emerald-700">
-                                              {empty ? <span className="text-gray-400">미설정 — 청구 차단</span> : <>VAT 포함 {fmtPrice(pv.withVat)}원</>}
+                                              {empty ? <span className="text-gray-400">미설정: 청구 차단</span> : <>VAT 포함 {fmtPrice(pv.withVat)}원</>}
                                             </div>
                                           </div>
                                         );
@@ -8359,7 +8359,7 @@ const handleApproveRequest = async (id: string) => {
                         <p className="text-sm font-semibold text-violet-900">무료체험 (베이직과 같은 기능 · 요금 0원)</p>
                         {editCompany.subscriptionStatus === 'trial' && editCompany.trialExpiresAt ? (
                           <p className="text-xs text-violet-700 mt-0.5">
-                            체험 중 — 만료: <b>{new Date(editCompany.trialExpiresAt).toLocaleString('ko-KR')}</b>
+                            체험 중 · 만료: <b>{new Date(editCompany.trialExpiresAt).toLocaleString('ko-KR')}</b>
                             {' '}
                             (D-{Math.max(0, Math.ceil((new Date(editCompany.trialExpiresAt).getTime() - Date.now()) / 86400000))})
                           </p>
@@ -8860,7 +8860,7 @@ const handleApproveRequest = async (id: string) => {
                           </div>
                           <div className="mt-2 text-[11px] font-semibold text-emerald-700">
                             {empty
-                              ? <span className="text-gray-400">미설정 — 청구서 발행이 차단됩니다</span>
+                              ? <span className="text-gray-400">미설정. 청구서 발행이 차단됩니다</span>
                               : <>VAT {fmtPrice(p.vat)}원 · <span className="text-emerald-800">VAT 포함 {fmtPrice(p.withVat)}원 차감</span></>}
                           </div>
                         </div>
@@ -8877,7 +8877,7 @@ const handleApproveRequest = async (id: string) => {
                     />
                     <span>
                       단가가 <b>비어 있는 발송ID</b>에도 이 값을 함께 적용합니다.
-                      이미 값이 있는 발송ID는 건드리지 않습니다 — 발송ID마다 계약이 다를 수 있어 자동 상속은 하지 않습니다.
+                      이미 값이 있는 발송ID는 건드리지 않습니다. 발송ID마다 계약이 다를 수 있어 자동 상속은 하지 않습니다.
                     </span>
                   </label>
 
@@ -9188,10 +9188,10 @@ const handleApproveRequest = async (id: string) => {
                             onChange={(e) => setBtSettings({ ...btSettings, manual_billing: e.target.checked })}
                             className="mt-0.5 w-4 h-4 accent-amber-600" />
                           <span className="flex-1 min-w-0">
-                            <span className="block text-sm font-semibold text-gray-800">수동 정산 회사 — 일괄발급 대상 제외</span>
+                            <span className="block text-sm font-semibold text-gray-800">수동 정산 회사: 일괄발급 대상 제외</span>
                             <span className="block text-xs text-gray-500 mt-1">
                               우리 정산으로 거래내역서를 발행할 수 없어 사람이 따로 처리하는 회사입니다. 켜두면 일괄발급 화면의
-                              [전체 담기]와 [선택 담기] 양쪽에서 이 회사가 빠집니다. 목록에서 숨기지는 않습니다 —
+                              [전체 담기]와 [선택 담기] 양쪽에서 이 회사가 빠집니다. 목록에서 숨기지는 않습니다.
                               그 달 처리 여부를 볼 수 있어야 하고, 처리했으면 그 화면에서 [수동 정산완료]를 눌러 목록에서 뺍니다.
                             </span>
                           </span>
@@ -9222,7 +9222,7 @@ const handleApproveRequest = async (id: string) => {
                             <p className="text-[11px] text-gray-400 truncate">
                               {btCompanyContact.taxbill_biz_number
                                 ? `${btCompanyContact.taxbill_company_name || ''} ${btCompanyContact.taxbill_biz_number}`.trim()
-                                : '미등록 — 비워두면 기본정보 탭의 회사 사업자정보로 발급됩니다.'}
+                                : '미등록. 비워두면 기본정보 탭의 회사 사업자정보로 발급됩니다.'}
                             </p>
                           </div>
                           <button type="button"
@@ -9242,7 +9242,7 @@ const handleApproveRequest = async (id: string) => {
                           className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
                           <option value="last_day">대상월 말일 (30일 달이면 30일, 2월이면 28·29일)</option>
                           <option value="first_day">익월 1일 (12월분은 익년 1월 1일)</option>
-                          <option value="manual">직접선택 (중간정산 등 — 발급 때마다 날짜 지정, 자동 발급 제외)</option>
+                          <option value="manual">직접선택 (중간정산 등, 발급 때마다 날짜 지정, 자동 발급 제외)</option>
                         </select>
                         {/* ★ 2026-07-28 예시 월을 글자로 적어두면 그 달에만 맞는 안내가 된다 — 현재 달 기준으로 계산해 보여준다(CT: utils/taxbillDate) */}
                         <p className="mt-2 text-xs text-indigo-600">{taxbillIssueDatePreviewText(btSettings.taxbill_day_policy as TaxbillDayPolicy)}</p>
@@ -9265,7 +9265,7 @@ const handleApproveRequest = async (id: string) => {
                       {btSettings.issue_scope === 'by_user' && (
                         <div className="rounded-lg border border-gray-200 p-4">
                           <p className="text-sm font-semibold text-gray-800 mb-1">계정별 정산 담당자</p>
-                          <p className="text-xs text-gray-500 mb-3">계정 장은 여기 등록된 이메일로 각각 발송·컨펌됩니다. 사업장이 다른 계정은 [계산서 사업자]로 별도 사업자를 등록하세요 — 미등록이면 회사 기본 사업자로 발급됩니다.</p>
+                          <p className="text-xs text-gray-500 mb-3">계정 장은 여기 등록된 이메일로 각각 발송·컨펌됩니다. 사업장이 다른 계정은 [계산서 사업자]로 별도 사업자를 등록하세요. 미등록이면 회사 기본 사업자로 발급됩니다.</p>
                           <div className="space-y-2">
                             {btAccounts.length === 0 && <p className="text-xs text-gray-400">활성 계정이 없습니다.</p>}
                             {btAccounts.map((a) => (
@@ -10922,7 +10922,7 @@ const handleApproveRequest = async (id: string) => {
                     <div className="border border-amber-200 rounded-lg bg-amber-50/40">
                       <button onClick={() => setBulkManualOpen(!bulkManualOpen)}
                         className="w-full flex items-center justify-between px-3 py-2 text-left">
-                        <span className="text-xs font-semibold text-amber-800">수동 정산완료 {bulkManualRows.length}개사 — 이 달 목록에서 빠져 있습니다</span>
+                        <span className="text-xs font-semibold text-amber-800">수동 정산완료 {bulkManualRows.length}개사: 이 달 목록에서 빠져 있습니다</span>
                         <span className="text-[11px] text-amber-700">{bulkManualOpen ? '접기' : '보기'}</span>
                       </button>
                       {bulkManualOpen && (
@@ -10943,7 +10943,7 @@ const handleApproveRequest = async (id: string) => {
                   {/* 담긴 목록 선택 빼기 — 전체 담기 뒤 몇 곳만 빼는 흐름. 행마다 [빼기] 하나로는 91건에서 쓸 수 없다 */}
                   {(bulkCombined.length + bulkByUser.length) > 0 && (
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-xs text-gray-500">담김 {bulkCombined.length + bulkByUser.length}개사 — 체크해서 한 번에 뺄 수 있습니다.</p>
+                      <p className="text-xs text-gray-500">담김 {bulkCombined.length + bulkByUser.length}개사. 체크해서 한 번에 뺄 수 있습니다.</p>
                       <div className="flex items-center gap-1.5">
                         <button onClick={() => setBulkPickedSel(
                           bulkPickedSel.length === bulkCombined.length + bulkByUser.length
@@ -11014,11 +11014,11 @@ const handleApproveRequest = async (id: string) => {
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5">
                   <h3 className="text-base font-bold text-gray-900 mb-1">수동 정산완료 ({bulkManualAsk.length}개사)</h3>
                   <p className="text-xs text-gray-500 mb-3">
-                    {bulkMonth} 대상 목록에서 이 회사들을 뺍니다. <span className="font-semibold text-gray-700">거래내역서는 만들지 않습니다</span> —
+                    {bulkMonth} 대상 목록에서 이 회사들을 뺍니다. <span className="font-semibold text-gray-700">거래내역서는 만들지 않습니다</span>.
                     금액은 시스템에 남지 않으니 어떻게 처리했는지 사유에 적어 주세요. 잘못 눌렀으면 목록에서 해제할 수 있습니다.
                   </p>
                   <textarea value={bulkManualReason} onChange={(e) => setBulkManualReason(e.target.value)} rows={3} maxLength={500}
-                    placeholder="예) 별도 양식으로 직접 청구 — 담당자 협의분"
+                    placeholder="예) 별도 양식으로 직접 청구, 담당자 협의분"
                     className="w-full px-3 py-2 border rounded-lg text-sm resize-none focus:ring-2 focus:ring-amber-500 outline-none" autoFocus />
                   <div className="flex gap-2 mt-4">
                     <button onClick={() => { setBulkManualAsk(null); setBulkManualReason(''); }} disabled={bulkManualBusy}
@@ -11086,7 +11086,7 @@ const handleApproveRequest = async (id: string) => {
                   <button onClick={() => loadConfirmBoard()} className="ml-auto text-[11px] text-slate-500 hover:underline">새로고침</button>
                 </div>
                 {confirmTruncated && (
-                  <p className="mb-2 px-2 py-1.5 bg-amber-50 text-amber-700 rounded text-[11px]">500건을 넘어 일부만 표시 중입니다 — 상태 필터로 좁혀 주세요.</p>
+                  <p className="mb-2 px-2 py-1.5 bg-amber-50 text-amber-700 rounded text-[11px]">500건을 넘어 일부만 표시 중입니다. 상태 필터로 좁혀 주세요.</p>
                 )}
                 {confirmLoading ? (
                   <p className="text-sm text-gray-400 text-center py-4">불러오는 중...</p>
@@ -11136,7 +11136,7 @@ const handleApproveRequest = async (id: string) => {
                                 {/* ★ 2026-08-21 계산서 비고(PO번호) — 같은 통보로 오는 값이라 날짜 옆 한 자리. 필수 회사는 표시·차단. */}
                                 <input type="text" value={manualRemarkDraft[r.id] || ''} maxLength={150}
                                   onChange={(e) => setManualRemarkDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                                  placeholder={r.require_taxbill_remark ? '비고(PO번호) — 필수' : '비고(PO번호 등, 선택)'}
+                                  placeholder={r.require_taxbill_remark ? '비고(PO번호), 필수' : '비고(PO번호 등, 선택)'}
                                   title="계산서 비고란에 그대로 인쇄됩니다"
                                   className={`px-1.5 py-0.5 border rounded text-[10px] w-40 ${r.require_taxbill_remark ? 'border-amber-400 bg-amber-50' : ''}`} />
                                 <button onClick={() => handleManualIssueDate(r.id, r.require_taxbill_remark === true)}
@@ -11144,7 +11144,7 @@ const handleApproveRequest = async (id: string) => {
                               </span>
                             ) : (
                               <span className="flex items-center gap-1 ml-auto">
-                                <span className="text-[10px] text-gray-400">컨펌 전 — 작성일자를 지정할 수 없습니다</span>
+                                <span className="text-[10px] text-gray-400">컨펌 전: 작성일자를 지정할 수 없습니다</span>
                                 <button onClick={() => { setAdminConfirmTarget(r); setAdminConfirmNote(''); }}
                                   title="업체가 메일·전화로 확인해 준 경우, 근거를 적고 컨펌을 대신 기록합니다."
                                   className="px-2 py-0.5 border border-sky-300 bg-sky-50 text-sky-700 rounded text-[10px] font-semibold hover:bg-sky-100">업체 확인 기록</button>
@@ -11184,7 +11184,7 @@ const handleApproveRequest = async (id: string) => {
                     ) : (
                       <>
                         {taxbillTruncated && (
-                          <p className="mb-2 px-2 py-1.5 bg-amber-50 text-amber-700 rounded text-[11px]">500건을 넘어 일부만 표시 중입니다 — 상태 필터로 좁혀 주세요.</p>
+                          <p className="mb-2 px-2 py-1.5 bg-amber-50 text-amber-700 rounded text-[11px]">500건을 넘어 일부만 표시 중입니다. 상태 필터로 좁혀 주세요.</p>
                         )}
                         <div className="max-h-72 overflow-y-auto divide-y">
                           {taxbillRows.map((t) => (
@@ -11299,7 +11299,7 @@ const handleApproveRequest = async (id: string) => {
 
                     <div className="px-3 py-2 bg-rose-50 rounded-lg text-[11px] text-rose-800">
                       이 문서는 <strong>국세청에 나가지 않았습니다.</strong> 팝빌 테스트베드에만 있습니다.
-                      같은 문서번호로 운영에 다시 발행합니다 — 테스트와 운영은 분리된 환경이라 중복이 되지 않습니다.
+                      같은 문서번호로 운영에 다시 발행합니다. 테스트와 운영은 분리된 환경이라 중복이 되지 않습니다.
                       <span className="block mt-1">발급 대기에 오르면 5분 주기 워커가 국세청으로 보냅니다. 작성일자는 그대로입니다.</span>
                     </div>
                   </div>
@@ -11841,7 +11841,7 @@ const handleApproveRequest = async (id: string) => {
                     <strong className="text-gray-700">{billingLabelText(billingLabelEffective)} 정산</strong> · {billingStart} ~ {billingEnd}
                   </p>
                   <p className="text-xs text-center text-gray-400 mb-4">
-                    {billingScope === 'company' ? '고객사 전체 (1장)' : '계정별 — 계정 장 + 공통 장 묶음'}
+                    {billingScope === 'company' ? '고객사 전체 (1장)' : '계정별: 계정 장 + 공통 장 묶음'}
                   </p>
                   {/* ★ 2026-08-04 발행 전 점검 — 발행과 같은 집계 함수(`/preview`)의 금액과 차단 사유.
                       여기서 막히는 것은 발행에서도 막힌다(서버가 같은 문으로 판정한다). */}
@@ -11918,7 +11918,7 @@ const handleApproveRequest = async (id: string) => {
                   <div className="mt-3">
                     <label className="block text-xs font-medium text-gray-500 mb-1">삭제 사유 (확정·수금·메일 발송분은 필수)</label>
                     <textarea value={deleteReason} onChange={e => setDeleteReason(e.target.value)} rows={2}
-                      placeholder="예: 단가 오설정으로 금액 오류 — 재발행 예정"
+                      placeholder="예: 단가 오설정으로 금액 오류, 재발행 예정"
                       className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-red-400 outline-none resize-none" />
                   </div>
                 </div>
@@ -12224,7 +12224,7 @@ const handleApproveRequest = async (id: string) => {
                       <p className="mb-1.5 text-[11px] text-gray-500">
                         등록된 수신자 <span className="font-medium text-gray-700">{emailDefaultTo.primary}</span>
                         {emailDefaultTo.cc.length > 0 && ` · 참조 ${emailDefaultTo.cc.length}명`}
-                        <span className="text-gray-400"> — 비워두면 이대로 발송됩니다</span>
+                        <span className="text-gray-400"> (비워두면 이대로 발송됩니다)</span>
                       </p>
                     )}
                     <input
@@ -12256,7 +12256,7 @@ const handleApproveRequest = async (id: string) => {
                       <p>안녕하세요, <strong>{emailTarget.company_name}</strong> 담당자님.</p>
                       <p><strong>{emailTarget.billing_year}년 {emailTarget.billing_month}월</strong> 정산서를 안내드립니다.</p>
                       <div className="bg-white rounded p-2 mt-2 border">
-                        <div className="text-gray-500 mb-1">청구 항목표 — 요금제 · 한줄로 · 에이전트 · 테스트 · 스팸필터 · AI 크레딧 (청구 상세와 동일)</div>
+                        <div className="text-gray-500 mb-1">청구 항목표: 요금제 · 한줄로 · 에이전트 · 테스트 · 스팸필터 · AI 크레딧 (청구 상세와 동일)</div>
                         <div className="flex justify-between"><span className="text-gray-400">공급가액</span><span>{billingFmtWon(Number(emailTarget.subtotal || 0))}</span></div>
                         <div className="flex justify-between"><span className="text-gray-400">부가세</span><span>{billingFmtWon(Number(emailTarget.vat || 0))}</span></div>
                         <div className="flex justify-between border-t pt-1 mt-1"><span className="font-bold">합계</span><span className="font-bold text-indigo-700">{billingFmtWon(Number(emailTarget.total_amount || 0))}</span></div>
@@ -12884,7 +12884,7 @@ const handleApproveRequest = async (id: string) => {
                     </div>
                   ) : (
                     <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 mb-5 text-xs text-amber-800">
-                      아직 자기 보고가 없습니다 — 구버전(v1.6.1 미만) 또는 신버전 첫 heartbeat 전입니다.
+                      아직 자기 보고가 없습니다. 구버전(v1.6.1 미만) 또는 신버전 첫 heartbeat 전입니다.
                     </div>
                   )}
 
@@ -12903,7 +12903,7 @@ const handleApproveRequest = async (id: string) => {
                             </span>
                           </div>
                         ))}
-                        <div className="text-gray-400 pt-1">{syncAgentDetail.agent?.supports_ack ? '에이전트 실행 확인(ACK) 수신 시 목록에서 사라집니다. 5회 재전달 미응답 시 실패로 만료됩니다.' : '구버전 에이전트 — 다음 heartbeat에 전달 후 목록에서 사라집니다(결과 회신 없음).'}</div>
+                        <div className="text-gray-400 pt-1">{syncAgentDetail.agent?.supports_ack ? '에이전트 실행 확인(ACK) 수신 시 목록에서 사라집니다. 5회 재전달 미응답 시 실패로 만료됩니다.' : '구버전 에이전트: 다음 heartbeat에 전달 후 목록에서 사라집니다(결과 회신 없음).'}</div>
                       </div>
                     </>
                   )}
@@ -12985,7 +12985,7 @@ const handleApproveRequest = async (id: string) => {
                             <tr className="bg-red-50/60">
                               <td colSpan={7} className="px-3 py-1.5 text-[11px] text-red-700">
                                 실패 상세: {log.failures.slice(0, 5).map((f: any, i: number) => (
-                                  <span key={i} className="mr-3 font-mono">{f.phone || '(번호 없음)'} — {f.reason || '원인 미기록'}</span>
+                                  <span key={i} className="mr-3 font-mono">{f.phone || '(번호 없음)'}: {f.reason || '원인 미기록'}</span>
                                 ))}
                                 {log.failures.length > 5 && <span className="text-red-400">외 {log.failures.length - 5}건</span>}
                               </td>
@@ -13139,7 +13139,7 @@ const handleApproveRequest = async (id: string) => {
               ) : syncMapReported ? (
                 <div className="px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 flex items-center justify-between flex-wrap gap-2">
                   <div>
-                    에이전트 보고 기준 프리필 — 보고 {syncMapReported.reportedAt ? formatDateTimeShort(syncMapReported.reportedAt) : '-'}
+                    에이전트 보고 기준 프리필: 보고 {syncMapReported.reportedAt ? formatDateTimeShort(syncMapReported.reportedAt) : '-'}
                     {' '}· 매핑 해시 <span className="font-mono">{syncMapReported.configVersion || '-'}</span>
                     {' '}· 소스 컬럼 고객 {(syncMapReported.sourceColumns?.customers || []).length}개
                     {syncMapReported.sourceColumns?.purchases ? ` / 구매 ${syncMapReported.sourceColumns.purchases.length}개` : ''}
@@ -13158,7 +13158,7 @@ const handleApproveRequest = async (id: string) => {
                 </div>
               ) : (
                 <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
-                  에이전트 보고 대기 — 현재 적용 매핑을 아직 보고하지 않았습니다(구버전 v{syncSelectedAgent.agent_version || '?'} 또는 첫 heartbeat 전).
+                  에이전트 보고 대기. 현재 적용 매핑을 아직 보고하지 않았습니다(구버전 v{syncSelectedAgent.agent_version || '?'} 또는 첫 heartbeat 전).
                   기존 매핑을 볼 수 없는 상태의 저장은 <b>매핑 전체 소실</b> 위험이 있어 차단됩니다. v1.6.1 이상 배포 후 사용해주세요.
                 </div>
               )}
@@ -13221,7 +13221,7 @@ const handleApproveRequest = async (id: string) => {
                     </div>
                   ))}
                   {syncMapCustomers.length === 0 && !syncMapReportLoading && (
-                    <p className="text-xs text-gray-400">{syncMapReported ? '보고된 고객 매핑이 없습니다 — 행 추가로 입력하세요.' : '행 추가로 매핑을 입력하세요.'}</p>
+                    <p className="text-xs text-gray-400">{syncMapReported ? '보고된 고객 매핑이 없습니다. 행 추가로 입력하세요.' : '행 추가로 매핑을 입력하세요.'}</p>
                   )}
                 </div>
               </div>
@@ -13279,10 +13279,10 @@ const handleApproveRequest = async (id: string) => {
               </div>
 
               <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
-                <div>• <b>저장은 전송한 대상의 매핑 전체를 교체</b>합니다 — 남길 매핑도 화면에 남아 있어야 합니다.</div>
+                <div>• <b>저장은 전송한 대상의 매핑 전체를 교체</b>합니다. 남길 매핑도 화면에 남아 있어야 합니다.</div>
                 <div>• 저장 시 Agent가 다음 heartbeat(최대 60분)에 매핑을 갱신하고 <b>바뀐 대상만</b> 전체 재동기화합니다.</div>
                 <div>• custom 슬롯은 라벨이 화면 표시명이 됩니다(비우면 슬롯명 표시).</div>
-                <div>• <b>미리보기(dry-run)</b>는 소스 1행에 적용한 결과만 회신하고 저장·적용하지 않습니다 — 결과는 상세의 "명령 결과"에 도착합니다.</div>
+                <div>• <b>미리보기(dry-run)</b>는 소스 1행에 적용한 결과만 회신하고 저장·적용하지 않습니다. 결과는 상세의 "명령 결과"에 도착합니다.</div>
               </div>
             </div>
 
@@ -13342,11 +13342,11 @@ const handleApproveRequest = async (id: string) => {
                   onChange={(e) => setSyncReleaseForm({ ...syncReleaseForm, tier: e.target.value })}
                   className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-violet-500 outline-none"
                 >
-                  <option value="win-legacy">win-legacy — Windows 7 · Server 2008 R2 (isae)</option>
-                  <option value="win-mid">win-mid — Windows 8.1 · Server 2012 R2</option>
-                  <option value="win-modern">win-modern — Windows 10/11 · Server 2016+</option>
-                  <option value="linux-legacy">linux-legacy — CentOS 7 · RHEL 7</option>
-                  <option value="linux-modern">linux-modern — Ubuntu 20+ · RHEL 8+</option>
+                  <option value="win-legacy">win-legacy: Windows 7 · Server 2008 R2 (isae)</option>
+                  <option value="win-mid">win-mid: Windows 8.1 · Server 2012 R2</option>
+                  <option value="win-modern">win-modern: Windows 10/11 · Server 2016+</option>
+                  <option value="linux-legacy">linux-legacy: CentOS 7 · RHEL 7</option>
+                  <option value="linux-modern">linux-modern: Ubuntu 20+ · RHEL 8+</option>
                 </select>
                 <p className="text-[11px] text-gray-400 mt-1">이 티어의 에이전트에게만 배포됩니다(다른 티어 오배포 차단).</p>
               </div>
@@ -13427,7 +13427,7 @@ const handleApproveRequest = async (id: string) => {
                         <input type="radio" name="cmdType" value="full_sync" checked={syncCommandType === 'full_sync'} onChange={() => setSyncCommandType('full_sync')} className="text-emerald-600" disabled={isPaused} />
                         <div>
                           <div className="text-sm font-medium text-gray-800">🔄 전체 동기화</div>
-                          <div className="text-xs text-gray-500">{isPaused ? '일시정지 중 — 재개 후 실행 가능' : '모든 고객/구매 데이터를 다시 동기화합니다'}</div>
+                          <div className="text-xs text-gray-500">{isPaused ? '일시정지 중: 재개 후 실행 가능' : '모든 고객/구매 데이터를 다시 동기화합니다'}</div>
                         </div>
                       </label>
                       <label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${syncCommandType === 'pause' ? 'border-orange-500 bg-orange-50' : 'hover:bg-gray-50'} ${isPaused ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>

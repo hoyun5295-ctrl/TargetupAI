@@ -158,7 +158,7 @@ export default function OneStepInterviewModal({ open, onClose, onGenerated }: {
       setResumed(!!d.resumed);
       applyProgress(d);
     } catch {
-      setError('네트워크 오류 — 다시 시도해 주세요.');
+      setError('네트워크 오류. 다시 시도해 주세요.');
     } finally {
       setLoading(false);
     }
@@ -191,7 +191,7 @@ export default function OneStepInterviewModal({ open, onClose, onGenerated }: {
       if (!r.ok) { setError(d.error || '저장하지 못했습니다.'); return; }
       applyProgress(d);
     } catch {
-      setError('네트워크 오류 — 다시 시도해 주세요.');
+      setError('네트워크 오류. 다시 시도해 주세요.');
     } finally {
       setSaving(null);
     }
@@ -205,7 +205,7 @@ export default function OneStepInterviewModal({ open, onClose, onGenerated }: {
       if (!r.ok) { setError(d.error || '견적을 내지 못했습니다.'); return; }
       setQuote(d);
     } catch {
-      setError('네트워크 오류 — 다시 시도해 주세요.');
+      setError('네트워크 오류. 다시 시도해 주세요.');
     }
   }, [sessionId]);
 
@@ -240,7 +240,7 @@ export default function OneStepInterviewModal({ open, onClose, onGenerated }: {
       //   결과물은 정상이지만 이 세션을 다시 열어도 이 결과가 나오지 않는다(편집기에서 이어서 쓰면 된다).
       onGenerated(d.data as GeneratedPayload, sessionId, !!d.sessionDetached);
     } catch {
-      setError('네트워크 오류 — 다시 시도해 주세요.');
+      setError('네트워크 오류. 다시 시도해 주세요.');
     } finally {
       setGenerating(false);
     }
@@ -555,7 +555,7 @@ export default function OneStepInterviewModal({ open, onClose, onGenerated }: {
               })}
 
               <p className="text-[10px] text-white/30 italic pt-1">
-                Data source — 답변은 저장 즉시 서버에 남아 창을 닫아도 이어할 수 있습니다. 상품·매장 정보는 연동몰과 브랜드 설정에서 가져오며, 혜택과 후기는 적어주신 내용만 그대로 사용합니다.
+                Data source: 답변은 저장 즉시 서버에 남아 창을 닫아도 이어할 수 있습니다. 상품·매장 정보는 연동몰과 브랜드 설정에서 가져오며, 혜택과 후기는 적어주신 내용만 그대로 사용합니다.
               </p>
             </>
           )}

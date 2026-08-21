@@ -32,7 +32,7 @@ router.post('/dist-alert', async (req: Request, res: Response) => {
     const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1' || ip.endsWith('127.0.0.1');
     if (!isLocal) {
       console.warn('[internal-alert] 외부 IP 차단:', ip);
-      return res.status(403).json({ error: 'Forbidden — localhost only' });
+      return res.status(403).json({ error: 'Forbidden: localhost only' });
     }
 
     // 2. 메시지 검증
@@ -51,7 +51,7 @@ router.post('/dist-alert', async (req: Request, res: Response) => {
 
     // 4. 메시지 본문 (LMS — 길이 안전)
     const ts = new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
-    const fullMsg = `[한줄로AI 시스템 알림]\n${ts}\n\n${message}\n\n— 즉시 SSH 확인 필요`;
+    const fullMsg = `[한줄로AI 시스템 알림]\n${ts}\n\n${message}\n\n즉시 SSH 확인 필요`;
 
     // 5. SMS row (msg_type='L' = LMS, title_str 필수)
     const row = [

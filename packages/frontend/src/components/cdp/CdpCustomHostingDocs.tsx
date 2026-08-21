@@ -38,7 +38,7 @@ export function CdpCustomWebhookGuide({ webhookUrl }: { webhookUrl: string }) {
 Content-Type: application/json
 X-Hanjullo-Company-Id: (이 화면의 Company ID)
 X-Hanjullo-Event: order.created          ← 아래 이벤트명 중 하나
-X-Hanjullo-Signature: (HMAC-SHA256 서명 — hex 또는 base64)
+X-Hanjullo-Signature: (HMAC-SHA256 서명, hex 또는 base64)
 
 {"event":"order.created","resource":{ ...아래 필드 }}`}</pre>
         </div>
@@ -55,7 +55,7 @@ X-Hanjullo-Signature: (HMAC-SHA256 서명 — hex 또는 base64)
           <div className="text-[11px] text-amber-200/80 mt-1.5">★ 수신동의(sms_opt_in)를 보내지 않으면 신규 고객은 발송 제외로 저장됩니다. 동의받은 회원은 반드시 true로 보내주세요.</div>
         </div>
         <div>
-          <div className="font-semibold text-white/90 mb-1">3. 서명 생성 — 전송하는 JSON 문자열 그대로(바이트 동일) 계산</div>
+          <div className="font-semibold text-white/90 mb-1">3. 서명 생성: 전송하는 JSON 문자열 그대로(바이트 동일) 계산</div>
           <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre">{`// Node.js
 const body = JSON.stringify({ event, resource });
 const signature = require('crypto')
@@ -76,14 +76,14 @@ signature = hmac.new(WEBHOOK_SECRET.encode(), body.encode(), hashlib.sha256).hex
         <div>
           <div className="font-semibold text-white/90 mb-1">4. 응답 규칙</div>
           <ul className="list-disc pl-4 space-y-0.5 text-[11px]">
-            <li>200 + success true (duplicate true 포함) = 정상 — 재전송 불필요</li>
-            <li>401 = 서명 또는 secret 불일치 — secret·서명 문자열 점검</li>
+            <li>200 + success true (duplicate true 포함) = 정상. 재전송 불필요</li>
+            <li>401 = 서명 또는 secret 불일치. secret·서명 문자열 점검</li>
             <li>429 = 이번 달 호출 한도 초과</li>
             <li>5xx 또는 네트워크 오류 = 잠시 후 재전송 권장 (중복 전송은 자동 차단됩니다)</li>
           </ul>
         </div>
       </div>
-      <div className="text-[10px] text-white/30 italic mt-3">Data source — POST /api/cdp/webhook/custom 계약</div>
+      <div className="text-[10px] text-white/30 italic mt-3">Data source: POST /api/cdp/webhook/custom 계약</div>
     </div>
   );
 }
@@ -104,7 +104,7 @@ export function CdpCustomDeliveries({ deliveries, loading, onLoad }: CdpCustomDe
       <div className="flex items-center justify-between gap-2 mb-3">
         <div className="flex items-center gap-2">
           <Activity className="w-5 h-5 text-emerald-300" />
-          <h2 className="text-base font-bold text-white">연결 검증 — 최근 수신</h2>
+          <h2 className="text-base font-bold text-white">연결 검증: 최근 수신</h2>
         </div>
         <button onClick={onLoad} disabled={loading} className="px-3.5 py-2 rounded-lg bg-emerald-500/20 border border-emerald-400/30 hover:bg-emerald-500/30 text-emerald-100 text-[12px] font-medium disabled:opacity-40 flex items-center gap-1.5">
           {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} 최근 수신 확인
@@ -125,11 +125,11 @@ export function CdpCustomDeliveries({ deliveries, loading, onLoad }: CdpCustomDe
             </div>
           ))}
           {deliveries.some((d) => d.errorMessage) && (
-            <div className="text-[10px] text-rose-300/80 mt-1">failed 항목은 처리 오류 — 이벤트·resource 필드 점검</div>
+            <div className="text-[10px] text-rose-300/80 mt-1">failed 항목은 처리 오류. 이벤트·resource 필드 점검</div>
           )}
         </div>
       )}
-      <div className="text-[10px] text-white/30 italic mt-3">Data source — GET /api/cdp/custom/deliveries</div>
+      <div className="text-[10px] text-white/30 italic mt-3">Data source: GET /api/cdp/custom/deliveries</div>
     </div>
   );
 }
@@ -146,7 +146,7 @@ export function CdpCustomAppGuide() {
         <h2 className="text-base font-bold text-white">네이티브 앱 (REST 직접 호출)</h2>
       </div>
       <div className="text-xs text-white/60 leading-relaxed mb-3">
-        웹뷰가 아닌 순수 네이티브 앱(iOS/Android)은 공개키(<span className="font-mono">hjl_</span>)로 이벤트·인앱을 직접 호출합니다. <strong className="text-white/90">secret(<span className="font-mono">sk_</span>)은 앱에 넣지 마세요</strong> — 회원/주문 적재는 고객사 서버에서 호출합니다(브라우저와 동일 원칙).
+        웹뷰가 아닌 순수 네이티브 앱(iOS/Android)은 공개키(<span className="font-mono">hjl_</span>)로 이벤트·인앱을 직접 호출합니다. <strong className="text-white/90">secret(<span className="font-mono">sk_</span>)은 앱에 넣지 마세요</strong>. 회원/주문 적재는 고객사 서버에서 호출합니다(브라우저와 동일 원칙).
       </div>
       <div className="space-y-3 text-xs text-white/70">
         <div>
@@ -178,7 +178,7 @@ val req = Request.Builder().url("https://app.hanjul.ai/api/cdp/ingest")
 client.newCall(req).execute()`}</pre>
         </div>
       </div>
-      <div className="text-[10px] text-white/30 italic mt-3">Data source — /api/cdp/ingest · /api/cdp/inapp/active (공개키)</div>
+      <div className="text-[10px] text-white/30 italic mt-3">Data source: /api/cdp/ingest · /api/cdp/inapp/active (공개키)</div>
     </div>
   );
 }

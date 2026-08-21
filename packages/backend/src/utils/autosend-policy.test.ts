@@ -302,7 +302,7 @@ describe('applyBenefitToBody — 혜택 placeholder 치환 (생성·발송 두 �
   it('[혜택 ...] 대괄호 placeholder를 관리자 입력값으로 전부 치환한다', async () => {
     const { applyBenefitToBody } = await import('./autosend-policy');
     const out = applyBenefitToBody(
-      '안녕하세요. [혜택 내용을 입력해주세요] 이번 달 준비했습니다. [혜택 안내 — 직접 작성해주세요]',
+      '안녕하세요. [혜택 내용을 입력해주세요] 이번 달 준비했습니다. [혜택 안내: 직접 작성해주세요]',
       '아메리카노 1잔 증정',
     );
     expect(out).toBe('안녕하세요. 아메리카노 1잔 증정 이번 달 준비했습니다. 아메리카노 1잔 증정');
@@ -326,7 +326,7 @@ describe('hasUneditedBenefitPlaceholder — 발송 출구 가드 검출', () => 
   it('[혜택 대괄호·직접 입력/작성해주세요 잔존 = true', async () => {
     const { hasUneditedBenefitPlaceholder } = await import('./autosend-policy');
     expect(hasUneditedBenefitPlaceholder('본문 [혜택 내용을 입력해주세요]')).toBe(true);
-    expect(hasUneditedBenefitPlaceholder('본문 [혜택 안내 — 직접 작성해주세요]')).toBe(true);
+    expect(hasUneditedBenefitPlaceholder('본문 [혜택 안내: 직접 작성해주세요]')).toBe(true);
     expect(hasUneditedBenefitPlaceholder('혜택을 직접 입력해주세요 라고 남음')).toBe(true);
   });
 

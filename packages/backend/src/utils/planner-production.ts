@@ -78,7 +78,7 @@ async function produceEmail(tp: PlannerTouchpointRow, userId: string): Promise<P
   // ⛔ 혜택 미입력 출구 가드를 **제작 단계에서** 본다. 발송 엔진에도 같은 가드가 있지만(마지막 방어선),
   //   거기서 걸리면 예정일마다 실패를 되풀이한다. 여기서 잠그면 담당자가 혜택을 채워 [다시 시작]할 수 있다.
   if (hasUneditedPlaceholder(subject, html)) {
-    throw new Error('직접 입력이 필요한 자리(혜택 등)가 남아 소재를 완성하지 못했습니다 — 행사 혜택 칸을 채운 뒤 다시 시작해 주세요.');
+    throw new Error('직접 입력이 필요한 자리(혜택 등)가 남아 소재를 완성하지 못했습니다. 행사 혜택 칸을 채운 뒤 다시 시작해 주세요.');
   }
   const campaign = await createEmailCampaign({
     companyId: tp.companyId,

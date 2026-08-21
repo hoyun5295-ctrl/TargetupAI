@@ -43,14 +43,14 @@ const TYPE_OPTIONS: Array<{ type: MemoryType; label: string; placeholder: string
     type: 'brand_tone_evolution',
     label: '브랜드 톤 진화',
     placeholder: '예: 이모지 사용 자제 정책',
-    valuePlaceholder: '예: 2026-Q1부터 이모지 사용 자제 — 전문성 우선. 느낌표는 1개 이내.',
+    valuePlaceholder: '예: 2026-Q1부터 이모지 사용 자제. 전문성 우선. 느낌표는 1개 이내.',
     gradient: 'from-violet-400 to-purple-500',
   },
   {
     type: 'compliance_learning',
     label: '컴플라이언스 학습',
     placeholder: '예: 광고 차단 단어 대체',
-    valuePlaceholder: '예: "특가" 단어 광고 차단 6건 발생 — "한정 혜택"으로 대체 적용 후 차단 0건',
+    valuePlaceholder: '예: "특가" 단어 광고 차단 6건 발생. "한정 혜택"으로 대체 적용 후 차단 0건',
     gradient: 'from-rose-400 to-pink-500',
   },
   {
@@ -64,7 +64,7 @@ const TYPE_OPTIONS: Array<{ type: MemoryType; label: string; placeholder: string
     type: 'channel_performance',
     label: '채널 성과',
     placeholder: '예: LMS vs SMS 비교',
-    valuePlaceholder: '예: LMS 평균 클릭률 7.4% > SMS 평균 5.2% — 30일 기준 (1,200건 발송)',
+    valuePlaceholder: '예: LMS 평균 클릭률 7.4% > SMS 평균 5.2%, 30일 기준 (1,200건 발송)',
     gradient: 'from-amber-400 to-orange-500',
   },
 ];

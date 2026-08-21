@@ -23,12 +23,12 @@ export function normalizeEventText(raw: any): string {
 export function buildEventPromptBlock(eventText: string): string {
   const t = normalizeEventText(eventText);
   if (!t) return '';
-  return `[행사 내용 — 사용자가 직접 입력한 사실. 이 캠페인은 아래 행사를 알리는 것]
+  return `[행사 내용: 사용자가 직접 입력한 사실. 이 캠페인은 아래 행사를 알리는 것]
 ${t}
 
-[행사 내용 사용 규칙 — 절대 준수]
+[행사 내용 사용 규칙: 절대 준수]
 - 행사명·기간·대상·조건은 위 원문에 적힌 것만 사용 (원문에 없는 사실 지어내기 금지)
-- 혜택(%·원·쿠폰·무료·사은품 등)은 위 원문에 적힌 표현만 원문 그대로 인용 — 원문에 혜택이 없으면 혜택 자리는 기존 placeholder 규칙을 따른다
+- 혜택(%·원·쿠폰·무료·사은품 등)은 위 원문에 적힌 표현만 원문 그대로 인용. 원문에 혜택이 없으면 혜택 자리는 기존 placeholder 규칙을 따른다
 - 원문에 기간이 있으면 마감 임박감을, 대상이 있으면 그 대상에게 말 걸듯 반영`;
 }
 
@@ -328,7 +328,7 @@ export function computeBriefCoverage(brief: EventBrief, contentText: string): { 
     // ★ Codex 1R — 적용 조건(target)까지 반영돼야 커버 (조건 없는 혜택 확대 표시 차단)
     const contentOk = benefitMatchesEventText(b.content, contentText);
     const targetOk = !b.target || textContainsNormalized(contentText, b.target);
-    if (!contentOk || !targetOk) missing.push({ kind: 'benefit', label: (b.target ? `${b.target} — ${b.content}` : b.content).slice(0, 60) });
+    if (!contentOk || !targetOk) missing.push({ kind: 'benefit', label: (b.target ? `${b.target}: ${b.content}` : b.content).slice(0, 60) });
   }
   for (const p of brief.products) {
     if (!nameTokensCovered(p.name, contentText)) missing.push({ kind: 'product', label: p.name });
@@ -350,7 +350,7 @@ export function computeBriefCoverage(brief: EventBrief, contentText: string): { 
 const EVENT_BRIEF_SYSTEM = `당신은 행사 원문을 구조화하는 파서입니다. 원문에 적힌 사실만 추출하고, 없는 항목은 null 또는 빈 배열로 둡니다. 창작 절대 금지.
 
 규칙:
-- event_name = 행사 이름 (원문 표기 그대로. 명시가 없으면 null — 지어내지 않는다)
+- event_name = 행사 이름 (원문 표기 그대로. 명시가 없으면 null, 지어내지 않는다)
 - period_raw = 기간 표현 원문 그대로 ("이번 주말까지", "7/20~7/27" 등. 없으면 null)
 - period_end = 기간 종료일 YYYY-MM-DD (period_raw가 상대 표현이면 현재 한국 시각 기준 계산. period_raw가 null이면 null)
 - place = 장소·채널 (원문 표기. 없으면 null)
@@ -358,7 +358,7 @@ const EVENT_BRIEF_SYSTEM = `당신은 행사 원문을 구조화하는 파서입
 - tone_hint = 원문이 풍기는 톤 힌트 한 단어 (예: premium/urgent/friendly. 모호하면 null)
 - benefits = 혜택 목록. content는 원문 표기 그대로(수치·조건 포함), target은 적용 대상·조건(원문 표기, 없으면 null). 상품 개별 할인가는 products에 담고 benefits에는 상품 외 혜택(증정·쿠폰·배송 등)을 담는다
 - notices = 유의사항·안내 문장 (원문 표기 그대로, 문장 단위. 없으면 빈 배열)
-- products = 상품 목록: name(원문 표기, 앞뒤 라벨 정리만 허용) · price(정가 — 원문 숫자 그대로 콤마 제거 정수) · discount_price(할인가, 원문에 있을 때만) · discount_rate(할인율 %, 원문에 있을 때만) · link_url(그 상품 블록의 URL 원문 글자 그대로 — 창작·축약·변형 금지, 없으면 생략). 가격 없는 상품·상품 없는 원문 = 빈 배열
+- products = 상품 목록: name(원문 표기, 앞뒤 라벨 정리만 허용) · price(정가, 원문 숫자 그대로 콤마 제거 정수) · discount_price(할인가, 원문에 있을 때만) · discount_rate(할인율 %, 원문에 있을 때만) · link_url(그 상품 블록의 URL 원문 글자 그대로, 창작·축약·변형 금지, 없으면 생략). 가격 없는 상품·상품 없는 원문 = 빈 배열
 
 JSON만 출력:
 { "event_name": null, "period_raw": null, "period_end": null, "place": null, "brand": null, "tone_hint": null,

@@ -119,7 +119,7 @@ export default function DmShortLinkModal({ open, onClose }: Props) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '상태 변경에 실패했습니다.');
       setLinks((prev) => prev.map((l) => (l.id === link.id ? data.link : l)));
-      toast.info(data.link.isActive ? '링크를 다시 활성화했습니다.' : '링크를 비활성화했습니다 — 접속 시 서비스 홈으로 이동합니다.');
+      toast.info(data.link.isActive ? '링크를 다시 활성화했습니다.' : '링크를 비활성화했습니다. 접속 시 서비스 홈으로 이동합니다.');
     } catch (e: any) {
       toast.error(e?.message || '상태 변경에 실패했습니다.');
     } finally {
@@ -141,7 +141,7 @@ export default function DmShortLinkModal({ open, onClose }: Props) {
               </div>
               <div className="min-w-0">
                 <h3 className="text-white font-bold text-base">단축 URL 만들기</h3>
-                <p className="text-xs text-white/50 mt-0.5">내가 만든 페이지 주소를 hlj.kr 짧은 주소로 — 클릭 수까지 집계</p>
+                <p className="text-xs text-white/50 mt-0.5">내가 만든 페이지 주소를 hlj.kr 짧은 주소로, 클릭 수까지 집계</p>
               </div>
             </div>
             <button type="button" onClick={onClose} className="text-white/50 hover:text-white p-1.5 hover:bg-white/5 rounded transition-colors shrink-0" aria-label="닫기">
@@ -163,7 +163,7 @@ export default function DmShortLinkModal({ open, onClose }: Props) {
                 />
               </div>
               <div>
-                <label className="text-xs text-white/60 font-medium mb-1.5 block">이름 (선택 — 목록 구분용)</label>
+                <label className="text-xs text-white/60 font-medium mb-1.5 block">이름 (선택, 목록 구분용)</label>
                 <input
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
@@ -249,7 +249,7 @@ export default function DmShortLinkModal({ open, onClose }: Props) {
 
           {/* 푸터 */}
           <div className="px-5 py-3 border-t border-white/10 shrink-0">
-            <div className="text-[10px] text-white/30 italic">Data source — dm_custom_short_links 실시간 · 발급 1건 = 100크레딧 · 비활성 시 접속은 서비스 홈으로 이동</div>
+            <div className="text-[10px] text-white/30 italic">Data source: dm_custom_short_links 실시간 · 발급 1건 = 100크레딧 · 비활성 시 접속은 서비스 홈으로 이동</div>
           </div>
         </div>
       </div>

@@ -62,7 +62,7 @@ export default function SendConfirmModal({
         : <CalendarClock size={18} strokeWidth={1.9} className="text-white" />}
       title={immediate ? '지금 바로 발송합니다' : '예약 발송으로 등록합니다'}
       subtitle={immediate
-        ? '누르는 즉시 발송 큐에 들어갑니다 — 발송 후에는 회수할 수 없습니다.'
+        ? '누르는 즉시 발송 큐에 들어갑니다. 발송 후에는 회수할 수 없습니다.'
         : '지정한 시각에 자동으로 나갑니다.'}
       cancelLabel="취소"
       onCancel={() => setSendConfirm({ show: false, type: 'immediate', count: 0, unsubscribeCount: 0 })}

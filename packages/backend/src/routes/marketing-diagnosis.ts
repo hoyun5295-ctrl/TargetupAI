@@ -39,7 +39,7 @@ function activeSetMissing(res: Response) {
   return res.status(503).json({
     success: false,
     code: 'DB_MIGRATION_PENDING',
-    error: 'DB 마이그레이션 필요 — diagnosis_question_sets 활성 문항 세트(seed) 실행 요청',
+    error: 'DB 마이그레이션 필요: diagnosis_question_sets 활성 문항 세트(seed) 실행 요청',
   });
 }
 

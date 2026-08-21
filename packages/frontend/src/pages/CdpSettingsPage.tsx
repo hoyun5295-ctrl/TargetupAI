@@ -125,12 +125,12 @@ interface CustomIssuedSecret {
 type ProviderKey = 'cafe24' | 'naver' | 'godo' | 'imweb' | 'makeshop' | 'custom';
 
 const PROVIDER_CARDS: Array<{ key: ProviderKey; name: string; desc: string; full?: boolean }> = [
-  { key: 'cafe24', name: '카페24', desc: 'OAuth 자동 연동 — 코딩 없이 회원·주문 동기화' },
-  { key: 'naver', name: '네이버 스마트스토어', desc: '커머스 API — 주문·구매고객 동기화' },
-  { key: 'godo', name: '고도몰', desc: '쇼핑몰 인증키 입력 — 주문·고객 자동 동기화' },
-  { key: 'imweb', name: '아임웹', desc: 'OAuth 자동 연동 — 회원·주문·수신동의 동기화' },
-  { key: 'makeshop', name: '메이크샵', desc: '커머스 API — 회원·주문·SMS수신동의 동기화' },
-  { key: 'custom', name: '자체 호스팅 / 그 외 자사몰', desc: '직접 개발했거나 목록에 없는 자사몰 — webhook 방식', full: true },
+  { key: 'cafe24', name: '카페24', desc: 'OAuth 자동 연동: 코딩 없이 회원·주문 동기화' },
+  { key: 'naver', name: '네이버 스마트스토어', desc: '커머스 API: 주문·구매고객 동기화' },
+  { key: 'godo', name: '고도몰', desc: '쇼핑몰 인증키 입력: 주문·고객 자동 동기화' },
+  { key: 'imweb', name: '아임웹', desc: 'OAuth 자동 연동: 회원·주문·수신동의 동기화' },
+  { key: 'makeshop', name: '메이크샵', desc: '커머스 API: 회원·주문·SMS수신동의 동기화' },
+  { key: 'custom', name: '자체 호스팅 / 그 외 자사몰', desc: '직접 개발했거나 목록에 없는 자사몰: webhook 방식', full: true },
 ];
 
 // 네이버 API 그룹·메이크샵 권한 목록은 그 폼과 함께 CdpConnectForms로 옮겼다(★2026-08-10 Phase 5-3).
@@ -309,7 +309,7 @@ export default function CdpSettingsPage() {
       .map((e) => ({
         key: e.provider,
         name: e.displayName,
-        desc: '곧 출시 예정 — 현재는 자체 호스팅(webhook) 방식으로 연동할 수 있습니다.',
+        desc: '곧 출시 예정. 현재는 자체 호스팅(webhook) 방식으로 연동할 수 있습니다.',
         available: e.status === 'available',
         modalKey: null,
       }));
@@ -562,7 +562,7 @@ export default function CdpSettingsPage() {
       const data = await res.json();
       if (data.success) {
         setIssuedSecret(data);
-        toast.success('CDP 키 발급 완료 — Secret을 즉시 저장해주세요.');
+        toast.success('CDP 키 발급 완료. Secret을 즉시 저장해주세요.');
         await loadAll();
       } else { toast.error(data.error || '키 발급 실패'); }
     } catch (e: any) { toast.error(e?.message || '키 발급 처리 오류'); }
@@ -675,7 +675,7 @@ export default function CdpSettingsPage() {
       const res = await fetch('/api/naver-commerce/orders/preview?hours=24', { headers: { Authorization: `Bearer ${token()}` } });
       const data = await res.json();
       if (data.success) {
-        toast.success(`최근 24시간 변경 주문 ${Number(data.idCount || 0).toLocaleString()}건 확인 — 연동 정상`);
+        toast.success(`최근 24시간 변경 주문 ${Number(data.idCount || 0).toLocaleString()}건 확인 (연동 정상)`);
       } else {
         toast.error(data.error || '주문 데이터 확인 실패');
       }
@@ -727,7 +727,7 @@ export default function CdpSettingsPage() {
     try {
       const res = await fetch('/api/makeshop/preview?days=30', { headers: { Authorization: `Bearer ${token()}` } });
       const data = await res.json();
-      if (data.success) toast.success('메이크샵 회원·주문 데이터 확인 완료 — 연동 정상');
+      if (data.success) toast.success('메이크샵 회원·주문 데이터 확인 완료 (연동 정상)');
       else toast.error(data.error || '데이터 확인 실패');
     } catch (e: any) { toast.error(e?.message || '데이터 확인 오류'); }
     finally { setMakeshopPreviewing(false); }
@@ -839,7 +839,7 @@ export default function CdpSettingsPage() {
       const data = await res.json();
       if (data.success) {
         setCustomIssuedSecret(data);
-        toast.success('Webhook Secret 발급 완료 — 즉시 저장해주세요.');
+        toast.success('Webhook Secret 발급 완료. 즉시 저장해주세요.');
         await loadAll();
       } else { toast.error(data.error || 'webhook_secret 발급 실패'); }
     } catch (e: any) { toast.error(e?.message || 'webhook_secret 발급 오류'); }
@@ -878,7 +878,7 @@ export default function CdpSettingsPage() {
     try {
       await navigator.clipboard.writeText(text);
       toast.success(`${label} 복사 완료`);
-    } catch { toast.error('복사 실패 — 브라우저 권한 확인 필요'); }
+    } catch { toast.error('복사 실패. 브라우저 권한 확인 필요'); }
   };
   const copy = async (text: string, target: 'key' | 'secret') => {
     try { await navigator.clipboard.writeText(text); setCopyStatus(target); setTimeout(() => setCopyStatus('idle'), 1500); }
@@ -925,7 +925,7 @@ export default function CdpSettingsPage() {
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl md:text-2xl font-semibold text-white">자사몰 연동 (CDP)</h1>
             </div>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5">카페24 · 네이버 · 메이크샵 · 고도몰 · 아임웹 · 자체 호스팅 · 싱크에이전트 — 고객 데이터를 한 곳으로 모읍니다</p>
+            <p className="text-xs md:text-sm text-white/50 mt-0.5">카페24 · 네이버 · 메이크샵 · 고도몰 · 아임웹 · 자체 호스팅 · 싱크에이전트: 고객 데이터를 한 곳으로 모읍니다</p>
           </div>
           <button onClick={loadAll} disabled={loading} className="p-2 rounded-lg hover:bg-white/10 transition-colors" title="새로고침">
             <RefreshCw className={`w-4 h-4 text-white/60 ${loading ? 'animate-spin' : ''}`} />
@@ -1182,7 +1182,7 @@ export default function CdpSettingsPage() {
                   <SecretRow label="Company ID" value={customIssuedSecret.company_id} copied={copyStatusCustom === 'companyId'} onCopy={() => copyCustom(customIssuedSecret.company_id, 'companyId')} />
                 </div>
                 <button onClick={() => setCustomIssuedSecret(null)} className="mt-4 px-4 py-2 bg-emerald-500/20 border border-emerald-400/40 hover:bg-emerald-500/30 text-emerald-200 text-sm font-medium rounded-lg">
-                  확인 — secret 저장 완료
+                  확인 · secret 저장 완료
                 </button>
               </div>
             )}
@@ -1238,11 +1238,11 @@ export default function CdpSettingsPage() {
             단일 소스 = components/inapp/AppIntegrationContract.tsx (편집기 앱 채널 모달과 동일 내용) */}
         {webhookProviderOpen && customInfo?.hasSecret && customTab === 'app' && (
           <CdpDeveloperDoc
-            title="인앱 메시지 — 앱이 구현해야 하는 계약"
+            title="인앱 메시지: 앱이 구현해야 하는 계약"
             summary="네이티브 앱은 인앱 메시지를 앱이 직접 그립니다. 아래 내용을 앱 개발자에게 전달하면, 이후 편집기에서 만드는 메시지가 앱 수정 없이 동작합니다."
             sections={APP_INAPP_CONTRACT_SECTIONS}
             onCopyAll={() => copyText(
-              developerDocToText('인앱 메시지 — 앱이 구현해야 하는 계약', APP_INAPP_CONTRACT_SECTIONS),
+              developerDocToText('인앱 메시지: 앱이 구현해야 하는 계약', APP_INAPP_CONTRACT_SECTIONS),
               '앱 인앱 메시지 계약',
             )}
           />
@@ -1371,7 +1371,7 @@ export default function CdpSettingsPage() {
                 <SecretRow label="Public Key (X-Hanjullo-Key)" value={issuedSecret.cdp_api_key} copied={copyStatus === 'key'} onCopy={() => copy(issuedSecret.cdp_api_key, 'key')} />
                 <SecretRow label="Secret Key (X-Hanjullo-Secret) ★ 1회 노출" value={issuedSecret.cdp_api_secret} copied={copyStatus === 'secret'} onCopy={() => copy(issuedSecret.cdp_api_secret, 'secret')} danger />
                 <button onClick={() => setIssuedSecret(null)} className="px-4 py-2 bg-emerald-500/20 border border-emerald-400/40 hover:bg-emerald-500/30 text-emerald-200 text-sm font-medium rounded-lg">
-                  확인 — 키 저장 완료
+                  확인 · 키 저장 완료
                 </button>
               </div>
             ) : (
@@ -1445,7 +1445,7 @@ export default function CdpSettingsPage() {
             ) : (
               <div className="text-xs text-white/40">등록된 도메인이 없습니다. 자사몰 도메인을 추가해주세요.</div>
             )}
-            <div className="text-[10px] text-white/30 italic mt-2">Data source — companies.cdp_allowed_origins</div>
+            <div className="text-[10px] text-white/30 italic mt-2">Data source: companies.cdp_allowed_origins</div>
           </div>
         )}
 
@@ -1489,7 +1489,7 @@ export default function CdpSettingsPage() {
             ) : (
               <div className="text-xs text-white/40">등록된 앱이 없습니다. 앱 번들ID를 추가해주세요.</div>
             )}
-            <div className="text-[10px] text-white/30 italic mt-2">Data source — companies.cdp_allowed_app_ids</div>
+            <div className="text-[10px] text-white/30 italic mt-2">Data source: companies.cdp_allowed_app_ids</div>
           </div>
         )}
 
@@ -1523,7 +1523,7 @@ export default function CdpSettingsPage() {
               ]}
               onCopy={copyText}
             />
-            <div className="text-[10px] text-white/30 italic mt-3">Data source — app.hanjul.ai/sdk/{CDP_SDK_VERSION}</div>
+            <div className="text-[10px] text-white/30 italic mt-3">Data source: app.hanjul.ai/sdk/{CDP_SDK_VERSION}</div>
           </div>
         )}
 

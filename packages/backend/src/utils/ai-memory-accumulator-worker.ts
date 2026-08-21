@@ -411,7 +411,7 @@ async function accumulateAvoidPatterns(): Promise<number> {
         companyId: row.company_id,
         memoryType: 'brand_tone_evolution',
         memoryKey: 'avoid_patterns',
-        memoryValue: `담당자가 거부한 제안들의 공통 패턴 — 새 문안에서 피할 것: ${donts.join(' / ')}`,
+        memoryValue: `담당자가 거부한 제안들의 공통 패턴: 새 문안에서 피할 것: ${donts.join(' / ')}`,
         importance: 7,
         source: 'reject_distill',
         metadata: { sample_count: texts.length, rejected_30d: Number(row.cnt) || 0 },

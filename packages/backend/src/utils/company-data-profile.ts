@@ -301,7 +301,7 @@ export function formatProfileForAiPrompt(
   const style = opts?.variableStyle || 'liquid';
 
   if (profile.totalCustomers === 0) {
-    return `[★ ★ ★ 회사 실측 데이터 매트릭스 — 절대 준수 ★ ★ ★]
+    return `[★ ★ ★ 회사 실측 데이터 매트릭스: 절대 준수 ★ ★ ★]
 - 현재 회사 customer DB = 0건 (cold start)
 - 개인화 변수 절대 사용 금지 (${style === 'liquid' ? "Liquid {{ customer.X }} 또는 %변수%" : '%변수% 형태'} 어디에도 사용 X)
 - 모두에게 동일한 일반 안내 본문만 작성 의무
@@ -315,9 +315,9 @@ export function formatProfileForAiPrompt(
   const formatConditionalField = (f: FieldProfile) =>
     style === 'liquid'
       ? `  - {{ customer.${f.field} }} 또는 %${f.percentVar}% (${f.label}, ${f.fillRate}% 채워짐)`
-      : `  - %${f.percentVar}% (${f.label}, ${f.fillRate}% 채워짐 — 값이 비어 있는 고객 존재)`;
+      : `  - %${f.percentVar}% (${f.label}, ${f.fillRate}% 채워짐, 값이 비어 있는 고객 존재)`;
   const formatBlockedField = (f: FieldProfile) =>
-    `  - ${f.label} (${f.fillRate}% 채워짐 — 데이터 부족)`;
+    `  - ${f.label} (${f.fillRate}% 채워짐, 데이터 부족)`;
 
   // ★ D210+ Phase 2-fix3 (Harold 명시 2026-05-23): 안전 변수 사용 의무 강화.
   //   옛 사고 영역 = AI 응답 본문 안 변수 활용 X 사고 (Harold 검증 발견).
@@ -325,36 +325,36 @@ export function formatProfileForAiPrompt(
   //   본 fix = "1~3개 자연 활용 의무 + 구체 예시 + 변수 0건 사고 차단" 명령 강화.
   const safeExamples = profile.safeFields.slice(0, 3).map((f) => `"%${f.percentVar}%"`).join(' / ');
 
-  return `[★ ★ ★ 회사 실측 데이터 활용 매트릭스 — 절대 준수 ★ ★ ★]
+  return `[★ ★ ★ 회사 실측 데이터 활용 매트릭스: 절대 준수 ★ ★ ★]
 회사 customer DB 총 ${profile.totalCustomers.toLocaleString()}건 분석 결과.
 아래 매트릭스 외 변수 임의 작성 시 발송 시점 자동 차단됩니다.
 
-[★ ★ ★ 안전 변수 — 본문 안 1~3개 자연 활용 의무 ★ ★ ★]
+[★ ★ ★ 안전 변수: 본문 안 1~3개 자연 활용 의무 ★ ★ ★]
 ※ 아래 변수는 회사 customer DB 70% 이상 채워짐 = 발송 시점 100% 안전.
 ※ AI 응답 본문(message_text) 안 = 본 매트릭스 안 1~3개 변수 자연 활용 의무.
 ※ 활용 예시: "${safeExamples || '%고객명%'}님 안녕하세요" / "%고객명%님, %고객등급% 회원 전용 안내드려요" / "오랜만이에요 %고객명%님".
-※ ⚠️ 변수 활용 0건 응답 절대 금지 — 일반 안내만 작성 시 사고. 반드시 위 안전 변수에서 1~3개 본문 안에 자연스럽게 포함.
+※ ⚠️ 변수 활용 0건 응답 절대 금지. 일반 안내만 작성 시 사고. 반드시 위 안전 변수에서 1~3개 본문 안에 자연스럽게 포함.
 ※ ⚠️ 3개 안(A/B/C) 모두 동일 안전 변수 자연 활용 의무 (한 안만 변수 활용 + 나머지 일반 안내 금지).
 
-${profile.safeFields.length > 0 ? profile.safeFields.map(formatSafeField).join('\n') : '  (해당 영역 없음 — 안전 변수가 없으므로 변수 사용 신중)'}
+${profile.safeFields.length > 0 ? profile.safeFields.map(formatSafeField).join('\n') : '  (해당 영역 없음, 안전 변수가 없으므로 변수 사용 신중)'}
 
 ${style === 'liquid'
-  ? `[분기 변수 — Liquid fallback 의무 (30~70% 채워짐)]
+  ? `[분기 변수: Liquid fallback 의무 (30~70% 채워짐)]
 ${profile.conditionalFields.length > 0
     ? profile.conditionalFields.map(formatConditionalField).join('\n') +
       `\n  → 사용 시 다음 패턴 의무:\n` +
       `     {{ customer.X | default: '고객' }}   (값 없으면 자동 대체)\n` +
       `     {% if customer.X %}...{% else %}...{% endif %}   (조건 분기)`
     : '  (해당 영역 없음)'}`
-  : `[주의 변수 — 값이 비어 있을 수 있음 (30~70% 채워짐)]
+  : `[주의 변수: 값이 비어 있을 수 있음 (30~70% 채워짐)]
 ${profile.conditionalFields.length > 0
     ? profile.conditionalFields.map(formatConditionalField).join('\n') +
       `\n  → 이 변수들은 값이 없는 고객이 있으므로, 확신이 없으면 위 안전 변수만 사용하세요.\n` +
       `  → 사용한다면 값이 비어도 문장이 자연스럽게 읽히도록 구성하세요.`
     : '  (해당 영역 없음)'}
-※ ⚠️ 이 문안 형식에서는 Liquid 등 템플릿 문법(중괄호 표기·조건 분기 태그) 절대 사용 금지 — 개인화는 %변수% 형태만 허용됩니다.`}
+※ ⚠️ 이 문안 형식에서는 Liquid 등 템플릿 문법(중괄호 표기·조건 분기 태그) 절대 사용 금지. 개인화는 %변수% 형태만 허용됩니다.`}
 
-[차단 변수 — 절대 사용 금지 (30% 미만 채워짐 — 데이터 부족)]
+[차단 변수: 절대 사용 금지 (30% 미만 채워짐, 데이터 부족)]
 ${profile.blockedFields.length > 0 ? profile.blockedFields.map(formatBlockedField).join('\n') : '  (해당 영역 없음)'}
 `;
 }

@@ -51,7 +51,7 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
     ? '저장 중...'
     : isDirty
     // ★ 2026-07-14 발행 DM은 저장해야 URL 반영(임은지) — 미저장 상태를 명확히 안내
-    ? (isPublished ? '변경사항 있음 — 저장해야 URL 반영' : '변경사항 있음')
+    ? (isPublished ? '변경사항 있음: 저장해야 URL 반영' : '변경사항 있음')
     : lastSavedAt
     ? `${new Date(lastSavedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 저장됨`
     : '';
@@ -165,7 +165,7 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
 
       {/* ★ 초안은 전역 자동저장 — 발행 DM만 명시 저장 유지(자동저장이 라이브 URL을 덮지 않게 차단돼 있어 저장 경로 필수) */}
       {isPublished && (
-        <button onClick={() => save()} disabled={isSaving} style={btnStyle('secondary')} title="저장 — 라이브 URL에 반영">
+        <button onClick={() => save()} disabled={isSaving} style={btnStyle('secondary')} title="저장: 라이브 URL에 반영">
           💾 저장
         </button>
       )}
@@ -187,7 +187,7 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
         style={{ ...btnStyle('primary'), ...(isStopped ? { opacity: 0.5, cursor: 'not-allowed' } : {}) }}
         title={isStopped
           ? '중지된 DM이에요. 목록에서 [재개] 후 발송할 수 있어요.'
-          : isPublished ? '타겟 고객에게 발송 (발행 완료 — 추가 과금 없음)' : canPublish ? '발행 — 자동 검수 후 진행 (100크레딧, DM당 1회)' : '발행 — 자동 검수를 다시 실행합니다'}
+          : isPublished ? '타겟 고객에게 발송 (발행 완료, 추가 과금 없음)' : canPublish ? '발행: 자동 검수 후 진행 (100크레딧, DM당 1회)' : '발행: 자동 검수를 다시 실행합니다'}
       >
         {isStopped ? '⏸ 중지됨' : isPublished ? '📨 발송' : '🚀 발행'}
       </button>
@@ -282,7 +282,7 @@ function MoreMenu({ items }: { items: Array<{ emoji: string; label: string; onCl
     <div ref={wrapRef} style={{ position: 'relative', flexShrink: 0 }}>
       <button
         onClick={toggle}
-        title="더보기 — 버전 히스토리 · A/B 테스트"
+        title="더보기: 버전 히스토리 · A/B 테스트"
         aria-label="더보기"
         style={{
           height: 32,

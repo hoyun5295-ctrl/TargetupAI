@@ -96,7 +96,7 @@ export function extractJson<T = unknown>(raw: string): T {
   try {
     return JSON.parse(jsonStr) as T;
   } catch (e: any) {
-    throw new Error(`JSON 파싱 실패: ${e.message} — raw: ${jsonStr.slice(0, 200)}`);
+    throw new Error(`JSON 파싱 실패: ${e.message}, raw: ${jsonStr.slice(0, 200)}`);
   }
 }
 
@@ -287,14 +287,14 @@ const COPY_GEN_SYSTEM = `당신은 리테일 브랜드 모바일 DM 카피라이
 
 제약:
 - 한국어만 사용
-- 이모지 사용 금지 — 발행물의 절제된 톤을 깨뜨린다. 장식이 필요하면 문장과 단어 선택으로 표현 (2026-07-02 디자인 v2 카피 규율)
+- 이모지 사용 금지. 발행물의 절제된 톤을 깨뜨린다. 장식이 필요하면 문장과 단어 선택으로 표현 (2026-07-02 디자인 v2 카피 규율)
 - 느낌표 최대 1개
-- (광고)·무료수신거부·080 번호 같은 발송 표기를 카피에 절대 넣지 않는다 — 발송 시스템이 설정값으로 별도 합성
+- (광고)·무료수신거부·080 번호 같은 발송 표기를 카피에 절대 넣지 않는다. 발송 시스템이 설정값으로 별도 합성
 - 브랜드명을 카피 본문에 직접 삽입하지 않음 (브랜드 영역은 별도)
 - 과장 표현("반드시 성공", "무조건") 금지
 - 개인화 변수는 %고객명% 같은 형태 유지
-- 구체 혜택 수치(20%, 5만원, 1+1, 무료배송, 쿠폰 금액, 사은품, 당첨 인원, 남은 수량 등) 절대 생성 금지 — 회사가 직접 채울 자리이므로 비워 둔다
-- 모르는 사실(상품명·가격·일정·수량)을 지어내지 않는다 — 구조와 분위기만 카피로 표현
+- 구체 혜택 수치(20%, 5만원, 1+1, 무료배송, 쿠폰 금액, 사은품, 당첨 인원, 남은 수량 등) 절대 생성 금지. 회사가 직접 채울 자리이므로 비워 둔다
+- 모르는 사실(상품명·가격·일정·수량)을 지어내지 않는다. 구조와 분위기만 카피로 표현
 - JSON 외 다른 텍스트 출력 금지`;
 
 /** ★ 2026-07-16 M1 — 카피 생성에 행사 원문·브리프를 직투입하는 컨텍스트 (요약 병목 제거) */
@@ -414,7 +414,7 @@ export async function generateCopy(spec: CampaignSpec, section: Section, company
       })
     : '';
   const eventBlock = rawEvent
-    ? `\n\n[행사 원문 — 사용자가 직접 적은 사실. 카피는 이 원문에 근거해 작성]\n${rawEvent}\n${briefSummary ? `\n[구조 요약]\n${briefSummary}\n` : ''}
+    ? `\n\n[행사 원문: 사용자가 직접 적은 사실. 카피는 이 원문에 근거해 작성]\n${rawEvent}\n${briefSummary ? `\n[구조 요약]\n${briefSummary}\n` : ''}
 [원문 사용 규칙]
 - 원문에 적힌 행사명·기간·혜택·조건·수치는 원문 그대로 인용해 이 섹션의 역할에 맞게 적극 반영
 - 원문에 없는 수치·혜택·사실 생성은 여전히 절대 금지`
@@ -481,7 +481,7 @@ const TONE_SYSTEM = `당신은 카피 톤 변환 전문가입니다.
 제약:
 - 한국어 유지
 - 원문의 길이 대비 ±30% 이내
-- 이모지 사용 금지 — 원문에 있던 이모지도 제거 (2026-07-02 디자인 v2 카피 규율)
+- 이모지 사용 금지. 원문에 있던 이모지도 제거 (2026-07-02 디자인 v2 카피 규율)
 - 출력은 JSON: { "text": "변환된 문장" }
 - JSON 외 다른 텍스트 금지`;
 
@@ -696,12 +696,12 @@ export function repairBriefCoverage(sections: Section[], brief: EventBrief, miss
   const benefitLines = missing.filter((m) => m.kind === 'benefit')
     // ★ Codex 1R — 커버리지 라벨이 "target — content" 합성형이 될 수 있어 양쪽 형식으로 매칭
     .map((m) => brief.benefits.find((b) => {
-      const composed = b.target ? `${b.target} — ${b.content}` : b.content;
+      const composed = b.target ? `${b.target}: ${b.content}` : b.content;
       const key = m.label.slice(0, 30);
       return composed.startsWith(key) || b.content.startsWith(key);
     }) || null)
     .filter(Boolean)
-    .map((b) => (b!.target ? `${b!.target} — ${b!.content}` : `${b!.content}`));
+    .map((b) => (b!.target ? `${b!.target}: ${b!.content}` : `${b!.content}`));
   const periodMissing = missing.some((m) => m.kind === 'period') && (brief.period_raw || brief.period_end);
   const noticeLines = missing.filter((m) => m.kind === 'notice')
     .map((m) => brief.notices.find((n) => n.startsWith(m.label.slice(0, 30))))

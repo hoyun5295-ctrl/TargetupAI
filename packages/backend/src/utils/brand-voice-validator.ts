@@ -70,7 +70,7 @@ export function validateBrandVoiceCompliance(
       return generated.includes(expr);
     });
     if (!hasExpression) {
-      issues.push(`빈출 표현 1건 이상 포함 의무 — 활용 가능 표현: ${guideline.frequent_expressions.join(' / ')}`);
+      issues.push(`빈출 표현 1건 이상 포함 의무: 활용 가능 표현: ${guideline.frequent_expressions.join(' / ')}`);
     }
   }
 
@@ -101,7 +101,7 @@ export function validateBrandVoiceCompliance(
       const allowedStr = guideline.emoji_whitelist.length > 0
         ? guideline.emoji_whitelist.join(' / ')
         : '(이모지 사용 금지)';
-      issues.push(`허용되지 않은 이모지 사용: ${invalid.join(' / ')} — 활용 가능: ${allowedStr}`);
+      issues.push(`허용되지 않은 이모지 사용: ${invalid.join(' / ')}: 활용 가능: ${allowedStr}`);
     }
   }
 
@@ -114,9 +114,9 @@ export function validateBrandVoiceCompliance(
     const haeyoCount = (generated.match(HAEYO_ENDING_RE) || []).length;
     const hapshoCount = (generated.match(HAPSHO_ENDING_RE) || []).length;
     if (guideline.sentence_ending_style === '합쇼체' && haeyoCount > hapshoCount && haeyoCount >= 2) {
-      issues.push(`종결어미 스타일 = 합쇼체(~습니다) 의무 — 현재 해요체(~요) 위주 (해요체 ${haeyoCount} / 합쇼체 ${hapshoCount})`);
+      issues.push(`종결어미 스타일 = 합쇼체(~습니다) 의무. 현재 해요체(~요) 위주 (해요체 ${haeyoCount} / 합쇼체 ${hapshoCount})`);
     } else if (guideline.sentence_ending_style === '해요체' && hapshoCount > haeyoCount && hapshoCount >= 2) {
-      issues.push(`종결어미 스타일 = 해요체(~요) 의무 — 현재 합쇼체(~습니다) 위주 (합쇼체 ${hapshoCount} / 해요체 ${haeyoCount})`);
+      issues.push(`종결어미 스타일 = 해요체(~요) 의무. 현재 합쇼체(~습니다) 위주 (합쇼체 ${hapshoCount} / 해요체 ${haeyoCount})`);
     }
   }
 
@@ -133,7 +133,7 @@ export function validateBrandVoiceCompliance(
     const maxAllowed = Math.ceil(range.max_chars * 1.2);
     if (len < minAllowed || len > maxAllowed) {
       const dir = len < minAllowed ? '미달' : '초과';
-      issues.push(`본문 길이 범위 ${range.min_chars}~${range.max_chars}자 ${dir} (현재 ${len}자) — 범위 안으로 작성`);
+      issues.push(`본문 길이 범위 ${range.min_chars}~${range.max_chars}자 ${dir} (현재 ${len}자). 범위 안으로 작성`);
     }
   }
 
@@ -163,5 +163,5 @@ export function validateBrandVoiceCompliance(
  */
 export function buildRetryHintFromIssues(issues: string[]): string {
   if (issues.length === 0) return '';
-  return `\n\n[자가 검증 미달 — 다음 항목 정정 의무]\n${issues.map((i) => `- ${i}`).join('\n')}`;
+  return `\n\n[자가 검증 미달: 다음 항목 정정 의무]\n${issues.map((i) => `- ${i}`).join('\n')}`;
 }

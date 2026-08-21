@@ -205,7 +205,7 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
       return prev.length < 50 ? [...prev, next] : prev;
     });
     setLinkedOrderIds((prev) => [...prev, o.id]);
-    setReason((prev) => prev || `고객사 충전 요청 — ${o.depositorName} 입금분`);
+    setReason((prev) => prev || `고객사 충전 요청: ${o.depositorName} 입금분`);
   };
 
   const rejectOrder = async (id: string) => {
@@ -225,7 +225,7 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
       setLinkedOrderIds((prev) => prev.filter((x) => x !== id));
       loadOrders();
     } catch {
-      setErrorMsg('네트워크 오류 — 반려 처리를 다시 시도하세요.');
+      setErrorMsg('네트워크 오류. 반려 처리를 다시 시도하세요.');
     }
   };
 
@@ -305,7 +305,7 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
     const myBatch = ++pollBatchRef.current;
     currentPollReqRef.current = requestId;
     pollCount.current = 0;
-    setPollNote('반영 대기 중 — 엔진 주기(약 1분) 확인 중입니다.');
+    setPollNote('반영 대기 중. 엔진 주기(약 1분) 확인 중입니다.');
     pollTimer.current = setInterval(async () => {
       pollCount.current += 1;
       try {
@@ -333,7 +333,7 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
       if (pollBatchRef.current !== myBatch) return;
       if (pollCount.current >= MAX_POLLS) {
         stopPolling();
-        setPollNote('3분 내 반영 확인 실패 — 성공 아님. 잠시 후 이력에서 상태를 재확인하고, 계속 N이면 수집 엔진 점검이 필요합니다.');
+        setPollNote('3분 내 반영 확인 실패. 성공 아님. 잠시 후 이력에서 상태를 재확인하고, 계속 N이면 수집 엔진 점검이 필요합니다.');
       }
     }, 5000);
   };
@@ -341,7 +341,7 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
   const handleSubmit = async () => {
     setErrorMsg('');
     if (uncertainHold) {
-      setErrorMsg('반영 불확실 건이 있습니다 — 이력 확인 후 잠금을 해제해야 등록할 수 있습니다.');
+      setErrorMsg('반영 불확실 건이 있습니다. 이력 확인 후 잠금을 해제해야 등록할 수 있습니다.');
       return;
     }
     const cleaned = rows
@@ -356,7 +356,7 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
         return;
       }
     }
-    if (!reason.trim()) { setErrorMsg('충전 사유를 입력하세요. (예: 7월 선불 충전 — 계좌이체 확인)'); return; }
+    if (!reason.trim()) { setErrorMsg('충전 사유를 입력하세요. (예: 7월 선불 충전, 계좌이체 확인)'); return; }
     setSubmitting(true);
     // 네트워크 오류 재시도에만 같은 키 재사용(같은 페이로드 한정) — 서버 응답을 받은 뒤에는 항상 새 키
     const payload = {
@@ -387,7 +387,7 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
             setUncertainList([{ id: String(d.requestId), reason: payload.reason, abs_total: payload.charges.reduce((s, c) => s + Math.abs(c.amount), 0), created_at: new Date().toISOString() }]);
           }
           setErrorMsg(d.error || '반영 여부 불확실');
-          setPollNote('반영 여부 불확실 — 아래 이력에서 해당 발송ID의 최신 행을 확인한 뒤 해소 처리하세요.');
+          setPollNote('반영 여부 불확실. 아래 이력에서 해당 발송ID의 최신 행을 확인한 뒤 해소 처리하세요.');
           loadHistory();
         } else if (res.status === 409 && d.code === 'UNCERTAIN_PENDING') {
           // 서버 전역 게이트 — 미해소 불확실 건 목록 표시(다른 세션/탭에서 발생한 건 포함)
@@ -412,14 +412,14 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
           // 단 다른 배치가 확인 중이면 그 폴러를 뺏지 않는다(Codex 9R-4 — 이력에서 확인 안내).
           if (d.requestId && reg.length > 0) {
             if (pollTimer.current && currentPollReqRef.current && currentPollReqRef.current !== String(d.requestId)) {
-              setPollNote('다른 배치의 반영 확인이 진행 중 — 이 요청은 중복 충전이 차단됐고, 상태는 아래 이력에서 확인하세요.');
+              setPollNote('다른 배치의 반영 확인이 진행 중. 이 요청은 중복 충전이 차단됐고, 상태는 아래 이력에서 확인하세요.');
             } else {
               setRegistered(reg);
               startPolling(String(d.requestId), reg.map((r) => r.seqNo), reg.map((r) => r.agentSendId));
-              setPollNote('이미 접수된 요청 — 중복 충전은 차단됐고, 반영 상태를 이어서 확인합니다.');
+              setPollNote('이미 접수된 요청. 중복 충전은 차단됐고, 반영 상태를 이어서 확인합니다.');
             }
           } else {
-            setPollNote('이미 접수된 요청입니다(중복 충전 차단) — 아래 이력에서 상태를 확인하세요.');
+            setPollNote('이미 접수된 요청입니다(중복 충전 차단). 아래 이력에서 상태를 확인하세요.');
           }
         } else if (d.requestId && reg.length > 0) {
           setRegistered(reg);
@@ -429,7 +429,7 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
       }
     } catch {
       // 응답 유실 — 키 유지: 같은 입력으로 다시 등록하면 같은 키로 재시도돼 중복 충전이 차단된다
-      setErrorMsg('네트워크 오류 — 입력을 바꾸지 말고 다시 등록을 누르면 같은 요청으로 재시도합니다(중복 충전 없음).');
+      setErrorMsg('네트워크 오류. 입력을 바꾸지 말고 다시 등록을 누르면 같은 요청으로 재시도합니다(중복 충전 없음).');
     } finally {
       setSubmitting(false);
     }
@@ -462,13 +462,13 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
       });
       loadHistory();
     } catch {
-      setErrorMsg('네트워크 오류 — 해소 처리를 다시 시도하세요.');
+      setErrorMsg('네트워크 오류. 해소 처리를 다시 시도하세요.');
     }
   };
 
   // 발급명이 앞(계정 식별), 회사명은 뒤(검색·귀속 확인용). 회사명으로 발송ID를 찾는 검색을 유지해야 한다.
   const targetLabel = (t: Target) =>
-    `${idLabel(t.agent_send_id, t.cust_name)} — ${t.company_name}${t.billing_type === 'prepaid' ? ' · 선불' : ''}`;
+    `${idLabel(t.agent_send_id, t.cust_name)} · ${t.company_name}${t.billing_type === 'prepaid' ? ' · 선불' : ''}`;
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
@@ -477,7 +477,7 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
           <div>
             <h2 className="text-lg font-semibold">에이전트 충전 실행</h2>
             <p className="text-xs text-gray-400 mt-0.5">
-              발송ID(게이트웨이) 지갑 충전 — 음수 입력 = 상계 차감. 반영 완료 표시 전까지는 성공이 아닙니다.
+              발송ID(게이트웨이) 지갑 충전: 음수 입력 = 상계 차감. 반영 완료 표시 전까지는 성공이 아닙니다.
               {/* ★ 2026-08-11 잔액은 발송이 나가는 동안 계속 깎인다. 정산 근거가 아니라 판단 참고값임을 밝힌다. */}
               {' '}잔액은 발송이 나가는 대로 바뀌는 표시 시점 값입니다.
             </p>
@@ -628,7 +628,7 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
             value={reason}
             onChange={(e) => setReason(e.target.value.slice(0, 200))}
             className="flex-1 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-            placeholder="충전 사유 (필수 — 감사 기록에 남습니다)"
+            placeholder="충전 사유 (필수, 감사 기록에 남습니다)"
           />
           <button
             type="button"
@@ -643,14 +643,14 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
         {uncertainHold && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1.5">
             <p className="text-xs text-amber-700">
-              반영 불확실 건 해소 전 — 등록이 잠겨 있습니다(서버 차단). 아래 이력에서 해당 발송ID 최신 행의 실반영 여부를 확인한 뒤 확정하세요.
+              반영 불확실 건 해소 전에는 등록이 잠겨 있습니다(서버 차단). 아래 이력에서 해당 발송ID 최신 행의 실반영 여부를 확인한 뒤 확정하세요.
             </p>
             <input
               type="text"
               value={resolveNote}
               onChange={(e) => setResolveNote(e.target.value.slice(0, 200))}
               className="w-full px-2.5 py-1.5 border border-amber-200 rounded-lg text-xs focus:ring-2 focus:ring-amber-400 outline-none"
-              placeholder="해소 사유 (필수 — 예: 이력에서 SeqNo 확인·실반영됨)"
+              placeholder="해소 사유 (필수, 예: 이력에서 SeqNo 확인·실반영됨)"
             />
             {uncertainList.map((u) => (
               <div key={u.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white border border-amber-100 px-2.5 py-1.5">
@@ -681,7 +681,7 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
                 onClick={() => { setUncertainHold(false); setErrorMsg(''); setPollNote(''); }}
                 className="px-2.5 py-1 text-xs border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-100"
               >
-                이력 확인 완료 — 잠금 해제
+                이력 확인 완료 · 잠금 해제
               </button>
             )}
           </div>
@@ -729,7 +729,7 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
           {staleDays !== null && staleDays >= STALE_DAYS && (
             <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
               <b>게이트웨이 충전 원장이 {String(latestFilledAt).slice(0, 10)} 이후 갱신되지 않고 있습니다({staleDays}일째).</b>
-              {' '}이 목록은 그 시점까지만 담고 있어 실제 충전과 다를 수 있습니다 — 통장·게이트웨이 원본과 대조하기 전까지 잔액 판단 근거로 쓰지 마십시오.
+              {' '}이 목록은 그 시점까지만 담고 있어 실제 충전과 다를 수 있습니다. 통장·게이트웨이 원본과 대조하기 전까지 잔액 판단 근거로 쓰지 마십시오.
             </div>
           )}
 
@@ -831,7 +831,7 @@ export default function AgentChargePanel({ onPendingOrdersChange }: AgentChargeP
             </button>
           </div>
         )}
-        <p className="mt-1.5 text-[10px] italic text-gray-300">Data source — 발송 게이트웨이 충전 원장 실시간 조회 (저장 없음)</p>
+        <p className="mt-1.5 text-[10px] italic text-gray-300">Data source: 발송 게이트웨이 충전 원장 실시간 조회 (저장 없음)</p>
       </div>
     </div>
   );

@@ -412,7 +412,7 @@ export default function SegmentsPage() {
         {/* Source caption */}
         {!loading && (
           <p className="text-[10px] text-white/30 italic text-center pt-2">
-            Data source — saved_segments + CT-01 customer-filter (whitelist 필드 + parameter binding) + CT-97 자연어 변환 (단 1 오차 X)
+            Data source: saved_segments + CT-01 customer-filter (whitelist 필드 + parameter binding) + CT-97 자연어 변환 (단 1 오차 X)
           </p>
         )}
       </div>

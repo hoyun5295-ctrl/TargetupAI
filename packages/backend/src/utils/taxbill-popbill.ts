@@ -167,7 +167,7 @@ export function buildTaxinvoicePayload(input: TaxinvoiceBuildInput): any {
   }
 
   for (const [label, v] of [['공급가액', supplyAmount], ['세액', taxAmount], ['합계', totalAmount]] as const) {
-    if (!Number.isInteger(v)) throw new Error(`${label}이(가) 정수가 아닙니다: ${v} — 원 미만 절사 규칙 위반`);
+    if (!Number.isInteger(v)) throw new Error(`${label}이(가) 정수가 아닙니다: ${v}, 원 미만 절사 규칙 위반`);
   }
   if (supplyAmount + taxAmount !== totalAmount) {
     throw new Error(`합계 불일치: 공급가액 ${supplyAmount} + 세액 ${taxAmount} ≠ 합계 ${totalAmount}`);
@@ -175,14 +175,14 @@ export function buildTaxinvoicePayload(input: TaxinvoiceBuildInput): any {
   // 부호 계약 — 원본은 음수 금지, 수정은 사유별(MODIFY_SIGN). 부호가 섞인 장(공급가액 +, 세액 -)은 거부.
   if (!hasModifyCode) {
     if (supplyAmount < 0 || taxAmount < 0) {
-      throw new Error(`원본 계산서에 음수 금액: 공급가액 ${supplyAmount} / 세액 ${taxAmount} — 마이너스는 수정세금계산서로만`);
+      throw new Error(`원본 계산서에 음수 금액: 공급가액 ${supplyAmount} / 세액 ${taxAmount}. 마이너스는 수정세금계산서로만`);
     }
   } else {
     if (Math.sign(supplyAmount) * Math.sign(taxAmount) < 0) {
       throw new Error(`부호가 섞인 장: 공급가액 ${supplyAmount} / 세액 ${taxAmount}`);
     }
     if (totalAmount === 0) {
-      throw new Error('수정 장의 합계가 0원 — 바꿀 것이 없는 수정발행은 만들 수 없습니다');
+      throw new Error('수정 장의 합계가 0원. 바꿀 것이 없는 수정발행은 만들 수 없습니다');
     }
     if (MODIFY_SIGN[Number(input.modifyCode)] === 'negative' && totalAmount > 0) {
       throw new Error(`사유 ${input.modifyCode}(해제·이중발급)는 음(-) 문서만 가능한데 합계가 +${totalAmount}입니다`);
@@ -344,7 +344,7 @@ export function planModifyIssue(orig: ModifyIssueOriginal, req: ModifyIssueReque
   const code = Number(req.code);
   if (!MODIFY_CODES.has(code)) throw new ModifyPlanError(`지원하지 않는 수정사유 코드: ${req.code} (지원 = 1·2·4·6)`);
   const orgNum = String(orig.ntsConfirmNum || '').trim();
-  if (!orgNum) throw new ModifyPlanError('당초 국세청승인번호가 없습니다 — 전송성공(승인번호 수신) 상태에서만 수정발행이 가능합니다');
+  if (!orgNum) throw new ModifyPlanError('당초 국세청승인번호가 없습니다. 전송성공(승인번호 수신) 상태에서만 수정발행이 가능합니다');
   try {
     toWriteDate(orig.issueDate); // 당초 작성일자 형식 검증
   } catch (e: any) {
@@ -386,17 +386,17 @@ export function planModifyIssue(orig: ModifyIssueOriginal, req: ModifyIssueReque
     const d = requiredDate('변동일', req.writeDate);
     const ds = requiredInt('공급가액 변동분', req.deltaSupply);
     const dt = requiredInt('세액 변동분', req.deltaTax);
-    if (ds === 0 && dt === 0) throw new ModifyPlanError('변동분이 0원 — 바꿀 것이 없는 수정발행은 만들 수 없습니다');
+    if (ds === 0 && dt === 0) throw new ModifyPlanError('변동분이 0원. 바꿀 것이 없는 수정발행은 만들 수 없습니다');
     if (Math.sign(ds) * Math.sign(dt) < 0) throw new ModifyPlanError(`변동분 부호가 섞였습니다: 공급가액 ${ds} / 세액 ${dt}`);
     // ★ 잔액 검증(0730 Codex 3R ② 수용) — 변동 후 공급가액이 0 이하가 되는 감액은 '변동'이 아니라
     //   전액 취소다. 팝빌 계약상 그 경우는 사유 4(해제)·6(이중발급)을 써야 한다.
     if (orig.supplyAmount + ds <= 0) {
       throw new ModifyPlanError(
-        `변동 후 공급가액이 ${orig.supplyAmount + ds}원 — 전액·초과 감액은 공급가액 변동(2)이 아니라 계약 해제(4)·착오 이중발급(6)으로 처리합니다`,
+        `변동 후 공급가액이 ${orig.supplyAmount + ds}원. 전액·초과 감액은 공급가액 변동(2)이 아니라 계약 해제(4)·착오 이중발급(6)으로 처리합니다`,
       );
     }
     if (orig.taxAmount + dt < 0) {
-      throw new ModifyPlanError(`변동 후 세액이 음수(${orig.taxAmount + dt}원)가 됩니다 — 변동분을 확인해 주세요`);
+      throw new ModifyPlanError(`변동 후 세액이 음수(${orig.taxAmount + dt}원)가 됩니다. 변동분을 확인해 주세요`);
     }
     return [{ modifyCode: 2, orgNtsConfirmNum: orgNum, issueDate: d, supplyAmount: ds, taxAmount: dt, totalAmount: ds + dt }];
   }
@@ -407,7 +407,7 @@ export function planModifyIssue(orig: ModifyIssueOriginal, req: ModifyIssueReque
   // ★ 정정 합계 0원 거부(0730 Codex 4R ① 수용) — 0원 정 장은 빌더가 거부해 부(-) 장만 발행되는
   //   반쪽을 만든다. 전액을 없애는 정정은 착오 이중발급(6)·계약 해제(4)의 몫이다.
   if (cs + ct === 0) {
-    throw new ModifyPlanError('정정 합계가 0원 — 전액 취소는 기재사항 정정(1)이 아니라 착오 이중발급(6)·계약 해제(4)로 처리합니다');
+    throw new ModifyPlanError('정정 합계가 0원. 전액 취소는 기재사항 정정(1)이 아니라 착오 이중발급(6)·계약 해제(4)로 처리합니다');
   }
   return [
     { ...negation, issueDate: orig.issueDate },
@@ -455,7 +455,7 @@ export function decideWebhookUpdate(body: any): WebhookDecision | null {
     return { mgtKey, set };
   }
   if (stateCode === 305) {
-    return { mgtKey, set: { status: 'failed', error: '국세청 전송실패(stateCode 305) — 팝빌 사이트에서 재전송 필요' } };
+    return { mgtKey, set: { status: 'failed', error: '국세청 전송실패(stateCode 305). 팝빌 사이트에서 재전송 필요' } };
   }
   // 301(전송전) 포함 그 외 — 발행 축은 이미 issueReadyTaxbills가 기록했으므로 관측만.
   return { mgtKey, set: {} };
@@ -517,7 +517,7 @@ export function sendEmailAsync(svc: any, corpNum: string, mgtKey: string, receiv
       fn(v);
     };
     const timer = setTimeout(
-      () => settle(reject)(new Error(`sendEmail 응답 없음 — ${TAXBILL_SENDMAIL_TIMEOUT_MS / 1000}초 초과`)),
+      () => settle(reject)(new Error(`sendEmail 응답 없음, ${TAXBILL_SENDMAIL_TIMEOUT_MS / 1000}초 초과`)),
       TAXBILL_SENDMAIL_TIMEOUT_MS,
     );
     try {
@@ -610,7 +610,7 @@ export async function enqueueTaxbillResendsForIssue(
   const exists = await (opts?.tableExists ?? taxbillResendTableExists)();
   if (!exists) {
     warnResendTableMissingOnce();
-    throw new Error('참조 재전송 테이블(taxbill_email_resends) 미생성 — 참조 수신자가 등록된 계산서는 기록 가능해질 때까지 발행 확정을 미룹니다');
+    throw new Error('참조 재전송 테이블(taxbill_email_resends) 미생성. 참조 수신자가 등록된 계산서는 기록 가능해질 때까지 발행 확정을 미룹니다');
   }
   for (const rcpt of targets) {
     await client.query(
@@ -811,7 +811,7 @@ async function processOne(id: string, cfg: PopbillConfig): Promise<'issued' | 's
 
   try {
     if (!row.issue_date) {
-      await markFailed(id, '작성일자(issue_date)가 없습니다 — 직접선택 정책이면 날짜 지정 후 ready로');
+      await markFailed(id, '작성일자(issue_date)가 없습니다. 직접선택 정책이면 날짜 지정 후 ready로');
       return 'failed';
     }
     if (!row.billing_end) {
@@ -822,14 +822,14 @@ async function processOne(id: string, cfg: PopbillConfig): Promise<'issued' | 's
     //   통과한 행만 존재하고, 빌더가 부호·remark1(당초 작성일자)을 한 번 더 검증한다.
     //   그 밖의 kind는 알 수 없는 값이라 거부(fail-closed 유지).
     if (row.kind !== 'original' && row.kind !== 'modify') {
-      await markFailed(id, `알 수 없는 장 유형(kind=${row.kind}) — original/modify만 발행 가능`);
+      await markFailed(id, `알 수 없는 장 유형(kind=${row.kind}). original/modify만 발행 가능`);
       return 'failed';
     }
     // ★ 2026-08-21 (Codex 2R critical) 컨펌 연결은 **같은 회사 행으로 맞춰진 것만** 진실이다. raw confirmation_id는 있는데
     //   같은 회사 행이 JOIN되지 않았으면(손상·이관 행이 타사 컨펌을 가리킴) 외부로 내보내지 않는다 — 내보내면 발행 확정
     //   쓰기가 타사 컨펌을 issued로 바꾸고 이 회사의 팝빌 키를 거기 적는다. 채번 앞이라 행은 복구 가능하게 남는다.
     if (row.confirmation_id && !row.matched_confirmation_id) {
-      await markFailed(id, '이 장이 가리키는 컨펌 행이 다른 회사 것이거나 없습니다 — 데이터 대사 후 처리해 주세요');
+      await markFailed(id, '이 장이 가리키는 컨펌 행이 다른 회사 것이거나 없습니다. 데이터 대사 후 처리해 주세요');
       return 'failed';
     }
     // ★ 2026-08-21 (Codex 1R·2R high 수용) **계산서 비고(PO) 필수 게이트는 여기다** — 효과(외부 발행)가 만들어지는 자리.
@@ -842,7 +842,7 @@ async function processOne(id: string, cfg: PopbillConfig): Promise<'issued' | 's
     if (row.kind === 'original' && row.require_taxbill_remark === true && !String(row.taxbill_remark || '').trim()) {
       const keyed = String(row.invoicer_mgt_key || '').trim();
       if (!keyed) {
-        await markFailed(id, '계산서 비고(PO번호) 필수 회사인데 비고가 없습니다 — [작성일자 변경]에서 비고를 입력하면 발급 대기로 다시 올라갑니다');
+        await markFailed(id, '계산서 비고(PO번호) 필수 회사인데 비고가 없습니다. [작성일자 변경]에서 비고를 입력하면 발급 대기로 다시 올라갑니다');
         return 'failed';
       }
       // ★ 3R high — 채번은 됐지만 외부에 문서가 없는 행(-11002009 거절·채번 직후 중단)은 registIssue가 **새 문서**를 만든다.
@@ -867,8 +867,8 @@ async function processOne(id: string, cfg: PopbillConfig): Promise<'issued' | 's
         //   덮어쓰면 [작성일자 변경] 화이트리스트(-11002009 포함 판정)가 닫혀 안내한 복구 경로가 실행 불가능해진다.
         const prev = String(row.prev_error || '');
         await markFailed(id, prev.includes('-11002009')
-          ? `팝빌 -11002009(작성일자 미래 거절 — 미등록 확정) 건에 계산서 비고(PO번호)가 없습니다 — [작성일자 변경]에서 비고를 입력하면 발급 대기로 다시 올라갑니다`
-          : '계산서 비고(PO번호) 필수 회사인데 비고가 없습니다(팝빌에 문서 없음 또는 조회 실패) — 대사 후 정산 삭제·재발행으로 처리해 주세요');
+          ? `팝빌 -11002009(작성일자 미래 거절, 미등록 확정) 건에 계산서 비고(PO번호)가 없습니다. [작성일자 변경]에서 비고를 입력하면 발급 대기로 다시 올라갑니다`
+          : '계산서 비고(PO번호) 필수 회사인데 비고가 없습니다(팝빌에 문서 없음 또는 조회 실패). 대사 후 정산 삭제·재발행으로 처리해 주세요');
         return 'failed';
       }
     }
@@ -903,7 +903,7 @@ async function processOne(id: string, cfg: PopbillConfig): Promise<'issued' | 's
     //   고객은 아무 통지를 못 받는다. 되돌리려면 수정발행이라 비용이 크다.
     //   거래내역서 수신자로 되돌리는 폴백은 두지 않는다 — 원장을 다시 섞는 길이다.
     if (!taxbillTo.primary?.email) {
-      await markFailed(id, '세금계산서 수신자가 등록되어 있지 않습니다 — 고객사 정산 탭에서 세금계산서 수신자를 등록한 뒤 재시도해주세요');
+      await markFailed(id, '세금계산서 수신자가 등록되어 있지 않습니다. 고객사 정산 탭에서 세금계산서 수신자를 등록한 뒤 재시도해주세요');
       return 'failed';
     }
     const payload = buildTaxinvoicePayload({
@@ -1006,7 +1006,7 @@ async function processOne(id: string, cfg: PopbillConfig): Promise<'issued' | 's
         try {
           await pool.query(
             `UPDATE taxbill_issues SET error = $2 WHERE id = $1`,
-            [id, `발행은 확정(팝빌 3xx)됐으나 내부 반영 실패 — 다음 주기 자동 재시도: ${String(localErr?.message ?? localErr).slice(0, 300)}`],
+            [id, `발행은 확정(팝빌 3xx)됐으나 내부 반영 실패: 다음 주기 자동 재시도: ${String(localErr?.message ?? localErr).slice(0, 300)}`],
           );
         } catch { /* best-effort — 로그가 진실 */ }
         return 'submitted';
@@ -1020,11 +1020,11 @@ async function processOne(id: string, cfg: PopbillConfig): Promise<'issued' | 's
 
     if (verdict === 'nts_failed') {
       // 발행 자체는 됐다 — 하지만 웹훅 305 판정과 같은 결론(failed + 재전송 안내)으로 통일한다.
-      await markFailed(id, '국세청 전송실패(stateCode 305) — 팝빌 사이트에서 재전송 필요');
+      await markFailed(id, '국세청 전송실패(stateCode 305). 팝빌 사이트에서 재전송 필요');
       return 'failed';
     }
     if (verdict === 'cancelled') {
-      await markFailed(id, `팝빌 문서가 발행취소 상태(stateCode ${info?.stateCode}) — 사람이 확인 후 재발번 필요`);
+      await markFailed(id, `팝빌 문서가 발행취소 상태(stateCode ${info?.stateCode}). 사람이 확인 후 재발번 필요`);
       return 'failed';
     }
 
@@ -1034,7 +1034,7 @@ async function processOne(id: string, cfg: PopbillConfig): Promise<'issued' | 's
     }
     await pool.query(
       `UPDATE taxbill_issues SET error = $2 WHERE id = $1`,
-      [id, `발행 응답은 성공인데 재조회 판정 불가(${info ? `stateCode ${info.stateCode}` : '재조회 실패'}) — 팝빌 사이트 확인 필요 (submitted 유지)`],
+      [id, `발행 응답은 성공인데 재조회 판정 불가(${info ? `stateCode ${info.stateCode}` : '재조회 실패'}). 팝빌 사이트 확인 필요 (submitted 유지)`],
     );
     return 'submitted';
   } catch (err: any) {
@@ -1075,7 +1075,7 @@ export async function issueReadyTaxbills(limit = 10): Promise<IssuePassResult> {
   try {
     const lock = await lockClient.query(`SELECT pg_try_advisory_lock(hashtext('taxbill_issue_pass')) AS ok`);
     if (!lock.rows[0]?.ok) {
-      return { picked: 0, issued: 0, submitted: 0, failed: 0, skipped: '다른 발행 패스가 진행 중 — 이번 tick 건너뜀' };
+      return { picked: 0, issued: 0, submitted: 0, failed: 0, skipped: '다른 발행 패스가 진행 중. 이번 tick 건너뜀' };
     }
 
     // claim — ready를 submitted로 전환해 이 패스의 소유로 만든다. SKIP LOCKED로 겹침 무해.
@@ -1139,7 +1139,7 @@ export async function issueReadyTaxbills(limit = 10): Promise<IssuePassResult> {
           negState = (sib.rows[0]?.status === 'issued' ? 'issued' : 'failed') as 'issued' | 'failed';
         }
         if (negState !== 'issued') {
-          await markFailed(id, '짝인 부(-) 장이 발행되지 않아 중단 — 부 장 문제를 해결하고 두 장을 재시도해 주세요');
+          await markFailed(id, '짝인 부(-) 장이 발행되지 않아 중단. 부 장 문제를 해결하고 두 장을 재시도해 주세요');
           result.failed += 1;
           continue;
         }
@@ -1181,13 +1181,13 @@ export async function processTaxbillEmailResends(limit = 20): Promise<ResendPass
   const cfg = getPopbillConfig();
   if (!cfg) return { picked: 0, sent: 0, failed: 0, skipped: '팝빌 게이트 닫힘' };
   if (!(await taxbillResendTableExists())) {
-    return { picked: 0, sent: 0, failed: 0, skipped: 'taxbill_email_resends 미생성 — DDL 실행 필요' };
+    return { picked: 0, sent: 0, failed: 0, skipped: 'taxbill_email_resends 미생성: DDL 실행 필요' };
   }
   const lockClient = await pool.connect();
   try {
     const lock = await lockClient.query(`SELECT pg_try_advisory_lock(hashtext('taxbill_email_resend_pass')) AS ok`);
     if (!lock.rows[0]?.ok) {
-      return { picked: 0, sent: 0, failed: 0, skipped: '다른 재전송 패스가 진행 중 — 이번 tick 건너뜀' };
+      return { picked: 0, sent: 0, failed: 0, skipped: '다른 재전송 패스가 진행 중. 이번 tick 건너뜀' };
     }
     // 단일 패스 락이라 이중 집기 없음 — claim 전이 없이 행 단위로 결과를 기록한다.
     const rows = await pool.query(

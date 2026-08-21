@@ -99,7 +99,7 @@ router.post('/connect', async (req: Request, res: Response) => {
     // 과거 주문 백필은 시간이 걸려 백그라운드로 (요청은 즉시 응답). 실패는 로그.
     void backfillGodoOrders(companyId).catch((e) => console.error('[Godo backfill]', e));
 
-    return res.json({ success: true, message: '연동 확인 완료 — 과거 주문을 가져오는 중입니다. 잠시 후 상태를 확인해주세요.' });
+    return res.json({ success: true, message: '연동 확인 완료. 과거 주문을 가져오는 중입니다. 잠시 후 상태를 확인해주세요.' });
   } catch (err) {
     console.error('[Godo /connect] 오류:', err);
     return sendGodoError(res, err);

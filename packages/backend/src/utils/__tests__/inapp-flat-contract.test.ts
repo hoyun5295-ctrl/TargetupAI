@@ -99,11 +99,11 @@ describe('composeFlatFromBlocks — 범용 보장 계약 합성', () => {
     expect(flat.buttons[0].action_url).toBeNull();
   });
 
-  it('placeholder URL("[URL — 회사 admin 수정]")은 보존 — SDK/앱이 이동만 차단', () => {
+  it('placeholder URL("[URL: 회사 admin 수정]")은 보존 — SDK/앱이 이동만 차단', () => {
     const flat = composeFlatFromBlocks([
-      { type: 'cta_group', buttons: [{ label: '자세히', action_url: '[URL — 회사 admin 수정]' }] },
+      { type: 'cta_group', buttons: [{ label: '자세히', action_url: '[URL: 회사 admin 수정]' }] },
     ]);
-    expect(flat.buttons[0].action_url).toBe('[URL — 회사 admin 수정]');
+    expect(flat.buttons[0].action_url).toBe('[URL: 회사 admin 수정]');
   });
 });
 

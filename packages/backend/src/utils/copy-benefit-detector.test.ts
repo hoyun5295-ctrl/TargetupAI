@@ -110,7 +110,7 @@ describe('stripUnauthorizedBenefits', () => {
 
   test('연달아 걸려도 placeholder가 겹치지 않는다', () => {
     const out = stripUnauthorizedBenefits('쿠폰 증정', '');
-    expect(out.match(/\[혜택 안내 — 직접 수정해주세요\]/g)?.length).toBe(1);
+    expect(out.match(/\[혜택 안내: 직접 수정해주세요\]/g)?.length).toBe(1);
   });
 });
 

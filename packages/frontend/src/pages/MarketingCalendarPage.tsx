@@ -218,7 +218,7 @@ export default function MarketingCalendarPage() {
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl md:text-2xl font-semibold">마케팅 캘린더</h1>
             </div>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5">업종·시즌·회사 데이터로 1년치 캠페인을 AI가 설계 — 고른 달은 그대로 자동마케팅으로</p>
+            <p className="text-xs md:text-sm text-white/50 mt-0.5">업종·시즌·회사 데이터로 1년치 캠페인을 AI가 설계. 고른 달은 그대로 자동마케팅으로</p>
           </div>
         </div>
       </div>
@@ -244,14 +244,14 @@ export default function MarketingCalendarPage() {
               AI로 1년 설계하기
             </button>
             {error && <div className="mt-4 text-xs text-rose-300">{error}</div>}
-            <div className="mt-4 text-[10px] text-white/30 italic">Data source — 회사 업종·브랜드·고객 규모 + 한국 시즌 달력</div>
+            <div className="mt-4 text-[10px] text-white/30 italic">Data source: 회사 업종·브랜드·고객 규모 + 한국 시즌 달력</div>
           </div>
         )}
 
         {entries.length > 0 && (
           <>
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <div className="text-sm text-white/70">원하는 달을 선택하세요 — 선택 {pickedCount}건</div>
+              <div className="text-sm text-white/70">원하는 달을 선택하세요 · 선택 {pickedCount}건</div>
               <button onClick={() => setGenConfirmOpen(true)} disabled={generating} className="text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 transition-colors">
                 다시 설계
               </button>
@@ -312,7 +312,7 @@ export default function MarketingCalendarPage() {
                         value={benefits[e.month] || ''}
                         onChange={(ev) => setBenefits((prev) => ({ ...prev, [e.month]: ev.target.value }))}
                         maxLength={200}
-                        placeholder="혜택 (선택) 예: 아메리카노 1잔 증정 — 비우면 발송 2일 전 입력 안내"
+                        placeholder="혜택 (선택) 예: 아메리카노 1잔 증정 (비우면 발송 2일 전 입력 안내)"
                         className="mt-2 w-full px-2.5 py-1.5 bg-white/5 border border-white/10 rounded text-white text-[11px] placeholder-white/25 focus:outline-none focus:border-orange-400/50"
                       />
                     )}

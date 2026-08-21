@@ -49,8 +49,8 @@ const USE_CASES: UseCase[] = [
     label: '여정 단계별 사전 생성',
     gradient: 'from-violet-400 to-purple-500',
     scenario: '여정 6단계 × 50명 × 다양한 톤 사전 생성',
-    realtime: '300회 호출 즉시 — 한도 빠른 소진',
-    batch: '300회 야간 일괄 — 다음 날 활용',
+    realtime: '300회 호출 즉시: 한도 빠른 소진',
+    batch: '300회 야간 일괄: 다음 날 활용',
     recommend: 'batch',
   },
   {
@@ -59,7 +59,7 @@ const USE_CASES: UseCase[] = [
     gradient: 'from-sky-400 to-cyan-500',
     scenario: '매월 말 전체 캠페인 성과 자율 분석',
     realtime: '즉시 결과 필요 시 적합',
-    batch: '리포트 생성 = 다음 날 발송 — Batch 적합',
+    batch: '리포트 생성 = 다음 날 발송: Batch 적합',
     recommend: 'batch',
   },
 ];
@@ -92,7 +92,7 @@ export default function BatchModeGuideModal({ open, onClose }: Props) {
           </div>
           <div className="flex-1">
             <h3 className="text-base font-bold text-white">Batch 처리 모드 가이드</h3>
-            <p className="text-xs text-white/50 mt-0.5">24시간 SLA + 50% 비용 절감 — 언제 사용하면 좋은가요?</p>
+            <p className="text-xs text-white/50 mt-0.5">24시간 SLA + 50% 비용 절감. 언제 사용하면 좋은가요?</p>
           </div>
           <button
             onClick={onClose}
@@ -187,7 +187,7 @@ export default function BatchModeGuideModal({ open, onClose }: Props) {
             </div>
             <ol className="text-xs text-white/80 space-y-1.5 list-decimal list-inside pl-1">
               <li>대량 작업이 필요한 메뉴 (캠페인 일괄 / 여정 사전 / 월별 리포트) 진입</li>
-              <li>"Batch 처리 모드" 옵션 선택 — 자동으로 일괄 큐에 등록</li>
+              <li>"Batch 처리 모드" 옵션 선택. 자동으로 일괄 큐에 등록</li>
               <li>24시간 이내 완료 알림 수신 (회사 admin 이메일 + 앱 알림)</li>
               <li>결과는 옛 메뉴 결과 화면에서 확인 가능</li>
             </ol>

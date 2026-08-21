@@ -200,7 +200,7 @@ describe('프론트 치환 규약 ↔ 백엔드 차단기 (실값 대조)', () =
   });
 
   it('인앱 표기(작성해주세요)도 알아본다 — placeholder 표기가 두 벌이다(실측)', () => {
-    expect(hasBenefitPlaceholder('[혜택 안내 — 직접 작성해주세요]')).toBe(true);
+    expect(hasBenefitPlaceholder('[혜택 안내: 직접 작성해주세요]')).toBe(true);
   });
 
   it('placeholder가 아닌 대괄호는 건드리지 않는다', () => {

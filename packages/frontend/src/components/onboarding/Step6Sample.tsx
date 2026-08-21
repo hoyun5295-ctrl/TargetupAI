@@ -51,7 +51,7 @@ export default function Step6Sample({ state, onNext, onSync }: Props) {
           <div className="flex-1">
             <h2 className="text-base font-semibold text-white mb-1.5">본인 휴대폰 인증 라인 무료 샘플 발송</h2>
             <p className="text-[12px] text-white/65 leading-relaxed">
-              발신번호 검수 통과 전에도 본인 휴대폰으로 즉시 발송할 수 있습니다 (인증 라인 — 무료체험 잔액 차감 X).
+              발신번호 검수 통과 전에도 본인 휴대폰으로 즉시 발송할 수 있습니다 (인증 라인, 무료체험 잔액 차감 X).
               실제 발송된 메시지를 확인하고 첫 가치를 즉시 경험하세요.
             </p>
           </div>

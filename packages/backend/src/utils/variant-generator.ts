@@ -66,7 +66,7 @@ export async function generateVariantsFromMessage(input: {
       channel,
       variants: [],
       generatedAt: new Date(),
-      warnings: ['base 메시지 영역 10자 이상 의무 — variant 자동 생성 X.'],
+      warnings: ['base 메시지 영역 10자 이상 의무. variant 자동 생성 X.'],
     };
   }
 
@@ -82,11 +82,11 @@ export async function generateVariantsFromMessage(input: {
 
 영구 원칙:
 - 구체 혜택(% / 원 / 무료 / 쿠폰 / 사은품 / 적립 / 할인) 임의 생성 절대 금지. base 메시지 안 옛 혜택 표현 영역 그대로 유지 (수치 변경 X).
-- base 메시지에 [혜택 안내 — 직접 수정해주세요] placeholder 영역 있으면 그대로 유지.
+- base 메시지에 [혜택 안내: 직접 수정해주세요] placeholder 영역 있으면 그대로 유지.
 - 인사 + 안내 + 마무리 표현만 톤 다양화 (혜택 영역은 보존).
 - 길이: SMS 90바이트 / LMS·MMS 2000바이트 이내.
 - 이모지 / 특수문자 사용 자제 (이통사 EUC-KR 안전 영역).
-- 광고 표기 (광고)+080+KISA 영역 시스템 자동 합성 — 본문에 광고 단어 작성 X.
+- 광고 표기 (광고)+080+KISA 영역 시스템 자동 합성. 본문에 광고 단어 작성 X.
 
 JSON 형식으로만 응답하세요.`;
 
@@ -102,9 +102,9 @@ ${baseMessage}
 
 ## 요청
 위 base 메시지를 3가지 톤으로 자연스럽게 재작성해주세요:
-1. 감성적 — 따뜻하고 공감적인 톤
-2. 실용적 — 명확하고 정보 중심 톤
-3. 캐주얼 — 친근하고 가벼운 톤
+1. 감성적: 따뜻하고 공감적인 톤
+2. 실용적: 명확하고 정보 중심 톤
+3. 캐주얼: 친근하고 가벼운 톤
 
 각 variant는 base와 동일한 정보 + 동일한 혜택 표현을 유지하되 톤만 다르게 표현합니다.
 
@@ -160,14 +160,14 @@ ${baseMessage}
       .filter((v: GeneratedVariant) => v.messageTemplate.length >= 10);
 
     if (variants.length === 0) {
-      warnings.push('AI 응답 영역 안 유효 variant 영역 0건 — 다시 시도해주세요.');
+      warnings.push('AI 응답 영역 안 유효 variant 영역 0건. 다시 시도해주세요.');
     }
 
     // SMS 영역 안 90바이트 초과 영역 경고
     if (channel === 'sms') {
       variants.forEach((v) => {
         if (v.byteCount > 90) {
-          warnings.push(`${v.tone} variant ${v.byteCount}바이트 — SMS 90바이트 영역 초과. LMS 영역 전환 또는 본문 영역 축소 의무.`);
+          warnings.push(`${v.tone} variant ${v.byteCount}바이트. SMS 90바이트 영역 초과. LMS 영역 전환 또는 본문 영역 축소 의무.`);
         }
       });
     }
@@ -188,7 +188,7 @@ ${baseMessage}
       channel,
       variants: [],
       generatedAt: new Date(),
-      warnings: [`AI 호출 영역 일시 오류 — 잠시 후 다시 시도해주세요. (${err?.message || ''})`],
+      warnings: [`AI 호출 영역 일시 오류. 잠시 후 다시 시도해주세요. (${err?.message || ''})`],
     };
   }
 }

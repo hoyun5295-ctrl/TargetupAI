@@ -1584,7 +1584,7 @@ router.post('/direct-send/stage', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('relation') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요 — campaign_send_staging 테이블' });
+      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: campaign_send_staging 테이블' });
     }
     console.error('[direct-send/stage] 적재 오류:', err);
     return res.status(500).json({ success: false, error: '수신자 적재 중 오류가 발생했습니다.' });
@@ -1606,7 +1606,7 @@ router.post('/direct-send/count', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('relation') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요 — campaign_send_staging 테이블' });
+      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: campaign_send_staging 테이블' });
     }
     console.error('[direct-send/count] 오류:', err);
     return res.status(500).json({ success: false, error: '정제 카운트 중 오류가 발생했습니다.' });
@@ -1753,10 +1753,10 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요 — campaigns staging 컬럼 ALTER 요청' });
+      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: campaigns staging 컬럼 ALTER 요청' });
     }
     if (msg.includes('relation') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요 — campaign_send_staging 테이블' });
+      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: campaign_send_staging 테이블' });
     }
     console.error('[direct-send/commit] 오류:', err);
     return res.status(500).json({ success: false, error: '발송 접수 중 오류가 발생했습니다.' });
@@ -2547,7 +2547,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       // ★ CT-87: 카카오 활성(A) 재확인 — 실제 7300 거절을 만드는 축이라 적재 직전 값이어야 한다.
       const directTplRecheck = decideKakaoTemplateSendable(await getImcTemplateStatusSafe(companyId, alimtalkTemplateCode));
       if (!directTplRecheck.sendable) {
-        throw new Error(`알림톡 발송 직전 상태 확인 실패 — ${directTplRecheck.reason}`);
+        throw new Error(`알림톡 발송 직전 상태 확인 실패: ${directTplRecheck.reason}`);
       }
 
       // ★ #4-a (2026-06-01 알림톡 디버깅): 결과 조회용 campaigns.kakao_template_id FK 저장 (results.ts:560 JOIN).

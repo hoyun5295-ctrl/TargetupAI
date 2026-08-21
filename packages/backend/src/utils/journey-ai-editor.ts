@@ -141,9 +141,9 @@ export async function editJourneyPackage(input: EditJourneyInput): Promise<any> 
 규칙:
 - 요청한 부분만 수정하고 나머지 step·문안·설정은 그대로 유지한다.
 - step 유형(message/wait/condition)·채널·알림톡 설정·조건(conditionJsonb)은 사용자가 요청할 때만 바꾼다. 그 외에는 받은 값을 그대로 돌려준다.
-- 구체 혜택(%·원·무료·쿠폰·할인·적립·사은품)은 **새로 지어내지 않는다**. 단 다음은 사용자가 준 값이라 창작이 아니다 — placeholder로 바꾸지 말고 그대로 유지·사용한다:
+- 구체 혜택(%·원·무료·쿠폰·할인·적립·사은품)은 **새로 지어내지 않는다**. 단 다음은 사용자가 준 값이라 창작이 아니다. placeholder로 바꾸지 말고 그대로 유지·사용한다:
   ① 현재 패키지의 본문·제목에 이미 있는 혜택  ② 사용자 수정 요청문에 적힌 혜택${benefitText ? `  ③ 회사가 승인한 혜택 "${benefitText}"` : ''}
-  그 밖의 혜택 자리는 [혜택 안내 — 직접 수정해주세요] 형태 placeholder를 유지한다.
+  그 밖의 혜택 자리는 [혜택 안내: 직접 수정해주세요] 형태 placeholder를 유지한다.
 - (광고) 접두사·무료수신거부·제목 자동 합성은 시스템이 처리하므로 본문에 직접 쓰지 않는다.
 - 여정은 연중 상시 자동 발송이다. 문안을 새로 쓰거나 다듬을 때 계절·월·날씨·명절 언급 금지 (시간 불문 감성으로). 원본에 계절 표현이 있으면 시간 불문 표현으로 교체한다. 단, 사용자 요청문에 계절·명절이 명시된 경우에만 반영.
 - step은 최대 7개.
@@ -237,7 +237,7 @@ triggerEvent·templateCode·triggerFilters는 받은 값을 그대로 돌려주�
       || (!!parsed?.triggerFilters && typeof parsed.triggerFilters === 'object' && Object.keys(parsed.triggerFilters).length > 0);
     if (aiMovedTarget) {
       // 사유는 **서버 문장으로 교체한다.** 대상을 옮긴 전제로 쓰인 설명은 문안 부분도 믿을 수 없다.
-      keptTargetNotice = `대상은 바꾸지 않았습니다 — 시작 신호는 ${presetLabel} 그대로입니다. 대상을 바꾸려면 새 여정으로 만들어 주세요.`;
+      keptTargetNotice = `대상은 바꾸지 않았습니다. 시작 신호는 ${presetLabel} 그대로입니다. 대상을 바꾸려면 새 여정으로 만들어 주세요.`;
     }
     triggerEvent = presetTrigger;
     templateCode = contractTemplate;

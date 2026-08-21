@@ -88,7 +88,7 @@ ${conflictSummary}
 ## 요청
 위 진단 결과를 분석해 자사몰 영역 강화 매트릭스를 도출해주세요:
 1. 자사몰 영역 전체 건강도 스코어 (0~100, 매핑률 + 이벤트 + Webhook 종합)
-2. 한 줄 핵심 인사이트 (예: "cafe24 매핑률 65% — phone 영역 없을 가능성 큼")
+2. 한 줄 핵심 인사이트 (예: "cafe24 매핑률 65%: phone 영역 없을 가능성 큼")
 3. 영향 요인 3~5개:
    - category: 'mapping' | 'events' | 'webhook' | 'multi_source' | 'provider'
    - label: 짧은 명사 (예: "카페24 매핑률", "Webhook 성공률")
@@ -96,7 +96,7 @@ ${conflictSummary}
    - direction: 'positive' | 'negative' | 'neutral'
    - detail: 구체 수치 안내
    - sourceField: 데이터 source (예: "cdp_identity_links + cdp_events.source")
-4. 추천 액션 2~4개 (회사 admin 실행 가능 영역만 — 구체 진입 경로 명시)
+4. 추천 액션 2~4개 (회사 admin 실행 가능 영역만, 구체 진입 경로 명시)
 
 ## 출력 (JSON만)
 {
@@ -158,7 +158,7 @@ ${conflictSummary}
     console.error('[CdpFusionExplainer] AI 호출 실패:', err);
     return {
       overallHealthScore: 50,
-      topInsight: '자사몰 진단 영역 일시 오류 — 잠시 후 다시 시도해주세요.',
+      topInsight: '자사몰 진단 영역 일시 오류. 잠시 후 다시 시도해주세요.',
       factors: [],
       recommendations: [],
       explainedAt: new Date().toISOString(),

@@ -61,7 +61,7 @@ const TP_STATUS: Record<string, { label: string; cls: string }> = {
   scheduled: { label: '발송 예약', cls: 'bg-sky-500/15 text-sky-200 border-sky-400/25' },
   sent: { label: '발송 완료', cls: 'bg-emerald-500/15 text-emerald-200 border-emerald-400/25' },
   skipped: { label: '생략', cls: 'bg-white/10 text-white/45 border-white/15' },
-  hold_credit: { label: '보류 — 크레딧', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/25' },
+  hold_credit: { label: '보류 (크레딧)', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/25' },
   locked: { label: '보류', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/25' },
 };
 const CHANNEL_ICON: Record<Channel, typeof MailOpen> = {
@@ -188,8 +188,8 @@ export default function MarketingPlannerPage() {
     const link = searchParams.get('link');
     if (!link) return;
     toast.error(link === 'expired'
-      ? '결재 링크가 만료됐습니다 — 아래 브리핑에서 확인해 주세요'
-      : '결재 링크를 여는 중 문제가 있었습니다 — 아래 브리핑에서 확인해 주세요');
+      ? '결재 링크가 만료됐습니다. 아래 브리핑에서 확인해 주세요'
+      : '결재 링크를 여는 중 문제가 있었습니다. 아래 브리핑에서 확인해 주세요');
     searchParams.delete('link');
     setSearchParams(searchParams, { replace: true });
   }, [searchParams, setSearchParams, toast]);
@@ -269,7 +269,7 @@ export default function MarketingPlannerPage() {
       if (r.ok) setDetail(await r.json());
       else if (r.status !== 404) toast.error('상세를 불러오지 못했습니다');
     } catch {
-      toast.error('네트워크 오류 — 다시 시도해 주세요');
+      toast.error('네트워크 오류. 다시 시도해 주세요');
     } finally {
       setDetailLoading(false);
     }
@@ -332,13 +332,13 @@ export default function MarketingPlannerPage() {
         body,
       });
       const d = await r.json().catch(() => ({}));
-      if (r.status === 503) { setMigrationPending(true); toast.error('준비 중입니다 — 잠시 후 다시 시도해 주세요'); return; }
+      if (r.status === 503) { setMigrationPending(true); toast.error('준비 중입니다. 잠시 후 다시 시도해 주세요'); return; }
       if (!r.ok) { toast.error(d.error || '저장에 실패했습니다'); return; }
       toast.success(editing ? '행사가 수정되었습니다' : '행사가 캘린더에 담겼습니다');
       setModalOpen(false);
       loadEvents(month);
     } catch {
-      toast.error('네트워크 오류 — 다시 시도해 주세요');
+      toast.error('네트워크 오류. 다시 시도해 주세요');
     } finally {
       setSaving(false);
     }
@@ -358,7 +358,7 @@ export default function MarketingPlannerPage() {
           if (!r.ok) { toast.error(d.error || '삭제에 실패했습니다'); return; }
           toast.success('삭제되었습니다');
           loadEvents(month);
-        } catch { toast.error('네트워크 오류 — 다시 시도해 주세요'); }
+        } catch { toast.error('네트워크 오류. 다시 시도해 주세요'); }
       },
     });
   };
@@ -446,7 +446,7 @@ export default function MarketingPlannerPage() {
                 {approval?.status === 'approved'
                   ? '이번 달 대행이 시작되었습니다'
                   : approval
-                    ? '결재 대기 — 승인만 하면 대행이 시작됩니다'
+                    ? '결재 대기: 승인만 하면 대행이 시작됩니다'
                     : '이번 달 계획을 결재에 올리세요'}
               </p>
               <p className="text-xs text-white/55 mt-0.5">
@@ -619,12 +619,12 @@ export default function MarketingPlannerPage() {
           <div className="rounded-2xl border border-dashed border-white/10 py-14 text-center">
             <Sparkles className="w-6 h-6 text-violet-300/50 mx-auto mb-2" />
             <p className="text-sm text-white/60">이번 달 행사가 아직 없습니다</p>
-            <p className="text-xs text-white/35 mt-1">날짜를 누르거나 [행사 담기]로 시작하세요 — 채널 제작·발송은 AI가 이어받습니다</p>
+            <p className="text-xs text-white/35 mt-1">날짜를 누르거나 [행사 담기]로 시작하세요. 채널 제작·발송은 AI가 이어받습니다</p>
           </div>
         )}
 
         <p className="text-[10px] text-white/30 italic">
-          Data source — 행사·채널 구성은 저장 즉시 반영, 예상 크레딧은 소재 제작 기준이며 문자·알림톡은 실행 시 별도 과금됩니다.
+          Data source: 행사·채널 구성은 저장 즉시 반영, 예상 크레딧은 소재 제작 기준이며 문자·알림톡은 실행 시 별도 과금됩니다.
           공휴일은 관보 확정분이고, 발송 결과·대상 수는 실제 발송 기록입니다. 월간 결재는 브리핑 화면에서 진행합니다.
         </p>
       </div>
@@ -737,7 +737,7 @@ export default function MarketingPlannerPage() {
                                 className="w-full flex items-center gap-2 px-4 py-3 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] transition-colors"
                               >
                                 <Smartphone className="w-4 h-4 text-violet-300 flex-shrink-0" />
-                                <span className="text-[12px] flex-1 truncate">모바일 DM — {detail.asset.url}</span>
+                                <span className="text-[12px] flex-1 truncate">모바일 DM: {detail.asset.url}</span>
                                 <ExternalLink className="w-3.5 h-3.5 text-violet-200 flex-shrink-0" />
                               </a>
                             )}
@@ -752,7 +752,7 @@ export default function MarketingPlannerPage() {
                             )}
                             {detail.asset.kind === 'alimtalk' && (
                               <div className="rounded-xl border border-white/10 bg-black/30 px-4 py-3">
-                                {detail.asset.inspection && <p className="text-[11px] text-white/45 mb-1.5">검수 상태 — {detail.asset.inspection}</p>}
+                                {detail.asset.inspection && <p className="text-[11px] text-white/45 mb-1.5">검수 상태: {detail.asset.inspection}</p>}
                                 <p className="text-[12px] text-white/75 whitespace-pre-wrap leading-relaxed">{detail.asset.body}</p>
                               </div>
                             )}
@@ -831,7 +831,7 @@ export default function MarketingPlannerPage() {
               </div>
 
               <label className="block">
-                <span className="text-xs font-medium text-white/50">혜택 문구 <span className="text-white/30">(직접 입력 — AI가 대신 만들지 않습니다)</span></span>
+                <span className="text-xs font-medium text-white/50">혜택 문구 <span className="text-white/30">(직접 입력, AI가 대신 만들지 않습니다)</span></span>
                 <input
                   type="text" value={fBenefit} onChange={(e) => setFBenefit(e.target.value.slice(0, 300))}
                   placeholder="예: 전 품목 신상 특가, 첫 구매 사은품"

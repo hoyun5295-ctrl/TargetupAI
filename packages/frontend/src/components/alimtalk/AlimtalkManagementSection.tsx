@@ -741,7 +741,7 @@ export default function AlimtalkManagementSection({ onCount }: Props = {}) {
                                     setCopiedKey(key);
                                     setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500);
                                   })
-                                  .catch(() => setToast('복사 실패 — 직접 선택 후 복사해주세요'));
+                                  .catch(() => setToast('복사 실패. 직접 선택 후 복사해주세요'));
                               }}
                               className={CUI_COPY_BTN}
                               title="발신프로필 키값 복사"

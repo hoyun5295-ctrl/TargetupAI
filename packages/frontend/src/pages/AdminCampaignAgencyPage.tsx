@@ -190,7 +190,7 @@ export default function AdminCampaignAgencyPage() {
       const d = await res.json();
       if (d.success && d.form) {
         setAdhocForm((cur) => mergeAnalyzedIntoForm(cur, d.form));
-        toast.success('이미지 내용을 자동 입력했습니다 — 확인 후 실행해 주세요.');
+        toast.success('이미지 내용을 자동 입력했습니다. 확인 후 실행해 주세요.');
       } else toast.error(d.error || '이미지 판독에 실패했습니다.');
     } catch { toast.error('이미지 판독에 실패했습니다.'); } finally { setAdhocAnalyzing(false); }
   };
@@ -244,7 +244,7 @@ export default function AdminCampaignAgencyPage() {
           </div>
           <div className="min-w-0">
             <div className="font-semibold text-gray-900 leading-tight">캠페인 대행 설계</div>
-            <div className="text-[11px] text-gray-400">비즈니스+ 업체 전용 — 선택한 업체의 데이터만 분석합니다</div>
+            <div className="text-[11px] text-gray-400">비즈니스+ 업체 전용. 선택한 업체의 데이터만 분석합니다</div>
           </div>
           <div className="ml-auto flex items-center gap-2">
             <button onClick={() => loadRows()} className="inline-flex items-center gap-1.5 text-[13px] text-gray-500 hover:text-gray-800 border border-gray-200 hover:bg-gray-50 px-3 py-1.5 rounded-lg">
@@ -318,7 +318,7 @@ export default function AdminCampaignAgencyPage() {
             </div>
           )}
         </div>
-        <div className="text-[10px] text-gray-400 italic">Data source — campaign_agency_requests(실시간) · 분석은 선택 업체 단일 스코프</div>
+        <div className="text-[10px] text-gray-400 italic">Data source: campaign_agency_requests(실시간) · 분석은 선택 업체 단일 스코프</div>
       </div>
 
       {/* ══ 상세 모달 ══ */}
@@ -329,7 +329,7 @@ export default function AdminCampaignAgencyPage() {
               <div className="absolute inset-0 bg-white/85 backdrop-blur-sm z-20 flex flex-col items-center justify-center gap-2">
                 <Loader2 className="w-8 h-8 text-violet-600 animate-spin" />
                 <div className="text-sm font-medium text-gray-700">[{selected.company_name}] 데이터 분석 중</div>
-                <div className="text-[12px] text-gray-400">고객DB 현황 · AI 메모리 · 캠페인 이력{selected.images.length ? ' · 행사 이미지' : ''} — 수십 초 소요, 창을 닫지 마세요</div>
+                <div className="text-[12px] text-gray-400">고객DB 현황 · AI 메모리 · 캠페인 이력{selected.images.length ? ' · 행사 이미지' : ''} (수십 초 소요, 창을 닫지 마세요)</div>
               </div>
             )}
             {/* 모달 헤더 */}
@@ -371,7 +371,7 @@ export default function AdminCampaignAgencyPage() {
                   <div className="flex items-center gap-2 mb-2.5">
                     <ImagesIcon className="w-4 h-4 text-violet-600" />
                     <span className="text-[13px] font-semibold text-gray-900">행사 이미지 {selected.images.length}장</span>
-                    <span className="text-[11px] text-gray-400">클릭하면 크게 볼 수 있습니다 — 분석 실행 시 함께 판독됩니다</span>
+                    <span className="text-[11px] text-gray-400">클릭하면 크게 볼 수 있습니다. 분석 실행 시 함께 판독됩니다</span>
                   </div>
                   <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
                     {selected.images.map((im, i) => (
@@ -400,7 +400,7 @@ export default function AdminCampaignAgencyPage() {
 
               {missingRequired.length > 0 && (
                 <div className="text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                  필수 항목 누락: {missingRequired.join(' / ')} — 입력 후 분석을 실행할 수 있습니다.
+                  필수 항목 누락: {missingRequired.join(' / ')}. 입력 후 분석을 실행할 수 있습니다.
                 </div>
               )}
 
@@ -418,11 +418,11 @@ export default function AdminCampaignAgencyPage() {
               {/* 실행 결과 요약 */}
               {runSummary && (
                 <div className="border border-violet-200 bg-violet-50/50 rounded-2xl p-4">
-                  <div className="text-[13px] font-semibold text-gray-900 mb-2">생성 결과 — 캠페인 플랜 {runSummary.plans?.length || 0}건</div>
+                  <div className="text-[13px] font-semibold text-gray-900 mb-2">생성 결과: 캠페인 플랜 {runSummary.plans?.length || 0}건</div>
                   <div className="space-y-1">
                     {(runSummary.plans || []).map((p: any, i: number) => (
                       <div key={i} className="text-[12px] text-gray-600">
-                        · {p.title} — {String(p.channel || '').toUpperCase()} / 타겟 {p.targetCount != null ? `${Number(p.targetCount).toLocaleString()}명(실측)` : '실행 시 산정'} / 발송비 {p.estimatedCost != null ? `${Number(p.estimatedCost).toLocaleString()}원` : '실행 시 산정'}
+                        · {p.title}: {String(p.channel || '').toUpperCase()} / 타겟 {p.targetCount != null ? `${Number(p.targetCount).toLocaleString()}명(실측)` : '실행 시 산정'} / 발송비 {p.estimatedCost != null ? `${Number(p.estimatedCost).toLocaleString()}원` : '실행 시 산정'}
                       </div>
                     ))}
                   </div>
@@ -437,7 +437,7 @@ export default function AdminCampaignAgencyPage() {
                   )}
                 </div>
               )}
-              <div className="text-[10px] text-gray-400 italic">Data source — 접수 원문 + 업체 단일 스코프 분석(실시간)</div>
+              <div className="text-[10px] text-gray-400 italic">Data source: 접수 원문 + 업체 단일 스코프 분석(실시간)</div>
             </div>
 
             {/* 모달 푸터 */}
@@ -464,7 +464,7 @@ export default function AdminCampaignAgencyPage() {
               <div className="absolute inset-0 bg-white/85 backdrop-blur-sm z-20 flex flex-col items-center justify-center gap-2">
                 <Loader2 className="w-8 h-8 text-violet-600 animate-spin" />
                 <div className="text-sm font-medium text-gray-700">분석 · 제안서 생성 중</div>
-                <div className="text-[12px] text-gray-400">수십 초 소요 — 창을 닫지 마세요</div>
+                <div className="text-[12px] text-gray-400">수십 초 소요, 창을 닫지 마세요</div>
               </div>
             )}
             <div className="flex items-center gap-3 px-5 py-4 border-b border-gray-200 shrink-0">
@@ -488,7 +488,7 @@ export default function AdminCampaignAgencyPage() {
                   <option value="">업체 선택 (비즈니스+ 활성 구독만 표시)</option>
                   {companies.map((c) => <option key={c.id} value={c.id}>{c.company_name} · {c.plan_code}</option>)}
                 </select>
-                <div className="text-[11px] text-gray-400 mt-1.5">선택한 업체의 데이터만 분석합니다 — 교차 분석 없음.</div>
+                <div className="text-[11px] text-gray-400 mt-1.5">선택한 업체의 데이터만 분석합니다. 교차 분석 없음.</div>
               </div>
               <AgencyRequestForm theme="light" value={adhocForm} onChange={setAdhocForm} disabled={adhocRunning || adhocAnalyzing}
                 images={adhocImages} onImagesChange={setAdhocImages} onImageError={(m) => toast.error(m)}

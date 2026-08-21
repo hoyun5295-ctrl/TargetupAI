@@ -393,7 +393,7 @@ export default function InAppMessagesPage() {
       status: 'active',
       channel: 'web',
     });
-    toast.success('행사 캠페인 인앱 초안을 불러왔습니다 — 이미지만 올리고 다듬어주세요.');
+    toast.success('행사 캠페인 인앱 초안을 불러왔습니다. 이미지만 올리고 다듬어주세요.');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -403,7 +403,7 @@ export default function InAppMessagesPage() {
     if (!d?.imageUrl) return;
     setChannel('web');
     setEditing({ ...EMPTY_FORM, template: 'full_image', image_url: d.imageUrl, channel: 'web' });
-    toast.success('스튜디오 소재로 포스터형 인앱을 시작했어요 — 문구·타겟만 다듬어주세요.');
+    toast.success('스튜디오 소재로 포스터형 인앱을 시작했어요. 문구·타겟만 다듬어주세요.');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -433,7 +433,7 @@ export default function InAppMessagesPage() {
 
   const handle503 = (data: any): boolean => {
     if (data?.code === 'DB_MIGRATION_PENDING') {
-      setError(data.error || 'DB 마이그레이션 필요 — 운영자에게 문의해주세요.');
+      setError(data.error || 'DB 마이그레이션 필요. 운영자에게 문의해주세요.');
       showToast('기능을 준비 중입니다. 잠시 후 다시 시도해 주세요.', { type: 'warning' });
       return true;
     }
@@ -509,7 +509,7 @@ export default function InAppMessagesPage() {
 
   const handleDiagnose = async () => {
     if (messages.length === 0) {
-      showToast('진단할 메시지가 없습니다 — 먼저 메시지를 생성해주세요.', { type: 'info' });
+      showToast('진단할 메시지가 없습니다. 먼저 메시지를 생성해주세요.', { type: 'info' });
       return;
     }
     setDiagnosing(true);
@@ -614,7 +614,7 @@ export default function InAppMessagesPage() {
       setTimeout(() => {
         setAiGenerating(false);
         setAiObjective('');
-        showToast('AI 메시지 생성 완료 — 혜택 부분 직접 작성 후 저장해주세요.', { type: 'success' });
+        showToast('AI 메시지 생성 완료. 혜택 부분 직접 작성 후 저장해주세요.', { type: 'success' });
       }, 400);
     } catch (e: any) {
       clearInterval(stepInterval);
@@ -714,7 +714,7 @@ export default function InAppMessagesPage() {
       const incomplete = (Array.isArray(rawExtra) ? rawExtra : []).find((s: any) => s && !String(s.image_url || '').trim()
         && (String(s.title || '').trim() || String(s.body || '').trim() || (s.cta && (String(s.cta.label || '').trim() || String(s.cta.action_url || '').trim()))));
       if (incomplete) {
-        showToast('추가 슬라이드에 이미지를 넣어주세요 — 이미지가 슬라이드의 필수 요소입니다.', { type: 'warning' });
+        showToast('추가 슬라이드에 이미지를 넣어주세요. 이미지가 슬라이드의 필수 요소입니다.', { type: 'warning' });
         return;
       }
     }
@@ -923,9 +923,9 @@ export default function InAppMessagesPage() {
 
   const dataShortage = useMemo(() => {
     const issues: string[] = [];
-    if (messages.length === 0) issues.push('등록된 메시지 없음 — 자연어 입력 또는 빠른 시작 카드로 시작해주세요.');
-    if (overview && overview.totalImpressions30d < 100) issues.push(`최근 30일 impression ${overview.totalImpressions30d}건 — 100건 이상 누적 후 정확한 분석 가능`);
-    if (overview && overview.avgCTR > 0 && overview.avgCTR < 0.03) issues.push(`평균 CTR ${(overview.avgCTR * 100).toFixed(1)}% (3% 미만) — AI 다듬기 1-click 액션 권장`);
+    if (messages.length === 0) issues.push('등록된 메시지 없음. 자연어 입력 또는 빠른 시작 카드로 시작해주세요.');
+    if (overview && overview.totalImpressions30d < 100) issues.push(`최근 30일 impression ${overview.totalImpressions30d}건. 100건 이상 누적 후 정확한 분석 가능`);
+    if (overview && overview.avgCTR > 0 && overview.avgCTR < 0.03) issues.push(`평균 CTR ${(overview.avgCTR * 100).toFixed(1)}% (3% 미만). AI 다듬기 1-click 액션 권장`);
     return issues;
   }, [messages, overview]);
 
@@ -949,7 +949,7 @@ export default function InAppMessagesPage() {
               <div className="flex items-center gap-2">
                 <h1 className="text-xl md:text-2xl font-semibold text-white">인앱 메시지</h1>
               </div>
-              <p className="text-xs md:text-sm text-white/50 mt-0.5">시나리오를 고르면 AI가 제목·본문·트리거까지 자동 — 웹·앱 어디든</p>
+              <p className="text-xs md:text-sm text-white/50 mt-0.5">시나리오를 고르면 AI가 제목·본문·트리거까지 자동, 웹·앱 어디든</p>
             </div>
           </div>
         </div>
@@ -960,7 +960,7 @@ export default function InAppMessagesPage() {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <Sparkles className="w-4 h-4 text-fuchsia-300" />
-              <h2 className="text-sm font-bold text-white">빠른 시작<span className="text-white/40 font-normal"> — 시나리오만 고르면 AI가 제목·본문·트리거까지</span></h2>
+              <h2 className="text-sm font-bold text-white">빠른 시작<span className="text-white/40 font-normal">: 시나리오만 고르면 AI가 제목·본문·트리거까지</span></h2>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               {(Object.keys(SCENARIO_VISUAL) as QuickStartScenario[]).map((sc) => {
@@ -987,7 +987,7 @@ export default function InAppMessagesPage() {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <Layers className="w-4 h-4 text-violet-300" />
-              <h2 className="text-sm font-bold text-white">직접 만들기<span className="text-white/40 font-normal"> — 띄울 곳을 고르면 빈 편집기로</span></h2>
+              <h2 className="text-sm font-bold text-white">직접 만들기<span className="text-white/40 font-normal">: 띄울 곳을 고르면 빈 편집기로</span></h2>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button onClick={() => { if (webBlocked) { setShowDisplayBlock(true); return; } setChannel('web'); }} className="group flex items-center gap-4 bg-gradient-to-br from-violet-500/12 to-fuchsia-500/12 border border-violet-400/25 hover:border-violet-300/55 rounded-2xl p-4 transition-all text-left">
@@ -999,9 +999,9 @@ export default function InAppMessagesPage() {
                   <div className="text-sm font-bold text-white flex items-center gap-1.5"><Globe className="w-3.5 h-3.5 text-violet-200" />웹 자사몰 팝업</div>
                   <div className="text-[11px] text-white/55 mt-0.5 leading-tight">모달 · 슬라이드 · 토스트 · 플로팅</div>
                   {webBlocked ? (
-                    <div className="text-[10px] text-amber-300/90 mt-1">표시할 쇼핑몰 연동 필요 — 눌러서 안내 보기</div>
+                    <div className="text-[10px] text-amber-300/90 mt-1">표시할 쇼핑몰 연동 필요. 눌러서 안내 보기</div>
                   ) : eligibility?.warnWeb ? (
-                    <div className="text-[10px] text-amber-300/80 mt-1">연동됨 — 쇼핑몰에 SDK 설치 후 표시</div>
+                    <div className="text-[10px] text-amber-300/80 mt-1">연동됨. 쇼핑몰에 SDK 설치 후 표시</div>
                   ) : (
                     <div className="text-[10px] text-emerald-300/80 mt-1">즉시 사용 가능</div>
                   )}
@@ -1026,7 +1026,7 @@ export default function InAppMessagesPage() {
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <Clock className="w-4 h-4 text-cyan-300" />
-                <h2 className="text-sm font-bold text-white">최근 인앱 메시지<span className="text-white/40 font-normal"> — 눌러서 미리보기·편집</span></h2>
+                <h2 className="text-sm font-bold text-white">최근 인앱 메시지<span className="text-white/40 font-normal">: 눌러서 미리보기·편집</span></h2>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {recentMessages.map((m) => (
@@ -1046,7 +1046,7 @@ export default function InAppMessagesPage() {
                   </button>
                 ))}
               </div>
-              <div className="text-[10px] text-white/30 italic mt-2">Data source — cdp_inapp_messages (회사 격리)</div>
+              <div className="text-[10px] text-white/30 italic mt-2">Data source: cdp_inapp_messages (회사 격리)</div>
             </div>
           )}
         </div>
@@ -1059,7 +1059,7 @@ export default function InAppMessagesPage() {
                 <h3 className="text-base font-bold text-white">어디에 띄울까요?</h3>
                 <button onClick={() => setScenarioPick(null)} className="text-white/50 hover:text-white p-1 rounded hover:bg-white/10" aria-label="닫기"><X className="w-4 h-4" /></button>
               </div>
-              <p className="text-xs text-white/50 mb-4">{SCENARIO_VISUAL[scenarioPick].label} — 채널을 고르면 AI가 바로 만들어요</p>
+              <p className="text-xs text-white/50 mb-4">{SCENARIO_VISUAL[scenarioPick].label}: 채널을 고르면 AI가 바로 만들어요</p>
               <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={() => { if (webBlocked) { setScenarioPick(null); setShowDisplayBlock(true); return; } const sc = scenarioPick; setScenarioPick(null); setChannel('web'); if (sc) handleAIGenerate('', sc, 'web'); }}
@@ -1179,8 +1179,8 @@ export default function InAppMessagesPage() {
             </div>
             <p className="text-xs md:text-sm text-white/50 mt-0.5">
               {channel === 'app'
-                ? '모바일 앱 인앱 — 기본형(중앙 모달·바텀 시트) · 포스터형 (앱 SDK 연동 후 표시)'
-                : '웹 자사몰 팝업 — 모달 · 슬라이드 · 토스트 · 플로팅 버튼 · 포스터형'}
+                ? '모바일 앱 인앱: 기본형(중앙 모달·바텀 시트) · 포스터형 (앱 SDK 연동 후 표시)'
+                : '웹 자사몰 팝업: 모달 · 슬라이드 · 토스트 · 플로팅 버튼 · 포스터형'}
             </p>
           </div>
           <div className="ml-auto flex items-center gap-2">
@@ -1210,7 +1210,7 @@ export default function InAppMessagesPage() {
               onPick={(a) => {
                 setChannel('web');
                 setEditing({ ...EMPTY_FORM, template: 'full_image', image_url: a.url, channel: 'web' });
-                toast.success('라이브러리 소재로 포스터형 인앱을 시작했어요 — 문구·타겟만 다듬어주세요.');
+                toast.success('라이브러리 소재로 포스터형 인앱을 시작했어요. 문구·타겟만 다듬어주세요.');
               }}
             />
           </div>
@@ -1239,15 +1239,15 @@ export default function InAppMessagesPage() {
             <div className="bg-amber-500/10 border border-amber-400/30 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
               <AlertTriangle className="w-5 h-5 text-amber-300 shrink-0" />
               <div className="flex-1 text-xs text-amber-200 leading-relaxed">
-                {eligibility.platforms.filter((p) => p.support !== 'unsupported').map((p) => p.label).join(' · ')} 연동됨 — 아직 쇼핑몰에서 SDK 신호가 감지되지 않았습니다. 쇼핑몰에 SDK 스크립트를 설치해야 만든 메시지가 실제로 표시됩니다.
-                {eligibility.platforms.some((p) => p.support === 'unsupported') && ' (네이버 스마트스토어는 인앱 표시 미지원 — 데이터 연동만)'}
+                {eligibility.platforms.filter((p) => p.support !== 'unsupported').map((p) => p.label).join(' · ')} 연동됨. 아직 쇼핑몰에서 SDK 신호가 감지되지 않았습니다. 쇼핑몰에 SDK 스크립트를 설치해야 만든 메시지가 실제로 표시됩니다.
+                {eligibility.platforms.some((p) => p.support === 'unsupported') && ' (네이버 스마트스토어는 인앱 표시 미지원, 데이터 연동만)'}
               </div>
               <button onClick={() => navigate('/cdp-settings')} className="shrink-0 px-3 py-2 bg-amber-500/25 hover:bg-amber-500/40 border border-amber-400/30 rounded-lg text-xs font-semibold text-white">설치 가이드 보기</button>
             </div>
           ) : (
             <div className="bg-emerald-500/10 border border-emerald-400/20 rounded-xl px-4 py-2.5 flex items-center gap-2 text-[11px] text-emerald-200/90 flex-wrap">
               <Activity className="w-3.5 h-3.5 shrink-0" />
-              <span>SDK 신호 감지됨{eligibility.webSdkLastSeenAt ? ` — 최근 ${new Date(eligibility.webSdkLastSeenAt).toLocaleString('ko-KR')}` : ''}</span>
+              <span>SDK 신호 감지됨{eligibility.webSdkLastSeenAt ? `: 최근 ${new Date(eligibility.webSdkLastSeenAt).toLocaleString('ko-KR')}` : ''}</span>
               {eligibility.platforms.length > 0 && <span className="text-white/40">· 연동: {eligibility.platforms.map((p) => p.label).join(', ')}</span>}
               {eligibility.platforms.some((p) => p.support === 'unsupported') && <span className="text-amber-300/70">· 네이버 스마트스토어는 인앱 표시 미지원(데이터 연동만)</span>}
             </div>
@@ -1257,7 +1257,7 @@ export default function InAppMessagesPage() {
         <div className="bg-gradient-to-br from-violet-500/12 via-fuchsia-500/8 to-indigo-500/12 border border-violet-400/25 rounded-2xl p-5">
           <div className="flex items-center gap-2 mb-3">
             <Sparkles className="w-4 h-4 text-fuchsia-300" />
-            <h3 className="text-sm font-bold text-white">메시지 만들기<span className="text-white/40 font-normal"> — 한 줄이면 AI가 제목·본문·트리거·세그먼트까지</span></h3>
+            <h3 className="text-sm font-bold text-white">메시지 만들기<span className="text-white/40 font-normal">: 한 줄이면 AI가 제목·본문·트리거·세그먼트까지</span></h3>
           </div>
           <div className="flex gap-2 mb-4 flex-wrap">
             <input
@@ -1287,7 +1287,7 @@ export default function InAppMessagesPage() {
 
           {/* ★ 2026-07-18 재편 (Harold 확정) — 원색 나열 폐기 → 모던 다크 카드 + 그라데이션 아이콘 칩.
               카드의 대상·시점 문구 = 백엔드가 결정 주입하는 실조건 그대로 (선택 즉시 세그·트리거까지 설정 완료) */}
-          <div className="text-xs text-white/60 mb-3">또는 빠른 시작 — 카드에 적힌 대상·시점이 그대로 설정됩니다:</div>
+          <div className="text-xs text-white/60 mb-3">또는 빠른 시작 (카드에 적힌 대상·시점이 그대로 설정됩니다):</div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5">
             {quickStartCards.map((card) => {
               const visual = SCENARIO_VISUAL[card.scenario] || SCENARIO_VISUAL.cart_recovery;
@@ -1366,7 +1366,7 @@ export default function InAppMessagesPage() {
           </div>
         )}
         {overview && (
-          <div className="text-[10px] text-white/30 italic">Data source — {overview.dataSource}</div>
+          <div className="text-[10px] text-white/30 italic">Data source: {overview.dataSource}</div>
         )}
 
         {/* ▼ AI 개선 — 진단 + 1-click 통합 (한 카드) */}
@@ -1572,12 +1572,12 @@ export default function InAppMessagesPage() {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
           <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="sticky top-0 bg-slate-900/90 backdrop-blur-sm border-b border-white/10 px-5 py-4 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2"><BarChart3 className="w-4 h-4 text-cyan-300" /> 자세히 분석 — Top CTR 메시지</h3>
+              <h3 className="text-sm font-bold text-white flex items-center gap-2"><BarChart3 className="w-4 h-4 text-cyan-300" /> 자세히 분석: Top CTR 메시지</h3>
               <button onClick={() => setShowDetails(false)} className="text-white/50 hover:text-white p-1.5 rounded-lg hover:bg-white/10"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-5">
               {topMessages.length === 0 ? (
-                <div className="text-xs text-white/40 py-8 text-center">데이터 누적 부족 — impression 10건 이상 쌓이면 표시됩니다.</div>
+                <div className="text-xs text-white/40 py-8 text-center">데이터 누적 부족. impression 10건 이상 쌓이면 표시됩니다.</div>
               ) : (
                 <div className="space-y-1.5">
                   {topMessages.map((m) => (
@@ -1590,7 +1590,7 @@ export default function InAppMessagesPage() {
                   ))}
                 </div>
               )}
-              <div className="text-[10px] text-white/30 italic mt-3">Data source — 회사 30일 누적 impression ≥ 10건 메시지</div>
+              <div className="text-[10px] text-white/30 italic mt-3">Data source: 회사 30일 누적 impression ≥ 10건 메시지</div>
             </div>
           </div>
         </div>
@@ -1717,7 +1717,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
       a.click();
       pickToast.success(`${kind === 'web' ? '웹' : '앱'} 이미지 저장 완료`);
     } catch {
-      pickToast.error('이미지 저장 실패 — 잠시 후 다시 시도해주세요');
+      pickToast.error('이미지 저장 실패. 잠시 후 다시 시도해주세요');
     } finally {
       setSavingShot(null);
     }
@@ -1882,7 +1882,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
     if (blocksNow.length > 0) {
       setGoldenConfirm({
         mode: 'warning',
-        title: `골든 템플릿 적용 — ${g.label}`,
+        title: `골든 템플릿 적용: ${g.label}`,
         description: '현재 편집 중인 블록 구성이 템플릿 블록으로 교체됩니다. 트리거·표시 대상·시간대 설정은 유지됩니다.',
         confirmLabel: '적용',
         onConfirm: () => applyGolden(g),
@@ -1939,7 +1939,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
             </div>
             <div>
               <h3 className="text-lg font-bold text-white leading-tight">{editing.id ? '메시지 수정' : '신규 메시지'}</h3>
-              <p className="text-[11px] text-white/50">자사몰에 뜨는 인앱 — 실시간 미리보기로 확인하며 편집</p>
+              <p className="text-[11px] text-white/50">자사몰에 뜨는 인앱: 실시간 미리보기로 확인하며 편집</p>
             </div>
           </div>
           <button onClick={() => setEditing(null)} className="text-white/50 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors">
@@ -1966,7 +1966,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               <div className="bg-cyan-500/10 border border-cyan-400/30 rounded-lg p-3 flex items-start gap-2">
                 <Smartphone className="w-4 h-4 text-cyan-300 mt-0.5 shrink-0" />
                 <div className="text-xs text-cyan-100 min-w-0">
-                  <strong>앱(네이티브)이 직접 그리는 채널입니다</strong> — 앱이 통합 계약을 구현해야 여기서 설정한 내용·색·정렬·닫기 동작이 그대로 나옵니다.{' '}
+                  <strong>앱(네이티브)이 직접 그리는 채널입니다</strong>. 앱이 통합 계약을 구현해야 여기서 설정한 내용·색·정렬·닫기 동작이 그대로 나옵니다.{' '}
                   <button onClick={() => setShowAppContract(true)} className="underline underline-offset-2 font-semibold text-cyan-200 hover:text-white">앱 통합 계약 보기</button>
                 </div>
               </div>
@@ -1975,7 +1975,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg p-3 flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 text-amber-300 mt-0.5 shrink-0" />
                 <div className="text-xs text-amber-100">
-                  <strong>혜택 안내 placeholder 발견</strong> — 회사 정책에 맞게 직접 작성 후 저장해주세요. AI는 구체 혜택 임의 작성 X.
+                  <strong>혜택 안내 placeholder 발견</strong>. 회사 정책에 맞게 직접 작성 후 저장해주세요. AI는 구체 혜택 임의 작성 X.
                 </div>
               </div>
             )}
@@ -2053,7 +2053,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   <textarea
                     value={editing.body || ''}
                     onChange={(e) => updateField('body', e.target.value)}
-                    placeholder={editing.template === 'full_image' ? '이미지 위에 얹는 짧은 문구 1~3줄 — 길면 이미지 밖으로 잘려 보일 수 있어요' : '짧고 강렬하게 한두 문장. 혜택 부분은 [혜택 안내 — 직접 작성해주세요] placeholder 사용'}
+                    placeholder={editing.template === 'full_image' ? '이미지 위에 얹는 짧은 문구 1~3줄. 길면 이미지 밖으로 잘려 보일 수 있어요' : '짧고 강렬하게 한두 문장. 혜택 부분은 [혜택 안내: 직접 작성해주세요] placeholder 사용'}
                     className={`w-full px-3 py-2 mb-2 bg-slate-900/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-y ${editing.template === 'full_image' ? 'h-16' : 'h-24'} focus:outline-none focus:border-violet-400/50`}
                     maxLength={300}
                   />
@@ -2080,14 +2080,14 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                           className="h-7 w-10 bg-slate-900/60 border border-white/10 rounded cursor-pointer"
                         />
                       </label>
-                      <span className="text-[10px] text-white/35">제목·본문은 이미지 위에 표시 — 우측 미리보기로 확인</span>
+                      <span className="text-[10px] text-white/35">제목·본문은 이미지 위에 표시. 우측 미리보기로 확인</span>
                     </div>
                   )}
                   <input
                     type="text"
                     value={editing.badge_text || ''}
                     onChange={(e) => updateField('badge_text', e.target.value)}
-                    placeholder="뱃지 (선택, 8자 안 — NEW · VIP · 오랜만이에요)"
+                    placeholder="뱃지 (선택, 8자 안: NEW · VIP · 오랜만이에요)"
                     className="w-full px-3 py-2 mb-2 bg-slate-900/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
                     maxLength={20}
                   />
@@ -2106,12 +2106,12 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                       onClick={() => { const c = convertToBlocks(editing); setEditing({ ...editing, ...c }); }}
                       className="w-full text-xs text-violet-100 bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 hover:from-violet-500/50 hover:to-fuchsia-500/50 border border-violet-400/30 rounded-lg py-2 flex items-center justify-center gap-1.5 transition-colors"
                     >
-                      <Wand2 className="w-3.5 h-3.5" /> 블록 에디터로 전환 (모던 메시지 — 권장)
+                      <Wand2 className="w-3.5 h-3.5" /> 블록 에디터로 전환 (모던 메시지, 권장)
                     </button>
                   )}
                   {isApp && (
                     <div className="text-[10px] text-white/40 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
-                      앱 인앱은 위 보장 요소(제목·본문·이미지·버튼·배지)가 그대로 앱에 표시됩니다 — 미리보기와 실물이 1:1로 일치합니다.
+                      앱 인앱은 위 보장 요소(제목·본문·이미지·버튼·배지)가 그대로 앱에 표시됩니다. 미리보기와 실물이 1:1로 일치합니다.
                     </div>
                   )}
                 </>
@@ -2139,7 +2139,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
             {SHOW_ELITE_TEMPLATES && eliteTemplates.length > 0 && !isApp && (
               <div className={activeTab === 'design' ? 'mb-5' : 'hidden'}>
                 <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                  <Sparkles className="w-3 h-3 text-amber-300" /> 정예 템플릿 — 목적으로 고르세요
+                  <Sparkles className="w-3 h-3 text-amber-300" /> 정예 템플릿: 목적으로 고르세요
                 </h4>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   {eliteTemplates.map((g) => (
@@ -2202,7 +2202,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                       })}
                     </div>
                     {isApp && editing.template !== 'full_image' && (
-                      <div className="text-[10px] text-white/40 mt-1.5">기본형 = 이미지·문구·버튼 카드 — 위치를 중앙 모달/바텀 시트로 나눕니다. 포스터형 = 전면 이미지 1장.</div>
+                      <div className="text-[10px] text-white/40 mt-1.5">기본형 = 이미지·문구·버튼 카드. 위치를 중앙 모달/바텀 시트로 나눕니다. 포스터형 = 전면 이미지 1장.</div>
                     )}
                     {editing.template === 'full_image' && (
                       <div className="text-[10px] text-white/40 mt-1.5">
@@ -2528,7 +2528,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     type="text"
                     value={editing.image_link_url || ''}
                     onChange={(e) => updateField('image_link_url', e.target.value || null)}
-                    placeholder="이미지를 누르면 이동할 주소 (https://…) — 비우면 이동 없음"
+                    placeholder="이미지를 누르면 이동할 주소 (https://…). 비우면 이동 없음"
                     className="w-full px-3 py-2 bg-slate-900/60 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
                   />
                 </div>
@@ -2553,8 +2553,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     hasOtherScheme || (isApp && !isHttpish && !domainLike)
                   );
                   const urlBadMsg = hasOtherScheme
-                    ? 'http/https 주소만 지원됩니다 — 저장 시 이 값은 제거되어 버튼이 무반응이 됩니다.'
-                    : '앱에서 열 수 없는 주소 형식입니다 — https:// 포함 전체 주소 또는 "연동 몰" 선택을 사용해주세요.';
+                    ? 'http/https 주소만 지원됩니다. 저장 시 이 값은 제거되어 버튼이 무반응이 됩니다.'
+                    : '앱에서 열 수 없는 주소 형식입니다. https:// 포함 전체 주소 또는 "연동 몰" 선택을 사용해주세요.';
                   // ★ 2026-07-19 (Harold) — 포스터형은 버튼 색을 버튼 행 바로 옆에 (배경/글자)
                   const posterBtn = editing.template === 'full_image';
                   return (
@@ -2656,7 +2656,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     onClick={() => updateField('buttons', [...(editing.buttons || []), {
                       id: `btn_${(editing.buttons || []).length}`,
                       label: '자세히 보기',
-                      action_url: '[URL — 회사 admin 수정]',
+                      action_url: '[URL: 회사 admin 수정]',
                       style: 'primary',
                       // ★ 2026-07-18 P1 — 버튼색 기본 = 브랜드 킷 색 (버튼만 브랜드 컬러 정책)
                       background_color: brandAccent || '#4f46e5',
@@ -2721,7 +2721,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               <div className="bg-slate-900/60 border border-white/10 rounded-lg p-3 space-y-2">
                 {editing.audience_filter && Object.keys(editing.audience_filter).length > 0 ? (
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] text-emerald-300">정밀 타겟 지정됨 — 이 조건에 맞는 회원에게만 표시</span>
+                    <span className="text-[11px] text-emerald-300">정밀 타겟 지정됨. 이 조건에 맞는 회원에게만 표시</span>
                     <div className="flex items-center gap-1.5">
                       <button onClick={() => setExtractOpen(true)} className="text-[11px] text-fuchsia-300 hover:text-fuchsia-200">다시 추출</button>
                       <button onClick={() => updateField('audience_filter', null)} className="text-[11px] text-white/40 hover:text-white/70">해제</button>
@@ -2824,7 +2824,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 <div className="mt-2 bg-slate-900/40 border border-white/10 rounded-lg p-2.5">
                   {editing.trigger_event === 'scroll' && (
                     <div>
-                      <label className="text-[10px] text-white/50 block mb-1">스크롤 도달 % (10~100 — 비우면 50%)</label>
+                      <label className="text-[10px] text-white/50 block mb-1">스크롤 도달 % (10~100, 비우면 50%)</label>
                       <input
                         type="number" min={10} max={100}
                         value={editing.trigger_conditions?.scroll_percent ?? ''}
@@ -2842,7 +2842,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   )}
                   {editing.trigger_event === 'time_on_page' && (
                     <div>
-                      <label className="text-[10px] text-white/50 block mb-1">체류 초 (5~600 — 비우면 10초)</label>
+                      <label className="text-[10px] text-white/50 block mb-1">체류 초 (5~600, 비우면 10초)</label>
                       <input
                         type="number" min={5} max={600}
                         value={editing.trigger_conditions?.time_on_page_seconds ?? ''}
@@ -3042,7 +3042,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                       </div>
                     </div>
                     {hasBlocks && <div className="text-[10px] text-white/40 mt-1.5">색상은 디자인 탭의 테마·강조색으로 정해집니다.</div>}
-                    {!hasBlocks && !showColors && <div className="text-[10px] text-white/40 mt-1.5">포스터형은 바닥이 흰색 고정 — 색은 버튼(브랜드 컬러)으로만 줍니다.</div>}
+                    {!hasBlocks && !showColors && <div className="text-[10px] text-white/40 mt-1.5">포스터형은 바닥이 흰색 고정. 색은 버튼(브랜드 컬러)으로만 줍니다.</div>}
                   </>
                 );
               })()}
@@ -3058,7 +3058,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
             {editing.channel === 'app' && (
               <div className="bg-sky-500/10 border border-sky-400/30 rounded-lg px-3 py-2 text-[11px] text-sky-200 flex items-start gap-1.5">
                 <Smartphone className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                <span>아래 미리보기 = <strong>앱 실렌더와 동일 요소</strong>(이미지·배지·제목·본문·버튼)만 표시 — 만든 그대로 앱에 뜹니다. (앱 SDK 연동 필요)</span>
+                <span>아래 미리보기 = <strong>앱 실렌더와 동일 요소</strong>(이미지·배지·제목·본문·버튼)만 표시. 만든 그대로 앱에 뜹니다. (앱 SDK 연동 필요)</span>
               </div>
             )}
             <div className="flex gap-1 flex-wrap">
@@ -3083,7 +3083,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 <>
                   샘플: {String(sampleCustomer.name || '고객')} · {String(sampleCustomer.grade || '-')} · {Number(sampleCustomer.points || 0).toLocaleString()}P
                   {samplePerson.is_sample
-                    ? <span className="text-amber-300/80"> · 가상 예시 — 고객 DB에 데이터가 쌓이면 실제 고객으로 바뀝니다</span>
+                    ? <span className="text-amber-300/80"> · 가상 예시. 고객 DB에 데이터가 쌓이면 실제 고객으로 바뀝니다</span>
                     : <span className="text-emerald-300/70"> · 실제 고객 DB{samplePerson.label === '타겟' ? ' (타겟 조건 최상단 고객)' : ''}</span>}
                 </>
               ) : (
@@ -3151,7 +3151,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
           <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-5xl w-full my-auto">
             <div className="sticky top-0 bg-slate-900/95 border-b border-white/10 px-6 py-4 flex items-start justify-between rounded-t-2xl">
               <div>
-                <h3 className="text-base font-bold text-white flex items-center gap-2"><Download className="w-4.5 h-4.5 text-violet-300" /> 테스트 이미지 저장 — 웹·앱 실물</h3>
+                <h3 className="text-base font-bold text-white flex items-center gap-2"><Download className="w-4.5 h-4.5 text-violet-300" /> 테스트 이미지 저장: 웹·앱 실물</h3>
                 <p className="text-[11px] text-white/50 mt-1">담당자에게 보낼 이미지입니다. 각 [이미지 저장]으로 PNG를 내려받아 이메일에 첨부하세요. (실제 발송이 아닙니다)</p>
               </div>
               <button onClick={() => setCaptureOpen(false)} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10 shrink-0" aria-label="닫기"><X className="w-5 h-5" /></button>
@@ -3226,7 +3226,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
             // ★ Codex C2 — 네이버 스마트스토어는 상품 API가 URL을 제공하지 않아 자동 연결 불가 (정직 안내)
             pickToast.warning(
               p.provider === 'naver'
-                ? '네이버 스마트스토어는 상품 URL을 제공하지 않아 자동 연결할 수 없습니다 — 이동 URL을 직접 입력해주세요.'
+                ? '네이버 스마트스토어는 상품 URL을 제공하지 않아 자동 연결할 수 없습니다. 이동 URL을 직접 입력해주세요.'
                 : '선택한 상품에 상품 페이지 URL이 없습니다. 다른 상품을 선택해주세요.',
             );
             return;
@@ -3242,8 +3242,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
             setEditing({ ...editing, ...patch });
             pickToast.success(
               filledImage
-                ? `"${p.name}" 연결 완료 — 이미지 클릭 링크와 이미지가 채워졌습니다.`
-                : `"${p.name}" 연결 완료 — 이미지 클릭 링크가 채워졌습니다.`,
+                ? `"${p.name}" 연결 완료. 이미지 클릭 링크와 이미지가 채워졌습니다.`
+                : `"${p.name}" 연결 완료. 이미지 클릭 링크가 채워졌습니다.`,
             );
             return;
           }
@@ -3264,8 +3264,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
           setEditing({ ...editing, ...patch });
           pickToast.success(
             filledImage
-              ? `"${p.name}" 연결 완료 — 이동 URL과 이미지가 채워졌습니다.`
-              : `"${p.name}" 연결 완료 — 이동 URL이 채워졌습니다.${products.length > 1 ? ' (첫 상품만 적용)' : ''}`,
+              ? `"${p.name}" 연결 완료. 이동 URL과 이미지가 채워졌습니다.`
+              : `"${p.name}" 연결 완료. 이동 URL이 채워졌습니다.${products.length > 1 ? ' (첫 상품만 적용)' : ''}`,
           );
         }}
       />
@@ -3324,7 +3324,7 @@ function DrillDownModal({ loading, stats, explain, viewers, messageTitle, onClos
             <>
               {/* Funnel */}
               <div className="bg-white/5 border border-white/10 rounded-xl p-4">
-                <h4 className="text-sm font-bold text-white mb-3">Funnel — impression → click → 24h 매핑 구매</h4>
+                <h4 className="text-sm font-bold text-white mb-3">Funnel: impression → click → 24h 매핑 구매</h4>
                 <div className="space-y-2">
                   {stats.funnel.steps.map((step, idx) => {
                     const colors = ['bg-indigo-500/40', 'bg-emerald-500/40', 'bg-rose-500/40', 'bg-amber-500/40'];
@@ -3349,14 +3349,14 @@ function DrillDownModal({ loading, stats, explain, viewers, messageTitle, onClos
                     24h 매핑 매출: <strong>{stats.funnel.attributedRevenueKrw.toLocaleString()}원</strong>
                   </div>
                 )}
-                <div className="text-[10px] text-white/30 italic mt-3">Data source — {stats.funnel.dataSource}</div>
+                <div className="text-[10px] text-white/30 italic mt-3">Data source: {stats.funnel.dataSource}</div>
               </div>
 
               {/* ★ 2026-07-06 누가 봤는지 — 식별 고객 목록 + 익명 합산 (절충안: 익명 다수 구조라 전 명단은 불가, 가능한 범위만 정직 표시) */}
               {viewers && (
                 <div className="bg-white/5 border border-white/10 rounded-xl p-4">
                   <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
-                    <h4 className="text-sm font-bold text-white">누가 봤는지 — 식별된 고객 {viewers.identifiedTotal.toLocaleString()}명</h4>
+                    <h4 className="text-sm font-bold text-white">누가 봤는지: 식별된 고객 {viewers.identifiedTotal.toLocaleString()}명</h4>
                     {viewers.viewers.length > 0 && (
                       <button
                         onClick={() => {
@@ -3390,13 +3390,13 @@ function DrillDownModal({ loading, stats, explain, viewers, messageTitle, onClos
                           <span className="ml-auto text-white/30">{v.lastSeenAt ? new Date(v.lastSeenAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</span>
                         </div>
                       ))}
-                      {viewers.viewers.length > 100 && <div className="px-3 py-2 text-[10px] text-white/40 text-center">외 {(viewers.viewers.length - 100).toLocaleString()}명 — CSV로 전체 확인</div>}
+                      {viewers.viewers.length > 100 && <div className="px-3 py-2 text-[10px] text-white/40 text-center">외 {(viewers.viewers.length - 100).toLocaleString()}명. CSV로 전체 확인</div>}
                     </div>
                   )}
                   <div className="mt-2.5 text-[11px] text-white/50">
-                    익명 방문자 <strong className="text-white/80">{viewers.anonymous.visitors.toLocaleString()}명</strong> — 표시 {viewers.anonymous.impressions.toLocaleString()} · 클릭 {viewers.anonymous.clicks.toLocaleString()} <span className="text-white/35">(비로그인 방문은 개인 식별이 불가해 합산으로만 표시)</span>
+                    익명 방문자 <strong className="text-white/80">{viewers.anonymous.visitors.toLocaleString()}명</strong>: 표시 {viewers.anonymous.impressions.toLocaleString()} · 클릭 {viewers.anonymous.clicks.toLocaleString()} <span className="text-white/35">(비로그인 방문은 개인 식별이 불가해 합산으로만 표시)</span>
                   </div>
-                  <div className="text-[10px] text-white/30 italic mt-2">Data source — cdp_inapp_impressions × customers(식별분) + 익명 합산 · purchases 7일 실측</div>
+                  <div className="text-[10px] text-white/30 italic mt-2">Data source: cdp_inapp_impressions × customers(식별분) + 익명 합산 · purchases 7일 실측</div>
                 </div>
               )}
 
@@ -3408,7 +3408,7 @@ function DrillDownModal({ loading, stats, explain, viewers, messageTitle, onClos
                     const maxCtr = Math.max(...stats.hourly.map((x) => x.ctr), 0.01);
                     const height = (h.ctr / maxCtr) * 100;
                     return (
-                      <div key={h.hour} className="flex flex-col justify-end" title={`${h.hour}시 — CTR ${(h.ctr * 100).toFixed(1)}% / ${h.impressions}건`}>
+                      <div key={h.hour} className="flex flex-col justify-end" title={`${h.hour}시: CTR ${(h.ctr * 100).toFixed(1)}% / ${h.impressions}건`}>
                         <div className="bg-gradient-to-t from-violet-500 to-fuchsia-500 rounded-t" style={{ height: `${Math.max(height, 2)}%` }} />
                       </div>
                     );
@@ -3419,7 +3419,7 @@ function DrillDownModal({ loading, stats, explain, viewers, messageTitle, onClos
                     <div key={h.hour} className="col-span-3">{h.hour}시</div>
                   ))}
                 </div>
-                <div className="text-[10px] text-white/30 italic mt-2">Data source — cdp_inapp_impressions KST 시간대별 집계</div>
+                <div className="text-[10px] text-white/30 italic mt-2">Data source: cdp_inapp_impressions KST 시간대별 집계</div>
               </div>
 
               {/* 디바이스 */}
@@ -3434,7 +3434,7 @@ function DrillDownModal({ loading, stats, explain, viewers, messageTitle, onClos
                     </div>
                   ))}
                 </div>
-                <div className="text-[10px] text-white/30 italic mt-2">Data source — 추정 분포 (D215+ 첫 단계 — 정확한 user_agent 매핑은 추후 강화)</div>
+                <div className="text-[10px] text-white/30 italic mt-2">Data source: 추정 분포 (첫 단계, 정확한 user_agent 매핑은 추후 강화)</div>
               </div>
             </>
           )}
@@ -3470,7 +3470,7 @@ function DrillDownModal({ loading, stats, explain, viewers, messageTitle, onClos
                         style={{ width: `${f.impact * 100}%` }}
                       />
                     </div>
-                    <div className="text-[10px] text-white/30 italic">Data source — {f.dataSource}</div>
+                    <div className="text-[10px] text-white/30 italic">Data source: {f.dataSource}</div>
                   </div>
                 ))}
               </div>
@@ -3517,12 +3517,12 @@ function newBlock(type: string): any {
     case 'headline': return { type, text: '', size: 'lg' };
     case 'body': return { type, text: '' };
     case 'bullets': return { type, items: [{ icon: 'check', text: '' }] };
-    case 'benefit': return { type, text: '[혜택 안내 — 직접 작성해주세요]' };
+    case 'benefit': return { type, text: '[혜택 안내: 직접 작성해주세요]' };
     case 'rating': return { type, value: 4.5, count: 0, label: '후기' };
     case 'product': return { type, name: '', meta: '' };
     case 'media': return { type, variant: 'icon', icon: 'gift' };
     case 'countdown': return { type, ends_at: '', label: '마감까지' };
-    case 'cta_group': return { type, layout: 'stack', buttons: [{ id: 'btn_primary', label: '자세히 보기', action_url: '[URL — 회사 admin 수정]', style: 'primary' }] };
+    case 'cta_group': return { type, layout: 'stack', buttons: [{ id: 'btn_primary', label: '자세히 보기', action_url: '[URL: 회사 admin 수정]', style: 'primary' }] };
     case 'divider': return { type };
     case 'spacer': return { type, size: 'md' };
     case 'footer': return { type, text: '' };
@@ -3671,7 +3671,7 @@ function PosterSlidesEditor({ slides, onChange, uploadImage }: { slides: any[]; 
         <span className="text-[11px] font-bold text-white/70 flex items-center gap-1.5"><Layers className="w-3 h-3" /> 추가 슬라이드 (좌우 스와이프)</span>
         <span className="text-[10px] text-white/35">{list.length > 0 ? `총 ${list.length + 1}장` : '단일 포스터'}</span>
       </div>
-      <p className="text-[10px] text-white/40 mb-2">위 이미지·문구가 <strong className="text-white/60">첫 장</strong>입니다. 장을 추가하면 좌우로 넘겨보는 카드가 됩니다 — 각 장은 자기 이미지·문구·버튼을 가집니다.</p>
+      <p className="text-[10px] text-white/40 mb-2">위 이미지·문구가 <strong className="text-white/60">첫 장</strong>입니다. 장을 추가하면 좌우로 넘겨보는 카드가 됩니다. 각 장은 자기 이미지·문구·버튼을 가집니다.</p>
       {list.map((s, i) => (
         <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-3 mb-2">
           <div className="flex items-center justify-between mb-2">
@@ -3816,7 +3816,7 @@ function BlockComposer({ blocks, onChange, uploadImage, template }: { blocks: an
                 {/* ★ 2026-07-17 템플릿 미허용 블록 = 실물에서 조용히 사라짐(SDK 필터) → 정직 경고 (조용한 소실 차단) */}
                 {b?.type && !isInAppBlockAllowed(template, String(b.type)) && (
                   <div className="mb-1.5 bg-amber-500/10 border border-amber-400/30 rounded px-2 py-1.5 text-[10px] text-amber-100">
-                    현재 표시 형태에서는 이 블록이 표시되지 않습니다 — 형태를 바꾸거나 블록을 제거해주세요.
+                    현재 표시 형태에서는 이 블록이 표시되지 않습니다. 형태를 바꾸거나 블록을 제거해주세요.
                   </div>
                 )}
                 <BlockEditor block={b} onChange={(patch) => update(i, patch)} uploadImage={uploadImage} />
@@ -3939,7 +3939,7 @@ function RemainBadge({ endsAt }: { endsAt: string }) {
   }, [end]);
   if (!isFinite(end)) return <span className="text-[10px] text-white/40">마감 시각을 설정하면 남은 시간이 표시됩니다</span>;
   const remain = end - now;
-  if (remain <= 0) return <span className="text-[10px] text-rose-300">이미 지난 시각 — 자사몰에 표시되지 않습니다</span>;
+  if (remain <= 0) return <span className="text-[10px] text-rose-300">이미 지난 시각. 자사몰에 표시되지 않습니다</span>;
   const s = Math.floor(remain / 1000);
   const d = Math.floor(s / 86400);
   const h = Math.floor((s % 86400) / 3600);
@@ -4013,7 +4013,7 @@ function BlockEditor({ block, onChange, uploadImage }: { block: any; onChange: (
     case 'benefit':
       return (
         <div>
-          <textarea value={b.text || ''} onChange={(e) => onChange({ text: e.target.value })} placeholder="[혜택 안내 — 직접 작성해주세요]" className={`${COMPOSER_INPUT} resize-y h-14`} />
+          <textarea value={b.text || ''} onChange={(e) => onChange({ text: e.target.value })} placeholder="[혜택 안내: 직접 작성해주세요]" className={`${COMPOSER_INPUT} resize-y h-14`} />
           <div className="text-[10px] text-amber-200/70 mt-1">혜택은 회사 정책에 맞게 직접 작성하세요. placeholder 그대로면 저장이 막힙니다.</div>
         </div>
       );
@@ -4023,7 +4023,7 @@ function BlockEditor({ block, onChange, uploadImage }: { block: any; onChange: (
       return (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-white/40">별점 (클릭 — 반쪽 = 0.5)</span>
+            <span className="text-[10px] text-white/40">별점 (클릭, 반쪽 = 0.5)</span>
             <StarInput value={Number(b.value ?? 0)} onChange={(v) => onChange({ value: v })} />
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -4111,7 +4111,7 @@ function BlockEditor({ block, onChange, uploadImage }: { block: any; onChange: (
     case 'countdown':
       return (
         <div className="space-y-1.5">
-          <div className="text-[10px] text-white/50 mb-1">마감 시각 — 날짜는 캘린더, 시간은 직접 입력</div>
+          <div className="text-[10px] text-white/50 mb-1">마감 시각: 날짜는 캘린더, 시간은 직접 입력</div>
           <DateTimeField value={b.ends_at || ''} onChange={(iso) => onChange({ ends_at: iso })} tone="dark" />
           <div className="flex items-center gap-2">
             <input type="text" value={b.label || ''} onChange={(e) => onChange({ label: e.target.value })} placeholder="라벨 (마감까지)" className={`${COMPOSER_INPUT} w-40`} />
@@ -4150,7 +4150,7 @@ function BlockEditor({ block, onChange, uploadImage }: { block: any; onChange: (
             );
           })}
           {(b.buttons || []).length < 3 && (
-            <button onClick={() => onChange({ buttons: [...(b.buttons || []), { id: `btn_${(b.buttons || []).length}`, label: '버튼', action_url: '[URL — 회사 admin 수정]', style: 'secondary' }] })} className="text-[11px] text-violet-300 hover:bg-violet-500/10 px-2 py-1 rounded flex items-center gap-1"><Plus className="w-3 h-3" /> 버튼 추가</button>
+            <button onClick={() => onChange({ buttons: [...(b.buttons || []), { id: `btn_${(b.buttons || []).length}`, label: '버튼', action_url: '[URL: 회사 admin 수정]', style: 'secondary' }] })} className="text-[11px] text-violet-300 hover:bg-violet-500/10 px-2 py-1 rounded flex items-center gap-1"><Plus className="w-3 h-3" /> 버튼 추가</button>
           )}
         </div>
       );

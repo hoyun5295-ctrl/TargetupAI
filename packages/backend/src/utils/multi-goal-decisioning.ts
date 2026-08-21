@@ -80,10 +80,10 @@ export async function analyzeGoalConflicts(input: {
           conflicts: [],
           priority: 1,
           shouldExecute: true,
-          reasoning: '단일 목표 — 충돌 분석 불필요.',
+          reasoning: '단일 목표. 충돌 분석 불필요.',
         },
       ],
-      overallStrategy: `단일 목표 "${goals[0].name}" 분석 완료 — 표준 흐름 진행.`,
+      overallStrategy: `단일 목표 "${goals[0].name}" 분석 완료. 표준 흐름 진행.`,
       conflictMatrix: '단일 목표라 충돌 매트릭스 불필요.',
       recommendedOrder: [goals[0].name],
       analyzedAt: new Date(),
@@ -93,7 +93,7 @@ export async function analyzeGoalConflicts(input: {
   const systemPrompt = buildSystemPrompt(companyInfo, customerStats);
   const userMessage = `다음 ${goals.length}개 목표의 충돌을 분석하고 진행 순서를 도출해주세요:
 
-${goals.map((g, i) => `${i + 1}. "${g.name}" (가중치 ${g.weight}${g.description ? ` — ${g.description}` : ''})`).join('\n')}
+${goals.map((g, i) => `${i + 1}. "${g.name}" (가중치 ${g.weight}${g.description ? `: ${g.description}` : ''})`).join('\n')}
 
 각 목표에 대해 sub_plan을 생성하고, 다른 목표와의 충돌 영역(동일 고객 동시 발송 / 메시지 중복 / 시점 겹침 등)을 분석해주세요.
 응답은 반드시 valid JSON으로만 응답해주세요 (다른 텍스트 X).`;
@@ -169,7 +169,7 @@ function buildSystemPrompt(companyInfo: any, customerStats: any): string {
 4. overall_strategy: 사용자 노출용 통합 전략 (한국어, 3~5 문장)
 5. conflict_matrix: 사용자 노출용 충돌 매트릭스 (markdown 표)
 6. 한국 SMB 마케팅 영역 정합 (정보통신망법 + 카카오 정책 + 통신사 스팸 정책)
-7. AI 단독 실행 X — 본 분석은 추천만 제공, 발송은 사용자 승인 후
+7. AI 단독 실행 X. 본 분석은 추천만 제공, 발송은 사용자 승인 후
 
 응답 형식 (valid JSON only, 다른 텍스트 X):
 {
@@ -179,7 +179,7 @@ function buildSystemPrompt(companyInfo: any, customerStats: any): string {
       "target_criteria": "VIP 등급 + 최근 30일 미구매 고객",
       "channel_recommended": "알림톡",
       "timing_recommended": "화/목 오후 2시 (KST)",
-      "conflicts": ["휴면 회수 목표와 동일 고객 겹칠 수 있음 — 등급 우선 적용"],
+      "conflicts": ["휴면 회수 목표와 동일 고객 겹칠 수 있음. 등급 우선 적용"],
       "priority": 1,
       "should_execute": true,
       "reasoning": "VIP 가중치 0.5로 최우선 적용"
@@ -201,13 +201,13 @@ function fallbackAnalysis(goals: OperatorGoal[]): MultiGoalAnalysis {
       targetCriteria: g.description || g.name,
       channelRecommended: 'SMS',
       timingRecommended: '오후 2~4시 (KST)',
-      conflicts: idx > 0 ? [`${sorted[0].name}과 동일 고객 겹칠 가능성 — 우선순위 적용`] : [],
+      conflicts: idx > 0 ? [`${sorted[0].name}과 동일 고객 겹칠 가능성. 우선순위 적용`] : [],
       priority: idx + 1,
       shouldExecute: true,
       reasoning: `가중치 ${g.weight} 기반 fallback 적용 (AI 분석 실패)`,
     })),
-    overallStrategy: `${goals.length}개 목표를 가중치 기반으로 정렬 (AI 충돌 분석 실패 — 표준 흐름 fallback).`,
-    conflictMatrix: 'AI 분석 실패 — 충돌 매트릭스를 도출하지 못했습니다. 사용자 직접 검토 진행해주세요.',
+    overallStrategy: `${goals.length}개 목표를 가중치 기반으로 정렬 (AI 충돌 분석 실패, 표준 흐름 fallback).`,
+    conflictMatrix: 'AI 분석 실패. 충돌 매트릭스를 도출하지 못했습니다. 사용자 직접 검토 진행해주세요.',
     recommendedOrder: sorted.map((g) => g.name),
     analyzedAt: new Date(),
   };

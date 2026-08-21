@@ -144,7 +144,7 @@ export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): 
       for (const f of explanation.factors.slice(0, 6)) {
         if (y > 740) { doc.addPage(); y = 50; }
         const dir = f.direction === 'positive' ? '▲' : f.direction === 'negative' ? '▼' : '-';
-        doc.fillColor(dark).text(`${dir} ${f.label} (${Math.round(f.impactScore * 100)}%) — ${f.detail}`, 60, y, { width: 485 }); y += 14;
+        doc.fillColor(dark).text(`${dir} ${f.label} (${Math.round(f.impactScore * 100)}%): ${f.detail}`, 60, y, { width: 485 }); y += 14;
       }
       y += 4;
     }
@@ -180,7 +180,7 @@ export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): 
   else {
     for (const [hour, a] of hourRows) {
       const sr = a.sent > 0 ? a.success / a.sent : 0;
-      doc.fillColor(dark).text(`${hour}시 — 발송 ${a.sent.toLocaleString()}건 / 성공률 ${pctStr(sr)}`, 50, y); y += 15;
+      doc.fillColor(dark).text(`${hour}시: 발송 ${a.sent.toLocaleString()}건 / 성공률 ${pctStr(sr)}`, 50, y); y += 15;
     }
   }
   y += 12;
@@ -202,8 +202,8 @@ export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): 
     setFont(false); doc.fontSize(9).fillColor(dark);
     for (const w of attribution.windows) {
       const line = attribution.hasCdpData
-        ? `발송 후 ${w.windowLabel} — CDP 구매 ${w.cdpPurchaseCount.toLocaleString()}건 / 매출 ${won(w.cdpRevenue)}`
-        : `발송 후 ${w.windowLabel} — 구매 고객 ${w.customerPurchaseCount.toLocaleString()}명 (CDP 미연동 추정)`;
+        ? `발송 후 ${w.windowLabel}: CDP 구매 ${w.cdpPurchaseCount.toLocaleString()}건 / 매출 ${won(w.cdpRevenue)}`
+        : `발송 후 ${w.windowLabel}: 구매 고객 ${w.customerPurchaseCount.toLocaleString()}명 (CDP 미연동 추정)`;
       doc.text(line, 50, y); y += 15;
     }
     y += 8;
@@ -216,7 +216,7 @@ export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): 
     setFont(false); doc.fontSize(9).fillColor(dark);
     doc.text(`기간 내 수신 고객 ${recipientAttribution.totalRecipients.toLocaleString()}명`, 50, y); y += 15;
     for (const w of recipientAttribution.windows) {
-      doc.text(`수신 후 ${w.windowLabel} — 구매 고객 ${w.buyers.toLocaleString()}명 / 구매 ${w.purchases.toLocaleString()}건 / 매출 ${won(w.revenue)}`, 50, y); y += 15;
+      doc.text(`수신 후 ${w.windowLabel}: 구매 고객 ${w.buyers.toLocaleString()}명 / 구매 ${w.purchases.toLocaleString()}건 / 매출 ${won(w.revenue)}`, 50, y); y += 15;
     }
     y += 8;
   }
@@ -228,7 +228,7 @@ export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): 
     setFont(false); doc.fontSize(9).fillColor(dark);
     for (const g of gradePerformance.slice(0, 8)) {
       if (y > 760) { doc.addPage(); y = 50; }
-      doc.text(`· ${g.grade} — 여정 ${g.journeySent.toLocaleString()}건 / DM ${g.dmSent.toLocaleString()}명(열람 ${g.dmViewers.toLocaleString()}) / 이메일 클릭 ${g.emailClickers.toLocaleString()} / 구매 ${g.buyers.toLocaleString()}명 / 매출 ${won(g.revenue)}`, 60, y, { width: 485 }); y += 14;
+      doc.text(`· ${g.grade}: 여정 ${g.journeySent.toLocaleString()}건 / DM ${g.dmSent.toLocaleString()}명(열람 ${g.dmViewers.toLocaleString()}) / 이메일 클릭 ${g.emailClickers.toLocaleString()} / 구매 ${g.buyers.toLocaleString()}명 / 매출 ${won(g.revenue)}`, 60, y, { width: 485 }); y += 14;
     }
     setFont(false); doc.fontSize(8).fillColor(gray);
     doc.text('여정·DM = 고객 단위 정확 매칭 / 이메일 = 반응자 기준 / SMS 캠페인 발송분은 채널 성과 절 참조', 60, y); y += 16;
@@ -241,7 +241,7 @@ export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): 
     setFont(false); doc.fontSize(9).fillColor(dark);
     doc.text(`평균 30일 잔존율 ${pctStr(cohort.avgM1Rate)} · 90일 잔존율 ${pctStr(cohort.avgM3Rate)}`, 50, y); y += 15;
     for (const c of cohort.cohorts.slice(0, 6)) {
-      doc.text(`${c.cohortMonth} — 가입 ${c.totalCustomers.toLocaleString()}명 / 30일 ${pctStr(c.m1Rate)} / 90일 ${pctStr(c.m3Rate)}`, 50, y); y += 14;
+      doc.text(`${c.cohortMonth}: 가입 ${c.totalCustomers.toLocaleString()}명 / 30일 ${pctStr(c.m1Rate)} / 90일 ${pctStr(c.m3Rate)}`, 50, y); y += 14;
     }
     y += 8;
   }
@@ -256,25 +256,25 @@ export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): 
       setFont(false); doc.fontSize(9);
       for (const s of segment.rfm.segments.slice(0, 8)) {
         if (y > 760) { doc.addPage(); y = 50; }
-        doc.fillColor(dark).text(`· ${s.label} — ${s.count.toLocaleString()}명 (${s.pct.toFixed(1)}%) / 평균 구매액 ${won(s.avgMonetary)}`, 60, y, { width: 485 }); y += 14;
+        doc.fillColor(dark).text(`· ${s.label}: ${s.count.toLocaleString()}명 (${s.pct.toFixed(1)}%) / 평균 구매액 ${won(s.avgMonetary)}`, 60, y, { width: 485 }); y += 14;
       }
       y += 4;
     } else {
-      setFont(false); doc.fontSize(9).fillColor(gray).text('RFM — 데이터 부족 (구매 이력 데이터 필요)', 60, y); y += 16;
+      setFont(false); doc.fontSize(9).fillColor(gray).text('RFM: 데이터 부족 (구매 이력 데이터 필요)', 60, y); y += 16;
     }
     if (segment.byGrade.length > 0) {
       if (y > 700) { doc.addPage(); y = 50; }
       setFont(true); doc.fontSize(10).fillColor(dark).text('등급 분포', 50, y); y += 15;
       setFont(false); doc.fontSize(9);
       for (const g of segment.byGrade.slice(0, 6)) {
-        doc.fillColor(dark).text(`· ${g.grade} — ${g.count.toLocaleString()}명 (${g.pct.toFixed(1)}%)`, 60, y); y += 14;
+        doc.fillColor(dark).text(`· ${g.grade}: ${g.count.toLocaleString()}명 (${g.pct.toFixed(1)}%)`, 60, y); y += 14;
       }
       y += 4;
     }
     if (segment.ltvAvailable && segment.avgLtv != null) {
       setFont(false); doc.fontSize(9).fillColor(dark).text(`평균 LTV 스코어 ${Math.round(segment.avgLtv).toLocaleString()}`, 50, y); y += 16;
     } else {
-      setFont(false); doc.fontSize(9).fillColor(gray).text('LTV 스코어 — 데이터 부족', 50, y); y += 16;
+      setFont(false); doc.fontSize(9).fillColor(gray).text('LTV 스코어: 데이터 부족', 50, y); y += 16;
     }
     y += 6;
   }
@@ -290,7 +290,7 @@ export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): 
     } else {
       for (const t of multidim.byType) {
         if (y > 760) { doc.addPage(); y = 50; }
-        doc.fillColor(dark).text(`· ${t.label} — 발송 ${t.sent.toLocaleString()}건 / 성공률 ${pctStr(t.successRate)} (캠페인 ${t.campaigns}건)`, 60, y, { width: 485 }); y += 14;
+        doc.fillColor(dark).text(`· ${t.label}: 발송 ${t.sent.toLocaleString()}건 / 성공률 ${pctStr(t.successRate)} (캠페인 ${t.campaigns}건)`, 60, y, { width: 485 }); y += 14;
       }
     }
     y += 4;
@@ -314,7 +314,7 @@ export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): 
       for (const t of message.byType) {
         if (y > 760) { doc.addPage(); y = 50; }
         const costStr = t.estimatedCost != null ? ` / 추정 비용 ${won(t.estimatedCost)}` : ' / 비용 데이터 부족';
-        doc.fillColor(dark).text(`· ${t.label} — 발송 ${t.sent.toLocaleString()}건 / 성공률 ${pctStr(t.successRate)}${costStr}`, 60, y, { width: 485 }); y += 14;
+        doc.fillColor(dark).text(`· ${t.label}: 발송 ${t.sent.toLocaleString()}건 / 성공률 ${pctStr(t.successRate)}${costStr}`, 60, y, { width: 485 }); y += 14;
       }
     }
     y += 4;
@@ -339,13 +339,13 @@ export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): 
         doc.fillColor(dark).text(`다음 동일 기간 예상 발송 ${Math.round(tr.projectedNextPeriod).toLocaleString()}건 (실측 추세 기준)`, 50, y); y += 14;
       }
     } else {
-      doc.fillColor(gray).text('발송 추세 — 데이터 부족 (최소 3일 발송 필요)', 50, y); y += 14;
+      doc.fillColor(gray).text('발송 추세: 데이터 부족 (최소 3일 발송 필요)', 50, y); y += 14;
     }
     setFont(false); doc.fontSize(8).fillColor(gray).text('매출 예측은 자사몰 매출 연동 데이터가 필요합니다.', 50, y); y += 16;
     const mo = forecast.missed;
     if (y > 720) { doc.addPage(); y = 50; }
     setFont(true); doc.fontSize(10).fillColor(dark).text('놓친 기회', 50, y); y += 15;
-    setFont(false); doc.fontSize(9).fillColor(dark).text(`이탈위험 ${mo.atRiskCount.toLocaleString()}명 · 휴면 ${mo.dormantCount.toLocaleString()}명 — 재참여 캠페인 대상`, 60, y); y += 14;
+    setFont(false); doc.fontSize(9).fillColor(dark).text(`이탈위험 ${mo.atRiskCount.toLocaleString()}명 · 휴면 ${mo.dormantCount.toLocaleString()}명: 재참여 캠페인 대상`, 60, y); y += 14;
     setFont(false); doc.fontSize(8).fillColor(gray).text('잠재 회복 매출은 구매 데이터 연동 시 산출됩니다.', 60, y); y += 16;
     y += 4;
   }
@@ -366,13 +366,13 @@ export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): 
 
   // 부록 — 데이터 출처 / 부족 항목
   if (y > 680) { doc.addPage(); y = 50; }
-  setFont(true); doc.fontSize(11).fillColor(primary).text('부록 — 데이터 출처', 50, y); y += 16;
+  setFont(true); doc.fontSize(11).fillColor(primary).text('부록: 데이터 출처', 50, y); y += 16;
   setFont(false); doc.fontSize(8).fillColor(gray);
   doc.text(`· 발송 성과: campaigns 발송일 기준 (${snapshot.source})`, 50, y); y += 11;
   doc.text('· 세그먼트/RFM/등급/LTV: customers (구매 이력·등급·LTV 보유분)', 50, y); y += 11;
-  doc.text('· 매출/퍼널/기여/반응: 자사몰 연동(CDP) 데이터 — 미연동 시 데이터 부족으로 표기', 50, y); y += 11;
+  doc.text('· 매출/퍼널/기여/반응: 자사몰 연동(CDP) 데이터, 미연동 시 데이터 부족으로 표기', 50, y); y += 11;
   doc.text('· 모든 추정치는 실측에서만 산출하며 임의 상수를 쓰지 않습니다.', 50, y); y += 14;
 
   // Source caption
-  setFont(false); doc.fontSize(8).fillColor(gray).text(`Data source — ${snapshot.source} · ${today} 생성`, 50, y);
+  setFont(false); doc.fontSize(8).fillColor(gray).text(`Data source: ${snapshot.source} · ${today} 생성`, 50, y);
 }

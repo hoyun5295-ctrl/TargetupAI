@@ -229,7 +229,7 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
     return res.json({
       success: true,
       images,
-      benefitNotice: benefitInHint ? '혜택 문구는 문구 칸(라벨·헤드라인·부제)에 입력해주세요 — 장면 힌트에는 장면 묘사만 들어가요.' : null,
+      benefitNotice: benefitInHint ? '혜택 문구는 문구 칸(라벨·헤드라인·부제)에 입력해주세요. 장면 힌트에는 장면 묘사만 들어가요.' : null,
     });
   } catch (err) {
     return respondStudioError(res, err);
@@ -515,7 +515,7 @@ imageStudioRouter.post('/save', async (req: any, res: Response) => {
     return res.json({ success: true, asset: { id: assetId, url: moved.url, bytes: moved.bytes, channelSpec: effectiveSpec } });
   } catch (err: any) {
     if (isAssetsTableMissing(err)) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 cdp_assets 테이블 확인 요청 의무', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 cdp_assets 테이블 확인 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     return respondStudioError(res, err);
   }
@@ -562,7 +562,7 @@ imageStudioRouter.post('/mms-from-asset', async (req: any, res: Response) => {
     });
   } catch (err: any) {
     if (isAssetsTableMissing(err)) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 cdp_assets 테이블 확인 요청 의무', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 cdp_assets 테이블 확인 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     return respondStudioError(res, err);
   }

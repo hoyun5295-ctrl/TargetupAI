@@ -140,7 +140,7 @@ async function processAnchorJourney(j: AnchorJourneyRow, now: Date): Promise<{ d
         `UPDATE journeys SET status = 'paused', paused_at = NOW(),
            pause_reason = $2, updated_at = NOW()
          WHERE id = $1::uuid AND status = 'active' AND start_kind = 'date_anchor'`,
-        [j.id, '지정일 D-0 발송 완료 — 다음 기준 날짜 지정 시 재가동'],
+        [j.id, '지정일 D-0 발송 완료. 다음 기준 날짜 지정 시 재가동'],
       );
       console.log(`[JourneyAnchor] 여정=${j.id} D-0 완료 → 자동 정지(none)`);
     }
@@ -165,7 +165,7 @@ async function dispatchAnchorStep(
     await query(
       `UPDATE journeys SET status = 'paused', paused_at = NOW(), pause_reason = $2, updated_at = NOW()
        WHERE id = $1::uuid AND status = 'active'`,
-      [j.id, `대량 진입 감지 (${ids.length}건 > 상한 ${Number(cap)}건) — 자동 정지, 담당자 확인 필요`],
+      [j.id, `대량 진입 감지 (${ids.length}건 > 상한 ${Number(cap)}건). 자동 정지, 담당자 확인 필요`],
     );
     console.warn(`[JourneyAnchor] 대량 차단 — journey=${j.id} step=${step.step_order} 후보=${ids.length} 상한=${cap} → 정지`);
     return { enqueued: 0 };
@@ -257,7 +257,7 @@ export async function dispatchOneShotJourney(companyId: string, journeyId: strin
     await query(
       `UPDATE journeys SET status = 'paused', paused_at = NOW(), pause_reason = $2, updated_at = NOW()
        WHERE id = $1::uuid AND status = 'active'`,
-      [journeyId, `대량 진입 감지 (${ids.length}건 > 상한 ${Number(cap)}건) — 자동 정지, 담당자 확인 필요`],
+      [journeyId, `대량 진입 감지 (${ids.length}건 > 상한 ${Number(cap)}건). 자동 정지, 담당자 확인 필요`],
     );
     return { enqueued: 0, reason: 'threshold_exceeded' };
   }

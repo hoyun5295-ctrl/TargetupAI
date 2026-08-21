@@ -335,7 +335,7 @@ router.get('/send/export', async (req: Request, res: Response) => {
     //   검증은 정규화(trim)된 날짜를 돌려주며, 이후 전 경로(웹·에이전트 조회·파일명)가 그 값을 쓴다.
     const dateCheck = validateStatsDateRange(startDate, endDate);
     if (!dateCheck.ok) {
-      return res.status(400).json({ error: `발송통계 엑셀 — ${dateCheck.error}` });
+      return res.status(400).json({ error: `발송통계 엑셀: ${dateCheck.error}` });
     }
     startDate = dateCheck.startDate;
     endDate = dateCheck.endDate;

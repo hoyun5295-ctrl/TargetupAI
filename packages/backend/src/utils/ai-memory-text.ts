@@ -27,7 +27,7 @@ export function composeCampaignLearningText(input: CampaignLearningTextInput): s
     const name = input.campaignName || '캠페인';
     return `${input.channel} 채널 + "${name}" 캠페인 발송 결과 → 클릭률 ${clickPct}%${conversionClause} (${input.sentCount}명 발송)`;
   }
-  return `${input.channel} 채널 최근 캠페인 성과 — 클릭률 ${clickPct}%${conversionClause}`;
+  return `${input.channel} 채널 최근 캠페인 성과: 클릭률 ${clickPct}%${conversionClause}`;
 }
 
 /**
@@ -65,7 +65,7 @@ export function composeDmEngagementText(input: DmEngagementTextInput): string {
   ];
   if (input.respondedCount > 0) parts.push(`응모·액션 ${input.respondedCount}명`);
   const top = input.topSectionLabel ? ` / 최다 반응 섹션: ${input.topSectionLabel}` : '';
-  return `모바일DM "${input.dmTitle}" 결과 — ${parts.join('·')}${top} (실측)`;
+  return `모바일DM "${input.dmTitle}" 결과: ${parts.join('·')}${top} (실측)`;
 }
 
 /**
@@ -90,7 +90,7 @@ export function composeEmailEngagementText(input: EmailEngagementTextInput): str
   const clickClause = input.clickCount > 0 && input.sentCount > 0
     ? ` / 클릭률 ${((input.clickCount / input.sentCount) * 100).toFixed(1)}%`
     : '';
-  return `이메일 "${input.name}" — ${input.sentCount}명 발송·오픈율 ${openPct}%${clickClause} (실측)`;
+  return `이메일 "${input.name}": ${input.sentCount}명 발송·오픈율 ${openPct}%${clickClause} (실측)`;
 }
 
 /** 이메일 학습 게이트 — 오픈 실측 표본이 있어야만 기록. */
@@ -166,7 +166,7 @@ export function diffGuideline(prev: GuidelineSnapshot | null, next: GuidelineSna
     parts.push(`평균 길이 ${prev.avg_length_chars}→${next.avg_length_chars}자`);
   }
 
-  return { summary: `브랜드 톤 변화 — ${parts.join(', ')}`, changedFields };
+  return { summary: `브랜드 톤 변화: ${parts.join(', ')}`, changedFields };
 }
 
 // ════════════════════════════════════════════════════════════════════

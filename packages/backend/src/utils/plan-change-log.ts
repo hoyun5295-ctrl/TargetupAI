@@ -317,7 +317,7 @@ export async function adjustPlanCreditsWithClient(
     [
       companyId, adjustment, `plan-prorate:${companyId}:${today}:${entitlement}:${granted}`,
       baseAfter, purchased,
-      `요금제 변경 일할 조정 — 이 달 권리 ${entitlement} / 기부여 ${granted}`,
+      `요금제 변경 일할 조정: 이 달 권리 ${entitlement} / 기부여 ${granted}`,
     ],
   );
 

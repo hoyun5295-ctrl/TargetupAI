@@ -269,7 +269,7 @@ async function notifyJourneyResultsToManagers(): Promise<void> {
       const isLastStep = stepOrder === totalSteps;
       const resultLine = countsKnown
         ? '성공: ' + successCount + '건 / 실패: ' + failedCount + '건' + (pendingCount > 0 ? ' / 대기: ' + pendingCount + '건' : '')
-        : '결과 집계 전 — 발송결과 화면에서 확인해 주세요';
+        : '결과 집계 전. 발송결과 화면에서 확인해 주세요';
       const lmsBody = [
         '[여정 발송 결과]',
         '',
@@ -278,7 +278,7 @@ async function notifyJourneyResultsToManagers(): Promise<void> {
         '대상: ' + targetCount + '명',
         resultLine,
         '',
-        isLastStep ? '여정 완료 — 다음 step 없음' : '다음 step 자동 진행 예정',
+        isLastStep ? '여정 완료: 다음 step 없음' : '다음 step 자동 진행 예정',
       ].join('\n');
 
       const authTable = await getAuthSmsTable();

@@ -226,7 +226,7 @@ export default function JourneyVariantsEditor({
   const handleAutoGenerate = async () => {
     if (isReadOnly) return;
     if (!defaultMessageTemplate || defaultMessageTemplate.trim().length < 10) {
-      setError('base 메시지 영역 10자 이상 의무 — step 본문 영역 먼저 작성해주세요.');
+      setError('base 메시지 영역 10자 이상 의무. step 본문 영역 먼저 작성해주세요.');
       return;
     }
     setAutoGenerating(true);
@@ -344,7 +344,7 @@ export default function JourneyVariantsEditor({
       <div className="text-[11px] text-violet-200/60 leading-relaxed">
         Variant A/B/C에 다른 메시지를 작성하면 Thompson Sampling이 누적 발송 결과(클릭/전환)를 학습하여 자동으로 최선의 variant를 선택합니다.
         <br />
-        <span className="text-amber-300/70">구체 혜택(%·원·쿠폰)은 AI가 임의로 만들지 않아요 — 관리자가 직접 작성해주세요.</span>
+        <span className="text-amber-300/70">구체 혜택(%·원·쿠폰)은 AI가 임의로 만들지 않아요. 관리자가 직접 작성해주세요.</span>
       </div>
 
       {/* ★ D211+ Phase A 3번 (2026-05-23 Harold 명시): AI 자동 생성 영역 — 3 톤 (감성/실용/캐주얼) */}
@@ -352,7 +352,7 @@ export default function JourneyVariantsEditor({
         <div className="p-2.5 bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 border border-violet-400/20 rounded-lg">
           <div className="flex items-center gap-2 mb-1.5">
             <Sparkles className="w-3.5 h-3.5 text-violet-300" />
-            <span className="text-[11px] font-semibold text-violet-100">AI 자동 생성 — 3 톤 다양화</span>
+            <span className="text-[11px] font-semibold text-violet-100">AI 자동 생성: 3 톤 다양화</span>
             <button
               onClick={handleAutoGenerate}
               disabled={autoGenerating || !defaultMessageTemplate || defaultMessageTemplate.trim().length < 10}
@@ -392,7 +392,7 @@ export default function JourneyVariantsEditor({
                 </div>
               ))}
               <div className="text-[9px] text-amber-200/60 italic">
-                회사 admin 명시 검토 + "적용" 클릭 의무 — 자동 저장 X.
+                회사 admin 명시 검토 + "적용" 클릭 의무, 자동 저장 X.
               </div>
             </div>
           )}
@@ -414,7 +414,7 @@ export default function JourneyVariantsEditor({
       {isReadOnly && (
         <div className="flex items-center gap-2 p-2 bg-amber-500/10 border border-amber-500/30 rounded text-[11px] text-amber-200">
           <Info className="w-3.5 h-3.5 flex-shrink-0" />
-          활성 여정의 variants는 수정 불가 — 먼저 일시정지 후 수정해주세요.
+          활성 여정의 variants는 수정 불가. 먼저 일시정지 후 수정해주세요.
         </div>
       )}
 
@@ -598,7 +598,7 @@ export default function JourneyVariantsEditor({
                 <div className="p-3 bg-slate-950/40 border border-white/10 rounded-lg">
                   <div className="flex items-center gap-1.5 mb-2">
                     <Activity className="w-3 h-3 text-violet-300" />
-                    <span className="text-[11px] font-semibold text-white/80">Funnel — Variant {activeVariant.variantId}</span>
+                    <span className="text-[11px] font-semibold text-white/80">Funnel: Variant {activeVariant.variantId}</span>
                   </div>
                   <div className="space-y-2">
                     {/* 발송 100% */}
@@ -681,8 +681,8 @@ export default function JourneyVariantsEditor({
                 // 신뢰도 안내 — interval 좁을수록 신뢰도 높음 (10%- 좁음 / 10~25% 중간 / 25%+ 넓음)
                 const reliabilityLabel =
                   intervalWidth < 0.10 ? '신뢰도 높음' :
-                  intervalWidth < 0.25 ? '신뢰도 중간 — 추가 발송 후 좁아짐' :
-                  '신뢰도 부족 — 누적 발송 영역 부족';
+                  intervalWidth < 0.25 ? '신뢰도 중간: 추가 발송 후 좁아짐' :
+                  '신뢰도 부족: 누적 발송 영역 부족';
                 const reliabilityColor =
                   intervalWidth < 0.10 ? 'text-emerald-300' :
                   intervalWidth < 0.25 ? 'text-amber-300' :
@@ -737,8 +737,8 @@ export default function JourneyVariantsEditor({
                 <BarChart3 className="w-3 h-3 mt-0.5 flex-shrink-0" />
                 <span>
                   {activeVariant.sentCount < 3
-                    ? `초기 탐색 단계 (누적 발송 ${activeVariant.sentCount}회 < 3회) — 모든 variant 동등 기회 제공. 누적 3회 이상부터 Bandit 추천 작동.`
-                    : `학습 단계 — Thompson Sampling Beta(α=${activeVariant.banditAlpha.toFixed(1)}, β=${activeVariant.banditBeta.toFixed(1)}) 분포 기반 자동 선택.`}
+                    ? `초기 탐색 단계 (누적 발송 ${activeVariant.sentCount}회 < 3회). 모든 variant 동등 기회 제공. 누적 3회 이상부터 Bandit 추천 작동.`
+                    : `학습 단계: Thompson Sampling Beta(α=${activeVariant.banditAlpha.toFixed(1)}, β=${activeVariant.banditBeta.toFixed(1)}) 분포 기반 자동 선택.`}
                 </span>
               </div>
 
@@ -764,7 +764,7 @@ export default function JourneyVariantsEditor({
                   Traffic Weight: <span className="text-violet-300 font-semibold">{(activeVariant.trafficWeight * 100).toFixed(0)}%</span>
                   {trafficSum > 0 && (
                     <span className="ml-2 text-[10px] text-white/30">
-                      (전체 합산 {(trafficSum * 100).toFixed(0)}% — Bandit이 자동 정규화)
+                      (전체 합산 {(trafficSum * 100).toFixed(0)}%, Bandit이 자동 정규화)
                     </span>
                   )}
                 </label>

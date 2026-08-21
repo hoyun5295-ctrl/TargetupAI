@@ -103,7 +103,7 @@ export default function AssetLibraryPickerModal({ open, onClose, onPick, multiSe
             <div>
               <h3 className="text-base font-bold text-white">에셋 라이브러리</h3>
               <p className="text-[11px] text-white/50">
-                업로드한 소재가 자동으로 쌓입니다 — 골라서 바로 사용
+                업로드한 소재가 자동으로 쌓입니다. 골라서 바로 사용
                 {usage && <span className="ml-2 text-white/35">({mb(usage.usedBytes)} / {mb(usage.limitBytes)})</span>}
               </p>
             </div>
@@ -131,7 +131,7 @@ export default function AssetLibraryPickerModal({ open, onClose, onPick, multiSe
             <div className="flex items-center justify-center py-14 text-white/40 text-sm gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 불러오는 중...</div>
           ) : migrationPending ? (
             <div className="text-center py-12 text-white/45 text-xs leading-relaxed">
-              라이브러리 준비 중입니다 — 운영자에게 DB 마이그레이션(cdp_assets) 실행을 요청해주세요.
+              라이브러리 준비 중입니다. 운영자에게 DB 마이그레이션(cdp_assets) 실행을 요청해주세요.
             </div>
           ) : err ? (
             <div className="text-center py-12 text-rose-300/80 text-xs">{err}</div>
@@ -171,7 +171,7 @@ export default function AssetLibraryPickerModal({ open, onClose, onPick, multiSe
                     onClick={() => remove(a.id)}
                     className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white/70 hover:text-rose-300 hover:bg-black/80 hidden group-hover:flex items-center justify-center"
                     aria-label="라이브러리에서 삭제"
-                    title="라이브러리에서만 삭제 — 이미 발행된 메시지의 이미지는 깨지지 않습니다"
+                    title="라이브러리에서만 삭제. 이미 발행된 메시지의 이미지는 깨지지 않습니다"
                   >
                     <Trash2 className="w-3 h-3" />
                   </button>

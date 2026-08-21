@@ -27,7 +27,7 @@ export interface BizRegistrationInfo {
 
 const SYSTEM_PROMPT = `당신은 한국 사업자등록증 이미지를 읽어 기재 정보를 "그대로 옮겨 적는" 전사 담당입니다.
 
-[출력 — 반드시 아래 JSON 형식만. 다른 텍스트·코드펜스·설명 금지]
+[출력: 반드시 아래 JSON 형식만. 다른 텍스트·코드펜스·설명 금지]
 {"biz_number":"","company_name":"","ceo_name":"","address":"","biz_type":"","biz_item":""}
 
 [규칙]

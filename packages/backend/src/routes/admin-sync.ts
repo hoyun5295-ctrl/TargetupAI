@@ -412,7 +412,7 @@ router.post('/agents/:agentId/command', authenticate, requireSuperAdmin, async (
     if (ACK_ONLY_TYPES.includes(type) && !isAgentVersionGte(rows[0].agent_version, ACK_MIN_AGENT_VERSION)) {
       return res.status(400).json({
         success: false,
-        error: `이 명령은 에이전트 v${ACK_MIN_AGENT_VERSION} 이상에서만 지원됩니다. (현재 v${rows[0].agent_version || '알 수 없음'} — 버전 배포 후 사용)`,
+        error: `이 명령은 에이전트 v${ACK_MIN_AGENT_VERSION} 이상에서만 지원됩니다. (현재 v${rows[0].agent_version || '알 수 없음'}, 버전 배포 후 사용)`,
         code: 'AGENT_VERSION_TOO_OLD',
       });
     }

@@ -82,7 +82,7 @@ export default function JourneyPlanModal({
                 {notice}
               </p>
             )}
-            <p className="mt-2 text-[10px] italic text-white/30">Data source — 입력한 문장을 읽고 AI가 고른 시작 신호</p>
+            <p className="mt-2 text-[10px] italic text-white/30">Data source: 입력한 문장을 읽고 AI가 고른 시작 신호</p>
           </section>
 
           {/* 2 — 목적 */}
@@ -116,7 +116,7 @@ export default function JourneyPlanModal({
                 </li>
               ))}
             </ol>
-            <p className="mt-2.5 text-[10px] italic text-white/30">Data source — AI가 만든 스텝 구성. 다음 화면에서 하나씩 고칠 수 있습니다.</p>
+            <p className="mt-2.5 text-[10px] italic text-white/30">Data source: AI가 만든 스텝 구성. 다음 화면에서 하나씩 고칠 수 있습니다.</p>
           </section>
 
           {/* 4 — 이 회사 데이터로 가능한가 */}

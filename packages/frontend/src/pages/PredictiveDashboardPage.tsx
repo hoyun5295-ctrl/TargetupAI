@@ -556,7 +556,7 @@ export default function PredictiveDashboardPage() {
               ))}
             </div>
           )}
-          <div className="text-[10px] text-white/30 italic mt-2">Data source — cdp_customer_predictions (매일 1회 자동 분석)</div>
+          <div className="text-[10px] text-white/30 italic mt-2">Data source: cdp_customer_predictions (매일 1회 자동 분석)</div>
         </div>
 
         {/* 블록4: 작은 요약 바 — 한 줄, 각 클릭 → 모달 */}
@@ -756,7 +756,7 @@ export default function PredictiveDashboardPage() {
                       </td></tr>
                     ) : customers.length === 0 ? (
                       <tr><td colSpan={9} className="text-center py-12 text-white/40">
-                        {search || filter !== 'all' ? '검색/필터 결과 없음' : '예측 데이터 누적 중 — 1시간 안에 자동 계산됩니다.'}
+                        {search || filter !== 'all' ? '검색/필터 결과 없음' : '예측 데이터 누적 중. 1시간 안에 자동 계산됩니다.'}
                       </td></tr>
                     ) : customers.map((c) => (
                       <tr
@@ -982,7 +982,7 @@ function PredictiveDetailModal({
                     );
                   })}
                 </div>
-                <div className="mt-2 text-[10px] text-white/30 italic">Data source — {explanation.factors.map((f) => f.sourceField).filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 3).join(' · ')}</div>
+                <div className="mt-2 text-[10px] text-white/30 italic">Data source: {explanation.factors.map((f) => f.sourceField).filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 3).join(' · ')}</div>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-white/10">
                 <div className="p-2 bg-white/5 rounded text-center"><div className="text-[9px] text-white/40">LTV 90일</div><div className="text-xs font-mono text-amber-300">{fmtWon(explanation.predictions.ltv90d)}</div></div>
@@ -1017,7 +1017,7 @@ function Card({
       </div>
       <div className="text-lg md:text-xl font-semibold font-mono">{value}</div>
       {source && (
-        <div className="text-[10px] text-white/30 mt-1 truncate" title={source}>Data source — {source}</div>
+        <div className="text-[10px] text-white/30 mt-1 truncate" title={source}>Data source: {source}</div>
       )}
     </div>
   );

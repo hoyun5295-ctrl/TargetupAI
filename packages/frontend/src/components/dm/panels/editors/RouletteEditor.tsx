@@ -37,7 +37,7 @@ export default function RouletteEditor({ props, onUpdate }: EditorProps<Roulette
         />
       </Field>
       <div style={{ fontSize: 11, fontWeight: 700, color: sumPct === 100 ? 'var(--dm-neutral-600)' : '#d97706', marginBottom: 10 }}>
-        확률 합계: {sumPct}%{sumPct !== 100 ? ' — 100%를 권장합니다' : ''}
+        확률 합계: {sumPct}%{sumPct !== 100 ? ' (100%를 권장합니다)' : ''}
       </div>
       <Field label="1인 1회 한정"><Toggle value={props.one_spin_per_user ?? true} onChange={(v) => onUpdate({ one_spin_per_user: v })} /></Field>
     </>

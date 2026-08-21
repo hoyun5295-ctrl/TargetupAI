@@ -237,7 +237,7 @@ export default function JourneyMessageEditModal({
             문안(본문·제목)만 고칠 수 있습니다. 발송 일정·단계 구조는 새 여정으로 바꿔주세요(진행 중 발송 보호).
             {journeyStatus === 'paused' && ' 일시정지 여정은 재개하면 새 문안으로 발송됩니다.'}
             {journeyStatus === 'draft' && ' 초안 여정은 활성화 시 이 문안으로 발송됩니다.'}
-            {journeyStatus === 'active' && ' 운영 중 여정입니다 — 저장 즉시 새 문안이 적용되고, 다음 발송 전 자동 스팸 검사를 다시 거칩니다. 단 2시간 이내로 예정된 발송에는 재검사 전에 적용될 수 있으니 저장 전 문안을 한 번 더 확인해주세요.'}
+            {journeyStatus === 'active' && ' 운영 중 여정입니다. 저장 즉시 새 문안이 적용되고, 다음 발송 전 자동 스팸 검사를 다시 거칩니다. 단 2시간 이내로 예정된 발송에는 재검사 전에 적용될 수 있으니 저장 전 문안을 한 번 더 확인해주세요.'}
             {viewMode === 'preview' && ' 미리보기는 샘플 고객 한 명 기준으로 변수를 치환한 모습입니다.'}
           </div>
         </div>
@@ -349,7 +349,7 @@ export default function JourneyMessageEditModal({
         {/* Source caption */}
         <div className="px-4 pt-2 shrink-0">
           <div className="text-[10px] text-white/30 italic">
-            Data source — journey_steps (문안 수정은 PATCH steps · 발송은 활성화 시점 snapshot 기준 · 미리보기 변수 치환은 샘플 고객)
+            Data source: journey_steps (문안 수정은 PATCH steps · 발송은 활성화 시점 snapshot 기준 · 미리보기 변수 치환은 샘플 고객)
           </div>
         </div>
 

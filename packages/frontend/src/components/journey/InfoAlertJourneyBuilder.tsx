@@ -275,14 +275,14 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
             disabled={suggesting || allowedTriggers.length === 0}
             className="px-3 py-1.5 rounded-lg bg-violet-500/20 hover:bg-violet-500/30 border border-violet-400/40 text-violet-100 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {suggesting ? '템플릿 읽는 중…' : '이 템플릿, 언제 보낼까요? — AI 추천'}
+            {suggesting ? '템플릿 읽는 중…' : '이 템플릿, 언제 보낼까요? (AI 추천)'}
           </button>
           {/* 추천·실패 표시는 **지금 고른 템플릿에 대한 것일 때만** 보여준다(템플릿 바꾸면 자동 소멸). */}
           {suggestion && suggestion.forTemplate === alimtalk.templateCode && (
             <span className="text-[11px] text-violet-200/90">
               {TRIGGER_EVENTS.find((t) => t.key === suggestion.key)?.label || suggestion.key} 추천
               {` · ${suggestion.delayDays === 0 ? '발생 즉시' : `${suggestion.delayDays}일 뒤`}`}
-              {suggestion.reason ? ` — ${suggestion.reason}` : ''}
+              {suggestion.reason ? `: ${suggestion.reason}` : ''}
             </span>
           )}
           {suggestFailed === alimtalk.templateCode && (
@@ -313,8 +313,8 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
           //   템플릿이 이벤트 변수를 쓰면 그 값을 못 주는 트리거는 사유와 함께 잠근다.
           const blockedMap = new Map(compat.blocked.map((b) => [b.trigger.key, b.reason]));
           const groups: { group: 'tx' | 'lifecycle'; title: string }[] = [
-            { group: 'tx', title: '거래가 일어났을 때 — 주문번호·상품명 같은 거래 정보를 쓸 수 있어요' },
-            { group: 'lifecycle', title: '고객 상태가 바뀌었을 때 — 이름·등급 같은 고객 정보만 쓸 수 있어요' },
+            { group: 'tx', title: '거래가 일어났을 때: 주문번호·상품명 같은 거래 정보를 쓸 수 있어요' },
+            { group: 'lifecycle', title: '고객 상태가 바뀌었을 때: 이름·등급 같은 고객 정보만 쓸 수 있어요' },
           ];
           return (
             <div className="mt-2 space-y-2.5">
@@ -370,7 +370,7 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
               {needsPointsMin && (
                 <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-400/30">
                   <label className="block text-[11px] text-amber-100/90 mb-1">
-                    보유 포인트 최소 (이 값 이상인 고객만) — 입력해야 만들 수 있어요
+                    보유 포인트 최소 (이 값 이상인 고객만). 입력해야 만들 수 있어요
                   </label>
                   <input
                     type="number" min={1} value={pointsMin} onChange={(e) => setPointsMin(e.target.value)}
@@ -409,7 +409,7 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
         )}
         {triggerMismatch && (
           <p className="text-[11px] text-rose-300 mt-2">
-            이 템플릿에 맞는 트리거를 다시 골라주세요 — 지금 선택({tx.label})은 템플릿이 쓰는 값을 채워줄 수 없습니다.
+            이 템플릿에 맞는 트리거를 다시 골라주세요. 지금 선택({tx.label})은 템플릿이 쓰는 값을 채워줄 수 없습니다.
           </p>
         )}
         {eventVarsInNonEventFlow && (
@@ -427,7 +427,7 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
         {alimtalk.templateCode && fallbackViolation && (
           <span className="text-[11px] text-rose-300">{fallbackViolation}</span>
         )}
-        <button onClick={handleBuild} disabled={!canBuild} className="px-5 py-3 bg-gradient-to-r from-teal-500 to-emerald-500 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">다음 — 흐름 검토</button>
+        <button onClick={handleBuild} disabled={!canBuild} className="px-5 py-3 bg-gradient-to-r from-teal-500 to-emerald-500 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">다음: 흐름 검토</button>
       </div>
 
       {showTemplate && (

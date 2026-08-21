@@ -347,7 +347,7 @@ export default function JourneyStepStudio({
             <div className="space-y-2.5 rounded-xl border border-fuchsia-400/30 bg-fuchsia-500/10 p-3">
               <div className="flex items-center gap-1.5">
                 <Gift className="h-3.5 w-3.5 text-fuchsia-300" />
-                <span className="text-xs font-semibold text-white/85">마지막 한 가지만 알려 주세요 — 문장은 그대로 잇습니다</span>
+                <span className="text-xs font-semibold text-white/85">마지막 한 가지만 알려 주세요. 문장은 그대로 잇습니다</span>
               </div>
 
               {benefitSlots && onFillBenefit && (
@@ -439,7 +439,7 @@ export default function JourneyStepStudio({
                   ))}
                 </div>
               )}
-              <p className="mt-1.5 text-[10px] italic text-white/30">Data source — 회사 고객 데이터에 실제로 있는 컬럼만 표시됩니다.</p>
+              <p className="mt-1.5 text-[10px] italic text-white/30">Data source: 회사 고객 데이터에 실제로 있는 컬럼만 표시됩니다.</p>
             </div>
           )}
 
@@ -482,7 +482,7 @@ export default function JourneyStepStudio({
                   );
                 })}
               </div>
-              <p className="mt-1.5 text-[10px] italic text-white/30">Data source — 회사 고객 데이터에 실제로 있는 컬럼만 표시됩니다.</p>
+              <p className="mt-1.5 text-[10px] italic text-white/30">Data source: 회사 고객 데이터에 실제로 있는 컬럼만 표시됩니다.</p>
               </>
             )}
           </div>
@@ -535,7 +535,7 @@ export default function JourneyStepStudio({
                 {sampleCustomer ? previewBody : highlightVars(previewBody)}
               </div>
               <p className="mt-2 text-[10px] italic text-white/30">
-                Data source — 저장된 스텝 본문{sampleCustomer ? ' + 추출된 타겟 최상위 고객 1명' : ''}. (광고) 표기와 무료수신거부는 발송할 때 자동으로 붙고, 위 미리보기·바이트에 이미 반영돼 있습니다.
+                Data source: 저장된 스텝 본문{sampleCustomer ? ' + 추출된 타겟 최상위 고객 1명' : ''}. (광고) 표기와 무료수신거부는 발송할 때 자동으로 붙고, 위 미리보기·바이트에 이미 반영돼 있습니다.
               </p>
             </div>
           )}

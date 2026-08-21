@@ -139,7 +139,7 @@ export async function buildJourneyOpportunities(companyId: string): Promise<Jour
       type: 'cart_recovery', templateCode: 'cart', title: '장바구니 이탈 미회복',
       count: num(a.cart_cnt), valueAtStake: num(a.cart_val), priority: 'medium',
       description: `최근 14일 안에 담고 구매하지 않은 ${num(a.cart_cnt).toLocaleString()}명. 1인 평균 ${perHead(num(a.cart_val), num(a.cart_cnt))} 규모라 회복 여력이 큽니다.`,
-      suggestedObjective: '장바구니에 담고 구매하지 않은 고객 회복 — 담은 상품 리마인드 + 결제 유도 2단계',
+      suggestedObjective: '장바구니에 담고 구매하지 않은 고객 회복: 담은 상품 리마인드 + 결제 유도 2단계',
     });
   }
   if (!active.has('onboarding') && num(a.onb_cnt) > 0) {
@@ -147,7 +147,7 @@ export async function buildJourneyOpportunities(companyId: string): Promise<Jour
       type: 'onboarding', templateCode: 'onboarding', title: '신규 가입 미환영',
       count: num(a.onb_cnt), valueAtStake: Math.round(num(a.onb_cnt) * aov), priority: 'medium',
       description: `최근 7일 안에 가입한 ${num(a.onb_cnt).toLocaleString()}명. 첫 구매 전환의 골든타임입니다.`,
-      suggestedObjective: '신규 가입자 환영 시리즈 — 첫 인사 + 첫 구매 유도',
+      suggestedObjective: '신규 가입자 환영 시리즈: 첫 인사 + 첫 구매 유도',
     });
   }
   if (!active.has('dormant') && num(a.dorm_cnt) > 0) {
@@ -155,7 +155,7 @@ export async function buildJourneyOpportunities(companyId: string): Promise<Jour
       type: 'dormant', templateCode: 'dormant', title: '장기 무구매 휴면',
       count: num(a.dorm_cnt), valueAtStake: num(a.dorm_val), priority: 'medium',
       description: `평소 구매 주기를 넘겨 ${p75Days}일 이상 무구매인 ${num(a.dorm_cnt).toLocaleString()}명. 누적 ${won(num(a.dorm_val))} 구매한 고객층이라 재활성 가치가 높습니다.`,
-      suggestedObjective: '장기 휴면 고객 복귀 유도 — 재방문 안내',
+      suggestedObjective: '장기 휴면 고객 복귀 유도: 재방문 안내',
     });
   }
   if (!active.has('birthday') && num(a.bday_cnt) > 0) {
@@ -171,7 +171,7 @@ export async function buildJourneyOpportunities(companyId: string): Promise<Jour
       type: 'repurchase_due', templateCode: 'repeat', title: '재구매 주기 도래',
       count: num(a.repur_cnt), valueAtStake: num(a.repur_val), priority: 'medium',
       description: `평소 재구매 주기(${medianDays}~${p75Days}일)에 접어든 ${num(a.repur_cnt).toLocaleString()}명. 휴면 전 리마인드 적기입니다.`,
-      suggestedObjective: '재구매 주기 도래 고객 리마인드 — 재구매 유도',
+      suggestedObjective: '재구매 주기 도래 고객 리마인드: 재구매 유도',
     });
   }
   if (num(a.wish_cnt) > 0) {
@@ -179,7 +179,7 @@ export async function buildJourneyOpportunities(companyId: string): Promise<Jour
       type: 'wishlist', templateCode: 'cart', title: '찜만 하고 미구매',
       count: num(a.wish_cnt), valueAtStake: Math.round(num(a.wish_cnt) * aov), priority: 'medium',
       description: `최근 14일 찜만 하고 구매하지 않은 ${num(a.wish_cnt).toLocaleString()}명. 관심 상품 알림으로 결제 유도가 가능합니다.`,
-      suggestedObjective: '찜한 상품 미구매 고객 — 관심 상품 리마인드',
+      suggestedObjective: '찜한 상품 미구매 고객: 관심 상품 리마인드',
     });
   }
 
@@ -219,20 +219,20 @@ const SUCCESSION_COPY: Record<string, {
 }> = {
   'purchase.first': {
     title: '첫 구매 고객 미대응',
-    describe: (n) => `신규 가입 여정에서 ${n.toLocaleString()}명이 첫 구매를 했어요 — 받아줄 여정이 없습니다.`,
-    objective: '첫 구매 고객 정착 — 감사 + 두 번째 구매 유도',
+    describe: (n) => `신규 가입 여정에서 ${n.toLocaleString()}명이 첫 구매를 했어요. 받아줄 여정이 없습니다.`,
+    objective: '첫 구매 고객 정착: 감사 + 두 번째 구매 유도',
     futureNotice: '지금 만들면 앞으로 첫 구매하는 고객부터 받습니다.',
   },
   'cdp.purchase': {
     title: '재구매 고객 미대응',
-    describe: (n) => `첫 구매 여정에서 ${n.toLocaleString()}명이 다시 구매했어요 — 받아줄 여정이 없습니다.`,
-    objective: '재구매 고객 관리 — 구매 감사 + 다음 구매 제안',
+    describe: (n) => `첫 구매 여정에서 ${n.toLocaleString()}명이 다시 구매했어요. 받아줄 여정이 없습니다.`,
+    objective: '재구매 고객 관리: 구매 감사 + 다음 구매 제안',
     futureNotice: '지금 만들면 앞으로 구매하는 고객부터 받습니다.',
   },
   'customer.dormant_return': {
     title: '휴면 복귀 고객 미대응',
-    describe: (n) => `휴면 회수 여정에서 ${n.toLocaleString()}명이 복귀했어요 — 받아줄 여정이 없습니다.`,
-    objective: '휴면에서 복귀한 고객 정착 — 복귀 감사 + 재구매 유도',
+    describe: (n) => `휴면 회수 여정에서 ${n.toLocaleString()}명이 복귀했어요. 받아줄 여정이 없습니다.`,
+    objective: '휴면에서 복귀한 고객 정착: 복귀 감사 + 재구매 유도',
     futureNotice: '지금 만들면 앞으로 복귀하는 고객부터 받습니다.',
   },
 };

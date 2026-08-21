@@ -438,7 +438,7 @@ async function reconcileOneBill(billId: string, server: GatewayServer): Promise<
         await query(
           `UPDATE gateway_template_mappings
               SET sync_status = 'failed', next_retry_at = NULL,
-                  last_error = '대조: 게이트웨이 부재(시드 이후 삭제 추정) — 자동 재등록 안 함·운영자 판단', updated_at = now()
+                  last_error = '대조: 게이트웨이 부재(시드 이후 삭제 추정): 자동 재등록 안 함·운영자 판단', updated_at = now()
             WHERE id = $1`,
           [desired.id],
         );
@@ -446,7 +446,7 @@ async function reconcileOneBill(billId: string, server: GatewayServer): Promise<
         await query(
           `UPDATE gateway_template_mappings
               SET sync_status = 'pending', next_retry_at = now(), attempts = 0,
-                  last_error = '대조: 게이트웨이에 행 부재 — 재push', updated_at = now()
+                  last_error = '대조: 게이트웨이에 행 부재: 재push', updated_at = now()
             WHERE id = $1`,
           [desired.id],
         );

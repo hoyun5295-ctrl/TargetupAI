@@ -172,7 +172,7 @@ export function markCommandsDelivered(
         commandId: String(cmd.id || ''),
         type: String(cmd.type || 'unknown'),
         ok: false,
-        message: `에이전트 실행 확인(ACK) 미수신 — ${COMMAND_MAX_ATTEMPTS}회 재전달 후 만료`,
+        message: `에이전트 실행 확인(ACK) 미수신: ${COMMAND_MAX_ATTEMPTS}회 재전달 후 만료`,
         completedAt: nowIso,
         recordedAt: nowIso,
       });

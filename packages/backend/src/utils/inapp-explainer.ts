@@ -217,18 +217,18 @@ export async function explainInAppMessage(
 - 본 메시지 격차: ${deltaPercent >= 0 ? '+' : ''}${deltaPercent.toFixed(1)}%
 
 [시간대 최고 CTR]
-- ${bestHour.hour}시 — impression ${bestHour.impressions}건 / click ${bestHour.clicks}건
+- ${bestHour.hour}시: impression ${bestHour.impressions}건 / click ${bestHour.clicks}건
 
 [★ 5 영향 요인 분석 가이드 ★]
 
-1. 이미지 (image_url) — 시선 끌기. 이미지 있음 = CTR +30~50% 일반
-2. CTA 색상 (background_color) — 대비 명확 + 브랜드 정합 = CTR +10~20%
-3. 트리거 시점 (trigger_event + 시간대) — page_load 단순 = CTR 낮음 / cart_view·time_on_page = CTR 높음 일반
-4. 본문 길이 (bodyLength) — 50자 미만 너무 짧음 / 500자 초과 너무 김 / 200~400자 권장
-5. 세그먼트 정확도 (hasSegmentConditions) — 전체 회원 = CTR 낮음 / 세그먼트 정확 = CTR +50~100%
+1. 이미지 (image_url): 시선 끌기. 이미지 있음 = CTR +30~50% 일반
+2. CTA 색상 (background_color): 대비 명확 + 브랜드 정합 = CTR +10~20%
+3. 트리거 시점 (trigger_event + 시간대): page_load 단순 = CTR 낮음 / cart_view·time_on_page = CTR 높음 일반
+4. 본문 길이 (bodyLength): 50자 미만 너무 짧음 / 500자 초과 너무 김 / 200~400자 권장
+5. 세그먼트 정확도 (hasSegmentConditions): 전체 회원 = CTR 낮음 / 세그먼트 정확 = CTR +50~100%
 
 각 요인:
-- impact: 0~1 (영향력 절대값 — 0.8 = 매우 높음 / 0.5 = 보통 / 0.2 = 낮음)
+- impact: 0~1 (영향력 절대값, 0.8 = 매우 높음 / 0.5 = 보통 / 0.2 = 낮음)
 - direction: 'positive' (현재 잘 적용) / 'negative' (개선 필요) / 'neutral' (영향 없음)
 - description: 한국어 1~2 문장 진단
 - dataSource: 어디 데이터 기준 (예: "회사 누적 30일 평균 / 본 메시지 30일 통계")
@@ -236,10 +236,10 @@ export async function explainInAppMessage(
 [★ 개선 추천 3건 우선순위 ★]
 
 actionType:
-- 'ai_refine' — AI 본문 다듬기 (감성/실용/캐주얼 톤 3안 자동 생성)
-- 'time_optimize' — 시간대 최적화 (best hour 자동 적용)
-- 'segment_refine' — 세그먼트 정밀화 (high LTV / 활성 사용자 한정)
-- 'manual' — 회사 admin 직접 작업 (이미지 추가 / CTA 색상 변경 등)
+- 'ai_refine': AI 본문 다듬기 (감성/실용/캐주얼 톤 3안 자동 생성)
+- 'time_optimize': 시간대 최적화 (best hour 자동 적용)
+- 'segment_refine': 세그먼트 정밀화 (high LTV / 활성 사용자 한정)
+- 'manual': 회사 admin 직접 작업 (이미지 추가 / CTA 색상 변경 등)
 
 priority: high / medium / low
 
@@ -247,9 +247,9 @@ priority: high / medium / low
 
 \`\`\`json
 {
-  "topInsight": "본 메시지 CTR이 회사 평균 대비 N% (높음/낮음) — 핵심 진단 한 줄",
+  "topInsight": "본 메시지 CTR이 회사 평균 대비 N% (높음/낮음): 핵심 진단 한 줄",
   "factors": [
-    { "factor": "이미지", "impact": 0.7, "direction": "negative", "description": "이미지 없음 — 시선 끌기 약함. 추가 시 CTR +30% 예상", "dataSource": "회사 누적 평균 vs 본 메시지" },
+    { "factor": "이미지", "impact": 0.7, "direction": "negative", "description": "이미지 없음. 시선 끌기 약함. 추가 시 CTR +30% 예상", "dataSource": "회사 누적 평균 vs 본 메시지" },
     ...총 5건
   ],
   "recommendations": [
@@ -336,7 +336,7 @@ function buildShortAnalysisForLowVolume(
 ): InAppExplainResult {
   return {
     messageId: ctx.id,
-    topInsight: `데이터 누적 부족 (impression ${ctx.impressions}건 < 50건) — 충분한 데이터 후 분석 권장`,
+    topInsight: `데이터 누적 부족 (impression ${ctx.impressions}건 < 50건). 충분한 데이터 후 분석 권장`,
     factors: [
       {
         factor: '데이터 누적',
@@ -360,7 +360,7 @@ function buildShortAnalysisForLowVolume(
       deltaPercent,
       sampleSize: companyAvg.sampleSize,
     },
-    reasoning: '데이터 누적 부족 — AI 분석 정확도 보장 X. 50건 이상 누적 후 재분석.',
+    reasoning: '데이터 누적 부족. AI 분석 정확도 보장 X. 50건 이상 누적 후 재분석.',
   };
 }
 

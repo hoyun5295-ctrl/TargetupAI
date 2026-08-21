@@ -137,7 +137,7 @@ export default function EmailVisualEditor({
     if (!el) {
       if (navigator.clipboard) {
         navigator.clipboard.writeText(token).then(
-          () => onToast(`${label} 변수 복사됨 — 입력칸에 붙여넣으세요`, 'info'),
+          () => onToast(`${label} 변수 복사됨. 입력칸에 붙여넣으세요`, 'info'),
           () => onToast('직접 입력해주세요: ' + token, 'warning'),
         );
       } else onToast('직접 입력해주세요: ' + token, 'info');
@@ -368,7 +368,7 @@ export default function EmailVisualEditor({
         onToast(
           completedState
             ? '저장 완료'
-            : '임시저장 완료 — 발송은 완성 저장(50크레딧) 후 열립니다.',
+            : '임시저장 완료. 발송은 완성 저장(50크레딧) 후 열립니다.',
           'success',
         );
         onSaved();
@@ -386,7 +386,7 @@ export default function EmailVisualEditor({
     if (sections.length === 0) { onToast('블록을 1개 이상 추가해주세요.', 'warning'); return; }
     setConfirmState({
       mode: 'warning',
-      title: '캠페인 완성 — 50크레딧',
+      title: '캠페인 완성 (50크레딧)',
       description: '완성 저장 시 50크레딧이 차감됩니다 (캠페인당 1회 · 환불 없음).\n이후 이 캠페인의 수정·재저장·발송·수신/오픈/클릭 이력 관리는 추가 차감 없이 무제한입니다.',
       confirmLabel: '50크레딧 차감하고 완성',
       cancelLabel: '취소',
@@ -400,7 +400,7 @@ export default function EmailVisualEditor({
           if (data?.code === 'INSUFFICIENT_CREDIT') { onToast('크레딧이 부족합니다. 충전 후 완성해주세요.', 'warning'); return; }
           if (!data.success) { onToast(data.error || '완성 처리 실패', 'error'); return; }
           setCompletedState(true);
-          onToast('캠페인 완성 — 이제 발송할 수 있습니다.', 'success');
+          onToast('캠페인 완성. 이제 발송할 수 있습니다.', 'success');
           onSaved();
           onClose();
         } catch (e: any) {
@@ -436,7 +436,7 @@ export default function EmailVisualEditor({
           <button
             onClick={() => setThemeOpen(true)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 shrink-0"
-            title="디자인 테마 8종 — 색·서체·조판을 1클릭으로 바꿉니다 (문안은 그대로)"
+            title="디자인 테마 8종: 색·서체·조판을 1클릭으로 바꿉니다 (문안은 그대로)"
           >
             <Palette className="w-4 h-4" /><span className="hidden md:inline">테마</span>
           </button>
@@ -457,10 +457,10 @@ export default function EmailVisualEditor({
             </button>
           ) : (
             <>
-              <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 disabled:opacity-50 shrink-0" title="무료 — 발송은 잠긴 상태로 보관됩니다">
+              <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 disabled:opacity-50 shrink-0" title="무료 (발송은 잠긴 상태로 보관됩니다)">
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}<span className="hidden md:inline">임시저장</span>
               </button>
-              <button onClick={handleComplete} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 shrink-0" title="50크레딧 1회 — 이후 수정·발송·이력 무제한 무료">
+              <button onClick={handleComplete} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 shrink-0" title="50크레딧 1회, 이후 수정·발송·이력 무제한 무료">
                 <Save className="w-4 h-4" />완성 저장 · 50
               </button>
             </>
@@ -756,7 +756,7 @@ export default function EmailVisualEditor({
       {pcPreviewOpen && (
         <div className="fixed inset-0 z-[130] bg-slate-950/90 backdrop-blur-sm flex flex-col">
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2 text-sm text-white/80"><Monitor className="w-4 h-4" /> PC 미리보기 — 데스크탑 폭 (실제 발송 HTML)</div>
+            <div className="flex items-center gap-2 text-sm text-white/80"><Monitor className="w-4 h-4" /> PC 미리보기: 데스크탑 폭 (실제 발송 HTML)</div>
             <button onClick={() => setPcPreviewOpen(false)} className="text-white/60 hover:text-white p-1.5 rounded hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>
           </div>
           <div className="flex-1 overflow-auto p-4 md:p-8 flex justify-center" onClick={(e) => e.stopPropagation()}>

@@ -29,7 +29,7 @@ export function buildActionPlan(input: ActionPlanInput): ActionItem[] {
     draft.push({
       weight: AI_WEIGHT,
       title: '성과 진단 1순위 권장 실행',
-      basis: `AI 자율 진단 권장 — ${input.aiRecommendation.trim()}`,
+      basis: `AI 자율 진단 권장: ${input.aiRecommendation.trim()}`,
       linkHint: '캠페인 만들기 또는 여정으로 실행',
       expectedEffect: null,
     });
@@ -39,7 +39,7 @@ export function buildActionPlan(input: ActionPlanInput): ActionItem[] {
       weight: input.atRiskCount,
       title: '이탈위험 고객 재참여',
       basis: `RFM 이탈위험 ${input.atRiskCount.toLocaleString()}명`,
-      linkHint: '여정 — 이탈 방지 시나리오',
+      linkHint: '여정: 이탈 방지 시나리오',
       expectedEffect: null,
     });
   }
@@ -48,7 +48,7 @@ export function buildActionPlan(input: ActionPlanInput): ActionItem[] {
       weight: input.dormantCount,
       title: '휴면 고객 리마인드',
       basis: `RFM 휴면 ${input.dormantCount.toLocaleString()}명`,
-      linkHint: '여정 — 휴면 리마인드',
+      linkHint: '여정: 휴면 리마인드',
       expectedEffect: null,
     });
   }

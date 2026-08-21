@@ -128,7 +128,7 @@ export function normalizeProposal(
     if (detectLiquidSyntax(draft)) draft = flattenLiquidToPlainText(draft);
     const guarded = guardDraftCopyBenefits(draft, request, extraAllowedText);
     if (guarded.removed) {
-      risks.push(`'${String(p?.title ?? '플랜')}' 문안에서 요청서에 없는 혜택 표현을 제거했습니다 — 발송 전 혜택 확인 필요.`);
+      risks.push(`'${String(p?.title ?? '플랜')}' 문안에서 요청서에 없는 혜택 표현을 제거했습니다. 발송 전 혜택 확인 필요.`);
     }
     return {
       title: String(p?.title ?? '').trim() || '캠페인 플랜',
@@ -165,20 +165,20 @@ export function normalizeProposal(
 export function buildAgencyIntakeSystemPrompt(): string {
   return `당신은 행사/프로모션 이미지를 읽어 캠페인 대행 요청서 항목을 채우는 전사 담당입니다.
 
-[반드시 이미지에 실제로 보이는 것만 — 절대 규칙]
+[반드시 이미지에 실제로 보이는 것만: 절대 규칙]
 1. 이미지에 없는 행사명·날짜·가격·할인율·혜택·상품을 지어내지 마세요. 안 보이면 빈 값("")으로 두세요.
-2. 광고 문구를 새로 창작하지 마세요 — 당신은 "옮겨 적기"만 합니다.
+2. 광고 문구를 새로 창작하지 마세요. 당신은 "옮겨 적기"만 합니다.
 3. 노이즈 제외: 리뷰 수·별점, 단위당 환산가격, 대괄호 채널/기획 태그, 섹션 헤드라인, 이모지.
 4. 날짜는 이미지에 명시된 경우만 YYYY-MM-DD 형식으로. 연도가 안 보이면 빈 값(추정 금지).
 5. benefit에는 이미지에 보이는 혜택(할인·쿠폰·사은품 등)만 적으세요.
 6. 여러 장의 이미지는 하나의 행사로 보고 합쳐서 정리하세요.
 
-[출력 — JSON만, 다른 텍스트 금지]
+[출력: JSON만, 다른 텍스트 금지]
 {
   "title": "행사명(배너에 크게 보이는 것, 없으면 빈 값)",
   "periodStart": "YYYY-MM-DD 또는 빈 값",
   "periodEnd": "YYYY-MM-DD 또는 빈 값",
-  "description": "행사 내용 정리 — 보이는 상품은 '상품명 / 정가 / 할인가' 한 줄씩 포함",
+  "description": "행사 내용 정리: 보이는 상품은 '상품명 / 정가 / 할인가' 한 줄씩 포함",
   "benefit": "이미지에 보이는 혜택만, 없으면 빈 값",
   "products": [{ "name": "상품명", "price": 정가 숫자 또는 null, "salePrice": 할인가 숫자 또는 null }]
 }`;
@@ -194,9 +194,9 @@ export function buildAgencySystemPrompt(): string {
 4. channel 값: sms | lms | mms | alimtalk | dm | email | inapp | journey 중 하나.
 5. 플랜 수: 2~4개. 서로 타겟 또는 채널이 달라야 합니다.
 6. 대상 인원수를 직접 추정하지 마세요(시스템이 DB에서 실측합니다).
-7. 데이터에 근거 없는 주장 금지 — 근거 부족하면 그 축은 언급하지 마세요.
+7. 데이터에 근거 없는 주장 금지. 근거 부족하면 그 축은 언급하지 마세요.
 
-[출력 — JSON만, 다른 텍스트 금지]
+[출력: JSON만, 다른 텍스트 금지]
 {
   "situation": ["기업 현황 요약 문장(실데이터 근거) 3~6개"],
   "eventSummary": "요청 행사 정리 한 단락",
@@ -228,7 +228,7 @@ export function buildAgencyUserMessage(input: {
     ? r.products.map((p) => `- ${p.name}${p.price ? ` 정가 ${p.price}원` : ''}${p.salePrice ? ` → 할인 ${p.salePrice}원` : ''}`).join('\n')
     : '(없음)';
   const transcriptBlock = input.imageTranscript
-    ? `\n## 행사 이미지 판독 (고객사가 올린 행사 이미지에 실제로 보이는 내용 — 실측 전사)\n${input.imageTranscript}\n`
+    ? `\n## 행사 이미지 판독 (고객사가 올린 행사 이미지에 실제로 보이는 내용, 실측 전사)\n${input.imageTranscript}\n`
     : '';
   return `## 회사
 - 회사명: ${input.companyName} / 업종: ${input.businessType || '미상'} / 브랜드: ${input.brandName || '-'} / 톤: ${input.brandTone || '-'}
@@ -247,7 +247,7 @@ ${input.campaignLines.length ? input.campaignLines.join('\n') : '(아직 없음)
 - 기간: ${r.periodStart} ~ ${r.periodEnd}
 - 행사 내용: ${r.description}
 - 요청 혜택(이것만 사용): ${r.benefit}
-- 희망 채널: ${r.channels.length ? r.channels.join(', ') : '(미지정 — 데이터 기반 추천)'}
+- 희망 채널: ${r.channels.length ? r.channels.join(', ') : '(미지정, 데이터 기반 추천)'}
 - 예산: ${r.budget ? `${r.budget}원` : '(미지정)'}
 - 대상 상품:
 ${products}

@@ -492,7 +492,7 @@ export default function AlimtalkTemplateFormV2({
         {rejectReason && (
           <div className="shrink-0 px-6 py-3 bg-rose-50 border-b border-rose-200">
             <p className="text-[12.5px] font-semibold text-rose-800 mb-1.5">
-              반려 사유 — 본문을 고쳐 저장하면 자동으로 재검수를 요청합니다
+              반려 사유: 본문을 고쳐 저장하면 자동으로 재검수를 요청합니다
             </p>
             <div className="max-h-[120px] overflow-y-auto rounded-lg border border-rose-200 bg-white px-3 py-2">
               <p className="text-[13px] text-rose-900 whitespace-pre-wrap leading-relaxed select-text cursor-text">

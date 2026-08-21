@@ -24,8 +24,8 @@ export interface GoldenInAppTemplate {
   swatches: [string, string, string];
 }
 
-const CTA_URL = '[URL — 회사 admin 수정]';
-const BENEFIT_PH = '[혜택 안내 — 직접 작성해주세요]';
+const CTA_URL = '[URL: 회사 admin 수정]';
+const BENEFIT_PH = '[혜택 안내: 직접 작성해주세요]';
 
 export const GOLDEN_INAPP_TEMPLATES: GoldenInAppTemplate[] = [
   {

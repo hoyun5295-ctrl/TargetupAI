@@ -818,7 +818,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
               {/* 미배정 컬럼 안내 */}
               {unassignedHeaders.length > 0 && (
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                  <p className="text-xs text-amber-700 font-medium mb-2">💡 미배정 엑셀 컬럼 ({unassignedHeaders.length}개) — 저장되지 않습니다</p>
+                  <p className="text-xs text-amber-700 font-medium mb-2">💡 미배정 엑셀 컬럼 ({unassignedHeaders.length}개). 저장되지 않습니다</p>
                   <div className="flex flex-wrap gap-1.5">
                     {unassignedHeaders.map(h => (
                       <span key={h} className="px-2 py-0.5 bg-amber-100 text-amber-600 rounded text-xs">{h}</span>

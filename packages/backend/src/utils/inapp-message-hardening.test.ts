@@ -31,7 +31,7 @@ describe('sanitizeActionUrl (P0-2 저장 무해화)', () => {
   });
 
   it('placeholder([...]) = 저장 보존 (SDK가 이동 차단)', () => {
-    expect(sanitizeActionUrl('[URL — 회사 admin 수정]')).toBe('[URL — 회사 admin 수정]');
+    expect(sanitizeActionUrl('[URL: 회사 admin 수정]')).toBe('[URL: 회사 admin 수정]');
   });
 
   it('빈 값/null/undefined = null', () => {
@@ -47,11 +47,11 @@ describe('sanitizeButtonsActionUrls + sanitizeContentBlocks cta_group (P0-2)', (
     const out = sanitizeButtonsActionUrls([
       { id: 'a', label: 'A', action_url: 'javascript:alert(1)' },
       { id: 'b', label: 'B', action_url: 'https://ok.example.com' },
-      { id: 'c', label: 'C', action_url: '[URL — 회사 admin 수정]' },
+      { id: 'c', label: 'C', action_url: '[URL: 회사 admin 수정]' },
     ]);
     expect(out[0].action_url).toBeNull();
     expect(out[1].action_url).toBe('https://ok.example.com');
-    expect(out[2].action_url).toBe('[URL — 회사 admin 수정]');
+    expect(out[2].action_url).toBe('[URL: 회사 admin 수정]');
   });
 
   it('배열 아님 = []', () => {

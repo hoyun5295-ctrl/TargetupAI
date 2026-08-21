@@ -23,9 +23,9 @@ interface Props {
 }
 
 const THRESHOLD_OPTIONS: Array<{ value: 50 | 80 | 95; label: string; tone: string; description: string }> = [
-  { value: 50, label: '50%',  tone: 'text-sky-300',     description: '여유 있게 미리 알림 — 추세 모니터링 우선' },
-  { value: 80, label: '80%',  tone: 'text-amber-300',   description: '주의 단계 알림 — 일반적인 권장 임계값' },
-  { value: 95, label: '95%',  tone: 'text-rose-300',    description: '곧 차단 단계 알림 — 즉시 조치 필요' },
+  { value: 50, label: '50%',  tone: 'text-sky-300',     description: '여유 있게 미리 알림: 추세 모니터링 우선' },
+  { value: 80, label: '80%',  tone: 'text-amber-300',   description: '주의 단계 알림: 일반적인 권장 임계값' },
+  { value: 95, label: '95%',  tone: 'text-rose-300',    description: '곧 차단 단계 알림: 즉시 조치 필요' },
 ];
 
 const CHANNEL_OPTIONS: Array<{ value: 'email' | 'sms' | 'inapp'; label: string; icon: typeof Mail; description: string }> = [
@@ -98,7 +98,7 @@ export default function ThresholdAlertModal({ open, onClose, initial, onSave }: 
           </div>
           <div className="flex-1">
             <h3 className="text-base font-bold text-white">한도 알림 설정</h3>
-            <p className="text-xs text-white/50 mt-0.5">AI 호출 한도 도달 전 사전 알림 — 차단 사고 예방</p>
+            <p className="text-xs text-white/50 mt-0.5">AI 호출 한도 도달 전 사전 알림. 차단 사고 예방</p>
           </div>
           <button
             onClick={() => !saving && onClose()}

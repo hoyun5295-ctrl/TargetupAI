@@ -65,7 +65,7 @@ export function decideSpamOutcome(
   return {
     status: 'admin_review',
     autoExecuteBlocked: true,
-    reason: `스팸필터 미통과 (AI 재생성 ${regenerateCount}회 후에도 ${finalResult}) — 담당자 검토 필요`,
+    reason: `스팸필터 미통과 (AI 재생성 ${regenerateCount}회 후에도 ${finalResult}). 담당자 검토 필요`,
   };
 }
 
@@ -95,7 +95,7 @@ export async function recordAdminStopLearning(
       other: '기타',
     };
     const reasonLabel = reasonLabelMap[stopReason.reason] || '기타';
-    const summary = `자동 마케팅 담당자 정지 = "${reasonLabel}"${stopReason.detail ? ` — ${stopReason.detail}` : ''}. 정지된 문안: "${messageBody.slice(0, 100)}${messageBody.length > 100 ? '...' : ''}"`;
+    const summary = `자동 마케팅 담당자 정지 = "${reasonLabel}"${stopReason.detail ? `: ${stopReason.detail}` : ''}. 정지된 문안: "${messageBody.slice(0, 100)}${messageBody.length > 100 ? '...' : ''}"`;
 
     await addMemory({
       companyId,

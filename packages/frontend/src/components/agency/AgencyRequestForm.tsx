@@ -174,8 +174,8 @@ export default function AgencyRequestForm({
     const next = [...current];
     for (const f of Array.from(list)) {
       if (next.length >= AGENCY_MAX_IMAGES) { onImageError?.(`이미지는 최대 ${AGENCY_MAX_IMAGES}장까지 올릴 수 있습니다.`); break; }
-      if (!['image/jpeg', 'image/png', 'image/webp'].includes(f.type)) { onImageError?.(`${f.name} — JPG/PNG/WebP만 가능합니다.`); continue; }
-      if (f.size > AGENCY_MAX_IMAGE_MB * 1024 * 1024) { onImageError?.(`${f.name} — 장당 ${AGENCY_MAX_IMAGE_MB}MB 이하만 가능합니다.`); continue; }
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(f.type)) { onImageError?.(`${f.name}: JPG/PNG/WebP만 가능합니다.`); continue; }
+      if (f.size > AGENCY_MAX_IMAGE_MB * 1024 * 1024) { onImageError?.(`${f.name}: 장당 ${AGENCY_MAX_IMAGE_MB}MB 이하만 가능합니다.`); continue; }
       next.push(f);
     }
     onImagesChange(next);
@@ -197,7 +197,7 @@ export default function AgencyRequestForm({
       {/* 행사 이미지 — 최상단: 올리면 AI가 아래 필드 자동 입력 (2026-07-09 Harold) */}
       {onImagesChange && (
         section(<Images className="w-4 h-4" />, `행사 이미지 (선택, 최대 ${AGENCY_MAX_IMAGES}장)`,
-          '행사 포스터·상품 이미지를 올리면 AI가 아래 내용을 자동으로 채워 드립니다 — 확인·수정만 하시면 됩니다.', (
+          '행사 포스터·상품 이미지를 올리면 AI가 아래 내용을 자동으로 채워 드립니다. 확인·수정만 하시면 됩니다.', (
           <div className="space-y-3">
             <label
               className={`${S.dropzone} block`}
@@ -226,7 +226,7 @@ export default function AgencyRequestForm({
             {onAnalyzeImages && (images || []).length > 0 && (
               <button type="button" onClick={onAnalyzeImages} disabled={disabled || analyzing} className={S.analyzeBtn}>
                 {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                {analyzing ? '이미지 판독 중 — 잠시만 기다려주세요' : 'AI로 자동 입력 (행사명·기간·내용·혜택·상품)'}
+                {analyzing ? '이미지 판독 중. 잠시만 기다려주세요' : 'AI로 자동 입력 (행사명·기간·내용·혜택·상품)'}
               </button>
             )}
           </div>
@@ -261,7 +261,7 @@ export default function AgencyRequestForm({
       ))}
 
       {/* 혜택 */}
-      {section(<Gift className="w-4 h-4" />, '고객 혜택', '제안서의 발송 문안은 여기 적어주신 혜택과 이미지에 보이는 내용만 사용합니다 — 없는 혜택은 만들지 않습니다.', (
+      {section(<Gift className="w-4 h-4" />, '고객 혜택', '제안서의 발송 문안은 여기 적어주신 혜택과 이미지에 보이는 내용만 사용합니다. 없는 혜택은 만들지 않습니다.', (
         <textarea value={value.benefit} onChange={(e) => set({ benefit: e.target.value })} rows={2} disabled={disabled}
           placeholder="예: 전 구매 고객 10% 할인 + 5만원 이상 구매 시 사은품 증정" className={`${S.input} resize-y`} />
       ))}
@@ -290,7 +290,7 @@ export default function AgencyRequestForm({
       ))}
 
       {/* 대상 상품 */}
-      {section(<Package className="w-4 h-4" />, '대상 상품 · 신제품 (선택)', '행사 대상 상품이 있으면 추가해 주세요 — 가격은 문안·제안서에 그대로 사용됩니다.', (
+      {section(<Package className="w-4 h-4" />, '대상 상품 · 신제품 (선택)', '행사 대상 상품이 있으면 추가해 주세요. 가격은 문안·제안서에 그대로 사용됩니다.', (
         <div className="space-y-2">
           {value.products.map((p, i) => (
             <div key={i} className={`${S.productRow} flex items-center gap-2 flex-wrap md:flex-nowrap`}>

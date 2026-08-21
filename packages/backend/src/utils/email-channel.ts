@@ -117,7 +117,7 @@ async function ensureDesignColumnOrThrow(): Promise<void> {
     );
     if (res.rows.length === 0) {
       // 'column' + 'does not exist' 포함 — route handleDbMigrationError가 503 DB_MIGRATION_PENDING으로 변환
-      throw new Error('email_campaigns.design column does not exist — ALTER 실행 필요');
+      throw new Error('email_campaigns.design column does not exist (ALTER 실행 필요)');
     }
     designColumnExists = true;
   }
@@ -142,7 +142,7 @@ export async function createEmailCampaign(input: CreateCampaignInput): Promise<E
   const defaultFromName = input.fromName || smtpConfig?.fromName || '한줄로AI';
 
   if (!defaultFromEmail) {
-    throw new Error('fromEmail 필수 — 회사 admin SMTP 설정 안 from_email 등록 후 진입 의무');
+    throw new Error('fromEmail 필수: 회사 admin SMTP 설정 안 from_email 등록 후 진입 의무');
   }
 
   const result = await query(
@@ -324,7 +324,7 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
   // 회사 SMTP 설정 검증
   const smtpReady = await isSmtpConfigured(campaign.companyId);
   if (!smtpReady) {
-    throw new Error('회사 SMTP 설정 미완료 — 회사 admin이 SMTP 정보 등록 후 발송 진입 의무');
+    throw new Error('회사 SMTP 설정 미완료. 회사 admin이 SMTP 정보 등록 후 발송 진입 의무');
   }
 
   // ★ 2026-07-12 발송 엔진 단일 길목 placeholder 가드 (Codex HIGH 정정) —
@@ -340,7 +340,7 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
 
   // Zero-Count 영구 원칙
   if (input.recipients.length === 0) {
-    throw new Error('수신자 0건 — Zero-Count 영구 원칙 발송 차단.');
+    throw new Error('수신자 0건. Zero-Count 영구 원칙 발송 차단.');
   }
 
   // ★ 2026-07-12 재시도 멱등 (Codex MEDIUM 정정) — 부분 실패 후 같은 캠페인을 다시 발송할 때

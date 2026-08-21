@@ -186,7 +186,7 @@ router.post('/:id/preview', async (req: Request, res: Response) => {
         success: true,
         matchCount: null,
         samples: [],
-        message: '본 세그먼트는 자연어 프롬프트 기반입니다 — 매칭 수는 AI 한줄로 발송 시점에 확정됩니다.',
+        message: '본 세그먼트는 자연어 프롬프트 기반입니다. 매칭 수는 AI 한줄로 발송 시점에 확정됩니다.',
       });
     }
 

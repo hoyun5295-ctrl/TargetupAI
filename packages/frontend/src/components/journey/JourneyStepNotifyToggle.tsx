@@ -114,7 +114,7 @@ export default function JourneyStepNotifyToggle({
         />
       </div>
       <div className="text-[10px] text-white/30 italic">
-        Data source — journey_steps.notify_manager_on_pretest · 첫·마지막 step 기본 ON / 중간 기본 OFF
+        Data source: journey_steps.notify_manager_on_pretest · 첫·마지막 step 기본 ON / 중간 기본 OFF
       </div>
     </div>
   );

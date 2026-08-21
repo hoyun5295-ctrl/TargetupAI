@@ -125,7 +125,7 @@ export default function ImcProfileImportModal({ companies, onClose, onDone, mode
   const linkProfile = async (it: any) => {
     const senderKey = pickSenderKey(it);
     if (!companyId) { setError('연결할 회사를 먼저 선택해주세요'); return; }
-    if (!senderKey) { setError('이 항목에 senderKey가 없습니다 — 아래 원문에서 확인이 필요합니다'); return; }
+    if (!senderKey) { setError('이 항목에 senderKey가 없습니다. 아래 원문에서 확인이 필요합니다'); return; }
     setWorking(true); setError('');
     try {
       const res = await fetch('/api/alimtalk/senders/import', {
@@ -138,7 +138,7 @@ export default function ImcProfileImportModal({ companies, onClose, onDone, mode
       setLinkedKey(senderKey);
       setLinkedLabel(pickLabel(it));
       setPreview(null);
-      onDone(`발신프로필 연결 완료 — ${pickLabel(it)}`);
+      onDone(`발신프로필 연결 완료: ${pickLabel(it)}`);
     } catch (e: any) {
       setError(e?.message || '연결 실패');
     } finally {
@@ -158,7 +158,7 @@ export default function ImcProfileImportModal({ companies, onClose, onDone, mode
       const data = await res.json();
       if (!res.ok || data?.success === false) throw new Error(data?.error || '템플릿 가져오기 실패');
       setPreview({ ...data, dryRun });
-      if (!dryRun) onDone(`템플릿 가져오기 완료 — ${linkedLabel}`);
+      if (!dryRun) onDone(`템플릿 가져오기 완료: ${linkedLabel}`);
     } catch (e: any) {
       setError(e?.message || '템플릿 가져오기 실패');
     } finally {
@@ -229,7 +229,7 @@ export default function ImcProfileImportModal({ companies, onClose, onDone, mode
                   <p className="text-[11px] text-gray-400">발신프로필을 불러오는 중...</p>
                 ) : linkedProfiles.length === 0 ? (
                   <p className="text-[11px] text-amber-600">
-                    이 회사에 연결된 발신프로필이 없습니다 — 발신프로필 관리 화면의 [IMC에서 가져오기]로 먼저 연결해 주세요.
+                    이 회사에 연결된 발신프로필이 없습니다. 발신프로필 관리 화면의 [IMC에서 가져오기]로 먼저 연결해 주세요.
                   </p>
                 ) : (
                   <div className="space-y-1.5">
@@ -255,7 +255,7 @@ export default function ImcProfileImportModal({ companies, onClose, onDone, mode
               </div>
             ) : (
               <p className="text-[11px] text-gray-400 mt-2">
-                옛 senderKey로는 찾을 수 없습니다 — 딜러 이관 시 키가 새로 발급되어 이전 키 조회는 `4011`이 됩니다. 채널명으로 찾습니다.
+                옛 senderKey로는 찾을 수 없습니다. 딜러 이관 시 키가 새로 발급되어 이전 키 조회는 `4011`이 됩니다. 채널명으로 찾습니다.
               </p>
             )}
           </div>
@@ -308,7 +308,7 @@ export default function ImcProfileImportModal({ companies, onClose, onDone, mode
           {linkedKey && (
             <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-4">
               <p className="text-xs font-semibold text-violet-700 mb-1">
-                3. 템플릿 가져오기 — {companyName} · {linkedLabel}
+                3. 템플릿 가져오기: {companyName} · {linkedLabel}
               </p>
               <p className="text-[11px] text-gray-500 mb-3">
                 미리보기로 건수를 먼저 확인하고 반영합니다. 회사 안에 같은 코드가 이미 있으면 건너뜁니다.

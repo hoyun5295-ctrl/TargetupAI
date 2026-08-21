@@ -300,7 +300,7 @@ export default function AiRefineModal({
           </span>
           <span className="text-amber-300 font-medium">AI 결과는 참고용 · 발송 전 반드시 미리보기로 확인하세요</span>
           <div className="text-[10px] text-white/30 italic mt-1">
-            Data source — AI 문안 다듬기 (회사 30일 발송 패턴 학습 + 톤 자동 반영)
+            Data source: AI 문안 다듬기 (회사 30일 발송 패턴 학습 + 톤 자동 반영)
           </div>
         </div>
       </div>

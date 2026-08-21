@@ -420,7 +420,7 @@ export async function cafe24ApiCall<T = unknown>(
       return (await res.json()) as T;
     }
     if (res.status >= 500 && attempt === 0) {
-      lastErr = new Error(`카페24 API 5xx (${res.status}) — retry`);
+      lastErr = new Error(`카페24 API 5xx (${res.status}), retry`);
       await new Promise((r) => setTimeout(r, 500));
       continue;
     }

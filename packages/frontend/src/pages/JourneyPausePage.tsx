@@ -104,7 +104,7 @@ export default function JourneyPausePage() {
         hour: '2-digit',
         minute: '2-digit',
       })
-    : '— 시각 미정 —';
+    : '시각 미정';
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white px-4 py-8 md:py-16">
@@ -119,7 +119,7 @@ export default function JourneyPausePage() {
               발송 정지 페이지
             </h1>
             <p className="text-[11px] md:text-[12px] text-white/50 mt-0.5">
-              여정 자동 발송 2시간 전 안내 — 담당자 1-click 정지 영역
+              여정 자동 발송 2시간 전 안내: 담당자 1-click 정지 영역
             </p>
           </div>
         </div>
@@ -258,11 +258,11 @@ export default function JourneyPausePage() {
 
             {phase === 'confirming' && (
               <div className="bg-violet-900/40 border border-rose-400/40 rounded-2xl shadow-2xl p-5">
-                <div className="text-[14px] font-semibold text-rose-100 mb-3">최종 확인 — 정지 후 복구 의무</div>
+                <div className="text-[14px] font-semibold text-rose-100 mb-3">최종 확인: 정지 후 복구 의무</div>
                 <div className="mb-4">
                   <label className="block text-[12px] text-white/60 mb-1.5 flex items-center gap-1.5">
                     <Phone className="w-3 h-3" />
-                    담당자 phone (선택 — 기록 보존)
+                    담당자 phone (선택, 기록 보존)
                   </label>
                   <input
                     type="tel"
@@ -299,7 +299,7 @@ export default function JourneyPausePage() {
         {phase === 'pausing' && (
           <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl p-8 text-center">
             <Loader2 className="w-8 h-8 text-rose-300 animate-spin mx-auto mb-3" />
-            <div className="text-[13px] text-white/70">발송 정지 진행 중 — DB 트랜잭션 + journey_step_pause_logs 영구 기록</div>
+            <div className="text-[13px] text-white/70">발송 정지 진행 중: DB 트랜잭션 + journey_step_pause_logs 영구 기록</div>
           </div>
         )}
 
@@ -322,7 +322,7 @@ export default function JourneyPausePage() {
 
         {/* Source caption */}
         <div className="text-[10px] text-white/30 italic mt-6 text-center">
-          Data source — CT-94 journey-pause-handler (D218+ 신설) · token TTL 24h · HMAC-SHA256 서명 정합
+          Data source: CT-94 journey-pause-handler (D218+ 신설) · token TTL 24h · HMAC-SHA256 서명 정합
         </div>
       </div>
     </div>

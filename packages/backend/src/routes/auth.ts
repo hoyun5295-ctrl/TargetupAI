@@ -384,7 +384,7 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
   } catch (error) {
     if (isMfaSchemaMissing(error)) {
       return res.status(503).json({
-        error: 'DB 마이그레이션 필요 — users.mfa_phone · mfa_challenges · mfa_trusted_devices 생성 요청',
+        error: 'DB 마이그레이션 필요: users.mfa_phone · mfa_challenges · mfa_trusted_devices 생성 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -515,7 +515,7 @@ router.post('/mfa/verify', loginLimiter, async (req: Request, res: Response) => 
   } catch (error) {
     if (isMfaSchemaMissing(error)) {
       return res.status(503).json({
-        error: 'DB 마이그레이션 필요 — users.mfa_phone · mfa_challenges · mfa_trusted_devices 생성 요청',
+        error: 'DB 마이그레이션 필요: users.mfa_phone · mfa_challenges · mfa_trusted_devices 생성 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -558,7 +558,7 @@ router.post('/mfa/resend', loginLimiter, async (req: Request, res: Response) => 
   } catch (error) {
     if (isMfaSchemaMissing(error)) {
       return res.status(503).json({
-        error: 'DB 마이그레이션 필요 — users.mfa_phone · mfa_challenges · mfa_trusted_devices 생성 요청',
+        error: 'DB 마이그레이션 필요: users.mfa_phone · mfa_challenges · mfa_trusted_devices 생성 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }

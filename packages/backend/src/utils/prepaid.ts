@@ -82,7 +82,7 @@ async function loadDeductLedger(
  * 되돌리는 경로(reverse)를 또 태워야 한다.
  */
 async function warnUnresolvedLedger(companyId: string, referenceId: string, messageType: string, where: string) {
-  const msg = `[선불정산중단] ${where} — 차감 원장 설명을 되읽지 못해 정산을 멈췄다. company=${companyId} ref=${referenceId} ${messageType}`;
+  const msg = `[선불정산중단] ${where}: 차감 원장 설명을 되읽지 못해 정산을 멈췄다. company=${companyId} ref=${referenceId} ${messageType}`;
   console.error(msg);
   await sendSystemAlert({
     dedupKey: `prepaid-ledger-unresolved:${referenceId}:${messageType}`,

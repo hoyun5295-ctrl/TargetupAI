@@ -196,7 +196,7 @@ describe('M4 — 채널 컴파일러(가지) 산출 유효성', () => {
         expect(BLOCK_TYPES).toContain(String(b.type));
       }
       const cta = c.content_blocks.find((b) => b.type === 'cta_group') as any;
-      if (cta) expect(cta.buttons[0].action_url).toBe('[URL — 회사 admin 수정]');
+      if (cta) expect(cta.buttons[0].action_url).toBe('[URL: 회사 admin 수정]');
     }
   });
 

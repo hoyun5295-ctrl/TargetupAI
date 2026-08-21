@@ -214,7 +214,7 @@ export default function ImageStudioPage() {
       if (!r2.ok || !d2?.success) throw new Error(d2?.error || '누끼에 실패했어요');
       setCutoutTempId(d2.cutout.tempId);
       setCutoutBlob(await loadBlob(`/api/image-studio/temp/${d2.cutout.tempId}`));
-      toast.success('제품 준비 완료 — 원본 그대로 포스터에 들어갑니다');
+      toast.success('제품 준비 완료. 원본 그대로 포스터에 들어갑니다');
     } catch (e: any) {
       toast.error(e?.message || '상품 준비에 실패했어요');
     } finally {
@@ -228,7 +228,7 @@ export default function ImageStudioPage() {
     setProduct(p);
     setCutoutTempId(null); setCutoutBlob(null);
     if (p.imageUrl) prepareProduct(p.imageUrl);
-    else toast.error('이 상품은 이미지가 없어요 — 다른 상품을 선택해주세요');
+    else toast.error('이 상품은 이미지가 없어요. 다른 상품을 선택해주세요');
   };
   const onUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -251,7 +251,7 @@ export default function ImageStudioPage() {
         texts, userHint: hint || null, cutoutTempId,
         textPosition: (template.kind || 'product') === 'event' ? textPosition : null,
       });
-      if (r.status === 402) { toast.error('크레딧이 부족합니다 — 충전 후 다시 시도해주세요'); return; }
+      if (r.status === 402) { toast.error('크레딧이 부족합니다. 충전 후 다시 시도해주세요'); return; }
       if (r.status === 409) { toast.error(d?.error || '다른 생성이 진행 중입니다'); return; }
       if (!r.ok || !d?.success) throw new Error(d?.error || '생성에 실패했어요');
       if (d.benefitNotice) toast.success(d.benefitNotice);
@@ -290,10 +290,10 @@ export default function ImageStudioPage() {
     setBusyMsg('라이브러리에 저장 중...');
     try {
       const { r, d } = await postJson('/api/image-studio/save', { tempId: c.tempId, title: c.title });
-      if (r.status === 503 && d?.code === 'DB_MIGRATION_PENDING') { toast.error('라이브러리 준비 중 — 운영자에게 문의해주세요'); return; }
+      if (r.status === 503 && d?.code === 'DB_MIGRATION_PENDING') { toast.error('라이브러리 준비 중. 운영자에게 문의해주세요'); return; }
       if (r.status === 409) { toast.error(d?.error || '이미 저장됐어요'); return; }
       if (!r.ok || !d?.success) throw new Error(d?.error || '저장에 실패했어요');
-      toast.success('라이브러리에 저장했어요 — MMS 발송 시엔 첨부 창에서 자동 변환돼요');
+      toast.success('라이브러리에 저장했어요. MMS 발송 시엔 첨부 창에서 자동 변환돼요');
       setCandidates((prev) => prev.filter((x) => x.tempId !== c.tempId));
       loadLibrary(); // 상단 라이브러리 폴더 즉시 갱신
     } catch (e: any) {
@@ -372,7 +372,7 @@ export default function ImageStudioPage() {
                 </button>
               ))}
             </div>
-            <p className="text-[10px] text-white/30 italic mt-2">Data source — 소재를 클릭하면 인앱·DM·이메일로 바로 만들거나 MMS로 변환할 수 있어요.</p>
+            <p className="text-[10px] text-white/30 italic mt-2">Data source: 소재를 클릭하면 인앱·DM·이메일로 바로 만들거나 MMS로 변환할 수 있어요.</p>
           </section>
         )}
 
@@ -389,7 +389,7 @@ export default function ImageStudioPage() {
                   <ShoppingBag className={`w-4 h-4 ${trackKind === 'product' ? 'text-violet-300' : 'text-white/40'}`} />
                   <span className="text-sm font-bold">제품 포스터</span>
                 </div>
-                <p className="text-[11px] text-white/45 leading-relaxed">내 상품이 주인공 — 제품 사진을 넣으면 원본 그대로 보존하고 배경·문구를 새로 그립니다.</p>
+                <p className="text-[11px] text-white/45 leading-relaxed">내 상품이 주인공: 제품 사진을 넣으면 원본 그대로 보존하고 배경·문구를 새로 그립니다.</p>
               </button>
               <button
                 onClick={() => { setTrackKind('event'); setCategory(null); }}
@@ -399,7 +399,7 @@ export default function ImageStudioPage() {
                   <Sparkles className={`w-4 h-4 ${trackKind === 'event' ? 'text-fuchsia-300' : 'text-white/40'}`} />
                   <span className="text-sm font-bold">행사 포스터</span>
                 </div>
-                <p className="text-[11px] text-white/45 leading-relaxed">멤버십데이·오픈·시즌 행사 안내 — 제품 없이 행사명과 문구만으로 완성됩니다.</p>
+                <p className="text-[11px] text-white/45 leading-relaxed">멤버십데이·오픈·시즌 행사 안내: 제품 없이 행사명과 문구만으로 완성됩니다.</p>
               </button>
             </div>
             <h2 className="text-sm font-bold text-white/90 mb-3">{trackKind === 'event' ? '어떤 행사인가요?' : '어떤 종류의 포스터인가요?'}</h2>
@@ -416,7 +416,7 @@ export default function ImageStudioPage() {
                 </button>
               ))}
             </div>
-            <p className="text-[10px] text-white/30 italic mt-3">Data source — 카테고리를 고르면 템플릿 목록으로 이동합니다. 생성 1회 2크레딧.</p>
+            <p className="text-[10px] text-white/30 italic mt-3">Data source: 카테고리를 고르면 템플릿 목록으로 이동합니다. 생성 1회 2크레딧.</p>
           </section>
         )}
 
@@ -485,7 +485,7 @@ export default function ImageStudioPage() {
                 </button>
               </div>
             )}
-            <p className="text-[10px] text-white/30 italic mt-3">Data source — 템플릿을 고르면 상품과 문구를 넣는 단계로 이동합니다. 돌아오면 보던 페이지가 유지됩니다.</p>
+            <p className="text-[10px] text-white/30 italic mt-3">Data source: 템플릿을 고르면 상품과 문구를 넣는 단계로 이동합니다. 돌아오면 보던 페이지가 유지됩니다.</p>
           </section>
         )}
 
@@ -521,7 +521,7 @@ export default function ImageStudioPage() {
                     </div>
                   )}
                   <p className="mt-2 text-[10px] text-white/30 italic">
-                    {template.exampleUrl ? '갤러리에서 보신 예시 그대로입니다 — 문구와 상품만 바뀝니다.' : '예시 이미지 준비 중 — 카드 스타일로 표시됩니다.'}
+                    {template.exampleUrl ? '갤러리에서 보신 예시 그대로입니다. 문구와 상품만 바뀝니다.' : '예시 이미지 준비 중. 카드 스타일로 표시됩니다.'}
                   </p>
                 </div>
               </div>
@@ -538,7 +538,7 @@ export default function ImageStudioPage() {
                   <div className="flex items-start gap-2.5">
                     <PenLine className="w-3.5 h-3.5 text-fuchsia-300 shrink-0 mt-0.5" />
                     <p className="text-[12px] leading-relaxed text-white/75 break-keep">
-                      예시 속 글자 자리에 <b className="text-fuchsia-200 font-semibold">아래 입력값이 그대로</b> 새겨져요 — 배경·분위기는 예시 그대로.
+                      예시 속 글자 자리에 <b className="text-fuchsia-200 font-semibold">아래 입력값이 그대로</b> 새겨져요. 배경·분위기는 예시 그대로.
                     </p>
                   </div>
                   {(template.kind || 'product') === 'product' && (
@@ -561,7 +561,7 @@ export default function ImageStudioPage() {
                     ))}
                   </div>
                 )}
-                <p className="text-[10px] text-white/35 italic">혜택·수치는 AI가 만들지 않아요 — 직접 입력해주세요.</p>
+                <p className="text-[10px] text-white/35 italic">혜택·수치는 AI가 만들지 않아요. 직접 입력해주세요.</p>
               </div>
 
               {/* ★ 2026-08-13 상품 이미지 — 좌측에서 우측으로 이동(Harold 지시 — 좌측은 예시 하나로 고정, 우측 높이로 균형) */}
@@ -569,7 +569,7 @@ export default function ImageStudioPage() {
                 <h3 className="text-sm font-bold mb-1 flex items-center gap-2"><ShoppingBag className="w-4 h-4 text-violet-300" /> {(template.kind || 'product') === 'event' ? '제품 이미지 (선택)' : '상품 이미지'}</h3>
                 <p className="text-[11px] text-white/40 mb-3">
                   {(template.kind || 'product') === 'event'
-                    ? '행사 포스터는 제품 없이 완성됩니다 — 포스터에 제품을 함께 넣고 싶을 때만 첨부하세요.'
+                    ? '행사 포스터는 제품 없이 완성됩니다. 포스터에 제품을 함께 넣고 싶을 때만 첨부하세요.'
                     : '제품 원본은 그대로 보존하고(누끼) 배경·문구만 새로 그립니다.'}
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -584,14 +584,14 @@ export default function ImageStudioPage() {
                 {cutoutBlob && (
                   <div className="mt-3 flex items-center gap-3">
                     <img src={cutoutBlob} alt="누끼" className="w-20 h-20 object-contain rounded-lg border border-emerald-400/30 bg-slate-800/40" />
-                    <div className="text-[11px] text-emerald-300/80 flex items-center gap-1"><Check className="w-3.5 h-3.5" /> 배경 제거 완료 — 원본 그대로 들어갑니다</div>
+                    <div className="text-[11px] text-emerald-300/80 flex items-center gap-1"><Check className="w-3.5 h-3.5" /> 배경 제거 완료. 원본 그대로 들어갑니다</div>
                   </div>
                 )}
                 {product && <div className="mt-2 text-[11px] text-white/50 truncate">{product.name}{product.salePrice ? ` · ${won(product.salePrice)}` : ''}</div>}
                 {(template.kind || 'product') === 'product' && (
                   <>
                     <p className="text-[10px] text-white/30 italic mt-2">상품 없이도 생성할 수 있어요(문구 포스터). 단일 제품 사진에서 가장 잘 작동합니다.</p>
-                    <p className="text-[10px] text-amber-300/60 italic mt-1">의류는 모델 착용컷 대신 옷 단독컷을 권장해요 — 착용컷은 배경과 합성한 티가 나기 쉬워요.</p>
+                    <p className="text-[10px] text-amber-300/60 italic mt-1">의류는 모델 착용컷 대신 옷 단독컷을 권장해요. 착용컷은 배경과 합성한 티가 나기 쉬워요.</p>
                   </>
                 )}
               </div>
@@ -613,7 +613,7 @@ export default function ImageStudioPage() {
           <section className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-sm font-bold text-white/90 mr-2">완성 포스터</h2>
-              <span className="text-[11px] text-white/40 mr-1">이 포스터는 인앱·DM·이메일 어디서든 그대로 쓸 수 있어요 — 저장하면 각 채널에 자동으로 맞춰 들어갑니다.</span>
+              <span className="text-[11px] text-white/40 mr-1">이 포스터는 인앱·DM·이메일 어디서든 그대로 쓸 수 있어요. 저장하면 각 채널에 자동으로 맞춰 들어갑니다.</span>
               <button onClick={() => setStage('setup')} className="ml-auto text-xs text-white/40 hover:text-white/70">문구·상품 수정</button>
             </div>
 
@@ -648,7 +648,7 @@ export default function ImageStudioPage() {
                 </div>
               ))}
             </div>
-            <p className="text-[10px] text-white/30 italic">Data source — 2K 약 20초 · 4K 약 30초 · 저장 전 산출물은 7일 후 자동 삭제 · MMS는 발송 시 첨부 창에서 자동 변환</p>
+            <p className="text-[10px] text-white/30 italic">Data source: 2K 약 20초 · 4K 약 30초 · 저장 전 산출물은 7일 후 자동 삭제 · MMS는 발송 시 첨부 창에서 자동 변환</p>
           </section>
         )}
       </main>
@@ -675,7 +675,7 @@ export default function ImageStudioPage() {
               <div className="md:w-[42%] p-5 flex flex-col gap-2.5 border-t md:border-t-0 md:border-l border-white/10">
                 <div className="text-[11px] text-white/45 mb-1">
                   {assetAction.filename && <div className="text-white/75 font-medium break-all leading-snug">{assetAction.filename.replace(/\.[^.]+$/, '')}</div>}
-                  <div className="mt-2 text-white/35 leading-relaxed">이 포스터는 문구·상품이 이미 들어가 있어, 어느 채널이든 <b className="text-white/60 font-semibold">전체가 그대로</b> 쓰여요 — 잘림·추가 비용 없음.</div>
+                  <div className="mt-2 text-white/35 leading-relaxed">이 포스터는 문구·상품이 이미 들어가 있어, 어느 채널이든 <b className="text-white/60 font-semibold">전체가 그대로</b> 쓰여요. 잘림·추가 비용 없음.</div>
                 </div>
                 {isCompanyAdmin && (
                   <button onClick={() => launchChannel(STUDIO_INAPP_DRAFT_KEY, '/inapp-messages')} className="flex items-center gap-2 px-3.5 py-3 rounded-xl border border-rose-400/40 bg-rose-500/10 text-xs font-semibold text-white/90 hover:bg-rose-500/20 transition">

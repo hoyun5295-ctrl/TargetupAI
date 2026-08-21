@@ -53,7 +53,7 @@ export default function EmailTemplateGalleryModal({
         <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
           <div>
             <h3 className="text-sm font-bold text-white">템플릿에서 시작</h3>
-            <p className="text-[11px] text-white/50">완성된 골격을 한 번에 불러와요 — 크레딧 0, 바로 편집</p>
+            <p className="text-[11px] text-white/50">완성된 골격을 한 번에 불러와요 (크레딧 0 · 바로 편집)</p>
           </div>
           <button onClick={onClose} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>
         </div>
@@ -70,7 +70,7 @@ export default function EmailTemplateGalleryModal({
           {elite.length > 0 && (
             <div>
               <div className="flex items-center gap-1.5 mb-2 text-[11px] font-semibold text-amber-200">
-                <Sparkles className="w-3.5 h-3.5" /> 정예 템플릿 — 목적으로 고르세요
+                <Sparkles className="w-3.5 h-3.5" /> 정예 템플릿: 목적으로 고르세요
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {elite.map((t) => (

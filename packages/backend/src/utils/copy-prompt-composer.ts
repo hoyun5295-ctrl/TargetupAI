@@ -73,14 +73,14 @@ export function buildCopyBrainPrompt(opts: {
 
   if (company.length > 0) {
     const list = company.map((e, i) => `${i + 1}. ${e.text}`).join('\n');
-    parts.push(`## 우리 회사에서 반응이 좋았던 문안 (톤·구조 참고용 — 본문을 그대로 베끼지 말 것)\n${list}`);
+    parts.push(`## 우리 회사에서 반응이 좋았던 문안 (톤·구조 참고용, 본문을 그대로 베끼지 말 것)\n${list}`);
   }
 
   // ★ 2026-07-04 같은 업종 베스트(탈색·검수된 큐레이션 시드)를 참고 원문으로 렌더. 식별자 잔존 행은 방어적으로 제외.
   const industry = examples.filter((e) => e.source === 'industry' && !hasIdentifierLeak(e.text));
   if (industry.length > 0) {
     const list = industry.map((e, i) => `${i + 1}. ${e.text}`).join('\n');
-    parts.push(`## 같은 업종에서 검증된 문안 (탈색됨 — 구조·표현만 참고, 회사 식별정보 제거 / 그대로 베끼지 말 것)\n${list}`);
+    parts.push(`## 같은 업종에서 검증된 문안 (탈색됨, 구조·표현만 참고, 회사 식별정보 제거 / 그대로 베끼지 말 것)\n${list}`);
   }
 
   // ★ 2026-07-04: 업종 승리 공식(증류 지침 — 원문 아님). 시드 원문 블록과 공존.
@@ -92,7 +92,7 @@ export function buildCopyBrainPrompt(opts: {
   if (industryFeatures && industryFeatures.sampleCount > 0) {
     const f = industryFeatures;
     parts.push(
-      `## 같은 업종 ${f.sampleCount}건의 구조 통계 (참고만 — 타사 문장·표현은 주어지지 않습니다)\n` +
+      `## 같은 업종 ${f.sampleCount}건의 구조 통계 (참고만, 타사 문장·표현은 주어지지 않습니다)\n` +
       `- 평균 길이: 약 ${f.avgLengthChars}자\n` +
       `- 평균 문장 수: 약 ${f.avgSentenceCount}개\n` +
       `- 행동 유도(CTA) 포함 비율: ${Math.round(f.hasCtaRatio * 100)}%\n` +
@@ -121,7 +121,7 @@ export function buildCopyBrainPrompt(opts: {
   }
 
   if (kit.bannedWords && kit.bannedWords.length > 0) {
-    parts.push(`## 절대 사용 금지 단어\n${kit.bannedWords.join(' / ')} — 이 단어들은 쓰지 마세요.`);
+    parts.push(`## 절대 사용 금지 단어\n${kit.bannedWords.join(' / ')}. 이 단어들은 쓰지 마세요.`);
   }
 
   if (parts.length === 0) return '';

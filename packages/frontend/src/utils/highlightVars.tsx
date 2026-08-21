@@ -120,7 +120,7 @@ export function mergeAndHighlightVars(
         );
       } else {
         parts.push(
-          <span key={key++} className={missingClass} title={`%${varName}% — 샘플 고객에 데이터 없음`}>
+          <span key={key++} className={missingClass} title={`%${varName}%: 샘플 고객에 데이터 없음`}>
             {match[0]}
           </span>
         );
@@ -144,7 +144,7 @@ export function mergeAndHighlightVars(
         );
       } else {
         parts.push(
-          <span key={key++} className={missingClass} title={`${match[0]} — 치환 데이터 없음`}>
+          <span key={key++} className={missingClass} title={`${match[0]}: 치환 데이터 없음`}>
             {match[0]}
           </span>
         );
@@ -218,7 +218,7 @@ function highlightPercentVars(
       );
     } else {
       parts.push(
-        <span key={key++} className={missingClass} title={`%${varName}% — 샘플 고객에 데이터 없음`}>
+        <span key={key++} className={missingClass} title={`%${varName}%: 샘플 고객에 데이터 없음`}>
           {match[0]}
         </span>
       );

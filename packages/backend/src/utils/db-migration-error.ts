@@ -22,7 +22,7 @@ export function handleDbMigrationError(err: any, res: Response, tableName: strin
   if (missing) {
     res.status(503).json({
       success: false,
-      error: `DB 마이그레이션 필요 — 운영자에게 ${tableName} 테이블/컬럼 생성(CREATE/ALTER) 실행 요청 의무`,
+      error: `DB 마이그레이션 필요: 운영자에게 ${tableName} 테이블/컬럼 생성(CREATE/ALTER) 실행 요청 의무`,
       code: 'DB_MIGRATION_PENDING',
     });
     return true;

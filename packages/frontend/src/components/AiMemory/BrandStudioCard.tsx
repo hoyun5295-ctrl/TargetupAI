@@ -210,11 +210,11 @@ export default function BrandStudioCard({ apiBase, token, onToast }: BrandStudio
                     )}
                   </>
                 ) : (
-                  <span className="text-[11px] text-amber-200/90">아직 학습 전이에요 — 홈페이지 주소 하나면 시작돼요.</span>
+                  <span className="text-[11px] text-amber-200/90">아직 학습 전이에요. 홈페이지 주소 하나면 시작돼요.</span>
                 )}
               </div>
             )}
-            <div className="text-[10px] text-white/30 italic mt-2">Data source — companies.brand_kit (DM·이메일·인앱 생성기 공용)</div>
+            <div className="text-[10px] text-white/30 italic mt-2">Data source: companies.brand_kit (DM·이메일·인앱 생성기 공용)</div>
           </div>
           <button
             onClick={openModal}

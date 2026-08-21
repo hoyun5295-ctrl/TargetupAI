@@ -44,7 +44,7 @@ export function buildInstallGuideText(input: BuildInstallGuideInput): string {
   const ver = sdkVersion || CDP_SDK_VERSION;
   const lines: string[] = [];
 
-  lines.push(`[한줄로 연동 설치 안내 — ${providerName}]`);
+  lines.push(`[한줄로 연동 설치 안내: ${providerName}]`);
   lines.push('');
   lines.push('아래 순서대로 진행해 주세요. 궁금한 점은 요청하신 담당자에게 문의해 주세요.');
   lines.push('');

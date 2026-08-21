@@ -695,7 +695,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       const spamRow = spamCheck.rows[0];
       if (spamRow?.spam_test_result?.isBlocked === true) {
         console.warn(`${logPrefix} 스팸필터 차단된 문안 — 본 발송 중단 (담당자 확인 필요)`);
-        await markFailed(ac, '스팸필터 차단으로 발송 중단 — 문안 수정 후 재시도');
+        await markFailed(ac, '스팸필터 차단으로 발송 중단. 문안 수정 후 재시도');
         return;
       }
     } catch (spamGuardErr) {
@@ -891,7 +891,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
           customers.length,
           ac.message_type,
           campaignId,
-          '개별회신번호 미보유로 전체 제외 — 환불',
+          '개별회신번호 미보유로 전체 제외 (환불)',
           'campaign',
           { refundKey: REFUND_KEYS.NOT_LOADED },   // 큐에 한 건도 안 들어간 분 = 미적재 항아리
         );

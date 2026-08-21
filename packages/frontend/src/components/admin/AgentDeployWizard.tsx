@@ -240,7 +240,7 @@ export default function AgentDeployWizard() {
                 {result.state === 'verified' ? (
                   <p className="mt-1 text-xs font-semibold text-emerald-600">실연결 검증 완료된 버전입니다.</p>
                 ) : (
-                  <p className="mt-1 text-xs text-amber-600">확인되지 않은 조합입니다 — 실연결 검증이 끝나면 다운로드가 열립니다.</p>
+                  <p className="mt-1 text-xs text-amber-600">확인되지 않은 조합입니다. 실연결 검증이 끝나면 다운로드가 열립니다.</p>
                 )}
               </div>
 
@@ -282,7 +282,7 @@ export default function AgentDeployWizard() {
                 ) : (
                   /* 검증된 조합만 내보낸다 — 실제 게이트는 서버 다운로드 길목(403). 여기는 안내만. */
                   <div className="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-5 py-2.5 text-sm font-medium text-amber-700">
-                    <ShieldAlert className="h-4 w-4" />확인되지 않음 — 담당자 확인 후 개별 전달
+                    <ShieldAlert className="h-4 w-4" />확인되지 않음. 담당자 확인 후 개별 전달
                   </div>
                 )}
                 <button

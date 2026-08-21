@@ -69,7 +69,7 @@ export default function MinimumChargeModal({ open, onClose, companies, onChanged
       });
       const d = await r.json();
       if (d.success) {
-        say(amount == null ? '해제했습니다 — 일괄발급 대상으로 돌아갑니다.' : '저장했습니다.');
+        say(amount == null ? '해제했습니다. 일괄발급 대상으로 돌아갑니다.' : '저장했습니다.');
         setRemoveAsk(null); setAddCompany('');
         load(month);
         onChanged?.();
@@ -159,7 +159,7 @@ export default function MinimumChargeModal({ open, onClose, companies, onChanged
               </thead>
               <tbody>
                 {(rows || []).length === 0 ? (
-                  <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">{loading ? '불러오는 중...' : '등록된 회사가 없습니다 — 위에서 등록해주세요.'}</td></tr>
+                  <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">{loading ? '불러오는 중...' : '등록된 회사가 없습니다. 위에서 등록해주세요.'}</td></tr>
                 ) : (rows || []).map((r) => (
                   <tr key={r.company_id} className="border-t">
                     <td className="px-3 py-2">{r.company_name}</td>
@@ -190,10 +190,10 @@ export default function MinimumChargeModal({ open, onClose, companies, onChanged
             <div className="border rounded-lg px-4 py-3 text-sm space-y-1.5">
               <div className="font-medium text-gray-700">발행 결과</div>
               {result.issued.map((a: any) => (
-                <div key={a.company_id} className="text-emerald-700 text-xs">{a.company_name} — 합계 {won(Number(a.total_amount))} 발행</div>
+                <div key={a.company_id} className="text-emerald-700 text-xs">{a.company_name}: 합계 {won(Number(a.total_amount))} 발행</div>
               ))}
               {result.skipped.map((s: any, i: number) => (
-                <div key={i} className="text-amber-700 text-xs">{s.company_name} — {s.reason}</div>
+                <div key={i} className="text-amber-700 text-xs">{s.company_name}: {s.reason}</div>
               ))}
               {result.issued.length > 0 && (
                 <div className="text-[11px] text-gray-400 pt-1">발행분 메일 발송·컨펌은 정산 목록의 기존 흐름(메일 재시도 버튼)으로 진행됩니다.</div>

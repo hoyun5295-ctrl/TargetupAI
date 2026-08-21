@@ -112,7 +112,7 @@ export default function ReportV1View({
             <div key={`${e.kind}-${i}`} className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <p className="text-xs text-white/50">{e.label}</p>
               <p className="mt-1 text-sm font-semibold leading-relaxed text-white">{e.value}</p>
-              <p className="mt-2 text-[10px] italic text-white/30">Data source — {e.source}</p>
+              <p className="mt-2 text-[10px] italic text-white/30">Data source: {e.source}</p>
             </div>
           ))}
         </div>
@@ -153,7 +153,7 @@ export default function ReportV1View({
               ))}
             </ul>
           )}
-          <p className="mt-3 text-[10px] italic text-white/30">Data source — 답변 × 요금제 실데이터(요금제 표가 진실)</p>
+          <p className="mt-3 text-[10px] italic text-white/30">Data source: 답변 × 요금제 실데이터(요금제 표가 진실)</p>
         </div>
       )}
 

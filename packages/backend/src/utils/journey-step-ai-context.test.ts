@@ -124,7 +124,7 @@ describe('refineStepMessage — 여정 맥락', () => {
       journey: { triggerLabel: '첫 구매', objective: '첫 구매 고객을 두 번째 구매로', stepOrder: 1, hoursFromTrigger: 0, previousMessages: [] },
     });
     expect(r.candidates[0].message).not.toContain('30%');
-    expect(r.candidates[0].message).toContain('[혜택 안내 — 직접 수정해주세요]');
+    expect(r.candidates[0].message).toContain('[혜택 안내: 직접 수정해주세요]');
   });
 
   it('목적에 혜택을 써도 생성 모드에서는 남기지 않는다 — 목적은 근거가 아니다', async () => {
@@ -139,7 +139,7 @@ describe('refineStepMessage — 여정 맥락', () => {
       journey: { triggerLabel: '첫 구매', objective: '30% 할인 행사를 알리고 싶어요', stepOrder: 1, hoursFromTrigger: 0, previousMessages: [] },
     });
     expect(r.candidates[0].message).not.toContain('30%');
-    expect(r.candidates[0].message).toContain('[혜택 안내 — 직접 수정해주세요]');
+    expect(r.candidates[0].message).toContain('[혜택 안내: 직접 수정해주세요]');
   });
 
   it('사람이 원본 본문에 쓴 혜택은 다듬어도 남는다', async () => {

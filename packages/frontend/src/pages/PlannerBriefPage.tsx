@@ -84,7 +84,7 @@ const TP_STATE: Record<string, { label: string; cls: string }> = {
   producing: { label: '제작 중', cls: 'bg-violet-500/15 text-violet-200 border-violet-400/25' },
   sent: { label: '발송 완료', cls: 'bg-emerald-500/15 text-emerald-200 border-emerald-400/25' },
   skipped: { label: '생략', cls: 'bg-white/10 text-white/55 border-white/15' },
-  hold_credit: { label: '보류 — 크레딧', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/25' },
+  hold_credit: { label: '보류 (크레딧)', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/25' },
   locked: { label: '보류', cls: 'bg-amber-500/15 text-amber-200 border-amber-400/25' },
 };
 
@@ -134,7 +134,7 @@ export default function PlannerBriefPage() {
       setMigrationPending(false);
       setBrief(await r.json());
     } catch {
-      toast.error('네트워크 오류 — 다시 시도해 주세요');
+      toast.error('네트워크 오류. 다시 시도해 주세요');
     } finally {
       setLoading(false);
     }
@@ -153,7 +153,7 @@ export default function PlannerBriefPage() {
       if (!r.ok) { toast.error('결과를 불러오지 못했습니다'); return; }
       setResult(await r.json());
     } catch {
-      toast.error('네트워크 오류 — 다시 시도해 주세요');
+      toast.error('네트워크 오류. 다시 시도해 주세요');
     } finally {
       setResultLoading(false);
     }
@@ -168,23 +168,23 @@ export default function PlannerBriefPage() {
     try {
       const r = await fetch(path, { method: 'POST', headers: auth() });
       const d = await r.json().catch(() => ({}));
-      if (r.status === 503) { setMigrationPending(true); toast.error('준비 중입니다 — 잠시 후 다시 시도해 주세요'); return; }
+      if (r.status === 503) { setMigrationPending(true); toast.error('준비 중입니다. 잠시 후 다시 시도해 주세요'); return; }
       if (!r.ok) { toast.error(d.error || '처리하지 못했습니다'); return; }
       if (kind === 'submit') {
-        toast.success(d.notified ? '결재 요청을 올렸습니다 — 담당자에게 안내 문자를 보냈습니다' : '결재 요청을 올렸습니다');
+        toast.success(d.notified ? '결재 요청을 올렸습니다. 담당자에게 안내 문자를 보냈습니다' : '결재 요청을 올렸습니다');
       } else if (kind === 'approve') {
         toast.success(d.deducted ? '이번 달 계획을 승인했습니다' : '이번 달 계획을 승인했습니다 (차감 대상 아님)');
       } else if (kind === 'cancel') {
         toast.success(d.refunded
           ? `이번 달 대행을 취소하고 ${Number(d.refundAmount || 0).toLocaleString()}크레딧을 환불했습니다`
-          : `이번 달 대행을 취소했습니다 — ${d.reason || '환불 대상이 아닙니다'}`);
+          : `이번 달 대행을 취소했습니다: ${d.reason || '환불 대상이 아닙니다'}`);
       } else {
         toast.success('다시 시작했습니다');
       }
       await load();
       setResult(null);
     } catch {
-      toast.error('네트워크 오류 — 다시 시도해 주세요');
+      toast.error('네트워크 오류. 다시 시도해 주세요');
     } finally {
       setBusy(null);
     }
@@ -373,7 +373,7 @@ export default function PlannerBriefPage() {
                     ))}
                   </div>
                   <p className="text-[10px] text-white/30 italic">
-                    Data source — 문자·알림톡은 발송 결과 집계, 이메일은 발송·열어봄·클릭 실측,
+                    Data source: 문자·알림톡은 발송 결과 집계, 이메일은 발송·열어봄·클릭 실측,
                     참여 신청은 안내 메일의 참여 버튼 클릭 실측입니다. 추정값은 쓰지 않습니다.
                   </p>
                 </>
@@ -424,7 +424,7 @@ export default function PlannerBriefPage() {
                       {needsResubmit && (
                         <p className="mt-2 text-xs text-amber-200 flex items-start gap-1.5">
                           <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
-                          승인 뒤 계획이 바뀌었습니다 — 변경분을 다시 결재에 올려 승인하면 같은 계약에 들어갑니다(대행료 추가 차감 없음).
+                          승인 뒤 계획이 바뀌었습니다. 변경분을 다시 결재에 올려 승인하면 같은 계약에 들어갑니다(대행료 추가 차감 없음).
                         </p>
                       )}
                     </>
@@ -586,7 +586,7 @@ export default function PlannerBriefPage() {
             )}
 
             <p className="text-[10px] text-white/30 italic">
-              Data source — 행사·채널은 플래너 계획 원장, 대상 수는 발송 게이트를 적용한 고객 데이터 실조회,
+              Data source: 행사·채널은 플래너 계획 원장, 대상 수는 발송 게이트를 적용한 고객 데이터 실조회,
               크레딧은 소재 제작 단가와 월간 대행 요금 기준입니다. 문자·알림톡은 실행 시 별도 과금됩니다.
             </p>
             </>

@@ -96,9 +96,9 @@ export default function BestCopyPage() {
         setIndustries(j.industries || []);
         setFormula(j.formula || null);
         setStyleExamples(j.styleExamples || []);
-      } else toast.error(`조회 실패 — ${j.error || '오류'}`);
+      } else toast.error(`조회 실패: ${j.error || '오류'}`);
     } catch (e: any) {
-      toast.error(`조회 실패 — ${e?.message || '네트워크 오류'}`);
+      toast.error(`조회 실패: ${e?.message || '네트워크 오류'}`);
     } finally {
       setLoading(false);
     }
@@ -127,7 +127,7 @@ export default function BestCopyPage() {
       setPicked(new Set(mining.candidates.map((_, i) => i)));
       setReviewOpen(true);
     }
-    if (mining?.status === 'error') toast.error(`AI 채굴 실패 — ${mining.error || '오류'}`);
+    if (mining?.status === 'error') toast.error(`AI 채굴 실패: ${mining.error || '오류'}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mining?.status]);
 
@@ -173,7 +173,7 @@ export default function BestCopyPage() {
         toast.error(j.error || '저장 실패');
       }
     } catch (e: any) {
-      toast.error(`저장 실패 — ${e?.message || '네트워크 오류'}`);
+      toast.error(`저장 실패: ${e?.message || '네트워크 오류'}`);
     } finally {
       setSaving(false);
     }
@@ -233,13 +233,13 @@ export default function BestCopyPage() {
       });
       const j = await r.json();
       if (j.success) {
-        toast.success(`공식 갱신 완료 — 예시 ${j.exampleCount}건${j.discardedBySimilarity > 0 ? ` (유사도 가드 제외 ${j.discardedBySimilarity})` : ''}`);
+        toast.success(`공식 갱신 완료: 예시 ${j.exampleCount}건${j.discardedBySimilarity > 0 ? ` (유사도 가드 제외 ${j.discardedBySimilarity})` : ''}`);
         void load(active);
       } else {
         toast.error(j.error || '공식 갱신 실패');
       }
     } catch (e: any) {
-      toast.error(`공식 갱신 실패 — ${e?.message || '네트워크 오류'}`);
+      toast.error(`공식 갱신 실패: ${e?.message || '네트워크 오류'}`);
     } finally {
       setRefreshingFormula(false);
     }
@@ -266,7 +266,7 @@ export default function BestCopyPage() {
         toast.error(j.error || '저장 실패');
       }
     } catch (e: any) {
-      toast.error(`저장 실패 — ${e?.message || '네트워크 오류'}`);
+      toast.error(`저장 실패: ${e?.message || '네트워크 오류'}`);
     } finally {
       setApproving(false);
     }
@@ -340,7 +340,7 @@ export default function BestCopyPage() {
             <div className="flex items-center gap-3">
               <Loader2 className="w-5 h-5 animate-spin text-violet-300 flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium">AI 전수 판정 중 — {activeLabel}</div>
+                <div className="text-sm font-medium">AI 전수 판정 중: {activeLabel}</div>
                 <div className="text-xs text-white/50 mt-0.5">
                   대상 {mining.totalMessages.toLocaleString()}건 · 배치 {mining.processedBatches}/{mining.totalBatches}
                   {mining.failedBatches > 0 && ` · 실패 ${mining.failedBatches}`}
@@ -381,7 +381,7 @@ export default function BestCopyPage() {
               <p className="mt-3 text-xs text-white/40">아직 공식이 없습니다. 시드 3건 이상 저장 후 [공식·예시 갱신]을 눌러주세요.</p>
             )}
             <div className="text-[10px] text-white/30 italic mt-2">
-              공식은 문안 생성 프롬프트 지침으로, 재창작 예시는 사용자 "스타일 참고"로만 쓰입니다 — 시드 원문은 사용자에게 노출되지 않습니다.
+              공식은 문안 생성 프롬프트 지침으로, 재창작 예시는 사용자 "스타일 참고"로만 쓰입니다. 시드 원문은 사용자에게 노출되지 않습니다.
             </div>
           </div>
         )}
@@ -392,7 +392,7 @@ export default function BestCopyPage() {
             onClick={() => { setPicked(new Set(mining.candidates.map((_, i) => i))); setReviewOpen(true); }}
             className="w-full p-3 bg-emerald-500/10 border border-emerald-400/30 rounded-2xl text-sm text-emerald-200 flex items-center justify-center gap-2 hover:bg-emerald-500/15 transition-colors"
           >
-            <Check className="w-4 h-4" /> AI 채굴 완료 — 후보 {mining.candidates.length}건 검수하기
+            <Check className="w-4 h-4" /> AI 채굴 완료: 후보 {mining.candidates.length}건 검수하기
           </button>
         )}
 
@@ -455,7 +455,7 @@ export default function BestCopyPage() {
         )}
 
         <div className="text-[10px] text-white/30 italic">
-          Data source — 큐레이션 시드(승인분만). 브랜드보이스 미등록 업체의 문안 생성에만 참고 원문으로 활용됩니다.
+          Data source: 큐레이션 시드(승인분만). 브랜드보이스 미등록 업체의 문안 생성에만 참고 원문으로 활용됩니다.
         </div>
       </div>
 
@@ -578,7 +578,7 @@ export default function BestCopyPage() {
                   <Sparkles className="w-4 h-4 text-white" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold">AI 채굴 후보 검수 — {activeLabel}</h3>
+                  <h3 className="text-sm font-semibold">AI 채굴 후보 검수: {activeLabel}</h3>
                   <p className="text-[11px] text-white/50">
                     전체 {mining.totalMessages.toLocaleString()}건 판정 · 후보 {mining.candidates.length}건 · 체크한 문안만 저장됩니다
                   </p>

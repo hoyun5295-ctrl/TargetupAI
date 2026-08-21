@@ -78,12 +78,12 @@ describe('sanitizePosterSlides — 슬라이드 정규화', () => {
     expect(s.body_size).toBe(12);
   });
 
-  it('placeholder URL("[URL — 회사 admin 수정]")은 보존 (이동만 차단)', () => {
+  it('placeholder URL("[URL: 회사 admin 수정]")은 보존 (이동만 차단)', () => {
     const [s] = sanitizePosterSlides([{
       image_url: '/i.jpg',
-      cta: { label: '자세히', action_url: '[URL — 회사 admin 수정]' },
+      cta: { label: '자세히', action_url: '[URL: 회사 admin 수정]' },
     }]);
-    expect(s.cta?.action_url).toBe('[URL — 회사 admin 수정]');
+    expect(s.cta?.action_url).toBe('[URL: 회사 admin 수정]');
   });
 
   it('배열 아님·null = 빈 배열', () => {
@@ -95,7 +95,7 @@ describe('sanitizePosterSlides — 슬라이드 정규화', () => {
 
 describe('posterSlidesHaveUneditedPlaceholder — 혜택 placeholder 차단(AI 임의 혜택 룰)', () => {
   it('제목·본문·CTA 라벨의 미편집 혜택 placeholder 검출', () => {
-    expect(posterSlidesHaveUneditedPlaceholder([{ image_url: '/i.jpg', title: '[혜택 안내 — 직접 작성해주세요]' }])).toBe(true);
+    expect(posterSlidesHaveUneditedPlaceholder([{ image_url: '/i.jpg', title: '[혜택 안내: 직접 작성해주세요]' }])).toBe(true);
     expect(posterSlidesHaveUneditedPlaceholder([{ image_url: '/i.jpg', body: '지금 [직접 작성해주세요]' }])).toBe(true);
     expect(posterSlidesHaveUneditedPlaceholder([{ image_url: '/i.jpg', cta: { label: '직접 작성해주세요' } }])).toBe(true);
   });

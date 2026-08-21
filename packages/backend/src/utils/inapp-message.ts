@@ -108,7 +108,7 @@ export const INAPP_THEME_KEYS = [
   'editorial', 'luxury-dark', 'bold-sale', 'soft-pastel', 'paper', 'city-night', 'festive',
 ] as const;
 
-export const BENEFIT_PLACEHOLDER = '[혜택 안내 — 직접 작성해주세요]';
+export const BENEFIT_PLACEHOLDER = '[혜택 안내: 직접 작성해주세요]';
 
 // ════════════════════════════════════════════════════════════════════
 // ★ 2026-07-14 디자인 3.0 — cdp_inapp_messages.design jsonb (전 키 옵셔널 — 미설정 = 현행 렌더)
@@ -175,7 +175,7 @@ async function ensureInAppDesignColumnOrThrow(): Promise<void> {
       `SELECT 1 FROM information_schema.columns WHERE table_name = 'cdp_inapp_messages' AND column_name = 'design'`,
     );
     if (res.rows.length === 0) {
-      throw new Error('cdp_inapp_messages.design column does not exist — ALTER 실행 필요');
+      throw new Error('cdp_inapp_messages.design column does not exist (ALTER 실행 필요)');
     }
     inappDesignColumnExists = true;
   }
@@ -191,7 +191,7 @@ async function ensureImageLinkUrlColumnOrThrow(): Promise<void> {
       `SELECT 1 FROM information_schema.columns WHERE table_name = 'cdp_inapp_messages' AND column_name = 'image_link_url'`,
     );
     if (res.rows.length === 0) {
-      throw new Error('cdp_inapp_messages.image_link_url column does not exist — ALTER 실행 필요');
+      throw new Error('cdp_inapp_messages.image_link_url column does not exist (ALTER 실행 필요)');
     }
     inappImageLinkColumnExists = true;
   }
@@ -204,7 +204,7 @@ async function ensurePosterSlidesColumnOrThrow(): Promise<void> {
       `SELECT 1 FROM information_schema.columns WHERE table_name = 'cdp_inapp_messages' AND column_name = 'poster_slides'`,
     );
     if (res.rows.length === 0) {
-      throw new Error('cdp_inapp_messages.poster_slides column does not exist — ALTER 실행 필요');
+      throw new Error('cdp_inapp_messages.poster_slides column does not exist (ALTER 실행 필요)');
     }
     inappPosterSlidesColumnExists = true;
   }

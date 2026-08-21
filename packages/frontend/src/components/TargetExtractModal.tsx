@@ -224,7 +224,7 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
               ))}
             </div>
             <div className="mt-3 flex items-center justify-between gap-2">
-              <p className="text-[10px] text-white/30">검증된 필터만 사용 — 단 1의 오차 없는 추출</p>
+              <p className="text-[10px] text-white/30">검증된 필터만 사용: 단 1의 오차 없는 추출</p>
               <button
                 onClick={handleExtract}
                 disabled={!input.trim() || generating}
@@ -307,7 +307,7 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
                 </div>
               )}
 
-              <p className="text-[10px] text-white/30 italic text-center">Data source — AI 자연어 변환 + 검증된 SQL 필터 + 채널 발송 자격</p>
+              <p className="text-[10px] text-white/30 italic text-center">Data source: AI 자연어 변환 + 검증된 SQL 필터 + 채널 발송 자격</p>
             </div>
           )}
         </div>

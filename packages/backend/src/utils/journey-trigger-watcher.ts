@@ -186,7 +186,7 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
   if (j.trigger_event === 'customer.created') {
     const judgement = resolveNewCustomerJudgement(await getCompanyIdentityCapability(j.company_id));
     if (!judgement.canJudge) {
-      await pauseJourneyForCompany(j.id, j.company_id, `신규 고객 판정 불가 — ${judgement.reason}`);
+      await pauseJourneyForCompany(j.id, j.company_id, `신규 고객 판정 불가: ${judgement.reason}`);
       console.log(`[JourneyTrigger] 신규 판정 근거 없음 → 정지 journey=${j.id} company=${j.company_id}`);
       return { matched: 0, enqueued: 0, skipped: 0 };
     }
@@ -217,7 +217,7 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
     await pauseJourneyForCompany(
       j.id,
       j.company_id,
-      `대량 진입 감지 (신규 후보 ${Number(cap)}건 초과) — 자동 정지, 담당자 확인 필요`,
+      `대량 진입 감지 (신규 후보 ${Number(cap)}건 초과). 자동 정지, 담당자 확인 필요`,
     );
     console.warn(`[JourneyTrigger] 대량 차단 — journey=${j.id} 신규 후보 > 상한 ${cap} → 정지`);
     return { matched: ids.length, enqueued: 0, skipped: ids.length };
@@ -329,7 +329,7 @@ async function finishCursorBatch(
     await pauseJourneyForCompany(
       j.id,
       j.company_id,
-      `대량 진입 감지 (${ids.length}건 > 상한 ${cap}건) — 자동 정지, 담당자 확인 필요`,
+      `대량 진입 감지 (${ids.length}건 > 상한 ${cap}건). 자동 정지, 담당자 확인 필요`,
     );
     console.warn(`[JourneyTrigger] 대량 차단(${sourceLabel}) — journey=${j.id} 후보=${ids.length} 상한=${cap} → 정지`);
     return { matched: ids.length, enqueued: 0, skipped: ids.length, paused: true };

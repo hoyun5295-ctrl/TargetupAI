@@ -546,7 +546,7 @@ export async function executeTouchpoint(tp: PlannerTouchpointRow, today = kstDat
     if (fresh?.execMeta?.send_started_at && !fresh?.execRef) {
       await setTouchpointState({
         companyId: tp.companyId, touchpointId: tp.id, status: 'locked',
-        lockReason: '발송 여부를 확인하지 못했습니다 — 발송 내역 확인이 필요합니다.',
+        lockReason: '발송 여부를 확인하지 못했습니다. 발송 내역 확인이 필요합니다.',
         execMetaPatch: { last_error: String(err?.message || err).slice(0, 200), last_error_at: new Date().toISOString() },
       }).catch(() => { /* 다음 주기 */ });
       await notifyPlanner(tp.companyId, tp.createdBy, '[마케팅 플래너] 확인 필요',

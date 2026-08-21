@@ -89,7 +89,7 @@ export default function DmPublicLinkStatsPanel({ dmId }: { dmId: string }) {
               <button onClick={() => copyText(stats.alias!.shortUrl!)} className="p-1.5 rounded-lg text-sky-200/70 hover:text-sky-100 hover:bg-white/10 flex-shrink-0" aria-label="한글 주소 복사"><Copy className="w-3.5 h-3.5" /></button>
             </div>
           ) : (
-            <p className="text-xs text-white/35">아직 없어요 — DM 카드의 [한글 주소]에서 만들 수 있어요</p>
+            <p className="text-xs text-white/35">아직 없어요. DM 카드의 [한글 주소]에서 만들 수 있어요</p>
           )}
         </div>
         <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3.5">
@@ -145,7 +145,7 @@ export default function DmPublicLinkStatsPanel({ dmId }: { dmId: string }) {
           <p className="text-[11px] font-semibold text-white/50 mb-2">일별 열람 추이 (최근 14일)</p>
           <div className="flex items-end gap-1 h-16">
             {stats.daily.map((d) => (
-              <div key={d.day} className="flex-1 flex flex-col items-center gap-1 min-w-0" title={`${d.day} — ${d.views.toLocaleString()}회`}>
+              <div key={d.day} className="flex-1 flex flex-col items-center gap-1 min-w-0" title={`${d.day}: ${d.views.toLocaleString()}회`}>
                 <div className="w-full rounded-t bg-gradient-to-t from-sky-500/60 to-cyan-400/60" style={{ height: `${Math.max(6, Math.round((d.views / maxDaily) * 100))}%` }} />
                 <span className="text-[8.5px] text-white/30 truncate">{d.day.slice(3)}</span>
               </div>
@@ -155,7 +155,7 @@ export default function DmPublicLinkStatsPanel({ dmId }: { dmId: string }) {
       )}
 
       <p className="text-[10.5px] text-white/40 leading-relaxed">공용 링크는 전체 대상 발송·공유용이라 개인 단위 추적 없이 집계로 보여드려요. 누가 열었는지는 [개인화 발송] 탭(문자 개인화 링크)이 담당합니다.</p>
-      <div className="text-[10px] text-white/30 italic">Data source — dm_views 익명 열람(개인화 링크 외 유입 전체) + dm_custom_short_links 클릭 집계 · 링크별 행은 한글 주소 유입만 귀속</div>
+      <div className="text-[10px] text-white/30 italic">Data source: dm_views 익명 열람(개인화 링크 외 유입 전체) + dm_custom_short_links 클릭 집계 · 링크별 행은 한글 주소 유입만 귀속</div>
     </div>
   );
 }

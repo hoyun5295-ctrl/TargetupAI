@@ -733,11 +733,11 @@ export async function getCompanyPredictionSummary(companyId: string): Promise<Co
     if (totalInPredictions === 0) {
       insightText = '예측 점수 데이터가 아직 누적되지 않았습니다. 발송 시작 후 1시간 안에 자동 계산됩니다.';
     } else if (isAllColdStart) {
-      insightText = `전체 ${totalInPredictions.toLocaleString()}명 모두 등급/활동 기반 추정치 (cold start). 실제 발송 누적 후 trained 모델로 자동 진화 — 정확도 시간 흐름과 함께 향상됩니다.`;
+      insightText = `전체 ${totalInPredictions.toLocaleString()}명 모두 등급/활동 기반 추정치 (cold start). 실제 발송 누적 후 trained 모델로 자동 진화. 정확도 시간 흐름과 함께 향상됩니다.`;
     } else {
       const parts: string[] = [];
-      if (highRisk > 0) parts.push(`이탈 위험 70%+ 고객 ${highRisk.toLocaleString()}명 — 회복 캠페인 추천`);
-      if (highPotential > 0) parts.push(`구매 가능성 60%+ 고객 ${highPotential.toLocaleString()}명 — 구매 유도 캠페인 추천`);
+      if (highRisk > 0) parts.push(`이탈 위험 70%+ 고객 ${highRisk.toLocaleString()}명: 회복 캠페인 추천`);
+      if (highPotential > 0) parts.push(`구매 가능성 60%+ 고객 ${highPotential.toLocaleString()}명: 구매 유도 캠페인 추천`);
       if (parts.length === 0) parts.push(`평균 클릭 가능성 ${(avgClick * 100).toFixed(0)}% / 이탈 위험 ${(avgChurn * 100).toFixed(0)}% / 구매 가능성 ${(avgPurchase * 100).toFixed(0)}%`);
       insightText = parts.join(' · ');
     }
@@ -784,7 +784,7 @@ export async function getCompanyPredictionSummary(companyId: string): Promise<Co
       avgClickScore: 0.5,
       avgChurnRisk: 0.5,
       avgPurchaseLikelihood: 0.5,
-      insightText: '예측 점수 조회 오류 — 추후 자동 재계산됩니다.',
+      insightText: '예측 점수 조회 오류. 추후 자동 재계산됩니다.',
       totalCustomers: 0,
       avgLtv60d: 0,
       avgLtv90d: 0,

@@ -178,7 +178,7 @@ export async function ensureFreshMakeshopToken(integration: MakeshopIntegration,
   }
   try {
     const c = creds ?? (await getMakeshopCredentials(integration.companyId, integration.shopUid)) ?? envMakeshopCreds();
-    if (!c) throw new Error('메이크샵 자격(client_id/secret)이 없습니다 — 연동 화면에서 다시 연결해주세요.');
+    if (!c) throw new Error('메이크샵 자격(client_id/secret)이 없습니다. 연동 화면에서 다시 연결해주세요.');
     const reissued = await issueMakeshopToken(c, integration.shopUid);
     await saveMakeshopIntegration(integration.companyId, integration.shopUid, reissued, c);
     return { ...integration, accessToken: reissued.access_token, tokenExpiresAt: new Date(Date.now() + (reissued.expires_in || 300) * 1000) };
@@ -289,7 +289,7 @@ export const makeshopAdapter: IProviderAdapter = {
   },
   async refreshToken(integration: ProviderIntegration) {
     const creds = (await getMakeshopCredentials(integration.companyId, integration.mallId)) ?? envMakeshopCreds();
-    if (!creds) throw new Error('메이크샵 자격(client_id/secret)이 없습니다 — 연동 화면에서 다시 연결해주세요.');
+    if (!creds) throw new Error('메이크샵 자격(client_id/secret)이 없습니다. 연동 화면에서 다시 연결해주세요.');
     const tokenRes = await issueMakeshopToken(creds, integration.mallId);
     return {
       accessToken: tokenRes.access_token,

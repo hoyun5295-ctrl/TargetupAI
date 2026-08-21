@@ -241,7 +241,7 @@ router.get('/oauth/authorize', async (req: Request, res: Response) => {
 router.get('/oauth/callback', (_req: Request, res: Response) => {
   // 이 경로는 callbackRouter (아래)가 먼저 매칭되어야 정합.
   // 만약 본 핸들러에 도달했다면 라우터 등록 순서 오류.
-  return res.status(500).send('카페24 OAuth callback 라우터 등록 순서 오류 — 운영 점검 필요.');
+  return res.status(500).send('카페24 OAuth callback 라우터 등록 순서 오류. 운영 점검 필요.');
 });
 
 /**
@@ -464,7 +464,7 @@ function renderCafe24CallbackHtml(status: 'ok' | 'error', message: string): stri
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>한줄로 — ${title}</title>
+<title>한줄로 · ${title}</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f9fafb; margin: 0; padding: 60px 20px; }
   .card { max-width: 480px; margin: 0 auto; background: white; border-radius: 16px; padding: 40px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); text-align: center; }

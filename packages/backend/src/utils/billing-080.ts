@@ -124,7 +124,7 @@ export interface KtStatementParse {
 
 const KT_SYSTEM_PROMPT = `당신은 KT 전화요금 명세서(스캔 이미지 PDF)의 "이용상세내역"에서 080 서비스 번호별 금액을 "그대로 옮겨 적는" 전사 담당입니다.
 
-[출력 — 반드시 아래 JSON 형식만. 다른 텍스트·코드펜스·설명 금지]
+[출력: 반드시 아래 JSON 형식만. 다른 텍스트·코드펜스·설명 금지]
 {"usage_period":"","count_080":0,"total_080":0,"entries":[{"number":"","call_fee":0,"svc_fee":0,"vat":0,"subtotal":0}]}
 
 [규칙]
@@ -193,7 +193,7 @@ export function validateKtStatement(p: KtStatementParse): KtValidation {
   //   3행 미만이면 성립하지 않는다. 매핑 kt_fee_supply와의 대조는 그 축이 청구 정책값(리스킨 무료=0)이라
   //   실비 검증에 쓸 수 없어 불수용. 실측 명세서는 18행이라 운영 영향 0 — 소수 행은 수동 처리로.
   if ((p.entries || []).length < 3) {
-    errors.push(`판독된 080 번호가 ${(p.entries || []).length}대뿐 — 검산 표본이 부족해 자동 반영할 수 없습니다. 명세서 전체가 판독됐는지 확인하거나 수동으로 처리해주세요.`);
+    errors.push(`판독된 080 번호가 ${(p.entries || []).length}대뿐. 검산 표본이 부족해 자동 반영할 수 없습니다. 명세서 전체가 판독됐는지 확인하거나 수동으로 처리해주세요.`);
   }
   // ③ 최빈값 — KT 부가서비스이용료는 전 번호 동일(실측 4,000). 요금 개정으로 값이 바뀌어도 "전 행 동일"은 유지된다.
   const svcCounts = new Map<number, number>();
@@ -215,13 +215,13 @@ export function validateKtStatement(p: KtStatementParse): KtValidation {
     // ② VAT 비율 — KT는 (통화료+부가서비스)의 10%를 원 미만 내림으로 부과한다(2026-07 명세서 18행 전수 실측). ±1 여유.
     const expectVat = Math.floor((e.call_fee + e.svc_fee) * 0.1);
     if (Math.abs(e.vat - expectVat) > 1) {
-      errors.push(`${disp}: VAT ${e.vat.toLocaleString()}이 (통화료+부가서비스)의 10%(${expectVat.toLocaleString()})와 다름 — 오분류 판독 가능`);
+      errors.push(`${disp}: VAT ${e.vat.toLocaleString()}이 (통화료+부가서비스)의 10%(${expectVat.toLocaleString()})와 다름. 오분류 판독 가능`);
     }
     // ③ 부가서비스 0 행 — 실측상 전 번호에 부가서비스 줄이 있다. 0이면 통화료에 섞여 읽혔을 가능성.
     if (e.svc_fee <= 0 && (e.call_fee > 0 || e.vat > 0)) {
-      errors.push(`${disp}: 부가서비스이용료가 0으로 판독됨 — 통화료에 섞였을 수 있어 반영 불가`);
+      errors.push(`${disp}: 부가서비스이용료가 0으로 판독됨. 통화료에 섞였을 수 있어 반영 불가`);
     } else if (svcMode !== undefined && e.svc_fee !== svcMode && p.entries.length >= 3) {
-      errors.push(`${disp}: 부가서비스이용료 ${e.svc_fee.toLocaleString()}이 다른 번호(${Number(svcMode).toLocaleString()})와 다름 — 오분류 판독 가능`);
+      errors.push(`${disp}: 부가서비스이용료 ${e.svc_fee.toLocaleString()}이 다른 번호(${Number(svcMode).toLocaleString()})와 다름. 오분류 판독 가능`);
     }
     if (seen.has(e.number)) errors.push(`${disp}: 번호 중복 판독`);
     seen.add(e.number);
@@ -229,10 +229,10 @@ export function validateKtStatement(p: KtStatementParse): KtValidation {
   // ④ 합계·행 수 — 필수. 0(미판독)도 불합격.
   const sum = p.entries.reduce((s, e) => s + (Number.isFinite(e.subtotal) ? e.subtotal : 0), 0);
   if (!(p.total_080 > 0) || sum !== p.total_080) {
-    errors.push(`번호별 소계 합 ${sum.toLocaleString()}원 ≠ 명세서 080 소계 ${(p.total_080 || 0).toLocaleString()}원 — 소계 미판독이거나 행 누락·오독`);
+    errors.push(`번호별 소계 합 ${sum.toLocaleString()}원 ≠ 명세서 080 소계 ${(p.total_080 || 0).toLocaleString()}원. 소계 미판독이거나 행 누락·오독`);
   }
   if (!(p.count_080 > 0) || p.entries.length !== p.count_080) {
-    errors.push(`판독된 번호 ${p.entries.length}대 ≠ 명세서 서비스번호수 ${p.count_080 || 0}대 — 번호수 미판독이거나 행 누락`);
+    errors.push(`판독된 번호 ${p.entries.length}대 ≠ 명세서 서비스번호수 ${p.count_080 || 0}대. 번호수 미판독이거나 행 누락`);
   }
   return { ok: errors.length === 0, errors };
 }
@@ -266,7 +266,7 @@ export function toStrictInt(v: any): number {
 export function canonicalKtStatement(p: Pick<KtStatementParse, 'count_080' | 'total_080' | 'entries'>): string {
   const req = (v: any): number => {
     const n = toStrictInt(v);
-    if (!Number.isSafeInteger(n)) throw new Error('정규형 불가 — 비정수 금액');
+    if (!Number.isSafeInteger(n)) throw new Error('정규형 불가, 비정수 금액');
     return n;
   };
   const entries = [...(p.entries || [])]
@@ -522,7 +522,7 @@ export async function applyKtStatement(params: {
   const skipped: KtApplyResult['skipped'] = [];
   for (const r of entries) {
     const m = byNumber.get(r.number);
-    if (!m) { skipped.push({ number: format080Number(r.number), reason: '매핑 없음 — 번호 관리에서 회사를 등록해주세요' }); continue; }
+    if (!m) { skipped.push({ number: format080Number(r.number), reason: '매핑 없음. 번호 관리에서 회사를 등록해주세요' }); continue; }
     if (!byCompany.has(m.company_id)) byCompany.set(m.company_id, []);
     byCompany.get(m.company_id)!.push({ m, call_fee: r.call_fee });
   }
@@ -565,8 +565,8 @@ export async function applyKtStatement(params: {
         skipped.push({
           company_id: companyId, company_name: companyName,
           reason: billed.rows.length > 0
-            ? '그 달 정산이 이미 발행됨 — 발행 삭제 후 반영하거나 다음 달에 청구'
-            : '그 달 전체가 발행된 정산 기간(또는 수동 정산완료)에 덮임 — 반영해도 실릴 청구서가 없어 건너뜀',
+            ? '그 달 정산이 이미 발행됨. 발행 삭제 후 반영하거나 다음 달에 청구'
+            : '그 달 전체가 발행된 정산 기간(또는 수동 정산완료)에 덮임. 반영해도 실릴 청구서가 없어 건너뜀',
         });
         continue;
       }
@@ -588,7 +588,7 @@ export async function applyKtStatement(params: {
       for (const { m, call_fee } of list) {
         const disp = format080Number(m.number);
         if (!stillMine.has(m.number)) {
-          skipped.push({ company_id: companyId, company_name: companyName, number: disp, reason: '반영 도중 그 번호의 매핑이 바뀌었습니다(회사 이관·중지) — 다시 판독해 반영해주세요' });
+          skipped.push({ company_id: companyId, company_name: companyName, number: disp, reason: '반영 도중 그 번호의 매핑이 바뀌었습니다(회사 이관·중지). 다시 판독해 반영해주세요' });
           continue;
         }
         const callFee = Math.max(0, Number(call_fee) || 0);
@@ -610,7 +610,7 @@ export async function applyKtStatement(params: {
           );
           const ownerId = String(owner.rows[0]?.company_id || '');
           if (ownerId && ownerId !== String(companyId)) {
-            skipped.push({ company_id: companyId, company_name: companyName, number: disp, reason: '그 달 그 번호가 다른 고객사로 이미 반영돼 있습니다 — 번호 매핑을 확인해주세요' });
+            skipped.push({ company_id: companyId, company_name: companyName, number: disp, reason: '그 달 그 번호가 다른 고객사로 이미 반영돼 있습니다. 번호 매핑을 확인해주세요' });
           } else {
             already.push(disp);
           }
@@ -622,7 +622,7 @@ export async function applyKtStatement(params: {
       await client.query('COMMIT');
       if (numbers > 0) applied.push({ company_id: companyId, company_name: companyName, numbers, call_supply: callSupply });
       for (const disp of already) {
-        skipped.push({ company_id: companyId, company_name: companyName, number: disp, reason: '이미 반영된 번호 — 중복 반영 차단(반영 현황에서 취소 후 다시 반영 가능)' });
+        skipped.push({ company_id: companyId, company_name: companyName, number: disp, reason: '이미 반영된 번호. 중복 반영 차단(반영 현황에서 취소 후 다시 반영 가능)' });
       }
     } catch (err: any) {
       try { await client.query('ROLLBACK'); } catch { /* release가 파기 */ }

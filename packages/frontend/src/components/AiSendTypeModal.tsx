@@ -144,13 +144,13 @@ export default function AiSendTypeModal({
           <div className="mt-5 flex items-start gap-2 text-xs text-white/40">
             <Lightbulb className="w-3 h-3 text-amber-300 mt-0.5 shrink-0" />
             <span>
-              <b className="text-white/60">AI 한줄로</b> — 간단한 한 줄 지시로 타겟+문안 자동 설계 &nbsp;|&nbsp;
-              <b className="text-white/60">AI 맞춤한줄</b> — 프로모션 상세 브리핑으로 고객별 맞춤 문안 생성
+              <b className="text-white/60">AI 한줄로</b>: 간단한 한 줄 지시로 타겟+문안 자동 설계 &nbsp;|&nbsp;
+              <b className="text-white/60">AI 맞춤한줄</b>: 프로모션 상세 브리핑으로 고객별 맞춤 문안 생성
             </span>
           </div>
 
           <div className="text-[10px] text-white/30 italic mt-3 text-center">
-            Data source — AI 발송 흐름 (자율 진단 + customer-filter)
+            Data source: AI 발송 흐름 (자율 진단 + customer-filter)
           </div>
         </div>
       </div>

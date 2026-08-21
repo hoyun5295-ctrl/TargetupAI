@@ -231,7 +231,7 @@ export default function CampaignDetailModal({
                 ) : (
                   <div className="text-xs text-neutral-400 text-center py-2">성공 건 없음</div>
                 )}
-                <div className="text-[10px] text-neutral-400 italic mt-2">Data source — 통신사 발송 결과(MySQL)</div>
+                <div className="text-[10px] text-neutral-400 italic mt-2">Data source: 통신사 발송 결과(MySQL)</div>
               </div>
 
               {/* 실패사유 분포 (모던 바) */}
@@ -254,7 +254,7 @@ export default function CampaignDetailModal({
                 ) : (
                   <div className="text-xs text-neutral-400 text-center py-2">실패 건 없음</div>
                 )}
-                <div className="text-[10px] text-neutral-400 italic mt-2">Data source — 통신사 실패 코드(MySQL)</div>
+                <div className="text-[10px] text-neutral-400 italic mt-2">Data source: 통신사 실패 코드(MySQL)</div>
               </div>
 
               <button

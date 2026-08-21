@@ -49,7 +49,7 @@ export default function Step5Draft({ state, onNext, onSync }: Props) {
             <h2 className="text-base font-semibold text-white mb-1.5">본문 작성 + AI 다듬기</h2>
             <p className="text-[12px] text-white/65 leading-relaxed">
               본문 골격을 입력하고 AI 다듬기로 풍성한 광고 카피로 변환할 수 있습니다.
-              구체 혜택 (%, 원, 쿠폰)은 직접 작성해주세요 — AI는 임의 생성하지 않습니다.
+              구체 혜택 (%, 원, 쿠폰)은 직접 작성해주세요. AI는 임의 생성하지 않습니다.
             </p>
           </div>
         </div>
@@ -65,7 +65,7 @@ export default function Step5Draft({ state, onNext, onSync }: Props) {
           rows={5}
         />
         <div className="mt-3 flex items-center justify-between gap-3">
-          <p className="text-[10px] text-white/35">{draft.length}자 — {draft.length <= 90 ? 'SMS' : 'LMS'} 발송</p>
+          <p className="text-[10px] text-white/35">{draft.length}자 · {draft.length <= 90 ? 'SMS' : 'LMS'} 발송</p>
           <div className="flex gap-2">
             <button
               onClick={handleSaveDraft}

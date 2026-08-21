@@ -148,7 +148,7 @@ export const DB_OPTIONS: DbOption[] = [
     label: 'MS SQL Server 2008 · 2008 R2',
     notes: [
       '연결 옵션 encrypt=false 권장',
-      '구형 TLS(1.0) — 최신 Windows(요즘 PC)에서는 연결이 막혀 옛 OS에 설치해야 함',
+      '구형 TLS(1.0): 최신 Windows(요즘 PC)에서는 연결이 막혀 옛 OS에 설치해야 함',
       '읽기전용 계정 사용',
     ],
   },

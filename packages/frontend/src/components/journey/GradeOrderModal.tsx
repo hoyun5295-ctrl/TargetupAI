@@ -260,7 +260,7 @@ export default function GradeOrderModal({ open, onClose, onSaved, token }: Props
                   </li>
                 ))}
               </ol>
-              <p className="text-[10px] italic text-white/30">Data source — 회사 고객 데이터에 실제로 있는 등급 값과 인원수</p>
+              <p className="text-[10px] italic text-white/30">Data source: 회사 고객 데이터에 실제로 있는 등급 값과 인원수</p>
             </>
           )}
 
@@ -272,7 +272,7 @@ export default function GradeOrderModal({ open, onClose, onSaved, token }: Props
             {rankedCount === 0
               ? '순서 없음으로 저장합니다 (등급 여정은 잠긴 채로 둡니다)'
               : rankedCount < 2
-                ? '한 급뿐이라 올라갈 자리가 없어요 — 등급 여정은 잠긴 채로 둡니다'
+                ? '한 급뿐이라 올라갈 자리가 없어요. 등급 여정은 잠긴 채로 둡니다'
                 : `${rankedCount}단계로 저장합니다`}
           </span>
           <button

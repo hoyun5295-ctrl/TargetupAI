@@ -135,7 +135,7 @@ export async function scanAndPretest(): Promise<{
 
       // 재생성으로도 통과 못 함 → 여정 정지 + 담당자 수동확인 안내.
       summary.paused++;
-      await pauseJourney(b.journeyId, '발송 2시간 전 스팸필터 통과 실패 (자동 재생성 후에도 차단) — 문안 직접 확인 필요');
+      await pauseJourney(b.journeyId, '발송 2시간 전 스팸필터 통과 실패 (자동 재생성 후에도 차단). 문안 직접 확인 필요');
       await safeNotify(b, body, 'pretest_paused');
       await recordSchedule(b, 'paused');
     } catch (bundleErr: any) {

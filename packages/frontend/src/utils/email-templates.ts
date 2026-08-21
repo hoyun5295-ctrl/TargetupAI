@@ -72,7 +72,7 @@ export const EMAIL_TEMPLATES: EmailTemplate[] = [
   {
     key: 'vip',
     label: 'VIP 감사',
-    hint: '우수 고객 전용 인사 — 프라이빗 다크',
+    hint: '우수 고객 전용 인사 · 프라이빗 다크',
     industry: ['fashion', '의류', 'beauty', '뷰티', 'luxury'],
     icon: Crown,
     gradient: 'from-amber-500 to-orange-500',
@@ -89,7 +89,7 @@ export const EMAIL_TEMPLATES: EmailTemplate[] = [
   {
     key: 'new',
     label: '신상품 안내',
-    hint: '새 상품·서비스 소개 — 에디토리얼',
+    hint: '새 상품·서비스 소개 · 에디토리얼',
     industry: ['fashion', '의류', 'beauty', '뷰티', 'food', '식품'],
     icon: Package,
     gradient: 'from-emerald-500 to-teal-500',
@@ -122,7 +122,7 @@ export const EMAIL_TEMPLATES: EmailTemplate[] = [
   {
     key: 'newsletter',
     label: '뉴스레터',
-    hint: '브랜드 소식 정기 발송 — 매거진 조판',
+    hint: '브랜드 소식 정기 발송 · 매거진 조판',
     icon: Newspaper,
     gradient: 'from-sky-500 to-indigo-500',
     design: themeDesign('editorial'),
@@ -139,7 +139,7 @@ export const EMAIL_TEMPLATES: EmailTemplate[] = [
   {
     key: 'season-sale',
     label: '시즌 세일',
-    hint: '기간 한정 세일 — 임팩트 조판',
+    hint: '기간 한정 세일 · 임팩트 조판',
     industry: ['fashion', '의류', 'beauty', '뷰티'],
     icon: Tag,
     gradient: 'from-zinc-700 to-zinc-900',

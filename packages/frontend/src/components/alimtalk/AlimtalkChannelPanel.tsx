@@ -503,7 +503,7 @@ export default function AlimtalkChannelPanel({
             {/* ★ 2026-07-27: '원문 그대로'는 무엇이 나가는지 화면에서 확정해 보여준다(추측 여지 제거). */}
             {(value.nextType === 'L' || value.nextType === 'S') && (
               <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-                <div className="text-[11px] font-medium text-gray-600 mb-1">전환 시 나갈 문구 — 위 알림톡 본문 그대로</div>
+                <div className="text-[11px] font-medium text-gray-600 mb-1">전환 시 나갈 문구: 위 알림톡 본문 그대로</div>
                 <div className="text-[11px] text-gray-500 whitespace-pre-wrap max-h-24 overflow-y-auto leading-relaxed">
                   {renderPreview(selectedTemplate?.content) || '템플릿을 선택하면 표시됩니다.'}
                 </div>

@@ -73,7 +73,7 @@ export default function EliteTemplateModal({ open, onClose }: { open: boolean; o
           return { ...s, ...patch };
         }) as any,
       );
-      setToast({ type: 'success', message: `'${t.label}' 룩·구도만 적용했어요 — 작성하신 콘텐츠는 그대로예요.` });
+      setToast({ type: 'success', message: `'${t.label}' 룩·구도만 적용했어요. 작성하신 콘텐츠는 그대로예요.` });
     }
     onClose();
   };
@@ -83,7 +83,7 @@ export default function EliteTemplateModal({ open, onClose }: { open: boolean; o
       open={open}
       onClose={onClose}
       title="정예 템플릿"
-      subtitle="빈 캔버스에는 골격까지, 작성 중인 DM에는 룩·구도만 입혀요 — 만들어둔 콘텐츠는 지워지지 않습니다."
+      subtitle="빈 캔버스에는 골격까지, 작성 중인 DM에는 룩·구도만 입혀요. 만들어둔 콘텐츠는 지워지지 않습니다."
       size="lg"
     >
       {loading && <div style={{ padding: 24, textAlign: 'center', fontSize: 13, color: '#6b7280' }}>정예 템플릿을 불러오는 중...</div>}

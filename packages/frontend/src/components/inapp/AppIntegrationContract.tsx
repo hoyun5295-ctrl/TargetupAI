@@ -32,7 +32,7 @@ export const APP_INAPP_CONTRACT_SECTIONS: ContractSection[] = [
         desc: '앱 실행(홈 진입) 시 조회해 응답의 messages 배열을 그립니다. 번들ID는 자사몰 연동 → 앱 탭에서 등록합니다.',
         code: `GET https://app.hanjul.ai/api/cdp/inapp/active?channel=app&anonymous_id=DEVICE_UUID
 Header: X-Hanjullo-Key: hjl_...
-(로그인 회원은 &external_id=회원ID 동봉 — 개인화 변수 치환용 customer 동봉됨)`,
+(로그인 회원은 &external_id=회원ID 동봉, 개인화 변수 치환용 customer 동봉됨)`,
       },
     ],
   },
@@ -42,12 +42,12 @@ Header: X-Hanjullo-Key: hjl_...
     items: [
       {
         title: '텍스트·이미지·버튼',
-        desc: 'title(제목) · body(본문) · imageUrl(이미지, 없으면 생략) · badgeText(배지) · buttons({id, label, action_url, background_color, text_color} 배열 — 3개까지만 그리고 색 필드를 반드시 소비하세요. 웹 SDK도 3개까지만 렌더합니다) — 앱 채널은 서버가 블록 콘텐츠를 이 평면 필드로 합성해 보장합니다.',
+        desc: 'title(제목) · body(본문) · imageUrl(이미지, 없으면 생략) · badgeText(배지) · buttons({id, label, action_url, background_color, text_color} 배열: 3개까지만 그리고 색 필드를 반드시 소비하세요. 웹 SDK도 3개까지만 렌더합니다). 앱 채널은 서버가 블록 콘텐츠를 이 평면 필드로 합성해 보장합니다.',
       },
       {
         // ★ 2026-07-18 포스터형 v2 — 앱 채널 계약 (웹 renderPoster와 동일 규격)
         title: '포스터형 (template = "full_image")',
-        desc: '가로 꽉 찬 하단 시트입니다 — 좌우 마진 0, 상단 모서리만 라운드, 카드 바닥 흰색 고정. imageUrl 필수(원본 비율 유지), 제목/본문/배지는 이미지 하단 어두운 그라데이션 위 오버레이(본문은 잘림 없이 전 줄). 스타일 필드: design.poster_title_color/poster_body_color(제목·본문 색, 폴백 poster_text_color→흰색) · design.poster_title_size(14~32, 기본 20)/poster_body_size(10~22, 기본 14) · 제목 서체 = design.font_display(로드 불가 환경은 기본 서체). 흰 바닥에 buttons[0] 1개만(배경/글자색 소비) + "다시 보지 않기·닫기". 이 값을 모르는 구버전 앱은 기본형(바텀 시트)으로 안전 표시하면 됩니다.',
+        desc: '가로 꽉 찬 하단 시트입니다. 좌우 마진 0, 상단 모서리만 라운드, 카드 바닥 흰색 고정. imageUrl 필수(원본 비율 유지), 제목/본문/배지는 이미지 하단 어두운 그라데이션 위 오버레이(본문은 잘림 없이 전 줄). 스타일 필드: design.poster_title_color/poster_body_color(제목·본문 색, 폴백 poster_text_color→흰색) · design.poster_title_size(14~32, 기본 20)/poster_body_size(10~22, 기본 14) · 제목 서체 = design.font_display(로드 불가 환경은 기본 서체). 흰 바닥에 buttons[0] 1개만(배경/글자색 소비) + "다시 보지 않기·닫기". 이 값을 모르는 구버전 앱은 기본형(바텀 시트)으로 안전 표시하면 됩니다.',
       },
       {
         // ★ 2026-07-21 포스터형 캐러셀 — 좌우 스와이프(스타벅스형). posterSlides가 있으면 여러 장을 넘겨봅니다.
@@ -57,14 +57,14 @@ Header: X-Hanjullo-Key: hjl_...
       {
         // ★ 2026-07-31 이미지 클릭 랜딩 — 이미지 자체가 링크(선택)
         title: '이미지 클릭 랜딩 (imageLinkUrl · 슬라이드 link_url)',
-        desc: '메시지에 imageLinkUrl이 오면(선택) 이미지 자체를 눌렀을 때 그 주소로 이동합니다 — 버튼과 동일 계약(트래킹 → 이번 세션 재표시 억제 → 시트 닫기 → 이동). 트래킹 button_id = "image". 캐러셀은 슬라이드별 link_url(선택)을 쓰고 button_id = "slide_{index}_image"(0부터)로 보냅니다. 링크가 없으면 지금처럼 아무 동작 없음 — 이 필드를 모르는 구버전 앱도 그대로 무동작이라 안전합니다. http/https만 오며(서버 무해화), 상대경로·커스텀 스킴은 오지 않습니다.',
+        desc: '메시지에 imageLinkUrl이 오면(선택) 이미지 자체를 눌렀을 때 그 주소로 이동합니다. 버튼과 동일 계약(트래킹 → 이번 세션 재표시 억제 → 시트 닫기 → 이동). 트래킹 button_id = "image". 캐러셀은 슬라이드별 link_url(선택)을 쓰고 button_id = "slide_{index}_image"(0부터)로 보냅니다. 링크가 없으면 지금처럼 아무 동작 없음. 이 필드를 모르는 구버전 앱도 그대로 무동작이라 안전합니다. http/https만 오며(서버 무해화), 상대경로·커스텀 스킴은 오지 않습니다.',
       },
       {
         title: '캐러셀 클릭 트래킹 + 그라데이션(네이티브 주의)',
-        desc: '슬라이드 CTA 클릭은 button_id = "slide_{index}"(0부터)로 트래킹을 보내면 슬라이드별 성과가 집계됩니다. 스크림(이미지 하단 어두운 그라데이션)은 반투명 View를 여러 장 쌓지 말고 단일 요소(LinearGradient 또는 코드 내장 base64 PNG 알파 램프 1장을 늘려서)로 그리세요 — 반투명 뷰 쌓기는 Android에서 이음새마다 가로줄이 생깁니다(실사고). 좌우 스와이프는 RN 기본 가로 페이징(FlatList/ScrollView pagingEnabled)으로 충분해 네이티브 모듈 추가가 필요 없습니다(OTA 가능).',
+        desc: '슬라이드 CTA 클릭은 button_id = "slide_{index}"(0부터)로 트래킹을 보내면 슬라이드별 성과가 집계됩니다. 스크림(이미지 하단 어두운 그라데이션)은 반투명 View를 여러 장 쌓지 말고 단일 요소(LinearGradient 또는 코드 내장 base64 PNG 알파 램프 1장을 늘려서)로 그리세요. 반투명 뷰 쌓기는 Android에서 이음새마다 가로줄이 생깁니다(실사고). 좌우 스와이프는 RN 기본 가로 페이징(FlatList/ScrollView pagingEnabled)으로 충분해 네이티브 모듈 추가가 필요 없습니다(OTA 가능).',
       },
       {
-        title: '색상 — 단색 hex만 옵니다',
+        title: '색상: 단색 hex만 옵니다',
         desc: 'backgroundColor · textColor는 앱 채널 응답에서 단색 hex(#RGB~#RRGGBBAA, 3~8자리)로 보정돼 옵니다(그라데이션 문자열 없음). 그래도 색 파싱 실패 시 앱이 죽지 않게 기본색 폴백을 두세요.',
       },
       {
@@ -102,7 +102,7 @@ Header: X-Hanjullo-Key: hjl_...
       {
         // ★ 2026-07-18 P2 — CTA 자동 연결 규칙: 몰마다 제각각인 앱 내 경로 문제 종결 (0718 팝폰 m/xxx 무반응 실사고 근거)
         title: 'CTA URL 처리 규칙 (웹 URL 기준)',
-        desc: 'CTA에는 연동 몰의 웹 URL(https://…)이 옵니다. 앱은 자체 라우팅 규칙으로 앱 내 화면에 매핑하고, 매핑할 수 없으면 반드시 인앱 브라우저(또는 외부 브라우저)로 여세요. 스킴 없는 상대경로를 openURL에 그대로 넘기면 조용히 무반응이 됩니다 — 무반응 CTA는 계약 위반입니다.',
+        desc: 'CTA에는 연동 몰의 웹 URL(https://…)이 옵니다. 앱은 자체 라우팅 규칙으로 앱 내 화면에 매핑하고, 매핑할 수 없으면 반드시 인앱 브라우저(또는 외부 브라우저)로 여세요. 스킴 없는 상대경로를 openURL에 그대로 넘기면 조용히 무반응이 됩니다. 무반응 CTA는 계약 위반입니다.',
       },
     ],
   },
@@ -191,7 +191,7 @@ export function AppInAppContractModal({ open, onClose }: { open: boolean; onClos
               </div>
             </div>
           ))}
-          <div className="text-[10px] text-white/30 italic">Data source — /api/cdp/inapp/active · /api/cdp/inapp/track (앱 채널 보장 계약)</div>
+          <div className="text-[10px] text-white/30 italic">Data source: /api/cdp/inapp/active · /api/cdp/inapp/track (앱 채널 보장 계약)</div>
         </div>
         <div className="px-6 py-3 border-t border-white/10 flex justify-end">
           <button onClick={onClose} className="px-4 py-2 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 text-sm font-semibold text-white hover:opacity-90">확인</button>

@@ -77,7 +77,7 @@ export default function JourneyDataScopeNote({ availableCount, lockedCount, lock
           )}
 
           <p className="mt-2 text-[10px] italic text-white/30">
-            Data source — 회사 고객 데이터로 실시간 판정한 결과입니다.
+            Data source: 회사 고객 데이터로 실시간 판정한 결과입니다.
           </p>
         </div>
       </div>

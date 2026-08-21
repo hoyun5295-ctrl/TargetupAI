@@ -49,7 +49,7 @@ export default function CouponEditor({ props, onUpdate }: EditorProps<CouponProp
         <ColorOverride value={props.card_bg_color} onChange={(v) => onUpdate({ card_bg_color: v })} />
       </Field>
 
-      <Field label="쿠폰코드 버튼 색" hint="'쿠폰코드' 알약 배경 — 미지정 = 기본 검정">
+      <Field label="쿠폰코드 버튼 색" hint="'쿠폰코드' 알약 배경 (미지정 = 기본 검정)">
         <ColorOverride value={props.button_color} onChange={(v) => onUpdate({ button_color: v })} />
       </Field>
 

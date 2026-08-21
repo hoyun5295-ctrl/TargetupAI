@@ -192,7 +192,7 @@ export default function SettlementOverviewModal({ show, onClose }: Props) {
 
         <div className="px-5 py-3 border-t border-white/10 shrink-0">
           <div className="text-[10px] text-white/30 italic">
-            Data source — 발행된 정산 장(billings) 실측 합 · 미납 = 수금완료로 표시되지 않은 장 · 삭제된 장은 제외
+            Data source: 발행된 정산 장(billings) 실측 합 · 미납 = 수금완료로 표시되지 않은 장 · 삭제된 장은 제외
           </div>
         </div>
       </div>

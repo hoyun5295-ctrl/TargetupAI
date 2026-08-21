@@ -293,7 +293,7 @@ router.post('/events', async (req: Request, res: Response) => {
     );
     if (locked.length > 0) {
       const g = gates.find((x) => x.channel === locked[0].channel)!;
-      return res.status(400).json({ error: `${PLANNER_CHANNEL_LABEL[g.channel]} — ${g.reason}` });
+      return res.status(400).json({ error: `${PLANNER_CHANNEL_LABEL[g.channel]}: ${g.reason}` });
     }
     const eventId = await writeEventWithTouchpoints(companyId, req.user?.userId || null, parsed);
     console.log(`[marketing-planner] 행사 기입 ${eventId} (${parsed.planMonth} · ${parsed.value.title} · TP ${parsed.value.touchpoints.length})`);
@@ -318,7 +318,7 @@ router.put('/events/:id', async (req: Request, res: Response) => {
     );
     if (locked.length > 0) {
       const g = gates.find((x) => x.channel === locked[0].channel)!;
-      return res.status(400).json({ error: `${PLANNER_CHANNEL_LABEL[g.channel]} — ${g.reason}` });
+      return res.status(400).json({ error: `${PLANNER_CHANNEL_LABEL[g.channel]}: ${g.reason}` });
     }
     await writeEventWithTouchpoints(companyId, req.user?.userId || null, parsed, String(req.params.id));
     return res.json({ id: String(req.params.id), month: parsed.planMonth });

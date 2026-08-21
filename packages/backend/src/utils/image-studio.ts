@@ -77,7 +77,7 @@ export type StudioErrorCode =
 
 const STUDIO_ERROR_MESSAGES: Record<StudioErrorCode, string> = {
   STUDIO_NOT_READY: '이미지 스튜디오가 준비 중입니다. 잠시 후 다시 시도해주세요.',
-  SAFETY_BLOCKED: '안전 기준으로 생성이 거부됐어요 — 문구나 상품을 바꿔 다시 시도해주세요.',
+  SAFETY_BLOCKED: '안전 기준으로 생성이 거부됐어요. 문구나 상품을 바꿔 다시 시도해주세요.',
   RATE_LIMITED: '지금 요청이 몰려 잠시 대기가 필요합니다. 잠시 후 다시 시도해주세요.',
   GEN_FAILED: '이미지 생성에 실패했어요. 잠시 후 다시 시도해주세요.',
   PY_SERVICE_DOWN: '이미지 준비 기능을 점검 중입니다. 잠시 후 다시 시도해주세요.',
@@ -191,18 +191,18 @@ export function buildPosterPrompt(input: {
   //      (실측: 최후미 규칙만으로는 textStyle 상단 문구 + 장면 구도에 밀려 미준수 — 모순 제거가 뿌리 수정)
   if (input.textPosition) {
     const zone = input.textPosition === 'top' ? 'upper third' : input.textPosition === 'center' ? 'vertical center' : 'lower third';
-    lines.push(`Scene composition requirement: reserve a calm, visually quiet zone at the ${zone} of the frame for the marketing copy — keep props, busy textures and strong highlights away from that zone.`);
+    lines.push(`Scene composition requirement: reserve a calm, visually quiet zone at the ${zone} of the frame for the marketing copy, keep props, busy textures and strong highlights away from that zone.`);
   }
   // 2. 포스터 형식·비율
   lines.push(`This is a complete marketing poster design, aspect ratio ${preset.aspectRatio}.`);
   // 3. 제품 보존(누끼 첨부 시) — 픽셀 충실 지시
   if (input.hasProduct) {
-    lines.push('A product photo with transparent background is attached. Place it as the hero of the composition on a natural surface. Preserve the attached product EXACTLY as provided — do not redraw, restyle, recolor, or alter its shape, proportions, packaging, or label text in any way. Integrate it with scene-consistent lighting and a realistic soft ground shadow.');
+    lines.push('A product photo with transparent background is attached. Place it as the hero of the composition on a natural surface. Preserve the attached product EXACTLY as provided, do not redraw, restyle, recolor, or alter its shape, proportions, packaging, or label text in any way. Integrate it with scene-consistent lighting and a realistic soft ground shadow.');
   }
   // 4. 시즌(시즌 템플릿만)
   if (template.useSeason) {
     const season = getSeasonContext(input.now || new Date());
-    lines.push(`Current Korean season: ${season.season} (month ${season.month}). Seasonal ambience keywords: ${season.keywords.slice(0, 3).join(', ')} — as scenery and mood only.`);
+    lines.push(`Current Korean season: ${season.season} (month ${season.month}). Seasonal ambience keywords: ${season.keywords.slice(0, 3).join(', ')}, as scenery and mood only.`);
   }
   // 5. (중간) 장면 힌트 — 장면 묘사로만. 혜택 문구는 문구 칸으로(라우트가 안내).
   const hint = (input.userHint || '').trim();
@@ -222,24 +222,24 @@ export function buildPosterPrompt(input: {
     lines.push(given.join('\n'));
     // 위치 지정 시 textStyle의 위치 발언권을 박탈(서체·무드만) — 위치 권한자는 최후미 규칙 하나뿐.
     if (input.textPosition) {
-      lines.push(`Typography direction (font mood and styling reference ONLY — any position wording inside it is void; the text position is defined solely by the FINAL LAYOUT RULE at the end): ${template.textStyle}`);
+      lines.push(`Typography direction (font mood and styling reference ONLY, any position wording inside it is void; the text position is defined solely by the FINAL LAYOUT RULE at the end): ${template.textStyle}`);
     } else {
       lines.push(`Typography direction: ${template.textStyle}`);
     }
   } else {
-    lines.push('This poster has no text — pure visual composition with space that could hold a headline.');
+    lines.push('This poster has no text, pure visual composition with space that could hold a headline.');
   }
   // 7. (마지막) 제한 — 지정 문구 외 일체 금지.
-  lines.push('Use ONLY the text given above, exactly as written — do not add, translate, paraphrase, or modify any wording or numbers. Do not render any other text, prices, logos, QR codes, or watermarks.');
+  lines.push('Use ONLY the text given above, exactly as written, do not add, translate, paraphrase, or modify any wording or numbers. Do not render any other text, prices, logos, QR codes, or watermarks.');
   // 8. (최후미) 문구 위치 강제 — 2026-08-09 보강: 모델이 마지막 지시에 가장 강하게 반응하므로 최종 제약 뒤에 둔다.
   //    템플릿 textStyle의 상단 배치 문구·장면 구도(하단 소품·상단 여백)에 밀리지 않도록 부정형 + 배경 정돈 지시 동반.
   if (given.length && input.textPosition) {
     const pos = input.textPosition === 'top'
       ? 'in the upper third of the poster. Do NOT place it in the middle or lower part'
       : input.textPosition === 'center'
-        ? 'at the exact vertical center of the poster — the headline must sit at the middle of the image height. Do NOT place the text block in the upper third'
+        ? 'at the exact vertical center of the poster, the headline must sit at the middle of the image height. Do NOT place the text block in the upper third'
         : 'in the lower third of the poster. Do NOT place it in the upper or middle part';
-    lines.push(`FINAL LAYOUT RULE — this single rule overrides every placement direction mentioned anywhere above, including the typography direction: place the entire text block (label, headline and sub-headline together as one group) ${pos}.${input.hasProduct ? ' Keep the text block clear of the attached product.' : ''} Compose the scene so the area behind the text block stays visually calm and uncluttered for readability.`);
+    lines.push(`FINAL LAYOUT RULE: this single rule overrides every placement direction mentioned anywhere above, including the typography direction: place the entire text block (label, headline and sub-headline together as one group) ${pos}.${input.hasProduct ? ' Keep the text block clear of the attached product.' : ''} Compose the scene so the area behind the text block stays visually calm and uncluttered for readability.`);
   }
 
   return lines.join('\n');

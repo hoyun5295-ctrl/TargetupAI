@@ -156,7 +156,7 @@ export interface PurchaseLedgerGate {
  */
 export async function resolvePurchaseLedgerGate(companyId: string): Promise<PurchaseLedgerGate> {
   if (await isMallPurchaseDoorActive(companyId)) {
-    return { enabled: false, reason: '자사몰 구매 이벤트가 현역 — 원장 문은 닫는다(중복 진입 차단)' };
+    return { enabled: false, reason: '자사몰 구매 이벤트가 현역: 원장 문은 닫는다(중복 진입 차단)' };
   }
   return { enabled: true };
 }

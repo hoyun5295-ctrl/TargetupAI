@@ -156,7 +156,7 @@ function buildInsightHtml(insight: CompanyInsight): string {
 async function sendInsightEmailForCompany(insight: CompanyInsight): Promise<{ ok: boolean; error?: string }> {
   // SMTP 설정 검증 — 미설정 회사 = skip
   if (!(await isSmtpConfigured(insight.companyId))) {
-    return { ok: false, error: 'SMTP 미설정 회사 — skip' };
+    return { ok: false, error: 'SMTP 미설정 회사: skip' };
   }
 
   const html = buildInsightHtml(insight);

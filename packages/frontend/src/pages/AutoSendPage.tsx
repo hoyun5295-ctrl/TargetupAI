@@ -77,7 +77,7 @@ export default function AutoSendPage() {
             </div>
 
             <p className="text-xs text-gray-400 leading-relaxed pt-3 border-t border-gray-100">
-              D188 Phase 2-B-4 (2026-05-21) — 자동발송 헤더 메뉴 영구 제거 + 본 페이지 안내 페이지 변경. 기존 운영 데이터(auto_campaigns 테이블 + plans 컬럼) 보존 안전망 정합.
+              D188 Phase 2-B-4 (2026-05-21). 자동발송 헤더 메뉴 영구 제거 + 본 페이지 안내 페이지 변경. 기존 운영 데이터(auto_campaigns 테이블 + plans 컬럼) 보존 안전망 정합.
             </p>
           </div>
         </div>

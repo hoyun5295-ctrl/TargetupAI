@@ -32,7 +32,7 @@ import { query } from '../config/database';
 /** 테이블 미생성(42P01)을 라우트·워커가 알아볼 수 있게 코드를 붙여 던진다. */
 function migrationPending(): Error {
   return Object.assign(
-    new Error('DB 마이그레이션 필요 — operator_cycle_snapshots 테이블 생성 요청'),
+    new Error('DB 마이그레이션 필요: operator_cycle_snapshots 테이블 생성 요청'),
     { code: 'DB_MIGRATION_PENDING' },
   );
 }

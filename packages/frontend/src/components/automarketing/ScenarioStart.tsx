@@ -59,7 +59,7 @@ export default function ScenarioStart({ onSelect }: { onSelect: (s: ScenarioPick
       </div>
 
       <div className="mt-4 flex items-center justify-center gap-1.5 text-xs text-white/40">
-        <Lock className="w-3 h-3" />가동 전 한 번 확인합니다 — 발송은 그 다음입니다
+        <Lock className="w-3 h-3" />가동 전 한 번 확인합니다. 발송은 그 다음입니다
       </div>
     </div>
   );

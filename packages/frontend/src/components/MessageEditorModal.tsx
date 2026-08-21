@@ -88,9 +88,9 @@ export default function MessageEditorModal({
 
   const warnings = useMemo(() => {
     const list: string[] = [];
-    if (/\(광고\)/.test(draft)) list.push('"(광고)"는 발송 시 자동으로 붙습니다 — 본문에서 빼주세요.');
-    if (/무료수신거부|무료거부|080[- ]?\d{3,4}[- ]?\d{4}/.test(draft)) list.push('무료수신거부 번호는 발송 시 자동으로 붙습니다 — 본문에서 빼주세요.');
-    if (hasIncompatibleEmoji(draft)) list.push('문자에서 깨질 수 있는 이모지가 있습니다 — 특수문자함의 기호로 바꿔주세요.');
+    if (/\(광고\)/.test(draft)) list.push('"(광고)"는 발송 시 자동으로 붙습니다. 본문에서 빼주세요.');
+    if (/무료수신거부|무료거부|080[- ]?\d{3,4}[- ]?\d{4}/.test(draft)) list.push('무료수신거부 번호는 발송 시 자동으로 붙습니다. 본문에서 빼주세요.');
+    if (hasIncompatibleEmoji(draft)) list.push('문자에서 깨질 수 있는 이모지가 있습니다. 특수문자함의 기호로 바꿔주세요.');
     if (overLimit) list.push(`${channelUpper} 한도(${byteLimit.toLocaleString()}바이트)를 초과했습니다.`);
     return list;
   }, [draft, overLimit, channelUpper, byteLimit]);
@@ -186,7 +186,7 @@ export default function MessageEditorModal({
                 />
                 {isAd && (
                   <p className="mt-2 text-[11px] text-white/35 italic shrink-0">
-                    (광고)·무료거부 {rejectNumber}는 발송 시 자동으로 붙습니다 — 본문만 입력하세요.
+                    (광고)·무료거부 {rejectNumber}는 발송 시 자동으로 붙습니다. 본문만 입력하세요.
                   </p>
                 )}
               </>
@@ -265,7 +265,7 @@ export default function MessageEditorModal({
               <section>
                 <h4 className="flex items-center gap-1.5 text-xs font-semibold text-white/70 mb-2">
                   <Sparkles className="w-3.5 h-3.5 text-fuchsia-300" /> 우리 회사 표현
-                  <span className="font-normal text-white/35">— 브랜드보이스 학습값</span>
+                  <span className="font-normal text-white/35">(브랜드보이스 학습값)</span>
                 </h4>
                 <div className="flex flex-wrap gap-1.5">
                   {brandExpr!.ctaPatterns.map((c, i) => (
@@ -304,7 +304,7 @@ export default function MessageEditorModal({
             <section>
               <h4 className="flex items-center gap-1.5 text-xs font-semibold text-white/70 mb-2">
                 <Hash className="w-3.5 h-3.5 text-emerald-300" /> 특수문자
-                <span className="font-normal text-white/35">— 문자 발송 안전 기호만</span>
+                <span className="font-normal text-white/35">(문자 발송 안전 기호만)</span>
               </h4>
               <div className="grid grid-cols-8 gap-1">
                 {specialChars.map((c, i) => (

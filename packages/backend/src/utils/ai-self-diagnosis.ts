@@ -83,7 +83,7 @@ export async function diagnoseCompanyHealth(companyId: string): Promise<CompanyH
       value: `${recent}건 (직전 30일 ${prev}건)`,
       trend: change > 0.1 ? 'up' : change < -0.1 ? 'down' : 'flat',
       message: recent === 0
-        ? '최근 30일 발송 0건 — 캠페인 재시작이 필요합니다'
+        ? '최근 30일 발송 0건. 캠페인 재시작이 필요합니다'
         : change < -0.2
         ? `직전 30일 대비 ${Math.abs(change * 100).toFixed(0)}% 감소`
         : `직전 30일 대비 ${(change * 100).toFixed(0)}% 변화`,
@@ -115,8 +115,8 @@ export async function diagnoseCompanyHealth(companyId: string): Promise<CompanyH
       value: `${(activeRate * 100).toFixed(0)}% (${active.toLocaleString()}/${total.toLocaleString()}명)`,
       trend: 'flat',
       message: dormant > active
-        ? `휴면 고객 ${dormant.toLocaleString()}명 — 활성 고객보다 많음. 회복 캠페인 우선`
-        : `활성 고객 ${active.toLocaleString()}명 — 안정적입니다`,
+        ? `휴면 고객 ${dormant.toLocaleString()}명. 활성 고객보다 많음. 회복 캠페인 우선`
+        : `활성 고객 ${active.toLocaleString()}명. 안정적입니다`,
     });
   } catch (err: any) {
     console.warn('[SelfDiagnosis] engagement 진단 skip:', err?.message);
@@ -135,7 +135,7 @@ export async function diagnoseCompanyHealth(companyId: string): Promise<CompanyH
         value: `${predictiveSummary.highRiskCount.toLocaleString()}명`,
         trend: 'flat',
         message: predictiveSummary.highRiskCount > 0
-          ? `${predictiveSummary.highRiskCount.toLocaleString()}명 — 회복 캠페인이 시급합니다`
+          ? `${predictiveSummary.highRiskCount.toLocaleString()}명. 회복 캠페인이 시급합니다`
           : '이탈 위험 고객 없음',
       });
       signals.push({
@@ -233,7 +233,7 @@ async function autoRecommendNextCampaigns(
       priority: 1,
       type: 'churn_recovery',
       title: `이탈 위험 ${predictiveSummary.highRiskCount.toLocaleString()}명 회복 캠페인`,
-      reason: 'AI 예측 결과 이탈 위험 70% 이상 고객이 다수입니다 — 빠른 회복 안내가 필요합니다',
+      reason: 'AI 예측 결과 이탈 위험 70% 이상 고객이 다수입니다. 빠른 회복 안내가 필요합니다',
       targetCount: predictiveSummary.highRiskCount,
       // 임의 상수(평균 30% 복귀 등) 제거 — 실측 근거만 (feedback_no_arbitrary_constants)
       expectedImpact: '이탈 위험 고객 회복 대상',
@@ -248,7 +248,7 @@ async function autoRecommendNextCampaigns(
       priority: 2,
       type: 'purchase_push',
       title: `구매 가능성 ${predictiveSummary.highPotentialCount.toLocaleString()}명 푸시 캠페인`,
-      reason: 'AI 예측 결과 구매 가능성 60% 이상 고객 — 구매 유도 우선 대상입니다',
+      reason: 'AI 예측 결과 구매 가능성 60% 이상 고객. 구매 유도 우선 대상입니다',
       targetCount: predictiveSummary.highPotentialCount,
       expectedImpact: '구매 의향 상위 그룹',
       oneClickObjective: '구매 가능성 60%+ 고객 구매 유도 캠페인 + VIP/등급별 분기',
@@ -276,7 +276,7 @@ async function autoRecommendNextCampaigns(
     priority: 3,
     type: 'season_campaign',
     title: season.title,
-    reason: `${month}월 시즌 — 자연스러운 안부 캠페인 추천`,
+    reason: `${month}월 시즌: 자연스러운 안부 캠페인 추천`,
     targetCount: 0,  // 회사 전체 활성 고객
     expectedImpact: '이번 달 시즌 소재 활용',
     oneClickObjective: season.objective,

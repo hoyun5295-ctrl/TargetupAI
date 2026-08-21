@@ -194,7 +194,7 @@ export default function BrandTemplateManagementSection({ profiles, setToast, onC
         setCopiedKey(key);
         setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500);
       })
-      .catch(() => setToast({ show: true, type: 'error', message: '복사 실패 — 직접 선택 후 복사해주세요' }));
+      .catch(() => setToast({ show: true, type: 'error', message: '복사 실패. 직접 선택 후 복사해주세요' }));
   };
 
   const remove = (t: BrandTemplate) => {

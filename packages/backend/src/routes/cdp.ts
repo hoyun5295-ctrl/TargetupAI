@@ -127,7 +127,7 @@ router.post('/ingest', requireCdpBrowserOrigin, cdpWriteBurst, async (req: Reque
     if (schema_version !== 'v1') {
       return res.status(400).json({
         success: false,
-        error: `schema_version 'v1' 의무 — 옛 값 = ${schema_version || '(누락)'}`,
+        error: `schema_version 'v1' 의무: 옛 값 = ${schema_version || '(누락)'}`,
         code: 'INVALID_SCHEMA_VERSION',
       });
     }
@@ -187,21 +187,21 @@ router.post('/ingest', requireCdpBrowserOrigin, cdpWriteBurst, async (req: Reque
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 의무 — 운영자에게 cdp_events ALTER 요청',
+        error: 'DB 마이그레이션 의무: 운영자에게 cdp_events ALTER 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
     if (msg.includes('relation') && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'cdp_events 테이블 X — DB 마이그레이션 의무',
+        error: 'cdp_events 테이블 없음. DB 마이그레이션 필요',
         code: 'DB_TABLE_MISSING',
       });
     }
     console.error('[CDP /ingest] 오류:', err);
     return res.status(500).json({
       success: false,
-      error: '서버 오류 — 잠시 후 재시도',
+      error: '서버 오류. 잠시 후 재시도',
       code: 'INTERNAL_ERROR',
     });
   }
@@ -673,7 +673,7 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
       await recordCdpApiCall(cdpAuth.companyId, 'event', 503);
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 cdp_inapp_messages ALTER 실행 요청 의무',
+        error: 'DB 마이그레이션 필요: 운영자에게 cdp_inapp_messages ALTER 실행 요청 의무',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -730,7 +730,7 @@ router.post('/inapp/track', requireCdpKeyOrBrowserOrigin, async (req: Request, r
       await recordCdpApiCall(cdpAuth.companyId, 'event', 503);
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 cdp_inapp_impressions ALTER 실행 요청 의무',
+        error: 'DB 마이그레이션 필요: 운영자에게 cdp_inapp_impressions ALTER 실행 요청 의무',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -945,7 +945,7 @@ router.get('/install-status', async (req: Request, res: Response) => {
     // db_alter_safety_net — cdp_events 신규 컬럼 미마이그레이션 시 503
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 cdp_events ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 cdp_events ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /install-status] 오류:', err);
     return res.status(500).json({ success: false, error: '조회 실패' });
@@ -962,7 +962,7 @@ router.get('/allowed-origins', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.cdp_allowed_origins ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: companies.cdp_allowed_origins ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /allowed-origins GET] 오류:', err);
     return res.status(500).json({ success: false, error: '조회 실패' });
@@ -994,7 +994,7 @@ router.post('/allowed-origins', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.cdp_allowed_origins ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: companies.cdp_allowed_origins ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /allowed-origins POST] 오류:', err);
     return res.status(500).json({ success: false, error: '등록 실패' });
@@ -1021,7 +1021,7 @@ router.delete('/allowed-origins', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.cdp_allowed_origins ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: companies.cdp_allowed_origins ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /allowed-origins DELETE] 오류:', err);
     return res.status(500).json({ success: false, error: '삭제 실패' });
@@ -1043,7 +1043,7 @@ router.get('/allowed-app-ids', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.cdp_allowed_app_ids ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: companies.cdp_allowed_app_ids ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /allowed-app-ids GET] 오류:', err);
     return res.status(500).json({ success: false, error: '조회 실패' });
@@ -1074,7 +1074,7 @@ router.post('/allowed-app-ids', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.cdp_allowed_app_ids ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: companies.cdp_allowed_app_ids ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /allowed-app-ids POST] 오류:', err);
     return res.status(500).json({ success: false, error: '등록 실패' });
@@ -1100,7 +1100,7 @@ router.delete('/allowed-app-ids', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.cdp_allowed_app_ids ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: companies.cdp_allowed_app_ids ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /allowed-app-ids DELETE] 오류:', err);
     return res.status(500).json({ success: false, error: '삭제 실패' });
@@ -1251,7 +1251,7 @@ router.post('/inapp', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: msg.replace(/^BENEFIT_PLACEHOLDER_UNEDITED:\s*/, ''), code: 'BENEFIT_PLACEHOLDER_UNEDITED' });
     }
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 cdp_inapp_messages ALTER(badge_text) 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 cdp_inapp_messages ALTER(badge_text) 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /inapp POST] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '생성 실패' });
@@ -1298,7 +1298,7 @@ router.put('/inapp/:id', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: msg.replace(/^BENEFIT_PLACEHOLDER_UNEDITED:\s*/, ''), code: 'BENEFIT_PLACEHOLDER_UNEDITED' });
     }
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 cdp_inapp_messages ALTER(badge_text) 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 cdp_inapp_messages ALTER(badge_text) 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /inapp PUT] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '수정 실패' });
@@ -1320,7 +1320,7 @@ router.put('/inapp/:id/audience-filter', async (req: Request, res: Response) => 
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 cdp_inapp_messages ALTER(audience_filter) 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 cdp_inapp_messages ALTER(audience_filter) 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /inapp audience-filter] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '저장 실패' });
@@ -1397,7 +1397,7 @@ function handleDbMigrationError(err: any, res: Response, tableName: string): boo
   if (msg.includes('column') && msg.includes('does not exist')) {
     res.status(503).json({
       success: false,
-      error: `DB 마이그레이션 필요 — 운영자에게 ${tableName} ALTER 실행 요청 의무`,
+      error: `DB 마이그레이션 필요: 운영자에게 ${tableName} ALTER 실행 요청 의무`,
       code: 'DB_MIGRATION_PENDING',
     });
     return true;
@@ -1987,7 +1987,7 @@ router.get('/diagnostics', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 customers ALTER 10건 (active_sources / preferred_channel / last_cart_add_at 등) 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 customers ALTER 10건 (active_sources / preferred_channel / last_cart_add_at 등) 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /diagnostics] 오류:', err);
     return res.status(500).json({ success: false, error: msg || '진단 조회 실패' });
@@ -2005,7 +2005,7 @@ router.get('/funnel', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /funnel] 오류:', err);
     return res.status(500).json({ success: false, error: msg || 'funnel 조회 실패' });
@@ -2022,7 +2022,7 @@ router.get('/timeline', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /timeline] 오류:', err);
     return res.status(500).json({ success: false, error: msg || 'timeline 조회 실패' });
@@ -2049,7 +2049,7 @@ router.get('/active-customers', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /active-customers] 오류:', err);
     return res.status(500).json({ success: false, error: msg || '활성 customer 조회 실패' });
@@ -2069,7 +2069,7 @@ router.get('/channel-distribution', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /channel-distribution] 오류:', err);
     return res.status(500).json({ success: false, error: msg || 'channel distribution 조회 실패' });
@@ -2096,7 +2096,7 @@ router.post('/explain', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /explain] 오류:', err);
     return res.status(500).json({ success: false, error: msg || 'AI 진단 실패' });
@@ -2118,7 +2118,7 @@ router.post('/recompute-profile', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /recompute-profile] 오류:', err);
     return res.status(500).json({ success: false, error: msg || '재계산 실패' });

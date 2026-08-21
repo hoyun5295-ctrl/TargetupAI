@@ -176,12 +176,12 @@ export function pickBestSendHour(
     if (c > bestCount) { bestCount = c; bestHour = h; }
   }
   if (sample < minSample) {
-    return { hour: null, sample, reason: `insufficient_data — 클릭 표본 ${sample}건 < 최소 ${minSample}건, 발송 시각 개인화 보류(현행 일정 유지)` };
+    return { hour: null, sample, reason: `insufficient_data: 클릭 표본 ${sample}건 < 최소 ${minSample}건, 발송 시각 개인화 보류(현행 일정 유지)` };
   }
   if (bestHour === null || bestCount <= 0) {
-    return { hour: null, sample, reason: `insufficient_data — 발송 가능 시간대(${sendStartHour}~${sendEndHour}시) 내 클릭 없음, 현행 일정 유지` };
+    return { hour: null, sample, reason: `insufficient_data: 발송 가능 시간대(${sendStartHour}~${sendEndHour}시) 내 클릭 없음, 현행 일정 유지` };
   }
-  return { hour: bestHour, sample, reason: `클릭 피크 ${bestHour}시 KST (표본 ${sample}건) — 발송 시각 개인화` };
+  return { hour: bestHour, sample, reason: `클릭 피크 ${bestHour}시 KST (표본 ${sample}건): 발송 시각 개인화` };
 }
 
 /**

@@ -286,7 +286,7 @@ export default function JourneyActivationConfirmModal({
             <div>
               <div className="text-[11px] text-white/50 mb-3 flex items-center gap-1.5">
                 <Loader2 className="w-3 h-3 animate-spin text-violet-300" />
-                AI 자율 진단 진행 중 — 모든 step + variant 일제 검증
+                AI 자율 진단 진행 중: 모든 step + variant 일제 검증
               </div>
               <div className="grid grid-cols-2 gap-2">
                 {SUB_AGENT_CARDS.map((card, i) => {
@@ -319,7 +319,7 @@ export default function JourneyActivationConfirmModal({
                 })}
               </div>
               <div className="text-[10px] text-white/30 italic mt-3">
-                Data source — 여정 자동 검증 엔진
+                Data source: 여정 자동 검증 엔진
               </div>
             </div>
           )}
@@ -366,11 +366,11 @@ export default function JourneyActivationConfirmModal({
               <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-400/30">
                 <div className="flex items-center gap-2 mb-2">
                   <CheckCircle2 className="w-5 h-5 text-emerald-300" />
-                  <div className="text-[14px] font-semibold text-emerald-100">자동 검증 통과 — 모든 step 정합 OK</div>
+                  <div className="text-[14px] font-semibold text-emerald-100">자동 검증 통과: 모든 step 정합 OK</div>
                 </div>
                 {result.confidenceScore > 0 && (
                   <div className="text-[12px] text-emerald-100/80">
-                    스팸필터 신뢰도 점수 — <span className="font-mono font-semibold">{result.confidenceScore}</span> / 100
+                    스팸필터 신뢰도 점수: <span className="font-mono font-semibold">{result.confidenceScore}</span> / 100
                     {result.perCarrierScore && (
                       <div className="grid grid-cols-3 gap-1 mt-2 text-[10px] text-emerald-100/60">
                         <div>SKT {result.perCarrierScore.skt}</div>
@@ -403,12 +403,12 @@ export default function JourneyActivationConfirmModal({
                     <span className="text-[11px] text-white/60">회사 현재 잔액</span>
                   </div>
                   <div className={`text-xl font-bold font-mono ${isInsufficientBalance ? 'text-rose-300' : 'text-white'}`}>
-                    {balance != null ? `${balance.toLocaleString()}원` : '— 조회 X —'}
+                    {balance != null ? `${balance.toLocaleString()}원` : '조회 불가'}
                   </div>
                   {isInsufficientBalance && (
                     <div className="text-[10px] text-rose-300 mt-1 flex items-center gap-1">
                       <AlertTriangle className="w-3 h-3" />
-                      잔액 부족 — 충전 의무
+                      잔액 부족: 충전 의무
                     </div>
                   )}
                 </div>
@@ -425,7 +425,7 @@ export default function JourneyActivationConfirmModal({
               </div>
 
               <div className="text-[10px] text-white/30 italic">
-                Data source — 여정 자동 검증 엔진
+                Data source: 여정 자동 검증 엔진
               </div>
             </div>
           )}
@@ -448,7 +448,7 @@ export default function JourneyActivationConfirmModal({
                     <div className="flex items-center gap-2">
                       <AlertTriangle className="w-5 h-5 text-rose-300" />
                       <div className="text-[14px] font-semibold text-rose-100">
-                        자동 검증 미통과 — {result.failedSteps.length}건 정정 의무
+                        자동 검증 미통과: {result.failedSteps.length}건 정정 의무
                       </div>
                     </div>
                   </div>
@@ -464,7 +464,7 @@ export default function JourneyActivationConfirmModal({
                         <div className="text-[12px] text-white/80 mb-2">{fs.details}</div>
                         {fs.matchedStopWords && fs.matchedStopWords.length > 0 && (
                           <div className="text-[11px] text-white/50">
-                            매칭된 stop word — {fs.matchedStopWords.slice(0, 5).join(', ')}
+                            매칭된 stop word: {fs.matchedStopWords.slice(0, 5).join(', ')}
                           </div>
                         )}
                         <button
@@ -479,7 +479,7 @@ export default function JourneyActivationConfirmModal({
                   </div>
 
                   <div className="text-[10px] text-white/30 italic">
-                    Data source — 여정 자동 검증 엔진
+                    Data source: 여정 자동 검증 엔진
                   </div>
                 </>
               )}
@@ -493,7 +493,7 @@ export default function JourneyActivationConfirmModal({
                   <AlertTriangle className="w-5 h-5 text-amber-300 flex-shrink-0 mt-0.5" />
                   <div>
                     <div className="text-[14px] font-semibold text-amber-100">
-                      미등록 매장번호 — 발송 실패 예정 {callbackConfirm.count.toLocaleString()}명
+                      미등록 매장번호: 발송 실패 예정 {callbackConfirm.count.toLocaleString()}명
                     </div>
                     <div className="text-[12px] text-amber-100/80 mt-1 leading-relaxed">
                       {callbackConfirm.message || '매장번호가 등록 발신번호가 아닌 고객은 발송이 자동 실패 처리됩니다.'}
@@ -516,7 +516,7 @@ export default function JourneyActivationConfirmModal({
                 </div>
               )}
               <div className="text-[10px] text-white/30 italic">
-                Data source — customers.store_phone ↔ 등록 발신번호(callback_numbers) 대조
+                Data source: customers.store_phone ↔ 등록 발신번호(callback_numbers) 대조
               </div>
             </div>
           )}
@@ -578,14 +578,14 @@ export default function JourneyActivationConfirmModal({
 
           {phase === 'validating' && (
             <div className="w-full text-center text-[11px] text-white/40">
-              검증 진행 중 — 5~10초 소요
+              검증 진행 중 (5~10초 소요)
             </div>
           )}
 
           {phase === 'activating' && (
             <div className="w-full text-center text-[12px] text-violet-200 flex items-center justify-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin" />
-              활성화 진행 중 — snapshot 보존 + 알림 스케줄 등록
+              활성화 진행 중: snapshot 보존 + 알림 스케줄 등록
             </div>
           )}
 

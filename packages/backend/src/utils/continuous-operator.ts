@@ -309,7 +309,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   // 계약 미지정이면 컬럼을 아예 참조하지 않는다 — 마이그레이션 전에도 옛 등록은 그대로 된다.
   // 계약을 고른 등록은 컬럼이 준비된 뒤에만 받는다(없으면 라우트가 503으로 안내).
   if (segKey && !(await hasSegmentColumns())) {
-    throw new Error('DB 마이그레이션 필요 — continuous_operators segment column does not exist');
+    throw new Error('DB 마이그레이션 필요: continuous_operators segment column does not exist');
   }
   let segCols = '';
   let segVals = '';
@@ -579,7 +579,7 @@ export async function updateOperator(
   //   폴백을 통째로 지우면 배포~DDL 구간에 일반 수정까지 전부 막혀 기능이 멈춘다(그건 처방이 아니라 사고다).
   const segColumnsReady = withSegmentSet ? await hasSegmentColumns() : false;
   if (segFinalKey && !segColumnsReady) {
-    throw new Error('DB 마이그레이션 필요 — continuous_operators segment column does not exist');
+    throw new Error('DB 마이그레이션 필요: continuous_operators segment column does not exist');
   }
   const result = await runUpdate(withSegmentSet && segColumnsReady);
   if (result.rows.length === 0) return null;
@@ -590,7 +590,7 @@ export async function updateOperator(
   //   2R(#10): 실패를 삼키지 않는다 — 1회 재시도 후에도 실패면 담당자 통지(예약이 살아 있을 수 있다는 사실).
   if (patch.sequenceEnabled === false) {
     const cancelSql = `UPDATE operator_proposals SET status = 'admin_stopped', scheduled_send_at = NULL, reviewed_at = NOW(),
-          auto_execute_reason = '리마인드 사용 해제 — 예약 취소'
+          auto_execute_reason = '리마인드 사용 해제로 예약 취소'
         WHERE operator_id = $1::uuid AND company_id = $2::uuid
           AND status IN ('scheduled', 'admin_review', 'pending')
           AND COALESCE((proposal_json -> 'meta' ->> 'is_reminder')::boolean, false) = true`;
@@ -613,7 +613,7 @@ export async function updateOperator(
 
   // ★ 2026-07-12 C-1: 일시 중지·보관 전환 시 예약된 자율 발송(scheduled) 동반 취소 — "중지했는데 발송" 차단.
   if (patch.status === 'paused' || patch.status === 'archived') {
-    await cancelScheduledProposalsForOperator(operatorId, '자동마케팅 중지 — 예약 발송 취소')
+    await cancelScheduledProposalsForOperator(operatorId, '자동마케팅 중지로 예약 발송 취소')
       .catch((e: any) => console.warn('[ContinuousOperator] 예약 발송 취소 경고:', e?.message));
   }
   return updated;
@@ -637,7 +637,7 @@ export async function archiveOperator(companyId: string, operatorId: string): Pr
   );
   if (result.rows.length === 0) return false;
   // ★ 2026-07-12 C-1: 보관(중지) 시 예약된 자율 발송 동반 취소 — "중지했는데 발송" 차단.
-  await cancelScheduledProposalsForOperator(operatorId, '자동마케팅 중지(보관) — 예약 발송 취소')
+  await cancelScheduledProposalsForOperator(operatorId, '자동마케팅 중지(보관)로 예약 발송 취소')
     .catch((e: any) => console.warn('[ContinuousOperator] 보관 시 예약 발송 취소 경고:', e?.message));
   return true;
 }
@@ -935,7 +935,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
 
   const autoExecuteReason = autoExecuteEligible
     ? `자동 실행 임계값 통과: ${recipientCount}명 / ${costEstimate.toLocaleString()}원 / ${compliance.riskLevel} risk (회사 max ${ctx.cdp_auto_execute_max_risk}) / 광고`
-    : `자동 실행 미통과 — ${[
+    : `자동 실행 미통과: ${[
         !ctx.cdp_auto_execute_enabled && '옵션 OFF',
         !ctx.advanced_access_enabled && '요금제',
         recipientCount > ctx.cdp_auto_execute_max_recipients && `${recipientCount}건 > ${ctx.cdp_auto_execute_max_recipients}`,
@@ -1116,7 +1116,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
       if (autoExecuteEligible) {
         await query(
           `UPDATE operator_proposals SET status = 'admin_review', auto_executed = false, scheduled_send_at = NULL,
-             auto_execute_reason = '스팸 검증 오류 — 담당자 검토 필요' WHERE id = $1::uuid`,
+             auto_execute_reason = '스팸 검증 오류. 담당자 검토 필요' WHERE id = $1::uuid`,
           [proposalRes.rows[0].id],
         ).catch(() => {});
       }
@@ -1330,7 +1330,7 @@ export async function approveProposal(
       if (!dup) throw e;
       await query(
         `UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL,
-           auto_execute_reason = '이미 예약된 발송이 있어 승인하지 않았습니다 — 기존 예약 처리 후 다시 승인해 주세요'
+           auto_execute_reason = '이미 예약된 발송이 있어 승인하지 않았습니다. 기존 예약 처리 후 다시 승인해 주세요'
          WHERE id = $1::uuid AND status = 'sending'`,
         [proposalId],
       ).catch((err: any) => console.warn('[ContinuousOperator] 승인 되돌리기 경고:', err?.message));
@@ -1687,7 +1687,7 @@ async function reconcileStuckSending(staleMinutes: number = 30): Promise<void> {
       // 커밋 전 중단(마커 없음) + 노후 → 담당자 검토(절대 자동 재발송 X).
       const upd = await query(
         `UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL,
-           auto_execute_reason = '발송 준비 중단 — 담당자 검토 (자동 복구)'
+           auto_execute_reason = '발송 준비 중단. 담당자 검토 (자동 복구)'
          WHERE id = $1::uuid AND status = 'sending' AND campaign_id IS NULL RETURNING id`,
         [row.id],
       ).catch(() => ({ rows: [] as any[] }));
@@ -1720,7 +1720,7 @@ async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skip
   if (opStatus !== 'active' && opStatus !== 'paused_no_credit') {
     await query(
       `UPDATE operator_proposals SET status = 'admin_stopped', scheduled_send_at = NULL,
-         auto_execute_reason = '오퍼레이터 중지 상태 — 자동 발송 취소', reviewed_at = NOW()
+         auto_execute_reason = '오퍼레이터 중지 상태로 자동 발송 취소', reviewed_at = NOW()
        WHERE id = $1::uuid AND status = 'scheduled'`,
       [proposalId],
     );
@@ -1788,7 +1788,7 @@ async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skip
   } catch (budErr: any) {
     // 예산 검증 실패 = 발송하지 않음(돈 보호). 'sending' 정지 방지 위해 admin_review로 내림.
     await query(
-      `UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '예산 검증 오류 — 담당자 검토'
+      `UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '예산 검증 오류. 담당자 검토'
        WHERE id = $1::uuid AND status = 'sending'`,
       [proposalId],
     ).catch(() => {});
@@ -1924,18 +1924,18 @@ async function dispatchProposalSend(
     if (hasUneditedBenefitPlaceholder(resolvedBody) || hasUneditedBenefitPlaceholder(resolvedSubject)) {
       await query(
         `UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL,
-           auto_execute_reason = '혜택 미입력(문안에 입력 안내 문구 잔존) — 발송 보류' WHERE id = $1::uuid`,
+           auto_execute_reason = '혜택 미입력(문안에 입력 안내 문구 잔존). 발송 보류' WHERE id = $1::uuid`,
         [proposalId],
       );
       await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 문안에 혜택이 입력되지 않아 발송을 보류했습니다. 한줄로 > 자동마케팅에서 혜택 입력 후 승인해 주세요.`);
-      return { action: 'skipped', reason: '혜택 미입력 — 발송 보류' };
+      return { action: 'skipped', reason: '혜택 미입력. 발송 보류' };
     }
 
     // 광고 가드 — 광고면 무료거부 번호(080) 해석 결과 필수(정보통신망법). 없으면 발송 보류(담당자 검토).
     if (isAd) {
       const opt080 = await getOpt080Number(op.created_by || null, companyId);
       if (!opt080) {
-        await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '광고 무료거부 번호(080) 미설정 — 발송 보류' WHERE id = $1::uuid`, [proposalId]);
+        await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '광고 무료거부 번호(080) 미설정. 발송 보류' WHERE id = $1::uuid`, [proposalId]);
         await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 광고 무료거부 번호(080)가 없어 발송을 보류했습니다. 080 등록 후 다시 진행해주세요.`);
         return { action: 'skipped', reason: '광고 무료거부 번호(080) 미설정' };
       }
@@ -1952,9 +1952,9 @@ async function dispatchProposalSend(
       const arr = imgRes.rows[0]?.mms_image_paths;
       const cleaned = Array.isArray(arr) ? arr.filter((x: any) => typeof x === 'string' && x.trim()).slice(0, 3) : [];
       if (imgRes.rows.length === 0 || !validateMmsPayload(msgType, cleaned).ok) {
-        await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = 'MMS 이미지 미첨부 — 발송 보류' WHERE id = $1::uuid`, [proposalId]);
+        await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = 'MMS 이미지 미첨부. 발송 보류' WHERE id = $1::uuid`, [proposalId]);
         await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' MMS 이미지가 없어 발송을 보류했습니다. 자동마케팅 수정에서 이미지를 첨부한 뒤 승인해 주세요.`);
-        return { action: 'skipped', reason: 'MMS 이미지 미첨부 — 발송 보류' };
+        return { action: 'skipped', reason: 'MMS 이미지 미첨부. 발송 보류' };
       }
       mmsImagePaths = cleaned;
     }
@@ -1966,7 +1966,7 @@ async function dispatchProposalSend(
     );
     callback = cbRes.rows[0]?.phone || null;
     if (!callback) {
-      await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발신번호 미설정 — 발송 보류' WHERE id = $1::uuid`, [proposalId]);
+      await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발신번호 미설정. 발송 보류' WHERE id = $1::uuid`, [proposalId]);
       await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 등록된 발신번호가 없어 발송을 보류했습니다.`);
       return { action: 'skipped', reason: '발신번호 미설정' };
     }
@@ -1980,12 +1980,12 @@ async function dispatchProposalSend(
     if (scope.blocked) {
       await query(
         `UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL,
-           auto_execute_reason = '담당 매장이 지정되지 않아 발송 대상을 정할 수 없습니다 — 발송 보류'
+           auto_execute_reason = '담당 매장이 지정되지 않아 발송 대상을 정할 수 없습니다. 발송 보류'
          WHERE id = $1::uuid`,
         [proposalId],
       );
       await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 담당 매장이 지정되지 않아 발송을 보류했습니다. 매장 권한 확인 후 다시 진행해주세요.`);
-      return { action: 'skipped', reason: '담당 매장 미지정 — 발송 보류' };
+      return { action: 'skipped', reason: '담당 매장 미지정. 발송 보류' };
     }
     sendBaseParams = scope.baseParams;
     sendStoreFilter = scope.storeFilter;
@@ -2005,7 +2005,7 @@ async function dispatchProposalSend(
         return { action: 'skipped' as const, reason };
       };
       if (!primaryCampaignId) {
-        return await halt('리마인드 취소 — 1차 캠페인 정보 없음(옛 형식 예약)',
+        return await halt('리마인드 취소: 1차 캠페인 정보 없음(옛 형식 예약)',
           `'${op.name || ''}' 리마인드에 1차 발송 정보가 없어 취소했습니다.`);
       }
       const camp = await query(
@@ -2016,13 +2016,13 @@ async function dispatchProposalSend(
       const crow = camp.rows[0];
       // 1차가 정상 종결(completed)하지 않았으면 리마인드도 없다 — 받은 적 없는 리마인드가 이 기능의 금기다.
       if (!crow || String(crow.status) !== 'completed') {
-        return await halt('리마인드 취소 — 1차 발송이 정상 종결되지 않음',
+        return await halt('리마인드 취소: 1차 발송이 정상 종결되지 않음',
           `'${op.name || ''}' 1차 발송이 정상 완료되지 않아 리마인드를 취소했습니다.`);
       }
       // 성공 코드만 — "1차를 받은 분"이 계약이다. 실패(결번·꺼짐)·대기 번호에 또 보내면 받은 적 없는 리마인드.
       const cohort = await readCampaignQueuedPhones(companyId, primaryCampaignId, crow, { successOnly: true });
       if (cohort.length === 0) {
-        return await halt('리마인드 취소 — 1차 수신 성공 명단이 없음',
+        return await halt('리마인드 취소: 1차 수신 성공 명단이 없음',
           `'${op.name || ''}' 1차를 실제로 받은 고객이 확인되지 않아 리마인드를 취소했습니다.`);
       }
       filterWhere = `AND regexp_replace(COALESCE(c.phone, ''), '[^0-9]', '', 'g') = ANY($${sendBaseParams.length + 1}::text[])`;
@@ -2122,7 +2122,7 @@ async function dispatchProposalSend(
             `UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL,
                recipient_count = $2, cost_estimate = $3, auto_execute_reason = $4
              WHERE id = $1::uuid`,
-            [proposalId, recipientTotal, actualCost, `${overReason} — 발송 보류`],
+            [proposalId, recipientTotal, actualCost, `${overReason}. 발송 보류`],
           );
         } else {
           await budgetClient.query(
@@ -2158,7 +2158,7 @@ async function dispatchProposalSend(
     // ⛔ 8R 정정: 적재해 둔 수신자 행도 함께 치운다. 캠페인이 소유권을 가져가기 전에 빠져나가면
     //   전화번호·이름이 담긴 staging이 주인 없이 남고 정리 워커도 없다.
     await cleanupOrphanStaging(stagingId);
-    await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발송 준비 오류 — 담당자 검토' WHERE id = $1::uuid AND status = 'sending'`, [proposalId]).catch(() => {});
+    await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발송 준비 오류. 담당자 검토' WHERE id = $1::uuid AND status = 'sending'`, [proposalId]).catch(() => {});
     await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 발송 준비 중 오류로 보류했습니다. 담당자 검토가 필요합니다.`);
     throw preErr;
   }
@@ -2194,11 +2194,11 @@ async function dispatchProposalSend(
     // ⛔ 8R 정정: 캠페인이 만들어지지 못했으면 staging의 주인이 없다 — 잔액 부족·발송 오류 모두에서 치운다.
     await cleanupOrphanStaging(stagingId);
     if (e instanceof DirectSendError && e.code === 'INSUFFICIENT_BALANCE') {
-      await query(`UPDATE operator_proposals SET status = 'skipped', auto_execute_reason = '잔액 부족 — 발송 생략' WHERE id = $1::uuid`, [proposalId]);
+      await query(`UPDATE operator_proposals SET status = 'skipped', auto_execute_reason = '잔액 부족으로 발송 생략' WHERE id = $1::uuid`, [proposalId]);
       await notify('[AI 자동마케팅] 발송 생략', `'${op.name || ''}' 잔액 부족으로 이번 사이클 발송을 생략했습니다.`);
       return { action: 'skipped', reason: '잔액 부족' };
     }
-    await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발송 오류 — 담당자 검토' WHERE id = $1::uuid`, [proposalId]).catch(() => {});
+    await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발송 오류. 담당자 검토' WHERE id = $1::uuid`, [proposalId]).catch(() => {});
     throw e;
   }
 
@@ -2351,7 +2351,7 @@ async function hasSegmentColumns(): Promise<boolean> {
   );
   const n = Number(r.rows[0]?.n) || 0;
   if (n === 1) {
-    throw new Error('DB 마이그레이션 필요 — continuous_operators segment column 하나만 존재합니다(두 컬럼 동시 추가 필요)');
+    throw new Error('DB 마이그레이션 필요: continuous_operators segment column 하나만 존재합니다(두 컬럼 동시 추가 필요)');
   }
   segmentColumnsReadyCache = n === 2;
   return segmentColumnsReadyCache;
@@ -2383,7 +2383,7 @@ async function cleanupOrphanStaging(stagingId: string): Promise<void> {
  *   → 수신자 원장을 세우기 전까지 보류하고 사유를 담당자에게 알린다. 잘못된 대상에 보내느니 안 보낸다.
  */
 /** 스팸 검증 대기 중 리마인드의 사유 문구 — 승격 CAS가 이 값으로만 올린다(사람 조작과 경합 금지). */
-const REMINDER_SPAM_PENDING_REASON = '리마인드 문안 스팸 검증 중 — 통과하면 자동 예약됩니다';
+const REMINDER_SPAM_PENDING_REASON = '리마인드 문안 스팸 검증 중. 통과하면 자동 예약됩니다';
 
 /**
  * ★ 2026-08-04 2R(#3·c) — '검증 중' 좀비 대조. 분리 실행이 크래시하면 승격도 실패 표기도 없이
@@ -2393,7 +2393,7 @@ const REMINDER_SPAM_PENDING_REASON = '리마인드 문안 스팸 검증 중 — 
  */
 async function sweepStaleSpamPendingReminders(): Promise<void> {
   const stale = await query(
-    `UPDATE operator_proposals p SET auto_execute_reason = '리마인드 문안 검증이 완료되지 않았습니다 — 문안 확인 후 승인해 주세요'
+    `UPDATE operator_proposals p SET auto_execute_reason = '리마인드 문안 검증이 완료되지 않았습니다. 문안 확인 후 승인해 주세요'
       WHERE p.status = 'admin_review' AND p.auto_execute_reason = $1
         AND p.created_at < NOW() - INTERVAL '10 minutes'
       RETURNING p.id, p.company_id, p.operator_id`,
@@ -2550,7 +2550,7 @@ async function scheduleSequenceReminder(
             auto_execute_reason = $2
           WHERE id = $1::uuid AND status = 'admin_review' AND auto_execute_reason = $3
           RETURNING id`,
-        [reminderId, `미반응자 리마인드 — 1차 수신자 중 미클릭만 발송 시점 재추출 (D+${delayDays})`, REMINDER_SPAM_PENDING_REASON],
+        [reminderId, `미반응자 리마인드: 1차 수신자 중 미클릭만 발송 시점 재추출 (D+${delayDays})`, REMINDER_SPAM_PENDING_REASON],
       ).catch((e: any) => { console.warn('[ContinuousOperator Sequence] 리마인드 승격 경고:', e?.message); return { rows: [] as any[] }; });
       if (up.rows.length > 0) console.log(`[ContinuousOperator Sequence] 리마인드 ${reminderId} 스팸 통과 — 예약 확정`);
     } else {
@@ -2559,7 +2559,7 @@ async function scheduleSequenceReminder(
         `UPDATE operator_proposals SET auto_execute_reason = $2
           WHERE id = $1::uuid AND status = 'admin_review' AND auto_execute_reason = $3
           RETURNING id`,
-        [reminderId, `리마인드 문안 스팸 검증 미통과(${spamNote}) — 문안 수정 후 승인 필요`, REMINDER_SPAM_PENDING_REASON],
+        [reminderId, `리마인드 문안 스팸 검증 미통과(${spamNote}). 문안 수정 후 승인 필요`, REMINDER_SPAM_PENDING_REASON],
       ).catch((e: any) => { console.warn('[ContinuousOperator Sequence] 리마인드 사유 갱신 경고:', e?.message); return { rows: [] as any[] }; });
       if (marked.rows.length > 0) {
         await tell('[AI 자동마케팅] 리마인드 검토 필요',

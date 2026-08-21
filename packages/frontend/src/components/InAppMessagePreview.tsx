@@ -289,7 +289,7 @@ function Overlay({ variant, themeTokens, treatment, ...rest }: { variant: Varian
             {posterImg ? (
               <img src={posterImg} alt="" onError={hideOnError} style={{ width: '100%', height: 'auto', maxHeight: 360, objectFit: 'cover', display: 'block' }} />
             ) : (
-              <div style={{ width: '100%', height: 240, background: 'linear-gradient(135deg,#e8e8ee,#d4d4dd)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#8a8a94' }}>이미지 1장 필수 — 콘텐츠 탭에서 업로드</div>
+              <div style={{ width: '100%', height: 240, background: 'linear-gradient(135deg,#e8e8ee,#d4d4dd)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#8a8a94' }}>이미지 1장 필수: 콘텐츠 탭에서 업로드</div>
             )}
             {(rest.title || rest.body || rest.badge) && posterImg && (
               <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '42px 18px 14px', background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.66) 100%)', color: overlayColor, maxHeight: '100%', overflowY: 'auto' }}>
@@ -441,7 +441,7 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
       </div>
       )}
       {props.theme === 'auto' && useBlocks && !props.captureMode && (
-        <div className="text-[10px] text-white/40 text-center -mt-1 mb-2">자동 테마 = 고객 자사몰의 라이트/다크 모드를 따라갑니다 — 위 토글로 양쪽 확인</div>
+        <div className="text-[10px] text-white/40 text-center -mt-1 mb-2">자동 테마 = 고객 자사몰의 라이트/다크 모드를 따라갑니다. 위 토글로 양쪽 확인</div>
       )}
 
       {/* 디바이스 프레임 */}
@@ -474,7 +474,7 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
 
       {!props.captureMode && (
       <div className="text-[10px] text-white/30 italic mt-2.5 text-center">
-        Data source — 선택한 형태·내용 그대로 자사몰에 표시됩니다
+        Data source: 선택한 형태·내용 그대로 자사몰에 표시됩니다
       </div>
       )}
     </div>
@@ -569,7 +569,7 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
         {img ? (
           <img src={img} alt="" onError={hideOnError} style={{ width: '100%', height: 'auto', maxHeight: 340, objectFit: 'cover', display: 'block' }} />
         ) : (
-          <div style={{ width: '100%', height: 220, background: 'linear-gradient(135deg,#e8e8ee,#d4d4dd)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#8a8a94' }}>이미지 1장 필수 — 콘텐츠 탭에서 업로드</div>
+          <div style={{ width: '100%', height: 220, background: 'linear-gradient(135deg,#e8e8ee,#d4d4dd)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#8a8a94' }}>이미지 1장 필수: 콘텐츠 탭에서 업로드</div>
         )}
         {(title || body || badge) && img && (
           <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '42px 18px 14px', background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.66) 100%)', color: posterOverlayColor, textAlign: ta, maxHeight: '100%', overflowY: 'auto' }}>
@@ -672,7 +672,7 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
       </div>
       {!captureMode && (
       <div className="text-[10px] text-white/30 italic mt-2.5 text-center">
-        Data source — 앱 실렌더와 동일 요소(이미지·배지·제목·본문·버튼·정렬) 표시 · 닫기/다시 보지 않기는 앱이 통합 계약을 구현한 빌드에서 동작
+        Data source: 앱 실렌더와 동일 요소(이미지·배지·제목·본문·버튼·정렬) 표시 · 닫기/다시 보지 않기는 앱이 통합 계약을 구현한 빌드에서 동작
       </div>
       )}
     </div>

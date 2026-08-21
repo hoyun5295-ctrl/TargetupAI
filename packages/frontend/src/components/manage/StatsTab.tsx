@@ -691,7 +691,7 @@ export default function StatsTab() {
                       ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
                       document.body.appendChild(ta); ta.select();
                       try { document.execCommand('copy'); setToast({ msg: '메시지를 복사했습니다', type: 'success' }); }
-                      catch { setToast({ msg: '복사 실패 — 본문을 직접 선택해 복사해주세요', type: 'error' }); }
+                      catch { setToast({ msg: '복사 실패. 본문을 직접 선택해 복사해주세요', type: 'error' }); }
                       document.body.removeChild(ta);
                     }
                   }}

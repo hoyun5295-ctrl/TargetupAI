@@ -94,7 +94,7 @@ router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: 
     // ★ 2026-08-18 u.mfa_phone을 명시 조회하므로 DDL 미적용이면 여기서 죽는다 — 원인이 보이는 응답으로
     if (isMfaSchemaMissing(error)) {
       return res.status(503).json({
-        error: 'DB 마이그레이션 필요 — users.mfa_phone ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: users.mfa_phone ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -292,7 +292,7 @@ router.put('/users/:id/mfa-phone', authenticate, requireSuperAdmin, async (req: 
   } catch (error: any) {
     if (isMfaSchemaMissing(error)) {
       return res.status(503).json({
-        error: 'DB 마이그레이션 필요 — users.mfa_phone · mfa_trusted_devices 생성 요청',
+        error: 'DB 마이그레이션 필요: users.mfa_phone · mfa_trusted_devices 생성 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -690,7 +690,7 @@ router.put('/companies/:id/unit-prices', authenticate, requireSuperAdmin, async 
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 companies.unit_price_basis ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: 운영자에게 companies.unit_price_basis ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -732,7 +732,7 @@ router.get('/spam-block/rules', authenticate, requireSuperAdmin, async (_req: Re
   } catch (error: any) {
     if (String(error?.message || '').includes('does not exist')) {
       return res.status(503).json({
-        error: 'DB 마이그레이션 필요 — spam_block_rules · spam_block_hits 생성 요청',
+        error: 'DB 마이그레이션 필요: spam_block_rules · spam_block_hits 생성 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -774,7 +774,7 @@ router.post('/spam-block/rules', authenticate, requireSuperAdmin, async (req: Re
     return res.json({ rule: result.rows[0] });
   } catch (error: any) {
     if (String(error?.message || '').includes('does not exist')) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — spam_block_rules 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: spam_block_rules 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('금칙어 규칙 생성 실패:', error);
     return res.status(500).json({ error: '금칙어 규칙 생성 실패' });
@@ -834,7 +834,7 @@ router.put('/spam-block/rules/:id', authenticate, requireSuperAdmin, async (req:
     return res.json({ success: true });
   } catch (error: any) {
     if (String(error?.message || '').includes('does not exist')) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — spam_block_rules 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: spam_block_rules 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('금칙어 규칙 수정 실패:', error);
     return res.status(500).json({ error: '금칙어 규칙 수정 실패' });
@@ -912,7 +912,7 @@ router.get('/spam-block/hits', authenticate, requireSuperAdmin, async (req: Requ
     return res.json({ hits: result.rows });
   } catch (error: any) {
     if (String(error?.message || '').includes('does not exist')) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — spam_block_hits 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: spam_block_hits 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('금칙어 탐지 이력 조회 실패:', error);
     return res.status(500).json({ error: '금칙어 탐지 이력 조회 실패' });
@@ -927,7 +927,7 @@ router.get('/spam-block/hits', authenticate, requireSuperAdmin, async (req: Requ
 //   컨트롤타워 = utils/geo-access.ts
 // ============================================================
 const GEO_MIGRATION_HINT = {
-  error: 'DB 마이그레이션 필요 — geo_allow_cidrs · access_origin_allowlist 생성 요청',
+  error: 'DB 마이그레이션 필요: geo_allow_cidrs · access_origin_allowlist 생성 요청',
   code: 'DB_MIGRATION_PENDING',
 };
 // IPv4 · IPv6 CIDR 모양. 실제 유효성은 PG의 ::cidr 캐스팅이 확정한다(트랜잭션 안이라 실패 시 롤백)
@@ -1148,7 +1148,7 @@ router.get('/companies/:id/sender-line-policy', authenticate, requireSuperAdmin,
   } catch (error: any) {
     if (isLineLimitSchemaMissing(error)) {
       return res.status(503).json({
-        error: 'DB 마이그레이션 필요 — companies.subscriber_type · mobile_line_limit · landline_line_limit ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: companies.subscriber_type · mobile_line_limit · landline_line_limit ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -1218,7 +1218,7 @@ router.put('/companies/:id/sender-line-policy', authenticate, requireSuperAdmin,
   } catch (error: any) {
     if (isLineLimitSchemaMissing(error)) {
       return res.status(503).json({
-        error: 'DB 마이그레이션 필요 — companies.subscriber_type · mobile_line_limit · landline_line_limit ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: companies.subscriber_type · mobile_line_limit · landline_line_limit ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -1425,7 +1425,7 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 companies.usage_type ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: 운영자에게 companies.usage_type ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -1461,8 +1461,8 @@ router.patch('/companies/:id/ai-orchestrator', authenticate, requireSuperAdmin, 
     res.json({
       company: result.rows[0],
       message: enabled
-        ? 'AI Orchestrator (Tool Use) 활성됨 — PM2 로그 모니터링 권장'
-        : 'AI Orchestrator 비활성됨 — 기존 orchestrate 흐름으로 복원',
+        ? 'AI Orchestrator (Tool Use) 활성됨. PM2 로그 모니터링 권장'
+        : 'AI Orchestrator 비활성됨. 기존 orchestrate 흐름으로 복원',
     });
   } catch (error) {
     console.error('AI Orchestrator 토글 실패:', error);
@@ -1498,8 +1498,8 @@ router.patch('/companies/:id/cdp-auto-execute', authenticate, requireSuperAdmin,
     res.json({
       company: result.rows[0],
       message: gate.enabled
-        ? `자율발송 ON — 최대 ${gate.maxRecipients.toLocaleString()}명 / 회당 ${gate.maxCostKrw.toLocaleString()}원 / 위험도 ${gate.maxRisk}`
-        : '자율발송 OFF — 이후 제안서는 담당자 수동 승인 대기',
+        ? `자율발송 ON: 최대 ${gate.maxRecipients.toLocaleString()}명 / 회당 ${gate.maxCostKrw.toLocaleString()}원 / 위험도 ${gate.maxRisk}`
+        : '자율발송 OFF: 이후 제안서는 담당자 수동 승인 대기',
     });
   } catch (error: any) {
     const msg = error?.message || '';
@@ -1507,7 +1507,7 @@ router.patch('/companies/:id/cdp-auto-execute', authenticate, requireSuperAdmin,
       return res.status(503).json({
         success: false,
         code: 'DB_MIGRATION_PENDING',
-        error: 'DB 마이그레이션 필요 — companies 자율발송 게이트 컬럼(cdp_auto_execute_*) ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: companies 자율발송 게이트 컬럼(cdp_auto_execute_*) ALTER 실행 요청',
       });
     }
     console.error('자율발송 게이트 저장 실패:', error);
@@ -2795,7 +2795,7 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
     const msg = error?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
-        error: 'DB 마이그레이션 필요 — 운영자에게 campaigns ALTER(result_final/result_synced_at) 실행 요청 의무',
+        error: 'DB 마이그레이션 필요: 운영자에게 campaigns ALTER(result_final/result_synced_at) 실행 요청 의무',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -3268,7 +3268,7 @@ router.get('/companies/:id/credit', authenticate, requireSuperAdmin, async (req:
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — ai_credit_transactions.reason 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: ai_credit_transactions.reason 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('크레딧 현황 조회 실패:', err);
     res.status(500).json({ error: '크레딧 현황 조회 실패' });
@@ -3297,7 +3297,7 @@ router.post('/companies/:id/credit-adjust', authenticate, requireSuperAdmin, asy
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — ai_credit_transactions.reason 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: ai_credit_transactions.reason 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     if (msg.includes('이미 처리')) return res.status(409).json({ error: msg, code: 'DUPLICATE_ADJUST' });
     if (msg.includes('부족') || msg.includes('찾을 수 없')) return res.status(400).json({ error: msg });
@@ -3357,7 +3357,7 @@ router.get('/credit-requests', authenticate, requireSuperAdmin, async (req: Requ
     res.json({ requests: r.rows, total: r.total, page, totalPages: Math.ceil(r.total / 20) });
   } catch (err: any) {
     if ((err?.message || '').includes('does not exist')) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — ai_credit_requests 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: ai_credit_requests 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('충전 요청 목록 실패:', err);
     res.status(500).json({ error: '충전 요청 목록 실패' });
@@ -3610,7 +3610,7 @@ router.put('/deposit-requests/:id/approve', authenticate, requireSuperAdmin, asy
     await depClient.query('ROLLBACK').catch(() => {});
     const msg = String(txErr?.message || '');
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — deposit_requests ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: deposit_requests ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('충전 요청 승인 실패:', txErr);
     return res.status(500).json({ error: '충전 요청 승인 실패' });
@@ -3648,7 +3648,7 @@ router.put('/deposit-requests/:id/approve', authenticate, requireSuperAdmin, asy
   } catch (error: any) {
     const msg = String(error?.message || '');
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — deposit_requests ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: deposit_requests ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('충전 요청 승인 실패:', error);
     res.status(500).json({ error: '충전 요청 승인 실패' });
@@ -3705,7 +3705,7 @@ router.put('/deposit-requests/:id/reject', authenticate, requireSuperAdmin, asyn
   } catch (error: any) {
     const msg = String(error?.message || '');
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — deposit_requests ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: deposit_requests ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('충전 요청 거절 실패:', error);
     res.status(500).json({ error: '충전 요청 거절 실패' });
@@ -3803,7 +3803,7 @@ router.post('/agent-charges', authenticate, requireSuperAdmin, async (req: Reque
   const idempotencyKey = String((req.body as any)?.idempotencyKey || '').trim();
   try {
     if (!isPayStatsConfigured()) {
-      return res.status(503).json({ error: '게이트웨이 통계 DB(env paystats) 미설정 — 충전 실행 불가' });
+      return res.status(503).json({ error: '게이트웨이 통계 DB(env paystats) 미설정. 충전 실행 불가' });
     }
     if (idempotencyKey.length < 8 || idempotencyKey.length > 80) {
       return res.status(400).json({ error: 'idempotencyKey(8~80자)가 필요합니다.' });
@@ -3828,14 +3828,14 @@ router.post('/agent-charges', authenticate, requireSuperAdmin, async (req: Reque
     const infoMap = new Map<string, any>(known.rows.map((r: any) => [String(r.agent_send_id), r]));
     const unknown = ids.filter((v) => !infoMap.has(v));
     if (unknown.length > 0) {
-      return res.status(400).json({ error: `매핑에 없는 발송ID: ${unknown.join(', ')} — 고객사 수정 화면에서 먼저 등록하세요.` });
+      return res.status(400).json({ error: `매핑에 없는 발송ID: ${unknown.join(', ')}. 고객사 수정 화면에서 먼저 등록하세요.` });
     }
     const notEligible = ids.filter((v) => {
       const r = infoMap.get(v);
       return r.billing_type !== 'prepaid' || !['agent', 'both'].includes(String(r.usage_type));
     });
     if (notEligible.length > 0) {
-      return res.status(400).json({ error: `선불 지정되지 않은 발송ID: ${notEligible.join(', ')} — 고객사 수정 화면에서 선불 지정 먼저 하세요.` });
+      return res.status(400).json({ error: `선불 지정되지 않은 발송ID: ${notEligible.join(', ')}. 고객사 수정 화면에서 선불 지정 먼저 하세요.` });
     }
 
     const totalAmount = parsed.charges.reduce((s, c) => s + c.amount, 0);
@@ -3911,7 +3911,7 @@ router.post('/agent-charges', authenticate, requireSuperAdmin, async (req: Reque
     if (uncertainPending) {
       return res.status(409).json({
         code: 'UNCERTAIN_PENDING',
-        error: '반영 불확실 충전이 미해소 상태입니다 — 이력 확인 후 해소해야 신규 충전이 가능합니다.',
+        error: '반영 불확실 충전이 미해소 상태입니다. 이력 확인 후 해소해야 신규 충전이 가능합니다.',
         uncertainRequests: uncertainPending,
       });
     }
@@ -3952,13 +3952,13 @@ router.post('/agent-charges', authenticate, requireSuperAdmin, async (req: Reque
         // 최고 위험 경로(고액 실반영 가능 + ACK 유실)일수록 즉시 알림 — 금액 무관 발송(Codex 10R)
         sendSystemAlert({
           dedupKey: `agent-charge-uncertain:${requestId}`,
-          message: `에이전트 충전 반영 불확실(커밋 응답 유실) — 절대합 ${absBatch.toLocaleString()}원 ${parsed.charges.length}건 (by ${requestedBy || 'unknown'}) 사유: ${reason}. 이력 확인 후 해소 필요`,
+          message: `에이전트 충전 반영 불확실(커밋 응답 유실): 절대합 ${absBatch.toLocaleString()}원 ${parsed.charges.length}건 (by ${requestedBy || 'unknown'}) 사유: ${reason}. 이력 확인 후 해소 필요`,
           cooldownMs: 1000,
         }).catch(() => { /* 미설정/실패 시 조용히 생략 */ });
         return res.status(502).json({
           uncertain: true,
           requestId,
-          error: '커밋 응답 유실 — 반영 여부 불확실. 같은 요청을 새로 넣지 말고, 아래 이력에서 해당 발송ID의 최신 행을 먼저 확인하세요.',
+          error: '커밋 응답 유실. 반영 여부 불확실. 같은 요청을 새로 넣지 말고, 아래 이력에서 해당 발송ID의 최신 행을 먼저 확인하세요.',
         });
       }
       // 커밋 전 실패 = MySQL 롤백 확정(충전 0건) — 예약 해제해 같은 키 재시도 허용
@@ -4009,7 +4009,7 @@ router.post('/agent-charges', authenticate, requireSuperAdmin, async (req: Reque
     if (absBatch >= 50_000_000) {
       sendSystemAlert({
         dedupKey: `agent-charge-high:${requestId}`,
-        message: `에이전트 고액 충전 등록 — 절대합 ${absBatch.toLocaleString()}원 ${registered.length}건 (by ${requestedBy || 'unknown'}) 사유: ${reason}`,
+        message: `에이전트 고액 충전 등록: 절대합 ${absBatch.toLocaleString()}원 ${registered.length}건 (by ${requestedBy || 'unknown'}) 사유: ${reason}`,
         cooldownMs: 1000,
       }).catch(() => { /* 미설정/실패 시 조용히 생략 */ });
     }
@@ -4023,11 +4023,11 @@ router.post('/agent-charges', authenticate, requireSuperAdmin, async (req: Reque
     console.error('에이전트 충전 등록 실패:', error);
     const msg = String(error?.message || '');
     if (msg === 'PAY_STATS_DB_NOT_CONFIGURED') {
-      return res.status(503).json({ error: '게이트웨이 통계 DB(env paystats) 미설정 — 충전 실행 불가' });
+      return res.status(503).json({ error: '게이트웨이 통계 DB(env paystats) 미설정. 충전 실행 불가' });
     }
     if (msg.toLowerCase().includes('command denied')) {
       return res.status(503).json({
-        error: '충전용 쓰기 권한 없음 — 운영자에게 pay-ingest-db 계정 GRANT INSERT(sales.RSRM_FillAmtHist) 실행 요청',
+        error: '충전용 쓰기 권한 없음: 운영자에게 pay-ingest-db 계정 GRANT INSERT(sales.RSRM_FillAmtHist) 실행 요청',
         code: 'DB_GRANT_PENDING',
       });
     }
@@ -4083,11 +4083,11 @@ router.post('/agent-charges/:requestId/resolve', authenticate, requireSuperAdmin
         );
       } catch (probeErr) {
         console.error('[agent-charges] 게이트웨이 대조 불가(해소 보류):', probeErr);
-        return res.status(503).json({ error: '게이트웨이 대조 불가 — 미반영 확정을 보류합니다. 잠시 후 다시 시도하세요.' });
+        return res.status(503).json({ error: '게이트웨이 대조 불가. 미반영 확정을 보류합니다. 잠시 후 다시 시도하세요.' });
       }
       if (matches.length > 0) {
         return res.status(400).json({
-          error: `게이트웨이에 대응 충전 행이 실존합니다(SeqNo ${matches.map((m) => m.seqNo).join(',')}) — 미반영 처리 불가. "실반영 확인됨"으로 해소하세요.`,
+          error: `게이트웨이에 대응 충전 행이 실존합니다(SeqNo ${matches.map((m) => m.seqNo).join(',')}). 미반영 처리 불가. "실반영 확인됨"으로 해소하세요.`,
         });
       }
     }
@@ -4557,7 +4557,7 @@ router.get('/billing/overview', authenticate, requireSuperAdmin, async (req: Req
 //   저장분(sentinel tenant)만 Track B(브랜드보이스 미등록) 생성 참고 원문으로 서빙.
 
 const SEED_GATE_MESSAGES: Record<SeedGateFail, string> = {
-  too_short: '저장할 수 없습니다 — 연락처·주소 등 자동 제거 후 12자 이상이어야 합니다.',
+  too_short: '저장할 수 없습니다. 연락처·주소 등 자동 제거 후 12자 이상이어야 합니다.',
   leak: '전화번호·URL·이메일 등 개인정보/식별 정보가 남아 있습니다. 제거 후 저장해주세요.',
   spam: '스팸 위험 표현이 많아 시드로 저장할 수 없습니다. 표현을 다듬어주세요.',
   duplicate: '동일한 문안이 이미 저장되어 있습니다.',
@@ -4608,7 +4608,7 @@ router.post('/best-copy/formula/refresh', authenticate, requireSuperAdmin, async
       const msg = r.reason === 'insufficient_seeds'
         ? '시드가 3건 이상 필요합니다. 먼저 베스트 문안을 채워주세요.'
         : r.reason === 'table_missing'
-          ? 'DB 마이그레이션 필요 — 운영자에게 best_copy_assets 테이블 생성 요청이 필요합니다.'
+          ? 'DB 마이그레이션 필요: 운영자에게 best_copy_assets 테이블 생성 요청이 필요합니다.'
           : 'AI 응답 해석에 실패했습니다. 다시 시도해주세요.';
       return res.status(r.reason === 'table_missing' ? 503 : 400).json({ error: msg, code: r.reason === 'table_missing' ? 'DB_MIGRATION_PENDING' : r.reason });
     }

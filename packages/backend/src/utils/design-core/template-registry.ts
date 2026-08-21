@@ -88,7 +88,7 @@ export const CORE_GOLDEN_TEMPLATES: readonly CoreGoldenTemplate[] = [
     id: 'welcome-first',
     label: '신규 환영 · 첫구매 길잡이',
     purpose: 'first_purchase',
-    difference: '10종 중 유일하게 구매 전 고객 전용 — 상품·혜택을 앞세우지 않고 브랜드 서사와 부담 없는 첫 행동으로 문턱을 낮춘다. 나머지 9종은 전부 구매·행사 맥락을 전제한다.',
+    difference: '10종 중 유일하게 구매 전 고객 전용. 상품·혜택을 앞세우지 않고 브랜드 서사와 부담 없는 첫 행동으로 문턱을 낮춘다. 나머지 9종은 전부 구매·행사 맥락을 전제한다.',
     story: {
       logic: '환영 → 브랜드 서사 → 첫 방문 길잡이 → 부담 없는 행동',
       blocks: [
@@ -108,7 +108,7 @@ export const CORE_GOLDEN_TEMPLATES: readonly CoreGoldenTemplate[] = [
     id: 'cart-recovery',
     label: '장바구니 회복',
     purpose: 'recovery',
-    difference: '고객이 이미 고른 상품(장바구니 실물 카드)이 히어로 — 상품 데이터가 설득의 주체이고 문안은 보조. 망설임 해소(증거) 블록을 CTA 직전에 고정한 유일한 구조다.',
+    difference: '고객이 이미 고른 상품(장바구니 실물 카드)이 히어로. 상품 데이터가 설득의 주체이고 문안은 보조. 망설임 해소(증거) 블록을 CTA 직전에 고정한 유일한 구조다.',
     story: {
       logic: '담아둔 것 상기 → 상품 실물(살아있는 카드) → 망설임 해소 → 행동',
       blocks: [
@@ -128,7 +128,7 @@ export const CORE_GOLDEN_TEMPLATES: readonly CoreGoldenTemplate[] = [
     id: 'dormant-comeback',
     label: '휴면 고객 안부',
     purpose: 'recovery',
-    difference: '떠난 사이 쌓인 변화(신상 축약 피드)로 복귀 명분을 만드는 유일한 구조 — 장바구니 회복이 "이미 고른 것"을 되살린다면 이 템플릿은 "새로 생긴 것"으로 부른다. 안부 톤, 세일 압박 배제.',
+    difference: '떠난 사이 쌓인 변화(신상 축약 피드)로 복귀 명분을 만드는 유일한 구조. 장바구니 회복이 "이미 고른 것"을 되살린다면 이 템플릿은 "새로 생긴 것"으로 부른다. 안부 톤, 세일 압박 배제.',
     story: {
       logic: '안부 → 그동안의 변화(신상 축약) → 다시 올 이유 → 행동',
       blocks: [
@@ -148,7 +148,7 @@ export const CORE_GOLDEN_TEMPLATES: readonly CoreGoldenTemplate[] = [
     id: 'repurchase-cycle',
     label: '재구매 시점 리마인드',
     purpose: 'repurchase',
-    difference: '구매 이력이 논리의 근거("지난 구매 후 시점 도래") — 시간 논리로 설득하는 유일한 템플릿. 행동은 원클릭 재주문 하나로 고정한다.',
+    difference: '구매 이력이 논리의 근거("지난 구매 후 시점 도래"). 시간 논리로 설득하는 유일한 템플릿. 행동은 원클릭 재주문 하나로 고정한다.',
     story: {
       logic: '지난 구매 상기 → 재구매 시점 논리 → 원클릭 행동',
       blocks: [
@@ -167,7 +167,7 @@ export const CORE_GOLDEN_TEMPLATES: readonly CoreGoldenTemplate[] = [
     id: 'deadline-sale',
     label: '마감 임박 세일',
     purpose: 'urgency',
-    difference: '카운트다운이 스토리의 1번 블록 — 시한이 훅이고 상품이 증거인 손실 회피 골격. 10종 중 유일하게 압축 밀도와 스티키 CTA가 기본이다.',
+    difference: '카운트다운이 스토리의 1번 블록. 시한이 훅이고 상품이 증거인 손실 회피 골격. 10종 중 유일하게 압축 밀도와 스티키 CTA가 기본이다.',
     story: {
       logic: '시한 선언(카운트다운) → 대상 상품 → 놓치면 잃는 것 → 행동',
       blocks: [
@@ -191,7 +191,7 @@ export const CORE_GOLDEN_TEMPLATES: readonly CoreGoldenTemplate[] = [
     id: 'vip-private',
     label: 'VIP 프라이빗',
     purpose: 'relationship',
-    difference: '혜택보다 자격 인정이 선행하는 유일한 구조 — 등급 슬롯이 훅이다. 격조 조판(럭셔리 다크)과 절제된 단일 CTA로 세일 조판과 구분된다.',
+    difference: '혜택보다 자격 인정이 선행하는 유일한 구조. 등급 슬롯이 훅이다. 격조 조판(럭셔리 다크)과 절제된 단일 CTA로 세일 조판과 구분된다.',
     story: {
       logic: '자격 인정 → 프라이빗 제안 → 격조 있는 행동',
       blocks: [
@@ -210,7 +210,7 @@ export const CORE_GOLDEN_TEMPLATES: readonly CoreGoldenTemplate[] = [
     id: 'new-arrival',
     label: '신상 발표',
     purpose: 'notice',
-    difference: '비주얼 공개가 목적 — 상품 이미지가 스토리의 정점이고 텍스트는 기대감 조성만 담당한다. CTA 문턱(둘러보기)이 10종 중 가장 낮다.',
+    difference: '비주얼 공개가 목적. 상품 이미지가 스토리의 정점이고 텍스트는 기대감 조성만 담당한다. CTA 문턱(둘러보기)이 10종 중 가장 낮다.',
     story: {
       logic: '기대감 훅 → 신상 공개(비주얼) → 첫 반응 유도',
       blocks: [
@@ -229,7 +229,7 @@ export const CORE_GOLDEN_TEMPLATES: readonly CoreGoldenTemplate[] = [
     id: 'social-proof',
     label: '후기가 말하는 신뢰',
     purpose: 'proof',
-    difference: '사회적 증거(별점·판매수·후기)가 훅으로 선행하는 유일한 구조 — 상품보다 "남들의 선택"이 먼저 나온다. 증거를 스크롤 전과 CTA 직전에 이중 배치한다(고전환 ESP 해부학).',
+    difference: '사회적 증거(별점·판매수·후기)가 훅으로 선행하는 유일한 구조. 상품보다 "남들의 선택"이 먼저 나온다. 증거를 스크롤 전과 CTA 직전에 이중 배치한다(고전환 ESP 해부학).',
     story: {
       logic: '사회적 증거 선행 → 대상 상품 → 증거 재확인 → 행동',
       blocks: [
@@ -253,7 +253,7 @@ export const CORE_GOLDEN_TEMPLATES: readonly CoreGoldenTemplate[] = [
     id: 'post-purchase',
     label: '구매 후 팔로업',
     purpose: 'relationship',
-    difference: '판매 CTA가 없는 유일한 템플릿 — 감사, 사용 가이드, 다음 단계 제안으로 이어지는 케어 콘텐츠가 본문이다. 재구매 템플릿의 선행 관계 자산을 만든다.',
+    difference: '판매 CTA가 없는 유일한 템플릿. 감사, 사용 가이드, 다음 단계 제안으로 이어지는 케어 콘텐츠가 본문이다. 재구매 템플릿의 선행 관계 자산을 만든다.',
     story: {
       logic: '감사 → 사용 가이드/케어 → 다음 단계 제안',
       blocks: [
@@ -272,12 +272,12 @@ export const CORE_GOLDEN_TEMPLATES: readonly CoreGoldenTemplate[] = [
     id: 'event-invite',
     label: '행사 초대장',
     purpose: 'notice',
-    difference: '행사 원문 verbatim 슬롯이 골격의 중심 — 혜택·기간을 AI가 아니라 원문이 공급한다(환각 0 게이트). 초대 서사 구조라서 마감 세일의 시한 압박과 구분된다.',
+    difference: '행사 원문 verbatim 슬롯이 골격의 중심. 혜택·기간을 AI가 아니라 원문이 공급한다(환각 0 게이트). 초대 서사 구조라서 마감 세일의 시한 압박과 구분된다.',
     story: {
       logic: '초대 서사 → 행사 핵심(원문 기반) → 참여 행동',
       blocks: [
         { role: 'hook', kind: 'headline', copy: { tag: 'INVITATION', headline: '%고객명%님을 초대합니다', body: '준비한 자리에 함께해주세요' } },
-        { role: 'context', kind: 'text', copy: { tag: '행사 안내', headline: '이런 행사예요', body: '[행사 핵심 내용 — 행사 원문에서 자동 채움]' }, dataSlot: 'event_text' },
+        { role: 'context', kind: 'text', copy: { tag: '행사 안내', headline: '이런 행사예요', body: '[행사 핵심 내용: 행사 원문에서 자동 채움]' }, dataSlot: 'event_text' },
         { role: 'visual', kind: 'product_live', dataSlot: 'product_live' },
         { role: 'action', kind: 'cta', cta: { label: '초대 받기' } },
       ],
@@ -322,7 +322,7 @@ export function validateGoldenTemplate(t: CoreGoldenTemplate, others: readonly C
   // 게이트 5 — 채널 파생 성립(최소 1채널 + 능력표 위반 없는 큐레이션)
   const included = (Object.keys(t.channels) as CoreChannel[]).filter((c) => t.channels[c].include);
   if (included.length < 1) {
-    v.push({ templateId: t.id, gate: 5, reason: '파생 채널 0 — 등록 불가' });
+    v.push({ templateId: t.id, gate: 5, reason: '파생 채널 0: 등록 불가' });
   }
   for (const ch of included) {
     if (t.story.blocks.some((b) => b.kind === 'countdown') && ch === 'email' && !t.channels.email.adjust) {

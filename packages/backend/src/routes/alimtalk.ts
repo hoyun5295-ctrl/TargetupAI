@@ -431,7 +431,7 @@ router.get(
     if (!/^[0-9A-Za-z_-]{8,64}$/.test(senderKey)) {
       return res
         .status(400)
-        .json({ success: false, error: 'senderKey 형식 오류 — 영숫자 8~64자' });
+        .json({ success: false, error: 'senderKey 형식 오류: 영숫자 8~64자' });
     }
     try {
       const r = await imc.getSender(senderKey);
@@ -475,7 +475,7 @@ router.post(
       if (!/^[0-9A-Za-z_-]{8,64}$/.test(senderKey)) {
         return res
           .status(400)
-          .json({ success: false, error: 'senderKey 형식 오류 — 영숫자 8~64자' });
+          .json({ success: false, error: 'senderKey 형식 오류: 영숫자 8~64자' });
       }
 
       const comp = await query(
@@ -509,7 +509,7 @@ router.post(
         return res.status(400).json({
           success: false,
           code: r.code,
-          error: 'IMC 조회 실패 — 우리 계정에서 보이지 않는 senderKey',
+          error: 'IMC 조회 실패: 우리 계정에서 보이지 않는 senderKey',
           imc: r,
         });
       }
@@ -647,7 +647,7 @@ router.post(
       if (!/^[0-9A-Za-z_-]{8,64}$/.test(senderKey)) {
         return res
           .status(400)
-          .json({ success: false, error: 'senderKey 형식 오류 — 영숫자 8~64자' });
+          .json({ success: false, error: 'senderKey 형식 오류: 영숫자 8~64자' });
       }
 
       const prof = await query(
@@ -659,7 +659,7 @@ router.post(
       if (prof.rows.length === 0) {
         return res.status(400).json({
           success: false,
-          error: '해당 회사에 연결된 senderKey가 없습니다 — 먼저 POST /senders/import(연결)를 실행하세요',
+          error: '해당 회사에 연결된 senderKey가 없습니다. 먼저 POST /senders/import(연결)를 실행하세요',
         });
       }
       const profileId: string = prof.rows[0].id;
@@ -676,7 +676,7 @@ router.post(
           // 부분 스캔으로 진행하면 누락 import가 "완료"로 보임 — 전체 스캔 실패 시 중단이 정답
           return res.status(502).json({
             success: false,
-            error: `IMC 목록 조회 실패 (page=${page}, code=${r.code}) — 전체 스캔 불가로 중단`,
+            error: `IMC 목록 조회 실패 (page=${page}, code=${r.code}). 전체 스캔 불가로 중단`,
             imcMessage: r.message,
           });
         }

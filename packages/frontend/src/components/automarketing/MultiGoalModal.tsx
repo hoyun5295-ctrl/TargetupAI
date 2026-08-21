@@ -54,7 +54,7 @@ export default function MultiGoalModal({ onClose }: { onClose: () => void }) {
           </div>
           <div className="flex-1 min-w-0">
             <h3 className="text-base font-semibold text-white">여러 목표 동시 분석</h3>
-            <p className="text-[11px] text-white/50 mt-0.5">2~5개 목표를 한번에 — AI가 충돌(중복 발송·시점 겹침)을 분석합니다.</p>
+            <p className="text-[11px] text-white/50 mt-0.5">2~5개 목표를 한번에. AI가 충돌(중복 발송·시점 겹침)을 분석합니다.</p>
           </div>
           <button onClick={onClose} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors" aria-label="닫기">
             <X className="w-4 h-4 text-white/50" />
@@ -85,7 +85,7 @@ export default function MultiGoalModal({ onClose }: { onClose: () => void }) {
                         <input type="number" step="0.1" min="0" max="1" value={g.weight} onChange={(e) => update(idx, { weight: parseFloat(e.target.value) || 0 })} className={`${INP} w-full`} />
                       </div>
                     </div>
-                    <textarea value={g.description || ''} onChange={(e) => update(idx, { description: e.target.value })} placeholder="자연어 상세 (선택) — 예: VIP 등급 + 최근 30일 미구매 고객" className={`${INP} w-full h-16 resize-none`} maxLength={500} />
+                    <textarea value={g.description || ''} onChange={(e) => update(idx, { description: e.target.value })} placeholder="자연어 상세 (선택) 예: VIP 등급 + 최근 30일 미구매 고객" className={`${INP} w-full h-16 resize-none`} maxLength={500} />
                   </div>
                 ))}
                 {goals.length < 5 && (

@@ -107,10 +107,10 @@ router.get('/overview', async (req: Request, res: Response) => {
       const usage = Number(top.usage_count) || 0;
       const valueShort = String(top.memory_value || '').slice(0, 80);
       topInsight = usage > 0
-        ? `AI가 가장 자주 참고한 학습: "${top.memory_key}" — ${valueShort} (AI 활용 ${usage}회)`
-        : `가장 중요도 높은 학습: "${top.memory_key}" — ${valueShort} (중요도 ${top.importance})`;
+        ? `AI가 가장 자주 참고한 학습: "${top.memory_key}": ${valueShort} (AI 활용 ${usage}회)`
+        : `가장 중요도 높은 학습: "${top.memory_key}": ${valueShort} (중요도 ${top.importance})`;
     } else {
-      topInsight = `누적 ${total}건 학습 — ${topType ? TYPE_LABEL[topType] : '학습'} 중심으로 누적되는 중입니다.`;
+      topInsight = `누적 ${total}건 학습. ${topType ? TYPE_LABEL[topType] : '학습'} 중심으로 누적되는 중입니다.`;
     }
 
     return res.json({
@@ -140,7 +140,7 @@ router.get('/overview', async (req: Request, res: Response) => {
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 ai_company_memory ALTER (usage_count 컬럼) 실행 요청',
+        error: 'DB 마이그레이션 필요: 운영자에게 ai_company_memory ALTER (usage_count 컬럼) 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -193,7 +193,7 @@ ${memoryContext}
 
 ## 답변 톤
 - 마케팅 담당자가 바로 활용할 수 있는 실무적 답변
-- "~인 것 같습니다" 같은 가설 표현 금지 — 근거 명확하면 단언, 부족하면 "데이터 부족" 명시
+- "~인 것 같습니다" 같은 가설 표현 금지. 근거 명확하면 단언, 부족하면 "데이터 부족" 명시
 - 전문 용어 풀어쓰기 (예: "RFM 분석" → "최근 구매 + 빈도 + 금액 기반 분석")`;
 
     const answer = await callAIWithFallback({
@@ -231,7 +231,7 @@ ${memoryContext}
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 ai_company_memory ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: 운영자에게 ai_company_memory ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -288,7 +288,7 @@ router.get('/top-impact', async (req: Request, res: Response) => {
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 ai_company_memory ALTER (usage_count 컬럼) 실행 요청',
+        error: 'DB 마이그레이션 필요: 운영자에게 ai_company_memory ALTER (usage_count 컬럼) 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -623,20 +623,20 @@ router.post('/brand-voice/extract-guideline', async (req: Request, res: Response
 
 ## 분석 원칙
 
-1. tone_signature — 5 분류 중 1 선택. 메시지 톤이 친근/격조 어느 영역인지 정확 판단.
-2. avg_length_chars + avg_length_bytes — ${parsedMessages.length}건 본문 평균 길이 (한글 2바이트 기준).
-3. frequent_expressions — 2건 이상 출현한 표현 3~5건 추출. 빈도 높은 영역 우선.
-4. ad_prefix_position — "(광고)" 위치가 본문 앞이면 front, 뒤면 back.
-5. greeting_pattern — "[브랜드명] OOO님께" 등 자주 활용한 인사말 1건. 없으면 빈 문자열.
-6. cta_patterns — "지금 바로 ~", "5월이 끝나기 전 ~" 등 행동 유도 표현 3건. 다양성 우선.
-7. signature — 회사 슬로건 또는 영문 시그니처. 없으면 빈 문자열.
-8. reject_position — "무료수신거부 080..." 위치가 본문 앞이면 front, 뒤면 back.
-9. emoji_whitelist — 실제 활용된 이모지/특수문자 배열 (★ ♥ ▶ 등). 활용 없으면 빈 배열.
-10. hook_types — (광고) 표기 다음 첫 문장의 후크 유형을 빈도순 1~2건: "질문형" / "선언형" / "영문 슬로건" / "혜택 직접형" 중 선택.
-11. body_structure — 문안들의 공통 구조를 등장 순서대로 3~7개 블록으로 (예: "(광고)+브랜드", "후크", "본문", "혜택/조건", "기간", "CTA", "수신거부"). 실제 문안에 있는 블록만.
-12. sentence_ending_style — 본문 종결어미가 해요체(~요) / 합쇼체(~습니다) / 혼합 중 무엇인지 + sentence_ending_examples에 대표 어미 2~3건.
-13. customer_address — 고객 호칭 (예: "고객님", "회원님", "실버 등급 고객님"). 없으면 빈 문자열.
-14. symbol_style — 기호·구분선 사용 패턴 한 줄 서술 (예: "CTA 끝에 > 부착, 【】로 혜택 강조"). 없으면 빈 문자열.
+1. tone_signature: 5 분류 중 1 선택. 메시지 톤이 친근/격조 어느 영역인지 정확 판단.
+2. avg_length_chars + avg_length_bytes: ${parsedMessages.length}건 본문 평균 길이 (한글 2바이트 기준).
+3. frequent_expressions: 2건 이상 출현한 표현 3~5건 추출. 빈도 높은 영역 우선.
+4. ad_prefix_position: "(광고)" 위치가 본문 앞이면 front, 뒤면 back.
+5. greeting_pattern: "[브랜드명] OOO님께" 등 자주 활용한 인사말 1건. 없으면 빈 문자열.
+6. cta_patterns: "지금 바로 ~", "5월이 끝나기 전 ~" 등 행동 유도 표현 3건. 다양성 우선.
+7. signature: 회사 슬로건 또는 영문 시그니처. 없으면 빈 문자열.
+8. reject_position: "무료수신거부 080..." 위치가 본문 앞이면 front, 뒤면 back.
+9. emoji_whitelist: 실제 활용된 이모지/특수문자 배열 (★ ♥ ▶ 등). 활용 없으면 빈 배열.
+10. hook_types: (광고) 표기 다음 첫 문장의 후크 유형을 빈도순 1~2건: "질문형" / "선언형" / "영문 슬로건" / "혜택 직접형" 중 선택.
+11. body_structure: 문안들의 공통 구조를 등장 순서대로 3~7개 블록으로 (예: "(광고)+브랜드", "후크", "본문", "혜택/조건", "기간", "CTA", "수신거부"). 실제 문안에 있는 블록만.
+12. sentence_ending_style: 본문 종결어미가 해요체(~요) / 합쇼체(~습니다) / 혼합 중 무엇인지 + sentence_ending_examples에 대표 어미 2~3건.
+13. customer_address: 고객 호칭 (예: "고객님", "회원님", "실버 등급 고객님"). 없으면 빈 문자열.
+14. symbol_style: 기호·구분선 사용 패턴 한 줄 서술 (예: "CTA 끝에 > 부착, 【】로 혜택 강조"). 없으면 빈 문자열.
 
 ## 응답 형식
 
@@ -701,7 +701,7 @@ JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 
     if (!guideline) {
       return res.status(500).json({
         success: false,
-        error: 'AI 응답 JSON 형식 오류 — 재시도해주세요.',
+        error: 'AI 응답 JSON 형식 오류. 재시도해주세요.',
       });
     }
 

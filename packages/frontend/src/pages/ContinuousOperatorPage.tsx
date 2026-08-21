@@ -275,7 +275,7 @@ export default function ContinuousOperatorPage() {
   const handleBriefStart = (rec: DailyBriefRecommendation) => {
     if (rec.opportunityType === 'journey_promotion') {
       sessionStorage.setItem('journeyObjectivePrefill', JSON.stringify({ objective: rec.objective, message: '' }));
-      toast.info('성과가 검증된 목표를 여정으로 가져갑니다 — 생성·활성화는 여정에서 진행됩니다.');
+      toast.info('성과가 검증된 목표를 여정으로 가져갑니다. 생성·활성화는 여정에서 진행됩니다.');
       navigate('/ai-journeys');
       return;
     }
@@ -371,7 +371,7 @@ export default function ContinuousOperatorPage() {
       objective: p.operatorObjective || pj.target?.criteria || '',
       message: best?.body || best?.message || '',
     }));
-    toast.info('검증된 목표를 여정으로 가져갑니다 — 생성·활성화는 여정에서 진행됩니다.');
+    toast.info('검증된 목표를 여정으로 가져갑니다. 생성·활성화는 여정에서 진행됩니다.');
     navigate('/ai-journeys');
   };
 
@@ -538,7 +538,7 @@ function LearningCard({ summary }: { summary: LearningSummary }) {
             <span className="text-white/40"> (클릭률 {(summary.variantWinner.ctr * 100).toFixed(1)}% · 발송 {summary.variantWinner.sent}건)</span></span>
         </div>
       )}
-      <div className="text-[10px] text-white/30 italic mt-2">Data source — 회사별 누적 학습 · 최근 30일 제안</div>
+      <div className="text-[10px] text-white/30 italic mt-2">Data source: 회사별 누적 학습 · 최근 30일 제안</div>
     </div>
   );
 }

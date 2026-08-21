@@ -66,7 +66,7 @@ export default function BrandBasicInfoTab({ apiBase, token, onToast }: Props) {
       basicSaved = true;
       // ★ 연락처·SNS는 정상 로드된 경우에만 저장(로드 실패 시 빈값 덮어쓰기 방지). 서버 merge로 다른 brand_kit 필드 보존.
       if (!kitOk) {
-        onToast('기본정보는 저장됐어요. (연락처·SNS는 불러오지 못해 이번엔 건너뜀 — 다시 열어 저장해주세요)', 'info');
+        onToast('기본정보는 저장됐어요. (연락처·SNS는 불러오지 못해 이번엔 건너뜀. 다시 열어 저장해주세요)', 'info');
         return;
       }
       const r2 = await fetch(`${apiBase}/api/dm/brand-kit`, {
@@ -131,7 +131,7 @@ export default function BrandBasicInfoTab({ apiBase, token, onToast }: Props) {
           {saving && <Loader2 className="w-4 h-4 animate-spin" />} 기본정보 저장
         </button>
       </div>
-      <div className="text-[10px] text-white/30 italic">Data source — companies(기본정보) + companies.brand_kit(연락처·SNS) · 전 채널 생성 공용 참조</div>
+      <div className="text-[10px] text-white/30 italic">Data source: companies(기본정보) + companies.brand_kit(연락처·SNS) · 전 채널 생성 공용 참조</div>
     </div>
   );
 }

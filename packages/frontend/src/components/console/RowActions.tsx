@@ -74,7 +74,7 @@ export default function RowActions({ actions, align = 'end' }: Props) {
             className={CUI_ACT_MORE}
             aria-haspopup="menu"
             aria-expanded={open}
-            aria-label={`더 보기 — ${rest.map((a) => a.label).join(', ')}`}
+            aria-label={`더 보기: ${rest.map((a) => a.label).join(', ')}`}
           >
             <MoreHorizontal className="w-[15px] h-[15px]" />
           </button>

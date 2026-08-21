@@ -568,9 +568,9 @@ export async function listAvailableVariables(companyId?: string): Promise<Availa
     { key: '{{ customer.purchase_count }}',           label: '총 구매 횟수',        hint: '누적 구매 횟수',                       sampleValue: '24' },
     { key: '{{ customer.total_purchase_amount }}',    label: 'LTV (총 구매액)',     hint: '누적 구매 금액 (원)',                  sampleValue: '1500000' },
     // 옛 %% 패턴 (Backward compat)
-    { key: '%고객명%',                                label: '회원명 (옛 패턴)',    hint: '옛 %변수% 패턴 — Liquid 권장',       sampleValue: '김민수' },
-    { key: '%등급%',                                  label: '등급 (옛 패턴)',      hint: '옛 %변수% 패턴 — Liquid 권장',       sampleValue: 'VIP' },
-    { key: '%포인트%',                                label: '포인트 (옛 패턴)',    hint: '옛 %변수% 패턴 — Liquid 권장',       sampleValue: '12000' },
+    { key: '%고객명%',                                label: '회원명 (옛 패턴)',    hint: '옛 %변수% 패턴, Liquid 권장',       sampleValue: '김민수' },
+    { key: '%등급%',                                  label: '등급 (옛 패턴)',      hint: '옛 %변수% 패턴, Liquid 권장',       sampleValue: 'VIP' },
+    { key: '%포인트%',                                label: '포인트 (옛 패턴)',    hint: '옛 %변수% 패턴, Liquid 권장',       sampleValue: '12000' },
   ];
   if (!companyId) return all;
   try {

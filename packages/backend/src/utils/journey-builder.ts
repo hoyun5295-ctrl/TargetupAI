@@ -462,8 +462,8 @@ async function generateCustomStepsWithAI(
 
 step_type 3종:
 - "message": 메시지 발송 (SMS/LMS/MMS/알림톡)
-- "wait": 시간 대기만 (delay_hours 후 다음 step 진입) — 메시지 발송 없음
-- "condition": 고객 조건 평가 — 만족 시 다음 step 진입 / 미만족 시 여정 종료
+- "wait": 시간 대기만 (delay_hours 후 다음 step 진입). 메시지 발송 없음
+- "condition": 고객 조건 평가: 만족 시 다음 step 진입 / 미만족 시 여정 종료
 
 규칙:
 - delayHours: 0(즉시) ~ 720h(30일) 범위. 24/48/72/168 등 자연 단위 권장
@@ -471,13 +471,13 @@ step_type 3종:
 - messageTemplate (message step만): %고객명%, %상품명%, %혜택% 등 변수 활용
 - 메시지에 (광고) 표기 없음 (시스템 자동 처리)
 - 한국 정보통신망법 + 통신사 스팸 정책 정합
-- conditionJsonb (condition step만) — 3 type 지원:
-  1. customer_field — {"type":"customer_field","field":"<컬럼명>","operator":"==|!=|>=|<=|>|<|in|not_in|is_null|not_null","value":<값>}
+- conditionJsonb (condition step만): 3 type 지원:
+  1. customer_field: {"type":"customer_field","field":"<컬럼명>","operator":"==|!=|>=|<=|>|<|in|not_in|is_null|not_null","value":<값>}
      · 지원 컬럼: name / phone / email / birth_date / recent_purchase_date / recent_purchase_amount / total_purchase_amount / purchase_count / grade / points / sms_opt_in / is_active
-  2. cdp_event_exists — {"type":"cdp_event_exists","event_name":"<이벤트명>","within_days":<1~365>,"presence":"exists"|"not_exists"}
+  2. cdp_event_exists: {"type":"cdp_event_exists","event_name":"<이벤트명>","within_days":<1~365>,"presence":"exists"|"not_exists"}
      · 이벤트명 예: purchase / order / cart_add / page_view / message_click
      · 사용 예: "지난 7일 안 구매 안 한 고객 영역 리마인드 발송" → presence='not_exists'
-  3. journey_step_clicked — {"type":"journey_step_clicked","step_order":<옛 step N>,"within_days":<1~365>,"clicked":true|false}
+  3. journey_step_clicked: {"type":"journey_step_clicked","step_order":<옛 step N>,"within_days":<1~365>,"clicked":true|false}
      · step_order = 옛 step만 참조 가능 (현재 step보다 작은 영역 의무)
      · 사용 예: "Step 1 영역 발송 후 5일 안 클릭 X 영역 다른 채널 재시도" → clicked=false
 
@@ -815,7 +815,7 @@ export async function activateJourney(companyId: string, journeyId: string, user
         const valid = validateLiquidTemplate(msg);
         if (!valid.valid) {
           const errMsg = valid.errors.map((e) => e.message).join(' / ');
-          return { ok: false, reason: `step ${s.order} Liquid 문법 오류 — ${errMsg}. 미리보기 모달에서 문법 확인 후 재시도해주세요.` };
+          return { ok: false, reason: `step ${s.order} Liquid 문법 오류: ${errMsg}. 미리보기 모달에서 문법 확인 후 재시도해주세요.` };
         }
       }
     } catch (err: any) {
@@ -1658,7 +1658,7 @@ export async function deleteJourney(companyId: string, journeyId: string): Promi
     return { ok: false, reason: '여정을 찾을 수 없습니다.' };
   }
   if (status.rows[0].status === 'active') {
-    return { ok: false, reason: '활성 여정은 영구 삭제 X — 먼저 일시정지 또는 종료해주세요.' };
+    return { ok: false, reason: '활성 여정은 영구 삭제 X. 먼저 일시정지 또는 종료해주세요.' };
   }
   // FK CASCADE = journey_steps / journey_executions / journey_step_logs / journey_step_variants 자동 삭제
   const r = await query(

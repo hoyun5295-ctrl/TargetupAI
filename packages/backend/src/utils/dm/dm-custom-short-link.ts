@@ -52,7 +52,7 @@ async function issueUniqueCode(): Promise<string> {
     );
     if (dup.rows.length === 0) return code;
   }
-  throw new Error('단축 코드 발급 실패 (충돌 5회) — 잠시 후 다시 시도해주세요.');
+  throw new Error('단축 코드 발급 실패 (충돌 5회). 잠시 후 다시 시도해주세요.');
 }
 
 /**

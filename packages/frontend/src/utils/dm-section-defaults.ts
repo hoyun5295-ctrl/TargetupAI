@@ -424,10 +424,10 @@ export type SectionMeta = {
  */
 export const STYLE_VARIANT_LABELS: Record<string, string> = {
   'default': '기본',
-  'beauty-elegant': '뷰티 — 우아한',
-  'beauty-bold': '뷰티 — 강렬한',
-  'fashion-editorial': '패션 — 에디토리얼',
-  'food-warm': '푸드 — 따뜻한',
+  'beauty-elegant': '뷰티 · 우아한',
+  'beauty-bold': '뷰티 · 강렬한',
+  'fashion-editorial': '패션 · 에디토리얼',
+  'food-warm': '푸드 · 따뜻한',
   'luxury': '럭셔리',
   'editorial': '에디토리얼',
   'elegant': '우아한',

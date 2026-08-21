@@ -52,9 +52,9 @@ export function buildCalendarSystemPrompt(): string {
 규칙 (반드시 지킬 것):
 1. 할인율·금액·쿠폰·무료 같은 구체 혜택을 임의로 만드는 것은 금지. 혜택은 회사 담당자가 직접 정한다.
 2. 각 달의 한국 시즌·명절·기념일(설날·어버이날·여름 휴가·추석·연말 등)과 이 회사 업종의 성수기를 조합한다.
-3. objective는 자동 마케팅이 그대로 실행할 자연어 한 줄 — 타겟과 목적이 담기게 쓴다.
+3. objective는 자동 마케팅이 그대로 실행할 자연어 한 줄. 타겟과 목적이 담기게 쓴다.
 4. suggestedDay는 그 캠페인에 자연스러운 발송일(1~28)로 제안한다.
-5. targetHint는 그 캠페인의 발송 대상 축 — 반드시 다음 중 하나만: ${hintKeys}
+5. targetHint는 그 캠페인의 발송 대상 축: 반드시 다음 중 하나만: ${hintKeys}
 ${hintGuide}
    objective의 대상 서술과 targetHint가 일치해야 한다.
 6. 12개월 전부, 월당 1건.

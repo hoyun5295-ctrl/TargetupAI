@@ -145,7 +145,7 @@ export function buildPlannerCopyObjective(ev: PlannerEventFacts, channelLabel: s
     `행사 기간: ${ev.startsOn} ~ ${ev.endsOn}`,
   ];
   if (ev.benefitText && ev.benefitText.trim()) {
-    lines.push(`고객사가 직접 기입한 혜택(문구를 그대로 인용할 것 — 수치·조건을 만들거나 바꾸지 말 것): ${ev.benefitText.trim()}`);
+    lines.push(`고객사가 직접 기입한 혜택(문구를 그대로 인용할 것, 수치·조건을 만들거나 바꾸지 말 것): ${ev.benefitText.trim()}`);
   }
   const names = (ev.products || []).map((p) => p?.name).filter(Boolean).slice(0, 10);
   if (names.length > 0) lines.push(`행사 상품: ${names.join(', ')}`);

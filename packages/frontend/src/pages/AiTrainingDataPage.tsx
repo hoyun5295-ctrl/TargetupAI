@@ -47,9 +47,9 @@ export default function AiTrainingDataPage() {
       if (r.status === 403) { setDenied(true); return; }
       const j = await r.json();
       if (j.success) { setData(j); setDenied(false); }
-      else toast.error(`조회 실패 — ${j.error || '알 수 없는 오류'}`);
+      else toast.error(`조회 실패: ${j.error || '알 수 없는 오류'}`);
     } catch (e: any) {
-      toast.error(`조회 실패 — ${e?.message || '네트워크 오류'}`);
+      toast.error(`조회 실패: ${e?.message || '네트워크 오류'}`);
     } finally {
       setLoading(false);
     }
@@ -120,7 +120,7 @@ export default function AiTrainingDataPage() {
                   <div className="h-full bg-gradient-to-r from-violet-400 to-fuchsia-400" style={{ width: `${Math.min(100, data.summary.progressPct)}%` }} />
                 </div>
               </div>
-              <div className="text-[10px] text-white/30 italic mt-3">Data source — ai_training_logs 전수 집계 (HMAC 비식별 + 마스킹 후 적재)</div>
+              <div className="text-[10px] text-white/30 italic mt-3">Data source: ai_training_logs 전수 집계 (HMAC 비식별 + 마스킹 후 적재)</div>
             </div>
 
             {/* 2. 채널 + 작성 유형 분포 */}
@@ -138,7 +138,7 @@ export default function AiTrainingDataPage() {
                     </div>
                   ))}
                 </div>
-                <div className="text-[10px] text-white/30 italic mt-3">Data source — ai_training_logs.message_type</div>
+                <div className="text-[10px] text-white/30 italic mt-3">Data source: ai_training_logs.message_type</div>
               </div>
               <div className="p-5 bg-white/5 border border-white/10 rounded-2xl">
                 <div className="flex items-center gap-2 mb-4"><FileJson className="w-4 h-4 text-violet-300" /><h3 className="text-sm font-semibold">작성 유형</h3></div>
@@ -153,7 +153,7 @@ export default function AiTrainingDataPage() {
                     </div>
                   ))}
                 </div>
-                <div className="text-[10px] text-white/30 italic mt-3">Data source — ai_training_logs.final_source (AI 생성 vs 직접 작성)</div>
+                <div className="text-[10px] text-white/30 italic mt-3">Data source: ai_training_logs.final_source (AI 생성 vs 직접 작성)</div>
               </div>
             </div>
 
@@ -173,7 +173,7 @@ export default function AiTrainingDataPage() {
                     <div className="text-[10px] text-white/50">거부</div>
                   </div>
                 </div>
-                <div className="text-[10px] text-white/30 italic mt-3">Data source — operator_proposals.status (선호 학습 신호)</div>
+                <div className="text-[10px] text-white/30 italic mt-3">Data source: operator_proposals.status (선호 학습 신호)</div>
               </div>
               <div className="p-5 bg-white/5 border border-white/10 rounded-2xl">
                 <div className="flex items-center gap-2 mb-4"><FileJson className="w-4 h-4 text-amber-300" /><h3 className="text-sm font-semibold">export 데이터셋 준비도</h3></div>
@@ -190,7 +190,7 @@ export default function AiTrainingDataPage() {
                     </div>
                   ))}
                 </div>
-                <div className="text-[10px] text-white/30 italic mt-3">Data source — export-training-data JSONL (발송 학습 + 스팸필터 판정 문안)</div>
+                <div className="text-[10px] text-white/30 italic mt-3">Data source: export-training-data JSONL (발송 학습 + 스팸필터 판정 문안)</div>
               </div>
             </div>
 
@@ -209,7 +209,7 @@ export default function AiTrainingDataPage() {
               </div>
               {(data.spamSamples?.length ?? 0) > 0 ? (
                 <>
-                  <div className="text-[11px] text-white/50 mb-2">차단된 문안 — 어떤 문구가 스팸으로 처리됐는지</div>
+                  <div className="text-[11px] text-white/50 mb-2">차단된 문안: 어떤 문구가 스팸으로 처리됐는지</div>
                   <div className="space-y-1.5">
                     {(data.spamSamples ?? []).map((sp, i) => (
                       <div key={i} className="flex items-start gap-2 p-2.5 bg-white/5 border border-white/10 rounded-lg">
@@ -226,7 +226,7 @@ export default function AiTrainingDataPage() {
               ) : (
                 <div className="text-center py-4 text-white/40 text-xs">차단된 문안이 아직 없습니다.</div>
               )}
-              <div className="text-[10px] text-white/30 italic mt-3">Data source — spam_filter_test_results.result='blocked' 문안 (통신사 스팸 판정 실측)</div>
+              <div className="text-[10px] text-white/30 italic mt-3">Data source: spam_filter_test_results.result='blocked' 문안 (통신사 스팸 판정 실측)</div>
             </div>
 
             {/* 5. 일별 적재 추이 */}
@@ -246,7 +246,7 @@ export default function AiTrainingDataPage() {
                   ))}
                 </div>
               )}
-              <div className="text-[10px] text-white/30 italic mt-3">Data source — ai_training_logs.send_at 일별(KST) 집계</div>
+              <div className="text-[10px] text-white/30 italic mt-3">Data source: ai_training_logs.send_at 일별(KST) 집계</div>
             </div>
           </>
         )}

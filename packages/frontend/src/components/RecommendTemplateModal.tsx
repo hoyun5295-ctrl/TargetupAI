@@ -303,7 +303,7 @@ export default function RecommendTemplateModal({
             <span>클릭하면 AI가 바로 실행됩니다. 발송 성공 후에도 설정을 저장할 수 있습니다.</span>
           </div>
           <div className="text-[10px] text-white/30 italic mt-2">
-            Data source — AI 발송 템플릿 (saved-segments + customer-filter)
+            Data source: AI 발송 템플릿 (saved-segments + customer-filter)
           </div>
         </div>
       </div>

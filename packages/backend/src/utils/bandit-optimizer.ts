@@ -132,7 +132,7 @@ export function thompsonSamplingChoice(variants: ProposalVariant[]): BanditRecom
       posteriorMean: chosen.armAlpha / (chosen.armAlpha + chosen.armBeta),
       posteriorSample: 0,
       totalTrials,
-      reasoning: `초기 탐색 단계 (누적 발송 ${totalTrials}회 < 3회) — 모든 variant 동등 기회 제공. 누적 3회 이상부터 Bandit 추천이 작동합니다.`,
+      reasoning: `초기 탐색 단계 (누적 발송 ${totalTrials}회 < 3회). 모든 variant 동등 기회 제공. 누적 3회 이상부터 Bandit 추천이 작동합니다.`,
     };
   }
 
@@ -157,9 +157,9 @@ export function thompsonSamplingChoice(variants: ProposalVariant[]): BanditRecom
 
   let reasoning = '';
   if (bestIdx === bestMeanIdx) {
-    reasoning = `누적 발송 ${totalTrials}회 — Variant ${chosen.variantIndex + 1} 평균 클릭률 ${(posteriorMean * 100).toFixed(1)}% (최우수). Thompson Sampling 추천.`;
+    reasoning = `누적 발송 ${totalTrials}회: Variant ${chosen.variantIndex + 1} 평균 클릭률 ${(posteriorMean * 100).toFixed(1)}% (최우수). Thompson Sampling 추천.`;
   } else {
-    reasoning = `누적 발송 ${totalTrials}회 — Variant ${chosen.variantIndex + 1} 평균 클릭률 ${(posteriorMean * 100).toFixed(1)}% / 본 sample ${(bestSample * 100).toFixed(1)}%. Thompson Sampling이 탐색 균형을 위해 추천 (최고 평균과 다를 수 있음 — 학습 진행 정합).`;
+    reasoning = `누적 발송 ${totalTrials}회: Variant ${chosen.variantIndex + 1} 평균 클릭률 ${(posteriorMean * 100).toFixed(1)}% / 본 sample ${(bestSample * 100).toFixed(1)}%. Thompson Sampling이 탐색 균형을 위해 추천 (최고 평균과 다를 수 있음: 학습 진행 정합).`;
   }
 
   return {
@@ -421,7 +421,7 @@ export function selectJourneyStepVariant(variants: JourneyStepVariant[]): Journe
       posteriorMean: chosen.banditAlpha / (chosen.banditAlpha + chosen.banditBeta),
       posteriorSample: 0,
       totalTrials,
-      reasoning: `초기 탐색 단계 (누적 발송 ${totalTrials}회 < 3회) — 모든 variant 동등 기회. 누적 3회 이상부터 Bandit 추천 작동.`,
+      reasoning: `초기 탐색 단계 (누적 발송 ${totalTrials}회 < 3회). 모든 variant 동등 기회. 누적 3회 이상부터 Bandit 추천 작동.`,
     };
   }
 
@@ -437,7 +437,7 @@ export function selectJourneyStepVariant(variants: JourneyStepVariant[]): Journe
   }
   const chosen = variants[bestIdx];
   const posteriorMean = chosen.banditAlpha / (chosen.banditAlpha + chosen.banditBeta);
-  const reasoning = `누적 발송 ${totalTrials}회 — Variant ${chosen.variantId} 평균 클릭률 ${(posteriorMean * 100).toFixed(1)}% / 본 sample ${(bestSample * 100).toFixed(1)}%. Thompson Sampling 추천.`;
+  const reasoning = `누적 발송 ${totalTrials}회: Variant ${chosen.variantId} 평균 클릭률 ${(posteriorMean * 100).toFixed(1)}% / 본 sample ${(bestSample * 100).toFixed(1)}%. Thompson Sampling 추천.`;
   return {
     variant: chosen,
     posteriorMean,
@@ -654,7 +654,7 @@ export function declareVariantWinner(variants: JourneyStepVariant[]): VariantWin
       recommendedTrafficWeights: weights,
       totalTrials,
       variantProbabilities: {},
-      reasoning: `데이터 누적 영역 (누적 ${totalTrials}회 < 30회) — 균등 영역 정합 + Bandit 자동 추천 흐름 유지 영역.`,
+      reasoning: `데이터 누적 영역 (누적 ${totalTrials}회 < 30회). 균등 영역 정합 + Bandit 자동 추천 흐름 유지 영역.`,
       status: 'cold_start',
     };
   }
@@ -704,7 +704,7 @@ export function declareVariantWinner(variants: JourneyStepVariant[]): VariantWin
       recommendedTrafficWeights: trafficWeights,
       totalTrials,
       variantProbabilities,
-      reasoning: `Winner = Variant ${topVariantId} (신뢰도 ${(topProbability * 100).toFixed(1)}% / 평균 클릭률 ${(topClickRate * 100).toFixed(1)}%) — 100% traffic 적용 권장. 회사 admin 명시 적용 의무.`,
+      reasoning: `Winner = Variant ${topVariantId} (신뢰도 ${(topProbability * 100).toFixed(1)}% / 평균 클릭률 ${(topClickRate * 100).toFixed(1)}%). 100% traffic 적용 권장. 회사 admin 명시 적용 의무.`,
       status: 'winner',
     };
   }
@@ -719,7 +719,7 @@ export function declareVariantWinner(variants: JourneyStepVariant[]): VariantWin
       recommendedTrafficWeights: trafficWeights,
       totalTrials,
       variantProbabilities,
-      reasoning: `선두 = Variant ${topVariantId} (신뢰도 ${(topProbability * 100).toFixed(1)}% / 평균 클릭률 ${(topClickRate * 100).toFixed(1)}%) — 80% traffic 권장 + 추가 발송 후 재평가 의무.`,
+      reasoning: `선두 = Variant ${topVariantId} (신뢰도 ${(topProbability * 100).toFixed(1)}% / 평균 클릭률 ${(topClickRate * 100).toFixed(1)}%). 80% traffic 권장 + 추가 발송 후 재평가 의무.`,
       status: 'leading',
     };
   }
@@ -733,7 +733,7 @@ export function declareVariantWinner(variants: JourneyStepVariant[]): VariantWin
     recommendedTrafficWeights: trafficWeights,
     totalTrials,
     variantProbabilities,
-    reasoning: `데이터 영역 부족 — 선두 Variant ${topVariantId} 영역 ${(topProbability * 100).toFixed(1)}% 영역 (95% 이상 의무) — 균등 영역 정합 + 추가 발송 후 재평가.`,
+    reasoning: `데이터 영역 부족. 선두 Variant ${topVariantId} 영역 ${(topProbability * 100).toFixed(1)}% 영역 (95% 이상 의무). 균등 영역 정합 + 추가 발송 후 재평가.`,
     status: 'low_confidence',
   };
 }

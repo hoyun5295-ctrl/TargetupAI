@@ -290,7 +290,7 @@ export default function TargetRecipientsModal({
               </div>
             </div>
           )}
-          <div className="text-[10px] text-white/30 italic">Data source — {sourceLabel} · 연락처 중간자리 마스킹</div>
+          <div className="text-[10px] text-white/30 italic">Data source: {sourceLabel} · 연락처 중간자리 마스킹</div>
         </div>
       </div>
     </div>,

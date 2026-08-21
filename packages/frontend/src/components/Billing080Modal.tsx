@@ -201,7 +201,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
       const d = await r.json();
       if (d.success) {
         setApplyResult({ applied: d.applied || [], skipped: d.skipped || [] });
-        say(`${(d.applied || []).length}개사 반영 완료 — 실제 청구 금액을 현황에서 확인해주세요.`);
+        say(`${(d.applied || []).length}개사 반영 완료. 실제 청구 금액을 현황에서 확인해주세요.`);
         // ★ 2026-08-04 반영 직후 그 달 현황으로 바로 이동한다 — 이용료·부가서비스는 매핑 설정에서
         //   파생되므로 "얼마가 청구되는가"는 현황 탭이 답한다(추가 클릭 없이 그 화면을 띄운다).
         setStatusMonth(month);
@@ -231,7 +231,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
       });
       const d = await r.json();
       if (d.success) {
-        say(`추가했습니다 — 공급가 ${won(d.supplyTotal)} (${mQty}건). ${mMonth}월 발행 때 "부가서비스" 항목으로 실립니다.`);
+        say(`추가했습니다. 공급가 ${won(d.supplyTotal)} (${mQty}건). ${mMonth}월 발행 때 "부가서비스" 항목으로 실립니다.`);
         setMLabel(''); setMQty(1);
         if (statusMonth === mMonth) loadItems(mMonth);
       } else say(d.error || '추가 실패', 'error');
@@ -347,7 +347,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
                       className="w-full px-3 py-2 border rounded-lg text-sm" />
                   </div>
                   <div>
-                    <label className="block text-[11px] text-gray-500 mb-1">라벨 (부서/브랜드 — 선택)</label>
+                    <label className="block text-[11px] text-gray-500 mb-1">라벨 (부서/브랜드, 선택)</label>
                     <input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="예: Nars"
                       className="w-full px-3 py-2 border rounded-lg text-sm" />
                   </div>
@@ -412,7 +412,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
                     {mapLoading ? (
                       <tr><td colSpan={9} className="px-3 py-6 text-center text-gray-400">불러오는 중...</td></tr>
                     ) : mappings.length === 0 ? (
-                      <tr><td colSpan={9} className="px-3 py-6 text-center text-gray-400">등록된 번호가 없습니다 — 위에서 등록해주세요.</td></tr>
+                      <tr><td colSpan={9} className="px-3 py-6 text-center text-gray-400">등록된 번호가 없습니다. 위에서 등록해주세요.</td></tr>
                     ) : mappings.map((m) => (
                       <tr key={m.id} className={`border-t ${m.is_active ? '' : 'opacity-50'}`}>
                         <td className="px-3 py-2 font-mono">{m.display_number}</td>
@@ -481,7 +481,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
                     <span className="text-gray-600">080 소계 <b>{won(parse.total_080)}</b> (VAT 포함)</span>
                     {parse.valid
                       ? <span className="text-emerald-600 font-medium">검산 일치</span>
-                      : <span className="text-red-600 font-medium">검산 불일치 — 반영 불가</span>}
+                      : <span className="text-red-600 font-medium">검산 불일치: 반영 불가</span>}
                   </div>
                   {!parse.valid && (
                     <div className="border border-red-200 bg-red-50 rounded-lg px-4 py-3 text-xs text-red-700 space-y-1">
@@ -513,7 +513,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
                             <td className="px-3 py-2">
                               {r.mapped
                                 ? (r.charge_call_fee ? <span className="text-emerald-600 text-xs">반영 대상</span> : <span className="text-gray-500 text-xs">통화료 미청구 (고정료만)</span>)
-                                : <span className="text-amber-600 text-xs">미매핑 — 보류</span>}
+                                : <span className="text-amber-600 text-xs">미매핑: 보류</span>}
                             </td>
                           </tr>
                         ))}
@@ -535,7 +535,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
                     </div>
                   ) : (
                     <div className="border rounded-lg px-4 py-3 text-xs text-gray-500">
-                      반영을 마쳤습니다 — 실제 청구될 금액은 <b>반영 현황</b> 탭에 있습니다.
+                      반영을 마쳤습니다. 실제 청구될 금액은 <b>반영 현황</b> 탭에 있습니다.
                     </div>
                   )}
                 </div>
@@ -605,7 +605,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
                 </button>
                 {loadedMonth && (
                   <span className={`text-xs ${monthStale ? 'text-amber-600 font-medium' : 'text-gray-400'}`}>
-                    {monthStale ? `아래 목록은 ${loadedMonth} 기준입니다 — 조회를 눌러야 ${statusMonth}로 바뀝니다` : `${loadedMonth} 기준`}
+                    {monthStale ? `아래 목록은 ${loadedMonth} 기준입니다. 조회를 눌러야 ${statusMonth}로 바뀝니다` : `${loadedMonth} 기준`}
                   </span>
                 )}
               </div>
@@ -613,12 +613,12 @@ export default function Billing080Modal({ open, onClose, companies }: {
                 <div className="border rounded-lg px-4 py-3 text-sm space-y-1.5">
                   <div className="font-medium text-gray-700">직전 반영 결과</div>
                   {applyResult.applied.map((a: any) => (
-                    <div key={a.company_id} className="text-emerald-700 text-xs">{a.company_name} — 번호 {a.numbers}개 · 통화료 {won(a.call_supply)}</div>
+                    <div key={a.company_id} className="text-emerald-700 text-xs">{a.company_name}: 번호 {a.numbers}개 · 통화료 {won(a.call_supply)}</div>
                   ))}
                   {applyResult.skipped.map((s: any, i: number) => (
-                    <div key={i} className="text-amber-700 text-xs">{[s.company_name, s.number].filter(Boolean).join(' ') || '-'} — {s.reason}</div>
+                    <div key={i} className="text-amber-700 text-xs">{[s.company_name, s.number].filter(Boolean).join(' ') || '-'}: {s.reason}</div>
                   ))}
-                  <div className="text-[11px] text-gray-400 pt-0.5">이용료·부가서비스·청구 귀속은 번호 매핑 설정에서 나옵니다 — 아래 금액이 실제 청구액입니다.</div>
+                  <div className="text-[11px] text-gray-400 pt-0.5">이용료·부가서비스·청구 귀속은 번호 매핑 설정에서 나옵니다. 아래 금액이 실제 청구액입니다.</div>
                 </div>
               )}
               {items !== null && (grouped.size === 0 ? (
@@ -629,9 +629,9 @@ export default function Billing080Modal({ open, onClose, companies }: {
                     <div key={cid} className="border rounded-lg">
                       <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 rounded-t-lg">
                         <div className="text-sm font-medium text-gray-700">
-                          {g.name} <span className="text-gray-400 font-normal">— 청구 예정 {won(g.total)}</span>
+                          {g.name} <span className="text-gray-400 font-normal">· 청구 예정 {won(g.total)}</span>
                           {g.billed && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">청구서에 반영됨</span>}
-                          {g.blocked && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700">매핑 없음 — 이 회사 발행이 막힙니다</span>}
+                          {g.blocked && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700">매핑 없음: 이 회사 발행이 막힙니다</span>}
                         </div>
                         {/* ★ 2026-08-04 KT 반영분과 수기 입력분을 따로 지운다 — 한 버튼으로 묶여 있어서
                             KT를 다시 반영하려고 취소하면 손으로 넣은 부가서비스까지 사라졌다.
@@ -639,7 +639,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
                         {monthStale ? (
                           <span className="text-[11px] text-amber-600">조회 후 취소할 수 있습니다</span>
                         ) : g.billed ? (
-                          <span className="text-[11px] text-gray-400">발행됨 — 취소 불가</span>
+                          <span className="text-[11px] text-gray-400">발행됨: 취소 불가</span>
                         ) : cancelAsk?.startsWith(`${cid}:`) ? (
                           <div className="flex items-center gap-2">
                             <span className="text-[11px] text-gray-500">
@@ -668,13 +668,13 @@ export default function Billing080Modal({ open, onClose, companies }: {
                               <div className="flex items-center gap-1.5">
                                 <span className="truncate">{it.label}{it.map_label ? ` ${it.map_label}` : ''}</span>
                                 {it.legacy_superseded && (
-                                  <span className="shrink-0 rounded bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[10px] text-amber-700">옛 항목 — 새 반영분이 대신함 · 취소로 정리</span>
+                                  <span className="shrink-0 rounded bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[10px] text-amber-700">옛 항목: 새 반영분이 대신함 · 취소로 정리</span>
                                 )}
                                 {it.blocks_issue && (
-                                  <span className="shrink-0 rounded bg-red-50 border border-red-200 px-1.5 py-0.5 text-[10px] text-red-700">매핑 없음 — 발행 차단</span>
+                                  <span className="shrink-0 rounded bg-red-50 border border-red-200 px-1.5 py-0.5 text-[10px] text-red-700">매핑 없음: 발행 차단</span>
                                 )}
                                 {it.inactive && (
-                                  <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">비활성 — 청구 안 함</span>
+                                  <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">비활성: 청구 안 함</span>
                                 )}
                                 {it.kind === '080_call' && it.map_found && !it.inactive && !it.map_charge_call_fee && (
                                   <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">통화료 미청구</span>
@@ -682,7 +682,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
                               </div>
                               <div className="text-[11px] text-gray-400 mt-0.5">
                                 {it.billed_billing_id
-                                  ? '발행됨 — 금액은 발행된 청구서 기준'
+                                  ? '발행됨: 금액은 발행된 청구서 기준'
                                   : it.billable_parts.length === 0
                                     ? '청구 항목 없음'
                                     : it.billable_parts.map((p) => `${p.label} ${won(p.amount)}`).join(' · ')}
@@ -712,7 +712,7 @@ export default function Billing080Modal({ open, onClose, companies }: {
                     </div>
                   ))}
                   <p className="text-[11px] text-gray-400">
-                    금액은 <b>번호 매핑 설정에서 계산된 실제 청구액</b>입니다 — 이용료·부가서비스·통화료 청구 여부·청구 귀속을 매핑에서 고치면 여기와 청구서가 함께 바뀝니다(재반영 불필요).
+                    금액은 <b>번호 매핑 설정에서 계산된 실제 청구액</b>입니다. 이용료·부가서비스·통화료 청구 여부·청구 귀속을 매핑에서 고치면 여기와 청구서가 함께 바뀝니다(재반영 불필요).
                     취소는 그 달 정산이 발행되기 전까지만 가능하고, 발행된 뒤에는 발행 삭제 후 취소해주세요.
                   </p>
                 </div>

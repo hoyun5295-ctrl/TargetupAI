@@ -108,7 +108,7 @@ export default function BillingRecipientsEditor({
             <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 bg-gray-50 rounded-t-lg">
               <span className="text-xs font-semibold text-gray-700">{DOC_LABEL[docType]} 수신자</span>
               <span className="text-[11px] text-gray-400">
-                {rows.length === 0 ? '미등록 — 이 유형은 발송되지 않습니다' : `${rows.length}명 · 대표 1명 + 참조 ${Math.max(0, rows.length - 1)}명`}
+                {rows.length === 0 ? '미등록. 이 유형은 발송되지 않습니다' : `${rows.length}명 · 대표 1명 + 참조 ${Math.max(0, rows.length - 1)}명`}
               </span>
             </div>
 

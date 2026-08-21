@@ -637,7 +637,7 @@ export default function Dashboard() {
               show: true,
               type: pd.phase === 'sent' ? 'success' : 'error',
               message: pd.phase === 'sent'
-                ? `발송 완료 — 성공 ${(pd.sentCount || 0).toLocaleString()}건${pd.failCount > 0 ? `, 실패 ${pd.failCount.toLocaleString()}건` : ''}`
+                ? `발송 완료: 성공 ${(pd.sentCount || 0).toLocaleString()}건${pd.failCount > 0 ? `, 실패 ${pd.failCount.toLocaleString()}건` : ''}`
                 : '발송 처리 중 오류가 발생했습니다.',
             });
             setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 5000);
@@ -2450,7 +2450,7 @@ const campaignData = {
                   <div className="mt-2 rounded-lg border border-emerald-100/80 bg-gradient-to-r from-emerald-50/60 to-teal-50/30 px-3.5 py-2.5">
                     <div className="mb-1.5 flex items-center justify-between">
                       <span className="text-xs font-medium text-gray-500">에이전트 발송 잔액</span>
-                      <span className="text-[10px] italic text-gray-300">Data source — 발송 게이트웨이 계정 원장 실시간 잔액</span>
+                      <span className="text-[10px] italic text-gray-300">Data source: 발송 게이트웨이 계정 원장 실시간 잔액</span>
                     </div>
                     <div className="space-y-1">
                       {agentBalances.map((b) => (

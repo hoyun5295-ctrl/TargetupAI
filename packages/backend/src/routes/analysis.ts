@@ -6,6 +6,7 @@ import * as path from 'path';
 import { query } from '../config/database';
 import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS, getCompanyCosts, isAdaptiveOnlyModel, resolveMaxTokens } from '../config/defaults';
 import { authenticate } from '../middlewares/auth';
+import { withCopyRules } from '../services/ai';
 
 const router = Router();
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || '' });
@@ -302,7 +303,7 @@ async function callClaude(userMessage: string, maxRetries = 2): Promise<Analysis
         model: AI_MODELS.claude,
         max_tokens: resolveMaxTokens(AI_MAX_TOKENS.analysis, AI_MODELS.claude),
         ...analysisGuard,
-        system: ANALYSIS_SYSTEM_PROMPT,
+        system: withCopyRules(ANALYSIS_SYSTEM_PROMPT),
         messages: [{ role: 'user', content: userMessage }],
       });
 
@@ -330,7 +331,7 @@ async function callClaude(userMessage: string, maxRetries = 2): Promise<Analysis
       max_completion_tokens: AI_MAX_TOKENS.analysis,
       // ★ 2026-07-22 gpt-5.5는 temperature 0.3 보내면 400("only default 1 supported") → 미전송(기본값). 다른 GPT 폴백 3곳과 동일.
       messages: [
-        { role: 'system', content: ANALYSIS_SYSTEM_PROMPT },
+        { role: 'system', content: withCopyRules(ANALYSIS_SYSTEM_PROMPT) },
         { role: 'user', content: userMessage },
       ],
     });

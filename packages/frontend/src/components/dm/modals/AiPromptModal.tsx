@@ -93,7 +93,7 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
       if (data?.code === 'INSUFFICIENT_CREDIT') throw new Error('크레딧이 부족합니다. 충전 후 이용해주세요.');
       if (!res.ok || data?.success === false) throw new Error(String(data?.error || '이미지 판독 실패'));
       appendText(String(data.event_text || ''));
-      setToast({ type: 'success', message: '이미지에서 행사 내용을 읽어왔어요 — 내용을 확인·보정해주세요.' });
+      setToast({ type: 'success', message: '이미지에서 행사 내용을 읽어왔어요. 내용을 확인·보정해주세요.' });
     } catch (e: any) {
       setError(e?.message || '이미지 판독 실패');
     } finally {
@@ -113,7 +113,7 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
       if (!res.data?.success) throw new Error(res.data?.error || 'URL 수집 실패');
       appendText(String(res.data.text || ''));
       setUrlInput('');
-      setToast({ type: 'success', message: '페이지 내용을 가져왔어요 — 내용을 확인·보정해주세요.' });
+      setToast({ type: 'success', message: '페이지 내용을 가져왔어요. 내용을 확인·보정해주세요.' });
     } catch (e: any) {
       setError(e?.response?.data?.error || e?.message || 'URL 수집 실패');
     } finally {
@@ -159,7 +159,7 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
       pages: result.pages,
       layoutMode: result.layoutMode,
     });
-    setToast({ type: 'success', message: 'AI가 만든 DM을 적용했어요 — 캔버스에서 바로 다듬을 수 있어요.' });
+    setToast({ type: 'success', message: 'AI가 만든 DM을 적용했어요. 캔버스에서 바로 다듬을 수 있어요.' });
     handleClose();
   };
 
@@ -193,7 +193,7 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
       onClose={handleClose}
       size="lg"
       title="AI로 만들기"
-      subtitle="행사 내용을 통째로 붙여넣으면 — 기간·혜택·상품·유의사항까지 자리 잡은 DM이 나와요."
+      subtitle="행사 내용을 통째로 붙여넣으면 기간·혜택·상품·유의사항까지 자리 잡은 DM이 나와요."
       footer={footer}
     >
       {step !== 'preview' && (
@@ -204,7 +204,7 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
           <textarea
             value={eventText}
             onChange={(e) => setEventText(e.target.value.slice(0, EVENT_TEXT_MAX))}
-            placeholder={'예)\n프리미엄 수분 세럼 30ml\n85,000원 → 15% 72,250원\nhttps://brand.naver.com/...\n\n세럼 구매 시 한정판 파우치 증정\n한정 수량 — 조기 소진 가능'}
+            placeholder={'예)\n프리미엄 수분 세럼 30ml\n85,000원 → 15% 72,250원\nhttps://brand.naver.com/...\n\n세럼 구매 시 한정판 파우치 증정\n한정 수량 · 조기 소진 가능'}
             rows={9}
             style={{
               width: '100%', border: '1px solid #d1d5db', borderRadius: 8, padding: 12,
@@ -292,7 +292,7 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
           {step === 'generating' && (
             <div style={{ marginTop: 16, padding: 16, background: '#f9fafb', borderRadius: 8, textAlign: 'center', color: '#6b7280', fontSize: 13 }}>
               <div style={{ marginBottom: 8 }}>행사 내용을 이해하고 DM을 만들고 있어요...</div>
-              <div style={{ fontSize: 11 }}>상품·혜택·기간을 자리에 배치하는 중 — 보통 15~30초 걸려요.</div>
+              <div style={{ fontSize: 11 }}>상품·혜택·기간을 자리에 배치하는 중. 보통 15~30초 걸려요.</div>
             </div>
           )}
         </>
@@ -326,7 +326,7 @@ function PreviewPanel({ result }: {
       {/* 브리프 요약 — AI가 원문에서 무엇을 읽었는지 */}
       {brief && (
         <div style={{ marginBottom: 12, padding: 12, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, fontSize: 12.5, color: '#166534' }}>
-          원문에서 읽어낸 것 —
+          원문에서 읽어낸 것:
           {brief.event_name ? ` 행사명 1` : ''}
           {Array.isArray(brief.products) && brief.products.length > 0 ? ` · 상품 ${brief.products.length}개` : ''}
           {Array.isArray(brief.benefits) && brief.benefits.length > 0 ? ` · 혜택 ${brief.benefits.length}건` : ''}
@@ -340,14 +340,14 @@ function PreviewPanel({ result }: {
       {missing.length > 0 && (
         <div style={{ marginBottom: 12, padding: 12, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: '#92400e', marginBottom: 6 }}>
-            원문 중 아직 반영하지 못한 항목 — 적용 후 직접 확인해주세요
+            원문 중 아직 반영하지 못한 항목. 적용 후 직접 확인해주세요
           </div>
           <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, color: '#92400e', lineHeight: 1.7 }}>
             {missing.slice(0, 8).map((m, i) => (
               <li key={i}>[{COVERAGE_KIND_LABEL[m.kind] || m.kind}] {m.label}</li>
             ))}
             {/* ★ Codex 1R — 8건 초과분 은닉 금지: 숨겨진 개수 명시 (커버리지 보고의 정직성) */}
-            {missing.length > 8 && <li>외 {missing.length - 8}건 더 — 적용 후 본문에서 확인해주세요</li>}
+            {missing.length > 8 && <li>외 {missing.length - 8}건 더. 적용 후 본문에서 확인해주세요</li>}
           </ul>
         </div>
       )}

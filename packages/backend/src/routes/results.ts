@@ -225,7 +225,7 @@ router.get('/summary', async (req: Request, res: Response) => {
     const msg = error?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
-        error: 'DB 마이그레이션 필요 — 운영자에게 campaigns ALTER(result_final/result_synced_at) 실행 요청 의무',
+        error: 'DB 마이그레이션 필요: 운영자에게 campaigns ALTER(result_final/result_synced_at) 실행 요청 의무',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -393,7 +393,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     const msg = error?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
-        error: 'DB 마이그레이션 필요 — 운영자에게 campaigns ALTER(result_final/result_synced_at) 실행 요청 의무',
+        error: 'DB 마이그레이션 필요: 운영자에게 campaigns ALTER(result_final/result_synced_at) 실행 요청 의무',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -526,7 +526,7 @@ router.get('/campaigns/export', async (req: Request, res: Response) => {
     const msg = error?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
-        error: 'DB 마이그레이션 필요 — 운영자에게 campaigns ALTER 실행 요청 의무',
+        error: 'DB 마이그레이션 필요: 운영자에게 campaigns ALTER 실행 요청 의무',
         code: 'DB_MIGRATION_PENDING',
       });
     }

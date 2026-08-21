@@ -151,7 +151,7 @@ export async function buildInAppFunnel(
       percentOfPrevious: impressions > 0 ? (clicks / impressions) * 100 : 0,
       percentOfTotal: impressions > 0 ? (clicks / impressions) * 100 : 0,
       dropoffReason: impressions > clicks
-        ? `${(((impressions - clicks) / impressions) * 100).toFixed(1)}% 미클릭 — 본문/CTA 점검 권장`
+        ? `${(((impressions - clicks) / impressions) * 100).toFixed(1)}% 미클릭. 본문/CTA 점검 권장`
         : undefined,
     },
     {
@@ -160,7 +160,7 @@ export async function buildInAppFunnel(
       percentOfPrevious: impressions > 0 ? (dismisses / impressions) * 100 : 0,
       percentOfTotal: impressions > 0 ? (dismisses / impressions) * 100 : 0,
       dropoffReason: dismisses > clicks
-        ? '명시 dismiss > click — 메시지 부정 반응. 본문/타이밍 점검'
+        ? '명시 dismiss > click. 메시지 부정 반응. 본문/타이밍 점검'
         : undefined,
     },
     {
@@ -169,7 +169,7 @@ export async function buildInAppFunnel(
       percentOfPrevious: uniqueClickers > 0 ? (attributedCustomers / uniqueClickers) * 100 : 0,
       percentOfTotal: impressions > 0 ? (attributedCustomers / impressions) * 100 : 0,
       dropoffReason: uniqueClickers > attributedCustomers
-        ? `${uniqueClickers - attributedCustomers}명 클릭 후 24h 안 미구매 — 결제 흐름 점검`
+        ? `${uniqueClickers - attributedCustomers}명 클릭 후 24h 안 미구매. 결제 흐름 점검`
         : undefined,
     },
   ];

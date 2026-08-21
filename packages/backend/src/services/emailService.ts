@@ -35,7 +35,7 @@ export async function sendBillingEmail(params: SendBillingEmailParams): Promise<
   //   "발송된 정산서"라는 거짓 상태가 남는다. 연결 전까지는 정직하게 실패로 응답.
   return {
     success: false,
-    message: '정산서 이메일 발송 기능이 아직 연결되지 않았습니다 — 발송되지 않았습니다. PDF 다운로드 후 직접 전달해주세요.',
+    message: '정산서 이메일 발송 기능이 아직 연결되지 않았습니다. 발송되지 않았습니다. PDF 다운로드 후 직접 전달해주세요.',
   };
 
   // TODO: 하이웍스 SMTP 연결 시 아래 코드로 교체

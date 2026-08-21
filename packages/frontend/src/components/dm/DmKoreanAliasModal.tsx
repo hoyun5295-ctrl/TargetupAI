@@ -168,7 +168,7 @@ export default function DmKoreanAliasModal({ open, dmId, dmTitle, onClose }: Pro
                     </button>
                   </div>
                   <div className="flex items-center gap-1.5 text-[11px] text-white/45">
-                    <MousePointerClick className="w-3.5 h-3.5" /> 누적 클릭 {alias.clickCount.toLocaleString()}회 — 상세 퍼널은 [발송 추적 → 공용 링크] 탭
+                    <MousePointerClick className="w-3.5 h-3.5" /> 누적 클릭 {alias.clickCount.toLocaleString()}회. 상세 퍼널은 [발송 추적 → 공용 링크] 탭
                   </div>
                 </div>
               )}
@@ -177,7 +177,7 @@ export default function DmKoreanAliasModal({ open, dmId, dmTitle, onClose }: Pro
               <div className="rounded-xl bg-white/[0.04] border border-white/10 p-3.5 space-y-1.5">
                 <p className="text-[11px] text-white/50 leading-relaxed">전체 대상 발송·카톡 공유·SNS에 쓰는 <span className="text-white/75 font-semibold">공용 주소</span>입니다. 기존 발행 주소도 계속 사용할 수 있어요.</p>
                 <p className="text-[11px] text-white/50 leading-relaxed">공용 주소는 누가 열었는지 개인 단위 추적은 되지 않고, 클릭·열람 횟수로 집계됩니다. 고객별 추적은 문자 발송의 개인화 링크가 담당해요.</p>
-                <p className="text-[11px] text-white/35">무료 — DM 1개당 주소 1개, 언제든 변경 가능</p>
+                <p className="text-[11px] text-white/35">무료: DM 1개당 주소 1개, 언제든 변경 가능</p>
               </div>
 
               <button
@@ -188,7 +188,7 @@ export default function DmKoreanAliasModal({ open, dmId, dmTitle, onClose }: Pro
                 {saving ? (<><Loader2 className="w-4 h-4 animate-spin" /> 저장 중</>) : alias ? '주소 변경하고 복사' : '주소 만들고 복사'}
               </button>
 
-              <div className="text-[10px] text-white/30 italic">Data source — dm_custom_short_links 클릭 집계 (실시간)</div>
+              <div className="text-[10px] text-white/30 italic">Data source: dm_custom_short_links 클릭 집계 (실시간)</div>
             </>
           )}
         </div>

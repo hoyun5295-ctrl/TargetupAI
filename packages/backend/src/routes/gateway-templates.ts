@@ -62,7 +62,7 @@ function handleDbError(res: Response, err: any): Response {
   if (isMissingRelationError(err)) {
     return res.status(503).json({
       success: false,
-      error: 'DB 마이그레이션 필요 — 운영자에게 gateway_bill_mappings·gateway_template_mappings CREATE 실행 요청 의무',
+      error: 'DB 마이그레이션 필요: 운영자에게 gateway_bill_mappings·gateway_template_mappings CREATE 실행 요청 의무',
       code: 'DB_MIGRATION_PENDING',
     });
   }
@@ -160,7 +160,7 @@ router.post('/bills', async (req: Request, res: Response) => {
 
     const dup = await query(`SELECT bill_id FROM gateway_bill_mappings WHERE bill_id = $1`, [billId]);
     if (dup.rows.length > 0) {
-      return res.status(409).json({ success: false, error: '이미 등록된 bill_id — 연결·수정은 link/auto-push 경로로' });
+      return res.status(409).json({ success: false, error: '이미 등록된 bill_id. 연결·수정은 link/auto-push 경로로' });
     }
 
     const r = await query(
@@ -228,7 +228,7 @@ router.post('/bills/:billId/auto-push', async (req: Request, res: Response) => {
       const chk = await query(`SELECT company_id FROM gateway_bill_mappings WHERE bill_id = $1`, [billId]);
       if (chk.rows.length === 0) return res.status(404).json({ success: false, error: 'bill 없음' });
       if (!chk.rows[0].company_id) {
-        return res.status(400).json({ success: false, error: '회사 미연결 bill — 연결 후에만 auto_push 개시 가능' });
+        return res.status(400).json({ success: false, error: '회사 미연결 bill. 연결 후에만 auto_push 개시 가능' });
       }
     }
 
@@ -322,7 +322,7 @@ router.post('/bills/bulk-create-companies', async (req: Request, res: Response) 
     const planRow = await query(`SELECT id FROM plans WHERE plan_code = 'FREE' LIMIT 1`);
     const freePlanId = planRow.rows[0]?.id;
     if (!freePlanId) {
-      return res.status(500).json({ success: false, error: "plans에 plan_code='FREE' 없음 — 플랜 확인 필요" });
+      return res.status(500).json({ success: false, error: "plans에 plan_code='FREE' 없음. 플랜 확인 필요" });
     }
 
     let created = 0;
@@ -382,7 +382,7 @@ router.post('/bills/bulk-create-companies', async (req: Request, res: Response) 
       } catch (e: any) {
         errors.push({
           companyCode: g.companyCode,
-          error: e?.code === '23505' ? 'company_code 중복(경합) — 재실행 시 연결됨' : String(e?.message || e).slice(0, 200),
+          error: e?.code === '23505' ? 'company_code 중복(경합). 재실행 시 연결됨' : String(e?.message || e).slice(0, 200),
         });
       }
     }
@@ -482,7 +482,7 @@ router.post('/bulk-migrate-templates', async (req: Request, res: Response) => {
       if (r.code !== '0000') {
         return res.status(502).json({
           success: false,
-          error: `IMC 목록 조회 실패 (page=${page}, code=${r.code}) — 전체 스캔 불가로 중단`,
+          error: `IMC 목록 조회 실패 (page=${page}, code=${r.code}). 전체 스캔 불가로 중단`,
           imcMessage: r.message,
         });
       }
@@ -498,7 +498,7 @@ router.post('/bulk-migrate-templates', async (req: Request, res: Response) => {
     if (!scanExhausted) {
       return res.status(502).json({
         success: false,
-        error: `IMC 목록이 ${IMC_MAX_PAGES}페이지에서도 끝나지 않음 — 부분 스캔 금지로 중단(페이지 상한 상향 필요)`,
+        error: `IMC 목록이 ${IMC_MAX_PAGES}페이지에서도 끝나지 않음. 부분 스캔 금지로 중단(페이지 상한 상향 필요)`,
         scanned: imcItems.length,
       });
     }
@@ -840,7 +840,7 @@ router.post('/imported-alarm-suppress', async (req: Request, res: Response) => {
     if (billIds.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'billIds 배열 필요 — 억제 대상을 명시해야 합니다 (예: ["R0007"])',
+        error: 'billIds 배열 필요. 억제 대상을 명시해야 합니다 (예: ["R0007"])',
       });
     }
 
@@ -932,7 +932,7 @@ router.post('/mappings', async (req: Request, res: Response) => {
     const billId = String(req.body?.billId || '').trim();
     const bill = await query(`SELECT bill_id, server, bill_name FROM gateway_bill_mappings WHERE bill_id = $1`, [billId]);
     if (bill.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'bill 없음 — 먼저 bill을 시드/등록하세요' });
+      return res.status(404).json({ success: false, error: 'bill 없음. 먼저 bill을 시드/등록하세요' });
     }
 
     const built = buildMappingPayload({
@@ -980,7 +980,7 @@ router.post('/seed-import', async (req: Request, res: Response) => {
     if (prepared.serverConflicts.length > 0) {
       return res.status(400).json({
         success: false,
-        error: '같은 bill_id가 두 서버에 걸침 — 시드 데이터 확인 필요 (실등록 데이터엔 0건이 정상 §4-0-2)',
+        error: '같은 bill_id가 두 서버에 걸침. 시드 데이터 확인 필요 (실등록 데이터엔 0건이 정상 §4-0-2)',
         conflicts: prepared.serverConflicts,
       });
     }
@@ -1004,7 +1004,7 @@ router.post('/seed-import', async (req: Request, res: Response) => {
     if (prepared.invalid.length > 0) {
       return res.status(400).json({
         success: false,
-        error: `유효하지 않은 행 ${prepared.invalid.length}건 — 정정 후 실행 (dryRun으로 목록 확인)`,
+        error: `유효하지 않은 행 ${prepared.invalid.length}건. 정정 후 실행 (dryRun으로 목록 확인)`,
         invalidSamples: prepared.invalid.slice(0, 50),
       });
     }

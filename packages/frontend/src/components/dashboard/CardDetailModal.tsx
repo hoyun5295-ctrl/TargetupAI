@@ -423,7 +423,7 @@ export default function CardDetailModal({ card, onClose }: CardDetailModalProps)
                     AI 분석
                   </span>
                 </div>
-                <p className="text-xs text-gray-500 italic">Data source — customers DB / 최근 6개월 기준</p>
+                <p className="text-xs text-gray-500 italic">Data source: customers DB / 최근 6개월 기준</p>
               </div>
             </div>
             <button
@@ -465,7 +465,7 @@ export default function CardDetailModal({ card, onClose }: CardDetailModalProps)
                   <p className="text-sm md:text-base text-white/90 leading-relaxed mb-4">{theme.insightDesc(numVal)}</p>
                   <div className="flex flex-wrap items-center gap-2">
                     <Lightbulb className="w-4 h-4 text-yellow-300" />
-                    <span className="text-xs text-yellow-100 font-medium">추천 — {theme.recommend}</span>
+                    <span className="text-xs text-yellow-100 font-medium">추천: {theme.recommend}</span>
                   </div>
                 </div>
               </div>
@@ -583,7 +583,7 @@ export default function CardDetailModal({ card, onClose }: CardDetailModalProps)
               <div>
                 <h4 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-violet-600" />
-                  1-click 액션 — 본 데이터로 즉시 캠페인
+                  1-click 액션: 본 데이터로 즉시 캠페인
                 </h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   {/* 직접 발송 (rose) */}

@@ -77,7 +77,7 @@ export const DM_TEMPLATES: DmTemplate[] = [
   tpl(
     'new_product_beauty',
     'new_product', 'beauty',
-    '뷰티 신상 런칭 — 에디토리얼',
+    '뷰티 신상 런칭 · 에디토리얼',
     '세리프 헤드라인 + 오버랩 히어로 + 대표 상품 포커스. 잡지 화보 톤의 신상 소개',
     buildStyledSections([
       ['header'],
@@ -98,7 +98,7 @@ export const DM_TEMPLATES: DmTemplate[] = [
   tpl(
     'discount_fashion',
     'discount', 'fashion',
-    '패션 시즌 세일 — 볼드',
+    '패션 시즌 세일 · 볼드',
     '풀블리드 히어로 + 긴박 배너 타이머 + 티켓 쿠폰 + 스티키 CTA. 세일 전용 임팩트 조판',
     buildStyledSections([
       ['header'],
@@ -119,7 +119,7 @@ export const DM_TEMPLATES: DmTemplate[] = [
   tpl(
     'urgent_today_close',
     'urgent', 'general',
-    '오늘 마감 — 임팩트',
+    '오늘 마감 · 임팩트',
     '상단 타이머 + 분할 히어로 + 스포트라이트 쿠폰 + 스티키 CTA. 마감 임박 집중 유도',
     buildStyledSections([
       ['header'],
@@ -138,7 +138,7 @@ export const DM_TEMPLATES: DmTemplate[] = [
   tpl(
     'point_reminder_general',
     'point_reminder', 'general',
-    '포인트 리마인드 — 미니멀',
+    '포인트 리마인드 · 미니멀',
     '리드 텍스트 + 라이트 프로모 코드 + 고스트 CTA. 조용하고 정갈한 안내 톤',
     buildStyledSections([
       ['header'],
@@ -156,7 +156,7 @@ export const DM_TEMPLATES: DmTemplate[] = [
   tpl(
     'reactivation_beauty',
     'reactivation', 'beauty',
-    '휴면 재방문 — 소프트',
+    '휴면 재방문 · 소프트',
     '소프트 오버레이 히어로 + 프레임 텍스트 + 쿠폰 겹침 카드. 부드러운 안부 톤',
     buildStyledSections([
       ['header'],
@@ -175,7 +175,7 @@ export const DM_TEMPLATES: DmTemplate[] = [
   tpl(
     'offline_driving_food',
     'offline_driving', 'food',
-    '매장 방문 — 웜 페이퍼',
+    '매장 방문 · 웜 페이퍼',
     '종이 질감 배경 + 고운바탕 세리프 + 모자이크 갤러리 + 매장 카드. 따뜻한 로컬 톤',
     buildStyledSections([
       ['header'],
@@ -196,7 +196,7 @@ export const DM_TEMPLATES: DmTemplate[] = [
   tpl(
     'vip_exclusive_luxury',
     'vip', 'luxury',
-    'VIP 프라이빗 — 럭셔리 다크',
+    'VIP 프라이빗 · 럭셔리 다크',
     '다크 서피스 전면 + 골드 액센트 + 타이포 히어로 + 인용 카드. 격조 있는 비공개 오퍼',
     buildStyledSections([
       ['header'],
@@ -218,7 +218,7 @@ export const DM_TEMPLATES: DmTemplate[] = [
   tpl(
     'new_product_tech',
     'new_product', 'tech',
-    '테크 신제품 — 시티 나이트',
+    '테크 신제품 · 시티 나이트',
     '다크 배경 + 시안 네온 + 브랜드 틴트 풀블리드 + 포커스 상품 + 스티키 CTA',
     buildStyledSections([
       ['header'],
@@ -237,7 +237,7 @@ export const DM_TEMPLATES: DmTemplate[] = [
   tpl(
     'discount_food',
     'discount', 'food',
-    '푸드 위크 특가 — 비비드',
+    '푸드 위크 특가 · 비비드',
     '분할 히어로 + 리스트형 메뉴 + 티켓 쿠폰 + 후기. 생동감 있는 식음 프로모션',
     buildStyledSections([
       ['header'],
@@ -257,7 +257,7 @@ export const DM_TEMPLATES: DmTemplate[] = [
   tpl(
     'vip_fashion_mono',
     'vip', 'fashion',
-    '패션 멤버스 — 모노 에디토리얼',
+    '패션 멤버스 · 모노 에디토리얼',
     '흑백 미니멀 + 타이포 히어로 + 모자이크 룩북 + 인용. 하이패션 룩북 톤',
     buildStyledSections([
       ['header'],
@@ -277,7 +277,7 @@ export const DM_TEMPLATES: DmTemplate[] = [
   tpl(
     'reactivation_gradient',
     'reactivation', 'general',
-    '다시 만나요 — 그라데이션',
+    '다시 만나요 · 그라데이션',
     '무드 그라데이션 히어로 + 그라데이션 면 텍스트 + 겹침 쿠폰. 산뜻한 복귀 인사',
     buildStyledSections([
       ['header'],
@@ -296,7 +296,7 @@ export const DM_TEMPLATES: DmTemplate[] = [
   tpl(
     'event_invite_festive',
     'offline_driving', 'general',
-    '팝업·이벤트 초대 — 페스티브',
+    '팝업·이벤트 초대 · 페스티브',
     '상단 오버레이 히어로 + 타이머 + 갤러리 + 매장 카드 + 스티키 CTA. 초대장 톤',
     buildStyledSections([
       ['header'],

@@ -269,10 +269,10 @@ export default function AiMemoryPage() {
       } else if (data.code === 'DB_MIGRATION_PENDING') {
         setMigrationPending(data.error || 'DB 마이그레이션이 필요합니다.');
       } else {
-        toast.error(`요약 조회 실패 — ${data.error || '알 수 없는 오류'}`);
+        toast.error(`요약 조회 실패: ${data.error || '알 수 없는 오류'}`);
       }
     } catch (e: any) {
-      toast.error(`요약 조회 실패 — ${e?.message || '네트워크 오류'}`);
+      toast.error(`요약 조회 실패: ${e?.message || '네트워크 오류'}`);
     } finally {
       setOverviewLoading(false);
     }
@@ -351,14 +351,14 @@ export default function AiMemoryPage() {
           noData: data.no_data,
         });
       } else if (data.code === 'AI_RATE_LIMIT') {
-        toast.warning(`AI 호출 한도 초과 — ${data.error || '이번 달 한도를 초과했습니다.'}`);
+        toast.warning(`AI 호출 한도 초과: ${data.error || '이번 달 한도를 초과했습니다.'}`);
         setNaturalResult(null);
       } else {
-        toast.error(`검색 실패 — ${data.error || '알 수 없는 오류'}`);
+        toast.error(`검색 실패: ${data.error || '알 수 없는 오류'}`);
         setNaturalResult(null);
       }
     } catch (e: any) {
-      toast.error(`검색 실패 — ${e?.message || '네트워크 오류'}`);
+      toast.error(`검색 실패: ${e?.message || '네트워크 오류'}`);
       setNaturalResult(null);
     } finally {
       setNaturalLoading(false);
@@ -407,7 +407,7 @@ export default function AiMemoryPage() {
       throw new Error(data.error || '저장 실패');
     }
     setShowAddModal(false);
-    toast.success(`학습 추가 완료 — 중요도 ${input.importance}로 저장되었습니다. AI가 다음 호출부터 우선 참고합니다.`);
+    toast.success(`학습 추가 완료. 중요도 ${input.importance}로 저장되었습니다. AI가 다음 호출부터 우선 참고합니다.`);
     await reloadAll();
   };
 
@@ -432,13 +432,13 @@ export default function AiMemoryPage() {
           });
           const data = await r.json();
           if (data.success) {
-            toast.success(`정리 완료 — ${data.deletedCount}건이 삭제되었습니다.`);
+            toast.success(`정리 완료: ${data.deletedCount}건이 삭제되었습니다.`);
             await reloadAll();
           } else {
-            toast.error(`정리 실패 — ${data.error || '알 수 없는 오류'}`);
+            toast.error(`정리 실패: ${data.error || '알 수 없는 오류'}`);
           }
         } catch (e: any) {
-          toast.error(`정리 실패 — ${e?.message || '네트워크 오류'}`);
+          toast.error(`정리 실패: ${e?.message || '네트워크 오류'}`);
         }
         setConfirmState(null);
       },
@@ -465,10 +465,10 @@ export default function AiMemoryPage() {
             toast.success('학습이 삭제되었습니다.');
             await reloadAll();
           } else {
-            toast.error(`삭제 실패 — ${data.error || '알 수 없는 오류'}`);
+            toast.error(`삭제 실패: ${data.error || '알 수 없는 오류'}`);
           }
         } catch (e: any) {
-          toast.error(`삭제 실패 — ${e?.message || '네트워크 오류'}`);
+          toast.error(`삭제 실패: ${e?.message || '네트워크 오류'}`);
         }
         setConfirmState(null);
       },
@@ -578,7 +578,7 @@ export default function AiMemoryPage() {
             <div className="flex items-center gap-2">
               <h1 className="text-xl md:text-2xl font-semibold text-white">AI 학습 메모리</h1>
             </div>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5 hidden md:block">회사별 누적 학습 — 시간이 지날수록 AI 추천 정확도가 향상됩니다</p>
+            <p className="text-xs md:text-sm text-white/50 mt-0.5 hidden md:block">회사별 누적 학습. 시간이 지날수록 AI 추천 정확도가 향상됩니다</p>
           </div>
           <div className="ml-auto flex items-center gap-2">
             {/* ★ 2026-08-12 (Harold 확정 — 플래너 메뉴 개편): 세그먼트 = AI Operator 타일에서 제거 → 여기 서브메뉴로.
@@ -696,7 +696,7 @@ export default function AiMemoryPage() {
             </div>
           </div>
           <div className="text-[10px] text-white/30 italic mt-3 pl-15">
-            Data source — ai_company_memory 5 타입 자동 누적 (성공 패턴·채널 성과 = 캠페인 클릭 실측 / 고객 인사이트 = 등급 집계 / 브랜드 톤 = 가이드라인 변경 / 컴플라이언스 = 차단·반려) + 회사 admin 직접 입력
+            Data source: ai_company_memory 5 타입 자동 누적 (성공 패턴·채널 성과 = 캠페인 클릭 실측 / 고객 인사이트 = 등급 집계 / 브랜드 톤 = 가이드라인 변경 / 컴플라이언스 = 차단·반려) + 회사 admin 직접 입력
           </div>
         </div>
 
@@ -707,7 +707,7 @@ export default function AiMemoryPage() {
               <Sparkles className="w-4 h-4 text-fuchsia-300" />
               <span className="text-sm font-semibold text-white">자연어로 학습 메모리에 질문하기</span>
             </div>
-            <p className="text-[11px] text-white/60 mb-3">예: "지난 30일 VIP 영역에서 AI가 발견한 가장 강한 패턴은?" — Enter 키로 즉시 검색</p>
+            <p className="text-[11px] text-white/60 mb-3">예: "지난 30일 VIP 영역에서 AI가 발견한 가장 강한 패턴은?" (Enter 키로 즉시 검색)</p>
             <div className="flex gap-2">
               <input
                 ref={queryInputRef}
@@ -804,7 +804,7 @@ export default function AiMemoryPage() {
               </div>
             )}
             <div className="text-[10px] text-white/30 italic">
-              Data source — buildMemoryPromptContext (중요도 3 이상 최대 30건 + 시스템 프롬프트 포함)
+              Data source: buildMemoryPromptContext (중요도 3 이상 최대 30건 + 시스템 프롬프트 포함)
             </div>
           </div>
         )}
@@ -828,7 +828,7 @@ export default function AiMemoryPage() {
             </div>
           ) : !overview || overview.total_memories < 5 ? (
             <div className="text-center py-6 text-white/40 text-sm">
-              학습 {overview?.total_memories || 0}건 — 5건 이상 쌓이면 분포 차트가 표시됩니다.
+              학습 {overview?.total_memories || 0}건. 5건 이상 쌓이면 분포 차트가 표시됩니다.
             </div>
           ) : (
             <div className="grid md:grid-cols-2 gap-6 items-center">
@@ -841,7 +841,7 @@ export default function AiMemoryPage() {
                       fill={seg.color}
                       className="hover:opacity-80 transition-opacity"
                     >
-                      <title>{seg.label} — {seg.count}건 ({(seg.percent * 100).toFixed(1)}%)</title>
+                      <title>{seg.label}: {seg.count}건 ({(seg.percent * 100).toFixed(1)}%)</title>
                     </path>
                   ))}
                   <text x="100" y="95" textAnchor="middle" className="fill-white" style={{ fontSize: '22px', fontWeight: 700 }}>
@@ -875,7 +875,7 @@ export default function AiMemoryPage() {
               </div>
             </div>
           )}
-          <div className="text-[10px] text-white/30 italic mt-4">Data source — ai_company_memory.memory_type 5 카테고리 집계</div>
+          <div className="text-[10px] text-white/30 italic mt-4">Data source: ai_company_memory.memory_type 5 카테고리 집계</div>
         </div>
 
         {/* ───────── 5. 영향도 top 10 카드 ───────── */}
@@ -908,7 +908,7 @@ export default function AiMemoryPage() {
               ))}
             </div>
           )}
-          <div className="text-[10px] text-white/30 italic mt-4">Data source — ai_company_memory ORDER BY usage_count DESC, importance DESC LIMIT 10</div>
+          <div className="text-[10px] text-white/30 italic mt-4">Data source: ai_company_memory ORDER BY usage_count DESC, importance DESC LIMIT 10</div>
         </div>
 
         {/* ───────── 6. 1-click 액션 3 카드 ───────── */}
@@ -952,7 +952,7 @@ export default function AiMemoryPage() {
             </div>
             <div className="text-sm font-semibold text-white mb-1">5 타입 가이드</div>
             <div className="text-[11px] text-white/60 leading-relaxed">
-              자동 누적되는 학습과 직접 입력해야 하는 학습 — 예시 + 흐름 안내.
+              자동 누적되는 학습과 직접 입력해야 하는 학습: 예시 + 흐름 안내.
             </div>
           </button>
         </div>
@@ -988,7 +988,7 @@ export default function AiMemoryPage() {
                       <svg viewBox="0 0 200 200" className="w-32 h-32">
                         {detailedStats.sourceSegs.map((s) => (
                           <path key={s.source} d={s.pathD} fill={s.color}>
-                            <title>{s.source} — {s.count}건 ({(s.percent * 100).toFixed(1)}%)</title>
+                            <title>{s.source}: {s.count}건 ({(s.percent * 100).toFixed(1)}%)</title>
                           </path>
                         ))}
                         <text x="100" y="100" textAnchor="middle" dominantBaseline="middle" className="fill-white" style={{ fontSize: '18px', fontWeight: 700 }}>
@@ -1005,7 +1005,7 @@ export default function AiMemoryPage() {
                         ))}
                       </div>
                     </div>
-                    <div className="text-[10px] text-white/30 italic mt-2">Data source — ai_company_memory.source 집계</div>
+                    <div className="text-[10px] text-white/30 italic mt-2">Data source: ai_company_memory.source 집계</div>
                   </div>
 
                   {/* b. 월별 누적 line */}
@@ -1034,7 +1034,7 @@ export default function AiMemoryPage() {
                         })}
                       </div>
                     )}
-                    <div className="text-[10px] text-white/30 italic mt-2">Data source — ai_company_memory.created_at 월별 집계</div>
+                    <div className="text-[10px] text-white/30 italic mt-2">Data source: ai_company_memory.created_at 월별 집계</div>
                   </div>
 
                   {/* c. 중요도 histogram */}
@@ -1060,7 +1060,7 @@ export default function AiMemoryPage() {
                         );
                       })}
                     </div>
-                    <div className="text-[10px] text-white/30 italic mt-2">Data source — ai_company_memory.importance 1~10 분포</div>
+                    <div className="text-[10px] text-white/30 italic mt-2">Data source: ai_company_memory.importance 1~10 분포</div>
                   </div>
 
                   {/* d. 최근 활용 timeline */}
@@ -1088,7 +1088,7 @@ export default function AiMemoryPage() {
                         );
                       })}
                     </div>
-                    <div className="text-[10px] text-white/30 italic mt-2">Data source — ai_company_memory.last_accessed_at 내림차순</div>
+                    <div className="text-[10px] text-white/30 italic mt-2">Data source: ai_company_memory.last_accessed_at 내림차순</div>
                   </div>
                 </div>
               )}
@@ -1098,9 +1098,9 @@ export default function AiMemoryPage() {
 
         {/* ───────── 8. Source caption ───────── */}
         <div className="text-center text-[10px] text-white/30 italic pt-4">
-          Data source — ai_company_memory 자동 학습 (성공 패턴·채널 성과 = 캠페인 클릭 실측에서만 / 고객 인사이트 = 등급별 구매·LTV / 브랜드 톤 = 가이드라인 변경 / 컴플라이언스 = 광고 차단·반려) + 회사 admin 직접 입력
+          Data source: ai_company_memory 자동 학습 (성공 패턴·채널 성과 = 캠페인 클릭 실측에서만 / 고객 인사이트 = 등급별 구매·LTV / 브랜드 톤 = 가이드라인 변경 / 컴플라이언스 = 광고 차단·반려) + 회사 admin 직접 입력
           <br />
-          실측 데이터가 없으면 그 학습은 생성되지 않습니다. AI는 시스템 프롬프트에 중요도 3 이상 학습 최대 30건을 자동 포함합니다 — 시간이 지날수록 추천 정확도가 향상됩니다
+          실측 데이터가 없으면 그 학습은 생성되지 않습니다. AI는 시스템 프롬프트에 중요도 3 이상 학습 최대 30건을 자동 포함합니다. 시간이 지날수록 추천 정확도가 향상됩니다
         </div>
       </div>
 

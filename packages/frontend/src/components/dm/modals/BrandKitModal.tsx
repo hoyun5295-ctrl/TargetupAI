@@ -476,7 +476,7 @@ function ExtractResultView({ result, onApply }: { result: ExtractResult; onApply
       ) : (
         <>
           <div style={{ fontSize: 12, fontWeight: 700, color: '#0369a1', marginBottom: 8 }}>
-            추출 결과 {raw.site_name && `— ${raw.site_name}`}
+            추출 결과 {raw.site_name && `: `}
           </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
             {raw.logo_url && (

@@ -76,7 +76,7 @@ export async function buildCampaignAttribution(
       hasCdpData: false,
       analysisPeriodDays,
       computedAt: new Date().toISOString(),
-      source: '발송 캠페인 X — N일 안 발송 누적 후 활성',
+      source: '발송 캠페인 X: N일 안 발송 누적 후 활성',
     };
   }
 
@@ -167,6 +167,6 @@ export async function buildCampaignAttribution(
     computedAt: new Date().toISOString(),
     source: hasCdpData
       ? '캠페인 sent_at + N시간 안 cdp_events EXISTS 합집합 (회사 전체 시간 윈도우)'
-      : 'CDP 미연동 — customers.recent_purchase_date 간접 attribution 영역만',
+      : 'CDP 미연동: customers.recent_purchase_date 간접 attribution 영역만',
   };
 }

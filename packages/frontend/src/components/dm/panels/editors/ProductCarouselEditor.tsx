@@ -40,15 +40,15 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
       });
       const data = await res.json();
       if (data?.configured === false) {
-        setCandNote('이미지 후보 검색이 아직 설정되지 않았어요 — 직접 업로드하거나 연동 몰 매칭을 이용해주세요.');
+        setCandNote('이미지 후보 검색이 아직 설정되지 않았어요. 직접 업로드하거나 연동 몰 매칭을 이용해주세요.');
       } else if (Array.isArray(data?.candidates) && data.candidates.length > 0) {
         setCandidates(data.candidates);
-        setCandNote('후보를 탭하면 그 이미지로 확정돼요 — 내 상품이 맞는지 확인해주세요.');
+        setCandNote('후보를 탭하면 그 이미지로 확정돼요. 내 상품이 맞는지 확인해주세요.');
       } else {
-        setCandNote('후보를 찾지 못했어요 — 직접 업로드해주세요.');
+        setCandNote('후보를 찾지 못했어요. 직접 업로드해주세요.');
       }
     } catch {
-      setCandNote('후보 검색에 실패했어요 — 직접 업로드해주세요.');
+      setCandNote('후보 검색에 실패했어요. 직접 업로드해주세요.');
     } finally {
       setCandLoading(false);
     }
@@ -57,7 +57,7 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
   const applyPaste = () => {
     const parsed = parsePastedProducts(pasteText, 8);
     if (parsed.length === 0) {
-      setPasteNote('상품을 찾지 못했어요 — "상품명 / 가격 / 링크"를 줄로 나눠 붙여넣어 주세요.');
+      setPasteNote('상품을 찾지 못했어요. "상품명 / 가격 / 링크"를 줄로 나눠 붙여넣어 주세요.');
       return;
     }
     const items: ProductCarouselItem[] = parsed.map((p) => ({
@@ -140,10 +140,10 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
           options={[{ value: 'sm', label: '작게' }, { value: 'md', label: '보통' }, { value: 'lg', label: '크게' }]}
         />
       </Field>
-      <Field label="배경색" hint="맞추기 여백·섹션 배경 — 미지정 = 기본(회색 여백)">
+      <Field label="배경색" hint="맞추기 여백·섹션 배경 (미지정 = 기본, 회색 여백)">
         <ColorOverride value={props.background_color} onChange={(v) => onUpdate({ background_color: v })} />
       </Field>
-      <Field label="글씨공간 색" hint="상품명·가격 카드 배경 — 미지정 = 흰색">
+      <Field label="글씨공간 색" hint="상품명·가격 카드 배경 (미지정 = 흰색)">
         <ColorOverride value={props.caption_bg_color} onChange={(v) => onUpdate({ caption_bg_color: v })} />
       </Field>
       <Field label="상품 목록">
@@ -222,7 +222,7 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
                         <button
                           key={ci}
                           type="button"
-                          title={`${c.title}${c.mallName ? ` — ${c.mallName}` : ''}`}
+                          title={`${c.title}${c.mallName ? ` · ${c.mallName}` : ''}`}
                           onClick={() => {
                             setItem(i, { image_url: c.image });
                             setCandIdx(null);

@@ -63,7 +63,7 @@ async function collectContext(companyId: string): Promise<AgencyContext> {
     const profile = await getCompanyDataProfile(companyId);
     profileBlock = formatProfileForAiPrompt(profile, { variableStyle: 'percent' });
   } catch (e: any) {
-    notes.push('고객DB 현황 분석 실패 — 해당 축 생략');
+    notes.push('고객DB 현황 분석 실패. 해당 축 생략');
     console.log('[CRM대행] 프로필 축 생략:', e?.message || e);
   }
 
@@ -74,7 +74,7 @@ async function collectContext(companyId: string): Promise<AgencyContext> {
     const memories = await listMemories(companyId, { limit: 20, memoryTypes: LEARNING_MEMORY_TYPES });
     memoryLines = memories.map((m) => `- [${m.memoryType}] ${m.memoryKey}: ${m.memoryValue} (중요도 ${m.importance})`);
   } catch (e: any) {
-    notes.push('AI 학습 메모리 조회 실패 — 해당 축 생략');
+    notes.push('AI 학습 메모리 조회 실패. 해당 축 생략');
     console.log('[CRM대행] 메모리 축 생략:', e?.message || e);
   }
 
@@ -93,7 +93,7 @@ async function collectContext(companyId: string): Promise<AgencyContext> {
       return `- ${d} · ${c.campaign_name || '(무제)'} · ${c.message_type || '-'} · 대상 ${c.target_count ?? '-'} · 성공 ${c.success_count ?? '-'}`;
     });
   } catch (e: any) {
-    notes.push('과거 캠페인 이력 조회 실패 — 해당 축 생략');
+    notes.push('과거 캠페인 이력 조회 실패. 해당 축 생략');
     console.log('[CRM대행] 캠페인 축 생략:', e?.message || e);
   }
 
@@ -125,7 +125,7 @@ async function measurePlanTargets(
       // ★ Codex 적대 리뷰 fix: 빈 필터({}) = 변환 실패 취급 — recommendTarget degraded 경로(API 키 미설정 등)가
       //   filters:{}를 반환하면 전 고객 COUNT가 좁은 타겟 플랜에 찍히는 오표기 차단(services/ai.ts:1588 실증).
       plan.targetFilters = target?.filters && Object.keys(target.filters).length > 0 ? target.filters : null;
-      if (!plan.targetFilters) { result.dataNotes.push(`'${plan.title}' 타겟 필터 변환 실패 — 실행 시 재산정`); continue; }
+      if (!plan.targetFilters) { result.dataNotes.push(`'${plan.title}' 타겟 필터 변환 실패. 실행 시 재산정`); continue; }
       // DB 실측 COUNT (공통 안전필터 포함 — orchestrator와 동일 경로, userId ''=orchestrator 관례)
       const counted = await countFilteredCustomers(companyId, plan.targetFilters as Record<string, any>, '');
       plan.targetCount = Number((counted as any)?.count) || 0;
@@ -137,7 +137,7 @@ async function measurePlanTargets(
       plan.estimatedCost = unit != null && plan.targetCount != null ? Math.round(plan.targetCount * unit) : null;
     } catch (e: any) {
       plan.targetFilters = null; plan.targetCount = null; plan.estimatedCost = null;
-      result.dataNotes.push(`'${plan.title}' 타겟 실측 실패 — 실행 시 재산정`);
+      result.dataNotes.push(`'${plan.title}' 타겟 실측 실패. 실행 시 재산정`);
       console.log('[CRM대행] 플랜 타겟 실측 생략:', e?.message || e);
     }
   }
@@ -185,7 +185,7 @@ export async function generateAgencyProposal(
       try {
         imageTranscript = await extractEventTextFromImages({ images, companyId });
       } catch (e: any) {
-        ctx.notes.push('행사 이미지 판독 실패 — 해당 축 생략');
+        ctx.notes.push('행사 이미지 판독 실패. 해당 축 생략');
         console.log('[CRM대행] 이미지 판독 축 생략:', e?.message || e);
       }
     }

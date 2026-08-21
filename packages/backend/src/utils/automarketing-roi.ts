@@ -101,6 +101,6 @@ export async function buildAutoMarketingRoi(
     hasCdpData,
     source: hasCdpData
       ? '자동마케팅 캠페인 sent_at + 7일 안 cdp_events purchase/order 귀속 (시간 윈도우 합집합)'
-      : 'CDP 미연동 — 매출 귀속 불가 (비용·발송 실측만)',
+      : 'CDP 미연동: 매출 귀속 불가 (비용·발송 실측만)',
   };
 }

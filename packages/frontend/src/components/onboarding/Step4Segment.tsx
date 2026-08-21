@@ -131,7 +131,7 @@ export default function Step4Segment({ state, onNext, onSync }: Props) {
             <p className="text-[12px] text-white/70 leading-relaxed">
               조건을 자연어로 입력하면 AI가 정확한 필터로 변환합니다. 매칭 수 + 샘플 5건이 즉시 표시되어 신뢰할 수 있습니다.
               <br />
-              <span className="text-violet-200 font-medium">단 1의 오차도 없는 추출</span> — AI는 검증된 필드/연산자만 사용하며, SQL은 직접 생성하지 않습니다.
+              <span className="text-violet-200 font-medium">단 1의 오차도 없는 추출</span>. AI는 검증된 필드/연산자만 사용하며, SQL은 직접 생성하지 않습니다.
             </p>
           </div>
         </div>

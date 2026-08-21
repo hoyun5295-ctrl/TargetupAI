@@ -134,7 +134,7 @@ export default function AiCampaignSendModal({
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-white font-bold text-lg">AI 추천 결과 — 메시지 & 발송</h3>
+                <h3 className="text-white font-bold text-lg">AI 추천 결과: 메시지 & 발송</h3>
               </div>
               <div className="text-xs text-white/50 mt-0.5">캠페인 정보를 확인하고 발송합니다</div>
             </div>
@@ -433,7 +433,7 @@ export default function AiCampaignSendModal({
               </div>
 
               <div className="text-[10px] text-white/30 italic">
-                Data source — AI 추천 (자율 진단 + 발송 흐름)
+                Data source: AI 추천 (자율 진단 + 발송 흐름)
               </div>
             </div>
           </div>

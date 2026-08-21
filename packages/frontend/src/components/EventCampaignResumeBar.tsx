@@ -46,7 +46,7 @@ export default function EventCampaignResumeBar({ refreshKey, onResume }: {
       <div className="flex items-center gap-1.5 mb-2">
         <CalendarClock className="w-3.5 h-3.5 text-violet-300" />
         <span className="text-xs font-bold text-white/80">임시 보관한 행사 캠페인</span>
-        <span className="text-[10px] text-white/40">— 이어서 편집할 수 있어요</span>
+        <span className="text-[10px] text-white/40">(이어서 편집할 수 있어요)</span>
       </div>
       <div className="flex flex-wrap gap-2">
         {drafts.map((d) => (

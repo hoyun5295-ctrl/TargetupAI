@@ -31,7 +31,7 @@ export default function Step7Roi({ state, onComplete }: Props) {
           <div>
             <h2 className="text-xl font-bold text-white mb-2">거의 다 왔어요!</h2>
             <p className="text-[13px] text-white/80 leading-relaxed">
-              마지막 단계 — 매일 9시 자동 인사이트 메일을 활성화하면 한 달 안 30번 자동 성과 추적 + 다음 캠페인 추천을 받을 수 있어요.
+              마지막 단계: 매일 9시 자동 인사이트 메일을 활성화하면 한 달 안 30번 자동 성과 추적 + 다음 캠페인 추천을 받을 수 있어요.
             </p>
           </div>
         </div>

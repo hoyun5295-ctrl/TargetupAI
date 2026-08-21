@@ -83,7 +83,7 @@ export async function buildDataAvailability(companyId: string): Promise<DataAvai
       level: 'critical',
       icon: 'customer',
       title: '고객 등록 X',
-      message: '활성 고객 0명 — 고객을 등록하시면 성과리포트 영역 활성됩니다.',
+      message: '활성 고객 0명. 고객을 등록하시면 성과리포트 영역 활성됩니다.',
       actionLabel: '고객 관리 진입',
       actionPath: '/customers',
     });
@@ -95,7 +95,7 @@ export async function buildDataAvailability(companyId: string): Promise<DataAvai
       level: 'warning',
       icon: 'campaign',
       title: '발송 캠페인 X',
-      message: '최근 30일 안 완료 캠페인 0건 — 첫 캠페인 발송 후 성과 분석 영역 활성됩니다.',
+      message: '최근 30일 안 완료 캠페인 0건. 첫 캠페인 발송 후 성과 분석 영역 활성됩니다.',
       actionLabel: 'AI Operator 진입',
       actionPath: '/ai-operator',
     });
@@ -104,7 +104,7 @@ export async function buildDataAvailability(companyId: string): Promise<DataAvai
       level: 'info',
       icon: 'campaign',
       title: '발송 누적 부족',
-      message: `최근 30일 ${campaignCount}건 발송 — 3건+ 누적 시 추세 / 기간 비교 / AI 추천 정확도 향상.`,
+      message: `최근 30일 ${campaignCount}건 발송. 3건+ 누적 시 추세 / 기간 비교 / AI 추천 정확도 향상.`,
       actionLabel: 'AI Operator 진입',
       actionPath: '/ai-operator',
     });
@@ -125,7 +125,7 @@ export async function buildDataAvailability(companyId: string): Promise<DataAvai
       level: 'warning',
       icon: 'event',
       title: '자사몰 이벤트 X',
-      message: '자사몰 연동되었으나 최근 30일 이벤트 0건 — SDK 설치 또는 webhook 동작 확인 필요.',
+      message: '자사몰 연동되었으나 최근 30일 이벤트 0건. SDK 설치 또는 webhook 동작 확인 필요.',
       actionLabel: '자사몰 진단 진입',
       actionPath: '/cdp-settings',
     });
@@ -134,7 +134,7 @@ export async function buildDataAvailability(companyId: string): Promise<DataAvai
       level: 'info',
       icon: 'event',
       title: 'CDP 이벤트 누적 부족',
-      message: `최근 30일 ${cdpEventCount}건 이벤트 — 100건+ 누적 시 funnel 정확도 + attribution 정확도 향상.`,
+      message: `최근 30일 ${cdpEventCount}건 이벤트. 100건+ 누적 시 funnel 정확도 + attribution 정확도 향상.`,
     });
   }
 
@@ -144,7 +144,7 @@ export async function buildDataAvailability(companyId: string): Promise<DataAvai
       level: 'good',
       icon: 'event',
       title: '모든 분석 영역 활성',
-      message: `고객 ${customerCount.toLocaleString()}명 + 30일 캠페인 ${campaignCount}건 + CDP 이벤트 ${cdpEventCount.toLocaleString()}건 누적 — 모든 매트릭스 정확도 정합.`,
+      message: `고객 ${customerCount.toLocaleString()}명 + 30일 캠페인 ${campaignCount}건 + CDP 이벤트 ${cdpEventCount.toLocaleString()}건 누적. 모든 매트릭스 정확도 정합.`,
     });
   }
 

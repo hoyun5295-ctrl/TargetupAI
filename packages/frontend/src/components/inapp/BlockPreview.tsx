@@ -182,7 +182,7 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
       );
     }
     case 'benefit': {
-      const text = t(b.text || '[혜택 안내 — 직접 작성해주세요]');
+      const text = t(b.text || '[혜택 안내: 직접 작성해주세요]');
       // ★ 2026-07-07(5) 형태 골격 — 쿠폰 티켓 카드: 점선 박스 중첩 대신 대형 혜택 타이포 (SDK 미러)
       //   ★ 3.0 — spotlight 구도(classic 카드)도 같은 대형 승격 (SDK 미러)
       if (ctx.cardStyle === 'ticket' || ctx.treatment === 'spotlight') {

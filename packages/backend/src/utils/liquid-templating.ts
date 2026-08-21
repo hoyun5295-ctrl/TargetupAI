@@ -354,7 +354,7 @@ function parseIfNode(state: ParseState): ASTNode {
       break;
     }
 
-    throw new Error(`if 미종결 — 예상치 못한 tag: ${tn}`);
+    throw new Error(`if 미종결: 예상치 못한 tag: ${tn}`);
   }
 
   return { type: 'if', branches, elseChildren };
@@ -423,7 +423,7 @@ function parseCaseNode(state: ParseState): ASTNode {
       break;
     }
 
-    throw new Error(`case 미종결 — 예상치 못한 tag: ${tn}`);
+    throw new Error(`case 미종결: 예상치 못한 tag: ${tn}`);
   }
 
   return { type: 'case', expression, whens, elseChildren };

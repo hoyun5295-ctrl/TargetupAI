@@ -95,7 +95,7 @@ export default function CdpIntegrationDashboard({
               key={p.key}
               type="button"
               onClick={() => onOpen(p.key)}
-              aria-label={`${p.name} — ${st.label}. ${st.actionLabel}`}
+              aria-label={`${p.name}: ${st.label}. ${st.actionLabel}`}
               className="group flex flex-col gap-3 p-4 rounded-2xl border border-white/10 bg-white/[0.03] text-left transition-all duration-200 hover:border-violet-400/40 hover:bg-white/[0.06] hover:-translate-y-0.5"
             >
               {/* 1줄 — 아이콘 + 이름 */}

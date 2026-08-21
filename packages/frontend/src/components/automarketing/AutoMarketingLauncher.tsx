@@ -52,7 +52,7 @@ export default function AutoMarketingLauncher({
           {!roi.hasCdpData && (
             <div className="mt-2 text-[11px] text-white/50">매출 귀속은 자사몰 연동(구매 데이터 수집) 후 표시됩니다.</div>
           )}
-          <div className="text-[10px] text-white/30 italic mt-2">Data source — 발송 후 7일 구매 귀속 · 최근 30일 실측</div>
+          <div className="text-[10px] text-white/30 italic mt-2">Data source: 발송 후 7일 구매 귀속 · 최근 30일 실측</div>
         </div>
       )}
 

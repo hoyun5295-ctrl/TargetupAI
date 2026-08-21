@@ -248,7 +248,7 @@ export function buildBrandQueuePayload(p: BrandQueuePayloadParams): BrandQueuePa
   const unsubPhone = String(p.unsubscribePhone || '').trim();
   const unsubAuth = String(p.unsubscribeAuth || '').trim();
   if ((targeting === 'M' || targeting === 'N') && !unsubPhone) {
-    throw new BrandMessageBuildError('마수동(M/N) 대상 발송은 무료수신거부 번호가 필요합니다 — 수신거부 번호를 입력하거나 대상 범위를 채널 친구로 바꿔주세요');
+    throw new BrandMessageBuildError('마수동(M/N) 대상 발송은 무료수신거부 번호가 필요합니다. 수신거부 번호를 입력하거나 대상 범위를 채널 친구로 바꿔주세요');
   }
 
   // ── msg_contents = 내용물 ──
@@ -323,13 +323,13 @@ export function buildBrandQueuePayload(p: BrandQueuePayloadParams): BrandQueuePa
   const judgeAt = isPast ? new Date() : sendAt;
   if (!isWithinBrandSendWindow(judgeAt, isImmediate ? marginMinutes : 0)) {
     throw new BrandMessageBuildError(
-      '브랜드메시지는 오전 8시부터 저녁 8시 50분 사이에만 발송할 수 있습니다 — 발송 시각을 조정해주세요'
+      '브랜드메시지는 오전 8시부터 저녁 8시 50분 사이에만 발송할 수 있습니다. 발송 시각을 조정해주세요'
     );
   }
 
   const etcJson = JSON.stringify(etc);
   if (etcJson.length > K_ETC_JSON_MAX) {
-    throw new BrandMessageBuildError(`브랜드메시지 부가 정보가 너무 깁니다 (${etcJson.length}자 — 최대 ${K_ETC_JSON_MAX}자). 버튼·링크 길이를 줄여주세요`);
+    throw new BrandMessageBuildError(`브랜드메시지 부가 정보가 너무 깁니다 (${etcJson.length}자, 최대 ${K_ETC_JSON_MAX}자). 버튼·링크 길이를 줄여주세요`);
   }
 
   return { msgContents, etcJson };
@@ -418,7 +418,7 @@ export function resolveBrandFallback(input: {
 
   const contents = String(input.resendMessage || '').trim() || String(input.originalMessage || '').trim();
   if (!contents) {
-    throw new BrandMessageBuildError('대체발송 문구가 없습니다 — 대체문안을 입력하거나 대체발송을 끄세요');
+    throw new BrandMessageBuildError('대체발송 문구가 없습니다. 대체문안을 입력하거나 대체발송을 끄세요');
   }
   if (mapped === 'B') {
     const title = String(input.resendTitle || '').trim();
@@ -749,12 +749,12 @@ function assertBrandContentSpec(input: {
     // 옛 `link` 래핑이 먼저다 — 제목·URL 검사보다 앞에 둬야 "형식이 틀렸다"가 아니라
     // 실제 원인(옛 규약으로 들어왔다)을 알려줄 수 있다.
     if (coupon.link !== undefined) {
-      throw new BrandMessageBuildError('쿠폰 링크 형식이 올바르지 않습니다 — 쿠폰 URL을 다시 입력해주세요');
+      throw new BrandMessageBuildError('쿠폰 링크 형식이 올바르지 않습니다. 쿠폰 URL을 다시 입력해주세요');
     }
     const cTitle = strFieldOrThrow(coupon.title, '쿠폰 제목');
     if (!cTitle) throw new BrandMessageBuildError('쿠폰 제목이 필요합니다');
     if (!isAllowedCouponTitle(cTitle)) {
-      throw new BrandMessageBuildError(`쿠폰 제목은 정해진 형식만 쓸 수 있습니다 — ${COUPON_TITLE_GUIDE}`);
+      throw new BrandMessageBuildError(`쿠폰 제목은 정해진 형식만 쓸 수 있습니다: ${COUPON_TITLE_GUIDE}`);
     }
     // 클릭 대상이 없는 쿠폰은 카카오가 받지 않는다(기본 케이스 url_mobile · 채널쿠폰이면 스킴).
     const hasCouponLink = ['url_mobile', 'scheme_android', 'scheme_ios']
@@ -867,7 +867,7 @@ export function buildAttachmentJson(params: {
   //   타입(BrandCoupon)은 `link`를 이미 뺐지만 라우트가 req.body.coupon을 그대로 넘기므로
   //   런타임에는 여전히 들어올 수 있다(옛 화면 번들 캐시).
   if (params.coupon && (params.coupon as any).link !== undefined) {
-    throw new BrandMessageBuildError('쿠폰 링크 형식이 올바르지 않습니다 — 쿠폰 URL을 다시 입력해주세요');
+    throw new BrandMessageBuildError('쿠폰 링크 형식이 올바르지 않습니다. 쿠폰 URL을 다시 입력해주세요');
   }
   if (params.coupon) {
     attachment.coupon = {

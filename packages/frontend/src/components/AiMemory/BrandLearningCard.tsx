@@ -50,10 +50,10 @@ export default function BrandLearningCard({ apiBase, token, onToast, onConfirm }
                   {summary?.logo && <span className="inline-flex items-center gap-1 text-[11px] text-white/70 bg-white/5 border border-white/10 rounded-full px-2 py-0.5"><Check className="w-3 h-3 text-emerald-300" /> 로고</span>}
                 </>
               ) : (
-                <span className="text-[11px] text-amber-200/90">아직 학습 전이에요 — 3탭에 필요한 정보를 채워주세요.</span>
+                <span className="text-[11px] text-amber-200/90">아직 학습 전이에요. 3탭에 필요한 정보를 채워주세요.</span>
               )}
             </div>
-            <div className="text-[10px] text-white/30 italic mt-2">Data source — companies + companies.brand_kit (DM·이메일·인앱·문안 생성 공용)</div>
+            <div className="text-[10px] text-white/30 italic mt-2">Data source: companies + companies.brand_kit (DM·이메일·인앱·문안 생성 공용)</div>
           </div>
           <button
             onClick={() => setOpen(true)}

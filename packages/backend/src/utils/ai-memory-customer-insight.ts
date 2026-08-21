@@ -47,7 +47,7 @@ export function buildCustomerInsights(input: CustomerInsightInput): CustomerInsi
       ? g.avgPurchaseAmount / input.overallAvgPurchaseAmount
       : 1;
     const memoryValue =
-      `${g.grade} 등급 (${g.customerCount}명) — 평균 구매액 ₩${comma(g.avgPurchaseAmount)}`
+      `${g.grade} 등급 (${g.customerCount}명): 평균 구매액 ₩${comma(g.avgPurchaseAmount)}`
       + ` (전체 평균의 ${amountRatio.toFixed(1)}배), 평균 구매 ${g.avgPurchaseCount.toFixed(1)}회, LTV ${comma(g.avgLtvScore)}점`;
     out.push({
       grade: g.grade,

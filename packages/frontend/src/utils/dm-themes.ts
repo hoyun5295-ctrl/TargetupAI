@@ -25,7 +25,7 @@ export const DM_DESIGN_THEMES: DmDesignTheme[] = [
   {
     id: 'editorial',
     name: '에디토리얼',
-    description: '세리프 헤드라인 · 넉넉한 여백 · 헤어라인 구분 — 잡지 화보 톤',
+    description: '세리프 헤드라인 · 넉넉한 여백 · 헤어라인 구분: 잡지 화보 톤',
     swatches: ['#111827', '#b45309', '#ffffff'],
     previewFont: '"Noto Serif KR", serif',
     recommendedTones: ['premium', 'elegant'],
@@ -38,7 +38,7 @@ export const DM_DESIGN_THEMES: DmDesignTheme[] = [
   {
     id: 'luxury-dark',
     name: '럭셔리 다크',
-    description: '딥 다크 서피스 · 골드 액센트 · 그레인 — 프라이빗 오퍼 톤',
+    description: '딥 다크 서피스 · 골드 액센트 · 그레인: 프라이빗 오퍼 톤',
     swatches: ['#0e1018', '#d4af37', '#b89150'],
     previewFont: '"Noto Serif KR", serif',
     recommendedTones: ['premium'],
@@ -51,7 +51,7 @@ export const DM_DESIGN_THEMES: DmDesignTheme[] = [
   {
     id: 'minimal',
     name: '미니멀',
-    description: '절제된 크기 · 여백 구분 · 무장식 — 조용하고 정갈한 안내 톤',
+    description: '절제된 크기 · 여백 구분 · 무장식: 조용하고 정갈한 안내 톤',
     swatches: ['#3b82f6', '#93c5fd', '#ffffff'],
     recommendedTones: ['friendly'],
     kit: {
@@ -63,7 +63,7 @@ export const DM_DESIGN_THEMES: DmDesignTheme[] = [
   {
     id: 'bold-sale',
     name: '볼드 세일',
-    description: '검은고딕 임팩트 · 압축 밀도 · 섹션 넘버링 — 세일 전용 조판',
+    description: '검은고딕 임팩트 · 압축 밀도 · 섹션 넘버링: 세일 전용 조판',
     swatches: ['#18181b', '#fde68a', '#ef4444'],
     previewFont: '"Black Han Sans", sans-serif',
     recommendedTones: ['urgent'],
@@ -76,7 +76,7 @@ export const DM_DESIGN_THEMES: DmDesignTheme[] = [
   {
     id: 'soft-pastel',
     name: '소프트 파스텔',
-    description: '옅은 핑크 서피스 · 도트 포인트 — 부드러운 안부·복귀 톤',
+    description: '옅은 핑크 서피스 · 도트 포인트: 부드러운 안부·복귀 톤',
     swatches: ['#ec4899', '#fbcfe8', '#fffafc'],
     recommendedTones: ['friendly', 'playful'],
     kit: {
@@ -88,7 +88,7 @@ export const DM_DESIGN_THEMES: DmDesignTheme[] = [
   {
     id: 'paper',
     name: '웜 페이퍼',
-    description: '종이 질감 배경 · 고운바탕 세리프 · 그레인 — 따뜻한 로컬 톤',
+    description: '종이 질감 배경 · 고운바탕 세리프 · 그레인: 따뜻한 로컬 톤',
     swatches: ['#9a5b33', '#e8b96a', '#faf6ef'],
     previewFont: '"Gowun Batang", serif',
     recommendedTones: ['friendly', 'elegant'],
@@ -101,7 +101,7 @@ export const DM_DESIGN_THEMES: DmDesignTheme[] = [
   {
     id: 'city-night',
     name: '시티 나이트',
-    description: '다크 배경 · 시안 네온 · 그레인 — 테크·이벤트 밤 무드',
+    description: '다크 배경 · 시안 네온 · 그레인: 테크·이벤트 밤 무드',
     swatches: ['#0b1220', '#0ea5e9', '#22d3ee'],
     recommendedTones: ['premium', 'urgent'],
     kit: {
@@ -113,7 +113,7 @@ export const DM_DESIGN_THEMES: DmDesignTheme[] = [
   {
     id: 'festive',
     name: '페스티브',
-    description: '로즈×앰버 · 브래킷 포인트 — 팝업·이벤트 초대장 톤',
+    description: '로즈×앰버 · 브래킷 포인트: 팝업·이벤트 초대장 톤',
     swatches: ['#e11d48', '#fbbf24', '#ffffff'],
     recommendedTones: ['playful', 'urgent'],
     kit: {

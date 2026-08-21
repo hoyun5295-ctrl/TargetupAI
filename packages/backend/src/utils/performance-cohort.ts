@@ -117,7 +117,7 @@ export async function buildCohortRetention(companyId: string, months: number = 1
     totalCohortCustomers,
     avgM1Rate: totalCohortCustomers > 0 ? weightedM1 / totalCohortCustomers : 0,
     avgM3Rate: totalCohortCustomers > 0 ? weightedM3 / totalCohortCustomers : 0,
-    source: 'customers.created_at + customers.recent_purchase_date (CDP 미연동 회사 fallback — 향후 cdp_events.purchase 강화)',
+    source: 'customers.created_at + customers.recent_purchase_date (CDP 미연동 회사 fallback, 향후 cdp_events.purchase 강화)',
     computedAt: new Date().toISOString(),
   };
 }

@@ -1196,7 +1196,7 @@ export function parseAgentCharges(body: any): { charges: AgentChargeInput[] } | 
   for (const r of raw) {
     const agentSendId = String(r?.agentSendId || '').trim();
     if (!agentSendId || agentSendId.length > 100) return { error: '발송ID가 비었거나 100자를 초과했습니다.' };
-    if (seen.has(agentSendId.toUpperCase())) return { error: `같은 발송ID가 요청에 2번 이상 있습니다: ${agentSendId} — 금액을 합쳐 1행으로 입력하세요.` };
+    if (seen.has(agentSendId.toUpperCase())) return { error: `같은 발송ID가 요청에 2번 이상 있습니다: ${agentSendId}. 금액을 합쳐 1행으로 입력하세요.` };
     seen.add(agentSendId.toUpperCase());
     // 금액 = number 또는 십진 문자열만 (Codex 8R — boolean/배열/16진 문자열의 Number() 강제 변환 차단)
     const rawAmount = r?.amount;

@@ -127,7 +127,7 @@ router.post('/extract', requirePlanFeature('ai_messaging'), async (req: Request,
       return res.status(503).json({
         success: false,
         code: 'DB_MIGRATION_PENDING',
-        error: 'DB 마이그레이션 필요 — 운영자에게 customers 컬럼 확인을 요청해주세요.',
+        error: 'DB 마이그레이션 필요: 운영자에게 customers 컬럼 확인을 요청해주세요.',
       });
     }
     console.error('[targets/extract] 실패:', err);
@@ -208,7 +208,7 @@ router.post('/recipients', requirePlanFeature('ai_messaging'), async (req: Reque
       return res.status(503).json({
         success: false,
         code: 'DB_MIGRATION_PENDING',
-        error: 'DB 마이그레이션 필요 — 운영자에게 customers 컬럼 확인을 요청해주세요.',
+        error: 'DB 마이그레이션 필요: 운영자에게 customers 컬럼 확인을 요청해주세요.',
       });
     }
     console.error('[targets/recipients] 실패:', err);

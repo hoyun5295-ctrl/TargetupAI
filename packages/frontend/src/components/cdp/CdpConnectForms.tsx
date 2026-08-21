@@ -106,7 +106,7 @@ export function CdpCafe24ConnectForm(p: CdpCafe24ConnectFormProps) {
       <div className="flex items-center gap-2 mb-4">
         <Store className="w-5 h-5 text-amber-300" />
         <h2 className="text-base font-bold text-white">카페24 연동</h2>
-        <span className="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-medium">OAuth — 코딩 0건</span>
+        <span className="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-medium">OAuth · 코딩 0건</span>
       </div>
 
       {p.status?.connected ? (
@@ -154,13 +154,13 @@ export function CdpCafe24ConnectForm(p: CdpCafe24ConnectFormProps) {
           {/* 고급 — 자체앱(직접 발급 키)으로 연결 (접이식) */}
           <div className="border border-white/10 rounded-xl overflow-hidden">
             <button onClick={p.onToggleByo} className="w-full px-4 py-2.5 flex items-center justify-between text-[11px] text-white/50 hover:bg-white/5">
-              <span>자체앱(직접 발급한 키)으로 연결 — 고급</span>
+              <span>자체앱(직접 발급한 키)으로 연결 (고급)</span>
               {p.showByo ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
             {p.showByo && (
               <div className="p-4 pt-2 space-y-4 border-t border-white/10">
                 <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
-                  <div className="text-xs font-semibold text-violet-100">자체앱 연결 — 4단계</div>
+                  <div className="text-xs font-semibold text-violet-100">자체앱 연결 · 4단계</div>
                   <GuideStep n={1}>
                     <a href="https://developers.cafe24.com" target="_blank" rel="noreferrer" className="text-violet-200 underline inline-flex items-center gap-1">카페24 개발자센터<ExternalLink className="w-3 h-3" /></a>에서 "앱 만들기"(자체앱)를 생성합니다.
                   </GuideStep>
@@ -287,7 +287,7 @@ export function CdpNaverConnectForm(p: CdpNaverConnectFormProps) {
           </div>
           {/* 안내 — 애플리케이션 등록 4단계 (client_credentials — Redirect URI/scope 없음) */}
           <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
-            <div className="text-xs font-semibold text-violet-100">애플리케이션 연결 — 4단계</div>
+            <div className="text-xs font-semibold text-violet-100">애플리케이션 연결 · 4단계</div>
             <GuideStep n={1}>네이버 커머스 API센터에서 애플리케이션을 등록합니다.</GuideStep>
             <GuideStep n={2}>
               애플리케이션의 <strong className="text-white/90">API 호출 IP</strong>에 한줄로 서버 IP를 등록합니다. (미등록 시 연동이 거부됩니다)
@@ -414,7 +414,7 @@ export function CdpMakeshopConnectForm(p: CdpMakeshopConnectFormProps) {
         <div className="space-y-4">
           {/* 안내 — App 등록 3단계 */}
           <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
-            <div className="text-xs font-semibold text-violet-100">App 연결 — 3단계</div>
+            <div className="text-xs font-semibold text-violet-100">App 연결 · 3단계</div>
             <GuideStep n={1}>메이크샵 파트너센터(partner.makeshop.co.kr)에서 App을 등록합니다.</GuideStep>
             <GuideStep n={2}>
               App에 다음 권한(Read)을 추가합니다.
@@ -478,7 +478,7 @@ export function CdpMakeshopConnectForm(p: CdpMakeshopConnectFormProps) {
       <div className="mt-5 pt-5 border-t border-white/10 space-y-4">
         <div className="flex items-center gap-2">
           <Code2 className="w-4 h-4 text-violet-300" />
-          <h3 className="text-sm font-bold text-white">SDK 설치 — 방문·장바구니 수집 + 인앱 메시지 표시</h3>
+          <h3 className="text-sm font-bold text-white">SDK 설치: 방문·장바구니 수집 + 인앱 메시지 표시</h3>
         </div>
         <div className="text-[11px] text-white/50 -mt-2">회원·주문 동기화(위)와 별개입니다. 방문·장바구니 수집과 <strong className="text-white/80">인앱 메시지 표시</strong>는 쇼핑몰 페이지에 아래 스크립트가 설치돼야 작동합니다. 메이크샵 관리자 &gt; 개별디자인(디자인 편집)에서 모든 페이지에 공통 적용되는 상단 HTML(&lt;head&gt;)에 붙여넣으세요. PC·모바일 디자인 양쪽 모두 필요합니다.</div>
         <div className="space-y-3">
@@ -537,7 +537,7 @@ export function CdpImwebConnectForm(p: CdpImwebConnectFormProps) {
       ) : (
         <div className="space-y-4">
           <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
-            <div className="text-xs font-semibold text-violet-100">아임웹 연결 — 2단계</div>
+            <div className="text-xs font-semibold text-violet-100">아임웹 연결 · 2단계</div>
             <GuideStep n={1}>
               아임웹 앱스토어에서 <strong className="text-white/90">한줄로</strong> 앱을 추가하면 전달되는 <strong className="text-white/90">사이트 코드(siteCode)</strong>를 확인합니다.
             </GuideStep>
@@ -561,7 +561,7 @@ export function CdpImwebConnectForm(p: CdpImwebConnectFormProps) {
             {p.connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 준비 중...</> : <><Link2 className="w-4 h-4" /> 아임웹 연결</>}
           </button>
           {!p.isAdmin && NOT_ADMIN_NOTE}
-          <div className="text-[10px] text-white/30 italic">Data source — 아임웹 Open API (openapi.imweb.me). 회원·주문·수신동의 읽기 전용.</div>
+          <div className="text-[10px] text-white/30 italic">Data source: 아임웹 Open API (openapi.imweb.me). 회원·주문·수신동의 읽기 전용.</div>
         </div>
       )}
 
@@ -569,7 +569,7 @@ export function CdpImwebConnectForm(p: CdpImwebConnectFormProps) {
       <div className="mt-5 pt-5 border-t border-white/10 space-y-4">
         <div className="flex items-center gap-2">
           <Code2 className="w-4 h-4 text-violet-300" />
-          <h3 className="text-sm font-bold text-white">SDK 설치 — 방문·장바구니 수집 + 인앱 메시지 표시</h3>
+          <h3 className="text-sm font-bold text-white">SDK 설치: 방문·장바구니 수집 + 인앱 메시지 표시</h3>
         </div>
         <div className="text-[11px] text-white/50 -mt-2">회원·주문 동기화(위)와 별개입니다. 방문·장바구니 수집과 <strong className="text-white/80">인앱 메시지 표시</strong>는 사이트에 아래 스크립트가 설치돼야 작동합니다. 아임웹 관리자 화면의 코드 삽입(HEAD 영역)에 붙여넣으세요.</div>
         <div className="space-y-3">
@@ -645,7 +645,7 @@ export function CdpGodoConnectForm(p: CdpGodoConnectFormProps) {
       ) : (
         <div className="space-y-4">
           <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
-            <div className="text-xs font-semibold text-violet-100">쇼핑몰 인증키 연결 — 2단계</div>
+            <div className="text-xs font-semibold text-violet-100">쇼핑몰 인증키 연결 · 2단계</div>
             <GuideStep n={1}>고도몰 쇼핑몰 관리자에서 한줄로 API 사용을 신청하고 <strong className="text-white/90">쇼핑몰 인증키(key)</strong>를 발급받습니다.</GuideStep>
             <GuideStep n={2}>발급된 인증키를 아래에 입력하면, 최근 주문이 자동으로 들어옵니다.</GuideStep>
           </div>
@@ -678,14 +678,14 @@ export function CdpGodoConnectForm(p: CdpGodoConnectFormProps) {
       <div className="mt-5 pt-5 border-t border-white/10 space-y-4">
         <div className="flex items-center gap-2">
           <Code2 className="w-4 h-4 text-violet-300" />
-          <h3 className="text-sm font-bold text-white">SDK 설치 — 방문·회원·장바구니 수집</h3>
+          <h3 className="text-sm font-bold text-white">SDK 설치: 방문·회원·장바구니 수집</h3>
         </div>
         <div className="text-[11px] text-white/50 -mt-2">주문(위)과 별개입니다. 방문·회원·장바구니까지 수집하려면 고도몰 스킨(PC·모바일 각각)에 아래를 붙여넣으세요. 고도몰5 표준 치환코드라 수정 없이 동작합니다.</div>
         <div className="space-y-4">
-          {blk('① 설치 스크립트 — 모든 페이지 스킨 <head>', godoHead, '고도몰 설치 스크립트')}
-          {blk('② 회원 식별 — 로그인 스킨 <body> 태그', godoBody, '고도몰 회원 식별 코드')}
-          {blk('③ 장바구니 담기 — 상품상세(goods_view) 스킨', godoCart, '고도몰 장바구니 코드')}
-          {blk('④ 구매 완료 — 주문완료(order_end) 스킨', godoPurchase, '고도몰 구매 완료 코드')}
+          {blk('① 설치 스크립트: 모든 페이지 스킨 <head>', godoHead, '고도몰 설치 스크립트')}
+          {blk('② 회원 식별: 로그인 스킨 <body> 태그', godoBody, '고도몰 회원 식별 코드')}
+          {blk('③ 장바구니 담기: 상품상세(goods_view) 스킨', godoCart, '고도몰 장바구니 코드')}
+          {blk('④ 구매 완료: 주문완료(order_end) 스킨', godoPurchase, '고도몰 구매 완료 코드')}
           <div className="text-[10px] text-amber-300/70 italic">PC·모바일 스킨 양쪽에 넣어야 합니다. 그리고 "수집 허용 도메인"에 몰 도메인을 등록해야 수집이 시작됩니다.</div>
         </div>
       </div>

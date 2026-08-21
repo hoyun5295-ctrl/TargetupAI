@@ -89,7 +89,7 @@ export async function submitBatch(input: {
     throw new Error('requests 배열은 1건 이상 필요합니다.');
   }
   if (input.requests.length > 100000) {
-    throw new Error('Anthropic Batch API 1회 한도(100,000건) 초과 — 분할 진행해주세요.');
+    throw new Error('Anthropic Batch API 1회 한도(100,000건) 초과. 분할 진행해주세요.');
   }
 
   const modelKey = input.model || 'opus';

@@ -150,7 +150,7 @@ export default function EmailAnalyticsModal({
                     );
                   })}
                 </div>
-                <div className="text-[10px] text-white/30 italic mt-2">Data source — email_campaigns 발송 기준 최근 {days}일 vs 직전 동기간</div>
+                <div className="text-[10px] text-white/30 italic mt-2">Data source: email_campaigns 발송 기준 최근 {days}일 vs 직전 동기간</div>
               </div>
 
               {/* 2. AI 종합 진단 */}
@@ -160,7 +160,7 @@ export default function EmailAnalyticsModal({
                     <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-fuchsia-500 to-purple-500 flex items-center justify-center"><Sparkles className="w-4 h-4 text-white" /></div>
                     <div>
                       <div className="text-sm font-bold text-white">AI 종합 진단</div>
-                      <div className="text-[11px] text-white/50">실측 집계만 근거 — 다음 캠페인 개선점</div>
+                      <div className="text-[11px] text-white/50">실측 집계만 근거: 다음 캠페인 개선점</div>
                     </div>
                   </div>
                   <button onClick={runAiInsight} disabled={aiBusy} className="px-3 py-1.5 bg-gradient-to-r from-fuchsia-500 to-purple-500 hover:opacity-90 disabled:opacity-40 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 whitespace-nowrap">
@@ -208,7 +208,7 @@ export default function EmailAnalyticsModal({
                       </div>
                     ))}
                   </div>
-                  <div className="text-[10px] text-white/30 italic mt-2">Data source — email_events 오픈·클릭 일자 집계 (KST)</div>
+                  <div className="text-[10px] text-white/30 italic mt-2">Data source: email_events 오픈·클릭 일자 집계 (KST)</div>
                 </div>
               )}
 
@@ -237,7 +237,7 @@ export default function EmailAnalyticsModal({
                     ))}
                   </div>
                 )}
-                <div className="text-[10px] text-white/30 italic mt-2">Data source — 캠페인별 누적 오픈·클릭 (전 기간)</div>
+                <div className="text-[10px] text-white/30 italic mt-2">Data source: 캠페인별 누적 오픈·클릭 (전 기간)</div>
               </div>
             </>
           )}

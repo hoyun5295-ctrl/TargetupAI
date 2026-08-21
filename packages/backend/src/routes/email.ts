@@ -110,7 +110,7 @@ function handleDbMigrationError(err: any, res: Response, tableName: string): boo
   if (msg.includes('column') && msg.includes('does not exist')) {
     res.status(503).json({
       success: false,
-      error: `DB 마이그레이션 필요 — 운영자에게 ${tableName} ALTER 실행 요청 의무`,
+      error: `DB 마이그레이션 필요: 운영자에게 ${tableName} ALTER 실행 요청 의무`,
       code: 'DB_MIGRATION_PENDING',
     });
     return true;
@@ -123,7 +123,7 @@ function handleEncryptionKeyError(err: any, res: Response): boolean {
   if (msg.includes('SMTP_ENCRYPTION_KEY 미설정')) {
     res.status(503).json({
       success: false,
-      error: 'SMTP 암호화 키 미설정 — 운영자에게 .env SMTP_ENCRYPTION_KEY 등록 요청 의무',
+      error: 'SMTP 암호화 키 미설정. 운영자에게 .env SMTP_ENCRYPTION_KEY 등록 요청 의무',
       code: 'SMTP_ENCRYPTION_KEY_MISSING',
     });
     return true;
@@ -1499,7 +1499,7 @@ router.post('/campaigns/:id/resend-non-openers', async (req: Request, res: Respo
       return res.status(400).json({ success: false, error: '재발송본은 다시 재발송할 수 없습니다.', code: 'RESEND_LIMIT' });
     }
     if ((await countResendChildren(auth.companyId, parent.id)) > 0) {
-      return res.status(400).json({ success: false, error: '이미 재발송한 캠페인입니다 (재발송 1회 한도 — 발신 도메인 평판 보호).', code: 'RESEND_LIMIT' });
+      return res.status(400).json({ success: false, error: '이미 재발송한 캠페인입니다 (재발송 1회 한도, 발신 도메인 평판 보호).', code: 'RESEND_LIMIT' });
     }
     if (!(await isSmtpConfigured(auth.companyId))) {
       return res.status(400).json({ success: false, error: '회사 SMTP 설정 후 재발송할 수 있습니다.' });

@@ -78,12 +78,12 @@ export async function quickActionAIRefine(
 [3 tone 매핑]
 1. 감성적: 시즌 감성 + 진심 어린 표현 + 정중함
 2. 실용적: 명확한 가치 제안 + 사실 기반 + 간결
-3. 캐주얼: 친근한 대화체 + 가벼운 톤 (단, 격조 X — "단골" / "초특가" 단어 사용 절대 금지)
+3. 캐주얼: 친근한 대화체 + 가벼운 톤 (단, 격조 X, "단골" / "초특가" 단어 사용 절대 금지)
 
-[★ 영구 룰 — 절대 위반 X ★]
-- 구체 혜택 (% / 원 / 무료 / 쿠폰 / 사은품) 임의 작성 X — \`[혜택 안내 — 직접 작성해주세요]\` placeholder 그대로 보존
+[★ 영구 룰: 절대 위반 X ★]
+- 구체 혜택 (% / 원 / 무료 / 쿠폰 / 사은품) 임의 작성 X. \`[혜택 안내: 직접 작성해주세요]\` placeholder 그대로 보존
 - 원본 안 변수 ({{ customer.name }}, %고객명% 등) 그대로 보존
-- 원본 안 URL placeholder ([URL — 회사 admin 수정]) 그대로 보존
+- 원본 안 URL placeholder ([URL: 회사 admin 수정]) 그대로 보존
 - 제목 20자 안 / 본문 200~400자
 
 [응답 JSON]
@@ -129,7 +129,7 @@ export async function quickActionAIRefine(
       }))
     : [];
 
-  if (variants.length === 0) throw new Error('AI variant 생성 실패 — 응답 안 variants 0건');
+  if (variants.length === 0) throw new Error('AI variant 생성 실패: 응답 안 variants 0건');
 
   // variant 자동 신설 (CT-80 createVariant 호출) — 가중치 동등 100/100/100
   const createdIds: string[] = [];
@@ -156,7 +156,7 @@ export async function quickActionAIRefine(
   return {
     actionType: 'ai_refine',
     applied: createdIds.length > 0,
-    appliedDetails: `A/B variant ${createdIds.length}건 자동 신설 — 감성/실용/캐주얼 톤 자동 생성. 발송 시점 Sticky bucketing + Thompson Sampling으로 winner 자동 선택`,
+    appliedDetails: `A/B variant ${createdIds.length}건 자동 신설. 감성/실용/캐주얼 톤 자동 생성. 발송 시점 Sticky bucketing + Thompson Sampling으로 winner 자동 선택`,
     beforeAfter: {
       before: { variantCount: 0 },
       after: { variantCount: createdIds.length, tones: variants.map((v) => v.tone) },
@@ -192,7 +192,7 @@ export async function quickActionTimeOptimize(
     return {
       actionType: 'time_optimize',
       applied: false,
-      appliedDetails: `데이터 누적 부족 (impression ${totalImp}건 < 50건) — 시간대 최적화 진행 X. 충분한 데이터 후 재시도 권장`,
+      appliedDetails: `데이터 누적 부족 (impression ${totalImp}건 < 50건). 시간대 최적화 진행 X. 충분한 데이터 후 재시도 권장`,
       beforeAfter: {
         before: { send_start_hour: beforeStart, send_end_hour: beforeEnd },
         after: { send_start_hour: beforeStart, send_end_hour: beforeEnd },
@@ -210,7 +210,7 @@ export async function quickActionTimeOptimize(
     return {
       actionType: 'time_optimize',
       applied: false,
-      appliedDetails: '유효한 시간대 통계 없음 — 시간대 최적화 진행 X',
+      appliedDetails: '유효한 시간대 통계 없음. 시간대 최적화 진행 X',
       beforeAfter: {
         before: { send_start_hour: beforeStart, send_end_hour: beforeEnd },
         after: { send_start_hour: beforeStart, send_end_hour: beforeEnd },
@@ -224,7 +224,7 @@ export async function quickActionTimeOptimize(
     return {
       actionType: 'time_optimize',
       applied: false,
-      appliedDetails: '새벽 시간대만 CTR 높음 — 안전상 적용 X (7~22시 표준 유지 권장)',
+      appliedDetails: '새벽 시간대만 CTR 높음. 안전상 적용 X (7~22시 표준 유지 권장)',
       beforeAfter: {
         before: { send_start_hour: beforeStart, send_end_hour: beforeEnd },
         after: { send_start_hour: beforeStart, send_end_hour: beforeEnd },
@@ -245,7 +245,7 @@ export async function quickActionTimeOptimize(
   return {
     actionType: 'time_optimize',
     applied: true,
-    appliedDetails: `시간대 ${newStart}~${newEnd}시 적용 — 상위 CTR 시간대 자동 도출 (${validHours.length}개 시간대 분석)`,
+    appliedDetails: `시간대 ${newStart}~${newEnd}시 적용. 상위 CTR 시간대 자동 도출 (${validHours.length}개 시간대 분석)`,
     beforeAfter: {
       before: { send_start_hour: beforeStart, send_end_hour: beforeEnd },
       after: { send_start_hour: newStart, send_end_hour: newEnd },
@@ -285,7 +285,7 @@ export async function quickActionSegmentRefine(
     return {
       actionType: 'segment_refine',
       applied: false,
-      appliedDetails: '회사 LTV 데이터 부족 — 세그먼트 정밀화 진행 X. CDP 동기화 후 재시도 권장',
+      appliedDetails: '회사 LTV 데이터 부족. 세그먼트 정밀화 진행 X. CDP 동기화 후 재시도 권장',
       beforeAfter: { before: beforeSegment, after: beforeSegment },
     };
   }
@@ -310,7 +310,7 @@ export async function quickActionSegmentRefine(
   return {
     actionType: 'segment_refine',
     applied: true,
-    appliedDetails: `세그먼트 정밀화 적용 — LTV ${p70LTV.toLocaleString()}원 이상 (상위 30%) + 30일 안 활성 사용자 한정`,
+    appliedDetails: `세그먼트 정밀화 적용: LTV ${p70LTV.toLocaleString()}원 이상 (상위 30%) + 30일 안 활성 사용자 한정`,
     beforeAfter: {
       before: beforeSegment,
       after: newSegment,

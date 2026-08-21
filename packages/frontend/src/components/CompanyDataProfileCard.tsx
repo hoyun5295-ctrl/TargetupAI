@@ -83,7 +83,7 @@ export default function CompanyDataProfileCard({ className }: CompanyDataProfile
   if (error || !profile) {
     return (
       <div className={`rounded-2xl bg-white/[0.04] backdrop-blur-xl border border-white/10 p-6 shadow-lg ${className || ''}`}>
-        <p className="text-xs text-white/50">회사 데이터 프로필 표시 영역 — {error || '데이터 없음'}</p>
+        <p className="text-xs text-white/50">회사 데이터 프로필 표시 영역: {error || '데이터 없음'}</p>
       </div>
     );
   }
@@ -120,7 +120,7 @@ export default function CompanyDataProfileCard({ className }: CompanyDataProfile
           <p className="text-[10px] font-semibold tracking-[0.22em] uppercase mb-1 text-violet-200">Company Data Profile</p>
           <p className="text-base font-bold text-white">이 메시지에 활용된 회사 데이터</p>
           <p className="text-xs text-white/50 mt-0.5">
-            총 {totalCustomers.toLocaleString()}명 customer DB 실측 분석 결과 — AI가 안전한 변수만 활용합니다
+            총 {totalCustomers.toLocaleString()}명 customer DB 실측 분석 결과. AI가 안전한 변수만 활용합니다
           </p>
         </div>
       </div>

@@ -56,7 +56,7 @@ export default function NaturalLanguageStart({ submitting, onSubmit }: { submitt
       </div>
 
       <div className="mt-5 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
-        <div className="text-xs text-white/40 mb-2.5">이 항목은 AI가 자동으로 잡습니다 — 필요하면 다음 단계에서 조정</div>
+        <div className="text-xs text-white/40 mb-2.5">이 항목은 AI가 자동으로 잡습니다. 필요하면 다음 단계에서 조정</div>
         <div className="flex flex-wrap gap-2">
           {AUTO_ITEMS.map((it) => (
             <span key={it} className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-300">

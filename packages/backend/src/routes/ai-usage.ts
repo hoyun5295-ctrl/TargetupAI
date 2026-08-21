@@ -130,17 +130,17 @@ router.get('/overview', async (req: Request, res: Response) => {
       : 0;
     let topInsight = '';
     if (monthly.limit === null) {
-      topInsight = `이번 달 ${monthly.used.toLocaleString()}회 호출 — 무제한 요금제 사용 중입니다. cache 히트율 ${(cache.hitRate * 100).toFixed(1)}% 로 비용을 절감하고 있습니다.`;
+      topInsight = `이번 달 ${monthly.used.toLocaleString()}회 호출. 무제한 요금제 사용 중입니다. cache 히트율 ${(cache.hitRate * 100).toFixed(1)}% 로 비용을 절감하고 있습니다.`;
     } else if (monthlyPercent >= 95) {
-      topInsight = `한도 ${monthlyPercent}% 도달 — 곧 AI 호출이 차단됩니다. Batch 처리 모드 전환 또는 요금제 업그레이드를 권장합니다.`;
+      topInsight = `한도 ${monthlyPercent}% 도달. 곧 AI 호출이 차단됩니다. Batch 처리 모드 전환 또는 요금제 업그레이드를 권장합니다.`;
     } else if (monthlyPercent >= 80) {
-      topInsight = `한도 ${monthlyPercent}% 사용 — ${predictedDaysToLimit !== null ? `약 ${predictedDaysToLimit}일 후 한도 도달 예상` : '주의 필요'}. 한도 알림 설정을 권장합니다.`;
+      topInsight = `한도 ${monthlyPercent}% 사용. ${predictedDaysToLimit !== null ? `약 ${predictedDaysToLimit}일 후 한도 도달 예상` : '주의 필요'}. 한도 알림 설정을 권장합니다.`;
     } else if (cache.hitRate >= 0.3) {
-      topInsight = `한도 ${monthlyPercent}% 사용 중 — cache 히트율 ${(cache.hitRate * 100).toFixed(1)}% 로 효율적으로 운영되고 있습니다.`;
+      topInsight = `한도 ${monthlyPercent}% 사용 중. cache 히트율 ${(cache.hitRate * 100).toFixed(1)}% 로 효율적으로 운영되고 있습니다.`;
     } else if (monthly.used > 100 && cache.hitRate < 0.1) {
-      topInsight = `한도 ${monthlyPercent}% 사용 — cache 히트율 ${(cache.hitRate * 100).toFixed(1)}% 가 낮습니다. 자연어 질문 반복 시 5분 내 동일 입력은 자동 cache 되므로 비용 절감 가능합니다.`;
+      topInsight = `한도 ${monthlyPercent}% 사용. cache 히트율 ${(cache.hitRate * 100).toFixed(1)}% 가 낮습니다. 자연어 질문 반복 시 5분 내 동일 입력은 자동 cache 되므로 비용 절감 가능합니다.`;
     } else {
-      topInsight = `이번 달 ${monthly.used.toLocaleString()}회 호출 — 한도 ${monthlyPercent}% 사용 중입니다.`;
+      topInsight = `이번 달 ${monthly.used.toLocaleString()}회 호출. 한도 ${monthlyPercent}% 사용 중입니다.`;
     }
 
     return res.json({
@@ -167,7 +167,7 @@ router.get('/overview', async (req: Request, res: Response) => {
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 companies ALTER (ai_usage_threshold_config jsonb) 실행 요청',
+        error: 'DB 마이그레이션 필요: 운영자에게 companies ALTER (ai_usage_threshold_config jsonb) 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -320,11 +320,11 @@ ${topSources || '(데이터 없음)'}
 
 ## 답변 원칙 (반드시 준수)
 1. 위 데이터만 근거로 답변하세요. 데이터에 없는 정보는 추측하지 마세요.
-2. **모델명을 절대 노출하지 마세요** — "고급 추론 모드 / 표준 추론 모드 / 보조 추론 모드" 추상 명칭만 사용.
-3. **구체 혜택(%, 원, 무료, 쿠폰) 임의 생성 금지** — 회사 정책 데이터가 없습니다.
+2. **모델명을 절대 노출하지 마세요**. "고급 추론 모드 / 표준 추론 모드 / 보조 추론 모드" 추상 명칭만 사용.
+3. **구체 혜택(%, 원, 무료, 쿠폰) 임의 생성 금지**. 회사 정책 데이터가 없습니다.
 4. 답변은 한국어 3~6문장으로 간결하게 작성하세요.
 5. 비용 절감 추천 시 = Batch 처리 모드 (24시간 SLA, 50% 절감) + cache 히트율 향상 + 한도 알림 설정 중심으로 안내.
-6. "~인 것 같습니다" 가설 표현 금지 — 근거 명확하면 단언, 부족하면 "데이터 부족" 명시.`;
+6. "~인 것 같습니다" 가설 표현 금지. 근거 명확하면 단언, 부족하면 "데이터 부족" 명시.`;
 
     const answer = await callAIWithFallback({
       system: systemPrompt,
@@ -414,7 +414,7 @@ router.post('/threshold-alert', async (req: Request, res: Response) => {
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 companies ALTER (ai_usage_threshold_config jsonb) 실행 요청',
+        error: 'DB 마이그레이션 필요: 운영자에게 companies ALTER (ai_usage_threshold_config jsonb) 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }

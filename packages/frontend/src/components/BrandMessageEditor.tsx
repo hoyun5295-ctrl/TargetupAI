@@ -193,7 +193,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
     for (let i = 0; i < buttons.length; i++) {
       const b = buttons[i];
       const spec = BUTTON_TYPES.find(t => t.code === b.type);
-      if (!spec) return `${i + 1}번째 버튼은 지금 사용할 수 없는 종류입니다 — 다시 선택해주세요`;
+      if (!spec) return `${i + 1}번째 버튼은 지금 사용할 수 없는 종류입니다. 다시 선택해주세요`;
       if (!b.name.trim()) return `${i + 1}번째 버튼의 버튼명을 입력해주세요`;
       if (spec?.needUrl && !(b.url_mobile || '').trim()) return `${i + 1}번째 버튼의 링크를 입력해주세요`;
       if (spec?.targetingOnly && !spec.targetingOnly.includes(targeting)) {
@@ -328,7 +328,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
             <label className="block text-[13px] font-semibold text-slate-700 mb-1.5">타겟팅</label>
             <select value={targeting} onChange={(e) => setTargeting(e.target.value)} className={FIELD_CLASS}>
               {TARGETING_OPTIONS.map(t => (
-                <option key={t.code} value={t.code}>{t.label} — {t.desc}</option>
+                <option key={t.code} value={t.code}>{t.label}: {t.desc}</option>
               ))}
             </select>
           </div>
@@ -338,7 +338,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
         <label className="inline-flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer select-none">
           <input type="checkbox" checked={isAd} onChange={(e) => setIsAd(e.target.checked)}
             className="w-4 h-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500/40" />
-          광고 메시지 <span className="text-slate-400 text-[12px]">— 수신거부 표시가 필요합니다</span>
+          광고 메시지 <span className="text-slate-400 text-[12px]">(수신거부 표시가 필요합니다)</span>
         </label>
 
         {/* 기본형: 템플릿 코드 */}
@@ -468,7 +468,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending }: BrandM
               {hasCoupon && (
                 <>
                   {!!couponTitle && (
-                    <p className="text-[11px] text-slate-400 px-1">표시될 제목 — {couponTitle}</p>
+                    <p className="text-[11px] text-slate-400 px-1">표시될 제목: {couponTitle}</p>
                   )}
                   <input type="text" value={couponDesc} onChange={(e) => setCouponDesc(e.target.value)}
                     maxLength={selectedType.couponDescMax} className={FIELD_CLASS}

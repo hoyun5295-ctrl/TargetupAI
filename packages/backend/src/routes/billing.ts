@@ -159,7 +159,7 @@ router.post('/generate', async (req: Request, res: Response) => {
     }
     const emsg = error?.message || '';
     if (emsg.includes('column') && emsg.includes('does not exist')) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — billing_items.channel·store_id·plan_days·plan_month_days, billings.scope·batch_id, ai_credit_transactions.overage_credits·billed_billing_id 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: billing_items.channel·store_id·plan_days·plan_month_days, billings.scope·batch_id, ai_credit_transactions.overage_credits·billed_billing_id 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('정산 생성 오류:', error);
     return res.status(500).json({ error: error.message });
@@ -225,7 +225,7 @@ router.post('/bulk/retry-confirmations', async (req: Request, res: Response) => 
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — invoice_confirmations 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: invoice_confirmations 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('컨펌 재시도 오류:', error);
     return res.status(500).json({ error: error.message });
@@ -264,7 +264,7 @@ router.get('/company-billing-settings/:companyId', async (req: Request, res: Res
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — company_billing_settings·billing_contacts 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: company_billing_settings·billing_contacts 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('정산 설정 조회 오류:', error);
     return res.status(500).json({ error: error.message });
@@ -295,7 +295,7 @@ router.put('/company-billing-settings/:companyId', async (req: Request, res: Res
     }
     if (bizErrors.length > 0) {
       return res.status(400).json({
-        error: `사업자등록번호는 숫자 10자리여야 합니다 — ${bizErrors.join(' / ')}`,
+        error: `사업자등록번호는 숫자 10자리여야 합니다: ${bizErrors.join(' / ')}`,
         code: 'BILLING_CONTACT_INVALID',
       });
     }
@@ -363,7 +363,7 @@ router.put('/company-billing-settings/:companyId', async (req: Request, res: Res
     try { await client.query('ROLLBACK'); } catch { /* 아래 응답이 사실을 전달한다 */ }
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — company_billing_settings·billing_contacts 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: company_billing_settings·billing_contacts 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     // ★ 2026-07-28 입력값 검증 실패는 사람이 고칠 수 있는 문제라 400으로 그대로 알린다(500 노출 금지).
     if (emsg.includes('사업자등록번호') || emsg.includes('값이 올바르지 않습니다')) {
@@ -416,7 +416,7 @@ router.post('/company-billing-settings/:companyId/recipients', async (req: Reque
     try { await client.query('ROLLBACK'); } catch { /* 아래 응답이 사실을 전달한다 */ }
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — billing_recipients 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: billing_recipients 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     if (emsg.includes('이메일') || emsg.includes('문서 유형')) {
       return res.status(400).json({ success: false, error: emsg });
@@ -446,7 +446,7 @@ router.delete('/company-billing-settings/:companyId/recipients/:id', async (req:
     try { await client.query('ROLLBACK'); } catch { /* 아래 응답이 사실을 전달한다 */ }
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — billing_recipients 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: billing_recipients 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('정산 수신자 삭제 오류:', emsg || error);
     return res.status(500).json({ success: false, error: '수신자 삭제 실패' });
@@ -473,7 +473,7 @@ router.get('/bulk/unbilled', async (req: Request, res: Response) => {
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — 일괄발급 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: 일괄발급 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('일괄발급 대상 조회 오류:', error);
     return res.status(500).json({ error: error.message });
@@ -490,7 +490,7 @@ const isMigrationPending = (error: any): boolean => {
   const m = error?.message || '';
   return m.includes('does not exist') && (m.includes('relation') || m.includes('column'));
 };
-const MIGRATION_MSG = 'DB 마이그레이션 필요 — billing_manual_completions 테이블·company_billing_settings.manual_billing 컬럼 생성 요청';
+const MIGRATION_MSG = 'DB 마이그레이션 필요: billing_manual_completions 테이블·company_billing_settings.manual_billing 컬럼 생성 요청';
 
 // GET /bulk/manual-completions?start&end — 그 기간 수동완료 목록
 router.get('/bulk/manual-completions', async (req: Request, res: Response) => {
@@ -518,7 +518,7 @@ router.post('/bulk/manual-completions', async (req: Request, res: Response) => {
     }
     // ★ 2026-07-29 달 단위로만 받는다 — 하루짜리 기록이 그 달 전체를 가리는 매출 누락 경로를 입구에서 막는다.
     if (!isWholeMonthPeriod(String(period_start), String(period_end))) {
-      return res.status(400).json({ error: '수동 정산완료는 달 단위로만 기록합니다 — 대상월 1일부터 말일까지여야 합니다.' });
+      return res.status(400).json({ error: '수동 정산완료는 달 단위로만 기록합니다. 대상월 1일부터 말일까지여야 합니다.' });
     }
     const ids = Array.from(new Set((Array.isArray(company_ids) ? company_ids : []).map((v: any) => String(v))));
     if (ids.length === 0) return res.status(400).json({ error: '수동 정산완료로 표시할 회사를 선택해 주세요.' });
@@ -564,7 +564,7 @@ router.post('/bulk/jobs', async (req: Request, res: Response) => {
     // ★ 2026-07-29 일괄발급도 달 단위로만 받는다(화면이 월만 보낸다). 수동완료와 같은 격자에 놓여야
     //   "6월 수동완료 + 6/25~7/25 일괄발급" 같은 부분 겹침 자체가 생기지 않는다. 임의 기간은 단건 발행 경로다.
     if (!isWholeMonthPeriod(String(period_start), String(period_end))) {
-      return res.status(400).json({ error: '일괄발급은 달 단위로만 실행합니다 — 대상월 1일부터 말일까지여야 합니다.' });
+      return res.status(400).json({ error: '일괄발급은 달 단위로만 실행합니다. 대상월 1일부터 말일까지여야 합니다.' });
     }
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const list = Array.isArray(items) ? items : [];
@@ -595,7 +595,7 @@ router.post('/bulk/jobs', async (req: Request, res: Response) => {
     }
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — 일괄발급 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: 일괄발급 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('일괄발급 시작 오류:', error);
     return res.status(500).json({ error: error.message });
@@ -611,7 +611,7 @@ router.get('/bulk/jobs/:id', async (req: Request, res: Response) => {
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — 일괄발급 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: 일괄발급 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('일괄발급 조회 오류:', error);
     return res.status(500).json({ error: error.message });
@@ -661,7 +661,7 @@ router.get('/confirmations', async (req: Request, res: Response) => {
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — invoice_confirmations 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: invoice_confirmations 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('컨펌 현황 조회 오류:', error);
     return res.status(500).json({ error: error.message });
@@ -704,7 +704,7 @@ router.get('/taxbill-issues', async (req: Request, res: Response) => {
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('세금계산서 장부 조회 오류:', error);
     return res.status(500).json({ error: error.message });
@@ -807,7 +807,7 @@ router.post('/taxbill-issues/:id/modify', async (req: Request, res: Response) =>
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('수정세금계산서 생성 오류:', error);
     return res.status(500).json({ error: error.message });
@@ -874,7 +874,7 @@ router.post('/taxbill-issues/:id/retry', async (req: Request, res: Response) => 
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('세금계산서 재시도 오류:', error);
     return res.status(500).json({ error: error.message });
@@ -946,7 +946,7 @@ router.put('/taxbill-issues/:id/issue-date', async (req: Request, res: Response)
       if (!neverAttempted && !rejectedByValidation) {
         await client.query('ROLLBACK');
         return res.status(409).json({
-          error: '이 건은 팝빌 발행 시도 이력이 있어 문서가 외부에 존재할 수 있습니다. 안전이 확정되는 경우(발행 시도 전·미래 작성일자 거절)에만 날짜를 바꿀 수 있습니다 — 팝빌 사이트에서 대사 후 처리해 주세요.',
+          error: '이 건은 팝빌 발행 시도 이력이 있어 문서가 외부에 존재할 수 있습니다. 안전이 확정되는 경우(발행 시도 전·미래 작성일자 거절)에만 날짜를 바꿀 수 있습니다. 팝빌 사이트에서 대사 후 처리해 주세요.',
           code: 'TAXBILL_ISSUE_DATE_UNSAFE',
         });
       }
@@ -1009,7 +1009,7 @@ router.put('/taxbill-issues/:id/issue-date', async (req: Request, res: Response)
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('작성일자 변경 오류:', error);
     return res.status(500).json({ error: error.message });
@@ -1063,7 +1063,7 @@ router.post('/taxbill-issues/:id/reissue-production', async (req: Request, res: 
       if (row.is_test === null || row.is_test === undefined) {
         await client.query('ROLLBACK');
         return res.status(503).json({
-          error: 'DB 마이그레이션 필요 — taxbill_issues.is_test 컬럼 추가와 백필 실행 요청',
+          error: 'DB 마이그레이션 필요: taxbill_issues.is_test 컬럼 추가와 백필 실행 요청',
           code: 'DB_MIGRATION_PENDING',
         });
       }
@@ -1084,7 +1084,7 @@ router.post('/taxbill-issues/:id/reissue-production', async (req: Request, res: 
       if (String(row.kind) !== 'original') {
         await client.query('ROLLBACK');
         return res.status(422).json({
-          error: '수정세금계산서는 이 경로로 되돌리지 않습니다. 당초 원본이 참조하는 승인번호가 테스트베드 것이라 운영에는 그 원본이 없습니다 — 원본을 먼저 운영으로 발행한 뒤 그 승인번호로 다시 정정해야 합니다.',
+          error: '수정세금계산서는 이 경로로 되돌리지 않습니다. 당초 원본이 참조하는 승인번호가 테스트베드 것이라 운영에는 그 원본이 없습니다. 원본을 먼저 운영으로 발행한 뒤 그 승인번호로 다시 정정해야 합니다.',
           code: 'TAXBILL_NOT_ORIGINAL',
         });
       }
@@ -1119,7 +1119,7 @@ router.post('/taxbill-issues/:id/reissue-production', async (req: Request, res: 
       await client.query(
         `UPDATE taxbill_issues
             SET status = 'ready', nts_confirm_num = NULL, issued_at = NULL, is_test = false,
-                error = '테스트베드 발행분 — 운영으로 재발행'
+                error = '테스트베드 발행분: 운영으로 재발행'
           WHERE id = $1::uuid AND kind = 'original'`,
         [id],
       );
@@ -1141,7 +1141,7 @@ router.post('/taxbill-issues/:id/reissue-production', async (req: Request, res: 
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — taxbill_issues.is_test 컬럼 추가 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: taxbill_issues.is_test 컬럼 추가 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('테스트베드 재발행 오류:', emsg || error);
     return res.status(500).json({ error: '운영 재발행 요청에 실패했습니다.' });
@@ -1205,7 +1205,7 @@ router.post('/taxbill-issues/:id/cancel', async (req: Request, res: Response) =>
             AND nts_confirm_num IS NULL
             AND (kind = 'original' OR (kind = 'modify' AND modify_code IN (2, 4, 6)))
         RETURNING confirmation_id`,
-        [id, `발급 대기 취소 — ${reason}`],
+        [id, `발급 대기 취소: ${reason}`],
       );
       if (r.rows.length === 0) {
         // 판정은 위 UPDATE가 끝냈다. 여기서는 **사유만** 읽어 담당자가 다음 행동을 알게 한다.
@@ -1254,7 +1254,7 @@ router.post('/taxbill-issues/:id/cancel', async (req: Request, res: Response) =>
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('세금계산서 발급 대기 취소 오류:', emsg || error);
     return res.status(500).json({ error: '발급 대기 취소에 실패했습니다.' });
@@ -1278,13 +1278,13 @@ router.post('/taxbill-issues/:id/resend-email', async (req: Request, res: Respon
       sent: r.sent,
       failed: r.failed,
       message: r.failed.length > 0
-        ? `${r.sent.length}곳으로 다시 보냈습니다. 실패 ${r.failed.length}곳 — ${r.failed.map((f) => f.email).join(', ')}`
+        ? `${r.sent.length}곳으로 다시 보냈습니다. 실패 ${r.failed.length}곳: ${r.failed.map((f) => f.email).join(', ')}`
         : `${r.sent.join(', ')}로 계산서 메일을 다시 보냈습니다.`,
     });
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: taxbill_issues 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('세금계산서 메일 재발송 오류:', emsg || error);
     // ★ Codex 3R medium 수용 — **분류된 실패만 그 상태로 돌려준다.**
@@ -1335,7 +1335,7 @@ router.put('/confirmations/:id/admin-confirm', async (req: Request, res: Respons
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
       return res.status(503).json({
-        error: 'DB 마이그레이션 필요 — invoice_confirmations.confirmed_by_admin·confirm_note 컬럼 ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: invoice_confirmations.confirmed_by_admin·confirm_note 컬럼 ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -1410,7 +1410,7 @@ router.put('/confirmations/:id/issue-date', async (req: Request, res: Response) 
       if (reconcile.rows.length > 0) {
         await client.query('ROLLBACK');
         return res.status(409).json({
-          error: '취소된 장에 국세청 승인번호가 확인됩니다 — 그 문서가 실제로 발행돼 있다는 뜻이라, 다시 발행하면 같은 건이 두 장 나갑니다. 팝빌 대사 후 처리해 주세요.',
+          error: '취소된 장에 국세청 승인번호가 확인됩니다. 그 문서가 실제로 발행돼 있다는 뜻이라, 다시 발행하면 같은 건이 두 장 나갑니다. 팝빌 대사 후 처리해 주세요.',
           code: 'TAXBILL_RECONCILE_REQUIRED',
         });
       }
@@ -1454,7 +1454,7 @@ router.put('/confirmations/:id/issue-date', async (req: Request, res: Response) 
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — invoice_confirmations.taxbill_remark · company_billing_settings.require_taxbill_remark ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: invoice_confirmations.taxbill_remark · company_billing_settings.require_taxbill_remark ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('작성일자 지정 오류:', error);
     return res.status(500).json({ error: error.message });
@@ -1633,7 +1633,7 @@ router.post('/080-numbers', async (req: Request, res: Response) => {
     // ★ 2026-07-31 `user_id` ALTER 미실행 서버에서 500 대신 안내로 (db_alter_safety_net)
     const emsg080 = error?.message || '';
     if (emsg080.includes('does not exist') && (emsg080.includes('column') || emsg080.includes('relation'))) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — billing_080_numbers.user_id 컬럼 추가 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: billing_080_numbers.user_id 컬럼 추가 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('080 번호 저장 오류:', emsg080 || error);
     return res.status(500).json({ success: false, error: '080 번호 저장 실패' });
@@ -1851,7 +1851,7 @@ router.post('/extra-items', async (req: Request, res: Response) => {
     //   ★ 2026-08-20(2) 커버리지 판정이 billing_manual_completions도 읽는다 — 안내 대상에 포함.
     const emsgX = error?.message || '';
     if (emsgX.includes('does not exist') && (emsgX.includes('column') || emsgX.includes('relation'))) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — billing_extra_items.user_id·billing_manual_completions 반영 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: billing_extra_items.user_id·billing_manual_completions 반영 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('부가서비스 항목 추가 오류:', emsgX || error);
     return res.status(400).json({ success: false, error: emsgX || '항목 추가 실패' });
@@ -1944,7 +1944,7 @@ router.get('/:id/qty-adjustments', async (req: Request, res: Response) => {
         unit_price: l.unitPrice, count: l.count, amount: l.amount,
         delta, base: l.count - applied,
         adjustable: !multiPrice,
-        not_adjustable_reason: multiPrice ? '같은 유형에 단가가 여러 개입니다(발송ID별 단가) — 화면에서 조정할 수 없습니다' : null,
+        not_adjustable_reason: multiPrice ? '같은 유형에 단가가 여러 개입니다(발송ID별 단가). 화면에서 조정할 수 없습니다' : null,
       };
     });
     return res.json({
@@ -1962,7 +1962,7 @@ router.get('/:id/qty-adjustments', async (req: Request, res: Response) => {
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — billing_qty_adjustments 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: billing_qty_adjustments 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('수량 조정 조회 오류:', emsg || error);
     return res.status(500).json({ success: false, error: '수량 조정 조회 실패' });
@@ -2021,7 +2021,7 @@ router.post('/:id/qty-adjustments', async (req: Request, res: Response) => {
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — billing_qty_adjustments 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: billing_qty_adjustments 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('수량 조정 저장 오류:', emsg || error);
     return res.status(500).json({ success: false, error: '수량 조정 저장 실패' });
@@ -2217,7 +2217,7 @@ router.get('/agent-price-gaps', async (_req: Request, res: Response) => {
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('column') && emsg.includes('does not exist')) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — company_agent_ids.billing_type·cost_per_* 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: company_agent_ids.billing_type·cost_per_* 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('에이전트 단가 공백 조회 오류:', error);
     return res.status(500).json({ error: error.message });
@@ -2485,16 +2485,16 @@ const handleBillingDelete = async (req: Request, res: Response) => {
             String(g.channel) === String(a.channel)
             && String(g.message_type) === String(a.type_key)
             && (a.agent_id ? String(g.agent_id || '') === String(a.agent_id) : true));
-          if (hits.length === 0) { bad.push(`${a.channel}/${a.type_key} — 청구 항목 없음`); continue; }
+          if (hits.length === 0) { bad.push(`${a.channel}/${a.type_key}: 청구 항목 없음`); continue; }
           const base = hits.reduce((s: number, g: any) => s + (Number(g.cnt) || 0), 0) - (Number(a.applied_delta) || 0);
           if (base + (Number(a.qty_delta) || 0) < 0) {
-            bad.push(`${a.channel}/${a.type_key} — 조정 후 ${base + (Number(a.qty_delta) || 0)}건`);
+            bad.push(`${a.channel}/${a.type_key}: 조정 후 ${base + (Number(a.qty_delta) || 0)}건`);
           }
         }
         if (bad.length > 0) {
           await client.query('ROLLBACK');
           return res.status(422).json({
-            error: `수량 조정을 적용할 수 없어 재발행을 중단했습니다 (${bad.join(', ')}). 기존 정산은 그대로 있습니다 — 조정을 고친 뒤 다시 시도해주세요.`,
+            error: `수량 조정을 적용할 수 없어 재발행을 중단했습니다 (${bad.join(', ')}). 기존 정산은 그대로 있습니다. 조정을 고친 뒤 다시 시도해주세요.`,
             code: 'BILLING_QTY_ADJUST_PREFLIGHT',
           });
         }
@@ -2572,7 +2572,7 @@ const handleBillingDelete = async (req: Request, res: Response) => {
           ...body,
           code: body?.code || 'BILLING_REISSUE_FAILED',
           deleted: true,
-          error: `기존 정산은 삭제됐지만 재발행에 실패했습니다 — ${body?.error || '알 수 없는 오류'}. 원인을 고친 뒤 정산 목록에서 같은 기간으로 다시 발행해주세요.`,
+          error: `기존 정산은 삭제됐지만 재발행에 실패했습니다: ${body?.error || '알 수 없는 오류'}. 원인을 고친 뒤 정산 목록에서 같은 기간으로 다시 발행해주세요.`,
         });
       }
     }
@@ -2590,7 +2590,7 @@ const handleBillingDelete = async (req: Request, res: Response) => {
     }
     const emsg = error?.message || '';
     if (emsg.includes('column') && emsg.includes('does not exist')) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — billings.batch_id·ai_credit_transactions.billed_billing_id 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: billings.batch_id·ai_credit_transactions.billed_billing_id 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('정산 삭제 오류:', error);
     return res.status(500).json({ error: error.message });
@@ -2838,7 +2838,7 @@ router.get('/preview', async (req: Request, res: Response) => {
     const blockers: string[] = [];
     const blockerCodes: string[] = [];
     const block = (code: string, msg: string) => { blockerCodes.push(code); blockers.push(msg); };
-    if (!billable) block('PREPAID_COMPANY_NOT_BILLABLE', '선불 고객사 — 발송 시점에 잔액에서 이미 차감되어 월 정산서 발행 시 이중 청구');
+    if (!billable) block('PREPAID_COMPANY_NOT_BILLABLE', '선불 고객사: 발송 시점에 잔액에서 이미 차감되어 월 정산서 발행 시 이중 청구');
     if (axisDiffs.length > 0) block('BILLING_AXIS_MISMATCH', '청구 상세와 사용량 집계 수량 불일치');
     // ★ 2026-08-04 기간 축 차단 2종(겹치는 발행·수동 정산완료) — 발행이 409로 막는 사유인데 미리보기에 없어
     //   "미리보기 통과 → 발행 실패"가 났다(0731 별건 5). 판정·문구를 발행과 **같은 함수**에서 받는다.
@@ -2852,11 +2852,11 @@ router.get('/preview', async (req: Request, res: Response) => {
     if (unbillable.length > 0) block('UNBILLABLE_TYPE_KEY', `청구 단가가 정의되지 않은 유형: ${summarizeBlockList(unbillable.map((u) => u.key))}`);
     if (webUnsetPriced.length > 0) block('WEB_UNIT_PRICE_UNSET', `고객사 단가 미설정: ${summarizeBlockList(webUnsetPriced.map((u) => u.key))}`);
     if (priced.missingAgentPrices.length > 0) block('AGENT_UNIT_PRICE_MISSING', `에이전트 발송ID 단가 미설정: ${summarizeBlockList(priced.missingAgentPrices.map((m) => `${m.agentSendId} ${m.typeKey}`))}`);
-    if (usage.agentMappingMissing) block('AGENT_MAPPING_MISSING', `에이전트 사용 설정(usage_type=${ledger.usageType})인데 발송ID 매핑 0건 — 게이트웨이 발송분이 통째로 빠진다`);
+    if (usage.agentMappingMissing) block('AGENT_MAPPING_MISSING', `에이전트 사용 설정(usage_type=${ledger.usageType})인데 발송ID 매핑 0건. 게이트웨이 발송분이 통째로 빠진다`);
     if (!planGate.ok) {
       block('PLAN_HISTORY_MISSING', planGate.blockReason === 'history_absent'
-        ? '요금제가 배정돼 있는데 요금제 변경 이력이 0건 — 구독료가 0원으로 빠진다'
-        : `요금제 이력이 중간에 끊김 ${planGate.gap!.from}~${planGate.gap!.to} (${planGate.gap!.days}일) — 그 구간 구독료가 0원으로 빠진다`);
+        ? '요금제가 배정돼 있는데 요금제 변경 이력이 0건. 구독료가 0원으로 빠진다'
+        : `요금제 이력이 중간에 끊김 ${planGate.gap!.from}~${planGate.gap!.to} (${planGate.gap!.days}일). 그 구간 구독료가 0원으로 빠진다`);
     }
     const billing_guard = {
       billable: billable && blockers.length === 0,
@@ -2975,7 +2975,7 @@ router.get('/preview', async (req: Request, res: Response) => {
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('column') && emsg.includes('does not exist')) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — company_agent_ids.billing_type·cost_per_* 및 ai_credit_transactions.overage_credits 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: company_agent_ids.billing_type·cost_per_* 및 ai_credit_transactions.overage_credits 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('정산 미리보기 오류:', error);
     return res.status(500).json({ error: error.message });
@@ -3145,7 +3145,7 @@ router.get('/invoices/:id/pdf', async (req: Request, res: Response) => {
     // ★ 2026-07-29 거래내역서 PDF가 billing_contacts(공급받는자 사업자)에 의존하게 됐다 —
     //   그 테이블·컬럼이 없으면 500이 아니라 마이그레이션 안내를 낸다(db_alter_safety_net).
     if (isMigrationPending(error)) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — billing_contacts 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: billing_contacts 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('PDF 생성 오류:', error);
     return res.status(500).json({ error: error.message });
@@ -3363,7 +3363,7 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
       } catch (tokenErr: any) {
         const tmsg = String(tokenErr?.message || '');
         if (tmsg.includes('does not exist') && (tmsg.includes('relation') || tmsg.includes('column'))) {
-          throw new Error('DB 마이그레이션 필요 — invoice_confirmations 테이블·컬럼 확인 요청. 컨펌 링크 없는 정산서는 보내지 않습니다.');
+          throw new Error('DB 마이그레이션 필요: invoice_confirmations 테이블·컬럼 확인 요청. 컨펌 링크 없는 정산서는 보내지 않습니다.');
         }
         throw tokenErr;
       }
@@ -3581,7 +3581,7 @@ router.post('/invoices/:id/send-email', async (req: Request, res: Response) => {
     return res.json({ message: '거래내역서 메일이 발송되었습니다.', sent_to: invSendTo, cc: invTo.cc });
   } catch (error: any) {
     if (isMigrationPending(error)) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — billing_contacts 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: billing_contacts 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('거래내역서 메일 발송 오류:', error);
     return res.status(500).json({ error: '메일 발송에 실패했습니다: ' + error.message });

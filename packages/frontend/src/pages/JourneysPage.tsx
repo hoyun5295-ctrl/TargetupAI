@@ -843,7 +843,7 @@ export default function JourneysPage() {
         `AI 자동 매칭 완료 (정합 점수 ${data.matchScore})\n\n` +
         `템플릿: ${data.template.template_name}\n` +
         `근거: ${data.matchReason}\n\n` +
-        `변수 자동 매핑: ${(data.variableMappings || []).length}건 (미매핑 ${unmappedCount}건 — 회사 admin 직접 입력 필요)\n\n` +
+        `변수 자동 매핑: ${(data.variableMappings || []).length}건 (미매핑 ${unmappedCount}건, 회사 admin 직접 입력 필요)\n\n` +
         `회사 admin 검토 + 정정 후 활성화해주세요.`
       );
     } catch (err: any) {
@@ -1212,7 +1212,7 @@ export default function JourneysPage() {
         setEditingStepIdx(null);
         setPreviewSteps(new Set());
         setEditInstruction('');
-        toast.success(data.package.reasoning ? `수정 완료 — ${data.package.reasoning}` : '여정을 수정했습니다.');
+        toast.success(data.package.reasoning ? `수정 완료: ${data.package.reasoning}` : '여정을 수정했습니다.');
       } else {
         toast.error(data.error || 'AI 수정 실패. 요청을 더 명확히 작성해주세요.');
       }
@@ -1428,9 +1428,9 @@ export default function JourneysPage() {
   // ★ 2026-06-22: 정보 알림 빌더 결과 → aiPkg(kakao step)로 조립 → 기존 review 흐름 재사용
   const handleInfoAlertBuild = (result: InfoAlertBuildResult) => {
     const reasonByKind: Record<string, string> = {
-      event: '정보 알림 — 거래 이벤트 발생 시 카카오 승인 템플릿 발송',
-      one_shot: '정보 알림 — 대상군에 카카오 승인 템플릿 1회 발송',
-      standing: '정보 알림 — 조건 충족 고객에게 카카오 승인 템플릿 상시 발송',
+      event: '정보 알림: 거래 이벤트 발생 시 카카오 승인 템플릿 발송',
+      one_shot: '정보 알림: 대상군에 카카오 승인 템플릿 1회 발송',
+      standing: '정보 알림: 조건 충족 고객에게 카카오 승인 템플릿 상시 발송',
     };
     const pkg: AIJourneyPackage = {
       name: result.name,
@@ -1458,7 +1458,7 @@ export default function JourneysPage() {
       callbackNumberHint: null,
       budgetMonthlyHint: null,
       thresholdCostHint: null,
-      reasoning: reasonByKind[result.startKind] || '정보 알림 — 카카오 승인 템플릿',
+      reasoning: reasonByKind[result.startKind] || '정보 알림: 카카오 승인 템플릿',
       startKind: result.startKind,
       oneShotScheduledAt: result.oneShotScheduledAt,
     };
@@ -1490,7 +1490,7 @@ export default function JourneysPage() {
       callbackNumberHint: null,
       budgetMonthlyHint: null,
       thresholdCostHint: null,
-      reasoning: '날짜축 여정 — 기준 날짜 기준 D-N 단계 발송',
+      reasoning: '날짜축 여정: 기준 날짜 기준 D-N 단계 발송',
       startKind: 'date_anchor',
       anchorDate: result.anchorDate,
       anchorRecurrence: result.anchorRecurrence,
@@ -1586,7 +1586,7 @@ export default function JourneysPage() {
     if (!reviewCallback) { toast.warning('회신번호를 선택해주세요.'); return; }
     const issues = collectStepIssues(aiPkg.steps);
     if (issues.length > 0) {
-      toast.warning(`스텝 ${issues[0].stepOrder} — ${issues[0].message}`);
+      toast.warning(`스텝 ${issues[0].stepOrder}: ${issues[0].message}`);
       return;
     }
     setSaving(true);
@@ -1726,7 +1726,7 @@ export default function JourneysPage() {
         description:
           `여정을 완료한 고객이 cooldown(${cooldownDays ?? 0}일) 경과 후 자동으로 다시 진입합니다. 6시간 주기로 자동 진입합니다.\n\n` +
           `· 활성 상태 + 광고 수신 동의 고객만 진입\n` +
-          `· 한 고객당 진행 중 1건만 — 중복 진입 차단\n` +
+          `· 한 고객당 진행 중 1건만 (중복 진입 차단)\n` +
           `· 비용·발송은 회사 담당자 책임이므로 직접 확인이 필요합니다.`,
         confirmLabel: '활성화',
         onConfirm: doToggle,
@@ -1756,12 +1756,12 @@ export default function JourneysPage() {
           </button>
           <div className="flex-1 min-w-0">
             <h1 className="text-lg md:text-2xl font-bold truncate text-white">
-              {view === 'studio' ? `${aiPkg?.name || '여정'} — 스텝 ${studioIdx + 1}` : view === 'review' ? 'AI 생성 여정 검토' : '여정 자동화 — AI Operator'}
+              {view === 'studio' ? `${aiPkg?.name || '여정'}: 스텝 ${studioIdx + 1}` : view === 'review' ? 'AI 생성 여정 검토' : '여정 자동화: AI Operator'}
             </h1>
             <p className="text-xs md:text-sm text-white/80 mt-0.5">
               {view === 'studio'
                 ? '한 화면에서 스텝 하나를 끝내고 [스텝 추가]로 넘어갑니다'
-                : view === 'review' ? 'AI가 설계한 흐름을 검토 + 혜택 부분 수정 후 활성화' : '만들 여정을 고르면 AI가 흐름을 설계합니다 — 연동한 데이터가 많을수록 고를 수 있는 여정이 늘어납니다'}
+                : view === 'review' ? 'AI가 설계한 흐름을 검토 + 혜택 부분 수정 후 활성화' : '만들 여정을 고르면 AI가 흐름을 설계합니다. 연동한 데이터가 많을수록 고를 수 있는 여정이 늘어납니다'}
             </p>
           </div>
           {view === 'main' && (
@@ -1824,7 +1824,7 @@ export default function JourneysPage() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <h2 className="text-sm font-bold text-white md:text-base">다음 수 — {nextDef.label} 여정</h2>
+                        <h2 className="text-sm font-bold text-white md:text-base">다음 수: {nextDef.label} 여정</h2>
                         <span className="shrink-0 rounded border border-violet-400/30 bg-violet-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-violet-100">NEW</span>
                       </div>
                       <p className="mt-1 text-xs leading-relaxed text-white/75">
@@ -1834,7 +1834,7 @@ export default function JourneysPage() {
                       <div className="mt-2 space-y-1">
                         <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-200/90">
                           <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
-                          <span>여정은 켠 뒤에 생기는 일부터 받습니다 — 지금 만들면 앞으로 해당하는 고객부터 나갑니다.</span>
+                          <span>여정은 켠 뒤에 생기는 일부터 받습니다. 지금 만들면 앞으로 해당하는 고객부터 나갑니다.</span>
                         </div>
                         {overlapLabels.length > 0 && (
                           <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-200/90">
@@ -1858,7 +1858,7 @@ export default function JourneysPage() {
                           나중에
                         </button>
                       </div>
-                      <div className="mt-2 text-[10px] italic text-white/30">Data source — 방금 저장한 여정 · 활성 여정 목록</div>
+                      <div className="mt-2 text-[10px] italic text-white/30">Data source: 방금 저장한 여정 · 활성 여정 목록</div>
                     </div>
                   </div>
                 </div>
@@ -1935,7 +1935,7 @@ export default function JourneysPage() {
                           >
                             <Sparkles className="w-3.5 h-3.5" /> 1클릭 생성
                           </button>
-                          <div className="text-[10px] text-white/30 italic mt-2">Data source — customers · journeys 실시간 집계</div>
+                          <div className="text-[10px] text-white/30 italic mt-2">Data source: customers · journeys 실시간 집계</div>
                         </div>
                       );
                     })}
@@ -2065,7 +2065,7 @@ export default function JourneysPage() {
                     })}
                   </div>
                   <p className="text-[11px] text-white/40 text-center mt-4">
-                    또는 위 자연어 입력란에 직접 작성 — 회사 admin이 원하는 모든 시나리오 가능
+                    또는 위 자연어 입력란에 직접 작성, 회사 admin이 원하는 모든 시나리오 가능
                   </p>
                 </div>
               )}
@@ -2092,12 +2092,12 @@ export default function JourneysPage() {
                               <span className="flex items-center gap-1"><Users className="w-3 h-3" />{j.stats_total_entered}</span>
                               <span className="flex items-center gap-1"><Sparkles className="w-3 h-3" />{j.stats_total_completed}</span>
                               {Number(j.goal_met_count) > 0 && (
-                                <span className="flex items-center gap-1 text-emerald-300" title="목표 달성 종료 — 진입 후 목표 달성이 확인되어 잔여 발송 없이 종료된 고객">
+                                <span className="flex items-center gap-1 text-emerald-300" title="목표 달성 종료: 진입 후 목표 달성이 확인되어 잔여 발송 없이 종료된 고객">
                                   <Target className="w-3 h-3" />목표 달성 {Number(j.goal_met_count).toLocaleString()}
                                 </span>
                               )}
                               {Number(j.holdout_count) > 0 && (
-                                <span className="flex items-center gap-1 text-sky-300" title="홀드아웃 대조군 — 증분 성과 비교를 위해 의도적으로 발송하지 않는 진입 고객 (통계 분석에서 전환 비교)">
+                                <span className="flex items-center gap-1 text-sky-300" title="홀드아웃 대조군: 증분 성과 비교를 위해 의도적으로 발송하지 않는 진입 고객 (통계 분석에서 전환 비교)">
                                   <Users className="w-3 h-3" />홀드아웃 {Number(j.holdout_count).toLocaleString()}
                                 </span>
                               )}
@@ -2118,7 +2118,7 @@ export default function JourneysPage() {
                             </button>
                             {/* ★ 2026-07-11 [타겟확인] — 지금 조건 매칭 표본 (발송 추출과 동일 함수 실측) */}
                             {!j.archived_at && j.status !== 'ended' && (
-                              <button onClick={(e) => { e.stopPropagation(); setTargetInfo(null); setTargetModal({ journeyId: j.id, journeyName: j.name }); }} className="p-2 rounded bg-teal-500/20 hover:bg-teal-500/30 text-teal-300" title="타겟확인 — 지금 조건 매칭 고객 표본">
+                              <button onClick={(e) => { e.stopPropagation(); setTargetInfo(null); setTargetModal({ journeyId: j.id, journeyName: j.name }); }} className="p-2 rounded bg-teal-500/20 hover:bg-teal-500/30 text-teal-300" title="타겟확인: 지금 조건 매칭 고객 표본">
                               <Target className="w-4 h-4" />
                               </button>
                             )}
@@ -2292,7 +2292,7 @@ export default function JourneysPage() {
                               </div>
                               {livePositionsMap[j.id].nextRunAt && (
                                 <div className="text-[11px] text-cyan-200/80">
-                                  다음 발송 예정 — {new Date(livePositionsMap[j.id].nextRunAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}
+                                  다음 발송 예정: {new Date(livePositionsMap[j.id].nextRunAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}
                                 </div>
                               )}
                             </div>
@@ -2387,14 +2387,14 @@ export default function JourneysPage() {
                                     </div>
                                     {step.oneClickAction && (
                                       <div className="mt-1.5 text-[10px] text-amber-300/70 italic">
-                                        제안 액션 — {step.oneClickAction.label} (회사 admin 명시 검토 후 적용)
+                                        제안 액션: {step.oneClickAction.label} (회사 admin 명시 검토 후 적용)
                                       </div>
                                     )}
                                   </div>
                                 ))}
                                 {diagnosisMap[j.id].steps.every((s) => s.severity === 'good') && (
                                   <div className="text-[11px] text-emerald-300/80 leading-relaxed">
-                                    전체 단계 정상 흐름 — 추가 정정 영역 없음. 다음 단계 신설 검토 가능.
+                                    전체 단계 정상 흐름. 추가 정정 영역 없음. 다음 단계 신설 검토 가능.
                                   </div>
                                 )}
                               </div>
@@ -2413,7 +2413,7 @@ export default function JourneysPage() {
                                 {samplesTotalMap[j.id] && (
                                   <span className="text-[10px] text-cyan-200/80">전체 {samplesTotalMap[j.id].total.toLocaleString()}명{samplesTotalMap[j.id].capped ? ' 이상' : ''} 중 {samplesMap[j.id].length}명</span>
                                 )}
-                                <span className="text-[10px] text-white/30 italic ml-auto">Data source — customers + 예측</span>
+                                <span className="text-[10px] text-white/30 italic ml-auto">Data source: customers + 예측</span>
                               </div>
                               <div className="flex flex-wrap gap-1">
                                 {samplesMap[j.id].map((sample) => (
@@ -2497,7 +2497,7 @@ export default function JourneysPage() {
                                   </button>
                                 </div>
                                 <div className="text-[11px] text-fuchsia-100/70 leading-relaxed">
-                                  cooldown {detail.journey.reentry_cooldown_days ?? 0}일 경과 후 자동 진입 (6시간 cron). 회사 admin 명시 활성 의무 — AI 자동 진입 X 정합.
+                                  cooldown {detail.journey.reentry_cooldown_days ?? 0}일 경과 후 자동 진입 (6시간 cron). 회사 admin 명시 활성 의무, AI 자동 진입 X 정합.
                                 </div>
                               </div>
                             </div>
@@ -2629,7 +2629,7 @@ export default function JourneysPage() {
                                   )}
                                   <div className="text-[10px] text-cyan-200/80">{nextStepMap[j.id].recommended.reasoning}</div>
                                   {nextStepMap[j.id].recommended.expectedImpact && (
-                                    <div className="text-[10px] text-emerald-300/70 mt-0.5">예상 영향 — {nextStepMap[j.id].recommended.expectedImpact}</div>
+                                    <div className="text-[10px] text-emerald-300/70 mt-0.5">예상 영향: {nextStepMap[j.id].recommended.expectedImpact}</div>
                                   )}
                                 </div>
                                 {/* 대안 2건 */}
@@ -2765,7 +2765,7 @@ export default function JourneysPage() {
               <div className="flex items-center gap-2 mb-2 flex-wrap">
                 <Wand2 className="w-4 h-4 text-violet-300" />
                 <span className="text-sm font-semibold">대화형 수정</span>
-                <span className="text-[11px] text-white/45">말로 고치세요 — 예: "2단계 하루 늦추고 VIP만 보내줘"</span>
+                <span className="text-[11px] text-white/45">말로 고치세요 (예: "2단계 하루 늦추고 VIP만 보내줘")</span>
               </div>
               <div className="flex flex-col md:flex-row gap-2">
                 <input
@@ -2791,7 +2791,7 @@ export default function JourneysPage() {
               <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-3 text-xs text-emerald-100 flex items-start gap-2">
                 <Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0 text-emerald-300" />
                 <div>
-                  <span className="font-semibold">타겟 고객 데이터 연동됨</span> — 각 step에서 <span className="text-emerald-200">발송 미리보기</span> 토글을 누르면, 추출된 타겟 최상위 고객 기준으로 실제 발송될 형태(변수 치환 + 광고·무료거부)를 볼 수 있어요.
+                  <span className="font-semibold">타겟 고객 데이터 연동됨</span>. 각 step에서 <span className="text-emerald-200">발송 미리보기</span> 토글을 누르면, 추출된 타겟 최상위 고객 기준으로 실제 발송될 형태(변수 치환 + 광고·무료거부)를 볼 수 있어요.
                 </div>
               </div>
             )}
@@ -2925,7 +2925,7 @@ export default function JourneysPage() {
                             onChange={(e) => updateStep(idx, { waitEventName: e.target.value || undefined, waitTimeoutHours: e.target.value ? (s.waitTimeoutHours ?? 72) : undefined })}
                             className="w-full px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
                           >
-                            <option value="">사용 안 함 — 시간만 대기 (기본)</option>
+                            <option value="">사용 안 함: 시간만 대기 (기본)</option>
                             <option value="purchase">구매(purchase)가 오면 즉시 진행</option>
                             <option value="message_click">발송 링크 클릭이 오면 즉시 진행</option>
                             <option value="page_view">몰 방문(page_view)이 오면 즉시 진행</option>
@@ -3040,7 +3040,7 @@ export default function JourneysPage() {
                             <option value="">여정 종료 (기본)</option>
                             {aiPkg.steps.filter((t) => t.stepOrder > s.stepOrder).map((t) => (
                               <option key={t.stepOrder} value={t.stepOrder}>
-                                Step {t.stepOrder}(으)로 이동{t.stepIntent ? ` — ${String(t.stepIntent).slice(0, 20)}` : ''}
+                                Step {t.stepOrder}(으)로 이동{t.stepIntent ? `: ${String(t.stepIntent).slice(0, 20)}` : ''}
                               </option>
                             ))}
                           </select>
@@ -3421,13 +3421,13 @@ export default function JourneysPage() {
                           <div className="space-y-1">
                             {s.isAd && (
                               <div className="px-3 py-1.5 bg-slate-950/50 border border-amber-400/20 rounded text-[11px] text-amber-300/70 select-none">
-                                {adPrefixFor(s.channel).trim()} <span className="text-white/40">— 발송 시 자동 추가 (본문에 직접 쓰지 마세요)</span>
+                                {adPrefixFor(s.channel).trim()} <span className="text-white/40">(발송 시 자동 추가, 본문에 직접 쓰지 마세요)</span>
                               </div>
                             )}
                             <textarea value={s.messageTemplate} onChange={(e) => updateStep(idx, { messageTemplate: e.target.value })} rows={7} placeholder="본문을 입력하세요" className="w-full px-3 py-2 bg-slate-900 border border-fuchsia-400/50 rounded text-sm font-mono focus:outline-none resize-y leading-relaxed" />
                             {s.isAd && (
                               <div className="px-3 py-1.5 bg-slate-950/50 border border-amber-400/20 rounded text-[11px] text-amber-300/70 select-none whitespace-pre-wrap">
-                                {adRejectFor(s.channel, opt080Number)} <span className="text-white/40">— 발송 시 자동 추가</span>
+                                {adRejectFor(s.channel, opt080Number)} <span className="text-white/40">(발송 시 자동 추가)</span>
                               </div>
                             )}
                           </div>
@@ -3620,7 +3620,7 @@ export default function JourneysPage() {
                     </button>
                     <button onClick={() => setRefining(null)} className="px-3 py-2 text-xs text-white/45 hover:text-white/70">그대로 두기</button>
                   </div>
-                  <p className="text-[10px] italic text-white/30">Data source — 지금 스텝 본문과 AI가 다듬은 안. 바이트는 (광고) 표기 포함 기준입니다.</p>
+                  <p className="text-[10px] italic text-white/30">Data source: 지금 스텝 본문과 AI가 다듬은 안. 바이트는 (광고) 표기 포함 기준입니다.</p>
                 </div>
               )}
             </div>
@@ -3643,7 +3643,7 @@ export default function JourneysPage() {
               <div className="mb-6 text-center animate-in fade-in duration-300">
                 <Loader2 className="w-10 h-10 animate-spin text-fuchsia-400 mx-auto mb-3" />
                 <p className="text-white/85 text-sm font-medium">AI Operator가 여정 마지막 다듬는 중입니다</p>
-                <p className="text-white/50 text-xs mt-1">검토 화면 준비 중 — 잠시만 기다려주세요</p>
+                <p className="text-white/50 text-xs mt-1">검토 화면 준비 중. 잠시만 기다려주세요</p>
               </div>
             )}
 
@@ -3754,7 +3754,7 @@ export default function JourneysPage() {
       <TargetRecipientsModal
         show={!!targetModal}
         onClose={() => { setTargetModal(null); setTargetInfo(null); }}
-        title={`발송 대상 확인 — ${targetModal?.journeyName || ''}`}
+        title={`발송 대상 확인: ${targetModal?.journeyName || ''}`}
         criteria={targetInfo?.criteria ?? null}
         totalCount={targetInfo?.displayTotal ?? null}
         fetchPage={targetModal ? journeyTargetPage : null}

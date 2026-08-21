@@ -807,7 +807,7 @@ export default function AiOperatorPage() {
           : `${recipients.length.toLocaleString()}명에게 지금 즉시 발송됩니다.\n발송 후 회수 불가합니다. 진행하시겠습니까?`;
         setConfirm({
           mode: 'warning',
-          title: '즉시 발송 — 회수 불가',
+          title: '즉시 발송: 회수 불가',
           description: confirmMsg,
           confirmLabel: '지금 발송',
           onConfirm: () => performDirectSend(sendBody, suggestedName),
@@ -825,7 +825,7 @@ export default function AiOperatorPage() {
         : '';
       setConfirm({
         mode: 'info',
-        title: '예약 발송 — 지금 나가지 않습니다',
+        title: '예약 발송: 지금 나가지 않습니다',
         description: `${recipients.length.toLocaleString()}명에게 ${scheduledLabel}에 발송됩니다.\n지금은 나가지 않으며, 그전까지 예약내역에서 취소할 수 있습니다.`,
         confirmLabel: '예약하기',
         onConfirm: () => performDirectSend(sendBody, suggestedName),
@@ -945,25 +945,25 @@ export default function AiOperatorPage() {
                 </button>
                 <div
                   role="tooltip"
-                  className={`absolute left-1/2 -translate-x-1/2 top-full mt-4 w-[min(560px,calc(100vw-48px))] text-left rounded-2xl border border-white/15 bg-[#180a38]/95 backdrop-blur-xl p-5 shadow-2xl shadow-black/50 z-20 transition-all duration-200 ${
+                  className={`absolute left-1/2 -translate-x-1/2 top-full mt-4 w-[min(720px,calc(100vw-48px))] text-left rounded-2xl border border-white/15 bg-[#180a38]/95 backdrop-blur-xl p-5 shadow-2xl shadow-black/50 z-20 transition-all duration-200 ${
                     showWhat ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-1 pointer-events-none'
                   }`}
                 >
-                  <p className="text-xl font-bold text-white leading-snug">
+                  <p className="text-[22px] font-bold tracking-[-0.02em] text-white leading-snug">
                     한 줄이 <span className="text-violet-200">실행 가능한 제안서</span>가 됩니다
                   </p>
-                  <p className="text-sm text-white/55 mt-1.5">
-                    누구에게 · 무엇을 · 어디로 · 언제 · 얼마에 · 얼마나 — 여섯 가지를 AI가 한 번에 정합니다.
+                  <p className="text-[14px] text-white/70 mt-1.5">
+                    누구에게·무엇을·어디로·언제·얼마에·얼마나, 여섯 가지를 AI가 한 번에 정합니다.
                   </p>
-                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 mt-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-4">
                     {WHAT_AI_DECIDES.map((s) => (
-                      <div key={s.k} className="rounded-lg bg-white/5 border border-white/10 px-2 py-2.5 text-center">
-                        <div className="text-[13px] font-semibold text-white">{s.k}</div>
-                        <div className="text-[10.5px] text-white/45 mt-0.5 leading-snug">{s.v}</div>
+                      <div key={s.k} className="rounded-lg bg-white/5 border border-white/10 px-4 py-3.5 text-center">
+                        <div className="text-[15px] font-semibold text-white">{s.k}</div>
+                        <div className="text-[13px] text-white/65 mt-0.5 leading-snug break-keep">{s.v}</div>
                       </div>
                     ))}
                   </div>
-                  <div className="mt-3.5 pt-3 border-t border-white/10 flex flex-wrap justify-between gap-x-3 gap-y-1 text-[11.5px] text-white/45">
+                  <div className="mt-3.5 pt-3 border-t border-white/10 flex flex-wrap justify-between gap-x-3 gap-y-1 text-[12.5px] text-white/45">
                     <span>제안서를 보고 <b className="font-medium text-white/80">발송 여부는 직접 결정</b>합니다</span>
                     <span>수정 요청도 한 줄로</span>
                   </div>
@@ -1060,7 +1060,7 @@ export default function AiOperatorPage() {
               <div className="mb-6 text-center animate-in fade-in duration-300">
                 <Loader2 className="w-10 h-10 animate-spin text-fuchsia-400 mx-auto mb-3" />
                 <p className="text-white/85 text-sm font-medium">AI Operator가 마지막 다듬는 중입니다</p>
-                <p className="text-white/50 text-xs mt-1">제안서 화면 준비 중 — 잠시만 기다려주세요</p>
+                <p className="text-white/50 text-xs mt-1">제안서 화면을 준비 중입니다. 잠시만 기다려주세요</p>
               </div>
             )}
 
@@ -1300,7 +1300,7 @@ export default function AiOperatorPage() {
                                   ? 'bg-amber-400/25 text-amber-100 font-semibold ring-1 ring-amber-300/40'
                                   : 'bg-white/5 text-white/40 hover:text-white/60'
                               }`}
-                              title="개인화 변수 위치 강조 — %고객명% 형태 그대로 표시"
+                              title="개인화 변수 위치 강조 (%고객명% 형태 그대로 표시)"
                             >
                               원본 (변수 강조)
                             </button>
@@ -1323,7 +1323,7 @@ export default function AiOperatorPage() {
                         <label className={`flex items-center justify-between gap-3 mb-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-all ${isAd ? 'bg-amber-400/15 border-amber-300/40' : 'bg-white/5 border-white/10 hover:bg-white/[0.07]'}`}>
                           <div className="min-w-0">
                             <div className={`text-xs font-semibold ${isAd ? 'text-amber-100' : 'text-white/70'}`}>광고표기 <span className="font-bold">(광고)</span></div>
-                            <div className="text-[10px] text-white/45 mt-0.5">{isAd ? '제목·본문 맨 앞에 (광고)+무료거부 자동 부착' : '정보성 발송 — (광고) 미부착 (광고성 문안은 법상 (광고) 표기 의무)'}</div>
+                            <div className="text-[10px] text-white/45 mt-0.5">{isAd ? '제목·본문 맨 앞에 (광고)+무료거부 자동 부착' : '정보성 발송: (광고) 미부착 (광고성 문안은 법상 (광고) 표기 의무)'}</div>
                           </div>
                           <input type="checkbox" checked={isAd} onChange={(e) => setAdEnabled(e.target.checked)} className="w-4 h-4 accent-amber-400 flex-shrink-0" />
                         </label>
@@ -1331,7 +1331,7 @@ export default function AiOperatorPage() {
                         {/* ★ 2026-07-10 (임은지 리포트): LMS/MMS 제목 확인·수정 — 발송 전 확인 불가 문제 해소. 표시 값 = 발송 값(resolveSubject) */}
                         {(activeChannel === 'LMS' || activeChannel === 'MMS') && (
                           <div className="mb-3">
-                            <label className="block text-[11px] text-white/50 mb-1">제목 — 문자 상단에 표시</label>
+                            <label className="block text-[11px] text-white/50 mb-1">제목 (문자 상단에 표시)</label>
                             {/* ★ 2026-07-22 (Harold 명시): 광고표기 ON이면 제목 입력칸 앞에 (광고) 고정 접두 오버레이(직접발송 미러). 입력값은 순수 제목 유지 → 백엔드 buildAdSubject가 부착·이중부착 없음 */}
                             <div className="relative">
                               {isAd && (
@@ -1787,7 +1787,7 @@ export default function AiOperatorPage() {
               <div>
                 <p className="text-[10px] font-semibold tracking-[0.28em] text-white/40 mb-1.5 uppercase">AI Operator Modules</p>
                 <h2 className="text-xl font-bold mb-1.5 text-white">함께 사용하는 AI 영역</h2>
-                <p className="text-sm text-white/50 mb-6">자연어 한 줄 진입 외에도 AI Operator 안에 내장된 영역 — 클릭 시 진입</p>
+                <p className="text-sm text-white/50 mb-6">자연어 한 줄 진입 외에도 AI Operator 안에 내장된 기능입니다. 클릭하면 바로 이동합니다</p>
                 {/* ★ D209+ (Harold 명시 2026-05-22): 우측 3열 세로 나열 매트릭스 + description \n 줄바꿈 정합 (whitespace-pre-line). */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {SUB_MODULE_CARDS
@@ -2162,7 +2162,7 @@ function AiSelfDiagnosisCards({ onApply }: { onApply: (objective: string) => voi
       </button>
 
       <div className="mt-3 text-[10px] text-white/30 italic">
-        Data source — {useBrief ? '매일 오전 일일 분석 (고객 DB 실측 신호 · 누적 학습)' : '회사 실측 신호 (일일 분석 누적 전 기본 추천)'}
+        Data source: {useBrief ? '매일 오전 일일 분석 (고객 DB 실측 신호 · 누적 학습)' : '회사 실측 신호 (일일 분석 누적 전 기본 추천)'}
       </div>
     </div>
   );

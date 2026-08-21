@@ -57,7 +57,7 @@ export const CORE_PALETTES: readonly CorePalette[] = [
   {
     id: 'editorial',
     name: '에디토리얼',
-    description: '세리프 헤드라인 · 넉넉한 여백 · 헤어라인 구분 — 잡지 화보 톤',
+    description: '세리프 헤드라인 · 넉넉한 여백 · 헤어라인 구분: 잡지 화보 톤',
     primary: '#111827', accent: '#b45309', background: '#ffffff',
     swatches: ['#111827', '#b45309', '#ffffff'],
     fontDisplay: '"Noto Serif KR", serif',
@@ -68,7 +68,7 @@ export const CORE_PALETTES: readonly CorePalette[] = [
   {
     id: 'luxury-dark',
     name: '럭셔리 다크',
-    description: '딥 다크 서피스 · 골드 액센트 — 프라이빗 오퍼 톤',
+    description: '딥 다크 서피스 · 골드 액센트: 프라이빗 오퍼 톤',
     primary: '#b89150', accent: '#d4af37', background: '#0e1018',
     swatches: ['#0e1018', '#d4af37', '#b89150'],
     fontDisplay: '"Noto Serif KR", serif',
@@ -79,7 +79,7 @@ export const CORE_PALETTES: readonly CorePalette[] = [
   {
     id: 'minimal',
     name: '미니멀',
-    description: '절제된 크기 · 여백 구분 · 무장식 — 조용하고 정갈한 안내 톤',
+    description: '절제된 크기 · 여백 구분 · 무장식: 조용하고 정갈한 안내 톤',
     primary: '#3b82f6', accent: '#93c5fd', background: '#ffffff',
     swatches: ['#3b82f6', '#93c5fd', '#ffffff'],
     fontDisplay: null,
@@ -90,18 +90,18 @@ export const CORE_PALETTES: readonly CorePalette[] = [
   {
     id: 'bold-sale',
     name: '볼드 세일',
-    description: '검은고딕 임팩트 · 압축 밀도 · 섹션 넘버링 — 세일 전용 조판',
+    description: '검은고딕 임팩트 · 압축 밀도 · 섹션 넘버링: 세일 전용 조판',
     primary: '#18181b', accent: '#fde68a', background: '#ffffff',
     swatches: ['#18181b', '#fde68a', '#ef4444'],
     fontDisplay: '"Black Han Sans", sans-serif',
     artDirection: { typeScale: 'bold', headlineFont: 'sans', spacingDensity: 'compact', accentMotif: 'index', sectionDivider: 'none' },
     recommendedTones: ['urgent'],
-    inapp: { signature: true, defaultAccent: '#ef4444', note: '연노랑(#fde68a)은 인앱 칩·버튼 대비 미달 — 세일 레드 재해석' },
+    inapp: { signature: true, defaultAccent: '#ef4444', note: '연노랑(#fde68a)은 인앱 칩·버튼 대비 미달. 세일 레드 재해석' },
   },
   {
     id: 'soft-pastel',
     name: '소프트 파스텔',
-    description: '옅은 핑크 서피스 · 도트 포인트 — 부드러운 안부·복귀 톤',
+    description: '옅은 핑크 서피스 · 도트 포인트: 부드러운 안부·복귀 톤',
     primary: '#ec4899', accent: '#fbcfe8', background: '#fffafc',
     swatches: ['#ec4899', '#fbcfe8', '#fffafc'],
     fontDisplay: null,
@@ -112,7 +112,7 @@ export const CORE_PALETTES: readonly CorePalette[] = [
   {
     id: 'paper',
     name: '웜 페이퍼',
-    description: '종이 질감 배경 · 고운바탕 세리프 — 따뜻한 로컬 톤',
+    description: '종이 질감 배경 · 고운바탕 세리프: 따뜻한 로컬 톤',
     primary: '#9a5b33', accent: '#e8b96a', background: '#faf6ef',
     swatches: ['#9a5b33', '#e8b96a', '#faf6ef'],
     fontDisplay: '"Gowun Batang", serif',
@@ -123,7 +123,7 @@ export const CORE_PALETTES: readonly CorePalette[] = [
   {
     id: 'city-night',
     name: '시티 나이트',
-    description: '다크 배경 · 시안 네온 — 테크·이벤트 밤 무드',
+    description: '다크 배경 · 시안 네온: 테크·이벤트 밤 무드',
     primary: '#0ea5e9', accent: '#22d3ee', background: '#0b1220',
     swatches: ['#0b1220', '#0ea5e9', '#22d3ee'],
     fontDisplay: null,
@@ -134,7 +134,7 @@ export const CORE_PALETTES: readonly CorePalette[] = [
   {
     id: 'festive',
     name: '페스티브',
-    description: '로즈×앰버 · 브래킷 포인트 — 팝업·이벤트 초대장 톤',
+    description: '로즈×앰버 · 브래킷 포인트: 팝업·이벤트 초대장 톤',
     primary: '#e11d48', accent: '#fbbf24', background: '#ffffff',
     swatches: ['#e11d48', '#fbbf24', '#ffffff'],
     fontDisplay: null,

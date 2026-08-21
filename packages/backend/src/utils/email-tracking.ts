@@ -33,7 +33,7 @@ function getTrackingSecret(): string {
   const secret = process.env.EMAIL_TRACKING_SECRET || process.env.JWT_SECRET;
   if (!secret) {
     // JWT_SECRET 미설정 시 서버 자체가 기동 불가(auth fail-fast)라 실제 도달 불가 — 방어선만 유지
-    throw new Error('EMAIL_TRACKING_SECRET / JWT_SECRET 미설정 — 트래킹 토큰 생성 불가');
+    throw new Error('EMAIL_TRACKING_SECRET / JWT_SECRET 미설정. 트래킹 토큰 생성 불가');
   }
   return secret;
 }

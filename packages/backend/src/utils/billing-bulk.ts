@@ -310,7 +310,7 @@ export async function createBulkJob(
     const rejected = items.filter((i) => !billable.has(i.companyId)).map((i) => i.companyId);
     if (rejected.length > 0) {
       const err: any = new Error(
-        `발급할 수 없는 회사가 ${rejected.length}개사 포함돼 시작하지 않았습니다 — 수동 정산 회사이거나, 이미 발행됐거나, 수동 정산완료로 표시된 회사입니다. 목록을 다시 불러와 주세요.`,
+        `발급할 수 없는 회사가 ${rejected.length}개사 포함돼 시작하지 않았습니다. 수동 정산 회사이거나, 이미 발행됐거나, 수동 정산완료로 표시된 회사입니다. 목록을 다시 불러와 주세요.`,
       );
       err.code = 'BULK_TARGET_NOT_BILLABLE';
       err.companyIds = rejected;
@@ -375,7 +375,7 @@ async function runBulkJob(jobId: string, periodStart: string, periodEnd: string,
       //   여기서 또 잠그면 축만 늘고 창은 안 닫힌다. 실패 기록은 아래 catch가 그대로 한다.
       const stillBillable = await filterBillableCompanies([String(item.company_id)], periodStart, periodEnd);
       if (!stillBillable.has(String(item.company_id))) {
-        throw new Error('발급 대상에서 제외됨 — 대기 중 수동 정산 회사로 바뀌었거나, 수동 정산완료로 표시됐거나, 이미 발행된 회사입니다.');
+        throw new Error('발급 대상에서 제외됨: 대기 중 수동 정산 회사로 바뀌었거나, 수동 정산완료로 표시됐거나, 이미 발행된 회사입니다.');
       }
       const result = await issueBilling({
         company_id: String(item.company_id),
@@ -407,8 +407,8 @@ async function runBulkJob(jobId: string, periodStart: string, periodEnd: string,
           // ★ 2026-07-28 두 축을 나눠 적는다. 뭉치면 일시적 디스크 장애에도 멀쩡한 묶음을 지우고 재발행하게 된다.
           // ★ 2026-07-28 복구 경로가 생겼다 — 발행은 두고 컨펌 단계만 다시 태우는 [메일 재시도](정산 목록).
           //   일괄발급 재실행은 여전히 기간 중복에 막히므로 그쪽을 안내하지 않는다.
-          (conf.mismatchBlocked > 0 ? ` · ⛔ 금액 불일치 ${conf.mismatchBlocked}장 — 금액을 정정한 뒤 정산 목록에서 [메일 재시도]를 눌러 주세요` : '') +
-          (conf.renderFailed > 0 ? ` · ⛔ PDF 생성 장애 ${conf.renderFailed}장 — 금액은 정상입니다. 장애 해소 후 정산 목록에서 [메일 재시도]를 눌러 주세요` : '') +
+          (conf.mismatchBlocked > 0 ? ` · ⛔ 금액 불일치 ${conf.mismatchBlocked}장. 금액을 정정한 뒤 정산 목록에서 [메일 재시도]를 눌러 주세요` : '') +
+          (conf.renderFailed > 0 ? ` · ⛔ PDF 생성 장애 ${conf.renderFailed}장. 금액은 정상입니다. 장애 해소 후 정산 목록에서 [메일 재시도]를 눌러 주세요` : '') +
           (conf.manualWait > 0 ? ` · 계산서 날짜 직접선택 대기 ${conf.manualWait}건` : '');
       } catch (mailPhaseErr: any) {
         note += ` · 메일 단계 실패(발행은 완료): ${String(mailPhaseErr?.message || mailPhaseErr).slice(0, 300)}`;

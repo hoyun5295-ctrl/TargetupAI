@@ -196,7 +196,7 @@ export default function JourneyMmsUploader({ value, onChange, disabled, maxCount
       <div className="text-[10px] text-cyan-200/60 leading-relaxed">
         JPG만 / 300KB 이하 / 1280x720 권장.
         한글 파일명은 자동으로 영문 파일명으로 바뀝니다.
-        PNG/GIF는 통신사에서 거절될 수 있어요 — JPG로 변환 후 업로드해주세요.
+        PNG/GIF는 통신사에서 거절될 수 있어요. JPG로 변환 후 업로드해주세요.
       </div>
 
       {error && (

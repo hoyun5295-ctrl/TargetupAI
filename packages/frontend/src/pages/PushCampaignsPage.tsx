@@ -166,7 +166,7 @@ export default function PushCampaignsPage() {
                   onChange={(e) => setBody(e.target.value.slice(0, 200))}
                   maxLength={200}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none h-20"
-                  placeholder="봄 신상 30% 할인 — 오늘 자정까지"
+                  placeholder="봄 신상 30% 할인, 오늘 자정까지"
                 />
               </div>
               <div>
@@ -189,7 +189,7 @@ export default function PushCampaignsPage() {
 
               {lastResult && (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-800">
-                  발송 완료 — 대상 {lastResult.total.toLocaleString()}명 / 성공 {lastResult.success.toLocaleString()} / 실패 {lastResult.fail.toLocaleString()}
+                  발송 완료: 대상 {lastResult.total.toLocaleString()}명 / 성공 {lastResult.success.toLocaleString()} / 실패 {lastResult.fail.toLocaleString()}
                 </div>
               )}
 
@@ -203,7 +203,7 @@ export default function PushCampaignsPage() {
               </button>
               {stats && stats.active === 0 && (
                 <div className="text-xs text-gray-500">
-                  활성 구독자가 0건입니다 — 자사몰에 @hanjullo/sdk push 모듈을 통합한 후 사용자 동의를 확보해주세요.
+                  활성 구독자가 0건입니다. 자사몰에 @hanjullo/sdk push 모듈을 통합한 후 사용자 동의를 확보해주세요.
                 </div>
               )}
             </div>

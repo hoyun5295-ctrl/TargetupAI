@@ -13,6 +13,7 @@
 - **★ 라이트 관리·조회 화면의 톤 값은 `utils/console-ui.ts`(`CUI_*`)가 소유한다 (2026-08-17~18)** — 액센트 = 인디고(`dm-tokens.ts` `brand.primary`와 같은 값). **바이올렛은 AI 기능 화면 색이라 관리 화면에 쓰지 않는다** — 이 선이 두 색을 가르는 기준. 색은 의미가 있을 때만 남긴다(성공 emerald·실패 rose·주의 amber). 다크 화면과 `ConfirmModal`(40파일 공용)은 slate-950 규약 그대로다. 원칙 전문 = [콘솔 톤 §2](../../docs/2026-08-18-console-ui-unification.md)
 
 - **★ 화면 결함이 하나씩 튀어나오는 이유는 대개 "표준 밖 값을 새로 만든 것"이다 — 값 대조는 기계가 한다 (2026-08-17 마케팅 진단)** — 새 화면을 그리며 `disabled:opacity-25` · `text-white/28` · `text-[10.5px]` 같은 값을 즉석에서 정했고, 다크 배경에서 글씨가 묻혀 Harold가 화면을 하나씩 짚어야 했다. **실측하니 앱 전체는 이미 표준 위에 있었다** — 흰색 명도는 5단위 사다리(25·30·…·90)에 100% 정렬돼 있었고 벗어난 값은 새로 만든 3개뿐, `Data source` 캡션은 96/98이 `text-[10px] italic text-white/30`, 비활성 투명도는 40·50·30·60이 전부였다. 즉 표준은 있었고 **기계가 안 봤을 뿐**이다. 게이트 = `backend/src/utils/__tests__/ui-token-invariants.test.ts`(4규칙: 비활성 투명도 표준 집합 · 흰색 명도 5단위 · Data source 캡션 명도·크기 · 진단 히어로 배경 알파 0). 스캔은 `__tests__/source-scan.ts` 공용 헬퍼.
+- **★ 사용자 노출 문자열에 줄표(em dash) 0 · 표 빈칸 예외 (2026-08-21 전수 완료)**: Harold "글자 중간의 줄표는 AI 티 1순위". 프론트 969건·AI 프롬프트 7파일·서버 노출 문자열(error 응답·메일·PDF·공개 페이지·AI 사유문)을 하루에 걷어냈다. 나열은 "·", 부연은 ":" 또는 괄호, 문장이 둘이면 마침표. `Data source: …` 캡션도 `Data source: …`로. AI 생성물은 `callAIWithFallback` 관문이 모든 system 프롬프트 끝에 문장 부호 규칙을 붙여 막는다(`services/ai.ts COPY_PUNCTUATION_RULE`). 계약 테스트 = `backend/src/utils/__tests__/em-dash-invariants.test.ts`(프론트·백엔드 전수, 주석·내부 로그 제외). 코드 주석의 줄표는 대상이 아니다.
   ⛔ **"라이트 표면에 다크 전제 색 금지"는 정적으로 만들지 마라** — `<main>` 안에 있어도 대부분 모달이고 `from-gray-50/60 to-white`처럼 라이트 배경+어두운 글씨도 함께 걸린다(실측: 후보 11 중 9 오탐). **오탐이 쌓이는 테스트는 곧 무시된다** — 그 축은 파일 지정 계약(진단 히어로)으로 좁히고, 나머지는 사람 눈이 맡는다.
   **판정 순서**: ①값 대조로 기계가 걸러낸다 ②표면 목록을 만들어 한 번에 훑는다(진단은 14개) ③사람 눈은 그 뒤에 본다. 하나씩 나오는 건 ②가 없어서다.
 - **★ 누를 수 없는 버튼은 흐리게 두지 말고 그리지 마라 (2026-08-17)** — 리포트 첫 장의 「이전」을 `disabled:opacity-25`로 남겼더니 다크 바 위에서 "검은 글씨"로 보였다. 비활성 상태가 필요 없는 자리(첫 장·마지막 장 같은 경계)는 조건부 미렌더가 정답이다. 레이아웃은 spacer가 잡는다.
@@ -195,7 +196,7 @@
 - disabled 영역 = `disabled:opacity-30 disabled:cursor-not-allowed`
 
 ### Source caption 의무 (모든 카드/차트)
-- `<div className="text-[10px] text-white/30 italic mt-2">Data source — ...</div>`
+- `<div className="text-[10px] text-white/30 italic mt-2">Data source: ...</div>`
 
 ---
 
@@ -224,7 +225,7 @@
 | 요약 5 metric + 이전 30일 대비 +/-% (TrendingUp/Down) | 통계 |
 | 자세히 분석 토글 (ChevronDown/Up + 6 차트) | 통계 |
 | 다크 톤 + violet 액센트 (`bg-slate-950` + `border-white/10`) | 모든 페이지 |
-| Source caption (`text-[10px] text-white/30 italic` + `Data source — …`) | 모든 차트/카드 |
+| Source caption (`text-[10px] text-white/30 italic` + `Data source: …`) | 모든 차트/카드 |
 | 모바일 반응형 (flex-wrap + md:/lg: 분기 + grid-cols-2 md:grid-cols-4) | 모든 페이지 |
 | ConfirmModal + useToast (native dialog 0건) | 모든 페이지 |
 | 모달 (`bg-slate-900` + `border-white/10` + `rounded-2xl` + `shadow-2xl`) | 모든 모달 |

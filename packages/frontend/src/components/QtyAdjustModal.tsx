@@ -114,7 +114,7 @@ export default function QtyAdjustModal({ open, target, onClose, onReissued }: {
     if (!Number.isSafeInteger(typed) || typed < 0) { say('실제 수량을 0 이상 정수로 입력해주세요.', 'error'); return; }
     const nextDelta = typed - l.base;
     const why = (reason[k] || '').trim();
-    if (nextDelta !== 0 && why.length < 2) { say('조정 사유를 적어주세요 — 왜 고쳤는지가 없으면 다음 달에 알 수 없습니다.', 'error'); return; }
+    if (nextDelta !== 0 && why.length < 2) { say('조정 사유를 적어주세요. 왜 고쳤는지가 없으면 다음 달에 알 수 없습니다.', 'error'); return; }
     setSaving(k);
     try {
       if (nextDelta === 0) {
@@ -138,7 +138,7 @@ export default function QtyAdjustModal({ open, target, onClose, onReissued }: {
         body: JSON.stringify({ channel: l.channel, type_key: l.type_key, qty_delta: nextDelta, reason: why }),
       });
       const d = await r.json();
-      if (d.success) { say(`저장했습니다 — ${l.label} ${l.base.toLocaleString()}건 → ${typed.toLocaleString()}건. 수정 재발행하면 반영됩니다.`); load(target.id); }
+      if (d.success) { say(`저장했습니다. ${l.label} ${l.base.toLocaleString()}건 → ${typed.toLocaleString()}건. 수정 재발행하면 반영됩니다.`); load(target.id); }
       else say(d.error || '저장 실패', 'error');
     } catch { say('저장 실패', 'error'); } finally { setSaving(null); }
   };
@@ -185,7 +185,7 @@ export default function QtyAdjustModal({ open, target, onClose, onReissued }: {
             <p className="text-xs text-gray-500 mt-0.5">
               {target.companyName}{target.accountName ? ` · ${target.accountName}` : ''}
               {period ? ` · ${period.start} ~ ${period.end}` : ''}
-              {' — '}업체와 맞춘 <b>실제 수량</b>을 적으면 청구서가 그 수량으로 나갑니다. 발송 실적 자체는 바뀌지 않습니다.
+              {'. '}업체와 맞춘 <b>실제 수량</b>을 적으면 청구서가 그 수량으로 나갑니다. 발송 실적 자체는 바뀌지 않습니다.
             </p>
           </div>
           <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400" aria-label="닫기">✕</button>
@@ -259,7 +259,7 @@ export default function QtyAdjustModal({ open, target, onClose, onReissued }: {
           <div className="border rounded-lg px-4 py-3 bg-gray-50 flex items-center justify-between gap-3 flex-wrap">
             <div className="text-xs text-gray-600">
               {changed > 0
-                ? `저장하지 않은 변경 ${changed}건이 있습니다 — 줄마다 [저장]을 눌러야 조정으로 기록됩니다.`
+                ? `저장하지 않은 변경 ${changed}건이 있습니다. 줄마다 [저장]을 눌러야 조정으로 기록됩니다.`
                 : adjusted > 0
                   ? `조정 ${adjusted}건이 기록돼 있습니다. 수정 재발행하면 그 수량으로 청구서가 다시 만들어집니다.`
                   : '조정이 없습니다. 실제 수량을 고친 뒤 저장해주세요.'}
@@ -283,7 +283,7 @@ export default function QtyAdjustModal({ open, target, onClose, onReissued }: {
 
           <p className="text-[11px] text-gray-400">
             수정 재발행은 이 정산서를 삭제하고 같은 기간으로 다시 발행합니다. 조정은 회사·기간에 붙어 있어 재발행에도 그대로 반영됩니다.
-            이미 세금계산서가 발행된 건은 여기서 고칠 수 없습니다 — 수정세금계산서 경로로 진행해주세요.
+            이미 세금계산서가 발행된 건은 여기서 고칠 수 없습니다. 수정세금계산서 경로로 진행해주세요.
           </p>
         </div>
 

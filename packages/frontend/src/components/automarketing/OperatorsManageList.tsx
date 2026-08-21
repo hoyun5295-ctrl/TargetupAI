@@ -61,7 +61,7 @@ export default function OperatorsManageList({ operators, onRunNow, onEdit, onDel
                     <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
                       <div className={`h-full ${isOver ? 'bg-rose-400' : isAlert ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${Math.min(100, monthPct)}%` }} />
                     </div>
-                    {isOver && <div className="mt-1.5 text-[10px] text-rose-300 flex items-center gap-1"><AlertCircle className="w-2.5 h-2.5" /> 월 예산 초과 — 새 제안 생성 자동 차단</div>}
+                    {isOver && <div className="mt-1.5 text-[10px] text-rose-300 flex items-center gap-1"><AlertCircle className="w-2.5 h-2.5" /> 월 예산 초과: 새 제안 생성 자동 차단</div>}
                     {!isOver && isAlert && <div className="mt-1.5 text-[10px] text-amber-300 flex items-center gap-1"><AlertCircle className="w-2.5 h-2.5" /> 알림 임계값 {threshold}% 도달</div>}
                   </div>
                 )}

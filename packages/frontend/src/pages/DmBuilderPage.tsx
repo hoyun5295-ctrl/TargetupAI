@@ -271,7 +271,7 @@ export default function DmBuilderPage() {
       // 6. 편집 모드 진입 + floating bar 표시 (자동 생성 직후만)
       setMode('edit');
       setShowAiFloatingBar(true);
-      setToast({ type: 'success', message: `AI가 ${(sections || []).length}개 섹션 + 카피 자동 생성 종결 — 추가 1-click 액션 활용 가능` });
+      setToast({ type: 'success', message: `AI가 ${(sections || []).length}개 섹션 + 카피 자동 생성 종결. 추가 1-click 액션 활용 가능` });
     } catch (err: any) {
       clearInterval(stepTimer);
       setToast({ type: 'error', message: err?.response?.data?.error || err?.message || 'AI 생성 실패' });
@@ -294,7 +294,7 @@ export default function DmBuilderPage() {
       save({ silent: true }).catch(() => {});
       setMode('edit');
       setShowAiFloatingBar(true);
-      setToast({ type: 'success', message: '행사 캠페인 DM 초안을 불러왔습니다 — 이미지만 올리고 다듬어주세요.' });
+      setToast({ type: 'success', message: '행사 캠페인 DM 초안을 불러왔습니다. 이미지만 올리고 다듬어주세요.' });
     } catch {
       // 초안 손상 = 조용히 무시 (일반 진입 흐름 무손상)
     }
@@ -311,7 +311,7 @@ export default function DmBuilderPage() {
       applyAiGenerated([gallery], undefined, '이미지 스튜디오 소재', { layoutMode: 'scroll' });
       save({ silent: true }).catch(() => {});
       setMode('edit');
-      setToast({ type: 'success', message: '스튜디오 소재로 이미지 DM을 시작했어요 — 문구·버튼만 더해주세요.' });
+      setToast({ type: 'success', message: '스튜디오 소재로 이미지 DM을 시작했어요. 문구·버튼만 더해주세요.' });
     } catch {
       // 초안 손상 = 조용히 무시
     }
@@ -399,7 +399,7 @@ export default function DmBuilderPage() {
         design_align: '디자인 정합화',
         variable_consistency: '변수 일관성',
       };
-      setToast({ type: 'success', message: `${labelMap[action]} 종결 — ${changes.length}개 섹션 정정` });
+      setToast({ type: 'success', message: `${labelMap[action]} 종결: ${changes.length}개 섹션 정정` });
     } catch (err: any) {
       setToast({ type: 'error', message: err?.response?.data?.error || err?.message || '액션 실패' });
     } finally {
@@ -551,7 +551,7 @@ export default function DmBuilderPage() {
       const url = res?.data?.short_url || '';
       if (!url) { setToast({ type: 'error', message: '발행 주소를 찾지 못했어요. 편집에서 발행 후 다시 시도해주세요.' }); return; }
       await navigator.clipboard.writeText(url);
-      setToast({ type: 'success', message: '발행 주소를 복사했어요. (이미 발행 — 추가 과금 없음)' });
+      setToast({ type: 'success', message: '발행 주소를 복사했어요. (이미 발행, 추가 과금 없음)' });
     } catch (err: any) {
       setToast({ type: 'error', message: err?.response?.data?.error || '주소 복사 실패' });
     }
@@ -736,7 +736,7 @@ export default function DmBuilderPage() {
             <h1 style={{ fontSize: 20, fontWeight: 800, color: '#fff', margin: 0 }}>모바일 DM 빌더</h1>
             <span style={{ fontSize: 11, padding: '3px 8px', background: 'rgba(139,92,246,0.2)', color: '#c4b5fd', borderRadius: 12, fontWeight: 700 }}>PRO</span>
           </div>
-          <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', margin: '2px 0 0 0' }}>카드형 모바일 DM 빌더 — 미디어 메세지 디자인 + 카드 단위 편집</p>
+          <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', margin: '2px 0 0 0' }}>카드형 모바일 DM 빌더: 미디어 메세지 디자인 + 카드 단위 편집</p>
         </div>
         {/* ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 박성용 신기능(Harold 위치 확정: 새 DM 만들기 왼쪽) */}
         <button
@@ -840,7 +840,7 @@ export default function DmBuilderPage() {
                     save({ silent: true }).catch(() => {});
                     setMode('edit');
                     const sum = summarizeEvents(events);
-                    setToast({ type: 'success', message: `행사 ${sum.events}건·상품 ${sum.products}개로 DM 초안을 만들었어요 — 상품 이미지와 문구만 다듬어주세요.` });
+                    setToast({ type: 'success', message: `행사 ${sum.events}건·상품 ${sum.products}개로 DM 초안을 만들었어요. 상품 이미지와 문구만 다듬어주세요.` });
                   } catch {
                     // 조립 실패 = 산문 폴백(기존 흐름 무손상)
                     setNaturalLanguage((prev) => (prev.trim() ? `${prev.trim()}\n${text}` : text));
@@ -881,7 +881,7 @@ export default function DmBuilderPage() {
                   <span style={{ fontSize: 18 }}>⚡</span>
                   <span style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>빠른 시작</span>
                 </div>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', lineHeight: 1.5 }}>12가지 시나리오 — 카드 클릭 즉시 AI가 섹션 + 카피를 만들고 편집 모드로 들어갑니다</div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', lineHeight: 1.5 }}>12가지 시나리오: 카드 클릭 즉시 AI가 섹션 + 카피를 만들고 편집 모드로 들어갑니다</div>
                 <div style={{ fontSize: 13, marginTop: 8, letterSpacing: 2 }}>🛍️ 🏷️ 🎁 🗺️ 📝 ✉️ 🎡 🖼️ ⭐ ⏳ 📊 👑</div>
               </button>
               <div className="dm-hub-bottom">
@@ -1016,7 +1016,7 @@ export default function DmBuilderPage() {
                 {QUICK_STARTS.map((s) => (
                   <button
                     key={s.label}
-                    onClick={() => { setQuickStartOpen(false); if (!generating) setPendingGen({ scenario: s.label, desc: `${s.label} — ${s.hint}. AI가 어울리는 섹션과 카피를 자동 생성합니다.` }); }}
+                    onClick={() => { setQuickStartOpen(false); if (!generating) setPendingGen({ scenario: s.label, desc: `${s.label}: ${s.hint}. AI가 어울리는 섹션과 카피를 자동 생성합니다.` }); }}
                     disabled={generating}
                     style={{
                       padding: '14px 10px 12px',
@@ -1099,13 +1099,13 @@ export default function DmBuilderPage() {
               if (ov.total_dm === 0) return '아직 만든 DM이 없어요. 위 빠른 시작 카드를 누르면 AI가 1분 만에 만들어 드려요.';
               if (ov.published_dm === 0) return `DM ${ov.total_dm}개를 작성 중이에요. 검수 후 발행하면 고객에게 보낼 수 있어요.`;
               if (ov.total_views_30d < 50) return `발행한 DM의 열람이 쌓이는 중이에요. 데이터가 더 모이면 정확히 분석해 드릴게요.`;
-              if (ov.avg_ctr_30d >= 5) return `평균 클릭률 ${ov.avg_ctr_30d}% — 아주 좋아요. 성과 좋은 DM의 구성을 다른 캠페인에도 활용해 보세요.`;
-              if (ov.avg_ctr_30d >= 2) return `평균 클릭률 ${ov.avg_ctr_30d}% — 무난해요. AI 카피 다듬기로 더 끌어올릴 수 있어요.`;
-              return `평균 클릭률 ${ov.avg_ctr_30d}% — 개선 여지가 있어요. CTA 위치와 카피, 이미지를 점검해 보세요.`;
+              if (ov.avg_ctr_30d >= 5) return `평균 클릭률 ${ov.avg_ctr_30d}%, 아주 좋아요. 성과 좋은 DM의 구성을 다른 캠페인에도 활용해 보세요.`;
+              if (ov.avg_ctr_30d >= 2) return `평균 클릭률 ${ov.avg_ctr_30d}%, 무난해요. AI 카피 다듬기로 더 끌어올릴 수 있어요.`;
+              return `평균 클릭률 ${ov.avg_ctr_30d}%, 개선 여지가 있어요. CTA 위치와 카피, 이미지를 점검해 보세요.`;
             })()}
           </div>
           <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontStyle: 'italic', marginTop: 8 }}>
-            집계 — 최근 30일 열람·이벤트 응답 데이터
+            집계: 최근 30일 열람·이벤트 응답 데이터
           </div>
         </div>
 
@@ -1175,7 +1175,7 @@ export default function DmBuilderPage() {
                 클릭률 = 이벤트 응답 ÷ 열람 × 100. 응답은 설문·응모·이메일 수집·추첨 등 고객 인터랙션을 합산해요.
               </div>
               <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', fontStyle: 'italic' }}>
-                집계 — 최근 30일 열람 + 이벤트 응답
+                집계: 최근 30일 열람 + 이벤트 응답
               </div>
             </div>
           )}
@@ -1195,7 +1195,7 @@ export default function DmBuilderPage() {
             <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>아직 만든 DM이 없어요</div>
             <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.6 }}>위에서 한 줄만 입력하거나 빠른 시작 카드를 누르면<br />AI가 1분 만에 첫 DM을 만들어 드려요.</div>
             <button
-              onClick={() => { if (!generating) setPendingGen({ scenario: QUICK_STARTS[0].label, desc: `${QUICK_STARTS[0].label} — ${QUICK_STARTS[0].hint}. AI가 어울리는 섹션과 카피를 자동 생성합니다.` }); }}
+              onClick={() => { if (!generating) setPendingGen({ scenario: QUICK_STARTS[0].label, desc: `${QUICK_STARTS[0].label}: ${QUICK_STARTS[0].hint}. AI가 어울리는 섹션과 카피를 자동 생성합니다.` }); }}
               disabled={generating}
               style={{
                 marginTop: 4, padding: '10px 20px', borderRadius: 10, border: 'none',
@@ -1252,7 +1252,7 @@ export default function DmBuilderPage() {
                   const next = QUICK_STARTS.find((q) => !used.has(q.label)) || QUICK_STARTS[1];
                   return (
                     <button
-                      onClick={() => { if (!generating) setPendingGen({ scenario: next.label, desc: `${next.label} — ${next.hint}. AI가 어울리는 섹션과 카피를 자동 생성합니다.` }); }}
+                      onClick={() => { if (!generating) setPendingGen({ scenario: next.label, desc: `${next.label}: ${next.hint}. AI가 어울리는 섹션과 카피를 자동 생성합니다.` }); }}
                       disabled={generating}
                       style={{
                         border: '1px dashed rgba(255,255,255,0.2)',
@@ -1267,7 +1267,7 @@ export default function DmBuilderPage() {
                       onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; }}
                     >
                       <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(168,85,247,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>{next.icon}</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>다음 추천 — {next.label}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>다음 추천: {next.label}</div>
                       <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>클릭하면 AI가 바로 만들어 드려요</div>
                     </button>
                   );
@@ -1368,10 +1368,10 @@ export default function DmBuilderPage() {
             // 결과물은 여기 그대로 들어왔다. 다만 질문 답이 저장된 자리와 끊겼으면 그 사실을 알린다 —
             // 안 알리면 사용자가 "다시 열면 이어서 나오겠지"라고 믿고 되돌아갔다가 빈 화면을 본다.
             message: sessionDetached
-              ? `${sections.length}개 섹션으로 만들었어요 — 이 결과는 지금 화면에서 이어서 편집해 주세요(질문 답으로는 다시 불러올 수 없습니다)`
+              ? `${sections.length}개 섹션으로 만들었어요. 이 결과는 지금 화면에서 이어서 편집해 주세요(질문 답으로는 다시 불러올 수 없습니다)`
               : missing > 0
-                ? `${sections.length}개 섹션으로 만들었어요 — 반영되지 않은 항목 ${missing}건은 편집기에서 확인해 주세요`
-                : `${sections.length}개 섹션으로 만들었어요 — 문구와 이미지만 다듬으면 됩니다`,
+                ? `${sections.length}개 섹션으로 만들었어요. 반영되지 않은 항목 ${missing}건은 편집기에서 확인해 주세요`
+                : `${sections.length}개 섹션으로 만들었어요. 문구와 이미지만 다듬으면 됩니다`,
           });
         }}
       />
@@ -1541,7 +1541,7 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
             onClick={async () => {
               if (!publishedUrl) return;
               try { await navigator.clipboard.writeText(publishedUrl); setToast({ type: 'success', message: '링크를 복사했어요.' }); }
-              catch { setToast({ type: 'error', message: '복사 실패 — 링크를 길게 눌러 복사해주세요.' }); }
+              catch { setToast({ type: 'error', message: '복사 실패. 링크를 길게 눌러 복사해주세요.' }); }
             }}
           >복사</ModalButton>
         </div>
@@ -1725,7 +1725,7 @@ function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, onTrack, onKoreanAli
             <button
               onClick={(e) => { e.stopPropagation(); if (!isStopped) onKoreanAlias(dm.id, dm.title); }}
               disabled={isStopped}
-              title={isStopped ? '중지된 DM입니다. [재개] 후 사용할 수 있어요.' : '한글 주소 — hlj.kr/반짝세일_07처럼 기억하기 쉬운 공용 주소 (무료)'}
+              title={isStopped ? '중지된 DM입니다. [재개] 후 사용할 수 있어요.' : '한글 주소: hlj.kr/반짝세일_07처럼 기억하기 쉬운 공용 주소 (무료)'}
               style={{ height: 32, padding: '0 10px', background: 'rgba(56,189,248,0.12)', color: '#7dd3fc', border: '1px solid rgba(56,189,248,0.35)', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: isStopped ? 'not-allowed' : 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap', opacity: isStopped ? 0.35 : 1 }}
               onMouseEnter={(e) => { if (!isStopped) e.currentTarget.style.background = 'rgba(56,189,248,0.2)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(56,189,248,0.12)'; }}
@@ -1738,7 +1738,7 @@ function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, onTrack, onKoreanAli
       {dm.has_send_history && onTrack && (
         <button
           onClick={(e) => { e.stopPropagation(); onTrack(dm.id, dm.title); }}
-          title="발송 추적 — 수신자별 열람·깊이·클릭·응모 현황"
+          title="발송 추적: 수신자별 열람·깊이·클릭·응모 현황"
           style={{ height: 32, width: '100%', background: 'rgba(139,92,246,0.12)', color: '#c4b5fd', border: '1px solid rgba(139,92,246,0.35)', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
           onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(139,92,246,0.2)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(139,92,246,0.12)'; }}
@@ -1782,7 +1782,7 @@ function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, onTrack, onKoreanAli
         {isStopped && onResume && (
           <button
             onClick={() => onResume(dm.id)}
-            title="재개 — 같은 주소로 다시 열어요 (추가 과금 없음)"
+            title="재개: 같은 주소로 다시 열어요 (추가 과금 없음)"
             style={{
               height: 32, padding: '0 10px',
               background: 'rgba(16, 185, 129, 0.12)', color: '#6ee7b7',
@@ -1798,7 +1798,7 @@ function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, onTrack, onKoreanAli
         {!isStopped && dm.status === 'published' && onStop && (
           <button
             onClick={() => onStop(dm.id)}
-            title="중지 — 고객 접속을 막아요. 이력은 그대로 남아요."
+            title="중지: 고객 접속을 막아요. 이력은 그대로 남아요."
             style={{
               height: 32, padding: '0 10px',
               background: 'rgba(245, 158, 11, 0.12)', color: '#fcd34d',

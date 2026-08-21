@@ -108,7 +108,7 @@ export default function CreditGauge({
 
       {!compact && (
         <p className={`mt-3 text-[10px] italic ${dark ? 'text-white/30' : 'text-slate-300'}`}>
-          Data source — companies.ai_credits + ai_credit_transactions (이번달 차감 합)
+          Data source: companies.ai_credits + ai_credit_transactions (이번달 차감 합)
         </p>
       )}
     </div>

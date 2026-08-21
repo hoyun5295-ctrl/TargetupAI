@@ -147,7 +147,7 @@ export default function CdpIntegrationStepper({
                 </p>
               ) : (
                 <p className="text-[12px] text-white/55 leading-relaxed">
-                  따로 설치할 것은 없습니다. 한줄로가 {providerName}에서 데이터를 가져옵니다 — 첫 주문·회원 활동이 생기면 다음 단계가 켜집니다.
+                  따로 설치할 것은 없습니다. 한줄로가 {providerName}에서 데이터를 가져옵니다. 첫 주문·회원 활동이 생기면 다음 단계가 켜집니다.
                 </p>
               )
             )}
@@ -206,13 +206,13 @@ export default function CdpIntegrationStepper({
                   {/* 확인 항목도 몰 유형을 따른다 — 폴링·웹훅 몰에 "설치 코드가 모든 페이지에"는 물어볼 수 없는 것이다. */}
                   {needsInstall ? (
                     <ul className="text-[11.5px] text-white/55 leading-relaxed list-disc pl-4 space-y-0.5">
-                      <li>설치한 페이지를 한 번 열어보셨나요 — 방문이 있어야 첫 데이터가 만들어집니다.</li>
+                      <li>설치한 페이지를 한 번 열어보셨나요. 방문이 있어야 첫 데이터가 만들어집니다.</li>
                       <li>설치 코드가 모든 페이지에 들어갔는지 개발자에게 확인해 주세요.</li>
                       <li>쇼핑몰 도메인이 수집 허용 목록에 등록됐는지 확인해 주세요.</li>
                     </ul>
                   ) : (
                     <ul className="text-[11.5px] text-white/55 leading-relaxed list-disc pl-4 space-y-0.5">
-                      <li>연결한 뒤에 새 주문·가입이 있었는지 확인해 주세요 — 활동이 있어야 첫 데이터가 만들어집니다.</li>
+                      <li>연결한 뒤에 새 주문·가입이 있었는지 확인해 주세요. 활동이 있어야 첫 데이터가 만들어집니다.</li>
                       <li>쇼핑몰 관리자에서 연동 계정의 조회 권한이 그대로인지 확인해 주세요.</li>
                     </ul>
                   )}

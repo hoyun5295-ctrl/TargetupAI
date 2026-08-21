@@ -268,7 +268,7 @@ export default function ManagePurchasesTab() {
           </div>
         ))}
       </div>
-      <p className="text-[10px] text-slate-400 italic -mt-1">Data source — 구매 원장(purchases), 선택 기간 실제 집계</p>
+      <p className="text-[10px] text-slate-400 italic -mt-1">Data source: 구매 원장(purchases), 선택 기간 실제 집계</p>
 
       {/* 테이블 */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">

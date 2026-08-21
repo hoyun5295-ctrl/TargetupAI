@@ -49,7 +49,7 @@ function resolveBaseURL(): string {
     env === 'PRD' ? process.env.IMC_BASE_URL_PRD : process.env.IMC_BASE_URL_STG;
   if (!url) {
     throw new Error(
-      `[IMC] 환경변수가 설정되지 않았습니다 — IMC_BASE_URL_${env}=? .env 확인 필요`,
+      `[IMC] 환경변수가 설정되지 않았습니다: IMC_BASE_URL_${env}=? .env 확인 필요`,
     );
   }
   return url.replace(/\/$/, '');
@@ -61,7 +61,7 @@ function resolveApiKey(): string {
     env === 'PRD' ? process.env.IMC_API_KEY : process.env.IMC_API_KEY_SANDBOX;
   if (!key) {
     throw new Error(
-      `[IMC] 환경변수가 설정되지 않았습니다 — IMC_API_KEY${env === 'PRD' ? '' : '_SANDBOX'}=? .env 확인 필요`,
+      `[IMC] 환경변수가 설정되지 않았습니다: IMC_API_KEY${env === 'PRD' ? '' : '_SANDBOX'}=? .env 확인 필요`,
     );
   }
   return key;

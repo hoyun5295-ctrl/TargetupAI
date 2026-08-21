@@ -193,13 +193,13 @@ export default function EmailCampaignsPage() {
 
   const handle503 = (data: any): boolean => {
     if (data?.code === 'DB_MIGRATION_PENDING') {
-      setError(data.error || 'DB 마이그레이션 필요 — 운영자에게 문의해주세요.');
+      setError(data.error || 'DB 마이그레이션 필요. 운영자에게 문의해주세요.');
       showToast('기능을 준비 중입니다. 잠시 후 다시 시도해 주세요.', 'warning');
       return true;
     }
     if (data?.code === 'SMTP_ENCRYPTION_KEY_MISSING') {
-      setError(data.error || 'SMTP 암호화 키 미설정 — 운영자에게 문의해주세요.');
-      showToast('SMTP 암호화 키 미설정 — 운영자에게 .env 등록 요청 의무', 'warning');
+      setError(data.error || 'SMTP 암호화 키 미설정. 운영자에게 문의해주세요.');
+      showToast('SMTP 암호화 키 미설정. 운영자에게 .env 등록 요청 의무', 'warning');
       return true;
     }
     return false;
@@ -341,7 +341,7 @@ export default function EmailCampaignsPage() {
       const data = await res.json();
       if (handle503(data)) return;
       if (data.success) {
-        showToast(`테스트 발송 완료 — ${testEmail} 수신 확인해주세요 (스팸 폴더도 확인)`, 'success');
+        showToast(`테스트 발송 완료. ${testEmail} 수신 확인해주세요 (스팸 폴더도 확인)`, 'success');
       } else {
         showToast(data.error || '테스트 발송 실패', 'error');
       }
@@ -379,7 +379,7 @@ export default function EmailCampaignsPage() {
       const data = await res.json();
       if (handle503(data)) return;
       if (data.success) {
-        showToast(`테스트발송 완료 — ${data.sent}건 발송 (수신함·스팸 폴더 확인)`, 'success');
+        showToast(`테스트발송 완료. ${data.sent}건 발송 (수신함·스팸 폴더 확인)`, 'success');
         setCampaignTest(null);
       } else {
         showToast(data.error || '테스트발송 실패', 'error');
@@ -547,7 +547,7 @@ export default function EmailCampaignsPage() {
           // ★ 2026-07-13 — AI 프리헤더 회생(design.preheader로 수용 — 옛 흐름은 버렸음)
           design: g.preheader ? { preheader: String(g.preheader).slice(0, 90) } : null,
         });
-        showToast('AI 생성 완료 — 비주얼 편집기에서 확인하고 다듬어주세요. (3 크레딧)', 'success');
+        showToast('AI 생성 완료. 비주얼 편집기에서 확인하고 다듬어주세요. (3 크레딧)', 'success');
       } else {
         showToast(data.error || 'AI 생성 실패', 'error');
       }
@@ -574,7 +574,7 @@ export default function EmailCampaignsPage() {
       aiGenerated: true,
       design: g.preheader ? { preheader: String(g.preheader).slice(0, 90) } : null,
     });
-    showToast('행사 캠페인 이메일 초안을 불러왔습니다 — 이미지만 올리고 다듬어주세요.', 'success');
+    showToast('행사 캠페인 이메일 초안을 불러왔습니다. 이미지만 올리고 다듬어주세요.', 'success');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -592,7 +592,7 @@ export default function EmailCampaignsPage() {
         aiGenerated: false,
         design: null,
       });
-      showToast('스튜디오 소재로 이메일을 시작했어요 — 제목·문구만 더해주세요.', 'success');
+      showToast('스튜디오 소재로 이메일을 시작했어요. 제목·문구만 더해주세요.', 'success');
     } catch {
       // 초안 손상 = 조용히 무시
     }
@@ -613,7 +613,7 @@ export default function EmailCampaignsPage() {
       aiGenerated: false,
       design: null,
     });
-    showToast(`라이브러리 소재 ${urls.length}장으로 이메일을 시작했어요 — 제목·문구만 더해주세요.`, 'success');
+    showToast(`라이브러리 소재 ${urls.length}장으로 이메일을 시작했어요. 제목·문구만 더해주세요.`, 'success');
   };
 
   // ──────────────── 발송 진행 (수신자 모달 → 확인 → POST → 폴링) ────────────────
@@ -645,11 +645,11 @@ export default function EmailCampaignsPage() {
       if (data.success) {
         const excluded = Number(data.excludedOptOut) > 0 ? ` · 수신거부 이력 ${Number(data.excludedOptOut)}건 제외` : '';
         if (data.scheduled) {
-          showToast(`예약 완료 — ${new Date(data.scheduledAt).toLocaleString('ko-KR')} 발송 (대상 ${data.total}명${excluded})`, 'success');
+          showToast(`예약 완료: ${new Date(data.scheduledAt).toLocaleString('ko-KR')} 발송 (대상 ${data.total}명${excluded})`, 'success');
           setSendingId(null);
           await loadAll();
         } else {
-          showToast(`발송 시작 — 대상 ${data.total}명${excluded} (진행 상황 자동 갱신)`, 'success');
+          showToast(`발송 시작: 대상 ${data.total}명${excluded} (진행 상황 자동 갱신)`, 'success');
           pollCampaign(campaign.id);
         }
       } else {
@@ -668,7 +668,7 @@ export default function EmailCampaignsPage() {
   const handleProceedSend = (campaign: EmailCampaign, payload: any, total: number) => {
     setRecipientsModal(null);
     const sched = payload.mode === 'scheduled';
-    const desc = `${total.toLocaleString()}명에게 ${sched ? '예약' : '즉시'} 발송합니다.${campaign.isAd ? ' (광고성 — "(광고)" + 수신거부 링크 자동 부착)' : ''} 발신 = ${campaign.fromEmail}`;
+    const desc = `${total.toLocaleString()}명에게 ${sched ? '예약' : '즉시'} 발송합니다.${campaign.isAd ? ' (광고성, "(광고)" + 수신거부 링크 자동 부착)' : ''} 발신 = ${campaign.fromEmail}`;
     if (!campaign.completed) {
       // 미완성 = 완성 50크레딧 고지 후 완성+발송 연속 처리
       setCreditConfirm({ campaign, payload, desc });
@@ -696,7 +696,7 @@ export default function EmailCampaignsPage() {
           const data = await res.json();
           if (handle503(data)) return;
           if (data.success) {
-            showToast('예약이 취소되었습니다 — 캠페인은 초안 상태로 보관됩니다.', 'success');
+            showToast('예약이 취소되었습니다. 캠페인은 초안 상태로 보관됩니다.', 'success');
             await loadAll();
           } else {
             showToast(data.error || '예약 취소 실패', 'error');
@@ -770,7 +770,7 @@ export default function EmailCampaignsPage() {
                 <button
                   onClick={() => setSmtpFormOpen(true)}
                   className="text-xs flex items-center gap-1.5 px-2.5 py-2 rounded-lg bg-emerald-500/15 border border-emerald-400/25 text-emerald-100 hover:bg-emerald-500/25 transition-colors"
-                  title="SMTP 설정 — 수정 / 영구 제거"
+                  title="SMTP 설정: 수정 / 영구 제거"
                 >
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
                   <span className="font-medium">발송 가능</span>
@@ -818,7 +818,7 @@ export default function EmailCampaignsPage() {
             <div className="flex items-start gap-3">
               <AlertTriangle className="w-5 h-5 text-amber-300 mt-0.5 shrink-0" />
               <div className="flex-1">
-                <h3 className="text-sm font-bold text-amber-100 mb-1">SMTP 설정 미완료 — Email 캠페인 발송 불가</h3>
+                <h3 className="text-sm font-bold text-amber-100 mb-1">SMTP 설정 미완료: Email 캠페인 발송 불가</h3>
                 <p className="text-xs text-amber-200/80 mb-3">
                   회사 admin 본인 메일 서버 (Google Workspace / Naver Works / Office 365 / 자체 메일 서버) SMTP 정보 등록 후 발송 가능합니다.
                   발신 도메인 = 회사 본인 도메인 = 한줄로 부담 0 + SPF/DKIM/DMARC 회사 본인 책임.
@@ -891,7 +891,7 @@ export default function EmailCampaignsPage() {
                 </div>
                 <div>
                   <div className="text-xs font-bold text-white">템플릿에서 시작</div>
-                  <div className="text-[10px] text-white/45 mt-0.5">완성된 골격을 한 번에 — 크레딧 0, 바로 편집</div>
+                  <div className="text-[10px] text-white/45 mt-0.5">완성된 골격을 한 번에 (크레딧 0 · 바로 편집)</div>
                 </div>
               </button>
               <button
@@ -930,7 +930,7 @@ export default function EmailCampaignsPage() {
               onPickMany={startFromLibrary}
             />
             <div className="text-[10px] text-white/30 italic mt-3">
-              Data source — 회사 Brand Voice 학습 결과 자동 반영 · 구체 혜택은 직접 입력
+              Data source: 회사 Brand Voice 학습 결과 자동 반영 · 구체 혜택은 직접 입력
             </div>
           </div>
         )}
@@ -957,7 +957,7 @@ export default function EmailCampaignsPage() {
           </div>
         )}
         {campaigns.length > 0 && (
-          <div className="text-[10px] text-white/30 italic">Data source — email_campaigns + email_events 누적 통계</div>
+          <div className="text-[10px] text-white/30 italic">Data source: email_campaigns + email_events 누적 통계</div>
         )}
 
         {/* 캠페인 목록 */}
@@ -1028,7 +1028,7 @@ export default function EmailCampaignsPage() {
                     <button
                       onClick={() => handleCancelSchedule(c)}
                       className="inline-flex items-center gap-1 text-[11px] font-semibold bg-amber-500/20 hover:bg-amber-500/35 text-amber-200 border border-amber-400/30 px-2.5 py-1.5 rounded-lg"
-                      title="예약을 취소하고 초안으로 되돌립니다 (완성 상태 유지 — 다시 발송·예약 가능)"
+                      title="예약을 취소하고 초안으로 되돌립니다 (완성 상태 유지, 다시 발송·예약 가능)"
                     >
                       <X className="w-3 h-3" /> 예약 취소
                     </button>
@@ -1067,7 +1067,7 @@ export default function EmailCampaignsPage() {
                     <button
                       onClick={() => openCampaignTest(c)}
                       className="inline-flex items-center gap-1 text-[11px] text-teal-300 border border-teal-400/20 hover:bg-teal-500/10 px-2.5 py-1.5 rounded-lg"
-                      title="이 이메일을 직접 입력한 주소(최대 3개)로 테스트 발송합니다 — 광고 표기 없음"
+                      title="이 이메일을 직접 입력한 주소(최대 3개)로 테스트 발송합니다 (광고 표기 없음)"
                     >
                       <Send className="w-3 h-3" /> 테스트발송
                     </button>
@@ -1455,7 +1455,7 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
           </div>
 
           <div>
-            <label className="text-xs text-white/70 block mb-1">사용자 (user) — 보통 이메일 주소</label>
+            <label className="text-xs text-white/70 block mb-1">사용자 (user): 보통 이메일 주소</label>
             <input
               type="text"
               value={form.user}
@@ -1467,7 +1467,7 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
 
           <div>
             <label className="text-xs text-white/70 block mb-1 flex items-center gap-1">
-              <Lock className="w-3 h-3" /> 비밀번호 (password) — 앱 비밀번호 권장 (Google 2단계 인증 영역)
+              <Lock className="w-3 h-3" /> 비밀번호 (password): 앱 비밀번호 권장 (Google 2단계 인증 영역)
             </label>
             <div className="relative">
               <input
@@ -1487,7 +1487,7 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
-            <div className="text-[10px] text-white/40 mt-1">서버 저장 시 AES-256-GCM 암호화 — 평문 응답/로그 X</div>
+            <div className="text-[10px] text-white/40 mt-1">서버 저장 시 AES-256-GCM 암호화. 평문 응답/로그 X</div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -1605,7 +1605,7 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
         <div className="sticky top-0 bg-violet-900/40 border-b border-white/10 px-6 py-4 flex items-center justify-between z-10">
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
             {editing.aiGenerated && <Sparkles className="w-4 h-4 text-fuchsia-300" />}
-            {editing.id ? '캠페인 수정' : editing.aiGenerated ? 'AI 생성 이메일 — 확인 후 발송' : '신규 Email 캠페인'}
+            {editing.id ? '캠페인 수정' : editing.aiGenerated ? 'AI 생성 이메일: 확인 후 발송' : '신규 Email 캠페인'}
           </h3>
           <button onClick={() => setEditing(null)} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10" aria-label="닫기">
             <X className="w-5 h-5" />
@@ -1635,7 +1635,7 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
               maxLength={200}
             />
             {(editing.subject || '').length > 40 && (
-              <div className="text-[10px] text-amber-300 mt-1">제목 {(editing.subject || '').length}자 — 모바일 수신함에서 40자 이후가 잘릴 수 있어요.</div>
+              <div className="text-[10px] text-amber-300 mt-1">제목 {(editing.subject || '').length}자. 모바일 수신함에서 40자 이후가 잘릴 수 있어요.</div>
             )}
             {/* AI 제목 3안 칩 */}
             {subjects.length > 1 && (
@@ -1740,7 +1740,7 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
             <div className="text-[10px] text-white/40 mt-1">{`{{이름}}`} = 발송 시 고객 이름 자동 치환 · 수신거부 링크는 발송 시 자동 부착</div>
           </div>
           <div>
-            <label className="text-xs text-white/70 block mb-1">텍스트 본문 (선택 — HTML 미지원 클라이언트 대응)</label>
+            <label className="text-xs text-white/70 block mb-1">텍스트 본문 (선택, HTML 미지원 클라이언트 대응)</label>
             <textarea
               value={editing.textBody || ''}
               onChange={(e) => setEditing({ ...editing, textBody: e.target.value })}
@@ -1757,7 +1757,7 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
               className="rounded"
             />
             <label htmlFor="campaign_is_ad" className="text-xs text-amber-100">
-              <strong>광고성 이메일</strong> — 체크 시 "(광고)" prefix + 수신거부 링크 자동 부착 (정보통신망법 의무).
+              <strong>광고성 이메일</strong>: 체크 시 "(광고)" prefix + 수신거부 링크 자동 부착 (정보통신망법 의무).
             </label>
           </div>
         </div>
@@ -1907,7 +1907,7 @@ function RecipientsModal({ campaign, authHeaders, onProceed, onClose, onToast }:
         <div className="p-6 space-y-4">
           <div className="text-xs text-white/60">
             캠페인: <strong className="text-white">{campaign.name}</strong>
-            {campaign.isAd && <span className="ml-2 text-amber-300">(광고성 — "(광고)" + 수신거부 자동 부착)</span>}
+            {campaign.isAd && <span className="ml-2 text-amber-300">(광고성, "(광고)" + 수신거부 자동 부착)</span>}
           </div>
 
           {/* 탭 */}
@@ -1997,7 +1997,7 @@ function RecipientsModal({ campaign, authHeaders, onProceed, onClose, onToast }:
               className="text-xs text-fuchsia-300 hover:text-fuchsia-200 flex items-center gap-1.5 disabled:opacity-50"
             >
               {prechecking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-              발송 전 AI 진단 (스팸 위험 · 광고 표기 · 모바일 잘림 — 1 크레딧)
+              발송 전 AI 진단 (스팸 위험 · 광고 표기 · 모바일 잘림 · 1 크레딧)
             </button>
             {precheck && (
               <div className="mt-3 space-y-2 bg-violet-950/40 rounded-lg p-3">
@@ -2129,7 +2129,7 @@ function InsightModal({ campaign, authHeaders, onClose, onToast }: InsightModalP
                   )}
                 </>
               )}
-              <div className="text-[10px] text-white/30 italic">Data source — 실측 오픈/클릭 이벤트 (email_events)</div>
+              <div className="text-[10px] text-white/30 italic">Data source: 실측 오픈/클릭 이벤트 (email_events)</div>
             </>
           )}
         </div>
@@ -2238,7 +2238,7 @@ function NonOpenerModal({ campaign, authHeaders, onClose, onToast, onGoSms, onRe
           <button onClick={onClose} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>
         </div>
         <div className="p-6 space-y-4">
-          <div className="text-xs text-white/50">{campaign.name} — 이메일을 열지 않은 고객에게 다시 보냅니다.</div>
+          <div className="text-xs text-white/50">{campaign.name}: 이메일을 열지 않은 고객에게 다시 보냅니다.</div>
           {loading ? (
             <div className="py-12 flex justify-center text-white/50"><Loader2 className="w-6 h-6 animate-spin" /></div>
           ) : result && phase === 'view' ? (
@@ -2287,7 +2287,7 @@ function NonOpenerModal({ campaign, authHeaders, onClose, onToast, onGoSms, onRe
               </div>
 
               <div className="border-t border-white/10 pt-3">
-                <div className="text-[11px] text-white/40 mb-2">더 확실히 닿고 싶으면 — 문자로 (유료)</div>
+                <div className="text-[11px] text-white/40 mb-2">더 확실히 닿고 싶으면: 문자로 (유료)</div>
                 {result.matched.length > 0 ? (
                   <div className="flex gap-2">
                     <button onClick={copyPhones} className="flex-1 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs text-white/70">전화번호 {result.matched.length}건 복사</button>
@@ -2298,14 +2298,14 @@ function NonOpenerModal({ campaign, authHeaders, onClose, onToast, onGoSms, onRe
                 )}
               </div>
 
-              <div className="text-[10px] text-white/30 italic">Data source — email_events delivered 후 미오픈(수신거부·반송 제외) · 전화 매칭은 고객DB</div>
+              <div className="text-[10px] text-white/30 italic">Data source: email_events delivered 후 미오픈(수신거부·반송 제외) · 전화 매칭은 고객DB</div>
             </>
           ) : result && phase === 'confirm' ? (
             <>
               <div className="bg-slate-800/60 border border-white/10 rounded-xl p-4 space-y-2">
                 <div className="text-sm text-white">미수신자 <strong className="text-cyan-300">{result.resendEligible.toLocaleString()}명</strong>에게 재발송합니다.</div>
                 <div className="text-[11px] text-white/50 break-words">제목: {subject.trim() || campaign.subject}</div>
-                <div className="text-[11px] text-emerald-300">비용 0원 — 이메일 발송은 회사 SMTP로 나가며 무료입니다.</div>
+                <div className="text-[11px] text-emerald-300">비용 0원: 이메일 발송은 회사 SMTP로 나가며 무료입니다.</div>
                 {result.resendEligible >= LARGE_VOLUME && (
                   <div className="text-[11px] text-amber-300 flex items-start gap-1.5"><AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> 대량 발송입니다. 발신 도메인 평판에 영향을 줄 수 있어 재발송은 1회로 제한됩니다.</div>
                 )}

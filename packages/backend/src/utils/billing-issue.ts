@@ -433,7 +433,7 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
   if (!planGate.ok) {
     throw new BillingIssueError(422, {
       error: planGate.blockReason === 'history_absent'
-        ? '요금제가 배정돼 있는데 요금제 변경 이력이 한 건도 없습니다. 이대로 발행하면 구독료가 0원으로 빠집니다 — 이력을 먼저 확인해 주세요.'
+        ? '요금제가 배정돼 있는데 요금제 변경 이력이 한 건도 없습니다. 이대로 발행하면 구독료가 0원으로 빠집니다. 이력을 먼저 확인해 주세요.'
         : `요금제 변경 이력이 중간에 끊겨 구독료를 계산할 수 없습니다 (${planGate.gap!.from} ~ ${planGate.gap!.to}, ${planGate.gap!.days}일). 이대로 발행하면 그 구간 구독료가 0원으로 빠집니다.`,
       code: 'PLAN_HISTORY_MISSING',
       block_reason: planGate.blockReason,
@@ -506,7 +506,7 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
     );
     if (freeFingerprintNow !== freeFingerprint) {
       throw new BillingIssueError(422, {
-        error: '발행 중에 요금제 무료 제공 잔량이 바뀌어 중단했습니다. 같은 달의 다른 청구서가 먼저 발행됐을 수 있습니다 — 그대로 다시 발행해 주세요.',
+        error: '발행 중에 요금제 무료 제공 잔량이 바뀌어 중단했습니다. 같은 달의 다른 청구서가 먼저 발행됐을 수 있습니다. 그대로 다시 발행해 주세요.',
         code: 'BILLING_FREE_QUOTA_CHANGED',
       });
     }
@@ -639,7 +639,7 @@ ${EXTRA_ITEM_SOURCE_JOIN}
       const amsg = String(adjErr?.message || '');
       if (amsg.includes('does not exist') && (amsg.includes('relation') || amsg.includes('column'))) {
         throw new BillingIssueError(503, {
-          error: 'DB 마이그레이션 필요 — billing_qty_adjustments 테이블 생성 요청',
+          error: 'DB 마이그레이션 필요: billing_qty_adjustments 테이블 생성 요청',
           code: 'DB_MIGRATION_PENDING',
         });
       }
@@ -1053,7 +1053,7 @@ export async function issueMinimumChargeBilling(input: {
     });
     if (!minChargePlanGate.ok) {
       throw new BillingIssueError(422, {
-        error: `${co.company_name}은(는) 요금제 변경 이력이 온전하지 않아 정액 발행을 중단했습니다. 이대로 발행하면 그 기간 구독료가 청구서에서 빠진 채 정액만 나갑니다 — 이력을 먼저 확인해 주세요.`,
+        error: `${co.company_name}은(는) 요금제 변경 이력이 온전하지 않아 정액 발행을 중단했습니다. 이대로 발행하면 그 기간 구독료가 청구서에서 빠진 채 정액만 나갑니다. 이력을 먼저 확인해 주세요.`,
         code: 'MIN_CHARGE_PLAN_HISTORY_MISSING',
         block_reason: minChargePlanGate.blockReason,
         plan_gap: minChargePlanGate.gap,
@@ -1086,7 +1086,7 @@ export async function issueMinimumChargeBilling(input: {
     );
     if (active080.rows.length > 0) {
       throw new BillingIssueError(422, {
-        error: `${co.company_name}에 고정료가 설정된 활성 080 번호 매핑이 있습니다. 정액 발행은 080 고정료를 싣지 않아 그 달 이용료·부가서비스가 청구에서 빠집니다 — 일반 발행으로 청구하거나, 080 청구를 중단하려면 매핑을 비활성으로 바꾼 뒤 발행해주세요.`,
+        error: `${co.company_name}에 고정료가 설정된 활성 080 번호 매핑이 있습니다. 정액 발행은 080 고정료를 싣지 않아 그 달 이용료·부가서비스가 청구에서 빠집니다. 일반 발행으로 청구하거나, 080 청구를 중단하려면 매핑을 비활성으로 바꾼 뒤 발행해주세요.`,
         code: 'MIN_CHARGE_080_MAPPING_ACTIVE',
       });
     }

@@ -26,10 +26,10 @@ export interface SendOutcome {
 
 export function decideSendOutcome(input: { recipientCount: number; balanceOk: boolean }): SendOutcome {
   if (input.recipientCount <= 0) {
-    return { action: 'skip', notify: true, reason: '발송 대상 0명 — 이번 사이클 건너뜀' };
+    return { action: 'skip', notify: true, reason: '발송 대상 0명. 이번 사이클 건너뜀' };
   }
   if (!input.balanceOk) {
-    return { action: 'skip', notify: true, reason: '잔액 부족 — 이번 사이클 건너뜀' };
+    return { action: 'skip', notify: true, reason: '잔액 부족. 이번 사이클 건너뜀' };
   }
   return { action: 'send', notify: false, reason: '발송 진행' };
 }
@@ -80,14 +80,14 @@ export function decideBudgetGuard(input: BudgetGuardInput): BudgetGuardResult {
     return {
       over: true,
       scope: 'month',
-      reason: `월 예산 초과 — 발송 보류 (사용 ${spentMonth.toLocaleString()}원 + 이번 ${pending.toLocaleString()}원 > 한도 ${input.budgetMonthly.toLocaleString()}원)`,
+      reason: `월 예산 초과. 발송 보류 (사용 ${spentMonth.toLocaleString()}원 + 이번 ${pending.toLocaleString()}원 > 한도 ${input.budgetMonthly.toLocaleString()}원)`,
     };
   }
   if (input.budgetDaily != null && spentToday + pending > input.budgetDaily) {
     return {
       over: true,
       scope: 'day',
-      reason: `일 한도 초과 — 발송 보류 (오늘 ${spentToday.toLocaleString()}원 + 이번 ${pending.toLocaleString()}원 > 한도 ${input.budgetDaily.toLocaleString()}원)`,
+      reason: `일 한도 초과. 발송 보류 (오늘 ${spentToday.toLocaleString()}원 + 이번 ${pending.toLocaleString()}원 > 한도 ${input.budgetDaily.toLocaleString()}원)`,
     };
   }
   return { over: false, scope: null, reason: '' };
@@ -145,7 +145,7 @@ export function decideBudgetAlert(input: BudgetAlertInput): BudgetAlertResult {
       return {
         alert: true,
         scope,
-        message: `${label} 사용 ${Math.round(((prev + added) / budget) * 100)}% 도달 — ${(prev + added).toLocaleString()}원 / 한도 ${budget.toLocaleString()}원 (알림 기준 ${pct}%)`,
+        message: `${label} 사용 ${Math.round(((prev + added) / budget) * 100)}% 도달: ${(prev + added).toLocaleString()}원 / 한도 ${budget.toLocaleString()}원 (알림 기준 ${pct}%)`,
       };
     }
     return null;
@@ -277,7 +277,7 @@ export function normalizeCopyStyle(raw: unknown): CopyStyle | null {
 export function buildCopyStylePromptBlock(style: CopyStyle | null): string {
   if (!style) return '';
   const def = COPY_STYLES.find((s) => s.key === style)!;
-  return `[문안 스타일 — 반드시 반영] ${def.label} 톤: ${def.prompt}`;
+  return `[문안 스타일: 반드시 반영] ${def.label} 톤: ${def.prompt}`;
 }
 
 /**
@@ -311,7 +311,7 @@ export function buildTargetHintPromptBlock(hint: TargetHint | null): string {
   if (!hint) return '';
   const def = TARGET_HINTS.find((h) => h.key === hint)!;
   return [
-    `[발송 대상 축 — 회사 확정, 반드시 준수]`,
+    `[발송 대상 축: 회사 확정, 반드시 준수]`,
     `대상: ${def.label}. ${def.directive}`,
     `filters는 반드시 이 대상 축을 구현해야 한다. 다른 대상으로 바꾸지 않는다.`,
   ].join('\n');

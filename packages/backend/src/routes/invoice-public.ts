@@ -88,7 +88,7 @@ function renderPage(row: any): string {
 <html lang="ko"><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <meta name="robots" content="noindex,nofollow"/>
-<title>거래내역서 확인 — 한줄로</title>
+<title>거래내역서 확인 · 한줄로</title>
 <style>
   body{margin:0;background:#0f172a;font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#e2e8f0;}
   .wrap{max-width:520px;margin:0 auto;padding:40px 20px;}

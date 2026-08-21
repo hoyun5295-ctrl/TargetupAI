@@ -256,15 +256,15 @@ export default function AiUsagePage() {
       if (data.success) {
         setOverview(data);
         setMigrationPending(data.threshold_config?._migration_pending
-          ? 'DB 마이그레이션 필요 — 한도 알림 설정 기능을 사용하려면 운영자에게 companies ALTER (ai_usage_threshold_config jsonb) 실행을 요청해주세요.'
+          ? 'DB 마이그레이션 필요: 한도 알림 설정 기능을 사용하려면 운영자에게 companies ALTER (ai_usage_threshold_config jsonb) 실행을 요청해주세요.'
           : null);
       } else if (data.code === 'DB_MIGRATION_PENDING') {
         setMigrationPending(data.error || 'DB 마이그레이션이 필요합니다.');
       } else {
-        toast.error(`요약 조회 실패 — ${data.error || '알 수 없는 오류'}`);
+        toast.error(`요약 조회 실패: ${data.error || '알 수 없는 오류'}`);
       }
     } catch (e: any) {
-      toast.error(`요약 조회 실패 — ${e?.message || '네트워크 오류'}`);
+      toast.error(`요약 조회 실패: ${e?.message || '네트워크 오류'}`);
     } finally {
       setOverviewLoading(false);
     }
@@ -338,14 +338,14 @@ export default function AiUsagePage() {
       if (data.success) {
         setNaturalResult({ query, answer: data.answer, noData: data.no_data });
       } else if (data.code === 'AI_RATE_LIMIT') {
-        toast.warning(`AI 호출 한도 초과 — ${data.error || '이번 달 한도를 초과했습니다.'}`);
+        toast.warning(`AI 호출 한도 초과: ${data.error || '이번 달 한도를 초과했습니다.'}`);
         setNaturalResult(null);
       } else {
-        toast.error(`검색 실패 — ${data.error || '알 수 없는 오류'}`);
+        toast.error(`검색 실패: ${data.error || '알 수 없는 오류'}`);
         setNaturalResult(null);
       }
     } catch (e: any) {
-      toast.error(`검색 실패 — ${e?.message || '네트워크 오류'}`);
+      toast.error(`검색 실패: ${e?.message || '네트워크 오류'}`);
       setNaturalResult(null);
     } finally {
       setNaturalLoading(false);
@@ -380,7 +380,7 @@ export default function AiUsagePage() {
       throw new Error(data.error || '저장 실패');
     }
     setShowThresholdModal(false);
-    toast.success(`한도 알림 ${config.enabled ? '활성화' : '비활성화'} 완료 — 임계값 ${config.threshold_percent}% / 채널 ${config.channels.length}개`);
+    toast.success(`한도 알림 ${config.enabled ? '활성화' : '비활성화'} 완료: 임계값 ${config.threshold_percent}% / 채널 ${config.channels.length}개`);
     await loadOverview();
   };
 
@@ -511,7 +511,7 @@ export default function AiUsagePage() {
             </div>
           </div>
           <div className="text-[10px] text-white/30 italic mt-3">
-            Data source — ai_call_log + plans.ai_calls_per_month + cache 통계 (5분 TTL) + 전월 대비 격차
+            Data source: ai_call_log + plans.ai_calls_per_month + cache 통계 (5분 TTL) + 전월 대비 격차
           </div>
         </div>
 
@@ -522,7 +522,7 @@ export default function AiUsagePage() {
               <Sparkles className="w-4 h-4 text-cyan-300" />
               <span className="text-sm font-semibold text-white">자연어로 사용량 데이터에 질문하기</span>
             </div>
-            <p className="text-[11px] text-white/60 mb-3">예: "이번 달 가장 비용이 많이 든 호출 출처는?" — Enter 키로 즉시 검색</p>
+            <p className="text-[11px] text-white/60 mb-3">예: "이번 달 가장 비용이 많이 든 호출 출처는?" (Enter 키로 즉시 검색)</p>
             <div className="flex gap-2">
               <input
                 ref={queryInputRef}
@@ -598,7 +598,7 @@ export default function AiUsagePage() {
               )}
             </div>
             <div className="text-[10px] text-white/30 italic">
-              Data source — ai_call_log 30일 + cache 통계 + 모델 추상 분포 (시스템 프롬프트 자동 포함)
+              Data source: ai_call_log 30일 + cache 통계 + 모델 추상 분포 (시스템 프롬프트 자동 포함)
             </div>
           </div>
         )}
@@ -683,7 +683,7 @@ export default function AiUsagePage() {
             loading={forecastLoading}
           />
           <div className="text-[10px] text-white/30 italic mt-3">
-            Data source — ai_call_log 직전 30일 일별 + 선형 회귀 (y = ax + b) 향후 30일 예측 + 일평균 한도 비교
+            Data source: ai_call_log 직전 30일 일별 + 선형 회귀 (y = ax + b) 향후 30일 예측 + 일평균 한도 비교
           </div>
         </div>
 
@@ -715,7 +715,7 @@ export default function AiUsagePage() {
             </div>
             <div className="text-sm font-semibold text-white mb-1">Batch 모드 가이드</div>
             <div className="text-[11px] text-white/60 leading-relaxed">
-              24시간 SLA + 50% 비용 절감 — 언제 사용하면 좋은가요?
+              24시간 SLA + 50% 비용 절감. 언제 사용하면 좋은가요?
             </div>
           </button>
 
@@ -733,7 +733,7 @@ export default function AiUsagePage() {
             </div>
             {overview?.threshold_config?.enabled && !migrationPending && (
               <div className="text-[10px] text-emerald-300 mt-1.5">
-                활성 — {overview.threshold_config.threshold_percent}% / {(overview.threshold_config.channels || []).length}개 채널
+                활성: {overview.threshold_config.threshold_percent}% / {(overview.threshold_config.channels || []).length}개 채널
               </div>
             )}
           </button>
@@ -771,7 +771,7 @@ export default function AiUsagePage() {
                         <svg viewBox="0 0 200 200" className="w-32 h-32">
                           {modelDonut.map((d) => (
                             <path key={d.modelType} d={d.pathD} fill={d.color}>
-                              <title>{d.label} — {d.count.toLocaleString()}회 ({(d.percent * 100).toFixed(1)}%)</title>
+                              <title>{d.label}: {d.count.toLocaleString()}회 ({(d.percent * 100).toFixed(1)}%)</title>
                             </path>
                           ))}
                           <text x="100" y="100" textAnchor="middle" dominantBaseline="middle" className="fill-white" style={{ fontSize: '18px', fontWeight: 700 }}>
@@ -789,7 +789,7 @@ export default function AiUsagePage() {
                         </div>
                       </div>
                     )}
-                    <div className="text-[10px] text-white/30 italic mt-2">Data source — ai_call_log.model_type 추상 매핑</div>
+                    <div className="text-[10px] text-white/30 italic mt-2">Data source: ai_call_log.model_type 추상 매핑</div>
                   </div>
 
                   {/* b. source 상위 10 bar */}
@@ -816,7 +816,7 @@ export default function AiUsagePage() {
                         })()}
                       </div>
                     )}
-                    <div className="text-[10px] text-white/30 italic mt-2">Data source — ai_call_log.source GROUP BY</div>
+                    <div className="text-[10px] text-white/30 italic mt-2">Data source: ai_call_log.source GROUP BY</div>
                   </div>
 
                   {/* c. 일별 비용 area */}
@@ -853,7 +853,7 @@ export default function AiUsagePage() {
                         <span>{dailyCosts.rows[dailyCosts.rows.length - 1]?.date.slice(5)}</span>
                       </div>
                     )}
-                    <div className="text-[10px] text-white/30 italic mt-2">Data source — ai_call_log.cost_won 일별 합계</div>
+                    <div className="text-[10px] text-white/30 italic mt-2">Data source: ai_call_log.cost_won 일별 합계</div>
                   </div>
                 </div>
               )}
@@ -863,9 +863,9 @@ export default function AiUsagePage() {
 
         {/* ───────── 8. Source caption ───────── */}
         <div className="text-center text-[10px] text-white/30 italic pt-4">
-          Data source — ai_call_log (호출별 비용 + 모델 + source) + plans.ai_calls_per_month (월 한도) + ai_cache (5분 TTL) + ai_batch_jobs (Batch 처리)
+          Data source: ai_call_log (호출별 비용 + 모델 + source) + plans.ai_calls_per_month (월 한도) + ai_cache (5분 TTL) + ai_batch_jobs (Batch 처리)
           <br />
-          AI 모델은 호출 의도에 따라 자동 선택됩니다 — 추상 명칭으로 표시 (고급/표준/보조 추론 모드)
+          AI 모델은 호출 의도에 따라 자동 선택됩니다. 추상 명칭으로 표시 (고급/표준/보조 추론 모드)
         </div>
       </div>
 

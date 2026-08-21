@@ -36,7 +36,7 @@ function ChartCard({ title, source, icon, children }: { title: string; source?: 
       </div>
       <div className="p-4">
         {children}
-        {source && (<div className="text-[10px] text-white/30 italic mt-2 truncate" title={source}>Data source — {source}</div>)}
+        {source && (<div className="text-[10px] text-white/30 italic mt-2 truncate" title={source}>Data source: {source}</div>)}
       </div>
     </div>
   );
@@ -170,7 +170,7 @@ export default function CdpAnalyticsPanels({
         </ChartCard>
       ) : (
         <div className="p-4 bg-white/5 border border-white/10 rounded-xl text-xs text-white/50">
-          자사몰 이벤트 영역 0건 — SDK 설치 또는 webhook 영역 확인 의무.
+          자사몰 이벤트 영역 0건. SDK 설치 또는 webhook 영역 확인 의무.
         </div>
       )}
 

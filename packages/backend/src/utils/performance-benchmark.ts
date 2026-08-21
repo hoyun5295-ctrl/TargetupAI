@@ -61,7 +61,7 @@ export async function buildBenchmark(companyId: string, days: number = 30): Prom
       peerCompanyCount: 0,
       metrics: [],
       computedAt: new Date().toISOString(),
-      source: '회사 요금제 미등록 — 벤치마크 비활성',
+      source: '회사 요금제 미등록: 벤치마크 비활성',
     };
   }
 
@@ -115,7 +115,7 @@ export async function buildBenchmark(companyId: string, days: number = 30): Prom
       peerCompanyCount: 0,
       metrics: [],
       computedAt: new Date().toISOString(),
-      source: '같은 요금제 다른 회사 X — 벤치마크 비활성',
+      source: '같은 요금제 다른 회사 X: 벤치마크 비활성',
     };
   }
 
@@ -185,7 +185,7 @@ export async function buildBenchmark(companyId: string, days: number = 30): Prom
       industryAvg: peerAvgSent,
       diffPct: calcDiff(companySent, peerAvgSent),
       betterThan: companySent > peerAvgSent,
-      source: 'campaigns.sent_count (D144 PG 캐시 — 향후 MySQL 큐 사전 계산 강화)',
+      source: 'campaigns.sent_count (D144 PG 캐시, 향후 MySQL 큐 사전 계산 강화)',
     },
     {
       label: '발송 성공률',
@@ -211,6 +211,6 @@ export async function buildBenchmark(companyId: string, days: number = 30): Prom
     peerCompanyCount,
     metrics,
     computedAt: new Date().toISOString(),
-    source: `같은 요금제(${planCode}) ${peerCompanyCount}개 회사 평균 (anonymized — 개별 회사 노출 X)`,
+    source: `같은 요금제(${planCode}) ${peerCompanyCount}개 회사 평균 (anonymized, 개별 회사 노출 X)`,
   };
 }

@@ -299,7 +299,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
   //   어떤 번호가 붙는지 발송 전에 눈으로 확인 (백엔드 buildAdMessage와 동일 형식)
   const previewBody = substituteVars(messageText, sample, 'https://hanjul.ai/dm(개인화)');
   const previewText = isAd && previewBody.trim()
-    ? `(광고) ${previewBody}\n무료수신거부 ${opt080 || '(080 미등록 — 수신거부번호 설정 필요)'}`
+    ? `(광고) ${previewBody}\n무료수신거부 ${opt080 || '(080 미등록, 수신거부번호 설정 필요)'}`
     : previewBody;
   // ★ 2026-07-02(3) 스팸테스트 본문 = 첫 샘플 고객 치환본 (원본 변수 그대로 들어가던 결함 수정).
   //   링크는 실발송 개인화 링크와 같은 길이 구조의 자리값 — 바이트·스팸 판정 정확도 유지.
@@ -487,7 +487,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
 
                   {mode === 'ai' && (
                     <div>
-                      <p className="text-[10px] text-violet-200/70 mb-1.5">편집해 둔 DM 내용(행사·쿠폰·상품)을 AI가 읽고 문안을 만듭니다 — 프롬프트 없이 바로 생성하세요.</p>
+                      <p className="text-[10px] text-violet-200/70 mb-1.5">편집해 둔 DM 내용(행사·쿠폰·상품)을 AI가 읽고 문안을 만듭니다. 프롬프트 없이 바로 생성하세요.</p>
                       {/* ★ 2026-07-07(4) SMS 우선 옵션 — hlj.kr 단축링크(22자)로 90바이트 단문 발송 가능 (원가 절감) */}
                       <div className="flex items-center gap-1.5 mb-1.5">
                         <span className="text-[10px] text-white/40">길이</span>
@@ -501,7 +501,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                           </button>
                         ))}
                       </div>
-                      <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={2} placeholder="추가 요청 (선택) — 예: 정중한 톤으로, 마감 강조" className="w-full bg-slate-950/60 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-violet-400/60 resize-none" />
+                      <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={2} placeholder="추가 요청 (선택) 예: 정중한 톤으로, 마감 강조" className="w-full bg-slate-950/60 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-violet-400/60 resize-none" />
                       <button onClick={handleGenerate} disabled={generating} className="mt-2 w-full py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 disabled:opacity-30 flex items-center justify-center gap-1.5">
                         {generating ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}{generating ? '생성 중...' : '편집된 DM 내용으로 AI 문안 생성'}
                       </button>
@@ -557,7 +557,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                   </div>
 
                   <label className="flex items-center gap-2 text-[11px] text-white/60 cursor-pointer">
-                    <input type="checkbox" checked={isAd} onChange={(e) => setIsAd(e.target.checked)} className="rounded" /> 광고성 메시지 — (광고)·무료수신거부 자동 표기
+                    <input type="checkbox" checked={isAd} onChange={(e) => setIsAd(e.target.checked)} className="rounded" /> 광고성 메시지: (광고)·무료수신거부 자동 표기
                     {isAd && (
                       <span className={`font-mono ${opt080 ? 'text-emerald-300/90' : 'text-amber-300/90'}`}>
                         {opt080 ? opt080 : opt080Loaded ? '080 미등록' : ''}
@@ -593,8 +593,8 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                 </div>
                 <p className="text-[10px] text-white/30 italic mt-2 text-center">
                   {target
-                    ? `발송 시 ${target.channelEligibleCount.toLocaleString()}명 각각 본인 이름·등급·지역 + 개인화 링크로 치환되어 나갑니다 — ‹ › 로 수신자별 확인`
-                    : 'Data source — 타겟 추출 후 수신자별 개인화 미리보기가 표시됩니다'}
+                    ? `발송 시 ${target.channelEligibleCount.toLocaleString()}명 각각 본인 이름·등급·지역 + 개인화 링크로 치환되어 나갑니다. ‹ › 로 수신자별 확인`
+                    : 'Data source: 타겟 추출 후 수신자별 개인화 미리보기가 표시됩니다'}
                 </p>
                 {sentCount !== null && (
                   <div className="mt-3 w-full rounded-xl border border-emerald-400/30 bg-emerald-500/10 p-3 flex items-start gap-2">
@@ -638,9 +638,9 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                     {(() => {
                       const segs = [
                         { label: '미열람', ids: tracking.recipients.filter((r) => !r.viewed).map((r) => r.customerId), hint: '문구를 바꿔 다시 보내면 열람률이 오릅니다' },
-                        { label: '열람·무반응', ids: tracking.recipients.filter((r) => r.viewed && r.clicks === 0 && !r.responded).map((r) => r.customerId), hint: '열람했지만 클릭·응모가 없던 고객 — 다른 문구·구성으로 후속' },
-                        { label: '클릭', ids: tracking.recipients.filter((r) => r.clicks > 0).map((r) => r.customerId), hint: '관심을 보인 고객 — 구매 유도 후속' },
-                        { label: '응모·액션', ids: tracking.recipients.filter((r) => r.responded).map((r) => r.customerId), hint: '참여한 고객 — 결과 안내·후속 혜택' },
+                        { label: '열람·무반응', ids: tracking.recipients.filter((r) => r.viewed && r.clicks === 0 && !r.responded).map((r) => r.customerId), hint: '열람했지만 클릭·응모가 없던 고객: 다른 문구·구성으로 후속' },
+                        { label: '클릭', ids: tracking.recipients.filter((r) => r.clicks > 0).map((r) => r.customerId), hint: '관심을 보인 고객: 구매 유도 후속' },
+                        { label: '응모·액션', ids: tracking.recipients.filter((r) => r.responded).map((r) => r.customerId), hint: '참여한 고객: 결과 안내·후속 혜택' },
                       ].filter((s) => s.ids.length > 0);
                       return segs.map((s) => (
                         <button
@@ -736,7 +736,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                               {r.responded && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-400/30 font-semibold">응모</span>}
                               {/* ★ 2026-07-06 재열람·공유·구매 신호 */}
                               {(r.openCount ?? 0) > 1 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-200 border border-cyan-400/25">재열람 ×{r.openCount}</span>}
-                              {(r.deviceCount ?? 0) > 1 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-sky-500/15 text-sky-200 border border-sky-400/25" title="여러 기기에서 열람 — 지인 공유 가능성">기기 {r.deviceCount}</span>}
+                              {(r.deviceCount ?? 0) > 1 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-sky-500/15 text-sky-200 border border-sky-400/25" title="여러 기기에서 열람 (지인 공유 가능성)">기기 {r.deviceCount}</span>}
                               {(r.purchaseCount ?? 0) > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-200 border border-rose-400/30 font-semibold" title={`발송 후 7일 내 구매 ${r.purchaseCount}건`}>구매 {Math.round(Number(r.purchaseAmount || 0)).toLocaleString()}원</span>}
                               <span className="text-white/30 w-16 text-right hidden md:inline">{formatAgo(r.lastActiveAt)}</span>
                               <span className={`w-12 text-right font-medium ${r.completed ? 'text-emerald-300' : 'text-cyan-300'}`}>{r.completed ? '완독' : '열람'}</span>
@@ -756,7 +756,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                             ) : detail ? (
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div>
-                                  <p className="text-[10px] font-semibold text-white/50 mb-1.5">섹션 여정 — 본 곳과 누른 버튼</p>
+                                  <p className="text-[10px] font-semibold text-white/50 mb-1.5">섹션 여정: 본 곳과 누른 버튼</p>
                                   <div className="space-y-1 max-h-[240px] overflow-y-auto pr-1">
                                     {(detail.sections || []).map((s: any) => (
                                       <div key={s.id} className={`rounded-lg px-2.5 py-1.5 border ${(s.views > 0 || s.clicks > 0) ? 'border-white/10 bg-white/5' : 'border-white/5 opacity-45'}`}>
@@ -824,7 +824,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                             <span key={h.hour} className="text-[10.5px] px-2 py-1 rounded-lg bg-violet-500/15 text-violet-200 border border-violet-400/25">{h.hour}시 <strong>{h.cnt}</strong>건</span>
                           ))}
                         </div>
-                        <p className="text-[10px] text-white/30 mt-1.5">다음 발송은 {tracking.hourDistribution![0].hour}시 전후를 권장합니다 · Data source — dm_views 열람 시각(KST)</p>
+                        <p className="text-[10px] text-white/30 mt-1.5">다음 발송은 {tracking.hourDistribution![0].hour}시 전후를 권장합니다 · Data source: dm_views 열람 시각(KST)</p>
                       </div>
                     )}
                     {(tracking.sectionExits?.length || 0) > 0 && (
@@ -838,13 +838,13 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                             </div>
                           ))}
                         </div>
-                        <p className="text-[10px] text-white/30 mt-1.5">이 섹션 다음 내용을 다듬으면 완독률이 오릅니다 · Data source — section_interactions</p>
+                        <p className="text-[10px] text-white/30 mt-1.5">이 섹션 다음 내용을 다듬으면 완독률이 오릅니다 · Data source: section_interactions</p>
                       </div>
                     )}
                   </div>
                 )}
                 {/* ★ 2026-07-12 D-4: 구매 전환 소스 명시 — 자동마케팅 ROI(자사몰 cdp)와 소스가 달라 숫자가 다를 수 있음을 정직 표기 */}
-                <p className="text-[10px] text-white/30 italic text-center">행을 클릭하면 섹션 여정·버튼 클릭·응답 상세가 열립니다 · Data source — dm_recipient_tokens × dm_views × dm_event_responses · 구매 전환 = 매장·ERP 구매내역(발송 후 7일 실측, 자사몰 기준 화면과 소스가 다를 수 있음)</p>
+                <p className="text-[10px] text-white/30 italic text-center">행을 클릭하면 섹션 여정·버튼 클릭·응답 상세가 열립니다 · Data source: dm_recipient_tokens × dm_views × dm_event_responses · 구매 전환 = 매장·ERP 구매내역(발송 후 7일 실측, 자사몰 기준 화면과 소스가 다를 수 있음)</p>
               </>
             ) : (
               <p className="text-xs text-white/40 text-center py-8">추적 데이터를 불러오는 중입니다.</p>
@@ -873,7 +873,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
               <span className="text-[10px] text-white/40 flex items-center gap-1 whitespace-nowrap"><Clock className="w-3 h-3" /> 발송 시각</span>
               <button onClick={() => setScheduleMode('immediate')} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold ${scheduleMode === 'immediate' ? 'bg-indigo-500/40 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>즉시</button>
               <button onClick={() => setScheduleMode('manual')} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold ${scheduleMode === 'manual' ? 'bg-indigo-500/40 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>직접 예약</button>
-              <button onClick={applyAiTime} title="AI 추천 — 내일 오전 10시" className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold ${scheduleMode === 'ai' ? 'bg-violet-500/40 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>AI 추천</button>
+              <button onClick={applyAiTime} title="AI 추천: 내일 오전 10시" className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold ${scheduleMode === 'ai' ? 'bg-violet-500/40 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>AI 추천</button>
               {scheduleMode !== 'immediate' && (
                 <DateTimeField
                   value={localInputToIso(scheduledAt)}

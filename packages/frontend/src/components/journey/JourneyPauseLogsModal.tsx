@@ -299,7 +299,7 @@ export default function JourneyPauseLogsModal({ journeyId, journeyName, onClose,
                         )}
                         {log.pause_trigger_source && (
                           <div className="mt-2 text-[10px] text-white/30 font-mono">
-                            trigger source — {log.pause_trigger_source}
+                            trigger source: {log.pause_trigger_source}
                           </div>
                         )}
                       </div>
@@ -314,7 +314,7 @@ export default function JourneyPauseLogsModal({ journeyId, journeyName, onClose,
         {/* 푸터 — Source caption */}
         <div className="px-5 py-3 border-t border-white/10 bg-slate-950/50">
           <div className="text-[10px] text-white/30 italic">
-            Data source — journey_step_pause_logs (D218+ 영구 기록 테이블) · 정지 효과 + execution_status_at_pause 추적
+            Data source: journey_step_pause_logs (D218+ 영구 기록 테이블) · 정지 효과 + execution_status_at_pause 추적
           </div>
         </div>
       </div>

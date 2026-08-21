@@ -39,7 +39,7 @@ function handleDbError(res: Response, err: any): Response {
   if (isMissingRelationError(err)) {
     return res.status(503).json({
       success: false,
-      error: 'DB 마이그레이션 필요 — 운영자에게 company_agent_ids CREATE 실행 요청 의무',
+      error: 'DB 마이그레이션 필요: 운영자에게 company_agent_ids CREATE 실행 요청 의무',
       code: 'DB_MIGRATION_PENDING',
     });
   }
@@ -93,7 +93,7 @@ router.post('/seed-import', async (req: Request, res: Response) => {
     if (dupCust.length || dupLogin.length) {
       return res.status(400).json({
         success: false,
-        error: 'payload 내 중복 — 시드 데이터 확인 필요',
+        error: 'payload 내 중복. 시드 데이터 확인 필요',
         dupCustIds: dupCust,
         dupLoginIds: dupLogin,
       });
@@ -122,7 +122,7 @@ router.post('/seed-import', async (req: Request, res: Response) => {
       const existing = compByCode.get(e.companyCode);
       const problems: string[] = [];
       if (e.action === 'link' && !existing) problems.push('대상 회사 코드 없음');
-      if (e.action !== 'link' && existing) problems.push(`코드 선점(${existing.company_name}) — 생성 대신 연결됨`);
+      if (e.action !== 'link' && existing) problems.push(`코드 선점(${existing.company_name}): 생성 대신 연결됨`);
       if (e.action === 'create' && e.loginId && takenLogins.has(e.loginId)) problems.push(`loginId 선점(${e.loginId})`);
       const newCust = e.custIds.filter((c) => !linkedCust.has(c));
       return {
@@ -161,7 +161,7 @@ router.post('/seed-import', async (req: Request, res: Response) => {
     if (hardProblems.length > 0) {
       return res.status(400).json({
         success: false,
-        error: 'link 대상 회사 부재 — 정정 후 실행',
+        error: 'link 대상 회사 부재. 정정 후 실행',
         problems: hardProblems.map((p) => ({ companyName: p.companyName, problems: p.problems })),
       });
     }
@@ -170,7 +170,7 @@ router.post('/seed-import', async (req: Request, res: Response) => {
     const planRow = await query(`SELECT id FROM plans WHERE plan_code = 'FREE' LIMIT 1`);
     const freePlanId = planRow.rows[0]?.id;
     if (!freePlanId) {
-      return res.status(500).json({ success: false, error: "plans에 plan_code='FREE' 없음 — 플랜 확인 필요" });
+      return res.status(500).json({ success: false, error: "plans에 plan_code='FREE' 없음. 플랜 확인 필요" });
     }
 
     let companiesCreated = 0;

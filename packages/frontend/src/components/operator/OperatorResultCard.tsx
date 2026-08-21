@@ -164,7 +164,7 @@ export default function OperatorResultCard({ result, onApprove, onReject }: Oper
 
       {/* Source caption */}
       <p className="text-[10px] text-white/30 italic">
-        Data source — 등급별 구매주기·발송 후 구매 실측·CDP 이벤트 (회사 실데이터 기반, 임의 추정치 미사용)
+        Data source: 등급별 구매주기·발송 후 구매 실측·CDP 이벤트 (회사 실데이터 기반, 임의 추정치 미사용)
       </p>
 
       {/* 액션 */}

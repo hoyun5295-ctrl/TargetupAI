@@ -279,13 +279,13 @@ JSON 형식으로만 응답하세요.`;
 ${message}
 """
 
-## 검수 기준 (아래 항목만 검수 — 본문에 실제로 있는 내용만 평가)
+## 검수 기준 (아래 항목만 검수, 본문에 실제로 있는 내용만 평가)
 1. 금칙어: "확정", "100%", "무료", "당첨" 등 과장 표현
 2. 스팸 위험: 과도한 할인 표현, 긴급성 강조, 반복 특수문자
 3. 변수 형식: %변수% 또는 #{변수} 외 형식 금지
 4. 미완성 표기: [테스트계정]·[브랜드명] 등 대괄호 placeholder가 본문에 그대로 남아있으면 경고 (실제 발송 시 노출 위험)
 
-## ★ 검수 제외 — 아래는 시스템/발신 설정이 자동 처리하므로 본문에 없어도 정상이다. 절대 누락/경고/제안에 넣지 마라
+## ★ 검수 제외: 아래는 시스템/발신 설정이 자동 처리하므로 본문에 없어도 정상이다. 절대 누락/경고/제안에 넣지 마라
 - "(광고)" 표기: 발송 시 시스템이 본문 앞에 자동 부착
 - 무료수신거부 080 안내 문구: 발송 시 시스템이 본문 뒤에 자동 부착 (본문에 있든 없든 누락으로 잡지 마라)
 - 발신번호/상호명/사업자 정보: 발신 설정 영역 (본문 기준으로 누락 잡지 마라)
@@ -450,7 +450,7 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
         const c = getSegmentContract(contractKey);
         const dayPart = contractParams?.days ? ` (기준 ${contractParams.days}일)` : '';
         contractLabel = c?.label || '';
-        contractCriteria = c ? `${c.label}${dayPart} — ${c.description}` : '';
+        contractCriteria = c ? `${c.label}${dayPart}: ${c.description}` : '';
       }
       // ⛔ 4R 정정: 조건 조각만 넘기면 추정기는 안전필터·수신거부·피로도를 안 본다 — VIP 100명 중 실제 10명인데
       //   프로파일은 100명 기준으로 잡혀 기대 매출이 몇 배가 된다. count가 쓴 최종 WHERE 그대로를 넘긴다.
@@ -495,7 +495,7 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
   // ⛔ 8R 정정: 계약이 있으면 문안 생성에도 그 대상을 명시한다. 종전엔 목표 문장만 넘겨서
   //   대상은 생일 고객인데 문안·개인화·채널 사유가 VIP를 말하는 일이 생겼다(수신자와 문안이 다른 사람을 가리킨다).
   const contractAudienceBlock = contractCriteria
-    ? `[실제 발송 대상 — 이 대상에게 맞게 쓴다]\n${contractCriteria}\n목표 문장과 대상이 다르면 대상을 따른다. 다른 고객군을 지칭하지 않는다.`
+    ? `[실제 발송 대상: 이 대상에게 맞게 쓴다]\n${contractCriteria}\n목표 문장과 대상이 다르면 대상을 따른다. 다른 고객군을 지칭하지 않는다.`
     : '';
   const messagesResult = await generateMessages(
     buildMessageObjective(
@@ -799,7 +799,7 @@ async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorRe
             actual_count: actual,
             // ★ Zero-Count 영구 원칙 안내 (Harold 명시 D171)
             warning: actual === 0
-              ? '★ 매칭 0건 — 발송 차단 정합 (Harold 영구 원칙). 자동완화 절대 금지. message_composition 호출 X. 사용자에게 조건 재입력 안내 제공할 것.'
+              ? '★ 매칭 0건. 발송 차단 정합 (Harold 영구 원칙). 자동완화 절대 금지. message_composition 호출 X. 사용자에게 조건 재입력 안내 제공할 것.'
               : null,
           };
         } catch (cntErr: any) {
@@ -807,7 +807,7 @@ async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorRe
           estimatedCount = 0;
           countVerified = false;
           mark('verify', start);
-          return { error: `count_verification 실패: ${cntErr?.message || 'unknown'} — 대상 0 처리(추정값 사용 금지)` };
+          return { error: `count_verification 실패: ${cntErr?.message || 'unknown'}. 대상 0 처리(추정값 사용 금지)` };
         }
       }
       if (toolName === 'message_composition') {
@@ -817,7 +817,7 @@ async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorRe
         }
         if (estimatedCount === 0) {
           mark('message', start);
-          return { error: '★ 매칭 0건 — Zero-Count 영구 원칙으로 message_composition 호출 차단. count_verification 결과를 사용자에게 안내해야 함.' };
+          return { error: '★ 매칭 0건. Zero-Count 영구 원칙으로 message_composition 호출 차단. count_verification 결과를 사용자에게 안내해야 함.' };
         }
         const { fieldMappings: varCatalog, availableVars } = extractVarCatalog(ctx.companyInfo.customer_schema);
         await filterVarCatalogByData(varCatalog, availableVars, ctx.companyId);
@@ -917,13 +917,13 @@ ${memoryContext}
 ## ★ 절대 영구 원칙 (Harold 명시 D171)
 - 타겟 매칭 0건이 나오면 자동완화(relaxFilters / auto-relax) 절대 금지. 발송 차단이 정합.
 - AI가 임의로 조건 풀어서 다른 고객에게 발송 = 마케팅 의도 파괴 + 수신자 권리 침해 + 발신번호 차단 위험.
-- count_verification 결과 0건이면 message_composition 호출하지 말고, "★ 매칭 0건 — 사용자가 조건을 재입력해야 합니다" 한 줄로 즉시 응답 종료.
+- count_verification 결과 0건이면 message_composition 호출하지 말고, "★ 매칭 0건. 사용자가 조건을 재입력해야 합니다" 한 줄로 즉시 응답 종료.
 
 ## 흐름 가이드
 - 4 tool을 모두 호출한 후 통합 분석 한 단락(200자 이내) 박고 종료 (stop_reason='end_turn')
 - 각 tool은 최대 2회만 호출 가능 (안전장치)
 - 동일 tool 결과 받은 후 입력 변경 없이 재호출 금지
-- tool_use 없이 자유 텍스트만 응답하면 fallback 흐름으로 전환됩니다 — 반드시 tool을 호출하세요`;
+- tool_use 없이 자유 텍스트만 응답하면 fallback 흐름으로 전환됩니다. 반드시 tool을 호출하세요`;
 
   const userMessage = `## 사용자 마케팅 목표
 "${ctx.objective}"
@@ -1025,16 +1025,16 @@ ${memoryContext}
 
     // 필수 tool 호출 검증
     if (!targetResult) {
-      throw new Error('OrchestratorAI: target_analysis 미호출 — fallback');
+      throw new Error('OrchestratorAI: target_analysis 미호출: fallback');
     }
     if (!messagesResult || normalizedMessages.length === 0) {
       // 0건 매칭으로 message_composition 의도적 skip한 경우 정합
       if (estimatedCount === 0) {
         console.log('[OrchestratorAI] 0건 매칭으로 message_composition skip — Zero-Count 영구 원칙 정합');
         normalizedMessages = [];
-        messagesResult = { recommendation: '', recommendation_reason: '매칭 고객 0건 — 사용자가 조건을 재입력해야 합니다.' };
+        messagesResult = { recommendation: '', recommendation_reason: '매칭 고객 0건. 사용자가 조건을 재입력해야 합니다.' };
       } else {
-        throw new Error('OrchestratorAI: message_composition 미호출 (count>0) — fallback');
+        throw new Error('OrchestratorAI: message_composition 미호출 (count>0): fallback');
       }
     }
     if (!stoppedNormally) {

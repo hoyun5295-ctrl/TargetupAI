@@ -274,7 +274,7 @@ ${snapshot.byHour.sort((a, b) => b.sent - a.sent).slice(0, 5).map((h) => `  · $
 
 ## 요청
 위 데이터를 분석해 다음 캠페인을 추천해주세요:
-1. 한 줄 요약 (예: "주말 저녁 8시 VIP 재구매 캠페인 추천 — 평균 성공률 +14% 기대")
+1. 한 줄 요약 (예: "주말 저녁 8시 VIP 재구매 캠페인 추천: 평균 성공률 +14% 기대")
 2. 추천 타겟 (자연어 한 줄, AI Operator orchestrate에 입력 가능한 형식)
 3. 추천 채널 (SMS / LMS / MMS / KAKAO 중 하나)
 4. 추천 발송 시점 (다음 7일 내 KST 08~21시 1개)
@@ -812,6 +812,6 @@ export async function buildPerformanceSnapshotV2(
     funnelStats,
     topCampaigns,
     computedAt: new Date().toISOString(),
-    source: 'campaigns + MySQL 큐 직접 집계 (D144 정합 — aggregateSmsCountsByCampaign, 브랜드 msg_type F 포함) + cdp_events.purchase + customers + email_campaigns/dm_recipient_tokens(2026-07-03 채널 합류)',
+    source: 'campaigns + MySQL 큐 직접 집계 (D144 정합, aggregateSmsCountsByCampaign, 브랜드 msg_type F 포함) + cdp_events.purchase + customers + email_campaigns/dm_recipient_tokens(2026-07-03 채널 합류)',
   };
 }

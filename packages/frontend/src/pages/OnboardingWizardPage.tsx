@@ -319,7 +319,7 @@ export default function OnboardingWizardPage() {
       {/* Source caption (D215+ design_quality 정합) */}
       <div className="max-w-4xl mx-auto px-4 md:px-6 pb-8">
         <p className="text-[10px] text-white/30 italic text-center">
-          Data source — AI 오퍼레이션 Wizard 자동 생성 (자연어 입력 → AI 자동 변환 → 검증된 필터 SQL 빌더 통과)
+          Data source: AI 오퍼레이션 Wizard 자동 생성 (자연어 입력 → AI 자동 변환 → 검증된 필터 SQL 빌더 통과)
         </p>
       </div>
     </div>

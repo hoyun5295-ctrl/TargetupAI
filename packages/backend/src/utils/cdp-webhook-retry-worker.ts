@@ -45,7 +45,7 @@ export async function runCdpWebhookRetryPass(): Promise<{ retried: number; succe
         `UPDATE cdp_webhook_deliveries
          SET retry_count = retry_count + 1, error_message = $2, processed_at = NOW()
          WHERE id = $1::uuid`,
-        [row.id, `재처리 불가 — 미등록 source: ${row.source}`]
+        [row.id, `재처리 불가: 미등록 source: ${row.source}`]
       );
       continue;
     }

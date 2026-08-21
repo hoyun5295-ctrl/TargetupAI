@@ -314,7 +314,7 @@ export default function DiagnosisAdminPanel({ onBadgeRefresh, toast }: Props) {
                     <span className="ml-2 text-indigo-500">월 {Number(result.recommendation.monthly_price).toLocaleString()}원</span>
                   </div>
                 ) : (
-                  <p className="mt-3 text-sm text-gray-400">추천 없음(no_match) — 상담 대상</p>
+                  <p className="mt-3 text-sm text-gray-400">추천 없음(no_match): 상담 대상</p>
                 )}
                 {Array.isArray(result?.findings) && result.findings.length > 0 && (
                   <ul className="mt-3 space-y-1 text-[13px] text-gray-600">

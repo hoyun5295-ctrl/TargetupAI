@@ -51,22 +51,22 @@ export interface MergeAxis {
  * keep = 그 회사가 "겪은 이력"과 "고유 상태". 옮기면 병합 대상의 사실을 오염시킨다.
  */
 export const COMPANY_MERGE_AXES: readonly MergeAxis[] = [
-  { table: 'kakao_sender_profiles', action: 'move', reason: '카카오 발신프로필 — 이관 자산 본체' },
-  { table: 'kakao_templates', action: 'move', reason: '알림톡 템플릿 — 프로필과 같은 회사에 있어야 한다' },
-  { table: 'brand_message_templates', action: 'move', reason: '브랜드메시지 템플릿 — 프로필 종속' },
-  { table: 'gateway_bill_mappings', action: 'move', reason: '게이트웨이 납입자ID 연결 — auto_push가 이 축으로 돈다' },
-  { table: 'gateway_template_mappings', action: 'move', reason: '게이트웨이 매핑 — company_id가 채워진 행만(시드 행은 bill_id 축이라 NULL)' },
-  { table: 'company_agent_ids', action: 'move', reason: 'PAY 발송ID — 발송결과·정산이 이 축을 읽는다' },
+  { table: 'kakao_sender_profiles', action: 'move', reason: '카카오 발신프로필: 이관 자산 본체' },
+  { table: 'kakao_templates', action: 'move', reason: '알림톡 템플릿: 프로필과 같은 회사에 있어야 한다' },
+  { table: 'brand_message_templates', action: 'move', reason: '브랜드메시지 템플릿: 프로필 종속' },
+  { table: 'gateway_bill_mappings', action: 'move', reason: '게이트웨이 납입자ID 연결: auto_push가 이 축으로 돈다' },
+  { table: 'gateway_template_mappings', action: 'move', reason: '게이트웨이 매핑: company_id가 채워진 행만(시드 행은 bill_id 축이라 NULL)' },
+  { table: 'company_agent_ids', action: 'move', reason: 'PAY 발송ID: 발송결과·정산이 이 축을 읽는다' },
 
   // ★ 2026-08-16 마케팅 진단(설계서 §4-7) — 미등재면 진단 행 있는 회사의 병합이 통째로 차단된다.
-  { table: 'marketing_diagnoses', action: 'move', reason: '진단·리드 원장 — 관리 파이프라인 연속성. funnel A 부분 UNIQUE가 겹치면(양쪽 다 진단 완료) 충돌 차단 = 사람 판단' },
-  { table: 'diagnosis_trial_grants', action: 'keep', reason: '진단 체험 지급 이력(1회 한정 원장) — 병합 대상 자신의 지급 상태를 유지한다(선행 행 유지 §4-7). 옛 회사에 진단 행이 함께 있으면 간접 축이 차단한다' },
-  { table: 'diagnosis_invites', action: 'keep', reason: '초대 표시 기록 — UX 상태이지 자산이 아니다. 병합 대상 상태 유지(모달 1회 재노출은 무해)' },
+  { table: 'marketing_diagnoses', action: 'move', reason: '진단·리드 원장: 관리 파이프라인 연속성. funnel A 부분 UNIQUE가 겹치면(양쪽 다 진단 완료) 충돌 차단 = 사람 판단' },
+  { table: 'diagnosis_trial_grants', action: 'keep', reason: '진단 체험 지급 이력(1회 한정 원장): 병합 대상 자신의 지급 상태를 유지한다(선행 행 유지 §4-7). 옛 회사에 진단 행이 함께 있으면 간접 축이 차단한다' },
+  { table: 'diagnosis_invites', action: 'keep', reason: '초대 표시 기록: UX 상태이지 자산이 아니다. 병합 대상 상태 유지(모달 1회 재노출은 무해)' },
 
-  { table: 'users', action: 'keep', reason: '계정 — 실사용 계정은 병합 대상에 이미 있고 옛 계정은 status로 로그인 차단된다' },
-  { table: 'company_plan_changes', action: 'keep', reason: '요금제 이력 — 옮기면 병합 대상이 겪지 않은 변경이 이력에 생긴다' },
-  { table: 'company_settings', action: 'keep', reason: '회사 설정 — 옮기면 병합 대상의 현재 설정을 옛 값으로 덮는다' },
-  { table: 'customer_code_sequences', action: 'keep', reason: '고객코드 채번 상태 — 회사 고유값이라 합칠 수 없다' },
+  { table: 'users', action: 'keep', reason: '계정: 실사용 계정은 병합 대상에 이미 있고 옛 계정은 status로 로그인 차단된다' },
+  { table: 'company_plan_changes', action: 'keep', reason: '요금제 이력: 옮기면 병합 대상이 겪지 않은 변경이 이력에 생긴다' },
+  { table: 'company_settings', action: 'keep', reason: '회사 설정: 옮기면 병합 대상의 현재 설정을 옛 값으로 덮는다' },
+  { table: 'customer_code_sequences', action: 'keep', reason: '고객코드 채번 상태: 회사 고유값이라 합칠 수 없다' },
 ];
 
 /**
@@ -106,28 +106,28 @@ export const COMPANY_MERGE_INDIRECT_AXES: readonly IndirectAxis[] = [
     childColumns: ['profile_id'],
     parentTable: 'kakao_sender_profiles',
     action: 'block',
-    reason: '사용자-발신프로필 연결 — 프로필은 옮겨가고 계정은 남으므로 회사가 엇갈린 연결이 된다',
+    reason: '사용자-발신프로필 연결. 프로필은 옮겨가고 계정은 남으므로 회사가 엇갈린 연결이 된다',
   },
   {
     childTable: 'billing_items',
     childColumns: ['agent_id'],
     parentTable: 'company_agent_ids',
     action: 'block',
-    reason: '청구 항목이 발송ID를 가리킨다 — 청구는 돈 이력이라 옮길 수 없고, 발송ID만 옮기면 지난 청구가 다른 회사 자산을 가리킨다',
+    reason: '청구 항목이 발송ID를 가리킨다. 청구는 돈 이력이라 옮길 수 없고, 발송ID만 옮기면 지난 청구가 다른 회사 자산을 가리킨다',
   },
   {
     childTable: 'campaigns',
     childColumns: ['kakao_profile_id'],
     parentTable: 'kakao_sender_profiles',
     action: 'block',
-    reason: '캠페인은 자기 회사에 남는데 발신프로필이 옮겨간다 — 지난 발송이 다른 회사 프로필을 가리킨다',
+    reason: '캠페인은 자기 회사에 남는데 발신프로필이 옮겨간다. 지난 발송이 다른 회사 프로필을 가리킨다',
   },
   {
     childTable: 'campaigns',
     childColumns: ['kakao_template_id'],
     parentTable: 'kakao_templates',
     action: 'block',
-    reason: '캠페인은 자기 회사에 남는데 템플릿이 옮겨간다 — 지난 발송이 다른 회사 템플릿을 가리킨다',
+    reason: '캠페인은 자기 회사에 남는데 템플릿이 옮겨간다. 지난 발송이 다른 회사 템플릿을 가리킨다',
   },
   // ★ 2026-08-16 마케팅 진단(설계서 §4-7)
   {
@@ -135,7 +135,7 @@ export const COMPANY_MERGE_INDIRECT_AXES: readonly IndirectAxis[] = [
     childColumns: ['diagnosis_id'],
     parentTable: 'marketing_diagnoses',
     action: 'block',
-    reason: '지급 이력(keep)이 진단 행(move)을 가리킨다 — 함께 있으면 회사가 엇갈린 연결이 된다. 옛 회사 지급·진단을 정리한 뒤 진행한다',
+    reason: '지급 이력(keep)이 진단 행(move)을 가리킨다. 함께 있으면 회사가 엇갈린 연결이 된다. 옛 회사 지급·진단을 정리한 뒤 진행한다',
   },
 ];
 
@@ -629,7 +629,7 @@ async function buildMergePlan(
       plan.unregistered.push({ table, action: 'keep', rows });
       blockers.push({
         kind: 'unregistered_axis',
-        detail: `${table} ${rows}행 — 병합 축 표에 없는 테이블입니다. 이동/잔류를 정해 COMPANY_MERGE_AXES에 등재해야 진행됩니다.`,
+        detail: `${table} ${rows}행. 병합 축 표에 없는 테이블입니다. 이동/잔류를 정해 COMPANY_MERGE_AXES에 등재해야 진행됩니다.`,
       });
     }
   }
@@ -640,7 +640,7 @@ async function buildMergePlan(
   for (const u of unsupported) {
     blockers.push({
       kind: 'unsupported_unique_index',
-      detail: `${u.table}.${u.indexName} — ${u.why}. 충돌을 계산할 수 없어 진행하지 않습니다.`,
+      detail: `${u.table}.${u.indexName}: ${u.why}. 충돌을 계산할 수 없어 진행하지 않습니다.`,
     });
   }
   for (const ix of indexes) {
@@ -667,7 +667,7 @@ async function buildMergePlan(
       plan.indirect.push({ signature, childTable: ref.childTable, registered: false, rows: null });
       blockers.push({
         kind: 'unregistered_indirect_axis',
-        detail: `${signature} — 이동 테이블을 FK로 가리키는데 병합 정책이 등재되지 않았습니다. COMPANY_MERGE_INDIRECT_AXES에 등재해야 진행됩니다.`,
+        detail: `${signature}. 이동 테이블을 FK로 가리키는데 병합 정책이 등재되지 않았습니다. COMPANY_MERGE_INDIRECT_AXES에 등재해야 진행됩니다.`,
       });
       continue;
     }
@@ -675,7 +675,7 @@ async function buildMergePlan(
       plan.indirect.push({ signature, childTable: ref.childTable, registered: true, rows: null });
       blockers.push({
         kind: 'unregistered_indirect_axis',
-        detail: `${signature} — 복합 FK이거나 부모 id가 아닌 컬럼을 가리켜 건수를 계산할 수 없습니다. 사람이 확인해야 합니다.`,
+        detail: `${signature}. 복합 FK이거나 부모 id가 아닌 컬럼을 가리켜 건수를 계산할 수 없습니다. 사람이 확인해야 합니다.`,
       });
       continue;
     }
@@ -686,7 +686,7 @@ async function buildMergePlan(
       const axis = axisBySignature.get(signature);
       blockers.push({
         kind: 'indirect_axis_rows',
-        detail: `${signature} ${rows}행 — ${axis?.reason ?? '옮길 행을 가리키는 다른 테이블 행이 있습니다'}. 이 연결을 정리한 뒤 진행합니다.`,
+        detail: `${signature} ${rows}행: ${axis?.reason ?? '옮길 행을 가리키는 다른 테이블 행이 있습니다'}. 이 연결을 정리한 뒤 진행합니다.`,
       });
     }
   }
@@ -701,7 +701,7 @@ async function buildMergePlan(
     if (rows > 0) {
       blockers.push({
         kind: 'indirect_axis_rows',
-        detail: `diagnosis_trial_grants→marketing_diagnoses ${rows}건 — 옛 회사의 진단 체험 지급 결합입니다. 지급·진단을 정리한 뒤 진행합니다.`,
+        detail: `diagnosis_trial_grants→marketing_diagnoses ${rows}건. 옛 회사의 진단 체험 지급 결합입니다. 지급·진단을 정리한 뒤 진행합니다.`,
       });
     }
   }
@@ -712,7 +712,7 @@ async function buildMergePlan(
     if (norm(confirm.fromCompanyCode) !== norm(from.companyCode) || norm(confirm.toCompanyCode) !== norm(to.companyCode)) {
       blockers.push({
         kind: 'pair_confirmation_mismatch',
-        detail: `실행 확인 회사코드가 DB 값과 다릅니다 — 보낸 값 ${confirm.fromCompanyCode}→${confirm.toCompanyCode} / DB 값 ${from.companyCode}→${to.companyCode}.`,
+        detail: `실행 확인 회사코드가 DB 값과 다릅니다: 보낸 값 ${confirm.fromCompanyCode}→${confirm.toCompanyCode} / DB 값 ${from.companyCode}→${to.companyCode}.`,
       });
     }
   }

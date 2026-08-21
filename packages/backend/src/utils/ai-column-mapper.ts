@@ -85,13 +85,13 @@ const TARGET_COLUMNS: Array<{ key: string; label: string; example: string }> = [
 ];
 
 function buildSystemPrompt(): string {
-  const fields = TARGET_COLUMNS.map((c) => `- ${c.key} (${c.label}) — 예: ${c.example}`).join('\n');
+  const fields = TARGET_COLUMNS.map((c) => `- ${c.key} (${c.label}): 예: ${c.example}`).join('\n');
   return `당신은 한줄로 마케팅 SaaS의 Excel/CSV 컬럼 자동 매핑 AI입니다.
 사용자가 업로드한 파일의 컬럼명 + 샘플 데이터를 보고, 각 컬럼을 표준 customers 컬럼에 매핑합니다.
 
 [표준 customers 컬럼]
 ${fields}
-- custom_fields.{키} — 위 표준 컬럼에 없는 사용자 정의 필드 (영문/한글 키 모두 가능)
+- custom_fields.{키}: 위 표준 컬럼에 없는 사용자 정의 필드 (영문/한글 키 모두 가능)
 
 [규칙]
 1. 각 원본 컬럼마다 가장 잘 맞는 표준 컬럼을 1개만 선택 (또는 매핑 안 함 = null)
@@ -100,7 +100,7 @@ ${fields}
 4. 표준 컬럼에 없는 의미 있는 필드 (예: "쿠폰 보유 개수") = custom_fields.{key} 매핑 (key는 영문 snake_case)
 5. 명백히 의미 없는 컬럼 (예: 순번, 빈 컬럼) = target = null, confidence = 1.0
 
-[응답 형식 — JSON 단일]
+[응답 형식: JSON 단일]
 \`\`\`json
 {
   "mappings": [
@@ -192,7 +192,7 @@ ${limitedSamples.map((row, idx) => `${idx + 1}. ${JSON.stringify(row)}`).join('\
   // 원본 컬럼 누락 보정 — AI가 일부 컬럼을 안내 빠뜨린 경우 target=null로 채움
   for (const col of columnNames) {
     if (!mappings.find((m) => m.source === col)) {
-      mappings.push({ source: col, target: null, confidence: 0.5, reason: 'AI 매핑 결과 누락 — 수동 정정 의무' });
+      mappings.push({ source: col, target: null, confidence: 0.5, reason: 'AI 매핑 결과 누락. 수동 정정 의무' });
     }
   }
 

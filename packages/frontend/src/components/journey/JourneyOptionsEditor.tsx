@@ -75,7 +75,7 @@ export default function JourneyOptionsEditor({ journey, token, onSaved }: Props)
       if (ok) {
         setGoalExit(next);
         toast.success(next
-          ? '목표 달성 시 자동 종료를 켰습니다 — 진입 후 목표 달성이 확인된 고객은 남은 메시지를 받지 않습니다.'
+          ? '목표 달성 시 자동 종료를 켰습니다. 진입 후 목표 달성이 확인된 고객은 남은 메시지를 받지 않습니다.'
           : '목표 달성 시 자동 종료를 껐습니다.');
         onSaved();
       }
@@ -267,14 +267,14 @@ export default function JourneyOptionsEditor({ journey, token, onSaved }: Props)
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" disabled={!editable} checked={form.personalSendTime === true}
                   onChange={(e) => set('personalSendTime', e.target.checked)} className="w-3.5 h-3.5 rounded accent-violet-500" />
-                <span className="text-[10px] text-white/60 leading-snug">발송 시각 개인화 — 시각 지정 단계를 고객이 반응한 시간대(최근 90일)로 보정</span>
+                <span className="text-[10px] text-white/60 leading-snug">발송 시각 개인화: 시각 지정 단계를 고객이 반응한 시간대(최근 90일)로 보정</span>
               </label>
             </div>
           </div>
 
           {conditions.length > 0 && (
             <div className="pt-2 border-t border-white/10 space-y-1">
-              <div className="text-[10px] text-white/40 font-semibold">고객 복합 조건 ({tf.logic || 'AND'}) — 읽기 전용</div>
+              <div className="text-[10px] text-white/40 font-semibold">고객 복합 조건 ({tf.logic || 'AND'}) · 읽기 전용</div>
               <div className="flex flex-wrap gap-1">
                 {conditions.map((c: any, i: number) => (
                   <span key={i} className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded text-[10px] text-white/70 font-mono">
@@ -293,7 +293,7 @@ export default function JourneyOptionsEditor({ journey, token, onSaved }: Props)
           )}
         </>
       )}
-      <div className="text-[10px] text-white/30 italic">Data source — journeys.trigger_filters + 옵션 컬럼. 고객 복합 조건 편집은 별도.</div>
+      <div className="text-[10px] text-white/30 italic">Data source: journeys.trigger_filters + 옵션 컬럼. 고객 복합 조건 편집은 별도.</div>
     </div>
   );
 }

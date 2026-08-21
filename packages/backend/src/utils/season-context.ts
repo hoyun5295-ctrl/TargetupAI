@@ -36,7 +36,7 @@ export function buildSeasonPromptBlock(month: number, businessType: string | nul
   const ctx = SEASON_BY_MONTH[month] || { season: '계절', keywords: [] };
   const biz = businessType && businessType.trim() ? businessType.trim() : '일반';
   return [
-    `[이번 달 계절 컨텍스트 — KST]`,
+    `[이번 달 계절 컨텍스트: KST]`,
     `- 현재 ${month}월 (${ctx.season})`,
     `- 시즌 키워드: ${ctx.keywords.join(', ')}`,
     `- 업종(${biz})에 맞는 톤으로 위 시즌 감성을 자연스럽게 녹이세요.`,

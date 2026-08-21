@@ -92,10 +92,10 @@ export async function explainCustomerPrediction(
       impactScore: daysSince <= 30 ? 0.9 : daysSince <= 90 ? 0.5 : 0.95,
       direction: daysSince <= 30 ? 'positive' : daysSince <= 90 ? 'neutral' : 'negative',
       detail: daysSince <= 30
-        ? `최근 ${daysSince}일 안에 활동 — 활성 고객`
+        ? `최근 ${daysSince}일 안에 활동: 활성 고객`
         : daysSince <= 90
-        ? `${daysSince}일 전 마지막 활동 — 주의`
-        : `${daysSince}일 넘게 활동 없음 — 휴면 위험`,
+        ? `${daysSince}일 전 마지막 활동: 주의`
+        : `${daysSince}일 넘게 활동 없음: 휴면 위험`,
       sourceField: 'customers.recent_purchase_date + cdp_events.message_click',
     });
   } else {
@@ -104,7 +104,7 @@ export async function explainCustomerPrediction(
       label: '최근 활동',
       impactScore: 0.7,
       direction: 'negative',
-      detail: '활동 이력 없음 — 신규 또는 휴면',
+      detail: '활동 이력 없음: 신규 또는 휴면',
       sourceField: 'customers.recent_purchase_date',
     });
   }
@@ -128,7 +128,7 @@ export async function explainCustomerPrediction(
       label: '메시지 클릭 이력',
       impactScore: 0.3,
       direction: 'neutral',
-      detail: `누적 발송 ${totalSent}건 — 데이터 부족 (cold start)`,
+      detail: `누적 발송 ${totalSent}건: 데이터 부족 (cold start)`,
       sourceField: 'journey_step_logs',
     });
   }
@@ -151,7 +151,7 @@ export async function explainCustomerPrediction(
       label: '구매 빈도',
       impactScore: 0.5,
       direction: 'negative',
-      detail: '구매 이력 없음 — 첫 구매 유도 대상',
+      detail: '구매 이력 없음: 첫 구매 유도 대상',
       sourceField: 'customers.purchase_count',
     });
   }
@@ -171,7 +171,7 @@ export async function explainCustomerPrediction(
     label: '고객 등급',
     impactScore: gi.score,
     direction: gi.dir,
-    detail: `${grade} 등급 — 등급별 평균 클릭률·객단가 기준`,
+    detail: `${grade} 등급: 등급별 평균 클릭률·객단가 기준`,
     sourceField: 'customers.grade',
   });
 
@@ -206,13 +206,13 @@ export async function explainCustomerPrediction(
   const purchaseLikelihood = Number(row.purchase_likelihood) || 0;
   let topRecommendation: string;
   if (churnRisk > 0.7) {
-    topRecommendation = `이탈 위험 ${(churnRisk * 100).toFixed(0)}% — 회복 캠페인을 권장합니다 (감성 톤 + 자주 클릭한 ${row.channel_preference || 'SMS'} 채널)`;
+    topRecommendation = `이탈 위험 ${(churnRisk * 100).toFixed(0)}%. 회복 캠페인을 권장합니다 (감성 톤 + 자주 클릭한 ${row.channel_preference || 'SMS'} 채널)`;
   } else if (purchaseLikelihood > 0.5) {
-    topRecommendation = `구매 가능성 ${(purchaseLikelihood * 100).toFixed(0)}% — 추천 상품 캠페인을 권장합니다${row.next_purchase_days !== null ? ` (다음 구매 예상 D+${row.next_purchase_days}일 전 발송)` : ''}`;
+    topRecommendation = `구매 가능성 ${(purchaseLikelihood * 100).toFixed(0)}%. 추천 상품 캠페인을 권장합니다${row.next_purchase_days !== null ? ` (다음 구매 예상 D+${row.next_purchase_days}일 전 발송)` : ''}`;
   } else if (grade === 'VIP' || grade === 'Gold') {
-    topRecommendation = `${grade} 등급 — 90일 LTV ${Math.round(Number(row.ltv_90d) || 0).toLocaleString()}원을 지키는 VIP 전용 혜택을 권장합니다`;
+    topRecommendation = `${grade} 등급. 90일 LTV ${Math.round(Number(row.ltv_90d) || 0).toLocaleString()}원을 지키는 VIP 전용 혜택을 권장합니다`;
   } else {
-    topRecommendation = `${grade} 등급 — 클릭 이력을 분석해 채널·시간대를 맞춘 발송을 권장합니다`;
+    topRecommendation = `${grade} 등급. 클릭 이력을 분석해 채널·시간대를 맞춘 발송을 권장합니다`;
   }
 
   return {

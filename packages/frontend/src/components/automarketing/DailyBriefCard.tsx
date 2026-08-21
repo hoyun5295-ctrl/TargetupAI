@@ -84,7 +84,7 @@ export default function DailyBriefCard({ brief, submitting, onStart }: Props) {
         <div className="mt-4 text-xs text-white/45">오늘은 새로 추천할 만한 신호가 없습니다. 데이터가 쌓이면 추천이 늘어납니다.</div>
       )}
 
-      <div className="mt-3 text-[10px] text-white/30 italic">Data source — 회사 고객 DB 실측 신호 · 누적 학습 메모리 · 운영 현황 (매일 오전 분석)</div>
+      <div className="mt-3 text-[10px] text-white/30 italic">Data source: 회사 고객 DB 실측 신호 · 누적 학습 메모리 · 운영 현황 (매일 오전 분석)</div>
     </div>
   );
 }

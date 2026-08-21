@@ -76,7 +76,7 @@ async function recoverStale(monthFrom: string): Promise<number> {
     if (tp.execMeta?.send_started_at && !tp.execRef) {
       const locked = await releaseStaleClaim({
         companyId: tp.companyId, touchpointId: tp.id, observedClaimedAt: observed, toStatus: 'locked',
-        lockReason: '발송 여부를 확인하지 못했습니다 — 발송 내역 확인이 필요합니다.',
+        lockReason: '발송 여부를 확인하지 못했습니다. 발송 내역 확인이 필요합니다.',
       });
       if (locked) {
         recovered++;
@@ -90,7 +90,7 @@ async function recoverStale(monthFrom: string): Promise<number> {
     //   담당자가 [다시 시작]을 누르면 그때 정상 경로로 재개된다(제작비·발송 멱등키가 이중 과금을 막는다).
     const ok = await releaseStaleClaim({
       companyId: tp.companyId, touchpointId: tp.id, observedClaimedAt: observed, toStatus: 'locked',
-      lockReason: '진행이 오래 멈춰 있어 자동 진행을 중단했습니다 — 확인 후 [다시 시작]을 눌러주세요.',
+      lockReason: '진행이 오래 멈춰 있어 자동 진행을 중단했습니다. 확인 후 [다시 시작]을 눌러주세요.',
       execMetaPatch: { recovered_at: new Date().toISOString() },
     });
     if (ok) {

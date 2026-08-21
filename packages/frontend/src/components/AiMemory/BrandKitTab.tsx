@@ -160,7 +160,7 @@ export default function BrandKitTab({ apiBase, token, onToast }: Props) {
           {saving && <Loader2 className="w-4 h-4 animate-spin" />} 브랜드킷 저장
         </button>
       </div>
-      <div className="text-[10px] text-white/30 italic">Data source — companies.brand_kit · 전 채널 생성 공용 참조</div>
+      <div className="text-[10px] text-white/30 italic">Data source: companies.brand_kit · 전 채널 생성 공용 참조</div>
     </div>
   );
 }

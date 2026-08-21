@@ -115,7 +115,7 @@ function isDbMigrationPendingError(err: any): boolean {
 function send503Migration(res: any, requiredAlter: string) {
   return res.status(503).json({
     success: false,
-    error: `DB 마이그레이션 필요 — 운영자에게 ${requiredAlter} 실행 요청 의무`,
+    error: `DB 마이그레이션 필요: 운영자에게 ${requiredAlter} 실행 요청 의무`,
     code: 'DB_MIGRATION_PENDING',
   });
 }
@@ -441,7 +441,7 @@ dmRouter.get('/short-links', async (req: any, res: any) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('does not exist') && (msg.includes('relation') || msg.includes('column'))) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 dm_custom_short_links 테이블 생성을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 dm_custom_short_links 테이블 생성을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[커스텀 단축링크 목록] 오류:', msg);
     return res.status(500).json({ error: '서버 오류' });
@@ -484,7 +484,7 @@ dmRouter.post('/short-links', async (req: any, res: any) => {
     }
     const msg = err?.message || '';
     if (msg.includes('does not exist') && (msg.includes('relation') || msg.includes('column'))) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 dm_custom_short_links 테이블 생성을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 dm_custom_short_links 테이블 생성을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[커스텀 단축링크 생성] 오류:', msg);
     return res.status(500).json({ error: msg || '서버 오류' });
@@ -525,7 +525,7 @@ async function canAccessDm(dmId: string, companyId: string, userType?: string, u
 //   target에 ?src=<slug>를 저장해 리다이렉트 무변경으로 유입원이 뷰어 비콘까지 흐른다.
 // ============================================================
 
-const ALIAS_MIGRATION_MSG = 'DB 마이그레이션 필요 — 운영자에게 dm_custom_short_links(dm_page_id)/dm_views(entry_source) ALTER 실행을 요청해주세요.';
+const ALIAS_MIGRATION_MSG = 'DB 마이그레이션 필요: 운영자에게 dm_custom_short_links(dm_page_id)/dm_views(entry_source) ALTER 실행을 요청해주세요.';
 
 function isMissingDbObject(err: any): boolean {
   const msg = String(err?.message || '');
@@ -1293,7 +1293,7 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
     } catch (e: any) {
       const msg = e?.message || '';
       if (msg.includes('relation') && msg.includes('does not exist')) {
-        return res.status(503).json({ error: 'DB 마이그레이션 필요 — 운영자에게 dm_recipient_tokens 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+        return res.status(503).json({ error: 'DB 마이그레이션 필요: 운영자에게 dm_recipient_tokens 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
       }
       throw e;
     }
@@ -1536,7 +1536,7 @@ dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — dm_recipient_tokens 테이블 / dm_views ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: dm_recipient_tokens 테이블 / dm_views ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[DM 발송 추적] 오류:', err?.message);
     return res.status(500).json({ error: err?.message || '추적 조회 실패' });
@@ -1615,7 +1615,7 @@ dmRouter.get('/:id/recipient-detail', async (req: any, res: any) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — dm_recipient_tokens/dm_views/dm_event_responses 확인 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: dm_recipient_tokens/dm_views/dm_event_responses 확인 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[DM 수신자 상세] 오류:', err?.message);
     return res.status(500).json({ error: err?.message || '수신자 상세 조회 실패' });
@@ -1677,25 +1677,25 @@ dmRouter.post('/:id/generate-copy', async (req: any, res: any) => {
       }
     }
     const dmSummary = dmLines.length
-      ? `\n\n[DM 페이지 편집 내용 — 이 문자는 아래 DM을 알리는 문자입니다. 문안은 반드시 이 내용에 근거해 작성]\n${dmLines.join('\n')}`
+      ? `\n\n[DM 페이지 편집 내용: 이 문자는 아래 DM을 알리는 문자입니다. 문안은 반드시 이 내용에 근거해 작성]\n${dmLines.join('\n')}`
       : '';
 
     // ★ 2026-07-02(3) 계절·시기 감성 주입 — DM 내용 + 시즌감으로 풍성한 카피 (구체 사실 창작은 여전히 금지)
     const { monthLabel, seasonHint } = getSeasonContext();
     const lengthRule = lengthMode === 'sms'
-      ? `- 단문(SMS) 우선: %DM링크%는 발송 시 22자 내외 단축링크로 치환됩니다. 링크를 제외한 본문은 한글 기준 28자 안(전체 90바이트 안)으로 — 감성 후크 반 줄 + 핵심 한 조각 + %DM링크%. 줄바꿈 없이 한 줄.`
+      ? `- 단문(SMS) 우선: %DM링크%는 발송 시 22자 내외 단축링크로 치환됩니다. 링크를 제외한 본문은 한글 기준 28자 안(전체 90바이트 안)으로: 감성 후크 반 줄 + 핵심 한 조각 + %DM링크%. 줄바꿈 없이 한 줄.`
       : `- 밋밋한 나열 대신 감성 후크(첫 줄) + 핵심 내용 + 행동 유도 흐름으로.
 - 80~250자. 줄바꿈은 실제 줄바꿈 문자로.`;
     const baseSystem = `당신은 한줄로 SMS/LMS 마케팅 카피라이터입니다. 아래 조건으로 ${lengthMode === 'sms' ? '단문(SMS)' : 'LMS'} 문자 본문 1개만 작성합니다.
 - 반드시 %DM링크% 를 문안 안 자연스러운 위치에 1회 포함(수신자별 개인화 링크가 여기 들어갑니다).
-- 혜택·쿠폰·이벤트는 [DM 페이지 편집 내용]에 실제 적힌 표현만 그대로 인용 — 거기 없는 혜택(%/원/쿠폰/무료/할인/사은품/적립) 임의 창작 절대 금지.
-- 지금은 ${monthLabel}(${seasonHint}) — 계절감과 시기 감성을 가벼운 수식·인사로 자연스럽게 녹여 카피를 풍성하게. 단 시즌 묘사는 일반적 사실만, 통계·행사 등 구체 사실 지어내기 금지.
+- 혜택·쿠폰·이벤트는 [DM 페이지 편집 내용]에 실제 적힌 표현만 그대로 인용. 거기 없는 혜택(%/원/쿠폰/무료/할인/사은품/적립) 임의 창작 절대 금지.
+- 지금은 ${monthLabel}(${seasonHint}). 계절감과 시기 감성을 가벼운 수식·인사로 자연스럽게 녹여 카피를 풍성하게. 단 시즌 묘사는 일반적 사실만, 통계·행사 등 구체 사실 지어내기 금지.
 - [DM 페이지 편집 내용]에 상품 가격이 있으면 대표 상품 1~3개를 "정가 → 할인가" 형식 그대로 본문에 담아라(전 상품 나열로 장황해지지 않게).
-- 구분선은 하이픈 10개(----------)를 초과 금지 — 긴 대시/등호/특수문자 줄은 휴대폰에서 두 줄로 꺾여 보인다.
+- 구분선은 하이픈 10개(----------)를 초과 금지. 긴 대시/등호/특수문자 줄은 휴대폰에서 두 줄로 꺾여 보인다.
 ${lengthRule}
 - 유니코드 이모지 금지(SMS 호환).
 - 개인화는 %고객명% 등 명시된 변수만 사용.
-[출력 형식 — 절대 준수] 문자 본문 텍스트만 그대로 출력. JSON·코드블록·따옴표·"channel"·"body" 같은 형식 절대 금지.${dmSummary}`;
+[출력 형식: 절대 준수] 문자 본문 텍스트만 그대로 출력. JSON·코드블록·따옴표·"channel"·"body" 같은 형식 절대 금지.${dmSummary}`;
     const system = await buildSystemPromptWithBrandVoice(companyId, baseSystem);
 
     const text = await callAIWithFallback({

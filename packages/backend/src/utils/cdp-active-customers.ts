@@ -121,6 +121,6 @@ export async function buildCdpActiveCustomers(
     totalActiveCustomers,
     anonymousEventCount,
     computedAt: new Date().toISOString(),
-    source: 'cdp_events JOIN customers (회원 매핑된 영역만 — 비회원 영역 = anonymized 매트릭스 별도)',
+    source: 'cdp_events JOIN customers (회원 매핑된 영역만, 비회원 영역 = anonymized 매트릭스 별도)',
   };
 }

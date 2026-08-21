@@ -104,7 +104,7 @@ export function buildDailyBriefSystemPrompt(): string {
 1. 제공된 실측 숫자만 사용한다. 새로운 숫자·통계를 만들지 않는다.
 2. 할인율·금액·쿠폰·무료 같은 구체 혜택을 임의로 만드는 것은 금지. 혜택은 회사 담당자가 직접 정한다.
 3. 이미 운영 중인 자동 마케팅과 목표가 겹치는 추천은 하지 않는다.
-4. 의미 있는 신호가 없으면 추천하지 않는다 — recommendations를 빈 배열로 돌려라. 억지 추천 금지.
+4. 의미 있는 신호가 없으면 추천하지 않는다. recommendations를 빈 배열로 돌려라. 억지 추천 금지.
 5. 추천은 최대 3건. 각 추천의 reason에는 이 회사의 실측 근거(신호 이름·인원·규모)를 인용한다.
 6. 누적 학습(Company Memory)에 성공 패턴이 있으면 그 패턴("이럴 때 이런 마케팅이 효과 있었다")을 우선 반영하고 reason에 근거로 남겨라.
 7. "여정 정착 후보"가 제공되면 그중 성과가 뚜렷한 것을 opportunityType "journey_promotion"으로 추천할 수 있다(objective = 그 후보의 목표 그대로, reason에 발송·클릭 실측 인용).
@@ -144,7 +144,7 @@ export function buildDailyBriefUserMessage(input: {
 }): string {
   const oppLines = input.opportunities.length > 0
     ? input.opportunities.map((o) =>
-        `- [${o.type}] ${o.title}: ${o.count.toLocaleString()}명 (관련 매출 규모 ₩${Math.round(o.valueAtStake).toLocaleString()}) — 제안 골격: ${o.suggestedObjective}`,
+        `- [${o.type}] ${o.title}: ${o.count.toLocaleString()}명 (관련 매출 규모 ₩${Math.round(o.valueAtStake).toLocaleString()}): 제안 골격: ${o.suggestedObjective}`,
       ).join('\n')
     : '(감지된 신호 없음)';
   const opLines = input.activeOperators.length > 0
@@ -170,7 +170,7 @@ ${oppLines}
 ## 운영 중인 자동 마케팅 (목표 중복 금지)
 ${opLines}
 
-## 여정 정착 후보 (성과가 검증된 자동 마케팅 — journey_promotion 추천 가능)
+## 여정 정착 후보 (성과가 검증된 자동 마케팅, journey_promotion 추천 가능)
 ${promoLines}
 
 ## 승인 대기 중인 추천 수: ${input.pendingProposals}건

@@ -259,7 +259,7 @@ router.get('/inicis/return', async (req: Request, res: Response) => {
   console.log('[payments] /inicis/return GET fallback:', { orderId, query: req.query, requestHost: req.get('host') });
   res.status(200).send(renderResultHtml('failed', {
     orderId,
-    resultMsg: '결제 결과 확인 실패 (GET fallback) — 결제 진행 여부는 발송결과 영역 안 확인 의무',
+    resultMsg: '결제 결과 확인 실패 (GET fallback). 결제 진행 여부는 발송결과 영역 안 확인 의무',
   }, baseUrl));
 });
 

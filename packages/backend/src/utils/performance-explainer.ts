@@ -83,7 +83,7 @@ ${snapshot.byHour.sort((a, b) => b.sent - a.sent).slice(0, 5).map((h) => `  · $
 - 30일 신규 고객: ${snapshot.newCustomers30d.toLocaleString()}명 / 활성 고객: ${snapshot.activeCustomers30d.toLocaleString()}명
 - 30일 추정 매출 (CDP): ${snapshot.estimatedRevenue.toLocaleString()}원
 ${snapshot.funnelStats ? `- CDP Funnel: 조회 ${snapshot.funnelStats.viewCount} → 장바구니 ${snapshot.funnelStats.cartAddCount} → 구매 ${snapshot.funnelStats.purchaseCount} (전환율 ${(snapshot.funnelStats.purchaseConversionRate * 100).toFixed(2)}%)` : '- CDP 미연동'}
-${extraLines && extraLines.length > 0 ? `\n## 고객 축 실측 (등급·전 채널 — audience 요인 근거)\n${extraLines.map((l) => `- ${l}`).join('\n')}` : ''}
+${extraLines && extraLines.length > 0 ? `\n## 고객 축 실측 (등급·전 채널, audience 요인 근거)\n${extraLines.map((l) => `- ${l}`).join('\n')}` : ''}
 
 ## 요청
 위 데이터를 분석해 영향 요인 매트릭스를 도출해주세요:
@@ -94,7 +94,7 @@ ${extraLines && extraLines.length > 0 ? `\n## 고객 축 실측 (등급·전 채
    - label: 짧은 명사 (예: "LMS 채널", "20시 발송")
    - impactScore: 0~1 (영향력 크기)
    - direction: 'positive' (성과 견인) | 'negative' (성과 저하) | 'neutral'
-   - detail: 구체 수치 안내 (예: "LMS 발송 성공률 96.2% — SMS 89.1% 대비 +7.1%p")
+   - detail: 구체 수치 안내 (예: "LMS 발송 성공률 96.2%: SMS 89.1% 대비 +7.1%p")
    - sourceField: 데이터 source (예: "campaigns.sent_at AT TIME ZONE 'Asia/Seoul' + success_count")
 4. 1순위 권장 액션 (사용자 실행 가능 한 줄)
 
@@ -103,7 +103,7 @@ ${extraLines && extraLines.length > 0 ? `\n## 고객 축 실측 (등급·전 채
   "overallScore": 72,
   "topInsight": "주말 저녁 시간대 발송 시 성공률 +14%",
   "factors": [
-    {"category": "time", "label": "20시 발송", "impactScore": 0.85, "direction": "positive", "detail": "20시 발송 성공률 94.3% — 전체 평균 +6.2%p", "sourceField": "campaigns.sent_at AT TIME ZONE 'Asia/Seoul'"}
+    {"category": "time", "label": "20시 발송", "impactScore": 0.85, "direction": "positive", "detail": "20시 발송 성공률 94.3%: 전체 평균 +6.2%p", "sourceField": "campaigns.sent_at AT TIME ZONE 'Asia/Seoul'"}
   ],
   "recommendation": "다음 캠페인 LMS 채널 + 20시 발송 정합"
 }`;
@@ -161,7 +161,7 @@ ${extraLines && extraLines.length > 0 ? `\n## 고객 축 실측 (등급·전 채
     console.error('[PerformanceExplainer] AI 호출 실패:', err);
     return {
       overallScore: 50,
-      topInsight: '성과 분석 영역 일시 오류 — 잠시 후 다시 시도해주세요.',
+      topInsight: '성과 분석 영역 일시 오류. 잠시 후 다시 시도해주세요.',
       factors: [],
       recommendation: '',
       explainedAt: new Date().toISOString(),

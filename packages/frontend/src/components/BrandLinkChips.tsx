@@ -87,7 +87,7 @@ export default function BrandLinkChips({ onInsert, tone = 'light', onToast, clas
       setUrl('');
       setAdding(false);
       await loadLinks();
-      notify('브랜드 링크 저장 완료 — 모든 문안 편집기에서 재사용됩니다.', 'success');
+      notify('브랜드 링크 저장 완료. 모든 문안 편집기에서 재사용됩니다.', 'success');
     } catch (err: any) {
       setError(err?.message || '저장 실패');
     } finally {
@@ -135,7 +135,7 @@ export default function BrandLinkChips({ onInsert, tone = 'light', onToast, clas
         <div className={`flex items-center gap-1.5 text-xs font-semibold ${titleCls}`}>
           <Link2 className="w-3.5 h-3.5" />
           브랜드 링크
-          {onInsert && <span className={`font-normal ${dark ? 'text-white/40' : 'text-slate-400'}`}>— 클릭 시 커서 위치에 삽입</span>}
+          {onInsert && <span className={`font-normal ${dark ? 'text-white/40' : 'text-slate-400'}`}>(클릭 시 커서 위치에 삽입)</span>}
         </div>
         {!adding && (
           <button

@@ -84,20 +84,20 @@ async function evaluateCtr(campaignId: string, companyId: string): Promise<DmDia
       score: 50,
       status: 'warning',
       short_message: '데이터 부족 (열람 50건 미만)',
-      detail: `현재 ${views}건 — 분석을 위해 더 많은 발송 필요`,
+      detail: `현재 ${views}건. 분석을 위해 더 많은 발송 필요`,
     };
   }
   if (ctr >= 5) {
-    return { factor: 'ctr', score: 90, status: 'good', short_message: `CTR ${ctr.toFixed(1)}% — 우수` };
+    return { factor: 'ctr', score: 90, status: 'good', short_message: `CTR ${ctr.toFixed(1)}%: 우수` };
   }
   if (ctr >= 2) {
-    return { factor: 'ctr', score: 70, status: 'warning', short_message: `CTR ${ctr.toFixed(1)}% — 평균` };
+    return { factor: 'ctr', score: 70, status: 'warning', short_message: `CTR ${ctr.toFixed(1)}%: 평균` };
   }
   return {
     factor: 'ctr',
     score: 40,
     status: 'critical',
-    short_message: `CTR ${ctr.toFixed(1)}% — 개선 필요`,
+    short_message: `CTR ${ctr.toFixed(1)}%: 개선 필요`,
     detail: 'CTA 위치 / 카피 / 이미지 정합 검토 권장',
   };
 }
@@ -128,7 +128,7 @@ async function evaluateDesignConsistency(campaignId: string): Promise<DmDiagnosi
       score: 70,
       status: 'warning',
       short_message: `${issues}개 섹션 색상 불일치`,
-      detail: '브랜드 킷과 다른 색상 사용 — 디자인 정합화 권장',
+      detail: '브랜드 킷과 다른 색상 사용. 디자인 정합화 권장',
     };
   }
   return {
@@ -158,7 +158,7 @@ async function evaluateAdLabelCompliance(campaignId: string): Promise<DmDiagnosi
     score: 30,
     status: 'critical',
     short_message: '광고 표기 누락',
-    detail: '정보통신망법 위반 위험 — 헤더 (광고) 표기 의무',
+    detail: '정보통신망법 위반 위험. 헤더 (광고) 표기 의무',
   };
 }
 
@@ -246,7 +246,7 @@ async function evaluateSectionOrder(campaignId: string): Promise<DmDiagnosisFact
 const TOP_INSIGHT_SYSTEM = `당신은 모바일 DM 마케팅 진단 전문가입니다. 회사 컨텍스트와 5 factor 분석 결과를 기반으로 가장 시급한 개선 한 줄 (15~25자) 을 출력합니다.
 
 **절대 금지:**
-- 구체 혜택 (%/원/쿠폰/무료/사은품) 제시 금지 — 회사 admin 직접 작성 영역
+- 구체 혜택 (%/원/쿠폰/무료/사은품) 제시 금지. 회사 admin 직접 작성 영역
 - AI 도구명 / 모델명 노출 금지
 - 한 줄 이상 출력 금지
 
@@ -266,7 +266,7 @@ async function deriveTopInsight(
       .slice(0, 1200);
 
     const factorSummary = factors
-      .map((f) => `- ${f.factor}: ${f.status} (${f.score}점) — ${f.short_message}`)
+      .map((f) => `- ${f.factor}: ${f.status} (${f.score}점): ${f.short_message}`)
       .join('\n');
 
     const userMessage = `회사 메모리:
@@ -301,7 +301,7 @@ ${factorSummary}
   if (critical) return critical.short_message;
   const warning = factors.find((f) => f.status === 'warning');
   if (warning) return warning.short_message;
-  return '전체 진단 우수 — 추가 발송 데이터 누적 권장';
+  return '전체 진단 우수. 추가 발송 데이터 누적 권장';
 }
 
 // ────────────── 메인 함수 ──────────────
@@ -343,7 +343,7 @@ export async function selfDiagnoseDm(
     recommendedActions.push({
       action: 'ai_refine',
       priority: 'high',
-      reason: 'CTR 낮음 — 카피 개선 권장',
+      reason: 'CTR 낮음. 카피 개선 권장',
     });
   }
 

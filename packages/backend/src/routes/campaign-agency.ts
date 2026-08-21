@@ -52,7 +52,7 @@ function missingRelationResponse(res: Response, err: any): boolean {
   if (msg.includes('does not exist') && (msg.includes('relation') || msg.includes('column'))) {
     res.status(503).json({
       success: false,
-      error: 'DB 마이그레이션 필요 — 운영자에게 campaign_agency_requests 반영 실행을 요청해 주세요.',
+      error: 'DB 마이그레이션 필요: 운영자에게 campaign_agency_requests 반영 실행을 요청해 주세요.',
       code: 'DB_MIGRATION_PENDING',
     });
     return true;
@@ -82,7 +82,7 @@ function validateAndSaveImages(companyId: string, files: Express.Multer.File[]):
   for (const f of files) {
     const sniffed = sniffImageMediaType(f.buffer);
     if (!sniffed || !MIME_EXT[sniffed]) {
-      throw Object.assign(new Error(`이미지 파일이 아닙니다: ${f.originalname || '이름 없음'} — JPG/PNG/WebP만 가능합니다.`), { statusCode: 400 });
+      throw Object.assign(new Error(`이미지 파일이 아닙니다: ${f.originalname || '이름 없음'}. JPG/PNG/WebP만 가능합니다.`), { statusCode: 400 });
     }
     metas.push({ buf: f.buffer, name: (f.originalname || 'image').slice(0, 200), mime: sniffed });
   }
@@ -109,7 +109,7 @@ function toVisionInputs(files: Express.Multer.File[]): EventImageInput[] {
   for (const f of files) {
     const sniffed = sniffImageMediaType(f.buffer);
     if (!sniffed || !MIME_EXT[sniffed]) {
-      throw Object.assign(new Error(`이미지 파일이 아닙니다: ${f.originalname || '이름 없음'} — JPG/PNG/WebP만 가능합니다.`), { statusCode: 400 });
+      throw Object.assign(new Error(`이미지 파일이 아닙니다: ${f.originalname || '이름 없음'}. JPG/PNG/WebP만 가능합니다.`), { statusCode: 400 });
     }
     inputs.push({ media_type: sniffed, data: f.buffer.toString('base64') });
   }
@@ -230,7 +230,7 @@ router.post('/requests', withImageUpload(async (req: any, res: Response) => {
   // 운영자 통지 (실패해도 접수 성공 — fire-and-forget)
   sendSystemAlert({
     dedupKey: `agency-request:${ins.rows[0].id}`,
-    message: `[캠페인 대행] 새 요청 접수 — 행사명: ${parsed.title}. 슈퍼관리자 > 캠페인 대행 설계에서 확인해 주세요.`,
+    message: `[캠페인 대행] 새 요청 접수: 행사명: ${parsed.title}. 슈퍼관리자 > 캠페인 대행 설계에서 확인해 주세요.`,
   }).catch((e: any) => console.log('[캠페인대행] 접수 통지 생략:', e?.message || e));
 
   return res.json({ success: true, id: ins.rows[0].id });
@@ -460,7 +460,7 @@ async function executeDesignForRequest(requestId: string): Promise<
   const parsed: AgencyRequestParsed | null = row.parsed_json || null;
   if (!parsed) return { ok: false, status: 400, error: '요청 내용이 없습니다. 내용을 입력(보정)한 후 실행해 주세요.' };
   if (Array.isArray(parsed.missingRequired) && parsed.missingRequired.length > 0) {
-    return { ok: false, status: 400, error: `필수 항목 누락: ${parsed.missingRequired.join(' / ')} — 보정 후 실행해 주세요.` };
+    return { ok: false, status: 400, error: `필수 항목 누락: ${parsed.missingRequired.join(' / ')}. 보정 후 실행해 주세요.` };
   }
   // 실행 시점 자격 재검증 — 다운그레이드·만료된 업체의 과거 접수 건 실행 차단
   if (!(await isCompanyEligible(row.company_id))) {

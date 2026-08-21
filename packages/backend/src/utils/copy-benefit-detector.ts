@@ -42,7 +42,7 @@ export function detectBenefits(input: string): BenefitDetectResult {
 }
 
 /** 사용자가 직접 채워야 하는 자리 — 프로젝트 표준 문구(활성화 게이트가 미편집 상태를 막는다). */
-export const BENEFIT_PLACEHOLDER = '[혜택 안내 — 직접 수정해주세요]';
+export const BENEFIT_PLACEHOLDER = '[혜택 안내: 직접 수정해주세요]';
 
 /**
  * ★ 2026-08-02 Codex 4R — **구조를 바꿨다. 비교를 없앴다.**
@@ -186,7 +186,7 @@ export function buildBenefitEmphasis(tokens: string[], channel: Channel): string
   }
   return [
     '',
-    '## 풍성도 (혜택 미입력 — 시의성으로)',
+    '## 풍성도 (혜택 미입력: 시의성으로)',
     '- 구체 혜택(%·원·쿠폰·무료 등)을 절대 지어내지 마세요. 혜택 날조 금지.',
     '- 대신 현재 계절감·해당 월 특성·시즌 이벤트·요일/시간 맥락을 자연스럽게 살려 문안 자체를 풍성하게 작성하세요.',
   ].join('\n');

@@ -39,7 +39,7 @@ export function renderFormulaSummary(meta: IndustryFormulaMeta): string {
 /** 조립기 주입용 블록 — Track B 프롬프트에 붙는 지침(원문 아님). */
 export function renderFormulaBlock(meta: IndustryFormulaMeta): string {
   return (
-    '## 업종 승리 공식 (같은 업종 검증 문안들의 구조 지침 — 원문 아님)\n'
+    '## 업종 승리 공식 (같은 업종 검증 문안들의 구조 지침, 원문 아님)\n'
     + renderFormulaSummary(meta)
     + '\n위 공식은 구조 지침일 뿐입니다. 문안은 우리 브랜드 상황에 맞게 완전히 새로 작성하세요.'
   );
@@ -83,9 +83,9 @@ export async function distillIndustryFormula(industryCode: string): Promise<Dist
   const exampleRaw = await callAIWithFallback({
     system:
       '너는 문자(LMS) 마케팅 카피라이터다. 아래 업종 공식만 참고해 서로 다른 스타일의 예시 문안을 새로 작성한다. '
-      + '규칙: (1) 실제 업체명 금지 — 가상 상호(예: "OO뷰티") 사용. (2) 구체 혜택(%·원·쿠폰 금액) 금지 — 혜택 자리는 반드시 "[직접 작성해주세요]" 그대로. '
+      + '규칙: (1) 실제 업체명 금지: 가상 상호(예: "OO뷰티") 사용. (2) 구체 혜택(%·원·쿠폰 금액) 금지. 혜택 자리는 반드시 "[직접 작성해주세요]" 그대로. '
       + '(3) 전화번호·URL 금지. (4) 각 300자 이내. 반드시 JSON 배열만 출력: '
-      + `[{"text":"예시 문안","tags":["후킹유형","톤"]}] — 정확히 ${EXAMPLE_COUNT}개.`,
+      + `[{"text":"예시 문안","tags":["후킹유형","톤"]}]: 정확히 ${EXAMPLE_COUNT}개.`,
     userMessage: `업종: ${label}\n\n공식:\n${renderFormulaSummary(meta)}`,
     maxTokens: 1500,
     temperature: 0.7,

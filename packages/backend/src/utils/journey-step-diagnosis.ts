@@ -150,10 +150,10 @@ export async function diagnoseJourneySteps(
       return b.dropoutRate - a.dropoutRate;
     })
     .slice(0, 3)
-    .map((s) => `Step ${s.stepOrder} — ${s.topExitReason} (이탈 ${(s.dropoutRate * 100).toFixed(0)}%)`);
+    .map((s) => `Step ${s.stepOrder}: ${s.topExitReason} (이탈 ${(s.dropoutRate * 100).toFixed(0)}%)`);
 
   if (topConcerns.length === 0 && messageSteps.length > 0) {
-    topConcerns.push('전체 단계 정상 흐름 — 추가 단계 신설 검토 권장');
+    topConcerns.push('전체 단계 정상 흐름. 추가 단계 신설 검토 권장');
   }
 
   return {
@@ -195,7 +195,7 @@ function buildStepRecommendation(
   // wait step 영역
   if (step.stepType === 'wait' && step.waitedCount > 0 && dropoutRate > 0.3) {
     return {
-      recommendation: `wait 시간 영역 이탈 ${(dropoutRate * 100).toFixed(0)}% — 대기 시간 단축 검토 (현재 영역 → 권장 50% 단축)`,
+      recommendation: `wait 시간 영역 이탈 ${(dropoutRate * 100).toFixed(0)}%. 대기 시간 단축 검토 (현재 영역 → 권장 50% 단축)`,
       oneClickAction: {
         type: 'adjust_wait_hours',
         label: 'wait 시간 50% 단축 적용',
@@ -207,7 +207,7 @@ function buildStepRecommendation(
   // 발송 시간대 차단 영역
   if (topExitReason.includes('발송 시간대')) {
     return {
-      recommendation: `KST 21~08시 발송 차단으로 ${step.skippedHoursCount.toLocaleString()}건 영역 누락 — 발송 시간대 매트릭스 확장 권장`,
+      recommendation: `KST 21~08시 발송 차단으로 ${step.skippedHoursCount.toLocaleString()}건 영역 누락. 발송 시간대 매트릭스 확장 권장`,
       oneClickAction: {
         type: 'expand_send_hours',
         label: '발송 가능 시간대 확장 (KST 09~20시 → 08~21시)',
@@ -219,7 +219,7 @@ function buildStepRecommendation(
   // 수신거부 영역
   if (topExitReason.includes('수신거부')) {
     return {
-      recommendation: `수신거부 누적 ${step.skippedOptOutCount.toLocaleString()}건 — 비광고성 안내 흐름 추가 검토 + 이전 단계 안 메시지 톤 정정 권장`,
+      recommendation: `수신거부 누적 ${step.skippedOptOutCount.toLocaleString()}건. 비광고성 안내 흐름 추가 검토 + 이전 단계 안 메시지 톤 정정 권장`,
       oneClickAction: null,
     };
   }
@@ -227,7 +227,7 @@ function buildStepRecommendation(
   // 조건 미충족 영역
   if (topExitReason.includes('조건 미충족')) {
     return {
-      recommendation: `조건 미충족 ${step.conditionFailedCount.toLocaleString()}건 — 조건 영역 완화 또는 대체 흐름 추가 검토`,
+      recommendation: `조건 미충족 ${step.conditionFailedCount.toLocaleString()}건. 조건 영역 완화 또는 대체 흐름 추가 검토`,
       oneClickAction: {
         type: 'adjust_condition',
         label: '조건 영역 검토',
@@ -239,7 +239,7 @@ function buildStepRecommendation(
   // 클릭률 영역 (message step 안 클릭률 5% 미만)
   if (step.stepType === 'message' && step.sentCount > 100 && step.clickRate < 0.05) {
     return {
-      recommendation: `클릭률 ${(step.clickRate * 100).toFixed(1)}% — variant A/B 테스트 신설 권장 (옛 평균 대비 부족 영역)`,
+      recommendation: `클릭률 ${(step.clickRate * 100).toFixed(1)}%. variant A/B 테스트 신설 권장 (옛 평균 대비 부족 영역)`,
       oneClickAction: {
         type: 'add_variant',
         label: 'A/B variant 신설',
@@ -250,7 +250,7 @@ function buildStepRecommendation(
 
   // 정상 흐름 영역
   return {
-    recommendation: dropoutRate < 0.1 ? '정상 흐름 — 추가 정정 영역 없음' : `이탈률 ${(dropoutRate * 100).toFixed(0)}% — 모니터링 영역`,
+    recommendation: dropoutRate < 0.1 ? '정상 흐름. 추가 정정 영역 없음' : `이탈률 ${(dropoutRate * 100).toFixed(0)}%. 모니터링 영역`,
     oneClickAction: null,
   };
 }
@@ -299,17 +299,17 @@ export async function recommendNextJourneyStep(
 회사의 현재 여정 단계 흐름을 분석하여 가장 적합한 다음 단계 1개 + 대안 2개를 추천합니다.
 
 영구 원칙:
-- 구체 혜택(% / 원 / 무료 / 쿠폰) 임의 작성 절대 금지. 회사 admin이 직접 작성 (메시지 본문 안 [혜택 안내 — 직접 수정해주세요] placeholder 사용).
+- 구체 혜택(% / 원 / 무료 / 쿠폰) 임의 작성 절대 금지. 회사 admin이 직접 작성 (메시지 본문 안 [혜택 안내: 직접 수정해주세요] placeholder 사용).
 - 단계 흐름 안 발송 시간대 제약 (KST 09~20시 권장).
 - 단계 간 wait 시간은 24~168h (1~7일) 범위 권장.
-- 회사 admin 검토 + 승인 후 추가 — AI 자동 추가 X.
+- 회사 admin 검토 + 승인 후 추가. AI 자동 추가 X.
 
 JSON 형식으로만 응답하세요.`;
 
   const stepsDescription = existingSteps.map((s, idx) => {
     if (s.step_type === 'wait') return `${idx + 1}. wait ${s.delay_hours}h`;
     if (s.step_type === 'condition') return `${idx + 1}. condition (분기)`;
-    return `${idx + 1}. message [${s.channel || 'sms'}] delay=${s.delay_hours}h — "${(s.message_template || '').slice(0, 60)}..."`;
+    return `${idx + 1}. message [${s.channel || 'sms'}] delay=${s.delay_hours}h: "${(s.message_template || '').slice(0, 60)}..."`;
   }).join('\n');
 
   const userMessage = `## 회사 정보
@@ -331,7 +331,7 @@ ${stepsDescription || '(단계 영역 없음)'}
 - stepType: message / wait / condition 중 하나
 - delayHours: 직전 단계 후 대기 시간 (h)
 - channel: sms / lms / mms (message 영역만)
-- messageTemplate: 본문 (구체 혜택 절대 금지, [혜택 안내 — 직접 수정해주세요] placeholder)
+- messageTemplate: 본문 (구체 혜택 절대 금지, [혜택 안내: 직접 수정해주세요] placeholder)
 - subject: LMS/MMS 영역 제목 (40자 이내)
 - reasoning: 추천 사유 한 줄
 - expectedImpact: 예상 영향 한 줄
@@ -412,11 +412,11 @@ ${stepsDescription || '(단계 영역 없음)'}
         messageTemplate: null,
         subject: null,
         conditionType: null,
-        reasoning: 'AI 추천 영역 일시 불가 — 잠시 후 다시 시도해주세요.',
+        reasoning: 'AI 추천 영역 일시 불가. 잠시 후 다시 시도해주세요.',
         expectedImpact: '',
       },
       alternatives: [],
-      reasoning: 'AI 호출 영역 오류 — 추후 자동 복구',
+      reasoning: 'AI 호출 영역 오류. 추후 자동 복구',
     };
   }
 }

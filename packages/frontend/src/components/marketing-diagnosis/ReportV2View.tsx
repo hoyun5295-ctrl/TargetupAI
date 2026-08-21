@@ -248,7 +248,7 @@ export default function ReportV2View({
               ))}
             </div>
             {result.observation?.source && (
-              <p className="mt-3.5 text-[10px] italic text-white/30">Data source — {result.observation.source}</p>
+              <p className="mt-3.5 text-[10px] italic text-white/30">Data source: {result.observation.source}</p>
             )}
           </section>
         )}
@@ -269,7 +269,7 @@ export default function ReportV2View({
               ))}
             </div>
             {checkup.source && (
-              <p className="mt-3 text-[10px] italic text-white/30">Data source — {checkup.source}</p>
+              <p className="mt-3 text-[10px] italic text-white/30">Data source: {checkup.source}</p>
             )}
           </section>
         )}
@@ -351,7 +351,7 @@ export default function ReportV2View({
                   );
                 })}
               </div>
-              <p className="mt-3 text-[10px] italic text-white/30">Data source — 답변 기준 자가 진단</p>
+              <p className="mt-3 text-[10px] italic text-white/30">Data source: 답변 기준 자가 진단</p>
             </section>
           )}
         </>
@@ -513,7 +513,7 @@ export default function ReportV2View({
               <div key={`${e.kind}-${i}`} className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                 <p className="text-[11px] font-semibold text-white/40">{e.label}</p>
                 <p className="mt-1.5 text-[15px] font-bold leading-snug text-white">{e.value}</p>
-                <p className="mt-2.5 text-[10px] italic text-white/30">Data source — {e.source}</p>
+                <p className="mt-2.5 text-[10px] italic text-white/30">Data source: {e.source}</p>
               </div>
             ))}
           </div>
@@ -589,7 +589,7 @@ export default function ReportV2View({
                 {result.pitch_note && (
                   <p className="mt-2.5 text-[12px] text-white/50">{result.pitch_note}</p>
                 )}
-                <p className="mt-3 text-[10px] italic text-white/30">Data source — 답변 × 요금제 실데이터(요금제 표가 진실)</p>
+                <p className="mt-3 text-[10px] italic text-white/30">Data source: 답변 × 요금제 실데이터(요금제 표가 진실)</p>
               </div>
             ) : (
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 md:p-5">

@@ -98,7 +98,7 @@ export default function AiExplainPage() {
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <div>
             <strong>근거 인용 답변:</strong> AI가 본 회사의 데이터(회사 정보 + 30일 캠페인 history + 학습 메모리 + 고객 통계)만 참고하여 답변하고, 응답 옆에 근거 출처를 인용합니다.
-            추측 / 창작 없음 — 회사 데이터에 없는 영역은 "정보 없음"으로 답변합니다.
+            추측 / 창작 없음. 회사 데이터에 없는 영역은 "정보 없음"으로 답변합니다.
           </div>
         </div>
 

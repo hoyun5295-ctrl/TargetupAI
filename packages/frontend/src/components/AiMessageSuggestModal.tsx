@@ -135,7 +135,7 @@ export default function AiMessageSuggestModal({
             >
               <span className="flex items-center gap-1.5">
                 <Palette className="w-3.5 h-3.5 text-violet-300" />
-                스타일 참고 (선택) — 내 승리 문안 {myBest.length} · 업종 스타일 {styles.length}
+                스타일 참고 (선택): 내 승리 문안 {myBest.length} · 업종 스타일 {styles.length}
               </span>
               {galleryOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
@@ -145,7 +145,7 @@ export default function AiMessageSuggestModal({
                 {myBest.length > 0 && (
                   <div>
                     <p className="text-[11px] text-emerald-300/80 font-medium flex items-center gap-1 mb-1.5">
-                      <Trophy className="w-3 h-3" /> 내 승리 문안 — 우리 회사 발송 중 성과 상위
+                      <Trophy className="w-3 h-3" /> 내 승리 문안: 우리 회사 발송 중 성과 상위
                     </p>
                     <div className="space-y-1.5">
                       {myBest.map((c, i) => (
@@ -247,7 +247,7 @@ export default function AiMessageSuggestModal({
               );
             })}
             <div className="text-[10px] text-white/30 italic pt-1">
-              Data source — AI 문구 추천 (자율 진단 + 자연어 입력)
+              Data source: AI 문구 추천 (자율 진단 + 자연어 입력)
             </div>
           </div>
         )}

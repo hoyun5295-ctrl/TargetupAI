@@ -79,7 +79,7 @@ export const INTERVIEW_QUESTIONS: Record<InterviewQuestionKey, InterviewQuestion
   products: { key: 'products', title: '어떤 상품인가요?', hint: '연동된 쇼핑몰에서 고르거나 직접 적을 수 있어요' },
   benefit: {
     key: 'benefit', title: '혜택이 있나요?', userOnly: true,
-    hint: '직접 입력 — AI가 대신 만들지 않습니다. 비워 두면 혜택 안내 없이 만듭니다',
+    hint: '직접 입력. AI가 대신 만들지 않습니다. 비워 두면 혜택 안내 없이 만듭니다',
   },
   urgency: { key: 'urgency', title: '언제까지인가요?', hint: '마감이 있으면 남은 시간을, 수량이 한정이면 남은 수량을 보여줍니다' },
   proof: { key: 'proof', title: '보여줄 후기나 영상이 있나요?', userOnly: true, hint: '없는 후기는 만들지 않습니다' },

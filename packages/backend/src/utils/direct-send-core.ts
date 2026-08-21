@@ -198,7 +198,7 @@ export async function createDirectSendCampaign(
           message: `직접발송 활성화 실패 + 중화 미완 — campaign=${campaignId} ${deductedTypes.join('/')} ${spec.total}건 수동 확인 필요(preparing 발송 차단 상태)`,
         });
       }
-      throw new DirectSendError('COMMIT_FAILED', '발송 접수에 실패했습니다. 차감분은 자동 환불됩니다 — 잠시 후 다시 시도해주세요.', 500);
+      throw new DirectSendError('COMMIT_FAILED', '발송 접수에 실패했습니다. 차감분은 자동 환불됩니다. 잠시 후 다시 시도해주세요.', 500);
     } else {
       // 미확정(재확인 실패·행 없음 등) — 자동 환불을 기록하면 실제 발송과 겹칠 수 있다. 사람이 판정한다.
       void sendSystemAlert({

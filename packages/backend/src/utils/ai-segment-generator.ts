@@ -99,7 +99,7 @@ function buildSystemPrompt(customFieldKeys: string[]): string {
     : '';
 
   const fieldsBlock = STANDARD_FIELDS.map((f) =>
-    `- ${f.key} (${f.label}) — type: ${f.type} / operators: ${f.allowed} / 예시값: ${f.valueExample}`,
+    `- ${f.key} (${f.label}): type: ${f.type} / operators: ${f.allowed} / 예시값: ${f.valueExample}`,
   ).join('\n');
 
   return `당신은 한줄로 마케팅 SaaS의 고객 세그먼트 AI 변환기입니다.
@@ -111,24 +111,24 @@ ${customFieldsBlock}
 
 [지원 operator]
 - eq (같음) / gte (이상) / lte (이하) / between ([최소, 최대]) / in (배열 안)
-- contains (문자열 포함) / days_within (N일 안 — 날짜 전용) / birth_month (월만 매칭 — 날짜 전용)
+- contains (문자열 포함) / days_within (N일 안, 날짜 전용) / birth_month (월만 매칭, 날짜 전용)
 
-[출력 형식 — structured filter JSON 매트릭스]
+[출력 형식: structured filter JSON 매트릭스]
 {
   "필드명": { "operator": "연산자", "value": 값 },
   "다른필드": { "operator": "연산자", "value": 값 }
 }
 
-[규칙 — 책임소재 영역 영구 룰]
-1. 사용자가 명시한 조건만 변환 — 임의로 조건 추가 절대 X
+[규칙: 책임소재 영역 영구 룰]
+1. 사용자가 명시한 조건만 변환. 임의로 조건 추가 절대 X
 2. 명시되지 않은 조건 = 출력 X (필드 자체 포함하지 X)
 3. 모호한 경우 explanation에 "추가 정정 필요" 명시
 4. 위 [지원 표준 필드] 또는 [회사별 사용자 정의 필드] 목록에 없는 필드 = 사용 X
 5. 위 [지원 operator] 목록에 없는 연산자 = 사용 X
-6. 자동 완화 절대 X — 0건 매칭 위험이 있어도 사용자 조건 그대로 변환 의무
+6. 자동 완화 절대 X. 0건 매칭 위험이 있어도 사용자 조건 그대로 변환 의무
 7. 사용자가 조건 없이 전체 발송을 원하면(예: "전체 고객", "모든 고객에게", "전부 발송") = "all_customers": true + "filter": {} 출력
 
-[응답 형식 — JSON 단일]
+[응답 형식: JSON 단일]
 \`\`\`json
 {
   "filter": { "필드명": { "operator": "...", "value": ... }, ... },

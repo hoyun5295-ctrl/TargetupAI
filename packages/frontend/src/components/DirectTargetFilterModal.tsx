@@ -819,7 +819,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
                 disabled={aiNlGenerating || aiNlExtracting}
               />
               <div className="mt-2 flex items-center justify-between gap-2">
-                <p className="text-[9px] text-gray-400">검증된 필터만 사용 — 단 1의 오차 없는 추출</p>
+                <p className="text-[9px] text-gray-400">검증된 필터만 사용: 단 1의 오차 없는 추출</p>
                 <button
                   onClick={handleAiNlGenerate}
                   disabled={!aiNlInput.trim() || aiNlGenerating || aiNlExtracting}
@@ -928,7 +928,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
 
                 {/* Source caption */}
                 <p className="text-[9px] text-gray-400 italic text-center mt-2">
-                  Data source — AI 자연어 변환 + 검증된 SQL 필터 빌더 통과 (단 1의 오차 X 본질)
+                  Data source: AI 자연어 변환 + 검증된 SQL 필터 빌더 통과 (단 1의 오차 X 본질)
                 </p>
               </div>
             )}

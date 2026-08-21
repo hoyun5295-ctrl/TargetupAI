@@ -42,7 +42,7 @@ const ENGINE_CARDS: EngineCard[] = [
     icon: Code,
     gradient: 'from-violet-400 to-fuchsia-500',
     title: 'Liquid 1:1 동적 콘텐츠',
-    description: '사용자별 등급/지역/구매 분기 자동 처리 — 1개 메시지 작성 + 무한 분기 자동 렌더링. {{ customer.name }} + {% if VIP %} 같은 Shopify Liquid 표준 호환',
+    description: '사용자별 등급/지역/구매 분기 자동 처리: 1개 메시지 작성 + 무한 분기 자동 렌더링. {{ customer.name }} + {% if VIP %} 같은 Shopify Liquid 표준 호환',
   },
   {
     icon: Zap,

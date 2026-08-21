@@ -252,13 +252,13 @@ export function channelAudienceNote(channel: PlannerChannel): string {
     case 'email':
       return '이메일 수신 가능 고객 (수신거부·무효 주소 제외)';
     case 'inapp':
-      return '노출 대상은 방문 시점에 정해집니다 — 사전 인원이 없습니다';
+      return '노출 대상은 방문 시점에 정해집니다. 사전 인원이 없습니다';
     case 'alimtalk':
       return '정보성 안내 대상(행사 참여 신청자)은 행사 진행 중 확정됩니다';
   }
 }
 
-const AUDIENCE_ERROR_NOTE = '대상 수를 확인하지 못했습니다 — 다시 열어 확인한 뒤 승인할 수 있습니다';
+const AUDIENCE_ERROR_NOTE = '대상 수를 확인하지 못했습니다. 다시 열어 확인한 뒤 승인할 수 있습니다';
 const AUDIENCE_SCOPE_NOTE = '담당 매장 범위를 확인할 수 없어 대상을 정할 수 없습니다';
 
 /**

@@ -46,7 +46,7 @@ export function useMmsUpload(onError: (msg: string) => void) {
       return;
     }
     if (file.size > MAX_BYTES) {
-      onError(`${(file.size / 1024).toFixed(0)}KB — 300KB 이하만 가능합니다`);
+      onError(`${(file.size / 1024).toFixed(0)}KB. 300KB 이하만 가능합니다`);
       return;
     }
 
@@ -93,7 +93,7 @@ export function useMmsUpload(onError: (msg: string) => void) {
         return;
       }
       if (file.size > MAX_BYTES) {
-        onError(`${file.name}: ${(file.size / 1024).toFixed(0)}KB — 300KB 이하만 가능합니다`);
+        onError(`${file.name}: ${(file.size / 1024).toFixed(0)}KB. 300KB 이하만 가능합니다`);
         return;
       }
     }

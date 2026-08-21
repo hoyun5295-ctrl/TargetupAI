@@ -28,7 +28,7 @@ export type CdpIntegrationBadge =
   | 'awaiting'     // amber   — 연결됐는데 아직 0건. 문구는 몰 유형이 가른다(설치 대기 vs 첫 주문 대기)
   | 'preparing'    // violet  — 연결 완료·우리 쪽 매핑 준비 중
   | 'action'       // rose    — 인증 끊김(고객사 담당자 차례)
-  | 'disconnected';// white/40— 아직 연결 전
+  | 'disconnected';   // white/40, 아직 연결 전
 
 /** 다음 행동의 주체 — 카드 버튼 문구를 이 값이 정한다(§5-1). */
 export type CdpNextActor = 'none' | 'merchant' | 'merchant_dev' | 'hanjul';

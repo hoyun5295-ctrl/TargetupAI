@@ -329,7 +329,7 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
             </div>
             <div>
               <h3 className="text-base font-bold text-white">원클릭 캠페인</h3>
-              <p className="text-[11px] text-white/50">행사 내용을 붙여넣거나 이미지로 불러오면 — 고른 채널만 AI 초안 생성, 잔손질만 하면 됩니다</p>
+              <p className="text-[11px] text-white/50">행사 내용을 붙여넣거나 이미지로 불러오면 고른 채널만 AI 초안 생성, 잔손질만 하면 됩니다</p>
             </div>
           </div>
           <button onClick={onClose} disabled={busy} className="text-white/50 hover:text-white p-1.5 rounded-lg hover:bg-white/10 disabled:opacity-40" aria-label="닫기">
@@ -422,7 +422,7 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
               placeholder={'행사 내용을 자유롭게 붙여넣거나, 위에서 이미지로 불러오세요. 한 줄이든 줄바꿈 나열이든 무관합니다.\n예)\n여름맞이 신상품 출시전\n7/10~7/20\n전 품목 신상품 대상\n구매 고객 사은품 증정'}
               className="w-full h-32 px-3 py-2.5 bg-slate-950/60 border border-white/10 rounded-xl text-sm text-white placeholder-white/25 resize-y focus:outline-none focus:border-fuchsia-400/40"
             />
-            <p className="text-[10px] text-white/40 mt-1">행사 내용에 직접 적으신(또는 이미지에서 읽어온) 혜택만 초안에 그대로 사용됩니다 — AI가 혜택을 지어내지 않습니다.</p>
+            <p className="text-[10px] text-white/40 mt-1">행사 내용에 직접 적으신(또는 이미지에서 읽어온) 혜택만 초안에 그대로 사용됩니다. AI가 혜택을 지어내지 않습니다.</p>
           </div>
 
           {/* 채널 3슬롯 */}
@@ -456,9 +456,9 @@ export default function EventCampaignModal({ open, onClose, initialText, resumeD
                     <p className="text-[10px] text-white/45 mt-1">{c.desc}</p>
                     <p className="text-[10px] mt-1.5">
                       {done
-                        ? <span className="text-emerald-300">{opened ? '편집함' : '생성 완료'} — {summaryOf(c.key)}</span>
+                        ? <span className="text-emerald-300">{opened ? '편집함' : '생성 완료'}: {summaryOf(c.key)}</span>
                         : locked
-                          ? <span className="text-amber-300/80">{c.key === 'email' ? '관리자만 생성 가능' : '표시할 곳 없음 — 연동 후 이용 가능'}</span>
+                          ? <span className="text-amber-300/80">{c.key === 'email' ? '관리자만 생성 가능' : '표시할 곳 없음. 연동 후 이용 가능'}</span>
                           : <span className="text-white/50">예상 {CH_COSTS[c.key]} 크레딧</span>}
                     </p>
                     {err && <p className="text-[10px] text-rose-300 mt-1">{err}</p>}

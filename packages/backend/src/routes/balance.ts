@@ -45,7 +45,7 @@ router.get('/', async (req: Request, res: Response) => {
     const msg = error?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
-        error: 'DB 마이그레이션 필요 — 운영자에게 companies.unit_price_basis ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: 운영자에게 companies.unit_price_basis ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -80,7 +80,7 @@ router.get('/agent', async (req: Request, res: Response) => {
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 company_agent_ids ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: 운영자에게 company_agent_ids ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -260,7 +260,7 @@ router.post('/deposit-request', async (req: Request, res: Response) => {
     const msg = String(error?.message || '');
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
-        error: 'DB 마이그레이션 필요 — deposit_requests ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: deposit_requests ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -299,7 +299,7 @@ router.post('/deposit-request/:id/explanation', async (req: Request, res: Respon
     const msg = String(error?.message || '');
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
-        error: 'DB 마이그레이션 필요 — deposit_requests ALTER 실행 요청',
+        error: 'DB 마이그레이션 필요: deposit_requests ALTER 실행 요청',
         code: 'DB_MIGRATION_PENDING',
       });
     }

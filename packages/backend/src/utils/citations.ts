@@ -117,7 +117,7 @@ export async function buildCompanyDocuments(companyId: string): Promise<CompanyD
   const memories = await listCompanyMemories(companyId, { limit: 30, minImportance: 5, memoryTypes: LEARNING_MEMORY_TYPES });
   if (memories.length > 0) {
     const lines = memories.map((m, i) =>
-      `${i + 1}. [${m.memoryType}/중요도 ${m.importance}] ${m.memoryKey} — ${m.memoryValue}`
+      `${i + 1}. [${m.memoryType}/중요도 ${m.importance}] ${m.memoryKey}: ${m.memoryValue}`
     );
     docs.push({
       title: '회사별 학습 메모리',

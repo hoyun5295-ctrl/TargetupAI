@@ -228,7 +228,7 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     // ★ db_alter_safety_net: first_recipient 컬럼 미생성(ALTER 누락) 시 500 대신 친화 안내.
     if (msg.includes('column') && msg.includes('does not exist')) {
       console.log('[SpamTestQueue] DB 마이그레이션 필요 — spam_filter_tests.first_recipient ALTER 요청:', msg);
-      return { ok: false, error: 'DB 마이그레이션 필요 — 운영자에게 spam_filter_tests 컬럼 추가를 요청하세요', errorCode: 'DB_MIGRATION_PENDING' };
+      return { ok: false, error: 'DB 마이그레이션 필요: 운영자에게 spam_filter_tests 컬럼 추가를 요청하세요', errorCode: 'DB_MIGRATION_PENDING' };
     }
     console.log('[SpamTestQueue] 큐 등록 오류(상세):', err?.message || err);
     return { ok: false, error: `스팸 테스트 큐 등록 오류: ${err?.message || '알 수 없는 오류'}` };

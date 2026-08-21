@@ -176,7 +176,7 @@ export function computeEstimate(input: ComputeInput): PerformanceEstimate {
       }
     }
     if (dataCount < totalGradeCount) {
-      notes.push(`타겟 ${totalGradeCount.toLocaleString()}명 중 ${dataCount.toLocaleString()}명만 구매 데이터 보유 — 나머지는 추정에서 제외`);
+      notes.push(`타겟 ${totalGradeCount.toLocaleString()}명 중 ${dataCount.toLocaleString()}명만 구매 데이터 보유. 나머지는 추정에서 제외`);
     }
   } else if (
     companyActual &&
@@ -192,7 +192,7 @@ export function computeEstimate(input: ComputeInput): PerformanceEstimate {
       expectedConversions = Math.min(count, Math.round(count * rawCvr));
       expectedRevenue = Math.round(expectedConversions * (fallbackAvgRevenue || 0));
       notes.push(`최근 발송 ${companyActual.totalSent.toLocaleString()}건 중 ${eventWindowDays}일 내 구매 ${companyActual.purchase7d.toLocaleString()}건 (전환율 ${(rawCvr * 100).toFixed(1)}%)`);
-      notes.push('회사 전체 평균 — 등급별 구매 데이터가 쌓이면 등급 차등 예측이 가능합니다');
+      notes.push('회사 전체 평균: 등급별 구매 데이터가 쌓이면 등급 차등 예측이 가능합니다');
     } else {
       level = 'insufficient_data';
       label = '정확한 예측을 위해 고객 구매 데이터(구매횟수·구매일·등급)가 필요합니다';

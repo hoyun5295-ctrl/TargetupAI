@@ -84,7 +84,7 @@ export default function LiquidPreviewModal({ messageTemplate, subject, samples, 
         {/* 안내 + 에러 요약 */}
         <div className="px-4 py-2 border-b border-white/10 bg-slate-950/50">
           <div className="text-[11px] text-white/60 flex items-center gap-3">
-            <span>발송 시점 사용자별 동적 렌더링 결과 — 1개 메시지 + 10명 고객 = 10가지 결과</span>
+            <span>발송 시점 사용자별 동적 렌더링 결과: 1개 메시지 + 10명 고객 = 10가지 결과</span>
             {totalErrors > 0 && (
               <span className="flex items-center gap-1 text-rose-400">
                 <AlertCircle className="w-3 h-3" /> 오류 {totalErrors}건 감지
@@ -238,7 +238,7 @@ export default function LiquidPreviewModal({ messageTemplate, subject, samples, 
 
         {/* 푸터 */}
         <div className="p-3 border-t border-white/10 bg-slate-950/40 flex items-center justify-between text-[11px] text-white/50">
-          <div>1:1 진정 개인화 — 1개 메시지 작성 = 사용자별 무한 분기 자동 처리</div>
+          <div>1:1 진정 개인화: 1개 메시지 작성 = 사용자별 무한 분기 자동 처리</div>
           <button onClick={onClose} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white/80 rounded text-xs">
             닫기
           </button>

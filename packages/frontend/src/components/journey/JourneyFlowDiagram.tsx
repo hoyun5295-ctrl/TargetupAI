@@ -83,7 +83,7 @@ export default function JourneyFlowDiagram({ steps, funnelStats, livePositions }
   if (steps.length === 0) {
     return (
       <div className="p-6 bg-slate-950/60 border border-dashed border-white/10 rounded-xl text-center">
-        <span className="text-[12px] text-white/40">step 영역 없음 — 흐름 시각화 X</span>
+        <span className="text-[12px] text-white/40">step 영역 없음: 흐름 시각화 X</span>
       </div>
     );
   }

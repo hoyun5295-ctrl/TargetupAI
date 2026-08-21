@@ -161,7 +161,7 @@ export async function validateJourneyForActivation(
             stepId: step.step_id,
             variantId: msg.variantId,
             reason: 'spam_filter_failed',
-            details: `스팸필터 enqueue 실패 — ${r.error || 'unknown'}`,
+            details: `스팸필터 enqueue 실패: ${r.error || 'unknown'}`,
           });
           continue;
         }

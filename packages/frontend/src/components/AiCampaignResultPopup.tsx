@@ -254,7 +254,7 @@ export default function AiCampaignResultPopup({
               </div>
 
               <div className="text-[10px] text-white/30 italic mt-3">
-                Data source — AI 추천 (자율 진단 + customer-filter)
+                Data source: AI 추천 (자율 진단 + customer-filter)
               </div>
             </div>
 
@@ -386,7 +386,7 @@ export default function AiCampaignResultPopup({
                 {targetCount === 0 ? (
                   <>추출된 고객이 0명입니다. 다시 추출해주세요</>
                 ) : (
-                  <>다음 — AI 메시지 생성 <ArrowRight className="w-4 h-4" /></>
+                  <>다음: AI 메시지 생성 <ArrowRight className="w-4 h-4" /></>
                 )}
               </button>
             )}
@@ -401,7 +401,7 @@ export default function AiCampaignResultPopup({
             <div className="rounded-xl bg-emerald-500/5 border border-emerald-400/20 p-4">
               <div className="flex items-center gap-2 text-emerald-300 font-medium text-sm mb-3">
                 <Check className="w-4 h-4" />
-                AI 진단 종결 — 6 단계 완료
+                AI 진단 종결: 6 단계 완료
               </div>
               <div className="grid grid-cols-3 max-md:grid-cols-2 gap-2">
                 {SUB_AGENT_STEPS.map(step => (
@@ -415,7 +415,7 @@ export default function AiCampaignResultPopup({
                 ))}
               </div>
               <div className="text-[10px] text-white/30 italic mt-2">
-                Data source — AI 6 sub-agent (자율 진단)
+                Data source: AI 6 sub-agent (자율 진단)
               </div>
             </div>
 
@@ -559,7 +559,7 @@ export default function AiCampaignResultPopup({
                                       <div className="text-[10px] text-rose-400 mt-1 flex items-center justify-center gap-1">
                                         <AlertTriangle className="w-2.5 h-2.5" />
                                         {selectedChannel === 'SMS'
-                                          ? 'SMS 90바이트 초과 — LMS 전환 필요'
+                                          ? 'SMS 90바이트 초과. LMS 전환 필요'
                                           : 'LMS 2000바이트 초과'}
                                       </div>
                                     )}

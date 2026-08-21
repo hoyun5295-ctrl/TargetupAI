@@ -163,11 +163,11 @@ export function renderContextForPrompt(ctx: CopyContext): string {
     if (c.topGrade) bits.push(`주요 등급 ${c.topGrade}`);
     if (typeof c.avgCycleDays === 'number') bits.push(`평균 재구매 주기 약 ${c.avgCycleDays}일`);
     if (c.recentToneHint) bits.push(`최근 반응 톤 ${c.recentToneHint}`);
-    if (bits.length > 0) parts.push(`고객 맥락 — ${bits.join(' / ')}.`);
+    if (bits.length > 0) parts.push(`고객 맥락: ${bits.join(' / ')}.`);
   }
   if (ctx.weather && ctx.weather.summary) {
     const w = ctx.weather;
-    parts.push(`현재 날씨${w.region ? `(${w.region})` : ''} — ${w.summary}${typeof w.tempC === 'number' ? ` ${w.tempC}도` : ''}.`);
+    parts.push(`현재 날씨${w.region ? `(${w.region})` : ''}: ${w.summary}${typeof w.tempC === 'number' ? ` ${w.tempC}도` : ''}.`);
   }
   return parts.join(' ');
 }

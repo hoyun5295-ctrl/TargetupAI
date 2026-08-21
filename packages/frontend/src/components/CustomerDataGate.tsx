@@ -149,7 +149,7 @@ export function CustomerDataRequiredModal({ open, onClose }: { open: boolean; on
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-white">엑셀·CSV 직접 업로드</p>
-                <p className="text-[12px] text-white/55 mt-0.5">고객 관리에서 파일로 바로 올리기 — 가장 빠른 방법</p>
+                <p className="text-[12px] text-white/55 mt-0.5">고객 관리에서 파일로 바로 올리기 (가장 빠른 방법)</p>
               </div>
               <span className="shrink-0 inline-flex items-center gap-1 text-[12px] font-semibold text-emerald-200 group-hover:gap-1.5 transition-all">
                 올리러 가기 <ArrowRight className="w-4 h-4" />
@@ -165,14 +165,14 @@ export function CustomerDataRequiredModal({ open, onClose }: { open: boolean; on
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-white">회사 DB 자동 연동 (싱크에이전트)</p>
-                <p className="text-[12px] text-white/55 mt-0.5">회사 DB를 주기적으로 자동 동기화 — 한줄로 담당자에게 문의해 주세요.</p>
+                <p className="text-[12px] text-white/55 mt-0.5">회사 DB를 주기적으로 자동 동기화. 한줄로 담당자에게 문의해 주세요.</p>
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-1.5 pt-1 text-[11px] text-white/40">
             <Users className="w-3.5 h-3.5" />
-            <span className="italic">Data source — customers (현재 등록 고객 0명)</span>
+            <span className="italic">Data source: customers (현재 등록 고객 0명)</span>
           </div>
         </div>
 

@@ -77,16 +77,16 @@ const VALID_EVENT_TYPES: EventCategory[] = [
 const SYSTEM_PROMPT = `당신은 모바일 DM 이벤트 추천 전문가입니다. 회사 데이터 + 시즌 + 캠페인 목표를 종합하여 가장 효과 클 이벤트 1건을 추천합니다.
 
 **선택지:**
-- lucky_draw (추첨) — 리드 발굴 강력 / 응모 form 활용
-- roulette (룰렛) — 참여 강력 / 즉시 보상 / 신규 고객 환영
-- instant_coupon (즉시 쿠폰) — 직접 매출 직결 / 활성 고객 재구매
-- limited_quantity (선착순) — 긴급감 강력 / VIP 인기
-- poll (투표) — 참여 가볍게 / 인사이트 발굴
-- survey (설문) — 깊은 인사이트 / 보상 시 효과
-- email_capture (이메일 수집) — 리드 발굴 / 동의 기반
+- lucky_draw (추첨): 리드 발굴 강력 / 응모 form 활용
+- roulette (룰렛): 참여 강력 / 즉시 보상 / 신규 고객 환영
+- instant_coupon (즉시 쿠폰): 직접 매출 직결 / 활성 고객 재구매
+- limited_quantity (선착순): 긴급감 강력 / VIP 인기
+- poll (투표): 참여 가볍게 / 인사이트 발굴
+- survey (설문): 깊은 인사이트 / 보상 시 효과
+- email_capture (이메일 수집): 리드 발굴 / 동의 기반
 
 **절대 금지:**
-- 구체 혜택 제시 (%/원/쿠폰 액수 등) 금지 — 회사 admin 직접 작성 영역
+- 구체 혜택 제시 (%/원/쿠폰 액수 등) 금지. 회사 admin 직접 작성 영역
 - AI 도구명 / 모델명 노출 금지
 
 **default_section_chain 매트릭스:**
@@ -112,7 +112,7 @@ const SYSTEM_PROMPT = `당신은 모바일 DM 이벤트 추천 전문가입니�
 function defaultRecommendation(): EventRecommendation {
   return {
     event_type: 'instant_coupon',
-    reason: '안전한 default 추천 — 회사 admin 직접 혜택 작성 의무',
+    reason: '안전한 default 추천. 회사 admin 직접 혜택 작성 의무',
     expected_engagement: 'medium',
     quick_start_scenario: '즉시 쿠폰 발급',
     default_section_chain: ['header', 'hero', 'instant_coupon', 'cta', 'footer'],

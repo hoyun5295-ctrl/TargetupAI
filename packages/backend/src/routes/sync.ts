@@ -766,7 +766,7 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
         // ★ 2026-08-14 (Codex 2R): 단 계통 오류(연결·구문·자원)는 폴백 금지 — 부하 증폭(customer-upsert.ts 참조).
         if (!isRowLevelDbError(chunkError)) {
           failedCount += chunk.length;
-          failures.push({ phone: `chunk#${Math.floor(i / CHUNK_SIZE) + 1}`, reason: `계통 오류 — 폴백 생략: ${chunkError.message || chunkError}` });
+          failures.push({ phone: `chunk#${Math.floor(i / CHUNK_SIZE) + 1}`, reason: `계통 오류(폴백 생략): ${chunkError.message || chunkError}` });
           continue;
         }
         console.warn(`[Sync] Chunk ${Math.floor(i / CHUNK_SIZE) + 1} 일괄 UPSERT 실패 → 단건 재시도 모드: ${chunkError.message || chunkError}`);

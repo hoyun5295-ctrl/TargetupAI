@@ -141,9 +141,9 @@ async function judgeBatch(batch: CorpusItem[], job: MiningJob): Promise<MiningCa
     .join('\n');
   const system =
     '너는 문자(SMS/LMS) 마케팅 카피 심사위원이다. 각 문안을 판정한다: '
-    + '(1) mkt — 마케팅/프로모션 목적이면 true. 예약안내·배송안내·본인인증·설문·시스템 통지 등 단순 안내는 false. '
-    + '(2) s — 마케팅 문안 퀄리티 0~10점(후킹, 오퍼 전달 명확성, 구성, 행동 유도 기준). '
-    + '(3) r — 한 줄 선정/탈락 이유(한국어 40자 이내). '
+    + '(1) mkt: 마케팅/프로모션 목적이면 true. 예약안내·배송안내·본인인증·설문·시스템 통지 등 단순 안내는 false. '
+    + '(2) s: 마케팅 문안 퀄리티 0~10점(후킹, 오퍼 전달 명확성, 구성, 행동 유도 기준). '
+    + '(3) r: 한 줄 선정/탈락 이유(한국어 40자 이내). '
     + '반드시 JSON 배열만 출력: [{"i":1,"mkt":true,"s":8,"r":"..."}]';
   try {
     const raw = await callAIWithFallback({

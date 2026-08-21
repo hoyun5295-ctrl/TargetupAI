@@ -245,16 +245,16 @@ export async function buildSystemPromptWithBrandVoice(
   //   few-shot(참고)과 달리 "규칙"으로 격상 — AI가 자기 기본 스타일로 되돌아가는 것을 차단.
   const formSpecLines: string[] = [];
   if (Array.isArray(g.hook_types) && g.hook_types.length > 0) {
-    formSpecLines.push(`- 첫 줄 후크 유형: ${g.hook_types.join(' 또는 ')} — 본문을 이 유형의 후크로 시작하세요.`);
+    formSpecLines.push(`- 첫 줄 후크 유형: ${g.hook_types.join(' 또는 ')}. 본문을 이 유형의 후크로 시작하세요.`);
   }
   if (Array.isArray(g.body_structure) && g.body_structure.length > 0) {
-    formSpecLines.push(`- 본문 구조 순서: ${g.body_structure.join(' → ')} — 이 순서 그대로 구성하세요.`);
+    formSpecLines.push(`- 본문 구조 순서: ${g.body_structure.join(' → ')}. 이 순서 그대로 구성하세요.`);
   }
   if (g.sentence_ending_style) {
     const endingEx = Array.isArray(g.sentence_ending_examples) && g.sentence_ending_examples.length > 0
       ? ` (대표 어미: ${g.sentence_ending_examples.join(' / ')})`
       : '';
-    formSpecLines.push(`- 문장 종결어미: ${g.sentence_ending_style}${endingEx} — 다른 어체로 바꾸지 마세요.`);
+    formSpecLines.push(`- 문장 종결어미: ${g.sentence_ending_style}${endingEx}. 다른 어체로 바꾸지 마세요.`);
   }
   if (g.customer_address) {
     formSpecLines.push(`- 고객 호칭: "${g.customer_address}" 그대로 사용하세요.`);
@@ -263,11 +263,11 @@ export async function buildSystemPromptWithBrandVoice(
     formSpecLines.push(`- 기호·구분선 스타일: ${g.symbol_style}`);
   }
   if (g.length_range && g.length_range.min_chars > 0 && g.length_range.max_chars >= g.length_range.min_chars) {
-    formSpecLines.push(`- 본문 길이: ${g.length_range.min_chars}~${g.length_range.max_chars}자 범위로 작성하세요 (LMS/MMS 기준 — SMS는 압축 규칙 우선).`);
+    formSpecLines.push(`- 본문 길이: ${g.length_range.min_chars}~${g.length_range.max_chars}자 범위로 작성하세요 (LMS/MMS 기준, SMS는 압축 규칙 우선).`);
   }
   const formSpecSection = formSpecLines.length > 0
     ? `
-## 형태 준수 규칙 (참고가 아니라 규칙 — 반드시 준수)
+## 형태 준수 규칙 (참고가 아니라 규칙, 반드시 준수)
 
 이 회사 대표 문안들에서 추출한 문안 형태입니다. 톤뿐 아니라 아래 형태 자체를 규칙으로 지키세요.
 
@@ -296,7 +296,7 @@ ${formSpecSection}
 SMS 90바이트 - (광고) 6바이트 - 무료수신거부080XXXXXXXX 18바이트 = 66바이트 = 33글자 한도입니다.
 LMS 톤 학습 결과 기반으로 핵심 CTA 1건 + 빈출 표현 1건 우선 + 시그니처 생략 형식으로 자동 압축하세요.
 
-${hasFewShot ? `## In-Context Learning — 회사 대표 문안 Few-shot 예시
+${hasFewShot ? `## In-Context Learning: 회사 대표 문안 Few-shot 예시
 
 아래 ${data.messages.length}건은 본 회사의 실제 마케팅 문안입니다. AI 생성 문안은 본 톤/문체/구조를 자연스럽게 정합하세요. 단, 본문 내용 자체를 복사하지 말고 톤만 학습하세요.
 

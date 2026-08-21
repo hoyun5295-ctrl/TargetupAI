@@ -139,7 +139,7 @@ function StepEditModal({ step, dataProfileVars, opt080Number, onRefine, onDecora
         <input value={subject} onChange={(e) => setSubject(e.target.value.slice(0, 40))} placeholder="본문 요약 한 줄" className="w-full bg-white/[0.06] border border-white/15 rounded-lg px-3 py-2 text-sm text-white" />
       </div>
       <div>
-        <label className="block text-[11px] text-white/50 mb-1">본문 <span className="text-white/35">(순수 본문 — (광고)·무료수신거부는 직접 쓰지 마세요)</span></label>
+        <label className="block text-[11px] text-white/50 mb-1">본문 <span className="text-white/35">(순수 본문, (광고)·무료수신거부는 직접 쓰지 마세요)</span></label>
         <textarea value={message} onChange={(e) => setMessage(e.target.value.slice(0, 2000))} rows={8} placeholder="AI 다듬기/꾸미기로 손보세요. 구체 혜택(%·원·쿠폰)은 직접 채워주세요." className="w-full bg-white/[0.06] border border-white/15 rounded-lg px-3 py-2 text-sm text-white resize-y leading-relaxed" />
         <div className="text-right text-[10px] text-white/35 mt-0.5">{message.length} / 2000자</div>
       </div>
@@ -298,7 +298,7 @@ export default function DateAnchorJourneyBuilder({ embedded = false, dataProfile
                   <span className="w-12 text-center text-[11px] font-mono text-indigo-300 bg-indigo-500/15 border border-indigo-400/30 rounded-lg py-1.5 shrink-0">D-{s.anchorOffsetDays}</span>
                   <div className="flex-1 min-w-0">
                     {empty ? (
-                      <p className="text-[11px] text-amber-200/70">문안 미작성 — [문안 편집]에서 작성</p>
+                      <p className="text-[11px] text-amber-200/70">문안 미작성: [문안 편집]에서 작성</p>
                     ) : (
                       <>
                         <p className="text-xs font-medium text-white/85 truncate">{s.subject || '(제목 없음)'}</p>
@@ -320,7 +320,7 @@ export default function DateAnchorJourneyBuilder({ embedded = false, dataProfile
       <SummaryButton icon={<Users className="w-4 h-4 text-white" />} label="대상" value={audienceSummary(conditions)} onClick={() => setShowAudience(true)} />
 
       <div className="flex justify-end pt-1">
-        <button onClick={handleBuild} disabled={!canBuild} className="px-5 py-3 bg-gradient-to-r from-indigo-500 to-violet-500 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">다음 — 흐름 검토</button>
+        <button onClick={handleBuild} disabled={!canBuild} className="px-5 py-3 bg-gradient-to-r from-indigo-500 to-violet-500 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">다음: 흐름 검토</button>
       </div>
 
       {showSettings && (

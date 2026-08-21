@@ -460,24 +460,24 @@ export async function generateInAppMessagePackage(
 - 톤앤매너: ${ctx.brandTone || '친근함'}
 - 업종: ${ctx.businessType || '(미설정)'}
 
-[현재 시점 컨텍스트 — KST]
+[현재 시점 컨텍스트: KST]
 - 현재 월: ${season.month}월 (${season.season})
 - 시즌 키워드: ${season.keywords.join(', ')}
 
 ${memoryContext}
 
 ${eventText ? `${buildEventPromptBlock(eventText)}\n${(() => { const h = buildEventTemplateHintBlock(eventText); return h ? `${h}\n` : ''; })()}` : ''}
-[★ ★ ★ 영구 룰 — 절대 위반 X ★ ★ ★]
+[★ ★ ★ 영구 룰: 절대 위반 X ★ ★ ★]
 
 1. AI 임의 혜택 절대 금지:
    ✗ 구체 혜택 (% / 원 / 무료 / 쿠폰 / 사은품 / 적립 / 무료배송 / 할인) 절대 임의 작성 X
-   ✓ 혜택 부분은 \`[혜택 안내 — 직접 작성해주세요]\` placeholder만 정확히 사용
-   ✓ 회사 admin이 검토 + 편집 단계에서 실제 정책 작성 의무${eventText ? `\n   ✓ 예외 1가지: 위 [행사 내용] 원문에 기재된 혜택 표현은 원문 그대로(변형 금지) benefit에 사용 가능 — 원문에 없는 혜택은 여전히 절대 금지` : ''}
+   ✓ 혜택 부분은 \`[혜택 안내: 직접 작성해주세요]\` placeholder만 정확히 사용
+   ✓ 회사 admin이 검토 + 편집 단계에서 실제 정책 작성 의무${eventText ? `\n   ✓ 예외 1가지: 위 [행사 내용] 원문에 기재된 혜택 표현은 원문 그대로(변형 금지) benefit에 사용 가능. 원문에 없는 혜택은 여전히 절대 금지` : ''}
 
 2. AI 메시지 = 메시지 흐름 / 구조 / 인사 / 시즌 감성 텍스트만 작성
    ✓ 안부 / 공감 도입 / 시즌 묘사 / 가치 제안 / CTA 안내 / 진심 마무리 = 적극 작성
    ✓ %고객명% / {{ customer.name }} / {{ customer.grade }} 변수 활용 권장
-   ✓ 짧고 강렬하게 — 제목 18자 안, 본문 1~2문장(40~70자). 한 호흡에 읽히게, 군더더기 X
+   ✓ 짧고 강렬하게: 제목 18자 안, 본문 1~2문장(40~70자). 한 호흡에 읽히게, 군더더기 X
 
 3. 브랜드 격조 의무:
    ✗ "단골" / "사장님이 직접" / "초특가" / "역대급" / "미친" / "대박" 단어 사용 X
@@ -492,7 +492,7 @@ ${eventText ? `${buildEventPromptBlock(eventText)}\n${(() => { const h = buildEv
 | center_modal | 신규 환영 / 휴면 회수 / VIP 감사 등 중요 알림 |
 | full_screen | 신규 가입 환영 / 온보딩 (5단계 슬라이드 가능) |
 | slide_in | 우측 슬라이드 알림 / 자동 닫힘 |
-| inline_card | 페이지 안 추천 카드 (DOM inline 삽입 — selector 필요) |
+| inline_card | 페이지 안 추천 카드 (DOM inline 삽입, selector 필요) |
 | toast | 우상단 작은 confirmation (3초 자동 닫힘) |
 | floating_button | 우하단 플로팅 CTA (장바구니 / 문의 진입) |
 
@@ -504,14 +504,14 @@ ${eventText ? `${buildEventPromptBlock(eventText)}\n${(() => { const h = buildEv
 - cart_add: 장바구니 추가 직후
 - cart_view: 장바구니 페이지 진입
 - checkout_start: 결제 페이지 진입
-- scroll: 페이지 N% 스크롤 도달 (scroll_percent 명시 — 30~70 권장)
-- time_on_page: 페이지 N초 체류 (time_on_page_seconds 명시 — 10~60 권장)
+- scroll: 페이지 N% 스크롤 도달 (scroll_percent 명시, 30~70 권장)
+- time_on_page: 페이지 N초 체류 (time_on_page_seconds 명시, 10~60 권장)
 - exit_intent: 마우스 상단 이탈 (desktop only)
 - cart_value: 장바구니 금액 N원 이상 (cart_value_min 명시)
 
 빠른 시작 시나리오 기본 제안: ${suggestedTrigger}
 
-[세그먼트 조건 가이드 — D214+ Unified Customer Profile 활용]
+[세그먼트 조건 가이드: D214+ Unified Customer Profile 활용]
 
 customer 조건:
 - grade: ['VIP', '일반', '신규'] 등 등급 배열
@@ -526,19 +526,19 @@ events 조건 (cdp_events 매칭):
 - purchase_within_days: 지난 N일 안 purchase 이벤트 발생
 - page_view_within_days: 지난 N일 안 page_view 이벤트 발생
 
-[Liquid 개인화 변수 — 본문/제목에 활용]
+[Liquid 개인화 변수: 본문/제목에 활용]
 
 활용 가능한 변수 (Liquid 표기):
-- {{ customer.name }} — 회원명
-- {{ customer.grade }} — 등급
-- {{ customer.points }} — 적립 포인트
-- {{ customer.recent_product }} — 직전 본 상품
-- {{ customer.cart_count }} — 장바구니 항목 수
-- {{ customer.last_purchase_days_ago }} — 마지막 구매 N일 전
+- {{ customer.name }}: 회원명
+- {{ customer.grade }}: 등급
+- {{ customer.points }}: 적립 포인트
+- {{ customer.recent_product }}: 직전 본 상품
+- {{ customer.cart_count }}: 장바구니 항목 수
+- {{ customer.last_purchase_days_ago }}: 마지막 구매 N일 전
 
 personalization_vars 배열 = 본 메시지에 활용한 변수 명칭 (예: ["customer.name", "customer.cart_count"])
 
-★ 제목 (title) 안 변수 / Liquid 사용 X — 모든 회원에게 동일 단순 텍스트만 (제목은 통신사 표시 부분 좁음 + 가독성 우선)
+★ 제목 (title) 안 변수 / Liquid 사용 X. 모든 회원에게 동일 단순 텍스트만 (제목은 통신사 표시 부분 좁음 + 가독성 우선)
 ✓ 본문 (body) 안 변수 / Liquid 적극 활용 권장
 
 ${dataProfilePrompt}
@@ -548,14 +548,14 @@ ${dataProfilePrompt}
 buttons 배열 (최대 3개):
 - id: 'btn_primary' / 'btn_secondary' / 'btn_tertiary' 등 고유 ID (click 트래킹 분리용)
 - label: 버튼 텍스트 (10자 안)
-- action_url: 클릭 시 이동 URL (또는 null = dismiss). URL 모르는 경우 \`[URL — 회사 admin 수정]\` placeholder
+- action_url: 클릭 시 이동 URL (또는 null = dismiss). URL 모르는 경우 \`[URL: 회사 admin 수정]\` placeholder
 - style: 'primary' (강조) / 'secondary' / 'tertiary' (약함)
 - background_color / text_color: hex 색상
 
 [시간대 / 요일 / 빈도]
 
 - send_start_hour / send_end_hour: 노출 시간대 (0~23, null = 24h)
-  ✗ 새벽 노출 위험 (23~7시) 권장 X — 9~22 권장
+  ✗ 새벽 노출 위험 (23~7시) 권장 X, 9~22 권장
 - allowed_weekdays: 노출 요일 배열 [0=일, 1=월, ..., 6=토] (default [0,1,2,3,4,5,6])
 - display_frequency: once_per_session / once_per_day / always
 - auto_dismiss_seconds: 자동 닫힘 N초 (null = 사용자 수동 닫음만)
@@ -573,7 +573,7 @@ buttons 배열 (최대 3개):
   - floating_button = pulse
 - 환영 / 축하 / 감사 메시지 = spring(부드러운 스케일) 또는 celebrate(가벼운 축하 효과)도 가능
 
-[★ 블록 조립 — content_blocks 배열 (쇼핑객이 보는 메시지 격상)]
+[★ 블록 조립: content_blocks 배열 (쇼핑객이 보는 메시지 격상)]
 
 메시지 본문을 블록 배열로 구성합니다. 순서 = 화면 위→아래. 각 블록 = { "type": "...", ...속성 }.
 
@@ -582,56 +582,56 @@ buttons 배열 (최대 3개):
 - headline  { "text": "헤드라인 (변수 X)", "size": "lg" | "xl" }
 - body      { "text": "본문 (변수 / Liquid 활용 가능)" }
 - bullets   { "items": [ { "icon": "check", "text": "장점 한 줄" } ] }   (2~4개)
-- benefit   { "text": "[혜택 안내 — 직접 작성해주세요]" }   ← 반드시 이 placeholder 그대로. 구체 혜택 작성 절대 X
+- benefit   { "text": "[혜택 안내: 직접 작성해주세요]" }   ← 반드시 이 placeholder 그대로. 구체 혜택 작성 절대 X
 - rating    { "value": 4.6, "count": 128, "label": "후기" }
 - product   { "name": "상품명", "meta": "간단 설명" }   ← image url 작성 X${eventText ? `
-            ← 행사 원문에 상품·가격·URL이 있으면 "price"(정가 숫자)·"discount_price"(할인가 숫자)·"link_url"(상품 URL)을 원문에 적힌 값 그대로(변형 금지) 추가 가능 — 원문에 없는 가격/URL 절대 작성 X` : ''}
+            ← 행사 원문에 상품·가격·URL이 있으면 "price"(정가 숫자)·"discount_price"(할인가 숫자)·"link_url"(상품 URL)을 원문에 적힌 값 그대로(변형 금지) 추가 가능. 원문에 없는 가격/URL 절대 작성 X` : ''}
 - media     { "variant": "icon", "icon": "gift" }  또는  { "variant": "illustration", "icon": "welcome" }
             ← image url은 AI가 작성 X (회사 admin 직접 업로드). 아이콘 키: gift·bell·heart·star·tag·sparkle·cart·user·check·clock / 일러스트 키: welcome·celebrate·empty_cart·gift·bell·heart
 - divider   { }   구분선
 - spacer    { "size": "sm" | "md" | "lg" }   여백
-- cta_group { "layout": "stack" | "inline", "buttons": [ { "id":"btn_primary", "label":"자세히 보기", "action_url":"[URL — 회사 admin 수정]", "style":"primary" } ] }
+- cta_group { "layout": "stack" | "inline", "buttons": [ { "id":"btn_primary", "label":"자세히 보기", "action_url":"[URL: 회사 admin 수정]", "style":"primary" } ] }
             ← 버튼 1~3. style: primary(강조) · secondary · tertiary · ghost(텍스트형)
 - footer    { "text": "잔글씨 안내" }   (is_ad=true면 (광고) 자동 표기)
 
 작성 규칙:
 - 블록 5~8개 안으로 간결하게. headline + body는 필수. 시나리오에 맞춰 eyebrow / benefit / cta_group / rating / media를 조합.
-- benefit 블록은 혜택을 직접 쓰지 말고 placeholder 그대로 (회사 정책 모름 — 거짓 광고 방지).
+- benefit 블록은 혜택을 직접 쓰지 말고 placeholder 그대로 (회사 정책 모름, 거짓 광고 방지).
 - headline 안 변수 X / body · bullets · product 안 변수 O.
-- buttons.action_url 모르면 "[URL — 회사 admin 수정]".
-- title / body 평면 필드도 그대로 출력(headline / body 블록과 같은 텍스트 — 접근성·폴백용).
+- buttons.action_url 모르면 "[URL: 회사 admin 수정]".
+- title / body 평면 필드도 그대로 출력(headline / body 블록과 같은 텍스트, 접근성·폴백용).
 
 [테마 (theme + accent_color)]
 
 theme = 디자인 언어 큐레이션. 다음 중 하나:
-- 기본: auto(자사몰 라이트/다크 자동) · light(소프트 글래스) · dark(미드나잇 글로우) · brand(흰 캔버스 + 브랜드 밴드 쇼케이스) · vibrant(회사색 임팩트 포스터 — 환영·축하·감사 같은 강한 인상) · minimal(모노 에디토리얼 — 절제·프리미엄)
-- 시그니처(아트디렉션 내장 — 서체·조판·모티프까지 큐레이션): editorial(세리프 화보 — 프리미엄 안내) · luxury-dark(딥 다크+골드 — VIP·프라이빗 오퍼) · bold-sale(검은고딕 임팩트 — 세일·마감 임박) · soft-pastel(부드러운 파스텔 — 환영·안부·복귀) · paper(웜 페이퍼 명조 — 따뜻한 감사·로컬) · city-night(다크 네온 — 신상·이벤트 밤 무드) · festive(축제 로즈×앰버 — 팝업·초대)
+- 기본: auto(자사몰 라이트/다크 자동) · light(소프트 글래스) · dark(미드나잇 글로우) · brand(흰 캔버스 + 브랜드 밴드 쇼케이스) · vibrant(회사색 임팩트 포스터: 환영·축하·감사 같은 강한 인상) · minimal(모노 에디토리얼: 절제·프리미엄)
+- 시그니처(아트디렉션 내장: 서체·조판·모티프까지 큐레이션): editorial(세리프 화보: 프리미엄 안내) · luxury-dark(딥 다크+골드: VIP·프라이빗 오퍼) · bold-sale(검은고딕 임팩트: 세일·마감 임박) · soft-pastel(부드러운 파스텔: 환영·안부·복귀) · paper(웜 페이퍼 명조: 따뜻한 감사·로컬) · city-night(다크 네온: 신상·이벤트 밤 무드) · festive(축제 로즈×앰버: 팝업·초대)
 
 ${brandAccent
-    ? `accent_color = 반드시 "${brandAccent}" (회사가 설정한 브랜드 강조색 — 다른 색 임의 선택 절대 금지)`
+    ? `accent_color = 반드시 "${brandAccent}" (회사가 설정한 브랜드 강조색, 다른 색 임의 선택 절대 금지)`
     : `accent_color = 강조색 hex (예: "#4f46e5"). 회사 브랜드 색이 확인되지 않았으므로 시나리오 무드에 맞는 차분한 색 1개만 선택.`}
 - 환영 / 복귀 / 안부 = soft-pastel · vibrant 권장. 정보 / 안내 = light · brand 권장. 프리미엄 · VIP = luxury-dark · editorial · minimal 권장. 세일 · 마감 = bold-sale 권장. 신상품 · 이벤트 = city-night · festive 권장.
 
-[형태 (card_style)] — 색상과 독립인 카드 형태 축. 다음 중 하나:
-- classic(정돈된 기본 카드) · bubble(꼬리 달린 둥근 말풍선 — 환영·안부·대화 회복) · ticket(절취선 쿠폰 티켓 — 혜택·재구매 유도) · poster(매거진 포스터 — 신상품·이미지 중심 발표)
+[형태 (card_style)]: 색상과 독립인 카드 형태 축. 다음 중 하나:
+- classic(정돈된 기본 카드) · bubble(꼬리 달린 둥근 말풍선: 환영·안부·대화 회복) · ticket(절취선 쿠폰 티켓: 혜택·재구매 유도) · poster(매거진 포스터: 신상품·이미지 중심 발표)
 
 [is_ad 광고 표기]
 
 - 마케팅성 메시지 (혜택 / 할인 안내) = is_ad: true
 - 단순 안내 / 환영 / 감사 인사 = is_ad: false
-- is_ad: true 시 = SDK가 자동으로 "(광고)" 표기 (인앱은 페이지 내 표시라 수신거부·080 개념 없음 — 관련 문구 생성 금지)
+- is_ad: true 시 = SDK가 자동으로 "(광고)" 표기 (인앱은 페이지 내 표시라 수신거부·080 개념 없음, 관련 문구 생성 금지)
 
-[★ 응답 JSON 형식 — 반드시 본 구조 ★]
+[★ 응답 JSON 형식: 반드시 본 구조 ★]
 
 \`\`\`json
 {
   "title": "메시지 제목 (18자 안, 변수 X)",
-  "body": "메시지 본문 (40~70자, 1~2문장 — 짧고 강렬, 변수/Liquid 활용 가능)",
-  "badge_text": "짧은 라벨 8자 안 (NEW · VIP · 오랜만이에요 — 구체 혜택·수치 X)",
+  "body": "메시지 본문 (40~70자, 1~2문장, 짧고 강렬, 변수/Liquid 활용 가능)",
+  "badge_text": "짧은 라벨 8자 안 (NEW · VIP · 오랜만이에요, 구체 혜택·수치 X)",
   "template": "top_banner | bottom_banner | center_modal | full_screen | slide_in | inline_card | toast | floating_button",
   "image_url": null,
   "buttons": [
-    { "id": "btn_primary", "label": "자세히 보기", "action_url": "[URL — 회사 admin 수정]", "style": "primary", "background_color": "#4f46e5", "text_color": "#ffffff" }
+    { "id": "btn_primary", "label": "자세히 보기", "action_url": "[URL: 회사 admin 수정]", "style": "primary", "background_color": "#4f46e5", "text_color": "#ffffff" }
   ],
   "background_color": "#4f46e5",
   "text_color": "#ffffff",
@@ -658,7 +658,7 @@ ${brandAccent
     { "type": "eyebrow", "text": "오랜만이에요", "tone": "accent" },
     { "type": "headline", "text": "다시 만나 반가워요", "size": "lg" },
     { "type": "body", "text": "{{ customer.name }}님, 그동안 새 소식이 많았어요." },
-    { "type": "cta_group", "layout": "stack", "buttons": [ { "id": "btn_primary", "label": "둘러보기", "action_url": "[URL — 회사 admin 수정]", "style": "primary" } ] }
+    { "type": "cta_group", "layout": "stack", "buttons": [ { "id": "btn_primary", "label": "둘러보기", "action_url": "[URL: 회사 admin 수정]", "style": "primary" } ] }
   ],
   "reasoning": "본 인앱 메시지 선택 이유 + template / 트리거 / 세그먼트 / 블록 구성 / 테마 결정 근거 (한국어 3~5 문장)"
 }
@@ -671,13 +671,13 @@ ${brandAccent
 위 목표 + 회사 컨텍스트 + 시즌 + 회사 메모리 + 데이터 프로필을 기반으로 완전한 인앱 메시지 패키지를 작성해주세요.
 
 영구 룰 준수 의무:
-- 구체 혜택 (% / 원 / 무료 / 쿠폰 / 할인) 절대 임의 작성 X — \`[혜택 안내 — 직접 작성해주세요]\` placeholder만 사용
+- 구체 혜택 (% / 원 / 무료 / 쿠폰 / 할인) 절대 임의 작성 X. \`[혜택 안내: 직접 작성해주세요]\` placeholder만 사용
 - 본문 40~70자 짧고 강렬하게 (한두 문장, 군더더기 X)
 - 제목 18자 안 + 변수 / Liquid 사용 X (단순 텍스트만)
 - badge_text 8자 안 짧은 라벨 (혜택·수치 X)
 - segment_conditions / trigger_conditions / personalization_vars 자연어 목표에 정확한 매핑
 - content_blocks 배열로 본문 구성 (eyebrow / headline / body 기본 + 시나리오에 맞는 블록 조합, 5~8개 안). benefit 블록은 placeholder 그대로, 이미지 url은 비움
-- theme + accent_color 선택 (환영·감사·축하 = vibrant / 정보·안내 = light·brand / 프리미엄·VIP = minimal·dark)${brandAccent ? ` — accent_color는 반드시 "${brandAccent}"` : ''}
+- theme + accent_color 선택 (환영·감사·축하 = vibrant / 정보·안내 = light·brand / 프리미엄·VIP = minimal·dark)${brandAccent ? `. accent_color는 반드시 "${brandAccent}"` : ''}
 
 응답은 위 응답 JSON 형식 그대로.`;
 
@@ -787,7 +787,7 @@ ${brandAccent
     { name: 'audience_match',     status: 'completed', hint: 'D214+ Unified Customer Profile 세그먼트 자동 매핑' },
     { name: 'template_selection', status: 'completed', hint: `${message.template} template 선택 (8종 중)` },
     { name: 'copy_design',        status: 'completed', hint: `${message.body.length}자 본문 작성 (시즌 감성 + 가치 제안)` },
-    { name: 'variant_generation', status: 'completed', hint: 'A/B variant 생성 가능 (별도 호출 — POST /inapp/variant)' },
+    { name: 'variant_generation', status: 'completed', hint: 'A/B variant 생성 가능 (별도 호출: POST /inapp/variant)' },
     { name: 'review_ready',       status: 'completed', hint: '회사 admin 검토 + 편집 진입 (혜택 placeholder 직접 작성 의무)' },
   ];
 

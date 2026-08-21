@@ -79,7 +79,7 @@ export function renderAgencyProposalPdf(doc: any, data: AgencyProposalPdfData): 
   setFont(true);
   doc.fontSize(23).fillColor('#ffffff').text('한줄로 마케팅 제안서', LEFT, 34);
   setFont(false);
-  doc.fontSize(9).fillColor('#ddd6fe').text('CRM CAMPAIGN PROPOSAL — 한줄로 운영팀 · AI 분석', LEFT, 66);
+  doc.fontSize(9).fillColor('#ddd6fe').text('CRM CAMPAIGN PROPOSAL · 한줄로 운영팀 · AI 분석', LEFT, 66);
   doc.fontSize(8.5).fillColor('#ede9fe').text(`작성일 ${today}`, LEFT, 92);
 
   // ── 표지 정보 카드
@@ -94,7 +94,7 @@ export function renderAgencyProposalPdf(doc: any, data: AgencyProposalPdfData): 
 
   // ── 1. 기업 현황 분석
   h2('1. 기업 현황 분석');
-  if (result.situation.length === 0) bullet('데이터 부족 — 현황 요약을 생성하지 못했습니다.', gray);
+  if (result.situation.length === 0) bullet('데이터 부족. 현황 요약을 생성하지 못했습니다.', gray);
   for (const s of result.situation) bullet(s);
   y += 6; hr();
 
@@ -139,7 +139,7 @@ export function renderAgencyProposalPdf(doc: any, data: AgencyProposalPdfData): 
     }
     if (drawn % 2 === 1) y += cellH + 12;
     if (embeddable.length < (data.imagePaths || []).length) {
-      bullet('일부 이미지(webp 등)는 PDF에 표시되지 않습니다 — 원본은 관리자 화면에서 확인.', gray);
+      bullet('일부 이미지(webp 등)는 PDF에 표시되지 않습니다. 원본은 관리자 화면에서 확인.', gray);
     }
     y += 2; hr();
   }
@@ -157,7 +157,7 @@ export function renderAgencyProposalPdf(doc: any, data: AgencyProposalPdfData): 
     doc.fontSize(8).fillColor('#ffffff').text(chipLabel, RIGHT - chipW, y + 8.5);
     y += 32;
     if (plan.objective) bullet(`목표: ${plan.objective}`);
-    bullet(`타겟: ${plan.targetDescription || '-'} — ${plan.targetCount != null ? `실측 ${plan.targetCount.toLocaleString()}명` : '실행 시 산정'}`);
+    bullet(`타겟: ${plan.targetDescription || '-'}: ${plan.targetCount != null ? `실측 ${plan.targetCount.toLocaleString()}명` : '실행 시 산정'}`);
     if (plan.timing) bullet(`발송 시점: ${plan.timing}`);
     bullet(`예상 발송비: ${plan.estimatedCost != null ? won(plan.estimatedCost) : '실행 시 산정'}`);
     if (plan.expectedNote) bullet(`기대 효과: ${plan.expectedNote}`);
@@ -190,7 +190,7 @@ export function renderAgencyProposalPdf(doc: any, data: AgencyProposalPdfData): 
 
   ensure(30);
   setFont(false); doc.fontSize(8).fillColor(gray)
-    .text(`본 제안서는 ${result.companyName || '해당 업체'}의 데이터만을 분석해 작성되었습니다. — 한줄로 AI 분석`, LEFT, y, { width: WIDTH });
+    .text(`본 제안서는 ${result.companyName || '해당 업체'}의 데이터만을 분석해 작성되었습니다. (한줄로 AI 분석)`, LEFT, y, { width: WIDTH });
 
   // ── 페이지 번호 푸터 (호출측이 bufferPages:true로 doc 생성해야 동작 — 아니면 조용히 생략)
   try {
@@ -200,7 +200,7 @@ export function renderAgencyProposalPdf(doc: any, data: AgencyProposalPdfData): 
         doc.switchToPage(p);
         setFont(false);
         doc.fontSize(7.5).fillColor('#9ca3af')
-          .text(`한줄로 마케팅 제안서 · ${result.companyName || ''}  —  ${p - range.start + 1} / ${range.count}`,
+          .text(`한줄로 마케팅 제안서 · ${result.companyName || ''}  ·  ${p - range.start + 1} / ${range.count}`,
             LEFT, 818, { width: WIDTH, align: 'right', lineBreak: false });
       }
     }

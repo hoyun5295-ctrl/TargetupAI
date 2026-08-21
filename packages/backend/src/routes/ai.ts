@@ -837,7 +837,7 @@ router.post('/target-recipients', authenticate, async (req: Request, res: Respon
       return res.status(503).json({
         success: false,
         code: 'DB_MIGRATION_PENDING',
-        error: 'DB 마이그레이션 필요 — 운영자에게 customers 컬럼 확인을 요청해주세요.',
+        error: 'DB 마이그레이션 필요: 운영자에게 customers 컬럼 확인을 요청해주세요.',
       });
     }
     console.error('[ai/target-recipients] 오류:', err);
@@ -1497,7 +1497,7 @@ router.get('/operator/segments', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 컬럼 확인을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 컬럼 확인을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[AI Operator] segments 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '발송 대상 축 조회 실패' });
@@ -1617,7 +1617,7 @@ router.post('/operator/target-recipients', async (req: Request, res: Response) =
       return res.status(503).json({ success: false, error: '지난번과 달라진 점을 찾는 조건은 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 customers 컬럼 확인을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 customers 컬럼 확인을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[AI Operator] target-recipients 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '추출 대상 조회 실패' });
@@ -2509,7 +2509,7 @@ router.get('/operator/daily-brief', async (req: Request, res: Response) => {
     if (msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — 운영자에게 company_daily_briefs 테이블 생성 요청이 필요합니다.',
+        error: 'DB 마이그레이션 필요: 운영자에게 company_daily_briefs 테이블 생성 요청이 필요합니다.',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -2762,7 +2762,7 @@ router.post('/operator/continuous/:id/run-now', async (req: Request, res: Respon
           });
         }
       } catch { /* 안내 실패 = 일반 메시지로 */ }
-      return res.json({ success: true, proposal: null, message: '0건 매칭 또는 생성 실패 — 제안서가 생성되지 않았습니다.' });
+      return res.json({ success: true, proposal: null, message: '0건 매칭 또는 생성 실패. 제안서가 생성되지 않았습니다.' });
     }
     return res.json({ success: true, proposal });
   } catch (err: any) {
@@ -2929,7 +2929,7 @@ router.post('/operator/proposals/:id/recipients', async (req: Request, res: Resp
       return res.status(503).json({ success: false, error: '지난번과 달라진 점을 찾는 조건은 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 customers/operator_proposals 컬럼 확인을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 customers/operator_proposals 컬럼 확인을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[Proposals recipients] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '발송 대상 조회 실패' });
@@ -3284,7 +3284,7 @@ router.post('/operator/explain', async (req: Request, res: Response) => {
 
     const systemPrompt = `당신은 한줄로AI Operator의 분석 에이전트입니다.
 제공된 document에 명시된 사실만 응답 + 출처 근거 명시 (citations 활용).
-추측/창작 X — document에 없는 영역은 "정보가 없습니다"로 응답.
+추측/창작 X. document에 없는 영역은 "정보가 없습니다"로 응답.
 한국어 존댓말 (~입니다 / ~합니다).`;
 
     const answer = await callAIWithCitations({
@@ -3476,7 +3476,7 @@ router.post('/operator/journeys', async (req: Request, res: Response) => {
     // ★ db_alter_safety_net — start_kind/anchor_* 등 신규 컬럼 미마이그레이션 시 503 + 운영자 안내(500 노출 X).
     const cm = err?.message || '';
     if (cm.includes('column') && cm.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 journeys/journey_steps 여정 일반화 ALTER 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 journeys/journey_steps 여정 일반화 ALTER 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     if (err instanceof JourneyStepGateError) {
       return res.status(409).json({ success: false, error: err.message, code: err.code });
@@ -3607,7 +3607,7 @@ router.post('/operator/journeys/:id/activate', async (req: Request, res: Respons
       // ★ Fix #4 + db_alter_safety_net: 컬럼 미존재(미마이그레이션) = 503 + 운영자 안내(500 노출 X).
       const cm = colErr?.message || '';
       if (cm.includes('column') && cm.includes('does not exist')) {
-        return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 journeys.last_pretest_passed_at ALTER 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+        return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 journeys.last_pretest_passed_at ALTER 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
       }
       throw colErr;
     }
@@ -3792,7 +3792,7 @@ router.post('/operator/journeys/:id/steps', async (req: Request, res: Response) 
     }
     const msg = String(err?.message || '');
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — journey_steps ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: journey_steps ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[Journeys add step] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'step 추가 실패' });
@@ -3819,7 +3819,7 @@ router.delete('/operator/journeys/:id/steps/:stepId', async (req: Request, res: 
     }
     const msg = String(err?.message || '');
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — journey_steps ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: journey_steps ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[Journeys delete step] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'step 삭제 실패' });
@@ -4087,7 +4087,7 @@ router.post('/operator/journeys/:id/target-recipients', async (req: Request, res
       capped,
       criteria: describeJourneyTrigger(triggerEvent, triggerFilters),
       journeyName: journeyRow.name || null,
-      basisLabel: '발송 추출과 동일 함수 실측 — 실제 진입·발송은 트리거 발생/스케줄 시점 기준',
+      basisLabel: '발송 추출과 동일 함수 실측. 실제 진입·발송은 트리거 발생/스케줄 시점 기준',
       conditionColumns: [
         { key: 'points', label: '포인트' },
         { key: 'recent_purchase', label: '최근구매일' },
@@ -4248,7 +4248,7 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션이 필요합니다 — 운영자에게 journeys 옵션 컬럼 확인을 요청해 주세요.', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션이 필요합니다. 운영자에게 journeys 옵션 컬럼 확인을 요청해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[Journeys update options] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '여정 옵션 수정 실패' });
@@ -4275,7 +4275,7 @@ router.get('/operator/journeys-data-capability', async (req: Request, res: Respo
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션이 필요합니다 — 운영자에게 확인을 요청해 주세요.', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션이 필요합니다. 운영자에게 확인을 요청해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[Journeys data capability] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '여정 가능 여부 조회 실패' });
@@ -4312,7 +4312,7 @@ router.get('/operator/grade-ranks', async (req: Request, res: Response) => {
       return res.status(503).json({ success: false, error: '등급 순서 설정을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 customer_grade_ranks 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 customer_grade_ranks 생성 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[Grade ranks get] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '등급 순서 조회 실패' });
@@ -4707,7 +4707,7 @@ router.get('/operator/journeys/:id/pause-logs', async (req: Request, res: Respon
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — journey_step_pause_logs 테이블 생성 요청 의무',
+        error: 'DB 마이그레이션 필요: journey_step_pause_logs 테이블 생성 요청 의무',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -4754,7 +4754,7 @@ router.patch('/operator/journeys/:id/archive', async (req: Request, res: Respons
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
     const ok = await archiveJourney(companyId, req.params.id);
-    if (!ok) return res.status(409).json({ success: false, error: '보관 영역 이동 X — 활성 여정 또는 이미 보관함 영역.' });
+    if (!ok) return res.status(409).json({ success: false, error: '보관 영역 이동 X: 활성 여정 또는 이미 보관함 영역.' });
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Journeys archive] 오류:', err);
@@ -4878,7 +4878,7 @@ router.get('/operator/predictive/settings', async (req: Request, res: Response) 
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.predictive_enabled 컬럼 추가 요청 의무', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: companies.predictive_enabled 컬럼 추가 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[Predictive settings GET] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '예측 설정 조회 실패' });
@@ -4901,7 +4901,7 @@ router.patch('/operator/predictive/settings', async (req: Request, res: Response
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.predictive_enabled 컬럼 추가 요청 의무', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: companies.predictive_enabled 컬럼 추가 요청 의무', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[Predictive settings PATCH] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '예측 설정 변경 실패' });
@@ -5063,7 +5063,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
         [companyId]
       );
       targetCount = Number(r.rows[0]?.cnt) || 0;
-      objective = `이탈 위험 70% 이상 고객 ${targetCount.toLocaleString()}명에게 회복 캠페인 — 자주 반응한 채널과 감성적인 메시지로 다시 찾게 만듭니다.`;
+      objective = `이탈 위험 70% 이상 고객 ${targetCount.toLocaleString()}명에게 회복 캠페인. 자주 반응한 채널과 감성적인 메시지로 다시 찾게 만듭니다.`;
       targetFilters = { predictive_churn_risk_min: 0.7 };
       suggestedChannel = 'lms';
       suggestedTone = '감성적';
@@ -5074,7 +5074,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
         [companyId]
       );
       targetCount = Number(r.rows[0]?.cnt) || 0;
-      objective = `구매 가능성 60% 이상 고객 ${targetCount.toLocaleString()}명에게 추천 상품 캠페인 — 다음 구매 예측 시점 직전에 발송하면 효과적입니다.`;
+      objective = `구매 가능성 60% 이상 고객 ${targetCount.toLocaleString()}명에게 추천 상품 캠페인. 다음 구매 예측 시점 직전에 발송하면 효과적입니다.`;
       targetFilters = { predictive_purchase_likelihood_min: 0.6 };
       suggestedChannel = 'sms';
       suggestedTone = '실용적';
@@ -5091,7 +5091,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
         [companyId, avgLtv * 2]
       );
       targetCount = Number(r.rows[0]?.cnt) || 0;
-      objective = `예측 LTV 상위 고객 ${targetCount.toLocaleString()}명에게 VIP 전용 혜택과 감사 인사 캠페인 — 평균의 두 배가 넘는 핵심 고객층입니다.`;
+      objective = `예측 LTV 상위 고객 ${targetCount.toLocaleString()}명에게 VIP 전용 혜택과 감사 인사 캠페인. 평균의 두 배가 넘는 핵심 고객층입니다.`;
       targetFilters = { predictive_ltv_365d_min: avgLtv * 2 };
       suggestedChannel = 'kakao';
       suggestedTone = '감성적';
@@ -5103,7 +5103,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
         [companyId]
       );
       targetCount = Number(r.rows[0]?.cnt) || 0;
-      objective = `아직 첫 구매를 하지 않은 고객 ${targetCount.toLocaleString()}명에게 환영·첫 거래 유도 캠페인 — 부담 없는 첫 메시지로 거래를 트는 데 집중합니다.`;
+      objective = `아직 첫 구매를 하지 않은 고객 ${targetCount.toLocaleString()}명에게 환영·첫 거래 유도 캠페인. 부담 없는 첫 메시지로 거래를 트는 데 집중합니다.`;
       targetFilters = { purchase_count_max: 0 };
       suggestedChannel = 'sms';
       suggestedTone = '친근한';
@@ -5114,7 +5114,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
         [companyId]
       );
       targetCount = Number(r.rows[0]?.cnt) || 0;
-      objective = `메시지에 잘 반응하는 고객 ${targetCount.toLocaleString()}명에게 신상품·이벤트 우선 알림 — 클릭 가능성이 높아 반응을 빠르게 끌어낼 수 있습니다.`;
+      objective = `메시지에 잘 반응하는 고객 ${targetCount.toLocaleString()}명에게 신상품·이벤트 우선 알림. 클릭 가능성이 높아 반응을 빠르게 끌어낼 수 있습니다.`;
       targetFilters = { predictive_click_score_min: 0.5 };
       suggestedChannel = 'sms';
       suggestedTone = '활기찬';
@@ -5125,7 +5125,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
         [companyId]
       );
       targetCount = Number(r.rows[0]?.cnt) || 0;
-      objective = `2주 안에 다시 살 것으로 예측되는 고객 ${targetCount.toLocaleString()}명에게 적시 추천 캠페인 — 구매 직전 타이밍에 추천 상품을 보냅니다.`;
+      objective = `2주 안에 다시 살 것으로 예측되는 고객 ${targetCount.toLocaleString()}명에게 적시 추천 캠페인. 구매 직전 타이밍에 추천 상품을 보냅니다.`;
       targetFilters = { predictive_next_purchase_days_max: 14 };
       suggestedChannel = 'sms';
       suggestedTone = '실용적';

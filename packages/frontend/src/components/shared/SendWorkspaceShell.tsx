@@ -126,7 +126,7 @@ export function WorkspaceNotice({ children }: { children: ReactNode }) {
 
 /** 데이터 출처 표기 — 모든 카드·미리보기에 붙인다(디자인 최소 기준) */
 export function SourceCaption({ children }: { children: ReactNode }) {
-  return <div className="text-[10px] text-slate-400 italic mt-2">Data source — {children}</div>;
+  return <div className="text-[10px] text-slate-400 italic mt-2">Data source: {children}</div>;
 }
 
 /**

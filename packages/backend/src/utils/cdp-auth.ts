@@ -317,7 +317,7 @@ export async function requireCdpBrowserOrigin(req: Request, res: Response, next:
     // db_alter_safety_net — cdp_allowed_origins 미마이그레이션 시 503
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.cdp_allowed_origins ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: companies.cdp_allowed_origins ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
       return;
     }
     console.error('[CDP BrowserAuth] 인증 처리 실패:', err);
@@ -381,7 +381,7 @@ export async function requireCdpAppId(req: Request, res: Response, next: NextFun
     // db_alter_safety_net — cdp_allowed_app_ids 미마이그레이션 시 503
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
-      res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.cdp_allowed_app_ids ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: companies.cdp_allowed_app_ids ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
       return;
     }
     console.error('[CDP AppAuth] 인증 처리 실패:', err);

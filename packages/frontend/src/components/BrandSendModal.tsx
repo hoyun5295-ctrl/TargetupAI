@@ -307,7 +307,7 @@ export default function BrandSendModal({
               <Upload size={18} strokeWidth={1.9} className="text-white" />
             </div>
             <span className="font-medium text-slate-700">파일을 선택하세요</span>
-            <span className="text-[11px] text-slate-400">CSV · TXT — 번호만 골라 읽습니다</span>
+            <span className="text-[11px] text-slate-400">CSV · TXT: 번호만 골라 읽습니다</span>
             <input type="file" accept=".csv,.txt,text/plain" className="hidden"
               onChange={(e) => { handleFile(e.target.files?.[0] || null); e.target.value = ''; }} />
           </label>

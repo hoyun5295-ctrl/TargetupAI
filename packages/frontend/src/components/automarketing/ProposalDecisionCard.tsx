@@ -154,7 +154,7 @@ export default function ProposalDecisionCard({
   const diagnosisBlock = (diagnosis || insufficient) && (
     <div className="mt-4 rounded-r-lg border-l-2 border-indigo-400 bg-slate-950/40 px-3 py-2.5">
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-[11px] text-indigo-300 font-medium">왜 지금인가 — AI 진단</span>
+        <span className="text-[11px] text-indigo-300 font-medium">왜 지금인가: AI 진단</span>
         {confidenceText && <span className="text-[10px] text-white/40">신뢰도 {confidenceText}</span>}
       </div>
       <div className="text-[13px] text-white/75 leading-relaxed">
@@ -177,7 +177,7 @@ export default function ProposalDecisionCard({
           </div>
         ))}
       </div>
-      {sourceLabel && <div className="text-[10px] text-white/30 italic mt-1.5">Data source — {sourceLabel}</div>}
+      {sourceLabel && <div className="text-[10px] text-white/30 italic mt-1.5">Data source: {sourceLabel}</div>}
     </div>
   );
 
@@ -191,7 +191,7 @@ export default function ProposalDecisionCard({
       )}
       {channelReason && (
         <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-white/5 text-white/60">
-          <MessageSquare className="w-3 h-3" />{channelName} — {channelReason}
+          <MessageSquare className="w-3 h-3" />{channelName}: {channelReason}
         </span>
       )}
       {recommendedIdx != null && (
@@ -210,7 +210,7 @@ export default function ProposalDecisionCard({
       {/* ★ 2026-07-10: LMS/MMS 제목 표시 — 광고 발송 시 "(광고)"는 발송 시점 자동 부착(buildAdSubject) */}
       {isLongType && (
         <div className="text-[12px] text-white/80 mb-1.5 pb-1.5 border-b border-white/10">
-          <span className="text-white/40 mr-1.5">제목</span>{effectiveSubject || <span className="text-rose-300">제목 없음 — 상세에서 입력해주세요</span>}
+          <span className="text-white/40 mr-1.5">제목</span>{effectiveSubject || <span className="text-rose-300">제목 없음. 상세에서 입력해주세요</span>}
         </div>
       )}
       <div className="text-[13px] text-white/80 leading-relaxed whitespace-pre-wrap">{effectiveBody}</div>
@@ -261,7 +261,7 @@ export default function ProposalDecisionCard({
         <DetailRow label="타겟 근거">
           {pj.target.criteria}
           {pj.target.count != null && (
-            <span className="text-white/40 ml-1">— 매칭 {pj.target.count?.toLocaleString()} / 전체 {pj.target.totalCount?.toLocaleString()}</span>
+            <span className="text-white/40 ml-1">(매칭 {pj.target.count?.toLocaleString()} / 전체 {pj.target.totalCount?.toLocaleString()})</span>
           )}
         </DetailRow>
       )}
@@ -293,7 +293,7 @@ export default function ProposalDecisionCard({
                   {isLongType && (
                     isSel && editing ? (
                       <div className="mt-1 mb-1.5" onClick={(e) => e.stopPropagation()}>
-                        <label className="block text-[10px] text-white/40 mb-0.5">제목 — 문자 상단에 표시 · 광고 발송 시 "(광고)" 자동 부착</label>
+                        <label className="block text-[10px] text-white/40 mb-0.5">제목 (문자 상단에 표시) · 광고 발송 시 "(광고)" 자동 부착</label>
                         <input
                           type="text"
                           value={effectiveSubject}
@@ -302,7 +302,7 @@ export default function ProposalDecisionCard({
                           placeholder="발송 제목 입력"
                           className="w-full rounded-lg bg-slate-950/60 border border-indigo-400/40 text-white/90 text-[12px] px-2.5 py-1.5 focus:outline-none focus:border-indigo-300"
                         />
-                        {subjectInvalid && <div className="text-[10px] text-rose-300 mt-0.5">제목을 입력해주세요 — 비워두면 승인·발송할 수 없습니다.</div>}
+                        {subjectInvalid && <div className="text-[10px] text-rose-300 mt-0.5">제목을 입력해주세요. 비워두면 승인·발송할 수 없습니다.</div>}
                       </div>
                     ) : (
                       <div className="text-[11px] text-white/50 mb-1">
@@ -371,7 +371,7 @@ export default function ProposalDecisionCard({
   const reviewNotice = proposal.status === 'admin_review' && (
     <div className="mt-3 flex items-start gap-1.5 text-[11px] text-amber-100 bg-amber-500/10 border border-amber-400/30 rounded-lg p-2">
       <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" />
-      <span>{proposal.autoExecuteReason || '스팸 필터를 끝내 통과하지 못했습니다.'} — 문안을 확인하고 발송 여부를 직접 판단해주세요.</span>
+      <span>{proposal.autoExecuteReason || '스팸 필터를 끝내 통과하지 못했습니다.'}. 문안을 확인하고 발송 여부를 직접 판단해주세요.</span>
     </div>
   );
 
@@ -393,7 +393,7 @@ export default function ProposalDecisionCard({
     <TargetRecipientsModal
       show={showTargets}
       onClose={() => setShowTargets(false)}
-      title={`발송 대상 확인${targetInfo?.segmentName ? ` — ${targetInfo.segmentName}` : ''}`}
+      title={`발송 대상 확인${targetInfo?.segmentName ? `: ${targetInfo.segmentName}` : ''}`}
       objective={proposal.operatorObjective || null}
       criteria={targetInfo?.criteria ?? pj.target?.criteria ?? null}
       channelLabel={channelName}

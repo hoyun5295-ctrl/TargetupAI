@@ -344,9 +344,9 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
             </div>
             <p className="text-xs text-violet-200/70 mt-0.5">
               {guideline
-                ? `${messages.length}건 학습 완료 — AI 문안이 회사 톤으로 자동 적용 중`
+                ? `${messages.length}건 학습 완료. AI 문안이 회사 톤으로 자동 적용 중`
                 : registered
-                  ? `${messages.length}건 저장 완료 — 가이드라인 추출을 눌러야 회사 톤이 적용됩니다`
+                  ? `${messages.length}건 저장 완료. 가이드라인 추출을 눌러야 회사 톤이 적용됩니다`
                   : 'LMS/MMS 대표 문안 1~10건 등록 시 = 다음 발송부터 회사 아이덴티티 적용'}
             </p>
           </div>
@@ -365,7 +365,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
           <div className="flex items-start gap-3 text-sm">
             <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
             <div className="text-violet-100">
-              <strong className="text-amber-200">브랜드보이스 미적용</strong> — AI 문안이 일반 한국어 톤으로 생성됩니다.
+              <strong className="text-amber-200">브랜드보이스 미적용</strong>. AI 문안이 일반 한국어 톤으로 생성됩니다.
               <br />
               <span className="text-violet-200/70">{registered ? '가이드라인 추출을 누르면' : '대표 문안을 등록하고 가이드라인을 추출하면'} 다음 발송부터 회사 톤으로 자동 작성됩니다.</span>
             </div>
@@ -529,7 +529,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
                   value={guideline.length_range ? `${guideline.length_range.min_chars}~${guideline.length_range.max_chars}자` : ''} />
                 <GuidelineField label="링크 습관 (자동 계산)" editing={false}
                   value={guideline.link_habit?.uses_url
-                    ? `있음 — ${guideline.link_habit.position === 'body_end' ? '본문 끝' : '본문 중간'} · 문안당 ${guideline.link_habit.avg_urls_per_message}개`
+                    ? `있음: ${guideline.link_habit.position === 'body_end' ? '본문 끝' : '본문 중간'} · 문안당 ${guideline.link_habit.avg_urls_per_message}개`
                     : guideline.link_habit ? '없음' : ''} />
                 {/* ★ 브랜드 키트 — 문안 생성 시 조합되는 회사 고정 자산 */}
                 <GuidelineField label="고정 시그니처 (문안 끝에 조합)" value={guideline.signature_locked || ''} editing={editingGuideline}
@@ -547,7 +547,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
 
               {guidelineUpdatedAt && (
                 <div className="mt-3 text-[10px] text-white/40 italic">
-                  Data source — 회사 대표 문안 {messages.length}건 + AI 자동 추출 · 마지막 갱신: {new Date(guidelineUpdatedAt).toLocaleString('ko-KR')}
+                  Data source: 회사 대표 문안 {messages.length}건 + AI 자동 추출 · 마지막 갱신: {new Date(guidelineUpdatedAt).toLocaleString('ko-KR')}
                 </div>
               )}
                     </div>
@@ -624,7 +624,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
                   type="text"
                   value={editor.draft.subject}
                   onChange={(e) => updateDraft({ subject: e.target.value })}
-                  placeholder="제목 — LMS/MMS 한정"
+                  placeholder="제목 (LMS/MMS 한정)"
                   className="w-full px-3 py-2 text-xs bg-slate-950 border border-white/10 rounded-lg text-white placeholder-white/30 focus:border-violet-500 focus:outline-none"
                 />
               </div>
@@ -761,7 +761,7 @@ function GuidelineArrayField({
           type="text"
           value={joined}
           onChange={(e) => onChange(e.target.value.split(/\s*\/\s*/).map((s) => s.trim()).filter(Boolean))}
-          placeholder="슬래시(/)로 구분 — 예: 준비했어요 / 꼭 받아가세요"
+          placeholder="슬래시(/)로 구분, 예: 준비했어요 / 꼭 받아가세요"
           className="w-full px-2 py-1 bg-slate-900 border border-white/10 rounded text-white text-xs placeholder-white/30 focus:border-violet-500 focus:outline-none"
         />
       ) : (

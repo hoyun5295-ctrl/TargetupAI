@@ -63,7 +63,7 @@ export default function MarketingJourneyModal({
           </div>
           <div className="min-w-0 flex-1">
             <h3 id="marketing-journey-modal-title" className="text-base font-bold text-white">마케팅 여정 만들기</h3>
-            <p className="text-[11px] text-white/50">광고성 문자·LMS — 하고 싶은 것을 한 줄로 쓰면 AI가 흐름을 설계합니다</p>
+            <p className="text-[11px] text-white/50">광고성 문자·LMS: 하고 싶은 것을 한 줄로 쓰면 AI가 흐름을 설계합니다</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-white/40 transition-colors hover:bg-white/5 hover:text-white/70" aria-label="닫기">
             <X className="h-4 w-4" />

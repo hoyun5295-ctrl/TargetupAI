@@ -340,7 +340,7 @@ export function prepareSeedImport(rows: SeedRowInput[]): PreparedSeed {
 function getApiToken(): string {
   const token = String(process.env.GATEWAY_TMPL_API_TOKEN || '').trim();
   if (!token) {
-    throw new Error('GATEWAY_TMPL_API_TOKEN 미설정 — 게이트웨이 매핑 호출 불가 (.env 등록 필요)');
+    throw new Error('GATEWAY_TMPL_API_TOKEN 미설정. 게이트웨이 매핑 호출 불가 (.env 등록 필요)');
   }
   return token;
 }

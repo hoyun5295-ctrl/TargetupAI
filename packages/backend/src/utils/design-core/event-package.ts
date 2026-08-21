@@ -48,7 +48,7 @@ export function buildEventTemplateHintBlock(eventText: string | null | undefined
   const match = selectGoldenTemplateForEvent(eventText);
   if (!match) return '';
   const t = match.template;
-  return `[정예 템플릿 힌트 — 이 행사에 어울리는 스토리 구조]
+  return `[정예 템플릿 힌트: 이 행사에 어울리는 스토리 구조]
 - 템플릿: ${t.label}
 - 스토리 순서: ${t.story.logic}
 - 조판 방향: '${t.design.palette}' 테마 계열 (색·서체는 회사 브랜드 설정이 항상 우선)

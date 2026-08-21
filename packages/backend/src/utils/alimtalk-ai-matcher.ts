@@ -147,8 +147,8 @@ export function autoMapVariables(
       reasoning: bestMatch
         ? bestMatch.isExact
           ? `정확 매칭 (${bestMatch.fieldLabel})`
-          : `유사 매칭 (${bestMatch.fieldLabel}) — 회사 admin 검토 권장`
-        : '매칭 실패 — 회사 admin 직접 입력 필요',
+          : `유사 매칭 (${bestMatch.fieldLabel}). 회사 admin 검토 권장`
+        : '매칭 실패. 회사 admin 직접 입력 필요',
       isExactMatch: bestMatch?.isExact || false,
     });
   }
@@ -223,8 +223,8 @@ export async function matchAlimtalkTemplate(input: MatchInput): Promise<Alimtalk
 매칭 원칙:
 1. 캠페인 의도 키워드(VIP/재구매/휴면/생일/장바구니/예약/이벤트/할인 등) ↔ 템플릿 본문/제목/카테고리 키워드 정합
 2. 정합 점수(0~100): 100=완벽 매칭 / 70+=우수 정합 / 50+=가능 / 50 미만=정합 X
-3. 정합 점수 50 미만 시 matched=false 반환 (자동완화 절대 금지 — AI가 임의 매칭 X)
-4. 회사 admin이 검토 + 승인 후 발송 (AI 단독 실행 X — 영구 원칙 #1)
+3. 정합 점수 50 미만 시 matched=false 반환 (자동완화 절대 금지, AI가 임의 매칭 X)
+4. 회사 admin이 검토 + 승인 후 발송 (AI 단독 실행 X, 영구 원칙 #1)
 
 ${memoryContext ? `회사 학습 메모리:\n${memoryContext}\n` : ''}
 
@@ -368,7 +368,7 @@ function fallbackMatch(templates: AlimtalkTemplate[], input: MatchInput): Alimta
     .map((s) => ({
       template: s.template,
       matchScore: s.score,
-      matchReason: 'AI 분석 실패 — 키워드 기반 단순 매칭 (회사 admin 검토 권장)',
+      matchReason: 'AI 분석 실패. 키워드 기반 단순 매칭 (회사 admin 검토 권장)',
     }));
 
   return {
@@ -376,8 +376,8 @@ function fallbackMatch(templates: AlimtalkTemplate[], input: MatchInput): Alimta
     template: bestScore >= 50 ? bestTemplate : null,
     matchScore: bestScore,
     matchReason: bestScore >= 50
-      ? `AI 분석 실패 — 키워드 기반 fallback 매칭 (정합 점수 ${bestScore}). 회사 admin 검토 권장.`
-      : `정합 점수 ${bestScore} 미만 — 정합되는 템플릿이 없습니다.`,
+      ? `AI 분석 실패. 키워드 기반 fallback 매칭 (정합 점수 ${bestScore}). 회사 admin 검토 권장.`
+      : `정합 점수 ${bestScore} 미만. 정합되는 템플릿이 없습니다.`,
     variableMappings: bestScore >= 50 && bestTemplate
       ? autoMapVariables(bestTemplate.content, [])
       : [],
