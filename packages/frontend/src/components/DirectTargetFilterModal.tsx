@@ -1,4 +1,11 @@
-import { Filter, RotateCcw, Search, Users, Sparkles, RefreshCw, AlertCircle, Check, Eye } from 'lucide-react';
+import { Filter, RotateCcw, Search, Users, Sparkles, RefreshCw, AlertCircle, AlertTriangle, Info, Check, Eye, X, ChevronDown, ClipboardList, ShoppingBag, Store, Tag, Smartphone, Wrench, Pin, Loader2, type LucideIcon } from 'lucide-react';
+import {
+  CUI_MODAL_SCRIM, CUI_MODAL, CUI_MODAL_HEAD, CUI_MODAL_TITLE, CUI_MODAL_DESC, CUI_MODAL_BODY, CUI_MODAL_CLOSE,
+  CUI_BTN_PRIMARY, CUI_BTN_OUTLINE, CUI_BTN_GHOST, CUI_BTN_DANGER, CUI_LABEL, CUI_HINT, CUI_TEXTAREA,
+  CUI_INFO, CUI_INFO_ICON, CUI_INFO_TEXT, CUI_DANGER_BOX, CUI_DANGER_ICON, CUI_DANGER_TEXT, CUI_NOTICE, CUI_NOTICE_ICON, CUI_NOTICE_TEXT,
+  CUI_PANEL, CUI_SCROLL_X, CUI_THEAD, CUI_TH, CUI_TH_RIGHT, CUI_TR, CUI_TD, CUI_CELL_DATA, CUI_CELL_META, CUI_CELL_CODE,
+  CUI_PILL_BASE, CUI_FIELDSET_TITLE, CUI_PICK_ON, CUI_PICK_OFF, CUI_LOADING, CUI_SPINNER, CUI_EMPTY, CUI_EMPTY_BADGE, CUI_EMPTY_TITLE, CUI_EMPTY_DESC,
+} from '../utils/console-ui';
 import { useEffect, useState } from 'react';
 import { FRONT_FIELD_DISPLAY_MAP, reverseDisplayValueFront } from '../utils/formatDate';
 
@@ -161,10 +168,10 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
   const aiNlFieldLabel = (f: { field_key: string; display_name: string }) =>
     enabledFields.find((e: any) => e.field_key === f.field_key)?.display_name || f.display_name || f.field_key;
 
-  // 카테고리 아이콘
-  const CAT_ICONS: Record<string, string> = {
-    basic: '📋', purchase: '💰', store: '🏪',
-    membership: '🏷️', marketing: '📱', custom: '🔧',
+  // 카테고리 아이콘(lucide). 이모지는 화면마다 크기·정렬이 달라져 2026-08-21 표면 리프트에서 걷어냈다.
+  const CAT_ICONS: Record<string, LucideIcon> = {
+    basic: ClipboardList, purchase: ShoppingBag, store: Store,
+    membership: Tag, marketing: Smartphone, custom: Wrench,
   };
 
   // 프리셋
@@ -507,12 +514,12 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
         <div className="mt-1.5 space-y-2">
           <div className="flex items-center gap-1">
             <button onClick={() => setAgeMode('preset')}
-              className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${age.mode === 'preset' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+              className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-all ${age.mode === 'preset' ? 'bg-indigo-600 text-white' : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200'}`}
             >연령대</button>
             <button onClick={() => setAgeMode('range')}
-              className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${age.mode === 'range' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+              className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-all ${age.mode === 'range' ? 'bg-indigo-600 text-white' : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200'}`}
             >직접입력</button>
-            {rangeText && <span className="text-xs text-green-600 font-medium ml-1">→ {rangeText}</span>}
+            {rangeText && <span className="text-xs text-indigo-600 font-medium ml-1">→ {rangeText}</span>}
           </div>
           {age.mode === 'preset' && (
             <div className="flex flex-wrap gap-1.5">
@@ -520,7 +527,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
                 const sel = (age.presets || []).includes(p.value);
                 return (
                   <button key={p.value} onClick={() => toggleAgePreset(p.value)}
-                    className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${sel ? 'bg-green-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                    className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-all ${sel ? 'bg-indigo-600 text-white shadow-sm' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}
                   >{p.label}</button>
                 );
               })}
@@ -529,11 +536,11 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
           {age.mode === 'range' && (
             <div className="flex items-center gap-1.5">
               <input type="number" value={age.min || ''} onChange={e => setAgeRange('min', e.target.value)}
-                placeholder="최소" className="w-16 px-2 py-1 border border-gray-200 rounded-md text-sm text-center focus:ring-1 focus:ring-green-500 focus:border-green-500" />
-              <span className="text-xs text-gray-400">~</span>
+                placeholder="최소" className="w-16 px-2 py-1 border border-neutral-200 rounded-lg text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-600/20 focus:border-indigo-600" />
+              <span className="text-xs text-neutral-400">~</span>
               <input type="number" value={age.max || ''} onChange={e => setAgeRange('max', e.target.value)}
-                placeholder="최대" className="w-16 px-2 py-1 border border-gray-200 rounded-md text-sm text-center focus:ring-1 focus:ring-green-500 focus:border-green-500" />
-              <span className="text-xs text-gray-400">세</span>
+                placeholder="최대" className="w-16 px-2 py-1 border border-neutral-200 rounded-lg text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-600/20 focus:border-indigo-600" />
+              <span className="text-xs text-neutral-400">세</span>
             </div>
           )}
         </div>
@@ -546,10 +553,10 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
       return (
         <div className="flex gap-1 mt-1.5">
           <button onClick={() => setFilterValues(prev => ({ ...prev, [fk]: 'true' }))}
-            className={`px-3 py-1 text-xs rounded-md font-medium transition-all ${val === 'true' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+            className={`px-3 py-1 text-xs rounded-lg font-medium transition-all ${val === 'true' ? 'bg-indigo-600 text-white' : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200'}`}
           >예</button>
           <button onClick={() => setFilterValues(prev => ({ ...prev, [fk]: 'false' }))}
-            className={`px-3 py-1 text-xs rounded-md font-medium transition-all ${val === 'false' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+            className={`px-3 py-1 text-xs rounded-lg font-medium transition-all ${val === 'false' ? 'bg-indigo-600 text-white' : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200'}`}
           >아니오</button>
         </div>
       );
@@ -576,17 +583,17 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
               type="text" placeholder={`검색 (${allOpts.length}개 중)...`}
               value={filterValues[searchKey] || ''}
               onChange={(e) => setFilterValues(prev => ({ ...prev, [searchKey]: e.target.value }))}
-              className="w-full px-2.5 py-1.5 text-xs border rounded-md mb-1.5 focus:outline-none focus:ring-1 focus:ring-green-400"
+              className="w-full px-2.5 py-1.5 text-xs border border-neutral-200 rounded-lg mb-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-600/20"
             />
             {selected.length > 0 && (
-              <div className="text-[10px] text-green-600 mb-1">{selected.length}개 선택됨</div>
+              <div className="text-[10px] text-indigo-600 mb-1">{selected.length}개 선택됨</div>
             )}
             <div className="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto pr-1">
               {filtered.map((opt: string) => {
                 const sel = selected.includes(opt);
                 return (
                   <button key={opt} onClick={() => toggleMultiOption(fk, opt)}
-                    className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${sel ? 'bg-green-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                    className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-all ${sel ? 'bg-indigo-600 text-white shadow-sm' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}
                   >{getDisplayLabel(opt)}</button>
                 );
               })}
@@ -601,7 +608,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
             const sel = selected.includes(opt);
             return (
               <button key={opt} onClick={() => toggleMultiOption(fk, opt)}
-                className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${sel ? 'bg-green-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-all ${sel ? 'bg-indigo-600 text-white shadow-sm' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}
               >{getDisplayLabel(opt)}</button>
             );
           })}
@@ -618,18 +625,18 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
           <div className="flex flex-wrap gap-1.5">
             {POINTS_PRESETS.map(p => (
               <button key={p.value} onClick={() => setFilterValues(prev => ({ ...prev, [minKey]: prev[minKey] === p.value ? '' : p.value, [maxKey]: '' }))}
-                className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${filterValues[minKey] === p.value && !filterValues[maxKey] ? 'bg-green-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-all ${filterValues[minKey] === p.value && !filterValues[maxKey] ? 'bg-indigo-600 text-white shadow-sm' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}
               >{p.label}</button>
             ))}
           </div>
           <div className="flex items-center gap-1.5">
             <input type="text" inputMode="numeric" value={filterValues[minKey] ? Number(filterValues[minKey]).toLocaleString() : ''}
               onChange={e => { const num = e.target.value.replace(/[^0-9]/g, ''); setFilterValues(prev => ({ ...prev, [minKey]: num })); }}
-              placeholder="최소" className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-1 focus:ring-green-500 focus:border-green-500" />
-            <span className="text-gray-400 text-sm font-medium">~</span>
+              placeholder="최소" className="flex-1 px-2.5 py-1.5 border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600/20 focus:border-indigo-600" />
+            <span className="text-neutral-400 text-sm font-medium">~</span>
             <input type="text" inputMode="numeric" value={filterValues[maxKey] ? Number(filterValues[maxKey]).toLocaleString() : ''}
               onChange={e => { const num = e.target.value.replace(/[^0-9]/g, ''); setFilterValues(prev => ({ ...prev, [maxKey]: num })); }}
-              placeholder="최대" className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-1 focus:ring-green-500 focus:border-green-500" />
+              placeholder="최대" className="flex-1 px-2.5 py-1.5 border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600/20 focus:border-indigo-600" />
           </div>
         </div>
       );
@@ -650,23 +657,23 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
               <input type="text" inputMode="numeric" value={filterValues[minKey] ? Number(filterValues[minKey]).toLocaleString() : ''}
                 onChange={e => { const num = e.target.value.replace(/[^0-9]/g, ''); setFilterValues(prev => ({ ...prev, [minKey]: num })); }}
                 placeholder={minPlaceholder}
-                className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-1 focus:ring-green-500 focus:border-green-500 pr-8" />
-              {unit && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">{unit}</span>}
+                className="w-full px-2.5 py-1.5 border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600/20 focus:border-indigo-600 pr-8" />
+              {unit && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-neutral-400">{unit}</span>}
             </div>
-            <span className="text-gray-400 text-sm font-medium">~</span>
+            <span className="text-neutral-400 text-sm font-medium">~</span>
             <div className="flex-1 relative">
               <input type="text" inputMode="numeric" value={filterValues[maxKey] ? Number(filterValues[maxKey]).toLocaleString() : ''}
                 onChange={e => { const num = e.target.value.replace(/[^0-9]/g, ''); setFilterValues(prev => ({ ...prev, [maxKey]: num })); }}
                 placeholder={maxPlaceholder}
-                className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-1 focus:ring-green-500 focus:border-green-500 pr-8" />
-              {unit && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">{unit}</span>}
+                className="w-full px-2.5 py-1.5 border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600/20 focus:border-indigo-600 pr-8" />
+              {unit && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-neutral-400">{unit}</span>}
             </div>
           </div>
           {isAmount && (
             <div className="flex gap-1 mt-1.5">
               {[{l:'10만',v:100000},{l:'50만',v:500000},{l:'100만',v:1000000},{l:'500만',v:5000000}].map(p => (
                 <button key={p.v} type="button" onClick={() => setFilterValues(prev => ({ ...prev, [minKey]: String(p.v) }))}
-                  className={`px-2 py-0.5 text-[10px] rounded font-medium transition-all ${filterValues[minKey] === String(p.v) ? 'bg-green-100 text-green-700 border border-green-300' : 'bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100'}`}
+                  className={`px-2 py-0.5 text-[10px] rounded font-medium transition-all ${filterValues[minKey] === String(p.v) ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' : 'bg-white text-neutral-500 border border-neutral-200 hover:bg-neutral-50'}`}
                 >{p.l}↑</button>
               ))}
             </div>
@@ -684,7 +691,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
         <div className="flex flex-wrap gap-1.5 mt-1.5">
           {presets.map(p => (
             <button key={p.value} onClick={() => setFilterValues(prev => ({ ...prev, [fk]: prev[fk] === p.value ? '' : p.value }))}
-              className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${val === p.value ? 'bg-green-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-all ${val === p.value ? 'bg-indigo-600 text-white shadow-sm' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}
             >{p.label}</button>
           ))}
         </div>
@@ -694,7 +701,7 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
     // 문자열 (옵션 없음) → 포함 검색
     return (
       <input type="text" value={filterValues[fk] || ''} onChange={e => setFilterValues(prev => ({ ...prev, [fk]: e.target.value }))}
-        placeholder="포함하는 값 입력" className="mt-1.5 w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-1 focus:ring-green-500 focus:border-green-500" />
+        placeholder="포함하는 값 입력" className="mt-1.5 w-full px-2.5 py-1.5 border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600/20 focus:border-indigo-600" />
     );
   };
 
@@ -731,75 +738,71 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
   const extraCategories = usedCategories.filter(c => !categoryOrder.includes(c));
   const allCategories = [...orderedCategories, ...extraCategories];
 
+  // ★ 2026-08-21 표면 리프트(인디고): 기능·state·핸들러는 그대로, 표면만 콘솔 톤(CUI_*)으로.
+  //   이모지 섹션 아이콘 → lucide, 회색 체크박스 → 카드형 선택(CUI_PICK), 초록 액센트 → 인디고.
+  //   스크림·박스에 transform·backdrop-blur를 두지 않는다(console-ui.ts CUI_MODAL 주석의 ⛔).
+  const SEG_ON = 'flex-1 h-9 rounded-lg text-[13px] font-semibold text-indigo-700 bg-white shadow-sm inline-flex items-center justify-center gap-1.5 transition';
+  const SEG_OFF = 'flex-1 h-9 rounded-lg text-[13px] font-medium text-neutral-500 hover:text-neutral-900 inline-flex items-center justify-center gap-1.5 transition';
+  const alertTone = alertModal.type === 'error'
+    ? { ring: 'bg-rose-50 text-rose-600', btn: CUI_BTN_DANGER, Icon: AlertCircle }
+    : alertModal.type === 'warning'
+      ? { ring: 'bg-amber-50 text-amber-600', btn: `${CUI_BTN_PRIMARY} !bg-amber-500 hover:!bg-amber-600`, Icon: AlertTriangle }
+      : { ring: 'bg-indigo-50 text-indigo-600', btn: CUI_BTN_PRIMARY, Icon: Info };
+
   return (
     <>
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-2xl w-[720px] max-h-[95vh] overflow-hidden animate-in zoom-in-95 duration-200">
+    <div className={CUI_MODAL_SCRIM}>
+      <div className={`${CUI_MODAL} max-w-[760px]`} role="dialog" aria-modal="true" aria-label="직접 타겟 설정">
         {/* 헤더 */}
-        <div className="px-5 py-3 border-b border-gray-100 flex justify-between items-center bg-gradient-to-r from-green-50 to-emerald-50">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 bg-green-100 rounded-xl flex items-center justify-center">
-              <Filter className="w-5 h-5 text-green-600" />
+        <div className={CUI_MODAL_HEAD}>
+          <div className="flex items-center gap-3.5 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center shrink-0 shadow-lg shadow-indigo-500/25">
+              <Filter className="w-5 h-5 text-white" />
             </div>
-            <div>
-              <h3 className="text-base font-bold text-gray-800">직접 타겟 설정</h3>
-              <p className="text-xs text-gray-500">필터할 항목을 선택하고 조건을 설정하세요</p>
+            <div className="min-w-0">
+              <h3 className={CUI_MODAL_TITLE}>직접 타겟 설정</h3>
+              <p className={CUI_MODAL_DESC}>필터할 항목을 고르고 조건을 정하면 대상 인원을 바로 셉니다</p>
             </div>
           </div>
-          <button onClick={handleClose}
-            className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/80 transition-colors text-gray-400 hover:text-gray-600">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+          <button type="button" onClick={handleClose} className={CUI_MODAL_CLOSE} aria-label="닫기">
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* ★ D219+ Part 2 후속 (2026-05-27): AI 자연어 모드 토글 */}
-        <div className="px-5 py-2.5 border-b border-violet-100 bg-gradient-to-r from-violet-50 to-fuchsia-50 flex items-center gap-2">
-          <button
-            onClick={() => setAiNlMode(false)}
-            className={`flex-1 px-3 py-1.5 text-xs rounded-lg font-semibold transition-all ${!aiNlMode ? 'bg-white text-green-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            <Filter className="w-3.5 h-3.5 inline mr-1" />
-            필터 조건 직접 설정
-          </button>
-          <button
-            onClick={() => setAiNlMode(true)}
-            className={`flex-1 px-3 py-1.5 text-xs rounded-lg font-semibold transition-all ${aiNlMode ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-md' : 'text-violet-600 hover:text-violet-800'}`}
-          >
-            <Sparkles className="w-3.5 h-3.5 inline mr-1" />
-            AI 자연어 모드
-            <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-white/30 text-white font-bold">NEW</span>
-          </button>
+        {/* 모드 전환: 직접 설정 / AI 자연어 */}
+        <div className="shrink-0 px-6 pt-4">
+          <div className="flex p-1 rounded-xl bg-neutral-100">
+            <button type="button" onClick={() => setAiNlMode(false)} className={!aiNlMode ? SEG_ON : SEG_OFF}>
+              <Filter className="w-3.5 h-3.5" />
+              필터 조건 직접 설정
+            </button>
+            <button type="button" onClick={() => setAiNlMode(true)} className={aiNlMode ? SEG_ON : SEG_OFF}>
+              <Sparkles className="w-3.5 h-3.5" />
+              AI 자연어 모드
+              <span className="ml-0.5 text-[10px] font-bold px-1.5 py-px rounded bg-indigo-100 text-indigo-700">NEW</span>
+            </button>
+          </div>
         </div>
 
-        {/* ★ D219+ Part 2 후속: AI 자연어 모드 영역 */}
         {aiNlMode ? (
-          <div className="p-4 space-y-3 overflow-y-auto max-h-[68vh]">
-            {/* AI 안내 카드 */}
-            <div className="rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-4">
-              <div className="flex items-start gap-2.5">
-                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
-                  <Sparkles className="w-5 h-5 text-white" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-violet-900 mb-0.5">자연어로 고객 추출</p>
-                  <p className="text-[11px] text-violet-700 leading-relaxed">
-                    조건을 자연어로 입력하면 AI가 정확한 필터로 변환합니다. 매칭 수 + 샘플 5건이 즉시 표시되어 신뢰할 수 있어요.
-                  </p>
-                </div>
+          <div className={CUI_MODAL_BODY}>
+            <div className={CUI_INFO}>
+              <Sparkles className={`w-4 h-4 ${CUI_INFO_ICON}`} />
+              <div className={CUI_INFO_TEXT}>
+                <p className="font-semibold">자연어로 고객 추출</p>
+                <p className="mt-0.5 text-indigo-900/80">조건을 말로 적으면 AI가 검증된 필터로 바꿉니다. 매칭 수와 샘플 5건을 먼저 보여 드립니다.</p>
               </div>
             </div>
 
-            {/* 예시 prompt */}
             <div>
-              <p className="text-[10px] text-gray-500 mb-1.5">💡 빠른 시작 예시</p>
+              <p className={CUI_LABEL}>빠른 시작 예시</p>
               <div className="flex flex-wrap gap-1.5">
                 {AI_NL_EXAMPLES.map((p) => (
                   <button
                     key={p}
+                    type="button"
                     onClick={() => setAiNlInput(p)}
-                    className="text-[11px] px-2.5 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700"
+                    className="h-8 px-3 rounded-lg bg-neutral-100 text-[12.5px] text-neutral-700 hover:bg-indigo-50 hover:text-indigo-700 transition"
                   >
                     {p}
                   </button>
@@ -807,212 +810,192 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
               </div>
             </div>
 
-            {/* 자연어 입력 */}
-            <div className="rounded-xl border border-gray-200 bg-white p-3">
-              <label className="text-[10px] text-gray-500 mb-1 block">조건 자연어 입력</label>
+            <div>
+              <label className={CUI_LABEL}>조건 자연어 입력</label>
               <textarea
                 value={aiNlInput}
                 onChange={(e) => setAiNlInput(e.target.value)}
                 placeholder="예: 30일 안 구매하지 않은 30대 여성"
-                className="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400"
+                className={CUI_TEXTAREA}
                 rows={3}
                 disabled={aiNlGenerating || aiNlExtracting}
               />
-              <div className="mt-2 flex items-center justify-between gap-2">
-                <p className="text-[9px] text-gray-400">검증된 필터만 사용: 단 1의 오차 없는 추출</p>
+              <div className="mt-2 flex items-center justify-between gap-3">
+                <p className={`${CUI_HINT} !mt-0`}>검증된 필터만 씁니다. 조건 밖 고객은 들어오지 않습니다.</p>
                 <button
+                  type="button"
                   onClick={handleAiNlGenerate}
                   disabled={!aiNlInput.trim() || aiNlGenerating || aiNlExtracting}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold"
+                  className={CUI_BTN_PRIMARY}
                 >
                   {aiNlGenerating ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                  {aiNlGenerating ? 'AI 변환 중...' : 'AI 변환'}
+                  {aiNlGenerating ? 'AI 변환 중' : 'AI 변환'}
                 </button>
               </div>
             </div>
 
-            {/* 오류 */}
             {aiNlError && (
-              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
-                <div className="flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 text-rose-500 flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-rose-700">{aiNlError}</p>
-                </div>
+              <div className={CUI_DANGER_BOX}>
+                <AlertCircle className={`w-4 h-4 ${CUI_DANGER_ICON}`} />
+                <p className={CUI_DANGER_TEXT}>{aiNlError}</p>
               </div>
             )}
 
-            {/* 결과 카드 */}
             {aiNlResult && (
-              <div className="space-y-3">
-                {/* 매칭 수 + AI 해석 */}
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                  <div className="flex items-start gap-3">
-                    <Users className="w-6 h-6 text-emerald-600 flex-shrink-0" />
-                    <div className="flex-1">
-                      <p className="text-[10px] text-emerald-700/70 mb-0.5">매칭 결과</p>
-                      <p className="text-2xl font-bold text-emerald-700">{aiNlResult.matchCount.toLocaleString()}명</p>
-                      <p className="text-[11px] text-emerald-800/80 mt-1.5 leading-relaxed">
-                        <span className="font-semibold">AI 해석:</span> {aiNlResult.explanation}
-                      </p>
-                    </div>
+              <div className="space-y-4">
+                <div className="rounded-xl border border-indigo-600/15 bg-indigo-50 p-4 flex items-start gap-3.5">
+                  <div className="h-10 w-10 rounded-xl bg-white grid place-items-center text-indigo-600 ring-1 ring-indigo-600/15 shrink-0">
+                    <Users className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[12px] text-indigo-700/70">매칭 결과</p>
+                    <p className="text-2xl font-bold text-indigo-700 tabular-nums leading-tight">{aiNlResult.matchCount.toLocaleString()}<span className="text-sm font-medium text-indigo-700/70 ml-1">명</span></p>
+                    <p className="text-[12.5px] text-indigo-900/80 mt-1.5 leading-relaxed"><span className="font-semibold">AI 해석:</span> {aiNlResult.explanation}</p>
                   </div>
                 </div>
 
-                {/* 샘플 5건 — ★ 2026-08-08 조건 필드(sampleFields) 열을 함께 보여 조건이 맞았는지 눈으로 검증한다 */}
                 {aiNlResult.samples.length > 0 && (
-                  <div className="rounded-xl border border-gray-200 bg-white p-3">
+                  <div>
                     <div className="flex items-center gap-1.5 mb-2">
-                      <Eye className="w-3.5 h-3.5 text-gray-500" />
-                      <p className="text-[11px] text-gray-600 font-medium">샘플 5건 미리보기</p>
+                      <Eye className="w-3.5 h-3.5 text-neutral-400" />
+                      <p className={CUI_FIELDSET_TITLE}>샘플 5건 미리보기</p>
                     </div>
-                    <div className="overflow-x-auto">
-                      <div className="space-y-1 min-w-max">
-                        {aiNlResult.sampleFields.length > 0 && (
-                          <div className="flex items-center gap-2 text-[9px] text-gray-400 pb-0.5">
-                            <span className="w-28">전화번호</span>
-                            <span className="w-16">이름</span>
-                            <span className="w-10">성별</span>
-                            <span className="w-16">지역</span>
-                            {aiNlResult.sampleFields.map((f) => (
-                              <span key={f.field_key} className="w-20 truncate font-medium text-emerald-600">{aiNlFieldLabel(f)}</span>
+                    <div className={CUI_PANEL}>
+                      <div className={CUI_SCROLL_X}>
+                        <table className="w-full">
+                          <thead className={CUI_THEAD}>
+                            <tr>
+                              <th className={CUI_TH}>전화번호</th>
+                              <th className={CUI_TH}>이름</th>
+                              <th className={CUI_TH}>성별</th>
+                              <th className={CUI_TH}>지역</th>
+                              {aiNlResult.sampleFields.map((f) => (
+                                <th key={f.field_key} className={`${CUI_TH} text-indigo-600`}>{aiNlFieldLabel(f)}</th>
+                              ))}
+                              <th className={CUI_TH_RIGHT}>누적구매</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {aiNlResult.samples.map((s) => (
+                              <tr key={s.id} className={CUI_TR}>
+                                <td className={`${CUI_TD} ${CUI_CELL_CODE}`}>{s.phone}</td>
+                                <td className={`${CUI_TD} ${CUI_CELL_DATA}`}>{s.name || '-'}</td>
+                                <td className={`${CUI_TD} ${CUI_CELL_META}`}>{s.gender || '-'}</td>
+                                <td className={`${CUI_TD} ${CUI_CELL_META}`}>{s.region || '-'}</td>
+                                {aiNlResult.sampleFields.map((f) => (
+                                  <td key={f.field_key} className={`${CUI_TD} ${CUI_CELL_DATA}`}>
+                                    {s[f.field_key] != null && s[f.field_key] !== '' ? String(s[f.field_key]) : '-'}
+                                  </td>
+                                ))}
+                                <td className={`${CUI_TD} ${CUI_CELL_META} text-right`}>{s.total_purchase_amount?.toLocaleString() || '-'}</td>
+                              </tr>
                             ))}
-                            <span className="ml-auto pl-2">누적구매</span>
-                          </div>
-                        )}
-                        {aiNlResult.samples.map((s) => (
-                          <div key={s.id} className="flex items-center gap-2 text-[10px] py-1 border-b border-gray-100">
-                            <span className="text-gray-800 font-mono w-28">{s.phone}</span>
-                            <span className="text-gray-600 w-16 truncate">{s.name || '-'}</span>
-                            <span className="text-gray-400 w-10">{s.gender || '-'}</span>
-                            <span className="text-gray-400 w-16 truncate">{s.region || '-'}</span>
-                            {aiNlResult.sampleFields.map((f) => (
-                              <span key={f.field_key} className="text-gray-700 w-20 truncate">
-                                {s[f.field_key] != null && s[f.field_key] !== '' ? String(s[f.field_key]) : '-'}
-                              </span>
-                            ))}
-                            <span className="text-gray-400 ml-auto pl-2 truncate">{s.total_purchase_amount?.toLocaleString() || '-'}</span>
-                          </div>
-                        ))}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* 0건 안내 (자동 완화 X — D171 영구 룰) */}
                 {aiNlResult.matchCount === 0 && (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-                    <p className="text-xs text-amber-800">
-                      매칭되는 고객이 0명입니다. 조건을 더 넓혀주세요. (자동 완화는 마케팅 의도 보호를 위해 차단됩니다)
-                    </p>
+                  <div className={`${CUI_NOTICE} !mt-0`}>
+                    <AlertTriangle className={`w-4 h-4 ${CUI_NOTICE_ICON}`} />
+                    <p className={CUI_NOTICE_TEXT}>매칭되는 고객이 0명입니다. 조건을 더 넓혀 주세요. 자동 완화는 마케팅 의도를 지키기 위해 하지 않습니다.</p>
                   </div>
                 )}
 
-                {/* 액션 */}
-                <div className="flex gap-2 pt-1">
-                  <button
-                    onClick={resetAiNlMode}
-                    disabled={aiNlExtracting}
-                    className="px-3 py-2 text-xs text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg disabled:opacity-40"
-                  >
+                <div className="flex items-center gap-2 pt-1">
+                  <button type="button" onClick={resetAiNlMode} disabled={aiNlExtracting} className={CUI_BTN_GHOST}>
                     다시 입력
                   </button>
                   <button
+                    type="button"
                     onClick={handleAiNlApply}
                     disabled={aiNlResult.matchCount === 0 || aiNlExtracting}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold shadow-md"
+                    className={`${CUI_BTN_PRIMARY} flex-1 justify-center h-10`}
                   >
                     {aiNlExtracting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                    {aiNlExtracting ? '추출 중...' : `이대로 ${aiNlResult.matchCount.toLocaleString()}명 추출`}
+                    {aiNlExtracting ? '추출 중' : `이대로 ${aiNlResult.matchCount.toLocaleString()}명 추출`}
                   </button>
                 </div>
 
-                {/* Source caption */}
-                <p className="text-[9px] text-gray-400 italic text-center mt-2">
-                  Data source: AI 자연어 변환 + 검증된 SQL 필터 빌더 통과 (단 1의 오차 X 본질)
-                </p>
+                <p className="text-[10px] text-neutral-400 italic text-center">Data source: AI 자연어 변환 + 검증된 필터 빌더 (조건 밖 고객 0)</p>
               </div>
             )}
           </div>
         ) : (
         <>
-
-        {/* 필터 영역 */}
-        <div className="p-4 space-y-3 overflow-y-auto max-h-[68vh]">
-          {/* 헤더 바 */}
+        <div className={CUI_MODAL_BODY}>
+          {/* 필터 헤더 바 */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-gray-700">필터 조건</span>
+              <span className={CUI_FIELDSET_TITLE}>필터 조건</span>
               {activeFilterCount > 0 && (
-                <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-bold">
-                  {activeFilterCount}개 설정
-                </span>
+                <span className={`${CUI_PILL_BASE} bg-indigo-100 text-indigo-700`}>{activeFilterCount}개 설정</span>
               )}
             </div>
-            <button onClick={resetAll} className="flex items-center gap-1 text-xs text-green-600 hover:text-green-700 font-medium transition-colors">
-              <RotateCcw className="w-3 h-3" />
+            <button type="button" onClick={resetAll} className={`${CUI_BTN_GHOST} h-8 px-2.5 text-[12.5px]`}>
+              <RotateCcw className="w-3.5 h-3.5" />
               초기화
             </button>
           </div>
 
-          {/* 로딩/빈 */}
           {!fieldsLoaded ? (
-            <div className="text-center py-6 text-gray-400 text-sm">
-              <div className="inline-block w-5 h-5 border-2 border-gray-300 border-t-green-500 rounded-full animate-spin mb-2" />
-              <div>필드 로딩 중...</div>
+            <div className={CUI_LOADING}>
+              <div className={CUI_SPINNER} />
+              <div>필드를 불러오는 중</div>
             </div>
           ) : allFields.length === 0 ? (
-            <div className="text-center py-6 text-gray-400 text-sm">
-              고객 데이터를 먼저 업로드해주세요
+            <div className={CUI_EMPTY}>
+              <div className={CUI_EMPTY_BADGE}><Users className="w-5 h-5" /></div>
+              <div className={CUI_EMPTY_TITLE}>고객 데이터가 아직 없습니다</div>
+              <div className={CUI_EMPTY_DESC}>고객 관리에서 파일을 올리거나 자사몰을 연동하면 필터 항목이 여기에 나타납니다.</div>
             </div>
           ) : (
-            /* 카테고리 아코디언 */
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               {allCategories.map(cat => {
                 const catFields = allFields.filter((f: any) => f.category === cat);
                 if (catFields.length === 0) return null;
 
-                const label = `${CAT_ICONS[cat] || '📌'} ${categoryLabels[cat] || cat}`;
+                const CatIcon = CAT_ICONS[cat] || Pin;
                 const selectedInCat = catFields.filter((f: any) => hasFilterValue(f.field_key)).length;
                 const isExpanded = expandedCats[cat] ?? false;
 
                 return (
-                  <div key={cat} className="border border-gray-200 rounded-xl overflow-hidden">
+                  <div key={cat} className="rounded-xl border border-neutral-200 bg-white overflow-hidden">
                     <button type="button"
                       onClick={() => setExpandedCats(prev => ({ ...prev, [cat]: !prev[cat] }))}
-                      className="w-full px-3.5 py-2.5 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-gray-700">{label}</span>
-                        <span className="text-xs text-gray-400">({catFields.length})</span>
+                      className="w-full h-12 px-4 flex items-center justify-between hover:bg-neutral-50 transition-colors">
+                      <div className="flex items-center gap-2.5">
+                        <span className="h-7 w-7 rounded-lg bg-indigo-50 text-indigo-600 grid place-items-center">
+                          <CatIcon className="w-4 h-4" />
+                        </span>
+                        <span className="text-[13.5px] font-semibold text-neutral-900">{categoryLabels[cat] || cat}</span>
+                        <span className="text-[12px] text-neutral-400 tabular-nums">{catFields.length}</span>
                         {selectedInCat > 0 && (
-                          <span className="px-1.5 py-0.5 bg-green-600 text-white text-xs rounded-full font-bold min-w-[18px] text-center">{selectedInCat}</span>
+                          <span className="h-5 min-w-[20px] px-1.5 rounded-full bg-indigo-600 text-white text-[11px] font-bold grid place-items-center tabular-nums">{selectedInCat}</span>
                         )}
                       </div>
-                      <svg className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
+                      <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
                     </button>
 
-                    {/* 2열 그리드 */}
                     {isExpanded && (
-                      <div className="p-3 bg-white border-t border-gray-100 grid grid-cols-2 gap-2">
+                      <div className="p-3 border-t border-neutral-100 grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {catFields.map((field: any) => {
                           const fk = field.field_key;
                           const isSelected = selectedFields.has(fk);
                           const hasValue = hasFilterValue(fk);
-
-                          // 범위 입력이 필요한 숫자 필드는 2열 차지
                           const needsWide = isSelected && field.data_type === 'number' && fk !== 'age';
                           return (
-                            <div key={fk}
-                              className={`rounded-lg transition-all duration-150 ${needsWide ? 'col-span-2' : ''} ${isSelected ? 'bg-green-50/80 border border-green-200 p-2.5' : 'border border-transparent p-2.5 hover:bg-gray-50'}`}>
-                              <label className="flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox" checked={isSelected} onChange={() => toggleField(fk)}
-                                  className="w-3.5 h-3.5 text-green-600 rounded focus:ring-green-500 border-gray-300 cursor-pointer" />
-                                <span className={`text-xs font-medium ${isSelected ? 'text-green-700' : 'text-gray-600'}`}>
-                                  {field.display_name}
+                            <div key={fk} className={`${isSelected ? CUI_PICK_ON : CUI_PICK_OFF} ${needsWide ? 'sm:col-span-2' : ''}`}>
+                              <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                                <input type="checkbox" checked={isSelected} onChange={() => toggleField(fk)} className="sr-only" />
+                                <span className={`h-4 w-4 rounded border grid place-items-center shrink-0 transition ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-neutral-300'}`}>
+                                  {isSelected && <Check className="w-3 h-3" strokeWidth={3} />}
                                 </span>
+                                <span className={`text-[13px] ${isSelected ? 'font-semibold text-indigo-900' : 'font-medium text-neutral-700'}`}>{field.display_name}</span>
                                 {hasValue && (
-                                  <span className="ml-auto text-[10px] bg-green-600 text-white px-1.5 py-0.5 rounded font-medium">설정</span>
+                                  <span className="ml-auto text-[10.5px] font-semibold px-1.5 py-px rounded bg-indigo-600 text-white">설정</span>
                                 )}
                               </label>
                               {isSelected && renderCondition(field)}
@@ -1027,58 +1010,33 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
             </div>
           )}
 
-          {/* 조회 버튼 */}
-          <button onClick={loadTargetCount} disabled={countLoading}
-            className="w-full py-2.5 border-2 border-green-600 text-green-700 rounded-xl hover:bg-green-50 transition-all font-semibold disabled:opacity-50 flex items-center justify-center gap-2 text-sm">
-            {countLoading ? (
-              <>
-                <div className="w-4 h-4 border-2 border-green-300 border-t-green-600 rounded-full animate-spin" />
-                조회 중...
-              </>
-            ) : (
-              <>
-                <Search className="w-4 h-4" />
-                대상 인원 조회
-              </>
-            )}
+          <button type="button" onClick={loadTargetCount} disabled={countLoading}
+            className={`${CUI_BTN_OUTLINE} w-full h-11 justify-center text-[14px] text-indigo-700 border-indigo-200 hover:bg-indigo-50 hover:border-indigo-300`}>
+            {countLoading ? <div className={CUI_SPINNER} /> : <Search className="w-4 h-4" />}
+            {countLoading ? '조회 중' : '대상 인원 조회'}
           </button>
         </div>
 
         {/* 푸터 */}
-        <div className="px-5 py-3 border-t border-gray-100 bg-gradient-to-r from-gray-50 to-green-50/30">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-green-100 rounded-full flex items-center justify-center">
-                <Users className="w-4 h-4 text-green-600" />
-              </div>
-              <div>
-                <div className="text-xs text-gray-500">대상 인원</div>
-                <div className="text-xl font-bold text-green-700">
-                  {countLoading ? '...' : targetCount.toLocaleString()}
-                  <span className="text-sm font-normal text-gray-500 ml-1">명</span>
-                </div>
+        <div className="shrink-0 px-6 py-4 border-t border-neutral-200 bg-neutral-50 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-white ring-1 ring-indigo-600/15 text-indigo-600 grid place-items-center">
+              <Users className="w-4.5 h-4.5" />
+            </div>
+            <div>
+              <div className="text-[12px] text-neutral-500">대상 인원</div>
+              <div className="text-xl font-bold text-neutral-900 tabular-nums leading-tight">
+                {countLoading ? '...' : targetCount.toLocaleString()}
+                <span className="text-[13px] font-medium text-neutral-500 ml-1">명</span>
               </div>
             </div>
-            <div className="flex gap-2">
-              <button onClick={handleClose}
-                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors font-medium text-sm">
-                취소
-              </button>
-              <button onClick={handleExtract} disabled={targetCount === 0 || extracting}
-                className="px-5 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm">
-                {extracting ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    추출 중...
-                  </>
-                ) : (
-                  <>
-                    <Users className="w-3.5 h-3.5" />
-                    타겟 추출
-                  </>
-                )}
-              </button>
-            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={handleClose} className={CUI_BTN_OUTLINE}>취소</button>
+            <button type="button" onClick={handleExtract} disabled={targetCount === 0 || extracting} className={`${CUI_BTN_PRIMARY} px-5`}>
+              {extracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Users className="w-4 h-4" />}
+              {extracting ? '추출 중' : '타겟 추출'}
+            </button>
           </div>
         </div>
         </>
@@ -1086,40 +1044,19 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
       </div>
     </div>
 
-    {/* 커스텀 알림 모달 */}
+    {/* 알림 모달(커스텀, native dialog 아님) */}
     {alertModal.show && (
-      <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] animate-in fade-in duration-150">
-        <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full mx-4 animate-in zoom-in-95 duration-200 overflow-hidden">
-          <div className="p-6 text-center">
-            <div className={`w-12 h-12 mx-auto mb-3 rounded-full flex items-center justify-center ${
-              alertModal.type === 'error' ? 'bg-red-100' : alertModal.type === 'warning' ? 'bg-amber-100' : 'bg-blue-100'
-            }`}>
-              {alertModal.type === 'error' ? (
-                <svg className="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              ) : alertModal.type === 'warning' ? (
-                <svg className="w-6 h-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                </svg>
-              ) : (
-                <svg className="w-6 h-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              )}
+      <div className={`${CUI_MODAL_SCRIM} z-[60]`}>
+        <div className={`${CUI_MODAL} max-w-sm`} role="alertdialog" aria-modal="true" aria-label={alertModal.title}>
+          <div className="px-6 pt-7 pb-5 text-center">
+            <div className={`h-12 w-12 mx-auto mb-3 rounded-2xl grid place-items-center ${alertTone.ring}`}>
+              <alertTone.Icon className="w-6 h-6" />
             </div>
-            <h4 className="text-base font-bold text-gray-800 mb-1.5">{alertModal.title}</h4>
-            <p className="text-sm text-gray-500 leading-relaxed">{alertModal.message}</p>
+            <h4 className={CUI_MODAL_TITLE}>{alertModal.title}</h4>
+            <p className="mt-1.5 text-[13px] text-neutral-500 leading-relaxed">{alertModal.message}</p>
           </div>
-          <div className="px-6 pb-5">
-            <button
-              onClick={() => setAlertModal(prev => ({ ...prev, show: false }))}
-              className={`w-full py-2.5 rounded-xl font-semibold text-sm transition-colors ${
-                alertModal.type === 'error' ? 'bg-red-600 hover:bg-red-700 text-white'
-                : alertModal.type === 'warning' ? 'bg-amber-500 hover:bg-amber-600 text-white'
-                : 'bg-blue-600 hover:bg-blue-700 text-white'
-              }`}
-            >확인</button>
+          <div className="px-6 pb-6">
+            <button type="button" onClick={() => setAlertModal(prev => ({ ...prev, show: false }))} className={`${alertTone.btn} w-full h-10 justify-center`}>확인</button>
           </div>
         </div>
       </div>

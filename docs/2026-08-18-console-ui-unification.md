@@ -77,7 +77,10 @@
 
 ---
 
+- **2026-08-21 직접 타겟 설정·직접 타겟 발송 리프트(인디고)** — Harold "촌스럽다, 직접발송보다 모던한 인디고로". 기능·state·핸들러 100% 유지, 표면만 교체: 타겟 설정 = `CUI_MODAL*`·`CUI_PICK`·lucide 카테고리 아이콘(이모지 0)·샘플 표 `CUI_T*` / 타겟 발송 = `SendWorkspaceShell`(accent `indigo` 신설, `FIELD_CLASS_INDIGO`, `zClass` prop: 대시보드 z-[60]·[70] 중첩 모달 위 유지를 위해 옛 z-50 전달)에 좌 작성기 440px(세그먼트·링 카드·lucide 도구줄·변수 칩)·우 수신자 표 `CUI_T*`. 알림톡 버튼은 amber 유지. 게이트 = tsc 0 · 불변식 4종.
+
 ## §5 남은 것
+- 직접발송 패널(`DirectSendPanel`, 에메랄드 `ds-*` CSS)은 그대로다. 같은 대시보드에서 직접발송 초록 / 타겟 모달 인디고가 공존한다. 직접발송까지 인디고로 맞출지는 Harold 판단(별건).
 
 - **등장 애니메이션 복구** — 하려면 `ResultsModal`의 중첩 오버레이 6곳 + `CampaignDetailModal` + `CalendarModal` 호출부를 `createPortal`로 뺀 뒤에야 `CUI_MODAL`에 transform을 되돌릴 수 있다. 지금은 뺀 상태가 정상이다.
 - **`SenderRegistrationWizard` 톤** — 슈퍼관리자 화면과 공유. 되돌릴지 Harold 판단 대기.

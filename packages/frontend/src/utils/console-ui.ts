@@ -16,6 +16,7 @@
  *   - 카카오 & RCS (페이지 1 + 섹션 2 + 폼 모달 3 + 부속 모달 3 + 폼 내부 편집기 3)
  *   - 발송 결과 (ResultsModal · CampaignDetailModal)
  *   - 수신거부 관리 · 회사 설정
+ *   - 직접 타겟 설정 모달(DirectTargetFilterModal) · 직접 타겟 발송(TargetSendModal, SendWorkspaceShell indigo 액센트) ★2026-08-21 리프트
  *
  * 액센트 = 인디고. `dm-tokens.ts`의 `DM_COLOR_TOKENS.brand.primary`(#4f46e5)와 같은 값이라
  *   Tailwind `indigo-600`/`indigo-700`(#4338ca)/`indigo-50`(#eef2ff)이 그대로 대응한다.

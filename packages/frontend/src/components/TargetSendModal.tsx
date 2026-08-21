@@ -1,4 +1,6 @@
-import { Sparkles } from 'lucide-react';
+import { Sparkles, Users, Eye, ShieldCheck, Smartphone, Type, Archive, Save, ImagePlus, Bell, Search, ChevronLeft, ChevronRight, RotateCcw, Trash2, Send } from 'lucide-react';
+import SendWorkspaceShell, { FIELD_CLASS_INDIGO } from './shared/SendWorkspaceShell';
+import { CUI_PILL_BASE, CUI_PANEL, CUI_SCROLL_X, CUI_THEAD, CUI_TH, CUI_TR, CUI_TD, CUI_CELL_DATA, CUI_BTN_GHOST, CUI_BTN_OUTLINE } from '../utils/console-ui';
 import { useRef, useState } from 'react';
 import type { FieldMeta } from './DirectTargetFilterModal';
 import { formatPreviewValue, formatByType, buildAdMessageFront, replaceVarsByFieldMeta, FRONT_FIELD_DISPLAY_MAP, reverseDisplayValueFront } from '../utils/formatDate';
@@ -399,559 +401,470 @@ export default function TargetSendModal({
   // ====== 렌더링 ======
   if (!show) return null;
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 md:p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[1400px] max-h-[95vh] overflow-y-auto">
-        {/* 헤더 */}
-        <div className="px-4 md:px-6 py-3 md:py-4 border-b flex justify-between items-center bg-green-50">
-          <div>
-            <h3 className="text-base md:text-xl font-bold text-gray-800">직접 타겟 발송</h3>
-            <p className="text-xs md:text-base text-gray-500 mt-1">추출된 <span className="font-bold text-emerald-600">{targetRecipients.length.toLocaleString()}명</span>에게 메시지를 발송합니다</p>
-          </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors text-gray-400 hover:text-gray-600"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+  // ★ 2026-08-21 표면 리프트(인디고): 기능·state·props·핸들러 100% 유지, 표면만 발송 공용 셸(SendWorkspaceShell)로.
+  //   이모지 버튼 → lucide, 회색 박스 → 링(ring)과 서브 서페이스, 에메랄드 → 인디고 액센트.
+  //   좌측(aside) = 작성기 440px, 우측 = 수신자 목록. md 이하 1컬럼.
+  const fullMsgBytes = calculateBytes(buildAdMessageFront(targetMessage, targetMsgType, adTextEnabled, optOutNumber));
+  const maxBytes = targetMsgType === 'SMS' ? 90 : 2000;
+  const bytesOver = fullMsgBytes > maxBytes;
+  const filteredRecipients = targetListSearch
+    ? targetRecipients.filter(r => r.phone?.includes(targetListSearch))
+    : targetRecipients;
+  const PAGE_SIZE = 15;
+  const pageStart = targetListPage * PAGE_SIZE;
+  const totalPages = Math.ceil(filteredRecipients.length / PAGE_SIZE);
+  const pageRows = filteredRecipients.slice(pageStart, pageStart + PAGE_SIZE);
+  const approvedTpl = ['approved', 'APPROVED', 'APR', 'A'].includes(kakaoSelectedTemplate?.status);
+
+  const SEG_ON = 'flex-1 h-9 rounded-lg text-[13px] font-semibold text-indigo-700 bg-white shadow-sm transition';
+  const SEG_OFF = 'flex-1 h-9 rounded-lg text-[13px] font-medium text-slate-500 hover:text-slate-900 transition';
+  const TOOL_BTN = 'h-8 px-2.5 rounded-lg text-[12px] font-medium text-slate-600 hover:bg-white hover:text-slate-900 inline-flex items-center gap-1 transition';
+  const ACTION_BTN = 'h-10 rounded-xl bg-white ring-1 ring-slate-200 text-[13px] font-semibold text-slate-700 hover:ring-indigo-400 hover:text-indigo-700 inline-flex items-center justify-center gap-1.5 transition disabled:opacity-40 disabled:pointer-events-none';
+  const OPT_ON = 'rounded-xl ring-1 ring-indigo-300 bg-indigo-50/60 p-3 text-center';
+  const OPT_OFF = 'rounded-xl ring-1 ring-slate-200 bg-white p-3 text-center';
+
+  const composer = (
+    <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-3">
+      {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시. 채널 탭 자체 제거.
+          직접타겟발송 = 문자(SMS/LMS/MMS) 단일 모드. 알림톡은 수신자 목록 위 '알림톡 발송' 버튼으로 진입 → AlimtalkSendModal 풀 화면.
+          targetSendChannel state는 'sms' 고정. ★ 2026-08-17 죽어 있던 RCS 분기 제거(직접발송과 같은 축). */}
+      {targetSendChannel === 'sms' && (<>
+        {/* SMS/LMS/MMS 세그먼트 */}
+        <div className="flex p-1 rounded-xl bg-slate-200/60">
+          <button type="button" onClick={() => { setTargetMsgType('SMS'); setMmsUploadedImages([]); setLmsKeepAccepted(false); }} className={targetMsgType === 'SMS' ? SEG_ON : SEG_OFF}>SMS</button>
+          <button type="button" onClick={() => { setTargetMsgType('LMS'); setMmsUploadedImages([]); setLmsKeepAccepted(false); }} className={targetMsgType === 'LMS' ? SEG_ON : SEG_OFF}>LMS</button>
+          <button type="button" onClick={() => { setTargetMsgType('MMS'); setLmsKeepAccepted(false); }} className={targetMsgType === 'MMS' ? SEG_ON : SEG_OFF}>MMS</button>
         </div>
 
-        {/* 본문 — D186: 모바일 stacked (md 이하) + 데스크탑 좌우 분할 */}
-        <div className="px-4 md:px-6 py-4 md:py-5 flex flex-col md:flex-row gap-4 md:gap-5">
-          {/* ========== 좌측: 메시지 작성 ========== */}
-          <div className="w-full md:w-[400px] md:shrink-0">
-            {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시 — 채널 탭 자체 제거.
-                직접타겟발송 = 문자(SMS/LMS/MMS) 단일 모드.
-                알림톡은 수신번호 검색 옆 카카오 노란색 '알림톡 발송' 버튼으로 진입 → AlimtalkSendModal 풀 화면.
-                targetSendChannel state는 'sms' 고정.
-                ★ 2026-08-17 죽어 있던 RCS 분기 제거(직접발송과 같은 축). */}
-
-            {/* === SMS 채널 === */}
-            {targetSendChannel === 'sms' && (<>
-            {/* SMS/LMS/MMS 서브탭 */}
-            <div className="flex mb-2 bg-gray-50 rounded-lg p-0.5">
-              <button
-                onClick={() => { setTargetMsgType('SMS'); setMmsUploadedImages([]); setLmsKeepAccepted(false); }}
-                className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${targetMsgType === 'SMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
-              >SMS</button>
-              <button
-                onClick={() => { setTargetMsgType('LMS'); setMmsUploadedImages([]); setLmsKeepAccepted(false); }}
-                className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${targetMsgType === 'LMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
-              >LMS</button>
-              <button
-                onClick={() => { setTargetMsgType('MMS'); setLmsKeepAccepted(false); }}
-                className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${targetMsgType === 'MMS' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
-              >MMS</button>
-            </div>
-
-            {/* SMS 메시지 작성 영역 */}
-            <div className="border-2 border-gray-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-              {/* LMS/MMS 제목 */}
-              {(targetMsgType === 'LMS' || targetMsgType === 'MMS') && (
-                <div className="px-4 pt-3">
-                  <div className="relative">
-                    {adTextEnabled && (
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-orange-600 font-medium pointer-events-none select-none">(광고) </span>
-                    )}
-                    <input
-                      type="text"
-                      value={targetSubject}
-                      onChange={(e) => setTargetSubject(e.target.value)}
-                      placeholder={adTextEnabled ? "제목 입력 (필수)" : "제목 (필수)"}
-                      style={adTextEnabled ? { paddingLeft: '52px' } : {}}
-                      className="w-full px-3 py-2 border border-orange-300 bg-orange-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-orange-400"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* 메시지 입력 */}
-              <div className="p-4">
-                <div className="relative">
-                  {adTextEnabled && (
-                    <span className="absolute left-0 top-0 text-sm text-orange-600 font-medium pointer-events-none select-none">(광고) </span>
-                  )}
-                  <textarea
-                    ref={smsTextareaRef}
-                    data-char-target="target"
-                    value={targetMessage}
-                    onChange={(e) => {
-                      const text = e.target.value;
-                      setTargetMessage(text);
-                    }}
-                    placeholder="전송하실 내용을 입력하세요."
-                    style={adTextEnabled ? { textIndent: '42px' } : {}}
-                    className={`w-full resize-none border-0 focus:outline-none text-sm leading-relaxed ${targetMsgType === 'SMS' ? 'h-[180px]' : 'h-[140px]'}`}
-                  />
-                </div>
-                {/* 무료거부 표기 */}
+        {/* 작성 카드 */}
+        <div className="rounded-2xl bg-white ring-1 ring-slate-900/5 shadow-sm overflow-hidden">
+          {(targetMsgType === 'LMS' || targetMsgType === 'MMS') && (
+            <div className="px-4 pt-4">
+              <div className="relative">
                 {adTextEnabled && (
-                  <div className="text-sm text-orange-600 mt-1">
-                    {targetMsgType === 'SMS'
-                      ? `무료거부${optOutNumber.replace(/-/g, '')}`
-                      : `무료수신거부 ${formatRejectNumber(optOutNumber)}`}
-                  </div>
-                )}
-              </div>
-
-              {/* 버튼들 + 바이트 표시 */}
-              <div className="px-3 py-1.5 bg-gray-50 border-t flex items-center justify-between">
-                <div className="flex items-center gap-0.5">
-                  <button onClick={handleAiMsgHelper} className="px-2 py-1 text-xs bg-gradient-to-r from-violet-500 to-blue-500 text-white rounded hover:from-violet-600 hover:to-blue-600 flex items-center gap-0.5 shadow-sm"><Sparkles className="w-3 h-3" />AI추천</button>
-                  <button onClick={() => setShowSpecialChars('target')} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">특수문자</button>
-                  <button onClick={() => { loadTemplates(); setShowTemplateBox('target'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">보관함</button>
-                  <button onClick={() => { if (!targetMessage.trim()) { setToast({show: true, type: 'error', message: '저장할 메시지를 먼저 입력해주세요.'}); setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000); return; } setTemplateSaveName(''); setShowTemplateSave('target'); }} className="px-2 py-1 text-xs bg-white border rounded hover:bg-gray-100">문자저장</button>
-                </div>
-                <span className="text-xs text-gray-500 whitespace-nowrap">
-                  <span className={`font-bold ${(() => {
-                    const fullMsg = buildAdMessageFront(targetMessage, targetMsgType, adTextEnabled, optOutNumber);
-                    const bytes = calculateBytes(fullMsg);
-                    const max = targetMsgType === 'SMS' ? 90 : 2000;
-                    return bytes > max ? 'text-red-500' : 'text-emerald-600';
-                  })()}`}>
-                    {(() => {
-                      const fullMsg = buildAdMessageFront(targetMessage, targetMsgType, adTextEnabled, optOutNumber);
-                      return calculateBytes(fullMsg);
-                    })()}
-                  </span>/{targetMsgType === 'SMS' ? 90 : 2000}byte
-                </span>
-              </div>
-
-              {/* 회신번호 선택 */}
-              <div className="px-3 py-1.5 border-t">
-                <select
-                  value={useIndividualCallback ? `__col__${individualCallbackColumn}` : selectedCallback}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val.startsWith('__col__')) {
-                      setUseIndividualCallback(true);
-                      setSelectedCallback('');
-                      setIndividualCallbackColumn(val.replace('__col__', ''));
-                    } else {
-                      setUseIndividualCallback(false);
-                      setSelectedCallback(val);
-                      setIndividualCallbackColumn('');
-                    }
-                  }}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value="">회신번호 선택</option>
-                  <optgroup label="수신자별 회신번호 컬럼">
-                    {/* ★ D103: phoneFields 기반 동적 필터 (displayName 하드코딩 제거) */}
-                    {fieldsMeta
-                      .filter(f => phoneFields?.includes(f.field_key))
-                      .map(f => (
-                        <option key={f.field_key} value={`__col__${f.field_key}`}>
-                          {f.display_name} (수신자별)
-                        </option>
-                      ))
-                    }
-                  </optgroup>
-                  <optgroup label="등록된 회신번호">
-                    {callbackNumbers.map((cb) => (
-                      <option key={cb.id} value={cb.phone}>
-                        {formatPhoneNumber(cb.phone)} {cb.label ? `(${cb.label})` : ''} {cb.is_default ? '⭐' : ''}
-                      </option>
-                    ))}
-                  </optgroup>
-                </select>
-                {useIndividualCallback && (
-                  <p className="text-xs text-blue-600 mt-1">
-                    각 수신자의 <strong>{fieldsMeta.find(f => f.field_key === individualCallbackColumn)?.display_name || individualCallbackColumn}</strong> 값으로 발송됩니다
-                  </p>
-                )}
-              </div>
-
-              {/* ★ 자동입력 드롭다운 — fieldsMeta 기반 동적 (하드코딩 제거) */}
-              <div className="px-3 py-1.5 border-t bg-gray-50">
-                <div className="flex items-center gap-3">
-                  <span className="text-sm font-bold text-gray-700 whitespace-nowrap">자동입력</span>
-                  <select
-                    value=""
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        insertVariable(e.target.value, 'sms');
-                      }
-                    }}
-                    className="flex-1 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option value="">변수 선택</option>
-                    {variableFields.map(fm => (
-                      <option key={fm.field_key} value={fm.variable}>{fm.display_name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* ★ 2026-07-02 브랜드 링크 — 칩 클릭 = 커서 위치 URL 삽입 (insertAtCursor CT 재사용) */}
-              <div className="px-3 py-1.5 border-t bg-gray-50">
-                <BrandLinkChips
-                  tone="light"
-                  onToast={(message, type) => setToast({ show: true, type: type === 'error' ? 'error' : 'success', message })}
-                  onInsert={(u) => {
-                    const ok = insertAtCursor(smsTextareaRef.current, u, setTargetMessage);
-                    if (!ok) setTargetMessage(targetMessage + u);
-                  }}
-                />
-              </div>
-
-              {/* MMS 이미지 업로드 영역 — B16-05: MMS 탭에서만 표시 (SMS/LMS 전환 시 잔존 방지) */}
-              {targetMsgType === 'MMS' && (
-                <div className="px-3 py-2 border-t bg-amber-50/50 cursor-pointer hover:bg-amber-100/50 transition-colors" onClick={() => setShowMmsUploadModal(true)}>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-gray-600">🖼️ MMS 이미지</span>
-                    {mmsUploadedImages.length > 0 ? (
-                      <div className="flex items-center gap-1">
-                        {/* ★ B3: 공용 컴포넌트 MmsImagePreview 사용 */}
-                        <MmsImagePreview images={mmsUploadedImages} size="xs" compact />
-                        <span className="text-xs text-purple-600 ml-1">✏️ 수정</span>
-                      </div>
-                    ) : (
-                      <span className="text-xs text-amber-600">클릭하여 이미지 첨부 →</span>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* 테스트 결과 표시 */}
-              {testSentResultProp && (
-                <div className={`mx-3 mt-1.5 p-2.5 rounded-lg text-xs whitespace-pre-wrap ${testSentResultProp.startsWith('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                  {testSentResultProp}
-                </div>
-              )}
-
-              {/* 미리보기 + 스팸필터 + 담당자테스트 버튼 */}
-              <div className="px-3 py-1.5 border-t">
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    onClick={handlePreview}
-                    className="py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium transition-colors"
-                  >📄 미리보기</button>
-                  <button
-                    onClick={handleSpamFilter}
-                    className="py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors"
-                  >🛡️ 스팸필터</button>
-                  <button
-                    onClick={handleTargetTestSend}
-                    disabled={testSendingProp || testCooldownProp || !targetMessage.trim()}
-                    className="py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >{testSendingProp ? '📱 발송중...' : testCooldownProp ? '⏳ 10초 대기' : '📱 담당자테스트'}</button>
-                </div>
-              </div>
-
-              {/* 예약/분할/광고 옵션 - 3분할 */}
-              <div className="px-3 py-2 border-t">
-                <div className="grid grid-cols-3 gap-2 text-xs">
-                  {/* 예약전송 */}
-                  <div className={`rounded-lg p-3 text-center ${reserveEnabled ? 'bg-blue-50' : 'bg-gray-50'}`}>
-                    <label className="flex items-center justify-center gap-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={reserveEnabled}
-                        onChange={(e) => {
-                          setReserveEnabled(e.target.checked);
-                          if (e.target.checked) setShowReservePicker(true);
-                        }}
-                        className="rounded w-4 h-4"
-                      />
-                      <span className={`font-medium ${reserveEnabled ? 'text-blue-700' : ''}`}>예약전송</span>
-                    </label>
-                    <div
-                      className={`mt-1.5 text-xs cursor-pointer ${reserveEnabled ? 'text-blue-600 font-medium' : 'text-gray-400'}`}
-                      onClick={() => reserveEnabled && setShowReservePicker(true)}
-                    >
-                      {reserveDateTime
-                        ? new Date(reserveDateTime).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                        : '예약시간 선택'}
-                    </div>
-                  </div>
-                  {/* 분할전송 */}
-                  <div className={`rounded-lg p-3 text-center ${splitEnabled ? 'bg-purple-50' : 'bg-gray-50'}`}>
-                    <label className="flex items-center justify-center gap-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        className="rounded w-4 h-4"
-                        checked={splitEnabled}
-                        onChange={(e) => setSplitEnabled(e.target.checked)}
-                      />
-                      <span className={`font-medium ${splitEnabled ? 'text-purple-700' : ''}`}>분할전송</span>
-                    </label>
-                    <div className="mt-1.5 flex items-center justify-center gap-1">
-                      <input
-                        type="number"
-                        className="w-14 border rounded px-1.5 py-1 text-xs text-center"
-                        placeholder="1000"
-                        value={splitCount}
-                        onChange={(e) => setSplitCount(Number(e.target.value) || 1000)}
-                        disabled={!splitEnabled}
-                      />
-                      <span className="text-xs text-gray-500">건/분</span>
-                    </div>
-                  </div>
-                  {/* 광고/080 */}
-                  <div className={`rounded-lg p-3 text-center ${adTextEnabled ? 'bg-orange-50' : 'bg-gray-50'}`}>
-                    <label className="flex items-center justify-center gap-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={adTextEnabled}
-                        onChange={(e) => handleAdToggle(e.target.checked)}
-                        className="rounded w-4 h-4"
-                      />
-                      <span className={`font-medium ${adTextEnabled ? 'text-orange-700' : ''}`}>광고표기</span>
-                    </label>
-                    <div className={`mt-1.5 text-xs ${adTextEnabled ? 'text-orange-500' : 'text-gray-400'}`}>080 수신거부</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* 전송하기 버튼 */}
-              <div className="px-3 py-2 border-t">
-                <button
-                  onClick={handleSmsSend}
-                  disabled={targetSending}
-                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-base transition-colors disabled:opacity-50"
-                >
-                  {targetSending ? '발송 중...' : '전송하기'}
-                </button>
-              </div>
-            </div>
-            </>)}
-
-            {/* ★ 2026-08-17 RCS 채널 블록 제거 — 직접발송과 같은 죽은 분기였다.
-                "미지원 단말은 SMS/LMS로 자동 폴백" 안내도 함께 내렸다(그렇게 동작한 적이 없다). */}
-
-            {/* === 카카오 알림톡 채널 (D130: AlimtalkChannelPanel 공용) === */}
-            {targetSendChannel === 'kakao_alimtalk' && (
-              <div className="space-y-2">
-                <AlimtalkChannelPanel
-                  senders={alimtalkSenders}
-                  templates={kakaoTemplates as AlimtalkTemplate[]}
-                  customerFieldOptions={customerFieldOptions}
-                  value={{
-                    profileId: alimtalkProfileId,
-                    templateCode: kakaoSelectedTemplate?.template_code || '',
-                    templateId: kakaoSelectedTemplate?.id || '',
-                    variableMap: kakaoTemplateVars,
-                    nextType: alimtalkFallback,
-                    nextContents: alimtalkNextContents,
-                    // ★ 2026-07-27: nextSubject 배선 누락 정정 — 값을 안 내려주고 안 받아올려
-                    //   LMS 대체 제목이 화면엔 떠도 발송 payload엔 항상 빈 값이었다(D224+와 같은 사고).
-                    nextSubject: alimtalkNextSubject,
-                  }}
-                  onChange={(v: AlimtalkChannelState) => {
-                    if (setAlimtalkProfileId) setAlimtalkProfileId(v.profileId);
-                    const nextTpl =
-                      kakaoTemplates.find((t: any) => t.id === v.templateId) || null;
-                    setKakaoSelectedTemplate(nextTpl);
-                    setKakaoTemplateVars(v.variableMap);
-                    if (setAlimtalkFallback) setAlimtalkFallback(v.nextType);
-                    if (setAlimtalkNextContents) setAlimtalkNextContents(v.nextContents);
-                    if (setAlimtalkNextSubject) setAlimtalkNextSubject(v.nextSubject || '');
-                  }}
-                />
-                <div className="bg-white rounded-2xl border-2 border-blue-200 px-3 py-2">
-                  <button
-                    onClick={() => {
-                      if (!kakaoSelectedTemplate) { setToast({ show: true, type: 'error', message: '템플릿을 선택해주세요' }); return; }
-                      if (!['approved', 'APPROVED', 'APR', 'A'].includes(kakaoSelectedTemplate.status)) { setToast({ show: true, type: 'error', message: '승인된 템플릿만 발송 가능합니다' }); return; }
-                      handleAlimtalkSend();
-                    }}
-                    disabled={
-                      !kakaoSelectedTemplate ||
-                      !['approved', 'APPROVED', 'APR', 'A'].includes(kakaoSelectedTemplate?.status) ||
-                      targetSending
-                    }
-                    className={`w-full py-3 rounded-xl font-bold text-base transition-colors disabled:opacity-50 ${
-                      ['approved', 'APPROVED', 'APR', 'A'].includes(kakaoSelectedTemplate?.status)
-                        ? 'bg-blue-500 hover:bg-blue-600 text-white'
-                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    }`}
-                  >
-                    {targetSending ? '발송 중...' : !kakaoSelectedTemplate ? '템플릿을 선택해주세요' : '🔔 알림톡 발송하기'}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-
-          {/* ========== 우측: 수신자 목록 ========== */}
-          <div className="flex-1 flex flex-col">
-            {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: 알림톡 채널일 때만 변수 매칭 박스 노출.
-                직접타겟발송도 직접발송과 동일 UX. 문자 채널 영향 0. */}
-            {targetSendChannel === 'kakao_alimtalk' && (
-              <div className="mb-3">
-                <AlimtalkVariableMappingPanel
-                  selectedTemplate={kakaoSelectedTemplate}
-                  variableMap={kakaoTemplateVars}
-                  onVariableMapChange={(next) => setKakaoTemplateVars(next)}
-                  customerFieldOptions={customerFieldOptions}
-                  sampleRecipient={targetRecipients[0] || null}
-                  recipientCount={targetRecipients.length}
-                />
-              </div>
-            )}
-
-            {/* 헤더 */}
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-3">
-                <span className="text-lg font-bold text-gray-800">수신자 목록</span>
-                <span className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-sm font-medium">
-                  총 {targetRecipients.length.toLocaleString()}건
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                {/* ★ D162-4 (2026-05-15) 4차: 알림톡 버튼 톤 다운 (창닫기와 괴리 없게).
-                    추출된 수신자(targetRecipients) 그대로 알림톡 모달로 인계. */}
-                {onAlimtalkOpen && (
-                  <button
-                    type="button"
-                    onClick={onAlimtalkOpen}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-700"
-                    title="추출된 수신자에게 알림톡 발송"
-                  >
-                    <Sparkles size={14} strokeWidth={1.75} />
-                    <span>알림톡 발송</span>
-                  </button>
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-indigo-600 font-semibold pointer-events-none select-none">(광고)</span>
                 )}
                 <input
                   type="text"
-                  placeholder="🔍 수신번호 검색"
-                  value={targetListSearch}
-                  onChange={(e) => { setTargetListSearch(e.target.value); setTargetListPage(0); }}
-                  className="border rounded-lg px-3 py-1.5 text-sm w-48"
+                  value={targetSubject}
+                  onChange={(e) => setTargetSubject(e.target.value)}
+                  placeholder="제목 (필수)"
+                  style={adTextEnabled ? { paddingLeft: '58px' } : {}}
+                  className={FIELD_CLASS_INDIGO}
                 />
-                {/* ★ D123: 중복제거/수신거부제거 체크박스 제거 — 직접타겟발송은 앞 단에서 이미 처리된 데이터 */}
               </div>
             </div>
+          )}
 
-            {/* ★ 테이블 — fieldsMeta 기반 동적 컬럼 (하드코딩 제거) */}
-            <div className="flex-1 border rounded-xl overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-2 py-2.5 text-center w-10">
-                        <input
-                          type="checkbox"
-                          className="rounded"
-                          checked={targetRecipients.length > 0 && selectedPhones.size === targetRecipients.length}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedPhones(new Set(targetRecipients.map((r, i) => `${r.phone}_${i}`)));
-                            } else {
-                              setSelectedPhones(new Set());
-                            }
-                          }}
-                        />
-                      </th>
-                      <th className="px-4 py-2.5 text-left font-medium text-gray-600 whitespace-nowrap">수신번호</th>
-                      {tableFields.map(fm => (
-                        <th key={fm.field_key} className="px-4 py-2.5 text-left font-medium text-gray-600 whitespace-nowrap">
-                          {fm.display_name}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(() => {
-                      const filtered = targetListSearch
-                        ? targetRecipients.filter(r => r.phone?.includes(targetListSearch))
-                        : targetRecipients;
-                      const pageSize = 15;
-                      const start = targetListPage * pageSize;
-                      return filtered.slice(start, start + pageSize).map((r, idx) => (
-                        <tr key={idx} className={`border-t hover:bg-gray-50 ${selectedPhones.has(`${r.phone}_${start + idx}`) ? 'bg-blue-50' : ''}`}>
-                          <td className="px-2 py-2 text-center">
-                            <input
-                              type="checkbox"
-                              className="rounded"
-                              checked={selectedPhones.has(`${r.phone}_${start + idx}`)}
-                              onChange={(e) => {
-                                const key = `${r.phone}_${start + idx}`;
-                                const next = new Set(selectedPhones);
-                                if (e.target.checked) next.add(key); else next.delete(key);
-                                setSelectedPhones(next);
-                              }}
-                            />
-                          </td>
-                          <td className="px-4 py-2 font-mono whitespace-nowrap">{r.phone}</td>
-                          {tableFields.map(fm => (
-                            <td key={fm.field_key} className="px-4 py-2 whitespace-nowrap">
-                              {formatCellValue(r[fm.field_key], fm.data_type, fm.field_key)}
-                            </td>
-                          ))}
-                        </tr>
-                      ));
-                    })()}
-                  </tbody>
-                </table>
+          <div className="p-4">
+            <div className="relative">
+              {adTextEnabled && (
+                <span className="absolute left-0 top-0 text-sm text-indigo-600 font-semibold pointer-events-none select-none">(광고)</span>
+              )}
+              <textarea
+                ref={smsTextareaRef}
+                data-char-target="target"
+                value={targetMessage}
+                onChange={(e) => setTargetMessage(e.target.value)}
+                placeholder="전송할 내용을 입력하세요."
+                style={adTextEnabled ? { textIndent: '42px' } : {}}
+                className={`w-full resize-none border-0 p-0 focus:outline-none focus:ring-0 text-sm leading-relaxed text-slate-800 placeholder:text-slate-300 ${targetMsgType === 'SMS' ? 'h-[180px]' : 'h-[140px]'}`}
+              />
+            </div>
+            {adTextEnabled && (
+              <div className="text-[12.5px] text-slate-500 mt-1">
+                {targetMsgType === 'SMS'
+                  ? `무료거부${optOutNumber.replace(/-/g, '')}`
+                  : `무료수신거부 ${formatRejectNumber(optOutNumber)}`}
+              </div>
+            )}
+          </div>
+
+          {/* 도구줄 + 바이트 */}
+          <div className="px-3 py-2 border-t border-slate-100 bg-slate-50/70 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-0.5 flex-wrap">
+              <button type="button" onClick={handleAiMsgHelper} className="h-8 px-2.5 rounded-lg text-[12px] font-semibold bg-indigo-600 text-white hover:bg-indigo-700 inline-flex items-center gap-1 transition shadow-sm">
+                <Sparkles className="w-3.5 h-3.5" />AI 추천
+              </button>
+              <button type="button" onClick={() => setShowSpecialChars('target')} className={TOOL_BTN}><Type className="w-3.5 h-3.5" />특수문자</button>
+              <button type="button" onClick={() => { loadTemplates(); setShowTemplateBox('target'); }} className={TOOL_BTN}><Archive className="w-3.5 h-3.5" />보관함</button>
+              <button type="button" onClick={() => { if (!targetMessage.trim()) { setToast({show: true, type: 'error', message: '저장할 메시지를 먼저 입력해주세요.'}); setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000); return; } setTemplateSaveName(''); setShowTemplateSave('target'); }} className={TOOL_BTN}><Save className="w-3.5 h-3.5" />문자 저장</button>
+            </div>
+            <span className="text-[12px] text-slate-500 tabular-nums whitespace-nowrap">
+              <span className={`font-bold ${bytesOver ? 'text-rose-600' : 'text-indigo-600'}`}>{fullMsgBytes}</span>/{maxBytes}byte
+            </span>
+          </div>
+
+          {/* 발신번호 */}
+          <div className="px-4 py-3 border-t border-slate-100">
+            <label className="block text-[12px] font-medium text-slate-500 mb-1.5">발신번호</label>
+            <select
+              value={useIndividualCallback ? `__col__${individualCallbackColumn}` : selectedCallback}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val.startsWith('__col__')) {
+                  setUseIndividualCallback(true);
+                  setSelectedCallback('');
+                  setIndividualCallbackColumn(val.replace('__col__', ''));
+                } else {
+                  setUseIndividualCallback(false);
+                  setSelectedCallback(val);
+                  setIndividualCallbackColumn('');
+                }
+              }}
+              className={FIELD_CLASS_INDIGO}
+            >
+              <option value="">회신번호 선택</option>
+              <optgroup label="수신자별 회신번호 컬럼">
+                {/* ★ D103: phoneFields 기반 동적 필터 (displayName 하드코딩 제거) */}
+                {fieldsMeta
+                  .filter(f => phoneFields?.includes(f.field_key))
+                  .map(f => (
+                    <option key={f.field_key} value={`__col__${f.field_key}`}>
+                      {f.display_name} (수신자별)
+                    </option>
+                  ))
+                }
+              </optgroup>
+              <optgroup label="등록된 회신번호">
+                {callbackNumbers.map((cb) => (
+                  <option key={cb.id} value={cb.phone}>
+                    {formatPhoneNumber(cb.phone)} {cb.label ? `(${cb.label})` : ''} {cb.is_default ? '(기본)' : ''}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+            {useIndividualCallback && (
+              <p className="text-[12px] text-indigo-700 mt-1.5">
+                각 수신자의 <strong>{fieldsMeta.find(f => f.field_key === individualCallbackColumn)?.display_name || individualCallbackColumn}</strong> 값으로 발송됩니다
+              </p>
+            )}
+          </div>
+
+          {/* ★ 자동입력: fieldsMeta 기반 동적 변수 칩 (클릭 = 커서 위치 삽입) */}
+          <div className="px-4 py-3 border-t border-slate-100">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[12px] font-medium text-slate-500">자동입력 변수</span>
+              <span className="text-[11px] text-slate-400">누르면 커서 위치에 들어갑니다</span>
+            </div>
+            {variableFields.length === 0 ? (
+              <p className="text-[12px] text-slate-400">추출 조건에 넣은 항목이 변수로 나타납니다</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {variableFields.map(fm => (
+                  <button key={fm.field_key} type="button" onClick={() => insertVariable(fm.variable, 'sms')}
+                    className="h-7 px-2.5 rounded-lg bg-white ring-1 ring-slate-200 text-[12px] text-slate-700 hover:ring-indigo-400 hover:text-indigo-700 transition">
+                    {fm.display_name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ★ 2026-07-02 브랜드 링크: 칩 클릭 = 커서 위치 URL 삽입 (insertAtCursor CT 재사용) */}
+          <div className="px-4 py-3 border-t border-slate-100">
+            <BrandLinkChips
+              tone="light"
+              onToast={(message, type) => setToast({ show: true, type: type === 'error' ? 'error' : 'success', message })}
+              onInsert={(u) => {
+                const ok = insertAtCursor(smsTextareaRef.current, u, setTargetMessage);
+                if (!ok) setTargetMessage(targetMessage + u);
+              }}
+            />
+          </div>
+
+          {/* MMS 이미지 (B16-05: MMS 탭에서만) */}
+          {targetMsgType === 'MMS' && (
+            <button type="button" onClick={() => setShowMmsUploadModal(true)}
+              className="w-full px-4 py-3 border-t border-slate-100 bg-indigo-50/40 hover:bg-indigo-50 transition flex items-center gap-2.5 text-left">
+              <ImagePlus className="w-4 h-4 text-indigo-600 shrink-0" />
+              <span className="text-[12.5px] font-semibold text-slate-700">MMS 이미지</span>
+              {mmsUploadedImages.length > 0 ? (
+                <span className="flex items-center gap-1.5">
+                  {/* ★ B3: 공용 컴포넌트 MmsImagePreview 사용 */}
+                  <MmsImagePreview images={mmsUploadedImages} size="xs" compact />
+                  <span className="text-[12px] text-indigo-700">수정</span>
+                </span>
+              ) : (
+                <span className="text-[12px] text-indigo-700 ml-auto">눌러서 이미지 첨부</span>
+              )}
+            </button>
+          )}
+
+          {/* 담당자 테스트 결과 */}
+          {testSentResultProp && (
+            <div className={`mx-4 mt-3 px-3 py-2.5 rounded-xl text-[12.5px] whitespace-pre-wrap ring-1 ${testSentResultProp.startsWith('✅') ? 'bg-emerald-50 text-emerald-800 ring-emerald-200' : 'bg-rose-50 text-rose-800 ring-rose-200'}`}>
+              {testSentResultProp}
+            </div>
+          )}
+
+          {/* 미리보기 · 스팸필터 · 담당자테스트 */}
+          <div className="px-4 py-3 border-t border-slate-100 grid grid-cols-3 gap-2">
+            <button type="button" onClick={handlePreview} className={ACTION_BTN}><Eye className="w-4 h-4" />미리보기</button>
+            <button type="button" onClick={handleSpamFilter} className={ACTION_BTN}><ShieldCheck className="w-4 h-4" />스팸필터</button>
+            <button type="button" onClick={handleTargetTestSend} disabled={testSendingProp || testCooldownProp || !targetMessage.trim()} className={ACTION_BTN}>
+              <Smartphone className="w-4 h-4" />
+              {testSendingProp ? '발송 중' : testCooldownProp ? '10초 대기' : '담당자테스트'}
+            </button>
+          </div>
+
+          {/* 예약 · 분할 · 광고표기 */}
+          <div className="px-4 py-3 border-t border-slate-100 grid grid-cols-3 gap-2 text-[12px]">
+            <div className={reserveEnabled ? OPT_ON : OPT_OFF}>
+              <label className="flex items-center justify-center gap-1.5 cursor-pointer">
+                <input type="checkbox" checked={reserveEnabled} onChange={(e) => { setReserveEnabled(e.target.checked); if (e.target.checked) setShowReservePicker(true); }} className="h-4 w-4 rounded accent-indigo-600" />
+                <span className={`font-semibold ${reserveEnabled ? 'text-indigo-700' : 'text-slate-700'}`}>예약전송</span>
+              </label>
+              <div className={`mt-1.5 cursor-pointer ${reserveEnabled ? 'text-indigo-600 font-medium' : 'text-slate-400'}`} onClick={() => reserveEnabled && setShowReservePicker(true)}>
+                {reserveDateTime
+                  ? new Date(reserveDateTime).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                  : '예약시간 선택'}
               </div>
             </div>
-
-            {/* 페이징 */}
-            <div className="mt-3 flex justify-center items-center gap-2">
-              {(() => {
-                const filtered = targetListSearch
-                  ? targetRecipients.filter(r => r.phone?.includes(targetListSearch))
-                  : targetRecipients;
-                const totalPages = Math.ceil(filtered.length / 15);
-                if (totalPages <= 1) return null;
-
-                return (
-                  <>
-                    <button
-                      onClick={() => setTargetListPage(p => Math.max(0, p - 1))}
-                      disabled={targetListPage === 0}
-                      className="px-3 py-1.5 border rounded-lg text-sm disabled:opacity-50"
-                    >이전</button>
-                    <span className="text-sm text-gray-600">
-                      {targetListPage + 1} / {totalPages} 페이지
-                    </span>
-                    <button
-                      onClick={() => setTargetListPage(p => Math.min(totalPages - 1, p + 1))}
-                      disabled={targetListPage >= totalPages - 1}
-                      className="px-3 py-1.5 border rounded-lg text-sm disabled:opacity-50"
-                    >다음</button>
-                  </>
-                );
-              })()}
-            </div>
-
-            {/* 하단 버튼 */}
-            {/* ★ D124 N1: 중복제거 버튼 제거 — 직접타겟발송은 앞 단에서 이미 중복 제거된 데이터. 상단 체크박스(D123)와 함께 버튼도 제거 */}
-            <div className="mt-3 flex justify-between items-center">
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    if (selectedPhones.size === 0) return;
-                    const selectedIndices = new Set<number>();
-                    for (const key of selectedPhones) {
-                      const idx = parseInt(key.split('_').pop() || '-1');
-                      if (idx >= 0) selectedIndices.add(idx);
-                    }
-                    const remaining = targetRecipients.filter((_, i) => !selectedIndices.has(i));
-                    setTargetRecipients(remaining);
-                    setSelectedPhones(new Set());
-                  }}
-                  disabled={selectedPhones.size === 0}
-                  className={`px-3 py-1.5 text-sm border rounded-lg ${selectedPhones.size > 0 ? 'hover:bg-red-50 text-red-600 border-red-300' : 'text-gray-400'}`}
-                >선택삭제 {selectedPhones.size > 0 && `(${selectedPhones.size})`}</button>
-                <button
-                  onClick={() => setTargetRecipients([])}
-                  className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50"
-                >전체삭제</button>
+            <div className={splitEnabled ? OPT_ON : OPT_OFF}>
+              <label className="flex items-center justify-center gap-1.5 cursor-pointer">
+                <input type="checkbox" className="h-4 w-4 rounded accent-indigo-600" checked={splitEnabled} onChange={(e) => setSplitEnabled(e.target.checked)} />
+                <span className={`font-semibold ${splitEnabled ? 'text-indigo-700' : 'text-slate-700'}`}>분할전송</span>
+              </label>
+              <div className="mt-1.5 flex items-center justify-center gap-1">
+                <input type="number" className="w-16 h-7 rounded-lg ring-1 ring-slate-200 px-1.5 text-[12px] text-center focus:outline-none focus:ring-2 focus:ring-indigo-500/50 disabled:opacity-50" placeholder="1000" value={splitCount} onChange={(e) => setSplitCount(Number(e.target.value) || 1000)} disabled={!splitEnabled} />
+                <span className="text-slate-500">건/분</span>
               </div>
-              <button
-                onClick={onResetTarget}
-                className="px-3 py-1.5 text-sm bg-gray-100 rounded-lg hover:bg-gray-200"
-              >🔄 타겟 재설정</button>
+            </div>
+            <div className={adTextEnabled ? OPT_ON : OPT_OFF}>
+              <label className="flex items-center justify-center gap-1.5 cursor-pointer">
+                <input type="checkbox" checked={adTextEnabled} onChange={(e) => handleAdToggle(e.target.checked)} className="h-4 w-4 rounded accent-indigo-600" />
+                <span className={`font-semibold ${adTextEnabled ? 'text-indigo-700' : 'text-slate-700'}`}>광고표기</span>
+              </label>
+              <div className={`mt-1.5 ${adTextEnabled ? 'text-indigo-600' : 'text-slate-400'}`}>080 수신거부</div>
             </div>
           </div>
+
+          {/* 전송 */}
+          <div className="px-4 py-3 border-t border-slate-100">
+            <button type="button" onClick={handleSmsSend} disabled={targetSending}
+              className="w-full h-12 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[15px] font-bold shadow-lg shadow-indigo-600/20 transition inline-flex items-center justify-center gap-2 disabled:opacity-50">
+              <Send className="w-4 h-4" />
+              {targetSending ? '발송 중' : `${targetRecipients.length.toLocaleString()}명에게 전송`}
+            </button>
+          </div>
+        </div>
+      </>)}
+
+      {/* === 카카오 알림톡 채널 (D130: AlimtalkChannelPanel 공용) === */}
+      {targetSendChannel === 'kakao_alimtalk' && (
+        <div className="space-y-3">
+          <AlimtalkChannelPanel
+            senders={alimtalkSenders}
+            templates={kakaoTemplates as AlimtalkTemplate[]}
+            customerFieldOptions={customerFieldOptions}
+            value={{
+              profileId: alimtalkProfileId,
+              templateCode: kakaoSelectedTemplate?.template_code || '',
+              templateId: kakaoSelectedTemplate?.id || '',
+              variableMap: kakaoTemplateVars,
+              nextType: alimtalkFallback,
+              nextContents: alimtalkNextContents,
+              // ★ 2026-07-27: nextSubject 배선 누락 정정. 값을 안 내려주고 안 받아올려 LMS 대체 제목이 발송 payload엔 항상 빈 값이었다.
+              nextSubject: alimtalkNextSubject,
+            }}
+            onChange={(v: AlimtalkChannelState) => {
+              if (setAlimtalkProfileId) setAlimtalkProfileId(v.profileId);
+              const nextTpl =
+                kakaoTemplates.find((t: any) => t.id === v.templateId) || null;
+              setKakaoSelectedTemplate(nextTpl);
+              setKakaoTemplateVars(v.variableMap);
+              if (setAlimtalkFallback) setAlimtalkFallback(v.nextType);
+              if (setAlimtalkNextContents) setAlimtalkNextContents(v.nextContents);
+              if (setAlimtalkNextSubject) setAlimtalkNextSubject(v.nextSubject || '');
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              if (!kakaoSelectedTemplate) { setToast({ show: true, type: 'error', message: '템플릿을 선택해주세요' }); return; }
+              if (!approvedTpl) { setToast({ show: true, type: 'error', message: '승인된 템플릿만 발송 가능합니다' }); return; }
+              handleAlimtalkSend();
+            }}
+            disabled={!kakaoSelectedTemplate || !approvedTpl || targetSending}
+            className={`w-full h-12 rounded-xl text-[15px] font-bold transition inline-flex items-center justify-center gap-2 disabled:opacity-50 ${approvedTpl ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-500/20' : 'bg-slate-200 text-slate-500 cursor-not-allowed'}`}
+          >
+            <Bell className="w-4 h-4" />
+            {targetSending ? '발송 중' : !kakaoSelectedTemplate ? '템플릿을 선택해주세요' : '알림톡 발송하기'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <SendWorkspaceShell
+      show={show}
+      onClose={onClose}
+      title="직접 타겟 발송"
+      subtitle={`추출된 ${targetRecipients.length.toLocaleString()}명에게 메시지를 발송합니다`}
+      icon={<Users className="w-5 h-5 text-white" />}
+      accent="indigo"
+      zClass="z-50"
+      aside={composer}
+      asideWidth="440px"
+      maxW="max-w-[1400px]"
+    >
+      <div className="p-4 sm:p-6 flex flex-col min-h-full">
+        {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: 알림톡 채널일 때만 변수 매칭 박스 노출. 문자 채널 영향 0. */}
+        {targetSendChannel === 'kakao_alimtalk' && (
+          <div className="mb-4">
+            <AlimtalkVariableMappingPanel
+              selectedTemplate={kakaoSelectedTemplate}
+              variableMap={kakaoTemplateVars}
+              onVariableMapChange={(next) => setKakaoTemplateVars(next)}
+              customerFieldOptions={customerFieldOptions}
+              sampleRecipient={targetRecipients[0] || null}
+              recipientCount={targetRecipients.length}
+            />
+          </div>
+        )}
+
+        {/* 수신자 목록 헤더 */}
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+          <div className="flex items-center gap-2.5">
+            <span className="text-[15px] font-semibold text-slate-900">수신자 목록</span>
+            <span className={`${CUI_PILL_BASE} bg-indigo-100 text-indigo-700`}>총 {targetRecipients.length.toLocaleString()}건</span>
+            {selectedPhones.size > 0 && <span className={`${CUI_PILL_BASE} bg-slate-100 text-slate-600`}>{selectedPhones.size}건 선택</span>}
+          </div>
+          <div className="flex items-center gap-2">
+            {/* ★ D162-4 4차: 알림톡 버튼은 채널 정체성(amber) 유지. 추출된 수신자 그대로 알림톡 모달로 인계. */}
+            {onAlimtalkOpen && (
+              <button type="button" onClick={onAlimtalkOpen}
+                className="h-9 px-3 rounded-lg text-[13px] font-semibold text-amber-800 bg-amber-50 ring-1 ring-amber-200 hover:bg-amber-100 inline-flex items-center gap-1.5 transition"
+                title="추출된 수신자에게 알림톡 발송">
+                <Bell className="w-3.5 h-3.5" />
+                알림톡 발송
+              </button>
+            )}
+            <div className="h-9 w-52 flex items-center gap-2 px-3 rounded-lg bg-slate-50 ring-1 ring-slate-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-500/50 transition">
+              <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <input
+                type="text"
+                placeholder="수신번호 검색"
+                value={targetListSearch}
+                onChange={(e) => { setTargetListSearch(e.target.value); setTargetListPage(0); }}
+                className="w-full min-w-0 bg-transparent border-0 p-0 text-[13px] text-slate-800 outline-none placeholder:text-slate-400 focus:ring-0"
+              />
+            </div>
+            {/* ★ D123: 중복제거/수신거부제거 체크박스 제거. 직접타겟발송은 앞 단에서 이미 처리된 데이터 */}
+          </div>
+        </div>
+
+        {/* ★ 표: fieldsMeta 기반 동적 컬럼 (하드코딩 제거) */}
+        <div className={`${CUI_PANEL} flex-1`}>
+          <div className={CUI_SCROLL_X}>
+            <table className="w-full">
+              <thead className={CUI_THEAD}>
+                <tr>
+                  <th className={`${CUI_TH} w-10 text-center`}>
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded accent-indigo-600"
+                      checked={targetRecipients.length > 0 && selectedPhones.size === targetRecipients.length}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedPhones(new Set(targetRecipients.map((r, i) => `${r.phone}_${i}`)));
+                        } else {
+                          setSelectedPhones(new Set());
+                        }
+                      }}
+                    />
+                  </th>
+                  <th className={CUI_TH}>수신번호</th>
+                  {tableFields.map(fm => (
+                    <th key={fm.field_key} className={CUI_TH}>{fm.display_name}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {pageRows.length === 0 && (
+                  <tr>
+                    <td colSpan={2 + tableFields.length} className="px-4 py-14 text-center text-[13px] text-slate-400">
+                      {targetListSearch ? '검색과 일치하는 수신번호가 없습니다' : '수신자가 없습니다. 타겟을 다시 설정해 주세요'}
+                    </td>
+                  </tr>
+                )}
+                {pageRows.map((r, idx) => {
+                  const key = `${r.phone}_${pageStart + idx}`;
+                  const checked = selectedPhones.has(key);
+                  return (
+                    <tr key={idx} className={`${CUI_TR} ${checked ? 'bg-indigo-50/60' : ''}`}>
+                      <td className={`${CUI_TD} text-center`}>
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded accent-indigo-600"
+                          checked={checked}
+                          onChange={(e) => {
+                            const next = new Set(selectedPhones);
+                            if (e.target.checked) next.add(key); else next.delete(key);
+                            setSelectedPhones(next);
+                          }}
+                        />
+                      </td>
+                      <td className={`${CUI_TD} font-mono text-[13px] text-slate-800`}>{r.phone}</td>
+                      {tableFields.map(fm => (
+                        <td key={fm.field_key} className={`${CUI_TD} ${CUI_CELL_DATA}`}>
+                          {formatCellValue(r[fm.field_key], fm.data_type, fm.field_key)}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* 페이징 */}
+        {totalPages > 1 && (
+          <div className="mt-3 flex justify-center items-center gap-2">
+            <button type="button" onClick={() => setTargetListPage(p => Math.max(0, p - 1))} disabled={targetListPage === 0} className={`${CUI_BTN_GHOST} h-8`}>
+              <ChevronLeft className="w-4 h-4" />이전
+            </button>
+            <span className="text-[12.5px] text-slate-500 tabular-nums">{targetListPage + 1} / {totalPages} 페이지</span>
+            <button type="button" onClick={() => setTargetListPage(p => Math.min(totalPages - 1, p + 1))} disabled={targetListPage >= totalPages - 1} className={`${CUI_BTN_GHOST} h-8`}>
+              다음<ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* 하단 액션 */}
+        {/* ★ D124 N1: 중복제거 버튼 제거. 직접타겟발송은 앞 단에서 이미 중복 제거된 데이터 */}
+        <div className="mt-3 flex justify-between items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (selectedPhones.size === 0) return;
+                const selectedIndices = new Set<number>();
+                for (const k of selectedPhones) {
+                  const idx = parseInt(k.split('_').pop() || '-1');
+                  if (idx >= 0) selectedIndices.add(idx);
+                }
+                const remaining = targetRecipients.filter((_, i) => !selectedIndices.has(i));
+                setTargetRecipients(remaining);
+                setSelectedPhones(new Set());
+              }}
+              disabled={selectedPhones.size === 0}
+              className={`${CUI_BTN_OUTLINE} ${selectedPhones.size > 0 ? 'text-rose-600 border-rose-200 hover:bg-rose-50 hover:border-rose-300' : ''}`}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              선택삭제{selectedPhones.size > 0 && ` (${selectedPhones.size})`}
+            </button>
+            <button type="button" onClick={() => setTargetRecipients([])} className={CUI_BTN_OUTLINE}>전체삭제</button>
+          </div>
+          <button type="button" onClick={onResetTarget} className={CUI_BTN_GHOST}>
+            <RotateCcw className="w-3.5 h-3.5" />
+            타겟 재설정
+          </button>
         </div>
       </div>
-    </div>
+    </SendWorkspaceShell>
   );
 }

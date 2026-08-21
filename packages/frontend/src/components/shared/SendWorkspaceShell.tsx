@@ -20,8 +20,8 @@ import { useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
-/** 채널 정체성 색 — 알림톡은 amber, 브랜드메시지는 violet */
-export type WorkspaceAccent = 'violet' | 'amber';
+/** 채널 정체성 색 — 알림톡은 amber, 브랜드메시지는 violet, 문자 타겟 발송은 indigo(★2026-08-21 콘솔 톤 정합) */
+export type WorkspaceAccent = 'violet' | 'amber' | 'indigo';
 
 const ACCENT = {
   violet: {
@@ -33,6 +33,11 @@ const ACCENT = {
     icon: 'from-amber-400 to-orange-500',
     iconShadow: 'shadow-amber-500/25',
     headerTint: 'from-amber-50/80 via-white to-white',
+  },
+  indigo: {
+    icon: 'from-indigo-500 to-violet-500',
+    iconShadow: 'shadow-indigo-500/25',
+    headerTint: 'from-indigo-50/80 via-white to-white',
   },
 } as const;
 
@@ -53,11 +58,17 @@ export interface SendWorkspaceShellProps {
   maxW?: string;
   /** 우측 본문 */
   children: ReactNode;
+  /**
+   * 스크림 z-index 티어. 기본 z-[2000](인터럽트 티어).
+   * 이 셸 위로 호출부(대시보드)가 z-[60]·z-[70] 모달(미리보기·특수문자·보관함·예약 시각)을 띄워야 하면
+   * 옛 모달과 같은 `z-50`을 넘긴다. 포털은 body 끝에 붙어 같은 z면 나중 것이 위다.
+   */
+  zClass?: string;
 }
 
 export default function SendWorkspaceShell({
   show, onClose, title, subtitle, icon, accent = 'violet',
-  notice, aside, asideWidth = '380px', maxW = 'max-w-6xl', children,
+  notice, aside, asideWidth = '380px', maxW = 'max-w-6xl', children, zClass = 'z-[2000]',
 }: SendWorkspaceShellProps) {
   // ESC 닫기 — 백드롭 클릭은 작업 손실을 만들어 쓰지 않는다(2026-07-04 전면 제거 룰).
   useEffect(() => {
@@ -71,7 +82,7 @@ export default function SendWorkspaceShell({
   const tone = ACCENT[accent];
 
   return createPortal(
-    <div className="fixed inset-0 z-[2000] bg-slate-900/35 backdrop-blur-[2px] flex items-center justify-center p-3 sm:p-5">
+    <div className={`fixed inset-0 ${zClass} bg-slate-900/35 backdrop-blur-[2px] flex items-center justify-center p-3 sm:p-5`}>
       <div
         className={`bg-white rounded-[20px] w-full ${maxW} h-[94vh] sm:h-[92vh] flex flex-col overflow-hidden ring-1 ring-slate-900/5 shadow-[0_32px_90px_-24px_rgba(15,23,42,0.45)]`}
         role="dialog"
@@ -137,6 +148,10 @@ export function SourceCaption({ children }: { children: ReactNode }) {
 export const FIELD_CLASS =
   'w-full rounded-xl bg-white px-3.5 py-2.5 text-sm text-slate-800 placeholder:text-slate-300 ' +
   'ring-1 ring-slate-200 focus:ring-2 focus:ring-violet-500/50 outline-none transition shadow-sm';
+/** 같은 폼 컨트롤, 인디고 액센트(문자 타겟 발송 등 콘솔 톤 정합 화면) */
+export const FIELD_CLASS_INDIGO =
+  'w-full rounded-xl bg-white px-3.5 py-2.5 text-sm text-slate-800 placeholder:text-slate-300 ' +
+  'ring-1 ring-slate-200 focus:ring-2 focus:ring-indigo-500/50 outline-none transition shadow-sm';
 
 /** 서브 서페이스 — 섹션을 나눌 때 회색 박스 대신 쓴다 */
 export const PANEL_CLASS = 'rounded-2xl bg-slate-50/70 ring-1 ring-slate-900/5 p-4';

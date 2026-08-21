@@ -58,7 +58,7 @@
 
 ### 다음 세션 (예정)
 > 경위·범위·확정 사실은 링크가 소유한다. 여기엔 제목·다음 한 수·호출어만.
-> ★ **오퍼레이터 표면 단계 — 0821 전원 합의·코드완료·배포 대기** — 호출어 **"오퍼레이터 표면 단계"** → [설계·구현 기록](../docs/2026-08-21-operator-surface-tier-design.md)이 전부 소유(체계 §3 · 구현 §4 · 불변식 §6 · 별건 §7 · 회의록 §8). 다음 = 프론트 `build:safe` 후 Harold 라이브 판정("같은 앱으로 보입니까 · 튀는 곳이 있습니까") · 별건 §7 착수 판단
+> ★ **오퍼레이터 표면 단계 — 0821 코드완료·배포 대기** — 호출어 **"오퍼레이터 표면 단계"** → [설계·구현 기록](../docs/2026-08-21-operator-surface-tier-design.md)이 전부 소유. 다음 = `build:safe` 후 Harold 라이브 판정 · 별건 §7. 같은 날 직접 타겟 설정·발송 모달 인디고 리프트 = [콘솔 톤 §4·§5](../docs/2026-08-18-console-ui-unification.md)
 > ⓪ **AI 마케팅 진단 — v10 배포완료(0820)** — 호출어 **"마케팅 진단"** → [FEATURE-MARKETING-DIAGNOSIS.md](../docs/FEATURE-MARKETING-DIAGNOSIS.md) §12 v10이 전부 소유. 잔여 = 실측만
 > ① **템플릿** — 호출어 **"템플릿"** → **[FEATURE-ALIMTALK-TEMPLATE.md](../docs/FEATURE-ALIMTALK-TEMPLATE.md)가 전부 소유**(구조·불변 원칙·이관 절차·이력 §6·남은 것 §5). 여기 다시 쓰지 않는다.
 > ② **0718 성능 후속** — 관측 사이클 1회전: 1순위 campaigns 발송 폴러 인덱스(EXPLAIN 후 처방) · 2순위 `balance_transactions` 잔액 SUM N+1(호출처 추적) · 그 후 M3/롤업. [핸드오프](docs/2026-07-18-frontend-splitting-incident-handoff.md) · [[project_2026_0717_dashboard_performance]]
