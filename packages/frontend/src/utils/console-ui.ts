@@ -17,6 +17,8 @@
  *   - 발송 결과 (ResultsModal · CampaignDetailModal)
  *   - 수신거부 관리 · 회사 설정
  *   - 직접 타겟 설정 모달(DirectTargetFilterModal) · 직접 타겟 발송(TargetSendModal, SendWorkspaceShell indigo 액센트) ★2026-08-21 리프트
+ *   - 작성기 부속 모달 3종(특수문자·보관함·문자 저장 = `components/console/ConsoleDialog` 셸) ★2026-08-21(2).
+ *     직접발송과 공용이라 강조색은 호출자가 고른다(타겟=indigo · 직접발송=emerald) — 그 표는 ConsoleDialog가 소유, 여기 토큰은 골격만
  *
  * 액센트 = 인디고. `dm-tokens.ts`의 `DM_COLOR_TOKENS.brand.primary`(#4f46e5)와 같은 값이라
  *   Tailwind `indigo-600`/`indigo-700`(#4338ca)/`indigo-50`(#eef2ff)이 그대로 대응한다.

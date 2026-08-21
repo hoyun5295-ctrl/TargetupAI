@@ -79,6 +79,11 @@
 
 - **2026-08-21 직접 타겟 설정·직접 타겟 발송 리프트(인디고)** — Harold "촌스럽다, 직접발송보다 모던한 인디고로". 기능·state·핸들러 100% 유지, 표면만 교체: 타겟 설정 = `CUI_MODAL*`·`CUI_PICK`·lucide 카테고리 아이콘(이모지 0)·샘플 표 `CUI_T*` / 타겟 발송 = `SendWorkspaceShell`(accent `indigo` 신설, `FIELD_CLASS_INDIGO`, `zClass` prop: 대시보드 z-[60]·[70] 중첩 모달 위 유지를 위해 옛 z-50 전달)에 좌 작성기 440px(세그먼트·링 카드·lucide 도구줄·변수 칩)·우 수신자 표 `CUI_T*`. 알림톡 버튼은 amber 유지. 게이트 = tsc 0 · 불변식 4종.
 
+- **2026-08-21(2) 직접 타겟 발송 부속 3건** — Harold "보관함·특수문자는 여전히 촌스럽다 / 특수문자·문자 저장은 경계가 안 보인다 / AI 꾸미기가 여긴 없다".
+  - **부속 모달 3종 분리**: 특수문자·보관함·문자 저장이 `Dashboard.tsx`에 인라인(이모지 제목 ✨📂💾 · 헤더 색 제각각 purple/amber/emerald · 회색 border · 글자 ✕ · "EUC-KR" 노출)이라 지난 리프트 범위 밖이었다. `components/console/ConsoleDialog`(CUI_MODAL 골격 · z-[70] 포털 · ESC는 캡처 단계에서 이 창만 닫음) 위에 `SpecialCharsModal` · `TemplateBoxModal` · `TemplateSaveModal`로 뽑았다. state·저장·삭제·적용 로직은 Dashboard가 그대로 소유. **강조색은 호출자별**(타겟 = indigo · 직접발송 = emerald) — 직접발송 인디고화는 §5 별건이라 그쪽 색을 여기서 바꾸지 않는다. 보관함 전문 보기 토글(D182)은 모달 내부 state로 이동.
+  - **도구줄 경계**: ghost였던 특수문자·보관함·문자 저장을 흰 칩 + 링으로. 한 줄에 다섯을 두면 440px에서 접혀 위계가 깨져 **윗줄 = AI(추천·꾸미기) + 바이트 / 아랫줄 = 작성 도구**로 나눴다.
+  - **AI 꾸미기 배선**: 기존 `POST /api/ai/operator/decorate-message`(3크레딧, Operator·여정·DM 편집기 공용) 재사용, 백엔드 변경 0. **녹일 변수 = 본문에 이미 들어 있는 `%변수%`만 자동 감지**(0808 규약 "쓰인 컬럼 = 고른 컬럼") → 별도 선택 단계 없음, 0개면 비활성 + 도움말. 게이트 = AI 추천과 같은 `isAiMessagingLocked` → `PlanUpgradeModal`(403 `AI_OPERATOR_GATED`도 같은 모달). 적용 직전 원문 보관 → 되돌리기 1회, 본문을 손대면 사라진다. 게이트 = tsc 0 · 줄표·UI 토큰·오퍼레이터 표면 불변식 3종 · 검출기 1회(신규 지적 0 — rose 항목은 hover 짝 오탐).
+
 ## §5 남은 것
 - 직접발송 패널(`DirectSendPanel`, 에메랄드 `ds-*` CSS)은 그대로다. 같은 대시보드에서 직접발송 초록 / 타겟 모달 인디고가 공존한다. 직접발송까지 인디고로 맞출지는 Harold 판단(별건).
 

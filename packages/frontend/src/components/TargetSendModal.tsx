@@ -1,4 +1,4 @@
-import { Sparkles, Users, Eye, ShieldCheck, Smartphone, Type, Archive, Save, ImagePlus, Bell, Search, ChevronLeft, ChevronRight, RotateCcw, Trash2, Send } from 'lucide-react';
+import { Sparkles, Users, Eye, ShieldCheck, Smartphone, Type, Archive, Save, ImagePlus, Bell, Search, ChevronLeft, ChevronRight, RotateCcw, Trash2, Send, Wand2, Loader2 } from 'lucide-react';
 import SendWorkspaceShell, { FIELD_CLASS_INDIGO } from './shared/SendWorkspaceShell';
 import { CUI_PILL_BASE, CUI_PANEL, CUI_SCROLL_X, CUI_THEAD, CUI_TH, CUI_TR, CUI_TD, CUI_CELL_DATA, CUI_BTN_GHOST, CUI_BTN_OUTLINE } from '../utils/console-ui';
 import { useRef, useState } from 'react';
@@ -113,6 +113,11 @@ interface TargetSendModalProps {
 
   // AI 추천
   handleAiMsgHelper: () => void;
+  /**
+   * ★ 2026-08-21 AI 꾸미기 — 본문에 이미 들어 있는 %변수%만 자연스럽게 녹인다(3크레딧).
+   *   게이트·호출은 대시보드가 소유(AI 추천과 같은 자리). 꾸민 문안을 돌려주고, 막혔거나 실패하면 null.
+   */
+  onAiDecorate?: (message: string, tokens: string[]) => Promise<string | null>;
 
   // 특수문자/보관함/저장
   setShowSpecialChars: (s: 'target' | 'direct' | null) => void;
@@ -186,6 +191,7 @@ export default function TargetSendModal({
   setShowDirectPreview, setDirectMessage, setDirectMsgType, setDirectSubject,
   setSpamFilterData, setShowSpamFilter,
   handleAiMsgHelper,
+  onAiDecorate,
   setShowSpecialChars, loadTemplates, setShowTemplateBox,
   setShowTemplateSave, setTemplateSaveName,
   smsOverrideAccepted, setSmsOverrideAccepted,
@@ -210,6 +216,9 @@ export default function TargetSendModal({
   const [selectedPhones, setSelectedPhones] = useState<Set<string>>(new Set());
   const smsTextareaRef = useRef<HTMLTextAreaElement>(null);
   const kakaoTextareaRef = useRef<HTMLTextAreaElement>(null);
+  // ★ 2026-08-21 AI 꾸미기 — 처리 중 잠금 + 적용 직전 원문(되돌리기 1회). 사용자가 본문을 고치면 되돌리기는 사라진다.
+  const [decorating, setDecorating] = useState(false);
+  const [decorateUndo, setDecorateUndo] = useState<string | null>(null);
 
   // ====== ★ 동적 필드 파생 (하드코딩 제거 핵심) ======
 
@@ -217,6 +226,31 @@ export default function TargetSendModal({
   const variableFields = fieldsMeta.filter(fm =>
     fm.field_key !== 'phone' && fm.field_key !== 'sms_opt_in'
   );
+
+  // ★ 2026-08-21 AI 꾸미기가 녹일 변수 = 본문에 이미 들어 있는 것만(0808 규약 "쓰인 컬럼 = 고른 컬럼"). 별도 선택 단계 없음.
+  const usedVariableTokens = variableFields
+    .filter(fm => fm.variable && targetMessage.includes(fm.variable))
+    .map(fm => fm.variable);
+
+  const handleAiDecorate = async () => {
+    if (!onAiDecorate || decorating || usedVariableTokens.length === 0 || !targetMessage.trim()) return;
+    const before = targetMessage;
+    setDecorating(true);
+    try {
+      const out = await onAiDecorate(before, usedVariableTokens);
+      if (out != null && out !== before) {
+        setDecorateUndo(before);
+        setTargetMessage(out);
+      }
+    } finally {
+      setDecorating(false);
+    }
+  };
+  const undoDecorate = () => {
+    if (decorateUndo == null) return;
+    setTargetMessage(decorateUndo);
+    setDecorateUndo(null);
+  };
 
   // 테이블에 표시할 필드 (phone은 항상 첫 번째 고정, sms_opt_in 제외)
   const tableFields = fieldsMeta.filter(fm =>
@@ -418,7 +452,10 @@ export default function TargetSendModal({
 
   const SEG_ON = 'flex-1 h-9 rounded-lg text-[13px] font-semibold text-indigo-700 bg-white shadow-sm transition';
   const SEG_OFF = 'flex-1 h-9 rounded-lg text-[13px] font-medium text-slate-500 hover:text-slate-900 transition';
-  const TOOL_BTN = 'h-8 px-2.5 rounded-lg text-[12px] font-medium text-slate-600 hover:bg-white hover:text-slate-900 inline-flex items-center gap-1 transition';
+  // ★ 2026-08-21 Harold 지적: 도구 버튼이 ghost라 AI 추천 옆에서 경계가 안 보였다 → 흰 칩 + 링으로 버튼임을 드러낸다.
+  const TOOL_BTN = 'h-8 px-2.5 rounded-lg bg-white ring-1 ring-slate-200 text-[12px] font-medium text-slate-700 hover:ring-indigo-400 hover:text-indigo-700 inline-flex items-center gap-1 transition disabled:opacity-40 disabled:pointer-events-none';
+  const AI_BTN_PRIMARY = 'h-8 px-2.5 rounded-lg text-[12px] font-semibold bg-indigo-600 text-white hover:bg-indigo-700 inline-flex items-center gap-1 transition shadow-sm';
+  const AI_BTN_OUTLINE = 'h-8 px-2.5 rounded-lg text-[12px] font-semibold text-indigo-700 bg-indigo-50 ring-1 ring-indigo-200 hover:bg-indigo-100 hover:ring-indigo-300 inline-flex items-center gap-1 transition disabled:opacity-40 disabled:pointer-events-none';
   const ACTION_BTN = 'h-10 rounded-xl bg-white ring-1 ring-slate-200 text-[13px] font-semibold text-slate-700 hover:ring-indigo-400 hover:text-indigo-700 inline-flex items-center justify-center gap-1.5 transition disabled:opacity-40 disabled:pointer-events-none';
   const OPT_ON = 'rounded-xl ring-1 ring-indigo-300 bg-indigo-50/60 p-3 text-center';
   const OPT_OFF = 'rounded-xl ring-1 ring-slate-200 bg-white p-3 text-center';
@@ -465,7 +502,7 @@ export default function TargetSendModal({
                 ref={smsTextareaRef}
                 data-char-target="target"
                 value={targetMessage}
-                onChange={(e) => setTargetMessage(e.target.value)}
+                onChange={(e) => { setTargetMessage(e.target.value); if (decorateUndo != null) setDecorateUndo(null); }}
                 placeholder="전송할 내용을 입력하세요."
                 style={adTextEnabled ? { textIndent: '42px' } : {}}
                 className={`w-full resize-none border-0 p-0 focus:outline-none focus:ring-0 text-sm leading-relaxed text-slate-800 placeholder:text-slate-300 ${targetMsgType === 'SMS' ? 'h-[180px]' : 'h-[140px]'}`}
@@ -480,19 +517,44 @@ export default function TargetSendModal({
             )}
           </div>
 
-          {/* 도구줄 + 바이트 */}
-          <div className="px-3 py-2 border-t border-slate-100 bg-slate-50/70 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-0.5 flex-wrap">
-              <button type="button" onClick={handleAiMsgHelper} className="h-8 px-2.5 rounded-lg text-[12px] font-semibold bg-indigo-600 text-white hover:bg-indigo-700 inline-flex items-center gap-1 transition shadow-sm">
-                <Sparkles className="w-3.5 h-3.5" />AI 추천
-              </button>
+          {/* 도구줄 — 윗줄 = AI(추천·꾸미기) + 바이트 / 아랫줄 = 작성 도구(특수문자·보관함·문자 저장).
+              ★ 2026-08-21: 한 줄에 다섯을 두면 440px에서 접혀 위계가 깨진다. AI 행동과 작성 도구를 줄로 나눈다. */}
+          <div className="px-3 py-2.5 border-t border-slate-100 bg-slate-50/70 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button type="button" onClick={handleAiMsgHelper} className={AI_BTN_PRIMARY}>
+                  <Sparkles className="w-3.5 h-3.5" />AI 추천
+                </button>
+                {onAiDecorate && (
+                  <button
+                    type="button"
+                    onClick={handleAiDecorate}
+                    disabled={decorating || usedVariableTokens.length === 0 || !targetMessage.trim()}
+                    title={usedVariableTokens.length === 0 ? '자동입력 변수를 먼저 넣어주세요' : `본문의 변수 ${usedVariableTokens.length}개를 자연스럽게 녹입니다 (3크레딧)`}
+                    className={AI_BTN_OUTLINE}
+                  >
+                    {decorating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+                    {decorating ? '꾸미는 중' : 'AI 꾸미기'}
+                    {!decorating && usedVariableTokens.length > 0 && (
+                      <span className="ml-0.5 h-4 min-w-4 px-1 rounded-full bg-indigo-600 text-white text-[10px] font-bold grid place-items-center tabular-nums">{usedVariableTokens.length}</span>
+                    )}
+                  </button>
+                )}
+                {decorateUndo != null && !decorating && (
+                  <button type="button" onClick={undoDecorate} className="h-8 px-2 rounded-lg text-[12px] font-medium text-slate-500 hover:text-slate-900 hover:bg-white inline-flex items-center gap-1 transition">
+                    <RotateCcw className="w-3.5 h-3.5" />되돌리기
+                  </button>
+                )}
+              </div>
+              <span className="text-[12px] text-slate-500 tabular-nums whitespace-nowrap">
+                <span className={`font-bold ${bytesOver ? 'text-rose-600' : 'text-indigo-600'}`}>{fullMsgBytes}</span>/{maxBytes}byte
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
               <button type="button" onClick={() => setShowSpecialChars('target')} className={TOOL_BTN}><Type className="w-3.5 h-3.5" />특수문자</button>
               <button type="button" onClick={() => { loadTemplates(); setShowTemplateBox('target'); }} className={TOOL_BTN}><Archive className="w-3.5 h-3.5" />보관함</button>
               <button type="button" onClick={() => { if (!targetMessage.trim()) { setToast({show: true, type: 'error', message: '저장할 메시지를 먼저 입력해주세요.'}); setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000); return; } setTemplateSaveName(''); setShowTemplateSave('target'); }} className={TOOL_BTN}><Save className="w-3.5 h-3.5" />문자 저장</button>
             </div>
-            <span className="text-[12px] text-slate-500 tabular-nums whitespace-nowrap">
-              <span className={`font-bold ${bytesOver ? 'text-rose-600' : 'text-indigo-600'}`}>{fullMsgBytes}</span>/{maxBytes}byte
-            </span>
           </div>
 
           {/* 발신번호 */}

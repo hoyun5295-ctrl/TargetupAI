@@ -54,7 +54,10 @@ import { formatDate, formatPreviewValue, formatByType, calculateSmsBytes, trunca
 import { insertAtCursorOrAppend } from '../utils/textInsert';
 import { formatAgentIdLabel, formatAgentBalance } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스
 // ★ 2026-07-02 특수문자 세트 컨트롤타워 (MessageEditorModal과 공유 — 목록 변경은 utils/smsSafeChars.ts 1곳)
-import { SMS_SAFE_CHARS } from '../utils/smsSafeChars';
+// ★ 2026-08-21 작성기 부속 모달 3종 — 인라인에서 분리(기호 목록 CT는 SpecialCharsModal이 직접 읽는다)
+import SpecialCharsModal from '../components/console/SpecialCharsModal';
+import TemplateBoxModal from '../components/console/TemplateBoxModal';
+import TemplateSaveModal from '../components/console/TemplateSaveModal';
 import { getMmsImagePath, getMmsImageDisplayName, toMmsImagePaths, type MmsImageItem } from '../utils/mmsImage';
 import DirectSendPanel from '../components/DirectSendPanel';
 import AlimtalkSendModal from '../components/AlimtalkSendModal';
@@ -496,6 +499,41 @@ export default function Dashboard() {
     setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
   };
 
+  // ★ 2026-08-21 AI 꾸미기(직접 타겟 발송) — 본문에 이미 들어 있는 %변수%만 자연스럽게 녹인다.
+  //   AI Operator·여정·DM 편집기가 쓰는 같은 API(3크레딧). 게이트는 AI 추천과 같은 isAiMessagingLocked → 업그레이드 모달.
+  //   백엔드 라우트 변경 0. 돌려주는 값 = 꾸민 문안, 막혔거나 실패하면 null(호출부는 원문을 건드리지 않는다).
+  const handleAiDecorate = async (message: string, tokens: string[]): Promise<string | null> => {
+    const openUpgrade = () => {
+      setPlanUpgradeFeature('AI 꾸미기');
+      setPlanUpgradeRequired('스타터');
+      setShowPlanUpgradeModal(true);
+    };
+    if (isAiMessagingLocked) { openUpgrade(); return null; }
+    const fail = (msg: string) => {
+      setToast({ show: true, type: 'error', message: msg });
+      setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+      return null;
+    };
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/ai/operator/decorate-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ message, selectedVars: tokens, channel: targetMsgType.toLowerCase(), isAd: adTextEnabled }),
+      });
+      const data = await res.json();
+      if (data?.code === 'AI_OPERATOR_GATED') { openUpgrade(); return null; }
+      if (data?.success && typeof data.message === 'string' && data.message.trim()) {
+        setToast({ show: true, type: 'success', message: '꾸미기를 적용했습니다 (3크레딧)' });
+        setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
+        return data.message;
+      }
+      return fail(data?.error || 'AI 꾸미기에 실패했습니다.');
+    } catch (e: any) {
+      return fail(e?.message || '꾸미기 중 오류가 발생했습니다.');
+    }
+  };
+
   // 직접발송 실행 함수
   const executeDirectSend = async (confirmCallbackExclusion?: boolean, confirmNameEmpty?: boolean) => {
     if (isSending || directSending) return; // 교차 중복 발송 방지
@@ -901,8 +939,6 @@ export default function Dashboard() {
   const [showSpecialChars, setShowSpecialChars] = useState<'target' | 'direct' | null>(null);
   const [showTemplateBox, setShowTemplateBox] = useState<'target' | 'direct' | null>(null);
   const [templateList, setTemplateList] = useState<any[]>([]);
-  // ★ D182 (2026-05-19) — 보관함 본문 전문 보기 토글 (직원 신고: line-clamp-2로 짤려 전문 확인 불가)
-  const [expandedTemplateIds, setExpandedTemplateIds] = useState<Set<string>>(new Set());
   const [showTemplateSave, setShowTemplateSave] = useState<'target' | 'direct' | null>(null);
   const [templateSaveName, setTemplateSaveName] = useState('');
   // ★ D96: directInputText → DirectSendPanel로 이동
@@ -3346,6 +3382,7 @@ const campaignData = {
         setSpamFilterData={setSpamFilterData}
         setShowSpamFilter={setShowSpamFilter}
         handleAiMsgHelper={handleAiMsgHelper}
+        onAiDecorate={handleAiDecorate}
         setShowSpecialChars={setShowSpecialChars}
         loadTemplates={loadTemplates}
         setShowTemplateBox={setShowTemplateBox}
@@ -3663,201 +3700,85 @@ const campaignData = {
         setToast={setToast}
       />
 
-      {/* 특수문자 모달 (직접발송 + 직접타겟발송 공용) */}
-      {showSpecialChars && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[400px] max-h-[90vh] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
-            <div className="p-4 border-b bg-purple-50 flex justify-between items-center">
-              <h3 className="font-bold text-lg">✨ 특수문자</h3>
-              <button onClick={() => setShowSpecialChars(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
-            </div>
-            <div className="p-4">
-              <div className="grid grid-cols-8 gap-1.5">
-                {/* SMS/LMS 호환 특수문자만 (EUC-KR 인코딩 지원 확인 완료) — 세트 = utils/smsSafeChars.ts CT */}
-                {SMS_SAFE_CHARS.map((char, i) => (
-                  <button
-                    key={i}
-                    onClick={() => {
-                      // ★ D124 N3: 컨트롤타워 insertAtCursorOrAppend — 커서 위치 삽입 (fallback: 끝에 붙임)
-                      const kind = showSpecialChars; // 'target' | 'direct'
-                      const ta = document.querySelector<HTMLTextAreaElement>(`textarea[data-char-target="${kind}"]`);
-                      const setter = kind === 'target' ? setTargetMessage : setDirectMessage;
-                      insertAtCursorOrAppend(ta, char, setter);
-                      setShowSpecialChars(null);
-                    }}
-                    className="w-10 h-10 flex items-center justify-center text-lg border rounded-lg hover:bg-purple-50 hover:border-purple-300 transition-colors"
-                  >
-                    {char}
-                  </button>
-                ))}
-              </div>
-              <p className="text-xs text-amber-500 mt-3 text-center">✅ SMS/LMS 호환 특수문자만 표시됩니다 (EUC-KR 기준)</p>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ★ 2026-08-21 작성기 부속 모달 3종(특수문자·보관함·문자 저장) — 인라인(이모지 제목·제각각 색·회색 border)에서
+          components/console/ 컴포넌트로 분리. 색은 호출자별: 직접 타겟 발송 = 인디고(콘솔 톤) · 직접발송 = 에메랄드(그 패널 색).
+          state·저장·삭제·적용 로직은 그대로 여기(Dashboard)가 소유한다. */}
+      <SpecialCharsModal
+        show={showSpecialChars !== null}
+        accent={showSpecialChars === 'target' ? 'indigo' : 'emerald'}
+        onClose={() => setShowSpecialChars(null)}
+        onPick={(char) => {
+          // ★ D124 N3: 컨트롤타워 insertAtCursorOrAppend — 커서 위치 삽입 (fallback: 끝에 붙임)
+          const kind = showSpecialChars; // 'target' | 'direct'
+          const ta = document.querySelector<HTMLTextAreaElement>(`textarea[data-char-target="${kind}"]`);
+          const setter = kind === 'target' ? setTargetMessage : setDirectMessage;
+          insertAtCursorOrAppend(ta, char, setter);
+          setShowSpecialChars(null);
+        }}
+      />
 
-      {/* 보관함 모달 (직접발송 + 직접타겟발송 공용) */}
-      {showTemplateBox && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[500px] max-h-[85vh] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
-            <div className="p-4 border-b bg-amber-50 flex justify-between items-center">
-              <h3 className="font-bold text-lg">📂 보관함</h3>
-              <button onClick={() => setShowTemplateBox(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
-            </div>
-            <div className="p-4 overflow-y-auto max-h-[50vh]">
-              {templateList.length === 0 ? (
-                <div className="text-center py-12 text-gray-400">
-                  <div className="text-4xl mb-3">📭</div>
-                  <div className="text-sm">저장된 문자가 없습니다</div>
-                  <div className="text-xs mt-1">메시지 작성 후 '문자저장'을 눌러주세요</div>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {templateList.map((t: any) => {
-                    const isExpanded = expandedTemplateIds.has(t.id);
-                    const contentLines = String(t.content || '').split('\n').length;
-                    const contentLong = (t.content || '').length > 80 || contentLines > 2;
-                    return (
-                    <div key={t.id} className="border rounded-xl p-4 hover:border-amber-300 hover:bg-amber-50/30 transition-colors group">
-                      <div className="flex justify-between items-start mb-2">
-                        <div className="font-medium text-sm text-gray-800">{t.template_name}</div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs px-2 py-0.5 bg-gray-100 rounded">{t.message_type}</span>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); deleteTemplate(t.id); }}
-                            className="text-gray-300 hover:text-red-500 text-sm opacity-0 group-hover:opacity-100 transition-opacity"
-                          >🗑️</button>
-                        </div>
-                      </div>
-                      {/* ★ D182 (2026-05-19): line-clamp-2 → 토글 가능. 직원 신고 — 전문 확인 불가 */}
-                      <div
-                        onClick={() => {
-                          if (!contentLong) return;
-                          setExpandedTemplateIds(prev => {
-                            const next = new Set(prev);
-                            if (next.has(t.id)) next.delete(t.id); else next.add(t.id);
-                            return next;
-                          });
-                        }}
-                        className={`text-xs text-gray-500 mb-2 whitespace-pre-wrap ${isExpanded ? '' : 'line-clamp-2'} ${contentLong ? 'cursor-pointer hover:text-gray-700' : ''}`}
-                        title={contentLong ? (isExpanded ? '클릭하여 접기' : '클릭하여 전문 보기') : ''}
-                      >
-                        {t.content}
-                      </div>
-                      {contentLong && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setExpandedTemplateIds(prev => {
-                              const next = new Set(prev);
-                              if (next.has(t.id)) next.delete(t.id); else next.add(t.id);
-                              return next;
-                            });
-                          }}
-                          className="text-[11px] text-amber-600 hover:text-amber-700 hover:underline mb-2"
-                        >
-                          {isExpanded ? '▲ 접기' : '▼ 전문 보기'}
-                        </button>
-                      )}
-                      <button
-                        onClick={() => {
-                          if (showTemplateBox === 'target') {
-                            setTargetMessage(t.content);
-                            if (t.subject) setTargetSubject(t.subject);
-                            if (t.message_type) setTargetMsgType(t.message_type);
-                          } else {
-                            setDirectMessage(t.content);
-                            if (t.subject) setDirectSubject(t.subject);
-                            if (t.message_type) setDirectMsgType(t.message_type);
-                          }
-                          // ★ B1(0417 PDF #1): 저장 시점의 광고 체크박스 상태 복원
-                          //   t.is_ad === false 만 OFF로, NULL/undefined/true는 ON 유지(레거시 호환)
-                          setAdTextEnabled(t.is_ad !== false);
-                          // ★ D100: MMS 이미지 복원 — JSON 문자열/배열 양쪽 대응
-                          //   DB에 JSON.stringify()로 저장 → 조회 시 string으로 반환 → Array.isArray 실패 → 이미지 미복원
-                          // ★ D124 N4: 배열 항목이 객체(신규: {path, originalName}) 또는 문자열(과거) 혼재 → 컨트롤타워 사용
-                          let mmsPaths = t.mms_image_paths;
-                          if (typeof mmsPaths === 'string') {
-                            try { mmsPaths = JSON.parse(mmsPaths); } catch { mmsPaths = null; }
-                          }
-                          if (t.message_type === 'MMS' && mmsPaths && Array.isArray(mmsPaths)) {
-                            setMmsUploadedImages(mmsPaths.map((item: any, i: number) => {
-                              const serverPath = getMmsImagePath(item);
-                              const originalName = typeof item === 'object' && item?.originalName ? item.originalName : undefined;
-                              const apiUrl = mmsServerPathToUrl(serverPath);
-                              const filename = getMmsImageDisplayName(item, `image_${i + 1}`);
-                              return { serverPath, url: apiUrl, filename, originalName, size: 0 };
-                            }));
-                          }
-                          setShowTemplateBox(null);
-                          setToast({ show: true, type: 'success', message: '문자가 적용되었습니다.' });
-                          setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
-                        }}
-                        className="w-full py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-medium transition-colors"
-                      >적용하기</button>
-                    </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <TemplateBoxModal
+        show={showTemplateBox !== null}
+        accent={showTemplateBox === 'target' ? 'indigo' : 'emerald'}
+        templates={templateList}
+        onDelete={deleteTemplate}
+        onClose={() => setShowTemplateBox(null)}
+        onApply={(t) => {
+          if (showTemplateBox === 'target') {
+            setTargetMessage(t.content);
+            if (t.subject) setTargetSubject(t.subject);
+            if (t.message_type) setTargetMsgType(t.message_type as 'SMS' | 'LMS' | 'MMS');
+          } else {
+            setDirectMessage(t.content);
+            if (t.subject) setDirectSubject(t.subject);
+            if (t.message_type) setDirectMsgType(t.message_type as 'SMS' | 'LMS' | 'MMS');
+          }
+          // ★ B1(0417 PDF #1): 저장 시점의 광고 체크박스 상태 복원
+          //   t.is_ad === false 만 OFF로, NULL/undefined/true는 ON 유지(레거시 호환)
+          setAdTextEnabled(t.is_ad !== false);
+          // ★ D100: MMS 이미지 복원 — JSON 문자열/배열 양쪽 대응
+          //   DB에 JSON.stringify()로 저장 → 조회 시 string으로 반환 → Array.isArray 실패 → 이미지 미복원
+          // ★ D124 N4: 배열 항목이 객체(신규: {path, originalName}) 또는 문자열(과거) 혼재 → 컨트롤타워 사용
+          let mmsPaths: any = t.mms_image_paths;
+          if (typeof mmsPaths === 'string') {
+            try { mmsPaths = JSON.parse(mmsPaths); } catch { mmsPaths = null; }
+          }
+          if (t.message_type === 'MMS' && mmsPaths && Array.isArray(mmsPaths)) {
+            setMmsUploadedImages(mmsPaths.map((item: any, i: number) => {
+              const serverPath = getMmsImagePath(item);
+              const originalName = typeof item === 'object' && item?.originalName ? item.originalName : undefined;
+              const apiUrl = mmsServerPathToUrl(serverPath);
+              const filename = getMmsImageDisplayName(item, `image_${i + 1}`);
+              return { serverPath, url: apiUrl, filename, originalName, size: 0 };
+            }));
+          }
+          setShowTemplateBox(null);
+          setToast({ show: true, type: 'success', message: '문자가 적용되었습니다.' });
+          setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
+        }}
+      />
 
-      {/* 문자저장 모달 (직접발송 + 직접타겟발송 공용) */}
-      {showTemplateSave && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[400px] max-h-[90vh] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
-            <div className="p-4 border-b bg-emerald-50 flex justify-between items-center">
-              <h3 className="font-bold text-lg">💾 문자 저장</h3>
-              <button onClick={() => setShowTemplateSave(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
-            </div>
-            <div className="p-6">
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">저장할 이름</label>
-                <input
-                  type="text"
-                  value={templateSaveName}
-                  onChange={(e) => setTemplateSaveName(e.target.value)}
-                  placeholder="예: VIP 할인 안내, 봄 신상품 홍보"
-                  className="w-full border-2 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                  autoFocus
-                />
-              </div>
-              <div className="mb-4 p-3 bg-gray-50 rounded-xl">
-                <div className="text-xs text-gray-400 mb-1">저장될 내용 미리보기</div>
-                <div className="text-sm text-gray-700 whitespace-pre-wrap line-clamp-4">
-                  {showTemplateSave === 'target' ? targetMessage : directMessage}
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowTemplateSave(null)}
-                  className="flex-1 py-3 border-2 rounded-xl text-sm font-medium hover:bg-gray-50"
-                >취소</button>
-                <button
-                  onClick={async () => {
-                    if (!templateSaveName.trim()) {
-                      setToast({ show: true, type: 'error', message: '이름을 입력해주세요.' });
-                      setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
-                      return;
-                    }
-                    const content = showTemplateSave === 'target' ? targetMessage : directMessage;
-                    const msgType = showTemplateSave === 'target' ? targetMsgType : directMsgType;
-                    const subject = showTemplateSave === 'target' ? targetSubject : directSubject;
-                    const imagePaths = msgType === 'MMS' ? toMmsImagePaths(mmsUploadedImages) : undefined;
-                    const ok = await saveTemplate(templateSaveName.trim(), content, msgType, subject, imagePaths);
-                    if (ok) setShowTemplateSave(null);
-                  }}
-                  className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-sm font-bold transition-colors"
-                >💾 저장하기</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <TemplateSaveModal
+        show={showTemplateSave !== null}
+        accent={showTemplateSave === 'target' ? 'indigo' : 'emerald'}
+        name={templateSaveName}
+        onNameChange={setTemplateSaveName}
+        preview={showTemplateSave === 'target' ? targetMessage : directMessage}
+        onClose={() => setShowTemplateSave(null)}
+        onSave={async () => {
+          if (!templateSaveName.trim()) {
+            setToast({ show: true, type: 'error', message: '이름을 입력해주세요.' });
+            setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+            return;
+          }
+          const content = showTemplateSave === 'target' ? targetMessage : directMessage;
+          const msgType = showTemplateSave === 'target' ? targetMsgType : directMsgType;
+          const subject = showTemplateSave === 'target' ? targetSubject : directSubject;
+          const imagePaths = msgType === 'MMS' ? toMmsImagePaths(mmsUploadedImages) : undefined;
+          const ok = await saveTemplate(templateSaveName.trim(), content, msgType, subject, imagePaths);
+          if (ok) setShowTemplateSave(null);
+        }}
+      />
 
       <AddressBookModal
         show={showAddressBook}
