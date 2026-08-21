@@ -304,7 +304,7 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
   it('작성일자 지정은 컨펌 없이 발급 큐에 올리지 않는다 — ready는 팝빌 발행 큐다', () => {
     const at = billingSrc.indexOf("/confirmations/:id/issue-date");
     expect(at, '작성일자 지정 라우트를 찾지 못했다').toBeGreaterThan(-1);
-    const route = billingSrc.slice(at, at + 3000);
+    const route = billingSrc.slice(at, at + 5000); // 2026-08-21 비고 입력·필수 관문이 앞에 들어와 창을 넓혔다(검사 조건은 그대로)
     expect(route, "manual_wait → ready 승격에 confirmed_at 조건이 없다").toContain('confirmed_at IS NOT NULL');
     expect(route, '컨펌 전이라는 사유를 운영자에게 알려야 한다').toContain('TAXBILL_CONFIRM_REQUIRED');
   });
@@ -525,7 +525,7 @@ describe('080 고정료 자동 파생·작성일자 계약 (2026-08-21)', () => 
     // ★ 4R medium 수용 — 앵커는 설명 주석이 아니라 라우트 선언이다(주석만 남아도 통과하는 함정 제거).
     const at = billingSrc.indexOf("router.put('/taxbill-issues/:id/issue-date'");
     expect(at, '작성일자 변경 라우트 선언을 찾지 못했다').toBeGreaterThan(-1);
-    const route = billingSrc.slice(at, at + 5500);
+    const route = billingSrc.slice(at, at + 9000);
     // 허용 화이트리스트 2종 — 그 외 전부 거부(TAXBILL_ISSUE_DATE_UNSAFE). 팝빌 조회는 하지 않는다
     //   (외부로 나간 적 있는 요청의 부재는 로컬에서 완전하게 증명할 수 없다 — 4R 지연 완료·환경·빈 키).
     // ★ 5R — ①은 엄격 NULL(빈 문자열·공백 fail-open 차단), 수신자 미등록은 허용 근거가 못 된다
@@ -543,7 +543,8 @@ describe('080 고정료 자동 파생·작성일자 계약 (2026-08-21)', () => 
     expect(lockAt, '행 잠금 SELECT가 있어야 한다').toBeGreaterThan(-1);
     expect(lockAt, '쓰기는 잠금 뒤여야 한다').toBeLessThan(writeAt);
     // 컨펌 행 동기화 — 화면이 invoice_confirmations.taxbill_issue_date를 보여준다(이중 진실 차단).
-    expect(route).toContain('UPDATE invoice_confirmations SET taxbill_issue_date');
+    expect(route).toContain('UPDATE invoice_confirmations');
+    expect(route, '컨펌 행 작성일자 동기화').toContain('SET taxbill_issue_date = $2::date,');
   });
 
   it('화이트리스트의 근거가 되는 발행 패스 계약이 유지된다 — 채번은 외부 호출 직전·trim 기준 저장, 재시도는 자격을 지우지 않는다', () => {
@@ -561,5 +562,132 @@ describe('080 고정료 자동 파생·작성일자 계약 (2026-08-21)', () => 
     const retryAt = billingSrc.indexOf("router.post('/taxbill-issues/:id/retry'");
     const retryBody = billingSrc.slice(retryAt, retryAt + 2500);
     expect(retryBody, '재시도는 status만 올린다 — error 소거 금지').not.toContain('error = NULL');
+  });
+});
+
+// ★ 2026-08-21 계산서 비고(PO) — 입력에서 팝빌까지 한 줄로 이어져야 한다. 한 단계라도 빠지면 "넣었는데 계산서엔 없다".
+describe('계산서 비고(PO) 경로 계약 (2026-08-21)', () => {
+  it('발행 행 SQL이 컨펌 행의 비고를 읽어 payload에 넘긴다 — 읽기는 to_jsonb(ALTER 전 안전)', () => {
+    const popbillSrc = read('./taxbill-popbill.ts');
+    expect(popbillSrc, '발행 행 SQL에 비고가 없다').toContain("(to_jsonb(ic) ->> 'taxbill_remark') AS taxbill_remark");
+    expect(popbillSrc, 'payload 호출에 비고가 안 넘어간다').toContain('remark: row.taxbill_remark ?? null');
+  });
+
+  it('작성일자 지정·변경 라우트가 비고를 받아 컨펌 행에 쓰고, 필수 회사는 비면 422로 막는다', () => {
+    const at1 = billingSrc.indexOf("router.put('/confirmations/:id/issue-date'");
+    const r1 = billingSrc.slice(at1, at1 + 6000);
+    // ★ Codex 1R medium — 키가 없으면 기존 PO 보존(취소 후 재지정·옛 클라이언트가 issue_date만 보내도 지우지 않는다).
+    expect(r1).toContain('taxbill_remark = CASE WHEN $4::boolean THEN $3 ELSE taxbill_remark END');
+    expect(r1).toContain("TAXBILL_REMARK_REQUIRED");
+    const at2 = billingSrc.indexOf("router.put('/taxbill-issues/:id/issue-date'");
+    const r2 = billingSrc.slice(at2, at2 + 7000);
+    expect(r2).toContain("taxbill_remark = CASE WHEN $3::boolean THEN $4 ELSE taxbill_remark END");
+    expect(r2).toContain("TAXBILL_REMARK_REQUIRED");
+    // ★ Codex 1R high — 컨펌 행은 같은 회사의 활성 행을 잠근 뒤 쓰고, 저장 1건을 확인해야 ready로 올린다(0건이면 PO 유실).
+    expect(r2, '컨펌 행 잠금은 회사 축까지').toContain('ic.company_id = $2::uuid AND ic.superseded_at IS NULL');
+    expect(r2, '저장 확인 후 ready').toContain('RETURNING id');
+    expect(r2, '둘 곳이 없으면 차단').toContain('TAXBILL_CONFIRMATION_MISSING');
+    const lockIcAt = r2.indexOf('ic.company_id = $2::uuid AND ic.superseded_at IS NULL');
+    const readyAt = r2.indexOf("UPDATE taxbill_issues SET issue_date = $2::date, status = 'ready'");
+    expect(lockIcAt, '컨펌 행 잠금을 찾지 못했다').toBeGreaterThan(-1);
+    expect(lockIcAt, '컨펌 행 잠금·저장이 ready 전환보다 앞').toBeLessThan(readyAt);
+  });
+
+  it('★비고 필수의 최종 게이트는 발행 패스(효과가 만들어지는 곳)에 있고 문서번호 채번보다 앞이다 — 라우트 검사만으로는 자동 정책·전환 전 ready가 샌다', () => {
+    const popbillSrc = read('./taxbill-popbill.ts');
+    // ★ 4R medium — 중괄호 경계로 **실제 분기 블록**을 잘라 제어 흐름을 검증한다(문자열 존재만 보면 분기를 옮겨도 통과한다).
+    const braceBlock = (src: string, from: number): string => {
+      const open = src.indexOf('{', from);
+      let depth = 0;
+      for (let i = open; i < src.length; i++) {
+        if (src[i] === '{') depth++;
+        else if (src[i] === '}') { depth--; if (depth === 0) return src.slice(open, i + 1); }
+      }
+      return '';
+    };
+    const fnStart = popbillSrc.indexOf('async function processOne(');
+    expect(fnStart, 'processOne을 찾지 못했다').toBeGreaterThan(-1);
+    const fn = braceBlock(popbillSrc, popbillSrc.indexOf(')', fnStart));
+    // 순서: 회사 불일치 guard → 비고 게이트 → 채번 → registIssue
+    const mismatchAt = fn.indexOf('if (row.confirmation_id && !row.matched_confirmation_id)');
+    const gateAt = fn.indexOf("if (row.kind === 'original' && row.require_taxbill_remark === true && !String(row.taxbill_remark || '').trim())");
+    const keyAt = fn.indexOf('buildInvoicerMgtKey(issueDate, id)');
+    const registAt = fn.indexOf('await registIssueAsync(');
+    expect(mismatchAt, '회사 불일치 guard가 없다').toBeGreaterThan(-1);
+    expect(gateAt, '비고 필수 게이트가 없다').toBeGreaterThan(-1);
+    expect(mismatchAt).toBeLessThan(gateAt);
+    expect(gateAt, '게이트는 채번 앞').toBeLessThan(keyAt);
+    expect(keyAt).toBeLessThan(registAt);
+    // 불일치 guard 블록 = markFailed + 즉시 return
+    const mismatchBlock = braceBlock(fn, mismatchAt);
+    expect(mismatchBlock).toContain('await markFailed(');
+    expect(mismatchBlock).toContain("return 'failed'");
+    // 게이트 블록: 미채번 분기·미등록 분기 **각각** markFailed + return, 채번 분기는 getInfo 선대사
+    const gateBlock = braceBlock(fn, gateAt);
+    // ★ 5R — 앵커가 없으면 braceBlock이 부모 블록을 돌려줘 fail-open이 된다. 앵커 존재를 먼저 단언한다.
+    const unkeyedAt = gateBlock.indexOf('if (!keyed)');
+    expect(unkeyedAt, '미채번 분기가 없다').toBeGreaterThan(-1);
+    const unkeyedBlock = braceBlock(gateBlock, unkeyedAt);
+    expect(unkeyedBlock).toContain('await markFailed(');
+    expect(unkeyedBlock).toContain("return 'failed'");
+    expect(gateBlock).toContain('getInfoAsync(getService(cfg), cfg.corpNum, keyed)');
+    const absentAt = gateBlock.indexOf('if (!existsExternally)');
+    expect(absentAt, '미등록 분기가 없다').toBeGreaterThan(-1);
+    const absentBlock = braceBlock(gateBlock, absentAt);
+    // ★ 5R — -11002009 증거 보존(덮어쓰면 작성일자 변경 화이트리스트가 닫힌다)
+    expect(absentBlock).toContain("prev.includes('-11002009')");
+    expect(popbillSrc).toContain('t.error AS prev_error,');
+    expect(absentBlock).toContain('await markFailed(');
+    expect(absentBlock).toContain("return 'failed'");
+    // issued 분기 블록 안에 컨펌 UPDATE가 정확히 하나, matched id + company_id 결합, raw id 0
+    const issuedAt = fn.indexOf("if (verdict === 'issued')");
+    expect(issuedAt, 'issued 분기가 없다').toBeGreaterThan(-1);
+    const issuedBlock = braceBlock(fn, issuedAt);
+    expect((issuedBlock.match(/UPDATE invoice_confirmations/g) || []), 'issued 블록의 컨펌 UPDATE는 정확히 하나').toHaveLength(1);
+    expect(issuedBlock).toContain('WHERE id = $1 AND company_id = $3`');
+    expect(issuedBlock).toContain('[row.matched_confirmation_id, mgtKey, row.company_id]');
+    expect(issuedBlock, 'raw confirmation_id로 쓰면 회사 격리가 후속 쓰기에서 열린다').not.toMatch(/row\.confirmation_id/);
+    // processOne 전체에서도 컨펌 UPDATE는 issued 블록 하나뿐이다(다른 분기로 옮기면 위 검사를 우회한다)
+    expect((fn.match(/UPDATE invoice_confirmations/g) || []), 'processOne의 컨펌 UPDATE는 issued 블록 하나뿐').toHaveLength(1);
+    // 발행 행 SQL — 플래그·matched id·회사 격리 JOIN
+    expect(popbillSrc).toContain("(to_jsonb(cbs) ->> 'require_taxbill_remark')::boolean AS require_taxbill_remark");
+    expect(popbillSrc).toContain('ic.id AS matched_confirmation_id');
+    expect(popbillSrc).toContain('LEFT JOIN invoice_confirmations ic ON ic.id = t.confirmation_id AND ic.company_id = t.company_id');
+    expect(popbillSrc).toContain('LEFT JOIN company_billing_settings cbs ON cbs.company_id = t.company_id');
+  });
+
+  it('작성일자 변경 라우트 — 비고만 바꾸는 요청도 같은 화이트리스트를 탄다(4R: 날짜 동일 우회 폐기 — 외부 문서와 로컬 PO 불일치 차단)', () => {
+    const at = billingSrc.indexOf("router.put('/taxbill-issues/:id/issue-date'");
+    const route = billingSrc.slice(at, at + 9000);
+    expect(route, '날짜 동일 우회가 되살아나면 안 된다').not.toContain('dateChanged');
+    expect(route).toContain('if (!neverAttempted && !rejectedByValidation)');
+    // 화이트리스트 거부 블록 = ROLLBACK + 409 (★5R — 실제 중괄호 블록 안에서만 인정)
+    const braceBlock = (src: string, from: number): string => {
+      const open = src.indexOf('{', from);
+      let depth = 0;
+      for (let i = open; i < src.length; i++) {
+        if (src[i] === '{') depth++;
+        else if (src[i] === '}') { depth--; if (depth === 0) return src.slice(open, i + 1); }
+      }
+      return '';
+    };
+    const guardAt = route.indexOf('if (!neverAttempted && !rejectedByValidation)');
+    expect(guardAt, '화이트리스트 guard가 없다').toBeGreaterThan(-1);
+    const guardBlock = braceBlock(route, guardAt);
+    expect(guardBlock).toContain("query('ROLLBACK')");
+    expect(guardBlock).toContain('res.status(409)');
+    expect(guardBlock).toContain('TAXBILL_ISSUE_DATE_UNSAFE');
+  });
+
+  it('컨펌 현황·계산서 목록이 비고와 필수 플래그를 to_jsonb로 내린다 — 화면이 입력칸·표시를 여는 근거', () => {
+    expect(billingSrc).toContain("(to_jsonb(ic) ->> 'taxbill_remark')     AS taxbill_remark");
+    expect(billingSrc).toContain("(to_jsonb(cbs) ->> 'require_taxbill_remark')::boolean AS require_taxbill_remark");
+    expect(billingSrc).toContain("(to_jsonb(ic) ->> 'taxbill_remark') AS taxbill_remark");
+  });
+
+  it('설정 CT — 필수 플래그는 미전송 보존(CASE WHEN provided)으로 쓴다(옛 번들 저장이 설정을 풀지 않게)', () => {
+    const settingsSrc = read('./billing-settings.ts');
+    expect(settingsSrc).toContain("require_taxbill_remark = CASE WHEN $8 THEN EXCLUDED.require_taxbill_remark ELSE company_billing_settings.require_taxbill_remark END");
+    expect(settingsSrc).toContain("(to_jsonb(s) ->> 'require_taxbill_remark')::boolean AS require_taxbill_remark");
   });
 });

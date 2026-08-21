@@ -610,3 +610,31 @@ describe('enqueueTaxbillArchiveCopies — 확정 트랜잭션 밖 best-effort �
     expect(f.calls.map((q) => q.params[2])).toEqual(['mobile@invitocorp.com']);
   });
 });
+
+// ★ 2026-08-21 계산서 비고(PO번호 — 시세이도 접수). 입력 → invoice_confirmations.taxbill_remark → 발행 행 SQL → payload.
+//   배치 규칙: 원본(및 remark1이 빈 수정 장) = remark1 / 사유 2·4처럼 remark1이 당초 작성일자로 찬 장 = remark2.
+describe('buildTaxinvoicePayload — 계산서 비고(PO) 배치 (2026-08-21)', () => {
+  it('원본 장 — 비고가 remark1에 그대로 실린다', () => {
+    const p = buildTaxinvoicePayload({ ...baseInput, remark: ' PO-2026-0831 ' });
+    expect(p.remark1).toBe('PO-2026-0831');
+    expect(p.remark2).toBeUndefined();
+  });
+
+  it('비고가 없으면 remark 키를 만들지 않는다(빈 문자열도 싣지 않는다)', () => {
+    expect(buildTaxinvoicePayload({ ...baseInput, remark: '   ' }).remark1).toBeUndefined();
+    expect(buildTaxinvoicePayload({ ...baseInput, remark: null }).remark1).toBeUndefined();
+  });
+
+  it('사유 2(기재사항 착오) 수정 장 — remark1은 당초 작성일자가 지키고 비고는 remark2로 내려간다', () => {
+    const p = buildTaxinvoicePayload({
+      ...baseInput, modifyCode: 2, orgNtsConfirmNum: '20260801410002030000366e', orgWriteDate: '2026-07-31', remark: 'PO-2026-0831',
+    });
+    expect(p.remark1).toBe('당초 작성일자 2026-07-31');
+    expect(p.remark2).toBe('PO-2026-0831');
+  });
+
+  it('150자 상한 — 팝빌 비고 필드 규격과 입력 경로 상한이 같다', () => {
+    const p = buildTaxinvoicePayload({ ...baseInput, remark: 'x'.repeat(300) });
+    expect(p.remark1).toHaveLength(150);
+  });
+});

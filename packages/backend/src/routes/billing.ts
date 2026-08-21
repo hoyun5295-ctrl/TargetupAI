@@ -278,7 +278,7 @@ router.put('/company-billing-settings/:companyId', async (req: Request, res: Res
   try {
     const { companyId } = req.params;
     const adminId = (req as any).user?.userId || null;
-    const { issue_scope, taxbill_day_policy, manual_billing, company_contact, account_contacts } = (req.body || {}) as any;
+    const { issue_scope, taxbill_day_policy, manual_billing, require_taxbill_remark, company_contact, account_contacts } = (req.body || {}) as any;
 
     // ★ 2026-07-28 사업자등록번호는 **트랜잭션 전에 전부** 검증한다.
     //   BEGIN 안에서 던지면 한 줄 때문에 같이 입력한 다른 값까지 통째로 롤백되고,
@@ -306,6 +306,8 @@ router.put('/company-billing-settings/:companyId', async (req: Request, res: Res
       taxbillDayPolicy: String(taxbill_day_policy || 'last_day'),
       // ★ 2026-07-29 키가 없으면 undefined 그대로 넘겨 기존 값을 보존한다(CT가 미전송/지움을 구분).
       manualBilling: manual_billing === undefined ? undefined : manual_billing === true,
+      // ★ 2026-08-21 계산서 비고(PO) 필수 — 같은 보존 규약.
+      requireTaxbillRemark: require_taxbill_remark === undefined ? undefined : require_taxbill_remark === true,
       updatedBy: adminId,
     });
     if (company_contact && typeof company_contact === 'object') {
@@ -633,6 +635,9 @@ router.get('/confirmations', async (req: Request, res: Response) => {
               ic.confirmed_at, ic.objection_at, ic.objection_text,
               (to_jsonb(ic) ->> 'confirmed_by_admin') AS confirmed_by_admin,
               (to_jsonb(ic) ->> 'confirm_note')       AS confirm_note,
+              -- ★ 2026-08-21 계산서 비고(PO) — 장마다 값. 회사 "비고 필수" 플래그와 함께 내려 화면이 입력칸·필수 표시를 연다.
+              (to_jsonb(ic) ->> 'taxbill_remark')     AS taxbill_remark,
+              (to_jsonb(cbs) ->> 'require_taxbill_remark')::boolean AS require_taxbill_remark,
               ic.taxbill_status, to_char(ic.taxbill_issue_date, 'YYYY-MM-DD') AS taxbill_issue_date,
               ic.taxbill_due_at, ic.issued_at, ic.superseded_at,
               to_char(b.billing_start, 'YYYY-MM-DD') AS billing_start,
@@ -643,6 +648,7 @@ router.get('/confirmations', async (req: Request, res: Response) => {
          JOIN billings b ON b.id = ic.billing_id
          JOIN companies c ON c.id = ic.company_id
          LEFT JOIN users u ON u.id = ic.recipient_user_id
+         LEFT JOIN company_billing_settings cbs ON cbs.company_id = ic.company_id
         WHERE ($1::date IS NULL OR b.billing_end >= $1::date)
           AND ($2::date IS NULL OR b.billing_start <= $2::date)
           AND ($3::text IS NULL OR ic.taxbill_status = $3::text)
@@ -677,10 +683,13 @@ router.get('/taxbill-issues', async (req: Request, res: Response) => {
               -- ★ 2026-08-05 발행 환경. to_jsonb로 읽어 ALTER 전에도 이 목록이 깨지지 않는다
               --   (컬럼이 없으면 NULL — 화면은 미상으로 두고 되돌리기 버튼을 열지 않는다).
               (to_jsonb(t) ->> 'is_test')::boolean AS is_test,
+              -- ★ 2026-08-21 계산서 비고(PO) — [작성일자 변경] 모달의 기본값·목록 표시.
+              (to_jsonb(ic) ->> 'taxbill_remark') AS taxbill_remark,
               to_char(b.billing_start, 'YYYY-MM-DD') AS billing_start,
               to_char(b.billing_end, 'YYYY-MM-DD')   AS billing_end,
               c.company_name
          FROM taxbill_issues t
+         LEFT JOIN invoice_confirmations ic ON ic.id = t.confirmation_id AND ic.company_id = t.company_id
          LEFT JOIN billings b ON b.id = t.billing_id
          LEFT JOIN companies c ON c.id = t.company_id
         WHERE ($1::date IS NULL OR COALESCE(b.billing_end, t.issue_date) >= $1::date)
@@ -902,11 +911,15 @@ router.put('/taxbill-issues/:id/issue-date', async (req: Request, res: Response)
     if (!/^\d{4}-\d{2}-\d{2}$/.test(issueDate)) {
       return res.status(400).json({ error: '작성일자(issue_date)가 올바르지 않습니다. YYYY-MM-DD 형식으로 지정해 주세요.' });
     }
+    // ★ 2026-08-21 계산서 비고(PO) — 키가 있으면 그 값으로 쓴다(빈 값 = 지움), 키가 없으면 기존 값 보존.
+    const remarkProvided = Object.prototype.hasOwnProperty.call((req.body as any) || {}, 'taxbill_remark');
+    const taxbillRemark = remarkProvided ? (String((req.body as any)?.taxbill_remark ?? '').trim().slice(0, 150) || null) : null;
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       const cur = await client.query(
-        `SELECT id, confirmation_id, status, kind, nts_confirm_num, error, invoicer_mgt_key
+        `SELECT id, confirmation_id, status, kind, nts_confirm_num, error, invoicer_mgt_key, company_id,
+                to_char(issue_date, 'YYYY-MM-DD') AS issue_date
            FROM taxbill_issues WHERE id = $1::uuid FOR UPDATE`,
         [id],
       );
@@ -926,6 +939,10 @@ router.put('/taxbill-issues/:id/issue-date', async (req: Request, res: Response)
       //   남은 행이 재claim에서 수신자 실패로 error가 덮이면, 팝빌에 문서가 실존하는데 최신 error만 보고 연다).
       const neverAttempted = row.invoicer_mgt_key == null; // 채번 전 = 외부 호출 0 확정(엄격 NULL만)
       const rejectedByValidation = rowErr.includes('-11002009'); // 팝빌 검증 거절 완결 응답 = 미등록 확정
+      // ★ 2026-08-21 (Codex 4R) **비고만 바꾸는 요청도 같은 화이트리스트를 탄다.** 3R에서 "날짜가 같으면 비고만 저장"을
+      //   열었다가 접었다 — 외부 문서가 있는데 선대사 타임아웃으로 failed가 된 행에 비고를 적으면, 다음 발행이 중복
+      //   거절 → 자가치유로 끝나 **로컬엔 PO가 있고 실제 문서엔 없는** 조용한 불일치가 된다. 외부 호출 이력이 있는
+      //   행은 날짜든 비고든 로컬에서 바꾸지 않는다. 그런 행의 처방은 대사 후 정산 삭제·재발행(§2-8 이전 장)이다.
       if (!neverAttempted && !rejectedByValidation) {
         await client.query('ROLLBACK');
         return res.status(409).json({
@@ -933,22 +950,54 @@ router.put('/taxbill-issues/:id/issue-date', async (req: Request, res: Response)
           code: 'TAXBILL_ISSUE_DATE_UNSAFE',
         });
       }
+      // ★ 2026-08-21 (Codex 1R high 2건 수용) 컨펌 행은 **같은 회사의 활성 행**을 FOR UPDATE로 잠근 뒤 쓴다.
+      //   비고는 그 행이 갖고 발행 패스가 거기서 읽으므로, 저장이 0건이면 새 PO는 유실된다 — 그 경우 ready로
+      //   올리지 않고 롤백한다(비고를 보냈거나 필수 회사인데 둘 곳이 없으면 422). 회사 불일치 행은 타사 PO를
+      //   읽고 덮는 경로라 처음부터 잇지 않는다.
+      const cbs = await getCompanyBillingSettings(String(row.company_id), client);
+      const icRes = row.confirmation_id
+        ? await client.query(
+            `SELECT ic.id, (to_jsonb(ic) ->> 'taxbill_remark') AS taxbill_remark
+               FROM invoice_confirmations ic
+              WHERE ic.id = $1::uuid AND ic.company_id = $2::uuid AND ic.superseded_at IS NULL
+              FOR UPDATE`,
+            [String(row.confirmation_id), String(row.company_id)],
+          )
+        : { rows: [] as any[] };
+      const icRow = icRes.rows[0] || null;
+      const effectiveRemark = remarkProvided ? taxbillRemark : (String(icRow?.taxbill_remark || '').trim() || null);
+      if (!icRow && (remarkProvided || cbs.requireTaxbillRemark)) {
+        await client.query('ROLLBACK');
+        return res.status(422).json({
+          error: '이 장에 연결된 활성 컨펌 행이 없어 계산서 비고를 저장할 곳이 없습니다(재발급으로 무효화됐거나 연결이 끊긴 장). 대사 후 처리해 주세요.',
+          code: 'TAXBILL_CONFIRMATION_MISSING',
+        });
+      }
+      if (cbs.requireTaxbillRemark && !effectiveRemark) {
+        await client.query('ROLLBACK');
+        return res.status(422).json({
+          error: '이 회사는 계산서 비고(PO번호 등)가 필수입니다. 비고를 입력한 뒤 작성일자를 변경해 주세요.',
+          code: 'TAXBILL_REMARK_REQUIRED',
+        });
+      }
+      if (icRow) {
+        const sync = await client.query(
+          `UPDATE invoice_confirmations
+              SET taxbill_issue_date = $2::date,
+                  taxbill_remark = CASE WHEN $3::boolean THEN $4 ELSE taxbill_remark END
+            WHERE id = $1::uuid AND company_id = $5::uuid AND superseded_at IS NULL
+          RETURNING id`,
+          [String(icRow.id), issueDate, remarkProvided, taxbillRemark, String(row.company_id)],
+        );
+        if ((sync.rowCount || 0) !== 1) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: '처리 중에 컨펌 행 상태가 바뀌어 중단했습니다. 잠시 후 다시 확인해 주세요.' });
+        }
+      }
       await client.query(
         `UPDATE taxbill_issues SET issue_date = $2::date, status = 'ready' WHERE id = $1::uuid`,
         [id, issueDate],
       );
-      if (row.confirmation_id) {
-        // ★ Codex 5R medium 수용 — superseded(재발급으로 대체된) 컨펌 행은 덮지 않는다. 0건이면 경고만
-        //   남기고 진행한다(taxbill_issues가 진실 축 — 표시 행 부재로 날짜 변경 자체를 되돌리지 않는다).
-        const sync = await client.query(
-          `UPDATE invoice_confirmations SET taxbill_issue_date = $2::date
-            WHERE id = $1::uuid AND superseded_at IS NULL`,
-          [String(row.confirmation_id), issueDate],
-        );
-        if ((sync.rowCount || 0) === 0) {
-          console.warn(`[작성일자변경] 컨펌 행 동기화 0건 — confirmation=${row.confirmation_id} (소실 또는 superseded). 화면 작성일자가 옛 값으로 보일 수 있다.`);
-        }
-      }
       await client.query('COMMIT');
     } catch (txErr) {
       try { await client.query('ROLLBACK'); } catch { /* 응답이 사실을 전달한다 */ }
@@ -1302,6 +1351,11 @@ router.put('/confirmations/:id/issue-date', async (req: Request, res: Response) 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(issueDate)) {
       return res.status(400).json({ error: '작성일자(issue_date)가 올바르지 않습니다. YYYY-MM-DD 형식으로 지정해 주세요.' });
     }
+    // ★ 2026-08-21 계산서 비고(PO번호 등 — 시세이도 접수). 날짜와 같은 통보로 오는 값이라 한 자리에서 받는다.
+    //   장마다 다르므로 invoice_confirmations.taxbill_remark에 저장하고, 발행 패스가 팝빌 비고로 싣는다(§2-20).
+    //   키가 없으면 기존 값 보존(Codex 1R medium — 취소 후 재지정·옛 클라이언트가 issue_date만 보내면 PO가 지워졌다).
+    const remarkProvided = Object.prototype.hasOwnProperty.call((req.body as any) || {}, 'taxbill_remark');
+    const taxbillRemark = remarkProvided ? (String((req.body as any)?.taxbill_remark ?? '').trim().slice(0, 150) || null) : null;
     // ★ Codex 2R HIGH 수용 — 직접선택 건도 ready 전이와 **같은 트랜잭션**에서 장부(taxbill_issues)를 만든다.
     //   워커 CTE는 confirmed·due만 소비하므로, 여기서 안 만들면 이 건은 팝빌 소비 큐에 영영 안 들어간다.
     const client = await pool.connect();
@@ -1315,8 +1369,10 @@ router.put('/confirmations/:id/issue-date', async (req: Request, res: Response) 
       //   업체가 메일·전화로 확인해 준 경우는 [업체 확인 기록](/admin-confirm)으로 `confirmed_at`을 남긴 뒤 지정한다 —
       //   막기만 하면 부서가 발행일자를 통보하는 회사(시세이도류)가 영영 발행 불가가 된다.
       const cur = await client.query(
-        `SELECT taxbill_status, confirmed_at FROM invoice_confirmations
-          WHERE id = $1::uuid AND superseded_at IS NULL FOR UPDATE`,
+        `SELECT ic.taxbill_status, ic.confirmed_at, ic.company_id,
+                (to_jsonb(ic) ->> 'taxbill_remark') AS taxbill_remark
+           FROM invoice_confirmations ic
+          WHERE ic.id = $1::uuid AND ic.superseded_at IS NULL FOR UPDATE`,
         [String(req.params.id)],
       );
       if (cur.rows.length === 0 || String(cur.rows[0].taxbill_status) !== 'manual_wait') {
@@ -1328,6 +1384,17 @@ router.put('/confirmations/:id/issue-date', async (req: Request, res: Response) 
         return res.status(422).json({
           error: '업체 컨펌 전에는 계산서를 발급할 수 없습니다. 업체가 컨펌 링크를 누르거나, 메일·전화로 확인받았다면 [업체 확인 기록]을 남긴 뒤 작성일자를 지정해 주세요.',
           code: 'TAXBILL_CONFIRM_REQUIRED',
+        });
+      }
+      // ★ 2026-08-21 회사가 "계산서 비고 필수"면 비고 없이 발급 큐에 올리지 않는다(PO 누락 계산서 = 재발행 비용).
+      //   유효값 = 이번에 보낸 값(키 있음) 또는 잠근 행의 기존 값(키 없음). 최종 관문은 발행 패스(processOne)에 한 번 더 있다.
+      const cbs = await getCompanyBillingSettings(String(cur.rows[0].company_id), client);
+      const effectiveRemark = remarkProvided ? taxbillRemark : (String(cur.rows[0].taxbill_remark || '').trim() || null);
+      if (cbs.requireTaxbillRemark && !effectiveRemark) {
+        await client.query('ROLLBACK');
+        return res.status(422).json({
+          error: '이 회사는 계산서 비고(PO번호 등)가 필수입니다. 비고를 입력한 뒤 작성일자를 지정해 주세요.',
+          code: 'TAXBILL_REMARK_REQUIRED',
         });
       }
       // ★ 2026-08-07(2) 취소된 장에 국세청 승인번호가 남아 있으면(웹훅 대사 기록 — 외부에 문서 실존)
@@ -1349,11 +1416,12 @@ router.put('/confirmations/:id/issue-date', async (req: Request, res: Response) 
       }
       const r = await client.query(
         `UPDATE invoice_confirmations
-            SET taxbill_issue_date = $2::date, taxbill_status = 'ready'
+            SET taxbill_issue_date = $2::date, taxbill_status = 'ready',
+                taxbill_remark = CASE WHEN $4::boolean THEN $3 ELSE taxbill_remark END
           WHERE id = $1::uuid AND taxbill_status = 'manual_wait' AND superseded_at IS NULL
             AND confirmed_at IS NOT NULL
         RETURNING id, billing_id, company_id, taxbill_issue_date`,
-        [String(req.params.id), issueDate],
+        [String(req.params.id), issueDate, taxbillRemark, remarkProvided],
       );
       if (r.rows.length === 0) {
         await client.query('ROLLBACK');
@@ -1386,7 +1454,7 @@ router.put('/confirmations/:id/issue-date', async (req: Request, res: Response) 
   } catch (error: any) {
     const emsg = error?.message || '';
     if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — invoice_confirmations 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — invoice_confirmations.taxbill_remark · company_billing_settings.require_taxbill_remark ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('작성일자 지정 오류:', error);
     return res.status(500).json({ error: error.message });

@@ -129,6 +129,11 @@ export interface TaxinvoiceBuildInput {
   orgNtsConfirmNum?: string | null;
   /** 당초 작성일자(YYYY-MM-DD) — 사유 2·4는 remark1에 기재 의무(§7-0) */
   orgWriteDate?: string | null;
+  /**
+   * ★ 2026-08-21 계산서 비고(PO번호 등 — 시세이도 접수). 원본 장은 `remark1`에 싣고, 사유 2·4 수정 장처럼
+   * `remark1`이 당초 작성일자로 차 있으면 `remark2`로 내려 보낸다(당초 작성일자 기재 의무를 밀어내지 않는다).
+   */
+  remark?: string | null;
 }
 
 const MODIFY_CODES = new Set([1, 2, 4, 6]); // §7-0 — 우리 구현 대상 사유만
@@ -259,6 +264,14 @@ export function buildTaxinvoicePayload(input: TaxinvoiceBuildInput): any {
     if (MODIFY_NEEDS_ORG_DATE.has(Number(input.modifyCode))) {
       payload.remark1 = `당초 작성일자 ${String(input.orgWriteDate).trim()}`;
     }
+  }
+
+  // ★ 2026-08-21 계산서 비고(PO) — 당초 작성일자가 remark1을 차지한 수정 장은 remark2, 그 밖은 remark1.
+  //   150자 상한(팝빌 비고 필드 규격 — 입력 경로에서도 같은 상한으로 자른다).
+  const remark = String(input.remark || '').trim().slice(0, 150);
+  if (remark) {
+    if (payload.remark1) payload.remark2 = remark;
+    else payload.remark1 = remark;
   }
 
   return payload;
@@ -731,13 +744,22 @@ const ISSUE_ROW_SQL = `
   SELECT t.id, t.kind, t.modify_code, t.org_nts_confirm_num, t.invoicer_mgt_key,
          to_char(t.issue_date, 'YYYY-MM-DD') AS issue_date,
          t.supply_amount, t.tax_amount, t.total_amount, t.status,
+         t.error AS prev_error,
          t.confirmation_id,
+         -- ★ 2026-08-21 (Codex 2R critical) 같은 회사로 JOIN된 컨펌 행의 id — 발행 확정 쓰기는 raw confirmation_id가
+         --   아니라 **이 값**만 쓴다. raw id는 있는데 이 값이 NULL이면 타사 컨펌을 가리키는 손상 행이라 외부 호출 전에 멈춘다.
+         ic.id AS matched_confirmation_id,
          -- 당초 작성일자(수정 장의 remark1 재료) — 당초 승인번호로 우리 장부에서 역참조
          (SELECT to_char(o.issue_date, 'YYYY-MM-DD')
             FROM taxbill_issues o
            WHERE o.nts_confirm_num = t.org_nts_confirm_num AND o.id <> t.id
            ORDER BY o.created_at LIMIT 1) AS org_write_date,
          ic.recipient_email,
+         -- ★ 2026-08-21 계산서 비고(PO — 시세이도). to_jsonb로 읽어 ALTER 전에도 발행 패스가 깨지지 않는다.
+         --   회사 "비고 필수" 플래그도 함께 읽는다 — 게이트는 효과(외부 발행)가 만들어지는 이 패스에 있어야
+         --   자동 정책(confirmed·due→ready)·설정 전환 전 ready·연결 없는 건까지 전부 걸린다(Codex 1R high).
+         (to_jsonb(ic) ->> 'taxbill_remark') AS taxbill_remark,
+         (to_jsonb(cbs) ->> 'require_taxbill_remark')::boolean AS require_taxbill_remark,
          t.company_id, b.user_id AS billing_user_id,
          to_char(b.billing_end, 'YYYY-MM-DD') AS billing_end,
          c.company_name, c.business_number, c.ceo_name, c.address,
@@ -755,7 +777,10 @@ const ISSUE_ROW_SQL = `
          bcc.taxbill_biz_type     AS co_taxbill_biz_type,
          bcc.taxbill_biz_item     AS co_taxbill_biz_item
     FROM taxbill_issues t
-    LEFT JOIN invoice_confirmations ic ON ic.id = t.confirmation_id
+    -- ★ 2026-08-21 컨펌 행은 **같은 회사**일 때만 잇는다(Codex 1R high — 손상·이관 행이 타사 컨펌을 가리키면
+    --   타사 PO가 이 회사 계산서에 실린다). 불일치면 ic가 NULL로 떨어져 비고 없음 = 필수 회사면 아래 게이트가 막는다.
+    LEFT JOIN invoice_confirmations ic ON ic.id = t.confirmation_id AND ic.company_id = t.company_id
+    LEFT JOIN company_billing_settings cbs ON cbs.company_id = t.company_id
     LEFT JOIN billings b ON b.id = t.billing_id
     LEFT JOIN companies c ON c.id = t.company_id
     LEFT JOIN users u ON u.id = b.user_id
@@ -799,6 +824,53 @@ async function processOne(id: string, cfg: PopbillConfig): Promise<'issued' | 's
     if (row.kind !== 'original' && row.kind !== 'modify') {
       await markFailed(id, `알 수 없는 장 유형(kind=${row.kind}) — original/modify만 발행 가능`);
       return 'failed';
+    }
+    // ★ 2026-08-21 (Codex 2R critical) 컨펌 연결은 **같은 회사 행으로 맞춰진 것만** 진실이다. raw confirmation_id는 있는데
+    //   같은 회사 행이 JOIN되지 않았으면(손상·이관 행이 타사 컨펌을 가리킴) 외부로 내보내지 않는다 — 내보내면 발행 확정
+    //   쓰기가 타사 컨펌을 issued로 바꾸고 이 회사의 팝빌 키를 거기 적는다. 채번 앞이라 행은 복구 가능하게 남는다.
+    if (row.confirmation_id && !row.matched_confirmation_id) {
+      await markFailed(id, '이 장이 가리키는 컨펌 행이 다른 회사 것이거나 없습니다 — 데이터 대사 후 처리해 주세요');
+      return 'failed';
+    }
+    // ★ 2026-08-21 (Codex 1R·2R high 수용) **계산서 비고(PO) 필수 게이트는 여기다** — 효과(외부 발행)가 만들어지는 자리.
+    //   라우트 입력 검사만으로는 자동 정책(confirmed·due→ready)·플래그 켜기 전 ready·컨펌 연결 없는 건이 샌다.
+    //   적용 범위 = **원본 장 + 문서번호 미채번(외부 호출 0이 증명된 행)** 뿐이다:
+    //   - 채번된 행(submitted 재확인·실패 재시도)은 이미 외부에 문서가 있을 수 있어 이 게이트가 getInfo 대사보다 먼저
+    //     failed로 덮으면 실발행 건을 지운다(2R). 그 행의 비고는 바꿀 수도 없다(화이트리스트와 같은 축).
+    //   - 수정 장은 같은 컨펌 행의 비고를 따르고 PO 판정은 원본 발행 때 끝났다 — 막으면 복구 경로가 없다(2R).
+    //   문서번호 채번 **앞**에서 멈춰야 invoicer_mgt_key가 NULL로 남아 [작성일자 변경] 화이트리스트로 비고를 넣고 복구된다.
+    if (row.kind === 'original' && row.require_taxbill_remark === true && !String(row.taxbill_remark || '').trim()) {
+      const keyed = String(row.invoicer_mgt_key || '').trim();
+      if (!keyed) {
+        await markFailed(id, '계산서 비고(PO번호) 필수 회사인데 비고가 없습니다 — [작성일자 변경]에서 비고를 입력하면 발급 대기로 다시 올라갑니다');
+        return 'failed';
+      }
+      // ★ 3R high — 채번은 됐지만 외부에 문서가 없는 행(-11002009 거절·채번 직후 중단)은 registIssue가 **새 문서**를 만든다.
+      //   그래서 채번된 원본은 registIssue 전에 getInfo로 실재를 먼저 본다: 실재하면 그대로 진행(중복 → 자가치유 경로),
+      //   미등록·조회 실패면 비고를 요구하며 멈춘다(보수적 — 조회 장애는 다음 재시도로 해소된다).
+      //   ★ 4R — 이 failed 건의 복구는 [작성일자 변경] **화이트리스트 안에서만**(-11002009 거절 확정 건은 거기서 비고를
+      //   넣는다). 그 밖의 채번 행은 외부 상태가 불확실해 로컬 비고를 적지 않는다 — 대사 후 정산 삭제·재발행이 처방이다.
+      let existsExternally = false;
+      try {
+        const probe = await new Promise<any>((resolve, reject) => {
+          let settled = false;
+          const t = setTimeout(() => { if (!settled) { settled = true; reject(new Error('getInfo timeout')); } }, 10_000);
+          getInfoAsync(getService(cfg), cfg.corpNum, keyed).then(
+            (v) => { if (!settled) { settled = true; clearTimeout(t); resolve(v); } },
+            (e) => { if (!settled) { settled = true; clearTimeout(t); reject(e); } },
+          );
+        });
+        existsExternally = !!probe;
+      } catch { existsExternally = false; }
+      if (!existsExternally) {
+        // ★ 5R — 기존 실패 사유가 -11002009(미래 작성일자 거절 = 미등록 확정)면 그 증거를 **메시지에 보존**한다.
+        //   덮어쓰면 [작성일자 변경] 화이트리스트(-11002009 포함 판정)가 닫혀 안내한 복구 경로가 실행 불가능해진다.
+        const prev = String(row.prev_error || '');
+        await markFailed(id, prev.includes('-11002009')
+          ? `팝빌 -11002009(작성일자 미래 거절 — 미등록 확정) 건에 계산서 비고(PO번호)가 없습니다 — [작성일자 변경]에서 비고를 입력하면 발급 대기로 다시 올라갑니다`
+          : '계산서 비고(PO번호) 필수 회사인데 비고가 없습니다(팝빌에 문서 없음 또는 조회 실패) — 대사 후 정산 삭제·재발행으로 처리해 주세요');
+        return 'failed';
+      }
     }
 
     // numeric(15,2)는 문자열로 온다 — Number 변환 후 정수 검증은 빌더가 한다.
@@ -846,6 +918,8 @@ async function processOne(id: string, cfg: PopbillConfig): Promise<'issued' | 's
       modifyCode: row.kind === 'modify' ? row.modify_code : null,
       orgNtsConfirmNum: row.kind === 'modify' ? row.org_nts_confirm_num : null,
       orgWriteDate: row.kind === 'modify' ? row.org_write_date : null,
+      // ★ 2026-08-21 계산서 비고(PO) — 컨펌 행의 값. 수정 장도 같은 컨펌 행을 가리키므로 같은 PO가 따라간다.
+      remark: row.taxbill_remark ?? null,
     });
 
     const svc = getService(cfg);
@@ -907,14 +981,16 @@ async function processOne(id: string, cfg: PopbillConfig): Promise<'issued' | 's
         // ★ 3R·4R — issued 승격 계약: 참조 pending 기록과 같은 트랜잭션. 승격 소유자는 이 패스 하나뿐
         //   (웹훅 304는 관측·failed 재큐잉만 — 여기가 유일한 기록 지점이라 수신자 집합도 한 벌만 커밋된다).
         await enqueueTaxbillResendsForIssue(client, id, mgtKey, taxbillTo);
-        if (row.confirmation_id) {
+        // ★ 2026-08-21 (Codex 2R critical) 같은 회사로 맞춰진 컨펌 행(matched_confirmation_id)만 쓴다 — raw id로 쓰면
+        //   위 JOIN 격리가 후속 쓰기에서 다시 열린다. 회사 조건을 한 번 더 건다.
+        if (row.matched_confirmation_id) {
           await client.query(
             `UPDATE invoice_confirmations
                 SET taxbill_status = 'issued',
                     issued_at = COALESCE(issued_at, NOW()),
                     popbill_invoice_key = COALESCE(popbill_invoice_key, $2)
-              WHERE id = $1`,
-            [row.confirmation_id, mgtKey],
+              WHERE id = $1 AND company_id = $3`,
+            [row.matched_confirmation_id, mgtKey, row.company_id],
           );
         }
         await client.query('COMMIT');

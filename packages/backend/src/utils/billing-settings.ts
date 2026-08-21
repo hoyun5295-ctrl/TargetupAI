@@ -24,19 +24,29 @@ export interface CompanyBillingSettings {
   taxbillDayPolicy: TaxbillDayPolicy;
   /** 자동 일괄발급 대상에서 뺀다 — 우리 정산으로 발행할 수 없어 사람이 따로 처리하는 회사. */
   manualBilling: boolean;
+  /**
+   * ★ 2026-08-21 계산서 비고(PO번호 등)를 **필수**로 받는 회사(시세이도 — 부서 PO를 계산서 비고에 실어야 한다).
+   * 켜져 있으면 작성일자 지정·변경 때 비고가 비어 있으면 차단한다. 값 자체는 장마다 다르므로
+   * `invoice_confirmations.taxbill_remark`가 갖는다(회사 고정값이 아니다). 경위 = FEATURE-BILLING §2-20.
+   */
+  requireTaxbillRemark: boolean;
 }
 
-/** 설정 행이 없으면 기본값(전체 발급 · 말일 · 자동 발급 대상) — 행 생성은 저장 시에만. */
+/** 설정 행이 없으면 기본값(전체 발급 · 말일 · 자동 발급 대상 · 비고 선택) — 행 생성은 저장 시에만. */
 export async function getCompanyBillingSettings(companyId: string, db: any = pool): Promise<CompanyBillingSettings> {
   const r = await db.query(
-    `SELECT issue_scope, taxbill_day_policy, manual_billing FROM company_billing_settings WHERE company_id = $1::uuid`,
+    // ★ 2026-08-21 신설 컬럼은 to_jsonb로 읽는다 — ALTER 전에도 설정 조회·발행 경로가 깨지지 않는다(컬럼 없으면 NULL=false).
+    `SELECT s.issue_scope, s.taxbill_day_policy, s.manual_billing,
+            (to_jsonb(s) ->> 'require_taxbill_remark')::boolean AS require_taxbill_remark
+       FROM company_billing_settings s WHERE s.company_id = $1::uuid`,
     [companyId],
   );
-  if (r.rows.length === 0) return { issueScope: 'combined', taxbillDayPolicy: 'last_day', manualBilling: false };
+  if (r.rows.length === 0) return { issueScope: 'combined', taxbillDayPolicy: 'last_day', manualBilling: false, requireTaxbillRemark: false };
   return {
     issueScope: r.rows[0].issue_scope as BillingIssueScope,
     taxbillDayPolicy: r.rows[0].taxbill_day_policy as TaxbillDayPolicy,
     manualBilling: r.rows[0].manual_billing === true,
+    requireTaxbillRemark: r.rows[0].require_taxbill_remark === true,
   };
 }
 
@@ -48,7 +58,7 @@ export async function getCompanyBillingSettings(companyId: string, db: any = poo
 export async function upsertCompanyBillingSettings(
   db: any,
   companyId: string,
-  s: { issueScope: string; taxbillDayPolicy: string; manualBilling?: boolean; updatedBy?: string | null },
+  s: { issueScope: string; taxbillDayPolicy: string; manualBilling?: boolean; requireTaxbillRemark?: boolean; updatedBy?: string | null },
 ): Promise<void> {
   if (!ISSUE_SCOPES.includes(s.issueScope as BillingIssueScope)) {
     throw new Error(`발행 단위 값이 올바르지 않습니다: ${s.issueScope}`);
@@ -58,16 +68,19 @@ export async function upsertCompanyBillingSettings(
   }
   const updatedBy = s.updatedBy && UUID_RE.test(s.updatedBy) ? s.updatedBy : null;
   const manualProvided = s.manualBilling !== undefined;
+  // ★ 2026-08-21 `requireTaxbillRemark`도 미전송(undefined) = 기존 값 보존 — manualBilling과 같은 함정(옛 번들 저장이 설정을 푼다).
+  const remarkProvided = s.requireTaxbillRemark !== undefined;
   await db.query(
-    `INSERT INTO company_billing_settings (company_id, issue_scope, taxbill_day_policy, manual_billing, updated_by, updated_at)
-     VALUES ($1::uuid, $2, $3, $5::boolean, $4::uuid, NOW())
+    `INSERT INTO company_billing_settings (company_id, issue_scope, taxbill_day_policy, manual_billing, require_taxbill_remark, updated_by, updated_at)
+     VALUES ($1::uuid, $2, $3, $5::boolean, $7::boolean, $4::uuid, NOW())
      ON CONFLICT (company_id) DO UPDATE SET
-       issue_scope        = EXCLUDED.issue_scope,
-       taxbill_day_policy = EXCLUDED.taxbill_day_policy,
-       manual_billing     = CASE WHEN $6 THEN EXCLUDED.manual_billing ELSE company_billing_settings.manual_billing END,
-       updated_by         = EXCLUDED.updated_by,
-       updated_at         = NOW()`,
-    [companyId, s.issueScope, s.taxbillDayPolicy, updatedBy, s.manualBilling === true, manualProvided],
+       issue_scope            = EXCLUDED.issue_scope,
+       taxbill_day_policy     = EXCLUDED.taxbill_day_policy,
+       manual_billing         = CASE WHEN $6 THEN EXCLUDED.manual_billing ELSE company_billing_settings.manual_billing END,
+       require_taxbill_remark = CASE WHEN $8 THEN EXCLUDED.require_taxbill_remark ELSE company_billing_settings.require_taxbill_remark END,
+       updated_by             = EXCLUDED.updated_by,
+       updated_at             = NOW()`,
+    [companyId, s.issueScope, s.taxbillDayPolicy, updatedBy, s.manualBilling === true, manualProvided, s.requireTaxbillRemark === true, remarkProvided],
   );
 }
 

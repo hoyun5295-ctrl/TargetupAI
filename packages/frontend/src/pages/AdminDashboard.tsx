@@ -1617,6 +1617,8 @@ const [confirmLoading, setConfirmLoading] = useState(false);
 const [confirmStatusFilter, setConfirmStatusFilter] = useState('');
 const [confirmTruncated, setConfirmTruncated] = useState(false);
 const [manualDateDraft, setManualDateDraft] = useState<Record<string, string>>({});
+// ★ 2026-08-21 계산서 비고(PO번호 등 — 시세이도) — 작성일자와 같은 통보로 오는 값이라 같은 자리에서 받는다.
+const [manualRemarkDraft, setManualRemarkDraft] = useState<Record<string, string>>({});
 // ★ 2026-08-05 (서수란 접수) 업체 확인을 관리자가 대신 기록 — 컨펌 링크를 안 누르고 메일·전화로
 //   발행일자를 통보하는 회사(시세이도류)가 있다. 이 창구가 없으면 컨펌 관문이 그 회사를 영영 막는다.
 const [adminConfirmTarget, setAdminConfirmTarget] = useState<any | null>(null);
@@ -1657,6 +1659,7 @@ const [taxbillProdBusy, setTaxbillProdBusy] = useState(false);
 //   발행 전(ready/failed 원본 장)에 담당자가 고치는 창구. 문서번호는 그대로 유지된다.
 const [taxbillDateTarget, setTaxbillDateTarget] = useState<any | null>(null);
 const [taxbillDateValue, setTaxbillDateValue] = useState('');
+const [taxbillDateRemark, setTaxbillDateRemark] = useState(''); // ★ 2026-08-21 계산서 비고(PO) — 변경 모달에서도 정정 가능
 const [taxbillDateBusy, setTaxbillDateBusy] = useState(false);
 // ★ 2026-07-29 수동 정산완료 — 우리 정산으로 발행할 수 없어 사람이 따로 처리한 회사의 그 달 기록.
 //   담긴 좌/우 목록의 다중 선택(빼기)도 여기에 둔다 — 91개사를 한 줄씩 빼는 것은 쓸 수 없다.
@@ -1921,15 +1924,18 @@ const loadConfirmBoard = async (statusFilter?: string) => {
 };
 
 // 직접선택(중간정산) 건 — 작성일자 지정 → 발급 대기(ready) 진입
-const handleManualIssueDate = async (confirmationId: string) => {
+const handleManualIssueDate = async (confirmationId: string, requireRemark?: boolean) => {
   const d = manualDateDraft[confirmationId] || '';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { setBillingToast({ msg: '작성일자를 선택해 주세요', type: 'error' }); return; }
+  // ★ 2026-08-21 계산서 비고(PO) — 필수 회사는 비어 있으면 서버가 422로 막는다. 화면에서도 먼저 안내한다.
+  const remark = (manualRemarkDraft[confirmationId] || '').trim();
+  if (requireRemark && !remark) { setBillingToast({ msg: '이 회사는 계산서 비고(PO번호)가 필수입니다', type: 'error' }); return; }
   try {
     const token = localStorage.getItem('token');
     const res = await fetch(`/api/admin/billing/confirmations/${confirmationId}/issue-date`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ issue_date: d }),
+      body: JSON.stringify({ issue_date: d, taxbill_remark: remark }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || '작성일자 지정 실패');
@@ -2086,13 +2092,15 @@ const handleTaxbillIssueDateChange = async () => {
     const res = await fetch(`/api/admin/billing/taxbill-issues/${taxbillDateTarget.id}/issue-date`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ issue_date: taxbillDateValue }),
+      // ★ 2026-08-21 비고 키를 항상 보낸다(빈 값 = 지움) — 모달이 기존 값을 기본으로 보여주므로 그대로 두면 유지된다.
+      body: JSON.stringify({ issue_date: taxbillDateValue, taxbill_remark: taxbillDateRemark.trim() }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || '작성일자 변경 실패');
     setBillingToast({ msg: data?.message || '작성일자를 변경했습니다', type: 'success' });
     setTaxbillDateTarget(null);
     setTaxbillDateValue('');
+    setTaxbillDateRemark('');
     loadTaxbillIssues();
   } catch (e: any) {
     setBillingToast({ msg: e?.message || '작성일자 변경 실패', type: 'error' });
@@ -3734,7 +3742,7 @@ const handleApproveRequest = async (id: string) => {
   //   SoT = docs/2026-07-28-bulk-invoice-confirm-taxbill-design.md §2. 백엔드 = /api/admin/billing/company-billing-settings.
   const [btLoading, setBtLoading] = useState(false);
   const [btSaving, setBtSaving] = useState(false);
-  const [btSettings, setBtSettings] = useState({ issue_scope: 'combined', taxbill_day_policy: 'last_day', manual_billing: false });
+  const [btSettings, setBtSettings] = useState({ issue_scope: 'combined', taxbill_day_policy: 'last_day', manual_billing: false, require_taxbill_remark: false }); // ★ 2026-08-21 계산서 비고(PO) 필수 플래그
   // 회사 레벨 = billing_contacts(user_id NULL) 한 행 — 정산 담당자 + 계산서 사업자를 함께 갖는다.
   //   any로 두면 6개 키 이름 오타를 tsc가 못 잡는다(load·save·모달 3곳에 같은 키를 적는다).
   type BillingBizFields = {
@@ -3804,6 +3812,7 @@ const handleApproveRequest = async (id: string) => {
       setBtSettings({
         issue_scope: sData?.settings?.issueScope || 'combined',
         taxbill_day_policy: sData?.settings?.taxbillDayPolicy || 'last_day',
+        require_taxbill_remark: sData?.settings?.requireTaxbillRemark === true,
         manual_billing: sData?.settings?.manualBilling === true,
       });
       setBtCompanyContact({
@@ -3843,6 +3852,7 @@ const handleApproveRequest = async (id: string) => {
         body: JSON.stringify({
           issue_scope: btSettings.issue_scope,
           taxbill_day_policy: btSettings.taxbill_day_policy,
+          require_taxbill_remark: btSettings.require_taxbill_remark,
           manual_billing: btSettings.manual_billing,
           // 회사 레벨은 담당자 + 계산서 사업자를 함께 보낸다. 사업자를 비워 보내면 그대로 NULL이 되고,
           // 발급 시 회사 기본정보(companies)로 내려간다 — 우선순위는 SoT §5 참조.
@@ -9207,6 +9217,19 @@ const handleApproveRequest = async (id: string) => {
                         <p className="mt-2 text-xs text-indigo-600">{taxbillIssueDatePreviewText(btSettings.taxbill_day_policy as TaxbillDayPolicy)}</p>
                       </div>
 
+                      {/* ★ 2026-08-21 계산서 비고(PO) 필수 — 시세이도처럼 부서 PO를 계산서 비고에 실어야 하는 회사. 켜면 작성일자 지정·변경 때 비고가 비어 있으면 막는다. */}
+                      <div className="rounded-lg border border-gray-200 p-4">
+                        <label className="flex items-start gap-2 cursor-pointer">
+                          <input type="checkbox" checked={btSettings.require_taxbill_remark}
+                            onChange={(e) => setBtSettings({ ...btSettings, require_taxbill_remark: e.target.checked })}
+                            className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                          <span>
+                            <span className="text-sm font-semibold text-gray-800">계산서 비고(PO번호) 필수</span>
+                            <span className="block text-xs text-gray-500 mt-0.5">작성일자를 지정할 때 비고(PO번호 등)를 반드시 입력하게 합니다. 입력한 값은 세금계산서 비고란에 그대로 인쇄됩니다.</span>
+                          </span>
+                        </label>
+                      </div>
+
                       {/* 계정별 담당자·사업자 (개별 발급일 때 펼침) */}
                       {btSettings.issue_scope === 'by_user' && (
                         <div className="rounded-lg border border-gray-200 p-4">
@@ -11066,6 +11089,8 @@ const handleApproveRequest = async (id: string) => {
                             </span>
                           )}
                           {r.taxbill_issue_date && <span>작성일자 {String(r.taxbill_issue_date).slice(0, 10)}</span>}
+                          {/* ★ 2026-08-21 계산서 비고(PO) — 발행 패스가 이 값을 팝빌 비고로 싣는다. */}
+                          {r.taxbill_remark && <span className="text-indigo-600" title="계산서 비고에 그대로 인쇄됩니다">비고 {r.taxbill_remark}</span>}
                           {r.superseded_at && <span className="text-gray-400">재발급으로 무효</span>}
                           {/* ★ 2026-08-05 (서수란 접수) 작성일자 지정은 **컨펌 뒤에만** 연다.
                               지정하는 순간 발급 큐(ready)로 올라가 워커가 국세청 문서를 만든다 —
@@ -11077,7 +11102,13 @@ const handleApproveRequest = async (id: string) => {
                                 <input type="date" value={manualDateDraft[r.id] || ''}
                                   onChange={(e) => setManualDateDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
                                   className="px-1.5 py-0.5 border rounded text-[10px]" />
-                                <button onClick={() => handleManualIssueDate(r.id)}
+                                {/* ★ 2026-08-21 계산서 비고(PO번호) — 같은 통보로 오는 값이라 날짜 옆 한 자리. 필수 회사는 표시·차단. */}
+                                <input type="text" value={manualRemarkDraft[r.id] || ''} maxLength={150}
+                                  onChange={(e) => setManualRemarkDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                                  placeholder={r.require_taxbill_remark ? '비고(PO번호) — 필수' : '비고(PO번호 등, 선택)'}
+                                  title="계산서 비고란에 그대로 인쇄됩니다"
+                                  className={`px-1.5 py-0.5 border rounded text-[10px] w-40 ${r.require_taxbill_remark ? 'border-amber-400 bg-amber-50' : ''}`} />
+                                <button onClick={() => handleManualIssueDate(r.id, r.require_taxbill_remark === true)}
                                   className="px-2 py-0.5 bg-amber-500 text-white rounded text-[10px] font-semibold">작성일자 지정</button>
                               </span>
                             ) : (
@@ -11198,7 +11229,7 @@ const handleApproveRequest = async (id: string) => {
                                 {/* ★ 2026-08-21 작성일자 변경(서수란 접수 — 라프레리) — 자동 정책(익월 1일)이 만든 작성일자를
                                     발행 전에 고치는 유일한 창구. 승인번호가 생긴 뒤에는 국세청 사실이라 잠근다(서버와 같은 화이트리스트). */}
                                 {(t.status === 'ready' || t.status === 'failed') && t.kind === 'original' && !t.nts_confirm_num && (
-                                  <button onClick={() => { setTaxbillDateTarget(t); setTaxbillDateValue(String(t.issue_date || '').slice(0, 10)); }}
+                                  <button onClick={() => { setTaxbillDateTarget(t); setTaxbillDateValue(String(t.issue_date || '').slice(0, 10)); setTaxbillDateRemark(String(t.taxbill_remark || '')); }}
                                     title="계산서에 적힐 작성일자를 바꿉니다. 문서번호는 그대로입니다."
                                     className="shrink-0 px-2 py-0.5 border border-indigo-300 bg-indigo-50 text-indigo-700 rounded text-[10px] font-semibold hover:bg-indigo-100">작성일자 변경</button>
                                 )}
@@ -11303,13 +11334,19 @@ const handleApproveRequest = async (id: string) => {
                     <input type="date" value={taxbillDateValue} onChange={(e) => setTaxbillDateValue(e.target.value)}
                       className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
 
+                    {/* ★ 2026-08-21 계산서 비고(PO번호) — 발행 패스가 팝빌 비고란에 그대로 싣는다. 기존 값이 기본으로 채워진다. */}
+                    <label className="block text-xs font-semibold text-gray-600 mb-1 mt-3">계산서 비고 (PO번호 등 · 선택)</label>
+                    <input type="text" value={taxbillDateRemark} maxLength={150} onChange={(e) => setTaxbillDateRemark(e.target.value)}
+                      placeholder="예) PO-2026-0831 (계산서 비고란에 인쇄됩니다)"
+                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+
                     <div className="mt-3 px-3 py-2 bg-indigo-50 rounded-lg text-[11px] text-indigo-800">
                       오늘이거나 지난 날짜면 5분 안에 자동 발행되고, 미래 날짜면 그날 발행됩니다. 발행 실패 상태였던 건은
-                      변경과 동시에 발급 대기로 되돌아갑니다.
+                      변경과 동시에 발급 대기로 되돌아갑니다. 비고를 비우면 계산서 비고도 비워집니다.
                     </div>
                   </div>
                   <div className="flex border-t">
-                    <button onClick={() => { setTaxbillDateTarget(null); setTaxbillDateValue(''); }} disabled={taxbillDateBusy}
+                    <button onClick={() => { setTaxbillDateTarget(null); setTaxbillDateValue(''); setTaxbillDateRemark(''); }} disabled={taxbillDateBusy}
                       className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r">닫기</button>
                     <button onClick={handleTaxbillIssueDateChange} disabled={taxbillDateBusy || !taxbillDateValue}
                       className="flex-1 px-4 py-3 bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-50">
