@@ -5,18 +5,37 @@
  * "시스템 요소"로 읽혀야 한다(토스트가 다크 화면 위에서도 같은 모양인 것과 같은 이유).
  *
  * ⛔ 런처·패널에 transform·filter·backdrop-filter·animate-in 계열 0. 패널 안에서 fixed 오버레이가 열릴 수 있다.
+ *   (transform이 걸린 조상은 그 안 fixed의 기준이 되어 화면 기준 좌표가 어긋난다.)
  * 층: 런처 z-[1400] · 패널 z-[1500]. 인터럽트(z-[2000]) 아래, 일반 모달(z-50~70) 위. 토스트(z-[10000])는 항상 위.
- * 자리: 우측 하단(Harold 2026-08-22). 토스트가 같은 자리를 쓰므로 `data-toast-open`이면 런처가 위로 비켜선다.
+ * 자리: 우측 하단(Harold 2026-08-22). 비켜서지 않는다 — 공용 알림은 우측 상단이고, 우하단을 쓰는 화면은
+ *   그 화면을 공용 알림으로 되돌려 자리를 비웠다(`surface-flags.ts` 2026-08-22(2) 주석).
+ *
+ * 티저(★2026-08-22(2) Harold "저게 도움말인지 어떻게 알겠냐"): 첫 진입 1회만 문구가 펼쳐졌다 스스로 접힌다.
+ *   ⛔ 폭 전환은 `transform: scale`이 아니라 **max-width**로 한다. 위 규약을 지키면서 같은 그림이 나온다.
  */
 
 // ────────────── 런처 ──────────────
-export const HELP_LAUNCHER_WRAP = 'fixed z-[1400] right-4 bottom-4 md:right-5 md:bottom-5 transition-[bottom] duration-200 motion-reduce:transition-none';
-export const HELP_LAUNCHER_WRAP_SHIFTED = 'fixed z-[1400] right-4 bottom-20 md:right-5 md:bottom-24 transition-[bottom] duration-200 motion-reduce:transition-none';
+export const HELP_LAUNCHER_WRAP = 'fixed z-[1400] right-4 bottom-4 md:right-5 md:bottom-5';
 export const HELP_LAUNCHER_BTN =
-  'h-12 min-w-[48px] px-3 rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 flex items-center gap-2 ' +
+  'h-12 min-w-[48px] rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 flex items-center overflow-hidden ' +
   'hover:bg-indigo-700 active:bg-indigo-800 transition-colors focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-600/30';
-export const HELP_LAUNCHER_LABEL = 'text-[13px] font-semibold whitespace-nowrap pr-1';
-export const HELP_LAUNCHER_COUNT = 'text-[11.5px] font-medium text-white/80 tabular-nums';
+/** 아이콘 자리. 접힌 상태의 지름(48px)을 이 칸이 혼자 만든다 */
+export const HELP_LAUNCHER_ICON = 'w-12 h-12 shrink-0 grid place-items-center';
+/** 문구 자리. 평소 폭 0 → 펼칠 때만 자란다 */
+export const HELP_LAUNCHER_TEXT =
+  'overflow-hidden whitespace-nowrap text-[13px] font-semibold flex items-center ' +
+  'transition-[max-width,opacity,padding] duration-500 ease-out motion-reduce:transition-none';
+export const HELP_LAUNCHER_TEXT_OPEN = 'max-w-[240px] opacity-100 pr-4';
+export const HELP_LAUNCHER_TEXT_CLOSED = 'max-w-0 opacity-0 pr-0';
+export const HELP_LAUNCHER_COUNT = 'text-[11.5px] font-medium text-white/80 tabular-nums ml-1.5';
+/** 첫 진입 안내 문구. 고객 언어 그대로 */
+export const HELP_TEASE_TEXT = '궁금한 건 물어보세요';
+
+// ────────────── 헤더 진입점(대시보드) ──────────────
+export const HELP_HEADER_BTN =
+  'h-7 md:h-8 px-2.5 md:px-3 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 ' +
+  'text-[11.5px] md:text-[12.5px] font-semibold inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap ' +
+  'hover:bg-indigo-100 transition-colors focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-600/20';
 
 // ────────────── 패널 ──────────────
 export const HELP_PANEL =

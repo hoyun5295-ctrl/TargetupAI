@@ -28,6 +28,7 @@ import {
   ArrowLeft, Sparkles, Target, Plus, Trash2, Edit3, Eye, EyeOff,
   Users, RefreshCw, AlertCircle, Check, X,
 } from 'lucide-react';
+import { useToast } from '../components/ToastProvider';
 
 interface SavedSegment {
   id: string;
@@ -95,16 +96,16 @@ export default function SegmentsPage() {
   const [deleteTarget, setDeleteTarget] = useState<SavedSegment | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // toast
-  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  // ★ 2026-08-22 자체 우하단 토스트 폐기 → 공용 알림(ToastProvider) 사용.
+  //   우하단은 도움말 런처 자리다. 화면마다 알림을 따로 만들면 그 자리에서 겹친다.
+  const toast = useToast();
 
   useEffect(() => {
     loadSegments();
   }, []);
 
   function showToast(type: 'success' | 'error', message: string) {
-    setToast({ type, message });
-    setTimeout(() => setToast(null), 3000);
+    toast[type](message);
   }
 
   async function loadSegments() {
@@ -581,19 +582,6 @@ export default function SegmentsPage() {
         </div>
       )}
 
-      {/* Toast */}
-      {toast && (
-        <div className="fixed bottom-6 right-6 z-[10000]">
-          <div className={`px-4 py-3 rounded-lg shadow-2xl backdrop-blur-sm flex items-center gap-2 text-sm font-medium border ${
-            toast.type === 'success'
-              ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-100'
-              : 'bg-rose-500/20 border-rose-400/40 text-rose-100'
-          }`}>
-            {toast.type === 'success' ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-            {toast.message}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

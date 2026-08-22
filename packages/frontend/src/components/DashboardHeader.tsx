@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { LifeBuoy } from 'lucide-react';
 import SessionTimer from './SessionTimer';
+import { toggleHelp, useHelpEligible } from '../lib/help-open';
+import { HELP_HEADER_BTN } from './help/help-ui';
 
 interface DashboardHeaderProps {
   companyName: string;
@@ -81,6 +84,8 @@ export default function DashboardHeader({
   const navigate = useNavigate();
   const location = useLocation();
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  // 도움말 대상 여부는 서버가 판정해 HelpDock이 받아 둔 것을 읽기만 한다. 헤더가 요금제를 따로 조회하지 않는다
+  const helpEligible = useHelpEligible();
 
   // D53: 캘린더 게이팅 — customer_db_enabled 필요
   const isCalendarLocked = customerDbEnabled === false;
@@ -144,12 +149,29 @@ export default function DashboardHeader({
       {/* D186 Phase 1.5: 모바일 stacked + 데스크탑 좌우 분할 */}
       <div className="max-w-7xl mx-auto px-3 md:px-4 py-2 md:py-4 flex flex-col md:flex-row md:justify-between md:items-center gap-2 md:gap-0">
         {/* 좌측: 회사명 + 사용자 — 모바일에서는 한 줄 컴팩트 */}
-        <div className="cursor-pointer select-none flex md:block items-center gap-2 shrink-0" onClick={() => window.location.reload()}>
-          <h1 className="text-base md:text-xl font-bold text-gray-800 truncate max-w-[200px] md:max-w-none">{companyName}</h1>
-          <p className="text-xs md:text-sm text-gray-500 truncate">
-            {userName}
-            {department ? ` · ${department}` : ''}
-          </p>
+        <div className="flex items-center gap-2.5 md:gap-3 shrink-0 min-w-0">
+          <div className="cursor-pointer select-none flex md:block items-center gap-2 shrink-0 min-w-0" onClick={() => window.location.reload()}>
+            <h1 className="text-base md:text-xl font-bold text-gray-800 truncate max-w-[200px] md:max-w-none">{companyName}</h1>
+            <p className="text-xs md:text-sm text-gray-500 truncate">
+              {userName}
+              {department ? ` · ${department}` : ''}
+            </p>
+          </div>
+          {/* ★ 2026-08-22(2) 업체명 옆 도움말 진입점 (Harold 지시).
+              ⛔ 메뉴 목록에 넣지 않는다 — "헤더에 메뉴를 늘리지 않는다"는 확정은 유지되고, 이건 업체명 옆 유틸리티 자리다.
+              ⛔ 회사명 블록 밖 형제로 둔다. 그 블록에는 새로고침이 걸려 있어 안에 넣으면 눌릴 때마다 화면이 다시 뜬다.
+              열림 상태는 우하단 런처와 공유한다(lib/help-open.ts) — 진입점이 둘이어도 창은 하나다. */}
+          {helpEligible && (
+            <button
+              type="button"
+              onClick={toggleHelp}
+              className={HELP_HEADER_BTN}
+              aria-label="도움말 열기"
+            >
+              <LifeBuoy className="w-3.5 h-3.5" strokeWidth={2.2} />
+              궁금한 건 물어보세요
+            </button>
+          )}
         </div>
 
         {/* 우측: 세션 타이머 + 메뉴 — 모바일에서는 가로 스크롤 */}
