@@ -19,6 +19,14 @@ import {
   decodeCursor,
   isoToKstSql,
   kstSqlToIso,
+  likePattern,
+  kstDateToIso,
+  minIso,
+  monthsBack,
+  monthlySeries,
+  recentYms,
+  SEND_MONTHS_CAP,
+  SUMMARY_MONTHS,
   type TimelineEvent,
   type TimelineKind,
   type TimelineSourceState,
@@ -179,5 +187,70 @@ describe('고객 360 타임라인 — 카탈로그', () => {
     expect(/JOIN\s+customers_unified/i.test(SRC)).toBe(false);
     // 원본 customers를 읽는 식별 쿼리는 실제로 있어야 한다(반대 방향도 잠근다)
     expect(/FROM\s+customers\b/i.test(SRC)).toBe(true);
+  });
+
+  it('MySQL 발송 조회는 번호만 보지 않고 회사(app_etc2)까지 본다(⛔ 회사 격리)', () => {
+    // 2026-08-22 실측: 법인폰 한 번호에 4개 회사의 행이 섞여 있었고, dest_no만 보던 목록·건수가
+    // 테스트계정 화면에 타사 발송을 그대로 띄웠다. 읽는 테이블이 전 bulk 라인 합집합이라
+    // 번호 조건만으로는 회사가 갈리지 않는다. `dest_no = ?`가 있는 WHERE는 전부 `app_etc2 = ?`를 동반해야 한다.
+    const wheres = SRC.match(/WHERE\s+dest_no\s*=\s*\?[^)`'\n]*/g) || [];
+    expect(wheres.length).toBeGreaterThan(0);
+    const unguarded = wheres.filter((w) => !/app_etc2\s*=\s*\?/.test(w));
+    expect(unguarded).toEqual([]);
+  });
+});
+
+describe('고객 360 v2 — 검색·기간 술어(서버가 해석한다, v2 §3-2)', () => {
+  it('LIKE 패턴은 %·_·역슬래시를 이스케이프하고 빈 검색어는 null이다', () => {
+    expect(likePattern('  ')).toBeNull();
+    expect(likePattern(null)).toBeNull();
+    expect(likePattern('쿠폰')).toBe('%쿠폰%');
+    expect(likePattern('50%_할인\\')).toBe('%50\\%\\_할인\\\\%');
+  });
+
+  it('KST 날짜는 그날 00:00 / 23:59:59.999를 UTC ISO로 만들고, 틀린 날짜는 버린다', () => {
+    expect(kstDateToIso('2026-08-21')).toBe('2026-08-20T15:00:00.000Z');
+    expect(kstDateToIso('2026-08-21', true)).toBe('2026-08-21T14:59:59.999Z');
+    expect(kstDateToIso('2026-02-31')).toBeNull();
+    expect(kstDateToIso('2026/08/21')).toBeNull();
+    expect(kstDateToIso('')).toBeNull();
+  });
+
+  it('상한이 둘이면 이른 쪽을 쓴다(커서 · to)', () => {
+    expect(minIso('2026-08-10T00:00:00.000Z', '2026-08-21T14:59:59.999Z')).toBe('2026-08-10T00:00:00.000Z');
+    expect(minIso(null, 'x')).toBe('x');
+    expect(minIso('x', null)).toBe('x');
+    expect(minIso(null, null)).toBeNull();
+  });
+
+  it('from에서 MySQL log 개월 수를 역산하고 24에서 막는다(from이 없으면 24)', () => {
+    const now = new Date(2026, 7, 22); // 2026-08-22
+    expect(monthsBack(null, now)).toBe(SEND_MONTHS_CAP);
+    expect(monthsBack(kstDateToIso('2026-08-01'), now)).toBe(1);
+    expect(monthsBack(kstDateToIso('2026-07-23'), now)).toBe(2);   // 30일 전 → 7월·8월
+    expect(monthsBack(kstDateToIso('2025-08-22'), now)).toBe(13);  // 12개월 전 → 13개 달에 걸친다
+    expect(monthsBack(kstDateToIso('2020-01-01'), now)).toBe(SEND_MONTHS_CAP);
+  });
+
+  it('월별 시리즈는 최근 12칸을 오래된 달부터 채우고 없는 달은 0이다', () => {
+    const now = new Date(2026, 7, 22);
+    const yms = recentYms(SUMMARY_MONTHS, now);
+    expect(yms[0]).toBe('202509');
+    expect(yms[yms.length - 1]).toBe('202608');
+    const series = monthlySeries(new Map([['202608', 4], ['202607', 2], ['202001', 99]]), now);
+    expect(series).toHaveLength(SUMMARY_MONTHS);
+    expect(series[series.length - 1]).toEqual({ ym: '202608', sends: 4 });
+    expect(series[series.length - 2]).toEqual({ ym: '202607', sends: 2 });
+    expect(series.reduce((a, b) => a + b.sends, 0)).toBe(6); // 범위 밖 달은 들어오지 않는다
+  });
+
+  it('검색 대상이 없는 원천(동의·수신거부·등록)은 검색어가 있으면 빈 결과다(소스 계약)', () => {
+    const SRC = readFileSync(resolve(__dirname, '../customer-timeline.ts'), 'utf8');
+    for (const fn of ['fetchConsents', 'fetchUnsubscribes', 'buildProfileEvents']) {
+      const start = SRC.indexOf(`function ${fn}(`);
+      expect(start, fn).toBeGreaterThan(0);
+      const head = SRC.slice(start, start + 500);
+      expect(/if \(f\.like\) return \[\];/.test(head), fn).toBe(true);
+    }
   });
 });

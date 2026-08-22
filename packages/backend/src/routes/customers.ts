@@ -1719,13 +1719,26 @@ router.get('/:id/timeline', requirePlanFeature('customer_db_view'), async (req: 
       ? (rawKinds.split(',').map((k) => k.trim()).filter((k) => (TIMELINE_KINDS as readonly string[]).includes(k)) as TimelineKind[])
       : null;
 
+    // ★ v2(2026-08-22): 검색어 `q`(1~40자) · 기간 `from`/`to`(YYYY-MM-DD, KST) · `summary=0`(요약 생략).
+    //   형식이 틀린 날짜는 400이 아니라 무시한다 — 화면이 만든 값이고, 무시하면 상한(24개월)으로 떨어져 더 넓게 본다.
+    //   해석·이스케이프는 CT가 한다(여기는 길이·형식 자르기만).
+    const q = String(req.query.q || '').trim().slice(0, 40);
+    const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+    const from = DATE_RE.test(String(req.query.from || '')) ? String(req.query.from) : null;
+    const to = DATE_RE.test(String(req.query.to || '')) ? String(req.query.to) : null;
+    const withSummary = String(req.query.summary ?? '') !== '0';
+
     const result = await buildCustomerTimeline({
       companyId,
       customerId: String(id),
       before: req.query.before ? String(req.query.before) : null,
       kinds,
       limit: req.query.limit ? Number(req.query.limit) : 50,
-      months: req.query.months ? Number(req.query.months) : 12,
+      months: req.query.months ? Number(req.query.months) : undefined,
+      q: q || null,
+      from,
+      to,
+      withSummary,
     });
 
     if (!result) return res.status(404).json({ success: false, error: '고객을 찾을 수 없습니다.' });

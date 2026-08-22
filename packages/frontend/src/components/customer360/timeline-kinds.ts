@@ -72,9 +72,24 @@ export function dayLabel(iso: string): string {
   return d.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
 }
 
-/** 시:분 (KST) */
+/**
+ * 시:분 (KST) — **24시간제**. "오전 04:35"는 글자 수가 들쭉날쭉해 고정 폭 시각 열이 세로로 정렬되지 않았다(v2 §1-11).
+ * 이 파일 전용이라 다른 화면의 표기(오전/오후)에는 영향이 없다.
+ */
 export function timeLabel(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
+
+/** 상태 → 칩 문구(실패·대기만 칩으로 승격한다. 성공은 점만) */
+export const STATUS_PILL: Partial<Record<string, { label: string; tone: 'rose' | 'amber' | 'blue' }>> = {
+  fail: { label: '실패', tone: 'rose' },
+  pending: { label: '대기', tone: 'amber' },
+  scheduled: { label: '예약', tone: 'blue' },
+};
+
+/** 상태 → 낭독용 문구(점은 색만 있어 sr-only로 붙인다) */
+export const STATUS_SR: Record<string, string> = {
+  success: '성공', fail: '실패', pending: '대기', scheduled: '예약', unknown: '상태 미확인',
+};

@@ -270,6 +270,22 @@ SELECT tablename, indexname, indexdef FROM pg_indexes WHERE tablename IN ('purch
 
 **Codex**: 읽기 전용 조회 경로라 대상 제외(`feedback_codex_scope_write_path_or_ddl_only` — 쓰기 경로·DDL만). 아래 인덱스 DDL은 데이터를 바꾸지 않고 되돌리기가 자명해(`DROP INDEX`) 같은 기준으로 제외한다.
 
+### 6-R-2) 회사 격리 결함 정정 (2026-08-22 저녁)
+
+**실측 경위**: 2차 개편 회의 중 "같은 LMS 6건 연속"이 live·log 중복인지 확인하려고 Harold님이 실행한 SQL 3건이 다른 결함을 드러냈다.
+- PG: 화면 회사(테스트계정)에 어제 캠페인 **0건**.
+- MySQL(`SMSQ_SEND` 뷰 = live 1~11): 이 번호 행 **0건**. 행은 `_202608` log와 비토 라인 13~15에만 있다(테이블별 seqno 범위가 달라 **live·log 중복 없음** → 반복 행은 실제 별개 발송, 접기가 맞는 처방).
+- MySQL(log + 13~15 UNION): 한 번호에 `app_etc2` **4종류** — 주식회사 인비토(`c7c9…`, 어제 16:36 LMS 10건, 이 회사엔 고객 행 없음) · 인비토(`d284…`) · 테스트계정(`a099…`, 자기 발송은 13·14·15번 **4건**뿐) · **NULL 147건**(10번 라인, 한줄로 적재 경로 아님 — 전 경로가 companyId를 기록하고 NULL은 `internal-alert.ts`의 내부 알림뿐).
+- 즉 테스트계정 화면의 "받은 메시지 110건"과 어제 LMS 연속 행은 **타사·외부 발송**이었다.
+
+**원인**: `fetchSends`·`countSends`가 `WHERE dest_no = ?`만 보고 회사(`app_etc2`)를 보지 않았다. 읽는 테이블이 회사 라인이 아니라 **전 bulk 라인 합집합**(`sms-queue.ts getCompanyAllLiveSmsTables`)이라, 같은 라인을 쓰는 다른 회사가 그 번호로 보낸 문자까지 고객 타임라인에 떴다. 다른 MySQL 집계 경로는 전부 `app_etc2 = ?`로 격리한다(`send-usage-aggregation.ts:139` 계약).
+
+**처방**: 두 곳에 `AND app_etc2 = ?`(companyId) 추가. NULL 행은 자동 제외. 인덱스(`dest_no, sendreq_time`) 조회 뒤 행 필터라 계획 무변경. 회귀 잠금 = `customer-timeline.test.ts` "`dest_no = ?` WHERE는 전부 `app_etc2 = ?` 동반"(12건 통과) · tsc 0.
+
+**실측 기준**: 테스트계정에서 이 고객을 열면 받은 메시지 **4건**, 어제 16:36 LMS가 보이지 않아야 한다.
+
+> ⛔ **일반화**: MySQL 큐를 번호로 읽는 코드는 회사 조건이 없으면 **다른 회사 데이터를 읽는 코드다.** 라인이 회사 전용이라는 전제는 없다(bulk 라인 공유). 새 조회를 만들 때 `dest_no`·`app_etc1` 옆에 `app_etc2 = companyId`를 기본값으로 둔다.
+
 ## 6-D) 배포 전 실행 DDL (Harold)
 
 `(dest_no, sendreq_time)` 인덱스. **없으면 고객 1명 조회가 테이블마다 전행 스캔**이다(5-3 EXPLAIN).
@@ -297,7 +313,13 @@ SELECT tablename, indexname, indexdef FROM pg_indexes WHERE tablename IN ('purch
 
 ## 7) 상태·잔여
 
-- 2026-08-22 **Phase 0 코드 완료**(6-R). 남은 것 = 6-D 인덱스 DDL 실행 → 배포 → §8 실측 1건. 다음 단계 = §6의 1(진입점 확장) · 2(AI 요약) · 3(인바운드 대화).
+- 2026-08-22 **Phase 0 배포완료.** 인덱스 DDL 103개 실행완료(§6-D-R) · 커밋 4건(`602c35d9` → `446e630c` → `894e28bb` → `49e74080`). 남은 것 = **§8 실측 1건**.
+- 2026-08-22 저녁 **회사 격리 결함 정정**(§6-R-2, 코드완료·배포 대기) + **v2 개편**(2열 작업면 · 검색·기간 · 반복 접기 = [v2 설계서](2026-08-22-customer-360-v2-design.md)가 소유. 아래 "다음 축" 2번은 v2에서 닫혔다).
+- **다음 축 (Harold 접수, 착수 대기)**
+  1. **고객 목록 필터 다중값** — 같은 항목에 값 여러 개(지역 = 마천 OR 가락) + 값이 200개여도 찾는 검색형 선택기. **백엔드 `customer-filter.ts`는 이미 `operator: 'in'` + 배열을 지원한다**(문자·숫자·커스텀 분기 전부). 프론트가 `activeFilters.filter(f => f.field !== dynFilterField)`로 같은 필드를 덮어쓰고 있을 뿐 → **백엔드 변경 0**.
+  2. **타임라인 기간·검색어** — 지금은 종류 탭과 "더 보기"뿐이라 200건 받은 고객에서 특정 시점을 못 찾는다. API에 `from`·`to`·`q` 추가. 기간은 `(dest_no, sendreq_time)` 인덱스를 그대로 타서 오히려 빨라진다.
+  3. **인바운드 대화**(§9) · AI 한 줄 요약(§3-6) · 진입점 확장(§6-1).
+- **별건**: 기존 `/api/customers` 나머지 경로의 요금제 게이트. 직접 타겟 발송 추출·대시보드 통계·여정이 함께 써서 통째로 막으면 FREE 발송이 죽는다 — 엔드포인트별 전수 확인 후에만.
 - 2026-08-22 설계서 작성 → **§5 확인 7건 + U-7 전부 완료**(5-R). 미검증 U-1~U-7 전부 해소. 실측 전부 SCHEMA.md 등재(customers_unified 뷰 · 여정 3테이블 · voice · email 2종 · 9테이블 인덱스 41건 · MySQL 103테이블·규모·인덱스 부재). 확정 DDL = MySQL `(dest_no, sendreq_time)` live 14 + 기존 log(1회). PG 인덱스 후보 3은 착수 시 EXPLAIN. 코드 변경 0. **⛔ Harold "구현해" 지시 전 구현 금지**(2026-08-22 명시).
 
 ---
