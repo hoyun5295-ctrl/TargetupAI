@@ -12,7 +12,6 @@
 
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { CUI_MODAL } from '../../utils/console-ui';
 import Customer360Panel from './Customer360Panel';
 
 interface Props {
@@ -42,9 +41,16 @@ export default function Customer360Modal({
 
   if (!show || !customerId) return null;
 
+  // 껍데기 규격은 고객 DB 조회 모달과 같다(같은 스크림·모서리·그림자·폭).
+  // ⛔ 높이는 `max-h`다 — `h-[88vh]` 고정이면 기록이 적은 고객에서 아래가 텅 빈다.
   return createPortal(
-    <div className="fixed inset-0 z-[60] bg-neutral-900/45 flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150 motion-reduce:animate-none">
-      <div className={`${CUI_MODAL} max-w-[1100px] h-[88vh]`} role="dialog" aria-modal="true" aria-label="고객 활동 기록">
+    <div className="fixed inset-0 z-[60] bg-black bg-opacity-50 flex items-center justify-center p-4">
+      <div
+        className="bg-white rounded-xl shadow-2xl w-[1100px] max-w-full max-h-[88vh] overflow-hidden flex flex-col"
+        role="dialog"
+        aria-modal="true"
+        aria-label="고객 활동 기록"
+      >
         <Customer360Panel
           customerId={customerId}
           fallbackName={fallbackName}

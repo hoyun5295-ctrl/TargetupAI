@@ -4,16 +4,16 @@
  * 데이터는 `GET /api/customers/:id/timeline` 하나에서 온다. 제목·상태 문구는 **서버가 완성해서** 준다
  * (설계서 §2-5). 여기는 묶고 그리는 일만 한다.
  *
- * 구성: 헤더(이름·번호·등급·매장·수신 상태) → 요약 4칸 → 접이식 기본 정보 → 필터 칩 → 날짜별 타임라인 → 더 보기.
- * 톤 = 콘솔 톤(`CUI_*`). 이모지 0.
+ * 구성: 헤더(이름·번호·등급·수신 상태) → 요약 4칸 → 접이식 기본 정보 → 종류 탭 → 날짜별 타임라인 → 더 보기.
+ *
+ * ⛔ **톤은 `CustomerDBModal`(고객 DB 조회)을 따른다.** 이 창은 그 목록에서 열리므로 같은 집이어야 한다:
+ *   헤더 `bg-gray-50 border-b px-6 py-4` + 닫기 `w-8 h-8 rounded-full` 우측 끝 · 섹션 `px-6 py-3 border-b` ·
+ *   날짜 머리는 표 헤더처럼 `bg-gray-50` sticky. 강조만 인디고(Harold 지시).
+ *   처음엔 콘솔 톤(CUI_*)에 읽기 폭 880px을 씌웠는데, 1,100px 창에서 내용이 왼쪽에 몰려 오른쪽이 비고
+ *   헤더 배경이 없어 요약과 구분이 사라졌다 — "각이 안 잡혔다"(2026-08-22 Harold). 폭 제한을 걷고 옛 언어로 맞췄다.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Info, Loader2, RotateCcw, X, Clock } from 'lucide-react';
-import {
-  CUI_PILL_BASE, CUI_PILL_DOT, CUI_BTN_OUTLINE, CUI_BTN_GHOST,
-  CUI_EMPTY_BADGE, CUI_EMPTY_TITLE, CUI_EMPTY_DESC,
-  CUI_INFO, CUI_INFO_ICON, CUI_INFO_TEXT, CUI_CHIP_ON, CUI_CHIP_OFF,
-} from '../../utils/console-ui';
+import { ChevronDown, ChevronRight, Info, Loader2, RotateCcw, Clock } from 'lucide-react';
 import {
   KIND_STYLE, FILTER_KINDS, FILTER_EXPAND, STATUS_DOT, dayLabel, timeLabel,
   type TimelineKind,
@@ -54,9 +54,6 @@ interface Props {
   /** 발송 결과 상세로 보내기(캠페인 참조가 있을 때만) */
   onOpenCampaign?: (campaignId: string) => void;
 }
-
-/** 읽기 폭 — 목록이 접히면 패널이 1,000px을 넘게 되는데, 줄이 그만큼 길면 오히려 읽기 나쁘다 */
-const WRAP = 'w-full max-w-[880px]';
 
 const PHONE_FMT = (p: string | null | undefined) => {
   const v = String(p || '').replace(/[^0-9]/g, '');
@@ -146,191 +143,214 @@ export default function Customer360Panel({
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-white">
-      {/* 헤더 — 넓은 화면에서 줄이 끝까지 퍼지지 않게 읽기 폭을 잡는다(WRAP) */}
-      <div className="shrink-0 px-5 sm:px-6 py-4 border-b border-neutral-200">
-        <div className={WRAP}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-[16px] font-bold tracking-[-0.02em] text-neutral-900 truncate">{name || '이름 없음'}</h3>
-              {customer?.grade && (
-                <span className={`${CUI_PILL_BASE} bg-indigo-50 text-indigo-700`}>{customer.grade}</span>
-              )}
-              {customer && (
-                customer.isUnsubscribed ? (
-                  <span className={`${CUI_PILL_BASE} bg-rose-100 text-rose-800`}>
-                    <span className={CUI_PILL_DOT} aria-hidden="true" />수신거부
-                  </span>
-                ) : (
-                  <span className={`${CUI_PILL_BASE} ${customer.smsOptIn ? 'bg-emerald-100 text-emerald-800' : 'bg-neutral-100 text-neutral-600'}`}>
-                    <span className={CUI_PILL_DOT} aria-hidden="true" />{customer.smsOptIn ? '수신 동의' : '수신 미동의'}
-                  </span>
-                )
-              )}
-            </div>
-            <p className="mt-1 text-[13px] text-neutral-500 font-mono">{PHONE_FMT(phone)}</p>
-            {customer && customer.stores.length > 0 && (
-              <p className="mt-0.5 text-[12px] text-neutral-400 truncate">{customer.stores.join(' · ')}</p>
+
+      {/* ── 헤더 — 고객 DB 조회와 같은 언어(bg-gray-50 + border-b + px-6 py-4, X는 우측 끝) ── */}
+      <div className="shrink-0 flex justify-between items-start gap-4 px-6 py-4 border-b bg-gray-50">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-lg font-bold text-gray-800 truncate">{name || '이름 없음'}</h3>
+            {customer?.grade && (
+              <span className="px-2 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-700">{customer.grade}</span>
+            )}
+            {customer && (
+              customer.isUnsubscribed ? (
+                <span className="px-2 py-0.5 rounded text-xs font-medium bg-red-50 text-red-600">수신거부</span>
+              ) : (
+                <span className={`px-2 py-0.5 rounded text-xs font-medium ${customer.smsOptIn ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                  {customer.smsOptIn ? '수신 동의' : '수신 미동의'}
+                </span>
+              )
             )}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="닫기"
-            className="h-8 w-8 shrink-0 grid place-items-center rounded-lg text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-900 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-600/15"
-          >
-            <X className="w-4 h-4" strokeWidth={1.75} />
-          </button>
-        </div>
-
-        {/* 요약 */}
-        <div className="mt-3.5 grid grid-cols-4 gap-2">
-          {[
-            { label: '받은 메시지', value: data?.summary.sends },
-            { label: '반응', value: data?.summary.engagements },
-            { label: '구매', value: data?.summary.purchases },
-          ].map((s) => (
-            <div key={s.label} className="rounded-xl bg-neutral-50 ring-1 ring-neutral-200 px-2.5 py-2 text-center">
-              <p className="text-[11px] text-neutral-500">{s.label}</p>
-              <p className="mt-0.5 text-[16px] font-bold text-neutral-900 tabular-nums">
-                {loading && data == null ? '-' : (s.value ?? 0).toLocaleString()}
-              </p>
-            </div>
-          ))}
-          <div className="rounded-xl bg-neutral-50 ring-1 ring-neutral-200 px-2.5 py-2 text-center">
-            <p className="text-[11px] text-neutral-500">마지막 활동</p>
-            <p className="mt-0.5 text-[12.5px] font-semibold text-neutral-900">
-              {data?.summary.lastActivityAt ? dayLabel(data.summary.lastActivityAt) : '없음'}
-            </p>
+          <div className="mt-1 flex items-center gap-2 text-sm text-gray-500">
+            <span className="font-mono">{PHONE_FMT(phone)}</span>
+            {customer && customer.stores.length > 0 && (
+              <>
+                <span className="text-gray-300">·</span>
+                <span className="truncate">{customer.stores.join(', ')}</span>
+              </>
+            )}
           </div>
         </div>
+        <button
+          onClick={onClose}
+          aria-label="닫기"
+          className="w-8 h-8 shrink-0 flex items-center justify-center rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors text-lg"
+        >
+          &times;
+        </button>
+      </div>
+
+      {/* ── 요약 4칸 ── */}
+      <div className="shrink-0 grid grid-cols-4 divide-x border-b">
+        {[
+          { label: '받은 메시지', value: data?.summary.sends, suffix: '건' },
+          { label: '반응', value: data?.summary.engagements, suffix: '건' },
+          { label: '구매', value: data?.summary.purchases, suffix: '건' },
+        ].map((s) => (
+          <div key={s.label} className="px-6 py-3">
+            <div className="text-xs text-gray-400">{s.label}</div>
+            <div className="mt-0.5 text-xl font-bold text-gray-800 tabular-nums">
+              {loading && data == null ? '-' : (s.value ?? 0).toLocaleString()}
+              <span className="ml-0.5 text-xs font-normal text-gray-400">{s.suffix}</span>
+            </div>
+          </div>
+        ))}
+        <div className="px-6 py-3">
+          <div className="text-xs text-gray-400">마지막 활동</div>
+          <div className="mt-0.5 text-base font-bold text-gray-800">
+            {data?.summary.lastActivityAt ? dayLabel(data.summary.lastActivityAt) : '없음'}
+          </div>
         </div>
       </div>
 
-      {/* 기본 정보(접이식) — 기존 필드 표를 없애지 않는다 */}
+      {/* ── 기본 정보(접이식) — 옛 우측 패널이 보여주던 필드 표 ── */}
       {basicInfo && (
-        <div className="shrink-0 border-b border-neutral-200">
+        <div className="shrink-0 border-b">
           <button
             type="button"
             onClick={() => setBasicOpen((v) => !v)}
-            className="w-full px-5 sm:px-6 py-2.5 flex items-center gap-1.5 text-[13px] font-medium text-neutral-600 transition hover:bg-neutral-50"
+            className="w-full px-6 py-2.5 flex items-center gap-1.5 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
           >
-            {basicOpen ? <ChevronDown className="w-4 h-4 text-neutral-400" /> : <ChevronRight className="w-4 h-4 text-neutral-400" />}
+            {basicOpen ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
             기본 정보
           </button>
-          {basicOpen && <div className="px-5 sm:px-6 pb-4 max-h-[280px] overflow-y-auto"><div className={WRAP}>{basicInfo}</div></div>}
+          {basicOpen && <div className="px-6 pb-4 max-h-[260px] overflow-y-auto">{basicInfo}</div>}
         </div>
       )}
 
-      {/* 필터 칩 — 좁으면 줄바꿈한다(가로 스크롤에 갇히면 뒤쪽 칩을 못 찾는다) */}
-      <div className="shrink-0 px-5 sm:px-6 py-2.5 border-b border-neutral-200">
-        <div className={`${WRAP} flex items-center gap-1 flex-wrap`}>
-          <button type="button" onClick={() => setActive(null)} className={active === null ? CUI_CHIP_ON : CUI_CHIP_OFF}>
-            전체
+      {/* ── 종류 탭 — 옛 화면의 필터 버튼과 같은 규격 ── */}
+      <div className="shrink-0 px-6 py-2.5 border-b flex items-center gap-1 flex-wrap">
+        <button
+          type="button"
+          onClick={() => setActive(null)}
+          className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+            active === null ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-200 text-gray-500 hover:bg-gray-50'
+          }`}
+        >
+          전체
+        </button>
+        {FILTER_KINDS.map((k) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => selectKind(k)}
+            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+              active === k ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-200 text-gray-500 hover:bg-gray-50'
+            }`}
+          >
+            {KIND_STYLE[k].label}
           </button>
-          {FILTER_KINDS.map((k) => (
-            <button key={k} type="button" onClick={() => selectKind(k)} className={active === k ? CUI_CHIP_ON : CUI_CHIP_OFF}>
-              {KIND_STYLE[k].label}
-            </button>
-          ))}
-        </div>
+        ))}
       </div>
 
-      {/* 타임라인 */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-4"><div className={WRAP}>
+      {/* ── 타임라인 ── */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {loading && data == null ? (
-          <div className="py-16 grid place-items-center gap-2.5 text-[13px] text-neutral-500">
-            <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
+          <div className="py-20 flex flex-col items-center gap-2.5 text-sm text-gray-400">
+            <Loader2 className="w-5 h-5 animate-spin text-indigo-500" />
             활동 기록을 불러오는 중
           </div>
         ) : error ? (
-          <div className="py-14 grid place-items-center text-center gap-3">
-            <p className="text-[13px] text-neutral-600">{error}</p>
-            <button type="button" onClick={() => load(null)} className={CUI_BTN_OUTLINE}>
-              <RotateCcw className="w-[15px] h-[15px]" />다시 시도
+          <div className="py-20 flex flex-col items-center gap-3 text-center px-6">
+            <p className="text-sm text-gray-600">{error}</p>
+            <button
+              type="button"
+              onClick={() => load(null)}
+              className="px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium text-gray-600 hover:bg-gray-50 inline-flex items-center gap-1.5 transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />다시 시도
             </button>
           </div>
         ) : events.length === 0 ? (
-          <div className="py-14 grid place-items-center text-center">
-            <div className={CUI_EMPTY_BADGE}><Clock className="w-5 h-5" strokeWidth={1.6} /></div>
-            <p className={CUI_EMPTY_TITLE}>{active ? `${KIND_STYLE[active].label} 기록이 없습니다` : '아직 기록이 없습니다'}</p>
-            <p className={CUI_EMPTY_DESC}>
+          <div className="py-20 flex flex-col items-center text-center px-6">
+            <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 mb-3">
+              <Clock className="w-5 h-5" strokeWidth={1.6} />
+            </div>
+            <p className="text-sm font-semibold text-gray-700">
+              {active ? `${KIND_STYLE[active].label} 기록이 없습니다` : '아직 기록이 없습니다'}
+            </p>
+            <p className="mt-1 text-xs text-gray-400">
               {active ? '위에서 다른 종류를 골라 보세요' : '메시지를 보내거나 고객이 반응하면 여기에 쌓입니다'}
             </p>
           </div>
         ) : (
-          <div className="space-y-5">
+          <>
             {groups.map((g) => (
               <div key={g.day}>
-                <p className="text-[12px] font-semibold text-neutral-400 mb-2">{g.day}</p>
-                <ul className="space-y-1">
-                  {g.items.map((e) => {
-                    const style = KIND_STYLE[e.kind] || KIND_STYLE.behavior;
-                    const Icon = style.icon;
-                    const open = expanded.has(e.id);
-                    const hasDetail = !!e.detail && Object.keys(e.detail).length > 0;
-                    return (
-                      <li key={`${e.kind}:${e.id}`} className="rounded-xl transition hover:bg-neutral-50">
-                        <button
-                          type="button"
-                          onClick={() => hasDetail && toggleExpand(e.id)}
-                          className={`w-full text-left px-2.5 py-2 flex items-start gap-2.5 ${hasDetail ? 'cursor-pointer' : 'cursor-default'}`}
-                        >
-                          <span className={`h-7 w-7 shrink-0 mt-0.5 rounded-lg grid place-items-center ${style.tile}`}>
-                            <Icon className="w-[15px] h-[15px]" strokeWidth={1.9} />
+                {/* 날짜 머리 — 표 헤더와 같은 언어로 붙여 스크롤 중에도 기준이 남는다 */}
+                <div className="sticky top-0 z-10 px-6 py-1.5 bg-gray-50 border-b text-xs font-semibold text-gray-500">
+                  {g.day}
+                </div>
+                {g.items.map((e) => {
+                  const style = KIND_STYLE[e.kind] || KIND_STYLE.behavior;
+                  const Icon = style.icon;
+                  const open = expanded.has(e.id);
+                  const hasDetail = !!e.detail && Object.keys(e.detail).length > 0;
+                  return (
+                    <div key={`${e.kind}:${e.id}`} className="border-b last:border-b-0">
+                      <button
+                        type="button"
+                        onClick={() => hasDetail && toggleExpand(e.id)}
+                        className={`w-full text-left px-6 py-3 flex items-start gap-3 transition-colors ${hasDetail ? 'hover:bg-gray-50 cursor-pointer' : 'cursor-default'}`}
+                      >
+                        <span className={`w-7 h-7 shrink-0 rounded-lg flex items-center justify-center ${style.tile}`}>
+                          <Icon className="w-[15px] h-[15px]" strokeWidth={1.9} />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-1.5">
+                            <span className="text-sm font-medium text-gray-800 truncate">{e.title}</span>
+                            {e.status && STATUS_DOT[e.status] && (
+                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${STATUS_DOT[e.status]}`} aria-hidden="true" />
+                            )}
                           </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="flex items-center gap-1.5">
-                              <span className="text-[13.5px] font-medium text-neutral-900 truncate">{e.title}</span>
-                              {e.status && STATUS_DOT[e.status] && (
-                                <span className={`w-[6px] h-[6px] rounded-full shrink-0 ${STATUS_DOT[e.status]}`} aria-hidden="true" />
-                              )}
-                            </span>
-                            {e.subtitle && <span className="block text-[12px] text-neutral-500 mt-0.5 truncate">{e.subtitle}</span>}
-                          </span>
-                          <span className="shrink-0 text-[11.5px] text-neutral-400 tabular-nums mt-0.5">{timeLabel(e.at)}</span>
-                        </button>
-
-                        {open && e.detail && (
-                          <div className="px-2.5 pb-3 pl-[46px]">
-                            <div className="rounded-lg bg-neutral-50 ring-1 ring-neutral-200 px-3 py-2.5 space-y-1.5">
-                              {e.detail.content && (
-                                <p className="text-[12.5px] text-neutral-700 whitespace-pre-wrap break-words leading-relaxed">{e.detail.content}</p>
-                              )}
-                              <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
-                                {Object.entries(e.detail)
-                                  .filter(([k, v]) => k !== 'content' && v != null && v !== '' && typeof v !== 'object')
-                                  .map(([k, v]) => (
-                                    <div key={k} className="flex items-center gap-1.5 min-w-0">
-                                      <dt className="text-[11px] text-neutral-400 shrink-0">{DETAIL_LABEL[k] || k}</dt>
-                                      <dd className="text-[11.5px] text-neutral-700 truncate">{String(v)}</dd>
-                                    </div>
-                                  ))}
-                              </dl>
-                              {e.ref?.type === 'campaign' && onOpenCampaign && (
-                                <button
-                                  type="button"
-                                  onClick={(ev) => { ev.stopPropagation(); onOpenCampaign(e.ref!.id); }}
-                                  className="text-[12px] font-medium text-indigo-600 hover:text-indigo-700 inline-flex items-center gap-1"
-                                >
-                                  발송 결과 보기<ChevronRight className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          </div>
+                          {e.subtitle && <span className="block mt-0.5 text-xs text-gray-500 truncate">{e.subtitle}</span>}
+                        </span>
+                        <span className="shrink-0 text-xs text-gray-400 tabular-nums pt-0.5">{timeLabel(e.at)}</span>
+                        {hasDetail && (
+                          <ChevronDown className={`w-4 h-4 shrink-0 text-gray-300 transition-transform ${open ? 'rotate-180' : ''}`} />
                         )}
-                      </li>
-                    );
-                  })}
-                </ul>
+                      </button>
+
+                      {open && e.detail && (
+                        <div className="px-6 pb-4 pl-[68px]">
+                          <div className="rounded-lg bg-gray-50 border p-3 space-y-2">
+                            {e.detail.content && (
+                              <p className="text-xs text-gray-700 whitespace-pre-wrap break-words leading-relaxed">{e.detail.content}</p>
+                            )}
+                            <dl className="grid grid-cols-2 gap-x-4 gap-y-1">
+                              {Object.entries(e.detail)
+                                .filter(([k, v]) => k !== 'content' && v != null && v !== '' && typeof v !== 'object')
+                                .map(([k, v]) => (
+                                  <div key={k} className="flex items-center gap-1.5 min-w-0">
+                                    <dt className="text-[11px] text-gray-400 shrink-0">{DETAIL_LABEL[k] || k}</dt>
+                                    <dd className="text-xs text-gray-600 truncate">{String(v)}</dd>
+                                  </div>
+                                ))}
+                            </dl>
+                            {e.ref?.type === 'campaign' && onOpenCampaign && (
+                              <button
+                                type="button"
+                                onClick={(ev) => { ev.stopPropagation(); onOpenCampaign(e.ref!.id); }}
+                                className="text-xs font-medium text-indigo-600 hover:text-indigo-700 inline-flex items-center gap-1"
+                              >
+                                발송 결과 보기<ChevronRight className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             ))}
 
             {(truncatedKinds.length > 0 || erroredKinds.length > 0) && (
-              <div className={CUI_INFO}>
-                <Info className={CUI_INFO_ICON} size={15} strokeWidth={1.9} />
-                <div className={CUI_INFO_TEXT}>
-                  {truncatedKinds.length > 0 && <p>기록이 많아 일부만 보입니다. 아래 "더 보기"로 이어서 볼 수 있습니다.</p>}
+              <div className="px-6 py-3 bg-blue-50/60 border-b text-xs text-blue-900 flex gap-2">
+                <Info className="w-3.5 h-3.5 shrink-0 mt-px" strokeWidth={1.9} />
+                <div>
+                  {truncatedKinds.length > 0 && <p>기록이 많아 일부만 보입니다. 아래에서 이어서 볼 수 있습니다.</p>}
                   {erroredKinds.length > 0 && (
                     <p>{erroredKinds.map((k) => KIND_STYLE[k as TimelineKind]?.label || k).join(' · ')} 기록은 지금 불러오지 못했습니다.</p>
                   )}
@@ -339,22 +359,24 @@ export default function Customer360Panel({
             )}
 
             {data?.nextBefore && (
-              <button
-                type="button"
-                onClick={() => load(data.nextBefore)}
-                disabled={loadingMore}
-                className={`${CUI_BTN_GHOST} w-full`}
-              >
-                {loadingMore ? <><Loader2 className="w-[15px] h-[15px] animate-spin" />불러오는 중</> : '더 보기'}
-              </button>
+              <div className="px-6 py-3">
+                <button
+                  type="button"
+                  onClick={() => load(data.nextBefore)}
+                  disabled={loadingMore}
+                  className="w-full py-2 rounded-lg border border-gray-300 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 inline-flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  {loadingMore ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />불러오는 중</> : '더 보기'}
+                </button>
+              </div>
             )}
 
-            <p className="text-[10px] text-neutral-400 italic pt-1">
+            <p className="px-6 pb-3 text-[10px] text-gray-400 italic">
               Data source: 발송 큐 · 고객 DB · 자사몰 이벤트
             </p>
-          </div>
+          </>
         )}
-      </div></div>
+      </div>
     </div>
   );
 }
