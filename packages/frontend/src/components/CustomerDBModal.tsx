@@ -443,7 +443,8 @@ export default function CustomerDBModal({ onClose, token, userType, initialCusto
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[50]">
-      <div className="bg-white rounded-xl shadow-2xl w-[1100px] max-h-[88vh] overflow-hidden flex flex-col">
+      {/* ★ 2026-08-22 v2: max-w-full — 375px에서 1100px 고정 폭이 화면 밖으로 넘치던 것만 잡는다(자식 360 창과 같은 값) */}
+      <div className="bg-white rounded-xl shadow-2xl w-[1100px] max-w-full max-h-[88vh] overflow-hidden flex flex-col">
 
         {/* 헤더 */}
         <div className="flex justify-between items-center px-6 py-4 border-b bg-gray-50">
@@ -635,7 +636,7 @@ export default function CustomerDBModal({ onClose, token, userType, initialCusto
                     <tr key={c.id}
                       onClick={() => openCustomer(c)}
                       title="누르면 이 고객의 활동 기록이 열립니다"
-                      className={`border-t cursor-pointer transition-colors ${selectedCustomerId === c.id ? 'bg-emerald-50' : 'hover:bg-gray-50'}`}>
+                      className={`border-t cursor-pointer transition-colors ${selectedCustomerId === c.id ? 'bg-indigo-50' : 'hover:bg-gray-50'}`}>
                       <td className="px-3 py-2.5 text-center text-xs text-gray-400">{(page - 1) * limit + idx + 1}</td>
                       <td className="px-3 py-2.5 text-sm font-medium text-gray-800 whitespace-nowrap">{c.name || '-'}</td>
                       <td className="px-3 py-2.5 font-mono text-xs text-gray-600 whitespace-nowrap">{formatPhone(c.phone)}</td>

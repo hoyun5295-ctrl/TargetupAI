@@ -155,5 +155,5 @@ foldRuns(events, { windowMs: 600000, minRun: 3, maxRun: 50, hasMore })
   - 게이트 결과: 백엔드 tsc 0 · 프론트 tsc 0 · vitest **190파일 2,911건 통과**(`customer-timeline.test.ts` 18 + `customer360-fold.test.ts` 8 포함) · 프론트 `build:safe` 성공 · 검출기(impeccable detect) 지적 0 · 모델명·native dialog·화면 이모지·줄표 0 · `disabled:opacity`·`text-white/N` 사용 0 · 클래스 동적 조립 0.
   - 구현 중 정정 2건: ①`buildCustomerTimeline`의 지역 변수 `toIso`가 모듈 헬퍼 `toIso`를 가려 tsc가 잡았다(`toLimitIso`로) ②첫 로드 판정을 `events.length`가 아니라 `hasSummary`(요약 보유 여부)로 — 같은 창에서 고객이 바뀔 때 옛 목록 길이로 판정하면 스켈레톤 대신 빈 상태가 잠깐 비친다.
   - 남은 것 = **§5 실측 ①~⑥(Harold)**. 특히 ④ 검색 성능(500건+ 고객 · 검색어 + 전체 기간 2초)과 2열 첫인상.
-- 별건(부모 변경, 이 축 밖): 선택 행 `emerald-50` · `onOpenCampaign` 배선(연결 시 발송 결과 창 z 티어 확인 필요: ResultsModal 상세가 `z-[70]`) · 부모 모달 모바일 폭(`max-w-full` 없음).
+- 별건 정리(2026-08-22 Harold 동의): 부모 `CustomerDBModal.tsx` **2줄만** 반영 — 선택 행 `emerald-50` → `indigo-50`(638) · 박스 `max-w-full`(446, 375px 넘침). 로직·나머지 톤 무변경. 남은 별건 = `onOpenCampaign` 배선(연결 시 발송 결과 창 z 티어 확인 필요: ResultsModal 상세가 `z-[70]`) → 다음 축.
 - 2단계: `kindCounts` · `summary.recent` · `matched` · 스니펫 · AI 한 줄 요약(1차 §3-6).
