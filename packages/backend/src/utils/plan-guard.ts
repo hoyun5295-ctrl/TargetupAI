@@ -99,6 +99,9 @@ export interface PlanContext {
   aiOperatorTrialStartedAt: Date | null;
   aiOperatorTrialUntil: Date | null;
   isAiOperatorTrialActive: boolean;      // ai_operator_trial_until > NOW()
+  // ★ 2026-08-22 대행발송: 슈퍼관리자가 이 회사에 열어 줬는가(회사 단위 스위치. 요금제 등급과 별개).
+  //   실제 이용 가부는 이 값 AND 유료 = canUseAgencySend 하나가 판정한다.
+  agencySendEnabled: boolean;
 }
 
 export interface FeatureCheckResult {
@@ -138,7 +141,11 @@ export const PLAN_STATUS_SELECT_EXPR = `
   ) AS advanced_access_enabled,
   c.auto_campaign_override, c.subscription_status, c.trial_expires_at,
   COALESCE(c.legacy_grandfathered, false) AS legacy_grandfathered,
-  c.ai_operator_trial_started_at, c.ai_operator_trial_until
+  c.ai_operator_trial_started_at, c.ai_operator_trial_until,
+  -- ★ 2026-08-22 대행발송 셀프 접수(docs/2026-08-22-agency-send-design.md). 회사 단위 스위치이지 요금제 등급이 아니다.
+  --   슈퍼관리자가 "이 회사에 열어 준다"를 켜는 값이라 plans가 아니라 companies에 둔다.
+  --   ⚠ ALTER 전에도 깨지지 않도록 to_jsonb로 읽는다(advanced_access_enabled와 같은 방식). 컬럼이 없으면 false.
+  COALESCE((to_jsonb(c) ->> 'agency_send_enabled')::boolean, false) AS agency_send_enabled
 `.trim();
 
 /**
@@ -213,6 +220,7 @@ export async function loadPlanContext(companyId: string): Promise<PlanContext | 
     directRecipientLimit: row.direct_recipient_limit != null ? Number(row.direct_recipient_limit) : null,
     legacyGrandfathered: !!row.legacy_grandfathered,
     advancedAccessEnabled: !!row.advanced_access_enabled,
+    agencySendEnabled: !!row.agency_send_enabled,
     aiOperatorTrialStartedAt,
     aiOperatorTrialUntil,
     isAiOperatorTrialActive,
@@ -240,6 +248,30 @@ export function isSubscriptionBlocked(ctx: PlanContext): { blocked: boolean; rea
     return { blocked: true, reason: '구독이 만료되었습니다. 요금제를 갱신해주세요.' };
   }
   return { blocked: false };
+}
+
+/**
+ * 요금제를 쓰는 회사인가(미가입 아님 + 구독 정상). `ACTIVE_PAID_PLAN_WHERE`의 함수 판이다.
+ * SQL로 대상을 고를 때는 그 상수를, 이미 읽어 둔 컨텍스트로 판정할 때는 이 함수를 쓴다. 기준은 하나다.
+ * ※ `routes/help.ts`가 같은 판정을 자체 구현하고 있다(도움말 봇 노출). 통합은 별건 — 그 축이 배포 직후라 같은 세션에 건드리지 않는다.
+ */
+export function isActivePaidPlan(ctx: PlanContext | null): boolean {
+  if (!ctx) return false;
+  if (isUnsubscribed(ctx)) return false;
+  return !isSubscriptionBlocked(ctx).blocked;
+}
+
+/**
+ * 대행발송 이용 자격 (★ 2026-08-22 · docs/2026-08-22-agency-send-design.md §4-1).
+ *
+ * = 슈퍼관리자가 이 회사에 켠 스위치 **AND** 요금제 사용 중.
+ * ⛔ 이 판정은 여기 하나뿐이다. 메뉴는 모든 회사에 보이고(미끼), 들어가는 것만 이 함수가 가른다.
+ *   프론트가 플래그와 요금제를 각각 받아 조합하면 판정이 두 벌이 된다 — my-plan은 이 함수의 결과 한 값만 내린다.
+ * ⛔ 쓰기 경로에서는 라우트 장식이 아니라 **효과를 만드는 함수 안**에서 부른다(feedback_gate_belongs_where_the_effect_is_created).
+ */
+export function canUseAgencySend(ctx: PlanContext | null): boolean {
+  if (!ctx) return false;
+  return ctx.agencySendEnabled && isActivePaidPlan(ctx);
 }
 
 // ═══════════════════════════════════════════════════════════

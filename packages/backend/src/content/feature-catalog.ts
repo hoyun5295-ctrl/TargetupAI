@@ -54,7 +54,7 @@ export type PublicFeatureJob = Omit<FeatureJob, 'sourceFile' | 'status' | 'stubU
 export const JOB_GROUPS: { key: string; label: string; jobs: string[] }[] = [
   { key: 'start', label: '시작 준비', jobs: ['sender-register', 'credits-and-plan', 'manage-accounts', 'ai-usage', 'ai-batches'] },
   { key: 'customers', label: '고객 명단', jobs: ['upload-customers', 'ai-column-mapping', 'view-customer', 'manage-unsubscribes', 'connect-shop', 'segments'] },
-  { key: 'send', label: '보내기', jobs: ['send-direct', 'send-target', 'schedule-send', 'send-alimtalk', 'check-spam', 'auto-spam-test', 'ai-operator'] },
+  { key: 'send', label: '보내기', jobs: ['send-direct', 'send-target', 'schedule-send', 'send-alimtalk', 'check-spam', 'auto-spam-test', 'agency-send', 'ai-operator'] },
   { key: 'create', label: '만들기', jobs: ['write-copy-ai', 'mobile-dm', 'image-studio', 'email-campaign', 'inapp-message', 'push-campaign', 'quick-campaign'] },
   { key: 'automate', label: '자동으로 돌리기', jobs: ['auto-marketing', 'journeys', 'marketing-planner', 'marketing-calendar', 'auto-send-legacy'] },
   { key: 'results', label: '결과 보기', jobs: ['check-results', 'performance', 'predictive', 'ai-explain', 'send-calendar'] },
@@ -968,6 +968,33 @@ const READY: FeatureJob[] = [
     related: ['journeys'],
     status: 'ready', stubUntil: null,
     sourceFile: 'frontend/src/pages/AutoSendPage.tsx · frontend/src/components/journey/DateAnchorJourneyBuilder.tsx(반복 종류)',
+  },
+  // ★ 2026-08-22 대행발송(docs/2026-08-22-agency-send-design.md). 화면이 붙어 ready로 올렸다.
+  //   steps는 실제 화면 순서, blockers는 코드가 실제로 내는 차단 문구에서 뽑았다.
+  {
+    id: 'agency-send',
+    title: '대행발송 맡기기',
+    goal: '명단과 문안을 맡기면 검사와 예약까지 대신 해 준다',
+    keywords: ['대행발송', '대행 발송', '대신 보내기', '맡기기', '대행', '명단 보내기', '발송 대행', '요청 발송'],
+    steps: [
+      '상단 메뉴 "대행발송"을 누르고 "새 접수"를 누릅니다',
+      '보낼 명단을 넣습니다. 엑셀이나 CSV를 올리거나 번호를 직접 붙여 넣습니다. 전화번호 열은 자동으로 골라 두니 다르면 바꿉니다',
+      '문안과 제목을 쓰고, 필요하면 이미지를 넣습니다. 이름처럼 사람마다 다른 값은 퍼센트 기호로 감싸면 명단의 같은 이름 열에 자동으로 맞춰집니다',
+      '보내는 번호와 보낼 시각, 테스트 문자를 받을 담당자 번호를 넣고 접수합니다',
+      '검사를 마치면 담당자 번호로 문안이 그대로 옵니다. 확인한 뒤 목록에서 "승인하기"를 누르면 그 시각에 예약됩니다',
+      '발송 2시간 전에 한 번 더 검사합니다. 그때 걸리면 예약을 취소하고 다듬은 문안으로 다시 승인을 받습니다',
+    ],
+    blockers: [
+      { symptom: '"지금부터 3시간 뒤부터 정할 수 있습니다"라고 뜹니다', fix: '문안 검사와 승인, 발송 직전 재검사에 시간이 필요합니다. 더 뒤로 정하거나 급하면 직접발송을 쓰세요' },
+      { symptom: '"등록되지 않은 보내는 번호입니다"라고 뜹니다', fix: '회사에 등록된 번호로만 보낼 수 있습니다. 발신번호 등록을 먼저 해 주세요' },
+      { symptom: '승인했는데 발송되지 않았습니다', fix: '발송 2시간 전 검사에서 걸리면 예약이 취소되고 안내 문자가 갑니다. 다듬은 문안을 다시 승인해야 나갑니다' },
+    ],
+    entry: { path: '/agency-send', via: '상단 메뉴 "대행발송"' },
+    planKey: null,
+    creditSource: null,
+    related: ['send-direct', 'check-spam', 'schedule-send'],
+    status: 'ready', stubUntil: null,
+    sourceFile: 'frontend/src/pages/AgencySendPage.tsx · frontend/src/components/agency/ · backend/src/utils/agency-send-worker.ts',
   },
 ];
 

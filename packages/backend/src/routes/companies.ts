@@ -11,6 +11,7 @@ import { normalizeOpt080Input } from '../utils/normalize';
 import { grantFreeTrial, isTrialApplyOpen } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
+import { canUseAgencySend, loadPlanContext } from '../utils/plan-guard';
 import { parseAgentLedgerFields, parseAgentLedgerPatch, getAgentCustNameMap } from '../utils/pay-stats';
 // ★ 2026-08-20 발송ID 표기 정규화 CT — 저장(여기)·비교(집계)가 같은 규약(대문자)을 쓴다
 import { normalizeAgentSendId } from '../utils/send-usage-aggregation';
@@ -411,7 +412,18 @@ router.get('/my-plan', async (req: Request, res: Response) => {
       console.warn('[my-plan] plan_notified_code 처리 스킵(신규 컬럼 미마이그레이션 등):', e?.message);
     }
 
-    res.json({ ...row, plan_change: planChange });
+    // ★ 2026-08-22 대행발송(docs/2026-08-22-agency-send-design.md §4-1) — 헤더 메뉴는 모든 회사에 보이고,
+    //   들어갈 수 있는지만 이 값이 가른다. 판정은 서버 하나(canUseAgencySend = 회사 스위치 AND 유료).
+    //   ⛔ 플래그와 요금제를 따로 내리지 않는다 — 프론트가 조합하면 판정이 두 벌이 된다.
+    //   조회 실패는 메뉴 진입만 막고 플랜 조회 자체(대시보드 핵심)는 살린다.
+    let agencySendAllowed = false;
+    try {
+      agencySendAllowed = canUseAgencySend(await loadPlanContext(companyId));
+    } catch (e: any) {
+      console.warn('[my-plan] 대행발송 자격 판정 스킵:', e?.message);
+    }
+
+    res.json({ ...row, plan_change: planChange, agency_send_allowed: agencySendAllowed });
   } catch (error) {
     console.error('플랜 조회 실패:', error);
     res.status(500).json({ error: '플랜 조회 실패' });

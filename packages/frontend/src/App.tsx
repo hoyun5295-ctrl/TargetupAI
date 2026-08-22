@@ -34,6 +34,7 @@ const Settings = lazyPage(() => import('./pages/Settings'));
 const Unsubscribes = lazyPage(() => import('./pages/Unsubscribes'));
 const PricingPage = lazyPage(() => import('./pages/PricingPage'));
 const GuidePage = lazyPage(() => import('./pages/GuidePage')); // ★ 2026-08-22 기능 안내(/guide) — 도움말 봇과 같은 원장
+const AgencySendPage = lazyPage(() => import('./pages/AgencySendPage')); // ★ 2026-08-22 대행발송 셀프 접수
 const AutoSendPage = lazyPage(() => import('./pages/AutoSendPage'));
 const KakaoRcsPage = lazyPage(() => import('./pages/KakaoRcsPage'));
 const DmBuilderPage = lazyPage(() => import('./pages/DmBuilderPage')); // ★ 모바일 DM 빌더
@@ -653,6 +654,7 @@ function App() {
         <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
         <Route path="/unsubscribes" element={<PrivateRoute><Unsubscribes /></PrivateRoute>} />
         <Route path="/pricing" element={<PrivateRoute><PricingPage /></PrivateRoute>} />
+        <Route path="/agency-send" element={<PrivateRoute><AgencySendPage /></PrivateRoute>} />
         <Route path="/guide" element={<PrivateRoute><GuidePage /></PrivateRoute>} />
         <Route path="/guide/:jobId" element={<PrivateRoute><GuidePage /></PrivateRoute>} />
         <Route path="/privacy" element={<PrivacyPage />} />

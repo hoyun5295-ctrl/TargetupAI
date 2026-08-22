@@ -30,6 +30,10 @@ interface DashboardHeaderProps {
   //   그전에는 planCode === 'BUSINESS'/'ENTERPRISE' 하드코딩이라, 플래그를 켠 임직원 요금제(STAFF)가
   //   서버 API는 통과하는데 메뉴만 안 떴다(plan-guard 0728 전환 사유가 여기서 재현). 코드 비교 금지.
   advancedAccess?: boolean;
+  // ★ 2026-08-22 대행발송 — 메뉴는 모든 회사에 보이고, 이 값이 진입과 안내 모달을 가른다.
+  //   판정 원천 = 서버 my-plan의 agency_send_allowed(canUseAgencySend). 프론트가 다시 조합하지 않는다.
+  agencySendAllowed?: boolean;
+  onAgencySendBlocked?: () => void;
   // ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 베타 메뉴.
   //   클릭 시 Dashboard.tsx에서 isBetaAccessAllowed 게이팅:
   //   ENTERPRISE/BUSINESS = /ai-operator 진입 / 그 외 = BetaFeatureModal 표시.
@@ -79,6 +83,8 @@ export default function DashboardHeader({
   isSubscriptionLocked,
   onSubscriptionLocked,
   advancedAccess,
+  agencySendAllowed,
+  onAgencySendBlocked,
   onAiOperatorClick,
 }: DashboardHeaderProps) {
   const navigate = useNavigate();
@@ -105,12 +111,9 @@ export default function DashboardHeader({
     // ★ D222+ Phase 1 (2026-05-27): AI Operator (BETA) 메뉴 영구 제거 — Dashboard 우측 카드 "AI Operator" 라벨 통합 진입.
     //   onAiOperatorClick prop = 호환성 유지 (Dashboard 우측 카드 클릭 callback). 헤더 메뉴 영역 = 제거.
     // ★ 2026-07-05 (Harold 명시): 헤더 '매뉴얼' 메뉴 제거 → 하단 푸터 링크로 복귀 (Dashboard.tsx 푸터). 헤더 간소화.
-    // ★ AI Operator 소개 — about-ai-operator.html 새 탭 진입. 모든 요금제 공통(게이팅 없음).
-    {
-      label: 'AI Operator 소개',
-      onClick: () => window.open('/about-ai-operator.html?v=4', '_blank', 'noopener'), // ?v= 캐시 버스터 — LoginPage 2곳과 동시 관리
-      color: 'new',
-    },
+    // ★ 2026-08-22 (Harold 명시): 'AI Operator 소개' 메뉴 제거 → 대시보드 푸터로 이동(매뉴얼과 같은 처리).
+    //   로그인 전 영업용이라 로그인 화면 2곳에 이미 걸려 있다. 매일 여는 헤더 자리는 업무 메뉴에 준다.
+    //   ?v= 캐시 버스터는 LoginPage 2곳 + 푸터 1곳으로 계속 동시 관리한다.
     // ★ D188 Phase 2-B-4 (2026-05-21) 자동발송 메뉴 영구 제거 — Harold 명시 "사용 고객사 0 + 여정 빌더가 진짜 업그레이드".
     //   /auto-send 라우트 진입 시 AutoSendPage.tsx가 여정 빌더 안내 페이지로 노출. auto_campaigns 운영 데이터는 보존 (worker 유지).
     // ★ D182 (2026-05-19): 모바일DM 헤더 메뉴 영구 제거 — AI Operator 페이지 안 SUB_MODULE_CARDS로 이동 (Harold 명시 — 헤더 간소화)
@@ -123,6 +126,16 @@ export default function DashboardHeader({
     // ★ 2026-08-22 '고객' 메뉴는 두지 않는다(Harold 확정) — 헤더가 이미 길고,
     //   진입은 대시보드 "DB 현황" 카드의 상세보기 하나로 충분하다. 진입점을 늘리지 않는다.
     { label: '직접발송', onClick: onDirectSend, color: 'green', path: '/' },
+    // ★ 2026-08-22 대행발송(docs/2026-08-22-agency-send-design.md §4-1) — **모든 회사에 보인다**(Harold "미끼로 한다").
+    //   들어가는 것은 서버 판정(agencySendAllowed = 회사 스위치 AND 유료)뿐이고, 아니면 안내 모달이 뜬다.
+    //   NEW 배지는 갓 출시 표시라 4~6주 뒤 제거한다(뱃지 3단 정책).
+    {
+      label: '대행발송',
+      onClick: () => { if (agencySendAllowed) navigate('/agency-send'); else onAgencySendBlocked?.(); },
+      color: 'new',
+      newBadge: true,
+      path: '/agency-send',
+    },
     // ★ D162-4 (2026-05-15) 2차: Harold님 명시 정합 — DashboardHeader 메뉴에서 '알림톡 발송' 제거.
     //   직접발송/직접타겟발송 모달 헤더 안에서 알림톡 모달 진입 (카카오 노란색 버튼). 메뉴 분리 시 사용자 혼란 차단.
     //   onAlimtalkSend prop은 호환성 위해 유지 (Dashboard에서 직접발송/타겟발송 → 알림톡 모달 진입 callback).

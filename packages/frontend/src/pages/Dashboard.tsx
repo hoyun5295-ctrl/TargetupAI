@@ -64,6 +64,7 @@ import AlimtalkSendModal from '../components/AlimtalkSendModal';
 import BrandSendModal from '../components/BrandSendModal';
 // ★ D209+ (Harold 명시 2026-05-23): BetaFeatureModal → AiOperatorWalkthroughModal 정합 (AI Operator 메뉴 클릭 시 walkthrough + 특별혜택 안내 본질).
 import AiOperatorWalkthroughModal from '../components/AiOperatorWalkthroughModal';
+import AgencySendIntroModal from '../components/agency/AgencySendIntroModal';
 // ★ 2026-08-16 AI 마케팅 진단(퍼널 A — 설계서 §5-2·§5-3): FREE 진단 → TRIAL 7일 자동 지급
 import DiagnosisModal from '../components/marketing-diagnosis/DiagnosisModal';
 import DiagnosisInviteModal from '../components/marketing-diagnosis/DiagnosisInviteModal';
@@ -121,6 +122,9 @@ interface PlanInfo {
   ai_premium_enabled?: boolean;
   // ★ 2026-08-20 상위 등급 게이트 플래그(plans.advanced_access_enabled) — 헤더 캠페인 대행 메뉴 판정 원천
   advanced_access_enabled?: boolean;
+  // ★ 2026-08-22 대행발송 이용 자격(서버 canUseAgencySend = 회사 스위치 AND 유료).
+  //   메뉴는 모든 회사에 보이고 이 값이 false면 안내 모달로 간다(docs/2026-08-22-agency-send-design.md §4-1).
+  agency_send_allowed?: boolean;
 }
 
 // D41 대시보드 동적 카드 아이콘 맵
@@ -188,6 +192,8 @@ export default function Dashboard() {
   const [diagnosisState, setDiagnosisState] = useState<DiagnosisStateDto | null>(null);
   const [showDiagnosisInvite, setShowDiagnosisInvite] = useState(false);
   const [showDiagnosisWizard, setShowDiagnosisWizard] = useState(false);
+  // ★ 2026-08-22 대행발송 안내 모달 — 아직 못 쓰는 회사가 헤더 메뉴를 눌렀을 때(미끼 진입점)
+  const [showAgencyIntro, setShowAgencyIntro] = useState(false);
   const refreshDiagnosisState = async () => {
     try {
       const r = await diagnosisApi.state();
@@ -2288,6 +2294,9 @@ const campaignData = {
         department={(user as any)?.department}
         isCompanyAdmin={user?.userType === 'company_admin'}
         advancedAccess={!!planInfo?.advanced_access_enabled}
+        // ★ 2026-08-22 대행발송 — 메뉴는 모두에게, 진입은 서버 판정만(docs/2026-08-22-agency-send-design.md §4-1)
+        agencySendAllowed={!!planInfo?.agency_send_allowed}
+        onAgencySendBlocked={() => setShowAgencyIntro(true)}
         // ★ D220+ Task 8 (2026-05-27): 세그먼트 메뉴 잠금 게이팅 (ai_messaging — BASIC+)
         aiMessagingEnabled={planInfo?.ai_messaging_enabled}
         onAiOperatorClick={async () => {
@@ -3997,10 +4006,20 @@ const campaignData = {
           ENT/BUSINESS 외 등급 사용자가 헤더 "AI Operator" 메뉴 클릭 시 노출. */}
       <AiOperatorWalkthroughModal forceShow={showWalkthroughModal} onClose={() => setShowWalkthroughModal(false)} />
 
+      {/* ★ 2026-08-22 대행발송 안내 — 요금제 가입 여부로만 두 갈래(설계서 §4-8) */}
+      <AgencySendIntroModal
+        show={showAgencyIntro}
+        isPaidPlan={!!planInfo?.plan_code && planInfo.plan_code !== 'FREE'}
+        onClose={() => setShowAgencyIntro(false)}
+      />
+
       {/* 하단 링크 — 2026-07-05 (Harold 명시): 매뉴얼 링크 헤더 → 푸터 복귀 (헤더 간소화, 매뉴얼 강조 제거) */}
       <div className="max-w-7xl mx-auto px-4 py-6 mt-8 border-t border-gray-200 text-center text-xs text-gray-400 space-x-3">
         {/* ★ 2026-08-22 옛 정적 매뉴얼(3개월 정지) → 기능 안내(/guide, 도움말 봇과 같은 원장) */}
         <a href="/guide" className="hover:text-gray-600 transition">기능 안내</a>
+        <span>|</span>
+        {/* ★ 2026-08-22 (Harold 명시): 헤더에서 내려온 자리. ?v= 캐시 버스터는 LoginPage 2곳과 동시에 올린다 */}
+        <a href="/about-ai-operator.html?v=4" target="_blank" rel="noopener" className="hover:text-gray-600 transition">AI Operator 소개</a>
         <span>|</span>
         <a href="/privacy" target="_blank" className="hover:text-gray-600 transition">개인정보처리방침</a>
         <span>|</span>

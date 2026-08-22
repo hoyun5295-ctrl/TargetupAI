@@ -19,6 +19,8 @@ import companiesRoutes from './routes/companies';
 // ★ D219+ Part 2 (2026-05-27): Onboarding Wizard 7 step endpoints
 import onboardingRoutes from './routes/onboarding';
 import helpRoutes from './routes/help';
+import agencySendRoutes from './routes/agency-send';
+import { startAgencySendWorker } from './utils/agency-send-worker';
 // ★ D219+ Part 2 후속 (2026-05-27): 일일 인사이트 API (Performance 카드 + 메일 양쪽 활용)
 import insightRoutes from './routes/insight';
 import plansRoutes from './routes/plans';
@@ -339,6 +341,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/companies', companiesRoutes);
 app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/help', helpRoutes); // ★ 2026-08-22 도움말 봇 · 기능 카탈로그(docs/FEATURE-HELP-CATALOG.md)
+app.use('/api/agency-send', agencySendRoutes); // ★ 2026-08-22 대행발송 셀프 접수(docs/2026-08-22-agency-send-design.md)
 app.use('/api/insight', insightRoutes);
 app.use('/api/plans', plansRoutes);
 app.use('/api/customers', customersRoutes);
@@ -494,6 +497,10 @@ app.listen(PORT, () => {
 
   // ★ D218+ (2026-05-26): 여정 발송 2시간 전 담당자 LMS 자동 발송 (5분 cron)
   startJourneyPretestNotifierWorker();
+
+  // ★ 2026-08-22 대행발송 셀프 접수 워커 (5분 cron) — 1차 검사·당일 재검사·만료·대조·복구
+  //   docs/2026-08-22-agency-send-design.md §4-4. 테이블이 없으면 조용히 넘어간다(마이그레이션 전 안전).
+  startAgencySendWorker();
 
   // ★ D218+ (2026-05-26): 7일 KPI 누적 + ai_company_memory 자동 학습 (1시간 cron)
   startAiMemoryAccumulatorWorker();

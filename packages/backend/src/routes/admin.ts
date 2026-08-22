@@ -1515,6 +1515,47 @@ router.patch('/companies/:id/cdp-auto-execute', authenticate, requireSuperAdmin,
   }
 });
 
+// ★ 2026-08-22 대행발송 스위치 — 슈퍼관리자가 "이 회사에 열어 준다"를 켠다(docs/2026-08-22-agency-send-design.md §4-1).
+//   메뉴는 모든 회사에 보이고(미끼), 실제 진입은 이 스위치 AND 유료 = canUseAgencySend가 판정한다.
+//   ⛔ 끈다고 진행 중인 건이 멈추지 않는다(Harold 확정): 새 접수·승인만 막고, 이미 승인된 건은 워커가 끝까지 처리한다.
+router.patch('/companies/:id/agency-send', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const enabled = req.body?.enabled === true;
+
+  try {
+    const result = await query(
+      `UPDATE companies SET agency_send_enabled = $1, updated_at = NOW()
+       WHERE id = $2::uuid
+       RETURNING id, company_name, agency_send_enabled`,
+      [enabled, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+    }
+
+    console.log(`[Admin] 대행발송 스위치: company=${result.rows[0].company_name} → enabled=${enabled}`);
+    res.json({
+      success: true,
+      company: result.rows[0],
+      message: enabled
+        ? '대행발송을 열었습니다. 요금제를 쓰는 계정에서 메뉴로 들어갈 수 있습니다.'
+        : '대행발송을 닫았습니다. 새 접수만 막히고 이미 승인된 건은 예정대로 나갑니다.',
+    });
+  } catch (error: any) {
+    const msg = error?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        code: 'DB_MIGRATION_PENDING',
+        error: 'DB 마이그레이션 필요: companies.agency_send_enabled ALTER 실행 요청',
+      });
+    }
+    console.error('대행발송 스위치 저장 실패:', error);
+    res.status(500).json({ error: '대행발송 스위치 저장 실패' });
+  }
+});
+
 // 회사 비활성화 (soft delete)
 router.delete('/companies/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
@@ -5582,6 +5623,42 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
   } catch (error) {
     console.error('[Admin] 발송통계 엑셀 다운로드 실패:', error);
     res.status(500).json({ error: '다운로드에 실패했습니다.' });
+  }
+});
+
+// ★ 2026-08-22 대행발송 접수 현황 — 직원이 흐름을 보는 자리(읽기 전용).
+//   손으로 하던 일을 기계에 넘겼으니, 무엇이 어디서 멈췄는지는 사람이 볼 수 있어야 한다.
+router.get('/agency-send', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const status = String(req.query.status || '').trim();
+    const params: any[] = [];
+    let where = '';
+    if (status && status !== 'all') {
+      params.push(status);
+      where = `WHERE a.status = $${params.length}`;
+    }
+    const rows = await query(
+      `SELECT a.id, a.status, a.message_type, a.requested_at, a.recipient_count, a.file_name,
+              a.test_round, a.reapproval_count, a.created_at, a.queued_at, a.campaign_id,
+              c.company_name
+         FROM agency_send_requests a
+         LEFT JOIN companies c ON c.id = a.company_id
+         ${where}
+        ORDER BY a.created_at DESC
+        LIMIT 200`,
+      params,
+    );
+    const summary = await query(
+      `SELECT status, COUNT(*)::int AS c FROM agency_send_requests GROUP BY status`,
+    );
+    return res.json({ success: true, requests: rows.rows, summary: summary.rows });
+  } catch (error: any) {
+    const msg = String(error?.message || '');
+    if (msg.includes('relation') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: agency_send_* 테이블 생성 요청' });
+    }
+    console.error('[Admin] 대행발송 현황 조회 실패:', error);
+    return res.status(500).json({ error: '대행발송 현황 조회 실패' });
   }
 });
 

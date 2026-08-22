@@ -182,6 +182,7 @@ export default function AdminDashboard() {
     cdpAutoExecuteMaxRecipients: 1000,
     cdpAutoExecuteMaxCostKrw: 50000,
     cdpAutoExecuteMaxRisk: 'low',
+    agencySendEnabled: false,  // ★ 2026-08-22 대행발송 스위치(companies.agency_send_enabled)
     subscriptionStatus: 'trial',
     // ★ CT-17: 30일 PRO 체험 관리 (표시용)
     trialExpiresAt: '' as string | null | '',
@@ -3749,6 +3750,7 @@ const handleApproveRequest = async (id: string) => {
           cdpAutoExecuteMaxRecipients: c.cdp_auto_execute_max_recipients ?? 1000,
           cdpAutoExecuteMaxCostKrw: c.cdp_auto_execute_max_cost_krw ?? 50000,
           cdpAutoExecuteMaxRisk: c.cdp_auto_execute_max_risk ?? 'low',
+          agencySendEnabled: c.agency_send_enabled ?? false,  // ★ 2026-08-22 대행발송 스위치
           subscriptionStatus: c.subscription_status || 'trial',
           // ★ CT-17
           trialExpiresAt: c.trial_expires_at || '',
@@ -8595,6 +8597,55 @@ const handleApproveRequest = async (id: string) => {
                       className="mt-3 w-full py-2 bg-rose-500 hover:bg-rose-600 text-white text-sm font-medium rounded-lg transition-colors">
                       자율발송 게이트 저장
                     </button>
+                  </div>
+
+                  {/* ★ 2026-08-22 대행발송 스위치 (docs/2026-08-22-agency-send-design.md §4-1)
+                      메뉴는 모든 회사에 보이고, 이 스위치 AND 유료 요금제일 때만 화면으로 들어간다.
+                      끄면 새 접수만 막히고 이미 승인된 건은 예정대로 나간다. */}
+                  <div className="border border-indigo-200 bg-indigo-50/40 rounded-xl p-4">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-gray-800">대행발송</span>
+                          <span className="text-xs bg-indigo-500 text-white px-1.5 py-0.5 rounded">NEW</span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          ON = 이 회사가 대행발송 화면으로 들어가 명단·문안을 직접 접수합니다 (요금제를 쓰는 계정만).
+                          OFF = 메뉴는 보이되 안내만 나갑니다. 끄더라도 이미 승인된 건은 예정대로 발송됩니다.
+                        </p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer ml-3">
+                        <input
+                          type="checkbox"
+                          checked={editCompany.agencySendEnabled}
+                          onChange={async (e) => {
+                            const next = e.target.checked;
+                            setEditCompany({ ...editCompany, agencySendEnabled: next });
+                            try {
+                              const token = localStorage.getItem('token');
+                              const res = await fetch(`/api/admin/companies/${editCompany.id}/agency-send`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                body: JSON.stringify({ enabled: next }),
+                              });
+                              const data = await res.json();
+                              if (!res.ok) {
+                                setEditCompany({ ...editCompany, agencySendEnabled: !next }); // 서버가 거절하면 되돌린다
+                                showAlert('오류', data?.error || '대행발송 스위치 저장 실패', 'error');
+                              } else {
+                                setEditCompany({ ...editCompany, agencySendEnabled: !!data.company?.agency_send_enabled });
+                                showAlert('완료', data?.message || '대행발송 스위치 저장 완료', 'success');
+                              }
+                            } catch (err: any) {
+                              setEditCompany({ ...editCompany, agencySendEnabled: !next });
+                              showAlert('오류', err?.message || '네트워크 오류', 'error');
+                            }
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
+                      </label>
+                    </div>
                   </div>
                 </div>
               )}

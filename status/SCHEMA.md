@@ -357,6 +357,7 @@
 | ai_mapping_last_month | varchar | ★ 실측 |
 | user_isolation_enabled | boolean | ★ 실측 |
 | cdp_auto_execute_enabled | boolean | ★ 실측 (자동마케팅 C게이트) |
+| agency_send_enabled | boolean NOT NULL DEFAULT false | ★2026-08-22 ALTER 실행완료(information_schema 실측). 대행발송 셀프 접수 스위치 — 슈퍼관리자가 회사별로 켠다. 실제 이용 = 이 값 AND 유료(`canUseAgencySend`). 메뉴 자체는 모든 회사에 보인다(미끼). 설계 = docs/2026-08-22-agency-send-design.md |
 | cdp_auto_execute_max_recipients | integer | ★ 실측 |
 | cdp_auto_execute_max_cost_krw | integer | ★ 실측 |
 | cdp_auto_execute_max_risk | varchar | ★ 실측 |
@@ -3137,3 +3138,19 @@ CREATE INDEX idx_gtm_company ON gateway_template_mappings (company_id);
 - sync_status: pending(push 대기/재시도) → synced(효과 검증 통과) / failed(8회 초과·영구 오류 — 알림 후 수동 재개) / orphan(게이트웨이에만 있는 행 — 표시 전용, 자동 삭제 절대 X)
 - source: seed(서팀장 엑셀 4,681행 — sync_status 'synced'로 적재) / auto(적재 스캔 생성) / manual(수동 등록 + 대조가 발견한 고아 행)
 - env 게이트: `GATEWAY_TMPL_SYNC_ENABLED`(마스터, 기본 false) · `GATEWAY_TMPL_54_ENABLED`(54 푸시, 기본 false — P0001 한글 왕복 실측 후) · `GATEWAY_TMPL_API_TOKEN`
+
+---
+
+### agency_send_requests · agency_send_recipients · agency_send_events (대행발송 셀프 접수) — ★2026-08-22 CREATE 실행완료(information_schema 4행 실측)
+
+설계·불변·상태 머신 = `docs/2026-08-22-agency-send-design.md`(§4-3 상태 · §4-4 워커 · §7 DDL 원문). 회사 스위치 = `companies.agency_send_enabled`.
+
+**agency_send_requests** (접수 1건 = 1행): `id uuid PK, company_id uuid NOT NULL REFERENCES companies(id), created_by uuid NULL, status varchar(24) NOT NULL DEFAULT 'received' CHECK IN (received·testing·awaiting_approval·test_failed·approved·final_testing·queued·reapproval·expired·cancelled), callback_number varchar(20) NOT NULL, message_type varchar(4) NOT NULL DEFAULT 'SMS' CHECK IN (SMS·LMS·MMS), subject varchar(60), mms_image_paths jsonb, is_ad boolean NOT NULL DEFAULT false, original_content text NOT NULL, current_content text NOT NULL, content_version integer NOT NULL DEFAULT 1, requested_at timestamptz NOT NULL, manager_phone varchar(20) NOT NULL, file_name varchar(200), phone_column varchar(100) NOT NULL, var_mapping jsonb NOT NULL DEFAULT '{}', recipient_count integer NOT NULL DEFAULT 0, test_round integer NOT NULL DEFAULT 0, last_test_result jsonb, last_test_at timestamptz, approved_at timestamptz, approved_by uuid, approval_version integer, reapproval_count integer NOT NULL DEFAULT 0, final_test_at timestamptz, campaign_id uuid, queued_at timestamptz, cancelled_at timestamptz, cancel_reason varchar(200), expired_at timestamptz, lock_at timestamptz, created_at·updated_at timestamptz NOT NULL DEFAULT NOW()`. 인덱스 = `(company_id, created_at DESC)` · `(status, requested_at)`(워커 픽업).
+
+**agency_send_recipients**: `id bigserial PK, request_id uuid NOT NULL REFERENCES agency_send_requests(id) ON DELETE CASCADE, row_no integer NOT NULL, phone varchar(20) NOT NULL, vars jsonb NOT NULL DEFAULT '{}'`. 인덱스 `(request_id, row_no)`.
+
+**agency_send_events**: `id bigserial PK, request_id uuid NOT NULL REFERENCES agency_send_requests(id) ON DELETE CASCADE, kind varchar(32) NOT NULL, payload jsonb NOT NULL DEFAULT '{}', created_at timestamptz NOT NULL DEFAULT NOW()`. 인덱스 `(request_id, created_at DESC)`.
+
+- ⛔ `created_by`·`approved_by`·`campaign_id`에 **FK 없음**(0728 `23503` 원칙 + 캠페인 정리 워커가 옛 행을 지운다).
+- ⛔ **큐 적재는 당일 재검사 통과 뒤 1회뿐**이라 `queued` 이전 상태에는 MySQL 큐가 없다. 취소도 그 전에는 상태 변경만이다(0611 에이치피오 사고 경로를 구조로 제거).
+- `approval_version`은 승인 당시 `content_version`. 문안이 바뀌면(다듬기) 값이 어긋나 재승인으로 간다.
