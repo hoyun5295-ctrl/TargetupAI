@@ -24,6 +24,8 @@ const DASHBOARD_SWR_HARD_TTL_SEC = 600;
 // ★ D219+ Part 2 후속 (2026-05-27): CT-97 활용 — DirectTargetFilterModal 자연어 모드 (BASIC+ 게이팅)
 import { requirePlanFeature } from '../utils/plan-guard';
 import { generateSegmentFromNaturalLanguage, SegmentGenerationError } from '../utils/ai-segment-generator';
+// ★ 2026-08-22 고객 360 타임라인 — 조립·판정은 CT가 소유(라우트 인라인 금지 규약)
+import { buildCustomerTimeline, TIMELINE_KINDS, type TimelineKind } from '../utils/customer-timeline';
 
 const router = Router();
 
@@ -1689,6 +1691,54 @@ router.get('/:id/purchases', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('고객 구매 이력 조회 에러:', error);
     res.status(500).json({ error: '구매 이력 조회 실패' });
+  }
+});
+
+/**
+ * ★ 2026-08-22 고객 360 타임라인 — GET /api/customers/:id/timeline
+ *
+ * 판정·조립은 전부 CT(`utils/customer-timeline.ts`)가 소유한다. 여기는 파라미터 검증과 전달만.
+ * ⛔ `/:id`보다 **위에** 있어야 한다 — Express는 먼저 맞는 경로를 쓴다.
+ * 읽기 전용이라 크레딧·요금제 게이트는 걸지 않는다(회사 범위 격리는 CT가 companyId로 한다).
+ */
+router.get('/:id/timeline', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+
+    const { id } = req.params;
+    if (!/^[0-9a-f-]{36}$/i.test(String(id))) {
+      return res.status(400).json({ success: false, error: '고객 식별자가 올바르지 않습니다.' });
+    }
+
+    const rawKinds = String(req.query.kinds || '').trim();
+    const kinds = rawKinds
+      ? (rawKinds.split(',').map((k) => k.trim()).filter((k) => (TIMELINE_KINDS as readonly string[]).includes(k)) as TimelineKind[])
+      : null;
+
+    const result = await buildCustomerTimeline({
+      companyId,
+      customerId: String(id),
+      before: req.query.before ? String(req.query.before) : null,
+      kinds,
+      limit: req.query.limit ? Number(req.query.limit) : 50,
+      months: req.query.months ? Number(req.query.months) : 12,
+    });
+
+    if (!result) return res.status(404).json({ success: false, error: '고객을 찾을 수 없습니다.' });
+    return res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error('[고객 타임라인] 오류:', err);
+    // ★ db_alter_safety_net 정합 — 원천 테이블·컬럼이 아직 없는 환경에서 500 대신 안내
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        error: '고객 활동 기록을 준비 중입니다. 잠시 후 다시 시도해 주세요.',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    return res.status(500).json({ success: false, error: '고객 활동 기록을 불러오지 못했습니다.' });
   }
 });
 

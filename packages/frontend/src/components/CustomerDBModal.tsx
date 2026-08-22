@@ -1,14 +1,37 @@
-import { useEffect, useState } from 'react';
+/**
+ * CustomerDBModal — 고객 목록 + 고객 360 타임라인
+ *
+ * ★ 2026-08-22 풀스크린 작업면으로 확장(Harold 확정: 페이지 신설 대신 이 모달을 키운다).
+ *   좌 = 목록·필터(조회 로직 무변경) · 우 = `Customer360Panel`. 진입 = 대시보드 "상세보기" · 헤더 "고객" 메뉴 · `?customer=<id>`.
+ *   표면은 콘솔 톤(`CUI_*`)으로 올렸고, 옛 규격에서 함께 고친 것 셋:
+ *     ①boolean 컬럼이 `true`/`false` 원문으로 보이던 것 → 동의·거부 칩
+ *     ②"전체 삭제"가 다운로드 옆 주 동선에 있던 것 → 관리자 전용 `⋯` 메뉴 뒤 + 공용 확인 셸
+ *     ③에메랄드 옛 톤 → 인디고
+ *   설계·불변 원칙 = docs/2026-08-22-customer-360-timeline-design.md
+ */
+import { useEffect, useRef, useState } from 'react';
+import { Users, Download, MoreHorizontal, X, Search, RotateCcw, ChevronLeft, ChevronRight, Loader2, AlertTriangle } from 'lucide-react';
 import { formatDate, formatPreviewValue, formatPhoneNumber, compactTimestamp, formatIfIsoDate } from '../utils/formatDate';
 import { useToast } from './ToastProvider';
+import Customer360Panel from './customer360/Customer360Panel';
+import ConfirmDialogShell from './shared/ConfirmDialogShell';
+import {
+  CUI_MODAL_SCRIM, CUI_MODAL, CUI_MODAL_HEAD, CUI_MODAL_TITLE, CUI_MODAL_DESC, CUI_MODAL_CLOSE,
+  CUI_BTN_PRIMARY, CUI_BTN_OUTLINE, CUI_BTN_GHOST, CUI_ICON_BTN, CUI_MENU, CUI_MENU_ITEM_DANGER,
+  CUI_SELECT, CUI_INPUT, CUI_CHIP_ON, CUI_CHIP_OFF,
+  CUI_THEAD, CUI_TH, CUI_TR, CUI_TD, CUI_CELL_NAME, CUI_CELL_DATA, CUI_CELL_META, CUI_CELL_OFF,
+  CUI_PILL_BASE,
+} from '../utils/console-ui';
 
 interface CustomerDBModalProps {
   onClose: () => void;
   token: string | null;
   userType?: 'super_admin' | 'company_admin' | 'company_user';
+  /** ★ 2026-08-22 `?customer=<id>` 진입 — 열자마자 그 고객의 360을 편다 */
+  initialCustomerId?: string | null;
 }
 
-export default function CustomerDBModal({ onClose, token, userType }: CustomerDBModalProps) {
+export default function CustomerDBModal({ onClose, token, userType, initialCustomerId }: CustomerDBModalProps) {
   const toast = useToast();
   const [customers, setCustomers] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
@@ -29,9 +52,13 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
   const [storeCodeOptions, setStoreCodeOptions] = useState<string[]>([]);
   const [filterOptions, setFilterOptions] = useState<Record<string, string[]>>({});
 
-  // 상세보기
+  // 상세보기 — selectedCustomer = 기본 정보(상세 API 결과)
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  // ★ 2026-08-22 고객 360 — 패널은 id로 스스로 조회한다. selectedRow는 응답 전 헤더용 폴백
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+  const [selectedRow, setSelectedRow] = useState<any>(null);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
 
   // 동적 컬럼 (field_definitions 기반)
   const [fieldColumns, setFieldColumns] = useState<any[]>([]);
@@ -49,6 +76,21 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
     fetchEnabledFieldsAndOptions();
     fetchCustomers(1);
   }, []);
+
+  /**
+   * ★ 2026-08-22 진입 파라미터로 온 고객을 바로 편다.
+   * `fetchCustomers`가 선택을 지우므로 **첫 목록 로딩이 끝난 뒤**에 세우고, 한 번만 적용한다.
+   * (한 번만이 아니면 필터를 바꿀 때마다 loading이 토글되어 그 고객이 다시 열린다)
+   */
+  const initialAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!initialCustomerId || initialAppliedRef.current || loading) return;
+    initialAppliedRef.current = true;
+    setSelectedCustomerId(initialCustomerId);
+    setSelectedRow(null);
+    fetchDetail(initialCustomerId as any);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialCustomerId, loading]);
 
   // ★ D144 P5: 전체 삭제 실행
   const handleDeleteAll = async () => {
@@ -129,6 +171,8 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
   const fetchCustomers = async (p: number, overrides?: { smsOptIn?: string; storeCode?: string; filtersOverride?: typeof activeFilters }) => {
     setLoading(true);
     setSelectedCustomer(null);
+    setSelectedCustomerId(null);
+    setSelectedRow(null);
     try {
       const currentSmsOptIn = overrides?.smsOptIn ?? filterSmsOptIn;
       const currentStoreCode = overrides?.storeCode ?? filterStoreCode;
@@ -163,6 +207,13 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
     } finally {
       setLoading(false);
     }
+  };
+
+  /** 행을 누르면 360 패널을 연다. 기본 정보는 기존 상세 API가 그대로 채운다 */
+  const openCustomer = (row: any) => {
+    setSelectedRow(row);
+    setSelectedCustomerId(String(row.id));
+    fetchDetail(row.id);
   };
 
   const fetchDetail = async (customerId: number) => {
@@ -365,163 +416,230 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
     .map(f => ({ key: f.field_key, label: f.field_label || f.display_name || f.field_key, format: ((v: any) => formatIfIsoDate(v) ?? (v != null ? String(v) : '-')) as ((v: any) => string) | undefined }));
   const detailFields = [...baseDetailFields, ...extraDetailFields];
 
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[50]">
-      <div className="bg-white rounded-xl shadow-2xl w-[1100px] max-h-[88vh] overflow-hidden flex flex-col">
+  // ── 기본 정보 표 — 360 패널의 접이식 "기본 정보"로 들어간다(기존 필드 나열을 없애지 않는다) ──
+  const basicInfoBlock = selectedCustomer ? (
+    <div>
+      {detailLoading ? (
+        <p className="py-6 text-center text-[13px] text-neutral-400">불러오는 중</p>
+      ) : (
+        <dl className="divide-y divide-neutral-100">
+          {detailFields.map(field => {
+            const value = selectedCustomer[field.key];
+            if (value == null && field.key !== 'sms_opt_in') return null;
+            const display = field.format ? field.format(value) : (value || '-');
+            if (display === '-' && field.key !== 'sms_opt_in' && field.key !== 'name') return null;
+            return (
+              <div key={field.key} className="flex items-start gap-3 py-2">
+                <dt className="w-24 shrink-0 text-[11.5px] text-neutral-400">{field.label}</dt>
+                <dd className="text-[13px] text-neutral-800 break-words">{display}</dd>
+              </div>
+            );
+          })}
+          {selectedCustomer.custom_fields && Object.keys(selectedCustomer.custom_fields).length > 0 && (
+            <>
+              <div className="pt-3 pb-1 text-[11.5px] font-medium text-neutral-400">추가 정보</div>
+              {Object.entries(selectedCustomer.custom_fields).map(([key, value]) => {
+                const fieldDef = fieldColumns && fieldColumns.length > 0
+                  ? fieldColumns.find((f: any) => f.field_key === key)
+                  : null;
+                const displayLabel = fieldDef?.field_label || fieldDef?.display_name || key;
+                // ★ D89→D120: formatPreviewValue + fieldLabel 전달로 숫자/날짜 판정
+                // ★ D136 재발방지 (2026-04-22 P1): custom_fields JSONB 키는 자체가 fieldKey — 그대로 전달하여 커스텀 가드 작동
+                const displayValue = value != null ? formatPreviewValue(value, { fieldLabel: displayLabel, fieldKey: key }) : '-';
+                return (
+                  <div key={key} className="flex items-start gap-3 py-2">
+                    <dt className="w-24 shrink-0 text-[11.5px] text-neutral-400">{displayLabel}</dt>
+                    <dd className="text-[13px] text-neutral-800 break-words">{displayValue}</dd>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </dl>
+      )}
+    </div>
+  ) : null;
 
-        {/* 헤더 */}
-        <div className="flex justify-between items-center px-6 py-4 border-b bg-gray-50">
-          <div>
-            <h3 className="text-lg font-bold text-gray-800">고객 DB 조회</h3>
-            <span className="text-sm text-gray-500">총 {total.toLocaleString()}명</span>
+  const listColumns = fieldColumns.filter(f => !['name', 'phone'].includes(f.field_key));
+  const canManage = userType === 'company_admin' || userType === 'super_admin';
+
+  return (
+    <div className={CUI_MODAL_SCRIM}>
+      {/* ★ 2026-08-22 풀스크린 작업면 — 직접 타겟 발송과 같은 규격(92vh). 좌 목록 · 우 고객 360 */}
+      <div className={`${CUI_MODAL} max-w-[1600px] h-[92vh]`} role="dialog" aria-modal="true" aria-label="고객">
+
+        {/* ===== 헤더 ===== */}
+        <div className={CUI_MODAL_HEAD}>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="h-9 w-9 shrink-0 rounded-xl bg-indigo-600 text-white grid place-items-center">
+              <Users className="w-4 h-4" strokeWidth={1.9} />
+            </div>
+            <div className="min-w-0">
+              <h3 className={CUI_MODAL_TITLE}>고객</h3>
+              <p className={`${CUI_MODAL_DESC} tabular-nums`}>총 {total.toLocaleString()}명</p>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            {/* ★ D132 Phase A: 현재 필터 조건 XLSX 다운로드 */}
+          <div className="flex items-center gap-2 shrink-0">
             <button
+              type="button"
               onClick={handleDownload}
               disabled={downloading || total === 0}
-              title={total === 0 ? '다운로드할 고객이 없습니다' : '현재 필터 조건의 고객 리스트를 엑셀로 다운로드합니다'}
-              className="px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-lg shadow-sm shadow-violet-200/60 hover:from-violet-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-1.5"
+              title={total === 0 ? '다운로드할 고객이 없습니다' : '지금 조건의 고객 목록을 엑셀로 받습니다'}
+              className={CUI_BTN_OUTLINE}
             >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              {downloading ? '다운로드 중...' : '엑셀 다운로드'}
+              {downloading
+                ? <><Loader2 className="w-[15px] h-[15px] animate-spin" />내려받는 중</>
+                : <><Download className="w-[15px] h-[15px]" />엑셀 받기</>}
             </button>
-            {/* ★ D144 P5: 전체 삭제 (company_admin/super_admin만) */}
-            {(userType === 'company_admin' || userType === 'super_admin') && (
-              <button
-                onClick={() => { setShowDeleteAllConfirm(true); setDeleteConfirmInput(''); setDeleteResult(null); }}
-                disabled={total === 0}
-                title={total === 0 ? '삭제할 고객이 없습니다' : '고객 DB 전체를 영구 삭제합니다 (회사명 확인 필요)'}
-                className="px-3 py-1.5 text-xs font-semibold bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-1.5"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
-                </svg>
-                전체 삭제
-              </button>
+
+            {/* ★ 2026-08-22 전체 삭제를 주 동선에서 뗐다 — 되돌릴 수 없는 행동이 다운로드 옆에 있으면 오클릭이 사고가 된다 */}
+            {canManage && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowMoreMenu(v => !v)}
+                  aria-label="더 보기"
+                  className={CUI_ICON_BTN}
+                >
+                  <MoreHorizontal className="w-4 h-4" strokeWidth={1.9} />
+                </button>
+                {showMoreMenu && (
+                  <>
+                    <div className="fixed inset-0 z-30" onClick={() => setShowMoreMenu(false)} />
+                    <div className={CUI_MENU}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMoreMenu(false);
+                          if (total === 0) return;
+                          setShowDeleteAllConfirm(true); setDeleteConfirmInput(''); setDeleteResult(null);
+                        }}
+                        disabled={total === 0}
+                        className={`${CUI_MENU_ITEM_DANGER} disabled:opacity-40`}
+                      >
+                        고객 DB 전체 삭제
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
-            <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors text-lg">&times;</button>
+
+            <button type="button" onClick={onClose} className={CUI_MODAL_CLOSE} aria-label="닫기">
+              <X className="w-4 h-4" strokeWidth={1.75} />
+            </button>
           </div>
         </div>
 
-        {/* 필터 (한 줄 통합) */}
-        <div className="px-6 py-3 border-b space-y-2">
-          <div className="flex items-center gap-2 text-sm flex-wrap">
-            {/* 필드 선택 */}
+        {/* ===== 필터 ===== */}
+        <div className="shrink-0 px-6 py-3 border-b border-neutral-200 space-y-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <select value={dynFilterField} onChange={(e) => {
               const newField = e.target.value;
               setDynFilterField(newField);
               setDynFilterValue('');
               setDynFilterValueMax('');
-              // 숫자/날짜 필드면 첫 번째 연산자, 문자열이면 contains
               if (newField) {
                 const ops = getOperatorsForField(newField);
                 setDynFilterOp(ops.length > 0 ? ops[0].v : 'contains');
               } else {
                 setDynFilterOp('contains');
               }
-            }}
-              className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200 min-w-[120px]">
-              <option value="">필터 필드 선택</option>
+            }} className={`${CUI_SELECT} w-auto min-w-[140px]`}>
+              <option value="">항목 고르기</option>
               {/* ★ D88: sms_opt_in은 전용 필터 버튼이 있으므로 중복 제외 */}
               {fieldColumns.filter((f: any) => f.field_key !== 'sms_opt_in').map((f: any) => (
                 <option key={f.field_key} value={f.field_key}>{f.field_label || f.display_name || f.field_key}</option>
               ))}
             </select>
 
-            {/* 연산자 드롭다운 — 숫자/날짜 필드만 표시 (문자열은 자동 포함검색) */}
+            {/* 연산자 — 숫자·날짜 항목만(문자열은 자동 포함검색) */}
             {dynFilterField && isNumericOrDateField(dynFilterField) && (
-              <select value={dynFilterOp} onChange={(e) => setDynFilterOp(e.target.value)}
-                className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200">
+              <select value={dynFilterOp} onChange={(e) => setDynFilterOp(e.target.value)} className={`${CUI_SELECT} w-auto min-w-[92px]`}>
                 {getOperatorsForField(dynFilterField).map(op => (
                   <option key={op.v} value={op.v}>{op.l}</option>
                 ))}
               </select>
             )}
 
-            {/* 값 입력 */}
             {dynFilterField && (
               hasDropdownOptions(dynFilterField) ? (
-                <select value={dynFilterValue} onChange={(e) => setDynFilterValue(e.target.value)}
-                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200 min-w-[100px]">
-                  <option value="">선택</option>
+                <select value={dynFilterValue} onChange={(e) => setDynFilterValue(e.target.value)} className={`${CUI_SELECT} w-auto min-w-[120px]`}>
+                  <option value="">값 고르기</option>
                   {filterOptions[dynFilterField].map(v => <option key={v} value={v}>{v}</option>)}
                 </select>
               ) : (
                 <input type={isDateField(dynFilterField) ? 'date' : 'text'}
                   value={dynFilterValue} onChange={(e) => setDynFilterValue(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleAddFilter(); }}
-                  placeholder={isDateField(dynFilterField) ? '' : isNumericOrDateField(dynFilterField) ? '값 입력' : '검색어 입력'}
-                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-36 focus:outline-none focus:ring-2 focus:ring-emerald-200" />
+                  placeholder={isDateField(dynFilterField) ? '' : isNumericOrDateField(dynFilterField) ? '값' : '검색어'}
+                  className={`${CUI_INPUT} w-40`} />
               )
             )}
 
-            {/* 범위(between) 최대값 */}
             {dynFilterField && dynFilterOp === 'between' && (
               <>
-                <span className="text-gray-400 text-xs">~</span>
+                <span className="text-[12px] text-neutral-400">~</span>
                 <input type={isDateField(dynFilterField) ? 'date' : 'text'}
                   value={dynFilterValueMax} onChange={(e) => setDynFilterValueMax(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleAddFilter(); }}
-                  placeholder={isDateField(dynFilterField) ? '' : '최대값'}
-                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-28 focus:outline-none focus:ring-2 focus:ring-emerald-200" />
+                  placeholder={isDateField(dynFilterField) ? '' : '최대'}
+                  className={`${CUI_INPUT} w-32`} />
               </>
             )}
 
-            {/* 검색 버튼 */}
             {dynFilterField && dynFilterValue && (
-              <button onClick={handleAddFilter}
-                className="px-4 py-1.5 bg-emerald-500 text-white rounded-lg text-xs font-medium hover:bg-emerald-600 transition-colors">
-                검색
+              <button type="button" onClick={handleAddFilter} className={CUI_BTN_PRIMARY}>
+                <Search className="w-[15px] h-[15px]" />찾기
               </button>
             )}
 
-            <div className="w-px h-5 bg-gray-200" />
+            <span className="w-px h-5 bg-neutral-200 mx-0.5" />
 
-            {/* 수신동의 */}
-            <span className="text-gray-500 font-medium text-xs">수신</span>
+            <span className="text-[12px] font-medium text-neutral-500">수신</span>
             {[{ v: 'all', l: '전체' }, { v: 'true', l: '동의' }, { v: 'false', l: '거부' }].map(opt => (
-              <button key={opt.v} onClick={() => handleSpecialFilterChange('smsOptIn', opt.v)}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${filterSmsOptIn === opt.v ? 'bg-emerald-100 text-emerald-700 border border-emerald-300' : 'bg-white border border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+              <button key={opt.v} type="button" onClick={() => handleSpecialFilterChange('smsOptIn', opt.v)}
+                className={filterSmsOptIn === opt.v ? CUI_CHIP_ON : CUI_CHIP_OFF}>
                 {opt.l}
               </button>
             ))}
 
-            {/* 브랜드 */}
-            {(userType === 'company_admin' || userType === 'super_admin') && storeCodeOptions.length > 0 && (
+            {canManage && storeCodeOptions.length > 0 && (
               <>
-                <div className="w-px h-5 bg-gray-200" />
-                <span className="text-gray-500 font-medium text-xs">브랜드</span>
+                <span className="w-px h-5 bg-neutral-200 mx-0.5" />
+                <span className="text-[12px] font-medium text-neutral-500">브랜드</span>
                 <select value={filterStoreCode} onChange={(e) => handleSpecialFilterChange('storeCode', e.target.value)}
-                  className="border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200">
+                  className={`${CUI_SELECT} w-auto min-w-[110px]`}>
                   <option value="all">전체</option>
                   {storeCodeOptions.map(sc => <option key={sc} value={sc}>{sc}</option>)}
                 </select>
               </>
             )}
 
-            {/* 초기화 */}
             {(activeFilters.length > 0 || filterSmsOptIn !== 'all' || filterStoreCode !== 'all') && (
               <>
-                <div className="w-px h-5 bg-gray-200" />
-                <button onClick={handleReset} className="px-3 py-1 bg-white border border-gray-300 rounded-lg text-xs text-gray-500 hover:bg-gray-50 transition-colors">초기화</button>
+                <span className="w-px h-5 bg-neutral-200 mx-0.5" />
+                <button type="button" onClick={handleReset} className={CUI_BTN_GHOST}>
+                  <RotateCcw className="w-[15px] h-[15px]" />초기화
+                </button>
               </>
             )}
           </div>
 
-          {/* ★ D79: 활성 필터 태그 표시 */}
+          {/* ★ D79: 적용된 필터 */}
           {activeFilters.length > 0 && (
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs text-gray-400">적용 필터:</span>
+              <span className="text-[11.5px] text-neutral-400">적용:</span>
               {activeFilters.map(af => {
                 const opLabel = af.op === 'contains' ? '포함' : af.op === 'eq' ? '=' : af.op === 'gte' ? '이상' : af.op === 'lte' ? '이하' : af.op === 'between' ? '~' : af.op;
                 const valueDisplay = af.op === 'between' && af.valueMax ? `${af.value} ~ ${af.valueMax}` : af.value;
                 return (
-                  <span key={af.field} className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-xs border border-emerald-200">
+                  <span key={af.field} className="h-[26px] pl-2.5 pr-1 inline-flex items-center gap-1 rounded-lg bg-indigo-50 text-indigo-700 text-[12px] font-medium ring-1 ring-indigo-600/15">
                     {af.label} {opLabel} {valueDisplay}
-                    <button onClick={() => handleRemoveFilter(af.field)} className="ml-0.5 text-emerald-400 hover:text-emerald-600">&times;</button>
+                    <button type="button" onClick={() => handleRemoveFilter(af.field)} aria-label={`${af.label} 조건 빼기`}
+                      className="h-5 w-5 grid place-items-center rounded text-indigo-400 transition hover:bg-white hover:text-indigo-700">
+                      <X className="w-3 h-3" strokeWidth={2.4} />
+                    </button>
                   </span>
                 );
               })}
@@ -529,236 +647,165 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
           )}
         </div>
 
-        {/* 테이블 + 상세 패널 */}
-        <div className="flex-1 overflow-hidden flex">
-          {/* 테이블 영역 */}
-          <div className={`overflow-auto transition-all ${selectedCustomer ? 'flex-[65]' : 'flex-1'}`}>
-            <table className="w-full text-sm" style={{ minWidth: `${Math.max(700, 100 + fieldColumns.length * 120)}px` }}>
-              <thead className="bg-gray-50 sticky top-0 z-10">
-                <tr>
-                  <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 w-12 whitespace-nowrap">#</th>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">{fieldColumns.find(f => f.field_key === 'name')?.field_label || '고객명'}</th>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">{fieldColumns.find(f => f.field_key === 'phone')?.field_label || '전화번호'}</th>
-                  {fieldColumns.filter(f => !['name', 'phone'].includes(f.field_key)).map(f => (
-                    <th key={f.field_key} className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 whitespace-nowrap">
-                      {f.field_label || f.display_name || f.field_key}
-                    </th>
-                  ))}
-                  <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 whitespace-nowrap">수신</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr><td colSpan={3 + fieldColumns.filter(f => !['name', 'phone'].includes(f.field_key)).length + 1} className="py-16 text-center text-gray-400">조회 중...</td></tr>
-                ) : customers.length === 0 ? (
-                  <tr><td colSpan={3 + fieldColumns.filter(f => !['name', 'phone'].includes(f.field_key)).length + 1} className="py-16 text-center text-gray-400">
-                    {activeFilters.length > 0 ? '검색 결과가 없습니다.' : '고객 데이터가 없습니다.'}
-                  </td></tr>
-                ) : (
-                  customers.map((c: any, idx: number) => (
-                    <tr key={c.id}
-                      onClick={() => fetchDetail(c.id)}
-                      className={`border-t cursor-pointer transition-colors ${selectedCustomer?.id === c.id ? 'bg-emerald-50' : 'hover:bg-gray-50'}`}>
-                      <td className="px-3 py-2.5 text-center text-xs text-gray-400">{(page - 1) * limit + idx + 1}</td>
-                      <td className="px-3 py-2.5 text-sm font-medium text-gray-800 whitespace-nowrap">{c.name || '-'}</td>
-                      <td className="px-3 py-2.5 font-mono text-xs text-gray-600 whitespace-nowrap">{formatPhone(c.phone)}</td>
-                      {fieldColumns.filter(f => !['name', 'phone'].includes(f.field_key)).map(f => {
-                        const val = f.is_custom ? c.custom_fields?.[f.field_key] : c[f.field_key];
-                        let display: string;
-                        if (f.field_key === 'gender') {
-                          display = val === 'M' || val === '남' || val === '남성' ? '남' : val === 'F' || val === '여' || val === '여성' ? '여' : val || '-';
-                        } else if (f.field_key === 'birth_date' || f.field_key === 'recent_purchase_date' || f.field_key === 'created_at' || f.field_key === 'wedding_anniversary' || f.field_key === 'registration_date' || f.field_key === 'first_purchase_date' || (f.field_type && ['DATE', 'DATETIME', 'TIMESTAMP'].includes(f.field_type.toUpperCase()))) {
-                          // ★ D93: DATE/DATETIME/TIMESTAMP 타입 + 날짜 직접 컬럼 전부 formatDate 적용
-                          display = val ? formatDate(String(val)) : '-';
-                        } else if (f.field_key === 'total_purchase_amount' || f.field_key === 'recent_purchase_amount' || f.field_key === 'points' || f.field_key === 'purchase_count') {
-                          // ★ D89→D120: formatPreviewValue + fieldLabel 전달로 숫자/날짜 판정
-                          // ★ D136 재발방지 (2026-04-22 P1): fieldKey 전달 — 커스텀필드 가드 작동 보장
-                          display = val != null ? formatPreviewValue(val, { fieldLabel: f.field_label || f.display_name || f.field_key, fieldKey: f.field_key }) : '-';
-                        } else if ((f.field_type === 'NUMBER' || f.data_type === 'number') && val != null) {
-                          // ★ D98→D120: 커스텀 숫자 필드 — fieldLabel 기반 숫자/날짜 판정
-                          // ★ D136 재발방지 (2026-04-22 P1): fieldKey 필수 전달 — 커스텀 숫자 필드(custom_2 등)
-                          //   data_type='number' 자동 감지된 varchar "20260416150000"가 콤마 포맷되는 버그 차단
-                          display = formatPreviewValue(val, { fieldLabel: f.field_label || f.display_name || f.field_key, fieldKey: f.field_key });
-                        } else if (f.field_key === 'grade') {
-                          return (
-                            <td key={f.field_key} className="px-3 py-2.5 text-center whitespace-nowrap">
-                              {val ? (
-                                <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
-                                  String(val).toUpperCase() === 'VIP' ? 'bg-amber-50 text-amber-700' :
-                                  String(val).toUpperCase() === 'VVIP' ? 'bg-purple-50 text-purple-700' :
-                                  'bg-gray-100 text-gray-600'
-                                }`}>{val}</span>
-                              ) : '-'}
-                            </td>
-                          );
-                        } else {
-                          // ★ 2026-07-03: 명백한 ISO 타임스탬프(싱크 custom 날짜)만 날짜 표시 — 그 외 원본 유지(D142)
-                          display = val != null ? (formatIfIsoDate(val) ?? String(val)) : '-';
-                        }
-                        return <td key={f.field_key} className="px-3 py-2.5 text-center text-xs text-gray-600 whitespace-nowrap">{display}</td>;
-                      })}
-                      <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                        <span className={`inline-block w-2 h-2 rounded-full ${c.sms_opt_in ? 'bg-green-400' : 'bg-gray-300'}`} />
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+        {/* ===== 목록 + 360 패널 ===== */}
+        <div className="flex-1 min-h-0 flex">
+          {/* 목록 */}
+          <div className={`min-w-0 flex flex-col ${selectedCustomerId ? 'hidden md:flex md:flex-1' : 'flex-1'}`}>
+            <div className="flex-1 min-h-0 overflow-auto">
+              <table className="w-full" style={{ minWidth: `${Math.max(700, 220 + listColumns.length * 120)}px` }}>
+                <thead className={`${CUI_THEAD} sticky top-0 z-10`}>
+                  <tr>
+                    <th className={`${CUI_TH} w-12 text-center`}>#</th>
+                    <th className={CUI_TH}>{fieldColumns.find(f => f.field_key === 'name')?.field_label || '고객명'}</th>
+                    <th className={CUI_TH}>{fieldColumns.find(f => f.field_key === 'phone')?.field_label || '전화번호'}</th>
+                    {listColumns.map(f => (
+                      <th key={f.field_key} className={CUI_TH}>{f.field_label || f.display_name || f.field_key}</th>
+                    ))}
+                    <th className={`${CUI_TH} text-center`}>수신</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr><td colSpan={4 + listColumns.length} className="py-16 text-center text-[13px] text-neutral-400">조회 중</td></tr>
+                  ) : customers.length === 0 ? (
+                    <tr><td colSpan={4 + listColumns.length} className="py-16 text-center text-[13px] text-neutral-400">
+                      {activeFilters.length > 0 ? '조건에 맞는 고객이 없습니다' : '고객 데이터가 없습니다'}
+                    </td></tr>
+                  ) : (
+                    customers.map((c: any, idx: number) => (
+                      <tr key={c.id}
+                        onClick={() => openCustomer(c)}
+                        className={`${CUI_TR} cursor-pointer ${selectedCustomerId === c.id ? 'bg-indigo-50/60' : ''}`}>
+                        <td className={`${CUI_TD} text-center ${CUI_CELL_META}`}>{(page - 1) * limit + idx + 1}</td>
+                        <td className={`${CUI_TD} ${CUI_CELL_NAME}`}>{c.name || '-'}</td>
+                        <td className={`${CUI_TD} font-mono text-[12.5px] text-neutral-600`}>{formatPhone(c.phone)}</td>
+                        {listColumns.map(f => {
+                          const val = f.is_custom ? c.custom_fields?.[f.field_key] : c[f.field_key];
+                          let display: string;
+                          if (f.field_key === 'gender') {
+                            display = val === 'M' || val === '남' || val === '남성' ? '남' : val === 'F' || val === '여' || val === '여성' ? '여' : val || '-';
+                          } else if (f.field_key === 'birth_date' || f.field_key === 'recent_purchase_date' || f.field_key === 'created_at' || f.field_key === 'wedding_anniversary' || f.field_key === 'registration_date' || f.field_key === 'first_purchase_date' || (f.field_type && ['DATE', 'DATETIME', 'TIMESTAMP'].includes(f.field_type.toUpperCase()))) {
+                            // ★ D93: DATE/DATETIME/TIMESTAMP 타입 + 날짜 직접 컬럼 전부 formatDate 적용
+                            display = val ? formatDate(String(val)) : '-';
+                          } else if (f.field_key === 'total_purchase_amount' || f.field_key === 'recent_purchase_amount' || f.field_key === 'points' || f.field_key === 'purchase_count') {
+                            // ★ D89→D120 + D136: fieldKey 전달로 커스텀필드 가드 작동
+                            display = val != null ? formatPreviewValue(val, { fieldLabel: f.field_label || f.display_name || f.field_key, fieldKey: f.field_key }) : '-';
+                          } else if ((f.field_type === 'NUMBER' || f.data_type === 'number') && val != null) {
+                            display = formatPreviewValue(val, { fieldLabel: f.field_label || f.display_name || f.field_key, fieldKey: f.field_key });
+                          } else if (f.field_key === 'grade') {
+                            return (
+                              <td key={f.field_key} className={CUI_TD}>
+                                {val ? <span className={`${CUI_PILL_BASE} bg-indigo-50 text-indigo-700`}>{val}</span> : <span className={CUI_CELL_OFF}>-</span>}
+                              </td>
+                            );
+                          } else if (f.data_type === 'boolean' || typeof val === 'boolean') {
+                            // ★ 2026-08-22: true/false 원문이 그대로 보이던 것을 사람 말로. 값 판정은 그대로다.
+                            return (
+                              <td key={f.field_key} className={CUI_TD}>
+                                {val == null || val === ''
+                                  ? <span className={CUI_CELL_OFF}>-</span>
+                                  : <span className={`${CUI_PILL_BASE} ${val === true || val === 'true' ? 'bg-emerald-100 text-emerald-800' : 'bg-neutral-100 text-neutral-600'}`}>
+                                      {val === true || val === 'true' ? '동의' : '거부'}
+                                    </span>}
+                              </td>
+                            );
+                          } else {
+                            // ★ 2026-07-03: 명백한 ISO 타임스탬프만 날짜 표시 — 그 외 원본 유지(D142)
+                            display = val != null ? (formatIfIsoDate(val) ?? String(val)) : '-';
+                          }
+                          return <td key={f.field_key} className={`${CUI_TD} ${CUI_CELL_DATA}`}>{display}</td>;
+                        })}
+                        <td className={`${CUI_TD} text-center`}>
+                          <span className={`inline-block w-2 h-2 rounded-full ${c.sms_opt_in ? 'bg-emerald-500' : 'bg-neutral-300'}`}
+                            title={c.sms_opt_in ? '수신 동의' : '수신 거부'} />
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* 페이지 */}
+            {totalPages > 0 && (
+              <div className="shrink-0 px-6 py-3 border-t border-neutral-200 bg-neutral-50 flex items-center justify-center gap-1.5">
+                <button type="button" onClick={() => { const p = Math.max(1, page - 1); setPage(p); fetchCustomers(p); }}
+                  disabled={page <= 1} className={`${CUI_BTN_GHOST} h-8`}>
+                  <ChevronLeft className="w-4 h-4" />이전
+                </button>
+                {Array.from({ length: Math.min(totalPages, 10) }, (_, i) => {
+                  let start = Math.max(1, page - 4);
+                  if (start + 9 > totalPages) start = Math.max(1, totalPages - 9);
+                  return start + i;
+                }).filter(p => p <= totalPages).map(p => (
+                  <button key={p} type="button" onClick={() => { setPage(p); fetchCustomers(p); }}
+                    className={`h-8 w-8 rounded-lg text-[13px] font-medium transition ${page === p ? 'bg-indigo-600 text-white font-semibold' : 'text-neutral-600 hover:bg-neutral-100'}`}>
+                    {p}
+                  </button>
+                ))}
+                <button type="button" onClick={() => { const p = Math.min(totalPages, page + 1); setPage(p); fetchCustomers(p); }}
+                  disabled={page >= totalPages} className={`${CUI_BTN_GHOST} h-8`}>
+                  다음<ChevronRight className="w-4 h-4" />
+                </button>
+                <span className="ml-2 text-[12px] text-neutral-400 tabular-nums">{page} / {totalPages}</span>
+              </div>
+            )}
           </div>
 
-          {/* 상세 패널 (우측 슬라이드) */}
-          {selectedCustomer && (
-            <div className="flex-[35] border-l bg-gray-50 overflow-y-auto p-5">
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <div className="text-lg font-bold text-gray-800">{selectedCustomer.name || '-'}</div>
-                  {selectedCustomer.grade && (
-                    <span className={`inline-block mt-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      selectedCustomer.grade === 'VIP' ? 'bg-amber-100 text-amber-700' :
-                      selectedCustomer.grade === 'VVIP' ? 'bg-purple-100 text-purple-700' :
-                      'bg-gray-200 text-gray-600'
-                    }`}>{selectedCustomer.grade}</span>
-                  )}
-                </div>
-                <button onClick={() => setSelectedCustomer(null)} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 text-sm">&times;</button>
-              </div>
-
-              {detailLoading ? (
-                <div className="text-center text-gray-400 py-10">불러오는 중...</div>
-              ) : (
-                <div className="space-y-0">
-                  {detailFields.map(field => {
-                    const value = selectedCustomer[field.key];
-                    if (value == null && field.key !== 'sms_opt_in') return null;
-                    const display = field.format ? field.format(value) : (value || '-');
-                    if (display === '-' && field.key !== 'sms_opt_in' && field.key !== 'name') return null;
-                    return (
-                      <div key={field.key} className="flex items-center py-2.5 border-b border-gray-100">
-                        <span className="w-24 flex-shrink-0 text-xs text-gray-400">{field.label}</span>
-                        <span className="text-sm text-gray-800 font-medium">{display}</span>
-                      </div>
-                    );
-                  })}
-
-                  {/* custom_fields 표시 */}
-                  {selectedCustomer.custom_fields && Object.keys(selectedCustomer.custom_fields).length > 0 && (
-                    <>
-                      <div className="text-xs text-gray-400 font-medium mt-4 mb-2">추가 정보</div>
-                      {Object.entries(selectedCustomer.custom_fields).map(([key, value]) => {
-                        // fieldColumns에서 커스텀 필드 라벨 조회 (custom_1 → 사용자 정의 라벨)
-                        const fieldDef = fieldColumns && fieldColumns.length > 0
-                          ? fieldColumns.find((f: any) => f.field_key === key)
-                          : null;
-                        const displayLabel = fieldDef?.field_label || fieldDef?.display_name || key;
-                        // ★ D89→D120: formatPreviewValue + fieldLabel 전달로 숫자/날짜 판정
-                        // ★ D136 재발방지 (2026-04-22 P1): custom_fields JSONB 키는 자체가 fieldKey — 그대로 전달하여 커스텀 가드 작동
-                        const displayValue = value != null ? formatPreviewValue(value, { fieldLabel: displayLabel, fieldKey: key }) : '-';
-                        return (
-                          <div key={key} className="flex items-center py-2.5 border-b border-gray-100">
-                            <span className="w-24 flex-shrink-0 text-xs text-gray-400">{displayLabel}</span>
-                            <span className="text-sm text-gray-800 font-medium">{displayValue}</span>
-                          </div>
-                        );
-                      })}
-                    </>
-                  )}
-                </div>
-              )}
+          {/* 고객 360 — 데스크톱은 우측 고정, 모바일은 목록을 덮는다 */}
+          {selectedCustomerId && (
+            <div className="w-full md:w-[440px] shrink-0 md:border-l border-neutral-200 min-h-0">
+              <Customer360Panel
+                customerId={selectedCustomerId}
+                fallbackName={selectedRow?.name || null}
+                fallbackPhone={selectedRow?.phone || null}
+                basicInfo={basicInfoBlock}
+                onClose={() => { setSelectedCustomerId(null); setSelectedCustomer(null); setSelectedRow(null); }}
+              />
             </div>
           )}
         </div>
-
-        {/* 페이지네이션 */}
-        {totalPages > 0 && (
-          <div className="flex items-center justify-center gap-1.5 py-3 border-t bg-gray-50">
-            <button
-              onClick={() => { const p = Math.max(1, page - 1); setPage(p); fetchCustomers(p); }}
-              disabled={page <= 1}
-              className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-              이전
-            </button>
-            {Array.from({ length: Math.min(totalPages, 10) }, (_, i) => {
-              let start = Math.max(1, page - 4);
-              if (start + 9 > totalPages) start = Math.max(1, totalPages - 9);
-              return start + i;
-            }).filter(p => p <= totalPages).map(p => (
-              <button key={p} onClick={() => { setPage(p); fetchCustomers(p); }}
-                className={`w-8 h-8 text-sm rounded-md border transition-colors ${page === p ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white hover:bg-gray-50'}`}>
-                {p}
-              </button>
-            ))}
-            <button
-              onClick={() => { const p = Math.min(totalPages, page + 1); setPage(p); fetchCustomers(p); }}
-              disabled={page >= totalPages}
-              className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-              다음
-            </button>
-            <span className="text-xs text-gray-400 ml-2">{page} / {totalPages} 페이지</span>
-          </div>
-        )}
       </div>
 
-      {/* ★ D144 P5: 고객 DB 전체 삭제 확인 모달 (안전장치 — 회사명 일치 검증) */}
-      {showDeleteAllConfirm && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in">
-            <div className="px-6 py-5">
-              <div className="flex items-start gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-5 h-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-lg font-bold text-gray-900">고객 DB 전체 삭제</h3>
-                  <p className="text-sm text-gray-600 mt-1">
-                    등록된 모든 고객 데이터, 구매내역, 수신거부, 필드 정의가 <strong className="text-red-600">영구 삭제</strong>됩니다. 복구 불가능합니다.
-                  </p>
-                </div>
-              </div>
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-xs text-amber-800">
-                <strong>안전 확인:</strong> 본인 회사의 정확한 회사명을 아래에 입력해야 삭제됩니다.
-              </div>
-              <input
-                type="text"
-                value={deleteConfirmInput}
-                onChange={(e) => { setDeleteConfirmInput(e.target.value); setDeleteResult(null); }}
-                placeholder="회사명을 정확히 입력하세요"
-                disabled={deletingAll}
-                className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none disabled:bg-gray-50"
-                onKeyDown={(e) => { if (e.key === 'Enter' && !deletingAll) handleDeleteAll(); }}
-              />
-              {deleteResult && (
-                <div className={`mt-3 p-3 rounded-lg text-sm ${deleteResult.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-                  {deleteResult.message}
-                </div>
-              )}
-            </div>
-            <div className="px-6 py-4 bg-gray-50 border-t flex justify-end gap-2 rounded-b-xl">
-              <button
-                onClick={() => { setShowDeleteAllConfirm(false); setDeleteConfirmInput(''); setDeleteResult(null); }}
-                disabled={deletingAll}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-              >
-                취소
-              </button>
-              <button
-                onClick={handleDeleteAll}
-                disabled={deletingAll || !deleteConfirmInput.trim() || (deleteResult?.ok === true)}
-                className="px-4 py-2 text-sm font-bold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {deletingAll ? (
-                  <>
-                    <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="60" strokeLinecap="round" /></svg>
-                    삭제 중...
-                  </>
-                ) : '영구 삭제'}
-              </button>
-            </div>
-          </div>
+      {/* ★ D144 P5: 고객 DB 전체 삭제 — 회사명 일치 확인. 셸은 발송 계열 공용(포털·ESC·처리 중 잠금) */}
+      <ConfirmDialogShell
+        show={showDeleteAllConfirm}
+        tone="rose"
+        icon={<AlertTriangle size={18} strokeWidth={1.9} className="text-white" />}
+        title="고객 DB를 전부 지웁니다"
+        subtitle="지운 뒤에는 되돌릴 수 없습니다."
+        cancelLabel="취소"
+        onCancel={() => { setShowDeleteAllConfirm(false); setDeleteConfirmInput(''); setDeleteResult(null); }}
+        confirmLabel="영구 삭제"
+        onConfirm={handleDeleteAll}
+        busy={deletingAll}
+        busyLabel="삭제 중..."
+        confirmDisabled={!deleteConfirmInput.trim() || deleteResult?.ok === true}
+      >
+        <p className="text-[13px] text-neutral-700 leading-relaxed">
+          등록된 모든 고객 데이터와 구매내역, 수신거부, 항목 정의가 함께 사라집니다.
+        </p>
+        <div className="mt-3">
+          <label htmlFor="delete-all-confirm" className="block text-[12.5px] font-medium text-neutral-600 mb-1.5">
+            확인을 위해 회사명을 그대로 입력해 주세요
+          </label>
+          <input
+            id="delete-all-confirm"
+            type="text"
+            value={deleteConfirmInput}
+            onChange={(e) => { setDeleteConfirmInput(e.target.value); setDeleteResult(null); }}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !deletingAll && deleteConfirmInput.trim()) handleDeleteAll(); }}
+            placeholder="회사명"
+            disabled={deletingAll}
+            className="w-full h-9 px-3 rounded-lg bg-white border border-neutral-200 text-[13.5px] text-neutral-900 transition placeholder:text-neutral-400 focus:outline-none focus:border-rose-500 focus:ring-4 focus:ring-rose-500/15 disabled:bg-neutral-50"
+          />
         </div>
-      )}
+        {deleteResult && (
+          <div className={`mt-3 px-3.5 py-3 rounded-lg text-[13px] ${deleteResult.ok ? 'bg-emerald-50 text-emerald-900 border border-emerald-200' : 'bg-rose-50 text-rose-900 border border-rose-200'}`}>
+            {deleteResult.message}
+          </div>
+        )}
+      </ConfirmDialogShell>
     </div>
   );
 }

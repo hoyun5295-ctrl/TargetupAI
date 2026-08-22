@@ -475,6 +475,7 @@
 | collected_by_user_id | uuid FK |
 | created_at | timestamptz |
 | updated_at | timestamptz |
+- INDEX 실측(★2026-08-22 `pg_indexes`, Harold 실행 · 고객 360 설계 §5-7): PK(id) · **idx_consents_customer(customer_id)** · idx_consents_status(customer_id, channel, status)
 
 ### customer_field_definitions (고객 필드 정의)
 > **⚠️ 쓰기 진입점:** CT-07 `upsertCustomFieldDefinitions()` (standard-field-map.ts) — 인라인 INSERT/UPDATE 절대 금지.
@@ -561,6 +562,42 @@
 - UNIQUE: (company_id, COALESCE(store_code,'__NONE__'), phone)
 - INDEX: uploaded_by
 - INDEX: **idx_customers_active_smsable** (company_id, store_code) WHERE is_active=true AND sms_opt_in=true — ★ D150-3 (2026-05-10) 자동발송 worker `runAutoCampaignWorker` D-day 발송 + customer-filter 매 회차 SELECT 시 활성 SMS 가능 고객 부분 인덱스. 1만+ 고객 회사에서 풀스캔 → Bitmap Index Scan 전환.
+
+### customers_unified (VIEW — 고객 중복 행 접기) ★2026-08-22 등재 (`pg_get_viewdef` 실측, Harold 실행)
+
+> 고객 상세·목록 조회(`routes/customers.ts` GET /:id 등)가 `customers` 대신 읽는 뷰. **테이블이 아니라 VIEW**라 INSERT/UPDATE 불가.
+> 정의 = 두 덩어리의 UNION ALL:
+>   ① 이름이 있는 행: `row_number() OVER (PARTITION BY company_id, phone, name ORDER BY CASE WHEN source=sync THEN 0 ELSE 1 END)` 에서 **rn = 1만**
+>      → 같은 회사·번호·이름이 여러 행(매장별)이면 **싱크 행을 우선해 1행만** 남긴다.
+>   ② 이름이 NULL·빈 문자열인 행: 전부 그대로(rn = 1 고정).
+> ⛔ 파티션 키에 `store_code`가 없다 — 매장별 중복 행은 여기서 접힌다. 고객 기준으로 구매·동의를 **전부** 모으려면 뷰가 아니라 `customers` 원본을 `company_id + phone`으로 읽어야 한다(고객 360 설계서 §2-2).
+> ⛔ 접힌 행의 id(rn ≥ 2)로 GET /:id를 부르면 404다.
+> 컬럼 40개 = customers 중 일부만: id company_id phone name gender birth_date age email address grade points store_code registered_store registered_store_number registration_type recent_purchase_amount recent_purchase_store total_purchase_amount wedding_anniversary is_married sms_opt_in custom_fields is_opt_out is_invalid created_at updated_at source birth_year birth_month_day region total_purchase last_purchase_date purchase_count is_active recent_purchase_date store_name callback store_phone uploaded_by rn.
+> **없는 컬럼**(customers에는 있으나 뷰에 없음): ltv_score avg_order_value customer_code email_opt_in last_activity_at active_sources primary_source preferred_channel source_priority_resolved last_cart_add_at cart_add_count_30d last_wishlist_add_at wishlist_add_count_30d last_page_view_at. 이 값이 필요하면 원본 테이블.
+
+### journeys / journey_steps / journey_executions (여정 3테이블) ★2026-08-22 등재 (`information_schema.columns` 실측 84행, Harold 실행)
+
+> 여정 기능 문서 = docs/FEATURE-JOURNEY.md. 여기는 컬럼·인덱스 실물만.
+
+**journeys** (44컬럼): id company_id name template_code trigger_event trigger_filters(jsonb) status budget_monthly approved_by approved_at paused_at pause_reason stats_total_entered stats_total_completed stats_total_cost created_by created_at updated_at threshold_recipients_per_step threshold_cost_per_step threshold_risk_level allow_reentry reentry_cooldown_days callback_number auto_reentry_enabled archived_at pretest_notify_step_defaults(jsonb) callback_mode(text) entry_baseline_at last_event_cursor last_pretest_passed_at start_kind anchor_date(date) anchor_recurrence anchor_recurrence_day anchor_hour_kst one_shot_scheduled_at goal_exit_enabled goal_kind holdout_pct(smallint) personal_send_time last_event_cursor_id last_purchase_cursor last_purchase_cursor_id
+
+**journey_steps** (25컬럼): id journey_id step_order step_type delay_hours channel message_template(text) condition_jsonb created_at is_ad subject alimtalk_profile_id alimtalk_template_code alimtalk_variable_map(jsonb) alimtalk_next_type alimtalk_next_contents alimtalk_next_subject mms_image_paths(ARRAY) delay_mode target_hour_kst notify_manager_on_pretest anchor_offset_days not_met_goto wait_event_name wait_timeout_hours. ⛔ 스텝 **이름 컬럼 없음**(화면 표시는 step_order + step_type/channel로)
+
+**journey_executions** (15컬럼): id journey_id customer_id current_step_order status entered_at next_run_at completed_at total_cost error_log(jsonb) last_error_at error_count result_notified_at entry_event_properties(jsonb)
+- INDEX 실측(★2026-08-22 `pg_indexes`): PK(id) · **idx_journey_executions_customer(customer_id)** · idx_journey_executions_due(next_run_at) WHERE status=active · idx_journey_executions_journey_status(journey_id, status, entered_at DESC)
+
+관련: journey_step_logs(id execution_id step_id campaign_id sent_at status cost error_reason — 코드 INSERT문 기준) · journey_entry_ledger·journey_step_campaigns·journey_anchor_dispatch = 이 파일 하단 변경 이력 참조.
+
+### voice_inbound_calls (인바운드 AI 음성 통화) ★2026-08-22 등재 (컬럼 = `utils/voice-inbound.ts` INSERT문 기준 · information_schema 미실측)
+
+id company_id caller_phone customer_id(NULL 가능) transcript ai_response duration_ms status created_at
+- INDEX 실측(★2026-08-22 `pg_indexes`): PK(id) · idx_voice_inbound_company_created(company_id, created_at DESC). ⛔ **customer_id·caller_phone 인덱스 없음**(고객 360 §4-4 후보 — 현재 규모 작음)
+
+### email_campaigns / email_events (이메일 채널) ★2026-08-22 존재 확인 (컬럼 = `utils/email-channel.ts` INSERT문 기준 부분 목록 · information_schema 미실측)
+
+**email_campaigns**: id company_id created_by name subject html_body text_body from_name from_email is_ad scheduled_at status sent_count open_count click_count bounce_count unsubscribe_count ai_generated sections parent_campaign_id resend_generation (+design 컬럼) created_at updated_at
+**email_events**: id campaign_id email event_type url reason occurred_at auto_processed created_at. ⛔ 고객 키가 **email 주소**(customer_id·phone 없음) → 고객 360에서는 `customers.email`로 잇는다.
+
 
 ### file_uploads (파일 업로드)
 | 컬럼 | 타입 |
@@ -908,6 +945,7 @@
 - INDEX: idx_dm_views_token (dm_id, recipient_token) WHERE recipient_token IS NOT NULL ★ 2026-07-02
 - INDEX: idx_dm_views_anon (dm_id, anonymous_id) WHERE anonymous_id IS NOT NULL ★ 2026-07-02
 - INDEX: idx_dm_views_entry_source (dm_id, entry_source) WHERE entry_source IS NOT NULL ★ 2026-07-15 대기
+- INDEX 실측(★2026-08-22 `pg_indexes`, Harold 실행 · 고객 360 설계 §5-7): PK(id) · idx_dm_views_ab(ab_test_id, ab_variant) WHERE ab_test_id IS NOT NULL · idx_dm_views_anon(dm_id, anonymous_id) partial · idx_dm_views_company(company_id, viewed_at) · idx_dm_views_dm(dm_id) · idx_dm_views_entry_source(dm_id, entry_source) partial · idx_dm_views_phone(dm_id, phone) · idx_dm_views_token(dm_id, recipient_token) partial. ⛔ **phone·token 선행 인덱스 없음(전부 dm_id 선행)** → 고객 1명의 전체 DM 열람은 (company_id, viewed_at) 범위 스캔 + phone 필터(고객 360 §4-4 후보)
 
 ### dm_recipient_tokens (DM 수신자별 토큰 — 발송 고객 1급 연결) ★ 2026-07-03 information_schema 실측 기록
 > 0702 수신자 추적 작업 신설분. DM 발송 시 고객별 토큰 발급(dm.ts → dm-recipient-token.ts) — "DM 발송 고객 명단"의 원천. 성과리포트 고객 축이 발송 집합으로 사용.
@@ -962,6 +1000,7 @@
 - INDEX: (section_id, section_type)
 - INDEX: (customer_id) WHERE customer_id IS NOT NULL
 - UNIQUE: uniq_dm_response_per_user (campaign_id, section_id, COALESCE(customer_id::text, anonymous_id)) WHERE COALESCE(...) IS NOT NULL — ★ B 2026-06-14 1인1회 응모
+- INDEX 실측(★2026-08-22 `pg_indexes`, Harold 실행 · 고객 360 설계 §5-7): PK(id) · idx_dm_event_resp_campaign(company_id, campaign_id, occurred_at DESC) · **idx_dm_event_resp_customer(customer_id) WHERE customer_id IS NOT NULL** · idx_dm_event_resp_section(section_id, section_type) · UNIQUE uniq_dm_response_per_user(campaign_id, section_id, COALESCE(customer_id::text, anonymous_id::text)) partial
 
 ### dm_prizes (DM 인터랙션 경품/등급/재고) ★ B 2026-06-14 신설·실측
 > 룰렛/추첨 경품. win_method = random(마감추첨) | preset(엑셀지정) | roulette. roulette_segment_id로 룰렛 세그먼트 매핑.
@@ -1024,6 +1063,7 @@
 | source | varchar(20) |
 | created_at | timestamp |
 - UNIQUE: (user_id, phone)
+- INDEX 실측(★2026-08-22 `pg_indexes`, Harold 실행 · 고객 360 설계 §5-7): PK(id) · **idx_opt_outs_phone(company_id, phone)** · UNIQUE idx_opt_outs_user_phone(user_id, phone)
 
 ### opt_out_sync_logs (수신거부 동기화 로그)
 | 컬럼 | 타입 |
@@ -1227,6 +1267,7 @@
 **시간 축 주의 (2026-08-03 실측)** — `purchase_date`는 **KST 날짜**(1,855,088건 전량 `00:00:00`, 시각 없음)이고 `created_at`은 `NOW()` 적재라 **UTC 벽시계**다(DB 세션 TimeZone = `Etc/UTC`). 한 행에 축이 둘이니 비교 시 반드시 변환을 명시한다.
 
 **멱등 인덱스** — `CREATE UNIQUE INDEX ux_purchases_company_source_row_key ON purchases (company_id, source_row_key) WHERE source_row_key IS NOT NULL` (2026-08-03 실행완료). 부분 인덱스라 키 없는 기존 행·옛 에이전트 적재분은 걸리지 않는다. 적재는 `ON CONFLICT ... DO UPDATE`이며 **`created_at`은 갱신 대상에서 제외**한다(여정 구매 원장 커서가 도착 축으로 읽어, 값을 올리면 이미 발화한 구매가 재발송된다). 소유 = `utils/sync-ingest.ts`.
+- INDEX 실측(★2026-08-22 `pg_indexes`, Harold 실행 · 고객 360 설계 §5-7): PK(id) · idx_purchases_company_created_id(company_id, created_at, id) · idx_purchases_company_date(company_id, purchase_date DESC) · **idx_purchases_customer(customer_id, purchase_date DESC)** · idx_purchases_date(purchase_date DESC) · idx_purchases_product(product_code) · UNIQUE ux_purchases_company_source_row_key(company_id, source_row_key) WHERE source_row_key IS NOT NULL
 
 ### rcs_templates (RCS 템플릿)
 | 컬럼 | 타입 |
@@ -1356,6 +1397,7 @@
 | created_at | timestamp |
 - UNIQUE: (user_id, phone)
 - INDEX: company_id (080 콜백용, company_admin 전체 조회용)
+- INDEX 실측(★2026-08-22 `pg_indexes`, Harold 실행 · 고객 360 설계 §5-7): PK(id) · idx_unsubscribes_company_id(company_id) · **idx_unsubscribes_company_phone(company_id, phone)** · UNIQUE idx_unsubscribes_user_phone(user_id, phone)
 
 ### user_alarm_phones (사용자 알림 전화번호)
 | 컬럼 | 타입 |
@@ -1543,6 +1585,8 @@
 > 인덱스 = PK(`seqno`) + `idx_app_etc1_status`(app_etc1,status_code) + `idx_app_etc1_sendreq`(app_etc1,sendreq_time). InnoDB / utf8mb4_0900_ai_ci.
 > `app_etc1` = 캠페인/추적 식별자(결과·정산 매칭 축), `app_etc2` = company_id.
 > 신규 라인 테이블은 `CREATE TABLE SMSQ_SEND_N LIKE SMSQ_SEND_13` (root 실행 — smsuser는 CREATE 권한 없음. 권한은 `smsdb.*` 스키마 단위라 자동 상속).
+> **★ DDL 접속(2026-08-22 재확인)** — `docker exec -it targetup-mysql mysql -uroot -p smsdb`. `smsuser`로는 `ERROR 1142 ALTER command denied`가 난다(조회는 smsuser로 된다). 이 표의 DDL을 psql에 넣으면 `syntax error at or near "ALGORITHM"` — **MySQL과 PG를 헷갈리지 않는다**.
+> **★ 2026-08-22 실측(Harold 실행, 고객 360 설계 §5-R)** — `SMSQ_SEND_%` 총 **103개**. 월별 log `SMSQ_SEND_N_YYYYMM`은 **우리 코드가 자동 생성**: `utils/sms-queue.ts ensureMonthlyLogTables()`가 프로세스 시작 시 당월·다음달을 `CREATE TABLE IF NOT EXISTS <log> LIKE <live>`로 만든다(대상 = env `SMS_TABLES`의 1~11. 13~15는 log 없음). **`LIKE`라 live에 건 인덱스는 다음 달 log부터 자동 상속**, 이미 있는 log에는 별도 DDL. 실데이터 2026-03~08, 최대 `SMSQ_SEND_8_202606` 846,873행(4~9번 라인 5~8월 각 30만~85만, 전체 약 1,400만). `dest_no`는 하이픈 없는 숫자만(0/839,349) · **`dest_no` 인덱스 없음**(`WHERE dest_no=?` EXPLAIN = type ALL + filesort, COUNT 1회 20초). 고객별 발송 조회는 `(dest_no, sendreq_time)` 인덱스 전제.
 
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
@@ -2301,6 +2345,7 @@ CAFE24_REDIRECT_URI=https://app.hanjul.ai/api/cafe24/oauth/callback
 | attributed_purchase_id | uuid | ★ 실측 — 24h purchase attribution |
 - INDEX: company_id, message_id, occurred_at DESC
 - INDEX: message_id, event_type
+- INDEX 실측(★2026-08-22 `pg_indexes`, Harold 실행 · 고객 360 설계 §5-7): PK(id) · idx_inapp_imp_attributed(attributed_purchase_id) partial · idx_inapp_imp_button(message_id, button_id) partial · idx_inapp_imp_event(message_id, event_type) · idx_inapp_imp_msg(company_id, message_id, occurred_at DESC). ⛔ **customer_id 선행 인덱스 없음**(고객 360 §4-4 후보)
 
 ### cdp_assets (에셋 라이브러리) — 2026-07-18 P3 신규 (★ 2026-07-30 운영 information_schema 실측 16컬럼·제약=PK뿐)
 

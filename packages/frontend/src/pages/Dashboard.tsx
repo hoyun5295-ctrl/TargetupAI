@@ -303,6 +303,8 @@ export default function Dashboard() {
   const [testSentResult, setTestSentResult] = useState<string | null>(null);
   const [showResults, setShowResults] = useState(false);
   const [showCustomerDB, setShowCustomerDB] = useState(false);
+  // ★ 2026-08-22 ?customer=<id>로 들어오면 그 고객의 360을 바로 편다
+  const [customerDbInitialId, setCustomerDbInitialId] = useState<string | null>(null);
   const [showAnalysis, setShowAnalysis] = useState(false);
   // D41 동적 카드 + D77 페이징 뷰 (6개씩)
   const [dashboardCards, setDashboardCards] = useState<DashboardCardsResponse | null>(null);
@@ -1018,6 +1020,15 @@ export default function Dashboard() {
     if (searchParams.get('results') === '1') {
       setShowResults(true);
       searchParams.delete('results');
+      setSearchParams(searchParams, { replace: true });
+    }
+    // ★ 2026-08-22 ?customer=<id> — 고객 360을 그 고객으로 바로 연다(타겟 발송·발송결과·인바운드 알림의 진입점).
+    //   파라미터는 즉시 지운다(새로고침 때 다시 열리지 않게) — upload·results와 같은 규약.
+    const customerParam = searchParams.get('customer');
+    if (customerParam) {
+      setCustomerDbInitialId(customerParam);
+      setShowCustomerDB(true);
+      searchParams.delete('customer');
       setSearchParams(searchParams, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2260,6 +2271,7 @@ const campaignData = {
         department={(user as any)?.department}
         isCompanyAdmin={user?.userType === 'company_admin'}
         advancedAccess={!!planInfo?.advanced_access_enabled}
+        onCustomers={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } setShowCustomerDB(true); }}
         // ★ D220+ Task 8 (2026-05-27): 세그먼트 메뉴 잠금 게이팅 (ai_messaging — BASIC+)
         aiMessagingEnabled={planInfo?.ai_messaging_enabled}
         onAiOperatorClick={async () => {
@@ -3227,7 +3239,14 @@ const campaignData = {
           }}
         />
         {showResults && <ResultsModal onClose={() => setShowResults(false)} token={localStorage.getItem('token')} customerDbEnabled={planInfo?.customer_db_enabled} isSubscriptionLocked={isSubscriptionLocked} onFeatureLocked={(name, plan) => { /* 업그레이드 모달 등 */ }} onSubscriptionLocked={() => setShowSubscriptionLock(true)} />}
-        {showCustomerDB && <CustomerDBModal onClose={() => setShowCustomerDB(false)} token={localStorage.getItem('token')} userType={user?.userType} />}
+        {showCustomerDB && (
+          <CustomerDBModal
+            onClose={() => { setShowCustomerDB(false); setCustomerDbInitialId(null); }}
+            token={localStorage.getItem('token')}
+            userType={user?.userType}
+            initialCustomerId={customerDbInitialId}
+          />
+        )}
         {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} token={localStorage.getItem('token')} onEdit={(campaign) => {
           setShowCalendar(false);
           if (campaign._clone) {

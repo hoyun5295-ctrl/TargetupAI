@@ -586,6 +586,38 @@ async function getExistingLogTables(): Promise<Set<string>> {
 }
 
 /**
+ * ★ 2026-08-22 신설 — 고객 기준 조회용: 회사 LIVE 테이블 + **최근 N개월** LOG 테이블.
+ *
+ * `getCompanySmsTablesWithLogs`는 당월·전월 2개월만 붙인다(캠페인 조회는 그 기간이면 충분하다).
+ * 고객 360 타임라인은 한 사람의 지난 이력을 보는 화면이라 더 거슬러 올라가야 한다.
+ * 기존 함수는 손대지 않는다 — 소비처 10곳이 2개월 전제로 돌고 있다.
+ *
+ * ⛔ 실존하는 LOG 테이블만 붙인다(`getExistingLogTables`). 없는 테이블을 UNION에 넣으면 쿼리 전체가 죽는다.
+ * @param months 1~24. 당월 포함해 과거로 N개월.
+ */
+export async function getCompanySmsTablesWithLogsRange(companyId: string, months: number): Promise<string[]> {
+  const span = Math.min(Math.max(Math.floor(months) || 1, 1), 24);
+  const liveTables = await getCompanyAllLiveSmsTables(companyId);
+  const existingLogs = await getExistingLogTables();
+
+  const now = new Date();
+  const yms: string[] = [];
+  for (let i = 0; i < span; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    yms.push(`${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+
+  const all = [...liveTables];
+  for (const live of liveTables) {
+    for (const ym of yms) {
+      const logTable = `${live}_${ym}`;
+      if (existingLogs.has(logTable)) all.push(logTable);
+    }
+  }
+  return all;
+}
+
+/**
  * ★ 슈퍼관리자 전역 조회용 — 전체 LIVE 테이블 + 전체 LOG 테이블
  * 회사/유저 구분 없이 모든 SMSQ_SEND* 테이블(LIVE+LOG)을 반환한다.
  * admin.ts의 sms-detail 등 어드민 범위 조회에서 사용.

@@ -31,6 +31,8 @@ interface DashboardHeaderProps {
   //   클릭 시 Dashboard.tsx에서 isBetaAccessAllowed 게이팅:
   //   ENTERPRISE/BUSINESS = /ai-operator 진입 / 그 외 = BetaFeatureModal 표시.
   onAiOperatorClick?: () => void;
+  /** ★ 2026-08-22 고객 메뉴 — 고객 목록·360 모달을 연다. 없으면 메뉴를 그리지 않는다 */
+  onCustomers?: () => void;
 }
 
 // ★ D222+ Phase 1 (2026-05-27): AI Operator 메뉴 제거. 2026-07-05 매뉴얼 메뉴 → 푸터 이동(Dashboard.tsx).
@@ -77,6 +79,7 @@ export default function DashboardHeader({
   onSubscriptionLocked,
   advancedAccess,
   onAiOperatorClick,
+  onCustomers,
 }: DashboardHeaderProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -115,6 +118,12 @@ export default function DashboardHeader({
       color: 'green',
       path: '/kakao-rcs',
     },
+    // ★ 2026-08-22 '고객' 메뉴 신설 — 고객 360 타임라인 진입(설계서 §3-5).
+    //   그전에는 대시보드 "DB 현황" 카드의 작은 상세보기 링크뿐이라, 발송 메뉴만 있고 고객이 없는 구조였다.
+    //   직접발송·발송결과와 같은 규칙으로 **모달을 연다**(페이지 전환 아님).
+    ...(onCustomers
+      ? [{ label: '고객', onClick: onCustomers, color: 'green' as MenuColor, path: '/' }]
+      : []),
     { label: '직접발송', onClick: onDirectSend, color: 'green', path: '/' },
     // ★ D162-4 (2026-05-15) 2차: Harold님 명시 정합 — DashboardHeader 메뉴에서 '알림톡 발송' 제거.
     //   직접발송/직접타겟발송 모달 헤더 안에서 알림톡 모달 진입 (카카오 노란색 버튼). 메뉴 분리 시 사용자 혼란 차단.
