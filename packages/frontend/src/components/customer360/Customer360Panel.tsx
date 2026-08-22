@@ -55,6 +55,9 @@ interface Props {
   onOpenCampaign?: (campaignId: string) => void;
 }
 
+/** 읽기 폭 — 목록이 접히면 패널이 1,000px을 넘게 되는데, 줄이 그만큼 길면 오히려 읽기 나쁘다 */
+const WRAP = 'w-full max-w-[880px]';
+
 const PHONE_FMT = (p: string | null | undefined) => {
   const v = String(p || '').replace(/[^0-9]/g, '');
   if (v.length === 11) return `${v.slice(0, 3)}-${v.slice(3, 7)}-${v.slice(7)}`;
@@ -144,8 +147,9 @@ export default function Customer360Panel({
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-white">
-      {/* 헤더 */}
-      <div className="shrink-0 px-5 py-4 border-b border-neutral-200">
+      {/* 헤더 — 넓은 화면에서 줄이 끝까지 퍼지지 않게 읽기 폭을 잡는다(WRAP) */}
+      <div className="shrink-0 px-5 sm:px-6 py-4 border-b border-neutral-200">
+        <div className={WRAP}>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -201,6 +205,7 @@ export default function Customer360Panel({
             </p>
           </div>
         </div>
+        </div>
       </div>
 
       {/* 기본 정보(접이식) — 기존 필드 표를 없애지 않는다 */}
@@ -209,29 +214,31 @@ export default function Customer360Panel({
           <button
             type="button"
             onClick={() => setBasicOpen((v) => !v)}
-            className="w-full px-5 py-2.5 flex items-center gap-1.5 text-[13px] font-medium text-neutral-600 transition hover:bg-neutral-50"
+            className="w-full px-5 sm:px-6 py-2.5 flex items-center gap-1.5 text-[13px] font-medium text-neutral-600 transition hover:bg-neutral-50"
           >
             {basicOpen ? <ChevronDown className="w-4 h-4 text-neutral-400" /> : <ChevronRight className="w-4 h-4 text-neutral-400" />}
             기본 정보
           </button>
-          {basicOpen && <div className="px-5 pb-4 max-h-[280px] overflow-y-auto">{basicInfo}</div>}
+          {basicOpen && <div className="px-5 sm:px-6 pb-4 max-h-[280px] overflow-y-auto"><div className={WRAP}>{basicInfo}</div></div>}
         </div>
       )}
 
-      {/* 필터 칩 */}
-      <div className="shrink-0 px-5 py-2.5 border-b border-neutral-200 flex items-center gap-1 overflow-x-auto">
-        <button type="button" onClick={() => setActive(new Set())} className={active.size === 0 ? CUI_CHIP_ON : CUI_CHIP_OFF}>
-          전체
-        </button>
-        {FILTER_KINDS.map((k) => (
-          <button key={k} type="button" onClick={() => toggleKind(k)} className={active.has(k) ? CUI_CHIP_ON : CUI_CHIP_OFF}>
-            {KIND_STYLE[k].label}
+      {/* 필터 칩 — 좁으면 줄바꿈한다(가로 스크롤에 갇히면 뒤쪽 칩을 못 찾는다) */}
+      <div className="shrink-0 px-5 sm:px-6 py-2.5 border-b border-neutral-200">
+        <div className={`${WRAP} flex items-center gap-1 flex-wrap`}>
+          <button type="button" onClick={() => setActive(new Set())} className={active.size === 0 ? CUI_CHIP_ON : CUI_CHIP_OFF}>
+            전체
           </button>
-        ))}
+          {FILTER_KINDS.map((k) => (
+            <button key={k} type="button" onClick={() => toggleKind(k)} className={active.has(k) ? CUI_CHIP_ON : CUI_CHIP_OFF}>
+              {KIND_STYLE[k].label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* 타임라인 */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
+      <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-4"><div className={WRAP}>
         {loading && data == null ? (
           <div className="py-16 grid place-items-center gap-2.5 text-[13px] text-neutral-500">
             <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
@@ -348,7 +355,7 @@ export default function Customer360Panel({
             </p>
           </div>
         )}
-      </div>
+      </div></div>
     </div>
   );
 }

@@ -40,7 +40,8 @@ import { query } from '../config/database';
 
 export type FeatureKey =
   | 'basic_send'        // 직접발송/수신거부/발송결과/예약(직접)  — FREE 포함 전 플랜 허용
-  | 'customer_db'       // 한줄로 고객DB (업로드·관리·필터·조회)  — STARTER+
+  | 'customer_db'       // 한줄로 고객DB **적재**(sync·upload·단건·일괄) — 2026-08-14 잠금 폐지, 전 플랜 허용
+  | 'customer_db_view'  // 한줄로 고객DB **조회 화면**(목록·고객 360)     — STARTER+ (★2026-08-22 신설)
   | 'target_send'       // 직접타겟발송 (필터로 추출 후 발송)      — STARTER+
   | 'ai_mapping'        // 엑셀 업로드 AI 자동매핑                — STARTER+
   | 'spam_filter'       // 스팸필터 수동 테스트                    — STARTER+
@@ -337,9 +338,18 @@ export function canUseFeature(ctx: PlanContext, key: FeatureKey): FeatureCheckRe
       return { allowed: true };
 
     case 'customer_db':
-      // ★ 2026-08-14: 고객 DB 잠금 폐지 — 미가입(FREE) 포함 전 플랜 허용. 근거·재발 경위 = 파일 상단 주석.
+      // ★ 2026-08-14: 고객 DB **적재** 잠금 폐지 — 미가입(FREE) 포함 전 플랜 허용. 근거·재발 경위 = 파일 상단 주석.
       //   헤더의 허용 표는 처음부터 "FREE : ... 고객DB"였는데 이 분기만 플래그를 보고 있어 서로 어긋나 있었다.
+      //   ⛔ 되살리지 마라 — 이 분기가 막히면 싱크·업로드가 403으로 끊긴다(아난티 96,903건 유실).
       return { allowed: true };
+
+    case 'customer_db_view':
+      // ★ 2026-08-22 (Harold 지시) 조회 **화면** 전용 축 — "요금제를 안 쓰는 곳에 고객 화면을 줄 이유가 없다".
+      //   ⛔ 위 `customer_db`(적재)와 **다른 키다.** 적재는 계속 전 플랜 허용이라 싱크·업로드는 영향이 없다.
+      //   여기를 적재 경로에 쓰면 0814 사고가 그대로 재발한다 — 소비처는 조회 API로만 한정한다.
+      return ctx.features.customer_db_enabled
+        ? { allowed: true }
+        : { allowed: false, errorMsg: '고객 DB 조회는 스타터 요금제부터 이용 가능합니다.', errorCode: 'PLAN_FEATURE_LOCKED' };
 
     case 'target_send':
       return ctx.features.target_send_enabled

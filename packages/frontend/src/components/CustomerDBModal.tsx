@@ -2,7 +2,9 @@
  * CustomerDBModal — 고객 목록 + 고객 360 타임라인
  *
  * ★ 2026-08-22 풀스크린 작업면으로 확장(Harold 확정: 페이지 신설 대신 이 모달을 키운다).
- *   좌 = 목록·필터(조회 로직 무변경) · 우 = `Customer360Panel`. 진입 = 대시보드 "상세보기" · 헤더 "고객" 메뉴 · `?customer=<id>`.
+ *   목록·필터는 **전체 폭**을 쓰고, 고객을 고르면 `Customer360Modal`이 그 위에 뜬다(조회 로직 무변경).
+ *   진입 = 대시보드 "DB 현황" 카드의 상세보기 · `?customer=<id>`. **헤더 메뉴는 두지 않는다**(0822 Harold: 헤더가 이미 길다).
+ *   요금제 게이트는 진입점이 소유한다 — `Dashboard.openCustomerDb()` 한 곳(`customer_db_enabled`, STARTER+).
  *   표면은 콘솔 톤(`CUI_*`)으로 올렸고, 옛 규격에서 함께 고친 것 셋:
  *     ①boolean 컬럼이 `true`/`false` 원문으로 보이던 것 → 동의·거부 칩
  *     ②"전체 삭제"가 다운로드 옆 주 동선에 있던 것 → 관리자 전용 `⋯` 메뉴 뒤 + 공용 확인 셸
@@ -13,7 +15,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Users, Download, MoreHorizontal, X, Search, RotateCcw, ChevronLeft, ChevronRight, Loader2, AlertTriangle } from 'lucide-react';
 import { formatDate, formatPreviewValue, formatPhoneNumber, compactTimestamp, formatIfIsoDate } from '../utils/formatDate';
 import { useToast } from './ToastProvider';
-import Customer360Panel from './customer360/Customer360Panel';
+import Customer360Modal from './customer360/Customer360Modal';
 import ConfirmDialogShell from './shared/ConfirmDialogShell';
 import {
   CUI_MODAL_SCRIM, CUI_MODAL, CUI_MODAL_HEAD, CUI_MODAL_TITLE, CUI_MODAL_DESC, CUI_MODAL_CLOSE,
@@ -533,7 +535,10 @@ export default function CustomerDBModal({ onClose, token, userType, initialCusto
 
         {/* ===== 필터 ===== */}
         <div className="shrink-0 px-6 py-3 border-b border-neutral-200 space-y-2">
+          {/* ⛔ CUI_SELECT·CUI_INPUT은 `w-full`을 갖는다 — 폭은 **래퍼 div**로 잡는다.
+              뒤에 `w-auto`를 붙여도 Tailwind 출력 순서상 `w-full`이 이겨서 전폭이 된다(2026-08-22 실측). */}
           <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="w-[150px] shrink-0">
             <select value={dynFilterField} onChange={(e) => {
               const newField = e.target.value;
               setDynFilterField(newField);
@@ -545,46 +550,55 @@ export default function CustomerDBModal({ onClose, token, userType, initialCusto
               } else {
                 setDynFilterOp('contains');
               }
-            }} className={`${CUI_SELECT} w-auto min-w-[140px]`}>
+            }} className={CUI_SELECT}>
               <option value="">항목 고르기</option>
               {/* ★ D88: sms_opt_in은 전용 필터 버튼이 있으므로 중복 제외 */}
               {fieldColumns.filter((f: any) => f.field_key !== 'sms_opt_in').map((f: any) => (
                 <option key={f.field_key} value={f.field_key}>{f.field_label || f.display_name || f.field_key}</option>
               ))}
             </select>
+            </div>
 
             {/* 연산자 — 숫자·날짜 항목만(문자열은 자동 포함검색) */}
             {dynFilterField && isNumericOrDateField(dynFilterField) && (
-              <select value={dynFilterOp} onChange={(e) => setDynFilterOp(e.target.value)} className={`${CUI_SELECT} w-auto min-w-[92px]`}>
-                {getOperatorsForField(dynFilterField).map(op => (
-                  <option key={op.v} value={op.v}>{op.l}</option>
-                ))}
-              </select>
+              <div className="w-[96px] shrink-0">
+                <select value={dynFilterOp} onChange={(e) => setDynFilterOp(e.target.value)} className={CUI_SELECT}>
+                  {getOperatorsForField(dynFilterField).map(op => (
+                    <option key={op.v} value={op.v}>{op.l}</option>
+                  ))}
+                </select>
+              </div>
             )}
 
             {dynFilterField && (
               hasDropdownOptions(dynFilterField) ? (
-                <select value={dynFilterValue} onChange={(e) => setDynFilterValue(e.target.value)} className={`${CUI_SELECT} w-auto min-w-[120px]`}>
-                  <option value="">값 고르기</option>
-                  {filterOptions[dynFilterField].map(v => <option key={v} value={v}>{v}</option>)}
-                </select>
+                <div className="w-[140px] shrink-0">
+                  <select value={dynFilterValue} onChange={(e) => setDynFilterValue(e.target.value)} className={CUI_SELECT}>
+                    <option value="">값 고르기</option>
+                    {filterOptions[dynFilterField].map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                </div>
               ) : (
-                <input type={isDateField(dynFilterField) ? 'date' : 'text'}
-                  value={dynFilterValue} onChange={(e) => setDynFilterValue(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddFilter(); }}
-                  placeholder={isDateField(dynFilterField) ? '' : isNumericOrDateField(dynFilterField) ? '값' : '검색어'}
-                  className={`${CUI_INPUT} w-40`} />
+                <div className="w-[160px] shrink-0">
+                  <input type={isDateField(dynFilterField) ? 'date' : 'text'}
+                    value={dynFilterValue} onChange={(e) => setDynFilterValue(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddFilter(); }}
+                    placeholder={isDateField(dynFilterField) ? '' : isNumericOrDateField(dynFilterField) ? '값' : '검색어'}
+                    className={CUI_INPUT} />
+                </div>
               )
             )}
 
             {dynFilterField && dynFilterOp === 'between' && (
               <>
                 <span className="text-[12px] text-neutral-400">~</span>
-                <input type={isDateField(dynFilterField) ? 'date' : 'text'}
-                  value={dynFilterValueMax} onChange={(e) => setDynFilterValueMax(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddFilter(); }}
-                  placeholder={isDateField(dynFilterField) ? '' : '최대'}
-                  className={`${CUI_INPUT} w-32`} />
+                <div className="w-[130px] shrink-0">
+                  <input type={isDateField(dynFilterField) ? 'date' : 'text'}
+                    value={dynFilterValueMax} onChange={(e) => setDynFilterValueMax(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddFilter(); }}
+                    placeholder={isDateField(dynFilterField) ? '' : '최대'}
+                    className={CUI_INPUT} />
+                </div>
               </>
             )}
 
@@ -608,11 +622,12 @@ export default function CustomerDBModal({ onClose, token, userType, initialCusto
               <>
                 <span className="w-px h-5 bg-neutral-200 mx-0.5" />
                 <span className="text-[12px] font-medium text-neutral-500">브랜드</span>
-                <select value={filterStoreCode} onChange={(e) => handleSpecialFilterChange('storeCode', e.target.value)}
-                  className={`${CUI_SELECT} w-auto min-w-[110px]`}>
-                  <option value="all">전체</option>
-                  {storeCodeOptions.map(sc => <option key={sc} value={sc}>{sc}</option>)}
-                </select>
+                <div className="w-[130px] shrink-0">
+                  <select value={filterStoreCode} onChange={(e) => handleSpecialFilterChange('storeCode', e.target.value)} className={CUI_SELECT}>
+                    <option value="all">전체</option>
+                    {storeCodeOptions.map(sc => <option key={sc} value={sc}>{sc}</option>)}
+                  </select>
+                </div>
               </>
             )}
 
@@ -647,10 +662,11 @@ export default function CustomerDBModal({ onClose, token, userType, initialCusto
           )}
         </div>
 
-        {/* ===== 목록 + 360 패널 ===== */}
+        {/* ===== 목록 =====
+            ⛔ 고객을 고르면 **별도 모달**(Customer360Modal)이 뜬다. 목록은 전체 폭을 그대로 쓴다.
+            옆에 패널을 붙이면 표가 잘리고, 목록을 접으면 여닫는 동작이 늘어난다(2026-08-22 Harold 확정). */}
         <div className="flex-1 min-h-0 flex">
-          {/* 목록 */}
-          <div className={`min-w-0 flex flex-col ${selectedCustomerId ? 'hidden md:flex md:flex-1' : 'flex-1'}`}>
+          <div className="min-w-0 flex flex-col flex-1">
             <div className="flex-1 min-h-0 overflow-auto">
               <table className="w-full" style={{ minWidth: `${Math.max(700, 220 + listColumns.length * 120)}px` }}>
                 <thead className={`${CUI_THEAD} sticky top-0 z-10`}>
@@ -752,20 +768,18 @@ export default function CustomerDBModal({ onClose, token, userType, initialCusto
             )}
           </div>
 
-          {/* 고객 360 — 데스크톱은 우측 고정, 모바일은 목록을 덮는다 */}
-          {selectedCustomerId && (
-            <div className="w-full md:w-[440px] shrink-0 md:border-l border-neutral-200 min-h-0">
-              <Customer360Panel
-                customerId={selectedCustomerId}
-                fallbackName={selectedRow?.name || null}
-                fallbackPhone={selectedRow?.phone || null}
-                basicInfo={basicInfoBlock}
-                onClose={() => { setSelectedCustomerId(null); setSelectedCustomer(null); setSelectedRow(null); }}
-              />
-            </div>
-          )}
         </div>
       </div>
+
+      {/* 고객 360 — 목록 위에 자기 모달로 뜬다 */}
+      <Customer360Modal
+        show={!!selectedCustomerId}
+        customerId={selectedCustomerId}
+        fallbackName={selectedRow?.name || null}
+        fallbackPhone={selectedRow?.phone || null}
+        basicInfo={basicInfoBlock}
+        onClose={() => { setSelectedCustomerId(null); setSelectedCustomer(null); setSelectedRow(null); }}
+      />
 
       {/* ★ D144 P5: 고객 DB 전체 삭제 — 회사명 일치 확인. 셸은 발송 계열 공용(포털·ESC·처리 중 잠금) */}
       <ConfirmDialogShell

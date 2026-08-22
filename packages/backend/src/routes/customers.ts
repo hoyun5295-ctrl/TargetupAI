@@ -1699,9 +1699,12 @@ router.get('/:id/purchases', async (req: Request, res: Response) => {
  *
  * 판정·조립은 전부 CT(`utils/customer-timeline.ts`)가 소유한다. 여기는 파라미터 검증과 전달만.
  * ⛔ `/:id`보다 **위에** 있어야 한다 — Express는 먼저 맞는 경로를 쓴다.
- * 읽기 전용이라 크레딧·요금제 게이트는 걸지 않는다(회사 범위 격리는 CT가 companyId로 한다).
+ * ⛔ 요금제 게이트 = **`customer_db_view`**(STARTER+, 조회 화면 전용). 화면만 막으면 API는 열린 채라 가림막이 된다.
+ *   적재 키 `customer_db`는 2026-08-14에 전 플랜 개방됐고 **그대로 둔다**(막으면 싱크·업로드가 403으로 끊긴다).
+ *   기존 `/api/customers` 나머지 경로에는 게이트가 없다. 거기는 직접 타겟 발송 추출·대시보드 통계·여정이
+ *   함께 쓰고 있어 통째로 막으면 FREE 사용자의 발송이 죽는다 — 엔드포인트별 전수 확인이 필요한 **별건**이다.
  */
-router.get('/:id/timeline', async (req: Request, res: Response) => {
+router.get('/:id/timeline', requirePlanFeature('customer_db_view'), async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });

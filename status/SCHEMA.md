@@ -1587,6 +1587,7 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 > 신규 라인 테이블은 `CREATE TABLE SMSQ_SEND_N LIKE SMSQ_SEND_13` (root 실행 — smsuser는 CREATE 권한 없음. 권한은 `smsdb.*` 스키마 단위라 자동 상속).
 > **★ DDL 접속(2026-08-22 재확인)** — `docker exec -it targetup-mysql mysql -uroot -p smsdb`. `smsuser`로는 `ERROR 1142 ALTER command denied`가 난다(조회는 smsuser로 된다). 이 표의 DDL을 psql에 넣으면 `syntax error at or near "ALGORITHM"` — **MySQL과 PG를 헷갈리지 않는다**.
 > **★ 2026-08-22 실측(Harold 실행, 고객 360 설계 §5-R)** — `SMSQ_SEND_%` 총 **103개**. 월별 log `SMSQ_SEND_N_YYYYMM`은 **우리 코드가 자동 생성**: `utils/sms-queue.ts ensureMonthlyLogTables()`가 프로세스 시작 시 당월·다음달을 `CREATE TABLE IF NOT EXISTS <log> LIKE <live>`로 만든다(대상 = env `SMS_TABLES`의 1~11. 13~15는 log 없음). **`LIKE`라 live에 건 인덱스는 다음 달 log부터 자동 상속**, 이미 있는 log에는 별도 DDL. 실데이터 2026-03~08, 최대 `SMSQ_SEND_8_202606` 846,873행(4~9번 라인 5~8월 각 30만~85만, 전체 약 1,400만). `dest_no`는 하이픈 없는 숫자만(0/839,349) · **`dest_no` 인덱스 없음**(`WHERE dest_no=?` EXPLAIN = type ALL + filesort, COUNT 1회 20초). 고객별 발송 조회는 `(dest_no, sendreq_time)` 인덱스 전제.
+> **★ 2026-08-22 `idx_dest_sendreq (dest_no, sendreq_time)` 103개 전 테이블 적용 완료**(Harold 실행 · root). 재측정 = `type=ref` · `rows=1` · `Backward index scan; Using index`(covering + filesort 제거). 최장 소요 37.7초(`SMSQ_SEND_9_202606`), `LOCK=NONE`이라 무중단. 다음 달 log는 `ensureMonthlyLogTables()`의 `LIKE`로 자동 상속. 되돌리기 = `DROP INDEX idx_dest_sendreq`. 경위 = 고객 360 설계서 §6-D-R.
 
 | 컬럼 | 타입 | 설명 |
 |------|------|------|

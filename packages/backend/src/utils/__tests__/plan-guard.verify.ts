@@ -131,6 +131,20 @@ ok('customer_db — FREE(미가입) 허용', () =>
   assert.strictEqual(canUseFeature(mkCtx('FREE'), 'customer_db').allowed, true));
 ok('customer_db — 플래그 false여도 허용', () =>
   assert.strictEqual(canUseFeature(mkCtx('STARTER', { customer_db_enabled: false }), 'customer_db').allowed, true));
+// ★ 2026-08-22 조회 화면 전용 축 — 적재(customer_db)와 **다른 키**다.
+//   이 둘이 같은 판정이 되면 둘 중 하나가 틀린 것이다: 적재를 막으면 싱크가 403으로 끊기고(0814 아난티),
+//   조회를 열면 요금제를 안 쓰는 곳에 고객 화면이 열린다(Harold 0822).
+ok('customer_db_view — 플래그 true면 허용', () =>
+  assert.strictEqual(canUseFeature(mkCtx('STARTER', { customer_db_enabled: true }), 'customer_db_view').allowed, true));
+ok('customer_db_view — FREE(미가입) 차단', () =>
+  assert.strictEqual(canUseFeature(mkCtx('FREE'), 'customer_db_view').allowed, false));
+ok('customer_db_view — 플래그 false면 차단', () =>
+  assert.strictEqual(canUseFeature(mkCtx('STARTER', { customer_db_enabled: false }), 'customer_db_view').allowed, false));
+ok('적재는 열려 있고 조회만 막힌다 (두 키가 갈린다)', () => {
+  const ctx = mkCtx('STARTER', { customer_db_enabled: false });
+  assert.strictEqual(canUseFeature(ctx, 'customer_db').allowed, true);
+  assert.strictEqual(canUseFeature(ctx, 'customer_db_view').allowed, false);
+});
 ok('ai_mapping 플래그 false → 차단 (STARTER+ 유지)', () =>
   assert.strictEqual(canUseFeature(mkCtx('FREE'), 'ai_mapping').allowed, false));
 

@@ -1009,6 +1009,24 @@ export default function Dashboard() {
     setShowFileUpload(true);
   };
 
+  /**
+   * ★ 2026-08-22 고객 DB 조회 진입 — 판정은 한 곳에서만 한다.
+   * 진입점이 둘(카드 상세보기 · `?customer=` 딥링크)이라 각자 판정하면 한쪽이 빠진다.
+   * 기준 = `customer_db_enabled`(STARTER+) + 구독 잠금. 같은 카드의 업로드 버튼과 같은 기준이다.
+   */
+  const openCustomerDb = (customerId?: string | null) => {
+    if (isSubscriptionLocked) { setShowSubscriptionLock(true); return false; }
+    if (isCustomerDbLocked) {
+      setPlanUpgradeFeature('고객 DB');
+      setPlanUpgradeRequired('스타터');
+      setShowPlanUpgradeModal(true);
+      return false;
+    }
+    setCustomerDbInitialId(customerId || null);
+    setShowCustomerDB(true);
+    return true;
+  };
+
   // ★ 2026-06-25: ?upload=1 진입(게이트 "올리러 가기" 동선) 시 고객 DB 업로드 모달 자동 오픈 + 파라미터 제거(새로고침 재오픈 방지)
   // ★ 2026-07-10: ?results=1 진입(AI Operator "발송 결과 보기" 동선) 시 발송결과 자동 오픈 — 헤더 메뉴 클릭과 동일 동작
   useEffect(() => {
@@ -1026,8 +1044,7 @@ export default function Dashboard() {
     //   파라미터는 즉시 지운다(새로고침 때 다시 열리지 않게) — upload·results와 같은 규약.
     const customerParam = searchParams.get('customer');
     if (customerParam) {
-      setCustomerDbInitialId(customerParam);
-      setShowCustomerDB(true);
+      openCustomerDb(customerParam);
       searchParams.delete('customer');
       setSearchParams(searchParams, { replace: true });
     }
@@ -2271,7 +2288,6 @@ const campaignData = {
         department={(user as any)?.department}
         isCompanyAdmin={user?.userType === 'company_admin'}
         advancedAccess={!!planInfo?.advanced_access_enabled}
-        onCustomers={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } setShowCustomerDB(true); }}
         // ★ D220+ Task 8 (2026-05-27): 세그먼트 메뉴 잠금 게이팅 (ai_messaging — BASIC+)
         aiMessagingEnabled={planInfo?.ai_messaging_enabled}
         onAiOperatorClick={async () => {
@@ -2545,7 +2561,9 @@ const campaignData = {
                       REAL-TIME
                     </span>
                   </div>
-                  <button onClick={() => isSubscriptionLocked ? setShowSubscriptionLock(true) : setShowCustomerDB(true)} className="group inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-emerald-700 transition-colors">
+                  {/* ★ 2026-08-22 요금제 게이트 — 고객 DB 조회는 STARTER+(`customer_db_enabled`).
+                      그전에는 구독 잠금만 봐서 FREE도 열렸다. 같은 카드의 "고객 DB 업로드"는 이미 이 기준을 쓰고 있었다(일관성 정정). */}
+                  <button onClick={() => openCustomerDb()} className="group inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-emerald-700 transition-colors">
                     상세보기
                     <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                   </button>
