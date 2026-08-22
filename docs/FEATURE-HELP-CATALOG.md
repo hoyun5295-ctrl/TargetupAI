@@ -188,7 +188,33 @@ export type PublicFeatureJob = Omit<FeatureJob, 'sourceFile' | 'status' | 'stubU
 
 ## 9) 상태·잔여
 
-- 2026-08-22 **설계 확정(브레인스토밍 수렴 + Harold 지시 반영). 구현 착수 전.**
+- 2026-08-22 설계 확정(브레인스토밍 수렴 + Harold 지시 반영) → **같은 날 1단계 구현 완료 · 배포 대기.**
+  - 백엔드: `content/feature-catalog.ts`(ready 12 + stub 27 · `JOB_GROUPS` 7 · `NOT_DOCUMENTED_ROUTES`) · `utils/help-answer.ts`(매칭·프롬프트·출구 4겹·소한도·모델 호출) · `routes/help.ts`(`GET /context` · `GET /catalog` · `GET /catalog/:id` · `POST /ask` · `POST /questions`) · `app.ts` 마운트.
+  - 프론트: `components/help/`(HelpDock · HelpPanel · HelpJobCard · help-api · help-ui) · `lib/surface-flags.ts` · `pages/GuidePage.tsx`(`/guide` · `/guide/:jobId`) · App.tsx(lazy 리터럴 + 마운트 + 라우트) · ToastProvider·ConfirmModal·CreditConfirmModal·CustomerDataRequiredModal에 표시 속성 1줄씩 · 대시보드 푸터 링크 → `/guide` · 온보딩 마법사 `?step=`.
+  - 게이트 결과: 백엔드 tsc 0 · 프론트 tsc 0 · vitest 193파일 2,930건(신규 `feature-catalog-invariants` 8 · `help-answer` 9 · `credit-label-parity` 2) · 검출기 지적 1건(인디고 면 위 회색 글자) 정정 후 0 · 모델명·dialog·이모지·줄표 0(기존 줄표 불변식이 프롬프트 문자열의 줄표 리터럴을 잡아 정정).
+  - 구현 중 정정: 회의가 낸 매칭(키워드 전체 일치만)은 "문자 어떻게 보내요"처럼 활용형을 못 잡았다 → 낱말 + 어간(끝 글자 제외) 점수로 바꿈. 카탈로그 문장에서 혜택 단어(할인·쿠폰)를 제거 — 모델이 그대로 따라 쓰면 출구 검사에 걸려 답이 버려진다.
+  - **배포 전 DDL 1건(Harold, 서버 psql)**: 아래 §9-D.
+- 남은 것 = §6-1 인수 조건(백지 계정 리허설 1일 · 375px 실측) · §7 Harold 답 · 봇 패널 톤 육안 판정(라이트 인디고 1벌로 냈다. 다크 화면 위에서 어색하면 그때 2벌째).
+
+### 9-D) 배포 전 실행 DDL (Harold · 서버 psql)
+
+```sql
+CREATE TABLE IF NOT EXISTS help_questions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  user_id uuid NULL,
+  path varchar(200) NULL,
+  question varchar(240) NOT NULL,
+  matched_ids text[] NOT NULL DEFAULT '{}',
+  answered boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_help_questions_company_created ON help_questions (company_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_help_questions_unanswered ON help_questions (answered, created_at DESC) WHERE answered = false;
+```
+
+- `user_id`에 FK를 걸지 않는다(0728 `23503` 원칙 — 계정이 삭제돼도 질문 기록은 남는다). 테이블이 없어도 답변은 나가고 "문의 남기기"만 503(`DB_MIGRATION_PENDING`).
+- 확인 SQL: `SELECT column_name FROM information_schema.columns WHERE table_name='help_questions' ORDER BY ordinal_position;` (8행)
 - **선행 완료(2026-08-22)**: 고객 화면 내부 용어 노출 14건 정정(테이블명 13 + 내부 코드명 1) · 크레딧 라벨 1건 + 1:1 계약 테스트 신설. 게이트 방식이 굴러간다는 첫 증거를 확보했다.
 - **별건(미착수)**: 청구·회사·관리 라우트의 같은 문구 24건. 슈퍼관리자 화면이 섞여 있어 고객 노출 여부 판정이 먼저다.
 - 다음 = §6 1단계 구현 → §6-1 인수 조건 3개.

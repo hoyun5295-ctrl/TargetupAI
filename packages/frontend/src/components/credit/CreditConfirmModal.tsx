@@ -8,6 +8,7 @@
  */
 import { useState, useEffect, type ReactNode } from 'react';
 import { Sparkles, X, AlertTriangle } from 'lucide-react';
+import { useBodyFlag } from '../../lib/surface-flags';
 import { CONFIRM_CREDIT_COSTS, CREDIT_SOURCE_LABELS } from '../../constants/credit';
 
 interface Props {
@@ -30,6 +31,8 @@ interface Props {
 }
 
 export default function CreditConfirmModal({ open, source, quantity, costOverride, description, extraContent, onConfirm, onCancel }: Props) {
+  // ★ 2026-08-22 인터럽트 표시 — 도움말 런처가 크레딧 확인창을 덮지 않게 숨는다(조기 return 위)
+  useBodyFlag('data-interrupt-open', open);
   const unitCost = CONFIRM_CREDIT_COSTS[source] ?? 0;
   const qty = Math.max(1, Math.floor(Number(quantity)) || 1);
   const cost = Number.isFinite(Number(costOverride)) ? Number(costOverride) : unitCost * qty;

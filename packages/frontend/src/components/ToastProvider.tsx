@@ -19,6 +19,7 @@
 
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { CheckCircle2, AlertCircle, Info, AlertTriangle, X } from 'lucide-react';
+import { useBodyFlag } from '../lib/surface-flags';
 import { CONFIRM_CREDIT_COSTS, CREDIT_SOURCE_LABELS } from '../constants/credit';
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
@@ -50,6 +51,8 @@ const TYPE_CONFIG: Record<ToastType, { icon: typeof CheckCircle2; accent: string
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  // ★ 2026-08-22 도움말 런처가 토스트와 같은 우하단을 쓴다 — 토스트가 떠 있는 동안 런처가 비켜선다
+  useBodyFlag('data-toast-open', toasts.length > 0);
 
   const remove = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));

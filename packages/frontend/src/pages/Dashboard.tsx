@@ -3999,7 +3999,8 @@ const campaignData = {
 
       {/* 하단 링크 — 2026-07-05 (Harold 명시): 매뉴얼 링크 헤더 → 푸터 복귀 (헤더 간소화, 매뉴얼 강조 제거) */}
       <div className="max-w-7xl mx-auto px-4 py-6 mt-8 border-t border-gray-200 text-center text-xs text-gray-400 space-x-3">
-        <a href="/manual/manual.html" target="_blank" className="hover:text-gray-600 transition">매뉴얼</a>
+        {/* ★ 2026-08-22 옛 정적 매뉴얼(3개월 정지) → 기능 안내(/guide, 도움말 봇과 같은 원장) */}
+        <a href="/guide" className="hover:text-gray-600 transition">기능 안내</a>
         <span>|</span>
         <a href="/privacy" target="_blank" className="hover:text-gray-600 transition">개인정보처리방침</a>
         <span>|</span>

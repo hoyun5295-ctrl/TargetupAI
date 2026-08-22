@@ -108,7 +108,9 @@ export default function OnboardingWizardPage() {
       const nextStep = data.state?.completedAt
         ? 7
         : Math.max(1, Math.min(7, Number(data.state?.currentStep || 1)));
-      setActiveStep(nextStep);
+      // ★ 2026-08-22 도움말 봇 딥링크(/onboarding?step=N) — 주소에 단계가 있으면 그 단계를 우선한다
+      const fromUrl = Number(new URLSearchParams(window.location.search).get('step') || 0);
+      setActiveStep(fromUrl >= 1 && fromUrl <= 7 ? fromUrl : nextStep);
     } catch (e: any) {
       setError(e?.message || 'Wizard 상태 조회 실패');
     } finally {

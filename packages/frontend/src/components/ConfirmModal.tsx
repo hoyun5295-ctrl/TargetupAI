@@ -16,6 +16,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useBodyFlag } from '../lib/surface-flags';
 import { X, AlertTriangle, Info, AlertCircle, Check } from 'lucide-react';
 
 export type ConfirmMode = 'default' | 'info' | 'warning' | 'danger';
@@ -80,6 +81,8 @@ export default function ConfirmModal({ state, onClose }: Props) {
   const [running, setRunning] = useState(false);
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
   const open = !!state;
+  // ★ 2026-08-22 인터럽트 표시 — 도움말 런처가 이 창을 덮지 않게 숨는다(조기 return 위)
+  useBodyFlag('data-interrupt-open', open);
   const config = MODE_CONFIG[state?.mode || 'default'];
   const Icon = config.icon;
 

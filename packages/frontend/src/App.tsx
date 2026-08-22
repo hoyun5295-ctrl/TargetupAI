@@ -1,4 +1,7 @@
-import { useEffect, useState, useCallback, createContext, useContext, Suspense } from 'react';
+import { useEffect, useState, useCallback, createContext, useContext, Suspense, lazy } from 'react';
+// ★ 2026-08-22 도움말 봇 — 런처는 정적, 패널은 lazy. **동적 import 리터럴은 이 파일 안에 둔다**(vite 난독화 exclude 4종 중 하나, 0718 경위)
+import HelpDock from './components/help/HelpDock';
+const HelpPanel = lazy(() => import('./components/help/HelpPanel'));
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { ScrollManager } from './lib/scroll-restoration';
 import { useAuthStore, isAgentOnlyCompany } from './stores/authStore';
@@ -30,6 +33,7 @@ const CalendarPage = lazyPage(() => import('./pages/CalendarPage'));
 const Settings = lazyPage(() => import('./pages/Settings'));
 const Unsubscribes = lazyPage(() => import('./pages/Unsubscribes'));
 const PricingPage = lazyPage(() => import('./pages/PricingPage'));
+const GuidePage = lazyPage(() => import('./pages/GuidePage')); // ★ 2026-08-22 기능 안내(/guide) — 도움말 봇과 같은 원장
 const AutoSendPage = lazyPage(() => import('./pages/AutoSendPage'));
 const KakaoRcsPage = lazyPage(() => import('./pages/KakaoRcsPage'));
 const DmBuilderPage = lazyPage(() => import('./pages/DmBuilderPage')); // ★ 모바일 DM 빌더
@@ -649,6 +653,8 @@ function App() {
         <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
         <Route path="/unsubscribes" element={<PrivateRoute><Unsubscribes /></PrivateRoute>} />
         <Route path="/pricing" element={<PrivateRoute><PricingPage /></PrivateRoute>} />
+        <Route path="/guide" element={<PrivateRoute><GuidePage /></PrivateRoute>} />
+        <Route path="/guide/:jobId" element={<PrivateRoute><GuidePage /></PrivateRoute>} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/terms" element={<TermsPage />} />
         {/* ★ 2026-07-03 카페24 앱 실행 랜딩 (심사위원 동선) — 공개, 페이지가 로그인 3분기 판별 */}
@@ -667,6 +673,8 @@ function App() {
       </Routes>
       </Suspense>
       </PageErrorBoundary>
+      {/* ★ 2026-08-22 도움말 봇 — 라우트 Suspense 밖(화면을 옮겨도 대화가 안 사라진다), 세션 가드 안(로그인 상태에서만) */}
+      <HelpDock Panel={HelpPanel} />
       </SessionTimeoutGuard>
       </ToastProvider>
     </BrowserRouter>

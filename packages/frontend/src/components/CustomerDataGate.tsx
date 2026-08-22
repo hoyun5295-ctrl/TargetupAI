@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useBodyFlag } from '../lib/surface-flags';
 import { useNavigate } from 'react-router-dom';
 import { Database, Upload, RefreshCw, X, Sparkles, ArrowRight, Users } from 'lucide-react';
 
@@ -91,6 +92,8 @@ export function CustomerDataRequiredBanner({ className = '' }: { className?: str
 export function CustomerDataRequiredModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const navigate = useNavigate();
   const [shown, setShown] = useState(false);
+  // ★ 2026-08-22 인터럽트 표시 — 도움말 런처가 이 차단창을 덮지 않게 숨는다(조기 return 위)
+  useBodyFlag('data-interrupt-open', open);
 
   useEffect(() => {
     if (!open) { setShown(false); return; }
