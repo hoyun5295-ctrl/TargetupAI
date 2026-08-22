@@ -73,21 +73,23 @@ export default function Customer360Panel({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [active, setActive] = useState<Set<TimelineKind>>(new Set());
+  /**
+   * 종류 필터는 **하나만** 고른다(null = 전체).
+   * ⛔ 처음엔 여러 개를 켜는 토글이었는데, 누를수록 쌓여서 무엇을 보고 있는지 알 수 없게 됐다
+   *   (2026-08-22 Harold "다른 걸 선택하면 그걸로 바로 넘어가야지"). 탭처럼 고른 것 하나만 켠다.
+   */
+  const [active, setActive] = useState<TimelineKind | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [basicOpen, setBasicOpen] = useState(false);
 
   /** 늦게 온 응답이 그 사이 바뀐 고객·필터를 덮지 않게 한다 */
   const reqSeq = useRef(0);
 
-  const kindsParam = useMemo(() => {
-    if (active.size === 0) return '';
-    const set = new Set<TimelineKind>();
-    for (const k of active) {
-      for (const x of (FILTER_EXPAND[k] || [k])) set.add(x);
-    }
-    return Array.from(set).join(',');
-  }, [active]);
+  // 하나를 고르면 짝이 되는 종류까지 함께 본다(DM 열람 → 응답 포함, 발송 → 이메일 포함)
+  const kindsParam = useMemo(
+    () => (active ? (FILTER_EXPAND[active] || [active]).join(',') : ''),
+    [active],
+  );
 
   const load = useCallback(async (before: string | null) => {
     const seq = ++reqSeq.current;
@@ -113,13 +115,10 @@ export default function Customer360Panel({
   }, [customerId, kindsParam]);
 
   useEffect(() => { setExpanded(new Set()); load(null); }, [load]);
-  useEffect(() => { setActive(new Set()); setBasicOpen(false); }, [customerId]);
+  useEffect(() => { setActive(null); setBasicOpen(false); }, [customerId]);
 
-  const toggleKind = (k: TimelineKind) => setActive((prev) => {
-    const next = new Set(prev);
-    if (next.has(k)) next.delete(k); else next.add(k);
-    return next;
-  });
+  /** 같은 칩을 다시 누르면 전체로 돌아온다 */
+  const selectKind = (k: TimelineKind) => setActive((prev) => (prev === k ? null : k));
 
   const toggleExpand = (id: string) => setExpanded((prev) => {
     const next = new Set(prev);
@@ -226,11 +225,11 @@ export default function Customer360Panel({
       {/* 필터 칩 — 좁으면 줄바꿈한다(가로 스크롤에 갇히면 뒤쪽 칩을 못 찾는다) */}
       <div className="shrink-0 px-5 sm:px-6 py-2.5 border-b border-neutral-200">
         <div className={`${WRAP} flex items-center gap-1 flex-wrap`}>
-          <button type="button" onClick={() => setActive(new Set())} className={active.size === 0 ? CUI_CHIP_ON : CUI_CHIP_OFF}>
+          <button type="button" onClick={() => setActive(null)} className={active === null ? CUI_CHIP_ON : CUI_CHIP_OFF}>
             전체
           </button>
           {FILTER_KINDS.map((k) => (
-            <button key={k} type="button" onClick={() => toggleKind(k)} className={active.has(k) ? CUI_CHIP_ON : CUI_CHIP_OFF}>
+            <button key={k} type="button" onClick={() => selectKind(k)} className={active === k ? CUI_CHIP_ON : CUI_CHIP_OFF}>
               {KIND_STYLE[k].label}
             </button>
           ))}
@@ -254,9 +253,9 @@ export default function Customer360Panel({
         ) : events.length === 0 ? (
           <div className="py-14 grid place-items-center text-center">
             <div className={CUI_EMPTY_BADGE}><Clock className="w-5 h-5" strokeWidth={1.6} /></div>
-            <p className={CUI_EMPTY_TITLE}>{active.size > 0 ? '고른 종류의 기록이 없습니다' : '아직 기록이 없습니다'}</p>
+            <p className={CUI_EMPTY_TITLE}>{active ? `${KIND_STYLE[active].label} 기록이 없습니다` : '아직 기록이 없습니다'}</p>
             <p className={CUI_EMPTY_DESC}>
-              {active.size > 0 ? '다른 종류를 골라 보세요' : '메시지를 보내거나 고객이 반응하면 여기에 쌓입니다'}
+              {active ? '위에서 다른 종류를 골라 보세요' : '메시지를 보내거나 고객이 반응하면 여기에 쌓입니다'}
             </p>
           </div>
         ) : (
