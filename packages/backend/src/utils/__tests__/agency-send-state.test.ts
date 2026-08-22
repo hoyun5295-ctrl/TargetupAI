@@ -11,9 +11,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   AGENCY_SEND_STATUSES, canTransition, canCancel, isEditable, needsQueueCancel,
-  validateRequestedAt, checkApproval, isFinalTestDue, isApprovalExpired,
-  isLockStale, lockRecoveryStatus, hasTestRoundsLeft, kstHour,
-  FINAL_TEST_LEAD_MINUTES, MAX_TEST_ROUNDS, MIN_LEAD_MINUTES,
+  validateRequestedAt, checkApproval, isFinalTestDue, isQueueDue, isApprovalExpired, isApprovalCurrent,
+  isLockStale, lockRecoveryStatus, hasTestRoundsLeft, kstHour, requiredLeadMinutes,
+  FINAL_TEST_LEAD_MINUTES, MAX_TEST_ROUNDS, MIN_LEAD_MINUTES, QUEUE_MARGIN_MINUTES,
   type AgencySendStatus,
 } from '../agency-send-state';
 
@@ -22,8 +22,13 @@ const NOW = new Date('2026-08-24T01:00:00Z');
 const minutesLater = (m: number) => new Date(NOW.getTime() + m * 60000);
 
 describe('대행발송 상태 전이', () => {
-  it('승인만으로 큐에 갈 수 없다 — 당일 재검사를 반드시 지난다', () => {
-    expect(canTransition('approved', 'queued')).toBe(false);
+  it('당일 검사를 통과하지 않은 건은 승인만으로 예약되지 않는다', () => {
+    // ★ 2026-08-23 전이표에서 approved → queued를 열었다(재승인 건은 검사를 이미 통과했다).
+    //   불변 2를 지키는 자리는 전이표가 아니라 `final_test_at` 유무를 보는 판정이다.
+    expect(isQueueDue('approved', minutesLater(60), NOW, null)).toBe(false);
+    expect(isFinalTestDue('approved', minutesLater(60), NOW, null)).toBe(true);
+    expect(isQueueDue('approved', minutesLater(60), NOW, minutesLater(-5))).toBe(true);
+    expect(isFinalTestDue('approved', minutesLater(60), NOW, minutesLater(-5))).toBe(false);
     expect(canTransition('reapproval', 'queued')).toBe(false);
     expect(canTransition('approved', 'final_testing')).toBe(true);
     expect(canTransition('final_testing', 'queued')).toBe(true);
@@ -111,6 +116,9 @@ describe('승인 판정', () => {
     const r = checkApproval(late, 2, NOW);
     expect(r.ok).toBe(false);
     expect(r.code).toBe('TOO_LATE');
+    // 경계는 만료 판정과 같은 쪽으로 닫는다 — 딱 그 값이면 승인되지 않는다(승인 직후 만료되는 건을 없앤다)
+    expect(checkApproval({ ...base, requestedAt: minutesLater(FINAL_TEST_LEAD_MINUTES) }, 2, NOW).ok).toBe(false);
+    expect(checkApproval({ ...base, requestedAt: minutesLater(FINAL_TEST_LEAD_MINUTES + 1) }, 2, NOW).ok).toBe(true);
   });
 
   it('승인 대기가 아닌 상태에서는 승인되지 않는다', () => {
@@ -119,22 +127,77 @@ describe('승인 판정', () => {
     }
     expect(checkApproval({ ...base, status: 'reapproval' }, 2, NOW).ok).toBe(true);
   });
+
+  /**
+   * ★ 2026-08-23 §12-2 정정 계약.
+   * 당일 차단으로 `reapproval`이 되는 순간은 **정의상 2시간 미만**이 남은 때다.
+   * 승인에 2시간을 요구하면 그 상태의 승인은 100% 거절되고, 안내 문자만 "다시 승인해 주세요"라고 말한다.
+   * 재승인 건은 검사를 이미 통과했으므로 필요한 것은 예약을 넣을 여유뿐이다.
+   */
+  it('재승인은 2시간이 남지 않아도 승인된다 — 검사를 이미 통과한 문안이다', () => {
+    const reapproval = { ...base, status: 'reapproval' as AgencySendStatus, requestedAt: minutesLater(100) };
+    expect(checkApproval(reapproval, 2, NOW).ok).toBe(true);
+    expect(checkApproval({ ...reapproval, requestedAt: minutesLater(QUEUE_MARGIN_MINUTES + 1) }, 2, NOW).ok).toBe(true);
+    // 예약을 넣을 여유조차 없으면 거절하고 시각을 다시 받는다
+    const tooLate = checkApproval({ ...reapproval, requestedAt: minutesLater(QUEUE_MARGIN_MINUTES - 1) }, 2, NOW);
+    expect(tooLate.ok).toBe(false);
+    expect(tooLate.code).toBe('TOO_LATE');
+  });
+
+  /**
+   * 승인 게이트가 라우트에만 있으면, 워커가 문안을 다듬은 직후 상태 전이가 실패한 경로로
+   * **담당자가 못 본 문장**이 적재까지 간다. 적재 직전에 같은 것을 다시 본다(불변 7).
+   */
+  it('승인은 문안 버전에 묶인다 — 적재 직전에도 같은 판정을 쓴다', () => {
+    expect(isApprovalCurrent(3, 3)).toBe(true);
+    expect(isApprovalCurrent(2, 3)).toBe(false);
+    expect(isApprovalCurrent(null, 3)).toBe(false);   // 승인 흔적이 지워진 건
+    expect(isApprovalCurrent(undefined, 3)).toBe(false);
+    expect(isApprovalCurrent(3, null)).toBe(false);
+  });
+
+  it('필요한 리드타임은 상태가 정한다 — 승인·만료 판정이 같은 값을 쓴다', () => {
+    expect(requiredLeadMinutes('awaiting_approval')).toBe(FINAL_TEST_LEAD_MINUTES);
+    expect(requiredLeadMinutes('reapproval')).toBe(QUEUE_MARGIN_MINUTES);
+    expect(requiredLeadMinutes('approved')).toBe(QUEUE_MARGIN_MINUTES);
+  });
 });
 
 describe('워커 픽업 판정', () => {
-  it('당일 재검사는 발송 2시간 전 창에서만 잡는다', () => {
-    expect(isFinalTestDue('approved', minutesLater(121), NOW)).toBe(false); // 아직 이르다
-    expect(isFinalTestDue('approved', minutesLater(119), NOW)).toBe(true);
-    expect(isFinalTestDue('approved', minutesLater(111), NOW)).toBe(true);
-    expect(isFinalTestDue('approved', minutesLater(109), NOW)).toBe(false); // 창을 지났다(만료 워커가 맡는다)
-    expect(isFinalTestDue('awaiting_approval', minutesLater(119), NOW)).toBe(false); // 승인 안 된 건은 대상이 아니다
+  /**
+   * ★ 2026-08-23 §12-3 정정 계약.
+   * 전에는 "110분 초과 120분 이하"라는 10분 창이었다. 워커 한 tick이 밀리거나 앞 건 검사가 길어져
+   * 창을 넘기면 그 건은 영영 안 잡혔고, 만료 판정도 `approved`를 보지 않아 **발송도 만료도 안내도
+   * 없는 건**이 남았다. 창을 없애고 단조 조건으로 바꾼다(중복은 선점 UPDATE가 막는다).
+   */
+  it('당일 재검사는 2시간 전부터 예약 여유가 남는 동안 계속 잡는다 — 창을 놓쳐도 사라지지 않는다', () => {
+    expect(isFinalTestDue('approved', minutesLater(121), NOW, null)).toBe(false); // 아직 이르다
+    expect(isFinalTestDue('approved', minutesLater(119), NOW, null)).toBe(true);
+    expect(isFinalTestDue('approved', minutesLater(111), NOW, null)).toBe(true);
+    expect(isFinalTestDue('approved', minutesLater(109), NOW, null)).toBe(true);  // 옛 창이 버리던 자리
+    expect(isFinalTestDue('approved', minutesLater(30), NOW, null)).toBe(true);
+    expect(isFinalTestDue('approved', minutesLater(QUEUE_MARGIN_MINUTES), NOW, null)).toBe(false); // 여기부터는 만료
+    expect(isFinalTestDue('awaiting_approval', minutesLater(119), NOW, null)).toBe(false); // 승인 안 된 건은 대상이 아니다
   });
 
-  it('승인 없이 재검사 시점을 넘기면 만료다 — 발송하지 않는다', () => {
+  it('승인·재승인·승인 완료 어느 쪽도 시간이 지나면 만료다 — 발송하지 않는다', () => {
     expect(isApprovalExpired('awaiting_approval', minutesLater(119), NOW)).toBe(true);
-    expect(isApprovalExpired('reapproval', minutesLater(10), NOW)).toBe(true);
+    expect(isApprovalExpired('reapproval', minutesLater(QUEUE_MARGIN_MINUTES), NOW)).toBe(true);
     expect(isApprovalExpired('awaiting_approval', minutesLater(121), NOW)).toBe(false);
-    expect(isApprovalExpired('approved', minutesLater(10), NOW)).toBe(false); // 승인된 건은 재검사 워커가 맡는다
+    // ★ 승인된 건도 만료로 간다. 전에는 여기가 비어 있어 아무 일도 일어나지 않았다
+    expect(isApprovalExpired('approved', minutesLater(QUEUE_MARGIN_MINUTES), NOW)).toBe(true);
+    expect(isApprovalExpired('approved', minutesLater(QUEUE_MARGIN_MINUTES + 1), NOW)).toBe(false);
+    expect(isApprovalExpired('queued', minutesLater(1), NOW)).toBe(false); // 이미 예약된 건은 만료 대상이 아니다
+  });
+
+  it('재검사 대상과 만료 대상이 겹치지도 비지도 않는다 — 사이에 빠지는 구간이 없다', () => {
+    for (let m = 1; m <= 130; m += 1) {
+      const at = minutesLater(m);
+      const test = isFinalTestDue('approved', at, NOW, null);
+      const expire = isApprovalExpired('approved', at, NOW);
+      if (m <= FINAL_TEST_LEAD_MINUTES) expect(test || expire).toBe(true); // 반드시 누군가 맡는다
+      expect(test && expire).toBe(false);                                  // 둘이 동시에 맡지 않는다
+    }
   });
 
   it('워커가 잡은 채 죽어도 30분 뒤 되돌아간다', () => {

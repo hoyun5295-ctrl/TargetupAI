@@ -40,8 +40,13 @@ const TRANSITIONS: Record<AgencySendStatus, readonly AgencySendStatus[]> = {
   testing: ['awaiting_approval', 'test_failed', 'received'],           // received = lock 복구
   awaiting_approval: ['approved', 'received', 'expired', 'cancelled'], // received = 담당자가 문안 수정
   test_failed: ['received', 'cancelled'],
-  approved: ['final_testing', 'cancelled'],
-  final_testing: ['queued', 'reapproval', 'test_failed', 'approved'],  // approved = lock 복구
+  // expired = 승인은 받았는데 워커가 재검사·적재를 넣을 시간이 지났다(발송하지 않는다)
+  approved: ['final_testing', 'queued', 'expired', 'cancelled'],
+  // queued = 재승인 건(당일 검사를 이미 통과한 문안)은 재검사 없이 적재로 간다
+  // expired = 잔액 부족 등으로 예약을 만들지 못했다
+  final_testing: ['queued', 'reapproval', 'test_failed', 'expired', 'approved'],  // approved = lock 복구
+  // ⛔ 적재 뒤에는 상태를 내리지 않는다 — 일부가 이미 나갔을 수 있어 "미발송"으로 적으면 거짓이 된다.
+  //   적재 실패는 이벤트와 안내로 알리고 상태는 그대로 둔다(취소만 상태를 바꾼다).
   queued: ['cancelled'],                                               // 취소는 기존 캠페인 취소 CT를 함께 탄다
   reapproval: ['approved', 'received', 'expired', 'cancelled'],
   expired: ['received', 'cancelled'],                                  // received = 새 시각으로 다시 올린다
@@ -73,8 +78,15 @@ export function needsQueueCancel(status: AgencySendStatus): boolean {
 export const MIN_LEAD_MINUTES = 180;
 /** 당일 재검사를 시작하는 지점(발송 2시간 전) */
 export const FINAL_TEST_LEAD_MINUTES = 120;
-/** 재검사 창의 폭. 워커 주기(5분)보다 넉넉히 잡아 한 건도 건너뛰지 않게 한다 */
-export const FINAL_TEST_WINDOW_MINUTES = 10;
+/**
+ * 큐에 넣기만 하면 되는 건에 남아 있어야 하는 최소 여유(분).
+ *
+ * ★ 2026-08-23 신설. 전에는 상수가 `FINAL_TEST_LEAD_MINUTES` 하나뿐이라 **뜻이 셋인 값을 하나로 쓰고 있었다**:
+ *   승인 마감 · 재검사 시작 · 적재 여유. 그래서 당일 차단으로 `reapproval`이 된 건(정의상 2시간 미만이 남는다)이
+ *   승인에서 항상 거절됐고, 안내 문자는 "다시 승인해 주세요"라고 하는데 버튼은 듣지 않았다(§12-2).
+ *   재승인 건은 **검사를 이미 통과한 문안**이라 남은 일이 적재뿐이므로 필요한 여유가 다르다.
+ */
+export const QUEUE_MARGIN_MINUTES = 10;
 /** 발송 허용 시간 기본값(회사 설정이 없을 때). config SEND_HOURS와 같은 값이지만 이 파일은 순수해야 해서 인자로 받는다 */
 export const DEFAULT_SEND_START_HOUR = 8;
 export const DEFAULT_SEND_END_HOUR = 21;
@@ -151,6 +163,20 @@ export interface ApprovalTarget {
   requestedAt: Date;
 }
 
+/**
+ * **이 건이 지금 필요로 하는 리드타임(분).** 승인 판정과 만료 판정이 같은 답을 써야 한다.
+ *
+ * 갈리면 그 사이가 함정이 된다: 승인은 되는데 워커가 안 잡는 구간, 또는 승인이 거절되는데
+ * 만료도 안 되는 구간이 생긴다. §12-2·§12-3이 정확히 그 두 구간이었다.
+ *
+ *   · `awaiting_approval` = 승인 뒤 **당일 재검사**가 들어가야 한다 → 2시간
+ *   · `reapproval`        = 당일 검사를 이미 통과한 문안이다 → 적재 여유만
+ *   · `approved`          = 승인이 끝났다. 워커가 검사·적재를 하면 된다 → 적재 여유만
+ */
+export function requiredLeadMinutes(status: AgencySendStatus): number {
+  return status === 'awaiting_approval' ? FINAL_TEST_LEAD_MINUTES : QUEUE_MARGIN_MINUTES;
+}
+
 export interface ApprovalCheck {
   ok: boolean;
   error?: string;
@@ -170,31 +196,74 @@ export function checkApproval(target: ApprovalTarget, approvingVersion: number, 
   if (Number(approvingVersion) !== Number(target.contentVersion)) {
     return { ok: false, error: '문안이 바뀌었습니다. 새 문안을 확인하고 다시 승인해 주세요.', code: 'VERSION_MISMATCH' };
   }
+  // ⛔ 경계는 만료 판정과 **같은 쪽으로** 닫는다(`<=`). 한쪽이 `<`면 딱 그 값일 때
+  //   "승인은 됐는데 같은 tick에 만료되는" 건이 생긴다.
   const minutesLeft = (target.requestedAt.getTime() - now.getTime()) / 60000;
-  if (minutesLeft < FINAL_TEST_LEAD_MINUTES) {
+  if (minutesLeft <= requiredLeadMinutes(target.status)) {
     return {
       ok: false,
-      error: '보낼 시각까지 2시간이 남지 않았습니다. 발송 직전 재검사에 필요한 시간이라 시각을 다시 정해 주세요.',
+      error: target.status === 'awaiting_approval'
+        ? '보낼 시각까지 2시간이 남지 않았습니다. 발송 직전 재검사에 필요한 시간이라 시각을 다시 정해 주세요.'
+        : '보낼 시각이 너무 가까워 예약을 넣지 못합니다. 시각을 다시 정해 주세요.',
       code: 'TOO_LATE',
     };
   }
   return { ok: true };
 }
 
-/** 워커 B(당일 재검사) 대상인가. 발송 2시간 전 창에 들어왔고 아직 승인 상태인 건 */
-export function isFinalTestDue(status: AgencySendStatus, requestedAt: Date, now: Date): boolean {
+/**
+ * 워커 B(당일 재검사) 대상인가. 승인된 건이 발송 2시간 전 안에 들어왔고 **아직 오늘 검사를 안 한** 경우.
+ *
+ * ★ 2026-08-23 창(110분 초과 120분 이하)을 없애고 단조 조건으로 바꿨다. 워커 한 tick이 밀리거나
+ *   앞 건 검사가 길어져 10분 창을 넘기면 그 건은 영영 안 잡히고, 만료 판정도 `approved`를 보지 않아
+ *   **발송도 만료도 안내도 없는 건**이 남았다(§12-3). 중복 처리는 창이 아니라 선점 UPDATE(`status='approved'`)가 막는다.
+ */
+export function isFinalTestDue(
+  status: AgencySendStatus, requestedAt: Date, now: Date, finalTestedAt?: Date | null,
+): boolean {
   if (status !== 'approved') return false;
+  if (finalTestedAt) return false; // 오늘 검사를 이미 통과한 문안이다 → 재검사가 아니라 적재로 간다
   const minutesLeft = (requestedAt.getTime() - now.getTime()) / 60000;
-  return minutesLeft <= FINAL_TEST_LEAD_MINUTES && minutesLeft > FINAL_TEST_LEAD_MINUTES - FINAL_TEST_WINDOW_MINUTES;
+  return minutesLeft <= FINAL_TEST_LEAD_MINUTES && minutesLeft > QUEUE_MARGIN_MINUTES;
 }
 
 /**
- * 워커 C(만료) 대상인가. 승인·재승인을 기다리는 동안 재검사 시점을 넘긴 건.
- * ⛔ 이때 발송하지 않는다. 승인 없는 발송은 이 축에 없다(불변 1).
+ * 지금 문안이 **승인받은 그 문안인가**(불변 7).
+ *
+ * 승인 라우트가 이미 버전을 맞춰 보지만, 그 뒤에도 워커가 문안을 다듬어 버전을 올린다.
+ * 다듬은 직후 상태 전이가 실패해 잡기 전 상태로 되돌아가면 **담당자가 못 본 문장이 적재까지 갈 수 있다.**
+ * 그래서 효과가 만들어지는 자리(적재 직전)에서 한 번 더 본다.
+ */
+export function isApprovalCurrent(approvalVersion: any, contentVersion: any): boolean {
+  const a = Number(approvalVersion);
+  const c = Number(contentVersion);
+  return Number.isFinite(a) && Number.isFinite(c) && a === c;
+}
+
+/**
+ * 워커 B(적재) 대상인가. **당일 재검사를 이미 통과한 문안**을 담당자가 재승인한 건.
+ *
+ * 검사를 두 번 하지 않는 이유: 그 문안은 방금 통과했다. 다시 돌리면 통신사 결과가 흔들려
+ * 승인받은 문안이 또 차단으로 뒤집힐 수 있고, 그 사이 남은 시간도 사라진다.
+ * ⛔ `final_test_at`은 문안 수정·시각 변경에서 반드시 지워진다(그때는 다시 검사해야 한다).
+ */
+export function isQueueDue(
+  status: AgencySendStatus, requestedAt: Date, now: Date, finalTestedAt?: Date | null,
+): boolean {
+  if (status !== 'approved' || !finalTestedAt) return false;
+  return (requestedAt.getTime() - now.getTime()) / 60000 > QUEUE_MARGIN_MINUTES;
+}
+
+/**
+ * 워커 C(만료) 대상인가. 남은 시간이 그 상태에 필요한 리드타임보다 짧아진 건.
+ * ⛔ 이때 발송하지 않는다. 승인 없는 발송도, 당일 검사 없는 발송도 이 축에 없다(불변 1·2).
+ *
+ * ★ 2026-08-23 `approved`가 대상에 들어왔다. 전에는 승인된 건이 재검사 창을 놓치면 아무 워커도
+ *   맡지 않아 요청 시각이 지나도 그대로 남았다(§12-3).
  */
 export function isApprovalExpired(status: AgencySendStatus, requestedAt: Date, now: Date): boolean {
-  if (status !== 'awaiting_approval' && status !== 'reapproval') return false;
-  return (requestedAt.getTime() - now.getTime()) / 60000 < FINAL_TEST_LEAD_MINUTES;
+  if (status !== 'awaiting_approval' && status !== 'reapproval' && status !== 'approved') return false;
+  return (requestedAt.getTime() - now.getTime()) / 60000 <= requiredLeadMinutes(status);
 }
 
 /**

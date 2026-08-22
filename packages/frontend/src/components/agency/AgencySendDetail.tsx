@@ -39,14 +39,26 @@ const EVENT_LABEL: Record<string, string> = {
   reapproval: '발송 직전 검사에 걸려 다시 승인을 기다립니다',
   queued: '예약을 마쳤습니다',
   test_failed: '문안 확인이 필요합니다',
-  expired: '승인이 없어 발송하지 않았습니다',
+  final_test_failed: '발송 직전 검사를 통과하지 못했습니다',
+  expired: '시각이 지나 발송하지 않았습니다',
   cancelled: '취소했습니다',
   content_edited: '문안을 고쳤습니다',
   rescheduled: '시각을 고쳤습니다',
-  queue_mismatch: '예약 건수가 맞지 않아 멈췄습니다',
   lock_recovered: '멈춘 작업을 되돌렸습니다',
   notify_failed: '안내 문자를 보내지 못했습니다',
   reconciled_cancelled: '예약이 취소되어 반영했습니다',
+  queued_already: '예약을 이미 마친 건입니다',
+  queue_failed: '예약을 만드는 중 문제가 있었습니다',
+  dispatch_rejected: '예약을 넣지 못했습니다',
+  dispatch_no_recipient: '보낼 번호가 남지 않았습니다',
+  dispatch_zero_after_filter: '수신거부를 빼고 나니 보낼 번호가 없습니다',
+  dispatch_var_overflow: '문안에 넣을 항목이 너무 많습니다',
+  dispatch_no_owner: '접수자 정보를 찾지 못했습니다',
+  dispatch_error: '예약을 만들지 못해 다시 시도합니다',
+  dispatch_incomplete: '예약이 끝나지 않아 발송하지 않았습니다',
+  dispatch_unapproved_version: '승인한 문안과 달라 다시 승인을 기다립니다',
+  first_test_error: '검사 중 문제가 있어 다시 시도합니다',
+  final_test_error: '발송 전 검사 중 문제가 있어 다시 시도합니다',
 };
 
 export default function AgencySendDetail({ requestId, onClose, onChanged }: Props) {
@@ -163,7 +175,10 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                 <div className={CUI_INFO}>
                   <Check className={CUI_INFO_ICON} size={16} strokeWidth={2} />
                   <p className={CUI_INFO_TEXT}>
-                    담당자 번호로 보내 드린 문자를 확인하셨나요? 아래 문안 그대로 나갑니다. 승인하면 요청한 시각에 예약됩니다.
+                    담당자 번호로 보내 드린 문자를 확인하셨나요? 아래 문안 그대로 나갑니다.
+                    {req.status === 'reapproval'
+                      ? ' 검사는 이미 통과했으니 승인하시면 곧바로 예약됩니다.'
+                      : ' 승인하면 요청한 시각에 예약됩니다. 발송 두 시간 전에 한 번 더 검사합니다.'}
                   </p>
                 </div>
               )}
@@ -232,7 +247,8 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                         <Clock className="w-3.5 h-3.5 text-neutral-300 mt-0.5 shrink-0" strokeWidth={2} />
                         <span className="text-neutral-500 tabular-nums shrink-0">{formatWhen(e.created_at)}</span>
                         <span className="text-neutral-800">
-                          {EVENT_LABEL[e.kind] || e.kind}
+                          {/* ⛔ 모르는 항목에 내부 이름을 그대로 쓰지 않는다(고객 화면이다) */}
+                          {EVENT_LABEL[e.kind] || '진행 상황을 기록했습니다'}
                           {e.payload?.round ? ` (${e.payload.round}번째)` : ''}
                         </span>
                       </li>

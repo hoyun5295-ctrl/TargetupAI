@@ -20,7 +20,9 @@ import {
   CUI_MODAL_CLOSE, CUI_MODAL_DESC, CUI_MODAL_FOOT, CUI_MODAL_HEAD, CUI_MODAL_TITLE, CUI_SELECT,
   CUI_TEXTAREA,
 } from '../../utils/console-ui';
-import { createAgencyRequest, toLocalInput, type AgencySendRequest } from './agency-send-api';
+import {
+  createAgencyRequest, extractAgencyVars, MAX_AGENCY_VARS, toLocalInput, type AgencySendRequest,
+} from './agency-send-api';
 
 interface SenderNumber { phone_number?: string; phone?: string }
 
@@ -36,13 +38,6 @@ type Step = 1 | 2 | 3;
 function guessPhoneColumn(headers: string[]): string {
   const hit = headers.find((h) => /전화|휴대|핸드폰|폰|번호|phone|mobile|hp|tel/i.test(h));
   return hit || headers[0] || '';
-}
-
-/** 문안 안 %변수% 목록 */
-function extractVars(content: string): string[] {
-  const out = new Set<string>();
-  for (const m of String(content || '').matchAll(/%([^%\s]{1,20})%/g)) out.add(m[1]);
-  return [...out];
 }
 
 const ONLY_DIGITS = (s: string) => String(s || '').replace(/[^0-9]/g, '');
@@ -105,7 +100,7 @@ export default function AgencySendComposer({ show, onClose, onCreated }: Props) 
     return out;
   }, [rows, phoneColumn, pasted, varMapping]);
 
-  const usedVars = useMemo(() => extractVars(content), [content]);
+  const usedVars = useMemo(() => extractAgencyVars(content), [content]);
 
   const reset = () => {
     setStep(1); setFileName(null); setHeaders([]); setRows([]); setPhoneColumn(''); setPasted('');
@@ -167,6 +162,17 @@ export default function AgencySendComposer({ show, onClose, onCreated }: Props) 
     if (!content.trim()) { toast.error('문안을 입력해 주세요.'); return; }
     if ((messageType === 'LMS' || messageType === 'MMS') && !subject.trim()) {
       toast.error('제목을 입력해 주세요. 긴 문자와 이미지 문자에는 제목이 필요합니다.');
+      return;
+    }
+    // 문안에 넣는 항목은 네 개까지다. 서버도 같은 자리에서 막지만, 여기서 알려야 다시 쓰지 않는다.
+    if (usedVars.length > MAX_AGENCY_VARS) {
+      toast.error(`문안에 넣을 항목은 ${MAX_AGENCY_VARS}개까지입니다. 지금 ${usedVars.length}개를 쓰고 있습니다.`);
+      return;
+    }
+    // 제목은 모든 수신자에게 같은 문장으로 나간다. 항목을 넣으면 그 글자가 그대로 보인다.
+    const subjectVars = extractAgencyVars(subject);
+    if (subjectVars.length > 0) {
+      toast.error(`제목에는 항목을 넣을 수 없습니다: ${subjectVars.map((v) => `%${v}%`).join(' ')}`);
       return;
     }
     // 자동 매핑: 문안 변수와 같은 이름의 열이 있으면 맞춰 둔다
@@ -307,6 +313,7 @@ export default function AgencySendComposer({ show, onClose, onCreated }: Props) 
               <div>
                 <label className={CUI_LABEL}>제목 {(messageType === 'LMS' || messageType === 'MMS') && <span className="text-rose-500">*</span>}</label>
                 <input value={subject} onChange={(e) => setSubject(e.target.value)} className={CUI_INPUT} placeholder="가을 신상 행사 안내" />
+                <p className={CUI_HINT}>제목은 모든 수신자에게 같은 문장으로 나갑니다. 항목(%이름% 같은 것)은 문안에만 넣어 주세요.</p>
               </div>
 
               <div>
@@ -319,9 +326,17 @@ export default function AgencySendComposer({ show, onClose, onCreated }: Props) 
                   className={CUI_TEXTAREA}
                 />
                 <p className={CUI_HINT}>
-                  퍼센트 기호로 감싼 낱말(예: %이름%)은 고객마다 다른 값이 들어갑니다.
+                  퍼센트 기호로 감싼 낱말(예: %이름%)은 고객마다 다른 값이 들어갑니다. {MAX_AGENCY_VARS}개까지 넣을 수 있습니다.
                   지금 형식은 <b>{messageType}</b>입니다.
                 </p>
+                {usedVars.length > MAX_AGENCY_VARS && (
+                  <div className={`${CUI_DANGER_BOX} mt-2`}>
+                    <AlertTriangle className={CUI_DANGER_ICON} size={16} strokeWidth={2} />
+                    <p className={CUI_DANGER_TEXT}>
+                      문안에 넣을 항목이 {usedVars.length}개입니다. {MAX_AGENCY_VARS}개까지만 넣을 수 있으니 일부를 빼 주세요.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {usedVars.length > 0 && headers.length > 0 && (

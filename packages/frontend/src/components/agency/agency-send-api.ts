@@ -30,6 +30,8 @@ export interface AgencySendRequest {
   lastTestResult: any;
   approvedAt: string | null;
   approvalVersion: number | null;
+  /** 발송 직전 검사를 이미 통과한 문안인가. 값이 있으면 승인 즉시 예약된다 */
+  finalTestedAt: string | null;
   reapprovalCount: number;
   queuedAt: string | null;
   campaignId: string | null;
@@ -118,6 +120,30 @@ export async function cancelAgencyRequest(id: string, reason?: string): Promise<
     method: 'POST', headers: json(), body: JSON.stringify({ reason }),
   });
   return (await unwrap(res)).request;
+}
+
+// ────────────── 문안 변수 (서버 CT `utils/agency-send-vars.ts` 미러) ──────────────
+
+/**
+ * 문안에 넣을 수 있는 항목 수. 값은 서버가 소유하고 화면은 미리 안내만 한다.
+ * ⚠ 서버 `MAX_AGENCY_VARS`와 **같은 값이어야 한다** — 화면만 늘리면 접수가 400으로 막힌다.
+ *   두 값의 일치는 `backend/src/utils/__tests__/agency-send-vars.test.ts`가 기계로 확인한다.
+ */
+export const MAX_AGENCY_VARS = 4;
+
+/**
+ * 문안 안 `%변수%` 목록. 패턴은 서버 `extractAgencyVars`와 **같아야 한다** —
+ * 화면이 더 넓게 잡으면 매핑표에 변수가 아닌 것(`%50%` 같은 본문 표기)이 뜨고 개수도 어긋난다.
+ */
+export function extractAgencyVars(content: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const m of String(content || '').matchAll(/%([가-힣A-Za-z_][^%\s]{0,19})%/g)) {
+    if (seen.has(m[1])) continue;
+    seen.add(m[1]);
+    out.push(m[1]);
+  }
+  return out;
 }
 
 // ────────────── 화면 표시용 (상태 하나가 두 곳에서 다르게 읽히지 않게 여기 모은다) ──────────────

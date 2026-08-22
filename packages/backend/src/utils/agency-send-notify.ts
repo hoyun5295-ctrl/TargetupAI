@@ -83,6 +83,28 @@ export function buildExpiredNotify(ctx: AgencyNotifyContext): string {
   ]);
 }
 
+/**
+ * ⑥ 승인은 받았는데 발송 직전 검사·예약을 넣을 시간이 지났다 (★ 2026-08-23 신설)
+ *
+ * ⑤와 나눈 이유: ⑤는 "승인이 없어서"다. 승인한 담당자에게 그 문장을 보내면 사실과 다르다.
+ */
+export function buildApprovedExpiredNotify(ctx: AgencyNotifyContext): string {
+  return compose([
+    `${HEAD} 요청한 시각에 발송하지 못했습니다.`,
+    `건: ${shortLabel(ctx.label)}`,
+    '발송 직전 검사에 필요한 시간이 지났습니다. 로그인하여 시각을 다시 정해 주세요.',
+  ]);
+}
+
+/** ⑦ 예약을 만들지 못했다 (★ 2026-08-23 신설). 사유는 화면 상세에 남는다 */
+export function buildQueueFailedNotify(ctx: AgencyNotifyContext): string {
+  return compose([
+    `${HEAD} 예약을 넣지 못해 발송하지 않았습니다.`,
+    `건: ${shortLabel(ctx.label)}`,
+    '로그인하여 상세를 확인해 주세요.',
+  ]);
+}
+
 /** 요청 시각을 담당자가 읽는 형태로 (KST) */
 export function formatWhen(at: Date): string {
   const kst = new Date(at.getTime() + 9 * 60 * 60 * 1000);

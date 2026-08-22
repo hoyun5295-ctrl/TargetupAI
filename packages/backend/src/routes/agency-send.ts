@@ -19,6 +19,9 @@ import {
   canCancel, checkApproval, isEditable, needsQueueCancel, validateRequestedAt,
   type AgencySendStatus,
 } from '../utils/agency-send-state';
+import { buildSlotPlan, extractAgencyVars } from '../utils/agency-send-vars';
+import { SEND_HOURS } from '../config/defaults';
+import { triggerAgencySendDispatch } from '../utils/agency-send-worker';
 
 const router = Router();
 router.use(authenticate);
@@ -37,6 +40,24 @@ const isMissingRelation = (err: any) => {
   const msg = String(err?.message || '');
   return (msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist');
 };
+
+/**
+ * 제목에 변수를 쓰지 못하게 막는다(★2026-08-23 Codex 적대 검토 high).
+ *
+ * 발송 배관은 **제목을 치환하지 않는다**(Harold 확정 · `messageUtils.prepareSendMessage` 3단계 주석).
+ * 그래서 제목에 `%이름%`을 쓰면 그 글자가 그대로 고객에게 간다. 본문 슬롯과 짝도 맞지 않는다.
+ * 발송 뒤에 알게 되는 결함이라 접수·수정에서 막는다.
+ */
+function rejectSubjectVars(subject: any, res: Response): boolean {
+  const vars = extractAgencyVars(String(subject || ''));
+  if (vars.length === 0) return false;
+  res.status(400).json({
+    success: false,
+    code: 'SUBJECT_VARS',
+    error: `제목에는 항목을 넣을 수 없습니다: ${vars.map((v) => `%${v}%`).join(' ')}. 제목은 모든 수신자에게 같은 문장으로 나갑니다.`,
+  });
+  return true;
+}
 
 function migrationPending(res: Response) {
   return res.status(503).json({
@@ -65,18 +86,30 @@ async function requireAgencySend(req: Request, res: Response): Promise<{ company
   return { companyId, userId };
 }
 
-/** 회사 발송 허용 시간(없으면 CT 기본값) */
-async function loadSendWindow(companyId: string): Promise<{ startHour: number | null; endHour: number | null }> {
+/**
+ * 회사 발송 허용 시간(없으면 CT 기본값).
+ *
+ * ⛔ 광고면 플랫폼 창(`SEND_HOURS`)과 **겹치는 구간**만 쓴다. 회사 설정이 그보다 넓어도 광고는
+ *   야간 제한(정보통신망법)에 걸려 예약 단계에서 거절된다. 접수에서 안 막으면 담당자는
+ *   발송 2시간 전에야 "나가지 않았다"를 알게 된다(★2026-08-23).
+ */
+async function loadSendWindow(companyId: string, isAd: boolean): Promise<{ startHour: number | null; endHour: number | null }> {
+  let startHour: number | null = null;
+  let endHour: number | null = null;
   try {
     const r = await query(`SELECT send_start_hour, send_end_hour FROM companies WHERE id = $1`, [companyId]);
     const row = r.rows[0] || {};
-    return {
-      startHour: row.send_start_hour != null ? Number(row.send_start_hour) : null,
-      endHour: row.send_end_hour != null ? Number(row.send_end_hour) : null,
-    };
+    startHour = row.send_start_hour != null ? Number(row.send_start_hour) : null;
+    endHour = row.send_end_hour != null ? Number(row.send_end_hour) : null;
   } catch {
-    return { startHour: null, endHour: null };
+    startHour = null;
+    endHour = null;
   }
+  if (!isAd) return { startHour, endHour };
+  return {
+    startHour: Math.max(startHour ?? SEND_HOURS.start, SEND_HOURS.start),
+    endHour: Math.min(endHour ?? SEND_HOURS.end, SEND_HOURS.end),
+  };
 }
 
 async function logEvent(requestId: string, kind: string, payload: Record<string, any> = {}): Promise<void> {
@@ -111,6 +144,8 @@ function toPublic(row: any) {
     lastTestResult: row.last_test_result || null,
     approvedAt: row.approved_at,
     approvalVersion: row.approval_version,
+    // 화면이 "지금 승인하면 바로 예약된다"와 "승인 뒤 발송 직전 검사가 한 번 더 있다"를 구분하는 값
+    finalTestedAt: row.final_test_at,
     reapprovalCount: row.reapproval_count,
     queuedAt: row.queued_at,
     campaignId: row.campaign_id,
@@ -159,6 +194,11 @@ router.post('/', async (req: Request, res: Response) => {
     if (!body) return res.status(400).json({ success: false, error: '보낼 문안을 입력해 주세요.' });
     if (body.length > MAX_CONTENT) return res.status(400).json({ success: false, error: `문안은 ${MAX_CONTENT}자까지 넣을 수 있습니다.` });
 
+    // 문안 변수는 직접발송과 같은 주소록 슬롯 네 칸에 얹는다(치환 CT가 하나여야 하므로).
+    // ⛔ 발송 직전에 조용히 잘리면 안 되므로 접수에서 막는다.
+    const plan = buildSlotPlan(body);
+    if (!plan.ok) return res.status(400).json({ success: false, error: plan.error, code: 'TOO_MANY_VARS' });
+
     const type = String(messageType).toUpperCase();
     if (!['SMS', 'LMS', 'MMS'].includes(type)) {
       return res.status(400).json({ success: false, error: '보낼 수 있는 형식이 아닙니다.' });
@@ -166,6 +206,7 @@ router.post('/', async (req: Request, res: Response) => {
     if ((type === 'LMS' || type === 'MMS') && !String(subject || '').trim()) {
       return res.status(400).json({ success: false, error: '제목을 입력해 주세요.' });
     }
+    if (rejectSubjectVars(subject, res)) return;
     // MMS는 이미지가 본체다. 0장이면 통신사가 파일 오류로 버린다(2026-04-21 9007 선례)
     const images = Array.isArray(mmsImagePaths) ? mmsImagePaths : [];
     const mmsCheck = validateMmsPayload(type, images);
@@ -185,7 +226,7 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     // ── 요청 시각(리드타임 + 회사 발송 허용 시간)
-    const when = validateRequestedAt(requestedAt, new Date(), await loadSendWindow(auth.companyId));
+    const when = validateRequestedAt(requestedAt, new Date(), await loadSendWindow(auth.companyId, !!isAd));
     if (!when.valid) return res.status(400).json({ success: false, error: when.error });
 
     // ── 수신자
@@ -327,6 +368,8 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
     }
 
     await logEvent(req.params.id, 'approved', { version: Number(req.body?.contentVersion), by: auth.userId });
+    // 재승인은 남은 시간이 짧다. 다음 tick을 기다리면 그 사이에 만료 기준을 지나 승인이 헛돈다.
+    triggerAgencySendDispatch(req.params.id);
     return res.json({ success: true, request: toPublic(updated.rows[0]) });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
@@ -345,9 +388,10 @@ router.post('/:id/content', async (req: Request, res: Response) => {
     const body = String(req.body?.content || '').trim();
     if (!body) return res.status(400).json({ success: false, error: '문안을 입력해 주세요.' });
     if (body.length > MAX_CONTENT) return res.status(400).json({ success: false, error: `문안은 ${MAX_CONTENT}자까지 넣을 수 있습니다.` });
+    if (req.body?.subject != null && rejectSubjectVars(req.body.subject, res)) return;
 
     const r = await query(
-      `SELECT status FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
+      `SELECT status, var_mapping, content_version FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
       [req.params.id, auth.companyId],
     );
     if (r.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
@@ -355,18 +399,43 @@ router.post('/:id/content', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '지금은 문안을 고칠 수 있는 상태가 아닙니다.' });
     }
 
+    const plan = buildSlotPlan(body);
+    if (!plan.ok) return res.status(400).json({ success: false, error: plan.error, code: 'TOO_MANY_VARS' });
+    // 명단은 접수 때 확정됐다. 그때 연결하지 않은 항목을 새로 넣으면 그 자리가 빈칸으로 나간다.
+    const known = Object.keys(r.rows[0].var_mapping || {});
+    const unknown = plan.order.filter((v) => !known.includes(v));
+    if (unknown.length > 0) {
+      return res.status(400).json({
+        success: false,
+        code: 'UNKNOWN_VARS',
+        error: `명단에 연결하지 않은 항목이 있습니다: ${unknown.map((v) => `%${v}%`).join(' ')}. 그 부분을 빼거나 새로 접수해 주세요.`,
+      });
+    }
+
     // 원문도 함께 바꾼다 — 사용자가 새로 쓴 문장이 이번 접수의 원문이다(AI가 다듬을 때의 기준선).
     // 승인 흔적을 지워 옛 승인이 남지 않게 한다(불변 7).
+    // ⛔ `final_test_at`도 지운다 — 바뀐 문안은 당일 검사를 통과한 적이 없다(그대로 두면 검사 없이 나간다).
+    // ⛔ `dispatch_key`·`campaign_id`도 지운다 — 문안이 바뀌면 앞선 시도와는 다른 발송이다(새 시도 키를 받는다).
+    // ⛔ **관찰한 상태·버전을 조건에 넣는다.** 조건 없이 덮으면 워커가 잡고 있는 건의 lock을 깨고,
+    //   그 워커가 뒤늦게 옛 문안으로 상태를 되돌려 **고친 적 없는 문장이 나가는** 경로가 생긴다.
     const updated = await query(
       `UPDATE agency_send_requests
           SET original_content = $1, current_content = $1, content_version = content_version + 1,
               status = 'received', test_round = 0, last_test_result = NULL, last_test_at = NULL,
-              approved_at = NULL, approved_by = NULL, approval_version = NULL,
-              subject = COALESCE($2, subject), expired_at = NULL, updated_at = NOW()
-        WHERE id = $3::uuid AND company_id = $4::uuid
+              approved_at = NULL, approved_by = NULL, approval_version = NULL, final_test_at = NULL,
+              dispatch_key = NULL, campaign_id = NULL,
+              subject = COALESCE($2, subject), expired_at = NULL, lock_at = NULL, updated_at = NOW()
+        WHERE id = $3::uuid AND company_id = $4::uuid AND status = $5 AND content_version = $6
         RETURNING *`,
-      [body, req.body?.subject ?? null, req.params.id, auth.companyId],
+      [body, req.body?.subject ?? null, req.params.id, auth.companyId, r.rows[0].status, r.rows[0].content_version],
     );
+    if (updated.rows.length === 0) {
+      return res.status(409).json({
+        success: false,
+        code: 'STATE_CHANGED',
+        error: '그 사이 상태가 바뀌었습니다. 화면을 새로 고치고 다시 시도해 주세요.',
+      });
+    }
 
     await logEvent(req.params.id, 'content_edited', { version: updated.rows[0]?.content_version });
     return res.json({ success: true, request: toPublic(updated.rows[0]) });
@@ -385,7 +454,7 @@ router.post('/:id/reschedule', async (req: Request, res: Response) => {
   if (!auth) return;
   try {
     const r = await query(
-      `SELECT status, content_version FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
+      `SELECT status, content_version, is_ad FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
       [req.params.id, auth.companyId],
     );
     if (r.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
@@ -393,19 +462,34 @@ router.post('/:id/reschedule', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '지금은 시각을 고칠 수 있는 상태가 아닙니다.' });
     }
 
-    const when = validateRequestedAt(req.body?.requestedAt, new Date(), await loadSendWindow(auth.companyId));
+    const when = validateRequestedAt(
+      req.body?.requestedAt, new Date(), await loadSendWindow(auth.companyId, !!r.rows[0].is_ad),
+    );
     if (!when.valid) return res.status(400).json({ success: false, error: when.error });
 
     // 문안은 그대로다. 검사를 이미 통과한 건이면 승인 대기로 돌려보내고, 아니면 검사부터 다시 한다.
+    // ⛔ `final_test_at`을 지운다 — 시각이 바뀌면 그 날 그 시각 기준의 검사를 다시 받아야 한다(불변 2).
+    // ⛔ `dispatch_key`·`campaign_id`를 지운다 — 새 시각은 새 시도다. 그대로 두면 실패한 앞 시도의
+    //   캠페인을 계속 찾아 같은 자리에서 다시 닫힌다(★2026-08-23 Codex 적대 검토 high).
+    // ⛔ 관찰한 상태를 조건에 넣는다(문안 수정과 같은 이유).
     const backTo: AgencySendStatus = r.rows[0].status === 'test_failed' ? 'received' : 'awaiting_approval';
     const updated = await query(
       `UPDATE agency_send_requests
           SET requested_at = $1, status = $2, expired_at = NULL,
-              approved_at = NULL, approved_by = NULL, approval_version = NULL, updated_at = NOW()
-        WHERE id = $3::uuid AND company_id = $4::uuid
+              approved_at = NULL, approved_by = NULL, approval_version = NULL, final_test_at = NULL,
+              dispatch_key = NULL, campaign_id = NULL, lock_at = NULL,
+              updated_at = NOW()
+        WHERE id = $3::uuid AND company_id = $4::uuid AND status = $5
         RETURNING *`,
-      [when.at, backTo, req.params.id, auth.companyId],
+      [when.at, backTo, req.params.id, auth.companyId, r.rows[0].status],
     );
+    if (updated.rows.length === 0) {
+      return res.status(409).json({
+        success: false,
+        code: 'STATE_CHANGED',
+        error: '그 사이 상태가 바뀌었습니다. 화면을 새로 고치고 다시 시도해 주세요.',
+      });
+    }
 
     await logEvent(req.params.id, 'rescheduled', { requestedAt: when.at?.toISOString(), status: backTo });
     return res.json({ success: true, request: toPublic(updated.rows[0]) });
@@ -451,15 +535,30 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
       }
     }
 
+    // ⛔ **관찰한 상태를 조건에 넣는다**(★2026-08-23 Codex 적대 검토 critical).
+    //   조건 없이 덮으면, `approved`를 읽은 뒤 워커가 예약을 만든 사이에 큐 삭제를 건너뛴 채
+    //   `queued` 행을 `cancelled`로 덮는다. 화면은 취소인데 큐는 그 시각에 나간다(0611과 같은 형태).
+    //   0행이면 아무것도 바꾸지 않고 돌려보낸다. 다시 누르면 그때의 상태(`queued`)로 큐 삭제 경로를 탄다.
     const updated = await query(
       `UPDATE agency_send_requests
           SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = $1, updated_at = NOW()
-        WHERE id = $2::uuid AND company_id = $3::uuid AND status <> 'cancelled'
+        WHERE id = $2::uuid AND company_id = $3::uuid AND status = $4
         RETURNING *`,
-      [String(req.body?.reason || '담당자 취소').slice(0, 200), req.params.id, auth.companyId],
+      [String(req.body?.reason || '담당자 취소').slice(0, 200), req.params.id, auth.companyId, status],
     );
     if (updated.rows.length === 0) {
-      return res.status(409).json({ success: false, error: '이미 취소된 접수입니다.' });
+      const nowStatus = await query(
+        `SELECT status FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [req.params.id, auth.companyId],
+      );
+      if (nowStatus.rows[0]?.status === 'cancelled') {
+        return res.status(409).json({ success: false, error: '이미 취소된 접수입니다.', code: 'ALREADY_CANCELLED' });
+      }
+      return res.status(409).json({
+        success: false,
+        code: 'STATE_CHANGED',
+        error: '처리 중이라 취소하지 못했습니다. 화면을 새로 고치고 다시 시도해 주세요.',
+      });
     }
 
     await logEvent(req.params.id, 'cancelled', { from: status, queueCancelled: needsQueueCancel(status) });
