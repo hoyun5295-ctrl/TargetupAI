@@ -10,6 +10,12 @@
  *      모델명이 없는지. 하나라도 걸리면 답변을 버리고 1번 응답(후보 카드만)으로 되돌린다.
  *   4. 요금제 문구는 모델이 쓰지 않는다 — 라우트가 `canUseFeature`로 판정해 `locked`를 붙이고 화면이 우리 문자열로 그린다.
  *
+ * ★ 2026-08-22(2) 답변 틀 고정 (docs §10-1 ③): 본문이 있는 작업이 **분명한 1순위**면 모델을 부르지 않고 그 정의를
+ *   카드 그대로 낸다(`direct`). 정의에 적힌 순서를 모델이 산문으로 풀어 쓰면 순서가 뭉개지고 이름을 바꿔 부른다.
+ *   모델은 **어느 작업인지 가리기 어려울 때(1·2순위 점수 차가 작을 때)와 본문 없는 작업**에만 쓴다.
+ * ★ 2026-08-22(2) 관련 기능은 id가 아니라 **화면 이름(title)** 으로 프롬프트에 넣는다 (docs §10-1 ②).
+ *   영문 id(`quick-campaign`)를 넣었더니 모델이 "퀵 캠페인"이라는 없는 이름을 지어냈다. 구현 결함이었다.
+ *
  * 과금 = 무료. `CREDIT_COST_MAP`에 등록하지 않는다(미등록 source = 0). 기록만 `ai_call_log`에 `help-ask`로 남긴다(원가 실측).
  * 남용 방지 = 매칭 실패는 호출 전 거절 · 캐시(5분) · 회사당 일 30회·분 3회(초과 시 잠그지 않고 후보 카드만) · 입력 240자.
  */
@@ -26,6 +32,11 @@ export const HELP_DAILY_LIMIT = 30;
 export const HELP_MINUTE_LIMIT = 3;
 /** 이 점수 미만이면 "모른다"로 끝낸다(모델 호출 0) */
 export const HELP_MATCH_THRESHOLD = 3;
+/**
+ * 1순위와 2순위 점수 차가 이 값 이상이면 "분명한 1순위"로 보고 모델 없이 정의를 그대로 낸다.
+ * 4 = 키워드 하나가 통째로 맞은 만큼의 점수(`matchJobs`). 그보다 작으면 어느 작업인지 모델이 가린다.
+ */
+export const HELP_DIRECT_MARGIN = 4;
 
 // ────────────── 1. 폐집합 매칭 ──────────────
 
@@ -74,13 +85,19 @@ const SYSTEM_PROMPT = [
   '정의에 답이 없으면 "이 안내에는 없는 내용입니다"라고만 말하고 가장 가까운 기능 이름을 하나 권합니다.',
   '할인율·금액·쿠폰·무료 같은 혜택 수치를 만들지 않습니다. 요금제 이름이나 가격을 말하지 않습니다.',
   '화면 경로는 [기능 정의]의 entry.path에 있는 것만 씁니다.',
+  '기능을 부를 때는 [기능 정의]의 title과 related에 적힌 이름을 글자 그대로 씁니다. 이름을 줄이거나 바꾸거나 새로 짓지 않습니다.',
   '한국어 존댓말, 5문장 이내, 긴 줄표·이모지·영어 약어 없이, 누를 것은 큰따옴표로 표시합니다.',
   '내부 시스템·모델·데이터베이스 이름을 말하지 않습니다.',
 ].join('\n');
 
-export function buildHelpMessages(question: string, jobs: PublicFeatureJob[], currentPath?: string | null) {
+/** 관련 작업 id → 화면 이름. 모델에게 id를 보여주면 그것을 한국어로 옮기며 없는 이름을 짓는다 */
+function relatedTitles(ids: string[], catalog: readonly FeatureJob[]): string[] {
+  return ids.map((id) => catalog.find((c) => c.id === id)?.title).filter((t): t is string => !!t);
+}
+
+export function buildHelpMessages(question: string, jobs: PublicFeatureJob[], currentPath?: string | null, catalog: readonly FeatureJob[] = FEATURE_CATALOG) {
   const defs = jobs.map((j) => ({
-    id: j.id, title: j.title, goal: j.goal, entry: j.entry, steps: j.steps, blockers: j.blockers, related: j.related,
+    title: j.title, goal: j.goal, entry: j.entry, steps: j.steps, blockers: j.blockers, related: relatedTitles(j.related, catalog),
     status: j.status === 'stub' ? '본문 없음(제목·목적·시작 위치만 있음)' : '본문 있음',
   }));
   const user = [
@@ -145,14 +162,26 @@ const MAX_TOKENS = 600;
 
 export interface HelpAnswer {
   answered: boolean;
-  /** answered=false면 빈 문자열 */
+  /** answered=false거나 direct면 빈 문자열 */
   answer: string;
+  /**
+   * 정의를 그대로 낸다. answer는 비어 있고 jobs[0]이 답이다 — 화면은 그 카드를 펼쳐 보여준다.
+   * 본문 있는 작업이 분명한 1순위일 때만 true(HELP_DIRECT_MARGIN).
+   */
+  direct: boolean;
   /** 매칭된 작업(공개 필드). 화면이 카드로 그린다 */
   jobs: PublicFeatureJob[];
   /** 모델을 불렀는가(원가 실측·디버그) */
   usedModel: boolean;
   /** 거절 사유(내부 로그용) */
   reason?: string;
+}
+
+/** 본문 있는 작업이 분명한 1순위인가. 1개뿐이거나 2순위와 점수 차가 여유 이상이면 모델 없이 정의를 낸다 */
+export function isDirectHit(top: MatchHit[]): boolean {
+  if (top.length === 0 || top[0].job.status !== 'ready') return false;
+  if (top.length === 1) return true;
+  return top[0].score - top[1].score >= HELP_DIRECT_MARGIN;
 }
 
 export async function answerHelpQuestion(opts: {
@@ -170,18 +199,22 @@ export async function answerHelpQuestion(opts: {
   const fallbackJobs = hits.slice(0, 3).map((h) => toPublicJob(h.job));
 
   // 1겹: 폐집합 매칭 실패 = 모델 호출 0
-  if (top.length === 0) return { answered: false, answer: '', jobs: fallbackJobs, usedModel: false, reason: 'no-match' };
+  if (top.length === 0) return { answered: false, answer: '', direct: false, jobs: fallbackJobs, usedModel: false, reason: 'no-match' };
 
   const jobs = top.map((h) => toPublicJob(h.job));
-  if (!takeHelpQuota(opts.companyId)) return { answered: false, answer: '', jobs, usedModel: false, reason: 'quota' };
 
-  const { system, user } = buildHelpMessages(question, jobs, opts.currentPath);
+  // 답변 틀 고정: 본문 있는 작업이 분명한 1순위면 정의를 그대로 낸다. 모델 호출 0 · 한도 소모 0 · 출구 검사 불요(우리 문장이다)
+  if (isDirectHit(top)) return { answered: true, answer: '', direct: true, jobs, usedModel: false };
+
+  if (!takeHelpQuota(opts.companyId)) return { answered: false, answer: '', direct: false, jobs, usedModel: false, reason: 'quota' };
+
+  const { system, user } = buildHelpMessages(question, jobs, opts.currentPath, catalog);
   // 답은 회사와 무관하다(요금제 판정은 라우트가 따로 붙인다) — 캐시를 전 회사가 공유한다
   const cacheKey = generateCacheKey('help-global', system, user);
   const cached = getCachedResponse(cacheKey);
   if (cached) {
     const check = checkAnswer(cached, allowedPathSet(catalog));
-    if (check.ok) return { answered: true, answer: cached, jobs, usedModel: false };
+    if (check.ok) return { answered: true, answer: cached, direct: false, jobs, usedModel: false };
   }
 
   const call = opts.callModel || callAnthropic;
@@ -193,16 +226,16 @@ export async function answerHelpQuestion(opts: {
     text = r.text; inputTokens = r.inputTokens; outputTokens = r.outputTokens;
   } catch (err: any) {
     await recordAiCall({ companyId: opts.companyId, source: HELP_SOURCE, modelType: 'sonnet', success: false });
-    return { answered: false, answer: '', jobs, usedModel: true, reason: `model-error:${err?.message || 'unknown'}` };
+    return { answered: false, answer: '', direct: false, jobs, usedModel: true, reason: `model-error:${err?.message || 'unknown'}` };
   }
   await recordAiCall({ companyId: opts.companyId, source: HELP_SOURCE, modelType: 'sonnet', inputTokens, outputTokens, costWon: 0 });
 
   // 3겹: 출구 검사
   const check = checkAnswer(text, allowedPathSet(catalog));
-  if (!check.ok) return { answered: false, answer: '', jobs, usedModel: true, reason: `exit:${check.reason}` };
+  if (!check.ok) return { answered: false, answer: '', direct: false, jobs, usedModel: true, reason: `exit:${check.reason}` };
 
   setCachedResponse(cacheKey, text);
-  return { answered: true, answer: text.trim(), jobs, usedModel: true };
+  return { answered: true, answer: text.trim(), direct: false, jobs, usedModel: true };
 }
 
 async function callAnthropic(system: string, user: string): Promise<{ text: string; inputTokens: number; outputTokens: number }> {

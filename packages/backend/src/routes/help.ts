@@ -162,7 +162,7 @@ router.post('/ask', async (req: Request, res: Response) => {
       matched: result.jobs.map((j) => j.id), answered: result.answered,
     });
 
-    return res.json({ success: true, answered: result.answered, answer: result.answer, jobs, reason: result.answered ? undefined : result.reason });
+    return res.json({ success: true, answered: result.answered, answer: result.answer, direct: result.direct, jobs, reason: result.answered ? undefined : result.reason });
   } catch (err: any) {
     console.error('[help/ask] 오류:', err);
     return res.status(500).json({ success: false, error: '답변을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.' });

@@ -31,6 +31,8 @@ export interface HelpContext {
 export interface HelpAskResult {
   answered: boolean;
   answer: string;
+  /** 정의를 그대로 낸 답. answer는 비어 있고 jobs[0]이 답이다(서버가 판정) */
+  direct: boolean;
   jobs: HelpJob[];
 }
 
@@ -51,7 +53,7 @@ export async function askHelp(question: string, path: string): Promise<HelpAskRe
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok || !json?.success) throw new Error(json?.error || '답변을 만들지 못했습니다.');
-  return { answered: !!json.answered, answer: String(json.answer || ''), jobs: json.jobs || [] };
+  return { answered: !!json.answered, answer: String(json.answer || ''), direct: !!json.direct, jobs: json.jobs || [] };
 }
 
 export async function leaveHelpQuestion(question: string, path: string): Promise<void> {

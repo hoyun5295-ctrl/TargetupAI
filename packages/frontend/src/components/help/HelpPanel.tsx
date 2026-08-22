@@ -82,8 +82,9 @@ export default function HelpPanel({ ctx, path, onClose }: Props) {
         {result ? (
           <>
             <p className={HELP_ANSWER_Q}>질문: {result.q}</p>
+            {/* direct = 정의를 그대로 낸 답. 산문 없이 첫 카드가 펼쳐진 채로 순서·막히는 지점을 보여준다 */}
             {result.r.answered ? (
-              <div className={HELP_ANSWER}>{result.r.answer}</div>
+              result.r.direct ? null : <div className={HELP_ANSWER}>{result.r.answer}</div>
             ) : (
               <div className={HELP_MISS}>
                 이 안내에는 없는 내용입니다. 가까운 기능을 아래에 두었습니다.
@@ -101,7 +102,7 @@ export default function HelpPanel({ ctx, path, onClose }: Props) {
             )}
             {result.r.jobs.length > 0 && (
               <div className="space-y-2">
-                <p className={HELP_SECTION_TITLE}>관련 기능</p>
+                <p className={HELP_SECTION_TITLE}>{result.r.direct ? '이 안내를 보세요' : '관련 기능'}</p>
                 {renderJobs(result.r.jobs)}
               </div>
             )}
