@@ -31,7 +31,8 @@ export default function AutoSendPage() {
               </span>
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">자동발송 → 여정 빌더로 통합</h1>
-                <p className="text-sm text-gray-500 mt-1">D188 (2026-05-21) 한줄로 마케팅 자동화 업그레이드</p>
+                {/* ★ 2026-08-22: 내부 코드명·날짜(D188 …)를 고객 화면에 그대로 내보내고 있었다. 고객 언어로 교체 */}
+                <p className="text-sm text-gray-500 mt-1">조건과 순서를 갖춘 자동화는 이제 여정 빌더에서 만듭니다</p>
               </div>
             </div>
           </div>

@@ -98,6 +98,8 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'planner-touchpoint-send': '마케팅 플래너 발송 문안',
   'predictive-daily': '예측 분석',
   'dm-ai-generate': '모바일 DM 생성', 'dm-builder': '모바일 DM 발행', 'dm-interaction-publish': '인터랙션 DM 발행',
+  // ★ 2026-08-22: 백엔드 CREDIT_COST_MAP에만 있고 여기 라벨이 없어 사용 내역에 "AI 작업"으로 뜨던 유일한 키.
+  'dm-custom-short-link': '단축 URL 발급',
   'inapp-ai-generator': '인앱 생성', 'inapp-publish': '인앱 게시', 'inapp-quick-action': '인앱 다듬기',
   'email-ai-generate': 'Email 생성', 'email-campaign-complete': 'Email 캠페인 완성', 'email-ai-publish': 'Email 발송 확정(구)', 'email-refine': 'Email 다듬기',
   'event-image-extract': '이미지 판독',

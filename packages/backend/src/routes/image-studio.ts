@@ -515,7 +515,7 @@ imageStudioRouter.post('/save', async (req: any, res: Response) => {
     return res.json({ success: true, asset: { id: assetId, url: moved.url, bytes: moved.bytes, channelSpec: effectiveSpec } });
   } catch (err: any) {
     if (isAssetsTableMissing(err)) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 cdp_assets 테이블 확인 요청 의무', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: '이미지 보관함을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     return respondStudioError(res, err);
   }
@@ -562,7 +562,7 @@ imageStudioRouter.post('/mms-from-asset', async (req: any, res: Response) => {
     });
   } catch (err: any) {
     if (isAssetsTableMissing(err)) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 cdp_assets 테이블 확인 요청 의무', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: '이미지 보관함을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     return respondStudioError(res, err);
   }

@@ -2509,7 +2509,7 @@ router.get('/operator/daily-brief', async (req: Request, res: Response) => {
     if (msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요: 운영자에게 company_daily_briefs 테이블 생성 요청이 필요합니다.',
+        error: '일일 브리핑을 준비 중입니다. 잠시 후 다시 시도해 주세요.',
         code: 'DB_MIGRATION_PENDING',
       });
     }
@@ -4707,7 +4707,7 @@ router.get('/operator/journeys/:id/pause-logs', async (req: Request, res: Respon
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요: journey_step_pause_logs 테이블 생성 요청 의무',
+        error: '여정 일시중지 기록을 준비 중입니다. 잠시 후 다시 시도해 주세요.',
         code: 'DB_MIGRATION_PENDING',
       });
     }

@@ -17,7 +17,7 @@ assetsRouter.use(authenticate);
 function respondMigrationPending(res: Response): void {
   res.status(503).json({
     success: false,
-    error: 'DB 마이그레이션 필요: 운영자에게 cdp_assets 테이블 생성 실행 요청 의무',
+    error: '이미지 보관함을 준비 중입니다. 잠시 후 다시 시도해 주세요.',
     code: 'DB_MIGRATION_PENDING',
   });
 }

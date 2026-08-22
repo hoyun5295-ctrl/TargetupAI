@@ -82,10 +82,12 @@ router.get('/state', requireAiOperatorTrialActive, async (req: Request, res: Res
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('relation') && msg.includes('does not exist')) {
+      // ★ 2026-08-22: 고객이 받는 문구에 테이블명이 실려 나가고 있었다(내부 용어 노출 0 하한 위반).
+      //   원인은 서버 로그가 갖고, 화면에는 "준비 중"만 알린다.
       return res.status(503).json({
         success: false,
         code: 'DB_MIGRATION_PENDING',
-        error: 'DB 마이그레이션이 필요합니다. 운영자에게 onboarding_wizard_state 테이블 신설을 요청하세요.',
+        error: '시작 안내를 준비 중입니다. 잠시 후 다시 시도해 주세요.',
       });
     }
     console.error('[onboarding/state] 실패:', err);

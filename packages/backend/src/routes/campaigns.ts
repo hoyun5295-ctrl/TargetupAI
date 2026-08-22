@@ -1584,7 +1584,7 @@ router.post('/direct-send/stage', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('relation') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: campaign_send_staging 테이블' });
+      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: '발송 준비 기능을 준비 중입니다. 잠시 후 다시 시도해 주세요.' });
     }
     console.error('[direct-send/stage] 적재 오류:', err);
     return res.status(500).json({ success: false, error: '수신자 적재 중 오류가 발생했습니다.' });
@@ -1606,7 +1606,7 @@ router.post('/direct-send/count', async (req: Request, res: Response) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('relation') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: campaign_send_staging 테이블' });
+      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: '발송 준비 기능을 준비 중입니다. 잠시 후 다시 시도해 주세요.' });
     }
     console.error('[direct-send/count] 오류:', err);
     return res.status(500).json({ success: false, error: '정제 카운트 중 오류가 발생했습니다.' });
@@ -1756,7 +1756,7 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
       return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: campaigns staging 컬럼 ALTER 요청' });
     }
     if (msg.includes('relation') && msg.includes('does not exist')) {
-      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: campaign_send_staging 테이블' });
+      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: '발송 준비 기능을 준비 중입니다. 잠시 후 다시 시도해 주세요.' });
     }
     console.error('[direct-send/commit] 오류:', err);
     return res.status(500).json({ success: false, error: '발송 접수 중 오류가 발생했습니다.' });

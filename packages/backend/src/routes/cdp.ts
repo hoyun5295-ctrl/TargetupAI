@@ -194,7 +194,7 @@ router.post('/ingest', requireCdpBrowserOrigin, cdpWriteBurst, async (req: Reque
     if (msg.includes('relation') && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'cdp_events 테이블 없음. DB 마이그레이션 필요',
+        error: '자사몰 활동 기록을 준비 중입니다. 잠시 후 다시 시도해 주세요.',
         code: 'DB_TABLE_MISSING',
       });
     }

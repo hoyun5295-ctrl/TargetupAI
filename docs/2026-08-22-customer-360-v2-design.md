@@ -149,7 +149,7 @@ foldRuns(events, { windowMs: 600000, minRun: 3, maxRun: 50, hasMore })
 
 ## 7) 상태·잔여
 
-- 2026-08-22 설계 승인(Harold "모달 맘에 든다, 제대로 하자") → **같은 세션에 구현 완료 · 배포 대기.**
+- 2026-08-22 설계 승인(Harold "모달 맘에 든다, 제대로 하자") → **같은 세션에 구현 완료 → 같은 날 배포완료(Harold).** 남은 것 = §5 실측 ①~⑥.
   - 백엔드: `customer-timeline.ts`(`SourceFilter` 술어 12원천 · `likePattern`·`kstDateToIso`·`minIso`·`monthsBack` · `rangeCapped` · `sends null` · `basis`·`monthly`(월별 GROUP BY, 추가 쿼리 0)) · `routes/customers.ts`(`q`·`from`·`to`·`summary=0`).
   - 프론트: `customer360/` 11파일 — `c360-ui.ts`(전용 리터럴) · `timeline-fold.ts`·`timeline-query.ts`(순수) · `useCustomerTimeline.ts`(훅 1개) · `Customer360Header`·`Rail`·`TimelineToolbar`·`TimelineList`·`TimelineStates`(훅 0) · `Panel`(조립) · `Modal`(껍데기 z-[70]·모바일). `timeline-kinds.ts` 24시간제 + `STATUS_PILL`·`STATUS_SR`. 부모 `CustomerDBModal` 무접촉.
   - 게이트 결과: 백엔드 tsc 0 · 프론트 tsc 0 · vitest **190파일 2,911건 통과**(`customer-timeline.test.ts` 18 + `customer360-fold.test.ts` 8 포함) · 프론트 `build:safe` 성공 · 검출기(impeccable detect) 지적 0 · 모델명·native dialog·화면 이모지·줄표 0 · `disabled:opacity`·`text-white/N` 사용 0 · 클래스 동적 조립 0.

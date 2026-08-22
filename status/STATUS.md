@@ -58,9 +58,9 @@
 
 ### 다음 세션 (예정)
 > 경위·범위·확정 사실은 링크가 소유한다. 여기엔 제목·다음 한 수·호출어만.
-> ★ **고객 360 — Phase 0 배포완료 · 0822(저녁) 격리 정정 + v2 코드완료·배포 대기** — 호출어 **"고객 360"** → [1차 설계서](../docs/2026-08-22-customer-360-timeline-design.md)(⛔ §2 · 격리 결함 §6-R-2 · 다음 축 §9) + [v2 설계서](../docs/2026-08-22-customer-360-v2-design.md)(계약 §3 · 게이트 §5 · 상태 §7)
+> ★ **고객 360 — Phase 0 + 격리 정정 + v2(2열·검색) 0822 배포완료 · 실측 대기** — 호출어 **"고객 360"** → [1차 설계서](../docs/2026-08-22-customer-360-timeline-design.md)(⛔ §2 · 격리 결함 §6-R-2 · 다음 축 §9) + [v2 설계서](../docs/2026-08-22-customer-360-v2-design.md)(계약 §3 · 게이트 §5 · 상태 §7)
 > ⛔ 발송 사실은 MySQL 큐에서만(PG `messages`는 죽은 테이블) / 식별 = `company_id + phone` 펼침(`customers_unified` 뷰는 접는다) / MySQL 시각 = KST naive(커서 UTC ISO 그대로면 9시간 어긋남) / 요금제 키 = `customer_db_view`(조회 전용 · 적재 `customer_db`는 전 플랜 유지)
-> 잔여 = 실측 1건 → **다음 = ①목록 필터 다중값(백엔드 `in` 이미 지원) ②타임라인 기간·검색어 ③인바운드 대화**
+> 잔여 = 실측(v2 설계서 §5 ①~⑥) → **다음 = ①목록 필터 다중값(백엔드 `in` 이미 지원) ②`onOpenCampaign` 배선(별건) ③인바운드 대화**
 > ★ **오퍼레이터 표면 단계 — 0821 코드완료·배포 대기** — 호출어 **"오퍼레이터 표면 단계"** → [설계·구현 기록](../docs/2026-08-21-operator-surface-tier-design.md)이 전부 소유. 다음 = `build:safe` 후 Harold 라이브 판정 · 별건 §7. 같은 날 직접 타겟 설정·발송 모달 인디고 리프트 = [콘솔 톤 §4·§5](../docs/2026-08-18-console-ui-unification.md)
 > ⓪ **AI 마케팅 진단 — v10 배포완료(0820)** — 호출어 **"마케팅 진단"** → [FEATURE-MARKETING-DIAGNOSIS.md](../docs/FEATURE-MARKETING-DIAGNOSIS.md) §12 v10이 전부 소유. 잔여 = 실측만
 > ① **템플릿** — 호출어 **"템플릿"** → **[FEATURE-ALIMTALK-TEMPLATE.md](../docs/FEATURE-ALIMTALK-TEMPLATE.md)가 전부 소유**(구조·불변 원칙·이관 절차·이력 §6·남은 것 §5). 여기 다시 쓰지 않는다.

@@ -441,7 +441,7 @@ dmRouter.get('/short-links', async (req: any, res: any) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('does not exist') && (msg.includes('relation') || msg.includes('column'))) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 dm_custom_short_links 테이블 생성을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: '단축 URL 기능을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[커스텀 단축링크 목록] 오류:', msg);
     return res.status(500).json({ error: '서버 오류' });
@@ -484,7 +484,7 @@ dmRouter.post('/short-links', async (req: any, res: any) => {
     }
     const msg = err?.message || '';
     if (msg.includes('does not exist') && (msg.includes('relation') || msg.includes('column'))) {
-      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 dm_custom_short_links 테이블 생성을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ success: false, error: '단축 URL 기능을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[커스텀 단축링크 생성] 오류:', msg);
     return res.status(500).json({ error: msg || '서버 오류' });
@@ -1293,7 +1293,7 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
     } catch (e: any) {
       const msg = e?.message || '';
       if (msg.includes('relation') && msg.includes('does not exist')) {
-        return res.status(503).json({ error: 'DB 마이그레이션 필요: 운영자에게 dm_recipient_tokens 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+        return res.status(503).json({ error: '수신자별 열람 기록을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
       }
       throw e;
     }
@@ -1536,7 +1536,7 @@ dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
   } catch (err: any) {
     const msg = err?.message || '';
     if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요: dm_recipient_tokens 테이블 / dm_views ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return res.status(503).json({ error: '수신자별 열람 기록을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[DM 발송 추적] 오류:', err?.message);
     return res.status(500).json({ error: err?.message || '추적 조회 실패' });
