@@ -405,7 +405,7 @@ export default function AgencySendComposer({ show, onClose, onCreated }: Props) 
                 <label className={CUI_LABEL}>보낼 시각 <span className="text-rose-500">*</span></label>
                 <input type="datetime-local" value={requestedAt} onChange={(e) => setRequestedAt(e.target.value)} className={CUI_INPUT} />
                 <p className={CUI_HINT}>
-                  지금부터 3시간 뒤부터 정할 수 있습니다. 문안 검사와 승인, 발송 직전 재검사에 필요한 시간입니다.
+                  지금부터 3시간 뒤부터 정할 수 있습니다. 문안 검사와 승인, 발송 준비에 필요한 시간입니다.
                 </p>
               </div>
 

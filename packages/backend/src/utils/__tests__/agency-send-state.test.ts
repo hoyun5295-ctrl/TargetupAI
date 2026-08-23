@@ -12,7 +12,8 @@ import { describe, it, expect } from 'vitest';
 import {
   AGENCY_SEND_STATUSES, canTransition, canCancel, isEditable, needsQueueCancel,
   validateRequestedAt, checkApproval, isFinalTestDue, isQueueDue, isApprovalExpired, isApprovalCurrent,
-  isLockStale, lockRecoveryStatus, hasTestRoundsLeft, kstHour, requiredLeadMinutes, NOT_CANCELABLE_SQL,
+  isLockStale, lockRecoveryStatus, hasTestRoundsLeft, kstHour, kstDateKey, isSameKstDay,
+  requiredLeadMinutes, NOT_CANCELABLE_SQL,
   FINAL_TEST_LEAD_MINUTES, MAX_TEST_ROUNDS, MIN_LEAD_MINUTES, QUEUE_MARGIN_MINUTES,
   type AgencySendStatus,
 } from '../agency-send-state';
@@ -119,6 +120,25 @@ describe('요청 시각 검증', () => {
     expect(kstHour(new Date('2026-08-24T01:00:00Z'))).toBe(10);
     expect(kstHour(new Date('2026-08-24T15:30:00Z'))).toBe(0); // 다음날 00:30 KST
   });
+
+  /**
+   * ★ 2026-08-23(2) 같은 날 판정. **UTC 날짜로 세면 안 된다** — KST 09시 이전은 UTC로 전날이라,
+   * 아침에 접수해 그날 저녁에 보내는 건이 "다른 날"로 잡혀 재검사가 되살아난다.
+   */
+  it('같은 날 판정은 KST 달력 기준이다 — UTC 자정에 갈리지 않는다', () => {
+    const kstMorning = new Date('2026-08-23T23:30:00Z'); // KST 8/24 08:30
+    const kstEvening = new Date('2026-08-24T10:00:00Z'); // KST 8/24 19:00
+    expect(kstDateKey(kstMorning)).toBe('2026-08-24');
+    expect(isSameKstDay(kstMorning, kstEvening)).toBe(true);   // UTC로는 날짜가 다르다
+
+    // KST 자정 경계에서 갈린다
+    expect(isSameKstDay(new Date('2026-08-24T14:59:00Z'), new Date('2026-08-24T15:01:00Z'))).toBe(false);
+
+    // 값이 없으면 "같은 날"이 아니다 → 검사를 건너뛰지 않는다(안전한 쪽)
+    expect(isSameKstDay(null, kstEvening)).toBe(false);
+    expect(isSameKstDay(kstMorning, undefined)).toBe(false);
+    expect(isSameKstDay(new Date('bad'), kstEvening)).toBe(false);
+  });
 });
 
 describe('승인 판정', () => {
@@ -192,6 +212,27 @@ describe('승인 판정', () => {
     expect(requiredLeadMinutes('reapproval')).toBe(QUEUE_MARGIN_MINUTES);
     expect(requiredLeadMinutes('approved')).toBe(QUEUE_MARGIN_MINUTES);
   });
+
+  /**
+   * ★ 2026-08-23(2) Harold 지시 계약.
+   * 접수한 그날 나가는 건은 접수 검사가 곧 당일 검사라 재검사가 없다.
+   * 그런 건에 2시간을 요구하면 **하지도 않을 검사를 이유로** 승인을 막고 근거 없이 만료시킨다.
+   */
+  it('당일 검사를 통과한 건은 승인 마감이 2시간이 아니다 — 남은 일이 적재뿐이다', () => {
+    expect(requiredLeadMinutes('awaiting_approval', true)).toBe(QUEUE_MARGIN_MINUTES);
+
+    const sameDay = { ...base, requestedAt: minutesLater(100), finalTestedAt: minutesLater(-30) };
+    expect(checkApproval(sameDay, 7, NOW).ok).toBe(true);
+    expect(checkApproval({ ...sameDay, requestedAt: minutesLater(QUEUE_MARGIN_MINUTES + 1) }, 7, NOW).ok).toBe(true);
+
+    // 검사를 안 지난 같은 시각의 건은 그대로 거절된다(다른 날 발송)
+    expect(checkApproval({ ...base, requestedAt: minutesLater(100) }, 7, NOW).code).toBe('TOO_LATE');
+
+    // 적재 여유조차 없으면 거절하되, **재검사를 이유로 들지 않는다**
+    const tooLate = checkApproval({ ...sameDay, requestedAt: minutesLater(QUEUE_MARGIN_MINUTES - 1) }, 7, NOW);
+    expect(tooLate.code).toBe('TOO_LATE');
+    expect(tooLate.error).not.toContain('재검사');
+  });
 });
 
 describe('워커 픽업 판정', () => {
@@ -228,6 +269,23 @@ describe('워커 픽업 판정', () => {
       const expire = isApprovalExpired('approved', at, NOW);
       if (m <= FINAL_TEST_LEAD_MINUTES) expect(test || expire).toBe(true); // 반드시 누군가 맡는다
       expect(test && expire).toBe(false);                                  // 둘이 동시에 맡지 않는다
+    }
+  });
+
+  /**
+   * ★ 2026-08-23(2) 같은 축을 당일 검사 통과 건에도 잠근다.
+   * 그 건은 재검사가 아니라 **적재**가 맡는다. 적재와 만료 사이에 빠지는 구간이 생기면
+   * 승인은 됐는데 아무도 안 맡는 건이 다시 나온다(§12-3과 같은 형태).
+   */
+  it('당일 검사 통과 건은 적재와 만료가 구간을 나눠 갖는다 — 재검사는 아무 데도 없다', () => {
+    const tested = minutesLater(-30);
+    for (let m = 1; m <= 130; m += 1) {
+      const at = minutesLater(m);
+      expect(isFinalTestDue('approved', at, NOW, tested)).toBe(false); // 두 번 검사하지 않는다
+      const queue = isQueueDue('approved', at, NOW, tested);
+      const expire = isApprovalExpired('approved', at, NOW, tested);
+      expect(queue || expire).toBe(true);
+      expect(queue && expire).toBe(false);
     }
   });
 

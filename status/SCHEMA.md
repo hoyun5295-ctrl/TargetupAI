@@ -3149,6 +3149,7 @@ CREATE INDEX idx_gtm_company ON gateway_template_mappings (company_id);
 > `dispatch_key` = **예약 시도의 식별자.** 캠페인이 이 값을 `campaigns.staging_id`로 들고 있어, 크래시 뒤 재시도가 같은 시도를 두 번 만들지 않는다(멱등의 근거는 원장의 `campaign_id`가 아니다 — 그건 나중에 적힌다). 문안 수정·시각 변경이 이 값과 `campaign_id`를 지운다 = 새 시도. 같은 날 `CREATE INDEX idx_campaigns_staging ON campaigns (staging_id)` 실행완료(멱등 조회용).
 > **`revision integer NOT NULL DEFAULT 0`**(★2026-08-23 ALTER 실행완료) = **행 수정 번호.** 이 행에 일어난 모든 변경이 +1 한다. 담당자 경로(승인·문안 수정·시각 변경·취소)는 화면이 본 값을 되돌려주고 서버가 `WHERE revision = ?`로 쓴다. 축마다 따로 비교하면(문안 버전만, 상태만) 시각만 바뀐 건이 통과해 **담당자가 못 본 시각으로 승인이 성립한다.**
 > **`lock_token uuid`**(★2026-08-23 ALTER 실행완료) = **워커 소유권 토큰.** 선점할 때 `gen_random_uuid()`로 발급하고, 워커의 모든 쓰기가 이 토큰을 조건으로 건다. ⛔ **타임스탬프를 토큰으로 쓰지 마라** — PG는 마이크로초, 드라이버는 밀리초라 왕복에서 어긋나 정상 소유자도 0행이 된다(memory `feedback_no_timestamp_as_fencing_token`).
+> **`final_test_at timestamptz`** = **이 문안이 발송일 당일 검사를 통과한 시각**(★2026-08-23(2) 뜻 확정). 값이 있으면 재검사를 건너뛰고 적재로 간다. ⛔ **통과 분기에서만 찍는다** — 시도 시각인 `last_test_at`은 차단된 회차에도 갱신되므로 이 판정에 쓰면 **차단된 문안이 검사 없이 예약된다.** 찍는 자리 = 워커 A(접수일 = 발송일일 때)·워커 B(통과). 지우는 자리 = 문안 수정(무조건)·시각 변경(새 시각이 다른 날일 때). 상세 = 대행발송 설계서 §14.
 > `lock_at` = 선점 시각. **만료 판정(30분)에만** 쓴다. 소유권 비교에는 쓰지 않는다.
 
 **agency_send_recipients**: `id bigserial PK, request_id uuid NOT NULL REFERENCES agency_send_requests(id) ON DELETE CASCADE, row_no integer NOT NULL, phone varchar(20) NOT NULL, vars jsonb NOT NULL DEFAULT '{}'`. 인덱스 `(request_id, row_no)`.

@@ -40,6 +40,11 @@ export interface AgencySendRequest {
   approvalVersion: number | null;
   /** 발송 직전 검사를 이미 통과한 문안인가. 값이 있으면 승인 즉시 예약된다 */
   finalTestedAt: string | null;
+  /**
+   * 발송 전에 검사가 한 번 더 남았는가. 접수한 그날 나가는 건은 접수 검사가 곧 당일 검사라 false다.
+   * ⛔ 화면에서 날짜를 다시 계산하지 않는다. 판정은 서버 하나가 소유한다.
+   */
+  finalTestRequired: boolean;
   reapprovalCount: number;
   queuedAt: string | null;
   campaignId: string | null;
@@ -173,7 +178,9 @@ export const STATUS_LABEL: Record<AgencySendStatus, string> = {
   awaiting_approval: '승인 대기',
   test_failed: '문안 확인 필요',
   approved: '발송 예정',
-  final_testing: '발송 전 검사 중',
+  // 이 상태는 세 가지를 덮는다: 당일 재검사 · 재승인 건 적재 · 당일 접수 건 적재.
+  // "검사 중"이라고 쓰면 뒤 둘에는 거짓이라, 셋 다 참인 말로 둔다(★2026-08-23(2)).
+  final_testing: '발송 준비 중',
   queued: '예약 완료',
   reapproval: '재승인 대기',
   expired: '미발송',

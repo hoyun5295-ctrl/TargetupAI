@@ -114,6 +114,25 @@ export function kstHour(at: Date): number {
   return new Date(at.getTime() + KST_OFFSET_MS).getUTCHours();
 }
 
+/** KST 달력 날짜 키(YYYY-MM-DD). "같은 날인가"를 판정하는 유일한 기준 */
+export function kstDateKey(at: Date): string {
+  return new Date(at.getTime() + KST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+/**
+ * 두 시각이 **KST 기준 같은 날**인가.
+ *
+ * ★ 2026-08-23 신설(Harold 지시). 접수한 그날 나가는 건은 접수 때 통과한 검사가 곧 당일 검사다.
+ *   그런 건에 발송 2시간 전 재검사를 또 돌리면 같은 문안을 같은 날 두 번 검사하는 것이고,
+ *   테스트폰 발송 비용이 한 번 더 나가며 통신사 결과가 흔들려 승인받은 문안이 뒤집힐 수 있다.
+ *   접수일과 발송일이 다르면 그날의 검사가 없으므로 재검사는 그대로 한다.
+ */
+export function isSameKstDay(a: Date | null | undefined, b: Date | null | undefined): boolean {
+  if (!a || !b) return false;
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return false;
+  return kstDateKey(a) === kstDateKey(b);
+}
+
 export interface RequestedAtCheck {
   valid: boolean;
   error?: string;
@@ -151,7 +170,7 @@ export function validateRequestedAt(
     const hours = Math.ceil(minLeadMinutes / 60);
     return {
       valid: false,
-      error: `지금부터 ${hours}시간 뒤부터 정할 수 있습니다. 문안 검사와 승인, 발송 직전 재검사에 필요한 시간입니다.`,
+      error: `지금부터 ${hours}시간 뒤부터 정할 수 있습니다. 문안 검사와 승인, 발송 준비에 필요한 시간입니다.`,
     };
   }
   if (diffMinutes / (60 * 24) > 365) {
@@ -184,6 +203,11 @@ export interface ApprovalTarget {
    */
   revision: number;
   requestedAt: Date;
+  /**
+   * 이 문안이 **발송일 당일 검사를 통과한** 시각(`final_test_at`). 없으면 아직 안 지났다는 뜻이다.
+   * 통과 분기에서만 찍히므로 "있다 = 남은 일이 적재뿐이다"가 성립한다.
+   */
+  finalTestedAt?: Date | null;
 }
 
 /**
@@ -192,11 +216,17 @@ export interface ApprovalTarget {
  * 갈리면 그 사이가 함정이 된다: 승인은 되는데 워커가 안 잡는 구간, 또는 승인이 거절되는데
  * 만료도 안 되는 구간이 생긴다. §12-2·§12-3이 정확히 그 두 구간이었다.
  *
+ *   · 당일 검사 통과함(`final_test_at` 있음) = 상태와 무관하게 남은 일이 적재뿐이다 → 적재 여유만
  *   · `awaiting_approval` = 승인 뒤 **당일 재검사**가 들어가야 한다 → 2시간
  *   · `reapproval`        = 당일 검사를 이미 통과한 문안이다 → 적재 여유만
  *   · `approved`          = 승인이 끝났다. 워커가 검사·적재를 하면 된다 → 적재 여유만
+ *
+ * ★ 2026-08-23(2) `finalTested` 합류(Harold 지시). 접수한 그날 나가는 건은 접수 검사가 곧 당일 검사라
+ *   재검사가 없다. 그런 건에 2시간을 요구하면 **하지도 않을 검사를 이유로** 승인을 거절하고
+ *   근거 없이 만료시킨다. 필요한 리드타임은 상태가 아니라 **남은 일**이 정한다.
  */
-export function requiredLeadMinutes(status: AgencySendStatus): number {
+export function requiredLeadMinutes(status: AgencySendStatus, finalTested = false): number {
+  if (finalTested) return QUEUE_MARGIN_MINUTES;
   return status === 'awaiting_approval' ? FINAL_TEST_LEAD_MINUTES : QUEUE_MARGIN_MINUTES;
 }
 
@@ -225,11 +255,13 @@ export function checkApproval(target: ApprovalTarget, approvingRevision: number,
   }
   // ⛔ 경계는 만료 판정과 **같은 쪽으로** 닫는다(`<=`). 한쪽이 `<`면 딱 그 값일 때
   //   "승인은 됐는데 같은 tick에 만료되는" 건이 생긴다.
+  const finalTested = !!target.finalTestedAt;
   const minutesLeft = (target.requestedAt.getTime() - now.getTime()) / 60000;
-  if (minutesLeft <= requiredLeadMinutes(target.status)) {
+  if (minutesLeft <= requiredLeadMinutes(target.status, finalTested)) {
     return {
       ok: false,
-      error: target.status === 'awaiting_approval'
+      // ⛔ 당일 검사가 끝난 건에 "재검사에 필요한 시간"이라고 쓰면 거짓이다. 남은 일이 다르면 문장도 다르다.
+      error: target.status === 'awaiting_approval' && !finalTested
         ? '보낼 시각까지 2시간이 남지 않았습니다. 발송 직전 재검사에 필요한 시간이라 시각을 다시 정해 주세요.'
         : '보낼 시각이 너무 가까워 예약을 넣지 못합니다. 시각을 다시 정해 주세요.',
       code: 'TOO_LATE',
@@ -244,6 +276,9 @@ export function checkApproval(target: ApprovalTarget, approvingRevision: number,
  * ★ 2026-08-23 창(110분 초과 120분 이하)을 없애고 단조 조건으로 바꿨다. 워커 한 tick이 밀리거나
  *   앞 건 검사가 길어져 10분 창을 넘기면 그 건은 영영 안 잡히고, 만료 판정도 `approved`를 보지 않아
  *   **발송도 만료도 안내도 없는 건**이 남았다(§12-3). 중복 처리는 창이 아니라 선점 UPDATE(`status='approved'`)가 막는다.
+ *
+ * ★ 2026-08-23(2) 접수한 그날 나가는 건은 워커 A가 1차 검사 통과 시점에 `final_test_at`을 찍는다.
+ *   그래서 여기서 걸러지고 곧바로 적재(`isQueueDue`)로 간다. 판정은 그대로 두고 **스위치를 켜는 자리만 늘렸다.**
  */
 export function isFinalTestDue(
   status: AgencySendStatus, requestedAt: Date, now: Date, finalTestedAt?: Date | null,
@@ -272,7 +307,10 @@ export function isApprovalCurrent(approvalVersion: any, contentVersion: any): bo
  *
  * 검사를 두 번 하지 않는 이유: 그 문안은 방금 통과했다. 다시 돌리면 통신사 결과가 흔들려
  * 승인받은 문안이 또 차단으로 뒤집힐 수 있고, 그 사이 남은 시간도 사라진다.
- * ⛔ `final_test_at`은 문안 수정·시각 변경에서 반드시 지워진다(그때는 다시 검사해야 한다).
+ * ⛔ `final_test_at`은 문안이 바뀌면 반드시 지워진다. 시각 변경은 **새 시각이 그 검사와 같은 날일 때만** 남긴다.
+ *
+ * ★ 2026-08-23(2) 접수한 그날 나가는 건도 여기로 온다(워커 A가 통과 시점에 찍는다).
+ *   ⛔ 그래도 **적재 시점은 그대로 발송 2시간 전**이다. 상한은 워커 후보 SQL이 들고 있다.
  */
 export function isQueueDue(
   status: AgencySendStatus, requestedAt: Date, now: Date, finalTestedAt?: Date | null,
@@ -287,10 +325,14 @@ export function isQueueDue(
  *
  * ★ 2026-08-23 `approved`가 대상에 들어왔다. 전에는 승인된 건이 재검사 창을 놓치면 아무 워커도
  *   맡지 않아 요청 시각이 지나도 그대로 남았다(§12-3).
+ * ★ 2026-08-23(2) `finalTestedAt`을 함께 받는다. **승인 판정과 같은 인자를 써야 한다** —
+ *   한쪽만 알면 승인은 되는데 다음 tick이 만료시키는 구간이 다시 생긴다.
  */
-export function isApprovalExpired(status: AgencySendStatus, requestedAt: Date, now: Date): boolean {
+export function isApprovalExpired(
+  status: AgencySendStatus, requestedAt: Date, now: Date, finalTestedAt?: Date | null,
+): boolean {
   if (status !== 'awaiting_approval' && status !== 'reapproval' && status !== 'approved') return false;
-  return (requestedAt.getTime() - now.getTime()) / 60000 <= requiredLeadMinutes(status);
+  return (requestedAt.getTime() - now.getTime()) / 60000 <= requiredLeadMinutes(status, !!finalTestedAt);
 }
 
 /**

@@ -206,9 +206,9 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                   <Check className={CUI_INFO_ICON} size={16} strokeWidth={2} />
                   <p className={CUI_INFO_TEXT}>
                     담당자 번호로 보내 드린 문자를 확인하셨나요? 아래 문안 그대로 나갑니다.
-                    {req.status === 'reapproval'
-                      ? ' 검사는 이미 통과했으니 승인하시면 곧바로 예약됩니다.'
-                      : ' 승인하면 요청한 시각에 예약됩니다. 발송 두 시간 전에 한 번 더 검사합니다.'}
+                    {!req.finalTestRequired
+                      ? ' 검사는 이미 통과했으니 승인하시면 요청한 시각에 예약됩니다.'
+                      : ' 승인하면 요청한 시각에 예약됩니다. 발송일이 오늘이 아니라서 발송 두 시간 전에 한 번 더 검사합니다.'}
                   </p>
                 </div>
               )}

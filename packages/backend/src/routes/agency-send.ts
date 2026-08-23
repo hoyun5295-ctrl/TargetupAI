@@ -16,7 +16,7 @@ import { isCallbackRegistered } from '../utils/callback-filter';
 import { validateMmsPayload } from '../utils/mms-validator';
 import { normalizePhone } from '../utils/normalize-phone';
 import {
-  canCancel, checkApproval, isEditable, NOT_CANCELABLE_SQL, validateRequestedAt,
+  canCancel, checkApproval, isEditable, isSameKstDay, NOT_CANCELABLE_SQL, validateRequestedAt,
   type AgencySendStatus,
 } from '../utils/agency-send-state';
 import { buildSlotPlan, extractAgencyVars } from '../utils/agency-send-vars';
@@ -172,6 +172,11 @@ function toPublic(row: any) {
     approvalVersion: row.approval_version,
     // 화면이 "지금 승인하면 바로 예약된다"와 "승인 뒤 발송 직전 검사가 한 번 더 있다"를 구분하는 값
     finalTestedAt: row.final_test_at,
+    /**
+     * 발송 전에 검사가 **한 번 더 남았는가**(★2026-08-23(2)).
+     * ⛔ 같은 날 판정을 화면에서 다시 계산하지 않는다 — 판정이 둘이 되면 화면과 워커가 갈린다.
+     */
+    finalTestRequired: !row.final_test_at,
     reapprovalCount: row.reapproval_count,
     queuedAt: row.queued_at,
     campaignId: row.campaign_id,
@@ -384,8 +389,16 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
     // ⛔ 승인의 기준은 **행 수정 번호**다(★2026-08-23 Codex 2R high). 문안 버전만 보면
     //   시각만 바뀐 건은 상태도 버전도 그대로라, 담당자가 **못 본 시각**으로 옛 승인이 통과한다.
     const revision = Number(req.body?.revision);
+    // ⛔ `final_test_at`을 함께 넘긴다(★2026-08-23(2)). 접수한 그날 나가는 건은 접수 검사가 곧
+    //   당일 검사라 재검사가 없다. 그런 건에 2시간을 요구하면 하지도 않을 검사를 이유로 승인을 막는다.
+    //   만료 판정(워커 C)도 같은 인자를 쓴다.
     const check = checkApproval(
-      { status: row.status, revision: Number(row.revision), requestedAt: new Date(row.requested_at) },
+      {
+        status: row.status,
+        revision: Number(row.revision),
+        requestedAt: new Date(row.requested_at),
+        finalTestedAt: row.final_test_at ? new Date(row.final_test_at) : null,
+      },
       revision,
       new Date(),
     );
@@ -499,7 +512,8 @@ router.post('/:id/reschedule', async (req: Request, res: Response) => {
   if (!auth) return;
   try {
     const r = await query(
-      `SELECT status, revision, is_ad, campaign_id FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
+      `SELECT status, revision, is_ad, campaign_id, final_test_at
+         FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
       [req.params.id, auth.companyId],
     );
     if (r.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
@@ -518,20 +532,31 @@ router.post('/:id/reschedule', async (req: Request, res: Response) => {
     if (!when.valid) return res.status(400).json({ success: false, error: when.error });
 
     // 문안은 그대로다. 검사를 이미 통과한 건이면 승인 대기로 돌려보내고, 아니면 검사부터 다시 한다.
-    // ⛔ `final_test_at`을 지운다 — 시각이 바뀌면 그 날 그 시각 기준의 검사를 다시 받아야 한다(불변 2).
     // ⛔ `dispatch_key`·`campaign_id`를 지운다 — 새 시각은 새 시도다. 그대로 두면 실패한 앞 시도의
     //   캠페인을 계속 찾아 같은 자리에서 다시 닫힌다(★2026-08-23 Codex 적대 검토 high).
     // ⛔ 관찰한 상태를 조건에 넣는다(문안 수정과 같은 이유).
     const backTo: AgencySendStatus = r.rows[0].status === 'test_failed' ? 'received' : 'awaiting_approval';
+
+    // `final_test_at` = 이 문안이 **발송일 당일 검사를 통과한** 시각. 시각이 바뀌면 발송일이 바뀔 수 있어
+    // 원칙은 지우는 것이다(불변 2). 다만 **새 시각이 그 검사와 같은 날이면 그 검사가 여전히 당일 검사**라
+    // 남긴다(★2026-08-23(2) Harold 지시 — 같은 날 두 번 검사하지 않는다).
+    // ⛔ `received`로 돌아가는 건(문안을 다시 검사한다)은 조건 없이 지운다. 남기면 검사 없이 나간다.
+    const priorFinalTest = r.rows[0].final_test_at ? new Date(r.rows[0].final_test_at) : null;
+    const keepFinalTest = backTo === 'awaiting_approval'
+      && !!priorFinalTest
+      && !!when.at
+      && isSameKstDay(priorFinalTest, when.at);
+
     const updated = await query(
       `UPDATE agency_send_requests
           SET requested_at = $1, status = $2, expired_at = NULL,
-              approved_at = NULL, approved_by = NULL, approval_version = NULL, final_test_at = NULL,
+              approved_at = NULL, approved_by = NULL, approval_version = NULL,
+              final_test_at = $6,
               dispatch_key = NULL, campaign_id = NULL, lock_at = NULL, lock_token = NULL,
               revision = revision + 1, updated_at = NOW()
         WHERE id = $3::uuid AND company_id = $4::uuid AND revision = $5
         RETURNING *`,
-      [when.at, backTo, req.params.id, auth.companyId, observedRevision],
+      [when.at, backTo, req.params.id, auth.companyId, observedRevision, keepFinalTest ? priorFinalTest : null],
     );
     if (updated.rows.length === 0) {
       return res.status(409).json({
@@ -541,7 +566,9 @@ router.post('/:id/reschedule', async (req: Request, res: Response) => {
       });
     }
 
-    await logEvent(req.params.id, 'rescheduled', { requestedAt: when.at?.toISOString(), status: backTo });
+    await logEvent(req.params.id, 'rescheduled', {
+      requestedAt: when.at?.toISOString(), status: backTo, keepFinalTest,
+    });
     return res.json({ success: true, request: toPublic(updated.rows[0]) });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);

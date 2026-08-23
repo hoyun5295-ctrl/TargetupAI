@@ -28,8 +28,9 @@ import {
   buildQueueFailedNotify, buildReapprovalNotify, buildTestFailedNotify, formatWhen, shortLabel,
 } from './agency-send-notify';
 import {
-  isApprovalCurrent, isApprovalExpired, isFinalTestDue, isLockStale, isQueueDue, lockRecoveryStatus,
-  LOCK_STALE_MINUTES, MAX_TEST_ROUNDS, QUEUE_MARGIN_MINUTES, type AgencySendStatus,
+  isApprovalCurrent, isApprovalExpired, isFinalTestDue, isLockStale, isQueueDue, isSameKstDay,
+  lockRecoveryStatus, LOCK_STALE_MINUTES, MAX_TEST_ROUNDS, QUEUE_MARGIN_MINUTES,
+  type AgencySendStatus,
 } from './agency-send-state';
 import { buildSlotPlan, toSlotValues } from './agency-send-vars';
 import { inspectAttemptCampaign, neutralizeCampaign } from './agency-send-campaign';
@@ -226,6 +227,13 @@ async function buildSample(row: any): Promise<{ text: string; subject: string }>
 /**
  * 스팸 검사 한 판. 걸리면 다듬어 다시 본다.
  * ⛔ 다듬은 문안은 `refineForSpam`의 검사를 통과한 것만 쓴다 — 날짜·번호·링크가 바뀐 문안은 버린다.
+ *
+ * ⚠ **[별도 과제 · 이번 축 아님] 통과 판정이 `!== 'blocked'`라 느슨하다.** 상류 계약은
+ *   `pass | blocked | failed | timeout`이고 적재 실패는 `failed`, 대기 만료는 `timeout`,
+ *   응답이 비면 `undefined`다. 즉 **검사가 못 돈 것도 통과로 읽는다.**
+ *   이것은 당일 재검사 폐지와 무관하게 **이전부터 있던 것**이고 워커 B에도 똑같이 있다
+ *   (오늘도 T-2h 재검사가 타임아웃이면 통과로 읽고 발송한다). 고치려면 실패를 판정이 아니라
+ *   의존 장애로 다루는 재시도·백오프 설계가 함께 필요해 별도 과제로 뺐다(설계서 §14-6).
  */
 async function runSpamRound(row: any, startRound: number): Promise<{
   passed: boolean;
@@ -347,8 +355,23 @@ async function runFirstTest(): Promise<void> {
 
       // ⛔ 상태를 먼저 확정하고 그다음에 알린다(★2026-08-23 Codex 2R high).
       //   알림을 먼저 보내면, 소유권을 잃어 상태가 안 바뀐 건에도 테스트 문자와 승인 요청이 나간다.
-      if (!await setStatus(row.id, 'awaiting_approval', { ...RELEASE }, token)) continue;
-      await logEvent(row.id, 'awaiting_approval', { rounds });
+      //
+      // ★ 2026-08-23(2) 이 검사가 **발송일에 통과한 검사**면 그것이 곧 당일 검사다(Harold 지시).
+      //   같은 문안을 같은 날 두 번 검사하지 않는다: 테스트폰 발송 비용이 한 번 더 나가고,
+      //   통신사 결과가 흔들려 담당자가 이미 승인한 문안이 차단으로 뒤집힐 수 있다.
+      //   ⛔ 이 자리는 **통과 분기 안**이다. 위 `!passed` 분기에서는 절대 찍히지 않는다 —
+      //     찍히면 차단된 문안이 검사 없이 예약된다.
+      //   기준은 접수일이 아니라 **통과한 시각**이다. 배치가 밀려 자정을 넘겨 통과했다면
+      //   그것은 넘어간 그 날의 검사다(그 날 나가는 건이면 유효하고, 아니면 워커 B가 2시간 전에 다시 본다).
+      //   비교와 저장에 **같은 한 시각**을 쓴다 — 따로 찍으면 자정 경계에서 둘이 갈린다.
+      const passedAt = new Date();
+      const sameDaySend = isSameKstDay(passedAt, new Date(row.requested_at));
+      if (!await setStatus(
+        row.id, 'awaiting_approval',
+        sameDaySend ? { ...RELEASE, final_test_at: passedAt } : { ...RELEASE },
+        token,
+      )) continue;
+      await logEvent(row.id, 'awaiting_approval', { rounds, sameDaySend });
 
       // 통과한 문안을 담당자에게 **실물 그대로** 보낸다(MMS면 이미지까지).
       //   승인은 이 문자를 본 뒤에 하는 것이라, 여기서 실제와 다른 것을 보내면 승인의 의미가 없다.
@@ -400,7 +423,8 @@ async function runFinalTest(onlyRequestId?: string): Promise<void> {
     const requestedAt = new Date(row.requested_at);
     const finalTestedAt = row.final_test_at ? new Date(row.final_test_at) : null;
 
-    // ① 재승인 건 = 당일 검사를 이미 통과한 문안이다. 다시 검사하지 않고 예약만 만든다.
+    // ① 당일 검사를 이미 통과한 문안이다. 다시 검사하지 않고 예약만 만든다.
+    //   두 갈래가 여기로 온다: 재승인 건 · **접수한 그날 나가는 건**(★2026-08-23(2) 워커 A가 통과 때 찍는다).
     //   ⛔ 여기서 또 검사하면 승인받은 문안이 통신사 결과에 따라 다시 뒤집히고, 남은 시간도 사라진다.
     if (isQueueDue('approved', requestedAt, now, finalTestedAt)) {
       const locked = await query(
@@ -415,7 +439,7 @@ async function runFinalTest(onlyRequestId?: string): Promise<void> {
       try {
         await dispatchToPipeline(ready, String(ready.current_content || ''), ready.lock_token);
       } catch (err: any) {
-        console.error(`${LOG} 재승인 건 예약 실패 request=${ready.id}:`, err);
+        console.error(`${LOG} 당일 검사 통과 건 예약 실패 request=${ready.id}:`, err);
         await setStatus(ready.id, 'approved', { ...RELEASE }, ready.lock_token).catch(() => {});
         await logEvent(ready.id, 'dispatch_error', { error: String(err?.message || '') });
       }
@@ -701,6 +725,9 @@ async function dispatchToPipeline(row: any, content: string, token: string): Pro
 async function runExpire(): Promise<void> {
   // ★ 2026-08-23 `approved` 합류(§12-3). 승인은 받았는데 재검사·예약을 넣을 시간이 지난 건이
   //   전에는 어느 워커의 대상도 아니어서 발송도 만료도 안내도 없이 그대로 남았다.
+  //
+  // ⚠ [별도 과제 · 이번 축 아님] 후보를 "2시간 안" 전부로 담고 `LIMIT`을 먼저 건다. 당일 검사를 통과해
+  //   아직 만료가 아닌 건이 스무 자리를 채우면 만료된 건이 밀린다(설계서 §14-6). 지금 볼륨에서는 도달하지 않는다.
   const rows = await query(
     `SELECT * FROM agency_send_requests
       WHERE status IN ('awaiting_approval','reapproval','approved')
@@ -711,7 +738,12 @@ async function runExpire(): Promise<void> {
 
   const now = new Date();
   for (const row of rows.rows) {
-    if (!isApprovalExpired(row.status, new Date(row.requested_at), now)) continue;
+    // ⛔ `final_test_at`을 함께 넘긴다(★2026-08-23(2)). 당일 검사가 끝난 건은 남은 일이 적재뿐이라
+    //   승인 마감이 2시간이 아니다. 승인 라우트와 **같은 인자**를 쓰지 않으면 승인은 되는데
+    //   다음 tick이 만료시키는 구간이 다시 생긴다(§12-2와 같은 형태).
+    if (!isApprovalExpired(
+      row.status, new Date(row.requested_at), now, row.final_test_at ? new Date(row.final_test_at) : null,
+    )) continue;
     const wasApproved = row.status === 'approved';
 
     // ⛔ 관찰한 상태·수정 번호로 잡고, **워커가 잡고 있지 않은 행만** 만료시킨다(★2026-08-23 Codex 3R high).
