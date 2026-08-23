@@ -16,10 +16,11 @@ import { isCallbackRegistered } from '../utils/callback-filter';
 import { validateMmsPayload } from '../utils/mms-validator';
 import { normalizePhone } from '../utils/normalize-phone';
 import {
-  canCancel, checkApproval, isEditable, needsQueueCancel, validateRequestedAt,
+  canCancel, checkApproval, isEditable, NOT_CANCELABLE_SQL, validateRequestedAt,
   type AgencySendStatus,
 } from '../utils/agency-send-state';
 import { buildSlotPlan, extractAgencyVars } from '../utils/agency-send-vars';
+import { findAttemptCampaignId } from '../utils/agency-send-campaign';
 import { SEND_HOURS } from '../config/defaults';
 import { triggerAgencySendDispatch } from '../utils/agency-send-worker';
 
@@ -35,6 +36,8 @@ const MAX_CONTENT = 2000;
  *   상한을 넘긴다(적재가 통째로 실패한다). 나눠 넣되 **한 트랜잭션 안**에서 처리해 부분 적재를 만들지 않는다.
  */
 const RECIPIENT_INSERT_CHUNK = 2000;
+/** 테스트 문자를 받을 담당자 수 상한. 그 이상은 실수로 명단을 넣은 것이다 */
+const MAX_MANAGER_PHONES = 10;
 
 const isMissingRelation = (err: any) => {
   const msg = String(err?.message || '');
@@ -55,6 +58,24 @@ function rejectSubjectVars(subject: any, res: Response): boolean {
     success: false,
     code: 'SUBJECT_VARS',
     error: `제목에는 항목을 넣을 수 없습니다: ${vars.map((v) => `%${v}%`).join(' ')}. 제목은 모든 수신자에게 같은 문장으로 나갑니다.`,
+  });
+  return true;
+}
+
+/**
+ * **예약이 한 번이라도 만들어진 접수는 고쳐서 다시 보내지 않는다**(★2026-08-23 Codex 3R high).
+ *
+ * `campaign_id`가 붙었다는 것은 이 명단이 이미 발송 배관에 들어갔다는 뜻이다. 그 뒤 예약이 중간에
+ * 끊겼더라도 **일부는 이미 나갔을 수 있다**(적재 도중 예외로 종결된 캠페인이 그렇다).
+ * 그 상태에서 시각만 바꿔 다시 보내면 같은 사람에게 두 번 가고 요금도 두 번 나간다.
+ * 다시 보내야 하면 결과를 확인한 뒤 **새 접수**로 간다.
+ */
+function rejectAlreadyDispatched(campaignId: any, res: Response): boolean {
+  if (!campaignId) return false;
+  res.status(400).json({
+    success: false,
+    code: 'ALREADY_DISPATCHED',
+    error: '이미 발송 준비가 시작된 접수입니다. 발송 결과를 확인하신 뒤 새로 접수해 주세요.',
   });
   return true;
 }
@@ -131,9 +152,14 @@ function toPublic(row: any) {
     isAd: row.is_ad,
     callbackNumber: row.callback_number,
     managerPhone: row.manager_phone,
+    managerPhones: Array.isArray(row.manager_phones) && row.manager_phones.length > 0
+      ? row.manager_phones
+      : [row.manager_phone].filter(Boolean),
     originalContent: row.original_content,
     currentContent: row.current_content,
     contentVersion: row.content_version,
+    // 행 수정 번호. 화면이 이 값을 되돌려주고 서버가 조건으로 쓴다(낙관적 잠금).
+    revision: row.revision,
     mmsImagePaths: row.mms_image_paths || [],
     requestedAt: row.requested_at,
     recipientCount: row.recipient_count,
@@ -185,7 +211,7 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const {
       messageType = 'SMS', subject, content, isAd = false, callbackNumber,
-      managerPhone, requestedAt, mmsImagePaths, fileName, phoneColumn, varMapping,
+      managerPhone, managerPhones, requestedAt, mmsImagePaths, fileName, phoneColumn, varMapping,
       recipients,
     } = req.body || {};
 
@@ -219,9 +245,18 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '등록되지 않은 보내는 번호입니다. 발신번호 등록을 먼저 해 주세요.' });
     }
 
-    // ── 담당자 번호(테스트 문자를 받을 곳)
-    const manager = normalizePhone(String(managerPhone || ''));
-    if (!manager || manager.length < 10) {
+    // ── 담당자 번호(테스트 문자를 받을 곳). **여러 명일 수 있다**(Harold 2026-08-23)
+    const managerList: string[] = [];
+    const managerSeen = new Set<string>();
+    const managerRaw: any[] = Array.isArray(managerPhones) ? managerPhones : [managerPhone];
+    for (const raw of managerRaw) {
+      const phone = normalizePhone(String(raw || ''));
+      if (!phone || phone.length < 10 || managerSeen.has(phone)) continue;
+      managerSeen.add(phone);
+      managerList.push(phone);
+      if (managerList.length >= MAX_MANAGER_PHONES) break;
+    }
+    if (managerList.length === 0) {
       return res.status(400).json({ success: false, error: '테스트 문자를 받을 담당자 휴대폰 번호를 넣어 주세요.' });
     }
 
@@ -252,14 +287,14 @@ router.post('/', async (req: Request, res: Response) => {
       const inserted = await client.query(
         `INSERT INTO agency_send_requests (
            company_id, created_by, status, callback_number, message_type, subject, mms_image_paths, is_ad,
-           original_content, current_content, content_version, requested_at, manager_phone,
+           original_content, current_content, content_version, requested_at, manager_phone, manager_phones,
            file_name, phone_column, var_mapping, recipient_count
-         ) VALUES ($1::uuid, $2::uuid, 'received', $3, $4, $5, $6::jsonb, $7, $8, $8, 1, $9, $10, $11, $12, $13::jsonb, $14)
+         ) VALUES ($1::uuid, $2::uuid, 'received', $3, $4, $5, $6::jsonb, $7, $8, $8, 1, $9, $10, $11::text[], $12, $13, $14::jsonb, $15)
          RETURNING *`,
         [
           auth.companyId, auth.userId, callback, type, subject || null,
           images.length > 0 ? JSON.stringify(images) : null, !!isAd,
-          body, when.at, manager,
+          body, when.at, managerList[0], managerList,
           fileName || null, String(phoneColumn || '전화번호'),
           JSON.stringify(varMapping && typeof varMapping === 'object' ? varMapping : {}),
           rows.length,
@@ -346,28 +381,30 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
     if (r.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
     const row = r.rows[0];
 
+    // ⛔ 승인의 기준은 **행 수정 번호**다(★2026-08-23 Codex 2R high). 문안 버전만 보면
+    //   시각만 바뀐 건은 상태도 버전도 그대로라, 담당자가 **못 본 시각**으로 옛 승인이 통과한다.
+    const revision = Number(req.body?.revision);
     const check = checkApproval(
-      { status: row.status, contentVersion: Number(row.content_version), requestedAt: new Date(row.requested_at) },
-      Number(req.body?.contentVersion),
+      { status: row.status, revision: Number(row.revision), requestedAt: new Date(row.requested_at) },
+      revision,
       new Date(),
     );
     if (!check.ok) return res.status(400).json({ success: false, error: check.error, code: check.code });
 
-    // 상태·버전을 조건에 넣어 같은 건이 두 번 승인되지 않게 한다(연타·두 사람 동시 승인)
     const updated = await query(
       `UPDATE agency_send_requests
           SET status = 'approved', approved_at = NOW(), approved_by = $1::uuid,
-              approval_version = content_version, updated_at = NOW()
+              approval_version = content_version, revision = revision + 1, updated_at = NOW()
         WHERE id = $2::uuid AND company_id = $3::uuid
-          AND status IN ('awaiting_approval','reapproval') AND content_version = $4
+          AND status IN ('awaiting_approval','reapproval') AND revision = $4
         RETURNING *`,
-      [auth.userId, req.params.id, auth.companyId, Number(req.body?.contentVersion)],
+      [auth.userId, req.params.id, auth.companyId, revision],
     );
     if (updated.rows.length === 0) {
       return res.status(409).json({ success: false, error: '이미 처리된 접수입니다. 화면을 새로 고쳐 주세요.', code: 'CONFLICT' });
     }
 
-    await logEvent(req.params.id, 'approved', { version: Number(req.body?.contentVersion), by: auth.userId });
+    await logEvent(req.params.id, 'approved', { revision, by: auth.userId });
     // 재승인은 남은 시간이 짧다. 다음 tick을 기다리면 그 사이에 만료 기준을 지나 승인이 헛돈다.
     triggerAgencySendDispatch(req.params.id);
     return res.json({ success: true, request: toPublic(updated.rows[0]) });
@@ -391,12 +428,19 @@ router.post('/:id/content', async (req: Request, res: Response) => {
     if (req.body?.subject != null && rejectSubjectVars(req.body.subject, res)) return;
 
     const r = await query(
-      `SELECT status, var_mapping, content_version FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
+      `SELECT status, var_mapping, revision, campaign_id FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
       [req.params.id, auth.companyId],
     );
     if (r.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
     if (!isEditable(r.rows[0].status)) {
       return res.status(400).json({ success: false, error: '지금은 문안을 고칠 수 있는 상태가 아닙니다.' });
+    }
+    if (rejectAlreadyDispatched(r.rows[0].campaign_id, res)) return;
+    // ⛔ 화면이 보고 있던 행 수정 번호를 조건으로 쓴다. 그 사이 워커가 문안을 다듬었거나 상태가 바뀌었으면
+    //   덮지 않고 돌려보낸다(조건 없이 덮으면 워커가 잡고 있는 건의 lock이 깨진다).
+    const observedRevision = Number(req.body?.revision);
+    if (!Number.isFinite(observedRevision)) {
+      return res.status(400).json({ success: false, code: 'REVISION_REQUIRED', error: '화면을 새로 고친 뒤 다시 시도해 주세요.' });
     }
 
     const plan = buildSlotPlan(body);
@@ -424,10 +468,11 @@ router.post('/:id/content', async (req: Request, res: Response) => {
               status = 'received', test_round = 0, last_test_result = NULL, last_test_at = NULL,
               approved_at = NULL, approved_by = NULL, approval_version = NULL, final_test_at = NULL,
               dispatch_key = NULL, campaign_id = NULL,
-              subject = COALESCE($2, subject), expired_at = NULL, lock_at = NULL, updated_at = NOW()
-        WHERE id = $3::uuid AND company_id = $4::uuid AND status = $5 AND content_version = $6
+              subject = COALESCE($2, subject), expired_at = NULL,
+              lock_at = NULL, lock_token = NULL, revision = revision + 1, updated_at = NOW()
+        WHERE id = $3::uuid AND company_id = $4::uuid AND revision = $5
         RETURNING *`,
-      [body, req.body?.subject ?? null, req.params.id, auth.companyId, r.rows[0].status, r.rows[0].content_version],
+      [body, req.body?.subject ?? null, req.params.id, auth.companyId, observedRevision],
     );
     if (updated.rows.length === 0) {
       return res.status(409).json({
@@ -454,12 +499,17 @@ router.post('/:id/reschedule', async (req: Request, res: Response) => {
   if (!auth) return;
   try {
     const r = await query(
-      `SELECT status, content_version, is_ad FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
+      `SELECT status, revision, is_ad, campaign_id FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
       [req.params.id, auth.companyId],
     );
     if (r.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
     if (!isEditable(r.rows[0].status)) {
       return res.status(400).json({ success: false, error: '지금은 시각을 고칠 수 있는 상태가 아닙니다.' });
+    }
+    if (rejectAlreadyDispatched(r.rows[0].campaign_id, res)) return;
+    const observedRevision = Number(req.body?.revision);
+    if (!Number.isFinite(observedRevision)) {
+      return res.status(400).json({ success: false, code: 'REVISION_REQUIRED', error: '화면을 새로 고친 뒤 다시 시도해 주세요.' });
     }
 
     const when = validateRequestedAt(
@@ -477,11 +527,11 @@ router.post('/:id/reschedule', async (req: Request, res: Response) => {
       `UPDATE agency_send_requests
           SET requested_at = $1, status = $2, expired_at = NULL,
               approved_at = NULL, approved_by = NULL, approval_version = NULL, final_test_at = NULL,
-              dispatch_key = NULL, campaign_id = NULL, lock_at = NULL,
-              updated_at = NOW()
-        WHERE id = $3::uuid AND company_id = $4::uuid AND status = $5
+              dispatch_key = NULL, campaign_id = NULL, lock_at = NULL, lock_token = NULL,
+              revision = revision + 1, updated_at = NOW()
+        WHERE id = $3::uuid AND company_id = $4::uuid AND revision = $5
         RETURNING *`,
-      [when.at, backTo, req.params.id, auth.companyId, r.rows[0].status],
+      [when.at, backTo, req.params.id, auth.companyId, observedRevision],
     );
     if (updated.rows.length === 0) {
       return res.status(409).json({
@@ -507,52 +557,44 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
   const auth = await requireAgencySend(req, res);
   if (!auth) return;
   try {
-    const r = await query(
-      `SELECT status, campaign_id FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
-      [req.params.id, auth.companyId],
+    // ⛔ **취소는 두 저장소를 건드리는 다단계 작업이다**(★2026-08-23 Codex 3R critical).
+    //   원장을 먼저 `cancelled`로 확정하면, 그 뒤 큐 삭제가 실패하거나 프로세스가 죽는 순간
+    //   **화면은 취소인데 큐는 살아 요청 시각에 나간다**(0611 에이치피오 87,014건과 같은 형태).
+    //   그래서 ①`cancelling`으로 먼저 잡고 ②큐를 지운 뒤 ③`cancelled`로 확정한다.
+    //   죽어서 남은 `cancelling`은 워커가 마무리한다(발송을 막는 쪽으로 민다).
+    // ⛔ 잡을 때 **옛 상태를 함께 받아 둔다**(`RETURNING`은 갱신 뒤 값이라 그것만으로는 되돌릴 수 없다).
+    //   워커가 잡고 있는 행(`lock_token`)은 건드리지 않는다.
+    const claimed = await query(
+      `WITH prev AS (
+         SELECT id, status, revision FROM agency_send_requests
+          WHERE id = $1::uuid AND company_id = $2::uuid
+          FOR UPDATE
+       )
+       UPDATE agency_send_requests a
+          SET status = 'cancelling', cancel_reason = $3, lock_at = NOW(),
+              revision = a.revision + 1, updated_at = NOW()
+         FROM prev
+        WHERE a.id = prev.id
+          AND prev.status NOT IN (${NOT_CANCELABLE_SQL})
+          AND a.lock_token IS NULL
+       RETURNING prev.status AS prev_status, prev.revision AS prev_revision, a.*`,
+      [req.params.id, auth.companyId, String(req.body?.reason || '담당자 취소').slice(0, 200)],
     );
-    if (r.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
-    const { status, campaign_id: campaignId } = r.rows[0];
 
-    if (!canCancel(status)) {
-      return res.status(400).json({ success: false, error: '검사가 진행 중이라 지금은 취소할 수 없습니다. 잠시 후 다시 시도해 주세요.' });
-    }
-
-    // 큐에 실린 뒤(queued)의 취소는 큐 삭제까지 끝나야 취소다.
-    // ⛔ 여기서 자체 DELETE를 쓰지 않는다 — 취소의 실체(라인 집합·효과 검증)는 기존 캠페인 취소 CT가 소유한다.
-    //   0611 에이치피오 87,014건 실발송이 "취소 화면만 바뀌고 큐가 남은" 사고였다.
-    if (needsQueueCancel(status)) {
-      if (!campaignId) {
-        return res.status(409).json({ success: false, error: '발송 준비 상태를 확인하지 못했습니다. 담당자에게 문의해 주세요.' });
-      }
-      const { cancelCampaign } = await import('../utils/campaign-lifecycle');
-      const result = await cancelCampaign(campaignId, auth.companyId, {
-        cancelledBy: auth.userId,
-        cancelledByType: req.user?.userType,
-      });
-      if (!result.success) {
-        return res.status(result.tooLate ? 400 : 500).json({ success: false, error: result.error, tooLate: result.tooLate });
-      }
-    }
-
-    // ⛔ **관찰한 상태를 조건에 넣는다**(★2026-08-23 Codex 적대 검토 critical).
-    //   조건 없이 덮으면, `approved`를 읽은 뒤 워커가 예약을 만든 사이에 큐 삭제를 건너뛴 채
-    //   `queued` 행을 `cancelled`로 덮는다. 화면은 취소인데 큐는 그 시각에 나간다(0611과 같은 형태).
-    //   0행이면 아무것도 바꾸지 않고 돌려보낸다. 다시 누르면 그때의 상태(`queued`)로 큐 삭제 경로를 탄다.
-    const updated = await query(
-      `UPDATE agency_send_requests
-          SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = $1, updated_at = NOW()
-        WHERE id = $2::uuid AND company_id = $3::uuid AND status = $4
-        RETURNING *`,
-      [String(req.body?.reason || '담당자 취소').slice(0, 200), req.params.id, auth.companyId, status],
-    );
-    if (updated.rows.length === 0) {
-      const nowStatus = await query(
+    if (claimed.rows.length === 0) {
+      const nowRow = await query(
         `SELECT status FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
         [req.params.id, auth.companyId],
       );
-      if (nowStatus.rows[0]?.status === 'cancelled') {
+      if (nowRow.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
+      if (nowRow.rows[0].status === 'cancelled') {
         return res.status(409).json({ success: false, error: '이미 취소된 접수입니다.', code: 'ALREADY_CANCELLED' });
+      }
+      if (nowRow.rows[0].status === 'cancelling') {
+        return res.status(409).json({ success: false, error: '취소를 처리하고 있습니다. 잠시 후 화면을 새로 고쳐 주세요.', code: 'CANCEL_IN_PROGRESS' });
+      }
+      if (!canCancel(nowRow.rows[0].status)) {
+        return res.status(400).json({ success: false, error: '검사가 진행 중이라 지금은 취소할 수 없습니다. 잠시 후 다시 시도해 주세요.' });
       }
       return res.status(409).json({
         success: false,
@@ -561,8 +603,89 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
       });
     }
 
-    await logEvent(req.params.id, 'cancelled', { from: status, queueCancelled: needsQueueCancel(status) });
-    return res.json({ success: true, request: toPublic(updated.rows[0]) });
+    const claimedRow = claimed.rows[0];
+    // ⛔ 근거는 **시도 키 하나다**. 원장의 `campaign_id`는 나중에 적히는 캐시라 비어 있어도 캠페인은 있을 수 있다.
+    const campaignId = await findAttemptCampaignId(auth.companyId, claimedRow.dispatch_key);
+
+    // 예약이 만들어진 뒤의 취소는 **큐 삭제까지 끝나야** 취소다.
+    // ⛔ 자체 DELETE를 쓰지 않는다 — 취소의 실체(라인 집합·효과 검증·환불)는 기존 캠페인 취소 CT가 소유한다.
+    if (campaignId) {
+      let result: { success: boolean; error?: string; tooLate?: boolean };
+      try {
+        const { cancelCampaign } = await import('../utils/campaign-lifecycle');
+        result = await cancelCampaign(campaignId, auth.companyId, {
+          cancelledBy: auth.userId,
+          cancelledByType: req.user?.userType,
+        });
+      } catch (cancelErr: any) {
+        result = { success: false, error: String(cancelErr?.message || '취소 처리 중 오류가 발생했습니다.') };
+      }
+      if (!result.success) {
+        // ⛔ **되돌리는 것은 "큐를 건드리기 전에 거절당한 것이 확실할 때"뿐이다**(★2026-08-23 Codex 4R high).
+        //   발송 15분 전 거절(`tooLate`)이 그 경우다. 그 밖의 실패·예외는 큐를 이미 지웠는지 알 수 없으므로
+        //   `cancelling`으로 남긴다 — 워커가 이어받아 끝까지 민다(화면은 "취소 중").
+        //   여기서 되돌리면 취소 의도가 사라져 **예약이 그대로 나간다.**
+        if (result.tooLate) {
+          const reverted = await query(
+            `UPDATE agency_send_requests
+                SET status = $1, cancel_reason = NULL, revision = revision + 1, updated_at = NOW()
+              WHERE id = $2::uuid AND company_id = $3::uuid AND status = 'cancelling' AND revision = $4`,
+            [claimedRow.prev_status, req.params.id, auth.companyId, claimedRow.revision],
+          );
+          await logEvent(req.params.id, 'cancel_rejected', {
+            campaignId, error: result.error, reverted: reverted.rowCount || 0,
+          });
+          return res.status(400).json({ success: false, error: result.error, tooLate: true });
+        }
+        await logEvent(req.params.id, 'cancel_queue_failed', { campaignId, error: result.error });
+        // 화면에는 현재 상태(`cancelling` = "취소 중")를 그대로 준다. 워커가 마무리하면 상태가 따라온다.
+        const pendingRow = await query(
+          `SELECT * FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
+          [req.params.id, auth.companyId],
+        );
+        return res.status(202).json({
+          success: true,
+          pending: true,
+          code: 'CANCEL_IN_PROGRESS',
+          request: toPublic(pendingRow.rows[0]),
+        });
+      }
+    }
+
+    // ⛔ 캠페인이 없고 **시도 키가 남아 있으면** 즉시 확정하지 않는다(★2026-08-23 Codex 5R critical).
+    //   예약을 만들던 핸들러가 뒤늦게 캠페인을 완성할 수 있다. 그 창은 워커가 시간으로 닫는다.
+    if (!campaignId && claimedRow.dispatch_key) {
+      await logEvent(req.params.id, 'cancel_pending_dispatch', { dispatchKey: claimedRow.dispatch_key });
+      const pendingRow = await query(
+        `SELECT * FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [req.params.id, auth.companyId],
+      );
+      return res.status(202).json({
+        success: true, pending: true, code: 'CANCEL_IN_PROGRESS', request: toPublic(pendingRow.rows[0]),
+      });
+    }
+
+    // 큐가 없어졌음을 확인한 뒤에만 취소를 확정한다.
+    const done = await query(
+      `UPDATE agency_send_requests
+          SET status = 'cancelled', cancelled_at = NOW(), lock_at = NULL,
+              revision = revision + 1, updated_at = NOW()
+        WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'cancelling' AND revision = $3
+        RETURNING *`,
+      [req.params.id, auth.companyId, claimedRow.revision],
+    );
+    if (done.rows.length === 0) {
+      // 워커가 먼저 마무리했거나 그 사이 상태가 또 바뀌었다. 큐는 이미 지웠으므로 발송 위험은 없다.
+      await logEvent(req.params.id, 'cancel_finalized_elsewhere', { campaignId });
+      const cur = await query(
+        `SELECT * FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [req.params.id, auth.companyId],
+      );
+      return res.json({ success: true, request: toPublic(cur.rows[0]) });
+    }
+
+    await logEvent(req.params.id, 'cancelled', { queueCancelled: !!campaignId, campaignId, from: claimedRow.prev_status });
+    return res.json({ success: true, request: toPublic(done.rows[0]) });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 취소 실패:', err);

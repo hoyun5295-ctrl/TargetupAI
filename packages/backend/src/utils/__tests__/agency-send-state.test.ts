@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import {
   AGENCY_SEND_STATUSES, canTransition, canCancel, isEditable, needsQueueCancel,
   validateRequestedAt, checkApproval, isFinalTestDue, isQueueDue, isApprovalExpired, isApprovalCurrent,
-  isLockStale, lockRecoveryStatus, hasTestRoundsLeft, kstHour, requiredLeadMinutes,
+  isLockStale, lockRecoveryStatus, hasTestRoundsLeft, kstHour, requiredLeadMinutes, NOT_CANCELABLE_SQL,
   FINAL_TEST_LEAD_MINUTES, MAX_TEST_ROUNDS, MIN_LEAD_MINUTES, QUEUE_MARGIN_MINUTES,
   type AgencySendStatus,
 } from '../agency-send-state';
@@ -53,6 +53,29 @@ describe('대행발송 상태 전이', () => {
     expect(canCancel('final_testing')).toBe(false);
     expect(isEditable('awaiting_approval')).toBe(true);
     expect(canCancel('approved')).toBe(true);
+  });
+
+  /**
+   * ★ 2026-08-23 (Codex 3R critical) 취소는 원장(PG)과 큐(MySQL) 두 곳을 건드리는 다단계 작업이라
+   * 한 트랜잭션으로 묶을 수 없다. 원장을 먼저 `cancelled`로 확정하면 그 뒤 큐 삭제가 실패하거나
+   * 프로세스가 죽는 순간 **화면은 취소인데 큐는 살아 요청 시각에 나간다**(0611과 같은 형태).
+   */
+  it('취소는 중간 상태를 지난다 — 큐를 지운 뒤에만 확정된다', () => {
+    for (const s of ['received', 'awaiting_approval', 'test_failed', 'approved', 'queued', 'reapproval', 'expired'] as AgencySendStatus[]) {
+      expect(canTransition(s, 'cancelling')).toBe(true);
+      expect(canTransition(s, 'cancelled')).toBe(false); // 곧바로 확정되는 길은 없다
+    }
+    expect(canTransition('cancelling', 'cancelled')).toBe(true);
+    // 큐 삭제가 거절되면 옛 상태로 되돌아간다
+    expect(canTransition('cancelling', 'queued')).toBe(true);
+    expect(canTransition('cancelling', 'approved')).toBe(true);
+  });
+
+  it('취소 중인 건은 다시 취소할 수 없다 — 화면 판정과 SQL 집합이 같다', () => {
+    expect(canCancel('cancelling')).toBe(false);
+    const notCancelable = AGENCY_SEND_STATUSES.filter((s) => !canCancel(s));
+    expect(NOT_CANCELABLE_SQL.split(',').map((v) => v.replace(/'/g, '')).sort())
+      .toEqual([...notCancelable].sort());
   });
 
   it('큐 삭제가 필요한 취소는 queued뿐이다(그 전에는 큐에 아무것도 없다)', () => {
@@ -99,33 +122,41 @@ describe('요청 시각 검증', () => {
 });
 
 describe('승인 판정', () => {
-  const base = { status: 'awaiting_approval' as AgencySendStatus, contentVersion: 2, requestedAt: minutesLater(300) };
+  const base = { status: 'awaiting_approval' as AgencySendStatus, revision: 7, requestedAt: minutesLater(300) };
 
-  it('버전이 같고 시간이 남았으면 승인된다', () => {
-    expect(checkApproval(base, 2, NOW).ok).toBe(true);
+  it('화면이 본 그대로이고 시간이 남았으면 승인된다', () => {
+    expect(checkApproval(base, 7, NOW).ok).toBe(true);
   });
 
-  it('문안이 다듬어진 뒤의 옛 승인은 거절한다', () => {
-    const r = checkApproval(base, 1, NOW);
+  /**
+   * ★ 2026-08-23 기준을 문안 버전에서 **행 수정 번호**로 바꿨다(Codex 2R high).
+   * 시각만 바뀐 건은 상태도 문안 버전도 그대로라, 담당자가 **못 본 시각**으로 옛 승인이 통과했다.
+   */
+  it('그 사이 무엇이든 바뀌었으면 거절한다 — 문안이든 시각이든', () => {
+    const r = checkApproval(base, 6, NOW);
     expect(r.ok).toBe(false);
-    expect(r.code).toBe('VERSION_MISMATCH');
+    expect(r.code).toBe('STALE_VIEW');
+    // 시각만 바뀐 경우도 같은 판정에 걸린다(옛 기준은 이걸 통과시켰다)
+    expect(checkApproval({ ...base, revision: 8 }, 7, NOW).code).toBe('STALE_VIEW');
+    // 값이 없으면 승인하지 않는다(옛 화면이 보낸 요청)
+    expect(checkApproval(base, NaN as any, NOW).code).toBe('STALE_VIEW');
   });
 
   it('재검사 시간이 남지 않았으면 거절한다', () => {
     const late = { ...base, requestedAt: minutesLater(FINAL_TEST_LEAD_MINUTES - 1) };
-    const r = checkApproval(late, 2, NOW);
+    const r = checkApproval(late, 7, NOW);
     expect(r.ok).toBe(false);
     expect(r.code).toBe('TOO_LATE');
     // 경계는 만료 판정과 같은 쪽으로 닫는다 — 딱 그 값이면 승인되지 않는다(승인 직후 만료되는 건을 없앤다)
-    expect(checkApproval({ ...base, requestedAt: minutesLater(FINAL_TEST_LEAD_MINUTES) }, 2, NOW).ok).toBe(false);
-    expect(checkApproval({ ...base, requestedAt: minutesLater(FINAL_TEST_LEAD_MINUTES + 1) }, 2, NOW).ok).toBe(true);
+    expect(checkApproval({ ...base, requestedAt: minutesLater(FINAL_TEST_LEAD_MINUTES) }, 7, NOW).ok).toBe(false);
+    expect(checkApproval({ ...base, requestedAt: minutesLater(FINAL_TEST_LEAD_MINUTES + 1) }, 7, NOW).ok).toBe(true);
   });
 
   it('승인 대기가 아닌 상태에서는 승인되지 않는다', () => {
     for (const s of ['received', 'testing', 'approved', 'queued', 'expired', 'cancelled'] as AgencySendStatus[]) {
-      expect(checkApproval({ ...base, status: s }, 2, NOW).ok).toBe(false);
+      expect(checkApproval({ ...base, status: s }, 7, NOW).ok).toBe(false);
     }
-    expect(checkApproval({ ...base, status: 'reapproval' }, 2, NOW).ok).toBe(true);
+    expect(checkApproval({ ...base, status: 'reapproval' }, 7, NOW).ok).toBe(true);
   });
 
   /**
@@ -136,10 +167,10 @@ describe('승인 판정', () => {
    */
   it('재승인은 2시간이 남지 않아도 승인된다 — 검사를 이미 통과한 문안이다', () => {
     const reapproval = { ...base, status: 'reapproval' as AgencySendStatus, requestedAt: minutesLater(100) };
-    expect(checkApproval(reapproval, 2, NOW).ok).toBe(true);
-    expect(checkApproval({ ...reapproval, requestedAt: minutesLater(QUEUE_MARGIN_MINUTES + 1) }, 2, NOW).ok).toBe(true);
+    expect(checkApproval(reapproval, 7, NOW).ok).toBe(true);
+    expect(checkApproval({ ...reapproval, requestedAt: minutesLater(QUEUE_MARGIN_MINUTES + 1) }, 7, NOW).ok).toBe(true);
     // 예약을 넣을 여유조차 없으면 거절하고 시각을 다시 받는다
-    const tooLate = checkApproval({ ...reapproval, requestedAt: minutesLater(QUEUE_MARGIN_MINUTES - 1) }, 2, NOW);
+    const tooLate = checkApproval({ ...reapproval, requestedAt: minutesLater(QUEUE_MARGIN_MINUTES - 1) }, 7, NOW);
     expect(tooLate.ok).toBe(false);
     expect(tooLate.code).toBe('TOO_LATE');
   });

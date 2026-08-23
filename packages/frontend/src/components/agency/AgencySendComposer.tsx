@@ -66,7 +66,8 @@ export default function AgencySendComposer({ show, onClose, onCreated }: Props) 
 
   // ③ 시각·담당자
   const [requestedAt, setRequestedAt] = useState('');
-  const [managerPhone, setManagerPhone] = useState('');
+  // 담당자 번호는 **여러 명**일 수 있다(★Harold 2026-08-23). 칸을 계속 늘려 받는다
+  const [managerPhones, setManagerPhones] = useState<string[]>(['']);
   const [callbackNumber, setCallbackNumber] = useState('');
   const [senders, setSenders] = useState<string[]>([]);
 
@@ -105,7 +106,7 @@ export default function AgencySendComposer({ show, onClose, onCreated }: Props) 
   const reset = () => {
     setStep(1); setFileName(null); setHeaders([]); setRows([]); setPhoneColumn(''); setPasted('');
     setContent(''); setSubject(''); setIsAd(false); setVarMapping({});
-    setRequestedAt(''); setManagerPhone(''); setCallbackNumber('');
+    setRequestedAt(''); setManagerPhones(['']); setCallbackNumber('');
     mms.setMmsUploadedImages([]);
   };
 
@@ -196,7 +197,8 @@ export default function AgencySendComposer({ show, onClose, onCreated }: Props) 
   const submit = async () => {
     if (saving) return;
     if (!callbackNumber) { toast.error('보내는 번호를 골라 주세요.'); return; }
-    if (ONLY_DIGITS(managerPhone).length < 10) { toast.error('테스트 문자를 받을 담당자 번호를 넣어 주세요.'); return; }
+    const managers = managerPhones.map((v) => ONLY_DIGITS(v)).filter((v) => v.length >= 10);
+    if (managers.length === 0) { toast.error('테스트 문자를 받을 담당자 번호를 넣어 주세요.'); return; }
     if (!requestedAt) { toast.error('보낼 시각을 정해 주세요.'); return; }
 
     setSaving(true);
@@ -207,7 +209,7 @@ export default function AgencySendComposer({ show, onClose, onCreated }: Props) 
         content: content.trim(),
         isAd,
         callbackNumber,
-        managerPhone: ONLY_DIGITS(managerPhone),
+        managerPhones: managers,
         requestedAt: new Date(requestedAt).toISOString(),
         mmsImagePaths: mms.mmsUploadedImages.map((i) => i.serverPath),
         fileName,
@@ -409,8 +411,42 @@ export default function AgencySendComposer({ show, onClose, onCreated }: Props) 
 
               <div>
                 <label className={CUI_LABEL}>테스트 문자를 받을 담당자 번호 <span className="text-rose-500">*</span></label>
-                <input value={managerPhone} onChange={(e) => setManagerPhone(e.target.value)} className={CUI_INPUT} placeholder="01012345678" />
-                <p className={CUI_HINT}>검사를 통과한 문안을 이 번호로 먼저 보내 드립니다. 확인하고 승인하면 예약됩니다.</p>
+                <div className="space-y-2">
+                  {managerPhones.map((phone, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        value={phone}
+                        onChange={(e) => {
+                          const next = [...managerPhones];
+                          next[i] = e.target.value;
+                          setManagerPhones(next);
+                        }}
+                        className={CUI_INPUT}
+                        placeholder="01012345678"
+                      />
+                      {managerPhones.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setManagerPhones(managerPhones.filter((_, k) => k !== i))}
+                          className="shrink-0 h-9 w-9 grid place-items-center rounded-lg text-neutral-400 hover:text-rose-500 hover:bg-rose-50"
+                          aria-label="이 번호 빼기"
+                        >
+                          <X className="w-4 h-4" strokeWidth={2} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {managerPhones.length < 10 && (
+                  <button
+                    type="button"
+                    onClick={() => setManagerPhones([...managerPhones, ''])}
+                    className="mt-2 text-[13px] font-medium text-indigo-600 hover:text-indigo-700"
+                  >
+                    + 담당자 번호 추가
+                  </button>
+                )}
+                <p className={CUI_HINT}>검사를 통과한 문안을 이 번호들로 먼저 보내 드립니다. 확인하고 승인하면 예약됩니다.</p>
               </div>
 
               <div className={CUI_INFO}>

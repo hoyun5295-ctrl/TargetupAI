@@ -9,6 +9,7 @@
  *   C 만료       승인 대기(2h 경과) → 발송하지 않고 안내
  *   D 대조       queued            ↔ campaigns.status (이중 진실 안전망)
  *   E 복구       lock 30분 초과     → 잡기 전 상태로 되돌린다
+ *   F 취소 마무리 cancelling        → 큐 삭제를 끝까지 밀고 cancelled로 확정
  *
  * ⛔ 큐 적재는 B에서 **한 번뿐**이다(불변 3). 승인은 상태만 바꾼다. 그래서 승인 뒤 취소에 지울 큐가 없다.
  * ⛔ 승인 없는 발송 0(불변 1) · 당일 검사 없는 발송 0(불변 2).
@@ -28,14 +29,16 @@ import {
 } from './agency-send-notify';
 import {
   isApprovalCurrent, isApprovalExpired, isFinalTestDue, isLockStale, isQueueDue, lockRecoveryStatus,
-  MAX_TEST_ROUNDS, QUEUE_MARGIN_MINUTES, type AgencySendStatus,
+  LOCK_STALE_MINUTES, MAX_TEST_ROUNDS, QUEUE_MARGIN_MINUTES, type AgencySendStatus,
 } from './agency-send-state';
 import { buildSlotPlan, toSlotValues } from './agency-send-vars';
-import { bulkInsertSmsQueue, getAuthSmsTable, toKoreaTimeStr } from './sms-queue';
+import { inspectAttemptCampaign, neutralizeCampaign } from './agency-send-campaign';
+import { bulkInsertSmsQueue, getAuthSmsTable, insertTestSmsQueue, toKoreaTimeStr } from './sms-queue';
 import { countStagingFiltered, createDirectSendCampaign } from './direct-send-core';
 import { DirectSendError } from './direct-send-spec';
 import { getOpt080Number, prepareFieldMappings, prepareSendMessage } from './messageUtils';
 import { normalizePhone } from './normalize-phone';
+import { sendSystemAlert } from './system-alert';
 
 const LOG = '[agency-send][worker]';
 const TICK_MS = 5 * 60 * 1000;
@@ -55,30 +58,37 @@ async function logEvent(requestId: string, kind: string, payload: Record<string,
 }
 
 /**
- * 선점 표시(=lease) 값을 만든다.
- *
- * ⛔ `NOW()`를 쓰지 않는다(★2026-08-23 Codex 2R critical). PostgreSQL `timestamptz`는 마이크로초를 담는데
- *   드라이버는 그것을 밀리초짜리 `Date`로 파싱한다. `RETURNING`으로 받은 값을 다시 조건으로 보내면
- *   `.123456`과 `.123000`이 되어 **정상 소유자의 UPDATE도 0행**이 되고, 그 건은 lock 상태에 영구 고착된다.
- *   애플리케이션이 만든 밀리초 값을 쓰면 왕복이 정확히 보존된다.
+ * 워커가 잡은 건을 놓을 때 함께 지우는 값. 소유권을 반납한다는 뜻이다.
+ * ⛔ 토큰만 지우고 `lock_at`을 남기면 만료 판정이 옛 시각을 보고 오작동한다. 둘은 같이 움직인다.
  */
-function newLease(): Date {
-  return new Date();
-}
+const RELEASE = { lock_at: null, lock_token: null } as const;
 
 /**
- * 상태를 바꾼다. **lease를 주면 그 lease를 쥐고 있을 때만 바뀐다**(★2026-08-23 Codex 적대 검토 critical).
+ * 상태를 바꾼다. **토큰을 주면 그 토큰을 쥐고 있을 때만 바뀐다.**
  *
- * 워커가 잡은 뒤 lock 복구가 되돌리거나 담당자 요청이 끼어들면, 이 핸들러는 이미 남의 건을 들고 있는 것이다.
- * 조건 없이 쓰면 남이 바꿔 놓은 상태를 덮어 **취소한 건을 다시 예약하거나 두 벌로 만드는** 경로가 생긴다.
- * lease = 선점할 때 DB가 돌려준 `lock_at` 값 그대로다(내가 만든 시각이 아니라 기록된 값이라 정밀도가 어긋나지 않는다).
+ * 이 행은 네 주체가 만진다: 워커·담당자·lock 복구·승인 직후 트리거. 조건 없이 쓰면 남이 바꿔 놓은 상태를
+ * 덮어 **취소한 건을 다시 예약하거나 같은 발송을 두 벌로 만드는** 경로가 생긴다.
  *
- * @returns 실제로 바뀌었는가. false면 이 핸들러는 더 손대면 안 된다.
+ * ★ 2026-08-23 (Codex 2R critical) 토큰을 `lock_at` 타임스탬프에서 `lock_token uuid`로 바꿨다.
+ *   PostgreSQL `timestamptz`는 마이크로초를 담는데 드라이버는 밀리초 `Date`로 파싱한다. 그 값을 조건으로
+ *   되보내면 `.123456`과 `.123000`이 되어 **정상 소유자의 UPDATE도 0행**이 되고 그 건이 영구 고착된다.
+ *   uuid는 왕복에서 변형되지 않는다. `lock_at`은 만료 판정에만 쓴다.
+ *
+ * ⛔ 모든 쓰기가 `revision`을 올린다 — 담당자 경로의 낙관적 잠금이 이 값 하나를 본다.
+ *
+ * @returns 실제로 바뀌었는가. false면 이 핸들러는 소유권을 잃은 것이고, 더 손대면 안 된다.
  */
 async function setStatus(
-  requestId: string, status: AgencySendStatus, extra: Record<string, any> = {}, lease?: any,
+  requestId: string, status: AgencySendStatus, extra: Record<string, any>, token: string,
 ): Promise<boolean> {
-  const sets = ['status = $2', 'updated_at = NOW()'];
+  // ⛔ 토큰은 **필수**다(★2026-08-23 Codex 3R high). 선택으로 두면 "토큰 없이 부르는 자리"가 생기고,
+  //   그 자리가 워커가 잡아 둔 행을 덮는다(만료 단계가 정확히 그랬다). 토큰 없는 전이는 각자
+  //   관찰한 값으로 CAS 하고, 그 결과를 확인한 뒤에만 다음 일을 한다.
+  if (!token) {
+    console.error(`${LOG} 토큰 없이 상태를 바꾸려 했다 request=${requestId} → ${status}`);
+    return false;
+  }
+  const sets = ['status = $2', 'revision = revision + 1', 'updated_at = NOW()'];
   const params: any[] = [requestId, status];
   let i = 3;
   for (const [col, val] of Object.entries(extra)) {
@@ -86,15 +96,14 @@ async function setStatus(
     params.push(val);
     i += 1;
   }
-  let where = 'id = $1::uuid';
-  if (lease !== undefined && lease !== null) {
-    where += ` AND lock_at = $${i}`;
-    params.push(lease);
-  }
-  const r = await query(`UPDATE agency_send_requests SET ${sets.join(', ')} WHERE ${where}`, params);
+  params.push(token);
+  const r = await query(
+    `UPDATE agency_send_requests SET ${sets.join(', ')} WHERE id = $1::uuid AND lock_token = $${i}::uuid`,
+    params,
+  );
   const changed = (r.rowCount || 0) > 0;
-  if (!changed && lease) {
-    console.warn(`${LOG} lease를 잃어 상태 변경을 건너뛴다 request=${requestId} → ${status}`);
+  if (!changed) {
+    console.warn(`${LOG} 소유권을 잃어 상태 변경을 건너뛴다 request=${requestId} → ${status}`);
   }
   return changed;
 }
@@ -106,25 +115,24 @@ async function setStatus(
 async function notifyManager(opts: {
   companyId: string;
   requestId: string;
-  managerPhone: string;
+  phones: string[];
   callback: string;
   text: string;
   title: string;
   msgType?: 'S' | 'L' | 'M';
   mmsImages?: string[];
 }): Promise<void> {
-  const phone = normalizePhone(opts.managerPhone);
-  if (!phone) return;
+  if (opts.phones.length === 0) return;
   try {
     const table = await getAuthSmsTable();
     const images = opts.mmsImages || [];
     await bulkInsertSmsQueue(
       [table],
-      [[
+      opts.phones.map((phone) => ([
         phone, opts.callback, opts.text, opts.msgType || 'L', opts.title,
         toKoreaTimeStr(new Date()), null, opts.companyId,
         images[0] || '', images[1] || '', images[2] || '',
-      ]],
+      ])),
       true,
       { companyId: opts.companyId, source: 'agency-send' } as any,
     );
@@ -132,6 +140,57 @@ async function notifyManager(opts: {
     // 안내를 못 보내도 본 흐름(상태 전이)은 멈추지 않는다. 화면에는 상태가 남는다
     console.error(`${LOG} 담당자 안내 실패 request=${opts.requestId}:`, err?.message);
     await logEvent(opts.requestId, 'notify_failed', { error: String(err?.message || '') });
+  }
+}
+
+/**
+ * 이 접수의 담당자 번호들. **여러 명일 수 있다**(★Harold 2026-08-23 "담당자번호(여러개일 수 있다)").
+ * 옛 컬럼(`manager_phone`) 한 칸도 함께 읽어 배포 전후 접수가 같이 동작하게 한다.
+ */
+function managerPhonesOf(row: any): string[] {
+  const list: string[] = Array.isArray(row.manager_phones) ? row.manager_phones : [];
+  const merged = list.length > 0 ? list : [row.manager_phone];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of merged) {
+    const phone = normalizePhone(String(raw || ''));
+    if (!phone || phone.length < 10 || seen.has(phone)) continue;
+    seen.add(phone);
+    out.push(phone);
+  }
+  return out;
+}
+
+/**
+ * 담당자에게 **문안 실물**을 보낸다(테스트발송).
+ *
+ * ⛔ 안내 문자와 라인이 다르다. 이건 화면의 "테스트발송"과 같은 것이라 같은 CT로 넣어야
+ *   사용량이 **그 계정으로** 잡힌다(집계는 `app_etc1='test'` + `bill_id`로 계정을 가른다).
+ *   인증 라인으로 보내면 그 두 값이 없어 어느 계정에도 안 잡힌다(★Harold 2026-08-23 지적).
+ * ⛔ `bill_id`는 접수한 사용자 id다 — 고객사 관리자 통합 발행이든 계정별 발행이든 이 값으로 갈린다.
+ */
+async function sendManagerTest(opts: {
+  companyId: string;
+  requestId: string;
+  createdBy: string | null;
+  phones: string[];
+  callback: string;
+  text: string;
+  subject: string;
+  messageType: string;
+  mmsImages?: string[];
+}): Promise<void> {
+  for (const phone of opts.phones) {
+    try {
+      await insertTestSmsQueue(
+        phone, opts.callback, opts.text, opts.messageType, 'test', opts.subject,
+        { companyId: opts.companyId, billId: opts.createdBy || '', mmsImages: opts.mmsImages },
+      );
+    } catch (err: any) {
+      // 한 번호가 실패해도 나머지에게는 보낸다
+      console.error(`${LOG} 담당자 테스트 문자 실패 request=${opts.requestId} phone=${phone}:`, err?.message);
+      await logEvent(opts.requestId, 'notify_failed', { error: String(err?.message || ''), kind: 'manager-test' });
+    }
   }
 }
 
@@ -217,19 +276,34 @@ async function runSpamRound(row: any, startRound: number): Promise<{
   return { passed: false, finalContent: content, rounds, detail };
 }
 
-/** 검사 결과를 원장에 반영한다. 문안이 다듬어졌으면 버전을 올려 옛 승인을 무효로 만든다 */
-async function saveTestResult(row: any, content: string, rounds: number, detail: any): Promise<number> {
+/**
+ * 검사 결과를 원장에 반영한다. 문안이 다듬어졌으면 버전을 올려 옛 승인을 무효로 만든다.
+ *
+ * ⛔ 소유권 토큰을 조건에 넣는다(★2026-08-23 Codex 2R high). 검사는 몇 분 걸리는 외부 호출이라, 그 사이
+ *   lock 복구가 되돌리고 담당자가 문안을 고쳤을 수 있다. 조건 없이 쓰면 **담당자가 고친 문안을 옛 문안으로
+ *   되덮는다.** 0행이면 이 핸들러는 남의 건을 들고 있는 것이라 아무것도 더 하지 않는다.
+ *
+ * @returns 갱신된 문안 버전. 소유권을 잃었으면 null.
+ */
+async function saveTestResult(
+  row: any, content: string, rounds: number, detail: any, token: string,
+): Promise<number | null> {
   const changed = content !== String(row.current_content || '');
   const r = await query(
     `UPDATE agency_send_requests
         SET current_content = $1,
             content_version = content_version + $2,
-            test_round = $3, last_test_result = $4::jsonb, last_test_at = NOW(), updated_at = NOW()
-      WHERE id = $5::uuid
+            test_round = $3, last_test_result = $4::jsonb, last_test_at = NOW(),
+            revision = revision + 1, updated_at = NOW()
+      WHERE id = $5::uuid AND lock_token = $6::uuid
       RETURNING content_version`,
-    [content, changed ? 1 : 0, rounds, JSON.stringify(detail || {}), row.id],
+    [content, changed ? 1 : 0, rounds, JSON.stringify(detail || {}), row.id, token],
   );
-  return Number(r.rows[0]?.content_version || row.content_version);
+  if (r.rows.length === 0) {
+    console.warn(`${LOG} 소유권을 잃어 검사 결과를 버린다 request=${row.id}`);
+    return null;
+  }
+  return Number(r.rows[0].content_version);
 }
 
 // ────────────── A. 1차 검사 ──────────────
@@ -237,7 +311,8 @@ async function saveTestResult(row: any, content: string, rounds: number, detail:
 async function runFirstTest(): Promise<void> {
   const picked = await query(
     `UPDATE agency_send_requests
-        SET status = 'testing', lock_at = $1, updated_at = NOW()
+        SET status = 'testing', lock_at = NOW(), lock_token = gen_random_uuid(),
+            revision = revision + 1, updated_at = NOW()
       WHERE id IN (
         SELECT id FROM agency_send_requests
          WHERE status = 'received'
@@ -246,51 +321,54 @@ async function runFirstTest(): Promise<void> {
          FOR UPDATE SKIP LOCKED
       )
       RETURNING *`,
-    [newLease()],
   );
 
   for (const row of picked.rows) {
-    // 선점할 때 DB가 적은 값이 이 핸들러의 lease다. 이 값이 바뀌면 남이 이 건을 가져간 것이다.
-    const lease = row.lock_at;
+    // 선점할 때 발급한 토큰이 이 핸들러의 소유권이다. 이 값이 바뀌면 남이 이 건을 가져간 것이다.
+    const token: string = row.lock_token;
     try {
       const { passed, finalContent, rounds, detail } = await runSpamRound(row, 0);
-      await saveTestResult(row, finalContent, rounds, detail);
+      // ⛔ 검사 결과부터 소유권을 확인하며 쓴다. 여기서 잃었으면 알림도 보내지 않는다 —
+      //   담당자가 이미 문안을 고쳤는데 옛 문안으로 "승인해 주세요"를 보내면 그 문자가 거짓이 된다.
+      if (await saveTestResult(row, finalContent, rounds, detail, token) === null) continue;
       const label = shortLabel(row.file_name || row.original_content);
       const whenText = formatWhen(new Date(row.requested_at));
 
       if (!passed) {
-        if (!await setStatus(row.id, 'test_failed', { lock_at: null }, lease)) continue;
+        if (!await setStatus(row.id, 'test_failed', { ...RELEASE }, token)) continue;
         await logEvent(row.id, 'test_failed', { rounds });
         await notifyManager({
-          companyId: row.company_id, requestId: row.id, managerPhone: row.manager_phone,
+          companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
           callback: row.callback_number, title: '[대행발송] 문안 확인 요청',
           text: buildTestFailedNotify({ label }),
         });
         continue;
       }
 
+      // ⛔ 상태를 먼저 확정하고 그다음에 알린다(★2026-08-23 Codex 2R high).
+      //   알림을 먼저 보내면, 소유권을 잃어 상태가 안 바뀐 건에도 테스트 문자와 승인 요청이 나간다.
+      if (!await setStatus(row.id, 'awaiting_approval', { ...RELEASE }, token)) continue;
+      await logEvent(row.id, 'awaiting_approval', { rounds });
+
       // 통과한 문안을 담당자에게 **실물 그대로** 보낸다(MMS면 이미지까지).
       //   승인은 이 문자를 본 뒤에 하는 것이라, 여기서 실제와 다른 것을 보내면 승인의 의미가 없다.
       const sample = await buildSample({ ...row, current_content: finalContent });
       const images = Array.isArray(row.mms_image_paths) ? row.mms_image_paths : [];
-      const msgType = row.message_type === 'MMS' ? 'M' : row.message_type === 'LMS' ? 'L' : 'S';
-      await notifyManager({
-        companyId: row.company_id, requestId: row.id, managerPhone: row.manager_phone,
-        callback: row.callback_number, title: sample.subject || '[대행발송] 테스트',
-        text: sample.text, msgType: msgType as any, mmsImages: images,
+      await sendManagerTest({
+        companyId: row.company_id, requestId: row.id, createdBy: row.created_by,
+        phones: managerPhonesOf(row), callback: row.callback_number,
+        text: sample.text, subject: sample.subject || '[대행발송] 테스트',
+        messageType: row.message_type, mmsImages: images,
       });
       await notifyManager({
-        companyId: row.company_id, requestId: row.id, managerPhone: row.manager_phone,
+        companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
         callback: row.callback_number, title: '[대행발송] 승인 요청',
         text: buildPassedNotify({ label, whenText }),
       });
-
-      if (!await setStatus(row.id, 'awaiting_approval', { lock_at: null }, lease)) continue;
-      await logEvent(row.id, 'awaiting_approval', { rounds });
       console.log(`${LOG} 1차 검사 통과 request=${row.id} rounds=${rounds}`);
     } catch (err: any) {
       console.error(`${LOG} 1차 검사 실패 request=${row.id}:`, err);
-      await setStatus(row.id, 'received', { lock_at: null }, lease).catch(() => {});
+      await setStatus(row.id, 'received', { ...RELEASE }, token).catch(() => {});
       await logEvent(row.id, 'first_test_error', { error: String(err?.message || '') });
     }
   }
@@ -326,17 +404,19 @@ async function runFinalTest(onlyRequestId?: string): Promise<void> {
     //   ⛔ 여기서 또 검사하면 승인받은 문안이 통신사 결과에 따라 다시 뒤집히고, 남은 시간도 사라진다.
     if (isQueueDue('approved', requestedAt, now, finalTestedAt)) {
       const locked = await query(
-        `UPDATE agency_send_requests SET status = 'final_testing', lock_at = $2, updated_at = NOW()
+        `UPDATE agency_send_requests
+            SET status = 'final_testing', lock_at = NOW(), lock_token = gen_random_uuid(),
+                revision = revision + 1, updated_at = NOW()
           WHERE id = $1::uuid AND status = 'approved' RETURNING *`,
-        [row.id, newLease()],
+        [row.id],
       );
       if (locked.rows.length === 0) continue;
       const ready = locked.rows[0];
       try {
-        await dispatchToPipeline(ready, String(ready.current_content || ''), ready.lock_at);
+        await dispatchToPipeline(ready, String(ready.current_content || ''), ready.lock_token);
       } catch (err: any) {
         console.error(`${LOG} 재승인 건 예약 실패 request=${ready.id}:`, err);
-        await setStatus(ready.id, 'approved', { lock_at: null }, ready.lock_at).catch(() => {});
+        await setStatus(ready.id, 'approved', { ...RELEASE }, ready.lock_token).catch(() => {});
         await logEvent(ready.id, 'dispatch_error', { error: String(err?.message || '') });
       }
       continue;
@@ -345,59 +425,64 @@ async function runFinalTest(onlyRequestId?: string): Promise<void> {
     if (!isFinalTestDue('approved', requestedAt, now, finalTestedAt)) continue;
 
     const locked = await query(
-      `UPDATE agency_send_requests SET status = 'final_testing', lock_at = $2, updated_at = NOW()
+      `UPDATE agency_send_requests
+          SET status = 'final_testing', lock_at = NOW(), lock_token = gen_random_uuid(),
+              revision = revision + 1, updated_at = NOW()
         WHERE id = $1::uuid AND status = 'approved' RETURNING *`,
-      [row.id, newLease()],
+      [row.id],
     );
     if (locked.rows.length === 0) continue; // 다른 tick이 먼저 잡았다
     const target = locked.rows[0];
-    const lease = target.lock_at;
+    const token: string = target.lock_token;
     const label = shortLabel(target.file_name || target.original_content);
 
     try {
       const { passed, finalContent, rounds, detail } = await runSpamRound(target, 0);
-      const version = await saveTestResult(target, finalContent, rounds, detail);
+      const version = await saveTestResult(target, finalContent, rounds, detail, token);
+      if (version === null) continue; // 소유권을 잃었다. 알림도 보내지 않는다
       // 통과한 문안에는 "오늘 검사를 지났다"는 표시를 남긴다. 재승인 뒤 재검사를 건너뛰는 근거이자,
       // 문안·시각이 바뀌면 라우트가 이 값을 지워 다시 검사하게 만드는 스위치다.
       if (passed) {
         await query(
-          `UPDATE agency_send_requests SET final_test_at = NOW() WHERE id = $1::uuid AND lock_at = $2`,
-          [target.id, lease],
+          `UPDATE agency_send_requests
+              SET final_test_at = NOW(), revision = revision + 1, updated_at = NOW()
+            WHERE id = $1::uuid AND lock_token = $2::uuid`,
+          [target.id, token],
         );
       }
 
       if (passed && finalContent === String(target.current_content || '')) {
         // 문안이 그대로 통과 = 담당자가 승인한 그 문안이다. 바로 예약으로 간다
-        await dispatchToPipeline(target, finalContent, lease);
+        await dispatchToPipeline(target, finalContent, token);
         continue;
       }
 
       if (passed) {
         // 다듬어서 통과했다 = 담당자가 못 본 문장이다. 재승인을 받는다(불변 7)
         if (!await setStatus(target.id, 'reapproval', {
-          lock_at: null,
+          ...RELEASE,
           approved_at: null,
           approved_by: null,
           approval_version: null,
           reapproval_count: Number(target.reapproval_count || 0) + 1,
-        }, lease)) continue;
+        }, token)) continue;
         await logEvent(target.id, 'reapproval', { rounds, version });
 
         await notifyManager({
-          companyId: target.company_id, requestId: target.id, managerPhone: target.manager_phone,
+          companyId: target.company_id, requestId: target.id, phones: managerPhonesOf(target),
           callback: target.callback_number, title: '[대행발송] 예약 취소 안내',
           text: buildFinalBlockedNotify({ label }),
         });
         const sample = await buildSample({ ...target, current_content: finalContent });
         const images = Array.isArray(target.mms_image_paths) ? target.mms_image_paths : [];
-        const msgType = target.message_type === 'MMS' ? 'M' : target.message_type === 'LMS' ? 'L' : 'S';
-        await notifyManager({
-          companyId: target.company_id, requestId: target.id, managerPhone: target.manager_phone,
-          callback: target.callback_number, title: sample.subject || '[대행발송] 수정 문안',
-          text: sample.text, msgType: msgType as any, mmsImages: images,
+        await sendManagerTest({
+          companyId: target.company_id, requestId: target.id, createdBy: target.created_by,
+          phones: managerPhonesOf(target), callback: target.callback_number,
+          text: sample.text, subject: sample.subject || '[대행발송] 수정 문안',
+          messageType: target.message_type, mmsImages: images,
         });
         await notifyManager({
-          companyId: target.company_id, requestId: target.id, managerPhone: target.manager_phone,
+          companyId: target.company_id, requestId: target.id, phones: managerPhonesOf(target),
           callback: target.callback_number, title: '[대행발송] 재승인 요청',
           text: buildReapprovalNotify({ label, whenText: formatWhen(new Date(target.requested_at)) }),
         });
@@ -405,22 +490,22 @@ async function runFinalTest(onlyRequestId?: string): Promise<void> {
       }
 
       // 세 번 다 걸렸다. 나가지 않는다
-      if (!await setStatus(target.id, 'test_failed', { lock_at: null }, lease)) continue;
+      if (!await setStatus(target.id, 'test_failed', { ...RELEASE }, token)) continue;
       await logEvent(target.id, 'final_test_failed', { rounds });
       await notifyManager({
-        companyId: target.company_id, requestId: target.id, managerPhone: target.manager_phone,
+        companyId: target.company_id, requestId: target.id, phones: managerPhonesOf(target),
         callback: target.callback_number, title: '[대행발송] 예약 취소 안내',
         text: buildFinalBlockedNotify({ label }),
       });
       await notifyManager({
-        companyId: target.company_id, requestId: target.id, managerPhone: target.manager_phone,
+        companyId: target.company_id, requestId: target.id, phones: managerPhonesOf(target),
         callback: target.callback_number, title: '[대행발송] 문안 확인 요청',
         text: buildTestFailedNotify({ label }),
       });
     } catch (err: any) {
       console.error(`${LOG} 당일 재검사 실패 request=${target.id}:`, err);
       // 되돌려 둔다. 다음 tick이 다시 잡거나, 시각이 지나면 만료 단계가 맡는다
-      await setStatus(target.id, 'approved', { lock_at: null }, lease).catch(() => {});
+      await setStatus(target.id, 'approved', { ...RELEASE }, token).catch(() => {});
       await logEvent(target.id, 'final_test_error', { error: String(err?.message || '') });
     }
   }
@@ -432,16 +517,16 @@ async function runFinalTest(onlyRequestId?: string): Promise<void> {
  * 직접 큐에 넣지 않고 직접발송 배관에 넘긴다: `campaign_send_staging` 적재 → `createDirectSendCampaign`.
  * 그 뒤의 수신거부 제외·중복 제거·선불 차감·큐 적재·미적재분 환불·적재 중 취소 감지는 그쪽이 소유한다.
  *
- * ⛔ `send_type='agency'` — 이 값이 빠지면 컬럼 기본값으로 적재되어 결과 동기화·실패 환불·후불 청구
- *   세 축 어디에도 안 걸리는 유령 발송이 된다(2026-08-23 정정 · CT = `send-type-axis.ts`).
+ * ⛔ `send_type`을 지정하지 않는다 — 배관 기본값 `'direct'`로 적재되어 결과 동기화·실패 환불·후불 청구가
+ *   **기존 경로 그대로** 돈다. 새 값을 만들면 그 축들을 건드려야 하고, 건드릴 이유가 없다.
  * ⛔ `campaign_id`가 이미 있으면 다시 만들지 않는다. 재시도가 캠페인과 큐를 한 벌 더 만들던 자리다(§12-1).
  */
-async function dispatchToPipeline(row: any, content: string, lease: any): Promise<void> {
+async function dispatchToPipeline(row: any, content: string, token: string): Promise<void> {
   const label = shortLabel(row.file_name || row.original_content, 40);
   const notifyFailed = async (kind: string, payload: Record<string, any>) => {
     await logEvent(row.id, kind, payload);
     await notifyManager({
-      companyId: row.company_id, requestId: row.id, managerPhone: row.manager_phone,
+      companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
       callback: row.callback_number, title: '[대행발송] 확인 요청',
       text: buildQueueFailedNotify({ label }),
     });
@@ -453,66 +538,63 @@ async function dispatchToPipeline(row: any, content: string, lease: any): Promis
   // ⛔ lease를 조건에 넣는다 — 이 사이 lock 복구가 되돌렸으면 여기서 멈춘다.
   const keyed = await query(
     `UPDATE agency_send_requests
-        SET dispatch_key = COALESCE(dispatch_key, gen_random_uuid()), updated_at = NOW()
-      WHERE id = $1::uuid AND lock_at = $2
+        SET dispatch_key = COALESCE(dispatch_key, gen_random_uuid()),
+            revision = revision + 1, updated_at = NOW()
+      WHERE id = $1::uuid AND lock_token = $2::uuid
       RETURNING dispatch_key`,
-    [row.id, lease],
+    [row.id, token],
   );
   if (keyed.rows.length === 0) {
-    console.warn(`${LOG} lease를 잃어 예약을 중단한다 request=${row.id}`);
+    console.warn(`${LOG} 소유권을 잃어 예약을 중단한다 request=${row.id}`);
     return;
   }
   const stagingId = keyed.rows[0].dispatch_key;
 
   // ⛔ 멱등 — 앞선 시도가 예약을 만들어 두고 원장에 적기 전에 죽었을 수 있다.
-  //   그때 그냥 다시 만들면 같은 발송이 두 벌 나간다. **캠페인을 만들기 전에** 이번 시도 키로 먼저 찾는다
-  //   (원장의 `campaign_id`는 나중에 적히므로 근거가 못 된다).
-  const prior = row.campaign_id
-    ? await query(`SELECT id, send_phase FROM campaigns WHERE id = $1::uuid`, [row.campaign_id])
-    : await query(
-        `SELECT id, send_phase FROM campaigns
-          WHERE staging_id = $1::uuid AND company_id = $2::uuid
-          ORDER BY created_at DESC LIMIT 1`,
-        [stagingId, row.company_id],
-      );
-  if (prior.rows.length > 0) {
-    const { id: priorId, send_phase: phase } = prior.rows[0];
-    // 차감 도중 멈춰 중화된 캠페인은 발송되지 않는다(배관이 'queued'만 집는다). 다시 만들지도 않는다.
-    // 이 시도는 여기서 끝이고, 담당자가 시각을 다시 정하면 새 시도 키로 처음부터 간다.
-    if (phase === 'failed' || phase === 'preparing') {
-      await setStatus(row.id, 'expired', { lock_at: null, campaign_id: priorId, expired_at: new Date() }, lease);
-      await notifyFailed('dispatch_incomplete', { campaignId: priorId, phase });
+  //   그때 그냥 다시 만들면 같은 발송이 두 벌 나간다. **캠페인을 만들기 전에** 이번 시도 키로 먼저 찾는다.
+  //   근거는 시도 키 하나다(원장의 `campaign_id`는 나중에 적히므로 근거가 못 된다).
+  const prior = await inspectAttemptCampaign(row.company_id, stagingId);
+  if (prior.id) {
+    // 차감 도중 멈춰 중화된 캠페인은 더 나가지 않는다. 다시 만들지도 않는다.
+    // ⛔ 일부는 이미 나갔을 수 있으므로 `campaign_id`를 붙인 채로 닫는다 — 라우트가 그 접수의 재예약을 막는다.
+    if (prior.kind === 'stopped') {
+      await setStatus(row.id, 'expired', { ...RELEASE, campaign_id: prior.id, expired_at: new Date() }, token);
+      await notifyFailed('dispatch_incomplete', { campaignId: prior.id });
       return;
     }
-    await setStatus(row.id, 'queued', { lock_at: null, campaign_id: priorId, queued_at: new Date() }, lease);
-    await logEvent(row.id, 'queued_already', { campaignId: priorId, phase });
+    // 살아 있다 = 이미 예약된 것이다. 상태를 맞추기만 한다(실패해도 대조가 수렴시킨다).
+    await setStatus(row.id, 'queued', { ...RELEASE, campaign_id: prior.id, queued_at: new Date() }, token);
+    await logEvent(row.id, 'queued_already', { campaignId: prior.id });
     return;
   }
   // ⛔ 승인은 문안 버전에 묶인다(불변 7). 게이트를 라우트에만 두면 워커가 문안을 다듬은 뒤
   //   상태 전이가 실패한 경로로 **담당자가 못 본 문장**이 여기까지 올 수 있다. 효과가 만들어지는 자리에서 다시 본다.
   if (!isApprovalCurrent(row.approval_version, row.content_version)) {
-    await setStatus(row.id, 'reapproval', {
-      lock_at: null, approved_at: null, approved_by: null, approval_version: null,
-    }, lease);
+    // ⛔ 소유권을 반납한다(★2026-08-23 Codex 4R). 토큰을 남기면 `reapproval`은 lock 복구 대상이 아니라
+    //   만료도 취소도 그 토큰 때문에 영원히 걸리지 않는다.
+    // ⛔ 상태가 실제로 바뀐 뒤에만 알린다 — 아니면 바뀌지도 않은 건에 재승인 요청 문자가 나간다.
+    if (!await setStatus(row.id, 'reapproval', {
+      ...RELEASE, approved_at: null, approved_by: null, approval_version: null,
+    }, token)) return;
     await logEvent(row.id, 'dispatch_unapproved_version', {
       approvalVersion: row.approval_version, contentVersion: row.content_version,
     });
     await notifyManager({
-      companyId: row.company_id, requestId: row.id, managerPhone: row.manager_phone,
+      companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
       callback: row.callback_number, title: '[대행발송] 재승인 요청',
       text: buildReapprovalNotify({ label, whenText: formatWhen(new Date(row.requested_at)) }),
     });
     return;
   }
   if (!row.created_by) {
-    await setStatus(row.id, 'expired', { lock_at: null, expired_at: new Date() }, lease);
+    await setStatus(row.id, 'expired', { ...RELEASE, expired_at: new Date() }, token);
     await notifyFailed('dispatch_no_owner', {});
     return;
   }
 
   const plan = buildSlotPlan(content);
   if (!plan.ok) {
-    await setStatus(row.id, 'test_failed', { lock_at: null }, lease);
+    await setStatus(row.id, 'test_failed', { ...RELEASE }, token);
     await notifyFailed('dispatch_var_overflow', { vars: plan.order.length });
     return;
   }
@@ -534,7 +616,7 @@ async function dispatchToPipeline(row: any, content: string, lease: any): Promis
   }
   // 문안 문제가 아니라 보낼 대상이 없는 것이다. "문안 확인 필요"로 적으면 담당자가 엉뚱한 곳을 본다.
   if (phones.length === 0) {
-    await setStatus(row.id, 'expired', { lock_at: null, expired_at: new Date() }, lease);
+    await setStatus(row.id, 'expired', { ...RELEASE, expired_at: new Date() }, token);
     await notifyFailed('dispatch_no_recipient', {});
     return;
   }
@@ -553,7 +635,7 @@ async function dispatchToPipeline(row: any, content: string, lease: any): Promis
   const { sendCount } = await countStagingFiltered(stagingId, row.company_id, row.created_by, true, true);
   if (sendCount === 0) {
     await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1::uuid`, [stagingId]);
-    await setStatus(row.id, 'expired', { lock_at: null, expired_at: new Date() }, lease);
+    await setStatus(row.id, 'expired', { ...RELEASE, expired_at: new Date() }, token);
     await notifyFailed('dispatch_zero_after_filter', { staged: phones.length });
     return;
   }
@@ -576,12 +658,13 @@ async function dispatchToPipeline(row: any, content: string, lease: any): Promis
         mmsImagePaths: images.length > 0 ? images : null,
         dedupEnabled: true,
         unsubFilterEnabled: true,
-        sendType: 'agency',
       },
       { companyId: row.company_id, userId: row.created_by },
     );
 
-    await setStatus(row.id, 'queued', { lock_at: null, campaign_id: campaignId, queued_at: new Date() }, lease);
+    // 상태를 적는다. **이 쓰기가 실패해도 발송이 미아가 되지 않는다** — 캠페인이 시도 키를 들고 있고
+    //   대조(워커 D)가 그것을 보고 수렴시킨다. 그래서 여기서 고아 판정·중화를 하지 않는다.
+    await setStatus(row.id, 'queued', { ...RELEASE, campaign_id: campaignId, queued_at: new Date() }, token);
     await logEvent(row.id, 'queued', { campaignId, count: sendCount, staged: phones.length });
     console.log(`${LOG} 예약 생성 완료 request=${row.id} campaign=${campaignId} ${sendCount}건`);
   } catch (err: any) {
@@ -590,8 +673,26 @@ async function dispatchToPipeline(row: any, content: string, lease: any): Promis
     //   그 순간 적재 워커가 읽는 행을 지우면 **일부만 나가는 발송**이 된다. 다음 시도가 같은 자리에 다시 쓴다.
     const code = err instanceof DirectSendError ? err.code : 'DISPATCH_ERROR';
     console.error(`${LOG} 예약 생성 거절 request=${row.id} code=${code}:`, err?.message || err);
-    await setStatus(row.id, 'expired', { lock_at: null, expired_at: new Date() }, lease);
-    await notifyFailed('dispatch_rejected', { code, message: String(err?.message || '') });
+
+    // ⛔ **결과를 확인하기 전에는 닫지 않는다**(★2026-08-23 Codex 2R critical).
+    //   배관은 "활성화 결과 미확정"으로도 던진다. 그때 캠페인이 실제로 살아 있을 수 있는데 여기서 닫고
+    //   담당자가 재예약하면 시도 키가 바뀌어 옛 캠페인을 못 찾는다 = 두 벌 발송.
+    //   그래서 이번 시도 키로 캠페인을 먼저 찾아 실제 상태로 확정한다.
+    const made = await inspectAttemptCampaign(row.company_id, stagingId);
+    if (made.id && made.kind === 'live') {
+      await setStatus(row.id, 'queued', { ...RELEASE, campaign_id: made.id, queued_at: new Date() }, token);
+      await logEvent(row.id, 'dispatch_recovered', { campaignId: made.id, code });
+      return;
+    }
+    if (made.id) {
+      await setStatus(row.id, 'expired', { ...RELEASE, campaign_id: made.id, expired_at: new Date() }, token);
+      await notifyFailed('dispatch_rejected', { code, campaignId: made.id, message: String(err?.message || '') });
+      return;
+    }
+    // 캠페인이 없다 = 이번 시도는 아무것도 만들지 못했다. 시도 키를 그대로 두고 되돌려 다음 tick이 다시 한다.
+    //   안내는 보내지 않는다 — 반복 실패마다 문자를 쏘면 담당자에게 같은 문장이 쌓인다(만료 때 한 번 간다).
+    await setStatus(row.id, 'approved', { ...RELEASE }, token);
+    await logEvent(row.id, 'dispatch_retry', { code, message: String(err?.message || '') });
   }
 }
 
@@ -612,11 +713,23 @@ async function runExpire(): Promise<void> {
   for (const row of rows.rows) {
     if (!isApprovalExpired(row.status, new Date(row.requested_at), now)) continue;
     const wasApproved = row.status === 'approved';
-    await setStatus(row.id, 'expired', { expired_at: new Date() });
+
+    // ⛔ 관찰한 상태·수정 번호로 잡고, **워커가 잡고 있지 않은 행만** 만료시킨다(★2026-08-23 Codex 3R high).
+    //   조건 없이 덮으면, 방금 예약을 만들기 시작한 건을 만료로 바꿔 놓고 그 핸들러는 계속 캠페인을 만든다
+    //   (담당자는 "발송하지 못했습니다"를 받고 실제로는 발송된다).
+    const claimed = await query(
+      `UPDATE agency_send_requests
+          SET status = 'expired', expired_at = NOW(), revision = revision + 1, updated_at = NOW()
+        WHERE id = $1::uuid AND status = $2 AND revision = $3 AND lock_token IS NULL
+        RETURNING id`,
+      [row.id, row.status, row.revision],
+    );
+    if (claimed.rows.length === 0) continue;
+
     await logEvent(row.id, 'expired', { from: row.status });
     const label = shortLabel(row.file_name || row.original_content);
     await notifyManager({
-      companyId: row.company_id, requestId: row.id, managerPhone: row.manager_phone,
+      companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
       callback: row.callback_number, title: '[대행발송] 미발송 안내',
       // 승인한 담당자에게 "승인이 없어서"라고 보내면 사실과 다르다. 사유대로 나눈다.
       text: wasApproved ? buildApprovedExpiredNotify({ label }) : buildExpiredNotify({ label }),
@@ -627,40 +740,206 @@ async function runExpire(): Promise<void> {
 
 // ────────────── D. 대조(이중 진실 안전망) ──────────────
 
+/**
+ * **캠페인 쪽 진실에 원장을 맞춘다.** 이 축의 수렴은 전부 여기 한 곳에서 일어난다.
+ *
+ * 근거는 `campaigns.staging_id = agency_send_requests.dispatch_key` 하나다. 원장의 `campaign_id`는
+ * 화면 표시용 캐시일 뿐이라 비어 있어도 판정이 흔들리지 않는다. 그래서 예약을 만드는 자리는
+ * "만들고 상태를 적는다"까지만 하고, 적기에 실패하든 크래시하든 **여기가 매 tick 다시 본다.**
+ *
+ * ⛔ 종결 상태(`cancelled`·`expired`·`test_failed`)도 대상이다. 늦게 태어난 캠페인은
+ *   요청이 이미 끝났든 말든 나가기 때문이다. 중화가 실패해도 다음 tick이 다시 시도한다
+ *   (그래서 별도 재시도 장치가 필요 없다).
+ */
 async function runReconcile(): Promise<void> {
   const rows = await query(
-    `SELECT a.id, a.campaign_id, c.status AS campaign_status
-       FROM agency_send_requests a
-       JOIN campaigns c ON c.id = a.campaign_id
-      WHERE a.status = 'queued' AND c.status = 'cancelled'
-      LIMIT 50`,
+    `SELECT id, company_id, status, revision, campaign_id, dispatch_key,
+            manager_phone, manager_phones, callback_number, file_name, original_content
+       FROM agency_send_requests
+      WHERE dispatch_key IS NOT NULL
+        AND status NOT IN ('cancelling')
+        AND updated_at > NOW() - INTERVAL '30 days'
+      ORDER BY updated_at DESC
+      LIMIT 200`,
   );
-  for (const row of rows.rows) {
-    await setStatus(row.id, 'cancelled', { cancelled_at: new Date(), cancel_reason: '예약이 취소되었습니다' });
-    await logEvent(row.id, 'reconciled_cancelled', { campaignId: row.campaign_id });
-    console.log(`${LOG} 캠페인 취소를 원장에 반영 request=${row.id}`);
-  }
 
-  // 적재가 예외로 끝난 건(배관이 `send_phase='failed'`로 종결). 일부가 이미 나갔을 수 있어
-  // 상태는 내리지 않고(그러면 "미발송"이라는 거짓이 된다) 담당자에게 한 번만 알린다.
-  const broken = await query(
-    `SELECT a.id, a.company_id, a.campaign_id, a.manager_phone, a.callback_number, a.file_name, a.original_content
-       FROM agency_send_requests a
-       JOIN campaigns c ON c.id = a.campaign_id
-      WHERE a.status = 'queued' AND c.send_phase = 'failed'
-        AND NOT EXISTS (
-          SELECT 1 FROM agency_send_events e WHERE e.request_id = a.id AND e.kind = 'queue_failed'
-        )
-      LIMIT 50`,
+  for (const row of rows.rows) {
+    try {
+      const found = await inspectAttemptCampaign(row.company_id, row.dispatch_key);
+      if (!found.id) continue;
+
+      // ① 나가면 안 되는데 살아 있다 = 되돌린다. 실패해도 다음 tick이 다시 한다.
+      const mustNotSend = row.status === 'cancelled' || row.status === 'expired' || row.status === 'test_failed';
+      if (mustNotSend && found.kind === 'live') {
+        const { ok, error } = await neutralizeCampaign(
+          row.id, row.company_id, found.id, `대행발송 ${row.status} 건의 예약 회수`,
+        );
+        await logEvent(row.id, 'reconciled_neutralize', { campaignId: found.id, ok, error });
+        if (ok) {
+          await query(
+            `UPDATE agency_send_requests SET campaign_id = COALESCE(campaign_id, $2::uuid), updated_at = NOW()
+              WHERE id = $1::uuid`,
+            [row.id, found.id],
+          );
+        }
+        continue;
+      }
+
+      // ② 살아 있는데 원장이 아직 따라오지 못했다 = 예약 완료로 맞춘다.
+      if (found.kind === 'live' && row.status !== 'queued') {
+        const fixed = await query(
+          `UPDATE agency_send_requests
+              SET status = 'queued', campaign_id = $2::uuid, queued_at = COALESCE(queued_at, NOW()),
+                  lock_at = NULL, lock_token = NULL, revision = revision + 1, updated_at = NOW()
+            WHERE id = $1::uuid AND revision = $3 AND status NOT IN ('cancelled','cancelling')
+            RETURNING id`,
+          [row.id, found.id, row.revision],
+        );
+        if (fixed.rows.length > 0) {
+          await logEvent(row.id, 'reconciled_queued', { campaignId: found.id, from: row.status });
+        }
+        continue;
+      }
+
+      // ③ 캐시만 비어 있으면 채운다(화면이 발송결과로 넘어갈 수 있게).
+      if (!row.campaign_id) {
+        await query(
+          `UPDATE agency_send_requests SET campaign_id = $2::uuid, updated_at = NOW()
+            WHERE id = $1::uuid AND campaign_id IS NULL`,
+          [row.id, found.id],
+        );
+      }
+
+      // ④ 예약된 건이 취소·중단됐다 = 원장에 반영하고 한 번만 알린다.
+      if (row.status === 'queued' && found.kind === 'stopped') {
+        const camp = await query(`SELECT status FROM campaigns WHERE id = $1::uuid`, [found.id]);
+        if (camp.rows[0]?.status === 'cancelled') {
+          const done = await query(
+            `UPDATE agency_send_requests
+                SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = $2,
+                    revision = revision + 1, updated_at = NOW()
+              WHERE id = $1::uuid AND status = 'queued' AND revision = $3
+              RETURNING id`,
+            [row.id, '예약이 취소되었습니다', row.revision],
+          );
+          if (done.rows.length > 0) await logEvent(row.id, 'reconciled_cancelled', { campaignId: found.id });
+          continue;
+        }
+        // 적재가 예외로 끝났다. 일부는 이미 나갔을 수 있어 상태는 내리지 않고 한 번만 알린다.
+        const told = await query(
+          `SELECT 1 FROM agency_send_events WHERE request_id = $1::uuid AND kind = 'queue_failed' LIMIT 1`,
+          [row.id],
+        );
+        if (told.rows.length === 0) {
+          await logEvent(row.id, 'queue_failed', { campaignId: found.id });
+          await notifyManager({
+            companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
+            callback: row.callback_number, title: '[대행발송] 확인 요청',
+            text: buildQueueFailedNotify({ label: shortLabel(row.file_name || row.original_content) }),
+          });
+        }
+      }
+    } catch (err: any) {
+      console.error(`${LOG} 대조 실패 request=${row.id}:`, err?.message || err);
+    }
+  }
+}
+
+// ────────────── F. 취소 마무리 ──────────────
+
+/**
+ * `cancelling`으로 남은 건을 끝까지 민다.
+ *
+ * 취소는 원장(PG)과 큐(MySQL) 두 곳을 건드리는 다단계 작업이라 한 트랜잭션으로 묶을 수 없다.
+ * 라우트가 큐를 지우는 도중 죽으면 `cancelling`이 남는데, 그대로 두면 **큐는 살아 있고 화면만 취소 중**이다.
+ *
+ * ⛔ **갓 잡힌 건은 건드리지 않는다**(★2026-08-23 Codex 6R critical). 라우트가 지금 그 건을 처리하는 중일 수 있고,
+ *   라우트는 시간 게이트(발송 15분 전)를 지키는데 여기는 그것을 넘긴다. 둘이 겹치면
+ *   **사용자는 "취소하지 못했습니다"를 받았는데 예약은 취소되는** 어긋남이 생긴다.
+ *   그래서 잡은 지 `CANCEL_HANDOVER_MINUTES`가 지난 건만 인수한다.
+ * ⛔ 기준 시각(`lock_at`)은 잡을 때 한 번 찍고 **회전용 `updated_at`과 섞지 않는다.** 섞으면 매 tick
+ *   기준이 앞으로 밀려 영영 인수되지 않는다.
+ */
+const CANCEL_HANDOVER_MINUTES = 2;
+
+async function runCancelSweep(): Promise<void> {
+  const rows = await query(
+    `SELECT id, company_id, revision, campaign_id, dispatch_key, lock_at, updated_at
+       FROM agency_send_requests
+      WHERE status = 'cancelling'
+        AND COALESCE(lock_at, updated_at) < NOW() - ($1::int * INTERVAL '1 minute')
+      ORDER BY COALESCE(lock_at, updated_at)
+      LIMIT 20`,
+    [CANCEL_HANDOVER_MINUTES],
   );
-  for (const row of broken.rows) {
-    await logEvent(row.id, 'queue_failed', { campaignId: row.campaign_id });
-    await notifyManager({
-      companyId: row.company_id, requestId: row.id, managerPhone: row.manager_phone,
-      callback: row.callback_number, title: '[대행발송] 확인 요청',
-      text: buildQueueFailedNotify({ label: shortLabel(row.file_name || row.original_content) }),
-    });
-    console.warn(`${LOG} 적재가 예외로 끝난 건 request=${row.id} campaign=${row.campaign_id}`);
+
+  const now = Date.now();
+  for (const row of rows.rows) {
+    // ⛔ 한 건이 던져도 다음 건은 처리한다. 격리하지 않으면 실패한 한 건이 매 tick 배치를 멈춰
+    //   뒤에 온 취소의 살아 있는 큐가 그대로 나간다.
+    try {
+      // 기준 시각을 아직 안 찍었으면 지금 한 번 고정한다(이후 회전에 흔들리지 않는다).
+      if (!row.lock_at) {
+        await query(`UPDATE agency_send_requests SET lock_at = NOW() WHERE id = $1::uuid AND lock_at IS NULL`, [row.id]);
+      }
+
+      // 근거는 시도 키 하나다.
+      const found = await inspectAttemptCampaign(row.company_id, row.dispatch_key);
+
+      if (found.id) {
+        const { ok, error } = await neutralizeCampaign(row.id, row.company_id, found.id, '담당자 취소(마무리)');
+        if (!ok) {
+          await logEvent(row.id, 'cancel_sweep_retry', { campaignId: found.id, error });
+          // 실패해도 `updated_at`을 밀어 **배치를 회전시킨다**. 안 밀면 영구 실패 스무 건이 앞자리를 차지해
+          // 그 뒤에 취소를 누른 건의 살아 있는 큐가 한 번도 처리되지 않는다.
+          await query(`UPDATE agency_send_requests SET updated_at = NOW() WHERE id = $1::uuid`, [row.id]);
+          const tries = await query(
+            `SELECT COUNT(*)::int AS c FROM agency_send_events WHERE request_id = $1::uuid AND kind = 'cancel_sweep_retry'`,
+            [row.id],
+          );
+          if ((tries.rows[0]?.c || 0) >= 6) {
+            try {
+              await sendSystemAlert({
+                dedupKey: `agency-cancel-stuck:${row.id}`,
+                message: `대행발송 취소가 끝나지 않았다 request=${row.id} campaign=${found.id} 사유=${error || '미상'} 큐 잔존 여부 확인 필요`,
+              });
+            } catch { /* 경보 실패가 배치를 멈추게 두지 않는다 */ }
+          }
+          continue;
+        }
+        if (!row.campaign_id) {
+          await query(
+            `UPDATE agency_send_requests SET campaign_id = $2::uuid, updated_at = NOW()
+              WHERE id = $1::uuid AND campaign_id IS NULL`,
+            [row.id, found.id],
+          );
+        }
+      } else if (row.dispatch_key) {
+        // ⛔ **"지금 캠페인이 없다"는 "앞으로도 없다"가 아니다.** 예약을 만들던 핸들러가 소유권을 잃은 뒤에도
+        //   생성을 끝낼 수 있다. 그 창이 닫히기 전에 확정하지 않는다.
+        //   ★ 확정한 뒤에 캠페인이 태어나도 **대조(워커 D)가 종결 상태까지 계속 보고 회수한다** — 여기서만 막지 않는다.
+        const startedAt = new Date(row.lock_at || row.updated_at).getTime();
+        if (now - startedAt < LOCK_STALE_MINUTES * 60000) {
+          await query(`UPDATE agency_send_requests SET updated_at = NOW() WHERE id = $1::uuid`, [row.id]);
+          continue;
+        }
+      }
+
+      const done = await query(
+        `UPDATE agency_send_requests
+            SET status = 'cancelled', cancelled_at = NOW(), lock_at = NULL,
+                revision = revision + 1, updated_at = NOW()
+          WHERE id = $1::uuid AND status = 'cancelling'
+          RETURNING id`,
+        [row.id],
+      );
+      if (done.rows.length === 0) continue;
+      await logEvent(row.id, 'cancel_swept', { campaignId: found.id });
+      console.warn(`${LOG} 남은 취소를 마무리 request=${row.id}`);
+    } catch (err: any) {
+      console.error(`${LOG} 취소 마무리 실패 request=${row.id}:`, err?.message || err);
+      await query(`UPDATE agency_send_requests SET updated_at = NOW() WHERE id = $1::uuid`, [row.id]).catch(() => {});
+    }
   }
 }
 
@@ -668,7 +947,7 @@ async function runReconcile(): Promise<void> {
 
 async function runLockRecovery(): Promise<void> {
   const rows = await query(
-    `SELECT id, company_id, status, lock_at, campaign_id, dispatch_key FROM agency_send_requests
+    `SELECT id, company_id, status, lock_at, lock_token, campaign_id, dispatch_key FROM agency_send_requests
       WHERE status IN ('testing','final_testing') LIMIT 50`,
   );
   const now = new Date();
@@ -677,25 +956,24 @@ async function runLockRecovery(): Promise<void> {
 
     // ⛔ 예약을 이미 만든 건은 잡기 전 상태로 되돌리지 않는다 — 되돌리면 다음 tick이 한 벌 더 만든다.
     //   원장의 `campaign_id`가 비어 있어도 캠페인은 있을 수 있다(적은 직후 죽는 창). 시도 키로 한 번 더 본다.
-    let campaignId: string | null = row.campaign_id || null;
-    if (!campaignId && row.dispatch_key) {
-      const found = await query(
-        `SELECT id FROM campaigns WHERE staging_id = $1::uuid AND company_id = $2::uuid ORDER BY created_at DESC LIMIT 1`,
-        [row.dispatch_key, row.company_id],
-      );
-      campaignId = found.rows[0]?.id || null;
-    }
-    if (campaignId) {
-      await setStatus(row.id, 'queued', { lock_at: null, campaign_id: campaignId, queued_at: new Date() }, row.lock_at);
-      await logEvent(row.id, 'lock_recovered', { from: row.status, to: 'queued', campaignId });
-      console.warn(`${LOG} 멈춘 건 복구 request=${row.id} ${row.status} → queued(예약 있음)`);
+    // 근거는 시도 키 하나다. 원장의 `campaign_id`가 비어 있어도 캠페인은 있을 수 있다.
+    const found = await inspectAttemptCampaign(row.company_id, row.dispatch_key);
+    if (found.id) {
+      // 살아 있으면 예약 완료로, 더 나가지 않으면 미발송으로 맞춘다(실패해도 대조가 다시 본다).
+      const to = found.kind === 'live' ? 'queued' : 'expired';
+      const extra = found.kind === 'live'
+        ? { ...RELEASE, campaign_id: found.id, queued_at: new Date() }
+        : { ...RELEASE, campaign_id: found.id, expired_at: new Date() };
+      if (!await setStatus(row.id, to, extra, row.lock_token)) continue;
+      await logEvent(row.id, 'lock_recovered', { from: row.status, to, campaignId: found.id });
+      console.warn(`${LOG} 멈춘 건 복구 request=${row.id} ${row.status} → ${to}(예약 있음)`);
       continue;
     }
 
     const back = lockRecoveryStatus(row.status);
     if (!back) continue;
-    // ⛔ 관찰한 lock_at을 조건에 넣는다 — 그 사이 원래 핸들러가 끝냈으면 되돌리지 않는다.
-    if (!await setStatus(row.id, back, { lock_at: null }, row.lock_at)) continue;
+    // ⛔ 관찰한 소유권 토큰을 조건에 넣는다 — 그 사이 원래 핸들러가 끝냈으면 되돌리지 않는다.
+    if (!await setStatus(row.id, back, { ...RELEASE }, row.lock_token)) continue;
     await logEvent(row.id, 'lock_recovered', { from: row.status, to: back });
     console.warn(`${LOG} 멈춘 건 복구 request=${row.id} ${row.status} → ${back}`);
   }
@@ -705,6 +983,7 @@ async function runLockRecovery(): Promise<void> {
 
 export async function runAgencySendWorker(): Promise<void> {
   try {
+    await runCancelSweep();
     await runLockRecovery();
     await runFirstTest();
     await runFinalTest();

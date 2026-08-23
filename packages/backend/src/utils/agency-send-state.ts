@@ -23,11 +23,12 @@ export type AgencySendStatus =
   | 'queued'             // 재검사 통과 → 캠페인 생성 + 큐 적재 완료
   | 'reapproval'         // 당일 차단 → 다듬은 문안으로 재승인 대기
   | 'expired'            // 요청 시각까지 승인이 없어 나가지 않음
+  | 'cancelling'         // 담당자가 취소를 눌렀고 **큐 삭제가 아직 안 끝났다**
   | 'cancelled';         // 담당자 취소
 
 export const AGENCY_SEND_STATUSES: readonly AgencySendStatus[] = [
   'received', 'testing', 'awaiting_approval', 'test_failed', 'approved',
-  'final_testing', 'queued', 'reapproval', 'expired', 'cancelled',
+  'final_testing', 'queued', 'reapproval', 'expired', 'cancelling', 'cancelled',
 ];
 
 /**
@@ -36,20 +37,28 @@ export const AGENCY_SEND_STATUSES: readonly AgencySendStatus[] = [
  *   승인만으로 큐에 넣으면 "검사 없이 나가는 발송"이 생긴다(불변 2).
  */
 const TRANSITIONS: Record<AgencySendStatus, readonly AgencySendStatus[]> = {
-  received: ['testing', 'cancelled'],
-  testing: ['awaiting_approval', 'test_failed', 'received'],           // received = lock 복구
-  awaiting_approval: ['approved', 'received', 'expired', 'cancelled'], // received = 담당자가 문안 수정
-  test_failed: ['received', 'cancelled'],
+  received: ['testing', 'cancelling'],
+  testing: ['awaiting_approval', 'test_failed', 'received'],             // received = lock 복구
+  awaiting_approval: ['approved', 'received', 'expired', 'cancelling'],  // received = 담당자가 문안 수정
+  test_failed: ['received', 'cancelling'],
   // expired = 승인은 받았는데 워커가 재검사·적재를 넣을 시간이 지났다(발송하지 않는다)
-  approved: ['final_testing', 'queued', 'expired', 'cancelled'],
+  approved: ['final_testing', 'queued', 'expired', 'cancelling'],
   // queued = 재승인 건(당일 검사를 이미 통과한 문안)은 재검사 없이 적재로 간다
   // expired = 잔액 부족 등으로 예약을 만들지 못했다
   final_testing: ['queued', 'reapproval', 'test_failed', 'expired', 'approved'],  // approved = lock 복구
   // ⛔ 적재 뒤에는 상태를 내리지 않는다 — 일부가 이미 나갔을 수 있어 "미발송"으로 적으면 거짓이 된다.
   //   적재 실패는 이벤트와 안내로 알리고 상태는 그대로 둔다(취소만 상태를 바꾼다).
-  queued: ['cancelled'],                                               // 취소는 기존 캠페인 취소 CT를 함께 탄다
-  reapproval: ['approved', 'received', 'expired', 'cancelled'],
-  expired: ['received', 'cancelled'],                                  // received = 새 시각으로 다시 올린다
+  queued: ['cancelling'],                                                // 취소는 기존 캠페인 취소 CT를 함께 탄다
+  reapproval: ['approved', 'received', 'expired', 'cancelling'],
+  expired: ['received', 'cancelling'],                                   // received = 새 시각으로 다시 올린다
+  /**
+   * ⛔ **취소는 두 저장소를 건드리는 다단계 작업이라 중간 상태가 있어야 한다**(★2026-08-23 Codex 3R critical).
+   *   원장을 먼저 `cancelled`로 확정하면, 그 뒤 큐 삭제가 실패하거나 프로세스가 죽는 순간
+   *   **화면은 취소인데 큐는 살아 요청 시각에 나간다**(0611과 같은 형태). 그래서 `cancelling`으로 먼저 잡고,
+   *   큐 삭제가 끝난 뒤에만 `cancelled`로 간다. 죽어서 남은 `cancelling`은 워커가 마무리한다.
+   *   되돌아가는 길들은 큐 삭제가 거절됐을 때(예: 발송 15분 전) 원래 상태로 복구하는 경로다.
+   */
+  cancelling: ['cancelled', 'received', 'awaiting_approval', 'test_failed', 'approved', 'queued', 'reapproval', 'expired'],
   cancelled: [],
 };
 
@@ -62,10 +71,17 @@ export function isEditable(status: AgencySendStatus): boolean {
   return status === 'awaiting_approval' || status === 'reapproval' || status === 'test_failed' || status === 'expired';
 }
 
-/** 취소 가능한가. `queued`도 가능하지만 그때는 큐 삭제(기존 취소 CT)가 함께 돌아야 한다 */
+/**
+ * 취소 가능한가. `queued`도 가능하지만 그때는 큐 삭제(기존 취소 CT)가 함께 돌아야 한다.
+ * ⛔ `cancelling`은 이미 취소가 진행 중이라 다시 누를 수 없다(두 번 누르면 큐 삭제가 겹친다).
+ */
 export function canCancel(status: AgencySendStatus): boolean {
-  return status !== 'cancelled' && status !== 'testing' && status !== 'final_testing';
+  return status !== 'cancelled' && status !== 'cancelling'
+    && status !== 'testing' && status !== 'final_testing';
 }
+
+/** 취소 가능 상태를 SQL `NOT IN (...)`에 넣을 리터럴. 위 판정과 **같은 집합이어야 한다** */
+export const NOT_CANCELABLE_SQL = "'cancelled','cancelling','testing','final_testing'";
 
 /** 취소에 큐 삭제가 필요한가. `queued`부터가 큐에 실려 있다 */
 export function needsQueueCancel(status: AgencySendStatus): boolean {
@@ -159,7 +175,14 @@ export function validateRequestedAt(
 
 export interface ApprovalTarget {
   status: AgencySendStatus;
-  contentVersion: number;
+  /**
+   * 행 수정 번호. **이 행에 일어난 모든 변경이 이 값을 올린다**(문안·시각·상태·워커 처리 전부).
+   *
+   * ★ 2026-08-23 `contentVersion` 비교를 여기로 바꿨다(Codex 2R high). 시각만 바뀐 건은
+   *   상태도 문안 버전도 그대로라, 담당자가 **못 본 시각**으로 옛 승인이 그대로 통과했다.
+   *   "무엇이 바뀌었나"를 축마다 세지 않고 "이 행이 바뀌었나" 하나로 본다.
+   */
+  revision: number;
   requestedAt: Date;
 }
 
@@ -189,12 +212,16 @@ export interface ApprovalCheck {
  *   그 사이에 문안이 다듬어진 것이라, 담당자가 못 본 문장이 나갈 수 있다 → 거절하고 다시 보게 한다.
  * ⛔ 재검사까지 남은 시간이 없으면 승인해도 검사를 못 넣는다 → 거절하고 시각을 다시 받는다.
  */
-export function checkApproval(target: ApprovalTarget, approvingVersion: number, now: Date): ApprovalCheck {
+export function checkApproval(target: ApprovalTarget, approvingRevision: number, now: Date): ApprovalCheck {
   if (target.status !== 'awaiting_approval' && target.status !== 'reapproval') {
     return { ok: false, error: '지금은 승인할 수 있는 상태가 아닙니다.', code: 'NOT_APPROVABLE' };
   }
-  if (Number(approvingVersion) !== Number(target.contentVersion)) {
-    return { ok: false, error: '문안이 바뀌었습니다. 새 문안을 확인하고 다시 승인해 주세요.', code: 'VERSION_MISMATCH' };
+  if (!Number.isFinite(Number(approvingRevision)) || Number(approvingRevision) !== Number(target.revision)) {
+    return {
+      ok: false,
+      error: '그 사이 내용이 바뀌었습니다. 화면을 새로 고쳐 문안과 시각을 확인한 뒤 승인해 주세요.',
+      code: 'STALE_VIEW',
+    };
   }
   // ⛔ 경계는 만료 판정과 **같은 쪽으로** 닫는다(`<=`). 한쪽이 `<`면 딱 그 값일 때
   //   "승인은 됐는데 같은 tick에 만료되는" 건이 생긴다.

@@ -69,10 +69,19 @@ describe('다듬은 문안 검사', () => {
 });
 
 describe('회차별 지시', () => {
-  it('2회차는 최소 수정을 지시한다', () => {
-    expect(buildRefinePrompt(ORIGINAL, 1).system).toContain('폭넓게');
-    expect(buildRefinePrompt(ORIGINAL, 2).system).toContain('낱말 몇 개만');
-    expect(buildRefinePrompt(ORIGINAL, 9).system).toContain('낱말 몇 개만'); // 범위 밖은 보수적으로
+  /**
+   * ★ Harold 2026-08-23 "1차 다듬기, 2차 중요내용 제외 문안 변경생성".
+   * 회차가 올라갈수록 **더 크게** 바꾼다. 2차를 더 보수적으로 쓰면 1차에서 걸린 문장이 거의 그대로
+   * 다시 나가 세 번째 검사도 같은 이유로 걸린다.
+   */
+  it('2회차는 문장을 새로 쓰라고 지시한다 — 1회차보다 크게 바꾼다', () => {
+    expect(buildRefinePrompt(ORIGINAL, 1).system).toContain('표현만 손봅니다');
+    expect(buildRefinePrompt(ORIGINAL, 2).system).toContain('문장을 새로 씁니다');
+    expect(buildRefinePrompt(ORIGINAL, 9).system).toContain('문장을 새로 씁니다'); // 범위 밖은 2차 규칙
+    // 어느 회차든 중요 내용은 남기라고 말한다(검사는 checkRefined가 따로 한다)
+    for (const round of [1, 2]) {
+      expect(buildRefinePrompt(ORIGINAL, round).system).toContain('날짜');
+    }
   });
 
   it('원문이 프롬프트에 그대로 들어간다', () => {

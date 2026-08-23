@@ -7,7 +7,7 @@
 
 export type AgencySendStatus =
   | 'received' | 'testing' | 'awaiting_approval' | 'test_failed' | 'approved'
-  | 'final_testing' | 'queued' | 'reapproval' | 'expired' | 'cancelled';
+  | 'final_testing' | 'queued' | 'reapproval' | 'expired' | 'cancelling' | 'cancelled';
 
 export interface AgencySendRequest {
   id: string;
@@ -17,9 +17,17 @@ export interface AgencySendRequest {
   isAd: boolean;
   callbackNumber: string;
   managerPhone: string;
+  /** 테스트 문자를 받을 담당자 번호들. 여러 명일 수 있다 */
+  managerPhones: string[];
   originalContent: string;
   currentContent: string;
   contentVersion: number;
+  /**
+   * 행 수정 번호. **승인·문안 수정·시각 변경은 이 값을 그대로 되돌려준다**(낙관적 잠금).
+   * 화면이 보고 있던 것과 서버의 것이 다르면 서버가 거절한다 — 담당자가 못 본 문안이나 시각으로
+   * 승인이 통과하는 것을 막는 자리다.
+   */
+  revision: number;
   mmsImagePaths: string[];
   requestedAt: string;
   recipientCount: number;
@@ -79,7 +87,7 @@ export interface CreateAgencyRequestInput {
   content: string;
   isAd: boolean;
   callbackNumber: string;
-  managerPhone: string;
+  managerPhones: string[];
   requestedAt: string;
   mmsImagePaths?: string[];
   fileName?: string | null;
@@ -94,32 +102,43 @@ export async function createAgencyRequest(input: CreateAgencyRequestInput): Prom
   return data.request;
 }
 
-export async function approveAgencyRequest(id: string, contentVersion: number): Promise<AgencySendRequest> {
+export async function approveAgencyRequest(id: string, revision: number): Promise<AgencySendRequest> {
   const res = await fetch(`/api/agency-send/${id}/approve`, {
-    method: 'POST', headers: json(), body: JSON.stringify({ contentVersion }),
+    method: 'POST', headers: json(), body: JSON.stringify({ revision }),
   });
   return (await unwrap(res)).request;
 }
 
-export async function updateAgencyContent(id: string, content: string, subject?: string): Promise<AgencySendRequest> {
+export async function updateAgencyContent(
+  id: string, content: string, revision: number, subject?: string,
+): Promise<AgencySendRequest> {
   const res = await fetch(`/api/agency-send/${id}/content`, {
-    method: 'POST', headers: json(), body: JSON.stringify({ content, subject }),
+    method: 'POST', headers: json(), body: JSON.stringify({ content, subject, revision }),
   });
   return (await unwrap(res)).request;
 }
 
-export async function rescheduleAgencyRequest(id: string, requestedAt: string): Promise<AgencySendRequest> {
+export async function rescheduleAgencyRequest(
+  id: string, requestedAt: string, revision: number,
+): Promise<AgencySendRequest> {
   const res = await fetch(`/api/agency-send/${id}/reschedule`, {
-    method: 'POST', headers: json(), body: JSON.stringify({ requestedAt }),
+    method: 'POST', headers: json(), body: JSON.stringify({ requestedAt, revision }),
   });
   return (await unwrap(res)).request;
 }
 
-export async function cancelAgencyRequest(id: string, reason?: string): Promise<AgencySendRequest> {
+/**
+ * 취소. **큐 삭제가 아직 안 끝났으면 `pending`으로 돌아온다**(상태는 "취소 중").
+ * 취소는 원장과 발송 큐 두 곳을 건드리는 다단계 작업이라, 큐가 지워졌음을 확인하기 전에는 확정하지 않는다.
+ */
+export async function cancelAgencyRequest(
+  id: string, reason?: string,
+): Promise<{ request: AgencySendRequest; pending: boolean }> {
   const res = await fetch(`/api/agency-send/${id}/cancel`, {
     method: 'POST', headers: json(), body: JSON.stringify({ reason }),
   });
-  return (await unwrap(res)).request;
+  const data = await unwrap(res);
+  return { request: data.request, pending: !!data.pending };
 }
 
 // ────────────── 문안 변수 (서버 CT `utils/agency-send-vars.ts` 미러) ──────────────
@@ -158,6 +177,7 @@ export const STATUS_LABEL: Record<AgencySendStatus, string> = {
   queued: '예약 완료',
   reapproval: '재승인 대기',
   expired: '미발송',
+  cancelling: '취소 중',
   cancelled: '취소됨',
 };
 
@@ -171,6 +191,7 @@ export const STATUS_TONE: Record<AgencySendStatus, 'neutral' | 'amber' | 'blue' 
   queued: 'green',
   reapproval: 'amber',
   expired: 'rose',
+  cancelling: 'amber',
   cancelled: 'neutral',
 };
 
@@ -185,7 +206,9 @@ export function isEditableStatus(status: AgencySendStatus): boolean {
 }
 
 export function isCancelable(status: AgencySendStatus): boolean {
-  return status !== 'cancelled' && status !== 'testing' && status !== 'final_testing';
+  // `cancelling`은 취소가 진행 중이라 다시 누를 수 없다(두 번 누르면 큐 삭제가 겹친다)
+  return status !== 'cancelled' && status !== 'cancelling'
+    && status !== 'testing' && status !== 'final_testing';
 }
 
 /** 요청 시각을 화면에 쓰는 형태로 */

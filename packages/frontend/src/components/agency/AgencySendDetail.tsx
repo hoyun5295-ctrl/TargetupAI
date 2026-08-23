@@ -42,6 +42,18 @@ const EVENT_LABEL: Record<string, string> = {
   final_test_failed: '발송 직전 검사를 통과하지 못했습니다',
   expired: '시각이 지나 발송하지 않았습니다',
   cancelled: '취소했습니다',
+  cancel_queue_failed: '예약을 지우지 못해 취소를 되돌렸습니다',
+  cancel_sweep_retry: '취소를 마무리하는 중입니다',
+  cancel_swept: '남은 취소를 마무리했습니다',
+  cancel_rejected: '발송이 임박해 취소하지 못했습니다',
+  cancel_pending_dispatch: '예약을 만드는 중이라 취소를 이어서 처리합니다',
+  reconciled_neutralize: '나가지 않아야 할 예약을 되돌렸습니다',
+  reconciled_queued: '예약 상태를 확인해 맞췄습니다',
+  cancel_finalized_elsewhere: '취소가 이미 마무리되었습니다',
+  queued_by_other: '예약이 이미 연결되어 있습니다',
+  dispatch_orphan_cancelled: '연결되지 않은 예약을 되돌렸습니다',
+  dispatch_recovered: '예약 상태를 확인해 반영했습니다',
+  dispatch_retry: '예약을 만들지 못해 다시 시도합니다',
   content_edited: '문안을 고쳤습니다',
   rescheduled: '시각을 고쳤습니다',
   lock_recovered: '멈춘 작업을 되돌렸습니다',
@@ -91,15 +103,29 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
 
   const apply = (r: AgencySendRequest) => { setReq(r); setDraft(r.currentContent); onChanged(r); };
 
+  /**
+   * 서버가 거절했을 때 현재 상태를 다시 읽는다.
+   * 거절 이유가 "그 사이 내용이 바뀌었다"인 경우가 많아, 화면을 맞춰 줘야 담당자가 무엇이 달라졌는지 본다.
+   */
+  const refresh = async () => {
+    if (!requestId) return;
+    try {
+      const { request, events: ev } = await fetchAgencyRequest(requestId);
+      setReq(request);
+      setEvents(ev);
+      setNewWhen(toLocalInput(new Date(request.requestedAt)));
+    } catch { /* 조회 실패는 이미 뜬 오류 위에 덧씌우지 않는다 */ }
+  };
+
   const doApprove = async () => {
     if (!req || busy) return;
     setBusy(true);
     try {
-      apply(await approveAgencyRequest(req.id, req.contentVersion));
+      apply(await approveAgencyRequest(req.id, req.revision));
       toast.success('승인했습니다. 요청한 시각에 나가도록 예약됩니다.');
     } catch (e: any) {
       toast.error(e?.message || '승인하지 못했습니다.');
-      if (requestId) fetchAgencyRequest(requestId).then(({ request }) => setReq(request)).catch(() => {});
+      await refresh();
     } finally { setBusy(false); }
   };
 
@@ -107,11 +133,12 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
     if (!req || busy) return;
     setBusy(true);
     try {
-      apply(await updateAgencyContent(req.id, draft));
+      apply(await updateAgencyContent(req.id, draft, req.revision));
       setEditing(false);
       toast.success('문안을 고쳤습니다. 검사를 다시 시작합니다.');
     } catch (e: any) {
       toast.error(e?.message || '문안을 고치지 못했습니다.');
+      await refresh();
     } finally { setBusy(false); }
   };
 
@@ -119,10 +146,11 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
     if (!req || busy || !newWhen) return;
     setBusy(true);
     try {
-      apply(await rescheduleAgencyRequest(req.id, new Date(newWhen).toISOString()));
+      apply(await rescheduleAgencyRequest(req.id, new Date(newWhen).toISOString(), req.revision));
       toast.success('시각을 고쳤습니다.');
     } catch (e: any) {
       toast.error(e?.message || '시각을 고치지 못했습니다.');
+      await refresh();
     } finally { setBusy(false); }
   };
 
@@ -130,10 +158,12 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
     if (!req || busy) return;
     setBusy(true);
     try {
-      apply(await cancelAgencyRequest(req.id));
-      toast.success('취소했습니다.');
+      const { request: next, pending } = await cancelAgencyRequest(req.id);
+      apply(next);
+      toast.success(pending ? '취소를 처리하고 있습니다. 잠시 후 상태가 바뀝니다.' : '취소했습니다.');
     } catch (e: any) {
       toast.error(e?.message || '취소하지 못했습니다.');
+      await refresh();
     } finally { setBusy(false); }
   };
 

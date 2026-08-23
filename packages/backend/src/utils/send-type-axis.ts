@@ -32,7 +32,7 @@
  * 의존을 끌어오기 싫어 다시 리터럴을 복제한다(`billing-types.ts`와 같은 이유).
  */
 
-export const SEND_TYPES = ['direct', 'ai', 'auto', 'journey', 'operator', 'agency'] as const;
+export const SEND_TYPES = ['direct', 'ai', 'auto', 'journey', 'operator'] as const;
 export type SendType = (typeof SEND_TYPES)[number];
 
 /** 표시명 — 화면 CT(`frontend/src/utils/campaign-axis.ts` `SEND_TYPE_LABEL`)와 같은 값이어야 한다. */
@@ -42,8 +42,6 @@ export const SEND_TYPE_LABEL: Record<string, string> = {
   auto: '자동발송',
   journey: '여정',
   operator: 'AI 오퍼레이터',
-  // ★ 2026-08-23 대행발송 셀프 접수. 담당자 승인 뒤 워커가 직접발송 배관으로 적재한다.
-  agency: '대행발송',
 };
 
 /**
@@ -56,12 +54,11 @@ export const SEND_TYPE_LABEL: Record<string, string> = {
  *
  * ⛔ 여기에 `'ai'`를 넣지 마라 — 그쪽은 `campaign_runs` 분기가 이미 처리한다(위 주석 참조).
  *
- * ★ 2026-08-23 `agency` 합류. 대행발송 워커가 당일 재검사를 통과한 건을 `campaign_send_staging` +
- *   `createDirectSendCampaign`으로 넘기므로 이 배관이 만드는 행이다. 넣지 않으면 컬럼 기본값 `'ai'`로
- *   적재되어(2026-08-23 `information_schema` 실측) `campaign_runs`도 없고 이 집합에도 없는 유령이 된다.
- *   실제로 그 상태였다: 결과 동기화도 실패 환불도 후불 청구도 통째로 멎었다.
+ * ★ 2026-08-23 대행발송은 **새 값을 만들지 않는다.** 그 축은 이 배관(`createDirectSendCampaign`)을 그대로 타므로
+ *   `'direct'`로 적재되고, 결과 동기화·실패 환불·후불 청구가 **기존 경로 그대로** 돈다.
+ *   새 값을 만들면 이 집합에 넣어야 하고 그 순간 정산 축을 건드리게 된다. 건드릴 이유가 없다.
  */
-export const DIRECT_PIPELINE_SEND_TYPES = ['direct', 'operator', 'agency'] as const;
+export const DIRECT_PIPELINE_SEND_TYPES = ['direct', 'operator'] as const;
 export type DirectPipelineSendType = (typeof DIRECT_PIPELINE_SEND_TYPES)[number];
 
 /** 위 집합의 SQL 리터럴 — `send_type IN (...)` 자리에 그대로 넣는다(파라미터 번호를 늘리지 않는다). */
