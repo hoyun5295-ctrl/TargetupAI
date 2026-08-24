@@ -86,6 +86,35 @@ export async function fetchAgencyRequest(id: string): Promise<{ request: AgencyS
   return { request: data.request, events: data.events || [] };
 }
 
+/** 재접수(같은 내용으로 다시 접수)용 수신자 목록. 읽기 전용이고, 새 접수는 기존 접수 API를 그대로 탄다 */
+export async function fetchAgencyRecipients(id: string): Promise<Array<{ phone: string; vars: Record<string, any> }>> {
+  const res = await fetch(`/api/agency-send/${id}/recipients`, { headers: auth() });
+  const data = await unwrap(res);
+  return data.recipients || [];
+}
+
+/**
+ * 업로드한 열 이름에서 전화번호 열을 AI가 고른다(★2026-08-25 · Harold "AI 자동매핑까지").
+ * 기존 고객DB 업로드의 AI 매핑 endpoint를 그대로 쓴다(`/api/upload/ai-map-columns` · 판정 서버 소유).
+ * 요금제에 없거나 실패하면 null을 돌려주고 화면은 기존 추정 규칙으로 폴백한다. 접수를 막지 않는다.
+ */
+export async function aiGuessPhoneColumn(
+  columnNames: string[], sampleRows: any[][],
+): Promise<{ phoneColumn: string; needsManualReview: boolean } | null> {
+  try {
+    const res = await fetch('/api/upload/ai-map-columns', {
+      method: 'POST', headers: json(), body: JSON.stringify({ columnNames, sampleRows }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.success) return null;
+    const hit = (data.mappings || []).find((m: any) => m?.target === 'phone' && m?.source);
+    if (!hit) return null;
+    return { phoneColumn: String(hit.source), needsManualReview: !!data.needsManualReview };
+  } catch {
+    return null;
+  }
+}
+
 export interface CreateAgencyRequestInput {
   messageType: 'SMS' | 'LMS' | 'MMS';
   subject?: string;
@@ -216,6 +245,71 @@ export function isCancelable(status: AgencySendStatus): boolean {
   // `cancelling`은 취소가 진행 중이라 다시 누를 수 없다(두 번 누르면 큐 삭제가 겹친다)
   return status !== 'cancelled' && status !== 'cancelling'
     && status !== 'testing' && status !== 'final_testing';
+}
+
+// ────────────── 진행 레일 (★2026-08-25 목록 개편 · 시안 A) ──────────────
+
+export const RAIL_STEPS = ['접수', '문안 검사', '담당자 문자', '승인', '예약', '발송'] as const;
+
+export interface RailState {
+  /** 이 번호 미만 단계는 끝났다(0 = 접수) */
+  doneBefore: number;
+  /** 지금 진행 중인 단계 번호. 종결 상태면 null */
+  now: number | null;
+  /** 흐름이 멈춘 자리. 취소·미발송·문안 확인 필요가 여기 얹힌다 */
+  fail: { at: number; label: string } | null;
+  /** 종결(취소·미발송) 건은 레일을 흐리게 그린다 */
+  muted: boolean;
+}
+
+/**
+ * 상태 → 진행 레일. 표시는 여기 하나가 소유한다(행마다 다르게 읽히지 않게).
+ * ⛔ 종결 건의 "어디까지 갔었나"는 시도 시각이 아니라 **성공 스탬프**(approvedAt·queuedAt)로만 되짚는다.
+ */
+export function railFor(r: Pick<AgencySendRequest, 'status' | 'approvedAt' | 'queuedAt'>): RailState {
+  switch (r.status) {
+    case 'received': return { doneBefore: 1, now: 1, fail: null, muted: false };
+    case 'testing': return { doneBefore: 1, now: 1, fail: null, muted: false };
+    case 'test_failed': return { doneBefore: 1, now: null, fail: { at: 1, label: '문안 확인' }, muted: false };
+    case 'awaiting_approval': return { doneBefore: 3, now: 3, fail: null, muted: false };
+    case 'reapproval': return { doneBefore: 3, now: 3, fail: null, muted: false };
+    case 'approved': return { doneBefore: 4, now: 4, fail: null, muted: false };
+    case 'final_testing': return { doneBefore: 4, now: 4, fail: null, muted: false };
+    case 'queued': return { doneBefore: 5, now: 5, fail: null, muted: false };
+    case 'expired': {
+      const at = r.approvedAt ? 4 : 3;
+      return { doneBefore: at, now: null, fail: { at, label: '미발송' }, muted: true };
+    }
+    case 'cancelling':
+    case 'cancelled': {
+      const at = r.queuedAt ? 5 : r.approvedAt ? 4 : 2;
+      return { doneBefore: at, now: null, fail: { at, label: r.status === 'cancelling' ? '취소 중' : '취소됨' }, muted: true };
+    }
+  }
+}
+
+/** 재접수 대상인가(끝난 건을 같은 내용으로 다시 시작한다) */
+export function isRedoable(status: AgencySendStatus): boolean {
+  return status === 'cancelled' || status === 'expired';
+}
+
+/** "오늘 14:00 · 3시간 후" 같은 상대 표기. 목록의 보낼 시각 칸이 쓴다 */
+export function formatWhenRelative(iso: string): { big: string; sub: string } {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return { big: '', sub: '' };
+  const now = new Date();
+  const midnight = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const dayDiff = Math.round((midnight(d) - midnight(now)) / 86400000);
+  const hm = d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const md = d.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short' });
+  if (dayDiff === 0) {
+    const hours = Math.round((d.getTime() - now.getTime()) / 3600000);
+    return { big: `오늘 ${hm}`, sub: hours > 0 ? `약 ${hours}시간 후` : md };
+  }
+  if (dayDiff === 1) return { big: `내일 ${hm}`, sub: md };
+  if (dayDiff === 2) return { big: `모레 ${hm}`, sub: md };
+  if (dayDiff < 0) return { big: `${d.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })} ${hm}`, sub: '지난 접수' };
+  return { big: `${d.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })} ${hm}`, sub: md };
 }
 
 /** 요청 시각을 화면에 쓰는 형태로 */

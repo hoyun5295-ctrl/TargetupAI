@@ -173,7 +173,7 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
 
   return (
     <div className="fixed inset-0 z-[60] bg-neutral-900/45 flex items-center justify-center p-4">
-      <div className={`${CUI_MODAL} max-w-[680px]`} role="dialog" aria-modal="true" aria-label="대행발송 상세">
+      <div className={`${CUI_MODAL} max-w-[780px]`} role="dialog" aria-modal="true" aria-label="대행발송 상세">
         <div className={CUI_MODAL_HEAD}>
           <div className="flex items-center gap-3 min-w-0">
             <div className="h-9 w-9 shrink-0 rounded-xl bg-indigo-600 text-white grid place-items-center">

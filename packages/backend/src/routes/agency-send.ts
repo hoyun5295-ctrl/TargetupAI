@@ -373,6 +373,32 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // ════════════════════════════════════════════════════════════
+// GET /api/agency-send/:id/recipients — 재접수용 수신자 목록 (★2026-08-25 · 읽기 전용)
+//   "같은 내용으로 다시 접수"가 이 목록을 받아 **기존 접수 API(POST /)를 그대로** 다시 탄다.
+//   ⛔ 서버 쪽 복제(clone) 쓰기 경로를 만들지 않는다 — 검증·트랜잭션·적재 대조가 전부 접수 한 곳에 있어야 한다.
+// ════════════════════════════════════════════════════════════
+router.get('/:id/recipients', async (req: Request, res: Response) => {
+  const auth = await requireAgencySend(req, res);
+  if (!auth) return;
+  try {
+    const own = await query(
+      `SELECT id FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [req.params.id, auth.companyId],
+    );
+    if (own.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
+    const r = await query(
+      `SELECT phone, vars FROM agency_send_recipients WHERE request_id = $1::uuid ORDER BY row_no`,
+      [req.params.id],
+    );
+    return res.json({ success: true, recipients: r.rows });
+  } catch (err: any) {
+    if (isMissingRelation(err)) return migrationPending(res);
+    console.error('[agency-send] 수신자 조회 실패:', err);
+    return res.status(500).json({ success: false, error: '수신자 목록을 불러오지 못했습니다.' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
 // POST /api/agency-send/:id/approve — 승인(발송을 결정하는 유일한 손)
 // ════════════════════════════════════════════════════════════
 router.post('/:id/approve', async (req: Request, res: Response) => {

@@ -1,33 +1,83 @@
 /**
- * AgencySendPage — 대행발송 (★ 2026-08-22 신설)
+ * AgencySendPage — 대행발송 (★ 2026-08-22 신설 · ★ 2026-08-25 목록 개편, Harold 시안 승인)
  *
  * 설계 = docs/2026-08-22-agency-send-design.md. 진입 = 헤더 "대행발송"(모든 회사에 보인다).
  *   못 쓰는 회사는 안내 모달(§4-8), 쓸 수 있는 회사는 접수 목록을 본다.
+ *
+ * 2026-08-25 개편(§15): 표를 진행판으로.
+ *   1. 접수마다 6단계 진행 레일(접수 → 문안 검사 → 담당자 문자 → 승인 → 예약 → 발송)을 그린다
+ *   2. 승인 기다리는 건은 문안 미리보기와 함께 최상단 "지금 할 일" 카드로 올라온다
+ *   3. 끝난 건(취소·미발송)은 "같은 내용으로 다시 접수"로 명단·문안·담당자까지 그대로 되살린다
+ *      (명단은 읽기 전용 API로 받아 오고, 새 접수는 기존 접수 API를 그대로 탄다 — 서버 쓰기 경로 신설 0)
  *
  * ⛔ 자격 판정은 서버 my-plan의 `agency_send_allowed` 하나만 믿는다(프론트가 요금제를 조합하지 않는다).
  * ⛔ 문구에 줄표 0. 톤 = 인디고 콘솔(`CUI_*`).
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2, Plus, RefreshCw, Send } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Loader2, MessageSquare, Plus, RefreshCw, Send, X } from 'lucide-react';
 import { goBackOr } from '../lib/scroll-restoration';
 import { useToast } from '../components/ToastProvider';
 import AgencySendIntroModal from '../components/agency/AgencySendIntroModal';
-import AgencySendComposer from '../components/agency/AgencySendComposer';
+import AgencySendComposer, { type AgencyComposerPrefill } from '../components/agency/AgencySendComposer';
 import AgencySendDetail from '../components/agency/AgencySendDetail';
 import {
-  fetchAgencyRequests, formatWhen, isApprovable, STATUS_LABEL, STATUS_TONE,
+  fetchAgencyRecipients, fetchAgencyRequests, formatWhenRelative, isApprovable, isRedoable,
+  RAIL_STEPS, railFor, STATUS_LABEL, STATUS_TONE,
   type AgencySendRequest,
 } from '../components/agency/agency-send-api';
 import {
-  CUI_BTN_GHOST, CUI_BTN_PRIMARY, CUI_CELL_META, CUI_CELL_NAME, CUI_EMPTY, CUI_EMPTY_BADGE,
-  CUI_EMPTY_DESC, CUI_EMPTY_TITLE, CUI_INFO, CUI_INFO_ICON, CUI_INFO_TEXT, CUI_PANEL,
-  CUI_PILL_BASE, CUI_PILL_TONE, CUI_TD, CUI_TH, CUI_THEAD, CUI_TR, CUI_WRAP,
+  CUI_BTN_GHOST, CUI_BTN_OUTLINE, CUI_BTN_PRIMARY, CUI_CELL_META, CUI_EMPTY, CUI_EMPTY_BADGE,
+  CUI_EMPTY_DESC, CUI_EMPTY_TITLE, CUI_PANEL, CUI_PILL_BASE, CUI_PILL_TONE, CUI_WRAP,
 } from '../utils/console-ui';
 
 interface PlanSnapshot {
   planCode: string;
   allowed: boolean;
+}
+
+/** 6단계 진행 레일. 표시 판정은 railFor(CT) 하나가 소유하고 여기는 그리기만 한다 */
+function ProgressRail({ r }: { r: AgencySendRequest }) {
+  const rail = railFor(r);
+  // 흐름이 닿은 마지막 단계. 연결선은 이 값 하나로 단조롭게 칠한다(마디별 조건 분기를 두지 않는다)
+  const reach = rail.fail ? rail.fail.at : (rail.now ?? Math.max(0, rail.doneBefore - 1));
+  const lineOn = rail.muted ? 'bg-neutral-300' : 'bg-indigo-600';
+  return (
+    <div className="flex items-start flex-1 min-w-[340px]" aria-label="진행 단계">
+      {RAIL_STEPS.map((label, i) => {
+        const fail = rail.fail?.at === i;
+        const now = !fail && rail.now === i;
+        const done = !fail && !now && i < rail.doneBefore;
+        return (
+          <div key={label} className="flex-1 flex flex-col items-center relative">
+            {i > 0 && (
+              <span className={`absolute left-0 right-1/2 top-[9px] h-0.5 ${reach >= i ? lineOn : 'bg-neutral-200'}`} aria-hidden="true" />
+            )}
+            {i < RAIL_STEPS.length - 1 && (
+              <span className={`absolute left-1/2 right-0 top-[9px] h-0.5 ${reach >= i + 1 ? lineOn : 'bg-neutral-200'}`} aria-hidden="true" />
+            )}
+            <span className={`relative z-10 h-5 w-5 rounded-full grid place-items-center border-2 ${
+              fail ? 'bg-rose-500 border-rose-500 text-white'
+                : now ? 'bg-white border-indigo-600'
+                : done ? (rail.muted ? 'bg-neutral-300 border-neutral-300 text-white' : 'bg-indigo-600 border-indigo-600 text-white')
+                : 'bg-white border-neutral-200'}`}>
+              {fail ? <X className="w-2.5 h-2.5" strokeWidth={3.2} />
+                : now ? <span className="h-[7px] w-[7px] rounded-full bg-indigo-600 animate-pulse" />
+                : done ? <Check className="w-2.5 h-2.5" strokeWidth={3.2} />
+                : null}
+            </span>
+            <span className={`mt-1 text-[11px] whitespace-nowrap ${
+              fail ? 'text-rose-700 font-bold'
+                : now ? 'text-indigo-700 font-bold'
+                : done ? (rail.muted ? 'text-neutral-400 font-semibold' : 'text-indigo-700 font-semibold')
+                : 'text-neutral-400 font-semibold'}`}>
+              {fail ? rail.fail!.label : label}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export default function AgencySendPage() {
@@ -37,9 +87,11 @@ export default function AgencySendPage() {
   const [loading, setLoading] = useState(true);
   const [introOpen, setIntroOpen] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
+  const [composerPrefill, setComposerPrefill] = useState<AgencyComposerPrefill | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [requests, setRequests] = useState<AgencySendRequest[]>([]);
   const [listLoading, setListLoading] = useState(false);
+  const [redoLoadingId, setRedoLoadingId] = useState<string | null>(null);
 
   const loadList = useCallback(async () => {
     setListLoading(true);
@@ -88,7 +140,36 @@ export default function AgencySendPage() {
     });
   };
 
-  const waiting = requests.filter((r) => isApprovable(r.status)).length;
+  /** 같은 내용으로 다시 접수 — 명단을 받아 접수 창을 프리필로 연다. 새 접수는 기존 접수 API를 그대로 탄다 */
+  const redo = async (r: AgencySendRequest) => {
+    if (redoLoadingId) return;
+    setRedoLoadingId(r.id);
+    try {
+      const recipients = await fetchAgencyRecipients(r.id);
+      if (recipients.length === 0) { toast.error('이전 접수의 명단을 찾지 못했습니다.'); return; }
+      setComposerPrefill({
+        content: r.currentContent,
+        subject: r.subject,
+        isAd: r.isAd,
+        callbackNumber: r.callbackNumber,
+        managerPhones: r.managerPhones?.length ? r.managerPhones : [r.managerPhone].filter(Boolean),
+        varMapping: r.varMapping || {},
+        fileName: r.fileName,
+        messageType: r.messageType,
+        recipients,
+        hadImages: (r.mmsImagePaths || []).length > 0,
+      });
+      setComposerOpen(true);
+    } catch (e: any) {
+      toast.error(e?.message || '이전 접수를 불러오지 못했습니다.');
+    } finally {
+      setRedoLoadingId(null);
+    }
+  };
+
+  const waitingList = requests.filter((r) => isApprovable(r.status));
+  const todo = waitingList[0] || null;
+  const todoWhen = todo ? formatWhenRelative(todo.requestedAt) : null;
 
   return (
     <div className="min-h-screen bg-neutral-50">
@@ -138,13 +219,32 @@ export default function AgencySendPage() {
           </div>
         ) : (
           <>
-            {waiting > 0 && (
-              <div className={`${CUI_INFO} mb-4`}>
-                <Send className={CUI_INFO_ICON} size={16} strokeWidth={2} />
-                <p className={CUI_INFO_TEXT}>
-                  승인을 기다리는 접수가 <b className="tabular-nums">{waiting}</b>건 있습니다.
-                  담당자 번호로 보내 드린 문자를 확인하고 승인해 주세요.
-                </p>
+            {/* ── 지금 할 일: 승인 기다리는 접수 ── */}
+            {todo && (
+              <div className="mb-5 rounded-2xl border border-indigo-600/20 bg-gradient-to-br from-indigo-50 via-white to-white p-5 shadow-[0_8px_24px_-16px_rgba(23,23,23,0.18)] flex flex-col sm:flex-row gap-4 sm:items-center">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                    <span className={`${CUI_PILL_BASE} ${CUI_PILL_TONE.amber}`}>{STATUS_LABEL[todo.status]}</span>
+                    <p className="text-[15px] font-extrabold tracking-[-0.015em] text-neutral-900">확인하실 문안이 도착했습니다</p>
+                  </div>
+                  <p className="text-[13px] text-neutral-700">
+                    담당자 번호 <b>{(todo.managerPhones?.length || 1)}곳</b>으로 테스트 문자를 보내 드렸습니다.
+                    받으신 문자 그대로 나가니, 확인하고 승인해 주세요.
+                    {waitingList.length > 1 && <> 그 외 <b className="tabular-nums">{waitingList.length - 1}</b>건이 더 기다리고 있습니다.</>}
+                  </p>
+                  <div className="mt-2.5 flex items-start gap-2 rounded-xl border border-neutral-200 bg-white px-3.5 py-2.5 max-w-[560px]">
+                    <MessageSquare className="w-[15px] h-[15px] text-indigo-600 shrink-0 mt-0.5" strokeWidth={2} />
+                    <p className="text-[13px] text-neutral-700 truncate">{todo.currentContent.slice(0, 90)}</p>
+                  </div>
+                </div>
+                <div className="shrink-0 flex sm:flex-col items-center sm:items-end gap-2.5">
+                  <button type="button" onClick={() => setDetailId(todo.id)} className={CUI_BTN_PRIMARY}>
+                    문안 확인하고 승인하기<ArrowRight className="w-[15px] h-[15px]" />
+                  </button>
+                  {todoWhen && (
+                    <p className="text-[12.5px] text-neutral-500"><b className="text-neutral-900">{todoWhen.big}</b> 발송 예정 · 발송 2시간 전까지 승인</p>
+                  )}
+                </div>
               </div>
             )}
 
@@ -161,47 +261,60 @@ export default function AgencySendPage() {
               </div>
             ) : (
               <div className={CUI_PANEL}>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className={CUI_THEAD}>
-                      <tr>
-                        <th className={CUI_TH}>건</th>
-                        <th className={CUI_TH}>상태</th>
-                        <th className={CUI_TH}>보낼 시각</th>
-                        <th className={CUI_TH}>건수</th>
-                        <th className={CUI_TH}>형식</th>
-                        <th className={CUI_TH}> </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {requests.map((r) => (
-                        <tr key={r.id} className={CUI_TR} onClick={() => setDetailId(r.id)} style={{ cursor: 'pointer' }}>
-                          <td className={CUI_TD}>
-                            <div className={`${CUI_CELL_NAME} max-w-[240px] truncate`}>
+                <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-200 bg-neutral-50/60">
+                  <p className="text-[13px] font-bold text-neutral-900">접수 내역</p>
+                  <p className="text-[12.5px] text-neutral-500 tabular-nums">{requests.length}건</p>
+                </div>
+                <div className="divide-y divide-neutral-100">
+                  {requests.map((r) => {
+                    const when = formatWhenRelative(r.requestedAt);
+                    const terminal = r.status === 'cancelled' || r.status === 'expired';
+                    return (
+                      <div
+                        key={r.id}
+                        onClick={() => setDetailId(r.id)}
+                        className={`flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-6 px-5 py-4 cursor-pointer transition-colors hover:bg-indigo-50/40 ${terminal ? 'opacity-70' : ''}`}
+                      >
+                        <div className="w-full lg:w-[280px] shrink-0 min-w-0">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <p className="text-[13.5px] font-bold tracking-[-0.01em] truncate">
                               {r.fileName || r.currentContent.slice(0, 24)}
-                            </div>
-                          </td>
-                          <td className={CUI_TD}>
-                            <span className={`${CUI_PILL_BASE} ${CUI_PILL_TONE[STATUS_TONE[r.status]]}`}>{STATUS_LABEL[r.status]}</span>
-                          </td>
-                          <td className={`${CUI_TD} ${CUI_CELL_META}`}>{formatWhen(r.requestedAt)}</td>
-                          <td className={`${CUI_TD} ${CUI_CELL_META}`}>{r.recipientCount.toLocaleString()}</td>
-                          <td className={`${CUI_TD} ${CUI_CELL_META}`}>{r.messageType}</td>
-                          <td className={CUI_TD}>
-                            {isApprovable(r.status) && (
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); setDetailId(r.id); }}
-                                className={CUI_BTN_PRIMARY}
-                              >
+                            </p>
+                            <span className={`${CUI_PILL_BASE} ${CUI_PILL_TONE[STATUS_TONE[r.status]]} shrink-0`}>{STATUS_LABEL[r.status]}</span>
+                          </div>
+                          <p className={`${CUI_CELL_META} mt-0.5 truncate`}>
+                            {r.fileName ? '파일 명단' : '직접 입력'} · <span className="tabular-nums">{r.recipientCount.toLocaleString()}</span>명 · {r.messageType}{r.isAd ? ' · 광고' : ''}
+                          </p>
+                        </div>
+                        <div className="hidden md:flex flex-1 min-w-0">
+                          <ProgressRail r={r} />
+                        </div>
+                        <div className="flex items-center justify-between lg:justify-end gap-4 lg:w-[300px] shrink-0">
+                          <div className="text-left lg:text-right lg:w-[124px]">
+                            <p className={`text-[13.5px] font-bold tracking-[-0.01em] ${terminal ? 'text-neutral-500' : 'text-neutral-900'}`}>{when.big}</p>
+                            <p className="text-[12px] text-neutral-500">{when.sub}</p>
+                          </div>
+                          <div className="w-[150px] flex justify-end" onClick={(e) => e.stopPropagation()}>
+                            {isApprovable(r.status) ? (
+                              <button type="button" onClick={() => setDetailId(r.id)} className={`${CUI_BTN_PRIMARY} h-8 px-3 text-[13px]`}>
                                 승인하기
                               </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                            ) : isRedoable(r.status) ? (
+                              <button
+                                type="button"
+                                onClick={() => redo(r)}
+                                disabled={redoLoadingId !== null}
+                                className={`${CUI_BTN_OUTLINE} h-8 px-3 text-[13px] whitespace-nowrap`}
+                              >
+                                {redoLoadingId === r.id ? <Loader2 className="w-[14px] h-[14px] animate-spin" /> : null}
+                                같은 내용으로 다시 접수
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -217,7 +330,8 @@ export default function AgencySendPage() {
       />
       <AgencySendComposer
         show={composerOpen}
-        onClose={() => setComposerOpen(false)}
+        prefill={composerPrefill}
+        onClose={() => { setComposerOpen(false); setComposerPrefill(null); }}
         onCreated={(r) => upsert(r)}
       />
       <AgencySendDetail
