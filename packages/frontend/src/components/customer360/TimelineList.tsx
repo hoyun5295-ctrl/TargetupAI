@@ -7,7 +7,10 @@
  */
 import { ChevronDown, ChevronRight, Loader2, RotateCcw } from 'lucide-react';
 import { CUI_ACT, CUI_BTN_OUTLINE, CUI_PILL_BASE, CUI_PILL_DOT, CUI_PILL_TONE } from '../../utils/console-ui';
-import { KIND_STYLE, STATUS_DOT, STATUS_PILL, STATUS_SR, dayLabel, timeLabel, type TimelineKind } from './timeline-kinds';
+import {
+  DETAIL_TIME_KEYS, KIND_STYLE, STATUS_DOT, STATUS_PILL, STATUS_SR, dayLabel, detailTimeLabel, timeLabel,
+  type TimelineKind,
+} from './timeline-kinds';
 import { splitHighlight, type DayGroup, type FoldItem } from './timeline-fold';
 import {
   C360_AXIS, C360_AXIS_COL, C360_AXIS_FIRST, C360_AXIS_LAST, C360_AXIS_ONLY, C360_CARD, C360_CARD_ACTIONS, C360_CHEVRON,
@@ -90,7 +93,12 @@ function DetailCard({ event, itemKey, fullText, onToggleFullText, onOpenCampaign
           {metas.map(([k, v]) => (
             <div key={k} className={C360_META_ROW}>
               <dt className={C360_META_DT}>{DETAIL_LABEL[k] || k}</dt>
-              <dd className={C360_META_DD}>{typeof v === 'number' ? v.toLocaleString() : String(v)}</dd>
+              {/* 시각 키는 화면 표기로 바꾼다 — 안 거치면 서버가 준 ISO 원문이 그대로 나온다(★2026-08-24 접수) */}
+              <dd className={C360_META_DD}>
+                {DETAIL_TIME_KEYS.has(k)
+                  ? detailTimeLabel(String(v), event.at)
+                  : (typeof v === 'number' ? v.toLocaleString() : String(v))}
+              </dd>
             </div>
           ))}
         </dl>

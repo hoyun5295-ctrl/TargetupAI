@@ -12,7 +12,7 @@ import { resolve } from 'node:path';
 
 vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })) }));
 import { query } from '../../config/database';
-import { getDmList } from './dm-builder';
+import { getDmList, restoreDmVersion } from './dm-builder';
 import { validateDm } from './dm-validate';
 
 const qmock = query as unknown as ReturnType<typeof vi.fn>;
@@ -124,6 +124,46 @@ describe('DM 위험 동작 불변식 (재발 방지책 2)', () => {
         /validation_override/.test(publishBody) && /overridden_by/.test(publishBody),
         '무시 기록이 빠지면 "고객이 확인하고 발행했다"는 근거가 남지 않는다',
       ).toBe(true);
+    });
+  });
+
+  /**
+   * ★ 2026-08-24 신설 — 접수 cmt6qug4s00v1jnotsqeaf12g(임은지) "버전 복원이 오류로 실패한다".
+   * jsonb를 JS로 꺼냈다가 그대로 다시 파라미터로 넣으면, 드라이버가 **배열**을 PG 배열 리터럴 `{…}`로
+   * 직렬화해 jsonb 컬럼이 거절한다(`invalid input syntax for type json`). `sections`가 배열이라 100% 실패했다.
+   */
+  describe('버전 복원은 jsonb를 문자열로 되돌린다', () => {
+    it('sections 배열이 PG 배열 리터럴로 나가지 않는다', async () => {
+      const sections = [{ id: 'a', type: 'header', order: 0 }, { id: 'b', type: 'hero', order: 1 }];
+      const brandKit = { accent_color: '#C6A15B' };
+      qmock.mockReset();
+      qmock
+        .mockResolvedValueOnce({ rows: [{ id: 'dm-1' }] })                       // 소유 확인
+        .mockResolvedValueOnce({ rows: [{ sections, brand_kit: brandKit }] })    // 버전 읽기
+        .mockResolvedValueOnce({ rows: [{ id: 'dm-1', sections }] });            // 되돌리기
+
+      await restoreDmVersion('dm-1', 'v-1', 'co-1');
+
+      const [sql, params] = qmock.mock.calls[2];
+      expect(/UPDATE dm_pages SET sections/.test(String(sql))).toBe(true);
+      expect(typeof params[0], 'sections를 배열 그대로 넘기면 jsonb가 거절한다').toBe('string');
+      expect(JSON.parse(params[0])).toEqual(sections);
+      expect(typeof params[1], 'brand_kit도 같은 규약을 따른다').toBe('string');
+      expect(JSON.parse(params[1])).toEqual(brandKit);
+    });
+
+    it('값이 없던 버전은 없는 채로 되돌린다(빈 배열을 지어내지 않는다)', async () => {
+      qmock.mockReset();
+      qmock
+        .mockResolvedValueOnce({ rows: [{ id: 'dm-1' }] })
+        .mockResolvedValueOnce({ rows: [{ sections: null, brand_kit: null }] })
+        .mockResolvedValueOnce({ rows: [{ id: 'dm-1' }] });
+
+      await restoreDmVersion('dm-1', 'v-1', 'co-1');
+
+      const [, params] = qmock.mock.calls[2];
+      expect(params[0]).toBeNull();
+      expect(params[1]).toBeNull();
     });
   });
 });

@@ -1943,7 +1943,10 @@ dmRouter.post('/:id/versions/:vid/restore', async (req: any, res: any) => {
     if (!restored) return res.status(404).json({ error: '버전을 찾을 수 없어요.' });
     return res.json({ dm: restored });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    // ⛔ 드라이버·DB 원문을 사용자에게 돌려주지 않는다(★2026-08-24 접수 cmt6qug4s00v1jnotsqeaf12g).
+    //   화면에 `invalid input syntax for type json`이 그대로 떴다. 원인은 로그로 남기고 고객에게는 할 일을 준다.
+    console.error('[dm/versions/restore] 복원 실패:', err);
+    return res.status(500).json({ error: '이 버전으로 되돌리지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
   }
 });
 

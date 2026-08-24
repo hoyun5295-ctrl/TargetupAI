@@ -15,6 +15,7 @@ import LoginBlocksManagement from '../components/admin/LoginBlocksManagement'; /
 import AgentChargePanel from '../components/AgentChargePanel'; // ★ 2026-07-24 §5-3 에이전트 충전 실행 (게이트웨이 지갑)
 import AgentDeployWizard from '../components/admin/AgentDeployWizard'; // 싱크에이전트 OS별 배포 위저드
 import DiagnosisAdminPanel from '../components/admin/DiagnosisAdminPanel'; // ★ 2026-08-16 신규마케팅진단(ceo 전용)
+import HelpQuestionsTab from '../components/admin/HelpQuestionsTab'; // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
 import { COMPANY_EMAIL } from '../constants/company';
 import { formatAgentIdLabel } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스(발급명 병기)
 import { formatPlanOptionLabel } from '../utils/planLabel'; // ★ 2026-07-28 요금제 라벨 = 월정액(고객 수 축 폐기)
@@ -83,9 +84,10 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions'>('companies');
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
+  const [helpQAccessAllowed, setHelpQAccessAllowed] = useState(false); // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
   // ★ 2026-06-13: AI 학습 데이터 열람 권한 (AI_TRAINING_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 진입 버튼 노출
   const [aiTrainingAllowed, setAiTrainingAllowed] = useState(false);
   // ★ 2026-07-17: 발송 라인 설정 권한 (LINE_GROUP_ADMIN_USERS — 기본 ceo,admin) — 허용 계정에만 메뉴/탭 노출.
@@ -942,6 +944,12 @@ useEffect(() => {
       const d = await r.json();
       setAuditAccessAllowed(d.allowed === true);
     } catch { setAuditAccessAllowed(false); }
+    try {
+      const token = localStorage.getItem('token');
+      const r = await fetch('/api/admin/help-questions/access', { headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json();
+      setHelpQAccessAllowed(d.allowed === true);
+    } catch { setHelpQAccessAllowed(false); }
     try {
       const token = localStorage.getItem('token');
       // ★ 2026-08-16: 신규마케팅진단 접근(mount 1회) — 허용이면 신규 리드 뱃지도 함께
@@ -4443,7 +4451,7 @@ const handleApproveRequest = async (id: string) => {
               },
               {
                 label: '시스템', color: 'gray',
-                tabs: ['syncAgents', 'agentDeploy', 'lineGroups', 'auditLogs', 'loginBlocks'] as const,
+                tabs: ['syncAgents', 'agentDeploy', 'lineGroups', 'auditLogs', 'helpQuestions', 'loginBlocks'] as const,
                 items: [
                   { key: 'syncAgents', label: 'Sync 모니터링' },
                   { key: 'agentDeploy', label: '싱크에이전트 배포' },
@@ -4451,6 +4459,8 @@ const handleApproveRequest = async (id: string) => {
                   ...(lineGroupCanManage ? [{ key: 'lineGroups', label: '발송 라인 설정' }] : []),
                   // ★ 2026-06-11: 감사 로그 = 허용 계정(기본 ceo)에만 노출
                   ...(auditAccessAllowed ? [{ key: 'auditLogs', label: '감사 로그' }] : []),
+                  // ★ 2026-08-24: 도움말 질문 이력 = 허용 계정(기본 ceo)에만 노출
+                  ...(helpQAccessAllowed ? [{ key: 'helpQuestions', label: '도움말 질문 이력' }] : []),
                   // ★ 2026-08-18: 금칙어 차단(전송자격인증 5.2)
                   { key: 'spamBlock', label: '금칙어 차단' },
                   // ★ 2026-08-19: 국외 접근 통제(전송자격인증 2.2)
@@ -5454,6 +5464,10 @@ const handleApproveRequest = async (id: string) => {
         )}
 
         {/* ★ 2026-08-19 국외 접근 통제 (전송자격인증 2.2) */}
+        {activeTab === 'helpQuestions' && helpQAccessAllowed && (
+          <HelpQuestionsTab companies={companies.map((c) => ({ id: c.id, company_name: c.company_name }))} />
+        )}
+
         {activeTab === 'geoAccess' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

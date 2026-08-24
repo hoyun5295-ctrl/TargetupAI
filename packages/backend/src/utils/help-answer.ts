@@ -4,10 +4,14 @@
  * 설계 = docs/FEATURE-HELP-CATALOG.md §4-5. 호출부 = routes/help.ts 하나.
  *
  * 환각 차단 4겹 (프롬프트 지시가 아니라 **코드 출구**다)
- *   1. 폐집합 매칭 — 카탈로그에서 후보를 못 찾으면 **모델을 부르지 않는다.** 지어낼 재료가 없다.
- *   2. 컨텍스트 = 후보 작업 3개의 공개 필드뿐. 내부 문서·화면 문구·FEATURE-*.md는 넣지 않는다.
+ *   1. 컨텍스트 = **카탈로그 전체의 공개 필드뿐.** 내부 문서·화면 문구·FEATURE-*.md는 넣지 않는다.
+ *      (★2026-08-24 개정 · Harold 확정: 전에는 "매칭 실패 = 모델 호출 0"이었다. 돌려 말한 질문이
+ *      정확히 모델이 잘하는 지점인데 그 지점에서 모델을 안 불렀다. 지금은 매칭이 못 찾은 질문도
+ *      전체 원장을 들고 모델이 찾는다. 폐집합이라는 사실은 그대로다 — 재료가 카탈로그 밖에 없다.)
+ *   2. 응답 계약 = JSON `{jobs: [id...], answer}`. **id가 카탈로그에 실존해야만** 카드가 된다.
+ *      jobs가 비면 "모른다"다 — 산문으로 얼버무린 답을 내보내지 않고 문의 남기기로 보낸다.
  *   3. 출구 검사 — 응답 안 모든 `/경로`가 카탈로그 진입 경로 집합에 있는지 · 혜택 토큰(%·원·쿠폰·무료)이 없는지 ·
- *      모델명이 없는지. 하나라도 걸리면 답변을 버리고 1번 응답(후보 카드만)으로 되돌린다.
+ *      모델명이 없는지. 하나라도 걸리면 답변을 버리고 후보 카드만으로 되돌린다.
  *   4. 요금제 문구는 모델이 쓰지 않는다 — 라우트가 `canUseFeature`로 판정해 `locked`를 붙이고 화면이 우리 문자열로 그린다.
  *
  * ★ 2026-08-22(2) 답변 틀 고정 (docs §10-1 ③): 본문이 있는 작업이 **분명한 1순위**면 모델을 부르지 않고 그 정의를
@@ -17,12 +21,13 @@
  *   영문 id(`quick-campaign`)를 넣었더니 모델이 "퀵 캠페인"이라는 없는 이름을 지어냈다. 구현 결함이었다.
  *
  * 과금 = 무료. `CREDIT_COST_MAP`에 등록하지 않는다(미등록 source = 0). 기록만 `ai_call_log`에 `help-ask`로 남긴다(원가 실측).
- * 남용 방지 = 매칭 실패는 호출 전 거절 · 캐시(5분) · 회사당 일 30회·분 3회(초과 시 잠그지 않고 후보 카드만) · 입력 240자.
+ * 남용 방지 = 캐시(5분·단발 질문만) · 회사당 일 30회·분 3회(초과 시 잠그지 않고 후보 카드만) · 입력 240자 · 후속 문답 3쌍.
  */
 import Anthropic from '@anthropic-ai/sdk';
 import { AI_MODELS, isAdaptiveOnlyModel } from '../config/defaults';
 import { FEATURE_CATALOG, toPublicJob, normalizePath, type FeatureJob, type PublicFeatureJob } from '../content/feature-catalog';
 import { detectBenefits } from './copy-benefit-detector';
+import { extractJsonFromAiText } from './ai-json';
 import { generateCacheKey, getCachedResponse, setCachedResponse } from './ai-cache';
 import { recordAiCall } from './ai-rate-limit';
 
@@ -30,7 +35,7 @@ export const HELP_SOURCE = 'help-ask';
 export const HELP_MAX_QUESTION = 240;
 export const HELP_DAILY_LIMIT = 30;
 export const HELP_MINUTE_LIMIT = 3;
-/** 이 점수 미만이면 "모른다"로 끝낸다(모델 호출 0) */
+/** 이 점수 이상만 직답 후보다. 미만이어도 모델 경로는 간다(★0824 개정 · 후보 카드 폴백의 문턱으로만 쓴다) */
 export const HELP_MATCH_THRESHOLD = 3;
 /**
  * 1순위와 2순위 점수 차가 이 값 이상이면 "분명한 1순위"로 보고 모델 없이 정의를 그대로 낸다.
@@ -82,12 +87,16 @@ export function matchJobs(question: string, currentPath?: string | null, catalog
 const SYSTEM_PROMPT = [
   '당신은 "한줄로" 서비스의 사용법 안내 도우미입니다. 사용자는 마케팅 담당자입니다.',
   '아래 [기능 정의]에 적힌 내용만으로 답합니다. 정의에 없는 기능·화면·버튼·조건을 말하지 않습니다.',
-  '정의에 답이 없으면 "이 안내에는 없는 내용입니다"라고만 말하고 가장 가까운 기능 이름을 하나 권합니다.',
   '할인율·금액·쿠폰·무료 같은 혜택 수치를 만들지 않습니다. 요금제 이름이나 가격을 말하지 않습니다.',
-  '화면 경로는 [기능 정의]의 entry.path에 있는 것만 씁니다.',
+  'answer에 화면 주소나 영문 id를 쓰지 않습니다. 갈 화면은 jobs 배열의 id가 가리키고, 화면이 그 카드에 이동 버튼을 답니다.',
   '기능을 부를 때는 [기능 정의]의 title과 related에 적힌 이름을 글자 그대로 씁니다. 이름을 줄이거나 바꾸거나 새로 짓지 않습니다.',
-  '한국어 존댓말, 5문장 이내, 긴 줄표·이모지·영어 약어 없이, 누를 것은 큰따옴표로 표시합니다.',
+  '질문이 여러 기능에 걸치면 순서대로 엮어 안내합니다.',
+  'answer는 한국어 존댓말, 5문장 이내, 긴 줄표·이모지·영어 약어 없이, 누를 것은 큰따옴표로 표시합니다.',
   '내부 시스템·모델·데이터베이스 이름을 말하지 않습니다.',
+  '',
+  '출력은 JSON 하나만 냅니다. 다른 글자를 붙이지 않습니다.',
+  '{"jobs": ["안내에 쓴 기능의 id(관련도 순, 최대 3개)"], "answer": "안내 문장"}',
+  '[기능 정의]에 답이 없으면 {"jobs": [], "answer": ""}를 냅니다. 비슷해 보이는 답을 지어내지 않습니다.',
 ].join('\n');
 
 /** 관련 작업 id → 화면 이름. 모델에게 id를 보여주면 그것을 한국어로 옮기며 없는 이름을 짓는다 */
@@ -95,17 +104,51 @@ function relatedTitles(ids: string[], catalog: readonly FeatureJob[]): string[] 
   return ids.map((id) => catalog.find((c) => c.id === id)?.title).filter((t): t is string => !!t);
 }
 
-export function buildHelpMessages(question: string, jobs: PublicFeatureJob[], currentPath?: string | null, catalog: readonly FeatureJob[] = FEATURE_CATALOG) {
-  const defs = jobs.map((j) => ({
-    title: j.title, goal: j.goal, entry: j.entry, steps: j.steps, blockers: j.blockers, related: relatedTitles(j.related, catalog),
+/**
+ * 카탈로그 전체를 모델이 읽는 형태로 직렬화한다.
+ *
+ * ★ 2026-08-24 (Harold 확정 · Sonnet 5): 전에는 매칭된 후보 3개만 user 메시지에 넣었다. 지금은
+ *   **전체 정의를 system에** 넣는다. system은 안정 문자열이라 프롬프트 캐시가 적중하고(5분 창),
+ *   돌려 말한 질문·여러 기능을 엮는 질문도 원장 전체에서 찾을 수 있다.
+ * ⛔ 회사별 값(잠금·요금제)은 넣지 않는다 — 답은 회사와 무관해야 응답 캐시를 전 회사가 공유하고,
+ *   요금제 문구는 라우트가 `locked`로 붙인다(4겹의 4).
+ * ⛔ keywords를 포함한다 — 사용자 어휘와 우리 용어의 간극을 메우는 필드라, 모델의 매칭이 이것에 기댄다.
+ */
+export function buildCatalogSystem(catalog: readonly FeatureJob[] = FEATURE_CATALOG): string {
+  const defs = catalog.map((j) => ({
+    id: j.id,
+    title: j.title,
+    goal: j.goal,
+    keywords: j.keywords,
+    entry: { via: j.entry.via },
+    steps: j.steps,
+    blockers: j.blockers,
+    related: relatedTitles(j.related, catalog),
     status: j.status === 'stub' ? '본문 없음(제목·목적·시작 위치만 있음)' : '본문 있음',
   }));
+  return `${SYSTEM_PROMPT}\n\n[기능 정의] ${JSON.stringify(defs)}`;
+}
+
+/** 후속 대화 한 쌍(화면이 보낸 이전 문답). 서버는 길이만 자르고 내용은 믿지 않는다 — 최종 방어는 출구 검사다 */
+export interface HelpTurn { q: string; a: string }
+export const HELP_MAX_HISTORY = 3;
+export const HELP_MAX_HISTORY_ANSWER = 600;
+
+export function buildHelpMessages(question: string, currentPath?: string | null, history?: HelpTurn[]) {
+  const messages: { role: 'user' | 'assistant'; content: string }[] = [];
+  for (const t of (history || []).slice(-HELP_MAX_HISTORY)) {
+    const q = String(t?.q || '').trim().slice(0, HELP_MAX_QUESTION);
+    const a = String(t?.a || '').trim().slice(0, HELP_MAX_HISTORY_ANSWER);
+    if (!q || !a) continue;
+    messages.push({ role: 'user', content: q });
+    messages.push({ role: 'assistant', content: a });
+  }
   const user = [
     currentPath ? `[지금 보고 있는 화면] ${currentPath}` : '',
     `[질문] ${question}`,
-    `[기능 정의] ${JSON.stringify(defs)}`,
   ].filter(Boolean).join('\n');
-  return { system: SYSTEM_PROMPT, user };
+  messages.push({ role: 'user', content: user });
+  return messages;
 }
 
 // ────────────── 3. 출구 검사 ──────────────
@@ -158,7 +201,7 @@ export function resetHelpQuota(): void { buckets.clear(); }
 // ────────────── 5. 모델 호출 ──────────────
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || '' });
-const MAX_TOKENS = 600;
+const MAX_TOKENS = 800; // JSON 래핑 여유. 잘리면 파싱이 실패해 답을 버리므로 부족보다 여유가 낫다
 
 export interface HelpAnswer {
   answered: boolean;
@@ -184,37 +227,71 @@ export function isDirectHit(top: MatchHit[]): boolean {
   return top[0].score - top[1].score >= HELP_DIRECT_MARGIN;
 }
 
+/**
+ * 모델 응답(JSON 계약)을 검증해 카드와 답으로 바꾼다. **id 실존이 카드의 조건이다** — 모델이 지어낸
+ * id는 조용히 버리고, 남는 카드가 없으면 답 전체를 버린다(안내문만 있고 갈 곳 없는 답은 절반짜리다).
+ */
+export function parseModelAnswer(
+  text: string, catalog: readonly FeatureJob[],
+): { ok: boolean; reason?: string; jobs: PublicFeatureJob[]; answer: string } {
+  let parsed: any;
+  try {
+    parsed = extractJsonFromAiText(text);
+  } catch {
+    return { ok: false, reason: 'json', jobs: [], answer: '' };
+  }
+  const answer = typeof parsed?.answer === 'string' ? parsed.answer.trim() : '';
+  const ids: string[] = Array.isArray(parsed?.jobs) ? parsed.jobs.filter((v: any) => typeof v === 'string') : [];
+  const jobs = ids
+    .map((id) => catalog.find((j) => j.id === id))
+    .filter((j): j is FeatureJob => !!j)
+    .slice(0, 3)
+    .map((j) => toPublicJob(j));
+  if (jobs.length === 0 || !answer) return { ok: false, reason: 'no-grounded-job', jobs: [], answer: '' };
+  return { ok: true, jobs, answer };
+}
+
 export async function answerHelpQuestion(opts: {
   companyId: string;
   question: string;
   currentPath?: string | null;
+  /** 화면이 보낸 직전 문답(후속 질문 이해용). 내용은 믿지 않는다 — 출구 검사가 최종 방어다 */
+  history?: HelpTurn[];
   catalog?: readonly FeatureJob[];
   /** 테스트 주입 */
-  callModel?: (system: string, user: string) => Promise<{ text: string; inputTokens: number; outputTokens: number }>;
+  callModel?: (system: string, messages: { role: 'user' | 'assistant'; content: string }[]) => Promise<{ text: string; inputTokens: number; outputTokens: number }>;
 }): Promise<HelpAnswer> {
   const catalog = opts.catalog || FEATURE_CATALOG;
   const question = String(opts.question || '').trim().slice(0, HELP_MAX_QUESTION);
   const hits = matchJobs(question, opts.currentPath, catalog);
   const top = hits.filter((h) => h.score >= HELP_MATCH_THRESHOLD).slice(0, 3);
   const fallbackJobs = hits.slice(0, 3).map((h) => toPublicJob(h.job));
-
-  // 1겹: 폐집합 매칭 실패 = 모델 호출 0
-  if (top.length === 0) return { answered: false, answer: '', direct: false, jobs: fallbackJobs, usedModel: false, reason: 'no-match' };
-
-  const jobs = top.map((h) => toPublicJob(h.job));
+  const history = (opts.history || []).slice(-HELP_MAX_HISTORY);
 
   // 답변 틀 고정: 본문 있는 작업이 분명한 1순위면 정의를 그대로 낸다. 모델 호출 0 · 한도 소모 0 · 출구 검사 불요(우리 문장이다)
-  if (isDirectHit(top)) return { answered: true, answer: '', direct: true, jobs, usedModel: false };
+  // ⛔ 후속 대화 중에는 직답을 건너뛴다 — "그게 안 되는데요"가 앞 문답 없이 새 매칭으로 잡히면 엉뚱한 카드가 나온다.
+  if (history.length === 0 && isDirectHit(top)) {
+    return { answered: true, answer: '', direct: true, jobs: top.map((h) => toPublicJob(h.job)), usedModel: false };
+  }
 
-  if (!takeHelpQuota(opts.companyId)) return { answered: false, answer: '', direct: false, jobs, usedModel: false, reason: 'quota' };
+  // ★ 2026-08-24 (Harold 확정): 매칭 실패도 여기로 온다. 전에는 이 자리에서 "no-match"로 끝났다 —
+  //   돌려 말한 질문이 정확히 모델이 잘하는 지점인데 그 지점에서 모델을 안 불렀다.
+  //   폐집합은 그대로다: 모델이 받는 재료도, 낼 수 있는 카드도 카탈로그뿐이다(2겹 · parseModelAnswer).
+  if (!takeHelpQuota(opts.companyId)) return { answered: false, answer: '', direct: false, jobs: fallbackJobs, usedModel: false, reason: 'quota' };
 
-  const { system, user } = buildHelpMessages(question, jobs, opts.currentPath, catalog);
-  // 답은 회사와 무관하다(요금제 판정은 라우트가 따로 붙인다) — 캐시를 전 회사가 공유한다
-  const cacheKey = generateCacheKey('help-global', system, user);
-  const cached = getCachedResponse(cacheKey);
-  if (cached) {
-    const check = checkAnswer(cached, allowedPathSet(catalog));
-    if (check.ok) return { answered: true, answer: cached, direct: false, jobs, usedModel: false };
+  const system = buildCatalogSystem(catalog);
+  const messages = buildHelpMessages(question, opts.currentPath, history);
+  // 답은 회사와 무관하다(요금제 판정은 라우트가 따로 붙인다) — 캐시를 전 회사가 공유한다.
+  // ⛔ 후속 대화는 캐시하지 않는다 — 히스토리가 키에 섞이면 적중이 0에 수렴하고, 빼면 남의 문맥 답이 나온다.
+  const cacheKey = history.length === 0 ? generateCacheKey('help-global', system, messages[messages.length - 1].content) : null;
+  if (cacheKey) {
+    const cached = getCachedResponse(cacheKey);
+    if (cached) {
+      const p = parseModelAnswer(cached, catalog);
+      if (p.ok && checkAnswer(p.answer, allowedPathSet(catalog)).ok) {
+        return { answered: true, answer: p.answer, direct: false, jobs: p.jobs, usedModel: false };
+      }
+    }
   }
 
   const call = opts.callModel || callAnthropic;
@@ -222,30 +299,37 @@ export async function answerHelpQuestion(opts: {
   let inputTokens = 0;
   let outputTokens = 0;
   try {
-    const r = await call(system, user);
+    const r = await call(system, messages);
     text = r.text; inputTokens = r.inputTokens; outputTokens = r.outputTokens;
   } catch (err: any) {
     await recordAiCall({ companyId: opts.companyId, source: HELP_SOURCE, modelType: 'sonnet', success: false });
-    return { answered: false, answer: '', direct: false, jobs, usedModel: true, reason: `model-error:${err?.message || 'unknown'}` };
+    return { answered: false, answer: '', direct: false, jobs: fallbackJobs, usedModel: true, reason: `model-error:${err?.message || 'unknown'}` };
   }
   await recordAiCall({ companyId: opts.companyId, source: HELP_SOURCE, modelType: 'sonnet', inputTokens, outputTokens, costWon: 0 });
 
-  // 3겹: 출구 검사
-  const check = checkAnswer(text, allowedPathSet(catalog));
-  if (!check.ok) return { answered: false, answer: '', direct: false, jobs, usedModel: true, reason: `exit:${check.reason}` };
+  // 2겹: JSON 계약 + id 실존. 모델이 "모른다"(jobs 빈 배열)면 지어내지 않은 것이다 — 문의 남기기로 보낸다
+  const parsed = parseModelAnswer(text, catalog);
+  if (!parsed.ok) return { answered: false, answer: '', direct: false, jobs: fallbackJobs, usedModel: true, reason: `contract:${parsed.reason}` };
 
-  setCachedResponse(cacheKey, text);
-  return { answered: true, answer: text.trim(), direct: false, jobs, usedModel: true };
+  // 3겹: 출구 검사
+  const check = checkAnswer(parsed.answer, allowedPathSet(catalog));
+  if (!check.ok) return { answered: false, answer: '', direct: false, jobs: fallbackJobs, usedModel: true, reason: `exit:${check.reason}` };
+
+  if (cacheKey) setCachedResponse(cacheKey, text);
+  return { answered: true, answer: parsed.answer, direct: false, jobs: parsed.jobs, usedModel: true };
 }
 
-async function callAnthropic(system: string, user: string): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
-  const modelId = AI_MODELS.claude;
+async function callAnthropic(
+  system: string, messages: { role: 'user' | 'assistant'; content: string }[],
+): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+  const modelId = AI_MODELS.claude; // = Sonnet 5 (Harold 2026-08-24 확정. 이 안내 축은 모델 경로가 어려운 꼬리만 받는다)
   const adaptiveGuard: any = isAdaptiveOnlyModel(modelId) ? { thinking: { type: 'disabled' } } : {};
   const response: any = await anthropic.messages.create({
     model: modelId,
     max_tokens: MAX_TOKENS,
+    // system = 지시 + 카탈로그 전체(안정 문자열). cache_control로 5분 캐시 — 두 번째 질문부터 입력 원가가 1/10이다
     system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } } as any],
-    messages: [{ role: 'user', content: user }],
+    messages,
     ...adaptiveGuard,
   } as any);
   const text = (response.content || []).find((b: any) => b?.type === 'text')?.text || '';

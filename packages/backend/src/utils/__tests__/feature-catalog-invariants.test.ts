@@ -119,6 +119,38 @@ describe('기능 카탈로그 불변식', () => {
     expect(STUB_UNTIL >= today).toBe(true);
   });
 
+  /**
+   * ★ 2026-08-24 신설 — 접수 cmt6qjoqs00umjnot0xph8v2g(남지현) "이 화면 열기가 홈페이지만 띄운다".
+   * 40개 중 10개가 시작 지점이 `/dashboard`인데 실물은 그 위의 모달이라, 경로 이동만으로는 아무 일도 없었다.
+   * 그래서 `entry.open`(모달 열쇠)을 뒀다. 이 게이트가 잠그는 것은 **열쇠가 화면에 실존하는가** 하나다.
+   */
+  it('9. entry.open 열쇠는 대시보드가 실제로 처리한다(카탈로그가 없는 열쇠를 지어내지 못한다)', () => {
+    const dash = readFileSync(resolve(FRONT, 'pages/Dashboard.tsx'), 'utf8');
+    const bad: string[] = [];
+    for (const j of FEATURE_CATALOG) {
+      const open = j.entry.open;
+      if (!open) continue;
+      // 열쇠는 이 화면 위의 모달을 여는 것이라, 그 화면이 대시보드가 아니면 처리기가 없다
+      if (j.entry.path !== '/dashboard') { bad.push(`${j.id}: ${j.entry.path}에는 open 처리기가 없다`); continue; }
+      const [key, value] = open.split('=');
+      if (!key || !value) { bad.push(`${j.id}: open 형식이 key=value가 아니다(${open})`); continue; }
+      if (!dash.includes(`searchParams.get('${key}')`)) bad.push(`${j.id}: 대시보드가 '${key}' 파라미터를 읽지 않는다`);
+      if (key === 'open' && !dash.includes(`=== '${value}'`)) bad.push(`${j.id}: 대시보드에 '${value}' 분기가 없다`);
+    }
+    expect(bad).toEqual([]);
+  });
+
+  /**
+   * ⛔ `entry.path`에 쿼리를 붙이면 두 곳이 함께 깨진다: 불변식 1(라우트 실존)과
+   * `jobsForPath`(현재 경로와 **문자열 비교**). 후자가 깨지면 그 작업이 "이 화면 목록"에서 통째로 사라진다.
+   */
+  it('10. entry.path는 순수 라우트다(쿼리·해시를 붙이지 않는다 — 붙일 것은 entry.open이다)', () => {
+    const bad = FEATURE_CATALOG
+      .filter((j) => /[?#]/.test(j.entry.path))
+      .map((j) => `${j.id}: ${j.entry.path}`);
+    expect(bad).toEqual([]);
+  });
+
   it('8. 내부 필드(sourceFile)는 응답 타입에서 잘려 나간다(소스 계약)', () => {
     const src = readFileSync(resolve(__dirname, '../../content/feature-catalog.ts'), 'utf8');
     expect(/Omit<FeatureJob,\s*'sourceFile'/.test(src)).toBe(true);

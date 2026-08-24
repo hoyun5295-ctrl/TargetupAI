@@ -55,6 +55,24 @@
 
 ## 2) 활성 버그
 
+### 🟠 B-0824-1 모바일 DM 버전 복원이 **100% 실패**했다 — jsonb를 JS로 꺼내 그대로 다시 넣었다 (🟢 코드완료 · 배포 대기) — 2026-08-24 (접수 `cmt6qug4s00v1jnotsqeaf12g` 임은지)
+> **증상**: "이 버전으로 복원"을 누르면 화면에 `invalid input syntax for type json`이 뜨고 복원되지 않는다.
+> **원인**: [dm-builder.ts](../packages/backend/src/utils/dm/dm-builder.ts) `restoreDmVersion`이 `dm_versions`에서 읽은 `sections`를 **파라미터로 그대로** 넘겼다. node-postgres는 JS **배열**을 PG 배열 리터럴 `{…}`로 직렬화하고, 대상은 `jsonb`라 거절한다. `sections`가 정확히 배열이라 이 경로는 **한 번도 성공한 적이 없다**. 같은 파일의 다른 쓰기 자리(생성 141행·수정 166행·버전 저장 203행)는 전부 `JSON.stringify`를 거치고 있었다 — 이 자리만 빠져 있었다. `cloneDm`은 `INSERT … SELECT`(순수 SQL)라 무관하다.
+> **전수 grep**: 복원·롤백 형태의 함수는 이 하나뿐(`restore|rollback|revert` 전수).
+> **수정**: 생성 경로와 같은 모양으로 맞췄다(`v.sections ? JSON.stringify(v.sections) : null`). 값이 없던 버전은 없는 채로 되돌린다(빈 배열을 지어내지 않는다).
+> **함께 고친 것 2**: ①라우트 catch가 `err.message`를 그대로 돌려줘 **DB 문법 오류가 고객 화면에 떴다** → 로그로 옮기고 고객에게는 할 일을 준다. ②모달이 "스냅샷을 비교하고 복원할 수 있다"고 적어 놓고 **JSON 줄 diff**를 보여줬다(접수 기대 동작) → 편집기와 같은 `SectionRenderer`로 양쪽을 실물로 그리는 "미리보기"를 기본 탭으로, 기존 diff는 "코드 비교"로 남겼다. 옛 버전이 그려지지 않으면 경계가 받아 코드 비교로 안내한다(모달 하나 때문에 화면 전체가 날아가지 않게).
+> **⚠ 별건(안 건드렸다)**: `routes/dm.ts`는 **49곳**이 `error: err.message`로 원문을 노출한다(라우트 73개 중). 이번 접수의 호출부 1곳만 고쳤다. 파일 전체 정정은 별도 과제.
+> **검증**: backend tsc 0 · frontend tsc 0 · vitest 196파일 2,991건(`dm-flow-invariants.test.ts`에 회귀 2건 신설 — 배열이 문자열로 나가는가 · null은 null로 남는가). **잔여 = 운영 실측**(버전 2개 만들고 1차로 복원 → 캔버스가 되돌아가는가).
+
+### 🟠 B-0823-1 대행발송 워커가 **의존 장애를 판정으로 읽는다** — 검사가 못 돌아도 통과, 다듬기 AI가 죽으면 문안 반려 (🔵 Open · 기존 부채) — 2026-08-23 (당일 재검사 폐지 Codex 적대 검토가 범위 인접에서 발견)
+> **한 줄**: 뿌리는 하나다 — **"시스템이 판정하지 못했다"를 "시스템이 반대로 판정했다"로 읽는다.** 같은 형태가 워커 안에서 네 자리에 있다. 전부 0823(2) 당일 재검사 폐지와 **인과 없음**(그 전부터 있던 코드).
+> **(가) 통과 판정이 느슨하다** — [agency-send-worker.ts](../packages/backend/src/utils/agency-send-worker.ts) `runSpamRound`가 `spamResult !== 'blocked'`면 통과로 읽는다. 상류 계약은 `pass | blocked | failed | timeout`([spam-test-queue.ts:89](../packages/backend/src/utils/spam-test-queue.ts:89))이고 큐 적재 실패는 `failed`, 대기 만료는 `timeout`, 응답이 비면 `undefined`다. **워커 A·B 양쪽**에 있어, 오늘 운영에서도 T-2h 재검사가 타임아웃이면 통과로 읽고 `final_test_at`을 찍은 뒤 발송한다(불변 2 위반 경로).
+> **(나) 다듬기 장애를 내용 반려로 읽는다** — `refineForSpam`은 API 장애도 `{ok:false, reason:'model-error:...'}`로 돌려주는데([agency-send-refine.ts:163](../packages/backend/src/utils/agency-send-refine.ts:163)) 워커가 `anchor-lost`·`benefit-invented` 같은 **내용 반려**와 같이 취급한다. AI가 잠깐 죽으면 한 번 차단된 것만으로 `test_failed`가 되고, 승인된 건에는 **예약 취소 통지**가 나간다.
+> **(다) 만료 후보가 `LIMIT`보다 늦게 걸린다** — `runExpire`가 "2시간 안" 전부를 담고 `LIMIT 20`을 먼저 건다. 아직 만료가 아닌 건이 스무 자리를 채우면 만료된 건이 밀려 미발송 안내가 늦는다. 2시간 창에 20건이 동시에 있어야 도달한다.
+> **(라) 승인 마감을 애플리케이션 시각으로만 본다** — 승인 CAS가 상태·`revision`만 걸어, 판정과 UPDATE 사이에 마감을 넘기면 "승인되었습니다"를 돌려주고 워커가 안 맡는다. `reapproval`은 **이전부터** 10분 마감이라 같은 경합이 있었다. 밀리초 창이고 결과는 미발송 안내다.
+> **⛔ 착수 시 주의 — 한 번 시도했다가 되돌렸다(2026-08-23)**: (가)만 고치려고 `error` 결말을 새로 만들어 잡기 전 상태로 되돌리게 했더니, 픽커가 `ORDER BY created_at LIMIT 5`라 **꾸준히 실패하는 다섯 건이 전 고객사의 매 tick을 독점**했다(`received`는 만료 대상도 아니라 먼 미래 접수는 상한 없이 재시도한다). **실패 처리만 조각으로 바꾸면 더 나빠진다.** 재시도 순서(줄 뒤로 보내기)·`received` 만료·다듬기 장애 분리를 **한 묶음**으로 설계해야 한다.
+> **관련**: [대행발송 설계서 §14-6](../docs/2026-08-22-agency-send-design.md) · 교훈 = memory `feedback_judge_by_the_success_stamp_not_the_attempt_stamp`
+
 ### 🟡 B-0821-5 여정 발송 정지 공개 페이지: 캡션에 내부 식별자(CT 번호·서명 알고리즘)가 고객에게 보인다 (🔵 Open) · 2026-08-21 (표면 점검 중 발견)
 
 - **증상**: `/journey-pause/:token` 하단 캡션이 "Data source: CT-94 journey-pause-handler (D218+ 신설) · token TTL 24h · HMAC-SHA256 서명 정합". 이 화면은 **로그인 없이 담당자가 문자 링크로 여는 공개 페이지**다.

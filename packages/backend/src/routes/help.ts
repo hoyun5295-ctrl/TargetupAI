@@ -17,7 +17,7 @@ import { loadPlanContext, canUseFeature, type PlanContext } from '../utils/plan-
 import {
   FEATURE_CATALOG, JOB_GROUPS, findJob, jobsForPath, toPublicJob, normalizePath, type PublicFeatureJob,
 } from '../content/feature-catalog';
-import { answerHelpQuestion, HELP_MAX_QUESTION } from '../utils/help-answer';
+import { answerHelpQuestion, HELP_MAX_HISTORY, HELP_MAX_QUESTION } from '../utils/help-answer';
 import { getOnboardingState } from '../utils/onboarding-wizard';
 
 const router = Router();
@@ -153,7 +153,16 @@ router.post('/ask', async (req: Request, res: Response) => {
     if (question.length > HELP_MAX_QUESTION) return res.status(400).json({ success: false, error: `질문은 ${HELP_MAX_QUESTION}자까지 입력할 수 있습니다.` });
     const path = req.body?.path ? normalizePath(String(req.body.path)) : null;
 
-    const result = await answerHelpQuestion({ companyId, question, currentPath: path });
+    // 후속 대화(★2026-08-24). 화면이 직전 문답을 보낸다 — 형식이 어긋난 항목은 조용히 버린다(막지 않는다).
+    // 내용 검증은 여기서 하지 않는다: 최종 방어는 답변 CT의 JSON 계약·출구 검사다.
+    const history = Array.isArray(req.body?.history)
+      ? req.body.history
+          .filter((t: any) => t && typeof t.q === 'string' && typeof t.a === 'string')
+          .slice(-HELP_MAX_HISTORY)
+          .map((t: any) => ({ q: String(t.q), a: String(t.a) }))
+      : undefined;
+
+    const result = await answerHelpQuestion({ companyId, question, currentPath: path, history });
     const jobs = result.jobs.map((j) => withLock(j, ctx));
 
     // 기록은 답변과 독립이다 — 실패해도 답은 나간다. 미답 비율이 2단계 정의의 유일한 입력이다

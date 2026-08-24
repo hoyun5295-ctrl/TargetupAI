@@ -70,6 +70,14 @@ export function isAuditLogViewer(superAdminId?: string | null): Promise<boolean>
 }
 
 /**
+ * 도움말 질문 이력 열람 권한 — HELP_QUESTION_VIEWER_IDS(기본 'ceo')에 포함된 super_admins.login_id만 허용.
+ * Harold 명시 2026-08-24: 어떤 업체가 어떤 질문을 했는지는 ceo 계정에서만 본다(감사 로그와 같은 규약).
+ */
+export function isHelpQuestionViewer(superAdminId?: string | null): Promise<boolean> {
+  return isSuperAdminAllowed(superAdminId, 'HELP_QUESTION_VIEWER_IDS', 'ceo', 'help-questions');
+}
+
+/**
  * AI 학습 데이터 열람 권한 — AI_TRAINING_VIEWER_IDS(기본 'ceo')에 포함된 super_admins.login_id만 허용.
  * 인비토AI 학습 데이터는 전사 비식별 집계라 소유자(ceo) 전용. 감사 로그와 분리된 별도 env.
  */

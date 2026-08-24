@@ -67,6 +67,8 @@ export const HELP_STUB = 'inline-flex items-center h-[20px] px-2 rounded-full bg
 export const HELP_CARD_ACTIONS = 'flex items-center gap-2 flex-wrap';
 export const HELP_BTN_PRIMARY = 'h-8 px-3 rounded-lg bg-indigo-600 text-white text-[12.5px] font-semibold inline-flex items-center gap-1.5 hover:bg-indigo-700 transition-colors';
 export const HELP_BTN_GHOST = 'h-8 px-2.5 rounded-lg text-[12.5px] font-medium text-indigo-600 hover:bg-indigo-50 inline-flex items-center gap-1 transition-colors';
+/** 시작 지점이 지금 보고 있는 화면 그 자체일 때. 누를 것이 없으므로 버튼이 아니라 표시다 */
+export const HELP_HERE_NOW = 'h-8 px-3 rounded-lg bg-neutral-100 text-neutral-600 text-[12.5px] font-medium inline-flex items-center gap-1.5';
 
 // ────────────── 답변 ──────────────
 export const HELP_ANSWER = 'rounded-xl bg-indigo-50 border border-indigo-100 px-3.5 py-3 text-[13px] text-indigo-950 leading-relaxed whitespace-pre-wrap';

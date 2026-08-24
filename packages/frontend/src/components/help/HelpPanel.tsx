@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, Send, Loader2, LifeBuoy, Sparkles, ArrowRight } from 'lucide-react';
 import HelpJobCard from './HelpJobCard';
-import { askHelp, leaveHelpQuestion, type HelpAskResult, type HelpContext, type HelpJob } from './help-api';
+import { askHelp, leaveHelpQuestion, type HelpAskResult, type HelpContext, type HelpJob, type HelpTurn } from './help-api';
 import {
   HELP_ANSWER, HELP_ANSWER_Q, HELP_BODY, HELP_BTN_GHOST, HELP_BTN_PRIMARY, HELP_FOOT, HELP_HEAD, HELP_HEAD_BADGE, HELP_HEAD_CLOSE,
   HELP_HEAD_TITLE, HELP_INPUT, HELP_INPUT_WRAP, HELP_INTRO, HELP_INTRO_DESC, HELP_INTRO_TITLE, HELP_MISS, HELP_PANEL, HELP_SECTION_TITLE, HELP_SEND, HELP_SOURCE,
@@ -34,9 +34,12 @@ export default function HelpPanel({ ctx, path, onClose }: Props) {
   const [askError, setAskError] = useState<string | null>(null);
   const [left, setLeft] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
   const inputRef = useRef<HTMLInputElement>(null);
+  // 직전 문답(최대 3쌍). 서버가 후속 질문("그게 안 되는데요")을 문맥으로 이해하는 재료다(★2026-08-24).
+  // 화면 표시는 기존 그대로 최신 답 하나다 — 이 값은 요청에만 실린다.
+  const historyRef = useRef<HelpTurn[]>([]);
 
-  // 화면이 바뀌면 펼침·답변을 정리한다(다른 화면의 답이 남아 있으면 헷갈린다)
-  useEffect(() => { setOpen(null); setResult(null); setAskError(null); setLeft('idle'); }, [path]);
+  // 화면이 바뀌면 펼침·답변·문맥을 정리한다(다른 화면의 답이 남아 있으면 헷갈린다)
+  useEffect(() => { setOpen(null); setResult(null); setAskError(null); setLeft('idle'); historyRef.current = []; }, [path]);
 
   const mode = ctx.mode || 'help';
   const here = ctx.here || [];
@@ -47,9 +50,14 @@ export default function HelpPanel({ ctx, path, onClose }: Props) {
     if (!question || asking) return;
     setAsking(true); setAskError(null); setLeft('idle');
     try {
-      const r = await askHelp(question, path);
+      const r = await askHelp(question, path, historyRef.current);
       setResult({ q: question, r });
       setOpen(r.jobs[0]?.id || null);
+      // 답이 성립한 문답만 문맥이 된다. direct는 답 문장이 비어 있으므로 카드 제목으로 요약한다
+      if (r.answered) {
+        const a = r.answer || (r.jobs[0] ? `"${r.jobs[0].title}" 안내를 보여드렸습니다.` : '');
+        if (a) historyRef.current = [...historyRef.current, { q: question, a }].slice(-3);
+      }
     } catch (e: any) {
       setAskError(e?.message || '답변을 만들지 못했습니다.');
     } finally {
@@ -106,7 +114,7 @@ export default function HelpPanel({ ctx, path, onClose }: Props) {
                 {renderJobs(result.r.jobs)}
               </div>
             )}
-            <button type="button" onClick={() => { setResult(null); setOpen(null); }} className={HELP_BTN_GHOST}>처음으로</button>
+            <button type="button" onClick={() => { setResult(null); setOpen(null); historyRef.current = []; }} className={HELP_BTN_GHOST}>처음으로</button>
           </>
         ) : mode === 'onboarding' ? (
           <>

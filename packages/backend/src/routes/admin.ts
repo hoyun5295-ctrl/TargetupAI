@@ -52,7 +52,7 @@ import { grantFreeTrial } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
-import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isLineGroupAdmin, isSettlementOverviewViewer, diffFields } from '../utils/audit-log';
+import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, diffFields } from '../utils/audit-log';
 // ★ 2026-07-01: 예측 일괄 분석·차감 수동 트리거 (9시 대기 없이 검증·복구·시연)
 import { runPredictiveBatchNow } from '../utils/predictive-worker';
 import { sendTypeLabel } from '../utils/send-type-axis';
@@ -4504,6 +4504,72 @@ router.get('/audit-logs/access', authenticate, requireSuperAdmin, async (req: Re
 // ★ 2026-06-13: AI 학습 데이터(인비토AI) 열람 — ceo 전용 (AI_TRAINING_VIEWER_IDS, 기본 'ceo')
 router.get('/ai-training/access', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   res.json({ allowed: await isAiTrainingViewer(req.user?.userId) });
+});
+
+// ★ 2026-08-24: 도움말 질문 이력 열람 — ceo 전용 (HELP_QUESTION_VIEWER_IDS, 기본 'ceo'). 메뉴 노출 게이팅용
+router.get('/help-questions/access', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  res.json({ allowed: await isHelpQuestionViewer(req.user?.userId) });
+});
+
+/**
+ * ★ 2026-08-24 도움말 질문 이력 (Harold 명시 · ceo 전용) — 어떤 업체가 무엇을 물었고 봇이 답했는가.
+ *
+ * 원천은 `help_questions` 하나다(봇이 답했든 못 했든 전 질문이 이 원장에 적힌다 — 미답 비율이
+ * 카탈로그 2단계 정의의 유일한 실측 입력이라는 그 원장이다). 여기는 읽기만 한다.
+ */
+router.get('/help-questions', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    if (!(await isHelpQuestionViewer(req.user?.userId))) {
+      return res.status(403).json({ error: '질문 이력 열람 권한이 없습니다.' });
+    }
+    const { page = 1, limit = 25, answered = 'all', companyId, q } = req.query;
+    const offset = (Number(page) - 1) * Number(limit);
+
+    let whereClause = 'WHERE 1=1';
+    const params: any[] = [];
+    let paramIndex = 1;
+
+    if (answered === 'yes') whereClause += ' AND h.answered = true';
+    else if (answered === 'no') whereClause += ' AND h.answered = false';
+    if (companyId && companyId !== 'all') {
+      whereClause += ` AND h.company_id = $${paramIndex++}::uuid`;
+      params.push(String(companyId));
+    }
+    if (q && String(q).trim()) {
+      whereClause += ` AND h.question ILIKE $${paramIndex++}`;
+      params.push(`%${String(q).trim()}%`);
+    }
+
+    const countRes = await query(`SELECT COUNT(*) AS total FROM help_questions h ${whereClause}`, params);
+    const listRes = await query(
+      `SELECT h.id, h.company_id, h.path, h.question, h.matched_ids, h.answered, h.created_at,
+              c.company_name, u.name AS user_name, u.login_id AS user_login
+         FROM help_questions h
+         JOIN companies c ON c.id = h.company_id
+         LEFT JOIN users u ON u.id = h.user_id
+        ${whereClause}
+        ORDER BY h.created_at DESC
+        LIMIT $${paramIndex++} OFFSET $${paramIndex++}`,
+      [...params, Number(limit), offset],
+    );
+
+    const total = Number(countRes.rows[0]?.total || 0);
+    return res.json({
+      success: true,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / Number(limit))),
+      page: Number(page),
+      questions: listRes.rows,
+    });
+  } catch (err: any) {
+    const msg = String(err?.message || '');
+    // help_questions는 DDL 실행 대기 상태일 수 있다 — 500 대신 마이그레이션 안내(db_alter_safety_net)
+    if (msg.includes('relation') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: help_questions 테이블을 먼저 생성해 주세요.' });
+    }
+    console.error('[admin/help-questions] 조회 실패:', err);
+    return res.status(500).json({ success: false, error: '질문 이력을 불러오지 못했습니다.' });
+  }
 });
 
 // ★ 2026-08-05: 총 정산표 열람 — ceo 전용 (SETTLEMENT_OVERVIEW_VIEWER_IDS, 기본 'ceo'). 메뉴 노출 게이팅용

@@ -74,7 +74,7 @@
 | AI Operator·CDP·Provider | [AI_OPERATOR_기능정의서.md](../docs/AI_OPERATOR_기능정의서.md) + [ai_operator_progress.md](ai_operator_progress.md) | 해당 절 |
 | AI 영업 아웃리치(슈퍼관리자·ceo 전용) | [2026-07-31-ai-sales-outreach-design.md](../docs/2026-07-31-ai-sales-outreach-design.md) | 전체 — 착수 전 확정 = §13, 재사용 맵 = §6-1 |
 | CRM 캠페인 대행(설계 대행) | [2026-07-09-crm-campaign-agency-implementation.md](../docs/2026-07-09-crm-campaign-agency-implementation.md) | 전체 |
-| **대행발송 셀프 접수**(직원 수작업 → 기계 · 승인만 담당자) — 호출어 **대행발송** | [2026-08-22-agency-send-design.md](../docs/2026-08-22-agency-send-design.md) | **§0 30초 요약 → §3 불변(큐 적재는 당일 재검사 통과 뒤 1회뿐 · 적재는 직접발송 배관 위임) → §4 구조.** 0823 정정 경위·지켜야 할 계약 5 = **§12** · 남은 것 = §11-4 |
+| **대행발송 셀프 접수**(직원 수작업 → 기계 · 승인만 담당자) — 호출어 **대행발송** | [2026-08-22-agency-send-design.md](../docs/2026-08-22-agency-send-design.md) | **§0 30초 요약 → §3 불변(적재는 당일 검사 통과 뒤 1회뿐 · 적재는 직접발송 배관 위임) → §4 구조.** 0823 정정 경위·계약 5 = **§12** · **당일 접수 건 재검사 폐지 = §14**(0823(2) Harold) · 축 밖 부채 = [B-0823-1](BUGS.md) · 남은 것 = §10-12 실측 |
 | 요금제 무료 메시징(월 제공량·소진·정산 제외) | [2026-08-05-plan-free-messaging-design.md](../docs/2026-08-05-plan-free-messaging-design.md) | 전체 — 확정 대기 = §9 (Harold 확정 전 착수 금지) |
 | DM 편집기 AI 퍼스트 재개편 | [2026-07-16-dm-editor-ai-first-redesign.md](../docs/2026-07-16-dm-editor-ai-first-redesign.md) | 전체 (Harold 검토 대기) |
 | **원스텝 AI 컨텐츠 생성**(인터뷰형 마스터프롬프트 · 1차 = DM) | [2026-08-13-one-step-content-interview-design.md](../docs/2026-08-13-one-step-content-interview-design.md) | 전체 — 판정 원장 §0 · 질문표 §2 · 확정 원장 §6 · **착수 원장 §8** · 호출어 **원스텝 생성** |

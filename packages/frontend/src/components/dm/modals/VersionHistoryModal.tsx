@@ -4,13 +4,20 @@
  * 흐름:
  *  1. 모달 열릴 때 GET /api/dm/:id/versions
  *  2. 좌측: 버전 목록 (최신순) + "스냅샷 저장" 버튼
- *  3. 우측: 선택한 버전과 현재 내용의 diff (줄 단위)
+ *  3. 우측: 선택한 버전과 현재 내용을 나란히 — **실물 미리보기**(기본) 또는 코드 비교(줄 단위)
  *  4. "이 버전으로 복원" 버튼 → POST /versions/:vid/restore
+ *
+ * ★ 2026-08-24 실물 미리보기 신설 — 접수 cmt6qug4s00v1jnotsqeaf12g(임은지):
+ *   "스냅샷을 비교하고 원하는 시점으로 복원할 수 있다"고 적어 놓고 실제로는 **JSON 로그**를 보여줬다.
+ *   무엇이 어떻게 달라지는지 못 보면 복원을 누를 근거가 없다. 편집기와 같은 `SectionRenderer`로
+ *   양쪽을 그대로 그린다(같은 부품을 써야 미리보기와 실물이 갈리지 않는다).
  */
 import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { useDmBuilderStore, selectAllSectionsFlat } from '../../../stores/dmBuilderStore';
 import { diffByLine, type DiffChunk } from '../../../utils/dm-text-diff';
+import { PageErrorBoundary } from '../../../lib/lazy-page';
+import SectionRenderer from '../canvas/SectionRenderer';
 import ModalBase, { ModalButton } from './ModalBase';
 import ConfirmModal, { type ConfirmState } from '../../ConfirmModal';
 
@@ -75,6 +82,8 @@ export default function VersionHistoryModal({ open, onClose }: { open: boolean; 
   };
 
   const selectedVersion = versions.find((v) => v.id === selectedId);
+  // 기본은 실물이다. 코드 비교는 정확하지만 "무엇이 달라 보이는가"를 알려주지 못한다(접수 원문)
+  const [compareMode, setCompareMode] = useState<'preview' | 'code'>('preview');
 
   const diffChunks = useMemo(() => {
     if (!selectedVersion) return [] as DiffChunk[];
@@ -226,7 +235,7 @@ export default function VersionHistoryModal({ open, onClose }: { open: boolean; 
           ))}
         </div>
 
-        {/* 우측: diff 표시 */}
+        {/* 우측: 실물 미리보기(기본) · 코드 비교 */}
         <div style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           {selectedVersion ? (
             <>
@@ -238,8 +247,32 @@ export default function VersionHistoryModal({ open, onClose }: { open: boolean; 
                 <span style={{ fontSize: 11, padding: '2px 8px', background: '#eef2ff', color: '#4f46e5', borderRadius: 10, fontWeight: 700 }}>
                   현재 작업본
                 </span>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+                  {(['preview', 'code'] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setCompareMode(m)}
+                      style={{
+                        fontSize: 11, padding: '3px 10px', borderRadius: 8, fontWeight: 600, cursor: 'pointer',
+                        border: `1px solid ${compareMode === m ? '#4f46e5' : '#e5e7eb'}`,
+                        background: compareMode === m ? '#eef2ff' : '#fff',
+                        color: compareMode === m ? '#4f46e5' : '#6b7280',
+                      }}
+                    >
+                      {m === 'preview' ? '미리보기' : '코드 비교'}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <DiffView chunks={diffChunks} />
+              {compareMode === 'preview' ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, overflow: 'auto', flex: 1 }}>
+                  <PhonePreview title={`v${selectedVersion.version_number} ${selectedVersion.version_label}`} sections={selectedVersion.sections} />
+                  <PhonePreview title="현재 작업본" sections={currentSections} accent />
+                </div>
+              ) : (
+                <DiffView chunks={diffChunks} />
+              )}
             </>
           ) : (
             <div style={{ padding: 40, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
@@ -250,6 +283,49 @@ export default function VersionHistoryModal({ open, onClose }: { open: boolean; 
       </div>
     </ModalBase>
     </>
+  );
+}
+
+/**
+ * 버전 하나를 **편집기와 같은 부품으로** 그린다(★2026-08-24 · 접수 임은지).
+ * ⛔ 미리보기 전용 렌더러를 새로 만들지 않는다 — 두 벌이 되는 순간 "미리보기와 실물이 다르다"가 생긴다.
+ * 보기 전용이라 클릭을 먹지 않게 하고, 좁은 칸에 담으려 폭 375를 기준으로 축소한다.
+ */
+function PhonePreview({ title, sections, accent }: { title: string; sections: any; accent?: boolean }) {
+  const list = Array.isArray(sections) ? sections.filter((x: any) => x && x.visible !== false) : [];
+  const SCALE = 0.62;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <div style={{
+        fontSize: 11, fontWeight: 700, marginBottom: 6, color: accent ? '#4f46e5' : '#374151',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>
+        {title}
+      </div>
+      <div style={{
+        border: `1px solid ${accent ? '#c7d2fe' : '#e5e7eb'}`, borderRadius: 12, background: '#fff',
+        overflow: 'auto', flex: 1, minHeight: 0,
+      }}>
+        {list.length === 0 ? (
+          <div style={{ padding: 24, textAlign: 'center', color: '#9ca3af', fontSize: 12 }}>표시할 내용이 없어요.</div>
+        ) : (
+          // ⛔ 옛 버전은 지금 없는 섹션 모양일 수 있다. 그리다 터지면 모달이 아니라 **화면 전체**가 날아가므로
+          //   경계를 두고 코드 비교로 안내한다(미리보기가 없다고 복원까지 막히면 안 된다).
+          <PageErrorBoundary fallback={
+            <div style={{ padding: 24, textAlign: 'center', color: '#9ca3af', fontSize: 12 }}>
+              이 버전은 미리보기를 그릴 수 없어요. "코드 비교"로 확인해 주세요.
+            </div>
+          }>
+            {/* `zoom`을 쓰는 이유: `transform: scale`은 **레이아웃 높이를 줄이지 않아** 아래로 빈 공간이 남는다 */}
+            <div style={{ zoom: SCALE, pointerEvents: 'none', userSelect: 'none' }}>
+              {list.map((sec: any, i: number) => (
+                <SectionRenderer key={sec.id || i} section={sec} readOnly />
+              ))}
+            </div>
+          </PageErrorBoundary>
+        )}
+      </div>
+    </div>
   );
 }
 

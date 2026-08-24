@@ -3,13 +3,13 @@
  *
  * 잠금·준비 중 표시는 서버가 준 값으로만 그린다. 요금제 이름은 이 파일에도 없다.
  */
-import { useNavigate } from 'react-router-dom';
-import { ChevronDown, ArrowRight, Lock, BookOpen } from 'lucide-react';
-import type { HelpJob } from './help-api';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { ChevronDown, ArrowRight, Lock, BookOpen, MapPin } from 'lucide-react';
+import { helpEntryHref, isAlreadyHere, type HelpJob } from './help-api';
 import {
   HELP_BLOCKER, HELP_BLOCKER_FIX, HELP_BLOCKER_SYMPTOM, HELP_BTN_GHOST, HELP_BTN_PRIMARY, HELP_CARD, HELP_CARD_ACTIONS,
-  HELP_CARD_BODY, HELP_CARD_GOAL, HELP_CARD_HEAD, HELP_CARD_NUM, HELP_CARD_TITLE, HELP_LOCK, HELP_SECTION_TITLE, HELP_STEP,
-  HELP_STEP_NUM, HELP_STUB,
+  HELP_CARD_BODY, HELP_CARD_GOAL, HELP_CARD_HEAD, HELP_CARD_NUM, HELP_CARD_TITLE, HELP_HERE_NOW, HELP_LOCK,
+  HELP_SECTION_TITLE, HELP_STEP, HELP_STEP_NUM, HELP_STUB,
 } from './help-ui';
 
 interface Props {
@@ -25,7 +25,10 @@ interface Props {
 
 export default function HelpJobCard({ job, index, open, onToggle, onNavigate, showGuideLink = true }: Props) {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const go = (to: string) => { navigate(to); onNavigate?.(); };
+  // 갈 곳도 열 것도 없으면 버튼을 그리지 않는다. 눌러도 아무 일이 없는 버튼이 "미동작"으로 접수된다
+  const hereNow = isAlreadyHere(job, pathname);
 
   return (
     <div className={HELP_CARD}>
@@ -79,9 +82,15 @@ export default function HelpJobCard({ job, index, open, onToggle, onNavigate, sh
           )}
 
           <div className={HELP_CARD_ACTIONS}>
-            <button type="button" onClick={() => go(job.entry.path)} className={HELP_BTN_PRIMARY}>
-              이 화면 열기<ArrowRight className="w-3.5 h-3.5" strokeWidth={2.2} />
-            </button>
+            {hereNow ? (
+              <span className={HELP_HERE_NOW}>
+                <MapPin className="w-3.5 h-3.5" strokeWidth={2} />지금 이 화면입니다
+              </span>
+            ) : (
+              <button type="button" onClick={() => go(helpEntryHref(job))} className={HELP_BTN_PRIMARY}>
+                이 화면 열기<ArrowRight className="w-3.5 h-3.5" strokeWidth={2.2} />
+              </button>
+            )}
             {showGuideLink && (
               <button type="button" onClick={() => go(`/guide/${job.id}`)} className={HELP_BTN_GHOST}>
                 <BookOpen className="w-3.5 h-3.5" strokeWidth={2} />자세히

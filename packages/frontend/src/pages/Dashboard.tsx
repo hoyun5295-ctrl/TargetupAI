@@ -1054,6 +1054,21 @@ export default function Dashboard() {
       searchParams.delete('customer');
       setSearchParams(searchParams, { replace: true });
     }
+    // ★ 2026-08-24 ?open=<열쇠> — 도움말 봇 "이 화면 열기"가 대시보드 **위의 모달**까지 연다.
+    //   경위 = 접수 cmt6qjoqs00umjnot0xph8v2g(남지현). 기능 카탈로그 40개 중 10개가 시작 지점이
+    //   `/dashboard`인데 실물은 여기 모달이라, 경로 이동만으로는 홈만 뜨고 아무 일도 안 일어났다.
+    //   ⛔ 열쇠 값은 `content/feature-catalog.ts`의 `entry.open`이 소유한다. 여기 없는 값이 오면 조용히 무시한다
+    //     (옛 링크·오타로 사용자가 막히지 않게). 새 값을 늘릴 때는 그 파일과 여기를 함께 고친다.
+    //   게이트는 각 진입 함수가 그대로 소유한다 — 여기서 판정을 다시 하지 않는다(openCustomerDb 선례).
+    const openParam = searchParams.get('open');
+    if (openParam) {
+      if (openParam === 'direct-send') { setShowDirectSend(true); setDirectSendChannel('sms'); }
+      else if (openParam === 'target-send') setShowDirectTargeting(true);
+      else if (openParam === 'customer-db') openCustomerDb();
+      else if (openParam === 'diagnosis') setShowDiagnosisWizard(true);
+      searchParams.delete('open');
+      setSearchParams(searchParams, { replace: true });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 

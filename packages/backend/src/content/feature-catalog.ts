@@ -31,8 +31,16 @@ export interface FeatureJob {
   steps: string[];
   /** 막히는 지점. 0~3개. 이것이 봇의 실제 답변 내용이다 */
   blockers: { symptom: string; fix: string }[];
-  /** 어디서 시작하는가. path는 실제 라우트, via는 그 화면에서 누르는 것 */
-  entry: { path: string; via: string };
+  /**
+   * 어디서 시작하는가.
+   *   `path` = 실제 라우트(⛔ 쿼리를 붙이지 마라 — 불변식 1이 라우트 실존을 보고, `jobsForPath`가
+   *            이 값을 현재 경로와 **문자열로** 비교한다. 쿼리를 붙이면 그 작업이 "이 화면 목록"에서 사라진다)
+   *   `via`  = 그 화면에서 누르는 것
+   *   `open` = 그 화면에서 **열려야 하는 모달·카드의 열쇠**(쿼리 문자열). 화면 자체가 목적지면 없다.
+   *            ★2026-08-24 신설 — 대행 접수(남지현): 40개 중 10개가 `/dashboard`인데 실제 시작 지점은
+   *            대시보드 위의 모달이라, 경로만으로는 "이 화면 열기"가 홈으로 가는 버튼이 됐다.
+   */
+  entry: { path: string; via: string; open?: string };
   /** 요금제 기능 키. null = 전 요금제 */
   planKey: FeatureKey | null;
   /** 크레딧이 드는 지점의 source 키(숫자 금지). null = 무료 */
@@ -110,7 +118,7 @@ const READY: FeatureJob[] = [
       { symptom: '업로드 뒤 고객 수가 파일 행 수보다 적습니다', fix: '같은 번호는 한 명으로 합쳐집니다. 번호가 비었거나 형식이 다른 행은 빠집니다' },
       { symptom: '날짜 열이 엉뚱하게 들어갔습니다', fix: '2026-08-22 또는 20260822 형식이면 안전합니다. 존재하지 않는 날짜(2월 30일)는 빠집니다' },
     ],
-    entry: { path: '/dashboard', via: '"DB 현황" 카드의 "고객 DB 업로드"' },
+    entry: { path: '/dashboard', via: '"DB 현황" 카드의 "고객 DB 업로드"', open: 'upload=1' },
     planKey: 'customer_db',
     creditSource: 'ai-column-mapper',
     related: ['view-customer', 'send-target', 'manage-unsubscribes'],
@@ -127,14 +135,14 @@ const READY: FeatureJob[] = [
       '오른쪽 "수신번호"에 번호를 "직접입력"하거나 "파일 선택"으로 올리거나 "주소록"에서 고릅니다',
       '왼쪽에서 "발신번호"를 고르고 내용을 씁니다. 광고면 "광고표기"를 켜고, 이름처럼 사람마다 다른 값은 "변수 삽입"으로 넣습니다',
       '"미리보기"로 확인하고, 광고 문자는 "스팸필터테스트"로 한 번 걸러 봅니다',
-      '"수신거부제거"와 "중복제거"를 누른 뒤 발송 버튼을 누르면 확인 창이 뜨고, 확인하면 나갑니다',
+      '"수신거부제거"와 "중복제거"는 기본으로 켜져 있습니다. 그대로 발송 버튼을 누르면 확인 창이 뜨고, 확인하면 나갑니다(걸러내지 않으려면 체크를 푸세요)',
     ],
     blockers: [
       { symptom: '발송 버튼이 눌리지 않습니다', fix: '발신번호가 선택됐는지, 수신번호가 한 건이라도 있는지, 내용이 비어 있지 않은지 확인하세요' },
       { symptom: '광고 문자인데 맨 앞에 (광고)가 안 붙습니다', fix: '"광고표기"를 켜면 (광고)와 무료수신거부 문구가 자동으로 붙습니다' },
       { symptom: '글자 수가 넘어 LMS로 바뀌었습니다', fix: 'SMS는 90바이트까지입니다. 넘으면 LMS로 나가고 단가가 다릅니다' },
     ],
-    entry: { path: '/dashboard', via: '상단 메뉴 "직접발송"' },
+    entry: { path: '/dashboard', via: '상단 메뉴 "직접발송"', open: 'open=direct-send' },
     planKey: 'basic_send',
     creditSource: null,
     related: ['sender-register', 'schedule-send', 'check-results'],
@@ -154,9 +162,9 @@ const READY: FeatureJob[] = [
     ],
     blockers: [
       { symptom: '방금 보냈는데 결과가 비어 있습니다', fix: '통신사 도착 확인까지 몇 분 걸립니다. 잠시 뒤 새로고침하세요' },
-      { symptom: '성공률이 낮습니다', fix: '없는 번호·수신거부 번호가 섞인 경우가 대부분입니다. 보내기 전 "수신거부제거"를 누르세요' },
+      { symptom: '성공률이 낮습니다', fix: '없는 번호·수신거부 번호가 섞인 경우가 대부분입니다. "수신거부제거"는 기본으로 켜져 있으니, 보내기 전 체크가 풀려 있지 않은지 확인하세요' },
     ],
-    entry: { path: '/dashboard', via: '상단 메뉴 "발송결과"' },
+    entry: { path: '/dashboard', via: '상단 메뉴 "발송결과"', open: 'results=1' },
     planKey: 'basic_send',
     creditSource: null,
     related: ['send-direct', 'manage-unsubscribes', 'view-customer'],
@@ -175,7 +183,7 @@ const READY: FeatureJob[] = [
       '080 번호를 쓰면 고객이 직접 거부한 번호가 "080 연동"으로 자동으로 들어옵니다',
     ],
     blockers: [
-      { symptom: '수신거부한 고객에게 문자가 나갔습니다', fix: '보내기 직전에 "수신거부제거"를 눌러야 목록에서 빠집니다. 예약 발송도 나가는 시점에 다시 거릅니다' },
+      { symptom: '수신거부한 고객에게 문자가 나갔습니다', fix: '"수신거부제거"가 켜져 있어야 목록에서 빠집니다. 기본은 켜짐이니 체크가 풀려 있지 않은지 확인하세요. 예약 발송도 나가는 시점에 다시 거릅니다' },
       { symptom: '080 번호로 거부한 고객이 목록에 없습니다', fix: '"080 연동 테스트"로 연동 상태를 확인하세요. 연동 전 거부는 들어오지 않습니다' },
     ],
     entry: { path: '/unsubscribes', via: '상단 메뉴 "수신거부"' },
@@ -223,7 +231,7 @@ const READY: FeatureJob[] = [
       { symptom: '대상 인원이 0명입니다', fix: '조건에 쓴 항목이 고객 파일에 있어야 합니다. 지역·등급 열 없이 올렸으면 그 조건은 0명이 됩니다' },
       { symptom: '조건을 말로 적었는데 엉뚱하게 해석됩니다', fix: '"AI 해석" 결과를 보고 "필터 조건"에서 직접 고치면 됩니다' },
     ],
-    entry: { path: '/dashboard', via: '"직접 타겟 발송" 카드' },
+    entry: { path: '/dashboard', via: '"직접 타겟 발송" 카드', open: 'open=target-send' },
     planKey: 'target_send',
     creditSource: null,
     related: ['upload-customers', 'write-copy-ai', 'schedule-send'],
@@ -245,7 +253,7 @@ const READY: FeatureJob[] = [
       { symptom: '문안에 [직접 작성해주세요] 같은 빈칸이 있습니다', fix: '혜택 숫자는 AI가 정하지 않습니다. 그 자리를 직접 채우지 않으면 발송이 막힙니다' },
       { symptom: 'AI 버튼이 잠겨 있습니다', fix: 'AI 문안은 요금제에 따라 열리고 크레딧을 씁니다. 요금제 안내를 확인하세요' },
     ],
-    entry: { path: '/dashboard', via: '"직접 타겟 발송" 카드 → 발송 화면의 "AI 문구 생성"' },
+    entry: { path: '/dashboard', via: '"직접 타겟 발송" 카드 → 발송 화면의 "AI 문구 생성"', open: 'open=target-send' },
     planKey: 'ai_messaging',
     creditSource: 'generate-messages',
     related: ['send-target', 'credits-and-plan', 'check-spam'],
@@ -267,7 +275,7 @@ const READY: FeatureJob[] = [
       { symptom: '받은 메시지가 0건입니다', fix: '이 회사 계정에서 그 번호로 보낸 기록만 셉니다. 다른 계정이나 다른 시스템에서 보낸 것은 나오지 않습니다' },
       { symptom: '상세보기가 잠겨 있습니다', fix: '고객 조회 화면은 요금제에 따라 열립니다. 요금제 안내를 확인하세요' },
     ],
-    entry: { path: '/dashboard', via: '"DB 현황" 카드의 "상세보기" → 고객 행 클릭' },
+    entry: { path: '/dashboard', via: '"DB 현황" 카드의 "상세보기" → 고객 행 클릭', open: 'open=customer-db' },
     planKey: 'customer_db_view',
     creditSource: null,
     related: ['upload-customers', 'check-results', 'send-target'],
@@ -289,7 +297,7 @@ const READY: FeatureJob[] = [
       { symptom: '예약 시간을 고를 수 없습니다', fix: '회사 설정의 "발송 시작시간"과 "발송 종료시간" 밖이거나, 휴일 발송이 꺼져 있으면 그 시간은 잠깁니다' },
       { symptom: '예약을 취소했는데 문자가 나갔습니다', fix: '나가기 시작한 뒤에는 취소가 되지 않습니다. 예약 시각 전에 취소해야 합니다' },
     ],
-    entry: { path: '/dashboard', via: '"직접발송" 안 "예약전송"' },
+    entry: { path: '/dashboard', via: '"직접발송" 안 "예약전송"', open: 'open=direct-send' },
     planKey: 'basic_send',
     creditSource: null,
     related: ['send-direct', 'send-target', 'check-results'],
@@ -383,7 +391,7 @@ const READY: FeatureJob[] = [
       { symptom: '"전화번호 컬럼을 맞춰야 저장할 수 있습니다"라고 뜹니다', fix: '전화번호는 필수입니다. "기본 항목"의 전화번호 칸에 엑셀의 번호 컬럼을 직접 고르세요' },
       { symptom: 'AI가 맞춘 항목이 틀렸습니다', fix: '"컬럼 맞추기" 단계에서 그 칸을 눌러 올바른 엑셀 컬럼으로 바꾸면 됩니다. 저장 전까지 몇 번이든 고칠 수 있습니다' },
     ],
-    entry: { path: '/dashboard', via: '"고객 DB 업로드" 안 "AI로 컬럼 맞추기"' },
+    entry: { path: '/dashboard', via: '"고객 DB 업로드" 안 "AI로 컬럼 맞추기"', open: 'upload=1' },
     planKey: 'ai_mapping',
     creditSource: 'ai-column-mapper',
     related: ['upload-customers', 'view-customer'],
@@ -455,7 +463,7 @@ const READY: FeatureJob[] = [
       { symptom: '"이미 진행 중인 테스트가 있습니다"라고 뜹니다', fix: '테스트는 한 번에 하나만 돕니다. 앞 테스트가 끝난 뒤 다시 시작하세요' },
       { symptom: '버튼에 자물쇠가 있고 요금제 안내가 뜹니다', fix: '스팸 확인은 요금제에 따라 열립니다. 요금제 안내를 확인하세요' },
     ],
-    entry: { path: '/dashboard', via: '"직접발송" 안 "스팸필터테스트"' },
+    entry: { path: '/dashboard', via: '"직접발송" 안 "스팸필터테스트"', open: 'open=direct-send' },
     planKey: 'spam_filter',
     creditSource: null,
     related: ['send-direct', 'auto-spam-test', 'write-copy-ai'],
@@ -808,7 +816,7 @@ const READY: FeatureJob[] = [
       { symptom: '대시보드에 진단 카드가 없습니다', fix: '이미 진단을 끝냈거나 대상이 아닌 계정입니다. 끝낸 진단은 카드 자리가 리포트 안내로 바뀝니다' },
       { symptom: '"체험이 진행 중이에요"라고 뜹니다', fix: '진단 뒤 체험 기간입니다. 남은 날짜가 카드에 표시되고 그동안 추천 기능을 써 볼 수 있습니다' },
     ],
-    entry: { path: '/dashboard', via: '대시보드 "진단 시작" 카드' },
+    entry: { path: '/dashboard', via: '대시보드 "진단 시작" 카드', open: 'open=diagnosis' },
     planKey: null,
     creditSource: null,
     related: ['campaign-agency', 'send-direct', 'auto-marketing'],

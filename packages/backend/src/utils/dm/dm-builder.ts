@@ -225,10 +225,20 @@ export async function restoreDmVersion(dmId: string, versionId: string, companyI
   const vRes = await query(`SELECT sections, brand_kit FROM dm_versions WHERE id = $1 AND dm_id = $2`, [versionId, dmId]);
   if (vRes.rows.length === 0) return null;
   const v = vRes.rows[0];
+  // ⛔ jsonb를 JS로 꺼냈다가 **그대로 다시 넣지 마라**(★2026-08-24 접수 cmt6qug4s00v1jnotsqeaf12g · 임은지).
+  //   드라이버는 JS 배열을 PG **배열 리터럴** `{…}`로 직렬화한다. `sections`가 정확히 배열이라
+  //   jsonb 컬럼이 거절했고(`invalid input syntax for type json`) **복원이 100% 실패**했다.
+  //   같은 파일의 다른 쓰기 자리(생성·수정·버전 저장)는 전부 `JSON.stringify`를 거친다 — 이 자리만 빠져 있었다.
+  //   null 처리는 생성 경로와 같은 모양으로 맞춘다(값이 없던 버전은 없는 채로 되돌린다).
   const upd = await query(
     `UPDATE dm_pages SET sections = $1, brand_kit = $2, updated_at = NOW()
      WHERE id = $3 AND company_id = $4 RETURNING *`,
-    [v.sections, v.brand_kit, dmId, companyId],
+    [
+      v.sections ? JSON.stringify(v.sections) : null,
+      v.brand_kit ? JSON.stringify(v.brand_kit) : null,
+      dmId,
+      companyId,
+    ],
   );
   return upd.rows[0] || null;
 }

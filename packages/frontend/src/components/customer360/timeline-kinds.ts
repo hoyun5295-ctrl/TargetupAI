@@ -82,6 +82,32 @@ export function timeLabel(iso: string): string {
   return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
+/**
+ * 상세 카드에서 **시각으로 읽어야 하는** 키. 여기 없는 키는 서버가 준 값을 그대로 보여준다.
+ * ⛔ 문자열 모양을 보고 짐작하지 않는다(본문에 ISO처럼 생긴 값이 들어와도 시각이 아니다).
+ */
+export const DETAIL_TIME_KEYS = new Set(['requestedAt', 'sentAt']);
+
+/**
+ * 상세 카드의 시각 표기. 서버는 UTC ISO를 준다(`kstSqlToIso`가 MySQL KST naive를 그렇게 만든다).
+ *
+ * ★ 2026-08-24 신설 — 접수 cmt6qw4kt00vcjnotd76wbut3(남지현) "요청·발송이 한국 기준으로 안 보인다".
+ *   상세 카드가 모든 값을 `String(v)`로 찍어 `2026-08-23T23:02:32.000Z`가 그대로 나왔다.
+ *   **값은 맞았고 표기만 빠져 있었다**(그 값은 KST 08:02로, 같은 화면의 "마지막 활동"과 일치했다).
+ *
+ * 그 건의 날짜와 다른 날이면 날짜를 함께 보인다 — 예약 발송은 요청과 발송이 며칠 떨어진다.
+ * 판정은 이 파일의 `dayLabel`과 같은 기준(달력 하루)을 쓴다.
+ */
+export function detailTimeLabel(iso: string, eventIso?: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso; // 시각이 아니면 원문을 그대로 둔다(지워버리면 정보가 사라진다)
+  const time = d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  const e = eventIso ? new Date(eventIso) : null;
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  if (e && !Number.isNaN(e.getTime()) && startOf(d) === startOf(e)) return time;
+  return `${d.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })} ${time}`;
+}
+
 /** 상태 → 칩 문구(실패·대기만 칩으로 승격한다. 성공은 점만) */
 export const STATUS_PILL: Partial<Record<string, { label: string; tone: 'rose' | 'amber' | 'blue' }>> = {
   fail: { label: '실패', tone: 'rose' },
