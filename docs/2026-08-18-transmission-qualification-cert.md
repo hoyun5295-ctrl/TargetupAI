@@ -424,6 +424,11 @@ MaxMind 등 GeoIP 라이브러리를 넣으면 **새 npm 의존성**이 생긴�
 
 탐지·차단 이력은 `audit_logs` 재사용(`foreign_access_detected` · `foreign_access_blocked`) — 새 테이블을 만들지 않았다.
 
+**★0824 이력 열람 게이트(Harold 지시).** `geo/hits`는 `audit_logs`를 읽는데 **전 슈퍼관리자에게 열려 있었다** — 감사 로그 탭은 ceo 전용인데 같은 원천을 보는 이 창만 열려 있으면 그 게이트가 의미가 없다. 잠갔다.
+⛔ **감사 로그와 축을 나눴다**: 감사 로그 = `AUDIT_LOG_VIEWER_IDS`(기본 `ceo`) · 국외 접근 이력 = **`GEO_HITS_VIEWER_IDS`(기본 `ceo,suran`)**. Harold 확정 = 이 이력은 운영 담당(suran)도 본다. 하나로 합치면 한쪽을 열 때 다른 쪽이 함께 열린다. 판정 CT는 둘 다 `isSuperAdminAllowed` 재사용(`utils/audit-log.ts`).
+비허용 계정에는 목록이 비는 대신 **"허용된 계정에서만 볼 수 있습니다"**가 뜬다 — 403을 "기록 없음"으로 그리면 거짓 표시다.
+담당자가 바뀌면 코드 수정 없이 서버 `.env`에 `GEO_HITS_VIEWER_IDS=ceo,<아이디>`만 넣는다(현재 미설정 = 기본값 적용 · 0824 서버 실측).
+
 ### 시행 전 남은 것
 
 1. **국내 대역 초기 적재** — APNIC `delegated-apnic-latest`의 KR 행. 화면에서 붙여넣기로 등록.

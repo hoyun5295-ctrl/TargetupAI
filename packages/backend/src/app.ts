@@ -20,7 +20,10 @@ import companiesRoutes from './routes/companies';
 import onboardingRoutes from './routes/onboarding';
 import helpRoutes from './routes/help';
 import agencySendRoutes from './routes/agency-send';
+import salesOutreachRoutes from './routes/sales-outreach'; // ★ 2026-08-24 AI 영업 아웃리치 (슈퍼관리자 ceo 전용 · docs/2026-07-31-ai-sales-outreach-design.md §15)
+import outreachPublicRoutes from './routes/outreach-public'; // ★ 2026-08-24 아웃리치 공개 샘플 페이지(무인증 · noindex · 만료)
 import { startAgencySendWorker } from './utils/agency-send-worker';
+import { startSalesOutreachSweeper } from './utils/sales-outreach-sweeper'; // ★ 2026-08-24 아웃리치 sweeper
 // ★ D219+ Part 2 후속 (2026-05-27): 일일 인사이트 API (Performance 카드 + 메일 양쪽 활용)
 import insightRoutes from './routes/insight';
 import plansRoutes from './routes/plans';
@@ -342,6 +345,8 @@ app.use('/api/companies', companiesRoutes);
 app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/help', helpRoutes); // ★ 2026-08-22 도움말 봇 · 기능 카탈로그(docs/FEATURE-HELP-CATALOG.md)
 app.use('/api/agency-send', agencySendRoutes); // ★ 2026-08-22 대행발송 셀프 접수(docs/2026-08-22-agency-send-design.md)
+app.use('/api/sales-outreach', salesOutreachRoutes); // ★ 2026-08-24 AI 영업 아웃리치(슈퍼관리자 ceo 전용)
+app.use('/api/outreach/v', outreachPublicRoutes); // ★ 2026-08-24 아웃리치 공개 샘플 페이지(무인증)
 app.use('/api/insight', insightRoutes);
 app.use('/api/plans', plansRoutes);
 app.use('/api/customers', customersRoutes);
@@ -501,6 +506,10 @@ app.listen(PORT, () => {
   // ★ 2026-08-22 대행발송 셀프 접수 워커 (5분 cron) — 1차 검사·당일 재검사·만료·대조·복구
   //   docs/2026-08-22-agency-send-design.md §4-4. 테이블이 없으면 조용히 넘어간다(마이그레이션 전 안전).
   startAgencySendWorker();
+
+  // ★ 2026-08-24 AI 영업 아웃리치 sweeper (10분 cron) — 좀비 잡 정직 종결 + 만료 산출물 파기.
+  //   자동 재시도·발송·재생성 0(설계 §15-6). 테이블 미생성이면 각 순회가 로그만 남기고 넘어간다.
+  startSalesOutreachSweeper();
 
   // ★ D218+ (2026-05-26): 7일 KPI 누적 + ai_company_memory 자동 학습 (1시간 cron)
   startAiMemoryAccumulatorWorker();

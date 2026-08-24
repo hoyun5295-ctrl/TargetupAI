@@ -1,7 +1,7 @@
 # 2026-07-31 AI 영업 아웃리치 설계서 (슈퍼관리자 · ceo 전용)
 
-> 상태: **설계 초안 — Harold 검토 대기.** 코드·스키마 미확인 상태에서 작성한 설계이며, CT 재사용 맵·테이블 초안은 구현 착수 시 소스 grep(승인 후)·`information_schema`로 확정한다.
-> 근거 대화: 2026-07-31 Harold↔AI 논의. 기존 발판 = 0722 영업용 테스트발송 3채널(배포완료).
+> 상태: **§15가 현행 설계다(2026-08-24 v2 개정 · Harold 개발 착수 승인).** §1~§14는 0731 초안 원문 보존 — §15와 어긋나면 §15가 이긴다.
+> 근거 대화: 2026-07-31 Harold↔AI 논의 + 2026-08-24 5역할 브레인스토밍(기획·프론트·백엔드·디자이너·회의론자, 교차 토론 1R + 최종 검증 H1~H19). 기존 발판 = 0722 영업용 테스트발송 3채널(배포완료).
 
 ## 0. 한 줄 요약
 
@@ -192,3 +192,118 @@ Harold가 영업 대상 업체 리스트만 넣으면, 백그라운드 워커가
 ## 14. 검증 상태 선언
 
 - 이 문서는 설계 초안이다. §6-1 재사용 맵은 2026-07-22 메모리 기반이며 현재 코드로 미재확인. §5 테이블은 초안이며 `information_schema` 미검증. 구현 착수 승인 시: ①소스 grep 승인 요청 → ②재사용 맵 확정 → ③DDL 초안 + 검증 SQL 제공 순서로 진행한다.
+
+---
+
+## 15. v2 개정 (2026-08-24 · 현행 설계 — 브레인스토밍 수렴 + Harold 조정 3건)
+
+> 2026-08-24 Harold 지시로 재개. 5역할 브레인스토밍(1차 의견 → 교차 토론 1R → 회의론자 최종 검증 H1~H19)으로 수렴했고, 재사용 맵은 이번에 **현재 코드로 전수 재확인 완료**(§15-9). Harold 개발 착수 승인(2026-08-24).
+
+### 15-1. 범위 재선언 — "발송을 걷어낸 0731"
+
+v2 = **단건 모달 + 자사 메일 인계.** 수신자가 자사(영업 전용 계정)이므로 §9(전용 도메인·워밍업·일일 상한·수신거부 원장)·§10(법률 확인) 발동 없이 Phase 1 가동. 단, Harold가 받은 메일을 업체로 포워딩하는 순간 최종 수신자는 외부다 — "자사 수신"을 안전장치로 세지 않는다(회의론자 원칙).
+
+| 구분 | 내용 |
+|---|---|
+| **v2 (지금)** | 단건 등록 모달 · 인용 확정 게이트 · 이미지 자동 선정 · 산출물 4종(문안·이메일·DM·이미지) · 자사 메일 1통 · 이력(직전 실행 요약) · 공개 샘플 페이지 · 경량 sweeper |
+| **미룸 (착수 조건 명시)** | 리스트 일괄 등록 · 데모 문자(§10 법률 확인 후) · 전용 발신 **도메인**(조건: Harold 포워딩 개시 — 계정 분리는 v2에서 선해결) · 인앱 시안 PNG · 첨부 스위치 · `style_guides`·`sends` 테이블 · 승인 큐 3탭 화면 |
+
+### 15-2. Harold 조정 3건 (0824 확정)
+
+1. **타사 이미지 활용 허용** — 메일 본문 고지 문구("귀사 맞춤 제안을 위해 귀사의 이미지를 활용한 예시이며, 상업적 이용이 아닌 제안용으로만 사용되었음을 확약") + 보강 3종: 인물 포함 사진 제외 · 확인 URL 만료 · 미회신 건 기간 후 비공개·파기(크롤 원본·누끼 중간물·합성 산출물 전량 — H7). §7의 "타사 사진 원본 삽입 금지"는 이 확정으로 대체. **로고 픽셀 금지는 유지**(상표).
+2. **이미지 자동 선정** — 수집·대표 이미지 선정·누끼·스튜디오 합성까지 자동. 확인 보드에는 AI 선정 결과가 기본 선택으로 뜨고 Harold는 바꿀 때만 개입. 인물 판정 = vision 4값(`person|none|undetermined|unavailable` — H6). `person`·`undetermined` = 사용 제외(fail-closed), 제외 사유·장수는 화면에 표시(H5). `unavailable`은 "확인 못함" 배지만.
+3. **발신 계정 = hanjul@invitocorp.com 신설**(영업 전용) — 정산·세금계산서 계정(mobile@)과 분리. 회의론자 R6·H4 해소. 계정 생성 = Harold, ENV 등록 후 개시.
+
+### 15-3. 흐름 (모달 1창 4단계 + 잡 상태머신)
+
+```
+① 입력    업체명 · 업종 셀렉트(industry-codes 15종 · 크롤 실패 시 폴백, etc 자동 폴백 금지) · 홈페이지 URL
+           등록 POST만 동기(1초 내) → 202 {jobId} → 2초 폴링. 화면 닫아도 잡은 계속(오버레이·close 차단 없음)
+② 분석    fetchHtmlGuarded 계열만(가드 크롤 · 최대 5페이지) → Sonnet 5가 행사를 서술이 아니라
+           인용 구조체 {인용문·출처URL·크롤시각·시작일·종료일}로 반환 → 서버가 크롤 원문과 문자열 재대조(환각 차단)
+③ 읽은 것 확인(정지점 · 원가 발생 전 유일한 사람 게이트)
+           행사 후보 라디오(검증 통과분만 · 인용 원문+출처+확인 시각 표시) | 행사 없음(일반형) | 직접 붙여넣기(봇 차단 폴백)
+           이미지 후보 그리드(AI 선정 기본 선택 · 해상도 배지 사전 라벨 · 인물 제외분은 사유 표시) · 업종 대조
+④ 제작 → 검토·발송
+           문안 → 스튜디오 이미지(누끼→compose JPEG q90 · 알파 PNG 직삽 금지) → DM 발행(hlj.kr) → 이메일 조립
+           검토: iframe(sandbox="") 미리보기 = 발송본 동일 조립 함수 · 토글(600/375 상시, 이미지차단·다크·VML 더보기)
+           발송: 버튼 1개 [자사 메일로 보내기](수신처 상수 · 입력칸 없음) + 확인 모달 1회
+```
+
+- 잡 stage(구현 확정): `queued → crawling → analyzing → awaiting_confirm(정지·사람 게이트) → producing_copy → producing_image → producing_dm → producing_email → ready → sent / failed`. 후보는 AI 구조화·서버 재대조를 거친 뒤에야 존재하므로 정지점은 analyzing 뒤다. 단계 결과는 3값 `ok|no_event|unavailable`(stage_results jsonb — `unavailable`을 `no_event`로 접지 않는다). vision 판정값은 별도 축 저장.
+- 전이 전부 CAS(`WHERE id AND stage AND lock_at`), 스탬프는 성공 분기에서만, 긴 단계 앞 `lock_at` heartbeat 갱신(H9). 실패는 그 단계 정지 + 사유 + 그 단계만 재시도. 자동 완화 0.
+
+### 15-4. 화면 (Z1 판정: 3:1 라이트)
+
+- 진입 = AdminDashboard ceo 게이트 메뉴 항목(access API 전례 동일) → **모달 1창 4단계 스테퍼**. 신규 페이지 0.
+- 톤 = **AdminDashboard 현행 리터럴(라이트·블루 강조)**. CUI 토큰·인디고·바이올렛 미사용(부모·0824 도움말 탭 실측 모두 CUI 0건 — "부모가 옛 톤이면 자식도 옛 톤"). §4의 "다크 의무" 문구는 폐기(전용 페이지 전제가 사라짐).
+- **산출물 미리보기 구역만 `bg-slate-950` 다크 액자**로 파낸다(흰 이메일 카드가 라이트 지면에서 경계 소실 — 디자이너 물리 지적의 채택된 해법).
+- 껍데기: portal + ESC 캡처 stopPropagation + `transform`·`backdrop-filter` 0 + 백드롭 클릭 닫힘 0 + 중첩 확인 모달 z-[2000].
+- 내부 메타(근거 발췌·검증 탈락·원가·딥링크) = 검토 화면 우측 근거 패널이 **단독 소유**. 혜택 표시 2줄 분리: 기계가 걷어냄 = emerald / 직접 채울 자리 = amber + 점프 앵커.
+- 실패·발송 미확인 건수 = 메뉴 뱃지(카운트 전용 조회 · 못 세면 null로 직전 값 유지 — H3).
+- 모달 상단 직전 실행 1건 요약 줄(같은 업체 재실행 시 이전 결과·전달 이력 경고 — 도메인 UNIQUE는 두지 않는다).
+
+### 15-5. 산출물 메일 · 공개 샘플 페이지
+
+- **메일 1통 = 전달용 완성본**(포워딩 그대로 가능). 내부 정보·내부 링크 0. 제목 = 업체용 제안 제목 한 벌. from 표시명 = 아웃리치 전용 값.
+- 조립 함수에 내부 URL(딥링크)을 인자로 넘기지 않는다 + 조립 결과에서 내부 경로·토큰 패턴 검출 시 throw(계약 테스트 고정 — H2). 미리보기 = 발송본 동일 함수라 미리보기에서도 같은 판정.
+- 본문 = 기존 `email-section-renderer` 12블록 레시피(hero lg·쇼케이스·cta bar·다크 밴드·footer) + design 4값(bold·airy·rule·브랜드색) + preheader 90자 명시. **새 CSS 0줄.** 버튼은 `renderButton`만(라벨 8자 서버 강제 — VML 230px). AI 문안 예시는 본문 텍스트로 직접. alt + 텍스트 링크 병행(이미지 차단 대비). 고지 문구 = footer legal_text 고정 블록. `product_carousel(focus)` 쇼케이스는 착수 조건 = 렌더 1건 실측(가격 빈 span 확인 — 실패 시 text_card 3연 대체).
+- **공개 샘플 페이지(Harold 0824: "외부 공개 가능한 정상 URL")**: DM = hlj.kr 실링크 그대로. 이메일 샘플 = hanjul.ai 짧은 코드형 공개 렌더 페이지 신설. 산출물 렌더만 — 원가·근거·내부 식별자·개발 용어 0(응답 payload에서 제외, SELECT 컬럼 계약 테스트 — H1). noindex + 열람 로그(시각·IP = 영업 신호). 수명 = 메일 발송 성공 시각 기준 상수 1곳 소유, 전달함 표시는 연장 트리거(H15). 수신거부 문구 자리 = 본문 조립에 빈 슬롯로 실재, 슬롯 공백 시 발송 비활성(§10 결론이 오면 값 하나로 개폐 — H19).
+
+### 15-6. 백엔드 구조
+
+- 게이팅: **fail-closed 신설**(`SALES_OUTREACH_ALLOWED_USERS` 미설정 = 전부 차단 · super_admin 우회 분기 없음 · 판정은 효과를 만드는 함수 안 · 조회·재생성·미리보기·공개 페이지까지 전 EP 전수). `isAiOperatorAllowed`(fail-open) 재사용 금지 — audit-log fail-closed 코어 계열을 본뜬다.
+- 회사 컨텍스트: `OUTREACH_COMPANY_ID`/`OUTREACH_USER_ID` ENV 고정(슈퍼관리자 JWT에 companyId 없음). 미설정 = "준비 안 됨" 정직 거절.
+- 발신: **시스템 SMTP CT 신설**(`utils/` · hanjul@ 계정 ENV · 새 자격증명 축 1개). 반환 = `sent|rejected|unknown` 3값 + `isRecipientRejected` 판정 내장, 호출부가 판정을 생략할 수 없는 시그니처(H16). `unknown`은 성공으로 세지 않는다. 거절 사유는 잡 행 기록. 발송 종결 = Harold 수신 확인 표시(자동 종결 금지). 기존 인라인 transporter 3곳(billing·companies·invoice-confirm) 흡수 = 별건 등재.
+- 발송 함수 = 승인 컨텍스트 필수 인자(워커·스케줄러 호출 물리 불가 — §9 규율 유지). 발송 UPDATE = `WHERE stage='ready' AND sent_at IS NULL` 1행 조건.
+- DM 발행 = CT 직접 호출(`publishDm` — 라우트 미경유 = 미차감, `dm.ts:765` 주석 확정). **내부 발행 CT가 `companyId === OUTREACH_COMPANY_ID` 자기 확인**(아니면 throw) + `dm_pages`를 세는 소비처 전수에 내부분 제외 조건을 같은 커밋에서 배선 + 잔존 0 계약 테스트(H14).
+- 이미지: fetch도 HTML과 동일 가드(홉별 재해석·바이트 상한·MIME 화이트리스트 — H8). 크롤 원본은 근거 저장소에만. 누끼 = `removeBackground()` 유틸 직접 호출 + 동시 1건(rembg 단일 워커 — 고객 스튜디오 경합 방지, 대기 문구 표시). 합성 함수 인자 `selectedBy`·`confirmedAt` 필수. 해상도 게이트(원본폭 < 표시폭 2배 = 히어로 차단·썸네일 강등).
+- 혜택 수치: `stripUnauthorizedBenefits`를 저장 직전 조립 CT에서 **명시 호출**. `originalBody` = ②재대조 통과 인용 스팬만(페이지 전문 금지). 조건 3: 부정·종료·조건 표현 = 이벤트째 폐기(애매하면 폐기) / 종료일 실재+미래만 혜택 면허(날짜 없으면 숫자 placeholder) / 확인 시각을 산출물·공개 페이지에 표기. placeholder 잔존 = 발송 비활성(자동 일반형 강등 금지 — 발송본이 미리보기와 달라지는 지점을 만들지 않는다).
+- sweeper: 경량 인터벌 1개(주기 < 최단 임계 · 주기·임계 상수 1곳 파생 — H10). 하는 일 둘뿐: ①heartbeat 기준 좀비 잡 failed 정직 종결(사유 기록·이중 try·재시도는 화면 버튼만 — H13) ②만료 파기(원본·중간물·산출물, 멱등 삭제·실패는 잡 행에 남겨 재수거 — H7). 자동 재시도·발송·재생성 0. 다중 프로세스 대비 선점 UPDATE + 부팅 등재 계약 테스트(H11).
+- 신규 라우트 catch: `err.message` 원문 미노출(코드+안전 문구) — 파일 지정 계약 테스트로 고정(H18). DB 미마이그레이션 = `DB_MIGRATION_PENDING` 503 분기.
+- 스타일 가이드: `utils/` 구조화 상수 **1파일 export**(`getActiveStyleGuide()` 단일 소비) + 계약 테스트 + 전환 조건 주석(샘플 2세트+·화면 편집 요구·롤백 필요 → 테이블 승격). 샘플 미수령 동안 v0 + "가이드 미학습" 표시.
+- 모델명 불변식 테스트 신설: 스캔 대상 = 외부로 나가는 문자열(프론트 src·응답·프롬프트·메일 템플릿·공개 페이지)로 한정, 모델 상수 소유 파일 1곳만 화이트리스트(H17).
+
+### 15-7. 데이터 모델 (§5 대체 — 4→2테이블)
+
+| 테이블 | 컬럼(구현 확정 2026-08-24) |
+|---|---|
+| `sales_outreach_jobs` | id, company_name, industry_category, homepage_url, stage, **lock_token uuid(소유권 CAS — 타임스탬프 fencing 금지)**, lock_at(heartbeat·좀비 판정 전용), stage_results jsonb, brand_profile jsonb(근거 발췌·이미지 후보·선택 이미지), event_quote jsonb(인용 구조체+검증+선택), fail_stage, fail_reason, **preview_code(공개 샘플 코드 · UNIQUE)**, mail_sent_at, mail_result('sent'\|'rejected'\|'unknown'), mail_confirmed_at(수신 확인), forwarded_at(전달함 표시), purged_at, created_by, created_at |
+| `sales_outreach_assets` | id, job_id(FK CASCADE), kind('copy'\|'email_html'\|'dm'\|'studio_image'), payload jsonb, regen_count, created_at |
+
+- DDL 실행 전 `information_schema` 검증 + 코드 배포 후 마이그레이션 + 503 분기 — §5 규율 그대로. 도메인 UNIQUE 없음(재실행은 화면 경고).
+
+### 15-8. 착수 전 실측 (검증은 하나씩 순차)
+
+1. `sales_outreach_jobs`·`sales_outreach_assets` 테이블 부재 확인(information_schema.tables)
+2. 운영 `.env` SMTP 실값(현행 축) + **hanjul@invitocorp.com 계정 생성 후 신규 ENV**(Harold 몫)
+3. hiworks 릴레이로 자사 도메인 수신함에 보내는 발송 실측 1건
+4. rembg 상주 서비스 기동(`isStudioReady()` 판정 그대로)
+5. `OUTREACH_COMPANY_ID`용 내부 전용 회사 행 확정
+6. 이메일 레시피 렌더 1건(브로마이드 시안 실물 판정 — 디자이너 S1 미검증 해소 + carousel 가격 span 확인)
+
+### 15-9. 재사용 맵 재확인 결과 (0824 코드 실측 — §6-1 대체)
+
+전부 실재 확인: 가드 크롤(`dm-brand-extractor.ts` fetchHtmlGuarded 계열 — 단 `extractBrandFromUrl`은 무가드 비대칭 = **BUGS 별건 등재, 이번 축에서 안 고침**) · Sonnet 5 기본 경로(`services/ai.ts` callAIWithFallback, images 지원) · 누끼(`image_studio_service.py` rembg + `removeBackground()` 무료) · DM 생성·발행·hlj.kr(`planner-production.ts` produceDm) · 이메일 렌더러(`email-section-renderer.ts` 12블록·VML·다크모드) · 자사 SMTP 전례 3곳 · export-html 절대화 · 업종 SSOT(`industry-codes.ts` 15종) · 혜택 차단 CT(`copy-benefit-detector.ts` — 호출부 2곳뿐이라 명시 배선 필요) · 공개 토큰 전례(journey-pause·email-tracking) · noindex 전례 3곳.
+
+### 15-9-1. Codex 적대 검증 이력 (2026-08-24 · 총 4회 실행 = 판정 3라운드 + 도구 사고 1회 재실행)
+
+- 1R(needs-attention · high 3): 이미지 다운로드 본문 무제한 적재 / 사설 IP 필터 IPv4-mapped 누락 / 내부 회사 공허 게이트 → **전량 수용·정정.** [범위 밖] 2건 = BUGS B-0824-2·B-0824-3 등재.
+- 2R(needs-attention · high 1 + 미검토 2): DNS 재해석 미고정 → **수용·정정**(검증 IP 연결 고정 · SNI 유지). 핵심 2파일은 요청문 결함(명령 전면 금지)으로 미검토 — RUNBOOK §5 등재.
+- 3R(Harold 승인 마무리 라운드 · 재실행 1회 포함): 두 파일 전량 정독(742줄·645줄). high 2 → **수용·정정**: ①SMTP 발송을 DB CAS 선점(`mail_result='sending'`) 후에만 실행 + 발송 후 기록 0행이면 성공으로 답하지 않음 + 발송 중 재조립 차단 + 끊긴 sending은 sweeper가 unknown 복구 ②산출물 INSERT를 소유권 검증과 한 문장 결속(`INSERT … SELECT WHERE EXISTS(stage·lock_token)`) — 소유권 잃은 워커의 자산 잔존 차단. DM 발행 외부 효과의 중복(내부 draft 1개 잔존)은 위험 수용(주석 기록).
+- **잔여 부채(medium · 등재만 — 규칙상 종료 조건은 critical·high 0)**:
+  1. `fetchImageGuarded`의 20초 벽시계가 DNS 조회를 포함하지 않는다(resolver 지연 시 총 시간 초과 가능) — 진입 시점 deadline으로 통합 필요.
+  2. 모달 폴링이 직렬화되지 않아 늦게 도착한 옛 응답이 최신 상태·편집 중 문안 초안을 덮을 수 있다 — request ID 폐기 + `copyEditingRef` 시점 확인 필요.
+
+### 15-10. §13 갱신 (Harold 확정 현황)
+
+| # | 항목 | 상태 |
+|---|---|---|
+| 1 | 샘플 세트 | **접수(0824)**: 직원 제작 · 전용 계정 1개 · 의류/화장품/커머스 × 3세트 권고 · 각 세트에 가정 업체명+홈페이지 필수. 병행 트랙(v0로 개발 선행) |
+| 2 | 발신 | **확정: hanjul@invitocorp.com 신설**(도메인 분리는 포워딩 개시 조건부 미룸) |
+| 3 | 문자 발신번호·080 | 미룸(§10 이후) |
+| 4 | §10 법률 확인 | 미룸 — 단 수신거부 슬롯은 v2 조립에 실재(15-5) |
+| 5 | 일일 상한 | v2 해당 없음(자사 1통) |
+| 6 | 메뉴명 | 가칭 "AI 영업" 유지 |
+| 7 | ENV 키 | `SALES_OUTREACH_ALLOWED_USERS` + `OUTREACH_COMPANY_ID`/`OUTREACH_USER_ID` + 신규 SMTP ENV |
+| 8 | 수신거부 문구 내용 | **Harold 결정 대기**(슬롯 공백 시 발송 비활성으로 안전) |

@@ -429,8 +429,9 @@ function requestPinned(
 }
 
 /** 리다이렉트 홉(최대 3)마다 호스트 가드를 재검증하는 HTML fetch — 공개 URL이 내부 주소로 redirect하는 우회 차단 (Codex 지적).
- *  ★ 2026-07-13 (Codex 2R) — 홉마다 DNS 해석 → 공인 검증 → 그 IP로 연결 고정(requestPinned) + 바이트 상한. */
-async function fetchHtmlGuarded(url: string): Promise<{ html: string; baseUrl: string } | null> {
+ *  ★ 2026-07-13 (Codex 2R) — 홉마다 DNS 해석 → 공인 검증 → 그 IP로 연결 고정(requestPinned) + 바이트 상한.
+ *  ★ 2026-08-24 export — 영업 아웃리치 크롤이 재사용(가드 없는 extractBrandFromUrl 경로는 아웃리치에서 사용 금지). */
+export async function fetchHtmlGuarded(url: string): Promise<{ html: string; baseUrl: string } | null> {
   let current = url;
   for (let hop = 0; hop < 3; hop++) {
     if (!isFetchableProductUrl(current)) return null;

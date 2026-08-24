@@ -16,6 +16,7 @@ import AgentChargePanel from '../components/AgentChargePanel'; // ★ 2026-07-24
 import AgentDeployWizard from '../components/admin/AgentDeployWizard'; // 싱크에이전트 OS별 배포 위저드
 import DiagnosisAdminPanel from '../components/admin/DiagnosisAdminPanel'; // ★ 2026-08-16 신규마케팅진단(ceo 전용)
 import HelpQuestionsTab from '../components/admin/HelpQuestionsTab'; // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
+import SalesOutreachModal from '../components/admin/SalesOutreachModal'; // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달)
 import { AUDIT_ACTION_COLOR, AUDIT_ACTION_LABEL, formatAuditDetail } from '../constants/audit-action-labels'; // ★ 2026-08-24 감사 액션 한글화 CT
 import { COMPANY_EMAIL } from '../constants/company';
 import { formatAgentIdLabel } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스(발급명 병기)
@@ -89,6 +90,9 @@ export default function AdminDashboard() {
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
   const [helpQAccessAllowed, setHelpQAccessAllowed] = useState(false); // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
+  // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달) — 서버 /access가 유일 소스, 미허용 = 메뉴 자체 미노출
+  const [outreachAllowed, setOutreachAllowed] = useState(false);
+  const [outreachOpen, setOutreachOpen] = useState(false);
   // ★ 2026-06-13: AI 학습 데이터 열람 권한 (AI_TRAINING_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 진입 버튼 노출
   const [aiTrainingAllowed, setAiTrainingAllowed] = useState(false);
   // ★ 2026-07-17: 발송 라인 설정 권한 (LINE_GROUP_ADMIN_USERS — 기본 ceo,admin) — 허용 계정에만 메뉴/탭 노출.
@@ -969,6 +973,13 @@ useEffect(() => {
       const d = await r.json();
       setAiTrainingAllowed(d.allowed === true);
     } catch { setAiTrainingAllowed(false); }
+    try {
+      const token = localStorage.getItem('token');
+      // ★ 2026-08-24: AI 영업 아웃리치 접근(mount 1회) — 허용 계정(기본 ceo)에만 메뉴 노출
+      const r = await fetch('/api/sales-outreach/access', { headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json();
+      setOutreachAllowed(d.allowed === true);
+    } catch { setOutreachAllowed(false); }
   })();
 }, []);
 useEffect(() => { if (activeTab === 'templates') { loadAdminTemplates(); loadAdminRcsTemplates(); } }, [activeTab, templateFilter]);
@@ -4419,6 +4430,8 @@ const handleApproveRequest = async (id: string) => {
                   { key: 'users', label: '사용자 관리' },
                   // ★ 2026-08-16: 신규마케팅진단 = 허용 계정(기본 ceo)에만 노출 · 뱃지 = 신규 리드 수
                   ...(diagnosisAllowed ? [{ key: 'marketingDiagnosis', label: '신규마케팅진단', badge: diagnosisBadge }] : []),
+                  // ★ 2026-08-24: AI 영업 = 허용 계정(기본 ceo)에만 노출 · 별도 모달(탭 아님 — 닫으면 고객사 탭 복귀)
+                  ...(outreachAllowed ? [{ key: 'salesOutreach', label: 'AI 영업', onClick: () => setOutreachOpen(true) }] : []),
                 ],
               },
               {
@@ -4531,6 +4544,10 @@ const handleApproveRequest = async (id: string) => {
           </div>
         </div>
         <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+        {/* ★ 2026-08-24 AI 영업 아웃리치 모달 — 메뉴 클릭이 activeTab을 'salesOutreach'로 바꾸므로 닫을 때 고객사 탭으로 복귀 */}
+        {outreachOpen && (
+          <SalesOutreachModal onClose={() => { setOutreachOpen(false); if ((activeTab as string) === 'salesOutreach') setActiveTab('companies'); }} />
+        )}
         {/* 고객사 관리 탭 */}
         {activeTab === 'companies' && (
           <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">

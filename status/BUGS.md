@@ -64,6 +64,16 @@
 > **⚠ 별건(안 건드렸다)**: `routes/dm.ts`는 **49곳**이 `error: err.message`로 원문을 노출한다(라우트 73개 중). 이번 접수의 호출부 1곳만 고쳤다. 파일 전체 정정은 별도 과제.
 > **검증**: backend tsc 0 · frontend tsc 0 · vitest 196파일 2,991건(`dm-flow-invariants.test.ts`에 회귀 2건 신설 — 배열이 문자열로 나가는가 · null은 null로 남는가). **잔여 = 운영 실측**(버전 2개 만들고 1차로 복원 → 캔버스가 되돌아가는가).
 
+### 🟡 B-0824-2 `extractBrandFromUrl`이 SSRF 가드를 안 탄다 — 같은 파일의 가드 fetch와 비대칭 (🔵 Open · 기존 부채 · 기록만) — 2026-08-24 (아웃리치 브레인스토밍 백엔드 실측)
+
+- **사실**: [dm-brand-extractor.ts:180](../packages/backend/src/utils/dm/dm-brand-extractor.ts) `extractBrandFromUrl`은 글로벌 `fetch` + `redirect: 'follow'`로 사용자 입력 URL을 받는다. 같은 파일 `fetchHtmlGuarded`(433행)는 홉마다 DNS 재검증 + IP 핀 고정을 하는데 이 함수만 그 가드를 안 탄다.
+- **범위**: 소비처 = DM 브랜드 추출 경로. **아웃리치 축은 이 함수를 쓰지 않는다**(가드 경로만 사용 + 계약 주석). 정정은 별도 과제 — 가드 경로로 교체 시 소비처 회귀 확인 필요.
+
+### 🟡 B-0824-3 이미지 스튜디오 `/ingest-product`의 사설 IP 필터가 IPv4-mapped IPv6 일부를 놓친다 (🔵 Open · 기존 부채 · 기록만) — 2026-08-24 (아웃리치 Codex 적대 1R이 미러 코드에서 발견 · 원본도 동일)
+
+- **사실**: [routes/image-studio.ts:296](../packages/backend/src/routes/image-studio.ts) `isPrivateIp`가 `::ffff:127.` · `::ffff:10.` · `::ffff:192.168.` prefix만 나열해 `::ffff:169.254.*` · `::ffff:172.16~31.*` · `::ffff:100.64~127.*`가 통과한다. AAAA 레코드로 이런 주소를 돌려주는 DNS면 사설망 차단을 우회한다.
+- **처방(미착수)**: 아웃리치 축과 같은 정정 — IPv4-mapped를 IPv4로 환원해 같은 판정기를 태운다([sales-outreach-produce.ts](../packages/backend/src/utils/sales-outreach-produce.ts) `isPrivateIp` 정정판이 참조 구현). 고객 축 라우트라 별도 과제로 분리.
+
 ### 🟠 B-0823-1 대행발송 워커가 **의존 장애를 판정으로 읽는다** — 검사가 못 돌아도 통과, 다듬기 AI가 죽으면 문안 반려 (🔵 Open · 기존 부채) — 2026-08-23 (당일 재검사 폐지 Codex 적대 검토가 범위 인접에서 발견)
 > **한 줄**: 뿌리는 하나다 — **"시스템이 판정하지 못했다"를 "시스템이 반대로 판정했다"로 읽는다.** 같은 형태가 워커 안에서 네 자리에 있다. 전부 0823(2) 당일 재검사 폐지와 **인과 없음**(그 전부터 있던 코드).
 > **(가) 통과 판정이 느슨하다** — [agency-send-worker.ts](../packages/backend/src/utils/agency-send-worker.ts) `runSpamRound`가 `spamResult !== 'blocked'`면 통과로 읽는다. 상류 계약은 `pass | blocked | failed | timeout`([spam-test-queue.ts:89](../packages/backend/src/utils/spam-test-queue.ts:89))이고 큐 적재 실패는 `failed`, 대기 만료는 `timeout`, 응답이 비면 `undefined`다. **워커 A·B 양쪽**에 있어, 오늘 운영에서도 T-2h 재검사가 타임아웃이면 통과로 읽고 `final_test_at`을 찍은 뒤 발송한다(불변 2 위반 경로).

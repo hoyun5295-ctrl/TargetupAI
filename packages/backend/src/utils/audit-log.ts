@@ -126,6 +126,17 @@ export function isLineGroupAdmin(superAdminId?: string | null): Promise<boolean>
   return isSuperAdminAllowed(superAdminId, 'LINE_GROUP_ADMIN_USERS', 'ceo,admin', 'line-group');
 }
 
+/**
+ * ★ 2026-08-24 AI 영업 아웃리치 실행 권한 — SALES_OUTREACH_ALLOWED_USERS(기본 'ceo').
+ * 영업 산출물 생성·자사 메일 발송을 만드는 축이라 소유자(ceo) 전용. 다른 축과 별도 env
+ * (한 계정을 열 때 다른 축까지 함께 열리면 안 된다). fail-closed 코어 재사용 —
+ * super_admin이라는 이유만으로 통과하는 분기를 만들지 않는다(plan-guard의 fail-open 패턴 금지).
+ * 설계 = docs/2026-07-31-ai-sales-outreach-design.md §15-6.
+ */
+export function isSalesOutreachOperator(superAdminId?: string | null): Promise<boolean> {
+  return isSuperAdminAllowed(superAdminId, 'SALES_OUTREACH_ALLOWED_USERS', 'ceo', 'sales-outreach');
+}
+
 /** 변경 전/후 객체에서 달라진 필드만 추출 — details 용량 최소화 + 변경 없는 수정은 기록 생략용 */
 export function diffFields(
   before: Record<string, any>,
