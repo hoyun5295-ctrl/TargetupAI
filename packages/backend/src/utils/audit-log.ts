@@ -70,6 +70,15 @@ export function isAuditLogViewer(superAdminId?: string | null): Promise<boolean>
 }
 
 /**
+ * 국외 접근 이력(/geo/hits) 열람 권한 — GEO_HITS_VIEWER_IDS(기본 'ceo,suran')에 포함된 super_admins.login_id만 허용.
+ * Harold 명시 2026-08-24: 감사 로그는 ceo만, **국외 접근 이력은 suran도** 본다(방통위 대응 운영 담당).
+ * 그래서 감사 로그 게이트(isAuditLogViewer)를 재사용하지 않고 축을 나눈다 — 합치면 한쪽을 열 때 다른 쪽도 열린다.
+ */
+export function isGeoHitsViewer(superAdminId?: string | null): Promise<boolean> {
+  return isSuperAdminAllowed(superAdminId, 'GEO_HITS_VIEWER_IDS', 'ceo,suran', 'geo-hits');
+}
+
+/**
  * 도움말 질문 이력 열람 권한 — HELP_QUESTION_VIEWER_IDS(기본 'ceo')에 포함된 super_admins.login_id만 허용.
  * Harold 명시 2026-08-24: 어떤 업체가 어떤 질문을 했는지는 ceo 계정에서만 본다(감사 로그와 같은 규약).
  */

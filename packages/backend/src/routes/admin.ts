@@ -52,7 +52,7 @@ import { grantFreeTrial } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
-import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, diffFields } from '../utils/audit-log';
+import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, diffFields } from '../utils/audit-log';
 import { helpQuestionKind, HELP_REQUEST_PHRASES } from '../utils/help-answer';
 // ★ 2026-07-01: 예측 일괄 분석·차감 수동 트리거 (9시 대기 없이 검증·복구·시연)
 import { runPredictiveBatchNow } from '../utils/predictive-worker';
@@ -1123,6 +1123,11 @@ router.delete('/geo/exceptions/:id', authenticate, requireSuperAdmin, async (req
 /** 국외 접근 이력 — 별도 테이블을 만들지 않고 `audit_logs`를 읽는다 */
 router.get('/geo/hits', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
+    // ★ 2026-08-24 이 이력의 원천이 audit_logs라 열람을 잠근다. 단 감사 로그 게이트와 축이 다르다 —
+    //   Harold: 감사 로그 = ceo만 · 국외 접근 이력 = suran도(운영 담당). GEO_HITS_VIEWER_IDS 기본 'ceo,suran'.
+    if (!(await isGeoHitsViewer(req.user?.userId))) {
+      return res.status(403).json({ error: '접근 이력 열람 권한이 없습니다.' });
+    }
     const limit = Math.min(Number(req.query.limit) || 200, 500);
     const result = await query(
       `SELECT l.id, l.action, l.details, host(l.ip_address) AS ip_address, l.created_at,

@@ -16,6 +16,7 @@ import AgentChargePanel from '../components/AgentChargePanel'; // ★ 2026-07-24
 import AgentDeployWizard from '../components/admin/AgentDeployWizard'; // 싱크에이전트 OS별 배포 위저드
 import DiagnosisAdminPanel from '../components/admin/DiagnosisAdminPanel'; // ★ 2026-08-16 신규마케팅진단(ceo 전용)
 import HelpQuestionsTab from '../components/admin/HelpQuestionsTab'; // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
+import { AUDIT_ACTION_COLOR, AUDIT_ACTION_LABEL, formatAuditDetail } from '../constants/audit-action-labels'; // ★ 2026-08-24 감사 액션 한글화 CT
 import { COMPANY_EMAIL } from '../constants/company';
 import { formatAgentIdLabel } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스(발급명 병기)
 import { formatPlanOptionLabel } from '../utils/planLabel'; // ★ 2026-07-28 요금제 라벨 = 월정액(고객 수 축 폐기)
@@ -209,6 +210,7 @@ export default function AdminDashboard() {
   const [geoStatus, setGeoStatus] = useState<any>(null);
   const [geoExceptions, setGeoExceptions] = useState<any[]>([]);
   const [geoHits, setGeoHits] = useState<any[]>([]);
+  const [geoHitsDenied, setGeoHitsDenied] = useState(false); // 403 = 권한 없음. "기록 없음"으로 그리면 거짓이다
   const [geoCidrInput, setGeoCidrInput] = useState('');
   const [geoForm, setGeoForm] = useState({ scope: 'user', target: '', cidr: '', reason: '' });
   const [geoBusy, setGeoBusy] = useState(false);
@@ -223,7 +225,8 @@ export default function AdminDashboard() {
     ]);
     if (statusRes.ok) setGeoStatus(await statusRes.json());
     if (exRes.ok) setGeoExceptions((await exRes.json()).exceptions || []);
-    if (hitsRes.ok) setGeoHits((await hitsRes.json()).hits || []);
+    if (hitsRes.ok) { setGeoHits((await hitsRes.json()).hits || []); setGeoHitsDenied(false); }
+    else setGeoHitsDenied(hitsRes.status === 403);
   };
 
   const geoPost = async (url: string, body: any, method: string = 'POST') => {
@@ -5635,7 +5638,9 @@ const handleApproveRequest = async (id: string) => {
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {geoHits.length === 0 && (
-                      <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400 text-xs">국외 접근 기록이 없습니다.</td></tr>
+                      <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400 text-xs">
+                        {geoHitsDenied ? '접근 이력은 허용된 계정에서만 볼 수 있습니다.' : '국외 접근 기록이 없습니다.'}
+                      </td></tr>
                     )}
                     {geoHits.map((h) => (
                       <tr key={h.id}>
@@ -12719,7 +12724,7 @@ const handleApproveRequest = async (id: string) => {
             <select value={auditActionFilter} onChange={(e) => setAuditActionFilter(e.target.value)}
               className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200">
               <option value="all">전체</option>
-              {auditActions.map(a => { const m={login_success:"로그인 성공",login_fail:"로그인 실패",login_blocked:"로그인 차단",customer_delete:"고객 삭제",customer_bulk_delete:"고객 선택삭제",customer_delete_all:"고객 전체삭제",customer_delete_by_user:"사용자별 고객 삭제",user_update:"사용자 수정",line_group_create:"라인그룹 생성",line_group_update:"라인그룹 수정",line_group_delete:"라인그룹 삭제",company_line_group_change:"회사 라인그룹 변경"} as any; return <option key={a} value={a}>{m[a]||a}</option>; })}
+              {auditActions.map(a => <option key={a} value={a}>{AUDIT_ACTION_LABEL[a] || a}</option>)}
             </select>
             <span className="text-sm text-gray-500 font-medium">고객사</span>
             <select value={auditCompanyFilter} onChange={(e) => setAuditCompanyFilter(e.target.value)}
@@ -12758,41 +12763,8 @@ const handleApproveRequest = async (id: string) => {
                   <tr><td colSpan={6} className="px-6 py-12 text-center text-gray-500">조회된 로그가 없습니다.</td></tr>
                 ) : (
                   auditLogs.map((log) => {
-                    const actionColors: Record<string, string> = {
-                      login_success: 'bg-green-100 text-green-700',
-                      login_fail: 'bg-red-100 text-red-700',
-                      login_blocked: 'bg-red-200 text-red-800',
-                      customer_delete: 'bg-orange-100 text-orange-700',
-                      customer_bulk_delete: 'bg-orange-100 text-orange-700',
-                      customer_delete_all: 'bg-red-100 text-red-700',
-                    };
-                    const actionLabels: Record<string, string> = {
-                      login_success: '로그인 성공',
-                      login_fail: '로그인 실패',
-                      login_blocked: '로그인 차단',
-                      customer_delete: '고객 삭제',
-                      customer_bulk_delete: '고객 선택삭제',
-                      customer_delete_all: '고객 전체삭제',
-                    };
-                    const details = log.details || {};
-                    const userTypes: Record<string,string> = { admin:'관리자', user:'사용자', super_admin:'슈퍼관리자', company_admin:'고객사관리자' };
-                    const reasons: Record<string,string> = { invalid_password:'비밀번호 불일치', user_not_found:'계정 없음', inactive:'비활성 계정', locked:'잠금 계정', dormant:'휴면 계정', not_allowed:'접근 차단' };
-                    let detailText = '';
-                    if (log.action === 'login_success') {
-                      detailText = (details.loginId || '') + ' (' + (userTypes[details.userType as string] || details.userType || '') + ') · ' + (details.companyName || '');
-                    } else if (log.action === 'login_fail') {
-                      detailText = (details.loginId || '') + ' · ' + (reasons[details.reason as string] || details.reason || '');
-                    } else if (log.action === 'login_blocked') {
-                      detailText = (details.loginId || '') + ' · ' + (reasons[details.reason as string] || details.reason || '');
-                    } else if (log.action === 'customer_delete_all') {
-                      detailText = (details.company_name || '') + ' · ' + (details.deleted_customers || 0).toLocaleString() + '명 전체삭제';
-                    } else if (log.action === 'customer_bulk_delete') {
-                      detailText = (details.company_name || '') + ' · ' + (details.deleted_count || details.count || 0).toLocaleString() + '명 선택삭제';
-                    } else if (log.action === 'customer_delete') {
-                      detailText = (details.company_name || '') + ' · ' + (details.phone || '') + ' 삭제';
-                    } else {
-                      detailText = JSON.stringify(details).slice(0, 60);
-                    }
+                    // ★ 2026-08-24 라벨·상세 조립 = constants/audit-action-labels.ts CT 소유(인라인 맵 금지)
+                    const detailText = formatAuditDetail(log.action, log.details);
 
                     return (
                       <tr key={log.id} className="hover:bg-gray-50">
@@ -12807,8 +12779,8 @@ const handleApproveRequest = async (id: string) => {
                           {log.company_name || '-'}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span className={`px-2 py-1 rounded-full text-[11px] font-medium ${actionColors[log.action] || 'bg-gray-100 text-gray-600'}`}>
-                            {actionLabels[log.action] || log.action}
+                          <span className={`px-2 py-1 rounded-full text-[11px] font-medium ${AUDIT_ACTION_COLOR[log.action] || 'bg-gray-100 text-gray-600'}`}>
+                            {AUDIT_ACTION_LABEL[log.action] || log.action}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-left text-xs text-gray-500 max-w-[300px] truncate" title={detailText}>
