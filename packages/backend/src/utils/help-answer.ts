@@ -32,6 +32,24 @@ import { generateCacheKey, getCachedResponse, setCachedResponse } from './ai-cac
 import { recordAiCall } from './ai-rate-limit';
 
 export const HELP_SOURCE = 'help-ask';
+
+/**
+ * 기능 요청 버튼이 `/api/help/questions`로 보내는 **고정 문구** (★2026-08-24 · Harold "기능 요청 구분 표시").
+ *
+ * 사람이 친 질문이 아니라 버튼이 남기는 기록이라, 질문 이력에서 "못 답함"으로 세면 미답 비율이 오염된다.
+ * 판정은 이 레지스트리 하나가 소유한다 — 컬럼을 새로 만들지 않는 이유는 이미 쌓인 행(배포 전 4건)도
+ * 같은 기준으로 소급 분류되기 때문이다.
+ * ⛔ 새 요청 버튼을 만들면 그 고정 문구를 여기 등록한다. 프론트 문구와 어긋나면 소스 계약 테스트가 잡는다
+ *   (`help-answer.test.ts` — AgencySendIntroModal의 문구를 읽어 대조).
+ */
+export const HELP_REQUEST_PHRASES: readonly string[] = [
+  '대행발송 이용을 요청합니다.', // AgencySendIntroModal "이용 요청 남기기"
+];
+
+/** 이력의 행 하나가 질문인가 기능 요청인가 */
+export function helpQuestionKind(question: string): 'request' | 'question' {
+  return HELP_REQUEST_PHRASES.includes(String(question || '').trim()) ? 'request' : 'question';
+}
 export const HELP_MAX_QUESTION = 240;
 export const HELP_DAILY_LIMIT = 30;
 export const HELP_MINUTE_LIMIT = 3;
@@ -84,8 +102,24 @@ export function matchJobs(question: string, currentPath?: string | null, catalog
 
 // ────────────── 2. 프롬프트 ──────────────
 
+/**
+ * ★ 2026-08-24(2) 스탠스 개편 (Harold: "너무 원론적이다. 난 챗봇을 만들고 싶었던 것").
+ * 전 지시는 역할이 "정의 요약"뿐이라, 모델의 최선이 카드에 이미 있는 순서를 산문으로 다시 읽는 것이었다.
+ * 지금은 **카드와 역할을 나눈다**: 순서는 카드가 보여주고, answer는 카드가 못 하는 것(공감·첫 걸음·되묻기·원인 좁히기)을 한다.
+ * 되묻기가 성립하는 기반 = 후속 문답 3쌍(§10-6). 폐집합·JSON 계약·출구 검사는 그대로다.
+ */
 const SYSTEM_PROMPT = [
-  '당신은 "한줄로" 서비스의 사용법 안내 도우미입니다. 사용자는 마케팅 담당자입니다.',
+  '당신은 "한줄로" 서비스의 안내 상담원입니다. 사용자는 마케팅 담당자입니다.',
+  '매뉴얼 낭독기가 아닙니다. 화면이 answer 아래에 jobs로 지목한 기능 카드를 그리고, 시작 위치와 순서 전체는 그 카드가 보여줍니다.',
+  '그래서 answer에서 순서를 처음부터 끝까지 나열하지 않습니다. answer는 카드가 못 하는 것을 합니다.',
+  '',
+  '질문 유형에 따라 이렇게 답합니다.',
+  '1) 어렵다, 모르겠다, 헷갈린다는 호소: 공감을 한 문장으로 하고, 지금 할 가장 쉬운 첫 걸음 하나만 짚고, 어디서 막혔는지 구체적인 선택지 두세 개로 되묻습니다.',
+  '2) 방법 질문: 핵심 요지만 한두 문장으로 말하고, 자세한 순서는 아래 카드를 보라고 안내합니다.',
+  '3) 안 된다는 신고: [기능 정의]의 blockers에서 가능성 높은 원인을 한두 개 골라, 무엇을 확인하면 되는지 알려줍니다.',
+  '4) 앞 문답에 이어진 질문: 되물었던 그 지점만 깊게 답합니다. 이미 한 말을 반복하지 않습니다.',
+  '되물을 때도 이야기한 기능의 id를 jobs에 담습니다.',
+  '',
   '아래 [기능 정의]에 적힌 내용만으로 답합니다. 정의에 없는 기능·화면·버튼·조건을 말하지 않습니다.',
   '할인율·금액·쿠폰·무료 같은 혜택 수치를 만들지 않습니다. 요금제 이름이나 가격을 말하지 않습니다.',
   'answer에 화면 주소나 영문 id를 쓰지 않습니다. 갈 화면은 jobs 배열의 id가 가리키고, 화면이 그 카드에 이동 버튼을 답니다.',

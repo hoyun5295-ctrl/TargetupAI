@@ -67,6 +67,8 @@ export default function AgencySendIntroModal({ show, isPaidPlan, onClose }: Prop
       await fetch('/api/help/questions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+        // ⛔ 이 고정 문구는 서버 레지스트리(help-answer.ts HELP_REQUEST_PHRASES)와 한 글자도 다르면 안 된다.
+        //   질문 이력이 이 문구로 "기능 요청"을 가른다 — 어긋나면 소스 계약 테스트가 빌드에서 잡는다(★2026-08-24)
         body: JSON.stringify({ question: '대행발송 이용을 요청합니다.', path: '/agency-send' }),
       });
       setAsked(true);

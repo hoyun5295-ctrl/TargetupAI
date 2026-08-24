@@ -10,10 +10,12 @@
  *   ⑧ (★0824) 후속 문답이 messages로 이어진다. 후속 중에는 direct를 건너뛴다(문맥 없는 새 매칭이 엉뚱한 카드를 낸다)
  */
 import { describe, it, expect, beforeEach } from 'vitest';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import {
   answerHelpQuestion, buildCatalogSystem, buildHelpMessages, checkAnswer, isDirectHit, matchJobs, parseModelAnswer,
   resetHelpQuota, takeHelpQuota,
-  HELP_DAILY_LIMIT, HELP_DIRECT_MARGIN, HELP_MAX_HISTORY, HELP_MINUTE_LIMIT,
+  helpQuestionKind, HELP_DAILY_LIMIT, HELP_DIRECT_MARGIN, HELP_MAX_HISTORY, HELP_MINUTE_LIMIT, HELP_REQUEST_PHRASES,
 } from '../help-answer';
 import { FEATURE_CATALOG, toPublicJob, type FeatureJob } from '../../content/feature-catalog';
 
@@ -113,6 +115,18 @@ describe('도움말 봇 — 프롬프트', () => {
     expect(system).not.toContain('planKey');
     // 경로도 넣지 않는다 — 이동은 jobs id로만 한다(답에 경로가 나오면 출구 검사가 버린다)
     expect(system).not.toContain('"path"');
+  });
+
+  /**
+   * ★ 2026-08-24(2) 스탠스 계약(Harold "너무 원론적이다"). 프롬프트가 "정의 요약"으로 돌아가면
+   * 모델의 최선이 카드에 이미 있는 순서를 산문으로 다시 읽는 것이 된다 — 그 회귀를 문장으로 잠근다.
+   */
+  it('answer는 카드와 역할을 나눈다(순서 낭독 금지 · 막힘 호소에는 되묻기)', () => {
+    const system = buildCatalogSystem(FEATURE_CATALOG);
+    expect(system).toContain('안내 상담원');
+    expect(system).toContain('순서를 처음부터 끝까지 나열하지 않습니다');
+    expect(system).toContain('어디서 막혔는지 구체적인 선택지');
+    expect(system).toContain('되물을 때도 이야기한 기능의 id를 jobs에 담습니다');
   });
 
   it('후속 문답이 messages로 이어지고 상한을 지킨다', () => {
@@ -238,5 +252,28 @@ describe('도움말 봇 — 답변 조립(모델 경로)', () => {
     resetHelpQuota();
     for (let i = 0; i < HELP_DAILY_LIMIT; i++) expect(takeHelpQuota(c, new Date(now.getTime() + i * 60000))).toBe(true);
     expect(takeHelpQuota(c, new Date(now.getTime() + HELP_DAILY_LIMIT * 60000))).toBe(false);
+  });
+});
+
+/**
+ * ★ 2026-08-24 기능 요청 구분. "이용 요청 남기기" 버튼의 고정 문구는 질문이 아니라 요청이다 —
+ * 질문 이력의 "못 답함"에서 빼야 미답 비율이 봇의 실제 실패만 센다. 판정은 서버 레지스트리 하나가 소유한다.
+ */
+describe('도움말 봇 — 기능 요청 구분', () => {
+  it('판정은 고정 문구 정확 일치다(앞뒤 공백만 눈감는다)', () => {
+    expect(helpQuestionKind('대행발송 이용을 요청합니다.')).toBe('request');
+    expect(helpQuestionKind(' 대행발송 이용을 요청합니다. ')).toBe('request');
+    expect(helpQuestionKind('대행발송 이용을 요청합니다')).toBe('question'); // 사람이 비슷하게 친 문장은 질문이다
+    expect(helpQuestionKind('대행발송 어떻게 해요')).toBe('question');
+    expect(helpQuestionKind('')).toBe('question');
+  });
+
+  it('요청 버튼의 프론트 고정 문구가 레지스트리와 한 글자도 다르지 않다(소스 계약)', () => {
+    const src = readFileSync(
+      resolve(__dirname, '../../../../frontend/src/components/agency/AgencySendIntroModal.tsx'), 'utf8',
+    );
+    const m = src.match(/question:\s*'([^']+)'/);
+    expect(m, '요청 버튼이 고정 문구를 보내는 자리가 사라졌다 — 레지스트리와 함께 정리하라').not.toBeNull();
+    expect(HELP_REQUEST_PHRASES).toContain(m![1]);
   });
 });

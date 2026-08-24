@@ -17,6 +17,8 @@ interface HelpQuestionRow {
   question: string;
   matched_ids: string[];
   answered: boolean;
+  /** 서버 판정(문구 레지스트리): 사람이 친 질문인가, 요청 버튼의 고정 문구인가 */
+  kind: 'request' | 'question';
   created_at: string;
 }
 
@@ -31,7 +33,7 @@ export default function HelpQuestionsTab({ companies }: Props) {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [answered, setAnswered] = useState<'all' | 'yes' | 'no'>('all');
+  const [answered, setAnswered] = useState<'all' | 'yes' | 'no' | 'request'>('all');
   const [companyFilter, setCompanyFilter] = useState('all');
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(false);
@@ -40,7 +42,7 @@ export default function HelpQuestionsTab({ companies }: Props) {
   const load = useCallback(async (p: number) => {
     setLoading(true); setError(null);
     try {
-      const params = new URLSearchParams({ page: String(p), limit: '25', answered });
+      const params = new URLSearchParams({ page: String(p), limit: '10', answered }); // 10건씩 = Harold 0824 지시
       if (companyFilter !== 'all') params.set('companyId', companyFilter);
       if (q.trim()) params.set('q', q.trim());
       const r = await fetch(`/api/admin/help-questions?${params}`, { headers: authHeaders() });
@@ -70,7 +72,7 @@ export default function HelpQuestionsTab({ companies }: Props) {
     <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
       <div className="px-6 py-4 border-b">
         <h2 className="text-lg font-semibold">도움말 질문 이력</h2>
-        <p className="text-xs text-gray-500 mt-1">어떤 업체가 무엇을 물었고 봇이 답했는지. 답 못한 질문이 카탈로그 보강의 입력입니다</p>
+        <p className="text-xs text-gray-500 mt-1">어떤 업체가 무엇을 물었고 봇이 답했는지. 답 못한 질문이 카탈로그 보강의 입력입니다. "이용 요청 남기기" 버튼의 기록은 기능 요청으로 구분됩니다</p>
       </div>
 
       <div className="px-6 py-3 border-b bg-gray-50 flex flex-wrap items-center gap-3">
@@ -80,6 +82,7 @@ export default function HelpQuestionsTab({ companies }: Props) {
           <option value="all">전체</option>
           <option value="yes">답함</option>
           <option value="no">못 답함</option>
+          <option value="request">기능 요청</option>
         </select>
         <span className="text-sm text-gray-500 font-medium">고객사</span>
         <select value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)}
@@ -133,9 +136,11 @@ export default function HelpQuestionsTab({ companies }: Props) {
                   {Array.isArray(r.matched_ids) && r.matched_ids.length > 0 ? r.matched_ids.join(', ') : '-'}
                 </td>
                 <td className="px-4 py-2.5 whitespace-nowrap">
-                  {r.answered
-                    ? <span className="inline-flex px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium">답함</span>
-                    : <span className="inline-flex px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-xs font-medium">못 답함</span>}
+                  {r.kind === 'request'
+                    ? <span className="inline-flex px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-medium">기능 요청</span>
+                    : r.answered
+                      ? <span className="inline-flex px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium">답함</span>
+                      : <span className="inline-flex px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-xs font-medium">못 답함</span>}
                 </td>
               </tr>
             ))}

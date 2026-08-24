@@ -53,6 +53,7 @@ import { grantFreeTrial } from '../utils/basic-trial';
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
 import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, diffFields } from '../utils/audit-log';
+import { helpQuestionKind, HELP_REQUEST_PHRASES } from '../utils/help-answer';
 // ★ 2026-07-01: 예측 일괄 분석·차감 수동 트리거 (9시 대기 없이 검증·복구·시연)
 import { runPredictiveBatchNow } from '../utils/predictive-worker';
 import { sendTypeLabel } from '../utils/send-type-axis';
@@ -4529,8 +4530,16 @@ router.get('/help-questions', authenticate, requireSuperAdmin, async (req: Reque
     const params: any[] = [];
     let paramIndex = 1;
 
+    // ★ 2026-08-24 기능 요청 구분 — "이용 요청 남기기" 버튼의 고정 문구는 질문이 아니다(레지스트리 소유 = help-answer.ts).
+    //   "못 답함" 필터에서 빼야 미답 비율이 봇의 실제 실패만 센다.
     if (answered === 'yes') whereClause += ' AND h.answered = true';
-    else if (answered === 'no') whereClause += ' AND h.answered = false';
+    else if (answered === 'no') {
+      whereClause += ` AND h.answered = false AND NOT (h.question = ANY($${paramIndex++}::text[]))`;
+      params.push([...HELP_REQUEST_PHRASES]);
+    } else if (answered === 'request') {
+      whereClause += ` AND h.question = ANY($${paramIndex++}::text[])`;
+      params.push([...HELP_REQUEST_PHRASES]);
+    }
     if (companyId && companyId !== 'all') {
       whereClause += ` AND h.company_id = $${paramIndex++}::uuid`;
       params.push(String(companyId));
@@ -4559,7 +4568,8 @@ router.get('/help-questions', authenticate, requireSuperAdmin, async (req: Reque
       total,
       totalPages: Math.max(1, Math.ceil(total / Number(limit))),
       page: Number(page),
-      questions: listRes.rows,
+      // kind = 화면이 "기능 요청"과 "못 답함"을 다르게 그리는 근거. 판정은 서버 레지스트리 하나다
+      questions: listRes.rows.map((r: any) => ({ ...r, kind: helpQuestionKind(r.question) })),
     });
   } catch (err: any) {
     const msg = String(err?.message || '');
