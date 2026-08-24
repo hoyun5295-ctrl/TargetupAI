@@ -774,3 +774,80 @@ export async function getLatestOutreachJob(operatorSuperAdminId: string | null |
   );
   return job.rows[0] || null;
 }
+
+/** 진행 목록(이력) — 최근 100건. 목록 행이 산출물 링크(preview_code)·발송 상태까지 들고 간다(0824 Harold: 기록+진행률+링크). */
+export async function listOutreachJobs(operatorSuperAdminId: string | null | undefined): Promise<any[]> {
+  await assertOperator(operatorSuperAdminId);
+  const r = await query(
+    `SELECT id, company_name, industry_category, homepage_url, stage, fail_stage, fail_reason,
+            preview_code, mail_result, mail_sent_at, mail_confirmed_at, forwarded_at, purged_at, created_at
+       FROM sales_outreach_jobs ORDER BY created_at DESC LIMIT 100`,
+    [],
+  );
+  return r.rows;
+}
+
+// ===== 대량 등록 (0824 Harold 지시 — 엑셀 일괄 · 실행은 순차) =====
+
+export interface BulkEnqueueInput {
+  companyName: string;
+  homepageUrl: string;
+  industryCategory: string | null;
+}
+
+/**
+ * 일괄 등록 — 전 행을 queued로 넣고, 실행은 **순차 체인**(한 건이 확인 대기·실패에 닿으면 다음 건 시작).
+ * 이유: 이미지 파이프라인 동시 1건 제한 + 상대 홈페이지 크롤 예의. 발송은 여기서 절대 일어나지 않는다(건별 사람 클릭).
+ * 체인이 겹쳐 떠도 runOutreachJob의 queued CAS 선점이 이중 실행을 막는다(두 번째는 0행 무시).
+ */
+export async function enqueueOutreachJobsBulk(
+  rows: BulkEnqueueInput[],
+  operatorSuperAdminId: string | null | undefined,
+): Promise<{ acceptedIds: string[]; rejected: Array<{ companyName: string; reason: string }> }> {
+  await assertOperator(operatorSuperAdminId);
+  if (!getOutreachContext()) {
+    throw new OutreachError('NOT_READY', '준비가 되지 않았습니다: OUTREACH_COMPANY_ID·OUTREACH_USER_ID 설정이 필요합니다.');
+  }
+
+  const acceptedIds: string[] = [];
+  const rejected: Array<{ companyName: string; reason: string }> = [];
+  for (const row of rows) {
+    const companyName = String(row.companyName || '').trim();
+    let homepageUrl = String(row.homepageUrl || '').trim();
+    if (!/^https?:\/\//i.test(homepageUrl)) homepageUrl = 'https://' + homepageUrl;
+    try {
+      void new URL(homepageUrl);
+    } catch {
+      rejected.push({ companyName: companyName || '(이름 없음)', reason: '홈페이지 주소 형식이 올바르지 않습니다.' });
+      continue;
+    }
+    const industry = row.industryCategory && isIndustryCode(row.industryCategory) ? row.industryCategory : null;
+    try {
+      const r = await query(
+        `INSERT INTO sales_outreach_jobs (company_name, industry_category, homepage_url, stage, created_by)
+         VALUES ($1, $2, $3, 'queued', $4) RETURNING id`,
+        [companyName, industry, homepageUrl, operatorSuperAdminId],
+      );
+      acceptedIds.push(r.rows[0].id as string);
+    } catch (err: any) {
+      console.error('[sales-outreach] 일괄 등록 실패:', companyName, err?.message);
+      rejected.push({ companyName, reason: '등록에 실패했습니다.' });
+    }
+  }
+
+  // 순차 체인 — 각 건은 awaiting_confirm(사람 게이트)·failed에서 멈추므로 이 체인은 발송·확정을 절대 넘지 않는다.
+  if (acceptedIds.length > 0) {
+    (async () => {
+      for (const id of acceptedIds) {
+        try {
+          await runOutreachJob(id);
+        } catch (err: any) {
+          console.error('[sales-outreach] 일괄 체인 실행 실패:', id, err?.message);
+          await markFailed(id, 'crawling', '분석 시작에 실패했습니다. 재시도해주세요.').catch(() => {});
+        }
+      }
+    })().catch((err: any) => console.error('[sales-outreach] 일괄 체인 예외:', err?.message));
+  }
+
+  return { acceptedIds, rejected };
+}

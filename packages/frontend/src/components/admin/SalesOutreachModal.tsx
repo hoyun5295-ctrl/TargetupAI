@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Loader2, RefreshCw, Send, Check, ExternalLink, Pencil } from 'lucide-react';
+import { X, Loader2, RefreshCw, Send, Check, ExternalLink, Pencil, Upload, Download, List } from 'lucide-react';
 import ConfirmModal, { ConfirmState } from '../ConfirmModal';
 
 interface IndustryOption { code: string; label: string }
@@ -34,6 +34,7 @@ interface OutreachJob {
   mail_confirmed_at?: string | null;
   forwarded_at?: string | null;
   preview_code?: string | null;
+  purged_at?: string | null;
   created_at?: string;
   assets?: OutreachAsset[];
 }
@@ -94,6 +95,12 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
   const [copyDraft, setCopyDraft] = useState('');
   const [copyEditing, setCopyEditing] = useState(false);
 
+  // 대량 업로드 · 진행 목록(0824 Harold: 일괄 등록 + 진행률 + 이력 + 건별 산출물 링크·메일 미리보기)
+  const [listMode, setListMode] = useState(false);
+  const [jobsList, setJobsList] = useState<OutreachJob[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkSummary, setBulkSummary] = useState<{ accepted: number; rejected: Array<{ label: string; reason: string }> } | null>(null);
+
   const jobRef = useRef<OutreachJob | null>(null);
   jobRef.current = job;
 
@@ -153,6 +160,73 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
     const t = setInterval(() => { loadJob(job.id); }, 2000);
     return () => clearInterval(t);
   }, [job?.id, job?.stage, loadJob]);
+
+  const loadJobsList = useCallback(async () => {
+    try {
+      const r = await authFetch('/api/sales-outreach/jobs');
+      const d = await r.json();
+      if (r.ok && Array.isArray(d?.jobs)) setJobsList(d.jobs);
+    } catch { /* 다음 폴링에서 회복 */ }
+  }, []);
+
+  // 목록 폴링(5초) — 진행 중 건이 있을 때만
+  useEffect(() => {
+    if (!listMode) return;
+    loadJobsList();
+    const t = setInterval(() => {
+      setJobsList((cur) => {
+        if (cur.some((j) => ACTIVE_STAGES.includes(j.stage))) loadJobsList();
+        return cur;
+      });
+    }, 5000);
+    return () => clearInterval(t);
+  }, [listMode, loadJobsList]);
+
+  const downloadTemplate = async () => {
+    try {
+      const r = await authFetch('/api/sales-outreach/template.xlsx');
+      if (!r.ok) { setNotice('양식 다운로드에 실패했습니다.'); return; }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'AI영업_업체목록_양식.xlsx';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { setNotice('양식 다운로드에 실패했습니다.'); }
+  };
+
+  const handleBulkFile = async (file: File | null) => {
+    if (!file) return;
+    setBulkBusy(true);
+    setNotice(null);
+    setBulkSummary(null);
+    try {
+      const token = localStorage.getItem('token');
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await fetch('/api/sales-outreach/jobs/bulk', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setNotice(d?.error || '일괄 등록에 실패했습니다.');
+        if (Array.isArray(d?.rejected) && d.rejected.length) {
+          setBulkSummary({ accepted: 0, rejected: d.rejected.map((x: any) => ({ label: x.label || `${x.line}행`, reason: x.reason })) });
+        }
+        return;
+      }
+      setBulkSummary({ accepted: d.accepted || 0, rejected: Array.isArray(d.rejected) ? d.rejected : [] });
+      setListMode(true);
+      await loadJobsList();
+    } catch {
+      setNotice('업로드 요청에 실패했습니다. 네트워크를 확인해주세요.');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   const callAction = async (path: string, body?: any): Promise<boolean> => {
     setBusy(true);
@@ -295,24 +369,34 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
             <h2 className="text-lg font-semibold text-gray-900">AI 영업</h2>
             <p className="text-xs text-gray-500 mt-0.5">업체 홈페이지를 읽고 맞춤 제안 세트를 만들어 회사 수신함으로 보냅니다</p>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50">
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => { setListMode(!listMode); if (!listMode) loadJobsList(); }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border ${
+                listMode ? 'border-blue-200 text-blue-600 bg-blue-50' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}>
+              <List className="w-4 h-4" /> {listMode ? '단건 등록' : '진행 목록'}
+            </button>
+            <button onClick={onClose} className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
-        {/* 스테퍼 */}
-        <div className="px-6 py-3 border-b border-gray-200/70 flex items-center gap-6 shrink-0 flex-wrap">
-          {stepChip(1, '입력')}
-          {stepChip(2, '분석')}
-          {stepChip(3, '읽은 것 확인')}
-          {stepChip(4, '제작·발송')}
-          {job && ACTIVE_STAGES.includes(stage) && (
-            <span className="ml-auto flex items-center gap-2 text-xs text-gray-500">
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
-              {STAGE_LABEL[stage] || '처리 중'} · 창을 닫아도 계속 진행됩니다
-            </span>
-          )}
-        </div>
+        {/* 스테퍼(단건 흐름 전용 — 목록 화면에서는 숨긴다) */}
+        {!listMode && (
+          <div className="px-6 py-3 border-b border-gray-200/70 flex items-center gap-6 shrink-0 flex-wrap">
+            {stepChip(1, '입력')}
+            {stepChip(2, '분석')}
+            {stepChip(3, '읽은 것 확인')}
+            {stepChip(4, '제작·발송')}
+            {job && ACTIVE_STAGES.includes(stage) && (
+              <span className="ml-auto flex items-center gap-2 text-xs text-gray-500">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                {STAGE_LABEL[stage] || '처리 중'} · 창을 닫아도 계속 진행됩니다
+              </span>
+            )}
+          </div>
+        )}
 
         {/* 알림 */}
         {notice && (
@@ -320,11 +404,102 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
             {notice}
           </div>
         )}
+        {/* 일괄 등록 결과 요약 — "전체 몇 곳 중 몇 곳 입력 OK" */}
+        {bulkSummary && (
+          <div className="mx-6 mt-3 px-4 py-2.5 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-800 shrink-0">
+            전체 {bulkSummary.accepted + bulkSummary.rejected.length}곳 중 {bulkSummary.accepted}곳 입력 OK
+            {bulkSummary.rejected.length > 0 && ` · 제외 ${bulkSummary.rejected.length}곳`}
+            {bulkSummary.rejected.length > 0 && (
+              <ul className="mt-1 text-xs text-blue-600 space-y-0.5">
+                {bulkSummary.rejected.slice(0, 6).map((r, i) => <li key={i}>{r.label}: {r.reason}</li>)}
+                {bulkSummary.rejected.length > 6 && <li>외 {bulkSummary.rejected.length - 6}건</li>}
+              </ul>
+            )}
+          </div>
+        )}
 
         {/* 본문 */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
+          {/* 진행 목록(이력) — 진행률 + 건별 산출물 링크 + 상세(메일 미리보기) 진입 */}
+          {listMode && (() => {
+            const total = jobsList.length;
+            const activeN = jobsList.filter((j) => ACTIVE_STAGES.includes(j.stage)).length;
+            const confirmN = jobsList.filter((j) => j.stage === 'awaiting_confirm').length;
+            const readyN = jobsList.filter((j) => j.stage === 'ready').length;
+            const sentN = jobsList.filter((j) => j.stage === 'sent').length;
+            const failedN = jobsList.filter((j) => j.stage === 'failed').length;
+            const processed = total - activeN;
+            const pct = total ? Math.round((processed / total) * 100) : 0;
+            const chip = (j: OutreachJob) => {
+              if (j.stage === 'failed') return <span className="text-[11px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">실패</span>;
+              if (j.stage === 'awaiting_confirm') return <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">확인 대기</span>;
+              if (j.stage === 'ready') return <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">검토 대기</span>;
+              if (j.stage === 'sent') return <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">발송됨</span>;
+              return (
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 inline-flex items-center gap-1">
+                  <Loader2 className="w-3 h-3 animate-spin" /> {STAGE_LABEL[j.stage] || '진행 중'}
+                </span>
+              );
+            };
+            return (
+              <div className="space-y-4">
+                <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-4">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="text-sm font-semibold text-gray-900">전체 {total}곳 · 자동 처리 완료 {processed}곳 ({pct}%)</div>
+                    <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
+                      {activeN > 0 && <span>진행 중 {activeN}</span>}
+                      {confirmN > 0 && <span className="text-amber-700 font-medium">확인 대기 {confirmN}</span>}
+                      {readyN > 0 && <span className="text-blue-700">검토 대기 {readyN}</span>}
+                      {sentN > 0 && <span className="text-emerald-700">발송됨 {sentN}</span>}
+                      {failedN > 0 && <span className="text-rose-700">실패 {failedN}</span>}
+                    </div>
+                  </div>
+                  <div className="mt-2 h-2 rounded-full bg-gray-100 overflow-hidden">
+                    <div className="h-full bg-blue-600 transition-all" style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+                {total === 0 ? (
+                  <div className="px-4 py-10 text-center text-sm text-gray-400 bg-gray-50 rounded-2xl">
+                    아직 등록된 업체가 없습니다. 단건 등록 또는 엑셀 업로드로 시작해주세요.
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm divide-y divide-gray-100">
+                    {jobsList.map((j) => {
+                      const pv = j.preview_code && !j.purged_at ? `${window.location.origin}/api/outreach/v/${j.preview_code}` : null;
+                      return (
+                        <div key={j.id} className="px-4 py-3 flex items-center gap-3 flex-wrap">
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium text-gray-900 flex items-center gap-2 flex-wrap">
+                              {j.company_name} {chip(j)}
+                            </div>
+                            <div className="text-xs text-gray-400 truncate">
+                              {j.homepage_url}
+                              {j.created_at ? ` · ${String(j.created_at).slice(0, 10)}` : ''}
+                              {j.stage === 'failed' && j.fail_reason ? ` · ${j.fail_reason}` : ''}
+                            </div>
+                          </div>
+                          {pv && (
+                            <a href={pv} target="_blank" rel="noreferrer"
+                              className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+                              <ExternalLink className="w-3.5 h-3.5" /> 산출물 페이지
+                            </a>
+                          )}
+                          <button onClick={() => { loadJob(j.id); setListMode(false); }}
+                            className="shrink-0 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium">
+                            {j.stage === 'awaiting_confirm' ? '확인하기' : j.stage === 'ready' ? '검토·발송' : '열기'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <p className="text-[10px] text-gray-400 italic">Data source: 등록된 업체별 자동 제작 진행 기록</p>
+              </div>
+            );
+          })()}
+
           {/* 직전 실행 요약(재실행 경고 축) */}
-          {step === 1 && lastSummary && (
+          {!listMode && step === 1 && lastSummary && (
             <div className="mb-4 px-4 py-2.5 rounded-lg bg-gray-50 border border-gray-200/70 text-xs text-gray-500">
               최근 실행: {lastSummary.company_name} · {STAGE_LABEL[lastSummary.stage] || lastSummary.stage}
               {lastSummary.created_at ? ` · ${String(lastSummary.created_at).slice(0, 10)}` : ''}
@@ -335,7 +510,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
           )}
 
           {/* ① 입력 */}
-          {step === 1 && (
+          {!listMode && step === 1 && (
             <div className="max-w-lg space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">업체명</label>
@@ -362,12 +537,32 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 읽기 시작
               </button>
+
+              {/* 대량 등록 — 엑셀 양식(옆에 작성 예시 포함)으로 한 번에 최대 20곳 */}
+              <div className="mt-6 pt-5 border-t border-gray-200/70">
+                <div className="text-sm font-medium text-gray-700 mb-1">여러 업체 한번에 등록</div>
+                <p className="text-xs text-gray-500 mb-3">엑셀 양식을 받아 작성한 뒤 올리면 한 번에 최대 20곳을 순서대로 자동 처리합니다. 진행 상황은 [진행 목록]에서 봅니다.</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button onClick={downloadTemplate}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50">
+                    <Download className="w-4 h-4" /> 엑셀 양식 받기
+                  </button>
+                  <label className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm cursor-pointer ${
+                    bulkBusy ? 'bg-blue-300 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'
+                  }`}>
+                    {bulkBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                    엑셀 업로드
+                    <input type="file" accept=".xlsx,.xls" className="hidden" disabled={bulkBusy}
+                      onChange={(e) => { handleBulkFile(e.target.files?.[0] || null); e.target.value = ''; }} />
+                  </label>
+                </div>
+              </div>
               <p className="text-[10px] text-gray-400 italic">Data source: 입력한 홈페이지를 읽고 AI가 분석합니다</p>
             </div>
           )}
 
           {/* ② 분석 중 */}
-          {step === 2 && job && (
+          {!listMode && step === 2 && job && (
             <div className="py-16 flex flex-col items-center gap-3 text-center">
               <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
               <div className="text-sm font-medium text-gray-900">{STAGE_LABEL[stage] || '분석 중'}</div>
@@ -377,7 +572,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
           )}
 
           {/* ③ 읽은 것 확인 */}
-          {step === 3 && job && (
+          {!listMode && step === 3 && job && (
             <div className="space-y-5">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 {/* 행사 후보 */}
@@ -484,7 +679,7 @@ export default function SalesOutreachModal({ onClose }: { onClose: () => void })
           )}
 
           {/* ④ 제작·검토·발송 */}
-          {step === 4 && job && (
+          {!listMode && step === 4 && job && (
             <div className="space-y-4">
               {failed && (
                 <div className="px-4 py-3 rounded-lg bg-rose-50 border border-rose-200 flex items-center justify-between gap-3">

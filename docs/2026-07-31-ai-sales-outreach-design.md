@@ -295,6 +295,14 @@ v2 = **단건 모달 + 자사 메일 인계.** 수신자가 자사(영업 전용
   1. `fetchImageGuarded`의 20초 벽시계가 DNS 조회를 포함하지 않는다(resolver 지연 시 총 시간 초과 가능) — 진입 시점 deadline으로 통합 필요.
   2. 모달 폴링이 직렬화되지 않아 늦게 도착한 옛 응답이 최신 상태·편집 중 문안 초안을 덮을 수 있다 — request ID 폐기 + `copyEditingRef` 시점 확인 필요.
 
+### 15-9-2. 대량 업로드 축 (2026-08-24 Harold 지시 — v3 "리스트 일괄"을 당김)
+
+- **양식** = 엑셀(.xlsx) 다운로드 `GET /api/sales-outreach/template.xlsx`(ExcelJS 생성 · 입력 A~C열 + **옆(E열~) 작성 예시·업종 라벨 목록** + 업종 셀 드롭다운 유효성 · Harold "엑셀 양식엔 옆에 예시").
+- **업로드** = `POST /api/sales-outreach/jobs/bulk`(multer 5MB · SheetJS 파싱이라 .xls도 읽음 · A~C열만 · 행별 거절 사유 반환 · 1회 상한 20곳 · 파일 내 중복 제거). 응답 = "전체 N곳 중 M곳 입력 OK + 제외 목록".
+- **실행** = 전 건 queued 등록 후 **순차 체인**(한 건이 awaiting_confirm·failed에 닿으면 다음 시작 — 이미지 동시 1건 제한·크롤 예의). 이중 체인은 queued CAS가 무해화. **발송·확정은 체인이 절대 넘지 않는다**(건별 사람 클릭 유지).
+- **진행 목록(이력)** = `GET /api/sales-outreach/jobs`(최근 100건) + 모달 [진행 목록] 뷰: 상단 진행률 바(전체 N곳 · 자동 처리 완료 n곳 %) + 상태 집계 칩(진행 중/확인 대기/검토 대기/발송됨/실패) + 행별 **[산출물 페이지] 링크**(preview_code · 파기 건 제외) + [확인하기/검토·발송/열기] → 기존 4단계 상세(발송 메일 미리보기 iframe 포함). 5초 폴링(진행 건 있을 때만).
+- 파일 = `utils/sales-outreach-bulk.ts`(양식 생성+파싱 CT) · jobs CT에 `enqueueOutreachJobsBulk`·`listOutreachJobs` · 라우트 3 EP · 모달 확장. 신규 의존성 0(exceljs·xlsx·multer 기존). Codex 대상 아님(DDL·돈·발송 로직 무변경 — 범위 규칙).
+
 ### 15-10. §13 갱신 (Harold 확정 현황)
 
 | # | 항목 | 상태 |

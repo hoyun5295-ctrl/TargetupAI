@@ -7,16 +7,19 @@
  * - 테이블 미생성 상태 = 503 DB_MIGRATION_PENDING(db_alter_safety_net).
  */
 import { Router, Request, Response } from 'express';
+import multer from 'multer';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { isSalesOutreachOperator } from '../utils/audit-log';
 import {
   enqueueOutreachJob, confirmOutreachSelection, retryOutreachJob,
-  getOutreachJob, getLatestOutreachJob,
+  getOutreachJob, getLatestOutreachJob, listOutreachJobs, enqueueOutreachJobsBulk,
+  OutreachError, isOutreachMigrationPending,
   sendOutreachMailForJob, confirmOutreachMailArrived, markOutreachForwarded,
   editOutreachCopy, rebuildOutreachEmail,
-  OutreachError, isOutreachMigrationPending,
 } from '../utils/sales-outreach-jobs';
 import { outreachMailTo } from '../utils/outreach-mailer';
+import { buildOutreachTemplateXlsx, parseOutreachBulkXlsx } from '../utils/sales-outreach-bulk';
+import { XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
 
 const router = Router();
 router.use(authenticate, requireSuperAdmin);
@@ -62,6 +65,67 @@ router.post('/jobs', async (req: Request, res: Response) => {
     res.status(202).json({ jobId: id });
   } catch (err: any) {
     respondError(res, err, '등록');
+  }
+});
+
+// 대량 업로드 양식(xlsx) — 입력 3열 + 옆에 작성 예시·업종 목록(Harold 0824)
+router.get('/template.xlsx', async (req: Request, res: Response) => {
+  try {
+    if (!(await isSalesOutreachOperator(req.user?.userId))) {
+      return res.status(403).json({ error: '이 기능을 사용할 권한이 없습니다.', code: 'FORBIDDEN' });
+    }
+    const buf = await buildOutreachTemplateXlsx();
+    res.setHeader('Content-Type', XLSX_CONTENT_TYPE);
+    res.setHeader('Content-Disposition', xlsxContentDisposition('AI영업_업체목록_양식.xlsx'));
+    res.send(buf);
+  } catch (err: any) {
+    respondError(res, err, '양식 다운로드');
+  }
+});
+
+// 대량 등록 — 엑셀 파일 1개(xlsx/xls) → 행별 검증 → 전 건 queued + 순차 실행 체인
+const bulkUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+});
+router.post('/jobs/bulk', (req: Request, res: Response) => {
+  bulkUpload.single('file')(req as any, res as any, async (err: any) => {
+    if (err) {
+      console.log('[sales-outreach] 일괄 업로드 거절:', err?.message);
+      return res.status(400).json({ error: '파일 업로드에 실패했습니다(5MB 이하 엑셀 파일 1개).' });
+    }
+    try {
+      const file = (req as any).file as { buffer: Buffer } | undefined;
+      if (!file?.buffer) return res.status(400).json({ error: '엑셀 파일을 선택해주세요.' });
+      const parsed = parseOutreachBulkXlsx(file.buffer);
+      if (parsed.rows.length === 0) {
+        return res.status(400).json({
+          error: '등록할 수 있는 줄이 없습니다. 양식의 업체명·홈페이지 열을 확인해주세요.',
+          rejected: parsed.rejected,
+        });
+      }
+      const result = await enqueueOutreachJobsBulk(parsed.rows, req.user?.userId);
+      console.log('[sales-outreach] 일괄 등록:', result.acceptedIds.length, '건 /', req.user?.userId);
+      res.status(202).json({
+        accepted: result.acceptedIds.length,
+        acceptedIds: result.acceptedIds,
+        rejected: [
+          ...parsed.rejected.map((r) => ({ label: `${r.line}행`, reason: r.reason })),
+          ...result.rejected.map((r) => ({ label: r.companyName, reason: r.reason })),
+        ],
+      });
+    } catch (e: any) {
+      respondError(res, e, '일괄 등록');
+    }
+  });
+});
+
+// 진행 목록(이력) — 진행률·산출물 링크·발송 상태까지 한 번에
+router.get('/jobs', async (req: Request, res: Response) => {
+  try {
+    res.json({ jobs: await listOutreachJobs(req.user?.userId) });
+  } catch (err: any) {
+    respondError(res, err, '목록 조회');
   }
 });
 
