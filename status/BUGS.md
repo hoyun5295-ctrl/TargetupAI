@@ -55,7 +55,10 @@
 
 ## 2) 활성 버그
 
-### 🟠 B-0824-1 모바일 DM 버전 복원이 **100% 실패**했다 — jsonb를 JS로 꺼내 그대로 다시 넣었다 (🟢 코드완료 · 배포 대기) — 2026-08-24 (접수 `cmt6qug4s00v1jnotsqeaf12g` 임은지)
+### 🟡 B-0825-1 AI 호출 토큰 기록이 캐시 생성분을 누락한다 — 도움말 축 정정 시 전수 grep으로 확인된 동일 패턴 2곳 (🔵 Open · 축 밖 기록만) — 2026-08-25
+> **증상**: `ai_call_log.input_tokens` 기록식이 `input_tokens + cache_read_input_tokens`만 합산해 **캐시 신규 생성분(cache_creation)이 통째로 빠진다.** 프롬프트 캐시를 쓰는 호출은 생성 회차가 가장 비싼데(도움말 봇 실측 = 질문당 약 2.9만 토큰), 원장에는 수십 토큰으로 적혀 원가 실측이 실제보다 작게 나온다.
+> **위치(전수 grep)**: [agency-send-refine.ts:193](../packages/backend/src/utils/agency-send-refine.ts) · [ai-mapping.ts:244](../packages/backend/src/utils/ai-mapping.ts) (`tokensUsed` 합산). 도움말 축([help-answer.ts](../packages/backend/src/utils/help-answer.ts))은 2026-08-25 정정 완료 — 같은 세션 축 밖이라 이 2곳은 기록만(`scope_discipline_one_ticket_axis`). `services/ai.ts`는 read/created를 PM2 로그에는 찍는데 기록 경로 합산 여부 미확인(확인부터).
+> **수정 방향**: 각 기록식에 `+ cache_creation_input_tokens` 합산(도움말 축과 같은 형태 · read/created 내역 로그 동반). 부수 = `ai_call_log` 테이블이 SCHEMA.md에 본체 미등재(FK 참조만 있음) — 착수 시 information_schema 순수 덤프 후 등재.
 > **증상**: "이 버전으로 복원"을 누르면 화면에 `invalid input syntax for type json`이 뜨고 복원되지 않는다.
 > **원인**: [dm-builder.ts](../packages/backend/src/utils/dm/dm-builder.ts) `restoreDmVersion`이 `dm_versions`에서 읽은 `sections`를 **파라미터로 그대로** 넘겼다. node-postgres는 JS **배열**을 PG 배열 리터럴 `{…}`로 직렬화하고, 대상은 `jsonb`라 거절한다. `sections`가 정확히 배열이라 이 경로는 **한 번도 성공한 적이 없다**. 같은 파일의 다른 쓰기 자리(생성 141행·수정 166행·버전 저장 203행)는 전부 `JSON.stringify`를 거치고 있었다 — 이 자리만 빠져 있었다. `cloneDm`은 `INSERT … SELECT`(순수 SQL)라 무관하다.
 > **전수 grep**: 복원·롤백 형태의 함수는 이 하나뿐(`restore|rollback|revert` 전수).

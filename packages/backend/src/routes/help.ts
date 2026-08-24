@@ -17,7 +17,7 @@ import { loadPlanContext, canUseFeature, type PlanContext } from '../utils/plan-
 import {
   FEATURE_CATALOG, JOB_GROUPS, findJob, jobsForPath, toPublicJob, normalizePath, type PublicFeatureJob,
 } from '../content/feature-catalog';
-import { answerHelpQuestion, HELP_MAX_HISTORY, HELP_MAX_QUESTION } from '../utils/help-answer';
+import { answerHelpQuestion, classifyHelpDbError, HELP_MAX_HISTORY, HELP_MAX_QUESTION } from '../utils/help-answer';
 import { getOnboardingState } from '../utils/onboarding-wizard';
 
 const router = Router();
@@ -57,21 +57,34 @@ async function hasSentAnything(companyId: string): Promise<boolean> {
   }
 }
 
-const isMissingRelation = (err: any) => {
-  const msg = String(err?.message || '');
-  return msg.includes('relation') && msg.includes('does not exist');
-};
-
-async function logQuestion(opts: { companyId: string; userId: string; path: string | null; question: string; matched: string[]; answered: boolean }): Promise<'ok' | 'missing' | 'error'> {
+async function logQuestion(opts: { companyId: string; userId: string; path: string | null; question: string; matched: string[]; answered: boolean; reason?: string | null }): Promise<'ok' | 'missing' | 'error'> {
+  const baseParams = [opts.companyId, opts.userId, opts.path, opts.question.slice(0, HELP_MAX_QUESTION), opts.matched, opts.answered];
   try {
+    // ★0825 못 답함 사유를 함께 적는다 — 이력 화면(ceo 전용)이 사유 라벨을 그리고, 카탈로그 보강의 입력이 된다
     await query(
-      `INSERT INTO help_questions (id, company_id, user_id, path, question, matched_ids, answered, created_at)
-       VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3, $4, $5::text[], $6, NOW())`,
-      [opts.companyId, opts.userId, opts.path, opts.question.slice(0, HELP_MAX_QUESTION), opts.matched, opts.answered],
+      `INSERT INTO help_questions (id, company_id, user_id, path, question, matched_ids, answered, reason, created_at)
+       VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3, $4, $5::text[], $6, $7, NOW())`,
+      [...baseParams, opts.reason ? String(opts.reason).slice(0, 200) : null],
     );
     return 'ok';
   } catch (err: any) {
-    if (isMissingRelation(err)) return 'missing';
+    // ⛔ 문자열 순서 판정 금지 — 42703 메시지에도 'relation'이 들어온다(Codex 적대 1R high). 분류는 CT 하나가 소유
+    const kind = classifyHelpDbError(err);
+    if (kind === 'missing-relation') return 'missing';
+    if (kind === 'missing-column') {
+      // reason ALTER가 아직 안 돌았다(배포가 DDL보다 먼저 나가는 창) — 옛 형태로라도 기록해 이력을 끊지 않는다
+      try {
+        await query(
+          `INSERT INTO help_questions (id, company_id, user_id, path, question, matched_ids, answered, created_at)
+           VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3, $4, $5::text[], $6, NOW())`,
+          baseParams,
+        );
+        return 'ok';
+      } catch (err2: any) {
+        console.warn('[help] 질문 기록 실패(답변은 나간다):', err2?.message);
+        return 'error';
+      }
+    }
     console.warn('[help] 질문 기록 실패(답변은 나간다):', err?.message);
     return 'error';
   }
@@ -165,10 +178,17 @@ router.post('/ask', async (req: Request, res: Response) => {
     const result = await answerHelpQuestion({ companyId, question, currentPath: path, history });
     const jobs = result.jobs.map((j) => withLock(j, ctx));
 
+    // ★0825 못 답함은 사유와 함께 서버 로그에 남긴다 — 성공·거절 양쪽을 찍는다(LESSONS_BACKEND).
+    //   0824 운영에서 사유가 응답으로만 나가고 어디에도 안 남아, "왜 못 답했나"를 사후에 특정할 수 없었다.
+    if (!result.answered) {
+      console.warn(`[help/ask] 못 답함 reason=${result.reason || '-'} path=${path || '-'} q="${question.slice(0, 80)}"`);
+    }
+
     // 기록은 답변과 독립이다 — 실패해도 답은 나간다. 미답 비율이 2단계 정의의 유일한 입력이다
     await logQuestion({
       companyId, userId: req.user!.userId, path, question,
       matched: result.jobs.map((j) => j.id), answered: result.answered,
+      reason: result.answered ? null : result.reason || null,
     });
 
     return res.json({ success: true, answered: result.answered, answer: result.answer, direct: result.direct, jobs, reason: result.answered ? undefined : result.reason });

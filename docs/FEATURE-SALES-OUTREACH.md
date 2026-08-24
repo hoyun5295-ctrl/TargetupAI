@@ -1,0 +1,92 @@
+# AI 영업 아웃리치 — 기능 상설 SoT
+
+> **호출어: "영업 아웃리치"** — Harold님이 AI 영업을 언급하면 이 문서를 먼저 연다.
+> 이 문서는 **AI 영업의 현재 모습과 이력 색인**을 소유한다. 시점별 설계 근거·경위는 설계서가 소유하고 여기엔 링크만 둔다(doc_ownership).
+> 상태·잔여는 STATUS §2 카드가 소유한다. 여기엔 **구조와 원칙**만 남긴다.
+
+| 시점 설계서 | 소유하는 것 |
+|---|---|
+| [2026-07-31 설계서 §1~§14](2026-07-31-ai-sales-outreach-design.md) | 0731 1차 구상 원문(리스트 일괄 + 승인 큐 + 대상 업체 직접 발송). **현행이 아니다** — §15와 어긋나면 §15가 이긴다 |
+| [같은 문서 §15 (2026-08-24 v2)](2026-07-31-ai-sales-outreach-design.md) | **현행 설계 전량** — 범위 §15-1 · Harold 조정 3건 §15-2 · 흐름 §15-3 · 화면 §15-4 · 메일·공개 페이지 §15-5 · 백엔드 §15-6 · 테이블 §15-7 · 착수 전 실측 §15-8 · **Codex 검증 이력·잔여 부채 §15-9-1** · 대량 업로드 §15-9-2 · Harold 확정 현황 §15-10 |
+
+---
+
+## 1) AI 영업이란 — 제품 정의
+
+영업 대상 업체의 **홈페이지 주소만 넣으면**, 그 업체가 지금 하고 있는 행사를 읽어 그 브랜드에 맞춘 산출물(문안 · 포스터 이미지 · 모바일 DM · 제안 메일)을 자동으로 만들고, 완성본을 **자사 수신함으로 1통** 보낸다. Harold가 그 메일을 확인하고 업체에 전달한다.
+
+"우리 서비스 좋습니다"가 아니라 **"귀사 브랜드로 이미 만들어 봤습니다"**를 들고 가는 구조다. 제품이 곧 데모이므로, 받는 쪽이 메일을 여는 순간 한줄로의 실물 산출물을 본다.
+
+사용자는 Harold 1인(슈퍼관리자 ceo 전용)이다. 고객사에 노출되는 기능이 아니다.
+
+---
+
+## 2) 불변 원칙 (어길 수 없는 것)
+
+1. **⛔ 발송 경로는 사람 클릭 하나뿐이다.** 워커·스케줄러·sweeper 어디서도 발송 함수를 부를 수 없다(승인 컨텍스트 필수 인자). 자동 재시도·자동 재생성도 0 — 재시도는 화면 버튼만.
+2. **⛔ 발송은 DB 선점 뒤에만 한다.** SMTP 호출 전에 `mail_result='sending'` CAS로 선점하고, 선점된 요청만 발송한다. 프로세스 내 잠금은 다중 프로세스를 못 막는다. **발송 후 기록 UPDATE가 0행이면 성공으로 답하지 않는다.**
+3. **⛔ 발송은 3중으로 잠겨 있다.** `OUTREACH_SMTP_USER/PASS` 미설정 · `OUTREACH_UNSUB_NOTICE` 공백 · 문안에 `BENEFIT_PLACEHOLDER` 잔존 중 하나라도면 발송 버튼이 열리지 않는다. 수신거부 문구는 정보통신망법 판단(설계서 §10)이 미확정인 동안 그 축을 잠그는 값이다.
+4. **⛔ 행사는 AI가 서술하지 않는다. 인용하고 서버가 재대조한다.** 모델은 `{인용문·출처·기간}` 구조체만 돌려주고, 서버가 그 인용문이 크롤 원문에 문자열로 실재하는지 확인한다. 실패·부정 표현·종료 표현이 섞이면 그 행사를 통째로 폐기하고 "행사 미확인" 일반형으로 간다.
+5. **⛔ 혜택 수치는 면허가 있을 때만 남는다.** `stripUnauthorizedBenefits`의 `originalBody`에는 **재대조 통과 + 종료일이 실재하고 미래인** 인용만 넘긴다. 나머지는 전부 `[직접 작성해주세요]` 자리가 되고, 그게 남아 있으면 발송이 잠긴다(원칙 3).
+6. **⛔ 게이트는 fail-closed다.** `SALES_OUTREACH_ALLOWED_USERS` 미설정 = 전부 차단. **super_admin이라는 이유로 통과하는 분기를 만들지 않는다**(`plan-guard.isAiOperatorAllowed`가 그 형태라 재사용 금지). 판정은 라우트가 아니라 효과를 만드는 함수 안에 둔다.
+7. **⛔ 크롤·이미지 fetch는 가드 경로만 쓴다.** `fetchHtmlGuarded` 계열(홉마다 DNS 재검증 + 검증 IP 연결 고정)만 탄다. 같은 파일의 `extractBrandFromUrl`은 무가드라 이 축에서 쓰지 않는다([B-0824-2](../status/BUGS.md)).
+8. **⛔ 산출물 INSERT는 소유권과 결속한다.** `insertAssetOwned`(INSERT … SELECT WHERE EXISTS(stage·lock_token))만 쓴다. 검증과 INSERT를 나누면 소유권을 잃은 느린 워커가 나중에 자산을 남겨 **검토된 최신본을 덮는다**(`latestAsset`은 created_at 최신을 읽는다).
+9. **⛔ 소유권은 `lock_token`(uuid) CAS다.** 타임스탬프를 fencing 토큰으로 쓰지 않는다(마이크로초·밀리초 왕복 불일치). `lock_at`은 heartbeat·좀비 판정 전용.
+10. **⛔ 단계 결과는 3값이다**(`ok` / `no_event` / `unavailable`). 의존 장애(AI·크롤 실패)를 내용 판정("행사 없음")으로 접지 않는다. 화면에도 "확인 실패"와 "행사 없음"을 다르게 쓴다.
+11. **⛔ 타사 이미지는 사람이 고른 1장만, 인물 없이 쓴다.** 수집은 자동이되 합성은 선택된 것만(`selectedBy`·`confirmedAt` 필수 인자). 인물 판정이 `person`이면 제외하고 사유를 화면에 표시한다. **로고 픽셀은 어떤 경우에도 금지**(상표) — 브랜드명은 텍스트로.
+12. **⛔ 메일은 전달용 완성본 한 벌이다.** 내부 정보(근거 발췌·원가·내부 링크)는 화면이 단독으로 소유한다. "이 아래는 지우고 보내세요" 형태의 블록을 만들지 않는다 — 사람이 지워야 안전한 설계는 사고가 난다([B-0821-5](../status/BUGS.md)가 그 부류).
+13. **⛔ 조립 함수에 내부 URL을 넘기지 않는다.** 손에 없으면 샐 수 없다. 조립 결과에서 내부 경로·토큰 패턴이 검출되면 throw한다(계약 테스트 고정).
+14. **⛔ 공개 샘플 페이지에는 산출물만 있다.** 원가·근거·내부 식별자·개발 용어 0. noindex + 만료(발송 성공 시각 기산) + 파기(`purged_at`) — 만료·파기 건은 404와 같은 안내를 준다.
+15. **⛔ DM 발행은 CT 직접 호출이라 미차감이다.** 라우트를 타면 30크레딧이 차감된다. 내부 발행 함수는 `companyId`가 `OUTREACH_COMPANY_ID`와 같은지 스스로 확인하고 아니면 던진다.
+16. **미리보기와 발송본은 같은 조립 함수를 쓴다.** 두 벌이 되는 순간 "화면에서 본 것과 다른 메일"이 나간다.
+17. **자사 수신은 안전장치가 아니다.** Harold가 포워딩하면 최종 수신자는 외부다 — 법·저작권·품질 축은 하나도 면제되지 않는다.
+
+---
+
+## 3) 현재 구조 — 파일별 소유
+
+| 파일 | 소유하는 것 |
+|---|---|
+| `packages/backend/src/utils/sales-outreach-jobs.ts` | **잡 상태머신 전량** — 등록 · 크롤 · 인용 재대조 · 확정(사람 게이트) · 제작 루프 · 발송 · 수신 확인 · 전달 표시 · 문안 편집 · 재조립 · 공개 페이지 조회 · 일괄 등록·순차 체인 · 목록 |
+| `packages/backend/src/utils/sales-outreach-produce.ts` | 산출물 제작 작업 함수 — 가드 이미지 fetch · 인물 판정(vision) · 템플릿 선택 · 누끼·합성 · DM 발행 · **제안 메일 조립(블록 레시피)** |
+| `packages/backend/src/utils/sales-outreach-style.ts` | 스타일 가이드 **단일 상수**(`getActiveStyleGuide()`가 유일 진입점). 샘플 세트 학습 반영 = 이 파일 하나 교체 |
+| `packages/backend/src/utils/sales-outreach-bulk.ts` | 엑셀 양식 생성(ExcelJS · 예시·업종 드롭다운 포함) + 업로드 파싱(SheetJS · 행별 거절 사유) |
+| `packages/backend/src/utils/sales-outreach-sweeper.ts` | 좀비 잡 정직 종결 · 끊긴 발송 선점 복구(unknown) · 만료 파기. **발송·재시도·재생성 능력 0** |
+| `packages/backend/src/utils/outreach-mailer.ts` | 영업 전용 계정 발신 + 결과 3값(`sent`/`rejected`/`unknown`) 판정 |
+| `packages/backend/src/routes/sales-outreach.ts` | ceo 전용 API(등록·확정·재시도·발송·확인·전달·문안·재조립·양식·일괄·목록). 오류는 분류 후 안전 문구만 |
+| `packages/backend/src/routes/outreach-public.ts` | 공개 샘플 페이지(무인증 · noindex · 만료 판정) |
+| `packages/frontend/src/components/admin/SalesOutreachModal.tsx` | 모달 1창 — 4단계 흐름 + 진행 목록(진행률·산출물 링크) + 대량 업로드 |
+| `packages/backend/src/utils/audit-log.ts` | `isSalesOutreachOperator`(fail-closed 게이트 · 다른 축과 별도 ENV) |
+| `packages/backend/src/utils/__tests__/sales-outreach-invariants.test.ts` | 계약 6건 — 모델명 0 · 오류 원문 미노출 · sweeper 부팅 등재 · 발송 경로 유일 · 내부 URL 미주입 · fail-closed |
+
+**재사용한 기존 자산(새로 만들지 않았다)**: 가드 크롤(`dm-brand-extractor`) · AI 호출(`services/ai.ts`) · 누끼·합성(`image-studio` + rembg) · DM 생성·발행(`dm-ai`·`dm-builder`) · 이메일 렌더러(`email/email-section-renderer` 12블록) · 혜택 차단(`copy-benefit-detector`) · 업종 SSOT(`industry-codes`) · 엑셀 응답 헤더(`xlsx-writer`).
+
+---
+
+## 4) 운영에 필요한 설정
+
+| ENV | 뜻 | 없으면 |
+|---|---|---|
+| `SALES_OUTREACH_ALLOWED_USERS` | 사용 허용 슈퍼관리자 login_id(기본 `ceo`) | 전부 차단(fail-closed) |
+| `OUTREACH_COMPANY_ID` / `OUTREACH_USER_ID` | 내부 산출물 귀속 회사·사용자(주식회사 인비토 / mobile) | 기능 전체가 "준비 안 됨"으로 정직 거절 |
+| `OUTREACH_SMTP_USER` / `OUTREACH_SMTP_PASS` | 영업 전용 발신 계정(hanjul@invitocorp.com) | 발송만 잠김(제작은 정상) |
+| `OUTREACH_MAIL_TO` | 수신함(미설정 = `INVITO_INFO.email`) | 기본값 사용 |
+| `OUTREACH_UNSUB_NOTICE` | 메일 하단 수신거부 안내 문구 | 발송 잠김(원칙 3) |
+
+테이블 2개(`sales_outreach_jobs` · `sales_outreach_assets`) — 컬럼은 설계서 §15-7. DDL은 **코드 배포 뒤** 실행한다.
+
+---
+
+## 5) 이력 색인
+
+| 시점 | 무엇 | 근거 |
+|---|---|---|
+| 2026-07-31 | 1차 구상·설계서 작성(리스트 일괄 + 승인 큐 + 직접 발송). 샘플 세트 대기로 중단 | 설계서 §1~§14 |
+| 2026-08-24 | **v2 수렴** — 5역할 브레인스토밍(1차 의견 → 교차 토론 1R → 회의론자 최종 검증 H1~H19). 진입 형태·발신 경로·메일 구조·이미지 흐름·혜택 처리·범위 6쟁점 판정 | 설계서 §15-1~§15-8 |
+| 2026-08-24 | Harold 조정 3건 — 타사 이미지 허용(+고지 문구·보강 3종) · 이미지 자동 선정 · 발신 계정 `hanjul@invitocorp.com` 신설 | 설계서 §15-2 |
+| 2026-08-24 | 코드 전량 구현 + Codex 적대 검증 3라운드(high 6건 전량 수용 정정) · 커밋 `4ca769e7` | 설계서 §15-9-1 |
+| 2026-08-24 | 엑셀 대량 업로드 + 진행 목록(진행률·산출물 링크·메일 미리보기) · 커밋 `c5c0862e` | 설계서 §15-9-2 |
+
+**뒤집힌 판단**: 0731의 "타사 사진 원본 삽입 금지"(§7)는 0824 Harold 확정으로 **대체**됐다 — 고지 문구 + 인물 제외 + 만료·파기를 조건으로 허용한다. 로고 픽셀 금지만 남는다. / 0731의 "다크 화면 의무"(§4)는 폐기 — 부모(슈퍼관리자)가 라이트라 자식 창도 라이트다(미리보기 구역만 다크 액자).
+
+**축 밖 부채**: [B-0824-2](../status/BUGS.md)(무가드 브랜드 추출) · [B-0824-3](../status/BUGS.md)(이미지 스튜디오 사설 IP 필터) · 설계서 §15-9-1 medium 2건(fetch deadline에 DNS 미포함 · 모달 폴링 미직렬화).

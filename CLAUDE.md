@@ -159,7 +159,7 @@
       [흐름] 작성 → tsc 0 + 자가 grep → **내 적대 검토** → Codex → 정정 → 표준 종료 멘트.
       [범위 — 0804 확정] **돈·국세청 문서·DB 마이그레이션 경로에만.** UI·React 상호작용은 **대상 제외**(수치 근거 = memory `feedback_codex_scope_write_path_or_ddl_only`).
       [종료 조건] `critical`·`high`가 0이면 종료. `medium` 이하는 SoT 문서에 등재만 하고 넘어간다. **라운드 최대 2회** — 넘기면 멈추고 Harold님께 남은 지적과 판단을 보고한다.
-      [면제] typo·주석·메모리·SCHEMA.md·STATUS.md·Harold 명시 면제. [실행 절차] `status/CODEX-RUNBOOK.md`
+      [면제] typo·주석·메모리·SCHEMA.md·STATUS.md·Harold 명시 면제 · **★0825 발송·돈·정산에 닿지 않는 로그성 테이블의 nullable 컬럼 추가(부재 시 코드 폴백 동반)는 DDL이어도 면제**(경위 = memory `feedback_codex_scope_write_path_or_ddl_only`). [실행 절차] `status/CODEX-RUNBOOK.md`
     </RULE>
 
     <RULE id="codex_review_scope_incremental" priority="HIGH">

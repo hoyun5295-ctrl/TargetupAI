@@ -14,7 +14,7 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import {
   answerHelpQuestion, buildCatalogSystem, buildHelpMessages, checkAnswer, isDirectHit, matchJobs, parseModelAnswer,
-  resetHelpQuota, takeHelpQuota,
+  resetHelpQuota, takeHelpQuota, helpReasonLabel, classifyHelpDbError,
   helpQuestionKind, HELP_DAILY_LIMIT, HELP_DIRECT_MARGIN, HELP_MAX_HISTORY, HELP_MINUTE_LIMIT, HELP_REQUEST_PHRASES,
 } from '../help-answer';
 import { FEATURE_CATALOG, toPublicJob, type FeatureJob } from '../../content/feature-catalog';
@@ -252,6 +252,122 @@ describe('도움말 봇 — 답변 조립(모델 경로)', () => {
     resetHelpQuota();
     for (let i = 0; i < HELP_DAILY_LIMIT; i++) expect(takeHelpQuota(c, new Date(now.getTime() + i * 60000))).toBe(true);
     expect(takeHelpQuota(c, new Date(now.getTime() + HELP_DAILY_LIMIT * 60000))).toBe(false);
+  });
+});
+
+/**
+ * ★ 2026-08-25 재시도·사유 (Harold 접수 "못 답함이 자꾸 생기면 어떻게 하냐").
+ * 0824 운영 실측 — 20:19 못 답함 건은 모델이 답을 만들었는데(성공 기록·출력 210토큰) 계약·출구 검사가
+ * 조용히 버린 것이었고, 사유가 어디에도 안 남아 원인을 특정할 수 없었다.
+ *   ① 계약·출구 위반은 위반 사유를 모델에 되먹여 같은 호출 안에서 1회 재시도한다
+ *   ② 모델이 스스로 모른다고 한 것(jobs·answer 모두 빈 값)은 위반이 아니다 — 재시도하지 않는다
+ *   ③ 사유는 코드로만 남는다 — 외부 오류 원문(모델명 포함 가능)을 응답·DB에 싣지 않는다
+ *   ④ 사유 코드 → 화면 한글 라벨 변환은 서버 CT 하나가 소유한다(질문 이력 탭이 그대로 그린다)
+ */
+describe('도움말 봇 — 재시도·사유(2026-08-25)', () => {
+  beforeEach(() => resetHelpQuota());
+
+  const ok = (jobs: string[], answer: string) => JSON.stringify({ jobs, answer });
+
+  it('계약 위반(산문 응답)이면 위반 사유를 되먹여 1회 재시도한다', async () => {
+    const calls: { role: string; content: string }[][] = [];
+    const r = await answerHelpQuestion({
+      companyId: '00000000-0000-0000-0000-000000000031', question: '고유질문 어떻게 해요 (재시도1)', catalog: TIE_CATALOG,
+      callModel: async (_system, messages) => {
+        calls.push(messages);
+        if (calls.length === 1) return { text: '"동점 작업 가"를 누르세요.', inputTokens: 10, outputTokens: 5 };
+        return { text: ok(['tie-a'], '"동점 작업 가"를 누르고 순서대로 진행하세요.'), inputTokens: 10, outputTokens: 5 };
+      },
+    });
+    expect(calls.length).toBe(2);
+    expect(r.answered).toBe(true);
+    expect(r.jobs[0]?.id).toBe('tie-a');
+    // 2회차 대화 = 원 질문 + 1회차 응답(assistant) + 위반 사유 되먹임(user)
+    const second = calls[1];
+    expect(second.length).toBe(3);
+    expect(second[1]).toEqual({ role: 'assistant', content: '"동점 작업 가"를 누르세요.' });
+    expect(second[2].role).toBe('user');
+    expect(second[2].content).toContain('JSON');
+  });
+
+  it('출구 위반(혜택 표현)도 재시도 대상이고, 되먹임이 위반 종류를 짚는다', async () => {
+    const calls: { role: string; content: string }[][] = [];
+    const r = await answerHelpQuestion({
+      companyId: '00000000-0000-0000-0000-000000000032', question: '고유질문 어떻게 해요 (재시도2)', catalog: TIE_CATALOG,
+      callModel: async (_system, messages) => {
+        calls.push(messages);
+        if (calls.length === 1) return { text: ok(['tie-a'], '"동점 작업 가"에서 보내면 10% 할인이 붙습니다.'), inputTokens: 10, outputTokens: 5 };
+        return { text: ok(['tie-a'], '"동점 작업 가"에서 순서대로 진행하세요.'), inputTokens: 10, outputTokens: 5 };
+      },
+    });
+    expect(calls.length).toBe(2);
+    expect(r.answered).toBe(true);
+    expect(calls[1][2].content).toContain('혜택');
+  });
+
+  it('두 번 다 위반이면 못 답함으로 끝나고 마지막 사유가 남는다', async () => {
+    let called = 0;
+    const r = await answerHelpQuestion({
+      companyId: '00000000-0000-0000-0000-000000000033', question: '고유질문 어떻게 해요 (재시도3)', catalog: TIE_CATALOG,
+      callModel: async () => { called++; return { text: ok(['tie-a'], '지금 가입하면 20% 할인 쿠폰을 드립니다.'), inputTokens: 10, outputTokens: 5 }; },
+    });
+    expect(called).toBe(2);
+    expect(r.answered).toBe(false);
+    expect(r.reason?.startsWith('exit:benefit')).toBe(true);
+    expect(r.jobs.length).toBeGreaterThan(0); // 후보 카드 폴백은 유지
+  });
+
+  it('모델이 스스로 모른다고 하면(jobs·answer 모두 빈 값) 재시도하지 않는다', async () => {
+    let called = 0;
+    const r = await answerHelpQuestion({
+      companyId: '00000000-0000-0000-0000-000000000034', question: '고유질문 어떻게 해요 (재시도4)', catalog: TIE_CATALOG,
+      callModel: async () => { called++; return { text: ok([], ''), inputTokens: 10, outputTokens: 2 }; },
+    });
+    expect(called).toBe(1);
+    expect(r.answered).toBe(false);
+    expect(r.reason).toBe('contract:no-answer');
+  });
+
+  it('모델 호출 실패는 원문 없이 model-error 코드로만 남는다(응답·DB에 외부 메시지 금지)', async () => {
+    const r = await answerHelpQuestion({
+      companyId: '00000000-0000-0000-0000-000000000035', question: '고유질문 어떻게 해요 (재시도5)', catalog: TIE_CATALOG,
+      callModel: async () => { throw new Error('upstream detail with internal names'); },
+    });
+    expect(r.answered).toBe(false);
+    expect(r.reason).toBe('model-error');
+  });
+
+  /**
+   * ★ Codex 적대 1R high 회귀 고정 — PG의 42703 INSERT 오류 메시지는
+   * column "reason" of relation "help_questions" does not exist 형태라 'relation' 문자열 판정에도 걸린다.
+   * 문자열 순서로 가르면 컬럼 부재가 테이블 부재로 오인돼 레거시 INSERT 폴백에 영영 못 간다.
+   * 판정은 SQLSTATE 우선(42703=column · 42P01=relation) 분류기 하나가 소유한다.
+   */
+  it('DB 오류 분류: 42703의 "of relation" 메시지를 테이블 부재로 오인하지 않는다', () => {
+    // 실제 PG 메시지 형태 그대로 주입 — INSERT의 컬럼 부재(코드+겹치는 메시지)
+    expect(classifyHelpDbError({ code: '42703', message: 'column "reason" of relation "help_questions" does not exist' })).toBe('missing-column');
+    // 테이블 부재
+    expect(classifyHelpDbError({ code: '42P01', message: 'relation "help_questions" does not exist' })).toBe('missing-relation');
+    // 코드가 벗겨진 래핑 오류 — 메시지 폴백에서도 column을 먼저 본다
+    expect(classifyHelpDbError({ message: 'column "reason" of relation "help_questions" does not exist' })).toBe('missing-column');
+    expect(classifyHelpDbError({ message: 'column h.reason does not exist' })).toBe('missing-column');
+    expect(classifyHelpDbError({ message: 'relation "help_questions" does not exist' })).toBe('missing-relation');
+    // 무관한 오류
+    expect(classifyHelpDbError({ code: '23502', message: 'null value in column "question"' })).toBe('other');
+    expect(classifyHelpDbError(new Error('connection refused'))).toBe('other');
+    expect(classifyHelpDbError(null)).toBe('other');
+  });
+
+  it('사유 코드 → 화면 라벨 변환을 서버가 소유한다', () => {
+    expect(helpReasonLabel('quota')).toBe('질문 한도 초과');
+    expect(helpReasonLabel('model-error')).toBe('AI 호출 실패');
+    expect(helpReasonLabel('contract:json')).toBe('응답 형식 위반');
+    expect(helpReasonLabel('contract:no-answer')).toBe('원장에 답 없음');
+    expect(helpReasonLabel('contract:no-grounded-job')).toBe('기능 지목 실패');
+    expect(helpReasonLabel('exit:benefit:할인')).toBe('혜택 표현 차단');
+    expect(helpReasonLabel('exit:path:/customers')).toBe('경로 표기 차단');
+    expect(helpReasonLabel(null)).toBeNull();
+    expect(helpReasonLabel('')).toBeNull();
   });
 });
 

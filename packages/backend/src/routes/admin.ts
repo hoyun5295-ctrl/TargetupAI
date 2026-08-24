@@ -53,7 +53,7 @@ import { grantFreeTrial } from '../utils/basic-trial';
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
 import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, diffFields } from '../utils/audit-log';
-import { helpQuestionKind, HELP_REQUEST_PHRASES } from '../utils/help-answer';
+import { classifyHelpDbError, helpQuestionKind, helpReasonLabel, HELP_REQUEST_PHRASES } from '../utils/help-answer';
 // ★ 2026-07-01: 예측 일괄 분석·차감 수동 트리거 (9시 대기 없이 검증·복구·시연)
 import { runPredictiveBatchNow } from '../utils/predictive-worker';
 import { sendTypeLabel } from '../utils/send-type-axis';
@@ -4556,7 +4556,7 @@ router.get('/help-questions', authenticate, requireSuperAdmin, async (req: Reque
 
     const countRes = await query(`SELECT COUNT(*) AS total FROM help_questions h ${whereClause}`, params);
     const listRes = await query(
-      `SELECT h.id, h.company_id, h.path, h.question, h.matched_ids, h.answered, h.created_at,
+      `SELECT h.id, h.company_id, h.path, h.question, h.matched_ids, h.answered, h.reason, h.created_at,
               c.company_name, u.name AS user_name, u.login_id AS user_login
          FROM help_questions h
          JOIN companies c ON c.id = h.company_id
@@ -4573,14 +4573,22 @@ router.get('/help-questions', authenticate, requireSuperAdmin, async (req: Reque
       total,
       totalPages: Math.max(1, Math.ceil(total / Number(limit))),
       page: Number(page),
-      // kind = 화면이 "기능 요청"과 "못 답함"을 다르게 그리는 근거. 판정은 서버 레지스트리 하나다
-      questions: listRes.rows.map((r: any) => ({ ...r, kind: helpQuestionKind(r.question) })),
+      // kind = 화면이 "기능 요청"과 "못 답함"을 다르게 그리는 근거. 판정은 서버 레지스트리 하나다.
+      // reason_label(★0825) = 못 답함 사유의 한글 라벨 — 변환 소유는 helpReasonLabel CT 하나다
+      questions: listRes.rows.map((r: any) => ({
+        ...r,
+        kind: helpQuestionKind(r.question),
+        reason_label: r.answered ? null : helpReasonLabel(r.reason),
+      })),
     });
   } catch (err: any) {
-    const msg = String(err?.message || '');
-    // help_questions는 DDL 실행 대기 상태일 수 있다 — 500 대신 마이그레이션 안내(db_alter_safety_net)
-    if (msg.includes('relation') && msg.includes('does not exist')) {
+    // DDL 대기 창 — 500 대신 마이그레이션 안내(db_alter_safety_net). ⛔ 문자열 순서 판정 금지 — 분류는 CT 하나(Codex 적대 1R)
+    const kind = classifyHelpDbError(err);
+    if (kind === 'missing-relation') {
       return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: help_questions 테이블을 먼저 생성해 주세요.' });
+    }
+    if (kind === 'missing-column') {
+      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: help_questions ALTER 1건(reason) 실행 요청.' });
     }
     console.error('[admin/help-questions] 조회 실패:', err);
     return res.status(500).json({ success: false, error: '질문 이력을 불러오지 못했습니다.' });

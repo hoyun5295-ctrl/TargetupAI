@@ -19,6 +19,10 @@
  *   모델은 **어느 작업인지 가리기 어려울 때(1·2순위 점수 차가 작을 때)와 본문 없는 작업**에만 쓴다.
  * ★ 2026-08-22(2) 관련 기능은 id가 아니라 **화면 이름(title)** 으로 프롬프트에 넣는다 (docs §10-1 ②).
  *   영문 id(`quick-campaign`)를 넣었더니 모델이 "퀵 캠페인"이라는 없는 이름을 지어냈다. 구현 결함이었다.
+ * ★ 2026-08-25 재시도·사유 (docs §10-7 · 0824 운영 실측 "못 답함" 원인 불명 건에서):
+ *   계약·출구 위반은 위반 사유를 모델에 되먹여 **같은 호출 안에서 1회만 재시도**한다(확률성 실패가 대부분 여기서 사라진다).
+ *   모델이 스스로 모른다고 한 것(no-answer)·한도·호출 실패는 재시도 대상이 아니다.
+ *   거절 사유는 **코드로만** 밖으로 나간다 — 외부 오류 원문(모델명이 섞일 수 있다)은 서버 로그에만 남긴다.
  *
  * 과금 = 무료. `CREDIT_COST_MAP`에 등록하지 않는다(미등록 source = 0). 기록만 `ai_call_log`에 `help-ask`로 남긴다(원가 실측).
  * 남용 방지 = 캐시(5분·단발 질문만) · 회사당 일 30회·분 3회(초과 시 잠그지 않고 후보 카드만) · 입력 240자 · 후속 문답 3쌍.
@@ -250,7 +254,7 @@ export interface HelpAnswer {
   jobs: PublicFeatureJob[];
   /** 모델을 불렀는가(원가 실측·디버그) */
   usedModel: boolean;
-  /** 거절 사유(내부 로그용) */
+  /** 거절 사유 코드(★0825 질문 이력·PM2 로그가 같이 쓴다). 외부 오류 원문은 담지 않는다 — 라벨 변환 = helpReasonLabel */
   reason?: string;
 }
 
@@ -264,6 +268,8 @@ export function isDirectHit(top: MatchHit[]): boolean {
 /**
  * 모델 응답(JSON 계약)을 검증해 카드와 답으로 바꾼다. **id 실존이 카드의 조건이다** — 모델이 지어낸
  * id는 조용히 버리고, 남는 카드가 없으면 답 전체를 버린다(안내문만 있고 갈 곳 없는 답은 절반짜리다).
+ * ★0825 사유를 가른다 — `no-answer`(모델이 계약대로 "모른다"를 낸 것 · 위반이 아니라 재시도 안 함) vs
+ * `no-grounded-job`(안내문은 있는데 근거 카드가 없거나 지어낸 id뿐 · 위반이라 재시도 대상).
  */
 export function parseModelAnswer(
   text: string, catalog: readonly FeatureJob[],
@@ -281,8 +287,77 @@ export function parseModelAnswer(
     .filter((j): j is FeatureJob => !!j)
     .slice(0, 3)
     .map((j) => toPublicJob(j));
+  if (ids.length === 0 && !answer) return { ok: false, reason: 'no-answer', jobs: [], answer: '' };
   if (jobs.length === 0 || !answer) return { ok: false, reason: 'no-grounded-job', jobs: [], answer: '' };
   return { ok: true, jobs, answer };
+}
+
+/**
+ * 거절 사유 코드 → 질문 이력 화면(ceo 전용)의 한글 라벨. 소유는 이 CT 하나다 — 화면이 코드를 해석하지 않는다.
+ * 사유 코드에 외부 오류 원문은 없다(answerHelpQuestion이 `model-error` 코드로만 접는다).
+ */
+export function helpReasonLabel(reason?: string | null): string | null {
+  if (!reason) return null;
+  if (reason === 'quota') return '질문 한도 초과';
+  if (reason.startsWith('model-error')) return 'AI 호출 실패';
+  if (reason === 'contract:json') return '응답 형식 위반';
+  if (reason === 'contract:no-answer') return '원장에 답 없음';
+  if (reason === 'contract:no-grounded-job') return '기능 지목 실패';
+  if (reason.startsWith('exit:path')) return '경로 표기 차단';
+  if (reason.startsWith('exit:benefit')) return '혜택 표현 차단';
+  if (reason.startsWith('exit:model-name')) return '내부 명칭 차단';
+  if (reason.startsWith('exit:dash')) return '표기 규칙 차단';
+  if (reason.startsWith('exit:')) return '출구 검사 차단';
+  return reason;
+}
+
+/**
+ * help_questions 접근 오류 분류 (★0825 · Codex 적대 1R high 정정 — 소비처 = routes/help.ts · routes/admin.ts).
+ *
+ * ⛔ 문자열 포함 순서로 가르면 안 된다 — PG의 42703 INSERT 메시지는
+ *   column "reason" of relation "help_questions" does not exist 형태라 'relation'·'does not exist' 판정에도 걸려,
+ *   컬럼 부재가 테이블 부재로 오인되고 레거시 INSERT 폴백에 영영 못 간다(코드 선배포·ALTER 후실행 창에서
+ *   /ask 이력이 조용히 유실되고 /questions가 테이블이 있는데도 503을 낸다).
+ * 판정은 SQLSTATE가 1순위(42703=undefined_column · 42P01=undefined_table)이고, 코드가 벗겨진 래핑 오류만
+ * 메시지 폴백을 타되 column을 먼저 본다.
+ */
+export type HelpDbErrorKind = 'missing-relation' | 'missing-column' | 'other';
+export function classifyHelpDbError(err: any): HelpDbErrorKind {
+  const code = String(err?.code || '');
+  if (code === '42703') return 'missing-column';
+  if (code === '42P01') return 'missing-relation';
+  if (code) return 'other'; // 다른 SQLSTATE가 확정돼 있으면 메시지로 재해석하지 않는다
+  const msg = String(err?.message || '');
+  if (!msg.includes('does not exist')) return 'other';
+  if (msg.includes('column')) return 'missing-column';
+  if (msg.includes('relation')) return 'missing-relation';
+  return 'other';
+}
+
+/**
+ * 위반 사유를 모델에 되먹이는 재시도 문구 (★0825 · 원칙 = 거절 사유는 모델과 로그 양쪽으로 흘린다).
+ * 대상은 계약·출구 위반뿐이다 — 스스로 "모른다"고 한 답(no-answer)·한도·호출 실패는 재시도하지 않는다.
+ */
+function retryFeedback(reason: string): string {
+  if (reason === 'contract:json') {
+    return '방금 응답은 JSON 형식이 아니었습니다. 다른 글자 없이 {"jobs": ["기능 id"], "answer": "안내 문장"} JSON 하나만 다시 출력하세요.';
+  }
+  if (reason === 'contract:no-grounded-job') {
+    return '방금 응답의 jobs가 비었거나 [기능 정의]에 없는 id였습니다. 안내에 쓴 기능의 id를 [기능 정의]에 있는 그대로 jobs에 담아 같은 안내를 다시 출력하세요. 정말 답할 수 없으면 {"jobs": [], "answer": ""}만 출력하세요.';
+  }
+  if (reason.startsWith('exit:path')) {
+    return '방금 답에 화면 주소가 있었습니다. 주소 없이 같은 안내를 다시 출력하세요. 이동은 jobs의 id가 대신합니다.';
+  }
+  if (reason.startsWith('exit:benefit')) {
+    return '방금 답에 할인·금액·쿠폰·무료 같은 혜택 표현이 있었습니다. 혜택 표현 없이 같은 안내를 다시 출력하세요.';
+  }
+  if (reason.startsWith('exit:model-name')) {
+    return '방금 답에 내부 시스템 이름이 있었습니다. 그 단어 없이 같은 안내를 다시 출력하세요.';
+  }
+  if (reason.startsWith('exit:dash')) {
+    return '방금 답에 긴 줄표 문자가 있었습니다. 줄표 없이 같은 안내를 다시 출력하세요.';
+  }
+  return '방금 응답이 출력 규칙을 어겼습니다. [기능 정의]와 출력 규칙을 지켜 같은 안내를 다시 출력하세요.';
 }
 
 export async function answerHelpQuestion(opts: {
@@ -328,29 +403,47 @@ export async function answerHelpQuestion(opts: {
     }
   }
 
+  // ★0825 계약·출구 위반은 위반 사유를 되먹여 1회만 재시도한다. 확률성 실패(JSON 흘림·id 누락·표기 위반)가
+  //   대부분 2회차에서 통과한다. 호출 실패·"모른다"(no-answer)는 재시도 대상이 아니다.
   const call = opts.callModel || callAnthropic;
-  let text = '';
-  let inputTokens = 0;
-  let outputTokens = 0;
-  try {
-    const r = await call(system, messages);
-    text = r.text; inputTokens = r.inputTokens; outputTokens = r.outputTokens;
-  } catch (err: any) {
-    await recordAiCall({ companyId: opts.companyId, source: HELP_SOURCE, modelType: 'sonnet', success: false });
-    return { answered: false, answer: '', direct: false, jobs: fallbackJobs, usedModel: true, reason: `model-error:${err?.message || 'unknown'}` };
+  let convo = messages;
+  let reason = '';
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    let text = '';
+    let inputTokens = 0;
+    let outputTokens = 0;
+    try {
+      const r = await call(system, convo);
+      text = r.text; inputTokens = r.inputTokens; outputTokens = r.outputTokens;
+    } catch (err: any) {
+      // 원문(모델 id가 섞일 수 있다)은 서버 로그에만 — 밖으로는 코드 하나
+      console.error('[help] 모델 호출 실패:', err?.message || err);
+      await recordAiCall({ companyId: opts.companyId, source: HELP_SOURCE, modelType: 'sonnet', success: false });
+      return { answered: false, answer: '', direct: false, jobs: fallbackJobs, usedModel: true, reason: 'model-error' };
+    }
+    await recordAiCall({ companyId: opts.companyId, source: HELP_SOURCE, modelType: 'sonnet', inputTokens, outputTokens, costWon: 0 });
+
+    // 2겹: JSON 계약 + id 실존. 모델이 "모른다"(jobs·answer 모두 빈 값)면 지어내지 않은 것이다 — 문의 남기기로 보낸다
+    const parsed = parseModelAnswer(text, catalog);
+    if (parsed.ok) {
+      // 3겹: 출구 검사
+      const check = checkAnswer(parsed.answer, allowedPathSet(catalog));
+      if (check.ok) {
+        if (cacheKey) setCachedResponse(cacheKey, text);
+        return { answered: true, answer: parsed.answer, direct: false, jobs: parsed.jobs, usedModel: true };
+      }
+      reason = `exit:${check.reason}`;
+    } else {
+      reason = `contract:${parsed.reason}`;
+    }
+    if (reason === 'contract:no-answer') break; // 계약을 지킨 "모른다" — 위반이 아니다
+    if (attempt === 1) {
+      convo = [...convo];
+      if (text.trim()) convo.push({ role: 'assistant', content: text });
+      convo.push({ role: 'user', content: retryFeedback(reason) });
+    }
   }
-  await recordAiCall({ companyId: opts.companyId, source: HELP_SOURCE, modelType: 'sonnet', inputTokens, outputTokens, costWon: 0 });
-
-  // 2겹: JSON 계약 + id 실존. 모델이 "모른다"(jobs 빈 배열)면 지어내지 않은 것이다 — 문의 남기기로 보낸다
-  const parsed = parseModelAnswer(text, catalog);
-  if (!parsed.ok) return { answered: false, answer: '', direct: false, jobs: fallbackJobs, usedModel: true, reason: `contract:${parsed.reason}` };
-
-  // 3겹: 출구 검사
-  const check = checkAnswer(parsed.answer, allowedPathSet(catalog));
-  if (!check.ok) return { answered: false, answer: '', direct: false, jobs: fallbackJobs, usedModel: true, reason: `exit:${check.reason}` };
-
-  if (cacheKey) setCachedResponse(cacheKey, text);
-  return { answered: true, answer: parsed.answer, direct: false, jobs: parsed.jobs, usedModel: true };
+  return { answered: false, answer: '', direct: false, jobs: fallbackJobs, usedModel: true, reason };
 }
 
 async function callAnthropic(
@@ -368,9 +461,15 @@ async function callAnthropic(
   } as any);
   const text = (response.content || []).find((b: any) => b?.type === 'text')?.text || '';
   const usage = response.usage || {};
+  const cacheRead = Number(usage.cache_read_input_tokens || 0);
+  const cacheCreated = Number(usage.cache_creation_input_tokens || 0);
+  // 합산 기록으로는 생성(정가 1.25배)과 읽기(정가 0.1배)가 안 갈린다 — 내역은 PM2 로그로(services/ai.ts와 같은 방식)
+  console.log(`[help] 모델 호출 (Cache · read ${cacheRead}, created ${cacheCreated}, in ${usage.input_tokens || 0}, out ${usage.output_tokens || 0})`);
   return {
     text,
-    inputTokens: Number(usage.input_tokens || 0) + Number(usage.cache_read_input_tokens || 0),
+    // ★0825 캐시 "생성"분(cache_creation)도 합산한다 — 0824 실측에서 이 값(질문당 약 2.9만 토큰, 가장 비싼 부분)이
+    //   기록에서 통째로 빠져 원가 실측 원장이 실제보다 적게 적히고 있었다. 원장 목적 = 원가 실측(docs §4-7).
+    inputTokens: Number(usage.input_tokens || 0) + cacheRead + cacheCreated,
     outputTokens: Number(usage.output_tokens || 0),
   };
 }

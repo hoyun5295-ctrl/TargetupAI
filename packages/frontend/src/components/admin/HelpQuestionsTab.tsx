@@ -19,6 +19,8 @@ interface HelpQuestionRow {
   answered: boolean;
   /** 서버 판정(문구 레지스트리): 사람이 친 질문인가, 요청 버튼의 고정 문구인가 */
   kind: 'request' | 'question';
+  /** 못 답함 사유의 한글 라벨(★0825) — 변환 소유는 서버 CT. 답함·구 데이터는 null */
+  reason_label?: string | null;
   created_at: string;
 }
 
@@ -140,7 +142,12 @@ export default function HelpQuestionsTab({ companies }: Props) {
                     ? <span className="inline-flex px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-medium">기능 요청</span>
                     : r.answered
                       ? <span className="inline-flex px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium">답함</span>
-                      : <span className="inline-flex px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-xs font-medium">못 답함</span>}
+                      : (
+                        <span className="inline-flex flex-col items-start gap-0.5">
+                          <span className="inline-flex px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-xs font-medium">못 답함</span>
+                          {r.reason_label ? <span className="text-[11px] text-gray-400">{r.reason_label}</span> : null}
+                        </span>
+                      )}
                 </td>
               </tr>
             ))}
