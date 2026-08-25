@@ -18,7 +18,7 @@ import {
 } from '../../utils/console-ui';
 import {
   approveAgencyRequest, cancelAgencyRequest, fetchAgencyRequest, formatWhen, isApprovable,
-  isCancelable, isEditableStatus, rescheduleAgencyRequest, STATUS_LABEL, STATUS_TONE,
+  isCancelable, isEditableStatus, rescheduleAgencyRequest, SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
   toLocalInput, updateAgencyContent, type AgencySendEvent, type AgencySendRequest,
 } from './agency-send-api';
 
@@ -182,7 +182,8 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
             <div className="min-w-0">
               <h3 className={CUI_MODAL_TITLE}>{req?.fileName || '대행발송'}</h3>
               <p className={CUI_MODAL_DESC}>
-                {req ? `${formatWhen(req.requestedAt)} · ${req.recipientCount.toLocaleString()}건 · ${req.messageType}` : ''}
+                {/* ★0826 §18: 출처는 SOURCE_LABEL 단일표. 발신 이메일 주소 전문은 이력(payload)에서만 보인다 */}
+                {req ? `${SOURCE_LABEL[req.source] || SOURCE_LABEL.screen} · ${formatWhen(req.requestedAt)} · ${req.recipientCount.toLocaleString()}건 · ${req.messageType}` : ''}
               </p>
             </div>
           </div>
@@ -279,9 +280,12 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                         <span className="text-neutral-800">
                           {/* ⛔ 모르는 항목에 내부 이름을 그대로 쓰지 않는다(고객 화면이다) */}
                           {/* ★2026-08-25 링크 승인은 어느 담당자 번호가 눌렀는지까지 보여준다(부인 방지 기록) */}
+                          {/* ★2026-08-26 §18 이메일 접수는 어느 주소의 메일인지까지 보여준다(모르는 발송을 승인하지 않게) */}
                           {e.kind === 'approved' && e.payload?.via === 'link'
                             ? `문자 속 주소에서 승인했습니다 (담당자 ${e.payload?.phone || '번호 미상'})`
-                            : EVENT_LABEL[e.kind] || '진행 상황을 기록했습니다'}
+                            : e.kind === 'received' && e.payload?.via === 'email'
+                              ? `메일로 접수했습니다 (${e.payload?.fromEmail || '주소 미상'})`
+                              : EVENT_LABEL[e.kind] || '진행 상황을 기록했습니다'}
                           {e.payload?.round ? ` (${e.payload.round}번째)` : ''}
                         </span>
                       </li>

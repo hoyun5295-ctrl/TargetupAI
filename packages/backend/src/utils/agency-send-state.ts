@@ -88,10 +88,32 @@ export function needsQueueCancel(status: AgencySendStatus): boolean {
   return status === 'queued';
 }
 
+/**
+ * ★2026-08-26 §18-6 이메일 접수 중복(내용 4요소) 차단 집합.
+ * 차단 = 발송 전 전 상태 + `queued` 중 `requested_at` 미도래. 허용 = `expired`·`cancelled`·시각이 지난 `queued`.
+ * ⛔ `queued`를 종결로 읽으면 **아직 나가지 않은 예약과 같은 명단이 한 벌 더 접수된다**(이중 발송 · 회의론자 필수 2).
+ * ⛔ 아래 SQL 리터럴과 판정 함수는 같은 집합이어야 한다 — 짝 테스트가 고정한다(NOT_CANCELABLE_SQL 규율).
+ */
+export const EMAIL_DUP_ALLOWED_TERMINAL: readonly AgencySendStatus[] = ['expired', 'cancelled'] as const;
+export const EMAIL_DUP_BLOCKING_SQL =
+  `(status NOT IN ('expired','cancelled') AND NOT (status = 'queued' AND requested_at <= NOW()))`;
+export function isEmailDupBlocking(status: AgencySendStatus, requestedAt: Date | null | undefined, now: Date): boolean {
+  if ((EMAIL_DUP_ALLOWED_TERMINAL as readonly string[]).includes(status)) return false;
+  if (status === 'queued' && requestedAt && !Number.isNaN(requestedAt.getTime()) && requestedAt.getTime() <= now.getTime()) return false;
+  return true;
+}
+
 // ────────────── 시각 규칙 ──────────────
 
 /** 접수 시각으로부터 최소 이만큼 뒤여야 한다: 1차 검사 + 승인 + 2시간 전 재검사가 들어갈 시간(불변 9) */
 export const MIN_LEAD_MINUTES = 180;
+/**
+ * 이메일 접수 전용 최소 리드타임(★2026-08-26 §18-7). 화면 180은 사람이 앞에 있는 전제다.
+ * 이메일은 메일 지연 + 1분 폴링 + 5분 검사 틱 + 회신 왕복이 끼어 승인 창이 더 필요하다(240 = 승인 창 120분).
+ * ⛔ MIN_LEAD_MINUTES를 겸용하지 마라 — 같은 상수가 뜻 둘을 겸하면 그 사이가 함정이 된다(0823 시각 축 사고).
+ * 집행 지점 = createRequestCore(pre.minLeadMinutes) 하나다. 어댑터에 시각 판정 코드를 두지 않는다.
+ */
+export const EMAIL_MIN_LEAD_MINUTES = 240;
 /** 당일 재검사를 시작하는 지점(발송 2시간 전) */
 export const FINAL_TEST_LEAD_MINUTES = 120;
 /**

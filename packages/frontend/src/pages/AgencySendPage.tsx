@@ -24,7 +24,7 @@ import AgencyOneStepModal from '../components/agency/AgencyOneStepModal';
 import AgencySendDetail from '../components/agency/AgencySendDetail';
 import {
   fetchAgencyRecipients, fetchAgencyRequests, formatWhenRelative, isApprovable, isRedoable,
-  RAIL_STEPS, railFor, STATUS_LABEL, STATUS_TONE,
+  RAIL_STEPS, railFor, SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
   type AgencySendRequest,
 } from '../components/agency/agency-send-api';
 import {
@@ -172,6 +172,16 @@ export default function AgencySendPage() {
     })();
     return () => { alive = false; };
   }, [loadList]);
+
+  // ★2026-08-26 §18: 이메일 접수는 워커가 만든다 — 사람 클릭 없이 생기는 첫 접수라,
+  //   탭에 돌아온 순간만이라도 목록을 맞춘다(visibilitychange 1회 · 주기 폴링은 보류 = 완료 회신의 링크가 진입점).
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && plan?.allowed) loadList();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [plan?.allowed, loadList]);
 
   const upsert = (r: AgencySendRequest) => {
     setRequests((prev) => {
@@ -337,7 +347,8 @@ export default function AgencySendPage() {
                             <span className={`${CUI_PILL_BASE} ${CUI_PILL_TONE[STATUS_TONE[r.status]]} shrink-0`}>{STATUS_LABEL[r.status]}</span>
                           </div>
                           <p className={`${CUI_CELL_META} mt-0.5 truncate`}>
-                            {r.fileName ? '파일 명단' : '직접 입력'} · <span className="tabular-nums">{r.recipientCount.toLocaleString()}</span>명 · {r.messageType}{r.isAd ? ' · 광고' : ''}
+                            {/* ★0826 §18: 출처 라벨 = SOURCE_LABEL 단일표(fileName 유무 추정 폐지 — 이메일 접수도 파일명이 있어 구분이 안 됐다) */}
+                            {SOURCE_LABEL[r.source] || SOURCE_LABEL.screen} · <span className="tabular-nums">{r.recipientCount.toLocaleString()}</span>명 · {r.messageType}{r.isAd ? ' · 광고' : ''}
                           </p>
                         </div>
                         <div className="hidden md:flex flex-1 min-w-0">

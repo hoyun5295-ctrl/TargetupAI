@@ -260,14 +260,14 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
             <div className="max-w-[560px] mx-auto space-y-5">
               <div className="flex items-center justify-between gap-3 rounded-xl border border-indigo-600/15 bg-indigo-50 px-4 py-3">
                 <p className="text-[13px] text-indigo-900 leading-relaxed">
-                  처음이시면 요청서 양식부터 받아 채워 주세요. 제목과 문안, 보낼 시각, 회신번호, 담당자 번호를 적는 한 장짜리입니다.
+                  처음이시면 요청서 양식부터 받아 채워 주세요. 제목과 문안, 보낼 시각, 회신번호, 담당자 번호를 적는 한 장짜리입니다. 수신자 열 이름 칸은 선택이며, 적으면 그 열로 확정됩니다.
                 </p>
                 <a href="/agency-request-form.xlsx" download="대행발송_요청서_양식.xlsx" className={`${CUI_BTN_OUTLINE} shrink-0`}>
                   <Download className="w-[15px] h-[15px]" />양식 내려받기
                 </a>
               </div>
               <FileSlot label="요청서" hint="양식 그대로 채운 엑셀" file={formFile} onFile={replaceFile('form')} accent />
-              <FileSlot label="고객 명단" hint="첫 줄이 열 이름인 엑셀 또는 CSV" file={listFile} onFile={replaceFile('list')} />
+              <FileSlot label="고객 명단" hint="엑셀 또는 CSV(첫 줄이 열 이름이면 그대로, 없어도 받습니다)" file={listFile} onFile={replaceFile('list')} />
               <p className={CUI_HINT}>이미지 문자가 필요하면 다음 화면에서 이미지를 넣을 수 있습니다.</p>
             </div>
           ) : a && (

@@ -17,6 +17,8 @@ import AgentDeployWizard from '../components/admin/AgentDeployWizard'; // 싱크
 import DiagnosisAdminPanel from '../components/admin/DiagnosisAdminPanel'; // ★ 2026-08-16 신규마케팅진단(ceo 전용)
 import HelpQuestionsTab from '../components/admin/HelpQuestionsTab'; // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
 import SalesOutreachModal from '../components/admin/SalesOutreachModal'; // ★ 2026-08-24 AI 영업 아웃리치(ceo 전용 · 모달)
+import AgencyEmailSendersModal from '../components/admin/AgencyEmailSendersModal'; // ★ 2026-08-26 대행발송 허용 발신 이메일(§18)
+import AgencyMailIntakePanel from '../components/admin/AgencyMailIntakePanel'; // ★ 2026-08-26 대행발송 메일 접수 관제(§18)
 import { AUDIT_ACTION_COLOR, AUDIT_ACTION_LABEL, formatAuditDetail } from '../constants/audit-action-labels'; // ★ 2026-08-24 감사 액션 한글화 CT
 import { COMPANY_EMAIL } from '../constants/company';
 import { formatAgentIdLabel } from '../utils/agentLabel'; // ★ 2026-07-27 발송ID 표시 규칙 단일 소스(발급명 병기)
@@ -86,7 +88,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail'>('companies');
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
   const [helpQAccessAllowed, setHelpQAccessAllowed] = useState(false); // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
@@ -3415,6 +3417,31 @@ const handleApproveRequest = async (id: string) => {
     setModal({ type: 'confirm', title, message, onConfirm });
   };
 
+  // ★2026-08-26 §18 대행발송 허용 발신 이메일 — 회사 편집이 열릴 때 활성 주소 수를 채운다(트리거 건수 표기).
+  //   못 센 축은 0이 아니라 null로 둔다(0은 "볼 일 없음"으로 읽혀 조회가 깨진 순간 대기가 사라진다 · LESSONS_FRONTEND).
+  const [agencyEmailModalOpen, setAgencyEmailModalOpen] = useState(false);
+  const [agencyEmailActiveCount, setAgencyEmailActiveCount] = useState<number | null>(null);
+  useEffect(() => {
+    const id = editCompany?.id;
+    setAgencyEmailModalOpen(false);
+    if (!id) { setAgencyEmailActiveCount(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/admin/companies/${id}/agency-send-emails`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        setAgencyEmailActiveCount(data?.success ? (data.senders || []).filter((s: any) => s.is_active).length : null);
+      } catch {
+        if (!cancelled) setAgencyEmailActiveCount(null);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editCompany?.id]);
+
   const showPasswordModal = (password: string, smsSent?: boolean, phone?: string) => {
     setCopied(false);
     setModal({ type: 'password', title: '임시 비밀번호 발급', message: '', password, smsSent, phone });
@@ -4436,7 +4463,7 @@ const handleApproveRequest = async (id: string) => {
               },
               {
                 label: '발송 관리', color: 'emerald',
-                tabs: ['callbacks', 'stats', 'scheduled', 'allCampaigns', 'templates'] as const,
+                tabs: ['callbacks', 'stats', 'scheduled', 'allCampaigns', 'templates', 'agencyMail'] as const,
                 items: [
                   // ★ 2026-08-08 상단 메뉴는 **두 축의 합** — "발신번호 관리에 볼 일 N건"이 여기선 맞는 말이다.
                   //   화면에 보이는 두 탭 뱃지의 합으로 만든다(서버 total을 따로 받으면 뱃지끼리 어긋날 수 있다).
@@ -4446,6 +4473,8 @@ const handleApproveRequest = async (id: string) => {
                   { key: 'allCampaigns', label: '캠페인 관리', onClick: () => loadAllCampaigns() },
                   // ★ 2026-07-09 CRM 캠페인 대행 설계 — 비즈니스+ 업체 접수 요청서 분석 → 제안서 PDF (별도 페이지)
                   { key: 'campaignAgency', label: '캠페인 대행 설계', onClick: () => navigate('/admin/campaign-agency') },
+                  // ★ 2026-08-26 §18 이메일 접수 관제 — 반려·격리 메일의 유일한 노출면
+                  { key: 'agencyMail', label: '대행발송 접수' },
                   { key: 'templates', label: '템플릿 관리' },
                 ],
               },
@@ -8682,6 +8711,22 @@ const handleApproveRequest = async (id: string) => {
                         <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
                       </label>
                     </div>
+                    {/* ★2026-08-26 §18 허용 발신 이메일 — 스위치와 독립(OFF여도 주소는 관리한다). 건수가 곧 상태 표시다 */}
+                    <div className="mt-3 pt-3 border-t border-indigo-100 flex items-center justify-between gap-3">
+                      <p className="text-xs text-gray-500 min-w-0">
+                        이메일 접수: 등록된 주소에서 온 요청서 메일만 자동 접수됩니다.
+                        {editCompany.agencySendEnabled && agencyEmailActiveCount === 0 && (
+                          <span className="ml-1 text-amber-600 font-medium">활성 주소가 0개라 접수 메일이 전부 무시됩니다.</span>
+                        )}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setAgencyEmailModalOpen(true)}
+                        className="shrink-0 text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+                      >
+                        허용 이메일 {agencyEmailActiveCount === null ? '' : `${agencyEmailActiveCount}개 `}관리
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -10421,8 +10466,25 @@ const handleApproveRequest = async (id: string) => {
         </div>
       )}
 
+      {/* ★2026-08-26 §18 대행발송 메일 접수 관제 탭 */}
+      {activeTab === 'agencyMail' && <AgencyMailIntakePanel />}
+
+      {/* ★2026-08-26 §18 허용 발신 이메일 관리 — 회사 편집 모달 밖의 독립 오버레이(z-[60]).
+          확인·알림 모달이 이 아래(문서 뒤쪽)에 렌더되므로 같은 z에서도 위에 뜬다(파일 내 중첩 관례). */}
+      {agencyEmailModalOpen && editCompany && (
+        <AgencyEmailSendersModal
+          companyId={editCompany.id}
+          companyName={editCompany.companyName || ''}
+          show={agencyEmailModalOpen}
+          onClose={() => setAgencyEmailModalOpen(false)}
+          onChanged={(n) => setAgencyEmailActiveCount(n)}
+          showConfirm={showConfirm}
+          showAlert={showAlert}
+        />
+      )}
+
       {/* ===== 커스텀 모달들 ===== */}
-      
+
       {/* 확인 모달 (Confirm) */}
       {modal.type === 'confirm' && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">

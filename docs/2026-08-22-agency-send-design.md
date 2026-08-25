@@ -390,7 +390,11 @@ ALTER TABLE agency_send_requests ADD CONSTRAINT agency_send_requests_status_chec
 
 ## 11) 상태·잔여
 
-- **★2026-08-25(4·5·6) 문안 항목 AI 매핑(§17-6) + 명단 미리보기 엑셀 뷰(§17-7) + 헤더 접수 입구 버튼(§15-6) 코드완료·배포 대기**(§17-6 = Codex 2R approve · §17-7 = 조회만이라 면제 · DDL 0 · 실측은 §17-6·§17-7).
+- **★2026-08-26(2) 이메일 접수(챕터 2) 코드 완료 · 자체 적대 검토 5R 종결(결함 0 라운드 도달 · §18-11-1) · 배포 대기.** 남은 것 = 배포 + DDL 4종(§18-10) + ENV(AGENCY_MAIL_*) + SMTP 발신 실측 + 접속 정책 문의 + 운영 실측 7(§18-12) + SCHEMA.md 등재(DDL 후).
+- **★2026-08-26 이메일 접수 게이트 실측 완료 · POP3 확정판(§18)**. 실측 = IMAP 미지원(POP3S·USER/PASS·APOP 거부) · Authentication-Results 미부착 → **allowlist_only 확정** · UIDL·TOP 지원.
+- **★2026-08-25(9) 이메일 접수 설계 확정 = §18** · Harold 승인. 절차 = COLLAB §1 브레인스토밍(기획·백엔드·프론트엔드·회의론자 · 교차 토론 1R · 회의론자 최종 검증 15건 전부 §18-8 반영). 파서 보강 2건(§18-4 무헤더·0 유실)은 전 입구 공통. BUGS 분리 = B-0825-6·B-0825-7.
+- **★2026-08-25(4·5·6) 배포완료** = 문안 항목 AI 매핑(§17-6 · Codex 2R approve) + 명단 미리보기 엑셀 뷰(§17-7) + 헤더 접수 입구 버튼(§15-6). DDL 0. **남은 것은 운영 실측**(§17-6 3항목 · §17-7 1항목).
+- **다음 축 = 이메일 접수(챕터 2)**. 요청서를 메일로 받아 자동 접수하는 입구다. 접수 코어(`createRequestCore`)는 이미 입구 셋을 전제로 추출돼 있다(§17-1 표 = 화면 접수 · 원스텝 · **예정된 이메일 워커**). 착수 전 브레인스토밍 1회 조건은 **0825(9)에 이행 완료 · 설계 = §18**. 진입점 = §18-2 구조 표 + `routes/agency-send.ts` `createRequestCore`.
 - **★2026-08-25 배포완료** = 화면 개편(§15) · 담당자 링크 승인(§16) · 요청서 원스텝(§17) · 양식 리디자인(§17-5). 남은 것은 **운영 실측뿐**(§16-4 4항목 · §17-4 5항목 · §15 5항목 · Harold 몫). DDL 0.
 - **2026-08-22 Harold 설계 승인.** 크레딧 0 · 인디고 톤 · MMS 포함 · 미끼 노출 확정.
 - **2026-08-22(밤) DDL 실행완료**(information_schema 4행 실측: 컬럼 1 + 테이블 3). SCHEMA.md 등재 완료.
@@ -778,3 +782,215 @@ Codex = 1R needs-attention(high 1 · medium 2 → 전부 정정: 입력 잠금 �
 게이트 = backend·frontend tsc 0 · em-dash·계약 테스트 22건 통과. 실측 = §17-6 실측 ①에서 버튼을 눌러 열 뱃지(수신자=휴대전화번호 · %이름%=고객명)와 6행 값이 파일과 같은지 함께 본다.
 
 배포 후 실측 3: ①직원테스트DB(열=고객명) + %이름% 요청서 업로드 → 확인 화면 문안 항목에 "고객명"이 미리 골라져 있고 "AI가 골랐습니다"가 뜨는가 ②그대로 접수 → 담당자 테스트 문자에 이름이 치환돼 오는가 ③드롭다운을 다른 열로 바꾸면 재분석 후 그 열로 접수되는가.
+
+---
+
+## 18) 이메일 접수 (챕터 2 · 2026-08-25(9) 설계 확정 · Harold 승인 · 구현 미착수)
+
+경위: Harold "hanjullo@invitocorp.com 으로 접수되는 업체들 진행" + "슈퍼관리자 대행발송 업체 지정 자리에 모달을 더해 허용 이메일 주소를 등록하자"(제안 채택). 확정 사실 = 메일은 하이웍스 호스팅 · IMAP 사용 가능 · 앱 비밀번호 발급 가능.
+설계 절차 = COLLAB §1 브레인스토밍(기획·백엔드·프론트엔드·회의론자 · 1차 의견 → 교차 토론 1R → 회의론자 최종 검증). 최종 판정 "이 조건이 채워져야 됩니다" 15건은 전부 §18-8에 반영했다. 파서 보강 2건(§18-4)은 Harold 실물 명단 지적(무헤더 · 앞자리 0 유실)에서 추가됐다.
+
+★2026-08-26 착수 게이트 실측(§18-11)으로 전제 둘이 정정됐다: ①하이웍스 메일은 **IMAP 미지원 · POP3S만**(가비아 고객센터 문서 "POP3 방식만 지원" + 설정 화면 실측 · CAPA 미구현·APOP 거부라 USER/PASS 방식 강제) ②수신 인증 결과 헤더(Authentication-Results)를 **붙이지 않는다**(gmail 외부 메일 헤더 실측 · ARC·DKIM 줄은 발신측 서명이라 수신 검증이 아니다). 이 절은 그 실측을 반영한 **POP3 확정판**이며, 신원 게이트는 §18-11의 조건부였던 **allowlist_only 모드로 확정**됐다.
+
+### 18-1) 한 줄 정의와 경계
+
+**이메일 접수 = 원스텝(§17)의 세 번째 입구다. 화면만 없고 규칙은 같다.**
+
+- 새 접수 종류 · 새 상태 · 정산 새 값 = 0(§12-G 유지). 접수가 생기면 그 뒤는 기존 파이프라인 그대로다(1차 검사 → 담당자 문자 링크 승인 → 당일 검사 → 적재). **메일이 자동이어도 발송은 승인 게이트를 지난다.**
+- ⛔ **반려된 메일은 `agency_send_requests` 행을 만들지 않는다.** intake 원장(§18-2)에만 남는다. 종결 건 명단 잔존 문제(B-0825-6)에 이 축이 기여하는 양을 0으로 만드는 근거다.
+- ⛔ **확정 경로 AI 금지(§17-6 계약)가 이메일 전 구간에 적용된다.** 이메일에는 미리보기가 없어 전 구간이 확정 경로다. 문안 항목·수신자 열 어디에도 AI 추천을 부르지 않는다.
+
+### 18-2) 구조
+
+| 조각 | 소유 | 내용 |
+|---|---|---|
+| 접수 코어 승격 | `utils/agency-send-intake.ts` (신설) | `createRequestCore` · `analyzeOneStep`을 라우트에서 승격(**원본 복사** · 라우트 쪽 정의는 삭제하고 CT를 import · 승격 커밋에서 잔존 0 전수 grep). ⛔ 워커가 라우트를 import하는 방향 금지. `pre`에 `minLeadMinutes`를 추가해 **리드타임은 코어가 집행**한다(화면 180 기본 · 이메일 240 · 어댑터에 시각 판정 코드 금지 · 239분 요청 반려 행동 테스트로 고정) |
+| 허용 발신자 원장 | `agency_send_email_senders` (신설 테이블) | `company_id · email_norm · user_id(필수) · label · is_active`. 정규화 = 헤더 디코딩 후 주소만 추출 · lower · trim(**plus-tag는 보존** · 정확 일치만). 활성 행 한정 **전역 UNIQUE**(한 주소가 두 회사에 있으면 회사 판정 불가). ⛔ `user_id`가 접수의 `created_by` · 정산 3축 귀속 · 회신번호 자격(user 단위 `assignment_scope`)을 전부 정한다. 없으면 승인까지 끝난 건이 발송 직전 `dispatch_no_owner`로 죽는다(`agency-send-worker.ts:666`) |
+| 신원 판정 | `resolveEmailSender` (한 함수) | 허용 주소 조회와 **귀속 사용자 활성 상태를 같은 쿼리로** 읽는다(비활성 = 접수 없이 반려 회신 + 알림). 조회 2행 이상 = fail-closed. **★0826 확정 = allowlist_only 모드**: 하이웍스가 수신 인증 헤더를 안 붙여(실측) 신원 게이트는 허용 목록 **정확 일치가 전부**다. 완충 = 일일 상한 절반값 본값 채택(§18-7) + 슈퍼관리자 현황 상시 경고 배지 + 접수 완료 회신이 항상 **진짜 주소 소유자**에게 가는 것(위조 접수 즉시 인지 경로) + 담당자 승인 게이트. ⛔ 메일 안의 `ARC-*`·`Authentication-Results`·`X-Authinfo` 류는 발신자가 위조 삽입 가능하므로 신뢰 근거로 쓰지 않는다(하이웍스가 유입 위조 헤더를 제거하는지 검증되기 전에는 · 추가 과제). ⛔ 신원 · `canUseAgencySend` · 전역 ENV 게이트는 **`createRequestCore` 직전 단일 지점**에서 본다(네 번째 우회 입구 방지) |
+| 회신 CT | `utils/agency-mailer.ts` (신설) | `outreach-mailer` 계약 복제(3값 `sent|rejected|unknown` · 부분 거부 판정 · 총 시간 상한) + `to` 인자. ⛔ `to` = 그 메일의 발신 주소 ∧ 활성 허용 목록 **교집합만**(위조 메일에 답해도 진짜 소유자에게 간다 · 백스캐터 반사판 방지). ⛔ ENV 미설정이면 `isAgencyMailerReady()` false = **폴링·접수 전체 잠금**(회신이 이 경로의 유일한 통지라 접수만 되고 통지 0인 상태를 금지). ENV = 정산·영업과 분리된 세 번째 계정 축 |
+| intake 원장 | `agency_send_email_intake` (신설 테이블) | `(mailbox, uidl)` UNIQUE = 선점 arbiter(★0826 실측: 하이웍스 UIDL = `..._20260825_...eml` 형태의 안정 식별자) · `(mailbox, message_hash)` UNIQUE · status `claimed|accepted|rejected|failed` · `reply_status` · 사유 코드 · `request_ids`(성공 분기에서만). ⛔ **헤더 메타·해시·사유 코드만 담는다. 첨부 바이트·명단 행 저장 금지**(주석 + 테스트로 고정) · 보존 90일 |
+| 메일 워커 | `utils/agency-send-mail-worker.ts` (신설) | 1분 주기 **별도 워커**(기존 5분 틱에 얹지 않는다). 프로토콜 = **POP3S**(pop3s.hiworks.com:995 · 메일 전용 비밀번호 + USER/PASS · ⛔ APOP 금지: 서버가 거부한다 실측). 절차 = §18-5, 수치 = §18-7 |
+| 관리 API · 모달 | `routes/admin.ts` 별도 라우트 + AdminDashboard 별도 모달 | `GET/POST/DELETE /api/admin/companies/:id/agency-send-emails`(기존 스위치 PATCH에 안 끼움 · 503 마이그레이션 문구도 별도). 모달 = 스위치 카드 아래 트리거 **"허용 이메일 N개 관리"**(건수 표기 · 스위치 ON인데 0건이면 경고 한 줄: 조용한 전량 반려 방지 · OFF에도 노출) · 즉시 저장(추가 POST · 삭제 DELETE) · ⛔ 스위치의 낙관 갱신+롤백 패턴 복제 금지(스테일 클로저 · 목록은 서버 응답 통째 교체 + 요청 중 disabled) · 주소별 활성 토글 + **"전부 비활성" 버튼**(긴급 정지 · 등록 보존) · `showConfirm`/`showAlert` 재사용 · 흰 모달 + 인디고(부모 톤) · 스크림 z-[60](`CUI_MODAL_SCRIM`은 z-50이라 부모와 동률 = 금지) · 입력 = Composer 담당자 번호 칩 미러. 재활성 23505 = "이미 다른 곳에 등록된 주소입니다"(⛔ 어느 회사인지 미노출) |
+| 출처 표시 | `agency_send_requests.source` (신설 컬럼) + 프론트 단일표 | `varchar(16) NOT NULL DEFAULT 'screen'` CHECK(`'screen','one_step','email'`). ⛔ 화면·원스텝 INSERT는 무접촉(DEFAULT에 맡김) · **이메일 경로만 값을 명시 기입**(코드 선배포·DDL 후행이 안전한 근거). `toPublic` 노출 + `SOURCE_LABEL`(`agency-send-api.ts` STATUS_LABEL 옆) + `EVENT_LABEL`에 `email_received`·`email_rejected` **같은 커밋 등재**(미등재 kind는 상세가 삼킨다). 이벤트 payload `via:'email'`+발신 주소 = 경위 축(상세 전용). 목록 메타 줄의 '파일 명단/직접 입력' 추정(fileName 유무)을 source 라벨로 대체 |
+| 슈퍼관리자 현황 | 기존 `GET /api/admin/agency-send` + 탭 컴포넌트 | 새 라우트 0: 응답에 `mailIntake` 키(마지막 성공 폴링 시각(⛔ DB 영속 · 메모리는 재기동마다 리셋) · status별 건수 · 회신 실패 건 · 미등록 카운터 · 반려·격리 최근 20건). 화면은 **별도 컴포넌트 파일**로 탭 렌더(AdminDashboard 인라인 금지) · visibilitychange 복귀 1회 갱신(주기 폴링 보류) |
+| 경보 | `system-alert` dedupKey 3종 | `agency-mail-login-fail`(POP3 로그인 실패 3연속 = 폴링 정지 · **즉시** · ★0826 정정: 인증 헤더 부재 확정으로 "위조 신호 경보"는 성립 불가, 위조 인지는 소유자 회신 경로가 진다) / `agency-mail-unknown-sender`(미등록 = 6시간 쿨다운 요약 + 주 1회 도메인 요약) / `agency-mail-poll-fail`(30분 정체 · ⛔ "메일 0통"과 "폴 실패"를 가른다 · `AGENCY_MAIL_ENABLED` off면 기준 시각 재설정으로 오탐 방지) |
+
+### 18-3) 자동 확정 조건 (전부 AND · 하나라도 아니면 반려 회신)
+
+1. 발신 주소가 활성 허용 목록과 정확 일치(유일) + 귀속 사용자 활성 + `canUseAgencySend` + 전역 ENV on (★0826: 인증 헤더 게이트는 성립 불가 확정 · §18-2 신원 판정 행)
+2. 첨부 = xlsx/xls/csv 후보 **정확 2개**(요청서/명단 역할은 파일명이 아니라 내용으로 판정 · zip 반려 · 이미지 첨부가 있으면 반려: "이미지 문자는 화면에서 접수해 주세요")
+3. 요청서 파서 `errors` 0(기존 반려 규칙 전량 그대로)
+4. 수신자 열 = 요청서 양식 신설 칸 **"수신자 열 이름"** 값 우선(명단에 없으면 폴백 없이 반려) · 칸이 비면 `scorePhoneColumns` 단일 점수표(§18-4)의 이메일 임계(비율 0.9 이상 그리고 2등과 0.3 이상 격차)로 자동 선정하되 회신·이력에 "자동 선정" 명시 · 불충족 반려
+5. 문안 `%항목%` = 명단 열 이름과 같은 이름만(공백 무시) · ⛔ AI 열 추천 호출 0(소스 스캔이 아니라 **mock 행동 테스트**로 "호출되지 않음"을 단언하고, 조건을 반전시켜 빨간불을 확인 후 원복)
+6. 회신번호 = 직접 번호(fixed)만 + 등록 집합 검증 · 열 방식(분할 접수) = 반려: "나뉘는 건수 확인이 필요하니 화면 접수에서 진행해 주세요"
+7. 담당자 번호 1개 이상
+8. 보낼 시각 = `validateRequestedAt`(코어 집행) + `EMAIL_MIN_LEAD_MINUTES` 240
+9. SMS·LMS만(MMS는 다음 축 · 불변 11의 "이미지 포함 실물 승인"을 메일 첨부로는 지킬 수 없다)
+
+양식 개정 규약: "수신자 열 이름" 칸 추가는 `scripts/build-agency-request-form.js` 재생성 + 파서 왕복 실측 + 원스텝 모달 안내 갱신을 **같은 커밋**에 묶는다(§17-5 계약).
+
+### 18-4) 파서 보강 2건 (★Harold 0825 실물 명단 지적 · 전 입구 공통)
+
+현재 결함(실측):
+- 명단 파서는 첫 줄 = 열 이름 전제(`agency-send-form.ts:156`). **무헤더 파일은 첫 고객 행이 열 이름으로 소비돼 조용히 1명 유실**되고, 나머지 행으로 번호 열이 잡혀 아무도 모른 채 진행된다.
+- 엑셀 숫자 셀이 앞 0을 떨어뜨린 번호(`1052958517`): `looksMobile`(`:194~198`)이 01 시작을 요구해 **열 자동 선정에서 탈락**하고, 사람이 그 열을 직접 고르면 유효 검사(`agency-send.ts:303`·`:618` = 10자리 이상만)가 **잘못된 번호를 그대로 적재**한다.
+
+처방(둘 다 파서·접수 공용부라 화면·원스텝·이메일 세 입구가 같이 고쳐진다):
+1. **0 복원 규칙**: `normalize-phone.ts`에 새 함수(숫자만 10자리이고 `1[016789]` 시작이면 앞에 0). 소비 = `looksMobile` 판정 + 명단 행의 번호 변환 지점(`agency-send.ts:303`·`:617` 및 형제 지점 전수 grep). ⛔ 기존 `normalizePhone` 동작은 무변경(전 플랫폼 소비처 영향 0). 구형 011의 9자리 0 유실은 복원 제외(오복원 위험이 더 크다).
+2. **무헤더 감지 + 열 이름 합성**: 첫 행에 휴대폰 모양 값(복원 후 판정)이 하나라도 있으면 무헤더로 판정 → 열 이름을 "열1·열2…"로 합성하고 **첫 행부터 데이터로**(첫 고객 유실 제거). 원스텝은 합성 이름으로 확인 화면 매핑이 그대로 되고, 이메일은 무헤더 + 문안 `%항목%` 존재면 반려("첫 줄에 열 이름을 넣거나 문안에서 항목을 빼 주세요"). 번호 없는 무헤더는 감지 불가지만 번호 0건 반려로 끝나므로 사각이 아니다.
+
+★0826 구현 중 실측 정정: **화면 접수(Composer)에는 무헤더 합성이 닿지 않는다.** Composer는 명단 파싱을 공용 업로드 API(`/api/upload/parse` · `routes/upload.ts`)에 위임하는데 그 파서는 고객DB 업로드 공용이라 이 축에서 고치지 않는다(공용 컴포넌트 금지 · 축 밖 = 추가 과제로 기록). 무헤더 수용 = 원스텝·이메일 두 입구. **0 복원은 접수 코어(`createRequestCore`) 수신자 정규화에서 걸리므로 세 입구 공통**이다. Composer의 열 추정(`guessPhoneColumn` = 이름 기반)은 사람이 보는 경로라 그대로 둔다.
+
+### 18-5) 워커 절차와 통지
+
+tick(1분): `running` 가드(try/finally) + `pg_try_advisory_lock`(⛔ **전용 client**로 획득부터 해제까지 유지, finally에서 unlock 후 release · `pool.query`로 잡으면 재진입이 뚫린다 · `invoice-confirm.ts:512` 선례) → ENV·`isAgencyMailerReady` 확인(아니면 return) → POP3S 접속(틱마다 짧은 세션 · USER/PASS · 연결·유휴 타임아웃 명시) → `UIDL` 전량 수신 → **원장에 없는 UIDL만** 처리 대상(⛔ POP3 메시지 번호는 세션마다 바뀐다 · 커서 개념이 없고 대조 축은 UIDL뿐) → 통마다: **`TOP n 0`(헤더만) → 신원 판정 → 선점 INSERT → 그 다음에야 `RETR`(본문·첨부)**(미등록 발신자의 첨부는 내려받지도 않는다) → 파싱 전 상한 → 파싱·검증 → 사전 조회(등록 발신번호 집합·발송 창) → BEGIN → `createRequestCore` + intake `accepted` → COMMIT → 회신 → QUIT.
+
+- ⛔ **서버 메일은 건드리지 않는다: `DELE` 0.** POP3에는 폴더·읽음 개념이 없으므로 처리 상태(수락/반려/미등록/실패)는 intake 원장 단독이고 현황 화면이 그것을 읽는다. 웹메일 정리는 사람 몫. ⚠ 이 계정에 다른 POP3 클라이언트(아웃룩 등)를 물리면 그쪽 "서버에서 삭제" 설정이 메일을 지워 워커가 못 본다(가비아 문서의 자동 삭제 경고 실측) = **hanjullo 메일함은 워커 전용으로 운영**.
+- 통 단위 실패 격리(한 통이 뒤를 막지 않는다). `claimed` 10분 초과 행은 관찰값 CAS로 복구(기존 워커 lock 복구와 같은 형태). 실패 통은 원장에 없거나 재시도 대상 status로 남으므로 다음 틱 UIDL 대조가 다시 잡는다(커서 누락 문제 자체가 없다).
+- **회신 재시도 = 수신 순회와 분리된 별도 패스**: `accepted`인데 `reply_status`가 pending·unknown인 행을 3회까지, 이후 현황 노출로 넘긴다.
+- 백오프(1/5/30/120분)는 **네트워크·DB 일시 장애만**. 파싱·신원 반려는 0회 즉시 확정. ⛔ **POP3 로그인 실패는 백오프 금지**: 3연속이면 폴링 정지 + 즉시 경보 + 사람이 재개한다(1분마다 로그인 재시도는 하이웍스 계정 잠금을 부른다).
+
+통지 2종(이 경로의 통지 채널은 메일뿐 · 접수 전 단계 문자 없음 = §18-9):
+- **접수 완료 회신**: 제목 · 문안 원문 · 보낼 시각 · 회신번호 · 담당자 번호 · 수신자 열 이름(자동 선정이면 그 표기) · 인원 · 제외 수 · 상세 링크. ⛔ 고정 2문장 필수: "담당자 승인 전에는 발송되지 않습니다" + "실제 치환된 문장은 담당자 휴대폰 테스트 문자에서 확인해 주세요"(치환 전 원문을 실물로 오독하는 것 방지).
+- **반려 회신**: 사유 전량(한 줄에 하나) + 고치는 법 + 명단의 실제 열 이름 목록. ⛔ **업체가 보낸 값만 반송한다**: 등록 발신번호 목록 같은 회사 자산 나열·접수 id·내부 식별자 금지("그 번호는 등록되어 있지 않습니다" 같은 사실 서술은 허용). 하단에 "고친 파일을 이 메일에 회신하시면 다시 접수됩니다".
+- 루프 방지: 우리 회신에 `Auto-Submitted: auto-replied` + In-Reply-To/References. 수신 메일에 `Auto-Submitted`·`List-Id`·`Precedence: bulk`가 있으면 접수 대상에서 제외. 미등록·fail·unknown = 회신 0(주소 등록 여부 탐침 방지). ⛔ 회신 본문 줄표 0(불변 10).
+
+### 18-6) 멱등 3층과 차단 집합
+
+| 층 | 키 | 동작 |
+|---|---|---|
+| 1 전달 | `(mailbox, uidl)` UNIQUE 선점(유일 arbiter · ★0826 POP3 확정) | 재처리 차단 · 무동작 |
+| 2 같은 메일 | `(mailbox, message_hash)` 사전 조회(경합의 UNIQUE 예외는 최후 방어로 skip+로그 · 자동 병합 금지) | 서버 재전송이므로 skip · 무회신 · 로그만 |
+| 3 같은 내용 | 4요소 해시 = 회사 · 문안 해시 · `requested_at` · **정렬된 수신 번호 집합 해시**(⛔ 첨부 바이트 해시 금지: 재저장만으로 바뀐다) | **미종결·발송 전 건과 일치할 때만** 접수 차단 + "이미 접수되어 있습니다(접수번호)" 회신 1회(24시간 내 재회신 없음). 종결 건과 일치는 정상 접수(같은 명단 주 2회 발송은 정상 업무) |
+
+⛔ **3층의 차단 집합은 상수 1벌로 못박는다**: 발송 전 전 상태 + `queued` 중 `requested_at` 미도래. 허용 = `expired` · `cancelled` · `requested_at`이 지난 `queued`. SQL 리터럴과 같은 집합임을 테스트로 고정한다(`NOT_CANCELABLE_SQL` 짝 규율 선례). `queued`를 종결로 읽으면 **아직 나가지 않은 예약과 같은 명단이 한 벌 더 접수된다**(이중 발송).
+⛔ intake `accepted`·`request_ids`는 성공 분기에서만 찍는다(통과 스탬프 원칙). §17-3 ①(재제출 중복)·②(압축 팽창)의 수용 근거는 이메일에서 소멸하므로(자동 재시도 · 무인증 입구) 이 3층과 §18-7 상한이 그 자리를 대신한다.
+
+### 18-7) 수치 (전부 서버 소유 · 화면·회신 문구에 하드코딩 금지)
+
+| 항목 | 값 | 근거 |
+|---|---|---|
+| `EMAIL_MIN_LEAD_MINUTES` | 240분 (별도 상수) | 화면 180은 사람이 앞에 있는 전제. 180이면 당일검사 120을 빼고 승인 창이 60분뿐인데 거기서 메일 지연·폴링 1분·검사 워커 5분 틱·회신 왕복이 다 빠진다. 240 = 승인 창 120분 |
+| 틱당 처리 | 10통 (재기동 후에도 동일) | 20이면 한 틱이 1분을 넘겨 실질 주기가 늘어난다. 밀린 메일의 반려 회신 폭주 완충 |
+| 일일 상한 | 발신 주소 5통 · 회사 10통 (**메일 통수** 기준 · ★0826 allowlist_only 확정으로 절반값이 본값) | 초과 = 거절 + 사유 회신 1회. ⛔ 초과 거절을 현황 카운터로 노출(조정이 필요한 회사가 보여야 값을 고친다) |
+| 회신 상한 | 같은 주소 1시간 5통 | 자동응답 루프 완충 |
+| 백오프 | 1 · 5 · 30 · 120분 후 failed | 네트워크·DB 일시 장애만. 인증 실패는 3연속 = 폴링 정지 |
+| 정체 경보 | 마지막 성공 폴링 30분 초과 | off 상태는 기준 재설정으로 오탐 방지 |
+| 파싱 전 상한 | 첨부 합계 15MB · 파일 5개 · 압축 팽창 100배 · 통당 처리 60초 | 15MB는 원스텝 multer와 동값. 무인증 입구의 첨부 폭탄 방어(1차 방어는 신원 통과 전 미다운로드) |
+| intake 보존 | 90일 | 개인정보 없는 메타뿐이라 가볍다 |
+
+### 18-8) 회의론자 최종 검증 15건 반영표 (구현 체크리스트)
+
+| # | 깨지는 지점 | 반영(막은 형태) | 배포 전 필수 |
+|---|---|---|---|
+| 1 | 리드타임 240의 집행 자리가 코어에 없어 판정 두 벌 | `pre.minLeadMinutes`로 코어가 집행 + 239분 반려 행동 테스트 | ★ |
+| 2 | 멱등 3층의 "종결"에 `queued` 오독 = 이중 발송 | §18-6 차단 집합 상수 + SQL 리터럴 짝 테스트 | ★ |
+| 3 | 성공 회신 1회 실패 = 영구 무소식 | 회신 재시도 별도 패스 3회 + 현황 노출 | ★ |
+| 4 | 회신 ENV 부재면 접수만 되고 통지 0 | `isAgencyMailerReady` false = 폴링·접수 전체 잠금 | ★ |
+| 5 | 승격 문구 오독으로 코어 두 벌 | 라우트 정의 삭제 + 잔존 0 전수 grep | ★ |
+| 6 | 처리 커서가 실패 통을 영구 누락 | ★0826 POP3 전환으로 커서 자체가 없다: 매 틱 UIDL 전량을 원장과 대조해 미기록만 처리 | |
+| 7 | intake에 첨부·명단 저장 = 지울 수 없는 개인정보 재축적 | 메타·해시·사유만 + 저장 금지 테스트 + 보존 90일 | |
+| 8 | source 배포 순서 어긋나면 화면 접수까지 전멸 | DEFAULT 'screen' + 이메일만 명시 기입 + 워커 catch 마이그레이션 skip + SCHEMA.md 등재 동일 커밋 | |
+| 9 | 재활성 23505가 "저장 실패"로만 보임 | "이미 다른 곳에 등록된 주소입니다"(회사 미노출) | |
+| 10 | ENV off가 정체 경보를 울림 | off면 기준 시각 재설정 | |
+| 11 | 폴링 시각이 메모리면 재기동마다 리셋 | DB 영속(쿨다운은 system-alert가 이미 PG 영속) | |
+| 12 | advisory lock을 pool.query로 잡으면 재진입 | 전용 client 유지 + finally unlock·release + `_running` 병용 | |
+| 13 | "AI 금지"를 소스 스캔으로 검사하면 조건 반전을 못 잡음 | mock 행동 테스트 + 반전 주입 확인 | |
+| 14 | 메일 세션 운용 미정(유지 vs 매틱) | ★0826 실측 확정: POP3S 틱마다 짧은 세션 · USER/PASS(APOP 서버 거부 실측) · 접속 빈도 정책 문의는 유지(§18-11 3) | |
+| 15 | 일일 상한이 정상 대량 업무를 막을 수 있음 | 초과 거절 카운터 노출로 조정 근거 확보 | |
+
+### 18-9) 회의에서 갈린 지점과 채택 (Harold 2026-08-25 승인)
+
+| 지점 | 채택 | 근거 |
+|---|---|---|
+| 이메일 접수 전용 스위치 | 신설 안 함 (3:1) | 허용 주소 등록 자체가 회사별 opt-in(0건 = 꺼짐). 긴급 정지 = 모달 "전부 비활성" 버튼(등록 보존) + 전역 ENV. 판정 지점이 늘면 "켰는데 안 되는" 조합이 생긴다 |
+| 접수 전 반려의 문자 보조 | 미도입 | 접수 전에는 문자 배관·비용 귀속 축이 없다(`notifyManager`는 requestId 전제 · §12-G 12). 메일 회신 + 재시도 패스로 대체. 접수 후는 기존 문자 그대로 |
+| 승인 페이지에 파일명·수신자 열·항목 매핑 3줄 | 무변경 | `agency-approve.ts` 계약(명단·변수 매핑·내부 식별자 미노출 · 링크가 흘러도 새는 것은 문안뿐) 유지. 오매핑 방어 = 접수 완료 회신 + 담당자 테스트 문자 실물. 운영에서 오매핑 사고가 실제 나면 계약 변경으로 재론 |
+
+### 18-10) DDL 초안 (실행 = Harold · ⛔ 실행 전 information_schema로 기존 유무 확인 · 실행 후 SCHEMA.md 등재 · 순서 = 코드 배포 후 DDL)
+
+```sql
+CREATE TABLE IF NOT EXISTS agency_send_email_senders (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id),
+  email_norm varchar(320) NOT NULL,
+  user_id uuid NOT NULL,
+  label varchar(100) NULL,
+  is_active boolean NOT NULL DEFAULT true,
+  created_by uuid NULL,
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  updated_at timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_agency_email_sender_active
+  ON agency_send_email_senders (email_norm) WHERE is_active;
+
+CREATE TABLE IF NOT EXISTS agency_send_email_intake (
+  id bigserial PRIMARY KEY,
+  mailbox varchar(64) NOT NULL,
+  uidl varchar(128) NOT NULL,
+  message_id varchar(998) NULL,
+  message_hash varchar(64) NOT NULL,
+  from_email varchar(320) NULL,
+  company_id uuid NULL,
+  user_id uuid NULL,
+  status varchar(20) NOT NULL,
+  reason varchar(200) NULL,
+  reply_status varchar(20) NULL,
+  reply_attempts int NOT NULL DEFAULT 0,
+  attempt_count int NOT NULL DEFAULT 0,
+  next_attempt_at timestamptz NULL,
+  request_ids uuid[] NULL,
+  claimed_at timestamptz NOT NULL DEFAULT NOW(),
+  decided_at timestamptz NULL,
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  updated_at timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_agency_email_intake_uidl
+  ON agency_send_email_intake (mailbox, uidl);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_agency_email_intake_hash
+  ON agency_send_email_intake (mailbox, message_hash);
+
+-- ★0826 구현 중 추가(회의론자 필수 11): 마지막 성공 폴링·로그인 실패·정지 상태의 DB 영속.
+--   메모리면 pm2 재기동마다 리셋돼 정체 경보가 영영 30분을 못 채운다. 재개 = paused_at을 NULL로.
+CREATE TABLE IF NOT EXISTS agency_send_mail_state (
+  mailbox varchar(64) PRIMARY KEY,
+  last_ok_at timestamptz NULL,
+  login_fail_count int NOT NULL DEFAULT 0,
+  paused_at timestamptz NULL,
+  paused_reason varchar(200) NULL,
+  updated_at timestamptz NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE agency_send_requests ADD COLUMN IF NOT EXISTS source varchar(16) NOT NULL DEFAULT 'screen';
+ALTER TABLE agency_send_requests ADD CONSTRAINT ck_agency_send_source
+  CHECK (source IN ('screen','one_step','email'));
+```
+
+안전망: 테이블·컬럼 부재 시 워커는 조용히 skip(`agency-send-worker.ts:1078` 선례), 관리 라우트는 503 `DB_MIGRATION_PENDING`(각자 자기 대상 지목 문구). `source`는 화면 경로 무접촉이라 코드 선배포가 안전하다.
+
+### 18-11) 착수 게이트와 순서
+
+**착수 게이트 실측 결과 (2026-08-25~26 · Harold PowerShell POP3S 직접 접속)**
+1. **하이웍스는 POP3S만 지원**(pop3s.hiworks.com:995 · 가비아 고객센터 "POP3 방식만 지원" + 설정 화면 실측). 로그인 = 메일 전용 비밀번호 + USER/PASS(⛔ APOP 서버 거부 · CAPA 미구현 실측). **UIDL·TOP 지원 확정**(멱등 키·헤더 선수신 성립). 폴더 개념 없음.
+2. **Authentication-Results 미부착 확정**(gmail 외부 메일 실측 · 있는 것은 하이웍스 자체 X-헤더와 발신측 ARC·DKIM 서명뿐) → 신원 게이트 = **allowlist_only 모드 확정**(§18-2).
+3. 동시 접속·로그인 빈도 정책 = 고객센터 문의 **남음**(짧은 세션 설계라 착수는 가능 · **배포 전 확인**).
+4. SMTP 발신(smtps.hiworks.com:465) 실측 **남음**(curl 발신 1통 · **배포 전 확인**).
+
+**구현 순서**: ①코어 승격(`utils/agency-send-intake.ts` · 잔존 0 grep) ②파서 보강 2건(§18-4 · 전 입구) + 양식 개정 ③허용 이메일 테이블·관리 라우트·모달 ④`agency-mailer` + intake 원장 + 메일 워커 ⑤source·라벨·현황·경보 ⑥Codex 적대 리뷰(쓰기 경로 + DDL 4종 = 의무) ⑦배포 → DDL → ENV(IMAP·발신 계정) → 실측(§18-12). ④의 수신 배관 = **자체 소형 POP3S 클라이언트 CT**(`utils/pop3-client.ts` · tls 위 6명령 USER/PASS/STAT/UIDL/TOP/RETR/QUIT · ★0826 결정: IMAP 라이브러리는 무용해졌고 node POP3 라이브러리는 장기 미유지보수라 공급망 위험이 더 크다) + 신규 의존성 1종 `mailparser`(MIME·encoded-word 디코딩·첨부 추출). ⛔ 직접 MIME 파싱 금지(`=?UTF-8?B?...`·multipart·base64를 손으로 풀면 그 자체가 결함 축 · POP3 프로토콜 6명령과 MIME 해석은 별개다).
+
+### 18-11-1) 구현·검증 이력 (2026-08-26 · 코드 완료)
+
+- 구현 = §18-11 순서 ①~⑤ 전부. 신설 파일 = `utils/agency-send-intake.ts`(승격) · `utils/pop3-client.ts` · `utils/agency-mailer.ts` · `utils/agency-send-email.ts` · `utils/agency-send-mail-worker.ts` · 프론트 `admin/AgencyEmailSendersModal.tsx` · `admin/AgencyMailIntakePanel.tsx`. 신규 의존성 = `mailparser`.
+- **⑥ 리뷰 = Harold 지시로 Codex 대신 자체 적대 검토 반복(결함 0 라운드까지).** R1~R5 실결함 7건 정정: 독약 메일 무백오프 재시도 · 완료 회신 rate-limit 시 skipped 고착 · 빈 편지함 틱에서 회신 재시도 미실행 · 유효 번호 0건의 오사유 반려 · **claimed 복구 CAS의 타임스탬프 동등 비교**(µs/ms 왕복 불일치로 영구 잠김 · memory 등재 사고 부류) · **원스텝 source 라벨 유실**(컬럼 존재 탐지 캐시로 정정: DDL 전 안전 + DDL 후 전 입구 라벨) · 관리 라우트 이메일 길이 미가드. 오판 1건 철회(`int || ' days'`는 PG `anynonarray || text`로 유효 · 기존 코드 4곳 실증).
+- 게이트 = backend tsc 0 · frontend tsc 0 · vitest 202파일 3,095건 · **frontend production 빌드 통과(57.8s · 청크 정상)** · 자가 grep(모델명 0 · native dialog 0 · 사용자 노출 줄표 0).
+- 남은 것 = 배포 + DDL 4종 + ENV + SMTP 발신 실측 + 접속 정책 문의 + §18-12 실측(Harold). SCHEMA.md 등재는 DDL 실행 확인 후.
+
+### 18-12) 배포 후 실측 7
+
+①등록 주소에서 정상 요청서+명단 발송 → 1분 내 접수 생성·완료 회신 수신·목록 라벨 "메일 접수"·상세 이력에 발신 주소 → 기존 파이프라인(검사·담당자 문자·링크 승인)이 그대로 도는가 ②미등록 주소 발송 → 회신 없음·격리 폴더 이동·현황 카운터 증가 ③같은 파일을 다시 발송 → 새 접수 0건·"이미 접수되어 있습니다" 회신 1회 ④무헤더 + 0 유실 번호 명단 → 첫 행 고객 포함·번호 복원(인원 수로 확인) ⑤반려 2종(보낼 시각 240분 미달 · 문안 `%항목%` 불일치) → 사유 회신 수신·접수 행 0건 ⑥메일 ENV 제거 후 재기동 → 폴링·접수 잠금 + 부팅 로그 1회 ⑦위조 시험(등록 주소를 From에 적어 다른 발신 경로로 발송) → 접수가 생기더라도 완료 회신이 **진짜 소유자에게** 도착하고(위조 인지 경로) 담당자 승인 없이는 나가지 않는 것 확인.
+
+### 18-13) 수용 위험 (명시) · 범위 밖
+
+수용 위험: ①미등록 발신자는 무응답이다(무시인지 미도달인지 업체는 모른다 · 문의는 격리 카운터·현황이 받는다) ②반려율이 첫인상을 해칠 수 있다(완화 = 양식 "수신자 열 이름" 칸 + 반려 회신 품질 · 확정 경로라 AI 완화는 불가) ③회신 메일의 스팸함 유실은 감지 불가(재시도 3회 + 현황 노출이 한계) ④신규 의존성 2종이 발송 백엔드 단일 프로세스에 들어온다(외부 입력 파서 = 취약점 축 하나 추가) ⑤무헤더 + 개인화 문안은 이메일로 불가(화면 안내로 우회) ⑥회신번호 열 방식이 화면은 되고 메일은 안 되는 비대칭(반려 회신 문구가 흡수) ⑦**From 위조 접수 가능성(★0826 확정)**: 수신 인증 헤더가 없어 위조 메일이 허용 주소를 From에 적으면 접수가 생길 수 있다. 완충 = 정확 일치 허용 목록 · 완료 회신이 진짜 소유자에게 가는 즉시 인지 경로 · 담당자 승인 게이트 · 일일 상한 절반값. 타사 명단이 DB에 적재되는 것 자체는 남는 위험.
+
+범위 밖(다음 축): 업체 자가 주소 등록 화면 · 반려 회신 스레드로 수정 재접수 추적 · MMS 이미지 첨부 · 회신번호 열 방식 · 슈퍼관리자 전면 개편(회사 편집 실사용 0 스위치 3종 정리 포함 · Harold 0825 인디고 전환 의향 = 별도 트랙) · 하이웍스 `X-Authinfo` 접속 IP 기반 자체 SPF 검증(하이웍스가 유입 위조 X-헤더를 제거하는지 검증된 뒤에만). BUGS 등재로 분리: **B-0825-6**(종결 접수 수신자 행 삭제 경로 부재) · **B-0825-7**(기존 5분 워커 겹침 가드 부재).

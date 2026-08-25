@@ -308,3 +308,36 @@ describe('워커 픽업 판정', () => {
     expect(hasTestRoundsLeft(MAX_TEST_ROUNDS)).toBe(false);
   });
 });
+
+// ★2026-08-26 §18-6 이메일 중복 차단 집합 — SQL 리터럴과 판정 함수가 같은 집합임을 고정(회의론자 필수 2)
+import { EMAIL_DUP_ALLOWED_TERMINAL, EMAIL_DUP_BLOCKING_SQL, isEmailDupBlocking, type AgencySendStatus as St } from '../agency-send-state';
+
+describe('이메일 중복 차단 집합(§18-6) — queued 미도래 포함, SQL과 함수는 한 집합', () => {
+  const ALL: St[] = ['received', 'testing', 'awaiting_approval', 'test_failed', 'approved', 'final_testing', 'queued', 'reapproval', 'expired', 'cancelling', 'cancelled'];
+  const past = new Date(Date.now() - 60_000);
+  const future = new Date(Date.now() + 60 * 60_000);
+  const now = new Date();
+
+  it('허용(차단 안 함) = expired · cancelled · 시각이 지난 queued뿐이다', () => {
+    for (const s of ALL) {
+      const blockedFuture = isEmailDupBlocking(s, future, now);
+      if (s === 'expired' || s === 'cancelled') expect(blockedFuture).toBe(false);
+      else expect(blockedFuture).toBe(true);
+    }
+    // queued는 requested_at이 지나야만 허용으로 내려간다 — 미도래 queued를 종결로 읽으면 이중 발송이다
+    expect(isEmailDupBlocking('queued', past, now)).toBe(false);
+    expect(isEmailDupBlocking('queued', future, now)).toBe(true);
+    expect(isEmailDupBlocking('received', past, now)).toBe(true);
+  });
+
+  it('SQL 리터럴은 허용 종결 상수와 queued 미도래 조건을 그대로 담는다(집합 두 벌 금지)', () => {
+    for (const s of EMAIL_DUP_ALLOWED_TERMINAL) {
+      expect(EMAIL_DUP_BLOCKING_SQL).toContain(`'${s}'`);
+    }
+    const notInMatch = EMAIL_DUP_BLOCKING_SQL.match(/status NOT IN \(([^)]+)\)/);
+    expect(notInMatch).not.toBeNull();
+    const sqlStatuses = notInMatch![1].split(',').map((x) => x.trim().replace(/'/g, ''));
+    expect([...sqlStatuses].sort()).toEqual([...EMAIL_DUP_ALLOWED_TERMINAL].sort());
+    expect(EMAIL_DUP_BLOCKING_SQL).toContain(`status = 'queued' AND requested_at <= NOW()`);
+  });
+});

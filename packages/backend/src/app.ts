@@ -24,6 +24,7 @@ import agencyApproveRoutes from './routes/agency-approve';  // ★ 2026-08-25 �
 import salesOutreachRoutes from './routes/sales-outreach'; // ★ 2026-08-24 AI 영업 아웃리치 (슈퍼관리자 ceo 전용 · docs/2026-07-31-ai-sales-outreach-design.md §15)
 import outreachPublicRoutes from './routes/outreach-public'; // ★ 2026-08-24 아웃리치 공개 샘플 페이지(무인증 · noindex · 만료)
 import { startAgencySendWorker } from './utils/agency-send-worker';
+import { startAgencySendMailWorker } from './utils/agency-send-mail-worker';
 import { startSalesOutreachSweeper } from './utils/sales-outreach-sweeper'; // ★ 2026-08-24 아웃리치 sweeper
 // ★ D219+ Part 2 후속 (2026-05-27): 일일 인사이트 API (Performance 카드 + 메일 양쪽 활용)
 import insightRoutes from './routes/insight';
@@ -508,6 +509,10 @@ app.listen(PORT, () => {
   // ★ 2026-08-22 대행발송 셀프 접수 워커 (5분 cron) — 1차 검사·당일 재검사·만료·대조·복구
   //   docs/2026-08-22-agency-send-design.md §4-4. 테이블이 없으면 조용히 넘어간다(마이그레이션 전 안전).
   startAgencySendWorker();
+
+  // ★ 2026-08-26 대행발송 이메일 접수 워커 (1분 폴링 · POP3S) — 설계서 §18.
+  //   AGENCY_MAIL_ENABLED + 계정 ENV가 없으면 부팅 로그 1회만 남기고 시작하지 않는다(회신 없는 접수 금지).
+  startAgencySendMailWorker();
 
   // ★ 2026-08-24 AI 영업 아웃리치 sweeper (10분 cron) — 좀비 잡 정직 종결 + 만료 산출물 파기.
   //   자동 재시도·발송·재생성 0(설계 §15-6). 테이블 미생성이면 각 순회가 로그만 남기고 넘어간다.

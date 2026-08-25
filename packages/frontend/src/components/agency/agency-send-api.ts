@@ -12,6 +12,8 @@ export type AgencySendStatus =
 export interface AgencySendRequest {
   id: string;
   status: AgencySendStatus;
+  /** ★2026-08-26 §18 접수 출처. 라벨은 SOURCE_LABEL 하나가 소유한다(fileName 유무 추정 금지) */
+  source: 'screen' | 'one_step' | 'email';
   messageType: 'SMS' | 'LMS' | 'MMS';
   subject: string | null;
   isAd: boolean;
@@ -284,6 +286,16 @@ export const STATUS_LABEL: Record<AgencySendStatus, string> = {
   expired: '미발송',
   cancelling: '취소 중',
   cancelled: '취소됨',
+};
+
+/**
+ * ★2026-08-26 §18 접수 출처 라벨 — 목록·상세·슈퍼관리자가 같은 표를 읽는다.
+ * ⛔ 색 칩을 쓰지 않는다(색은 상태 축이 소유한다 · console-ui 규약). 출처는 위험도가 아니다.
+ */
+export const SOURCE_LABEL: Record<AgencySendRequest['source'], string> = {
+  screen: '직접 입력',
+  one_step: '요청서 접수',
+  email: '메일 접수',
 };
 
 export const STATUS_TONE: Record<AgencySendStatus, 'neutral' | 'amber' | 'blue' | 'green' | 'rose'> = {

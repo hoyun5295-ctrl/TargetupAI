@@ -47,6 +47,7 @@ import { buildAdminAgentStatsXlsx } from '../utils/manage-stats-export';
 // ★ 2026-07-25 고객 대상 표는 엑셀(.xlsx)로 나간다 — LESSONS_BACKEND "고객 대상 xlsx = exceljs".
 import { buildXlsxBuffer, XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
 import { normalizePhone } from '../utils/normalize-phone';
+import { normalizeSenderEmail } from '../utils/agency-send-email';
 import { normalizeCdpAutoExecuteGate } from '../utils/autosend-policy';
 import { grantFreeTrial } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
@@ -1559,6 +1560,135 @@ router.patch('/companies/:id/agency-send', authenticate, requireSuperAdmin, asyn
     }
     console.error('대행발송 스위치 저장 실패:', error);
     res.status(500).json({ error: '대행발송 스위치 저장 실패' });
+  }
+});
+
+// ★ 2026-08-26 대행발송 허용 발신 이메일 — 이메일 접수(§18)의 발신자 → 회사·귀속 사용자 매핑 원장.
+//   ⛔ 스위치 PATCH에 끼우지 않는다(불리언 하나짜리 계약 유지 · §18-2). 별도 라우트 4개.
+//   ⛔ 귀속 사용자 필수 — created_by가 비면 승인까지 끝난 건이 발송 직전에 dispatch_no_owner로 죽는다.
+//   활성 주소는 전역 유일(부분 UNIQUE) — 23505는 "이미 다른 곳에 등록"으로 바꾸되 어느 회사인지는 노출하지 않는다.
+const agencyEmailMigrationPending = (res: Response) => res.status(503).json({
+  success: false,
+  code: 'DB_MIGRATION_PENDING',
+  error: 'DB 마이그레이션 필요: agency_send_email_senders 테이블 생성 요청',
+});
+const isAgencyEmailMissingRelation = (err: any) => {
+  const msg = String(err?.message || '');
+  return (msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist');
+};
+
+// 목록 + 귀속 사용자 후보(모달 드롭다운용 · 시스템 가상 계정 제외 관례 = COALESCE(is_system,false)=false)
+router.get('/companies/:id/agency-send-emails', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const senders = await query(
+      `SELECT s.id, s.email_norm, s.user_id, s.label, s.is_active, s.created_at,
+              u.name AS user_name, u.login_id AS user_login_id, u.status AS user_status, u.is_active AS user_is_active
+         FROM agency_send_email_senders s
+         LEFT JOIN users u ON u.id = s.user_id
+        WHERE s.company_id = $1::uuid
+        ORDER BY s.is_active DESC, s.created_at DESC`,
+      [req.params.id],
+    );
+    const users = await query(
+      `SELECT id, name, login_id, status, is_active FROM users
+        WHERE company_id = $1::uuid AND COALESCE(is_system, false) = false
+        ORDER BY name NULLS LAST, login_id LIMIT 200`,
+      [req.params.id],
+    );
+    return res.json({ success: true, senders: senders.rows, users: users.rows });
+  } catch (err: any) {
+    if (isAgencyEmailMissingRelation(err)) return agencyEmailMigrationPending(res);
+    console.error('[Admin] 허용 이메일 목록 조회 실패:', err);
+    return res.status(500).json({ success: false, error: '허용 이메일 목록을 불러오지 못했습니다.' });
+  }
+});
+
+// 추가 — 주소는 정규화(주소만 추출·소문자) 후 저장. 귀속 사용자는 그 회사 소속·활성이어야 한다
+router.post('/companies/:id/agency-send-emails', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const email = normalizeSenderEmail(req.body?.email);
+  const userId = String(req.body?.userId || '');
+  const label = String(req.body?.label || '').trim().slice(0, 100) || null;
+  if (!email || email.length > 320) return res.status(400).json({ success: false, error: '이메일 주소 형식을 확인해 주세요.' });
+  if (!userId) return res.status(400).json({ success: false, error: '접수를 귀속할 사용자를 골라 주세요.' });
+  try {
+    const u = await query(
+      `SELECT id FROM users WHERE id = $1::uuid AND company_id = $2::uuid AND is_active = true AND status = 'active'`,
+      [userId, req.params.id],
+    );
+    if (u.rows.length === 0) {
+      return res.status(400).json({ success: false, error: '그 회사의 활성 사용자만 귀속할 수 있습니다.' });
+    }
+    const inserted = await query(
+      `INSERT INTO agency_send_email_senders (company_id, email_norm, user_id, label, created_by)
+       VALUES ($1::uuid, $2, $3::uuid, $4, $5::uuid)
+       RETURNING id, email_norm, user_id, label, is_active, created_at`,
+      [req.params.id, email, userId, label, req.user?.userId || null],
+    );
+    console.log(`[Admin] 허용 이메일 추가: company=${req.params.id} email=${email}`);
+    return res.status(201).json({ success: true, sender: inserted.rows[0] });
+  } catch (err: any) {
+    if (err?.code === '23505') {
+      return res.status(409).json({ success: false, code: 'EMAIL_TAKEN', error: '이미 다른 곳에 등록된 주소입니다.' });
+    }
+    if (isAgencyEmailMissingRelation(err)) return agencyEmailMigrationPending(res);
+    console.error('[Admin] 허용 이메일 추가 실패:', err);
+    return res.status(500).json({ success: false, error: '허용 이메일을 추가하지 못했습니다.' });
+  }
+});
+
+// 주소별 활성 토글 · "전부 비활성"(id 대신 all=true · 긴급 정지, 등록 보존)
+router.patch('/companies/:id/agency-send-emails/:senderId', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const active = req.body?.isActive === true;
+  try {
+    const updated = await query(
+      `UPDATE agency_send_email_senders SET is_active = $1, updated_at = NOW()
+        WHERE id = $2::uuid AND company_id = $3::uuid
+        RETURNING id, email_norm, is_active`,
+      [active, req.params.senderId, req.params.id],
+    );
+    if (updated.rows.length === 0) return res.status(404).json({ success: false, error: '등록된 주소를 찾을 수 없습니다.' });
+    return res.json({ success: true, sender: updated.rows[0] });
+  } catch (err: any) {
+    if (err?.code === '23505') {
+      // 비활성 사이에 다른 회사가 같은 주소를 활성 등록한 경우 — 어느 회사인지는 노출하지 않는다(§18-8 9)
+      return res.status(409).json({ success: false, code: 'EMAIL_TAKEN', error: '이미 다른 곳에 등록된 주소입니다.' });
+    }
+    if (isAgencyEmailMissingRelation(err)) return agencyEmailMigrationPending(res);
+    console.error('[Admin] 허용 이메일 상태 변경 실패:', err);
+    return res.status(500).json({ success: false, error: '상태를 바꾸지 못했습니다.' });
+  }
+});
+
+router.post('/companies/:id/agency-send-emails/deactivate-all', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const updated = await query(
+      `UPDATE agency_send_email_senders SET is_active = false, updated_at = NOW()
+        WHERE company_id = $1::uuid AND is_active
+        RETURNING id`,
+      [req.params.id],
+    );
+    console.log(`[Admin] 허용 이메일 전부 비활성: company=${req.params.id} ${updated.rows.length}건`);
+    return res.json({ success: true, deactivated: updated.rows.length });
+  } catch (err: any) {
+    if (isAgencyEmailMissingRelation(err)) return agencyEmailMigrationPending(res);
+    console.error('[Admin] 허용 이메일 전부 비활성 실패:', err);
+    return res.status(500).json({ success: false, error: '전부 비활성으로 바꾸지 못했습니다.' });
+  }
+});
+
+router.delete('/companies/:id/agency-send-emails/:senderId', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const deleted = await query(
+      `DELETE FROM agency_send_email_senders WHERE id = $1::uuid AND company_id = $2::uuid RETURNING id, email_norm`,
+      [req.params.senderId, req.params.id],
+    );
+    if (deleted.rows.length === 0) return res.status(404).json({ success: false, error: '등록된 주소를 찾을 수 없습니다.' });
+    console.log(`[Admin] 허용 이메일 삭제: company=${req.params.id} email=${deleted.rows[0].email_norm}`);
+    return res.json({ success: true });
+  } catch (err: any) {
+    if (isAgencyEmailMissingRelation(err)) return agencyEmailMigrationPending(res);
+    console.error('[Admin] 허용 이메일 삭제 실패:', err);
+    return res.status(500).json({ success: false, error: '삭제하지 못했습니다.' });
   }
 });
 
@@ -5740,7 +5870,45 @@ router.get('/agency-send', authenticate, requireSuperAdmin, async (req: Request,
     const summary = await query(
       `SELECT status, COUNT(*)::int AS c FROM agency_send_requests GROUP BY status`,
     );
-    return res.json({ success: true, requests: rows.rows, summary: summary.rows });
+
+    // ★2026-08-26 §18 이메일 접수 관제 — 새 라우트를 만들지 않고 이 응답에 얹는다(소비처 0 화면 재생산 금지).
+    //   반려·격리 메일은 접수 원장에 행이 없어 여기가 유일한 노출면이다. 테이블 부재(마이그레이션 전) = null.
+    let mailIntake: any = null;
+    try {
+      const state = await query(
+        `SELECT mailbox, last_ok_at, login_fail_count, paused_at, paused_reason FROM agency_send_mail_state ORDER BY mailbox LIMIT 5`,
+      );
+      const counts = await query(
+        `SELECT status, COUNT(*)::int AS c FROM agency_send_email_intake GROUP BY status`,
+      );
+      const replyFailed = await query(
+        `SELECT COUNT(*)::int AS c FROM agency_send_email_intake WHERE status = 'accepted' AND reply_status IN ('rejected', 'unknown', 'skipped')`,
+      );
+      const unregisteredToday = await query(
+        `SELECT COUNT(*)::int AS c FROM agency_send_email_intake WHERE reason = 'unregistered' AND claimed_at > NOW() - interval '24 hours'`,
+      );
+      const recentRejected = await query(
+        `SELECT i.uidl, i.from_email, i.reason, i.reply_status, i.claimed_at, i.decided_at, c.company_name
+           FROM agency_send_email_intake i
+           LEFT JOIN companies c ON c.id = i.company_id
+          WHERE i.status IN ('rejected', 'failed')
+          ORDER BY i.claimed_at DESC LIMIT 20`,
+      );
+      mailIntake = {
+        state: state.rows,
+        counts: counts.rows,
+        replyFailed: replyFailed.rows[0]?.c || 0,
+        unregisteredToday: unregisteredToday.rows[0]?.c || 0,
+        recentRejected: recentRejected.rows,
+      };
+    } catch (mailErr: any) {
+      const m = String(mailErr?.message || '');
+      if (!((m.includes('relation') || m.includes('column')) && m.includes('does not exist'))) {
+        console.error('[Admin] 이메일 접수 현황 조회 실패(본 응답은 계속):', mailErr);
+      }
+    }
+
+    return res.json({ success: true, requests: rows.rows, summary: summary.rows, mailIntake });
   } catch (error: any) {
     const msg = String(error?.message || '');
     if (msg.includes('relation') && msg.includes('does not exist')) {
