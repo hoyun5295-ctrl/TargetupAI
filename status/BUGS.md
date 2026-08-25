@@ -64,7 +64,9 @@
 > **증상**: `ai_call_log.input_tokens` 기록식이 `input_tokens + cache_read_input_tokens`만 합산해 **캐시 신규 생성분(cache_creation)이 통째로 빠진다.** 프롬프트 캐시를 쓰는 호출은 생성 회차가 가장 비싼데(도움말 봇 실측 = 질문당 약 2.9만 토큰), 원장에는 수십 토큰으로 적혀 원가 실측이 실제보다 작게 나온다.
 > **위치(전수 grep)**: [agency-send-refine.ts:193](../packages/backend/src/utils/agency-send-refine.ts) · [ai-mapping.ts:244](../packages/backend/src/utils/ai-mapping.ts) (`tokensUsed` 합산). 도움말 축([help-answer.ts](../packages/backend/src/utils/help-answer.ts))은 2026-08-25 정정 완료 — 같은 세션 축 밖이라 이 2곳은 기록만(`scope_discipline_one_ticket_axis`). `services/ai.ts`는 read/created를 PM2 로그에는 찍는데 기록 경로 합산 여부 미확인(확인부터).
 > **수정 방향**: 각 기록식에 `+ cache_creation_input_tokens` 합산(도움말 축과 같은 형태 · read/created 내역 로그 동반). 부수 = `ai_call_log` 테이블이 SCHEMA.md에 본체 미등재(FK 참조만 있음) — 착수 시 information_schema 순수 덤프 후 등재.
-### 🔄 B-0824-1 DM 버전 복원이 화면에 반영되지 않는다 (🔄 Reopened → 🟡 코드 수정 완료·DDL 대기) — 2026-08-24 접수 cmt6qug4s00v1jnotsqeaf12g(임은지) · 2026-08-25 재오픈
+### 🔄 B-0824-1 DM 버전 복원이 화면에 반영되지 않는다 (🔄 Reopened → 🟡 배포완료·운영 실측 대기) — 2026-08-24 접수 cmt6qug4s00v1jnotsqeaf12g(임은지) · 2026-08-25 재오픈
+
+> **★2026-08-25 배포완료** — 프론트 빌드·스왑 완료 · 백엔드 reload 완료 · **DDL 실행완료**(`dm_versions.snapshot jsonb` · information_schema 실측). 남은 것은 운영 실측 4단계(아래 검증 줄).
 
 > **★2026-08-25 재오픈 정정 — 어제는 결함 둘 중 하나만 고쳤다.**
 > **재오픈 증상**: 오류 문구는 그대로였고(옛 코드 시점 스크린샷), 처리 메모에는 "복원 누르면 그 화면으로 바뀌지 않습니다"가 적혀 있었다.
@@ -91,6 +93,21 @@
 > **함께 고친 것 2**: ①라우트 catch가 `err.message`를 그대로 돌려줘 **DB 문법 오류가 고객 화면에 떴다** → 로그로 옮기고 고객에게는 할 일을 준다. ②모달이 "스냅샷을 비교하고 복원할 수 있다"고 적어 놓고 **JSON 줄 diff**를 보여줬다(접수 기대 동작) → 편집기와 같은 `SectionRenderer`로 양쪽을 실물로 그리는 "미리보기"를 기본 탭으로, 기존 diff는 "코드 비교"로 남겼다. 옛 버전이 그려지지 않으면 경계가 받아 코드 비교로 안내한다(모달 하나 때문에 화면 전체가 날아가지 않게).
 > **⚠ 별건(안 건드렸다)**: `routes/dm.ts`는 **49곳**이 `error: err.message`로 원문을 노출한다(라우트 73개 중). 이번 접수의 호출부 1곳만 고쳤다. 파일 전체 정정은 별도 과제.
 > **검증**: backend tsc 0 · frontend tsc 0 · vitest 196파일 2,991건(`dm-flow-invariants.test.ts`에 회귀 2건 신설 — 배열이 문자열로 나가는가 · null은 null로 남는가). **잔여 = 운영 실측**(버전 2개 만들고 1차로 복원 → 캔버스가 되돌아가는가).
+
+### 🟠 B-0825-5 프론트 빌드가 같은 소스로 무작위 실패한다 — 난독화 비결정성 (🟡 처방 완료·배포 대기) — 2026-08-25
+
+> **★처방 완료(2026-08-25 · Harold 지시)** — `vite.config.ts` 두 줄.
+> - **`exclude`에 `/modulepreload-polyfill/` 추가**. 플러그인 실코드 확인 결과 기본 include가 `/\.(jsx?|tsx?|cjs|mjs)$/`라 vite 내부 가상 모듈까지 난독화 대상이 됐다(`anymatch`가 모듈 id에 정규식을 그대로 건다 · `enforce: post`). 내부 폴리필이라 난독화 가치 0.
+> - **`seed: 20260825` 고정**. 실측 = 시드 없이 두 번 돌리면 결과가 다르고, 고정하면 같다. 이 한 줄이 "로컬에서 됐다"를 서버에 대한 근거로 만들어 준다. ⛔ 지우거나 0으로 되돌리면 비결정 빌드로 회귀한다.
+> **산출물 검증(문서 아닌 실측 · 0718 규약)**: 같은 설정으로 **연속 2회 빌드 → assets JS 통합 md5 동일**(`9323597b4bc010f215a14823ef0c1953`) · index.html 해시 동일 · 청크 파일명 168개 전부 동일. 서버 게이트와 같은 검사도 두 산출물 모두 통과 = **lazy 청크 41건 전부 실존 · 비literal 동적 import 0건**. 폴리필은 `modulepreload` 문자열이 평문으로 남아 제외가 실제로 걸린 것을 확인했다. frontend·backend tsc 0 · vitest 3,074건.
+> **잔여**: 서버 `build:safe` 1회로 실환경 확인(시드가 고정됐으니 로컬과 같은 산출물이어야 한다).
+
+> **증상**: `npm run build:safe`가 `[vite-plugin-javascript-obfuscator] @postConstruct error in class o: Invalid or unexpected token / file: vite/modulepreload-polyfill.js`로 **215ms 만에** 죽는다(모듈 1개 변환 후).
+> **실측으로 배제한 것**: 소스 문법(로컬 production 빌드 55초 정상) · 파일 동일성(`vite.config.ts` 포함 4개 md5가 로컬과 일치) · 패키지 버전(vite 5.4.21 · 플러그인 3.1.0 · javascript-obfuscator 4.2.2 서버·로컬 동일) · 난독화기 동작(운영 옵션 전량으로 시험 통과) · tsc emit(`noEmit: true`).
+> **확정 근거**: **같은 커밋·같은 서버에서 재실행하니 25.44초에 성공**했다(게이트 2종 통과 · atomic swap 완료). 20:23 성공 → 21:58 실패 → 22:0x 성공. 입력이 같은데 결과가 갈린다.
+> **원인**: 난독화 설정이 **비결정적**이다 — `stringArrayThreshold: 0.5`(문자열 절반을 빌드마다 무작위 선택) + 시드 미고정. 회차에 따라 vite 내부 가상 모듈(`modulepreload-polyfill`) 처리에서 파서가 깨진다. 이 프로젝트는 같은 비결정성으로 **2026-07-18 전 고객 화면 다운**을 겪었고(B-0718-1), safe-build의 게이트 2종(lazy 청크 실존 · 비literal 동적 import)이 그때 만든 방어막이다. 이번 것은 그 게이트가 잡는 "조용한 불량 산출물"이 아니라 **빌드 자체가 죽는** 형태라 배포가 막힐 뿐 운영은 안전했다(`dist-new`에만 쓰고 옛 `dist` 유지).
+> **처방 후보(착수 전)**: ①난독화 `exclude`에 vite 가상 모듈(`/modulepreload-polyfill/`) 추가 — 이번 실패 지점 제거. 내부 폴리필이라 난독화 가치가 0이다. ②`seed` 고정 — 빌드를 결정적으로 만들어 "로컬 통과 = 서버 통과"가 성립하게 한다(오늘 로컬만 보고 배포 명령을 드린 실패의 구조적 해소). 위험 = 나쁜 시드를 고정하면 항상 실패하나 첫 빌드에서 즉시 드러나고 시드 교체로 해결된다. **①②를 함께 하는 것이 추천**이며, 0718 사고 영역이라 변경 후 산출물 검증(게이트 2종 + 반복 빌드)을 동반한다.
+> **부수(오늘 확인)**: 재시도로 넘어갈 수 있으므로 배포가 막히면 **먼저 한 번 더 돌려 본다.** 다만 그것은 회피이지 해결이 아니다.
 
 ### 🟡 B-0825-3 이메일 편집기 블록 순서 이동 불능 (🟡 코드 수정 완료·배포 대기) — 2026-08-25 접수 cmt8dbun201lrjnota46p7c5z(임은지)
 

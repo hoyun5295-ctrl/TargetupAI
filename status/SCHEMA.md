@@ -899,7 +899,7 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 | note | text |
 | created_by | uuid FK | users.id |
 | created_at | timestamptz |
-| **snapshot** | **jsonb** | **★2026-08-25 ALTER 대기** — 화면을 만드는 상태 전부(`DM_SNAPSHOT_KEYS` 9개). `sections`만 되돌리면 화면이 `pages`를 우선 읽어 복원이 무효였다(B-0824-1 재오픈). 부재 시 503 `DB_MIGRATION_PENDING` + 옛 스냅샷 폴백 동반. `ALTER TABLE dm_versions ADD COLUMN IF NOT EXISTS snapshot jsonb;` |
+| **snapshot** | **jsonb** | **★2026-08-25 ALTER 실행완료**(information_schema 실측 = `jsonb` · nullable YES) — 화면을 만드는 상태 전부(`DM_SNAPSHOT_KEYS` 9개). `sections`만 되돌리면 화면이 `pages`를 우선 읽어 복원이 무효였다(B-0824-1 재오픈). 부재 시 503 `DB_MIGRATION_PENDING` + 옛 스냅샷 폴백 동반 |
 
 > ⚠ **실측(2026-08-25)**: `dm_pages` 5건이 **전부 `pages`를 보유**한다(scroll 모드도 1페이지). 즉 화면 렌더는 사실상 항상 `pages` 경로다 — `sections`만 쓰는 코드는 화면에 안 보인다.
 
