@@ -12,17 +12,22 @@ import { Router, Request, Response } from 'express';
 import pool, { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { canUseAgencySend, loadPlanContext } from '../utils/plan-guard';
-import { isCallbackRegistered } from '../utils/callback-filter';
+import multer from 'multer';
+import { getRegisteredCallbackSet, isCallbackRegistered } from '../utils/callback-filter';
 import { validateMmsPayload } from '../utils/mms-validator';
+import {
+  parseAgencyRequestForm, parseAgencyRecipientList, pickPhoneColumn, resolveCallbackPlan,
+  type AgencyFormError, type CallbackPlan,
+} from '../utils/agency-send-form';
 import { normalizePhone } from '../utils/normalize-phone';
 import {
-  canCancel, checkApproval, isEditable, isSameKstDay, NOT_CANCELABLE_SQL, validateRequestedAt,
+  canCancel, isEditable, isSameKstDay, NOT_CANCELABLE_SQL, validateRequestedAt,
   type AgencySendStatus,
 } from '../utils/agency-send-state';
 import { buildSlotPlan, extractAgencyVars } from '../utils/agency-send-vars';
 import { findAttemptCampaignId } from '../utils/agency-send-campaign';
 import { SEND_HOURS } from '../config/defaults';
-import { triggerAgencySendDispatch } from '../utils/agency-send-worker';
+import { approveAgencyRequestTx } from '../utils/agency-send-approve';
 
 const router = Router();
 router.use(authenticate);
@@ -207,127 +212,530 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // ════════════════════════════════════════════════════════════
-// POST /api/agency-send — 접수
+// 접수 생성 코어 — 검증·트랜잭션·이력이 전부 여기 있다 (★2026-08-25(3) 추출)
+//   입구 = ①화면 접수(POST /) ②요청서 원스텝(POST /one-step, 회신번호 열 방식이면 여러 번)
+//   ③(예정) 이메일 접수 워커. 입구가 늘어도 검증은 이 한 곳이다.
+// ════════════════════════════════════════════════════════════
+type CreateCoreResult =
+  | { ok: true; request: any }
+  | { ok: false; status: number; error: string; code?: string };
+
+async function createRequestCore(
+  auth: { companyId: string; userId: string },
+  input: any,
+  /** 외부 트랜잭션(원스텝 다건 생성). 주어지면 BEGIN·COMMIT·이력은 호출부가 소유한다 */
+  extClient?: any,
+  /**
+   * 사전 조회 컨텍스트(★Codex 적대 2R) — 외부 트랜잭션이 연결을 쥔 채 코어가 전역 풀을 다시 기다리면
+   * 동시 요청이 풀을 서로 기다리다 말라붙는다. 원스텝은 트랜잭션을 열기 **전에** 같은 함수로 조회해
+   * 여기로 넘긴다. 검증 규칙 자체는 그대로 코어가 집행한다.
+   */
+  pre?: { registeredSet?: Set<string>; window?: { startHour: number | null; endHour: number | null } },
+): Promise<CreateCoreResult> {
+  const {
+    messageType = 'SMS', subject, content, isAd = false, callbackNumber,
+    managerPhone, managerPhones, requestedAt, mmsImagePaths, fileName, phoneColumn, varMapping,
+    recipients,
+  } = input || {};
+
+  // ── 문안
+  const body = String(content || '').trim();
+  if (!body) return { ok: false, status: 400, error: '보낼 문안을 입력해 주세요.' };
+  if (body.length > MAX_CONTENT) return { ok: false, status: 400, error: `문안은 ${MAX_CONTENT}자까지 넣을 수 있습니다.` };
+
+  // 문안 변수는 직접발송과 같은 주소록 슬롯 네 칸에 얹는다(치환 CT가 하나여야 하므로).
+  // ⛔ 발송 직전에 조용히 잘리면 안 되므로 접수에서 막는다.
+  const plan = buildSlotPlan(body);
+  if (!plan.ok) return { ok: false, status: 400, error: plan.error || '문안 항목이 너무 많습니다.', code: 'TOO_MANY_VARS' };
+
+  const type = String(messageType).toUpperCase();
+  if (!['SMS', 'LMS', 'MMS'].includes(type)) {
+    return { ok: false, status: 400, error: '보낼 수 있는 형식이 아닙니다.' };
+  }
+  if ((type === 'LMS' || type === 'MMS') && !String(subject || '').trim()) {
+    return { ok: false, status: 400, error: '제목을 입력해 주세요.' };
+  }
+  const subjectVars = extractAgencyVars(String(subject || ''));
+  if (subjectVars.length > 0) {
+    return {
+      ok: false, status: 400, code: 'SUBJECT_VARS',
+      error: `제목에는 항목을 넣을 수 없습니다: ${subjectVars.map((v) => `%${v}%`).join(' ')}. 제목은 모든 수신자에게 같은 문장으로 나갑니다.`,
+    };
+  }
+  // MMS는 이미지가 본체다. 0장이면 통신사가 파일 오류로 버린다(2026-04-21 9007 선례)
+  const images = Array.isArray(mmsImagePaths) ? mmsImagePaths : [];
+  const mmsCheck = validateMmsPayload(type, images);
+  if (!mmsCheck.ok) return { ok: false, status: 400, error: mmsCheck.error || '이미지 구성을 확인해 주세요.', code: mmsCheck.code };
+
+  // ── 발신번호(회사에 등록된 것만)
+  const callback = normalizePhone(String(callbackNumber || ''));
+  if (!callback) return { ok: false, status: 400, error: '보내는 번호를 골라 주세요.' };
+  const callbackOk = pre?.registeredSet ? pre.registeredSet.has(callback) : await isCallbackRegistered(auth.companyId, callback, auth.userId);
+  if (!callbackOk) {
+    return { ok: false, status: 400, error: '등록되지 않은 보내는 번호입니다. 발신번호 등록을 먼저 해 주세요.' };
+  }
+
+  // ── 담당자 번호(테스트 문자를 받을 곳). **여러 명일 수 있다**(Harold 2026-08-23)
+  const managerList: string[] = [];
+  const managerSeen = new Set<string>();
+  const managerRaw: any[] = Array.isArray(managerPhones) ? managerPhones : [managerPhone];
+  for (const raw of managerRaw) {
+    const phone = normalizePhone(String(raw || ''));
+    if (!phone || phone.length < 10 || managerSeen.has(phone)) continue;
+    managerSeen.add(phone);
+    managerList.push(phone);
+    if (managerList.length >= MAX_MANAGER_PHONES) break;
+  }
+  if (managerList.length === 0) {
+    return { ok: false, status: 400, error: '테스트 문자를 받을 담당자 휴대폰 번호를 넣어 주세요.' };
+  }
+
+  // ── 요청 시각(리드타임 + 회사 발송 허용 시간)
+  const when = validateRequestedAt(requestedAt, new Date(), pre?.window ?? await loadSendWindow(auth.companyId, !!isAd));
+  if (!when.valid) return { ok: false, status: 400, error: when.error || '보낼 시각을 확인해 주세요.' };
+
+  // ── 수신자
+  const rows: Array<{ phone: string; vars: Record<string, any> }> = [];
+  const seen = new Set<string>();
+  for (const raw of Array.isArray(recipients) ? recipients : []) {
+    const phone = normalizePhone(String(raw?.phone ?? raw ?? ''));
+    if (!phone || phone.length < 10 || seen.has(phone)) continue;
+    seen.add(phone);
+    rows.push({ phone, vars: raw?.vars && typeof raw.vars === 'object' ? raw.vars : {} });
+    if (rows.length >= MAX_RECIPIENTS) break;
+  }
+  if (rows.length === 0) {
+    return { ok: false, status: 400, error: '보낼 번호가 없습니다. 명단을 확인해 주세요.' };
+  }
+
+  // ⛔ 접수 행과 수신자는 **한 트랜잭션**이다. 나뉘면 수신자 0건짜리 접수가 남고,
+  //   워커가 그것을 집어 "보낼 사람이 없는 발송"을 만든다.
+  //   원스텝(extClient)은 **여러 접수가 한 트랜잭션**이다 — 부분 생성 자체가 없다(★Codex 적대 1R).
+  const client = extClient || await pool.connect();
+  const own = !extClient;
+  let request: any;
+  try {
+    if (own) await client.query('BEGIN');
+    const inserted = await client.query(
+      `INSERT INTO agency_send_requests (
+         company_id, created_by, status, callback_number, message_type, subject, mms_image_paths, is_ad,
+         original_content, current_content, content_version, requested_at, manager_phone, manager_phones,
+         file_name, phone_column, var_mapping, recipient_count
+       ) VALUES ($1::uuid, $2::uuid, 'received', $3, $4, $5, $6::jsonb, $7, $8, $8, 1, $9, $10, $11::text[], $12, $13, $14::jsonb, $15)
+       RETURNING *`,
+      [
+        auth.companyId, auth.userId, callback, type, subject || null,
+        images.length > 0 ? JSON.stringify(images) : null, !!isAd,
+        body, when.at, managerList[0], managerList,
+        fileName || null, String(phoneColumn || '전화번호'),
+        JSON.stringify(varMapping && typeof varMapping === 'object' ? varMapping : {}),
+        rows.length,
+      ],
+    );
+    request = inserted.rows[0];
+
+    for (let offset = 0; offset < rows.length; offset += RECIPIENT_INSERT_CHUNK) {
+      const slice = rows.slice(offset, offset + RECIPIENT_INSERT_CHUNK);
+      const values: any[] = [];
+      const chunks: string[] = [];
+      slice.forEach((r, i) => {
+        const base = i * 3;
+        chunks.push(`($1::uuid, $${base + 2}, $${base + 3}, $${base + 4}::jsonb)`);
+        values.push(offset + i + 1, r.phone, JSON.stringify(r.vars));
+      });
+      await client.query(
+        `INSERT INTO agency_send_recipients (request_id, row_no, phone, vars) VALUES ${chunks.join(',')}`,
+        [request.id, ...values],
+      );
+    }
+
+    // 적재 효과 검증 — 넣었다고 믿지 않고 센다(6원칙 ②). 어긋나면 접수 자체를 되돌린다
+    const counted = await client.query(
+      `SELECT COUNT(*)::int AS c FROM agency_send_recipients WHERE request_id = $1::uuid`, [request.id],
+    );
+    if ((counted.rows[0]?.c || 0) !== rows.length) {
+      throw new Error(`수신자 적재 불일치: 기대 ${rows.length} 실제 ${counted.rows[0]?.c}`);
+    }
+    if (own) await client.query('COMMIT');
+  } catch (txErr) {
+    if (own) await client.query('ROLLBACK').catch(() => {});
+    throw txErr;
+  } finally {
+    if (own) client.release();
+  }
+
+  if (own) {
+    await logEvent(request.id, 'received', { recipientCount: rows.length, messageType: type });
+    console.log(`[agency-send] 접수 company=${auth.companyId} id=${request.id} ${type} ${rows.length}건`);
+  }
+  return { ok: true, request };
+}
+
+// ════════════════════════════════════════════════════════════
+// POST /api/agency-send — 접수 (화면 입구 · 검증은 코어가 소유)
 // ════════════════════════════════════════════════════════════
 router.post('/', async (req: Request, res: Response) => {
   const auth = await requireAgencySend(req, res);
   if (!auth) return;
-
   try {
-    const {
-      messageType = 'SMS', subject, content, isAd = false, callbackNumber,
-      managerPhone, managerPhones, requestedAt, mmsImagePaths, fileName, phoneColumn, varMapping,
-      recipients,
-    } = req.body || {};
-
-    // ── 문안
-    const body = String(content || '').trim();
-    if (!body) return res.status(400).json({ success: false, error: '보낼 문안을 입력해 주세요.' });
-    if (body.length > MAX_CONTENT) return res.status(400).json({ success: false, error: `문안은 ${MAX_CONTENT}자까지 넣을 수 있습니다.` });
-
-    // 문안 변수는 직접발송과 같은 주소록 슬롯 네 칸에 얹는다(치환 CT가 하나여야 하므로).
-    // ⛔ 발송 직전에 조용히 잘리면 안 되므로 접수에서 막는다.
-    const plan = buildSlotPlan(body);
-    if (!plan.ok) return res.status(400).json({ success: false, error: plan.error, code: 'TOO_MANY_VARS' });
-
-    const type = String(messageType).toUpperCase();
-    if (!['SMS', 'LMS', 'MMS'].includes(type)) {
-      return res.status(400).json({ success: false, error: '보낼 수 있는 형식이 아닙니다.' });
+    const result = await createRequestCore(auth, req.body || {});
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, error: result.error, ...(result.code ? { code: result.code } : {}) });
     }
-    if ((type === 'LMS' || type === 'MMS') && !String(subject || '').trim()) {
-      return res.status(400).json({ success: false, error: '제목을 입력해 주세요.' });
-    }
-    if (rejectSubjectVars(subject, res)) return;
-    // MMS는 이미지가 본체다. 0장이면 통신사가 파일 오류로 버린다(2026-04-21 9007 선례)
-    const images = Array.isArray(mmsImagePaths) ? mmsImagePaths : [];
-    const mmsCheck = validateMmsPayload(type, images);
-    if (!mmsCheck.ok) return res.status(400).json({ success: false, error: mmsCheck.error, code: mmsCheck.code });
+    return res.status(201).json({ success: true, request: toPublic(result.request) });
+  } catch (err: any) {
+    if (isMissingRelation(err)) return migrationPending(res);
+    console.error('[agency-send] 접수 실패:', err);
+    return res.status(500).json({ success: false, error: '접수하지 못했습니다. 잠시 후 다시 시도해 주세요.' });
+  }
+});
 
-    // ── 발신번호(회사에 등록된 것만)
-    const callback = normalizePhone(String(callbackNumber || ''));
-    if (!callback) return res.status(400).json({ success: false, error: '보내는 번호를 골라 주세요.' });
-    if (!(await isCallbackRegistered(auth.companyId, callback, auth.userId))) {
-      return res.status(400).json({ success: false, error: '등록되지 않은 보내는 번호입니다. 발신번호 등록을 먼저 해 주세요.' });
-    }
+// ════════════════════════════════════════════════════════════
+// 요청서 원스텝 접수 (★2026-08-25(3) · Harold "요청서 규격화 + 원스텝")
+//   파일 2개(요청서 규격 + 명단 자유형)를 서버가 파싱·검증·집계한다.
+//   브라우저에는 상위 50건 샘플과 집계만 내려간다(전 행 전송이 화면 접수가 느린 진짜 원인).
+//   확정도 같은 파일을 다시 받아 같은 분석을 거친다(서버에 중간 상태를 두지 않는다 — 무상태).
+//   ⛔ 회신번호 열 방식 = 회신번호별로 접수를 나눈다. 대행발송이 타는 적재 배관(주소록 슬롯 5칸)은
+//     수신자별 회신번호를 나르지 못한다(agency-send-worker 적재부 주석 소유). 나뉜 각 건은
+//     기존 파이프라인(검사·담당자 문자·승인)을 각각 그대로 탄다 — 확인 화면이 그 사실을 안내한다.
+// ════════════════════════════════════════════════════════════
+const oneStepMulter = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024, files: 2 },
+}).fields([{ name: 'form', maxCount: 1 }, { name: 'list', maxCount: 1 }]);
 
-    // ── 담당자 번호(테스트 문자를 받을 곳). **여러 명일 수 있다**(Harold 2026-08-23)
-    const managerList: string[] = [];
-    const managerSeen = new Set<string>();
-    const managerRaw: any[] = Array.isArray(managerPhones) ? managerPhones : [managerPhone];
-    for (const raw of managerRaw) {
-      const phone = normalizePhone(String(raw || ''));
-      if (!phone || phone.length < 10 || managerSeen.has(phone)) continue;
-      managerSeen.add(phone);
-      managerList.push(phone);
-      if (managerList.length >= MAX_MANAGER_PHONES) break;
-    }
-    if (managerList.length === 0) {
-      return res.status(400).json({ success: false, error: '테스트 문자를 받을 담당자 휴대폰 번호를 넣어 주세요.' });
-    }
+/** 자격을 **파일을 받기 전에** 확인한다(★Codex 적대 1R — 무자격 계정이 메모리부터 점유하면 안 된다) */
+async function requireAgencySendMw(req: Request, res: Response, next: () => void): Promise<void> {
+  const auth = await requireAgencySend(req, res);
+  if (!auth) return;
+  (req as any).agencyAuth = auth;
+  next();
+}
 
-    // ── 요청 시각(리드타임 + 회사 발송 허용 시간)
-    const when = validateRequestedAt(requestedAt, new Date(), await loadSendWindow(auth.companyId, !!isAd));
-    if (!when.valid) return res.status(400).json({ success: false, error: when.error });
+/** multer 오류는 핸들러 밖에서 터진다 — JSON 계약으로 바꿔 준다(HTML 스택이 화면에 뜨지 않게) */
+function oneStepUpload(req: Request, res: Response, next: () => void): void {
+  oneStepMulter(req as any, res as any, (err: any) => {
+    if (err) {
+      const tooBig = err?.code === 'LIMIT_FILE_SIZE';
+      res.status(tooBig ? 413 : 400).json({
+        success: false,
+        code: tooBig ? 'FILE_TOO_LARGE' : 'UPLOAD_INVALID',
+        error: tooBig ? '파일이 너무 큽니다. 한 파일 15MB까지 올릴 수 있습니다.' : '파일 업로드 형식이 올바르지 않습니다.',
+      });
+      return;
+    }
+    next();
+  });
+}
 
-    // ── 수신자
-    const rows: Array<{ phone: string; vars: Record<string, any> }> = [];
-    const seen = new Set<string>();
-    for (const raw of Array.isArray(recipients) ? recipients : []) {
-      const phone = normalizePhone(String(raw?.phone ?? raw ?? ''));
-      if (!phone || phone.length < 10 || seen.has(phone)) continue;
+/** 회신번호 종류(=나뉘는 접수 수) 상한. 이 위는 사람이 승인할 수 있는 규모가 아니다 */
+const MAX_CALLBACK_GROUPS = 20;
+
+interface OneStepGroup { callback: string; count: number; registered: boolean; recipients: Array<{ phone: string; vars: Record<string, any> }> }
+
+interface OneStepAnalysis {
+  subject: string;
+  content: string;
+  isAd: boolean;
+  requestedAtIso: string | null;
+  managerPhones: string[];
+  callback: CallbackPlan;
+  headers: string[];
+  phoneColumn: string | null;
+  varsMatched: Array<{ name: string; column: string | null }>;
+  counts: { total: number; valid: number; dup: number; invalid: number; callbackMissing: number };
+  groups: OneStepGroup[];
+  sample: Array<{ phone: string; callback?: string }>;
+  messageType: 'SMS' | 'LMS' | 'MMS';
+  fileName: string | null;
+  errors: AgencyFormError[];
+}
+
+/** 확인 화면에서 바꿀 수 있는 것: 시각 · 회신번호 선택 · 담당자 · 이미지. 문안·제목은 요청서가 진실이다 */
+function parseOneStepOverrides(raw: any): {
+  requestedAt?: string; callback?: { mode: string; number?: string; column?: string };
+  managerPhones?: string[]; mmsImagePaths?: string[]; phoneColumn?: string;
+} {
+  try {
+    const o = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
+    return o && typeof o === 'object' ? o : {};
+  } catch {
+    return {};
+  }
+}
+
+async function analyzeOneStep(
+  auth: { companyId: string; userId: string },
+  formBuf: Buffer | null, listBuf: Buffer | null, listName: string | null,
+  overrides: ReturnType<typeof parseOneStepOverrides>,
+): Promise<OneStepAnalysis> {
+  const errors: AgencyFormError[] = [];
+  const empty: OneStepAnalysis = {
+    subject: '', content: '', isAd: true, requestedAtIso: null, managerPhones: [],
+    callback: { mode: 'none' }, headers: [], phoneColumn: null, varsMatched: [],
+    counts: { total: 0, valid: 0, dup: 0, invalid: 0, callbackMissing: 0 },
+    groups: [], sample: [], messageType: 'SMS', fileName: listName, errors,
+  };
+  if (!formBuf) { errors.push({ field: '요청서', error: '요청서 파일을 올려 주세요.' }); }
+  if (!listBuf) { errors.push({ field: '명단', error: '고객 명단 파일을 올려 주세요.' }); }
+  if (!formBuf || !listBuf) return empty;
+
+  const form = parseAgencyRequestForm(formBuf);
+  errors.push(...form.errors);
+
+  let headers: string[] = [];
+  let rows: Record<string, any>[] = [];
+  try {
+    const list = parseAgencyRecipientList(listBuf);
+    headers = list.headers;
+    rows = list.rows;
+    // ⛔ 같은 이름의 열·상한 초과는 조용히 못 넘어간다(★Codex 적대 1R — 열이 밀리거나 잘리면 다른 사람에게 간다)
+    for (const d of list.duplicates) errors.push({ field: '명단', error: `명단에 "${d}" 열이 두 개 있습니다. 하나만 남겨 주세요.` });
+    if (list.truncated) errors.push({ field: '명단', error: `명단이 너무 큽니다. 한 번에 ${MAX_RECIPIENTS.toLocaleString()}명까지 접수할 수 있으니 나눠 주세요.` });
+    if (list.columnsOverflow) errors.push({ field: '명단', error: '명단의 열이 100개를 넘습니다. 발송에 쓸 열만 남겨 주세요.' });
+  } catch {
+    errors.push({ field: '명단', error: '명단 파일을 읽지 못했습니다. 엑셀 또는 CSV인지 확인해 주세요.' });
+  }
+  if (headers.length > 0 && rows.length === 0) errors.push({ field: '명단', error: '명단에 데이터 행이 없습니다.' });
+
+  // 수신자 열: 확인 화면에서 직접 고를 수 있다(값 비율 자동 선정이 애매한 파일 대비).
+  // ⛔ 지정했는데 명단에 없으면 자동 선정으로 **폴백하지 않는다**(★2R — 사용자가 본 것과 다른 열 금지)
+  let phoneColumn: string | null = null;
+  if (overrides.phoneColumn !== undefined) {
+    if (headers.includes(String(overrides.phoneColumn))) phoneColumn = String(overrides.phoneColumn);
+    else errors.push({ field: '명단', error: '고르신 수신자 열이 명단에 없습니다. 다시 골라 주세요.' });
+  } else {
+    phoneColumn = pickPhoneColumn(headers, rows);
+    if (rows.length > 0 && !phoneColumn) {
+      errors.push({ field: '명단', error: '휴대폰 번호 열을 찾지 못했습니다. 확인 화면에서 수신자 열을 직접 골라 주세요.' });
+    }
+  }
+
+  // 확인 화면 조정값 반영(시각·회신번호·담당자).
+  // ⛔ 값이 "있으면" 그것이 전부다 — 빈 문자열·빈 배열도 의도다(★Codex 적대 1R: 화면에서 지웠는데
+  //   요청서 원값으로 조용히 복귀하면, 보이는 것과 다른 값으로 접수된다). fail-closed = 반려.
+  const hasRequestedAtOverride = Object.prototype.hasOwnProperty.call(overrides, 'requestedAt');
+  const requestedAt = hasRequestedAtOverride
+    ? (overrides.requestedAt ? new Date(overrides.requestedAt) : null)
+    : form.requestedAt;
+  const requestedAtIso = requestedAt && !Number.isNaN(requestedAt.getTime()) ? requestedAt.toISOString() : null;
+  if (hasRequestedAtOverride && !requestedAtIso) errors.push({ field: '보낼 시각', error: '보낼 시각을 정해 주세요.' });
+  const hasManagerOverride = Array.isArray(overrides.managerPhones);
+  const managerPhones = (hasManagerOverride ? overrides.managerPhones! : form.managerPhones)
+    .map((p) => normalizePhone(String(p || ''))).filter((p) => p.length >= 10).slice(0, MAX_MANAGER_PHONES);
+  if (managerPhones.length === 0 && !form.errors.find((e) => e.field === '담당자 번호')) {
+    errors.push({ field: '담당자 번호', error: '테스트 문자를 받을 담당자 번호가 없습니다.' });
+  }
+
+  // ⛔ 회신번호 조정값도 유효하지 않으면 요청서 값으로 **폴백하지 않는다**(★2R)
+  let callback: CallbackPlan;
+  if (overrides.callback !== undefined) {
+    if (overrides.callback?.mode === 'fixed' && overrides.callback.number) {
+      callback = { mode: 'fixed', number: normalizePhone(String(overrides.callback.number)) };
+    } else if (overrides.callback?.mode === 'column' && overrides.callback.column && headers.includes(overrides.callback.column)) {
+      callback = { mode: 'column', column: overrides.callback.column };
+    } else {
+      callback = { mode: 'none' };
+      errors.push({ field: '회신번호', error: '고르신 회신번호가 올바르지 않습니다. 다시 골라 주세요.' });
+    }
+  } else {
+    callback = resolveCallbackPlan(form.callbackRaw, headers);
+  }
+  if (callback.mode === 'none' && form.callbackRaw) {
+    errors.push({ field: '회신번호', error: `회신번호 칸의 "${form.callbackRaw}"를 번호로도 명단의 열 이름으로도 읽지 못했습니다.` });
+  }
+
+  // 문안 항목 ↔ 명단 열(이름 같으면 자동 · 화면 접수와 같은 규칙)
+  const usedVars = extractAgencyVars(form.content);
+  const sameName = (v: string) => headers.find((h) => h.replace(/\s+/g, '') === v.replace(/\s+/g, ''));
+  const varsMatched = usedVars.map((name) => ({ name, column: sameName(name) || null }));
+  for (const vm of varsMatched) {
+    if (!vm.column) errors.push({ field: '문안', error: `문안의 %${vm.name}%에 맞는 열이 명단에 없습니다.` });
+  }
+  const varMappingColumns = varsMatched.filter((v) => v.column);
+
+  // 수신자 정리 + 집계(서버가 다 세고, 화면에는 숫자와 상위 50만 보낸다)
+  const seen = new Set<string>();
+  let dup = 0; let invalid = 0; let callbackMissing = 0;
+  const groupMap = new Map<string, Array<{ phone: string; vars: Record<string, any> }>>();
+  let groupsOverflow = false;
+  const sample: Array<{ phone: string; callback?: string }> = [];
+  const ONLY_DIGITS = (s: any) => String(s ?? '').replace(/[^0-9]/g, '');
+  if (phoneColumn) {
+    for (const r of rows) {
+      const phone = normalizePhone(ONLY_DIGITS(r[phoneColumn]));
+      if (!phone || phone.length < 10) { invalid++; continue; }
+      if (seen.has(phone)) { dup++; continue; }
+      let groupKey = callback.mode === 'fixed' ? callback.number : '';
+      if (callback.mode === 'column') {
+        const cb = normalizePhone(ONLY_DIGITS(r[callback.column]));
+        if (!cb || cb.length < 8) { callbackMissing++; continue; }
+        groupKey = cb;
+        // ⛔ 21종째가 나타나는 즉시 멈춘다(★2R) — 잘못 매핑된 열 하나가 수만 그룹을 만들며
+        //   자원(그룹 축적·등록 조회)을 태우는 것을 그룹 생성 단계에서 끊는다
+        if (!groupMap.has(groupKey) && groupMap.size >= MAX_CALLBACK_GROUPS + 1) { groupsOverflow = true; continue; }
+      }
       seen.add(phone);
-      rows.push({ phone, vars: raw?.vars && typeof raw.vars === 'object' ? raw.vars : {} });
-      if (rows.length >= MAX_RECIPIENTS) break;
+      const vars: Record<string, any> = {};
+      for (const vm of varMappingColumns) {
+        if (r[vm.column!] !== undefined && r[vm.column!] !== null) vars[vm.name] = r[vm.column!];
+      }
+      if (!groupMap.has(groupKey)) groupMap.set(groupKey, []);
+      groupMap.get(groupKey)!.push({ phone, vars });
+      if (sample.length < 50) sample.push({ phone, ...(callback.mode === 'column' ? { callback: groupKey } : {}) });
     }
-    if (rows.length === 0) {
-      return res.status(400).json({ success: false, error: '보낼 번호가 없습니다. 명단을 확인해 주세요.' });
+  }
+  const valid = [...groupMap.values()].reduce((a, g) => a + g.length, 0);
+  if (rows.length > 0 && valid === 0 && errors.length === 0) {
+    errors.push({ field: '명단', error: '보낼 수 있는 번호가 없습니다.' });
+  }
+
+  // 회신번호 그룹(열 방식이면 접수가 이 수만큼 나뉜다) + 등록 여부.
+  //   등록 검증은 **집합 1회 조회**로 한다(★2R — 그룹마다 조회하면 열 오지정 한 번에 수만 조회가 된다)
+  const groups: OneStepGroup[] = [];
+  const overLimit = groupsOverflow || groupMap.size > MAX_CALLBACK_GROUPS;
+  const registeredSet = overLimit ? new Set<string>() : await getRegisteredCallbackSet(auth.companyId, auth.userId);
+  for (const [cb, recipients] of groupMap) {
+    if (!cb) continue;
+    groups.push({ callback: cb, count: recipients.length, registered: overLimit ? false : registeredSet.has(cb), recipients });
+    if (recipients.length > MAX_RECIPIENTS) {
+      errors.push({ field: '명단', error: `회신번호 ${cb} 건이 ${recipients.length.toLocaleString()}명입니다. 한 접수는 ${MAX_RECIPIENTS.toLocaleString()}명까지라 명단을 나눠 주세요.` });
+    }
+  }
+  groups.sort((a, b) => b.count - a.count);
+  if (overLimit) {
+    errors.push({ field: '회신번호', error: `회신번호가 ${MAX_CALLBACK_GROUPS}종을 넘습니다. 접수가 그만큼 나뉘어 승인이 어렵습니다. 회신번호 열이 맞는지 확인하시고, 맞다면 ${MAX_CALLBACK_GROUPS}종 이하로 나눠 주세요.` });
+  }
+  const unregistered = overLimit ? [] : groups.filter((g) => !g.registered);
+  if (unregistered.length > 0) {
+    errors.push({
+      field: '회신번호',
+      error: `등록되지 않은 회신번호가 있습니다: ${unregistered.map((g) => g.callback).join(', ')}. 발신번호 등록을 먼저 해 주세요.`,
+    });
+  }
+  if (callback.mode === 'fixed' && groups.length === 0 && valid > 0) {
+    // fixed인데 그룹이 안 만들어진 경우는 없다(키 = 번호). 방어적 분기일 뿐이다.
+    errors.push({ field: '회신번호', error: '회신번호를 확인해 주세요.' });
+  }
+
+  // 발송 시각(리드타임 + 발송 허용 시간) 사전 검증 — 확정에서 또 검증되지만 확인 화면에서 먼저 알린다
+  if (requestedAtIso) {
+    const when = validateRequestedAt(requestedAtIso, new Date(), await loadSendWindow(auth.companyId, form.isAd));
+    if (!when.valid) errors.push({ field: '보낼 시각', error: when.error || '보낼 시각을 확인해 주세요.' });
+  }
+
+  const images = Array.isArray(overrides.mmsImagePaths) ? overrides.mmsImagePaths : [];
+  const messageType: 'SMS' | 'LMS' | 'MMS' = images.length > 0
+    ? 'MMS' : (form.content.length > 45 || form.subject.trim() ? 'LMS' : 'SMS');
+
+  return {
+    subject: form.subject, content: form.content, isAd: form.isAd, requestedAtIso,
+    managerPhones, callback, headers, phoneColumn, varsMatched,
+    counts: { total: rows.length, valid, dup, invalid, callbackMissing },
+    groups, sample, messageType, fileName: listName, errors,
+  };
+}
+
+function oneStepFiles(req: Request): { formBuf: Buffer | null; listBuf: Buffer | null; listName: string | null } {
+  const files = (req as any).files || {};
+  const formBuf = files.form?.[0]?.buffer || null;
+  const listBuf = files.list?.[0]?.buffer || null;
+  // multer는 latin1로 줄 때가 있어 원래 한글 파일명으로 되돌린다(업로드 라우트와 같은 관행)
+  const rawName = files.list?.[0]?.originalname || null;
+  let listName: string | null = null;
+  if (rawName) {
+    try { listName = Buffer.from(rawName, 'latin1').toString('utf8'); } catch { listName = rawName; }
+  }
+  return { formBuf, listBuf, listName };
+}
+
+/** 화면에 내려보낼 분석 결과(수신자 전 행은 절대 안 내려간다) */
+function toAnalysisView(a: OneStepAnalysis) {
+  return {
+    subject: a.subject, content: a.content, isAd: a.isAd, requestedAt: a.requestedAtIso,
+    managerPhones: a.managerPhones, callback: a.callback, headers: a.headers, phoneColumn: a.phoneColumn,
+    varsMatched: a.varsMatched, counts: a.counts,
+    groups: a.groups.map((g) => ({ callback: g.callback, count: g.count, registered: g.registered })),
+    sample: a.sample, messageType: a.messageType, fileName: a.fileName, errors: a.errors,
+  };
+}
+
+// 미리보기 — 파싱·검증·집계 결과만 돌려준다(접수 없음)
+router.post('/one-step/preview', requireAgencySendMw, oneStepUpload, async (req: Request, res: Response) => {
+  const auth = (req as any).agencyAuth as { companyId: string; userId: string };
+  try {
+    const { formBuf, listBuf, listName } = oneStepFiles(req);
+    const analysis = await analyzeOneStep(auth, formBuf, listBuf, listName, parseOneStepOverrides(req.body?.overrides));
+    return res.json({ success: true, analysis: toAnalysisView(analysis) });
+  } catch (err: any) {
+    if (isMissingRelation(err)) return migrationPending(res);
+    console.error('[agency-send] 원스텝 미리보기 실패:', err);
+    return res.status(500).json({ success: false, error: '파일을 분석하지 못했습니다. 양식 그대로인지 확인해 주세요.' });
+  }
+});
+
+// 확정 — 같은 파일을 다시 받아 같은 분석을 거치고, 회신번호 그룹마다 접수를 만든다
+router.post('/one-step', requireAgencySendMw, oneStepUpload, async (req: Request, res: Response) => {
+  const auth = (req as any).agencyAuth as { companyId: string; userId: string };
+  try {
+    const { formBuf, listBuf, listName } = oneStepFiles(req);
+    const overrides = parseOneStepOverrides(req.body?.overrides);
+    // ⛔ 확정은 확인 화면 스냅샷 **전체**가 필수다(★2R strict) — 빠진 필드가 요청서 원값으로
+    //   조용히 복귀하면 사용자가 본 것과 다른 값으로 접수된다. 폼 폴백은 미리보기 초회에만 허용한다.
+    const strictMissing: string[] = [];
+    if (!Object.prototype.hasOwnProperty.call(overrides, 'requestedAt')) strictMissing.push('보낼 시각');
+    if (!Array.isArray(overrides.managerPhones)) strictMissing.push('담당자 번호');
+    if (!overrides.callback || !['fixed', 'column'].includes(String(overrides.callback.mode))) strictMissing.push('회신번호');
+    if (!overrides.phoneColumn) strictMissing.push('수신자 열');
+    if (!Array.isArray(overrides.mmsImagePaths)) strictMissing.push('이미지 목록');
+    if (strictMissing.length > 0) {
+      return res.status(400).json({
+        success: false, code: 'CONFIRM_REQUIRED',
+        error: `확인 화면을 거쳐 접수해 주세요. 빠진 항목: ${strictMissing.join(', ')}`,
+      });
+    }
+    const analysis = await analyzeOneStep(auth, formBuf, listBuf, listName, overrides);
+    if (analysis.errors.length > 0) {
+      return res.status(400).json({ success: false, error: analysis.errors[0].error, errors: analysis.errors, code: 'FORM_INVALID' });
     }
 
-    // ⛔ 접수 행과 수신자는 **한 트랜잭션**이다. 나뉘면 수신자 0건짜리 접수가 남고,
-    //   워커가 그것을 집어 "보낼 사람이 없는 발송"을 만든다.
+    // ⛔ 전 그룹을 **한 트랜잭션**으로 만든다(★Codex 적대 1R high) — 중간 실패 시 전부 되돌아가
+    //   "일부만 접수된 상태"가 아예 생기지 않는다. 재시도해도 중복이 없다(전부 취소됐으니까).
+    //   남는 잔여 위험 = 성공 응답이 유실된 뒤 통째로 다시 제출하는 경우이며, 이는 화면 접수의
+    //   재클릭과 같은 부류다(§17에 수용 위험으로 기록).
+    const created: any[] = [];
+    // 트랜잭션을 열기 **전에** 검증 재료를 같은 함수로 조회해 둔다(★2R — 연결을 쥔 채 풀을 다시 기다리지 않는다)
+    const pre = {
+      registeredSet: await getRegisteredCallbackSet(auth.companyId, auth.userId),
+      window: await loadSendWindow(auth.companyId, analysis.isAd),
+    };
     const client = await pool.connect();
-    let request: any;
     try {
       await client.query('BEGIN');
-      const inserted = await client.query(
-        `INSERT INTO agency_send_requests (
-           company_id, created_by, status, callback_number, message_type, subject, mms_image_paths, is_ad,
-           original_content, current_content, content_version, requested_at, manager_phone, manager_phones,
-           file_name, phone_column, var_mapping, recipient_count
-         ) VALUES ($1::uuid, $2::uuid, 'received', $3, $4, $5, $6::jsonb, $7, $8, $8, 1, $9, $10, $11::text[], $12, $13, $14::jsonb, $15)
-         RETURNING *`,
-        [
-          auth.companyId, auth.userId, callback, type, subject || null,
-          images.length > 0 ? JSON.stringify(images) : null, !!isAd,
-          body, when.at, managerList[0], managerList,
-          fileName || null, String(phoneColumn || '전화번호'),
-          JSON.stringify(varMapping && typeof varMapping === 'object' ? varMapping : {}),
-          rows.length,
-        ],
-      );
-      request = inserted.rows[0];
-
-      for (let offset = 0; offset < rows.length; offset += RECIPIENT_INSERT_CHUNK) {
-        const slice = rows.slice(offset, offset + RECIPIENT_INSERT_CHUNK);
-        const values: any[] = [];
-        const chunks: string[] = [];
-        slice.forEach((r, i) => {
-          const base = i * 3;
-          chunks.push(`($1::uuid, $${base + 2}, $${base + 3}, $${base + 4}::jsonb)`);
-          values.push(offset + i + 1, r.phone, JSON.stringify(r.vars));
-        });
-        await client.query(
-          `INSERT INTO agency_send_recipients (request_id, row_no, phone, vars) VALUES ${chunks.join(',')}`,
-          [request.id, ...values],
-        );
-      }
-
-      // 적재 효과 검증 — 넣었다고 믿지 않고 센다(6원칙 ②). 어긋나면 접수 자체를 되돌린다
-      const counted = await client.query(
-        `SELECT COUNT(*)::int AS c FROM agency_send_recipients WHERE request_id = $1::uuid`, [request.id],
-      );
-      if ((counted.rows[0]?.c || 0) !== rows.length) {
-        throw new Error(`수신자 적재 불일치: 기대 ${rows.length} 실제 ${counted.rows[0]?.c}`);
+      for (const group of analysis.groups) {
+        const result = await createRequestCore(auth, {
+          messageType: analysis.messageType,
+          subject: analysis.subject || undefined,
+          content: analysis.content,
+          isAd: analysis.isAd,
+          callbackNumber: group.callback,
+          managerPhones: analysis.managerPhones,
+          requestedAt: analysis.requestedAtIso,
+          mmsImagePaths: Array.isArray(overrides.mmsImagePaths) ? overrides.mmsImagePaths : [],
+          fileName: analysis.fileName,
+          phoneColumn: analysis.phoneColumn || '전화번호',
+          varMapping: Object.fromEntries(analysis.varsMatched.filter((v) => v.column).map((v) => [v.name, v.column!])),
+          recipients: group.recipients,
+        }, client, pre);
+        if (!result.ok) {
+          await client.query('ROLLBACK');
+          return res.status(result.status).json({
+            success: false,
+            error: analysis.groups.length > 1 ? `회신번호 ${group.callback} 건: ${result.error} (아무것도 접수되지 않았습니다)` : result.error,
+            ...(result.code ? { code: result.code } : {}),
+          });
+        }
+        created.push(result.request);
       }
       await client.query('COMMIT');
     } catch (txErr) {
@@ -336,13 +744,15 @@ router.post('/', async (req: Request, res: Response) => {
     } finally {
       client.release();
     }
-
-    await logEvent(request.id, 'received', { recipientCount: rows.length, messageType: type });
-    console.log(`[agency-send] 접수 company=${auth.companyId} id=${request.id} ${type} ${rows.length}건`);
-    return res.status(201).json({ success: true, request: toPublic(request) });
+    // 이력은 커밋 뒤에 적는다(커밋 전 별도 연결로 적으면 아직 없는 행을 가리킨다)
+    for (const r of created) {
+      await logEvent(r.id, 'received', { recipientCount: r.recipient_count, messageType: r.message_type, via: 'one-step' });
+    }
+    console.log(`[agency-send] 원스텝 접수 company=${auth.companyId} ${created.length}건(회신번호 ${analysis.groups.length}종)`);
+    return res.status(201).json({ success: true, requests: created.map(toPublic) });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
-    console.error('[agency-send] 접수 실패:', err);
+    console.error('[agency-send] 원스텝 접수 실패:', err);
     return res.status(500).json({ success: false, error: '접수하지 못했습니다. 잠시 후 다시 시도해 주세요.' });
   }
 });
@@ -405,48 +815,21 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
   const auth = await requireAgencySend(req, res);
   if (!auth) return;
   try {
-    const r = await query(
-      `SELECT * FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
-      [req.params.id, auth.companyId],
-    );
-    if (r.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
-    const row = r.rows[0];
-
     // ⛔ 승인의 기준은 **행 수정 번호**다(★2026-08-23 Codex 2R high). 문안 버전만 보면
     //   시각만 바뀐 건은 상태도 버전도 그대로라, 담당자가 **못 본 시각**으로 옛 승인이 통과한다.
-    const revision = Number(req.body?.revision);
-    // ⛔ `final_test_at`을 함께 넘긴다(★2026-08-23(2)). 접수한 그날 나가는 건은 접수 검사가 곧
-    //   당일 검사라 재검사가 없다. 그런 건에 2시간을 요구하면 하지도 않을 검사를 이유로 승인을 막는다.
-    //   만료 판정(워커 C)도 같은 인자를 쓴다.
-    const check = checkApproval(
-      {
-        status: row.status,
-        revision: Number(row.revision),
-        requestedAt: new Date(row.requested_at),
-        finalTestedAt: row.final_test_at ? new Date(row.final_test_at) : null,
-      },
-      revision,
-      new Date(),
-    );
-    if (!check.ok) return res.status(400).json({ success: false, error: check.error, code: check.code });
-
-    const updated = await query(
-      `UPDATE agency_send_requests
-          SET status = 'approved', approved_at = NOW(), approved_by = $1::uuid,
-              approval_version = content_version, revision = revision + 1, updated_at = NOW()
-        WHERE id = $2::uuid AND company_id = $3::uuid
-          AND status IN ('awaiting_approval','reapproval') AND revision = $4
-        RETURNING *`,
-      [auth.userId, req.params.id, auth.companyId, revision],
-    );
-    if (updated.rows.length === 0) {
-      return res.status(409).json({ success: false, error: '이미 처리된 접수입니다. 화면을 새로 고쳐 주세요.', code: 'CONFLICT' });
+    // ★2026-08-25 판정·전이·이력·워커 기동은 승인 효과 CT 하나가 소유한다(utils/agency-send-approve.ts).
+    //   입구가 둘이어도(이 로그인 경로 · 담당자 링크 경로) 같은 함수를 지난다.
+    const outcome = await approveAgencyRequestTx({
+      requestId: req.params.id,
+      revision: Number(req.body?.revision),
+      companyId: auth.companyId,
+      approvedBy: auth.userId,
+      via: 'screen',
+    });
+    if (!outcome.ok) {
+      return res.status(outcome.status).json({ success: false, error: outcome.error, ...(outcome.code ? { code: outcome.code } : {}) });
     }
-
-    await logEvent(req.params.id, 'approved', { revision, by: auth.userId });
-    // 재승인은 남은 시간이 짧다. 다음 tick을 기다리면 그 사이에 만료 기준을 지나 승인이 헛돈다.
-    triggerAgencySendDispatch(req.params.id);
-    return res.json({ success: true, request: toPublic(updated.rows[0]) });
+    return res.json({ success: true, request: toPublic(outcome.row) });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 승인 실패:', err);

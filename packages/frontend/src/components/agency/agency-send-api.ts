@@ -175,6 +175,66 @@ export async function cancelAgencyRequest(
   return { request: data.request, pending: !!data.pending };
 }
 
+// ────────────── 요청서 원스텝 접수 (★2026-08-25(3) · 서버가 파싱·검증·집계) ──────────────
+
+export interface OneStepAnalysisView {
+  subject: string;
+  content: string;
+  isAd: boolean;
+  requestedAt: string | null;
+  managerPhones: string[];
+  callback: { mode: 'fixed'; number: string } | { mode: 'column'; column: string } | { mode: 'none' };
+  headers: string[];
+  phoneColumn: string | null;
+  varsMatched: Array<{ name: string; column: string | null }>;
+  counts: { total: number; valid: number; dup: number; invalid: number; callbackMissing: number };
+  groups: Array<{ callback: string; count: number; registered: boolean }>;
+  /** 상위 50건만 온다 — 전 행은 서버가 갖고 화면은 숫자와 샘플만 본다 */
+  sample: Array<{ phone: string; callback?: string }>;
+  messageType: 'SMS' | 'LMS' | 'MMS';
+  fileName: string | null;
+  errors: Array<{ field: string; error: string }>;
+}
+
+export interface OneStepOverrides {
+  /** 항상 보낸다. 빈 문자열 = "비워 둔 상태"라는 의도이고 서버가 반려한다(조용한 원값 복귀 금지) */
+  requestedAt?: string;
+  callback?: { mode: 'fixed'; number: string } | { mode: 'column'; column: string };
+  /** 항상 보낸다. 빈 배열 = 전부 지웠다는 의도이고 서버가 반려한다 */
+  managerPhones?: string[];
+  mmsImagePaths?: string[];
+  /** 수신자(휴대폰 번호) 열 직접 선택. 자동 선정이 애매한 파일 대비 */
+  phoneColumn?: string;
+}
+
+function oneStepBody(formFile: File, listFile: File, overrides: OneStepOverrides): FormData {
+  const fd = new FormData();
+  fd.append('form', formFile);
+  fd.append('list', listFile);
+  fd.append('overrides', JSON.stringify(overrides || {}));
+  return fd;
+}
+
+export async function previewOneStep(formFile: File, listFile: File, overrides: OneStepOverrides): Promise<OneStepAnalysisView> {
+  const res = await fetch('/api/agency-send/one-step/preview', { method: 'POST', headers: auth(), body: oneStepBody(formFile, listFile, overrides) });
+  const data = await unwrap(res);
+  return data.analysis;
+}
+
+export async function submitOneStep(formFile: File, listFile: File, overrides: OneStepOverrides): Promise<AgencySendRequest[]> {
+  const res = await fetch('/api/agency-send/one-step', { method: 'POST', headers: auth(), body: oneStepBody(formFile, listFile, overrides) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data?.success) {
+    const err: any = new Error(data?.error || '접수하지 못했습니다.');
+    err.code = data?.code;
+    err.errors = data?.errors;
+    // 일부만 접수된 경우 만들어진 목록을 화면에 넘겨 목록을 갱신하게 한다
+    err.requests = data?.requests;
+    throw err;
+  }
+  return data.requests || [];
+}
+
 // ────────────── 문안 변수 (서버 CT `utils/agency-send-vars.ts` 미러) ──────────────
 
 /**

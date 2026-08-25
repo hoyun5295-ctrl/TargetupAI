@@ -27,6 +27,7 @@ import {
   buildApprovedExpiredNotify, buildExpiredNotify, buildFinalBlockedNotify, buildPassedNotify,
   buildQueueFailedNotify, buildReapprovalNotify, buildTestFailedNotify, formatWhen, shortLabel,
 } from './agency-send-notify';
+import { agencyManagerPhones, buildAgencyApproveUrl } from './agency-send-link';
 import {
   isApprovalCurrent, isApprovalExpired, isFinalTestDue, isLockStale, isQueueDue, isSameKstDay,
   lockRecoveryStatus, LOCK_STALE_MINUTES, MAX_TEST_ROUNDS, QUEUE_MARGIN_MINUTES,
@@ -122,15 +123,23 @@ async function notifyManager(opts: {
   title: string;
   msgType?: 'S' | 'L' | 'M';
   mmsImages?: string[];
+  /**
+   * 담당자별로 문장이 다를 때(★2026-08-25 링크 승인 · 번호마다 자기 승인 주소가 실린다).
+   * 없으면 전 번호가 같은 text를 받는다. 있으면 phones보다 우선한다.
+   */
+  perPhoneTexts?: Array<{ phone: string; text: string }>;
 }): Promise<void> {
-  if (opts.phones.length === 0) return;
+  const entries = opts.perPhoneTexts && opts.perPhoneTexts.length > 0
+    ? opts.perPhoneTexts
+    : opts.phones.map((phone) => ({ phone, text: opts.text }));
+  if (entries.length === 0) return;
   try {
     const table = await getAuthSmsTable();
     const images = opts.mmsImages || [];
     await bulkInsertSmsQueue(
       [table],
-      opts.phones.map((phone) => ([
-        phone, opts.callback, opts.text, opts.msgType || 'L', opts.title,
+      entries.map(({ phone, text }) => ([
+        phone, opts.callback, text, opts.msgType || 'L', opts.title,
         toKoreaTimeStr(new Date()), null, opts.companyId,
         images[0] || '', images[1] || '', images[2] || '',
       ])),
@@ -146,20 +155,21 @@ async function notifyManager(opts: {
 
 /**
  * 이 접수의 담당자 번호들. **여러 명일 수 있다**(★Harold 2026-08-23 "담당자번호(여러개일 수 있다)").
- * 옛 컬럼(`manager_phone`) 한 칸도 함께 읽어 배포 전후 접수가 같이 동작하게 한다.
+ * ★2026-08-25 판정 한 벌 통합(Codex 적대 1R) — 발송처(여기)와 링크 승인 권한(공개 라우트·승인 CT)이
+ * 같은 목록을 봐야, 접수에서 뺀 번호가 발송에서도 권한에서도 같이 빠진다. 구현 = agency-send-link CT.
  */
-function managerPhonesOf(row: any): string[] {
-  const list: string[] = Array.isArray(row.manager_phones) ? row.manager_phones : [];
-  const merged = list.length > 0 ? list : [row.manager_phone];
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const raw of merged) {
-    const phone = normalizePhone(String(raw || ''));
-    if (!phone || phone.length < 10 || seen.has(phone)) continue;
-    seen.add(phone);
-    out.push(phone);
-  }
-  return out;
+const managerPhonesOf = agencyManagerPhones;
+
+/**
+ * 승인 링크를 만들기 직전의 **신선한** 행(★2026-08-25). tick 시작 때 읽은 row는 이 tick 안의
+ * 다듬기로 문안 버전이 올라 있을 수 있다 — 낡은 버전으로 서명하면 링크가 도착 즉시 죽는다.
+ */
+async function freshLinkFields(requestId: string): Promise<any | null> {
+  const r = await query(
+    `SELECT content_version, requested_at, manager_phones, manager_phone FROM agency_send_requests WHERE id = $1::uuid`,
+    [requestId],
+  );
+  return r.rows[0] || null;
 }
 
 /**
@@ -383,10 +393,20 @@ async function runFirstTest(): Promise<void> {
         text: sample.text, subject: sample.subject || '[대행발송] 테스트',
         messageType: row.message_type, mmsImages: images,
       });
+      // ★2026-08-25 링크 승인: 담당자마다 자기 번호에 묶인 승인 주소를 받는다(agency-send-link CT).
+      //   주소는 통지 직전의 신선한 문안 버전으로 서명한다(이 tick의 다듬기로 버전이 올라 있을 수 있다)
+      const linkRow = (await freshLinkFields(row.id)) || row;
       await notifyManager({
-        companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
+        companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkRow),
         callback: row.callback_number, title: '[대행발송] 승인 요청',
         text: buildPassedNotify({ label, whenText }),
+        perPhoneTexts: managerPhonesOf(linkRow).map((phone) => ({
+          phone,
+          text: buildPassedNotify({
+            label, whenText,
+            approveUrl: buildAgencyApproveUrl(row.id, phone, Number(linkRow.content_version), new Date(linkRow.requested_at)),
+          }),
+        })),
       });
       console.log(`${LOG} 1차 검사 통과 request=${row.id} rounds=${rounds}`);
     } catch (err: any) {
@@ -505,10 +525,19 @@ async function runFinalTest(onlyRequestId?: string): Promise<void> {
           text: sample.text, subject: sample.subject || '[대행발송] 수정 문안',
           messageType: target.message_type, mmsImages: images,
         });
+        // ★2026-08-25 링크 승인: 재승인은 다듬어진 새 문안 버전으로 서명한 새 주소가 나간다(옛 링크는 버전 불일치로 죽는다)
+        const reappRow = (await freshLinkFields(target.id)) || target;
         await notifyManager({
-          companyId: target.company_id, requestId: target.id, phones: managerPhonesOf(target),
+          companyId: target.company_id, requestId: target.id, phones: managerPhonesOf(reappRow),
           callback: target.callback_number, title: '[대행발송] 재승인 요청',
           text: buildReapprovalNotify({ label, whenText: formatWhen(new Date(target.requested_at)) }),
+          perPhoneTexts: managerPhonesOf(reappRow).map((phone) => ({
+            phone,
+            text: buildReapprovalNotify({
+              label, whenText: formatWhen(new Date(reappRow.requested_at)),
+              approveUrl: buildAgencyApproveUrl(target.id, phone, Number(reappRow.content_version), new Date(reappRow.requested_at)),
+            }),
+          })),
         });
         continue;
       }
@@ -603,10 +632,34 @@ async function dispatchToPipeline(row: any, content: string, token: string): Pro
     await logEvent(row.id, 'dispatch_unapproved_version', {
       approvalVersion: row.approval_version, contentVersion: row.content_version,
     });
+    // ★2026-08-25 이 재승인 분기도 담당자별 링크를 싣는다(Codex 적대 1R medium — 여기만 로그인 안내가 나갔다).
+    //   그리고 링크를 주기 전에 **문안 실물부터** 보낸다(Codex 적대 2R high — 정상 재승인 경로와 같은 순서.
+    //   실물 없이 승인 링크만 가면, 치환·광고 부착·이미지가 붙은 실제 문장을 못 본 채 승인하게 된다).
+    const unappRow = (await freshLinkFields(row.id)) || row;
+    try {
+      const sample = await buildSample(row);
+      await sendManagerTest({
+        companyId: row.company_id, requestId: row.id, createdBy: row.created_by,
+        phones: managerPhonesOf(unappRow), callback: row.callback_number,
+        text: sample.text, subject: sample.subject || '[대행발송] 수정 문안',
+        messageType: row.message_type,
+        mmsImages: Array.isArray(row.mms_image_paths) ? row.mms_image_paths : [],
+      });
+    } catch (err: any) {
+      console.error(`${LOG} 재승인 실물 문자 실패 request=${row.id}:`, err?.message);
+      await logEvent(row.id, 'notify_failed', { error: String(err?.message || ''), kind: 'manager-test' });
+    }
     await notifyManager({
-      companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
+      companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(unappRow),
       callback: row.callback_number, title: '[대행발송] 재승인 요청',
       text: buildReapprovalNotify({ label, whenText: formatWhen(new Date(row.requested_at)) }),
+      perPhoneTexts: managerPhonesOf(unappRow).map((phone) => ({
+        phone,
+        text: buildReapprovalNotify({
+          label, whenText: formatWhen(new Date(unappRow.requested_at)),
+          approveUrl: buildAgencyApproveUrl(row.id, phone, Number(unappRow.content_version), new Date(unappRow.requested_at)),
+        }),
+      })),
     });
     return;
   }

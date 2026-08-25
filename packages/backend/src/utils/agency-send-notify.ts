@@ -16,6 +16,11 @@ export interface AgencyNotifyContext {
   label: string;
   /** 요청 시각(KST 문자열, 예: "8월 24일 14:00") */
   whenText?: string;
+  /**
+   * 링크 승인 주소(★2026-08-25 · 담당자 번호별로 다르다 = agency-send-link CT가 만든다).
+   * 있으면 로그인 안내 대신 이 주소로 바로 승인하게 안내한다.
+   */
+  approveUrl?: string;
 }
 
 /** 문자 앞머리. 담당자가 받은 문자가 무엇인지 한눈에 알게 한다 */
@@ -38,7 +43,10 @@ export function buildPassedNotify(ctx: AgencyNotifyContext): string {
     `${HEAD} 스팸 검사를 통과했습니다.`,
     `건: ${shortLabel(ctx.label)}`,
     ctx.whenText ? `보낼 시각: ${ctx.whenText}` : '',
-    '방금 보내 드린 문자를 확인하시고, 로그인하여 승인해 주세요.',
+    ctx.approveUrl
+      ? '방금 보내 드린 문자를 확인하시고, 아래 주소에서 바로 승인해 주세요.'
+      : '방금 보내 드린 문자를 확인하시고, 로그인하여 승인해 주세요.',
+    ctx.approveUrl || '',
     '승인하지 않으면 발송되지 않습니다.',
   ]);
 }
@@ -61,7 +69,10 @@ export function buildReapprovalNotify(ctx: AgencyNotifyContext): string {
     `${HEAD} 수정한 문안이 스팸 검사를 통과했습니다.`,
     `건: ${shortLabel(ctx.label)}`,
     ctx.whenText ? `보낼 시각: ${ctx.whenText}` : '',
-    '방금 보내 드린 문자를 확인하시고, 로그인하여 다시 승인해 주세요.',
+    ctx.approveUrl
+      ? '방금 보내 드린 문자를 확인하시고, 아래 주소에서 다시 승인해 주세요.'
+      : '방금 보내 드린 문자를 확인하시고, 로그인하여 다시 승인해 주세요.',
+    ctx.approveUrl || '',
   ]);
 }
 

@@ -35,6 +35,7 @@ const Unsubscribes = lazyPage(() => import('./pages/Unsubscribes'));
 const PricingPage = lazyPage(() => import('./pages/PricingPage'));
 const GuidePage = lazyPage(() => import('./pages/GuidePage')); // ★ 2026-08-22 기능 안내(/guide) — 도움말 봇과 같은 원장
 const AgencySendPage = lazyPage(() => import('./pages/AgencySendPage')); // ★ 2026-08-22 대행발송 셀프 접수
+const AgencyApprovePage = lazyPage(() => import('./pages/AgencyApprovePage')); // ★ 2026-08-25 담당자 링크 승인(인증 X)
 const AutoSendPage = lazyPage(() => import('./pages/AutoSendPage'));
 const KakaoRcsPage = lazyPage(() => import('./pages/KakaoRcsPage'));
 const DmBuilderPage = lazyPage(() => import('./pages/DmBuilderPage')); // ★ 모바일 DM 빌더
@@ -669,6 +670,9 @@ function App() {
 
         {/* ★ 2026-08-16 AI 마케팅 진단(퍼널 B — 잠재고객 · 인증 X) — ?src= 영업 링크 식별 */}
         <Route path="/diagnosis" element={<DiagnosisPage />} />
+
+        {/* ★ 2026-08-25 대행발송 담당자 링크 승인 (인증 X · 안내 문자 속 주소 ?t=토큰) */}
+        <Route path="/agency-approve" element={<AgencyApprovePage />} />
 
         {/* 404 */}
         <Route path="*" element={<Navigate to="/" replace />} />

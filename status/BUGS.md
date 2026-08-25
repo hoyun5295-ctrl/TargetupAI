@@ -55,6 +55,11 @@
 
 ## 2) 활성 버그
 
+### 🟡 B-0825-2 JWT_SECRET 미설정 시 저장소 공개 폴백 키로 전 토큰이 서명된다 (🔵 Open · 전역 축 · 축 밖 기록) — 2026-08-25 (Codex 적대 1R)
+> **증상**: `JWT_SECRET` ENV가 없으면 로그인 JWT·OTP 등록 토큰·대행발송 승인 토큰이 전부 저장소에 공개된 고정 문자열(`targetup-jwt-secret-fallback`)로 서명된다. 그 상태면 누구든 토큰을 위조할 수 있다.
+> **위치**: `routes/auth.ts` · `utils/totp.ts` · `utils/agency-send-link.ts`(0825 신설분은 전용 파생 키 + 미설정 경고 로그를 추가했으나 폴백 자체는 같은 뿌리). 운영은 ENV가 설정돼 있는 것으로 보이나(로그인이 정상 동작) **미검증**.
+> **수정 방향**: 부팅 시 `JWT_SECRET` 부재면 기동 실패(fail-fast). 전 인증이 걸린 전역 축이라 별도 세션에서 영향표와 함께. 확인 SQL 아님: 서버에서 `printenv JWT_SECRET | wc -c`로 설정 여부부터.
+
 ### 🟡 B-0825-1 AI 호출 토큰 기록이 캐시 생성분을 누락한다 — 도움말 축 정정 시 전수 grep으로 확인된 동일 패턴 2곳 (🔵 Open · 축 밖 기록만) — 2026-08-25
 > **증상**: `ai_call_log.input_tokens` 기록식이 `input_tokens + cache_read_input_tokens`만 합산해 **캐시 신규 생성분(cache_creation)이 통째로 빠진다.** 프롬프트 캐시를 쓰는 호출은 생성 회차가 가장 비싼데(도움말 봇 실측 = 질문당 약 2.9만 토큰), 원장에는 수십 토큰으로 적혀 원가 실측이 실제보다 작게 나온다.
 > **위치(전수 grep)**: [agency-send-refine.ts:193](../packages/backend/src/utils/agency-send-refine.ts) · [ai-mapping.ts:244](../packages/backend/src/utils/ai-mapping.ts) (`tokensUsed` 합산). 도움말 축([help-answer.ts](../packages/backend/src/utils/help-answer.ts))은 2026-08-25 정정 완료 — 같은 세션 축 밖이라 이 2곳은 기록만(`scope_discipline_one_ticket_axis`). `services/ai.ts`는 read/created를 PM2 로그에는 찍는데 기록 경로 합산 여부 미확인(확인부터).

@@ -278,7 +278,10 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                         <span className="text-neutral-500 tabular-nums shrink-0">{formatWhen(e.created_at)}</span>
                         <span className="text-neutral-800">
                           {/* ⛔ 모르는 항목에 내부 이름을 그대로 쓰지 않는다(고객 화면이다) */}
-                          {EVENT_LABEL[e.kind] || '진행 상황을 기록했습니다'}
+                          {/* ★2026-08-25 링크 승인은 어느 담당자 번호가 눌렀는지까지 보여준다(부인 방지 기록) */}
+                          {e.kind === 'approved' && e.payload?.via === 'link'
+                            ? `문자 속 주소에서 승인했습니다 (담당자 ${e.payload?.phone || '번호 미상'})`
+                            : EVENT_LABEL[e.kind] || '진행 상황을 기록했습니다'}
                           {e.payload?.round ? ` (${e.payload.round}번째)` : ''}
                         </span>
                       </li>

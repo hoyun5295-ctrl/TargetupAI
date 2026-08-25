@@ -133,7 +133,8 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
   // ② 문안
   const [content, setContent] = useState('');
   const [subject, setSubject] = useState('');
-  const [isAd, setIsAd] = useState(false);
+  // 광고 기본 = 켜짐(★Harold 2026-08-25 "(광고) 기본적용"). 대행발송 대부분이 광고성이라 끄는 쪽이 예외다
+  const [isAd, setIsAd] = useState(true);
   const [varMapping, setVarMapping] = useState<Record<string, string>>({});
   const [mmsOpen, setMmsOpen] = useState(false);
   const [previewIdx, setPreviewIdx] = useState(0);
@@ -203,7 +204,7 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
   const reset = () => {
     setStep(1); setFileName(null); setHeaders([]); setRows([]); setPhoneColumn(''); setPasted('');
     setPasteMode(false); setAiPicked(false); setPrefillRecipients(null);
-    setContent(''); setSubject(''); setIsAd(false); setVarMapping({}); setPreviewIdx(0);
+    setContent(''); setSubject(''); setIsAd(true); setVarMapping({}); setPreviewIdx(0);
     setRequestedAt(''); setManagerPhones([]); setManagerInput(''); setCallbackNumber('');
     mms.setMmsUploadedImages([]);
   };

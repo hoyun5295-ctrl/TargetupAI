@@ -15,11 +15,12 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Check, Loader2, MessageSquare, Plus, RefreshCw, Send, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, FileSpreadsheet, Loader2, MessageSquare, Plus, RefreshCw, Send, X } from 'lucide-react';
 import { goBackOr } from '../lib/scroll-restoration';
 import { useToast } from '../components/ToastProvider';
 import AgencySendIntroModal from '../components/agency/AgencySendIntroModal';
 import AgencySendComposer, { type AgencyComposerPrefill } from '../components/agency/AgencySendComposer';
+import AgencyOneStepModal from '../components/agency/AgencyOneStepModal';
 import AgencySendDetail from '../components/agency/AgencySendDetail';
 import {
   fetchAgencyRecipients, fetchAgencyRequests, formatWhenRelative, isApprovable, isRedoable,
@@ -87,6 +88,7 @@ export default function AgencySendPage() {
   const [loading, setLoading] = useState(true);
   const [introOpen, setIntroOpen] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
+  const [oneStepOpen, setOneStepOpen] = useState(false);
   const [composerPrefill, setComposerPrefill] = useState<AgencyComposerPrefill | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [requests, setRequests] = useState<AgencySendRequest[]>([]);
@@ -194,6 +196,9 @@ export default function AgencySendPage() {
             <div className="ml-auto flex items-center gap-2">
               <button type="button" onClick={loadList} className={CUI_BTN_GHOST} aria-label="새로고침">
                 <RefreshCw className={`w-[15px] h-[15px] ${listLoading ? 'animate-spin' : ''}`} />
+              </button>
+              <button type="button" onClick={() => setOneStepOpen(true)} className={CUI_BTN_OUTLINE}>
+                <FileSpreadsheet className="w-[15px] h-[15px]" />요청서로 접수
               </button>
               <button type="button" onClick={() => setComposerOpen(true)} className={CUI_BTN_PRIMARY}>
                 <Plus className="w-[15px] h-[15px]" />새 접수
@@ -333,6 +338,11 @@ export default function AgencySendPage() {
         prefill={composerPrefill}
         onClose={() => { setComposerOpen(false); setComposerPrefill(null); }}
         onCreated={(r) => upsert(r)}
+      />
+      <AgencyOneStepModal
+        show={oneStepOpen}
+        onClose={() => setOneStepOpen(false)}
+        onCreated={(list) => list.forEach(upsert)}
       />
       <AgencySendDetail
         requestId={detailId}

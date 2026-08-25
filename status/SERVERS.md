@@ -38,6 +38,10 @@
 ### .65 — 비토 게이트웨이 (58.227.193.65 / `invito`)
 가장 좋은 CPU에 부하가 낮다. 실사용 트래픽 이관 전이라 여력이 크다.
 - **도커 3개**: `bito-bench-postgres`·`bito-agent-bench-mysql`·`bito-bench-redis`
+  - ⚠ **이름과 달리 `bito-bench-postgres`가 운영 DB다**(★2026-08-25 실측). 호스트에는 postgres가 없다: `/var/run/postgresql` 소켓 부재 · 5432는 이 컨테이너가 `127.0.0.1`로만 공개. 이름만 보고 "시험용"으로 읽으면 접속 경로를 못 찾는다.
+  - 접속(비밀번호 불요 · 컨테이너 안 로컬 접속): `docker exec bito-bench-postgres psql -U bito -d bito_gateway`. 호스트에서 `psql -h 127.0.0.1`로 붙으면 `DB_PASS`가 필요하고, 그 값은 root 전용(600) `/etc/default/bito-gateway`에 있다.
+- **관리 사이트** = ops.hanjulgw.com(전용 nginx 블록·인증서) → 로컬 4000 Admin API(`bito-admin-api.service`). 관리자 계정·OTP 원장 = `admin_user`(`admin`·`suran` 2개 · 2026-08-25 실측).
+  - ⛔ **관리자 OTP를 초기화하는 화면도 API도 없고 백업 코드도 없다.** 폰 교체·분실 시 유일한 길 = `UPDATE admin_user SET totp_enabled=false, totp_secret=NULL, updated_at=NOW() WHERE username='...'` 후 재로그인하면 QR 재발급. **`totp_secret`을 함께 비워야 한다** — 로그인 코드가 새 비밀키를 "비밀키가 빌 때만" 만들어서, 플래그만 내리면 옛 키가 그대로 QR에 실린다(`web/api/server.js` setupRequired 분기). 리셋과 재등록 사이에는 비밀번호만으로 QR 발급까지 도달 가능하니 즉시 이어서 끝낸다.
 - **포트**: 외부 22·80·443 · **9090(gRPC, Agent 접속)** · 4404(webhook) / 로컬 33306·4000(Admin API)·5432·6379·9081
 - `fail2ban` 가동 중
 - 환경변수 = `/etc/default/bito-gateway`(EnvironmentFile) + 유닛 드롭인 3종

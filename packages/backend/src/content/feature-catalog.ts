@@ -1022,6 +1022,8 @@ export const NOT_DOCUMENTED_ROUTES: Record<string, string> = {
   '/payment/result': '결제 결과 리다이렉트',
   '/cafe24/launch': '카페24 앱 진입 리다이렉트',
   '/journey-pause/:token': '고객이 받은 링크로 여는 일시중지 화면',
+  '/agency-approve': '대행발송 담당자가 문자 속 주소로 여는 승인 화면(로그인 없음)', // ★2026-08-25 링크 승인
+
   '/onboarding': '기존 온보딩 마법사(봇이 딥링크로 부른다)',
   '/diagnosis': '로그인 전 공개 진단(로그인 화면 링크). 로그인 고객의 진입은 대시보드 카드(= marketing-diagnosis)',
   '/guide': '안내 화면 자체',

@@ -20,6 +20,7 @@ import companiesRoutes from './routes/companies';
 import onboardingRoutes from './routes/onboarding';
 import helpRoutes from './routes/help';
 import agencySendRoutes from './routes/agency-send';
+import agencyApproveRoutes from './routes/agency-approve';  // ★ 2026-08-25 링크 승인 (무인증)
 import salesOutreachRoutes from './routes/sales-outreach'; // ★ 2026-08-24 AI 영업 아웃리치 (슈퍼관리자 ceo 전용 · docs/2026-07-31-ai-sales-outreach-design.md §15)
 import outreachPublicRoutes from './routes/outreach-public'; // ★ 2026-08-24 아웃리치 공개 샘플 페이지(무인증 · noindex · 만료)
 import { startAgencySendWorker } from './utils/agency-send-worker';
@@ -345,6 +346,7 @@ app.use('/api/companies', companiesRoutes);
 app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/help', helpRoutes); // ★ 2026-08-22 도움말 봇 · 기능 카탈로그(docs/FEATURE-HELP-CATALOG.md)
 app.use('/api/agency-send', agencySendRoutes); // ★ 2026-08-22 대행발송 셀프 접수(docs/2026-08-22-agency-send-design.md)
+app.use('/api/agency-approve', agencyApproveRoutes); // ★ 2026-08-25 대행발송 담당자 링크 승인(무인증 · 토큰 = 문자 안 주소)
 app.use('/api/sales-outreach', salesOutreachRoutes); // ★ 2026-08-24 AI 영업 아웃리치(슈퍼관리자 ceo 전용)
 app.use('/api/outreach/v', outreachPublicRoutes); // ★ 2026-08-24 아웃리치 공개 샘플 페이지(무인증)
 app.use('/api/insight', insightRoutes);
