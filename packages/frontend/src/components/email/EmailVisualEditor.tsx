@@ -22,7 +22,7 @@ import {
   EMAIL_TREATMENT_OPTIONS, EMAIL_BACKGROUND_OPTIONS, type EmailDesign,
 } from '../../utils/email-themes';
 import {
-  createSection, normalizeOrder, SECTION_META, type Section,
+  createSection, normalizeOrder, resequence, moveWithin, SECTION_META, type Section,
 } from '../../utils/dm-section-defaults';
 import type { SectionType } from '../../utils/dm-section-defaults';
 
@@ -220,14 +220,14 @@ export default function EmailVisualEditor({
     });
   };
 
+  // 화살표 이동도 드래그와 **같은 함수**(moveWithin)를 쓴다 — 이동 로직이 두 벌이면 한쪽만 고쳐진다.
+  // ⛔ 인덱스는 setSections 안에서 최신 상태로 구한다. 밖에서 구하면 연속 클릭 때 두 번째가 옛 순서를 본다.
   const moveBlock = (id: string, dir: -1 | 1) => {
     setSections((prev) => {
       const arr = prev.slice().sort((a, b) => a.order - b.order);
-      const i = arr.findIndex((s) => s.id === id);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= arr.length) return prev;
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-      return normalizeOrder(arr);
+      const from = arr.findIndex((s) => s.id === id);
+      if (from < 0) return prev;
+      return moveWithin(arr, from, from + dir); // 경계(맨 위·맨 아래)는 moveWithin이 판정한다
     });
   };
 
@@ -237,14 +237,10 @@ export default function EmailVisualEditor({
   };
 
   // 드래그앤드롭 순서 변경 (@dnd-kit — DM SectionList과 동일 패턴, 라이브러리 추가 0)
+  // ⛔ 옮긴 뒤에는 `resequence`다(★2026-08-25 접수 임은지). `normalizeOrder`는 옛 order로 다시 정렬해
+  //   방금 한 이동을 그대로 되돌린다 — 드래그도 화살표도 안 먹던 원인이 이 한 줄이었다.
   const reorder = (from: number, to: number) => {
-    setSections((prev) => {
-      const arr = prev.slice().sort((a, b) => a.order - b.order);
-      if (from < 0 || to < 0 || from >= arr.length || to >= arr.length || from === to) return prev;
-      const [moved] = arr.splice(from, 1);
-      arr.splice(to, 0, moved);
-      return normalizeOrder(arr);
-    });
+    setSections((prev) => moveWithin(prev, from, to));
   };
 
   const duplicateBlock = (id: string) => {
@@ -255,7 +251,8 @@ export default function EmailVisualEditor({
       const copy: Section = JSON.parse(JSON.stringify(arr[i]));
       copy.id = 'dup-' + Date.now() + '-' + copy.type;
       arr.splice(i + 1, 0, copy);
-      const next = normalizeOrder(arr);
+      // 복사본은 원본과 order가 같다 — 정렬에 기대지 않고 끼워 넣은 자리 그대로 번호를 다시 매긴다
+      const next = resequence(arr);
       setSelectedId(copy.id);
       return next;
     });

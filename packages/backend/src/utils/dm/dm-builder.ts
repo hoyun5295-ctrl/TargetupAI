@@ -183,6 +183,96 @@ export async function updateDm(id: string, companyId: string, data: Partial<DmPa
 
 // ────────────────── 버전 관리 (D125 §13) ──────────────────
 
+/**
+ * 스냅샷이 담는 것 = **화면을 만드는 상태 전부**(★2026-08-25 재오픈 정정 · 접수 cmt6qug4s00v1jnotsqeaf12g).
+ *
+ * ⛔ 이 목록이 곧 "복원하면 되돌아가는 것"의 정의다. 화면에 영향을 주는 컬럼을 새로 만들면 여기 등재한다.
+ *   ⛔ 메타(`approval_status`·`template_id`·`ai_prompt`·`title`·`view_count`)는 **담지 않는다** — 되돌리면 안 되는 값이다.
+ *
+ * 종전에는 `sections`·`brand_kit` 둘만 담았는데, 화면은 `pages`를 우선 읽으므로(`extractPagesFromDm`)
+ * 복원이 전 건 무효였다(운영 실측 = DM 5건 전부 `pages` 보유, scroll 모드도 1페이지로).
+ */
+export const DM_SNAPSHOT_KEYS = [
+  'pages', 'sections', 'brand_kit', 'layout_mode',
+  'header_data', 'footer_data', 'header_template', 'footer_template', 'settings',
+] as const;
+
+/** 위 목록 중 jsonb 컬럼. 되돌릴 때 `JSON.stringify`를 거쳐야 한다(나머지는 문자열 컬럼) */
+const DM_SNAPSHOT_JSON_KEYS = new Set<string>([
+  'pages', 'sections', 'brand_kit', 'header_data', 'footer_data', 'settings',
+]);
+
+/** DM 행에서 화면 상태만 뽑아 스냅샷을 만든다(순수). 문자열로 온 jsonb는 파싱해 담는다 */
+export function buildDmSnapshot(dm: any): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const key of DM_SNAPSHOT_KEYS) {
+    let v = dm?.[key];
+    if (typeof v === 'string' && DM_SNAPSHOT_JSON_KEYS.has(key)) {
+      try { v = JSON.parse(v); } catch { /* 파싱 안 되면 원본을 그대로 둔다 */ }
+    }
+    out[key] = v === undefined ? null : v;
+  }
+  return out;
+}
+
+export interface DmRestorePlan {
+  /** 되돌릴 컬럼과 값. 여기 없는 컬럼은 **건드리지 않는다** */
+  values: Record<string, any>;
+  /** 옛 스냅샷이라 페이지 경계 정보가 없어 한 페이지로 합쳤다(화면에 알린다) */
+  mergedPages: boolean;
+}
+
+/**
+ * 버전 행에서 되돌릴 값을 정한다(순수).
+ *
+ * 옛 스냅샷(`snapshot` 없음)은 `sections`만 갖고 있는데, 화면은 `pages`를 우선 읽으므로
+ * **그대로 되돌리면 아무 일도 일어나지 않는다.** 그래서 `sections`를 한 페이지로 감싸 `pages`에도 쓴다.
+ * ⛔ 내용이 없던 버전은 `pages`를 **덮지 않는다** — 저장된 정보가 없는데 화면을 비우는 것이 더 나쁘다.
+ */
+/**
+ * 새 형식 스냅샷인가. 근거는 **화면을 결정하는 두 축**(`pages`·`sections`)의 존재와 타입 하나뿐이다.
+ *
+ * ⛔ `DM_SNAPSHOT_KEYS` **전수** 존재로 판정하지 마라(★Codex 적대 2R high — 1R 정정이 만든 결함).
+ *   그 목록은 "화면에 영향을 주는 컬럼이 늘면 등재한다"고 정의돼 있어 **늘어나게 돼 있다.**
+ *   전수로 보면 키를 하나 더한 순간 **기존 스냅샷 전부가 옛 형식으로 떨어져** 평탄 sections만 복원되고
+ *   이번에 고친 결함(페이지 경계 소실·화면 미반영)이 그대로 재현된다.
+ * ⛔ 부분 객체(`{sections:[...]}`)는 `pages` 키가 없어 여기서 걸린다(1R medium이 지적한 경로).
+ */
+function isFullDmSnapshot(snap: any): boolean {
+  if (!snap || typeof snap !== 'object' || Array.isArray(snap)) return false;
+  const has = (k: string) => Object.prototype.hasOwnProperty.call(snap, k);
+  if (!has('pages') || !has('sections')) return false;
+  // 화면을 그리는 두 값은 배열이거나 없음이어야 한다 — 다른 타입이면 되돌릴 물건이 아니다
+  const okShape = (v: any) => v === null || v === undefined || Array.isArray(v);
+  return okShape(snap.pages) && okShape(snap.sections);
+}
+
+export function planDmRestore(version: any): DmRestorePlan {
+  let snap = version?.snapshot;
+  if (typeof snap === 'string') { try { snap = JSON.parse(snap); } catch { snap = null; } }
+  if (isFullDmSnapshot(snap)) {
+    const values: Record<string, any> = {};
+    // 스냅샷에 **있는 키만** 되돌린다. 목록이 늘어도 옛 스냅샷이 통째로 버려지지 않고,
+    // 줄어도 없는 컬럼을 쓰려 들지 않는다.
+    for (const key of DM_SNAPSHOT_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(snap, key)) values[key] = snap[key];
+    }
+    return { values, mergedPages: false };
+  }
+
+  let sections = version?.sections;
+  if (typeof sections === 'string') { try { sections = JSON.parse(sections); } catch { sections = null; } }
+  const list = Array.isArray(sections) ? sections : null;
+  const values: Record<string, any> = {
+    sections: list,
+    brand_kit: version?.brand_kit ?? null,
+  };
+  if (list && list.length > 0) {
+    values.pages = [{ id: 'p-restored', sections: list }];
+  }
+  return { values, mergedPages: !!(list && list.length > 0) };
+}
+
 export async function saveDmVersion(
   dmId: string,
   label: string,
@@ -190,6 +280,8 @@ export async function saveDmVersion(
   brandKit: any,
   note: string | null,
   userId: string,
+  /** 화면 상태 전부(`buildDmSnapshot`). 없으면 옛 형태로 저장된다 */
+  snapshot?: Record<string, any> | null,
 ): Promise<any> {
   const res = await query(
     `SELECT COALESCE(MAX(version_number), 0) + 1 AS next FROM dm_versions WHERE dm_id = $1`,
@@ -197,10 +289,13 @@ export async function saveDmVersion(
   );
   const versionNumber = res.rows[0]?.next || 1;
   const ins = await query(
-    `INSERT INTO dm_versions (dm_id, version_label, version_number, sections, brand_kit, note, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO dm_versions (dm_id, version_label, version_number, sections, brand_kit, note, created_by, snapshot)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING *`,
-    [dmId, label, versionNumber, JSON.stringify(sections), JSON.stringify(brandKit || {}), note, userId],
+    [
+      dmId, label, versionNumber, JSON.stringify(sections), JSON.stringify(brandKit || {}), note, userId,
+      snapshot ? JSON.stringify(snapshot) : null,
+    ],
   );
   return ins.rows[0];
 }
@@ -219,28 +314,51 @@ export async function listDmVersions(dmId: string, companyId: string): Promise<a
   return res.rows;
 }
 
-export async function restoreDmVersion(dmId: string, versionId: string, companyId: string): Promise<any | null> {
+/**
+ * 버전 복원. 되돌리는 대상은 `planDmRestore`가 정하고 여기는 쓰기만 한다.
+ *
+ * ⛔ jsonb를 JS로 꺼냈다가 **그대로 다시 넣지 마라**(★2026-08-24 접수 · 임은지).
+ *   드라이버는 JS 배열을 PG **배열 리터럴** `{…}`로 직렬화해 jsonb가 거절한다
+ *   (`invalid input syntax for type json`). 그래서 값은 전부 `JSON.stringify`를 거친다.
+ * ⛔ `sections`만 되돌리지 마라(★2026-08-25 재오픈). 화면은 `pages`를 우선 읽어서,
+ *   오류가 사라져도 복원이 화면에 반영되지 않았다. 되돌릴 목록은 `DM_SNAPSHOT_KEYS`가 소유한다.
+ */
+export async function restoreDmVersion(
+  dmId: string, versionId: string, companyId: string,
+): Promise<{ dm: any; mergedPages: boolean } | null> {
   const own = await query(`SELECT id FROM dm_pages WHERE id = $1 AND company_id = $2`, [dmId, companyId]);
   if (own.rows.length === 0) return null;
-  const vRes = await query(`SELECT sections, brand_kit FROM dm_versions WHERE id = $1 AND dm_id = $2`, [versionId, dmId]);
-  if (vRes.rows.length === 0) return null;
-  const v = vRes.rows[0];
-  // ⛔ jsonb를 JS로 꺼냈다가 **그대로 다시 넣지 마라**(★2026-08-24 접수 cmt6qug4s00v1jnotsqeaf12g · 임은지).
-  //   드라이버는 JS 배열을 PG **배열 리터럴** `{…}`로 직렬화한다. `sections`가 정확히 배열이라
-  //   jsonb 컬럼이 거절했고(`invalid input syntax for type json`) **복원이 100% 실패**했다.
-  //   같은 파일의 다른 쓰기 자리(생성·수정·버전 저장)는 전부 `JSON.stringify`를 거친다 — 이 자리만 빠져 있었다.
-  //   null 처리는 생성 경로와 같은 모양으로 맞춘다(값이 없던 버전은 없는 채로 되돌린다).
-  const upd = await query(
-    `UPDATE dm_pages SET sections = $1, brand_kit = $2, updated_at = NOW()
-     WHERE id = $3 AND company_id = $4 RETURNING *`,
-    [
-      v.sections ? JSON.stringify(v.sections) : null,
-      v.brand_kit ? JSON.stringify(v.brand_kit) : null,
-      dmId,
-      companyId,
-    ],
+  const vRes = await query(
+    `SELECT sections, brand_kit, snapshot FROM dm_versions WHERE id = $1 AND dm_id = $2`,
+    [versionId, dmId],
   );
-  return upd.rows[0] || null;
+  if (vRes.rows.length === 0) return null;
+
+  const plan = planDmRestore(vRes.rows[0]);
+  const sets: string[] = [];
+  const params: any[] = [];
+  let idx = 1;
+  // 컬럼명은 상수 목록(DM_SNAPSHOT_KEYS)에서만 나온다 — 버전 행의 키를 SQL에 그대로 쓰지 않는다
+  for (const key of DM_SNAPSHOT_KEYS) {
+    if (!(key in plan.values)) continue;
+    const raw = plan.values[key];
+    sets.push(`${key} = $${idx++}`);
+    params.push(
+      DM_SNAPSHOT_JSON_KEYS.has(key)
+        ? (raw === null || raw === undefined ? null : JSON.stringify(raw))
+        : (raw ?? null),
+    );
+  }
+  if (sets.length === 0) return null;
+
+  params.push(dmId, companyId);
+  const upd = await query(
+    `UPDATE dm_pages SET ${sets.join(', ')}, updated_at = NOW()
+     WHERE id = $${idx++} AND company_id = $${idx} RETURNING *`,
+    params,
+  );
+  const dm = upd.rows[0] || null;
+  return dm ? { dm, mergedPages: plan.mergedPages } : null;
 }
 
 // ────────────────── 승인 플로우 (D125 §13-3) ──────────────────

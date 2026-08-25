@@ -290,11 +290,39 @@ export default function MarketingPlannerPage() {
     });
   };
 
-  const setTiming = (channel: Channel, anchor: Anchor, offsetDays?: number) => {
+  /**
+   * 시점 켜고 끄기 — 한 채널에 시점을 여럿 붙일 수 있다(★2026-08-25 접수 임은지).
+   *
+   * 종전에는 채널 하나에 접점 하나만 두고 시점을 덮어써서 버튼이 라디오처럼 동작했다.
+   * 서버는 처음부터 (채널·시점·오프셋·대상) 조합으로 중복만 막으므로, 다른 시점은 원래 함께 담긴다.
+   * ⛔ 마지막 하나는 지우지 않는다 — 시점이 0개면 채널을 켜 둔 뜻이 사라진다(끄려면 채널 자체를 끈다).
+   */
+  const toggleTiming = (channel: Channel, anchor: Anchor) => {
+    setFTouchpoints((prev) => {
+      const mine = prev.filter((t) => t.channel === channel);
+      const has = mine.some((t) => t.timing.anchor === anchor);
+      if (has) {
+        if (mine.length <= 1) return prev;
+        return prev.filter((t) => !(t.channel === channel && t.timing.anchor === anchor));
+      }
+      // 대상 축은 그 채널이 이미 쓰던 것을 따라간다(화면이 채널 단위로 고르게 돼 있다)
+      const audience = mine[0]?.timing.audience;
+      return [...prev, {
+        channel,
+        timing: {
+          anchor,
+          ...(anchor === 'before_start' ? { offsetDays: 5 } : {}),
+          ...(audience ? { audience } : {}),
+        },
+      }];
+    });
+  };
+
+  /** 사전 안내를 며칠 전에 보낼지 — 그 채널의 사전 안내 접점에만 적용한다 */
+  const setOffsetDays = (channel: Channel, offsetDays: number) => {
     setFTouchpoints((prev) => prev.map((t) => (
-      t.channel === channel
-        // 대상 축(audience)은 시점 변경에 휩쓸리지 않게 보존한다.
-        ? { ...t, timing: { anchor, ...(anchor === 'before_start' ? { offsetDays: offsetDays || 5 } : {}), ...(t.timing.audience ? { audience: t.timing.audience } : {}) } }
+      t.channel === channel && t.timing.anchor === 'before_start'
+        ? { ...t, timing: { ...t.timing, offsetDays } }
         : t
     )));
   };
@@ -856,7 +884,10 @@ export default function MarketingPlannerPage() {
                 <span className="text-xs font-medium text-white/50">채널과 시점</span>
                 <div className="mt-2 space-y-2">
                   {availability.map((a) => {
-                    const selected = fTouchpoints.find((t) => t.channel === a.channel);
+                    // 한 채널에 시점이 여럿일 수 있다 — 선택 여부는 "접점이 하나라도 있는가"다
+                    const picked = fTouchpoints.filter((t) => t.channel === a.channel);
+                    const selected = picked.length > 0;
+                    const beforeTp = picked.find((t) => t.timing.anchor === 'before_start');
                     return (
                       <div key={a.channel} className={`rounded-xl border px-3 py-2.5 ${selected ? 'border-violet-400/40 bg-violet-500/10' : 'border-white/10 bg-white/[0.03]'} ${!a.available ? 'opacity-60' : ''}`}>
                         <div className="flex items-center gap-2.5">
@@ -874,6 +905,7 @@ export default function MarketingPlannerPage() {
                           </button>
                           <span className="text-sm">{a.label}</span>
                           <span className="ml-auto text-[11px] text-white/40 tabular-nums">
+                            {picked.length > 1 && <span className="text-violet-200/80 mr-1.5">시점 {picked.length}회</span>}
                             {a.estCredits != null ? `제작 ${a.estCredits}크레딧` : '실행 시 과금'}
                           </span>
                         </div>
@@ -881,33 +913,44 @@ export default function MarketingPlannerPage() {
                           <p className="mt-1.5 ml-[28px] text-[11px] text-amber-200/70">{a.reason}</p>
                         )}
                         {selected && (
-                          <div className="mt-2 ml-[28px] flex flex-wrap items-center gap-1.5">
-                            {(['start', 'end', 'before_start'] as Anchor[]).map((anchor) => (
-                              <button
-                                key={anchor}
-                                type="button"
-                                onClick={() => setTiming(a.channel, anchor)}
-                                className={`text-[11px] px-2 py-1 rounded-lg border ${
-                                  selected.timing.anchor === anchor
-                                    ? 'border-violet-400/60 bg-violet-500/25 text-violet-100'
-                                    : 'border-white/10 text-white/50 hover:bg-white/5'
-                                }`}
-                              >
-                                {ANCHOR_LABEL[anchor]}
-                              </button>
-                            ))}
-                            {selected.timing.anchor === 'before_start' && (
-                              <span className="flex items-center gap-1 text-[11px] text-white/60">
-                                시작
-                                <input
-                                  type="number" min={1} max={30}
-                                  value={selected.timing.offsetDays || 5}
-                                  onChange={(e) => setTiming(a.channel, 'before_start', Math.max(1, Math.min(30, Number(e.target.value) || 5)))}
-                                  className="w-14 px-2 py-1 bg-white/5 border border-white/10 rounded-lg text-center tabular-nums outline-none focus:ring-1 focus:ring-violet-500"
-                                />
-                                일 전
-                              </span>
-                            )}
+                          <div className="mt-2 ml-[28px]">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {(['start', 'end', 'before_start'] as Anchor[]).map((anchor) => {
+                                const on = picked.some((t) => t.timing.anchor === anchor);
+                                return (
+                                  <button
+                                    key={anchor}
+                                    type="button"
+                                    onClick={() => toggleTiming(a.channel, anchor)}
+                                    aria-pressed={on}
+                                    className={`text-[11px] px-2 py-1 rounded-lg border ${
+                                      on
+                                        ? 'border-violet-400/60 bg-violet-500/25 text-violet-100'
+                                        : 'border-white/10 text-white/50 hover:bg-white/5'
+                                    }`}
+                                  >
+                                    {ANCHOR_LABEL[anchor]}
+                                  </button>
+                                );
+                              })}
+                              {beforeTp && (
+                                <span className="flex items-center gap-1 text-[11px] text-white/60">
+                                  시작
+                                  <input
+                                    type="number" min={1} max={30}
+                                    value={beforeTp.timing.offsetDays || 5}
+                                    onChange={(e) => setOffsetDays(a.channel, Math.max(1, Math.min(30, Number(e.target.value) || 5)))}
+                                    className="w-14 px-2 py-1 bg-white/5 border border-white/10 rounded-lg text-center tabular-nums outline-none focus:ring-1 focus:ring-violet-500"
+                                  />
+                                  일 전
+                                </span>
+                              )}
+                            </div>
+                            <p className="mt-1.5 text-[11px] text-white/40">
+                              {picked.length > 1
+                                ? `고른 시점마다 따로 만들어 보냅니다. 지금 ${picked.length}회입니다.`
+                                : '시점을 여러 개 골라 시작과 종료에 나눠 보낼 수 있습니다.'}
+                            </p>
                           </div>
                         )}
                         {/* ★ 2026-08-13 대상 축 — 문자·DM만 고를 수 있다.
@@ -916,7 +959,7 @@ export default function MarketingPlannerPage() {
                           <label className="mt-2 ml-[28px] flex items-center gap-2 text-[11px] text-white/60 cursor-pointer">
                             <input
                               type="checkbox"
-                              checked={selected.timing.audience === 'participants'}
+                              checked={picked[0]?.timing.audience === 'participants'}
                               onChange={(e) => setAudience(a.channel, e.target.checked ? 'participants' : 'all')}
                               className="accent-violet-500"
                             />

@@ -587,12 +587,44 @@ export function createSection<T extends SectionType>(
   };
 }
 
-/** 섹션 배열 순서 재정렬 (0부터) */
+/**
+ * **`order` 값을 진실로 삼아** 다시 정렬하고 0부터 번호를 매긴다.
+ *
+ * ⛔ 순서를 **바꾼 직후에는 쓰지 마라.** 배열 위치만 바꾸고 이 함수에 넘기면
+ *   옛 `order`로 다시 정렬해 **이동이 그대로 취소된다.** 그때는 `resequence`를 쓴다.
+ *   (경위 = 2026-08-25 접수 임은지 "이메일 블록이 드래그로도 화살표로도 안 움직인다")
+ *   쓰는 자리 = 서버에서 받은 목록 정리 · 추가·삭제 뒤 번호 메우기.
+ */
 export function normalizeOrder(sections: Section[]): Section[] {
   return sections
     .slice()
     .sort((a, b) => a.order - b.order)
     .map((s, i) => ({ ...s, order: i }));
+}
+
+/**
+ * **현재 배열 순서를 진실로 삼아** `order`를 다시 매긴다(★2026-08-25 신설).
+ *
+ * 순서를 바꾸는 모든 자리(드래그·화살표 이동·복제 끼워넣기)가 쓴다. DM 스토어(`reorderSections`)가
+ * 인라인으로 하던 것과 같은 계약이며, 이름이 있어야 다음 사람이 `normalizeOrder`를 잘못 고르지 않는다.
+ */
+export function resequence(sections: Section[]): Section[] {
+  return sections.map((s, i) => ({ ...s, order: i }));
+}
+
+/**
+ * `order` 순으로 세운 뒤 `from` 자리의 섹션을 `to` 자리로 옮기고 번호를 다시 매긴다(순수).
+ *
+ * 드래그와 화살표가 **같은 함수**를 쓰게 하려고 뽑았다. 이동 로직이 두 벌이면 한쪽만 고쳐진다
+ * (실제로 그렇게 됐다 — DM은 고쳐졌고 이메일은 안 고쳐져 2026-08-25 접수가 됐다).
+ * 경계를 벗어나거나 제자리면 **원본을 그대로 돌려준다**(호출부가 경계 검사를 또 하지 않아도 된다).
+ */
+export function moveWithin(sections: Section[], from: number, to: number): Section[] {
+  const arr = sections.slice().sort((a, b) => a.order - b.order);
+  if (from < 0 || to < 0 || from >= arr.length || to >= arr.length || from === to) return sections;
+  const [moved] = arr.splice(from, 1);
+  arr.splice(to, 0, moved);
+  return resequence(arr);
 }
 
 /** 섹션 타입 유효성 */

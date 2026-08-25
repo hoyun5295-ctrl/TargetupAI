@@ -121,9 +121,12 @@ export default function VersionHistoryModal({ open, onClose }: { open: boolean; 
       cancelLabel: '취소',
       onConfirm: async () => {
         try {
-          await api.post(`/dm/${dmId}/versions/${selectedVersion.id}/restore`);
+          const res = await api.post(`/dm/${dmId}/versions/${selectedVersion.id}/restore`);
           await loadDm(dmId);
-          setToast({ type: 'success', message: '복원 완료.' });
+          // 페이지 경계를 안 담던 시절의 스냅샷은 한 페이지로 합쳐진다 — 조용히 넘기지 않고 그대로 알린다
+          setToast(res.data?.mergedPages
+            ? { type: 'success', message: '복원했어요. 이 스냅샷은 페이지 구분 이전에 저장돼 한 페이지로 합쳐졌어요.' }
+            : { type: 'success', message: '복원 완료.' });
           onClose();
         } catch (err: any) {
           setToast({ type: 'error', message: err?.response?.data?.error || '복원 실패' });

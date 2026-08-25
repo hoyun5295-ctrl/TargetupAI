@@ -90,6 +90,40 @@ describe('parsePlannerEventInput — 기입 검증', () => {
     expect(parsePlannerEventInput({ ...base, touchpoints: [] })).toMatchObject({ ok: false });
   });
 
+  /**
+   * ★ 2026-08-25 접수 cmt80akay00yqjnot2cqk4bw3(임은지) — "한 채널에서 시작일·종료일·사전 안내를 함께 고르고 싶다".
+   * 검증기는 처음부터 (채널·시점·오프셋·대상) 조합으로만 중복을 막았으므로 다중 시점은 원래 통과한다.
+   * 막고 있던 것은 화면이었다(채널 하나에 접점 하나만 두고 시점을 덮어썼다).
+   * 이 계약이 좁아지면 그 화면이 다시 못 쓰게 되므로 여기서 고정한다.
+   */
+  it('같은 채널의 다른 시점은 함께 담긴다 — 시작·종료·사전 안내 동시 선택', () => {
+    const r = parsePlannerEventInput({
+      ...base,
+      touchpoints: [
+        { channel: 'sms', timing: { anchor: 'start' } },
+        { channel: 'sms', timing: { anchor: 'end' } },
+        { channel: 'sms', timing: { anchor: 'before_start', offsetDays: 3 } },
+      ],
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.touchpoints).toHaveLength(3);
+      expect(r.value.touchpoints.map((t) => t.timing.anchor)).toEqual(['start', 'end', 'before_start']);
+    }
+  });
+
+  it('사전 안내는 며칠 전인지가 다르면 다른 발송이다', () => {
+    const r = parsePlannerEventInput({
+      ...base,
+      touchpoints: [
+        { channel: 'email', timing: { anchor: 'before_start', offsetDays: 7 } },
+        { channel: 'email', timing: { anchor: 'before_start', offsetDays: 1 } },
+      ],
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.touchpoints).toHaveLength(2);
+  });
+
   it('before_start의 offsetDays는 1~30만', () => {
     expect(parsePlannerEventInput({
       ...base,

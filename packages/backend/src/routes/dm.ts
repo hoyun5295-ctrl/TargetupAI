@@ -18,10 +18,12 @@ import { authenticate } from '../middlewares/auth';
 import {
   createDm, updateDm, deleteDm, getDmList, getDmDetail, getDmByCode, cloneDm,
   publishDm, trackDmView, getDmStats, getDmRecipientEngagementRows,
-  saveDmVersion, listDmVersions, restoreDmVersion, setApprovalStatus,
+  saveDmVersion, listDmVersions, restoreDmVersion, setApprovalStatus, buildDmSnapshot,
   extractFlatSectionsFromDm, extractPagesFromDm, extractDmCopyText,
   stopDm, resumeDm, isDmStopped, isDmStoppedByCode, DM_TRANSITION_BLOCK_MESSAGES,
 } from '../utils/dm/dm-builder';
+// ★ 2026-08-25 DB 스키마 부재 → 503 안내(CLAUDE.md db_alter_safety_net)
+import { isMissingSchemaError, migrationPendingBody } from '../utils/db-errors';
 // ★ 2026-07-03 DM 문안 학습 코퍼스 적재 (전 채널 학습 통합 Phase 1)
 import { logCampaignTraining } from '../utils/training-logger';
 // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용 — 타겟 선정 무관)
@@ -1908,10 +1910,16 @@ dmRouter.get('/:id/versions', async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    // ⛔ 버전 API 셋(목록·저장·복원)이 **같은 소유 가드**를 지난다. 둘만 막으면 남은 하나로 같은 내용이 샌다
+    //   (목록이 `sections`·`brand_kit`을 그대로 돌려준다). 정책 원천 = 0714 서수란 신고 · `canAccessDm`.
+    if (!(await canAccessDm(req.params.id, companyId, req.user?.userType, req.user?.userId))) {
+      return res.status(403).json({ error: '이 DM에 접근할 권한이 없어요.' });
+    }
     const versions = await listDmVersions(req.params.id, companyId);
     return res.json({ versions });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    console.error('[dm/versions] 목록 조회 실패:', err);
+    return res.status(500).json({ error: '버전 목록을 불러오지 못했습니다.' });
   }
 });
 
@@ -1921,16 +1929,32 @@ dmRouter.post('/:id/versions', async (req: any, res: any) => {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    // ⛔ 사용자별 소유 가드(0714 서수란 신고 정책)를 이 라우트만 빠뜨리고 있었다(★Codex 적대 1R high).
+    //   회사 격리는 "같은 회사 남의 DM"을 막지 못한다. 저장 응답에 화면 상태가 실리므로 열람 경로이기도 하다.
+    if (!(await canAccessDm(req.params.id, companyId, req.user?.userType, userId))) {
+      return res.status(403).json({ error: '이 DM에 접근할 권한이 없어요.' });
+    }
     const dm = await getDmDetail(req.params.id, companyId);
     if (!dm) return res.status(404).json({ error: 'DM을 찾을 수 없어요.' });
     const label = (req.body?.label || `수동저장 ${new Date().toLocaleString('ko-KR')}`) as string;
     const note = (req.body?.note || null) as string | null;
     const sections = extractFlatSectionsFromDm(dm);
     const brandKit = typeof dm.brand_kit === 'string' ? JSON.parse(dm.brand_kit) : (dm.brand_kit || {});
-    const version = await saveDmVersion(req.params.id, label, sections, brandKit, note, userId);
-    return res.json({ version });
+    // ⛔ 화면 상태 전부를 담는다(★2026-08-25 재오픈) — `sections`만 담으면 복원해도 화면이 안 바뀐다.
+    //   평탄화한 `sections`는 옛 소비처(diff 표시·옛 번들)를 위해 함께 남긴다.
+    const snapshot = buildDmSnapshot(dm);
+    const version = await saveDmVersion(req.params.id, label, sections, brandKit, note, userId, snapshot);
+    // ⛔ 스냅샷 본문(화면 상태 전부)은 응답에 싣지 않는다 — 화면은 저장 뒤 목록을 다시 불러온다.
+    //   `RETURNING *`을 그대로 돌려주면 필요 없는 전체 상태가 매 저장마다 흘러나간다.
+    const { snapshot: _omit, sections: _omitSections, brand_kit: _omitBrandKit, ...meta } = version || {};
+    return res.json({ version: meta });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    if (isMissingSchemaError(err)) {
+      console.error('[dm/versions] snapshot 컬럼 부재:', err?.message);
+      return res.status(503).json(migrationPendingBody('dm_versions.snapshot 컬럼 추가'));
+    }
+    console.error('[dm/versions] 스냅샷 저장 실패:', err);
+    return res.status(500).json({ error: '스냅샷을 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
   }
 });
 
@@ -1939,10 +1963,19 @@ dmRouter.post('/:id/versions/:vid/restore', async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    // ⛔ 복원은 화면 상태를 통째로 덮는 파괴적 동작이다 — 소유 가드를 반드시 지난다(★Codex 적대 1R high).
+    if (!(await canAccessDm(req.params.id, companyId, req.user?.userType, req.user?.userId))) {
+      return res.status(403).json({ error: '이 DM에 접근할 권한이 없어요.' });
+    }
     const restored = await restoreDmVersion(req.params.id, req.params.vid, companyId);
     if (!restored) return res.status(404).json({ error: '버전을 찾을 수 없어요.' });
-    return res.json({ dm: restored });
+    // mergedPages = 페이지 경계가 없던 옛 스냅샷이라 한 페이지로 합쳐 되돌렸다(화면이 그대로 알린다)
+    return res.json({ dm: restored.dm, mergedPages: restored.mergedPages });
   } catch (err: any) {
+    if (isMissingSchemaError(err)) {
+      console.error('[dm/versions/restore] snapshot 컬럼 부재:', err?.message);
+      return res.status(503).json(migrationPendingBody('dm_versions.snapshot 컬럼 추가'));
+    }
     // ⛔ 드라이버·DB 원문을 사용자에게 돌려주지 않는다(★2026-08-24 접수 cmt6qug4s00v1jnotsqeaf12g).
     //   화면에 `invalid input syntax for type json`이 그대로 떴다. 원인은 로그로 남기고 고객에게는 할 일을 준다.
     console.error('[dm/versions/restore] 복원 실패:', err);
