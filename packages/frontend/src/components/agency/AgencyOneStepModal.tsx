@@ -10,8 +10,9 @@
  * ⛔ 회신번호를 열로 지정하면 접수가 회신번호별로 나뉜다 — 그 사실을 화면이 숫자로 안내한다.
  * ⛔ 문구에 줄표 0. 톤 = 인디고 콘솔(CUI_*).
  */
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 // (useRef = 파일 입력과 분석 세대 가드에 쓴다)
+import { createPortal } from 'react-dom';
 import {
   AlertTriangle, ArrowLeft, Check, ChevronLeft, ChevronRight, Download, FileSpreadsheet,
   Image as ImageIcon, Loader2, Send, Upload, X,
@@ -99,6 +100,8 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
   const [managerInput, setManagerInput] = useState('');
   const [senders, setSenders] = useState<string[]>([]);
   const [samplePage, setSamplePage] = useState(0);
+  // 명단 미리보기(엑셀 모양 상위 50행) 창. CUI_MODAL 껍데기가 overflow-hidden이라 포탈로 띄운다
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [mmsOpen, setMmsOpen] = useState(false);
   const mms = useMmsUpload((m) => toast.error(m));
   // 재분석 응답의 세대 번호 — 늦게 도착한 옛 응답이 최신 화면을 덮지 못하게 한다
@@ -108,7 +111,7 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
     setPhase('upload'); setFormFile(null); setListFile(null); setAnalysis(null);
     setRequestedAt(''); setCallbackChoice(''); setPhoneColumnChoice(''); setManagerPhones([]); setManagerInput('');
     setVarMapping({}); setAiPickedVars(new Set());
-    setSamplePage(0); mms.setMmsUploadedImages([]);
+    setSamplePage(0); setPreviewOpen(false); mms.setMmsUploadedImages([]);
     analyzeSeq.current += 1;
   };
   const close = () => {
@@ -218,15 +221,16 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
     setManagerInput('');
   };
 
-  const sampleSlice = useMemo(() => {
-    const a = analysis;
-    if (!a) return [];
-    return a.sample.slice(samplePage * 10, samplePage * 10 + 10);
-  }, [analysis, samplePage]);
-
   if (!show) return null;
   const a = analysis;
   const columnMode = a?.callback.mode === 'column' || callbackChoice.startsWith('col:');
+  // 명단 미리보기의 역할 열 표시(수신자·회신번호·문안 항목) — 화면 상태가 진실이다
+  const phoneCol = phoneColumnChoice || a?.phoneColumn || null;
+  const cbCol = callbackChoice.startsWith('col:')
+    ? callbackChoice.slice(4)
+    : (a?.callback.mode === 'column' ? a.callback.column : null);
+  const varsFor = (h: string) => Object.entries(varMapping).filter(([, c]) => c === h).map(([n]) => n);
+  const previewRows = a ? a.sampleRows.slice(samplePage * 10, samplePage * 10 + 10) : [];
   const messageType: 'SMS' | 'LMS' | 'MMS' = mms.mmsUploadedImages.length > 0 ? 'MMS' : (a?.messageType === 'MMS' ? 'LMS' : a?.messageType || 'SMS');
 
   return (
@@ -419,7 +423,7 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
                 )}
 
                 <div className="rounded-xl border border-neutral-200 bg-white p-4">
-                  <p className="text-[13px] font-bold mb-2.5">명단 미리보기</p>
+                  <p className="text-[13px] font-bold mb-2.5">명단</p>
                   <div className="mb-2.5">
                     <label className={CUI_LABEL}>수신자(휴대폰 번호) 열</label>
                     <select
@@ -433,38 +437,15 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
                       {a.headers.map((h) => <option key={h} value={h}>{h}</option>)}
                     </select>
                   </div>
-                  <table className="w-full text-[12px]">
-                    <thead>
-                      <tr>
-                        <th className="text-left px-2 py-1.5 bg-indigo-50 text-indigo-700 font-bold rounded-md">{a.phoneColumn || '번호'}</th>
-                        {columnMode && <th className="text-left px-2 py-1.5 text-neutral-500 font-semibold">회신번호</th>}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sampleSlice.map((s, i) => (
-                        <tr key={i}>
-                          <td className="px-2 py-1.5 border-b border-neutral-100 tabular-nums">{s.phone}</td>
-                          {columnMode && <td className="px-2 py-1.5 border-b border-neutral-100 tabular-nums text-neutral-600">{s.callback || ''}</td>}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <div className="mt-2.5 flex items-center justify-between">
-                    <p className="text-[11.5px] text-neutral-400">상위 {a.sample.length}건만 보여드립니다</p>
-                    {a.sample.length > 10 && (
-                      <span className="flex items-center gap-1.5 text-[12px] text-neutral-500">
-                        <button type="button" disabled={samplePage <= 0} onClick={() => setSamplePage(samplePage - 1)}
-                          className="h-6 w-6 grid place-items-center rounded-lg border border-neutral-200 bg-white disabled:opacity-40" aria-label="이전">
-                          <ChevronLeft className="w-3.5 h-3.5" strokeWidth={2.4} />
-                        </button>
-                        <span className="tabular-nums">{samplePage + 1} / {Math.ceil(a.sample.length / 10)}</span>
-                        <button type="button" disabled={(samplePage + 1) * 10 >= a.sample.length} onClick={() => setSamplePage(samplePage + 1)}
-                          className="h-6 w-6 grid place-items-center rounded-lg border border-neutral-200 bg-white disabled:opacity-40" aria-label="다음">
-                          <ChevronRight className="w-3.5 h-3.5" strokeWidth={2.4} />
-                        </button>
-                      </span>
-                    )}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setSamplePage(0); setPreviewOpen(true); }}
+                    disabled={a.sampleRows.length === 0}
+                    className={`${CUI_BTN_OUTLINE} w-full justify-center`}
+                  >
+                    <FileSpreadsheet className="w-[15px] h-[15px]" />명단 미리보기 (상위 50건)
+                  </button>
+                  <p className={`${CUI_HINT} mt-1.5`}>올린 파일 모양 그대로 봅니다. 수신자·문안 항목·회신번호 열이 표시됩니다.</p>
                 </div>
               </div>
             </div>
@@ -490,6 +471,83 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
           )}
         </div>
       </div>
+
+      {/* 명단 미리보기 — 올린 파일 모양 그대로 상위 50행. 중첩 오버레이라 포탈로 몸통 밖에 띄운다 */}
+      {previewOpen && a && createPortal(
+        <div className="fixed inset-0 z-[80] bg-neutral-900/45 flex items-center justify-center p-4">
+          <div className={`${CUI_MODAL} max-w-[960px]`} role="dialog" aria-modal="true" aria-label="명단 미리보기">
+            <div className={CUI_MODAL_HEAD}>
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="h-9 w-9 shrink-0 rounded-xl bg-indigo-600 text-white grid place-items-center">
+                  <FileSpreadsheet className="w-4 h-4" strokeWidth={2} />
+                </div>
+                <div className="min-w-0">
+                  <h3 className={CUI_MODAL_TITLE}>명단 미리보기</h3>
+                  <p className={CUI_MODAL_DESC}>{a.fileName ? `${a.fileName} · ` : ''}올린 파일 모양 그대로, 앞 {a.sampleRows.length}행입니다</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setPreviewOpen(false)} className={CUI_MODAL_CLOSE} aria-label="닫기">
+                <X className="w-4 h-4" strokeWidth={1.75} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto px-6 py-5">
+              <table className="w-full text-[12px]">
+                <thead>
+                  <tr>
+                    {a.headers.map((h) => {
+                      const isPhone = h === phoneCol;
+                      const isCb = h === cbCol;
+                      const vars = varsFor(h);
+                      return (
+                        <th key={h} className={`text-left px-2.5 py-2 border-b-2 whitespace-nowrap font-bold ${
+                          isPhone ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-neutral-50 text-neutral-700 border-neutral-200'
+                        }`}>
+                          {h}
+                          {isPhone && <span className="ml-1.5 inline-flex items-center h-[17px] px-1.5 rounded bg-indigo-600 text-white text-[10px] font-bold align-middle">수신자</span>}
+                          {isCb && <span className="ml-1.5 inline-flex items-center h-[17px] px-1.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold align-middle">회신번호</span>}
+                          {vars.map((name) => (
+                            <span key={name} className="ml-1.5 inline-flex items-center h-[17px] px-1.5 rounded bg-indigo-100 text-indigo-700 text-[10px] font-bold align-middle">%{name}%</span>
+                          ))}
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody>
+                  {previewRows.map((row, ri) => (
+                    <tr key={ri}>
+                      {a.headers.map((h, ci) => (
+                        <td key={ci} className={`px-2.5 py-1.5 border-b border-neutral-100 whitespace-nowrap max-w-[220px] truncate tabular-nums ${
+                          h === phoneCol ? 'bg-indigo-50/40 text-neutral-900' : 'text-neutral-700'
+                        }`}>
+                          {row[ci] === null || row[ci] === undefined ? '' : String(row[ci])}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className={CUI_MODAL_FOOT}>
+              <p className="mr-auto text-[11.5px] text-neutral-400">명단의 앞 {a.sampleRows.length}행만 보여드립니다. 같은 번호·형식 제외 전의 원본입니다.</p>
+              {a.sampleRows.length > 10 && (
+                <span className="flex items-center gap-1.5 text-[12px] text-neutral-500">
+                  <button type="button" disabled={samplePage <= 0} onClick={() => setSamplePage(samplePage - 1)}
+                    className="h-7 w-7 grid place-items-center rounded-lg border border-neutral-200 bg-white disabled:opacity-40" aria-label="이전">
+                    <ChevronLeft className="w-3.5 h-3.5" strokeWidth={2.4} />
+                  </button>
+                  <span className="tabular-nums">{samplePage + 1} / {Math.ceil(a.sampleRows.length / 10)}</span>
+                  <button type="button" disabled={(samplePage + 1) * 10 >= a.sampleRows.length} onClick={() => setSamplePage(samplePage + 1)}
+                    className="h-7 w-7 grid place-items-center rounded-lg border border-neutral-200 bg-white disabled:opacity-40" aria-label="다음">
+                    <ChevronRight className="w-3.5 h-3.5" strokeWidth={2.4} />
+                  </button>
+                </span>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
 
       <MmsUploadModal
         show={mmsOpen}

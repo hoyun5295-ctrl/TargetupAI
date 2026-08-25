@@ -192,6 +192,8 @@ export interface OneStepAnalysisView {
   groups: Array<{ callback: string; count: number; registered: boolean }>;
   /** 상위 50건만 온다 — 전 행은 서버가 갖고 화면은 숫자와 샘플만 본다 */
   sample: Array<{ phone: string; callback?: string }>;
+  /** 명단 미리보기용 파일 순서 상위 50행 전체 열 값(제외 전 원본 · 열 순서 = headers) */
+  sampleRows: Array<Array<string | number | null>>;
   messageType: 'SMS' | 'LMS' | 'MMS';
   fileName: string | null;
   errors: Array<{ field: string; error: string }>;

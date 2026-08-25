@@ -447,6 +447,12 @@ interface OneStepAnalysis {
   counts: { total: number; valid: number; dup: number; invalid: number; callbackMissing: number };
   groups: OneStepGroup[];
   sample: Array<{ phone: string; callback?: string }>;
+  /**
+   * 명단 미리보기용 **파일 순서 그대로**의 상위 50행 전체 열 값(★2026-08-25(5) · Harold "엑셀 형식 뷰").
+   * 열 상한 100 × 50행이라 응답이 유계다 — "전 행 전송 금지"(§17) 계약은 그대로다.
+   * 제외(중복·형식) 전의 원본 행이다: 집계 카드가 제외 사유를 숫자로 설명한다.
+   */
+  sampleRows: Array<Array<string | number | null>>;
   messageType: 'SMS' | 'LMS' | 'MMS';
   fileName: string | null;
   errors: AgencyFormError[];
@@ -489,7 +495,7 @@ async function analyzeOneStep(
     subject: '', content: '', isAd: true, requestedAtIso: null, managerPhones: [],
     callback: { mode: 'none' }, headers: [], phoneColumn: null, varsMatched: [],
     counts: { total: 0, valid: 0, dup: 0, invalid: 0, callbackMissing: 0 },
-    groups: [], sample: [], messageType: 'SMS', fileName: listName, errors,
+    groups: [], sample: [], sampleRows: [], messageType: 'SMS', fileName: listName, errors,
   };
   if (!formBuf) { errors.push({ field: '요청서', error: '요청서 파일을 올려 주세요.' }); }
   if (!listBuf) { errors.push({ field: '명단', error: '고객 명단 파일을 올려 주세요.' }); }
@@ -677,7 +683,9 @@ async function analyzeOneStep(
     subject: form.subject, content: form.content, isAd: form.isAd, requestedAtIso,
     managerPhones, callback, headers, phoneColumn, varsMatched,
     counts: { total: rows.length, valid, dup, invalid, callbackMissing },
-    groups, sample, messageType, fileName: listName, errors,
+    groups, sample,
+    sampleRows: rows.slice(0, 50).map((r) => headers.map((h) => r[h] ?? null)),
+    messageType, fileName: listName, errors,
   };
 }
 
@@ -701,7 +709,7 @@ function toAnalysisView(a: OneStepAnalysis) {
     managerPhones: a.managerPhones, callback: a.callback, headers: a.headers, phoneColumn: a.phoneColumn,
     varsMatched: a.varsMatched, counts: a.counts,
     groups: a.groups.map((g) => ({ callback: g.callback, count: g.count, registered: g.registered })),
-    sample: a.sample, messageType: a.messageType, fileName: a.fileName, errors: a.errors,
+    sample: a.sample, sampleRows: a.sampleRows, messageType: a.messageType, fileName: a.fileName, errors: a.errors,
   };
 }
 
