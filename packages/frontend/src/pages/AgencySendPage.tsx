@@ -13,7 +13,7 @@
  * ⛔ 자격 판정은 서버 my-plan의 `agency_send_allowed` 하나만 믿는다(프론트가 요금제를 조합하지 않는다).
  * ⛔ 문구에 줄표 0. 톤 = 인디고 콘솔(`CUI_*`).
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Check, FileSpreadsheet, Loader2, MessageSquare, Plus, RefreshCw, Send, X } from 'lucide-react';
 import { goBackOr } from '../lib/scroll-restoration';
@@ -35,6 +35,47 @@ import {
 interface PlanSnapshot {
   planCode: string;
   allowed: boolean;
+}
+
+/**
+ * 접수 입구 버튼 (★2026-08-25(6) · Harold 시안 A 승인 — "둘 다 각각의 개성으로")
+ *
+ * 두 갈래(요청서로 접수 · 직접 입력)가 **같은 뼈대**(아이콘 칸 + 제목 + 한 줄)를 쓰고 표면만 갈린다.
+ * 종전에는 요청서 쪽이 회색 테두리라 "덜 중요한 것"으로 읽혔다 — 이 화면이 파는 길이 그쪽인데도.
+ * ⛔ 색은 인디고 계열만 쓴다(바이올렛은 AI 화면 색 · LESSONS_FRONTEND 핵심 원칙).
+ */
+function EntryButton({ tone, icon, title, sub, onClick }: {
+  tone: 'form' | 'new';
+  icon: ReactNode;
+  title: string;
+  sub: string;
+  onClick: () => void;
+}) {
+  const solid = tone === 'new';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`h-11 pl-2 pr-2.5 sm:pl-2.5 sm:pr-3.5 rounded-xl border-[1.5px] inline-flex items-center gap-2 sm:gap-2.5 transition ` +
+        `active:scale-[.98] motion-reduce:active:scale-100 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-600/20 ${
+        solid
+          ? 'border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700 hover:border-indigo-700 ' +
+            'shadow-[0_6px_16px_-8px_rgba(79,70,229,0.75)] hover:shadow-[0_8px_20px_-8px_rgba(79,70,229,0.9)]'
+          : 'border-indigo-600/25 bg-white text-neutral-900 hover:border-indigo-600/50 hover:bg-indigo-50/40 ' +
+            'shadow-[0_1px_2px_rgba(23,23,23,0.05)] hover:shadow-[0_4px_12px_-6px_rgba(79,70,229,0.35)]'
+      }`}
+    >
+      <span className={`h-7 w-7 rounded-[9px] grid place-items-center shrink-0 ${
+        solid ? 'bg-white/[0.16] text-white' : 'bg-indigo-50 text-indigo-600'}`}>
+        {icon}
+      </span>
+      <span className="flex flex-col items-start leading-[1.15]">
+        <span className="text-[13.5px] font-extrabold tracking-[-0.01em]">{title}</span>
+        {/* 좁은 화면에서는 설명 줄을 접고 아이콘과 제목만 남긴다 */}
+        <span className={`hidden sm:block text-[11px] font-semibold mt-px ${solid ? 'text-white/80' : 'text-indigo-700'}`}>{sub}</span>
+      </span>
+    </button>
+  );
 }
 
 /** 6단계 진행 레일. 표시 판정은 railFor(CT) 하나가 소유하고 여기는 그리기만 한다 */
@@ -193,16 +234,24 @@ export default function AgencySendPage() {
             <p className="text-[12.5px] text-neutral-500">양식만 채우면, 나머지는 한줄로가 합니다</p>
           </div>
           {plan?.allowed && (
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
               <button type="button" onClick={loadList} className={CUI_BTN_GHOST} aria-label="새로고침">
                 <RefreshCw className={`w-[15px] h-[15px] ${listLoading ? 'animate-spin' : ''}`} />
               </button>
-              <button type="button" onClick={() => setOneStepOpen(true)} className={CUI_BTN_OUTLINE}>
-                <FileSpreadsheet className="w-[15px] h-[15px]" />요청서로 접수
-              </button>
-              <button type="button" onClick={() => setComposerOpen(true)} className={CUI_BTN_PRIMARY}>
-                <Plus className="w-[15px] h-[15px]" />새 접수
-              </button>
+              <EntryButton
+                tone="form"
+                icon={<FileSpreadsheet className="w-[15px] h-[15px]" strokeWidth={2} />}
+                title="요청서로 접수"
+                sub="파일 2개면 끝납니다"
+                onClick={() => setOneStepOpen(true)}
+              />
+              <EntryButton
+                tone="new"
+                icon={<Plus className="w-[15px] h-[15px]" strokeWidth={2.2} />}
+                title="새 접수"
+                sub="직접 입력합니다"
+                onClick={() => setComposerOpen(true)}
+              />
             </div>
           )}
         </div>
