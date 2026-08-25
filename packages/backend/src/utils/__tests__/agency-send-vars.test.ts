@@ -9,8 +9,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  buildSlotPlan, extractAgencyVars, toSlotValues, MAX_AGENCY_VARS, SLOT_VARS,
+  buildSlotPlan, extractAgencyVars, toSlotValues, resolveVarColumns, sameNameColumn,
+  MAX_AGENCY_VARS, SLOT_VARS,
 } from '../agency-send-vars';
+import { normalizeVarSuggestions } from '../ai-column-mapper';
 import { replaceVariables } from '../messageUtils';
 import type { VarCatalogEntry } from '../../services/ai';
 // 테스트 전용 import — 화면 미러의 **실제 값**을 비교한다(주석·문자열 매칭은 회귀를 못 잡는다).
@@ -89,6 +91,99 @@ describe('화면 미러가 서버와 같은 답을 낸다', () => {
     for (const s of samples) {
       expect(frontApi.extractAgencyVars(s)).toEqual(extractAgencyVars(s));
     }
+  });
+});
+
+describe('문안 항목 ↔ 명단 열 잇기 (★2026-08-25 원스텝 §17-6)', () => {
+  const HEADERS = ['고객명', '휴대전화번호', '고객 등급', '포인트'];
+
+  it('같은 이름의 열을 공백만 무시하고 찾는다', () => {
+    expect(sameNameColumn(HEADERS, '고객명')).toBe('고객명');
+    expect(sameNameColumn(HEADERS, '고객등급')).toBe('고객 등급');
+    expect(sameNameColumn(HEADERS, '이름')).toBeNull();
+  });
+
+  it('조정값 > 같은 이름 순서로 잇고, 못 이은 항목은 null로 남는다', () => {
+    const { resolved, badOverrides } = resolveVarColumns(['이름', '포인트'], HEADERS, { 이름: '고객명' });
+    expect(resolved).toEqual([
+      { name: '이름', column: '고객명', via: 'override' },
+      { name: '포인트', column: '포인트', via: 'same' },
+    ]);
+    expect(badOverrides).toEqual([]);
+    expect(resolveVarColumns(['이름'], HEADERS).resolved[0]).toEqual({ name: '이름', column: null, via: null });
+  });
+
+  it('조정값이 명단에 없는 열이면 폴백하지 않고 badOverrides로 알린다', () => {
+    // 같은 이름 열(포인트)이 있어도 조정값이 틀렸으면 그리로 조용히 돌아가지 않는다(★2R 계약)
+    const { resolved, badOverrides } = resolveVarColumns(['포인트'], HEADERS, { 포인트: '적립금' });
+    expect(resolved[0].column).toBeNull();
+    expect(badOverrides).toEqual(['포인트']);
+  });
+
+  it('조정값의 빈 문자열은 "아직 안 골랐다"라 같은 이름 규칙으로 내려간다', () => {
+    const { resolved } = resolveVarColumns(['포인트', '이름'], HEADERS, { 포인트: '', 이름: '' });
+    expect(resolved[0]).toEqual({ name: '포인트', column: '포인트', via: 'same' });
+    expect(resolved[1].column).toBeNull();
+  });
+});
+
+describe('AI 추천 응답 다듬기 (순수 계약)', () => {
+  const VARS = ['이름', '적립금'];
+  const COLS = ['고객명', '포인트'];
+
+  it('명단에 있는 열 + 충분한 confidence만 추천으로 남는다', () => {
+    const out = normalizeVarSuggestions({
+      suggestions: [
+        { name: '이름', column: '고객명', confidence: 0.95 },
+        { name: '적립금', column: '마일리지', confidence: 0.9 }, // 명단에 없는 열
+      ],
+    }, VARS, COLS);
+    expect(out).toEqual([
+      { name: '이름', column: '고객명', confidence: 0.95 },
+      { name: '적립금', column: null, confidence: 0.9 },
+    ]);
+  });
+
+  it('낮은 confidence·항목 밖 응답·빠진 항목은 null로 접는다', () => {
+    const out = normalizeVarSuggestions({
+      suggestions: [
+        { name: '이름', column: '고객명', confidence: 0.3 }, // 0.5 미만 = 억지 매핑 금지
+        { name: '없는항목', column: '포인트', confidence: 1 },
+      ],
+    }, VARS, COLS);
+    expect(out[0].column).toBeNull();
+    expect(out[1]).toEqual({ name: '적립금', column: null, confidence: 0 });
+    expect(normalizeVarSuggestions(null, VARS, COLS)).toHaveLength(2);
+  });
+
+  it('타입 이상은 fail-closed — 배열·불리언·범위 밖 수치가 정상 값으로 승격되지 않는다 (★Codex 1R)', () => {
+    // String(["고객명"]) === "고객명" · Number(true) === 1 로 통과하던 구멍
+    const out = normalizeVarSuggestions({
+      suggestions: [
+        { name: ['이름'], column: ['고객명'], confidence: true },
+        { name: '적립금', column: '포인트', confidence: 1.2 }, // 범위 밖 = 무효
+      ],
+    }, VARS, COLS);
+    expect(out[0]).toEqual({ name: '이름', column: null, confidence: 0 });
+    expect(out[1]).toEqual({ name: '적립금', column: null, confidence: 0 });
+  });
+
+  it('같은 항목이 서로 다른 열로 두 번 오면 추천을 버린다 — 순서 의존 금지 (★Codex 1R)', () => {
+    const conflicted = normalizeVarSuggestions({
+      suggestions: [
+        { name: '이름', column: '고객명', confidence: 0.9 },
+        { name: '이름', column: '포인트', confidence: 0.9 },
+      ],
+    }, VARS, COLS);
+    expect(conflicted[0]).toEqual({ name: '이름', column: null, confidence: 0 });
+    // 같은 열이면 중복이어도 유지된다
+    const agreed = normalizeVarSuggestions({
+      suggestions: [
+        { name: '이름', column: '고객명', confidence: 0.9 },
+        { name: '이름', column: '고객명', confidence: 0.8 },
+      ],
+    }, VARS, COLS);
+    expect(agreed[0].column).toBe('고객명');
   });
 });
 

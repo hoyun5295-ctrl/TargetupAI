@@ -186,7 +186,8 @@ export interface OneStepAnalysisView {
   callback: { mode: 'fixed'; number: string } | { mode: 'column'; column: string } | { mode: 'none' };
   headers: string[];
   phoneColumn: string | null;
-  varsMatched: Array<{ name: string; column: string | null }>;
+  /** via: same = 같은 이름 자동 · override = 화면에서 고른 열 · ai = AI 추천(초회 분석에만 온다) */
+  varsMatched: Array<{ name: string; column: string | null; via: 'same' | 'override' | 'ai' | null }>;
   counts: { total: number; valid: number; dup: number; invalid: number; callbackMissing: number };
   groups: Array<{ callback: string; count: number; registered: boolean }>;
   /** 상위 50건만 온다 — 전 행은 서버가 갖고 화면은 숫자와 샘플만 본다 */
@@ -205,6 +206,12 @@ export interface OneStepOverrides {
   mmsImagePaths?: string[];
   /** 수신자(휴대폰 번호) 열 직접 선택. 자동 선정이 애매한 파일 대비 */
   phoneColumn?: string;
+  /**
+   * 문안 항목 → 명단 열. 확인 화면 이후 **항상 보낸다**(항목이 없어도 빈 객체).
+   * 접수 확정은 이 매핑으로만 간다 — AI 추천은 초회 분석에서 미리 골라 줄 뿐, 서버가
+   * 확정 때 다시 추론하지 않는다(화면에서 본 것과 같은 열 보장).
+   */
+  varMapping?: Record<string, string>;
 }
 
 function oneStepBody(formFile: File, listFile: File, overrides: OneStepOverrides): FormData {

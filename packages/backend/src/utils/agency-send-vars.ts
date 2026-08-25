@@ -80,6 +80,44 @@ export function buildSlotPlan(content: string): SlotPlan {
   return { ok: true, slots, slotContent, order };
 }
 
+/**
+ * 문안 항목 이름과 같은 이름의 명단 열을 찾는다(공백만 무시).
+ * 화면 접수(AgencySendComposer)가 같은 규칙을 미러로 갖고 있다 — 규칙을 바꾸면 양쪽을 함께 바꾼다.
+ */
+export function sameNameColumn(headers: string[], varName: string): string | null {
+  const key = String(varName || '').replace(/\s+/g, '');
+  return headers.find((h) => String(h || '').replace(/\s+/g, '') === key) || null;
+}
+
+export interface VarColumnResolution {
+  name: string;
+  column: string | null;
+  /** same = 같은 이름 자동 · override = 확인 화면에서 고른 열 · ai = AI 추천(라우트가 얹는다) */
+  via: 'same' | 'override' | 'ai' | null;
+}
+
+/**
+ * 문안 항목을 명단 열에 잇는다. 우선순위 = 확인 화면 조정값 > 같은 이름.
+ * ⛔ 조정값이 명단에 없는 열이면 **폴백하지 않고** badOverrides로 돌려준다
+ *   (사용자가 본 것과 다른 열로 접수되면 안 된다 · 원스텝 ★Codex 적대 2R 계약과 같은 선).
+ */
+export function resolveVarColumns(
+  vars: string[], headers: string[], overrideMap?: Record<string, string> | null,
+): { resolved: VarColumnResolution[]; badOverrides: string[] } {
+  const badOverrides: string[] = [];
+  const resolved = vars.map((name): VarColumnResolution => {
+    const pick = overrideMap && typeof overrideMap === 'object' ? overrideMap[name] : undefined;
+    if (pick !== undefined && pick !== null && String(pick) !== '') {
+      if (headers.includes(String(pick))) return { name, column: String(pick), via: 'override' };
+      badOverrides.push(name);
+      return { name, column: null, via: null };
+    }
+    const same = sameNameColumn(headers, name);
+    return same ? { name, column: same, via: 'same' } : { name, column: null, via: null };
+  });
+  return { resolved, badOverrides };
+}
+
 /** 수신자 한 명의 값(변수명 키)을 슬롯 자리로 옮긴다. 직접발송 staging의 컬럼 순서와 같다 */
 export interface SlotValues {
   name: string;

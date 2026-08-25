@@ -140,6 +140,121 @@ function extractJSON(text: string): string {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// 문안 항목 ↔ 명단 열 추천 (★ 2026-08-25 대행발송 원스텝 · 설계서 §17-6)
+//   %이름% 같은 문안 항목이 명단에 같은 이름의 열이 없을 때, 열 이름 + 샘플 값을 보고
+//   가장 맞는 열을 추천한다. **추천일 뿐 확정이 아니다** — 라우트가 확인 화면에 미리
+//   골라 두고, 접수 확정은 사용자가 화면에서 본 매핑(조정값)으로만 간다.
+//   비용은 대행발송 축이 진다(AI 다듬기 크레딧 0과 같은 정책 · 진입 자체가 유료+스위치 게이트).
+// ════════════════════════════════════════════════════════════════════
+
+export interface VarColumnSuggestion {
+  /** 문안 항목 이름(% 안쪽) */
+  name: string;
+  /** 추천 열. null = 맞는 열이 없다(억지 매핑 금지) */
+  column: string | null;
+  confidence: number;
+}
+
+/** 추천을 신뢰하는 최소 confidence. 이 아래는 "못 찾음"으로 돌려 사용자가 직접 고르게 한다 */
+const VAR_SUGGEST_MIN_CONFIDENCE = 0.5;
+
+/**
+ * AI 응답을 계약대로 다듬는다(순수 · 테스트 대상). **형태 이상은 전부 fail-closed** —
+ * String()·Number() 강제 변환을 쓰면 배열·불리언도 정상 값으로 승격된다(★Codex 1R medium:
+ * String(["고객명"]) === "고객명" · Number(true) === 1). 실제 문자열·유한한 0~1 숫자만 인정하고,
+ * 항목 밖 응답·명단에 없는 열·낮은 confidence·서로 다른 열을 가리키는 중복 항목은 null로 접는다.
+ */
+export function normalizeVarSuggestions(
+  raw: any, vars: string[], columnNames: string[],
+): VarColumnSuggestion[] {
+  const list: any[] = Array.isArray(raw?.suggestions) ? raw.suggestions : [];
+  const byName = new Map<string, VarColumnSuggestion>();
+  for (const s of list) {
+    const name = typeof s?.name === 'string' ? s.name : null;
+    if (!name || !vars.includes(name)) continue;
+    const confOk = typeof s?.confidence === 'number' && Number.isFinite(s.confidence)
+      && s.confidence >= 0 && s.confidence <= 1;
+    const confidence = confOk ? s.confidence : 0;
+    const column = typeof s?.column === 'string' && columnNames.includes(s.column)
+      && confOk && confidence >= VAR_SUGGEST_MIN_CONFIDENCE
+      ? s.column : null;
+    const prev = byName.get(name);
+    if (prev) {
+      // 같은 항목이 두 번 오고 열이 갈리면 모호하다 — 순서에 기대지 말고 추천을 버린다
+      if (prev.column !== column) byName.set(name, { name, column: null, confidence: 0 });
+      continue;
+    }
+    byName.set(name, { name, column, confidence });
+  }
+  return vars.map((name) => byName.get(name) || { name, column: null, confidence: 0 });
+}
+
+function buildVarSuggestPrompt(): string {
+  return `당신은 한줄로 마케팅 SaaS의 문자 문안 개인화 항목과 고객 명단 열을 잇는 AI입니다.
+문안 항목 이름과 명단의 열 이름, 샘플 데이터를 보고 각 항목의 값으로 넣기에 가장 맞는 열을 고릅니다.
+
+[규칙]
+1. 각 항목마다 명단의 열을 1개만 고릅니다. 맞는 열이 없으면 column = null (억지로 잇지 않습니다)
+2. 열 이름과 샘플 값 양쪽을 모두 참고합니다 (이름이 비슷해도 값이 다르면 의심)
+3. confidence는 0.0 ~ 1.0
+4. 열 이름은 명단에 있는 그대로 적습니다 (바꿔 쓰지 않습니다)
+
+[응답 형식: JSON 단일]
+\`\`\`json
+{ "suggestions": [ { "name": "항목 이름", "column": "명단의 열 이름 또는 null", "confidence": 0.0 } ] }
+\`\`\`
+
+[예시]
+입력: 항목 = ["이름"], 열 = ["고객명", "휴대전화번호", "포인트"], 샘플 = [["홍길동", "010-1234-5678", "1500"]]
+응답:
+\`\`\`json
+{ "suggestions": [ { "name": "이름", "column": "고객명", "confidence": 0.97 } ] }
+\`\`\``;
+}
+
+/**
+ * 문안 항목별 추천 열을 돌려준다. 실패는 실패로 던진다(호출부가 "추천 없음"으로 진행 · 조용한 성공 위장 금지).
+ */
+export async function suggestVarColumnsWithAi(input: {
+  companyId: string;
+  vars: string[];
+  columnNames: string[];
+  sampleRows: Array<Array<string | number | null>>;
+}): Promise<VarColumnSuggestion[]> {
+  const { companyId, vars, columnNames, sampleRows } = input;
+  if (!Array.isArray(vars) || vars.length === 0) return [];
+  if (!Array.isArray(columnNames) || columnNames.length === 0) {
+    return vars.map((name) => ({ name, column: null, confidence: 0 }));
+  }
+
+  const limitedSamples = sampleRows.slice(0, 5);
+  const userMessage = `문안 항목: ${JSON.stringify(vars)}
+명단의 열: ${JSON.stringify(columnNames)}
+샘플 데이터 (최대 5건):
+${limitedSamples.map((row, idx) => `${idx + 1}. ${JSON.stringify(row)}`).join('\n')}
+
+각 항목에 맞는 열을 골라 주세요.`;
+
+  const aiResult = await callAIWithFallback({
+    system: buildVarSuggestPrompt(),
+    userMessage,
+    model: 'opus',
+    maxTokens: 1024,
+    temperature: 0.1,
+    companyId,
+    source: 'agency-var-mapper',
+  });
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(extractJSON(aiResult || ''));
+  } catch (e: any) {
+    throw new ColumnMappingError('AI_RESPONSE_INVALID', `AI 응답 파싱 실패: ${e.message}`);
+  }
+  return normalizeVarSuggestions(parsed, vars, columnNames);
+}
+
+// ════════════════════════════════════════════════════════════════════
 // 메인 함수
 // ════════════════════════════════════════════════════════════════════
 

@@ -92,6 +92,9 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
   const [requestedAt, setRequestedAt] = useState('');
   const [callbackChoice, setCallbackChoice] = useState('');
   const [phoneColumnChoice, setPhoneColumnChoice] = useState('');
+  // 문안 항목 → 명단 열. 초회 분석의 결과(같은 이름 자동 + AI 추천)로 채우고, 이후엔 화면이 진실이다
+  const [varMapping, setVarMapping] = useState<Record<string, string>>({});
+  const [aiPickedVars, setAiPickedVars] = useState<Set<string>>(new Set());
   const [managerPhones, setManagerPhones] = useState<string[]>([]);
   const [managerInput, setManagerInput] = useState('');
   const [senders, setSenders] = useState<string[]>([]);
@@ -104,6 +107,7 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
   const reset = () => {
     setPhase('upload'); setFormFile(null); setListFile(null); setAnalysis(null);
     setRequestedAt(''); setCallbackChoice(''); setPhoneColumnChoice(''); setManagerPhones([]); setManagerInput('');
+    setVarMapping({}); setAiPickedVars(new Set());
     setSamplePage(0); mms.setMmsUploadedImages([]);
     analyzeSeq.current += 1;
   };
@@ -140,6 +144,8 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
       mmsImagePaths: mms.mmsUploadedImages.map((i) => i.serverPath),
       requestedAt: requestedAt ? new Date(requestedAt).toISOString() : '',
       managerPhones,
+      // 항목이 없어도 빈 객체를 보낸다 — 접수 확정은 화면이 보여준 매핑으로만 간다
+      varMapping,
     };
     if (phoneColumnChoice) o.phoneColumn = phoneColumnChoice;
     if (callbackChoice) {
@@ -167,6 +173,10 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
         setManagerPhones(a.managerPhones);
         setCallbackChoice(a.callback.mode === 'fixed' ? a.callback.number : a.callback.mode === 'column' ? `col:${a.callback.column}` : '');
         setPhoneColumnChoice(a.phoneColumn || '');
+        // 서버 초회 분석의 매핑(같은 이름 자동 + AI 추천)을 그대로 물려받는다.
+        // 이후 접수 확정은 이 상태를 조정값으로 보내므로, 화면에 보인 열 그대로 접수된다.
+        setVarMapping(Object.fromEntries(a.varsMatched.filter((v) => v.column).map((v) => [v.name, v.column!])));
+        setAiPickedVars(new Set(a.varsMatched.filter((v) => v.via === 'ai').map((v) => v.name)));
       }
       if (senders.length === 0) loadSenders();
       setPhase('confirm');
@@ -282,12 +292,48 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
                   <div className="mt-2 rounded-xl bg-neutral-100 px-4 py-3 text-[13px] leading-relaxed text-neutral-900 max-h-[150px] overflow-y-auto">
                     <p className="whitespace-pre-wrap break-words">{a.content}</p>
                   </div>
-                  <p className={CUI_HINT}>문안과 제목을 고치려면 요청서를 고쳐 다시 올려 주세요. 항목(%열이름%)은 명단의 같은 이름 열 값으로 바뀝니다.</p>
+                  <p className={CUI_HINT}>
+                    문안과 제목을 고치려면 요청서를 고쳐 다시 올려 주세요.
+                    {a.varsMatched.length > 0 && ' %항목% 자리는 아래 문안 항목 칸에서 명단의 열과 맞춥니다.'}
+                  </p>
                 </div>
+
+                {a.varsMatched.length > 0 && (
+                  <div>
+                    <label className={CUI_LABEL}>문안 항목</label>
+                    <div className="space-y-2">
+                      {a.varsMatched.map((v) => (
+                        <div key={v.name} className="flex items-center gap-2">
+                          <span className="inline-flex items-center shrink-0 h-[34px] px-2.5 rounded-lg bg-indigo-50 text-indigo-700 text-[12.5px] font-bold max-w-[160px]">
+                            <span className="truncate">%{v.name}%</span>
+                          </span>
+                          <select
+                            value={varMapping[v.name] || ''}
+                            onChange={(e) => {
+                              setVarMapping({ ...varMapping, [v.name]: e.target.value });
+                              setAiPickedVars((prev) => { const next = new Set(prev); next.delete(v.name); return next; });
+                            }}
+                            onBlur={() => analyze(true)}
+                            disabled={saving}
+                            className={CUI_SELECT}
+                            aria-label={`${v.name} 항목에 넣을 명단의 열`}
+                          >
+                            {!varMapping[v.name] && <option value="">맞는 열을 못 찾았습니다. 골라 주세요</option>}
+                            {a.headers.map((h) => <option key={h} value={h}>{h}</option>)}
+                          </select>
+                          {aiPickedVars.has(v.name) && !!varMapping[v.name] && (
+                            <span className="shrink-0 text-[11.5px] font-semibold text-indigo-600">AI가 골랐습니다</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <p className={CUI_HINT}>각 고객의 이 열 값이 문안의 %항목% 자리에 들어갑니다. 이름이 같은 열은 자동으로 맞습니다.</p>
+                  </div>
+                )}
 
                 <div>
                   <label className={CUI_LABEL}>보낼 시각 <span className="text-rose-500">*</span></label>
-                  <input type="datetime-local" value={requestedAt} onChange={(e) => setRequestedAt(e.target.value)} className={CUI_INPUT} />
+                  <input type="datetime-local" value={requestedAt} onChange={(e) => setRequestedAt(e.target.value)} disabled={saving} className={CUI_INPUT} />
                 </div>
 
                 <div>
@@ -296,6 +342,7 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
                     value={callbackChoice}
                     onChange={(e) => setCallbackChoice(e.target.value)}
                     onBlur={() => analyze(true)}
+                    disabled={saving}
                     className={CUI_SELECT}
                   >
                     {callbackChoice && !callbackChoice.startsWith('col:') && !senders.includes(callbackChoice) && (
@@ -316,8 +363,8 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
                       {managerPhones.map((phone) => (
                         <span key={phone} className="inline-flex items-center gap-1.5 h-[30px] pl-2.5 pr-1.5 rounded-lg bg-neutral-100 text-[13px] font-semibold text-neutral-700 tabular-nums">
                           {phone}
-                          <button type="button" onClick={() => setManagerPhones(managerPhones.filter((p) => p !== phone))}
-                            className="h-5 w-5 grid place-items-center rounded-md text-neutral-400 hover:text-rose-500 hover:bg-rose-50" aria-label="이 번호 빼기">
+                          <button type="button" onClick={() => setManagerPhones(managerPhones.filter((p) => p !== phone))} disabled={saving}
+                            className="h-5 w-5 grid place-items-center rounded-md text-neutral-400 hover:text-rose-500 hover:bg-rose-50 disabled:opacity-40 disabled:pointer-events-none" aria-label="이 번호 빼기">
                             <X className="w-3 h-3" strokeWidth={2.4} />
                           </button>
                         </span>
@@ -327,12 +374,12 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
                   <div className="flex gap-2">
                     <input value={managerInput} onChange={(e) => setManagerInput(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addManager(); } }}
-                      className={CUI_INPUT} placeholder="번호를 넣고 Enter를 누르면 추가됩니다" />
-                    <button type="button" onClick={addManager} className={`${CUI_BTN_OUTLINE} shrink-0`}>추가</button>
+                      disabled={saving} className={CUI_INPUT} placeholder="번호를 넣고 Enter를 누르면 추가됩니다" />
+                    <button type="button" onClick={addManager} disabled={saving} className={`${CUI_BTN_OUTLINE} shrink-0`}>추가</button>
                   </div>
                 </div>
 
-                <button type="button" onClick={() => setMmsOpen(true)} className={CUI_BTN_OUTLINE}>
+                <button type="button" onClick={() => setMmsOpen(true)} disabled={saving} className={CUI_BTN_OUTLINE}>
                   <ImageIcon className="w-[15px] h-[15px]" />
                   {mms.mmsUploadedImages.length > 0 ? `이미지 ${mms.mmsUploadedImages.length}장 첨부됨` : '이미지 넣기 (이미지 문자로 전환)'}
                 </button>
@@ -379,6 +426,7 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
                       value={phoneColumnChoice}
                       onChange={(e) => { setPhoneColumnChoice(e.target.value); }}
                       onBlur={() => analyze(true)}
+                      disabled={saving}
                       className={CUI_SELECT}
                     >
                       {!phoneColumnChoice && <option value="">자동으로 못 찾았습니다. 골라 주세요</option>}

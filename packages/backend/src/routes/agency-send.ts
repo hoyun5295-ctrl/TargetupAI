@@ -24,7 +24,8 @@ import {
   canCancel, isEditable, isSameKstDay, NOT_CANCELABLE_SQL, validateRequestedAt,
   type AgencySendStatus,
 } from '../utils/agency-send-state';
-import { buildSlotPlan, extractAgencyVars } from '../utils/agency-send-vars';
+import { buildSlotPlan, extractAgencyVars, resolveVarColumns } from '../utils/agency-send-vars';
+import { suggestVarColumnsWithAi } from '../utils/ai-column-mapper';
 import { findAttemptCampaignId } from '../utils/agency-send-campaign';
 import { SEND_HOURS } from '../config/defaults';
 import { approveAgencyRequestTx } from '../utils/agency-send-approve';
@@ -442,7 +443,7 @@ interface OneStepAnalysis {
   callback: CallbackPlan;
   headers: string[];
   phoneColumn: string | null;
-  varsMatched: Array<{ name: string; column: string | null }>;
+  varsMatched: Array<{ name: string; column: string | null; via: 'same' | 'override' | 'ai' | null }>;
   counts: { total: number; valid: number; dup: number; invalid: number; callbackMissing: number };
   groups: OneStepGroup[];
   sample: Array<{ phone: string; callback?: string }>;
@@ -451,14 +452,26 @@ interface OneStepAnalysis {
   errors: AgencyFormError[];
 }
 
-/** 확인 화면에서 바꿀 수 있는 것: 시각 · 회신번호 선택 · 담당자 · 이미지. 문안·제목은 요청서가 진실이다 */
+/** 확인 화면에서 바꿀 수 있는 것: 시각 · 회신번호 선택 · 담당자 · 이미지 · 문안 항목의 열. 문안·제목은 요청서가 진실이다 */
 function parseOneStepOverrides(raw: any): {
   requestedAt?: string; callback?: { mode: string; number?: string; column?: string };
   managerPhones?: string[]; mmsImagePaths?: string[]; phoneColumn?: string;
+  varMapping?: Record<string, string>;
 } {
   try {
     const o = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
-    return o && typeof o === 'object' ? o : {};
+    if (!o || typeof o !== 'object') return {};
+    // 문안 항목 매핑은 문자열 값만 남긴다(객체·배열이 끼면 열 이름 비교가 조용히 어긋난다)
+    if (o.varMapping && typeof o.varMapping === 'object' && !Array.isArray(o.varMapping)) {
+      const clean: Record<string, string> = {};
+      for (const [k, v] of Object.entries(o.varMapping)) {
+        if (typeof v === 'string') clean[k] = v;
+      }
+      o.varMapping = clean;
+    } else if (o.varMapping !== undefined) {
+      delete o.varMapping;
+    }
+    return o;
   } catch {
     return {};
   }
@@ -468,6 +481,8 @@ async function analyzeOneStep(
   auth: { companyId: string; userId: string },
   formBuf: Buffer | null, listBuf: Buffer | null, listName: string | null,
   overrides: ReturnType<typeof parseOneStepOverrides>,
+  /** AI 항목 추천 허용 여부. **미리보기만 true** — 확정 경로에 AI 비결정성이 들어오면 안 된다(★Codex 1R) */
+  aiSuggest: boolean,
 ): Promise<OneStepAnalysis> {
   const errors: AgencyFormError[] = [];
   const empty: OneStepAnalysis = {
@@ -545,12 +560,42 @@ async function analyzeOneStep(
     errors.push({ field: '회신번호', error: `회신번호 칸의 "${form.callbackRaw}"를 번호로도 명단의 열 이름으로도 읽지 못했습니다.` });
   }
 
-  // 문안 항목 ↔ 명단 열(이름 같으면 자동 · 화면 접수와 같은 규칙)
+  // 문안 항목 ↔ 명단 열: 확인 화면 조정값 > 같은 이름(화면 접수와 같은 규칙 · CT 소유)
   const usedVars = extractAgencyVars(form.content);
-  const sameName = (v: string) => headers.find((h) => h.replace(/\s+/g, '') === v.replace(/\s+/g, ''));
-  const varsMatched = usedVars.map((name) => ({ name, column: sameName(name) || null }));
+  const varResolution = resolveVarColumns(usedVars, headers, overrides.varMapping);
+  let varsMatched: OneStepAnalysis['varsMatched'] = varResolution.resolved;
+  // 이름이 다른 항목은 **미리보기 초회 분석에서만** AI가 열을 추천해 미리 골라 둔다(★2026-08-25 §17-6).
+  //   추천은 확정이 아니다 — 화면이 이 매핑을 조정값으로 다시 보내야 접수된다. 확정 경로는
+  //   aiSuggest=false로 이 분기 자체가 닫혀 있다(옛 번들이 varMapping 없이 확정해도 재추론 불가).
+  //   실패하면 추천 없이 진행한다(항목 반려가 남고 사용자가 직접 고른다 · 조용한 성공 위장 금지).
+  if (aiSuggest && overrides.varMapping === undefined && rows.length > 0) {
+    const unmatched = varsMatched.filter((v) => !v.column).map((v) => v.name);
+    if (unmatched.length > 0) {
+      try {
+        const suggestions = await suggestVarColumnsWithAi({
+          companyId: auth.companyId,
+          vars: unmatched,
+          columnNames: headers,
+          sampleRows: rows.slice(0, 5).map((r) => headers.map((h) => r[h] ?? null)),
+        });
+        varsMatched = varsMatched.map((v) => {
+          if (v.column) return v;
+          const s = suggestions.find((x) => x.name === v.name);
+          return s?.column ? { ...v, column: s.column, via: 'ai' as const } : v;
+        });
+      } catch (aiErr: any) {
+        console.warn('[agency-send] 원스텝 문안 항목 AI 추천 실패(직접 선택으로 진행):', aiErr?.message || aiErr);
+      }
+    }
+  }
   for (const vm of varsMatched) {
-    if (!vm.column) errors.push({ field: '문안', error: `문안의 %${vm.name}%에 맞는 열이 명단에 없습니다.` });
+    // 조정값이 틀린 항목은 아래에서 그 사유로만 알린다(한 항목에 반려 두 줄 금지)
+    if (!vm.column && !varResolution.badOverrides.includes(vm.name)) {
+      errors.push({ field: '문안 항목', error: `문안의 %${vm.name}%에 맞는 열을 명단에서 찾지 못했습니다. 문안 항목 칸에서 골라 주세요.` });
+    }
+  }
+  for (const name of varResolution.badOverrides) {
+    errors.push({ field: '문안 항목', error: `%${name}%에 고르신 열이 명단에 없습니다. 다시 골라 주세요.` });
   }
   const varMappingColumns = varsMatched.filter((v) => v.column);
 
@@ -665,7 +710,7 @@ router.post('/one-step/preview', requireAgencySendMw, oneStepUpload, async (req:
   const auth = (req as any).agencyAuth as { companyId: string; userId: string };
   try {
     const { formBuf, listBuf, listName } = oneStepFiles(req);
-    const analysis = await analyzeOneStep(auth, formBuf, listBuf, listName, parseOneStepOverrides(req.body?.overrides));
+    const analysis = await analyzeOneStep(auth, formBuf, listBuf, listName, parseOneStepOverrides(req.body?.overrides), true);
     return res.json({ success: true, analysis: toAnalysisView(analysis) });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
@@ -694,7 +739,16 @@ router.post('/one-step', requireAgencySendMw, oneStepUpload, async (req: Request
         error: `확인 화면을 거쳐 접수해 주세요. 빠진 항목: ${strictMissing.join(', ')}`,
       });
     }
-    const analysis = await analyzeOneStep(auth, formBuf, listBuf, listName, overrides);
+    // ⛔ 확정은 AI 추천 없이 분석한다(aiSuggest=false) — varMapping이 빠져도 재추론이 아니라
+    //   같은 이름 규칙만 돈다. 문안에 항목이 있는데 varMapping이 없으면 확인 화면이 옛 버전이다
+    //   (★Codex 1R: 항목 0개인 옛 번들 접수까지 막지 않되, 항목이 있으면 새 화면을 거치게 한다).
+    const analysis = await analyzeOneStep(auth, formBuf, listBuf, listName, overrides, false);
+    if (analysis.varsMatched.length > 0 && overrides.varMapping === undefined) {
+      return res.status(400).json({
+        success: false, code: 'CONFIRM_REQUIRED',
+        error: '접수 화면이 예전 버전입니다. 화면을 새로고침(Ctrl+F5)한 뒤 확인 화면을 다시 거쳐 접수해 주세요.',
+      });
+    }
     if (analysis.errors.length > 0) {
       return res.status(400).json({ success: false, error: analysis.errors[0].error, errors: analysis.errors, code: 'FORM_INVALID' });
     }
