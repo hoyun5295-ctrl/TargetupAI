@@ -66,9 +66,12 @@ function guessPhoneColumn(headers: string[]): string {
 
 const ONLY_DIGITS = (s: string) => String(s || '').replace(/[^0-9]/g, '');
 
-/** 보낼 시각 후보 칩. 리드타임(3시간) + 여유 30분을 지난 것만 낸다 */
+/**
+ * 보낼 시각 후보 칩. 리드타임(★0826(6) 40분)에 여유 20분을 얹은 시각부터 낸다.
+ * 칩은 "고르면 그냥 되는" 값만 담는 자리라 조정 구간(40분 미만)은 애초에 넣지 않는다.
+ */
 function timeCandidates(now: Date = new Date()): Array<{ label: string; value: string }> {
-  const min = now.getTime() + 3.5 * 60 * 60 * 1000;
+  const min = now.getTime() + 60 * 60 * 1000;
   const at = (dayOffset: number, hour: number) => {
     const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset, hour, 0, 0, 0);
     return d;
@@ -693,7 +696,7 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
                       ))}
                     </div>
                     <input type="datetime-local" value={requestedAt} onChange={(e) => setRequestedAt(e.target.value)} className={CUI_INPUT} />
-                    <p className={CUI_HINT}>지금부터 3시간 뒤부터 정할 수 있습니다. 문안 검사와 승인, 발송 준비에 필요한 시간입니다.</p>
+                    <p className={CUI_HINT}>지금부터 40분 뒤부터 정할 수 있습니다. 더 이른 시각을 넣으시면 준비 시간을 감안해 30분 뒤로 잡아 드립니다.</p>
                   </div>
 
                   <div>

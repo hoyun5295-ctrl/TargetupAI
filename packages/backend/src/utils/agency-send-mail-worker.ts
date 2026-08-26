@@ -40,9 +40,17 @@ const MAX_PER_TICK = 10;
 const MAX_MESSAGE_OCTETS = 25 * 1024 * 1024;
 const MAX_ATTACH_TOTAL = 15 * 1024 * 1024;
 const MAX_ATTACH_FILES = 5;
-/** 일일 상한 = KST 당일 **메일 통수** 기준(§18-7 · allowlist_only 확정으로 절반값이 본값) */
-const DAILY_SENDER_LIMIT = 5;
-const DAILY_COMPANY_LIMIT = 10;
+/**
+ * 일일 상한 = KST 당일 **메일 통수** 기준(§18-7).
+ *
+ * ★2026-08-26(6) Harold 지시로 **기본 무제한**(0 = 제한 없음). 옛 5/10은 From 위조 접수의 피해 규모를
+ *   묶는 완충이었는데, 실제 방벽은 그것이 아니라 **담당자 승인 게이트**다(승인 없이 나가는 경로가 0).
+ *   그리고 검사·테스트 문자 비용은 대행을 요청한 고객사 몫이므로(설계서 §0 확정) 접수가 늘어 문자가
+ *   느는 것은 정상 동작이지 사고가 아니다.
+ * ⛔ 판정 코드는 남긴다 — 폭주가 실제로 오면 서버에서 ENV 값만 넣어 다시 조인다(코드 배포 없이).
+ */
+const DAILY_SENDER_LIMIT = Number(process.env.AGENCY_MAIL_DAILY_SENDER_LIMIT || 0);
+const DAILY_COMPANY_LIMIT = Number(process.env.AGENCY_MAIL_DAILY_COMPANY_LIMIT || 0);
 const REPLY_MAX_ATTEMPTS = 3;
 const REPLY_RATE_PER_HOUR = 5;
 const CLAIM_STALE_MS = 10 * 60 * 1000;
@@ -136,15 +144,21 @@ function buildAcceptedReply(input: {
   subject: string; content: string; requestedAtIso: string; callback: string;
   managerPhones: string[]; phoneColumn: string; autoPickedPhoneColumn: boolean;
   total: number; valid: number; dup: number; invalid: number;
+  /** ★2026-08-26(6) 촉박해서 시각을 자동 조정했으면 원본 시각. 이메일은 확인 화면이 없어 이 회신이 유일한 고지다 */
+  originalAtIso?: string | null;
 }): string {
   const when = new Date(input.requestedAtIso);
   const p = (n: number) => String(n).padStart(2, '0');
-  const whenText = `${when.getFullYear()}-${p(when.getMonth() + 1)}-${p(when.getDate())} ${p(when.getHours())}:${p(when.getMinutes())}`;
+  const fmt = (d: Date) => `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  const whenText = fmt(when);
+  const shiftedNote = input.originalAtIso
+    ? `보낼 시각: ${whenText} (요청하신 ${fmt(new Date(input.originalAtIso))}은 준비 시간이 촉박해 뒤로 옮겼습니다)`
+    : `보낼 시각: ${whenText}`;
   const lines = [
     '대행발송 접수가 완료되었습니다.',
     '',
     `제목: ${input.subject || '(없음)'}`,
-    `보낼 시각: ${whenText}`,
+    shiftedNote,
     `회신번호: ${input.callback}`,
     `담당자 번호: ${input.managerPhones.join(', ')}`,
     `수신자 열: ${input.phoneColumn}${input.autoPickedPhoneColumn ? ' (자동 선정)' : ''}`,
@@ -349,27 +363,32 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
 
   const auth = { companyId: sender.companyId, userId: sender.userId };
 
-  // 4) 일일 상한(메일 통수 · KST 당일 · §18-7) — 초과는 지연이 아니라 거절
+  // 4) 일일 상한(메일 통수 · KST 당일 · §18-7) — 초과는 지연이 아니라 거절.
+  //    ★2026-08-26(6) 값이 0이면 그 축은 아예 세지 않는다(기본 무제한 · 쿼리도 돌지 않는다).
   const midnight = kstMidnight(ctx.now).toISOString();
-  const senderCount = await query(
-    `SELECT COUNT(*)::int AS c FROM agency_send_email_intake WHERE mailbox = $1 AND from_email = $2 AND claimed_at >= $3::timestamptz AND id <> $4`,
-    [ctx.mailbox, fromAddr, midnight, claimed.id],
-  );
-  if ((senderCount.rows[0]?.c || 0) >= DAILY_SENDER_LIMIT) {
-    await finalizeIntake(claimed.id, 'rejected', { reason: 'daily_sender_limit', companyId: auth.companyId, userId: auth.userId, replyStatus: 'pending' });
-    await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
-      buildRejectedReply([`이 주소로는 하루 ${DAILY_SENDER_LIMIT}통까지 접수할 수 있습니다. 내일 다시 보내시거나 화면에서 접수해 주세요.`]), messageId, 'daily_sender_limit');
-    return;
+  if (DAILY_SENDER_LIMIT > 0) {
+    const senderCount = await query(
+      `SELECT COUNT(*)::int AS c FROM agency_send_email_intake WHERE mailbox = $1 AND from_email = $2 AND claimed_at >= $3::timestamptz AND id <> $4`,
+      [ctx.mailbox, fromAddr, midnight, claimed.id],
+    );
+    if ((senderCount.rows[0]?.c || 0) >= DAILY_SENDER_LIMIT) {
+      await finalizeIntake(claimed.id, 'rejected', { reason: 'daily_sender_limit', companyId: auth.companyId, userId: auth.userId, replyStatus: 'pending' });
+      await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
+        buildRejectedReply([`이 주소로는 하루 ${DAILY_SENDER_LIMIT}통까지 접수할 수 있습니다. 내일 다시 보내시거나 화면에서 접수해 주세요.`]), messageId, 'daily_sender_limit');
+      return;
+    }
   }
-  const companyCount = await query(
-    `SELECT COUNT(*)::int AS c FROM agency_send_email_intake WHERE mailbox = $1 AND company_id = $2::uuid AND claimed_at >= $3::timestamptz AND id <> $4`,
-    [ctx.mailbox, auth.companyId, midnight, claimed.id],
-  );
-  if ((companyCount.rows[0]?.c || 0) >= DAILY_COMPANY_LIMIT) {
-    await finalizeIntake(claimed.id, 'rejected', { reason: 'daily_company_limit', companyId: auth.companyId, userId: auth.userId, replyStatus: 'pending' });
-    await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
-      buildRejectedReply([`회사 기준 하루 ${DAILY_COMPANY_LIMIT}통까지 접수할 수 있습니다. 내일 다시 보내시거나 화면에서 접수해 주세요.`]), messageId, 'daily_company_limit');
-    return;
+  if (DAILY_COMPANY_LIMIT > 0) {
+    const companyCount = await query(
+      `SELECT COUNT(*)::int AS c FROM agency_send_email_intake WHERE mailbox = $1 AND company_id = $2::uuid AND claimed_at >= $3::timestamptz AND id <> $4`,
+      [ctx.mailbox, auth.companyId, midnight, claimed.id],
+    );
+    if ((companyCount.rows[0]?.c || 0) >= DAILY_COMPANY_LIMIT) {
+      await finalizeIntake(claimed.id, 'rejected', { reason: 'daily_company_limit', companyId: auth.companyId, userId: auth.userId, replyStatus: 'pending' });
+      await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
+        buildRejectedReply([`회사 기준 하루 ${DAILY_COMPANY_LIMIT}통까지 접수할 수 있습니다. 내일 다시 보내시거나 화면에서 접수해 주세요.`]), messageId, 'daily_company_limit');
+      return;
+    }
   }
 
   // 5) 자격(회사 스위치 AND 유료) — 네 번째 우회 입구 방지(§18-2)
@@ -575,7 +594,10 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
   // 12) 접수 완료 회신 — 이 경로의 확인 화면(실패해도 접수는 유효 · 재시도 패스가 있다 · 회의론자 필수 3)
   await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 완료',
     buildAcceptedReply({
-      subject: analysis.subject, content: analysis.content, requestedAtIso: analysis.requestedAtIso!,
+      // ★0826(6) 접수된 실제 시각은 원장 행이 진실이다(코어가 조정했을 수 있다). 분석값을 그대로 쓰지 않는다
+      subject: analysis.subject, content: analysis.content,
+      requestedAtIso: new Date(requestRow.requested_at).toISOString(),
+      originalAtIso: requestRow.requested_at_original ? new Date(requestRow.requested_at_original).toISOString() : null,
       callback: group.callback, managerPhones: analysis.managerPhones,
       phoneColumn: analysis.phoneColumn || '전화번호', autoPickedPhoneColumn,
       total: analysis.counts.total, valid: analysis.counts.valid, dup: analysis.counts.dup, invalid: analysis.counts.invalid,
@@ -598,6 +620,8 @@ async function retryPendingReplies(mailbox: string): Promise<void> {
     const req = await query(
       `SELECT subject, current_content, requested_at, callback_number, manager_phones, phone_column, recipient_count
          FROM agency_send_requests WHERE id = $1::uuid`, [row.request_ids[0]],
+      // ⛔ 재시도 회신에 requested_at_original을 넣지 않는다 — 컬럼 부재(DDL 전) 시 이 SELECT가 통째로
+      //   실패해 재시도 패스가 멈춘다. 조정 고지는 첫 회신이 이미 했고, 여기는 도달 실패의 복구 경로다.
     );
     const r = req.rows[0];
     if (!r) continue;

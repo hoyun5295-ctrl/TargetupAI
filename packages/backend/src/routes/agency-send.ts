@@ -24,7 +24,7 @@ import { cancelAgencyRequestTx } from '../utils/agency-send-cancel';
 // ★2026-08-26 §18 승격 — 접수 코어·원스텝 분석은 CT(utils/agency-send-intake.ts)가 소유한다.
 //   입구 = 화면 접수 · 원스텝 · 이메일 접수 워커. 이 파일에 코어를 다시 정의하지 마라(두 벌 금지).
 import {
-  analyzeOneStep, createRequestCore, loadSendWindow, logEvent, parseOneStepOverrides,
+  analyzeOneStep, createRequestCore, kickFirstTest, loadSendWindow, logEvent, parseOneStepOverrides,
   MAX_CONTENT, type OneStepAnalysis,
 } from '../utils/agency-send-intake';
 
@@ -269,6 +269,8 @@ function oneStepFiles(req: Request): { formBuf: Buffer | null; listBuf: Buffer |
 function toAnalysisView(a: OneStepAnalysis) {
   return {
     subject: a.subject, content: a.content, isAd: a.isAd, requestedAt: a.requestedAtIso,
+    // ★0826(6) 촉박한 요청의 자동 조정 예고 — 확인 화면이 접수 전에 알린다(조용한 조정 금지)
+    timeShifted: !!a.timeShifted, shiftedAt: a.shiftedAtIso || null,
     managerPhones: a.managerPhones, callback: a.callback, headers: a.headers, phoneColumn: a.phoneColumn,
     varsMatched: a.varsMatched, counts: a.counts,
     groups: a.groups.map((g) => ({ callback: g.callback, count: g.count, registered: g.registered })),
@@ -371,8 +373,10 @@ router.post('/one-step', requireAgencySendMw, oneStepUpload, async (req: Request
       client.release();
     }
     // 이력은 커밋 뒤에 적는다(커밋 전 별도 연결로 적으면 아직 없는 행을 가리킨다)
+    // ★0826(6) 같은 자리에서 1차 검사를 즉시 깨운다 — 원스텝은 외부 트랜잭션이라 코어가 못 한다(코어 주석)
     for (const r of created) {
       await logEvent(r.id, 'received', { recipientCount: r.recipient_count, messageType: r.message_type, via: 'one-step' });
+      kickFirstTest(r.id);
     }
     console.log(`[agency-send] 원스텝 접수 company=${auth.companyId} ${created.length}건(회신번호 ${analysis.groups.length}종)`);
     return res.status(201).json({ success: true, requests: created.map(toPublic) });
@@ -619,8 +623,15 @@ router.post('/:id/reschedule', async (req: Request, res: Response) => {
 
     await logEvent(req.params.id, 'rescheduled', {
       requestedAt: when.at?.toISOString(), status: backTo, keepFinalTest,
+      ...(when.shifted ? { timeShifted: true, originalAt: when.originalAt?.toISOString() } : {}),
     });
-    return res.json({ success: true, request: toPublic(updated.rows[0]) });
+    // ★0826(6) 시각 변경도 촉박하면 자동 조정된다. **사용자가 화면 앞에서 고른 값이라 조용히 바꾸면 안 된다** —
+    //   응답에 사실을 실어 화면이 그 자리에서 알린다(접수 경로는 확인 화면이 미리 안내한다).
+    return res.json({
+      success: true,
+      request: toPublic(updated.rows[0]),
+      ...(when.shifted ? { timeShifted: true } : {}),
+    });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 시각 변경 실패:', err);

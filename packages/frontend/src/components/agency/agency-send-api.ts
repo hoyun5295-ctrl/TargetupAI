@@ -159,13 +159,18 @@ export async function updateAgencyContent(
   return (await unwrap(res)).request;
 }
 
+/**
+ * 시각 변경. ★2026-08-26(6) 고른 시각이 촉박하면 서버가 뒤로 옮겨 저장한다 —
+ * 그 경우 `timeShifted`가 true로 오고, 화면은 **바뀐 시각을 그 자리에서 알려야 한다**(조용한 조정 금지).
+ */
 export async function rescheduleAgencyRequest(
   id: string, requestedAt: string, revision: number,
-): Promise<AgencySendRequest> {
+): Promise<{ request: AgencySendRequest; timeShifted: boolean }> {
   const res = await fetch(`/api/agency-send/${id}/reschedule`, {
     method: 'POST', headers: json(), body: JSON.stringify({ requestedAt, revision }),
   });
-  return (await unwrap(res)).request;
+  const data = await unwrap(res);
+  return { request: data.request, timeShifted: !!data.timeShifted };
 }
 
 /**
@@ -189,6 +194,12 @@ export interface OneStepAnalysisView {
   content: string;
   isAd: boolean;
   requestedAt: string | null;
+  /**
+   * ★2026-08-26(6) 요청 시각이 촉박해 접수 시 자동으로 뒤로 미뤄질 예정인가.
+   * true면 `shiftedAt`이 실제 발송 시각이고 `requestedAt`은 사용자가 적은 원본이다.
+   */
+  timeShifted?: boolean;
+  shiftedAt?: string | null;
   managerPhones: string[];
   callback: { mode: 'fixed'; number: string } | { mode: 'column'; column: string } | { mode: 'none' };
   headers: string[];

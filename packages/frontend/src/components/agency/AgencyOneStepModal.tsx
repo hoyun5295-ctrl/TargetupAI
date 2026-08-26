@@ -27,7 +27,7 @@ import {
   CUI_MODAL_FOOT, CUI_MODAL_HEAD, CUI_MODAL_TITLE, CUI_SELECT,
 } from '../../utils/console-ui';
 import {
-  previewOneStep, submitOneStep, toLocalInput,
+  formatWhen, previewOneStep, submitOneStep, toLocalInput,
   type AgencySendRequest, type OneStepAnalysisView, type OneStepOverrides,
 } from './agency-send-api';
 
@@ -338,6 +338,13 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
                 <div>
                   <label className={CUI_LABEL}>보낼 시각 <span className="text-rose-500">*</span></label>
                   <input type="datetime-local" value={requestedAt} onChange={(e) => setRequestedAt(e.target.value)} disabled={saving} className={CUI_INPUT} />
+                  {/* ★0826(6) 촉박한 요청은 거절하지 않고 뒤로 미뤄 접수한다. 그 사실을 접수 전에 알린다(조용한 조정 금지) */}
+                  {a.timeShifted && a.shiftedAt && (
+                    <p className="mt-1.5 text-[12.5px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      적으신 시각은 문안 검사와 승인에 필요한 시간이 촉박해, 접수하면 <b>{formatWhen(a.shiftedAt)}</b>으로 잡힙니다.
+                      다른 시각을 원하시면 위에서 바꿔 주세요.
+                    </p>
+                  )}
                 </div>
 
                 <div>

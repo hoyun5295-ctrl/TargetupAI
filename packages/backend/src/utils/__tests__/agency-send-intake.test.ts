@@ -1,8 +1,8 @@
 /**
  * 대행발송 접수 코어 계약 (★2026-08-26 §18 승격 · 회의론자 최종 검증 필수 조건 1·5)
  *
- *   ① 리드타임은 코어가 집행한다 — pre.minLeadMinutes로 입구별 값(화면 180 · 이메일 240)이 갈려도
- *     판정 구현은 validateRequestedAt 한 벌이다. 239분 요청은 반려, 241분 요청은 시각 게이트를 지난다.
+ *   ① 리드타임은 코어가 집행한다 — 입구가 늘어도 판정 구현은 validateRequestedAt 한 벌이다.
+ *     ★2026-08-26(6) 값은 화면·이메일 모두 40분으로 통일됐고, **미달은 반려가 아니라 자동 조정**이다.
  *   ② 코어는 utils CT 한 벌만 존재한다 — 라우트에 같은 이름의 정의가 되살아나면 빨간불(두 벌 금지).
  */
 import { describe, it, expect, vi } from 'vitest';
@@ -45,32 +45,49 @@ function baseInput(requestedAt: Date) {
 }
 
 describe('접수 코어 — 리드타임 집행 지점은 코어 하나다 (§18-8 필수 1)', () => {
-  it('이메일 리드타임(240분) 미달(239분)은 코어가 반려한다', async () => {
-    const at = new Date(Date.now() + 239 * 60000);
-    const r = await createRequestCore(AUTH, baseInput(at), undefined, pre(EMAIL_MIN_LEAD_MINUTES));
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toContain('4시간');
-  });
-
-  it('241분 요청은 시각 게이트를 지난다(다음 게이트인 수신자 0건 반려에 닿는 것이 그 증거)', async () => {
-    const at = new Date(Date.now() + 241 * 60000);
-    const r = await createRequestCore(AUTH, baseInput(at), undefined, pre(EMAIL_MIN_LEAD_MINUTES));
+  /**
+   * ★2026-08-26(6) 촉박한 요청은 거절하지 않고 뒤로 밀어 접수한다(Harold 확정).
+   * 시각 게이트를 지났다는 증거 = 그다음 게이트인 수신자 0건 반려에 닿는 것.
+   */
+  it('리드타임 미달(10분 뒤)도 시각 게이트를 지난다 — 반려가 아니라 조정이다', async () => {
+    const at = new Date(Date.now() + 10 * 60000);
+    const r = await createRequestCore(AUTH, baseInput(at), undefined, pre());
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain('보낼 번호가 없습니다');
   });
 
-  it('minLeadMinutes를 비우면 화면 기본(180분)이다 — 200분 요청이 시각 게이트를 지난다', async () => {
+  it('이미 지난 시각도 안전선까지 끌어올려 접수한다(옛 동작 = 반려)', async () => {
+    const at = new Date(Date.now() - 60 * 60000);
+    const r = await createRequestCore(AUTH, baseInput(at), undefined, pre());
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('보낼 번호가 없습니다');
+  });
+
+  it('넉넉한 요청은 그대로 지난다', async () => {
     const at = new Date(Date.now() + 200 * 60000);
     const r = await createRequestCore(AUTH, baseInput(at), undefined, pre());
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain('보낼 번호가 없습니다');
   });
 
-  it('같은 200분 요청이 이메일 값(240분)으로는 반려된다 — 값이 실제로 갈린다', async () => {
-    const at = new Date(Date.now() + 200 * 60000);
+  it('이메일 값도 화면과 같은 값으로 통일됐다 — 입구가 달라도 같은 판정이다', async () => {
+    const at = new Date(Date.now() + 10 * 60000);
     const r = await createRequestCore(AUTH, baseInput(at), undefined, pre(EMAIL_MIN_LEAD_MINUTES));
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toContain('4시간');
+    if (!r.ok) expect(r.error).toContain('보낼 번호가 없습니다');
+  });
+
+  /** ⛔ 발송 허용 시간 밖은 여전히 옮기지 않는다 — 조정으로 창을 넘기면 거절이다(하루 뒤로 밀지 않는다) */
+  it('조정 결과가 발송 허용 시간을 넘으면 반려한다', async () => {
+    const at = new Date(Date.now() + 10 * 60000);
+    const narrow = {
+      registeredSet: new Set(['0500000000']),
+      // 지금 시각과 무관하게 항상 닫힌 창(startHour === endHour = 어떤 시각도 밖)
+      window: { startHour: 3, endHour: 3 } as { startHour: number | null; endHour: number | null },
+    };
+    const r = await createRequestCore(AUTH, baseInput(at), undefined, narrow);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('발송 가능 시간');
   });
 });
 

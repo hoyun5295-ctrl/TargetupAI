@@ -146,8 +146,12 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
     if (!req || busy || !newWhen) return;
     setBusy(true);
     try {
-      apply(await rescheduleAgencyRequest(req.id, new Date(newWhen).toISOString(), req.revision));
-      toast.success('시각을 고쳤습니다.');
+      const { request, timeShifted } = await rescheduleAgencyRequest(req.id, new Date(newWhen).toISOString(), req.revision);
+      apply(request);
+      // ★0826(6) 촉박해서 서버가 뒤로 옮겼으면 그 사실을 그 자리에서 알린다(고른 값과 다른 값이 저장됐다)
+      toast.success(timeShifted
+        ? `준비 시간이 촉박해 ${formatWhen(request.requestedAt)}으로 잡았습니다.`
+        : '시각을 고쳤습니다.');
     } catch (e: any) {
       toast.error(e?.message || '시각을 고치지 못했습니다.');
       await refresh();

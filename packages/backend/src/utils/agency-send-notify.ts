@@ -24,6 +24,11 @@ export interface AgencyNotifyContext {
   approveUrl?: string;
   /** ★2026-08-26(4) 전송 요청 건수(Harold "문자에 XX건 넣자"). 승인·재승인 안내에 실린다 */
   count?: number;
+  /**
+   * ★2026-08-26(6) 요청 시각이 촉박해 자동으로 뒤로 미룬 건인가(원본 시각 표기 · 예: "8월 30일 10:00").
+   * 값이 있으면 승인 문자가 **다른 문안**으로 나간다 — 담당자가 못 본 시각으로 승인하면 안 되기 때문이다.
+   */
+  originalWhenText?: string;
 }
 
 /** 문자 앞머리. 담당자가 받은 문자가 무엇인지 한눈에 알게 한다 */
@@ -40,8 +45,25 @@ export function shortLabel(input: string, max = 20): string {
   return t.length > max ? `${t.slice(0, max)}...` : t;
 }
 
-/** ① 1차 검사 통과. 담당자가 테스트 문자를 함께 받는다 */
+/**
+ * ① 1차 검사 통과. 담당자가 테스트 문자를 함께 받는다.
+ * ★2026-08-26(6) 시각이 자동 조정된 건은 **문안이 갈린다**(Harold 지시) — 요청한 시각과 나갈 시각이
+ *   다르다는 사실을 승인 전에 알려야 한다. 조정 사실을 숨기고 승인을 받으면 그 승인은 거짓이 된다.
+ */
 export function buildPassedNotify(ctx: AgencyNotifyContext): string {
+  if (ctx.originalWhenText) {
+    return compose([
+      `${HEAD} 스팸 검사를 통과했습니다.`,
+      `건: ${shortLabel(ctx.label)}`,
+      ctx.count ? `요청 건수: ${Number(ctx.count).toLocaleString()}건` : '',
+      `요청하신 ${ctx.originalWhenText}은 준비 시간이 촉박해 ${ctx.whenText}로 잡았습니다.`,
+      ctx.approveUrl
+        ? '이 시각이 괜찮으시면 아래 주소에서 승인해 주세요.'
+        : '이 시각이 괜찮으시면 로그인하여 승인해 주세요.',
+      ctx.approveUrl || '',
+      '다른 시각이 필요하시면 로그인하여 시각을 바꿔 주세요. 승인하지 않으면 발송되지 않습니다.',
+    ]);
+  }
   return compose([
     `${HEAD} 스팸 검사를 통과했습니다.`,
     `건: ${shortLabel(ctx.label)}`,
@@ -52,6 +74,21 @@ export function buildPassedNotify(ctx: AgencyNotifyContext): string {
       : '방금 보내 드린 문자를 확인하시고, 로그인하여 승인해 주세요.',
     ctx.approveUrl || '',
     '승인하지 않으면 발송되지 않습니다.',
+  ]);
+}
+
+/**
+ * ⑨ 시각을 조정했는데도 준비 시간이 모자란 건 (★2026-08-26(6) 신설)
+ *
+ * 검사가 예상보다 오래 걸려 남은 시간이 적재 여유에 못 미치는 경우다. 이때 승인 링크를 보내면
+ * **누를 수는 있는데 서버가 거절하는** 상태가 된다(0823 §12-2에서 겪은 그 함정). 링크를 아예 안 보낸다.
+ */
+export function buildTooTightNotify(ctx: AgencyNotifyContext): string {
+  return compose([
+    `${HEAD} 문안은 검사를 통과했지만 요청하신 시각까지 준비 시간이 모자랍니다.`,
+    `건: ${shortLabel(ctx.label)}`,
+    ctx.whenText ? `요청 시각: ${ctx.whenText}` : '',
+    '로그인하여 보낼 시각을 다시 정해 주세요. 시각을 정하시면 그대로 이어서 진행됩니다.',
   ]);
 }
 

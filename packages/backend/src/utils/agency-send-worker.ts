@@ -25,7 +25,7 @@ import { autoSpamTestWithRegenerate } from './spam-test-queue';
 import { refineForSpam } from './agency-send-refine';
 import {
   buildApprovedExpiredNotify, buildExpiredNotify, buildFinalBlockedNotify, buildPassedNotify,
-  buildQueueFailedNotify, buildReapprovalNotify, buildTestFailedNotify, formatWhen, shortLabel,
+  buildQueueFailedNotify, buildReapprovalNotify, buildTestFailedNotify, buildTooTightNotify, formatWhen, shortLabel,
 } from './agency-send-notify';
 import { agencyManagerPhones, buildShortAgencyApproveUrl } from './agency-send-link';
 import {
@@ -348,19 +348,29 @@ async function saveTestResult(
 
 // ────────────── A. 1차 검사 ──────────────
 
-async function runFirstTest(): Promise<void> {
+async function runFirstTest(onlyRequestId?: string): Promise<void> {
+  // ★0826(6) `onlyRequestId` = 접수 직후 즉시 진입(triggerAgencySendFirstTest). 리드타임 하한을 40분으로
+  //   내린 뒤로는 **워커 주기 5분을 기다리는 것 자체가 승인 시간을 깎는다.** 선점은 그대로 CAS라
+  //   정기 tick과 겹쳐도 한쪽만 잡는다(FOR UPDATE SKIP LOCKED + lock_token).
+  const params: any[] = [];
+  let idFilter = '';
+  if (onlyRequestId) {
+    params.push(onlyRequestId);
+    idFilter = ` AND id = $${params.length}::uuid`;
+  }
   const picked = await query(
     `UPDATE agency_send_requests
         SET status = 'testing', lock_at = NOW(), lock_token = gen_random_uuid(),
             revision = revision + 1, updated_at = NOW()
       WHERE id IN (
         SELECT id FROM agency_send_requests
-         WHERE status = 'received'
+         WHERE status = 'received'${idFilter}
          ORDER BY created_at
          LIMIT ${BATCH}
          FOR UPDATE SKIP LOCKED
       )
       RETURNING *`,
+    params,
   );
 
   for (const row of picked.rows) {
@@ -415,17 +425,35 @@ async function runFirstTest(): Promise<void> {
         text: sample.text, subject: sample.subject || '[대행발송] 테스트',
         messageType: row.message_type, mmsImages: images,
       });
+      // ★2026-08-26(6) 승인 링크를 보내기 전에 **지금 승인이 통하는지** 먼저 본다.
+      //   검사가 오래 걸려 남은 시간이 적재 여유에 못 미치면 링크를 보내지 않는다 —
+      //   누를 수는 있는데 서버가 거절하는 상태(0823 §12-2의 그 함정)를 만들지 않기 위해서다.
+      // 판정은 만료 워커·승인 라우트가 쓰는 그 함수 하나다(갈리면 그 사이가 함정이 된다 · §12-2·§12-3)
+      if (isApprovalExpired('awaiting_approval', new Date(row.requested_at), passedAt, sameDaySend ? passedAt : null)) {
+        await logEvent(row.id, 'approval_window_missed', { rounds, requestedAt: row.requested_at });
+        await notifyManager({
+          companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
+          callback: row.callback_number, title: '[대행발송] 시각 확인 요청',
+          text: buildTooTightNotify({ label, whenText }),
+        });
+        continue;
+      }
+
       // ★2026-08-25 링크 승인: 담당자마다 자기 번호에 묶인 승인 주소를 받는다(agency-send-link CT).
       //   주소는 통지 직전의 신선한 문안 버전으로 서명한다(이 tick의 다듬기로 버전이 올라 있을 수 있다)
       // ★2026-08-26(4) 주소는 단축으로 싣고(실패 시 원본 폴백), 요청 건수를 함께 안내한다(Harold)
+      // ★2026-08-26(6) 시각이 자동 조정된 건은 문안이 갈린다(원본 시각을 함께 알린다)
       const linkRow = (await freshLinkFields(row.id)) || row;
       const count = Number(row.recipient_count || 0);
+      const originalWhenText = row.requested_at_original
+        ? formatWhen(new Date(row.requested_at_original))
+        : undefined;
       await notifyManager({
         companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkRow),
         callback: row.callback_number, title: '[대행발송] 승인 요청',
-        text: buildPassedNotify({ label, whenText, count }),
+        text: buildPassedNotify({ label, whenText, count, originalWhenText }),
         perPhoneTexts: await buildApproveTexts(managerPhonesOf(linkRow), (approveUrl) =>
-          buildPassedNotify({ label, whenText, count, approveUrl }),
+          buildPassedNotify({ label, whenText, count, originalWhenText, approveUrl }),
           row.company_id, row.id, linkRow),
       });
       console.log(`${LOG} 1차 검사 통과 request=${row.id} rounds=${rounds}`);
@@ -1112,6 +1140,19 @@ export function triggerAgencySendDispatch(requestId: string): void {
   // ⛔ 전역 배치가 아니라 **그 건만** 집는다. 배치로 돌리면 앞자리 다섯 건에 가려 방금 승인한 건이 밀린다.
   runFinalTest(requestId).catch((err: any) => {
     console.error(`${LOG} 승인 직후 예약 시도 실패(정기 tick이 다시 맡는다) request=${requestId}:`, err?.message || err);
+  });
+}
+
+/**
+ * 접수 직후 1차 검사를 바로 시작하는 즉시 진입점(★2026-08-26(6) 신설).
+ *
+ * 리드타임 하한이 40분으로 내려오면서 **워커 주기 5분이 곧 승인 시간 5분**이 됐다. 접수한 그 순간
+ * 검사를 시작하면 그 5분이 담당자에게 돌아간다. 승인 직후 예약(`triggerAgencySendDispatch`)과 같은 형태다.
+ * fire and forget — 실패해도 정기 tick의 A단계가 다시 맡는다(선점이 CAS라 중복 실행도 한쪽만 잡는다).
+ */
+export function triggerAgencySendFirstTest(requestId: string): void {
+  runFirstTest(requestId).catch((err: any) => {
+    console.error(`${LOG} 접수 직후 검사 시도 실패(정기 tick이 다시 맡는다) request=${requestId}:`, err?.message || err);
   });
 }
 

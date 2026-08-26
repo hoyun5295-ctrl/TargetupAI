@@ -7,7 +7,7 @@
  *
  * ⛔ 워커가 라우트를 import하는 방향 금지 — 그래서 이 파일이 있다. 라우트는 이 CT를 import한다.
  * ⛔ 리드타임은 코어가 집행한다(`pre.minLeadMinutes` · 회의론자 필수 조건 1). 어댑터(이메일 워커)에
- *   시각 판정 코드를 두지 않는다 — 화면 180(기본) · 이메일 240(`EMAIL_MIN_LEAD_MINUTES`)이 갈라져도
+ *   시각 판정 코드를 두지 않는다 — 입구별 값이 갈라져도(★0826(6) 현재는 40분 통일)
  *   판정 구현은 `validateRequestedAt` 한 벌이다.
  * ⛔ 확정 경로에서 AI를 부르지 마라(§17-6 계약) — `analyzeOneStep(aiSuggest=false)`가 그 게이트다.
  */
@@ -70,21 +70,21 @@ export async function loadSendWindow(companyId: string, isAd: boolean): Promise<
  * 화면('screen')·원스텝('one_step') 라벨이 살아야 한다. 컬럼이 없으면 INSERT에서 빼고(DEFAULT 없음이므로
  * 그냥 구식 문장), 있으면 싣는다. 음성 결과는 5분 TTL로 재탐지한다(DDL이 재기동 없이 적용되는 창 대비).
  */
-let sourceColumnCache: { value: boolean; checkedAt: number } | null = null;
-async function hasSourceColumn(client: any): Promise<boolean> {
+const columnCache = new Map<string, { value: boolean; checkedAt: number }>();
+async function hasAgencyColumn(client: any, column: string): Promise<boolean> {
   const now = Date.now();
-  if (sourceColumnCache && (sourceColumnCache.value || now - sourceColumnCache.checkedAt < 5 * 60 * 1000)) {
-    return sourceColumnCache.value;
-  }
+  const hit = columnCache.get(column);
+  if (hit && (hit.value || now - hit.checkedAt < 5 * 60 * 1000)) return hit.value;
   try {
     const r = await client.query(
-      `SELECT 1 FROM information_schema.columns WHERE table_name = 'agency_send_requests' AND column_name = 'source'`,
+      `SELECT 1 FROM information_schema.columns WHERE table_name = 'agency_send_requests' AND column_name = $1`,
+      [column],
     );
-    sourceColumnCache = { value: r.rows.length > 0, checkedAt: now };
+    columnCache.set(column, { value: r.rows.length > 0, checkedAt: now });
   } catch {
-    sourceColumnCache = { value: false, checkedAt: now };
+    columnCache.set(column, { value: false, checkedAt: now });
   }
-  return sourceColumnCache.value;
+  return columnCache.get(column)!.value;
 }
 
 export async function logEvent(requestId: string, kind: string, payload: Record<string, any> = {}): Promise<void> {
@@ -212,26 +212,38 @@ export async function createRequestCore(
   let request: any;
   try {
     if (own) await client.query('BEGIN');
-    // 컬럼이 있을 때만 싣는다(위 주석 · DDL 후행 안전 + 라벨 보존)
-    const withSource = await hasSourceColumn(client);
-    const sourceCol = withSource ? ', source' : '';
-    const sourceVal = withSource ? ', $16' : '';
+    // 컬럼이 있을 때만 싣는다(위 주석 · DDL 후행 안전 + 라벨 보존).
+    // ⛔ 컬럼과 값을 **같은 배열에서** 만든다(★0826(6)) — 컬럼 존재 여부와 값 유무를 따로 판정하면
+    //   "컬럼은 있는데 값이 없는" 조합에서 자리표시자와 인자 수가 어긋난다(옛 source 분기의 잠재 결함).
+    const base: any[] = [
+      auth.companyId, auth.userId, callback, type, subject || null,
+      images.length > 0 ? JSON.stringify(images) : null, !!isAd,
+      body, when.at, managerList[0], managerList,
+      fileName || null, String(phoneColumn || '전화번호'),
+      JSON.stringify(varMapping && typeof varMapping === 'object' ? varMapping : {}),
+      rows.length,
+    ];
+    const extraCols: string[] = [];
+    const extraVals: any[] = [];
+    if (source && await hasAgencyColumn(client, 'source')) {
+      extraCols.push('source');
+      extraVals.push(String(source));
+    }
+    // ★0826(6) 자동 조정된 건은 사용자가 적은 원래 시각을 남긴다 — 담당자 문자 분기와 화면 표시의 근거다
+    if (when.shifted && when.originalAt && await hasAgencyColumn(client, 'requested_at_original')) {
+      extraCols.push('requested_at_original');
+      extraVals.push(when.originalAt);
+    }
+    const colSql = extraCols.length > 0 ? `, ${extraCols.join(', ')}` : '';
+    const valSql = extraCols.map((_, i) => `, $${base.length + 1 + i}`).join('');
     const inserted = await client.query(
       `INSERT INTO agency_send_requests (
          company_id, created_by, status, callback_number, message_type, subject, mms_image_paths, is_ad,
          original_content, current_content, content_version, requested_at, manager_phone, manager_phones,
-         file_name, phone_column, var_mapping, recipient_count${sourceCol}
-       ) VALUES ($1::uuid, $2::uuid, 'received', $3, $4, $5, $6::jsonb, $7, $8, $8, 1, $9, $10, $11::text[], $12, $13, $14::jsonb, $15${sourceVal})
+         file_name, phone_column, var_mapping, recipient_count${colSql}
+       ) VALUES ($1::uuid, $2::uuid, 'received', $3, $4, $5, $6::jsonb, $7, $8, $8, 1, $9, $10, $11::text[], $12, $13, $14::jsonb, $15${valSql})
        RETURNING *`,
-      [
-        auth.companyId, auth.userId, callback, type, subject || null,
-        images.length > 0 ? JSON.stringify(images) : null, !!isAd,
-        body, when.at, managerList[0], managerList,
-        fileName || null, String(phoneColumn || '전화번호'),
-        JSON.stringify(varMapping && typeof varMapping === 'object' ? varMapping : {}),
-        rows.length,
-        ...(source ? [String(source)] : []),
-      ],
+      [...base, ...extraVals],
     );
     request = inserted.rows[0];
 
@@ -266,10 +278,27 @@ export async function createRequestCore(
   }
 
   if (own) {
-    await logEvent(request.id, 'received', { recipientCount: rows.length, messageType: type });
-    console.log(`[agency-send] 접수 company=${auth.companyId} id=${request.id} ${type} ${rows.length}건`);
+    await logEvent(request.id, 'received', {
+      recipientCount: rows.length, messageType: type,
+      ...(when.shifted ? { timeShifted: true, originalAt: when.originalAt?.toISOString() } : {}),
+    });
+    console.log(`[agency-send] 접수 company=${auth.companyId} id=${request.id} ${type} ${rows.length}건${when.shifted ? ' (시각 자동 조정)' : ''}`);
+    // ★0826(6) 커밋 뒤에 1차 검사를 즉시 깨운다(리드타임 40분 체계 — 워커 주기 5분이 곧 승인 시간이다).
+    //   ⛔ 커밋 전에 부르면 워커가 아직 없는 행을 찾는다. 외부 트랜잭션(원스텝 다건)은 호출부가 커밋 뒤에 부른다.
+    kickFirstTest(request.id);
   }
   return { ok: true, request };
+}
+
+/**
+ * 접수 직후 1차 검사 즉시 기동(★0826(6)). 워커 모듈을 **동적 import**로 부르는 이유는
+ * 워커가 이 파일(logEvent·코어)을 정적 import하고 있어 정적 참조를 되걸면 순환이 되기 때문이다.
+ * fire and forget — 실패해도 정기 tick의 A단계가 다시 맡는다.
+ */
+export function kickFirstTest(requestId: string): void {
+  void import('./agency-send-worker')
+    .then((m) => m.triggerAgencySendFirstTest(requestId))
+    .catch((err: any) => console.warn('[agency-send] 접수 직후 검사 기동 실패(정기 tick이 맡는다):', err?.message));
 }
 
 // ════════════════════════════════════════════════════════════
@@ -282,6 +311,12 @@ export interface OneStepAnalysis {
   content: string;
   isAd: boolean;
   requestedAtIso: string | null;
+  /**
+   * ★0826(6) 촉박한 요청이라 자동 조정될 예정인가. true면 `shiftedAtIso`가 실제로 접수될 시각이고
+   * `requestedAtIso`는 사용자가 적은 원본이다. **확인 화면이 이 사실을 반드시 보여준다**(조용한 조정 금지).
+   */
+  timeShifted?: boolean;
+  shiftedAtIso?: string | null;
   managerPhones: string[];
   callback: CallbackPlan;
   headers: string[];
@@ -332,7 +367,7 @@ export async function analyzeOneStep(
   overrides: ReturnType<typeof parseOneStepOverrides>,
   /** AI 항목 추천 허용 여부. **미리보기만 true** — 확정 경로에 AI 비결정성이 들어오면 안 된다(★Codex 1R) */
   aiSuggest: boolean,
-  /** 입구별 최소 리드타임(★0826 §18 · 비우면 화면 기본 180). 판정 구현은 `validateRequestedAt` 한 벌이다 */
+  /** 입구별 최소 리드타임(비우면 `MIN_LEAD_MINUTES` · ★0826(6) 현재 40분 통일). 판정 구현은 `validateRequestedAt` 한 벌이다 */
   minLeadMinutes?: number,
 ): Promise<OneStepAnalysis> {
   const errors: AgencyFormError[] = [];
@@ -528,9 +563,16 @@ export async function analyzeOneStep(
   }
 
   // 발송 시각(리드타임 + 발송 허용 시간) 사전 검증 — 확정에서 또 검증되지만 확인 화면에서 먼저 알린다
+  // ★0826(6) 촉박해서 자동 조정될 건은 **확인 화면에 그 사실을 미리 보여준다**(접수 뒤에 알면 늦다)
+  let timeShifted = false;
+  let shiftedAtIso: string | null = null;
   if (requestedAtIso) {
     const when = validateRequestedAt(requestedAtIso, new Date(), await loadSendWindow(auth.companyId, form.isAd), minLeadMinutes);
     if (!when.valid) errors.push({ field: '보낼 시각', error: when.error || '보낼 시각을 확인해 주세요.' });
+    else if (when.shifted && when.at) {
+      timeShifted = true;
+      shiftedAtIso = when.at.toISOString();
+    }
   }
 
   const images = Array.isArray(overrides.mmsImagePaths) ? overrides.mmsImagePaths : [];
@@ -539,6 +581,7 @@ export async function analyzeOneStep(
 
   return {
     subject: form.subject, content: form.content, isAd: form.isAd, requestedAtIso,
+    timeShifted, shiftedAtIso,
     managerPhones, callback, headers, phoneColumn, varsMatched,
     counts: { total: rows.length, valid, dup, invalid, callbackMissing },
     groups, sample,

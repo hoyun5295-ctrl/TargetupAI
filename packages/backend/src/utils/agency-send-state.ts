@@ -106,14 +106,33 @@ export function isEmailDupBlocking(status: AgencySendStatus, requestedAt: Date |
 // ────────────── 시각 규칙 ──────────────
 
 /** 접수 시각으로부터 최소 이만큼 뒤여야 한다: 1차 검사 + 승인 + 2시간 전 재검사가 들어갈 시간(불변 9) */
-export const MIN_LEAD_MINUTES = 180;
 /**
- * 이메일 접수 전용 최소 리드타임(★2026-08-26 §18-7). 화면 180은 사람이 앞에 있는 전제다.
- * 이메일은 메일 지연 + 1분 폴링 + 5분 검사 틱 + 회신 왕복이 끼어 승인 창이 더 필요하다(240 = 승인 창 120분).
- * ⛔ MIN_LEAD_MINUTES를 겸용하지 마라 — 같은 상수가 뜻 둘을 겸하면 그 사이가 함정이 된다(0823 시각 축 사고).
- * 집행 지점 = createRequestCore(pre.minLeadMinutes) 하나다. 어댑터에 시각 판정 코드를 두지 않는다.
+ * 조정 없이 그대로 접수할 수 있는 최소 리드타임(분).
+ *
+ * ★2026-08-26(6) Harold 지시로 180 → 40. 옛 180은 "발송 2시간 전 재검사(120) + 승인 창 60"에서 나온 값인데,
+ *   0823(2)에 **당일 접수 건은 재검사를 하지 않도록** 바뀌면서 그 전제가 사라졌다. 그 결과
+ *   "승인은 발송 10분 전까지 받아주면서 접수는 3시간 전에만" 이라는 비대칭이 남아 있었다.
+ *
+ * 40의 내역(접수 즉시 1차 검사를 깨우는 것 전제 · triggerAgencySendFirstTest):
+ *   스팸 검사 최대 3회 8분 + 담당자 문자 도착 1분 + 적재 여유 10분(QUEUE_MARGIN_MINUTES) = 19분,
+ *   나머지 21분이 담당자가 승인할 시간이다. **기준선 바로 위의 건이 가장 빠듯하므로** 그 건 기준으로 잡는다.
  */
-export const EMAIL_MIN_LEAD_MINUTES = 240;
+export const MIN_LEAD_MINUTES = 40;
+/**
+ * 이메일 접수 최소 리드타임. ★2026-08-26(6) 240 → 화면과 같은 값으로 통일한다.
+ * 옛 240은 메일 지연·폴링·회신 왕복을 리드타임으로 흡수한 값이었는데, 그 시간은 **접수가 성립하기 전**에
+ * 지나가므로 접수 시점 기준 계산에는 들어가지 않는다(워커가 메일을 집은 순간이 접수 시각이다).
+ * 집행 지점은 여전히 createRequestCore(pre.minLeadMinutes) 하나다.
+ */
+export const EMAIL_MIN_LEAD_MINUTES = MIN_LEAD_MINUTES;
+/**
+ * 자동 조정 폭(분) — ★2026-08-26(6) Harold 확정 "여유롭게 발송요청시각 + 30분까지 설정해도 된다".
+ *
+ * 촉박한 요청을 거절하는 대신 뒤로 밀어 성공시킨다. **안전 면에서 잃는 것이 없다**:
+ * 승인 게이트가 그대로라 밀린 시각으로도 담당자가 승인하지 않으면 나가지 않고,
+ * 승인이 늦으면 미발송으로 끝난다(= 지금 거절하는 것과 결과가 같다). 성공 가능성만 올라간다.
+ */
+export const AUTO_SHIFT_MINUTES = 30;
 /** 당일 재검사를 시작하는 지점(발송 2시간 전) */
 export const FINAL_TEST_LEAD_MINUTES = 120;
 /**
@@ -158,8 +177,12 @@ export function isSameKstDay(a: Date | null | undefined, b: Date | null | undefi
 export interface RequestedAtCheck {
   valid: boolean;
   error?: string;
-  /** 통과했을 때의 Date */
+  /** 통과했을 때의 Date. **조정됐으면 조정된 시각이다**(원본은 originalAt) */
   at?: Date;
+  /** ★2026-08-26(6) 자동 조정 여부. true면 사용자가 적은 시각과 다르다 = 반드시 알려야 한다 */
+  shifted?: boolean;
+  /** 조정 전 원본(사용자가 적은 시각). 조정됐을 때만 있다 */
+  originalAt?: Date;
 }
 
 export interface SendWindow {
@@ -169,9 +192,18 @@ export interface SendWindow {
 
 /**
  * 요청 시각 검증(접수·시각 변경 공용).
- *   ① 형식 ② 최소 리드타임 ③ 365일 이내 ④ 회사 발송 허용 시간 안.
- * ⛔ 허용 시간 밖이면 **조용히 옮기지 않는다.** 대행발송은 고객이 정한 시각이 계약이라
- *   옮기면 "언제 나갔는지 모르는 발송"이 된다. 거절하고 사용자가 다시 고르게 한다(브랜드 창 판정과 같은 원칙).
+ *   ① 형식 ② 리드타임(미달이면 **자동 조정**) ③ 365일 이내 ④ 회사 발송 허용 시간 안.
+ *
+ * ★2026-08-26(6) 리드타임 미달을 거절에서 **자동 조정**으로 바꿨다(Harold 확정).
+ *   조정 시각 = `max(요청 시각 + AUTO_SHIFT_MINUTES, 지금 + minLeadMinutes)`.
+ *   앞항이 Harold 지시("발송요청시각 + 30분")이고, 뒷항은 요청이 과거이거나 지금과 붙어 있을 때
+ *   안전선을 지키는 하한이다(둘 중 큰 쪽이라 두 성질이 함께 산다).
+ *
+ * ⛔ **조정은 조용히 하지 않는다.** `shifted`를 받은 쪽이 반드시 사람에게 알린다
+ *   (화면 확인 단계 · 이메일 접수 회신 · 담당자 승인 문자). 이 축은 담당자 승인 문자에 확정 시각이
+ *   찍혀 나가므로 "언제 나갔는지 모르는 발송"이 되지 않는다 — 옛 주석의 금지는 사람 확인이 없는 경로 얘기다.
+ * ⛔ **발송 허용 시간 밖은 여전히 옮기지 않는다.** 조정 결과가 창 밖이면 거절한다(하루 뒤로 미루면
+ *   사용자 의도와 너무 멀어진다). 창 판정은 조정 **후** 시각으로 한다.
  */
 export function validateRequestedAt(
   input: any,
@@ -188,28 +220,36 @@ export function validateRequestedAt(
   }
 
   const diffMinutes = (at.getTime() - now.getTime()) / 60000;
+  let finalAt = at;
+  let shifted = false;
   if (diffMinutes < minLeadMinutes) {
-    const hours = Math.ceil(minLeadMinutes / 60);
-    return {
-      valid: false,
-      error: `지금부터 ${hours}시간 뒤부터 정할 수 있습니다. 문안 검사와 승인, 발송 준비에 필요한 시간입니다.`,
-    };
+    finalAt = new Date(Math.max(
+      at.getTime() + AUTO_SHIFT_MINUTES * 60000,
+      now.getTime() + minLeadMinutes * 60000,
+    ));
+    shifted = true;
   }
-  if (diffMinutes / (60 * 24) > 365) {
+
+  if ((finalAt.getTime() - now.getTime()) / (60000 * 60 * 24) > 365) {
     return { valid: false, error: '보낼 시각은 1년 이내로 정해 주세요.' };
   }
 
   const startHour = Number.isFinite(window.startHour as number) ? Number(window.startHour) : DEFAULT_SEND_START_HOUR;
   const endHour = Number.isFinite(window.endHour as number) ? Number(window.endHour) : DEFAULT_SEND_END_HOUR;
-  const h = kstHour(at);
+  const h = kstHour(finalAt);
   if (h < startHour || h >= endHour) {
     return {
       valid: false,
-      error: `${startHour}시부터 ${endHour}시 사이로 정해 주세요. 그 밖의 시간에는 발송할 수 없습니다.`,
+      // 조정 때문에 창을 넘긴 경우와 원래 창 밖인 경우를 다르게 쓴다(사용자가 무엇을 고쳐야 하는지 다르다)
+      error: shifted
+        ? `보낼 시각이 촉박해 ${AUTO_SHIFT_MINUTES}분 뒤로 미루면 발송 가능 시간(${startHour}시~${endHour}시)을 넘습니다. 시각을 다시 정해 주세요.`
+        : `${startHour}시부터 ${endHour}시 사이로 정해 주세요. 그 밖의 시간에는 발송할 수 없습니다.`,
     };
   }
 
-  return { valid: true, at };
+  return shifted
+    ? { valid: true, at: finalAt, shifted: true, originalAt: at }
+    : { valid: true, at: finalAt };
 }
 
 // ────────────── 승인·워커 판정 ──────────────

@@ -14,7 +14,7 @@ import {
   validateRequestedAt, checkApproval, isFinalTestDue, isQueueDue, isApprovalExpired, isApprovalCurrent,
   isLockStale, lockRecoveryStatus, hasTestRoundsLeft, kstHour, kstDateKey, isSameKstDay,
   requiredLeadMinutes, NOT_CANCELABLE_SQL,
-  FINAL_TEST_LEAD_MINUTES, MAX_TEST_ROUNDS, MIN_LEAD_MINUTES, QUEUE_MARGIN_MINUTES,
+  AUTO_SHIFT_MINUTES, FINAL_TEST_LEAD_MINUTES, MAX_TEST_ROUNDS, MIN_LEAD_MINUTES, QUEUE_MARGIN_MINUTES,
   type AgencySendStatus,
 } from '../agency-send-state';
 
@@ -88,12 +88,43 @@ describe('대행발송 상태 전이', () => {
 });
 
 describe('요청 시각 검증', () => {
-  it('최소 리드타임보다 이르면 거절한다', () => {
-    const tooSoon = validateRequestedAt(minutesLater(MIN_LEAD_MINUTES - 1).toISOString(), NOW);
-    expect(tooSoon.valid).toBe(false);
-    expect(tooSoon.error).toContain('시간 뒤부터');
-    // 리드타임을 넘기고 허용 시간 안이면 통과 (10:00 + 3h = 13:00 KST)
-    expect(validateRequestedAt(minutesLater(MIN_LEAD_MINUTES + 1).toISOString(), NOW).valid).toBe(true);
+  /**
+   * ★2026-08-26(6) 리드타임 미달 = 거절이 아니라 **자동 조정**(Harold 확정).
+   * 안전 면에서 잃는 것이 없다: 승인 게이트가 그대로라 밀린 시각으로도 승인 없이는 나가지 않고,
+   * 승인이 늦으면 미발송으로 끝난다(거절과 결과가 같다). 성공 가능성만 오른다.
+   */
+  it('리드타임 미달은 거절이 아니라 요청 시각 + 30분으로 조정한다', () => {
+    const asked = minutesLater(MIN_LEAD_MINUTES - 1);
+    const r = validateRequestedAt(asked.toISOString(), NOW);
+    expect(r.valid).toBe(true);
+    expect(r.shifted).toBe(true);
+    expect(r.originalAt?.getTime()).toBe(asked.getTime());
+    // 조정값 = max(요청 + 30분, 지금 + 리드타임). 여기서는 앞항이 크다
+    expect(r.at!.getTime()).toBe(asked.getTime() + AUTO_SHIFT_MINUTES * 60000);
+    // 리드타임을 넘긴 건은 손대지 않는다
+    const ok = validateRequestedAt(minutesLater(MIN_LEAD_MINUTES + 1).toISOString(), NOW);
+    expect(ok.valid).toBe(true);
+    expect(ok.shifted).toBeUndefined();
+  });
+
+  it('요청 시각이 과거여도 안전선(지금 + 리드타임)까지는 끌어올린다', () => {
+    const past = minutesLater(-120); // 2시간 전
+    const r = validateRequestedAt(past.toISOString(), NOW);
+    expect(r.valid).toBe(true);
+    expect(r.shifted).toBe(true);
+    // 요청 + 30분은 여전히 과거라 뒷항(지금 + 리드타임)이 이긴다
+    expect(r.at!.getTime()).toBe(NOW.getTime() + MIN_LEAD_MINUTES * 60000);
+    expect(r.at!.getTime()).toBeGreaterThan(NOW.getTime());
+  });
+
+  it('조정 결과가 발송 허용 시간을 넘으면 옮기지 않고 거절한다(하루 뒤로 밀지 않는다)', () => {
+    // KST 20:50 요청 → +30분이면 21:20으로 창(8~21시) 밖
+    const late = new Date('2026-08-24T11:50:00Z');
+    const now = new Date('2026-08-24T11:45:00Z'); // KST 20:45
+    const r = validateRequestedAt(late.toISOString(), now);
+    expect(r.valid).toBe(false);
+    expect(r.error).toContain('발송 가능 시간');
+    expect(r.at).toBeUndefined();
   });
 
   it('발송 허용 시간 밖은 거절한다 — 조용히 옮기지 않는다', () => {
