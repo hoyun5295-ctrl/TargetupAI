@@ -113,8 +113,9 @@ async function setStatus(
 /**
  * 담당자에게 문자를 보낸다. 안내와 테스트 문자 모두 이 함수를 지난다.
  * 인증 라인으로 보내는 이유 = 담당자 1명에게 가는 건이라 대량 라인을 점유하지 않는다(옛 워커와 같은 규칙).
+ * ★2026-08-26(3) export — 슈퍼관리자 운영 취소(routes/admin.ts)의 담당자 안내도 같은 함수를 쓴다.
  */
-async function notifyManager(opts: {
+export async function notifyManager(opts: {
   companyId: string;
   requestId: string;
   phones: string[];

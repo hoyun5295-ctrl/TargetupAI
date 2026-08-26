@@ -7,10 +7,10 @@
  * 표시 판정(레일·상태·출처 라벨)은 고객 화면과 **같은 CT**(agency-send-api)를 읽는다 — 두 화면이 다르게 읽히면 안 된다.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, RefreshCw, Search, Send } from 'lucide-react';
+import { AlertTriangle, Loader2, RefreshCw, Search, Send, X } from 'lucide-react';
 import AgencyProgressRail from '../agency/AgencyProgressRail';
 import {
-  formatWhenRelative, SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
+  formatWhenRelative, isCancelable, SOURCE_LABEL, STATUS_LABEL, STATUS_TONE,
   type AgencySendStatus,
 } from '../agency/agency-send-api';
 import { CUI_PILL_BASE, CUI_PILL_TONE } from '../../utils/console-ui';
@@ -67,6 +67,12 @@ export default function AgencySendLedgerPanel() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [keyword, setKeyword] = useState('');
+  // ★2026-08-26(3) 운영 취소(고객이 전화로 급히 요청 · 직원은 고객 비밀번호를 모른다)
+  const [cancelTarget, setCancelTarget] = useState<AdminAgencyRow | null>(null);
+  const [cancelMemo, setCancelMemo] = useState('');
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [cancelError, setCancelError] = useState('');
+  const [notice, setNotice] = useState('');
 
   const load = useCallback(async (status: string) => {
     setLoading(true);
@@ -88,6 +94,37 @@ export default function AgencySendLedgerPanel() {
   }, []);
 
   useEffect(() => { void load(statusFilter); }, [load, statusFilter]);
+
+  const openCancel = (row: AdminAgencyRow) => {
+    setCancelTarget(row); setCancelMemo(''); setCancelError(''); setNotice('');
+  };
+  const closeCancel = () => {
+    if (cancelBusy) return; // 처리 중에는 닫지 못한다(결과를 못 본 채 사라지면 재시도로 이어진다)
+    setCancelTarget(null);
+  };
+  const runCancel = async () => {
+    if (!cancelTarget || cancelBusy) return;
+    setCancelBusy(true);
+    setCancelError('');
+    try {
+      const res = await fetch(`/api/admin/agency-send/${cancelTarget.id}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+        body: JSON.stringify({ reason: cancelMemo.trim() }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body?.success === false) throw new Error(body?.error || '취소하지 못했습니다.');
+      setNotice(body?.pending
+        ? '취소를 처리하고 있습니다. 예약 정리가 끝나면 목록의 상태가 취소됨으로 바뀝니다.'
+        : '취소했습니다. 담당자 번호로 취소 안내 문자를 보냈습니다.');
+      setCancelTarget(null);
+      await load(statusFilter);
+    } catch (e: any) {
+      setCancelError(e?.message || '취소하지 못했습니다.');
+    } finally {
+      setCancelBusy(false);
+    }
+  };
 
   const filtered = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
@@ -193,11 +230,86 @@ export default function AgencySendLedgerPanel() {
                     <p className={`text-[13.5px] font-bold tracking-[-0.01em] ${terminal ? 'text-gray-400' : 'text-gray-900'}`}>{when.big}</p>
                     <p className="text-[12px] text-gray-400">{when.sub}</p>
                   </div>
+                  <div className="lg:w-[92px] shrink-0 flex lg:justify-end">
+                    {r.status === 'cancelling' ? (
+                      <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-amber-600">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />취소 중
+                      </span>
+                    ) : isCancelable(r.status) && r.status !== 'expired' ? (
+                      <button
+                        type="button"
+                        onClick={() => openCancel(r)}
+                        className="h-8 px-3 rounded-lg border border-rose-200 text-rose-600 text-[12.5px] font-semibold hover:bg-rose-50 hover:border-rose-300 transition-colors"
+                      >
+                        취소
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               );
             })}
           </div>
           <p className="mt-3 text-[10px] text-gray-400 italic">Data source: 대행발송 접수 원장 (최근 200건)</p>
+        </div>
+      )}
+
+      {notice && (
+        <div className="mx-6 mb-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-[13px] text-emerald-800">{notice}</div>
+      )}
+
+      {/* ── 운영 취소 확인 모달 (native dialog 금지 · 처리 중 닫힘 차단) ── */}
+      {cancelTarget && (
+        <div className="fixed inset-0 z-[70] bg-gray-900/45 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-2xl w-full max-w-[440px]" role="dialog" aria-modal="true" aria-label="대행발송 취소">
+            <div className="px-5 py-4 border-b flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-rose-50 flex items-center justify-center">
+                  <AlertTriangle className="w-4 h-4 text-rose-600" />
+                </div>
+                <h3 className="text-[15px] font-semibold text-gray-900">이 접수를 취소할까요?</h3>
+              </div>
+              <button onClick={closeCancel} disabled={cancelBusy} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 disabled:opacity-40" aria-label="닫기">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 text-[13px] space-y-1">
+                <p><span className="text-gray-500">고객사</span> <b className="text-gray-900">{cancelTarget.company_name || '(회사 없음)'}</b>
+                  <span className="text-gray-400"> · </span><span className="text-indigo-700 font-semibold">{cancelTarget.user_name || cancelTarget.user_login || '(신청자 없음)'}</span></p>
+                <p className="text-gray-600 truncate">{cancelTarget.file_name || cancelTarget.content_preview || ''}</p>
+                <p className="text-gray-600">
+                  <span className="tabular-nums">{Number(cancelTarget.recipient_count || 0).toLocaleString()}</span>명 · {cancelTarget.message_type}
+                  {' · '}보낼 시각 <b className="text-gray-900">{formatWhenRelative(cancelTarget.requested_at).big}</b>
+                </p>
+              </div>
+              <p className="text-[12.5px] text-gray-500 leading-relaxed">
+                취소가 확정되면 담당자 번호 전원에게 취소 안내 문자가 나가고, 처리 기록에 처리자 계정이 남습니다.
+              </p>
+              <div>
+                <label className="block text-[12px] font-medium text-gray-500 mb-1">메모 (선택 · 취소 사유에 함께 남습니다)</label>
+                <input
+                  value={cancelMemo}
+                  onChange={(e) => setCancelMemo(e.target.value)}
+                  maxLength={120}
+                  disabled={cancelBusy}
+                  placeholder="예: 대표번호로 전화 요청"
+                  className="w-full h-9 px-3 rounded-lg border border-gray-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-300"
+                />
+              </div>
+              {cancelError && <p className="text-[12.5px] text-rose-600">{cancelError}</p>}
+            </div>
+            <div className="px-5 py-3.5 border-t flex justify-end gap-2">
+              <button onClick={closeCancel} disabled={cancelBusy}
+                className="h-9 px-4 rounded-lg border border-gray-200 text-[13px] font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40">
+                닫기
+              </button>
+              <button onClick={() => void runCancel()} disabled={cancelBusy}
+                className="h-9 px-4 rounded-lg bg-rose-600 text-white text-[13px] font-semibold hover:bg-rose-700 disabled:opacity-60 inline-flex items-center gap-1.5">
+                {cancelBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                취소 실행
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

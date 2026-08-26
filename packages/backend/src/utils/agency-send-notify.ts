@@ -116,6 +116,21 @@ export function buildQueueFailedNotify(ctx: AgencyNotifyContext): string {
   ]);
 }
 
+/**
+ * ⑧ 운영(슈퍼관리자)이 고객 요청으로 취소를 대신 처리했다 (★2026-08-26(3) 신설)
+ *
+ * 전화로 취소를 요청한 사람이 담당자 여러 명 중 하나여도, 전원이 같은 문자를 받아야
+ * "취소된 줄 모르고 기다리는 담당자"가 안 생긴다.
+ */
+export function buildStaffCancelledNotify(ctx: AgencyNotifyContext): string {
+  return compose([
+    `${HEAD} 예약된 발송이 취소되었습니다.`,
+    `건: ${shortLabel(ctx.label)}`,
+    ctx.whenText ? `보낼 시각: ${ctx.whenText}` : '',
+    '요청에 따라 취소 처리했습니다. 로그인하여 확인하실 수 있습니다.',
+  ]);
+}
+
 /** 요청 시각을 담당자가 읽는 형태로 (KST) */
 export function formatWhen(at: Date): string {
   const kst = new Date(at.getTime() + 9 * 60 * 60 * 1000);

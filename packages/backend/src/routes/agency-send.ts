@@ -15,12 +15,12 @@ import { canUseAgencySend, loadPlanContext } from '../utils/plan-guard';
 import multer from 'multer';
 import { getRegisteredCallbackSet } from '../utils/callback-filter';
 import {
-  canCancel, isEditable, isSameKstDay, NOT_CANCELABLE_SQL, validateRequestedAt,
+  isEditable, isSameKstDay, validateRequestedAt,
   type AgencySendStatus,
 } from '../utils/agency-send-state';
 import { buildSlotPlan, extractAgencyVars } from '../utils/agency-send-vars';
-import { findAttemptCampaignId } from '../utils/agency-send-campaign';
 import { approveAgencyRequestTx } from '../utils/agency-send-approve';
+import { cancelAgencyRequestTx } from '../utils/agency-send-cancel';
 // ★2026-08-26 §18 승격 — 접수 코어·원스텝 분석은 CT(utils/agency-send-intake.ts)가 소유한다.
 //   입구 = 화면 접수 · 원스텝 · 이메일 접수 워커. 이 파일에 코어를 다시 정의하지 마라(두 벌 금지).
 import {
@@ -635,137 +635,28 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
   const auth = await requireAgencySend(req, res);
   if (!auth) return;
   try {
-    // ⛔ **취소는 두 저장소를 건드리는 다단계 작업이다**(★2026-08-23 Codex 3R critical).
-    //   원장을 먼저 `cancelled`로 확정하면, 그 뒤 큐 삭제가 실패하거나 프로세스가 죽는 순간
-    //   **화면은 취소인데 큐는 살아 요청 시각에 나간다**(0611 에이치피오 87,014건과 같은 형태).
-    //   그래서 ①`cancelling`으로 먼저 잡고 ②큐를 지운 뒤 ③`cancelled`로 확정한다.
-    //   죽어서 남은 `cancelling`은 워커가 마무리한다(발송을 막는 쪽으로 민다).
-    // ⛔ 잡을 때 **옛 상태를 함께 받아 둔다**(`RETURNING`은 갱신 뒤 값이라 그것만으로는 되돌릴 수 없다).
-    //   워커가 잡고 있는 행(`lock_token`)은 건드리지 않는다.
-    const claimed = await query(
-      `WITH prev AS (
-         SELECT id, status, revision FROM agency_send_requests
-          WHERE id = $1::uuid AND company_id = $2::uuid AND ($4::uuid IS NULL OR created_by = $4::uuid)
-          FOR UPDATE
-       )
-       UPDATE agency_send_requests a
-          SET status = 'cancelling', cancel_reason = $3, lock_at = NOW(),
-              revision = a.revision + 1, updated_at = NOW()
-         FROM prev
-        WHERE a.id = prev.id
-          AND prev.status NOT IN (${NOT_CANCELABLE_SQL})
-          AND a.lock_token IS NULL
-       RETURNING prev.status AS prev_status, prev.revision AS prev_revision, a.*`,
-      [req.params.id, auth.companyId, String(req.body?.reason || '담당자 취소').slice(0, 200), ownerParam(auth)],
-    );
-
-    if (claimed.rows.length === 0) {
-      // 소유자 술어를 여기도 건다 — 남의 접수는 상태("이미 취소됨" 등)조차 보이면 안 된다(404로 답한다)
-      const nowRow = await query(
-        `SELECT status FROM agency_send_requests
-          WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)`,
-        [req.params.id, auth.companyId, ownerParam(auth)],
-      );
-      if (nowRow.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
-      if (nowRow.rows[0].status === 'cancelled') {
-        return res.status(409).json({ success: false, error: '이미 취소된 접수입니다.', code: 'ALREADY_CANCELLED' });
-      }
-      if (nowRow.rows[0].status === 'cancelling') {
-        return res.status(409).json({ success: false, error: '취소를 처리하고 있습니다. 잠시 후 화면을 새로 고쳐 주세요.', code: 'CANCEL_IN_PROGRESS' });
-      }
-      if (!canCancel(nowRow.rows[0].status)) {
-        return res.status(400).json({ success: false, error: '검사가 진행 중이라 지금은 취소할 수 없습니다. 잠시 후 다시 시도해 주세요.' });
-      }
-      return res.status(409).json({
-        success: false,
-        code: 'STATE_CHANGED',
-        error: '처리 중이라 취소하지 못했습니다. 화면을 새로 고치고 다시 시도해 주세요.',
+    // ★2026-08-26(3) 취소 효과는 CT 하나가 소유한다(utils/agency-send-cancel.ts) — 입구가 둘이어도
+    //   (이 로그인 경로 · 슈퍼관리자 운영 취소) 같은 함수를 지난다(승인 CT와 같은 패턴).
+    const result = await cancelAgencyRequestTx({
+      requestId: req.params.id,
+      companyId: auth.companyId,
+      reason: String(req.body?.reason || '담당자 취소'),
+      ownerUserId: ownerParam(auth),
+      cancelledBy: auth.userId,
+      cancelledByType: req.user?.userType,
+    });
+    if (!result.ok) {
+      return res.status(result.status).json({
+        success: false, error: result.error,
+        ...(result.code ? { code: result.code } : {}),
+        ...(result.tooLate ? { tooLate: true } : {}),
       });
     }
-
-    const claimedRow = claimed.rows[0];
-    // ⛔ 근거는 **시도 키 하나다**. 원장의 `campaign_id`는 나중에 적히는 캐시라 비어 있어도 캠페인은 있을 수 있다.
-    const campaignId = await findAttemptCampaignId(auth.companyId, claimedRow.dispatch_key);
-
-    // 예약이 만들어진 뒤의 취소는 **큐 삭제까지 끝나야** 취소다.
-    // ⛔ 자체 DELETE를 쓰지 않는다 — 취소의 실체(라인 집합·효과 검증·환불)는 기존 캠페인 취소 CT가 소유한다.
-    if (campaignId) {
-      let result: { success: boolean; error?: string; tooLate?: boolean };
-      try {
-        const { cancelCampaign } = await import('../utils/campaign-lifecycle');
-        result = await cancelCampaign(campaignId, auth.companyId, {
-          cancelledBy: auth.userId,
-          cancelledByType: req.user?.userType,
-        });
-      } catch (cancelErr: any) {
-        result = { success: false, error: String(cancelErr?.message || '취소 처리 중 오류가 발생했습니다.') };
-      }
-      if (!result.success) {
-        // ⛔ **되돌리는 것은 "큐를 건드리기 전에 거절당한 것이 확실할 때"뿐이다**(★2026-08-23 Codex 4R high).
-        //   발송 15분 전 거절(`tooLate`)이 그 경우다. 그 밖의 실패·예외는 큐를 이미 지웠는지 알 수 없으므로
-        //   `cancelling`으로 남긴다 — 워커가 이어받아 끝까지 민다(화면은 "취소 중").
-        //   여기서 되돌리면 취소 의도가 사라져 **예약이 그대로 나간다.**
-        if (result.tooLate) {
-          const reverted = await query(
-            `UPDATE agency_send_requests
-                SET status = $1, cancel_reason = NULL, revision = revision + 1, updated_at = NOW()
-              WHERE id = $2::uuid AND company_id = $3::uuid AND status = 'cancelling' AND revision = $4`,
-            [claimedRow.prev_status, req.params.id, auth.companyId, claimedRow.revision],
-          );
-          await logEvent(req.params.id, 'cancel_rejected', {
-            campaignId, error: result.error, reverted: reverted.rowCount || 0,
-          });
-          return res.status(400).json({ success: false, error: result.error, tooLate: true });
-        }
-        await logEvent(req.params.id, 'cancel_queue_failed', { campaignId, error: result.error });
-        // 화면에는 현재 상태(`cancelling` = "취소 중")를 그대로 준다. 워커가 마무리하면 상태가 따라온다.
-        const pendingRow = await query(
-          `SELECT * FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
-          [req.params.id, auth.companyId],
-        );
-        return res.status(202).json({
-          success: true,
-          pending: true,
-          code: 'CANCEL_IN_PROGRESS',
-          request: toPublic(pendingRow.rows[0]),
-        });
-      }
+    if (result.pending) {
+      // 화면에는 현재 상태(`cancelling` = "취소 중")를 그대로 준다. 워커가 마무리하면 상태가 따라온다.
+      return res.status(202).json({ success: true, pending: true, code: 'CANCEL_IN_PROGRESS', request: toPublic(result.row) });
     }
-
-    // ⛔ 캠페인이 없고 **시도 키가 남아 있으면** 즉시 확정하지 않는다(★2026-08-23 Codex 5R critical).
-    //   예약을 만들던 핸들러가 뒤늦게 캠페인을 완성할 수 있다. 그 창은 워커가 시간으로 닫는다.
-    if (!campaignId && claimedRow.dispatch_key) {
-      await logEvent(req.params.id, 'cancel_pending_dispatch', { dispatchKey: claimedRow.dispatch_key });
-      const pendingRow = await query(
-        `SELECT * FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
-        [req.params.id, auth.companyId],
-      );
-      return res.status(202).json({
-        success: true, pending: true, code: 'CANCEL_IN_PROGRESS', request: toPublic(pendingRow.rows[0]),
-      });
-    }
-
-    // 큐가 없어졌음을 확인한 뒤에만 취소를 확정한다.
-    const done = await query(
-      `UPDATE agency_send_requests
-          SET status = 'cancelled', cancelled_at = NOW(), lock_at = NULL,
-              revision = revision + 1, updated_at = NOW()
-        WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'cancelling' AND revision = $3
-        RETURNING *`,
-      [req.params.id, auth.companyId, claimedRow.revision],
-    );
-    if (done.rows.length === 0) {
-      // 워커가 먼저 마무리했거나 그 사이 상태가 또 바뀌었다. 큐는 이미 지웠으므로 발송 위험은 없다.
-      await logEvent(req.params.id, 'cancel_finalized_elsewhere', { campaignId });
-      const cur = await query(
-        `SELECT * FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid`,
-        [req.params.id, auth.companyId],
-      );
-      return res.json({ success: true, request: toPublic(cur.rows[0]) });
-    }
-
-    await logEvent(req.params.id, 'cancelled', { queueCancelled: !!campaignId, campaignId, from: claimedRow.prev_status });
-    return res.json({ success: true, request: toPublic(done.rows[0]) });
+    return res.json({ success: true, request: toPublic(result.row) });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 취소 실패:', err);

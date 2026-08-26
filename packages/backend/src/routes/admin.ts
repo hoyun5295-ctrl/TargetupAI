@@ -48,6 +48,11 @@ import { buildAdminAgentStatsXlsx } from '../utils/manage-stats-export';
 import { buildXlsxBuffer, XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
 import { normalizePhone } from '../utils/normalize-phone';
 import { normalizeSenderEmail } from '../utils/agency-send-email';
+// ★ 2026-08-26(3) 대행발송 운영 취소 — 효과는 고객 화면과 같은 CT를 지난다(입구만 다르다)
+import { cancelAgencyRequestTx } from '../utils/agency-send-cancel';
+import { buildStaffCancelledNotify, formatWhen as agencyFormatWhen, shortLabel } from '../utils/agency-send-notify';
+import { notifyManager } from '../utils/agency-send-worker';
+import { agencyManagerPhones } from '../utils/agency-send-link';
 import { normalizeCdpAutoExecuteGate } from '../utils/autosend-policy';
 import { grantFreeTrial } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
@@ -5921,6 +5926,70 @@ router.get('/agency-send', authenticate, requireSuperAdmin, async (req: Request,
     }
     console.error('[Admin] 대행발송 현황 조회 실패:', error);
     return res.status(500).json({ error: '대행발송 현황 조회 실패' });
+  }
+});
+
+// ★ 2026-08-26(3) 대행발송 운영 취소 — 고객이 전화로 급히 취소를 요청하는데 직원은 고객 비밀번호를
+//   모른다(Harold). 취소 효과는 고객 화면과 **같은 CT**(agency-send-cancel)를 지난다: cancelling 선점 →
+//   큐 삭제 확인 → 확정, 실패 시 워커가 마무리. 확정된 때에만 담당자 전원에게 취소 안내 문자가 나간다.
+router.post('/agency-send/:id/cancel', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    // 슈퍼관리자는 전 회사를 본다 — 접수의 회사를 행에서 읽는다(회사 스코프는 CT가 그대로 집행)
+    const found = await query(
+      `SELECT company_id FROM agency_send_requests WHERE id = $1::uuid`,
+      [req.params.id],
+    );
+    if (found.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
+    const companyId = String(found.rows[0].company_id);
+
+    // 사유 = 운영 취소 + 처리 직원 계정(고객 상세의 취소 사유·이력에서 누가 처리했는지 보인다)
+    const memo = String(req.body?.reason || '').trim();
+    const reason = `운영 취소(${req.user?.loginId || 'admin'})${memo ? `: ${memo}` : ': 고객 요청'}`;
+
+    const result = await cancelAgencyRequestTx({
+      requestId: req.params.id,
+      companyId,
+      reason,
+      ownerUserId: null,
+      cancelledBy: req.user?.userId || '',
+      cancelledByType: 'super_admin',
+    });
+    if (!result.ok) {
+      return res.status(result.status).json({
+        success: false, error: result.error,
+        ...(result.code ? { code: result.code } : {}),
+        ...(result.tooLate ? { tooLate: true } : {}),
+      });
+    }
+
+    // 취소가 **확정된** 때에만 안내를 보낸다 — cancelling(취소 중)에 보내면, 발송 15분 전 거절로
+    //   되돌아가는 경로에서 "취소됐다"는 거짓 문자가 남는다. 취소 중 건은 워커가 마무리한다(문자 없음).
+    if (!result.pending && result.row?.status === 'cancelled') {
+      const row = result.row;
+      await notifyManager({
+        companyId,
+        requestId: req.params.id,
+        phones: agencyManagerPhones(row),
+        callback: String(row.callback_number || ''),
+        title: '[대행발송] 취소 안내',
+        text: buildStaffCancelledNotify({
+          label: shortLabel(String(row.file_name || row.current_content || '')),
+          whenText: row.requested_at ? agencyFormatWhen(new Date(row.requested_at)) : undefined,
+        }),
+      });
+    }
+    return res.status(result.pending ? 202 : 200).json({
+      success: true,
+      ...(result.pending ? { pending: true, code: 'CANCEL_IN_PROGRESS' } : {}),
+      status: result.row?.status || null,
+    });
+  } catch (error: any) {
+    const msg = String(error?.message || '');
+    if (msg.includes('relation') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: agency_send_* 테이블 생성 요청' });
+    }
+    console.error('[Admin] 대행발송 운영 취소 실패:', error);
+    return res.status(500).json({ success: false, error: '취소하지 못했습니다.' });
   }
 });
 

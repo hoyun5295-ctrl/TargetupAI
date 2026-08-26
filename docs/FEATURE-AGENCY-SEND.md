@@ -71,6 +71,7 @@
 | `utils/agency-send-vars.ts` | 문안 항목 ↔ 명단 열 매칭(`resolveVarColumns`) + 주소록 슬롯 번역(`buildSlotPlan`) |
 | `utils/agency-send-worker.ts` | 5분 워커 A~F(1차 검사·당일 재검사·적재·만료·대조·lock 복구). 적재는 `createDirectSendCampaign`에 위임 |
 | `utils/agency-send-approve.ts` | 승인 효과 CT(한 트랜잭션). 입구 둘(로그인 화면·문자 링크)이 같은 함수를 지난다 |
+| `utils/agency-send-cancel.ts` | ★0826(3) 취소 효과 CT. 입구 둘(고객 화면·슈퍼관리자 운영 취소)이 같은 함수를 지난다. cancelling 선점 → 큐 삭제 확인 → 확정 · tooLate만 되돌림 · 실패는 워커 F 인계 |
 | `utils/agency-send-link.ts` | 담당자 링크 승인 토큰(번호별 서명 · fragment 주소 · 헤더 운반) |
 | **`utils/agency-send-mail-worker.ts`** | **이메일 1분 워커** — UIDL 대조·선점·신원·상한·규격·분석·접수·회신·백오프·정지 |
 | `utils/pop3-client.ts` | 자체 소형 POP3S 클라이언트(tls 위 6명령). ⛔ MIME 해석은 여기서 안 한다(`mailparser`의 일) |
@@ -78,7 +79,7 @@
 | `utils/agency-mailer.ts` | 회신 발신(3값 `sent\|rejected\|unknown` · ENV 없으면 수신·접수까지 전면 잠금) |
 | `routes/agency-send.ts` | 고객사 API(목록·접수·원스텝·상세·승인·문안 수정·시각 변경·취소). 코어는 CT에서 import. ★0826(2) **사용자 격리**(소유자 술어 `ownerParam` 한 모양 · 관리자 응답에만 접수 계정 JOIN) |
 | `routes/agency-approve.ts` | 무로그인 링크 승인 API. ⛔ 노출은 문안·시각·건수·발신번호까지(명단·매핑·내부 식별자 금지) |
-| `routes/admin.ts` | 회사 스위치 PATCH · **허용 이메일 4라우트** · 접수 현황(+`mailIntake` · ★0826(2) 내역 메뉴 재료 = source·레일 스탬프·고객사명·신청자명) |
+| `routes/admin.ts` | 회사 스위치 PATCH · **허용 이메일 4라우트** · 접수 현황(+`mailIntake` · ★0826(2) 내역 메뉴 재료 = source·레일 스탬프·고객사명·신청자명) · ★0826(3) **운영 취소**(`POST /agency-send/:id/cancel` · 확정 시에만 담당자 안내 문자) |
 | 프론트 | `pages/AgencySendPage.tsx`(목록) · `components/agency/*`(Composer·OneStepModal·Detail·api 미러·★0826(2) `AgencyProgressRail` 공용 레일) · `pages/AgencyApprovePage.tsx` · `components/admin/AgencyEmailSendersModal.tsx` · `components/admin/AgencyMailIntakePanel.tsx` · ★0826(2) `components/admin/AgencySendLedgerPanel.tsx`(슈퍼관리자 대행발송 내역) |
 | 표시 라벨 | `components/agency/agency-send-api.ts`가 `STATUS_LABEL`·`SOURCE_LABEL`·`EVENT_LABEL` **단일표**를 소유. 새 상태·출처·이벤트는 여기 등재가 같은 커밋 |
 
@@ -110,7 +111,8 @@
 | 2026-08-25 | 화면 개편 §15 · **담당자 링크 승인 §16** · **요청서 원스텝 §17**(+양식 리디자인 §17-5) · 배포 | 설계서 §15~§17-5 |
 | 2026-08-25(4~6) | 문안 항목 AI 매핑 §17-6 · 명단 미리보기 엑셀 뷰 §17-7 · 헤더 접수 입구 두 문 §15-6 | 설계서 §17-6~§17-7 |
 | **2026-08-26** | **이메일 접수(챕터 2) 설계→구현→배포 하루 종결.** 브레인스토밍 4역할 + 회의론자 15건 → **하이웍스 실측으로 전제 2개 정정**(POP3만 · 인증헤더 미부착) → 신설 7파일 · DDL 4종 · 자체 적대 5R(실결함 7) | 설계서 §18·§18-11-1 |
-| **2026-08-26(2)** | **통일 양식 + 사용자 격리 + 슈퍼관리자 내역 메뉴.** ①업계 실물 양식(카톡 수신 실측) 기준으로 세 입구 통일: 한 파일(내용+고객리스트) · 화면 슬롯 1개 · 이메일 1파일 표준(2파일 관용) · 배포 양식 재생성(값 칸 빈칸 규약) ②사용자 격리(서수란 접수): company_user 본인만·관리자 전체 + 접수 계정 표시 ③슈퍼관리자 "대행발송 내역" 탭(진행 레일+접수구분+고객사·신청자) · DDL 0 · Codex 생략(Harold 지시)·자체 적대 검토 | 설계서 §19 |
+| **2026-08-26(2)** | **통일 양식 + 사용자 격리 + 슈퍼관리자 내역 메뉴.** ①업계 실물 양식(카톡 수신 실측) 기준으로 세 입구 통일: 한 파일(내용+고객리스트) · 화면 슬롯 1개 · 이메일 1파일 표준(2파일 관용) · 배포 양식 재생성 ②사용자 격리(서수란 접수): company_user 본인만·관리자 전체 + 접수 계정 표시 ③슈퍼관리자 "대행발송 내역" 탭(진행 레일+접수구분+고객사·신청자) · DDL 0 · Codex 생략(Harold 지시)·자체 적대 검토 | 설계서 §19 |
+| **2026-08-26(3)** | ①배포 양식을 **업체 실물 셀 단위 복제**로 정정(Harold 반려 "저걸로 통일=모양 그대로") ②**슈퍼관리자 운영 취소**: 취소 효과 CT 승격(`agency-send-cancel`) + admin API + 내역 탭 취소 버튼 + 확정 시 담당자 안내 문자 ⑧ | 설계서 §19-6·§19-7 |
 
 **뒤집힌 판단 (같은 자리에서 다시 틀리지 않으려고 남긴다)**
 
