@@ -3162,3 +3162,14 @@ CREATE INDEX idx_gtm_company ON gateway_template_mappings (company_id);
 - ⛔ `created_by`·`approved_by`·`campaign_id`에 **FK 없음**(0728 `23503` 원칙 + 캠페인 정리 워커가 옛 행을 지운다).
 - ⛔ **큐 적재는 당일 재검사 통과 뒤 1회뿐**이라 `queued` 이전 상태에는 MySQL 큐가 없다. 취소도 그 전에는 상태 변경만이다(0611 에이치피오 사고 경로를 구조로 제거).
 - `approval_version`은 승인 당시 `content_version`. 문안이 바뀌면(다듬기) 값이 어긋나 재승인으로 간다.
+- **`source varchar(16) NOT NULL DEFAULT 'screen'`**(★2026-08-26 ALTER 실행완료 · CHECK `('screen','one_step','email')`) = 접수 출처. 라벨은 프론트 `SOURCE_LABEL` 단일표 소유(파일명 유무 추정 폐지). 이메일 축 설계 = 대행발송 설계서 §18.
+
+### agency_send_email_senders · agency_send_email_intake · agency_send_mail_state (대행발송 이메일 접수 · §18) — ★2026-08-26 CREATE 실행완료(information_schema 3테이블+source 실측)
+
+설계·불변 = `docs/2026-08-22-agency-send-design.md` §18(§18-10 DDL 원문). 워커 = `utils/agency-send-mail-worker.ts`(1분 POP3S).
+
+**agency_send_email_senders** (허용 발신자 원장): `id uuid PK, company_id uuid NOT NULL REFERENCES companies(id), email_norm varchar(320) NOT NULL, user_id uuid NOT NULL, label varchar(100), is_active boolean NOT NULL DEFAULT true, created_by uuid, created_at·updated_at timestamptz NOT NULL DEFAULT NOW()`. **부분 UNIQUE `(email_norm) WHERE is_active`** = 활성 주소 전역 유일(두 회사 등록 시 회사 판정 불가 방지 · 23505는 "이미 다른 곳에 등록"으로 변환·회사 미노출). ⛔ `user_id` = 이 주소 접수의 `created_by`(발송·정산 귀속 · 없으면 dispatch_no_owner 사망). FK 없음(0728 원칙) · 접수 시점에 활성 재확인.
+
+**agency_send_email_intake** (메일 처리 원장 · 멱등의 진실): `id bigserial PK, mailbox varchar(64) NOT NULL, uidl varchar(128) NOT NULL, message_id varchar(998), message_hash varchar(64) NOT NULL, from_email varchar(320), company_id uuid, user_id uuid, status varchar(20) CHECK 없음(claimed·accepted·rejected·failed), reason varchar(200), reply_status varchar(20)(pending·sent·rejected·unknown·skipped), reply_attempts·attempt_count int DEFAULT 0, next_attempt_at timestamptz, request_ids uuid[], claimed_at DEFAULT NOW(), decided_at, created_at·updated_at`. **UNIQUE `(mailbox, uidl)` = 선점 arbiter**(멱등 1층 · POP3 UIDL) · **UNIQUE `(mailbox, message_hash)`**(같은 메일 재수신 2층 · 충돌 시 파생 해시로 rejected 기록). ⛔ 첨부 바이트·명단 행 저장 금지(메타·해시·사유만 · 보존 90일) · `accepted`·`request_ids`는 접수 트랜잭션 안 성공 분기에서만.
+
+**agency_send_mail_state** (워커 상태 · 1행 = 메일함 1개): `mailbox varchar(64) PK, last_ok_at timestamptz(마지막 성공 폴링 · 정체 30분 경보 기준), login_fail_count int DEFAULT 0(3연속 = 정지), paused_at timestamptz(정지 · **재개 = NULL로 UPDATE**), paused_reason varchar(200), updated_at`.

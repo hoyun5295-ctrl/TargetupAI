@@ -230,6 +230,54 @@ health = gateway unit active + `:9090` LISTEN · api `{"ok":true,"db":"connected
 
 ---
 
+### 2-2-D. 대행발송 이메일 접수 워커 운영 (★2026-08-26 신설 · 설계 = [설계서 §18](../docs/2026-08-22-agency-send-design.md))
+
+> **이 워커는 스스로 멈춘다.** POP3 로그인이 3연속 실패하면 폴링을 정지하고 경보를 보낸 뒤 **사람이 재개할 때까지 안 돈다**(1분마다 로그인 재시도가 하이웍스 계정 잠금을 부르기 때문). 그래서 이 절이 필요하다.
+> 계정 = `hanjullo@invitocorp.com` · 수신 `pop3s.hiworks.com:995` · 발신 `smtps.hiworks.com:465` · **메일 전용 비밀번호**(하이웍스 로그인 비밀번호 아님).
+> ⛔ 이 메일함에 **다른 POP3 클라이언트(아웃룩 등)를 물리지 마라** — 그쪽 "서버에서 삭제" 설정이 메일을 지우면 워커가 못 본다(가비아 문서 경고). 워커는 메일을 지우지 않는다(DELE 0).
+
+**① 가동 여부 확인**
+```bash
+grep -a "agency-mail" ~/.pm2/logs/targetup-backend-out*.log | tail -5
+```
+부팅 로그 `이메일 접수 워커 시작: hanjullo@… · 60초 주기 · 틱당 10통` = 가동. `이메일 접수 비활성(…)` = ENV 미설정 또는 `AGENCY_MAIL_ENABLED != true`. **아무 줄도 없으면 크래시 루프를 의심하고 에러 로그부터 본다**(`tail -20 ~/.pm2/logs/targetup-backend-error.log`).
+
+**② ENV 3키** — `packages/backend/.env`. 바꾼 뒤에는 `pm2 restart targetup-backend --update-env`(reload는 env를 다시 안 읽는다).
+```
+AGENCY_MAIL_ENABLED=true
+AGENCY_MAIL_USER=hanjullo@invitocorp.com
+AGENCY_MAIL_PASS=<메일 전용 비밀번호>
+```
+서버 주소는 코드 기본값이라 보통 생략한다(바꾸려면 `AGENCY_POP3_HOST`·`AGENCY_POP3_PORT`·`AGENCY_SMTP_HOST`·`AGENCY_SMTP_PORT`).
+
+**③ 정지 상태 확인·재개** — 정지의 진실은 `agency_send_mail_state.paused_at`이다.
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT mailbox, last_ok_at, login_fail_count, paused_at, paused_reason FROM agency_send_mail_state;"
+```
+비밀번호를 고친 뒤 재개(**재개 = `paused_at`을 NULL로 · 실패 카운터도 함께 0**):
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "UPDATE agency_send_mail_state SET paused_at = NULL, paused_reason = NULL, login_fail_count = 0 WHERE mailbox = 'hanjullo@invitocorp.com';"
+```
+다음 틱(1분 이내)에 자동으로 다시 돈다. pm2 재시작 불필요.
+
+**④ 긴급 정지 3단** — 범위가 좁은 것부터 고른다.
+| 범위 | 방법 | 되돌리기 |
+|---|---|---|
+| 발신자 1명 | 슈퍼관리자 회사 편집 → 허용 이메일 관리 → 그 주소 **비활성** 토글 | 같은 자리에서 활성 |
+| 회사 전체 | 같은 모달의 **전부 비활성** 버튼(등록은 남는다) | 주소별 활성 토글 |
+| 전 회사 | `.env`에서 `AGENCY_MAIL_ENABLED=false` → `pm2 restart targetup-backend --update-env` | `true`로 되돌리고 같은 재시작 |
+
+**⑤ 접수 현황·반려 확인** — 슈퍼관리자 → 발송 관리 → **대행발송 접수** 탭(반려·격리 메일은 접수 목록에 행이 없어 여기가 유일한 노출면). SQL로 볼 때:
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -c "SELECT status, reason, COUNT(*) FROM agency_send_email_intake GROUP BY status, reason ORDER BY 3 DESC LIMIT 20;"
+```
+
+**⑥ 경보 3종**(시스템 알림 LMS · dedupKey) — `agency-mail-login-fail`(즉시 · 폴링 정지 동반) / `agency-mail-unknown-sender`(미등록 발신 · 6시간 요약) / `agency-mail-poll-fail`(마지막 성공 폴링 30분 초과 · ⛔ "메일 0통"과는 다른 축).
+
+**⑦ 상한 조정** — 일일 상한(주소 5통·회사 10통)·틱당 10통·리드타임 240분은 **코드 상수**다(`utils/agency-send-mail-worker.ts` 상단 · 리드타임은 `utils/agency-send-state.ts EMAIL_MIN_LEAD_MINUTES`). 운영에서 자주 걸리면 현황 탭의 초과 거절 카운터를 근거로 값을 바꾼 뒤 배포한다. ENV로 빼지 않은 이유 = 발송량 축이라 코드 리뷰를 지나게 하려고.
+
+---
+
 ### 2-3. QTmsg 발송 엔진 (로컬 - 개발용)
 ```bash
 cd C:\projects\qtmsg\bin

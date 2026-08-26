@@ -3421,9 +3421,12 @@ const handleApproveRequest = async (id: string) => {
   //   못 센 축은 0이 아니라 null로 둔다(0은 "볼 일 없음"으로 읽혀 조회가 깨진 순간 대기가 사라진다 · LESSONS_FRONTEND).
   const [agencyEmailModalOpen, setAgencyEmailModalOpen] = useState(false);
   const [agencyEmailActiveCount, setAgencyEmailActiveCount] = useState<number | null>(null);
+  // 0826 실험실 접힘(기본 닫힘) — 실사용 0~1개사 스위치 3종을 담는다
+  const [labOpen, setLabOpen] = useState(false);
   useEffect(() => {
     const id = editCompany?.id;
     setAgencyEmailModalOpen(false);
+    setLabOpen(false);
     if (!id) { setAgencyEmailActiveCount(null); return; }
     let cancelled = false;
     (async () => {
@@ -8050,7 +8053,7 @@ const handleApproveRequest = async (id: string) => {
                   }}
                   className={`flex-1 py-2.5 text-[11px] font-medium text-center border-b-2 transition-colors ${
                     editCompanyTab === tab.key
-                      ? 'border-blue-600 text-blue-600 bg-white'
+                      ? 'border-indigo-600 text-indigo-600 bg-white'
                       : 'border-transparent text-gray-500 hover:text-gray-700'
                   }`}
                 >
@@ -8064,113 +8067,40 @@ const handleApproveRequest = async (id: string) => {
               {/* 기본정보 탭 */}
               {editCompanyTab === 'basic' && (
                 <div className="space-y-4">
-                  {/* ★ 2026-08-18 발신번호 회선 정책 — 전송자격인증 2.1 */}
-                  <div className="border border-gray-200 rounded-xl p-4 bg-gray-50/60">
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <h4 className="text-sm font-semibold text-gray-800">발신번호 회선 정책</h4>
-                        <p className="text-[11px] text-gray-500 mt-0.5">
-                          상한은 <span className="font-medium">신규 등록에만</span> 적용됩니다. 이미 등록된 번호는 그대로 유지됩니다.
-                        </p>
-                      </div>
-                      <button type="button" onClick={handleSaveLinePolicy} disabled={!linePolicy || linePolicySaving}
-                        className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg transition-colors">
-                        {linePolicySaving ? '저장 중…' : '회선 정책 저장'}
-                      </button>
-                    </div>
-
-                    {!linePolicy ? (
-                      <p className="text-xs text-gray-400">불러오는 중…</p>
-                    ) : (
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap gap-3 text-xs">
-                          <span className="px-2 py-1 rounded-md bg-white border border-gray-200 text-gray-600">
-                            현재 보유 · 무선 <span className="font-semibold text-gray-900">{linePolicy.held.mobile}</span>
-                          </span>
-                          <span className="px-2 py-1 rounded-md bg-white border border-gray-200 text-gray-600">
-                            현재 보유 · 유선 <span className="font-semibold text-gray-900">{linePolicy.held.landline}</span>
-                          </span>
-                          <span className="px-2 py-1 rounded-md bg-white border border-gray-200 text-gray-600">
-                            적용 상한 · 무선 <span className="font-semibold text-gray-900">{linePolicy.effective.mobile ?? '제한 없음'}</span>
-                            {' / '}유선 <span className="font-semibold text-gray-900">{linePolicy.effective.landline ?? '제한 없음'}</span>
-                          </span>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                          <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">가입자 유형</label>
-                            <select
-                              value={linePolicy.subscriberType || ''}
-                              onChange={(e) => setLinePolicy({ ...linePolicy, subscriberType: e.target.value || null })}
-                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
-                              <option value="">미설정</option>
-                              <option value="corporate">법인</option>
-                              <option value="individual">개인</option>
-                              <option value="foreigner">외국인</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">무선 상한</label>
-                            <input type="number" min={1} placeholder="비우면 제한 없음"
-                              disabled={linePolicy.subscriberType === 'individual' || linePolicy.subscriberType === 'foreigner'}
-                              value={linePolicy.mobileLineLimit ?? ''}
-                              onChange={(e) => setLinePolicy({ ...linePolicy, mobileLineLimit: e.target.value === '' ? null : Number(e.target.value) })}
-                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:text-gray-400" />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">유선 상한</label>
-                            <input type="number" min={1} placeholder="비우면 제한 없음"
-                              disabled={linePolicy.subscriberType === 'individual' || linePolicy.subscriberType === 'foreigner'}
-                              value={linePolicy.landlineLineLimit ?? ''}
-                              onChange={(e) => setLinePolicy({ ...linePolicy, landlineLineLimit: e.target.value === '' ? null : Number(e.target.value) })}
-                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:text-gray-400" />
-                          </div>
-                        </div>
-
-                        {(linePolicy.subscriberType === 'individual' || linePolicy.subscriberType === 'foreigner') && (
-                          <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                            개인·외국인은 고시 기준값이 적용됩니다. 무선 {linePolicy.subscriberType === 'foreigner' ? 2 : 3}회선 · 유선 5회선. 상한을 따로 지정할 수 없습니다.
-                          </p>
-                        )}
-                        {linePolicy.subscriberType === 'corporate' && linePolicy.landlineLineLimit === null && (
-                          <p className="text-[11px] text-gray-500">
-                            법인 유선 상한은 종사자 수 확인 자료(고용보험 자료 등)를 받아 입력합니다. 비워 두면 제한이 걸리지 않습니다.
-                          </p>
-                        )}
-                      </div>
-                    )}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold tracking-wide text-indigo-600">회사 정보</span>
+                    <div className="h-px flex-1 bg-gray-100"></div>
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">회사명 *</label>
                     <input type="text" value={editCompany.companyName}
                       onChange={(e) => setEditCompany({ ...editCompany, companyName: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" required />
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" required />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">사업자번호</label>
                     <input type="text" value={editCompany.businessNumber}
                       onChange={(e) => setEditCompany({ ...editCompany, businessNumber: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="000-00-00000" />
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="000-00-00000" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">대표자</label>
                     <input type="text" value={editCompany.ceoName}
                       onChange={(e) => setEditCompany({ ...editCompany, ceoName: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">업태</label>
                       <input type="text" value={editCompany.businessType}
                         onChange={(e) => setEditCompany({ ...editCompany, businessType: e.target.value })}
-                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="도소매업" />
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="도소매업" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">종목</label>
                       <input type="text" value={editCompany.businessItem}
                         onChange={(e) => setEditCompany({ ...editCompany, businessItem: e.target.value })}
-                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="화장품" />
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="화장품" />
                     </div>
                   </div>
                   {/* ★ 2026-07-21 문안 생성 참조 업종 — 사업자등록증 업태/종목(위)과 별개. 브랜드보이스 미등록 업체 문안 생성 시 참조 카테고리. */}
@@ -8178,7 +8108,7 @@ const handleApproveRequest = async (id: string) => {
                     <label className="block text-sm font-medium text-gray-700 mb-1">문안 생성 참조 업종</label>
                     <select value={editCompany.industryCode}
                       onChange={(e) => setEditCompany({ ...editCompany, industryCode: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
                       <option value="">미지정</option>
                       {industryOptions.map((o) => (
                         <option key={o.code} value={o.code}>{o.label}</option>
@@ -8190,31 +8120,36 @@ const handleApproveRequest = async (id: string) => {
                     <label className="block text-sm font-medium text-gray-700 mb-1">주소</label>
                     <input type="text" value={editCompany.address}
                       onChange={(e) => setEditCompany({ ...editCompany, address: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="서울시 강남구..." />
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="서울시 강남구..." />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">담당자명</label>
                     <input type="text" value={editCompany.contactName}
                       onChange={(e) => setEditCompany({ ...editCompany, contactName: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">이메일</label>
                     <input type="email" value={editCompany.contactEmail}
                       onChange={(e) => setEditCompany({ ...editCompany, contactEmail: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">연락처</label>
                     <input type="text" value={editCompany.contactPhone}
                       onChange={(e) => setEditCompany({ ...editCompany, contactPhone: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="010-0000-0000" />
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="010-0000-0000" />
                   </div>
+                  <div className="flex items-center gap-2 pt-2">
+                    <span className="text-[11px] font-bold tracking-wide text-indigo-600">요금제·상태</span>
+                    <div className="h-px flex-1 bg-gray-100"></div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">요금제 *</label>
                     <select value={editCompany.planId}
                       onChange={(e) => setEditCompany({ ...editCompany, planId: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" required>
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" required>
                       <option value="">선택하세요</option>
                       {plans.map((plan) => (
                         <option key={plan.id} value={plan.id}>{formatPlanOptionLabel(plan.plan_name, plan.monthly_price)}</option>
@@ -8225,12 +8160,66 @@ const handleApproveRequest = async (id: string) => {
                     <label className="block text-sm font-medium text-gray-700 mb-1">상태 *</label>
                     <select value={editCompany.status}
                       onChange={(e) => setEditCompany({ ...editCompany, status: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                       <option value="trial">체험</option>
                       <option value="active">활성</option>
                       <option value="suspended">정지</option>
                       <option value="terminated">해지</option>
                     </select>
+                  </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">구독 상태 *</label>
+                    <select value={editCompany.subscriptionStatus}
+                      onChange={(e) => setEditCompany({ ...editCompany, subscriptionStatus: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                      <option value="trial">체험 (trial)</option>
+                      <option value="trial_expired">체험만료 (trial_expired)</option>
+                      <option value="paid">정식 구독 (paid)</option>
+                      <option value="active">정상 구독 (active)</option>
+                      <option value="expired">만료 (expired)</option>
+                      <option value="suspended">정지 (suspended)</option>
+                    </select>
+                    <p className="text-xs text-gray-400 mt-1">expired/suspended 시 전 기능 차단. trial_expired 는 FREE plan 자동 강등 후 마커.</p>
+                  </div>
+                  {/* ★ 2026-06-08: BASIC 1개월 무료체험 (PRO 체험 + AI op overlay 체험 대체) */}
+                  <div className="col-span-2 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div>
+                        <p className="text-sm font-semibold text-indigo-900">무료체험 (베이직과 같은 기능 · 요금 0원)</p>
+                        {editCompany.subscriptionStatus === 'trial' && editCompany.trialExpiresAt ? (
+                          <p className="text-xs text-indigo-700 mt-0.5">
+                            체험 중 · 만료: <b>{new Date(editCompany.trialExpiresAt).toLocaleString('ko-KR')}</b>
+                            {' '}
+                            (D-{Math.max(0, Math.ceil((new Date(editCompany.trialExpiresAt).getTime() - Date.now()) / 86400000))})
+                          </p>
+                        ) : (
+                          <p className="text-xs text-indigo-600 mt-0.5">체험 미부여 상태. 부여 시 무료체험 요금제(베이직과 같은 기능·크레딧, 요금 0원) 1개월 개방, 30일 후 자동 미가입(FREE) 강등.</p>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={handleGrantBasicTrial}
+                          className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold"
+                        >
+                          {editCompany.subscriptionStatus === 'trial' ? '1개월 추가 부여' : '1개월 체험 부여'}
+                        </button>
+                        {editCompany.subscriptionStatus === 'trial' && (
+                          <button
+                            type="button"
+                            onClick={handleRevokeBasicTrial}
+                            className="px-3 py-2 bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded-lg text-xs font-semibold"
+                          >
+                            체험 취소
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 pt-2">
+                    <span className="text-[11px] font-bold tracking-wide text-indigo-600">계정 정책</span>
+                    <div className="h-px flex-1 bg-gray-100"></div>
                   </div>
                   {/* ★ 2026-07-03 사용구분 + 에이전트 발송ID 매핑 */}
                   <div>
@@ -8247,7 +8236,7 @@ const handleApproveRequest = async (id: string) => {
                           onClick={() => setEditCompany({ ...editCompany, usageType: opt.value })}
                           className={`px-2 py-2 rounded-lg border text-center transition ${
                             editCompany.usageType === opt.value
-                              ? 'border-blue-500 bg-blue-50 text-blue-700'
+                              ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
                               : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                           }`}
                         >
@@ -8291,7 +8280,7 @@ const handleApproveRequest = async (id: string) => {
                                     <button
                                       type="button"
                                       onClick={() => (editingAgentRowId === a.id ? setEditingAgentRowId(null) : openAgentLedgerEdit(a))}
-                                      className="text-xs text-blue-600 hover:text-blue-800"
+                                      className="text-xs text-indigo-600 hover:text-indigo-800"
                                     >
                                       설정
                                     </button>
@@ -8305,7 +8294,7 @@ const handleApproveRequest = async (id: string) => {
                                   </div>
                                 </div>
                                 {editingAgentRowId === a.id && (
-                                  <div className="mt-1.5 rounded-lg border border-blue-200 bg-blue-50/40 p-2.5 space-y-2">
+                                  <div className="mt-1.5 rounded-lg border border-indigo-200 bg-indigo-50/40 p-2.5 space-y-2">
                                     <div className="flex items-center gap-2 flex-wrap">
                                       {(['prepaid', 'postpaid'] as const).map((bt) => (
                                         <button
@@ -8316,7 +8305,7 @@ const handleApproveRequest = async (id: string) => {
                                             editAgentLedger.billingType === bt
                                               ? bt === 'prepaid'
                                                 ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
-                                                : 'border-blue-500 bg-blue-50 text-blue-700'
+                                                : 'border-indigo-500 bg-indigo-50 text-indigo-700'
                                               : 'border-gray-200 text-gray-500 hover:bg-gray-50'
                                           }`}
                                         >
@@ -8342,7 +8331,7 @@ const handleApproveRequest = async (id: string) => {
                                               type="text"
                                               value={raw}
                                               onChange={(e) => setEditAgentLedger({ ...editAgentLedger, [k]: sanitizeCostInput(e.target.value) })}
-                                              className="w-full px-2 py-1 border rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                                              className="w-full px-2 py-1 border rounded-lg text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
                                               placeholder="미설정"
                                             />
                                             <div className="mt-0.5 text-[10px] text-emerald-700">
@@ -8357,14 +8346,14 @@ const handleApproveRequest = async (id: string) => {
                                         type="text"
                                         value={editAgentLedger.memo}
                                         onChange={(e) => setEditAgentLedger({ ...editAgentLedger, memo: e.target.value })}
-                                        className="flex-1 px-2 py-1 border rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                                        className="flex-1 px-2 py-1 border rounded-lg text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
                                         placeholder="메모(선택)"
                                       />
                                       <button
                                         type="button"
                                         onClick={handleSaveAgentLedger}
                                         disabled={agentLedgerSaving}
-                                        className="px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-lg text-xs shrink-0"
+                                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white rounded-lg text-xs shrink-0"
                                       >
                                         {agentLedgerSaving ? '저장 중...' : '저장'}
                                       </button>
@@ -8388,78 +8377,30 @@ const handleApproveRequest = async (id: string) => {
                       <div className="flex gap-2">
                         <input type="text" value={newAgentSendId}
                           onChange={(e) => setNewAgentSendId(e.target.value)}
-                          className="flex-1 px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                          className="flex-1 px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                           placeholder="발송ID" />
                         <input type="text" value={newAgentMemo}
                           onChange={(e) => setNewAgentMemo(e.target.value)}
-                          className="w-28 px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                          className="w-28 px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                           placeholder="메모(선택)" />
                         <button
                           type="button"
                           onClick={handleAddAgentId}
                           disabled={agentIdSaving || !newAgentSendId.trim()}
-                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-lg text-sm shrink-0"
+                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white rounded-lg text-sm shrink-0"
                         >
                           {agentIdSaving ? '등록 중...' : '추가'}
                         </button>
                       </div>
                     </div>
                   )}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">구독 상태 *</label>
-                    <select value={editCompany.subscriptionStatus}
-                      onChange={(e) => setEditCompany({ ...editCompany, subscriptionStatus: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
-                      <option value="trial">체험 (trial)</option>
-                      <option value="trial_expired">체험만료 (trial_expired)</option>
-                      <option value="paid">정식 구독 (paid)</option>
-                      <option value="active">정상 구독 (active)</option>
-                      <option value="expired">만료 (expired)</option>
-                      <option value="suspended">정지 (suspended)</option>
-                    </select>
-                    <p className="text-xs text-gray-400 mt-1">expired/suspended 시 전 기능 차단. trial_expired 는 FREE plan 자동 강등 후 마커.</p>
-                  </div>
-                  {/* ★ 2026-06-08: BASIC 1개월 무료체험 (PRO 체험 + AI op overlay 체험 대체) */}
-                  <div className="col-span-2 rounded-lg border border-violet-200 bg-violet-50/40 p-3">
-                    <div className="flex items-center justify-between gap-3 flex-wrap">
-                      <div>
-                        <p className="text-sm font-semibold text-violet-900">무료체험 (베이직과 같은 기능 · 요금 0원)</p>
-                        {editCompany.subscriptionStatus === 'trial' && editCompany.trialExpiresAt ? (
-                          <p className="text-xs text-violet-700 mt-0.5">
-                            체험 중 · 만료: <b>{new Date(editCompany.trialExpiresAt).toLocaleString('ko-KR')}</b>
-                            {' '}
-                            (D-{Math.max(0, Math.ceil((new Date(editCompany.trialExpiresAt).getTime() - Date.now()) / 86400000))})
-                          </p>
-                        ) : (
-                          <p className="text-xs text-violet-600 mt-0.5">체험 미부여 상태. 부여 시 무료체험 요금제(베이직과 같은 기능·크레딧, 요금 0원) 1개월 개방, 30일 후 자동 미가입(FREE) 강등.</p>
-                        )}
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={handleGrantBasicTrial}
-                          className="px-3 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-semibold"
-                        >
-                          {editCompany.subscriptionStatus === 'trial' ? '1개월 추가 부여' : '1개월 체험 부여'}
-                        </button>
-                        {editCompany.subscriptionStatus === 'trial' && (
-                          <button
-                            type="button"
-                            onClick={handleRevokeBasicTrial}
-                            className="px-3 py-2 bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded-lg text-xs font-semibold"
-                          >
-                            체험 취소
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">최대 사용자 수</label>
                     <div className="flex items-center gap-2">
                       <input type="number" value={editCompany.maxUsers}
                         onChange={(e) => setEditCompany({ ...editCompany, maxUsers: Math.max(1, Number(e.target.value)) })}
-                        className="w-24 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" min={1} />
+                        className="w-24 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" min={1} />
                       <span className="text-sm text-gray-500">명</span>
                     </div>
                     <p className="text-xs text-gray-400 mt-1">고객사 관리자가 생성할 수 있는 최대 사용자 계정 수</p>
@@ -8469,16 +8410,21 @@ const handleApproveRequest = async (id: string) => {
                     <div className="flex items-center gap-2">
                       <input type="number" value={editCompany.sessionTimeoutMinutes}
                         onChange={(e) => setEditCompany({ ...editCompany, sessionTimeoutMinutes: Math.min(480, Math.max(5, Number(e.target.value))) })}
-                        className="w-24 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" min={5} max={480} />
+                        className="w-24 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" min={5} max={480} />
                       <span className="text-sm text-gray-500">분</span>
                     </div>
                     <p className="text-xs text-gray-400 mt-1">비활동 시 자동 로그아웃 시간 (5~480분)</p>
+                  </div>
+                  </div>
+                  <div className="flex items-center gap-2 pt-2">
+                    <span className="text-[11px] font-bold tracking-wide text-indigo-600">발송 설정</span>
+                    <div className="h-px flex-1 bg-gray-100"></div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">발송 라인</label>
                     <select value={editCompany.lineGroupId}
                       onChange={(e) => setEditCompany({ ...editCompany, lineGroupId: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                       <option value="">미할당 (전체 라인 사용)</option>
                       {lineGroups.filter((lg: any) => (lg.group_type === 'bulk' || lg.group_type === 'bito') && lg.is_active).map((lg: any) => (
                         <option key={lg.id} value={lg.id}>{lg.group_name} ({(lg.sms_tables || []).join(', ')})</option>
@@ -8490,180 +8436,107 @@ const handleApproveRequest = async (id: string) => {
                     <label className="block text-sm font-medium text-gray-700 mb-1">080 수신거부번호</label>
                     <input type="text" value={editCompany.rejectNumber}
                       onChange={(e) => setEditCompany({ ...editCompany, rejectNumber: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="080-000-0000" />
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="080-000-0000" />
                   </div>
-                  <div className="flex items-center justify-between bg-yellow-50 rounded-lg p-4 border border-yellow-200">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg">💬</span>
-                        <span className="font-semibold text-gray-800">카카오 브랜드메시지</span>
+                  {/* ★ 2026-08-18 발신번호 회선 정책 — 전송자격인증 2.1 */}
+                  <div className="border border-gray-200 rounded-xl p-4 bg-gray-50/60">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h4 className="text-sm font-semibold text-gray-800">발신번호 회선 정책</h4>
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                          상한은 <span className="font-medium">신규 등록에만</span> 적용됩니다. 이미 등록된 번호는 그대로 유지됩니다.
+                        </p>
                       </div>
-                      <p className="text-xs text-gray-500 mt-1">활성화하면 해당 고객사에서 카카오 채널 발송이 가능합니다</p>
+                      <button type="button" onClick={handleSaveLinePolicy} disabled={!linePolicy || linePolicySaving}
+                        className="px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-lg transition-colors">
+                        {linePolicySaving ? '저장 중…' : '회선 정책 저장'}
+                      </button>
                     </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={editCompany.kakaoEnabled}
-                        onChange={(e) => setEditCompany({ ...editCompany, kakaoEnabled: e.target.checked })}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-yellow-500"></div>
-                    </label>
-                  </div>
 
-                  {/* ★ D162-3 (2026-05-15) 수신거부 사용자격리 ON/OFF */}
-                  <div className="flex items-center justify-between p-4 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl mt-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg">🔒</span>
-                        <span className="font-semibold text-gray-800">수신거부 사용자격리</span>
+                    {!linePolicy ? (
+                      <p className="text-xs text-gray-400">불러오는 중…</p>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap gap-3 text-xs">
+                          <span className="px-2 py-1 rounded-md bg-white border border-gray-200 text-gray-600">
+                            현재 보유 · 무선 <span className="font-semibold text-gray-900">{linePolicy.held.mobile}</span>
+                          </span>
+                          <span className="px-2 py-1 rounded-md bg-white border border-gray-200 text-gray-600">
+                            현재 보유 · 유선 <span className="font-semibold text-gray-900">{linePolicy.held.landline}</span>
+                          </span>
+                          <span className="px-2 py-1 rounded-md bg-white border border-gray-200 text-gray-600">
+                            적용 상한 · 무선 <span className="font-semibold text-gray-900">{linePolicy.effective.mobile ?? '제한 없음'}</span>
+                            {' / '}유선 <span className="font-semibold text-gray-900">{linePolicy.effective.landline ?? '제한 없음'}</span>
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">가입자 유형</label>
+                            <select
+                              value={linePolicy.subscriberType || ''}
+                              onChange={(e) => setLinePolicy({ ...linePolicy, subscriberType: e.target.value || null })}
+                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                              <option value="">미설정</option>
+                              <option value="corporate">법인</option>
+                              <option value="individual">개인</option>
+                              <option value="foreigner">외국인</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">무선 상한</label>
+                            <input type="number" min={1} placeholder="비우면 제한 없음"
+                              disabled={linePolicy.subscriberType === 'individual' || linePolicy.subscriberType === 'foreigner'}
+                              value={linePolicy.mobileLineLimit ?? ''}
+                              onChange={(e) => setLinePolicy({ ...linePolicy, mobileLineLimit: e.target.value === '' ? null : Number(e.target.value) })}
+                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none disabled:bg-gray-100 disabled:text-gray-400" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">유선 상한</label>
+                            <input type="number" min={1} placeholder="비우면 제한 없음"
+                              disabled={linePolicy.subscriberType === 'individual' || linePolicy.subscriberType === 'foreigner'}
+                              value={linePolicy.landlineLineLimit ?? ''}
+                              onChange={(e) => setLinePolicy({ ...linePolicy, landlineLineLimit: e.target.value === '' ? null : Number(e.target.value) })}
+                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none disabled:bg-gray-100 disabled:text-gray-400" />
+                          </div>
+                        </div>
+
+                        {(linePolicy.subscriberType === 'individual' || linePolicy.subscriberType === 'foreigner') && (
+                          <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                            개인·외국인은 고시 기준값이 적용됩니다. 무선 {linePolicy.subscriberType === 'foreigner' ? 2 : 3}회선 · 유선 5회선. 상한을 따로 지정할 수 없습니다.
+                          </p>
+                        )}
+                        {linePolicy.subscriberType === 'corporate' && linePolicy.landlineLineLimit === null && (
+                          <p className="text-[11px] text-gray-500">
+                            법인 유선 상한은 종사자 수 확인 자료(고용보험 자료 등)를 받아 입력합니다. 비워 두면 제한이 걸리지 않습니다.
+                          </p>
+                        )}
                       </div>
-                      <p className="text-xs text-gray-500 mt-1">
-                        ON = 멀티 브랜드 회사 영역. 고객사관리자는 등록/삭제 차단(조회만 가능), 사용자가 등록한 수신거부는 관리자에게 자동 동기화.<br/>
-                        OFF = 누구든 등록/삭제 가능 + 회사 전체 사용자 동일 수신거부 적용 (기본).
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 pt-2">
+                    <span className="text-[11px] font-bold tracking-wide text-indigo-600">기능</span>
+                    <div className="h-px flex-1 bg-gray-100"></div>
+                  </div>
+                  {/* ★ D162-3 (2026-05-15) 수신거부 사용자격리 ON/OFF — 실무 스위치(0826 정리에서 본문 유지) */}
+                  <div className="flex items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white px-3.5 py-3">
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-semibold text-gray-800">수신거부 사용자격리</p>
+                      <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
+                        ON: 멀티 브랜드 회사용. 고객사관리자는 조회만 가능하고, 사용자가 등록한 수신거부가 관리자에게 자동 동기화됩니다.
+                        OFF: 누구든 등록·삭제 가능, 회사 전체 동일 수신거부(기본).
                       </p>
                     </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-0.5">
                       <input
                         type="checkbox"
                         checked={editCompany.userIsolationEnabled}
                         onChange={(e) => setEditCompany({ ...editCompany, userIsolationEnabled: e.target.checked })}
                         className="sr-only peer"
                       />
-                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
                     </label>
                   </div>
-
-                  {/* ★ D190 #2 (2026-05-22): AI Orchestrator (Tool Use) 회사별 토글 — 토글 변경 시 즉시 PATCH 호출 */}
-                  <div className="flex items-start justify-between p-4 bg-violet-50 border border-violet-200 rounded-lg mt-3">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg">🤖</span>
-                        <span className="font-semibold text-gray-800">AI Orchestrator (Tool Use)</span>
-                        <span className="text-xs bg-violet-500 text-white px-1.5 py-0.5 rounded">BETA</span>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">
-                        ON = AI Operator 동적 흐름 결정 모드 활성 (target → count → message → compliance 순서 자율 판단).<br/>
-                        OFF = 기존 고정 순서 (안정 영역, default). ENT 1사 한정 활성 → PM2 로그 모니터링 후 단계적 확장 권장.
-                      </p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={editCompany.useAiOrchestrator}
-                        onChange={async (e) => {
-                          const next = e.target.checked;
-                          const prev = editCompany.useAiOrchestrator;
-                          setEditCompany({ ...editCompany, useAiOrchestrator: next });
-                          try {
-                            const token = localStorage.getItem('token');
-                            const res = await fetch(`/api/admin/companies/${editCompany.id}/ai-orchestrator`, {
-                              method: 'PATCH',
-                              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                              body: JSON.stringify({ enabled: next }),
-                            });
-                            const data = await res.json();
-                            if (!res.ok) {
-                              showAlert('오류', data?.error || 'AI Orchestrator 토글 실패', 'error');
-                              setEditCompany({ ...editCompany, useAiOrchestrator: prev });
-                            } else {
-                              showAlert('완료', data?.message || 'AI Orchestrator 토글 완료', 'success');
-                            }
-                          } catch (err: any) {
-                            showAlert('오류', err?.message || '네트워크 오류', 'error');
-                            setEditCompany({ ...editCompany, useAiOrchestrator: prev });
-                          }
-                        }}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-500"></div>
-                    </label>
-                  </div>
-
-                  {/* ★ 2026-06-06 자동마케팅 자율발송 게이트 — 슈퍼관리자 회사별 ON/임계값 (cdp_auto_execute_*) */}
-                  <div className="p-4 bg-rose-50 border border-rose-200 rounded-lg mt-3">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-lg">🚀</span>
-                          <span className="font-semibold text-gray-800">자동마케팅 자율발송 게이트</span>
-                          <span className="text-xs bg-rose-500 text-white px-1.5 py-0.5 rounded">BETA</span>
-                        </div>
-                        <p className="text-xs text-gray-500 mt-1">
-                          ON = AI 자동마케팅 제안서가 담당자 승인 없이 임계값 이내에서 <b>자율 발송</b> (회사 잔액 자동 차감 + 고객 자동 발송).<br/>
-                          OFF = 제안서는 담당자 수동 승인 대기 (기본). 발신번호·무료거부(080)·잔액은 발송 직전 자동 확인.
-                        </p>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer ml-3">
-                        <input
-                          type="checkbox"
-                          checked={editCompany.cdpAutoExecuteEnabled}
-                          onChange={(e) => setEditCompany({ ...editCompany, cdpAutoExecuteEnabled: e.target.checked })}
-                          className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-rose-500"></div>
-                      </label>
-                    </div>
-                    <div className={`grid grid-cols-3 gap-2 mt-3 ${editCompany.cdpAutoExecuteEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
-                      <div>
-                        <label className="block text-[11px] font-medium text-gray-600 mb-1">최대 수신자(명)</label>
-                        <input type="number" min="1" value={editCompany.cdpAutoExecuteMaxRecipients}
-                          onChange={(e) => setEditCompany({ ...editCompany, cdpAutoExecuteMaxRecipients: Number(e.target.value) })}
-                          className="w-full px-2 py-1.5 border rounded text-sm focus:ring-2 focus:ring-rose-400 outline-none" />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-medium text-gray-600 mb-1">최대 회당 비용(원)</label>
-                        <input type="number" min="1" value={editCompany.cdpAutoExecuteMaxCostKrw}
-                          onChange={(e) => setEditCompany({ ...editCompany, cdpAutoExecuteMaxCostKrw: Number(e.target.value) })}
-                          className="w-full px-2 py-1.5 border rounded text-sm focus:ring-2 focus:ring-rose-400 outline-none" />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-medium text-gray-600 mb-1">최대 위험도</label>
-                        <select value={editCompany.cdpAutoExecuteMaxRisk}
-                          onChange={(e) => setEditCompany({ ...editCompany, cdpAutoExecuteMaxRisk: e.target.value })}
-                          className="w-full px-2 py-1.5 border rounded text-sm focus:ring-2 focus:ring-rose-400 outline-none bg-white">
-                          <option value="low">low</option>
-                          <option value="medium">medium</option>
-                          <option value="high">high</option>
-                        </select>
-                      </div>
-                    </div>
-                    <button
-                      onClick={async () => {
-                        try {
-                          const token = localStorage.getItem('token');
-                          const res = await fetch(`/api/admin/companies/${editCompany.id}/cdp-auto-execute`, {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                            body: JSON.stringify({
-                              enabled: editCompany.cdpAutoExecuteEnabled,
-                              maxRecipients: editCompany.cdpAutoExecuteMaxRecipients,
-                              maxCostKrw: editCompany.cdpAutoExecuteMaxCostKrw,
-                              maxRisk: editCompany.cdpAutoExecuteMaxRisk,
-                            }),
-                          });
-                          const data = await res.json();
-                          if (!res.ok) {
-                            showAlert('오류', data?.error || '자율발송 게이트 저장 실패', 'error');
-                          } else {
-                            const cc = data.company;
-                            setEditCompany({ ...editCompany,
-                              cdpAutoExecuteEnabled: cc.cdp_auto_execute_enabled,
-                              cdpAutoExecuteMaxRecipients: cc.cdp_auto_execute_max_recipients,
-                              cdpAutoExecuteMaxCostKrw: cc.cdp_auto_execute_max_cost_krw,
-                              cdpAutoExecuteMaxRisk: cc.cdp_auto_execute_max_risk,
-                            });
-                            showAlert('완료', data?.message || '자율발송 게이트 저장 완료', 'success');
-                          }
-                        } catch (err: any) {
-                          showAlert('오류', err?.message || '네트워크 오류', 'error');
-                        }
-                      }}
-                      className="mt-3 w-full py-2 bg-rose-500 hover:bg-rose-600 text-white text-sm font-medium rounded-lg transition-colors">
-                      자율발송 게이트 저장
-                    </button>
-                  </div>
-
                   {/* ★ 2026-08-22 대행발송 스위치 (docs/2026-08-22-agency-send-design.md §4-1)
                       메뉴는 모든 회사에 보이고, 이 스위치 AND 유료 요금제일 때만 화면으로 들어간다.
                       끄면 새 접수만 막히고 이미 승인된 건은 예정대로 나간다. */}
@@ -8727,6 +8600,174 @@ const handleApproveRequest = async (id: string) => {
                         허용 이메일 {agencyEmailActiveCount === null ? '' : `${agencyEmailActiveCount}개 `}관리
                       </button>
                     </div>
+                  </div>
+                  {/* ★ 2026-08-26 실험실 — 실사용 0~1개사 기능을 접어 정리(실측: 카카오 0사 · Orchestrator 1사 · 자율발송 0사).
+                      기능·값·저장 계약(카카오 = 폼 통째 저장 · Orchestrator = 즉시 PATCH · 자율발송 = 자체 저장 버튼)은 무변경 */}
+                  <div className="border border-gray-200 rounded-xl overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setLabOpen((v) => !v)}
+                      className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-50 hover:bg-gray-100 transition-colors"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="text-[12.5px] font-semibold text-gray-600">실험실</span>
+                        <span className="text-[10.5px] text-gray-400">카카오 채널 · AI 흐름 · 자율발송</span>
+                        {[editCompany.kakaoEnabled, editCompany.useAiOrchestrator, editCompany.cdpAutoExecuteEnabled].filter(Boolean).length > 0 && (
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-200">
+                            ON {[editCompany.kakaoEnabled, editCompany.useAiOrchestrator, editCompany.cdpAutoExecuteEnabled].filter(Boolean).length}
+                          </span>
+                        )}
+                      </span>
+                      <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform ${labOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    {labOpen && (
+                      <div className="p-3.5 space-y-3 border-t border-gray-200 bg-white">
+                      <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3.5 py-2.5">
+                        <div className="min-w-0">
+                          <p className="text-[13px] font-semibold text-gray-800">카카오 브랜드메시지</p>
+                          <p className="text-[11px] text-gray-500 mt-0.5">켜면 이 고객사에서 카카오 채널 발송이 가능합니다. 저장 버튼으로 반영됩니다.</p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={editCompany.kakaoEnabled}
+                            onChange={(e) => setEditCompany({ ...editCompany, kakaoEnabled: e.target.checked })}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
+                        </label>
+                      </div>
+                  {/* ★ D190 #2 (2026-05-22): AI Orchestrator (Tool Use) 회사별 토글 — 토글 변경 시 즉시 PATCH 호출 */}
+                  <div className="flex items-start justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3.5 py-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-gray-800">AI Orchestrator (Tool Use)</span>
+                        <span className="text-[10px] bg-gray-400 text-white px-1.5 py-0.5 rounded">BETA</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        ON = AI Operator 동적 흐름 결정 모드 활성 (target → count → message → compliance 순서 자율 판단).<br/>
+                        OFF = 기존 고정 순서 (안정 영역, default). ENT 1사 한정 활성 → PM2 로그 모니터링 후 단계적 확장 권장.
+                      </p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editCompany.useAiOrchestrator}
+                        onChange={async (e) => {
+                          const next = e.target.checked;
+                          const prev = editCompany.useAiOrchestrator;
+                          setEditCompany({ ...editCompany, useAiOrchestrator: next });
+                          try {
+                            const token = localStorage.getItem('token');
+                            const res = await fetch(`/api/admin/companies/${editCompany.id}/ai-orchestrator`, {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                              body: JSON.stringify({ enabled: next }),
+                            });
+                            const data = await res.json();
+                            if (!res.ok) {
+                              showAlert('오류', data?.error || 'AI Orchestrator 토글 실패', 'error');
+                              setEditCompany({ ...editCompany, useAiOrchestrator: prev });
+                            } else {
+                              showAlert('완료', data?.message || 'AI Orchestrator 토글 완료', 'success');
+                            }
+                          } catch (err: any) {
+                            showAlert('오류', err?.message || '네트워크 오류', 'error');
+                            setEditCompany({ ...editCompany, useAiOrchestrator: prev });
+                          }
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
+                    </label>
+                  </div>
+                  {/* ★ 2026-06-06 자동마케팅 자율발송 게이트 — 슈퍼관리자 회사별 ON/임계값 (cdp_auto_execute_*) */}
+                  <div className="rounded-lg border border-gray-200 bg-white px-3.5 py-3">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-gray-800">자동마케팅 자율발송 게이트</span>
+                          <span className="text-[10px] bg-gray-400 text-white px-1.5 py-0.5 rounded">BETA</span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          ON = AI 자동마케팅 제안서가 담당자 승인 없이 임계값 이내에서 <b>자율 발송</b> (회사 잔액 자동 차감 + 고객 자동 발송).<br/>
+                          OFF = 제안서는 담당자 수동 승인 대기 (기본). 발신번호·무료거부(080)·잔액은 발송 직전 자동 확인.
+                        </p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer ml-3">
+                        <input
+                          type="checkbox"
+                          checked={editCompany.cdpAutoExecuteEnabled}
+                          onChange={(e) => setEditCompany({ ...editCompany, cdpAutoExecuteEnabled: e.target.checked })}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
+                      </label>
+                    </div>
+                    <div className={`grid grid-cols-3 gap-2 mt-3 ${editCompany.cdpAutoExecuteEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
+                      <div>
+                        <label className="block text-[11px] font-medium text-gray-600 mb-1">최대 수신자(명)</label>
+                        <input type="number" min="1" value={editCompany.cdpAutoExecuteMaxRecipients}
+                          onChange={(e) => setEditCompany({ ...editCompany, cdpAutoExecuteMaxRecipients: Number(e.target.value) })}
+                          className="w-full px-2 py-1.5 border rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-gray-600 mb-1">최대 회당 비용(원)</label>
+                        <input type="number" min="1" value={editCompany.cdpAutoExecuteMaxCostKrw}
+                          onChange={(e) => setEditCompany({ ...editCompany, cdpAutoExecuteMaxCostKrw: Number(e.target.value) })}
+                          className="w-full px-2 py-1.5 border rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-gray-600 mb-1">최대 위험도</label>
+                        <select value={editCompany.cdpAutoExecuteMaxRisk}
+                          onChange={(e) => setEditCompany({ ...editCompany, cdpAutoExecuteMaxRisk: e.target.value })}
+                          className="w-full px-2 py-1.5 border rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+                          <option value="low">low</option>
+                          <option value="medium">medium</option>
+                          <option value="high">high</option>
+                        </select>
+                      </div>
+                    </div>
+                    <button
+                      type="button" // 0826 정정: type 미지정이라 폼 submit(통째 저장)까지 함께 나가던 결함
+                      onClick={async () => {
+                        try {
+                          const token = localStorage.getItem('token');
+                          const res = await fetch(`/api/admin/companies/${editCompany.id}/cdp-auto-execute`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                            body: JSON.stringify({
+                              enabled: editCompany.cdpAutoExecuteEnabled,
+                              maxRecipients: editCompany.cdpAutoExecuteMaxRecipients,
+                              maxCostKrw: editCompany.cdpAutoExecuteMaxCostKrw,
+                              maxRisk: editCompany.cdpAutoExecuteMaxRisk,
+                            }),
+                          });
+                          const data = await res.json();
+                          if (!res.ok) {
+                            showAlert('오류', data?.error || '자율발송 게이트 저장 실패', 'error');
+                          } else {
+                            const cc = data.company;
+                            setEditCompany({ ...editCompany,
+                              cdpAutoExecuteEnabled: cc.cdp_auto_execute_enabled,
+                              cdpAutoExecuteMaxRecipients: cc.cdp_auto_execute_max_recipients,
+                              cdpAutoExecuteMaxCostKrw: cc.cdp_auto_execute_max_cost_krw,
+                              cdpAutoExecuteMaxRisk: cc.cdp_auto_execute_max_risk,
+                            });
+                            showAlert('완료', data?.message || '자율발송 게이트 저장 완료', 'success');
+                          }
+                        } catch (err: any) {
+                          showAlert('오류', err?.message || '네트워크 오류', 'error');
+                        }
+                      }}
+                      className="mt-3 w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors">
+                      자율발송 게이트 저장
+                    </button>
+                  </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
