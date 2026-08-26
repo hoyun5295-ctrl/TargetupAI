@@ -16,9 +16,13 @@ import { resolve } from 'path';
 
 const SRC = resolve(__dirname, '../..');
 const read = (rel: string) => readFileSync(resolve(SRC, rel), 'utf8');
+/** 주석 제거 후 검사 — 이력을 적은 주석이 "호출이 남았다"로 오판되지 않게(LESSONS_BACKEND 2026-07-31) */
+const readCode = (rel: string) =>
+  read(rel).replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
 
 const OUTREACH_FILES = [
   'utils/sales-outreach-jobs.ts',
+  'utils/sales-outreach-extract.ts',
   'utils/sales-outreach-produce.ts',
   'utils/sales-outreach-style.ts',
   'utils/sales-outreach-sweeper.ts',
@@ -56,7 +60,7 @@ describe('sales-outreach invariants', () => {
   });
 
   it('발송 경로 유일 — 사람 클릭 함수 1곳, sweeper는 발송 능력 0', () => {
-    const jobs = read('utils/sales-outreach-jobs.ts');
+    const jobs = readCode('utils/sales-outreach-jobs.ts');
     // 여는 괄호까지 매칭 = 호출부만(임포트 줄은 괄호가 없다). 존재부터 단정(공허 통과 방지).
     const calls = jobs.match(/sendOutreachProposalMail\(/g) || [];
     expect(calls.length, '발송 함수 호출부는 sendOutreachMailForJob 1곳이어야 한다').toBe(1);
@@ -78,5 +82,27 @@ describe('sales-outreach invariants', () => {
     }
     // 판정은 fail-closed 코어(audit-log isSuperAdminAllowed 계열)를 쓴다
     expect(read('utils/sales-outreach-jobs.ts')).toContain('isSalesOutreachOperator');
+  });
+
+  it('크롤 소스 1개 — 잡 CT는 같은 URL을 두 번 긁지 않는다', () => {
+    const jobs = readCode('utils/sales-outreach-jobs.ts');
+    // 공허 통과 방지 — 대체 경로가 실재해야 한다
+    expect(jobs).toContain('buildOutreachEventText(');
+    expect(jobs, '잡 CT가 fetchEventTextFromUrl을 부르면 fetchHtmlGuarded와 합쳐 2회 요청이 된다')
+      .not.toContain('fetchEventTextFromUrl(');
+  });
+
+  it('fetchEventTextFromUrl 소비처는 DM 편집기 1곳뿐', () => {
+    const dm = read('routes/dm.ts');
+    expect(dm, 'DM 축은 이 함수를 계속 쓴다(공허 통과 방지)').toContain('fetchEventTextFromUrl(');
+    const jobs = readCode('utils/sales-outreach-jobs.ts');
+    expect(jobs).not.toContain('fetchEventTextFromUrl');
+  });
+
+  it('추출기는 새 네트워크 요청을 만들지 않는다', () => {
+    const ex = readCode('utils/sales-outreach-extract.ts');
+    expect(ex).toContain('extractEventTextFromHtml'); // 공허 통과 방지
+    expect(ex, '추출기는 HTML만 받는다 — fetch·request 호출 금지')
+      .not.toMatch(/fetchHtmlGuarded\(|fetchEventTextFromUrl\(|https?\.request\(|[^a-zA-Z.]fetch\(/);
   });
 });

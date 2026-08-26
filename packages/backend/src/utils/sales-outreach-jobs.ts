@@ -15,7 +15,8 @@
 import { randomUUID } from 'crypto';
 import { query } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
-import { fetchEventTextFromUrl, fetchHtmlGuarded } from './dm/dm-brand-extractor';
+import { fetchHtmlGuarded } from './dm/dm-brand-extractor';
+import { buildOutreachEventText } from './sales-outreach-extract';
 import { stripUnauthorizedBenefits, BENEFIT_PLACEHOLDER } from './copy-benefit-detector';
 import { getActiveStyleGuide } from './sales-outreach-style';
 import { isSalesOutreachOperator } from './audit-log';
@@ -184,18 +185,18 @@ export async function runOutreachJob(jobId: string): Promise<void> {
   const job = claimed.rows[0];
 
   // --- 크롤 (가드 경로만 — extractBrandFromUrl 사용 금지) ---
-  let eventText: string | null = null;
+  // ★ 2026-08-26 소스 1개로 되돌림 — HTML을 한 번만 받아 행사 텍스트와 이미지 후보를 함께 뽑는다.
+  //   전에는 같은 URL을 두 번 긁었고(fetchEventTextFromUrl이 내부에서 또 fetchHtmlGuarded를 부름),
+  //   Promise.all이 둘 중 하나만 실패해도 나머지 결과까지 버렸다 — [B-0826-1]의 뿌리가 그 두 번째 소스였다.
   let page: { html: string; baseUrl: string } | null = null;
   try {
-    [eventText, page] = await Promise.all([
-      fetchEventTextFromUrl(job.homepage_url),
-      fetchHtmlGuarded(job.homepage_url),
-    ]);
+    page = await fetchHtmlGuarded(job.homepage_url);
   } catch (err: any) {
     console.error('[sales-outreach] 크롤 예외:', jobId, err?.message);
   }
+  const eventText: string | null = page ? buildOutreachEventText(page.html) : null;
 
-  const crawlOutcome: StageOutcome = (eventText || page) ? 'ok' : 'unavailable';
+  const crawlOutcome: StageOutcome = page ? 'ok' : 'unavailable';
   const titleMatch = page?.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   const brandProfile = {
     siteTitle: titleMatch ? norm(titleMatch[1]).slice(0, 120) : null,

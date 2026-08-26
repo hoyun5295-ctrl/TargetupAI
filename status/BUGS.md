@@ -63,12 +63,15 @@
 > **미검증 1 → 대부분 닫힘**: 저장소 `ecosystem.config.js`가 `targetup-backend`의 `cwd`를 `/home/administrator/targetup-app/packages/backend`로 선언하고, 같은 파일의 `out_file`이 실제로 조회한 로그 파일과 일치한다. 즉 `dotenv.config()`가 읽는 `.env`는 curl이 읽은 그 파일이다. **남은 틈은 살아 있는 프로세스가 이 설정으로 기동됐는지 하나뿐**(`pm2 jlist`의 `pm_cwd` 1회 확인으로 완전히 닫힌다).
 > **미검증 2**: 404의 원인이 그 앱의 사용 API 설정인지 네이버의 제공 정책 변경인지. 네이버 개발자센터 "사용 API" 목록 1회 확인으로 갈린다. 공개 자료 검색으로는 중단 공지를 확인하지 못했다.
 > **수정 방향**: 원인 확정이 먼저다. ①쇼핑 검색 사용 설정 또는 앱 재등록 ②`isNaverShopSearchConfigured()`가 "키 문자열이 있음"만 보고 true를 내는 구조라 화면이 "설정됨인데 후보 0"으로 보인다 — 실패를 정직하게 드러내는 축은 별건(2값을 3값으로). ⛔ **이 세션 축(영업 아웃리치) 밖이라 기록만 한다.**
+> **★ 동반 실측(2026-08-26)**: 검색 API만이 아니라 **크롤 경로도 같이 막혀 있다.** `brand.naver.com` 대상 봇 UA curl · 실제 크롬 UA curl · Puppeteer 실렌더 3회 전부 **HTTP 429 에러 셸**. 차단 축은 UA도 TLS도 아니고 **출구 IP**다. 그래서 `fetchProductOgImages`(`dm-ai.ts:923` · `email-ai.ts:420` · `inapp-ai-generator.ts:339`)도 스마트스토어 상품 링크에 대해서는 조용히 `undefined`를 돌려주고 있다. **DM 편집기의 스마트스토어 이미지 자동 채우기는 검색 API 축과 크롤 축 양쪽에서 죽어 있는 상태다.** 근거·회차 = [설계서 §17-1](../docs/2026-07-31-ai-sales-outreach-design.md).
 > **파급**: 영업 아웃리치 v3 스마트스토어 재료 축의 착수 게이트 G4 실패 사유 = [설계서 §16-9-1](../docs/2026-07-31-ai-sales-outreach-design.md). 그 축은 이 버그가 닫히기 전에는 재개하지 않는다.
 
-### 🟡 B-0826-1 AI 영업 크롤이 `Promise.all`이라 한 소스 실패가 나머지 결과까지 버린다 (🔵 Open · 기존 부채 · 스마트스토어 축 착수 시 선결) — 2026-08-26 (스마트스토어 브레인스토밍 백엔드 실측)
+### 🟢 B-0826-1 AI 영업 크롤이 `Promise.all`이라 한 소스 실패가 나머지 결과까지 버린다 (🟢 수정 완료·배포 대기) — 2026-08-26 (스마트스토어 브레인스토밍 백엔드 실측 → 같은 날 종결)
 
 - `packages/backend/src/utils/sales-outreach-jobs.ts:190~196` — `Promise.all([fetchEventTextFromUrl, fetchHtmlGuarded])`을 바깥 try/catch가 감싸, 둘 중 하나만 던져도 `eventText`·`page`가 함께 null이 되어 `crawlOutcome='unavailable'`로 접힌다. 행사 텍스트는 잘 읽혔는데 HTML fetch가 죽었다는 이유로 행사 후보가 통째로 사라지는 형태.
-- 처방 = `Promise.allSettled`로 소스별 독립 수거. **스마트스토어 재료 축(설계서 §16)이 소스를 3개로 늘리므로 그 축 착수 시 선결 정정**(§16-5-C). 본체는 아직 운영 실측 0이라 지금은 기록만.
+- ~~처방 = `Promise.allSettled`로 소스별 독립 수거~~ **폐기.** 뿌리는 `Promise.all`이 아니라 **소스가 둘이었던 것**이다. `fetchEventTextFromUrl`이 내부에서 다시 `fetchHtmlGuarded`를 불러 **같은 URL을 두 번 긁고 있었다.**
+- **적용된 수정(2026-08-26)** = 크롤 소스를 1개로 되돌렸다. `fetchHtmlGuarded` 1회만 부르고 그 HTML로 행사 텍스트(`buildOutreachEventText`)와 이미지 후보를 함께 뽑는다. 소스가 하나라 "하나 실패하면 둘 다 버림"이 **성립할 수 없다.** 덧댄 장치 0(설계서 §17-4).
+- 계약 테스트 = 잡 CT에 `fetchEventTextFromUrl` 호출 0 · `fetchEventTextFromUrl` 소비처는 DM 편집기 1곳뿐(`sales-outreach-invariants.test.ts` · 주석 제거 후 검사).
 
 > **증상**: `agency_send_recipients`(접수당 최대 3만 행 · 전화번호+변수값)를 삭제하는 코드가 없다. `DELETE FROM agency_send` 전수 grep 0건. 반려·만료·취소로 종결된 접수의 고객 명단이 영구 잔존한다.
 > **위치**: 대행발송 전 경로(화면·원스텝 · 삭제 로직 자체가 부재). 이메일 접수 축(설계서 §18)은 반려 건이 접수 행을 만들지 않아 이 문제를 가속하지 않는다(그래서 그 축에서 분리).

@@ -478,6 +478,26 @@ export async function fetchProductOgImages(urls: Array<string | undefined>): Pro
     }
   }));
 }
+/**
+ * HTML 문자열 → 행사 원문 텍스트. ★ 2026-08-26 fetchEventTextFromUrl 본문을 그대로 옮긴 것(동작 무변경).
+ * 이미 HTML을 손에 든 호출자가 같은 URL을 두 번 긁지 않도록 분리했다(영업 아웃리치 크롤).
+ * maxLen 기본값 6000 = 옮기기 전 상수. 기본값 호출은 옛 결과와 문자 단위로 같다.
+ */
+export function extractEventTextFromHtml(html: string, maxLen = 6000): string | null {
+  const meta = parseMetaTags(html);
+  const head = [meta.get('og:title'), meta.get('og:description')].filter(Boolean).join('\n');
+  let t = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|h[1-6]|tr|section|article)>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  t = t.split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n');
+  const merged = [head, t].filter(Boolean).join('\n');
+  return merged ? merged.slice(0, maxLen) : null;
+}
 
 /**
  * ★ 2026-07-16 M3 — 행사 URL → 페이지 본문 텍스트 (브리프 입력기 "URL 붙여넣기" 축).
@@ -488,19 +508,7 @@ export async function fetchProductOgImages(urls: Array<string | undefined>): Pro
 export async function fetchEventTextFromUrl(url: string): Promise<string | null> {
   const page = await fetchHtmlGuarded(url);
   if (!page) return null;
-  const meta = parseMetaTags(page.html);
-  const head = [meta.get('og:title'), meta.get('og:description')].filter(Boolean).join('\n');
-  let t = page.html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|div|li|h[1-6]|tr|section|article)>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
-  t = t.split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n');
-  const merged = [head, t].filter(Boolean).join('\n');
-  return merged ? merged.slice(0, 6000) : null;
+  return extractEventTextFromHtml(page.html);
 }
 
 /**
